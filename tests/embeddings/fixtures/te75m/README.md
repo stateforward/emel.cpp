@@ -51,3 +51,7 @@ official source encoder families listed on the model card:
 - `EfficientAT mn20_as` via the upstream EfficientAT Python implementation
 
 The reproducible generator lives at `generate_upstream_goldens.py` in this same directory.
+
+The maintained Phase `63` Python reference backend `te_python_goldens` emits these stored vectors
+through the shared `embedding_compare/v1` contract so they can be compared against the EMEL lane
+without re-running the full Python model stack on every workflow invocation.

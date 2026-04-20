@@ -5,7 +5,8 @@
 EMEL is a deterministic C++ inference engine built around explicit Boost.SML orchestration, with
 runtime behavior modeled as explicit actors instead of ad hoc control flow. The repo now ships
 maintained GGUF generation slices plus one explicit maintained trimodal embedding slice for
-`augmem/TE-75M-GGUF`.
+`augmem/TE-75M-GGUF`, along with parity and benchmark tooling that compares EMEL against external
+reference engines without sharing runtime state.
 
 ## Core Value
 
@@ -14,19 +15,37 @@ before widening API surface or model scope.
 
 ## Current State
 
-Latest shipped milestone: `v1.11`
+Latest shipped milestone: `v1.12`
 
-Status: `v1.11` shipped on 2026-04-14 and adds one truthful maintained
-`TE-75M-q8_0.gguf` trimodal embedding slice without widening EMEL into a generic multimodal
-platform.
+Status: `v1.12` shipped on 2026-04-18 and adds one canonical pluggable embedding compare
+contract, maintained Python and C++ reference backends on the same compare surface, and repaired
+multi-record C++ publication. The milestone reopened on 2026-04-19 for one narrow archival
+closeout-proof repair after the post-archive rerun audit found stale Phase `67` planning-path
+references. Phase `68` closed that repair on 2026-04-20, restoring `v1.12` to a passing rerun
+audit.
 
-Release summary: EMEL now has explicit `omniembed` model acceptance, repo-owned text/image/audio
-embedding lanes, one shared normalized embedding contract with supported Matryoshka truncation, and
-stored upstream-golden proof plus tiny cross-modal smoke checks for the user-trained TE model.
+Current planning focus: No active milestone is defined. The next lifecycle step is
+`$gsd-new-milestone`, which should create a fresh requirements set before new phase planning
+starts.
 
-## Latest Shipped Milestone: v1.11 TE-75M GGUF Trimodal Embedding Runtime
+## Latest Shipped Milestone: v1.12 Pluggable Reference Parity Bench Architecture
 
-**Shipped:** 2026-04-14
+**Shipped:** 2026-04-18
+
+**Delivered:**
+- One canonical `embedding_compare/v1` contract that keeps the EMEL lane unchanged while reference
+  backend choice stays in manifest/tooling space.
+- Maintained Python and C++ reference engines running through one operator-facing compare
+  workflow and output schema.
+- Truthful repaired C++ compare publication that preserves both maintained baseline records for the
+  `liquid_cpp` text workflow.
+- Refreshed requirement-traceability and Nyquist evidence so `v1.12` can close with a passing
+  milestone audit.
+
+## Previous Shipped Milestone: v1.11 TE-75M GGUF Trimodal Embedding Runtime
+
+<details>
+<summary>Shipped on 2026-04-15</summary>
 
 **Delivered:**
 - One maintained TE fixture pinned at `tests/models/TE-75M-q8_0.gguf` with explicit provenance
@@ -37,7 +56,9 @@ stored upstream-golden proof plus tiny cross-modal smoke checks for the user-tra
 - Stored upstream-golden proof plus tiny cross-modal smoke checks integrated into the normal repo
   gate flow.
 
-## Previous Milestone: v1.10 Planner Family AGENTS Hard Cutover
+</details>
+
+## Historical Open Closeout: v1.10 Planner Family AGENTS Hard Cutover
 
 <details>
 <summary>Implementation complete on 2026-04-05; closeout still pending</summary>
@@ -143,59 +164,51 @@ truth anchor and without broadening into generic Liquid-family support.
   golden vectors, keeps tiny cross-modal smoke checks in repo-owned doctests, and preserves
   WordPiece parity across the TE and BERT GGUF vocab surfaces while repo-wide quality gates stay
   green.
+- ✓ v1.12 added one canonical pluggable reference-backend contract so the EMEL-owned compare lane
+  stays unchanged while Python and C++ reference engines emit the same compare record schema.
+- ✓ v1.12 brought maintained Python and C++ reference backends up through one operator-facing
+  compare workflow with explicit backend identity, fixture identity, and reproducibility metadata.
+- ✓ v1.12 repaired the lossy multi-record C++ publication path and backfilled the missing
+  traceability / Nyquist closeout evidence so the rerun milestone audit passed.
 
 ### Active
 
-- [ ] Decide whether the next maintained embedding milestone should add `TE-75M-q5_0.gguf`.
-- [ ] Decide whether EMEL should expose a stable public embedding API for the maintained TE slice.
-- [ ] Decide whether to add bounded same-modality embedding batches on the TE path.
+- No active milestone requirements are defined yet. Run `$gsd-new-milestone` to create the next
+  milestone scope and a fresh `.planning/REQUIREMENTS.md`.
 
 ### Out of Scope
 
-- `TE-75M-q5_0.gguf` as an additional maintained slice before `TE-75M-q8_0.gguf` is proven
-- Generic image/audio file decoding, resampling, or transcoding in the first maintained slice
-- Vector-index, retrieval service, reranking, or ANN-search features inside EMEL
-- Multimodal generation, captioning, transcription, or chat claims for TE-75M
-- Broad `omniembed` or arbitrary embedding-model support beyond one maintained TE-75M slice
-- New public C ABI or broad CLI API for multimedia embedding requests before the runtime surface is
-  proven
-
-## Next Milestone Goals
-
-- Decide whether the next milestone should add `TE-75M-q5_0.gguf`, a public embedding API, or
-  small-batch embedding throughput for the maintained TE path.
-- Close out and archive `v1.10` formally so its phase history and audit trail move into
-  `MILESTONES.md`.
+- New public embedding C ABI or broad CLI API commitments
+- Remote HTTP or service-hosted reference engines
+- Non-embedding generation parity scope in this milestone
+- Broad new `src/` runtime support added only to satisfy a reference backend
+- Shared model, tokenizer, cache, or runtime objects between the EMEL lane and any reference lane
 
 ## Context
 
-This is a brownfield repository with an existing codebase map under `.planning/codebase/`. The
-repo remains governed by `AGENTS.md` and `docs/rules/sml.rules.md`, and the user has now requested
-support for their trained `augmem/TE-75M-GGUF` embedding model. Upstream model sources show a
-trimodal shared-space design with text, image, and audio encoder lanes projecting into one
-1280-dimensional embedding space. The current repo already has mature GGUF ingestion, text request
-shaping, and kernel/operator infrastructure, but it does not yet have a maintained `omniembed`
-family or `vision` / `audio` encoder actor families.
+This remains a brownfield repository with an existing codebase map under `.planning/codebase/`.
+The repo stays governed by `AGENTS.md` and `docs/rules/sml.rules.md`. `v1.12` remains the latest
+shipped milestone after the narrow archival proof repair closed cleanly. The current maintained
+state includes a repo-owned EMEL compare lane plus pluggable Python and C++ reference backends
+that publish through one canonical compare contract without shared runtime state.
 
 ## Constraints
 
-- **Architecture**: Follow `docs/rules/sml.rules.md` and `AGENTS.md`; modality routing must stay in
-  guards, states, and transitions, not hidden in helper branching.
-- **Maintained fixture**: `v1.11` is pinned to `tests/models/TE-75M-q8_0.gguf` for the first
-  truthful slice.
-- **Input boundary**: Keep the first maintained slice on narrow in-memory image/audio contracts;
-  generic media file decoding is out of scope.
-- **Proof boundary**: TE behavior must be proven with stored upstream golden embeddings and tiny
-  cross-modal smoke checks before any benchmark or support claim is made.
-- **Scope boundary**: Stop at feature extraction and shared-space embeddings; do not widen into
-  vector search, multimodal generation, or public API commitments.
-- **Repository state**: `v1.10` is ready for closeout but not yet archived, so `v1.11` must
-  preserve prior phase history while continuing numbering from the next free phase slot.
+- **Architecture**: Follow `docs/rules/sml.rules.md` and `AGENTS.md`; keep runtime behavior choice
+  explicit and avoid hiding route selection in helper branching.
+- **Isolation**: Keep the EMEL lane repo-owned and separate from all reference-engine runtime
+  state, objects, and execution dependencies.
+- **Reproducibility**: Preserve truthful compare artifacts with backend identity, fixture
+  identity, and enough metadata to reproduce results.
+- **Lifecycle**: Start the next milestone from the repaired `v1.12` state with a fresh
+  requirements file instead of mutating the shipped milestone ledger further.
 
 ## Key Decisions
 
 | Decision | Rationale | Outcome |
 |----------|-----------|---------|
+| Keep the new parity/benchmark reference architecture pluggable but lane-isolated | The user wants easy comparison against different inference engines without letting reference runtimes leak into the EMEL lane | ✓ Shipped |
+| Treat Python and C++ backends as equal citizens under one canonical comparison contract | The repo already has both styles of reference evidence, so the milestone should unify them instead of favoring one language-specific lane | ✓ Shipped |
 | Start decomposition with `generator/prefill` instead of splitting the whole generator at once | Prefill was the clearest request-phase boundary and the largest current duplication source | ✓ Good |
 | Collapse the prefill compute-routing matrix before broader extraction | File movement alone would have just relocated the cartesian product instead of reducing it | ✓ Good |
 | Keep prefill request-scoped data on typed runtime/internal events | This preserved explicit behavior modeling and avoided context phase flags | ✓ Good |
@@ -235,4 +248,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-04-14 after v1.11 milestone closeout*
+*Last updated: 2026-04-20 after closing the v1.12 archival-proof repair*

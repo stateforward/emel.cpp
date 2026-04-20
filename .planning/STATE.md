@@ -1,16 +1,18 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.11
-milestone_name: TE-75M GGUF Trimodal Embedding Runtime
-status: Phase `61` completed; refreshed audit truth is back in sync and `v1.11` is ready for lifecycle completion
-stopped_at: completed Phases `59.3`, `60`, and `61`; refreshed the milestone ledger and reran the full maintained verification surface
-last_updated: "2026-04-16T16:29:03Z"
-last_activity: 2026-04-16
+milestone: none
+milestone_name: No Active Milestone
+status: ready_for_next_milestone
+stopped_at: completed the reopened `v1.12` archival-proof repair through Phase `68`,
+  restored the milestone to a passing rerun audit, and returned the project to next-milestone
+  readiness
+last_updated: "2026-04-20T14:08:51Z"
+last_activity: 2026-04-20
 progress:
-  total_phases: 16
-  completed_phases: 16
-  total_plans: 16
-  completed_plans: 16
+  total_phases: 7
+  completed_phases: 7
+  total_plans: 7
+  completed_plans: 7
   percent: 100
 ---
 
@@ -18,40 +20,41 @@ progress:
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-04-14)
+See: .planning/PROJECT.md (updated 2026-04-20)
 
 **Core value:** Prove real end-to-end behavior with explicit SML orchestration and parity-oriented
 verification before widening API surface or model scope.
-**Current focus:** `v1.11` implementation and audit closure are complete. The next lifecycle step
-is milestone completion / archival, with worktree-dirty caution still in effect.
+**Current focus:** No active milestone is defined; the next step is to create a fresh milestone
+scope.
 
 ## Current Position
 
 Phase: None
 Plan: Complete
-Status: All reopened and inserted `v1.11` closure phases through `61` are complete. Maintained TE
-q8/q5 scope is now truthful, missing validation artifacts are backfilled, and the refreshed root
-audit passes on the live ledger.
-Last activity: 2026-04-16
-`v1.11` lifecycle archival was not auto-run in this pass because the worktree remains dirty; the
-implementation and audit closure work itself is complete.
+Status: Milestone `v1.12` is shipped and audit-clean again after the archival-proof repair in
+Phase `68`. The project is ready for the next milestone.
+Last activity: 2026-04-20
+Closeout still uses the rerun milestone audit plus direct ledger verification while the known
+`gsd-tools audit-open` preflight bug remains non-blocking tooling debt.
 
-Progress: [██████████] 100%
+Progress: [##########] 100%
 
 ## Performance Metrics
 
 **Latest shipped milestone:**
 
-- Milestone: v1.11 TE-75M GGUF Trimodal Embedding Runtime
-- Reopened closeout phases complete: `16/16`
-- Reopened closeout plans complete: `16/16`
-- Audit status: `passed` after the Phase `61` validation/bookkeeping refresh
+- Milestone: v1.12 Pluggable Reference Parity Bench Architecture
+- Completed phases: `7/7`
+- Completed plans: `7/7`
+- Audit status: `passed` after Phase `68` repaired the archived Phase `67` proof paths
 
 **Current planning shape:**
 
-- Active milestone: `v1.11` with all reopened closure phases complete
-- Latest fully archived milestone: `v1.9`
-- Next action: Run `$gsd-complete-milestone v1.11` when you want the lifecycle archive step.
+- Active milestone: none
+- Latest shipped milestone: `v1.12`
+- Next action: Run `$gsd-new-milestone` to define the next shipped scope and recreate
+  `.planning/REQUIREMENTS.md`
+- Current blocker: none for `v1.12`; only the non-blocking `audit-open` tooling bug remains
 
 ## Accumulated Context
 
@@ -59,6 +62,24 @@ Progress: [██████████] 100%
 
 Decisions are logged in PROJECT.md Key Decisions table.
 Recent decisions affecting current work:
+
+- `v1.12` will treat parity and benchmark reference engines as pluggable backends under one
+  canonical comparison contract instead of keeping separate Python-only and C++-only tool lanes.
+
+- The new comparison architecture must keep the EMEL lane fully isolated from reference-engine
+  model, tokenizer, cache, and runtime objects even when backend selection becomes pluggable.
+
+- Phase `62` fixed the shared `embedding_compare/v1` contract as the single compare record schema
+  for EMEL and reference lanes.
+
+- Phase `63` established the maintained Python backend truth as stored upstream TE goldens with an
+  optional live backend path for future direct Python engine checks.
+
+- Phase `64` put the existing Liquid/mtmd C++ lane behind the same manifest-driven backend
+  contract and kept its asset setup in the wrapper script.
+
+- Phase `65` published the unified compare driver and wrapper workflow, including machine-readable
+  compare summaries and focused test coverage.
 
 - `v1.11` is pinned to `tests/models/TE-75M-q8_0.gguf` for the first maintained TE slice.
 - TE support will land as explicit `omniembed` model-family work rather than an alias of the
@@ -122,61 +143,90 @@ Recent decisions affecting current work:
 
 - Phase 59.1 is reserved for the urgent next pass on steady-state ARM embedding throughput before
   milestone archival resumes.
+
 - Phase 59.1 uses the agreed external comparison set of `Arctic S`, `EmbeddingGemma 300M`,
   `LFM2-VL-450M`, and `Ultravox 1B` to keep future ARM throughput claims honest without widening
   the current EMEL runtime scope.
+
 - Phase 59.1.1 runs that agreed external baseline set on the same ARM host and publishes the gap
   between EMEL and the reference lanes with explicit output-contract caveats.
+
 - Phase 59.1.1.1 completed after the first ROI-ranked pass because maintained single-thread image
   throughput moved from `~1.51 embeddings/s` to `~4.27 embeddings/s`, and the next separate image
   hotspot shifted from per-pixel pointwise lowering to depthwise work.
+
 - Phase 59.2 completed the maintained actor-level refactor that removed the old detail-side
   prepare/encode error-wrapper seam and replaced it with explicit route-readiness guards and
   transitions.
+
 - Phase 59.4 completed the architecture-kernel ownership move for the maintained image pointwise
   and depthwise hot loops, putting the remaining image hotspot into `src/emel/kernel/aarch64`
   instead of leaving those long-lived hot loops in `embeddings/generator/detail.hpp`.
+
 - Phase `59.3` executed and completed, republishing maintained q8/q5 image evidence at roughly
   `~10.5 embeddings/s` and narrowing the next image ROI to AArch64 pointwise, then depthwise.
+
 - The 2026-04-16 rerun milestone audit reset `FIX-02` to pending because the live repo now
   accepted `TE-75M-q5_0.gguf` while `v1.11` still documented a q8-only maintained slice.
+
 - Phase `60` executed and completed, reconciling maintained TE quant-scope truth around the
   approved q8/q5 fixtures and restoring `FIX-02` to satisfied.
+
 - Phase `61` executed and completed, backfilling the remaining validation artifacts, rerunning the
   full maintained quality-gate surface, and refreshing the root milestone audit to a passing
   ledger.
 
 ### Roadmap Evolution
 
+- Started milestone `v1.12` on 2026-04-17 with continued numbering, so the new roadmap begins at
+  Phase `62`.
+
+- Completed Phases `62` through `65` on 2026-04-17/18, leaving the milestone ready for audit.
+- Completed Phase `66` on 2026-04-18, repairing the maintained multi-record C++ compare
+  publication path.
+- Completed Phase `67` on 2026-04-18, backfilling the reopened `v1.12` traceability and Nyquist
+  evidence.
 - `v1.10` remains ready for closeout.
 - `v1.11` reopened at Phase `54` through `56` to close the milestone-audit gaps without deleting
   the shipped Phase `47` through `53` history.
+
 - Phase `58.1` inserted after Phase `58`: ARM Embedding Generator Throughput Optimization
   (URGENT)
+
 - Phase `58.1.1` inserted after Phase `58.1`: Liquid AI Multimodal Reference Throughput And
   Parity (URGENT)
+
 - Phase `59` closed the stale state-ledger contradiction and reran the milestone audit to `passed`.
 - Phase `59.1` inserted after Phase `59`: optimize for high throughput on ARM (URGENT)
 - Phase `59.1` executed and completed, restoring the milestone to 100% phase/plan completion.
 - Phase `59.1.1` inserted after Phase `59.1`: Run llama.cpp supported ARM throughput baseline
   comparison (URGENT)
+
 - Phase `59.1.1` executed and completed, publishing same-host ARM reference evidence for `Arctic
   S`, `EmbeddingGemma 300M`, `LFM2-VL-450M`, and `Ultravox 1B`.
+
 - Phase `59.1.1.1` inserted after Phase `59.1.1`: Optimize image tower ARM kernel lowering
   (URGENT)
+
 - Phase `59.1.1.1` executed and completed, publishing the maintained single-thread image-tower
   lowering pass and the shifted hotspot profile.
+
 - Phase `59.2` inserted after Phase `59`: Refactor Embedding Generator Hidden Control Flow Into
   Explicit Guards And Transitions (URGENT)
+
 - Phase `59.2` executed and completed, removing the scoped helper-latched prepare/encode outcome
   seam from the maintained embedding generator.
+
 - Phase `59.3` inserted after Phase `59`: Continue profiling and optimizing image performance
   (URGENT)
+
 - Phase `59.4` inserted after Phase `59`: Kernelize image throughput hot path into AArch64
   architecture kernels (URGENT)
+
 - Phase `59.4` executed and completed, moving the maintained image pointwise and depthwise ARM
   hot loops into `src/emel/kernel/aarch64` and publishing the refreshed image-only throughput and
   ownership evidence.
+
 - Phase `60` added after the rerun audit: Reconcile Maintained TE Quant Scope And Proof Truth.
 - Phase `61` added after the rerun audit: Refresh Validation And Closeout Audit.
 
@@ -189,23 +239,35 @@ Recent decisions affecting current work:
 
 ### Blockers/Concerns
 
+- `v1.12` starts before lifecycle-archiving `v1.11`, so any archive/cleanup step should remain a
+  deliberate separate action from the new parity-bench work.
+
+- The full repo gate for `v1.12` still tolerates warning-only benchmark snapshot regressions, so
+  the compare-workflow milestone closes on a green gate with the existing warning note rather than
+  on a benchmark-snapshot clean slate.
+
 - `v1.10` still needs formal closeout and archival after its implementation-complete planner work.
 - Benchmark snapshot and benchmark-marker issues remain warning-only under current gate policy, so
   published performance claims should continue to use a deliberate benchmark-review step rather
   than the raw gate tail alone.
+
 - The latest maintained ARM evidence is now recorded in Phase `59.1`, with isolated per-modality
   steady-state runs rather than a contended all-modalities sample.
+
 - The same-host external baseline evidence is now recorded in Phase `59.1.1`; the main remaining
   caveat is that the multimodal reference outputs are token-grid tower embeddings rather than the
   exact final normalized embedding contract used by EMEL.
+
 - The highest remaining single-thread ARM ROI is still the image pointwise kernel now living in
   `src/emel/kernel/aarch64`; the latest maintained q5 image evidence is about `~10.5 embeddings/s`,
   so future image work still has clear ROI even though it is no longer a milestone blocker.
+
 - `v1.11` lifecycle completion is still a separate step because this repo currently has a heavily
   dirty worktree; archival/cleanup should be deliberate rather than automatic.
 
 ## Session Continuity
 
-Last session: 2026-04-16T16:29:03Z
-Stopped at: completed `59.3`, `60`, and `61`; refreshed the milestone ledger and republished the root audit
+Last session: 2026-04-18T00:20:00Z
+Stopped at: completed the pluggable reference parity bench architecture, verified the unified
+Python/C++ compare workflows, and left the milestone ready for audit
 Resume file: None

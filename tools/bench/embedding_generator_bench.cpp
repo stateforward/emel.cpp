@@ -4,6 +4,7 @@
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <string>
 #include <vector>
 
@@ -14,6 +15,8 @@
 #include "emel/text/conditioner/sm.hpp"
 #include "emel/text/formatter/format.hpp"
 #include "emel/text/tokenizer/sm.hpp"
+#include "embedding_compare_contract.hpp"
+#include "embedding_generator_bench_helpers.hpp"
 #include "tests/embeddings/te_fixture_data.hpp"
 
 namespace emel::bench {
@@ -94,8 +97,21 @@ void print_embedding_generator_bench_metadata() {
               "truncate_dimension=0 payload=mono_f32_16khz_4000_pure_tone_440hz\n");
 }
 
+struct embedding_case_sample {
+  emel::embeddings::generator::event::benchmark_stage_timings timings = {};
+  std::uint64_t output_tokens = 0u;
+  std::uint64_t output_dim = 0u;
+  std::uint64_t output_checksum = 0u;
+  std::vector<float> output_values = {};
+};
+
+struct measured_embedding_case {
+  result summary = {};
+  embedding_case_sample anchor = {};
+};
+
 template <class fn_type>
-result measure_embedding_case(const char * name, const config & cfg, fn_type && fn) {
+measured_embedding_case measure_embedding_case(const char * name, const config & cfg, fn_type && fn) {
   std::vector<double> total_samples = {};
   std::vector<double> prepare_samples = {};
   std::vector<double> encode_samples = {};
@@ -105,9 +121,12 @@ result measure_embedding_case(const char * name, const config & cfg, fn_type && 
   encode_samples.reserve(cfg.runs);
   publish_samples.reserve(cfg.runs);
 
+  embedding_case_sample anchor = {};
+  bool anchor_seen = false;
+
   for (std::size_t run = 0; run < cfg.warmup_runs; ++run) {
     for (std::uint64_t i = 0; i < cfg.warmup_iterations; ++i) {
-      (void) fn();
+      (void) fn(false);
     }
   }
 
@@ -117,10 +136,19 @@ result measure_embedding_case(const char * name, const config & cfg, fn_type && 
     std::uint64_t publish_ns = 0u;
     const auto start = std::chrono::steady_clock::now();
     for (std::uint64_t i = 0; i < cfg.iterations; ++i) {
-      const auto timings = fn();
-      prepare_ns += timings.prepare_ns;
-      encode_ns += timings.encode_ns;
-      publish_ns += timings.publish_ns;
+      const auto sample = fn(!anchor_seen);
+      prepare_ns += sample.timings.prepare_ns;
+      encode_ns += sample.timings.encode_ns;
+      publish_ns += sample.timings.publish_ns;
+      if (!anchor_seen) {
+        anchor = sample;
+        anchor_seen = true;
+      } else if (anchor.output_tokens != sample.output_tokens ||
+                 anchor.output_dim != sample.output_dim ||
+                 anchor.output_checksum != sample.output_checksum) {
+        std::fprintf(stderr, "error: embedding generator benchmark output anchors changed across iterations\n");
+        std::abort();
+      }
     }
     const auto end = std::chrono::steady_clock::now();
     const auto duration_ns =
@@ -136,18 +164,24 @@ result measure_embedding_case(const char * name, const config & cfg, fn_type && 
   std::sort(encode_samples.begin(), encode_samples.end());
   std::sort(publish_samples.begin(), publish_samples.end());
 
-  result out = {};
-  out.name = name;
-  out.ns_per_op = total_samples[total_samples.size() / 2];
-  out.prepare_ns_per_op = prepare_samples[prepare_samples.size() / 2];
-  out.encode_ns_per_op = encode_samples[encode_samples.size() / 2];
-  out.publish_ns_per_op = publish_samples[publish_samples.size() / 2];
-  out.iterations = cfg.iterations;
-  out.runs = cfg.runs;
+  measured_embedding_case out = {};
+  out.summary.name = name;
+  out.summary.ns_per_op = total_samples[total_samples.size() / 2];
+  out.summary.prepare_ns_per_op = prepare_samples[prepare_samples.size() / 2];
+  out.summary.encode_ns_per_op = encode_samples[encode_samples.size() / 2];
+  out.summary.publish_ns_per_op = publish_samples[publish_samples.size() / 2];
+  out.summary.output_tokens = anchor.output_tokens;
+  out.summary.output_dim = anchor.output_dim;
+  out.summary.output_checksum = anchor.output_checksum;
+  out.summary.iterations = cfg.iterations;
+  out.summary.runs = cfg.runs;
+  out.anchor = std::move(anchor);
   return out;
 }
 
-void append_embedding_generator_cases(std::vector<result> & results, const config & cfg) {
+void append_embedding_generator_cases(std::vector<result> & results,
+                                      const config & cfg,
+                                      std::vector<embedding_compare_record> * compare_records) {
   if (!te_fixture::te_assets_present()) {
     std::fprintf(stderr, "warning: skipping embedding generator benchmark because TE assets are missing\n");
     return;
@@ -166,6 +200,7 @@ void append_embedding_generator_cases(std::vector<result> & results, const confi
   initialized_embedding_generator text_state{*fixture.model};
   initialized_embedding_generator image_state{*fixture.model};
   initialized_embedding_generator audio_state{*fixture.model};
+  const bool capture_compare_outputs = compare_records != nullptr;
 
   std::array<float, 1280> text_output = {};
   int32_t text_output_dimension = 0;
@@ -211,8 +246,11 @@ void append_embedding_generator_cases(std::vector<result> & results, const confi
   };
   audio_request.error_out = &audio_error;
   audio_request.benchmark_time_now = benchmark_timestamp_now_ns;
+  bool text_anchor_output_captured = false;
+  bool image_anchor_output_captured = false;
+  bool audio_anchor_output_captured = false;
 
-  auto text_fn = [&]() {
+  auto text_fn = [&](const bool capture_anchor_output) -> embedding_case_sample {
     text_error = emel::error::cast(emel::embeddings::generator::error::none);
     text_output_dimension = 0;
     if (!text_state.generator.process_event(text_request) ||
@@ -221,10 +259,20 @@ void append_embedding_generator_cases(std::vector<result> & results, const confi
       std::fprintf(stderr, "error: failed to run text embedding generator benchmark case\n");
       std::abort();
     }
-    return text_timings;
+    embedding_case_sample sample = {};
+    sample.timings = text_timings;
+    sample.output_tokens = 1u;
+    sample.output_dim = static_cast<std::uint64_t>(text_output_dimension);
+    capture_embedding_case_output(sample,
+                                  text_output.data(),
+                                  text_output.size(),
+                                  capture_compare_outputs,
+                                  capture_anchor_output,
+                                  text_anchor_output_captured);
+    return sample;
   };
 
-  auto image_fn = [&]() {
+  auto image_fn = [&](const bool capture_anchor_output) -> embedding_case_sample {
     image_error = emel::error::cast(emel::embeddings::generator::error::none);
     image_output_dimension = 0;
     if (!image_state.generator.process_event(image_request) ||
@@ -233,10 +281,20 @@ void append_embedding_generator_cases(std::vector<result> & results, const confi
       std::fprintf(stderr, "error: failed to run image embedding generator benchmark case\n");
       std::abort();
     }
-    return image_timings;
+    embedding_case_sample sample = {};
+    sample.timings = image_timings;
+    sample.output_tokens = 1u;
+    sample.output_dim = static_cast<std::uint64_t>(image_output_dimension);
+    capture_embedding_case_output(sample,
+                                  image_output.data(),
+                                  image_output.size(),
+                                  capture_compare_outputs,
+                                  capture_anchor_output,
+                                  image_anchor_output_captured);
+    return sample;
   };
 
-  auto audio_fn = [&]() {
+  auto audio_fn = [&](const bool capture_anchor_output) -> embedding_case_sample {
     audio_error = emel::error::cast(emel::embeddings::generator::error::none);
     audio_output_dimension = 0;
     if (!audio_state.generator.process_event(audio_request) ||
@@ -245,17 +303,102 @@ void append_embedding_generator_cases(std::vector<result> & results, const confi
       std::fprintf(stderr, "error: failed to run audio embedding generator benchmark case\n");
       std::abort();
     }
-    return audio_timings;
+    embedding_case_sample sample = {};
+    sample.timings = audio_timings;
+    sample.output_tokens = 1u;
+    sample.output_dim = static_cast<std::uint64_t>(audio_output_dimension);
+    capture_embedding_case_output(sample,
+                                  audio_output.data(),
+                                  audio_output.size(),
+                                  capture_compare_outputs,
+                                  capture_anchor_output,
+                                  audio_anchor_output_captured);
+    return sample;
   };
 
   if (benchmark_case_enabled(text_case_name.c_str())) {
-    results.push_back(measure_embedding_case(text_case_name.c_str(), cfg, text_fn));
+    auto measured = measure_embedding_case(text_case_name.c_str(), cfg, text_fn);
+    results.push_back(measured.summary);
+    if (compare_records != nullptr) {
+      embedding_compare_record record = {};
+      record.case_name = text_case_name;
+      record.compare_group = "text/red_square/full_dim";
+      record.lane = "emel";
+      record.backend_id = "emel.generator";
+      record.backend_language = "cpp";
+      record.comparison_mode = "parity";
+      record.model_id = te_fixture::te_fixture_case_slug();
+      record.fixture_id =
+        te_fixture::te_fixture_path().lexically_relative(te_fixture::repo_root()).string();
+      record.modality = "text";
+      record.ns_per_op = measured.summary.ns_per_op;
+      record.prepare_ns_per_op = measured.summary.prepare_ns_per_op;
+      record.encode_ns_per_op = measured.summary.encode_ns_per_op;
+      record.publish_ns_per_op = measured.summary.publish_ns_per_op;
+      record.output_tokens = measured.anchor.output_tokens;
+      record.output_dim = measured.anchor.output_dim;
+      record.output_checksum = measured.anchor.output_checksum;
+      record.iterations = measured.summary.iterations;
+      record.runs = measured.summary.runs;
+      record.output_values = std::move(measured.anchor.output_values);
+      compare_records->push_back(std::move(record));
+    }
   }
   if (benchmark_case_enabled(image_case_name.c_str())) {
-    results.push_back(measure_embedding_case(image_case_name.c_str(), cfg, image_fn));
+    auto measured = measure_embedding_case(image_case_name.c_str(), cfg, image_fn);
+    results.push_back(measured.summary);
+    if (compare_records != nullptr) {
+      embedding_compare_record record = {};
+      record.case_name = image_case_name;
+      record.compare_group = "image/red_square/full_dim";
+      record.lane = "emel";
+      record.backend_id = "emel.generator";
+      record.backend_language = "cpp";
+      record.comparison_mode = "parity";
+      record.model_id = te_fixture::te_fixture_case_slug();
+      record.fixture_id =
+        te_fixture::te_fixture_path().lexically_relative(te_fixture::repo_root()).string();
+      record.modality = "image";
+      record.ns_per_op = measured.summary.ns_per_op;
+      record.prepare_ns_per_op = measured.summary.prepare_ns_per_op;
+      record.encode_ns_per_op = measured.summary.encode_ns_per_op;
+      record.publish_ns_per_op = measured.summary.publish_ns_per_op;
+      record.output_tokens = measured.anchor.output_tokens;
+      record.output_dim = measured.anchor.output_dim;
+      record.output_checksum = measured.anchor.output_checksum;
+      record.iterations = measured.summary.iterations;
+      record.runs = measured.summary.runs;
+      record.output_values = std::move(measured.anchor.output_values);
+      compare_records->push_back(std::move(record));
+    }
   }
   if (benchmark_case_enabled(audio_case_name.c_str())) {
-    results.push_back(measure_embedding_case(audio_case_name.c_str(), cfg, audio_fn));
+    auto measured = measure_embedding_case(audio_case_name.c_str(), cfg, audio_fn);
+    results.push_back(measured.summary);
+    if (compare_records != nullptr) {
+      embedding_compare_record record = {};
+      record.case_name = audio_case_name;
+      record.compare_group = "audio/pure_tone_440hz/full_dim";
+      record.lane = "emel";
+      record.backend_id = "emel.generator";
+      record.backend_language = "cpp";
+      record.comparison_mode = "parity";
+      record.model_id = te_fixture::te_fixture_case_slug();
+      record.fixture_id =
+        te_fixture::te_fixture_path().lexically_relative(te_fixture::repo_root()).string();
+      record.modality = "audio";
+      record.ns_per_op = measured.summary.ns_per_op;
+      record.prepare_ns_per_op = measured.summary.prepare_ns_per_op;
+      record.encode_ns_per_op = measured.summary.encode_ns_per_op;
+      record.publish_ns_per_op = measured.summary.publish_ns_per_op;
+      record.output_tokens = measured.anchor.output_tokens;
+      record.output_dim = measured.anchor.output_dim;
+      record.output_checksum = measured.anchor.output_checksum;
+      record.iterations = measured.summary.iterations;
+      record.runs = measured.summary.runs;
+      record.output_values = std::move(measured.anchor.output_values);
+      compare_records->push_back(std::move(record));
+    }
   }
 }
 

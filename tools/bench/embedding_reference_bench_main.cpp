@@ -7,10 +7,13 @@
 #include <vector>
 
 #include "bench_common.hpp"
+#include "embedding_compare_contract.hpp"
 
 namespace emel::bench {
 
-void append_embedding_reference_cases(std::vector<result> & results, const config & cfg);
+void append_embedding_reference_cases(std::vector<result> & results,
+                                      const config & cfg,
+                                      std::vector<embedding_compare_record> * compare_records);
 void print_embedding_reference_bench_metadata();
 
 }  // namespace emel::bench
@@ -100,20 +103,35 @@ int main() {
   cfg.warmup_iterations = read_env_u64("EMEL_BENCH_WARMUP_ITERS", k_default_warmup_iterations);
   cfg.warmup_runs = read_env_size("EMEL_BENCH_WARMUP_RUNS", k_default_warmup_runs);
 
-  std::printf("# benchmark_config: iterations=%" PRIu64 " runs=%zu warmup_iterations=%" PRIu64
-              " warmup_runs=%zu\n",
-              cfg.iterations,
-              cfg.runs,
-              cfg.warmup_iterations,
-              cfg.warmup_runs);
-  std::printf("# embedding_reference_repository: %s\n", k_embedding_reference_repository.data());
-  std::printf("# embedding_reference_ref: %s\n", k_embedding_reference_ref.data());
-  std::printf("# embedding_reference_source: %s\n", k_embedding_reference_source.data());
-  bench::print_embedding_reference_bench_metadata();
+  const bool emit_jsonl = bench::embedding_compare_emit_jsonl();
+
+  if (!emit_jsonl) {
+    std::printf("# benchmark_config: iterations=%" PRIu64 " runs=%zu warmup_iterations=%" PRIu64
+                " warmup_runs=%zu\n",
+                cfg.iterations,
+                cfg.runs,
+                cfg.warmup_iterations,
+                cfg.warmup_runs);
+    std::printf("# embedding_reference_repository: %s\n", k_embedding_reference_repository.data());
+    std::printf("# embedding_reference_ref: %s\n", k_embedding_reference_ref.data());
+    std::printf("# embedding_reference_source: %s\n", k_embedding_reference_source.data());
+    bench::print_embedding_reference_bench_metadata();
+  }
 
   std::vector<bench::result> results = {};
   results.reserve(4u);
-  bench::append_embedding_reference_cases(results, cfg);
+  std::vector<bench::embedding_compare_record> compare_records = {};
+  bench::append_embedding_reference_cases(
+    results,
+    cfg,
+    emit_jsonl ? &compare_records : nullptr);
+  if (emit_jsonl) {
+    for (auto & record : compare_records) {
+      bench::maybe_dump_embedding_output(record);
+      bench::print_embedding_compare_record_jsonl(record);
+    }
+    return 0;
+  }
   print_results(results);
   return 0;
 }

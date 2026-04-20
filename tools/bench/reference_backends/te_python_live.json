@@ -1,0 +1,12 @@
+{
+  "id": "te_python_live",
+  "display_name": "TE Python live reference",
+  "language": "python",
+  "description": "Optional live Python TE-75M backend that regenerates embeddings from the upstream safetensors model when the Python ML stack is available.",
+  "run_command": [
+    "python3",
+    "tools/bench/embedding_reference_python.py",
+    "--backend",
+    "te75m_live"
+  ]
+}

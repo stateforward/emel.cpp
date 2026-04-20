@@ -17,6 +17,7 @@
 
 #include "llama.h"
 #include "mtmd.h"
+#include "embedding_compare_contract.hpp"
 
 namespace emel::bench {
 
@@ -561,8 +562,14 @@ reference_stage_timings run_audio_case(multimodal_reference_session & session,
   return timings;
 }
 
+struct measured_reference_case {
+  result summary = {};
+  reference_stage_timings anchor = {};
+  std::vector<float> output_values = {};
+};
+
 template <class fn_type>
-result measure_reference_case(const char * name, const config & cfg, fn_type && fn) {
+measured_reference_case measure_reference_case(const char * name, const config & cfg, fn_type && fn) {
   std::vector<double> total_samples = {};
   std::vector<double> prepare_samples = {};
   std::vector<double> encode_samples = {};
@@ -615,17 +622,18 @@ result measure_reference_case(const char * name, const config & cfg, fn_type && 
   std::sort(encode_samples.begin(), encode_samples.end());
   std::sort(publish_samples.begin(), publish_samples.end());
 
-  result out = {};
-  out.name = name;
-  out.ns_per_op = total_samples[total_samples.size() / 2];
-  out.prepare_ns_per_op = prepare_samples[prepare_samples.size() / 2];
-  out.encode_ns_per_op = encode_samples[encode_samples.size() / 2];
-  out.publish_ns_per_op = publish_samples[publish_samples.size() / 2];
-  out.output_tokens = anchor.output_tokens;
-  out.output_dim = anchor.output_dim;
-  out.output_checksum = anchor.output_checksum;
-  out.iterations = cfg.iterations;
-  out.runs = cfg.runs;
+  measured_reference_case out = {};
+  out.summary.name = name;
+  out.summary.ns_per_op = total_samples[total_samples.size() / 2];
+  out.summary.prepare_ns_per_op = prepare_samples[prepare_samples.size() / 2];
+  out.summary.encode_ns_per_op = encode_samples[encode_samples.size() / 2];
+  out.summary.publish_ns_per_op = publish_samples[publish_samples.size() / 2];
+  out.summary.output_tokens = anchor.output_tokens;
+  out.summary.output_dim = anchor.output_dim;
+  out.summary.output_checksum = anchor.output_checksum;
+  out.summary.iterations = cfg.iterations;
+  out.summary.runs = cfg.runs;
+  out.anchor = anchor;
   return out;
 }
 
@@ -668,7 +676,9 @@ void print_embedding_reference_bench_metadata() {
               "marker_only_prompt=true\n");
 }
 
-void append_embedding_reference_cases(std::vector<result> & results, const config & cfg) {
+void append_embedding_reference_cases(std::vector<result> & results,
+                                      const config & cfg,
+                                      std::vector<embedding_compare_record> * compare_records) {
   const std::string arctic_model_path = configured_env_value(k_text_arctic_model_env);
   const std::string gemma_model_path = configured_env_value(k_text_gemma_model_env);
   const std::string vision_model_path =
@@ -680,42 +690,126 @@ void append_embedding_reference_cases(std::vector<result> & results, const confi
 
   if (configured_path_exists(arctic_model_path) && reference_case_enabled(k_text_arctic_case_name)) {
     text_reference_session session = load_text_session(arctic_model_path);
-    std::printf("# embedding_reference_case_support_arctic_s: pooling=%d encoder=%s decoder=%s\n",
-                static_cast<int>(llama_pooling_type(session.context.get())),
-                llama_model_has_encoder(session.model.get()) ? "true" : "false",
-                llama_model_has_decoder(session.model.get()) ? "true" : "false");
+    if (compare_records == nullptr) {
+      std::printf("# embedding_reference_case_support_arctic_s: pooling=%d encoder=%s decoder=%s\n",
+                  static_cast<int>(llama_pooling_type(session.context.get())),
+                  llama_model_has_encoder(session.model.get()) ? "true" : "false",
+                  llama_model_has_decoder(session.model.get()) ? "true" : "false");
+    }
     reference_case_state state = {};
-    results.push_back(measure_reference_case(k_text_arctic_case_name, cfg, [&]() {
+    auto measured = measure_reference_case(k_text_arctic_case_name, cfg, [&]() {
       return run_text_case(session, state);
-    }));
+    });
+    measured.output_values = state.publish_buffer;
+    results.push_back(measured.summary);
+    if (compare_records != nullptr) {
+      embedding_compare_record record = {};
+      record.case_name = k_text_arctic_case_name;
+      record.compare_group = "text/red_square/full_dim";
+      record.lane = "reference";
+      record.backend_id = "cpp.reference.arctic_s";
+      record.backend_language = "cpp";
+      record.comparison_mode = "baseline";
+      record.model_id = "Snowflake/snowflake-arctic-embed-s";
+      record.fixture_id = arctic_model_path;
+      record.modality = "text";
+      record.ns_per_op = measured.summary.ns_per_op;
+      record.prepare_ns_per_op = measured.summary.prepare_ns_per_op;
+      record.encode_ns_per_op = measured.summary.encode_ns_per_op;
+      record.publish_ns_per_op = measured.summary.publish_ns_per_op;
+      record.output_tokens = measured.anchor.output_tokens;
+      record.output_dim = measured.anchor.output_dim;
+      record.output_checksum = measured.anchor.output_checksum;
+      record.iterations = measured.summary.iterations;
+      record.runs = measured.summary.runs;
+      record.output_values = std::move(measured.output_values);
+      record.note = "baseline_compare_only";
+      compare_records->push_back(std::move(record));
+    }
   }
 
   if (configured_path_exists(gemma_model_path) && reference_case_enabled(k_text_gemma_case_name)) {
     text_reference_session session = load_text_session(gemma_model_path);
-    std::printf("# embedding_reference_case_support_embeddinggemma_300m: pooling=%d encoder=%s "
-                "decoder=%s\n",
-                static_cast<int>(llama_pooling_type(session.context.get())),
-                llama_model_has_encoder(session.model.get()) ? "true" : "false",
-                llama_model_has_decoder(session.model.get()) ? "true" : "false");
+    if (compare_records == nullptr) {
+      std::printf("# embedding_reference_case_support_embeddinggemma_300m: pooling=%d encoder=%s "
+                  "decoder=%s\n",
+                  static_cast<int>(llama_pooling_type(session.context.get())),
+                  llama_model_has_encoder(session.model.get()) ? "true" : "false",
+                  llama_model_has_decoder(session.model.get()) ? "true" : "false");
+    }
     reference_case_state state = {};
-    results.push_back(measure_reference_case(k_text_gemma_case_name, cfg, [&]() {
+    auto measured = measure_reference_case(k_text_gemma_case_name, cfg, [&]() {
       return run_text_case(session, state);
-    }));
+    });
+    measured.output_values = state.publish_buffer;
+    results.push_back(measured.summary);
+    if (compare_records != nullptr) {
+      embedding_compare_record record = {};
+      record.case_name = k_text_gemma_case_name;
+      record.compare_group = "text/red_square/full_dim";
+      record.lane = "reference";
+      record.backend_id = "cpp.reference.embeddinggemma_300m";
+      record.backend_language = "cpp";
+      record.comparison_mode = "baseline";
+      record.model_id = "ggml-org/embeddinggemma-300M-GGUF";
+      record.fixture_id = gemma_model_path;
+      record.modality = "text";
+      record.ns_per_op = measured.summary.ns_per_op;
+      record.prepare_ns_per_op = measured.summary.prepare_ns_per_op;
+      record.encode_ns_per_op = measured.summary.encode_ns_per_op;
+      record.publish_ns_per_op = measured.summary.publish_ns_per_op;
+      record.output_tokens = measured.anchor.output_tokens;
+      record.output_dim = measured.anchor.output_dim;
+      record.output_checksum = measured.anchor.output_checksum;
+      record.iterations = measured.summary.iterations;
+      record.runs = measured.summary.runs;
+      record.output_values = std::move(measured.output_values);
+      record.note = "baseline_compare_only";
+      compare_records->push_back(std::move(record));
+    }
   }
 
   if (configured_path_exists(vision_model_path) &&
       configured_path_exists(vision_mmproj_path) &&
       reference_case_enabled(k_vision_case_name)) {
     multimodal_reference_session session = load_multimodal_session(vision_model_path, vision_mmproj_path);
-    std::printf("# embedding_reference_case_support_lfm2_vl_450m: vision=%s audio=%s threads=%d\n",
-                mtmd_support_vision(session.context.get()) ? "true" : "false",
-                mtmd_support_audio(session.context.get()) ? "true" : "false",
-                session.n_threads);
+    if (compare_records == nullptr) {
+      std::printf("# embedding_reference_case_support_lfm2_vl_450m: vision=%s audio=%s threads=%d\n",
+                  mtmd_support_vision(session.context.get()) ? "true" : "false",
+                  mtmd_support_audio(session.context.get()) ? "true" : "false",
+                  session.n_threads);
+    }
     if (mtmd_support_vision(session.context.get())) {
       reference_case_state state = {};
-      results.push_back(measure_reference_case(k_vision_case_name, cfg, [&]() {
+      auto measured = measure_reference_case(k_vision_case_name, cfg, [&]() {
         return run_image_case(session, state);
-      }));
+      });
+      measured.output_values = state.publish_buffer;
+      results.push_back(measured.summary);
+      if (compare_records != nullptr) {
+        embedding_compare_record record = {};
+        record.case_name = k_vision_case_name;
+        record.compare_group = "image/red_square/full_dim";
+        record.lane = "reference";
+        record.backend_id = "cpp.reference.lfm2_vl_450m";
+        record.backend_language = "cpp";
+        record.comparison_mode = "baseline";
+        record.model_id = "LiquidAI/LFM2-VL-450M";
+        record.fixture_id = vision_model_path;
+        record.modality = "image";
+        record.ns_per_op = measured.summary.ns_per_op;
+        record.prepare_ns_per_op = measured.summary.prepare_ns_per_op;
+        record.encode_ns_per_op = measured.summary.encode_ns_per_op;
+        record.publish_ns_per_op = measured.summary.publish_ns_per_op;
+        record.output_tokens = measured.anchor.output_tokens;
+        record.output_dim = measured.anchor.output_dim;
+        record.output_checksum = measured.anchor.output_checksum;
+        record.iterations = measured.summary.iterations;
+        record.runs = measured.summary.runs;
+        record.output_values = std::move(measured.output_values);
+        record.note = "baseline_compare_only";
+        compare_records->push_back(std::move(record));
+      }
     }
   }
 
@@ -723,15 +817,43 @@ void append_embedding_reference_cases(std::vector<result> & results, const confi
       configured_path_exists(audio_mmproj_path) &&
       reference_case_enabled(k_audio_case_name)) {
     multimodal_reference_session session = load_multimodal_session(audio_model_path, audio_mmproj_path);
-    std::printf("# embedding_reference_case_support_ultravox_1b: vision=%s audio=%s threads=%d\n",
-                mtmd_support_vision(session.context.get()) ? "true" : "false",
-                mtmd_support_audio(session.context.get()) ? "true" : "false",
-                session.n_threads);
+    if (compare_records == nullptr) {
+      std::printf("# embedding_reference_case_support_ultravox_1b: vision=%s audio=%s threads=%d\n",
+                  mtmd_support_vision(session.context.get()) ? "true" : "false",
+                  mtmd_support_audio(session.context.get()) ? "true" : "false",
+                  session.n_threads);
+    }
     if (mtmd_support_audio(session.context.get())) {
       reference_case_state state = {};
-      results.push_back(measure_reference_case(k_audio_case_name, cfg, [&]() {
+      auto measured = measure_reference_case(k_audio_case_name, cfg, [&]() {
         return run_audio_case(session, state);
-      }));
+      });
+      measured.output_values = state.publish_buffer;
+      results.push_back(measured.summary);
+      if (compare_records != nullptr) {
+        embedding_compare_record record = {};
+        record.case_name = k_audio_case_name;
+        record.compare_group = "audio/pure_tone_440hz/full_dim";
+        record.lane = "reference";
+        record.backend_id = "cpp.reference.ultravox_1b";
+        record.backend_language = "cpp";
+        record.comparison_mode = "baseline";
+        record.model_id = "fixie-ai/ultravox-v0_5-llama-3_2-1b";
+        record.fixture_id = audio_model_path;
+        record.modality = "audio";
+        record.ns_per_op = measured.summary.ns_per_op;
+        record.prepare_ns_per_op = measured.summary.prepare_ns_per_op;
+        record.encode_ns_per_op = measured.summary.encode_ns_per_op;
+        record.publish_ns_per_op = measured.summary.publish_ns_per_op;
+        record.output_tokens = measured.anchor.output_tokens;
+        record.output_dim = measured.anchor.output_dim;
+        record.output_checksum = measured.anchor.output_checksum;
+        record.iterations = measured.summary.iterations;
+        record.runs = measured.summary.runs;
+        record.output_values = std::move(measured.output_values);
+        record.note = "baseline_compare_only";
+        compare_records->push_back(std::move(record));
+      }
     }
   }
 

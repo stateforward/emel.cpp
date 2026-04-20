@@ -188,16 +188,6 @@ ALWAYS communicate between machines through events and explicit interfaces only.
 NEVER call another machine's actions, guards, or functions directly.
 NEVER mutate another machine's context directly.
 ALWAYS dispatch cross-machine events only via `machine->process_event(...)`.
-ALWAYS make state-machine structure changes directly when they are required for
-correctness, rule compliance, performance, or to make runtime control flow
-explicit.
-ALWAYS document structural changes in the corresponding plan, summary, or
-verification artifacts when those artifacts exist.
-NEVER broaden public API, product scope, or milestone claims accidentally when
-changing state-machine structure.
-If a structural change would intentionally alter externally visible semantics
-beyond the already-declared contract, document that semantic change explicitly
-instead of treating it as a hidden compliance repair.
 ALWAYS keep operator arithmetic, lowering, packing, quant/dequant, and
 backend-specific numeric work in the owning kernel layer (`src/emel/kernel/**`
 or a component-local kernel module when that component explicitly owns

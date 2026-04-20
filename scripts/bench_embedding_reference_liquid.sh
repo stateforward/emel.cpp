@@ -8,12 +8,13 @@ REFERENCE_REPOSITORY="${EMEL_REFERENCE_REPOSITORY:-https://github.com/Liquid4All
 REFERENCE_REF="${EMEL_REFERENCE_REF:-0f345f3a1924ef274678a65bdec4b17f14e8fe9a}"
 ASSET_DIR="${EMEL_REFERENCE_ASSET_DIR:-$ROOT_DIR/tests/models/reference}"
 BUILD_ONLY=false
+RUN_ONLY=false
 DOWNLOAD_KNOWN_ASSETS=false
 USE_ZIG=true
 
 usage() {
   cat <<'USAGE'
-usage: scripts/bench_embedding_reference_liquid.sh [--build-only] [--download-known-assets] [--zig|--system]
+usage: scripts/bench_embedding_reference_liquid.sh [--build-only] [--run-only] [--download-known-assets] [--zig|--system]
 
 Configures a dedicated Liquid AI multimodal reference benchmark build and builds
 `embedding_reference_bench_runner`. The same runner can benchmark the approved
@@ -45,6 +46,7 @@ USAGE
 for arg in "$@"; do
   case "$arg" in
     --build-only) BUILD_ONLY=true ;;
+    --run-only) RUN_ONLY=true ;;
     --download-known-assets) DOWNLOAD_KNOWN_ASSETS=true ;;
     --zig) USE_ZIG=true ;;
     --system) USE_ZIG=false ;;
@@ -56,6 +58,11 @@ for arg in "$@"; do
       ;;
   esac
 done
+
+if $BUILD_ONLY && $RUN_ONLY; then
+  echo "error: --build-only and --run-only are mutually exclusive" >&2
+  exit 1
+fi
 
 ensure_hf_tool() {
   if command -v huggingface-cli >/dev/null 2>&1; then
@@ -107,12 +114,14 @@ if $DOWNLOAD_KNOWN_ASSETS; then
   download_hf_asset "ggml-org/ultravox-v0_5-llama-3_2-1b-GGUF" "mmproj-ultravox-v0_5-llama-3_2-1b-f16.gguf" "$hf_bin"
 fi
 
-for tool in cmake ninja git; do
-  if ! command -v "$tool" >/dev/null 2>&1; then
-    echo "error: required tool missing: $tool" >&2
-    exit 1
-  fi
-done
+if ! $RUN_ONLY; then
+  for tool in cmake ninja git; do
+    if ! command -v "$tool" >/dev/null 2>&1; then
+      echo "error: required tool missing: $tool" >&2
+      exit 1
+    fi
+  done
+fi
 
 bench_cc="${BENCH_CC:-cc}"
 bench_cxx="${BENCH_CXX:-c++}"
@@ -121,7 +130,7 @@ bench_cxx_arg=""
 bench_asm_arg=""
 bench_c_flags=""
 bench_cxx_flags=""
-if $USE_ZIG; then
+if $USE_ZIG && ! $RUN_ONLY; then
   if ! command -v zig >/dev/null 2>&1; then
     echo "error: zig not found (use --system to use system compilers)" >&2
     exit 1
@@ -161,8 +170,10 @@ if [[ -n "$bench_cxx_flags" ]]; then
   cmake_args+=("-DCMAKE_CXX_FLAGS=$bench_cxx_flags")
 fi
 
-cmake "${cmake_args[@]}"
-cmake --build "$BUILD_DIR" --parallel --target embedding_reference_bench_runner
+if ! $RUN_ONLY; then
+  cmake "${cmake_args[@]}"
+  cmake --build "$BUILD_DIR" --parallel --target embedding_reference_bench_runner
+fi
 
 if $BUILD_ONLY; then
   exit 0
