@@ -103,7 +103,10 @@ def append_jsonl_record(path: Path, record: dict[str, object]) -> None:
 
 
 def ensure_error_record(path: Path, record: dict[str, object]) -> None:
-  records = parse_jsonl_records(path)
+  records = parse_jsonl_records(path,
+                                lane=str(record.get("lane", "")),
+                                backend_id=str(record.get("backend_id", "")),
+                                backend_language=str(record.get("backend_language", "")))
   if any(existing.get("record_type") == "error" for existing in records):
     return
   append_jsonl_record(path, record)
@@ -142,15 +145,33 @@ def run_command(command: list[str],
   return command_result(returncode=process.returncode)
 
 
-def parse_jsonl_records(path: Path) -> list[dict[str, object]]:
+def parse_jsonl_records(path: Path,
+                       *,
+                       lane: str = "",
+                       backend_id: str = "",
+                       backend_language: str = "") -> list[dict[str, object]]:
   records: list[dict[str, object]] = []
   if not path.exists():
     return records
-  for raw_line in path.read_text(encoding="utf-8").splitlines():
+  record_lane = lane or "unknown"
+  record_backend_id = backend_id or f"{record_lane}.input"
+  for line_number, raw_line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
     line = raw_line.strip()
     if not line or line.startswith("#") or not line.startswith("{"):
       continue
-    payload = json.loads(line)
+    try:
+      payload = json.loads(line)
+    except json.JSONDecodeError as exc:
+      records.append(
+        error_record(
+          lane=record_lane,
+          backend_id=record_backend_id,
+          backend_language=backend_language,
+          error_kind="malformed_jsonl",
+          error_message=f"{path}:{line_number}: {exc.msg}",
+        )
+      )
+      break
     if payload.get("schema") != SCHEMA:
       continue
     records.append(payload)
@@ -427,8 +448,16 @@ def main() -> int:
                        error_message=error_message),
         )
 
-  emel_records = parse_jsonl_records(emel_jsonl)
-  reference_records = parse_jsonl_records(reference_jsonl)
+  emel_records = parse_jsonl_records(emel_jsonl,
+                                     lane="emel",
+                                     backend_id="emel.generator",
+                                     backend_language="cpp")
+  reference_records = parse_jsonl_records(
+    reference_jsonl,
+    lane="reference",
+    backend_id=str(manifest.get("id", "reference.input")) if manifest else "reference.input",
+    backend_language=str(manifest.get("language", "")) if manifest else "",
+  )
   summary = build_summary(emel_records, reference_records, manifest, manifest_path)
   summary_path = args.output_dir / "compare_summary.json"
   summary_path.write_text(json.dumps(summary, indent=2, sort_keys=True), encoding="utf-8")
