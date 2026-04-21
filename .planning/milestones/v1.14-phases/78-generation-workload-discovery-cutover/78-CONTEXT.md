@@ -15,7 +15,7 @@ from checked-in workload manifests.
 ## Implementation Decisions
 
 ### Discovery
-- Discover `tools/bench/generation_workloads/*.json` in sorted path order.
+- Discover grouped `tools/bench/generation_workloads/**/*.json` manifests in deterministic order.
 - Load and validate each manifest through the existing generation workload parser.
 - Keep workload filters compatible with ID, case name, and compare group.
 

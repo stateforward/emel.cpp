@@ -335,6 +335,9 @@ TEST_CASE("generation workload manifests are discovered deterministically") {
   CHECK(manifests.size() >= 13u);
   REQUIRE(!manifests.empty());
   CHECK(manifests.front().workload_manifest_path.find("tools/bench/generation_workloads/") == 0u);
+  CHECK(manifests.front().workload_manifest_path !=
+        "tools/bench/generation_workloads/" +
+          std::filesystem::path(manifests.front().workload_manifest_path).filename().string());
   CHECK(std::any_of(manifests.begin(), manifests.end(), [](const auto & manifest) {
     return manifest.id == "qwen3_single_user_hello_max_tokens_1_v1";
   }));

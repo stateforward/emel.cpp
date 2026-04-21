@@ -42,7 +42,9 @@ def embedding_variants() -> list[dict[str, object]]:
   root = repo_root() / "tools" / "bench" / "embedding_variants"
   variants: list[dict[str, object]] = []
   seen_ids: set[str] = set()
-  for path in sorted(root.glob("*.json")):
+  for path in sorted(root.rglob("*.json")):
+    if path.parent == root:
+      raise ValueError(f"embedding variant must live in an isolation subdirectory: {path}")
     payload = json.loads(path.read_text(encoding="utf-8"))
     if payload.get("schema") != VARIANT_SCHEMA:
       raise ValueError(f"invalid embedding variant schema: {path}")

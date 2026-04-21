@@ -198,7 +198,7 @@ void make_executable(const std::filesystem::path & path) {
 TEST_CASE("embedding compare computes parity metrics from canonical records") {
   const std::filesystem::path tmp_dir =
     std::filesystem::temp_directory_path() / "emel-embedding-compare-tests" / "parity";
-  std::filesystem::create_directories(tmp_dir);
+  std::filesystem::create_directories(tmp_dir / "te75m" / "text");
   const std::filesystem::path emel_vector = tmp_dir / "emel.f32";
   const std::filesystem::path ref_vector = tmp_dir / "ref.f32";
   const std::filesystem::path emel_jsonl = tmp_dir / "emel.jsonl";
@@ -828,7 +828,9 @@ TEST_CASE("embedding variant manifests reject duplicate ids") {
     std::filesystem::temp_directory_path() / "emel-embedding-compare-tests" / "duplicate-variants";
   std::error_code ec = {};
   std::filesystem::remove_all(tmp_dir, ec);
-  std::filesystem::create_directories(tmp_dir);
+  const std::filesystem::path variant_dir = tmp_dir / "te75m" / "text";
+  REQUIRE(std::filesystem::create_directories(variant_dir, ec));
+  REQUIRE(!ec);
 
   const std::string body =
     "{\n"
@@ -842,13 +844,40 @@ TEST_CASE("embedding variant manifests reject duplicate ids") {
     "  \"note\": \"test\",\n"
     "  \"current_publication\": false\n"
     "}\n";
-  write_text_file(tmp_dir / "a.json", body);
-  write_text_file(tmp_dir / "b.json", body);
+  write_text_file(variant_dir / "a.json", body);
+  write_text_file(variant_dir / "b.json", body);
 
   std::vector<emel::bench::embedding_variant_manifest> variants = {};
   std::string error = {};
   CHECK_FALSE(emel::bench::load_embedding_variant_manifests(tmp_dir, variants, &error));
   CHECK(error.find("duplicate manifest id") != std::string::npos);
+}
+
+TEST_CASE("embedding variant manifests reject flat registry roots") {
+  const std::filesystem::path tmp_dir =
+    std::filesystem::temp_directory_path() / "emel-embedding-compare-tests" / "flat-variants";
+  std::error_code ec = {};
+  std::filesystem::remove_all(tmp_dir, ec);
+  std::filesystem::create_directories(tmp_dir);
+
+  const std::string body =
+    "{\n"
+    "  \"schema\": \"embedding_variant/v1\",\n"
+    "  \"id\": \"flat_variant\",\n"
+    "  \"case_name\": \"embeddings/generator/steady_request/flat\",\n"
+    "  \"compare_group\": \"text/red_square/full_dim\",\n"
+    "  \"modality\": \"text\",\n"
+    "  \"payload_id\": \"red_square_text_v1\",\n"
+    "  \"comparison_mode\": \"parity\",\n"
+    "  \"note\": \"test\",\n"
+    "  \"current_publication\": false\n"
+    "}\n";
+  write_text_file(tmp_dir / "flat.json", body);
+
+  std::vector<emel::bench::embedding_variant_manifest> variants = {};
+  std::string error = {};
+  CHECK_FALSE(emel::bench::load_embedding_variant_manifests(tmp_dir, variants, &error));
+  CHECK(error.find("isolation subdirectory") != std::string::npos);
 }
 
 #if !defined(_WIN32)

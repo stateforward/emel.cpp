@@ -197,7 +197,7 @@ inline bool discover_benchmark_manifest_paths(const std::filesystem::path & dire
     }
     return false;
   }
-  for (const auto & entry : std::filesystem::directory_iterator(directory, ec)) {
+  for (const auto & entry : std::filesystem::recursive_directory_iterator(directory, ec)) {
     if (ec) {
       if (error_out != nullptr) {
         *error_out = "failed to read manifest directory: " + directory.string();
@@ -208,9 +208,24 @@ inline bool discover_benchmark_manifest_paths(const std::filesystem::path & dire
       ec.clear();
       continue;
     }
+    const std::filesystem::path rel = std::filesystem::relative(entry.path(), directory, ec);
+    if (ec) {
+      if (error_out != nullptr) {
+        *error_out = "failed to resolve manifest path: " + entry.path().string();
+      }
+      return false;
+    }
+    if (!rel.has_parent_path()) {
+      if (error_out != nullptr) {
+        *error_out = "manifest must live in an isolation subdirectory: " + entry.path().string();
+      }
+      return false;
+    }
     out.push_back(entry.path());
   }
-  std::sort(out.begin(), out.end());
+  std::sort(out.begin(), out.end(), [](const auto & lhs, const auto & rhs) {
+    return lhs.generic_string() < rhs.generic_string();
+  });
   return true;
 }
 
