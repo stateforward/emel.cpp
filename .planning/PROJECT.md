@@ -15,6 +15,8 @@ before widening API surface or model scope.
 
 ## Current State
 
+Current milestone: `v1.14 Benchmark Variant Organization`
+
 Latest shipped milestone: `v1.13`
 
 Status: `v1.13` shipped on 2026-04-21 and extends the pluggable compare architecture into
@@ -23,8 +25,22 @@ contract, manifest-pinned workload metadata, a maintained `llama_cpp_generation`
 truthful comparable and non-comparable publication, repaired lane isolation, and a no-blocker
 milestone audit with accepted tech debt.
 
-Current planning focus: No active milestone. Start the next milestone with `$gsd-new-milestone`
-when ready.
+Current planning focus: `v1.14` organizes the existing pluggable generation and embedding
+benchmark surfaces so new maintained variants are added through data/registry-owned files instead
+of edits to unrelated runner, compare, or test code.
+
+## Current Milestone: v1.14 Benchmark Variant Organization
+
+**Goal:** Make maintained generation and embedding benchmark variants data/registry-owned so adding
+a new deterministic variant does not require modifying unrelated benchmark code.
+
+**Target features:**
+- Shared benchmark variant registry contract for generation workloads, embedding cases, and
+  reference backend manifests
+- Deterministic generation workload discovery that replaces hard-coded manifest arrays
+- Deterministic embedding benchmark case discovery that replaces code-owned case lists
+- Regression and documentation proof that new benchmark variants can be added without touching
+  unrelated runner or compare code
 
 ## Latest Shipped Milestone: v1.13 Pluggable Generative Parity Bench
 
@@ -189,7 +205,11 @@ truth anchor and without broadening into generic Liquid-family support.
 
 ### Active
 
-No active requirements. The next milestone should create a fresh `.planning/REQUIREMENTS.md`.
+- [ ] Define a shared benchmark variant registry contract with deterministic ordering and
+  hard-fail validation.
+- [ ] Cut generation benchmarks over to manifest discovery so adding a workload is data-only.
+- [ ] Cut embedding benchmarks over to variant discovery so adding an embedding case is data-only.
+- [ ] Prove and document the data-only add path for both benchmark families.
 
 ### Out of Scope
 
@@ -198,8 +218,9 @@ No active requirements. The next milestone should create a fresh `.planning/REQU
 - Public plugin SDK or third-party backend distribution outside the repo
 - Broad new `src/` runtime support added only to satisfy a reference backend
 - Shared model, tokenizer, cache, or runtime objects between the EMEL lane and any reference lane
-- Multimodal or embedding-compare scope changes unrelated to the maintained generative compare
-  lane
+- New model/runtime support added solely to demonstrate the benchmark registry
+- Performance tuning or benchmark-result optimization beyond preserving existing deterministic
+  evidence
 
 ## Context
 
@@ -207,9 +228,8 @@ This remains a brownfield repository with an existing codebase map under `.plann
 The repo stays governed by `AGENTS.md` and `docs/rules/sml.rules.md`. `v1.13` is now the latest
 shipped milestone. The current maintained state includes a repo-owned EMEL compare lane plus
 pluggable embedding and generative reference backends that publish through canonical compare
-contracts without shared runtime state. The next milestone should start from a fresh requirements
-file and decide whether to broaden reference backends, deepen generative coverage, or focus on
-runtime performance.
+contracts without shared runtime state. `v1.14` should reduce the developer surface for adding
+benchmark variants without broadening runtime support or weakening deterministic compare evidence.
 
 ## Constraints
 
@@ -223,11 +243,14 @@ runtime performance.
   benchmark or parity claims never hide apples-to-oranges drift.
 - **Lifecycle**: Start the next milestone with a fresh requirements file instead of mutating the
   shipped `v1.13` ledger.
+- **Developer surface**: Adding a new maintained benchmark variant should be data/registry-owned
+  and should not require modifying unrelated runner, compare, or test enumeration code.
 
 ## Key Decisions
 
 | Decision | Rationale | Outcome |
 |----------|-----------|---------|
+| Organize generation and embedding benchmark variants before adding more variants | The existing pluggable surfaces work, but hard-coded lists and code-owned cases make every new variant touch unrelated code and increase determinism risk | - Pending |
 | Promote the deferred `v1.12` generative follow-on into `v1.13` instead of inventing a separate tool family | The shipped embedding compare architecture already proves the lane-isolated pluggable pattern; the next milestone should reuse it for generation with a narrow reproducibility contract | ✓ Shipped |
 | Treat generative comparability drift as explicit contract data, not an implicit failure mode | Cross-engine generation can diverge because of formatter, tokenization, or sampling differences, so the workflow must publish why two runs are or are not comparable | ✓ Shipped |
 | Keep the new parity/benchmark reference architecture pluggable but lane-isolated | The user wants easy comparison against different inference engines without letting reference runtimes leak into the EMEL lane | ✓ Shipped |
@@ -271,4 +294,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-04-21 after shipping milestone v1.13*
+*Last updated: 2026-04-21 after starting milestone v1.14*

@@ -1,17 +1,17 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.13
-milestone_name: Pluggable Generative Parity Bench
-status: completed
-stopped_at: completed and archived v1.13 pluggable generative parity bench
-last_updated: "2026-04-21T05:45:44.083Z"
+milestone: v1.14
+milestone_name: Benchmark Variant Organization
+status: ready_for_phase_planning
+stopped_at: started v1.14 benchmark variant organization
+last_updated: "2026-04-21T09:36:00-05:00"
 last_activity: 2026-04-21
 progress:
-  total_phases: 8
-  completed_phases: 8
-  total_plans: 8
-  completed_plans: 8
-  percent: 100
+  total_phases: 4
+  completed_phases: 0
+  total_plans: 4
+  completed_plans: 0
+  percent: 0
 ---
 
 # Project State
@@ -22,17 +22,16 @@ See: .planning/PROJECT.md (updated 2026-04-21)
 
 **Core value:** Prove real end-to-end behavior with explicit SML orchestration and parity-oriented
 verification before widening API surface or model scope.
-**Current focus:** Planning next milestone.
+**Current focus:** v1.14 Benchmark Variant Organization.
 
 ## Current Position
 
-Phase: none
-Plan: none
-Status: `v1.13` shipped, audited, and archived.
+Phase: Not started (roadmap defined)
+Plan: -
+Status: Milestone requirements and roadmap are defined; ready to start Phase 77.
 Last activity: 2026-04-21
-Closeout accepted 5 non-phase deferred items and recorded them below.
 
-Progress: [##########] 100%
+Progress: [----------] 0%
 
 ## Deferred Items
 
@@ -57,9 +56,9 @@ Items acknowledged and deferred at milestone close on 2026-04-21:
 
 **Current planning shape:**
 
-- Active milestone: none
+- Active milestone: `v1.14 Benchmark Variant Organization`
 - Latest shipped milestone: `v1.13`
-- Next action: `$gsd-new-milestone`
+- Next action: `$gsd-discuss-phase 77`
 - Current blocker: none
 
 ## Accumulated Context
@@ -89,6 +88,12 @@ Recent decisions affecting current work:
 
 - Phase `73` added a closeout-proof regression that runs the operator-facing generation compare
   wrapper end to end on the maintained LFM2 workload manifest and reran `./scripts/quality_gates.sh`.
+
+- Milestone `v1.14` starts from the observation that both generation and embedding compare
+  workflows are modular, but adding new maintained variants still touches too much unrelated code.
+
+- `v1.14` should make generation workloads and embedding benchmark cases data/registry-owned with
+  deterministic discovery, validation, and proof that variant additions stay local.
 
 - The new generation compare workflow must record prompt, formatter, seed, sampling, and stop
   metadata explicitly so cross-engine results remain reproducible and truthful.
