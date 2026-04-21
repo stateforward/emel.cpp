@@ -37,6 +37,7 @@ def parse_args() -> argparse.Namespace:
   parser.add_argument("--emel-input", type=Path)
   parser.add_argument("--reference-input", type=Path)
   parser.add_argument("--case-filter", default="")
+  parser.add_argument("--variant-id", default="")
   return parser.parse_args()
 
 
@@ -377,8 +378,9 @@ def main() -> int:
   env_updates = {
     "EMEL_EMBEDDING_BENCH_FORMAT": "jsonl",
   }
-  if args.case_filter:
-    env_updates["EMEL_BENCH_CASE_FILTER"] = args.case_filter
+  selected_variant = args.variant_id or args.case_filter
+  if selected_variant:
+    env_updates["EMEL_BENCH_CASE_FILTER"] = selected_variant
 
   if args.emel_input is None:
     emel_vector_dir = args.output_dir / "vectors" / "emel"

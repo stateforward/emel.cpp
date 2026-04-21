@@ -3,6 +3,18 @@
 These manifests pin the maintained generation benchmark workloads that feed the shared
 `generation_compare/v1` output contract.
 
+Generation workloads are discovered deterministically from every `*.json` file in this directory.
+Ordinary workload additions should not edit `tools/bench/generation_bench.cpp`,
+`tools/bench/generation_compare.py`, or benchmark test enumeration code.
+
+To add a workload:
+
+1. Add or reuse a prompt fixture in `tools/bench/generation_prompts/`.
+2. Add one workload manifest in this directory with a stable `id`, `case_name`, and
+   `compare_group`.
+3. Use `--workload-id <id>` to run only that workload through
+   `scripts/bench_generation_compare.sh`.
+
 ## Contract
 
 - `schema`: workload manifest schema version

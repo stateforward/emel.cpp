@@ -13,6 +13,7 @@
 #include <doctest/doctest.h>
 
 #include "embedding_generator_bench_helpers.hpp"
+#include "embedding_variant_manifest.hpp"
 
 #if !defined(_WIN32)
 #include <csignal>
@@ -809,6 +810,47 @@ TEST_CASE("embedding generator sample capture recomputes checksum after warmup")
   CHECK(anchor_output_captured);
 }
 
+TEST_CASE("embedding variant manifests are discovered deterministically") {
+  std::vector<emel::bench::embedding_variant_manifest> variants = {};
+  std::string error = {};
+  CHECK(emel::bench::load_embedding_variant_manifests(
+      repo_root() / "tools" / "bench" / "embedding_variants", variants, &error));
+  CHECK(error.empty());
+  REQUIRE(variants.size() == 3u);
+  CHECK(variants[0].id == "te75m_audio_pure_tone_440hz_full_dim");
+  CHECK(variants[1].id == "te75m_image_red_square_full_dim");
+  CHECK(variants[2].id == "te75m_text_red_square_full_dim");
+  CHECK(variants[2].compare_group == "text/red_square/full_dim");
+}
+
+TEST_CASE("embedding variant manifests reject duplicate ids") {
+  const std::filesystem::path tmp_dir =
+    std::filesystem::temp_directory_path() / "emel-embedding-compare-tests" / "duplicate-variants";
+  std::error_code ec = {};
+  std::filesystem::remove_all(tmp_dir, ec);
+  std::filesystem::create_directories(tmp_dir);
+
+  const std::string body =
+    "{\n"
+    "  \"schema\": \"embedding_variant/v1\",\n"
+    "  \"id\": \"duplicate_variant\",\n"
+    "  \"case_name\": \"embeddings/generator/steady_request/duplicate\",\n"
+    "  \"compare_group\": \"text/red_square/full_dim\",\n"
+    "  \"modality\": \"text\",\n"
+    "  \"payload_id\": \"red_square_text_v1\",\n"
+    "  \"comparison_mode\": \"parity\",\n"
+    "  \"note\": \"test\",\n"
+    "  \"current_publication\": false\n"
+    "}\n";
+  write_text_file(tmp_dir / "a.json", body);
+  write_text_file(tmp_dir / "b.json", body);
+
+  std::vector<emel::bench::embedding_variant_manifest> variants = {};
+  std::string error = {};
+  CHECK_FALSE(emel::bench::load_embedding_variant_manifests(tmp_dir, variants, &error));
+  CHECK(error.find("duplicate manifest id") != std::string::npos);
+}
+
 #if !defined(_WIN32)
 TEST_CASE("run_command_capture reports signal termination deterministically") {
   const std::filesystem::path tmp_dir =
@@ -948,4 +990,38 @@ TEST_CASE("python golden backend emits canonical compare records") {
   CHECK(capture.stdout_text.find("\"compare_group\": \"audio/pure_tone_440hz/full_dim\"") !=
         std::string::npos);
   CHECK(std::filesystem::exists(result_dir));
+}
+
+TEST_CASE("python golden backend filters by embedding variant id") {
+  const std::filesystem::path tmp_dir =
+    std::filesystem::temp_directory_path() / "emel-embedding-compare-tests" /
+    "python-goldens-variant-filter";
+  std::filesystem::create_directories(tmp_dir);
+  const std::filesystem::path stdout_path = tmp_dir / "stdout.txt";
+  const std::filesystem::path stderr_path = tmp_dir / "stderr.txt";
+
+  std::string command;
+#if defined(_WIN32)
+  command = set_env_windows("EMEL_EMBEDDING_BENCH_FORMAT", "jsonl") + " && ";
+  command += set_env_windows("EMEL_BENCH_CASE_FILTER", "te75m_text_red_square_full_dim") + " && ";
+  command += "python3 " + quote_arg_windows(embedding_reference_python_path().string());
+  command += " --backend te75m_goldens > " + quote_arg_windows(stdout_path.string());
+  command += " 2> " + quote_arg_windows(stderr_path.string());
+#else
+  command = "EMEL_EMBEDDING_BENCH_FORMAT=jsonl ";
+  command += "EMEL_BENCH_CASE_FILTER=te75m_text_red_square_full_dim ";
+  command += "python3 " + quote_arg_posix(embedding_reference_python_path().string());
+  command += " --backend te75m_goldens > " + quote_arg_posix(stdout_path.string());
+  command += " 2> " + quote_arg_posix(stderr_path.string());
+#endif
+  const process_capture capture = run_command_capture(command, stdout_path, stderr_path);
+
+  CHECK(capture.exit_code == 0);
+  CHECK(capture.stderr_text.empty());
+  CHECK(capture.stdout_text.find("\"compare_group\": \"text/red_square/full_dim\"") !=
+        std::string::npos);
+  CHECK(capture.stdout_text.find("\"compare_group\": \"image/red_square/full_dim\"") ==
+        std::string::npos);
+  CHECK(capture.stdout_text.find("\"compare_group\": \"audio/pure_tone_440hz/full_dim\"") ==
+        std::string::npos);
 }

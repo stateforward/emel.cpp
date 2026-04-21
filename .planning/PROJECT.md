@@ -15,34 +15,29 @@ before widening API surface or model scope.
 
 ## Current State
 
-Current milestone: `v1.14 Benchmark Variant Organization`
+Current milestone: none
 
-Latest shipped milestone: `v1.13`
+Latest shipped milestone: `v1.14`
 
-Status: `v1.13` shipped on 2026-04-21 and extends the pluggable compare architecture into
-maintained generative workloads. The shipped surface includes one canonical `generation_compare/v1`
-contract, manifest-pinned workload metadata, a maintained `llama_cpp_generation` reference lane,
-truthful comparable and non-comparable publication, repaired lane isolation, and a no-blocker
-milestone audit with accepted tech debt.
+Status: `v1.14` shipped on 2026-04-21 and organizes maintained generation and embedding benchmark
+variants behind registry/data-owned discovery. The shipped surface includes shared deterministic
+manifest discovery, generation workload directory loading, embedding variant manifests, aligned
+`--workload-id` / `--variant-id` selection, and a passing milestone audit.
 
-Current planning focus: `v1.14` organizes the existing pluggable generation and embedding
-benchmark surfaces so new maintained variants are added through data/registry-owned files instead
-of edits to unrelated runner, compare, or test code.
+Current planning focus: define the next milestone with a fresh requirements set.
 
-## Current Milestone: v1.14 Benchmark Variant Organization
+## Latest Shipped Milestone: v1.14 Benchmark Variant Organization
 
-**Goal:** Make maintained generation and embedding benchmark variants data/registry-owned so adding
-a new deterministic variant does not require modifying unrelated benchmark code.
+**Shipped:** 2026-04-21
 
-**Target features:**
-- Shared benchmark variant registry contract for generation workloads, embedding cases, and
-  reference backend manifests
-- Deterministic generation workload discovery that replaces hard-coded manifest arrays
-- Deterministic embedding benchmark case discovery that replaces code-owned case lists
-- Regression and documentation proof that new benchmark variants can be added without touching
-  unrelated runner or compare code
+**Delivered:**
+- Shared benchmark manifest discovery and duplicate-ID validation helpers
+- Deterministic generation workload discovery from checked-in manifests
+- Deterministic embedding variant discovery from checked-in manifests
+- Aligned operator selectors for generation workload IDs and embedding variant IDs
+- Documentation and focused regressions proving ordinary variant additions stay data-only
 
-## Latest Shipped Milestone: v1.13 Pluggable Generative Parity Bench
+## Previous Shipped Milestone: v1.13 Pluggable Generative Parity Bench
 
 **Shipped:** 2026-04-21
 
@@ -202,14 +197,17 @@ truth anchor and without broadening into generic Liquid-family support.
   compare slice.
 - ✓ v1.13 repaired EMEL/reference JSONL lane isolation, added real selected single-lane
   non-comparable publication, and backfilled requirement/Nyquist evidence for a no-blocker audit.
+- ✓ v1.14 added a shared benchmark variant registry contract with deterministic ordering and
+  hard-fail duplicate-ID validation.
+- ✓ v1.14 cut generation benchmarks over to manifest discovery so maintained workload additions
+  are data-owned.
+- ✓ v1.14 cut embedding benchmarks over to variant discovery so maintained embedding cases are
+  data-owned across EMEL and Python-golden lanes.
+- ✓ v1.14 proved and documented the ordinary data-only add path for both benchmark families.
 
 ### Active
 
-- [ ] Define a shared benchmark variant registry contract with deterministic ordering and
-  hard-fail validation.
-- [ ] Cut generation benchmarks over to manifest discovery so adding a workload is data-only.
-- [ ] Cut embedding benchmarks over to variant discovery so adding an embedding case is data-only.
-- [ ] Prove and document the data-only add path for both benchmark families.
+- [ ] Define the next milestone requirements.
 
 ### Out of Scope
 
@@ -225,11 +223,11 @@ truth anchor and without broadening into generic Liquid-family support.
 ## Context
 
 This remains a brownfield repository with an existing codebase map under `.planning/codebase/`.
-The repo stays governed by `AGENTS.md` and `docs/rules/sml.rules.md`. `v1.13` is now the latest
-shipped milestone. The current maintained state includes a repo-owned EMEL compare lane plus
+The repo stays governed by `AGENTS.md` and `docs/rules/sml.rules.md`. `v1.14` is now the latest
+shipped milestone. The current maintained state includes repo-owned EMEL compare lanes plus
 pluggable embedding and generative reference backends that publish through canonical compare
-contracts without shared runtime state. `v1.14` should reduce the developer surface for adding
-benchmark variants without broadening runtime support or weakening deterministic compare evidence.
+contracts without shared runtime state, with maintained benchmark variants discovered through
+data/registry-owned manifests.
 
 ## Constraints
 
@@ -250,7 +248,7 @@ benchmark variants without broadening runtime support or weakening deterministic
 
 | Decision | Rationale | Outcome |
 |----------|-----------|---------|
-| Organize generation and embedding benchmark variants before adding more variants | The existing pluggable surfaces work, but hard-coded lists and code-owned cases make every new variant touch unrelated code and increase determinism risk | - Pending |
+| Organize generation and embedding benchmark variants before adding more variants | The existing pluggable surfaces work, but hard-coded lists and code-owned cases make every new variant touch unrelated code and increase determinism risk | ✓ Shipped |
 | Promote the deferred `v1.12` generative follow-on into `v1.13` instead of inventing a separate tool family | The shipped embedding compare architecture already proves the lane-isolated pluggable pattern; the next milestone should reuse it for generation with a narrow reproducibility contract | ✓ Shipped |
 | Treat generative comparability drift as explicit contract data, not an implicit failure mode | Cross-engine generation can diverge because of formatter, tokenization, or sampling differences, so the workflow must publish why two runs are or are not comparable | ✓ Shipped |
 | Keep the new parity/benchmark reference architecture pluggable but lane-isolated | The user wants easy comparison against different inference engines without letting reference runtimes leak into the EMEL lane | ✓ Shipped |

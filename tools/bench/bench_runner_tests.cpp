@@ -1,10 +1,12 @@
 #define DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN
 
+#include <algorithm>
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <string>
+#include <vector>
 
 #include <doctest/doctest.h>
 
@@ -323,4 +325,17 @@ TEST_CASE("generation prompt fixture parser ignores quoted key names inside text
   CHECK(error.empty());
   CHECK(fixture.text == "literal marker \"prompt_id\" before metadata");
   CHECK(fixture.prompt_id == "single_user:quoted_key");
+}
+
+TEST_CASE("generation workload manifests are discovered deterministically") {
+  std::vector<emel::bench::generation_workload_manifest> manifests = {};
+  std::string error = {};
+  CHECK(emel::bench::load_generation_workload_manifests(repo_root(), manifests, &error));
+  CHECK(error.empty());
+  CHECK(manifests.size() >= 13u);
+  REQUIRE(!manifests.empty());
+  CHECK(manifests.front().workload_manifest_path.find("tools/bench/generation_workloads/") == 0u);
+  CHECK(std::any_of(manifests.begin(), manifests.end(), [](const auto & manifest) {
+    return manifest.id == "qwen3_single_user_hello_max_tokens_1_v1";
+  }));
 }

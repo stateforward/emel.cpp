@@ -18,6 +18,7 @@ SCHEMA = "embedding_compare/v1"
 FORMAT_ENV = "EMEL_EMBEDDING_BENCH_FORMAT"
 RESULT_DIR_ENV = "EMEL_EMBEDDING_RESULT_DIR"
 CASE_FILTER_ENV = "EMEL_BENCH_CASE_FILTER"
+VARIANT_SCHEMA = "embedding_variant/v1"
 
 
 def repo_root() -> Path:
@@ -32,9 +33,38 @@ def emit_jsonl() -> bool:
   return os.environ.get(FORMAT_ENV, "") == "jsonl"
 
 
-def case_enabled(case_name: str) -> bool:
+def case_enabled(case_name: str, *aliases: str) -> bool:
   case_filter = os.environ.get(CASE_FILTER_ENV, "")
-  return not case_filter or case_filter in case_name
+  return not case_filter or any(case_filter in candidate for candidate in (case_name, *aliases))
+
+
+def embedding_variants() -> list[dict[str, object]]:
+  root = repo_root() / "tools" / "bench" / "embedding_variants"
+  variants: list[dict[str, object]] = []
+  seen_ids: set[str] = set()
+  for path in sorted(root.glob("*.json")):
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if payload.get("schema") != VARIANT_SCHEMA:
+      raise ValueError(f"invalid embedding variant schema: {path}")
+    variant_id = str(payload.get("id", ""))
+    if not variant_id:
+      raise ValueError(f"missing embedding variant id: {path}")
+    if variant_id in seen_ids:
+      raise ValueError(f"duplicate embedding variant id: {variant_id}")
+    seen_ids.add(variant_id)
+    variants.append(payload)
+  return variants
+
+
+def golden_fixture_for_payload(payload_id: str, root: Path) -> Path:
+  mapping = {
+    "red_square_text_v1": root / "red-square.text.1280.txt",
+    "red_square_image_v1": root / "red-square.image.1280.txt",
+    "pure_tone_440hz_audio_v1": root / "pure-tone-440hz.audio.1280.txt",
+  }
+  if payload_id not in mapping:
+    raise ValueError(f"unsupported embedding variant payload: {payload_id}")
+  return mapping[payload_id]
 
 
 def sanitize_name(name: str) -> str:
@@ -194,29 +224,14 @@ def emit_records(records: list[dict[str, object]]) -> int:
 
 def te75m_goldens_records() -> list[dict[str, object]]:
   root = fixture_root()
-  mapping = [
-    (
-      "reference/python/steady_request/te75m_goldens_text_red_square_full_dim",
-      "text/red_square/full_dim",
-      "text",
-      root / "red-square.text.1280.txt",
-    ),
-    (
-      "reference/python/steady_request/te75m_goldens_image_red_square_full_dim",
-      "image/red_square/full_dim",
-      "image",
-      root / "red-square.image.1280.txt",
-    ),
-    (
-      "reference/python/steady_request/te75m_goldens_audio_pure_tone_440hz_full_dim",
-      "audio/pure_tone_440hz/full_dim",
-      "audio",
-      root / "pure-tone-440hz.audio.1280.txt",
-    ),
-  ]
   records: list[dict[str, object]] = []
-  for case_name, compare_group, modality, path in mapping:
-    if not case_enabled(case_name):
+  for variant in embedding_variants():
+    variant_id = str(variant.get("id", ""))
+    case_name = f"reference/python/steady_request/te75m_goldens_{variant_id}"
+    compare_group = str(variant.get("compare_group", ""))
+    modality = str(variant.get("modality", ""))
+    path = golden_fixture_for_payload(str(variant.get("payload_id", "")), root)
+    if not case_enabled(case_name, variant_id, compare_group, modality):
       continue
     if not path.exists():
       records.append(error_record(
@@ -278,29 +293,14 @@ def te75m_live_records() -> list[dict[str, object]]:
       note="live_python_backend_execution_failed",
     )]
 
-  mapping = [
-    (
-      "reference/python/steady_request/te75m_live_text_red_square_full_dim",
-      "text/red_square/full_dim",
-      "text",
-      temp_root / "red-square.text.1280.txt",
-    ),
-    (
-      "reference/python/steady_request/te75m_live_image_red_square_full_dim",
-      "image/red_square/full_dim",
-      "image",
-      temp_root / "red-square.image.1280.txt",
-    ),
-    (
-      "reference/python/steady_request/te75m_live_audio_pure_tone_440hz_full_dim",
-      "audio/pure_tone_440hz/full_dim",
-      "audio",
-      temp_root / "pure-tone-440hz.audio.1280.txt",
-    ),
-  ]
   records: list[dict[str, object]] = []
-  for case_name, compare_group, modality, path in mapping:
-    if not case_enabled(case_name):
+  for variant in embedding_variants():
+    variant_id = str(variant.get("id", ""))
+    case_name = f"reference/python/steady_request/te75m_live_{variant_id}"
+    compare_group = str(variant.get("compare_group", ""))
+    modality = str(variant.get("modality", ""))
+    path = golden_fixture_for_payload(str(variant.get("payload_id", "")), temp_root)
+    if not case_enabled(case_name, variant_id, compare_group, modality):
       continue
     if not path.exists():
       records.append(error_record(

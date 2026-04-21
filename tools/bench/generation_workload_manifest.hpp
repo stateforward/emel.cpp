@@ -1,5 +1,7 @@
 #pragma once
 
+#include "benchmark_variant_registry.hpp"
+
 #include <cctype>
 #include <cstdint>
 #include <cstdlib>
@@ -7,6 +9,8 @@
 #include <fstream>
 #include <string>
 #include <string_view>
+#include <utility>
+#include <vector>
 
 namespace emel::bench {
 
@@ -346,6 +350,35 @@ inline bool load_generation_workload_manifest(const std::filesystem::path & repo
     out.workload_manifest_path = manifest_path.string();
   }
   return true;
+}
+
+inline bool load_generation_workload_manifests(const std::filesystem::path & repo_root,
+                                               const std::filesystem::path & directory,
+                                               std::vector<generation_workload_manifest> & out,
+                                               std::string * error_out = nullptr) {
+  out.clear();
+  std::vector<std::filesystem::path> paths = {};
+  if (!discover_benchmark_manifest_paths(directory, paths, error_out)) {
+    return false;
+  }
+
+  std::vector<std::pair<std::string, std::filesystem::path>> ids = {};
+  for (const auto & path : paths) {
+    generation_workload_manifest manifest = {};
+    if (!load_generation_workload_manifest(repo_root, path, manifest, error_out)) {
+      return false;
+    }
+    ids.push_back({manifest.id, path});
+    out.push_back(std::move(manifest));
+  }
+  return validate_benchmark_manifest_ids(ids, error_out);
+}
+
+inline bool load_generation_workload_manifests(const std::filesystem::path & repo_root,
+                                               std::vector<generation_workload_manifest> & out,
+                                               std::string * error_out = nullptr) {
+  return load_generation_workload_manifests(
+      repo_root, repo_root / "tools" / "bench" / "generation_workloads", out, error_out);
 }
 
 }  // namespace emel::bench

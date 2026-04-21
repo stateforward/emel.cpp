@@ -1,5 +1,34 @@
 # Project Milestones: EMEL
 
+## v1.14 Benchmark Variant Organization (Shipped: 2026-04-21)
+
+**Phases completed:** 4 phases, 4 plans, 0 tasks
+
+**Delivered:** EMEL benchmark variants for generation and embeddings are now registry/data-owned:
+adding ordinary maintained variants no longer requires editing unrelated runner, compare, or test
+enumeration code.
+
+**Key accomplishments:**
+
+- Added a shared benchmark manifest registry helper with deterministic discovery and duplicate-ID
+  validation.
+
+- Cut generation benchmark workload enumeration over to discovered manifests while preserving
+  workload ID, case-name, and compare-group filters.
+
+- Cut embedding benchmark case identity over to checked-in variant manifests consumed by the EMEL
+  lane and Python-golden reference lane.
+
+- Added operator-facing `--variant-id` selection for embedding compare wrappers, aligned with the
+  existing generation `--workload-id` path.
+
+- Documented data-only generation and embedding add paths, including the files ordinary variant
+  additions must not touch.
+
+**Audit:** Passed with `12/12` requirements satisfied and no blocking gaps.
+
+---
+
 ## v1.13 Pluggable Generative Parity Bench (Shipped: 2026-04-21)
 
 **Phases completed:** 8 phases, 8 plans, 0 tasks
