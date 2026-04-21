@@ -82,12 +82,15 @@ struct process_capture {
   std::string stderr_text = {};
 };
 
-process_capture run_generation_bench_compare_capture() {
+process_capture run_generation_bench_capture(const std::string & mode,
+                                             const bool emit_jsonl = false) {
   const std::filesystem::path tmp_dir =
-      std::filesystem::temp_directory_path() / "emel-bench-runner-tests";
+      std::filesystem::temp_directory_path() / "emel-bench-runner-tests" /
+      (emit_jsonl ? ("jsonl-" + mode) : ("text-" + mode));
   std::filesystem::create_directories(tmp_dir);
   const std::filesystem::path stdout_path = tmp_dir / "stdout.txt";
   const std::filesystem::path stderr_path = tmp_dir / "stderr.txt";
+  const std::filesystem::path output_dir = tmp_dir / "outputs";
 
   std::string command;
 #if defined(_WIN32)
@@ -100,8 +103,14 @@ process_capture run_generation_bench_compare_capture() {
   command += "set EMEL_BENCH_GENERATION_RUNS=1 && ";
   command += "set EMEL_BENCH_GENERATION_WARMUP_ITERS=0 && ";
   command += "set EMEL_BENCH_GENERATION_WARMUP_RUNS=0 && ";
+  if (emit_jsonl) {
+    command += "set EMEL_GENERATION_BENCH_FORMAT=jsonl && ";
+    command += "set \"EMEL_GENERATION_RESULT_DIR=";
+    command += output_dir.string();
+    command += "\" && ";
+  }
   command += quote_arg_windows(bench_runner_binary_path().string());
-  command += " --mode=compare > ";
+  command += " --mode=" + mode + " > ";
   command += quote_arg_windows(stdout_path.string());
   command += " 2> ";
   command += quote_arg_windows(stderr_path.string());
@@ -116,8 +125,12 @@ process_capture run_generation_bench_compare_capture() {
   command += "EMEL_BENCH_GENERATION_RUNS=1 ";
   command += "EMEL_BENCH_GENERATION_WARMUP_ITERS=0 ";
   command += "EMEL_BENCH_GENERATION_WARMUP_RUNS=0 ";
+  if (emit_jsonl) {
+    command += "EMEL_GENERATION_BENCH_FORMAT=jsonl ";
+    command += "EMEL_GENERATION_RESULT_DIR=" + quote_arg_posix(output_dir.string()) + " ";
+  }
   command += quote_arg_posix(bench_runner_binary_path().string());
-  command += " --mode=compare > ";
+  command += " --mode=" + mode + " > ";
   command += quote_arg_posix(stdout_path.string());
   command += " 2> ";
   command += quote_arg_posix(stderr_path.string());
@@ -144,6 +157,10 @@ process_capture run_generation_bench_compare_capture() {
   capture.exit_code = WEXITSTATUS(status);
 #endif
   return capture;
+}
+
+process_capture run_generation_bench_compare_capture() {
+  return run_generation_bench_capture("compare", false);
 }
 
 std::uint64_t parse_named_metric(const std::string & haystack, const std::string & name) {
@@ -213,4 +230,68 @@ TEST_CASE("bench_runner generation compare keeps maintained Qwen and Liquid fixt
   CHECK(binary_size_line.find("status=ok") != std::string::npos);
   CHECK(parse_named_metric(binary_size_line, "emel_bytes") > 0u);
   CHECK(parse_named_metric(binary_size_line, "llama_bytes") > 0u);
+}
+
+TEST_CASE("bench_runner generation jsonl emits manifest-driven workload metadata and explicit comparability") {
+  const process_capture emel_capture = run_generation_bench_capture("emel", true);
+  CHECK(emel_capture.exit_code == 0);
+  CHECK(emel_capture.stderr_text.find("error:") == std::string::npos);
+  CHECK(emel_capture.stdout_text.find("\"schema\":\"generation_compare/v1\"") != std::string::npos);
+  CHECK(emel_capture.stdout_text.find("\"lane\":\"emel\"") != std::string::npos);
+  CHECK(emel_capture.stdout_text.find("\"lane\":\"reference\"") == std::string::npos);
+  CHECK(emel_capture.stdout_text.find("\"backend_id\":\"emel.generator\"") != std::string::npos);
+  CHECK(emel_capture.stdout_text.find("\"backend_id\":\"cpp.reference.llama_cpp\"") ==
+        std::string::npos);
+  CHECK(emel_capture.stdout_text.find("\"workload_id\":\"qwen3_single_user_hello_max_tokens_1_v1\"") !=
+        std::string::npos);
+  CHECK(emel_capture.stdout_text.find(
+            "\"workload_manifest_path\":\"tools/bench/generation_workloads/"
+            "qwen3_single_user_hello_max_tokens_1.json\"") != std::string::npos);
+  CHECK(emel_capture.stdout_text.find("\"prompt_fixture_id\":\"single_user_hello_v1\"") !=
+        std::string::npos);
+  CHECK(emel_capture.stdout_text.find(
+            "\"prompt_fixture_path\":\"tools/bench/generation_prompts/single_user_hello.json\"") !=
+        std::string::npos);
+  CHECK(emel_capture.stdout_text.find("\"prompt_id\":\"single_user:hello\"") != std::string::npos);
+  CHECK(emel_capture.stdout_text.find("\"formatter_mode\":\"chat_template_supported_qwen_v1\"") !=
+        std::string::npos);
+  CHECK(emel_capture.stdout_text.find("\"sampling_id\":\"argmax_v1\"") != std::string::npos);
+  CHECK(emel_capture.stdout_text.find("\"comparable\":true") != std::string::npos);
+  const std::filesystem::path gemma4_fixture_path =
+      repo_root() / "tests" / "models" / "gemma-4-e2b-it-Q8_0.gguf";
+  if (std::filesystem::exists(gemma4_fixture_path)) {
+    CHECK(emel_capture.stdout_text.find("\"comparison_mode\":\"single_lane\"") !=
+          std::string::npos);
+    CHECK(emel_capture.stdout_text.find(
+              "\"note\":\"reference_lane_unavailable_for_maintained_compare_surface\"") !=
+          std::string::npos);
+  }
+  CHECK(emel_capture.stdout_text.find("\"output_path\":\"") != std::string::npos);
+  CHECK(emel_capture.stdout_text.find("ns/op,") == std::string::npos);
+
+  const process_capture reference_capture = run_generation_bench_capture("reference", true);
+  CHECK(reference_capture.exit_code == 0);
+  CHECK(reference_capture.stderr_text.find("error:") == std::string::npos);
+  CHECK(reference_capture.stdout_text.find("\"schema\":\"generation_compare/v1\"") !=
+        std::string::npos);
+  CHECK(reference_capture.stdout_text.find("\"lane\":\"reference\"") != std::string::npos);
+  CHECK(reference_capture.stdout_text.find("\"lane\":\"emel\"") == std::string::npos);
+  CHECK(reference_capture.stdout_text.find("\"backend_id\":\"cpp.reference.llama_cpp\"") !=
+        std::string::npos);
+  CHECK(reference_capture.stdout_text.find("\"backend_id\":\"emel.generator\"") ==
+        std::string::npos);
+  CHECK(reference_capture.stdout_text.find("\"workload_manifest_path\":\"tools/bench/generation_workloads/") !=
+        std::string::npos);
+  const bool saw_supported_reference_formatter =
+      reference_capture.stdout_text.find("\"formatter_mode\":\"chat_template_supported_qwen_v1\"") !=
+          std::string::npos ||
+      reference_capture.stdout_text.find("\"formatter_mode\":\"chat_template_supported_v1\"") !=
+          std::string::npos;
+  CHECK(saw_supported_reference_formatter);
+  CHECK(reference_capture.stdout_text.find("\"comparable\":true") != std::string::npos);
+  CHECK(reference_capture.stdout_text.find("\"comparison_mode\":\"single_lane\"") ==
+        std::string::npos);
+  CHECK(reference_capture.stdout_text.find("\"formatter_contract\":\"") != std::string::npos);
+  CHECK(reference_capture.stdout_text.find("\"output_path\":\"") != std::string::npos);
+  CHECK(reference_capture.stdout_text.find("ns/op,") == std::string::npos);
 }

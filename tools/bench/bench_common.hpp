@@ -25,15 +25,40 @@ struct config {
 
 struct result {
   std::string name;
+  std::string compare_group = {};
+  std::string lane = {};
+  std::string backend_id = {};
+  std::string backend_language = {};
+  std::string workload_id = {};
+  std::string workload_manifest_path = {};
+  std::string comparison_mode = {};
+  std::string model_id = {};
+  std::string fixture_id = {};
+  std::string prompt_fixture_id = {};
+  std::string prompt_fixture_path = {};
+  std::string prompt_id = {};
+  std::string formatter_mode = {};
+  std::string formatter_contract = {};
+  std::string sampling_id = {};
+  std::string stop_id = {};
+  std::int64_t seed = 0;
+  std::uint64_t max_output_tokens = 0;
+  bool comparable = false;
   double ns_per_op = 0.0;
   double prepare_ns_per_op = 0.0;
   double encode_ns_per_op = 0.0;
   double publish_ns_per_op = 0.0;
   std::uint64_t output_tokens = 0;
+  std::uint64_t output_bytes = 0;
   std::uint64_t output_dim = 0;
   std::uint64_t output_checksum = 0;
   std::uint64_t iterations = 0;
   std::size_t runs = 0;
+  std::string output_text = {};
+  std::string output_path = {};
+  std::string note = {};
+  std::string error_kind = {};
+  std::string error_message = {};
 };
 
 struct generation_stage_probe {

@@ -1,5 +1,6 @@
 {
   "id": "liquid_cpp",
+  "surface": "embedding_compare/v1",
   "display_name": "Liquid AI C++ reference baseline",
   "language": "cpp",
   "description": "Existing C++/mtmd embedding reference runner for the approved external baseline matrix.",

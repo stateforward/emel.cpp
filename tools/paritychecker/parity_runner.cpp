@@ -9796,11 +9796,11 @@ void dump_scalar_attention_debug(const generation_load_state & state,
     for (int32_t layer = 0; layer < 2; ++layer) {
       const auto & ref_layer = state.reference.model->layers[static_cast<size_t>(layer)];
       std::fprintf(stdout,
-                   "generation_debug.reference.layer%d.transforms: bo=%d wo_s=%d "
+                   "generation_debug.reference.layer%d.transforms: wo_b=%d wo_s=%d "
                    "ffn_gate_b=%d ffn_up_b=%d ffn_down_b=%d "
                    "ffn_gate_s=%d ffn_up_s=%d ffn_down_s=%d\n",
                    layer,
-                   ref_layer.bo != nullptr ? 1 : 0,
+                   ref_layer.wo_b != nullptr ? 1 : 0,
                    ref_layer.wo_s != nullptr ? 1 : 0,
                    ref_layer.ffn_gate_b != nullptr ? 1 : 0,
                    ref_layer.ffn_up_b != nullptr ? 1 : 0,

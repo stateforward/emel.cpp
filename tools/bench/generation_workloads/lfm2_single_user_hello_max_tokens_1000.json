@@ -1,0 +1,21 @@
+{
+  "schema": "generation_workload/v1",
+  "id": "lfm2_single_user_hello_max_tokens_1000_v1",
+  "case_name": "generation/preloaded_request/lfm2_5_1_2b_thinking_q4_k_m_prompt_hello_max_tokens_1000",
+  "compare_group": "generation/preloaded_request/lfm2_5_1_2b_thinking_q4_k_m_prompt_hello_max_tokens_1000",
+  "fixture_name": "LFM2.5-1.2B-Thinking-Q4_K_M.gguf",
+  "fixture_rel": "tests/models/LFM2.5-1.2B-Thinking-Q4_K_M.gguf",
+  "fixture_slug": "lfm2_5_1_2b_thinking_q4_k_m",
+  "prompt_fixture_id": "single_user_hello_v1",
+  "prompt_fixture_path": "tools/bench/generation_prompts/single_user_hello.json",
+  "formatter_mode": "chat_template_supported_v1",
+  "formatter_contract": "source=tokenizer.chat_template support=supported_contract shape=structured_chat_messages_v1 roles=system,user tools=none add_generation_prompt=true enable_thinking=false keep_past_thinking=false bos=<|startoftext|>",
+  "sampling_id": "argmax_v1",
+  "stop_id": "model_stop_or_max_tokens_v1",
+  "seed": 0,
+  "max_output_tokens": 1000,
+  "comparable": true,
+  "comparison_mode": "parity",
+  "comparability_note": "matched_emel_and_reference_workload",
+  "current_publication": false
+}

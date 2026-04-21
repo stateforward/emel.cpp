@@ -1,0 +1,7 @@
+{
+  "schema": "generation_prompt_fixture/v1",
+  "id": "single_user_hello_v1",
+  "shape": "single_user_text_v1",
+  "text": "hello",
+  "prompt_id": "single_user:hello"
+}

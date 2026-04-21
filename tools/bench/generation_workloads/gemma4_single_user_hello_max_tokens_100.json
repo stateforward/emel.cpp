@@ -1,0 +1,21 @@
+{
+  "schema": "generation_workload/v1",
+  "id": "gemma4_single_user_hello_max_tokens_100_v1",
+  "case_name": "generation/preloaded_request/gemma_4_e2b_it_q8_0_prompt_hello_max_tokens_100",
+  "compare_group": "generation/preloaded_request/gemma_4_e2b_it_q8_0_prompt_hello_max_tokens_100",
+  "fixture_name": "gemma-4-e2b-it-Q8_0.gguf",
+  "fixture_rel": "tests/models/gemma-4-e2b-it-Q8_0.gguf",
+  "fixture_slug": "gemma_4_e2b_it_q8_0",
+  "prompt_fixture_id": "single_user_hello_v1",
+  "prompt_fixture_path": "tools/bench/generation_prompts/single_user_hello.json",
+  "formatter_mode": "chat_template_supported_gemma4_v1",
+  "formatter_contract": "source=tokenizer.chat_template support=supported_contract shape=structured_chat_messages_v1 roles=system,user tools=none media=none add_generation_prompt=true enable_thinking=false assistant_history=none bos=<bos>",
+  "sampling_id": "argmax_v1",
+  "stop_id": "model_stop_or_max_tokens_v1",
+  "seed": 0,
+  "max_output_tokens": 100,
+  "comparable": false,
+  "comparison_mode": "single_lane",
+  "comparability_note": "reference_lane_unavailable_for_maintained_compare_surface",
+  "current_publication": false
+}

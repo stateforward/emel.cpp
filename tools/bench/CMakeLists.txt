@@ -268,6 +268,28 @@ add_test(
   COMMAND embedding_compare_tests
 )
 
+add_executable(generation_compare_tests
+  ${CMAKE_CURRENT_SOURCE_DIR}/generation_compare_tests.cpp
+)
+
+add_dependencies(generation_compare_tests bench_runner)
+
+target_include_directories(generation_compare_tests
+  PRIVATE
+    ${DOCTEST_INCLUDE_DIR}
+)
+
+target_compile_definitions(generation_compare_tests
+  PRIVATE
+    BENCH_REPO_ROOT=\"${EMEL_ROOT}\"
+    GENERATION_COMPARE_SCRIPT_PATH=\"${CMAKE_CURRENT_SOURCE_DIR}/generation_compare.py\"
+)
+
+add_test(
+  NAME generation_compare_tests
+  COMMAND generation_compare_tests
+)
+
 add_executable(gbnf_bench_runner
   ${CMAKE_CURRENT_SOURCE_DIR}/gbnf/rule_parser_bench.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/gbnf/bench_main.cpp

@@ -51,12 +51,9 @@ the stored compare snapshot also records `# benchmark_config: ...` and the resol
 so any publication-time env overrides and fetched `llama.cpp` revision are explicit in the artifact
 instead of staying implicit in local shell state.
 
-## canonical generation compare workflow
+## canonical generation benchmark workflow
 
-the canonical generation benchmark runs through the same compare surface. do not use a separate
-generation-only script path.
-
-run the normal compare workflow:
+the benchmark ratio publication path still runs through the existing shared benchmark surface:
 
 ```bash
 EMEL_BENCH_ITERS=1 \
@@ -85,11 +82,78 @@ the current maintained evidence workload is fixed to the checked-in Liquid
 `LFM2.5-1.2B-Thinking-Q4_K_M.gguf` fixture, prompt `hello`, and `max_tokens=1`. fixture loading
 and one-time setup stay outside the timed loop; this case measures preloaded request latency.
 
+the maintained generation workloads are now pinned by checked-in prompt/workload manifests under:
+
+- `tools/bench/generation_prompts/`
+- `tools/bench/generation_workloads/`
+
+these files are the source of truth for prompt identity, formatter mode, sampling, stop
+condition, seed, token budget, and whether a workload is actually comparable across lanes.
+
 the generation compare suite is additive across maintained supported fixtures. the current set
 includes both:
 
 - `generation/preloaded_request/qwen3_0_6b_q8_0_prompt_hello_max_tokens_1`
 - `generation/preloaded_request/lfm2_5_1_2b_thinking_q4_k_m_prompt_hello_max_tokens_1`
+
+## operator-facing generation compare workflow
+
+for reproducible compare artifacts instead of the benchmark ratio row, use:
+
+```bash
+EMEL_BENCH_GENERATION_ITERS=1 \
+EMEL_BENCH_GENERATION_RUNS=1 \
+EMEL_BENCH_GENERATION_WARMUP_ITERS=0 \
+EMEL_BENCH_GENERATION_WARMUP_RUNS=0 \
+scripts/bench_generation_compare.sh \
+  --reference-backend llama_cpp_generation \
+  --workload-id lfm2_single_user_hello_max_tokens_1_v1
+```
+
+the wrapper publishes:
+
+- `raw/emel.jsonl`
+- `raw/reference.jsonl`
+- `compare_summary.json`
+- dumped generation outputs under `outputs/emel/` and `outputs/reference/`
+
+use `--workload-id` when you want to pin the workflow to one manifest-selected compare workload for
+fast local validation or CI proof.
+
+if the selected workload manifest is marked `comparison_mode="single_lane"` or
+`comparable=false`, the wrapper runs the EMEL lane and intentionally leaves `raw/reference.jsonl`
+empty. the summary publishes the group as `non_comparable` with reason
+`single_lane_emel_workload`; that verdict means the selected workload is a maintained single-lane
+publication, not a failed reference backend.
+
+the selected backend is declared by the manifest under `tools/bench/reference_backends/`. the
+current maintained generation backend is:
+
+- `llama_cpp_generation`
+
+its wrapper keeps backend-specific build/run setup in:
+
+- `scripts/bench_generation_reference_llama_cpp.sh`
+
+## reading the generation compare summary
+
+`compare_summary.json` uses `generation_compare_summary/v1` and publishes one group per compare
+workload. each group includes workload identity, fixture identity, prompt identity, formatter
+contract, sampling contract, stop contract, seed, token budget, raw lane records, and one explicit
+verdict:
+
+- `exact_match`: lane outputs matched exactly for the comparable workload
+- `bounded_drift`: both lanes ran the comparable workload successfully, but the published text
+  differed; the summary records `shared_prefix_bytes`, `shared_prefix_fraction`,
+  `output_tokens_delta`, and `output_bytes_delta`
+- `non_comparable`: the workload was intentionally single-lane or otherwise apples-to-oranges
+- `missing`: one lane failed to produce a required comparable record
+- `error`: the lane emitted an explicit error record, such as a backend build/run failure
+
+`non_comparable` groups are truthful publication output, not workflow corruption. the current
+maintained examples are the Gemma4 single-lane workload family and the LFM2 single-lane wrapper
+proof workload, which stay available for the EMEL lane but are published as non-comparable instead
+of being presented as parity.
 
 ## phase 13 flash-evidence publication workflow
 
@@ -131,7 +195,7 @@ stop and obtain explicit user approval before running `scripts/bench.sh --compar
 checking in any new snapshot artifact under `snapshots/bench/`. do not treat local benchmark runs
 as permission to refresh checked-in snapshot or generated benchmark evidence files.
 
-## reading the generation compare row
+## reading the generation benchmark compare row
 
 compare mode prints one row per matched case:
 
@@ -143,6 +207,17 @@ generation/preloaded_request/lfm2_5_1_2b_thinking_q4_k_m_prompt_hello_max_tokens
 - `llama.cpp` is the direct reference time for the same named case.
 - `ratio` is `emel.cpp / llama.cpp`.
 - `ratio > 1.0x` means EMEL is slower for that workload; `ratio < 1.0x` means EMEL is faster.
+
+in JSONL mode, each `generation_compare/v1` record also includes:
+
+- `workload_id` and `workload_manifest_path`
+- `prompt_fixture_id` and `prompt_fixture_path`
+- `formatter_mode` and `formatter_contract`
+- `sampling_id`, `stop_id`, `seed`, and `max_output_tokens`
+- `comparable`
+
+single-lane workloads are marked with `comparison_mode="single_lane"` and a comparability note
+instead of being presented as parity rows.
 
 ## generation-specific local overrides
 

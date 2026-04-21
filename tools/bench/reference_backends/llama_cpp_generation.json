@@ -1,0 +1,15 @@
+{
+  "id": "llama_cpp_generation",
+  "surface": "generation_compare/v1",
+  "display_name": "Maintained llama.cpp C++ generation baseline",
+  "language": "cpp",
+  "description": "Existing maintained C++ generation reference lane exposed as a pluggable backend through bench_runner --mode=reference.",
+  "build_command": [
+    "scripts/bench_generation_reference_llama_cpp.sh",
+    "--build-only"
+  ],
+  "run_command": [
+    "scripts/bench_generation_reference_llama_cpp.sh",
+    "--run-only"
+  ]
+}
