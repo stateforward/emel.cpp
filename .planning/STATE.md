@@ -1,18 +1,16 @@
 ---
 gsd_state_version: 1.0
-milestone: none
-milestone_name: No Active Milestone
-status: ready_for_next_milestone
-stopped_at: completed the reopened `v1.12` archival-proof repair through Phase `68`,
-  restored the milestone to a passing rerun audit, and returned the project to next-milestone
-  readiness
-last_updated: "2026-04-20T14:08:51Z"
-last_activity: 2026-04-20
+milestone: v1.13
+milestone_name: Pluggable Generative Parity Bench
+status: completed
+stopped_at: completed and archived v1.13 pluggable generative parity bench
+last_updated: "2026-04-21T05:45:44.083Z"
+last_activity: 2026-04-21
 progress:
-  total_phases: 7
-  completed_phases: 7
-  total_plans: 7
-  completed_plans: 7
+  total_phases: 8
+  completed_phases: 8
+  total_plans: 8
+  completed_plans: 8
   percent: 100
 ---
 
@@ -20,41 +18,49 @@ progress:
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-04-20)
+See: .planning/PROJECT.md (updated 2026-04-21)
 
 **Core value:** Prove real end-to-end behavior with explicit SML orchestration and parity-oriented
 verification before widening API surface or model scope.
-**Current focus:** No active milestone is defined; the next step is to create a fresh milestone
-scope.
+**Current focus:** Planning next milestone.
 
 ## Current Position
 
-Phase: None
-Plan: Complete
-Status: Milestone `v1.12` is shipped and audit-clean again after the archival-proof repair in
-Phase `68`. The project is ready for the next milestone.
-Last activity: 2026-04-20
-Closeout still uses the rerun milestone audit plus direct ledger verification while the known
-`gsd-tools audit-open` preflight bug remains non-blocking tooling debt.
+Phase: none
+Plan: none
+Status: `v1.13` shipped, audited, and archived.
+Last activity: 2026-04-21
+Closeout accepted 5 non-phase deferred items and recorded them below.
 
 Progress: [##########] 100%
+
+## Deferred Items
+
+Items acknowledged and deferred at milestone close on 2026-04-21:
+
+| Category | Item | Status |
+|----------|------|--------|
+| quick_task | 260401-ejm-add-non-blocking-benchmark-binary-size-c | missing |
+| todo | 2026-04-02-move-eager-quant-prepack-into-generator-initializer.md | pending |
+| todo | 2026-04-02-optimize-lfm2-5-q4-prefill-kernel.md | pending |
+| todo | 2026-04-02-optimize-lfm2-5-q6-prefill-kernel.md | pending |
+| todo | 2026-04-02-reuse-q8-rhs-across-lfm2-5-prefill-matmuls.md | pending |
 
 ## Performance Metrics
 
 **Latest shipped milestone:**
 
-- Milestone: v1.12 Pluggable Reference Parity Bench Architecture
-- Completed phases: `7/7`
-- Completed plans: `7/7`
-- Audit status: `passed` after Phase `68` repaired the archived Phase `67` proof paths
+- Milestone: v1.13 Pluggable Generative Parity Bench
+- Completed phases: `8/8`
+- Completed plans: `8/8`
+- Audit status: `tech_debt` with no blocking gaps
 
 **Current planning shape:**
 
 - Active milestone: none
-- Latest shipped milestone: `v1.12`
-- Next action: Run `$gsd-new-milestone` to define the next shipped scope and recreate
-  `.planning/REQUIREMENTS.md`
-- Current blocker: none for `v1.12`; only the non-blocking `audit-open` tooling bug remains
+- Latest shipped milestone: `v1.13`
+- Next action: `$gsd-new-milestone`
+- Current blocker: none
 
 ## Accumulated Context
 
@@ -62,6 +68,30 @@ Progress: [##########] 100%
 
 Decisions are logged in PROJECT.md Key Decisions table.
 Recent decisions affecting current work:
+
+- `v1.13` promotes the deferred generation-scope follow-on from `v1.12` into the next active
+  milestone, reusing the same lane-isolated pluggable compare architecture instead of inventing a
+  separate tool family.
+
+- Phase `69` established `generation_compare/v1` as the maintained shared JSONL contract for EMEL
+  and C++ reference generation lanes while preserving the text benchmark output path.
+
+- Phase `70` moved maintained generation workload truth into checked-in prompt/workload manifests
+  and added explicit comparability labeling for single-lane workloads.
+
+- Phase `71` put the maintained llama.cpp generation reference lane behind
+  `tools/bench/reference_backends/llama_cpp_generation.json` and
+  `scripts/bench_generation_reference_llama_cpp.sh` without widening `src/`.
+
+- Phase `72` published `scripts/bench_generation_compare.sh` and
+  `generation_compare_summary/v1` verdicts for `exact_match`, `bounded_drift`,
+  `non_comparable`, `missing`, and `error`.
+
+- Phase `73` added a closeout-proof regression that runs the operator-facing generation compare
+  wrapper end to end on the maintained LFM2 workload manifest and reran `./scripts/quality_gates.sh`.
+
+- The new generation compare workflow must record prompt, formatter, seed, sampling, and stop
+  metadata explicitly so cross-engine results remain reproducible and truthful.
 
 - `v1.12` will treat parity and benchmark reference engines as pluggable backends under one
   canonical comparison contract instead of keeping separate Python-only and C++-only tool lanes.
@@ -178,14 +208,34 @@ Recent decisions affecting current work:
 
 ### Roadmap Evolution
 
+- Started milestone `v1.13` on 2026-04-20 with continued numbering, so the new roadmap begins at
+  Phase `69`.
+
+- Completed Phase `69` on 2026-04-20, landing the shared generation compare contract plus repo
+  gate verification and leaving Phase `70` as the next active target.
+
+- Completed Phase `70` on 2026-04-20, landing manifest-driven workload provenance and explicit
+  single-lane comparability truth and leaving Phase `71` as the next active target.
+
+- Completed Phases `71` through `73` on 2026-04-20, landing the manifest-selected maintained
+  llama.cpp generation backend, the operator-facing compare workflow, verdict publication, and
+  closeout-proof regression evidence.
+
+- Completed Phases `74` through `76` on 2026-04-21, repairing JSONL lane isolation, adding real
+  selected single-lane non-comparable publication, and backfilling requirement/Nyquist evidence.
+
+- Archived milestone `v1.13` on 2026-04-21 after a no-blocker audit with accepted tech debt.
+
 - Started milestone `v1.12` on 2026-04-17 with continued numbering, so the new roadmap begins at
   Phase `62`.
 
 - Completed Phases `62` through `65` on 2026-04-17/18, leaving the milestone ready for audit.
 - Completed Phase `66` on 2026-04-18, repairing the maintained multi-record C++ compare
   publication path.
+
 - Completed Phase `67` on 2026-04-18, backfilling the reopened `v1.12` traceability and Nyquist
   evidence.
+
 - `v1.10` remains ready for closeout.
 - `v1.11` reopened at Phase `54` through `56` to close the milestone-audit gaps without deleting
   the shipped Phase `47` through `53` history.

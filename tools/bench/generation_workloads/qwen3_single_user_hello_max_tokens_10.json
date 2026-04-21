@@ -1,0 +1,21 @@
+{
+  "schema": "generation_workload/v1",
+  "id": "qwen3_single_user_hello_max_tokens_10_v1",
+  "case_name": "generation/preloaded_request/qwen3_0_6b_q8_0_prompt_hello_max_tokens_10",
+  "compare_group": "generation/preloaded_request/qwen3_0_6b_q8_0_prompt_hello_max_tokens_10",
+  "fixture_name": "Qwen3-0.6B-Q8_0.gguf",
+  "fixture_rel": "tests/models/Qwen3-0.6B-Q8_0.gguf",
+  "fixture_slug": "qwen3_0_6b_q8_0",
+  "prompt_fixture_id": "single_user_hello_v1",
+  "prompt_fixture_path": "tools/bench/generation_prompts/single_user_hello.json",
+  "formatter_mode": "chat_template_supported_qwen_v1",
+  "formatter_contract": "source=tokenizer.chat_template support=supported_contract shape=structured_chat_messages_v1 roles=system,user,assistant tools=none add_generation_prompt=true enable_thinking=false bos=none",
+  "sampling_id": "argmax_v1",
+  "stop_id": "model_stop_or_max_tokens_v1",
+  "seed": 0,
+  "max_output_tokens": 10,
+  "comparable": true,
+  "comparison_mode": "parity",
+  "comparability_note": "matched_emel_and_reference_workload",
+  "current_publication": false
+}

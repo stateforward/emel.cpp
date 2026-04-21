@@ -1,5 +1,45 @@
 # Project Milestones: EMEL
 
+## v1.13 Pluggable Generative Parity Bench (Shipped: 2026-04-21)
+
+**Phases completed:** 8 phases, 8 plans, 0 tasks
+
+**Delivered:** EMEL now ships one pluggable generative compare workflow that keeps the EMEL lane
+isolated while running a maintained `llama_cpp_generation` reference lane through the shared
+`generation_compare/v1` contract, with truthful comparable and non-comparable publication.
+
+**Key accomplishments:**
+
+- Defined one canonical `generation_compare/v1` JSONL contract for prompts, generated outputs,
+  verdict metadata, and timing across EMEL and reference lanes.
+
+- Added checked-in generation workload and prompt manifests that pin fixture identity, formatter
+  mode, seed, sampling, stop conditions, and comparability intent.
+
+- Integrated a maintained local `llama_cpp_generation` reference backend behind manifest-selected
+  wrapper tooling without leaking reference objects into the EMEL runtime lane.
+
+- Published `scripts/bench_generation_compare.sh` and `generation_compare_summary/v1` verdicts for
+  exact match, bounded drift, non-comparable, missing, and error outcomes.
+
+- Repaired JSONL lane isolation so EMEL-only and reference-only runs no longer prepare the other
+  lane's fixture state.
+
+- Added a maintained single-lane LFM2 workload that flows through the operator wrapper and
+  truthfully publishes `non_comparable/single_lane_emel_workload` with an empty reference record
+  file.
+
+- Backfilled requirement traceability and Nyquist validation evidence for Phases 69 through 76,
+  producing a `tech_debt` audit with no blocking gaps.
+
+**Known deferred items at close:** 5 open non-phase items acknowledged and deferred; see
+`.planning/STATE.md` `Deferred Items`.
+
+**Technical debt:** Metadata mismatch tests sample representative fields directly, and the audit
+turn reused the post-review Phase 75 full quality-gate pass instead of rerunning the full gate.
+
+---
+
 ## v1.12 Pluggable Reference Parity Bench Architecture (Shipped: 2026-04-18, Closeout Repaired: 2026-04-20)
 
 **Delivered:** EMEL now ships one pluggable embedding compare architecture that keeps the EMEL

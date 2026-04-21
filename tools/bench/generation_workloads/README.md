@@ -1,0 +1,34 @@
+# Generation Workload Manifests
+
+These manifests pin the maintained generation benchmark workloads that feed the shared
+`generation_compare/v1` output contract.
+
+## Contract
+
+- `schema`: workload manifest schema version
+- `id`: stable workload identifier
+- `case_name`: benchmark row name
+- `compare_group`: stable matching group for EMEL/reference records
+- `fixture_name`: operator-facing model fixture name
+- `fixture_rel`: repo-relative model fixture path
+- `fixture_slug`: stable fixture slug used in case naming
+- `prompt_fixture_id`: expected checked-in prompt fixture id
+- `prompt_fixture_path`: repo-relative prompt fixture path
+- `formatter_mode`: stable formatter mode identifier
+- `formatter_contract`: exact maintained formatter contract string
+- `sampling_id`: stable sampling contract id
+- `stop_id`: stable stop-condition contract id
+- `seed`: deterministic sampling seed
+- `max_output_tokens`: token budget pinned for the workload
+- `comparable`: whether the workload may participate in EMEL/reference parity comparison
+- `comparison_mode`: truthful compare label for machine-readable records
+- `comparability_note`: explicit reason published into compare records
+- `current_publication`: whether the workload is the current maintained publication slice
+
+## Single-Lane Publication Proof
+
+`lfm2_single_user_hello_max_tokens_1_single_lane_v1` is a maintained local proof that the
+operator-facing compare wrapper publishes intentional EMEL-only workloads as
+`non_comparable`. It uses the same checked-in LFM2 fixture as the parity publication row, but its
+manifest contract sets `comparison_mode` to `single_lane` and `comparable` to `false`, so the
+reference backend is intentionally not run for that selected workload.

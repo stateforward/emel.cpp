@@ -1,4 +1,7 @@
 #include "bench_cases.hpp"
+#include "generation_compare_contract.hpp"
+#include "generation_workload_manifest.hpp"
+#include "embedding_generator_bench_helpers.hpp"
 #include "../generation_formatter_contract.hpp"
 #include "../generation_fixture_registry.hpp"
 
@@ -54,106 +57,14 @@ namespace {
 constexpr size_t k_generation_output_capacity = 65536u;
 
 struct generation_case_spec {
-  std::string_view name = {};
-  std::string_view prompt = {};
+  std::string name = {};
+  std::string prompt = {};
   int32_t max_tokens = 0;
+  emel::bench::generation_workload_manifest manifest = {};
 };
 
 struct generation_fixture_spec {
   const emel::tools::generation_fixture_registry::maintained_fixture * fixture = nullptr;
-  std::array<generation_case_spec, 4> cases = {};
-};
-
-constexpr generation_case_spec k_short_generation_case = {
-    .name = emel::bench::k_generation_case_name,
-    .prompt = "hello",
-    .max_tokens = 1,
-};
-
-constexpr generation_case_spec k_generation_10_case = {
-    .name = emel::bench::k_generation_10_case_name,
-    .prompt = "hello",
-    .max_tokens = 10,
-};
-
-constexpr generation_case_spec k_generation_100_case = {
-    .name = emel::bench::k_generation_100_case_name,
-    .prompt = "hello",
-    .max_tokens = 100,
-};
-
-constexpr generation_case_spec k_generation_1000_case = {
-    .name = emel::bench::k_generation_1000_case_name,
-    .prompt = "hello",
-    .max_tokens = 1000,
-};
-
-constexpr generation_case_spec k_qwen3_short_generation_case = {
-    .name = emel::bench::k_generation_qwen3_case_name,
-    .prompt = "hello",
-    .max_tokens = 1,
-};
-
-constexpr generation_case_spec k_qwen3_generation_10_case = {
-    .name = emel::bench::k_generation_qwen3_10_case_name,
-    .prompt = "hello",
-    .max_tokens = 10,
-};
-
-constexpr generation_case_spec k_qwen3_generation_100_case = {
-    .name = emel::bench::k_generation_qwen3_100_case_name,
-    .prompt = "hello",
-    .max_tokens = 100,
-};
-
-constexpr generation_case_spec k_qwen3_generation_1000_case = {
-    .name = emel::bench::k_generation_qwen3_1000_case_name,
-    .prompt = "hello",
-    .max_tokens = 1000,
-};
-
-constexpr generation_fixture_spec k_qwen3_generation_fixture = {
-    .fixture = &emel::tools::generation_fixture_registry::k_qwen3_generation_fixture,
-    .cases = {
-        k_qwen3_short_generation_case,
-        k_qwen3_generation_10_case,
-        k_qwen3_generation_100_case,
-        k_qwen3_generation_1000_case,
-    },
-};
-
-constexpr generation_fixture_spec k_lfm2_generation_fixture = {
-    .fixture = &emel::tools::generation_fixture_registry::k_lfm2_generation_fixture,
-    .cases = {
-        k_short_generation_case,
-        k_generation_10_case,
-        k_generation_100_case,
-        k_generation_1000_case,
-    },
-};
-
-constexpr generation_case_spec k_gemma4_short_generation_case = {
-    .name = "generation/preloaded_request/gemma_4_e2b_it_q8_0_prompt_hello_max_tokens_1",
-    .prompt = "hello",
-    .max_tokens = 1,
-};
-
-constexpr generation_case_spec k_gemma4_generation_10_case = {
-    .name = "generation/preloaded_request/gemma_4_e2b_it_q8_0_prompt_hello_max_tokens_10",
-    .prompt = "hello",
-    .max_tokens = 10,
-};
-
-constexpr generation_case_spec k_gemma4_generation_100_case = {
-    .name = "generation/preloaded_request/gemma_4_e2b_it_q8_0_prompt_hello_max_tokens_100",
-    .prompt = "hello",
-    .max_tokens = 100,
-};
-
-constexpr generation_case_spec k_gemma4_generation_1000_case = {
-    .name = "generation/preloaded_request/gemma_4_e2b_it_q8_0_prompt_hello_max_tokens_1000",
-    .prompt = "hello",
-    .max_tokens = 1000,
 };
 
 constexpr emel::tools::generation_fixture_registry::maintained_fixture
@@ -164,14 +75,16 @@ constexpr emel::tools::generation_fixture_registry::maintained_fixture
         .current_publication = false,
     };
 
+constexpr generation_fixture_spec k_qwen3_generation_fixture = {
+    .fixture = &emel::tools::generation_fixture_registry::k_qwen3_generation_fixture,
+};
+
+constexpr generation_fixture_spec k_lfm2_generation_fixture = {
+    .fixture = &emel::tools::generation_fixture_registry::k_lfm2_generation_fixture,
+};
+
 constexpr generation_fixture_spec k_gemma4_generation_fixture = {
     .fixture = &k_gemma4_emel_generation_fixture,
-    .cases = {
-        k_gemma4_short_generation_case,
-        k_gemma4_generation_10_case,
-        k_gemma4_generation_100_case,
-        k_gemma4_generation_1000_case,
-    },
 };
 
 constexpr std::array<generation_fixture_spec, 2> k_compare_generation_fixtures = {
@@ -183,6 +96,22 @@ constexpr std::array<generation_fixture_spec, 3> k_emel_generation_fixtures = {
     k_qwen3_generation_fixture,
     k_lfm2_generation_fixture,
     k_gemma4_generation_fixture,
+};
+
+constexpr std::array<std::string_view, 13> k_generation_workload_manifest_paths = {
+    "tools/bench/generation_workloads/qwen3_single_user_hello_max_tokens_1.json",
+    "tools/bench/generation_workloads/qwen3_single_user_hello_max_tokens_10.json",
+    "tools/bench/generation_workloads/qwen3_single_user_hello_max_tokens_100.json",
+    "tools/bench/generation_workloads/qwen3_single_user_hello_max_tokens_1000.json",
+    "tools/bench/generation_workloads/lfm2_single_user_hello_max_tokens_1.json",
+    "tools/bench/generation_workloads/lfm2_single_user_hello_max_tokens_1_single_lane.json",
+    "tools/bench/generation_workloads/lfm2_single_user_hello_max_tokens_10.json",
+    "tools/bench/generation_workloads/lfm2_single_user_hello_max_tokens_100.json",
+    "tools/bench/generation_workloads/lfm2_single_user_hello_max_tokens_1000.json",
+    "tools/bench/generation_workloads/gemma4_single_user_hello_max_tokens_1.json",
+    "tools/bench/generation_workloads/gemma4_single_user_hello_max_tokens_10.json",
+    "tools/bench/generation_workloads/gemma4_single_user_hello_max_tokens_100.json",
+    "tools/bench/generation_workloads/gemma4_single_user_hello_max_tokens_1000.json",
 };
 
 using llama_model_ptr = std::unique_ptr<llama_model, decltype(&llama_model_free)>;
@@ -212,6 +141,23 @@ std::size_t read_env_size(const char * name, const std::size_t fallback) {
 bool env_enabled(const char * name) {
   const char * value = std::getenv(name);
   return value != nullptr && value[0] != '\0' && value[0] != '0';
+}
+
+std::string_view generation_workload_filter() {
+  const char * value = std::getenv("EMEL_GENERATION_WORKLOAD_ID");
+  if (value == nullptr || value[0] == '\0') {
+    return {};
+  }
+  return value;
+}
+
+bool generation_workload_selected(const generation_case_spec & spec) {
+  const std::string_view filter = generation_workload_filter();
+  if (filter.empty()) {
+    return true;
+  }
+  return spec.manifest.id == filter || spec.name == filter ||
+      spec.manifest.compare_group == filter;
 }
 
 std::filesystem::path bench_root_path() {
@@ -273,6 +219,65 @@ extern std::string_view g_generation_fixture_rel;
   }
   std::fprintf(stderr, "error: generation bench setup failed at %s (%s)\n", step, detail);
   std::exit(1);
+}
+
+generation_case_spec load_generation_case_spec(const std::string_view manifest_rel) {
+  generation_case_spec spec = {};
+  std::string error = {};
+  const std::filesystem::path manifest_path = bench_root_path() / manifest_rel;
+  if (!emel::bench::load_generation_workload_manifest(
+          bench_root_path(), manifest_path, spec.manifest, &error)) {
+    fail_bench_setup("load_generation_workload_manifest", error.c_str());
+  }
+  spec.name = spec.manifest.case_name;
+  spec.prompt = spec.manifest.prompt_text;
+  spec.max_tokens = static_cast<int32_t>(spec.manifest.max_output_tokens);
+  return spec;
+}
+
+const std::vector<generation_case_spec> & maintained_generation_workloads() {
+  static const std::vector<generation_case_spec> workloads = [] {
+    std::vector<generation_case_spec> loaded = {};
+    loaded.reserve(k_generation_workload_manifest_paths.size());
+    for (const std::string_view manifest_rel : k_generation_workload_manifest_paths) {
+      loaded.push_back(load_generation_case_spec(manifest_rel));
+    }
+    return loaded;
+  }();
+  return workloads;
+}
+
+std::vector<generation_case_spec> generation_cases_for_fixture(
+    const emel::tools::generation_fixture_registry::maintained_fixture & fixture,
+    const bool comparable_only) {
+  std::vector<generation_case_spec> cases = {};
+  for (const generation_case_spec & candidate : maintained_generation_workloads()) {
+    if (candidate.manifest.fixture_rel != fixture.fixture_rel) {
+      continue;
+    }
+    if (comparable_only && !candidate.manifest.comparable) {
+      continue;
+    }
+    cases.push_back(candidate);
+  }
+  return cases;
+}
+
+void validate_generation_workload_fixture(
+    const emel::tools::generation_fixture_registry::maintained_fixture & fixture,
+    const generation_case_spec & spec) {
+  if (spec.manifest.fixture_rel != fixture.fixture_rel ||
+      spec.manifest.fixture_slug != fixture.slug ||
+      spec.manifest.fixture_name != fixture.name) {
+    fail_bench_setup("validate_generation_workload_fixture", spec.manifest.id.c_str());
+  }
+}
+
+void validate_generation_formatter_contract(const generation_case_spec & spec,
+                                            const std::string_view actual_contract) {
+  if (spec.manifest.formatter_contract != actual_contract) {
+    fail_bench_setup("validate_generation_formatter_contract", spec.manifest.id.c_str());
+  }
 }
 
 struct llama_backend_guard {
@@ -534,17 +539,20 @@ struct emel_session {
 
 struct prepared_generation_fixture {
   const generation_fixture_spec * spec = nullptr;
+  std::vector<generation_case_spec> cases = {};
   emel_fixture emel = {};
   reference_fixture reference = {};
 };
 
 struct prepared_emel_generation_fixture {
   const generation_fixture_spec * spec = nullptr;
+  std::vector<generation_case_spec> cases = {};
   emel_fixture emel = {};
 };
 
 struct prepared_reference_generation_fixture {
   const generation_fixture_spec * spec = nullptr;
+  std::vector<generation_case_spec> cases = {};
   reference_fixture reference = {};
 };
 
@@ -3926,7 +3934,15 @@ emel::bench::config generation_case_config(const emel::bench::config & cfg) {
 void prepare_emel_generation_fixture(const generation_fixture_spec & spec,
                                      prepared_emel_generation_fixture & prepared_fixture) {
   prepared_fixture.spec = &spec;
+  prepared_fixture.cases = generation_cases_for_fixture(*spec.fixture, false);
   g_generation_fixture_rel = spec.fixture->fixture_rel;
+
+  if (prepared_fixture.cases.empty()) {
+    fail_bench_setup("prepare_emel_generation_fixture", "no workload manifests for fixture");
+  }
+  for (const generation_case_spec & generation_case : prepared_fixture.cases) {
+    validate_generation_workload_fixture(*spec.fixture, generation_case);
+  }
 
   const std::string model_path = resolve_generation_model_path(spec.fixture->fixture_rel);
   if (!prepare_emel_fixture(prepared_fixture.emel, model_path)) {
@@ -3956,7 +3972,15 @@ void prepare_reference_generation_fixture(const generation_fixture_spec & spec,
   ensure_llama_backend_ready();
 
   prepared_fixture.spec = &spec;
+  prepared_fixture.cases = generation_cases_for_fixture(*spec.fixture, true);
   g_generation_fixture_rel = spec.fixture->fixture_rel;
+
+  if (prepared_fixture.cases.empty()) {
+    fail_bench_setup("prepare_reference_generation_fixture", "no comparable workload manifests");
+  }
+  for (const generation_case_spec & generation_case : prepared_fixture.cases) {
+    validate_generation_workload_fixture(*spec.fixture, generation_case);
+  }
 
   const std::string model_path = resolve_generation_model_path(spec.fixture->fixture_rel);
   if (!prepare_reference_fixture(prepared_fixture.reference, model_path)) {
@@ -3967,7 +3991,15 @@ void prepare_reference_generation_fixture(const generation_fixture_spec & spec,
 void prepare_compare_generation_fixture(const generation_fixture_spec & spec,
                                         prepared_generation_fixture & prepared_fixture) {
   prepared_fixture.spec = &spec;
+  prepared_fixture.cases = generation_cases_for_fixture(*spec.fixture, true);
   g_generation_fixture_rel = spec.fixture->fixture_rel;
+
+  if (prepared_fixture.cases.empty()) {
+    fail_bench_setup("prepare_compare_generation_fixture", "no comparable workload manifests");
+  }
+  for (const generation_case_spec & generation_case : prepared_fixture.cases) {
+    validate_generation_workload_fixture(*spec.fixture, generation_case);
+  }
 
   const std::string model_path = resolve_generation_model_path(spec.fixture->fixture_rel);
   if (!prepare_emel_fixture(prepared_fixture.emel, model_path)) {
@@ -4183,7 +4215,10 @@ void append_emel_generation_cases(std::vector<result> & results, const config & 
       const generation_fixture_spec * spec = prepared_fixture.spec;
       const emel_fixture & fixture = prepared_fixture.emel;
       g_generation_fixture_rel = spec->fixture->fixture_rel;
-      for (const generation_case_spec & generation_case : spec->cases) {
+      for (const generation_case_spec & generation_case : prepared_fixture.cases) {
+        if (!generation_workload_selected(generation_case)) {
+          continue;
+        }
         volatile std::size_t sink = 0u;
         generation_seam_audit seam = {};
         std::uint64_t flash_dispatch_calls = 0u;
@@ -4203,11 +4238,13 @@ void append_emel_generation_cases(std::vector<result> & results, const config & 
         std::uint64_t shared_q4_dispatch_calls = 0u;
         std::uint64_t optimized_q6_dispatch_calls = 0u;
         std::uint64_t shared_q6_dispatch_calls = 0u;
+        generation_result latest_generated = {};
         auto session = std::make_unique<emel_session>();
         prepare_emel_session(fixture, *session);
         if (!initialize_emel_session(*session, generation_case)) {
           fail_bench_setup("initialize_emel_session", generation_case.name.data());
         }
+        validate_generation_formatter_contract(generation_case, session->formatter_binding.contract);
 
         auto fn = [&]() {
           reset_generation_seam(session->seam);
@@ -4250,6 +4287,7 @@ void append_emel_generation_cases(std::vector<result> & results, const config & 
           if (!run_emel_generate(*session, generation_case, generated)) {
             fail_bench_setup("run_emel_generate", generation_case.name.data());
           }
+          latest_generated = generated;
           const std::uint64_t flash_dispatch_calls_after =
               session->generator->generation_flash_attention_dispatch_calls();
           const std::uint64_t optimized_flash_dispatch_calls_after =
@@ -4306,6 +4344,33 @@ void append_emel_generation_cases(std::vector<result> & results, const config & 
         };
 
         results.push_back(measure_case(generation_case.name.data(), case_cfg, fn));
+        result & compare_record = results.back();
+        compare_record.compare_group = generation_case.manifest.compare_group;
+        compare_record.lane = "emel";
+        compare_record.backend_id = "emel.generator";
+        compare_record.backend_language = "cpp";
+        compare_record.workload_id = generation_case.manifest.id;
+        compare_record.workload_manifest_path = generation_case.manifest.workload_manifest_path;
+        compare_record.comparison_mode = generation_case.manifest.comparison_mode;
+        compare_record.model_id = generation_case.manifest.fixture_name;
+        compare_record.fixture_id = generation_case.manifest.fixture_rel;
+        compare_record.prompt_fixture_id = generation_case.manifest.prompt_fixture_id;
+        compare_record.prompt_fixture_path = generation_case.manifest.prompt_fixture_path;
+        compare_record.prompt_id = generation_case.manifest.prompt_id;
+        compare_record.formatter_mode = generation_case.manifest.formatter_mode;
+        compare_record.formatter_contract = generation_case.manifest.formatter_contract;
+        compare_record.sampling_id = generation_case.manifest.sampling_id;
+        compare_record.stop_id = generation_case.manifest.stop_id;
+        compare_record.seed = generation_case.manifest.seed;
+        compare_record.max_output_tokens = generation_case.manifest.max_output_tokens;
+        compare_record.comparable = generation_case.manifest.comparable;
+        compare_record.output_tokens = static_cast<std::uint64_t>(latest_generated.tokens_generated);
+        compare_record.output_bytes = static_cast<std::uint64_t>(latest_generated.output_length);
+        compare_record.output_checksum = checksum_bytes(
+          reinterpret_cast<const std::uint8_t *>(latest_generated.output.data()),
+          latest_generated.output_length);
+        compare_record.output_text.assign(latest_generated.output.data(), latest_generated.output_length);
+        compare_record.note = generation_case.manifest.comparability_note;
         if (spec->fixture->current_publication &&
             generation_case.name == k_generation_case_name) {
           g_generation_architecture_contract.assign(
@@ -4361,7 +4426,10 @@ void append_emel_generation_cases(std::vector<result> & results, const config & 
     const generation_fixture_spec * spec = prepared_fixture.spec;
     const emel_fixture & fixture = prepared_fixture.emel;
     g_generation_fixture_rel = spec->fixture->fixture_rel;
-    for (const generation_case_spec & generation_case : spec->cases) {
+    for (const generation_case_spec & generation_case : prepared_fixture.cases) {
+      if (!generation_workload_selected(generation_case)) {
+        continue;
+      }
       volatile std::size_t sink = 0u;
       generation_seam_audit seam = {};
       std::uint64_t flash_dispatch_calls = 0u;
@@ -4381,11 +4449,13 @@ void append_emel_generation_cases(std::vector<result> & results, const config & 
       std::uint64_t shared_q4_dispatch_calls = 0u;
       std::uint64_t optimized_q6_dispatch_calls = 0u;
       std::uint64_t shared_q6_dispatch_calls = 0u;
+      generation_result latest_generated = {};
       auto session = std::make_unique<emel_session>();
       prepare_emel_session(fixture, *session);
       if (!initialize_emel_session(*session, generation_case)) {
         fail_bench_setup("initialize_emel_session", generation_case.name.data());
       }
+      validate_generation_formatter_contract(generation_case, session->formatter_binding.contract);
 
       auto fn = [&]() {
         reset_generation_seam(session->seam);
@@ -4428,6 +4498,7 @@ void append_emel_generation_cases(std::vector<result> & results, const config & 
         if (!run_emel_generate(*session, generation_case, generated)) {
           fail_bench_setup("run_emel_generate", generation_case.name.data());
         }
+        latest_generated = generated;
         const std::uint64_t flash_dispatch_calls_after =
             session->generator->generation_flash_attention_dispatch_calls();
         const std::uint64_t optimized_flash_dispatch_calls_after =
@@ -4484,6 +4555,33 @@ void append_emel_generation_cases(std::vector<result> & results, const config & 
       };
 
       results.push_back(measure_case(generation_case.name.data(), case_cfg, fn));
+      result & compare_record = results.back();
+      compare_record.compare_group = generation_case.manifest.compare_group;
+      compare_record.lane = "emel";
+      compare_record.backend_id = "emel.generator";
+      compare_record.backend_language = "cpp";
+      compare_record.workload_id = generation_case.manifest.id;
+      compare_record.workload_manifest_path = generation_case.manifest.workload_manifest_path;
+      compare_record.comparison_mode = generation_case.manifest.comparison_mode;
+      compare_record.model_id = generation_case.manifest.fixture_name;
+      compare_record.fixture_id = generation_case.manifest.fixture_rel;
+      compare_record.prompt_fixture_id = generation_case.manifest.prompt_fixture_id;
+      compare_record.prompt_fixture_path = generation_case.manifest.prompt_fixture_path;
+      compare_record.prompt_id = generation_case.manifest.prompt_id;
+      compare_record.formatter_mode = generation_case.manifest.formatter_mode;
+      compare_record.formatter_contract = generation_case.manifest.formatter_contract;
+      compare_record.sampling_id = generation_case.manifest.sampling_id;
+      compare_record.stop_id = generation_case.manifest.stop_id;
+      compare_record.seed = generation_case.manifest.seed;
+      compare_record.max_output_tokens = generation_case.manifest.max_output_tokens;
+      compare_record.comparable = generation_case.manifest.comparable;
+      compare_record.output_tokens = static_cast<std::uint64_t>(latest_generated.tokens_generated);
+      compare_record.output_bytes = static_cast<std::uint64_t>(latest_generated.output_length);
+      compare_record.output_checksum = checksum_bytes(
+        reinterpret_cast<const std::uint8_t *>(latest_generated.output.data()),
+        latest_generated.output_length);
+      compare_record.output_text.assign(latest_generated.output.data(), latest_generated.output_length);
+      compare_record.note = generation_case.manifest.comparability_note;
       if (spec->fixture->current_publication &&
           generation_case.name == k_generation_case_name) {
         g_generation_architecture_contract.assign(
@@ -4539,9 +4637,14 @@ void append_reference_generation_cases(std::vector<result> & results, const conf
       const generation_fixture_spec * spec = prepared_fixture.spec;
       const reference_fixture & fixture = prepared_fixture.reference;
       g_generation_fixture_rel = spec->fixture->fixture_rel;
-      for (const generation_case_spec & generation_case : spec->cases) {
+      for (const generation_case_spec & generation_case : prepared_fixture.cases) {
+        if (!generation_workload_selected(generation_case)) {
+          continue;
+        }
         volatile std::size_t sink = 0u;
         generation_seam_audit seam = {};
+        generation_result latest_generated = {};
+        validate_generation_formatter_contract(generation_case, fixture.formatter.contract);
         auto fn = [&]() {
           reset_generation_seam(seam);
           generation_result generated{};
@@ -4550,10 +4653,38 @@ void append_reference_generation_cases(std::vector<result> & results, const conf
           if (!run_reference_generate(fixture, generation_case, seam, generated)) {
             fail_bench_setup("run_reference_generate", generation_case.name.data());
           }
+          latest_generated = generated;
           sink ^= generated.output_length;
         };
 
         results.push_back(measure_case(generation_case.name.data(), case_cfg, fn));
+        result & compare_record = results.back();
+        compare_record.compare_group = generation_case.manifest.compare_group;
+        compare_record.lane = "reference";
+        compare_record.backend_id = "cpp.reference.llama_cpp";
+        compare_record.backend_language = "cpp";
+        compare_record.workload_id = generation_case.manifest.id;
+        compare_record.workload_manifest_path = generation_case.manifest.workload_manifest_path;
+        compare_record.comparison_mode = generation_case.manifest.comparison_mode;
+        compare_record.model_id = generation_case.manifest.fixture_name;
+        compare_record.fixture_id = generation_case.manifest.fixture_rel;
+        compare_record.prompt_fixture_id = generation_case.manifest.prompt_fixture_id;
+        compare_record.prompt_fixture_path = generation_case.manifest.prompt_fixture_path;
+        compare_record.prompt_id = generation_case.manifest.prompt_id;
+        compare_record.formatter_mode = generation_case.manifest.formatter_mode;
+        compare_record.formatter_contract = generation_case.manifest.formatter_contract;
+        compare_record.sampling_id = generation_case.manifest.sampling_id;
+        compare_record.stop_id = generation_case.manifest.stop_id;
+        compare_record.seed = generation_case.manifest.seed;
+        compare_record.max_output_tokens = generation_case.manifest.max_output_tokens;
+        compare_record.comparable = generation_case.manifest.comparable;
+        compare_record.output_tokens = static_cast<std::uint64_t>(latest_generated.tokens_generated);
+        compare_record.output_bytes = static_cast<std::uint64_t>(latest_generated.output_length);
+        compare_record.output_checksum = checksum_bytes(
+          reinterpret_cast<const std::uint8_t *>(latest_generated.output.data()),
+          latest_generated.output_length);
+        compare_record.output_text.assign(latest_generated.output.data(), latest_generated.output_length);
+        compare_record.note = generation_case.manifest.comparability_note;
         if (generation_seam_audit_enabled()) {
           print_generation_seam_audit("reference", seam);
           verify_reference_generation_seam(seam);
@@ -4569,9 +4700,14 @@ void append_reference_generation_cases(std::vector<result> & results, const conf
     const generation_fixture_spec * spec = prepared_fixture.spec;
     const reference_fixture & fixture = prepared_fixture.reference;
     g_generation_fixture_rel = spec->fixture->fixture_rel;
-    for (const generation_case_spec & generation_case : spec->cases) {
+    for (const generation_case_spec & generation_case : prepared_fixture.cases) {
+      if (!generation_workload_selected(generation_case)) {
+        continue;
+      }
       volatile std::size_t sink = 0u;
       generation_seam_audit seam = {};
+      generation_result latest_generated = {};
+      validate_generation_formatter_contract(generation_case, fixture.formatter.contract);
       auto fn = [&]() {
         reset_generation_seam(seam);
         generation_result generated{};
@@ -4580,10 +4716,38 @@ void append_reference_generation_cases(std::vector<result> & results, const conf
         if (!run_reference_generate(fixture, generation_case, seam, generated)) {
           fail_bench_setup("run_reference_generate", generation_case.name.data());
         }
+        latest_generated = generated;
         sink ^= generated.output_length;
       };
 
       results.push_back(measure_case(generation_case.name.data(), case_cfg, fn));
+      result & compare_record = results.back();
+      compare_record.compare_group = generation_case.manifest.compare_group;
+      compare_record.lane = "reference";
+      compare_record.backend_id = "cpp.reference.llama_cpp";
+      compare_record.backend_language = "cpp";
+      compare_record.workload_id = generation_case.manifest.id;
+      compare_record.workload_manifest_path = generation_case.manifest.workload_manifest_path;
+      compare_record.comparison_mode = generation_case.manifest.comparison_mode;
+      compare_record.model_id = generation_case.manifest.fixture_name;
+      compare_record.fixture_id = generation_case.manifest.fixture_rel;
+      compare_record.prompt_fixture_id = generation_case.manifest.prompt_fixture_id;
+      compare_record.prompt_fixture_path = generation_case.manifest.prompt_fixture_path;
+      compare_record.prompt_id = generation_case.manifest.prompt_id;
+      compare_record.formatter_mode = generation_case.manifest.formatter_mode;
+      compare_record.formatter_contract = generation_case.manifest.formatter_contract;
+      compare_record.sampling_id = generation_case.manifest.sampling_id;
+      compare_record.stop_id = generation_case.manifest.stop_id;
+      compare_record.seed = generation_case.manifest.seed;
+      compare_record.max_output_tokens = generation_case.manifest.max_output_tokens;
+      compare_record.comparable = generation_case.manifest.comparable;
+      compare_record.output_tokens = static_cast<std::uint64_t>(latest_generated.tokens_generated);
+      compare_record.output_bytes = static_cast<std::uint64_t>(latest_generated.output_length);
+      compare_record.output_checksum = checksum_bytes(
+        reinterpret_cast<const std::uint8_t *>(latest_generated.output.data()),
+        latest_generated.output_length);
+      compare_record.output_text.assign(latest_generated.output.data(), latest_generated.output_length);
+      compare_record.note = generation_case.manifest.comparability_note;
       if (generation_seam_audit_enabled()) {
         print_generation_seam_audit("reference", seam);
         verify_reference_generation_seam(seam);

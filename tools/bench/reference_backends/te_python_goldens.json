@@ -1,5 +1,6 @@
 {
   "id": "te_python_goldens",
+  "surface": "embedding_compare/v1",
   "display_name": "TE Python goldens",
   "language": "python",
   "description": "Maintained Python reference backend that emits the stored upstream TE-75M goldens through the canonical compare contract.",

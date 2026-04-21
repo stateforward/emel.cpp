@@ -5,8 +5,8 @@
 EMEL is a deterministic C++ inference engine built around explicit Boost.SML orchestration, with
 runtime behavior modeled as explicit actors instead of ad hoc control flow. The repo now ships
 maintained GGUF generation slices plus one explicit maintained trimodal embedding slice for
-`augmem/TE-75M-GGUF`, along with parity and benchmark tooling that compares EMEL against external
-reference engines without sharing runtime state.
+`augmem/TE-75M-GGUF`, along with pluggable parity and benchmark tooling that compares EMEL against
+external reference engines without sharing runtime state.
 
 ## Core Value
 
@@ -15,20 +15,30 @@ before widening API surface or model scope.
 
 ## Current State
 
-Latest shipped milestone: `v1.12`
+Latest shipped milestone: `v1.13`
 
-Status: `v1.12` shipped on 2026-04-18 and adds one canonical pluggable embedding compare
-contract, maintained Python and C++ reference backends on the same compare surface, and repaired
-multi-record C++ publication. The milestone reopened on 2026-04-19 for one narrow archival
-closeout-proof repair after the post-archive rerun audit found stale Phase `67` planning-path
-references. Phase `68` closed that repair on 2026-04-20, restoring `v1.12` to a passing rerun
-audit.
+Status: `v1.13` shipped on 2026-04-21 and extends the pluggable compare architecture into
+maintained generative workloads. The shipped surface includes one canonical `generation_compare/v1`
+contract, manifest-pinned workload metadata, a maintained `llama_cpp_generation` reference lane,
+truthful comparable and non-comparable publication, repaired lane isolation, and a no-blocker
+milestone audit with accepted tech debt.
 
-Current planning focus: No active milestone is defined. The next lifecycle step is
-`$gsd-new-milestone`, which should create a fresh requirements set before new phase planning
-starts.
+Current planning focus: No active milestone. Start the next milestone with `$gsd-new-milestone`
+when ready.
 
-## Latest Shipped Milestone: v1.12 Pluggable Reference Parity Bench Architecture
+## Latest Shipped Milestone: v1.13 Pluggable Generative Parity Bench
+
+**Shipped:** 2026-04-21
+
+**Delivered:**
+- Canonical `generation_compare/v1` contract for EMEL and reference lanes
+- Explicit workload manifests for prompts, formatter mode, seeds, sampling, and stop conditions
+- Maintained `llama_cpp_generation` backend integration on one operator-facing compare workflow
+- Truthful compare verdicts and publication artifacts for reproducible cross-engine review
+- Maintained single-lane publication that reports `non_comparable` instead of making a false
+  parity claim
+
+## Previous Shipped Milestone: v1.12 Pluggable Reference Parity Bench Architecture
 
 **Shipped:** 2026-04-18
 
@@ -170,27 +180,36 @@ truth anchor and without broadening into generic Liquid-family support.
   compare workflow with explicit backend identity, fixture identity, and reproducibility metadata.
 - ✓ v1.12 repaired the lossy multi-record C++ publication path and backfilled the missing
   traceability / Nyquist closeout evidence so the rerun milestone audit passed.
+- ✓ v1.13 added one canonical `generation_compare/v1` contract, manifest-pinned generation
+  workloads, a maintained `llama_cpp_generation` reference backend, one operator-facing
+  generation compare workflow, and closeout-proof regression coverage for the maintained LFM2
+  compare slice.
+- ✓ v1.13 repaired EMEL/reference JSONL lane isolation, added real selected single-lane
+  non-comparable publication, and backfilled requirement/Nyquist evidence for a no-blocker audit.
 
 ### Active
 
-- No active milestone requirements are defined yet. Run `$gsd-new-milestone` to create the next
-  milestone scope and a fresh `.planning/REQUIREMENTS.md`.
+No active requirements. The next milestone should create a fresh `.planning/REQUIREMENTS.md`.
 
 ### Out of Scope
 
 - New public embedding C ABI or broad CLI API commitments
 - Remote HTTP or service-hosted reference engines
-- Non-embedding generation parity scope in this milestone
+- Public plugin SDK or third-party backend distribution outside the repo
 - Broad new `src/` runtime support added only to satisfy a reference backend
 - Shared model, tokenizer, cache, or runtime objects between the EMEL lane and any reference lane
+- Multimodal or embedding-compare scope changes unrelated to the maintained generative compare
+  lane
 
 ## Context
 
 This remains a brownfield repository with an existing codebase map under `.planning/codebase/`.
-The repo stays governed by `AGENTS.md` and `docs/rules/sml.rules.md`. `v1.12` remains the latest
-shipped milestone after the narrow archival proof repair closed cleanly. The current maintained
-state includes a repo-owned EMEL compare lane plus pluggable Python and C++ reference backends
-that publish through one canonical compare contract without shared runtime state.
+The repo stays governed by `AGENTS.md` and `docs/rules/sml.rules.md`. `v1.13` is now the latest
+shipped milestone. The current maintained state includes a repo-owned EMEL compare lane plus
+pluggable embedding and generative reference backends that publish through canonical compare
+contracts without shared runtime state. The next milestone should start from a fresh requirements
+file and decide whether to broaden reference backends, deepen generative coverage, or focus on
+runtime performance.
 
 ## Constraints
 
@@ -200,13 +219,17 @@ that publish through one canonical compare contract without shared runtime state
   state, objects, and execution dependencies.
 - **Reproducibility**: Preserve truthful compare artifacts with backend identity, fixture
   identity, and enough metadata to reproduce results.
-- **Lifecycle**: Start the next milestone from the repaired `v1.12` state with a fresh
-  requirements file instead of mutating the shipped milestone ledger further.
+- **Comparability**: Record formatter, tokenization, seed, and sampling metadata explicitly so
+  benchmark or parity claims never hide apples-to-oranges drift.
+- **Lifecycle**: Start the next milestone with a fresh requirements file instead of mutating the
+  shipped `v1.13` ledger.
 
 ## Key Decisions
 
 | Decision | Rationale | Outcome |
 |----------|-----------|---------|
+| Promote the deferred `v1.12` generative follow-on into `v1.13` instead of inventing a separate tool family | The shipped embedding compare architecture already proves the lane-isolated pluggable pattern; the next milestone should reuse it for generation with a narrow reproducibility contract | ✓ Shipped |
+| Treat generative comparability drift as explicit contract data, not an implicit failure mode | Cross-engine generation can diverge because of formatter, tokenization, or sampling differences, so the workflow must publish why two runs are or are not comparable | ✓ Shipped |
 | Keep the new parity/benchmark reference architecture pluggable but lane-isolated | The user wants easy comparison against different inference engines without letting reference runtimes leak into the EMEL lane | ✓ Shipped |
 | Treat Python and C++ backends as equal citizens under one canonical comparison contract | The repo already has both styles of reference evidence, so the milestone should unify them instead of favoring one language-specific lane | ✓ Shipped |
 | Start decomposition with `generator/prefill` instead of splitting the whole generator at once | Prefill was the clearest request-phase boundary and the largest current duplication source | ✓ Good |
@@ -248,4 +271,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-04-20 after closing the v1.12 archival-proof repair*
+*Last updated: 2026-04-21 after shipping milestone v1.13*

@@ -13,6 +13,7 @@
 
 #include "bench_cases.hpp"
 #include "bench_common.hpp"
+#include "generation_compare_contract.hpp"
 
 namespace emel::bench {
 
@@ -406,6 +407,63 @@ void print_snapshot(const std::vector<bench::result> & results, const bench::con
                 entry.ns_per_op,
                 entry.iterations,
                 entry.runs);
+  }
+}
+
+void print_generation_jsonl(const std::vector<bench::result> & results) {
+  std::vector<bench::result> sorted = results;
+  std::sort(sorted.begin(), sorted.end(), [](const bench::result & a, const bench::result & b) {
+    return a.name < b.name;
+  });
+
+  bool emitted = false;
+  for (const auto & entry : sorted) {
+    if (!is_generation_case_name(entry.name)) {
+      continue;
+    }
+
+    bench::generation_compare_record record{};
+    record.case_name = entry.name;
+    record.compare_group = entry.compare_group.empty() ? entry.name : entry.compare_group;
+    record.lane = entry.lane;
+    record.backend_id = entry.backend_id;
+    record.backend_language = entry.backend_language;
+    record.workload_id = entry.workload_id;
+    record.workload_manifest_path = entry.workload_manifest_path;
+    record.comparison_mode = entry.comparison_mode;
+    record.model_id = entry.model_id;
+    record.fixture_id = entry.fixture_id;
+    record.prompt_fixture_id = entry.prompt_fixture_id;
+    record.prompt_fixture_path = entry.prompt_fixture_path;
+    record.prompt_id = entry.prompt_id;
+    record.formatter_mode = entry.formatter_mode;
+    record.formatter_contract = entry.formatter_contract;
+    record.sampling_id = entry.sampling_id;
+    record.stop_id = entry.stop_id;
+    record.seed = entry.seed;
+    record.comparable = entry.comparable;
+    record.max_output_tokens = entry.max_output_tokens;
+    record.ns_per_op = entry.ns_per_op;
+    record.prepare_ns_per_op = entry.prepare_ns_per_op;
+    record.encode_ns_per_op = entry.encode_ns_per_op;
+    record.publish_ns_per_op = entry.publish_ns_per_op;
+    record.output_tokens = entry.output_tokens;
+    record.output_bytes = entry.output_bytes;
+    record.output_checksum = entry.output_checksum;
+    record.iterations = entry.iterations;
+    record.runs = entry.runs;
+    record.output_text = entry.output_text;
+    record.note = entry.note;
+    record.error_kind = entry.error_kind;
+    record.error_message = entry.error_message;
+    bench::maybe_dump_generation_output(record);
+    bench::print_generation_compare_record_jsonl(record);
+    emitted = true;
+  }
+
+  if (!emitted) {
+    std::fprintf(stderr, "error: generation compare jsonl mode emitted no generation records\n");
+    std::exit(1);
   }
 }
 
@@ -852,6 +910,7 @@ int main(int argc, char ** argv) {
   cfg.warmup_runs = read_env_size("EMEL_BENCH_WARMUP_RUNS", k_default_warmup_runs);
 
   const mode run_mode = parse_mode(argc, argv);
+  const bool generation_jsonl = bench::generation_compare_emit_jsonl();
 
   if (run_mode == mode::k_kernel_emel) {
     const auto results = run_benchmarks(cfg, kernel_test_cases(), false, false);
@@ -875,14 +934,22 @@ int main(int argc, char ** argv) {
   if (run_mode == mode::k_emel) {
     bench::set_generation_lane_mode(bench::generation_lane_mode::emel);
     const auto results = run_benchmarks(cfg, default_test_cases(), false, true);
-    print_snapshot(results, cfg);
+    if (generation_jsonl) {
+      print_generation_jsonl(results);
+    } else {
+      print_snapshot(results, cfg);
+    }
     return 0;
   }
 
   if (run_mode == mode::k_reference) {
     bench::set_generation_lane_mode(bench::generation_lane_mode::reference);
     const auto results = run_benchmarks(cfg, default_test_cases(), true, true);
-    print_snapshot(results, cfg);
+    if (generation_jsonl) {
+      print_generation_jsonl(results);
+    } else {
+      print_snapshot(results, cfg);
+    }
     return 0;
   }
 
