@@ -9,6 +9,7 @@
 #include <doctest/doctest.h>
 
 #include "../generation_fixture_registry.hpp"
+#include "generation_workload_manifest.hpp"
 
 #if !defined(_WIN32)
 #include <sys/wait.h>
@@ -294,4 +295,32 @@ TEST_CASE("bench_runner generation jsonl emits manifest-driven workload metadata
   CHECK(reference_capture.stdout_text.find("\"formatter_contract\":\"") != std::string::npos);
   CHECK(reference_capture.stdout_text.find("\"output_path\":\"") != std::string::npos);
   CHECK(reference_capture.stdout_text.find("ns/op,") == std::string::npos);
+}
+
+TEST_CASE("generation prompt fixture parser ignores quoted key names inside text values") {
+  const std::filesystem::path tmp_dir =
+      std::filesystem::temp_directory_path() / "emel-bench-runner-tests" / "prompt-key-text";
+  const std::filesystem::path prompt_path = tmp_dir / "prompt.json";
+  std::error_code ec = {};
+  std::filesystem::remove_all(tmp_dir, ec);
+  std::filesystem::create_directories(tmp_dir);
+
+  std::ofstream output(prompt_path);
+  REQUIRE(output.good());
+  output << "{\n"
+            "  \"schema\": \"generation_prompt_fixture/v1\",\n"
+            "  \"id\": \"quoted_key_prompt_v1\",\n"
+            "  \"shape\": \"single_user_text_v1\",\n"
+            "  \"text\": \"literal marker \\\"prompt_id\\\" before metadata\",\n"
+            "  \"prompt_id\": \"single_user:quoted_key\"\n"
+            "}\n";
+  REQUIRE(output.good());
+  output.close();
+
+  emel::bench::generation_prompt_fixture fixture = {};
+  std::string error = {};
+  CHECK(emel::bench::load_generation_prompt_fixture(prompt_path, fixture, &error));
+  CHECK(error.empty());
+  CHECK(fixture.text == "literal marker \"prompt_id\" before metadata");
+  CHECK(fixture.prompt_id == "single_user:quoted_key");
 }

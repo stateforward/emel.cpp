@@ -120,19 +120,78 @@ inline bool parse_generation_json_string_token(const std::string & text,
 inline bool locate_generation_json_value(const std::string & text,
                                          const std::string_view key,
                                          std::size_t & value_pos) {
-  const std::string needle = "\"" + std::string(key) + "\"";
-  const std::size_t key_pos = text.find(needle);
-  if (key_pos == std::string::npos) {
-    return false;
-  }
+  int object_depth = 0;
+  int array_depth = 0;
+  std::size_t cursor = 0u;
+  while (cursor < text.size()) {
+    const char ch = text[cursor];
+    if (ch == '{') {
+      ++object_depth;
+      ++cursor;
+      continue;
+    }
+    if (ch == '}') {
+      if (object_depth > 0) {
+        --object_depth;
+      }
+      ++cursor;
+      continue;
+    }
+    if (ch == '[') {
+      ++array_depth;
+      ++cursor;
+      continue;
+    }
+    if (ch == ']') {
+      if (array_depth > 0) {
+        --array_depth;
+      }
+      ++cursor;
+      continue;
+    }
+    if (ch != '"') {
+      ++cursor;
+      continue;
+    }
 
-  std::size_t cursor = skip_generation_json_ws(text, key_pos + needle.size());
-  if (cursor >= text.size() || text[cursor] != ':') {
-    return false;
+    const std::size_t token_start = cursor;
+    ++cursor;
+    bool escaped = false;
+    bool closed = false;
+    while (cursor < text.size()) {
+      const char token_ch = text[cursor++];
+      if (escaped) {
+        escaped = false;
+        continue;
+      }
+      if (token_ch == '\\') {
+        escaped = true;
+        continue;
+      }
+      if (token_ch == '"') {
+        closed = true;
+        break;
+      }
+    }
+    if (!closed) {
+      return false;
+    }
+    const std::size_t token_end = cursor;
+    const std::size_t colon_pos = skip_generation_json_ws(text, token_end);
+    if (object_depth == 1 && array_depth == 0 && colon_pos < text.size() &&
+        text[colon_pos] == ':') {
+      std::string parsed_key = {};
+      if (!parse_generation_json_string_token(text, token_start, parsed_key)) {
+        return false;
+      }
+      if (parsed_key == key) {
+        value_pos = skip_generation_json_ws(text, colon_pos + 1u);
+        return value_pos < text.size();
+      }
+    }
+    cursor = token_end;
   }
-
-  value_pos = skip_generation_json_ws(text, cursor + 1u);
-  return value_pos < text.size();
+  return false;
 }
 
 inline bool extract_generation_json_string(const std::string & text,

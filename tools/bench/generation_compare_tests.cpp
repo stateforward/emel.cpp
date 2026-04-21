@@ -97,6 +97,13 @@ void write_text_file(const std::filesystem::path & path, const std::string & tex
   REQUIRE(output.good());
 }
 
+void write_binary_file(const std::filesystem::path & path, const std::string & bytes) {
+  std::ofstream output(path, std::ios::binary);
+  REQUIRE(output.good());
+  output.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
+  REQUIRE(output.good());
+}
+
 void make_executable(const std::filesystem::path & path) {
   std::error_code ec = {};
   std::filesystem::permissions(path,
@@ -470,6 +477,59 @@ TEST_CASE("generation compare reports shared prefixes in UTF-8 bytes") {
   const std::string summary = read_file(output_dir / "compare_summary.json");
   CHECK(summary.find("\"comparison_status\": \"bounded_drift\"") != std::string::npos);
   CHECK(summary.find("\"shared_prefix_bytes\": 3") != std::string::npos);
+}
+
+TEST_CASE("generation compare tolerates non-UTF8 output files") {
+  const std::filesystem::path tmp_dir =
+    std::filesystem::temp_directory_path() / "emel-generation-compare-tests" / "non-utf8";
+  const std::filesystem::path emel_output = tmp_dir / "emel.bin";
+  const std::filesystem::path reference_output = tmp_dir / "reference.bin";
+  const std::filesystem::path emel_jsonl = tmp_dir / "emel.jsonl";
+  const std::filesystem::path reference_jsonl = tmp_dir / "reference.jsonl";
+  const std::filesystem::path output_dir = tmp_dir / "out";
+  const std::filesystem::path stdout_path = tmp_dir / "stdout.txt";
+  const std::filesystem::path stderr_path = tmp_dir / "stderr.txt";
+  std::error_code ec = {};
+  std::filesystem::remove_all(tmp_dir, ec);
+  std::filesystem::create_directories(tmp_dir);
+
+  std::string invalid_output = "hello";
+  invalid_output.push_back(static_cast<char>(0xFF));
+  write_binary_file(emel_output, invalid_output);
+  write_binary_file(reference_output, "hello!");
+  write_text_file(emel_jsonl,
+                  qwen_compare_record_json("emel",
+                                           "chat_template_supported_qwen_v1",
+                                           "argmax_v1",
+                                           1,
+                                           emel_output.string(),
+                                           1,
+                                           6,
+                                           123));
+  write_text_file(reference_jsonl,
+                  qwen_compare_record_json("reference",
+                                           "chat_template_supported_qwen_v1",
+                                           "argmax_v1",
+                                           1,
+                                           reference_output.string(),
+                                           1,
+                                           6,
+                                           456));
+
+  const std::string command =
+    "python3 " + quote_arg_posix(generation_compare_script_path().string()) +
+    " --emel-input " + quote_arg_posix(emel_jsonl.string()) +
+    " --reference-input " + quote_arg_posix(reference_jsonl.string()) +
+    " --output-dir " + quote_arg_posix(output_dir.string()) +
+    " > " + quote_arg_posix(stdout_path.string()) +
+    " 2> " + quote_arg_posix(stderr_path.string());
+  const process_capture capture = run_command_capture(command, stdout_path, stderr_path);
+
+  CHECK(capture.exit_code == 0);
+  CHECK(capture.stderr_text.empty());
+  const std::string summary = read_file(output_dir / "compare_summary.json");
+  CHECK(summary.find("\"comparison_status\": \"bounded_drift\"") != std::string::npos);
+  CHECK(summary.find("\"shared_prefix_bytes\": 5") != std::string::npos);
 }
 
 TEST_CASE("generation compare publishes single-lane workloads as non-comparable") {

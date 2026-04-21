@@ -241,7 +241,7 @@ def read_generation_output_text(record: dict[str, object]) -> str:
   if not output_path:
     return ""
   try:
-    return Path(output_path).read_text(encoding="utf-8")
+    return Path(output_path).read_bytes().decode("utf-8", errors="replace")
   except FileNotFoundError:
     return ""
 
