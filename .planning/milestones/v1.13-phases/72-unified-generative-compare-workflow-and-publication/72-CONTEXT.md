@@ -2,7 +2,7 @@
 phase: 72
 slug: unified-generative-compare-workflow-and-publication
 created: 2026-04-20
-status: in_progress
+status: completed
 ---
 
 # Phase 72 Context

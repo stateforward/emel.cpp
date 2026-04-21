@@ -154,4 +154,10 @@ if [[ -n "$WORKLOAD_ID" ]]; then
   compare_args+=(--workload-id "$WORKLOAD_ID")
 fi
 
+if $USE_ZIG; then
+  export EMEL_GENERATION_REFERENCE_COMPILER_MODE=zig
+else
+  export EMEL_GENERATION_REFERENCE_COMPILER_MODE=system
+fi
+
 python3 "${compare_args[@]}"

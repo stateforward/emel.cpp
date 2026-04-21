@@ -2,7 +2,7 @@
 phase: 73
 slug: proof-regression-and-milestone-closeout
 created: 2026-04-20
-status: in_progress
+status: completed
 ---
 
 # Phase 73 Context

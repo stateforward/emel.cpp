@@ -7,6 +7,20 @@ BUILD_DIR="${EMEL_GENERATION_REFERENCE_BUILD_DIR:-$ROOT_DIR/build/bench_tools_ni
 BUILD_ONLY=false
 RUN_ONLY=false
 USE_ZIG=true
+case "${EMEL_GENERATION_REFERENCE_COMPILER_MODE:-}" in
+  "")
+    ;;
+  zig)
+    USE_ZIG=true
+    ;;
+  system)
+    USE_ZIG=false
+    ;;
+  *)
+    echo "error: EMEL_GENERATION_REFERENCE_COMPILER_MODE must be 'zig' or 'system'" >&2
+    exit 1
+    ;;
+esac
 
 usage() {
   cat <<'USAGE'
@@ -17,6 +31,7 @@ generation lane through `bench_runner --mode=reference`.
 
 Environment:
   EMEL_GENERATION_REFERENCE_BUILD_DIR  override build directory
+  EMEL_GENERATION_REFERENCE_COMPILER_MODE zig or system default compiler mode
   BENCH_REF_OVERRIDE                   override fetched llama.cpp ref
   EMEL_BENCH_SUITE                     defaults to generation for this wrapper
 USAGE

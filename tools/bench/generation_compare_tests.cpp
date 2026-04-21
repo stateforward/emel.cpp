@@ -623,7 +623,9 @@ TEST_CASE("generation compare wrapper honors --skip-emel-build without requiring
 
   write_text_file(fake_python,
                   "#!/bin/sh\n"
-                  "printf 'python-invoked\\n' > \"$EMEL_TEST_INVOKED_PATH\"\n"
+                  "printf 'python-invoked mode=%s\\n' "
+                  "\"$EMEL_GENERATION_REFERENCE_COMPILER_MODE\" > "
+                  "\"$EMEL_TEST_INVOKED_PATH\"\n"
                   "exit 0\n");
   make_executable(fake_python);
   write_text_file(fake_dirname,
@@ -646,6 +648,7 @@ TEST_CASE("generation compare wrapper honors --skip-emel-build without requiring
   CHECK(capture.exit_code == 0);
   CHECK(capture.stderr_text.empty());
   CHECK(read_file(invoked_path).find("python-invoked") != std::string::npos);
+  CHECK(read_file(invoked_path).find("mode=system") != std::string::npos);
 }
 
 TEST_CASE("generation reference wrapper honors --run-only without requiring build tools") {
