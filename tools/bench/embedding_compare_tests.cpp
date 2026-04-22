@@ -853,6 +853,34 @@ TEST_CASE("embedding variant manifests reject duplicate ids") {
   CHECK(error.find("duplicate manifest id") != std::string::npos);
 }
 
+TEST_CASE("embedding variant manifests reject empty required strings") {
+  const std::filesystem::path tmp_dir =
+    std::filesystem::temp_directory_path() / "emel-embedding-compare-tests" / "empty-strings";
+  std::error_code ec = {};
+  std::filesystem::remove_all(tmp_dir, ec);
+  const std::filesystem::path variant_dir = tmp_dir / "te75m" / "text";
+  REQUIRE(std::filesystem::create_directories(variant_dir, ec));
+  REQUIRE(!ec);
+
+  write_text_file(variant_dir / "empty.json",
+                  "{\n"
+                  "  \"schema\": \"embedding_variant/v1\",\n"
+                  "  \"id\": \"empty_payload_variant\",\n"
+                  "  \"case_name\": \"embeddings/generator/steady_request/empty\",\n"
+                  "  \"compare_group\": \"text/red_square/full_dim\",\n"
+                  "  \"modality\": \"text\",\n"
+                  "  \"payload_id\": \"\",\n"
+                  "  \"comparison_mode\": \"parity\",\n"
+                  "  \"note\": \"test\",\n"
+                  "  \"current_publication\": false\n"
+                  "}\n");
+
+  std::vector<emel::bench::embedding_variant_manifest> variants = {};
+  std::string error = {};
+  CHECK_FALSE(emel::bench::load_embedding_variant_manifests(tmp_dir, variants, &error));
+  CHECK(error.find("empty required string") != std::string::npos);
+}
+
 TEST_CASE("embedding variant manifests reject flat registry roots") {
   const std::filesystem::path tmp_dir =
     std::filesystem::temp_directory_path() / "emel-embedding-compare-tests" / "flat-variants";
@@ -963,6 +991,51 @@ TEST_CASE("embedding compare rejects mixed exact and broad filters") {
 
   CHECK(capture.exit_code != 0);
   CHECK(capture.stderr_text.find("mutually exclusive") != std::string::npos);
+}
+
+TEST_CASE("embedding compare rejects exact variant filter for unsupported backends") {
+  const std::filesystem::path tmp_dir =
+    std::filesystem::temp_directory_path() / "emel-embedding-compare-tests" /
+    "unsupported-variant-filter";
+  const std::filesystem::path output_dir = tmp_dir / "out";
+  const std::filesystem::path emel_jsonl = tmp_dir / "emel.jsonl";
+  const std::filesystem::path backend_manifest = tmp_dir / "backend.json";
+  const std::filesystem::path stdout_path = tmp_dir / "stdout.txt";
+  const std::filesystem::path stderr_path = tmp_dir / "stderr.txt";
+  std::error_code ec = {};
+  std::filesystem::remove_all(tmp_dir, ec);
+  std::filesystem::create_directories(tmp_dir);
+  write_text_file(emel_jsonl, "");
+  write_text_file(backend_manifest,
+                  "{\n"
+                  "  \"id\": \"liquid_cpp\",\n"
+                  "  \"surface\": \"embedding_compare/v1\",\n"
+                  "  \"language\": \"cpp\",\n"
+                  "  \"run_command\": [\"python3\", \"-c\", \"raise SystemExit(99)\"]\n"
+                  "}\n");
+
+  std::string command;
+#if defined(_WIN32)
+  command = "python3 " + quote_arg_windows(embedding_compare_script_path().string());
+  command += " --emel-input " + quote_arg_windows(emel_jsonl.string());
+  command += " --backend-manifest " + quote_arg_windows(backend_manifest.string());
+  command += " --output-dir " + quote_arg_windows(output_dir.string());
+  command += " --variant-id te75m_text_red_square_full_dim";
+  command += " > " + quote_arg_windows(stdout_path.string());
+  command += " 2> " + quote_arg_windows(stderr_path.string());
+#else
+  command = "python3 " + quote_arg_posix(embedding_compare_script_path().string());
+  command += " --emel-input " + quote_arg_posix(emel_jsonl.string());
+  command += " --backend-manifest " + quote_arg_posix(backend_manifest.string());
+  command += " --output-dir " + quote_arg_posix(output_dir.string());
+  command += " --variant-id te75m_text_red_square_full_dim";
+  command += " > " + quote_arg_posix(stdout_path.string());
+  command += " 2> " + quote_arg_posix(stderr_path.string());
+#endif
+  const process_capture capture = run_command_capture(command, stdout_path, stderr_path);
+
+  CHECK(capture.exit_code != 0);
+  CHECK(capture.stderr_text.find("does not support --variant-id") != std::string::npos);
 }
 
 #if !defined(_WIN32)

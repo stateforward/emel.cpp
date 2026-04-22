@@ -63,6 +63,10 @@ def command_to_strings(command: object) -> list[str]:
   return [str(part) for part in command]
 
 
+def backend_supports_exact_variant_id(manifest: dict[str, object]) -> bool:
+  return manifest.get("supports_exact_variant_id") is True
+
+
 def error_record(*,
                  lane: str,
                  backend_id: str,
@@ -382,6 +386,12 @@ def main() -> int:
     "EMEL_EMBEDDING_BENCH_FORMAT": "jsonl",
   }
   if args.variant_id:
+    if (args.reference_input is None and manifest is not None and
+        not backend_supports_exact_variant_id(manifest)):
+      backend_id = str(manifest.get("id", "reference.backend"))
+      print(f"error: reference backend {backend_id} does not support --variant-id",
+            file=sys.stderr)
+      return 1
     env_updates["EMEL_BENCH_VARIANT_ID"] = args.variant_id
   if args.case_filter:
     env_updates["EMEL_BENCH_CASE_FILTER"] = args.case_filter

@@ -49,6 +49,14 @@ inline bool load_embedding_variant_manifest(const std::filesystem::path & path,
     }
     return false;
   }
+  if (out.id.empty() || out.case_name.empty() || out.compare_group.empty() ||
+      out.modality.empty() || out.payload_id.empty() || out.comparison_mode.empty() ||
+      out.note.empty()) {
+    if (error_out != nullptr) {
+      *error_out = "invalid embedding variant manifest: empty required string";
+    }
+    return false;
+  }
   if (out.modality != "text" && out.modality != "image" && out.modality != "audio") {
     if (error_out != nullptr) {
       *error_out = "unsupported embedding variant modality";
