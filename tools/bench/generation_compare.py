@@ -67,8 +67,13 @@ def load_manifest(manifest_path: Path) -> dict[str, object]:
 def find_workload_manifest(workload_id: str) -> dict[str, object] | None:
   if not workload_id:
     return None
-  manifests = sorted((repo_root() / "tools" / "bench" / "generation_workloads").glob("*.json"))
+  root = repo_root() / "tools" / "bench" / "generation_variants"
+  manifests = sorted(root.rglob("*.json"))
   for manifest_path in manifests:
+    if manifest_path.parent == root:
+      raise ValueError(
+        f"generation workload must live in an isolation subdirectory: {manifest_path}"
+      )
     manifest = load_manifest(manifest_path)
     if manifest.get("id") == workload_id:
       return manifest

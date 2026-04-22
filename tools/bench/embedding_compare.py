@@ -37,7 +37,11 @@ def parse_args() -> argparse.Namespace:
   parser.add_argument("--emel-input", type=Path)
   parser.add_argument("--reference-input", type=Path)
   parser.add_argument("--case-filter", default="")
-  return parser.parse_args()
+  parser.add_argument("--variant-id", default="")
+  args = parser.parse_args()
+  if args.case_filter and args.variant_id:
+    parser.error("--variant-id and --case-filter are mutually exclusive")
+  return args
 
 
 def load_manifest(manifest_path: Path) -> dict[str, object]:
@@ -57,6 +61,10 @@ def command_to_strings(command: object) -> list[str]:
   if not isinstance(command, list) or not command:
     raise ValueError("manifest command must be a non-empty array")
   return [str(part) for part in command]
+
+
+def backend_supports_exact_variant_id(manifest: dict[str, object]) -> bool:
+  return manifest.get("supports_exact_variant_id") is True
 
 
 def error_record(*,
@@ -377,6 +385,16 @@ def main() -> int:
   env_updates = {
     "EMEL_EMBEDDING_BENCH_FORMAT": "jsonl",
   }
+  if args.variant_id:
+    if args.reference_input is not None:
+      print("error: --variant-id cannot be used with --reference-input", file=sys.stderr)
+      return 1
+    if manifest is not None and not backend_supports_exact_variant_id(manifest):
+      backend_id = str(manifest.get("id", "reference.backend"))
+      print(f"error: reference backend {backend_id} does not support --variant-id",
+            file=sys.stderr)
+      return 1
+    env_updates["EMEL_BENCH_VARIANT_ID"] = args.variant_id
   if args.case_filter:
     env_updates["EMEL_BENCH_CASE_FILTER"] = args.case_filter
 

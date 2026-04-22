@@ -7,12 +7,13 @@ BUILD_DIR="${EMEL_BENCH_BUILD_DIR:-$ROOT_DIR/build/bench_tools_ninja}"
 OUTPUT_DIR="${EMEL_COMPARE_OUTPUT_DIR:-$ROOT_DIR/build/embedding_compare}"
 REFERENCE_BACKEND=""
 CASE_FILTER=""
+VARIANT_ID=""
 SKIP_EMEL_BUILD=false
 USE_ZIG=true
 
 usage() {
   cat <<'USAGE'
-usage: scripts/bench_embedding_compare.sh --reference-backend BACKEND [--output-dir DIR] [--case-filter FILTER] [--skip-emel-build] [--zig|--system]
+usage: scripts/bench_embedding_compare.sh --reference-backend BACKEND [--output-dir DIR] [--case-filter FILTER] [--variant-id ID] [--skip-emel-build] [--zig|--system]
 
 Builds the maintained EMEL embedding benchmark runner, then runs the unified
 compare workflow against the selected pluggable reference backend manifest.
@@ -35,6 +36,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --case-filter)
       CASE_FILTER="${2:-}"
+      shift 2
+      ;;
+    --variant-id)
+      VARIANT_ID="${2:-}"
       shift 2
       ;;
     --skip-emel-build)
@@ -63,6 +68,12 @@ done
 
 if [[ -z "$REFERENCE_BACKEND" ]]; then
   echo "error: --reference-backend is required" >&2
+  usage
+  exit 1
+fi
+
+if [[ -n "$CASE_FILTER" && -n "$VARIANT_ID" ]]; then
+  echo "error: --case-filter and --variant-id are mutually exclusive" >&2
   usage
   exit 1
 fi
@@ -139,6 +150,9 @@ compare_args=(
 )
 if [[ -n "$CASE_FILTER" ]]; then
   compare_args+=(--case-filter "$CASE_FILTER")
+fi
+if [[ -n "$VARIANT_ID" ]]; then
+  compare_args+=(--variant-id "$VARIANT_ID")
 fi
 
 python3 "${compare_args[@]}"

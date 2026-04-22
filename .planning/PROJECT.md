@@ -15,18 +15,29 @@ before widening API surface or model scope.
 
 ## Current State
 
-Latest shipped milestone: `v1.13`
+Current milestone: none
 
-Status: `v1.13` shipped on 2026-04-21 and extends the pluggable compare architecture into
-maintained generative workloads. The shipped surface includes one canonical `generation_compare/v1`
-contract, manifest-pinned workload metadata, a maintained `llama_cpp_generation` reference lane,
-truthful comparable and non-comparable publication, repaired lane isolation, and a no-blocker
-milestone audit with accepted tech debt.
+Latest shipped milestone: `v1.14`
 
-Current planning focus: No active milestone. Start the next milestone with `$gsd-new-milestone`
-when ready.
+Status: `v1.14` shipped on 2026-04-21 and organizes maintained generation and embedding benchmark
+variants behind registry/data-owned discovery. The shipped surface includes shared deterministic
+manifest discovery, generation workload directory loading, embedding variant manifests, aligned
+`--workload-id` / `--variant-id` selection, and a passing milestone audit.
 
-## Latest Shipped Milestone: v1.13 Pluggable Generative Parity Bench
+Current planning focus: define the next milestone with a fresh requirements set.
+
+## Latest Shipped Milestone: v1.14 Benchmark Variant Organization
+
+**Shipped:** 2026-04-21
+
+**Delivered:**
+- Shared benchmark manifest discovery and duplicate-ID validation helpers
+- Deterministic generation workload discovery from checked-in manifests
+- Deterministic embedding variant discovery from checked-in manifests
+- Aligned operator selectors for generation workload IDs and embedding variant IDs
+- Documentation and focused regressions proving ordinary variant additions stay data-only
+
+## Previous Shipped Milestone: v1.13 Pluggable Generative Parity Bench
 
 **Shipped:** 2026-04-21
 
@@ -186,10 +197,17 @@ truth anchor and without broadening into generic Liquid-family support.
   compare slice.
 - ✓ v1.13 repaired EMEL/reference JSONL lane isolation, added real selected single-lane
   non-comparable publication, and backfilled requirement/Nyquist evidence for a no-blocker audit.
+- ✓ v1.14 added a shared benchmark variant registry contract with deterministic ordering and
+  hard-fail duplicate-ID validation.
+- ✓ v1.14 cut generation benchmarks over to manifest discovery so maintained workload additions
+  are data-owned.
+- ✓ v1.14 cut embedding benchmarks over to variant discovery so maintained embedding cases are
+  data-owned across EMEL and Python-golden lanes.
+- ✓ v1.14 proved and documented the ordinary data-only add path for both benchmark families.
 
 ### Active
 
-No active requirements. The next milestone should create a fresh `.planning/REQUIREMENTS.md`.
+- [ ] Define the next milestone requirements.
 
 ### Out of Scope
 
@@ -198,18 +216,18 @@ No active requirements. The next milestone should create a fresh `.planning/REQU
 - Public plugin SDK or third-party backend distribution outside the repo
 - Broad new `src/` runtime support added only to satisfy a reference backend
 - Shared model, tokenizer, cache, or runtime objects between the EMEL lane and any reference lane
-- Multimodal or embedding-compare scope changes unrelated to the maintained generative compare
-  lane
+- New model/runtime support added solely to demonstrate the benchmark registry
+- Performance tuning or benchmark-result optimization beyond preserving existing deterministic
+  evidence
 
 ## Context
 
 This remains a brownfield repository with an existing codebase map under `.planning/codebase/`.
-The repo stays governed by `AGENTS.md` and `docs/rules/sml.rules.md`. `v1.13` is now the latest
-shipped milestone. The current maintained state includes a repo-owned EMEL compare lane plus
+The repo stays governed by `AGENTS.md` and `docs/rules/sml.rules.md`. `v1.14` is now the latest
+shipped milestone. The current maintained state includes repo-owned EMEL compare lanes plus
 pluggable embedding and generative reference backends that publish through canonical compare
-contracts without shared runtime state. The next milestone should start from a fresh requirements
-file and decide whether to broaden reference backends, deepen generative coverage, or focus on
-runtime performance.
+contracts without shared runtime state, with maintained benchmark variants discovered through
+data/registry-owned manifests.
 
 ## Constraints
 
@@ -223,11 +241,14 @@ runtime performance.
   benchmark or parity claims never hide apples-to-oranges drift.
 - **Lifecycle**: Start the next milestone with a fresh requirements file instead of mutating the
   shipped `v1.13` ledger.
+- **Developer surface**: Adding a new maintained benchmark variant should be data/registry-owned
+  and should not require modifying unrelated runner, compare, or test enumeration code.
 
 ## Key Decisions
 
 | Decision | Rationale | Outcome |
 |----------|-----------|---------|
+| Organize generation and embedding benchmark variants before adding more variants | The existing pluggable surfaces work, but hard-coded lists and code-owned cases make every new variant touch unrelated code and increase determinism risk | ✓ Shipped |
 | Promote the deferred `v1.12` generative follow-on into `v1.13` instead of inventing a separate tool family | The shipped embedding compare architecture already proves the lane-isolated pluggable pattern; the next milestone should reuse it for generation with a narrow reproducibility contract | ✓ Shipped |
 | Treat generative comparability drift as explicit contract data, not an implicit failure mode | Cross-engine generation can diverge because of formatter, tokenization, or sampling differences, so the workflow must publish why two runs are or are not comparable | ✓ Shipped |
 | Keep the new parity/benchmark reference architecture pluggable but lane-isolated | The user wants easy comparison against different inference engines without letting reference runtimes leak into the EMEL lane | ✓ Shipped |
@@ -271,4 +292,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-04-21 after shipping milestone v1.13*
+*Last updated: 2026-04-21 after starting milestone v1.14*

@@ -1,0 +1,11 @@
+{
+  "schema": "embedding_variant/v1",
+  "id": "te75m_audio_pure_tone_440hz_full_dim",
+  "case_name": "embeddings/generator/steady_request/te75m_audio_pure_tone_440hz_full_dim",
+  "compare_group": "audio/pure_tone_440hz/full_dim",
+  "modality": "audio",
+  "payload_id": "pure_tone_440hz_audio_v1",
+  "comparison_mode": "parity",
+  "note": "maintained_te75m_audio_payload",
+  "current_publication": true
+}

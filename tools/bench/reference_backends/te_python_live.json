@@ -3,6 +3,7 @@
   "surface": "embedding_compare/v1",
   "display_name": "TE Python live reference",
   "language": "python",
+  "supports_exact_variant_id": true,
   "description": "Optional live Python TE-75M backend that regenerates embeddings from the upstream safetensors model when the Python ML stack is available.",
   "run_command": [
     "python3",

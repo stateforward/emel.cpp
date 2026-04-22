@@ -1,0 +1,11 @@
+{
+  "schema": "embedding_variant/v1",
+  "id": "te75m_image_red_square_full_dim",
+  "case_name": "embeddings/generator/steady_request/te75m_image_red_square_full_dim",
+  "compare_group": "image/red_square/full_dim",
+  "modality": "image",
+  "payload_id": "red_square_image_v1",
+  "comparison_mode": "parity",
+  "note": "maintained_te75m_image_payload",
+  "current_publication": true
+}

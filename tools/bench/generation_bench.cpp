@@ -18,6 +18,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include "emel/error/error.hpp"
@@ -96,22 +97,6 @@ constexpr std::array<generation_fixture_spec, 3> k_emel_generation_fixtures = {
     k_qwen3_generation_fixture,
     k_lfm2_generation_fixture,
     k_gemma4_generation_fixture,
-};
-
-constexpr std::array<std::string_view, 13> k_generation_workload_manifest_paths = {
-    "tools/bench/generation_workloads/qwen3_single_user_hello_max_tokens_1.json",
-    "tools/bench/generation_workloads/qwen3_single_user_hello_max_tokens_10.json",
-    "tools/bench/generation_workloads/qwen3_single_user_hello_max_tokens_100.json",
-    "tools/bench/generation_workloads/qwen3_single_user_hello_max_tokens_1000.json",
-    "tools/bench/generation_workloads/lfm2_single_user_hello_max_tokens_1.json",
-    "tools/bench/generation_workloads/lfm2_single_user_hello_max_tokens_1_single_lane.json",
-    "tools/bench/generation_workloads/lfm2_single_user_hello_max_tokens_10.json",
-    "tools/bench/generation_workloads/lfm2_single_user_hello_max_tokens_100.json",
-    "tools/bench/generation_workloads/lfm2_single_user_hello_max_tokens_1000.json",
-    "tools/bench/generation_workloads/gemma4_single_user_hello_max_tokens_1.json",
-    "tools/bench/generation_workloads/gemma4_single_user_hello_max_tokens_10.json",
-    "tools/bench/generation_workloads/gemma4_single_user_hello_max_tokens_100.json",
-    "tools/bench/generation_workloads/gemma4_single_user_hello_max_tokens_1000.json",
 };
 
 using llama_model_ptr = std::unique_ptr<llama_model, decltype(&llama_model_free)>;
@@ -221,37 +206,38 @@ extern std::string_view g_generation_fixture_rel;
   std::exit(1);
 }
 
-generation_case_spec load_generation_case_spec(const std::string_view manifest_rel) {
+generation_case_spec load_generation_case_spec(
+    emel::bench::generation_workload_manifest manifest) {
   generation_case_spec spec = {};
-  std::string error = {};
-  const std::filesystem::path manifest_path = bench_root_path() / manifest_rel;
-  if (!emel::bench::load_generation_workload_manifest(
-          bench_root_path(), manifest_path, spec.manifest, &error)) {
-    fail_bench_setup("load_generation_workload_manifest", error.c_str());
-  }
+  spec.manifest = std::move(manifest);
   spec.name = spec.manifest.case_name;
   spec.prompt = spec.manifest.prompt_text;
   spec.max_tokens = static_cast<int32_t>(spec.manifest.max_output_tokens);
   return spec;
 }
 
-const std::vector<generation_case_spec> & maintained_generation_workloads() {
-  static const std::vector<generation_case_spec> workloads = [] {
+const std::vector<generation_case_spec> & maintained_generation_variants() {
+  static const std::vector<generation_case_spec> variants = [] {
+    std::string error = {};
+    std::vector<emel::bench::generation_workload_manifest> manifests = {};
+    if (!emel::bench::load_generation_workload_manifests(bench_root_path(), manifests, &error)) {
+      fail_bench_setup("load_generation_workload_manifests", error.c_str());
+    }
     std::vector<generation_case_spec> loaded = {};
-    loaded.reserve(k_generation_workload_manifest_paths.size());
-    for (const std::string_view manifest_rel : k_generation_workload_manifest_paths) {
-      loaded.push_back(load_generation_case_spec(manifest_rel));
+    loaded.reserve(manifests.size());
+    for (auto & manifest : manifests) {
+      loaded.push_back(load_generation_case_spec(std::move(manifest)));
     }
     return loaded;
   }();
-  return workloads;
+  return variants;
 }
 
 std::vector<generation_case_spec> generation_cases_for_fixture(
     const emel::tools::generation_fixture_registry::maintained_fixture & fixture,
     const bool comparable_only) {
   std::vector<generation_case_spec> cases = {};
-  for (const generation_case_spec & candidate : maintained_generation_workloads()) {
+  for (const generation_case_spec & candidate : maintained_generation_variants()) {
     if (candidate.manifest.fixture_rel != fixture.fixture_rel) {
       continue;
     }

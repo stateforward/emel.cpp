@@ -1,10 +1,12 @@
 #define DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN
 
+#include <algorithm>
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <string>
+#include <vector>
 
 #include <doctest/doctest.h>
 
@@ -246,8 +248,8 @@ TEST_CASE("bench_runner generation jsonl emits manifest-driven workload metadata
   CHECK(emel_capture.stdout_text.find("\"workload_id\":\"qwen3_single_user_hello_max_tokens_1_v1\"") !=
         std::string::npos);
   CHECK(emel_capture.stdout_text.find(
-            "\"workload_manifest_path\":\"tools/bench/generation_workloads/"
-            "qwen3_single_user_hello_max_tokens_1.json\"") != std::string::npos);
+            "\"workload_manifest_path\":\"tools/bench/generation_variants/"
+            "qwen3/single_user_hello/max_tokens_1.json\"") != std::string::npos);
   CHECK(emel_capture.stdout_text.find("\"prompt_fixture_id\":\"single_user_hello_v1\"") !=
         std::string::npos);
   CHECK(emel_capture.stdout_text.find(
@@ -281,7 +283,7 @@ TEST_CASE("bench_runner generation jsonl emits manifest-driven workload metadata
         std::string::npos);
   CHECK(reference_capture.stdout_text.find("\"backend_id\":\"emel.generator\"") ==
         std::string::npos);
-  CHECK(reference_capture.stdout_text.find("\"workload_manifest_path\":\"tools/bench/generation_workloads/") !=
+  CHECK(reference_capture.stdout_text.find("\"workload_manifest_path\":\"tools/bench/generation_variants/") !=
         std::string::npos);
   const bool saw_supported_reference_formatter =
       reference_capture.stdout_text.find("\"formatter_mode\":\"chat_template_supported_qwen_v1\"") !=
@@ -323,4 +325,20 @@ TEST_CASE("generation prompt fixture parser ignores quoted key names inside text
   CHECK(error.empty());
   CHECK(fixture.text == "literal marker \"prompt_id\" before metadata");
   CHECK(fixture.prompt_id == "single_user:quoted_key");
+}
+
+TEST_CASE("generation workload manifests are discovered deterministically") {
+  std::vector<emel::bench::generation_workload_manifest> manifests = {};
+  std::string error = {};
+  CHECK(emel::bench::load_generation_workload_manifests(repo_root(), manifests, &error));
+  CHECK(error.empty());
+  CHECK(manifests.size() >= 13u);
+  REQUIRE(!manifests.empty());
+  CHECK(manifests.front().workload_manifest_path.find("tools/bench/generation_variants/") == 0u);
+  CHECK(manifests.front().workload_manifest_path !=
+        "tools/bench/generation_variants/" +
+          std::filesystem::path(manifests.front().workload_manifest_path).filename().string());
+  CHECK(std::any_of(manifests.begin(), manifests.end(), [](const auto & manifest) {
+    return manifest.id == "qwen3_single_user_hello_max_tokens_1_v1";
+  }));
 }

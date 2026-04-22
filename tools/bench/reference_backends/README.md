@@ -16,8 +16,19 @@ repo-owned compare surface such as `tools/bench/embedding_compare.py` or
   executes
 - `run_command`: required repo-relative command array that emits
   compare-surface JSONL records for the selected `surface`
+- `supports_exact_variant_id`: optional `true` for embedding backends that honor
+  `EMEL_BENCH_VARIANT_ID` as an exact manifest-ID selector
 
 ## Isolation
 
 The manifest only describes the reference lane. The EMEL lane remains separate
 and continues to run through its existing repo-owned runner surface.
+
+## Variant Selection
+
+Generation compare uses `--workload-id` to select one discovered generation workload manifest.
+Embedding compare uses `--variant-id` to select one discovered embedding variant manifest by
+exact ID. The older `--case-filter` remains available for broad substring filtering, but
+maintained data-only variant additions should prefer the stable manifest IDs. Backends that do
+not declare `supports_exact_variant_id` reject `--variant-id` instead of mixing exact EMEL
+selection with broad or unsupported reference selection.
