@@ -923,6 +923,34 @@ TEST_CASE("embedding variant manifests reject non-directory registry roots") {
   CHECK(error.find("not a directory") != std::string::npos);
 }
 
+TEST_CASE("benchmark json bool rejects malformed literal suffixes") {
+  bool value = false;
+  CHECK_FALSE(emel::bench::extract_benchmark_json_bool(
+    "{\"current_publication\": truex}\n", "current_publication", value));
+  CHECK_FALSE(emel::bench::extract_benchmark_json_bool(
+    "{\"current_publication\": falsex}\n", "current_publication", value));
+  CHECK_FALSE(emel::bench::extract_benchmark_json_bool(
+    "{\"current_publication\": true x}\n", "current_publication", value));
+  CHECK(emel::bench::extract_benchmark_json_bool(
+    "{\"current_publication\": true}\n", "current_publication", value));
+  CHECK(value);
+}
+
+TEST_CASE("benchmark manifest entry status errors fail fast") {
+  const std::filesystem::path missing_path =
+    std::filesystem::temp_directory_path() / "emel-embedding-compare-tests" /
+    "missing-status-entry.json";
+  std::error_code ec = {};
+  std::filesystem::remove(missing_path, ec);
+
+  std::filesystem::directory_entry missing_entry(missing_path);
+  bool is_json_file = true;
+  std::string error = {};
+  CHECK_FALSE(
+    emel::bench::benchmark_manifest_entry_is_json_file(missing_entry, is_json_file, &error));
+  CHECK(error.find("failed to read manifest file status") != std::string::npos);
+}
+
 TEST_CASE("embedding variant manifests ignore braces inside string values") {
   const std::filesystem::path tmp_dir =
     std::filesystem::temp_directory_path() / "emel-embedding-compare-tests" / "string-braces";

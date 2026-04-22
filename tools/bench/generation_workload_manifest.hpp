@@ -213,11 +213,13 @@ inline bool extract_generation_json_bool(const std::string & text,
   if (!locate_generation_json_value(text, key, value_pos)) {
     return false;
   }
-  if (text.compare(value_pos, 4u, "true") == 0) {
+  if (text.compare(value_pos, 4u, "true") == 0 &&
+      benchmark_json_literal_is_delimited(text, value_pos + 4u)) {
     out = true;
     return true;
   }
-  if (text.compare(value_pos, 5u, "false") == 0) {
+  if (text.compare(value_pos, 5u, "false") == 0 &&
+      benchmark_json_literal_is_delimited(text, value_pos + 5u)) {
     out = false;
     return true;
   }

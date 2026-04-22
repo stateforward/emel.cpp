@@ -144,6 +144,12 @@ inline bool extract_benchmark_json_string(const std::string & text,
       parse_benchmark_json_string_token(text, value_pos, out);
 }
 
+inline bool benchmark_json_literal_is_delimited(const std::string & text, std::size_t cursor) {
+  cursor = skip_benchmark_json_ws(text, cursor);
+  return cursor == text.size() || text[cursor] == ',' || text[cursor] == '}' ||
+      text[cursor] == ']';
+}
+
 inline bool extract_benchmark_json_bool(const std::string & text,
                                         const std::string_view key,
                                         bool & out) {
@@ -151,15 +157,32 @@ inline bool extract_benchmark_json_bool(const std::string & text,
   if (!locate_benchmark_json_value(text, key, value_pos)) {
     return false;
   }
-  if (text.compare(value_pos, 4u, "true") == 0) {
+  if (text.compare(value_pos, 4u, "true") == 0 &&
+      benchmark_json_literal_is_delimited(text, value_pos + 4u)) {
     out = true;
     return true;
   }
-  if (text.compare(value_pos, 5u, "false") == 0) {
+  if (text.compare(value_pos, 5u, "false") == 0 &&
+      benchmark_json_literal_is_delimited(text, value_pos + 5u)) {
     out = false;
     return true;
   }
   return false;
+}
+
+inline bool benchmark_manifest_entry_is_json_file(const std::filesystem::directory_entry & entry,
+                                                  bool & is_json_file,
+                                                  std::string * error_out = nullptr) {
+  std::error_code ec = {};
+  const bool is_regular = entry.is_regular_file(ec);
+  if (ec) {
+    if (error_out != nullptr) {
+      *error_out = "failed to read manifest file status: " + entry.path().string();
+    }
+    return false;
+  }
+  is_json_file = is_regular && entry.path().extension() == ".json";
+  return true;
 }
 
 inline bool discover_benchmark_manifest_paths(const std::filesystem::path & directory,
@@ -193,8 +216,11 @@ inline bool discover_benchmark_manifest_paths(const std::filesystem::path & dire
       }
       return false;
     }
-    if (!entry.is_regular_file(ec) || ec || entry.path().extension() != ".json") {
-      ec.clear();
+    bool is_json_file = false;
+    if (!benchmark_manifest_entry_is_json_file(entry, is_json_file, error_out)) {
+      return false;
+    }
+    if (!is_json_file) {
       continue;
     }
     const std::filesystem::path rel = std::filesystem::relative(entry.path(), directory, ec);
