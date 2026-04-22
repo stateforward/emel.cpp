@@ -249,7 +249,7 @@ TEST_CASE("bench_runner generation jsonl emits manifest-driven workload metadata
         std::string::npos);
   CHECK(emel_capture.stdout_text.find(
             "\"workload_manifest_path\":\"tools/bench/generation_variants/"
-            "qwen3_single_user_hello_max_tokens_1.json\"") != std::string::npos);
+            "qwen3/single_user_hello/max_tokens_1.json\"") != std::string::npos);
   CHECK(emel_capture.stdout_text.find("\"prompt_fixture_id\":\"single_user_hello_v1\"") !=
         std::string::npos);
   CHECK(emel_capture.stdout_text.find(

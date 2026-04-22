@@ -386,8 +386,10 @@ def main() -> int:
     "EMEL_EMBEDDING_BENCH_FORMAT": "jsonl",
   }
   if args.variant_id:
-    if (args.reference_input is None and manifest is not None and
-        not backend_supports_exact_variant_id(manifest)):
+    if args.reference_input is not None:
+      print("error: --variant-id cannot be used with --reference-input", file=sys.stderr)
+      return 1
+    if manifest is not None and not backend_supports_exact_variant_id(manifest):
       backend_id = str(manifest.get("id", "reference.backend"))
       print(f"error: reference backend {backend_id} does not support --variant-id",
             file=sys.stderr)
