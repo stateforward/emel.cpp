@@ -35,7 +35,7 @@ Use existing fixtures and payloads rather than adding new runtime behavior.
 - README files under benchmark manifest directories document local contracts.
 
 ### Integration Points
-- `tools/bench/generation_workloads/README.md`
+- `tools/bench/generation_variants/README.md`
 - `tools/bench/embedding_variants/README.md`
 - `tools/bench/reference_backends/README.md`
 

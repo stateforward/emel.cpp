@@ -67,7 +67,7 @@ def load_manifest(manifest_path: Path) -> dict[str, object]:
 def find_workload_manifest(workload_id: str) -> dict[str, object] | None:
   if not workload_id:
     return None
-  root = repo_root() / "tools" / "bench" / "generation_workloads"
+  root = repo_root() / "tools" / "bench" / "generation_variants"
   manifests = sorted(root.rglob("*.json"))
   for manifest_path in manifests:
     if manifest_path.parent == root:

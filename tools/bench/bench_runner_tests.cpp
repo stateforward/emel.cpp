@@ -248,7 +248,7 @@ TEST_CASE("bench_runner generation jsonl emits manifest-driven workload metadata
   CHECK(emel_capture.stdout_text.find("\"workload_id\":\"qwen3_single_user_hello_max_tokens_1_v1\"") !=
         std::string::npos);
   CHECK(emel_capture.stdout_text.find(
-            "\"workload_manifest_path\":\"tools/bench/generation_workloads/"
+            "\"workload_manifest_path\":\"tools/bench/generation_variants/"
             "qwen3_single_user_hello_max_tokens_1.json\"") != std::string::npos);
   CHECK(emel_capture.stdout_text.find("\"prompt_fixture_id\":\"single_user_hello_v1\"") !=
         std::string::npos);
@@ -283,7 +283,7 @@ TEST_CASE("bench_runner generation jsonl emits manifest-driven workload metadata
         std::string::npos);
   CHECK(reference_capture.stdout_text.find("\"backend_id\":\"emel.generator\"") ==
         std::string::npos);
-  CHECK(reference_capture.stdout_text.find("\"workload_manifest_path\":\"tools/bench/generation_workloads/") !=
+  CHECK(reference_capture.stdout_text.find("\"workload_manifest_path\":\"tools/bench/generation_variants/") !=
         std::string::npos);
   const bool saw_supported_reference_formatter =
       reference_capture.stdout_text.find("\"formatter_mode\":\"chat_template_supported_qwen_v1\"") !=
@@ -334,9 +334,9 @@ TEST_CASE("generation workload manifests are discovered deterministically") {
   CHECK(error.empty());
   CHECK(manifests.size() >= 13u);
   REQUIRE(!manifests.empty());
-  CHECK(manifests.front().workload_manifest_path.find("tools/bench/generation_workloads/") == 0u);
+  CHECK(manifests.front().workload_manifest_path.find("tools/bench/generation_variants/") == 0u);
   CHECK(manifests.front().workload_manifest_path !=
-        "tools/bench/generation_workloads/" +
+        "tools/bench/generation_variants/" +
           std::filesystem::path(manifests.front().workload_manifest_path).filename().string());
   CHECK(std::any_of(manifests.begin(), manifests.end(), [](const auto & manifest) {
     return manifest.id == "qwen3_single_user_hello_max_tokens_1_v1";

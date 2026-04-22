@@ -15,7 +15,7 @@ requirements-completed:
 
 - `generation_bench.cpp` now loads generation workloads from discovered manifests.
 - `generation_workload_manifest.hpp` exposes directory-level loading and duplicate-ID validation.
-- `generation_workloads/README.md` documents the data-only add path.
+- `generation_variants/README.md` documents the data-only add path.
 - Focused tests verify deterministic workload discovery.
 
 ## Evidence

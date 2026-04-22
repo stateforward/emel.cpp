@@ -216,8 +216,8 @@ generation_case_spec load_generation_case_spec(
   return spec;
 }
 
-const std::vector<generation_case_spec> & maintained_generation_workloads() {
-  static const std::vector<generation_case_spec> workloads = [] {
+const std::vector<generation_case_spec> & maintained_generation_variants() {
+  static const std::vector<generation_case_spec> variants = [] {
     std::string error = {};
     std::vector<emel::bench::generation_workload_manifest> manifests = {};
     if (!emel::bench::load_generation_workload_manifests(bench_root_path(), manifests, &error)) {
@@ -230,14 +230,14 @@ const std::vector<generation_case_spec> & maintained_generation_workloads() {
     }
     return loaded;
   }();
-  return workloads;
+  return variants;
 }
 
 std::vector<generation_case_spec> generation_cases_for_fixture(
     const emel::tools::generation_fixture_registry::maintained_fixture & fixture,
     const bool comparable_only) {
   std::vector<generation_case_spec> cases = {};
-  for (const generation_case_spec & candidate : maintained_generation_workloads()) {
+  for (const generation_case_spec & candidate : maintained_generation_variants()) {
     if (candidate.manifest.fixture_rel != fixture.fixture_rel) {
       continue;
     }

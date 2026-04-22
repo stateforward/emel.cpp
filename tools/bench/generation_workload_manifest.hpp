@@ -378,7 +378,7 @@ inline bool load_generation_workload_manifests(const std::filesystem::path & rep
                                                std::vector<generation_workload_manifest> & out,
                                                std::string * error_out = nullptr) {
   return load_generation_workload_manifests(
-      repo_root, repo_root / "tools" / "bench" / "generation_workloads", out, error_out);
+      repo_root, repo_root / "tools" / "bench" / "generation_variants", out, error_out);
 }
 
 }  // namespace emel::bench

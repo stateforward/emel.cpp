@@ -85,7 +85,7 @@ and one-time setup stay outside the timed loop; this case measures preloaded req
 the maintained generation workloads are now pinned by checked-in prompt/workload manifests under:
 
 - `tools/bench/generation_prompts/`
-- `tools/bench/generation_workloads/`
+- `tools/bench/generation_variants/`
 
 these files are the source of truth for prompt identity, formatter mode, sampling, stop
 condition, seed, token budget, and whether a workload is actually comparable across lanes.

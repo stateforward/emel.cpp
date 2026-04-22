@@ -13,7 +13,7 @@ requirements-completed:
 
 ## Delivered
 
-- `generation_workloads/README.md` documents the generation add path.
+- `generation_variants/README.md` documents the generation add path.
 - `embedding_variants/README.md` documents the embedding add path.
 - `reference_backends/README.md` documents `--workload-id` and `--variant-id` selection.
 - Requirements traceability was updated to complete for all 12 v1.14 requirements.
