@@ -91,6 +91,22 @@ inline bool locate_benchmark_json_value(const std::string & text,
   std::size_t cursor = 0u;
   while (cursor < text.size()) {
     const char ch = text[cursor];
+    if (ch == '"') {
+      const std::size_t token_start = cursor;
+      std::string parsed_key = {};
+      std::size_t token_end = 0u;
+      if (!parse_benchmark_json_string_token(text, token_start, parsed_key, &token_end)) {
+        return false;
+      }
+      const std::size_t colon_pos = skip_benchmark_json_ws(text, token_end);
+      if (object_depth == 1 && array_depth == 0 && colon_pos < text.size() &&
+          text[colon_pos] == ':' && parsed_key == key) {
+        value_pos = skip_benchmark_json_ws(text, colon_pos + 1u);
+        return value_pos < text.size();
+      }
+      cursor = token_end;
+      continue;
+    }
     if (ch == '{') {
       ++object_depth;
       ++cursor;
@@ -115,47 +131,7 @@ inline bool locate_benchmark_json_value(const std::string & text,
       ++cursor;
       continue;
     }
-    if (ch != '"') {
-      ++cursor;
-      continue;
-    }
-
-    const std::size_t token_start = cursor;
     ++cursor;
-    bool escaped = false;
-    bool closed = false;
-    while (cursor < text.size()) {
-      const char token_ch = text[cursor++];
-      if (escaped) {
-        escaped = false;
-        continue;
-      }
-      if (token_ch == '\\') {
-        escaped = true;
-        continue;
-      }
-      if (token_ch == '"') {
-        closed = true;
-        break;
-      }
-    }
-    if (!closed) {
-      return false;
-    }
-    const std::size_t token_end = cursor;
-    const std::size_t colon_pos = skip_benchmark_json_ws(text, token_end);
-    if (object_depth == 1 && array_depth == 0 && colon_pos < text.size() &&
-        text[colon_pos] == ':') {
-      std::string parsed_key = {};
-      if (!parse_benchmark_json_string_token(text, token_start, parsed_key)) {
-        return false;
-      }
-      if (parsed_key == key) {
-        value_pos = skip_benchmark_json_ws(text, colon_pos + 1u);
-        return value_pos < text.size();
-      }
-    }
-    cursor = token_end;
   }
   return false;
 }
@@ -197,7 +173,20 @@ inline bool discover_benchmark_manifest_paths(const std::filesystem::path & dire
     }
     return false;
   }
-  for (const auto & entry : std::filesystem::recursive_directory_iterator(directory, ec)) {
+  if (!std::filesystem::is_directory(directory, ec) || ec) {
+    if (error_out != nullptr) {
+      *error_out = "manifest path is not a directory: " + directory.string();
+    }
+    return false;
+  }
+  std::filesystem::recursive_directory_iterator iter(directory, ec);
+  if (ec) {
+    if (error_out != nullptr) {
+      *error_out = "failed to read manifest directory: " + directory.string();
+    }
+    return false;
+  }
+  for (const auto & entry : iter) {
     if (ec) {
       if (error_out != nullptr) {
         *error_out = "failed to read manifest directory: " + directory.string();

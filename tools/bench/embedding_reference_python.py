@@ -18,7 +18,17 @@ SCHEMA = "embedding_compare/v1"
 FORMAT_ENV = "EMEL_EMBEDDING_BENCH_FORMAT"
 RESULT_DIR_ENV = "EMEL_EMBEDDING_RESULT_DIR"
 CASE_FILTER_ENV = "EMEL_BENCH_CASE_FILTER"
+VARIANT_ID_ENV = "EMEL_BENCH_VARIANT_ID"
 VARIANT_SCHEMA = "embedding_variant/v1"
+REQUIRED_VARIANT_STRINGS = (
+  "id",
+  "case_name",
+  "compare_group",
+  "modality",
+  "payload_id",
+  "comparison_mode",
+  "note",
+)
 
 
 def repo_root() -> Path:
@@ -34,23 +44,39 @@ def emit_jsonl() -> bool:
 
 
 def case_enabled(case_name: str, *aliases: str) -> bool:
+  variant_id = aliases[0] if aliases else ""
+  exact_variant_id = os.environ.get(VARIANT_ID_ENV, "")
+  if exact_variant_id:
+    return variant_id == exact_variant_id
   case_filter = os.environ.get(CASE_FILTER_ENV, "")
   return not case_filter or any(case_filter in candidate for candidate in (case_name, *aliases))
 
 
+def validate_embedding_variant(payload: dict[str, object], path: Path) -> None:
+  if payload.get("schema") != VARIANT_SCHEMA:
+    raise ValueError(f"invalid embedding variant schema: {path}")
+  for key in REQUIRED_VARIANT_STRINGS:
+    value = payload.get(key)
+    if not isinstance(value, str) or not value:
+      raise ValueError(f"missing or invalid embedding variant {key}: {path}")
+  if payload["modality"] not in ("text", "image", "audio"):
+    raise ValueError(f"unsupported embedding variant modality: {path}")
+  if not isinstance(payload.get("current_publication"), bool):
+    raise ValueError(f"missing or invalid embedding variant current_publication: {path}")
+
+
 def embedding_variants() -> list[dict[str, object]]:
   root = repo_root() / "tools" / "bench" / "embedding_variants"
+  if not root.is_dir():
+    raise ValueError(f"embedding variant directory missing: {root}")
   variants: list[dict[str, object]] = []
   seen_ids: set[str] = set()
   for path in sorted(root.rglob("*.json")):
     if path.parent == root:
       raise ValueError(f"embedding variant must live in an isolation subdirectory: {path}")
     payload = json.loads(path.read_text(encoding="utf-8"))
-    if payload.get("schema") != VARIANT_SCHEMA:
-      raise ValueError(f"invalid embedding variant schema: {path}")
+    validate_embedding_variant(payload, path)
     variant_id = str(payload.get("id", ""))
-    if not variant_id:
-      raise ValueError(f"missing embedding variant id: {path}")
     if variant_id in seen_ids:
       raise ValueError(f"duplicate embedding variant id: {variant_id}")
     seen_ids.add(variant_id)
@@ -232,9 +258,9 @@ def te75m_goldens_records() -> list[dict[str, object]]:
     case_name = f"reference/python/steady_request/te75m_goldens_{variant_id}"
     compare_group = str(variant.get("compare_group", ""))
     modality = str(variant.get("modality", ""))
-    path = golden_fixture_for_payload(str(variant.get("payload_id", "")), root)
     if not case_enabled(case_name, variant_id, compare_group, modality):
       continue
+    path = golden_fixture_for_payload(str(variant.get("payload_id", "")), root)
     if not path.exists():
       records.append(error_record(
         backend_id="python.reference.te75m_goldens",
@@ -301,9 +327,9 @@ def te75m_live_records() -> list[dict[str, object]]:
     case_name = f"reference/python/steady_request/te75m_live_{variant_id}"
     compare_group = str(variant.get("compare_group", ""))
     modality = str(variant.get("modality", ""))
-    path = golden_fixture_for_payload(str(variant.get("payload_id", "")), temp_root)
     if not case_enabled(case_name, variant_id, compare_group, modality):
       continue
+    path = golden_fixture_for_payload(str(variant.get("payload_id", "")), temp_root)
     if not path.exists():
       records.append(error_record(
         backend_id="python.reference.te75m_live",

@@ -38,7 +38,10 @@ def parse_args() -> argparse.Namespace:
   parser.add_argument("--reference-input", type=Path)
   parser.add_argument("--case-filter", default="")
   parser.add_argument("--variant-id", default="")
-  return parser.parse_args()
+  args = parser.parse_args()
+  if args.case_filter and args.variant_id:
+    parser.error("--variant-id and --case-filter are mutually exclusive")
+  return args
 
 
 def load_manifest(manifest_path: Path) -> dict[str, object]:
@@ -378,9 +381,10 @@ def main() -> int:
   env_updates = {
     "EMEL_EMBEDDING_BENCH_FORMAT": "jsonl",
   }
-  selected_variant = args.variant_id or args.case_filter
-  if selected_variant:
-    env_updates["EMEL_BENCH_CASE_FILTER"] = selected_variant
+  if args.variant_id:
+    env_updates["EMEL_BENCH_VARIANT_ID"] = args.variant_id
+  if args.case_filter:
+    env_updates["EMEL_BENCH_CASE_FILTER"] = args.case_filter
 
   if args.emel_input is None:
     emel_vector_dir = args.output_dir / "vectors" / "emel"

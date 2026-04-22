@@ -6,6 +6,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "emel/embeddings/generator/errors.hpp"
@@ -50,13 +51,19 @@ const std::vector<embedding_variant_manifest> & maintained_embedding_variants() 
 }
 
 bool embedding_variant_enabled(const embedding_variant_manifest & variant) {
+  const char * variant_id = std::getenv("EMEL_BENCH_VARIANT_ID");
+  if (variant_id != nullptr && variant_id[0] != '\0') {
+    return variant.id == std::string_view{variant_id};
+  }
   const char * filter = std::getenv("EMEL_BENCH_CASE_FILTER");
   if (filter == nullptr || filter[0] == '\0') {
     return true;
   }
   const std::string_view value{filter};
-  return variant.id == value || variant.case_name.find(value) != std::string::npos ||
-      variant.compare_group == value || variant.modality == value;
+  return variant.id.find(value) != std::string::npos ||
+      variant.case_name.find(value) != std::string::npos ||
+      variant.compare_group.find(value) != std::string::npos ||
+      variant.modality.find(value) != std::string::npos;
 }
 
 struct initialized_embedding_generator {

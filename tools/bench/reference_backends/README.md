@@ -25,6 +25,6 @@ and continues to run through its existing repo-owned runner surface.
 ## Variant Selection
 
 Generation compare uses `--workload-id` to select one discovered generation workload manifest.
-Embedding compare uses `--variant-id` to select one discovered embedding variant manifest. The
-older `--case-filter` remains available for broad substring filtering, but maintained data-only
-variant additions should prefer the stable manifest IDs.
+Embedding compare uses `--variant-id` to select one discovered embedding variant manifest by
+exact ID. The older `--case-filter` remains available for broad substring filtering, but
+maintained data-only variant additions should prefer the stable manifest IDs.

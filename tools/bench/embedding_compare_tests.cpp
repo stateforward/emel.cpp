@@ -739,7 +739,7 @@ TEST_CASE("embedding generator compare output survives warmup iterations") {
   command += " && " + set_env_windows("EMEL_BENCH_RUNS", "1");
   command += " && " + set_env_windows("EMEL_BENCH_WARMUP_ITERS", "1");
   command += " && " + set_env_windows("EMEL_BENCH_WARMUP_RUNS", "1");
-  command += " && " + set_env_windows("EMEL_BENCH_CASE_FILTER", "text_red_square_full_dim");
+  command += " && " + set_env_windows("EMEL_BENCH_CASE_FILTER", "text/red_square");
   command += " && " + set_env_windows("EMEL_EMBEDDING_BENCH_FORMAT", "jsonl");
   command += " && " + set_env_windows("EMEL_EMBEDDING_RESULT_DIR", result_dir.string());
   command += " && " + quote_arg_windows(embedding_generator_bench_runner_path().string());
@@ -750,7 +750,7 @@ TEST_CASE("embedding generator compare output survives warmup iterations") {
   command += "EMEL_BENCH_RUNS=1 ";
   command += "EMEL_BENCH_WARMUP_ITERS=1 ";
   command += "EMEL_BENCH_WARMUP_RUNS=1 ";
-  command += "EMEL_BENCH_CASE_FILTER=text_red_square_full_dim ";
+  command += "EMEL_BENCH_CASE_FILTER=text/red_square ";
   command += "EMEL_EMBEDDING_BENCH_FORMAT=jsonl ";
   command += "EMEL_EMBEDDING_RESULT_DIR=" + quote_arg_posix(result_dir.string()) + " ";
   command += quote_arg_posix(embedding_generator_bench_runner_path().string());
@@ -878,6 +878,91 @@ TEST_CASE("embedding variant manifests reject flat registry roots") {
   std::string error = {};
   CHECK_FALSE(emel::bench::load_embedding_variant_manifests(tmp_dir, variants, &error));
   CHECK(error.find("isolation subdirectory") != std::string::npos);
+}
+
+TEST_CASE("embedding variant manifests reject non-directory registry roots") {
+  const std::filesystem::path tmp_dir =
+    std::filesystem::temp_directory_path() / "emel-embedding-compare-tests" / "file-root";
+  std::error_code ec = {};
+  std::filesystem::remove_all(tmp_dir, ec);
+  std::filesystem::create_directories(tmp_dir);
+  const std::filesystem::path file_root = tmp_dir / "embedding_variants";
+  write_text_file(file_root, "{}\n");
+
+  std::vector<emel::bench::embedding_variant_manifest> variants = {};
+  std::string error = {};
+  CHECK_FALSE(emel::bench::load_embedding_variant_manifests(file_root, variants, &error));
+  CHECK(error.find("not a directory") != std::string::npos);
+}
+
+TEST_CASE("embedding variant manifests ignore braces inside string values") {
+  const std::filesystem::path tmp_dir =
+    std::filesystem::temp_directory_path() / "emel-embedding-compare-tests" / "string-braces";
+  std::error_code ec = {};
+  std::filesystem::remove_all(tmp_dir, ec);
+  const std::filesystem::path variant_dir = tmp_dir / "te75m" / "text";
+  REQUIRE(std::filesystem::create_directories(variant_dir, ec));
+  REQUIRE(!ec);
+
+  write_text_file(variant_dir / "text.json",
+                  "{\n"
+                  "  \"schema\": \"embedding_variant/v1\",\n"
+                  "  \"id\": \"brace_variant\",\n"
+                  "  \"case_name\": \"embeddings/generator/steady_request/brace\",\n"
+                  "  \"compare_group\": \"text/red_square/full_dim\",\n"
+                  "  \"modality\": \"text\",\n"
+                  "  \"payload_id\": \"red_square_text_v1\",\n"
+                  "  \"comparison_mode\": \"parity\",\n"
+                  "  \"note\": \"contains } and [ in a string\",\n"
+                  "  \"current_publication\": false\n"
+                  "}\n");
+
+  std::vector<emel::bench::embedding_variant_manifest> variants = {};
+  std::string error = {};
+  CHECK(emel::bench::load_embedding_variant_manifests(tmp_dir, variants, &error));
+  CHECK(error.empty());
+  REQUIRE(variants.size() == 1u);
+  CHECK(variants[0].id == "brace_variant");
+}
+
+TEST_CASE("embedding compare rejects mixed exact and broad filters") {
+  const std::filesystem::path tmp_dir =
+    std::filesystem::temp_directory_path() / "emel-embedding-compare-tests" / "mixed-filters";
+  const std::filesystem::path output_dir = tmp_dir / "out";
+  const std::filesystem::path emel_jsonl = tmp_dir / "emel.jsonl";
+  const std::filesystem::path reference_jsonl = tmp_dir / "reference.jsonl";
+  const std::filesystem::path stdout_path = tmp_dir / "stdout.txt";
+  const std::filesystem::path stderr_path = tmp_dir / "stderr.txt";
+  std::error_code ec = {};
+  std::filesystem::remove_all(tmp_dir, ec);
+  std::filesystem::create_directories(tmp_dir);
+  write_text_file(emel_jsonl, "");
+  write_text_file(reference_jsonl, "");
+
+  std::string command;
+#if defined(_WIN32)
+  command = "python3 " + quote_arg_windows(embedding_compare_script_path().string());
+  command += " --emel-input " + quote_arg_windows(emel_jsonl.string());
+  command += " --reference-input " + quote_arg_windows(reference_jsonl.string());
+  command += " --output-dir " + quote_arg_windows(output_dir.string());
+  command += " --case-filter text";
+  command += " --variant-id te75m_text_red_square_full_dim";
+  command += " > " + quote_arg_windows(stdout_path.string());
+  command += " 2> " + quote_arg_windows(stderr_path.string());
+#else
+  command = "python3 " + quote_arg_posix(embedding_compare_script_path().string());
+  command += " --emel-input " + quote_arg_posix(emel_jsonl.string());
+  command += " --reference-input " + quote_arg_posix(reference_jsonl.string());
+  command += " --output-dir " + quote_arg_posix(output_dir.string());
+  command += " --case-filter text";
+  command += " --variant-id te75m_text_red_square_full_dim";
+  command += " > " + quote_arg_posix(stdout_path.string());
+  command += " 2> " + quote_arg_posix(stderr_path.string());
+#endif
+  const process_capture capture = run_command_capture(command, stdout_path, stderr_path);
+
+  CHECK(capture.exit_code != 0);
+  CHECK(capture.stderr_text.find("mutually exclusive") != std::string::npos);
 }
 
 #if !defined(_WIN32)
@@ -1021,10 +1106,10 @@ TEST_CASE("python golden backend emits canonical compare records") {
   CHECK(std::filesystem::exists(result_dir));
 }
 
-TEST_CASE("python golden backend filters by embedding variant id") {
+TEST_CASE("python golden backend filters by broad case filter") {
   const std::filesystem::path tmp_dir =
     std::filesystem::temp_directory_path() / "emel-embedding-compare-tests" /
-    "python-goldens-variant-filter";
+    "python-goldens-case-filter";
   std::filesystem::create_directories(tmp_dir);
   const std::filesystem::path stdout_path = tmp_dir / "stdout.txt";
   const std::filesystem::path stderr_path = tmp_dir / "stderr.txt";
@@ -1039,6 +1124,40 @@ TEST_CASE("python golden backend filters by embedding variant id") {
 #else
   command = "EMEL_EMBEDDING_BENCH_FORMAT=jsonl ";
   command += "EMEL_BENCH_CASE_FILTER=te75m_text_red_square_full_dim ";
+  command += "python3 " + quote_arg_posix(embedding_reference_python_path().string());
+  command += " --backend te75m_goldens > " + quote_arg_posix(stdout_path.string());
+  command += " 2> " + quote_arg_posix(stderr_path.string());
+#endif
+  const process_capture capture = run_command_capture(command, stdout_path, stderr_path);
+
+  CHECK(capture.exit_code == 0);
+  CHECK(capture.stderr_text.empty());
+  CHECK(capture.stdout_text.find("\"compare_group\": \"text/red_square/full_dim\"") !=
+        std::string::npos);
+  CHECK(capture.stdout_text.find("\"compare_group\": \"image/red_square/full_dim\"") ==
+        std::string::npos);
+  CHECK(capture.stdout_text.find("\"compare_group\": \"audio/pure_tone_440hz/full_dim\"") ==
+        std::string::npos);
+}
+
+TEST_CASE("python golden backend filters by exact embedding variant id") {
+  const std::filesystem::path tmp_dir =
+    std::filesystem::temp_directory_path() / "emel-embedding-compare-tests" /
+    "python-goldens-variant-filter";
+  std::filesystem::create_directories(tmp_dir);
+  const std::filesystem::path stdout_path = tmp_dir / "stdout.txt";
+  const std::filesystem::path stderr_path = tmp_dir / "stderr.txt";
+
+  std::string command;
+#if defined(_WIN32)
+  command = set_env_windows("EMEL_EMBEDDING_BENCH_FORMAT", "jsonl") + " && ";
+  command += set_env_windows("EMEL_BENCH_VARIANT_ID", "te75m_text_red_square_full_dim") + " && ";
+  command += "python3 " + quote_arg_windows(embedding_reference_python_path().string());
+  command += " --backend te75m_goldens > " + quote_arg_windows(stdout_path.string());
+  command += " 2> " + quote_arg_windows(stderr_path.string());
+#else
+  command = "EMEL_EMBEDDING_BENCH_FORMAT=jsonl ";
+  command += "EMEL_BENCH_VARIANT_ID=te75m_text_red_square_full_dim ";
   command += "python3 " + quote_arg_posix(embedding_reference_python_path().string());
   command += " --backend te75m_goldens > " + quote_arg_posix(stdout_path.string());
   command += " 2> " + quote_arg_posix(stderr_path.string());

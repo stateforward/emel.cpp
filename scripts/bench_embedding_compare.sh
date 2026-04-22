@@ -72,6 +72,12 @@ if [[ -z "$REFERENCE_BACKEND" ]]; then
   exit 1
 fi
 
+if [[ -n "$CASE_FILTER" && -n "$VARIANT_ID" ]]; then
+  echo "error: --case-filter and --variant-id are mutually exclusive" >&2
+  usage
+  exit 1
+fi
+
 if ! command -v python3 >/dev/null 2>&1; then
   echo "error: required tool missing: python3" >&2
   exit 1
