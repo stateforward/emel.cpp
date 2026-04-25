@@ -620,3 +620,65 @@ TEST_CASE("sortformer executor rejects insufficient hidden output capacity") {
   CHECK(frame_count == 0);
   CHECK(hidden_dim == 0);
 }
+
+TEST_CASE("sortformer executor reports encoder projection kernel failures") {
+  auto fixture = std::make_unique<model_fixture>();
+  const auto contract = make_contract(fixture->model);
+  const auto encoder_frames = make_encoder_frames();
+  std::vector<float> hidden_out(static_cast<size_t>(
+      executor_detail::k_required_hidden_value_count),
+                                -7.0f);
+  int32_t frame_count = -1;
+  int32_t hidden_dim = -1;
+  emel::error::type err = emel::error::cast(executor::error::none);
+
+  auto request = make_request(contract, encoder_frames, hidden_out, frame_count, hidden_dim, err);
+  executor::event::execute_ctx runtime_ctx = {};
+  executor::event::execute_run runtime_ev{request, runtime_ctx};
+  executor::action::context ctx = {};
+
+  executor::action::effect_begin_execute(runtime_ev, ctx);
+  executor::action::effect_bind_contracts(runtime_ev, ctx);
+  ctx.encoder_projection_weight_cache.source = nullptr;
+  executor::action::effect_project_encoder(runtime_ev, ctx);
+
+  CHECK(runtime_ctx.err == emel::error::cast(executor::error::kernel));
+  CHECK(frame_count == 0);
+  CHECK(hidden_dim == 0);
+  CHECK(std::all_of(hidden_out.begin(), hidden_out.end(), [](const float value) {
+    return value == -7.0f;
+  }));
+}
+
+TEST_CASE("sortformer executor reports transformer kernel failures before publishing") {
+  auto fixture = std::make_unique<model_fixture>();
+  const auto contract = make_contract(fixture->model);
+  const auto encoder_frames = make_encoder_frames();
+  std::vector<float> hidden_out(static_cast<size_t>(
+      executor_detail::k_required_hidden_value_count),
+                                -11.0f);
+  int32_t frame_count = -1;
+  int32_t hidden_dim = -1;
+  emel::error::type err = emel::error::cast(executor::error::none);
+
+  auto request = make_request(contract, encoder_frames, hidden_out, frame_count, hidden_dim, err);
+  executor::event::execute_ctx runtime_ctx = {};
+  executor::event::execute_run runtime_ev{request, runtime_ctx};
+  executor::action::context ctx = {};
+
+  executor::action::effect_begin_execute(runtime_ev, ctx);
+  executor::action::effect_bind_contracts(runtime_ev, ctx);
+  executor::action::effect_project_encoder(runtime_ev, ctx);
+  REQUIRE(runtime_ctx.err == emel::error::cast(executor::error::none));
+
+  ctx.transformer_workspace.attention_weight_caches[0].source = nullptr;
+  executor::action::effect_write_projected_frames_to_cache(runtime_ev, ctx);
+  executor::action::effect_execute_transformer_layer_00(runtime_ev, ctx);
+
+  CHECK(runtime_ctx.err == emel::error::cast(executor::error::kernel));
+  CHECK(frame_count == 0);
+  CHECK(hidden_dim == 0);
+  CHECK(std::all_of(hidden_out.begin(), hidden_out.end(), [](const float value) {
+    return value == -11.0f;
+  }));
+}

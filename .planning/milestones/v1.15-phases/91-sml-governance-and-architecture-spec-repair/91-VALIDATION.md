@@ -32,8 +32,8 @@ created: 2026-04-23
 |----------|-------|
 | **Framework** | phase-artifact verification via `rg` |
 | **Config file** | none |
-| **Quick run command** | `rg -n '^status: passed$|RUN-02|DIA-03|DOC-01|\\.planning/architecture' .planning/phases/91-sml-governance-and-architecture-spec-repair/{91-VERIFICATION.md,91-01-SUMMARY.md}` |
-| **Full suite command** | `rg -n '^requirements-completed:|RUN-02|DIA-03|DOC-01|docs/architecture/` is absent|\\.planning/architecture/' .planning/phases/91-sml-governance-and-architecture-spec-repair/{91-01-SUMMARY.md,91-VERIFICATION.md,91-VALIDATION.md}` |
+| **Quick run command** | `rg -n '^status: passed$|RUN-02|DIA-03|DOC-01|\.planning/architecture' .planning/milestones/v1.15-phases/91-sml-governance-and-architecture-spec-repair/{91-VERIFICATION.md,91-01-SUMMARY.md}` |
+| **Full suite command** | `rg -n '^requirements-completed:|RUN-02|DIA-03|DOC-01|docs/architecture is absent|\.planning/architecture' .planning/milestones/v1.15-phases/91-sml-governance-and-architecture-spec-repair/{91-01-SUMMARY.md,91-VERIFICATION.md,91-VALIDATION.md} && test ! -d docs/architecture` |
 | **Estimated runtime** | <1 second |
 
 ## Manual-Only Verifications

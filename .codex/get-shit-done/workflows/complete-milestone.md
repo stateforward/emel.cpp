@@ -86,7 +86,7 @@ result. Do not archive from roadmap/requirements completion alone when the audit
 or `tech_debt`.
 
 ```bash
-INIT=$(node "/Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/.codex/get-shit-done/bin/gsd-tools.cjs" init milestone-op)
+INIT=$(node .codex/get-shit-done/bin/gsd-tools.cjs init milestone-op)
 if [[ "$INIT" == @file:* ]]; then INIT=$(cat "${INIT#@file:}"); fi
 MILESTONE_VERSION=$(printf '%s' "$INIT" | node -e 'const fs=require("fs"); const data=JSON.parse(fs.readFileSync(0,"utf8")); process.stdout.write(data.milestone_version || "");')
 AUDIT_PATH=".planning/${MILESTONE_VERSION}-MILESTONE-AUDIT.md"
@@ -544,7 +544,7 @@ ls .planning/RETROSPECTIVE.md 2>/dev/null || true
 
 **If exists:** Read the file, append new milestone section before the "## Cross-Milestone Trends" section.
 
-**If doesn't exist:** Create from template at `/Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/.codex/get-shit-done/templates/retrospective.md`.
+**If doesn't exist:** Create from template at `.codex/get-shit-done/templates/retrospective.md`.
 
 **Gather retrospective data:**
 

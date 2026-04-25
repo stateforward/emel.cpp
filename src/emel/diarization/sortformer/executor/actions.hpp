@@ -13,7 +13,7 @@
 namespace emel::diarization::sortformer::executor::action {
 
 template <int32_t layer_index>
-void execute_transformer_layer(context & ctx) noexcept {
+bool compute_transformer_layer(context & ctx) noexcept {
   namespace transformer_detail = emel::diarization::sortformer::transformer::detail;
   const auto & layer_view = ctx.transformer.layers[static_cast<size_t>(layer_index)];
   constexpr size_t attention_cache_base = static_cast<size_t>(layer_index) * 4u;
@@ -30,11 +30,12 @@ void execute_transformer_layer(context & ctx) noexcept {
       ctx.transformer_workspace.feed_forward_weight_caches[feed_forward_cache_base + 0u];
   const auto & feed_forward_out_cache =
       ctx.transformer_workspace.feed_forward_weight_caches[feed_forward_cache_base + 1u];
+  bool layer_ok = false;
 
   if constexpr ((layer_index % 2) == 0) {
     const std::span<const float> layer_input{ctx.hidden_a};
     std::span<float> layer_output{ctx.hidden_b};
-    transformer_detail::compute_transformer_layer(
+    layer_ok = transformer_detail::compute_transformer_layer(
         layer_input,
         static_cast<uint32_t>(detail::k_frame_count),
         detail::tensor_data<transformer_detail::k_hidden_dim * transformer_detail::k_hidden_dim>(
@@ -70,7 +71,7 @@ void execute_transformer_layer(context & ctx) noexcept {
   } else {
     const std::span<const float> layer_input{ctx.hidden_b};
     std::span<float> layer_output{ctx.hidden_a};
-    transformer_detail::compute_transformer_layer(
+    layer_ok = transformer_detail::compute_transformer_layer(
         layer_input,
         static_cast<uint32_t>(detail::k_frame_count),
         detail::tensor_data<transformer_detail::k_hidden_dim * transformer_detail::k_hidden_dim>(
@@ -105,9 +106,7 @@ void execute_transformer_layer(context & ctx) noexcept {
         layer_output);
   }
 
-  if constexpr (layer_index + 1 < emel::diarization::sortformer::transformer::detail::k_layer_count) {
-    execute_transformer_layer<layer_index + 1>(ctx);
-  }
+  return layer_ok;
 }
 
 inline std::span<const float> final_hidden_frames(const context & ctx) noexcept {
@@ -116,6 +115,62 @@ inline std::span<const float> final_hidden_frames(const context & ctx) noexcept 
   } else {
     return std::span<const float>{ctx.hidden_b};
   }
+}
+
+inline void store_execution_result(event::execute_ctx & runtime_ctx, const bool ok) noexcept {
+  runtime_ctx.err = detail::to_error(error::kernel) *
+      static_cast<emel::error::type>(!ok);
+}
+
+inline void reset_stage_buffers(context & ctx) noexcept {
+  emel::diarization::sortformer::cache::detail::reset(ctx.cache);
+  std::fill(ctx.hidden_a.begin(), ctx.hidden_a.end(), 0.0f);
+  std::fill(ctx.hidden_b.begin(), ctx.hidden_b.end(), 0.0f);
+}
+
+inline bool compute_encoder_projection_stage(
+    const event::execute_run & runtime_ev,
+    context & ctx) noexcept {
+  namespace modules_detail = emel::diarization::sortformer::modules::detail;
+
+  const auto encoder_projection_weight =
+      detail::tensor_data<modules_detail::k_hidden_dim * modules_detail::k_encoder_dim>(
+          *ctx.modules.encoder_projection_weight.tensor);
+  const auto encoder_projection_bias =
+      detail::tensor_data<modules_detail::k_hidden_dim>(
+          *ctx.modules.encoder_projection_bias.tensor);
+
+  return modules_detail::compute_encoder_projection_batch(
+      runtime_ev.request.encoder_frames,
+      static_cast<size_t>(detail::k_frame_count),
+      encoder_projection_weight,
+      ctx.encoder_projection_weight_cache,
+      encoder_projection_bias,
+      ctx.transformer_workspace.dense_transposed_input,
+      ctx.transformer_workspace.dense_transposed_output,
+      ctx.hidden_a);
+}
+
+inline void write_projected_frames_to_cache(context & ctx) noexcept {
+  namespace modules_detail = emel::diarization::sortformer::modules::detail;
+
+  for (int32_t frame = 0; frame < detail::k_frame_count; ++frame) {
+    const size_t hidden_offset = static_cast<size_t>(frame) * detail::k_hidden_dim;
+    auto hidden_frame = std::span<float, modules_detail::k_hidden_dim>{
+        ctx.hidden_a.data() + hidden_offset,
+        modules_detail::k_hidden_dim};
+    emel::diarization::sortformer::cache::detail::write_frame(ctx.cache, frame, hidden_frame);
+  }
+}
+
+inline void publish_hidden_stage(const event::execute_run & runtime_ev,
+                                 const context & ctx) noexcept {
+  const auto hidden_frames = final_hidden_frames(ctx);
+  std::copy(hidden_frames.begin(),
+            hidden_frames.end(),
+            runtime_ev.request.hidden_out.begin());
+  runtime_ev.request.frame_count_out = detail::k_frame_count;
+  runtime_ev.request.hidden_dim_out = detail::k_hidden_dim;
 }
 
 struct effect_begin_execute {
@@ -168,48 +223,29 @@ struct effect_bind_contracts {
   }
 };
 
-struct effect_execute_stage {
+struct effect_project_encoder {
   void operator()(const event::execute_run & runtime_ev, context & ctx) const noexcept {
-    namespace modules_detail = emel::diarization::sortformer::modules::detail;
-    namespace transformer_detail = emel::diarization::sortformer::transformer::detail;
+    reset_stage_buffers(ctx);
+    store_execution_result(runtime_ev.ctx, compute_encoder_projection_stage(runtime_ev, ctx));
+  }
+};
 
-    emel::diarization::sortformer::cache::detail::reset(ctx.cache);
-    std::fill(ctx.hidden_a.begin(), ctx.hidden_a.end(), 0.0f);
-    std::fill(ctx.hidden_b.begin(), ctx.hidden_b.end(), 0.0f);
+struct effect_write_projected_frames_to_cache {
+  void operator()(const event::execute_run &, context & ctx) const noexcept {
+    write_projected_frames_to_cache(ctx);
+  }
+};
 
-    const auto encoder_projection_weight =
-        detail::tensor_data<modules_detail::k_hidden_dim * modules_detail::k_encoder_dim>(
-            *ctx.modules.encoder_projection_weight.tensor);
-    const auto encoder_projection_bias =
-        detail::tensor_data<modules_detail::k_hidden_dim>(
-            *ctx.modules.encoder_projection_bias.tensor);
+template <int32_t layer_index>
+struct effect_execute_transformer_layer {
+  void operator()(const event::execute_run & runtime_ev, context & ctx) const noexcept {
+    store_execution_result(runtime_ev.ctx, compute_transformer_layer<layer_index>(ctx));
+  }
+};
 
-    (void) modules_detail::compute_encoder_projection_batch(
-        runtime_ev.request.encoder_frames,
-        static_cast<size_t>(detail::k_frame_count),
-        encoder_projection_weight,
-        ctx.encoder_projection_weight_cache,
-        encoder_projection_bias,
-        ctx.transformer_workspace.dense_transposed_input,
-        ctx.transformer_workspace.dense_transposed_output,
-        ctx.hidden_a);
-
-    for (int32_t frame = 0; frame < detail::k_frame_count; ++frame) {
-      const size_t hidden_offset = static_cast<size_t>(frame) * detail::k_hidden_dim;
-      auto hidden_frame = std::span<float, modules_detail::k_hidden_dim>{
-          ctx.hidden_a.data() + hidden_offset,
-          modules_detail::k_hidden_dim};
-      emel::diarization::sortformer::cache::detail::write_frame(ctx.cache, frame, hidden_frame);
-    }
-
-    execute_transformer_layer<0>(ctx);
-
-    const auto hidden_frames = final_hidden_frames(ctx);
-    std::copy(hidden_frames.begin(),
-              hidden_frames.end(),
-              runtime_ev.request.hidden_out.begin());
-    runtime_ev.request.frame_count_out = detail::k_frame_count;
-    runtime_ev.request.hidden_dim_out = detail::k_hidden_dim;
+struct effect_publish_hidden {
+  void operator()(const event::execute_run & runtime_ev, context & ctx) const noexcept {
+    publish_hidden_stage(runtime_ev, ctx);
     runtime_ev.ctx.err = detail::to_error(error::none);
   }
 };
@@ -270,7 +306,27 @@ inline constexpr effect_mark_tensor_contract_invalid effect_mark_tensor_contract
 inline constexpr effect_mark_input_shape_invalid effect_mark_input_shape_invalid{};
 inline constexpr effect_mark_output_capacity_invalid effect_mark_output_capacity_invalid{};
 inline constexpr effect_bind_contracts effect_bind_contracts{};
-inline constexpr effect_execute_stage effect_execute_stage{};
+inline constexpr effect_project_encoder effect_project_encoder{};
+inline constexpr effect_write_projected_frames_to_cache effect_write_projected_frames_to_cache{};
+inline constexpr effect_execute_transformer_layer<0> effect_execute_transformer_layer_00{};
+inline constexpr effect_execute_transformer_layer<1> effect_execute_transformer_layer_01{};
+inline constexpr effect_execute_transformer_layer<2> effect_execute_transformer_layer_02{};
+inline constexpr effect_execute_transformer_layer<3> effect_execute_transformer_layer_03{};
+inline constexpr effect_execute_transformer_layer<4> effect_execute_transformer_layer_04{};
+inline constexpr effect_execute_transformer_layer<5> effect_execute_transformer_layer_05{};
+inline constexpr effect_execute_transformer_layer<6> effect_execute_transformer_layer_06{};
+inline constexpr effect_execute_transformer_layer<7> effect_execute_transformer_layer_07{};
+inline constexpr effect_execute_transformer_layer<8> effect_execute_transformer_layer_08{};
+inline constexpr effect_execute_transformer_layer<9> effect_execute_transformer_layer_09{};
+inline constexpr effect_execute_transformer_layer<10> effect_execute_transformer_layer_10{};
+inline constexpr effect_execute_transformer_layer<11> effect_execute_transformer_layer_11{};
+inline constexpr effect_execute_transformer_layer<12> effect_execute_transformer_layer_12{};
+inline constexpr effect_execute_transformer_layer<13> effect_execute_transformer_layer_13{};
+inline constexpr effect_execute_transformer_layer<14> effect_execute_transformer_layer_14{};
+inline constexpr effect_execute_transformer_layer<15> effect_execute_transformer_layer_15{};
+inline constexpr effect_execute_transformer_layer<16> effect_execute_transformer_layer_16{};
+inline constexpr effect_execute_transformer_layer<17> effect_execute_transformer_layer_17{};
+inline constexpr effect_publish_hidden effect_publish_hidden{};
 inline constexpr effect_store_success_error effect_store_success_error{};
 inline constexpr effect_emit_done effect_emit_done{};
 inline constexpr effect_publish_success_and_emit_done effect_publish_success_and_emit_done{};

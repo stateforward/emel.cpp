@@ -5,7 +5,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/.codex/hooks/gsd-session-start.sh",
+            "command": ".codex/hooks/gsd-session-start.sh",
             "timeout": 10
           }
         ]
@@ -16,7 +16,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/Users/gabrielwillen/.atmux/src/atmux/adapter/scripts/on-stop",
+            "command": ".codex/hooks/atmux-on-stop.sh",
             "timeout": 60
           }
         ]

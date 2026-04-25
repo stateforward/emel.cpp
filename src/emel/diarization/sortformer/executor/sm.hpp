@@ -17,7 +17,27 @@ struct state_tensor_contract_decision {};
 struct state_input_shape_decision {};
 struct state_output_capacity_decision {};
 struct state_binding {};
-struct state_executing {};
+struct state_projecting {};
+struct state_transformer_cache {};
+struct state_transformer_layer_00 {};
+struct state_transformer_layer_01 {};
+struct state_transformer_layer_02 {};
+struct state_transformer_layer_03 {};
+struct state_transformer_layer_04 {};
+struct state_transformer_layer_05 {};
+struct state_transformer_layer_06 {};
+struct state_transformer_layer_07 {};
+struct state_transformer_layer_08 {};
+struct state_transformer_layer_09 {};
+struct state_transformer_layer_10 {};
+struct state_transformer_layer_11 {};
+struct state_transformer_layer_12 {};
+struct state_transformer_layer_13 {};
+struct state_transformer_layer_14 {};
+struct state_transformer_layer_15 {};
+struct state_transformer_layer_16 {};
+struct state_transformer_layer_17 {};
+struct state_publishing_hidden {};
 struct state_success_error_out_decision {};
 struct state_success_callback_decision {};
 struct state_error_error_out_decision {};
@@ -63,13 +83,109 @@ struct model {
 
       //------------------------------------------------------------------------------//
       // Stage execution.
-      , sml::state<state_executing> <= sml::state<state_binding>
+      , sml::state<state_projecting> <= sml::state<state_binding>
           + sml::completion<event::execute_run>
-          / action::effect_execute_stage
-      , sml::state<state_success_error_out_decision> <= sml::state<state_executing>
+          / action::effect_project_encoder
+      , sml::state<state_transformer_cache> <= sml::state<state_projecting>
           + sml::completion<event::execute_run> [ guard::guard_execution_ok{} ]
-      , sml::state<state_error_error_out_decision> <= sml::state<state_executing>
+          / action::effect_write_projected_frames_to_cache
+      , sml::state<state_error_error_out_decision> <= sml::state<state_projecting>
           + sml::completion<event::execute_run> [ guard::guard_execution_failed{} ]
+      , sml::state<state_transformer_layer_00> <= sml::state<state_transformer_cache>
+          + sml::completion<event::execute_run>
+          / action::effect_execute_transformer_layer_00
+      , sml::state<state_transformer_layer_01> <= sml::state<state_transformer_layer_00>
+          + sml::completion<event::execute_run> [ guard::guard_execution_ok{} ]
+          / action::effect_execute_transformer_layer_01
+      , sml::state<state_error_error_out_decision> <= sml::state<state_transformer_layer_00>
+          + sml::completion<event::execute_run> [ guard::guard_execution_failed{} ]
+      , sml::state<state_transformer_layer_02> <= sml::state<state_transformer_layer_01>
+          + sml::completion<event::execute_run> [ guard::guard_execution_ok{} ]
+          / action::effect_execute_transformer_layer_02
+      , sml::state<state_error_error_out_decision> <= sml::state<state_transformer_layer_01>
+          + sml::completion<event::execute_run> [ guard::guard_execution_failed{} ]
+      , sml::state<state_transformer_layer_03> <= sml::state<state_transformer_layer_02>
+          + sml::completion<event::execute_run> [ guard::guard_execution_ok{} ]
+          / action::effect_execute_transformer_layer_03
+      , sml::state<state_error_error_out_decision> <= sml::state<state_transformer_layer_02>
+          + sml::completion<event::execute_run> [ guard::guard_execution_failed{} ]
+      , sml::state<state_transformer_layer_04> <= sml::state<state_transformer_layer_03>
+          + sml::completion<event::execute_run> [ guard::guard_execution_ok{} ]
+          / action::effect_execute_transformer_layer_04
+      , sml::state<state_error_error_out_decision> <= sml::state<state_transformer_layer_03>
+          + sml::completion<event::execute_run> [ guard::guard_execution_failed{} ]
+      , sml::state<state_transformer_layer_05> <= sml::state<state_transformer_layer_04>
+          + sml::completion<event::execute_run> [ guard::guard_execution_ok{} ]
+          / action::effect_execute_transformer_layer_05
+      , sml::state<state_error_error_out_decision> <= sml::state<state_transformer_layer_04>
+          + sml::completion<event::execute_run> [ guard::guard_execution_failed{} ]
+      , sml::state<state_transformer_layer_06> <= sml::state<state_transformer_layer_05>
+          + sml::completion<event::execute_run> [ guard::guard_execution_ok{} ]
+          / action::effect_execute_transformer_layer_06
+      , sml::state<state_error_error_out_decision> <= sml::state<state_transformer_layer_05>
+          + sml::completion<event::execute_run> [ guard::guard_execution_failed{} ]
+      , sml::state<state_transformer_layer_07> <= sml::state<state_transformer_layer_06>
+          + sml::completion<event::execute_run> [ guard::guard_execution_ok{} ]
+          / action::effect_execute_transformer_layer_07
+      , sml::state<state_error_error_out_decision> <= sml::state<state_transformer_layer_06>
+          + sml::completion<event::execute_run> [ guard::guard_execution_failed{} ]
+      , sml::state<state_transformer_layer_08> <= sml::state<state_transformer_layer_07>
+          + sml::completion<event::execute_run> [ guard::guard_execution_ok{} ]
+          / action::effect_execute_transformer_layer_08
+      , sml::state<state_error_error_out_decision> <= sml::state<state_transformer_layer_07>
+          + sml::completion<event::execute_run> [ guard::guard_execution_failed{} ]
+      , sml::state<state_transformer_layer_09> <= sml::state<state_transformer_layer_08>
+          + sml::completion<event::execute_run> [ guard::guard_execution_ok{} ]
+          / action::effect_execute_transformer_layer_09
+      , sml::state<state_error_error_out_decision> <= sml::state<state_transformer_layer_08>
+          + sml::completion<event::execute_run> [ guard::guard_execution_failed{} ]
+      , sml::state<state_transformer_layer_10> <= sml::state<state_transformer_layer_09>
+          + sml::completion<event::execute_run> [ guard::guard_execution_ok{} ]
+          / action::effect_execute_transformer_layer_10
+      , sml::state<state_error_error_out_decision> <= sml::state<state_transformer_layer_09>
+          + sml::completion<event::execute_run> [ guard::guard_execution_failed{} ]
+      , sml::state<state_transformer_layer_11> <= sml::state<state_transformer_layer_10>
+          + sml::completion<event::execute_run> [ guard::guard_execution_ok{} ]
+          / action::effect_execute_transformer_layer_11
+      , sml::state<state_error_error_out_decision> <= sml::state<state_transformer_layer_10>
+          + sml::completion<event::execute_run> [ guard::guard_execution_failed{} ]
+      , sml::state<state_transformer_layer_12> <= sml::state<state_transformer_layer_11>
+          + sml::completion<event::execute_run> [ guard::guard_execution_ok{} ]
+          / action::effect_execute_transformer_layer_12
+      , sml::state<state_error_error_out_decision> <= sml::state<state_transformer_layer_11>
+          + sml::completion<event::execute_run> [ guard::guard_execution_failed{} ]
+      , sml::state<state_transformer_layer_13> <= sml::state<state_transformer_layer_12>
+          + sml::completion<event::execute_run> [ guard::guard_execution_ok{} ]
+          / action::effect_execute_transformer_layer_13
+      , sml::state<state_error_error_out_decision> <= sml::state<state_transformer_layer_12>
+          + sml::completion<event::execute_run> [ guard::guard_execution_failed{} ]
+      , sml::state<state_transformer_layer_14> <= sml::state<state_transformer_layer_13>
+          + sml::completion<event::execute_run> [ guard::guard_execution_ok{} ]
+          / action::effect_execute_transformer_layer_14
+      , sml::state<state_error_error_out_decision> <= sml::state<state_transformer_layer_13>
+          + sml::completion<event::execute_run> [ guard::guard_execution_failed{} ]
+      , sml::state<state_transformer_layer_15> <= sml::state<state_transformer_layer_14>
+          + sml::completion<event::execute_run> [ guard::guard_execution_ok{} ]
+          / action::effect_execute_transformer_layer_15
+      , sml::state<state_error_error_out_decision> <= sml::state<state_transformer_layer_14>
+          + sml::completion<event::execute_run> [ guard::guard_execution_failed{} ]
+      , sml::state<state_transformer_layer_16> <= sml::state<state_transformer_layer_15>
+          + sml::completion<event::execute_run> [ guard::guard_execution_ok{} ]
+          / action::effect_execute_transformer_layer_16
+      , sml::state<state_error_error_out_decision> <= sml::state<state_transformer_layer_15>
+          + sml::completion<event::execute_run> [ guard::guard_execution_failed{} ]
+      , sml::state<state_transformer_layer_17> <= sml::state<state_transformer_layer_16>
+          + sml::completion<event::execute_run> [ guard::guard_execution_ok{} ]
+          / action::effect_execute_transformer_layer_17
+      , sml::state<state_error_error_out_decision> <= sml::state<state_transformer_layer_16>
+          + sml::completion<event::execute_run> [ guard::guard_execution_failed{} ]
+      , sml::state<state_publishing_hidden> <= sml::state<state_transformer_layer_17>
+          + sml::completion<event::execute_run> [ guard::guard_execution_ok{} ]
+          / action::effect_publish_hidden
+      , sml::state<state_error_error_out_decision> <= sml::state<state_transformer_layer_17>
+          + sml::completion<event::execute_run> [ guard::guard_execution_failed{} ]
+      , sml::state<state_success_error_out_decision> <= sml::state<state_publishing_hidden>
+          + sml::completion<event::execute_run> [ guard::guard_execution_ok{} ]
 
       //------------------------------------------------------------------------------//
       // Publish.
@@ -112,7 +228,47 @@ struct model {
           + sml::unexpected_event<sml::_> / action::effect_on_unexpected
       , sml::state<state_ready> <= sml::state<state_binding>
           + sml::unexpected_event<sml::_> / action::effect_on_unexpected
-      , sml::state<state_ready> <= sml::state<state_executing>
+      , sml::state<state_ready> <= sml::state<state_projecting>
+          + sml::unexpected_event<sml::_> / action::effect_on_unexpected
+      , sml::state<state_ready> <= sml::state<state_transformer_cache>
+          + sml::unexpected_event<sml::_> / action::effect_on_unexpected
+      , sml::state<state_ready> <= sml::state<state_transformer_layer_00>
+          + sml::unexpected_event<sml::_> / action::effect_on_unexpected
+      , sml::state<state_ready> <= sml::state<state_transformer_layer_01>
+          + sml::unexpected_event<sml::_> / action::effect_on_unexpected
+      , sml::state<state_ready> <= sml::state<state_transformer_layer_02>
+          + sml::unexpected_event<sml::_> / action::effect_on_unexpected
+      , sml::state<state_ready> <= sml::state<state_transformer_layer_03>
+          + sml::unexpected_event<sml::_> / action::effect_on_unexpected
+      , sml::state<state_ready> <= sml::state<state_transformer_layer_04>
+          + sml::unexpected_event<sml::_> / action::effect_on_unexpected
+      , sml::state<state_ready> <= sml::state<state_transformer_layer_05>
+          + sml::unexpected_event<sml::_> / action::effect_on_unexpected
+      , sml::state<state_ready> <= sml::state<state_transformer_layer_06>
+          + sml::unexpected_event<sml::_> / action::effect_on_unexpected
+      , sml::state<state_ready> <= sml::state<state_transformer_layer_07>
+          + sml::unexpected_event<sml::_> / action::effect_on_unexpected
+      , sml::state<state_ready> <= sml::state<state_transformer_layer_08>
+          + sml::unexpected_event<sml::_> / action::effect_on_unexpected
+      , sml::state<state_ready> <= sml::state<state_transformer_layer_09>
+          + sml::unexpected_event<sml::_> / action::effect_on_unexpected
+      , sml::state<state_ready> <= sml::state<state_transformer_layer_10>
+          + sml::unexpected_event<sml::_> / action::effect_on_unexpected
+      , sml::state<state_ready> <= sml::state<state_transformer_layer_11>
+          + sml::unexpected_event<sml::_> / action::effect_on_unexpected
+      , sml::state<state_ready> <= sml::state<state_transformer_layer_12>
+          + sml::unexpected_event<sml::_> / action::effect_on_unexpected
+      , sml::state<state_ready> <= sml::state<state_transformer_layer_13>
+          + sml::unexpected_event<sml::_> / action::effect_on_unexpected
+      , sml::state<state_ready> <= sml::state<state_transformer_layer_14>
+          + sml::unexpected_event<sml::_> / action::effect_on_unexpected
+      , sml::state<state_ready> <= sml::state<state_transformer_layer_15>
+          + sml::unexpected_event<sml::_> / action::effect_on_unexpected
+      , sml::state<state_ready> <= sml::state<state_transformer_layer_16>
+          + sml::unexpected_event<sml::_> / action::effect_on_unexpected
+      , sml::state<state_ready> <= sml::state<state_transformer_layer_17>
+          + sml::unexpected_event<sml::_> / action::effect_on_unexpected
+      , sml::state<state_ready> <= sml::state<state_publishing_hidden>
           + sml::unexpected_event<sml::_> / action::effect_on_unexpected
       , sml::state<state_ready> <= sml::state<state_success_error_out_decision>
           + sml::unexpected_event<sml::_> / action::effect_on_unexpected

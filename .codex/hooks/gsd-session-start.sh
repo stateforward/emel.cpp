@@ -22,11 +22,26 @@ now_epoch() {
   date +%s
 }
 
+file_mtime_epoch() {
+  local path="$1"
+  stat -f %m "$path" 2>/dev/null && return 0
+  stat -c %Y "$path" 2>/dev/null && return 0
+  python3 - "$path" <<'PY' 2>/dev/null
+import os
+import sys
+
+try:
+    print(int(os.path.getmtime(sys.argv[1])))
+except Exception:
+    print(0)
+PY
+}
+
 cache_fresh() {
   local now mtime age
   [[ -f "$CACHE_FILE" ]] || return 1
   now="$(now_epoch)"
-  mtime="$(stat -f %m "$CACHE_FILE" 2>/dev/null || printf '0')"
+  mtime="$(file_mtime_epoch "$CACHE_FILE")"
   [[ "$mtime" =~ ^[0-9]+$ ]] || return 1
   age=$(( now - mtime ))
   (( age >= 0 && age < CACHE_TTL_SECONDS ))
