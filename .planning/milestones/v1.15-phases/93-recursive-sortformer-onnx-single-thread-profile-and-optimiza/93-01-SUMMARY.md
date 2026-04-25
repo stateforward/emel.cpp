@@ -23,17 +23,17 @@ strict generated evidence reports `actual_providers=CPUExecutionProvider` with
 
 Final strict generated record directory:
 
-`build/diarization_compare_phase93_score_prenorm_restored_pytorch`
+`build/diarization_compare_post_pipeline_pr_feedback`
 
 Final timing and parity:
 
-- EMEL: `1352780166 ns/op`, `15` runs, `output_dim=17`, checksum `4249677247906920305`
-- ONNX benchmark reference: `1920646958 ns/op`, `15` runs, `output_dim=17`,
+- EMEL: `1370917625 ns/op`, `15` runs, `output_dim=17`, checksum `4249677247906920305`
+- ONNX benchmark reference: `5900446125 ns/op`, `15` runs, `output_dim=17`,
   checksum `4249677247906920305`
-- PyTorch/NeMo parity reference: `9420665125 ns/op`, `1` run, `output_dim=17`,
+- PyTorch/NeMo parity reference: `11417840125 ns/op`, `1` run, `output_dim=17`,
   checksum `4249677247906920305`
 
-EMEL is `0.704x` ONNX time on the strict record set, so the recursive optimization stop condition
+EMEL is `0.232x` ONNX time on the strict record set, so the recursive optimization stop condition
 is satisfied.
 
 Rejected candidates:

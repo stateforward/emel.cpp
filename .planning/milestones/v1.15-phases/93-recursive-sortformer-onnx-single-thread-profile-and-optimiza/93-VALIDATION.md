@@ -33,12 +33,12 @@ No rule violations were found within validation scope.
 | Framework | doctest, ONNX Runtime, uv-backed PyTorch/NeMo reference, quality gates |
 | Quick run command | `build/bench_tools_ninja/diarization_compare_tests` |
 | Full suite command | `scripts/quality_gates.sh` |
-| Strict compare command | `scripts/bench_diarization_compare.sh --skip-emel-build --setup-pytorch-reference-env --output-dir build/diarization_compare_phase93_score_prenorm_restored_pytorch --onnx-reference-model build/onnx_ref/diar_streaming_sortformer_4spk-v2.1.onnx --pytorch-reference-model nvidia/diar_streaming_sortformer_4spk-v2.1` |
+| Strict compare command | `scripts/bench_diarization_compare.sh --skip-emel-build --setup-pytorch-reference-env --output-dir build/diarization_compare_post_pipeline_pr_feedback --onnx-reference-model build/onnx_ref/diar_streaming_sortformer_4spk-v2.1.onnx --pytorch-reference-model nvidia/diar_streaming_sortformer_4spk-v2.1` |
 
 ## Manual-Only Verifications
 
-None. The strict generated compare record proves EMEL `1352780166 ns/op` beats ONNX
-`1920646958 ns/op` while exact-matching PyTorch/NeMo and ONNX output.
+None. The strict generated compare record proves EMEL `1370917625 ns/op` beats ONNX
+`5900446125 ns/op` while exact-matching PyTorch/NeMo and ONNX output.
 
 ## Validation Sign-Off
 

@@ -30,7 +30,7 @@ Phase: 93
 Plan: complete
 Status: `v1.15` completed and archived. EMEL exact-matches PyTorch/NeMo and ONNX on the
 maintained AMI fixture and beats the ONNX Runtime CPU single-thread benchmark reference in the
-strict generated record set: EMEL `1352780166 ns/op` versus ONNX `1920646958 ns/op`, with
+strict generated record set: EMEL `1370917625 ns/op` versus ONNX `5900446125 ns/op`, with
 `output_dim=17`, checksum `4249677247906920305`, and ONNX
 `actual_providers=CPUExecutionProvider`.
 Last activity: 2026-04-25
@@ -243,6 +243,10 @@ Recent decisions affecting current work:
 
 - Phase `92.6` completed: EMEL now exact-matches the PyTorch/NeMo parity reference and ONNX
   benchmark reference at `output_dim=17`, checksum `4249677247906920305`.
+
+- Phase `93` completed: latest strict generated compare
+  `build/diarization_compare_post_pipeline_pr_feedback` reports EMEL `1370917625 ns/op` versus
+  ONNX CPU single-thread `5900446125 ns/op` with exact ONNX and PyTorch/NeMo output matches.
 
 - Phase `92.5` inserted after Phase `92`: Add ONNX Sortformer reference parity lane (URGENT)
 

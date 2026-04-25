@@ -33,13 +33,13 @@ benchmark reference on the pinned maintained AMI fixture.
 
 Strict generated record set:
 
-`build/diarization_compare_phase93_score_prenorm_restored_pytorch`
+`build/diarization_compare_post_pipeline_pr_feedback`
 
-- EMEL: `1352780166 ns/op`, `15` runs, `output_dim=17`, checksum `4249677247906920305`
-- ONNX CPU single-thread: `1920646958 ns/op`, `15` runs, `output_dim=17`,
+- EMEL: `1370917625 ns/op`, `15` runs, `output_dim=17`, checksum `4249677247906920305`
+- ONNX CPU single-thread: `5900446125 ns/op`, `15` runs, `output_dim=17`,
   checksum `4249677247906920305`, `actual_providers=CPUExecutionProvider`
-- PyTorch/NeMo: `9420665125 ns/op`, `1` run, `output_dim=17`,
+- PyTorch/NeMo: `11417840125 ns/op`, `1` run, `output_dim=17`,
   checksum `4249677247906920305`
 
-Result: EMEL is `0.704x` ONNX time, so EMEL is faster than the ONNX single-thread benchmark
+Result: EMEL is `0.232x` ONNX time, so EMEL is faster than the ONNX single-thread benchmark
 reference while exact-matching both PyTorch/NeMo and ONNX.

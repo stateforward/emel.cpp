@@ -69,30 +69,30 @@
 - Strict PyTorch+ONNX compare:
 
   ```bash
-  rm -rf build/diarization_compare_phase93_score_prenorm_restored_pytorch
+  rm -rf build/diarization_compare_post_pipeline_pr_feedback
   EMEL_DIARIZATION_COMPARE_RUNS=15 \
   EMEL_DIARIZATION_COMPARE_WARMUP_RUNS=3 \
   scripts/bench_diarization_compare.sh \
     --skip-emel-build \
     --setup-pytorch-reference-env \
-    --output-dir build/diarization_compare_phase93_score_prenorm_restored_pytorch \
+    --output-dir build/diarization_compare_post_pipeline_pr_feedback \
     --onnx-reference-model build/onnx_ref/diar_streaming_sortformer_4spk-v2.1.onnx \
     --pytorch-reference-model nvidia/diar_streaming_sortformer_4spk-v2.1
   ```
 
   - Result: passed.
-  - EMEL: `1352780166 ns/op`, ONNX: `1920646958 ns/op`, PyTorch/NeMo: `9420665125 ns/op`.
+  - EMEL: `1370917625 ns/op`, ONNX: `5900446125 ns/op`, PyTorch/NeMo: `11417840125 ns/op`.
   - Exact output match against ONNX and PyTorch/NeMo.
 
 ## Final Generated Record Facts
 
-From `build/diarization_compare_phase93_score_prenorm_restored_pytorch`:
+From `build/diarization_compare_post_pipeline_pr_feedback`:
 
 | Lane | Role | ns/op | Runs | output_dim | output_checksum | Status |
 |------|------|------:|-----:|-----------:|----------------:|--------|
-| `emel.diarization.sortformer` | maintained runtime | `1352780166` | `15` | `17` | `4249677247906920305` | `ok` |
-| `onnx.sortformer.v2_1` | benchmark reference | `1920646958` | `15` | `17` | `4249677247906920305` | `ok` |
-| `pytorch.nemo.sortformer.v2_1` | parity reference | `9420665125` | `1` | `17` | `4249677247906920305` | `ok` |
+| `emel.diarization.sortformer` | maintained runtime | `1370917625` | `15` | `17` | `4249677247906920305` | `ok` |
+| `onnx.sortformer.v2_1` | benchmark reference | `5900446125` | `15` | `17` | `4249677247906920305` | `ok` |
+| `pytorch.nemo.sortformer.v2_1` | parity reference | `11417840125` | `1` | `17` | `4249677247906920305` | `ok` |
 
 ONNX note includes:
 
@@ -104,7 +104,7 @@ ONNX note includes:
 1. Reproducible ONNX and EMEL profile command recorded.
    - Passed. Verification records both generated compare commands.
 2. Recursive profiling continued until EMEL beat ONNX single-thread.
-   - Passed. EMEL is `0.704x` ONNX time in the strict generated record set.
+   - Passed. EMEL is `0.232x` ONNX time in the strict generated record set.
 3. Optimizations stayed in kernel/runtime-owned code.
    - Passed. Retained performance change is in the Sortformer encoder runtime path; rejected
      candidate helpers were reverted.
