@@ -337,11 +337,9 @@ def summarize_group(compare_group: str,
   )
   exact_checksum_match = (
     int(emel_record.get("output_checksum", 0)) == int(reference_record.get("output_checksum", 0))
-    and int(emel_record.get("output_checksum", 0)) != 0
   )
   exact_output_dim_match = (
     int(emel_record.get("output_dim", 0)) == int(reference_record.get("output_dim", 0))
-    and int(emel_record.get("output_dim", 0)) != 0
   )
 
   summary["exact_output_match"] = exact_output_match

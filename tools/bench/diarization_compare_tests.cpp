@@ -210,6 +210,48 @@ TEST_CASE("diarization compare reports bounded drift when checksum or segment co
         std::string::npos);
 }
 
+TEST_CASE("diarization compare accepts zero segment exact matches") {
+  const std::filesystem::path tmp_dir =
+      std::filesystem::temp_directory_path() / "emel-diarization-compare-tests" /
+      "zero-segment-exact-match";
+  const std::filesystem::path emel_jsonl = tmp_dir / "emel.jsonl";
+  const std::filesystem::path reference_jsonl = tmp_dir / "reference.jsonl";
+  const std::filesystem::path output_dir = tmp_dir / "out";
+  const std::filesystem::path stdout_path = tmp_dir / "stdout.txt";
+  const std::filesystem::path stderr_path = tmp_dir / "stderr.txt";
+  std::error_code ec = {};
+  std::filesystem::remove_all(tmp_dir, ec);
+  std::filesystem::create_directories(tmp_dir);
+
+  write_text_file(emel_jsonl,
+                  diarization_compare_record_json("emel",
+                                                  "emel.diarization.sortformer",
+                                                  0,
+                                                  0));
+  write_text_file(reference_jsonl,
+                  diarization_compare_record_json("reference",
+                                                  "onnx.sortformer.v2_1",
+                                                  0,
+                                                  0));
+
+  const std::string command =
+      "python3 " + quote_arg_posix(diarization_compare_script_path().string()) +
+      " --emel-input " + quote_arg_posix(emel_jsonl.string()) +
+      " --reference-input " + quote_arg_posix(reference_jsonl.string()) +
+      " --output-dir " + quote_arg_posix(output_dir.string()) +
+      " > " + quote_arg_posix(stdout_path.string()) +
+      " 2> " + quote_arg_posix(stderr_path.string());
+  const process_capture capture = run_command_capture(command, stdout_path, stderr_path);
+
+  CHECK(capture.exit_code == 0);
+  CHECK(capture.stderr_text.empty());
+  const std::string summary = read_file(output_dir / "compare_summary.json");
+  CHECK(summary.find("\"comparison_status\": \"exact_match\"") != std::string::npos);
+  CHECK(summary.find("\"exact_checksum_match\": true") != std::string::npos);
+  CHECK(summary.find("\"exact_output_dim_match\": true") != std::string::npos);
+  CHECK(capture.stdout_text.find("status=exact_match reason=ok") != std::string::npos);
+}
+
 TEST_CASE("diarization compare reports each reference backend independently") {
   const std::filesystem::path tmp_dir =
       std::filesystem::temp_directory_path() / "emel-diarization-compare-tests" /

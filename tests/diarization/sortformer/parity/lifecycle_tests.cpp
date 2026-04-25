@@ -1,6 +1,9 @@
 #include "doctest/doctest.h"
 
+#include <array>
+#include <cstdint>
 #include <memory>
+#include <span>
 
 #include "diarization/sortformer_fixture.hpp"
 
@@ -11,6 +14,34 @@ namespace pipeline = emel::diarization::sortformer::pipeline;
 namespace pipeline_detail = emel::diarization::sortformer::pipeline::detail;
 
 }  // namespace
+
+TEST_CASE("sortformer fixture accepts standard sixteen byte wav fmt chunks") {
+  const std::array<uint8_t, 16> fmt_bytes = {
+      0x01u,
+      0x00u,
+      0x01u,
+      0x00u,
+      0x80u,
+      0x3eu,
+      0x00u,
+      0x00u,
+      0x00u,
+      0x7du,
+      0x00u,
+      0x00u,
+      0x02u,
+      0x00u,
+      0x10u,
+      0x00u,
+  };
+  fixture::wav_fmt_chunk fmt = {};
+
+  REQUIRE(fixture::parse_wav_fmt_chunk(std::span<const uint8_t>{fmt_bytes}, fmt));
+  CHECK(fmt.audio_format == 1u);
+  CHECK(fmt.channel_count == 1u);
+  CHECK(fmt.sample_rate == 16000u);
+  CHECK(fmt.bits_per_sample == 16u);
+}
 
 TEST_CASE("sortformer parity matches maintained real model and audio checksum baseline") {
   auto model = std::make_unique<fixture::model_fixture>();

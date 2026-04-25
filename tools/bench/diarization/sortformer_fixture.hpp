@@ -76,6 +76,14 @@ inline uint32_t read_u32_le(const std::span<const uint8_t> bytes) {
   return value;
 }
 
+inline uint16_t read_u16_le(const std::span<const uint8_t> bytes) {
+  uint16_t value = 0u;
+  for (size_t i = 0u; i < sizeof(uint16_t); ++i) {
+    value |= static_cast<uint16_t>(bytes[i]) << (i * 8u);
+  }
+  return value;
+}
+
 inline uint64_t read_u64_le(const std::span<const uint8_t> bytes) {
   uint64_t value = 0u;
   for (size_t i = 0u; i < sizeof(uint64_t); ++i) {
@@ -158,6 +166,13 @@ struct pcm_fixture {
   std::vector<float> pcm = {};
   int32_t sample_rate = 0;
   bool ready = false;
+};
+
+struct wav_fmt_chunk {
+  uint16_t audio_format = 0u;
+  uint16_t channel_count = 0u;
+  uint32_t sample_rate = 0u;
+  uint16_t bits_per_sample = 0u;
 };
 
 struct expected_output_baseline {
@@ -645,6 +660,20 @@ inline bool find_chunk(const std::span<const uint8_t> bytes,
   return false;
 }
 
+inline bool parse_wav_fmt_chunk(std::span<const uint8_t> fmt_chunk,
+                                wav_fmt_chunk & fmt) noexcept {
+  if (fmt_chunk.size() < 16u) {
+    fmt = {};
+    return false;
+  }
+
+  fmt.audio_format = read_u16_le(fmt_chunk.first(2u));
+  fmt.channel_count = read_u16_le(fmt_chunk.subspan(2u, 2u));
+  fmt.sample_rate = read_u32_le(fmt_chunk.subspan(4u, 4u));
+  fmt.bits_per_sample = read_u16_le(fmt_chunk.subspan(14u, 2u));
+  return true;
+}
+
 inline bool prepare(pcm_fixture & fixture) {
   fixture.ready = false;
   fixture.pcm.clear();
@@ -669,15 +698,11 @@ inline bool prepare(pcm_fixture & fixture) {
     return false;
   }
 
-  const uint16_t audio_format = static_cast<uint16_t>(read_u32_le(fmt_chunk.first(4u)) & 0xffffu);
-  const uint16_t channel_count =
-      static_cast<uint16_t>(read_u32_le(fmt_chunk.subspan(2u, 4u)) & 0xffffu);
-  const uint32_t sample_rate = read_u32_le(fmt_chunk.subspan(4u, 4u));
-  const uint16_t bits_per_sample =
-      static_cast<uint16_t>(read_u32_le(fmt_chunk.subspan(14u, 4u)) & 0xffffu);
-  if (audio_format != 1u || channel_count != 1u ||
-      sample_rate != static_cast<uint32_t>(request_detail::k_sample_rate) ||
-      bits_per_sample != 16u) {
+  wav_fmt_chunk fmt = {};
+  if (!parse_wav_fmt_chunk(fmt_chunk, fmt) || fmt.audio_format != 1u ||
+      fmt.channel_count != 1u ||
+      fmt.sample_rate != static_cast<uint32_t>(request_detail::k_sample_rate) ||
+      fmt.bits_per_sample != 16u) {
     return false;
   }
 
@@ -689,7 +714,7 @@ inline bool prepare(pcm_fixture & fixture) {
     fixture.pcm[i] = static_cast<float>(sample) / 32768.0f;
   }
 
-  fixture.sample_rate = static_cast<int32_t>(sample_rate);
+  fixture.sample_rate = static_cast<int32_t>(fmt.sample_rate);
   fixture.ready = !fixture.pcm.empty();
   return fixture.ready;
 }
