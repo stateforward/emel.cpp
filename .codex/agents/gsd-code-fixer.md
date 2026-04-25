@@ -155,7 +155,7 @@ If no syntax checker is available for the file type (e.g., `.md`, `.sh`, obscure
 - Do NOT skip the fix just because syntax checking is unavailable
 - Proceed to commit if Tier 1 passed
 
-**emel.cpp gate:** After any implementation change in this repository, run `scripts/quality_gates.sh`. If the gate cannot run because of a missing prerequisite or unrelated hard blocker, record the exact blocker in REVIEW-FIX.md and do not claim full verification.
+**emel.cpp gate:** After any implementation change in this repository, run `scripts/quality_gates.sh`. In dirty worktrees with unrelated changes, set `EMEL_QUALITY_GATES_CHANGED_FILES` to only the files fixed by this pass and set `EMEL_QUALITY_GATES_BENCH_SUITE` when the fix has a known benchmark domain. Do not skip or weaken relevant coverage, parity, benchmark, fuzz, or docs lanes. Use `EMEL_QUALITY_GATES_SCOPE=full` only for release/milestone-closeout or cross-domain verification. If the gate cannot run because of a missing prerequisite or unrelated hard blocker, record the exact blocker in REVIEW-FIX.md and do not claim full verification.
 
 **NOT in scope:**
 - Running full test suite between fixes (too slow)

@@ -5626,9 +5626,8 @@ inline bool execute_neon_mul_mat(const event::op_mul_mat & request) noexcept {
 
   constexpr uint64_t row_block = 4;
   constexpr uint64_t col_vec = 4;
-  constexpr uint64_t col_block = 64;
-  constexpr uint64_t depth_block = 64;
-  alignas(64) static thread_local float packed_b[depth_block * col_block];
+  constexpr uint64_t col_block = 256;
+  constexpr uint64_t depth_block = 256;
 
   for (uint64_t jb = 0; jb < n * valid_u64; jb += col_block) {
     const uint64_t j_end = std::min<uint64_t>(n, jb + col_block);
@@ -5637,37 +5636,359 @@ inline bool execute_neon_mul_mat(const event::op_mul_mat & request) noexcept {
 
     for (uint64_t pb = 0; pb < k * valid_u64; pb += depth_block) {
       const uint64_t depth = std::min<uint64_t>(depth_block, k - pb);
-      const bool first_depth_block = (pb == 0);
       const float32x4_t zero = vdupq_n_f32(0.0f);
-      const uint32x4_t depth_reset_mask =
-          vdupq_n_u32(static_cast<uint32_t>(-static_cast<int32_t>(first_depth_block)));
+      const bool first_depth_block = (pb == 0);
+      const float * b_panel = b + (pb * n) + jb;
 
-      for (uint64_t kk = 0; kk < depth; ++kk) {
-        const float * b_src = b + (pb + kk) * n + jb;
-        float * b_dst = packed_b + kk * vec_cols;
-        std::memcpy(b_dst, b_src, static_cast<size_t>(vec_cols) * sizeof(float));
 #if defined(__GNUC__) || defined(__clang__)
-        const uint64_t prefetch_distance =
-            16u * static_cast<uint64_t>((kk & 15u) == 0u && kk + 16u < depth);
-        __builtin_prefetch(b + (pb + kk + prefetch_distance) * n + jb, 0, 1);
-#endif
+      for (uint64_t kk = 0; kk < depth; kk += 16u) {
+        __builtin_prefetch(b_panel + (kk * n), 0, 1);
       }
+#endif
 
-      for (uint64_t j = jb; j < j_vec_end; j += col_vec) {
+      uint64_t j = jb;
+      for (; j + (col_vec * 4u) <= j_vec_end; j += col_vec * 4u) {
         const uint64_t j_offset = j - jb;
         uint64_t i = 0;
         for (; i + row_block <= m; i += row_block) {
-          float32x4_t acc0 = vld1q_f32(c + (i + 0) * n + j);
-          float32x4_t acc1 = vld1q_f32(c + (i + 1) * n + j);
-          float32x4_t acc2 = vld1q_f32(c + (i + 2) * n + j);
-          float32x4_t acc3 = vld1q_f32(c + (i + 3) * n + j);
-          acc0 = vbslq_f32(depth_reset_mask, zero, acc0);
-          acc1 = vbslq_f32(depth_reset_mask, zero, acc1);
-          acc2 = vbslq_f32(depth_reset_mask, zero, acc2);
-          acc3 = vbslq_f32(depth_reset_mask, zero, acc3);
+          float32x4_t acc0_0 = zero;
+          float32x4_t acc0_1 = zero;
+          float32x4_t acc0_2 = zero;
+          float32x4_t acc0_3 = zero;
+          float32x4_t acc1_0 = zero;
+          float32x4_t acc1_1 = zero;
+          float32x4_t acc1_2 = zero;
+          float32x4_t acc1_3 = zero;
+          float32x4_t acc2_0 = zero;
+          float32x4_t acc2_1 = zero;
+          float32x4_t acc2_2 = zero;
+          float32x4_t acc2_3 = zero;
+          float32x4_t acc3_0 = zero;
+          float32x4_t acc3_1 = zero;
+          float32x4_t acc3_2 = zero;
+          float32x4_t acc3_3 = zero;
+          if (!first_depth_block) {
+            acc0_0 = vld1q_f32(c + (i + 0) * n + j);
+            acc0_1 = vld1q_f32(c + (i + 0) * n + j + col_vec);
+            acc0_2 = vld1q_f32(c + (i + 0) * n + j + (col_vec * 2u));
+            acc0_3 = vld1q_f32(c + (i + 0) * n + j + (col_vec * 3u));
+            acc1_0 = vld1q_f32(c + (i + 1) * n + j);
+            acc1_1 = vld1q_f32(c + (i + 1) * n + j + col_vec);
+            acc1_2 = vld1q_f32(c + (i + 1) * n + j + (col_vec * 2u));
+            acc1_3 = vld1q_f32(c + (i + 1) * n + j + (col_vec * 3u));
+            acc2_0 = vld1q_f32(c + (i + 2) * n + j);
+            acc2_1 = vld1q_f32(c + (i + 2) * n + j + col_vec);
+            acc2_2 = vld1q_f32(c + (i + 2) * n + j + (col_vec * 2u));
+            acc2_3 = vld1q_f32(c + (i + 2) * n + j + (col_vec * 3u));
+            acc3_0 = vld1q_f32(c + (i + 3) * n + j);
+            acc3_1 = vld1q_f32(c + (i + 3) * n + j + col_vec);
+            acc3_2 = vld1q_f32(c + (i + 3) * n + j + (col_vec * 2u));
+            acc3_3 = vld1q_f32(c + (i + 3) * n + j + (col_vec * 3u));
+          }
+
+          const float * a0_ptr = a + ((i + 0) * k) + pb;
+          const float * a1_ptr = a + ((i + 1) * k) + pb;
+          const float * a2_ptr = a + ((i + 2) * k) + pb;
+          const float * a3_ptr = a + ((i + 3) * k) + pb;
+          const float * b_ptr = b_panel + j_offset;
+          for (uint64_t kk = 0; kk < depth; ++kk) {
+            const float32x4_t bv0 = vld1q_f32(b_ptr);
+            const float32x4_t bv1 = vld1q_f32(b_ptr + col_vec);
+            const float32x4_t bv2 = vld1q_f32(b_ptr + (col_vec * 2u));
+            const float32x4_t bv3 = vld1q_f32(b_ptr + (col_vec * 3u));
+            const float a0 = a0_ptr[kk];
+            const float a1 = a1_ptr[kk];
+            const float a2 = a2_ptr[kk];
+            const float a3 = a3_ptr[kk];
+            acc0_0 = vmlaq_n_f32(acc0_0, bv0, a0);
+            acc0_1 = vmlaq_n_f32(acc0_1, bv1, a0);
+            acc0_2 = vmlaq_n_f32(acc0_2, bv2, a0);
+            acc0_3 = vmlaq_n_f32(acc0_3, bv3, a0);
+            acc1_0 = vmlaq_n_f32(acc1_0, bv0, a1);
+            acc1_1 = vmlaq_n_f32(acc1_1, bv1, a1);
+            acc1_2 = vmlaq_n_f32(acc1_2, bv2, a1);
+            acc1_3 = vmlaq_n_f32(acc1_3, bv3, a1);
+            acc2_0 = vmlaq_n_f32(acc2_0, bv0, a2);
+            acc2_1 = vmlaq_n_f32(acc2_1, bv1, a2);
+            acc2_2 = vmlaq_n_f32(acc2_2, bv2, a2);
+            acc2_3 = vmlaq_n_f32(acc2_3, bv3, a2);
+            acc3_0 = vmlaq_n_f32(acc3_0, bv0, a3);
+            acc3_1 = vmlaq_n_f32(acc3_1, bv1, a3);
+            acc3_2 = vmlaq_n_f32(acc3_2, bv2, a3);
+            acc3_3 = vmlaq_n_f32(acc3_3, bv3, a3);
+            b_ptr += n;
+          }
+
+          vst1q_f32(c + (i + 0) * n + j, acc0_0);
+          vst1q_f32(c + (i + 0) * n + j + col_vec, acc0_1);
+          vst1q_f32(c + (i + 0) * n + j + (col_vec * 2u), acc0_2);
+          vst1q_f32(c + (i + 0) * n + j + (col_vec * 3u), acc0_3);
+          vst1q_f32(c + (i + 1) * n + j, acc1_0);
+          vst1q_f32(c + (i + 1) * n + j + col_vec, acc1_1);
+          vst1q_f32(c + (i + 1) * n + j + (col_vec * 2u), acc1_2);
+          vst1q_f32(c + (i + 1) * n + j + (col_vec * 3u), acc1_3);
+          vst1q_f32(c + (i + 2) * n + j, acc2_0);
+          vst1q_f32(c + (i + 2) * n + j + col_vec, acc2_1);
+          vst1q_f32(c + (i + 2) * n + j + (col_vec * 2u), acc2_2);
+          vst1q_f32(c + (i + 2) * n + j + (col_vec * 3u), acc2_3);
+          vst1q_f32(c + (i + 3) * n + j, acc3_0);
+          vst1q_f32(c + (i + 3) * n + j + col_vec, acc3_1);
+          vst1q_f32(c + (i + 3) * n + j + (col_vec * 2u), acc3_2);
+          vst1q_f32(c + (i + 3) * n + j + (col_vec * 3u), acc3_3);
+        }
+
+        for (; i < m; ++i) {
+          float32x4_t acc0 = zero;
+          float32x4_t acc1 = zero;
+          float32x4_t acc2 = zero;
+          float32x4_t acc3 = zero;
+          if (!first_depth_block) {
+            acc0 = vld1q_f32(c + i * n + j);
+            acc1 = vld1q_f32(c + i * n + j + col_vec);
+            acc2 = vld1q_f32(c + i * n + j + (col_vec * 2u));
+            acc3 = vld1q_f32(c + i * n + j + (col_vec * 3u));
+          }
+          for (uint64_t kk = 0; kk < depth; ++kk) {
+            const uint64_t b_base = kk * n + j_offset;
+            const float32x4_t bv0 = vld1q_f32(b_panel + b_base);
+            const float32x4_t bv1 = vld1q_f32(b_panel + b_base + col_vec);
+            const float32x4_t bv2 = vld1q_f32(b_panel + b_base + (col_vec * 2u));
+            const float32x4_t bv3 = vld1q_f32(b_panel + b_base + (col_vec * 3u));
+            const float av = a[i * k + pb + kk];
+            acc0 = vmlaq_n_f32(acc0, bv0, av);
+            acc1 = vmlaq_n_f32(acc1, bv1, av);
+            acc2 = vmlaq_n_f32(acc2, bv2, av);
+            acc3 = vmlaq_n_f32(acc3, bv3, av);
+          }
+          vst1q_f32(c + i * n + j, acc0);
+          vst1q_f32(c + i * n + j + col_vec, acc1);
+          vst1q_f32(c + i * n + j + (col_vec * 2u), acc2);
+          vst1q_f32(c + i * n + j + (col_vec * 3u), acc3);
+        }
+      }
+
+      for (; j + (col_vec * 3u) <= j_vec_end; j += col_vec * 3u) {
+        const uint64_t j_offset = j - jb;
+        uint64_t i = 0;
+        for (; i + row_block <= m; i += row_block) {
+          float32x4_t acc0_0 = zero;
+          float32x4_t acc0_1 = zero;
+          float32x4_t acc0_2 = zero;
+          float32x4_t acc1_0 = zero;
+          float32x4_t acc1_1 = zero;
+          float32x4_t acc1_2 = zero;
+          float32x4_t acc2_0 = zero;
+          float32x4_t acc2_1 = zero;
+          float32x4_t acc2_2 = zero;
+          float32x4_t acc3_0 = zero;
+          float32x4_t acc3_1 = zero;
+          float32x4_t acc3_2 = zero;
+          if (!first_depth_block) {
+            acc0_0 = vld1q_f32(c + (i + 0) * n + j);
+            acc0_1 = vld1q_f32(c + (i + 0) * n + j + col_vec);
+            acc0_2 = vld1q_f32(c + (i + 0) * n + j + (col_vec * 2u));
+            acc1_0 = vld1q_f32(c + (i + 1) * n + j);
+            acc1_1 = vld1q_f32(c + (i + 1) * n + j + col_vec);
+            acc1_2 = vld1q_f32(c + (i + 1) * n + j + (col_vec * 2u));
+            acc2_0 = vld1q_f32(c + (i + 2) * n + j);
+            acc2_1 = vld1q_f32(c + (i + 2) * n + j + col_vec);
+            acc2_2 = vld1q_f32(c + (i + 2) * n + j + (col_vec * 2u));
+            acc3_0 = vld1q_f32(c + (i + 3) * n + j);
+            acc3_1 = vld1q_f32(c + (i + 3) * n + j + col_vec);
+            acc3_2 = vld1q_f32(c + (i + 3) * n + j + (col_vec * 2u));
+          }
 
           for (uint64_t kk = 0; kk < depth; ++kk) {
-            const float32x4_t bv = vld1q_f32(packed_b + kk * vec_cols + j_offset);
+            const uint64_t b_base = kk * n + j_offset;
+            const float32x4_t bv0 = vld1q_f32(b_panel + b_base);
+            const float32x4_t bv1 = vld1q_f32(b_panel + b_base + col_vec);
+            const float32x4_t bv2 = vld1q_f32(b_panel + b_base + (col_vec * 2u));
+            const float a0 = a[(i + 0) * k + pb + kk];
+            const float a1 = a[(i + 1) * k + pb + kk];
+            const float a2 = a[(i + 2) * k + pb + kk];
+            const float a3 = a[(i + 3) * k + pb + kk];
+            acc0_0 = vmlaq_n_f32(acc0_0, bv0, a0);
+            acc0_1 = vmlaq_n_f32(acc0_1, bv1, a0);
+            acc0_2 = vmlaq_n_f32(acc0_2, bv2, a0);
+            acc1_0 = vmlaq_n_f32(acc1_0, bv0, a1);
+            acc1_1 = vmlaq_n_f32(acc1_1, bv1, a1);
+            acc1_2 = vmlaq_n_f32(acc1_2, bv2, a1);
+            acc2_0 = vmlaq_n_f32(acc2_0, bv0, a2);
+            acc2_1 = vmlaq_n_f32(acc2_1, bv1, a2);
+            acc2_2 = vmlaq_n_f32(acc2_2, bv2, a2);
+            acc3_0 = vmlaq_n_f32(acc3_0, bv0, a3);
+            acc3_1 = vmlaq_n_f32(acc3_1, bv1, a3);
+            acc3_2 = vmlaq_n_f32(acc3_2, bv2, a3);
+          }
+
+          vst1q_f32(c + (i + 0) * n + j, acc0_0);
+          vst1q_f32(c + (i + 0) * n + j + col_vec, acc0_1);
+          vst1q_f32(c + (i + 0) * n + j + (col_vec * 2u), acc0_2);
+          vst1q_f32(c + (i + 1) * n + j, acc1_0);
+          vst1q_f32(c + (i + 1) * n + j + col_vec, acc1_1);
+          vst1q_f32(c + (i + 1) * n + j + (col_vec * 2u), acc1_2);
+          vst1q_f32(c + (i + 2) * n + j, acc2_0);
+          vst1q_f32(c + (i + 2) * n + j + col_vec, acc2_1);
+          vst1q_f32(c + (i + 2) * n + j + (col_vec * 2u), acc2_2);
+          vst1q_f32(c + (i + 3) * n + j, acc3_0);
+          vst1q_f32(c + (i + 3) * n + j + col_vec, acc3_1);
+          vst1q_f32(c + (i + 3) * n + j + (col_vec * 2u), acc3_2);
+        }
+
+        for (; i < m; ++i) {
+          float32x4_t acc0 = zero;
+          float32x4_t acc1 = zero;
+          float32x4_t acc2 = zero;
+          if (!first_depth_block) {
+            acc0 = vld1q_f32(c + i * n + j);
+            acc1 = vld1q_f32(c + i * n + j + col_vec);
+            acc2 = vld1q_f32(c + i * n + j + (col_vec * 2u));
+          }
+          for (uint64_t kk = 0; kk < depth; ++kk) {
+            const uint64_t b_base = kk * n + j_offset;
+            const float32x4_t bv0 = vld1q_f32(b_panel + b_base);
+            const float32x4_t bv1 = vld1q_f32(b_panel + b_base + col_vec);
+            const float32x4_t bv2 = vld1q_f32(b_panel + b_base + (col_vec * 2u));
+            const float av = a[i * k + pb + kk];
+            acc0 = vmlaq_n_f32(acc0, bv0, av);
+            acc1 = vmlaq_n_f32(acc1, bv1, av);
+            acc2 = vmlaq_n_f32(acc2, bv2, av);
+          }
+          vst1q_f32(c + i * n + j, acc0);
+          vst1q_f32(c + i * n + j + col_vec, acc1);
+          vst1q_f32(c + i * n + j + (col_vec * 2u), acc2);
+        }
+      }
+
+      for (; j + (col_vec * 2u) <= j_vec_end; j += col_vec * 2u) {
+        const uint64_t j_offset = j - jb;
+        uint64_t i = 0;
+        for (; i + row_block <= m; i += row_block) {
+          float32x4_t acc0_lo = zero;
+          float32x4_t acc0_hi = zero;
+          float32x4_t acc1_lo = zero;
+          float32x4_t acc1_hi = zero;
+          float32x4_t acc2_lo = zero;
+          float32x4_t acc2_hi = zero;
+          float32x4_t acc3_lo = zero;
+          float32x4_t acc3_hi = zero;
+          if (!first_depth_block) {
+            acc0_lo = vld1q_f32(c + (i + 0) * n + j);
+            acc0_hi = vld1q_f32(c + (i + 0) * n + j + col_vec);
+            acc1_lo = vld1q_f32(c + (i + 1) * n + j);
+            acc1_hi = vld1q_f32(c + (i + 1) * n + j + col_vec);
+            acc2_lo = vld1q_f32(c + (i + 2) * n + j);
+            acc2_hi = vld1q_f32(c + (i + 2) * n + j + col_vec);
+            acc3_lo = vld1q_f32(c + (i + 3) * n + j);
+            acc3_hi = vld1q_f32(c + (i + 3) * n + j + col_vec);
+          }
+
+          for (uint64_t kk = 0; kk < depth; ++kk) {
+            const float32x4_t bv_lo = vld1q_f32(b_panel + kk * n + j_offset);
+            const float32x4_t bv_hi =
+                vld1q_f32(b_panel + kk * n + j_offset + col_vec);
+            const float a0 = a[(i + 0) * k + pb + kk];
+            const float a1 = a[(i + 1) * k + pb + kk];
+            const float a2 = a[(i + 2) * k + pb + kk];
+            const float a3 = a[(i + 3) * k + pb + kk];
+            acc0_lo = vmlaq_n_f32(acc0_lo, bv_lo, a0);
+            acc0_hi = vmlaq_n_f32(acc0_hi, bv_hi, a0);
+            acc1_lo = vmlaq_n_f32(acc1_lo, bv_lo, a1);
+            acc1_hi = vmlaq_n_f32(acc1_hi, bv_hi, a1);
+            acc2_lo = vmlaq_n_f32(acc2_lo, bv_lo, a2);
+            acc2_hi = vmlaq_n_f32(acc2_hi, bv_hi, a2);
+            acc3_lo = vmlaq_n_f32(acc3_lo, bv_lo, a3);
+            acc3_hi = vmlaq_n_f32(acc3_hi, bv_hi, a3);
+          }
+
+          vst1q_f32(c + (i + 0) * n + j, acc0_lo);
+          vst1q_f32(c + (i + 0) * n + j + col_vec, acc0_hi);
+          vst1q_f32(c + (i + 1) * n + j, acc1_lo);
+          vst1q_f32(c + (i + 1) * n + j + col_vec, acc1_hi);
+          vst1q_f32(c + (i + 2) * n + j, acc2_lo);
+          vst1q_f32(c + (i + 2) * n + j + col_vec, acc2_hi);
+          vst1q_f32(c + (i + 3) * n + j, acc3_lo);
+          vst1q_f32(c + (i + 3) * n + j + col_vec, acc3_hi);
+        }
+
+        for (; i < m; ++i) {
+          float32x4_t acc_lo = zero;
+          float32x4_t acc_hi = zero;
+          if (!first_depth_block) {
+            acc_lo = vld1q_f32(c + i * n + j);
+            acc_hi = vld1q_f32(c + i * n + j + col_vec);
+          }
+          for (uint64_t kk = 0; kk < depth; ++kk) {
+            const float32x4_t bv_lo = vld1q_f32(b_panel + kk * n + j_offset);
+            const float32x4_t bv_hi =
+                vld1q_f32(b_panel + kk * n + j_offset + col_vec);
+            const float av = a[i * k + pb + kk];
+            acc_lo = vmlaq_n_f32(acc_lo, bv_lo, av);
+            acc_hi = vmlaq_n_f32(acc_hi, bv_hi, av);
+          }
+          vst1q_f32(c + i * n + j, acc_lo);
+          vst1q_f32(c + i * n + j + col_vec, acc_hi);
+        }
+      }
+
+      for (; j < j_vec_end; j += col_vec) {
+        const uint64_t j_offset = j - jb;
+        uint64_t i = 0;
+        for (; i + (row_block * 2u) <= m; i += row_block * 2u) {
+          float32x4_t acc0 = zero;
+          float32x4_t acc1 = zero;
+          float32x4_t acc2 = zero;
+          float32x4_t acc3 = zero;
+          float32x4_t acc4 = zero;
+          float32x4_t acc5 = zero;
+          float32x4_t acc6 = zero;
+          float32x4_t acc7 = zero;
+          if (!first_depth_block) {
+            acc0 = vld1q_f32(c + (i + 0) * n + j);
+            acc1 = vld1q_f32(c + (i + 1) * n + j);
+            acc2 = vld1q_f32(c + (i + 2) * n + j);
+            acc3 = vld1q_f32(c + (i + 3) * n + j);
+            acc4 = vld1q_f32(c + (i + 4) * n + j);
+            acc5 = vld1q_f32(c + (i + 5) * n + j);
+            acc6 = vld1q_f32(c + (i + 6) * n + j);
+            acc7 = vld1q_f32(c + (i + 7) * n + j);
+          }
+
+          for (uint64_t kk = 0; kk < depth; ++kk) {
+            const float32x4_t bv = vld1q_f32(b_panel + kk * n + j_offset);
+            acc0 = vmlaq_n_f32(acc0, bv, a[(i + 0) * k + pb + kk]);
+            acc1 = vmlaq_n_f32(acc1, bv, a[(i + 1) * k + pb + kk]);
+            acc2 = vmlaq_n_f32(acc2, bv, a[(i + 2) * k + pb + kk]);
+            acc3 = vmlaq_n_f32(acc3, bv, a[(i + 3) * k + pb + kk]);
+            acc4 = vmlaq_n_f32(acc4, bv, a[(i + 4) * k + pb + kk]);
+            acc5 = vmlaq_n_f32(acc5, bv, a[(i + 5) * k + pb + kk]);
+            acc6 = vmlaq_n_f32(acc6, bv, a[(i + 6) * k + pb + kk]);
+            acc7 = vmlaq_n_f32(acc7, bv, a[(i + 7) * k + pb + kk]);
+          }
+
+          vst1q_f32(c + (i + 0) * n + j, acc0);
+          vst1q_f32(c + (i + 1) * n + j, acc1);
+          vst1q_f32(c + (i + 2) * n + j, acc2);
+          vst1q_f32(c + (i + 3) * n + j, acc3);
+          vst1q_f32(c + (i + 4) * n + j, acc4);
+          vst1q_f32(c + (i + 5) * n + j, acc5);
+          vst1q_f32(c + (i + 6) * n + j, acc6);
+          vst1q_f32(c + (i + 7) * n + j, acc7);
+        }
+        for (; i + row_block <= m; i += row_block) {
+          float32x4_t acc0 = zero;
+          float32x4_t acc1 = zero;
+          float32x4_t acc2 = zero;
+          float32x4_t acc3 = zero;
+          if (!first_depth_block) {
+            acc0 = vld1q_f32(c + (i + 0) * n + j);
+            acc1 = vld1q_f32(c + (i + 1) * n + j);
+            acc2 = vld1q_f32(c + (i + 2) * n + j);
+            acc3 = vld1q_f32(c + (i + 3) * n + j);
+          }
+
+          for (uint64_t kk = 0; kk < depth; ++kk) {
+            const float32x4_t bv = vld1q_f32(b_panel + kk * n + j_offset);
             acc0 = vmlaq_n_f32(acc0, bv, a[(i + 0) * k + pb + kk]);
             acc1 = vmlaq_n_f32(acc1, bv, a[(i + 1) * k + pb + kk]);
             acc2 = vmlaq_n_f32(acc2, bv, a[(i + 2) * k + pb + kk]);
@@ -5681,25 +6002,24 @@ inline bool execute_neon_mul_mat(const event::op_mul_mat & request) noexcept {
         }
 
         for (; i < m; ++i) {
-          float32x4_t acc = vld1q_f32(c + i * n + j);
-          acc = vbslq_f32(depth_reset_mask, zero, acc);
+          float32x4_t acc = zero;
+          if (!first_depth_block) {
+            acc = vld1q_f32(c + i * n + j);
+          }
           for (uint64_t kk = 0; kk < depth; ++kk) {
-            const float32x4_t bv = vld1q_f32(packed_b + kk * vec_cols + j_offset);
+            const float32x4_t bv = vld1q_f32(b_panel + kk * n + j_offset);
             acc = vmlaq_n_f32(acc, bv, a[i * k + pb + kk]);
           }
           vst1q_f32(c + i * n + j, acc);
         }
       }
 
-      const uint32_t keep_existing_mask =
-          static_cast<uint32_t>(-static_cast<int32_t>(!first_depth_block));
       for (uint64_t j = j_vec_end; j < j_end; ++j) {
         for (uint64_t i = 0; i < m; ++i) {
-          uint32_t acc_bits = 0u;
-          std::memcpy(&acc_bits, c + i * n + j, sizeof(acc_bits));
-          acc_bits &= keep_existing_mask;
           float acc = 0.0f;
-          std::memcpy(&acc, &acc_bits, sizeof(acc));
+          if (!first_depth_block) {
+            acc = c[i * n + j];
+          }
           for (uint64_t kk = 0; kk < depth; ++kk) {
             acc += a[i * k + pb + kk] * b[(pb + kk) * n + j];
           }
@@ -5712,6 +6032,338 @@ inline bool execute_neon_mul_mat(const event::op_mul_mat & request) noexcept {
   return valid;
 #else
   (void) request;
+  return false;
+#endif
+}
+
+inline uint64_t prepared_f32_lhs_4row_value_count(const uint64_t k,
+                                                  const uint64_t m) noexcept {
+  const uint64_t row_groups = (m + 3u) / 4u;
+  return row_groups * k * 4u;
+}
+
+inline bool prepare_neon_mul_mat_f32_lhs_4row(const float * src,
+                                              const uint64_t k,
+                                              const uint64_t m,
+                                              float * dst,
+                                              const uint64_t dst_count) noexcept {
+  if (src == nullptr || dst == nullptr || k == 0u || m == 0u ||
+      dst_count < prepared_f32_lhs_4row_value_count(k, m)) {
+    return false;
+  }
+
+  const uint64_t row_groups = (m + 3u) / 4u;
+  for (uint64_t group = 0u; group < row_groups; ++group) {
+    const uint64_t row_base = group * 4u;
+    for (uint64_t kk = 0u; kk < k; ++kk) {
+      float * packed = dst + ((group * k + kk) * 4u);
+      packed[0] = src[(row_base + 0u) * k + kk];
+      packed[1] = (row_base + 1u < m) ? src[(row_base + 1u) * k + kk] : 0.0f;
+      packed[2] = (row_base + 2u < m) ? src[(row_base + 2u) * k + kk] : 0.0f;
+      packed[3] = (row_base + 3u < m) ? src[(row_base + 3u) * k + kk] : 0.0f;
+    }
+  }
+
+  return true;
+}
+
+template <int Lane>
+inline float32x4_t neon_fma_lane_f32(const float32x4_t acc,
+                                     const float32x4_t rhs,
+                                     const float32x4_t lhs) noexcept {
+#if defined(__aarch64__)
+  return vfmaq_laneq_f32(acc, rhs, lhs, Lane);
+#else
+  return vmlaq_n_f32(acc, rhs, vgetq_lane_f32(lhs, Lane));
+#endif
+}
+
+inline bool execute_neon_mul_mat_prepared_f32_lhs_4row(
+    const event::op_mul_mat & request,
+    const float * prepared_lhs,
+    const uint64_t prepared_lhs_count) noexcept {
+#if defined(__aarch64__) || defined(__ARM_NEON)
+  const uint64_t k = request.src0.ne[0];
+  const uint64_t m = request.src0.ne[1];
+  const uint64_t n = request.src1.ne[0];
+  const bool valid_dims = k != 0u && m != 0u && n != 0u;
+  const bool valid_layout =
+      request.src1.ne[1] == k && request.dst.ne[0] == n && request.dst.ne[1] == m;
+  const bool valid_types =
+      ::emel::kernel::detail::dtype_code(request.src0.type) ==
+          ::emel::kernel::detail::dtype_f32 &&
+      ::emel::kernel::detail::dtype_code(request.src1.type) ==
+          ::emel::kernel::detail::dtype_f32 &&
+      ::emel::kernel::detail::dtype_code(request.dst.type) ==
+          ::emel::kernel::detail::dtype_f32;
+  if (!valid_dims || !valid_layout || !valid_types || prepared_lhs == nullptr ||
+      prepared_lhs_count < prepared_f32_lhs_4row_value_count(k, m)) {
+    return false;
+  }
+
+  const float * b = static_cast<const float *>(request.src1.data);
+  float * c = static_cast<float *>(request.dst.data);
+  if (b == nullptr || c == nullptr) {
+    return false;
+  }
+
+  constexpr uint64_t row_block = 4u;
+  constexpr uint64_t col_vec = 4u;
+  constexpr uint64_t col_block = 256u;
+  constexpr uint64_t depth_block = 256u;
+
+  for (uint64_t jb = 0u; jb < n; jb += col_block) {
+    const uint64_t j_end = std::min<uint64_t>(n, jb + col_block);
+    const uint64_t vec_cols = ((j_end - jb) / col_vec) * col_vec;
+    const uint64_t j_vec_end = jb + vec_cols;
+
+    for (uint64_t pb = 0u; pb < k; pb += depth_block) {
+      const uint64_t depth = std::min<uint64_t>(depth_block, k - pb);
+      const float32x4_t zero = vdupq_n_f32(0.0f);
+      const bool first_depth_block = (pb == 0u);
+      const float * b_panel = b + (pb * n) + jb;
+
+#if defined(__GNUC__) || defined(__clang__)
+      for (uint64_t kk = 0u; kk < depth; kk += 16u) {
+        __builtin_prefetch(b_panel + (kk * n), 0, 1);
+      }
+#endif
+
+      uint64_t j = jb;
+      for (; j + (col_vec * 2u) <= j_vec_end; j += col_vec * 2u) {
+        const uint64_t j_offset = j - jb;
+        uint64_t i = 0u;
+        for (; i + (row_block * 2u) <= m; i += row_block * 2u) {
+          float32x4_t acc0_0 = zero;
+          float32x4_t acc0_1 = zero;
+          float32x4_t acc1_0 = zero;
+          float32x4_t acc1_1 = zero;
+          float32x4_t acc2_0 = zero;
+          float32x4_t acc2_1 = zero;
+          float32x4_t acc3_0 = zero;
+          float32x4_t acc3_1 = zero;
+          float32x4_t acc4_0 = zero;
+          float32x4_t acc4_1 = zero;
+          float32x4_t acc5_0 = zero;
+          float32x4_t acc5_1 = zero;
+          float32x4_t acc6_0 = zero;
+          float32x4_t acc6_1 = zero;
+          float32x4_t acc7_0 = zero;
+          float32x4_t acc7_1 = zero;
+          if (!first_depth_block) {
+            acc0_0 = vld1q_f32(c + (i + 0u) * n + j);
+            acc0_1 = vld1q_f32(c + (i + 0u) * n + j + col_vec);
+            acc1_0 = vld1q_f32(c + (i + 1u) * n + j);
+            acc1_1 = vld1q_f32(c + (i + 1u) * n + j + col_vec);
+            acc2_0 = vld1q_f32(c + (i + 2u) * n + j);
+            acc2_1 = vld1q_f32(c + (i + 2u) * n + j + col_vec);
+            acc3_0 = vld1q_f32(c + (i + 3u) * n + j);
+            acc3_1 = vld1q_f32(c + (i + 3u) * n + j + col_vec);
+            acc4_0 = vld1q_f32(c + (i + 4u) * n + j);
+            acc4_1 = vld1q_f32(c + (i + 4u) * n + j + col_vec);
+            acc5_0 = vld1q_f32(c + (i + 5u) * n + j);
+            acc5_1 = vld1q_f32(c + (i + 5u) * n + j + col_vec);
+            acc6_0 = vld1q_f32(c + (i + 6u) * n + j);
+            acc6_1 = vld1q_f32(c + (i + 6u) * n + j + col_vec);
+            acc7_0 = vld1q_f32(c + (i + 7u) * n + j);
+            acc7_1 = vld1q_f32(c + (i + 7u) * n + j + col_vec);
+          }
+
+          const float * a0_ptr = prepared_lhs + (((i / row_block) * k + pb) * row_block);
+          const float * a1_ptr =
+              prepared_lhs + ((((i + row_block) / row_block) * k + pb) * row_block);
+          const float * b_ptr = b_panel + j_offset;
+          for (uint64_t kk = 0u; kk < depth; ++kk) {
+            const float32x4_t av0 = vld1q_f32(a0_ptr);
+            const float32x4_t av1 = vld1q_f32(a1_ptr);
+            const float32x4_t bv0 = vld1q_f32(b_ptr);
+            const float32x4_t bv1 = vld1q_f32(b_ptr + col_vec);
+            acc0_0 = neon_fma_lane_f32<0>(acc0_0, bv0, av0);
+            acc0_1 = neon_fma_lane_f32<0>(acc0_1, bv1, av0);
+            acc1_0 = neon_fma_lane_f32<1>(acc1_0, bv0, av0);
+            acc1_1 = neon_fma_lane_f32<1>(acc1_1, bv1, av0);
+            acc2_0 = neon_fma_lane_f32<2>(acc2_0, bv0, av0);
+            acc2_1 = neon_fma_lane_f32<2>(acc2_1, bv1, av0);
+            acc3_0 = neon_fma_lane_f32<3>(acc3_0, bv0, av0);
+            acc3_1 = neon_fma_lane_f32<3>(acc3_1, bv1, av0);
+            acc4_0 = neon_fma_lane_f32<0>(acc4_0, bv0, av1);
+            acc4_1 = neon_fma_lane_f32<0>(acc4_1, bv1, av1);
+            acc5_0 = neon_fma_lane_f32<1>(acc5_0, bv0, av1);
+            acc5_1 = neon_fma_lane_f32<1>(acc5_1, bv1, av1);
+            acc6_0 = neon_fma_lane_f32<2>(acc6_0, bv0, av1);
+            acc6_1 = neon_fma_lane_f32<2>(acc6_1, bv1, av1);
+            acc7_0 = neon_fma_lane_f32<3>(acc7_0, bv0, av1);
+            acc7_1 = neon_fma_lane_f32<3>(acc7_1, bv1, av1);
+            a0_ptr += row_block;
+            a1_ptr += row_block;
+            b_ptr += n;
+          }
+
+          vst1q_f32(c + (i + 0u) * n + j, acc0_0);
+          vst1q_f32(c + (i + 0u) * n + j + col_vec, acc0_1);
+          vst1q_f32(c + (i + 1u) * n + j, acc1_0);
+          vst1q_f32(c + (i + 1u) * n + j + col_vec, acc1_1);
+          vst1q_f32(c + (i + 2u) * n + j, acc2_0);
+          vst1q_f32(c + (i + 2u) * n + j + col_vec, acc2_1);
+          vst1q_f32(c + (i + 3u) * n + j, acc3_0);
+          vst1q_f32(c + (i + 3u) * n + j + col_vec, acc3_1);
+          vst1q_f32(c + (i + 4u) * n + j, acc4_0);
+          vst1q_f32(c + (i + 4u) * n + j + col_vec, acc4_1);
+          vst1q_f32(c + (i + 5u) * n + j, acc5_0);
+          vst1q_f32(c + (i + 5u) * n + j + col_vec, acc5_1);
+          vst1q_f32(c + (i + 6u) * n + j, acc6_0);
+          vst1q_f32(c + (i + 6u) * n + j + col_vec, acc6_1);
+          vst1q_f32(c + (i + 7u) * n + j, acc7_0);
+          vst1q_f32(c + (i + 7u) * n + j + col_vec, acc7_1);
+        }
+
+        for (; i + row_block <= m; i += row_block) {
+          float32x4_t acc0_0 = zero;
+          float32x4_t acc0_1 = zero;
+          float32x4_t acc1_0 = zero;
+          float32x4_t acc1_1 = zero;
+          float32x4_t acc2_0 = zero;
+          float32x4_t acc2_1 = zero;
+          float32x4_t acc3_0 = zero;
+          float32x4_t acc3_1 = zero;
+          if (!first_depth_block) {
+            acc0_0 = vld1q_f32(c + (i + 0u) * n + j);
+            acc0_1 = vld1q_f32(c + (i + 0u) * n + j + col_vec);
+            acc1_0 = vld1q_f32(c + (i + 1u) * n + j);
+            acc1_1 = vld1q_f32(c + (i + 1u) * n + j + col_vec);
+            acc2_0 = vld1q_f32(c + (i + 2u) * n + j);
+            acc2_1 = vld1q_f32(c + (i + 2u) * n + j + col_vec);
+            acc3_0 = vld1q_f32(c + (i + 3u) * n + j);
+            acc3_1 = vld1q_f32(c + (i + 3u) * n + j + col_vec);
+          }
+
+          const float * a_ptr = prepared_lhs + (((i / row_block) * k + pb) * row_block);
+          const float * b_ptr = b_panel + j_offset;
+          for (uint64_t kk = 0u; kk < depth; ++kk) {
+            const float32x4_t av = vld1q_f32(a_ptr);
+            const float32x4_t bv0 = vld1q_f32(b_ptr);
+            const float32x4_t bv1 = vld1q_f32(b_ptr + col_vec);
+            acc0_0 = neon_fma_lane_f32<0>(acc0_0, bv0, av);
+            acc0_1 = neon_fma_lane_f32<0>(acc0_1, bv1, av);
+            acc1_0 = neon_fma_lane_f32<1>(acc1_0, bv0, av);
+            acc1_1 = neon_fma_lane_f32<1>(acc1_1, bv1, av);
+            acc2_0 = neon_fma_lane_f32<2>(acc2_0, bv0, av);
+            acc2_1 = neon_fma_lane_f32<2>(acc2_1, bv1, av);
+            acc3_0 = neon_fma_lane_f32<3>(acc3_0, bv0, av);
+            acc3_1 = neon_fma_lane_f32<3>(acc3_1, bv1, av);
+            a_ptr += row_block;
+            b_ptr += n;
+          }
+
+          vst1q_f32(c + (i + 0u) * n + j, acc0_0);
+          vst1q_f32(c + (i + 0u) * n + j + col_vec, acc0_1);
+          vst1q_f32(c + (i + 1u) * n + j, acc1_0);
+          vst1q_f32(c + (i + 1u) * n + j + col_vec, acc1_1);
+          vst1q_f32(c + (i + 2u) * n + j, acc2_0);
+          vst1q_f32(c + (i + 2u) * n + j + col_vec, acc2_1);
+          vst1q_f32(c + (i + 3u) * n + j, acc3_0);
+          vst1q_f32(c + (i + 3u) * n + j + col_vec, acc3_1);
+        }
+
+        for (; i < m; ++i) {
+          const uint64_t lane = i % row_block;
+          float32x4_t acc0 = zero;
+          float32x4_t acc1 = zero;
+          if (!first_depth_block) {
+            acc0 = vld1q_f32(c + i * n + j);
+            acc1 = vld1q_f32(c + i * n + j + col_vec);
+          }
+          const float * a_ptr =
+              prepared_lhs + (((i / row_block) * k + pb) * row_block) + lane;
+          const float * b_ptr = b_panel + j_offset;
+          for (uint64_t kk = 0u; kk < depth; ++kk) {
+            const float av = *a_ptr;
+            acc0 = vmlaq_n_f32(acc0, vld1q_f32(b_ptr), av);
+            acc1 = vmlaq_n_f32(acc1, vld1q_f32(b_ptr + col_vec), av);
+            a_ptr += row_block;
+            b_ptr += n;
+          }
+          vst1q_f32(c + i * n + j, acc0);
+          vst1q_f32(c + i * n + j + col_vec, acc1);
+        }
+      }
+
+      for (; j < j_vec_end; j += col_vec) {
+        const uint64_t j_offset = j - jb;
+        uint64_t i = 0u;
+        for (; i + row_block <= m; i += row_block) {
+          float32x4_t acc0 = zero;
+          float32x4_t acc1 = zero;
+          float32x4_t acc2 = zero;
+          float32x4_t acc3 = zero;
+          if (!first_depth_block) {
+            acc0 = vld1q_f32(c + (i + 0u) * n + j);
+            acc1 = vld1q_f32(c + (i + 1u) * n + j);
+            acc2 = vld1q_f32(c + (i + 2u) * n + j);
+            acc3 = vld1q_f32(c + (i + 3u) * n + j);
+          }
+
+          const float * a_ptr = prepared_lhs + (((i / row_block) * k + pb) * row_block);
+          const float * b_ptr = b_panel + j_offset;
+          for (uint64_t kk = 0u; kk < depth; ++kk) {
+            const float32x4_t av = vld1q_f32(a_ptr);
+            const float32x4_t bv = vld1q_f32(b_ptr);
+            acc0 = neon_fma_lane_f32<0>(acc0, bv, av);
+            acc1 = neon_fma_lane_f32<1>(acc1, bv, av);
+            acc2 = neon_fma_lane_f32<2>(acc2, bv, av);
+            acc3 = neon_fma_lane_f32<3>(acc3, bv, av);
+            a_ptr += row_block;
+            b_ptr += n;
+          }
+
+          vst1q_f32(c + (i + 0u) * n + j, acc0);
+          vst1q_f32(c + (i + 1u) * n + j, acc1);
+          vst1q_f32(c + (i + 2u) * n + j, acc2);
+          vst1q_f32(c + (i + 3u) * n + j, acc3);
+        }
+
+        for (; i < m; ++i) {
+          const uint64_t lane = i % row_block;
+          float32x4_t acc = zero;
+          if (!first_depth_block) {
+            acc = vld1q_f32(c + i * n + j);
+          }
+          const float * a_ptr =
+              prepared_lhs + (((i / row_block) * k + pb) * row_block) + lane;
+          const float * b_ptr = b_panel + j_offset;
+          for (uint64_t kk = 0u; kk < depth; ++kk) {
+            acc = vmlaq_n_f32(acc, vld1q_f32(b_ptr), *a_ptr);
+            a_ptr += row_block;
+            b_ptr += n;
+          }
+          vst1q_f32(c + i * n + j, acc);
+        }
+      }
+
+      for (uint64_t tail_j = j_vec_end; tail_j < j_end; ++tail_j) {
+        const uint64_t j_offset = tail_j - jb;
+        for (uint64_t i = 0u; i < m; ++i) {
+          const uint64_t lane = i % row_block;
+          float acc = first_depth_block ? 0.0f : c[i * n + tail_j];
+          const float * a_ptr =
+              prepared_lhs + (((i / row_block) * k + pb) * row_block) + lane;
+          const float * b_ptr = b_panel + j_offset;
+          for (uint64_t kk = 0u; kk < depth; ++kk) {
+            acc += (*a_ptr) * (*b_ptr);
+            a_ptr += row_block;
+            b_ptr += n;
+          }
+          c[i * n + tail_j] = acc;
+        }
+      }
+    }
+  }
+
+  return true;
+#else
+  (void) request;
+  (void) prepared_lhs;
+  (void) prepared_lhs_count;
   return false;
 #endif
 }

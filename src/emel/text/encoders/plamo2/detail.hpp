@@ -289,8 +289,15 @@ inline void plamo2_emit_piece_some(
   auto &row = ctx.table[static_cast<size_t>(table_idx)];
   row.piece_length = piece_len;
   row.token_id = token_id;
-  const int32_t rounded = static_cast<int32_t>(std::round(score * 1e4f));
-  row.score = select_i32(std::isfinite(score), rounded, k_invalid_score);
+  int32_t rounded = k_invalid_score;
+  if (std::isfinite(score)) {
+    const double scaled = std::round(static_cast<double>(score) * 10000.0);
+    const double clamped =
+        std::clamp(scaled, static_cast<double>(std::numeric_limits<int32_t>::min()),
+                   static_cast<double>(std::numeric_limits<int32_t>::max()));
+    rounded = static_cast<int32_t>(clamped);
+  }
+  row.score = rounded;
   row.piece_id = suffix_to_id[piece];
   table_idx += 1;
 }

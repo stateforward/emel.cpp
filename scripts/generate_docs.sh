@@ -46,7 +46,8 @@ run_docsgen() {
     -DCMAKE_ASM_COMPILER="$bench_cc" \
     -DCMAKE_C_COMPILER_ARG1="$bench_cc_arg" \
     -DCMAKE_CXX_COMPILER_ARG1="$bench_cxx_arg" \
-    -DCMAKE_ASM_COMPILER_ARG1="$bench_cc_arg"
+    -DCMAKE_ASM_COMPILER_ARG1="$bench_cc_arg" \
+    -DDOCSGEN_PART_SIZE="${DOCSGEN_PART_SIZE:-1}"
 
   cmake --build "$build_dir" --parallel --target docsgen
 

@@ -19,10 +19,15 @@ Your job: Check cross-phase wiring (exports used, APIs called, data flows) and v
 If the prompt contains a `<required_reading>` block, you MUST use the `Read` tool to load every file listed there before performing any other actions. This is your primary context.
 
 **Critical mindset:** Individual phases can pass while the system fails. A component can exist without being imported. An API can exist without being called. Focus on connections, not existence.
+Milestone closeout claims about maintained runtime, parity, benchmark, and publication lanes also
+require provenance verification: trace what concrete fixture/model contract/runtime path actually
+feeds the claimed lane.
 
 You MUST also flag milestone-closeout contradictions:
 - validation or planning artifacts claim a phase is complete, but ROADMAP.md / STATE.md still mark it incomplete
 - a phase claims shipped behavior without matching SUMMARY.md / VERIFICATION.md evidence
+- milestone artifacts claim maintained runtime/parity/benchmark truth, but live code still feeds
+  those lanes from a synthetic, fabricated, tool-only, or test-only contract/fixture/path
 </role>
 
 <emel_rule_hierarchy>
@@ -64,6 +69,12 @@ Integration verification checks connections:
 4. **Data → Display** — Database has data, UI renders it?
 
 A "complete" codebase with broken wiring is a broken product.
+
+**Artifacts ≠ Truth**
+
+Matching ROADMAP/STATE/SUMMARY/VERIFICATION text is not enough when the requirement is about which
+maintained path really runs. If the codepath is scaffolded or synthetic, the milestone claim is
+not integrated.
 </core_principle>
 
 <inputs>
@@ -92,7 +103,24 @@ A "complete" codebase with broken wiring is a broken product.
 - MUST map each integration finding to affected requirement IDs where applicable
 - Requirements with no cross-phase wiring MUST be flagged in the Requirements Integration Map
 - Phase-completion contradictions MUST be reported separately from wiring findings
+- Requirements about maintained fixture/runtime/parity/benchmark truth MUST be checked against live
+  source/test/tool consumers, not just planning artifacts
   </inputs>
+
+<maintained_path_verification>
+For milestones that claim maintained fixture, model-contract, runtime, parity, benchmark, or closeout
+document truth, you MUST perform source-level provenance tracing:
+
+1. Find the owning `src/` fixture/model-contract builder or validator.
+2. Find the runtime, parity, benchmark, and docs/publication entrypoints that claim to use it.
+3. Verify the claimed maintained lane actually consumes the maintained contract/fixture/path.
+4. If a tool/test fixture fabricates that contract or bypasses the maintained loader path, report:
+   - affected REQ-IDs
+   - exact source/test/tool files involved
+   - blocker verdict for milestone readiness
+
+Do not accept "pipeline entrypoint is used" as sufficient when the wrong contract/fixture feeds it.
+</maintained_path_verification>
 
 <verification_process>
 

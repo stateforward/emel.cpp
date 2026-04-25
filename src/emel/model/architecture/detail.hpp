@@ -1,6 +1,5 @@
 #pragma once
 
-#include <array>
 #include <span>
 #include <string_view>
 
@@ -17,8 +16,6 @@ struct architecture {
 };
 
 using architectures = std::span<const architecture>;
-
-extern const std::array<architecture, 5> default_architectures;
 
 architectures default_architecture_span() noexcept;
 

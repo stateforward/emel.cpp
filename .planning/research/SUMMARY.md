@@ -1,45 +1,48 @@
 # Research Summary
 
-**Milestone:** `v1.11 TE-75M GGUF Trimodal Embedding Runtime`  
-**Summarized:** 2026-04-13
+**Milestone:** `v1.15 ARM Sortformer Diarization GGUF Slice`
+**Summarized:** 2026-04-22
 
 ## Recommended Scope
 
-Build one truthful maintained TE vertical slice:
+Build one truthful maintained Sortformer diarization vertical slice:
 
-- pin `TE-75M-q8_0.gguf` as the maintained fixture
-- add explicit `omniembed` model-family support
-- add synchronous `text`, `image`, and `audio` embedding lanes
-- return one normalized shared-space embedding contract with supported Matryoshka truncation
-- prove behavior with upstream golden embeddings and tiny cross-modal smoke checks
+- pin `openresearchtools/diar_streaming_sortformer_4spk-v2.1-gguf` as the maintained GGUF target
+- add explicit Sortformer model-family acceptance and execution-contract validation
+- add a diarization-owned actor for mono 16 kHz PCM requests
+- run the maintained Sortformer path natively in EMEL-owned `src/` code on ARM
+- emit deterministic `T x 4` probabilities and bounded four-speaker segment records
+- prove behavior against a lane-isolated trusted reference baseline
+- publish one maintained ARM benchmark with fixture/profile/proof metadata
 
 ## Stack Additions
 
-- `src/emel/model/omniembed/` model contract and execution bindings
-- `src/emel/text/tokenizers/` as the tokenizer-family home
-- `src/emel/text/encoders/`, `src/emel/vision/encoders/`, and `src/emel/audio/encoders/` as
-  embedding-producer families
-- `src/emel/embeddings/generator/` as the shared embedding-session/output orchestrator
-- tiny canonical text/image/audio proof fixtures and golden baselines
+- `src/emel/model/sortformer/` for GGUF/model-family contract and tensor-family validation
+- `src/emel/audio/diarization/` for the diarization request/result/error actor
+- `src/emel/audio/diarization/sortformer/` for the maintained Sortformer implementation family
+- `src/emel/kernel/**` additions for Sortformer numeric work that belongs in kernel ownership
+- `tools/paritychecker/**` or `tools/bench/**` reference-lane additions for proof and benchmark
 
 ## Table Stakes
 
-- one exact maintained TE fixture recorded under `tests/models/`
-- truthful `omniembed` accept/reject behavior
-- text/image/audio request lanes that each produce shared-space embeddings
-- one common output contract for normalization and truncation
-- deterministic rejection of unsupported dimensions, payloads, and off-scope TE files
-- repeatable proof inside `emel_tests`
+- one exact maintained GGUF fixture contract with provenance/checksum
+- explicit loader rejection for incompatible or incomplete Sortformer GGUF files
+- one mono `float32` PCM, 16,000 Hz input contract
+- native frontend/input tensor preparation
+- native ARM Sortformer execution without external compute fallback
+- deterministic `T x 4` speaker probability output with 0.08-second frame semantics
+- stable `speaker_0` through `speaker_3` segment output
+- lane-isolated reference proof and ARM benchmark publication
 
 ## Watch Out For
 
-- do not start with `TE-75M-q5_0.gguf`
-- do not keep tokenizer families in `text/encoders`
-- do not hide modality routing in action/detail branching
-- do not force `*/forward` domains before a modality actually has hidden-state reuse across more
-  than one top-level contract
-- do not widen into file decode, vector search, or public API work
-- do not call the milestone maintained without upstream golden-baseline proof
+- do not route this through embeddings/generator just because existing audio embedding support
+  exists
+- do not use Python, NeMo, ONNX, llama.cpp, or ggml as the EMEL compute path
+- do not add media decode, resampling, live microphone capture, or service streaming in v1
+- do not hide streaming profile or cache-readiness routing in actions/detail helpers
+- do not call the milestone maintained with segment-only proof and no probability-matrix truth
+- do not share model/cache/tensor/output objects between EMEL and reference lanes
 
 ## Sources
 
@@ -47,6 +50,9 @@ Build one truthful maintained TE vertical slice:
 - `.planning/research/FEATURES.md`
 - `.planning/research/ARCHITECTURE.md`
 - `.planning/research/PITFALLS.md`
+- https://huggingface.co/openresearchtools/diar_streaming_sortformer_4spk-v2.1-gguf
+- https://huggingface.co/nvidia/diar_streaming_sortformer_4spk-v2.1
+- https://developer.nvidia.com/blog/identify-speakers-in-meetings-calls-and-voice-apps-in-real-time-with-nvidia-streaming-sortformer/
 
 ---
-*Research summarized: 2026-04-13*
+*Research summarized: 2026-04-22*

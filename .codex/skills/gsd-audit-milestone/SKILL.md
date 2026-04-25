@@ -49,6 +49,8 @@ Result parsing:
 Verify milestone achieved its definition of done. Check requirements coverage, cross-phase integration, and end-to-end flows.
 
 **This command IS the orchestrator.** Reads existing VERIFICATION.md files (phases already verified during execute-phase), aggregates tech debt and deferred gaps, then spawns integration checker for cross-phase wiring.
+It MUST also verify milestone-critical maintained-path claims against live repo codepaths instead of
+trusting planning artifacts alone.
 </objective>
 
 <execution_context>
@@ -68,4 +70,6 @@ Glob: .planning/phases/*/*-VERIFICATION.md
 <process>
 Execute the audit-milestone workflow from @/Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/.codex/get-shit-done/workflows/audit-milestone.md end-to-end.
 Preserve all workflow gates (scope determination, verification reading, integration check, requirements coverage, routing).
+Do not allow artifact-only agreement to pass a maintained runtime/parity/benchmark claim when live
+code wiring contradicts it.
 </process>

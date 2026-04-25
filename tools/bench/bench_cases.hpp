@@ -59,6 +59,9 @@ void append_emel_gbnf_rule_parser_cases(std::vector<result> & results, const con
 void append_reference_gbnf_rule_parser_cases(std::vector<result> & results, const config & cfg);
 void append_emel_generation_cases(std::vector<result> & results, const config & cfg);
 void append_reference_generation_cases(std::vector<result> & results, const config & cfg);
+void append_emel_sortformer_diarization_cases(std::vector<result> & results, const config & cfg);
+void append_reference_sortformer_diarization_cases(std::vector<result> & results,
+                                                   const config & cfg);
 void append_emel_flash_attention_cases(std::vector<result> & results, const config & cfg);
 void append_reference_flash_attention_cases(std::vector<result> & results, const config & cfg);
 void append_emel_logits_validator_cases(std::vector<result> & results, const config & cfg);

@@ -1,0 +1,26 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/.codex/hooks/gsd-session-start.sh",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/Users/gabrielwillen/.atmux/src/atmux/adapter/scripts/on-stop",
+            "timeout": 60
+          }
+        ]
+      }
+    ]
+  }
+}

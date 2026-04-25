@@ -1,99 +1,106 @@
 # ref=master
 # toolchain=/opt/homebrew/bin/zig
-# reference_impl: source=cmake_fetch_latest ref=223373742bc1bd48e37b22192d1302f54d6f14bc
+# reference_impl: source=cmake_fetch_latest ref=5d2b52d80d9f375a6e81d07e212d047d8ee4f76e
 # benchmark_config: iterations=1000 runs=3 warmup_iterations=100 warmup_runs=1 generation_iterations=1 generation_runs=3 generation_warmup_iterations=0 generation_warmup_runs=0
+# binary_size_compare: status=ok emel_target=libemel.a emel_bytes=30276224 llama_target=libllama.0.0.0.dylib llama_bytes=3385320 ratio=8.943x
 # generation_architecture: lfm2
 # generation_formatter_contract: source=tokenizer.chat_template support=supported_contract shape=structured_chat_messages_v1 roles=system,user tools=none add_generation_prompt=true enable_thinking=false keep_past_thinking=false bos=<|startoftext|>
 # generation_flash_evidence: case=generation/preloaded_request/lfm2_5_1_2b_thinking_q4_k_m_prompt_hello_max_tokens_1 flash_dispatch_calls=174 optimized_flash_dispatch_calls=174 shared_flash_dispatch_calls=0 emel_decode_calls=0 emel_logits_calls=0 reference_decode_calls=0 reference_logits_calls=0
 # generation_runtime_contract: case=generation/preloaded_request/lfm2_5_1_2b_thinking_q4_k_m_prompt_hello_max_tokens_1 native_quantized=8 approved_dense_f32_by_contract=6 disallowed_fallback=0 explicit_no_claim=0
 # generation_quantized_evidence: case=generation/preloaded_request/lfm2_5_1_2b_thinking_q4_k_m_prompt_hello_max_tokens_1 native_q8_0_dispatch_calls=0 packed_q8_0_dispatch_calls=0 optimized_q2_dispatch_calls=0 shared_q2_dispatch_calls=0 optimized_q3_dispatch_calls=0 shared_q3_dispatch_calls=0 optimized_q4_dispatch_calls=656 shared_q4_dispatch_calls=0 optimized_q6_dispatch_calls=81 shared_q6_dispatch_calls=0
-# generation_stage_probe: case=generation/preloaded_request/lfm2_5_1_2b_thinking_q4_k_m_prompt_hello_max_tokens_1 emel_total_ns=399902000 emel_prefill_contract=flash_preselected_chunk8_q8_k emel_prompt_tokens=29 emel_prefill_step_size=8 emel_conditioning_ns=45708 emel_prefill_ns=399719250 emel_first_decode_ns=20421625 emel_steady_decode_ns=0 emel_unattributed_ns=0 emel_prefill_linear_probe_ns=375726243 emel_prefill_attention_probe_ns=1558795 emel_prefill_misc_probe_ns=22340162 emel_prefill_misc_attention_norm_ns=676375 emel_prefill_misc_qk_norm_ns=163793 emel_prefill_misc_rope_ns=2623 emel_prefill_misc_kv_store_ns=163670 emel_prefill_misc_ctx_copy_ns=108875 emel_prefill_misc_shortconv_ns=794667 emel_prefill_shortconv_in_proj_ns=33400584 emel_prefill_shortconv_in_proj_prepare_ns=333335 emel_prefill_shortconv_conv_ns=742574 emel_prefill_shortconv_state_shift_ns=52093 emel_prefill_shortconv_out_proj_ns=11218668 emel_prefill_shortconv_out_proj_prepare_ns=326625 emel_prefill_misc_ffn_norm_ns=733415 emel_prefill_misc_silu_ns=5274370 reference_total_ns=328129042 reference_conditioning_ns=56208 reference_prefill_ns=274797750 reference_first_decode_ns=24240875 reference_steady_decode_ns=0 reference_unattributed_ns=29034209 reference_prefill_linear_probe_ns=271048330 reference_prefill_attention_probe_ns=1663790 reference_prefill_misc_probe_ns=9047584
-# generation_stage_probe: case=generation/preloaded_request/lfm2_5_1_2b_thinking_q4_k_m_prompt_hello_max_tokens_10 emel_total_ns=593653292 emel_prefill_contract=flash_preselected_chunk8_q8_k emel_prompt_tokens=29 emel_prefill_step_size=8 emel_conditioning_ns=39375 emel_prefill_ns=397155167 emel_first_decode_ns=20787875 emel_steady_decode_ns=188504209 emel_unattributed_ns=0 emel_prefill_linear_probe_ns=0 emel_prefill_attention_probe_ns=0 emel_prefill_misc_probe_ns=0 emel_prefill_misc_attention_norm_ns=0 emel_prefill_misc_qk_norm_ns=0 emel_prefill_misc_rope_ns=0 emel_prefill_misc_kv_store_ns=0 emel_prefill_misc_ctx_copy_ns=0 emel_prefill_misc_shortconv_ns=0 emel_prefill_shortconv_in_proj_ns=0 emel_prefill_shortconv_in_proj_prepare_ns=0 emel_prefill_shortconv_conv_ns=0 emel_prefill_shortconv_state_shift_ns=0 emel_prefill_shortconv_out_proj_ns=0 emel_prefill_shortconv_out_proj_prepare_ns=0 emel_prefill_misc_ffn_norm_ns=0 emel_prefill_misc_silu_ns=0 reference_total_ns=524524625 reference_conditioning_ns=56500 reference_prefill_ns=277471959 reference_first_decode_ns=24427333 reference_steady_decode_ns=224066749 reference_unattributed_ns=0 reference_prefill_linear_probe_ns=0 reference_prefill_attention_probe_ns=0 reference_prefill_misc_probe_ns=0
-# generation_stage_probe: case=generation/preloaded_request/lfm2_5_1_2b_thinking_q4_k_m_prompt_hello_max_tokens_100 emel_total_ns=2472134625 emel_prefill_contract=flash_preselected_chunk8_q8_k emel_prompt_tokens=29 emel_prefill_step_size=8 emel_conditioning_ns=37083 emel_prefill_ns=403671375 emel_first_decode_ns=20894666 emel_steady_decode_ns=2069237001 emel_unattributed_ns=0 emel_prefill_linear_probe_ns=0 emel_prefill_attention_probe_ns=0 emel_prefill_misc_probe_ns=0 emel_prefill_misc_attention_norm_ns=0 emel_prefill_misc_qk_norm_ns=0 emel_prefill_misc_rope_ns=0 emel_prefill_misc_kv_store_ns=0 emel_prefill_misc_ctx_copy_ns=0 emel_prefill_misc_shortconv_ns=0 emel_prefill_shortconv_in_proj_ns=0 emel_prefill_shortconv_in_proj_prepare_ns=0 emel_prefill_shortconv_conv_ns=0 emel_prefill_shortconv_state_shift_ns=0 emel_prefill_shortconv_out_proj_ns=0 emel_prefill_shortconv_out_proj_prepare_ns=0 emel_prefill_misc_ffn_norm_ns=0 emel_prefill_misc_silu_ns=0 reference_total_ns=2744493166 reference_conditioning_ns=44083 reference_prefill_ns=276621791 reference_first_decode_ns=24145917 reference_steady_decode_ns=2429306455 reference_unattributed_ns=14374920 reference_prefill_linear_probe_ns=0 reference_prefill_attention_probe_ns=0 reference_prefill_misc_probe_ns=0
-# generation_stage_probe: case=generation/preloaded_request/lfm2_5_1_2b_thinking_q4_k_m_prompt_hello_max_tokens_1000 emel_total_ns=22737997083 emel_prefill_contract=flash_preselected_chunk8_q8_k emel_prompt_tokens=29 emel_prefill_step_size=8 emel_conditioning_ns=35833 emel_prefill_ns=395689334 emel_first_decode_ns=20213042 emel_steady_decode_ns=21873018554 emel_unattributed_ns=449040320 emel_prefill_linear_probe_ns=0 emel_prefill_attention_probe_ns=0 emel_prefill_misc_probe_ns=0 emel_prefill_misc_attention_norm_ns=0 emel_prefill_misc_qk_norm_ns=0 emel_prefill_misc_rope_ns=0 emel_prefill_misc_kv_store_ns=0 emel_prefill_misc_ctx_copy_ns=0 emel_prefill_misc_shortconv_ns=0 emel_prefill_shortconv_in_proj_ns=0 emel_prefill_shortconv_in_proj_prepare_ns=0 emel_prefill_shortconv_conv_ns=0 emel_prefill_shortconv_state_shift_ns=0 emel_prefill_shortconv_out_proj_ns=0 emel_prefill_shortconv_out_proj_prepare_ns=0 emel_prefill_misc_ffn_norm_ns=0 emel_prefill_misc_silu_ns=0 reference_total_ns=25804161458 reference_conditioning_ns=59083 reference_prefill_ns=276097500 reference_first_decode_ns=24156459 reference_steady_decode_ns=25851391736 reference_unattributed_ns=0 reference_prefill_linear_probe_ns=0 reference_prefill_attention_probe_ns=0 reference_prefill_misc_probe_ns=0
-batch/planner_equal emel.cpp 1899.542 ns/op, llama.cpp 6059.042 ns/op, ratio=0.314x
-batch/planner_seq emel.cpp 2192.667 ns/op, llama.cpp 3211.125 ns/op, ratio=0.683x
-batch/planner_simple emel.cpp 984.125 ns/op, llama.cpp 2442.334 ns/op, ratio=0.403x
-flash_attention/aarch64/op_flash_attn_ext_decode_like emel.cpp 15231.250 ns/op, llama.cpp 18612.625 ns/op, ratio=0.818x
-gbnf/rule_parser_basic emel.cpp 481.125 ns/op, llama.cpp 272.458 ns/op, ratio=1.766x
-gbnf/rule_parser_complex emel.cpp 3246.417 ns/op, llama.cpp 1522.625 ns/op, ratio=2.132x
-generation/preloaded_request/lfm2_5_1_2b_thinking_q4_k_m_prompt_hello_max_tokens_1 emel.cpp 408512500.000 ns/op, llama.cpp 307468375.000 ns/op, ratio=1.329x
-generation/preloaded_request/lfm2_5_1_2b_thinking_q4_k_m_prompt_hello_max_tokens_10 emel.cpp 589380666.000 ns/op, llama.cpp 523875709.000 ns/op, ratio=1.125x
-generation/preloaded_request/lfm2_5_1_2b_thinking_q4_k_m_prompt_hello_max_tokens_100 emel.cpp 2471907584.000 ns/op, llama.cpp 2842218125.000 ns/op, ratio=0.870x
-generation/preloaded_request/lfm2_5_1_2b_thinking_q4_k_m_prompt_hello_max_tokens_1000 emel.cpp 22368668542.000 ns/op, llama.cpp 25874351417.000 ns/op, ratio=0.865x
-generation/preloaded_request/qwen3_0_6b_q8_0_prompt_hello_max_tokens_1 emel.cpp 110291083.000 ns/op, llama.cpp 123507708.000 ns/op, ratio=0.893x
-generation/preloaded_request/qwen3_0_6b_q8_0_prompt_hello_max_tokens_10 emel.cpp 203857542.000 ns/op, llama.cpp 219353333.000 ns/op, ratio=0.929x
-generation/preloaded_request/qwen3_0_6b_q8_0_prompt_hello_max_tokens_100 emel.cpp 1229578375.000 ns/op, llama.cpp 1261727625.000 ns/op, ratio=0.975x
-generation/preloaded_request/qwen3_0_6b_q8_0_prompt_hello_max_tokens_1000 emel.cpp 15577386000.000 ns/op, llama.cpp 16990208667.000 ns/op, ratio=0.917x
-kernel/aarch64/op_add emel.cpp 115.167 ns/op, llama.cpp 6302.958 ns/op, ratio=0.018x
-kernel/aarch64/op_cos emel.cpp 1645.875 ns/op, llama.cpp 6281.125 ns/op, ratio=0.262x
-kernel/aarch64/op_div emel.cpp 114.458 ns/op, llama.cpp 4799.917 ns/op, ratio=0.024x
-kernel/aarch64/op_dup emel.cpp 106.792 ns/op, llama.cpp 4575.083 ns/op, ratio=0.023x
-kernel/aarch64/op_log emel.cpp 1862.708 ns/op, llama.cpp 6937.292 ns/op, ratio=0.269x
-kernel/aarch64/op_mul emel.cpp 121.916 ns/op, llama.cpp 5915.333 ns/op, ratio=0.021x
-kernel/aarch64/op_mul_mat emel.cpp 4931.750 ns/op, llama.cpp 11146.666 ns/op, ratio=0.442x
-kernel/aarch64/op_sin emel.cpp 1298.416 ns/op, llama.cpp 6179.958 ns/op, ratio=0.210x
-kernel/aarch64/op_soft_max emel.cpp 1019.084 ns/op, llama.cpp 5772.875 ns/op, ratio=0.177x
-kernel/aarch64/op_sqr emel.cpp 105.000 ns/op, llama.cpp 4976.334 ns/op, ratio=0.021x
-kernel/aarch64/op_sqrt emel.cpp 153.208 ns/op, llama.cpp 4706.791 ns/op, ratio=0.033x
-kernel/aarch64/op_sub emel.cpp 110.334 ns/op, llama.cpp 6405.917 ns/op, ratio=0.017x
-kernel/aarch64/op_unary_exp emel.cpp 1410.042 ns/op, llama.cpp 5635.083 ns/op, ratio=0.250x
-kernel/aarch64/op_unary_neg emel.cpp 118.917 ns/op, llama.cpp 4843.458 ns/op, ratio=0.025x
-kernel/aarch64/op_unary_relu emel.cpp 132.708 ns/op, llama.cpp 5172.667 ns/op, ratio=0.026x
-logits/sampler_raw/vocab_128000 emel.cpp 20448.250 ns/op, llama.cpp 18286.584 ns/op, ratio=1.118x
-logits/sampler_raw/vocab_256000 emel.cpp 38871.208 ns/op, llama.cpp 39891.667 ns/op, ratio=0.974x
-logits/sampler_raw/vocab_32000 emel.cpp 4706.125 ns/op, llama.cpp 5408.750 ns/op, ratio=0.870x
-logits/sampler_sml/vocab_128000 emel.cpp 16550.666 ns/op, llama.cpp 16180.417 ns/op, ratio=1.023x
-logits/sampler_sml/vocab_256000 emel.cpp 29869.333 ns/op, llama.cpp 26783.083 ns/op, ratio=1.115x
-logits/sampler_sml/vocab_32000 emel.cpp 4375.958 ns/op, llama.cpp 4157.916 ns/op, ratio=1.052x
-logits/validator_raw/vocab_128000 emel.cpp 91645.042 ns/op, llama.cpp 91257.000 ns/op, ratio=1.004x
-logits/validator_raw/vocab_256000 emel.cpp 184238.167 ns/op, llama.cpp 180452.625 ns/op, ratio=1.021x
-logits/validator_raw/vocab_32000 emel.cpp 23894.208 ns/op, llama.cpp 23857.084 ns/op, ratio=1.002x
-logits/validator_sml/vocab_128000 emel.cpp 99734.208 ns/op, llama.cpp 100179.083 ns/op, ratio=0.996x
-logits/validator_sml/vocab_256000 emel.cpp 197700.584 ns/op, llama.cpp 200569.083 ns/op, ratio=0.986x
-logits/validator_sml/vocab_32000 emel.cpp 24562.167 ns/op, llama.cpp 24648.084 ns/op, ratio=0.997x
-memory/hybrid_full emel.cpp 434.917 ns/op, llama.cpp 36054.000 ns/op, ratio=0.012x
-memory/kv_full emel.cpp 125.917 ns/op, llama.cpp 36519.250 ns/op, ratio=0.003x
-memory/recurrent_full emel.cpp 139.916 ns/op, llama.cpp 6720.833 ns/op, ratio=0.021x
-text/encoders/bpe_long emel.cpp 60.500 ns/op, llama.cpp 60.667 ns/op, ratio=0.997x
-text/encoders/bpe_short emel.cpp 66.000 ns/op, llama.cpp 56.333 ns/op, ratio=1.172x
-text/encoders/fallback_long emel.cpp 2457.583 ns/op, llama.cpp 2461.583 ns/op, ratio=0.998x
-text/encoders/fallback_short emel.cpp 62.625 ns/op, llama.cpp 64.041 ns/op, ratio=0.978x
-text/encoders/plamo2_long emel.cpp 7544.958 ns/op, llama.cpp 7705.167 ns/op, ratio=0.979x
-text/encoders/plamo2_short emel.cpp 210.750 ns/op, llama.cpp 244.083 ns/op, ratio=0.863x
-text/encoders/rwkv_long emel.cpp 839708.875 ns/op, llama.cpp 833583.667 ns/op, ratio=1.007x
-text/encoders/rwkv_short emel.cpp 56620.500 ns/op, llama.cpp 56107.458 ns/op, ratio=1.009x
-text/encoders/spm_long emel.cpp 3577368.416 ns/op, llama.cpp 3565931.542 ns/op, ratio=1.003x
-text/encoders/spm_short emel.cpp 1321.333 ns/op, llama.cpp 1267.000 ns/op, ratio=1.043x
-text/encoders/ugm_long emel.cpp 1490079.792 ns/op, llama.cpp 1489678.583 ns/op, ratio=1.000x
-text/encoders/ugm_short emel.cpp 757.542 ns/op, llama.cpp 778.667 ns/op, ratio=0.973x
-text/encoders/wpm_long emel.cpp 30564.458 ns/op, llama.cpp 30743.583 ns/op, ratio=0.994x
-text/encoders/wpm_short emel.cpp 531.708 ns/op, llama.cpp 552.333 ns/op, ratio=0.963x
-text/jinja/formatter_long emel.cpp 65.667 ns/op, llama.cpp 239787.000 ns/op, ratio=0.000x
-text/jinja/formatter_short emel.cpp 15.958 ns/op, llama.cpp 4022.333 ns/op, ratio=0.004x
-text/jinja/parser_long emel.cpp 65216.000 ns/op, llama.cpp 50247.292 ns/op, ratio=1.298x
-text/jinja/parser_short emel.cpp 938.333 ns/op, llama.cpp 501.292 ns/op, ratio=1.872x
-tokenizer/full_bpe_long emel.cpp 13455.833 ns/op, llama.cpp 13899.792 ns/op, ratio=0.968x
-tokenizer/full_bpe_short emel.cpp 332.541 ns/op, llama.cpp 320.166 ns/op, ratio=1.039x
-tokenizer/full_plamo2_long emel.cpp 12750.208 ns/op, llama.cpp 12621.000 ns/op, ratio=1.010x
-tokenizer/full_plamo2_short emel.cpp 2477.000 ns/op, llama.cpp 1967.041 ns/op, ratio=1.259x
-tokenizer/full_rwkv_long emel.cpp 833512.042 ns/op, llama.cpp 830968.792 ns/op, ratio=1.003x
-tokenizer/full_rwkv_short emel.cpp 55883.916 ns/op, llama.cpp 55148.333 ns/op, ratio=1.013x
-tokenizer/full_spm_long emel.cpp 3577063.041 ns/op, llama.cpp 3578127.416 ns/op, ratio=1.000x
-tokenizer/full_spm_short emel.cpp 1414.417 ns/op, llama.cpp 1489.542 ns/op, ratio=0.950x
-tokenizer/full_ugm_long emel.cpp 1489834.542 ns/op, llama.cpp 1489502.458 ns/op, ratio=1.000x
-tokenizer/full_ugm_short emel.cpp 2441.583 ns/op, llama.cpp 2474.416 ns/op, ratio=0.987x
-tokenizer/full_wpm_long emel.cpp 32083.333 ns/op, llama.cpp 32329.709 ns/op, ratio=0.992x
-tokenizer/full_wpm_short emel.cpp 2337.166 ns/op, llama.cpp 2161.375 ns/op, ratio=1.081x
-tokenizer/preprocessor_bpe_long emel.cpp 3399.625 ns/op, llama.cpp 5282.459 ns/op, ratio=0.644x
-tokenizer/preprocessor_bpe_short emel.cpp 128.958 ns/op, llama.cpp 1721.708 ns/op, ratio=0.075x
-tokenizer/preprocessor_plamo2_long emel.cpp 4149.541 ns/op, llama.cpp 7122.458 ns/op, ratio=0.583x
-tokenizer/preprocessor_plamo2_short emel.cpp 2667.834 ns/op, llama.cpp 4600.125 ns/op, ratio=0.580x
-tokenizer/preprocessor_rwkv_long emel.cpp 4034.166 ns/op, llama.cpp 7117.667 ns/op, ratio=0.567x
-tokenizer/preprocessor_rwkv_short emel.cpp 2521.875 ns/op, llama.cpp 5207.916 ns/op, ratio=0.484x
-tokenizer/preprocessor_spm_long emel.cpp 4162.958 ns/op, llama.cpp 6702.333 ns/op, ratio=0.621x
-tokenizer/preprocessor_spm_short emel.cpp 2514.000 ns/op, llama.cpp 4829.083 ns/op, ratio=0.521x
-tokenizer/preprocessor_ugm_long emel.cpp 4174.750 ns/op, llama.cpp 7107.875 ns/op, ratio=0.587x
-tokenizer/preprocessor_ugm_short emel.cpp 2617.458 ns/op, llama.cpp 4693.792 ns/op, ratio=0.558x
-tokenizer/preprocessor_wpm_long emel.cpp 4767.834 ns/op, llama.cpp 7016.500 ns/op, ratio=0.680x
-tokenizer/preprocessor_wpm_short emel.cpp 2427.166 ns/op, llama.cpp 4889.042 ns/op, ratio=0.496x
+# generation_stage_probe: case=generation/preloaded_request/lfm2_5_1_2b_thinking_q4_k_m_prompt_hello_max_tokens_1 emel_total_ns=956783000 emel_prefill_contract=flash_preselected_chunk8_q8_k emel_prompt_tokens=29 emel_prefill_step_size=8 emel_conditioning_ns=37917 emel_prefill_ns=738580208 emel_first_decode_ns=49785667 emel_steady_decode_ns=0 emel_unattributed_ns=168379208 emel_prefill_linear_probe_ns=683206247 emel_prefill_attention_probe_ns=8412574 emel_prefill_misc_probe_ns=46849622 emel_prefill_misc_attention_norm_ns=779582 emel_prefill_misc_qk_norm_ns=233408 emel_prefill_misc_rope_ns=567547 emel_prefill_misc_kv_store_ns=296341 emel_prefill_misc_ctx_copy_ns=47047 emel_prefill_misc_shortconv_ns=806663 emel_prefill_shortconv_in_proj_ns=51559208 emel_prefill_shortconv_in_proj_prepare_ns=353458 emel_prefill_shortconv_conv_ns=753045 emel_prefill_shortconv_state_shift_ns=53618 emel_prefill_shortconv_out_proj_ns=12028623 emel_prefill_shortconv_out_proj_prepare_ns=353040 emel_prefill_misc_ffn_norm_ns=726126 emel_prefill_misc_silu_ns=6287670 reference_total_ns=652146292 reference_conditioning_ns=47125 reference_prefill_ns=518128083 reference_first_decode_ns=119345334 reference_steady_decode_ns=0 reference_unattributed_ns=14625750 reference_prefill_linear_probe_ns=751843870 reference_prefill_attention_probe_ns=1706125 reference_prefill_misc_probe_ns=16154961
+# generation_stage_probe: case=generation/preloaded_request/lfm2_5_1_2b_thinking_q4_k_m_prompt_hello_max_tokens_10 emel_total_ns=1174051875 emel_prefill_contract=flash_preselected_chunk8_q8_k emel_prompt_tokens=29 emel_prefill_step_size=8 emel_conditioning_ns=36916 emel_prefill_ns=1202064083 emel_first_decode_ns=21403541 emel_steady_decode_ns=506591916 emel_unattributed_ns=0 emel_prefill_linear_probe_ns=0 emel_prefill_attention_probe_ns=0 emel_prefill_misc_probe_ns=0 emel_prefill_misc_attention_norm_ns=0 emel_prefill_misc_qk_norm_ns=0 emel_prefill_misc_rope_ns=0 emel_prefill_misc_kv_store_ns=0 emel_prefill_misc_ctx_copy_ns=0 emel_prefill_misc_shortconv_ns=0 emel_prefill_shortconv_in_proj_ns=0 emel_prefill_shortconv_in_proj_prepare_ns=0 emel_prefill_shortconv_conv_ns=0 emel_prefill_shortconv_state_shift_ns=0 emel_prefill_shortconv_out_proj_ns=0 emel_prefill_shortconv_out_proj_prepare_ns=0 emel_prefill_misc_ffn_norm_ns=0 emel_prefill_misc_silu_ns=0 reference_total_ns=1422409333 reference_conditioning_ns=46542 reference_prefill_ns=845748916 reference_first_decode_ns=61273250 reference_steady_decode_ns=468782500 reference_unattributed_ns=46558125 reference_prefill_linear_probe_ns=0 reference_prefill_attention_probe_ns=0 reference_prefill_misc_probe_ns=0
+# generation_stage_probe: case=generation/preloaded_request/lfm2_5_1_2b_thinking_q4_k_m_prompt_hello_max_tokens_100 emel_total_ns=5379202208 emel_prefill_contract=flash_preselected_chunk8_q8_k emel_prompt_tokens=29 emel_prefill_step_size=8 emel_conditioning_ns=37542 emel_prefill_ns=1133095334 emel_first_decode_ns=90226209 emel_steady_decode_ns=5087114495 emel_unattributed_ns=0 emel_prefill_linear_probe_ns=0 emel_prefill_attention_probe_ns=0 emel_prefill_misc_probe_ns=0 emel_prefill_misc_attention_norm_ns=0 emel_prefill_misc_qk_norm_ns=0 emel_prefill_misc_rope_ns=0 emel_prefill_misc_kv_store_ns=0 emel_prefill_misc_ctx_copy_ns=0 emel_prefill_misc_shortconv_ns=0 emel_prefill_shortconv_in_proj_ns=0 emel_prefill_shortconv_in_proj_prepare_ns=0 emel_prefill_shortconv_conv_ns=0 emel_prefill_shortconv_state_shift_ns=0 emel_prefill_shortconv_out_proj_ns=0 emel_prefill_shortconv_out_proj_prepare_ns=0 emel_prefill_misc_ffn_norm_ns=0 emel_prefill_misc_silu_ns=0 reference_total_ns=5493854542 reference_conditioning_ns=140792 reference_prefill_ns=658225792 reference_first_decode_ns=45921250 reference_steady_decode_ns=5095874961 reference_unattributed_ns=0 reference_prefill_linear_probe_ns=0 reference_prefill_attention_probe_ns=0 reference_prefill_misc_probe_ns=0
+# generation_stage_probe: case=generation/preloaded_request/lfm2_5_1_2b_thinking_q4_k_m_prompt_hello_max_tokens_1000 emel_total_ns=47540722208 emel_prefill_contract=flash_preselected_chunk8_q8_k emel_prompt_tokens=29 emel_prefill_step_size=8 emel_conditioning_ns=37208 emel_prefill_ns=760644958 emel_first_decode_ns=21622500 emel_steady_decode_ns=43800367965 emel_unattributed_ns=2958049577 emel_prefill_linear_probe_ns=0 emel_prefill_attention_probe_ns=0 emel_prefill_misc_probe_ns=0 emel_prefill_misc_attention_norm_ns=0 emel_prefill_misc_qk_norm_ns=0 emel_prefill_misc_rope_ns=0 emel_prefill_misc_kv_store_ns=0 emel_prefill_misc_ctx_copy_ns=0 emel_prefill_misc_shortconv_ns=0 emel_prefill_shortconv_in_proj_ns=0 emel_prefill_shortconv_in_proj_prepare_ns=0 emel_prefill_shortconv_conv_ns=0 emel_prefill_shortconv_state_shift_ns=0 emel_prefill_shortconv_out_proj_ns=0 emel_prefill_shortconv_out_proj_prepare_ns=0 emel_prefill_misc_ffn_norm_ns=0 emel_prefill_misc_silu_ns=0 reference_total_ns=54319884292 reference_conditioning_ns=138208 reference_prefill_ns=372361750 reference_first_decode_ns=27112542 reference_steady_decode_ns=49638215669 reference_unattributed_ns=4282056123 reference_prefill_linear_probe_ns=0 reference_prefill_attention_probe_ns=0 reference_prefill_misc_probe_ns=0
+batch/planner_equal emel.cpp 2252.958 ns/op, llama.cpp 6425.750 ns/op, ratio=0.351x
+batch/planner_seq emel.cpp 2494.584 ns/op, llama.cpp 2896.959 ns/op, ratio=0.861x
+batch/planner_simple emel.cpp 2456.000 ns/op, llama.cpp 2274.000 ns/op, ratio=1.080x
+# diarization_sortformer: lane=emel case=diarization/sortformer/ami_en2002b_mix_headset_137.00_152.04_16khz_mono model_id=diar_streaming_sortformer_4spk_v2_1_gguf fixture_id=ami_en2002b_mix_headset_137.00_152.04_16khz_mono workload_id=diarization_sortformer_pipeline_v1 output_dim=17 output_checksum=4249677247906920305 source=ami ihm/test path=EN2002b.Mix-Headset.wav window=137.00-152.04s proof_status=maintained_loader_real_audio
+# diarization_sortformer: lane=reference case=diarization/sortformer/ami_en2002b_mix_headset_137.00_152.04_16khz_mono model_id=diar_streaming_sortformer_4spk_v2_1_gguf fixture_id=ami_en2002b_mix_headset_137.00_152.04_16khz_mono workload_id=diarization_sortformer_pipeline_v1 output_dim=17 output_checksum=4249677247906920305 proof_status=onnxruntime_cpu thread_contract=intra_op=1 inter_op=1 execution_mode=sequential benchmark_config=iterations:1,runs:15,warmup_iterations:1,warmup_runs:3 actual_providers=CPUExecutionProvider feature_contract=emel_maintained_features onnx_model=build/onnx_ref/diar_streaming_sortformer_4spk-v2.1.onnx onnx_sha256=5df5e883c8dae4e0ecba77739f3db38997c2ae57153de2583d625afb6abb2be0 output_contract=onnx_output_probabilities onnx_repo=ooobo/diar_streaming_sortformer_4spk-v2.1-onnx
+diarization/sortformer/ami_en2002b_mix_headset_137.00_152.04_16khz_mono emel.cpp 1352780166.000 ns/op, onnx.sortformer.v2_1 1920646958.000 ns/op, proof_status=onnx_cpu_single_thread_exact_match
+# diarization_sortformer: lane=emel case=diarization/sortformer/profile_ami_en2002b_mix_headset_137.00_152.04_16khz_mono model_id=diar_streaming_sortformer_4spk_v2_1_gguf fixture_id=ami_en2002b_mix_headset_137.00_152.04_16khz_mono workload_id=diarization_sortformer_pipeline_profile_v1 output_dim=17 output_checksum=4249677247906920305 profile=orchestrated_pipeline source=recorded_maintained_baseline proof_status=measurement_only end_to_end_ns=1413927958 prepare_ns=125782084 runtime_error=0
+# diarization_sortformer: lane=reference case=diarization/sortformer/profile_ami_en2002b_mix_headset_137.00_152.04_16khz_mono model_id=diar_streaming_sortformer_4spk_v2_1_gguf fixture_id=ami_en2002b_mix_headset_137.00_152.04_16khz_mono workload_id=diarization_sortformer_pipeline_profile_v1 output_dim=17 output_checksum=4249677247906920305 profile=orchestrated_pipeline source=recorded_maintained_baseline proof_status=measurement_only
+diarization/sortformer/profile_ami_en2002b_mix_headset_137.00_152.04_16khz_mono emel.cpp 1413927958.000 ns/op, reference-baseline 0.000 ns/op, proof_status=measurement_only
+flash_attention/aarch64/op_flash_attn_ext_decode_like emel.cpp 28642.917 ns/op, llama.cpp 41855.000 ns/op, ratio=0.684x
+gbnf/rule_parser_basic emel.cpp 488.625 ns/op, llama.cpp 271.125 ns/op, ratio=1.802x
+gbnf/rule_parser_complex emel.cpp 3298.458 ns/op, llama.cpp 1503.750 ns/op, ratio=2.193x
+generation/preloaded_request/lfm2_5_1_2b_thinking_q4_k_m_prompt_hello_max_tokens_1 emel.cpp 815738250.000 ns/op, llama.cpp 628570250.000 ns/op, ratio=1.298x
+generation/preloaded_request/lfm2_5_1_2b_thinking_q4_k_m_prompt_hello_max_tokens_10 emel.cpp 1784670500.000 ns/op, llama.cpp 1078314000.000 ns/op, ratio=1.655x
+generation/preloaded_request/lfm2_5_1_2b_thinking_q4_k_m_prompt_hello_max_tokens_100 emel.cpp 5102306792.000 ns/op, llama.cpp 5223846959.000 ns/op, ratio=0.977x
+generation/preloaded_request/lfm2_5_1_2b_thinking_q4_k_m_prompt_hello_max_tokens_1000 emel.cpp 47774724667.000 ns/op, llama.cpp 56893067125.000 ns/op, ratio=0.840x
+generation/preloaded_request/qwen3_0_6b_q8_0_prompt_hello_max_tokens_1 emel.cpp 131225292.000 ns/op, llama.cpp 247880000.000 ns/op, ratio=0.529x
+generation/preloaded_request/qwen3_0_6b_q8_0_prompt_hello_max_tokens_10 emel.cpp 504214333.000 ns/op, llama.cpp 636819042.000 ns/op, ratio=0.792x
+generation/preloaded_request/qwen3_0_6b_q8_0_prompt_hello_max_tokens_100 emel.cpp 3379409541.000 ns/op, llama.cpp 2782825667.000 ns/op, ratio=1.214x
+generation/preloaded_request/qwen3_0_6b_q8_0_prompt_hello_max_tokens_1000 emel.cpp 33315734042.000 ns/op, llama.cpp 36915570125.000 ns/op, ratio=0.902x
+kernel/aarch64/op_add emel.cpp 110.584 ns/op, llama.cpp 6455.708 ns/op, ratio=0.017x
+kernel/aarch64/op_cos emel.cpp 7024.917 ns/op, llama.cpp 8709.875 ns/op, ratio=0.807x
+kernel/aarch64/op_div emel.cpp 110.667 ns/op, llama.cpp 5873.250 ns/op, ratio=0.019x
+kernel/aarch64/op_dup emel.cpp 104.375 ns/op, llama.cpp 5788.291 ns/op, ratio=0.018x
+kernel/aarch64/op_log emel.cpp 1888.166 ns/op, llama.cpp 10266.417 ns/op, ratio=0.184x
+kernel/aarch64/op_mul emel.cpp 112.375 ns/op, llama.cpp 10176.375 ns/op, ratio=0.011x
+kernel/aarch64/op_mul_mat emel.cpp 4994.583 ns/op, llama.cpp 12349.834 ns/op, ratio=0.404x
+kernel/aarch64/op_sin emel.cpp 1352.792 ns/op, llama.cpp 7073.000 ns/op, ratio=0.191x
+kernel/aarch64/op_soft_max emel.cpp 1053.417 ns/op, llama.cpp 6543.542 ns/op, ratio=0.161x
+kernel/aarch64/op_sqr emel.cpp 103.583 ns/op, llama.cpp 5934.833 ns/op, ratio=0.017x
+kernel/aarch64/op_sqrt emel.cpp 143.333 ns/op, llama.cpp 7189.667 ns/op, ratio=0.020x
+kernel/aarch64/op_sub emel.cpp 110.625 ns/op, llama.cpp 7212.792 ns/op, ratio=0.015x
+kernel/aarch64/op_unary_exp emel.cpp 1369.333 ns/op, llama.cpp 14917.292 ns/op, ratio=0.092x
+kernel/aarch64/op_unary_neg emel.cpp 118.791 ns/op, llama.cpp 5713.875 ns/op, ratio=0.021x
+kernel/aarch64/op_unary_relu emel.cpp 137.792 ns/op, llama.cpp 5880.708 ns/op, ratio=0.023x
+logits/sampler_raw/vocab_128000 emel.cpp 20031.792 ns/op, llama.cpp 32190.542 ns/op, ratio=0.622x
+logits/sampler_raw/vocab_256000 emel.cpp 42020.625 ns/op, llama.cpp 49786.709 ns/op, ratio=0.844x
+logits/sampler_raw/vocab_32000 emel.cpp 5812.125 ns/op, llama.cpp 5866.500 ns/op, ratio=0.991x
+logits/sampler_sml/vocab_128000 emel.cpp 33250.583 ns/op, llama.cpp 19545.125 ns/op, ratio=1.701x
+logits/sampler_sml/vocab_256000 emel.cpp 40009.166 ns/op, llama.cpp 94785.916 ns/op, ratio=0.422x
+logits/sampler_sml/vocab_32000 emel.cpp 5510.667 ns/op, llama.cpp 5846.541 ns/op, ratio=0.943x
+logits/validator_raw/vocab_128000 emel.cpp 172149.125 ns/op, llama.cpp 128547.833 ns/op, ratio=1.339x
+logits/validator_raw/vocab_256000 emel.cpp 398246.792 ns/op, llama.cpp 443420.458 ns/op, ratio=0.898x
+logits/validator_raw/vocab_32000 emel.cpp 28950.250 ns/op, llama.cpp 24548.708 ns/op, ratio=1.179x
+logits/validator_sml/vocab_128000 emel.cpp 187875.458 ns/op, llama.cpp 161780.583 ns/op, ratio=1.161x
+logits/validator_sml/vocab_256000 emel.cpp 384760.875 ns/op, llama.cpp 471802.625 ns/op, ratio=0.816x
+logits/validator_sml/vocab_32000 emel.cpp 40494.458 ns/op, llama.cpp 43212.958 ns/op, ratio=0.937x
+memory/hybrid_full emel.cpp 438.375 ns/op, llama.cpp 47120.250 ns/op, ratio=0.009x
+memory/kv_full emel.cpp 135.041 ns/op, llama.cpp 34738.917 ns/op, ratio=0.004x
+memory/recurrent_full emel.cpp 137.916 ns/op, llama.cpp 4462.625 ns/op, ratio=0.031x
+text/encoders/bpe_long emel.cpp 65.625 ns/op, llama.cpp 63.708 ns/op, ratio=1.030x
+text/encoders/bpe_short emel.cpp 58.833 ns/op, llama.cpp 59.125 ns/op, ratio=0.995x
+text/encoders/fallback_long emel.cpp 2485.250 ns/op, llama.cpp 2462.500 ns/op, ratio=1.009x
+text/encoders/fallback_short emel.cpp 65.667 ns/op, llama.cpp 65.583 ns/op, ratio=1.001x
+text/encoders/plamo2_long emel.cpp 7791.459 ns/op, llama.cpp 9806.625 ns/op, ratio=0.795x
+text/encoders/plamo2_short emel.cpp 212.417 ns/op, llama.cpp 209.042 ns/op, ratio=1.016x
+text/encoders/rwkv_long emel.cpp 1711080.625 ns/op, llama.cpp 2087617.250 ns/op, ratio=0.820x
+text/encoders/rwkv_short emel.cpp 61692.083 ns/op, llama.cpp 190896.834 ns/op, ratio=0.323x
+text/encoders/spm_long emel.cpp 8421898.791 ns/op, llama.cpp 7629752.000 ns/op, ratio=1.104x
+text/encoders/spm_short emel.cpp 1388.000 ns/op, llama.cpp 1367.250 ns/op, ratio=1.015x
+text/encoders/ugm_long emel.cpp 2611299.166 ns/op, llama.cpp 3041259.416 ns/op, ratio=0.859x
+text/encoders/ugm_short emel.cpp 779.625 ns/op, llama.cpp 736.625 ns/op, ratio=1.058x
+text/encoders/wpm_long emel.cpp 40910.625 ns/op, llama.cpp 42601.292 ns/op, ratio=0.960x
+text/encoders/wpm_short emel.cpp 669.083 ns/op, llama.cpp 571.375 ns/op, ratio=1.171x
+text/jinja/formatter_long emel.cpp 62.583 ns/op, llama.cpp 433776.125 ns/op, ratio=0.000x
+text/jinja/formatter_short emel.cpp 16.208 ns/op, llama.cpp 7724.584 ns/op, ratio=0.002x
+text/jinja/parser_long emel.cpp 67889.875 ns/op, llama.cpp 62403.458 ns/op, ratio=1.088x
+text/jinja/parser_short emel.cpp 962.042 ns/op, llama.cpp 1090.542 ns/op, ratio=0.882x
+tokenizer/full_bpe_long emel.cpp 13994.792 ns/op, llama.cpp 14157.708 ns/op, ratio=0.988x
+tokenizer/full_bpe_short emel.cpp 321.083 ns/op, llama.cpp 307.000 ns/op, ratio=1.046x
+tokenizer/full_plamo2_long emel.cpp 14876.292 ns/op, llama.cpp 17710.125 ns/op, ratio=0.840x
+tokenizer/full_plamo2_short emel.cpp 2147.541 ns/op, llama.cpp 1964.250 ns/op, ratio=1.093x
+tokenizer/full_rwkv_long emel.cpp 2004227.125 ns/op, llama.cpp 1651740.750 ns/op, ratio=1.213x
+tokenizer/full_rwkv_short emel.cpp 69940.042 ns/op, llama.cpp 82096.875 ns/op, ratio=0.852x
+tokenizer/full_spm_long emel.cpp 6817666.666 ns/op, llama.cpp 7975885.250 ns/op, ratio=0.855x
+tokenizer/full_spm_short emel.cpp 1575.500 ns/op, llama.cpp 3048.500 ns/op, ratio=0.517x
+tokenizer/full_ugm_long emel.cpp 2848087.125 ns/op, llama.cpp 2802872.291 ns/op, ratio=1.016x
+tokenizer/full_ugm_short emel.cpp 2493.500 ns/op, llama.cpp 2465.125 ns/op, ratio=1.012x
+tokenizer/full_wpm_long emel.cpp 34054.792 ns/op, llama.cpp 89538.541 ns/op, ratio=0.380x
+tokenizer/full_wpm_short emel.cpp 2356.542 ns/op, llama.cpp 2273.958 ns/op, ratio=1.036x
+tokenizer/preprocessor_bpe_long emel.cpp 3489.917 ns/op, llama.cpp 31531.458 ns/op, ratio=0.111x
+tokenizer/preprocessor_bpe_short emel.cpp 124.708 ns/op, llama.cpp 1850.750 ns/op, ratio=0.067x
+tokenizer/preprocessor_plamo2_long emel.cpp 4216.084 ns/op, llama.cpp 7092.042 ns/op, ratio=0.594x
+tokenizer/preprocessor_plamo2_short emel.cpp 3169.209 ns/op, llama.cpp 5163.416 ns/op, ratio=0.614x
+tokenizer/preprocessor_rwkv_long emel.cpp 4147.625 ns/op, llama.cpp 7447.125 ns/op, ratio=0.557x
+tokenizer/preprocessor_rwkv_short emel.cpp 3086.083 ns/op, llama.cpp 5580.667 ns/op, ratio=0.553x
+tokenizer/preprocessor_spm_long emel.cpp 4003.625 ns/op, llama.cpp 7190.500 ns/op, ratio=0.557x
+tokenizer/preprocessor_spm_short emel.cpp 2736.167 ns/op, llama.cpp 7335.625 ns/op, ratio=0.373x
+tokenizer/preprocessor_ugm_long emel.cpp 5260.917 ns/op, llama.cpp 7661.583 ns/op, ratio=0.687x
+tokenizer/preprocessor_ugm_short emel.cpp 3107.916 ns/op, llama.cpp 5687.541 ns/op, ratio=0.546x
+tokenizer/preprocessor_wpm_long emel.cpp 5484.708 ns/op, llama.cpp 7731.333 ns/op, ratio=0.709x
+tokenizer/preprocessor_wpm_short emel.cpp 2541.709 ns/op, llama.cpp 5781.583 ns/op, ratio=0.440x

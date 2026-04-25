@@ -4,9 +4,10 @@
 
 EMEL is a deterministic C++ inference engine built around explicit Boost.SML orchestration, with
 runtime behavior modeled as explicit actors instead of ad hoc control flow. The repo now ships
-maintained GGUF generation slices plus one explicit maintained trimodal embedding slice for
-`augmem/TE-75M-GGUF`, along with pluggable parity and benchmark tooling that compares EMEL against
-external reference engines without sharing runtime state.
+maintained GGUF generation slices, one explicit maintained trimodal embedding slice for
+`augmem/TE-75M-GGUF`, and one maintained Sortformer diarization GGUF slice, along with pluggable
+parity and benchmark tooling that compares EMEL against external reference engines without sharing
+runtime state.
 
 ## Core Value
 
@@ -15,18 +16,41 @@ before widening API surface or model scope.
 
 ## Current State
 
-Current milestone: none
+Current milestone: none defined after `v1.15`
 
-Latest shipped milestone: `v1.14`
+Latest shipped milestone: `v1.15 ARM Sortformer Diarization GGUF Slice`
 
-Status: `v1.14` shipped on 2026-04-21 and organizes maintained generation and embedding benchmark
-variants behind registry/data-owned discovery. The shipped surface includes shared deterministic
-manifest discovery, generation workload directory loading, embedding variant manifests, aligned
-`--workload-id` / `--variant-id` selection, and a passing milestone audit.
+Status: `v1.15` shipped on 2026-04-25 with ARM support for
+`openresearchtools/diar_streaming_sortformer_4spk-v2.1-gguf`. The shipped scope is one maintained
+Sortformer diarization GGUF slice with pinned fixture provenance, native EMEL-owned ARM execution,
+deterministic `T x 4` speaker-activity output, PyTorch/NeMo and ONNX parity proof, ONNX CPU
+single-thread benchmark reference proof, and EMEL-over-ONNX performance closure.
 
-Current planning focus: define the next milestone with a fresh requirements set.
+Current planning focus: define the next milestone before adding new active requirements or phases.
 
-## Latest Shipped Milestone: v1.14 Benchmark Variant Organization
+## Latest Shipped Milestone: v1.15 ARM Sortformer Diarization GGUF Slice
+
+**Goal:** Bring up one truthful maintained ARM diarization slice for
+`openresearchtools/diar_streaming_sortformer_4spk-v2.1-gguf`, using EMEL-owned loading,
+execution, output decoding, parity proof, and benchmark publication.
+
+**Shipped:** 2026-04-25
+
+**Delivered:**
+- Pinned Sortformer GGUF fixture contract with source URL, checksum/provenance, and architecture
+  metadata truth.
+- Explicit Sortformer model contract and GGUF acceptance/rejection behavior.
+- Diarization request surface for deterministic mono `float32` PCM at 16,000 Hz.
+- Native ARM Sortformer runtime path in `src/`, with no tool-only compute fallback.
+- Deterministic `T x 4` speaker-activity probabilities and bounded `speaker_0` through
+  `speaker_3` segment output.
+- Lane-isolated PyTorch/NeMo parity proof, ONNX benchmark reference proof, and one maintained ARM
+  benchmark publication.
+- Strict Phase 93 generated record where EMEL exact-matches PyTorch/NeMo and ONNX on
+  `output_dim=17`, checksum `4249677247906920305`, while beating ONNX CPU single-thread:
+  EMEL `1352780166 ns/op` versus ONNX `1920646958 ns/op`.
+
+## Previous Shipped Milestone: v1.14 Benchmark Variant Organization
 
 **Shipped:** 2026-04-21
 
@@ -204,10 +228,18 @@ truth anchor and without broadening into generic Liquid-family support.
 - ✓ v1.14 cut embedding benchmarks over to variant discovery so maintained embedding cases are
   data-owned across EMEL and Python-golden lanes.
 - ✓ v1.14 proved and documented the ordinary data-only add path for both benchmark families.
+- ✓ v1.15 pinned one maintained Sortformer diarization GGUF fixture and accepted only its explicit
+  model/tensor/profile contract.
+- ✓ v1.15 added a diarization-owned mono 16 kHz PCM request surface, native feature preparation,
+  native encoder/executor execution, and deterministic probability/segment output.
+- ✓ v1.15 proved EMEL against lane-isolated PyTorch/NeMo and ONNX references on the maintained
+  fixture and closed the performance contract by beating ONNX Runtime CPU single-thread in the
+  strict Phase 93 generated record.
 
 ### Active
 
-- [ ] Define the next milestone requirements.
+- No active milestone requirements are defined after `v1.15`.
+- Start `$gsd-new-milestone` before adding new active requirements.
 
 ### Out of Scope
 
@@ -217,17 +249,17 @@ truth anchor and without broadening into generic Liquid-family support.
 - Broad new `src/` runtime support added only to satisfy a reference backend
 - Shared model, tokenizer, cache, or runtime objects between the EMEL lane and any reference lane
 - New model/runtime support added solely to demonstrate the benchmark registry
-- Performance tuning or benchmark-result optimization beyond preserving existing deterministic
-  evidence
+- Broader performance tuning beyond the shipped maintained Sortformer ONNX single-thread closure
 
 ## Context
 
 This remains a brownfield repository with an existing codebase map under `.planning/codebase/`.
-The repo stays governed by `AGENTS.md` and `docs/rules/sml.rules.md`. `v1.14` is now the latest
-shipped milestone. The current maintained state includes repo-owned EMEL compare lanes plus
-pluggable embedding and generative reference backends that publish through canonical compare
-contracts without shared runtime state, with maintained benchmark variants discovered through
-data/registry-owned manifests.
+The repo stays governed by `AGENTS.md` and `docs/rules/sml.rules.md`. `v1.15` is now the latest
+shipped milestone. The current maintained state includes repo-owned EMEL generation, embedding, and
+diarization lanes plus pluggable reference backends that publish through canonical compare
+contracts without shared runtime state. Sortformer closeout evidence is source-backed from the
+pinned fixture through maintained loader/runtime, PyTorch/NeMo parity, ONNX CPU single-thread
+benchmark reference, generated benchmark docs, and the refreshed milestone audit.
 
 ## Constraints
 
@@ -239,15 +271,21 @@ data/registry-owned manifests.
   identity, and enough metadata to reproduce results.
 - **Comparability**: Record formatter, tokenization, seed, and sampling metadata explicitly so
   benchmark or parity claims never hide apples-to-oranges drift.
-- **Lifecycle**: Start the next milestone with a fresh requirements file instead of mutating the
-  shipped `v1.13` ledger.
-- **Developer surface**: Adding a new maintained benchmark variant should be data/registry-owned
-  and should not require modifying unrelated runner, compare, or test enumeration code.
+- **Lifecycle**: Keep current milestone requirements in `.planning/REQUIREMENTS.md` and archived
+  shipped requirements under `.planning/milestones/`.
+- **Diarization scope**: Any future diarization widening must start from a new milestone and keep
+  the shipped `v1.15` Sortformer slice truthful before broadening into general speech, ASR,
+  streaming-service, or media-ingestion support.
 
 ## Key Decisions
 
 | Decision | Rationale | Outcome |
 |----------|-----------|---------|
+| Start v1.15 as one maintained ARM Sortformer diarization GGUF slice | The user asked for ARM support for `openresearchtools/diar_streaming_sortformer_4spk-v2.1-gguf`; the model card defines a diarization contract, not generation or embedding behavior | ✓ Shipped |
+| Require native EMEL-owned Sortformer execution for the EMEL lane | Tool-only Python, ONNX, NeMo, llama.cpp, or ggml compute would not satisfy ARM support in `src/` and would violate lane-isolation expectations | ✓ Shipped |
+| Keep v1.15 input/output contracts narrow | Mono 16 kHz PCM, `T x 4` probabilities, and bounded four-speaker segments are enough to prove this slice without committing media decode, ASR, or broad streaming APIs | ✓ Shipped |
+| Use PyTorch/NeMo as parity reference and ONNX as benchmark reference for Sortformer | PyTorch/NeMo is the model-card reference lane, while ONNX gives a reproducible CPU single-thread engine for bench parity and performance scrutiny | ✓ Shipped |
+| Close v1.15 only after EMEL beats ONNX CPU single-thread without weakening gates | A slower native lane would not satisfy the milestone performance contract, and stale or synthetic gates would not survive closeout scrutiny | ✓ Shipped |
 | Organize generation and embedding benchmark variants before adding more variants | The existing pluggable surfaces work, but hard-coded lists and code-owned cases make every new variant touch unrelated code and increase determinism risk | ✓ Shipped |
 | Promote the deferred `v1.12` generative follow-on into `v1.13` instead of inventing a separate tool family | The shipped embedding compare architecture already proves the lane-isolated pluggable pattern; the next milestone should reuse it for generation with a narrow reproducibility contract | ✓ Shipped |
 | Treat generative comparability drift as explicit contract data, not an implicit failure mode | Cross-engine generation can diverge because of formatter, tokenization, or sampling differences, so the workflow must publish why two runs are or are not comparable | ✓ Shipped |
@@ -292,4 +330,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-04-21 after starting milestone v1.14*
+*Last updated: 2026-04-25 after shipping milestone v1.15*

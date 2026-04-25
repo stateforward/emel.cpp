@@ -1,5 +1,39 @@
 # Project Milestones: EMEL
 
+## v1.15 ARM Sortformer Diarization GGUF Slice (Shipped: 2026-04-25)
+
+**Phases completed:** 24 phases, 24 plans
+
+**Delivered:** EMEL now ships one maintained ARM Sortformer diarization GGUF slice with
+EMEL-owned loading, native runtime execution, deterministic probability/segment output,
+PyTorch/NeMo parity proof, ONNX CPU single-thread benchmark reference proof, and source-backed
+closeout evidence.
+
+**Key accomplishments:**
+
+- Pinned the maintained `openresearchtools/diar_streaming_sortformer_4spk-v2.1-gguf` fixture,
+  model contract, and mono 16 kHz PCM request/output contract.
+
+- Built the maintained EMEL `src/` pipeline through feature preparation, encoder, executor,
+  speaker probabilities, and bounded segment publication without external compute fallbacks.
+
+- Added lane-isolated PyTorch/NeMo parity and ONNX CPU single-thread benchmark references that
+  exact-match EMEL on `output_dim=17` and checksum `4249677247906920305`.
+
+- Profiled and optimized the maintained runtime until EMEL beat ONNX CPU single-thread in the
+  strict Phase 93 generated record: EMEL `1352780166 ns/op` versus ONNX `1920646958 ns/op`.
+
+- Refreshed source-backed milestone audit evidence and final scoped quality gates with timing
+  recorded at `246s`.
+
+**Audit:** Passed with `16/16` requirements satisfied, no UAT/verification gaps, and source-backed
+traceability from pinned fixture through loader, runtime, parity, benchmark, and docs entrypoints.
+
+**Known deferred items at close:** 5 old non-phase items acknowledged and deferred; see
+`.planning/STATE.md` `Deferred Items`.
+
+---
+
 ## v1.14 Benchmark Variant Organization (Shipped: 2026-04-21)
 
 **Phases completed:** 4 phases, 4 plans, 0 tasks
