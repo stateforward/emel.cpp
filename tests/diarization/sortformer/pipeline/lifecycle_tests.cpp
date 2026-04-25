@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <memory>
 
@@ -93,4 +94,75 @@ TEST_CASE("sortformer pipeline rejects insufficient probability output capacity"
   CHECK(result.frame_count == 0);
   CHECK(result.probability_count == 0);
   CHECK(result.segment_count == 0);
+}
+
+TEST_CASE("sortformer pipeline reports encoder kernel failures before executor") {
+  auto model = std::make_unique<fixture::model_fixture>();
+  fixture::run_result result{};
+  std::array<float, 1> pcm_stub = {};
+
+  REQUIRE(fixture::prepare(*model));
+  REQUIRE(model->ready);
+
+  auto request = fixture::make_run_event(model->contract,
+                                         pcm_stub,
+                                         request_detail::k_sample_rate,
+                                         result.probabilities,
+                                         result.segments,
+                                         result.frame_count,
+                                         result.probability_count,
+                                         result.segment_count,
+                                         result.err);
+  pipeline::event::run_ctx runtime_ctx = {};
+  pipeline::event::run_flow runtime_ev{request, runtime_ctx};
+  pipeline::action::context ctx = {};
+
+  pipeline::action::effect_begin_run(runtime_ev, ctx);
+  REQUIRE(runtime_ctx.err == pipeline_detail::to_error(pipeline::error::none));
+  pipeline::action::effect_bind_encoder(runtime_ev, ctx);
+  ctx.encoder.pre[0].tensor = nullptr;
+  pipeline::action::effect_compute_encoder_frames(runtime_ev, ctx);
+
+  CHECK(runtime_ctx.err == pipeline_detail::to_error(pipeline::error::kernel));
+  CHECK(result.frame_count == 0);
+  CHECK(result.probability_count == 0);
+  CHECK(result.segment_count == 0);
+}
+
+TEST_CASE("sortformer pipeline reports probability kernel failures before decode") {
+  auto model = std::make_unique<fixture::model_fixture>();
+  fixture::run_result result{};
+  std::array<float, 1> pcm_stub = {};
+  std::fill(result.probabilities.begin(), result.probabilities.end(), -3.0f);
+
+  REQUIRE(fixture::prepare(*model));
+  REQUIRE(model->ready);
+
+  auto request = fixture::make_run_event(model->contract,
+                                         pcm_stub,
+                                         request_detail::k_sample_rate,
+                                         result.probabilities,
+                                         result.segments,
+                                         result.frame_count,
+                                         result.probability_count,
+                                         result.segment_count,
+                                         result.err);
+  pipeline::event::run_ctx runtime_ctx = {};
+  pipeline::event::run_flow runtime_ev{request, runtime_ctx};
+  pipeline::action::context ctx = {};
+
+  pipeline::action::effect_begin_run(runtime_ev, ctx);
+  pipeline::action::effect_bind_modules(runtime_ev, ctx);
+  ctx.modules.speaker_hidden_to_speaker_weight.tensor = nullptr;
+  pipeline::action::effect_compute_probabilities(runtime_ev, ctx);
+
+  CHECK(runtime_ctx.err == pipeline_detail::to_error(pipeline::error::kernel));
+  CHECK(result.frame_count == 0);
+  CHECK(result.probability_count == 0);
+  CHECK(result.segment_count == 0);
+  CHECK(std::all_of(result.probabilities.begin(),
+                    result.probabilities.end(),
+                    [](const float value) {
+                      return value == -3.0f;
+                    }));
 }

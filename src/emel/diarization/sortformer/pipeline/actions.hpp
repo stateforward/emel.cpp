@@ -10,6 +10,11 @@
 
 namespace emel::diarization::sortformer::pipeline::action {
 
+inline void effect_store_kernel_result(event::run_ctx & runtime_ctx, const bool ok) noexcept {
+  runtime_ctx.err = detail::to_error(error::kernel) *
+      static_cast<emel::error::type>(!ok);
+}
+
 struct effect_begin_run {
   void operator()(const event::run_flow & runtime_ev, context &) const noexcept {
     runtime_ev.ctx.err = detail::to_error(error::none);
@@ -88,12 +93,14 @@ struct effect_bind_encoder {
 };
 
 struct effect_compute_encoder_frames {
-  void operator()(const event::run_flow &, context & ctx) const noexcept {
-    emel::diarization::sortformer::encoder::detail::compute_encoder_frames_from_features(
-        ctx.features,
-        ctx.encoder,
-        ctx.encoder_workspace,
-        ctx.encoder_frames);
+  void operator()(const event::run_flow & runtime_ev, context & ctx) const noexcept {
+    effect_store_kernel_result(
+        runtime_ev.ctx,
+        emel::diarization::sortformer::encoder::detail::compute_encoder_frames_from_features(
+            ctx.features,
+            ctx.encoder,
+            ctx.encoder_workspace,
+            ctx.encoder_frames));
   }
 };
 
@@ -122,12 +129,15 @@ struct effect_bind_modules {
 
 struct effect_compute_probabilities {
   void operator()(const event::run_flow & runtime_ev, context & ctx) const noexcept {
-    emel::diarization::sortformer::output::detail::compute_speaker_probabilities(
-        ctx.hidden,
-        ctx.modules,
-        runtime_ev.request.probabilities.first(
-            static_cast<size_t>(detail::k_required_probability_value_count)));
-    runtime_ev.request.probability_count_out = detail::k_required_probability_value_count;
+    const auto probability_output = runtime_ev.request.probabilities.first(
+        static_cast<size_t>(detail::k_required_probability_value_count));
+    const bool probability_ok =
+        emel::diarization::sortformer::output::detail::compute_speaker_probabilities(
+            ctx.hidden, ctx.modules, probability_output);
+    effect_store_kernel_result(runtime_ev.ctx, probability_ok);
+    runtime_ev.request.probability_count_out =
+        detail::k_required_probability_value_count *
+        static_cast<int32_t>(probability_ok);
   }
 };
 

@@ -16,6 +16,7 @@ enum class error : uint32_t {
   request = (1u << 7),
   executor = (1u << 8),
   unexpected = (1u << 9),
+  kernel = (1u << 10),
 };
 
 }  // namespace emel::diarization::sortformer::pipeline
