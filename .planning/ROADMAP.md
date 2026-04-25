@@ -40,5 +40,5 @@ phases.
 ## Phases
 
 The completed `v1.15` phase details are archived in
-`.planning/milestones/v1.15-ROADMAP.md`. Raw phase execution directories remain in
-`.planning/phases/` for now and can be archived later with `$gsd-cleanup`.
+`.planning/milestones/v1.15-ROADMAP.md`, and raw phase execution directories are archived in
+`.planning/milestones/v1.15-phases/`.
