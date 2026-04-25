@@ -16,6 +16,11 @@ FIXTURE_ID = "ami_en2002b_mix_headset_137.00_152.04_16khz_mono"
 WORKLOAD_ID = "diarization_sortformer_pipeline_v1"
 SPEAKERS = 4
 THRESHOLD = 0.5
+EMEL_CHUNK_LEN = 188
+EMEL_CHUNK_RIGHT_CONTEXT = 1
+EMEL_FIFO_LEN = 0
+EMEL_SPKCACHE_UPDATE_PERIOD = 188
+EMEL_SPKCACHE_LEN = 188
 FNV_OFFSET = 1469598103934665603
 FNV_PRIME = 1099511628211
 UINT64_MASK = (1 << 64) - 1
@@ -28,11 +33,11 @@ def parse_args() -> argparse.Namespace:
   parser.add_argument("--segments-output-dir", type=Path)
   parser.add_argument("--device", default="cpu")
   parser.add_argument("--sample-rate", type=int, default=16000)
-  parser.add_argument("--chunk-len", type=int, default=340)
-  parser.add_argument("--chunk-right-context", type=int, default=40)
-  parser.add_argument("--fifo-len", type=int, default=40)
-  parser.add_argument("--spkcache-update-period", type=int, default=300)
-  parser.add_argument("--spkcache-len", type=int, default=188)
+  parser.add_argument("--chunk-len", type=int, default=EMEL_CHUNK_LEN)
+  parser.add_argument("--chunk-right-context", type=int, default=EMEL_CHUNK_RIGHT_CONTEXT)
+  parser.add_argument("--fifo-len", type=int, default=EMEL_FIFO_LEN)
+  parser.add_argument("--spkcache-update-period", type=int, default=EMEL_SPKCACHE_UPDATE_PERIOD)
+  parser.add_argument("--spkcache-len", type=int, default=EMEL_SPKCACHE_LEN)
   return parser.parse_args()
 
 
@@ -223,6 +228,7 @@ def main() -> int:
     "output_path": output_path,
     "note": (
       "proof_status=pytorch_nemo "
+      "stream_contract=emel_sortformer_gguf_v2_1 "
       "timing_scope=diarize_only_excludes_model_load "
       f"source_model={args.model} "
       f"audio={args.audio} "

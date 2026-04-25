@@ -30,6 +30,12 @@ DEFAULT_BENCHMARK_ITERATIONS = 1
 DEFAULT_BENCHMARK_RUNS = 3
 DEFAULT_BENCHMARK_WARMUP_ITERATIONS = 1
 DEFAULT_BENCHMARK_WARMUP_RUNS = 1
+SORTFORMER_CHUNK_LEN = 188
+SORTFORMER_CHUNK_RIGHT_CONTEXT = 1
+SORTFORMER_FIFO_LEN = 0
+SORTFORMER_SPKCACHE_UPDATE_PERIOD = 188
+SORTFORMER_SPKCACHE_LEN = 188
+SORTFORMER_ONNX_OUTPUT_CONTRACT = "probabilities"
 
 
 @dataclass(frozen=True)
@@ -511,6 +517,8 @@ def main() -> int:
       str(onnx_reference_features),
       "--segments-output-dir",
       str(onnx_output_dir),
+      "--output-contract",
+      SORTFORMER_ONNX_OUTPUT_CONTRACT,
       "--iterations",
       str(max(1, args.benchmark_iterations)),
       "--runs",
@@ -561,6 +569,16 @@ def main() -> int:
       str(pytorch_output_dir),
       "--device",
       args.pytorch_reference_device,
+      "--chunk-len",
+      str(SORTFORMER_CHUNK_LEN),
+      "--chunk-right-context",
+      str(SORTFORMER_CHUNK_RIGHT_CONTEXT),
+      "--fifo-len",
+      str(SORTFORMER_FIFO_LEN),
+      "--spkcache-update-period",
+      str(SORTFORMER_SPKCACHE_UPDATE_PERIOD),
+      "--spkcache-len",
+      str(SORTFORMER_SPKCACHE_LEN),
     ]
     pytorch_result = run_command(
       pytorch_command,

@@ -38,6 +38,7 @@ def parse_args() -> argparse.Namespace:
   parser.add_argument("--model", type=Path, required=True)
   parser.add_argument("--features", type=Path, required=True)
   parser.add_argument("--segments-output-dir", type=Path)
+  parser.add_argument("--output-contract", choices=("probabilities", "logits"), required=True)
   parser.add_argument("--expected-sha256", default="")
   parser.add_argument("--iterations", type=non_negative_int, default=1)
   parser.add_argument("--runs", type=non_negative_int, default=1)
@@ -121,16 +122,22 @@ def checksum_segments(segments: list[tuple[int, int, int]]) -> int:
   return checksum
 
 
-def output_to_probabilities(output):
+def output_to_probabilities(output, output_contract: str):
   try:
     import numpy as np
   except ImportError as exc:
     raise RuntimeError(f"numpy is required for ONNX reference execution: {exc}") from exc
 
-  min_value = float(np.min(output))
-  max_value = float(np.max(output))
-  if min_value >= 0.0 and max_value <= 1.0:
+  if output_contract == "probabilities":
+    min_value = float(np.min(output))
+    max_value = float(np.max(output))
+    if min_value < 0.0 or max_value > 1.0:
+      raise RuntimeError(
+        f"ONNX probability output is outside [0, 1]: min={min_value} max={max_value}"
+      )
     return output, "onnx_output_probabilities"
+  if output_contract != "logits":
+    raise RuntimeError(f"unsupported ONNX output contract: {output_contract}")
   return 1.0 / (1.0 + np.exp(-output)), "onnx_output_logits_sigmoid"
 
 
@@ -227,7 +234,10 @@ def main() -> int:
     if logits.shape[1] < OUTPUT_FRAMES:
       raise RuntimeError(f"logits contain {logits.shape[1]} frames, expected at least {OUTPUT_FRAMES}")
     comparable_output = logits[0, -OUTPUT_FRAMES:, :]
-    probabilities, output_contract = output_to_probabilities(comparable_output)
+    probabilities, output_contract = output_to_probabilities(
+      comparable_output,
+      args.output_contract,
+    )
     segments = decode_segments(probabilities)
     checksum = checksum_segments(segments)
     output_path, output_bytes = write_segments(args.segments_output_dir, segments)
