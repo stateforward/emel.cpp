@@ -379,6 +379,25 @@ add_test(
   COMMAND diarization_compare_tests
 )
 
+add_executable(quality_gates_tests
+  ${CMAKE_CURRENT_SOURCE_DIR}/quality_gates_tests.cpp
+)
+
+target_include_directories(quality_gates_tests
+  PRIVATE
+    ${DOCTEST_INCLUDE_DIR}
+)
+
+target_compile_definitions(quality_gates_tests
+  PRIVATE
+    BENCH_REPO_ROOT=\"${EMEL_ROOT}\"
+)
+
+add_test(
+  NAME quality_gates_tests
+  COMMAND quality_gates_tests
+)
+
 if(EMEL_BENCH_NEEDS_LLAMA)
   add_executable(gbnf_bench_runner
     ${CMAKE_CURRENT_SOURCE_DIR}/gbnf/rule_parser_bench.cpp

@@ -30,6 +30,9 @@ struct diarization_compare_record {
   std::string workload_id = {};
   bool comparable = false;
   double ns_per_op = 0.0;
+  double ns_min_per_op = 0.0;
+  double ns_mean_per_op = 0.0;
+  double ns_max_per_op = 0.0;
   double prepare_ns_per_op = 0.0;
   double encode_ns_per_op = 0.0;
   double publish_ns_per_op = 0.0;
@@ -137,8 +140,10 @@ inline void print_diarization_compare_record_jsonl(const diarization_compare_rec
       "\"compare_group\":\"%s\",\"lane\":\"%s\",\"backend_id\":\"%s\","
       "\"backend_language\":\"%s\",\"comparison_mode\":\"%s\",\"model_id\":\"%s\","
       "\"fixture_id\":\"%s\",\"workload_id\":\"%s\",\"comparable\":%s,"
-      "\"ns_per_op\":%.6f,\"prepare_ns_per_op\":%.6f,\"encode_ns_per_op\":%.6f,"
-      "\"publish_ns_per_op\":%.6f,\"output_bytes\":%" PRIu64 ",\"output_dim\":%" PRIu64
+      "\"ns_per_op\":%.6f,\"ns_min_per_op\":%.6f,\"ns_mean_per_op\":%.6f,"
+      "\"ns_max_per_op\":%.6f,\"prepare_ns_per_op\":%.6f,"
+      "\"encode_ns_per_op\":%.6f,\"publish_ns_per_op\":%.6f,"
+      "\"output_bytes\":%" PRIu64 ",\"output_dim\":%" PRIu64
       ",\"output_checksum\":%" PRIu64 ",\"iterations\":%" PRIu64 ",\"runs\":%zu,"
       "\"output_path\":\"%s\",\"note\":\"%s\",\"error_kind\":\"%s\","
       "\"error_message\":\"%s\"}\n",
@@ -156,6 +161,9 @@ inline void print_diarization_compare_record_jsonl(const diarization_compare_rec
       diarization_compare_json_escape(record.workload_id).c_str(),
       record.comparable ? "true" : "false",
       record.ns_per_op,
+      record.ns_min_per_op,
+      record.ns_mean_per_op,
+      record.ns_max_per_op,
       record.prepare_ns_per_op,
       record.encode_ns_per_op,
       record.publish_ns_per_op,

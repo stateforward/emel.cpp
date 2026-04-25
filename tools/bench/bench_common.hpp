@@ -45,6 +45,9 @@ struct result {
   std::uint64_t max_output_tokens = 0;
   bool comparable = false;
   double ns_per_op = 0.0;
+  double ns_min_per_op = 0.0;
+  double ns_mean_per_op = 0.0;
+  double ns_max_per_op = 0.0;
   double prepare_ns_per_op = 0.0;
   double encode_ns_per_op = 0.0;
   double publish_ns_per_op = 0.0;
@@ -127,10 +130,17 @@ result measure_case(const char * name, const config & cfg, fn_type && fn) {
 
   std::sort(samples.begin(), samples.end());
   const double median = samples[samples.size() / 2];
+  double sum = 0.0;
+  for (const double sample : samples) {
+    sum += sample;
+  }
 
   result out;
   out.name = name;
   out.ns_per_op = median;
+  out.ns_min_per_op = samples.front();
+  out.ns_mean_per_op = sum / static_cast<double>(samples.size());
+  out.ns_max_per_op = samples.back();
   out.iterations = cfg.iterations;
   out.runs = cfg.runs;
   return out;

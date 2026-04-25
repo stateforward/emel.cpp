@@ -64,6 +64,9 @@ def error_record(error_kind: str, error_message: str) -> dict[str, object]:
     "workload_id": WORKLOAD_ID,
     "comparable": False,
     "ns_per_op": 0.0,
+    "ns_min_per_op": 0.0,
+    "ns_mean_per_op": 0.0,
+    "ns_max_per_op": 0.0,
     "prepare_ns_per_op": 0.0,
     "encode_ns_per_op": 0.0,
     "publish_ns_per_op": 0.0,
@@ -226,6 +229,9 @@ def main() -> int:
       samples.append(float(time.perf_counter_ns() - start_ns) / float(iterations))
     samples.sort()
     elapsed_ns = samples[len(samples) // 2]
+    ns_min = samples[0]
+    ns_mean = sum(samples) / float(len(samples))
+    ns_max = samples[-1]
     if outputs is None:
       raise RuntimeError("ONNX reference produced no outputs")
     logits = np.asarray(outputs[0], dtype=np.float32)
@@ -261,6 +267,9 @@ def main() -> int:
     "workload_id": WORKLOAD_ID,
     "comparable": True,
     "ns_per_op": elapsed_ns,
+    "ns_min_per_op": ns_min,
+    "ns_mean_per_op": ns_mean,
+    "ns_max_per_op": ns_max,
     "prepare_ns_per_op": 0.0,
     "encode_ns_per_op": elapsed_ns,
     "publish_ns_per_op": 0.0,

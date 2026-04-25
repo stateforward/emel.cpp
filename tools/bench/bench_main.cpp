@@ -498,6 +498,9 @@ void print_generation_jsonl(const std::vector<bench::result> & results) {
     record.comparable = entry.comparable;
     record.max_output_tokens = entry.max_output_tokens;
     record.ns_per_op = entry.ns_per_op;
+    record.ns_min_per_op = entry.ns_min_per_op;
+    record.ns_mean_per_op = entry.ns_mean_per_op;
+    record.ns_max_per_op = entry.ns_max_per_op;
     record.prepare_ns_per_op = entry.prepare_ns_per_op;
     record.encode_ns_per_op = entry.encode_ns_per_op;
     record.publish_ns_per_op = entry.publish_ns_per_op;
@@ -545,6 +548,9 @@ void print_diarization_jsonl(const std::vector<bench::result> & results) {
     record.workload_id = entry.workload_id;
     record.comparable = entry.comparable;
     record.ns_per_op = entry.ns_per_op;
+    record.ns_min_per_op = entry.ns_min_per_op;
+    record.ns_mean_per_op = entry.ns_mean_per_op;
+    record.ns_max_per_op = entry.ns_max_per_op;
     record.prepare_ns_per_op = entry.prepare_ns_per_op;
     record.encode_ns_per_op = entry.encode_ns_per_op;
     record.publish_ns_per_op = entry.publish_ns_per_op;

@@ -40,6 +40,9 @@ struct generation_compare_record {
   std::uint64_t max_output_tokens = 0u;
   bool comparable = false;
   double ns_per_op = 0.0;
+  double ns_min_per_op = 0.0;
+  double ns_mean_per_op = 0.0;
+  double ns_max_per_op = 0.0;
   double prepare_ns_per_op = 0.0;
   double encode_ns_per_op = 0.0;
   double publish_ns_per_op = 0.0;
@@ -152,6 +155,7 @@ inline void print_generation_compare_record_jsonl(const generation_compare_recor
     "\"sampling_id\":\"%s\",\"stop_id\":\"%s\",\"seed\":%" PRId64 ","
     "\"comparable\":%s,"
     "\"max_output_tokens\":%" PRIu64 ",\"ns_per_op\":%.6f,"
+    "\"ns_min_per_op\":%.6f,\"ns_mean_per_op\":%.6f,\"ns_max_per_op\":%.6f,"
     "\"prepare_ns_per_op\":%.6f,\"encode_ns_per_op\":%.6f,\"publish_ns_per_op\":%.6f,"
     "\"output_tokens\":%" PRIu64 ",\"output_bytes\":%" PRIu64 ","
     "\"output_checksum\":%" PRIu64 ",\"iterations\":%" PRIu64 ",\"runs\":%zu,"
@@ -181,6 +185,9 @@ inline void print_generation_compare_record_jsonl(const generation_compare_recor
     record.comparable ? "true" : "false",
     record.max_output_tokens,
     record.ns_per_op,
+    record.ns_min_per_op,
+    record.ns_mean_per_op,
+    record.ns_max_per_op,
     record.prepare_ns_per_op,
     record.encode_ns_per_op,
     record.publish_ns_per_op,

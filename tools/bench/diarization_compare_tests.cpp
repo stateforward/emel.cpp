@@ -107,7 +107,8 @@ std::string diarization_compare_record_json(const std::string & lane,
          "\"model_id\":\"diar_streaming_sortformer_4spk_v2_1_gguf\","
          "\"fixture_id\":\"ami_en2002b_mix_headset_137.00_152.04_16khz_mono\","
          "\"workload_id\":\"diarization_sortformer_pipeline_v1\","
-         "\"comparable\":true,\"ns_per_op\":1.0,\"prepare_ns_per_op\":0.1,"
+         "\"comparable\":true,\"ns_per_op\":1.0,\"ns_min_per_op\":0.5,"
+         "\"ns_mean_per_op\":1.25,\"ns_max_per_op\":2.0,\"prepare_ns_per_op\":0.1,"
          "\"encode_ns_per_op\":0.9,\"publish_ns_per_op\":0.0,"
          "\"output_bytes\":" +
          std::to_string(output_bytes) +
@@ -162,6 +163,9 @@ TEST_CASE("diarization compare reports exact matches from maintained checksum re
   CHECK(summary.find("\"failed\": false") != std::string::npos);
   CHECK(summary.find("\"exact_checksum_match\": true") != std::string::npos);
   CHECK(summary.find("\"exact_output_dim_match\": true") != std::string::npos);
+  CHECK(summary.find("\"ns_min_per_op\": 0.5") != std::string::npos);
+  CHECK(summary.find("\"ns_mean_per_op\": 1.25") != std::string::npos);
+  CHECK(summary.find("\"ns_max_per_op\": 2.0") != std::string::npos);
   CHECK(capture.stdout_text.find("status=exact_match reason=ok") != std::string::npos);
 }
 

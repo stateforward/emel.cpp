@@ -138,7 +138,7 @@ void maybe_write_onnx_probe_inputs(const fixture::model_fixture & model,
   emel::error::type err =
       emel::diarization::sortformer::executor::detail::to_error(
           emel::diarization::sortformer::executor::error::none);
-  emel::diarization::sortformer::executor::sm executor{};
+  auto executor = std::make_unique<emel::diarization::sortformer::executor::sm>();
   emel::diarization::sortformer::executor::event::execute request{
       model.contract,
       encoder_frames,
@@ -147,7 +147,7 @@ void maybe_write_onnx_probe_inputs(const fixture::model_fixture & model,
       hidden_dim,
   };
   request.error_out = &err;
-  if (!executor.process_event(request) ||
+  if (!executor->process_event(request) ||
       err != emel::diarization::sortformer::executor::detail::to_error(
                  emel::diarization::sortformer::executor::error::none) ||
       hidden_frame_count != emel::diarization::sortformer::executor::detail::k_frame_count ||
@@ -208,6 +208,12 @@ double measure_once_ns(fn_type && fn) {
       std::chrono::duration_cast<std::chrono::nanoseconds>(end - start).count());
 }
 
+void set_single_sample_stats(result & out) noexcept {
+  out.ns_min_per_op = out.ns_per_op;
+  out.ns_mean_per_op = out.ns_per_op;
+  out.ns_max_per_op = out.ns_per_op;
+}
+
 result make_profile_reference_result(const char * lane,
                                      const fixture::expected_output_baseline & baseline) {
   result out;
@@ -223,6 +229,7 @@ result make_profile_reference_result(const char * lane,
   out.comparable = false;
   out.iterations = 1;
   out.runs = 1;
+  set_single_sample_stats(out);
   out.output_dim = static_cast<std::uint64_t>(baseline.segment_count);
   out.output_checksum = baseline.output_checksum;
   out.note =
@@ -236,10 +243,10 @@ result make_profile_emel_result(const fixture::model_fixture & model,
                                 const fixture::expected_output_baseline & baseline,
                                 const double prepare_ns) {
   fixture::run_result pipeline_result{};
-  pipeline::sm machine{};
+  auto machine = std::make_unique<pipeline::sm>();
 
   const double pipeline_ns = measure_once_ns([&]() {
-    g_stage_ok_sink = fixture::run_pipeline(machine,
+    g_stage_ok_sink = fixture::run_pipeline(*machine,
                                             model.contract,
                                             pcm.pcm,
                                             pcm.sample_rate,
@@ -259,6 +266,7 @@ result make_profile_emel_result(const fixture::model_fixture & model,
   out.backend_language = "cpp";
   out.comparison_mode = "measurement";
   out.ns_per_op = pipeline_ns;
+  set_single_sample_stats(out);
   out.prepare_ns_per_op = prepare_ns;
   out.encode_ns_per_op = pipeline_ns;
   out.publish_ns_per_op = 0.0;
@@ -292,7 +300,7 @@ result make_stage_profile_result(const fixture::model_fixture & model,
   encoder_detail::contract encoder_contract = {};
   emel::diarization::sortformer::modules::detail::contract modules_contract = {};
   encoder_detail::pre_encoder_workspace encoder_workspace = {};
-  emel::diarization::sortformer::executor::sm executor = {};
+  auto executor = std::make_unique<emel::diarization::sortformer::executor::sm>();
   int32_t hidden_frame_count = 0;
   int32_t hidden_dim = 0;
   int32_t segment_count = 0;
@@ -329,7 +337,7 @@ result make_stage_profile_result(const fixture::model_fixture & model,
         hidden_dim,
     };
     request.error_out = &executor_err;
-    g_stage_ok_sink = executor.process_event(request);
+    g_stage_ok_sink = executor->process_event(request);
   });
   if (!g_stage_ok_sink ||
       executor_err != emel::diarization::sortformer::executor::detail::to_error(
@@ -365,6 +373,7 @@ result make_stage_profile_result(const fixture::model_fixture & model,
   out.comparable = false;
   out.workload_id = "diarization_sortformer_stage_profile_v1";
   out.ns_per_op = feature_ns + encoder_ns + executor_ns + probabilities_ns + decode_ns;
+  set_single_sample_stats(out);
   out.prepare_ns_per_op = feature_ns;
   out.encode_ns_per_op = encoder_ns + executor_ns;
   out.publish_ns_per_op = probabilities_ns + decode_ns;
@@ -396,11 +405,11 @@ void append_emel_sortformer_diarization_cases(std::vector<result> & results,
     maybe_write_onnx_probe_inputs(*model, pcm);
   });
   fixture::run_result pipeline_result{};
-  pipeline::sm machine{};
+  auto machine = std::make_unique<pipeline::sm>();
 
   const auto bench_cfg = pipeline_benchmark_config(cfg);
   auto measured = measure_case(fixture::k_case_name, bench_cfg, [&]() {
-    g_stage_ok_sink = fixture::run_pipeline(machine,
+    g_stage_ok_sink = fixture::run_pipeline(*machine,
                                             model->contract,
                                             pcm.pcm,
                                             pcm.sample_rate,

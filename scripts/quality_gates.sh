@@ -415,8 +415,10 @@ run_benchmark_gates() {
       BENCH_TOLERANCE="$QUALITY_GATES_BENCH_TOLERANCE" \
       "$ROOT_DIR/scripts/bench.sh" --snapshot --compare; then
       return 0
+    else
+      status=$?
     fi
-    return $?
+    return "$status"
   fi
 
   if [[ ${#bench_suites[@]} -eq 0 ]]; then
