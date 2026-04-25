@@ -1,5 +1,42 @@
 # Test Models
 
+## diar_streaming_sortformer_4spk-v2.1.gguf
+- Source: `https://huggingface.co/openresearchtools/diar_streaming_sortformer_4spk-v2.1-gguf`
+- File: `diar_streaming_sortformer_4spk-v2.1.gguf`
+- Stable maintained path: `tests/models/diar_streaming_sortformer_4spk-v2.1.gguf`
+- License: NVIDIA Open Model License
+- Upstream model: `https://huggingface.co/nvidia/diar_streaming_sortformer_4spk-v2.1`
+- Repository commit: `e2970f92934105c6b385a047dc098aaaa593621b`
+- Size: `471107712` bytes (`449M`)
+- Linked ETag: `1b85d7bf641350d0d355e7494c4b7d92a1ff2fb2d886cd6dcc43f358a6266ff0`
+- Xet hash: `c2967a4fb433032ad610e17aee4a2137a770c489fcc0d42397b11ad527aa1628`
+- Download URL: `https://huggingface.co/openresearchtools/diar_streaming_sortformer_4spk-v2.1-gguf/resolve/main/diar_streaming_sortformer_4spk-v2.1.gguf`
+- Original NeMo source: `https://huggingface.co/nvidia/diar_streaming_sortformer_4spk-v2.1`
+  at repo commit `fafaab5faa1617a0ca52d38dd3dc4bd636800d3d`, file
+  `diar_streaming_sortformer_4spk-v2.1.nemo`, size `471367680` bytes, linked ETag
+  `8abd32832159c6ac1148c926b7276f35ba34582c444e559dce1f1253fea42ef8`.
+- Optional ONNX reference source for diarization parity: repository
+  `https://huggingface.co/ooobo/diar_streaming_sortformer_4spk-v2.1-onnx`, file
+  `diar_streaming_sortformer_4spk-v2.1.onnx`, expected local path
+  `build/onnx_ref/diar_streaming_sortformer_4spk-v2.1.onnx`, size `495690533` bytes, SHA256
+  `5df5e883c8dae4e0ecba77739f3db38997c2ae57153de2583d625afb6abb2be0`.
+- Executable metadata truth: treat current Hugging Face GGUF/model metadata as authoritative for
+  this maintained slice, including `gguf.architecture=sortformer`, source format `nemo`, compact
+  tensor-name scheme `compact_v1`, and maintained `f32` outtype.
+- Maintained stream contract: mono `float32` PCM at `16000` Hz, four speakers, `80` ms output
+  frames, `chunk_len=188`, `chunk_right_context=1`, `fifo_len=0`,
+  `spkcache_update_period=188`, and `spkcache_len=188`.
+- Conversion source:
+  `https://github.com/openresearchtools/engine/blob/main/build/sortformer/convert_nemo_sortformer_to_gguf.py`
+- Conversion verification: self-converting the upstream `.nemo` with the conversion source above
+  produced a `471107712` byte GGUF with `1007` tensors and `155` metadata keys. Normalized compare
+  against the maintained OpenResearchTools GGUF found identical tensor manifests and identical
+  payload hashes for all `1007` tensors; the only metadata value difference was display name
+  (`general.name`).
+- Provenance note: this is an unofficial community GGUF conversion derived from NVIDIA's
+  `diar_streaming_sortformer_4spk-v2.1`; EMEL support is limited to the explicit maintained
+  contract above until later phases add native execution proof.
+
 ## TE-75M-q8_0.gguf
 - Source: `https://huggingface.co/augmem/TE-75M-GGUF`
 - File: `TE-75M-q8_0.gguf`

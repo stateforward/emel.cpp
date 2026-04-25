@@ -1,16 +1,16 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.14
-milestone_name: Benchmark Variant Organization
-status: between_milestones
-stopped_at: v1.14 milestone shipped and archived
-last_updated: "2026-04-21T16:24:53.330Z"
-last_activity: 2026-04-21
+milestone: v1.15
+milestone_name: ARM Sortformer Diarization GGUF Slice
+status: completed
+stopped_at: v1.15 milestone completed and archived; next action is define the next milestone
+last_updated: "2026-04-25T00:13:19.297Z"
+last_activity: 2026-04-25
 progress:
-  total_phases: 4
-  completed_phases: 4
-  total_plans: 4
-  completed_plans: 4
+  total_phases: 24
+  completed_phases: 24
+  total_plans: 24
+  completed_plans: 24
   percent: 100
 ---
 
@@ -18,24 +18,28 @@ progress:
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-04-21)
+See: .planning/PROJECT.md (updated 2026-04-25)
 
 **Core value:** Prove real end-to-end behavior with explicit SML orchestration and parity-oriented
 verification before widening API surface or model scope.
-**Current focus:** v1.14 shipped; next milestone not yet defined.
+**Current focus:** Define the next milestone before adding new active requirements or phases.
 
 ## Current Position
 
-Phase: none
-Plan: none
-Status: `v1.14` milestone complete and archived.
-Last activity: 2026-04-21
+Phase: 93
+Plan: complete
+Status: `v1.15` completed and archived. EMEL exact-matches PyTorch/NeMo and ONNX on the
+maintained AMI fixture and beats the ONNX Runtime CPU single-thread benchmark reference in the
+strict generated record set: EMEL `1370917625 ns/op` versus ONNX `5900446125 ns/op`, with
+`output_dim=17`, checksum `4249677247906920305`, and ONNX
+`actual_providers=CPUExecutionProvider`.
+Last activity: 2026-04-25
 
 Progress: [##########] 100%
 
 ## Deferred Items
 
-Items acknowledged and deferred at milestone close on 2026-04-21:
+Items acknowledged and still deferred at milestone close on 2026-04-25:
 
 | Category | Item | Status |
 |----------|------|--------|
@@ -49,17 +53,18 @@ Items acknowledged and deferred at milestone close on 2026-04-21:
 
 **Latest shipped milestone:**
 
-- Milestone: v1.14 Benchmark Variant Organization
-- Completed phases: `4/4`
-- Completed plans: `4/4`
+- Milestone: v1.15 ARM Sortformer Diarization GGUF Slice
+- Completed phases: `24/24`
+- Completed plans: `24/24`
 - Audit status: `passed`
 
 **Current planning shape:**
 
 - Active milestone: none
-- Latest shipped milestone: `v1.14`
-- Next action: `$gsd-new-milestone`
-- Current blocker: none
+- Latest shipped milestone: `v1.15`
+- Next action: run `$gsd-new-milestone` to define the next requirements set.
+
+- Current blocker: none.
 
 ## Accumulated Context
 
@@ -67,6 +72,27 @@ Items acknowledged and deferred at milestone close on 2026-04-21:
 
 Decisions are logged in PROJECT.md Key Decisions table.
 Recent decisions affecting current work:
+
+- `v1.15` targets one maintained ARM diarization slice for
+  `openresearchtools/diar_streaming_sortformer_4spk-v2.1-gguf`.
+
+- The milestone is a diarization runtime milestone, not a generation or embedding benchmark
+  organization milestone.
+
+- The maintained input contract is deterministic single-channel `float32` PCM at 16,000 Hz.
+
+- The maintained output contract is a deterministic `T x 4` speaker-activity probability matrix
+  plus bounded four-speaker segment records.
+
+- Native EMEL-owned `src/` execution work is required; tool-only, Python, ONNX, NeMo, llama.cpp, or
+  ggml compute fallbacks do not satisfy the EMEL lane.
+
+- Runtime choices for Sortformer model readiness, chunk profile, cache readiness, and error
+  outcomes must be explicit in Boost.SML guards/states/transitions.
+
+- Parity and benchmark work must keep EMEL and reference lanes isolated.
+
+- Phase numbering continues from prior milestone history, so `v1.15` starts at Phase `81`.
 
 - `v1.13` promotes the deferred generation-scope follow-on from `v1.12` into the next active
   milestone, reusing the same lane-isolated pluggable compare architecture instead of inventing a
@@ -213,6 +239,34 @@ Recent decisions affecting current work:
 
 ### Roadmap Evolution
 
+- Phase `93` added: Recursive Sortformer ONNX single-thread profile and optimization.
+
+- Phase `92.6` completed: EMEL now exact-matches the PyTorch/NeMo parity reference and ONNX
+  benchmark reference at `output_dim=17`, checksum `4249677247906920305`.
+
+- Phase `93` completed: latest strict generated compare
+  `build/diarization_compare_post_pipeline_pr_feedback` reports EMEL `1370917625 ns/op` versus
+  ONNX CPU single-thread `5900446125 ns/op` with exact ONNX and PyTorch/NeMo output matches.
+
+- Phase `92.5` inserted after Phase `92`: Add ONNX Sortformer reference parity lane (URGENT)
+
+- Phase `92.4` inserted after Phase `92`: Reprofile and republish Sortformer after full kernel
+  completion (URGENT)
+
+- Phase `92.3` inserted after Phase `92`: Complete ARM Sortformer dense and matmul kernel
+  operations (URGENT)
+
+- Phase `92.2` inserted after Phase `92`: Maintained sortformer runtime contract repair (URGENT)
+
+- Phase `92.1` inserted after Phase `92`: Maintained GGUF contract parity and benchmark truth
+  repair (URGENT)
+
+- Added Phases `86` through `88` on 2026-04-23 for ARM Sortformer profiling, kernel-owned
+  optimization looping, and optimization-exhaustion closeout after parity/benchmark proof.
+
+- Started milestone `v1.15` on 2026-04-22 with continued numbering, so the new roadmap begins at
+  Phase `81`.
+
 - Started milestone `v1.13` on 2026-04-20 with continued numbering, so the new roadmap begins at
   Phase `69`.
 
@@ -322,7 +376,7 @@ Recent decisions affecting current work:
 
 ## Session Continuity
 
-Last session: 2026-04-18T00:20:00Z
-Stopped at: completed the pluggable reference parity bench architecture, verified the unified
-Python/C++ compare workflows, and left the milestone ready for audit
+Last session: 2026-04-22T19:06:20Z
+Stopped at: started `v1.15 ARM Sortformer Diarization GGUF Slice` and left Phase `81` ready to
+plan
 Resume file: None

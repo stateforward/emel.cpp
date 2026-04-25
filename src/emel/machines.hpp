@@ -1,6 +1,9 @@
 #pragma once
 
 #include "emel/batch/planner/sm.hpp"
+#include "emel/diarization/request/sm.hpp"
+#include "emel/diarization/sortformer/executor/sm.hpp"
+#include "emel/diarization/sortformer/pipeline/sm.hpp"
 #include "emel/embeddings/generator/sm.hpp"
 #include "emel/graph/processor/sm.hpp"
 #include "emel/text/encoders/any.hpp"
@@ -22,6 +25,9 @@ namespace emel {
 using ComputeExecutor = emel::graph::processor::sm;
 using Conditioner = emel::text::conditioner::sm;
 using Detokenizer = emel::text::detokenizer::sm;
+using DiarizationRequest = emel::diarization::request::sm;
+using SortformerExecutor = emel::diarization::sortformer::executor::sm;
+using SortformerPipeline = emel::diarization::sortformer::pipeline::sm;
 using EmbeddingsGenerator = emel::embeddings::generator::sm;
 using EncoderAny = emel::text::encoders::any;
 using EncoderBpe = emel::text::encoders::bpe::sm;

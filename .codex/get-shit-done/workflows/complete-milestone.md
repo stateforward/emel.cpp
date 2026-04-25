@@ -81,6 +81,32 @@ SECURITY: Audit JSON output is structured data from gsd-tools.cjs — validated 
 
 <step name="verify_readiness">
 
+Before presenting milestone close as shippable, require a current milestone audit and honor its
+result. Do not archive from roadmap/requirements completion alone when the audit says `gaps_found`
+or `tech_debt`.
+
+```bash
+INIT=$(node .codex/get-shit-done/bin/gsd-tools.cjs init milestone-op)
+if [[ "$INIT" == @file:* ]]; then INIT=$(cat "${INIT#@file:}"); fi
+MILESTONE_VERSION=$(printf '%s' "$INIT" | node -e 'const fs=require("fs"); const data=JSON.parse(fs.readFileSync(0,"utf8")); process.stdout.write(data.milestone_version || "");')
+AUDIT_PATH=".planning/${MILESTONE_VERSION}-MILESTONE-AUDIT.md"
+AUDIT_STATUS=$(awk -F': ' '/^status:/ {print $2; exit}' "$AUDIT_PATH" 2>/dev/null)
+```
+
+If `AUDIT_PATH` is missing:
+```
+No current milestone audit found at ${AUDIT_PATH}.
+Run `$gsd-audit-milestone` first.
+```
+Exit.
+
+If `AUDIT_STATUS` is not `passed`:
+```
+Milestone audit status is ${AUDIT_STATUS:-missing}, not passed.
+Run `$gsd-audit-milestone` to review the current gaps, then close them before archiving.
+```
+Exit.
+
 **Use `roadmap analyze` for comprehensive readiness check:**
 
 ```bash
@@ -518,7 +544,7 @@ ls .planning/RETROSPECTIVE.md 2>/dev/null || true
 
 **If exists:** Read the file, append new milestone section before the "## Cross-Milestone Trends" section.
 
-**If doesn't exist:** Create from template at `/Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/.codex/get-shit-done/templates/retrospective.md`.
+**If doesn't exist:** Create from template at `.codex/get-shit-done/templates/retrospective.md`.
 
 **Gather retrospective data:**
 

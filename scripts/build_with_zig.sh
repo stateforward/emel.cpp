@@ -15,11 +15,13 @@ if ! command -v ninja >/dev/null 2>&1; then
 fi
 
 zig_bin="$(command -v zig)"
+test_shards="${EMEL_ZIG_TEST_SHARDS:-}"
 
 cmake -S . -B build/zig -G Ninja \
   -DCMAKE_BUILD_TYPE=Release \
   -DCMAKE_C_COMPILER="$zig_bin" \
   -DCMAKE_C_COMPILER_ARG1=cc \
   -DCMAKE_CXX_COMPILER="$zig_bin" \
-  -DCMAKE_CXX_COMPILER_ARG1=c++
+  -DCMAKE_CXX_COMPILER_ARG1=c++ \
+  -DEMEL_TEST_SHARDS="$test_shards"
 cmake --build build/zig --parallel

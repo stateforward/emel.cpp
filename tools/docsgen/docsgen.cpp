@@ -19,27 +19,11 @@
 #include <utility>
 #include <vector>
 
-#include "emel/emel.h"
-#include "emel/docs/detail.hpp"
-#include "emel/graph/tensor/sm.hpp"
+#include "docsgen_machine_emit.hpp"
 #include "emel/text/jinja/parser/detail.hpp"
 #include "emel/text/jinja/parser/sm.hpp"
 
 namespace fs = std::filesystem;
-
-struct doc_paths {
-  fs::path root;
-  fs::path docs_dir;
-  fs::path architecture_dir;
-  fs::path mermaid_dir;
-  fs::path benchmarks_md;
-  fs::path benchmarks_snapshot;
-  fs::path embedded_size_snapshot;
-  fs::path generation_pre_arm_flash_optimized_baseline;
-  fs::path benchmarks_template;
-  fs::path readme_template;
-  fs::path readme_path;
-};
 
 struct benchmark_row {
   std::string name;
@@ -73,9 +57,30 @@ struct benchmark_generation_stage_probe {
   std::string reference_prefill_misc_probe_ns;
 };
 
+struct benchmark_diarization_record {
+  std::string lane;
+  std::string case_name;
+  std::string model_id;
+  std::string fixture_id;
+  std::string workload_id;
+  std::string output_dim;
+  std::string output_checksum;
+  std::string note;
+};
+
+struct benchmark_diarization_compare_row {
+  std::string name;
+  std::string emel_ns;
+  std::string reference_label;
+  std::string reference_ns;
+  std::string proof_status;
+};
+
 struct benchmark_snapshot {
   std::vector<benchmark_row> rows;
   std::vector<benchmark_generation_stage_probe> generation_stage_probes;
+  std::vector<benchmark_diarization_record> diarization_records;
+  std::vector<benchmark_diarization_compare_row> diarization_compare_rows;
   std::string reference_source;
   std::string reference_ref;
   std::string benchmark_config;
@@ -132,12 +137,6 @@ struct embedded_size_snapshot {
   std::string ratio_section;
 };
 
-struct machine_spec {
-  std::string name;
-  std::string source_path;
-  void (*emit)(const machine_spec & spec, const doc_paths & paths, bool check);
-};
-
 struct options {
   fs::path root;
   bool check = false;
@@ -181,8 +180,8 @@ bool prune_stale_generated_files(const fs::path & dir,
     return true;
   }
 
-  // Generated architecture outputs are intentionally flat directories; this prune pass is
-  // non-recursive and only removes unexpected files directly under `dir`.
+  // Generated architecture outputs are intentionally flat directories under .planning; this prune
+  // pass is non-recursive and only removes unexpected files directly under `dir`.
   for (const auto & entry : fs::directory_iterator(dir)) {
     if (!entry.is_regular_file() || entry.path().extension() != extension) {
       continue;
@@ -224,9 +223,9 @@ std::string build_docs_toc(const std::vector<machine_spec> & machines) {
   std::string toc;
   toc += "- [`docs/benchmarks.md`](docs/benchmarks.md)\n";
   for (const auto & spec : machines) {
-    toc += "- [`docs/architecture/";
+    toc += "- [`.planning/architecture/";
     toc += spec.name;
-    toc += ".md`](docs/architecture/";
+    toc += ".md`](.planning/architecture/";
     toc += spec.name;
     toc += ".md)\n";
   }
@@ -254,182 +253,6 @@ bool parse_options(int argc, char ** argv, options & out) {
   }
   return true;
 }
-
-template <class... Ts, class fn>
-constexpr void for_each_type(boost::sml::aux::type_list<Ts...>, fn && visitor) {
-  (visitor.template operator()<Ts>(), ...);
-}
-
-template <class T>
-std::string mermaid_state_name() {
-  return emel::docs::detail::mermaid_label(emel::docs::detail::raw_type_name<T>());
-}
-
-template <class T>
-std::string table_name() {
-  if constexpr (std::is_same_v<T, boost::sml::back::anonymous>) {
-    return "-";
-  }
-  return emel::docs::detail::shorten_type_name(emel::docs::detail::raw_type_name<T>());
-}
-
-struct transition_row {
-  std::string src_mermaid;
-  std::string dst_mermaid;
-  std::string event_mermaid;
-  std::string guard_mermaid;
-  std::string action_mermaid;
-  std::string src;
-  std::string dst;
-  std::string event;
-  std::string guard;
-  std::string action;
-  bool is_anonymous_event = false;
-};
-
-template <class model>
-void emit_machine(const machine_spec & spec, const doc_paths & paths, bool check) {
-  using sm_t = boost::sml::sm<model>;
-  using transitions = typename sm_t::transitions;
-
-  std::vector<transition_row> rows;
-  std::vector<std::string> initial_states;
-  std::unordered_set<std::string> initial_seen;
-
-  for_each_type(transitions{}, [&]<class transition_t>() {
-    using src_state = typename transition_t::src_state;
-    using dst_state = typename transition_t::dst_state;
-    using event = typename transition_t::event;
-    using guard = typename transition_t::guard;
-    using action = typename transition_t::action;
-
-    if (transition_t::initial) {
-      std::string initial_name = mermaid_state_name<src_state>();
-      if (initial_seen.insert(initial_name).second) {
-        initial_states.push_back(initial_name);
-      }
-    }
-
-    transition_row row;
-    row.src_mermaid = mermaid_state_name<src_state>();
-    row.dst_mermaid = mermaid_state_name<dst_state>();
-    row.event_mermaid = emel::docs::detail::mermaid_event_name<event>();
-    row.guard_mermaid =
-        emel::docs::detail::mermaid_label(emel::docs::detail::raw_type_name<guard>());
-    row.action_mermaid =
-        emel::docs::detail::mermaid_label(emel::docs::detail::raw_type_name<action>());
-
-    row.src = table_name<src_state>();
-    row.dst = table_name<dst_state>();
-    row.event = emel::docs::detail::table_event_name<event>();
-    row.guard = emel::docs::detail::shorten_type_name(emel::docs::detail::raw_type_name<guard>());
-    row.action =
-        emel::docs::detail::shorten_type_name(emel::docs::detail::raw_type_name<action>());
-    row.is_anonymous_event = std::is_same_v<event, boost::sml::back::anonymous>;
-
-    rows.push_back(std::move(row));
-  });
-
-  std::string mermaid;
-  mermaid += "stateDiagram-v2\n";
-  mermaid += "  direction TB\n";
-  for (const auto & initial : initial_states) {
-    mermaid += "  [*] --> ";
-    mermaid += initial;
-    mermaid += "\n";
-  }
-  for (const auto & row : rows) {
-    mermaid += "  ";
-    mermaid += row.src_mermaid;
-    mermaid += " --> ";
-    mermaid += row.dst_mermaid;
-    mermaid += " :";
-    if (!row.event_mermaid.empty()) {
-      mermaid += " ";
-      mermaid += row.event_mermaid;
-    }
-    mermaid += " [";
-    mermaid += row.guard_mermaid;
-    mermaid += "] / ";
-    mermaid += row.action_mermaid;
-    mermaid += "\n";
-  }
-
-  std::string table;
-  table += "| Source | Event | Guard | Action | Target |\n";
-  table += "| --- | --- | --- | --- | --- |\n";
-  for (const auto & row : rows) {
-    table += "| ";
-    table += md_link(row.src, spec.source_path);
-    table += " | ";
-    if (row.is_anonymous_event) {
-      table += "-";
-    } else {
-      table += md_link(row.event, spec.source_path);
-    }
-    table += " | ";
-    table += md_link(row.guard, spec.source_path);
-    table += " | ";
-    table += md_link(row.action, spec.source_path);
-    table += " | ";
-    table += md_link(row.dst, spec.source_path);
-    table += " |\n";
-  }
-
-  std::string doc;
-  doc += "# ";
-  doc += spec.name;
-  doc += "\n\n";
-  doc += "Source: ";
-  doc += md_link(spec.source_path, spec.source_path);
-  doc += "\n\n";
-  doc += "## Mermaid\n\n";
-  doc += "```mermaid\n";
-  doc += mermaid;
-  doc += "```\n\n";
-  doc += "## Transitions\n\n";
-  doc += table;
-
-  const fs::path md_path = paths.architecture_dir / (spec.name + ".md");
-  const fs::path mmd_path = paths.mermaid_dir / (spec.name + ".mmd");
-  if (!write_file(md_path, doc, check)) {
-    std::exit(1);
-  }
-  if (!write_file(mmd_path, mermaid, check)) {
-    std::exit(1);
-  }
-}
-
-template <class model>
-void register_machine(std::vector<machine_spec> & out,
-                      const char * name,
-                      const char * source_path) {
-  machine_spec spec;
-  spec.name = name;
-  spec.source_path = source_path;
-  spec.emit = &emit_machine<model>;
-  out.push_back(std::move(spec));
-}
-
-struct docsgen_tensor_view_policy {
-  using tensor_machine_type = emel::graph::tensor::sm;
-  using tensor_state_type = emel::graph::tensor::event::tensor_state;
-  static constexpr int32_t max_tensors = emel::graph::tensor::detail::max_tensors;
-  static constexpr int32_t none_error_code =
-      static_cast<int32_t>(emel::error::cast(emel::graph::tensor::error::none));
-  static constexpr int32_t invalid_request_error_code =
-      static_cast<int32_t>(emel::error::cast(emel::graph::tensor::error::invalid_request));
-  static constexpr int32_t internal_error_code =
-      static_cast<int32_t>(emel::error::cast(emel::graph::tensor::error::internal_error));
-
-  static bool capture_tensor_state(tensor_machine_type &,
-                                   const int32_t,
-                                   tensor_state_type &,
-                                   int32_t & err_out) noexcept {
-    err_out = none_error_code;
-    return true;
-  }
-};
 
 #include "docsgen_machines.hpp"
 
@@ -577,6 +400,70 @@ parse_inline_key_value_fields(const std::string & line, const char * prefix) {
   }
 
   return fields;
+}
+
+std::optional<benchmark_diarization_record>
+parse_diarization_metadata_line(const std::string & line) {
+  constexpr std::string_view k_prefix = "# diarization_sortformer: ";
+  if (line.rfind(k_prefix.data(), 0u) != 0u) {
+    return std::nullopt;
+  }
+
+  benchmark_diarization_record record;
+  std::istringstream input(line.substr(k_prefix.size()));
+  for (const char * field :
+       {"lane", "case", "model_id", "fixture_id", "workload_id", "output_dim", "output_checksum"}) {
+    std::string token;
+    if (!(input >> token)) {
+      return std::nullopt;
+    }
+    const std::size_t separator = token.find('=');
+    if (separator == std::string::npos || token.substr(0u, separator) != field) {
+      return std::nullopt;
+    }
+    const std::string value = token.substr(separator + 1u);
+    if (std::string_view{field} == "lane") {
+      record.lane = value;
+    } else if (std::string_view{field} == "case") {
+      record.case_name = value;
+    } else if (std::string_view{field} == "model_id") {
+      record.model_id = value;
+    } else if (std::string_view{field} == "fixture_id") {
+      record.fixture_id = value;
+    } else if (std::string_view{field} == "workload_id") {
+      record.workload_id = value;
+    } else if (std::string_view{field} == "output_dim") {
+      record.output_dim = value;
+    } else if (std::string_view{field} == "output_checksum") {
+      record.output_checksum = value;
+    }
+  }
+
+  std::string note;
+  std::getline(input, note);
+  if (!note.empty() && note[0] == ' ') {
+    note.erase(0u, 1u);
+  }
+  record.note = note;
+  return record;
+}
+
+std::optional<benchmark_diarization_compare_row>
+parse_diarization_compare_row(const std::string & line) {
+  static const std::regex row_re(
+      R"(^([^ ]+) emel\.cpp ([0-9.]+) ns/op, ([^ ]+) ([0-9.]+) ns/op, proof_status=([^ ]+)$)");
+  std::smatch match;
+  if (!std::regex_match(line, match, row_re)) {
+    return std::nullopt;
+  }
+
+  return benchmark_diarization_compare_row{
+      .name = match[1].str(),
+      .emel_ns = match[2].str(),
+      .reference_label = match[3].str(),
+      .reference_ns = match[4].str(),
+      .proof_status = match[5].str(),
+  };
 }
 
 std::optional<benchmark_snapshot> parse_benchmarks_snapshot(const doc_paths & paths) {
@@ -781,6 +668,16 @@ std::optional<benchmark_snapshot> parse_benchmarks_snapshot(const doc_paths & pa
           .reference_prefill_attention_probe_ns = metadata->at("reference_prefill_attention_probe_ns"),
           .reference_prefill_misc_probe_ns = metadata->at("reference_prefill_misc_probe_ns"),
       });
+      continue;
+    }
+    if (const auto diarization_record = parse_diarization_metadata_line(line);
+        diarization_record.has_value()) {
+      parsed.diarization_records.push_back(*diarization_record);
+      continue;
+    }
+    if (const auto diarization_compare = parse_diarization_compare_row(line);
+        diarization_compare.has_value()) {
+      parsed.diarization_compare_rows.push_back(*diarization_compare);
       continue;
     }
     if (line.empty() || line[0] == '#') {
@@ -1063,6 +960,28 @@ const benchmark_row * find_benchmark_row(const benchmark_snapshot & snapshot,
   return nullptr;
 }
 
+const benchmark_diarization_record * find_diarization_record(const benchmark_snapshot & snapshot,
+                                                             const std::string & case_name,
+                                                             const std::string & lane) {
+  for (const auto & record : snapshot.diarization_records) {
+    if (record.case_name == case_name && record.lane == lane) {
+      return &record;
+    }
+  }
+  return nullptr;
+}
+
+const benchmark_diarization_compare_row * find_diarization_compare_row(
+    const benchmark_snapshot & snapshot,
+    const std::string & name) {
+  for (const auto & row : snapshot.diarization_compare_rows) {
+    if (row.name == name) {
+      return &row;
+    }
+  }
+  return nullptr;
+}
+
 std::optional<double> parse_double_field(const std::string & raw_value,
                                          const char * field_name,
                                          const fs::path & source_path) {
@@ -1336,6 +1255,115 @@ std::optional<std::string> build_flash_publication_section(const doc_paths & pat
   return section;
 }
 
+std::optional<std::string> build_sortformer_publication_section(const doc_paths & paths,
+                                                                const benchmark_snapshot & snapshot) {
+  const std::string primary_case =
+      "diarization/sortformer/ami_en2002b_mix_headset_137.00_152.04_16khz_mono";
+  const std::string profile_case =
+      "diarization/sortformer/profile_ami_en2002b_mix_headset_137.00_152.04_16khz_mono";
+
+  const auto * primary_emel = find_diarization_record(snapshot, primary_case, "emel");
+  const auto * primary_reference = find_diarization_record(snapshot, primary_case, "reference");
+  const auto * profile_emel = find_diarization_record(snapshot, profile_case, "emel");
+  const auto * primary_row = find_diarization_compare_row(snapshot, primary_case);
+  const auto * profile_row = find_diarization_compare_row(snapshot, profile_case);
+
+  if (primary_emel == nullptr || primary_reference == nullptr || profile_emel == nullptr ||
+      primary_row == nullptr || profile_row == nullptr) {
+    std::fprintf(stderr,
+                 "error: missing diarization publication metadata in %s\n",
+                 paths.benchmarks_snapshot.string().c_str());
+    return std::nullopt;
+  }
+
+  std::string section;
+  section += "## Sortformer Diarization Baseline\n\n";
+  section += "- Source snapshot: `snapshots/bench/benchmarks_compare.txt`\n";
+  section += "- Maintained benchmark suite: `diarization_sortformer`.\n";
+  section += "- Supported maintained model: `tests/models/diar_streaming_sortformer_4spk-v2.1.gguf` (`";
+  section += primary_emel->model_id;
+  section += "`).\n";
+  section += "- Canonical proof fixture: `tests/fixtures/diarization/"
+             "ami_en2002b_mix_headset_137.00_152.04_16khz_mono.wav` (`";
+  section += primary_emel->fixture_id;
+  section += "`).\n";
+  section += "- Maintained fixture provenance: `";
+  section += primary_emel->note;
+  section += "`\n";
+  section += "- Input contract: real `15.04` second mono `16 kHz` audio, maintained GGUF loader, "
+             "maintained request frontend (`1504 x 128` log-mel features), maintained pre-encode "
+             "stack (`188 x 512` encoder frames), then the maintained executor/probability/"
+             "segment pipeline.\n";
+  const bool recorded_reference = primary_row->reference_label == "reference-baseline";
+  section += recorded_reference ? "- Self-recorded regression snapshot: `output_dim="
+                                : "- Current exact output: `output_dim=";
+  section += primary_emel->output_dim;
+  section += "` segments, `output_checksum=";
+  section += primary_emel->output_checksum;
+  section += "`.\n";
+  section += recorded_reference ? "- Recorded lane note: `" : "- Benchmark reference note: `";
+  section += primary_reference->note;
+  section += "`\n";
+  if (recorded_reference) {
+    section += "- Correctness caveat: the recorded lane was produced by EMEL and is not an "
+               "independent parity oracle.\n";
+  } else {
+    section += "- Current publication caveat: the ONNX row is the CPU single-thread benchmark "
+               "reference. PyTorch/NeMo remains the independent parity reference, and the ONNX "
+               "row is only a closeout target after it exact-matches that parity lane.\n";
+  }
+  section += "- Primary steady-state case: `";
+  section += primary_row->name;
+  section += " emel.cpp ";
+  section += primary_row->emel_ns;
+  section += " ns/op, ";
+  section += primary_row->reference_label;
+  section += " ";
+  section += primary_row->reference_ns;
+  section += " ns/op, proof_status=";
+  section += primary_row->proof_status;
+  section += "`\n";
+  section += "- Profile case: `";
+  section += profile_row->name;
+  section += " emel.cpp ";
+  section += profile_row->emel_ns;
+  section += " ns/op, ";
+  section += profile_row->reference_label;
+  section += " ";
+  section += profile_row->reference_ns;
+  section += " ns/op, proof_status=";
+  section += profile_row->proof_status;
+  section += "`\n";
+  section += "- Publication workflow: the deterministic compare artifacts now live under "
+             "`scripts/bench_diarization_compare.sh`, which writes `raw/emel.jsonl`, "
+             "`raw/reference.jsonl`, optional `raw/onnx_reference.jsonl`, and "
+             "`compare_summary.json` using "
+             "`diarization_compare/v1` / `diarization_compare_summary/v1`.\n";
+  section += "- PyTorch/NeMo parity reference lane: when supplied with "
+             "`--pytorch-reference-model`, the workflow emits a distinct "
+             "`pytorch.nemo.sortformer.v2_1` backend using the official model-card "
+             "`SortformerEncLabelModel.diarize(..., include_tensor_outputs=True)` path on the "
+             "maintained WAV fixture. The reproducible environment is synced with `uv` from "
+             "`tools/bench/diarization_pytorch_reference_requirements.txt` via "
+             "`scripts/setup_diarization_pytorch_ref_env.sh`. Timing excludes one-time model "
+             "load.\n";
+  section += "- ONNX benchmark reference lane: when supplied with `--onnx-reference-model`, the "
+             "workflow emits a distinct `onnx.sortformer.v2_1` backend using ONNX Runtime CPU "
+             "single-thread (`intra_op=1`, `inter_op=1`, `ORT_SEQUENTIAL`) and the maintained "
+             "feature tensor from the same fixture. Generated records include "
+             "`actual_providers` from ONNX Runtime. Missing ONNX dependencies or artifacts are "
+             "hard failures, not recorded-baseline fallbacks. ONNX output must be cross-checked "
+             "against the PyTorch parity lane before it is treated as a correctness target.\n";
+  section += "- Optimization contract: one-time setup costs are secondary evidence. The primary "
+             "benchmark claim remains the steady-state maintained pipeline lane on exact hardware.\n";
+  section += "- Rejected or deferred candidates:\n";
+  section += "  - Tool-local synthetic contracts/PCM fixtures and reference-lane dependencies "
+             "remain rejected.\n";
+  section += "  - Full transformer dense/matmul kernelization remains future kernel-contract "
+             "work.\n";
+  return section;
+}
+
 int main(int argc, char ** argv) {
   options opts;
   if (!parse_options(argc, argv, opts)) {
@@ -1345,7 +1373,7 @@ int main(int argc, char ** argv) {
   doc_paths paths;
   paths.root = opts.root;
   paths.docs_dir = paths.root / "docs";
-  paths.architecture_dir = paths.docs_dir / "architecture";
+  paths.architecture_dir = paths.root / ".planning" / "architecture";
   paths.mermaid_dir = paths.architecture_dir / "mermaid";
   paths.benchmarks_md = paths.docs_dir / "benchmarks.md";
   paths.benchmarks_snapshot = paths.root / "snapshots/bench/benchmarks_compare.txt";
@@ -1394,10 +1422,16 @@ int main(int argc, char ** argv) {
   if (!flash_publication_section.has_value()) {
     return 1;
   }
+  const auto sortformer_publication_section =
+      build_sortformer_publication_section(paths, *benchmarks_snapshot);
+  if (!sortformer_publication_section.has_value()) {
+    return 1;
+  }
 
   const auto benchmarks_doc = render_template(
       paths.benchmarks_template,
       {template_var{"flash_publication_section", *flash_publication_section},
+       template_var{"sortformer_publication_section", *sortformer_publication_section},
        template_var{"benchmarks_table", *benchmarks_table}});
   if (!benchmarks_doc.has_value()) {
     return 1;

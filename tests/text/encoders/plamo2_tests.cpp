@@ -78,3 +78,21 @@ TEST_CASE("encoder_detail_plamo2_bom_and_missing_bytes") {
                                                    *incomplete_builder.vocab);
   CHECK(invalid.error == emel::text::encoders::error::to_emel(emel::text::encoders::error::code::model_invalid));
 }
+
+TEST_CASE("encoder_detail_plamo2_non_finite_suffix_score_is_invalid") {
+  vocab_builder builder{};
+  builder.set_model("plamo2");
+  builder.add_token("dummy", 0.0f, 1);
+  builder.add_all_plamo2_byte_tokens();
+
+  emel::text::encoders::plamo2::action::context ctx{};
+  ctx.vocab = builder.vocab;
+  CHECK(emel::text::encoders::plamo2::detail::ensure_plamo2_tables(ctx, *builder.vocab));
+
+  constexpr int32_t k_invalid_score = -20000000;
+  bool found_invalid_score = false;
+  for (const auto &row : ctx.table) {
+    found_invalid_score = found_invalid_score || row.score == k_invalid_score;
+  }
+  CHECK(found_invalid_score);
+}

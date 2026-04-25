@@ -294,6 +294,120 @@ TEST_CASE("kernel_aarch64_mul_mat_simd_matches_scalar_when_matrix_has_eight_rows
 #endif
 }
 
+TEST_CASE("kernel_aarch64_prepared_f32_lhs_4row_matches_scalar_with_depth_and_tails") {
+#if !(defined(__aarch64__) || defined(__ARM_NEON))
+  return;
+#else
+  constexpr uint64_t k = 263;
+  constexpr uint64_t m = 9;
+  constexpr uint64_t n = 13;
+
+  std::array<float, k * m> src0{};
+  std::array<float, k * n> src1{};
+  std::array<float, n * m> dst_prepared{};
+  std::array<float, n * m> dst_scalar{};
+  std::vector<float> prepared(
+      static_cast<size_t>(
+          emel::kernel::aarch64::detail::prepared_f32_lhs_4row_value_count(k, m)),
+      0.0f);
+
+  for (uint64_t index = 0; index < src0.size(); ++index) {
+    const int64_t centered = static_cast<int64_t>((index * 5u) % 37u) - 18;
+    src0[static_cast<size_t>(index)] = static_cast<float>(centered) * 0.015625f;
+  }
+  for (uint64_t index = 0; index < src1.size(); ++index) {
+    const int64_t centered = static_cast<int64_t>((index * 7u) % 43u) - 21;
+    src1[static_cast<size_t>(index)] = static_cast<float>(centered) * 0.0078125f;
+  }
+  std::fill(dst_prepared.begin(), dst_prepared.end(), std::numeric_limits<float>::quiet_NaN());
+
+  REQUIRE(emel::kernel::aarch64::detail::prepare_neon_mul_mat_f32_lhs_4row(
+      src0.data(),
+      k,
+      m,
+      prepared.data(),
+      static_cast<uint64_t>(prepared.size())));
+
+  const emel::kernel::event::op_mul_mat prepared_ev{
+      .src0 = make_src(src0.data(), dtype::f32, k, m),
+      .src1 = make_src(src1.data(), dtype::f32, n, k),
+      .dst = make_dst(dst_prepared.data(), dtype::f32, n, m),
+      .nth = 1,
+  };
+  const emel::kernel::event::op_mul_mat scalar_ev{
+      .src0 = make_src(src0.data(), dtype::f32, k, m),
+      .src1 = make_src(src1.data(), dtype::f32, n, k),
+      .dst = make_dst(dst_scalar.data(), dtype::f32, n, m),
+      .nth = 1,
+  };
+
+  CHECK(emel::kernel::aarch64::detail::execute_neon_mul_mat_prepared_f32_lhs_4row(
+      prepared_ev,
+      prepared.data(),
+      static_cast<uint64_t>(prepared.size())));
+  CHECK(emel::kernel::detail::execute_scalar(scalar_ev));
+
+  for (uint64_t index = 0; index < dst_prepared.size(); ++index) {
+    CHECK(std::isfinite(dst_prepared[static_cast<size_t>(index)]));
+    CHECK(dst_prepared[static_cast<size_t>(index)] ==
+          doctest::Approx(dst_scalar[static_cast<size_t>(index)]).epsilon(1e-5f));
+  }
+#endif
+}
+
+TEST_CASE("kernel_aarch64_prepared_f32_lhs_4row_rejects_invalid_contract") {
+#if !(defined(__aarch64__) || defined(__ARM_NEON))
+  return;
+#else
+  constexpr uint64_t k = 4;
+  constexpr uint64_t m = 2;
+  constexpr uint64_t n = 3;
+
+  std::array<float, k * m> src0{};
+  std::array<float, k * n> src1{};
+  std::array<float, n * m> dst{};
+  std::vector<float> prepared(
+      static_cast<size_t>(
+          emel::kernel::aarch64::detail::prepared_f32_lhs_4row_value_count(k, m)),
+      0.0f);
+
+  CHECK_FALSE(emel::kernel::aarch64::detail::prepare_neon_mul_mat_f32_lhs_4row(
+      nullptr,
+      k,
+      m,
+      prepared.data(),
+      static_cast<uint64_t>(prepared.size())));
+  CHECK_FALSE(emel::kernel::aarch64::detail::prepare_neon_mul_mat_f32_lhs_4row(
+      src0.data(),
+      k,
+      m,
+      prepared.data(),
+      static_cast<uint64_t>(prepared.size() - 1u)));
+
+  emel::kernel::event::op_mul_mat ev{
+      .src0 = make_src(src0.data(), dtype::f32, k, m),
+      .src1 = make_src(src1.data(), dtype::f32, n, k),
+      .dst = make_dst(dst.data(), dtype::f32, n, m),
+      .nth = 1,
+  };
+
+  CHECK_FALSE(emel::kernel::aarch64::detail::execute_neon_mul_mat_prepared_f32_lhs_4row(
+      ev,
+      nullptr,
+      static_cast<uint64_t>(prepared.size())));
+  CHECK_FALSE(emel::kernel::aarch64::detail::execute_neon_mul_mat_prepared_f32_lhs_4row(
+      ev,
+      prepared.data(),
+      static_cast<uint64_t>(prepared.size() - 1u)));
+
+  ev.src1.ne[1] = k - 1u;
+  CHECK_FALSE(emel::kernel::aarch64::detail::execute_neon_mul_mat_prepared_f32_lhs_4row(
+      ev,
+      prepared.data(),
+      static_cast<uint64_t>(prepared.size())));
+#endif
+}
+
 TEST_CASE("kernel_aarch64_image_pointwise_f32_matches_scalar_reference") {
 #if !(defined(__aarch64__) || defined(__ARM_NEON))
   return;

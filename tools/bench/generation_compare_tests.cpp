@@ -197,7 +197,8 @@ TEST_CASE("generation compare reports exact matches from canonical generation re
     "\"prompt_id\":\"single_user:hello\",\"formatter_mode\":\"chat_template_supported_qwen_v1\","
     "\"formatter_contract\":\"chat_template_supported_qwen_v1\",\"sampling_id\":\"argmax_v1\","
     "\"stop_id\":\"max_tokens_v1\",\"seed\":0,\"comparable\":true,\"max_output_tokens\":1,"
-    "\"ns_per_op\":1.0,\"prepare_ns_per_op\":0.1,\"encode_ns_per_op\":0.8,"
+    "\"ns_per_op\":1.0,\"ns_min_per_op\":0.5,\"ns_mean_per_op\":1.25,"
+    "\"ns_max_per_op\":2.0,\"prepare_ns_per_op\":0.1,\"encode_ns_per_op\":0.8,"
     "\"publish_ns_per_op\":0.1,\"output_tokens\":1,\"output_bytes\":5,"
     "\"output_checksum\":123,\"iterations\":1,\"runs\":1,"
     "\"output_path\":\"" + emel_output.string() + "\",\"note\":\"\",\"error_kind\":\"\","
@@ -217,7 +218,8 @@ TEST_CASE("generation compare reports exact matches from canonical generation re
     "\"prompt_id\":\"single_user:hello\",\"formatter_mode\":\"chat_template_supported_qwen_v1\","
     "\"formatter_contract\":\"chat_template_supported_qwen_v1\",\"sampling_id\":\"argmax_v1\","
     "\"stop_id\":\"max_tokens_v1\",\"seed\":0,\"comparable\":true,\"max_output_tokens\":1,"
-    "\"ns_per_op\":1.0,\"prepare_ns_per_op\":0.1,\"encode_ns_per_op\":0.8,"
+    "\"ns_per_op\":1.0,\"ns_min_per_op\":0.5,\"ns_mean_per_op\":1.25,"
+    "\"ns_max_per_op\":2.0,\"prepare_ns_per_op\":0.1,\"encode_ns_per_op\":0.8,"
     "\"publish_ns_per_op\":0.1,\"output_tokens\":1,\"output_bytes\":5,"
     "\"output_checksum\":123,\"iterations\":1,\"runs\":1,"
     "\"output_path\":\"" + reference_output.string() + "\",\"note\":\"\",\"error_kind\":\"\","
@@ -240,6 +242,9 @@ TEST_CASE("generation compare reports exact matches from canonical generation re
   CHECK(summary.find("\"failed\": false") != std::string::npos);
   CHECK(summary.find("\"exact_output_match\": true") != std::string::npos);
   CHECK(summary.find("\"exact_checksum_match\": true") != std::string::npos);
+  CHECK(summary.find("\"ns_min_per_op\": 0.5") != std::string::npos);
+  CHECK(summary.find("\"ns_mean_per_op\": 1.25") != std::string::npos);
+  CHECK(summary.find("\"ns_max_per_op\": 2.0") != std::string::npos);
   CHECK(capture.stdout_text.find("status=exact_match reason=ok") != std::string::npos);
 }
 

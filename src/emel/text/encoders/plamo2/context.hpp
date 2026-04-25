@@ -7,6 +7,7 @@
 
 #include "emel/text/encoders/context.hpp"
 #include "emel/text/encoders/errors.hpp"
+#include "emel/text/encoders/events.hpp"
 #include "emel/text/encoders/types.hpp"
 
 namespace emel::text::encoders::plamo2::action {

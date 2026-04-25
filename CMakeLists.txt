@@ -77,6 +77,13 @@ add_library(emel STATIC
   src/emel/model/lfm2/detail.cpp
   src/emel/model/gemma4/detail.cpp
   src/emel/model/omniembed/detail.cpp
+  src/emel/model/sortformer/detail.cpp
+  src/emel/diarization/sortformer/detail.cpp
+  src/emel/diarization/sortformer/encoder/feature_extractor/detail.cpp
+  src/emel/diarization/sortformer/encoder/detail.cpp
+  src/emel/diarization/sortformer/modules/detail.cpp
+  src/emel/diarization/sortformer/output/detail.cpp
+  src/emel/diarization/sortformer/transformer/detail.cpp
 )
 
 target_link_libraries(emel
@@ -107,6 +114,14 @@ if(EMEL_ENABLE_TESTS)
     tests/generator/detail_tests.cpp
     tests/generator/initializer/lifecycle_tests.cpp
     tests/generator/prefill/lifecycle_tests.cpp
+    tests/diarization/request/lifecycle_tests.cpp
+    tests/diarization/sortformer/encoder/lifecycle_tests.cpp
+    tests/diarization/sortformer/executor/lifecycle_tests.cpp
+    tests/diarization/sortformer/modules/lifecycle_tests.cpp
+    tests/diarization/sortformer/output/lifecycle_tests.cpp
+    tests/diarization/sortformer/pipeline/lifecycle_tests.cpp
+    tests/diarization/sortformer/parity/lifecycle_tests.cpp
+    tests/diarization/sortformer/transformer/lifecycle_tests.cpp
     tests/embeddings/text_embedding_lane_tests.cpp
     tests/embeddings/vision_embedding_lane_tests.cpp
     tests/embeddings/audio_embedding_lane_tests.cpp
@@ -183,6 +198,54 @@ if(EMEL_ENABLE_TESTS)
     tests/text/tokenizer/tokenizer_action_guard_tests.cpp
   )
 
+  set(EMEL_TEST_SHARDS "" CACHE STRING "Comma or semicolon separated doctest shards to compile")
+  if(NOT EMEL_TEST_SHARDS STREQUAL "")
+    string(REPLACE "," ";" EMEL_TEST_SELECTED_SHARDS "${EMEL_TEST_SHARDS}")
+    set(EMEL_TEST_FILTERED_SOURCES tests/doctest_main.cpp)
+    foreach(test_source IN LISTS EMEL_TEST_SOURCES)
+      if(test_source STREQUAL "tests/doctest_main.cpp")
+        continue()
+      endif()
+
+      set(keep_test_source FALSE)
+      foreach(test_shard IN LISTS EMEL_TEST_SELECTED_SHARDS)
+        if((test_shard STREQUAL "model_and_batch" AND
+              test_source MATCHES "^tests/(model|gguf|gbnf|batch)/") OR
+           (test_shard STREQUAL "generator_and_runtime" AND
+              test_source MATCHES "^tests/(generator|embeddings|logits|token)/") OR
+           (test_shard STREQUAL "diarization" AND
+              test_source MATCHES "^tests/diarization/") OR
+           (test_shard STREQUAL "sm" AND
+              test_source MATCHES "^tests/sm/") OR
+           (test_shard STREQUAL "text" AND
+              test_source MATCHES "^tests/text/") OR
+           (test_shard STREQUAL "text_encoder_plamo2" AND
+              test_source MATCHES "^tests/text/encoders/plamo2_tests\\.cpp$") OR
+           (test_shard STREQUAL "text_encoders" AND
+              test_source MATCHES "^tests/text/encoders/") OR
+           (test_shard STREQUAL "text_tokenizer" AND
+              test_source MATCHES "^tests/text/tokenizer/") OR
+           (test_shard STREQUAL "text_runtime" AND
+              test_source MATCHES "^tests/text/(conditioner|detokenizer|formatter|jinja|renderer|unicode)/") OR
+           (test_shard STREQUAL "kernel_and_graph" AND
+              test_source MATCHES "^tests/(kernel|graph|memory|tensor)/"))
+          set(keep_test_source TRUE)
+        endif()
+      endforeach()
+
+      if(keep_test_source)
+        list(APPEND EMEL_TEST_FILTERED_SOURCES "${test_source}")
+      endif()
+    endforeach()
+
+    list(LENGTH EMEL_TEST_FILTERED_SOURCES EMEL_TEST_FILTERED_SOURCE_COUNT)
+    if(EMEL_TEST_FILTERED_SOURCE_COUNT LESS 2)
+      message(FATAL_ERROR "EMEL_TEST_SHARDS='${EMEL_TEST_SHARDS}' selected no test sources")
+    endif()
+    set(EMEL_TEST_SOURCES ${EMEL_TEST_FILTERED_SOURCES})
+    message(STATUS "EMEL test build scoped to shards: ${EMEL_TEST_SELECTED_SHARDS}")
+  endif()
+
   add_executable(emel_tests_bin
     ${EMEL_TEST_SOURCES}
   )
@@ -197,14 +260,22 @@ if(EMEL_ENABLE_TESTS)
     PRIVATE
       ${CMAKE_CURRENT_SOURCE_DIR}/src
       ${CMAKE_CURRENT_SOURCE_DIR}/include
+      ${CMAKE_CURRENT_SOURCE_DIR}/tools/bench
       ${boost_sml_SOURCE_DIR}/include
       ${DOCTEST_INCLUDE_DIR}
   )
 
+  target_compile_definitions(emel_tests_bin
+    PRIVATE
+      EMEL_TEST_REPO_ROOT=\"${CMAKE_CURRENT_SOURCE_DIR}\"
+  )
+
+  set(EMEL_TEST_EXTRA_ARG "" CACHE STRING "Optional extra doctest argument for test shards")
+
   function(emel_add_doctest_shard shard_name shard_filter)
     add_test(
       NAME emel_tests_${shard_name}
-      COMMAND emel_tests_bin --no-breaks --source-file=${shard_filter}
+      COMMAND emel_tests_bin --no-breaks --source-file=${shard_filter} ${EMEL_TEST_EXTRA_ARG}
     )
   endfunction()
 
@@ -217,12 +288,32 @@ if(EMEL_ENABLE_TESTS)
     "*tests/generator/*,*tests/embeddings/*,*tests/logits/*,*tests/token/*"
   )
   emel_add_doctest_shard(
+    diarization
+    "*tests/diarization/*"
+  )
+  emel_add_doctest_shard(
     sm
     "*tests/sm/*"
   )
   emel_add_doctest_shard(
     text
     "*tests/text/*"
+  )
+  emel_add_doctest_shard(
+    text_encoder_plamo2
+    "*tests/text/encoders/plamo2_tests.cpp"
+  )
+  emel_add_doctest_shard(
+    text_encoders
+    "*tests/text/encoders/*"
+  )
+  emel_add_doctest_shard(
+    text_tokenizer
+    "*tests/text/tokenizer/*"
+  )
+  emel_add_doctest_shard(
+    text_runtime
+    "*tests/text/conditioner/*,*tests/text/detokenizer/*,*tests/text/formatter/*,*tests/text/jinja/*,*tests/text/renderer/*,*tests/text/unicode/*"
   )
   emel_add_doctest_shard(
     kernel_and_graph

@@ -116,6 +116,9 @@ configure_bench_build() {
   cmake_args=(-S "$TOOLS_DIR" -B "$build_dir" -G Ninja -DCMAKE_BUILD_TYPE=Release
               -DEMEL_ENABLE_TESTS=OFF
               -DREF_IMPL_REF="$ref_value")
+  if [[ -n "$SUITE_FILTER" ]]; then
+    cmake_args+=("-DEMEL_BENCH_SUITE_FILTER=$SUITE_FILTER")
+  fi
   cmake_args+=("-DCMAKE_C_COMPILER=$bench_cc")
   cmake_args+=("-DCMAKE_CXX_COMPILER=$bench_cxx")
   cmake_args+=("-DCMAKE_ASM_COMPILER=$bench_cc")
@@ -160,12 +163,21 @@ if $COMBINED; then
   current_snapshot="$(mktemp)"
   trap 'rm -f "$compare_output" "$current_snapshot"' EXIT
   awk '
+    /^#/ {
+      skip_next = ($0 ~ /proof_status=measurement_only/);
+      next;
+    }
     /^[^#]/ {
+      if (skip_next) {
+        skip_next = 0;
+        next;
+      }
       name = $1;
       emel = $3;
       if (name != "" && emel != "") {
         printf("%s ns_per_op=%s\n", name, emel);
       }
+      skip_next = 0;
     }
   ' "$compare_output" > "$current_snapshot"
 
@@ -225,7 +237,7 @@ if $COMBINED; then
       exit 1
     fi
 
-    awk -v tol="$TOLERANCE" '
+    awk -v tol="$TOLERANCE" -v scoped="$([[ -n "$SUITE_FILTER" ]] && echo 1 || echo 0)" '
     function parse_base(line,    n, fields, name, ns, i, pair) {
       n = split(line, fields, " ");
       name = fields[1];
@@ -257,31 +269,55 @@ if $COMBINED; then
       curr[name] = ns;
     }
     FNR == NR {
+      if ($0 ~ /^#/) {
+        skip_base = ($0 ~ /proof_status=measurement_only/);
+        next;
+      }
+      if (skip_base) {
+        skip_base = 0;
+        next;
+      }
       parse_base($0);
       next;
     }
     {
+      if ($0 ~ /^#/) {
+        skip_curr = ($0 ~ /proof_status=measurement_only/);
+        next;
+      }
+      if (skip_curr) {
+        skip_curr = 0;
+        next;
+      }
       parse_curr($0);
       next;
     }
     END {
       fail = 0;
-      for (name in base) {
-        if (!(name in curr)) {
-          print "error: missing benchmark entry for " name > "/dev/stderr";
+      compared = 0;
+      for (name in curr) {
+        if (!(name in base)) {
+          print "error: new benchmark entry without baseline: " name > "/dev/stderr";
           fail = 1;
           continue;
         }
+        compared += 1;
         limit = base[name] * (1 + tol);
         if (curr[name] > limit) {
           printf("error: benchmark regression %s (%.3f > %.3f)\n", name, curr[name], limit) > "/dev/stderr";
           fail = 1;
         }
       }
-      for (name in curr) {
-        if (!(name in base)) {
-          print "error: new benchmark entry without baseline: " name > "/dev/stderr";
-          fail = 1;
+      if (scoped && compared == 0) {
+        print "error: no benchmark entries matched selected suite" > "/dev/stderr";
+        fail = 1;
+      }
+      if (!scoped) {
+        for (name in base) {
+          if (!(name in curr)) {
+            print "error: missing benchmark entry for " name > "/dev/stderr";
+            fail = 1;
+          }
         }
       }
       exit fail;
@@ -374,6 +410,9 @@ if $SNAPSHOT; then
   cmake_args=(-S "$TOOLS_DIR" -B "$build_dir" -G Ninja -DCMAKE_BUILD_TYPE=Release
               -DEMEL_ENABLE_TESTS=OFF
               -DREF_IMPL_REF="$ref_value")
+  if [[ -n "$SUITE_FILTER" ]]; then
+    cmake_args+=("-DEMEL_BENCH_SUITE_FILTER=$SUITE_FILTER")
+  fi
   cmake_args+=("-DCMAKE_C_COMPILER=$bench_cc")
   cmake_args+=("-DCMAKE_CXX_COMPILER=$bench_cxx")
   cmake_args+=("-DCMAKE_ASM_COMPILER=$bench_cc")
@@ -418,7 +457,7 @@ if $SNAPSHOT; then
       exit 1
     fi
 
-    awk -v tol="$TOLERANCE" '
+    awk -v tol="$TOLERANCE" -v scoped="$([[ -n "$SUITE_FILTER" ]] && echo 1 || echo 0)" '
     function parse_base(line,    n, fields, name, ns, i, pair) {
       n = split(line, fields, " ");
       name = fields[1];
@@ -450,31 +489,55 @@ if $SNAPSHOT; then
       curr[name] = ns;
     }
     FNR == NR {
+      if ($0 ~ /^#/) {
+        skip_base = ($0 ~ /proof_status=measurement_only/);
+        next;
+      }
+      if (skip_base) {
+        skip_base = 0;
+        next;
+      }
       parse_base($0);
       next;
     }
     {
+      if ($0 ~ /^#/) {
+        skip_curr = ($0 ~ /proof_status=measurement_only/);
+        next;
+      }
+      if (skip_curr) {
+        skip_curr = 0;
+        next;
+      }
       parse_curr($0);
       next;
     }
     END {
       fail = 0;
-      for (name in base) {
-        if (!(name in curr)) {
-          print "error: missing benchmark entry for " name > "/dev/stderr";
+      compared = 0;
+      for (name in curr) {
+        if (!(name in base)) {
+          print "error: new benchmark entry without baseline: " name > "/dev/stderr";
           fail = 1;
           continue;
         }
+        compared += 1;
         limit = base[name] * (1 + tol);
         if (curr[name] > limit) {
           printf("error: benchmark regression %s (%.3f > %.3f)\n", name, curr[name], limit) > "/dev/stderr";
           fail = 1;
         }
       }
-      for (name in curr) {
-        if (!(name in base)) {
-          print "error: new benchmark entry without baseline: " name > "/dev/stderr";
-          fail = 1;
+      if (scoped && compared == 0) {
+        print "error: no benchmark entries matched selected suite" > "/dev/stderr";
+        fail = 1;
+      }
+      if (!scoped) {
+        for (name in base) {
+          if (!(name in curr)) {
+            print "error: missing benchmark entry for " name > "/dev/stderr";
+            fail = 1;
+          }
         }
       }
       exit fail;
@@ -516,6 +579,9 @@ if $COMPARE; then
   cmake_args=(-S "$TOOLS_DIR" -B "$compare_build_dir" -G Ninja -DCMAKE_BUILD_TYPE=Release
               -DEMEL_ENABLE_TESTS=OFF
               -DREF_IMPL_REF="$ref_value")
+  if [[ -n "$SUITE_FILTER" ]]; then
+    cmake_args+=("-DEMEL_BENCH_SUITE_FILTER=$SUITE_FILTER")
+  fi
   cmake_args+=("-DCMAKE_C_COMPILER=$bench_cc")
   cmake_args+=("-DCMAKE_CXX_COMPILER=$bench_cxx")
   cmake_args+=("-DCMAKE_ASM_COMPILER=$bench_cc")

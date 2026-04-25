@@ -13,6 +13,7 @@
 
 #include "bench_cases.hpp"
 #include "bench_common.hpp"
+#include "diarization_compare_contract.hpp"
 #include "generation_compare_contract.hpp"
 
 namespace emel::bench {
@@ -97,6 +98,13 @@ constexpr std::string_view k_bench_llama_artifact_path =
   "";
 #endif
 
+constexpr std::string_view k_bench_compiled_suite =
+#ifdef EMEL_BENCH_COMPILED_SUITE
+  EMEL_BENCH_COMPILED_SUITE;
+#else
+  "";
+#endif
+
 struct artifact_size {
   std::string target = {};
   std::uintmax_t bytes = 0u;
@@ -151,6 +159,10 @@ bool is_generation_case_name(const std::string & name) {
   return name.rfind("generation/preloaded_request/", 0u) == 0u;
 }
 
+bool is_diarization_sortformer_case_name(const std::string & name) {
+  return name.rfind("diarization/sortformer/", 0u) == 0u;
+}
+
 bool case_supported_on_host(const bench::test_case & tc) {
   if (tc.append_emel == bench::append_emel_kernel_x86_64_cases ||
       tc.append_reference == bench::append_reference_kernel_x86_64_cases) {
@@ -200,6 +212,32 @@ std::int32_t read_env_i32(const char * name, const std::int32_t fallback) {
   return static_cast<std::int32_t>(parsed);
 }
 
+void enforce_compiled_suite_filter() {
+  if (k_bench_compiled_suite.empty()) {
+    return;
+  }
+
+  const char * selected_suite = std::getenv("EMEL_BENCH_SUITE");
+  if (selected_suite == nullptr || selected_suite[0] == '\0') {
+    std::fprintf(stderr,
+                 "error: this bench_runner was compiled for suite '%.*s'; set "
+                 "EMEL_BENCH_SUITE to the same value\n",
+                 static_cast<int>(k_bench_compiled_suite.size()),
+                 k_bench_compiled_suite.data());
+    std::exit(1);
+  }
+
+  if (std::string_view{selected_suite} != k_bench_compiled_suite) {
+    std::fprintf(stderr,
+                 "error: this bench_runner was compiled for suite '%.*s' but "
+                 "EMEL_BENCH_SUITE='%s'\n",
+                 static_cast<int>(k_bench_compiled_suite.size()),
+                 k_bench_compiled_suite.data(),
+                 selected_suite);
+    std::exit(1);
+  }
+}
+
 constexpr bench::test_case make_test_case(const bench::append_case_fn emel_fn,
                                           const bench::append_case_fn reference_fn,
                                           const std::string_view suite,
@@ -213,7 +251,7 @@ constexpr bench::test_case make_test_case(const bench::append_case_fn emel_fn,
 }
 
 const auto & default_test_cases() {
-  static const std::array<bench::test_case, 27> cases = {{
+  static const std::array<bench::test_case, 28> cases = {{
     make_test_case(bench::append_emel_batch_planner_cases,
                    bench::append_reference_batch_planner_cases,
                    "batch_planner"),
@@ -238,6 +276,9 @@ const auto & default_test_cases() {
     make_test_case(bench::append_emel_generation_cases,
                    bench::append_reference_generation_cases,
                    "generation"),
+    make_test_case(bench::append_emel_sortformer_diarization_cases,
+                   bench::append_reference_sortformer_diarization_cases,
+                   "diarization_sortformer"),
     make_test_case(bench::append_emel_flash_attention_cases,
                    bench::append_reference_flash_attention_cases,
                    "flash_attention"),
@@ -402,6 +443,19 @@ void print_snapshot(const std::vector<bench::result> & results, const bench::con
 
   print_benchmark_config(cfg);
   for (const auto & entry : sorted) {
+    if (is_diarization_sortformer_case_name(entry.name)) {
+      std::printf("# diarization_sortformer: lane=%s case=%s model_id=%s fixture_id=%s "
+                  "workload_id=%s output_dim=%" PRIu64 " output_checksum=%" PRIu64
+                  " %s\n",
+                  entry.lane.c_str(),
+                  entry.name.c_str(),
+                  entry.model_id.c_str(),
+                  entry.fixture_id.c_str(),
+                  entry.workload_id.c_str(),
+                  entry.output_dim,
+                  entry.output_checksum,
+                  entry.note.c_str());
+    }
     std::printf("%s ns_per_op=%.3f iter=%" PRIu64 " runs=%zu\n",
                 entry.name.c_str(),
                 entry.ns_per_op,
@@ -444,6 +498,9 @@ void print_generation_jsonl(const std::vector<bench::result> & results) {
     record.comparable = entry.comparable;
     record.max_output_tokens = entry.max_output_tokens;
     record.ns_per_op = entry.ns_per_op;
+    record.ns_min_per_op = entry.ns_min_per_op;
+    record.ns_mean_per_op = entry.ns_mean_per_op;
+    record.ns_max_per_op = entry.ns_max_per_op;
     record.prepare_ns_per_op = entry.prepare_ns_per_op;
     record.encode_ns_per_op = entry.encode_ns_per_op;
     record.publish_ns_per_op = entry.publish_ns_per_op;
@@ -463,6 +520,56 @@ void print_generation_jsonl(const std::vector<bench::result> & results) {
 
   if (!emitted) {
     std::fprintf(stderr, "error: generation compare jsonl mode emitted no generation records\n");
+    std::exit(1);
+  }
+}
+
+void print_diarization_jsonl(const std::vector<bench::result> & results) {
+  std::vector<bench::result> sorted = results;
+  std::sort(sorted.begin(), sorted.end(), [](const bench::result & a, const bench::result & b) {
+    return a.name < b.name;
+  });
+
+  bool emitted = false;
+  for (const auto & entry : sorted) {
+    if (!is_diarization_sortformer_case_name(entry.name)) {
+      continue;
+    }
+
+    bench::diarization_compare_record record{};
+    record.case_name = entry.name;
+    record.compare_group = entry.compare_group.empty() ? entry.name : entry.compare_group;
+    record.lane = entry.lane;
+    record.backend_id = entry.backend_id;
+    record.backend_language = entry.backend_language;
+    record.comparison_mode = entry.comparison_mode;
+    record.model_id = entry.model_id;
+    record.fixture_id = entry.fixture_id;
+    record.workload_id = entry.workload_id;
+    record.comparable = entry.comparable;
+    record.ns_per_op = entry.ns_per_op;
+    record.ns_min_per_op = entry.ns_min_per_op;
+    record.ns_mean_per_op = entry.ns_mean_per_op;
+    record.ns_max_per_op = entry.ns_max_per_op;
+    record.prepare_ns_per_op = entry.prepare_ns_per_op;
+    record.encode_ns_per_op = entry.encode_ns_per_op;
+    record.publish_ns_per_op = entry.publish_ns_per_op;
+    record.output_bytes = static_cast<std::uint64_t>(entry.output_text.size());
+    record.output_dim = entry.output_dim;
+    record.output_checksum = entry.output_checksum;
+    record.iterations = entry.iterations;
+    record.runs = entry.runs;
+    record.output_text = entry.output_text;
+    record.note = entry.note;
+    record.error_kind = entry.error_kind;
+    record.error_message = entry.error_message;
+    bench::maybe_dump_diarization_output(record);
+    bench::print_diarization_compare_record_jsonl(record);
+    emitted = true;
+  }
+
+  if (!emitted) {
+    std::fprintf(stderr, "error: diarization compare jsonl mode emitted no diarization records\n");
     std::exit(1);
   }
 }
@@ -855,6 +962,37 @@ void print_compare(const std::vector<bench::result> & emel_results,
                    emel_entry.name.c_str(), ref_entry.name.c_str());
       std::exit(1);
     }
+    if (is_diarization_sortformer_case_name(emel_entry.name)) {
+      std::printf("# diarization_sortformer: lane=%s case=%s model_id=%s fixture_id=%s "
+                  "workload_id=%s output_dim=%" PRIu64 " output_checksum=%" PRIu64
+                  " %s\n",
+                  emel_entry.lane.c_str(),
+                  emel_entry.name.c_str(),
+                  emel_entry.model_id.c_str(),
+                  emel_entry.fixture_id.c_str(),
+                  emel_entry.workload_id.c_str(),
+                  emel_entry.output_dim,
+                  emel_entry.output_checksum,
+                  emel_entry.note.c_str());
+      std::printf("# diarization_sortformer: lane=%s case=%s model_id=%s fixture_id=%s "
+                  "workload_id=%s output_dim=%" PRIu64 " output_checksum=%" PRIu64
+                  " %s\n",
+                  ref_entry.lane.c_str(),
+                  ref_entry.name.c_str(),
+                  ref_entry.model_id.c_str(),
+                  ref_entry.fixture_id.c_str(),
+                  ref_entry.workload_id.c_str(),
+                  ref_entry.output_dim,
+                  ref_entry.output_checksum,
+                  ref_entry.note.c_str());
+      std::printf("%s emel.cpp %.3f ns/op, reference-baseline %.3f ns/op, "
+                  "proof_status=%s\n",
+                  emel_entry.name.c_str(),
+                  emel_entry.ns_per_op,
+                  ref_entry.ns_per_op,
+                  emel_entry.comparable ? "baseline_matched" : "measurement_only");
+      continue;
+    }
     const double ratio = emel_entry.ns_per_op / ref_entry.ns_per_op;
     std::printf("%s emel.cpp %.3f ns/op, llama.cpp %.3f ns/op, ratio=%.3fx\n",
                 emel_entry.name.c_str(),
@@ -901,6 +1039,8 @@ mode parse_mode(int argc, char ** argv) {
 }  // namespace
 
 int main(int argc, char ** argv) {
+  enforce_compiled_suite_filter();
+
   bench::config cfg;
   cfg.iterations = read_env_u64("EMEL_BENCH_ITERS", k_default_iterations);
   cfg.runs = read_env_size("EMEL_BENCH_RUNS", k_default_runs);
@@ -911,6 +1051,12 @@ int main(int argc, char ** argv) {
 
   const mode run_mode = parse_mode(argc, argv);
   const bool generation_jsonl = bench::generation_compare_emit_jsonl();
+  const bool diarization_jsonl = bench::diarization_compare_emit_jsonl();
+  if (generation_jsonl && diarization_jsonl) {
+    std::fprintf(stderr,
+                 "error: generation and diarization jsonl modes cannot be enabled together\n");
+    return 1;
+  }
 
   if (run_mode == mode::k_kernel_emel) {
     const auto results = run_benchmarks(cfg, kernel_test_cases(), false, false);
@@ -936,6 +1082,8 @@ int main(int argc, char ** argv) {
     const auto results = run_benchmarks(cfg, default_test_cases(), false, true);
     if (generation_jsonl) {
       print_generation_jsonl(results);
+    } else if (diarization_jsonl) {
+      print_diarization_jsonl(results);
     } else {
       print_snapshot(results, cfg);
     }
@@ -947,6 +1095,8 @@ int main(int argc, char ** argv) {
     const auto results = run_benchmarks(cfg, default_test_cases(), true, true);
     if (generation_jsonl) {
       print_generation_jsonl(results);
+    } else if (diarization_jsonl) {
+      print_diarization_jsonl(results);
     } else {
       print_snapshot(results, cfg);
     }

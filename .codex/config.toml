@@ -127,9 +127,3 @@ config_file = "/Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/.codex/age
 [agents.gsd-verifier]
 description = "Verifies phase goal achievement through goal-backward analysis. Checks codebase delivers what phase promised, not just that tasks completed. Creates VERIFICATION.md report."
 config_file = "/Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/.codex/agents/gsd-verifier.toml"
-
-
-# GSD Hooks
-[[hooks]]
-event = "SessionStart"
-command = "node /Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/.codex/hooks/gsd-check-update.js"

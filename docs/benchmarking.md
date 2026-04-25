@@ -219,6 +219,97 @@ in JSONL mode, each `generation_compare/v1` record also includes:
 single-lane workloads are marked with `comparison_mode="single_lane"` and a comparability note
 instead of being presented as parity rows.
 
+## operator-facing diarization compare workflow
+
+for reproducible diarization compare artifacts instead of the ad hoc benchmark text row, use:
+
+```bash
+scripts/bench_diarization_compare.sh
+```
+
+the wrapper publishes:
+
+- `raw/emel.jsonl`
+- `raw/reference.jsonl`
+- `raw/onnx_reference.jsonl` when `--onnx-reference-model` is supplied
+- `compare_summary.json`
+- dumped EMEL segment outputs under `outputs/emel/` when the maintained lane emits segment text
+- dumped ONNX segment outputs under `outputs/onnx_reference/` when the ONNX lane runs
+
+the diarization compare surface uses `diarization_compare/v1` records and
+`diarization_compare_summary/v1` summaries. the maintained compare group is currently:
+
+- `diarization/sortformer/ami_en2002b_mix_headset_137.00_152.04_16khz_mono`
+
+the EMEL lane is the real maintained GGUF plus real maintained audio path. the default
+`recorded.diarization.baseline` lane is a self-recorded regression snapshot for that exact fixture;
+it is not an independent correctness oracle and must not be used to close parity claims. review
+`compare_summary.json` first and treat the human-readable stdout summary as a derived convenience
+view.
+
+to add the ONNX Sortformer benchmark reference lane, supply the model explicitly:
+
+```bash
+scripts/bench_diarization_compare.sh \
+  --onnx-reference-model build/onnx_ref/diar_streaming_sortformer_4spk-v2.1.onnx
+```
+
+the ONNX lane uses backend id `onnx.sortformer.v2_1` and runs through ONNX Runtime CPU with
+`intra_op_num_threads=1`, `inter_op_num_threads=1`, and `ORT_SEQUENTIAL`. generated records include
+`actual_providers=...` from `session.get_providers()`; closeout evidence must show
+`actual_providers=CPUExecutionProvider`. the model contract for this lane is the inspected
+`ooobo/diar_streaming_sortformer_4spk-v2.1-onnx`
+`diar_streaming_sortformer_4spk-v2.1.onnx` artifact at the expected local path above with SHA-256
+`5df5e883c8dae4e0ecba77739f3db38997c2ae57153de2583d625afb6abb2be0`. the wrapper exports the
+maintained EMEL feature tensor from the same fixture into `raw/onnx_features.f32` unless
+`--onnx-reference-features` is provided. missing ONNX Runtime, missing model files, checksum
+mismatches, and missing feature inputs are emitted as explicit `reference` error records and make
+the summary fail; the driver never substitutes the self-recorded snapshot for ONNX.
+
+for Sortformer correctness, the PyTorch/NeMo lane is the parity reference because it runs the
+official model-card execution path:
+
+```bash
+scripts/setup_diarization_pytorch_ref_env.sh
+
+scripts/bench_diarization_compare.sh \
+  --pytorch-reference-model nvidia/diar_streaming_sortformer_4spk-v2.1
+```
+
+the PyTorch lane uses backend id `pytorch.nemo.sortformer.v2_1` and runs the documented
+`SortformerEncLabelModel.diarize(..., include_tensor_outputs=True)` path on the maintained WAV
+fixture. timing excludes one-time model load and measures only the `diarize(...)` call. ONNX is the
+benchmark reference lane; before ONNX is used as a closeout target, its output must be checked
+against the PyTorch parity lane. exact matches against `recorded.diarization.baseline` prove only
+local regression stability.
+
+for one-command local setup and execution, pass `--setup-pytorch-reference-env`; this recreates the
+`uv` environment from `tools/bench/diarization_pytorch_reference_requirements.txt` under
+`build/diarization_pytorch_ref_venv` before running the compare.
+
+the strict closeout command that exercises EMEL, ONNX, and PyTorch/NeMo together is:
+
+```bash
+EMEL_DIARIZATION_COMPARE_RUNS=15 \
+EMEL_DIARIZATION_COMPARE_WARMUP_RUNS=3 \
+scripts/bench_diarization_compare.sh \
+  --setup-pytorch-reference-env \
+  --onnx-reference-model build/onnx_ref/diar_streaming_sortformer_4spk-v2.1.onnx \
+  --pytorch-reference-model nvidia/diar_streaming_sortformer_4spk-v2.1
+```
+
+drift against `reference_role=parity_reference` is a hard compare failure. ONNX keeps
+`reference_role=benchmark_reference`, so it remains a speed/bench comparator that must match
+PyTorch before its output is treated as a correctness target.
+
+the current deterministic exact-match criteria are:
+
+- matching `output_checksum`
+- matching `output_dim`
+
+when those diverge, the summary reports `bounded_drift` rather than silently folding the result
+into prose. missing or explicit error records are hard failures in the summary.
+
 ## generation-specific local overrides
 
 the canonical generation case has its own bounded local validation knobs:

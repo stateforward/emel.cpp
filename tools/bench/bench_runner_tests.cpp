@@ -162,6 +162,75 @@ process_capture run_generation_bench_capture(const std::string & mode,
   return capture;
 }
 
+process_capture run_diarization_bench_capture(const std::string & mode,
+                                              const bool emit_jsonl = false) {
+  const std::filesystem::path tmp_dir =
+      std::filesystem::temp_directory_path() / "emel-bench-runner-tests" /
+      (emit_jsonl ? ("diarization-jsonl-" + mode) : ("diarization-text-" + mode));
+  std::filesystem::create_directories(tmp_dir);
+  const std::filesystem::path stdout_path = tmp_dir / "stdout.txt";
+  const std::filesystem::path stderr_path = tmp_dir / "stderr.txt";
+  const std::filesystem::path output_dir = tmp_dir / "outputs";
+
+  std::string command;
+#if defined(_WIN32)
+  command = "set EMEL_BENCH_SUITE=diarization_sortformer && ";
+  command += "set EMEL_BENCH_ITERS=1 && ";
+  command += "set EMEL_BENCH_RUNS=1 && ";
+  command += "set EMEL_BENCH_WARMUP_ITERS=0 && ";
+  command += "set EMEL_BENCH_WARMUP_RUNS=0 && ";
+  if (emit_jsonl) {
+    command += "set EMEL_DIARIZATION_BENCH_FORMAT=jsonl && ";
+    command += "set \"EMEL_DIARIZATION_RESULT_DIR=";
+    command += output_dir.string();
+    command += "\" && ";
+  }
+  command += quote_arg_windows(bench_runner_binary_path().string());
+  command += " --mode=" + mode + " > ";
+  command += quote_arg_windows(stdout_path.string());
+  command += " 2> ";
+  command += quote_arg_windows(stderr_path.string());
+#else
+  command = "ulimit -s 8192; ";
+  command += "EMEL_BENCH_SUITE=diarization_sortformer ";
+  command += "EMEL_BENCH_ITERS=1 ";
+  command += "EMEL_BENCH_RUNS=1 ";
+  command += "EMEL_BENCH_WARMUP_ITERS=0 ";
+  command += "EMEL_BENCH_WARMUP_RUNS=0 ";
+  if (emit_jsonl) {
+    command += "EMEL_DIARIZATION_BENCH_FORMAT=jsonl ";
+    command += "EMEL_DIARIZATION_RESULT_DIR=" + quote_arg_posix(output_dir.string()) + " ";
+  }
+  command += quote_arg_posix(bench_runner_binary_path().string());
+  command += " --mode=" + mode + " > ";
+  command += quote_arg_posix(stdout_path.string());
+  command += " 2> ";
+  command += quote_arg_posix(stderr_path.string());
+#endif
+
+  const int status = std::system(command.c_str());
+  process_capture capture{};
+  capture.stdout_text = read_file(stdout_path);
+  capture.stderr_text = read_file(stderr_path);
+
+  std::error_code ec;
+  std::filesystem::remove(stdout_path, ec);
+  std::filesystem::remove(stderr_path, ec);
+
+  if (status == -1) {
+    return capture;
+  }
+#if defined(_WIN32)
+  capture.exit_code = status;
+#else
+  if (!WIFEXITED(status)) {
+    return capture;
+  }
+  capture.exit_code = WEXITSTATUS(status);
+#endif
+  return capture;
+}
+
 process_capture run_generation_bench_compare_capture() {
   return run_generation_bench_capture("compare", false);
 }
@@ -296,6 +365,43 @@ TEST_CASE("bench_runner generation jsonl emits manifest-driven workload metadata
         std::string::npos);
   CHECK(reference_capture.stdout_text.find("\"formatter_contract\":\"") != std::string::npos);
   CHECK(reference_capture.stdout_text.find("\"output_path\":\"") != std::string::npos);
+  CHECK(reference_capture.stdout_text.find("ns/op,") == std::string::npos);
+}
+
+TEST_CASE("bench_runner diarization jsonl emits structured maintained parity metadata") {
+  const process_capture emel_capture = run_diarization_bench_capture("emel", true);
+  CHECK(emel_capture.exit_code == 0);
+  CHECK(emel_capture.stderr_text.find("error:") == std::string::npos);
+  CHECK(emel_capture.stdout_text.find("\"schema\":\"diarization_compare/v1\"") !=
+        std::string::npos);
+  CHECK(emel_capture.stdout_text.find("\"lane\":\"emel\"") != std::string::npos);
+  CHECK(emel_capture.stdout_text.find("\"lane\":\"reference\"") == std::string::npos);
+  CHECK(emel_capture.stdout_text.find("\"backend_id\":\"emel.diarization.sortformer\"") !=
+        std::string::npos);
+  CHECK(emel_capture.stdout_text.find("\"comparison_mode\":\"parity\"") != std::string::npos);
+  CHECK(emel_capture.stdout_text.find("\"model_id\":\"diar_streaming_sortformer_4spk_v2_1_gguf\"") !=
+        std::string::npos);
+  CHECK(emel_capture.stdout_text.find(
+            "\"fixture_id\":\"ami_en2002b_mix_headset_137.00_152.04_16khz_mono\"") !=
+        std::string::npos);
+  CHECK(emel_capture.stdout_text.find(
+            "\"workload_id\":\"diarization_sortformer_pipeline_v1\"") != std::string::npos);
+  CHECK(emel_capture.stdout_text.find("\"comparable\":true") != std::string::npos);
+  CHECK(emel_capture.stdout_text.find("\"output_path\":\"") != std::string::npos);
+  CHECK(emel_capture.stdout_text.find("ns/op,") == std::string::npos);
+
+  const process_capture reference_capture = run_diarization_bench_capture("reference", true);
+  CHECK(reference_capture.exit_code == 0);
+  CHECK(reference_capture.stderr_text.find("error:") == std::string::npos);
+  CHECK(reference_capture.stdout_text.find("\"schema\":\"diarization_compare/v1\"") !=
+        std::string::npos);
+  CHECK(reference_capture.stdout_text.find("\"lane\":\"reference\"") != std::string::npos);
+  CHECK(reference_capture.stdout_text.find("\"lane\":\"emel\"") == std::string::npos);
+  CHECK(reference_capture.stdout_text.find("\"backend_id\":\"recorded.diarization.baseline\"") !=
+        std::string::npos);
+  CHECK(reference_capture.stdout_text.find("\"comparison_mode\":\"parity\"") !=
+        std::string::npos);
+  CHECK(reference_capture.stdout_text.find("\"comparable\":true") != std::string::npos);
   CHECK(reference_capture.stdout_text.find("ns/op,") == std::string::npos);
 }
 

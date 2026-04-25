@@ -58,6 +58,26 @@ Canonical gate types used across GSD workflows. Every validation checkpoint maps
 
 ---
 
+## emel.cpp Quality Gate Scope
+
+For `emel.cpp`, `scripts/quality_gates.sh` is the required implementation gate. It is scoped by
+default so phase iteration validates the files and benchmark domain actually changed instead of
+rerunning unrelated dirty-tree lanes.
+
+- Use the default changed-file scope for normal phase iteration.
+- In dirty worktrees, pass `EMEL_QUALITY_GATES_CHANGED_FILES` with only the files changed by the
+  current plan or fix.
+- When the benchmark domain is known, pass `EMEL_QUALITY_GATES_BENCH_SUITE` such as
+  `diarization_sortformer` so deterministic benchmark generation uses the relevant suite.
+- Use `EMEL_QUALITY_GATES_SCOPE=full scripts/quality_gates.sh` for milestone closeout, release
+  readiness, or cross-domain source changes.
+- Never disable a relevant lane to save time. Skips are valid only when the changed-file scope proves
+  the lane is unrelated.
+- Benchmark snapshot failures are hard failures by default. `EMEL_QUALITY_GATES_ALLOW_BENCH_REGRESSION=1`
+  is only for explicitly documented transitional runs and must not be used for milestone closeout.
+
+---
+
 ## Implementing Gates
 
 Use this taxonomy when designing or auditing workflow validation points:

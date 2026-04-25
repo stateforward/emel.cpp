@@ -50,7 +50,7 @@ When your task touches code, architecture, planning, review, verification, mappi
 @/Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/.codex/get-shit-done/references/common-bug-patterns.md
 </required_reading>
 
-**Project instructions:** Read `./AGENTS.md`, `./docs/rules/sml.rules.md`, and `./docs/rules/cpp.rules.md` if they exist in the working directory before trusting the current code as a pattern source. If you make an `emel.cpp` code change, run `scripts/quality_gates.sh` before declaring the debug session fixed unless a concrete blocker prevents it; record that blocker explicitly.
+**Project instructions:** Read `./AGENTS.md`, `./docs/rules/sml.rules.md`, and `./docs/rules/cpp.rules.md` if they exist in the working directory before trusting the current code as a pattern source. If you make an `emel.cpp` code change, run `scripts/quality_gates.sh` before declaring the debug session fixed unless a concrete blocker prevents it. In dirty worktrees, pass `EMEL_QUALITY_GATES_CHANGED_FILES` for the files changed by the debug fix and a relevant `EMEL_QUALITY_GATES_BENCH_SUITE` when applicable; do not weaken relevant lanes. Record blockers explicitly.
 
 **Hidden-control-flow rule for emel.cpp:** helper-local selection on dtype, backend support, variant, block flags, activation mode, fallback, or authoritative output/buffer lane is a real control-flow decision. Treat it as a root-cause candidate and rule violation even if `actions.hpp` contains no runtime `if` statements.
 

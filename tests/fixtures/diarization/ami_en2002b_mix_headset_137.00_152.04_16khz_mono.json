@@ -1,0 +1,71 @@
+{
+  "source_dataset": "diarizers-community/ami",
+  "source_subset": "ihm",
+  "source_split": "test",
+  "source_audio_path": "EN2002b.Mix-Headset.wav",
+  "license": "CC BY 4.0",
+  "clip_start_seconds": 137.0,
+  "clip_end_seconds": 152.04,
+  "duration_seconds": 15.04,
+  "sample_rate_hz": 16000,
+  "channels": 1,
+  "sample_width_bytes": 2,
+  "segments": [
+    {
+      "speaker": "MEE071",
+      "start_seconds": 0.43,
+      "end_seconds": 2.46,
+      "source_start_seconds": 137.43,
+      "source_end_seconds": 139.46
+    },
+    {
+      "speaker": "MEE073",
+      "start_seconds": 0.72,
+      "end_seconds": 2.68,
+      "source_start_seconds": 137.72,
+      "source_end_seconds": 139.68
+    },
+    {
+      "speaker": "FEO072",
+      "start_seconds": 2.26,
+      "end_seconds": 5.94,
+      "source_start_seconds": 139.26,
+      "source_end_seconds": 142.94
+    },
+    {
+      "speaker": "MEE073",
+      "start_seconds": 4.11,
+      "end_seconds": 5.63,
+      "source_start_seconds": 141.11,
+      "source_end_seconds": 142.63
+    },
+    {
+      "speaker": "FEO070",
+      "start_seconds": 5.19,
+      "end_seconds": 6.12,
+      "source_start_seconds": 142.19,
+      "source_end_seconds": 143.12
+    },
+    {
+      "speaker": "FEO072",
+      "start_seconds": 7.37,
+      "end_seconds": 13.21,
+      "source_start_seconds": 144.37,
+      "source_end_seconds": 150.21
+    },
+    {
+      "speaker": "MEE073",
+      "start_seconds": 7.51,
+      "end_seconds": 7.85,
+      "source_start_seconds": 144.51,
+      "source_end_seconds": 144.85
+    },
+    {
+      "speaker": "MEE073",
+      "start_seconds": 12.11,
+      "end_seconds": 15.04,
+      "source_start_seconds": 149.11,
+      "source_end_seconds": 152.04
+    }
+  ]
+}

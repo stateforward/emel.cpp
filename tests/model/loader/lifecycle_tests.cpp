@@ -17,6 +17,7 @@
 #include "emel/model/omniembed/detail.hpp"
 #include "emel/model/loader/errors.hpp"
 #include "emel/model/loader/sm.hpp"
+#include "emel/model/sortformer/detail.hpp"
 
 namespace {
 
@@ -400,6 +401,29 @@ void build_omniembed_model(emel::model::data & model, const bool include_audio_p
   if (include_audio_projection) {
     add("audio_projection.project.weight");
   }
+
+  model.n_tensors = tensor_index;
+}
+
+void build_sortformer_model(emel::model::data & model, const bool include_modules_family) {
+  std::memset(&model, 0, sizeof(model));
+  copy_name(model.architecture_name, "sortformer");
+  model.params.n_features = 4;
+  model.weights_data = model.tensors.data();
+  model.weights_size = 4096u;
+
+  uint32_t tensor_index = 0u;
+  const auto add = [&](const std::string_view name) {
+    append_tensor_name(model, model.tensors[tensor_index], name);
+    ++tensor_index;
+  };
+
+  add("prep.feat.fb");
+  add("enc.l0.conv.dw.w");
+  if (include_modules_family) {
+    add("mods.ep.w");
+  }
+  add("te.l0.sa.q.w");
 
   model.n_tensors = tensor_index;
 }
@@ -1438,6 +1462,105 @@ TEST_CASE("model_omniembed_detail_ignores_unusable_family_tensor_storage") {
   REQUIRE(emel::model::omniembed::detail::build_execution_contract(*model, contract) ==
           emel::error::cast(emel::model::loader::error::none));
   CHECK(contract.text_encoder.tensor_count == 1u);
+}
+
+TEST_CASE("model_detail_loads_sortformer_hparams_from_gguf_binding") {
+  std::vector<uint8_t> arena = {};
+  std::vector<emel::gguf::loader::kv_entry> entries = {};
+  auto model = std::make_unique<emel::model::data>();
+
+  append_kv_string(arena, entries, "general.architecture", "sortformer");
+  append_kv_string(arena, entries, "sortformer.source.format", "nemo");
+  append_kv_string(arena, entries, "sortformer.tensor_name_scheme", "compact_v1");
+  append_kv_string(arena, entries, "sortformer.outtype", "f32");
+  append_kv_u32(arena, entries, "sortformer.original_tensor_count", 128u);
+  append_kv_u32(arena, entries, "sortformer.tensor_count", 132u);
+  append_kv_u32(arena, entries, "sortformer.skipped_tensor_count", 3u);
+  append_kv_u32(arena, entries, "sortformer.config.preprocessor.sample_rate", 16000u);
+  append_kv_u32(arena, entries, "sortformer.config.sortformer_modules.num_spks", 4u);
+  append_kv_u32(arena, entries, "sortformer.config.sortformer_modules.chunk_len", 188u);
+  append_kv_u32(arena, entries, "sortformer.config.sortformer_modules.chunk_right_context", 1u);
+  append_kv_u32(arena, entries, "sortformer.config.sortformer_modules.fifo_len", 0u);
+  append_kv_u32(
+      arena, entries, "sortformer.config.sortformer_modules.spkcache_update_period", 188u);
+  append_kv_u32(arena, entries, "sortformer.config.sortformer_modules.spkcache_len", 188u);
+
+  const emel::model::detail::kv_binding binding{
+      .arena = std::span<const uint8_t>{arena},
+      .entries = std::span<const emel::gguf::loader::kv_entry>{entries},
+  };
+
+  REQUIRE(emel::model::detail::load_hparams_from_gguf(binding, *model));
+  CHECK(emel::model::architecture_name_view(*model) == "sortformer");
+  CHECK(emel::model::is_supported_execution_architecture("sortformer"));
+  CHECK(emel::model::sortformer::detail::is_execution_architecture("sortformer"));
+  CHECK_FALSE(emel::model::is_omniembed_execution_architecture("sortformer"));
+  CHECK(model->params.n_features == 4);
+}
+
+TEST_CASE("model_detail_rejects_sortformer_hparams_with_wrong_source_contract") {
+  std::vector<uint8_t> arena = {};
+  std::vector<emel::gguf::loader::kv_entry> entries = {};
+  auto model = std::make_unique<emel::model::data>();
+
+  append_kv_string(arena, entries, "general.architecture", "sortformer");
+  append_kv_string(arena, entries, "sortformer.source.format", "onnx");
+  append_kv_string(arena, entries, "sortformer.tensor_name_scheme", "compact_v1");
+  append_kv_string(arena, entries, "sortformer.outtype", "f32");
+  append_kv_u32(arena, entries, "sortformer.original_tensor_count", 128u);
+  append_kv_u32(arena, entries, "sortformer.tensor_count", 132u);
+
+  const emel::model::detail::kv_binding binding{
+      .arena = std::span<const uint8_t>{arena},
+      .entries = std::span<const emel::gguf::loader::kv_entry>{entries},
+  };
+
+  CHECK_FALSE(emel::model::detail::load_hparams_from_gguf(binding, *model));
+}
+
+TEST_CASE("model_sortformer_detail_builds_execution_contract") {
+  auto model = std::make_unique<emel::model::data>();
+  build_sortformer_model(*model, true);
+
+  emel::model::sortformer::detail::execution_contract contract = {};
+  REQUIRE(emel::model::sortformer::detail::build_execution_contract(*model, contract) ==
+          emel::error::cast(emel::model::loader::error::none));
+  CHECK(contract.sample_rate == 16000);
+  CHECK(contract.speaker_count == 4);
+  CHECK(contract.frame_shift_ms == 80);
+  CHECK(contract.chunk_len == 188);
+  CHECK(contract.chunk_right_context == 1);
+  CHECK(contract.fifo_len == 0);
+  CHECK(contract.spkcache_update_period == 188);
+  CHECK(contract.spkcache_len == 188);
+  CHECK(contract.feature_extractor.first.name == "prep.feat.fb");
+  CHECK(contract.encoder.first.name == "enc.l0.conv.dw.w");
+  CHECK(contract.modules.first.name == "mods.ep.w");
+  CHECK(contract.transformer_encoder.first.name == "te.l0.sa.q.w");
+  CHECK(emel::model::sortformer::detail::validate_data(*model) ==
+        emel::error::cast(emel::model::loader::error::none));
+  CHECK(emel::model::validate_execution_contract(*model) ==
+        emel::error::cast(emel::model::loader::error::none));
+}
+
+TEST_CASE("model_sortformer_detail_rejects_missing_modules_family") {
+  auto model = std::make_unique<emel::model::data>();
+  build_sortformer_model(*model, false);
+
+  emel::model::sortformer::detail::execution_contract contract = {};
+  CHECK(emel::model::sortformer::detail::build_execution_contract(*model, contract) ==
+        emel::error::cast(emel::model::loader::error::model_invalid));
+  CHECK(emel::model::validate_execution_contract(*model) ==
+        emel::error::cast(emel::model::loader::error::model_invalid));
+}
+
+TEST_CASE("model_sortformer_detail_rejects_noncanonical_stream_contract") {
+  auto model = std::make_unique<emel::model::data>();
+  build_sortformer_model(*model, true);
+  model->params.n_features = 3;
+
+  CHECK(emel::model::sortformer::detail::validate_execution_contract(*model) ==
+        emel::error::cast(emel::model::loader::error::model_invalid));
 }
 
 TEST_CASE("model_execution_contract_accepts_canonical_gemma4_shared_kv_contract") {

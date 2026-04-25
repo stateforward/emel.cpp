@@ -5,10 +5,13 @@
 #include "emel/model/llama/detail.hpp"
 #include "emel/model/omniembed/detail.hpp"
 #include "emel/model/qwen3/detail.hpp"
+#include "emel/model/sortformer/detail.hpp"
 
 namespace emel::model {
 
-const std::array<architecture, 5> default_architectures = {{
+namespace {
+
+const std::array<architecture, 6> default_architectures = {{
     {
         .name = "llama",
         .load_hparams = &emel::model::llama::detail::load_hparams,
@@ -34,7 +37,14 @@ const std::array<architecture, 5> default_architectures = {{
         .load_hparams = &emel::model::omniembed::detail::load_hparams,
         .validate_data = &emel::model::omniembed::detail::validate_execution_contract,
     },
+    {
+        .name = "sortformer",
+        .load_hparams = &emel::model::sortformer::detail::load_hparams,
+        .validate_data = &emel::model::sortformer::detail::validate_execution_contract,
+    },
 }};
+
+}  // namespace
 
 architectures default_architecture_span() noexcept {
   return architectures{default_architectures.data(), default_architectures.size()};

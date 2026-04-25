@@ -69,6 +69,31 @@ If a phase is missing VERIFICATION.md, flag it as "unverified phase" — blocker
 If ROADMAP.md / STATE.md still show the phase incomplete, treat the phase as incomplete even if
 PLAN.md or VALIDATION.md exists.
 
+## 2.5. Source-Backed Maintained-Path Audit
+
+Milestone audit MUST NOT rely only on planning artifacts for requirements that claim maintained
+fixture truth, loader/model-contract truth, runtime truth, parity proof truth, benchmark truth, or
+publication/document truth about those lanes.
+
+For any milestone requirement or success criterion touching:
+- pinned fixture / maintained artifact identity
+- loader-built or architecture-built execution contracts
+- maintained runtime entrypoints
+- parity harness entrypoints
+- benchmark publication entrypoints
+- documentation claims about which maintained path is exercised
+
+the auditor MUST inspect live repo source/test/tool files and trace the actual codepath.
+
+Required checks:
+- Identify the maintained fixture or model contract builder exported by the owning `src/` code.
+- Identify the runtime/parity/benchmark/tool entrypoints that claim to consume that maintained path.
+- Verify the claimed maintained contract/fixture is actually what those entrypoints consume.
+- If a synthetic, fabricated, tool-only, or test-only contract/fixture still feeds the claimed
+  maintained lane, record a blocker even when SUMMARY/VERIFICATION/REQUIREMENTS all agree.
+
+This is a hard override on artifact agreement. Source-code contradiction wins.
+
 ## 3. Spawn Integration Checker
 
 With phase context collected:
@@ -97,6 +122,12 @@ MUST call out any contradiction where a phase is claimed validated or complete w
 SUMMARY.md / VERIFICATION.md / roadmap-state evidence.
 MUST call out any rule conflict against AGENTS.md, docs/rules/sml.rules.md, or docs/rules/cpp.rules.md
 that affects milestone readiness.
+MUST trace milestone-critical maintained-path claims through live source/test/tool entrypoints.
+For requirements involving fixture truth, loader/model-contract truth, runtime truth, parity proof,
+benchmark truth, or closeout-document truth, do not stop at planning artifacts. Verify the
+maintained fixture/contract exported by `src/` code is the one actually consumed downstream. If a
+synthetic or tool-only contract/fixture bypasses the maintained path, flag a blocker and map it to
+the affected REQ-IDs.
 
 Verify cross-phase wiring and E2E user flows.
 ${AGENT_SKILLS_CHECKER}",
@@ -149,6 +180,10 @@ For each REQ-ID, determine status using all three sources:
 | missing                | listed              | any             | **partial** (verification gap) |
 | missing                | missing             | any             | **unsatisfied** |
 
+Artifact agreement is necessary but not sufficient. If the source-backed maintained-path audit or
+integration checker finds live code wiring contradicting the artifact story, downgrade the final
+status to `partial` or `unsatisfied` based on the real codepath.
+
 ### 5e. FAIL Gate and Orphan Detection
 
 **REQUIRED:** Any `unsatisfied` requirement MUST force `gaps_found` status on the milestone audit.
@@ -186,6 +221,19 @@ Classify per phase:
 | MISSING | No VALIDATION.md |
 
 `INVALID` phases MUST force milestone status `gaps_found`.
+
+## 5.6. Source Contradiction Override
+
+If live source/test/tool inspection contradicts milestone-closeout artifacts:
+- treat the affected requirement as `unsatisfied` or `partial` even if REQUIREMENTS.md, SUMMARY.md,
+  and VERIFICATION.md say `passed`
+- add a blocker under `gaps.requirements`, `gaps.integration`, or `gaps.flows`
+- explicitly call out the contradiction in the markdown report
+
+Examples:
+- maintained benchmark claim still runs through a synthetic fixture contract
+- parity proof enters the right actor but bypasses the maintained loader-built contract
+- docs claim maintained runtime publication while tools still publish a scaffolded lane
 
 Add to audit YAML: `nyquist: { compliant_phases, partial_phases, invalid_phases, missing_phases, overall }`
 
