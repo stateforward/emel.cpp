@@ -32,16 +32,18 @@
 - [x] [v1.16: ARM Whisper GGUF Parity And Performance](.planning/milestones/v1.16-ROADMAP.md)
   - Initial archive created 2026-04-26, reopened the same day because bounded transcript drift was
     not acceptable for an E2E milestone, then reopened again on 2026-04-27 after a source-backed
-    audit rerun found artifact, benchmark-publication, and rule-readiness gap phases were still
-    required before archive.
+    audit rerun found artifact, benchmark-publication, runtime-surface, and evidence-ledger gaps;
+    the latest source-backed audit rerun found decode-policy, tokenizer-backed decoder transcript,
+    and preserved-baseline Nyquist gaps now planned in Phases 120-122.
 
 ## Current Milestone
 
 **v1.16: ARM Whisper GGUF Parity And Performance**
 
-Goal: Maintained Whisper tiny E2E path with no top-level Whisper runtime domain, speech-domain
-recognizer/tokenizer ownership, exact transcript parity against the pinned `whisper.cpp` lane, and
-a source-backed closeout audit.
+Goal: Maintained Whisper tiny E2E path with no top-level Whisper runtime domain,
+speech-domain encoder/decoder/tokenizer ownership, exact transcript parity against the pinned
+`whisper.cpp` lane, ARM single-thread performance where EMEL beats the matched `whisper.cpp`
+reference, and a source-backed closeout audit.
 
 ## Phases
 
@@ -80,28 +82,57 @@ a source-backed closeout audit.
   required to supply phase-local verification and validation artifacts.
 - [x] **Phase 107: Speech Tokenizer And Decode Policy Hardening** - Complete on 2026-04-27.
   Enforced the pinned
-  `tokenizer-tiny.json` contract before maintained dispatch, model Whisper ASR decode policy as an
-  explicit speech-domain contract, and removed dispatch-time recognizer allocation; Phase 111 now
-  owns the remaining SML rule-readiness gap.
+  `tokenizer-tiny.json` contract before maintained dispatch and model Whisper ASR decode policy as
+  an explicit speech-domain contract; Phase 115 later superseded stale recognizer-route evidence.
 - [x] **Phase 108: Pinned Whisper Artifact Parity Closeout** - Complete on 2026-04-27. Replaced
   the default bench-only normalized bridge with the user-approved Option B contract: source-owned
   legacy Whisper `lmgg` conversion in `src/emel/model/whisper`, exact transcript parity through
-  the maintained EMEL speech recognizer lane, and exact parity evidence; Phase 112 now owns the
-  final closeout rerun after audit blockers.
-- [ ] **Phase 109: Reopened Whisper Artifact Evidence Closure** - Planned gap closure. Backfill
-  phase-local verification and validation for the reopened artifact repair claims assigned to
-  Phase 106, and reconcile the audit ledger so REOPEN-01 and SPEECH-01 are source-backed by the
-  assigned closure phase.
-- [ ] **Phase 110: Maintained Whisper Benchmark Publication Repair** - Planned gap closure.
-  Connect the single-thread Whisper benchmark EMEL lane to the pinned Phase 99 source model path
-  through the source-owned conversion path and make benchmark publication fail on model or
-  transcript mismatches.
-- [ ] **Phase 111: Speech Recognizer SML Rule Readiness Repair** - Planned gap closure. Move
-  tokenizer readiness and Whisper execution-contract acceptance decisions out of detail-driven
-  action/guard helper outputs and into explicit SML guards/transitions.
-- [ ] **Phase 112: Reopened Whisper Closeout Rerun** - Planned gap closure. Rerun the full
-  closeout gate and source-backed milestone audit after Phases 109-111 close the artifact,
-  benchmark, and rule-readiness blockers.
+  the maintained EMEL speech encoder/decoder/tokenizer surface, and exact parity evidence;
+  Phase 116 supplied final closeout after later audit blockers.
+- [x] **Phase 109: Reopened Whisper Artifact Evidence Closure** - Complete on 2026-04-27.
+  Backfilled source-backed Phase 106 verification and validation artifacts and reconciled
+  REOPEN-01/SPEECH-01 evidence without falsely claiming tokenizer, parity, benchmark, or closeout
+  scope.
+- [x] **Phase 110: Maintained Whisper Benchmark Publication Repair** - Complete on 2026-04-27.
+  Connected the single-thread Whisper benchmark EMEL lane to the pinned Phase 99 source model path,
+  matched deterministic reference policy, and made benchmark publication fail on model, transcript,
+  iteration, warmup, or missing transcript contradictions.
+- [x] **Phase 111: Speech Recognizer SML Rule Readiness Repair** - Superseded on 2026-04-27.
+  Phase 115 corrected this as historical recognizer-route evidence; Phase 114 owns current
+  runtime-surface truth.
+- [x] **Phase 112: Reopened Whisper Closeout Rerun** - Superseded on 2026-04-27. Phase 116 owns
+  final closeout after runtime-surface and evidence repairs.
+- [x] **Phase 113: Recursive Whisper ARM Profile And Optimize Closure** - Superseded on
+  2026-04-27. The stale plan was retired; active runtime-surface, evidence, and final closeout
+  gaps moved to Phases 114-116.
+- [x] **Phase 114: Whisper Runtime Surface Contract Repair** - Complete on 2026-04-27. Defined the
+  maintained runtime surface as the speech encoder/decoder/tokenizer Whisper path, updated
+  compare/benchmark metadata, and verified exact `[C]` parity.
+- [x] **Phase 115: Whisper Evidence Truth Repair** - Complete on 2026-04-27. Corrected or
+  superseded false Phase 103, 107, 108, 111, 112, and stale Phase 113 artifacts so active
+  milestone evidence matches live source.
+- [x] **Phase 116: Whisper Final Closeout Rerun** - Complete on 2026-04-27. Reran source-backed
+  closeout; a later source-backed audit found remaining compare-gate, harness-boundary, policy,
+  and Nyquist-ledger blockers.
+- [x] **Phase 117: Whisper Compare Failure Contract Repair** - Complete on 2026-04-27. Maintained
+  Whisper transcript drift now exits nonzero while exact match remains the only successful compare
+  status.
+- [x] **Phase 118: Whisper Public Runtime Harness Boundary Repair** - Complete on 2026-04-27.
+  Moved maintained parity/benchmark proof off actor detail APIs and reconciled speech-owned
+  runtime, tokenizer, decode-policy, parity, and performance evidence through public event
+  interfaces.
+- [x] **Phase 119: Whisper Final Source-Backed Closeout Rerun** - Complete on 2026-04-27.
+  Corrected the Phase 113 Nyquist ledger and reran final closeout after Phases 117-118.
+- [x] **Phase 120: Whisper Decode Policy And Transcript Runtime Repair** - Complete on
+  2026-04-27. Wired the speech-owned ASR decode-policy contract into decoder runtime behavior and
+  removed the hardcoded public decoder `token:<id>` transcript surface so `POLICY-01` and
+  `TOK-02` are source-backed.
+- [ ] **Phase 121: Whisper Baseline Nyquist Validation Backfill** - Planned gap closure. Add
+  source-backed validation artifacts for preserved baseline Phases 94-102 without giving them
+  active runtime credit beyond their archived scope.
+- [ ] **Phase 122: Whisper Final Gap Closeout Rerun** - Planned gap closure. Rerun source-backed
+  closeout after Phases 120-121, cite stable benchmark evidence, update the audit, and close
+  `CLOSE-01`.
 
 ## Phase Details
 
@@ -187,8 +218,8 @@ speech-domain ownership of Whisper recognizer actors.
 **Requirements:** REOPEN-01, SPEECH-01.
 **Success Criteria**:
 1. No `src/emel/whisper/**` runtime domain or `emel/whisper` include path remains.
-2. Whisper runtime actors live under speech recognizer ownership while model and kernel ownership
-   stay in `model/whisper` and `kernel/whisper`.
+2. Whisper runtime actors and fused ASR detail live under speech recognizer ownership while model
+   binding stays in `model/whisper`.
 3. Source-backed verification and Nyquist validation artifacts exist for the reopened cleanup.
 
 ### Phase 104: Speech Tokenizer And Decode Policy Contract
@@ -251,7 +282,7 @@ Phase 111 for remaining SML rule-readiness.
 
 **Goal:** Prove exact transcript parity through the maintained EMEL runtime path against the pinned
 Phase 99 `whisper.cpp` audio/model pair.
-**Requirements:** PARITY-01; CLOSE-01 final closeout rerun now maps to Phase 112.
+**Requirements:** PARITY-01; CLOSE-01 final closeout rerun now maps to Phase 116.
 **Success Criteria**:
 1. User approval for Option B is recorded as the final v1.16 closeout contract.
 2. The EMEL lane consumes the pinned source model path through a source-owned legacy Whisper
@@ -259,7 +290,8 @@ Phase 99 `whisper.cpp` audio/model pair.
 3. Exact transcript parity is proven without a bench-only normalized-GGUF bridge being presented
    as direct pinned-artifact parity.
 4. Full closeout quality gates and source-backed audit evidence from Phase 108 are superseded by
-   Phase 112 because the 2026-04-27 audit rerun found remaining closeout blockers.
+   Phases 112 and 113 because later audit reruns found remaining closeout and performance
+   blockers.
 
 **Completion Evidence**:
 - `build/whisper_compare/summary.json` records `comparison_status=exact_match`, EMEL transcript
@@ -286,12 +318,16 @@ source-backed verification and validation for the reopened evidence repair work.
 4. No tokenizer, parity, benchmark, or closeout requirement is falsely claimed by the artifact
    backfill.
 
+**Completion Evidence**:
+- `106-VERIFICATION.md` and `106-VALIDATION.md` now exist with source-backed evidence.
+- `109-VERIFICATION.md` and `109-VALIDATION.md` passed for REOPEN-01 and SPEECH-01.
+
 ### Phase 110: Maintained Whisper Benchmark Publication Repair
 
 **Goal:** Repair the maintained single-thread Whisper benchmark publication lane so EMEL and the
 reference consume the same pinned Phase 99 source model contract and mismatches cannot publish as
 `ok`.
-**Requirements:** CLOSE-01.
+**Requirements:** Historical CLOSE-01 publication repair; active CLOSE-01 now maps to Phase 116.
 **Gap Closure:** Closes audit integration and flow gaps for benchmark model-path truth and
 benchmark summary masking.
 **Success Criteria**:
@@ -303,6 +339,13 @@ benchmark summary masking.
    SHA or transcript differs.
 4. Focused benchmark tests and the Whisper benchmark wrapper prove the repaired publication
    contract.
+
+**Completion Evidence**:
+- `build/whisper_compare_tools/whisper_benchmark_tests` passed with 6 test cases and 86
+  assertions.
+- `build/whisper_benchmark/benchmark_summary.json` records `status: ok`, transcript `[C]` for
+  both lanes, and model SHA
+  `9ade048c9d3692b411572a9a8ad615766168e62fb1d4c234973825a377c71984` for both lanes.
 
 ### Phase 111: Speech Recognizer SML Rule Readiness Repair
 
@@ -323,18 +366,228 @@ Whisper execution-contract acceptance.
 4. Focused SML introspection and recognizer lifecycle tests prove the repaired graph and
    unexpected-event behavior.
 
+**Completion Evidence**:
+- `build/audit-native/emel_tests_bin --no-breaks --source-file='*tests/speech/*'` passed with 6
+  test cases and 1072 assertions.
+- Recognizer route context no longer stores initialize-event model/tokenizer payload views.
+
 ### Phase 112: Reopened Whisper Closeout Rerun
 
 **Goal:** Re-run closeout after Phases 109-111 repair artifact, benchmark, and rule-readiness
 blockers.
-**Requirements:** CLOSE-01.
-**Gap Closure:** Closes final audit contradiction and milestone readiness gaps.
+**Requirements:** Historical CLOSE-01 attempt; active CLOSE-01 and PERF-03 now map to Phase 116.
+**Gap Closure:** Superseded by Phase 116 after later runtime-surface and evidence-ledger repairs.
 **Success Criteria**:
 1. Full closeout quality gates pass with `EMEL_QUALITY_GATES_SCOPE=full` and
    `EMEL_QUALITY_GATES_BENCH_SUITE=whisper_compare`.
 2. The maintained Whisper compare and single-thread benchmark summaries both record the pinned
    Phase 99 source model contract truthfully.
-3. A source-backed milestone audit rerun reports no unsatisfied requirements, no integration
-   blockers, and no missing Nyquist validation artifacts.
-4. ROADMAP.md, REQUIREMENTS.md, STATE.md, and the milestone audit agree that v1.16 is ready to
-   archive.
+3. A source-backed milestone audit rerun reports all requirements satisfied, all integration flows
+   passed, and no missing Nyquist validation artifacts.
+4. ROADMAP.md, REQUIREMENTS.md, STATE.md, and the milestone audit agree whether v1.16 is ready to
+   archive or still blocked.
+
+**Completion Evidence**:
+- Superseded by Phase 116 final closeout evidence.
+
+### Phase 113: Recursive Whisper ARM Profile And Optimize Closure
+
+**Goal:** Restore the v1.16 performance contract by recursively profiling and optimizing the
+maintained ARM Whisper runtime until EMEL beats the matched single-thread CPU `whisper.cpp`
+reference lane, then rerun source-backed closeout.
+**Requirements:** No active requirements; historical/stale attempt only.
+**Gap Closure:** Superseded by Phases 114-116.
+**Status Note:** The stale implementation plan was retired and not executed.
+**Success Criteria**:
+1. Phase 113 summary and verification record supersession.
+2. `CLOSE-01` and `PERF-03` remain owned by Phase 116.
+3. The stale plan no longer directs implementation work.
+
+### Phase 114: Whisper Runtime Surface Contract Repair
+
+**Goal:** Make the maintained Whisper ASR runtime surface source-backed, domain-boundary clean, and
+extendable by reconciling the top-level recognizer claim with the live encoder/decoder/tokenizer
+runtime path.
+**Requirements:** SPEECH-01, TOK-01, TOK-02, POLICY-01, PARITY-01.
+**Gap Closure:** Closes audit gaps for public recognizer E2E wiring, tokenizer/policy/parity
+claims that are currently satisfied only by the benchmark runner, and the domain extensibility
+decision for the maintained Whisper slice.
+**Success Criteria**:
+1. The maintained v1.16 ASR runtime surface is explicit and source-backed as the speech
+   encoder/decoder actor pair plus tokenizer policy.
+2. The chosen runtime surface preserves `scripts/check_domain_boundaries.sh` and does not add
+   forbidden generic-recognizer or model-family runtime roots.
+3. The compare and benchmark EMEL lanes exercise the chosen maintained runtime surface rather than
+   a contradictory tool-local route.
+4. Tokenizer checksum validation, decode policy, model binding, transcript publication, and exact
+   `[C]` parity evidence are verified through the chosen runtime surface with focused tests.
+
+### Phase 115: Whisper Evidence Truth Repair
+
+**Goal:** Repair the milestone evidence ledger so completed phase artifacts match live source and
+no phase verification claims missing recognizer-route files, forbidden paths, or recognizer
+dispatch behavior that is not present.
+**Requirements:** Historical evidence repair only; no active requirement ownership.
+**Gap Closure:** Closes audit phase-artifact and Nyquist gaps for invalid Phase 103, 107, 108,
+111, 112 evidence and the stale Phase 113 plan/context.
+**Success Criteria**:
+1. Phase 103 evidence no longer claims old recognizer-internal actor paths or a model-family
+   kernel root.
+2. Phase 107 and Phase 111 evidence no longer claims missing recognizer-route files or symbols.
+3. Phase 108 evidence names the selected speech encoder/decoder/tokenizer runtime surface.
+4. Phase 112 validation and Phase 113 plan/context are superseded or corrected so ROADMAP,
+   REQUIREMENTS, STATE, and audit evidence agree with live benchmark and runtime truth.
+
+### Phase 116: Whisper Final Closeout Rerun
+
+**Goal:** Close v1.16 with a source-backed final rerun after runtime-surface and evidence repairs.
+**Requirements:** CLOSE-01, PERF-03.
+**Gap Closure:** Closes the remaining closeout ledger, benchmark performance, Nyquist validation,
+and milestone audit gaps.
+**Success Criteria**:
+1. Phase 114 and Phase 115 have SUMMARY, VERIFICATION, and VALIDATION artifacts with executable
+   evidence.
+2. The maintained compare summary records exact transcript parity on the pinned Phase 99
+   model/audio pair through the selected runtime surface.
+3. The maintained single-thread benchmark summary records `status: ok`, `reason: ok`, matching
+   model/transcript truth, and EMEL mean process wall time strictly below the matched
+   `whisper.cpp` reference mean.
+4. Full relevant quality gates pass with the Whisper benchmark suite and a domain-boundary check.
+5. ROADMAP.md, REQUIREMENTS.md, STATE.md, and the source-backed milestone audit agree that
+   `CLOSE-01` and `PERF-03` are complete before archival.
+
+### Phase 117: Whisper Compare Failure Contract Repair
+
+**Goal:** Make maintained Whisper transcript drift fail the compare and quality-gate path instead
+of publishing a successful `bounded_drift` result.
+**Requirements:** REOPEN-01.
+**Gap Closure:** Closes audit gaps `COMPARE-DRIFT-GATE` and `Parity failure flow`.
+**Success Criteria**:
+1. `tools/bench/whisper_compare.py` returns failure for any non-exact transcript comparison,
+   including `bounded_drift`.
+2. Focused tests prove exact match still passes and transcript mismatch fails with a deterministic
+   machine-readable reason.
+3. `scripts/bench_whisper_compare.sh` and the `whisper_compare` quality-gate suite fail when the
+   maintained EMEL/reference transcripts diverge.
+4. Updated verification evidence maps the no-drift gate back to `REOPEN-01`.
+
+**Completion Evidence**:
+- `build/whisper_compare_tools/whisper_benchmark_tests` passed with 9 test cases and 130
+  assertions.
+- `scripts/bench_whisper_compare.sh --skip-reference-build --skip-emel-build` still reports
+  `status=exact_match reason=ok`.
+- Changed-file scoped `scripts/quality_gates.sh` with
+  `EMEL_QUALITY_GATES_BENCH_SUITE=whisper_compare` passed.
+
+### Phase 118: Whisper Public Runtime Harness Boundary Repair
+
+**Status:** Complete.
+
+**Goal:** Repair the maintained Whisper parity/benchmark EMEL lane so proof code drives only
+public actor event interfaces and does not reach actor `detail.hpp` helpers directly.
+**Requirements:** SPEECH-01, TOK-02, POLICY-01, PARITY-01, PERF-03.
+**Gap Closure:** Closes audit gaps `HARNESS-DETAIL-API`, `POLICY-FIELD-WIRING`, and the
+`Public actor interface flow`.
+**Success Criteria**:
+1. `tools/bench/whisper_emel_parity_runner.cpp` no longer directly includes or calls actor
+   `detail.hpp` or `detail.cpp` helpers for model binding, encoder/decoder buffer sizing,
+   tokenizer policy, or transcript decode.
+2. The maintained EMEL lane drives the speech-owned Whisper encoder/decoder/tokenizer runtime
+   through public event interfaces and `process_event(...)` only.
+3. Whisper ASR decode-policy evidence is either fully wired into maintained behavior or narrowed
+   in source-backed requirements and verification to the fields that actually affect behavior.
+4. Exact `[C]` parity and EMEL-faster single-thread benchmark evidence still pass after the
+   public-interface repair.
+
+**Completion Evidence**:
+- `tools/bench/whisper_emel_parity_runner.cpp` now uses public Whisper model/speech `any.hpp`
+  surfaces plus encoder/decoder `process_event(...)`; a focused doctest guards against direct
+  detail-header regressions.
+- The maintained decode policy is source-backed as `english` / `transcribe` /
+  `timestamp_tokens` / `suppress_translate=true` with 3 prompt tokens; no-timestamps behavior is
+  explicitly not claimed for the `[C]` lane.
+- `scripts/bench_whisper_compare.sh --skip-reference-build --skip-emel-build` reports
+  `status=exact_match reason=ok`.
+- `EMEL_WHISPER_BENCH_WARMUPS=0 EMEL_WHISPER_BENCH_ITERATIONS=1
+  scripts/bench_whisper_single_thread.sh --skip-reference-build --skip-emel-build` reports
+  `benchmark_status=ok reason=ok`, with EMEL mean `62020084 ns` and reference mean `66998708 ns`.
+- Changed-file scoped `scripts/quality_gates.sh` with
+  `EMEL_QUALITY_GATES_BENCH_SUITE=whisper_compare` passed.
+
+### Phase 119: Whisper Final Source-Backed Closeout Rerun
+
+**Status:** Complete.
+
+**Goal:** Rerun final v1.16 closeout after the compare-failure and public-harness repairs, with
+truthful Nyquist and benchmark evidence.
+**Requirements:** CLOSE-01.
+**Gap Closure:** Closes the remaining audit closeout blocker and Phase 113 Nyquist-ledger gap.
+**Success Criteria**:
+1. Phase 113 is no longer counted as Nyquist-compliant without a validation artifact; either add
+   the missing validation evidence or document the superseded exception truthfully in the final
+   audit.
+2. Full relevant quality gates include the maintained compare proof and the single-thread Whisper
+   benchmark proof needed for `CLOSE-01`.
+3. ROADMAP.md, REQUIREMENTS.md, STATE.md, phase artifacts, benchmark summaries, and the milestone
+   audit agree on the final v1.16 status.
+4. `$gsd-audit-milestone` passes without source-backed maintained-path contradictions.
+
+**Completion Evidence**:
+- Phase 113 now has `113-VALIDATION.md` documenting the superseded retirement truth without
+  crediting it for runtime implementation.
+- Full closeout quality gate passed with `EMEL_QUALITY_GATES_SCOPE=full` and
+  `EMEL_QUALITY_GATES_BENCH_SUITE=whisper_compare`.
+- The final maintained compare summary reports `status=exact_match reason=ok` with EMEL and
+  reference transcripts `[C]`.
+- The final maintained benchmark summary reports `status=ok reason=ok`, EMEL mean `59049750 ns`,
+  and reference mean `63237291 ns`.
+- The 2026-04-27T21:02 audit reported `status: passed`; a later source-backed rerun at
+  2026-04-27T21:45 found remaining decode-policy, tokenizer-backed decoder transcript, and
+  preserved-baseline Nyquist gaps now planned in Phases 120-122.
+
+### Phase 120: Whisper Decode Policy And Transcript Runtime Repair
+
+**Goal:** Make the maintained Whisper decoder runtime consume a speech-owned ASR decode-policy
+contract and make transcript publication tokenizer-owned end to end.
+**Requirements:** TOK-02, POLICY-01.
+**Gap Closure:** Closes audit gaps for decode-policy wiring and the public decoder
+`token:<id>` transcript surface.
+**Success Criteria**:
+1. The decoder public event carries the speech-owned ASR decode-policy contract or a narrowed
+   policy-owned runtime payload, not just prompt tokens.
+2. Timestamp and suppression behavior choices are modeled by explicit SML guards/states or
+   explicit already-chosen action paths, not hardcoded detail-side behavior selection.
+3. The decoder no longer publishes a hardcoded `token:<id>` transcript surface; transcript text is
+   either removed from decoder output or produced only through `speech/tokenizer/whisper`.
+4. Focused decoder/tokenizer/benchmark tests prove exact `[C]` parity still passes, transcript
+   drift still fails, and policy fields in compare JSON describe behavior actually consumed by the
+   decoder runtime.
+
+### Phase 121: Whisper Baseline Nyquist Validation Backfill
+
+**Goal:** Backfill truthful Nyquist validation artifacts for preserved baseline Phases 94-102.
+**Requirements:** Closeout support only; active requirement closure remains Phase 122.
+**Gap Closure:** Closes audit phase-artifact gap `NYQUIST-MISSING-BASELINE`.
+**Success Criteria**:
+1. Phases 94-102 each have a `*-VALIDATION.md` artifact with executable evidence or an explicit
+   archived-baseline validation scope.
+2. Validation artifacts do not re-credit superseded baseline claims for final runtime, parity,
+   benchmark, tokenizer, or closeout requirements now owned by later phases.
+3. Each validation artifact records rule-compliance notes and no unresolved manual-only blocker.
+4. A focused artifact scan proves all v1.16 phase directories have SUMMARY, VERIFICATION, and
+   VALIDATION artifacts where required by the active Nyquist workflow.
+
+### Phase 122: Whisper Final Gap Closeout Rerun
+
+**Goal:** Rerun v1.16 source-backed closeout after decode-policy/transcript and baseline
+validation repairs.
+**Requirements:** CLOSE-01.
+**Gap Closure:** Closes final audit blockers for `POLICY-01`, `TOK-02`, `CLOSE-01`, and
+preserved-baseline Nyquist coverage.
+**Success Criteria**:
+1. Phase 120 and Phase 121 have SUMMARY, VERIFICATION, and VALIDATION artifacts.
+2. Maintained compare exact-matches `[C]` and proves policy JSON fields match runtime behavior.
+3. Maintained single-thread benchmark evidence uses the default warmed multi-iteration wrapper or
+   immutable archived benchmark evidence, not the volatile zero-warmup one-iteration citation.
+4. Full relevant quality gates, domain-boundary checks, and source-backed milestone audit rerun
+   pass before `CLOSE-01` is re-marked complete.

@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.16
 milestone_name: ARM Whisper GGUF Parity And Performance
 status: gaps_found
-stopped_at: v1.16 gap closure phases 109-112 planned after source-backed audit rerun
-last_updated: "2026-04-27T13:55:58.000Z"
+stopped_at: v1.16 reopened for source-backed gap closure phases 120-122
+last_updated: "2026-04-27T23:50:28.000Z"
 last_activity: 2026-04-27
 progress:
-  total_phases: 19
-  completed_phases: 15
-  total_plans: 14
-  completed_plans: 14
-  percent: 79
+  total_phases: 29
+  completed_phases: 27
+  total_plans: 18
+  completed_plans: 18
+  percent: 93
 ---
 
 # Project State
@@ -22,32 +22,28 @@ See: .planning/PROJECT.md (updated 2026-04-25)
 
 **Core value:** Prove real end-to-end behavior with explicit SML orchestration and parity-oriented
 verification before widening API surface or model scope.
-**Current focus:** v1.16 gap closure after reopened closeout audit blockers.
+**Current focus:** v1.16 is reopened for source-backed closeout gap closure.
 
 ## Current Position
 
-Phase: 109
-Plan: not planned
-Status: `v1.16` ARM Whisper GGUF Parity And Performance is reopened for gap closure after the
-2026-04-27 source-backed milestone audit rerun reported `gaps_found`.
+Phase: 121
+Plan: Whisper Baseline Nyquist Validation Backfill
+Status: `v1.16` ARM Whisper GGUF Parity And Performance has source-backed closeout gaps.
 
-The maintained parity compare path remains source-backed and exact-matching: the default compare
-uses the pinned source model path, records `model_normalization: {}`, and reports EMEL transcript
-`[C]` against reference transcript `[C]`. That evidence is not sufficient for archive because the
-audit found three closeout blockers:
+Planned gap closure:
 
-- Phase 106 claims REOPEN-01 and SPEECH-01 completion but lacks phase-local VERIFICATION and
-  VALIDATION artifacts.
-- `scripts/bench_whisper_single_thread.sh` defaults the EMEL benchmark lane to
-  `tests/models/model-tiny-q80.gguf` instead of the pinned Phase 99 source model path.
-- Dispatch-critical recognizer paths still have SML/detail rule-readiness risks around tokenizer
-  validation and Whisper execution-contract acceptance.
+- Phase 120: complete; decode-policy runtime behavior is wired through a speech-owned policy and
+  the hardcoded public decoder `token:<id>` transcript surface is removed.
+- Phase 121: backfill preserved-baseline Nyquist validation artifacts for Phases 94-102.
+- Phase 122: rerun source-backed closeout and update the milestone audit after gap closure.
 
-Phases 109-112 are planned to close the artifact, benchmark publication, rule-readiness, and final
-closeout rerun gaps.
+The latest compare artifact still records exact `[C]` parity through the public Whisper runtime
+surfaces, and the default warmed benchmark artifact records EMEL faster than the matched
+`whisper.cpp` reference. Phase 120 closed the decode-policy and tokenizer-backed decoder
+transcript gaps; preserved-baseline Nyquist backfill and final closeout audit remain.
 Last activity: 2026-04-27
 
-Progress: [########--] 79%
+Progress: [#########-] 93%
 
 ## Deferred Items
 
@@ -65,15 +61,14 @@ Items acknowledged and still deferred at milestone close on 2026-04-26:
 
 **Latest completed milestone:**
 
-- Milestone: v1.16 ARM Whisper GGUF Parity And Performance
+- Milestone: v1.15 ARM Sortformer Diarization GGUF Slice
 
 **Current planning shape:**
 
-- Active milestone: `v1.16 ARM Whisper GGUF Parity And Performance` gap closure
-- Latest shipped milestone: `v1.15` until archive command moves v1.16 into shipped history
-- Next action: plan Phase 109 with `$gsd-plan-phase 109`.
-- Current blocker: v1.16 audit reports gaps in Phase 106 evidence, benchmark publication truth,
-  and SML rule readiness.
+- Active milestone: `v1.16` reopened for Phases 120-122.
+- Latest shipped milestone: `v1.15`; v1.16 was archived, then reopened by source-backed audit.
+- Next action: execute Phase 121.
+- Current blocker: `CLOSE-01`.
 
 ## Accumulated Context
 
@@ -101,19 +96,19 @@ Recent decisions affecting current work:
 - Whisper variant support must be native kernel-level support, not a whole-tensor dequantize-to-f32
   fallback or tool-only compute path.
 
-- The milestone is a diarization runtime milestone, not a generation or embedding benchmark
-  organization milestone.
+- The milestone is a Whisper ASR runtime and performance milestone, not a generation, embedding,
+  or diarization benchmark organization milestone.
 
 - The maintained input contract is deterministic single-channel `float32` PCM at 16,000 Hz.
 
-- The maintained output contract is a deterministic `T x 4` speaker-activity probability matrix
-  plus bounded four-speaker segment records.
+- The maintained output contract is an exact transcript for the pinned Phase 99 audio/model pair,
+  currently `[C]` against the matched `whisper.cpp` reference.
 
 - Native EMEL-owned `src/` execution work is required; tool-only, Python, ONNX, NeMo, llama.cpp, or
   ggml compute fallbacks do not satisfy the EMEL lane.
 
-- Runtime choices for Sortformer model readiness, chunk profile, cache readiness, and error
-  outcomes must be explicit in Boost.SML guards/states/transitions.
+- Runtime choices for Whisper recognizer model readiness, tokenizer readiness, decode policy, and
+  error outcomes must be explicit in Boost.SML guards/states/transitions.
 
 - Parity and benchmark work must keep EMEL and reference lanes isolated.
 
@@ -401,7 +396,7 @@ Recent decisions affecting current work:
 
 ## Session Continuity
 
-Last session: 2026-04-27T13:55:58Z
-Stopped at: planned v1.16 gap closure phases 109-112 after the source-backed milestone audit
-rerun reported `gaps_found`; next action is `$gsd-plan-phase 109`.
+Last session: 2026-04-27T20:17:18Z
+Stopped at: completed Phase 117 compare failure contract repair; next action is
+`$gsd-plan-phase 118`.
 Resume file: None

@@ -1,30 +1,35 @@
-# Requirements: v1.16 Reopened Whisper E2E Closure
+# Requirements: v1.16 Reopened Whisper E2E And Performance Closure
 
 ## Active Requirements
 
-- [ ] **REOPEN-01** — Reopen v1.16 because `bounded_drift` transcript mismatch is not acceptable
+- [x] **REOPEN-01** — Reopen v1.16 because `bounded_drift` transcript mismatch is not acceptable
   for the E2E milestone.
-- [ ] **SPEECH-01** — Remove the top-level `src/emel/whisper/**` runtime domain; Whisper runtime
-  actors must live under the speech recognizer domain while model and kernel ownership stay in
-  `model/whisper` and `kernel/whisper`.
-- [ ] **TOK-01** — Pin and validate the maintained `tokenizer-tiny.json` asset before dispatch.
+- [x] **SPEECH-01** — Remove the top-level `src/emel/whisper/**` runtime domain; Whisper runtime
+  actors live under speech encoder/decoder/tokenizer ownership while model binding stays in
+  `model/whisper`.
+- [x] **TOK-01** — Pin and validate the maintained `tokenizer-tiny.json` asset before dispatch.
 - [x] **TOK-02** — Use speech tokenizer/detokenizer machinery for transcript publication; do not
   hardcode fixture transcript text or token-piece mappings in Whisper kernels.
-- [ ] **POLICY-01** — Model Whisper ASR decode policy explicitly: prompt sequence, language/task
+- [x] **POLICY-01** — Model Whisper ASR decode policy explicitly: prompt sequence, language/task
   roles, timestamp mode, and suppression behavior.
 - [x] **PARITY-01** — The maintained EMEL lane must exact-match the pinned `whisper.cpp`
   transcript for the Phase 99 audio/model pair.
 - [ ] **CLOSE-01** — Re-run source-backed audit and full relevant quality gates before closing
-  the reopened milestone.
+  the reopened milestone, including benchmark evidence that enforces the performance contract.
+- [x] **PERF-03** — Restore a source-backed benchmark record where EMEL beats the matched
+  single-thread CPU `whisper.cpp` ARM reference lane for the maintained Phase 99 model/audio pair.
+
+**Coverage after source-backed gap audit:** 7 complete, 1 pending.
 
 ## Traceability
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| REOPEN-01 | 109 | Pending |
-| SPEECH-01 | 109 | Pending |
-| TOK-01 | 111 | Pending |
-| TOK-02 | 107 | Complete |
-| POLICY-01 | 111 | Pending |
-| PARITY-01 | 108 | Complete |
-| CLOSE-01 | 112 | Pending |
+| REOPEN-01 | 117 | Complete |
+| SPEECH-01 | 118 | Complete |
+| TOK-01 | 114 | Complete |
+| TOK-02 | 120 | Complete |
+| POLICY-01 | 120 | Complete |
+| PARITY-01 | 118 | Complete |
+| CLOSE-01 | 122 | Pending |
+| PERF-03 | 118 | Complete |
