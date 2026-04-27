@@ -1,17 +1,17 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.15
-milestone_name: ARM Sortformer Diarization GGUF Slice
-status: completed
-stopped_at: v1.15 milestone completed and archived; next action is define the next milestone
-last_updated: "2026-04-25T00:13:19.297Z"
-last_activity: 2026-04-25
+milestone: v1.16
+milestone_name: ARM Whisper GGUF Parity And Performance
+status: gaps_found
+stopped_at: v1.16 gap closure phases 109-112 planned after source-backed audit rerun
+last_updated: "2026-04-27T13:55:58.000Z"
+last_activity: 2026-04-27
 progress:
-  total_phases: 24
-  completed_phases: 24
-  total_plans: 24
-  completed_plans: 24
-  percent: 100
+  total_phases: 19
+  completed_phases: 15
+  total_plans: 14
+  completed_plans: 14
+  percent: 79
 ---
 
 # Project State
@@ -22,24 +22,36 @@ See: .planning/PROJECT.md (updated 2026-04-25)
 
 **Core value:** Prove real end-to-end behavior with explicit SML orchestration and parity-oriented
 verification before widening API surface or model scope.
-**Current focus:** Define the next milestone before adding new active requirements or phases.
+**Current focus:** v1.16 gap closure after reopened closeout audit blockers.
 
 ## Current Position
 
-Phase: 93
-Plan: complete
-Status: `v1.15` completed and archived. EMEL exact-matches PyTorch/NeMo and ONNX on the
-maintained AMI fixture and beats the ONNX Runtime CPU single-thread benchmark reference in the
-strict generated record set: EMEL `1370917625 ns/op` versus ONNX `5900446125 ns/op`, with
-`output_dim=17`, checksum `4249677247906920305`, and ONNX
-`actual_providers=CPUExecutionProvider`.
-Last activity: 2026-04-25
+Phase: 109
+Plan: not planned
+Status: `v1.16` ARM Whisper GGUF Parity And Performance is reopened for gap closure after the
+2026-04-27 source-backed milestone audit rerun reported `gaps_found`.
 
-Progress: [##########] 100%
+The maintained parity compare path remains source-backed and exact-matching: the default compare
+uses the pinned source model path, records `model_normalization: {}`, and reports EMEL transcript
+`[C]` against reference transcript `[C]`. That evidence is not sufficient for archive because the
+audit found three closeout blockers:
+
+- Phase 106 claims REOPEN-01 and SPEECH-01 completion but lacks phase-local VERIFICATION and
+  VALIDATION artifacts.
+- `scripts/bench_whisper_single_thread.sh` defaults the EMEL benchmark lane to
+  `tests/models/model-tiny-q80.gguf` instead of the pinned Phase 99 source model path.
+- Dispatch-critical recognizer paths still have SML/detail rule-readiness risks around tokenizer
+  validation and Whisper execution-contract acceptance.
+
+Phases 109-112 are planned to close the artifact, benchmark publication, rule-readiness, and final
+closeout rerun gaps.
+Last activity: 2026-04-27
+
+Progress: [########--] 79%
 
 ## Deferred Items
 
-Items acknowledged and still deferred at milestone close on 2026-04-25:
+Items acknowledged and still deferred at milestone close on 2026-04-26:
 
 | Category | Item | Status |
 |----------|------|--------|
@@ -51,20 +63,17 @@ Items acknowledged and still deferred at milestone close on 2026-04-25:
 
 ## Performance Metrics
 
-**Latest shipped milestone:**
+**Latest completed milestone:**
 
-- Milestone: v1.15 ARM Sortformer Diarization GGUF Slice
-- Completed phases: `24/24`
-- Completed plans: `24/24`
-- Audit status: `passed`
+- Milestone: v1.16 ARM Whisper GGUF Parity And Performance
 
 **Current planning shape:**
 
-- Active milestone: none
-- Latest shipped milestone: `v1.15`
-- Next action: run `$gsd-new-milestone` to define the next requirements set.
-
-- Current blocker: none.
+- Active milestone: `v1.16 ARM Whisper GGUF Parity And Performance` gap closure
+- Latest shipped milestone: `v1.15` until archive command moves v1.16 into shipped history
+- Next action: plan Phase 109 with `$gsd-plan-phase 109`.
+- Current blocker: v1.16 audit reports gaps in Phase 106 evidence, benchmark publication truth,
+  and SML rule readiness.
 
 ## Accumulated Context
 
@@ -75,6 +84,22 @@ Recent decisions affecting current work:
 
 - `v1.15` targets one maintained ARM diarization slice for
   `openresearchtools/diar_streaming_sortformer_4spk-v2.1-gguf`.
+
+- `v1.16` targets one maintained ARM Whisper tiny GGUF ASR slice across the requested
+  `oxide-lab/whisper-tiny-GGUF` variant family.
+
+- Current local Whisper work includes model/loader scaffolding, q80 fixture notes, a
+  reference-only `whisper.cpp` benchmark wrapper, and partial quant-kernel arithmetic; this is
+  backfilled starting state and must be audited before it is treated as landed.
+
+- `v1.16` parity reference is `whisper.cpp`; benchmark reference is also `whisper.cpp`, but
+  benchmark claims are CPU-only, single-thread-only, and ARM-hosted.
+
+- EMEL must beat the matched single-thread CPU `whisper.cpp` ARM reference lane before the
+  milestone can close.
+
+- Whisper variant support must be native kernel-level support, not a whole-tensor dequantize-to-f32
+  fallback or tool-only compute path.
 
 - The milestone is a diarization runtime milestone, not a generation or embedding benchmark
   organization milestone.
@@ -376,7 +401,7 @@ Recent decisions affecting current work:
 
 ## Session Continuity
 
-Last session: 2026-04-22T19:06:20Z
-Stopped at: started `v1.15 ARM Sortformer Diarization GGUF Slice` and left Phase `81` ready to
-plan
+Last session: 2026-04-27T13:55:58Z
+Stopped at: planned v1.16 gap closure phases 109-112 after the source-backed milestone audit
+rerun reported `gaps_found`; next action is `$gsd-plan-phase 109`.
 Resume file: None
