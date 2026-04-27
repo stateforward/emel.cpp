@@ -127,8 +127,8 @@ reference, and a source-backed closeout audit.
   2026-04-27. Wired the speech-owned ASR decode-policy contract into decoder runtime behavior and
   removed the hardcoded public decoder `token:<id>` transcript surface so `POLICY-01` and
   `TOK-02` are source-backed.
-- [ ] **Phase 121: Whisper Baseline Nyquist Validation Backfill** - Planned gap closure. Add
-  source-backed validation artifacts for preserved baseline Phases 94-102 without giving them
+- [x] **Phase 121: Whisper Baseline Nyquist Validation Backfill** - Complete on 2026-04-27. Added
+  archived-baseline validation artifacts for preserved baseline Phases 94-102 without giving them
   active runtime credit beyond their archived scope.
 - [ ] **Phase 122: Whisper Final Gap Closeout Rerun** - Planned gap closure. Rerun source-backed
   closeout after Phases 120-121, cite stable benchmark evidence, update the audit, and close

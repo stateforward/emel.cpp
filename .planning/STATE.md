@@ -4,14 +4,14 @@ milestone: v1.16
 milestone_name: ARM Whisper GGUF Parity And Performance
 status: gaps_found
 stopped_at: v1.16 reopened for source-backed gap closure phases 120-122
-last_updated: "2026-04-27T23:50:28.000Z"
+last_updated: "2026-04-27T23:55:55.000Z"
 last_activity: 2026-04-27
 progress:
   total_phases: 29
-  completed_phases: 27
-  total_plans: 18
-  completed_plans: 18
-  percent: 93
+  completed_phases: 28
+  total_plans: 19
+  completed_plans: 19
+  percent: 97
 ---
 
 # Project State
@@ -26,24 +26,26 @@ verification before widening API surface or model scope.
 
 ## Current Position
 
-Phase: 121
-Plan: Whisper Baseline Nyquist Validation Backfill
+Phase: 122
+Plan: Whisper Final Gap Closeout Rerun
 Status: `v1.16` ARM Whisper GGUF Parity And Performance has source-backed closeout gaps.
 
 Planned gap closure:
 
 - Phase 120: complete; decode-policy runtime behavior is wired through a speech-owned policy and
   the hardcoded public decoder `token:<id>` transcript surface is removed.
-- Phase 121: backfill preserved-baseline Nyquist validation artifacts for Phases 94-102.
+- Phase 121: complete; preserved-baseline Nyquist validation artifacts for Phases 94-102 are
+  backfilled with archived-baseline scope.
 - Phase 122: rerun source-backed closeout and update the milestone audit after gap closure.
 
 The latest compare artifact still records exact `[C]` parity through the public Whisper runtime
 surfaces, and the default warmed benchmark artifact records EMEL faster than the matched
 `whisper.cpp` reference. Phase 120 closed the decode-policy and tokenizer-backed decoder
-transcript gaps; preserved-baseline Nyquist backfill and final closeout audit remain.
+transcript gaps; Phase 121 backfilled preserved-baseline Nyquist artifacts. Final closeout audit
+remains.
 Last activity: 2026-04-27
 
-Progress: [#########-] 93%
+Progress: [##########] 97%
 
 ## Deferred Items
 
@@ -67,7 +69,7 @@ Items acknowledged and still deferred at milestone close on 2026-04-26:
 
 - Active milestone: `v1.16` reopened for Phases 120-122.
 - Latest shipped milestone: `v1.15`; v1.16 was archived, then reopened by source-backed audit.
-- Next action: execute Phase 121.
+- Next action: execute Phase 122.
 - Current blocker: `CLOSE-01`.
 
 ## Accumulated Context
