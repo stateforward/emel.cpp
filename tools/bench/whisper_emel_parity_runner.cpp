@@ -233,18 +233,26 @@ bool load_wav_16khz_mono(const std::filesystem::path &path,
   return true;
 }
 
-void materialize_tensor_names_from_file(
+bool materialize_tensor_names_from_file(
     emel::model::data &model, const std::span<const uint8_t> file_bytes) {
   model.name_bytes_used = 0u;
   for (uint32_t index = 0u; index < model.n_tensors; ++index) {
     auto &tensor = model.tensors[index];
     const size_t source_offset = static_cast<size_t>(tensor.name_offset);
     const size_t length = static_cast<size_t>(tensor.name_length);
+    const size_t used = static_cast<size_t>(model.name_bytes_used);
+    if (source_offset > file_bytes.size() ||
+        length > file_bytes.size() - source_offset ||
+        used > model.name_storage.size() ||
+        length > model.name_storage.size() - used) {
+      return false;
+    }
     std::memcpy(model.name_storage.data() + model.name_bytes_used,
                 file_bytes.data() + source_offset, length);
     tensor.name_offset = model.name_bytes_used;
     model.name_bytes_used += static_cast<uint32_t>(length);
   }
+  return true;
 }
 
 bool load_whisper_fixture_binding(
@@ -412,7 +420,10 @@ int main(int argc, char **argv) {
   model->weights_data = model_image.data();
   model->weights_size = model_image.size();
   model->weights_mapped = true;
-  materialize_tensor_names_from_file(*model, model_image);
+  if (!materialize_tensor_names_from_file(*model, model_image)) {
+    std::fprintf(stderr, "error: invalid Whisper tensor name metadata\n");
+    return 2;
+  }
   const uint64_t binding_ns = elapsed_ns(binding_start, steady_clock::now());
 
   const auto initialize_start = steady_clock::now();

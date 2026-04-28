@@ -337,6 +337,22 @@ TEST_CASE("whisper emel parity runner bounds transcript size before string") {
         std::string::npos);
 }
 
+TEST_CASE("whisper emel parity runner validates tensor name materialization") {
+  const std::string source =
+      read_file(whisper_emel_parity_runner_source_path());
+  REQUIRE(!source.empty());
+
+  CHECK(source.find("bool materialize_tensor_names_from_file") !=
+        std::string::npos);
+  CHECK(source.find("source_offset > file_bytes.size()") != std::string::npos);
+  CHECK(source.find("length > file_bytes.size() - source_offset") !=
+        std::string::npos);
+  CHECK(source.find("length > model.name_storage.size() - used") !=
+        std::string::npos);
+  CHECK(source.find("!materialize_tensor_names_from_file(*model, "
+                    "model_image)") != std::string::npos);
+}
+
 TEST_CASE("whisper single-thread wrapper defaults to stable closeout sample") {
   const std::string source = read_file(whisper_single_thread_script_path());
   REQUIRE(!source.empty());
