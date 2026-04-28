@@ -95,6 +95,16 @@ run_domain_boundary_gate() {
   "$ROOT_DIR/scripts/check_domain_boundaries.sh"
 }
 
+is_coverage_excluded_src_file() {
+  local file="$1"
+  case "$file" in
+    src/emel/*/sm.hpp)
+      return 0
+      ;;
+  esac
+  return 1
+}
+
 changed_files=()
 coverage_src_files=()
 test_shards=()
@@ -122,8 +132,10 @@ add_changed_file() {
     src/emel/*.h|src/emel/*.hh|src/emel/*.hpp|\
     src/emel/**/*.c|src/emel/**/*.cc|src/emel/**/*.cpp|src/emel/**/*.cxx|\
     src/emel/**/*.h|src/emel/**/*.hh|src/emel/**/*.hpp)
-      coverage_src_files+=("$file")
       infer_test_shard_for_src "$file"
+      if ! is_coverage_excluded_src_file "$file"; then
+        coverage_src_files+=("$file")
+      fi
       ;;
   esac
   case "$file" in

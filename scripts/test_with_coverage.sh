@@ -50,6 +50,16 @@ selected_test_dirs=()
 selected_test_sources=()
 unknown_changed_src=0
 
+is_coverage_excluded_src_file() {
+  local file="$1"
+  case "$file" in
+    src/emel/*/sm.hpp)
+      return 0
+      ;;
+  esac
+  return 1
+}
+
 add_changed_shard() {
   local shard="$1"
   local existing
@@ -154,13 +164,15 @@ if [[ "$COVERAGE_CHANGED_ONLY" == "1" ]]; then
 
   if [[ -n "$COVERAGE_CHANGED_FILES" ]]; then
     while IFS= read -r file; do
-      if [[ -n "$file" ]]; then
+      if [[ -n "$file" ]] && ! is_coverage_excluded_src_file "$file"; then
         changed_files+=("$file")
       fi
     done < <(printf '%s\n' "$COVERAGE_CHANGED_FILES" | tr ':,' '\n')
   else
     while IFS= read -r file; do
-      changed_files+=("$file")
+      if ! is_coverage_excluded_src_file "$file"; then
+        changed_files+=("$file")
+      fi
     done < <(
       {
         git diff --name-only --diff-filter=ACMR "$base_ref...HEAD" -- src

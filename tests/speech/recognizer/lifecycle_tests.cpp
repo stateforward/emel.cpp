@@ -311,6 +311,108 @@ TEST_CASE("speech_recognizer_runs_backend_route_from_public_events") {
   CHECK(recognition_capture.generated_token_count == 1);
 }
 
+TEST_CASE("speech_recognizer_returns_to_ready_after_rejected_recognition") {
+  emel::speech::recognizer::sm<test_route> recognizer{};
+  auto model = std::make_unique<emel::model::data>();
+  emel::error::type err =
+      emel::error::cast(emel::speech::recognizer::error::none);
+
+  emel::speech::recognizer::event::initialize initialize_ev{
+      *model, emel::speech::recognizer::event::tokenizer_assets{
+                  .model_json = "{}",
+                  .sha256 = k_backend_sha,
+              }};
+  initialize_ev.error_out = &err;
+  REQUIRE(recognizer.process_event(initialize_ev));
+  CHECK(err == emel::error::cast(emel::speech::recognizer::error::none));
+
+  std::array<char, 8> invalid_transcript{};
+  int32_t invalid_transcript_size = -1;
+  int32_t invalid_token = -1;
+  float invalid_confidence = -1.0f;
+  int32_t invalid_frames = -1;
+  int32_t invalid_width = -1;
+  uint64_t invalid_encoder_digest = 1u;
+  uint64_t invalid_decoder_digest = 1u;
+  recognition_error_capture error_capture{};
+
+  emel::speech::recognizer::event::recognize invalid_recognize_ev{
+      *model,
+      emel::speech::recognizer::event::tokenizer_assets{
+          .model_json = "{}",
+          .sha256 = k_backend_sha,
+      },
+      std::span<const float>{},
+      16000,
+      std::span<char>{invalid_transcript},
+      invalid_transcript_size,
+      invalid_token,
+      invalid_confidence,
+      invalid_frames,
+      invalid_width,
+      invalid_encoder_digest,
+      invalid_decoder_digest};
+  invalid_recognize_ev.error_out = &err;
+  invalid_recognize_ev.on_error = emel::callback<void(
+      const emel::speech::recognizer::events::recognition_error &)>::
+      from<recognition_error_capture, record_recognition_error>(&error_capture);
+
+  CHECK_FALSE(recognizer.process_event(invalid_recognize_ev));
+  CHECK(err ==
+        emel::error::cast(emel::speech::recognizer::error::invalid_request));
+  CHECK(error_capture.calls == 1);
+
+  std::array<float, 4> pcm{};
+  std::array<float, 4> encoder_workspace{};
+  std::array<float, 8> encoder_state{};
+  std::array<float, 8> decoder_workspace{};
+  std::array<float, 16> logits{};
+  std::array<int32_t, 4> generated_tokens{};
+  std::array<char, 8> transcript{};
+  int32_t transcript_size = -1;
+  int32_t selected_token = -1;
+  float confidence = -1.0f;
+  int32_t encoder_frames = -1;
+  int32_t encoder_width = -1;
+  uint64_t encoder_digest = 1u;
+  uint64_t decoder_digest = 1u;
+  int32_t generated_token_count = -1;
+
+  emel::speech::recognizer::event::recognize valid_recognize_ev{
+      *model,
+      emel::speech::recognizer::event::tokenizer_assets{
+          .model_json = "{}",
+          .sha256 = k_backend_sha,
+      },
+      std::span<const float>{pcm},
+      16000,
+      std::span<char>{transcript},
+      transcript_size,
+      selected_token,
+      confidence,
+      encoder_frames,
+      encoder_width,
+      encoder_digest,
+      decoder_digest,
+      generated_token_count};
+  valid_recognize_ev.storage = emel::speech::recognizer::event::runtime_storage{
+      .encoder_workspace = std::span<float>{encoder_workspace},
+      .encoder_state = std::span<float>{encoder_state},
+      .decoder_workspace = std::span<float>{decoder_workspace},
+      .logits = std::span<float>{logits},
+      .generated_tokens = std::span<int32_t>{generated_tokens},
+  };
+  err = emel::error::cast(emel::speech::recognizer::error::none);
+  valid_recognize_ev.error_out = &err;
+
+  REQUIRE(recognizer.process_event(valid_recognize_ev));
+  CHECK(err == emel::error::cast(emel::speech::recognizer::error::none));
+  CHECK(transcript_size == 2);
+  CHECK(transcript[0] == 'O');
+  CHECK(transcript[1] == 'K');
+  CHECK(selected_token == 67);
+}
+
 TEST_CASE("speech_recognizer_rejects_recognition_before_initialize") {
   emel::speech::recognizer::sm recognizer{};
   auto model = std::make_unique<emel::model::data>();

@@ -313,6 +313,19 @@ TEST_CASE("whisper emel parity runner stays on public runtime surfaces") {
         std::string::npos);
 }
 
+TEST_CASE("whisper emel parity runner escapes transcript JSON") {
+  const std::string source = read_file(whisper_emel_parity_runner_source_path());
+  REQUIRE(!source.empty());
+
+  CHECK(source.find("json_escape_string") != std::string::npos);
+  CHECK(source.find("json_escape_string(transcript_text)") !=
+        std::string::npos);
+  CHECK(source.find("transcript_json.c_str(), static_cast<uint64_t>") !=
+        std::string::npos);
+  CHECK(source.find("transcript_text.c_str(), static_cast<uint64_t>") ==
+        std::string::npos);
+}
+
 TEST_CASE("whisper single-thread wrapper defaults to stable closeout sample") {
   const std::string source = read_file(whisper_single_thread_script_path());
   REQUIRE(!source.empty());

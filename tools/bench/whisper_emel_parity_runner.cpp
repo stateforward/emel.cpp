@@ -302,6 +302,47 @@ uint64_t checksum_text(const std::string &text) {
   return hash;
 }
 
+std::string json_escape_string(const std::string_view text) {
+  std::string escaped = {};
+  escaped.reserve(text.size());
+  for (const unsigned char c : text) {
+    switch (c) {
+    case '"':
+      escaped += "\\\"";
+      break;
+    case '\\':
+      escaped += "\\\\";
+      break;
+    case '\b':
+      escaped += "\\b";
+      break;
+    case '\f':
+      escaped += "\\f";
+      break;
+    case '\n':
+      escaped += "\\n";
+      break;
+    case '\r':
+      escaped += "\\r";
+      break;
+    case '\t':
+      escaped += "\\t";
+      break;
+    default:
+      if (c < 0x20u) {
+        char buffer[7] = {};
+        std::snprintf(buffer, sizeof(buffer), "\\u%04x",
+                      static_cast<unsigned int>(c));
+        escaped += buffer;
+      } else {
+        escaped.push_back(static_cast<char>(c));
+      }
+      break;
+    }
+  }
+  return escaped;
+}
+
 } // namespace
 
 int main(int argc, char **argv) {
@@ -460,6 +501,9 @@ int main(int argc, char **argv) {
   const uint64_t total_ns = elapsed_ns(total_start, steady_clock::now());
 
   const uint64_t checksum = checksum_text(transcript_text);
+  const std::string transcript_json = json_escape_string(transcript_text);
+  const std::string transcript_path_json =
+      json_escape_string(transcript_path.string());
   std::printf(
       "{\"schema\":\"whisper_compare/"
       "v1\",\"record_type\":\"result\",\"status\":\"ok\","
@@ -494,8 +538,8 @@ int main(int argc, char **argv) {
       emel::speech::tokenizer::whisper::timestamp_mode_name(policy.timestamps)
           .data(),
       policy.suppress_translate ? "true" : "false", policy.prompt_tokens.size(),
-      transcript_text.c_str(), static_cast<uint64_t>(generated_token_count),
-      token, transcript_text.size(), checksum, transcript_path.string().c_str(),
+      transcript_json.c_str(), static_cast<uint64_t>(generated_token_count),
+      token, transcript_text.size(), checksum, transcript_path_json.c_str(),
       frames, width, encoder_digest, decoder_digest, total_ns, model_load_ns,
       audio_load_ns, binding_ns, contract_ns, recognize_ns, encode_ns,
       decode_ns, publish_ns);

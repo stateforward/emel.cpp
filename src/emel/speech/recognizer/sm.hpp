@@ -173,10 +173,10 @@ template <class route_policy = route::unsupported> struct model {
           / action::effect_emit_recognize_done
       , sml::state<state_done> <= sml::state<state_recognize_done_callback_decision>
           + sml::completion<event::recognize_run> [ guard::guard_no_recognize_done_callback{} ]
-      , sml::state<state_errored> <= sml::state<state_recognize_error_callback_decision>
+      , sml::state<state_ready> <= sml::state<state_recognize_error_callback_decision>
           + sml::completion<event::recognize_run> [ guard::guard_has_recognize_error_callback{} ]
           / action::effect_emit_recognize_error
-      , sml::state<state_errored> <= sml::state<state_recognize_error_callback_decision>
+      , sml::state<state_ready> <= sml::state<state_recognize_error_callback_decision>
           + sml::completion<event::recognize_run> [ guard::guard_no_recognize_error_callback{} ]
       , sml::state<state_ready> <= sml::state<state_done>
           + sml::completion<event::recognize_run>
