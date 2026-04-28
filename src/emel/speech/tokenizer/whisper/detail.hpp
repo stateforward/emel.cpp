@@ -293,13 +293,48 @@ inline size_t required_transcript_capacity(std::string_view tokenizer_json,
   return token_count * token_bytes;
 }
 
+inline bool decode_json_escaped_byte(const char escaped,
+                                     char &byte_out) noexcept {
+  switch (escaped) {
+  case '"':
+    byte_out = '"';
+    return true;
+  case '\\':
+    byte_out = '\\';
+    return true;
+  case '/':
+    byte_out = '/';
+    return true;
+  case 'b':
+    byte_out = '\b';
+    return true;
+  case 'f':
+    byte_out = '\f';
+    return true;
+  case 'n':
+    byte_out = '\n';
+    return true;
+  case 'r':
+    byte_out = '\r';
+    return true;
+  case 't':
+    byte_out = '\t';
+    return true;
+  default:
+    return false;
+  }
+}
+
 inline void append_decoded_piece(std::string_view piece, char *transcript,
                                  const uint64_t capacity,
                                  uint64_t &size) noexcept {
   for (size_t index = 0u; index < piece.size();) {
     char out = piece[index];
     uint64_t advance = 1u;
-    if (index + 1u < piece.size() &&
+    if (piece[index] == '\\' && index + 1u < piece.size() &&
+        decode_json_escaped_byte(piece[index + 1u], out)) {
+      advance = 2u;
+    } else if (index + 1u < piece.size() &&
         static_cast<unsigned char>(piece[index]) == 0xc4u &&
         static_cast<unsigned char>(piece[index + 1u]) == 0xa0u) {
       out = ' ';

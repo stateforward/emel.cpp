@@ -170,6 +170,22 @@ TEST_CASE("speech whisper tokenizer restricts id lookup to vocab entries") {
         "!real");
 }
 
+TEST_CASE("speech whisper tokenizer decodes escaped vocab token text") {
+  namespace whisper = emel::speech::tokenizer::whisper::detail;
+
+  const std::string tokenizer_json =
+      R"({"model":{"vocab":{"\"":1,"\\":2,"\/":3,)"
+      R"("\b":4,"\f":5,"\n":6,"\r":7,"\t":8,"plain":9}}})";
+  int32_t token_ids[] = {1, 2, 3, 4, 5, 6, 7, 8, 9};
+  char transcript[24] = {};
+  const uint64_t transcript_size = whisper::decode_token_ids(
+      tokenizer_json, std::span<const int32_t>{token_ids}, transcript,
+      sizeof(transcript));
+
+  CHECK(std::string_view{transcript, static_cast<size_t>(transcript_size)} ==
+        "\"\\/\b\f\n\r\tplain");
+}
+
 TEST_CASE("speech whisper tokenizer trims leading spaces and respects capacity") {
   namespace whisper = emel::speech::tokenizer::whisper::detail;
 
