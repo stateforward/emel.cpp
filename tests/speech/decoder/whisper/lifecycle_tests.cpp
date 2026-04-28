@@ -9,6 +9,7 @@
 #include <fstream>
 #include <memory>
 #include <span>
+#include <string>
 #include <string_view>
 #include <vector>
 
@@ -85,6 +86,13 @@ std::vector<uint8_t> read_binary_file(const std::filesystem::path & path) {
   stream.read(reinterpret_cast<char *>(bytes.data()), size);
   REQUIRE(stream.good());
   return bytes;
+}
+
+std::string read_text_file(const std::filesystem::path & path) {
+  std::ifstream stream(path);
+  REQUIRE(stream.good());
+  return std::string{std::istreambuf_iterator<char>{stream},
+                     std::istreambuf_iterator<char>{}};
 }
 
 void materialize_tensor_names_from_file(emel::model::data & model,
@@ -246,6 +254,73 @@ encoded_fixture encode_fixture_audio(const loaded_whisper_fixture & loaded) {
 }
 
 }  // namespace
+
+TEST_CASE("whisper_decoder_runtime_owns_decode_detail_dependencies") {
+  const auto root = repo_root();
+  const std::array<std::filesystem::path, 3> production_files{
+      root / "src" / "emel" / "speech" / "decoder" / "whisper" / "actions.hpp",
+      root / "src" / "emel" / "speech" / "decoder" / "whisper" / "guards.hpp",
+      root / "src" / "emel" / "speech" / "decoder" / "whisper" / "detail.hpp",
+  };
+
+  for (const auto &path : production_files) {
+    const std::string source = read_text_file(path);
+    CHECK(source.find("emel/speech/encoder/whisper/detail.hpp") == std::string::npos);
+    CHECK(source.find("encoder::whisper::detail") == std::string::npos);
+  }
+
+  const std::string decoder_detail = read_text_file(production_files[2]);
+  CHECK(decoder_detail.find("run_decoder_sequence") != std::string::npos);
+  CHECK(decoder_detail.find("select_greedy_timestamp_aware_token") != std::string::npos);
+}
+
+TEST_CASE("whisper_decoder_detail_timestamp_blocking_is_decoder_owned") {
+  namespace whisper = emel::speech::decoder::whisper::detail;
+
+  std::vector<float> logits(static_cast<size_t>(whisper::k_vocab_size),
+                            -1000.0f);
+  logits[42] = 100.0f;
+  logits[static_cast<size_t>(whisper::k_token_timestamp_begin)] = 0.0f;
+  const std::array<int32_t, 2> generated{42,
+                                         whisper::k_token_timestamp_begin};
+  const whisper::decode_policy_runtime policy{};
+  float confidence = 0.0f;
+  const int32_t token = whisper::select_greedy_timestamp_aware_token(
+      policy, logits.data(), generated.data(), generated.size(), false,
+      confidence);
+  CHECK(token >= whisper::k_token_timestamp_begin);
+}
+
+TEST_CASE("whisper_decoder_detail_timestamp_policy_suppresses_control_tokens") {
+  namespace whisper = emel::speech::decoder::whisper::detail;
+
+  const whisper::decode_policy_runtime policy{};
+
+  std::vector<float> initial_logits(
+      static_cast<size_t>(whisper::k_vocab_size), -1000.0f);
+  initial_logits[static_cast<size_t>(policy.eot)] = 500.0f;
+  initial_logits[static_cast<size_t>(policy.space)] = 400.0f;
+  initial_logits[42] = 10.0f;
+  float initial_confidence = 0.0f;
+  const int32_t initial_token = whisper::select_greedy_timestamp_aware_token(
+      policy, initial_logits.data(), nullptr, 0u, true, initial_confidence);
+  CHECK(initial_token == 42);
+  CHECK(initial_confidence == doctest::Approx(10.0f));
+
+  std::vector<float> control_logits(
+      static_cast<size_t>(whisper::k_vocab_size), -1000.0f);
+  control_logits[static_cast<size_t>(policy.sot)] = 600.0f;
+  control_logits[static_cast<size_t>(policy.translate)] = 500.0f;
+  control_logits[static_cast<size_t>(policy.transcribe)] = 400.0f;
+  control_logits[static_cast<size_t>(policy.no_speech)] = 300.0f;
+  control_logits[static_cast<size_t>(policy.notimestamps)] = 200.0f;
+  control_logits[77] = 20.0f;
+  float control_confidence = 0.0f;
+  const int32_t control_token = whisper::select_greedy_timestamp_aware_token(
+      policy, control_logits.data(), nullptr, 0u, false, control_confidence);
+  CHECK(control_token == 77);
+  CHECK(control_confidence == doctest::Approx(20.0f));
+}
 
 TEST_CASE("whisper_decoder_rejects_invalid_runtime_capacity") {
   auto loaded = load_fixture_or_skip();

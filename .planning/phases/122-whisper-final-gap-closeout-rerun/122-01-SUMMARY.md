@@ -9,6 +9,12 @@ requirements-completed:
 
 # Summary 122.1
 
+## Supersession Notice
+
+This closeout result is historical. The 2026-04-28 recognizer-backed audits superseded it because
+this phase still cited the pre-recognizer runtime surface. Phase 127 is the active source-backed
+closeout truth, and Phase 128 stabilizes the benchmark/evidence ledger before archive.
+
 ## Completed
 
 - Reran the source-backed v1.16 closeout after Phase 120 repaired decode-policy/runtime transcript
@@ -37,4 +43,6 @@ requirements-completed:
 
 ## Residual Work
 
-None for the reopened v1.16 closeout. The next workflow step is milestone archival/cleanup.
+This phase has no remaining work in its original scope, but it no longer owns final v1.16
+closeout truth. Phases 123-127 superseded the runtime and closeout surface, and Phase 128 owns the
+remaining evidence cleanup.

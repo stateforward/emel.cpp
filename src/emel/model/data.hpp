@@ -104,7 +104,7 @@ struct data {
     uint64_t data_offset = 0;
     uint64_t file_offset = 0;
     uint64_t data_size = 0;
-    const void * data = nullptr;
+    const void *data = nullptr;
     uint16_t file_index = 0;
   };
 
@@ -187,7 +187,8 @@ struct data {
     int32_t attention_sliding_window = 0;
     int32_t attention_sliding_window_pattern = 0;
     uint32_t attention_sliding_window_pattern_count = 0;
-    std::array<uint8_t, k_max_metadata_arrays> attention_sliding_window_pattern_flags = {};
+    std::array<uint8_t, k_max_metadata_arrays>
+        attention_sliding_window_pattern_flags = {};
     float attention_scale = 0.0f;
     float attention_output_scale = 0.0f;
     int32_t attention_temperature_length = 0;
@@ -203,7 +204,8 @@ struct data {
     int32_t n_rot_swa = 0;
     float rope_scale_linear = 0.0f;
     int32_t rope_dimension_sections_count = 0;
-    std::array<int32_t, k_max_rope_dimension_sections> rope_dimension_sections = {};
+    std::array<int32_t, k_max_rope_dimension_sections> rope_dimension_sections =
+        {};
     float rope_scaling_factor = 0.0f;
     float rope_scaling_attn_factor = 0.0f;
     int32_t rope_scaling_orig_ctx_len = 0;
@@ -253,7 +255,8 @@ struct data {
     std::array<vocab_entry, k_max_vocab_tokens> entries = {};
     std::array<uint32_t, k_max_merges> merge_offsets = {};
     std::array<uint32_t, k_max_merges> merge_lengths = {};
-    std::array<uint8_t, k_max_precompiled_charsmap_bytes> precompiled_charsmap = {};
+    std::array<uint8_t, k_max_precompiled_charsmap_bytes> precompiled_charsmap =
+        {};
     static constexpr uint32_t k_attr_flag_bytes = (k_max_vocab_tokens + 7) / 8;
     std::array<uint8_t, k_attr_flag_bytes> lstrip_flags = {};
     std::array<uint8_t, k_attr_flag_bytes> rstrip_flags = {};
@@ -504,7 +507,7 @@ struct data {
   std::array<char, k_max_architecture_name> architecture_name = {};
   std::array<char, k_max_name_bytes> name_storage = {};
   std::array<tensor_record, k_max_tensors> tensors = {};
-  const void * weights_data = nullptr;
+  const void *weights_data = nullptr;
   uint64_t weights_size = 0;
   bool weights_mapped = false;
   uint16_t weights_split_count = 1;
@@ -515,17 +518,21 @@ struct data {
   metadata meta = {};
 };
 
-std::string_view tensor_name_view(const data & model_data,
-                                  const data::tensor_record & tensor) noexcept;
-std::string_view metadata_string_view(
-    const data::metadata & metadata,
-    const data::metadata::string_view & value) noexcept;
-bool try_parse_block_index(std::string_view name, int32_t & block_index_out) noexcept;
-std::string_view architecture_name_view(const data & model_data) noexcept;
-bool is_supported_execution_architecture(std::string_view architecture) noexcept;
+std::string_view tensor_name_view(const data &model_data,
+                                  const data::tensor_record &tensor) noexcept;
+std::string_view
+metadata_string_view(const data::metadata &metadata,
+                     const data::metadata::string_view &value) noexcept;
+bool try_parse_block_index(std::string_view name,
+                           int32_t &block_index_out) noexcept;
+std::string_view architecture_name_view(const data &model_data) noexcept;
+bool is_supported_execution_architecture(
+    std::string_view architecture) noexcept;
 bool is_lfm2_execution_architecture(std::string_view architecture) noexcept;
 bool is_gemma4_execution_architecture(std::string_view architecture) noexcept;
-bool is_omniembed_execution_architecture(std::string_view architecture) noexcept;
-emel::error::type validate_execution_contract(const data & model_data) noexcept;
+bool is_omniembed_execution_architecture(
+    std::string_view architecture) noexcept;
+bool is_whisper_execution_architecture(std::string_view architecture) noexcept;
+emel::error::type validate_execution_contract(const data &model_data) noexcept;
 
-}  // namespace emel::model
+} // namespace emel::model

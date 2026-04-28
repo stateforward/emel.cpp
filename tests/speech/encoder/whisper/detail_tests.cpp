@@ -3,7 +3,11 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <filesystem>
+#include <fstream>
+#include <iterator>
 #include <memory>
+#include <string>
 #include <vector>
 
 #include "doctest/doctest.h"
@@ -25,6 +29,21 @@ tensor_record make_tensor(std::array<block_type, block_count> & blocks,
   tensor.data = blocks.data();
   tensor.data_size = sizeof(block_type) * block_count;
   return tensor;
+}
+
+std::filesystem::path repo_root() {
+#ifdef EMEL_TEST_REPO_ROOT
+  return std::filesystem::path{EMEL_TEST_REPO_ROOT};
+#else
+  return std::filesystem::current_path();
+#endif
+}
+
+std::string read_text_file(const std::filesystem::path & path) {
+  std::ifstream stream(path);
+  REQUIRE(stream.good());
+  return std::string{std::istreambuf_iterator<char>{stream},
+                     std::istreambuf_iterator<char>{}};
 }
 
 }  // namespace
@@ -264,7 +283,7 @@ TEST_CASE("whisper detail convolution helpers cover interior frame paths") {
                     [](const float value) { return std::isfinite(value); }));
 }
 
-TEST_CASE("whisper detail f32 auxiliary readers and timestamp blocking are covered") {
+TEST_CASE("whisper detail f32 auxiliary readers are covered") {
   namespace whisper = emel::speech::encoder::whisper::detail;
 
   std::array<float, 4> f32_values{1.25f, -2.5f, 3.75f, 4.5f};
@@ -279,48 +298,18 @@ TEST_CASE("whisper detail f32 auxiliary readers and timestamp blocking are cover
         doctest::Approx(-2.5f));
   CHECK(whisper::read_aux_matrix<whisper::aux_weight_variant::f32>(f32_tensor, 2) ==
         doctest::Approx(3.75f));
-
-  std::vector<float> logits(static_cast<size_t>(whisper::k_vocab_size), -1000.0f);
-  logits[42] = 100.0f;
-  logits[static_cast<size_t>(whisper::k_token_timestamp_begin)] = 0.0f;
-  const std::array<int32_t, 2> generated{42, whisper::k_token_timestamp_begin};
-  const whisper::decode_policy_runtime policy{};
-  float confidence = 0.0f;
-  const int32_t token = whisper::select_greedy_timestamp_aware_token(
-      policy, logits.data(), generated.data(), generated.size(), false,
-      confidence);
-  CHECK(token >= whisper::k_token_timestamp_begin);
 }
 
-TEST_CASE("whisper detail timestamp policy suppresses initial and control tokens") {
-  namespace whisper = emel::speech::encoder::whisper::detail;
-
-  const whisper::decode_policy_runtime policy{};
-
-  std::vector<float> initial_logits(
-      static_cast<size_t>(whisper::k_vocab_size), -1000.0f);
-  initial_logits[static_cast<size_t>(policy.eot)] = 500.0f;
-  initial_logits[static_cast<size_t>(policy.space)] = 400.0f;
-  initial_logits[42] = 10.0f;
-  float initial_confidence = 0.0f;
-  const int32_t initial_token = whisper::select_greedy_timestamp_aware_token(
-      policy, initial_logits.data(), nullptr, 0u, true, initial_confidence);
-  CHECK(initial_token == 42);
-  CHECK(initial_confidence == doctest::Approx(10.0f));
-
-  std::vector<float> control_logits(
-      static_cast<size_t>(whisper::k_vocab_size), -1000.0f);
-  control_logits[static_cast<size_t>(policy.sot)] = 600.0f;
-  control_logits[static_cast<size_t>(policy.translate)] = 500.0f;
-  control_logits[static_cast<size_t>(policy.transcribe)] = 400.0f;
-  control_logits[static_cast<size_t>(policy.no_speech)] = 300.0f;
-  control_logits[static_cast<size_t>(policy.notimestamps)] = 200.0f;
-  control_logits[77] = 20.0f;
-  float control_confidence = 0.0f;
-  const int32_t control_token = whisper::select_greedy_timestamp_aware_token(
-      policy, control_logits.data(), nullptr, 0u, false, control_confidence);
-  CHECK(control_token == 77);
-  CHECK(control_confidence == doctest::Approx(20.0f));
+TEST_CASE("whisper encoder detail does not own decoder runtime helpers") {
+  const std::string source = read_text_file(
+      repo_root() / "src/emel/speech/encoder/whisper/detail.hpp");
+  CHECK(source.find("decode_policy_runtime") == std::string::npos);
+  CHECK(source.find("required_decoder_workspace_floats") == std::string::npos);
+  CHECK(source.find("compute_decoder_cross_cache") == std::string::npos);
+  CHECK(source.find("run_decoder_layer_sequence") == std::string::npos);
+  CHECK(source.find("compute_decoder_logits_for_tokens") == std::string::npos);
+  CHECK(source.find("select_greedy_timestamp_aware_token") == std::string::npos);
+  CHECK(source.find("run_decoder_sequence") == std::string::npos);
 }
 
 TEST_CASE("whisper detail spectral helpers prepare stable frame transforms") {

@@ -101,6 +101,13 @@ add_test_dirs_for_shard() {
     diarization)
       add_selected_test_dir tests/diarization
       ;;
+    speech)
+      add_selected_test_dir tests/speech
+      ;;
+    whisper)
+      add_selected_test_dir tests/speech/encoder/whisper
+      add_selected_test_dir tests/speech/decoder/whisper
+      ;;
     sm)
       add_selected_test_dir tests/sm
       ;;
@@ -179,7 +186,7 @@ if [[ "$COVERAGE_CHANGED_ONLY" == "1" ]]; then
   for file in "${changed_files[@]}"; do
     echo "  $file"
     escaped_file="$(printf '%s\n' "$file" | sed 's/[][(){}.^$+*?|\\]/\\&/g')"
-    coverage_filters+=(--filter "^${escaped_file}$")
+    coverage_filters+=(--filter "(^|.*/)${escaped_file}$")
 
     case "$file" in
       src/emel/model/*|src/emel/model*.hpp|src/emel/gguf/*|src/emel/gbnf/*|src/emel/batch/*)
@@ -190,6 +197,9 @@ if [[ "$COVERAGE_CHANGED_ONLY" == "1" ]]; then
         ;;
       src/emel/diarization/*)
         add_changed_shard diarization
+        ;;
+      src/emel/speech/*|src/emel/speech/**/*)
+        add_changed_shard speech
         ;;
       src/emel/sm/*)
         add_changed_shard sm
@@ -337,6 +347,7 @@ if [[ "$COVERAGE_CHANGED_ONLY" == "1" &&
     tests/logits
     tests/token
     tests/diarization
+    tests/speech
     tests/sm
     tests/text
     tests/text/encoders
@@ -376,6 +387,7 @@ gcovr \
   "${coverage_filters[@]}" \
   --exclude tests \
   --exclude 'src/emel/.*/sm.hpp' \
+  --gcov-ignore-errors no_working_dir_found \
   --gcov-ignore-parse-errors suspicious_hits.warn_once_per_file \
   --exclude-throw-branches \
   --exclude-unreachable-branches \

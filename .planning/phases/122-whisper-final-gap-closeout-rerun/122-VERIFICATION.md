@@ -10,8 +10,10 @@ requirements:
 
 ## Verdict
 
-Passed. The repaired maintained Whisper source path, preserved-baseline validation ledger, default
-warmed benchmark, and full closeout quality gate all pass. `CLOSE-01` is source-backed.
+Passed for its historical scope. The repaired maintained Whisper source path,
+preserved-baseline validation ledger, default warmed benchmark, and full closeout quality gate
+passed on 2026-04-27. This verification is superseded for final v1.16 closeout by the
+recognizer-backed Phase 127 audit truth and the Phase 128 evidence cleanup.
 
 ## Evidence
 
@@ -63,7 +65,7 @@ warmed benchmark, and full closeout quality gate all pass. `CLOSE-01` is source-
 
 ## Closeout Result
 
-The prior audit blockers are closed:
+The prior audit blockers for Phase 122's historical scope were closed:
 
 - `POLICY-01`: Phase 120 made the decoder public event carry the speech-owned ASR decode policy
   and routed policy validation through decoder SML guards.
@@ -71,3 +73,7 @@ The prior audit blockers are closed:
   publication remains tokenizer-owned in the maintained runner.
 - Baseline Nyquist: Phase 121 added archived-baseline validation artifacts for Phases 94-102.
 - `CLOSE-01`: this phase reran source-backed closeout evidence and the full relevant quality gate.
+
+Phase 122 no longer owns the active `CLOSE-01` proof. Later audits required the public recognizer
+route, explicit recognizer route graph, and decoder-owned runtime execution, now closed by Phases
+123-127.

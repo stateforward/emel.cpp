@@ -1,0 +1,18 @@
+{
+  "id": "whisper_cpp_asr",
+  "surface": "whisper_compare/v1",
+  "display_name": "Pinned whisper.cpp ASR reference lane",
+  "language": "cpp",
+  "repository": "https://github.com/ggml-org/whisper.cpp.git",
+  "ref": "v1.7.6",
+  "commit": "a8d002cfd879315632a579e73f0148d06959de36",
+  "description": "Pinned whisper.cpp CLI reference lane for the v1.16 Whisper tiny ASR parity workflow.",
+  "build_command": [
+    "scripts/setup_whisper_cpp_reference.sh",
+    "--build-only"
+  ],
+  "run_command": [
+    "scripts/bench_whisper_compare.sh",
+    "--skip-reference-build"
+  ]
+}

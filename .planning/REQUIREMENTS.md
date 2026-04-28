@@ -19,17 +19,21 @@
 - [x] **PERF-03** — Restore a source-backed benchmark record where EMEL beats the matched
   single-thread CPU `whisper.cpp` ARM reference lane for the maintained Phase 99 model/audio pair.
 
-**Coverage after source-backed closeout:** 8 complete, 0 pending.
+**Coverage after latest source-backed audit:** 8 complete, 0 pending.
+
+Phase 128 and Phase 129 are tech-debt cleanup phases created from the milestone audit. They do not
+reset active requirement status because the audit found no unsatisfied requirement, integration, or
+flow gaps. Phases 128 and 129 are complete.
 
 ## Traceability
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| REOPEN-01 | 117 | Complete |
-| SPEECH-01 | 118 | Complete |
-| TOK-01 | 114 | Complete |
-| TOK-02 | 120 | Complete |
-| POLICY-01 | 120 | Complete |
-| PARITY-01 | 118 | Complete |
-| CLOSE-01 | 122 | Complete |
-| PERF-03 | 118 | Complete |
+| REOPEN-01 | 124 | Complete |
+| SPEECH-01 | 127 | Complete |
+| TOK-01 | 123 | Complete |
+| TOK-02 | 123 | Complete |
+| POLICY-01 | 127 | Complete |
+| PARITY-01 | 124 | Complete |
+| CLOSE-01 | 127 | Complete |
+| PERF-03 | 124 | Complete |

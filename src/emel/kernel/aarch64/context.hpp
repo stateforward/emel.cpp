@@ -42,6 +42,10 @@ struct context {
   uint64_t optimized_q4_vector_dispatch_count = 0;
   uint64_t optimized_q4_vector_packed_dispatch_count = 0;
   uint64_t optimized_q4_vector_packed_q8_rhs_dispatch_count = 0;
+  uint64_t optimized_q4_0_dispatch_count = 0;
+  uint64_t optimized_q4_0_vector_dispatch_count = 0;
+  uint64_t optimized_q4_1_dispatch_count = 0;
+  uint64_t optimized_q4_1_vector_dispatch_count = 0;
   uint64_t shared_q4_dispatch_count = 0;
   uint64_t optimized_q6_dispatch_count = 0;
   uint64_t optimized_q6_vector_dispatch_count = 0;

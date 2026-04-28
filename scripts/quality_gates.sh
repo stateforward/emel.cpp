@@ -91,6 +91,10 @@ record_skipped_step() {
   write_timing_snapshot
 }
 
+run_domain_boundary_gate() {
+  "$ROOT_DIR/scripts/check_domain_boundaries.sh"
+}
+
 changed_files=()
 coverage_src_files=()
 test_shards=()
@@ -167,6 +171,9 @@ infer_test_shard_for_src() {
       ;;
     src/emel/diarization/*)
       add_test_shard diarization
+      ;;
+    src/emel/speech/*|src/emel/speech/**/*)
+      add_test_shard speech
       ;;
     src/emel/sm/*)
       add_test_shard sm
@@ -268,7 +275,13 @@ infer_quality_gate_scope() {
   local raw_suite
 
   if [[ "$QUALITY_GATES_SCOPE" == "full" ]]; then
-    bench_full=true
+    if [[ -n "$QUALITY_GATES_BENCH_SUITE" ]]; then
+      while IFS= read -r raw_suite; do
+        add_bench_suite "$raw_suite"
+      done < <(printf '%s\n' "$QUALITY_GATES_BENCH_SUITE" | tr ':,' '\n')
+    else
+      bench_full=true
+    fi
     docs_needed=true
     parity_needed=true
     fuzz_needed=true
@@ -440,6 +453,24 @@ run_benchmark_gates() {
         bench_warmup_runs="${EMEL_QUALITY_GATES_DIARIZATION_BENCH_WARMUP_RUNS:-1}"
         bench_tolerance="${EMEL_QUALITY_GATES_DIARIZATION_BENCH_TOLERANCE:-0.30}"
         ;;
+      whisper_compare)
+        if run_step_allow_fail "bench_snapshot_${suite}" \
+          "$ROOT_DIR/scripts/bench_whisper_compare.sh"; then
+          continue
+        else
+          status=$?
+          continue
+        fi
+        ;;
+      whisper_single_thread)
+        if run_step_allow_fail "bench_snapshot_${suite}" \
+          "$ROOT_DIR/scripts/bench_whisper_single_thread.sh"; then
+          continue
+        else
+          status=$?
+          continue
+        fi
+        ;;
     esac
     if run_step_allow_fail "bench_snapshot_${suite}" env \
       EMEL_BENCH_ITERS="$bench_iters" \
@@ -477,6 +508,7 @@ if [[ -z "$test_shard_list" &&
   test_shard_list="$(IFS=,; echo "${test_shards[*]}")"
 fi
 
+run_step domain_boundaries run_domain_boundary_gate
 run_step build_with_zig env \
   EMEL_ZIG_TEST_SHARDS="$test_shard_list" \
   "$ROOT_DIR/scripts/build_with_zig.sh"

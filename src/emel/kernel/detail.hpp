@@ -6,6 +6,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <limits>
 #include <type_traits>
 
 #if defined(__aarch64__) || defined(__ARM_NEON)
@@ -144,11 +145,14 @@ namespace emel::kernel::detail {
 inline constexpr uint8_t dtype_f32 = 0;
 inline constexpr uint8_t dtype_f16 = 1;
 inline constexpr uint8_t dtype_q4_0 = 2;
+inline constexpr uint8_t dtype_q4_1 = 3;
 inline constexpr uint8_t dtype_q5_0 = 6;
+inline constexpr uint8_t dtype_q5_1 = 7;
 inline constexpr uint8_t dtype_q8_0 = 8;
 inline constexpr uint8_t dtype_q2_k = 10;
 inline constexpr uint8_t dtype_q3_k = 11;
 inline constexpr uint8_t dtype_q4_k = 12;
+inline constexpr uint8_t dtype_q5_k = 13;
 inline constexpr uint8_t dtype_q6_k = 14;
 inline constexpr uint8_t dtype_q8_k = 15;
 inline constexpr uint8_t dtype_q6_k_x8 = 36;
@@ -174,7 +178,10 @@ struct flash_attn_workspace {
 
 namespace quant {
 
+constexpr uint64_t QK4_0 = 32u;
+constexpr uint64_t QK4_1 = 32u;
 constexpr uint64_t QK5_0 = 32u;
+constexpr uint64_t QK5_1 = 32u;
 constexpr uint64_t QK8_0 = 32u;
 constexpr uint64_t QK_K = 256u;
 constexpr uint64_t K_SCALE_SIZE = 12u;
@@ -184,10 +191,28 @@ constexpr uint64_t Q4_K_X8_ROWS = 8u;
 constexpr uint64_t Q6_K_X8_ROWS = 8u;
 constexpr uint64_t Q8_0_X4_ROWS = 4u;
 
+struct block_q4_0 {
+  uint16_t d = 0;
+  std::array<uint8_t, QK4_0 / 2> qs = {};
+};
+
+struct block_q4_1 {
+  uint16_t d = 0;
+  uint16_t m = 0;
+  std::array<uint8_t, QK4_1 / 2> qs = {};
+};
+
 struct block_q5_0 {
   uint16_t d = 0;
   std::array<uint8_t, 4> qh = {};
   std::array<uint8_t, QK5_0 / 2> qs = {};
+};
+
+struct block_q5_1 {
+  uint16_t d = 0;
+  uint16_t m = 0;
+  std::array<uint8_t, 4> qh = {};
+  std::array<uint8_t, QK5_1 / 2> qs = {};
 };
 
 struct block_q8_0 {
@@ -218,6 +243,14 @@ struct block_q4_k {
   uint16_t d = 0;
   uint16_t dmin = 0;
   std::array<uint8_t, K_SCALE_SIZE> scales = {};
+  std::array<uint8_t, QK_K / 2> qs = {};
+};
+
+struct block_q5_k {
+  uint16_t d = 0;
+  uint16_t dmin = 0;
+  std::array<uint8_t, K_SCALE_SIZE> scales = {};
+  std::array<uint8_t, QK_K / 8> qh = {};
   std::array<uint8_t, QK_K / 2> qs = {};
 };
 
@@ -260,11 +293,15 @@ struct block_q8_k {
   std::array<int16_t, QK_K / 16> bsums = {};
 };
 
+static_assert(sizeof(block_q4_0) == sizeof(uint16_t) + (QK4_0 / 2));
+static_assert(sizeof(block_q4_1) == 2 * sizeof(uint16_t) + (QK4_1 / 2));
 static_assert(sizeof(block_q5_0) == sizeof(uint16_t) + sizeof(uint32_t) + (QK5_0 / 2));
+static_assert(sizeof(block_q5_1) == 2 * sizeof(uint16_t) + sizeof(uint32_t) + (QK5_1 / 2));
 static_assert(sizeof(block_q8_0) == sizeof(uint16_t) + QK8_0);
 static_assert(sizeof(block_q2_k) == 2 * sizeof(uint16_t) + (QK_K / 16) + (QK_K / 4));
 static_assert(sizeof(block_q3_k) == sizeof(uint16_t) + (QK_K / 4) + (QK_K / 8) + 12);
 static_assert(sizeof(block_q4_k) == 2 * sizeof(uint16_t) + K_SCALE_SIZE + (QK_K / 2));
+static_assert(sizeof(block_q5_k) == 2 * sizeof(uint16_t) + K_SCALE_SIZE + (5 * QK_K / 8));
 static_assert(sizeof(block_q6_k) == sizeof(uint16_t) + (QK_K / 16) + (3 * QK_K / 4));
 static_assert(
     sizeof(block_q4_kx8) ==
@@ -430,6 +467,38 @@ inline void get_scale_min_k4(const int j,
   *m = static_cast<uint8_t>((q[j + 4] >> 4u) | ((q[j - 0] >> 6u) << 4u));
 }
 
+inline void dequantize_row_q4_0(const block_q4_0 * x, float * y, const int64_t k) noexcept {
+  const int64_t nb = k / static_cast<int64_t>(QK4_0);
+
+  for (int64_t i = 0; i < nb; ++i) {
+    const float d = fp16_to_fp32(x[i].d);
+    for (uint64_t j = 0; j < (QK4_0 / 2u); ++j) {
+      const int32_t x0 = static_cast<int32_t>(x[i].qs[j] & 0x0fu) - 8;
+      const int32_t x1 = static_cast<int32_t>(x[i].qs[j] >> 4u) - 8;
+      y[i * static_cast<int64_t>(QK4_0) + static_cast<int64_t>(j)] = static_cast<float>(x0) * d;
+      y[i * static_cast<int64_t>(QK4_0) + static_cast<int64_t>(j + (QK4_0 / 2u))] =
+          static_cast<float>(x1) * d;
+    }
+  }
+}
+
+inline void dequantize_row_q4_1(const block_q4_1 * x, float * y, const int64_t k) noexcept {
+  const int64_t nb = k / static_cast<int64_t>(QK4_1);
+
+  for (int64_t i = 0; i < nb; ++i) {
+    const float d = fp16_to_fp32(x[i].d);
+    const float m = fp16_to_fp32(x[i].m);
+    for (uint64_t j = 0; j < (QK4_1 / 2u); ++j) {
+      const uint8_t x0 = x[i].qs[j] & 0x0fu;
+      const uint8_t x1 = x[i].qs[j] >> 4u;
+      y[i * static_cast<int64_t>(QK4_1) + static_cast<int64_t>(j)] =
+          static_cast<float>(x0) * d + m;
+      y[i * static_cast<int64_t>(QK4_1) + static_cast<int64_t>(j + (QK4_1 / 2u))] =
+          static_cast<float>(x1) * d + m;
+    }
+  }
+}
+
 inline void dequantize_row_q4_k(const block_q4_k * x, float * y, const int64_t k) noexcept {
   const int64_t nb = k / static_cast<int64_t>(QK_K);
 
@@ -456,6 +525,43 @@ inline void dequantize_row_q4_k(const block_q4_k * x, float * y, const int64_t k
       }
       q += 32;
       is += 2;
+    }
+  }
+}
+
+inline void dequantize_row_q5_k(const block_q5_k * x, float * y, const int64_t k) noexcept {
+  const int64_t nb = k / static_cast<int64_t>(QK_K);
+
+  for (int64_t i = 0; i < nb; ++i) {
+    const uint8_t * ql = x[i].qs.data();
+    const uint8_t * qh = x[i].qh.data();
+    const float d = fp16_to_fp32(x[i].d);
+    const float min = fp16_to_fp32(x[i].dmin);
+    int is = 0;
+    uint8_t u1 = 1u;
+    uint8_t u2 = 2u;
+
+    for (int j = 0; j < static_cast<int>(QK_K); j += 64) {
+      uint8_t sc = 0u;
+      uint8_t m = 0u;
+      get_scale_min_k4(is + 0, x[i].scales.data(), &sc, &m);
+      const float d0 = d * static_cast<float>(sc);
+      const float m0 = min * static_cast<float>(m);
+      get_scale_min_k4(is + 1, x[i].scales.data(), &sc, &m);
+      const float d1 = d * static_cast<float>(sc);
+      const float m1 = min * static_cast<float>(m);
+      for (int l = 0; l < 32; ++l) {
+        const uint8_t high = (qh[l] & u1) != 0u ? 16u : 0u;
+        *y++ = d0 * static_cast<float>((ql[l] & 0x0fu) + high) - m0;
+      }
+      for (int l = 0; l < 32; ++l) {
+        const uint8_t high = (qh[l] & u2) != 0u ? 16u : 0u;
+        *y++ = d1 * static_cast<float>((ql[l] >> 4u) + high) - m1;
+      }
+      ql += 32;
+      is += 2;
+      u1 = static_cast<uint8_t>(u1 << 2u);
+      u2 = static_cast<uint8_t>(u2 << 2u);
     }
   }
 }
@@ -516,6 +622,28 @@ inline void dequantize_row_q5_0(const block_q5_0 * x, float * y, const int64_t k
   }
 }
 
+inline void dequantize_row_q5_1(const block_q5_1 * x, float * y, const int64_t k) noexcept {
+  const int64_t nb = k / static_cast<int64_t>(QK5_1);
+
+  for (int64_t i = 0; i < nb; ++i) {
+    const float d = fp16_to_fp32(x[i].d);
+    const float m = fp16_to_fp32(x[i].m);
+    uint32_t qh = 0u;
+    std::memcpy(&qh, x[i].qh.data(), sizeof(qh));
+
+    for (uint64_t j = 0; j < (QK5_1 / 2u); ++j) {
+      const uint8_t xh_0 = static_cast<uint8_t>(((qh >> j) & 1u) << 4u);
+      const uint8_t xh_1 = static_cast<uint8_t>(((qh >> (j + (QK5_1 / 2u))) & 1u) << 4u);
+      const uint8_t x0 = (x[i].qs[j] & 0x0fu) | xh_0;
+      const uint8_t x1 = (x[i].qs[j] >> 4u) | xh_1;
+      y[i * static_cast<int64_t>(QK5_1) + static_cast<int64_t>(j)] =
+          static_cast<float>(x0) * d + m;
+      y[i * static_cast<int64_t>(QK5_1) + static_cast<int64_t>(j + (QK5_1 / 2u))] =
+          static_cast<float>(x1) * d + m;
+    }
+  }
+}
+
 inline void dequantize_row_q8_0(const block_q8_0 * x, float * y, const int64_t k) noexcept {
   const int64_t nb = k / static_cast<int64_t>(QK8_0);
 
@@ -533,6 +661,72 @@ inline int nearest_int(const float value) noexcept {
   int bits = 0;
   std::memcpy(&bits, &biased, sizeof(bits));
   return (bits & 0x007fffff) - 0x00400000;
+}
+
+inline void quantize_row_q4_0_ref(const float * x, block_q4_0 * y, const int64_t k) noexcept {
+  const int64_t nb = k / static_cast<int64_t>(QK4_0);
+
+  for (int64_t i = 0; i < nb; ++i) {
+    float amax = 0.0f;
+    float max = 0.0f;
+    const float * block = x + i * static_cast<int64_t>(QK4_0);
+    for (uint64_t j = 0; j < QK4_0; ++j) {
+      const float value = block[j];
+      const float abs_value = std::fabs(value);
+      if (abs_value > amax) {
+        amax = abs_value;
+        max = value;
+      }
+    }
+
+    const float d = max / -8.0f;
+    const float inv_d = d != 0.0f ? 1.0f / d : 0.0f;
+    y[i].d = fp32_to_fp16(d);
+
+    for (uint64_t j = 0; j < (QK4_0 / 2u); ++j) {
+      const float x0 = block[j] * inv_d;
+      const float x1 = block[j + (QK4_0 / 2u)] * inv_d;
+      const uint8_t xi0 = static_cast<uint8_t>(
+          std::clamp(static_cast<int>(x0 + 8.5f), 0, 15));
+      const uint8_t xi1 = static_cast<uint8_t>(
+          std::clamp(static_cast<int>(x1 + 8.5f), 0, 15));
+      y[i].qs[j] = static_cast<uint8_t>((xi0 & 0x0fu) | ((xi1 & 0x0fu) << 4u));
+    }
+  }
+}
+
+inline void quantize_row_q4_1_ref(const float * x, block_q4_1 * y, const int64_t k) noexcept {
+  const int64_t nb = k / static_cast<int64_t>(QK4_1);
+
+  for (int64_t i = 0; i < nb; ++i) {
+    float min = std::numeric_limits<float>::max();
+    float max = -std::numeric_limits<float>::max();
+    const float * block = x + i * static_cast<int64_t>(QK4_1);
+    for (uint64_t j = 0; j < QK4_1; ++j) {
+      const float value = block[j];
+      if (value < min) {
+        min = value;
+      }
+      if (value > max) {
+        max = value;
+      }
+    }
+
+    const float d = (max - min) / 15.0f;
+    const float inv_d = d != 0.0f ? 1.0f / d : 0.0f;
+    y[i].d = fp32_to_fp16(d);
+    y[i].m = fp32_to_fp16(min);
+
+    for (uint64_t j = 0; j < (QK4_1 / 2u); ++j) {
+      const float x0 = (block[j] - min) * inv_d;
+      const float x1 = (block[j + (QK4_1 / 2u)] - min) * inv_d;
+      const uint8_t xi0 = static_cast<uint8_t>(
+          std::clamp(static_cast<int>(x0 + 0.5f), 0, 15));
+      const uint8_t xi1 = static_cast<uint8_t>(
+          std::clamp(static_cast<int>(x1 + 0.5f), 0, 15));
+      y[i].qs[j] = static_cast<uint8_t>((xi0 & 0x0fu) | ((xi1 & 0x0fu) << 4u));
+    }
+  }
 }
 
 inline void quantize_row_q5_0_ref(const float * x, block_q5_0 * y, const int64_t k) noexcept {
@@ -1131,8 +1325,29 @@ inline bool is_q5_0_dtype(const uint8_t code) noexcept {
   return code == dtype_q5_0;
 }
 
+inline bool is_q4_0_dtype(const uint8_t code) noexcept {
+  return code == dtype_q4_0;
+}
+
+inline bool is_q4_1_dtype(const uint8_t code) noexcept {
+  return code == dtype_q4_1;
+}
+
+inline bool is_q5_1_dtype(const uint8_t code) noexcept {
+  return code == dtype_q5_1;
+}
+
 inline bool is_q8_0_dtype(const uint8_t code) noexcept {
   return code == dtype_q8_0;
+}
+
+inline bool is_quantized_32_dtype(const uint8_t code) noexcept {
+  return is_q4_0_dtype(code) || is_q4_1_dtype(code) || is_q5_0_dtype(code) ||
+      is_q5_1_dtype(code) || is_q8_0_dtype(code);
+}
+
+inline bool is_q5_k_dtype(const uint8_t code) noexcept {
+  return code == dtype_q5_k;
 }
 
 inline bool is_quantized_k_dtype(const uint8_t code) noexcept {
@@ -1140,12 +1355,22 @@ inline bool is_quantized_k_dtype(const uint8_t code) noexcept {
 }
 
 inline bool is_native_quantized_dtype(const uint8_t code) noexcept {
-  return is_q5_0_dtype(code) || is_q8_0_dtype(code) || is_quantized_k_dtype(code);
+  return is_q4_0_dtype(code) || is_q4_1_dtype(code) ||
+      is_q5_0_dtype(code) || is_q8_0_dtype(code) || is_quantized_k_dtype(code);
 }
 
 inline uint64_t quantized_block_size(const uint8_t code) noexcept {
+  if (is_q4_0_dtype(code)) {
+    return quant::QK4_0;
+  }
+  if (is_q4_1_dtype(code)) {
+    return quant::QK4_1;
+  }
   if (is_q5_0_dtype(code)) {
     return quant::QK5_0;
+  }
+  if (is_q5_1_dtype(code)) {
+    return quant::QK5_1;
   }
   if (is_q8_0_dtype(code)) {
     return quant::QK8_0;
@@ -1157,10 +1382,7 @@ inline uint64_t quantized_block_size(const uint8_t code) noexcept {
 }
 
 inline uint64_t max_quantized_block_count(const uint8_t code) noexcept {
-  if (is_q5_0_dtype(code)) {
-    return quant::MAX_Q8_0_BLOCKS;
-  }
-  if (is_q8_0_dtype(code)) {
+  if (is_quantized_32_dtype(code)) {
     return quant::MAX_Q8_0_BLOCKS;
   }
   if (is_quantized_k_dtype(code)) {
@@ -1238,8 +1460,17 @@ inline size_t dtype_size_bytes(const uint8_t code) noexcept {
   if (code == dtype_f16) {
     return sizeof(uint16_t);
   }
+  if (code == dtype_q4_0) {
+    return sizeof(quant::block_q4_0) / quant::QK4_0;
+  }
+  if (code == dtype_q4_1) {
+    return sizeof(quant::block_q4_1) / quant::QK4_1;
+  }
   if (code == dtype_q5_0) {
     return sizeof(quant::block_q5_0) / quant::QK5_0;
+  }
+  if (code == dtype_q5_1) {
+    return sizeof(quant::block_q5_1) / quant::QK5_1;
   }
   if (code == dtype_q8_0) {
     return sizeof(quant::block_q8_0) / quant::QK8_0;
@@ -1252,6 +1483,9 @@ inline size_t dtype_size_bytes(const uint8_t code) noexcept {
   }
   if (code == dtype_q4_k) {
     return sizeof(quant::block_q4_k) / quant::QK_K;
+  }
+  if (code == dtype_q5_k) {
+    return sizeof(quant::block_q5_k) / quant::QK_K;
   }
   if (code == dtype_q6_k) {
     return sizeof(quant::block_q6_k) / quant::QK_K;
@@ -1269,12 +1503,33 @@ inline size_t dtype_size_bytes(const uint8_t code) noexcept {
 }
 
 inline size_t quantized_row_storage_bytes(const uint8_t code, const uint64_t cols) noexcept {
+  if (code == dtype_q4_0) {
+    if ((cols % quant::QK4_0) != 0u) {
+      return 0u;
+    }
+    const uint64_t block_count = cols / quant::QK4_0;
+    return static_cast<size_t>(block_count) * sizeof(quant::block_q4_0);
+  }
+  if (code == dtype_q4_1) {
+    if ((cols % quant::QK4_1) != 0u) {
+      return 0u;
+    }
+    const uint64_t block_count = cols / quant::QK4_1;
+    return static_cast<size_t>(block_count) * sizeof(quant::block_q4_1);
+  }
   if (code == dtype_q5_0) {
     if ((cols % quant::QK5_0) != 0u) {
       return 0u;
     }
     const uint64_t block_count = cols / quant::QK5_0;
     return static_cast<size_t>(block_count) * sizeof(quant::block_q5_0);
+  }
+  if (code == dtype_q5_1) {
+    if ((cols % quant::QK5_1) != 0u) {
+      return 0u;
+    }
+    const uint64_t block_count = cols / quant::QK5_1;
+    return static_cast<size_t>(block_count) * sizeof(quant::block_q5_1);
   }
   if (code == dtype_q8_0) {
     if ((cols % quant::QK8_0) != 0u) {
@@ -1295,6 +1550,9 @@ inline size_t quantized_row_storage_bytes(const uint8_t code, const uint64_t col
   }
   if (code == dtype_q4_k) {
     return static_cast<size_t>(block_count) * sizeof(quant::block_q4_k);
+  }
+  if (code == dtype_q5_k) {
+    return static_cast<size_t>(block_count) * sizeof(quant::block_q5_k);
   }
   if (code == dtype_q6_k) {
     return static_cast<size_t>(block_count) * sizeof(quant::block_q6_k);
@@ -2434,6 +2692,62 @@ inline float dot_q4_k_q8_k_row_scalar(const quant::block_q4_k * lhs,
   return sum;
 }
 
+inline float dot_q5_k_q8_k_block_scalar(const quant::block_q5_k & lhs,
+                                        const quant::block_q8_k & rhs) noexcept {
+  const uint8_t * ql = lhs.qs.data();
+  const uint8_t * qh = lhs.qh.data();
+  const int8_t * q8 = rhs.qs.data();
+  const float d = quant::fp16_to_fp32(lhs.d);
+  const float min = quant::fp16_to_fp32(lhs.dmin);
+  float sum = 0.0f;
+  int is = 0;
+  uint8_t u1 = 1u;
+  uint8_t u2 = 2u;
+
+  for (uint64_t j = 0; j < quant::QK_K; j += 64u) {
+    uint8_t sc = 0u;
+    uint8_t m = 0u;
+    quant::get_scale_min_k4(is + 0, lhs.scales.data(), &sc, &m);
+    const float d0 = d * static_cast<float>(sc);
+    const float m0 = min * static_cast<float>(m);
+    quant::get_scale_min_k4(is + 1, lhs.scales.data(), &sc, &m);
+    const float d1 = d * static_cast<float>(sc);
+    const float m1 = min * static_cast<float>(m);
+    int32_t dot0 = 0;
+    int32_t dot1 = 0;
+    int32_t rhs_sum0 = 0;
+    int32_t rhs_sum1 = 0;
+    for (uint64_t l = 0; l < 32u; ++l) {
+      const int32_t rhs0 = static_cast<int32_t>(q8[j + l]);
+      const int32_t rhs1 = static_cast<int32_t>(q8[j + 32u + l]);
+      const uint8_t high0 = (qh[l] & u1) != 0u ? 16u : 0u;
+      const uint8_t high1 = (qh[l] & u2) != 0u ? 16u : 0u;
+      dot0 += static_cast<int32_t>((ql[l] & 0x0fu) + high0) * rhs0;
+      dot1 += static_cast<int32_t>((ql[l] >> 4u) + high1) * rhs1;
+      rhs_sum0 += rhs0;
+      rhs_sum1 += rhs1;
+    }
+    sum += rhs.d * (d0 * static_cast<float>(dot0) - m0 * static_cast<float>(rhs_sum0));
+    sum += rhs.d * (d1 * static_cast<float>(dot1) - m1 * static_cast<float>(rhs_sum1));
+    ql += 32;
+    is += 2;
+    u1 = static_cast<uint8_t>(u1 << 2u);
+    u2 = static_cast<uint8_t>(u2 << 2u);
+  }
+
+  return sum;
+}
+
+inline float dot_q5_k_q8_k_row_scalar(const quant::block_q5_k * lhs,
+                                      const quant::block_q8_k * rhs,
+                                      const uint64_t block_count) noexcept {
+  float sum = 0.0f;
+  for (uint64_t block = 0; block < block_count; ++block) {
+    sum += dot_q5_k_q8_k_block_scalar(lhs[block], rhs[block]);
+  }
+  return sum;
+}
+
 inline float dot_q6_k_q8_k_block_scalar(const quant::block_q6_k & lhs,
                                         const quant::block_q8_k & rhs) noexcept {
   alignas(64) int8_t dequant[quant::QK_K] = {};
@@ -2553,6 +2867,54 @@ inline float dot_q6_k_q8_k_row_scalar(const quant::block_q6_k * lhs,
   return sumf;
 }
 
+inline float dot_q4_0_q8_0_row_scalar(const quant::block_q4_0 * lhs,
+                                      const quant::block_q8_0 * rhs,
+                                      const uint64_t block_count) noexcept {
+  float sumf = 0.0f;
+
+  for (uint64_t block = 0; block < block_count; ++block) {
+    int32_t sumi0 = 0;
+    int32_t sumi1 = 0;
+    for (uint64_t j = 0; j < (quant::QK4_0 / 2u); ++j) {
+      const int32_t x0 = static_cast<int32_t>(lhs[block].qs[j] & 0x0fu) - 8;
+      const int32_t x1 = static_cast<int32_t>(lhs[block].qs[j] >> 4u) - 8;
+      sumi0 += x0 * static_cast<int32_t>(rhs[block].qs[j]);
+      sumi1 += x1 * static_cast<int32_t>(rhs[block].qs[j + (quant::QK4_0 / 2u)]);
+    }
+
+    sumf += static_cast<float>(sumi0 + sumi1) *
+        (quant::fp16_to_fp32(lhs[block].d) * quant::fp16_to_fp32(rhs[block].d));
+  }
+
+  return sumf;
+}
+
+inline float dot_q4_1_q8_0_row_scalar(const quant::block_q4_1 * lhs,
+                                      const quant::block_q8_0 * rhs,
+                                      const uint64_t block_count) noexcept {
+  float sumf = 0.0f;
+
+  for (uint64_t block = 0; block < block_count; ++block) {
+    int32_t sumi0 = 0;
+    int32_t sumi1 = 0;
+    int32_t rhs_sum = 0;
+    for (uint64_t j = 0; j < (quant::QK4_1 / 2u); ++j) {
+      const int32_t rhs0 = static_cast<int32_t>(rhs[block].qs[j]);
+      const int32_t rhs1 = static_cast<int32_t>(rhs[block].qs[j + (quant::QK4_1 / 2u)]);
+      sumi0 += static_cast<int32_t>(lhs[block].qs[j] & 0x0fu) * rhs0;
+      sumi1 += static_cast<int32_t>(lhs[block].qs[j] >> 4u) * rhs1;
+      rhs_sum += rhs0 + rhs1;
+    }
+
+    const float rhs_d = quant::fp16_to_fp32(rhs[block].d);
+    sumf += rhs_d *
+        (quant::fp16_to_fp32(lhs[block].d) * static_cast<float>(sumi0 + sumi1) +
+         quant::fp16_to_fp32(lhs[block].m) * static_cast<float>(rhs_sum));
+  }
+
+  return sumf;
+}
+
 inline float dot_q5_0_q8_0_row_scalar(const quant::block_q5_0 * lhs,
                                       const quant::block_q8_0 * rhs,
                                       const uint64_t block_count) noexcept {
@@ -2576,6 +2938,40 @@ inline float dot_q5_0_q8_0_row_scalar(const quant::block_q5_0 * lhs,
 
     sumf += static_cast<float>(sumi0 + sumi1) *
         (quant::fp16_to_fp32(lhs[block].d) * quant::fp16_to_fp32(rhs[block].d));
+  }
+
+  return sumf;
+}
+
+inline float dot_q5_1_q8_0_row_scalar(const quant::block_q5_1 * lhs,
+                                      const quant::block_q8_0 * rhs,
+                                      const uint64_t block_count) noexcept {
+  float sumf = 0.0f;
+
+  for (uint64_t block = 0; block < block_count; ++block) {
+    uint32_t qh = 0u;
+    std::memcpy(&qh, lhs[block].qh.data(), sizeof(qh));
+
+    int32_t sumi0 = 0;
+    int32_t sumi1 = 0;
+    int32_t rhs_sum = 0;
+    for (uint64_t j = 0; j < (quant::QK5_1 / 2u); ++j) {
+      const uint8_t xh_0 = static_cast<uint8_t>(((qh >> j) & 1u) << 4u);
+      const uint8_t xh_1 =
+          static_cast<uint8_t>(((qh >> (j + (quant::QK5_1 / 2u))) & 1u) << 4u);
+      const int32_t rhs0 = static_cast<int32_t>(rhs[block].qs[j]);
+      const int32_t rhs1 = static_cast<int32_t>(rhs[block].qs[j + (quant::QK5_1 / 2u)]);
+      const int32_t x0 = static_cast<int32_t>((lhs[block].qs[j] & 0x0fu) | xh_0);
+      const int32_t x1 = static_cast<int32_t>((lhs[block].qs[j] >> 4u) | xh_1);
+      sumi0 += x0 * rhs0;
+      sumi1 += x1 * rhs1;
+      rhs_sum += rhs0 + rhs1;
+    }
+
+    const float rhs_d = quant::fp16_to_fp32(rhs[block].d);
+    sumf += rhs_d *
+        (quant::fp16_to_fp32(lhs[block].d) * static_cast<float>(sumi0 + sumi1) +
+         quant::fp16_to_fp32(lhs[block].m) * static_cast<float>(rhs_sum));
   }
 
   return sumf;

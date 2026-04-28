@@ -18,6 +18,10 @@ inline const asr_decode_policy &tiny_asr_decode_policy() noexcept {
   return detail::k_tiny_asr_decode_policy;
 }
 
+inline constexpr std::string_view tiny_tokenizer_sha256() noexcept {
+  return "dfc530298b6fbed1a97c6472c575b026453706e2a204c7f7038f2c9d208b0759";
+}
+
 inline bool
 is_tiny_asr_decode_policy_supported(const asr_decode_policy &policy) noexcept {
   const auto tokens = detail::k_tiny_control_tokens;

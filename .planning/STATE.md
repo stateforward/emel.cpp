@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.16
 milestone_name: ARM Whisper GGUF Parity And Performance
 status: ready_to_archive
-stopped_at: v1.16 source-backed closeout passed; ready for milestone archival
-last_updated: "2026-04-27T23:59:00.000Z"
-last_activity: 2026-04-27
+stopped_at: Phases 128-129 complete; archive/tag confirmation next
+last_updated: "2026-04-28T10:47:11Z"
+last_activity: 2026-04-28
 progress:
-  total_phases: 29
-  completed_phases: 29
-  total_plans: 20
-  completed_plans: 20
+  total_phases: 36
+  completed_phases: 36
+  total_plans: 8
+  completed_plans: 8
   percent: 100
 ---
 
@@ -22,29 +22,64 @@ See: .planning/PROJECT.md (updated 2026-04-25)
 
 **Core value:** Prove real end-to-end behavior with explicit SML orchestration and parity-oriented
 verification before widening API surface or model scope.
-**Current focus:** v1.16 source-backed closeout passed; milestone is ready for archival.
+**Current focus:** v1.16 has no source-backed blockers after Phase 127. Phases 128-129 closed the
+non-blocking audit tech debt around benchmark/evidence stability and encoder-detail helper
+deduplication before archive/tag confirmation.
 
 ## Current Position
 
-Phase: 122
-Plan: Whisper Final Gap Closeout Rerun
-Status: `v1.16` ARM Whisper GGUF Parity And Performance passed source-backed closeout.
+Phase: 129
+Plan: Whisper Detail Helper Deduplication Cleanup
+Status: `v1.16` ARM Whisper GGUF Parity And Performance has all active requirements satisfied and
+no source-backed readiness blockers. Phase 128 closed the benchmark/evidence cleanup items, and
+Phase 129 removed stale duplicate decoder/timestamp helpers from encoder detail. Archive/tag
+confirmation is the next milestone-management step.
 
 Closed gap sequence:
 
 - Phase 120: complete; decode-policy runtime behavior is wired through a speech-owned policy and
   the hardcoded public decoder `token:<id>` transcript surface is removed.
+
 - Phase 121: complete; preserved-baseline Nyquist validation artifacts for Phases 94-102 are
   backfilled with archived-baseline scope.
-- Phase 122: complete; source-backed closeout rerun passed and the milestone audit now reports
-  `status: passed`.
 
-The latest compare artifact still records exact `[C]` parity through the public Whisper runtime
-surfaces, and the default warmed benchmark artifact records EMEL faster than the matched
-`whisper.cpp` reference. Phase 120 closed the decode-policy and tokenizer-backed decoder
-transcript gaps; Phase 121 backfilled preserved-baseline Nyquist artifacts; Phase 122 closed
-`CLOSE-01`.
-Last activity: 2026-04-27
+- Phase 122: superseded by the 2026-04-28 public-recognizer source-backed audit; its closeout
+  evidence used bypass-lane compare and benchmark proof.
+
+- Phase 123: complete; maintained Whisper runtime has a public recognizer route through
+  `emel::speech::recognizer::sm`, with generic recognizer leak checks preserved.
+
+- Phase 124: complete; maintained compare and benchmark evidence now runs through the public
+  recognizer lane and publishes recognizer-backed metadata.
+
+- Phase 125: source-backed runtime evidence exists, but the latest audit supersedes its closeout
+  claim because recognizer route behavior still runs through hidden backend function pointers.
+
+- Phase 126: complete; hidden recognizer backend dispatch was replaced with explicit SML route
+  states/transitions/guards and compile-time route policy wiring.
+
+Final gap closure:
+
+- Phase 127: complete; decoder sequence/logit/timestamp-policy execution is no longer reached
+  through `speech/encoder/whisper/detail.hpp` from decoder production code, and `SPEECH-01`,
+  `POLICY-01`, and `CLOSE-01` are complete.
+
+Tech-debt closure:
+
+- Phase 128: complete; default Whisper single-thread closeout evidence now uses 20 measured
+  iterations with explicit 20,000 ppm process-wall tolerance, and Phase 122/125 prose is marked
+  superseded.
+
+- Phase 129: complete; duplicate decoder/timestamp helpers were removed from encoder detail,
+  decoder timestamp helper tests moved under the decoder test surface, and decoder production
+  files still do not include or alias encoder detail.
+
+The latest compare artifact records exact `[C]` parity through
+`emel.speech.recognizer.whisper`, and the latest default benchmark artifact records 20 iterations
+with EMEL faster than the matched `whisper.cpp` reference through the same public recognizer lane.
+`CLOSE-01` is complete after the Phase 127 source-backed audit rerun; Phases 128-129 are cleanup
+phases only.
+Last activity: 2026-04-28
 
 Progress: [##########] 100%
 
@@ -68,11 +103,12 @@ Items acknowledged and still deferred at milestone close on 2026-04-26:
 
 **Current planning shape:**
 
-- Active milestone: `v1.16` ready for archival after Phase 122 closeout.
-- Latest shipped milestone: `v1.15`; v1.16 was archived, reopened by source-backed audit, and now
-  has a passing source-backed closeout audit.
-- Next action: archive/complete the milestone.
-- Current blocker: none.
+- Active milestone: `v1.16` has all active requirements complete and Phases 128-129 closed the
+  non-blocking source-backed audit tech debt.
+- Latest shipped milestone: `v1.15`; v1.16 has not yet been archived/tagged.
+
+- Next action: run `$gsd-complete-milestone`.
+- Current blocker: none. The user-approved lint snapshot update passed `lint_snapshot`.
 
 ## Accumulated Context
 

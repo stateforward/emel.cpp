@@ -9,12 +9,11 @@
 #include "emel/speech/decoder/whisper/context.hpp"
 #include "emel/speech/decoder/whisper/detail.hpp"
 #include "emel/speech/decoder/whisper/events.hpp"
-#include "emel/speech/encoder/whisper/detail.hpp"
 #include "emel/speech/tokenizer/whisper/any.hpp"
 
 namespace emel::speech::decoder::whisper::guard {
 
-namespace kdetail = emel::speech::encoder::whisper::detail;
+namespace kdetail = emel::speech::decoder::whisper::detail;
 
 inline bool has_tensor(const emel::model::data &model,
                        const std::string_view name, const int32_t n_dims,

@@ -229,7 +229,9 @@ add_bench_runner_suite(encoder_fallback text/encoders/fallback_bench.cpp
                        EMEL_BENCH_ENABLE_ENCODER_FALLBACK)
 add_bench_runner_suite(tokenizer text/tokenizer/tokenizer_bench.cpp EMEL_BENCH_ENABLE_TOKENIZER)
 
-if(NOT EMEL_BENCH_SUITE_FILTER STREQUAL "" AND BENCH_RUNNER_COMPILE_DEFINITIONS STREQUAL "")
+if(NOT EMEL_BENCH_SUITE_FILTER STREQUAL "" AND
+   NOT EMEL_BENCH_SUITE_FILTER STREQUAL "whisper_compare" AND
+   BENCH_RUNNER_COMPILE_DEFINITIONS STREQUAL "")
   message(FATAL_ERROR "Unknown EMEL_BENCH_SUITE_FILTER='${EMEL_BENCH_SUITE_FILTER}'")
 endif()
 
@@ -256,6 +258,24 @@ if(NOT EMEL_BENCH_SUITE_FILTER STREQUAL "")
       EMEL_BENCH_COMPILED_SUITE=\"${EMEL_BENCH_SUITE_FILTER}\"
   )
 endif()
+
+add_executable(whisper_emel_parity_runner
+  ${CMAKE_CURRENT_SOURCE_DIR}/whisper_emel_parity_runner.cpp
+)
+
+target_link_libraries(whisper_emel_parity_runner
+  PRIVATE
+    emel_core
+    emel
+)
+
+target_include_directories(whisper_emel_parity_runner
+  PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${EMEL_ROOT}
+    ${EMEL_ROOT}/src
+    ${EMEL_ROOT}/include
+)
 if(EMEL_BENCH_NEEDS_LLAMA)
   target_compile_definitions(bench_runner
     PRIVATE
@@ -377,6 +397,28 @@ target_compile_definitions(diarization_compare_tests
 add_test(
   NAME diarization_compare_tests
   COMMAND diarization_compare_tests
+)
+
+add_executable(whisper_benchmark_tests
+  ${CMAKE_CURRENT_SOURCE_DIR}/whisper_benchmark_tests.cpp
+)
+
+target_include_directories(whisper_benchmark_tests
+  PRIVATE
+    ${DOCTEST_INCLUDE_DIR}
+)
+
+target_compile_definitions(whisper_benchmark_tests
+  PRIVATE
+    BENCH_REPO_ROOT=\"${EMEL_ROOT}\"
+    WHISPER_COMPARE_SCRIPT_PATH=\"${CMAKE_CURRENT_SOURCE_DIR}/whisper_compare.py\"
+    WHISPER_BENCHMARK_SCRIPT_PATH=\"${CMAKE_CURRENT_SOURCE_DIR}/whisper_benchmark.py\"
+    WHISPER_EMEL_PARITY_RUNNER_SOURCE_PATH=\"${CMAKE_CURRENT_SOURCE_DIR}/whisper_emel_parity_runner.cpp\"
+)
+
+add_test(
+  NAME whisper_benchmark_tests
+  COMMAND whisper_benchmark_tests
 )
 
 add_executable(quality_gates_tests

@@ -33,9 +33,10 @@
   - Initial archive created 2026-04-26, reopened the same day because bounded transcript drift was
     not acceptable for an E2E milestone, then reopened again on 2026-04-27 after a source-backed
     audit rerun found artifact, benchmark-publication, runtime-surface, and evidence-ledger gaps;
-    the final source-backed audit rerun on 2026-04-27 passed after Phases 120-122 closed
-    decode-policy, tokenizer-backed decoder transcript, preserved-baseline Nyquist, and closeout
-    gaps.
+    a later 2026-04-28 source-backed audit found the public recognizer route still hid behavior
+    behind a runtime backend function-pointer table; Phase 126 repaired that blocker, but a later
+    source-backed audit found the decoder runtime still executed through encoder-owned detail
+    code. Phase 127 closed that ownership blocker and the latest source-backed audit passed.
 
 ## Current Milestone
 
@@ -45,6 +46,14 @@ Goal: Maintained Whisper tiny E2E path with no top-level Whisper runtime domain,
 speech-domain encoder/decoder/tokenizer ownership, exact transcript parity against the pinned
 `whisper.cpp` lane, ARM single-thread performance where EMEL beats the matched `whisper.cpp`
 reference, and a source-backed closeout audit.
+
+Current gap closure: Phases 123-127 repaired the public recognizer E2E path, cut maintained
+parity/performance evidence over to that path, replaced hidden `runtime_backend`
+function-pointer dispatch with explicit recognizer SML route graph behavior, and removed the
+decoder actor's production dependency on `speech/encoder/whisper/detail.hpp`. The latest
+source-backed audit found no blockers, but it identified non-blocking tech debt. Phases 128-129
+closed that debt before archive/tag confirmation: Phase 128 stabilized benchmark evidence and
+superseded prose, and Phase 129 removed stale encoder-owned decoder helper duplication.
 
 ## Phases
 
@@ -133,7 +142,31 @@ reference, and a source-backed closeout audit.
   active runtime credit beyond their archived scope.
 - [x] **Phase 122: Whisper Final Gap Closeout Rerun** - Complete on 2026-04-27. Reran
   source-backed closeout after Phases 120-121, cited stable warmed benchmark evidence, updated
-  the audit, and closed `CLOSE-01`.
+  the audit, and previously closed `CLOSE-01` before later public-recognizer audits superseded
+  that closeout.
+- [x] **Phase 123: Whisper Public Recognizer Runtime Wiring** - Complete. The maintained
+  Whisper model, tokenizer, decode-policy, encoder, decoder, and transcript publication path now
+  has a public recognizer route through `emel::speech::recognizer::sm`.
+- [x] **Phase 124: Whisper Recognizer Compare And Benchmark Cutover** - Complete on 2026-04-28.
+  The maintained EMEL compare and single-thread benchmark lanes now drive the public recognizer
+  actor and publish recognizer-backed parity/performance records.
+- [x] **Phase 125: Whisper Final Recognizer Closeout Rerun** - Complete on 2026-04-28. Reran
+  source-backed audit and full relevant quality gates after recognizer-backed parity and benchmark
+  evidence; the later behavior-selection audit was closed by Phase 126.
+- [x] **Phase 126: Whisper Recognizer Explicit Route Graph Repair** - Complete on 2026-04-28.
+  Replaced hidden `runtime_backend` function-pointer route selection/execution with explicit
+  recognizer SML route states, guards, transitions, compile-time route policy wiring, and
+  rule-focused regression tests.
+- [x] **Phase 127: Whisper Decoder Ownership Gap Closure** - Complete on 2026-04-28. Rewired the
+  decoder actor to use decoder-owned detail for sequence/logit/timestamp-policy runtime
+  execution, added a source-level ownership regression, and reran source-backed closeout gates.
+- [x] **Phase 128: Whisper Benchmark And Closeout Evidence Cleanup** - Complete on 2026-04-28.
+  Stabilized the default Whisper single-thread benchmark closeout path with a 20-iteration sample
+  and repaired superseded Phase 122/125 closeout prose so the evidence ledger matches Phase 127
+  truth.
+- [x] **Phase 129: Whisper Detail Helper Deduplication Cleanup** - Complete on 2026-04-28.
+  Removed unused duplicate decoder/timestamp helper code from encoder detail while preserving
+  decoder-owned runtime execution and SML behavior-selection rules.
 
 ## Phase Details
 
@@ -606,4 +639,256 @@ preserved-baseline Nyquist coverage.
   `EMEL_QUALITY_GATES_SCOPE=full` and
   `EMEL_QUALITY_GATES_BENCH_SUITE=whisper_compare:whisper_single_thread`; coverage was line
   `90.8%`, branch `55.6%`.
-- `.planning/milestones/v1.16-MILESTONE-AUDIT.md` reports `status: passed`.
+- The 2026-04-27 audit reported `status: passed`; the 2026-04-28 source-backed rerun supersedes
+  that result with a public-recognizer bypass blocker now planned in Phases 123-125.
+
+### Phase 123: Whisper Public Recognizer Runtime Wiring
+
+**Status:** Complete.
+
+**Goal:** Make the maintained Whisper E2E ASR path run through the public speech recognizer actor
+instead of tool-local encoder/decoder/tokenizer orchestration.
+**Requirements:** SPEECH-01, TOK-01, TOK-02, POLICY-01.
+**Gap Closure:** Closes audit gaps `PUBLIC-RECOGNIZER-BYPASS`,
+`RECOGNIZER-BACKEND-DISABLED`, recognizer tokenizer checksum, recognizer decode policy, and
+recognizer transcript publication.
+**Success Criteria**:
+1. `emel::speech::recognizer::sm` can initialize the maintained Phase 99 Whisper model/tokenizer
+   route through explicit guards/transitions without generic recognizer Whisper leakage.
+2. Recognizer dispatch validates the pinned tokenizer asset identity and ASR decode-policy support
+   before selected execution.
+3. Recognizer recognition dispatch owns the maintained encoder, decoder, and tokenizer-backed
+   transcript publication flow using public child actor events and `process_event(...)`.
+4. Focused recognizer tests prove the Phase 99 model/audio/tokenizer path succeeds through public
+   recognizer events and no longer asserts that the maintained Whisper route is unsupported.
+
+**Completion Evidence**:
+- Generic recognizer tests pass with a model-family-free backend route and no `whisper` matches in
+  `src/emel/speech/recognizer` or `tests/speech/recognizer`.
+- A focused Whisper fixture test proves `emel::speech::recognizer::sm` initializes the maintained
+  model/tokenizer route and runs recognition through public recognizer events.
+- `scripts/check_domain_boundaries.sh` passed, and forbidden-root grep returned no matches.
+- Changed-file scoped `scripts/quality_gates.sh` passed with
+  `EMEL_QUALITY_GATES_BENCH_SUITE=whisper_compare`; changed-file coverage was line `100.0%`,
+  branch `64.5%`.
+- Phase 124 cut compare and benchmark proof tools over from the old bypass runner to this
+  recognizer route.
+
+### Phase 124: Whisper Recognizer Compare And Benchmark Cutover
+
+**Goal:** Make maintained parity and performance proof consume the public recognizer runtime path.
+**Requirements:** REOPEN-01, PARITY-01, PERF-03.
+**Gap Closure:** Closes audit flows for public recognizer E2E parity, public recognizer
+benchmarking, no-drift compare gating, and recognizer-backed performance publication.
+**Success Criteria**:
+1. `tools/bench/whisper_emel_parity_runner.cpp` drives `emel::speech::recognizer::sm` through
+   public recognizer events instead of constructing encoder/decoder actors or calling tokenizer
+   decode directly.
+2. `tools/bench/whisper_compare.py` and `tools/bench/whisper_benchmark.py` publish EMEL backend
+   and runtime-surface metadata that identifies the public recognizer lane.
+3. Recognizer-backed compare exact-matches `[C]` against the pinned `whisper.cpp` Phase 99
+   model/audio pair and still hard-fails transcript drift.
+4. Recognizer-backed single-thread CPU benchmark records EMEL faster than the matched
+   `whisper.cpp` reference lane without using tool-only compute fallback or reference-owned EMEL
+   lane state.
+
+**Completion Evidence**:
+- `tools/bench/whisper_emel_parity_runner.cpp` now initializes and recognizes through
+  `emel::speech::recognizer::sm` with `speech/recognizer_routes/whisper::backend()`.
+- Runner source grep found no direct `encoder::whisper`, `decoder::whisper`,
+  `speech/encoder/whisper`, `speech/decoder/whisper`, or `decode_token_ids` references.
+- Compare and benchmark summaries publish `backend_id=emel.speech.recognizer.whisper` and
+  `runtime_surface=speech/recognizer+speech/recognizer_routes/whisper`.
+- Recognizer-backed compare passed with `status=exact_match reason=ok`.
+- Recognizer-backed single-thread benchmark passed with `benchmark_status=ok reason=ok`; the
+  quality-gate artifact records EMEL mean `58,263,986 ns` versus reference mean `60,507,152 ns`.
+- Changed-file scoped `scripts/quality_gates.sh` passed with
+  `EMEL_QUALITY_GATES_BENCH_SUITE=whisper_compare:whisper_single_thread`; focused recognizer,
+  Whisper recognizer, benchmark tool, domain-boundary, generic leak, and forbidden-root checks
+  passed.
+
+### Phase 125: Whisper Final Recognizer Closeout Rerun
+
+**Goal:** Close v1.16 only after recognizer-backed source evidence satisfies the maintained E2E
+runtime, parity, benchmark, and closeout contracts.
+**Requirements:** CLOSE-01.
+**Gap Closure:** Closes audit closeout blockers caused by the prior bypass-lane parity and
+benchmark evidence.
+**Success Criteria**:
+1. Phases 123 and 124 have SUMMARY, VERIFICATION, and VALIDATION artifacts with executable
+   source-backed evidence.
+2. Full relevant quality gates pass with the recognizer-backed Whisper compare and single-thread
+   benchmark suites.
+3. `scripts/check_domain_boundaries.sh`, forbidden-root grep, focused recognizer tests,
+   recognizer-backed compare, and recognizer-backed benchmark all pass.
+4. `$gsd-audit-milestone` reports no source-backed maintained-path contradictions and
+   REQUIREMENTS.md, ROADMAP.md, STATE.md, and phase artifacts agree that v1.16 is ready to
+   archive.
+
+**Completion Evidence**:
+- The Phase 125 runtime evidence remains useful, but its original closeout claim was superseded
+  by the Phase 126 explicit route graph repair and then by the Phase 127 decoder ownership gap.
+- Full-scope `scripts/quality_gates.sh` passed with
+  `EMEL_QUALITY_GATES_SCOPE=full` and
+  `EMEL_QUALITY_GATES_BENCH_SUITE=whisper_compare:whisper_single_thread`; all 12 test shards,
+  paritychecker, fuzz smoke, recognizer-backed compare, recognizer-backed benchmark, and docsgen
+  completed.
+- Latest full-gate compare summary records `exact_match`, `ok`, backend
+  `emel.speech.recognizer.whisper`, runtime surface
+  `speech/recognizer+speech/recognizer_routes/whisper`, transcript `[C]`.
+- Latest full-gate benchmark summary records `ok`, `ok`, backend
+  `emel.speech.recognizer.whisper`, runtime surface
+  `speech/recognizer+speech/recognizer_routes/whisper`, transcript `[C]`, EMEL mean
+  `59,106,792 ns`, and reference mean `59,958,847 ns`.
+- The latest source-backed audit finds no remaining direct-runner bypass, domain-boundary leak,
+  forbidden root, parity, benchmark, or explicit route graph contradiction, but it does find the
+  decoder ownership blocker now assigned to Phase 127.
+
+### Phase 126: Whisper Recognizer Explicit Route Graph Repair
+
+**Goal:** Remove hidden recognizer backend dispatch so Whisper route support, readiness, encode,
+decode, and detokenize behavior are selected and executed through explicit SML states, guards, and
+transitions.
+**Requirements:** CLOSE-01.
+**Gap Closure:** Closes the 2026-04-28 audit blocker where `event::runtime_backend` function
+pointers and `ctx.backend->...` calls hide route behavior outside the recognizer transition graph.
+**Success Criteria**:
+1. `src/emel/speech/recognizer/**` no longer defines, stores, binds, or invokes a runtime backend
+   function-pointer table for route support, readiness, encode, decode, or detokenize behavior.
+2. The maintained Whisper recognizer route remains model-family-free at the generic public
+   recognizer boundary while route support/readiness choices are observable through explicit
+   recognizer `sm.hpp` states/transitions and `guards.hpp` predicates.
+3. The maintained compare and single-thread benchmark still drive `emel::speech::recognizer::sm`,
+   exact-match `[C]`, and publish recognizer-backed parity/performance metadata after the refactor.
+4. Rule-focused tests and `scripts/check_sml_behavior_selection.sh` fail before the repair and pass
+   after the repair for the maintained recognizer path.
+5. A final source-backed audit, domain-boundary check, recognizer tests, compare, benchmark, and
+   full relevant quality gate pass before `CLOSE-01` is marked complete again.
+
+**Completion Evidence:**
+- `src/emel/speech/recognizer/**` no longer defines or stores `runtime_backend`,
+  `initialize.backend`, or `ctx.backend` route calls.
+- `src/emel/speech/recognizer/sm.hpp` routes support/readiness and encode/decode/detokenize
+  phases through explicit route-policy guard/action transition rows.
+- Generic recognizer leak grep for `whisper` returned no matches.
+- `scripts/check_sml_behavior_selection.sh src/emel/speech/recognizer src/emel/speech/recognizer_routes/whisper src/emel/speech/encoder/whisper src/emel/speech/decoder/whisper src/emel/speech/tokenizer/whisper`
+  passed.
+- `EMEL_QUALITY_GATES_SCOPE=full EMEL_QUALITY_GATES_BENCH_SUITE='whisper_compare:whisper_single_thread' scripts/quality_gates.sh`
+  passed on 2026-04-28 with 12/12 test shards, coverage line `90.8%`, branch `55.6%`,
+  paritychecker, fuzz smoke, Whisper compare, Whisper benchmark, and docs generation.
+- Latest benchmark evidence records EMEL mean `58,911,208 ns` versus reference mean
+  `60,982,694 ns`.
+
+### Phase 127: Whisper Decoder Ownership Gap Closure
+
+**Goal:** Move maintained Whisper decoder sequence, logits, and timestamp-policy execution out of
+`src/emel/speech/encoder/whisper/detail.hpp` so the public recognizer-to-decoder path is
+source-backed by decoder-owned code or an explicitly appropriate shared kernel-owned surface.
+**Requirements:** SPEECH-01, POLICY-01, CLOSE-01.
+**Gap Closure:** Closes the 2026-04-28 source-backed audit blocker where
+`src/emel/speech/decoder/whisper/actions.hpp` includes encoder detail code and calls
+`emel::speech::encoder::whisper::detail::run_decoder_sequence`.
+**Success Criteria**:
+1. `src/emel/speech/decoder/whisper/actions.hpp` no longer includes
+   `emel/speech/encoder/whisper/detail.hpp`, aliases `encoder::whisper::detail`, or calls decoder
+   runtime helpers from the encoder namespace.
+2. Decoder logits, timestamp-aware token selection, generation stopping, and decode-sequence
+   execution live under decoder-owned implementation or a justified kernel-owned shared surface,
+   without duplicating behavior or hiding route/runtime selection outside SML guards and
+   transitions.
+3. The public recognizer route still dispatches encoder, decoder, and detokenizer actors through
+   public events; compare evidence exact-matches `[C]`; benchmark evidence keeps EMEL faster than
+   the matched single-thread `whisper.cpp` reference.
+4. Source-backed checks pass: `scripts/check_sml_behavior_selection.sh` over recognizer, Whisper
+   route, encoder, decoder, and tokenizer paths; `scripts/check_domain_boundaries.sh`; forbidden
+   root grep; and a focused grep proving decoder no longer depends on encoder detail.
+5. A final source-backed audit and full relevant quality gate pass before `SPEECH-01`,
+   `POLICY-01`, and `CLOSE-01` are marked complete again.
+
+**Completion Evidence:**
+- `src/emel/speech/decoder/whisper/actions.hpp` and
+  `src/emel/speech/decoder/whisper/guards.hpp` no longer include or alias
+  `emel/speech/encoder/whisper/detail.hpp`.
+- `rg -n "encoder/whisper/detail|encoder::whisper::detail" src/emel/speech/decoder/whisper`
+  returned no matches.
+- `tests/speech/decoder/whisper/lifecycle_tests.cpp` includes a regression that checks
+  production decoder files for encoder-detail dependency leaks and decoder-owned decode
+  entrypoints.
+- Focused decoder tests passed with 5 test cases and 1431 assertions; the focused recognizer
+  test passed with 1 test case and 356 assertions.
+- `scripts/check_sml_behavior_selection.sh` over recognizer, Whisper route, encoder, decoder,
+  and tokenizer paths passed.
+- `scripts/check_domain_boundaries.sh` passed, and forbidden model-family root grep over `src`,
+  `tests`, and `CMakeLists.txt` returned no matches.
+- Scoped quality gate passed on 2026-04-28 with changed-source coverage line `98.5%`, branch
+  `58.2%`, exact Whisper compare transcript `[C]`, and Whisper single-thread benchmark status
+  `ok`.
+- Latest benchmark evidence records EMEL mean `58,537,483 ns` versus reference mean
+  `60,435,595 ns`.
+
+### Phase 128: Whisper Benchmark And Closeout Evidence Cleanup
+
+**Status:** Complete.
+
+**Goal:** Close the non-blocking milestone audit debt around closeout evidence stability and stale
+historical closeout prose.
+**Requirements:** Tech debt cleanup only; active requirements remain satisfied.
+**Gap Closure:** Closes audit tech debt for the noisy default 3-iteration Whisper benchmark
+wrapper and superseded Phase 122/125 "no blockers remain" wording.
+**Success Criteria**:
+1. The default Whisper single-thread benchmark closeout path is stable enough for milestone
+   evidence, either by using the current 20-iteration sample by default for closeout or by making
+   the closeout wrapper require an explicit stable iteration count.
+2. Benchmark tests prove transcript, model, reference, and performance-regression contradictions
+   still fail instead of being hidden by the more stable sampling policy.
+3. Phase 122 and Phase 125 closeout artifacts are clearly marked superseded by Phases 126-127 and
+   the latest tech-debt audit, without erasing their historical evidence.
+4. The updated audit/roadmap/state ledger identifies Phase 127 as the active closeout truth and
+   records Phase 128 as evidence-cleanup only.
+
+**Completion Evidence:**
+- `scripts/bench_whisper_single_thread.sh` and `tools/bench/whisper_benchmark.py` now default to
+  20 measured iterations, with an explicit 20,000 ppm process-wall tolerance in benchmark
+  summaries.
+- `tools/bench/whisper_benchmark_tests.cpp` covers both default paths and preserves hard-fail
+  regression coverage for transcript, model, reference, and material performance contradictions.
+- Default closeout wrapper evidence passed with `benchmark_status=ok`, exact `[C]` transcripts,
+  20 iterations, EMEL mean `60,189,787 ns`, and reference mean `60,736,881 ns`.
+- Phase 122 and Phase 125 artifacts now include supersession notices pointing final closeout
+  truth to the later source-backed chain.
+
+### Phase 129: Whisper Detail Helper Deduplication Cleanup
+
+**Status:** Complete.
+
+**Goal:** Remove stale duplicate decoder/timestamp helper code from encoder detail without
+reintroducing decoder production dependencies on encoder-owned implementation.
+**Requirements:** Tech debt cleanup only; active requirements remain satisfied.
+**Gap Closure:** Closes audit tech debt for unused duplicate decoder/timestamp helpers in
+`src/emel/speech/encoder/whisper/detail.hpp`.
+**Success Criteria**:
+1. Duplicate decoder/timestamp helpers are removed from encoder detail or relocated to an
+   explicitly appropriate shared surface, with no behavior-selection logic hidden in detail
+   helpers.
+2. Decoder production code still includes and aliases only decoder-owned detail or the approved
+   shared surface, never `speech/encoder/whisper/detail.hpp`.
+3. Regression tests cover the ownership boundary and the maintained recognizer-backed `[C]`
+   compare path still passes.
+4. Source-backed checks pass: `scripts/check_sml_behavior_selection.sh` over recognizer, Whisper
+   route, encoder, decoder, and tokenizer paths; `scripts/check_domain_boundaries.sh`; forbidden
+   root grep; and the decoder ownership grep.
+
+**Completion Evidence:**
+- `src/emel/speech/encoder/whisper/detail.hpp` no longer contains decoder token constants,
+  `decode_policy_runtime`, decoder workspace sizing, decoder cross-cache/logit helpers,
+  timestamp-aware token selection, or `run_decoder_sequence`.
+- Decoder timestamp helper tests now live in `tests/speech/decoder/whisper/lifecycle_tests.cpp`;
+  encoder detail tests include a source regression that blocks decoder helper names from
+  returning to encoder detail.
+- Focused encoder Whisper tests passed with 15 test cases and 2166 assertions; focused decoder
+  Whisper tests passed with 7 test cases and 1436 assertions.
+- `ctest` passed for `emel_tests_speech` and `emel_tests_whisper`.
+- SML behavior-selection scan, domain-boundary script, forbidden-root grep, encoder-detail helper
+  removal grep, and decoder production ownership grep passed.
+- Scoped quality gate passed with encoder-detail coverage line `100.0%`, branch `50.0%`, exact
+  Whisper compare transcript `[C]`, and Whisper single-thread benchmark status `ok`.

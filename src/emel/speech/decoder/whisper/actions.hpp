@@ -3,11 +3,10 @@
 #include "emel/speech/decoder/whisper/context.hpp"
 #include "emel/speech/decoder/whisper/detail.hpp"
 #include "emel/speech/decoder/whisper/events.hpp"
-#include "emel/speech/encoder/whisper/detail.hpp"
 
 namespace emel::speech::decoder::whisper::action {
 
-namespace kdetail = emel::speech::encoder::whisper::detail;
+namespace kdetail = emel::speech::decoder::whisper::detail;
 
 struct effect_begin_decode {
   void operator()(const event::decode_run &runtime_ev,

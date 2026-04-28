@@ -29,10 +29,8 @@
 #include "emel/model/detail.hpp"
 #include "emel/model/loader/errors.hpp"
 #include "emel/model/whisper/any.hpp"
-#include "emel/speech/decoder/whisper/any.hpp"
-#include "emel/speech/decoder/whisper/sm.hpp"
-#include "emel/speech/encoder/whisper/any.hpp"
-#include "emel/speech/encoder/whisper/sm.hpp"
+#include "emel/speech/recognizer/sm.hpp"
+#include "emel/speech/recognizer_routes/whisper/any.hpp"
 #include "emel/speech/tokenizer/whisper/any.hpp"
 
 namespace {
@@ -377,35 +375,34 @@ int main(int argc, char **argv) {
   const uint64_t binding_ns = elapsed_ns(binding_start, steady_clock::now());
 
   const auto initialize_start = steady_clock::now();
-  emel::model::whisper::execution_contract model_contract = {};
-  const auto &policy =
-      emel::speech::tokenizer::whisper::tiny_asr_decode_policy();
-  if (emel::model::whisper::build_execution_contract(*model,
-                                                     model_contract) !=
-          emel::error::cast(emel::model::loader::error::none) ||
-      !emel::speech::tokenizer::whisper::validate_tiny_control_tokens(
-          tokenizer_json) ||
-      !emel::speech::tokenizer::whisper::is_tiny_asr_decode_policy_supported(
-          policy)) {
+  namespace speech_recognizer = emel::speech::recognizer;
+  namespace whisper_route = emel::speech::recognizer_routes::whisper;
+  namespace whisper_tokenizer = emel::speech::tokenizer::whisper;
+  const auto &policy = whisper_tokenizer::tiny_asr_decode_policy();
+  speech_recognizer::event::tokenizer_assets tokenizer_assets{
+      .model_json = tokenizer_json,
+      .sha256 = whisper_tokenizer::tiny_tokenizer_sha256(),
+  };
+  speech_recognizer::sm<whisper_route::route> recognizer{};
+  emel::error::type initialize_err =
+      emel::error::cast(speech_recognizer::error::none);
+  speech_recognizer::event::initialize initialize_ev{*model, tokenizer_assets};
+  initialize_ev.error_out = &initialize_err;
+  if (!recognizer.process_event(initialize_ev)) {
     std::fprintf(stderr, "error: failed to initialize Whisper runtime\n");
     return 2;
   }
-  const auto encoder_contract =
-      emel::speech::encoder::whisper::bind_execution_contract(*model);
-  const auto decoder_contract =
-      emel::speech::decoder::whisper::bind_execution_contract(*model);
   const uint64_t contract_ns =
       elapsed_ns(initialize_start, steady_clock::now());
 
   const auto recognize_start = steady_clock::now();
-  namespace whisper_encoder = emel::speech::encoder::whisper;
-  namespace whisper_decoder = emel::speech::decoder::whisper;
-  namespace whisper_tokenizer = emel::speech::tokenizer::whisper;
   std::vector<float> encoder_workspace(static_cast<size_t>(
-      whisper_encoder::required_workspace_floats(pcm.size())));
+      whisper_route::required_encoder_workspace_floats(pcm.size())));
   std::vector<float> encoder_state(static_cast<size_t>(
-      whisper_encoder::required_encoder_output_floats(pcm.size())));
-  std::vector<float> logits(static_cast<size_t>(whisper_decoder::vocab_size()));
+      whisper_route::required_encoder_state_floats(pcm.size())));
+  std::vector<float> decoder_workspace(static_cast<size_t>(
+      whisper_route::required_decoder_workspace_floats(pcm.size())));
+  std::vector<float> logits(static_cast<size_t>(whisper_route::logits_size()));
   std::array<int32_t, 32> generated_tokens = {};
   std::vector<char> transcript(64u);
   int32_t transcript_size = 0;
@@ -415,57 +412,38 @@ int main(int argc, char **argv) {
   int32_t width = 0;
   uint64_t encoder_digest = 0u;
   uint64_t decoder_digest = 0u;
-  emel::speech::encoder::whisper::sm encoder{};
-  emel::speech::encoder::whisper::event::encode encode_ev{
-      encoder_contract,
-      std::span<const float>{pcm},
-      16000,
-      1,
-      std::span<float>{encoder_workspace},
-      std::span<float>{encoder_state},
-      frames,
-      width,
-      encoder_digest};
-  const auto encode_start = steady_clock::now();
-  if (!encoder.process_event(encode_ev)) {
-    std::fprintf(stderr, "error: Whisper encoder event failed\n");
-    return 2;
-  }
-  const uint64_t encode_ns = elapsed_ns(encode_start, steady_clock::now());
-
   int32_t generated_token_count = 0;
-  std::vector<float> decoder_workspace(static_cast<size_t>(
-      whisper_decoder::required_workspace_floats(
-          static_cast<uint64_t>(frames))));
-  emel::speech::decoder::whisper::sm decoder{};
-  emel::speech::decoder::whisper::event::decode decode_ev{
-      decoder_contract,
-      std::span<const float>{encoder_state},
-      frames,
-      policy,
-      std::span<int32_t>{generated_tokens.data(), 4u},
-      generated_token_count,
-      std::span<float>{decoder_workspace},
-      std::span<float>{logits},
-      token,
-      confidence,
-      decoder_digest};
-  const auto decode_start = steady_clock::now();
-  if (!decoder.process_event(decode_ev)) {
-    std::fprintf(stderr, "error: Whisper decoder event failed\n");
+  emel::error::type recognize_err =
+      emel::error::cast(speech_recognizer::error::none);
+  speech_recognizer::event::recognize recognize_ev{*model,
+                                                   tokenizer_assets,
+                                                   std::span<const float>{pcm},
+                                                   16000,
+                                                   std::span<char>{transcript},
+                                                   transcript_size,
+                                                   token,
+                                                   confidence,
+                                                   frames,
+                                                   width,
+                                                   encoder_digest,
+                                                   decoder_digest,
+                                                   generated_token_count};
+  recognize_ev.storage = speech_recognizer::event::runtime_storage{
+      .encoder_workspace = std::span<float>{encoder_workspace},
+      .encoder_state = std::span<float>{encoder_state},
+      .decoder_workspace = std::span<float>{decoder_workspace},
+      .logits = std::span<float>{logits},
+      .generated_tokens = std::span<int32_t>{generated_tokens},
+  };
+  recognize_ev.error_out = &recognize_err;
+  if (!recognizer.process_event(recognize_ev)) {
+    std::fprintf(stderr, "error: Whisper recognizer event failed\n");
     return 2;
   }
-  transcript_size = static_cast<int32_t>(
-      whisper_tokenizer::decode_token_ids(
-          tokenizer_json,
-          std::span<const int32_t>{
-              generated_tokens.data(),
-              static_cast<size_t>(generated_token_count),
-          },
-          transcript.data(), static_cast<uint64_t>(transcript.size())));
-  const uint64_t decode_ns = elapsed_ns(decode_start, steady_clock::now());
   const uint64_t recognize_ns =
       elapsed_ns(recognize_start, steady_clock::now());
+  constexpr uint64_t encode_ns = 0u;
+  constexpr uint64_t decode_ns = 0u;
 
   const auto publish_start = steady_clock::now();
   std::filesystem::create_directories(opts.output_dir);
@@ -485,11 +463,11 @@ int main(int argc, char **argv) {
   std::printf(
       "{\"schema\":\"whisper_compare/"
       "v1\",\"record_type\":\"result\",\"status\":\"ok\","
-      "\"case_name\":\"emel/emel.speech.whisper.encoder_decoder\","
+      "\"case_name\":\"emel/emel.speech.recognizer.whisper\","
       "\"compare_group\":\"whisper/tiny/q8_0/phase99_440hz_16khz_mono\","
-      "\"lane\":\"emel\",\"backend_id\":\"emel.speech.whisper.encoder_decoder\","
-      "\"runtime_surface\":\"speech/encoder/whisper+speech/decoder/whisper+"
-      "speech/tokenizer/whisper\","
+      "\"lane\":\"emel\",\"backend_id\":\"emel.speech.recognizer.whisper\","
+      "\"runtime_surface\":\"speech/recognizer+speech/recognizer_routes/"
+      "whisper\","
       "\"decode_policy_language\":\"%s\","
       "\"decode_policy_task\":\"%s\","
       "\"decode_policy_timestamp_mode\":\"%s\","
@@ -507,6 +485,7 @@ int main(int argc, char **argv) {
       "\"cpu_only\":true,\"wall_time_ns\":%" PRIu64 ","
       "\"model_load_ns\":%" PRIu64 ",\"audio_load_ns\":%" PRIu64 ","
       "\"binding_ns\":%" PRIu64 ",\"contract_ns\":%" PRIu64 ","
+      "\"recognize_ns\":%" PRIu64 ","
       "\"encode_ns\":%" PRIu64 ",\"decode_ns\":%" PRIu64 ","
       "\"publish_ns\":%" PRIu64 "}\n",
       emel::speech::tokenizer::whisper::language_role_name(policy.language)
@@ -514,11 +493,11 @@ int main(int argc, char **argv) {
       emel::speech::tokenizer::whisper::task_role_name(policy.task).data(),
       emel::speech::tokenizer::whisper::timestamp_mode_name(policy.timestamps)
           .data(),
-      policy.suppress_translate ? "true" : "false",
-      policy.prompt_tokens.size(), transcript_text.c_str(),
-      static_cast<uint64_t>(generated_token_count),
+      policy.suppress_translate ? "true" : "false", policy.prompt_tokens.size(),
+      transcript_text.c_str(), static_cast<uint64_t>(generated_token_count),
       token, transcript_text.size(), checksum, transcript_path.string().c_str(),
       frames, width, encoder_digest, decoder_digest, total_ns, model_load_ns,
-      audio_load_ns, binding_ns, contract_ns, encode_ns, decode_ns, publish_ns);
+      audio_load_ns, binding_ns, contract_ns, recognize_ns, encode_ns,
+      decode_ns, publish_ns);
   return 0;
 }
