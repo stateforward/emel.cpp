@@ -32,6 +32,8 @@ class Reader:
     self.offset = 0
 
   def read(self, size: int) -> bytes:
+    if size < 0:
+      raise ValueError("negative read size")
     if self.offset + size > len(self.data):
       raise ValueError("unexpected EOF")
     out = self.data[self.offset:self.offset + size]

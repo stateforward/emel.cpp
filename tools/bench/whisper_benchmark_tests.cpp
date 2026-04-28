@@ -38,6 +38,10 @@ std::filesystem::path whisper_compare_script_path() {
 #endif
 }
 
+std::filesystem::path whisper_normalize_model_script_path() {
+  return repo_root() / "tools" / "bench" / "whisper_normalize_model.py";
+}
+
 std::filesystem::path whisper_emel_parity_runner_source_path() {
 #ifdef WHISPER_EMEL_PARITY_RUNNER_SOURCE_PATH
   return WHISPER_EMEL_PARITY_RUNNER_SOURCE_PATH;
@@ -351,6 +355,47 @@ TEST_CASE("whisper emel parity runner validates tensor name materialization") {
         std::string::npos);
   CHECK(source.find("!materialize_tensor_names_from_file(*model, "
                     "model_image)") != std::string::npos);
+}
+
+TEST_CASE("whisper normalizer rejects negative reader sizes") {
+#if defined(_WIN32)
+  MESSAGE("skipping Python-backed Whisper normalizer test on Windows");
+#else
+  const auto tmp_dir = std::filesystem::temp_directory_path() /
+                       "emel-whisper-benchmark-tests" /
+                       "normalizer-negative-read";
+  std::error_code ec = {};
+  std::filesystem::remove_all(tmp_dir, ec);
+  std::filesystem::create_directories(tmp_dir);
+  const auto script_path = tmp_dir / "negative_read_test.py";
+  const auto stdout_path = tmp_dir / "stdout.txt";
+  const auto stderr_path = tmp_dir / "stderr.txt";
+  write_text_file(script_path,
+                  "import importlib.util\n"
+                  "import sys\n"
+                  "\n"
+                  "spec = importlib.util.spec_from_file_location(\n"
+                  "    'whisper_normalize_model', sys.argv[1])\n"
+                  "module = importlib.util.module_from_spec(spec)\n"
+                  "sys.modules[spec.name] = module\n"
+                  "spec.loader.exec_module(module)\n"
+                  "reader = module.Reader(b'abcdef')\n"
+                  "try:\n"
+                  "  reader.read(-1)\n"
+                  "except ValueError:\n"
+                  "  sys.exit(0)\n"
+                  "raise AssertionError('negative read was accepted')\n");
+
+  const std::string command =
+      "python3 " + quote_arg_posix(script_path.string()) + " " +
+      quote_arg_posix(whisper_normalize_model_script_path().string()) +
+      " > " + quote_arg_posix(stdout_path.string()) + " 2> " +
+      quote_arg_posix(stderr_path.string());
+  const auto capture = run_command_capture(command, stdout_path, stderr_path);
+  CHECK(capture.exit_code == 0);
+  CHECK(capture.stdout_text.empty());
+  CHECK(capture.stderr_text.empty());
+#endif
 }
 
 TEST_CASE("whisper single-thread wrapper defaults to stable closeout sample") {
