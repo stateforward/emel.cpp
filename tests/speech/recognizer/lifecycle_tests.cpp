@@ -225,6 +225,47 @@ TEST_CASE("speech_recognizer_rejects_unsupported_initialized_model") {
         emel::error::cast(emel::speech::recognizer::error::unsupported_model));
 }
 
+TEST_CASE("speech_recognizer_rejects_initialize_after_initialize_error") {
+  emel::speech::recognizer::sm<test_route> recognizer{};
+  auto model = std::make_unique<emel::model::data>();
+  emel::error::type err =
+      emel::error::cast(emel::speech::recognizer::error::none);
+  initialize_error_capture first_error{};
+  initialize_error_capture second_error{};
+
+  emel::speech::recognizer::event::initialize invalid_initialize_ev{
+      *model, emel::speech::recognizer::event::tokenizer_assets{}};
+  invalid_initialize_ev.error_out = &err;
+  invalid_initialize_ev.on_error = emel::callback<void(
+      const emel::speech::recognizer::events::initialize_error &)>::
+      from<initialize_error_capture, record_initialize_error>(&first_error);
+
+  CHECK_FALSE(recognizer.process_event(invalid_initialize_ev));
+  CHECK(err ==
+        emel::error::cast(emel::speech::recognizer::error::invalid_request));
+  CHECK(first_error.calls == 1);
+  CHECK(recognizer.is(boost::sml::state<recognizer::state_errored>));
+
+  err = emel::error::cast(emel::speech::recognizer::error::none);
+  emel::speech::recognizer::event::initialize valid_initialize_ev{
+      *model, emel::speech::recognizer::event::tokenizer_assets{
+                  .model_json = "{}",
+                  .sha256 = k_backend_sha,
+              }};
+  valid_initialize_ev.error_out = &err;
+  valid_initialize_ev.on_error = emel::callback<void(
+      const emel::speech::recognizer::events::initialize_error &)>::
+      from<initialize_error_capture, record_initialize_error>(&second_error);
+
+  CHECK_FALSE(recognizer.process_event(valid_initialize_ev));
+  CHECK(err ==
+        emel::error::cast(emel::speech::recognizer::error::invalid_request));
+  CHECK(second_error.calls == 1);
+  CHECK(second_error.err ==
+        emel::error::cast(emel::speech::recognizer::error::invalid_request));
+  CHECK(recognizer.is(boost::sml::state<recognizer::state_errored>));
+}
+
 TEST_CASE("speech_recognizer_runs_backend_route_from_public_events") {
   emel::speech::recognizer::sm<test_route> recognizer{};
   auto model = std::make_unique<emel::model::data>();

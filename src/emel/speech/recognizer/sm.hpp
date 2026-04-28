@@ -67,6 +67,9 @@ template <class route_policy = route::unsupported> struct model {
       , sml::state<state_initialize_error_out_decision> <= sml::state<state_ready>
           + sml::event<event::initialize_run> [ guard::guard_invalid_initialize{} ]
           / action::effect_reject_initialize
+      , sml::state<state_initialize_error_out_decision> <= sml::state<state_errored>
+          + sml::event<event::initialize_run>
+          / action::effect_reject_initialize
 
       , sml::state<state_tokenizer_decision> <= sml::state<state_initializing>
           + sml::completion<event::initialize_run>
