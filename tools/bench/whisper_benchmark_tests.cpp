@@ -357,6 +357,17 @@ TEST_CASE("whisper emel parity runner validates tensor name materialization") {
                     "model_image)") != std::string::npos);
 }
 
+TEST_CASE("whisper emel parity runner sizes transcript buffer from token budget") {
+  const std::string source =
+      read_file(whisper_emel_parity_runner_source_path());
+  REQUIRE(!source.empty());
+
+  CHECK(source.find("k_transcript_bytes_per_token") != std::string::npos);
+  CHECK(source.find("generated_tokens.size() *") != std::string::npos);
+  CHECK(source.find("std::vector<char> transcript(64u)") ==
+        std::string::npos);
+}
+
 TEST_CASE("whisper normalizer rejects negative reader sizes") {
 #if defined(_WIN32)
   MESSAGE("skipping Python-backed Whisper normalizer test on Windows");

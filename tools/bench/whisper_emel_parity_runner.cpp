@@ -37,6 +37,8 @@ namespace {
 
 using steady_clock = std::chrono::steady_clock;
 
+constexpr size_t k_transcript_bytes_per_token = 16u;
+
 uint64_t elapsed_ns(const steady_clock::time_point start,
                     const steady_clock::time_point end) noexcept {
   return static_cast<uint64_t>(
@@ -456,7 +458,8 @@ int main(int argc, char **argv) {
       whisper_route::required_decoder_workspace_floats(pcm.size())));
   std::vector<float> logits(static_cast<size_t>(whisper_route::logits_size()));
   std::array<int32_t, 32> generated_tokens = {};
-  std::vector<char> transcript(64u);
+  std::vector<char> transcript(generated_tokens.size() *
+                               k_transcript_bytes_per_token);
   int32_t transcript_size = 0;
   int32_t token = 0;
   float confidence = 0.0f;

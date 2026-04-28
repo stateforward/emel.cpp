@@ -2569,3 +2569,39 @@ TEST_CASE(
   CHECK(requirements.kv_count == 4u);
   CHECK(requirements.tensor_count == 168u);
 }
+
+TEST_CASE("whisper_detail_rejects_legacy_tensor_size_overflow") {
+  std::vector<uint8_t> legacy = {'l', 'm', 'g', 'g'};
+  append_scalar<int32_t>(legacy, 51865);
+  append_scalar<int32_t>(legacy, 1500);
+  append_scalar<int32_t>(legacy, 384);
+  append_scalar<int32_t>(legacy, 6);
+  append_scalar<int32_t>(legacy, 4);
+  append_scalar<int32_t>(legacy, 448);
+  append_scalar<int32_t>(legacy, 384);
+  append_scalar<int32_t>(legacy, 6);
+  append_scalar<int32_t>(legacy, 4);
+  append_scalar<int32_t>(legacy, 80);
+  append_scalar<int32_t>(legacy, 7);
+  append_scalar<int32_t>(legacy, 80);
+  append_scalar<int32_t>(legacy, 1);
+  for (int32_t index = 0; index < 80; ++index) {
+    append_scalar<uint32_t>(legacy, 0u);
+  }
+  append_scalar<int32_t>(legacy, 1);
+  append_scalar<uint32_t>(legacy, 0u);
+
+  const std::string_view tensor_name = "encoder.positional_embedding";
+  append_scalar<int32_t>(legacy, 4);
+  append_scalar<int32_t>(legacy, static_cast<int32_t>(tensor_name.size()));
+  append_scalar<int32_t>(legacy, 0);
+  append_scalar<int32_t>(legacy, 65536);
+  append_scalar<int32_t>(legacy, 65536);
+  append_scalar<int32_t>(legacy, 65536);
+  append_scalar<int32_t>(legacy, 65536);
+  legacy.insert(legacy.end(), tensor_name.begin(), tensor_name.end());
+
+  std::vector<uint8_t> gguf = {};
+  CHECK_FALSE(emel::model::whisper::detail::normalize_legacy_lmgg_to_gguf(
+      std::span<const uint8_t>{legacy}, gguf));
+}

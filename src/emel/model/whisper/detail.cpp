@@ -6,6 +6,7 @@
 #include <cstdio>
 #include <cstring>
 #include <initializer_list>
+#include <limits>
 #include <span>
 #include <string>
 #include <utility>
@@ -45,7 +46,7 @@ struct legacy_reader {
   size_t offset = 0u;
 
   bool read(std::span<const uint8_t> &out, const size_t size) noexcept {
-    if (offset + size > bytes.size()) {
+    if (offset > bytes.size() || size > bytes.size() - offset) {
       return false;
     }
     out = bytes.subspan(offset, size);
@@ -71,6 +72,23 @@ struct legacy_reader {
     return true;
   }
 };
+
+bool checked_mul_u64(const uint64_t lhs, const uint64_t rhs,
+                     uint64_t &out) noexcept {
+  if (lhs != 0u && rhs > std::numeric_limits<uint64_t>::max() / lhs) {
+    return false;
+  }
+  out = lhs * rhs;
+  return true;
+}
+
+bool checked_size_out(const uint64_t bytes, size_t &size_out) noexcept {
+  if (bytes > static_cast<uint64_t>(std::numeric_limits<size_t>::max())) {
+    return false;
+  }
+  size_out = static_cast<size_t>(bytes);
+  return true;
+}
 
 struct normalized_tensor_record {
   std::string name = {};
@@ -112,19 +130,22 @@ bool tensor_data_size(const uint32_t dtype, const std::array<uint64_t, 4> &dims,
                       const uint32_t n_dims, size_t &size_out) noexcept {
   uint64_t elements = 1u;
   for (uint32_t index = 0u; index < n_dims; ++index) {
-    elements *= dims[index];
+    if (!checked_mul_u64(elements, dims[index], elements)) {
+      return false;
+    }
   }
+  uint64_t bytes = 0u;
   if (dtype == k_dtype_f32) {
-    size_out = static_cast<size_t>(elements * 4u);
-    return true;
+    return checked_mul_u64(elements, 4u, bytes) &&
+           checked_size_out(bytes, size_out);
   }
   if (dtype == k_dtype_f16) {
-    size_out = static_cast<size_t>(elements * 2u);
-    return true;
+    return checked_mul_u64(elements, 2u, bytes) &&
+           checked_size_out(bytes, size_out);
   }
   if (dtype == k_dtype_q8_0 && n_dims > 0u && dims[0] % 32u == 0u) {
-    size_out = static_cast<size_t>((elements / 32u) * 34u);
-    return true;
+    return checked_mul_u64(elements / 32u, 34u, bytes) &&
+           checked_size_out(bytes, size_out);
   }
   return false;
 }
