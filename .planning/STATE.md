@@ -2,9 +2,9 @@
 gsd_state_version: 1.0
 milestone: v1.16
 milestone_name: ARM Whisper GGUF Parity And Performance
-status: ready_to_archive
-stopped_at: Phases 128-129 complete; archive/tag confirmation next
-last_updated: "2026-04-28T10:47:11Z"
+status: pr_open
+stopped_at: PR #73 open for v1.16; archive/tag confirmation next after review
+last_updated: "2026-04-28T11:12:05Z"
 last_activity: 2026-04-28
 progress:
   total_phases: 36
@@ -24,7 +24,7 @@ See: .planning/PROJECT.md (updated 2026-04-25)
 verification before widening API surface or model scope.
 **Current focus:** v1.16 has no source-backed blockers after Phase 127. Phases 128-129 closed the
 non-blocking audit tech debt around benchmark/evidence stability and encoder-detail helper
-deduplication before archive/tag confirmation.
+deduplication, and PR #73 is open before archive/tag confirmation.
 
 ## Current Position
 
@@ -34,6 +34,8 @@ Status: `v1.16` ARM Whisper GGUF Parity And Performance has all active requireme
 no source-backed readiness blockers. Phase 128 closed the benchmark/evidence cleanup items, and
 Phase 129 removed stale duplicate decoder/timestamp helpers from encoder detail. Archive/tag
 confirmation is the next milestone-management step.
+
+Open PR: https://github.com/stateforward/emel.cpp/pull/73
 
 Closed gap sequence:
 
@@ -107,7 +109,7 @@ Items acknowledged and still deferred at milestone close on 2026-04-26:
   non-blocking source-backed audit tech debt.
 - Latest shipped milestone: `v1.15`; v1.16 has not yet been archived/tagged.
 
-- Next action: run `$gsd-complete-milestone`.
+- Next action: review/merge PR #73, then run `$gsd-complete-milestone`.
 - Current blocker: none. The user-approved lint snapshot update passed `lint_snapshot`.
 
 ## Accumulated Context
