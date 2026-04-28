@@ -33,8 +33,9 @@
   - Initial archive created 2026-04-26, reopened the same day because bounded transcript drift was
     not acceptable for an E2E milestone, then reopened again on 2026-04-27 after a source-backed
     audit rerun found artifact, benchmark-publication, runtime-surface, and evidence-ledger gaps;
-    the latest source-backed audit rerun found decode-policy, tokenizer-backed decoder transcript,
-    and preserved-baseline Nyquist gaps now planned in Phases 120-122.
+    the final source-backed audit rerun on 2026-04-27 passed after Phases 120-122 closed
+    decode-policy, tokenizer-backed decoder transcript, preserved-baseline Nyquist, and closeout
+    gaps.
 
 ## Current Milestone
 
@@ -130,9 +131,9 @@ reference, and a source-backed closeout audit.
 - [x] **Phase 121: Whisper Baseline Nyquist Validation Backfill** - Complete on 2026-04-27. Added
   archived-baseline validation artifacts for preserved baseline Phases 94-102 without giving them
   active runtime credit beyond their archived scope.
-- [ ] **Phase 122: Whisper Final Gap Closeout Rerun** - Planned gap closure. Rerun source-backed
-  closeout after Phases 120-121, cite stable benchmark evidence, update the audit, and close
-  `CLOSE-01`.
+- [x] **Phase 122: Whisper Final Gap Closeout Rerun** - Complete on 2026-04-27. Reran
+  source-backed closeout after Phases 120-121, cited stable warmed benchmark evidence, updated
+  the audit, and closed `CLOSE-01`.
 
 ## Phase Details
 
@@ -579,6 +580,8 @@ contract and make transcript publication tokenizer-owned end to end.
 
 ### Phase 122: Whisper Final Gap Closeout Rerun
 
+**Status:** Complete.
+
 **Goal:** Rerun v1.16 source-backed closeout after decode-policy/transcript and baseline
 validation repairs.
 **Requirements:** CLOSE-01.
@@ -591,3 +594,16 @@ preserved-baseline Nyquist coverage.
    immutable archived benchmark evidence, not the volatile zero-warmup one-iteration citation.
 4. Full relevant quality gates, domain-boundary checks, and source-backed milestone audit rerun
    pass before `CLOSE-01` is re-marked complete.
+
+**Completion Evidence**:
+- `scripts/check_domain_boundaries.sh` passed and forbidden-root grep returned no matches.
+- `scripts/bench_whisper_compare.sh --skip-reference-build --skip-emel-build` reported
+  `status=exact_match reason=ok`.
+- `scripts/bench_whisper_single_thread.sh --skip-reference-build --skip-emel-build` reported
+  `benchmark_status=ok reason=ok` with EMEL mean `70709972 ns` below reference mean
+  `81716555 ns`.
+- Full closeout quality gate passed with
+  `EMEL_QUALITY_GATES_SCOPE=full` and
+  `EMEL_QUALITY_GATES_BENCH_SUITE=whisper_compare:whisper_single_thread`; coverage was line
+  `90.8%`, branch `55.6%`.
+- `.planning/milestones/v1.16-MILESTONE-AUDIT.md` reports `status: passed`.

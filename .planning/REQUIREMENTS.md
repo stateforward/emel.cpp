@@ -14,12 +14,12 @@
   roles, timestamp mode, and suppression behavior.
 - [x] **PARITY-01** — The maintained EMEL lane must exact-match the pinned `whisper.cpp`
   transcript for the Phase 99 audio/model pair.
-- [ ] **CLOSE-01** — Re-run source-backed audit and full relevant quality gates before closing
+- [x] **CLOSE-01** — Re-run source-backed audit and full relevant quality gates before closing
   the reopened milestone, including benchmark evidence that enforces the performance contract.
 - [x] **PERF-03** — Restore a source-backed benchmark record where EMEL beats the matched
   single-thread CPU `whisper.cpp` ARM reference lane for the maintained Phase 99 model/audio pair.
 
-**Coverage after source-backed gap audit:** 7 complete, 1 pending.
+**Coverage after source-backed closeout:** 8 complete, 0 pending.
 
 ## Traceability
 
@@ -31,5 +31,5 @@
 | TOK-02 | 120 | Complete |
 | POLICY-01 | 120 | Complete |
 | PARITY-01 | 118 | Complete |
-| CLOSE-01 | 122 | Pending |
+| CLOSE-01 | 122 | Complete |
 | PERF-03 | 118 | Complete |

@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.16
 milestone_name: ARM Whisper GGUF Parity And Performance
-status: gaps_found
-stopped_at: v1.16 reopened for source-backed gap closure phases 120-122
-last_updated: "2026-04-27T23:55:55.000Z"
+status: ready_to_archive
+stopped_at: v1.16 source-backed closeout passed; ready for milestone archival
+last_updated: "2026-04-27T23:59:00.000Z"
 last_activity: 2026-04-27
 progress:
   total_phases: 29
-  completed_phases: 28
-  total_plans: 19
-  completed_plans: 19
-  percent: 97
+  completed_phases: 29
+  total_plans: 20
+  completed_plans: 20
+  percent: 100
 ---
 
 # Project State
@@ -22,30 +22,31 @@ See: .planning/PROJECT.md (updated 2026-04-25)
 
 **Core value:** Prove real end-to-end behavior with explicit SML orchestration and parity-oriented
 verification before widening API surface or model scope.
-**Current focus:** v1.16 is reopened for source-backed closeout gap closure.
+**Current focus:** v1.16 source-backed closeout passed; milestone is ready for archival.
 
 ## Current Position
 
 Phase: 122
 Plan: Whisper Final Gap Closeout Rerun
-Status: `v1.16` ARM Whisper GGUF Parity And Performance has source-backed closeout gaps.
+Status: `v1.16` ARM Whisper GGUF Parity And Performance passed source-backed closeout.
 
-Planned gap closure:
+Closed gap sequence:
 
 - Phase 120: complete; decode-policy runtime behavior is wired through a speech-owned policy and
   the hardcoded public decoder `token:<id>` transcript surface is removed.
 - Phase 121: complete; preserved-baseline Nyquist validation artifacts for Phases 94-102 are
   backfilled with archived-baseline scope.
-- Phase 122: rerun source-backed closeout and update the milestone audit after gap closure.
+- Phase 122: complete; source-backed closeout rerun passed and the milestone audit now reports
+  `status: passed`.
 
 The latest compare artifact still records exact `[C]` parity through the public Whisper runtime
 surfaces, and the default warmed benchmark artifact records EMEL faster than the matched
 `whisper.cpp` reference. Phase 120 closed the decode-policy and tokenizer-backed decoder
-transcript gaps; Phase 121 backfilled preserved-baseline Nyquist artifacts. Final closeout audit
-remains.
+transcript gaps; Phase 121 backfilled preserved-baseline Nyquist artifacts; Phase 122 closed
+`CLOSE-01`.
 Last activity: 2026-04-27
 
-Progress: [##########] 97%
+Progress: [##########] 100%
 
 ## Deferred Items
 
@@ -67,10 +68,11 @@ Items acknowledged and still deferred at milestone close on 2026-04-26:
 
 **Current planning shape:**
 
-- Active milestone: `v1.16` reopened for Phases 120-122.
-- Latest shipped milestone: `v1.15`; v1.16 was archived, then reopened by source-backed audit.
-- Next action: execute Phase 122.
-- Current blocker: `CLOSE-01`.
+- Active milestone: `v1.16` ready for archival after Phase 122 closeout.
+- Latest shipped milestone: `v1.15`; v1.16 was archived, reopened by source-backed audit, and now
+  has a passing source-backed closeout audit.
+- Next action: archive/complete the milestone.
+- Current blocker: none.
 
 ## Accumulated Context
 
