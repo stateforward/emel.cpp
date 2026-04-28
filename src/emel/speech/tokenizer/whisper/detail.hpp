@@ -103,47 +103,194 @@ inline bool contains_token_role(std::string_view tokenizer_json,
   return contains(window, "\"id\"") && contains(window, id_view);
 }
 
+inline bool is_json_space(const char value) noexcept {
+  return value == ' ' || value == '\n' || value == '\r' || value == '\t';
+}
+
+inline size_t skip_json_space(std::string_view text,
+                              size_t offset) noexcept {
+  while (offset < text.size() && is_json_space(text[offset])) {
+    ++offset;
+  }
+  return offset;
+}
+
+inline bool find_json_object_value(std::string_view json,
+                                   std::string_view key,
+                                   std::string_view &object_out) noexcept {
+  size_t search = 0u;
+  while (search < json.size()) {
+    const size_t key_pos = json.find(key, search);
+    if (key_pos == std::string_view::npos) {
+      return false;
+    }
+    search = key_pos + key.size();
+
+    size_t colon = skip_json_space(json, search);
+    if (colon >= json.size() || json[colon] != ':') {
+      continue;
+    }
+    size_t object_begin = skip_json_space(json, colon + 1u);
+    if (object_begin >= json.size() || json[object_begin] != '{') {
+      continue;
+    }
+
+    uint32_t depth = 1u;
+    bool in_string = false;
+    bool escaped = false;
+    const size_t content_begin = object_begin + 1u;
+    for (size_t offset = content_begin; offset < json.size(); ++offset) {
+      const char value = json[offset];
+      if (in_string) {
+        if (escaped) {
+          escaped = false;
+        } else if (value == '\\') {
+          escaped = true;
+        } else if (value == '"') {
+          in_string = false;
+        }
+        continue;
+      }
+
+      if (value == '"') {
+        in_string = true;
+      } else if (value == '{') {
+        ++depth;
+      } else if (value == '}') {
+        --depth;
+        if (depth == 0u) {
+          object_out = json.substr(content_begin, offset - content_begin);
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+  return false;
+}
+
+inline std::string_view vocab_lookup_scope(std::string_view tokenizer_json)
+    noexcept {
+  std::string_view vocab_json = {};
+  if (find_json_object_value(tokenizer_json, "\"vocab\"", vocab_json)) {
+    return vocab_json;
+  }
+  return tokenizer_json;
+}
+
+inline bool find_next_json_object_entry(std::string_view object_json,
+                                        size_t &search,
+                                        std::string_view &key_out,
+                                        size_t &value_begin_out) noexcept {
+  while (search < object_json.size()) {
+    const size_t key_begin = object_json.find('"', search);
+    if (key_begin == std::string_view::npos) {
+      return false;
+    }
+
+    bool escaped = false;
+    size_t key_end = key_begin + 1u;
+    while (key_end < object_json.size()) {
+      const char value = object_json[key_end];
+      if (escaped) {
+        escaped = false;
+      } else if (value == '\\') {
+        escaped = true;
+      } else if (value == '"') {
+        break;
+      }
+      ++key_end;
+    }
+    if (key_end >= object_json.size()) {
+      return false;
+    }
+
+    const size_t colon = skip_json_space(object_json, key_end + 1u);
+    if (colon >= object_json.size() || object_json[colon] != ':') {
+      search = key_end + 1u;
+      continue;
+    }
+
+    key_out = object_json.substr(key_begin + 1u, key_end - key_begin - 1u);
+    value_begin_out = skip_json_space(object_json, colon + 1u);
+    search = value_begin_out;
+    return true;
+  }
+  return false;
+}
+
+inline bool json_value_ends_at(std::string_view object_json,
+                               size_t value_end) noexcept {
+  value_end = skip_json_space(object_json, value_end);
+  return value_end == object_json.size() || object_json[value_end] == ',' ||
+         object_json[value_end] == '}';
+}
+
 inline bool find_vocab_token_text(std::string_view tokenizer_json,
                                   const int32_t id,
                                   std::string_view &token_text_out) noexcept {
   char id_buffer[16] = {};
   const uint32_t id_size = write_i32(id, id_buffer);
   const std::string_view id_view{id_buffer, id_size};
+  const std::string_view vocab_json = vocab_lookup_scope(tokenizer_json);
   size_t search = 0u;
-  while (search < tokenizer_json.size()) {
-    const size_t id_pos = tokenizer_json.find(id_view, search);
-    if (id_pos == std::string_view::npos) {
+  while (search < vocab_json.size()) {
+    std::string_view token_text = {};
+    size_t value_begin = 0u;
+    if (!find_next_json_object_entry(vocab_json, search, token_text,
+                                     value_begin)) {
       return false;
     }
-    search = id_pos + id_view.size();
-
-    size_t colon = id_pos;
-    while (colon > 0u && tokenizer_json[colon - 1u] == ' ') {
-      --colon;
+    const size_t value_end = value_begin + id_view.size();
+    if (value_end <= vocab_json.size() &&
+        vocab_json.substr(value_begin, id_view.size()) == id_view &&
+        json_value_ends_at(vocab_json, value_end)) {
+      token_text_out = token_text;
+      return true;
     }
-    if (colon == 0u || tokenizer_json[colon - 1u] != ':') {
-      continue;
-    }
-    const size_t value_end = id_pos + id_view.size();
-    if (value_end < tokenizer_json.size() && tokenizer_json[value_end] != ',' &&
-        tokenizer_json[value_end] != '\n' &&
-        tokenizer_json[value_end] != '\r') {
-      continue;
-    }
-
-    const size_t key_end = tokenizer_json.rfind('"', colon - 1u);
-    if (key_end == std::string_view::npos || key_end == 0u) {
-      continue;
-    }
-    const size_t key_begin = tokenizer_json.rfind('"', key_end - 1u);
-    if (key_begin == std::string_view::npos) {
-      continue;
-    }
-    token_text_out =
-        tokenizer_json.substr(key_begin + 1u, key_end - key_begin - 1u);
-    return true;
+    search = value_begin < vocab_json.size() ? value_begin + 1u
+                                             : vocab_json.size();
   }
   return false;
+}
+
+inline size_t find_max_vocab_token_bytes(std::string_view tokenizer_json)
+    noexcept {
+  const std::string_view vocab_json = vocab_lookup_scope(tokenizer_json);
+  size_t search = 0u;
+  size_t max_token_bytes = 0u;
+  while (search < vocab_json.size()) {
+    std::string_view token_text = {};
+    size_t value_begin = 0u;
+    if (!find_next_json_object_entry(vocab_json, search, token_text,
+                                     value_begin)) {
+      break;
+    }
+    if (token_text.size() > max_token_bytes) {
+      max_token_bytes = token_text.size();
+    }
+    search = value_begin < vocab_json.size() ? value_begin + 1u
+                                             : vocab_json.size();
+  }
+  return max_token_bytes;
+}
+
+inline size_t required_transcript_capacity(std::string_view tokenizer_json,
+                                           const size_t token_count) noexcept {
+  if (token_count == 0u) {
+    return 0u;
+  }
+  size_t token_bytes = find_max_vocab_token_bytes(tokenizer_json);
+  if (token_bytes == 0u) {
+    token_bytes = tokenizer_json.size();
+  }
+  if (token_bytes == 0u) {
+    token_bytes = 1u;
+  }
+  if (token_count > static_cast<size_t>(-1) / token_bytes) {
+    return static_cast<size_t>(-1);
+  }
+  return token_count * token_bytes;
 }
 
 inline void append_decoded_piece(std::string_view piece, char *transcript,

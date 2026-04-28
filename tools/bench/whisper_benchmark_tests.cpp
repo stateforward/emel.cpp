@@ -357,13 +357,18 @@ TEST_CASE("whisper emel parity runner validates tensor name materialization") {
                     "model_image)") != std::string::npos);
 }
 
-TEST_CASE("whisper emel parity runner sizes transcript buffer from token budget") {
+TEST_CASE("whisper emel parity runner sizes transcript buffer from tokenizer vocab") {
   const std::string source =
       read_file(whisper_emel_parity_runner_source_path());
   REQUIRE(!source.empty());
 
-  CHECK(source.find("k_transcript_bytes_per_token") != std::string::npos);
-  CHECK(source.find("generated_tokens.size() *") != std::string::npos);
+  CHECK(source.find("whisper_tokenizer::required_transcript_capacity") !=
+        std::string::npos);
+  CHECK(source.find("tokenizer_json, generated_tokens.size()") !=
+        std::string::npos);
+  CHECK(source.find("k_transcript_bytes_per_token") == std::string::npos);
+  CHECK(source.find("generated_tokens.size() * k_transcript_bytes_per_token") ==
+        std::string::npos);
   CHECK(source.find("std::vector<char> transcript(64u)") ==
         std::string::npos);
 }

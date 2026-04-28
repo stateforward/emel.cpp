@@ -143,6 +143,33 @@ TEST_CASE("speech whisper tokenizer rejects malformed token metadata") {
                                              token_text));
 }
 
+TEST_CASE("speech whisper tokenizer restricts id lookup to vocab entries") {
+  namespace whisper = emel::speech::tokenizer::whisper::detail;
+
+  const std::string tokenizer_json =
+      "{\"added_tokens\":[{\"content\":\"metadata\",\"type_id\":0,\"id\":1}],"
+      "\"model\":{\"vocab\":{\"!\":0,\"real\":1}}}";
+
+  CHECK(whisper::find_max_vocab_token_bytes(tokenizer_json) == 4u);
+  CHECK(whisper::required_transcript_capacity(tokenizer_json, 2u) == 8u);
+
+  std::string_view token_text = {};
+  REQUIRE(whisper::find_vocab_token_text(tokenizer_json, 0, token_text));
+  CHECK(token_text == "!");
+
+  token_text = {};
+  REQUIRE(whisper::find_vocab_token_text(tokenizer_json, 1, token_text));
+  CHECK(token_text == "real");
+
+  int32_t token_ids[] = {0, 1};
+  char transcript[16] = {};
+  const uint64_t transcript_size = whisper::decode_token_ids(
+      tokenizer_json, std::span<const int32_t>{token_ids}, transcript,
+      sizeof(transcript));
+  CHECK(std::string_view{transcript, static_cast<size_t>(transcript_size)} ==
+        "!real");
+}
+
 TEST_CASE("speech whisper tokenizer trims leading spaces and respects capacity") {
   namespace whisper = emel::speech::tokenizer::whisper::detail;
 

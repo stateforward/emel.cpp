@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <span>
 #include <string_view>
@@ -65,6 +66,11 @@ inline uint64_t decode_token_ids(std::string_view tokenizer_json,
                                  const uint64_t capacity) noexcept {
   return detail::decode_token_ids(tokenizer_json, token_ids, transcript,
                                   capacity);
+}
+
+inline size_t required_transcript_capacity(std::string_view tokenizer_json,
+                                           const size_t token_count) noexcept {
+  return detail::required_transcript_capacity(tokenizer_json, token_count);
 }
 
 } // namespace emel::speech::tokenizer::whisper
