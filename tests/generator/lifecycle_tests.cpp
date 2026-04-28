@@ -1314,7 +1314,7 @@ TEST_CASE("generator_quantized_path_audit_marks_unsupported_quantized_stage_no_c
   build_prepared_model(*prepared);
 
   REQUIRE(find_tensor(*prepared, "blk.0.attn_q.weight") != nullptr);
-  find_tensor(*prepared, "blk.0.attn_q.weight")->type = emel::kernel::detail::dtype_q4_0;
+  find_tensor(*prepared, "blk.0.attn_q.weight")->type = emel::kernel::detail::dtype_q5_1;
 
   emel::model::llama::detail::execution_view execution{};
   REQUIRE(emel::model::llama::detail::build_execution_view(stabilize_model(*prepared), execution) ==
@@ -1324,7 +1324,7 @@ TEST_CASE("generator_quantized_path_audit_marks_unsupported_quantized_stage_no_c
   const auto & attention_q = find_stage_audit(
       audit, emel::model::llama::detail::quantized_stage_family::attention_q);
 
-  CHECK(attention_q.tensor_type == emel::kernel::detail::dtype_q4_0);
+  CHECK(attention_q.tensor_type == emel::kernel::detail::dtype_q5_1);
   CHECK(attention_q.contract ==
         emel::model::llama::detail::quantized_contract_kind::explicit_no_claim);
   CHECK(attention_q.consistent_across_layers);

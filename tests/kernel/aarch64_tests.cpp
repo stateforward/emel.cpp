@@ -671,6 +671,134 @@ TEST_CASE("kernel_aarch64_quantized_mul_mat_simd_matches_scalar") {
 #endif
 }
 
+TEST_CASE("kernel_aarch64_q4_0_vector_route_is_explicit_and_numeric_match") {
+#if !(defined(__aarch64__) || defined(__ARM_NEON))
+  return;
+#else
+  if (!emel::kernel::aarch64::detail::neon_q4_0_vector_supported()) {
+    return;
+  }
+
+  using emel::kernel::detail::quant::QK4_0;
+  using emel::kernel::detail::quant::block_q4_0;
+  using emel::kernel::detail::quant::block_q8_0;
+  using emel::kernel::detail::quant::quantize_row_q4_0_ref;
+  using emel::kernel::detail::quant::quantize_row_q8_0_strided;
+
+  constexpr uint64_t row_count = 4u;
+  std::array<float, QK4_0 * row_count> dense_rows = {};
+  for (size_t index = 0; index < dense_rows.size(); ++index) {
+    dense_rows[index] = static_cast<float>(static_cast<int32_t>((index * 5u) % 21u) - 10) * 0.125f;
+  }
+
+  std::array<block_q4_0, row_count> q4_rows = {};
+  for (uint64_t row = 0; row < row_count; ++row) {
+    quantize_row_q4_0_ref(
+        dense_rows.data() + row * QK4_0,
+        q4_rows.data() + row,
+        static_cast<int64_t>(QK4_0));
+  }
+
+  std::array<float, QK4_0> input = {};
+  for (size_t index = 0; index < input.size(); ++index) {
+    input[index] = static_cast<float>(static_cast<int32_t>((index * 7u) % 19u) - 9) * 0.25f;
+  }
+
+  std::array<block_q8_0, 1> q8_input = {};
+  quantize_row_q8_0_strided(input.data(), 1u, q8_input.data(), static_cast<int64_t>(QK4_0));
+
+  std::array<float, row_count> reference = {};
+  for (uint64_t row = 0; row < row_count; ++row) {
+    reference[row] =
+        emel::kernel::detail::dot_q4_0_q8_0_row_scalar(q4_rows.data() + row, q8_input.data(), 1u);
+  }
+
+  std::array<float, row_count> simd_out = {};
+  const emel::kernel::event::op_mul_mat ev{
+      .src0 = make_quantized_src(q4_rows.data(), dtype::q4_0, QK4_0, row_count),
+      .src1 = make_src(input.data(), dtype::f32, 1u, QK4_0),
+      .dst = make_dst(simd_out.data(), dtype::f32, 1u, row_count),
+      .nth = 1,
+  };
+
+  CHECK(emel::kernel::aarch64::detail::can_use_neon_mul_mat_q4_0_vector(ev, true));
+  CHECK(emel::kernel::aarch64::detail::execute_neon_mul_mat_q4_0_vector(ev));
+  for (uint64_t row = 0; row < row_count; ++row) {
+    CHECK(simd_out[row] == doctest::Approx(reference[row]).epsilon(1.0e-5f));
+  }
+
+  aarch64_sm machine{};
+  REQUIRE(machine.process_event(ev));
+  CHECK(machine.optimized_q4_0_dispatch_count() == 1u);
+  CHECK(machine.optimized_q4_0_vector_dispatch_count() == 1u);
+  CHECK(machine.shared_q4_dispatch_count() == 0u);
+#endif
+}
+
+TEST_CASE("kernel_aarch64_q4_1_vector_route_is_explicit_and_numeric_match") {
+#if !(defined(__aarch64__) || defined(__ARM_NEON))
+  return;
+#else
+  if (!emel::kernel::aarch64::detail::neon_q4_1_vector_supported()) {
+    return;
+  }
+
+  using emel::kernel::detail::quant::QK4_1;
+  using emel::kernel::detail::quant::block_q4_1;
+  using emel::kernel::detail::quant::block_q8_0;
+  using emel::kernel::detail::quant::quantize_row_q4_1_ref;
+  using emel::kernel::detail::quant::quantize_row_q8_0_strided;
+
+  constexpr uint64_t row_count = 4u;
+  std::array<float, QK4_1 * row_count> dense_rows = {};
+  for (size_t index = 0; index < dense_rows.size(); ++index) {
+    dense_rows[index] = static_cast<float>(static_cast<int32_t>((index * 5u) % 21u) - 10) * 0.125f;
+  }
+
+  std::array<block_q4_1, row_count> q4_rows = {};
+  for (uint64_t row = 0; row < row_count; ++row) {
+    quantize_row_q4_1_ref(
+        dense_rows.data() + row * QK4_1,
+        q4_rows.data() + row,
+        static_cast<int64_t>(QK4_1));
+  }
+
+  std::array<float, QK4_1> input = {};
+  for (size_t index = 0; index < input.size(); ++index) {
+    input[index] = static_cast<float>(static_cast<int32_t>((index * 7u) % 19u) - 9) * 0.25f;
+  }
+
+  std::array<block_q8_0, 1> q8_input = {};
+  quantize_row_q8_0_strided(input.data(), 1u, q8_input.data(), static_cast<int64_t>(QK4_1));
+
+  std::array<float, row_count> reference = {};
+  for (uint64_t row = 0; row < row_count; ++row) {
+    reference[row] =
+        emel::kernel::detail::dot_q4_1_q8_0_row_scalar(q4_rows.data() + row, q8_input.data(), 1u);
+  }
+
+  std::array<float, row_count> simd_out = {};
+  const emel::kernel::event::op_mul_mat ev{
+      .src0 = make_quantized_src(q4_rows.data(), dtype::q4_1, QK4_1, row_count),
+      .src1 = make_src(input.data(), dtype::f32, 1u, QK4_1),
+      .dst = make_dst(simd_out.data(), dtype::f32, 1u, row_count),
+      .nth = 1,
+  };
+
+  CHECK(emel::kernel::aarch64::detail::can_use_neon_mul_mat_q4_1_vector(ev, true));
+  CHECK(emel::kernel::aarch64::detail::execute_neon_mul_mat_q4_1_vector(ev));
+  for (uint64_t row = 0; row < row_count; ++row) {
+    CHECK(simd_out[row] == doctest::Approx(reference[row]).epsilon(1.0e-5f));
+  }
+
+  aarch64_sm machine{};
+  REQUIRE(machine.process_event(ev));
+  CHECK(machine.optimized_q4_1_dispatch_count() == 1u);
+  CHECK(machine.optimized_q4_1_vector_dispatch_count() == 1u);
+  CHECK(machine.shared_q4_dispatch_count() == 0u);
+#endif
+}
+
 TEST_CASE("kernel_aarch64_q5_0_vector_route_is_explicit_and_numeric_match") {
 #if !(defined(__aarch64__) || defined(__ARM_NEON))
   return;
@@ -732,6 +860,159 @@ TEST_CASE("kernel_aarch64_q5_0_vector_route_is_explicit_and_numeric_match") {
   CHECK(machine.optimized_q5_0_dispatch_count() == 1u);
   CHECK(machine.optimized_q5_0_vector_dispatch_count() == 1u);
   CHECK(machine.shared_q5_0_dispatch_count() == 0u);
+#endif
+}
+
+TEST_CASE("kernel_aarch64_q4_q5_vector_unchecked_paths_match_scalar_with_tail_rows") {
+#if !(defined(__aarch64__) || defined(__ARM_NEON))
+  return;
+#else
+  constexpr uint64_t row_count = 5u;
+
+  auto fill_values = [](auto &values, const uint32_t multiplier,
+                        const uint32_t modulus, const float scale) {
+    for (size_t index = 0; index < values.size(); ++index) {
+      const int32_t centered =
+          static_cast<int32_t>((index * multiplier) % modulus) -
+          static_cast<int32_t>(modulus / 2u);
+      values[index] = static_cast<float>(centered) * scale;
+    }
+  };
+  auto check_rows = [](const auto &optimized, const auto &scalar) {
+    for (size_t row = 0; row < optimized.size(); ++row) {
+      CHECK(optimized[row] ==
+            doctest::Approx(scalar[row]).epsilon(1.0e-5f));
+    }
+  };
+
+  {
+    using emel::kernel::detail::quant::QK4_0;
+    using emel::kernel::detail::quant::block_q4_0;
+    using emel::kernel::detail::quant::block_q8_0;
+    using emel::kernel::detail::quant::quantize_row_q4_0_ref;
+    using emel::kernel::detail::quant::quantize_row_q8_0_strided;
+
+    std::array<float, QK4_0 * row_count> dense_rows = {};
+    std::array<float, QK4_0> input = {};
+    fill_values(dense_rows, 5u, 21u, 0.125f);
+    fill_values(input, 7u, 19u, 0.25f);
+
+    std::array<block_q4_0, row_count> q4_rows = {};
+    for (uint64_t row = 0; row < row_count; ++row) {
+      quantize_row_q4_0_ref(
+          dense_rows.data() + static_cast<size_t>(row) * QK4_0,
+          q4_rows.data() + row,
+          static_cast<int64_t>(QK4_0));
+    }
+
+    std::array<block_q8_0, 1> q8_input = {};
+    quantize_row_q8_0_strided(input.data(), 1u, q8_input.data(),
+                              static_cast<int64_t>(QK4_0));
+
+    std::array<float, row_count> optimized = {};
+    std::array<float, row_count> reference = {};
+    for (uint64_t row = 0; row < row_count; ++row) {
+      reference[row] = emel::kernel::detail::dot_q4_0_q8_0_row_scalar(
+          q4_rows.data() + row, q8_input.data(), 1u);
+    }
+    const emel::kernel::event::op_mul_mat optimized_ev{
+        .src0 = make_quantized_src(q4_rows.data(), dtype::q4_0, QK4_0,
+                                   row_count),
+        .src1 = make_src(input.data(), dtype::f32, 1u, QK4_0),
+        .dst = make_dst(optimized.data(), dtype::f32, 1u, row_count),
+        .nth = 1,
+    };
+
+    emel::kernel::aarch64::detail::execute_neon_mul_mat_q4_0_vector_unchecked(
+        optimized_ev);
+    check_rows(optimized, reference);
+  }
+
+  {
+    using emel::kernel::detail::quant::QK4_1;
+    using emel::kernel::detail::quant::block_q4_1;
+    using emel::kernel::detail::quant::block_q8_0;
+    using emel::kernel::detail::quant::quantize_row_q4_1_ref;
+    using emel::kernel::detail::quant::quantize_row_q8_0_strided;
+
+    std::array<float, QK4_1 * row_count> dense_rows = {};
+    std::array<float, QK4_1> input = {};
+    fill_values(dense_rows, 11u, 23u, 0.0625f);
+    fill_values(input, 13u, 29u, 0.125f);
+
+    std::array<block_q4_1, row_count> q4_rows = {};
+    for (uint64_t row = 0; row < row_count; ++row) {
+      quantize_row_q4_1_ref(
+          dense_rows.data() + static_cast<size_t>(row) * QK4_1,
+          q4_rows.data() + row,
+          static_cast<int64_t>(QK4_1));
+    }
+
+    std::array<block_q8_0, 1> q8_input = {};
+    quantize_row_q8_0_strided(input.data(), 1u, q8_input.data(),
+                              static_cast<int64_t>(QK4_1));
+
+    std::array<float, row_count> optimized = {};
+    std::array<float, row_count> reference = {};
+    for (uint64_t row = 0; row < row_count; ++row) {
+      reference[row] = emel::kernel::detail::dot_q4_1_q8_0_row_scalar(
+          q4_rows.data() + row, q8_input.data(), 1u);
+    }
+    const emel::kernel::event::op_mul_mat optimized_ev{
+        .src0 = make_quantized_src(q4_rows.data(), dtype::q4_1, QK4_1,
+                                   row_count),
+        .src1 = make_src(input.data(), dtype::f32, 1u, QK4_1),
+        .dst = make_dst(optimized.data(), dtype::f32, 1u, row_count),
+        .nth = 1,
+    };
+
+    emel::kernel::aarch64::detail::execute_neon_mul_mat_q4_1_vector_unchecked(
+        optimized_ev);
+    check_rows(optimized, reference);
+  }
+
+  {
+    using emel::kernel::detail::quant::QK5_0;
+    using emel::kernel::detail::quant::block_q5_0;
+    using emel::kernel::detail::quant::block_q8_0;
+    using emel::kernel::detail::quant::quantize_row_q5_0_ref;
+    using emel::kernel::detail::quant::quantize_row_q8_0_strided;
+
+    std::array<float, QK5_0 * row_count> dense_rows = {};
+    std::array<float, QK5_0> input = {};
+    fill_values(dense_rows, 17u, 31u, 0.0625f);
+    fill_values(input, 19u, 37u, 0.125f);
+
+    std::array<block_q5_0, row_count> q5_rows = {};
+    for (uint64_t row = 0; row < row_count; ++row) {
+      quantize_row_q5_0_ref(
+          dense_rows.data() + static_cast<size_t>(row) * QK5_0,
+          q5_rows.data() + row,
+          static_cast<int64_t>(QK5_0));
+    }
+
+    std::array<block_q8_0, 1> q8_input = {};
+    quantize_row_q8_0_strided(input.data(), 1u, q8_input.data(),
+                              static_cast<int64_t>(QK5_0));
+
+    std::array<float, row_count> optimized = {};
+    std::array<float, row_count> reference = {};
+    for (uint64_t row = 0; row < row_count; ++row) {
+      reference[row] = emel::kernel::detail::dot_q5_0_q8_0_row_scalar(
+          q5_rows.data() + row, q8_input.data(), 1u);
+    }
+    const emel::kernel::event::op_mul_mat optimized_ev{
+        .src0 = make_quantized_src(q5_rows.data(), dtype::q5_0, QK5_0,
+                                   row_count),
+        .src1 = make_src(input.data(), dtype::f32, 1u, QK5_0),
+        .dst = make_dst(optimized.data(), dtype::f32, 1u, row_count),
+        .nth = 1,
+    };
+
+    emel::kernel::aarch64::detail::execute_neon_mul_mat_q5_0_vector_unchecked(
+        optimized_ev);
+    check_rows(optimized, reference);
+  }
 #endif
 }
 

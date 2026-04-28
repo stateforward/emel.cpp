@@ -1,16 +1,16 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.15
-milestone_name: ARM Sortformer Diarization GGUF Slice
-status: completed
-stopped_at: v1.15 milestone completed and archived; next action is define the next milestone
-last_updated: "2026-04-25T00:13:19.297Z"
-last_activity: 2026-04-25
+milestone: v1.16
+milestone_name: ARM Whisper GGUF Parity And Performance
+status: pr_open
+stopped_at: PR #73 open for v1.16; archive/tag confirmation next after review
+last_updated: "2026-04-28T11:12:05Z"
+last_activity: 2026-04-28
 progress:
-  total_phases: 24
-  completed_phases: 24
-  total_plans: 24
-  completed_plans: 24
+  total_phases: 36
+  completed_phases: 36
+  total_plans: 8
+  completed_plans: 8
   percent: 100
 ---
 
@@ -22,24 +22,72 @@ See: .planning/PROJECT.md (updated 2026-04-25)
 
 **Core value:** Prove real end-to-end behavior with explicit SML orchestration and parity-oriented
 verification before widening API surface or model scope.
-**Current focus:** Define the next milestone before adding new active requirements or phases.
+**Current focus:** v1.16 has no source-backed blockers after Phase 127. Phases 128-129 closed the
+non-blocking audit tech debt around benchmark/evidence stability and encoder-detail helper
+deduplication, and PR #73 is open before archive/tag confirmation.
 
 ## Current Position
 
-Phase: 93
-Plan: complete
-Status: `v1.15` completed and archived. EMEL exact-matches PyTorch/NeMo and ONNX on the
-maintained AMI fixture and beats the ONNX Runtime CPU single-thread benchmark reference in the
-strict generated record set: EMEL `1370917625 ns/op` versus ONNX `5900446125 ns/op`, with
-`output_dim=17`, checksum `4249677247906920305`, and ONNX
-`actual_providers=CPUExecutionProvider`.
-Last activity: 2026-04-25
+Phase: 129
+Plan: Whisper Detail Helper Deduplication Cleanup
+Status: `v1.16` ARM Whisper GGUF Parity And Performance has all active requirements satisfied and
+no source-backed readiness blockers. Phase 128 closed the benchmark/evidence cleanup items, and
+Phase 129 removed stale duplicate decoder/timestamp helpers from encoder detail. Archive/tag
+confirmation is the next milestone-management step.
+
+Open PR: https://github.com/stateforward/emel.cpp/pull/73
+
+Closed gap sequence:
+
+- Phase 120: complete; decode-policy runtime behavior is wired through a speech-owned policy and
+  the hardcoded public decoder `token:<id>` transcript surface is removed.
+
+- Phase 121: complete; preserved-baseline Nyquist validation artifacts for Phases 94-102 are
+  backfilled with archived-baseline scope.
+
+- Phase 122: superseded by the 2026-04-28 public-recognizer source-backed audit; its closeout
+  evidence used bypass-lane compare and benchmark proof.
+
+- Phase 123: complete; maintained Whisper runtime has a public recognizer route through
+  `emel::speech::recognizer::sm`, with generic recognizer leak checks preserved.
+
+- Phase 124: complete; maintained compare and benchmark evidence now runs through the public
+  recognizer lane and publishes recognizer-backed metadata.
+
+- Phase 125: source-backed runtime evidence exists, but the latest audit supersedes its closeout
+  claim because recognizer route behavior still runs through hidden backend function pointers.
+
+- Phase 126: complete; hidden recognizer backend dispatch was replaced with explicit SML route
+  states/transitions/guards and compile-time route policy wiring.
+
+Final gap closure:
+
+- Phase 127: complete; decoder sequence/logit/timestamp-policy execution is no longer reached
+  through `speech/encoder/whisper/detail.hpp` from decoder production code, and `SPEECH-01`,
+  `POLICY-01`, and `CLOSE-01` are complete.
+
+Tech-debt closure:
+
+- Phase 128: complete; default Whisper single-thread closeout evidence now uses 20 measured
+  iterations with explicit 20,000 ppm process-wall tolerance, and Phase 122/125 prose is marked
+  superseded.
+
+- Phase 129: complete; duplicate decoder/timestamp helpers were removed from encoder detail,
+  decoder timestamp helper tests moved under the decoder test surface, and decoder production
+  files still do not include or alias encoder detail.
+
+The latest compare artifact records exact `[C]` parity through
+`emel.speech.recognizer.whisper`, and the latest default benchmark artifact records 20 iterations
+with EMEL faster than the matched `whisper.cpp` reference through the same public recognizer lane.
+`CLOSE-01` is complete after the Phase 127 source-backed audit rerun; Phases 128-129 are cleanup
+phases only.
+Last activity: 2026-04-28
 
 Progress: [##########] 100%
 
 ## Deferred Items
 
-Items acknowledged and still deferred at milestone close on 2026-04-25:
+Items acknowledged and still deferred at milestone close on 2026-04-26:
 
 | Category | Item | Status |
 |----------|------|--------|
@@ -51,20 +99,18 @@ Items acknowledged and still deferred at milestone close on 2026-04-25:
 
 ## Performance Metrics
 
-**Latest shipped milestone:**
+**Latest completed milestone:**
 
 - Milestone: v1.15 ARM Sortformer Diarization GGUF Slice
-- Completed phases: `24/24`
-- Completed plans: `24/24`
-- Audit status: `passed`
 
 **Current planning shape:**
 
-- Active milestone: none
-- Latest shipped milestone: `v1.15`
-- Next action: run `$gsd-new-milestone` to define the next requirements set.
+- Active milestone: `v1.16` has all active requirements complete and Phases 128-129 closed the
+  non-blocking source-backed audit tech debt.
+- Latest shipped milestone: `v1.15`; v1.16 has not yet been archived/tagged.
 
-- Current blocker: none.
+- Next action: review/merge PR #73, then run `$gsd-complete-milestone`.
+- Current blocker: none. The user-approved lint snapshot update passed `lint_snapshot`.
 
 ## Accumulated Context
 
@@ -76,19 +122,35 @@ Recent decisions affecting current work:
 - `v1.15` targets one maintained ARM diarization slice for
   `openresearchtools/diar_streaming_sortformer_4spk-v2.1-gguf`.
 
-- The milestone is a diarization runtime milestone, not a generation or embedding benchmark
-  organization milestone.
+- `v1.16` targets one maintained ARM Whisper tiny GGUF ASR slice across the requested
+  `oxide-lab/whisper-tiny-GGUF` variant family.
+
+- Current local Whisper work includes model/loader scaffolding, q80 fixture notes, a
+  reference-only `whisper.cpp` benchmark wrapper, and partial quant-kernel arithmetic; this is
+  backfilled starting state and must be audited before it is treated as landed.
+
+- `v1.16` parity reference is `whisper.cpp`; benchmark reference is also `whisper.cpp`, but
+  benchmark claims are CPU-only, single-thread-only, and ARM-hosted.
+
+- EMEL must beat the matched single-thread CPU `whisper.cpp` ARM reference lane before the
+  milestone can close.
+
+- Whisper variant support must be native kernel-level support, not a whole-tensor dequantize-to-f32
+  fallback or tool-only compute path.
+
+- The milestone is a Whisper ASR runtime and performance milestone, not a generation, embedding,
+  or diarization benchmark organization milestone.
 
 - The maintained input contract is deterministic single-channel `float32` PCM at 16,000 Hz.
 
-- The maintained output contract is a deterministic `T x 4` speaker-activity probability matrix
-  plus bounded four-speaker segment records.
+- The maintained output contract is an exact transcript for the pinned Phase 99 audio/model pair,
+  currently `[C]` against the matched `whisper.cpp` reference.
 
 - Native EMEL-owned `src/` execution work is required; tool-only, Python, ONNX, NeMo, llama.cpp, or
   ggml compute fallbacks do not satisfy the EMEL lane.
 
-- Runtime choices for Sortformer model readiness, chunk profile, cache readiness, and error
-  outcomes must be explicit in Boost.SML guards/states/transitions.
+- Runtime choices for Whisper recognizer model readiness, tokenizer readiness, decode policy, and
+  error outcomes must be explicit in Boost.SML guards/states/transitions.
 
 - Parity and benchmark work must keep EMEL and reference lanes isolated.
 
@@ -376,7 +438,7 @@ Recent decisions affecting current work:
 
 ## Session Continuity
 
-Last session: 2026-04-22T19:06:20Z
-Stopped at: started `v1.15 ARM Sortformer Diarization GGUF Slice` and left Phase `81` ready to
-plan
+Last session: 2026-04-27T20:17:18Z
+Stopped at: completed Phase 117 compare failure contract repair; next action is
+`$gsd-plan-phase 118`.
 Resume file: None

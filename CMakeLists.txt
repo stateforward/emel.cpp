@@ -78,6 +78,8 @@ add_library(emel STATIC
   src/emel/model/gemma4/detail.cpp
   src/emel/model/omniembed/detail.cpp
   src/emel/model/sortformer/detail.cpp
+  src/emel/model/whisper/detail.cpp
+  src/emel/speech/recognizer_routes/whisper/detail.cpp
   src/emel/diarization/sortformer/detail.cpp
   src/emel/diarization/sortformer/encoder/feature_extractor/detail.cpp
   src/emel/diarization/sortformer/encoder/detail.cpp
@@ -122,6 +124,11 @@ if(EMEL_ENABLE_TESTS)
     tests/diarization/sortformer/pipeline/lifecycle_tests.cpp
     tests/diarization/sortformer/parity/lifecycle_tests.cpp
     tests/diarization/sortformer/transformer/lifecycle_tests.cpp
+    tests/speech/encoder/whisper/lifecycle_tests.cpp
+    tests/speech/decoder/whisper/lifecycle_tests.cpp
+    tests/speech/encoder/whisper/detail_tests.cpp
+    tests/speech/recognizer/lifecycle_tests.cpp
+    tests/speech/tokenizer/whisper_tests.cpp
     tests/embeddings/text_embedding_lane_tests.cpp
     tests/embeddings/vision_embedding_lane_tests.cpp
     tests/embeddings/audio_embedding_lane_tests.cpp
@@ -215,6 +222,10 @@ if(EMEL_ENABLE_TESTS)
               test_source MATCHES "^tests/(generator|embeddings|logits|token)/") OR
            (test_shard STREQUAL "diarization" AND
               test_source MATCHES "^tests/diarization/") OR
+           (test_shard STREQUAL "speech" AND
+              test_source MATCHES "^tests/speech/") OR
+           (test_shard STREQUAL "whisper" AND
+              test_source MATCHES "^tests/speech/(encoder|decoder)/whisper/") OR
            (test_shard STREQUAL "sm" AND
               test_source MATCHES "^tests/sm/") OR
            (test_shard STREQUAL "text" AND
@@ -290,6 +301,14 @@ if(EMEL_ENABLE_TESTS)
   emel_add_doctest_shard(
     diarization
     "*tests/diarization/*"
+  )
+  emel_add_doctest_shard(
+    speech
+    "*tests/speech/*,*tests/speech/encoder/whisper/*,*tests/speech/decoder/whisper/*"
+  )
+  emel_add_doctest_shard(
+    whisper
+    "*tests/speech/encoder/whisper/*,*tests/speech/decoder/whisper/*"
   )
   emel_add_doctest_shard(
     sm

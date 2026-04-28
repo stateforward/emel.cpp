@@ -151,6 +151,8 @@ environments, while Zig remains the default for day-to-day builds.
 - [`.planning/architecture/model_loader.md`](.planning/architecture/model_loader.md)
 - [`.planning/architecture/model_tensor.md`](.planning/architecture/model_tensor.md)
 - [`.planning/architecture/model_weight_loader.md`](.planning/architecture/model_weight_loader.md)
+- [`.planning/architecture/speech_decoder_whisper.md`](.planning/architecture/speech_decoder_whisper.md)
+- [`.planning/architecture/speech_encoder_whisper.md`](.planning/architecture/speech_encoder_whisper.md)
 - [`.planning/architecture/tensor_view.md`](.planning/architecture/tensor_view.md)
 - [`.planning/architecture/text_conditioner.md`](.planning/architecture/text_conditioner.md)
 - [`.planning/architecture/text_detokenizer.md`](.planning/architecture/text_detokenizer.md)

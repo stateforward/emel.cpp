@@ -3,6 +3,9 @@
 #include <algorithm>
 #include <array>
 #include <cstring>
+#include <filesystem>
+#include <fstream>
+#include <initializer_list>
 #include <memory>
 #include <span>
 #include <string>
@@ -10,14 +13,18 @@
 #include <vector>
 
 #include "emel/error/error.hpp"
+#include "emel/gguf/loader/detail.hpp"
+#include "emel/gguf/loader/events.hpp"
+#include "emel/gguf/loader/sm.hpp"
 #include "emel/kernel/detail.hpp"
 #include "emel/kernel/events.hpp"
 #include "emel/model/detail.hpp"
 #include "emel/model/llama/detail.hpp"
-#include "emel/model/omniembed/detail.hpp"
 #include "emel/model/loader/errors.hpp"
 #include "emel/model/loader/sm.hpp"
+#include "emel/model/omniembed/detail.hpp"
 #include "emel/model/sortformer/detail.hpp"
+#include "emel/model/whisper/detail.hpp"
 
 namespace {
 
@@ -30,8 +37,9 @@ struct owner_state {
   bool used_mmap = false;
 };
 
-void on_done(void * object, const emel::model::loader::events::load_done & ev) noexcept {
-  auto * owner = static_cast<owner_state *>(object);
+void on_done(void *object,
+             const emel::model::loader::events::load_done &ev) noexcept {
+  auto *owner = static_cast<owner_state *>(object);
   owner->done = true;
   owner->error = false;
   owner->bytes_total = ev.bytes_total;
@@ -39,28 +47,30 @@ void on_done(void * object, const emel::model::loader::events::load_done & ev) n
   owner->used_mmap = ev.used_mmap;
 }
 
-void on_error(void * object, const emel::model::loader::events::load_error & ev) noexcept {
-  auto * owner = static_cast<owner_state *>(object);
+void on_error(void *object,
+              const emel::model::loader::events::load_error &ev) noexcept {
+  auto *owner = static_cast<owner_state *>(object);
   owner->done = false;
   owner->error = true;
   owner->err = ev.err;
 }
 
-emel::error::type parse_ok(void *, const emel::model::loader::event::load & req) noexcept {
+emel::error::type
+parse_ok(void *, const emel::model::loader::event::load &req) noexcept {
   req.model_data.n_tensors = 1;
   req.model_data.n_layers = 1;
   return emel::error::cast(emel::model::loader::error::none);
 }
 
-emel::error::type parse_fail(void *, const emel::model::loader::event::load &) noexcept {
+emel::error::type
+parse_fail(void *, const emel::model::loader::event::load &) noexcept {
   return emel::error::cast(emel::model::loader::error::parse_failed);
 }
 
 emel::error::type load_weights_ok(void *,
-                                  const emel::model::loader::event::load & req,
-                                  uint64_t & bytes_total,
-                                  uint64_t & bytes_done,
-                                  bool & used_mmap) noexcept {
+                                  const emel::model::loader::event::load &req,
+                                  uint64_t &bytes_total, uint64_t &bytes_done,
+                                  bool &used_mmap) noexcept {
   static_cast<void>(req);
   bytes_total = 4096;
   bytes_done = 4096;
@@ -68,33 +78,37 @@ emel::error::type load_weights_ok(void *,
   return emel::error::cast(emel::model::loader::error::none);
 }
 
-emel::error::type load_weights_backend_error(void *,
-                                             const emel::model::loader::event::load &,
-                                             uint64_t & bytes_total,
-                                             uint64_t & bytes_done,
-                                             bool & used_mmap) noexcept {
+emel::error::type
+load_weights_backend_error(void *, const emel::model::loader::event::load &,
+                           uint64_t &bytes_total, uint64_t &bytes_done,
+                           bool &used_mmap) noexcept {
   bytes_total = 0;
   bytes_done = 0;
   used_mmap = false;
   return emel::error::cast(emel::model::loader::error::backend_error);
 }
 
-emel::error::type map_layers_ok(void *, const emel::model::loader::event::load & req) noexcept {
+emel::error::type
+map_layers_ok(void *, const emel::model::loader::event::load &req) noexcept {
   req.model_data.n_layers = 2;
   return emel::error::cast(emel::model::loader::error::none);
 }
 
-emel::error::type validate_structure_ok(void *, const emel::model::loader::event::load &) noexcept {
+emel::error::type
+validate_structure_ok(void *,
+                      const emel::model::loader::event::load &) noexcept {
   return emel::error::cast(emel::model::loader::error::none);
 }
 
-emel::error::type validate_architecture_ok(void *,
-                                           const emel::model::loader::event::load &) noexcept {
+emel::error::type
+validate_architecture_ok(void *,
+                         const emel::model::loader::event::load &) noexcept {
   return emel::error::cast(emel::model::loader::error::none);
 }
 
-void copy_name(std::array<char, emel::model::data::k_max_architecture_name> & dest,
-               const std::string_view value) {
+void copy_name(
+    std::array<char, emel::model::data::k_max_architecture_name> &dest,
+    const std::string_view value) {
   dest.fill('\0');
   const size_t count = std::min(dest.size() - 1u, value.size());
   for (size_t i = 0; i < count; ++i) {
@@ -102,8 +116,8 @@ void copy_name(std::array<char, emel::model::data::k_max_architecture_name> & de
   }
 }
 
-void copy_metadata_string(emel::model::data::metadata & metadata,
-                          emel::model::data::metadata::string_view & field,
+void copy_metadata_string(emel::model::data::metadata &metadata,
+                          emel::model::data::metadata::string_view &field,
                           const std::string_view value) {
   field = {};
   REQUIRE(metadata.blob_bytes_used + value.size() <= metadata.blob.size());
@@ -114,12 +128,14 @@ void copy_metadata_string(emel::model::data::metadata & metadata,
   metadata.blob_bytes_used += static_cast<uint32_t>(value.size());
 }
 
-void append_tensor_name(emel::model::data & model, emel::model::data::tensor_record & tensor,
+void append_tensor_name(emel::model::data &model,
+                        emel::model::data::tensor_record &tensor,
                         const std::string_view name) {
   tensor.name_offset = model.name_bytes_used;
   tensor.name_length = static_cast<uint32_t>(name.size());
   for (size_t i = 0; i < name.size(); ++i) {
-    model.name_storage[model.name_bytes_used + static_cast<uint32_t>(i)] = name[i];
+    model.name_storage[model.name_bytes_used + static_cast<uint32_t>(i)] =
+        name[i];
   }
   model.name_bytes_used += static_cast<uint32_t>(name.size());
   tensor.n_dims = 2;
@@ -129,7 +145,23 @@ void append_tensor_name(emel::model::data & model, emel::model::data::tensor_rec
   tensor.data_size = 64u;
 }
 
-void build_canonical_model(emel::model::data & model, const int32_t block_count) {
+void append_tensor_with_shape(emel::model::data &model,
+                              emel::model::data::tensor_record &tensor,
+                              const std::string_view name,
+                              const std::initializer_list<int64_t> dims) {
+  append_tensor_name(model, tensor, name);
+  tensor.n_dims = static_cast<int32_t>(dims.size());
+  tensor.data_size = 1u;
+  size_t index = 0u;
+  for (const int64_t dim : dims) {
+    tensor.dims[index] = dim;
+    ++index;
+    tensor.data_size *= static_cast<uint64_t>(dim > 0 ? dim : 0);
+  }
+}
+
+void build_canonical_model(emel::model::data &model,
+                           const int32_t block_count) {
   std::memset(&model, 0, sizeof(model));
   copy_name(model.architecture_name, "llama");
   model.n_layers = block_count;
@@ -143,8 +175,10 @@ void build_canonical_model(emel::model::data & model, const int32_t block_count)
     append_tensor_name(model, model.tensors[tensor_index], name);
     ++tensor_index;
   };
-  const auto add_block = [&](const int32_t block, const std::string_view suffix) {
-    add(std::string{"blk."} + std::to_string(block) + "." + std::string{suffix});
+  const auto add_block = [&](const int32_t block,
+                             const std::string_view suffix) {
+    add(std::string{"blk."} + std::to_string(block) + "." +
+        std::string{suffix});
   };
 
   add("token_embd.weight");
@@ -164,10 +198,8 @@ void build_canonical_model(emel::model::data & model, const int32_t block_count)
   model.n_tensors = tensor_index;
 }
 
-void build_qwen3_model(emel::model::data & model,
-                       const int32_t block_count,
-                       const bool include_q_norm,
-                       const bool include_k_norm) {
+void build_qwen3_model(emel::model::data &model, const int32_t block_count,
+                       const bool include_q_norm, const bool include_k_norm) {
   std::memset(&model, 0, sizeof(model));
   copy_name(model.architecture_name, "qwen3");
   model.n_layers = block_count;
@@ -181,8 +213,10 @@ void build_qwen3_model(emel::model::data & model,
     append_tensor_name(model, model.tensors[tensor_index], name);
     ++tensor_index;
   };
-  const auto add_block = [&](const int32_t block, const std::string_view suffix) {
-    add(std::string{"blk."} + std::to_string(block) + "." + std::string{suffix});
+  const auto add_block = [&](const int32_t block,
+                             const std::string_view suffix) {
+    add(std::string{"blk."} + std::to_string(block) + "." +
+        std::string{suffix});
   };
 
   add("token_embd.weight");
@@ -210,20 +244,19 @@ void build_qwen3_model(emel::model::data & model,
 
 bool is_lfm2_attention_layer(const int32_t block_index) {
   switch (block_index) {
-    case 2:
-    case 5:
-    case 8:
-    case 10:
-    case 12:
-    case 14:
-      return true;
-    default:
-      return false;
+  case 2:
+  case 5:
+  case 8:
+  case 10:
+  case 12:
+  case 14:
+    return true;
+  default:
+    return false;
   }
 }
 
-void build_lfm2_model(emel::model::data & model,
-                      const bool include_output_norm,
+void build_lfm2_model(emel::model::data &model, const bool include_output_norm,
                       const bool corrupt_conv_block_contract) {
   std::memset(&model, 0, sizeof(model));
   copy_name(model.architecture_name, "lfm2");
@@ -245,8 +278,10 @@ void build_lfm2_model(emel::model::data & model,
     append_tensor_name(model, model.tensors[tensor_index], name);
     ++tensor_index;
   };
-  const auto add_block = [&](const int32_t block, const std::string_view suffix) {
-    add(std::string{"blk."} + std::to_string(block) + "." + std::string{suffix});
+  const auto add_block = [&](const int32_t block,
+                             const std::string_view suffix) {
+    add(std::string{"blk."} + std::to_string(block) + "." +
+        std::string{suffix});
   };
 
   add("token_embd.weight");
@@ -283,7 +318,8 @@ void build_lfm2_model(emel::model::data & model,
   model.n_tensors = tensor_index;
 }
 
-void build_gemma4_model(emel::model::data & model, const bool include_output_weight) {
+void build_gemma4_model(emel::model::data &model,
+                        const bool include_output_weight) {
   std::memset(&model, 0, sizeof(model));
   copy_name(model.architecture_name, "gemma4");
   model.n_layers = 35;
@@ -312,7 +348,8 @@ void build_gemma4_model(emel::model::data & model, const bool include_output_wei
   model.params.tie_word_embeddings = true;
   model.params.attention_sliding_window_pattern_count = 35u;
   for (int32_t block = 0; block < model.n_layers; ++block) {
-    model.params.attention_sliding_window_pattern_flags[static_cast<size_t>(block)] =
+    model.params
+        .attention_sliding_window_pattern_flags[static_cast<size_t>(block)] =
         ((block + 1) % 5 == 0) ? 0u : 1u;
   }
   model.weights_data = model.tensors.data();
@@ -323,8 +360,10 @@ void build_gemma4_model(emel::model::data & model, const bool include_output_wei
     append_tensor_name(model, model.tensors[tensor_index], name);
     ++tensor_index;
   };
-  const auto add_block = [&](const int32_t block, const std::string_view suffix) {
-    add(std::string{"blk."} + std::to_string(block) + "." + std::string{suffix});
+  const auto add_block = [&](const int32_t block,
+                             const std::string_view suffix) {
+    add(std::string{"blk."} + std::to_string(block) + "." +
+        std::string{suffix});
   };
 
   add("token_embd.weight");
@@ -350,7 +389,8 @@ void build_gemma4_model(emel::model::data & model, const bool include_output_wei
   model.n_tensors = tensor_index;
 }
 
-void build_omniembed_model(emel::model::data & model, const bool include_audio_projection) {
+void build_omniembed_model(emel::model::data &model,
+                           const bool include_audio_projection) {
   std::memset(&model, 0, sizeof(model));
   copy_name(model.architecture_name, "omniembed");
   model.params.n_embd = 1280;
@@ -379,11 +419,10 @@ void build_omniembed_model(emel::model::data & model, const bool include_audio_p
   model.meta.clip_audio_data.log_offset = 1.0e-5f;
   model.meta.clip_audio_data.normalize_bias = 4.5f;
   model.meta.clip_audio_data.normalize_scale = 5.0f;
-  copy_metadata_string(model.meta,
-                       model.meta.clip_vision_data.encoder_name,
+  copy_metadata_string(model.meta, model.meta.clip_vision_data.encoder_name,
                        "mobilenetv4_conv_medium.e180_r384_in12k");
-  copy_metadata_string(
-      model.meta, model.meta.clip_audio_data.encoder_name, "efficientat_mn20_as");
+  copy_metadata_string(model.meta, model.meta.clip_audio_data.encoder_name,
+                       "efficientat_mn20_as");
   model.weights_data = model.tensors.data();
   model.weights_size = 4096u;
 
@@ -405,7 +444,8 @@ void build_omniembed_model(emel::model::data & model, const bool include_audio_p
   model.n_tensors = tensor_index;
 }
 
-void build_sortformer_model(emel::model::data & model, const bool include_modules_family) {
+void build_sortformer_model(emel::model::data &model,
+                            const bool include_modules_family) {
   std::memset(&model, 0, sizeof(model));
   copy_name(model.architecture_name, "sortformer");
   model.params.n_features = 4;
@@ -428,8 +468,59 @@ void build_sortformer_model(emel::model::data & model, const bool include_module
   model.n_tensors = tensor_index;
 }
 
+void build_whisper_model(emel::model::data &model,
+                         const bool include_decoder_cross_attn) {
+  std::memset(&model, 0, sizeof(model));
+  copy_name(model.architecture_name, "whisper");
+  model.params.n_features = 80;
+  model.params.n_vocab = 51865;
+  model.params.n_embd = 384;
+  model.params.n_embd_out = 384;
+  model.params.n_ff = 1536;
+  model.params.n_head = 6;
+  model.params.n_head_kv = 6;
+  model.params.n_ctx = 448;
+  model.params.n_layer = 4;
+  model.params.decoder_block_count = 4;
+  model.weights_data = model.tensors.data();
+  model.weights_size = 4096u;
+
+  uint32_t tensor_index = 0u;
+  const auto add = [&](const std::string_view name,
+                       const std::initializer_list<int64_t> dims) {
+    append_tensor_with_shape(model, model.tensors[tensor_index], name, dims);
+    ++tensor_index;
+  };
+  const auto add_encoder_block = [&](const int32_t block) {
+    add(std::string{"model.encoder.layers."} + std::to_string(block) +
+            ".self_attn.q_proj.weight",
+        {384, 384});
+  };
+  const auto add_decoder_block = [&](const int32_t block) {
+    if (include_decoder_cross_attn) {
+      add(std::string{"model.decoder.layers."} + std::to_string(block) +
+              ".encoder_attn.q_proj.weight",
+          {384, 384});
+    }
+  };
+
+  add("mel_filters", {201, 80});
+  add("model.encoder.conv1.weight", {3, 80, 384});
+  add("model.encoder.embed_positions.weight", {384, 1500});
+  add("model.decoder.embed_tokens.weight", {384, 51865});
+  add("model.decoder.embed_positions.weight", {384, 448});
+  add("model.encoder.layer_norm.weight", {384});
+  add("model.decoder.layer_norm.weight", {384});
+  for (int32_t block = 0; block < 4; ++block) {
+    add_encoder_block(block);
+    add_decoder_block(block);
+  }
+
+  model.n_tensors = tensor_index;
+}
+
 template <class value_type>
-void append_scalar(std::vector<uint8_t> & bytes, const value_type value) {
+void append_scalar(std::vector<uint8_t> &bytes, const value_type value) {
   using unsigned_type = std::make_unsigned_t<value_type>;
   const unsigned_type raw = static_cast<unsigned_type>(value);
   for (size_t i = 0u; i < sizeof(value_type); ++i) {
@@ -437,15 +528,26 @@ void append_scalar(std::vector<uint8_t> & bytes, const value_type value) {
   }
 }
 
-void append_string_bytes(std::vector<uint8_t> & bytes, const std::string_view value) {
+void append_string_bytes(std::vector<uint8_t> &bytes,
+                         const std::string_view value) {
   append_scalar<uint64_t>(bytes, static_cast<uint64_t>(value.size()));
   bytes.insert(bytes.end(), value.begin(), value.end());
 }
 
-void append_kv_entry(std::vector<uint8_t> & arena,
-                     std::vector<emel::gguf::loader::kv_entry> & entries,
-                     const std::string_view key,
-                     const uint32_t value_type,
+void append_legacy_whisper_tensor(std::vector<uint8_t> &bytes,
+                                  const std::string_view name) {
+  append_scalar<int32_t>(bytes, 2);
+  append_scalar<int32_t>(bytes, static_cast<int32_t>(name.size()));
+  append_scalar<int32_t>(bytes, 0);
+  append_scalar<int32_t>(bytes, 1);
+  append_scalar<int32_t>(bytes, 1);
+  bytes.insert(bytes.end(), name.begin(), name.end());
+  append_scalar<uint32_t>(bytes, 0u);
+}
+
+void append_kv_entry(std::vector<uint8_t> &arena,
+                     std::vector<emel::gguf::loader::kv_entry> &entries,
+                     const std::string_view key, const uint32_t value_type,
                      const std::span<const uint8_t> value_bytes) {
   emel::gguf::loader::kv_entry entry = {};
   entry.key_offset = static_cast<uint32_t>(arena.size());
@@ -458,120 +560,102 @@ void append_kv_entry(std::vector<uint8_t> & arena,
   entries.push_back(entry);
 }
 
-void append_kv_string(std::vector<uint8_t> & arena,
-                      std::vector<emel::gguf::loader::kv_entry> & entries,
+void append_kv_string(std::vector<uint8_t> &arena,
+                      std::vector<emel::gguf::loader::kv_entry> &entries,
                       const std::string_view key,
                       const std::string_view value) {
   std::vector<uint8_t> encoded = {};
   append_string_bytes(encoded, value);
-  append_kv_entry(arena,
-                  entries,
-                  key,
+  append_kv_entry(arena, entries, key,
                   emel::gguf::loader::detail::constants::gguf_type_string,
                   std::span<const uint8_t>{encoded});
 }
 
-void append_kv_bool(std::vector<uint8_t> & arena,
-                    std::vector<emel::gguf::loader::kv_entry> & entries,
-                    const std::string_view key,
-                    const bool value) {
-  const std::array<uint8_t, 1> encoded = {static_cast<uint8_t>(value ? 1u : 0u)};
-  append_kv_entry(arena,
-                  entries,
-                  key,
+void append_kv_bool(std::vector<uint8_t> &arena,
+                    std::vector<emel::gguf::loader::kv_entry> &entries,
+                    const std::string_view key, const bool value) {
+  const std::array<uint8_t, 1> encoded = {
+      static_cast<uint8_t>(value ? 1u : 0u)};
+  append_kv_entry(arena, entries, key,
                   emel::gguf::loader::detail::constants::gguf_type_bool,
                   std::span<const uint8_t>{encoded});
 }
 
-void append_kv_u32(std::vector<uint8_t> & arena,
-                   std::vector<emel::gguf::loader::kv_entry> & entries,
-                   const std::string_view key,
-                   const uint32_t value) {
+void append_kv_u32(std::vector<uint8_t> &arena,
+                   std::vector<emel::gguf::loader::kv_entry> &entries,
+                   const std::string_view key, const uint32_t value) {
   std::vector<uint8_t> encoded = {};
   append_scalar<uint32_t>(encoded, value);
-  append_kv_entry(arena,
-                  entries,
-                  key,
+  append_kv_entry(arena, entries, key,
                   emel::gguf::loader::detail::constants::gguf_type_uint32,
                   std::span<const uint8_t>{encoded});
 }
 
-void append_kv_i32(std::vector<uint8_t> & arena,
-                   std::vector<emel::gguf::loader::kv_entry> & entries,
-                   const std::string_view key,
-                   const int32_t value) {
+void append_kv_i32(std::vector<uint8_t> &arena,
+                   std::vector<emel::gguf::loader::kv_entry> &entries,
+                   const std::string_view key, const int32_t value) {
   std::vector<uint8_t> encoded = {};
   append_scalar<int32_t>(encoded, value);
-  append_kv_entry(arena,
-                  entries,
-                  key,
+  append_kv_entry(arena, entries, key,
                   emel::gguf::loader::detail::constants::gguf_type_int32,
                   std::span<const uint8_t>{encoded});
 }
 
-void append_kv_f32(std::vector<uint8_t> & arena,
-                   std::vector<emel::gguf::loader::kv_entry> & entries,
-                   const std::string_view key,
-                   const float value) {
+void append_kv_f32(std::vector<uint8_t> &arena,
+                   std::vector<emel::gguf::loader::kv_entry> &entries,
+                   const std::string_view key, const float value) {
   std::array<uint8_t, sizeof(float)> encoded = {};
   std::memcpy(encoded.data(), &value, sizeof(float));
-  append_kv_entry(arena,
-                  entries,
-                  key,
+  append_kv_entry(arena, entries, key,
                   emel::gguf::loader::detail::constants::gguf_type_float32,
                   std::span<const uint8_t>{encoded});
 }
 
-void append_kv_f64(std::vector<uint8_t> & arena,
-                   std::vector<emel::gguf::loader::kv_entry> & entries,
-                   const std::string_view key,
-                   const double value) {
+void append_kv_f64(std::vector<uint8_t> &arena,
+                   std::vector<emel::gguf::loader::kv_entry> &entries,
+                   const std::string_view key, const double value) {
   std::array<uint8_t, sizeof(double)> encoded = {};
   std::memcpy(encoded.data(), &value, sizeof(double));
-  append_kv_entry(arena,
-                  entries,
-                  key,
+  append_kv_entry(arena, entries, key,
                   emel::gguf::loader::detail::constants::gguf_type_float64,
                   std::span<const uint8_t>{encoded});
 }
 
-void append_kv_string_array(std::vector<uint8_t> & arena,
-                            std::vector<emel::gguf::loader::kv_entry> & entries,
+void append_kv_string_array(std::vector<uint8_t> &arena,
+                            std::vector<emel::gguf::loader::kv_entry> &entries,
                             const std::string_view key,
                             const std::span<const std::string_view> values) {
   std::vector<uint8_t> encoded = {};
-  append_scalar<uint32_t>(encoded, emel::gguf::loader::detail::constants::gguf_type_string);
+  append_scalar<uint32_t>(
+      encoded, emel::gguf::loader::detail::constants::gguf_type_string);
   append_scalar<uint64_t>(encoded, static_cast<uint64_t>(values.size()));
   for (const std::string_view value : values) {
     append_string_bytes(encoded, value);
   }
-  append_kv_entry(arena,
-                  entries,
-                  key,
+  append_kv_entry(arena, entries, key,
                   emel::gguf::loader::detail::constants::gguf_type_array,
                   std::span<const uint8_t>{encoded});
 }
 
-void append_kv_u32_array(std::vector<uint8_t> & arena,
-                         std::vector<emel::gguf::loader::kv_entry> & entries,
+void append_kv_u32_array(std::vector<uint8_t> &arena,
+                         std::vector<emel::gguf::loader::kv_entry> &entries,
                          const std::string_view key,
                          const std::span<const uint32_t> values) {
   std::vector<uint8_t> encoded = {};
-  append_scalar<uint32_t>(encoded, emel::gguf::loader::detail::constants::gguf_type_uint32);
+  append_scalar<uint32_t>(
+      encoded, emel::gguf::loader::detail::constants::gguf_type_uint32);
   append_scalar<uint64_t>(encoded, static_cast<uint64_t>(values.size()));
   for (const uint32_t value : values) {
     append_scalar<uint32_t>(encoded, value);
   }
-  append_kv_entry(arena,
-                  entries,
-                  key,
+  append_kv_entry(arena, entries, key,
                   emel::gguf::loader::detail::constants::gguf_type_array,
                   std::span<const uint8_t>{encoded});
 }
 
 template <class value_type>
-void append_kv_scalar_array(std::vector<uint8_t> & arena,
-                            std::vector<emel::gguf::loader::kv_entry> & entries,
+void append_kv_scalar_array(std::vector<uint8_t> &arena,
+                            std::vector<emel::gguf::loader::kv_entry> &entries,
                             const std::string_view key,
                             const uint32_t element_type,
                             const std::span<const value_type> values) {
@@ -581,48 +665,158 @@ void append_kv_scalar_array(std::vector<uint8_t> & arena,
   for (const value_type value : values) {
     append_scalar<value_type>(encoded, value);
   }
-  append_kv_entry(arena,
-                  entries,
-                  key,
+  append_kv_entry(arena, entries, key,
                   emel::gguf::loader::detail::constants::gguf_type_array,
                   std::span<const uint8_t>{encoded});
 }
 
-void append_kv_f32_array(std::vector<uint8_t> & arena,
-                         std::vector<emel::gguf::loader::kv_entry> & entries,
+void append_kv_f32_array(std::vector<uint8_t> &arena,
+                         std::vector<emel::gguf::loader::kv_entry> &entries,
                          const std::string_view key,
                          const std::span<const float> values) {
   std::vector<uint8_t> encoded = {};
-  append_scalar<uint32_t>(encoded, emel::gguf::loader::detail::constants::gguf_type_float32);
+  append_scalar<uint32_t>(
+      encoded, emel::gguf::loader::detail::constants::gguf_type_float32);
   append_scalar<uint64_t>(encoded, static_cast<uint64_t>(values.size()));
   for (const float value : values) {
     std::array<uint8_t, sizeof(float)> bytes = {};
     std::memcpy(bytes.data(), &value, sizeof(float));
     encoded.insert(encoded.end(), bytes.begin(), bytes.end());
   }
-  append_kv_entry(arena,
-                  entries,
-                  key,
+  append_kv_entry(arena, entries, key,
                   emel::gguf::loader::detail::constants::gguf_type_array,
                   std::span<const uint8_t>{encoded});
 }
 
-std::string_view vocab_piece(const emel::model::data::vocab & vocab, const uint32_t token_id) {
-  const auto & entry = vocab.entries[token_id];
+std::string_view vocab_piece(const emel::model::data::vocab &vocab,
+                             const uint32_t token_id) {
+  const auto &entry = vocab.entries[token_id];
   return std::string_view{
       vocab.token_storage.data() + entry.text_offset,
       entry.text_length,
   };
 }
 
-std::string_view merge_piece(const emel::model::data::vocab & vocab, const uint32_t merge_id) {
+std::string_view merge_piece(const emel::model::data::vocab &vocab,
+                             const uint32_t merge_id) {
   return std::string_view{
       vocab.merge_storage.data() + vocab.merge_offsets[merge_id],
       vocab.merge_lengths[merge_id],
   };
 }
 
-}  // namespace
+std::filesystem::path repo_root() {
+  return std::filesystem::path{__FILE__}
+      .parent_path()
+      .parent_path()
+      .parent_path()
+      .parent_path();
+}
+
+std::filesystem::path whisper_fixture_path() {
+  return repo_root() / "tests" / "models" / "model-tiny-q80.gguf";
+}
+
+std::filesystem::path whisper_q4_0_fixture_path() {
+  return repo_root() / "tests" / "models" / "whisper-tiny-q4_0.gguf";
+}
+
+std::filesystem::path whisper_q4_1_fixture_path() {
+  return repo_root() / "tests" / "models" / "whisper-tiny-q4_1.gguf";
+}
+
+std::vector<uint8_t> read_binary_file(const std::filesystem::path &path) {
+  std::ifstream stream(path, std::ios::binary);
+  REQUIRE(stream.good());
+
+  stream.seekg(0, std::ios::end);
+  const std::streamsize size = stream.tellg();
+  REQUIRE(size > 0);
+  stream.seekg(0, std::ios::beg);
+
+  std::vector<uint8_t> bytes(static_cast<size_t>(size));
+  stream.read(reinterpret_cast<char *>(bytes.data()), size);
+  REQUIRE(stream.good());
+  return bytes;
+}
+
+void noop_probe_done(const emel::gguf::loader::events::probe_done &) {}
+void noop_probe_error(const emel::gguf::loader::events::probe_error &) {}
+void noop_bind_done(const emel::gguf::loader::events::bind_done &) {}
+void noop_bind_error(const emel::gguf::loader::events::bind_error &) {}
+void noop_parse_done(const emel::gguf::loader::events::parse_done &) {}
+void noop_parse_error(const emel::gguf::loader::events::parse_error &) {}
+
+void materialize_tensor_names_from_file(
+    emel::model::data &model_data, const std::vector<uint8_t> &file_bytes) {
+  model_data.name_bytes_used = 0u;
+  for (uint32_t index = 0u; index < model_data.n_tensors; ++index) {
+    auto &tensor = model_data.tensors[index];
+    const size_t source_offset = static_cast<size_t>(tensor.name_offset);
+    const size_t length = static_cast<size_t>(tensor.name_length);
+    REQUIRE(source_offset + length <= file_bytes.size());
+    REQUIRE(static_cast<size_t>(model_data.name_bytes_used) + length <=
+            model_data.name_storage.size());
+
+    std::memcpy(model_data.name_storage.data() + model_data.name_bytes_used,
+                file_bytes.data() + source_offset, length);
+    tensor.name_offset = model_data.name_bytes_used;
+    model_data.name_bytes_used += static_cast<uint32_t>(length);
+  }
+}
+
+bool load_whisper_fixture_binding(
+    const std::vector<uint8_t> &file_bytes, std::vector<uint8_t> &kv_arena,
+    std::vector<emel::gguf::loader::kv_entry> &kv_entries,
+    emel::model::data &model_out) {
+  emel::gguf::loader::sm loader{};
+  emel::gguf::loader::requirements requirements = {};
+  const auto on_probe_done =
+      emel::gguf::loader::event::probe_done_fn::from<&noop_probe_done>();
+  const auto on_probe_error =
+      emel::gguf::loader::event::probe_error_fn::from<&noop_probe_error>();
+  const auto on_bind_done =
+      emel::gguf::loader::event::bind_done_fn::from<&noop_bind_done>();
+  const auto on_bind_error =
+      emel::gguf::loader::event::bind_error_fn::from<&noop_bind_error>();
+  const auto on_parse_done =
+      emel::gguf::loader::event::parse_done_fn::from<&noop_parse_done>();
+  const auto on_parse_error =
+      emel::gguf::loader::event::parse_error_fn::from<&noop_parse_error>();
+
+  const emel::gguf::loader::event::probe probe{
+      std::span<const uint8_t>{file_bytes}, requirements, on_probe_done,
+      on_probe_error};
+  if (!loader.process_event(probe) || requirements.tensor_count == 0u ||
+      requirements.tensor_count > model_out.tensors.size()) {
+    return false;
+  }
+
+  kv_arena.resize(static_cast<size_t>(
+      emel::gguf::loader::detail::required_kv_arena_bytes(requirements)));
+  kv_entries.resize(requirements.kv_count);
+  model_out.n_tensors = requirements.tensor_count;
+
+  const emel::gguf::loader::event::bind_storage bind{
+      std::span<uint8_t>{kv_arena},
+      std::span<emel::gguf::loader::kv_entry>{kv_entries},
+      std::span<emel::model::data::tensor_record>{model_out.tensors.data(),
+                                                  model_out.n_tensors},
+      on_bind_done, on_bind_error};
+  if (!loader.process_event(bind)) {
+    return false;
+  }
+
+  const emel::gguf::loader::event::parse parse{
+      std::span<const uint8_t>{file_bytes}, on_parse_done, on_parse_error};
+  if (!loader.process_event(parse)) {
+    return false;
+  }
+
+  return true;
+}
+
+} // namespace
 
 TEST_CASE("model loader lifecycle succeeds on full load path") {
   auto model = std::make_unique<emel::model::data>();
@@ -662,10 +856,12 @@ TEST_CASE("model loader rejects missing source payload") {
   CHECK_FALSE(machine.process_event(request));
   CHECK_FALSE(owner.done);
   CHECK(owner.error);
-  CHECK(owner.err == emel::error::cast(emel::model::loader::error::invalid_request));
+  CHECK(owner.err ==
+        emel::error::cast(emel::model::loader::error::invalid_request));
 }
 
-TEST_CASE("model loader allows vocab-only parse without weight and map callbacks") {
+TEST_CASE(
+    "model loader allows vocab-only parse without weight and map callbacks") {
   auto model = std::make_unique<emel::model::data>();
   emel::model::loader::sm machine{};
   owner_state owner{};
@@ -705,7 +901,8 @@ TEST_CASE("model loader propagates parse failure") {
   CHECK_FALSE(machine.process_event(request));
   CHECK_FALSE(owner.done);
   CHECK(owner.error);
-  CHECK(owner.err == emel::error::cast(emel::model::loader::error::parse_failed));
+  CHECK(owner.err ==
+        emel::error::cast(emel::model::loader::error::parse_failed));
 }
 
 TEST_CASE("model loader rejects full load without load_weights callback") {
@@ -727,7 +924,8 @@ TEST_CASE("model loader rejects full load without load_weights callback") {
   CHECK_FALSE(machine.process_event(request));
   CHECK_FALSE(owner.done);
   CHECK(owner.error);
-  CHECK(owner.err == emel::error::cast(emel::model::loader::error::invalid_request));
+  CHECK(owner.err ==
+        emel::error::cast(emel::model::loader::error::invalid_request));
 }
 
 TEST_CASE("model loader rejects full load without map_layers callback") {
@@ -749,7 +947,8 @@ TEST_CASE("model loader rejects full load without map_layers callback") {
   CHECK_FALSE(machine.process_event(request));
   CHECK_FALSE(owner.done);
   CHECK(owner.error);
-  CHECK(owner.err == emel::error::cast(emel::model::loader::error::invalid_request));
+  CHECK(owner.err ==
+        emel::error::cast(emel::model::loader::error::invalid_request));
 }
 
 TEST_CASE("model loader propagates load_weights backend error") {
@@ -772,10 +971,12 @@ TEST_CASE("model loader propagates load_weights backend error") {
   CHECK_FALSE(machine.process_event(request));
   CHECK_FALSE(owner.done);
   CHECK(owner.error);
-  CHECK(owner.err == emel::error::cast(emel::model::loader::error::backend_error));
+  CHECK(owner.err ==
+        emel::error::cast(emel::model::loader::error::backend_error));
 }
 
-TEST_CASE("model loader unclassified error guard matches only unclassified codes") {
+TEST_CASE(
+    "model loader unclassified error guard matches only unclassified codes") {
   auto model = std::make_unique<emel::model::data>();
   emel::model::loader::event::parse_model_fn parse_model{nullptr, parse_ok};
   emel::model::loader::event::load request{*model, parse_model};
@@ -806,7 +1007,8 @@ TEST_CASE("model_llama_detail_builds_execution_view_for_canonical_tensor_set") {
   build_canonical_model(*model, 2);
 
   emel::model::llama::detail::execution_view view = {};
-  const auto err = emel::model::llama::detail::build_execution_view(*model, view);
+  const auto err =
+      emel::model::llama::detail::build_execution_view(*model, view);
 
   CHECK(err == emel::error::cast(emel::model::loader::error::none));
   CHECK(view.model == model.get());
@@ -823,14 +1025,16 @@ TEST_CASE("model_llama_detail_builds_execution_view_for_canonical_tensor_set") {
   CHECK(block.feed_forward_up.name == "blk.1.ffn_up.weight");
 }
 
-TEST_CASE("model_llama_detail_builds_execution_view_without_contiguous_weights_blob") {
+TEST_CASE("model_llama_detail_builds_execution_view_without_contiguous_weights_"
+          "blob") {
   auto model = std::make_unique<emel::model::data>();
   build_canonical_model(*model, 2);
   model->weights_data = nullptr;
   model->weights_size = 0u;
 
   emel::model::llama::detail::execution_view view = {};
-  const auto err = emel::model::llama::detail::build_execution_view(*model, view);
+  const auto err =
+      emel::model::llama::detail::build_execution_view(*model, view);
 
   CHECK(err == emel::error::cast(emel::model::loader::error::none));
   CHECK(view.model == model.get());
@@ -851,22 +1055,27 @@ TEST_CASE("model_data_tensor_name_view_rejects_out_of_bounds_storage_range") {
 TEST_CASE("model_data_try_parse_block_index_accepts_canonical_block_name") {
   int32_t block_index = -1;
 
-  CHECK(emel::model::try_parse_block_index("blk.12.attn_q.weight", block_index));
+  CHECK(
+      emel::model::try_parse_block_index("blk.12.attn_q.weight", block_index));
   CHECK(block_index == 12);
 }
 
-TEST_CASE("model_data_try_parse_block_index_rejects_names_without_block_prefix") {
+TEST_CASE(
+    "model_data_try_parse_block_index_rejects_names_without_block_prefix") {
   int32_t block_index = -1;
 
-  CHECK_FALSE(emel::model::try_parse_block_index("layer.12.attn_q.weight", block_index));
+  CHECK_FALSE(emel::model::try_parse_block_index("layer.12.attn_q.weight",
+                                                 block_index));
 }
 
 TEST_CASE("model_data_try_parse_block_index_rejects_prefix_without_digits") {
   int32_t block_index = -1;
 
   CHECK_FALSE(emel::model::try_parse_block_index("blk.", block_index));
-  CHECK_FALSE(emel::model::try_parse_block_index("blk.attn_q.weight", block_index));
-  CHECK_FALSE(emel::model::try_parse_block_index("blk.12attn_q.weight", block_index));
+  CHECK_FALSE(
+      emel::model::try_parse_block_index("blk.attn_q.weight", block_index));
+  CHECK_FALSE(
+      emel::model::try_parse_block_index("blk.12attn_q.weight", block_index));
 }
 
 TEST_CASE("model_llama_detail_rejects_missing_required_tensor") {
@@ -876,18 +1085,21 @@ TEST_CASE("model_llama_detail_rejects_missing_required_tensor") {
   model->tensors[3].data_size = 0u;
 
   emel::model::llama::detail::execution_view view = {};
-  const auto err = emel::model::llama::detail::build_execution_view(*model, view);
+  const auto err =
+      emel::model::llama::detail::build_execution_view(*model, view);
 
   CHECK(err == emel::error::cast(emel::model::loader::error::model_invalid));
   CHECK(view.model == nullptr);
 }
 
-TEST_CASE("model_llama_detail_builds_qwen3_execution_view_for_canonical_tensor_set") {
+TEST_CASE(
+    "model_llama_detail_builds_qwen3_execution_view_for_canonical_tensor_set") {
   auto model = std::make_unique<emel::model::data>();
   build_qwen3_model(*model, 1, true, true);
 
   emel::model::llama::detail::execution_view view = {};
-  const auto err = emel::model::llama::detail::build_execution_view(*model, view);
+  const auto err =
+      emel::model::llama::detail::build_execution_view(*model, view);
 
   CHECK(err == emel::error::cast(emel::model::loader::error::none));
   CHECK(view.model == model.get());
@@ -901,34 +1113,39 @@ TEST_CASE("model_llama_detail_builds_qwen3_execution_view_for_canonical_tensor_s
   CHECK(block.attention_k_norm.name == "blk.0.attn_k_norm.weight");
 }
 
-TEST_CASE("model_llama_detail_rejects_qwen3_execution_view_without_attention_q_norm") {
+TEST_CASE("model_llama_detail_rejects_qwen3_execution_view_without_attention_q_"
+          "norm") {
   auto model = std::make_unique<emel::model::data>();
   build_qwen3_model(*model, 1, false, true);
 
   emel::model::llama::detail::execution_view view = {};
-  const auto err = emel::model::llama::detail::build_execution_view(*model, view);
+  const auto err =
+      emel::model::llama::detail::build_execution_view(*model, view);
 
   CHECK(err == emel::error::cast(emel::model::loader::error::model_invalid));
   CHECK(view.model == nullptr);
 }
 
-TEST_CASE("model_llama_detail_rejects_qwen3_execution_view_without_attention_k_norm") {
+TEST_CASE("model_llama_detail_rejects_qwen3_execution_view_without_attention_k_"
+          "norm") {
   auto model = std::make_unique<emel::model::data>();
   build_qwen3_model(*model, 1, true, false);
 
   emel::model::llama::detail::execution_view view = {};
-  const auto err = emel::model::llama::detail::build_execution_view(*model, view);
+  const auto err =
+      emel::model::llama::detail::build_execution_view(*model, view);
 
   CHECK(err == emel::error::cast(emel::model::loader::error::model_invalid));
   CHECK(view.model == nullptr);
 }
 
-TEST_CASE("model_llama_detail_builds_qwen3_execution_view_with_tied_output_fallback") {
+TEST_CASE("model_llama_detail_builds_qwen3_execution_view_with_tied_output_"
+          "fallback") {
   auto model = std::make_unique<emel::model::data>();
   build_qwen3_model(*model, 1, true, true);
 
   for (uint32_t idx = 0; idx < model->n_tensors; ++idx) {
-    auto & tensor = model->tensors[idx];
+    auto &tensor = model->tensors[idx];
     if (emel::model::tensor_name_view(*model, tensor) == "output.weight") {
       tensor.data = nullptr;
       tensor.data_size = 0u;
@@ -937,7 +1154,8 @@ TEST_CASE("model_llama_detail_builds_qwen3_execution_view_with_tied_output_fallb
   }
 
   emel::model::llama::detail::execution_view view = {};
-  const auto err = emel::model::llama::detail::build_execution_view(*model, view);
+  const auto err =
+      emel::model::llama::detail::build_execution_view(*model, view);
 
   CHECK(err == emel::error::cast(emel::model::loader::error::none));
   CHECK(view.model == model.get());
@@ -984,7 +1202,8 @@ TEST_CASE("model_llama_detail_builds_lfm2_topology_with_hybrid_tensor_count") {
   CHECK(topology.node_count == 149u);
 }
 
-TEST_CASE("model_execution_contract_rejects_lfm2_without_token_embedding_norm") {
+TEST_CASE(
+    "model_execution_contract_rejects_lfm2_without_token_embedding_norm") {
   auto model = std::make_unique<emel::model::data>();
   build_lfm2_model(*model, false, false);
 
@@ -992,7 +1211,8 @@ TEST_CASE("model_execution_contract_rejects_lfm2_without_token_embedding_norm") 
         emel::error::cast(emel::model::loader::error::model_invalid));
 }
 
-TEST_CASE("model_execution_contract_rejects_lfm2_with_noncanonical_hybrid_block_tensors") {
+TEST_CASE("model_execution_contract_rejects_lfm2_with_noncanonical_hybrid_"
+          "block_tensors") {
   auto model = std::make_unique<emel::model::data>();
   build_lfm2_model(*model, true, true);
 
@@ -1000,10 +1220,12 @@ TEST_CASE("model_execution_contract_rejects_lfm2_with_noncanonical_hybrid_block_
         emel::error::cast(emel::model::loader::error::model_invalid));
 }
 
-TEST_CASE("model_execution_contract_rejects_lfm2_attention_block_with_shortconv_weights") {
+TEST_CASE("model_execution_contract_rejects_lfm2_attention_block_with_"
+          "shortconv_weights") {
   auto model = std::make_unique<emel::model::data>();
   build_lfm2_model(*model, true, false);
-  append_tensor_name(*model, model->tensors[model->n_tensors], "blk.2.shortconv.conv.weight");
+  append_tensor_name(*model, model->tensors[model->n_tensors],
+                     "blk.2.shortconv.conv.weight");
   ++model->n_tensors;
 
   CHECK(emel::model::validate_execution_contract(*model) ==
@@ -1015,30 +1237,23 @@ TEST_CASE("model_detail_loads_gemma4_hparams_from_gguf_binding") {
   std::vector<emel::gguf::loader::kv_entry> entries = {};
   const std::array<std::string_view, 2> tokens = {"<bos>", "hello"};
   const std::array<uint32_t, 35> feed_forward_lengths = {
-      6144u, 6144u, 6144u, 6144u, 6144u,
-      6144u, 6144u, 6144u, 6144u, 6144u,
-      6144u, 6144u, 6144u, 6144u, 6144u,
-      6144u, 6144u, 6144u, 6144u, 6144u,
-      6144u, 6144u, 6144u, 6144u, 6144u,
-      6144u, 6144u, 6144u, 6144u, 6144u,
-      6144u, 6144u, 6144u, 6144u, 6144u,
+      6144u, 6144u, 6144u, 6144u, 6144u, 6144u, 6144u, 6144u, 6144u,
+      6144u, 6144u, 6144u, 6144u, 6144u, 6144u, 6144u, 6144u, 6144u,
+      6144u, 6144u, 6144u, 6144u, 6144u, 6144u, 6144u, 6144u, 6144u,
+      6144u, 6144u, 6144u, 6144u, 6144u, 6144u, 6144u, 6144u,
   };
   const std::array<uint32_t, 35> sliding_pattern = {
-      1u, 1u, 1u, 1u, 0u,
-      1u, 1u, 1u, 1u, 0u,
-      1u, 1u, 1u, 1u, 0u,
-      1u, 1u, 1u, 1u, 0u,
-      1u, 1u, 1u, 1u, 0u,
-      1u, 1u, 1u, 1u, 0u,
-      1u, 1u, 1u, 1u, 0u,
+      1u, 1u, 1u, 1u, 0u, 1u, 1u, 1u, 1u, 0u, 1u, 1u, 1u, 1u, 0u, 1u, 1u, 1u,
+      1u, 0u, 1u, 1u, 1u, 1u, 0u, 1u, 1u, 1u, 1u, 0u, 1u, 1u, 1u, 1u, 0u,
   };
 
   append_kv_string(arena, entries, "general.architecture", "gemma4");
   append_kv_u32(arena, entries, "gemma4.context_length", 131072u);
   append_kv_u32(arena, entries, "gemma4.embedding_length", 1536u);
-  append_kv_u32(arena, entries, "gemma4.embedding_length_per_layer_input", 256u);
-  append_kv_u32_array(
-      arena, entries, "gemma4.feed_forward_length", std::span<const uint32_t>{feed_forward_lengths});
+  append_kv_u32(arena, entries, "gemma4.embedding_length_per_layer_input",
+                256u);
+  append_kv_u32_array(arena, entries, "gemma4.feed_forward_length",
+                      std::span<const uint32_t>{feed_forward_lengths});
   append_kv_u32(arena, entries, "gemma4.attention.head_count", 8u);
   append_kv_u32(arena, entries, "gemma4.attention.head_count_kv", 1u);
   append_kv_u32(arena, entries, "gemma4.attention.key_length", 512u);
@@ -1051,14 +1266,15 @@ TEST_CASE("model_detail_loads_gemma4_hparams_from_gguf_binding") {
   append_kv_u32(arena, entries, "gemma4.attention.shared_kv_layers", 20u);
   append_kv_u32(arena, entries, "gemma4.rope.dimension_count", 512u);
   append_kv_u32(arena, entries, "gemma4.rope.dimension_count_swa", 256u);
-  append_kv_f32(arena, entries, "gemma4.attention.layer_norm_rms_epsilon", 1e-6f);
+  append_kv_f32(arena, entries, "gemma4.attention.layer_norm_rms_epsilon",
+                1e-6f);
   append_kv_f32(arena, entries, "gemma4.final_logit_softcapping", 30.0f);
   append_kv_f32(arena, entries, "gemma4.rope.freq_base", 1000000.0f);
   append_kv_f32(arena, entries, "gemma4.rope.freq_base_swa", 10000.0f);
-  append_kv_u32_array(
-      arena, entries, "gemma4.attention.sliding_window_pattern", std::span<const uint32_t>{sliding_pattern});
-  append_kv_string_array(
-      arena, entries, "tokenizer.tokens", std::span<const std::string_view>{tokens});
+  append_kv_u32_array(arena, entries, "gemma4.attention.sliding_window_pattern",
+                      std::span<const uint32_t>{sliding_pattern});
+  append_kv_string_array(arena, entries, "tokenizer.tokens",
+                         std::span<const std::string_view>{tokens});
 
   auto model = std::make_unique<emel::model::data>();
   const emel::model::detail::kv_binding binding{
@@ -1091,7 +1307,8 @@ TEST_CASE("model_detail_loads_gemma4_hparams_from_gguf_binding") {
   CHECK(model->vocab_data.n_tokens == 2u);
 }
 
-TEST_CASE("model_detail_rejects_unknown_hparams_architecture_from_gguf_binding") {
+TEST_CASE(
+    "model_detail_rejects_unknown_hparams_architecture_from_gguf_binding") {
   std::vector<uint8_t> arena = {};
   std::vector<emel::gguf::loader::kv_entry> entries = {};
   auto model = std::make_unique<emel::model::data>();
@@ -1134,8 +1351,8 @@ TEST_CASE("model_detail_loads_llama_hparams_from_gguf_binding") {
   append_kv_f32(arena, entries, "llama.embedding_scale", 1.5f);
   append_kv_f32(arena, entries, "llama.rope.freq_base", 10000.0f);
   append_kv_f64(arena, entries, "llama.rope.freq_base_swa", 500000.0);
-  append_kv_string_array(
-      arena, entries, "tokenizer.ggml.tokens", std::span<const std::string_view>{tokens});
+  append_kv_string_array(arena, entries, "tokenizer.ggml.tokens",
+                         std::span<const std::string_view>{tokens});
 
   const emel::model::detail::kv_binding binding{
       .arena = std::span<const uint8_t>{arena},
@@ -1157,7 +1374,8 @@ TEST_CASE("model_detail_loads_llama_hparams_from_gguf_binding") {
   CHECK(model->params.n_layer == 12);
   CHECK(model->params.n_vocab == 32000);
   CHECK(model->params.attention_layer_norm_epsilon == doctest::Approx(1e-5f));
-  CHECK(model->params.attention_layer_norm_rms_epsilon == doctest::Approx(1e-6f));
+  CHECK(model->params.attention_layer_norm_rms_epsilon ==
+        doctest::Approx(1e-6f));
   CHECK(model->params.attention_clamp_kqv == doctest::Approx(4.0f));
   CHECK(model->params.attn_logit_softcapping == doctest::Approx(12.0f));
   CHECK(model->params.final_logit_softcapping == doctest::Approx(8.0f));
@@ -1168,11 +1386,13 @@ TEST_CASE("model_detail_loads_llama_hparams_from_gguf_binding") {
   CHECK(model->vocab_data.n_tokens == 3u);
 }
 
-TEST_CASE("model_detail_loads_qwen3_hparams_from_gguf_binding_with_vocab_fallback") {
+TEST_CASE(
+    "model_detail_loads_qwen3_hparams_from_gguf_binding_with_vocab_fallback") {
   std::vector<uint8_t> arena = {};
   std::vector<emel::gguf::loader::kv_entry> entries = {};
   auto model = std::make_unique<emel::model::data>();
-  const std::array<std::string_view, 4> tokens = {"<|bos|>", "A", "B", "<|eos|>"};
+  const std::array<std::string_view, 4> tokens = {"<|bos|>", "A", "B",
+                                                  "<|eos|>"};
 
   append_kv_string(arena, entries, "general.architecture", "qwen3");
   append_kv_u32(arena, entries, "qwen3.context_length", 32768u);
@@ -1183,10 +1403,11 @@ TEST_CASE("model_detail_loads_qwen3_hparams_from_gguf_binding_with_vocab_fallbac
   append_kv_u32(arena, entries, "qwen3.attention.key_length", 64u);
   append_kv_u32(arena, entries, "qwen3.attention.value_length", 80u);
   append_kv_u32(arena, entries, "qwen3.block_count", 24u);
-  append_kv_f32(arena, entries, "qwen3.attention.layer_norm_rms_epsilon", 1e-6f);
+  append_kv_f32(arena, entries, "qwen3.attention.layer_norm_rms_epsilon",
+                1e-6f);
   append_kv_f32(arena, entries, "qwen3.rope.freq_base", 1000000.0f);
-  append_kv_string_array(
-      arena, entries, "tokenizer.ggml.tokens", std::span<const std::string_view>{tokens});
+  append_kv_string_array(arena, entries, "tokenizer.ggml.tokens",
+                         std::span<const std::string_view>{tokens});
 
   const emel::model::detail::kv_binding binding{
       .arena = std::span<const uint8_t>{arena},
@@ -1208,7 +1429,8 @@ TEST_CASE("model_detail_loads_qwen3_hparams_from_gguf_binding_with_vocab_fallbac
   CHECK(model->params.n_layer == 24);
   CHECK(model->params.n_vocab == 4);
   CHECK(model->params.tie_word_embeddings);
-  CHECK(model->params.attention_layer_norm_rms_epsilon == doctest::Approx(1e-6f));
+  CHECK(model->params.attention_layer_norm_rms_epsilon ==
+        doctest::Approx(1e-6f));
   CHECK(model->params.rope_freq_base == doctest::Approx(1000000.0f));
   CHECK(model->vocab_data.n_tokens == 4u);
 }
@@ -1229,8 +1451,8 @@ TEST_CASE("model_detail_loads_lfm2_hparams_from_gguf_binding") {
   append_kv_u32(arena, entries, "lfm2.shortconv.l_cache", 3u);
   append_kv_f32(arena, entries, "lfm2.attention.layer_norm_rms_epsilon", 1e-6f);
   append_kv_f32(arena, entries, "lfm2.rope.freq_base", 1000000.0f);
-  append_kv_u32_array(
-      arena, entries, "lfm2.attention.head_count_kv", std::span<const uint32_t>{head_count_kv});
+  append_kv_u32_array(arena, entries, "lfm2.attention.head_count_kv",
+                      std::span<const uint32_t>{head_count_kv});
 
   const emel::model::detail::kv_binding binding{
       .arena = std::span<const uint8_t>{arena},
@@ -1252,7 +1474,8 @@ TEST_CASE("model_detail_loads_lfm2_hparams_from_gguf_binding") {
   CHECK(model->params.n_vocab == 65536);
   CHECK(model->params.shortconv_l_cache == 3);
   CHECK(model->params.tie_word_embeddings);
-  CHECK(model->params.attention_layer_norm_rms_epsilon == doctest::Approx(1e-6f));
+  CHECK(model->params.attention_layer_norm_rms_epsilon ==
+        doctest::Approx(1e-6f));
   CHECK(model->params.rope_freq_base == doctest::Approx(1000000.0f));
 }
 
@@ -1265,18 +1488,16 @@ TEST_CASE("model_detail_loads_omniembed_hparams_from_gguf_binding") {
 
   append_kv_string(arena, entries, "general.architecture", "omniembed");
   append_kv_u32(arena, entries, "omniembed.embed_dim", 1280u);
-  append_kv_string(
-      arena,
-      entries,
-      "omniembed.image_encoder_name",
-      "mobilenetv4_conv_medium.e180_r384_in12k");
+  append_kv_string(arena, entries, "omniembed.image_encoder_name",
+                   "mobilenetv4_conv_medium.e180_r384_in12k");
   append_kv_u32(arena, entries, "omniembed.image_encoder_dim", 1280u);
-  append_kv_string(arena, entries, "omniembed.audio_encoder_name", "efficientat_mn20_as");
+  append_kv_string(arena, entries, "omniembed.audio_encoder_name",
+                   "efficientat_mn20_as");
   append_kv_u32(arena, entries, "omniembed.audio_encoder_dim", 1920u);
-  append_kv_u32_array(
-      arena, entries, "omniembed.matryoshka_dims", std::span<const uint32_t>{matryoshka_dims});
-  append_kv_string_array(
-      arena, entries, "tokenizer.tokens", std::span<const std::string_view>{tokens});
+  append_kv_u32_array(arena, entries, "omniembed.matryoshka_dims",
+                      std::span<const uint32_t>{matryoshka_dims});
+  append_kv_string_array(arena, entries, "tokenizer.tokens",
+                         std::span<const std::string_view>{tokens});
 
   const emel::model::detail::kv_binding binding{
       .arena = std::span<const uint8_t>{arena},
@@ -1294,7 +1515,8 @@ TEST_CASE("model_detail_loads_omniembed_hparams_from_gguf_binding") {
   CHECK(model->params.matryoshka_dimensions[3] == 128);
   CHECK(model->meta.clip_data.has_vision_encoder);
   CHECK(model->meta.clip_data.has_audio_encoder);
-  CHECK(emel::model::metadata_string_view(model->meta, model->meta.clip_vision_data.encoder_name) ==
+  CHECK(emel::model::metadata_string_view(
+            model->meta, model->meta.clip_vision_data.encoder_name) ==
         "mobilenetv4_conv_medium.e180_r384_in12k");
   CHECK(model->meta.clip_vision_data.embedding_length == 1280);
   CHECK(model->meta.clip_vision_data.projection_dim == 1280);
@@ -1304,7 +1526,8 @@ TEST_CASE("model_detail_loads_omniembed_hparams_from_gguf_binding") {
   CHECK(model->meta.clip_vision_data.image_std_count == 3u);
   CHECK(model->meta.clip_vision_data.image_mean[0] == doctest::Approx(0.485f));
   CHECK(model->meta.clip_vision_data.image_std[2] == doctest::Approx(0.225f));
-  CHECK(emel::model::metadata_string_view(model->meta, model->meta.clip_audio_data.encoder_name) ==
+  CHECK(emel::model::metadata_string_view(
+            model->meta, model->meta.clip_audio_data.encoder_name) ==
         "efficientat_mn20_as");
   CHECK(model->meta.clip_audio_data.embedding_length == 1920);
   CHECK(model->meta.clip_audio_data.projection_dim == 1280);
@@ -1313,8 +1536,10 @@ TEST_CASE("model_detail_loads_omniembed_hparams_from_gguf_binding") {
   CHECK(model->meta.clip_audio_data.win_length == 800);
   CHECK(model->meta.clip_audio_data.hop_size == 320);
   CHECK(model->meta.clip_audio_data.num_mel_bins == 128);
-  CHECK(model->meta.clip_audio_data.high_frequency == doctest::Approx(15000.0f));
-  CHECK(model->meta.clip_audio_data.preemphasis_coefficient == doctest::Approx(0.97f));
+  CHECK(model->meta.clip_audio_data.high_frequency ==
+        doctest::Approx(15000.0f));
+  CHECK(model->meta.clip_audio_data.preemphasis_coefficient ==
+        doctest::Approx(0.97f));
   CHECK(model->meta.clip_audio_data.log_offset == doctest::Approx(1.0e-5f));
   CHECK(model->meta.clip_audio_data.normalize_bias == doctest::Approx(4.5f));
   CHECK(model->meta.clip_audio_data.normalize_scale == doctest::Approx(5.0f));
@@ -1331,12 +1556,9 @@ TEST_CASE("model_detail_loads_omniembed_hparams_from_i16_matryoshka_binding") {
   append_kv_u32(arena, entries, "omniembed.embed_dim", 1280u);
   append_kv_u32(arena, entries, "omniembed.image_encoder_dim", 640u);
   append_kv_u32(arena, entries, "omniembed.audio_encoder_dim", 768u);
-  append_kv_scalar_array(
-      arena,
-      entries,
-      "omniembed.matryoshka_dims",
-      emel::gguf::loader::detail::constants::gguf_type_int16,
-      std::span<const int16_t>{matryoshka_dims});
+  append_kv_scalar_array(arena, entries, "omniembed.matryoshka_dims",
+                         emel::gguf::loader::detail::constants::gguf_type_int16,
+                         std::span<const int16_t>{matryoshka_dims});
 
   const emel::model::detail::kv_binding binding{
       .arena = std::span<const uint8_t>{arena},
@@ -1359,12 +1581,9 @@ TEST_CASE("model_detail_loads_omniembed_hparams_from_i64_matryoshka_binding") {
   append_kv_u32(arena, entries, "omniembed.embed_dim", 1280u);
   append_kv_u32(arena, entries, "omniembed.image_encoder_dim", 640u);
   append_kv_u32(arena, entries, "omniembed.audio_encoder_dim", 768u);
-  append_kv_scalar_array(
-      arena,
-      entries,
-      "omniembed.matryoshka_dims",
-      emel::gguf::loader::detail::constants::gguf_type_int64,
-      std::span<const int64_t>{matryoshka_dims});
+  append_kv_scalar_array(arena, entries, "omniembed.matryoshka_dims",
+                         emel::gguf::loader::detail::constants::gguf_type_int64,
+                         std::span<const int64_t>{matryoshka_dims});
 
   const emel::model::detail::kv_binding binding{
       .arena = std::span<const uint8_t>{arena},
@@ -1401,7 +1620,8 @@ TEST_CASE("model_omniembed_detail_builds_multimodal_execution_contract") {
   build_omniembed_model(*model, true);
 
   emel::model::omniembed::detail::execution_contract contract = {};
-  REQUIRE(emel::model::omniembed::detail::build_execution_contract(*model, contract) ==
+  REQUIRE(emel::model::omniembed::detail::build_execution_contract(*model,
+                                                                   contract) ==
           emel::error::cast(emel::model::loader::error::none));
   CHECK(contract.embedding_length == 1280);
   CHECK(contract.image_encoder_length == 640);
@@ -1415,7 +1635,8 @@ TEST_CASE("model_omniembed_detail_builds_multimodal_execution_contract") {
   CHECK(contract.audio_encoder.tensor_count == 1u);
   CHECK(contract.audio_projection.tensor_count == 1u);
   CHECK(contract.text_encoder.first.name == "text_encoder.backbone.weight");
-  CHECK(contract.audio_projection.first.name == "audio_projection.project.weight");
+  CHECK(contract.audio_projection.first.name ==
+        "audio_projection.project.weight");
   CHECK(emel::model::omniembed::detail::validate_data(*model) ==
         emel::error::cast(emel::model::loader::error::none));
   CHECK(emel::model::omniembed::detail::validate_execution_contract(*model) ==
@@ -1424,18 +1645,21 @@ TEST_CASE("model_omniembed_detail_builds_multimodal_execution_contract") {
         emel::error::cast(emel::model::loader::error::none));
 }
 
-TEST_CASE("model_execution_contract_rejects_omniembed_without_audio_projection_family") {
+TEST_CASE("model_execution_contract_rejects_omniembed_without_audio_projection_"
+          "family") {
   auto model = std::make_unique<emel::model::data>();
   build_omniembed_model(*model, false);
 
   emel::model::omniembed::detail::execution_contract contract = {};
-  CHECK(emel::model::omniembed::detail::build_execution_contract(*model, contract) ==
+  CHECK(emel::model::omniembed::detail::build_execution_contract(*model,
+                                                                 contract) ==
         emel::error::cast(emel::model::loader::error::model_invalid));
   CHECK(emel::model::validate_execution_contract(*model) ==
         emel::error::cast(emel::model::loader::error::model_invalid));
 }
 
-TEST_CASE("model_execution_contract_rejects_omniembed_with_invalid_matryoshka_shape") {
+TEST_CASE("model_execution_contract_rejects_omniembed_with_invalid_matryoshka_"
+          "shape") {
   auto model = std::make_unique<emel::model::data>();
   build_omniembed_model(*model, true);
   model->params.matryoshka_dimensions[1] = 1536;
@@ -1450,7 +1674,7 @@ TEST_CASE("model_omniembed_detail_ignores_unusable_family_tensor_storage") {
   auto model = std::make_unique<emel::model::data>();
   build_omniembed_model(*model, true);
 
-  auto & unusable = model->tensors[model->n_tensors];
+  auto &unusable = model->tensors[model->n_tensors];
   append_tensor_name(*model, unusable, "text_encoder.unusable.weight");
   unusable.n_dims = 1;
   unusable.dims[0] = 0;
@@ -1459,7 +1683,8 @@ TEST_CASE("model_omniembed_detail_ignores_unusable_family_tensor_storage") {
   ++model->n_tensors;
 
   emel::model::omniembed::detail::execution_contract contract = {};
-  REQUIRE(emel::model::omniembed::detail::build_execution_contract(*model, contract) ==
+  REQUIRE(emel::model::omniembed::detail::build_execution_contract(*model,
+                                                                   contract) ==
           emel::error::cast(emel::model::loader::error::none));
   CHECK(contract.text_encoder.tensor_count == 1u);
 }
@@ -1471,19 +1696,27 @@ TEST_CASE("model_detail_loads_sortformer_hparams_from_gguf_binding") {
 
   append_kv_string(arena, entries, "general.architecture", "sortformer");
   append_kv_string(arena, entries, "sortformer.source.format", "nemo");
-  append_kv_string(arena, entries, "sortformer.tensor_name_scheme", "compact_v1");
+  append_kv_string(arena, entries, "sortformer.tensor_name_scheme",
+                   "compact_v1");
   append_kv_string(arena, entries, "sortformer.outtype", "f32");
   append_kv_u32(arena, entries, "sortformer.original_tensor_count", 128u);
   append_kv_u32(arena, entries, "sortformer.tensor_count", 132u);
   append_kv_u32(arena, entries, "sortformer.skipped_tensor_count", 3u);
-  append_kv_u32(arena, entries, "sortformer.config.preprocessor.sample_rate", 16000u);
-  append_kv_u32(arena, entries, "sortformer.config.sortformer_modules.num_spks", 4u);
-  append_kv_u32(arena, entries, "sortformer.config.sortformer_modules.chunk_len", 188u);
-  append_kv_u32(arena, entries, "sortformer.config.sortformer_modules.chunk_right_context", 1u);
-  append_kv_u32(arena, entries, "sortformer.config.sortformer_modules.fifo_len", 0u);
-  append_kv_u32(
-      arena, entries, "sortformer.config.sortformer_modules.spkcache_update_period", 188u);
-  append_kv_u32(arena, entries, "sortformer.config.sortformer_modules.spkcache_len", 188u);
+  append_kv_u32(arena, entries, "sortformer.config.preprocessor.sample_rate",
+                16000u);
+  append_kv_u32(arena, entries, "sortformer.config.sortformer_modules.num_spks",
+                4u);
+  append_kv_u32(arena, entries,
+                "sortformer.config.sortformer_modules.chunk_len", 188u);
+  append_kv_u32(arena, entries,
+                "sortformer.config.sortformer_modules.chunk_right_context", 1u);
+  append_kv_u32(arena, entries, "sortformer.config.sortformer_modules.fifo_len",
+                0u);
+  append_kv_u32(arena, entries,
+                "sortformer.config.sortformer_modules.spkcache_update_period",
+                188u);
+  append_kv_u32(arena, entries,
+                "sortformer.config.sortformer_modules.spkcache_len", 188u);
 
   const emel::model::detail::kv_binding binding{
       .arena = std::span<const uint8_t>{arena},
@@ -1493,22 +1726,74 @@ TEST_CASE("model_detail_loads_sortformer_hparams_from_gguf_binding") {
   REQUIRE(emel::model::detail::load_hparams_from_gguf(binding, *model));
   CHECK(emel::model::architecture_name_view(*model) == "sortformer");
   CHECK(emel::model::is_supported_execution_architecture("sortformer"));
-  CHECK(emel::model::sortformer::detail::is_execution_architecture("sortformer"));
+  CHECK(
+      emel::model::sortformer::detail::is_execution_architecture("sortformer"));
   CHECK_FALSE(emel::model::is_omniembed_execution_architecture("sortformer"));
   CHECK(model->params.n_features == 4);
 }
 
-TEST_CASE("model_detail_rejects_sortformer_hparams_with_wrong_source_contract") {
+TEST_CASE(
+    "model_detail_rejects_sortformer_hparams_with_wrong_source_contract") {
   std::vector<uint8_t> arena = {};
   std::vector<emel::gguf::loader::kv_entry> entries = {};
   auto model = std::make_unique<emel::model::data>();
 
   append_kv_string(arena, entries, "general.architecture", "sortformer");
   append_kv_string(arena, entries, "sortformer.source.format", "onnx");
-  append_kv_string(arena, entries, "sortformer.tensor_name_scheme", "compact_v1");
+  append_kv_string(arena, entries, "sortformer.tensor_name_scheme",
+                   "compact_v1");
   append_kv_string(arena, entries, "sortformer.outtype", "f32");
   append_kv_u32(arena, entries, "sortformer.original_tensor_count", 128u);
   append_kv_u32(arena, entries, "sortformer.tensor_count", 132u);
+
+  const emel::model::detail::kv_binding binding{
+      .arena = std::span<const uint8_t>{arena},
+      .entries = std::span<const emel::gguf::loader::kv_entry>{entries},
+  };
+
+  CHECK_FALSE(emel::model::detail::load_hparams_from_gguf(binding, *model));
+}
+
+TEST_CASE("model_detail_loads_whisper_tiny_hparams_from_gguf_binding") {
+  std::vector<uint8_t> arena = {};
+  std::vector<emel::gguf::loader::kv_entry> entries = {};
+  auto model = std::make_unique<emel::model::data>();
+
+  append_kv_string(arena, entries, "general.architecture", "whisper");
+  append_kv_u32(arena, entries, "whisper.n_mels", 80u);
+  append_kv_u32(arena, entries, "whisper.n_vocab", 51865u);
+
+  const emel::model::detail::kv_binding binding{
+      .arena = std::span<const uint8_t>{arena},
+      .entries = std::span<const emel::gguf::loader::kv_entry>{entries},
+  };
+
+  REQUIRE(emel::model::detail::load_hparams_from_gguf(binding, *model));
+  CHECK(emel::model::architecture_name_view(*model) == "whisper");
+  CHECK(emel::model::is_supported_execution_architecture("whisper"));
+  CHECK(emel::model::is_whisper_execution_architecture("whisper"));
+  CHECK_FALSE(emel::model::is_omniembed_execution_architecture("whisper"));
+  CHECK(model->params.n_features == 80);
+  CHECK(model->params.n_vocab == 51865);
+  CHECK(model->params.n_embd == 384);
+  CHECK(model->params.n_embd_out == 384);
+  CHECK(model->params.n_ff == 1536);
+  CHECK(model->params.n_head == 6);
+  CHECK(model->params.n_head_kv == 6);
+  CHECK(model->params.n_ctx == 448);
+  CHECK(model->params.n_layer == 4);
+  CHECK(model->params.decoder_block_count == 4);
+}
+
+TEST_CASE(
+    "model_detail_rejects_whisper_hparams_with_noncanonical_mel_contract") {
+  std::vector<uint8_t> arena = {};
+  std::vector<emel::gguf::loader::kv_entry> entries = {};
+  auto model = std::make_unique<emel::model::data>();
+
+  append_kv_string(arena, entries, "general.architecture", "whisper");
+  append_kv_u32(arena, entries, "whisper.n_mels", 128u);
+  append_kv_u32(arena, entries, "whisper.n_vocab", 51865u);
 
   const emel::model::detail::kv_binding binding{
       .arena = std::span<const uint8_t>{arena},
@@ -1523,7 +1808,8 @@ TEST_CASE("model_sortformer_detail_builds_execution_contract") {
   build_sortformer_model(*model, true);
 
   emel::model::sortformer::detail::execution_contract contract = {};
-  REQUIRE(emel::model::sortformer::detail::build_execution_contract(*model, contract) ==
+  REQUIRE(emel::model::sortformer::detail::build_execution_contract(*model,
+                                                                    contract) ==
           emel::error::cast(emel::model::loader::error::none));
   CHECK(contract.sample_rate == 16000);
   CHECK(contract.speaker_count == 4);
@@ -1548,7 +1834,8 @@ TEST_CASE("model_sortformer_detail_rejects_missing_modules_family") {
   build_sortformer_model(*model, false);
 
   emel::model::sortformer::detail::execution_contract contract = {};
-  CHECK(emel::model::sortformer::detail::build_execution_contract(*model, contract) ==
+  CHECK(emel::model::sortformer::detail::build_execution_contract(*model,
+                                                                  contract) ==
         emel::error::cast(emel::model::loader::error::model_invalid));
   CHECK(emel::model::validate_execution_contract(*model) ==
         emel::error::cast(emel::model::loader::error::model_invalid));
@@ -1563,7 +1850,254 @@ TEST_CASE("model_sortformer_detail_rejects_noncanonical_stream_contract") {
         emel::error::cast(emel::model::loader::error::model_invalid));
 }
 
-TEST_CASE("model_execution_contract_accepts_canonical_gemma4_shared_kv_contract") {
+TEST_CASE("model_whisper_detail_builds_tiny_gguf_execution_contract") {
+  auto model = std::make_unique<emel::model::data>();
+  build_whisper_model(*model, true);
+
+  emel::model::whisper::detail::execution_contract contract = {};
+  REQUIRE(emel::model::whisper::detail::build_execution_contract(*model,
+                                                                 contract) ==
+          emel::error::cast(emel::model::loader::error::none));
+  CHECK(contract.sample_rate == 16000);
+  CHECK(contract.mel_bin_count == 80);
+  CHECK(contract.vocab_size == 51865);
+  CHECK(contract.embedding_length == 384);
+  CHECK(contract.feed_forward_length == 1536);
+  CHECK(contract.attention_head_count == 6);
+  CHECK(contract.encoder_context_length == 1500);
+  CHECK(contract.decoder_context_length == 448);
+  CHECK(contract.encoder_block_count == 4);
+  CHECK(contract.decoder_block_count == 4);
+  CHECK(contract.mel_filters.first.name == "mel_filters");
+  CHECK(contract.encoder.first.name == "model.encoder.conv1.weight");
+  CHECK(contract.decoder.first.name == "model.decoder.embed_tokens.weight");
+  CHECK(emel::model::whisper::detail::validate_data(*model) ==
+        emel::error::cast(emel::model::loader::error::none));
+  CHECK(emel::model::validate_execution_contract(*model) ==
+        emel::error::cast(emel::model::loader::error::none));
+}
+
+TEST_CASE("model_whisper_detail_rejects_missing_decoder_cross_attention") {
+  auto model = std::make_unique<emel::model::data>();
+  build_whisper_model(*model, false);
+
+  emel::model::whisper::detail::execution_contract contract = {};
+  CHECK(emel::model::whisper::detail::build_execution_contract(*model,
+                                                               contract) ==
+        emel::error::cast(emel::model::loader::error::model_invalid));
+  CHECK(emel::model::validate_execution_contract(*model) ==
+        emel::error::cast(emel::model::loader::error::model_invalid));
+}
+
+TEST_CASE("model_whisper_detail_rejects_noncanonical_vocab_contract") {
+  auto model = std::make_unique<emel::model::data>();
+  build_whisper_model(*model, true);
+  model->params.n_vocab = 50257;
+
+  CHECK(emel::model::whisper::detail::validate_execution_contract(*model) ==
+        emel::error::cast(emel::model::loader::error::model_invalid));
+}
+
+TEST_CASE(
+    "model_whisper_detail_builds_execution_contract_from_pinned_real_fixture") {
+  const auto fixture_path = whisper_fixture_path();
+  if (!std::filesystem::exists(fixture_path)) {
+    MESSAGE(
+        "skipping real Whisper fixture parse test because fixture is missing: "
+        << fixture_path.string());
+    return;
+  }
+
+  auto model = std::make_unique<emel::model::data>();
+  const std::vector<uint8_t> file_bytes = read_binary_file(fixture_path);
+  std::vector<uint8_t> kv_arena = {};
+  std::vector<emel::gguf::loader::kv_entry> kv_entries = {};
+  REQUIRE(
+      load_whisper_fixture_binding(file_bytes, kv_arena, kv_entries, *model));
+
+  const emel::model::detail::kv_binding binding{
+      .arena = std::span<const uint8_t>{kv_arena},
+      .entries = std::span<const emel::gguf::loader::kv_entry>{kv_entries},
+  };
+  REQUIRE(emel::model::detail::load_hparams_from_gguf(binding, *model));
+  model->weights_data = file_bytes.data();
+  model->weights_size = file_bytes.size();
+  model->weights_mapped = true;
+  materialize_tensor_names_from_file(*model, file_bytes);
+
+  emel::model::whisper::detail::execution_contract contract = {};
+  REQUIRE(emel::model::whisper::detail::build_execution_contract(*model,
+                                                                 contract) ==
+          emel::error::cast(emel::model::loader::error::none));
+  CHECK(emel::model::architecture_name_view(*model) == "whisper");
+  CHECK(model->params.n_features == 80);
+  CHECK(model->params.n_vocab == 51865);
+  CHECK(contract.mel_filters.tensor_count > 0u);
+  CHECK(contract.encoder.tensor_count > 0u);
+  CHECK(contract.decoder.tensor_count > 0u);
+  CHECK(contract.mel_filters.first.name == "mel_filters");
+  CHECK(contract.encoder.first.name.starts_with("model.encoder."));
+  CHECK(contract.decoder.first.name.starts_with("model.decoder."));
+  CHECK(emel::model::validate_execution_contract(*model) ==
+        emel::error::cast(emel::model::loader::error::none));
+}
+
+TEST_CASE(
+    "model_whisper_fixture_carries_no_embedded_tokenizer_metadata_in_gguf") {
+  // The Candle-style oxide-lab/whisper-tiny-GGUF fixtures intentionally do
+  // not embed tokenizer metadata; the maintained Whisper tokenizer is shipped
+  // as an external `tokenizer-tiny.json` sibling in the same upstream repo
+  // (mirroring how the maintained TE slice ships `mdbr-leaf-ir-vocab.txt`
+  // alongside its GGUF). This test source-backs that contract truth so a
+  // future ASR runtime phase wires the external tokenizer asset explicitly
+  // instead of silently falling back to absent GGUF tokenizer keys.
+  const auto fixture_path = whisper_fixture_path();
+  if (!std::filesystem::exists(fixture_path)) {
+    MESSAGE("skipping real Whisper tokenizer-absence test because fixture is "
+            "missing: "
+            << fixture_path.string());
+    return;
+  }
+
+  auto model = std::make_unique<emel::model::data>();
+  const std::vector<uint8_t> file_bytes = read_binary_file(fixture_path);
+  std::vector<uint8_t> kv_arena = {};
+  std::vector<emel::gguf::loader::kv_entry> kv_entries = {};
+  REQUIRE(
+      load_whisper_fixture_binding(file_bytes, kv_arena, kv_entries, *model));
+
+  const emel::model::detail::kv_binding binding{
+      .arena = std::span<const uint8_t>{kv_arena},
+      .entries = std::span<const emel::gguf::loader::kv_entry>{kv_entries},
+  };
+
+  // No tokenizer model identity should be present in the GGUF.
+  CHECK(emel::model::detail::find_kv_entry_any(
+            binding, {"tokenizer.model", "tokenizer.ggml.model"}) == nullptr);
+
+  // No tokenizer token array should be present in the GGUF.
+  CHECK(emel::model::detail::find_kv_entry_any(
+            binding, {"tokenizer.tokens", "tokenizer.ggml.tokens"}) == nullptr);
+
+  // load_vocab_from_gguf must therefore not synthesize a vocab from the
+  // Whisper GGUF: it should leave the model in the no-tokenizer state.
+  const bool loaded =
+      emel::model::detail::load_vocab_from_gguf(binding, model->vocab_data);
+  CHECK_FALSE(loaded);
+  CHECK(model->vocab_data.tokenizer_model_id ==
+        emel::model::data::tokenizer_model::UNKNOWN);
+}
+
+TEST_CASE("model_whisper_detail_builds_execution_contract_from_q4_0_fixture") {
+  const auto fixture_path = whisper_q4_0_fixture_path();
+  if (!std::filesystem::exists(fixture_path)) {
+    MESSAGE("skipping real Whisper q4_0 fixture parse test because fixture is "
+            "missing: "
+            << fixture_path.string());
+    return;
+  }
+
+  auto model = std::make_unique<emel::model::data>();
+  const std::vector<uint8_t> file_bytes = read_binary_file(fixture_path);
+  std::vector<uint8_t> kv_arena = {};
+  std::vector<emel::gguf::loader::kv_entry> kv_entries = {};
+  REQUIRE(
+      load_whisper_fixture_binding(file_bytes, kv_arena, kv_entries, *model));
+
+  const emel::model::detail::kv_binding binding{
+      .arena = std::span<const uint8_t>{kv_arena},
+      .entries = std::span<const emel::gguf::loader::kv_entry>{kv_entries},
+  };
+  REQUIRE(emel::model::detail::load_hparams_from_gguf(binding, *model));
+  model->weights_data = file_bytes.data();
+  model->weights_size = file_bytes.size();
+  model->weights_mapped = true;
+  materialize_tensor_names_from_file(*model, file_bytes);
+
+  emel::model::whisper::detail::execution_contract contract = {};
+  REQUIRE(emel::model::whisper::detail::build_execution_contract(*model,
+                                                                 contract) ==
+          emel::error::cast(emel::model::loader::error::none));
+  CHECK(emel::model::architecture_name_view(*model) == "whisper");
+  CHECK(model->params.n_features == 80);
+  CHECK(model->params.n_vocab == 51865);
+  CHECK(contract.mel_filters.tensor_count > 0u);
+  CHECK(contract.encoder.tensor_count > 0u);
+  CHECK(contract.decoder.tensor_count > 0u);
+  CHECK(contract.mel_filters.first.name == "mel_filters");
+  CHECK(contract.encoder.first.name.starts_with("model.encoder."));
+  CHECK(contract.decoder.first.name.starts_with("model.decoder."));
+  CHECK(emel::model::validate_execution_contract(*model) ==
+        emel::error::cast(emel::model::loader::error::none));
+}
+
+TEST_CASE("model_whisper_detail_builds_execution_contract_from_q4_1_fixture") {
+  const auto fixture_path = whisper_q4_1_fixture_path();
+  if (!std::filesystem::exists(fixture_path)) {
+    MESSAGE("skipping real Whisper q4_1 fixture parse test because fixture is "
+            "missing: "
+            << fixture_path.string());
+    return;
+  }
+
+  auto model = std::make_unique<emel::model::data>();
+  const std::vector<uint8_t> file_bytes = read_binary_file(fixture_path);
+  std::vector<uint8_t> kv_arena = {};
+  std::vector<emel::gguf::loader::kv_entry> kv_entries = {};
+  REQUIRE(
+      load_whisper_fixture_binding(file_bytes, kv_arena, kv_entries, *model));
+
+  const emel::model::detail::kv_binding binding{
+      .arena = std::span<const uint8_t>{kv_arena},
+      .entries = std::span<const emel::gguf::loader::kv_entry>{kv_entries},
+  };
+  REQUIRE(emel::model::detail::load_hparams_from_gguf(binding, *model));
+  model->weights_data = file_bytes.data();
+  model->weights_size = file_bytes.size();
+  model->weights_mapped = true;
+  materialize_tensor_names_from_file(*model, file_bytes);
+
+  emel::model::whisper::detail::execution_contract contract = {};
+  REQUIRE(emel::model::whisper::detail::build_execution_contract(*model,
+                                                                 contract) ==
+          emel::error::cast(emel::model::loader::error::none));
+  CHECK(emel::model::architecture_name_view(*model) == "whisper");
+  CHECK(model->params.n_features == 80);
+  CHECK(model->params.n_vocab == 51865);
+  CHECK(contract.mel_filters.tensor_count > 0u);
+  CHECK(contract.encoder.tensor_count > 0u);
+  CHECK(contract.decoder.tensor_count > 0u);
+  CHECK(contract.mel_filters.first.name == "mel_filters");
+  CHECK(contract.encoder.first.name.starts_with("model.encoder."));
+  CHECK(contract.decoder.first.name.starts_with("model.decoder."));
+  CHECK(emel::model::validate_execution_contract(*model) ==
+        emel::error::cast(emel::model::loader::error::none));
+}
+
+TEST_CASE(
+    "model_whisper_loader_rejects_whisper_cpp_lmgg_sibling_magic_synthetic") {
+  // Build a minimal in-memory file image whose first four bytes are the
+  // whisper.cpp `lmgg` binary marker rather than the GGUF `GGUF` magic.
+  // The EMEL-owned GGUF loader probe must reject this without producing a
+  // valid requirements descriptor, so it cannot bootstrap EMEL Whisper state
+  // from a whisper.cpp/ sibling artifact.
+  std::vector<uint8_t> file_bytes(64u, 0u);
+  file_bytes[0] = 'l';
+  file_bytes[1] = 'm';
+  file_bytes[2] = 'g';
+  file_bytes[3] = 'g';
+
+  emel::gguf::loader::requirements requirements = {};
+  const emel::error::type err = emel::gguf::loader::detail::probe_requirements(
+      std::span<const uint8_t>{file_bytes}, requirements);
+  CHECK(err == emel::gguf::loader::detail::cast_loader_error(
+                   emel::gguf::loader::error::model_invalid));
+  CHECK(requirements.tensor_count == 0u);
+  CHECK(requirements.kv_count == 0u);
+}
+
+TEST_CASE(
+    "model_execution_contract_accepts_canonical_gemma4_shared_kv_contract") {
   auto model = std::make_unique<emel::model::data>();
   build_gemma4_model(*model, false);
 
@@ -1571,13 +2105,15 @@ TEST_CASE("model_execution_contract_accepts_canonical_gemma4_shared_kv_contract"
         emel::error::cast(emel::model::loader::error::none));
 }
 
-TEST_CASE("model_llama_detail_builds_gemma4_execution_view_with_shared_kv_and_tied_output_fallback") {
+TEST_CASE("model_llama_detail_builds_gemma4_execution_view_with_shared_kv_and_"
+          "tied_output_fallback") {
   auto model = std::make_unique<emel::model::data>();
   build_gemma4_model(*model, false);
 
   for (uint32_t idx = 0; idx < model->n_tensors; ++idx) {
-    auto & tensor = model->tensors[idx];
-    if (emel::model::tensor_name_view(*model, tensor) == "blk.15.attn_v.weight") {
+    auto &tensor = model->tensors[idx];
+    if (emel::model::tensor_name_view(*model, tensor) ==
+        "blk.15.attn_v.weight") {
       tensor.data = nullptr;
       tensor.data_size = 0u;
       break;
@@ -1600,7 +2136,8 @@ TEST_CASE("model_llama_detail_builds_gemma4_execution_view_with_shared_kv_and_ti
   CHECK(shared.attention_v.name == "blk.15.attn_k.weight");
 }
 
-TEST_CASE("model_llama_detail_builds_gemma4_topology_with_shared_kv_tail_tensor_count") {
+TEST_CASE("model_llama_detail_builds_gemma4_topology_with_shared_kv_tail_"
+          "tensor_count") {
   auto model = std::make_unique<emel::model::data>();
   build_gemma4_model(*model, false);
 
@@ -1615,12 +2152,13 @@ TEST_CASE("model_llama_detail_builds_gemma4_topology_with_shared_kv_tail_tensor_
   CHECK(topology.node_count == 333u);
 }
 
-TEST_CASE("model_llama_detail_builds_gemma4_quantized_path_audit_with_shared_kv_fallback") {
+TEST_CASE("model_llama_detail_builds_gemma4_quantized_path_audit_with_shared_"
+          "kv_fallback") {
   auto model = std::make_unique<emel::model::data>();
   build_gemma4_model(*model, false);
 
   for (uint32_t idx = 0; idx < model->n_tensors; ++idx) {
-    auto & tensor = model->tensors[idx];
+    auto &tensor = model->tensors[idx];
     const std::string_view name = emel::model::tensor_name_view(*model, tensor);
     if (name == "token_embd.weight") {
       tensor.type = static_cast<int32_t>(emel::kernel::event::dtype::q2_k);
@@ -1635,10 +2173,12 @@ TEST_CASE("model_llama_detail_builds_gemma4_quantized_path_audit_with_shared_kv_
   REQUIRE(emel::model::llama::detail::build_execution_view(*model, view) ==
           emel::error::cast(emel::model::loader::error::none));
 
-  const auto audit = emel::model::llama::detail::build_quantized_path_audit(view);
-  const auto find_stage = [&](const emel::model::llama::detail::quantized_stage_family family)
+  const auto audit =
+      emel::model::llama::detail::build_quantized_path_audit(view);
+  const auto find_stage =
+      [&](const emel::model::llama::detail::quantized_stage_family family)
       -> const emel::model::llama::detail::quantized_stage_audit & {
-    for (const auto & stage : audit.stages) {
+    for (const auto &stage : audit.stages) {
       if (stage.family == family) {
         return stage;
       }
@@ -1647,24 +2187,26 @@ TEST_CASE("model_llama_detail_builds_gemma4_quantized_path_audit_with_shared_kv_
     return audit.stages[0];
   };
 
-  const auto & token_embedding = find_stage(
+  const auto &token_embedding = find_stage(
       emel::model::llama::detail::quantized_stage_family::token_embedding);
-  const auto & output =
+  const auto &output =
       find_stage(emel::model::llama::detail::quantized_stage_family::output);
-  const auto & attention_v = find_stage(
+  const auto &attention_v = find_stage(
       emel::model::llama::detail::quantized_stage_family::attention_v);
-  const auto & attention_q_norm = find_stage(
+  const auto &attention_q_norm = find_stage(
       emel::model::llama::detail::quantized_stage_family::attention_q_norm);
-  const auto & attention_k_norm = find_stage(
+  const auto &attention_k_norm = find_stage(
       emel::model::llama::detail::quantized_stage_family::attention_k_norm);
 
   CHECK(token_embedding.contract ==
         emel::model::llama::detail::quantized_contract_kind::
             approved_dense_f32_by_contract);
-  CHECK(output.tensor_type == static_cast<int32_t>(emel::kernel::event::dtype::q2_k));
+  CHECK(output.tensor_type ==
+        static_cast<int32_t>(emel::kernel::event::dtype::q2_k));
   CHECK(output.contract ==
         emel::model::llama::detail::quantized_contract_kind::native_quantized);
-  CHECK(attention_v.tensor_type == static_cast<int32_t>(emel::kernel::event::dtype::q6_k));
+  CHECK(attention_v.tensor_type ==
+        static_cast<int32_t>(emel::kernel::event::dtype::q6_k));
   CHECK(attention_v.contract ==
         emel::model::llama::detail::quantized_contract_kind::native_quantized);
   CHECK(attention_v.consistent_across_layers);
@@ -1676,9 +2218,12 @@ TEST_CASE("model_llama_detail_builds_gemma4_quantized_path_audit_with_shared_kv_
             approved_dense_f32_by_contract);
 }
 
-TEST_CASE("model_llama_detail_quantized_audit_name_helpers_publish_supported_labels") {
-  using quantized_contract_kind = emel::model::llama::detail::quantized_contract_kind;
-  using quantized_stage_family = emel::model::llama::detail::quantized_stage_family;
+TEST_CASE("model_llama_detail_quantized_audit_name_helpers_publish_supported_"
+          "labels") {
+  using quantized_contract_kind =
+      emel::model::llama::detail::quantized_contract_kind;
+  using quantized_stage_family =
+      emel::model::llama::detail::quantized_stage_family;
 
   CHECK(emel::model::llama::detail::quantized_stage_family_name(
             quantized_stage_family::attention_v) == "attention_v");
@@ -1686,12 +2231,13 @@ TEST_CASE("model_llama_detail_quantized_audit_name_helpers_publish_supported_lab
             quantized_contract_kind::not_applicable) == "not_applicable");
   CHECK(emel::model::llama::detail::tensor_type_name(
             static_cast<int32_t>(emel::kernel::event::dtype::q4_k)) == "q4_k");
-  CHECK(emel::model::llama::detail::tensor_type_name(emel::kernel::detail::dtype_q4_0) ==
-        "q4_0");
+  CHECK(emel::model::llama::detail::tensor_type_name(
+            emel::kernel::detail::dtype_q4_0) == "q4_0");
   CHECK(emel::model::llama::detail::tensor_type_name(-7) == "unknown");
 }
 
-TEST_CASE("model_execution_contract_rejects_gemma4_without_canonical_sliding_window_pattern") {
+TEST_CASE("model_execution_contract_rejects_gemma4_without_canonical_sliding_"
+          "window_pattern") {
   auto model = std::make_unique<emel::model::data>();
   build_gemma4_model(*model, false);
   model->params.attention_sliding_window_pattern_flags[4] = 1u;
@@ -1700,13 +2246,15 @@ TEST_CASE("model_execution_contract_rejects_gemma4_without_canonical_sliding_win
         emel::error::cast(emel::model::loader::error::model_invalid));
 }
 
-TEST_CASE("model_execution_contract_rejects_gemma4_without_required_dedicated_v_projection") {
+TEST_CASE("model_execution_contract_rejects_gemma4_without_required_dedicated_"
+          "v_projection") {
   auto model = std::make_unique<emel::model::data>();
   build_gemma4_model(*model, false);
 
   for (uint32_t idx = 0; idx < model->n_tensors; ++idx) {
-    auto & tensor = model->tensors[idx];
-    if (emel::model::tensor_name_view(*model, tensor) == "blk.0.attn_v.weight") {
+    auto &tensor = model->tensors[idx];
+    if (emel::model::tensor_name_view(*model, tensor) ==
+        "blk.0.attn_v.weight") {
       tensor.data = nullptr;
       tensor.data_size = 0u;
       break;
@@ -1728,14 +2276,15 @@ TEST_CASE("model_detail_loads_gguf_vocab_metadata_without_llama_bootstrap") {
 
   append_kv_string(arena, entries, "tokenizer.model", "gpt2");
   append_kv_string(arena, entries, "tokenizer.pre", "lfm2");
-  append_kv_string_array(
-      arena, entries, "tokenizer.tokens", std::span<const std::string_view>{tokens});
-  append_kv_u32_array(
-      arena, entries, "tokenizer.token_type", std::span<const uint32_t>{token_types});
+  append_kv_string_array(arena, entries, "tokenizer.tokens",
+                         std::span<const std::string_view>{tokens});
+  append_kv_u32_array(arena, entries, "tokenizer.token_type",
+                      std::span<const uint32_t>{token_types});
   append_kv_u32(arena, entries, "tokenizer.token_type_count", 4u);
-  append_kv_f32_array(arena, entries, "tokenizer.scores", std::span<const float>{scores});
-  append_kv_string_array(
-      arena, entries, "tokenizer.merges", std::span<const std::string_view>{merges});
+  append_kv_f32_array(arena, entries, "tokenizer.scores",
+                      std::span<const float>{scores});
+  append_kv_string_array(arena, entries, "tokenizer.merges",
+                         std::span<const std::string_view>{merges});
   append_kv_u32(arena, entries, "tokenizer.bos_token_id", 0u);
   append_kv_u32(arena, entries, "tokenizer.eos_token_id", 0u);
   append_kv_u32(arena, entries, "tokenizer.padding_token_id", 0u);
@@ -1769,21 +2318,24 @@ TEST_CASE("model_detail_loads_gguf_vocab_metadata_without_llama_bootstrap") {
   CHECK(vocab->ignore_merges);
 }
 
-TEST_CASE("model_detail_preserves_vocab_default_flags_when_gguf_omits_optional_t5_fields") {
+TEST_CASE("model_detail_preserves_vocab_default_flags_when_gguf_omits_optional_"
+          "t5_fields") {
   std::vector<uint8_t> arena = {};
   std::vector<emel::gguf::loader::kv_entry> entries = {};
 
-  const std::array<std::string_view, 4> tokens = {"<pad>", "</s>", "<unk>", "\xE2\x96\x81"};
+  const std::array<std::string_view, 4> tokens = {"<pad>", "</s>", "<unk>",
+                                                  "\xE2\x96\x81"};
   const std::array<uint32_t, 4> token_types = {3u, 3u, 2u, 1u};
 
   append_kv_string(arena, entries, "tokenizer.ggml.model", "t5");
   append_kv_string(arena, entries, "tokenizer.ggml.pre", "default");
-  append_kv_string_array(
-      arena, entries, "tokenizer.ggml.tokens", std::span<const std::string_view>{tokens});
-  append_kv_u32_array(
-      arena, entries, "tokenizer.ggml.token_type", std::span<const uint32_t>{token_types});
+  append_kv_string_array(arena, entries, "tokenizer.ggml.tokens",
+                         std::span<const std::string_view>{tokens});
+  append_kv_u32_array(arena, entries, "tokenizer.ggml.token_type",
+                      std::span<const uint32_t>{token_types});
   append_kv_bool(arena, entries, "tokenizer.ggml.add_space_prefix", true);
-  append_kv_bool(arena, entries, "tokenizer.ggml.remove_extra_whitespaces", true);
+  append_kv_bool(arena, entries, "tokenizer.ggml.remove_extra_whitespaces",
+                 true);
 
   auto vocab = std::make_unique<emel::model::data::vocab>();
   const emel::model::detail::kv_binding binding{
@@ -1801,7 +2353,8 @@ TEST_CASE("model_detail_preserves_vocab_default_flags_when_gguf_omits_optional_t
   CHECK(vocab->escape_whitespaces);
 }
 
-TEST_CASE("model_detail_preserves_negative_vocab_sentinels_when_gguf_omits_optional_ids") {
+TEST_CASE("model_detail_preserves_negative_vocab_sentinels_when_gguf_omits_"
+          "optional_ids") {
   std::vector<uint8_t> arena = {};
   std::vector<emel::gguf::loader::kv_entry> entries = {};
 
@@ -1809,10 +2362,10 @@ TEST_CASE("model_detail_preserves_negative_vocab_sentinels_when_gguf_omits_optio
   const std::array<uint32_t, 2> token_types = {3u, 1u};
 
   append_kv_string(arena, entries, "tokenizer.ggml.model", "rwkv");
-  append_kv_string_array(
-      arena, entries, "tokenizer.ggml.tokens", std::span<const std::string_view>{tokens});
-  append_kv_u32_array(
-      arena, entries, "tokenizer.ggml.token_type", std::span<const uint32_t>{token_types});
+  append_kv_string_array(arena, entries, "tokenizer.ggml.tokens",
+                         std::span<const std::string_view>{tokens});
+  append_kv_u32_array(arena, entries, "tokenizer.ggml.token_type",
+                      std::span<const uint32_t>{token_types});
   append_kv_u32(arena, entries, "tokenizer.ggml.bos_token_id", 0u);
   append_kv_u32(arena, entries, "tokenizer.ggml.eos_token_id", 0u);
 
@@ -1831,7 +2384,8 @@ TEST_CASE("model_detail_preserves_negative_vocab_sentinels_when_gguf_omits_optio
   CHECK(vocab->pad_id == -1);
 }
 
-TEST_CASE("model_detail_preserves_negative_vocab_sentinels_when_gguf_uses_signed_optional_ids") {
+TEST_CASE("model_detail_preserves_negative_vocab_sentinels_when_gguf_uses_"
+          "signed_optional_ids") {
   std::vector<uint8_t> arena = {};
   std::vector<emel::gguf::loader::kv_entry> entries = {};
 
@@ -1839,10 +2393,10 @@ TEST_CASE("model_detail_preserves_negative_vocab_sentinels_when_gguf_uses_signed
   const std::array<uint32_t, 2> token_types = {3u, 1u};
 
   append_kv_string(arena, entries, "tokenizer.ggml.model", "rwkv");
-  append_kv_string_array(
-      arena, entries, "tokenizer.ggml.tokens", std::span<const std::string_view>{tokens});
-  append_kv_u32_array(
-      arena, entries, "tokenizer.ggml.token_type", std::span<const uint32_t>{token_types});
+  append_kv_string_array(arena, entries, "tokenizer.ggml.tokens",
+                         std::span<const std::string_view>{tokens});
+  append_kv_u32_array(arena, entries, "tokenizer.ggml.token_type",
+                      std::span<const uint32_t>{token_types});
   append_kv_u32(arena, entries, "tokenizer.ggml.bos_token_id", 0u);
   append_kv_u32(arena, entries, "tokenizer.ggml.eos_token_id", 0u);
   append_kv_i32(arena, entries, "tokenizer.ggml.padding_token_id", -1);
@@ -1871,14 +2425,15 @@ TEST_CASE("model_detail_loads_gemma4_vocab_metadata_with_large_merge_table") {
   const std::vector<std::string_view> merges(400001u, std::string_view{});
 
   append_kv_string(arena, entries, "tokenizer.ggml.model", "gemma4");
-  append_kv_string_array(
-      arena, entries, "tokenizer.ggml.tokens", std::span<const std::string_view>{tokens});
-  append_kv_u32_array(
-      arena, entries, "tokenizer.ggml.token_type", std::span<const uint32_t>{token_types});
+  append_kv_string_array(arena, entries, "tokenizer.ggml.tokens",
+                         std::span<const std::string_view>{tokens});
+  append_kv_u32_array(arena, entries, "tokenizer.ggml.token_type",
+                      std::span<const uint32_t>{token_types});
   append_kv_u32(arena, entries, "tokenizer.ggml.token_type_count", 4u);
-  append_kv_f32_array(arena, entries, "tokenizer.ggml.scores", std::span<const float>{scores});
-  append_kv_string_array(
-      arena, entries, "tokenizer.ggml.merges", std::span<const std::string_view>{merges});
+  append_kv_f32_array(arena, entries, "tokenizer.ggml.scores",
+                      std::span<const float>{scores});
+  append_kv_string_array(arena, entries, "tokenizer.ggml.merges",
+                         std::span<const std::string_view>{merges});
   append_kv_u32(arena, entries, "tokenizer.ggml.bos_token_id", 0u);
   append_kv_u32(arena, entries, "tokenizer.ggml.eos_token_id", 1u);
   append_kv_bool(arena, entries, "tokenizer.ggml.add_bos_token", true);
@@ -1898,4 +2453,155 @@ TEST_CASE("model_detail_loads_gemma4_vocab_metadata_with_large_merge_table") {
   CHECK(vocab->eos_id == 1);
   CHECK(vocab->add_bos);
   CHECK(vocab->add_space_prefix);
+}
+
+TEST_CASE(
+    "whisper_detail_normalizes_legacy_lmgg_artifact_to_source_owned_gguf") {
+  std::vector<uint8_t> legacy = {'l', 'm', 'g', 'g'};
+  append_scalar<int32_t>(legacy, 51865);
+  append_scalar<int32_t>(legacy, 1500);
+  append_scalar<int32_t>(legacy, 384);
+  append_scalar<int32_t>(legacy, 6);
+  append_scalar<int32_t>(legacy, 4);
+  append_scalar<int32_t>(legacy, 448);
+  append_scalar<int32_t>(legacy, 384);
+  append_scalar<int32_t>(legacy, 6);
+  append_scalar<int32_t>(legacy, 4);
+  append_scalar<int32_t>(legacy, 80);
+  append_scalar<int32_t>(legacy, 7);
+  append_scalar<int32_t>(legacy, 80);
+  append_scalar<int32_t>(legacy, 1);
+  for (int32_t index = 0; index < 80; ++index) {
+    append_scalar<uint32_t>(legacy, 0u);
+  }
+  append_scalar<int32_t>(legacy, 1);
+  append_scalar<uint32_t>(legacy, 0u);
+
+  const std::array<std::string_view, 11> root_tensors = {
+      "encoder.positional_embedding",
+      "encoder.conv1.weight",
+      "encoder.conv1.bias",
+      "encoder.conv2.weight",
+      "encoder.conv2.bias",
+      "encoder.ln_post.weight",
+      "encoder.ln_post.bias",
+      "decoder.positional_embedding",
+      "decoder.token_embedding.weight",
+      "decoder.ln.weight",
+      "decoder.ln.bias",
+  };
+  for (const auto name : root_tensors) {
+    append_legacy_whisper_tensor(legacy, name);
+  }
+
+  const std::array<std::string_view, 15> encoder_suffixes = {
+      "attn_ln.weight",  "attn_ln.bias",    "attn.query.weight",
+      "attn.query.bias", "attn.key.weight", "attn.value.weight",
+      "attn.value.bias", "attn.out.weight", "attn.out.bias",
+      "mlp_ln.weight",   "mlp_ln.bias",     "mlp.0.weight",
+      "mlp.0.bias",      "mlp.2.weight",    "mlp.2.bias",
+  };
+  const std::array<std::string_view, 24> decoder_suffixes = {
+      "attn_ln.weight",
+      "attn_ln.bias",
+      "attn.query.weight",
+      "attn.query.bias",
+      "attn.key.weight",
+      "attn.value.weight",
+      "attn.value.bias",
+      "attn.out.weight",
+      "attn.out.bias",
+      "cross_attn_ln.weight",
+      "cross_attn_ln.bias",
+      "cross_attn.query.weight",
+      "cross_attn.query.bias",
+      "cross_attn.key.weight",
+      "cross_attn.value.weight",
+      "cross_attn.value.bias",
+      "cross_attn.out.weight",
+      "cross_attn.out.bias",
+      "mlp_ln.weight",
+      "mlp_ln.bias",
+      "mlp.0.weight",
+      "mlp.0.bias",
+      "mlp.2.weight",
+      "mlp.2.bias",
+  };
+  for (int32_t block = 0; block < 4; ++block) {
+    for (const auto suffix : encoder_suffixes) {
+      append_legacy_whisper_tensor(legacy, "encoder.blocks." +
+                                               std::to_string(block) + "." +
+                                               std::string{suffix});
+    }
+    for (const auto suffix : decoder_suffixes) {
+      append_legacy_whisper_tensor(legacy, "decoder.blocks." +
+                                               std::to_string(block) + "." +
+                                               std::string{suffix});
+    }
+  }
+
+  REQUIRE(emel::model::whisper::detail::is_legacy_lmgg_whisper(
+      std::span<const uint8_t>{legacy}));
+
+  std::vector<uint8_t> gguf = {};
+  REQUIRE(emel::model::whisper::detail::normalize_legacy_lmgg_to_gguf(
+      std::span<const uint8_t>{legacy}, gguf));
+  REQUIRE(gguf.size() > 4u);
+  CHECK(std::string_view{reinterpret_cast<const char *>(gguf.data()), 4u} ==
+        "GGUF");
+  const std::string_view gguf_text{reinterpret_cast<const char *>(gguf.data()),
+                                   gguf.size()};
+  CHECK(gguf_text.find("model.encoder.layers.3.self_attn.q_proj.weight") !=
+        std::string_view::npos);
+  CHECK(gguf_text.find("model.decoder.layers.3.encoder_attn.q_proj.weight") !=
+        std::string_view::npos);
+
+  emel::gguf::loader::sm loader{};
+  emel::gguf::loader::requirements requirements = {};
+  const auto on_probe_done =
+      emel::gguf::loader::event::probe_done_fn::from<&noop_probe_done>();
+  const auto on_probe_error =
+      emel::gguf::loader::event::probe_error_fn::from<&noop_probe_error>();
+  const emel::gguf::loader::event::probe probe{std::span<const uint8_t>{gguf},
+                                               requirements, on_probe_done,
+                                               on_probe_error};
+  REQUIRE(loader.process_event(probe));
+  CHECK(requirements.kv_count == 4u);
+  CHECK(requirements.tensor_count == 168u);
+}
+
+TEST_CASE("whisper_detail_rejects_legacy_tensor_size_overflow") {
+  std::vector<uint8_t> legacy = {'l', 'm', 'g', 'g'};
+  append_scalar<int32_t>(legacy, 51865);
+  append_scalar<int32_t>(legacy, 1500);
+  append_scalar<int32_t>(legacy, 384);
+  append_scalar<int32_t>(legacy, 6);
+  append_scalar<int32_t>(legacy, 4);
+  append_scalar<int32_t>(legacy, 448);
+  append_scalar<int32_t>(legacy, 384);
+  append_scalar<int32_t>(legacy, 6);
+  append_scalar<int32_t>(legacy, 4);
+  append_scalar<int32_t>(legacy, 80);
+  append_scalar<int32_t>(legacy, 7);
+  append_scalar<int32_t>(legacy, 80);
+  append_scalar<int32_t>(legacy, 1);
+  for (int32_t index = 0; index < 80; ++index) {
+    append_scalar<uint32_t>(legacy, 0u);
+  }
+  append_scalar<int32_t>(legacy, 1);
+  append_scalar<uint32_t>(legacy, 0u);
+
+  const std::string_view tensor_name = "encoder.positional_embedding";
+  append_scalar<int32_t>(legacy, 4);
+  append_scalar<int32_t>(legacy, static_cast<int32_t>(tensor_name.size()));
+  append_scalar<int32_t>(legacy, 0);
+  append_scalar<int32_t>(legacy, 65536);
+  append_scalar<int32_t>(legacy, 65536);
+  append_scalar<int32_t>(legacy, 65536);
+  append_scalar<int32_t>(legacy, 65536);
+  legacy.insert(legacy.end(), tensor_name.begin(), tensor_name.end());
+
+  std::vector<uint8_t> gguf = {};
+  CHECK_FALSE(emel::model::whisper::detail::normalize_legacy_lmgg_to_gguf(
+      std::span<const uint8_t>{legacy}, gguf));
 }

@@ -1,5 +1,94 @@
 # Test Models
 
+## model-tiny-q80.gguf
+- Source: `https://huggingface.co/oxide-lab/whisper-tiny-GGUF`
+- File: `model-tiny-q80.gguf`
+- Stable maintained path: `tests/models/model-tiny-q80.gguf`
+- License: MIT
+- Upstream model: `https://huggingface.co/openai/whisper-tiny`
+- Repository commit: `94468a6c81edab8c594d9b1d06ea1dfb64292327`
+- Size: `40700160` bytes (`39M`)
+- SHA256: `52deb0fdcbb9c36b4d570e35f5a65a5ad4275ccdb85e7a06e81a8b05b3743c9d`
+- Xet hash: `9b02c103aabca43b343c667068c2b81fa8d5090597f42adbfdc7e68b2b4d3aa9`
+- Download URL:
+  `https://huggingface.co/oxide-lab/whisper-tiny-GGUF/resolve/94468a6c81edab8c594d9b1d06ea1dfb64292327/model-tiny-q80.gguf`
+- Executable metadata truth: this root artifact is a real GGUF file with `GGUF` magic,
+  `general.architecture=whisper`, `whisper.n_mels=80`, `whisper.n_vocab=51865`, `168`
+  tensors, and Candle-style tensor names with the `model.` prefix.
+- Maintained contract: Whisper tiny encoder-decoder shape only: mono `16000` Hz speech
+  frontend, `80` mel bins, encoder context `1500`, decoder context `448`, embedding width
+  `384`, feed-forward width `1536`, `6` attention heads, `4` encoder blocks, and `4`
+  decoder blocks.
+- Variant-family scope note: the maintained v1.16 Whisper tiny GGUF variant family is
+  narrowed to the three upstream EMEL-loadable Candle-style GGUFs at the top level of the
+  pinned repo commit: `q8_0` (`model-tiny-q80.gguf`), `q4_0` (`whisper-tiny-q4_0.gguf`),
+  and `q4_1` (`whisper-tiny-q4_1.gguf`). The broader quant family (`q5_0`, `q5_1`, `q2_k`,
+  `q3_k`, `q4_k`, `q5_k`, `q6_k`, `q8_k`) is deferred to a future approved EMEL-owned
+  conversion phase. This section does not claim every variant is already runnable.
+- Loader/runtime boundary note: the evidence in this section proves fixture provenance and
+  loader/model-contract validation only. It is not proof that EMEL Whisper ASR runtime or
+  `whisper.cpp` parity is complete.
+- Reference-lane note: the sibling `whisper.cpp/` artifacts in the same Hugging Face repo are
+  reserved for the whisper.cpp reference lane. Direct inspection of
+  `whisper.cpp/whisper-tiny-q4_k.gguf` at the pinned commit found `lmgg` magic rather than
+  `GGUF`, so those files must not feed EMEL-owned GGUF runtime objects.
+- External tokenizer-asset note: the Candle-style Whisper tiny GGUFs in this repo do not
+  embed tokenizer metadata (`tokenizer.model`, `tokenizer.ggml.model`, `tokenizer.tokens`,
+  etc.). The maintained Whisper tokenizer source is the upstream `tokenizer-tiny.json`
+  sibling at
+  `https://huggingface.co/oxide-lab/whisper-tiny-GGUF/resolve/94468a6c81edab8c594d9b1d06ea1dfb64292327/tokenizer-tiny.json`
+  (size `2480452` bytes, SHA256
+  `dfc530298b6fbed1a97c6472c575b026453706e2a204c7f7038f2c9d208b0759`). The reopened v1.16
+  speech tokenizer work stages this external asset under `tests/models/tokenizer-tiny.json`;
+  runtime wiring must use that tokenizer contract instead of silently falling back to absent GGUF
+  tokenizer keys or hardcoded transcript token strings.
+
+## whisper-tiny-q4_0.gguf
+- Source: `https://huggingface.co/oxide-lab/whisper-tiny-GGUF`
+- File: `whisper-tiny-q4_0.gguf`
+- Stable maintained path: `tests/models/whisper-tiny-q4_0.gguf`
+- License: MIT
+- Upstream model: `https://huggingface.co/openai/whisper-tiny`
+- Repository commit: `94468a6c81edab8c594d9b1d06ea1dfb64292327`
+- Size: `22087104` bytes (`22M`)
+- SHA256: `b2be6457e86d2c917d0c0eecef8e041ed03c60f64fc5744e6720adfb5141c21b`
+- Download URL:
+  `https://huggingface.co/oxide-lab/whisper-tiny-GGUF/resolve/94468a6c81edab8c594d9b1d06ea1dfb64292327/whisper-tiny-q4_0.gguf`
+- Executable metadata truth: top-level Candle-style GGUF sibling of `model-tiny-q80.gguf`
+  with `GGUF` magic, `general.architecture=whisper`, `whisper.n_mels=80`,
+  `whisper.n_vocab=51865`, and the same Whisper tiny encoder-decoder tensor manifest under
+  the `model.` prefix as the q80 root fixture; differs only in quantization scheme.
+- Maintained contract: same Whisper tiny encoder-decoder shape as the q80 root (mono
+  `16000` Hz, `80` mel bins, encoder context `1500`, decoder context `448`, embedding
+  width `384`, feed-forward width `1536`, `6` attention heads, `4` encoder blocks, `4`
+  decoder blocks).
+- Loader/runtime boundary note: the evidence in this section proves fixture provenance and
+  loader/model-contract validation only for the `q4_0` variant. It is not proof that EMEL
+  Whisper ASR runtime or `whisper.cpp` parity is complete.
+
+## whisper-tiny-q4_1.gguf
+- Source: `https://huggingface.co/oxide-lab/whisper-tiny-GGUF`
+- File: `whisper-tiny-q4_1.gguf`
+- Stable maintained path: `tests/models/whisper-tiny-q4_1.gguf`
+- License: MIT
+- Upstream model: `https://huggingface.co/openai/whisper-tiny`
+- Repository commit: `94468a6c81edab8c594d9b1d06ea1dfb64292327`
+- Size: `24414464` bytes (`24M`)
+- SHA256: `7d40a062a67abeb53784edd326610035089164c9c261cbcfa628e017a07e7a3a`
+- Download URL:
+  `https://huggingface.co/oxide-lab/whisper-tiny-GGUF/resolve/94468a6c81edab8c594d9b1d06ea1dfb64292327/whisper-tiny-q4_1.gguf`
+- Executable metadata truth: top-level Candle-style GGUF sibling of `model-tiny-q80.gguf`
+  with `GGUF` magic, `general.architecture=whisper`, `whisper.n_mels=80`,
+  `whisper.n_vocab=51865`, and the same Whisper tiny encoder-decoder tensor manifest under
+  the `model.` prefix as the q80 root fixture; differs only in quantization scheme.
+- Maintained contract: same Whisper tiny encoder-decoder shape as the q80 root (mono
+  `16000` Hz, `80` mel bins, encoder context `1500`, decoder context `448`, embedding
+  width `384`, feed-forward width `1536`, `6` attention heads, `4` encoder blocks, `4`
+  decoder blocks).
+- Loader/runtime boundary note: the evidence in this section proves fixture provenance and
+  loader/model-contract validation only for the `q4_1` variant. It is not proof that EMEL
+  Whisper ASR runtime or `whisper.cpp` parity is complete.
+
 ## diar_streaming_sortformer_4spk-v2.1.gguf
 - Source: `https://huggingface.co/openresearchtools/diar_streaming_sortformer_4spk-v2.1-gguf`
 - File: `diar_streaming_sortformer_4spk-v2.1.gguf`

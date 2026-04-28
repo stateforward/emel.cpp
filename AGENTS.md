@@ -118,6 +118,34 @@ ALWAYS structure machine docs and code namespaces using the pattern
 ALWAYS colocate machine definition, data, guards, actions, and events within the
 same component directory.
 NEVER place orchestration logic in data-only files.
+ALWAYS treat domains as ownership boundaries, not naming decoration.
+A domain-specific implementation MAY depend inward on shared kernel, model,
+text, speech, memory, or runtime primitives, but shared layers MUST NOT include
+or name downstream domain runtime internals.
+NEVER create top-level runtime domains for model families unless explicitly
+approved by the user. For example, Whisper speech runtime belongs under
+`src/emel/speech/encoder/whisper/**` and
+`src/emel/speech/decoder/whisper/**`, model binding belongs under
+`src/emel/model/whisper/**`, and tokenizer policy belongs under
+`src/emel/speech/tokenizer/whisper/**`; never add `src/emel/whisper/**`,
+`src/emel/speech/asr/whisper/**`, or `src/emel/kernel/whisper/**`.
+NEVER expose `emel::model::whisper` contracts from speech encoder/decoder
+events, contexts, guards, or actions. Speech encoder/decoder runtime contracts
+must be speech-owned and constructed at the variant boundary after model
+binding validation.
+NEVER put model-family runtime contracts in generic public recognizer,
+generator, event, or context headers. Keep variant contracts in variant routes,
+variant detail events, or dispatch-local construction at the variant boundary.
+ALWAYS name variant-specific routes/components with the variant or domain name
+when they directly include variant detail, tokenizer, or model contracts; a
+generic-sounding route MUST NOT hardcode a model family.
+ALWAYS add or maintain domain-leak checks when adding or moving
+domain-specific code. At minimum, check for forbidden model-family roots such as
+`rg 'emel/whisper|namespace emel::whisper|kernel/whisper|kernel::whisper' src tests CMakeLists.txt`
+and check generic public headers for variant names they should not expose.
+ALWAYS run `scripts/check_domain_boundaries.sh` for any phase that touches
+variant/model-family placement, recognizer/generator public headers, tokenizer
+policy, model-family contracts, or kernel ownership.
 ALWAYS put runtime behavior choice in `sm.hpp` transitions using guards from
 `guards.hpp`.
 NEVER put runtime behavior choice in `actions.hpp`, `detail.hpp`, or `detail.cpp`.
@@ -414,18 +442,44 @@ When an implementation is architecturally narrower than the user's stated
 goal, ALWAYS stop and get explicit approval before proceeding, even if the
 narrower implementation is faster to complete.
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 <atmux>
+# Role
+- ROLE: integration-checker
+
 # atmux Rules
 - Use plain `atmux ...` commands; do not prefix them with inherited session environment.
 
-# Delegation Rules
-- ALWAYS check `atmux list agents --all --status` first.
-- ALWAYS assign to an existing idle capable agent before creating a new one.
-- ONLY create a new agent when no idle agent matches the required capability/intelligence.
-- ALWAYS include clear task scope via `--description` and `--todos`.
-- ALWAYS use `--reply-required` for decisions/blockers.
+# Managed Agent Rules
+- ALWAYS acknowledge manager messages quickly with a short plan.
+- ALWAYS send a message to your manager when stuck or after completing any task.
+- ALWAYS message your manager with `atmux send --to agent-0 "..."`.
+- ALWAYS coordinate with peer agents using `atmux send --to <agent> "..."`.
+- ALWAYS check `atmux list agents --all --status` before creating new agents.
+- ALWAYS reuse idle capable agents before creating new ones.
+- ALWAYS spawn agents to decompose your todos if necessary.
+- ALWAYS use `--reply-required` when a manager decision is needed.
 - NEVER poll agent panes unless absolutely necessary.
-- NEVER do tasks yourself unless explicitly instructed.
+- NEVER silently change scope; ask your manager first.
+- NEVER report task completion without validation evidence.
+- NEVER leave blockers unreported; escalate immediately.
 
 # atmux help
 ## create
@@ -433,9 +487,10 @@ Usage:
   atmux create --agent <name> --role <role> --intelligence <0-100> [--team <team>] [--adapter <adapter>] [--no-worktree] [--task --description <desc> --todo <todo>...] [-- <adapter-args...>]
   atmux create --team <name>
   atmux create --issue --title <title> [--description <description>] [--todo <todo>...] [--repo <repo>]
+  atmux create --pr --title <title> [--description <description>] [--source <branch>] [--target <branch>] [--todo <todo>...] [--repo <repo>]
 
 Description:
-  Unified create entrypoint for agents, teams, and issues.
+  Unified create entrypoint for agents, teams, issues, and pull requests.
   For agents, --team defaults to ATMUX_TEAM when set (for example after `atmux create --team <name>` in a tmux session).
 
 ## list
@@ -444,6 +499,7 @@ Usage:
   atmux list sessions
   atmux list agents [--all] [--status]
   atmux list issues [--repo <repo>]
+  atmux list prs [--repo <repo>]
   atmux list messages [--unread]
 
 Description:
@@ -487,11 +543,13 @@ Description:
 
   Notification mode:
     - Always targets the current agent/session.
+    - Use this for self reminders, ticks, and status checks.
 
   Command mode:
     - Runs the provided command in the current environment.
-    - If you want to schedule a message, schedule the command directly:
+    - Only schedule `atmux send` when the target is another agent or team:
       `atmux schedule --once 10m -- atmux send --to worker "status check"`
+    - Never schedule `atmux send --to <self>`; use `--notification` instead.
 
   --no-detach  Run in the foreground (blocking). By default, the scheduled
                task runs in a detached tmux window and the command returns
@@ -508,6 +566,7 @@ Durations:
 
 Examples:
   atmux schedule --interval 30m --notification "check on long-running jobs"
+  atmux schedule --once 45s --notification "tick"
   atmux schedule --once 45s -- atmux send --to atmux-myrepo-worker "follow up"
 
 ## assign
@@ -523,9 +582,10 @@ Description:
 ## comment
 Usage:
   atmux comment "message" --issue <id> [--repo <repo>]
+  atmux comment "message" --pr <id> [--repo <repo>]
 
 Description:
-  Add a comment to a filesystem issue.
+  Add a comment to a filesystem issue or pull request.
   Notifies watchers, assignee, and assigner.
 
 ## capture
@@ -547,6 +607,7 @@ Examples:
 ## kill
 Usage:
   atmux kill --pid <pid> [--timeout <seconds>] [--signal <NAME>]
+  atmux kill --watcher <id> [--timeout <seconds>]
   atmux kill --agent <name|pattern> [name|pattern...]
   atmux kill --all [--yes]
 
@@ -554,6 +615,8 @@ Description:
   --pid    Stop an atmux exec-tracked child process for this repo, wait for
            executor notifications (including watcher fan-out) to finish, then
            remove metadata under ~/.atmux/exec/<repo>/<pid>/.
+  --watcher  Remove a watcher registration by id. Supports watcher ids emitted
+             by `atmux watch --pr` and `atmux watch --issues`.
   --agent  Kill agent sessions and clean up their worktrees and branches.
            Accepts agent names, session names, or glob patterns.
   --all    Kill every atmux session, worktree, and branch for this repo.
@@ -563,6 +626,8 @@ Description:
 Examples:
   atmux kill --pid 12345
   atmux kill --pid 12345 --timeout 30 --signal TERM
+  atmux kill --watcher pr:owner_repo_pr_123:atmux-myrepo-worker-_12
+  atmux kill --watcher issues:owner_repo_issues:atmux-myrepo-worker-_12
   atmux kill --agent worker
   atmux kill --agent 'agent-*'
   atmux kill --agent worker planner
@@ -592,7 +657,11 @@ Usage:
   atmux watch --target <tmux-target> --text <needle> [--scope pane|window|session] [--timeout <seconds>] [--interval <seconds>] [--lines <n>]
   atmux watch --pid <pid> [--timeout <seconds>] [--interval <seconds>]
   atmux watch --pid <pid> --stdio [--duration <seconds>] [--timeout <seconds>] [--interval <seconds>] [--lines <n>]
+  atmux watch --path <glob> [--timeout <seconds>] [--interval <seconds>]
   atmux watch --issue <id> [--repo <repo>] [--timeout <seconds>] [--interval <seconds>]
+  atmux watch --issues <repo|url> [--timeout <seconds>] [--interval <seconds>]
+  atmux watch --pr <id|atmux-uri|github-url> [--repo <repo>] [--timeout <seconds>] [--interval <seconds>]
+  atmux watch --pull-request <id> [--repo <repo>] [--timeout <seconds>] [--interval <seconds>]
   atmux watch --agent <name|session> [--idle <seconds>] [--timeout <seconds>] [--interval <seconds>] [--lines <n>]
 
 Description:
@@ -602,12 +671,21 @@ Description:
   Stdio mode: monitor a detached exec process pane for output changes. Sends
   a notification each time new output is detected. Exits when --duration
   expires, --timeout (no new output) expires, or the process exits.
+  Path mode: watch filesystem paths matching a glob and exit when the matched
+  set or file metadata changes.
   Issue mode: wait for the next filesystem issue update and receive the same
   notification XML as issue assign/claim fan-out.
+  Issues mode: keep watching a GitHub repository for newly created issues and
+  queue notifications to the current pane until the watcher is stopped.
+  PR mode: with a GitHub URL, keep watching a remote pull request discussion;
+  otherwise wait for the next filesystem pull request update. --pull-request is
+  kept as a compatibility alias for local filesystem pull requests.
   Agent mode: wait until an agent's pane output has been stable for --idle
   seconds (default 30). Exits 0 when idle, 124 on timeout.
 
-  Implementations: bin/(atmux)/[watch]/text, [watch]/pid, [watch]/stdio, [watch]/issue, [watch]/agent.
+  Implementations: bin/(atmux)/[watch]/text, [watch]/pid, [watch]/stdio,
+  [watch]/path, [watch]/issue, [watch]/issues, [watch]/pull-request,
+  [watch]/pr, [watch]/agent.
 
 ## env
 Usage:

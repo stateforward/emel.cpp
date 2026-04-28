@@ -115,10 +115,8 @@ configure_bench_build() {
 
   cmake_args=(-S "$TOOLS_DIR" -B "$build_dir" -G Ninja -DCMAKE_BUILD_TYPE=Release
               -DEMEL_ENABLE_TESTS=OFF
-              -DREF_IMPL_REF="$ref_value")
-  if [[ -n "$SUITE_FILTER" ]]; then
-    cmake_args+=("-DEMEL_BENCH_SUITE_FILTER=$SUITE_FILTER")
-  fi
+              -DREF_IMPL_REF="$ref_value"
+              -DEMEL_BENCH_SUITE_FILTER="$SUITE_FILTER")
   cmake_args+=("-DCMAKE_C_COMPILER=$bench_cc")
   cmake_args+=("-DCMAKE_CXX_COMPILER=$bench_cxx")
   cmake_args+=("-DCMAKE_ASM_COMPILER=$bench_cc")
@@ -409,10 +407,8 @@ if $SNAPSHOT; then
 
   cmake_args=(-S "$TOOLS_DIR" -B "$build_dir" -G Ninja -DCMAKE_BUILD_TYPE=Release
               -DEMEL_ENABLE_TESTS=OFF
-              -DREF_IMPL_REF="$ref_value")
-  if [[ -n "$SUITE_FILTER" ]]; then
-    cmake_args+=("-DEMEL_BENCH_SUITE_FILTER=$SUITE_FILTER")
-  fi
+              -DREF_IMPL_REF="$ref_value"
+              -DEMEL_BENCH_SUITE_FILTER="$SUITE_FILTER")
   cmake_args+=("-DCMAKE_C_COMPILER=$bench_cc")
   cmake_args+=("-DCMAKE_CXX_COMPILER=$bench_cxx")
   cmake_args+=("-DCMAKE_ASM_COMPILER=$bench_cc")
@@ -578,10 +574,8 @@ if $COMPARE; then
 
   cmake_args=(-S "$TOOLS_DIR" -B "$compare_build_dir" -G Ninja -DCMAKE_BUILD_TYPE=Release
               -DEMEL_ENABLE_TESTS=OFF
-              -DREF_IMPL_REF="$ref_value")
-  if [[ -n "$SUITE_FILTER" ]]; then
-    cmake_args+=("-DEMEL_BENCH_SUITE_FILTER=$SUITE_FILTER")
-  fi
+              -DREF_IMPL_REF="$ref_value"
+              -DEMEL_BENCH_SUITE_FILTER="$SUITE_FILTER")
   cmake_args+=("-DCMAKE_C_COMPILER=$bench_cc")
   cmake_args+=("-DCMAKE_CXX_COMPILER=$bench_cxx")
   cmake_args+=("-DCMAKE_ASM_COMPILER=$bench_cc")
