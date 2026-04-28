@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import json
 import struct
 from dataclasses import dataclass
 from pathlib import Path
@@ -275,20 +276,23 @@ def parse_args() -> argparse.Namespace:
   return parser.parse_args()
 
 
+def write_manifest(path: Path, source: Path, output: Path) -> None:
+  payload = {
+      "source_model": str(source),
+      "source_sha256": sha256_file(source),
+      "normalized_model": str(output),
+      "normalized_sha256": sha256_file(output),
+      "normalizer": "tools/bench/whisper_normalize_model.py",
+  }
+  path.parent.mkdir(parents=True, exist_ok=True)
+  path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+
+
 def main() -> int:
   args = parse_args()
   hparams, tensors = read_source(args.source)
   write_gguf(args.output, hparams, tensors)
-  args.manifest.parent.mkdir(parents=True, exist_ok=True)
-  args.manifest.write_text(
-      "{\n"
-      f"  \"source_model\": \"{args.source}\",\n"
-      f"  \"source_sha256\": \"{sha256_file(args.source)}\",\n"
-      f"  \"normalized_model\": \"{args.output}\",\n"
-      f"  \"normalized_sha256\": \"{sha256_file(args.output)}\",\n"
-      "  \"normalizer\": \"tools/bench/whisper_normalize_model.py\"\n"
-      "}\n",
-      encoding="utf-8")
+  write_manifest(args.manifest, args.source, args.output)
   return 0
 
 

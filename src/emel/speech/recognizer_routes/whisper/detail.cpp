@@ -34,4 +34,8 @@ required_decoder_workspace_floats(const uint64_t sample_count) noexcept {
 
 int32_t logits_size() noexcept { return whisper_decoder::vocab_size(); }
 
+int32_t max_generated_token_count() noexcept {
+  return whisper_decoder::max_generated_token_count();
+}
+
 } // namespace emel::speech::recognizer_routes::whisper

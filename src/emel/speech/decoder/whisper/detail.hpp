@@ -30,9 +30,11 @@ inline constexpr int32_t k_decoder_block_count = 4;
 inline constexpr int32_t k_vocab_size = 51865;
 inline constexpr int32_t k_max_encoder_frame_count = 1500;
 inline constexpr int32_t k_decoder_prompt_token_count = 4;
-inline constexpr int32_t k_max_generated_token_count = 32;
+inline constexpr int32_t k_decoder_context_token_count = 448;
 inline constexpr int32_t k_decoder_sequence_token_count =
-    k_decoder_prompt_token_count + k_max_generated_token_count;
+    k_decoder_context_token_count;
+inline constexpr int32_t k_max_generated_token_count =
+    k_decoder_sequence_token_count - k_decoder_prompt_token_count;
 inline constexpr int32_t k_token_eot = 50257;
 inline constexpr int32_t k_token_sot = 50258;
 inline constexpr int32_t k_token_translate = 50358;

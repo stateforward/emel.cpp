@@ -414,6 +414,54 @@ TEST_CASE("whisper normalizer rejects negative reader sizes") {
 #endif
 }
 
+TEST_CASE("whisper normalizer emits manifest through JSON encoder") {
+#if defined(_WIN32)
+  MESSAGE("skipping Python-backed Whisper normalizer test on Windows");
+#else
+  const auto tmp_dir = std::filesystem::temp_directory_path() /
+                       "emel-whisper-benchmark-tests" /
+                       "normalizer-manifest-json";
+  std::error_code ec = {};
+  std::filesystem::remove_all(tmp_dir, ec);
+  std::filesystem::create_directories(tmp_dir);
+  const auto script_path = tmp_dir / "manifest_json_test.py";
+  const auto stdout_path = tmp_dir / "stdout.txt";
+  const auto stderr_path = tmp_dir / "stderr.txt";
+  write_text_file(script_path,
+                  "import importlib.util\n"
+                  "import json\n"
+                  "import sys\n"
+                  "from pathlib import Path\n"
+                  "\n"
+                  "spec = importlib.util.spec_from_file_location(\n"
+                  "    'whisper_normalize_model', sys.argv[1])\n"
+                  "module = importlib.util.module_from_spec(spec)\n"
+                  "sys.modules[spec.name] = module\n"
+                  "spec.loader.exec_module(module)\n"
+                  "tmp = Path(sys.argv[2])\n"
+                  "source = tmp / 'source \"quoted\" \\\\ model.bin'\n"
+                  "output = tmp / 'normalized \"quoted\" \\\\ model.gguf'\n"
+                  "manifest = tmp / 'manifest.json'\n"
+                  "source.write_bytes(b'source')\n"
+                  "output.write_bytes(b'output')\n"
+                  "module.write_manifest(manifest, source, output)\n"
+                  "payload = json.loads(manifest.read_text(encoding='utf-8'))\n"
+                  "assert payload['source_model'] == str(source)\n"
+                  "assert payload['normalized_model'] == str(output)\n");
+
+  const std::string command =
+      "python3 " + quote_arg_posix(script_path.string()) + " " +
+      quote_arg_posix(whisper_normalize_model_script_path().string()) + " " +
+      quote_arg_posix(tmp_dir.string()) + " > " +
+      quote_arg_posix(stdout_path.string()) + " 2> " +
+      quote_arg_posix(stderr_path.string());
+  const auto capture = run_command_capture(command, stdout_path, stderr_path);
+  CHECK(capture.exit_code == 0);
+  CHECK(capture.stdout_text.empty());
+  CHECK(capture.stderr_text.empty());
+#endif
+}
+
 TEST_CASE("whisper single-thread wrapper defaults to stable closeout sample") {
   const std::string source = read_file(whisper_single_thread_script_path());
   REQUIRE(!source.empty());

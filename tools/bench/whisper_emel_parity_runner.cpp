@@ -455,7 +455,8 @@ int main(int argc, char **argv) {
   std::vector<float> decoder_workspace(static_cast<size_t>(
       whisper_route::required_decoder_workspace_floats(pcm.size())));
   std::vector<float> logits(static_cast<size_t>(whisper_route::logits_size()));
-  std::array<int32_t, 32> generated_tokens = {};
+  std::vector<int32_t> generated_tokens(
+      static_cast<size_t>(whisper_route::max_generated_token_count()));
   std::vector<char> transcript(whisper_tokenizer::required_transcript_capacity(
       tokenizer_json, generated_tokens.size()));
   int32_t transcript_size = 0;

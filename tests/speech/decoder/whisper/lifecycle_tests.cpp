@@ -20,10 +20,12 @@
 #include "emel/speech/encoder/whisper/detail.hpp"
 #include "emel/model/detail.hpp"
 #include "emel/model/loader/errors.hpp"
+#include "emel/speech/decoder/whisper/any.hpp"
 #include "emel/model/whisper/detail.hpp"
 #include "emel/speech/decoder/whisper/detail.hpp"
 #include "emel/speech/decoder/whisper/sm.hpp"
 #include "emel/speech/encoder/whisper/sm.hpp"
+#include "emel/speech/recognizer_routes/whisper/any.hpp"
 #include "emel/speech/tokenizer/whisper/any.hpp"
 
 namespace {
@@ -253,6 +255,202 @@ encoded_fixture encode_fixture_audio(const loaded_whisper_fixture & loaded) {
   return encoded;
 }
 
+struct zero_q4_decoder_fixture {
+  std::unique_ptr<emel::model::data> model = {};
+  std::vector<emel::kernel::detail::quant::block_q4_0> q4_blocks = {};
+  std::vector<emel::kernel::detail::quant::block_q8_0> q8_blocks = {};
+};
+
+void add_test_tensor(emel::model::data &model, const std::string_view name,
+                     const int32_t type, const int32_t n_dims,
+                     const std::array<int64_t, 4> dims, const void *data,
+                     const uint64_t data_size) {
+  REQUIRE(model.n_tensors < model.tensors.size());
+  REQUIRE(static_cast<size_t>(model.name_bytes_used) + name.size() <=
+          model.name_storage.size());
+  auto &tensor = model.tensors[model.n_tensors++];
+  tensor.name_offset = model.name_bytes_used;
+  tensor.name_length = static_cast<uint32_t>(name.size());
+  std::memcpy(model.name_storage.data() + model.name_bytes_used, name.data(),
+              name.size());
+  model.name_bytes_used += static_cast<uint32_t>(name.size());
+  tensor.type = type;
+  tensor.n_dims = n_dims;
+  tensor.dims = dims;
+  tensor.data = data;
+  tensor.data_size = data_size;
+}
+
+zero_q4_decoder_fixture make_zero_q4_decoder_fixture() {
+  namespace quant = emel::kernel::detail::quant;
+  namespace whisper = emel::speech::decoder::whisper::detail;
+
+  zero_q4_decoder_fixture fixture{};
+  fixture.model = std::make_unique<emel::model::data>();
+  fixture.q4_blocks.resize(static_cast<size_t>(
+      static_cast<uint64_t>(whisper::k_vocab_size) *
+      (static_cast<uint64_t>(whisper::k_embedding_length) / quant::QK4_0)));
+  fixture.q8_blocks.resize(static_cast<size_t>(
+      static_cast<uint64_t>(whisper::k_decoder_sequence_token_count) *
+      (static_cast<uint64_t>(whisper::k_embedding_length) / quant::QK8_0)));
+  for (auto &block : fixture.q4_blocks) {
+    block.d = quant::fp32_to_fp16(0.0f);
+    block.qs.fill(0x88u);
+  }
+  for (auto &block : fixture.q8_blocks) {
+    block.d = quant::fp32_to_fp16(0.0f);
+    block.qs.fill(0);
+  }
+
+  auto add_q4_weight = [&](const std::string &name, const int64_t in,
+                           const int64_t out) {
+    add_test_tensor(*fixture.model, name,
+                    static_cast<int32_t>(emel::kernel::detail::dtype_q4_0), 2,
+                    {in, out, 0, 0}, fixture.q4_blocks.data(),
+                    fixture.q4_blocks.size() * sizeof(quant::block_q4_0));
+  };
+  auto add_q8_aux = [&](const std::string &name, const int32_t n_dims,
+                        const std::array<int64_t, 4> dims) {
+    add_test_tensor(*fixture.model, name,
+                    static_cast<int32_t>(emel::kernel::detail::dtype_q8_0),
+                    n_dims, dims, fixture.q8_blocks.data(),
+                    fixture.q8_blocks.size() * sizeof(quant::block_q8_0));
+  };
+
+  add_q4_weight("model.decoder.embed_tokens.weight",
+                whisper::k_embedding_length, whisper::k_vocab_size);
+  add_q8_aux("model.decoder.embed_positions.weight", 2,
+             {whisper::k_embedding_length, whisper::k_decoder_sequence_token_count,
+              0, 0});
+  add_q8_aux("model.decoder.layer_norm.weight", 1,
+             {whisper::k_embedding_length, 0, 0, 0});
+  add_q8_aux("model.decoder.layer_norm.bias", 1,
+             {whisper::k_embedding_length, 0, 0, 0});
+
+  for (int32_t layer = 0; layer < whisper::k_decoder_block_count; ++layer) {
+    const std::string prefix =
+        "model.decoder.layers." + std::to_string(layer) + ".";
+    add_q8_aux(prefix + "self_attn_layer_norm.weight", 1,
+               {whisper::k_embedding_length, 0, 0, 0});
+    add_q8_aux(prefix + "self_attn_layer_norm.bias", 1,
+               {whisper::k_embedding_length, 0, 0, 0});
+    add_q4_weight(prefix + "self_attn.q_proj.weight",
+                  whisper::k_embedding_length, whisper::k_embedding_length);
+    add_q8_aux(prefix + "self_attn.q_proj.bias", 1,
+               {whisper::k_embedding_length, 0, 0, 0});
+    add_q4_weight(prefix + "self_attn.k_proj.weight",
+                  whisper::k_embedding_length, whisper::k_embedding_length);
+    add_q4_weight(prefix + "self_attn.v_proj.weight",
+                  whisper::k_embedding_length, whisper::k_embedding_length);
+    add_q8_aux(prefix + "self_attn.v_proj.bias", 1,
+               {whisper::k_embedding_length, 0, 0, 0});
+    add_q4_weight(prefix + "self_attn.out_proj.weight",
+                  whisper::k_embedding_length, whisper::k_embedding_length);
+    add_q8_aux(prefix + "self_attn.out_proj.bias", 1,
+               {whisper::k_embedding_length, 0, 0, 0});
+    add_q8_aux(prefix + "encoder_attn_layer_norm.weight", 1,
+               {whisper::k_embedding_length, 0, 0, 0});
+    add_q8_aux(prefix + "encoder_attn_layer_norm.bias", 1,
+               {whisper::k_embedding_length, 0, 0, 0});
+    add_q4_weight(prefix + "encoder_attn.q_proj.weight",
+                  whisper::k_embedding_length, whisper::k_embedding_length);
+    add_q8_aux(prefix + "encoder_attn.q_proj.bias", 1,
+               {whisper::k_embedding_length, 0, 0, 0});
+    add_q4_weight(prefix + "encoder_attn.out_proj.weight",
+                  whisper::k_embedding_length, whisper::k_embedding_length);
+    add_q8_aux(prefix + "encoder_attn.out_proj.bias", 1,
+               {whisper::k_embedding_length, 0, 0, 0});
+    add_q8_aux(prefix + "final_layer_norm.weight", 1,
+               {whisper::k_embedding_length, 0, 0, 0});
+    add_q8_aux(prefix + "final_layer_norm.bias", 1,
+               {whisper::k_embedding_length, 0, 0, 0});
+    add_q4_weight(prefix + "fc1.weight", whisper::k_embedding_length,
+                  whisper::k_feed_forward_length);
+    add_q8_aux(prefix + "fc1.bias", 1,
+               {whisper::k_feed_forward_length, 0, 0, 0});
+    add_q4_weight(prefix + "fc2.weight", whisper::k_feed_forward_length,
+                  whisper::k_embedding_length);
+    add_q8_aux(prefix + "fc2.bias", 1,
+               {whisper::k_embedding_length, 0, 0, 0});
+  }
+
+  return fixture;
+}
+
+template <uint64_t In, uint64_t Out>
+void exercise_q4_decoder_linear_shape() {
+  namespace quant = emel::kernel::detail::quant;
+  namespace whisper = emel::speech::decoder::whisper::detail;
+
+  constexpr uint64_t q4_block_count = In / quant::QK4_0;
+  std::vector<quant::block_q4_0> q4_0_blocks(
+      static_cast<size_t>(Out * q4_block_count));
+  std::vector<quant::block_q4_1> q4_1_blocks(
+      static_cast<size_t>(Out * q4_block_count));
+  for (auto &block : q4_0_blocks) {
+    block.d = quant::fp32_to_fp16(0.0f);
+    block.qs.fill(0x88u);
+  }
+  for (auto &block : q4_1_blocks) {
+    block.d = quant::fp32_to_fp16(0.0f);
+    block.m = quant::fp32_to_fp16(0.0f);
+    block.qs.fill(0x00u);
+  }
+
+  emel::model::data::tensor_record q4_0_tensor{};
+  q4_0_tensor.type = static_cast<int32_t>(emel::kernel::detail::dtype_q4_0);
+  q4_0_tensor.n_dims = 2;
+  q4_0_tensor.dims = {
+      static_cast<int64_t>(In), static_cast<int64_t>(Out), 0, 0};
+  q4_0_tensor.data = q4_0_blocks.data();
+  q4_0_tensor.data_size = q4_0_blocks.size() * sizeof(quant::block_q4_0);
+
+  emel::model::data::tensor_record q4_1_tensor{};
+  q4_1_tensor.type = static_cast<int32_t>(emel::kernel::detail::dtype_q4_1);
+  q4_1_tensor.n_dims = 2;
+  q4_1_tensor.dims = {
+      static_cast<int64_t>(In), static_cast<int64_t>(Out), 0, 0};
+  q4_1_tensor.data = q4_1_blocks.data();
+  q4_1_tensor.data_size = q4_1_blocks.size() * sizeof(quant::block_q4_1);
+
+  constexpr uint64_t q8_bias_block_count = Out / quant::QK8_0;
+  std::vector<quant::block_q8_0> bias_blocks(
+      static_cast<size_t>(q8_bias_block_count));
+  for (auto &block : bias_blocks) {
+    block.d = quant::fp32_to_fp16(0.0f);
+    block.qs.fill(0);
+  }
+  emel::model::data::tensor_record bias_tensor{};
+  bias_tensor.type = static_cast<int32_t>(emel::kernel::detail::dtype_q8_0);
+  bias_tensor.n_dims = 1;
+  bias_tensor.dims = {static_cast<int64_t>(Out), 0, 0, 0};
+  bias_tensor.data = bias_blocks.data();
+  bias_tensor.data_size = bias_blocks.size() * sizeof(quant::block_q8_0);
+
+  std::vector<float> input(static_cast<size_t>(In), 1.0f);
+  std::vector<float> output(static_cast<size_t>(Out), -1.0f);
+  whisper::linear<whisper::linear_weight_variant::q4_0, In, Out>(
+      q4_0_tensor, bias_tensor, input.data(), output.data());
+  CHECK(output[0] == doctest::Approx(0.0f));
+
+  std::fill(output.begin(), output.end(), -1.0f);
+  whisper::linear<whisper::linear_weight_variant::q4_1, In, Out>(
+      q4_1_tensor, bias_tensor, input.data(), output.data());
+  CHECK(output[0] == doctest::Approx(0.0f));
+
+  if constexpr (In == 384u && Out == 384u) {
+    std::fill(output.begin(), output.end(), -1.0f);
+    whisper::linear_no_bias<whisper::linear_weight_variant::q4_0, In, Out>(
+        q4_0_tensor, input.data(), output.data());
+    CHECK(output[0] == doctest::Approx(0.0f));
+
+    std::fill(output.begin(), output.end(), -1.0f);
+    whisper::linear_no_bias<whisper::linear_weight_variant::q4_1, In, Out>(
+        q4_1_tensor, input.data(), output.data());
+    CHECK(output[0] == doctest::Approx(0.0f));
+  }
+}
+
 }  // namespace
 
 TEST_CASE("whisper_decoder_runtime_owns_decode_detail_dependencies") {
@@ -320,6 +518,158 @@ TEST_CASE("whisper_decoder_detail_timestamp_policy_suppresses_control_tokens") {
       policy, control_logits.data(), nullptr, 0u, false, control_confidence);
   CHECK(control_token == 77);
   CHECK(control_confidence == doctest::Approx(20.0f));
+}
+
+TEST_CASE("whisper_decoder_generation_budget_matches_text_context") {
+  namespace whisper = emel::speech::decoder::whisper::detail;
+
+  CHECK(whisper::k_decoder_sequence_token_count == 448);
+  CHECK(whisper::k_max_generated_token_count ==
+        whisper::k_decoder_sequence_token_count -
+            whisper::k_decoder_prompt_token_count);
+}
+
+TEST_CASE("whisper_decoder_public_generation_budget_hooks_match_detail") {
+  namespace route = emel::speech::recognizer_routes::whisper;
+  namespace whisper = emel::speech::decoder::whisper::detail;
+
+  CHECK(decoder::max_generated_token_count() ==
+        whisper::k_max_generated_token_count);
+  CHECK(route::max_generated_token_count() ==
+        whisper::k_max_generated_token_count);
+}
+
+TEST_CASE("whisper_decoder_detail_reads_f32_aux_and_q4_linear_rows") {
+  namespace quant = emel::kernel::detail::quant;
+  namespace whisper = emel::speech::decoder::whisper::detail;
+
+  auto model = std::make_unique<emel::model::data>();
+  CHECK(whisper::find_tensor(*model, "missing.tensor") == nullptr);
+  CHECK(whisper::required_decoder_workspace_floats(1024u) >
+        whisper::required_decoder_workspace_floats(1u));
+
+  emel::model::data::tensor_record invalid_shape{};
+  CHECK_FALSE(whisper::tensor_has_shape(invalid_shape, 1, {2, 0, 0, 0}));
+
+  const std::array<float, 2> aux_values{1.25f, -2.5f};
+  emel::model::data::tensor_record aux_tensor{};
+  aux_tensor.type = static_cast<int32_t>(emel::kernel::detail::dtype_f32);
+  aux_tensor.n_dims = 1;
+  aux_tensor.dims = {2, 1, 1, 1};
+  aux_tensor.data = aux_values.data();
+  aux_tensor.data_size = sizeof(float) * aux_values.size();
+  CHECK(whisper::read_aux_vector<whisper::aux_weight_variant::f32>(
+            aux_tensor, 0u) == doctest::Approx(1.25f));
+  CHECK(whisper::read_aux_matrix<whisper::aux_weight_variant::f32>(
+            aux_tensor, 1u) == doctest::Approx(-2.5f));
+
+  std::array<quant::block_q4_0, 1> q4_0_blocks{};
+  q4_0_blocks[0].d = quant::fp32_to_fp16(0.5f);
+  q4_0_blocks[0].qs.fill(0x98u);
+  emel::model::data::tensor_record q4_0_tensor{};
+  q4_0_tensor.type = static_cast<int32_t>(emel::kernel::detail::dtype_q4_0);
+  q4_0_tensor.n_dims = 2;
+  q4_0_tensor.dims = {static_cast<int64_t>(quant::QK4_0), 1, 1, 1};
+  q4_0_tensor.data = q4_0_blocks.data();
+  q4_0_tensor.data_size = sizeof(q4_0_blocks);
+
+  std::array<quant::block_q4_1, 1> q4_1_blocks{};
+  q4_1_blocks[0].d = quant::fp32_to_fp16(0.25f);
+  q4_1_blocks[0].m = quant::fp32_to_fp16(1.5f);
+  q4_1_blocks[0].qs.fill(0x42u);
+  emel::model::data::tensor_record q4_1_tensor{};
+  q4_1_tensor.type = static_cast<int32_t>(emel::kernel::detail::dtype_q4_1);
+  q4_1_tensor.n_dims = 2;
+  q4_1_tensor.dims = {static_cast<int64_t>(quant::QK4_1), 1, 1, 1};
+  q4_1_tensor.data = q4_1_blocks.data();
+  q4_1_tensor.data_size = sizeof(q4_1_blocks);
+
+  std::array<float, static_cast<size_t>(quant::QK4_0)> input{};
+  input.fill(1.0f);
+  std::array<float, 1> output{};
+
+  CHECK(whisper::read_matrix_q4_0_value(q4_0_tensor, 0u, 0u) ==
+        doctest::Approx(0.0f));
+  CHECK(whisper::read_matrix_q4_0_value(q4_0_tensor, 0u, 16u) ==
+        doctest::Approx(0.5f));
+  CHECK(whisper::dot_linear_row<whisper::linear_weight_variant::q4_0>(
+            q4_0_tensor, 0u, input.data(), input.size()) ==
+        doctest::Approx(8.0f));
+  whisper::linear_no_bias<whisper::linear_weight_variant::q4_0,
+                          quant::QK4_0, 1u>(
+      q4_0_tensor, input.data(), output.data());
+  CHECK(output[0] == doctest::Approx(8.0f));
+
+  CHECK(whisper::read_matrix_q4_1_value(q4_1_tensor, 0u, 0u) ==
+        doctest::Approx(2.0f));
+  CHECK(whisper::read_matrix_q4_1_value(q4_1_tensor, 0u, 16u) ==
+        doctest::Approx(2.5f));
+  CHECK(whisper::dot_linear_row<whisper::linear_weight_variant::q4_1>(
+            q4_1_tensor, 0u, input.data(), input.size()) ==
+        doctest::Approx(72.0f));
+  whisper::linear<whisper::linear_weight_variant::q4_1, quant::QK4_1, 1u,
+                  whisper::aux_weight_variant::f32>(
+      q4_1_tensor, aux_tensor, input.data(), output.data());
+  CHECK(output[0] == doctest::Approx(73.25f));
+
+  std::array<float, static_cast<size_t>(whisper::k_embedding_length)> norm_in{};
+  std::array<float, static_cast<size_t>(whisper::k_embedding_length)> norm_w{};
+  std::array<float, static_cast<size_t>(whisper::k_embedding_length)> norm_b{};
+  std::array<float, static_cast<size_t>(whisper::k_embedding_length)> norm_out{};
+  for (size_t index = 0; index < norm_in.size(); ++index) {
+    norm_in[index] = static_cast<float>(index % 7u);
+    norm_w[index] = 1.0f;
+  }
+  emel::model::data::tensor_record norm_w_tensor{};
+  norm_w_tensor.type = static_cast<int32_t>(emel::kernel::detail::dtype_f32);
+  norm_w_tensor.n_dims = 1;
+  norm_w_tensor.dims = {whisper::k_embedding_length, 0, 0, 0};
+  norm_w_tensor.data = norm_w.data();
+  norm_w_tensor.data_size = sizeof(float) * norm_w.size();
+  emel::model::data::tensor_record norm_b_tensor = norm_w_tensor;
+  norm_b_tensor.data = norm_b.data();
+  whisper::layer_norm_frame<whisper::aux_weight_variant::f32>(
+      norm_in.data(), norm_w_tensor, norm_b_tensor, norm_out.data());
+  CHECK(std::isfinite(norm_out[0]));
+
+  std::array<float, 3> softmax_values{3.0f, 2.0f, 1.0f};
+  whisper::softmax(softmax_values.data(), softmax_values.size());
+  CHECK(softmax_values[0] > softmax_values[1]);
+}
+
+TEST_CASE("whisper_decoder_detail_exercises_compiled_q4_linear_shapes") {
+  exercise_q4_decoder_linear_shape<384u, 384u>();
+  exercise_q4_decoder_linear_shape<384u, 1536u>();
+  exercise_q4_decoder_linear_shape<1536u, 384u>();
+}
+
+TEST_CASE("whisper_decoder_detail_exercises_q4_logits_path") {
+  namespace whisper = emel::speech::decoder::whisper::detail;
+
+  auto fixture = make_zero_q4_decoder_fixture();
+  constexpr uint64_t encoder_frames = 1u;
+  std::array<float, static_cast<size_t>(whisper::k_decoder_block_count *
+                                        whisper::k_embedding_length)>
+      cross_k = {};
+  std::array<float, static_cast<size_t>(whisper::k_decoder_block_count *
+                                        whisper::k_embedding_length)>
+      cross_v = {};
+  const std::array<int32_t, 1> tokens{0};
+  std::vector<float> workspace(static_cast<size_t>(
+      whisper::required_decoder_workspace_floats(encoder_frames)));
+  std::vector<float> logits(static_cast<size_t>(whisper::k_vocab_size), -1.0f);
+  float confidence = -1.0f;
+  uint64_t digest = 0u;
+
+  whisper::compute_decoder_logits_for_tokens<
+      whisper::linear_weight_variant::q4_0>(
+      *fixture.model, encoder_frames, cross_k.data(), cross_v.data(),
+      tokens.data(), tokens.size(), workspace.data(), logits.data(),
+      confidence, digest);
+
+  CHECK(confidence == doctest::Approx(0.0f));
+  CHECK(logits[0] == doctest::Approx(0.0f));
+  CHECK(digest != 0u);
 }
 
 TEST_CASE("whisper_decoder_rejects_invalid_runtime_capacity") {
@@ -596,6 +946,35 @@ TEST_CASE("whisper_decoder_runs_first_q8_token_from_public_event") {
   CHECK(generated_token_count_again == generated_token_count);
   CHECK(generated_tokens_again[0] == generated_tokens[0]);
   CHECK(digest_again == digest);
+
+  std::fill(workspace.begin(), workspace.end(), 0.0f);
+  std::fill(logits.begin(), logits.end(), 0.0f);
+  std::vector<int32_t> stop_generated_tokens(
+      static_cast<size_t>(decoder::max_generated_token_count()) + 16u);
+  uint64_t stop_generated_token_count = 0u;
+  int32_t stop_token = 0;
+  float stop_confidence = 0.0f;
+  decoder::detail::decode_policy_runtime stop_policy{};
+  stop_policy.eot = -1;
+  stop_policy.sot = -2;
+  stop_policy.translate = -3;
+  stop_policy.transcribe = -4;
+  stop_policy.no_speech = -5;
+  stop_policy.notimestamps = -6;
+  stop_policy.timestamp_begin = 0;
+  stop_policy.space = -7;
+  const uint64_t stop_digest =
+      decoder::detail::run_decoder_sequence<
+          decoder::detail::linear_weight_variant::q8_0>(
+          *loaded.decoder_contract.model, encoded.encoder_state.data(),
+          static_cast<uint64_t>(encoded.frames), stop_policy,
+          policy.prompt_tokens.data(), policy.prompt_tokens.size(),
+          workspace.data(), logits.data(), stop_generated_tokens.data(),
+          stop_generated_tokens.size(), stop_generated_token_count, stop_token,
+          stop_confidence);
+  CHECK(stop_generated_token_count == 2u);
+  CHECK(stop_generated_tokens[1] >= stop_policy.timestamp_begin);
+  CHECK(stop_digest != 0u);
 }
 
 TEST_CASE("whisper_decoder_routes_q8_linear_f32_aux_variant") {

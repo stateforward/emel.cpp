@@ -23,4 +23,8 @@ inline int32_t vocab_size() noexcept {
   return detail::k_vocab_size;
 }
 
+inline int32_t max_generated_token_count() noexcept {
+  return detail::k_max_generated_token_count;
+}
+
 } // namespace emel::speech::decoder::whisper
