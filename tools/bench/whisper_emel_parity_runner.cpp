@@ -488,9 +488,12 @@ int main(int argc, char **argv) {
 
   const auto publish_start = steady_clock::now();
   std::filesystem::create_directories(opts.output_dir);
-  const std::string transcript_text{transcript.data(),
-                                    transcript.data() +
-                                        static_cast<size_t>(transcript_size)};
+  const int32_t bounded_transcript_size_i32 =
+      std::clamp(transcript_size, 0, static_cast<int32_t>(transcript.size()));
+  const size_t bounded_transcript_size =
+      static_cast<size_t>(bounded_transcript_size_i32);
+  const std::string transcript_text{
+      transcript.data(), transcript.data() + bounded_transcript_size};
   const std::filesystem::path transcript_path =
       opts.output_dir / "transcript.txt";
   {

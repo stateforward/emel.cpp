@@ -164,3 +164,24 @@ TEST_CASE("speech whisper tokenizer trims leading spaces and respects capacity")
   CHECK(std::string_view{transcript, static_cast<size_t>(transcript_size)} ==
         "ABell");
 }
+
+TEST_CASE("speech whisper tokenizer clamps compacted output to capacity") {
+  namespace whisper = emel::speech::tokenizer::whisper::detail;
+
+  const std::string tokenizer_json =
+      "{\"ĠLong\": 33,\n\"Transcript\": 34,\n\"Tail\": 35,\n}";
+  int32_t token_ids[] = {
+      33,
+      34,
+      35,
+  };
+  char transcript[4] = {};
+  const uint64_t transcript_size = whisper::decode_token_ids(
+      tokenizer_json, std::span<const int32_t>{token_ids}, transcript,
+      sizeof(transcript));
+
+  CHECK(transcript_size <= sizeof(transcript));
+  CHECK(transcript_size == 3u);
+  CHECK(std::string_view{transcript, static_cast<size_t>(transcript_size)} ==
+        "Lon");
+}

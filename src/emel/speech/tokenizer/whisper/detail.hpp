@@ -158,10 +158,11 @@ inline void append_decoded_piece(std::string_view piece, char *transcript,
       out = ' ';
       advance = 2u;
     }
-    if (size < capacity) {
-      transcript[size] = out;
-      ++size;
+    if (size >= capacity) {
+      break;
     }
+    transcript[size] = out;
+    ++size;
     index += static_cast<size_t>(advance);
   }
 }
@@ -180,14 +181,15 @@ inline uint64_t decode_token_ids(std::string_view tokenizer_json,
       append_decoded_piece(piece, transcript, capacity, size);
     }
   }
+  const uint64_t compact_size = size < capacity ? size : capacity;
   uint64_t leading_spaces = 0u;
-  while (leading_spaces < size && transcript[leading_spaces] == ' ') {
+  while (leading_spaces < compact_size && transcript[leading_spaces] == ' ') {
     ++leading_spaces;
   }
-  for (uint64_t index = leading_spaces; index < size; ++index) {
+  for (uint64_t index = leading_spaces; index < compact_size; ++index) {
     transcript[index - leading_spaces] = transcript[index];
   }
-  return size - leading_spaces;
+  return compact_size - leading_spaces;
 }
 
 inline bool

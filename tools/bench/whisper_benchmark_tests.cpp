@@ -326,6 +326,17 @@ TEST_CASE("whisper emel parity runner escapes transcript JSON") {
         std::string::npos);
 }
 
+TEST_CASE("whisper emel parity runner bounds transcript size before string") {
+  const std::string source =
+      read_file(whisper_emel_parity_runner_source_path());
+  REQUIRE(!source.empty());
+
+  CHECK(source.find("bounded_transcript_size") != std::string::npos);
+  CHECK(source.find("std::clamp(transcript_size") != std::string::npos);
+  CHECK(source.find("static_cast<size_t>(transcript_size)}") ==
+        std::string::npos);
+}
+
 TEST_CASE("whisper single-thread wrapper defaults to stable closeout sample") {
   const std::string source = read_file(whisper_single_thread_script_path());
   REQUIRE(!source.empty());
