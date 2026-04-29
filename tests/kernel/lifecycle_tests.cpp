@@ -9,11 +9,13 @@
 #include <vector>
 
 #include "test_helpers.hpp"
+#include "emel/kernel/actions.hpp"
 #include "emel/kernel/any.hpp"
 #include "emel/kernel/aarch64/actions.hpp"
 #include "emel/kernel/aarch64/events.hpp"
 #include "emel/kernel/aarch64/sm.hpp"
 #include "emel/kernel/detail.hpp"
+#include "emel/kernel/guards.hpp"
 #include "emel/kernel/sm.hpp"
 #include "emel/kernel/x86_64/actions.hpp"
 #include "emel/kernel/x86_64/events.hpp"
@@ -498,6 +500,51 @@ TEST_CASE("kernel_backends_expose_explicit_op_transitions") {
   CHECK(kernel_machine.process_event(op_add_ok));
   CHECK_FALSE(kernel_machine.process_event(op_add_invalid));
   CHECK(kernel_machine.process_event(emel::kernel::event::dispatch{}));
+}
+
+TEST_CASE("kernel_aggregate_actions_cover_maintained_lanes") {
+  float lhs[4] = {1.0f, 2.0f, 3.0f, 4.0f};
+  float rhs[4] = {5.0f, 6.0f, 7.0f, 8.0f};
+  float primary_out[4] = {};
+  float secondary_out[4] = {};
+
+  const emel::kernel::event::op_add primary_ev{
+      .src0 = make_src(lhs, dtype::f32, 4),
+      .src1 = make_src(rhs, dtype::f32, 4),
+      .dst = make_dst(primary_out, dtype::f32, 4),
+      .nth = 1,
+  };
+  const emel::kernel::event::op_add secondary_ev{
+      .src0 = make_src(lhs, dtype::f32, 4),
+      .src1 = make_src(rhs, dtype::f32, 4),
+      .dst = make_dst(secondary_out, dtype::f32, 4),
+      .nth = 1,
+  };
+
+  emel::kernel::action::context ctx{};
+  emel::kernel::event::dispatch_ctx primary_ctx{};
+  const emel::kernel::event::dispatch_op_add primary_dispatch{primary_ev, primary_ctx};
+
+  emel::kernel::action::begin_dispatch(primary_dispatch, ctx);
+  CHECK(emel::kernel::guard::phase_ok{}(primary_dispatch, ctx));
+  emel::kernel::action::request_primary(primary_dispatch, ctx);
+  CHECK(emel::kernel::guard::primary_done{}(primary_dispatch, ctx));
+  emel::kernel::action::mark_primary_done(primary_dispatch, ctx);
+  CHECK(primary_ctx.primary_outcome == emel::kernel::event::phase_outcome::done);
+  CHECK(primary_out[0] == doctest::Approx(6.0f));
+  CHECK(primary_out[3] == doctest::Approx(12.0f));
+
+  emel::kernel::event::dispatch_ctx secondary_ctx{};
+  const emel::kernel::event::dispatch_op_add secondary_dispatch{secondary_ev, secondary_ctx};
+
+  emel::kernel::action::begin_dispatch(secondary_dispatch, ctx);
+  CHECK(emel::kernel::guard::phase_ok{}(secondary_dispatch, ctx));
+  emel::kernel::action::request_secondary(secondary_dispatch, ctx);
+  CHECK(emel::kernel::guard::secondary_done{}(secondary_dispatch, ctx));
+  emel::kernel::action::mark_secondary_done(secondary_dispatch, ctx);
+  CHECK(secondary_ctx.secondary_outcome == emel::kernel::event::phase_outcome::done);
+  CHECK(secondary_out[0] == doctest::Approx(6.0f));
+  CHECK(secondary_out[3] == doctest::Approx(12.0f));
 }
 
 TEST_CASE("kernel_validation_branch_paths") {
