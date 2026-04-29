@@ -13,20 +13,8 @@
 #include "emel/kernel/aarch64/actions.hpp"
 #include "emel/kernel/aarch64/events.hpp"
 #include "emel/kernel/aarch64/sm.hpp"
-#include "emel/kernel/cuda/actions.hpp"
-#include "emel/kernel/cuda/events.hpp"
-#include "emel/kernel/cuda/sm.hpp"
 #include "emel/kernel/detail.hpp"
-#include "emel/kernel/metal/actions.hpp"
-#include "emel/kernel/metal/events.hpp"
-#include "emel/kernel/metal/sm.hpp"
 #include "emel/kernel/sm.hpp"
-#include "emel/kernel/vulkan/actions.hpp"
-#include "emel/kernel/vulkan/events.hpp"
-#include "emel/kernel/vulkan/sm.hpp"
-#include "emel/kernel/wasm/actions.hpp"
-#include "emel/kernel/wasm/events.hpp"
-#include "emel/kernel/wasm/sm.hpp"
 #include "emel/kernel/x86_64/actions.hpp"
 #include "emel/kernel/x86_64/events.hpp"
 #include "emel/kernel/x86_64/sm.hpp"
@@ -36,16 +24,8 @@ namespace {
 using kernel_sm = emel::kernel::sm;
 using x86_64_sm = emel::kernel::x86_64::sm;
 using aarch64_sm = emel::kernel::aarch64::sm;
-using wasm_sm = emel::kernel::wasm::sm;
-using cuda_sm = emel::kernel::cuda::sm;
-using metal_sm = emel::kernel::metal::sm;
-using vulkan_sm = emel::kernel::vulkan::sm;
 using x86_64_dispatch_event = emel::kernel::x86_64::event::dispatch_request;
 using aarch64_dispatch_event = emel::kernel::aarch64::event::dispatch_request;
-using wasm_dispatch_event = emel::kernel::wasm::event::dispatch_request;
-using cuda_dispatch_event = emel::kernel::cuda::event::dispatch_request;
-using metal_dispatch_event = emel::kernel::metal::event::dispatch_request;
-using vulkan_dispatch_event = emel::kernel::vulkan::event::dispatch_request;
 using emel::kernel::test::dtype;
 using emel::kernel::test::flash_attn_ext_fixture;
 using emel::kernel::test::flash_attn_reference_f16_scores;
@@ -442,19 +422,11 @@ TEST_CASE("kernel_backends_accept_dispatch_event") {
 
   x86_64_sm x86_64_machine{};
   aarch64_sm aarch64_machine{};
-  wasm_sm wasm_machine{};
-  cuda_sm cuda_machine{};
-  metal_sm metal_machine{};
-  vulkan_sm vulkan_machine{};
   kernel_sm kernel_machine{};
   emel::kernel::any any_machine{};
 
   CHECK(x86_64_machine.process_event(event));
   CHECK(aarch64_machine.process_event(event));
-  CHECK(wasm_machine.process_event(event));
-  CHECK(cuda_machine.process_event(event));
-  CHECK(metal_machine.process_event(event));
-  CHECK(vulkan_machine.process_event(event));
   CHECK(kernel_machine.process_event(event));
   CHECK(any_machine.process_event(event));
 }
@@ -510,10 +482,6 @@ TEST_CASE("kernel_backends_expose_explicit_op_transitions") {
 
   x86_64_sm x86_64_machine{};
   aarch64_sm aarch64_machine{};
-  wasm_sm wasm_machine{};
-  cuda_sm cuda_machine{};
-  metal_sm metal_machine{};
-  vulkan_sm vulkan_machine{};
   kernel_sm kernel_machine{};
   emel::kernel::any any_machine{};
 
@@ -522,22 +490,6 @@ TEST_CASE("kernel_backends_expose_explicit_op_transitions") {
                          op_soft_max_ok, op_soft_max_invalid);
 
   check_backend_op_paths(aarch64_machine, op_dup_ok, op_dup_invalid, op_add_ok, op_add_invalid,
-                         op_mul_ok, op_mul_invalid, op_mul_mat_ok, op_mul_mat_invalid,
-                         op_soft_max_ok, op_soft_max_invalid);
-
-  check_backend_op_paths(wasm_machine, op_dup_ok, op_dup_invalid, op_add_ok, op_add_invalid,
-                         op_mul_ok, op_mul_invalid, op_mul_mat_ok, op_mul_mat_invalid,
-                         op_soft_max_ok, op_soft_max_invalid);
-
-  check_backend_op_paths(cuda_machine, op_dup_ok, op_dup_invalid, op_add_ok, op_add_invalid,
-                         op_mul_ok, op_mul_invalid, op_mul_mat_ok, op_mul_mat_invalid,
-                         op_soft_max_ok, op_soft_max_invalid);
-
-  check_backend_op_paths(metal_machine, op_dup_ok, op_dup_invalid, op_add_ok, op_add_invalid,
-                         op_mul_ok, op_mul_invalid, op_mul_mat_ok, op_mul_mat_invalid,
-                         op_soft_max_ok, op_soft_max_invalid);
-
-  check_backend_op_paths(vulkan_machine, op_dup_ok, op_dup_invalid, op_add_ok, op_add_invalid,
                          op_mul_ok, op_mul_invalid, op_mul_mat_ok, op_mul_mat_invalid,
                          op_soft_max_ok, op_soft_max_invalid);
 
@@ -758,17 +710,9 @@ TEST_CASE("kernel_backends_reject_quantized_dispatch_dtypes") {
 
   x86_64_sm x86_64_machine{};
   aarch64_sm aarch64_machine{};
-  wasm_sm wasm_machine{};
-  cuda_sm cuda_machine{};
-  metal_sm metal_machine{};
-  vulkan_sm vulkan_machine{};
 
   CHECK_FALSE(x86_64_machine.process_event(quantized));
   CHECK_FALSE(aarch64_machine.process_event(quantized));
-  CHECK_FALSE(wasm_machine.process_event(quantized));
-  CHECK_FALSE(cuda_machine.process_event(quantized));
-  CHECK_FALSE(metal_machine.process_event(quantized));
-  CHECK_FALSE(vulkan_machine.process_event(quantized));
 }
 
 TEST_CASE("kernel_flash_attn_ext_requires_canonical_execution_path") {
@@ -1220,63 +1164,30 @@ TEST_CASE("kernel_backend_unexpected_actions_mark_backend_error") {
 
   emel::kernel::x86_64::action::context x86_64_ctx{};
   emel::kernel::aarch64::action::context aarch64_ctx{};
-  emel::kernel::wasm::action::context wasm_ctx{};
-  emel::kernel::cuda::action::context cuda_ctx{};
-  emel::kernel::metal::action::context metal_ctx{};
-  emel::kernel::vulkan::action::context vulkan_ctx{};
 
   emel::kernel::x86_64::event::dispatch_ctx x86_64_dispatch_ctx{};
   emel::kernel::aarch64::event::dispatch_ctx aarch64_dispatch_ctx{};
-  emel::kernel::wasm::event::dispatch_ctx wasm_dispatch_ctx{};
-  emel::kernel::cuda::event::dispatch_ctx cuda_dispatch_ctx{};
-  emel::kernel::metal::event::dispatch_ctx metal_dispatch_ctx{};
-  emel::kernel::vulkan::event::dispatch_ctx vulkan_dispatch_ctx{};
 
   const emel::kernel::x86_64::event::dispatch_request x86_64_dispatch{request,
                                                                        x86_64_dispatch_ctx};
   const emel::kernel::aarch64::event::dispatch_request aarch64_dispatch{request,
                                                                          aarch64_dispatch_ctx};
-  const emel::kernel::wasm::event::dispatch_request wasm_dispatch{request, wasm_dispatch_ctx};
-  const emel::kernel::cuda::event::dispatch_request cuda_dispatch{request, cuda_dispatch_ctx};
-  const emel::kernel::metal::event::dispatch_request metal_dispatch{request, metal_dispatch_ctx};
-  const emel::kernel::vulkan::event::dispatch_request vulkan_dispatch{request,
-                                                                       vulkan_dispatch_ctx};
 
   emel::kernel::x86_64::action::on_unexpected(x86_64_dispatch, x86_64_ctx);
   emel::kernel::aarch64::action::on_unexpected(aarch64_dispatch, aarch64_ctx);
-  emel::kernel::wasm::action::on_unexpected(wasm_dispatch, wasm_ctx);
-  emel::kernel::cuda::action::on_unexpected(cuda_dispatch, cuda_ctx);
-  emel::kernel::metal::action::on_unexpected(metal_dispatch, metal_ctx);
-  emel::kernel::vulkan::action::on_unexpected(vulkan_dispatch, vulkan_ctx);
 
   CHECK(x86_64_dispatch_ctx.err ==
         static_cast<int32_t>(emel::error::cast(emel::kernel::error::internal_error)));
   CHECK(aarch64_dispatch_ctx.err ==
         static_cast<int32_t>(emel::error::cast(emel::kernel::error::internal_error)));
-  CHECK(wasm_dispatch_ctx.err ==
-        static_cast<int32_t>(emel::error::cast(emel::kernel::error::internal_error)));
-  CHECK(cuda_dispatch_ctx.err ==
-        static_cast<int32_t>(emel::error::cast(emel::kernel::error::internal_error)));
-  CHECK(metal_dispatch_ctx.err ==
-        static_cast<int32_t>(emel::error::cast(emel::kernel::error::internal_error)));
-  CHECK(vulkan_dispatch_ctx.err ==
-        static_cast<int32_t>(emel::error::cast(emel::kernel::error::internal_error)));
 
   CHECK(x86_64_dispatch_ctx.outcome == emel::kernel::x86_64::events::phase_outcome::failed);
   CHECK(aarch64_dispatch_ctx.outcome == emel::kernel::aarch64::events::phase_outcome::failed);
-  CHECK(wasm_dispatch_ctx.outcome == emel::kernel::wasm::events::phase_outcome::failed);
-  CHECK(cuda_dispatch_ctx.outcome == emel::kernel::cuda::events::phase_outcome::failed);
-  CHECK(metal_dispatch_ctx.outcome == emel::kernel::metal::events::phase_outcome::failed);
-  CHECK(vulkan_dispatch_ctx.outcome == emel::kernel::vulkan::events::phase_outcome::failed);
 }
 
 TEST_CASE("kernel_backends_cover_all_ggml_ops") {
   x86_64_sm x86_64_machine{};
   aarch64_sm aarch64_machine{};
-  wasm_sm wasm_machine{};
-  cuda_sm cuda_machine{};
-  metal_sm metal_machine{};
-  vulkan_sm vulkan_machine{};
   kernel_sm kernel_machine{};
   emel::kernel::any any_machine{};
 
@@ -1286,10 +1197,6 @@ TEST_CASE("kernel_backends_cover_all_ggml_ops") {
     const bool backend_supported = emel::kernel::detail::can_run_backend_request(ev);         \
     CHECK(x86_64_machine.process_event(ev) == backend_supported);                             \
     CHECK(aarch64_machine.process_event(ev) == backend_supported);                            \
-    CHECK(wasm_machine.process_event(ev));                                                    \
-    CHECK(cuda_machine.process_event(ev));                                                    \
-    CHECK(metal_machine.process_event(ev));                                                   \
-    CHECK(vulkan_machine.process_event(ev));                                                  \
     CHECK(kernel_machine.process_event(ev) == backend_supported);                             \
     CHECK(any_machine.process_event(ev) == backend_supported);                                \
   }
@@ -1305,8 +1212,4 @@ TEST_CASE("kernel_wrapper_exposes_public_dispatch_entrypoints") {
 TEST_CASE("kernel_backend_wrappers_hide_internal_dispatch_entrypoints") {
   CHECK_FALSE((has_public_process_event<x86_64_sm, x86_64_dispatch_event>));
   CHECK_FALSE((has_public_process_event<aarch64_sm, aarch64_dispatch_event>));
-  CHECK_FALSE((has_public_process_event<wasm_sm, wasm_dispatch_event>));
-  CHECK_FALSE((has_public_process_event<cuda_sm, cuda_dispatch_event>));
-  CHECK_FALSE((has_public_process_event<metal_sm, metal_dispatch_event>));
-  CHECK_FALSE((has_public_process_event<vulkan_sm, vulkan_dispatch_event>));
 }

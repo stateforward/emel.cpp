@@ -5,12 +5,8 @@
 #include "emel/emel.h"
 #include "emel/kernel/errors.hpp"
 #include "emel/kernel/aarch64/sm.hpp"
-#include "emel/kernel/cuda/sm.hpp"
 #include "emel/kernel/detail.hpp"
 #include "emel/kernel/events.hpp"
-#include "emel/kernel/metal/sm.hpp"
-#include "emel/kernel/vulkan/sm.hpp"
-#include "emel/kernel/wasm/sm.hpp"
 #include "emel/kernel/x86_64/sm.hpp"
 #include "emel/sm.hpp"
 
@@ -19,10 +15,6 @@ namespace emel::kernel {
 enum class kernel_kind : uint8_t {
   x86_64 = 0,
   aarch64 = 1,
-  wasm = 2,
-  cuda = 3,
-  metal = 4,
-  vulkan = 5,
 };
 
 class any {
@@ -315,8 +307,7 @@ class any {
   }
 
  private:
-  using sm_list = boost::sml::aux::type_list<x86_64::sm, aarch64::sm, wasm::sm, cuda::sm,
-                                             metal::sm, vulkan::sm>;
+  using sm_list = boost::sml::aux::type_list<x86_64::sm, aarch64::sm>;
   using event_list = boost::sml::aux::type_list<
       event::dispatch
 #define EMEL_KERNEL_ANY_EVENT_TYPE(op_name) , event::op_name

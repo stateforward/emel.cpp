@@ -10,9 +10,47 @@ stateDiagram-v2
   state_input_shape_decision --> state_error_error_out_decision : completion_execute_run_ [guard_input_shape_invalid_] / effect_mark_input_shape_invalid_
   state_output_capacity_decision --> state_binding : completion_execute_run_ [guard_output_capacity_valid_] / effect_bind_contracts_
   state_output_capacity_decision --> state_error_error_out_decision : completion_execute_run_ [guard_output_capacity_invalid_] / effect_mark_output_capacity_invalid_
-  state_binding --> state_executing : completion_execute_run_ [always] / effect_execute_stage_
-  state_executing --> state_success_error_out_decision : completion_execute_run_ [guard_execution_ok_] / none
-  state_executing --> state_error_error_out_decision : completion_execute_run_ [guard_execution_failed_] / none
+  state_binding --> state_projecting : completion_execute_run_ [always] / effect_project_encoder_
+  state_projecting --> state_transformer_cache : completion_execute_run_ [guard_execution_ok_] / effect_write_projected_frames_to_cache_
+  state_projecting --> state_error_error_out_decision : completion_execute_run_ [guard_execution_failed_] / none
+  state_transformer_cache --> state_transformer_layer_00 : completion_execute_run_ [always] / effect_execute_transformer_layer_0__
+  state_transformer_layer_00 --> state_transformer_layer_01 : completion_execute_run_ [guard_execution_ok_] / effect_execute_transformer_layer_1__
+  state_transformer_layer_00 --> state_error_error_out_decision : completion_execute_run_ [guard_execution_failed_] / none
+  state_transformer_layer_01 --> state_transformer_layer_02 : completion_execute_run_ [guard_execution_ok_] / effect_execute_transformer_layer_2__
+  state_transformer_layer_01 --> state_error_error_out_decision : completion_execute_run_ [guard_execution_failed_] / none
+  state_transformer_layer_02 --> state_transformer_layer_03 : completion_execute_run_ [guard_execution_ok_] / effect_execute_transformer_layer_3__
+  state_transformer_layer_02 --> state_error_error_out_decision : completion_execute_run_ [guard_execution_failed_] / none
+  state_transformer_layer_03 --> state_transformer_layer_04 : completion_execute_run_ [guard_execution_ok_] / effect_execute_transformer_layer_4__
+  state_transformer_layer_03 --> state_error_error_out_decision : completion_execute_run_ [guard_execution_failed_] / none
+  state_transformer_layer_04 --> state_transformer_layer_05 : completion_execute_run_ [guard_execution_ok_] / effect_execute_transformer_layer_5__
+  state_transformer_layer_04 --> state_error_error_out_decision : completion_execute_run_ [guard_execution_failed_] / none
+  state_transformer_layer_05 --> state_transformer_layer_06 : completion_execute_run_ [guard_execution_ok_] / effect_execute_transformer_layer_6__
+  state_transformer_layer_05 --> state_error_error_out_decision : completion_execute_run_ [guard_execution_failed_] / none
+  state_transformer_layer_06 --> state_transformer_layer_07 : completion_execute_run_ [guard_execution_ok_] / effect_execute_transformer_layer_7__
+  state_transformer_layer_06 --> state_error_error_out_decision : completion_execute_run_ [guard_execution_failed_] / none
+  state_transformer_layer_07 --> state_transformer_layer_08 : completion_execute_run_ [guard_execution_ok_] / effect_execute_transformer_layer_8__
+  state_transformer_layer_07 --> state_error_error_out_decision : completion_execute_run_ [guard_execution_failed_] / none
+  state_transformer_layer_08 --> state_transformer_layer_09 : completion_execute_run_ [guard_execution_ok_] / effect_execute_transformer_layer_9__
+  state_transformer_layer_08 --> state_error_error_out_decision : completion_execute_run_ [guard_execution_failed_] / none
+  state_transformer_layer_09 --> state_transformer_layer_10 : completion_execute_run_ [guard_execution_ok_] / effect_execute_transformer_layer_10__
+  state_transformer_layer_09 --> state_error_error_out_decision : completion_execute_run_ [guard_execution_failed_] / none
+  state_transformer_layer_10 --> state_transformer_layer_11 : completion_execute_run_ [guard_execution_ok_] / effect_execute_transformer_layer_11__
+  state_transformer_layer_10 --> state_error_error_out_decision : completion_execute_run_ [guard_execution_failed_] / none
+  state_transformer_layer_11 --> state_transformer_layer_12 : completion_execute_run_ [guard_execution_ok_] / effect_execute_transformer_layer_12__
+  state_transformer_layer_11 --> state_error_error_out_decision : completion_execute_run_ [guard_execution_failed_] / none
+  state_transformer_layer_12 --> state_transformer_layer_13 : completion_execute_run_ [guard_execution_ok_] / effect_execute_transformer_layer_13__
+  state_transformer_layer_12 --> state_error_error_out_decision : completion_execute_run_ [guard_execution_failed_] / none
+  state_transformer_layer_13 --> state_transformer_layer_14 : completion_execute_run_ [guard_execution_ok_] / effect_execute_transformer_layer_14__
+  state_transformer_layer_13 --> state_error_error_out_decision : completion_execute_run_ [guard_execution_failed_] / none
+  state_transformer_layer_14 --> state_transformer_layer_15 : completion_execute_run_ [guard_execution_ok_] / effect_execute_transformer_layer_15__
+  state_transformer_layer_14 --> state_error_error_out_decision : completion_execute_run_ [guard_execution_failed_] / none
+  state_transformer_layer_15 --> state_transformer_layer_16 : completion_execute_run_ [guard_execution_ok_] / effect_execute_transformer_layer_16__
+  state_transformer_layer_15 --> state_error_error_out_decision : completion_execute_run_ [guard_execution_failed_] / none
+  state_transformer_layer_16 --> state_transformer_layer_17 : completion_execute_run_ [guard_execution_ok_] / effect_execute_transformer_layer_17__
+  state_transformer_layer_16 --> state_error_error_out_decision : completion_execute_run_ [guard_execution_failed_] / none
+  state_transformer_layer_17 --> state_publishing_hidden : completion_execute_run_ [guard_execution_ok_] / effect_publish_hidden_
+  state_transformer_layer_17 --> state_error_error_out_decision : completion_execute_run_ [guard_execution_failed_] / none
+  state_publishing_hidden --> state_success_error_out_decision : completion_execute_run_ [guard_execution_ok_] / none
   state_success_error_out_decision --> state_success_callback_decision : completion_execute_run_ [guard_has_error_out_] / effect_store_success_error_
   state_success_error_out_decision --> state_success_callback_decision : completion_execute_run_ [guard_no_error_out_] / none
   state_error_error_out_decision --> state_error_callback_decision : completion_execute_run_ [guard_has_error_out_] / effect_store_error_error_
@@ -29,7 +67,27 @@ stateDiagram-v2
   state_input_shape_decision --> state_ready : _ [always] / effect_on_unexpected_
   state_output_capacity_decision --> state_ready : _ [always] / effect_on_unexpected_
   state_binding --> state_ready : _ [always] / effect_on_unexpected_
-  state_executing --> state_ready : _ [always] / effect_on_unexpected_
+  state_projecting --> state_ready : _ [always] / effect_on_unexpected_
+  state_transformer_cache --> state_ready : _ [always] / effect_on_unexpected_
+  state_transformer_layer_00 --> state_ready : _ [always] / effect_on_unexpected_
+  state_transformer_layer_01 --> state_ready : _ [always] / effect_on_unexpected_
+  state_transformer_layer_02 --> state_ready : _ [always] / effect_on_unexpected_
+  state_transformer_layer_03 --> state_ready : _ [always] / effect_on_unexpected_
+  state_transformer_layer_04 --> state_ready : _ [always] / effect_on_unexpected_
+  state_transformer_layer_05 --> state_ready : _ [always] / effect_on_unexpected_
+  state_transformer_layer_06 --> state_ready : _ [always] / effect_on_unexpected_
+  state_transformer_layer_07 --> state_ready : _ [always] / effect_on_unexpected_
+  state_transformer_layer_08 --> state_ready : _ [always] / effect_on_unexpected_
+  state_transformer_layer_09 --> state_ready : _ [always] / effect_on_unexpected_
+  state_transformer_layer_10 --> state_ready : _ [always] / effect_on_unexpected_
+  state_transformer_layer_11 --> state_ready : _ [always] / effect_on_unexpected_
+  state_transformer_layer_12 --> state_ready : _ [always] / effect_on_unexpected_
+  state_transformer_layer_13 --> state_ready : _ [always] / effect_on_unexpected_
+  state_transformer_layer_14 --> state_ready : _ [always] / effect_on_unexpected_
+  state_transformer_layer_15 --> state_ready : _ [always] / effect_on_unexpected_
+  state_transformer_layer_16 --> state_ready : _ [always] / effect_on_unexpected_
+  state_transformer_layer_17 --> state_ready : _ [always] / effect_on_unexpected_
+  state_publishing_hidden --> state_ready : _ [always] / effect_on_unexpected_
   state_success_error_out_decision --> state_ready : _ [always] / effect_on_unexpected_
   state_success_callback_decision --> state_ready : _ [always] / effect_on_unexpected_
   state_error_error_out_decision --> state_ready : _ [always] / effect_on_unexpected_
