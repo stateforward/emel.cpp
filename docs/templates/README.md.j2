@@ -98,7 +98,6 @@ environments, while Zig remains the default for day-to-day builds.
 - [ARM-first Inventory](docs/arm-first-inventory.md) (non-ARM surface inventory and removal notes)
 - [Benchmarks](docs/benchmarks.md) (generated benchmark snapshot table)
 - [SML Conventions](docs/third_party/sml.md) (Boost.SML conventions and usage)
-- [Parity Audit](docs/gaps.md) (parity audit status)
 
 ## Docs index
 
