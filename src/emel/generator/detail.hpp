@@ -220,8 +220,6 @@ constexpr emel::kernel::kernel_kind detect_host_kernel_kind() noexcept {
   return emel::kernel::kernel_kind::aarch64;
 #elif defined(__x86_64__) || defined(_M_X64)
   return emel::kernel::kernel_kind::x86_64;
-#elif defined(__wasm__)
-  return emel::kernel::kernel_kind::wasm;
 #else
   return emel::kernel::kernel_kind::x86_64;
 #endif

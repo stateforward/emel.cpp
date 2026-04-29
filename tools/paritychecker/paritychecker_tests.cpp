@@ -532,8 +532,6 @@ std::string_view expected_generation_kernel_kind() {
   return "aarch64";
 #elif defined(__x86_64__) || defined(_M_X64)
   return "x86_64";
-#elif defined(__wasm__)
-  return "wasm";
 #else
   return "x86_64";
 #endif

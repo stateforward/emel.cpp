@@ -15838,14 +15838,6 @@ const char * kernel_kind_name(const emel::kernel::kernel_kind kind) {
       return "x86_64";
     case emel::kernel::kernel_kind::aarch64:
       return "aarch64";
-    case emel::kernel::kernel_kind::wasm:
-      return "wasm";
-    case emel::kernel::kernel_kind::cuda:
-      return "cuda";
-    case emel::kernel::kernel_kind::metal:
-      return "metal";
-    case emel::kernel::kernel_kind::vulkan:
-      return "vulkan";
   }
   return "unknown";
 }
