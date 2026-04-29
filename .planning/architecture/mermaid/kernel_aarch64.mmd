@@ -66,6 +66,8 @@ stateDiagram-v2
   ready --> ready : dispatch_op_l2_norm [dispatch_op_l2_norm__] / dispatch_op_l2_norm__
   ready --> ready : dispatch_op_l2_norm [dispatch_op_l2_norm__] / dispatch_op_l2_norm__
   ready --> ready : dispatch_op_mul_mat [simd_op_mul_mat_q5_0_vector_] / exec_simd_q5_0_vector_op_mul_mat_
+  ready --> ready : dispatch_op_mul_mat [simd_op_mul_mat_q4_0_vector_] / exec_simd_q4_0_vector_op_mul_mat_
+  ready --> ready : dispatch_op_mul_mat [simd_op_mul_mat_q4_1_vector_] / exec_simd_q4_1_vector_op_mul_mat_
   ready --> ready : dispatch_op_mul_mat [simd_op_mul_mat_q8_0_packed_bl8_matrix_x4_] / exec_simd_q8_0_packed_bl8_matrix_x4_op_mul_mat_
   ready --> ready : dispatch_op_mul_mat [simd_op_mul_mat_q8_0_packed_bl8_full_groups_] / exec_simd_q8_0_packed_bl8_full_groups_op_mul_mat_
   ready --> ready : dispatch_op_mul_mat [simd_op_mul_mat_q8_0_packed_bl8_] / exec_simd_q8_0_packed_bl8_op_mul_mat_

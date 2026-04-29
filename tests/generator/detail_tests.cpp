@@ -30,6 +30,15 @@ uint16_t fp16_bits(const float value) {
   return emel::generator::detail::quant::fp32_to_fp16(value);
 }
 
+TEST_CASE("generator detects only maintained host kernel kinds") {
+  const emel::kernel::kernel_kind kind = emel::generator::detail::detect_host_kernel_kind();
+#if defined(__aarch64__) || defined(_M_ARM64)
+  CHECK(kind == emel::kernel::kernel_kind::aarch64);
+#else
+  CHECK(kind == emel::kernel::kernel_kind::x86_64);
+#endif
+}
+
 std::array<block_q6_k, Q6_K_X8_ROWS> make_q6_rows() {
   std::array<block_q6_k, Q6_K_X8_ROWS> rows = {};
   for (size_t row = 0; row < rows.size(); ++row) {

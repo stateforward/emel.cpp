@@ -206,11 +206,7 @@ Scoring rule for `StaticStatus`:
 | `src/emel/graph/processor/validate_step/sm.hpp` | PASS | 1 | 1 | 1 | 0 | 0 | 1 | 0 | 0 | 1 | 1 | designed |
 | `src/emel/graph/sm.hpp` | PASS | 1 | 1 | 1 | 1 | 0 | 1 | 0 | 0 | 1 | 1 | designed |
 | `src/emel/kernel/aarch64/sm.hpp` | PASS | 1 | 1 | 1 | 1 | 0 | 1 | 0 | 0 | 1 | 1 | none |
-| `src/emel/kernel/cuda/sm.hpp` | PASS | 1 | 1 | 1 | 1 | 0 | 1 | 0 | 0 | 1 | 1 | none |
-| `src/emel/kernel/metal/sm.hpp` | PASS | 1 | 1 | 1 | 1 | 0 | 1 | 0 | 0 | 1 | 1 | none |
 | `src/emel/kernel/sm.hpp` | FAIL | 0 | 0 | 1 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | none |
-| `src/emel/kernel/vulkan/sm.hpp` | PASS | 1 | 1 | 1 | 1 | 0 | 1 | 0 | 0 | 1 | 1 | none |
-| `src/emel/kernel/wasm/sm.hpp` | PASS | 1 | 1 | 1 | 1 | 0 | 1 | 0 | 0 | 1 | 1 | none |
 | `src/emel/kernel/x86_64/sm.hpp` | PASS | 1 | 1 | 1 | 1 | 0 | 1 | 0 | 0 | 1 | 1 | none |
 | `src/emel/logits/sampler/sm.hpp` | PASS | 1 | 1 | 1 | 1 | 0 | 1 | 0 | 0 | 1 | 1 | none |
 | `src/emel/logits/validator/sm.hpp` | PASS | 1 | 1 | 1 | 1 | 0 | 1 | 0 | 0 | 1 | 1 | none |
