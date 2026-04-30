@@ -2,9 +2,9 @@
 gsd_state_version: 1.0
 milestone: v1.17
 milestone_name: Text Generator Domain Alignment
-status: ready_to_complete
-stopped_at: Phase 147 complete; full closeout gate and source-backed milestone audit passed
-last_updated: "2026-04-30T19:27:33Z"
+status: pr_opened
+stopped_at: PR #75 opened for v1.17; awaiting review and CI
+last_updated: "2026-04-30T19:56:44Z"
 last_activity: 2026-04-30
 progress:
   total_phases: 4
@@ -22,7 +22,7 @@ See: .planning/PROJECT.md (updated 2026-04-28)
 
 **Core value:** Prove real end-to-end behavior with explicit SML orchestration and parity-oriented
 verification before widening API surface or model scope.
-**Current focus:** Complete/archive v1.17 after the Phase 147 full gate and audit pass.
+**Current focus:** Review and merge PR #75 for v1.17 after the Phase 147 full gate and audit pass.
 
 ## Current Position
 
@@ -31,7 +31,8 @@ Plan: 147-01 complete
 Status: Phase 147 closed the sixth source-backed audit blocker for `TEXTGEN-04` and `TEXTGEN-07`.
 Maintained graph validation, bind, and extract callbacks are now guard-accepted execution
 callbacks, and source regressions prove the old detail callback outcome path is no longer wired.
-The required full closeout quality gate and final source-backed milestone audit both passed.
+The required full closeout quality gate and final source-backed milestone audit both passed. PR #75
+is open for review.
 Last activity: 2026-04-30
 
 Progress: [##########] 100%
@@ -58,7 +59,7 @@ Items acknowledged and still deferred at milestone close on 2026-04-26:
   passed.
 - Latest shipped milestone: `v1.16 ARM Whisper GGUF Parity And Performance`.
 
-- Next action: `$gsd-complete-milestone`.
+- Next action: review/merge PR #75, then `$gsd-complete-milestone`.
 - Current blocker: none known in source, full-gate validation, or final source-backed audit after
   Phase 147.
 
