@@ -111,6 +111,7 @@ if(EMEL_ENABLE_TESTS)
     tests/gbnf/lexer_tests.cpp
     tests/gbnf/parser_tests.cpp
     tests/gbnf/sampler_tests.cpp
+    tests/text/generator/legacy_compatibility_tests.cpp
     tests/text/generator/lifecycle_tests.cpp
     tests/text/generator/action_guard_tests.cpp
     tests/text/generator/detail_tests.cpp

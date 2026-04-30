@@ -98,6 +98,9 @@ run_domain_boundary_gate() {
 is_coverage_excluded_src_file() {
   local file="$1"
   case "$file" in
+    src/emel/generator/*.hpp|src/emel/generator/**/*.hpp)
+      return 0
+      ;;
     src/emel/*/sm.hpp|src/emel/**/*/sm.hpp)
       return 0
       ;;
@@ -180,6 +183,9 @@ infer_test_shard_for_src() {
   case "$file" in
     src/emel/model/*|src/emel/model*.hpp|src/emel/gguf/*|src/emel/gbnf/*|src/emel/batch/*)
       add_test_shard model_and_batch
+      ;;
+    src/emel/generator/*|src/emel/generator/**/*)
+      add_test_shard generator_and_runtime
       ;;
     src/emel/text/generator/*|src/emel/embeddings/*|src/emel/logits/*|src/emel/token/*)
       add_test_shard generator_and_runtime
@@ -313,6 +319,8 @@ infer_quality_gate_scope() {
 
   for file in "${changed_files[@]+${changed_files[@]}}"; do
     case "$file" in
+      src/emel/generator/*|src/emel/generator/**/*)
+        ;;
       docs/templates/*|tools/docsgen/*|snapshots/bench/*|snapshots/embedded_size/*|src/emel/**/sm.hpp)
         docs_needed=true
         ;;
@@ -353,6 +361,8 @@ infer_quality_gate_scope() {
     fi
 
     case "$file" in
+      src/emel/generator/*|src/emel/generator/**/*)
+        ;;
       src/emel/diarization/*|src/emel/model/sortformer/*|tests/diarization/*|\
       tools/bench/diarization*|scripts/bench_diarization_compare.sh|\
       scripts/setup_diarization_pytorch_ref_env.sh)

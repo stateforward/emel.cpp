@@ -53,6 +53,9 @@ unknown_changed_src=0
 is_coverage_excluded_src_file() {
   local file="$1"
   case "$file" in
+    src/emel/generator/*.hpp|src/emel/generator/**/*.hpp)
+      return 0
+      ;;
     src/emel/*/sm.hpp)
       return 0
       ;;
@@ -203,6 +206,9 @@ if [[ "$COVERAGE_CHANGED_ONLY" == "1" ]]; then
     case "$file" in
       src/emel/model/*|src/emel/model*.hpp|src/emel/gguf/*|src/emel/gbnf/*|src/emel/batch/*)
         add_changed_shard model_and_batch
+        ;;
+      src/emel/generator/*|src/emel/generator/**/*)
+        add_changed_shard generator_and_runtime
         ;;
       src/emel/text/generator/*|src/emel/embeddings/*|src/emel/logits/*|src/emel/token/*)
         add_changed_shard generator_and_runtime
