@@ -1,79 +1,39 @@
-# Requirements: v1.17 Text Generator Domain Alignment
-
-**Defined:** 2026-04-28
-**Core Value:** Prove real end-to-end behavior with explicit SML orchestration and
-parity-oriented verification before widening API surface or model scope.
-**Closed after reopen:** 2026-04-30. Phase 147 removed the final source-backed `TEXTGEN-04` /
-`TEXTGEN-07` blocker by making maintained graph validation, bind, and extract callbacks
-guard-accepted only; they no longer reject graph execution or write callback error state through
-`err_out`.
+# Requirements: v1.16 Reopened Whisper E2E And Performance Closure
 
 ## Active Requirements
 
-### Domain Ownership
+- [x] **REOPEN-01** — Reopen v1.16 because `bounded_drift` transcript mismatch is not acceptable
+  for the E2E milestone.
+- [x] **SPEECH-01** — Remove the top-level `src/emel/whisper/**` runtime domain; Whisper runtime
+  actors live under speech encoder/decoder/tokenizer ownership while model binding stays in
+  `model/whisper`.
+- [x] **TOK-01** — Pin and validate the maintained `tokenizer-tiny.json` asset before dispatch.
+- [x] **TOK-02** — Use speech tokenizer/detokenizer machinery for transcript publication; do not
+  hardcode fixture transcript text or token-piece mappings in Whisper kernels.
+- [x] **POLICY-01** — Model Whisper ASR decode policy explicitly: prompt sequence, language/task
+  roles, timestamp mode, and suppression behavior.
+- [x] **PARITY-01** — The maintained EMEL lane must exact-match the pinned `whisper.cpp`
+  transcript for the Phase 99 audio/model pair.
+- [x] **CLOSE-01** — Re-run source-backed audit and full relevant quality gates before closing
+  the reopened milestone, including benchmark evidence that enforces the performance contract.
+- [x] **PERF-03** — Restore a source-backed benchmark record where EMEL beats the matched
+  single-thread CPU `whisper.cpp` ARM reference lane for the maintained Phase 99 model/audio pair.
 
-- [x] **TEXTGEN-01**: Maintainer can find the canonical generative text actor under
-  `src/emel/text/generator/**`, with canonical namespace and machine type
-  `emel::text::generator::sm`.
-- [x] **TEXTGEN-02**: Maintainer can verify no canonical production source remains under
-  `src/emel/generator/**`, and any temporary compatibility surface is explicit, non-owning, and
-  documented.
+**Coverage after latest source-backed audit:** 8 complete, 0 pending.
 
-### Actor Move
-
-- [x] **TEXTGEN-03**: Existing generation entrypoints, paritychecker, benchmarks, and
-  embedded-size probes build against the new `text/generator` ownership without changing
-  request/output behavior.
-- [x] **TEXTGEN-04**: Generator initializer and prefill child actors move with the parent under
-  `text/generator/**` while preserving destination-first Boost.SML transition tables and no-queue
-  RTC semantics.
-- [x] **TEXTGEN-05**: Generator tests live under `tests/text/generator/**` or otherwise explicitly
-  validate the text-domain generator namespace, includes, SML states, callbacks, and error paths.
-
-### Proof
-
-- [x] **TEXTGEN-06**: Domain-boundary checks fail on reintroduced `emel/generator` includes,
-  `src/emel/generator` paths, or `namespace emel::generator` ownership outside an approved
-  compatibility header.
-- [x] **TEXTGEN-07**: Existing generation parity and benchmark proof remains source-backed and
-  lane-isolated after the move; no new model family, fixture, sampling policy, or performance
-  claim is introduced by the refactor.
-
-## Future Requirements
-
-- **TEXTGEN-F01**: Decode and sampler submachine extraction can be planned after the text-domain
-  move is stable.
-- **TEXTGEN-F02**: Public generation C ABI expansion can be planned separately after the canonical
-  text generator ownership is settled.
-
-## Out of Scope
-
-| Feature | Reason |
-|---------|--------|
-| New generation model family support | This milestone is an ownership refactor, not a model-scope widening. |
-| Sampling, formatter, tokenizer, or decode semantic changes | Behavior must remain stable while ownership moves. |
-| Performance optimization | Existing benchmark/parity proof must remain truthful, but this milestone does not tune kernels. |
-| Broad `text/forward` extraction | A shared hidden-state forward domain is only justified when multiple top-level contracts need it. |
+Phase 128 and Phase 129 are tech-debt cleanup phases created from the milestone audit. They do not
+reset active requirement status because the audit found no unsatisfied requirement, integration, or
+flow gaps. Phases 128 and 129 are complete.
 
 ## Traceability
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| TEXTGEN-01 | Phase 140 | Complete |
-| TEXTGEN-02 | Phase 135 | Complete |
-| TEXTGEN-03 | Phase 136 | Complete |
-| TEXTGEN-04 | Phase 147 | Complete |
-| TEXTGEN-05 | Phase 141 | Complete |
-| TEXTGEN-06 | Phase 140 | Complete |
-| TEXTGEN-07 | Phase 147 | Complete |
-
-**Coverage:**
-- Active requirements: 7 total
-- Mapped to phases: 7
-- Unmapped: 0
-- Complete: 7
-- Pending: 0
-
-**Last updated:** 2026-04-30 after Phase 147 graph callback outcome ownership closure passed
-focused tests, domain-boundary checks, paritychecker, generation benchmark evidence, and the
-changed-file scoped quality gate.
+| REOPEN-01 | 124 | Complete |
+| SPEECH-01 | 127 | Complete |
+| TOK-01 | 123 | Complete |
+| TOK-02 | 123 | Complete |
+| POLICY-01 | 127 | Complete |
+| PARITY-01 | 124 | Complete |
+| CLOSE-01 | 127 | Complete |
+| PERF-03 | 124 | Complete |

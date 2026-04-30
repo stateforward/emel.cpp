@@ -5,9 +5,9 @@
 EMEL is a deterministic C++ inference engine built around explicit Boost.SML orchestration, with
 runtime behavior modeled as explicit actors instead of ad hoc control flow. The repo now ships
 maintained GGUF generation slices, one explicit maintained trimodal embedding slice for
-`augmem/TE-75M-GGUF`, one maintained Sortformer diarization GGUF slice, and one maintained Whisper
-ASR GGUF slice, along with pluggable parity and benchmark tooling that compares EMEL against
-external reference engines without sharing runtime state.
+`augmem/TE-75M-GGUF`, and one maintained Sortformer diarization GGUF slice, along with pluggable
+parity and benchmark tooling that compares EMEL against external reference engines without sharing
+runtime state.
 
 ## Core Value
 
@@ -16,59 +16,19 @@ before widening API surface or model scope.
 
 ## Current State
 
-Current milestone: `v1.17 Text Generator Domain Alignment` final closeout
+Current milestone: none defined after `v1.15`
 
-Latest shipped milestone: `v1.16 ARM Whisper GGUF Parity And Performance`
+Latest shipped milestone: `v1.15 ARM Sortformer Diarization GGUF Slice`
 
-Status: `v1.17` is ready to complete after Phase 147. The canonical generative text actor is
-moved under `text/generator`, source-backed generator parity and benchmark proof is preserved, all
-`TEXTGEN-*` requirements are complete, and the required full closeout quality gate and final
-source-backed milestone audit both passed.
+Status: `v1.15` shipped on 2026-04-25 with ARM support for
+`openresearchtools/diar_streaming_sortformer_4spk-v2.1-gguf`. The shipped scope is one maintained
+Sortformer diarization GGUF slice with pinned fixture provenance, native EMEL-owned ARM execution,
+deterministic `T x 4` speaker-activity output, PyTorch/NeMo and ONNX parity proof, ONNX CPU
+single-thread benchmark reference proof, and EMEL-over-ONNX performance closure.
 
-Current planning focus: complete/archive `v1.17`.
+Current planning focus: define the next milestone before adding new active requirements or phases.
 
-## Active Closeout Milestone: v1.17 Text Generator Domain Alignment
-
-**Goal:** Move the canonical generative text actor to `text/generator` so generation ownership
-matches the text-domain layout and aligns with the existing `embeddings/generator` actor.
-
-**Implementation complete:** 2026-04-30 after Phase 147
-
-**Delivered:**
-- Established `src/emel/text/generator/**`, `emel/text/generator/**`, and
-  `emel::text::generator::sm` as the canonical generative text actor ownership contract.
-- Moved the generator parent actor, initializer, prefill child, tests, CMake wiring, and public
-  aliases under text-domain ownership.
-- Repaired generator wrapper SML rule violations so runtime choices stay in explicit
-  guard/transition orchestration.
-- Preserved maintained generation parity and benchmark proof while removing paritychecker and
-  benchmark dependencies on text-generator actor internals.
-- Added a public `event::capture_diagnostics` actor event for source-backed diagnostics evidence.
-- Closed reopened audit gaps with public graph lifecycle diagnostics, kernel-owned row-storage
-  sizing, stronger domain-boundary checks, explicit generator test-surface classification,
-  guard-owned route support, native-quantized route evidence, explicit compute outcome modeling,
-  and guard-accepted graph validation/bind/extract callbacks.
-
-## Previous Shipped Milestone: v1.16 ARM Whisper GGUF Parity And Performance
-
-**Goal:** Bring up one truthful maintained ARM Whisper tiny ASR GGUF slice through speech-owned
-runtime actors, exact transcript parity, and matched single-thread benchmark proof.
-
-**Shipped:** 2026-04-28
-
-**Delivered:**
-- Removed the top-level Whisper runtime domain; Whisper runtime actors now live under speech
-  encoder/decoder/tokenizer ownership while model binding stays in `model/whisper`.
-- Pinned and validated the maintained Whisper tokenizer/model/audio contract before dispatch.
-- Published exact transcript parity against the pinned `whisper.cpp` lane through the public
-  recognizer route.
-- Replaced hidden recognizer backend dispatch with explicit SML route states, transitions, guards,
-  and compile-time route policy wiring.
-- Removed decoder production dependency on encoder-owned Whisper detail helpers.
-- Published source-backed ARM single-thread evidence where EMEL beats the matched `whisper.cpp`
-  reference lane.
-
-## Previous Shipped Milestone: v1.15 ARM Sortformer Diarization GGUF Slice
+## Latest Shipped Milestone: v1.15 ARM Sortformer Diarization GGUF Slice
 
 **Goal:** Bring up one truthful maintained ARM diarization slice for
 `openresearchtools/diar_streaming_sortformer_4spk-v2.1-gguf`, using EMEL-owned loading,
@@ -275,24 +235,11 @@ truth anchor and without broadening into generic Liquid-family support.
 - ✓ v1.15 proved EMEL against lane-isolated PyTorch/NeMo and ONNX references on the maintained
   fixture and closed the performance contract by beating ONNX Runtime CPU single-thread in the
   strict Phase 93 generated record.
-- ✓ v1.16 moved Whisper runtime ownership out of top-level model-family domains and into
-  speech-owned encoder, decoder, tokenizer, and recognizer actors.
-- ✓ v1.16 proved exact recognizer-backed Whisper transcript parity against the pinned
-  `whisper.cpp` lane and kept EMEL/reference runtime state isolated.
-- ✓ v1.16 repaired hidden recognizer route dispatch, decoder ownership leaks, and benchmark
-  evidence stability before merge.
-- ✓ v1.17 moved the canonical generative text actor, initializer, and prefill child machines under
-  `src/emel/text/generator/**` with canonical namespace `emel::text::generator`.
-- ✓ v1.17 updated tests, tools, benchmark/parity surfaces, and domain-boundary checks so no stale
-  top-level generator ownership remains.
-- ✓ v1.17 closed source-backed SML/detail/test-surface audit gaps with public lifecycle events,
-  kernel-owned row sizing, component-private test classification, explicit route/outcome modeling,
-  and guard-accepted graph validation/bind/extract callbacks.
 
 ### Active
 
-- [ ] Run the full closeout quality gate and final source-backed audit for `v1.17`.
-- [ ] Define the next maintained milestone scope after `v1.17` closes.
+- No active milestone requirements are defined after `v1.15`.
+- Start `$gsd-new-milestone` before adding new active requirements.
 
 ### Out of Scope
 
@@ -303,19 +250,16 @@ truth anchor and without broadening into generic Liquid-family support.
 - Shared model, tokenizer, cache, or runtime objects between the EMEL lane and any reference lane
 - New model/runtime support added solely to demonstrate the benchmark registry
 - Broader performance tuning beyond the shipped maintained Sortformer ONNX single-thread closure
-- Decode extraction, sampler redesign, new generation model support, or public generation C ABI
-  expansion during the text-domain move
 
 ## Context
 
 This remains a brownfield repository with an existing codebase map under `.planning/codebase/`.
-The repo stays governed by `AGENTS.md` and `docs/rules/sml.rules.md`. `v1.17` is the active
-closeout milestone, and `v1.16` is the latest shipped milestone until the final v1.17 audit and
-completion step finish. The required v1.17 full closeout quality gate has passed. The current
-maintained state includes repo-owned EMEL generation, embedding, diarization, and Whisper ASR lanes
-plus pluggable reference backends that publish through canonical compare contracts without shared
-runtime state. The generative text actor now lives under `text/generator`, with maintained
-generation parity and benchmark proof still driven through public actor events.
+The repo stays governed by `AGENTS.md` and `docs/rules/sml.rules.md`. `v1.15` is now the latest
+shipped milestone. The current maintained state includes repo-owned EMEL generation, embedding, and
+diarization lanes plus pluggable reference backends that publish through canonical compare
+contracts without shared runtime state. Sortformer closeout evidence is source-backed from the
+pinned fixture through maintained loader/runtime, PyTorch/NeMo parity, ONNX CPU single-thread
+benchmark reference, generated benchmark docs, and the refreshed milestone audit.
 
 ## Constraints
 
@@ -332,14 +276,11 @@ generation parity and benchmark proof still driven through public actor events.
 - **Diarization scope**: Any future diarization widening must start from a new milestone and keep
   the shipped `v1.15` Sortformer slice truthful before broadening into general speech, ASR,
   streaming-service, or media-ingestion support.
-- **Text generator scope**: Moving `generator` to `text/generator` must be an ownership refactor;
-  it must not introduce new sampling semantics, model-family support, or performance claims.
 
 ## Key Decisions
 
 | Decision | Rationale | Outcome |
 |----------|-----------|---------|
-| Move the canonical generator actor to `text/generator` in v1.17 | The existing generator is a generative text actor, and placing it under the text domain aligns it with text tokenizer/formatter ownership and the established `embeddings/generator` top-level actor pattern | ✓ Implementation complete |
 | Start v1.15 as one maintained ARM Sortformer diarization GGUF slice | The user asked for ARM support for `openresearchtools/diar_streaming_sortformer_4spk-v2.1-gguf`; the model card defines a diarization contract, not generation or embedding behavior | ✓ Shipped |
 | Require native EMEL-owned Sortformer execution for the EMEL lane | Tool-only Python, ONNX, NeMo, llama.cpp, or ggml compute would not satisfy ARM support in `src/` and would violate lane-isolation expectations | ✓ Shipped |
 | Keep v1.15 input/output contracts narrow | Mono 16 kHz PCM, `T x 4` probabilities, and bounded four-speaker segments are enough to prove this slice without committing media decode, ASR, or broad streaming APIs | ✓ Shipped |
@@ -389,4 +330,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-04-30 after Phase 147 v1.17 closeout implementation*
+*Last updated: 2026-04-25 after shipping milestone v1.15*

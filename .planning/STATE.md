@@ -1,16 +1,16 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.17
-milestone_name: Text Generator Domain Alignment
-status: pr_opened
-stopped_at: PR #75 opened for v1.17; awaiting review and CI
-last_updated: "2026-04-30T19:56:44Z"
-last_activity: 2026-04-30
+milestone: v1.16
+milestone_name: ARM Whisper GGUF Parity And Performance
+status: pr_open
+stopped_at: PR #73 open for v1.16; archive/tag confirmation next after review
+last_updated: "2026-04-28T11:12:05Z"
+last_activity: 2026-04-28
 progress:
-  total_phases: 4
-  completed_phases: 4
-  total_plans: 4
-  completed_plans: 4
+  total_phases: 36
+  completed_phases: 36
+  total_plans: 8
+  completed_plans: 8
   percent: 100
 ---
 
@@ -18,22 +18,70 @@ progress:
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-04-28)
+See: .planning/PROJECT.md (updated 2026-04-25)
 
 **Core value:** Prove real end-to-end behavior with explicit SML orchestration and parity-oriented
 verification before widening API surface or model scope.
-**Current focus:** Review and merge PR #75 for v1.17 after the Phase 147 full gate and audit pass.
+**Current focus:** v1.16 has no source-backed blockers after Phase 127. Phases 128-129 closed the
+non-blocking audit tech debt around benchmark/evidence stability and encoder-detail helper
+deduplication, and PR #73 is open before archive/tag confirmation.
 
 ## Current Position
 
-Phase: 147
-Plan: 147-01 complete
-Status: Phase 147 closed the sixth source-backed audit blocker for `TEXTGEN-04` and `TEXTGEN-07`.
-Maintained graph validation, bind, and extract callbacks are now guard-accepted execution
-callbacks, and source regressions prove the old detail callback outcome path is no longer wired.
-The required full closeout quality gate and final source-backed milestone audit both passed. PR #75
-is open for review.
-Last activity: 2026-04-30
+Phase: 129
+Plan: Whisper Detail Helper Deduplication Cleanup
+Status: `v1.16` ARM Whisper GGUF Parity And Performance has all active requirements satisfied and
+no source-backed readiness blockers. Phase 128 closed the benchmark/evidence cleanup items, and
+Phase 129 removed stale duplicate decoder/timestamp helpers from encoder detail. Archive/tag
+confirmation is the next milestone-management step.
+
+Open PR: https://github.com/stateforward/emel.cpp/pull/73
+
+Closed gap sequence:
+
+- Phase 120: complete; decode-policy runtime behavior is wired through a speech-owned policy and
+  the hardcoded public decoder `token:<id>` transcript surface is removed.
+
+- Phase 121: complete; preserved-baseline Nyquist validation artifacts for Phases 94-102 are
+  backfilled with archived-baseline scope.
+
+- Phase 122: superseded by the 2026-04-28 public-recognizer source-backed audit; its closeout
+  evidence used bypass-lane compare and benchmark proof.
+
+- Phase 123: complete; maintained Whisper runtime has a public recognizer route through
+  `emel::speech::recognizer::sm`, with generic recognizer leak checks preserved.
+
+- Phase 124: complete; maintained compare and benchmark evidence now runs through the public
+  recognizer lane and publishes recognizer-backed metadata.
+
+- Phase 125: source-backed runtime evidence exists, but the latest audit supersedes its closeout
+  claim because recognizer route behavior still runs through hidden backend function pointers.
+
+- Phase 126: complete; hidden recognizer backend dispatch was replaced with explicit SML route
+  states/transitions/guards and compile-time route policy wiring.
+
+Final gap closure:
+
+- Phase 127: complete; decoder sequence/logit/timestamp-policy execution is no longer reached
+  through `speech/encoder/whisper/detail.hpp` from decoder production code, and `SPEECH-01`,
+  `POLICY-01`, and `CLOSE-01` are complete.
+
+Tech-debt closure:
+
+- Phase 128: complete; default Whisper single-thread closeout evidence now uses 20 measured
+  iterations with explicit 20,000 ppm process-wall tolerance, and Phase 122/125 prose is marked
+  superseded.
+
+- Phase 129: complete; duplicate decoder/timestamp helpers were removed from encoder detail,
+  decoder timestamp helper tests moved under the decoder test surface, and decoder production
+  files still do not include or alias encoder detail.
+
+The latest compare artifact records exact `[C]` parity through
+`emel.speech.recognizer.whisper`, and the latest default benchmark artifact records 20 iterations
+with EMEL faster than the matched `whisper.cpp` reference through the same public recognizer lane.
+`CLOSE-01` is complete after the Phase 127 source-backed audit rerun; Phases 128-129 are cleanup
+phases only.
+Last activity: 2026-04-28
 
 Progress: [##########] 100%
 
@@ -51,17 +99,18 @@ Items acknowledged and still deferred at milestone close on 2026-04-26:
 
 ## Performance Metrics
 
-**Latest reopened milestone:**
+**Latest completed milestone:**
 
-- Milestone: v1.17 Text Generator Domain Alignment
+- Milestone: v1.15 ARM Sortformer Diarization GGUF Slice
 
-- Current planning shape: Phase 147 complete; full closeout gate passed; source-backed audit
-  passed.
-- Latest shipped milestone: `v1.16 ARM Whisper GGUF Parity And Performance`.
+**Current planning shape:**
 
-- Next action: review/merge PR #75, then `$gsd-complete-milestone`.
-- Current blocker: none known in source, full-gate validation, or final source-backed audit after
-  Phase 147.
+- Active milestone: `v1.16` has all active requirements complete and Phases 128-129 closed the
+  non-blocking source-backed audit tech debt.
+- Latest shipped milestone: `v1.15`; v1.16 has not yet been archived/tagged.
+
+- Next action: review/merge PR #73, then run `$gsd-complete-milestone`.
+- Current blocker: none. The user-approved lint snapshot update passed `lint_snapshot`.
 
 ## Accumulated Context
 
@@ -389,7 +438,7 @@ Recent decisions affecting current work:
 
 ## Session Continuity
 
-Last session: 2026-04-30T19:23:23Z
-Stopped at: completed Phase 147 gap closure and full closeout gate for v1.17; next action is
-`$gsd-audit-milestone`.
+Last session: 2026-04-27T20:17:18Z
+Stopped at: completed Phase 117 compare failure contract repair; next action is
+`$gsd-plan-phase 118`.
 Resume file: None
