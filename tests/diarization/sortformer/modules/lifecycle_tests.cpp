@@ -1,5 +1,6 @@
 #include <array>
 #include <cstring>
+#include <memory>
 #include <span>
 #include <string_view>
 
@@ -72,11 +73,11 @@ void build_modules_model(emel::model::data & model,
 }  // namespace
 
 TEST_CASE("sortformer modules bind maintained tensor contract") {
-  emel::model::data model = {};
-  build_modules_model(model, true, true);
+  auto model = std::make_unique<emel::model::data>();
+  build_modules_model(*model, true, true);
 
   modules_detail::contract contract = {};
-  REQUIRE(modules_detail::bind_contract(model, contract));
+  REQUIRE(modules_detail::bind_contract(*model, contract));
   CHECK(contract.tensor_count == static_cast<uint32_t>(modules_detail::k_tensor_count));
   CHECK(contract.encoder_projection_weight.name == "mods.ep.w");
   CHECK(contract.hidden_to_speaker_weight.name == "mods.h2s.w");
@@ -84,19 +85,19 @@ TEST_CASE("sortformer modules bind maintained tensor contract") {
 }
 
 TEST_CASE("sortformer modules reject missing maintained tensor") {
-  emel::model::data model = {};
-  build_modules_model(model, false, true);
+  auto model = std::make_unique<emel::model::data>();
+  build_modules_model(*model, false, true);
 
   modules_detail::contract contract = {};
-  CHECK_FALSE(modules_detail::bind_contract(model, contract));
+  CHECK_FALSE(modules_detail::bind_contract(*model, contract));
 }
 
 TEST_CASE("sortformer modules reject maintained shape drift") {
-  emel::model::data model = {};
-  build_modules_model(model, true, false);
+  auto model = std::make_unique<emel::model::data>();
+  build_modules_model(*model, true, false);
 
   modules_detail::contract contract = {};
-  CHECK_FALSE(modules_detail::bind_contract(model, contract));
+  CHECK_FALSE(modules_detail::bind_contract(*model, contract));
 }
 
 TEST_CASE("sortformer speaker cache reset write and read are deterministic") {

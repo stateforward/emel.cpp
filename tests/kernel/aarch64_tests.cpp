@@ -355,6 +355,67 @@ TEST_CASE("kernel_aarch64_prepared_f32_lhs_4row_matches_scalar_with_depth_and_ta
 #endif
 }
 
+TEST_CASE("kernel_aarch64_prepared_f32_lhs_4row_accumulates_twelve_column_depth_blocks") {
+#if !(defined(__aarch64__) || defined(__ARM_NEON))
+  return;
+#else
+  constexpr uint64_t k = 520;
+  constexpr uint64_t m = 5;
+  constexpr uint64_t n = 12;
+
+  std::vector<float> src0(static_cast<size_t>(k * m), 0.0f);
+  std::vector<float> src1(static_cast<size_t>(k * n), 0.0f);
+  std::vector<float> dst_prepared(static_cast<size_t>(n * m), 0.0f);
+  std::vector<float> dst_scalar(static_cast<size_t>(n * m), 0.0f);
+  std::vector<float> prepared(
+      static_cast<size_t>(
+          emel::kernel::aarch64::detail::prepared_f32_lhs_4row_value_count(k, m)),
+      0.0f);
+
+  for (uint64_t index = 0; index < src0.size(); ++index) {
+    const int64_t centered = static_cast<int64_t>((index * 11u) % 47u) - 23;
+    src0[static_cast<size_t>(index)] = static_cast<float>(centered) * 0.0078125f;
+  }
+  for (uint64_t index = 0; index < src1.size(); ++index) {
+    const int64_t centered = static_cast<int64_t>((index * 13u) % 53u) - 26;
+    src1[static_cast<size_t>(index)] = static_cast<float>(centered) * 0.00390625f;
+  }
+  std::fill(dst_prepared.begin(), dst_prepared.end(), std::numeric_limits<float>::quiet_NaN());
+
+  REQUIRE(emel::kernel::aarch64::detail::prepare_neon_mul_mat_f32_lhs_4row(
+      src0.data(),
+      k,
+      m,
+      prepared.data(),
+      static_cast<uint64_t>(prepared.size())));
+
+  const emel::kernel::event::op_mul_mat prepared_ev{
+      .src0 = make_src(src0.data(), dtype::f32, k, m),
+      .src1 = make_src(src1.data(), dtype::f32, n, k),
+      .dst = make_dst(dst_prepared.data(), dtype::f32, n, m),
+      .nth = 1,
+  };
+  const emel::kernel::event::op_mul_mat scalar_ev{
+      .src0 = make_src(src0.data(), dtype::f32, k, m),
+      .src1 = make_src(src1.data(), dtype::f32, n, k),
+      .dst = make_dst(dst_scalar.data(), dtype::f32, n, m),
+      .nth = 1,
+  };
+
+  CHECK(emel::kernel::aarch64::detail::execute_neon_mul_mat_prepared_f32_lhs_4row(
+      prepared_ev,
+      prepared.data(),
+      static_cast<uint64_t>(prepared.size())));
+  CHECK(emel::kernel::detail::execute_scalar(scalar_ev));
+
+  for (uint64_t index = 0; index < dst_prepared.size(); ++index) {
+    CHECK(std::isfinite(dst_prepared[static_cast<size_t>(index)]));
+    CHECK(dst_prepared[static_cast<size_t>(index)] ==
+          doctest::Approx(dst_scalar[static_cast<size_t>(index)]).epsilon(1e-5f));
+  }
+#endif
+}
+
 TEST_CASE("kernel_aarch64_prepared_f32_lhs_4row_rejects_invalid_contract") {
 #if !(defined(__aarch64__) || defined(__ARM_NEON))
   return;

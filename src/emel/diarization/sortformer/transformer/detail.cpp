@@ -113,12 +113,11 @@ float compute_head_score(std::span<const float, k_max_frame_count * k_hidden_dim
                          uint32_t query_frame,
                          uint32_t key_frame,
                          size_t head_offset) noexcept {
-  float acc = 0.0f;
   const size_t query_base = (static_cast<size_t>(query_frame) * k_hidden_dim) + head_offset;
   const size_t key_base = (static_cast<size_t>(key_frame) * k_hidden_dim) + head_offset;
-  for (size_t dim = 0u; dim < static_cast<size_t>(k_attention_head_dim); ++dim) {
-    acc += query[query_base + dim] * key[key_base + dim];
-  }
+  const float acc =
+      emel::diarization::sortformer::detail::compute_dot_24(query.data() + query_base,
+                                                            key.data() + key_base);
 
   return acc / std::sqrt(static_cast<float>(k_attention_head_dim));
 }
@@ -147,15 +146,16 @@ void compute_head_attention(std::span<const float, k_max_frame_count * k_hidden_
     normalizer += weight;
   }
 
-  for (size_t dim = 0u; dim < static_cast<size_t>(k_attention_head_dim); ++dim) {
-    float acc = 0.0f;
-    for (uint32_t frame_index = 0u; frame_index < frame_count; ++frame_index) {
-      const size_t value_offset =
-          (static_cast<size_t>(frame_index) * k_hidden_dim) + head_offset + dim;
-      acc += (scores[frame_index] / normalizer) * value[value_offset];
-    }
-    attended[head_offset + dim] = acc;
+  const float inv_normalizer = 1.0f / normalizer;
+  for (uint32_t frame_index = 0u; frame_index < frame_count; ++frame_index) {
+    scores[frame_index] *= inv_normalizer;
   }
+  emel::diarization::sortformer::detail::compute_weighted_sum_24(
+      scores.data(),
+      value.data() + head_offset,
+      static_cast<size_t>(k_hidden_dim),
+      static_cast<size_t>(frame_count),
+      attended.data() + head_offset);
 }
 
 }  // namespace

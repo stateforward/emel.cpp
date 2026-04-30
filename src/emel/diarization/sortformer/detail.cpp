@@ -2,6 +2,10 @@
 
 #include <cstddef>
 
+#if defined(__aarch64__) || defined(__ARM_NEON)
+#include <arm_neon.h>
+#endif
+
 #include "emel/kernel/aarch64/actions.hpp"
 #include "emel/kernel/detail.hpp"
 #include "emel/kernel/events.hpp"
@@ -9,6 +13,28 @@
 namespace emel::diarization::sortformer::detail {
 
 namespace {
+
+#if defined(__aarch64__) || defined(__ARM_NEON)
+float compute_neon_horizontal_sum(const float32x4_t value) noexcept {
+#if defined(__aarch64__)
+  return vaddvq_f32(value);
+#else
+  const float32x2_t lanes = vadd_f32(vget_low_f32(value), vget_high_f32(value));
+  const float32x2_t sum = vpadd_f32(lanes, lanes);
+  return vget_lane_f32(sum, 0);
+#endif
+}
+
+float32x4_t compute_neon_fma(const float32x4_t acc,
+                             const float32x4_t lhs,
+                             const float32x4_t rhs) noexcept {
+#if defined(__aarch64__)
+  return vfmaq_f32(acc, lhs, rhs);
+#else
+  return vmlaq_f32(acc, lhs, rhs);
+#endif
+}
+#endif
 
 bool run_dense_matmul(std::span<const float> input,
                       std::span<const float> weights,
@@ -233,6 +259,166 @@ bool run_dense_batch_matmul_from_transposed_prepared(
 }
 
 }  // namespace
+
+float compute_dot_64(const float *lhs, const float *rhs) noexcept {
+#if defined(__aarch64__) || defined(__ARM_NEON)
+  float32x4_t acc0 = vdupq_n_f32(0.0f);
+  float32x4_t acc1 = vdupq_n_f32(0.0f);
+  float32x4_t acc2 = vdupq_n_f32(0.0f);
+  float32x4_t acc3 = vdupq_n_f32(0.0f);
+  for (size_t dim = 0u; dim < 64u; dim += 16u) {
+    acc0 = compute_neon_fma(acc0, vld1q_f32(lhs + dim), vld1q_f32(rhs + dim));
+    acc1 = compute_neon_fma(acc1, vld1q_f32(lhs + dim + 4u),
+                            vld1q_f32(rhs + dim + 4u));
+    acc2 = compute_neon_fma(acc2, vld1q_f32(lhs + dim + 8u),
+                            vld1q_f32(rhs + dim + 8u));
+    acc3 = compute_neon_fma(acc3, vld1q_f32(lhs + dim + 12u),
+                            vld1q_f32(rhs + dim + 12u));
+  }
+
+  return compute_neon_horizontal_sum(vaddq_f32(vaddq_f32(acc0, acc1),
+                                               vaddq_f32(acc2, acc3)));
+#else
+  float acc = 0.0f;
+  for (size_t dim = 0u; dim < 64u; ++dim) {
+    acc += lhs[dim] * rhs[dim];
+  }
+  return acc;
+#endif
+}
+
+float compute_dot_24(const float *lhs, const float *rhs) noexcept {
+#if defined(__aarch64__) || defined(__ARM_NEON)
+  float32x4_t acc0 = vdupq_n_f32(0.0f);
+  float32x4_t acc1 = vdupq_n_f32(0.0f);
+  float32x4_t acc2 = vdupq_n_f32(0.0f);
+  for (size_t dim = 0u; dim < 24u; dim += 12u) {
+    acc0 = compute_neon_fma(acc0, vld1q_f32(lhs + dim), vld1q_f32(rhs + dim));
+    acc1 = compute_neon_fma(acc1, vld1q_f32(lhs + dim + 4u),
+                            vld1q_f32(rhs + dim + 4u));
+    acc2 = compute_neon_fma(acc2, vld1q_f32(lhs + dim + 8u),
+                            vld1q_f32(rhs + dim + 8u));
+  }
+
+  return compute_neon_horizontal_sum(vaddq_f32(vaddq_f32(acc0, acc1), acc2));
+#else
+  float acc = 0.0f;
+  for (size_t dim = 0u; dim < 24u; ++dim) {
+    acc += lhs[dim] * rhs[dim];
+  }
+  return acc;
+#endif
+}
+
+void compute_weighted_sum_64(const float *weights,
+                             const float *values,
+                             const size_t value_stride,
+                             const size_t value_count,
+                             float *output) noexcept {
+#if defined(__aarch64__) || defined(__ARM_NEON)
+  float32x4_t acc0 = vdupq_n_f32(0.0f);
+  float32x4_t acc1 = vdupq_n_f32(0.0f);
+  float32x4_t acc2 = vdupq_n_f32(0.0f);
+  float32x4_t acc3 = vdupq_n_f32(0.0f);
+  float32x4_t acc4 = vdupq_n_f32(0.0f);
+  float32x4_t acc5 = vdupq_n_f32(0.0f);
+  float32x4_t acc6 = vdupq_n_f32(0.0f);
+  float32x4_t acc7 = vdupq_n_f32(0.0f);
+  float32x4_t acc8 = vdupq_n_f32(0.0f);
+  float32x4_t acc9 = vdupq_n_f32(0.0f);
+  float32x4_t acc10 = vdupq_n_f32(0.0f);
+  float32x4_t acc11 = vdupq_n_f32(0.0f);
+  float32x4_t acc12 = vdupq_n_f32(0.0f);
+  float32x4_t acc13 = vdupq_n_f32(0.0f);
+  float32x4_t acc14 = vdupq_n_f32(0.0f);
+  float32x4_t acc15 = vdupq_n_f32(0.0f);
+  for (size_t index = 0u; index < value_count; ++index) {
+    const float32x4_t weight = vdupq_n_f32(weights[index]);
+    const float *row = values + (index * value_stride);
+    acc0 = compute_neon_fma(acc0, weight, vld1q_f32(row));
+    acc1 = compute_neon_fma(acc1, weight, vld1q_f32(row + 4u));
+    acc2 = compute_neon_fma(acc2, weight, vld1q_f32(row + 8u));
+    acc3 = compute_neon_fma(acc3, weight, vld1q_f32(row + 12u));
+    acc4 = compute_neon_fma(acc4, weight, vld1q_f32(row + 16u));
+    acc5 = compute_neon_fma(acc5, weight, vld1q_f32(row + 20u));
+    acc6 = compute_neon_fma(acc6, weight, vld1q_f32(row + 24u));
+    acc7 = compute_neon_fma(acc7, weight, vld1q_f32(row + 28u));
+    acc8 = compute_neon_fma(acc8, weight, vld1q_f32(row + 32u));
+    acc9 = compute_neon_fma(acc9, weight, vld1q_f32(row + 36u));
+    acc10 = compute_neon_fma(acc10, weight, vld1q_f32(row + 40u));
+    acc11 = compute_neon_fma(acc11, weight, vld1q_f32(row + 44u));
+    acc12 = compute_neon_fma(acc12, weight, vld1q_f32(row + 48u));
+    acc13 = compute_neon_fma(acc13, weight, vld1q_f32(row + 52u));
+    acc14 = compute_neon_fma(acc14, weight, vld1q_f32(row + 56u));
+    acc15 = compute_neon_fma(acc15, weight, vld1q_f32(row + 60u));
+  }
+
+  vst1q_f32(output, acc0);
+  vst1q_f32(output + 4u, acc1);
+  vst1q_f32(output + 8u, acc2);
+  vst1q_f32(output + 12u, acc3);
+  vst1q_f32(output + 16u, acc4);
+  vst1q_f32(output + 20u, acc5);
+  vst1q_f32(output + 24u, acc6);
+  vst1q_f32(output + 28u, acc7);
+  vst1q_f32(output + 32u, acc8);
+  vst1q_f32(output + 36u, acc9);
+  vst1q_f32(output + 40u, acc10);
+  vst1q_f32(output + 44u, acc11);
+  vst1q_f32(output + 48u, acc12);
+  vst1q_f32(output + 52u, acc13);
+  vst1q_f32(output + 56u, acc14);
+  vst1q_f32(output + 60u, acc15);
+#else
+  for (size_t dim = 0u; dim < 64u; ++dim) {
+    float acc = 0.0f;
+    for (size_t index = 0u; index < value_count; ++index) {
+      acc += weights[index] * values[(index * value_stride) + dim];
+    }
+    output[dim] = acc;
+  }
+#endif
+}
+
+void compute_weighted_sum_24(const float *weights,
+                             const float *values,
+                             const size_t value_stride,
+                             const size_t value_count,
+                             float *output) noexcept {
+#if defined(__aarch64__) || defined(__ARM_NEON)
+  float32x4_t acc0 = vdupq_n_f32(0.0f);
+  float32x4_t acc1 = vdupq_n_f32(0.0f);
+  float32x4_t acc2 = vdupq_n_f32(0.0f);
+  float32x4_t acc3 = vdupq_n_f32(0.0f);
+  float32x4_t acc4 = vdupq_n_f32(0.0f);
+  float32x4_t acc5 = vdupq_n_f32(0.0f);
+  for (size_t index = 0u; index < value_count; ++index) {
+    const float32x4_t weight = vdupq_n_f32(weights[index]);
+    const float *row = values + (index * value_stride);
+    acc0 = compute_neon_fma(acc0, weight, vld1q_f32(row));
+    acc1 = compute_neon_fma(acc1, weight, vld1q_f32(row + 4u));
+    acc2 = compute_neon_fma(acc2, weight, vld1q_f32(row + 8u));
+    acc3 = compute_neon_fma(acc3, weight, vld1q_f32(row + 12u));
+    acc4 = compute_neon_fma(acc4, weight, vld1q_f32(row + 16u));
+    acc5 = compute_neon_fma(acc5, weight, vld1q_f32(row + 20u));
+  }
+
+  vst1q_f32(output, acc0);
+  vst1q_f32(output + 4u, acc1);
+  vst1q_f32(output + 8u, acc2);
+  vst1q_f32(output + 12u, acc3);
+  vst1q_f32(output + 16u, acc4);
+  vst1q_f32(output + 20u, acc5);
+#else
+  for (size_t dim = 0u; dim < 24u; ++dim) {
+    float acc = 0.0f;
+    for (size_t index = 0u; index < value_count; ++index) {
+      acc += weights[index] * values[(index * value_stride) + dim];
+    }
+    output[dim] = acc;
+  }
+#endif
+}
 
 bool prepare_dense_weight_cache(std::span<const float> weights,
                                 const size_t input_dim,

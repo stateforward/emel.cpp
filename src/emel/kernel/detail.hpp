@@ -1624,8 +1624,8 @@ inline bool has_valid_tensor_layout(const tensor_type & tensor) noexcept {
   const uint64_t elem_size = dtype_size_bytes(dtype_code(tensor.type));
   const bool elem_valid = elem_size != 0u;
   const bool explicit_stride = tensor.nb[0] != 0u;
-  const bool aligned_stride =
-      explicit_stride && tensor.nb[0] >= elem_size && (tensor.nb[0] % elem_size) == 0u;
+  const bool aligned_stride = elem_valid && explicit_stride && tensor.nb[0] >= elem_size &&
+      (tensor.nb[0] % elem_size) == 0u;
 
   bool dims_valid = true;
   for (size_t i = 0; i < 4; ++i) {
