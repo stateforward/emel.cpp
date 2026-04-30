@@ -9,11 +9,11 @@
 #include "emel/embeddings/generator/errors.hpp"
 #include "emel/embeddings/generator/sm.hpp"
 #include "emel/error/error.hpp"
-#include "emel/generator/initializer/sm.hpp"
-#include "emel/generator/prefill/sm.hpp"
 #include "emel/sm.hpp"
 #include "emel/text/conditioner/sm.hpp"
 #include "emel/text/formatter/format.hpp"
+#include "emel/text/generator/initializer/sm.hpp"
+#include "emel/text/generator/prefill/sm.hpp"
 #include "emel/text/tokenizer/sm.hpp"
 #include "te_fixture.hpp"
 
@@ -82,36 +82,36 @@ inline uint64_t hash_tensor_metadata(const emel::model::data & model) noexcept {
 }
 
 inline void warm_generator_sm_introspection_paths() {
-  using initializer_machine = boost::sml::sm<emel::generator::initializer::model>;
+  using initializer_machine = boost::sml::sm<emel::text::generator::initializer::model>;
   using initializer_states = typename initializer_machine::states;
   using initializer_transitions = typename initializer_machine::transitions;
-  using prefill_machine = boost::sml::sm<emel::generator::prefill::model>;
+  using prefill_machine = boost::sml::sm<emel::text::generator::prefill::model>;
   using prefill_states = typename prefill_machine::states;
   using prefill_transitions = typename prefill_machine::transitions;
 
   (void) emel::detail::type_list_contains<
-      emel::generator::initializer::preparing_backend_decision,
+      emel::text::generator::initializer::preparing_backend_decision,
       initializer_states>::value;
   (void) emel::detail::type_list_contains<
-      emel::generator::initializer::binding_conditioner,
+      emel::text::generator::initializer::binding_conditioner,
       initializer_states>::value;
   (void) emel::detail::type_list_contains<
-      emel::generator::initializer::binding_conditioner_decision,
+      emel::text::generator::initializer::binding_conditioner_decision,
       initializer_states>::value;
   (void) emel::detail::type_list_contains<
-      emel::generator::initializer::reserving_graph_decision,
+      emel::text::generator::initializer::reserving_graph_decision,
       initializer_states>::value;
   (void) emel::detail::type_list_contains<
-      emel::generator::initializer::configuring_sampler_decision,
+      emel::text::generator::initializer::configuring_sampler_decision,
       initializer_states>::value;
   (void) emel::detail::type_list_contains<
-      emel::generator::prefill::contract_flash_decision,
+      emel::text::generator::prefill::contract_flash_decision,
       prefill_states>::value;
   (void) emel::detail::type_list_contains<
-      emel::generator::prefill::contract_nonflash_decision,
+      emel::text::generator::prefill::contract_nonflash_decision,
       prefill_states>::value;
   (void) emel::detail::type_list_contains<
-      emel::generator::prefill::compute_result_decision,
+      emel::text::generator::prefill::compute_result_decision,
       prefill_states>::value;
 
   for_each_type(initializer_transitions{}, [&]<class transition_t>() {

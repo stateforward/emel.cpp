@@ -1,5 +1,85 @@
 # Project Milestones: EMEL
 
+## v1.17 Text Generator Domain Alignment (Ready To Complete: 2026-04-30)
+
+**Phases completed:** 18 phases, including Phase 147 final gap closure.
+
+**Delivered:** EMEL now owns the canonical generative text actor under `text/generator`, with
+generator parent, initializer, prefill child, tests, tools, paritychecker, benchmarks, and
+domain-boundary checks aligned to text-domain ownership without changing generation behavior. The
+milestone was reopened on 2026-04-29 for source-backed audit gap closure. Phases 144 through 147
+closed the live source-backed route and outcome ownership blockers found by refreshed audits. Phase
+147 removed the final graph validation, bind, and extract callback outcome bypass so all 7 active
+`TEXTGEN-*` requirements are implementation-complete. The required full closeout quality gate and
+final source-backed milestone audit both passed.
+
+**Key accomplishments:**
+
+- Established `src/emel/text/generator/**`, `emel/text/generator/**`, and
+  `emel::text::generator::sm` as the canonical generator ownership contract.
+
+- Moved generator actor source, child machines, tests, CMake wiring, and public aliases to the
+  text-domain layout.
+
+- Repaired generator wrapper SML rule violations so runtime decisions stay in explicit
+  guard/transition orchestration instead of wrapper-side branching.
+
+- Backfilled moved-generator coverage and Nyquist evidence until the scoped generator/runtime gate
+  passed the maintained coverage thresholds.
+
+- Removed paritychecker and benchmark publication proof dependencies on text-generator actor
+  internals, replacing diagnostic reads with a public `event::capture_diagnostics` actor event.
+
+- Closed earlier source-backed audit gaps by documenting the existing `src` include-root truth,
+  extending domain-boundary checks for hidden parity/benchmark bridges, replacing graph lifecycle
+  context accessors with a public event, moving dtype row sizing to kernel ownership, and
+  classifying generator test surfaces.
+
+- Published refreshed source-backed milestone audits, then closed the remaining `TEXTGEN-04` and
+  `TEXTGEN-07` blockers through Phases 144-147, ending with the graph callback outcome ownership
+  closure.
+
+**Audit:** Passed final source-backed rerun after the Phase 147 full closeout quality gate. The
+obsolete Phase 143 shipped claim is superseded by the reopened Phase 144-147 source-backed closure
+chain.
+
+**Known deferred items at close:** 5 old non-phase items acknowledged and deferred; see
+`.planning/STATE.md` `Deferred Items`.
+
+---
+
+## v1.16 ARM Whisper GGUF Parity And Performance (Shipped: 2026-04-28)
+
+**Phases completed:** 36 phases, 8 plans
+
+**Delivered:** EMEL now ships one maintained ARM Whisper tiny GGUF ASR slice with speech-owned
+runtime actors, recognizer-backed exact transcript parity against the pinned `whisper.cpp` lane,
+matched single-thread ARM benchmark proof, and source-backed closeout evidence.
+
+**Key accomplishments:**
+
+- Removed top-level Whisper runtime ownership; model-family binding remains in `model/whisper`
+  while runtime behavior lives under speech encoder, decoder, tokenizer, and recognizer actors.
+
+- Pinned and validated the maintained Whisper tokenizer/model/audio contract before dispatch.
+
+- Published exact recognizer-backed transcript parity against the pinned `whisper.cpp` lane while
+  preserving EMEL/reference lane isolation.
+
+- Replaced hidden recognizer backend function-pointer dispatch with explicit SML route states,
+  guards, transitions, and compile-time route policy wiring.
+
+- Repaired decoder ownership so decoder runtime execution no longer depends on encoder-owned
+  Whisper detail helpers.
+
+- Stabilized closeout benchmark evidence and published ARM single-thread proof where EMEL beats
+  the matched `whisper.cpp` reference lane.
+
+**Audit:** Latest source-backed audit passed after Phase 127; Phases 128-129 closed non-blocking
+benchmark/evidence and helper-deduplication tech debt before merge.
+
+---
+
 ## v1.15 ARM Sortformer Diarization GGUF Slice (Shipped: 2026-04-25)
 
 **Phases completed:** 24 phases, 24 plans

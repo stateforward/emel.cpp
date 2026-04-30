@@ -98,7 +98,7 @@ run_domain_boundary_gate() {
 is_coverage_excluded_src_file() {
   local file="$1"
   case "$file" in
-    src/emel/*/sm.hpp)
+    src/emel/*/sm.hpp|src/emel/**/*/sm.hpp)
       return 0
       ;;
   esac
@@ -139,6 +139,9 @@ add_changed_file() {
       ;;
   esac
   case "$file" in
+    tests/text/generator/*)
+      add_test_shard generator_and_runtime
+      ;;
     tests/text/encoders/plamo2_tests.cpp)
       add_test_shard text_encoder_plamo2
       ;;
@@ -178,7 +181,7 @@ infer_test_shard_for_src() {
     src/emel/model/*|src/emel/model*.hpp|src/emel/gguf/*|src/emel/gbnf/*|src/emel/batch/*)
       add_test_shard model_and_batch
       ;;
-    src/emel/generator/*|src/emel/embeddings/*|src/emel/logits/*|src/emel/token/*)
+    src/emel/text/generator/*|src/emel/embeddings/*|src/emel/logits/*|src/emel/token/*)
       add_test_shard generator_and_runtime
       ;;
     src/emel/diarization/*)
@@ -355,7 +358,7 @@ infer_quality_gate_scope() {
       scripts/setup_diarization_pytorch_ref_env.sh)
         add_bench_suite diarization_sortformer
         ;;
-      src/emel/generator/*|tools/bench/generation*|scripts/bench_generation*)
+      src/emel/text/generator/*|tools/bench/generation*|scripts/bench_generation*)
         add_bench_suite generation
         ;;
       src/emel/batch/*|tests/batch/*)

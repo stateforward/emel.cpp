@@ -1578,6 +1578,28 @@ inline size_t quantized_row_storage_bytes(const uint8_t code, const uint64_t col
   return 0u;
 }
 
+inline size_t row_storage_bytes_for_dtype(const uint8_t code, const uint64_t cols) noexcept {
+  if (code == dtype_f32) {
+    return static_cast<size_t>(cols) * sizeof(float);
+  }
+  if (code == dtype_q8_0_x4_bl4 || code == dtype_q8_0_x4_bl8) {
+    return quant::packed_q8_0_x4_group_storage_bytes(cols);
+  }
+  if (code == dtype_q4_k_x8_bl4 || code == dtype_q4_k_x8_bl8) {
+    return quant::packed_q4_k_x8_group_storage_bytes(cols);
+  }
+  if (code == dtype_q6_k_x8) {
+    return quant::packed_q6_k_x8_group_storage_bytes(cols);
+  }
+  if (code == dtype_q6_k_x8_q8_prepared) {
+    return quant::prepared_q6_k_x8_q8_group_storage_bytes(cols);
+  }
+  if (code == dtype_q6_k_x8_q8_argmax_prepared) {
+    return quant::argmax_prepared_q6_k_x8_q8_group_storage_bytes(cols);
+  }
+  return quantized_row_storage_bytes(code, cols);
+}
+
 template <class tensor_type>
 inline uint64_t tensor_element_count(const tensor_type & tensor) noexcept {
   uint64_t count = 1;

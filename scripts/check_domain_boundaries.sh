@@ -24,6 +24,14 @@ check_no_matches "forbidden model-family runtime roots" \
   'emel/whisper|namespace emel::whisper|kernel/whisper|kernel::whisper|model/whisper/(runtime|inference|encoder|decoder)|model::whisper::(runtime|inference|encoder|decoder)|speech/asr/whisper|speech::asr::whisper|speech/whisper|speech::whisper|recognizer/detail/whisper|recognizer::detail::whisper' \
   src tests tools CMakeLists.txt
 
+check_no_matches "legacy text generator root" \
+  'emel/generator|emel::generator|namespace emel::generator|src/emel/generator|tests/generator' \
+  src tests tools scripts/quality_gates.sh scripts/test_with_coverage.sh CMakeLists.txt
+
+check_no_matches "text generator actor internals in maintained generation parity/benchmark lanes" \
+  'emel/text/generator/(detail|actions|guards)\.hpp|emel::text::generator::(detail|action|guard)::|emel::text::generator::prefill::guard::|generation_internal_diagnostics' \
+  tools/bench/generation_bench.cpp tools/paritychecker/parity_runner.cpp tools/paritychecker/parity_runner.hpp
+
 check_no_matches "Whisper leaked into generic speech recognizer" \
   'whisper|model/whisper|speech/tokenizer/whisper|speech/encoder/whisper|speech/decoder/whisper|model::whisper|tokenizer::whisper|encoder::whisper|decoder::whisper' \
   src/emel/speech/recognizer tests/speech/recognizer

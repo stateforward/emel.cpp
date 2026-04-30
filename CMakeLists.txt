@@ -111,11 +111,11 @@ if(EMEL_ENABLE_TESTS)
     tests/gbnf/lexer_tests.cpp
     tests/gbnf/parser_tests.cpp
     tests/gbnf/sampler_tests.cpp
-    tests/generator/lifecycle_tests.cpp
-    tests/generator/action_guard_tests.cpp
-    tests/generator/detail_tests.cpp
-    tests/generator/initializer/lifecycle_tests.cpp
-    tests/generator/prefill/lifecycle_tests.cpp
+    tests/text/generator/lifecycle_tests.cpp
+    tests/text/generator/action_guard_tests.cpp
+    tests/text/generator/detail_tests.cpp
+    tests/text/generator/initializer/lifecycle_tests.cpp
+    tests/text/generator/prefill/lifecycle_tests.cpp
     tests/diarization/request/lifecycle_tests.cpp
     tests/diarization/sortformer/encoder/lifecycle_tests.cpp
     tests/diarization/sortformer/executor/lifecycle_tests.cpp
@@ -219,7 +219,7 @@ if(EMEL_ENABLE_TESTS)
         if((test_shard STREQUAL "model_and_batch" AND
               test_source MATCHES "^tests/(model|gguf|gbnf|batch)/") OR
            (test_shard STREQUAL "generator_and_runtime" AND
-              test_source MATCHES "^tests/(generator|embeddings|logits|token)/") OR
+              test_source MATCHES "^tests/(text/generator|embeddings|logits|token)/") OR
            (test_shard STREQUAL "diarization" AND
               test_source MATCHES "^tests/diarization/") OR
            (test_shard STREQUAL "speech" AND
@@ -296,7 +296,7 @@ if(EMEL_ENABLE_TESTS)
   )
   emel_add_doctest_shard(
     generator_and_runtime
-    "*tests/generator/*,*tests/embeddings/*,*tests/logits/*,*tests/token/*"
+    "*tests/text/generator/*,*tests/embeddings/*,*tests/logits/*,*tests/token/*"
   )
   emel_add_doctest_shard(
     diarization
