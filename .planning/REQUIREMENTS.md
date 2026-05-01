@@ -9,18 +9,18 @@ parity-oriented verification before widening API surface or model scope.
 
 ### Dependency Pin
 
-- [ ] **DEP-01**: Maintainer can identify the current EMEL SML pin and the intended newer
+- [x] **DEP-01**: Maintainer can identify the current EMEL SML pin and the intended newer
   `stateforward/sml.cpp` upstream commit before changing the dependency.
-- [ ] **DEP-02**: Maintainer can build EMEL against the intended newer `stateforward/sml.cpp`
+- [x] **DEP-02**: Maintainer can build EMEL against the intended newer `stateforward/sml.cpp`
   commit pinned in `cmake/sml_version.cmake`.
-- [ ] **DEP-03**: Maintainer can explain whether EMEL relies on any upstream legacy SML
+- [x] **DEP-03**: Maintainer can explain whether EMEL relies on any upstream legacy SML
   compatibility shim, with each exception documented and bounded.
 
 ### Source Migration
 
-- [ ] **SRC-01**: Maintainer can include SML through the preferred upstream
+- [x] **SRC-01**: Maintainer can include SML through the preferred upstream
   `stateforward` include path in project-owned code where that path is supported.
-- [ ] **SRC-02**: Maintainer can use `stateforward::sml` naming in project-owned source,
+- [x] **SRC-02**: Maintainer can use `stateforward::sml` naming in project-owned source,
   tests, and tools without changing actor behavior.
 - [ ] **SRC-03**: Maintainer can verify that SML transition tables, logger wiring,
   `unexpected_event`, dispatch tables, and state inspection still compile and behave after the
@@ -71,11 +71,11 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| DEP-01 | Phase 173 | Pending |
-| DEP-02 | Phase 173 | Pending |
-| DEP-03 | Phase 173 | Pending |
-| SRC-01 | Phase 173 | Pending |
-| SRC-02 | Phase 173 | Pending |
+| DEP-01 | Phase 173 | Complete |
+| DEP-02 | Phase 173 | Complete |
+| DEP-03 | Phase 173 | Complete |
+| SRC-01 | Phase 173 | Complete |
+| SRC-02 | Phase 173 | Complete |
 | SRC-03 | Phase 174 | Pending |
 | DOC-01 | Phase 175 | Pending |
 | DOC-02 | Phase 175 | Pending |
