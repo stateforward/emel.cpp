@@ -60,7 +60,7 @@ manifests.
   request/result contract and process-level extension seam.
 - [x] **Phase 159: Benchmark Runner Discovery And Registration** - Replace broad static case
   registration with localized runner metadata/discovery.
-- [ ] **Phase 160: Benchmark Independent Build Targets** - Split CMake/build wiring so runners can
+- [x] **Phase 160: Benchmark Independent Build Targets** - Split CMake/build wiring so runners can
   build independently and additions stay local.
 - [ ] **Phase 161: Benchmark Dependency Manifest Emission** - Emit deterministic per-runner
   dependency manifests from build/source-backed inputs.
@@ -149,7 +149,9 @@ new runners do not require broad rebuilds or source edits across existing famili
 4. Source/build checks fail if new runner additions modify unrelated runner implementation files.
 5. Focused bench builds and tests pass on the modular target layout.
 
-**Status:** Pending.
+**Status:** Complete. Phase 160 added per-suite `bench_runner_suite_<suite>` object targets,
+linked selected suite object files into the existing `bench_runner` binary, preserved filtered
+disabled-stub behavior, and added focused source checks for localized suite build wiring.
 
 ### Phase 161: Benchmark Dependency Manifest Emission
 

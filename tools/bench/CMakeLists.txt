@@ -181,15 +181,69 @@ if(EMEL_BENCH_NEEDS_LLAMA)
   )
 endif()
 set(BENCH_RUNNER_COMPILE_DEFINITIONS "")
+set(BENCH_RUNNER_SUITE_TARGETS "")
+
+function(configure_bench_runner_common_target target_name)
+  target_link_libraries(${target_name} PRIVATE emel_core emel)
+  if(EMEL_BENCH_NEEDS_LLAMA)
+    target_link_libraries(${target_name} PRIVATE ggml llama)
+  endif()
+
+  target_include_directories(${target_name}
+    PRIVATE
+      ${CMAKE_CURRENT_SOURCE_DIR}
+      ${EMEL_ROOT}/src
+      ${EMEL_ROOT}/include
+      ${NLOHMANN_JSON_INCLUDE_DIR}
+  )
+  if(EMEL_BENCH_NEEDS_LLAMA)
+    target_include_directories(${target_name}
+      PRIVATE
+        ${reference_impl_SOURCE_DIR}/common
+        ${reference_impl_SOURCE_DIR}/src
+        ${reference_impl_SOURCE_DIR}/ggml/include
+        ${reference_impl_SOURCE_DIR}/include
+    )
+  endif()
+endfunction()
+
+function(configure_bench_runner_artifact_definitions target_name)
+  target_compile_definitions(${target_name}
+    PRIVATE
+      EMEL_BENCH_REPO_ROOT=\"${EMEL_ROOT}\"
+      BENCH_REFERENCE_SOURCE=\"${BENCH_REFERENCE_SOURCE}\"
+      BENCH_REFERENCE_REF=\"${BENCH_REFERENCE_REF_VALUE}\"
+      EMEL_BENCH_EMEL_ARTIFACT_PATH=\"$<TARGET_FILE:emel>\"
+  )
+  if(NOT EMEL_BENCH_SUITE_FILTER STREQUAL "")
+    target_compile_definitions(${target_name}
+      PRIVATE
+        EMEL_BENCH_COMPILED_SUITE=\"${EMEL_BENCH_SUITE_FILTER}\"
+    )
+  endif()
+  if(EMEL_BENCH_NEEDS_LLAMA)
+    target_compile_definitions(${target_name}
+      PRIVATE
+        EMEL_BENCH_LLAMA_ARTIFACT_PATH=\"$<TARGET_FILE:llama>\"
+    )
+  endif()
+endfunction()
 
 function(add_bench_runner_suite suite_name source_path compile_definition)
   if(EMEL_BENCH_SUITE_FILTER STREQUAL "" OR EMEL_BENCH_SUITE_FILTER STREQUAL suite_name)
-    list(APPEND BENCH_RUNNER_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/${source_path}")
+    set(target_name "bench_runner_suite_${suite_name}")
+    add_library(${target_name} OBJECT "${CMAKE_CURRENT_SOURCE_DIR}/${source_path}")
+    configure_bench_runner_common_target(${target_name})
+    configure_bench_runner_artifact_definitions(${target_name})
+    target_compile_definitions(${target_name} PRIVATE ${compile_definition})
+    list(APPEND BENCH_RUNNER_SOURCES "$<TARGET_OBJECTS:${target_name}>")
     list(APPEND BENCH_RUNNER_COMPILE_DEFINITIONS "${compile_definition}")
+    list(APPEND BENCH_RUNNER_SUITE_TARGETS "${target_name}")
     set(BENCH_RUNNER_SOURCES "${BENCH_RUNNER_SOURCES}" PARENT_SCOPE)
     set(BENCH_RUNNER_COMPILE_DEFINITIONS
         "${BENCH_RUNNER_COMPILE_DEFINITIONS}"
         PARENT_SCOPE)
+    set(BENCH_RUNNER_SUITE_TARGETS "${BENCH_RUNNER_SUITE_TARGETS}" PARENT_SCOPE)
   endif()
 endfunction()
 
@@ -247,23 +301,12 @@ add_executable(bench_runner
   ${BENCH_RUNNER_SOURCES}
 )
 
-target_link_libraries(bench_runner PRIVATE emel_core emel)
-if(EMEL_BENCH_NEEDS_LLAMA)
-  target_link_libraries(bench_runner PRIVATE ggml llama)
-endif()
-
-target_compile_definitions(bench_runner
-  PRIVATE
-    ${BENCH_RUNNER_COMPILE_DEFINITIONS}
-    EMEL_BENCH_REPO_ROOT=\"${EMEL_ROOT}\"
-    BENCH_REFERENCE_SOURCE=\"${BENCH_REFERENCE_SOURCE}\"
-    BENCH_REFERENCE_REF=\"${BENCH_REFERENCE_REF_VALUE}\"
-    EMEL_BENCH_EMEL_ARTIFACT_PATH=\"$<TARGET_FILE:emel>\"
-)
-if(NOT EMEL_BENCH_SUITE_FILTER STREQUAL "")
+configure_bench_runner_common_target(bench_runner)
+configure_bench_runner_artifact_definitions(bench_runner)
+if(NOT BENCH_RUNNER_COMPILE_DEFINITIONS STREQUAL "")
   target_compile_definitions(bench_runner
     PRIVATE
-      EMEL_BENCH_COMPILED_SUITE=\"${EMEL_BENCH_SUITE_FILTER}\"
+      ${BENCH_RUNNER_COMPILE_DEFINITIONS}
   )
 endif()
 
@@ -284,30 +327,6 @@ target_include_directories(whisper_emel_parity_runner
     ${EMEL_ROOT}/src
     ${EMEL_ROOT}/include
 )
-if(EMEL_BENCH_NEEDS_LLAMA)
-  target_compile_definitions(bench_runner
-    PRIVATE
-      EMEL_BENCH_LLAMA_ARTIFACT_PATH=\"$<TARGET_FILE:llama>\"
-  )
-endif()
-
-target_include_directories(bench_runner
-  PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}
-    ${EMEL_ROOT}/src
-    ${EMEL_ROOT}/include
-    ${NLOHMANN_JSON_INCLUDE_DIR}
-)
-if(EMEL_BENCH_NEEDS_LLAMA)
-  target_include_directories(bench_runner
-    PRIVATE
-      ${reference_impl_SOURCE_DIR}/common
-      ${reference_impl_SOURCE_DIR}/src
-      ${reference_impl_SOURCE_DIR}/ggml/include
-      ${reference_impl_SOURCE_DIR}/include
-  )
-endif()
-
 set(DOCTEST_INCLUDE_DIR ${EMEL_ROOT}/third_party/doctest)
 if(NOT EXISTS ${DOCTEST_INCLUDE_DIR}/doctest/doctest.h)
   message(FATAL_ERROR "Missing doctest header at ${DOCTEST_INCLUDE_DIR}/doctest/doctest.h")

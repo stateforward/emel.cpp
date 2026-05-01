@@ -425,6 +425,22 @@ TEST_CASE("bench runner orchestration no longer owns broad static registration")
   CHECK(registry_source.find("append_reference_generation_cases") != std::string::npos);
 }
 
+TEST_CASE("bench runner suites build through independent object targets") {
+  const std::string cmake_source = read_file(repo_root() / "tools" / "bench" / "CMakeLists.txt");
+
+  CHECK(cmake_source.find("bench_runner_suite_${suite_name}") != std::string::npos);
+  CHECK(cmake_source.find("add_library(${target_name} OBJECT") != std::string::npos);
+  CHECK(cmake_source.find("$<TARGET_OBJECTS:${target_name}>") != std::string::npos);
+  CHECK(cmake_source.find("configure_bench_runner_common_target(${target_name})") !=
+        std::string::npos);
+  CHECK(cmake_source.find("configure_bench_runner_artifact_definitions(${target_name})") !=
+        std::string::npos);
+  CHECK(cmake_source.find("add_bench_runner_suite(generation generation_bench.cpp") !=
+        std::string::npos);
+  CHECK(cmake_source.find("add_bench_runner_suite(diarization_sortformer") != std::string::npos);
+  CHECK(cmake_source.find("BENCH_RUNNER_SUITE_TARGETS") != std::string::npos);
+}
+
 TEST_CASE("generation_stage_probe_emel_path_does_not_bypass_generator_actor") {
   const std::string source =
       read_file(repo_root() / "tools" / "bench" / "generation_bench.cpp");
