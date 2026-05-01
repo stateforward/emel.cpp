@@ -54,7 +54,7 @@ benchmark behavior, output intent, and EMEL/reference lane isolation while repla
 compile-time runner coupling with localized runner contracts and conservative dependency
 manifests.
 
-- [ ] **Phase 157: Benchmark Orchestrator Boundary** - Establish the shared benchmark
+- [x] **Phase 157: Benchmark Orchestrator Boundary** - Establish the shared benchmark
   orchestrator boundary for common config, asset, request, and report handling.
 - [ ] **Phase 158: Benchmark Runner Contract And Process Seam** - Define the narrow runner
   request/result contract and process-level extension seam.
@@ -89,7 +89,9 @@ benchmark-family execution behavior.
    compatibility.
 5. The changed-file scoped quality gate passes for touched benchmark orchestrator files.
 
-**Status:** Pending.
+**Status:** Complete. Phase 157 moved shared benchmark CLI/config/report orchestration behind
+`emel::bench::run_bench_cli(...)`, kept `bench_main.cpp` as a process shim, preserved existing
+EMEL/reference lane execution, and added focused source tests for ownership drift.
 
 ### Phase 158: Benchmark Runner Contract And Process Seam
 

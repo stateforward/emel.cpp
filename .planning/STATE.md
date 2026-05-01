@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.19
 milestone_name: Benchmark Tool Pluggable Runner Refactor
-status: roadmap_ready
-stopped_at: "v1.19 roadmap created; next action is `$gsd-discuss-phase 157`."
-last_updated: "2026-05-01T06:15:00Z"
+status: phase_in_progress
+stopped_at: "Phase 157 complete; next action is `$gsd-discuss-phase 158`."
+last_updated: "2026-05-01T06:40:00Z"
 last_activity: 2026-05-01
 progress:
   total_phases: 7
-  completed_phases: 0
-  total_plans: 0
-  completed_plans: 0
-  percent: 0
+  completed_phases: 1
+  total_plans: 1
+  completed_plans: 1
+  percent: 14
 ---
 
 # Project State
@@ -26,12 +26,12 @@ verification before widening API surface or model scope.
 
 ## Current Position
 
-Phase: 157 Benchmark Orchestrator Boundary
+Phase: 158 Benchmark Runner Contract And Process Seam
 Plan: -
-Status: Roadmap ready; first phase not started.
-Last activity: 2026-05-01 - Milestone v1.19 roadmap created
+Status: Phase 157 complete; Phase 158 not started.
+Last activity: 2026-05-01 - Phase 157 completed
 
-Progress: [----------] 0%
+Progress: [#---------] 14%
 
 ## Deferred Items
 
@@ -51,10 +51,10 @@ Items acknowledged and still deferred at milestone close on 2026-05-01:
 
 - Milestone: `v1.19 Benchmark Tool Pluggable Runner Refactor`
 
-- Current planning shape: 7 phases, 13 active requirements mapped.
+- Current planning shape: 7 phases, 13 active requirements mapped; 1 phase complete.
 - Latest shipped milestone: `v1.18 Parity Tool Boundary Refactor`.
 
-- Next action: `$gsd-discuss-phase 157` or `$gsd-plan-phase 157`.
+- Next action: `$gsd-discuss-phase 158` or `$gsd-plan-phase 158`.
 - Current blocker: none known.
 
 ## Accumulated Context
@@ -76,6 +76,10 @@ Recent decisions affecting current work:
 
 - Phase 157 starts the milestone by establishing the shared benchmark orchestrator boundary while
   keeping EMEL/reference lane-owned assets separate.
+
+- Phase 157 completed by extracting `emel::bench::run_bench_cli(...)`, making `bench_main.cpp` a
+  process shim, and preserving existing benchmark lane construction and behavior under focused
+  bench runner tests plus a generation-scoped quality gate.
 
 - Phases 158-160 own runner contract, discovery/registration, and independent build-target
   boundaries before manifest and quality-gate work begins.

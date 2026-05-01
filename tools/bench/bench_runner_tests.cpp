@@ -304,6 +304,21 @@ TEST_CASE("bench_runner generation compare keeps maintained Qwen and Liquid fixt
   CHECK(parse_named_metric(binary_size_line, "llama_bytes") > 0u);
 }
 
+TEST_CASE("bench_main delegates to runner-owned cli boundary") {
+  const std::string main_source = read_file(repo_root() / "tools" / "bench" / "bench_main.cpp");
+  const std::string runner_source =
+      read_file(repo_root() / "tools" / "bench" / "bench_runner.cpp");
+
+  CHECK(main_source.find("run_bench_cli(argc, argv)") != std::string::npos);
+  CHECK(main_source.find("default_test_cases") == std::string::npos);
+  CHECK(main_source.find("run_benchmarks") == std::string::npos);
+  CHECK(main_source.find("print_compare") == std::string::npos);
+  CHECK(runner_source.find("int emel::bench::run_bench_cli(int argc, char ** argv)") !=
+        std::string::npos);
+  CHECK(runner_source.find("EMEL_BENCH_ITERS") != std::string::npos);
+  CHECK(runner_source.find("print_compare") != std::string::npos);
+}
+
 TEST_CASE("generation_stage_probe_emel_path_does_not_bypass_generator_actor") {
   const std::string source =
       read_file(repo_root() / "tools" / "bench" / "generation_bench.cpp");

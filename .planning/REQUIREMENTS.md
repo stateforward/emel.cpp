@@ -87,7 +87,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| ORCH-01 | Phase 157 | Pending |
+| ORCH-01 | Phase 157 | Complete |
 | ORCH-02 | Phase 163 | Pending |
 | RUNNER-01 | Phase 158 | Pending |
 | RUNNER-02 | Phase 158 | Pending |
@@ -98,7 +98,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | MANIFEST-02 | Phase 161 | Pending |
 | GATE-01 | Phase 162 | Pending |
 | GATE-02 | Phase 162 | Pending |
-| LANE-01 | Phase 157 | Pending |
+| LANE-01 | Phase 157 | Complete |
 | LANE-02 | Phase 163 | Pending |
 
 **Coverage:**
