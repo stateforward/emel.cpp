@@ -39,6 +39,7 @@ std::string_view kind_name(dependency_kind kind);
 std::span<const dependency_record> records();
 std::span<const dependency_record> records_for(parity_mode mode);
 bool requires_full_gate(freshness_state state);
+freshness_state inspect(const std::filesystem::path & path, bool uncertain);
 std::string render();
 bool write(const std::filesystem::path & path);
 

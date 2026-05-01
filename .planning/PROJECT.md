@@ -21,11 +21,10 @@ Current milestone: `v1.18 Parity Tool Boundary Refactor` reopened for source-bac
 Latest fully shipped milestone: `v1.17 Text Generator Domain Alignment`
 
 Status: `v1.18` was reopened on 2026-05-01 after a source-backed audit found partial runner
-ownership, live generation reference truth, actor-boundary, and manifest-gate gaps. Phases 153 and
-154 have closed the runner and generation-truth gaps, and Phase 155 has closed the actor-boundary
-gap. Phase 156 remains before the milestone can be treated as shipped.
+ownership, live generation reference truth, actor-boundary, and manifest-gate gaps. Phases 153-156
+have closed the reopened gap set; the milestone is ready for re-audit.
 
-Current planning focus: execute Phase 156, then re-audit v1.18.
+Current planning focus: re-audit v1.18 and proceed to milestone closeout if the audit passes.
 
 ## Reopened Milestone: v1.18 Parity Tool Boundary Refactor
 
@@ -50,10 +49,10 @@ EMEL/reference lane isolation or existing parity behavior.
   baselines are publication artifacts, and legacy non-current Qwen drift is reported truthfully.
 - Paritychecker source ownership now goes through public GGUF/model/llama wrapper surfaces instead
   of non-kernel actor/detail includes, with broad source checks guarding the boundary.
+- Maintained dependency-manifest CLI emission/check operations and quality-gate freshness
+  escalation now force full parity when manifest data is missing, stale, or uncertain.
 
-**Open closure gaps:**
-- Wire dependency-manifest emission and missing/stale/uncertain full-gate semantics into production
-  paritychecker or quality-gate entrypoints (`MANIFEST-01`, `MANIFEST-02`).
+**Open closure gaps:** None after Phase 156; pending re-audit.
 
 ## Previous Shipped Milestone: v1.17 Text Generator Domain Alignment
 
@@ -329,8 +328,8 @@ truth anchor and without broadening into generic Liquid-family support.
 
 ### Active
 
-- [ ] Execute Phase 156 for dependency-manifest production/gate consumption.
-- [ ] Re-audit v1.18 after Phases 155-156 complete.
+- [x] Execute Phase 156 for dependency-manifest production/gate consumption.
+- [ ] Re-audit v1.18 after Phases 153-156 complete.
 
 ### Out of Scope
 

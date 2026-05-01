@@ -922,6 +922,98 @@ TEST_CASE("parity dependency manifest renders and writes a deterministic format"
   CHECK(docs.find("Missing, stale, or uncertain") != std::string::npos);
 }
 
+TEST_CASE("paritychecker cli emits dependency manifest for operators") {
+  namespace manifest = emel::paritychecker::dependency_manifest;
+
+  const std::filesystem::path manifest_path =
+      make_temp_capture_path("paritychecker-cli-dependency-manifest");
+  const process_capture capture = run_generation_paritychecker_capture_with_args({
+    "--write-dependency-manifest",
+    manifest_path.string(),
+  });
+
+  CHECK(capture.exit_code == 0);
+  CHECK(capture.stderr_text.empty());
+  CHECK(capture.stdout_text.find("dependency_manifest: action=write") !=
+        std::string::npos);
+  CHECK(capture.stdout_text.find("schema=parity_dependency_manifest/v1") !=
+        std::string::npos);
+  CHECK(read_text_file(manifest_path) == manifest::render());
+  std::filesystem::remove(manifest_path);
+
+  const std::string runner_source =
+      read_text_file(repo_root_dir() / "tools" / "paritychecker" / "parity_runner.cpp");
+  REQUIRE_FALSE(runner_source.empty());
+  CHECK(runner_source.find("--write-dependency-manifest") != std::string::npos);
+  CHECK(runner_source.find("dependency_manifest::write") != std::string::npos);
+}
+
+TEST_CASE("paritychecker cli reports dependency manifest freshness conservatively") {
+  namespace manifest = emel::paritychecker::dependency_manifest;
+
+  const std::filesystem::path manifest_path =
+      make_temp_capture_path("paritychecker-cli-dependency-manifest-freshness");
+  REQUIRE(manifest::write(manifest_path));
+
+  const process_capture fresh = run_generation_paritychecker_capture_with_args({
+    "--check-dependency-manifest",
+    manifest_path.string(),
+  });
+  CHECK(fresh.exit_code == 0);
+  CHECK(fresh.stderr_text.empty());
+  CHECK(fresh.stdout_text.find("dependency_manifest: action=check") != std::string::npos);
+  CHECK(fresh.stdout_text.find("full_gate=0") != std::string::npos);
+  CHECK(fresh.stdout_text.find("reason=fresh") != std::string::npos);
+
+  const process_capture uncertain = run_generation_paritychecker_capture_with_args({
+    "--check-dependency-manifest",
+    manifest_path.string(),
+    "--dependency-manifest-uncertain",
+  });
+  CHECK(uncertain.exit_code == 3);
+  CHECK(uncertain.stdout_text.find("full_gate=1") != std::string::npos);
+  CHECK(uncertain.stdout_text.find("reason=uncertain") != std::string::npos);
+
+  {
+    std::ofstream stale_manifest(manifest_path, std::ios::binary);
+    stale_manifest << "stale manifest\n";
+  }
+  const process_capture stale = run_generation_paritychecker_capture_with_args({
+    "--check-dependency-manifest",
+    manifest_path.string(),
+  });
+  CHECK(stale.exit_code == 3);
+  CHECK(stale.stdout_text.find("full_gate=1") != std::string::npos);
+  CHECK(stale.stdout_text.find("reason=stale") != std::string::npos);
+
+  std::filesystem::remove(manifest_path);
+  const process_capture missing = run_generation_paritychecker_capture_with_args({
+    "--check-dependency-manifest",
+    manifest_path.string(),
+  });
+  CHECK(missing.exit_code == 3);
+  CHECK(missing.stdout_text.find("full_gate=1") != std::string::npos);
+  CHECK(missing.stdout_text.find("reason=missing") != std::string::npos);
+}
+
+TEST_CASE("quality gate escalates parity on dependency manifest freshness gaps") {
+  namespace manifest = emel::paritychecker::dependency_manifest;
+
+  const std::string baseline =
+      read_text_file(repo_root_dir() / "tools" / "paritychecker" / "dependency_manifest.txt");
+  CHECK(baseline == manifest::render());
+
+  const std::string gate_source =
+      read_text_file(repo_root_dir() / "scripts" / "quality_gates.sh");
+  REQUIRE_FALSE(gate_source.empty());
+  CHECK(gate_source.find("PARITY_DEPENDENCY_MANIFEST_BASELINE") != std::string::npos);
+  CHECK(gate_source.find("--write-dependency-manifest") != std::string::npos);
+  CHECK(gate_source.find("--check-dependency-manifest") != std::string::npos);
+  CHECK(gate_source.find("EMEL_PARITY_DEPENDENCY_MANIFEST_UNCERTAIN") != std::string::npos);
+  CHECK(gate_source.find("dependency manifest requires full parity gate") !=
+        std::string::npos);
+}
+
 TEST_CASE("paritychecker sources do not bridge into actor internals") {
   const auto paritychecker_dir = repo_root_dir() / "tools" / "paritychecker";
   REQUIRE(!file_exists(paritychecker_dir / ("generation_internal_" "diagnostics.hpp")));

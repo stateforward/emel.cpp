@@ -330,6 +330,26 @@ bool requires_full_gate(const freshness_state state) {
   return state.missing || state.stale || state.uncertain;
 }
 
+freshness_state inspect(const std::filesystem::path & path, const bool uncertain) {
+  freshness_state state{};
+  state.uncertain = uncertain;
+
+  std::ifstream input(path, std::ios::binary);
+  if (!input.good()) {
+    state.missing = true;
+    return state;
+  }
+
+  std::ostringstream current;
+  current << input.rdbuf();
+  if (!input.eof() && input.fail()) {
+    state.uncertain = true;
+    return state;
+  }
+  state.stale = current.str() != render();
+  return state;
+}
+
 std::string render() {
   std::ostringstream out;
   out << k_schema << '\n';

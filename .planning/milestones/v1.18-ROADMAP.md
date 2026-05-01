@@ -66,7 +66,7 @@ manifest gate consumption.
 - [x] **Phase 155: Parity Actor Boundary Enforcement Closure** - Replace direct paritychecker
   actor-helper/detail reaches with public state-machine or owned-kernel surfaces and broaden source
   checks.
-- [ ] **Phase 156: Parity Dependency Manifest Gate Closure** - Wire manifest emission and
+- [x] **Phase 156: Parity Dependency Manifest Gate Closure** - Wire manifest emission and
   missing/stale/uncertain full-gate semantics into production paritychecker or quality-gate entry
   points.
 
@@ -271,4 +271,9 @@ conservative freshness semantics into production paritychecker or quality-gate e
 4. Focused tests cover manifest emission, stale/missing/uncertain full-gate behavior, and unchanged
    parity mode execution behavior.
 
-**Status:** Pending.
+**Status:** Complete. Phase 156 added maintained paritychecker CLI operations for dependency
+manifest emission and freshness checks, committed the source-generated
+`tools/paritychecker/dependency_manifest.txt` baseline, and wired `scripts/quality_gates.sh` so
+missing, stale, or uncertain manifest data forces the full parity gate. Focused paritychecker tests
+cover CLI emission, fresh/stale/missing/uncertain freshness outcomes, the quality-gate hook, and
+unchanged parity mode execution.

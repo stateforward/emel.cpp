@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.18
 milestone_name: Parity Tool Boundary Refactor
-status: phase_in_progress
-stopped_at: "Phase 155 completed; next action is autonomous execution of Phase 156."
-last_updated: "2026-05-01T05:20:00.000Z"
+status: milestone_ready_for_audit
+stopped_at: "Phase 156 completed; next action is v1.18 milestone re-audit."
+last_updated: "2026-05-01T06:10:00.000Z"
 last_activity: 2026-05-01
 progress:
   total_phases: 4
-  completed_phases: 3
-  total_plans: 3
-  completed_plans: 3
-  percent: 75
+  completed_phases: 4
+  total_plans: 4
+  completed_plans: 4
+  percent: 100
 ---
 
 # Project State
@@ -28,10 +28,10 @@ verification before widening API surface or model scope.
 
 Phase: 156
 Plan: —
-Status: Phase 155 complete; Phase 156 pending.
+Status: Phase 156 complete; v1.18 ready for re-audit.
 Last activity: 2026-05-01
 
-Progress: [########--] 75%
+Progress: [##########] 100%
 
 ## Deferred Items
 
@@ -55,9 +55,9 @@ Items acknowledged and still deferred at milestone close on 2026-05-01:
 - Latest shipped milestone: `v1.17 Text Generator Domain Alignment`; v1.18 is not closeout-ready
   until the reopened source-backed gaps pass audit.
 
-- Next action: continue autonomous execution with Phase 156.
-- Current blocker: v1.18 milestone audit is `gaps_found` with remaining partial `MANIFEST-01`
-  and `MANIFEST-02`.
+- Next action: rerun v1.18 milestone audit and complete closeout if it passes.
+- Current blocker: none known after Phase 156; prior partial `MANIFEST-01` and `MANIFEST-02`
+  gaps have source-backed closure evidence.
 
 ## Accumulated Context
 
@@ -111,6 +111,11 @@ Recent decisions affecting current work:
   instead of direct non-kernel actor/detail includes, keeps only an approved kernel-owned AArch64
   detail arithmetic surface for flash diagnostics, and scans all paritychecker source/header files
   for actor internal include/namespace regressions.
+
+- Phase 156 closed `MANIFEST-01` and `MANIFEST-02`: paritychecker now exposes maintained
+  dependency-manifest write/check CLI operations, the generated manifest baseline is checked in,
+  and `scripts/quality_gates.sh` forces full parity when manifest freshness is missing, stale, or
+  uncertain.
 
 - `v1.15` targets one maintained ARM diarization slice for
   `openresearchtools/diar_streaming_sortformer_4spk-v2.1-gguf`.
