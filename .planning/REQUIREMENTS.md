@@ -87,7 +87,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 **Coverage:**
 - v1 requirements: 12 total
 - Mapped to phases: 12
-- Open after v1.20 audit: 12
+- Open after v1.20 gap closure: 1
 - Unmapped: 0
 
 ---
