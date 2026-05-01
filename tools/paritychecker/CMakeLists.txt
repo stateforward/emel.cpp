@@ -112,6 +112,7 @@ add_subdirectory(${EMEL_ROOT} emel)
 
 add_executable(paritychecker
   ${CMAKE_CURRENT_SOURCE_DIR}/parity_main.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/parity_assets.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/parity_runner.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/tokenizer_parity_common.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/tokenizer_spm_parity.cpp
@@ -162,6 +163,7 @@ endif()
 
 add_executable(paritychecker_tests
   ${CMAKE_CURRENT_SOURCE_DIR}/paritychecker_tests.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/parity_assets.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/parity_runner.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/tokenizer_parity_common.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/tokenizer_spm_parity.cpp

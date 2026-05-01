@@ -9,7 +9,7 @@ parity-oriented verification before widening API surface or model scope.
 
 ### Runner Boundary
 
-- [ ] **PARITY-01**: `tools/paritychecker` has a shared runner boundary that owns CLI/config
+- [x] **PARITY-01**: `tools/paritychecker` has a shared runner boundary that owns CLI/config
   parsing, asset resolution, fixture normalization, lane invocation, and result normalization.
 - [ ] **PARITY-02**: The shared runner no longer contains bulk per-mode parity implementation for
   tokenizer, GBNF, kernel, Jinja, or generation modes.
@@ -26,7 +26,7 @@ parity-oriented verification before widening API surface or model scope.
 
 ### Lane Isolation
 
-- [ ] **LANE-01**: EMEL and reference lanes construct and own their model, vocab, tokenizer,
+- [x] **LANE-01**: EMEL and reference lanes construct and own their model, vocab, tokenizer,
   formatter, runtime, cache, and output state separately.
 - [ ] **LANE-02**: Tests or source checks fail if shared runner code reuses reference-created lane
   objects in the EMEL lane or reaches into actor `actions.hpp`, `guards.hpp`, or `detail.hpp`
@@ -72,12 +72,12 @@ parity-oriented verification before widening API surface or model scope.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| PARITY-01 | Phase 148 | Pending |
+| PARITY-01 | Phase 148 | Complete |
 | PARITY-02 | Phase 149 | Pending |
 | PARITY-03 | Phase 152 | Pending |
 | ENGINE-01 | Phase 149 | Pending |
 | ENGINE-02 | Phase 150 | Pending |
-| LANE-01 | Phase 148 | Pending |
+| LANE-01 | Phase 148 | Complete |
 | LANE-02 | Phase 152 | Pending |
 | BUILD-01 | Phase 150 | Pending |
 | BUILD-02 | Phase 150 | Pending |
@@ -89,7 +89,8 @@ parity-oriented verification before widening API surface or model scope.
 - Active requirements: 12 total
 - Mapped to phases: 12
 - Unmapped: 0
-- Complete: 0
-- Pending: 12
+- Complete: 2
+- Pending: 10
 
-**Last updated:** 2026-05-01 after initializing v1.18 from GitHub issue #54.
+**Last updated:** 2026-05-01 after Phase 148 established the parity asset boundary and passed
+focused paritychecker tests plus the changed-file scoped quality gate.

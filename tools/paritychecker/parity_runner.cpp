@@ -1,4 +1,5 @@
 #include "parity_runner.hpp"
+#include "parity_assets.hpp"
 #include "tokenizer_parity.hpp"
 #include "../generation_formatter_contract.hpp"
 #include "../generation_fixture_registry.hpp"
@@ -131,68 +132,9 @@ constexpr std::string_view k_reference_impl_ref =
 using llama_model_ptr = std::unique_ptr<llama_model, decltype(&llama_model_free)>;
 using llama_context_ptr = std::unique_ptr<llama_context, decltype(&llama_free)>;
 namespace kernel_quant = emel::kernel::detail::quant;
+namespace parity_assets = emel::paritychecker::assets;
 using maintained_generation_fixture =
     emel::tools::generation_fixture_registry::maintained_fixture;
-
-bool file_exists(const std::string & path) {
-  std::FILE * file = std::fopen(path.c_str(), "rb");
-  if (file == nullptr) {
-    return false;
-  }
-  std::fclose(file);
-  return true;
-}
-
-std::filesystem::path expected_generation_fixture_path(
-    const maintained_generation_fixture & fixture) {
-#ifdef PARITYCHECKER_REPO_ROOT
-  const std::filesystem::path root = PARITYCHECKER_REPO_ROOT;
-  return root / fixture.fixture_rel;
-#else
-  return std::filesystem::path(fixture.fixture_rel);
-#endif
-}
-
-std::filesystem::path normalize_fixture_path(const std::filesystem::path & path) {
-  std::error_code ec;
-  const std::filesystem::path absolute_path = std::filesystem::absolute(path, ec);
-  if (ec) {
-    return {};
-  }
-  return absolute_path.lexically_normal();
-}
-
-const maintained_generation_fixture * find_generation_fixture(const std::string & model_path) {
-  const std::filesystem::path provided_path =
-      normalize_fixture_path(std::filesystem::path(model_path));
-  if (provided_path.empty()) {
-    return nullptr;
-  }
-
-  for (const auto & fixture :
-       emel::tools::generation_fixture_registry::k_maintained_generation_fixtures) {
-    const std::filesystem::path expected_path =
-        normalize_fixture_path(expected_generation_fixture_path(fixture));
-    if (!expected_path.empty() && expected_path == provided_path) {
-      return &fixture;
-    }
-  }
-  return nullptr;
-}
-
-std::string maintained_generation_fixture_list() {
-  std::string list = {};
-  bool first = true;
-  for (const auto & fixture :
-       emel::tools::generation_fixture_registry::k_maintained_generation_fixtures) {
-    if (!first) {
-      list += ", ";
-    }
-    first = false;
-    list += fixture.fixture_rel;
-  }
-  return list;
-}
 
 struct parser_done_capture {
   bool called = false;
@@ -655,20 +597,6 @@ struct generation_baseline_record {
   generation_result result = {};
 };
 
-bool read_file_bytes(const std::string & path, std::vector<uint8_t> & out);
-
-std::filesystem::path paritychecker_repo_root_path() {
-#ifdef PARITYCHECKER_REPO_ROOT
-  return std::filesystem::path(PARITYCHECKER_REPO_ROOT);
-#else
-  return std::filesystem::current_path();
-#endif
-}
-
-std::filesystem::path generation_baseline_directory_path() {
-  return paritychecker_repo_root_path() / "snapshots" / "parity";
-}
-
 std::string generation_prompt_slug(std::string_view text) {
   std::string slug;
   slug.reserve(text.size());
@@ -703,7 +631,7 @@ std::filesystem::path default_generation_baseline_path(
     const maintained_generation_fixture & fixture,
     const emel::paritychecker::parity_options & opts) {
   const std::string prompt_slug = generation_prompt_slug(opts.text);
-  return generation_baseline_directory_path() /
+  return parity_assets::generation_baseline_directory_path() /
       ("generation_" + std::string(fixture.slug) + "_prompt_" + prompt_slug +
        "_max_tokens_" + std::to_string(opts.max_tokens) + ".txt");
 }
@@ -916,7 +844,7 @@ bool write_generation_baseline_file(const std::filesystem::path & path,
 bool load_generation_baseline_file(const std::filesystem::path & path,
                                    generation_baseline_record & record_out) {
   std::vector<uint8_t> file_bytes;
-  if (!read_file_bytes(path.string(), file_bytes)) {
+  if (!parity_assets::read_file_bytes(path.string(), file_bytes)) {
     return false;
   }
 
@@ -1175,29 +1103,6 @@ uint64_t read_u64_le(const std::span<const uint8_t> bytes) {
     value |= static_cast<uint64_t>(bytes[i]) << (i * 8u);
   }
   return value;
-}
-
-bool read_file_bytes(const std::string & path, std::vector<uint8_t> & out) {
-  out.clear();
-
-  std::FILE * file = std::fopen(path.c_str(), "rb");
-  if (file == nullptr) {
-    return false;
-  }
-
-  const bool seek_end_ok = std::fseek(file, 0, SEEK_END) == 0;
-  const long file_size = seek_end_ok ? std::ftell(file) : -1L;
-  const bool seek_start_ok = file_size >= 0 && std::fseek(file, 0, SEEK_SET) == 0;
-  if (!seek_end_ok || file_size < 0 || !seek_start_ok) {
-    std::fclose(file);
-    return false;
-  }
-
-  out.resize(static_cast<size_t>(file_size));
-  const size_t read_size = out.empty() ? 0u : std::fread(out.data(), 1u, out.size(), file);
-  const bool read_ok = read_size == out.size();
-  std::fclose(file);
-  return read_ok;
 }
 
 const char * model_loader_error_name(const emel::error::type err) {
@@ -1660,7 +1565,8 @@ bool load_generation_reference_backend(const std::string & model_path,
 bool load_emel_vocab_from_gguf_file(const std::string & model_path,
                                     emel::model::data::vocab & vocab_out) {
   generation_load_state state{};
-  if (!read_file_bytes(model_path, state.file_bytes) || state.file_bytes.empty()) {
+  if (!parity_assets::read_file_bytes(model_path, state.file_bytes) ||
+      state.file_bytes.empty()) {
     return false;
   }
 
@@ -18260,13 +18166,14 @@ int run_generation_harness_contract(const emel::paritychecker::parity_options & 
   llama_backend_guard backend_guard{};
   llama_log_silencer log_silencer{};
 
-  if (!file_exists(opts.model_path)) {
+  if (!parity_assets::file_exists(opts.model_path)) {
     std::fprintf(stderr, "generation load failed: missing model file %s\n", opts.model_path.c_str());
     return 1;
   }
-  const maintained_generation_fixture * fixture = find_generation_fixture(opts.model_path);
+  const maintained_generation_fixture * fixture =
+      parity_assets::find_generation_fixture(opts.model_path);
   if (fixture == nullptr) {
-    const std::string supported_fixtures = maintained_generation_fixture_list();
+    const std::string supported_fixtures = parity_assets::maintained_generation_fixture_list();
     std::fprintf(stderr,
                  "generation requires maintained fixture path (%s), got %s\n",
                  supported_fixtures.c_str(),
@@ -18281,7 +18188,8 @@ int run_generation_harness_contract(const emel::paritychecker::parity_options & 
   }
 
   generation_load_state state{};
-  if (!read_file_bytes(opts.model_path, state.file_bytes) || state.file_bytes.empty()) {
+  if (!parity_assets::read_file_bytes(opts.model_path, state.file_bytes) ||
+      state.file_bytes.empty()) {
     std::fprintf(stderr, "generation load failed: unable to read model file %s\n", opts.model_path.c_str());
     return 1;
   }

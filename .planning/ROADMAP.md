@@ -44,7 +44,7 @@ v1.18 starts from GitHub issue #54. The milestone refactors `tools/paritychecker
 runner, engine, asset-loading, build-registration, and dependency-manifest boundaries while
 preserving existing parity behavior and EMEL/reference lane isolation.
 
-- [ ] **Phase 148: Parity Runner Asset Boundary** - Establish the shared runner boundary and
+- [x] **Phase 148: Parity Runner Asset Boundary** - Establish the shared runner boundary and
   centralize asset/config/fixture normalization without changing mode behavior.
 - [ ] **Phase 149: Parity Engine Adapter Split** - Move tokenizer, GBNF, kernel, Jinja, and
   generation mode implementations behind explicit engine adapters.
@@ -73,7 +73,10 @@ behavior.
 4. Focused paritychecker tests cover centralized asset resolution and existing fixtures.
 5. Existing parity modes still pass their maintained smoke or fixture checks.
 
-**Status:** Pending.
+**Status:** Complete. Phase 148 added `emel::paritychecker::assets` for shared file, path,
+byte-loading, baseline-directory, and maintained generation fixture resolution. The runner now uses
+that boundary without changing mode dispatch or lane-owned runtime state. Focused paritychecker
+build/tests and the changed-file scoped quality gate passed.
 
 ### Phase 149: Parity Engine Adapter Split
 

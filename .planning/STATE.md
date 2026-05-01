@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.18
 milestone_name: Parity Tool Boundary Refactor
 status: ready_to_plan
-stopped_at: Milestone v1.18 initialized from GitHub issue #54; Phase 148 ready to plan
+stopped_at: Phase 148 complete; Phase 149 ready to plan
 last_updated: "2026-05-01T00:00:00Z"
 last_activity: 2026-05-01
 progress:
   total_phases: 5
-  completed_phases: 0
-  total_plans: 0
-  completed_plans: 0
-  percent: 0
+  completed_phases: 1
+  total_plans: 1
+  completed_plans: 1
+  percent: 20
 ---
 
 # Project State
@@ -22,19 +22,19 @@ See: .planning/PROJECT.md (updated 2026-05-01)
 
 **Core value:** Prove real end-to-end behavior with explicit SML orchestration and parity-oriented
 verification before widening API surface or model scope.
-**Current focus:** Plan Phase 148 for v1.18, starting the GitHub issue #54 paritychecker boundary
-refactor.
+**Current focus:** Plan Phase 149 for v1.18, splitting parity mode logic behind explicit engine
+adapters after the Phase 148 asset boundary landed.
 
 ## Current Position
 
-Phase: 148
+Phase: 149
 Plan: —
-Status: v1.18 requirements and roadmap are defined from GitHub issue #54. The next step is to plan
-the shared parity runner asset boundary before splitting engines, build registration, dependency
-manifests, and closeout proof.
-Last activity: 2026-05-01 — Milestone v1.18 started
+Status: Phase 148 established `emel::paritychecker::assets` as the shared paritychecker file,
+path, byte-loading, baseline-directory, and maintained generation fixture lookup boundary. Focused
+paritychecker builds/tests, code review, and the changed-file scoped quality gate passed.
+Last activity: 2026-05-01 — Phase 148 complete
 
-Progress: [----------] 0%
+Progress: [##--------] 20%
 
 ## Deferred Items
 
@@ -54,11 +54,11 @@ Items acknowledged and still deferred at milestone close on 2026-04-26:
 
 - Milestone: v1.18 Parity Tool Boundary Refactor
 
-- Current planning shape: phases 148-152 defined; Phase 148 ready to plan.
+- Current planning shape: Phase 148 complete; Phase 149 ready to plan.
 - Latest shipped milestone: `v1.17 Text Generator Domain Alignment`.
 
-- Next action: `$gsd-plan-phase 148`.
-- Current blocker: none known; no implementation has started for v1.18.
+- Next action: `$gsd-plan-phase 149`.
+- Current blocker: none known after Phase 148.
 
 ## Accumulated Context
 
@@ -76,6 +76,9 @@ Recent decisions affecting current work:
 
 - Missing, stale, or uncertain parity dependency manifests must trigger the relevant full parity
   gate; manifest data cannot be used as a permissive skip by default.
+
+- Phase 148 established the parity asset boundary only for paths, byte loading, and maintained
+  fixture identity; Phase 149 still owns mode implementation adapter boundaries.
 
 - `v1.15` targets one maintained ARM diarization slice for
   `openresearchtools/diar_streaming_sortformer_4spk-v2.1-gguf`.

@@ -17,6 +17,7 @@
 
 #include "../generation_formatter_contract.hpp"
 #include "../generation_fixture_registry.hpp"
+#include "parity_assets.hpp"
 
 #if !defined(_WIN32)
 #include <sys/wait.h>
@@ -681,6 +682,51 @@ TEST_CASE("paritychecker help describes the maintained generation fixture contra
   CHECK(capture.stderr_text.find("snapshots/parity/") != std::string::npos);
   CHECK(capture.stderr_text.find("append-only") != std::string::npos);
   CHECK(capture.stderr_text.find("error:") == std::string::npos);
+}
+
+TEST_CASE("parity assets resolve maintained generation fixtures centrally") {
+  const std::string fixture_list =
+      emel::paritychecker::assets::maintained_generation_fixture_list();
+
+  for (const auto & fixture :
+       emel::tools::generation_fixture_registry::k_maintained_generation_fixtures) {
+    const auto expected_path =
+        emel::paritychecker::assets::expected_generation_fixture_path(fixture);
+    const auto normalized_expected =
+        emel::paritychecker::assets::normalize_path(expected_path);
+    REQUIRE_FALSE(normalized_expected.empty());
+    CHECK(normalized_expected.filename().string() == std::string(fixture.name));
+
+    const auto * resolved =
+        emel::paritychecker::assets::find_generation_fixture(expected_path.string());
+    REQUIRE(resolved != nullptr);
+    CHECK(resolved->slug == fixture.slug);
+
+    const auto impostor_path =
+        make_temp_fixture_path("paritychecker-fixture-impostor", std::string(fixture.name));
+    CHECK(emel::paritychecker::assets::find_generation_fixture(impostor_path.string()) ==
+          nullptr);
+    CHECK(fixture_list.find(std::string(fixture.fixture_rel)) != std::string::npos);
+  }
+}
+
+TEST_CASE("parity assets own common runner file helpers") {
+  const auto reference_ref = repo_root_dir() / "tools" / "paritychecker" / "reference_ref.txt";
+  REQUIRE(emel::paritychecker::assets::file_exists(reference_ref.string()));
+
+  std::vector<uint8_t> bytes;
+  REQUIRE(emel::paritychecker::assets::read_file_bytes(reference_ref.string(), bytes));
+  CHECK_FALSE(bytes.empty());
+
+  const std::string source =
+      read_text_file(repo_root_dir() / "tools" / "paritychecker" / "parity_runner.cpp");
+  REQUIRE_FALSE(source.empty());
+  CHECK(source.find("#include \"parity_assets.hpp\"") != std::string::npos);
+  CHECK(source.find("bool file_exists(") == std::string::npos);
+  CHECK(source.find("bool read_file_bytes(") == std::string::npos);
+  CHECK(source.find("const maintained_generation_fixture * find_generation_fixture(") ==
+        std::string::npos);
+  CHECK(source.find("std::string maintained_generation_fixture_list(") == std::string::npos);
 }
 
 TEST_CASE("paritychecker sources do not bridge into text generator actor internals") {
