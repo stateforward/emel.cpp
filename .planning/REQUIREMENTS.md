@@ -94,8 +94,8 @@ Which phases cover which requirements. Updated during roadmap creation.
 | DISC-01 | Phase 159 | Complete |
 | BUILD-01 | Phase 160 | Complete |
 | BUILD-02 | Phase 160 | Complete |
-| MANIFEST-01 | Phase 161 | Pending |
-| MANIFEST-02 | Phase 161 | Pending |
+| MANIFEST-01 | Phase 161 | Complete |
+| MANIFEST-02 | Phase 161 | Complete |
 | GATE-01 | Phase 162 | Pending |
 | GATE-02 | Phase 162 | Pending |
 | LANE-01 | Phase 157 | Complete |

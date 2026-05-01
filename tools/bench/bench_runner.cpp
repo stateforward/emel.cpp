@@ -12,6 +12,7 @@
 
 #include "bench_cases.hpp"
 #include "bench_common.hpp"
+#include "bench_dependency_manifest.hpp"
 #include "bench_runner_contract.hpp"
 #include "bench_runner.hpp"
 #include "bench_runner_registry.hpp"
@@ -877,9 +878,125 @@ bench::runner_mode parse_mode(int argc, char ** argv) {
   return parsed;
 }
 
+enum class manifest_operation {
+  none,
+  write,
+  check,
+};
+
+struct manifest_args {
+  manifest_operation operation = manifest_operation::none;
+  std::string path = {};
+  bool uncertain = false;
+};
+
+bool parse_manifest_args(int argc, char ** argv, manifest_args & out) {
+  out = {};
+  for (int i = 1; i < argc; ++i) {
+    const std::string_view arg = argv[i];
+    if (arg == "--write-dependency-manifest") {
+      if (i + 1 >= argc || out.operation != manifest_operation::none) {
+        return false;
+      }
+      out.operation = manifest_operation::write;
+      out.path = argv[++i];
+      continue;
+    }
+    if (arg == "--check-dependency-manifest") {
+      if (i + 1 >= argc || out.operation != manifest_operation::none) {
+        return false;
+      }
+      out.operation = manifest_operation::check;
+      out.path = argv[++i];
+      continue;
+    }
+    if (arg == "--dependency-manifest-uncertain") {
+      out.uncertain = true;
+      continue;
+    }
+  }
+
+  if (out.operation == manifest_operation::none) {
+    return !out.uncertain;
+  }
+  if (out.path.empty() || (out.operation == manifest_operation::write && out.uncertain)) {
+    return false;
+  }
+
+  for (int i = 1; i < argc; ++i) {
+    const std::string_view arg = argv[i];
+    if (arg == "--write-dependency-manifest" || arg == "--check-dependency-manifest") {
+      ++i;
+      continue;
+    }
+    if (arg == "--dependency-manifest-uncertain") {
+      continue;
+    }
+    return false;
+  }
+  return true;
+}
+
+std::string freshness_reason(const bench::dependency_manifest::freshness_state state) {
+  if (!bench::dependency_manifest::requires_full_gate(state)) {
+    return "fresh";
+  }
+
+  std::string reason;
+  if (state.missing) {
+    reason += "missing";
+  }
+  if (state.stale) {
+    if (!reason.empty()) {
+      reason += ",";
+    }
+    reason += "stale";
+  }
+  if (state.uncertain) {
+    if (!reason.empty()) {
+      reason += ",";
+    }
+    reason += "uncertain";
+  }
+  return reason;
+}
+
 }  // namespace
 
 int emel::bench::run_bench_cli(int argc, char ** argv) {
+  manifest_args manifest = {};
+  if (!parse_manifest_args(argc, argv, manifest)) {
+    std::fprintf(stderr, "error: invalid dependency manifest arguments\n");
+    return 2;
+  }
+  if (manifest.operation == manifest_operation::write) {
+    if (!bench::dependency_manifest::write(manifest.path)) {
+      std::fprintf(stderr,
+                   "error: failed to write dependency manifest: %s\n",
+                   manifest.path.c_str());
+      return 1;
+    }
+    std::printf("dependency_manifest: action=write schema=%.*s records=%zu path=%s\n",
+                static_cast<int>(bench::dependency_manifest::k_schema.size()),
+                bench::dependency_manifest::k_schema.data(),
+                bench::dependency_manifest::records().size(),
+                manifest.path.c_str());
+    return 0;
+  }
+  if (manifest.operation == manifest_operation::check) {
+    const bench::dependency_manifest::freshness_state state =
+      bench::dependency_manifest::inspect(manifest.path, manifest.uncertain);
+    const bool full_gate = bench::dependency_manifest::requires_full_gate(state);
+    const std::string reason = freshness_reason(state);
+    std::printf("dependency_manifest: action=check schema=%.*s full_gate=%u reason=%s path=%s\n",
+                static_cast<int>(bench::dependency_manifest::k_schema.size()),
+                bench::dependency_manifest::k_schema.data(),
+                full_gate ? 1u : 0u,
+                reason.c_str(),
+                manifest.path.c_str());
+    return full_gate ? 3 : 0;
+  }
+
   enforce_compiled_suite_filter();
 
   bench::config cfg;

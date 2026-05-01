@@ -62,7 +62,7 @@ manifests.
   registration with localized runner metadata/discovery.
 - [x] **Phase 160: Benchmark Independent Build Targets** - Split CMake/build wiring so runners can
   build independently and additions stay local.
-- [ ] **Phase 161: Benchmark Dependency Manifest Emission** - Emit deterministic per-runner
+- [x] **Phase 161: Benchmark Dependency Manifest Emission** - Emit deterministic per-runner
   dependency manifests from build/source-backed inputs.
 - [ ] **Phase 162: Benchmark Manifest Quality-Gate Consumption** - Wire conservative
   manifest-driven benchmark gate selection into quality gates.
@@ -169,7 +169,9 @@ config, fixture, model, and script inputs for conservative impact detection.
 4. Missing, stale, and uncertain manifest semantics are documented as conservative rerun triggers.
 5. Tests cover manifest rendering, deterministic ordering, and missing/stale/uncertain states.
 
-**Status:** Pending.
+**Status:** Complete. Phase 161 added `bench_dependency_manifest/v1`, runner CLI write/check
+operations, a generated `tools/bench/dependency_manifest.txt` baseline, schema docs, and tests for
+registered runner coverage plus missing/stale/uncertain freshness semantics.
 
 ### Phase 162: Benchmark Manifest Quality-Gate Consumption
 

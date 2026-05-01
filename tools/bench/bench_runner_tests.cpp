@@ -11,6 +11,7 @@
 #include <doctest/doctest.h>
 
 #include "../generation_fixture_registry.hpp"
+#include "bench_dependency_manifest.hpp"
 #include "bench_runner_contract.hpp"
 #include "bench_runner_registry.hpp"
 #include "generation_workload_manifest.hpp"
@@ -86,6 +87,59 @@ struct process_capture {
   std::string stdout_text = {};
   std::string stderr_text = {};
 };
+
+process_capture run_bench_runner_capture(const std::vector<std::string> & args,
+                                         const std::string & tag) {
+  const std::filesystem::path tmp_dir =
+      std::filesystem::temp_directory_path() / "emel-bench-runner-tests" / tag;
+  std::filesystem::create_directories(tmp_dir);
+  const std::filesystem::path stdout_path = tmp_dir / "stdout.txt";
+  const std::filesystem::path stderr_path = tmp_dir / "stderr.txt";
+
+  std::string command;
+#if defined(_WIN32)
+  command = quote_arg_windows(bench_runner_binary_path().string());
+  for (const std::string & arg : args) {
+    command += " " + quote_arg_windows(arg);
+  }
+  command += " > ";
+  command += quote_arg_windows(stdout_path.string());
+  command += " 2> ";
+  command += quote_arg_windows(stderr_path.string());
+#else
+  command = "ulimit -s 8192; ";
+  command += quote_arg_posix(bench_runner_binary_path().string());
+  for (const std::string & arg : args) {
+    command += " " + quote_arg_posix(arg);
+  }
+  command += " > ";
+  command += quote_arg_posix(stdout_path.string());
+  command += " 2> ";
+  command += quote_arg_posix(stderr_path.string());
+#endif
+
+  const int status = std::system(command.c_str());
+  process_capture capture{};
+  capture.stdout_text = read_file(stdout_path);
+  capture.stderr_text = read_file(stderr_path);
+
+  std::error_code ec;
+  std::filesystem::remove(stdout_path, ec);
+  std::filesystem::remove(stderr_path, ec);
+
+  if (status == -1) {
+    return capture;
+  }
+#if defined(_WIN32)
+  capture.exit_code = status;
+#else
+  if (!WIFEXITED(status)) {
+    return capture;
+  }
+  capture.exit_code = WEXITSTATUS(status);
+#endif
+  return capture;
+}
 
 process_capture run_generation_bench_capture(const std::string & mode,
                                              const bool emit_jsonl = false) {
@@ -439,6 +493,146 @@ TEST_CASE("bench runner suites build through independent object targets") {
         std::string::npos);
   CHECK(cmake_source.find("add_bench_runner_suite(diarization_sortformer") != std::string::npos);
   CHECK(cmake_source.find("BENCH_RUNNER_SUITE_TARGETS") != std::string::npos);
+}
+
+TEST_CASE("benchmark dependency manifest covers registered runners conservatively") {
+  namespace manifest = emel::bench::dependency_manifest;
+
+  CHECK(manifest::kind_name(manifest::dependency_kind::source) == "source");
+  CHECK(manifest::kind_name(manifest::dependency_kind::config) == "config");
+  CHECK_FALSE(manifest::requires_full_gate({}));
+  CHECK(manifest::requires_full_gate({.missing = true}));
+  CHECK(manifest::requires_full_gate({.stale = true}));
+  CHECK(manifest::requires_full_gate({.uncertain = true}));
+
+  const auto all_records = manifest::records_for("all");
+  REQUIRE_FALSE(all_records.empty());
+  bool saw_cmake = false;
+  bool saw_quality_gate = false;
+  for (const auto & record : all_records) {
+    saw_cmake = saw_cmake || record.path == std::string_view{"tools/bench/CMakeLists.txt"};
+    saw_quality_gate = saw_quality_gate ||
+      record.path == std::string_view{"scripts/quality_gates.sh"};
+  }
+  CHECK(saw_cmake);
+  CHECK(saw_quality_gate);
+
+  for (std::size_t i = 0; i < emel::bench::registered_runner_count(); ++i) {
+    const std::string_view runner = emel::bench::registered_runner_suite_at(i);
+    const auto records = manifest::records_for(runner);
+    CHECK_MESSAGE(!records.empty(), "missing manifest records for runner " << runner);
+    bool has_source = false;
+    for (const auto & record : records) {
+      has_source = has_source || record.kind == manifest::dependency_kind::source;
+    }
+    CHECK_MESSAGE(has_source, "runner lacks source record " << runner);
+  }
+
+  const auto generation_records = manifest::records_for("generation");
+  bool has_generation_config = false;
+  bool has_generation_model = false;
+  bool has_generation_script = false;
+  for (const auto & record : generation_records) {
+    has_generation_config =
+      has_generation_config || record.kind == manifest::dependency_kind::config;
+    has_generation_model =
+      has_generation_model || record.kind == manifest::dependency_kind::model;
+    has_generation_script =
+      has_generation_script || record.kind == manifest::dependency_kind::script;
+  }
+  CHECK(has_generation_config);
+  CHECK(has_generation_model);
+  CHECK(has_generation_script);
+  CHECK(manifest::records_for("missing_runner").empty());
+}
+
+TEST_CASE("benchmark dependency manifest renders and writes deterministic output") {
+  namespace manifest = emel::bench::dependency_manifest;
+
+  const std::string rendered = manifest::render();
+  CHECK(rendered == manifest::render());
+  CHECK(rendered.rfind(std::string(manifest::k_schema) + "\n", 0u) == 0u);
+  CHECK(rendered.find("full_gate_on=missing,stale,uncertain\n") != std::string::npos);
+  CHECK(rendered.find(
+          "record runner=generation kind=source path=tools/bench/generation_bench.cpp") !=
+        std::string::npos);
+  CHECK(rendered.find(
+          "record runner=diarization_sortformer kind=source "
+          "path=tools/bench/diarization/sortformer_bench.cpp") != std::string::npos);
+
+  const std::filesystem::path manifest_path =
+      std::filesystem::temp_directory_path() / "emel-bench-runner-tests" /
+      "bench-dependency-manifest.txt";
+  std::filesystem::create_directories(manifest_path.parent_path());
+  REQUIRE(manifest::write(manifest_path));
+  CHECK(read_file(manifest_path) == rendered);
+  std::filesystem::remove(manifest_path);
+
+  const std::string baseline =
+      read_file(repo_root() / "tools" / "bench" / "dependency_manifest.txt");
+  CHECK(baseline == rendered);
+  const std::string docs =
+      read_file(repo_root() / "tools" / "bench" / "dependency_manifest.md");
+  CHECK(docs.find(manifest::k_schema) != std::string::npos);
+  CHECK(docs.find("full_gate_on=missing,stale,uncertain") != std::string::npos);
+}
+
+TEST_CASE("bench_runner cli emits and checks dependency manifest freshness") {
+  namespace manifest = emel::bench::dependency_manifest;
+
+  const std::filesystem::path manifest_path =
+      std::filesystem::temp_directory_path() / "emel-bench-runner-tests" /
+      "bench-runner-cli-dependency-manifest.txt";
+  std::filesystem::create_directories(manifest_path.parent_path());
+
+  process_capture write_capture = run_bench_runner_capture(
+    {"--write-dependency-manifest", manifest_path.string()},
+    "bench-manifest-write");
+  CHECK(write_capture.exit_code == 0);
+  CHECK(write_capture.stderr_text.empty());
+  CHECK(write_capture.stdout_text.find("dependency_manifest: action=write") !=
+        std::string::npos);
+  CHECK(write_capture.stdout_text.find("schema=bench_dependency_manifest/v1") !=
+        std::string::npos);
+  CHECK(read_file(manifest_path) == manifest::render());
+
+  process_capture fresh_capture = run_bench_runner_capture(
+    {"--check-dependency-manifest", manifest_path.string()},
+    "bench-manifest-fresh");
+  CHECK(fresh_capture.exit_code == 0);
+  CHECK(fresh_capture.stdout_text.find("full_gate=0") != std::string::npos);
+  CHECK(fresh_capture.stdout_text.find("reason=fresh") != std::string::npos);
+
+  process_capture uncertain_capture = run_bench_runner_capture(
+    {"--check-dependency-manifest", manifest_path.string(), "--dependency-manifest-uncertain"},
+    "bench-manifest-uncertain");
+  CHECK(uncertain_capture.exit_code == 3);
+  CHECK(uncertain_capture.stdout_text.find("full_gate=1") != std::string::npos);
+  CHECK(uncertain_capture.stdout_text.find("reason=uncertain") != std::string::npos);
+
+  {
+    std::ofstream stale_manifest(manifest_path, std::ios::binary);
+    stale_manifest << "stale manifest\n";
+  }
+  process_capture stale_capture = run_bench_runner_capture(
+    {"--check-dependency-manifest", manifest_path.string()},
+    "bench-manifest-stale");
+  CHECK(stale_capture.exit_code == 3);
+  CHECK(stale_capture.stdout_text.find("reason=stale") != std::string::npos);
+
+  std::filesystem::remove(manifest_path);
+  process_capture missing_capture = run_bench_runner_capture(
+    {"--check-dependency-manifest", manifest_path.string()},
+    "bench-manifest-missing");
+  CHECK(missing_capture.exit_code == 3);
+  CHECK(missing_capture.stdout_text.find("reason=missing") != std::string::npos);
+
+  process_capture invalid_capture = run_bench_runner_capture(
+    {"--write-dependency-manifest", manifest_path.string(), "--dependency-manifest-uncertain"},
+    "bench-manifest-invalid");
+  CHECK(invalid_capture.exit_code == 2);
+  CHECK(invalid_capture.stderr_text.find("error: invalid dependency manifest arguments") !=
+        std::string::npos);
 }
 
 TEST_CASE("generation_stage_probe_emel_path_does_not_bypass_generator_actor") {

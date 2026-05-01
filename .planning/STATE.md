@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.19
 milestone_name: Benchmark Tool Pluggable Runner Refactor
 status: phase_in_progress
-stopped_at: "Phase 160 complete; next action is `$gsd-discuss-phase 161`."
-last_updated: "2026-05-01T07:35:00Z"
+stopped_at: "Phase 161 complete; next action is `$gsd-discuss-phase 162`."
+last_updated: "2026-05-01T07:50:00Z"
 last_activity: 2026-05-01
 progress:
   total_phases: 7
-  completed_phases: 4
-  total_plans: 4
-  completed_plans: 4
-  percent: 57
+  completed_phases: 5
+  total_plans: 5
+  completed_plans: 5
+  percent: 71
 ---
 
 # Project State
@@ -26,12 +26,12 @@ verification before widening API surface or model scope.
 
 ## Current Position
 
-Phase: 161 Benchmark Dependency Manifest Emission
+Phase: 162 Benchmark Manifest Quality-Gate Consumption
 Plan: -
-Status: Phase 160 complete; Phase 161 not started.
-Last activity: 2026-05-01 - Phase 160 completed
+Status: Phase 161 complete; Phase 162 not started.
+Last activity: 2026-05-01 - Phase 161 completed
 
-Progress: [######----] 57%
+Progress: [#######---] 71%
 
 ## Deferred Items
 
@@ -51,10 +51,10 @@ Items acknowledged and still deferred at milestone close on 2026-05-01:
 
 - Milestone: `v1.19 Benchmark Tool Pluggable Runner Refactor`
 
-- Current planning shape: 7 phases, 13 active requirements mapped; 4 phases complete.
+- Current planning shape: 7 phases, 13 active requirements mapped; 5 phases complete.
 - Latest shipped milestone: `v1.18 Parity Tool Boundary Refactor`.
 
-- Next action: `$gsd-discuss-phase 161` or `$gsd-plan-phase 161`.
+- Next action: `$gsd-discuss-phase 162` or `$gsd-plan-phase 162`.
 - Current blocker: none known.
 
 ## Accumulated Context
@@ -94,6 +94,10 @@ Recent decisions affecting current work:
 - Phase 160 completed independent benchmark build targets by compiling selected suite sources
   through `bench_runner_suite_<suite>` object targets while preserving the existing
   operator-facing `bench_runner` executable and filtered disabled-stub behavior.
+
+- Phase 161 completed deterministic benchmark dependency manifest emission with
+  `bench_dependency_manifest/v1`, a generated baseline, schema docs, runner CLI write/check
+  operations, and conservative missing/stale/uncertain freshness semantics.
 
 - Phases 161-162 own build-time benchmark dependency manifests and conservative quality-gate
   consumption. Phase 163 closes maintained behavior and lane-isolation proof.
