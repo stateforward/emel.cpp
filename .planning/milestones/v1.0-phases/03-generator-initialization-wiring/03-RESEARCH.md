@@ -55,7 +55,7 @@ Phase 3 should extend the current runtime path rather than create a parallel ini
 | Library | Version | Purpose | Why Standard |
 |---------|---------|---------|--------------|
 | C++20 | repo standard | Runtime and tool implementation | Already enforced across the repo |
-| Boost.SML | pinned in repo | Generator and child-actor orchestration | Required by project rules and existing machines |
+| Stateforward.SML | pinned in repo | Generator and child-actor orchestration | Required by project rules and existing machines |
 | doctest | vendored in repo | Existing generator lifecycle coverage | Already used by `tests/generator/*` |
 
 ### Supporting

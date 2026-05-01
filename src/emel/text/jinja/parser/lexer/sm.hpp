@@ -56,7 +56,7 @@ struct invalid_char_result_decision {};
 
 struct model {
   auto operator()() const {
-    namespace sml = boost::sml;
+    namespace sml = stateforward::sml;
 
     // clang-format off
     return sml::make_transition_table(

@@ -44,7 +44,7 @@ individual gate scripts live in `scripts/`, but you should only invoke them thro
 ### architecture & style rules (the constitution)
 
 full details live in `docs/rules/sml.rules.md`. highlights:
-- boost.SML is the *only* orchestration mechanism allowed.
+- stateforward.SML is the *only* orchestration mechanism allowed.
 - run-to-completion actor model. no queues, no deferred events, no re-entrancy, no excuses.
 - guards must be pure. actions must be bounded and allocation-free during dispatch.
 - no llama.cpp or ggml names, patterns, or energy permitted outside the explicitly allowed tool

@@ -130,7 +130,7 @@ struct unexpected {};
  */
 struct model {
   auto operator()() const {
-    namespace sml = boost::sml;
+    namespace sml = stateforward::sml;
 
     // clang-format off
     return sml::make_transition_table(
@@ -441,7 +441,7 @@ struct sm : public emel::sm<model, action::context> {
   sm() = default;
 
   bool process_event(const event::bind & ev) {
-    namespace sml = boost::sml;
+    namespace sml = stateforward::sml;
 
     const bool accepted = base_type::process_event(ev);
     const bool at_idle = this->is(sml::state<idle>);
@@ -449,7 +449,7 @@ struct sm : public emel::sm<model, action::context> {
   }
 
   bool process_event(const event::detokenize & ev) {
-    namespace sml = boost::sml;
+    namespace sml = stateforward::sml;
 
     const bool accepted = base_type::process_event(ev);
     const bool at_done = this->is(sml::state<done>);

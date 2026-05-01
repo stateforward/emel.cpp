@@ -8,11 +8,11 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 include(FetchContent)
 include("${CMAKE_CURRENT_LIST_DIR}/../../cmake/sml_version.cmake")
 FetchContent_Declare(
-  boost_sml
-  GIT_REPOSITORY ${EMEL_BOOST_SML_GIT_REPOSITORY}
-  GIT_TAG ${EMEL_BOOST_SML_GIT_TAG}
+  stateforward_sml
+  GIT_REPOSITORY ${EMEL_SML_GIT_REPOSITORY}
+  GIT_TAG ${EMEL_SML_GIT_TAG}
 )
-FetchContent_MakeAvailable(boost_sml)
+FetchContent_MakeAvailable(stateforward_sml)
 
 set(ROOT_DIR "${CMAKE_CURRENT_LIST_DIR}/../..")
 
@@ -152,6 +152,6 @@ target_include_directories(docsgen PRIVATE
   "${CMAKE_CURRENT_SOURCE_DIR}"
   "${ROOT_DIR}/src"
   "${ROOT_DIR}/include"
-  "${boost_sml_SOURCE_DIR}/include"
+  "${stateforward_sml_SOURCE_DIR}/include"
   "${CMAKE_CURRENT_BINARY_DIR}"
 )

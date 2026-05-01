@@ -1,6 +1,6 @@
 #pragma once
 
-#include <boost/sml.hpp>
+#include <stateforward/sml.hpp>
 
 #include <cstddef>
 #include <cctype>
@@ -172,28 +172,28 @@ inline std::string mermaid_label(std::string_view name) {
 
 template <class T>
 std::string raw_type_name() {
-  return boost::sml::aux::string<T>::c_str();
+  return stateforward::sml::aux::string<T>::c_str();
 }
 
 template <class>
 struct is_unexpected_event : std::false_type {};
 
 template <class T, class event>
-struct is_unexpected_event<boost::sml::back::unexpected_event<T, event>>
+struct is_unexpected_event<stateforward::sml::back::unexpected_event<T, event>>
     : std::true_type {};
 
 template <class>
 struct is_completion_event : std::false_type {};
 
 template <class event>
-struct is_completion_event<boost::sml::back::completion<event>> : std::true_type {
+struct is_completion_event<stateforward::sml::back::completion<event>> : std::true_type {
   using payload_type = event;
 };
 
 template <class event>
 std::string event_type_name() {
   if constexpr (is_unexpected_event<event>::value) {
-    using mapped = boost::sml::back::get_event_t<event>;
+    using mapped = stateforward::sml::back::get_event_t<event>;
     return raw_type_name<mapped>();
   }
   if constexpr (is_completion_event<event>::value) {
@@ -208,7 +208,7 @@ std::string event_type_name() {
 
 template <class event>
 std::string mermaid_event_name() {
-  if constexpr (std::is_same_v<event, boost::sml::back::anonymous>) {
+  if constexpr (std::is_same_v<event, stateforward::sml::back::anonymous>) {
     return {};
   }
   return mermaid_label(event_type_name<event>());
@@ -216,7 +216,7 @@ std::string mermaid_event_name() {
 
 template <class event>
 std::string table_event_name() {
-  if constexpr (std::is_same_v<event, boost::sml::back::anonymous>) {
+  if constexpr (std::is_same_v<event, stateforward::sml::back::anonymous>) {
     return "-";
   }
   return shorten_type_name(event_type_name<event>());

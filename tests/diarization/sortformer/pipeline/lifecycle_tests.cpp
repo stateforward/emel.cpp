@@ -3,7 +3,7 @@
 #include <cmath>
 #include <memory>
 
-#include <boost/sml.hpp>
+#include <stateforward/sml.hpp>
 #include "doctest/doctest.h"
 
 #include "diarization/sortformer_fixture.hpp"
@@ -29,7 +29,7 @@ TEST_CASE("sortformer pipeline runs maintained pcm to probabilities and segments
 
   pipeline::sm machine{};
   REQUIRE(fixture::run_pipeline(machine, model->contract, pcm.pcm, pcm.sample_rate, result));
-  CHECK(machine.is(boost::sml::state<pipeline::state_ready>));
+  CHECK(machine.is(stateforward::sml::state<pipeline::state_ready>));
   CHECK(result.err == pipeline_detail::to_error(pipeline::error::none));
   CHECK(result.frame_count == pipeline_detail::k_frame_count);
   CHECK(result.probability_count == pipeline_detail::k_required_probability_value_count);

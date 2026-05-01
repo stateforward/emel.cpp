@@ -32,7 +32,7 @@ struct unexpected {};
 
 struct model {
   auto operator()() const {
-    namespace sml = boost::sml;
+    namespace sml = stateforward::sml;
 
     // clang-format off
     return sml::make_transition_table(
@@ -283,7 +283,7 @@ struct sm : public emel::sm<model, action::context> {
   sm() = default;
 
   bool process_event(const event::bind &ev) {
-    namespace sml = boost::sml;
+    namespace sml = stateforward::sml;
 
     event::bind_ctx runtime_ctx{};
     event::bind_runtime runtime_ev{ev, runtime_ctx};
@@ -305,7 +305,7 @@ struct sm : public emel::sm<model, action::context> {
   }
 
   bool process_event(const event::tokenize &ev) {
-    namespace sml = boost::sml;
+    namespace sml = stateforward::sml;
 
     event::tokenize_ctx runtime_ctx{};
     runtime_ctx.fragments = tokenize_fragments_.data();

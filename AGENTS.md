@@ -4,7 +4,7 @@ these rules define the engineering contract for emel.cpp. they are aligned with
 `docs/rules/sml.rules.md`. if a rule here conflicts with `docs/rules/sml.rules.md`, the doc
 wins and this file must be updated.
 
-## boost.SML actor model (aligned with docs/sml.rules.md)
+## stateforward.SML actor model (aligned with docs/sml.rules.md)
 ALWAYS follow the RTC actor model and no-queue invariant from `docs/sml.rules.md`.
 NEVER use `sml::process_queue`, `sml::defer_queue`, or any mailbox/post-for-later
 mechanism.
@@ -79,16 +79,16 @@ same RTC chain; invoke before dispatch returns, never store in context, and neve
 ALWAYS define explicit behavior for unexpected events; NEVER drop them silently.
 ALWAYS use `sml::unexpected_event` for unexpected-event handling (never `event<sml::_>`).
 `sml::unexpected_event<_>` is only raised for unhandled external events; it already excludes
-internal events. do NOT guard it to exclude `boost::sml::back::internal_event`, or you will
+internal events. do NOT guard it to exclude `stateforward::sml::back::internal_event`, or you will
 suppress the unexpected event itself.
 ALWAYS reproduce a reported bug by adding a failing unit test before making fixes.
 ALWAYS keep tracing deterministic, bounded, and allocation-free; use
 `sml::logger<...>` when needed.
 
 ## architecture and composition
-ALWAYS use boost.SML for orchestration state machines.
+ALWAYS use stateforward.SML for orchestration state machines.
 ALWAYS define transition tables in `struct model` and expose `using sm =
-boost::sml::sm<model>;`.
+stateforward::sml::sm<model>;`.
 ALWAYS write transition rows in destination-first form:
 `sml::state<dst> <= src + event [guard] / action`.
 NEVER write source-first rows in new or modified code
@@ -358,7 +358,7 @@ ALWAYS use ctest targets `emel_tests` and `lint_snapshot` for test execution.
 ALWAYS reference `docs/rules/sml.rules.md` for SML semantics and testing guidance.
 
 ## reference policy
-ALWAYS treat `src/` boost.SML machines as the single source of truth for
+ALWAYS treat `src/` stateforward.SML machines as the single source of truth for
 architecture and orchestration.
 ALWAYS treat milestone-closeout claims about maintained runtime, fixture,
 contract, parity, benchmark, or benchmark-document truth as source-backed
@@ -375,7 +375,7 @@ contract/fixture/path is still feeding the claimed maintained runtime,
 ALWAYS treat the claim as unsatisfied until the maintained codepath is wired end
 to end.
 ALWAYS use `src/emel/gbnf` as the default architectural reference for new
-Boost.SML machine organization, decomposition, and transition-table layout,
+Stateforward.SML machine organization, decomposition, and transition-table layout,
 unless the current task explicitly requires a different reference family.
 NEVER maintain parallel machine-definition markdown specs under
 `docs/architecture/*`.
@@ -385,7 +385,7 @@ ALWAYS treat the reference implementation as the functional logic reference for
 allocator and behavioral parity work.
 NEVER port reference control flow, branching structure, lifecycle semantics, or
 orchestration decisions verbatim from llama.cpp/ggml.
-ALWAYS define EMEL behavior and orchestration semantics in boost.SML machines as
+ALWAYS define EMEL behavior and orchestration semantics in stateforward.SML machines as
 source of truth.
 ALWAYS port llama.cpp/ggml arithmetic, kernels, and instruction behavior into
 this codebase when implementing equivalent EMEL functionality.

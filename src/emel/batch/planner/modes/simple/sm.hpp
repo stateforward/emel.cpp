@@ -1,7 +1,7 @@
 #pragma once
 // benchmark: designed
 
-#include <boost/sml.hpp>
+#include <stateforward/sml.hpp>
 
 #include "emel/sm.hpp"
 #include "emel/batch/planner/modes/simple/actions.hpp"
@@ -20,7 +20,7 @@ struct state_planning_failed {};
 
 struct model {
   auto operator()() const {
-    namespace sml = boost::sml;
+    namespace sml = stateforward::sml;
     // clang-format off
     return sml::make_transition_table(
       //------------------------------------------------------------------------------//
@@ -85,7 +85,7 @@ struct sm : emel::sm<model, context> {
 
   bool process_event(const event::plan_request & ev) {
     const bool accepted = base_type::process_event(ev);
-    return accepted && this->is(boost::sml::state<state_planning_done>);
+    return accepted && this->is(stateforward::sml::state<state_planning_done>);
   }
 };
 

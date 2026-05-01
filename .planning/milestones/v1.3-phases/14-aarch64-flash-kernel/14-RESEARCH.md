@@ -13,7 +13,7 @@
 Phase 14 delivers a backend-specific AArch64 `op_flash_attn_ext` implementation for the maintained
 canonical Llama-68M flash-attention contract inside `src/emel/kernel`, preserving reusable
 workspace semantics and zero-allocation dispatch. This phase does not widen workload scope, does
-not change the existing Boost.SML orchestration contract, and does not yet claim shipped runtime,
+not change the existing Stateforward.SML orchestration contract, and does not yet claim shipped runtime,
 paritychecker, or benchmark completion.
 
 ## Existing Code Insights

@@ -1,5 +1,5 @@
 #include <array>
-#include <boost/sml.hpp>
+#include <stateforward/sml.hpp>
 #include <cstdint>
 #include <cstring>
 #include <doctest/doctest.h>
@@ -131,7 +131,7 @@ emel::error::type sampler_select_argmax(int32_t & candidate_ids,
 }
 
 template <class... Ts, class fn>
-constexpr void for_each_type(boost::sml::aux::type_list<Ts...>, fn && visitor) {
+constexpr void for_each_type(stateforward::sml::aux::type_list<Ts...>, fn && visitor) {
   (visitor.template operator()<Ts>(), ...);
 }
 
@@ -971,7 +971,7 @@ struct generator_fixture {
 
 TEST_CASE("generator_starts_uninitialized") {
   auto fixture = std::make_unique<generator_fixture>();
-  CHECK(fixture->generator->is(boost::sml::state<emel::text::generator::uninitialized>));
+  CHECK(fixture->generator->is(stateforward::sml::state<emel::text::generator::uninitialized>));
 }
 
 TEST_CASE("generator_initialize_reserves_lifecycle_managed_graph_tensors") {
@@ -1008,7 +1008,7 @@ TEST_CASE("generator_rejects_generate_before_initialize") {
       fixture->make_generate(tracker, output.data(), output.size(), output_length, &error);
 
   CHECK_FALSE(fixture->generator->process_event(request));
-  CHECK(fixture->generator->is(boost::sml::state<emel::text::generator::uninitialized>));
+  CHECK(fixture->generator->is(stateforward::sml::state<emel::text::generator::uninitialized>));
   CHECK_FALSE(tracker.generate_done_called);
   CHECK(tracker.generate_error_called);
   CHECK(error == emel::error::cast(emel::text::generator::error::invalid_request));
@@ -1022,7 +1022,7 @@ TEST_CASE("generator_initialize_succeeds_and_enters_ready") {
   const auto request = fixture->make_initialize(tracker, &error);
 
   CHECK(fixture->generator->process_event(request));
-  CHECK(fixture->generator->is(boost::sml::state<emel::text::generator::ready>));
+  CHECK(fixture->generator->is(stateforward::sml::state<emel::text::generator::ready>));
   CHECK(tracker.initialize_done_called);
   CHECK_FALSE(tracker.initialize_error_called);
   CHECK(error == emel::error::cast(emel::text::generator::error::none));
@@ -1036,7 +1036,7 @@ TEST_CASE("generator_initialize_accepts_explicit_preselected_argmax_mode_without
       tracker, &error, emel::text::generator::selection_mode::preselected_argmax);
 
   CHECK(fixture->generator->process_event(request));
-  CHECK(fixture->generator->is(boost::sml::state<emel::text::generator::ready>));
+  CHECK(fixture->generator->is(stateforward::sml::state<emel::text::generator::ready>));
   CHECK(tracker.initialize_done_called);
   CHECK_FALSE(tracker.initialize_error_called);
   CHECK(error == emel::error::cast(emel::text::generator::error::none));
@@ -1050,7 +1050,7 @@ TEST_CASE("generator_rejects_invalid_initialize_request") {
   request.tokenizer_sm = nullptr;
 
   CHECK_FALSE(fixture->generator->process_event(request));
-  CHECK(fixture->generator->is(boost::sml::state<emel::text::generator::uninitialized>));
+  CHECK(fixture->generator->is(stateforward::sml::state<emel::text::generator::uninitialized>));
   CHECK_FALSE(tracker.initialize_done_called);
   CHECK(tracker.initialize_error_called);
   CHECK(error == emel::error::cast(emel::text::generator::error::invalid_request));
@@ -1082,7 +1082,7 @@ TEST_CASE("generator_initialize_rejects_missing_injected_dependencies_through_sm
           on_initialize_error);
 
   CHECK_FALSE(generator.process_event(request));
-  CHECK(generator.is(boost::sml::state<emel::text::generator::uninitialized>));
+  CHECK(generator.is(stateforward::sml::state<emel::text::generator::uninitialized>));
   CHECK_FALSE(tracker.initialize_done_called);
   CHECK(tracker.initialize_error_called);
   CHECK(error == emel::error::cast(emel::text::generator::error::invalid_request));
@@ -1096,7 +1096,7 @@ TEST_CASE("generator_initialize_reports_original_request_without_generation_call
   const auto request = fixture->make_initialize(tracker, &error);
 
   REQUIRE(fixture->generator->process_event(request));
-  CHECK(fixture->generator->is(boost::sml::state<emel::text::generator::ready>));
+  CHECK(fixture->generator->is(stateforward::sml::state<emel::text::generator::ready>));
   CHECK(tracker.initialize_done_called);
   CHECK_FALSE(tracker.initialize_error_called);
   CHECK(tracker.initialize_request == &request);
@@ -1113,7 +1113,7 @@ TEST_CASE("generator_initialize_can_rebind_ready_session_without_re_reserving_gr
   const auto first_request = fixture->make_initialize(first_tracker, &first_error);
 
   REQUIRE(fixture->generator->process_event(first_request));
-  CHECK(fixture->generator->is(boost::sml::state<emel::text::generator::ready>));
+  CHECK(fixture->generator->is(stateforward::sml::state<emel::text::generator::ready>));
   CHECK(first_tracker.initialize_done_called);
   CHECK(first_error == emel::error::cast(emel::text::generator::error::none));
 
@@ -1122,7 +1122,7 @@ TEST_CASE("generator_initialize_can_rebind_ready_session_without_re_reserving_gr
   const auto second_request = fixture->make_initialize(second_tracker, &second_error);
 
   CHECK(fixture->generator->process_event(second_request));
-  CHECK(fixture->generator->is(boost::sml::state<emel::text::generator::ready>));
+  CHECK(fixture->generator->is(stateforward::sml::state<emel::text::generator::ready>));
   CHECK(second_tracker.initialize_done_called);
   CHECK_FALSE(second_tracker.initialize_error_called);
   CHECK(second_error == emel::error::cast(emel::text::generator::error::none));
@@ -1144,7 +1144,7 @@ TEST_CASE("generator_generate_runs_native_generator_contract") {
                              &generate_error);
 
   CHECK(fixture->generator->process_event(generate_request));
-  CHECK(fixture->generator->is(boost::sml::state<emel::text::generator::ready>));
+  CHECK(fixture->generator->is(stateforward::sml::state<emel::text::generator::ready>));
   CHECK_FALSE(generate_tracker.generate_error_called);
   CHECK(generate_tracker.generate_done_called);
   CHECK(generate_error == emel::error::cast(emel::text::generator::error::none));
@@ -1184,7 +1184,7 @@ TEST_CASE("generator_qwen3_generator_initializes_and_generates_one_token") {
                              &generate_error);
 
   CHECK(fixture->generator->process_event(generate_request));
-  CHECK(fixture->generator->is(boost::sml::state<emel::text::generator::ready>));
+  CHECK(fixture->generator->is(stateforward::sml::state<emel::text::generator::ready>));
   CHECK_FALSE(generate_tracker.generate_error_called);
   CHECK(generate_tracker.generate_done_called);
   CHECK(generate_tracker.tokens_generated == 1);
@@ -1212,7 +1212,7 @@ TEST_CASE("generator_gemma4_generator_initializes_and_generates_one_token") {
                              &generate_error);
 
   CHECK(fixture->generator->process_event(generate_request));
-  CHECK(fixture->generator->is(boost::sml::state<emel::text::generator::ready>));
+  CHECK(fixture->generator->is(stateforward::sml::state<emel::text::generator::ready>));
   CHECK_FALSE(generate_tracker.generate_error_called);
   CHECK(generate_tracker.generate_done_called);
   CHECK(generate_tracker.tokens_generated == 1);
@@ -1806,7 +1806,7 @@ TEST_CASE("generator_generate_reports_bounded_output_buffer_errors") {
                              &generate_error);
 
   CHECK_FALSE(fixture->generator->process_event(generate_request));
-  CHECK(fixture->generator->is(boost::sml::state<emel::text::generator::ready>));
+  CHECK(fixture->generator->is(stateforward::sml::state<emel::text::generator::ready>));
   CHECK_FALSE(generate_tracker.generate_done_called);
   CHECK(generate_tracker.generate_error_called);
   CHECK(generate_tracker.generate_request == &generate_request);
@@ -1834,7 +1834,7 @@ TEST_CASE("generator_generate_uses_nonflash_runtime_without_claiming_flash") {
                              &generate_error);
 
   CHECK(fixture->generator->process_event(generate_request));
-  CHECK(fixture->generator->is(boost::sml::state<emel::text::generator::ready>));
+  CHECK(fixture->generator->is(stateforward::sml::state<emel::text::generator::ready>));
   CHECK(generate_tracker.generate_done_called);
   CHECK_FALSE(generate_tracker.generate_error_called);
   CHECK(generate_error == emel::error::cast(emel::text::generator::error::none));
@@ -1963,7 +1963,7 @@ TEST_CASE("generator_reinitialize_clears_lifecycle_publish_state_before_next_gen
 }
 
 TEST_CASE("generator_docs_table_uses_typed_completion_event_names") {
-  using machine_t = boost::sml::sm<emel::text::generator::model>;
+  using machine_t = stateforward::sml::sm<emel::text::generator::model>;
   using transitions = typename machine_t::transitions;
 
   bool has_initialize_completion = false;
@@ -1985,7 +1985,7 @@ TEST_CASE("generator_docs_table_uses_typed_completion_event_names") {
 }
 
 TEST_CASE("generator_sm_models_explicit_prefill_boundary_and_decode_compute_states") {
-  using machine_t = boost::sml::sm<emel::text::generator::model>;
+  using machine_t = stateforward::sml::sm<emel::text::generator::model>;
   using states = typename machine_t::states;
 
   CHECK(emel::detail::type_list_contains<
@@ -2013,7 +2013,7 @@ TEST_CASE("generator_sm_models_explicit_prefill_boundary_and_decode_compute_stat
 }
 
 TEST_CASE("generator_sm_models_explicit_initializer_boundary") {
-  using machine_t = boost::sml::sm<emel::text::generator::model>;
+  using machine_t = stateforward::sml::sm<emel::text::generator::model>;
   using states = typename machine_t::states;
 
   CHECK(emel::detail::type_list_contains<emel::text::generator::initializing, states>::value);

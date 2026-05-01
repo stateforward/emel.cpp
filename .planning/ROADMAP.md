@@ -51,7 +51,7 @@
 ## v1.20 SML Dependency And Namespace Migration
 
 **Goal:** Upgrade EMEL to the current `stateforward/sml.cpp` dependency and migrate
-project-owned code/docs from legacy `boost::sml` naming to `stateforward::sml` without weakening
+project-owned code/docs from the legacy SML surface to `stateforward::sml` without weakening
 actor-model rules or maintained parity/benchmark evidence.
 
 **Source:** GitHub issue #56
@@ -64,7 +64,7 @@ actor-model rules or maintained parity/benchmark evidence.
 | 168 | Project-Owned Source Namespace Migration | Move active EMEL source, headers, tests, and tools to the preferred `stateforward` SML include and namespace surface. | SRC-01, SRC-02 |
 | 169 | SML Orchestration Behavior Preservation | Prove transition tables, dispatch tables, unexpected-event handling, loggers, and state inspection still behave after migration. | SRC-03 |
 | 170 | SML Rules And Documentation Migration | Update contributor rules, docs, examples, docsgen, and planning guidance so active instructions no longer point at legacy naming. | DOC-01, DOC-02, DOC-03 |
-| 171 | Legacy SML Reference Guardrails | Add source checks and scoped quality gates that prevent unapproved `boost::sml` drift while preserving maintained behavior. | VAL-01, VAL-02 |
+| 171 | Legacy SML Reference Guardrails | Add source checks and scoped quality gates that prevent unapproved legacy SML drift while preserving maintained behavior. | VAL-01, VAL-02 |
 | 172 | v1.20 Source-Backed Closeout | Run source-backed audit and close the milestone only after all active migration requirements are proven. | VAL-03 |
 
 ### Phase 167: SML Upstream Pin And Surface Audit
@@ -90,7 +90,7 @@ contract before changing broad code.
 **Success criteria:**
 1. Active `src/`, `include/`, `tests/`, and `tools/` SML include sites use the preferred upstream
    include path where supported.
-2. Active project-owned `boost::sml` namespace references are migrated to `stateforward::sml`
+2. Active project-owned legacy SML namespace references are migrated to `stateforward::sml`
    without changing transition-table semantics.
 3. Existing canonical machine aliases remain stable for EMEL callers.
 4. Focused build/test coverage passes for representative SML machines after the rename.
@@ -118,7 +118,7 @@ contract before changing broad code.
 1. `docs/rules/sml.rules.md`, `AGENTS.md`, and active planning guidance instruct new work to use
    `stateforward::sml`.
 2. Docsgen and examples emit or check the new namespace consistently.
-3. Historical `boost::sml` references are either archival context or explicitly exempted.
+3. Historical legacy SML references are either archival context or explicitly exempted.
 4. Documentation checks pass after the migration.
 
 ### Phase 171: Legacy SML Reference Guardrails
@@ -128,7 +128,7 @@ contract before changing broad code.
 **Requirements:** VAL-01, VAL-02
 
 **Success criteria:**
-1. Source checks fail on new unapproved active `boost::sml` namespace or `<boost/sml.hpp>`
+1. Source checks fail on new unapproved active legacy SML namespace or include-path
    include references.
 2. Changed-file scoped quality gates run against the migration files without weakening parity,
    benchmark, coverage, or docs lanes.

@@ -15,7 +15,7 @@ unwrap_runtime_event(const runtime_event_type &ev) noexcept {
                 }) {
     return (ev);
   } else if constexpr (requires { ev.event_; }) {
-    // Boost.SML may wrap events in internal back:: wrappers exposing event_.
+    // Stateforward.SML may wrap events in internal back:: wrappers exposing event_.
     return (ev.event_);
   } else {
     return (ev);

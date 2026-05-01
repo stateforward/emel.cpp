@@ -39,7 +39,7 @@ Status legend: `PASS` = met by static evidence, `FAIL` = violated by static evid
 
 | Item | Status | Evidence |
 | --- | --- | --- |
-| 1.1 Boost.SML orchestration | PASS | 79 machine files contain `make_transition_table(...)`; remaining wrappers alias to machine types |
+| 1.1 Stateforward.SML orchestration | PASS | 79 machine files contain `make_transition_table(...)`; remaining wrappers alias to machine types |
 | 1.2 `struct model` + canonical `sm` type | PARTIAL | 79 files have `struct model`; 81 have `sm` type; alias-only wrappers: `src/emel/kernel/sm.hpp`, `src/emel/text/encoders/sm.hpp` |
 | 1.3 Destination-first transition rows only | FAIL | source-first rows in `src/emel/text/formatter/sm.hpp:65`, `src/emel/text/formatter/sm.hpp:66` |
 | 1.4 No source-first syntax in modified code | FAIL | same offender as 1.3 |

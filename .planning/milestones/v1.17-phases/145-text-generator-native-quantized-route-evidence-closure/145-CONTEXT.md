@@ -16,7 +16,7 @@ The concrete blocker is in `src/emel/text/generator/detail.hpp`:
 
 ## Constraints
 
-- Keep Boost.SML orchestration as the behavior source of truth.
+- Keep Stateforward.SML orchestration as the behavior source of truth.
 - Do not introduce dispatch-time queues, deferred work, or hidden route selection in actions or
   detail helpers.
 - Preserve native quantized behavior and optimized kernel evidence where the prepared tensor

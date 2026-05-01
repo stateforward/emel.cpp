@@ -13,7 +13,7 @@ ARM Llama-68M path
 
 Phase 18 delivers an EMEL-owned vectorized AArch64 `q3_K x q8_K` hot-path kernel inside the
 existing kernel backend seam for the canonical Llama-68M ARM workload. This phase stays
-data-plane-only: it does not change Boost.SML structure, public APIs, acceptance surfaces, or the
+data-plane-only: it does not change Stateforward.SML structure, public APIs, acceptance surfaces, or the
 effective operand contract already shipped through the generator -> graph -> processor -> kernel
 chain.
 

@@ -50,9 +50,9 @@ class any {
   }
 
  private:
-  using sm_list = boost::sml::aux::type_list<spm::sm, bpe::sm, wpm::sm, ugm::sm,
+  using sm_list = stateforward::sml::aux::type_list<spm::sm, bpe::sm, wpm::sm, ugm::sm,
                                              rwkv::sm, plamo2::sm, fallback::sm>;
-  using event_list = boost::sml::aux::type_list<event::encode>;
+  using event_list = stateforward::sml::aux::type_list<event::encode>;
 
   emel::sm_any<encoder_kind, sm_list, event_list> core_{};
 };

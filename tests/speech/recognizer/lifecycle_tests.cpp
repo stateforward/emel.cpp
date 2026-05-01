@@ -244,7 +244,7 @@ TEST_CASE("speech_recognizer_rejects_initialize_after_initialize_error") {
   CHECK(err ==
         emel::error::cast(emel::speech::recognizer::error::invalid_request));
   CHECK(first_error.calls == 1);
-  CHECK(recognizer.is(boost::sml::state<recognizer::state_errored>));
+  CHECK(recognizer.is(stateforward::sml::state<recognizer::state_errored>));
 
   err = emel::error::cast(emel::speech::recognizer::error::none);
   emel::speech::recognizer::event::initialize valid_initialize_ev{
@@ -263,7 +263,7 @@ TEST_CASE("speech_recognizer_rejects_initialize_after_initialize_error") {
   CHECK(second_error.calls == 1);
   CHECK(second_error.err ==
         emel::error::cast(emel::speech::recognizer::error::invalid_request));
-  CHECK(recognizer.is(boost::sml::state<recognizer::state_errored>));
+  CHECK(recognizer.is(stateforward::sml::state<recognizer::state_errored>));
 }
 
 TEST_CASE("speech_recognizer_runs_backend_route_from_public_events") {

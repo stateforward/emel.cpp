@@ -29,7 +29,7 @@ runtime/error orchestration.
 |-------------|--------|----------|
 | ASR-02 | SATISFIED | Mel and encoder already landed in Phase 97; Phase 98 adds decoder execution, token handling, and transcript publication through `src/` code. |
 | ASR-03 | SATISFIED | Public decoder event returns deterministic token transcript and explicit malformed request errors. |
-| ASR-04 | SATISFIED | Decoder orchestration uses Boost.SML guards/transitions for validation and variant routing. |
+| ASR-04 | SATISFIED | Decoder orchestration uses Stateforward.SML guards/transitions for validation and variant routing. |
 
 ## Automated Checks
 

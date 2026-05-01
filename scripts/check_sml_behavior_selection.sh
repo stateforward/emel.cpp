@@ -7,7 +7,7 @@ usage() {
   cat <<'USAGE'
 usage: scripts/check_sml_behavior_selection.sh [PATH...]
 
-Scans Boost.SML actor source for hidden runtime behavior selection that should be
+Scans Stateforward.SML actor source for hidden runtime behavior selection that should be
 modeled as explicit sm.hpp guards/states/transitions.
 
 When PATH is omitted, scans src/emel.

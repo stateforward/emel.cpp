@@ -1,4 +1,4 @@
-#include <boost/sml.hpp>
+#include <stateforward/sml.hpp>
 #include <doctest/doctest.h>
 
 #include "emel/docs/detail.hpp"
@@ -7,14 +7,14 @@
 namespace {
 
 template <class... Ts, class fn>
-constexpr void for_each_type(boost::sml::aux::type_list<Ts...>, fn && visitor) {
+constexpr void for_each_type(stateforward::sml::aux::type_list<Ts...>, fn && visitor) {
   (visitor.template operator()<Ts>(), ...);
 }
 
 }  // namespace
 
 TEST_CASE("generator_prefill_sm_models_explicit_contract_and_compute_states") {
-  using machine_t = boost::sml::sm<emel::text::generator::prefill::model>;
+  using machine_t = stateforward::sml::sm<emel::text::generator::prefill::model>;
   using states = typename machine_t::states;
 
   CHECK(emel::detail::type_list_contains<
@@ -29,7 +29,7 @@ TEST_CASE("generator_prefill_sm_models_explicit_contract_and_compute_states") {
 }
 
 TEST_CASE("generator_prefill_sm_uses_explicit_internal_run_completion") {
-  using machine_t = boost::sml::sm<emel::text::generator::prefill::model>;
+  using machine_t = stateforward::sml::sm<emel::text::generator::prefill::model>;
   using transitions = typename machine_t::transitions;
 
   bool has_run_completion = false;

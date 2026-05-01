@@ -153,7 +153,7 @@ TEST_CASE("detokenizer_dispatches_error_callbacks_for_invalid_requests") {
 }
 
 TEST_CASE("detokenizer_internal_reentry_rejections_dispatch_error_callbacks") {
-  namespace sml = boost::sml;
+  namespace sml = stateforward::sml;
 
   auto & vocab = make_vocab();
   add_token(vocab, "B");
@@ -164,9 +164,9 @@ TEST_CASE("detokenizer_internal_reentry_rejections_dispatch_error_callbacks") {
       detokenizer_error_code(emel::text::detokenizer::error::invalid_request);
 
   emel::text::detokenizer::action::context ctx = {};
-  boost::sml::sm<
+  stateforward::sml::sm<
       emel::text::detokenizer::model,
-      boost::sml::testing> machine{ctx};
+      stateforward::sml::testing> machine{ctx};
   detokenizer_callback_recorder callbacks = {};
 
   machine.set_current_states(sml::state<emel::text::detokenizer::binding_done_callback>);

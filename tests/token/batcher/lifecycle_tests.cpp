@@ -1,5 +1,5 @@
 #include <array>
-#include <boost/sml.hpp>
+#include <stateforward/sml.hpp>
 #include <doctest/doctest.h>
 #include <limits>
 
@@ -75,7 +75,7 @@ struct unknown_event {};
 
 TEST_CASE("token_batcher_starts_initialized") {
   emel::token::batcher::sm machine{};
-  CHECK(machine.is(boost::sml::state<emel::token::batcher::ready>));
+  CHECK(machine.is(stateforward::sml::state<emel::token::batcher::ready>));
 }
 
 TEST_CASE("token_batcher_generates_defaults") {
@@ -644,7 +644,7 @@ TEST_CASE("token_batcher_rejects_zero_tokens") {
   request.seq_mask_words = 1;
 
   CHECK_FALSE(machine.process_event(request));
-  CHECK(machine.is(boost::sml::state<emel::token::batcher::ready>));
+  CHECK(machine.is(stateforward::sml::state<emel::token::batcher::ready>));
   CHECK(err == emel::error::cast(batch_error::invalid_request));
 }
 
@@ -728,5 +728,5 @@ TEST_CASE("token_batcher_unknown_phase_guard_matches_only_unclassified_errors") 
 TEST_CASE("token_batcher_routes_unexpected_event") {
   emel::token::batcher::sm machine{};
   CHECK(machine.process_event(unknown_event{}));
-  CHECK(machine.is(boost::sml::state<emel::token::batcher::ready>));
+  CHECK(machine.is(stateforward::sml::state<emel::token::batcher::ready>));
 }

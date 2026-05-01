@@ -8,7 +8,7 @@
 
 Close the v1.17 audit blocker where `emel::text::generator::sm` still performs runtime behavior
 selection in the public `process_event(event::initialize)` wrapper. This phase must model
-initialize readiness and invalid-request outcomes through explicit Boost.SML guards, states, and
+initialize readiness and invalid-request outcomes through explicit Stateforward.SML guards, states, and
 transitions while preserving generator initializer and prefill child ownership under
 `src/emel/text/generator/**`.
 

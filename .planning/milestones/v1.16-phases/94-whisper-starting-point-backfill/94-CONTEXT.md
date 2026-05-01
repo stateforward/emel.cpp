@@ -46,7 +46,7 @@ execute Phase 95+ with clear keep/fix/replace boundaries.
 
 ### Engineering Rules
 - `AGENTS.md` — authoritative engineering contract for behavior routing and performance policy.
-- `docs/rules/sml.rules.md` — Boost.SML invariants and explicit routing requirements.
+- `docs/rules/sml.rules.md` — Stateforward.SML invariants and explicit routing requirements.
 
 ### Current Whisper Starting Material
 - `src/emel/model/whisper/detail.hpp` — Whisper model contract types and interfaces.

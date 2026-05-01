@@ -8,7 +8,7 @@ score: 3/3 phase truths verified
 # Phase 15 Verification Report
 
 **Phase Goal:** Wire the optimized ARM flash path through the shipped runtime chain, keep the
-existing Boost.SML orchestration contract intact, and publish explicit proof of supported and
+existing Stateforward.SML orchestration contract intact, and publish explicit proof of supported and
 unsupported behavior.
 **Verified:** 2026-03-22T22:12:00Z
 **Status:** passed

@@ -33,7 +33,7 @@ TEST_CASE("sm_normalize_event_result_handles_error_out") {
 }
 
 TEST_CASE("sm_process_support_dispatches_events") {
-  using process_t = boost::sml::back::process<dummy_event>;
+  using process_t = stateforward::sml::back::process<dummy_event>;
 
   owner_probe owner{};
   emel::detail::process_support<owner_probe, process_t> support{&owner};

@@ -1,6 +1,6 @@
 #include <algorithm>
 #include <array>
-#include <boost/sml.hpp>
+#include <stateforward/sml.hpp>
 #include <doctest/doctest.h>
 
 #include "emel/batch/planner/sm.hpp"
@@ -72,7 +72,7 @@ TEST_CASE("batch_planner_sm_recover_after_error") {
   CHECK(error_capture.err == emel::error::set(
       emel::error::cast(emel::batch::planner::error::invalid_request),
       emel::batch::planner::error::invalid_token_data));
-  CHECK(machine.is(boost::sml::state<emel::batch::planner::state_request_rejected>));
+  CHECK(machine.is(stateforward::sml::state<emel::batch::planner::state_request_rejected>));
 
   std::array<int32_t, 3> tokens = {{1, 2, 3}};
   plan_capture ok_capture{};
@@ -87,7 +87,7 @@ TEST_CASE("batch_planner_sm_recover_after_error") {
   }));
 
   CHECK(ok_capture.done_called);
-  CHECK(machine.is(boost::sml::state<emel::batch::planner::state_completed>));
+  CHECK(machine.is(stateforward::sml::state<emel::batch::planner::state_completed>));
 }
 
 TEST_CASE("batch_planner_sm_accepts_consecutive_splits") {
@@ -133,5 +133,5 @@ TEST_CASE("batch_planner_sm_template_dispatch_keeps_done_callback_behavior") {
   CHECK(machine.process_event(request));
   CHECK(capture.done_called);
   CHECK_FALSE(capture.error_called);
-  CHECK(machine.is(boost::sml::state<emel::batch::planner::state_completed>));
+  CHECK(machine.is(stateforward::sml::state<emel::batch::planner::state_completed>));
 }

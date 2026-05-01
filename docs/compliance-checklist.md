@@ -9,7 +9,7 @@ This checklist is architecture-only and merge-blocking for machine design/orches
 
 ## 1) SML Actor Architecture
 
-- [ ] Orchestration uses Boost.SML state machines (`boost::sml::sm<...>`); no alternate orchestration framework.
+- [ ] Orchestration uses Stateforward.SML state machines (`stateforward::sml::sm<...>`); no alternate orchestration framework.
 - [ ] Each machine defines transitions in `struct model` and exposes a canonical machine type (`struct sm : emel::sm<model, ...>` or an equivalent local alias pattern).
 - [ ] Transition rows use destination-first form only: `sml::state<dst> <= src + event [guard] / action`.
 - [ ] No source-first transition syntax is introduced in new/modified code.
@@ -69,7 +69,7 @@ This checklist is architecture-only and merge-blocking for machine design/orches
 
 ## 4) Pattern and Convention Enforcement (Kernel, GBNF, Memory)
 
-- [ ] `src/` Boost.SML machines are the source of truth for orchestration/architecture.
+- [ ] `src/` Stateforward.SML machines are the source of truth for orchestration/architecture.
 - [ ] `src/emel/gbnf`, `src/emel/kernel`, and `src/emel/memory` patterns are enforced as architecture references where applicable.
 - [ ] `src/emel/gbnf` remains the default structural reference family when task scope does not require a different family.
 - [ ] No parallel machine-definition specs are introduced under `docs/architecture/*`.

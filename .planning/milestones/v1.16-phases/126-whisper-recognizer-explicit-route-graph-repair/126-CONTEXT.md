@@ -7,7 +7,7 @@
 ## Phase Boundary
 
 Repair the public speech recognizer route boundary so route support, readiness, encode, decode,
-and detokenize behavior are represented by explicit Boost.SML guards, states, transitions, and
+and detokenize behavior are represented by explicit Stateforward.SML guards, states, transitions, and
 compile-time route policy types instead of a runtime `runtime_backend` function-pointer bundle.
 
 </domain>

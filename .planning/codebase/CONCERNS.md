@@ -100,7 +100,7 @@ raises the cost of keeping architecture, tests, docs, and benchmarks in sync.
 
 ## Security And Supply-Chain Concerns
 
-- `CMakeLists.txt` fetches Boost.SML from the network via `cmake/sml_version.cmake`, and both
+- `CMakeLists.txt` fetches Stateforward.SML from the network via `cmake/sml_version.cmake`, and both
   `tools/bench/CMakeLists.txt` and `tools/paritychecker/CMakeLists.txt` fetch `llama.cpp` unless
   `tmp/llama.cpp` is present. The refs are pinned, which helps, but builds are still dependent on
   external repository availability and integrity.

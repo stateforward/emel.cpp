@@ -1,4 +1,4 @@
-#include <boost/sml.hpp>
+#include <stateforward/sml.hpp>
 #include <doctest/doctest.h>
 
 #include "emel/gbnf/rule_parser/lexer/errors.hpp"
@@ -39,7 +39,7 @@ int32_t error_code(const emel::gbnf::rule_parser::lexer::error err) {
 
 TEST_CASE("gbnf_lexer_starts_initialized") {
   emel::gbnf::rule_parser::lexer::sm machine{};
-  CHECK(machine.is(boost::sml::state<emel::gbnf::rule_parser::lexer::initialized>));
+  CHECK(machine.is(stateforward::sml::state<emel::gbnf::rule_parser::lexer::initialized>));
 }
 
 TEST_CASE("gbnf_lexer_next_emits_token_stream_then_eof") {
@@ -56,7 +56,7 @@ TEST_CASE("gbnf_lexer_next_emits_token_stream_then_eof") {
   emel::gbnf::rule_parser::lexer::event::next next_ev{cursor, done_cb, error_cb};
 
   CHECK(machine.process_event(next_ev));
-  CHECK(machine.is(boost::sml::state<emel::gbnf::rule_parser::lexer::scanning>));
+  CHECK(machine.is(stateforward::sml::state<emel::gbnf::rule_parser::lexer::scanning>));
   CHECK(out.done_called);
   CHECK_FALSE(out.error_called);
   CHECK(out.has_token);
@@ -74,7 +74,7 @@ TEST_CASE("gbnf_lexer_next_emits_token_stream_then_eof") {
 
   out = {};
   CHECK(machine.process_event(next_def));
-  CHECK(machine.is(boost::sml::state<emel::gbnf::rule_parser::lexer::scanning>));
+  CHECK(machine.is(stateforward::sml::state<emel::gbnf::rule_parser::lexer::scanning>));
   CHECK(out.done_called);
   CHECK_FALSE(out.error_called);
   CHECK(out.has_token);
@@ -119,7 +119,7 @@ TEST_CASE("gbnf_lexer_empty_input_returns_eof") {
 
   emel::gbnf::rule_parser::lexer::event::next next_ev{cursor, done_cb, error_cb};
   CHECK(machine.process_event(next_ev));
-  CHECK(machine.is(boost::sml::state<emel::gbnf::rule_parser::lexer::scanning>));
+  CHECK(machine.is(stateforward::sml::state<emel::gbnf::rule_parser::lexer::scanning>));
   CHECK(out.done_called);
   CHECK_FALSE(out.error_called);
   CHECK_FALSE(out.has_token);
@@ -140,7 +140,7 @@ TEST_CASE("gbnf_lexer_rejects_invalid_cursor_offset") {
 
   emel::gbnf::rule_parser::lexer::event::next next_ev{cursor, done_cb, error_cb};
   CHECK(machine.process_event(next_ev));
-  CHECK(machine.is(boost::sml::state<emel::gbnf::rule_parser::lexer::initialized>));
+  CHECK(machine.is(stateforward::sml::state<emel::gbnf::rule_parser::lexer::initialized>));
   CHECK_FALSE(out.done_called);
   CHECK(out.error_called);
   CHECK(out.err == error_code(emel::gbnf::rule_parser::lexer::error::invalid_request));
@@ -159,7 +159,7 @@ TEST_CASE("gbnf_lexer_requires_callbacks") {
 
   emel::gbnf::rule_parser::lexer::event::next next_ev{cursor, missing_done, error_cb};
   CHECK(machine.process_event(next_ev));
-  CHECK(machine.is(boost::sml::state<emel::gbnf::rule_parser::lexer::initialized>));
+  CHECK(machine.is(stateforward::sml::state<emel::gbnf::rule_parser::lexer::initialized>));
   CHECK(out.error_called);
   CHECK(out.err == error_code(emel::gbnf::rule_parser::lexer::error::invalid_request));
 }

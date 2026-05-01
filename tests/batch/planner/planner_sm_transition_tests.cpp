@@ -1,5 +1,5 @@
 #include <array>
-#include <boost/sml.hpp>
+#include <stateforward/sml.hpp>
 #include <cstdint>
 #include <doctest/doctest.h>
 
@@ -57,7 +57,7 @@ TEST_CASE("batch_planner_sm_successful_split") {
   });
 
   CHECK(capture.done_called);
-  CHECK(machine.is(boost::sml::state<emel::batch::planner::state_completed>));
+  CHECK(machine.is(stateforward::sml::state<emel::batch::planner::state_completed>));
 }
 
 TEST_CASE("batch_planner_sm_validation_error_path") {
@@ -77,5 +77,5 @@ TEST_CASE("batch_planner_sm_validation_error_path") {
   CHECK(capture.err == emel::error::set(
       emel::error::cast(emel::batch::planner::error::invalid_request),
       emel::batch::planner::error::invalid_token_data));
-  CHECK(machine.is(boost::sml::state<emel::batch::planner::state_request_rejected>));
+  CHECK(machine.is(stateforward::sml::state<emel::batch::planner::state_request_rejected>));
 }

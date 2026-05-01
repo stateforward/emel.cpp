@@ -173,7 +173,7 @@ bench_leaf = Counter()
 def is_bench_frame(name: str) -> bool:
     return (
         "emel::" in name
-        or "boost::ext::sml::" in name
+        or "stateforward::sml::" in name
         or "llama" in name
         or "ggml" in name
         or "bench_runner" in name
@@ -226,7 +226,7 @@ if $GENERATE_FLAMEGRAPH; then
   if [[ -n "$stackcollapse_tool" && -n "$flamegraph_tool" ]]; then
     "$stackcollapse_tool" "$xml_path" > "$folded_path"
     "$flamegraph_tool" "$folded_path" > "$svg_path"
-    rg 'emel::|boost::ext::sml::|llama|ggml|bench_runner' "$folded_path" \
+    rg 'emel::|stateforward::sml::|llama|ggml|bench_runner' "$folded_path" \
       > "$bench_only_folded_path" || true
     if [[ -s "$bench_only_folded_path" ]]; then
       "$flamegraph_tool" "$bench_only_folded_path" > "$bench_only_svg_path"

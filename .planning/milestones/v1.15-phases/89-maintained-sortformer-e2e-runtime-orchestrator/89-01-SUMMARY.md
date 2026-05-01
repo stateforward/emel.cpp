@@ -13,7 +13,7 @@ requirements-completed:
 
 ## Completed
 
-- Added `src/emel/diarization/sortformer/pipeline/` as a maintained Boost.SML E2E actor.
+- Added `src/emel/diarization/sortformer/pipeline/` as a maintained Stateforward.SML E2E actor.
 - Added `event::run` with reference-based contract, PCM, probability output, segment output,
   output counts, and error output fields.
 - Wired the pipeline through:

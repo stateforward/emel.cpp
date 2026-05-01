@@ -2,7 +2,7 @@
 
 This repository is governed first by `docs/rules/sml.rules.md`, then by `AGENTS.md`, with
 `docs/rules/cpp.rules.md` supplying broader C/C++ real-time constraints. The implementation
-style in `src/` is heavily shaped by Boost.SML orchestration, synchronous actor boundaries,
+style in `src/` is heavily shaped by Stateforward.SML orchestration, synchronous actor boundaries,
 and “no allocation during dispatch” expectations.
 
 ## Coding Style
@@ -26,7 +26,7 @@ and “no allocation during dispatch” expectations.
 - Line length and indentation expectations come from `AGENTS.md`: near 100 columns and 2-space
   indentation.
 - `using namespace` in headers is prohibited by `AGENTS.md`; the code instead uses local aliases
-  like `namespace sml = boost::sml;` inside functions in `src/emel/*/sm.hpp`.
+  like `namespace sml = stateforward::sml;` inside functions in `src/emel/*/sm.hpp`.
 
 ## Naming Rules
 

@@ -7,7 +7,7 @@ the main boundaries between `src/emel/` and the outside world.
 
 ## External Libraries
 
-- Boost.SML is the primary external framework. `CMakeLists.txt` and `tools/docsgen/CMakeLists.txt`
+- Stateforward.SML is the primary external framework. `CMakeLists.txt` and `tools/docsgen/CMakeLists.txt`
   fetch it from the repository pinned in `cmake/sml_version.cmake`, and every machine family under
   `src/emel/**/sm.hpp` depends on that integration pattern.
 - `third_party/doctest/doctest/doctest.h` is a vendored test dependency used by the root test
@@ -91,7 +91,7 @@ the main boundaries between `src/emel/` and the outside world.
 
 - There is no evidence of HTTP client code or always-on external service calls in `src/emel/` or
   `include/emel/`; runtime integration is file-based and in-process.
-- Network use is concentrated in build and CI edges: `cmake/sml_version.cmake` fetches Boost.SML,
+- Network use is concentrated in build and CI edges: `cmake/sml_version.cmake` fetches Stateforward.SML,
   `tools/bench/CMakeLists.txt` and `tools/paritychecker/CMakeLists.txt` fetch `llama.cpp` when
   `tmp/llama.cpp` is absent, and `tests/models/README.md` records external Hugging Face download
   sources for local test assets.

@@ -7,7 +7,7 @@
 ## Phase Boundary
 
 Phase 21 stays on the maintained benchmark publication surface. It does not widen the runtime path,
-change Boost.SML structure, or revisit longer-decode parity scope. Its job is to make the
+change Stateforward.SML structure, or revisit longer-decode parity scope. Its job is to make the
 maintained ARM compare workflow truthfully publish the vectorized quantized path attribution, then
 refresh maintained benchmark evidence for the active `1/10/100/1000` generation coverage.
 

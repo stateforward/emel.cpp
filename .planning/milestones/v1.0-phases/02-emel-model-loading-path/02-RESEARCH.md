@@ -52,7 +52,7 @@ This phase should extend the repo's current runtime stack rather than introduce 
 | Library | Version | Purpose | Why Standard |
 |---------|---------|---------|--------------|
 | C++20 | repo standard | Runtime and tool implementation | Already enforced across the repo |
-| Boost.SML | pinned in repo | Loader and GGUF actor orchestration | Required by project rules and existing loader machines |
+| Stateforward.SML | pinned in repo | Loader and GGUF actor orchestration | Required by project rules and existing loader machines |
 | doctest | vendored in repo | Existing loader and paritychecker verification surface | Already used by `tests/model/loader/*`, `tests/gguf/loader/*`, and `tools/paritychecker/*` |
 
 ### Supporting

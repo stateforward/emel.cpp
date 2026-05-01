@@ -11,7 +11,7 @@ and documentation/lint checks as gate steps.
   header is expected at `third_party/doctest/doctest/doctest.h` by `CMakeLists.txt`.
 - `CTest` is the top-level test launcher. `CMakeLists.txt` registers `emel_tests`,
   `lint_snapshot`, and `generate_docs` as named tests.
-- Boost.SML state introspection is part of the test style. Tests use `is(...)`,
+- Stateforward.SML state introspection is part of the test style. Tests use `is(...)`,
   `visit_current_states`, and `set_current_states(...)` rather than indirect probing, as seen in
   `tests/text/jinja/parser_tests.cpp`, `tests/text/jinja/formatter_tests.cpp`,
   `tests/batch/planner/planner_sm_flow_tests.cpp`, and `tests/text/detokenizer/detokenizer_tests.cpp`.

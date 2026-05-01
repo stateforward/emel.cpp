@@ -58,7 +58,7 @@ struct idle {};
 
 struct model {
   auto operator()() const {
-    namespace sml = boost::sml;
+    namespace sml = stateforward::sml;
     return sml::make_transition_table(
       *sml::state<idle> + sml::event<event::scaffold> = sml::state<idle>,
       sml::state<idle> + sml::unexpected_event<sml::_> = sml::state<idle>

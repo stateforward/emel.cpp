@@ -33,7 +33,7 @@ struct unexpected {};
 
 struct model {
   auto operator()() const {
-    namespace sml = boost::sml;
+    namespace sml = stateforward::sml;
 
     // clang-format off
     return sml::make_transition_table(
@@ -209,7 +209,7 @@ struct sm : public emel::sm<model, action::context> {
   sm() = default;
 
   bool process_event(const event::preprocess & ev) {
-    namespace sml = boost::sml;
+    namespace sml = stateforward::sml;
 
     event::preprocess_ctx runtime_ctx{};
     event::preprocess_runtime runtime_ev{ev, runtime_ctx};

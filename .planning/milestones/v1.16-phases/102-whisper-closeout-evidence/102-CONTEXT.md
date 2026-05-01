@@ -17,7 +17,7 @@ milestone artifacts.
 <decisions>
 ## Closeout Scope
 
-- Treat `src/` Boost.SML machines and kernel code as source of truth, not planning artifacts.
+- Treat `src/` Stateforward.SML machines and kernel code as source of truth, not planning artifacts.
 - Reuse the pinned `whisper.cpp` v1.7.6 reference lane at commit
   `a8d002cfd879315632a579e73f0148d06959de36`.
 - Reuse the pinned q8_0 Whisper tiny fixture and deterministic 16 kHz mono WAV from Phases 99-101.

@@ -23,7 +23,7 @@ This map covers the concrete implementation stack in `CMakeLists.txt`, `src/emel
 ## Runtime And Build Outputs
 
 - `CMakeLists.txt` defines `emel_core` as an `INTERFACE` target exposing headers from `include/`,
-  `src/`, and fetched Boost.SML headers.
+  `src/`, and fetched Stateforward.SML headers.
 - `CMakeLists.txt` defines `emel` as a `STATIC` library. The current compiled translation unit is
   `src/emel/model/data.cpp`, while most behavior lives header-first under `src/emel/**`.
 - `src/emel/machines.hpp` aggregates the main machine aliases and shows the intended top-level
@@ -33,7 +33,7 @@ This map covers the concrete implementation stack in `CMakeLists.txt`, `src/emel
 
 ## Core Frameworks And Libraries
 
-- Boost.SML is the orchestration framework. It is fetched in `CMakeLists.txt` and
+- Stateforward.SML is the orchestration framework. It is fetched in `CMakeLists.txt` and
   `tools/docsgen/CMakeLists.txt`, pinned by `cmake/sml_version.cmake`, and used throughout
   `src/emel/**/sm.hpp`.
 - `third_party/doctest/doctest/doctest.h` is the unit-test framework wired into `CMakeLists.txt`
@@ -75,7 +75,7 @@ This map covers the concrete implementation stack in `CMakeLists.txt`, `src/emel
 
 ## Dependency Layers
 
-- Production code under `src/emel/**` depends directly on Boost.SML and the standard library.
+- Production code under `src/emel/**` depends directly on Stateforward.SML and the standard library.
 - Test code depends on `third_party/doctest/doctest/doctest.h`.
 - `tools/bench/CMakeLists.txt` and `tools/paritychecker/CMakeLists.txt` add tool-only reference
   dependencies on `llama.cpp` and `ggml`; those dependencies are intentionally not part of the
@@ -86,8 +86,8 @@ This map covers the concrete implementation stack in `CMakeLists.txt`, `src/emel
 ## Configuration Surfaces
 
 - Root CMake options live in `CMakeLists.txt`: `EMEL_ENABLE_TESTS` and `EMEL_ENABLE_FUZZ`.
-- The Boost.SML source pin is controlled in `cmake/sml_version.cmake` through
-  `EMEL_BOOST_SML_GIT_REPOSITORY` and `EMEL_BOOST_SML_GIT_TAG`.
+- The Stateforward.SML source pin is controlled in `cmake/sml_version.cmake` through
+  `EMEL_SML_GIT_REPOSITORY` and `EMEL_SML_GIT_TAG`.
 - Benchmark configuration lives in `scripts/bench.sh`, `tools/bench/bench_main.cpp`, and
   `tools/bench/gbnf/bench_main.cpp` via `EMEL_BENCH_ITERS`, `EMEL_BENCH_RUNS`,
   `EMEL_BENCH_WARMUP_ITERS`, `EMEL_BENCH_WARMUP_RUNS`, `EMEL_BENCH_CASE_INDEX`,

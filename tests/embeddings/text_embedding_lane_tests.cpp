@@ -3,7 +3,7 @@
 #include <cstdint>
 #include <filesystem>
 
-#include <boost/sml.hpp>
+#include <stateforward/sml.hpp>
 #include "doctest/doctest.h"
 
 #include "emel/embeddings/generator/detail.hpp"
@@ -195,7 +195,7 @@ TEST_CASE("embeddings text lane returns normalized TE embeddings when fixture pr
 
   REQUIRE(embedding_generator.process_event(initialize));
   CHECK(initialize_error == emel::error::cast(emel::embeddings::generator::error::none));
-  CHECK(embedding_generator.is(boost::sml::state<emel::embeddings::generator::state_idle>));
+  CHECK(embedding_generator.is(stateforward::sml::state<emel::embeddings::generator::state_idle>));
 
   const std::string red_square = read_text_file(te_prompt_path("red-square.txt"));
   const std::string pure_tone = read_text_file(te_prompt_path("pure-tone-440hz.txt"));
@@ -228,7 +228,7 @@ TEST_CASE("embeddings text lane returns normalized TE embeddings when fixture pr
             red_square_embedding.data(),
             static_cast<size_t>(red_square_dimension)}) ==
         doctest::Approx(1.0f).epsilon(1.0e-4f));
-  CHECK(embedding_generator.is(boost::sml::state<emel::embeddings::generator::state_done>));
+  CHECK(embedding_generator.is(stateforward::sml::state<emel::embeddings::generator::state_done>));
 
   emel::embeddings::generator::event::embed_text pure_tone_request{
     pure_tone_messages,
@@ -288,7 +288,7 @@ TEST_CASE("embeddings generator initializes with TE q5 fixture when present") {
 
   REQUIRE(embedding_generator.process_event(initialize));
   CHECK(initialize_error == emel::error::cast(emel::embeddings::generator::error::none));
-  CHECK(embedding_generator.is(boost::sml::state<emel::embeddings::generator::state_idle>));
+  CHECK(embedding_generator.is(stateforward::sml::state<emel::embeddings::generator::state_idle>));
 }
 
 TEST_CASE("embeddings text lane surfaces runtime encode failures as backend errors") {
@@ -331,7 +331,7 @@ TEST_CASE("embeddings text lane surfaces runtime encode failures as backend erro
   CHECK_FALSE(embedding_generator.process_event(request));
   CHECK(embed_error == emel::error::cast(emel::embeddings::generator::error::backend));
   CHECK(output_dimension == 0);
-  CHECK(embedding_generator.is(boost::sml::state<emel::embeddings::generator::state_errored>));
+  CHECK(embedding_generator.is(stateforward::sml::state<emel::embeddings::generator::state_errored>));
 }
 
 TEST_CASE("maintained TE fixture selector approves q8 and q5 only") {
@@ -416,7 +416,7 @@ TEST_CASE("embeddings text lane supports TE matryoshka truncation when fixture p
   CHECK_FALSE(embedding_generator.process_event(invalid_request));
   CHECK(invalid_error == emel::error::cast(emel::embeddings::generator::error::invalid_request));
   CHECK(invalid_output_dimension == 0);
-  CHECK(embedding_generator.is(boost::sml::state<emel::embeddings::generator::state_errored>));
+  CHECK(embedding_generator.is(stateforward::sml::state<emel::embeddings::generator::state_errored>));
 }
 
 TEST_CASE("embeddings generator helper paths cover tensor binding callbacks and publication") {
@@ -842,7 +842,7 @@ TEST_CASE("embeddings generator state machine covers callback and prepare error 
           emel::error::cast(emel::embeddings::generator::error::invalid_request));
     CHECK(preinit_output_dimension == 0);
     CHECK(embedding_generator.is(
-        boost::sml::state<emel::embeddings::generator::state_uninitialized>));
+        stateforward::sml::state<emel::embeddings::generator::state_uninitialized>));
 
     emel::error::type initialize_error =
         emel::error::cast(emel::embeddings::generator::error::none);
@@ -858,7 +858,7 @@ TEST_CASE("embeddings generator state machine covers callback and prepare error 
 
     REQUIRE(embedding_generator.process_event(initialize));
     CHECK(initialize_error == emel::error::cast(emel::embeddings::generator::error::none));
-    CHECK(embedding_generator.is(boost::sml::state<emel::embeddings::generator::state_idle>));
+    CHECK(embedding_generator.is(stateforward::sml::state<emel::embeddings::generator::state_idle>));
 
     std::array<float, 1280> output = {};
     int32_t output_dimension = -1;

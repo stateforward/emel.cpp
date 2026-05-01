@@ -1,6 +1,6 @@
 #include <algorithm>
 #include <array>
-#include <boost/sml.hpp>
+#include <stateforward/sml.hpp>
 #include <cstdint>
 #include <doctest/doctest.h>
 
@@ -56,7 +56,7 @@ inline emel::callback<void(const emel::batch::planner::events::plan_error &)> ma
 
 TEST_CASE("batch_planner_starts_initialized") {
   emel::batch::planner::sm machine{};
-  CHECK(machine.is(boost::sml::state<emel::batch::planner::state_idle>));
+  CHECK(machine.is(stateforward::sml::state<emel::batch::planner::state_idle>));
 }
 
 TEST_CASE("batch_planner_splits_tokens_into_steps") {

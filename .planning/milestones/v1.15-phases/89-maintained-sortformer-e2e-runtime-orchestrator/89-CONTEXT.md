@@ -18,7 +18,7 @@ milestone ledger artifacts; those are assigned to phases 90 through 92.
 ## Implementation Decisions
 
 ### Orchestration Surface
-- Add a component-local Boost.SML actor for the maintained Sortformer E2E path instead of another
+- Add a component-local Stateforward.SML actor for the maintained Sortformer E2E path instead of another
   ad hoc test sequence.
 - Own fixed-size scratch buffers in actor context so dispatch remains allocation-free after
   construction.

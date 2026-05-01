@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.20
 milestone_name: SML Dependency And Namespace Migration
-status: defining_requirements
-stopped_at: v1.20 milestone started from GitHub issue #56; next action is `$gsd-plan-phase 167`.
+status: implemented
+stopped_at: v1.20 hard-cutover implementation and validation complete; PR #79 ready for review.
 last_updated: "2026-05-01T17:35:00.000Z"
 last_activity: 2026-05-01
 progress:
   total_phases: 6
-  completed_phases: 0
-  total_plans: 0
-  completed_plans: 0
-  percent: 0
+  completed_phases: 6
+  total_plans: 6
+  completed_plans: 6
+  percent: 100
 ---
 
 # Project State
@@ -26,12 +26,12 @@ verification before widening API surface or model scope.
 
 ## Current Position
 
-Phase: 167 (not started)
-Plan: —
-Status: Roadmap ready
-Last activity: 2026-05-01 — Milestone v1.20 started from GitHub issue #56
+Phase: 172 (complete)
+Plan: hard-cutover implementation
+Status: Implemented and validated
+Last activity: 2026-05-01 — v1.20 hard cutover completed on PR #79
 
-Progress: [----------] 0%
+Progress: [##########] 100%
 
 ## Deferred Items
 
@@ -51,10 +51,10 @@ Items acknowledged and still deferred at milestone close on 2026-05-01:
 
 - Milestone: `v1.20 SML Dependency And Namespace Migration`
 
-- Planned shape: 6 phases, 12 active requirements mapped; 0 phases complete.
+- Implemented shape: 6 phases, 12 active requirements satisfied; hard source cutover complete.
 - Latest shipped milestone: `v1.19 Benchmark Tool Pluggable Runner Refactor`.
 
-- Next action: `$gsd-plan-phase 167`.
+- Next action: review and merge PR #79 after CI/review approval.
 - Current blocker: none known.
 
 ## Accumulated Context
@@ -68,7 +68,7 @@ Recent decisions affecting current work:
   discovery, and dependency-manifest boundaries rather than new benchmark semantics.
 
 - `v1.20` starts from GitHub issue #56 and targets the `stateforward/sml.cpp` dependency bump plus
-  repo-wide migration from legacy `boost::sml` naming to `stateforward::sml` naming.
+  repo-wide migration from the legacy SML surface to `stateforward::sml` naming.
 
 - The v1.20 upstream target is `stateforward/sml.cpp` `main` at
   `4a7109b5dd4aae40e78304e3ac03440ccc35031e`; the current repo pin before migration is
@@ -226,7 +226,7 @@ Recent decisions affecting current work:
   ggml compute fallbacks do not satisfy the EMEL lane.
 
 - Runtime choices for Whisper recognizer model readiness, tokenizer readiness, decode policy, and
-  error outcomes must be explicit in Boost.SML guards/states/transitions.
+  error outcomes must be explicit in Stateforward.SML guards/states/transitions.
 
 - Parity and benchmark work must keep EMEL and reference lanes isolated.
 
