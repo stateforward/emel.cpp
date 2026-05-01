@@ -485,55 +485,6 @@ bool compute_feed_forward_block(
   return true;
 }
 
-float compute_attention_content_score(
-    std::span<const float, k_required_encoder_value_count> query,
-    std::span<const float, k_required_encoder_value_count> key,
-    std::span<const float, k_attention_head_dim * k_attention_head_count> position_bias,
-    const int32_t query_frame,
-    const int32_t key_frame,
-    const int32_t head) noexcept {
-  const size_t head_offset = static_cast<size_t>(head) *
-      static_cast<size_t>(k_attention_head_dim);
-  const size_t query_base =
-      (static_cast<size_t>(query_frame) * static_cast<size_t>(k_model_dim)) + head_offset;
-  const size_t key_base =
-      (static_cast<size_t>(key_frame) * static_cast<size_t>(k_model_dim)) + head_offset;
-  const size_t bias_base = head_offset;
-
-  float acc = 0.0f;
-  for (int32_t dim = 0; dim < k_attention_head_dim; ++dim) {
-    const size_t offset = static_cast<size_t>(dim);
-    acc += (query[query_base + offset] + position_bias[bias_base + offset]) *
-        key[key_base + offset];
-  }
-  return acc;
-}
-
-float compute_attention_position_score(
-    std::span<const float, k_required_encoder_value_count> query,
-    std::span<const float, k_relative_position_count * k_model_dim> positions,
-    std::span<const float, k_attention_head_dim * k_attention_head_count> position_bias,
-    const int32_t query_frame,
-    const int32_t key_frame,
-    const int32_t head) noexcept {
-  const int32_t relative_index = (k_frame_count - 1) + key_frame - query_frame;
-  const size_t head_offset = static_cast<size_t>(head) *
-      static_cast<size_t>(k_attention_head_dim);
-  const size_t query_base =
-      (static_cast<size_t>(query_frame) * static_cast<size_t>(k_model_dim)) + head_offset;
-  const size_t position_base =
-      (static_cast<size_t>(relative_index) * static_cast<size_t>(k_model_dim)) + head_offset;
-  const size_t bias_base = head_offset;
-
-  float acc = 0.0f;
-  for (int32_t dim = 0; dim < k_attention_head_dim; ++dim) {
-    const size_t offset = static_cast<size_t>(dim);
-    acc += (query[query_base + offset] + position_bias[bias_base + offset]) *
-        positions[position_base + offset];
-  }
-  return acc;
-}
-
 void compute_attention_head(
     std::span<const float, k_required_encoder_value_count> query,
     std::span<const float, k_required_encoder_value_count> key,
@@ -545,12 +496,33 @@ void compute_attention_head(
     const int32_t head,
     std::span<float, k_frame_count> scores,
     std::span<float, k_model_dim> attended) noexcept {
+  std::array<float, k_attention_head_dim> content_query = {};
+  std::array<float, k_attention_head_dim> position_query = {};
+  const size_t head_offset = static_cast<size_t>(head) *
+      static_cast<size_t>(k_attention_head_dim);
+  const size_t query_base =
+      (static_cast<size_t>(query_frame) * static_cast<size_t>(k_model_dim)) + head_offset;
+  for (int32_t dim = 0; dim < k_attention_head_dim; ++dim) {
+    const size_t offset = static_cast<size_t>(dim);
+    content_query[offset] = query[query_base + offset] +
+        position_bias_u[head_offset + offset];
+    position_query[offset] = query[query_base + offset] +
+        position_bias_v[head_offset + offset];
+  }
+
   float max_score = -std::numeric_limits<float>::infinity();
   for (int32_t key_frame = 0; key_frame < k_frame_count; ++key_frame) {
-    const float content = compute_attention_content_score(
-        query, key, position_bias_u, query_frame, key_frame, head);
-    const float position = compute_attention_position_score(
-        query, positions, position_bias_v, query_frame, key_frame, head);
+    const int32_t relative_index = (k_frame_count - 1) + key_frame - query_frame;
+    const size_t key_base =
+        (static_cast<size_t>(key_frame) * static_cast<size_t>(k_model_dim)) + head_offset;
+    const size_t position_base =
+        (static_cast<size_t>(relative_index) * static_cast<size_t>(k_model_dim)) + head_offset;
+    const float content = emel::diarization::sortformer::detail::compute_dot_64(
+        content_query.data(),
+        key.data() + key_base);
+    const float position = emel::diarization::sortformer::detail::compute_dot_64(
+        position_query.data(),
+        positions.data() + position_base);
     const float score = (content + position) /
         std::sqrt(static_cast<float>(k_attention_head_dim));
     scores[static_cast<size_t>(key_frame)] = score;
@@ -564,22 +536,16 @@ void compute_attention_head(
     normalizer += weight;
   }
 
-  const size_t head_offset = static_cast<size_t>(head) *
-      static_cast<size_t>(k_attention_head_dim);
   const float inv_normalizer = 1.0f / normalizer;
   for (int32_t key_frame = 0; key_frame < k_frame_count; ++key_frame) {
     scores[static_cast<size_t>(key_frame)] *= inv_normalizer;
   }
-  for (int32_t dim = 0; dim < k_attention_head_dim; ++dim) {
-    float acc = 0.0f;
-    for (int32_t key_frame = 0; key_frame < k_frame_count; ++key_frame) {
-      const size_t value_offset =
-          (static_cast<size_t>(key_frame) * static_cast<size_t>(k_model_dim)) +
-          head_offset + static_cast<size_t>(dim);
-      acc += scores[static_cast<size_t>(key_frame)] * value[value_offset];
-    }
-    attended[head_offset + static_cast<size_t>(dim)] = acc;
-  }
+  emel::diarization::sortformer::detail::compute_weighted_sum_64(
+      scores.data(),
+      value.data() + head_offset,
+      static_cast<size_t>(k_model_dim),
+      static_cast<size_t>(k_frame_count),
+      attended.data() + head_offset);
 }
 
 bool compute_attention_block(

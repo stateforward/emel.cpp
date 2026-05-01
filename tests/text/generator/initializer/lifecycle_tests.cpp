@@ -2,7 +2,7 @@
 #include <doctest/doctest.h>
 
 #include "emel/docs/detail.hpp"
-#include "emel/generator/initializer/sm.hpp"
+#include "emel/text/generator/initializer/sm.hpp"
 
 namespace {
 
@@ -14,28 +14,28 @@ constexpr void for_each_type(boost::sml::aux::type_list<Ts...>, fn && visitor) {
 }  // namespace
 
 TEST_CASE("generator_initializer_sm_models_explicit_initialize_pipeline_states") {
-  using machine_t = boost::sml::sm<emel::generator::initializer::model>;
+  using machine_t = boost::sml::sm<emel::text::generator::initializer::model>;
   using states = typename machine_t::states;
 
   CHECK(emel::detail::type_list_contains<
-        emel::generator::initializer::preparing_backend_decision,
+        emel::text::generator::initializer::preparing_backend_decision,
         states>::value);
   CHECK(emel::detail::type_list_contains<
-        emel::generator::initializer::binding_conditioner,
+        emel::text::generator::initializer::binding_conditioner,
         states>::value);
   CHECK(emel::detail::type_list_contains<
-        emel::generator::initializer::binding_conditioner_decision,
+        emel::text::generator::initializer::binding_conditioner_decision,
         states>::value);
   CHECK(emel::detail::type_list_contains<
-        emel::generator::initializer::reserving_graph_decision,
+        emel::text::generator::initializer::reserving_graph_decision,
         states>::value);
   CHECK(emel::detail::type_list_contains<
-        emel::generator::initializer::configuring_sampler_decision,
+        emel::text::generator::initializer::configuring_sampler_decision,
         states>::value);
 }
 
 TEST_CASE("generator_initializer_sm_uses_explicit_internal_run_completion") {
-  using machine_t = boost::sml::sm<emel::generator::initializer::model>;
+  using machine_t = boost::sml::sm<emel::text::generator::initializer::model>;
   using transitions = typename machine_t::transitions;
 
   bool has_run_completion = false;
@@ -52,7 +52,7 @@ TEST_CASE("generator_initializer_sm_uses_explicit_internal_run_completion") {
 }
 
 TEST_CASE("generator_initializer_sm_routes_backend_ready_run_completion_directly") {
-  using machine_t = boost::sml::sm<emel::generator::initializer::model>;
+  using machine_t = boost::sml::sm<emel::text::generator::initializer::model>;
   using transitions = typename machine_t::transitions;
 
   bool has_backend_ready_transition = false;

@@ -16,9 +16,9 @@
 #include "emel/gguf/loader/errors.hpp"
 #include "emel/gguf/loader/events.hpp"
 #include "emel/gguf/loader/sm.hpp"
-#include "emel/generator/errors.hpp"
-#include "emel/generator/events.hpp"
-#include "emel/generator/sm.hpp"
+#include "emel/text/generator/errors.hpp"
+#include "emel/text/generator/events.hpp"
+#include "emel/text/generator/sm.hpp"
 #include "emel/logits/sampler/events.hpp"
 #include "emel/model/data.hpp"
 #include "emel/model/detail.hpp"
@@ -94,13 +94,13 @@ struct load_capture {
 struct initialize_capture {
   bool done = false;
   bool error = false;
-  emel::error::type err = emel::error::cast(emel::generator::error::none);
+  emel::error::type err = emel::error::cast(emel::text::generator::error::none);
 };
 
 struct generation_capture {
   bool done = false;
   bool error = false;
-  emel::error::type err = emel::error::cast(emel::generator::error::none);
+  emel::error::type err = emel::error::cast(emel::text::generator::error::none);
   int32_t tokens_generated = 0;
   size_t output_length = 0u;
 };
@@ -131,7 +131,7 @@ struct emel_session {
   std::unique_ptr<emel::model::data> model_data = std::make_unique<emel::model::data>();
   emel::text::tokenizer::sm tokenizer = {};
   emel::text::conditioner::sm conditioner = {};
-  std::unique_ptr<emel::generator::sm> generator = {};
+  std::unique_ptr<emel::text::generator::sm> generator = {};
   formatter_binding formatter = {};
   initialize_capture initialize = {};
   generation_capture generation = {};
@@ -517,29 +517,29 @@ void on_load_error(void * owner, const emel::model::loader::events::load_error &
   fixture.load.err = ev.err;
 }
 
-void on_initialize_done(void * owner, const emel::generator::events::initialize_done &) {
+void on_initialize_done(void * owner, const emel::text::generator::events::initialize_done &) {
   auto & session = *static_cast<emel_session *>(owner);
   session.initialize.done = true;
   session.initialize.error = false;
-  session.initialize.err = emel::error::cast(emel::generator::error::none);
+  session.initialize.err = emel::error::cast(emel::text::generator::error::none);
 }
 
-void on_initialize_error(void * owner, const emel::generator::events::initialize_error & ev) {
+void on_initialize_error(void * owner, const emel::text::generator::events::initialize_error & ev) {
   auto & session = *static_cast<emel_session *>(owner);
   session.initialize.error = true;
   session.initialize.err = ev.err;
 }
 
-void on_generation_done(void * owner, const emel::generator::events::generation_done & ev) {
+void on_generation_done(void * owner, const emel::text::generator::events::generation_done & ev) {
   auto & session = *static_cast<emel_session *>(owner);
   session.generation.done = true;
   session.generation.error = false;
-  session.generation.err = emel::error::cast(emel::generator::error::none);
+  session.generation.err = emel::error::cast(emel::text::generator::error::none);
   session.generation.tokens_generated = ev.tokens_generated;
   session.generation.output_length = ev.output_length;
 }
 
-void on_generation_error(void * owner, const emel::generator::events::generation_error & ev) {
+void on_generation_error(void * owner, const emel::text::generator::events::generation_error & ev) {
   auto & session = *static_cast<emel_session *>(owner);
   session.generation.error = true;
   session.generation.err = ev.err;
@@ -1182,8 +1182,8 @@ bool initialize_emel_session(emel_session & session) {
   const int32_t block_capacity = std::max<int32_t>(8, prompt_capacity + decode_capacity);
 
   reset_initialize_capture(session);
-  emel::error::type error_out = emel::error::cast(emel::generator::error::none);
-  emel::generator::event::initialize request{
+  emel::error::type error_out = emel::error::cast(emel::text::generator::error::none);
+  emel::text::generator::event::initialize request{
       &session.tokenizer,
       tokenizer_bind_dispatch,
       tokenizer_tokenize_dispatch,
@@ -1193,7 +1193,7 @@ bool initialize_emel_session(emel_session & session) {
   request.encoder_variant = generation_encoder_variant(*session.model_data);
   request.add_special = false;
   request.parse_special = false;
-  request.selection_mode = emel::generator::selection_mode::preselected_argmax;
+  request.selection_mode = emel::text::generator::selection_mode::preselected_argmax;
   request.max_prompt_tokens = prompt_capacity;
   request.max_generated_tokens = decode_capacity;
   request.max_blocks = block_capacity;
@@ -1205,7 +1205,7 @@ bool initialize_emel_session(emel_session & session) {
 
   const bool accepted = session.generator->process_event(request);
   return accepted && session.initialize.done && !session.initialize.error &&
-         error_out == emel::error::cast(emel::generator::error::none);
+         error_out == emel::error::cast(emel::text::generator::error::none);
 }
 
 bool run_emel_generate(emel_session & session, generation_result & result_out) {
@@ -1215,9 +1215,9 @@ bool run_emel_generate(emel_session & session, generation_result & result_out) {
 
   result_out = {};
   reset_generation_capture(session);
-  emel::error::type error_out = emel::error::cast(emel::generator::error::none);
+  emel::error::type error_out = emel::error::cast(emel::text::generator::error::none);
   std::array<emel::text::formatter::chat_message, 1> message_storage = {};
-  emel::generator::event::generate request{
+  emel::text::generator::event::generate request{
       single_user_messages(message_storage, k_prompt),
       k_max_tokens,
       std::span<char>{result_out.output},
@@ -1230,7 +1230,7 @@ bool run_emel_generate(emel_session & session, generation_result & result_out) {
   request.on_error = {&session, on_generation_error};
   const bool accepted = session.generator->process_event(request);
   if (!accepted || !session.generation.done || session.generation.error ||
-      error_out != emel::error::cast(emel::generator::error::none)) {
+      error_out != emel::error::cast(emel::text::generator::error::none)) {
     return false;
   }
 
@@ -1282,7 +1282,7 @@ int main(int argc, char ** argv) {
   auto session = std::make_unique<emel_session>();
   session->model_data = std::move(fixture->model_data);
   session->formatter = fixture->formatter;
-  session->generator = std::make_unique<emel::generator::sm>(*session->model_data,
+  session->generator = std::make_unique<emel::text::generator::sm>(*session->model_data,
                                                              session->conditioner,
                                                              session->formatter.formatter_ctx,
                                                              session->formatter.format_prompt);

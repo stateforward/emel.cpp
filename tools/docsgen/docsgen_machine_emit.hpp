@@ -22,7 +22,6 @@ struct doc_paths {
   std::filesystem::path benchmarks_md;
   std::filesystem::path benchmarks_snapshot;
   std::filesystem::path embedded_size_snapshot;
-  std::filesystem::path generation_pre_arm_flash_optimized_baseline;
   std::filesystem::path benchmarks_template;
   std::filesystem::path readme_template;
   std::filesystem::path readme_path;

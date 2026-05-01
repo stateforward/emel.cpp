@@ -2,7 +2,7 @@
 #include <doctest/doctest.h>
 
 #include "emel/docs/detail.hpp"
-#include "emel/generator/prefill/sm.hpp"
+#include "emel/text/generator/prefill/sm.hpp"
 
 namespace {
 
@@ -14,22 +14,22 @@ constexpr void for_each_type(boost::sml::aux::type_list<Ts...>, fn && visitor) {
 }  // namespace
 
 TEST_CASE("generator_prefill_sm_models_explicit_contract_and_compute_states") {
-  using machine_t = boost::sml::sm<emel::generator::prefill::model>;
+  using machine_t = boost::sml::sm<emel::text::generator::prefill::model>;
   using states = typename machine_t::states;
 
   CHECK(emel::detail::type_list_contains<
-        emel::generator::prefill::contract_flash_decision,
+        emel::text::generator::prefill::contract_flash_decision,
         states>::value);
   CHECK(emel::detail::type_list_contains<
-        emel::generator::prefill::contract_nonflash_decision,
+        emel::text::generator::prefill::contract_nonflash_decision,
         states>::value);
   CHECK(emel::detail::type_list_contains<
-        emel::generator::prefill::compute_result_decision,
+        emel::text::generator::prefill::compute_result_decision,
         states>::value);
 }
 
 TEST_CASE("generator_prefill_sm_uses_explicit_internal_run_completion") {
-  using machine_t = boost::sml::sm<emel::generator::prefill::model>;
+  using machine_t = boost::sml::sm<emel::text::generator::prefill::model>;
   using transitions = typename machine_t::transitions;
 
   bool has_run_completion = false;

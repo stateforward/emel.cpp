@@ -3,6 +3,8 @@
 #include <cstdint>
 #include <cstring>
 #include <doctest/doctest.h>
+#include <filesystem>
+#include <fstream>
 #include <memory>
 #include <span>
 #include <string>
@@ -12,10 +14,10 @@
 
 #include "emel/docs/detail.hpp"
 #include "emel/emel.h"
-#include "emel/generator/errors.hpp"
-#include "emel/generator/initializer/sm.hpp"
-#include "emel/generator/prefill/sm.hpp"
-#include "emel/generator/sm.hpp"
+#include "emel/text/generator/errors.hpp"
+#include "emel/text/generator/initializer/sm.hpp"
+#include "emel/text/generator/prefill/sm.hpp"
+#include "emel/text/generator/sm.hpp"
 #include "emel/kernel/detail.hpp"
 #include "emel/kernel/events.hpp"
 #include "emel/model/data.hpp"
@@ -28,6 +30,14 @@
 #include "emel/text/tokenizer/sm.hpp"
 
 namespace {
+
+std::filesystem::path repo_root() {
+#ifdef EMEL_TEST_REPO_ROOT
+  return std::filesystem::path{EMEL_TEST_REPO_ROOT};
+#else
+  return std::filesystem::current_path();
+#endif
+}
 
 constexpr bool host_is_aarch64() noexcept {
 #if defined(__aarch64__) || defined(_M_ARM64)
@@ -42,27 +52,27 @@ struct callback_tracker {
   bool initialize_error_called = false;
   bool generate_done_called = false;
   bool generate_error_called = false;
-  const emel::generator::event::initialize * initialize_request = nullptr;
-  const emel::generator::event::generate * generate_request = nullptr;
+  const emel::text::generator::event::initialize * initialize_request = nullptr;
+  const emel::text::generator::event::generate * generate_request = nullptr;
   int32_t tokens_generated = -1;
   size_t output_length = 0;
-  emel::error::type err = emel::error::cast(emel::generator::error::none);
+  emel::error::type err = emel::error::cast(emel::text::generator::error::none);
 };
 
-void on_initialize_done(void * owner, const emel::generator::events::initialize_done & ev) {
+void on_initialize_done(void * owner, const emel::text::generator::events::initialize_done & ev) {
   auto * tracker = static_cast<callback_tracker *>(owner);
   tracker->initialize_done_called = true;
   tracker->initialize_request = ev.request;
 }
 
-void on_initialize_error(void * owner, const emel::generator::events::initialize_error & ev) {
+void on_initialize_error(void * owner, const emel::text::generator::events::initialize_error & ev) {
   auto * tracker = static_cast<callback_tracker *>(owner);
   tracker->initialize_error_called = true;
   tracker->initialize_request = ev.request;
   tracker->err = ev.err;
 }
 
-void on_generate_done(void * owner, const emel::generator::events::generation_done & ev) {
+void on_generate_done(void * owner, const emel::text::generator::events::generation_done & ev) {
   auto * tracker = static_cast<callback_tracker *>(owner);
   tracker->generate_done_called = true;
   tracker->generate_request = ev.request;
@@ -70,7 +80,7 @@ void on_generate_done(void * owner, const emel::generator::events::generation_do
   tracker->output_length = ev.output_length;
 }
 
-void on_generate_error(void * owner, const emel::generator::events::generation_error & ev) {
+void on_generate_error(void * owner, const emel::text::generator::events::generation_error & ev) {
   auto * tracker = static_cast<callback_tracker *>(owner);
   tracker->generate_error_called = true;
   tracker->generate_request = ev.request;
@@ -133,27 +143,34 @@ struct prepared_model {
 };
 
 static_assert(std::is_reference_v<
-              decltype(std::declval<const emel::generator::event::initialize &>()
+              decltype(std::declval<const emel::text::generator::event::initialize &>()
                            .dispatch_tokenizer_bind)>);
 static_assert(std::is_reference_v<
-              decltype(std::declval<const emel::generator::event::initialize &>()
+              decltype(std::declval<const emel::text::generator::event::initialize &>()
                            .dispatch_tokenizer_tokenize)>);
 static_assert(std::is_same_v<
               std::remove_cvref_t<
-                  decltype(std::declval<const emel::generator::event::initialize &>()
+                  decltype(std::declval<const emel::text::generator::event::initialize &>()
                                .sampler_fns)>,
               std::span<emel::logits::sampler::fn>>);
 static_assert(std::is_same_v<
               std::remove_cvref_t<
-                  decltype(std::declval<const emel::generator::event::generate &>().messages)>,
+                  decltype(std::declval<const emel::text::generator::event::generate &>().messages)>,
               std::span<const emel::text::formatter::chat_message>>);
 static_assert(std::is_same_v<
               std::remove_cvref_t<
-                  decltype(std::declval<const emel::generator::event::generate &>().output)>,
+                  decltype(std::declval<const emel::text::generator::event::generate &>().output)>,
               std::span<char>>);
 static_assert(std::is_reference_v<
-              decltype(std::declval<const emel::generator::event::generate &>()
+              decltype(std::declval<const emel::text::generator::event::generate &>()
                            .output_length_out)>);
+
+emel::text::generator::diagnostics capture_generator_diagnostics(
+    emel::text::generator::sm & generator) {
+  emel::text::generator::diagnostics diagnostics = {};
+  CHECK(generator.process_event(emel::text::generator::event::capture_diagnostics{diagnostics}));
+  return diagnostics;
+}
 
 struct checked_formatter_ctx {
   std::span<const emel::text::formatter::chat_message> expected_messages = {};
@@ -850,7 +867,7 @@ struct generator_fixture {
   prepared_model prepared = {};
   emel::text::tokenizer::sm tokenizer{};
   emel::text::conditioner::sm conditioner{};
-  std::unique_ptr<emel::generator::sm> generator = {};
+  std::unique_ptr<emel::text::generator::sm> generator = {};
   std::array<emel::logits::sampler::fn, 1> samplers = {
       emel::logits::sampler::fn::from<sampler_select_argmax>(),
   };
@@ -887,22 +904,22 @@ struct generator_fixture {
     if (variant == model_variant::flash_kv_width_mismatch) {
       apply_flash_kv_width_mismatch(prepared);
     }
-    generator = std::make_unique<emel::generator::sm>(
+    generator = std::make_unique<emel::text::generator::sm>(
         stabilize_model(prepared), conditioner, formatter_ctx, format_prompt);
     hello_id = prepared.hello_id;
     world_id = prepared.world_id;
   }
 
-  emel::generator::event::initialize make_initialize(
+  emel::text::generator::event::initialize make_initialize(
       callback_tracker & tracker,
       emel::error::type * error_out = nullptr,
-      const emel::generator::selection_mode selection_mode =
-          emel::generator::selection_mode::sample_logits) {
+      const emel::text::generator::selection_mode selection_mode =
+          emel::text::generator::selection_mode::sample_logits) {
     const std::span<emel::logits::sampler::fn> sampler_span =
-        selection_mode == emel::generator::selection_mode::sample_logits
+        selection_mode == emel::text::generator::selection_mode::sample_logits
             ? std::span<emel::logits::sampler::fn>{samplers}
             : std::span<emel::logits::sampler::fn>{};
-    emel::generator::event::initialize request{
+    emel::text::generator::event::initialize request{
       &tokenizer,
       tokenizer_bind_dispatch,
       tokenizer_tokenize_dispatch,
@@ -919,19 +936,19 @@ struct generator_fixture {
     request.block_tokens = 4;
     request.strip_leading_space = false;
     request.error_out = error_out;
-    request.on_done = emel::callback<void(const emel::generator::events::initialize_done &)>(
+    request.on_done = emel::callback<void(const emel::text::generator::events::initialize_done &)>(
         &tracker, on_initialize_done);
-    request.on_error = emel::callback<void(const emel::generator::events::initialize_error &)>(
+    request.on_error = emel::callback<void(const emel::text::generator::events::initialize_error &)>(
         &tracker, on_initialize_error);
     return request;
   }
 
-  emel::generator::event::generate make_generate(callback_tracker & tracker,
+  emel::text::generator::event::generate make_generate(callback_tracker & tracker,
                                                  char * output,
                                                  size_t output_capacity,
                                                  size_t & output_length_out,
                                                  emel::error::type * error_out = nullptr) {
-    emel::generator::event::generate request{
+    emel::text::generator::event::generate request{
       std::span<const emel::text::formatter::chat_message>{k_phase_4_messages},
       k_phase_4_max_tokens,
       std::span<char>{output, output_capacity},
@@ -940,9 +957,9 @@ struct generator_fixture {
     request.add_generation_prompt = k_phase_4_add_generation_prompt;
     request.enable_thinking = k_phase_4_enable_thinking;
     request.error_out = error_out;
-    request.on_done = emel::callback<void(const emel::generator::events::generation_done &)>(
+    request.on_done = emel::callback<void(const emel::text::generator::events::generation_done &)>(
         &tracker, on_generate_done);
-    request.on_error = emel::callback<void(const emel::generator::events::generation_error &)>(
+    request.on_error = emel::callback<void(const emel::text::generator::events::generation_error &)>(
         &tracker, on_generate_error);
     return request;
   }
@@ -954,31 +971,31 @@ struct generator_fixture {
 
 TEST_CASE("generator_starts_uninitialized") {
   auto fixture = std::make_unique<generator_fixture>();
-  CHECK(fixture->generator->is(boost::sml::state<emel::generator::uninitialized>));
+  CHECK(fixture->generator->is(boost::sml::state<emel::text::generator::uninitialized>));
 }
 
 TEST_CASE("generator_initialize_reserves_lifecycle_managed_graph_tensors") {
   auto fixture = std::make_unique<generator_fixture>();
   callback_tracker tracker{};
-  emel::error::type error = emel::error::cast(emel::generator::error::none);
+  emel::error::type error = emel::error::cast(emel::text::generator::error::none);
   auto initialize = fixture->make_initialize(tracker, &error);
 
   REQUIRE(fixture->generator->process_event(initialize));
   REQUIRE(tracker.initialize_done_called);
   REQUIRE_FALSE(tracker.initialize_error_called);
 
-  const auto & reservation = fixture->generator->graph_reservation();
-  REQUIRE(reservation.lifecycle != nullptr);
-  REQUIRE(reservation.lifecycle->tensor_count > 1);
-
-  emel::graph::tensor::event::tensor_state tensor_state{};
-  emel::error::type tensor_err = emel::error::cast(emel::graph::tensor::error::none);
-  REQUIRE(fixture->generator->try_capture_graph_tensor(0, tensor_state, tensor_err));
-  CHECK(tensor_state.lifecycle_state == emel::graph::tensor::event::lifecycle::leaf_filled);
-
-  const int32_t runtime_tensor_id = reservation.lifecycle->tensor_count - 1;
-  REQUIRE(fixture->generator->try_capture_graph_tensor(runtime_tensor_id, tensor_state, tensor_err));
-  CHECK(tensor_state.lifecycle_state == emel::graph::tensor::event::lifecycle::empty);
+  emel::text::generator::graph_lifecycle_snapshot graph_snapshot{};
+  REQUIRE(fixture->generator->process_event(
+      emel::text::generator::event::capture_graph_lifecycle{graph_snapshot}));
+  REQUIRE(graph_snapshot.reservation != nullptr);
+  REQUIRE(graph_snapshot.reservation->lifecycle != nullptr);
+  REQUIRE(graph_snapshot.reservation->lifecycle->tensor_count > 1);
+  REQUIRE(graph_snapshot.first_tensor_captured);
+  CHECK(graph_snapshot.first_tensor.lifecycle_state ==
+        emel::graph::tensor::event::lifecycle::leaf_filled);
+  REQUIRE(graph_snapshot.runtime_tensor_captured);
+  CHECK(graph_snapshot.runtime_tensor.lifecycle_state ==
+        emel::graph::tensor::event::lifecycle::empty);
 }
 
 TEST_CASE("generator_rejects_generate_before_initialize") {
@@ -986,187 +1003,220 @@ TEST_CASE("generator_rejects_generate_before_initialize") {
   callback_tracker tracker{};
   std::array<char, 16> output = {};
   size_t output_length = 7;
-  emel::error::type error = emel::error::cast(emel::generator::error::none);
+  emel::error::type error = emel::error::cast(emel::text::generator::error::none);
   const auto request =
       fixture->make_generate(tracker, output.data(), output.size(), output_length, &error);
 
   CHECK_FALSE(fixture->generator->process_event(request));
-  CHECK(fixture->generator->is(boost::sml::state<emel::generator::uninitialized>));
+  CHECK(fixture->generator->is(boost::sml::state<emel::text::generator::uninitialized>));
   CHECK_FALSE(tracker.generate_done_called);
   CHECK(tracker.generate_error_called);
-  CHECK(error == emel::error::cast(emel::generator::error::invalid_request));
-  CHECK(tracker.err == emel::error::cast(emel::generator::error::invalid_request));
+  CHECK(error == emel::error::cast(emel::text::generator::error::invalid_request));
+  CHECK(tracker.err == emel::error::cast(emel::text::generator::error::invalid_request));
 }
 
 TEST_CASE("generator_initialize_succeeds_and_enters_ready") {
   auto fixture = std::make_unique<generator_fixture>();
   callback_tracker tracker{};
-  emel::error::type error = emel::error::cast(emel::generator::error::backend);
+  emel::error::type error = emel::error::cast(emel::text::generator::error::backend);
   const auto request = fixture->make_initialize(tracker, &error);
 
   CHECK(fixture->generator->process_event(request));
-  CHECK(fixture->generator->is(boost::sml::state<emel::generator::ready>));
+  CHECK(fixture->generator->is(boost::sml::state<emel::text::generator::ready>));
   CHECK(tracker.initialize_done_called);
   CHECK_FALSE(tracker.initialize_error_called);
-  CHECK(error == emel::error::cast(emel::generator::error::none));
+  CHECK(error == emel::error::cast(emel::text::generator::error::none));
 }
 
 TEST_CASE("generator_initialize_accepts_explicit_preselected_argmax_mode_without_sampler_chain") {
   auto fixture = std::make_unique<generator_fixture>();
   callback_tracker tracker{};
-  emel::error::type error = emel::error::cast(emel::generator::error::backend);
+  emel::error::type error = emel::error::cast(emel::text::generator::error::backend);
   const auto request = fixture->make_initialize(
-      tracker, &error, emel::generator::selection_mode::preselected_argmax);
+      tracker, &error, emel::text::generator::selection_mode::preselected_argmax);
 
   CHECK(fixture->generator->process_event(request));
-  CHECK(fixture->generator->is(boost::sml::state<emel::generator::ready>));
+  CHECK(fixture->generator->is(boost::sml::state<emel::text::generator::ready>));
   CHECK(tracker.initialize_done_called);
   CHECK_FALSE(tracker.initialize_error_called);
-  CHECK(error == emel::error::cast(emel::generator::error::none));
+  CHECK(error == emel::error::cast(emel::text::generator::error::none));
 }
 
 TEST_CASE("generator_rejects_invalid_initialize_request") {
   auto fixture = std::make_unique<generator_fixture>();
   callback_tracker tracker{};
-  emel::error::type error = emel::error::cast(emel::generator::error::none);
+  emel::error::type error = emel::error::cast(emel::text::generator::error::none);
   auto request = fixture->make_initialize(tracker, &error);
   request.tokenizer_sm = nullptr;
 
   CHECK_FALSE(fixture->generator->process_event(request));
-  CHECK(fixture->generator->is(boost::sml::state<emel::generator::uninitialized>));
+  CHECK(fixture->generator->is(boost::sml::state<emel::text::generator::uninitialized>));
   CHECK_FALSE(tracker.initialize_done_called);
   CHECK(tracker.initialize_error_called);
-  CHECK(error == emel::error::cast(emel::generator::error::invalid_request));
-  CHECK(tracker.err == emel::error::cast(emel::generator::error::invalid_request));
+  CHECK(error == emel::error::cast(emel::text::generator::error::invalid_request));
+  CHECK(tracker.err == emel::error::cast(emel::text::generator::error::invalid_request));
+}
+
+TEST_CASE("generator_initialize_rejects_missing_injected_dependencies_through_sml") {
+  emel::text::generator::sm generator{};
+  emel::text::tokenizer::sm tokenizer{};
+  std::array<emel::logits::sampler::fn, 1> samplers = {
+      emel::logits::sampler::fn::from<sampler_select_argmax>(),
+  };
+  callback_tracker tracker{};
+  emel::error::type error = emel::error::cast(emel::text::generator::error::none);
+  emel::text::generator::event::initialize request{
+    &tokenizer,
+    tokenizer_bind_dispatch,
+    tokenizer_tokenize_dispatch,
+    std::span<emel::logits::sampler::fn>{samplers},
+  };
+  request.max_prompt_tokens = 8;
+  request.max_generated_tokens = 4;
+  request.max_blocks = 8;
+  request.block_tokens = 4;
+  request.error_out = &error;
+  request.on_error =
+      emel::callback<void(const emel::text::generator::events::initialize_error &)>(
+          &tracker,
+          on_initialize_error);
+
+  CHECK_FALSE(generator.process_event(request));
+  CHECK(generator.is(boost::sml::state<emel::text::generator::uninitialized>));
+  CHECK_FALSE(tracker.initialize_done_called);
+  CHECK(tracker.initialize_error_called);
+  CHECK(error == emel::error::cast(emel::text::generator::error::invalid_request));
+  CHECK(tracker.err == emel::error::cast(emel::text::generator::error::invalid_request));
 }
 
 TEST_CASE("generator_initialize_reports_original_request_without_generation_callbacks") {
   auto fixture = std::make_unique<generator_fixture>();
   callback_tracker tracker{};
-  emel::error::type error = emel::error::cast(emel::generator::error::backend);
+  emel::error::type error = emel::error::cast(emel::text::generator::error::backend);
   const auto request = fixture->make_initialize(tracker, &error);
 
   REQUIRE(fixture->generator->process_event(request));
-  CHECK(fixture->generator->is(boost::sml::state<emel::generator::ready>));
+  CHECK(fixture->generator->is(boost::sml::state<emel::text::generator::ready>));
   CHECK(tracker.initialize_done_called);
   CHECK_FALSE(tracker.initialize_error_called);
   CHECK(tracker.initialize_request == &request);
   CHECK_FALSE(tracker.generate_done_called);
   CHECK_FALSE(tracker.generate_error_called);
   CHECK(tracker.generate_request == nullptr);
-  CHECK(error == emel::error::cast(emel::generator::error::none));
+  CHECK(error == emel::error::cast(emel::text::generator::error::none));
 }
 
 TEST_CASE("generator_initialize_can_rebind_ready_session_without_re_reserving_graph") {
   auto fixture = std::make_unique<generator_fixture>();
   callback_tracker first_tracker{};
-  emel::error::type first_error = emel::error::cast(emel::generator::error::backend);
+  emel::error::type first_error = emel::error::cast(emel::text::generator::error::backend);
   const auto first_request = fixture->make_initialize(first_tracker, &first_error);
 
   REQUIRE(fixture->generator->process_event(first_request));
-  CHECK(fixture->generator->is(boost::sml::state<emel::generator::ready>));
+  CHECK(fixture->generator->is(boost::sml::state<emel::text::generator::ready>));
   CHECK(first_tracker.initialize_done_called);
-  CHECK(first_error == emel::error::cast(emel::generator::error::none));
+  CHECK(first_error == emel::error::cast(emel::text::generator::error::none));
 
   callback_tracker second_tracker{};
-  emel::error::type second_error = emel::error::cast(emel::generator::error::backend);
+  emel::error::type second_error = emel::error::cast(emel::text::generator::error::backend);
   const auto second_request = fixture->make_initialize(second_tracker, &second_error);
 
   CHECK(fixture->generator->process_event(second_request));
-  CHECK(fixture->generator->is(boost::sml::state<emel::generator::ready>));
+  CHECK(fixture->generator->is(boost::sml::state<emel::text::generator::ready>));
   CHECK(second_tracker.initialize_done_called);
   CHECK_FALSE(second_tracker.initialize_error_called);
-  CHECK(second_error == emel::error::cast(emel::generator::error::none));
+  CHECK(second_error == emel::error::cast(emel::text::generator::error::none));
 }
 
 TEST_CASE("generator_generate_runs_native_generator_contract") {
   auto fixture = std::make_unique<generator_fixture>();
   callback_tracker initialize_tracker{};
-  emel::error::type initialize_error = emel::error::cast(emel::generator::error::backend);
+  emel::error::type initialize_error = emel::error::cast(emel::text::generator::error::backend);
   const auto initialize_request = fixture->make_initialize(initialize_tracker, &initialize_error);
   REQUIRE(fixture->generator->process_event(initialize_request));
 
   callback_tracker generate_tracker{};
   std::array<char, 32> output = {};
   size_t output_length = 99;
-  emel::error::type generate_error = emel::error::cast(emel::generator::error::backend);
+  emel::error::type generate_error = emel::error::cast(emel::text::generator::error::backend);
   const auto generate_request =
       fixture->make_generate(generate_tracker, output.data(), output.size(), output_length,
                              &generate_error);
 
   CHECK(fixture->generator->process_event(generate_request));
-  CHECK(fixture->generator->is(boost::sml::state<emel::generator::ready>));
+  CHECK(fixture->generator->is(boost::sml::state<emel::text::generator::ready>));
   CHECK_FALSE(generate_tracker.generate_error_called);
   CHECK(generate_tracker.generate_done_called);
-  CHECK(generate_error == emel::error::cast(emel::generator::error::none));
+  CHECK(generate_error == emel::error::cast(emel::text::generator::error::none));
   CHECK(generate_tracker.tokens_generated == 1);
   CHECK(output_length == 5);
   CHECK(generate_tracker.output_length == 5);
   CHECK(std::string_view(output.data(), output_length) == "world");
-  CHECK(fixture->generator->generation_kernel_dispatch_calls() > 0u);
-  CHECK(fixture->generator->generation_flash_attention_dispatch_calls() > 0u);
+  const auto diagnostics = capture_generator_diagnostics(*fixture->generator);
+  CHECK(diagnostics.kernel_dispatch_calls > 0u);
+  CHECK(diagnostics.flash_attention_dispatch_calls > 0u);
   if (host_is_aarch64()) {
-    CHECK(fixture->generator->generation_optimized_flash_dispatch_calls() > 0u);
-    CHECK(fixture->generator->generation_shared_flash_dispatch_calls() == 0u);
+    CHECK(diagnostics.optimized_flash_dispatch_calls > 0u);
+    CHECK(diagnostics.shared_flash_dispatch_calls == 0u);
   } else {
-    CHECK(fixture->generator->generation_optimized_flash_dispatch_calls() == 0u);
-    CHECK(fixture->generator->generation_shared_flash_dispatch_calls() == 0u);
+    CHECK(diagnostics.optimized_flash_dispatch_calls == 0u);
+    CHECK(diagnostics.shared_flash_dispatch_calls == 0u);
   }
 }
 
 TEST_CASE("generator_qwen3_generator_initializes_and_generates_one_token") {
   auto fixture = std::make_unique<generator_fixture>(generator_fixture::model_variant::qwen3_canonical);
   callback_tracker initialize_tracker{};
-  emel::error::type initialize_error = emel::error::cast(emel::generator::error::backend);
+  emel::error::type initialize_error = emel::error::cast(emel::text::generator::error::backend);
   const auto initialize_request = fixture->make_initialize(initialize_tracker, &initialize_error);
 
   REQUIRE(fixture->generator->process_event(initialize_request));
   REQUIRE(initialize_tracker.initialize_done_called);
   REQUIRE_FALSE(initialize_tracker.initialize_error_called);
-  REQUIRE(initialize_error == emel::error::cast(emel::generator::error::none));
+  REQUIRE(initialize_error == emel::error::cast(emel::text::generator::error::none));
 
   callback_tracker generate_tracker{};
   std::array<char, 32> output = {};
   size_t output_length = 0u;
-  emel::error::type generate_error = emel::error::cast(emel::generator::error::backend);
+  emel::error::type generate_error = emel::error::cast(emel::text::generator::error::backend);
   const auto generate_request =
       fixture->make_generate(generate_tracker, output.data(), output.size(), output_length,
                              &generate_error);
 
   CHECK(fixture->generator->process_event(generate_request));
-  CHECK(fixture->generator->is(boost::sml::state<emel::generator::ready>));
+  CHECK(fixture->generator->is(boost::sml::state<emel::text::generator::ready>));
   CHECK_FALSE(generate_tracker.generate_error_called);
   CHECK(generate_tracker.generate_done_called);
   CHECK(generate_tracker.tokens_generated == 1);
-  CHECK(generate_error == emel::error::cast(emel::generator::error::none));
+  CHECK(generate_error == emel::error::cast(emel::text::generator::error::none));
   CHECK(output_length > 0u);
 }
 
 TEST_CASE("generator_gemma4_generator_initializes_and_generates_one_token") {
   auto fixture = std::make_unique<generator_fixture>(generator_fixture::model_variant::gemma4_canonical);
   callback_tracker initialize_tracker{};
-  emel::error::type initialize_error = emel::error::cast(emel::generator::error::backend);
+  emel::error::type initialize_error = emel::error::cast(emel::text::generator::error::backend);
   const auto initialize_request = fixture->make_initialize(initialize_tracker, &initialize_error);
 
   REQUIRE(fixture->generator->process_event(initialize_request));
   REQUIRE(initialize_tracker.initialize_done_called);
   REQUIRE_FALSE(initialize_tracker.initialize_error_called);
-  REQUIRE(initialize_error == emel::error::cast(emel::generator::error::none));
+  REQUIRE(initialize_error == emel::error::cast(emel::text::generator::error::none));
 
   callback_tracker generate_tracker{};
   std::array<char, 32> output = {};
   size_t output_length = 0u;
-  emel::error::type generate_error = emel::error::cast(emel::generator::error::backend);
+  emel::error::type generate_error = emel::error::cast(emel::text::generator::error::backend);
   const auto generate_request =
       fixture->make_generate(generate_tracker, output.data(), output.size(), output_length,
                              &generate_error);
 
   CHECK(fixture->generator->process_event(generate_request));
-  CHECK(fixture->generator->is(boost::sml::state<emel::generator::ready>));
+  CHECK(fixture->generator->is(boost::sml::state<emel::text::generator::ready>));
   CHECK_FALSE(generate_tracker.generate_error_called);
   CHECK(generate_tracker.generate_done_called);
   CHECK(generate_tracker.tokens_generated == 1);
-  CHECK(generate_error == emel::error::cast(emel::generator::error::none));
+  CHECK(generate_error == emel::error::cast(emel::text::generator::error::none));
   CHECK(output_length > 0u);
 }
 
@@ -1175,45 +1225,46 @@ TEST_CASE("generator_gemma4_generator_initializes_with_mixed_sliding_and_full_at
       generator_fixture::model_variant::gemma4_multiwidth);
 
   callback_tracker initialize_tracker{};
-  emel::error::type initialize_error = emel::error::cast(emel::generator::error::backend);
+  emel::error::type initialize_error = emel::error::cast(emel::text::generator::error::backend);
   const auto initialize_request = fixture->make_initialize(initialize_tracker, &initialize_error);
 
   REQUIRE(fixture->generator->process_event(initialize_request));
-  CHECK(initialize_error == emel::error::cast(emel::generator::error::none));
+  CHECK(initialize_error == emel::error::cast(emel::text::generator::error::none));
 }
 
 TEST_CASE("generator_generate_f32_fixture_does_not_claim_quantized_optimized_dispatch") {
   auto fixture = std::make_unique<generator_fixture>();
   callback_tracker initialize_tracker{};
-  emel::error::type initialize_error = emel::error::cast(emel::generator::error::backend);
+  emel::error::type initialize_error = emel::error::cast(emel::text::generator::error::backend);
   const auto initialize_request = fixture->make_initialize(initialize_tracker, &initialize_error);
   REQUIRE(fixture->generator->process_event(initialize_request));
 
   callback_tracker generate_tracker{};
   std::array<char, 32> output = {};
   size_t output_length = 0;
-  emel::error::type generate_error = emel::error::cast(emel::generator::error::backend);
+  emel::error::type generate_error = emel::error::cast(emel::text::generator::error::backend);
   const auto generate_request =
       fixture->make_generate(generate_tracker, output.data(), output.size(), output_length,
                              &generate_error);
 
   REQUIRE(fixture->generator->process_event(generate_request));
-  CHECK(generate_error == emel::error::cast(emel::generator::error::none));
-  CHECK(fixture->generator->generation_optimized_q2_dispatch_calls() == 0u);
-  CHECK(fixture->generator->generation_shared_q2_dispatch_calls() == 0u);
-  CHECK(fixture->generator->generation_optimized_q3_dispatch_calls() == 0u);
-  CHECK(fixture->generator->generation_shared_q3_dispatch_calls() == 0u);
-  CHECK(fixture->generator->generation_optimized_q4_dispatch_calls() == 0u);
-  CHECK(fixture->generator->generation_optimized_q4_vector_dispatch_calls() == 0u);
-  CHECK(fixture->generator->generation_optimized_q4_vector_packed_dispatch_calls() == 0u);
-  CHECK(fixture->generator->generation_optimized_q4_vector_packed_q8_rhs_dispatch_calls() == 0u);
-  CHECK(fixture->generator->generation_shared_q4_dispatch_calls() == 0u);
-  CHECK(fixture->generator->generation_optimized_q6_dispatch_calls() == 0u);
-  CHECK(fixture->generator->generation_optimized_q6_vector_dispatch_calls() == 0u);
-  CHECK(fixture->generator->generation_optimized_q6_vector_packed_dispatch_calls() == 0u);
-  CHECK(fixture->generator->generation_optimized_q6_vector_packed_q8_rhs_dispatch_calls() == 0u);
-  CHECK(fixture->generator->generation_optimized_q6_vector_prepared_q8_rhs_dispatch_calls() == 0u);
-  CHECK(fixture->generator->generation_shared_q6_dispatch_calls() == 0u);
+  CHECK(generate_error == emel::error::cast(emel::text::generator::error::none));
+  const auto diagnostics = capture_generator_diagnostics(*fixture->generator);
+  CHECK(diagnostics.optimized_q2_dispatch_calls == 0u);
+  CHECK(diagnostics.shared_q2_dispatch_calls == 0u);
+  CHECK(diagnostics.optimized_q3_dispatch_calls == 0u);
+  CHECK(diagnostics.shared_q3_dispatch_calls == 0u);
+  CHECK(diagnostics.optimized_q4_dispatch_calls == 0u);
+  CHECK(diagnostics.optimized_q4_vector_dispatch_calls == 0u);
+  CHECK(diagnostics.optimized_q4_vector_packed_dispatch_calls == 0u);
+  CHECK(diagnostics.optimized_q4_vector_packed_q8_rhs_dispatch_calls == 0u);
+  CHECK(diagnostics.shared_q4_dispatch_calls == 0u);
+  CHECK(diagnostics.optimized_q6_dispatch_calls == 0u);
+  CHECK(diagnostics.optimized_q6_vector_dispatch_calls == 0u);
+  CHECK(diagnostics.optimized_q6_vector_packed_dispatch_calls == 0u);
+  CHECK(diagnostics.optimized_q6_vector_packed_q8_rhs_dispatch_calls == 0u);
+  CHECK(diagnostics.optimized_q6_vector_prepared_q8_rhs_dispatch_calls == 0u);
+  CHECK(diagnostics.shared_q6_dispatch_calls == 0u);
 }
 
 TEST_CASE("generator_quantized_path_audit_classifies_canonical_stage_families") {
@@ -1428,31 +1479,32 @@ TEST_CASE("generator_initialize_quantized_contract_fixture_reports_zero_disallow
   auto fixture = std::make_unique<generator_fixture>(
       generator_fixture::model_variant::quantized_contract);
   callback_tracker tracker{};
-  emel::error::type error = emel::error::cast(emel::generator::error::backend);
+  emel::error::type error = emel::error::cast(emel::text::generator::error::backend);
   const auto initialize = fixture->make_initialize(tracker, &error);
 
   REQUIRE(fixture->generator->process_event(initialize));
-  CHECK(error == emel::error::cast(emel::generator::error::none));
-  CHECK(fixture->generator->generation_native_quantized_stage_count() == 8u);
-  CHECK(fixture->generator->generation_approved_dense_f32_stage_count() == 4u);
-  CHECK(fixture->generator->generation_disallowed_fallback_stage_count() == 0u);
-  CHECK(fixture->generator->generation_explicit_no_claim_stage_count() == 0u);
+  CHECK(error == emel::error::cast(emel::text::generator::error::none));
+  const auto diagnostics = capture_generator_diagnostics(*fixture->generator);
+  CHECK(diagnostics.native_quantized_stage_count == 8u);
+  CHECK(diagnostics.approved_dense_f32_stage_count == 4u);
+  CHECK(diagnostics.disallowed_fallback_stage_count == 0u);
+  CHECK(diagnostics.explicit_no_claim_stage_count == 0u);
 }
 
 TEST_CASE("generator_generate_quantized_contract_fixture_preserves_zero_disallowed_fallback") {
   auto fixture = std::make_unique<generator_fixture>(
       generator_fixture::model_variant::quantized_contract);
   callback_tracker initialize_tracker{};
-  emel::error::type initialize_error = emel::error::cast(emel::generator::error::backend);
+  emel::error::type initialize_error = emel::error::cast(emel::text::generator::error::backend);
   const auto initialize_request = fixture->make_initialize(initialize_tracker, &initialize_error);
 
   REQUIRE(fixture->generator->process_event(initialize_request));
-  REQUIRE(initialize_error == emel::error::cast(emel::generator::error::none));
+  REQUIRE(initialize_error == emel::error::cast(emel::text::generator::error::none));
 
   callback_tracker generate_tracker{};
   std::array<char, 32> output = {};
   size_t output_length = 0;
-  emel::error::type generate_error = emel::error::cast(emel::generator::error::backend);
+  emel::error::type generate_error = emel::error::cast(emel::text::generator::error::backend);
   const auto generate_request =
       fixture->make_generate(generate_tracker, output.data(), output.size(), output_length,
                              &generate_error);
@@ -1460,39 +1512,29 @@ TEST_CASE("generator_generate_quantized_contract_fixture_preserves_zero_disallow
   REQUIRE(fixture->generator->process_event(generate_request));
   CHECK_FALSE(generate_tracker.generate_error_called);
   CHECK(generate_tracker.generate_done_called);
-  CHECK(generate_error == emel::error::cast(emel::generator::error::none));
-  CHECK(fixture->generator->generation_native_quantized_stage_count() == 8u);
-  CHECK(fixture->generator->generation_approved_dense_f32_stage_count() == 4u);
-  CHECK(fixture->generator->generation_disallowed_fallback_stage_count() == 0u);
-  CHECK(fixture->generator->generation_explicit_no_claim_stage_count() == 0u);
+  CHECK(generate_error == emel::error::cast(emel::text::generator::error::none));
+  const auto diagnostics = capture_generator_diagnostics(*fixture->generator);
+  CHECK(diagnostics.native_quantized_stage_count == 8u);
+  CHECK(diagnostics.approved_dense_f32_stage_count == 4u);
+  CHECK(diagnostics.disallowed_fallback_stage_count == 0u);
+  CHECK(diagnostics.explicit_no_claim_stage_count == 0u);
   if (host_is_aarch64()) {
-    CHECK(fixture->generator->generation_optimized_q6_vector_dispatch_calls() > 0u);
-    CHECK(fixture->generator->generation_optimized_q6_vector_packed_dispatch_calls() > 0u);
-    CHECK(
-        fixture->generator->generation_optimized_q6_vector_packed_q8_rhs_dispatch_calls() > 0u);
+    CHECK(diagnostics.optimized_q6_vector_dispatch_calls > 0u);
+    CHECK(diagnostics.optimized_q6_vector_packed_dispatch_calls > 0u);
+    CHECK(diagnostics.optimized_q6_vector_packed_q8_rhs_dispatch_calls > 0u);
 #if defined(__aarch64__) && defined(__ARM_NEON) && defined(__ARM_FEATURE_MATMUL_INT8)
-    CHECK(
-        fixture->generator->generation_optimized_q6_vector_prepared_q8_rhs_dispatch_calls() > 0u);
-    CHECK(
-        fixture->generator->generation_optimized_q6_vector_prepared_q8_rhs_i8mm_dispatch_calls() >
-        0u);
+    CHECK(diagnostics.optimized_q6_vector_prepared_q8_rhs_dispatch_calls > 0u);
+    CHECK(diagnostics.optimized_q6_vector_prepared_q8_rhs_i8mm_dispatch_calls > 0u);
 #else
-    CHECK(
-        fixture->generator->generation_optimized_q6_vector_prepared_q8_rhs_i8mm_dispatch_calls() ==
-        0u);
-    CHECK(
-        fixture->generator->generation_optimized_q6_vector_prepared_q8_rhs_dispatch_calls() == 0u);
+    CHECK(diagnostics.optimized_q6_vector_prepared_q8_rhs_i8mm_dispatch_calls == 0u);
+    CHECK(diagnostics.optimized_q6_vector_prepared_q8_rhs_dispatch_calls == 0u);
 #endif
   } else {
-    CHECK(fixture->generator->generation_optimized_q6_vector_dispatch_calls() == 0u);
-    CHECK(fixture->generator->generation_optimized_q6_vector_packed_dispatch_calls() == 0u);
-    CHECK(
-        fixture->generator->generation_optimized_q6_vector_packed_q8_rhs_dispatch_calls() == 0u);
-    CHECK(
-        fixture->generator->generation_optimized_q6_vector_prepared_q8_rhs_dispatch_calls() == 0u);
-    CHECK(
-        fixture->generator->generation_optimized_q6_vector_prepared_q8_rhs_i8mm_dispatch_calls() ==
-        0u);
+    CHECK(diagnostics.optimized_q6_vector_dispatch_calls == 0u);
+    CHECK(diagnostics.optimized_q6_vector_packed_dispatch_calls == 0u);
+    CHECK(diagnostics.optimized_q6_vector_packed_q8_rhs_dispatch_calls == 0u);
+    CHECK(diagnostics.optimized_q6_vector_prepared_q8_rhs_dispatch_calls == 0u);
+    CHECK(diagnostics.optimized_q6_vector_prepared_q8_rhs_i8mm_dispatch_calls == 0u);
   }
 }
 
@@ -1500,22 +1542,22 @@ TEST_CASE("generator_generate_quantized_contract_fixture_supports_explicit_prese
   auto fixture = std::make_unique<generator_fixture>(
       generator_fixture::model_variant::quantized_contract);
   callback_tracker initialize_tracker{};
-  emel::error::type initialize_error = emel::error::cast(emel::generator::error::backend);
+  emel::error::type initialize_error = emel::error::cast(emel::text::generator::error::backend);
   const auto initialize_request = fixture->make_initialize(
       initialize_tracker,
       &initialize_error,
-      emel::generator::selection_mode::preselected_argmax);
+      emel::text::generator::selection_mode::preselected_argmax);
   auto long_initialize_request = initialize_request;
   long_initialize_request.max_generated_tokens = 16;
   long_initialize_request.max_blocks = 32;
 
   REQUIRE(fixture->generator->process_event(long_initialize_request));
-  REQUIRE(initialize_error == emel::error::cast(emel::generator::error::none));
+  REQUIRE(initialize_error == emel::error::cast(emel::text::generator::error::none));
 
   callback_tracker generate_tracker{};
   std::array<char, 32> output = {};
   size_t output_length = 0;
-  emel::error::type generate_error = emel::error::cast(emel::generator::error::backend);
+  emel::error::type generate_error = emel::error::cast(emel::text::generator::error::backend);
   const auto generate_request =
       fixture->make_generate(generate_tracker, output.data(), output.size(), output_length,
                              &generate_error);
@@ -1523,52 +1565,29 @@ TEST_CASE("generator_generate_quantized_contract_fixture_supports_explicit_prese
   REQUIRE(fixture->generator->process_event(generate_request));
   CHECK_FALSE(generate_tracker.generate_error_called);
   CHECK(generate_tracker.generate_done_called);
-  CHECK(generate_error == emel::error::cast(emel::generator::error::none));
+  CHECK(generate_error == emel::error::cast(emel::text::generator::error::none));
   CHECK(output_length > 0u);
+  const auto diagnostics = capture_generator_diagnostics(*fixture->generator);
   if (host_is_aarch64()) {
-    CHECK(fixture->generator->generation_optimized_q6_vector_argmax_dispatch_calls() > 0u);
+    CHECK(diagnostics.optimized_q6_vector_argmax_dispatch_calls > 0u);
 #if defined(__aarch64__) && defined(__ARM_NEON) && defined(__ARM_FEATURE_MATMUL_INT8)
-    CHECK(
-        fixture->generator->generation_optimized_q6_vector_packed_q8_rhs_argmax_dispatch_calls() ==
-        0u);
-    CHECK(
-        fixture->generator->generation_optimized_q6_vector_prepared_q8_rhs_argmax_i8mm_dispatch_calls() ==
-        0u);
-    CHECK(
-        fixture->generator->generation_optimized_q6_vector_q8_argmax_prepared_i8mm_dispatch_calls() >
-        0u);
+    CHECK(diagnostics.optimized_q6_vector_packed_q8_rhs_argmax_dispatch_calls == 0u);
+    CHECK(diagnostics.optimized_q6_vector_prepared_q8_rhs_argmax_i8mm_dispatch_calls == 0u);
+    CHECK(diagnostics.optimized_q6_vector_q8_argmax_prepared_i8mm_dispatch_calls > 0u);
 #elif defined(__aarch64__) && defined(__ARM_NEON) && defined(__ARM_FEATURE_DOTPROD)
-    CHECK(
-        fixture->generator->generation_optimized_q6_vector_packed_q8_rhs_argmax_dispatch_calls() >
-        0u);
-    CHECK(
-        fixture->generator->generation_optimized_q6_vector_prepared_q8_rhs_argmax_i8mm_dispatch_calls() ==
-        0u);
-    CHECK(
-        fixture->generator->generation_optimized_q6_vector_q8_argmax_prepared_i8mm_dispatch_calls() ==
-        0u);
+    CHECK(diagnostics.optimized_q6_vector_packed_q8_rhs_argmax_dispatch_calls > 0u);
+    CHECK(diagnostics.optimized_q6_vector_prepared_q8_rhs_argmax_i8mm_dispatch_calls == 0u);
+    CHECK(diagnostics.optimized_q6_vector_q8_argmax_prepared_i8mm_dispatch_calls == 0u);
 #else
-    CHECK(
-        fixture->generator->generation_optimized_q6_vector_packed_q8_rhs_argmax_dispatch_calls() ==
-        0u);
-    CHECK(
-        fixture->generator->generation_optimized_q6_vector_prepared_q8_rhs_argmax_i8mm_dispatch_calls() ==
-        0u);
-    CHECK(
-        fixture->generator->generation_optimized_q6_vector_q8_argmax_prepared_i8mm_dispatch_calls() ==
-        0u);
+    CHECK(diagnostics.optimized_q6_vector_packed_q8_rhs_argmax_dispatch_calls == 0u);
+    CHECK(diagnostics.optimized_q6_vector_prepared_q8_rhs_argmax_i8mm_dispatch_calls == 0u);
+    CHECK(diagnostics.optimized_q6_vector_q8_argmax_prepared_i8mm_dispatch_calls == 0u);
 #endif
   } else {
-    CHECK(fixture->generator->generation_optimized_q6_vector_argmax_dispatch_calls() == 0u);
-    CHECK(
-        fixture->generator->generation_optimized_q6_vector_packed_q8_rhs_argmax_dispatch_calls() ==
-        0u);
-    CHECK(
-        fixture->generator->generation_optimized_q6_vector_prepared_q8_rhs_argmax_i8mm_dispatch_calls() ==
-        0u);
-    CHECK(
-        fixture->generator->generation_optimized_q6_vector_q8_argmax_prepared_i8mm_dispatch_calls() ==
-        0u);
+    CHECK(diagnostics.optimized_q6_vector_argmax_dispatch_calls == 0u);
+    CHECK(diagnostics.optimized_q6_vector_packed_q8_rhs_argmax_dispatch_calls == 0u);
+    CHECK(diagnostics.optimized_q6_vector_prepared_q8_rhs_argmax_i8mm_dispatch_calls == 0u);
+    CHECK(diagnostics.optimized_q6_vector_q8_argmax_prepared_i8mm_dispatch_calls == 0u);
   }
 }
 
@@ -1577,32 +1596,32 @@ TEST_CASE(
   auto fixture = std::make_unique<generator_fixture>(
       generator_fixture::model_variant::quantized_contract);
   callback_tracker initialize_tracker{};
-  emel::error::type initialize_error = emel::error::cast(emel::generator::error::backend);
+  emel::error::type initialize_error = emel::error::cast(emel::text::generator::error::backend);
   const auto initialize_request = fixture->make_initialize(
       initialize_tracker,
       &initialize_error,
-      emel::generator::selection_mode::preselected_argmax);
+      emel::text::generator::selection_mode::preselected_argmax);
 
   REQUIRE(fixture->generator->process_event(initialize_request));
-  REQUIRE(initialize_error == emel::error::cast(emel::generator::error::none));
+  REQUIRE(initialize_error == emel::error::cast(emel::text::generator::error::none));
 
   callback_tracker first_tracker{};
   std::array<char, 64> first_output = {};
   size_t first_output_length = 0;
-  emel::error::type first_error = emel::error::cast(emel::generator::error::backend);
+  emel::error::type first_error = emel::error::cast(emel::text::generator::error::backend);
   const auto first_request = fixture->make_generate(
       first_tracker, first_output.data(), first_output.size(), first_output_length, &first_error);
 
   REQUIRE(fixture->generator->process_event(first_request));
   REQUIRE_FALSE(first_tracker.generate_error_called);
   REQUIRE(first_tracker.generate_done_called);
-  REQUIRE(first_error == emel::error::cast(emel::generator::error::none));
+  REQUIRE(first_error == emel::error::cast(emel::text::generator::error::none));
   REQUIRE(first_output_length > 0u);
 
   callback_tracker second_tracker{};
   std::array<char, 64> second_output = {};
   size_t second_output_length = 0;
-  emel::error::type second_error = emel::error::cast(emel::generator::error::backend);
+  emel::error::type second_error = emel::error::cast(emel::text::generator::error::backend);
   const auto second_request = fixture->make_generate(
       second_tracker,
       second_output.data(),
@@ -1613,7 +1632,7 @@ TEST_CASE(
   CHECK(fixture->generator->process_event(second_request));
   CHECK_FALSE(second_tracker.generate_error_called);
   CHECK(second_tracker.generate_done_called);
-  CHECK(second_error == emel::error::cast(emel::generator::error::none));
+  CHECK(second_error == emel::error::cast(emel::text::generator::error::none));
   CHECK(second_output_length > 0u);
 }
 
@@ -1622,21 +1641,21 @@ TEST_CASE(
   auto fixture = std::make_unique<generator_fixture>(
       generator_fixture::model_variant::quantized_contract);
   callback_tracker initialize_tracker{};
-  emel::error::type initialize_error = emel::error::cast(emel::generator::error::backend);
+  emel::error::type initialize_error = emel::error::cast(emel::text::generator::error::backend);
   const auto initialize_request = fixture->make_initialize(
       initialize_tracker,
       &initialize_error,
-      emel::generator::selection_mode::preselected_argmax);
+      emel::text::generator::selection_mode::preselected_argmax);
 
   REQUIRE(fixture->generator->process_event(initialize_request));
-  REQUIRE(initialize_error == emel::error::cast(emel::generator::error::none));
+  REQUIRE(initialize_error == emel::error::cast(emel::text::generator::error::none));
 
   const auto make_long_generate =
       [](callback_tracker & tracker,
          std::array<char, 256> & output,
          size_t & output_length,
          emel::error::type * error_out) {
-        emel::generator::event::generate request{
+        emel::text::generator::event::generate request{
           std::span<const emel::text::formatter::chat_message>{
               generator_fixture::k_phase_4_messages},
           2,
@@ -1646,9 +1665,9 @@ TEST_CASE(
         request.add_generation_prompt = generator_fixture::k_phase_4_add_generation_prompt;
         request.enable_thinking = generator_fixture::k_phase_4_enable_thinking;
         request.error_out = error_out;
-        request.on_done = emel::callback<void(const emel::generator::events::generation_done &)>(
+        request.on_done = emel::callback<void(const emel::text::generator::events::generation_done &)>(
             &tracker, on_generate_done);
-        request.on_error = emel::callback<void(const emel::generator::events::generation_error &)>(
+        request.on_error = emel::callback<void(const emel::text::generator::events::generation_error &)>(
             &tracker, on_generate_error);
         return request;
       };
@@ -1656,41 +1675,41 @@ TEST_CASE(
   callback_tracker first_tracker{};
   std::array<char, 256> first_output = {};
   size_t first_output_length = 0;
-  emel::error::type first_error = emel::error::cast(emel::generator::error::backend);
+  emel::error::type first_error = emel::error::cast(emel::text::generator::error::backend);
   const auto first_request =
       make_long_generate(first_tracker, first_output, first_output_length, &first_error);
 
   REQUIRE(fixture->generator->process_event(first_request));
   REQUIRE_FALSE(first_tracker.generate_error_called);
   REQUIRE(first_tracker.generate_done_called);
-  REQUIRE(first_error == emel::error::cast(emel::generator::error::none));
+  REQUIRE(first_error == emel::error::cast(emel::text::generator::error::none));
   REQUIRE(first_output_length > 0u);
 
   callback_tracker second_tracker{};
   std::array<char, 256> second_output = {};
   size_t second_output_length = 0;
-  emel::error::type second_error = emel::error::cast(emel::generator::error::backend);
+  emel::error::type second_error = emel::error::cast(emel::text::generator::error::backend);
   const auto second_request =
       make_long_generate(second_tracker, second_output, second_output_length, &second_error);
 
   CHECK(fixture->generator->process_event(second_request));
   CHECK_FALSE(second_tracker.generate_error_called);
   CHECK(second_tracker.generate_done_called);
-  CHECK(second_error == emel::error::cast(emel::generator::error::none));
+  CHECK(second_error == emel::error::cast(emel::text::generator::error::none));
   CHECK(second_output_length > 0u);
 }
 
 TEST_CASE("generator structured message request pins the phase 4 contract") {
   auto fixture = std::make_unique<generator_fixture>();
   callback_tracker initialize_tracker{};
-  emel::error::type initialize_error = emel::error::cast(emel::generator::error::backend);
+  emel::error::type initialize_error = emel::error::cast(emel::text::generator::error::backend);
   const auto initialize_request = fixture->make_initialize(initialize_tracker, &initialize_error);
   REQUIRE(fixture->generator->process_event(initialize_request));
 
   callback_tracker generate_tracker{};
   std::array<char, 32> output = {};
   size_t output_length = 0;
-  emel::error::type generate_error = emel::error::cast(emel::generator::error::backend);
+  emel::error::type generate_error = emel::error::cast(emel::text::generator::error::backend);
   const auto generate_request =
       fixture->make_generate(generate_tracker, output.data(), output.size(), output_length,
                              &generate_error);
@@ -1738,16 +1757,16 @@ TEST_CASE("generator structured message request reaches the conditioner formatte
                                                      &formatter_ctx,
                                                      format_checked_messages);
   callback_tracker initialize_tracker{};
-  emel::error::type initialize_error = emel::error::cast(emel::generator::error::backend);
+  emel::error::type initialize_error = emel::error::cast(emel::text::generator::error::backend);
   const auto initialize_request = fixture->make_initialize(initialize_tracker, &initialize_error);
   REQUIRE(fixture->generator->process_event(initialize_request));
-  REQUIRE(initialize_error == emel::error::cast(emel::generator::error::none));
+  REQUIRE(initialize_error == emel::error::cast(emel::text::generator::error::none));
 
   callback_tracker generate_tracker{};
   std::array<char, 32> output = {};
   size_t output_length = 0;
-  emel::error::type generate_error = emel::error::cast(emel::generator::error::backend);
-  emel::generator::event::generate generate_request{
+  emel::error::type generate_error = emel::error::cast(emel::text::generator::error::backend);
+  emel::text::generator::event::generate generate_request{
       std::span<const emel::text::formatter::chat_message>{k_messages},
       1,
       std::span<char>{output.data(), output.size()},
@@ -1756,17 +1775,17 @@ TEST_CASE("generator structured message request reaches the conditioner formatte
   generate_request.add_generation_prompt = true;
   generate_request.enable_thinking = false;
   generate_request.error_out = &generate_error;
-  generate_request.on_done = emel::callback<void(const emel::generator::events::generation_done &)>(
+  generate_request.on_done = emel::callback<void(const emel::text::generator::events::generation_done &)>(
       &generate_tracker, on_generate_done);
   generate_request.on_error =
-      emel::callback<void(const emel::generator::events::generation_error &)>(
+      emel::callback<void(const emel::text::generator::events::generation_error &)>(
           &generate_tracker, on_generate_error);
 
   REQUIRE(fixture->generator->process_event(generate_request));
   CHECK(formatter_ctx.seen);
   CHECK_FALSE(generate_tracker.generate_error_called);
   CHECK(generate_tracker.generate_done_called);
-  CHECK(generate_error == emel::error::cast(emel::generator::error::none));
+  CHECK(generate_error == emel::error::cast(emel::text::generator::error::none));
   CHECK(generate_tracker.tokens_generated == 1);
   CHECK(std::string_view(output.data(), output_length) == "world");
 }
@@ -1774,91 +1793,92 @@ TEST_CASE("generator structured message request reaches the conditioner formatte
 TEST_CASE("generator_generate_reports_bounded_output_buffer_errors") {
   auto fixture = std::make_unique<generator_fixture>();
   callback_tracker initialize_tracker{};
-  emel::error::type initialize_error = emel::error::cast(emel::generator::error::backend);
+  emel::error::type initialize_error = emel::error::cast(emel::text::generator::error::backend);
   const auto initialize_request = fixture->make_initialize(initialize_tracker, &initialize_error);
   REQUIRE(fixture->generator->process_event(initialize_request));
 
   callback_tracker generate_tracker{};
   std::array<char, 4> output = {};
   size_t output_length = 17;
-  emel::error::type generate_error = emel::error::cast(emel::generator::error::none);
+  emel::error::type generate_error = emel::error::cast(emel::text::generator::error::none);
   const auto generate_request =
       fixture->make_generate(generate_tracker, output.data(), output.size(), output_length,
                              &generate_error);
 
   CHECK_FALSE(fixture->generator->process_event(generate_request));
-  CHECK(fixture->generator->is(boost::sml::state<emel::generator::ready>));
+  CHECK(fixture->generator->is(boost::sml::state<emel::text::generator::ready>));
   CHECK_FALSE(generate_tracker.generate_done_called);
   CHECK(generate_tracker.generate_error_called);
   CHECK(generate_tracker.generate_request == &generate_request);
   CHECK(generate_tracker.tokens_generated == 0);
   CHECK(generate_tracker.output_length == 0);
   CHECK(output_length == 0);
-  CHECK(generate_error == emel::error::cast(emel::generator::error::invalid_request));
-  CHECK(generate_tracker.err == emel::error::cast(emel::generator::error::invalid_request));
+  CHECK(generate_error == emel::error::cast(emel::text::generator::error::invalid_request));
+  CHECK(generate_tracker.err == emel::error::cast(emel::text::generator::error::invalid_request));
 }
 
 TEST_CASE("generator_generate_uses_nonflash_runtime_without_claiming_flash") {
   auto fixture = std::make_unique<generator_fixture>(
       generator_fixture::model_variant::flash_kv_width_mismatch);
   callback_tracker initialize_tracker{};
-  emel::error::type initialize_error = emel::error::cast(emel::generator::error::backend);
+  emel::error::type initialize_error = emel::error::cast(emel::text::generator::error::backend);
   const auto initialize_request = fixture->make_initialize(initialize_tracker, &initialize_error);
   REQUIRE(fixture->generator->process_event(initialize_request));
 
   callback_tracker generate_tracker{};
   std::array<char, 32> output = {};
   size_t output_length = 0;
-  emel::error::type generate_error = emel::error::cast(emel::generator::error::none);
+  emel::error::type generate_error = emel::error::cast(emel::text::generator::error::none);
   const auto generate_request =
       fixture->make_generate(generate_tracker, output.data(), output.size(), output_length,
                              &generate_error);
 
   CHECK(fixture->generator->process_event(generate_request));
-  CHECK(fixture->generator->is(boost::sml::state<emel::generator::ready>));
+  CHECK(fixture->generator->is(boost::sml::state<emel::text::generator::ready>));
   CHECK(generate_tracker.generate_done_called);
   CHECK_FALSE(generate_tracker.generate_error_called);
-  CHECK(generate_error == emel::error::cast(emel::generator::error::none));
+  CHECK(generate_error == emel::error::cast(emel::text::generator::error::none));
   CHECK(generate_tracker.tokens_generated == 1);
   CHECK(output_length == 5);
   CHECK(generate_tracker.output_length == 5);
   CHECK(std::string_view(output.data(), output_length) == "world");
-  CHECK(fixture->generator->generation_flash_attention_dispatch_calls() == 0u);
-  CHECK(fixture->generator->generation_optimized_flash_dispatch_calls() == 0u);
-  CHECK(fixture->generator->generation_shared_flash_dispatch_calls() == 0u);
+  const auto diagnostics = capture_generator_diagnostics(*fixture->generator);
+  CHECK(diagnostics.flash_attention_dispatch_calls == 0u);
+  CHECK(diagnostics.optimized_flash_dispatch_calls == 0u);
+  CHECK(diagnostics.shared_flash_dispatch_calls == 0u);
 }
 
 TEST_CASE("generator_generate_multiple_tokens_and_resets_sequence_on_reuse") {
   auto fixture = std::make_unique<generator_fixture>();
   callback_tracker initialize_tracker{};
-  emel::error::type initialize_error = emel::error::cast(emel::generator::error::backend);
+  emel::error::type initialize_error = emel::error::cast(emel::text::generator::error::backend);
   const auto initialize_request = fixture->make_initialize(initialize_tracker, &initialize_error);
   REQUIRE(fixture->generator->process_event(initialize_request));
 
   callback_tracker first_tracker{};
   std::array<char, 32> first_output = {};
   size_t first_output_length = 0;
-  emel::error::type first_error = emel::error::cast(emel::generator::error::backend);
+  emel::error::type first_error = emel::error::cast(emel::text::generator::error::backend);
   auto first_request =
       fixture->make_generate(first_tracker, first_output.data(), first_output.size(),
                              first_output_length, &first_error);
   first_request.max_tokens = 2;
 
   CHECK(fixture->generator->process_event(first_request));
-  CHECK(first_error == emel::error::cast(emel::generator::error::none));
+  CHECK(first_error == emel::error::cast(emel::text::generator::error::none));
   CHECK(first_tracker.tokens_generated == 2);
   CHECK(std::string_view(first_output.data(), first_output_length) == "worldworld");
 
   callback_tracker second_tracker{};
   std::array<char, 16> second_output = {};
   size_t second_output_length = 0;
-  emel::error::type second_error = emel::error::cast(emel::generator::error::backend);
+  emel::error::type second_error = emel::error::cast(emel::text::generator::error::backend);
   const auto second_request =
       fixture->make_generate(second_tracker, second_output.data(), second_output.size(),
                              second_output_length, &second_error);
 
   CHECK(fixture->generator->process_event(second_request));
-  CHECK(second_error == emel::error::cast(emel::generator::error::none));
+  CHECK(second_error == emel::error::cast(emel::text::generator::error::none));
   CHECK(second_tracker.tokens_generated == 1);
   CHECK(std::string_view(second_output.data(), second_output_length) == "world");
 }
@@ -1866,7 +1886,7 @@ TEST_CASE("generator_generate_multiple_tokens_and_resets_sequence_on_reuse") {
 TEST_CASE("generator_resets_renderer_stop_state_when_reusing_a_sequence") {
   auto fixture = std::make_unique<generator_fixture>();
   callback_tracker initialize_tracker{};
-  emel::error::type initialize_error = emel::error::cast(emel::generator::error::backend);
+  emel::error::type initialize_error = emel::error::cast(emel::text::generator::error::backend);
   auto initialize_request = fixture->make_initialize(initialize_tracker, &initialize_error);
   const std::array<std::string_view, 1> stops = {"worldworld"};
   initialize_request.stop_sequences = stops;
@@ -1875,28 +1895,28 @@ TEST_CASE("generator_resets_renderer_stop_state_when_reusing_a_sequence") {
   callback_tracker first_tracker{};
   std::array<char, 32> first_output = {};
   size_t first_output_length = 0;
-  emel::error::type first_error = emel::error::cast(emel::generator::error::backend);
+  emel::error::type first_error = emel::error::cast(emel::text::generator::error::backend);
   auto first_request =
       fixture->make_generate(first_tracker, first_output.data(), first_output.size(),
                              first_output_length, &first_error);
   first_request.max_tokens = 2;
 
   REQUIRE(fixture->generator->process_event(first_request));
-  CHECK(first_error == emel::error::cast(emel::generator::error::none));
+  CHECK(first_error == emel::error::cast(emel::text::generator::error::none));
   CHECK(first_tracker.tokens_generated == 2);
   CHECK(first_output_length == 0);
 
   callback_tracker second_tracker{};
   std::array<char, 32> second_output = {};
   size_t second_output_length = 0;
-  emel::error::type second_error = emel::error::cast(emel::generator::error::backend);
+  emel::error::type second_error = emel::error::cast(emel::text::generator::error::backend);
   auto second_request =
       fixture->make_generate(second_tracker, second_output.data(), second_output.size(),
                              second_output_length, &second_error);
   second_request.max_tokens = 2;
 
   CHECK(fixture->generator->process_event(second_request));
-  CHECK(second_error == emel::error::cast(emel::generator::error::none));
+  CHECK(second_error == emel::error::cast(emel::text::generator::error::none));
   CHECK(second_tracker.tokens_generated == 2);
   CHECK(second_output_length == 0);
 }
@@ -1905,7 +1925,7 @@ TEST_CASE("generator_reinitialize_clears_lifecycle_publish_state_before_next_gen
   auto fixture = std::make_unique<generator_fixture>();
   callback_tracker first_initialize_tracker{};
   emel::error::type first_initialize_error =
-      emel::error::cast(emel::generator::error::backend);
+      emel::error::cast(emel::text::generator::error::backend);
   const auto first_initialize =
       fixture->make_initialize(first_initialize_tracker, &first_initialize_error);
   REQUIRE(fixture->generator->process_event(first_initialize));
@@ -1913,37 +1933,37 @@ TEST_CASE("generator_reinitialize_clears_lifecycle_publish_state_before_next_gen
   callback_tracker first_generate_tracker{};
   std::array<char, 32> first_output = {};
   size_t first_output_length = 0;
-  emel::error::type first_generate_error = emel::error::cast(emel::generator::error::backend);
+  emel::error::type first_generate_error = emel::error::cast(emel::text::generator::error::backend);
   const auto first_generate =
       fixture->make_generate(first_generate_tracker, first_output.data(), first_output.size(),
                              first_output_length, &first_generate_error);
   REQUIRE(fixture->generator->process_event(first_generate));
-  REQUIRE(first_generate_error == emel::error::cast(emel::generator::error::none));
+  REQUIRE(first_generate_error == emel::error::cast(emel::text::generator::error::none));
 
   callback_tracker second_initialize_tracker{};
   emel::error::type second_initialize_error =
-      emel::error::cast(emel::generator::error::backend);
+      emel::error::cast(emel::text::generator::error::backend);
   const auto second_initialize =
       fixture->make_initialize(second_initialize_tracker, &second_initialize_error);
   REQUIRE(fixture->generator->process_event(second_initialize));
-  REQUIRE(second_initialize_error == emel::error::cast(emel::generator::error::none));
+  REQUIRE(second_initialize_error == emel::error::cast(emel::text::generator::error::none));
 
   callback_tracker second_generate_tracker{};
   std::array<char, 32> second_output = {};
   size_t second_output_length = 0;
-  emel::error::type second_generate_error = emel::error::cast(emel::generator::error::backend);
+  emel::error::type second_generate_error = emel::error::cast(emel::text::generator::error::backend);
   const auto second_generate =
       fixture->make_generate(second_generate_tracker, second_output.data(), second_output.size(),
                              second_output_length, &second_generate_error);
 
   CHECK(fixture->generator->process_event(second_generate));
-  CHECK(second_generate_error == emel::error::cast(emel::generator::error::none));
+  CHECK(second_generate_error == emel::error::cast(emel::text::generator::error::none));
   CHECK(second_generate_tracker.tokens_generated == 1);
   CHECK(std::string_view(second_output.data(), second_output_length) == "world");
 }
 
 TEST_CASE("generator_docs_table_uses_typed_completion_event_names") {
-  using machine_t = boost::sml::sm<emel::generator::model>;
+  using machine_t = boost::sml::sm<emel::text::generator::model>;
   using transitions = typename machine_t::transitions;
 
   bool has_initialize_completion = false;
@@ -1965,47 +1985,284 @@ TEST_CASE("generator_docs_table_uses_typed_completion_event_names") {
 }
 
 TEST_CASE("generator_sm_models_explicit_prefill_boundary_and_decode_compute_states") {
-  using machine_t = boost::sml::sm<emel::generator::model>;
+  using machine_t = boost::sml::sm<emel::text::generator::model>;
   using states = typename machine_t::states;
 
   CHECK(emel::detail::type_list_contains<
-        emel::generator::prefill_running,
+        emel::text::generator::prefill_running,
         states>::value);
   CHECK(emel::detail::type_list_contains<
-        emel::generator::prefill_result_decision,
+        emel::text::generator::prefill_result_decision,
         states>::value);
   CHECK_FALSE(emel::detail::type_list_contains<
-              emel::generator::prefill::contract_runtime_decision,
+              emel::text::generator::prefill::contract_runtime_decision,
               states>::value);
   CHECK_FALSE(emel::detail::type_list_contains<
-              emel::generator::prefill::contract_flash_decision,
+              emel::text::generator::prefill::contract_flash_decision,
               states>::value);
   CHECK_FALSE(emel::detail::type_list_contains<
-              emel::generator::prefill::contract_nonflash_decision,
+              emel::text::generator::prefill::contract_nonflash_decision,
               states>::value);
   CHECK_FALSE(emel::detail::type_list_contains<
-              emel::generator::prefill::compute_result_decision,
+              emel::text::generator::prefill::compute_result_decision,
               states>::value);
-  CHECK(emel::detail::type_list_contains<emel::generator::decode_compute_flash, states>::value);
+  CHECK(emel::detail::type_list_contains<emel::text::generator::decode_compute_flash, states>::value);
   CHECK(emel::detail::type_list_contains<
-        emel::generator::decode_compute_nonflash,
+        emel::text::generator::decode_compute_nonflash,
         states>::value);
 }
 
 TEST_CASE("generator_sm_models_explicit_initializer_boundary") {
-  using machine_t = boost::sml::sm<emel::generator::model>;
+  using machine_t = boost::sml::sm<emel::text::generator::model>;
   using states = typename machine_t::states;
 
-  CHECK(emel::detail::type_list_contains<emel::generator::initializing, states>::value);
+  CHECK(emel::detail::type_list_contains<emel::text::generator::initializing, states>::value);
   CHECK(emel::detail::type_list_contains<
-        emel::generator::initializer_result_decision,
+        emel::text::generator::initializer_result_decision,
         states>::value);
   CHECK_FALSE(emel::detail::type_list_contains<
-              emel::generator::initializer::binding_conditioner,
+              emel::text::generator::initializer::binding_conditioner,
               states>::value);
   CHECK_FALSE(emel::detail::type_list_contains<
-              emel::generator::initializer::configuring_sampler_decision,
+              emel::text::generator::initializer::configuring_sampler_decision,
               states>::value);
+}
+
+TEST_CASE("generator_initialize_public_wrapper_has_no_runtime_branch") {
+  std::ifstream stream(repo_root() / "src" / "emel" / "text" / "generator" / "sm.hpp");
+  REQUIRE(stream.good());
+
+  const std::string source((std::istreambuf_iterator<char>(stream)),
+                           std::istreambuf_iterator<char>());
+  const std::string marker = "bool process_event(const event::initialize & ev)";
+  const auto start = source.find(marker);
+  REQUIRE(start != std::string::npos);
+  const auto end = source.find("bool process_event(const event::generate & ev)", start);
+  REQUIRE(end != std::string::npos);
+
+  const auto wrapper = source.substr(start, end - start);
+  CHECK(wrapper.find("if (") == std::string::npos);
+  CHECK(wrapper.find(" ? ") == std::string::npos);
+  CHECK(wrapper.find("switch") == std::string::npos);
+}
+
+TEST_CASE("generator_route_guards_do_not_delegate_behavior_selection_to_detail_helpers") {
+  const auto read_source = [](const std::filesystem::path & path) {
+    std::ifstream stream(path);
+    REQUIRE(stream.good());
+    return std::string(
+        (std::istreambuf_iterator<char>(stream)), std::istreambuf_iterator<char>());
+  };
+
+  const std::string parent_guards =
+      read_source(repo_root() / "src" / "emel" / "text" / "generator" / "guards.hpp");
+  const std::string prefill_guards =
+      read_source(repo_root() / "src" / "emel" / "text" / "generator" / "prefill" / "guards.hpp");
+  const std::array<std::string_view, 6> forbidden_parent_patterns{
+    "emel::text::generator::detail::preselected_argmax_direct_supported(",
+    "emel::text::generator::detail::prefill_chunk4_q8_gemm_backend_ready(",
+    "emel::text::generator::detail::prefill_chunk8_q8_k_backend_ready(",
+    "emel::text::generator::detail::prefill_chunk4_backend_ready<",
+    "emel::text::generator::detail::prefill_chunk8_backend_ready<",
+    "emel::text::generator::detail::flash_attention_supported(",
+  };
+  for (const auto pattern : forbidden_parent_patterns) {
+    CAPTURE(pattern);
+    CHECK(parent_guards.find(pattern) == std::string::npos);
+    CHECK(prefill_guards.find(pattern) == std::string::npos);
+  }
+}
+
+TEST_CASE("generator_scalar_kernel_route_choice_stays_in_state_machines") {
+  const auto read_source = [](const std::filesystem::path & path) {
+    std::ifstream stream(path);
+    REQUIRE(stream.good());
+    return std::string(
+        (std::istreambuf_iterator<char>(stream)), std::istreambuf_iterator<char>());
+  };
+
+  const std::string detail_source =
+      read_source(repo_root() / "src" / "emel" / "text" / "generator" / "detail.hpp");
+  CHECK(detail_source.find("run_kernel_mode(") == std::string::npos);
+  CHECK(detail_source.find("run_kernel_mode_preselected_argmax(") == std::string::npos);
+  CHECK(detail_source.find("plan->kind == step_kind::prefill ?") == std::string::npos);
+  CHECK(detail_source.find("phase_lifecycle(") == std::string::npos);
+
+  const auto guarded_validate_start =
+      detail_source.find("inline bool validate_guarded_compute");
+  REQUIRE(guarded_validate_start != std::string::npos);
+  const auto guarded_validate_end =
+      detail_source.find("inline bool prepare_graph", guarded_validate_start);
+  REQUIRE(guarded_validate_end != std::string::npos);
+  const auto guarded_validate_callbacks =
+      detail_source.substr(guarded_validate_start,
+                           guarded_validate_end - guarded_validate_start);
+  const std::array<std::string_view, 10> forbidden_validate_callback_patterns{
+    "request_plan(",
+    "check_backend(",
+    "expected_outputs",
+    "selected_token_out == nullptr",
+    "selected_score_out == nullptr",
+    "positions_count !=",
+    "token_count <=",
+    "*err_out",
+    "k_error_invalid",
+    "return false",
+  };
+  for (const auto pattern : forbidden_validate_callback_patterns) {
+    CAPTURE(pattern);
+    CHECK(guarded_validate_callbacks.find(pattern) == std::string::npos);
+  }
+
+  const auto guarded_bind_start =
+      detail_source.find("inline bool bind_guarded_inputs");
+  REQUIRE(guarded_bind_start != std::string::npos);
+  const auto guarded_bind_end =
+      detail_source.find("template <emel::text::generator::attention_mode",
+                         guarded_bind_start);
+  REQUIRE(guarded_bind_end != std::string::npos);
+  const auto guarded_bind_callback =
+      detail_source.substr(guarded_bind_start, guarded_bind_end - guarded_bind_start);
+  const std::array<std::string_view, 7> forbidden_bind_callback_patterns{
+    "request_plan(",
+    "check_backend(",
+    "== nullptr",
+    "expected_outputs",
+    "*err_out",
+    "k_error_invalid",
+    "return false",
+  };
+  for (const auto pattern : forbidden_bind_callback_patterns) {
+    CAPTURE(pattern);
+    CHECK(guarded_bind_callback.find(pattern) == std::string::npos);
+  }
+
+  const auto guarded_extract_start =
+      detail_source.find("inline bool extract_guarded_outputs");
+  REQUIRE(guarded_extract_start != std::string::npos);
+  const auto guarded_extract_end =
+      detail_source.find("}  // namespace emel::text::generator::detail",
+                         guarded_extract_start);
+  REQUIRE(guarded_extract_end != std::string::npos);
+  const auto guarded_extract_callbacks =
+      detail_source.substr(guarded_extract_start,
+                           guarded_extract_end - guarded_extract_start);
+  const std::array<std::string_view, 8> forbidden_extract_callback_patterns{
+    "check_backend(",
+    "== nullptr",
+    "selected_token_out == nullptr",
+    "selected_score_out == nullptr",
+    "*err_out",
+    "k_error_invalid",
+    "return false",
+    "request_plan(",
+  };
+  for (const auto pattern : forbidden_extract_callback_patterns) {
+    CAPTURE(pattern);
+    CHECK(guarded_extract_callbacks.find(pattern) == std::string::npos);
+  }
+
+  const auto audited_start = detail_source.find("inline bool run_kernel_scalar_mode");
+  REQUIRE(audited_start != std::string::npos);
+  const auto audited_end =
+      detail_source.find("inline bool extract_guarded_outputs", audited_start);
+  REQUIRE(audited_end != std::string::npos);
+  const auto audited_wrappers = detail_source.substr(audited_start, audited_end - audited_start);
+  const std::array<std::string_view, 10> forbidden_wrapper_patterns{
+    "request_plan(",
+    "plan->kind",
+    "check_backend(",
+    "bound_ready",
+    "selected_token_out == nullptr",
+    "selected_score_out == nullptr",
+    "prefill_chunk4_backend_ready",
+    "prefill_chunk8_q8_k_backend_ready",
+    "*err_out",
+    "k_error_invalid",
+  };
+  for (const auto pattern : forbidden_wrapper_patterns) {
+    CAPTURE(pattern);
+    CHECK(audited_wrappers.find(pattern) == std::string::npos);
+  }
+
+  auto matmul_start = detail_source.find("inline bool matmul_vector(native_backend");
+  REQUIRE(matmul_start != std::string::npos);
+  matmul_start = detail_source.find("inline bool matmul_vector(native_backend", matmul_start + 1u);
+  REQUIRE(matmul_start != std::string::npos);
+  const auto matmul_end = detail_source.find("inline bool matmul_vector_argmax", matmul_start);
+  REQUIRE(matmul_end != std::string::npos);
+  const auto matmul_body = detail_source.substr(matmul_start, matmul_end - matmul_start);
+  CHECK(matmul_body.find("packed_q8_0_input_path_supported") == std::string::npos);
+  CHECK(matmul_body.find("q8_input_path_supported") == std::string::npos);
+
+  const auto native_matmul_start =
+      detail_source.find("inline bool matmul_vector_native_quantized(");
+  REQUIRE(native_matmul_start != std::string::npos);
+  const auto native_matmul_end =
+      detail_source.find("inline bool matmul_vector(", native_matmul_start);
+  REQUIRE(native_matmul_end != std::string::npos);
+  const auto native_matmul_body =
+      detail_source.substr(native_matmul_start, native_matmul_end - native_matmul_start);
+  CHECK(native_matmul_body.find("packed_q8_0_input_path_supported") == std::string::npos);
+  CHECK(native_matmul_body.find("q8_input_path_supported") == std::string::npos);
+  CHECK(native_matmul_body.find("matmul_vector_packed_q8_0(") == std::string::npos);
+  CHECK(native_matmul_body.find("matmul_vector_q8_k(") == std::string::npos);
+
+  const std::string parent_actions =
+      read_source(repo_root() / "src" / "emel" / "text" / "generator" / "actions.hpp");
+  CHECK(parent_actions.find("detail::validate,") == std::string::npos);
+  CHECK(parent_actions.find("detail::validate_preselected_argmax") == std::string::npos);
+  CHECK(parent_actions.find("detail::bind_inputs") == std::string::npos);
+  CHECK(parent_actions.find("detail::extract_outputs") == std::string::npos);
+  CHECK(parent_actions.find("detail::extract_preselected_argmax") == std::string::npos);
+  CHECK(parent_actions.find("detail::validate_guarded_compute") != std::string::npos);
+  CHECK(parent_actions.find("detail::validate_guarded_preselected_argmax") !=
+        std::string::npos);
+  CHECK(parent_actions.find("detail::bind_guarded_inputs") != std::string::npos);
+  CHECK(parent_actions.find("detail::extract_guarded_outputs") != std::string::npos);
+  CHECK(parent_actions.find("detail::extract_guarded_preselected_argmax") !=
+        std::string::npos);
+  CHECK(parent_actions.find("io.selected_token_out = &ev.ctx.selected_token") !=
+        std::string::npos);
+  CHECK(parent_actions.find("io.selected_score_out = &ev.ctx.selected_score") !=
+        std::string::npos);
+  CHECK(parent_actions.find("detail::run_kernel_flash>") == std::string::npos);
+  CHECK(parent_actions.find("detail::run_kernel_nonflash>") == std::string::npos);
+  CHECK(parent_actions.find("detail::run_kernel_flash_preselected_argmax>") ==
+        std::string::npos);
+  CHECK(parent_actions.find("detail::run_kernel_nonflash_preselected_argmax>") ==
+        std::string::npos);
+
+  const std::string parent_sm =
+      read_source(repo_root() / "src" / "emel" / "text" / "generator" / "sm.hpp");
+  CHECK(parent_sm.find("guard::guard_decode_compute_invalid_request{}") !=
+        std::string::npos);
+  CHECK(parent_sm.find("guard::guard_decode_compute_backend_unavailable{}") !=
+        std::string::npos);
+  CHECK(parent_sm.find("guard::guard_decode_materialized_scalar_kernel_ready{}") !=
+        std::string::npos);
+  CHECK(parent_sm.find("guard::guard_decode_preselected_argmax_kernel_ready{}") !=
+        std::string::npos);
+
+  const std::string prefill_actions =
+      read_source(repo_root() / "src" / "emel" / "text" / "generator" / "prefill" /
+                  "actions.hpp");
+  CHECK(prefill_actions.find("detail::run_kernel_flash>") == std::string::npos);
+  CHECK(prefill_actions.find("detail::run_kernel_nonflash>") == std::string::npos);
+  CHECK(prefill_actions.find("detail::run_kernel_flash_preselected_argmax>") ==
+        std::string::npos);
+  CHECK(prefill_actions.find("detail::run_kernel_nonflash_preselected_argmax>") ==
+        std::string::npos);
+
+  const std::string prefill_sm =
+      read_source(repo_root() / "src" / "emel" / "text" / "generator" / "prefill" /
+                  "sm.hpp");
+  CHECK(prefill_sm.find("guard::guard_compute_invalid_request{}") != std::string::npos);
+  CHECK(prefill_sm.find("guard::guard_compute_backend_unavailable{}") != std::string::npos);
+  CHECK(prefill_sm.find("guard::guard_materialized_logits_with_scalar_kernel_ready{}") !=
+        std::string::npos);
+  CHECK(prefill_sm.find("guard::guard_preselected_argmax_with_scalar_kernel_ready{}") !=
+        std::string::npos);
 }
 
 TEST_CASE("docs_detail_shortens_lambda_type_names_for_mermaid") {
@@ -2018,6 +2275,6 @@ TEST_CASE("docs_detail_shortens_lambda_type_names_for_mermaid") {
 
 TEST_CASE("docs_detail_table_event_name_supports_non_completion_event") {
   const auto event_name =
-      emel::docs::detail::table_event_name<emel::generator::event::generate_run>();
+      emel::docs::detail::table_event_name<emel::text::generator::event::generate_run>();
   CHECK(event_name == "generate_run");
 }

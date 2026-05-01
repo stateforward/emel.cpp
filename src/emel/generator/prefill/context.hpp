@@ -1,16 +1,7 @@
 #pragma once
 
-namespace emel::generator::action {
-struct context;
-}
+#include "emel/text/generator/prefill/context.hpp"
 
-namespace emel::generator::prefill::action {
-
-struct context {
-  explicit context(emel::generator::action::context & generator_ref) noexcept
-    : generator(generator_ref) {}
-
-  emel::generator::action::context & generator;
-};
-
-}  // namespace emel::generator::prefill::action
+namespace emel {
+namespace generator = text::generator;
+}  // namespace emel
