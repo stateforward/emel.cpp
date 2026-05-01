@@ -11,6 +11,7 @@
 #include <doctest/doctest.h>
 
 #include "../generation_fixture_registry.hpp"
+#include "bench_runner_contract.hpp"
 #include "generation_workload_manifest.hpp"
 
 #if !defined(_WIN32)
@@ -317,6 +318,77 @@ TEST_CASE("bench_main delegates to runner-owned cli boundary") {
         std::string::npos);
   CHECK(runner_source.find("EMEL_BENCH_ITERS") != std::string::npos);
   CHECK(runner_source.find("print_compare") != std::string::npos);
+}
+
+TEST_CASE("bench runner contract serializes requests and results for a process seam") {
+  emel::bench::runner_request request = {};
+  request.mode = emel::bench::runner_mode::compare;
+  request.suite = "generation";
+  request.cfg.iterations = 17u;
+  request.cfg.runs = 3u;
+  request.cfg.warmup_iterations = 5u;
+  request.cfg.warmup_runs = 1u;
+  request.generation_jsonl = true;
+
+  const std::string serialized = emel::bench::serialize_runner_request(request);
+  CHECK(serialized.find("schema=bench_runner_request/v1\n") != std::string::npos);
+  CHECK(serialized.find("mode=compare\n") != std::string::npos);
+  CHECK(serialized.find("suite=generation\n") != std::string::npos);
+
+  emel::bench::runner_request parsed = {};
+  CHECK(emel::bench::parse_runner_request(serialized, parsed));
+  CHECK(parsed.mode == emel::bench::runner_mode::compare);
+  CHECK(parsed.suite == "generation");
+  CHECK(parsed.cfg.iterations == 17u);
+  CHECK(parsed.cfg.runs == 3u);
+  CHECK(parsed.cfg.warmup_iterations == 5u);
+  CHECK(parsed.cfg.warmup_runs == 1u);
+  CHECK(parsed.generation_jsonl);
+  CHECK_FALSE(parsed.diarization_jsonl);
+
+  emel::bench::runner_result result = {};
+  result.exit_code = 2;
+  result.error_kind = "invalid_request";
+  result.error_message = "bad runner payload";
+  const std::string result_text = emel::bench::serialize_runner_result(result);
+
+  emel::bench::runner_result parsed_result = {};
+  CHECK(emel::bench::parse_runner_result(result_text, parsed_result));
+  CHECK(parsed_result.exit_code == 2);
+  CHECK(parsed_result.error_kind == "invalid_request");
+  CHECK(parsed_result.error_message == "bad runner payload");
+}
+
+TEST_CASE("bench runner contract rejects malformed process payloads") {
+  emel::bench::runner_request request = {};
+  CHECK_FALSE(emel::bench::parse_runner_request("schema=bench_runner_request/v1\n", request));
+  CHECK_FALSE(emel::bench::parse_runner_request(
+    "schema=bench_runner_request/v1\n"
+    "mode=unknown\n"
+    "suite=generation\n"
+    "iterations=1\n"
+    "runs=1\n"
+    "warmup_iterations=0\n"
+    "warmup_runs=0\n"
+    "generation_jsonl=0\n"
+    "diarization_jsonl=0\n",
+    request));
+  CHECK_FALSE(emel::bench::parse_runner_request(
+    "schema=bench_runner_request/v1\n"
+    "mode=compare\n"
+    "suite=generation\n"
+    "iterations=one\n"
+    "runs=1\n"
+    "warmup_iterations=0\n"
+    "warmup_runs=0\n"
+    "generation_jsonl=0\n"
+    "diarization_jsonl=0\n",
+    request));
+
+  emel::bench::runner_result result = {};
+  CHECK_FALSE(emel::bench::parse_runner_result("schema=bench_runner_result/v1\n", result));
+  CHECK_FALSE(emel::bench::parse_runner_result(
+    "schema=bench_runner_result/v1\nexit_code=bad\n", result));
 }
 
 TEST_CASE("generation_stage_probe_emel_path_does_not_bypass_generator_actor") {

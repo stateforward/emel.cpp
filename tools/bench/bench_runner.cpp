@@ -13,6 +13,7 @@
 
 #include "bench_cases.hpp"
 #include "bench_common.hpp"
+#include "bench_runner_contract.hpp"
 #include "bench_runner.hpp"
 #include "diarization_compare_contract.hpp"
 #include "generation_compare_contract.hpp"
@@ -1003,38 +1004,15 @@ void print_compare(const std::vector<bench::result> & emel_results,
   }
 }
 
-enum class mode {
-  k_emel,
-  k_reference,
-  k_compare,
-  k_kernel_emel,
-  k_kernel_reference,
-  k_kernel_compare,
-};
-
-mode parse_mode(int argc, char ** argv) {
+bench::runner_mode parse_mode(int argc, char ** argv) {
+  bench::runner_mode parsed = bench::runner_mode::emel;
   for (int i = 1; i < argc; ++i) {
     const std::string arg = argv[i];
-    if (arg == "--mode=emel") {
-      return mode::k_emel;
-    }
-    if (arg == "--mode=reference") {
-      return mode::k_reference;
-    }
-    if (arg == "--mode=compare") {
-      return mode::k_compare;
-    }
-    if (arg == "--mode=kernel-emel") {
-      return mode::k_kernel_emel;
-    }
-    if (arg == "--mode=kernel-reference") {
-      return mode::k_kernel_reference;
-    }
-    if (arg == "--mode=kernel-compare") {
-      return mode::k_kernel_compare;
+    if (bench::parse_runner_mode_arg(arg, parsed)) {
+      return parsed;
     }
   }
-  return mode::k_emel;
+  return parsed;
 }
 
 }  // namespace
@@ -1050,63 +1028,68 @@ int emel::bench::run_bench_cli(int argc, char ** argv) {
     std::min(cfg.iterations, k_default_warmup_iterations));
   cfg.warmup_runs = read_env_size("EMEL_BENCH_WARMUP_RUNS", k_default_warmup_runs);
 
-  const mode run_mode = parse_mode(argc, argv);
-  const bool generation_jsonl = bench::generation_compare_emit_jsonl();
-  const bool diarization_jsonl = bench::diarization_compare_emit_jsonl();
-  if (generation_jsonl && diarization_jsonl) {
+  const char * selected_suite = std::getenv("EMEL_BENCH_SUITE");
+  const bench::runner_request request{
+    .mode = parse_mode(argc, argv),
+    .cfg = cfg,
+    .suite = selected_suite == nullptr ? std::string{} : std::string{selected_suite},
+    .generation_jsonl = bench::generation_compare_emit_jsonl(),
+    .diarization_jsonl = bench::diarization_compare_emit_jsonl(),
+  };
+  if (request.generation_jsonl && request.diarization_jsonl) {
     std::fprintf(stderr,
                  "error: generation and diarization jsonl modes cannot be enabled together\n");
     return 1;
   }
 
-  if (run_mode == mode::k_kernel_emel) {
-    const auto results = run_benchmarks(cfg, kernel_test_cases(), false, false);
-    print_snapshot(results, cfg);
+  if (request.mode == bench::runner_mode::kernel_emel) {
+    const auto results = run_benchmarks(request.cfg, kernel_test_cases(), false, false);
+    print_snapshot(results, request.cfg);
     return 0;
   }
 
-  if (run_mode == mode::k_kernel_reference) {
-    const auto results = run_benchmarks(cfg, kernel_test_cases(), true, false);
-    print_snapshot(results, cfg);
+  if (request.mode == bench::runner_mode::kernel_reference) {
+    const auto results = run_benchmarks(request.cfg, kernel_test_cases(), true, false);
+    print_snapshot(results, request.cfg);
     return 0;
   }
 
-  if (run_mode == mode::k_kernel_compare) {
-    const auto emel_results = run_benchmarks(cfg, kernel_test_cases(), false, false);
-    const auto ref_results = run_benchmarks(cfg, kernel_test_cases(), true, false);
-    print_compare(emel_results, ref_results, cfg);
+  if (request.mode == bench::runner_mode::kernel_compare) {
+    const auto emel_results = run_benchmarks(request.cfg, kernel_test_cases(), false, false);
+    const auto ref_results = run_benchmarks(request.cfg, kernel_test_cases(), true, false);
+    print_compare(emel_results, ref_results, request.cfg);
     return 0;
   }
 
-  if (run_mode == mode::k_emel) {
+  if (request.mode == bench::runner_mode::emel) {
     bench::set_generation_lane_mode(bench::generation_lane_mode::emel);
-    const auto results = run_benchmarks(cfg, default_test_cases(), false, true);
-    if (generation_jsonl) {
+    const auto results = run_benchmarks(request.cfg, default_test_cases(), false, true);
+    if (request.generation_jsonl) {
       print_generation_jsonl(results);
-    } else if (diarization_jsonl) {
+    } else if (request.diarization_jsonl) {
       print_diarization_jsonl(results);
     } else {
-      print_snapshot(results, cfg);
+      print_snapshot(results, request.cfg);
     }
     return 0;
   }
 
-  if (run_mode == mode::k_reference) {
+  if (request.mode == bench::runner_mode::reference) {
     bench::set_generation_lane_mode(bench::generation_lane_mode::reference);
-    const auto results = run_benchmarks(cfg, default_test_cases(), true, true);
-    if (generation_jsonl) {
+    const auto results = run_benchmarks(request.cfg, default_test_cases(), true, true);
+    if (request.generation_jsonl) {
       print_generation_jsonl(results);
-    } else if (diarization_jsonl) {
+    } else if (request.diarization_jsonl) {
       print_diarization_jsonl(results);
     } else {
-      print_snapshot(results, cfg);
+      print_snapshot(results, request.cfg);
     }
     return 0;
   }
 
   bench::set_generation_lane_mode(bench::generation_lane_mode::compare);
-  const auto emel_results = run_benchmarks(cfg, default_test_cases(), false, true);
-  const auto ref_results = run_benchmarks(cfg, default_test_cases(), true, true);
-  print_compare(emel_results, ref_results, cfg);
+  const auto emel_results = run_benchmarks(request.cfg, default_test_cases(), false, true);
+  const auto ref_results = run_benchmarks(request.cfg, default_test_cases(), true, true);
+  print_compare(emel_results, ref_results, request.cfg);
   return 0;
 }

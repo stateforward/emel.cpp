@@ -56,7 +56,7 @@ manifests.
 
 - [x] **Phase 157: Benchmark Orchestrator Boundary** - Establish the shared benchmark
   orchestrator boundary for common config, asset, request, and report handling.
-- [ ] **Phase 158: Benchmark Runner Contract And Process Seam** - Define the narrow runner
+- [x] **Phase 158: Benchmark Runner Contract And Process Seam** - Define the narrow runner
   request/result contract and process-level extension seam.
 - [ ] **Phase 159: Benchmark Runner Discovery And Registration** - Replace broad static case
   registration with localized runner metadata/discovery.
@@ -110,7 +110,9 @@ runners.
    local runner fixture.
 5. Tests prove malformed or unavailable runner responses fail closed with deterministic errors.
 
-**Status:** Pending.
+**Status:** Complete. Phase 158 added `bench_runner_request/v1` and
+`bench_runner_result/v1` serialized payloads, wired `run_bench_cli(...)` through a normalized
+`runner_request`, and added fail-closed contract tests.
 
 ### Phase 159: Benchmark Runner Discovery And Registration
 

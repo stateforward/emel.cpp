@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.19
 milestone_name: Benchmark Tool Pluggable Runner Refactor
 status: phase_in_progress
-stopped_at: "Phase 157 complete; next action is `$gsd-discuss-phase 158`."
-last_updated: "2026-05-01T06:40:00Z"
+stopped_at: "Phase 158 complete; next action is `$gsd-discuss-phase 159`."
+last_updated: "2026-05-01T07:05:00Z"
 last_activity: 2026-05-01
 progress:
   total_phases: 7
-  completed_phases: 1
-  total_plans: 1
-  completed_plans: 1
-  percent: 14
+  completed_phases: 2
+  total_plans: 2
+  completed_plans: 2
+  percent: 29
 ---
 
 # Project State
@@ -26,12 +26,12 @@ verification before widening API surface or model scope.
 
 ## Current Position
 
-Phase: 158 Benchmark Runner Contract And Process Seam
+Phase: 159 Benchmark Runner Discovery And Registration
 Plan: -
-Status: Phase 157 complete; Phase 158 not started.
-Last activity: 2026-05-01 - Phase 157 completed
+Status: Phase 158 complete; Phase 159 not started.
+Last activity: 2026-05-01 - Phase 158 completed
 
-Progress: [#---------] 14%
+Progress: [###-------] 29%
 
 ## Deferred Items
 
@@ -51,10 +51,10 @@ Items acknowledged and still deferred at milestone close on 2026-05-01:
 
 - Milestone: `v1.19 Benchmark Tool Pluggable Runner Refactor`
 
-- Current planning shape: 7 phases, 13 active requirements mapped; 1 phase complete.
+- Current planning shape: 7 phases, 13 active requirements mapped; 2 phases complete.
 - Latest shipped milestone: `v1.18 Parity Tool Boundary Refactor`.
 
-- Next action: `$gsd-discuss-phase 158` or `$gsd-plan-phase 158`.
+- Next action: `$gsd-discuss-phase 159` or `$gsd-plan-phase 159`.
 - Current blocker: none known.
 
 ## Accumulated Context
@@ -83,6 +83,9 @@ Recent decisions affecting current work:
 
 - Phases 158-160 own runner contract, discovery/registration, and independent build-target
   boundaries before manifest and quality-gate work begins.
+
+- Phase 158 completed the runner request/result contract with deterministic serialized process
+  seam payloads and malformed-payload tests.
 
 - Phases 161-162 own build-time benchmark dependency manifests and conservative quality-gate
   consumption. Phase 163 closes maintained behavior and lane-isolation proof.
