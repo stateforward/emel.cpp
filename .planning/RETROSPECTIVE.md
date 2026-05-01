@@ -182,12 +182,78 @@
 
 ---
 
+## Milestone: v1.19 - Benchmark Tool Pluggable Runner Refactor
+
+**Shipped:** 2026-05-01
+**Phases:** 7 | **Plans:** 7 | **Sessions:** autonomous execution and closeout
+
+### What Was Built
+
+- Shared benchmark orchestration behind `emel::bench::run_bench_cli(...)`, with `bench_main.cpp`
+  left as a process shim.
+- Deterministic `bench_runner_request/v1` and `bench_runner_result/v1` contracts for a future
+  process-level runner seam.
+- Localized benchmark suite registration and lookup through `bench_runner_registry.hpp` / `.cpp`.
+- Per-suite `bench_runner_suite_<suite>` CMake object targets for maintained runner source
+  isolation.
+- Deterministic `bench_dependency_manifest/v1` records, a checked-in baseline, write/check CLI
+  operations, and manifest-driven quality-gate escalation.
+- Source-backed generation and diarization behavior coverage plus shared runner lane-isolation and
+  actor-boundary checks.
+
+### What Worked
+
+- Reusing the v1.18 paritychecker boundary pattern made the benchmark runner refactor predictable.
+- The phase order kept behavior-preservation proof last, after orchestration, contract, registry,
+  build, and manifest boundaries were already source-backed.
+- Changed-file scoped quality gates stayed focused on benchmark work by passing the generation
+  benchmark suite explicitly.
+- The audit was able to rely on source tests and verification artifacts instead of roadmap claims.
+
+### What Was Inefficient
+
+- The milestone archive command still produced an empty accomplishments section that needed manual
+  repair in `MILESTONES.md`.
+- `STATE.md` kept a stale v1.18 closeout sentence after archiving v1.19.
+- Quality-gate runs rewrote `snapshots/quality_gates/timing.txt`, requiring repeated restoration
+  because the run was not a snapshot update.
+- Full `bench_runner_tests` took several minutes when the build directory had to be reconfigured
+  away from the generation-only suite filter.
+
+### Patterns Established
+
+- Benchmark and parity tool refactors should share the same boundary progression: runner shim,
+  contract, registration, build isolation, dependency manifest, quality-gate consumption, then
+  maintained behavior closure.
+- Shared orchestration source checks should stay narrow to the shared boundary and not claim to
+  replace suite-owned implementation tests.
+- Dependency manifests should be treated as conservative routing evidence; missing, stale, or
+  uncertain data means run the relevant benchmark gate.
+
+### Key Lessons
+
+1. Reconfigure benchmark builds explicitly after suite-filtered quality gates before running tests
+   that expect multiple maintained suites.
+2. Milestone audit files should be committed before archival so complete-milestone can move them
+   with history.
+3. Closeout automation needs manual review for generated accomplishments and stale state text.
+
+### Cost Observations
+
+- Model mix: not measured.
+- Sessions: one autonomous issue-based milestone execution and closeout session.
+- Notable: final `bench_runner_tests` passed after full benchmark-tool reconfiguration; the final
+  scoped quality gate passed with benchmark manifest freshness checked.
+
+---
+
 ## Cross-Milestone Trends
 
 ### Process Evolution
 
 | Milestone | Sessions | Phases | Key Change |
 |-----------|----------|--------|------------|
+| v1.19 | autonomous execution/closeout | 7 | Benchmark runner boundaries now mirror paritychecker boundaries with manifests and source-backed lane-isolation proof. |
 | v1.18 | autonomous execution/closeout | 5 | Paritychecker boundaries became explicit runner, engine, build, manifest, and lane-isolation contracts. |
 | v1.15 | autonomous execution/closeout | 24 | Source-backed audit and recursive profiling became mandatory before milestone archive. |
 | v1.13 | current closeout | 8 | Audit gaps became explicit repair phases before archive. |
@@ -196,6 +262,7 @@
 
 | Milestone | Tests | Coverage | Zero-Dep Additions |
 |-----------|-------|----------|-------------------|
+| v1.19 | `bench_runner_tests`, `quality_gates_tests`, changed-file scoped quality gates | Coverage gate skipped because no `src/emel` files changed | No new runtime dependency in `src/`; benchmark manifests are source-controlled. |
 | v1.18 | `paritychecker_tests`, focused paritychecker executable builds, changed-file scoped quality gates | Coverage gate skipped because no `src/emel` files changed | No new runtime dependency in `src/`; manifest records are source-controlled. |
 | v1.15 | Sortformer runtime/parity/benchmark tests plus final scoped quality gate | Line coverage gate preserved; scoped gate timing `246s` | No external runtime dependency in the EMEL lane. |
 | v1.13 | `generation_compare_tests`, focused `bench_runner_tests`, quality gates | 90.4% line coverage at last full gate | No new runtime dependency in `src/`. |
