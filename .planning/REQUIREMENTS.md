@@ -87,25 +87,25 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| ORCH-01 | TBD | Pending |
-| ORCH-02 | TBD | Pending |
-| RUNNER-01 | TBD | Pending |
-| RUNNER-02 | TBD | Pending |
-| DISC-01 | TBD | Pending |
-| BUILD-01 | TBD | Pending |
-| BUILD-02 | TBD | Pending |
-| MANIFEST-01 | TBD | Pending |
-| MANIFEST-02 | TBD | Pending |
-| GATE-01 | TBD | Pending |
-| GATE-02 | TBD | Pending |
-| LANE-01 | TBD | Pending |
-| LANE-02 | TBD | Pending |
+| ORCH-01 | Phase 157 | Pending |
+| ORCH-02 | Phase 163 | Pending |
+| RUNNER-01 | Phase 158 | Pending |
+| RUNNER-02 | Phase 158 | Pending |
+| DISC-01 | Phase 159 | Pending |
+| BUILD-01 | Phase 160 | Pending |
+| BUILD-02 | Phase 160 | Pending |
+| MANIFEST-01 | Phase 161 | Pending |
+| MANIFEST-02 | Phase 161 | Pending |
+| GATE-01 | Phase 162 | Pending |
+| GATE-02 | Phase 162 | Pending |
+| LANE-01 | Phase 157 | Pending |
+| LANE-02 | Phase 163 | Pending |
 
 **Coverage:**
 - Active requirements: 13 total
-- Mapped to phases: 0
-- Unmapped: 13
+- Mapped to phases: 13
+- Unmapped: 0
 
 ---
 *Requirements defined: 2026-05-01*
-*Last updated: 2026-05-01 after initial definition from GitHub issue #55*
+*Last updated: 2026-05-01 after roadmap traceability mapping*

@@ -2,12 +2,12 @@
 gsd_state_version: 1.0
 milestone: v1.19
 milestone_name: Benchmark Tool Pluggable Runner Refactor
-status: defining_requirements
-stopped_at: "v1.19 milestone started from GitHub issue #55; defining requirements and roadmap."
-last_updated: "2026-05-01T06:05:00Z"
+status: roadmap_ready
+stopped_at: "v1.19 roadmap created; next action is `$gsd-discuss-phase 157`."
+last_updated: "2026-05-01T06:15:00Z"
 last_activity: 2026-05-01
 progress:
-  total_phases: 0
+  total_phases: 7
   completed_phases: 0
   total_plans: 0
   completed_plans: 0
@@ -26,10 +26,10 @@ verification before widening API surface or model scope.
 
 ## Current Position
 
-Phase: Not started (defining requirements)
+Phase: 157 Benchmark Orchestrator Boundary
 Plan: -
-Status: Defining requirements for v1.19 from GitHub issue #55.
-Last activity: 2026-05-01 - Milestone v1.19 started
+Status: Roadmap ready; first phase not started.
+Last activity: 2026-05-01 - Milestone v1.19 roadmap created
 
 Progress: [----------] 0%
 
@@ -51,10 +51,10 @@ Items acknowledged and still deferred at milestone close on 2026-05-01:
 
 - Milestone: `v1.19 Benchmark Tool Pluggable Runner Refactor`
 
-- Current planning shape: requirements and roadmap being defined from GitHub issue #55.
+- Current planning shape: 7 phases, 13 active requirements mapped.
 - Latest shipped milestone: `v1.18 Parity Tool Boundary Refactor`.
 
-- Next action: define scoped requirements, then create the milestone roadmap.
+- Next action: `$gsd-discuss-phase 157` or `$gsd-plan-phase 157`.
 - Current blocker: none known.
 
 ## Accumulated Context
@@ -73,6 +73,15 @@ Recent decisions affecting current work:
 
 - Missing, stale, or uncertain benchmark runner dependency manifests must force the relevant
   benchmark gate instead of enabling a permissive skip.
+
+- Phase 157 starts the milestone by establishing the shared benchmark orchestrator boundary while
+  keeping EMEL/reference lane-owned assets separate.
+
+- Phases 158-160 own runner contract, discovery/registration, and independent build-target
+  boundaries before manifest and quality-gate work begins.
+
+- Phases 161-162 own build-time benchmark dependency manifests and conservative quality-gate
+  consumption. Phase 163 closes maintained behavior and lane-isolation proof.
 
 - `v1.18` starts from GitHub issue #54 and targets paritychecker runner/engine/build/manifest
   boundaries rather than new parity semantics.

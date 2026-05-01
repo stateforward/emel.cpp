@@ -235,7 +235,15 @@ truth anchor and without broadening into generic Liquid-family support.
 
 ### Active
 
-No active milestone requirements. Start the next milestone with `$gsd-new-milestone`.
+- [ ] Refactor `tools/bench` around a shared orchestrator that owns common benchmark setup and
+  reporting without owning per-family execution behavior.
+- [ ] Move benchmark-family execution behind explicit runner boundaries that can be added locally.
+- [ ] Make benchmark runner discovery, registration, and build wiring localized enough that new
+  runners do not require touching or rebuilding unrelated runners.
+- [ ] Emit and consume per-runner dependency manifests with conservative missing, stale, or
+  uncertain-data fallback behavior.
+- [ ] Preserve existing maintained benchmark families, report schemas, and EMEL/reference lane
+  isolation while the tool boundary moves.
 
 ### Validated
 
@@ -351,18 +359,6 @@ No active milestone requirements. Start the next milestone with `$gsd-new-milest
 - ✓ v1.17 closed source-backed SML/detail/test-surface audit gaps with public lifecycle events,
   kernel-owned row sizing, component-private test classification, explicit route/outcome modeling,
   and guard-accepted graph validation/bind/extract callbacks.
-
-### Active
-
-- [ ] Refactor `tools/bench` around a shared orchestrator that owns common benchmark setup and
-  reporting without owning per-family execution behavior.
-- [ ] Move benchmark-family execution behind explicit runner boundaries that can be added locally.
-- [ ] Make benchmark runner discovery, registration, and build wiring localized enough that new
-  runners do not require touching or rebuilding unrelated runners.
-- [ ] Emit and consume per-runner dependency manifests with conservative missing, stale, or
-  uncertain-data fallback behavior.
-- [ ] Preserve existing maintained benchmark families, report schemas, and EMEL/reference lane
-  isolation while the tool boundary moves.
 
 ### Out of Scope
 
