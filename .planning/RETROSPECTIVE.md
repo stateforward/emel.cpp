@@ -125,12 +125,70 @@
 
 ---
 
+## Milestone: v1.18 - Parity Tool Boundary Refactor
+
+**Shipped:** 2026-05-01
+**Phases:** 5 | **Plans:** 5 | **Sessions:** autonomous execution and closeout
+
+### What Was Built
+
+- A shared paritychecker asset boundary for repo paths, byte loading, and maintained generation
+  fixture resolution.
+- Explicit tokenizer, GBNF, kernel, Jinja, and generation engine adapters behind one runner-facing
+  registration surface.
+- Modular paritychecker CMake source groups shared by the executable and tests.
+- Deterministic `parity_dependency_manifest/v1` records with conservative full-gate semantics for
+  missing, stale, or uncertain data.
+- Lane-isolation source checks and a reference-side byte-token parser that avoids EMEL actor action
+  detail helpers.
+
+### What Worked
+
+- Keeping the runner small made later engine/build/manifest boundaries easy to audit.
+- Focused source checks caught the exact regression risks for this milestone without changing
+  parity output semantics.
+- The archive safety commit before removing `REQUIREMENTS.md` gave a clean recovery point.
+
+### What Was Inefficient
+
+- `gsd-tools init milestone-op` still returned stale `v1.0` metadata, which required manual
+  closeout repair for `STATE.md` and completion commands.
+- Summary one-liner extraction again produced empty accomplishments, so `MILESTONES.md` needed
+  manual cleanup.
+- The quality gate timing snapshot was rewritten by scoped runs and had to be restored repeatedly.
+
+### Patterns Established
+
+- Parity tool refactors should add source-backed boundary tests before moving behavior.
+- Dependency manifests should be conservative evidence only; unknown freshness means run the full
+  relevant gate.
+- Shared runner code should stay free of lane-owned runtime objects; mode engines own lane setup.
+
+### Key Lessons
+
+1. Milestone closeout tooling needs to trust ROADMAP/STATE only after validating the current
+   milestone identity.
+2. Source checks are useful when they target a narrow contract and avoid pretending to prove every
+   future misuse.
+3. Scoped quality gates should avoid persisting timing snapshot churn unless the user explicitly
+   approves a snapshot update.
+
+### Cost Observations
+
+- Model mix: not measured.
+- Sessions: one autonomous execution/closeout session after issue-based milestone initialization.
+- Notable: focused paritychecker tests gave fast confidence for tool-boundary work without running
+  unrelated benchmark suites.
+
+---
+
 ## Cross-Milestone Trends
 
 ### Process Evolution
 
 | Milestone | Sessions | Phases | Key Change |
 |-----------|----------|--------|------------|
+| v1.18 | autonomous execution/closeout | 5 | Paritychecker boundaries became explicit runner, engine, build, manifest, and lane-isolation contracts. |
 | v1.15 | autonomous execution/closeout | 24 | Source-backed audit and recursive profiling became mandatory before milestone archive. |
 | v1.13 | current closeout | 8 | Audit gaps became explicit repair phases before archive. |
 
@@ -138,6 +196,7 @@
 
 | Milestone | Tests | Coverage | Zero-Dep Additions |
 |-----------|-------|----------|-------------------|
+| v1.18 | `paritychecker_tests`, focused paritychecker executable builds, changed-file scoped quality gates | Coverage gate skipped because no `src/emel` files changed | No new runtime dependency in `src/`; manifest records are source-controlled. |
 | v1.15 | Sortformer runtime/parity/benchmark tests plus final scoped quality gate | Line coverage gate preserved; scoped gate timing `246s` | No external runtime dependency in the EMEL lane. |
 | v1.13 | `generation_compare_tests`, focused `bench_runner_tests`, quality gates | 90.4% line coverage at last full gate | No new runtime dependency in `src/`. |
 
@@ -148,3 +207,4 @@
 3. Keep milestone closeout files machine-readable enough for audit tooling.
 4. Treat benchmark performance claims as source-backed claims that must trace through the live
    maintained runtime path.
+5. Treat dependency manifests as conservative gate evidence, never as permissive skip evidence.
