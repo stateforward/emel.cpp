@@ -22,7 +22,7 @@ parity-oriented verification before widening API surface or model scope.
   `stateforward` include path in project-owned code where that path is supported.
 - [x] **SRC-02**: Maintainer can use `stateforward::sml` naming in project-owned source,
   tests, and tools without changing actor behavior.
-- [ ] **SRC-03**: Maintainer can verify that SML transition tables, logger wiring,
+- [x] **SRC-03**: Maintainer can verify that SML transition tables, logger wiring,
   `unexpected_event`, dispatch tables, and state inspection still compile and behave after the
   namespace migration.
 
@@ -76,7 +76,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | DEP-03 | Phase 173 | Complete |
 | SRC-01 | Phase 173 | Complete |
 | SRC-02 | Phase 173 | Complete |
-| SRC-03 | Phase 174 | Pending |
+| SRC-03 | Phase 174 | Complete |
 | DOC-01 | Phase 175 | Pending |
 | DOC-02 | Phase 175 | Pending |
 | DOC-03 | Phase 175 | Pending |
