@@ -12,6 +12,7 @@
 
 #include "../generation_fixture_registry.hpp"
 #include "bench_runner_contract.hpp"
+#include "bench_runner_registry.hpp"
 #include "generation_workload_manifest.hpp"
 
 #if !defined(_WIN32)
@@ -389,6 +390,39 @@ TEST_CASE("bench runner contract rejects malformed process payloads") {
   CHECK_FALSE(emel::bench::parse_runner_result("schema=bench_runner_result/v1\n", result));
   CHECK_FALSE(emel::bench::parse_runner_result(
     "schema=bench_runner_result/v1\nexit_code=bad\n", result));
+}
+
+TEST_CASE("benchmark runner registration is localized outside the orchestrator") {
+  CHECK(emel::bench::registered_runner_count() >= 29u);
+  CHECK(emel::bench::find_registered_runner("generation") != nullptr);
+  CHECK(emel::bench::find_registered_runner("diarization_sortformer") != nullptr);
+  CHECK(emel::bench::find_registered_runner("tokenizer") != nullptr);
+  CHECK(emel::bench::find_registered_runner("missing_suite") == nullptr);
+
+  bool saw_generation = false;
+  bool saw_tokenizer = false;
+  for (std::size_t i = 0; i < emel::bench::registered_runner_count(); ++i) {
+    saw_generation = saw_generation ||
+      emel::bench::registered_runner_suite_at(i) == std::string_view{"generation"};
+    saw_tokenizer = saw_tokenizer ||
+      emel::bench::registered_runner_suite_at(i) == std::string_view{"tokenizer"};
+  }
+  CHECK(saw_generation);
+  CHECK(saw_tokenizer);
+}
+
+TEST_CASE("bench runner orchestration no longer owns broad static registration") {
+  const std::string runner_source =
+      read_file(repo_root() / "tools" / "bench" / "bench_runner.cpp");
+  const std::string registry_source =
+      read_file(repo_root() / "tools" / "bench" / "bench_runner_registry.cpp");
+
+  CHECK(runner_source.find("std::array<bench::test_case") == std::string::npos);
+  CHECK(runner_source.find("append_emel_generation_cases") == std::string::npos);
+  CHECK(runner_source.find("append_reference_generation_cases") == std::string::npos);
+  CHECK(runner_source.find("bench::default_runner_cases()") != std::string::npos);
+  CHECK(registry_source.find("append_emel_generation_cases") != std::string::npos);
+  CHECK(registry_source.find("append_reference_generation_cases") != std::string::npos);
 }
 
 TEST_CASE("generation_stage_probe_emel_path_does_not_bypass_generator_actor") {

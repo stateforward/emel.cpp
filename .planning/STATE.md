@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.19
 milestone_name: Benchmark Tool Pluggable Runner Refactor
 status: phase_in_progress
-stopped_at: "Phase 158 complete; next action is `$gsd-discuss-phase 159`."
-last_updated: "2026-05-01T07:05:00Z"
+stopped_at: "Phase 159 complete; next action is `$gsd-discuss-phase 160`."
+last_updated: "2026-05-01T07:20:00Z"
 last_activity: 2026-05-01
 progress:
   total_phases: 7
-  completed_phases: 2
-  total_plans: 2
-  completed_plans: 2
-  percent: 29
+  completed_phases: 3
+  total_plans: 3
+  completed_plans: 3
+  percent: 43
 ---
 
 # Project State
@@ -26,12 +26,12 @@ verification before widening API surface or model scope.
 
 ## Current Position
 
-Phase: 159 Benchmark Runner Discovery And Registration
+Phase: 160 Benchmark Independent Build Targets
 Plan: -
-Status: Phase 158 complete; Phase 159 not started.
-Last activity: 2026-05-01 - Phase 158 completed
+Status: Phase 159 complete; Phase 160 not started.
+Last activity: 2026-05-01 - Phase 159 completed
 
-Progress: [###-------] 29%
+Progress: [####------] 43%
 
 ## Deferred Items
 
@@ -51,10 +51,10 @@ Items acknowledged and still deferred at milestone close on 2026-05-01:
 
 - Milestone: `v1.19 Benchmark Tool Pluggable Runner Refactor`
 
-- Current planning shape: 7 phases, 13 active requirements mapped; 2 phases complete.
+- Current planning shape: 7 phases, 13 active requirements mapped; 3 phases complete.
 - Latest shipped milestone: `v1.18 Parity Tool Boundary Refactor`.
 
-- Next action: `$gsd-discuss-phase 159` or `$gsd-plan-phase 159`.
+- Next action: `$gsd-discuss-phase 160` or `$gsd-plan-phase 160`.
 - Current blocker: none known.
 
 ## Accumulated Context
@@ -86,6 +86,10 @@ Recent decisions affecting current work:
 
 - Phase 158 completed the runner request/result contract with deterministic serialized process
   seam payloads and malformed-payload tests.
+
+- Phase 159 completed benchmark runner discovery and registration by moving suite metadata into a
+  localized registry, updating the orchestrator to consume registered runner spans, and preserving
+  tokenizer inclusion behavior with focused source checks.
 
 - Phases 161-162 own build-time benchmark dependency manifests and conservative quality-gate
   consumption. Phase 163 closes maintained behavior and lane-isolation proof.

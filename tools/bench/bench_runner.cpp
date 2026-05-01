@@ -1,5 +1,4 @@
 #include <algorithm>
-#include <array>
 #include <cinttypes>
 #include <cstddef>
 #include <cstdint>
@@ -15,6 +14,7 @@
 #include "bench_common.hpp"
 #include "bench_runner_contract.hpp"
 #include "bench_runner.hpp"
+#include "bench_runner_registry.hpp"
 #include "diarization_compare_contract.hpp"
 #include "generation_compare_contract.hpp"
 
@@ -240,120 +240,6 @@ void enforce_compiled_suite_filter() {
   }
 }
 
-constexpr bench::test_case make_test_case(const bench::append_case_fn emel_fn,
-                                          const bench::append_case_fn reference_fn,
-                                          const std::string_view suite,
-                                          const bool tokenizer_case = false) {
-  return bench::test_case{
-    .append_emel = emel_fn,
-    .append_reference = reference_fn,
-    .suite = suite,
-    .tokenizer_case = tokenizer_case,
-  };
-}
-
-const auto & default_test_cases() {
-  static const std::array<bench::test_case, 28> cases = {{
-    make_test_case(bench::append_emel_batch_planner_cases,
-                   bench::append_reference_batch_planner_cases,
-                   "batch_planner"),
-    make_test_case(bench::append_emel_memory_kv_cases,
-                   bench::append_reference_memory_kv_cases,
-                   "memory_kv"),
-    make_test_case(bench::append_emel_memory_recurrent_cases,
-                   bench::append_reference_memory_recurrent_cases,
-                   "memory_recurrent"),
-    make_test_case(bench::append_emel_memory_hybrid_cases,
-                   bench::append_reference_memory_hybrid_cases,
-                   "memory_hybrid"),
-    make_test_case(bench::append_emel_jinja_parser_cases,
-                   bench::append_reference_jinja_parser_cases,
-                   "jinja_parser"),
-    make_test_case(bench::append_emel_jinja_formatter_cases,
-                   bench::append_reference_jinja_formatter_cases,
-                   "jinja_formatter"),
-    make_test_case(bench::append_emel_gbnf_rule_parser_cases,
-                   bench::append_reference_gbnf_rule_parser_cases,
-                   "gbnf_rule_parser"),
-    make_test_case(bench::append_emel_generation_cases,
-                   bench::append_reference_generation_cases,
-                   "generation"),
-    make_test_case(bench::append_emel_sortformer_diarization_cases,
-                   bench::append_reference_sortformer_diarization_cases,
-                   "diarization_sortformer"),
-    make_test_case(bench::append_emel_flash_attention_cases,
-                   bench::append_reference_flash_attention_cases,
-                   "flash_attention"),
-    make_test_case(bench::append_emel_logits_validator_cases,
-                   bench::append_reference_logits_validator_cases,
-                   "logits_validator"),
-    make_test_case(bench::append_emel_logits_sampler_cases,
-                   bench::append_reference_logits_sampler_cases,
-                   "logits_sampler"),
-    make_test_case(bench::append_emel_kernel_x86_64_cases,
-                   bench::append_reference_kernel_x86_64_cases,
-                   "kernel_x86_64"),
-    make_test_case(bench::append_emel_kernel_aarch64_cases,
-                   bench::append_reference_kernel_aarch64_cases,
-                   "kernel_aarch64"),
-    make_test_case(bench::append_emel_sm_any_cases,
-                   bench::append_reference_sm_any_cases,
-                   "sm_any"),
-    make_test_case(bench::append_emel_tokenizer_preprocessor_bpe_cases,
-                   bench::append_reference_tokenizer_preprocessor_bpe_cases,
-                   "tokenizer_preprocessor_bpe"),
-    make_test_case(bench::append_emel_tokenizer_preprocessor_spm_cases,
-                   bench::append_reference_tokenizer_preprocessor_spm_cases,
-                   "tokenizer_preprocessor_spm"),
-    make_test_case(bench::append_emel_tokenizer_preprocessor_ugm_cases,
-                   bench::append_reference_tokenizer_preprocessor_ugm_cases,
-                   "tokenizer_preprocessor_ugm"),
-    make_test_case(bench::append_emel_tokenizer_preprocessor_wpm_cases,
-                   bench::append_reference_tokenizer_preprocessor_wpm_cases,
-                   "tokenizer_preprocessor_wpm"),
-    make_test_case(bench::append_emel_tokenizer_preprocessor_rwkv_cases,
-                   bench::append_reference_tokenizer_preprocessor_rwkv_cases,
-                   "tokenizer_preprocessor_rwkv"),
-    make_test_case(bench::append_emel_tokenizer_preprocessor_plamo2_cases,
-                   bench::append_reference_tokenizer_preprocessor_plamo2_cases,
-                   "tokenizer_preprocessor_plamo2"),
-    make_test_case(bench::append_emel_encoder_bpe_cases,
-                   bench::append_reference_encoder_bpe_cases,
-                   "encoder_bpe"),
-    make_test_case(bench::append_emel_encoder_spm_cases,
-                   bench::append_reference_encoder_spm_cases,
-                   "encoder_spm"),
-    make_test_case(bench::append_emel_encoder_wpm_cases,
-                   bench::append_reference_encoder_wpm_cases,
-                   "encoder_wpm"),
-    make_test_case(bench::append_emel_encoder_ugm_cases,
-                   bench::append_reference_encoder_ugm_cases,
-                   "encoder_ugm"),
-    make_test_case(bench::append_emel_encoder_rwkv_cases,
-                   bench::append_reference_encoder_rwkv_cases,
-                   "encoder_rwkv"),
-    make_test_case(bench::append_emel_encoder_plamo2_cases,
-                   bench::append_reference_encoder_plamo2_cases,
-                   "encoder_plamo2"),
-    make_test_case(bench::append_emel_encoder_fallback_cases,
-                   bench::append_reference_encoder_fallback_cases,
-                   "encoder_fallback"),
-  }};
-  return cases;
-}
-
-const auto & kernel_test_cases() {
-  static const std::array<bench::test_case, 2> cases = {{
-    make_test_case(bench::append_emel_kernel_x86_64_cases,
-                   bench::append_reference_kernel_x86_64_cases,
-                   "kernel_x86_64"),
-    make_test_case(bench::append_emel_kernel_aarch64_cases,
-                   bench::append_reference_kernel_aarch64_cases,
-                   "kernel_aarch64"),
-  }};
-  return cases;
-}
-
 void print_benchmark_config(const bench::config & cfg) {
   const auto generation_iterations = read_env_u64("EMEL_BENCH_GENERATION_ITERS", 1u);
   const auto generation_runs = read_env_size("EMEL_BENCH_GENERATION_RUNS", cfg.runs);
@@ -376,13 +262,12 @@ void print_benchmark_config(const bench::config & cfg) {
               generation_warmup_runs);
 }
 
-template <size_t k_case_count>
 std::vector<bench::result> run_benchmarks(const bench::config & cfg,
-                                          const std::array<bench::test_case, k_case_count> & cases,
+                                          const std::span<const bench::test_case> cases,
                                           const bool reference,
                                           const bool include_tokenizer) {
   std::vector<bench::result> results;
-  results.reserve(k_case_count + 1);
+  results.reserve(cases.size());
   const std::int32_t selected_case_index = read_env_i32("EMEL_BENCH_CASE_INDEX", -1);
   const char * selected_suite = std::getenv("EMEL_BENCH_SUITE");
   const bool filter_by_suite = selected_suite != nullptr && selected_suite[0] != '\0';
@@ -405,29 +290,6 @@ std::vector<bench::result> run_benchmarks(const bench::config & cfg,
       continue;
     }
     bench::append_test_case(results, cfg, tc, reference);
-  }
-
-  if (include_tokenizer) {
-    const bool selected_tokenizer = selected_case_index < 0 ||
-      selected_case_index == static_cast<std::int32_t>(k_case_count);
-    const bool selected_tokenizer_suite = !filter_by_suite ||
-      std::string_view{"tokenizer"} == selected_suite;
-    suite_seen = suite_seen || selected_tokenizer_suite;
-    if (!selected_tokenizer) {
-      if (filter_by_suite && !suite_seen) {
-        std::fprintf(stderr, "error: unknown benchmark suite '%s'\n", selected_suite);
-        std::exit(1);
-      }
-      return results;
-    }
-    const bench::test_case tokenizer_case = make_test_case(
-      bench::append_emel_tokenizer_cases,
-      bench::append_reference_tokenizer_cases,
-      "tokenizer",
-      true);
-    if (selected_tokenizer_suite) {
-      bench::append_test_case(results, cfg, tokenizer_case, reference);
-    }
   }
 
   if (filter_by_suite && !suite_seen) {
@@ -1043,27 +905,32 @@ int emel::bench::run_bench_cli(int argc, char ** argv) {
   }
 
   if (request.mode == bench::runner_mode::kernel_emel) {
-    const auto results = run_benchmarks(request.cfg, kernel_test_cases(), false, false);
+    const auto results =
+      run_benchmarks(request.cfg, bench::kernel_runner_cases(), false, false);
     print_snapshot(results, request.cfg);
     return 0;
   }
 
   if (request.mode == bench::runner_mode::kernel_reference) {
-    const auto results = run_benchmarks(request.cfg, kernel_test_cases(), true, false);
+    const auto results =
+      run_benchmarks(request.cfg, bench::kernel_runner_cases(), true, false);
     print_snapshot(results, request.cfg);
     return 0;
   }
 
   if (request.mode == bench::runner_mode::kernel_compare) {
-    const auto emel_results = run_benchmarks(request.cfg, kernel_test_cases(), false, false);
-    const auto ref_results = run_benchmarks(request.cfg, kernel_test_cases(), true, false);
+    const auto emel_results =
+      run_benchmarks(request.cfg, bench::kernel_runner_cases(), false, false);
+    const auto ref_results =
+      run_benchmarks(request.cfg, bench::kernel_runner_cases(), true, false);
     print_compare(emel_results, ref_results, request.cfg);
     return 0;
   }
 
   if (request.mode == bench::runner_mode::emel) {
     bench::set_generation_lane_mode(bench::generation_lane_mode::emel);
-    const auto results = run_benchmarks(request.cfg, default_test_cases(), false, true);
+    const auto results =
+      run_benchmarks(request.cfg, bench::default_runner_cases(), false, true);
     if (request.generation_jsonl) {
       print_generation_jsonl(results);
     } else if (request.diarization_jsonl) {
@@ -1076,7 +943,8 @@ int emel::bench::run_bench_cli(int argc, char ** argv) {
 
   if (request.mode == bench::runner_mode::reference) {
     bench::set_generation_lane_mode(bench::generation_lane_mode::reference);
-    const auto results = run_benchmarks(request.cfg, default_test_cases(), true, true);
+    const auto results =
+      run_benchmarks(request.cfg, bench::default_runner_cases(), true, true);
     if (request.generation_jsonl) {
       print_generation_jsonl(results);
     } else if (request.diarization_jsonl) {
@@ -1088,8 +956,10 @@ int emel::bench::run_bench_cli(int argc, char ** argv) {
   }
 
   bench::set_generation_lane_mode(bench::generation_lane_mode::compare);
-  const auto emel_results = run_benchmarks(request.cfg, default_test_cases(), false, true);
-  const auto ref_results = run_benchmarks(request.cfg, default_test_cases(), true, true);
+  const auto emel_results =
+    run_benchmarks(request.cfg, bench::default_runner_cases(), false, true);
+  const auto ref_results =
+    run_benchmarks(request.cfg, bench::default_runner_cases(), true, true);
   print_compare(emel_results, ref_results, request.cfg);
   return 0;
 }

@@ -162,10 +162,12 @@ set(BENCH_RUNNER_SOURCES
   ${CMAKE_CURRENT_SOURCE_DIR}/bench_common.hpp
   ${CMAKE_CURRENT_SOURCE_DIR}/bench_runner_contract.hpp
   ${CMAKE_CURRENT_SOURCE_DIR}/bench_runner.hpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/bench_runner_registry.hpp
   ${CMAKE_CURRENT_SOURCE_DIR}/kernel/bench_common.hpp
   ${CMAKE_CURRENT_SOURCE_DIR}/logits/bench_common.hpp
   ${CMAKE_CURRENT_SOURCE_DIR}/bench_main.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/bench_runner.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/bench_runner_registry.cpp
 )
 if(EMEL_BENCH_NEEDS_LLAMA)
   list(APPEND BENCH_RUNNER_SOURCES
@@ -313,6 +315,8 @@ endif()
 
 add_executable(bench_runner_tests
   ${CMAKE_CURRENT_SOURCE_DIR}/bench_runner_tests.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/bench_disabled_cases.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/bench_runner_registry.cpp
 )
 
 add_dependencies(bench_runner_tests bench_runner)

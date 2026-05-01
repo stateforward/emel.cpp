@@ -58,7 +58,7 @@ manifests.
   orchestrator boundary for common config, asset, request, and report handling.
 - [x] **Phase 158: Benchmark Runner Contract And Process Seam** - Define the narrow runner
   request/result contract and process-level extension seam.
-- [ ] **Phase 159: Benchmark Runner Discovery And Registration** - Replace broad static case
+- [x] **Phase 159: Benchmark Runner Discovery And Registration** - Replace broad static case
   registration with localized runner metadata/discovery.
 - [ ] **Phase 160: Benchmark Independent Build Targets** - Split CMake/build wiring so runners can
   build independently and additions stay local.
@@ -128,7 +128,10 @@ the orchestrator no longer needs compile-time knowledge of every runner implemen
 4. A test runner proves registration stays local to runner-owned files.
 5. Existing operator-facing benchmark selection still resolves maintained benchmark families.
 
-**Status:** Pending.
+**Status:** Complete. Phase 159 moved suite metadata into
+`tools/bench/bench_runner_registry.hpp` / `.cpp`, updated the orchestrator to consume registered
+default and kernel runner spans, preserved tokenizer inclusion filtering, and added focused tests
+for deterministic lookup and registration ownership.
 
 ### Phase 160: Benchmark Independent Build Targets
 

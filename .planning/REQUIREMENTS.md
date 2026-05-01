@@ -91,7 +91,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | ORCH-02 | Phase 163 | Pending |
 | RUNNER-01 | Phase 158 | Complete |
 | RUNNER-02 | Phase 158 | Complete |
-| DISC-01 | Phase 159 | Pending |
+| DISC-01 | Phase 159 | Complete |
 | BUILD-01 | Phase 160 | Pending |
 | BUILD-02 | Phase 160 | Pending |
 | MANIFEST-01 | Phase 161 | Pending |
