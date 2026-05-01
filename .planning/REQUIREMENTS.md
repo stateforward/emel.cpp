@@ -1,0 +1,94 @@
+# Requirements: EMEL v1.20 SML Dependency And Namespace Migration
+
+**Defined:** 2026-05-01
+**Source:** GitHub issue #56
+**Core Value:** Prove real end-to-end behavior with explicit SML orchestration and
+parity-oriented verification before widening API surface or model scope.
+
+## v1 Requirements
+
+### Dependency Pin
+
+- [ ] **DEP-01**: Maintainer can identify the current EMEL SML pin and the intended newer
+  `stateforward/sml.cpp` upstream commit before changing the dependency.
+- [ ] **DEP-02**: Maintainer can build EMEL against the intended newer `stateforward/sml.cpp`
+  commit pinned in `cmake/sml_version.cmake`.
+- [ ] **DEP-03**: Maintainer can explain whether EMEL relies on any upstream legacy
+  `boost::sml` compatibility shim, with each exception documented and bounded.
+
+### Source Migration
+
+- [ ] **SRC-01**: Maintainer can include SML through the preferred upstream
+  `stateforward` include path in project-owned code where that path is supported.
+- [ ] **SRC-02**: Maintainer can use `stateforward::sml` naming in project-owned source,
+  tests, and tools without changing actor behavior.
+- [ ] **SRC-03**: Maintainer can verify that SML transition tables, logger wiring,
+  `unexpected_event`, dispatch tables, and state inspection still compile and behave after the
+  namespace migration.
+
+### Documentation And Rules
+
+- [ ] **DOC-01**: Contributor-facing rules describe the `stateforward::sml` namespace and
+  preferred include path instead of instructing new work to use legacy `boost::sml` naming.
+- [ ] **DOC-02**: Project documentation, examples, generated-doc tooling, and planning
+  artifacts no longer create conflicting SML namespace guidance.
+- [ ] **DOC-03**: Any remaining historical `boost::sml` references are clearly archival,
+  quoted, or intentionally exempted from active contributor guidance.
+
+### Validation And Guardrails
+
+- [ ] **VAL-01**: Maintainer can run focused and changed-file scoped quality gates proving the
+  dependency bump and namespace migration preserve maintained runtime behavior.
+- [ ] **VAL-02**: Maintainer can run source checks that fail on new unapproved legacy
+  `boost::sml` includes or namespace references in active project-owned code/docs.
+- [ ] **VAL-03**: Maintainer can close the milestone only after source-backed audit evidence
+  proves all active SML migration requirements are satisfied.
+
+## v2 Requirements
+
+Deferred to future releases. Tracked but not in current roadmap.
+
+### SML Surface Expansion
+
+- **SML-EXT-01**: Maintainer can adopt new upstream SML features beyond namespace/include
+  migration when a future milestone has a behavior-specific need.
+- **SML-EXT-02**: Maintainer can remove any explicitly bounded compatibility exception after the
+  active codebase no longer needs it.
+
+## Out of Scope
+
+| Feature | Reason |
+|---------|--------|
+| Runtime behavior redesign | Issue #56 is a dependency/API-surface migration, not a new actor semantics milestone. |
+| Queue/mailbox actor patterns | The existing no-queue RTC invariant remains in force. |
+| New model-family support | The namespace migration should not broaden runtime/model scope. |
+| Performance claims unrelated to the migration | Existing parity and benchmark proof must be preserved, not repurposed for new claims. |
+| Linking EMEL to llama.cpp or ggml runtime paths | Existing EMEL/reference lane isolation remains unchanged. |
+
+## Traceability
+
+Which phases cover which requirements. Updated during roadmap creation.
+
+| Requirement | Phase | Status |
+|-------------|-------|--------|
+| DEP-01 | Phase 167 | Pending |
+| DEP-02 | Phase 167 | Pending |
+| DEP-03 | Phase 167 | Pending |
+| SRC-01 | Phase 168 | Pending |
+| SRC-02 | Phase 168 | Pending |
+| SRC-03 | Phase 169 | Pending |
+| DOC-01 | Phase 170 | Pending |
+| DOC-02 | Phase 170 | Pending |
+| DOC-03 | Phase 170 | Pending |
+| VAL-01 | Phase 171 | Pending |
+| VAL-02 | Phase 171 | Pending |
+| VAL-03 | Phase 172 | Pending |
+
+**Coverage:**
+- v1 requirements: 12 total
+- Mapped to phases: 12
+- Unmapped: 0
+
+---
+*Requirements defined: 2026-05-01*
+*Last updated: 2026-05-01 after initial v1.20 definition*
