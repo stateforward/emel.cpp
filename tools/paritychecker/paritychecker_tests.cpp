@@ -18,6 +18,7 @@
 #include "../generation_formatter_contract.hpp"
 #include "../generation_fixture_registry.hpp"
 #include "parity_assets.hpp"
+#include "parity_engine.hpp"
 
 #if !defined(_WIN32)
 #include <sys/wait.h>
@@ -719,7 +720,7 @@ TEST_CASE("parity assets own common runner file helpers") {
   CHECK_FALSE(bytes.empty());
 
   const std::string source =
-      read_text_file(repo_root_dir() / "tools" / "paritychecker" / "parity_runner.cpp");
+      read_text_file(repo_root_dir() / "tools" / "paritychecker" / "parity_engines.cpp");
   REQUIRE_FALSE(source.empty());
   CHECK(source.find("#include \"parity_assets.hpp\"") != std::string::npos);
   CHECK(source.find("bool file_exists(") == std::string::npos);
@@ -727,6 +728,38 @@ TEST_CASE("parity assets own common runner file helpers") {
   CHECK(source.find("const maintained_generation_fixture * find_generation_fixture(") ==
         std::string::npos);
   CHECK(source.find("std::string maintained_generation_fixture_list(") == std::string::npos);
+}
+
+TEST_CASE("parity runner dispatches through explicit engine adapters") {
+  const auto assert_engine =
+      [](const emel::paritychecker::parity_mode mode, const std::string_view name) {
+        const emel::paritychecker::engine_adapter * engine =
+            emel::paritychecker::find_engine(mode);
+        REQUIRE(engine != nullptr);
+        CHECK(engine->mode == mode);
+        CHECK(engine->name == name);
+        CHECK(engine->run != nullptr);
+      };
+
+  assert_engine(emel::paritychecker::parity_mode::tokenizer, "tokenizer");
+  assert_engine(emel::paritychecker::parity_mode::gbnf_parser, "gbnf_parser");
+  assert_engine(emel::paritychecker::parity_mode::kernel, "kernel");
+  assert_engine(emel::paritychecker::parity_mode::jinja, "jinja");
+  assert_engine(emel::paritychecker::parity_mode::generation, "generation");
+  CHECK(emel::paritychecker::find_engine(
+            static_cast<emel::paritychecker::parity_mode>(255)) == nullptr);
+
+  const std::string runner_source =
+      read_text_file(repo_root_dir() / "tools" / "paritychecker" / "parity_runner.cpp");
+  REQUIRE_FALSE(runner_source.empty());
+  CHECK(runner_source.find("find_engine(opts.mode)") != std::string::npos);
+  CHECK(runner_source.find("run_generation_harness_contract") == std::string::npos);
+  CHECK(runner_source.find("run_gbnf_parser_parity") == std::string::npos);
+  CHECK(runner_source.find("run_kernel_parity") == std::string::npos);
+  CHECK(runner_source.find("run_jinja_parity") == std::string::npos);
+  CHECK(runner_source.find("run_tokenizer_parity") == std::string::npos);
+  CHECK(runner_source.find("#include \"llama") == std::string::npos);
+  CHECK(runner_source.find("#include \"ggml") == std::string::npos);
 }
 
 TEST_CASE("paritychecker sources do not bridge into text generator actor internals") {

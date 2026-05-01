@@ -46,7 +46,7 @@ preserving existing parity behavior and EMEL/reference lane isolation.
 
 - [x] **Phase 148: Parity Runner Asset Boundary** - Establish the shared runner boundary and
   centralize asset/config/fixture normalization without changing mode behavior.
-- [ ] **Phase 149: Parity Engine Adapter Split** - Move tokenizer, GBNF, kernel, Jinja, and
+- [x] **Phase 149: Parity Engine Adapter Split** - Move tokenizer, GBNF, kernel, Jinja, and
   generation mode implementations behind explicit engine adapters.
 - [ ] **Phase 150: Parity Build Registration Boundary** - Make CMake and source registration
   modular enough for localized future engine additions.
@@ -94,7 +94,10 @@ explicit runner-facing engine adapters so the runner stops containing bulk per-m
 4. Tests fail if parity harnesses reach directly into actor action/guard/detail helpers.
 5. Changed-file scoped quality gates pass for paritychecker code touched by the adapter split.
 
-**Status:** Pending.
+**Status:** Complete. Phase 149 moved the existing bulk parity mode implementation into
+`parity_engines.cpp`, added explicit `engine_adapter` metadata and per-mode adapter entrypoints,
+and reduced `parity_runner.cpp` to orchestration through `find_engine(opts.mode)`. Focused
+paritychecker builds/tests and the changed-file scoped quality gate passed.
 
 ### Phase 150: Parity Build Registration Boundary
 

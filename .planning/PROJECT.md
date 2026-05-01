@@ -25,7 +25,7 @@ Status: `v1.18` is initialized from GitHub issue #54. The milestone will refacto
 modular build wiring, and per-runner dependency manifests while preserving existing parity
 behavior.
 
-Current planning focus: plan and execute Phase 149.
+Current planning focus: plan and execute Phase 150.
 
 ## Current Milestone: v1.18 Parity Tool Boundary Refactor
 
@@ -320,7 +320,7 @@ truth anchor and without broadening into generic Liquid-family support.
 
 ### Active
 
-- [ ] Plan and execute Phase 149 for the v1.18 parity engine adapter split.
+- [ ] Plan and execute Phase 150 for the v1.18 parity build registration boundary.
 - [ ] Preserve existing parity mode behavior while splitting runner, engine, build-registration,
   and dependency-manifest responsibilities.
 - [ ] Prove EMEL/reference lane isolation remains explicit and enforceable after the refactor.

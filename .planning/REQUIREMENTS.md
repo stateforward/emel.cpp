@@ -11,7 +11,7 @@ parity-oriented verification before widening API surface or model scope.
 
 - [x] **PARITY-01**: `tools/paritychecker` has a shared runner boundary that owns CLI/config
   parsing, asset resolution, fixture normalization, lane invocation, and result normalization.
-- [ ] **PARITY-02**: The shared runner no longer contains bulk per-mode parity implementation for
+- [x] **PARITY-02**: The shared runner no longer contains bulk per-mode parity implementation for
   tokenizer, GBNF, kernel, Jinja, or generation modes.
 - [ ] **PARITY-03**: Existing parity modes preserve their current user-facing behavior, maintained
   fixtures, output schemas, and failure semantics unless a change is explicitly documented and
@@ -19,7 +19,7 @@ parity-oriented verification before widening API surface or model scope.
 
 ### Engine Interfaces
 
-- [ ] **ENGINE-01**: Mode-specific parity logic is isolated behind explicit runner-facing engine
+- [x] **ENGINE-01**: Mode-specific parity logic is isolated behind explicit runner-facing engine
   interfaces or adapters with narrow ownership of that mode's EMEL and reference execution.
 - [ ] **ENGINE-02**: Adding a future parity engine requires localized registration and adapter
   implementation instead of broad edits through unrelated modes or runner internals.
@@ -73,9 +73,9 @@ parity-oriented verification before widening API surface or model scope.
 | Requirement | Phase | Status |
 |-------------|-------|--------|
 | PARITY-01 | Phase 148 | Complete |
-| PARITY-02 | Phase 149 | Pending |
+| PARITY-02 | Phase 149 | Complete |
 | PARITY-03 | Phase 152 | Pending |
-| ENGINE-01 | Phase 149 | Pending |
+| ENGINE-01 | Phase 149 | Complete |
 | ENGINE-02 | Phase 150 | Pending |
 | LANE-01 | Phase 148 | Complete |
 | LANE-02 | Phase 152 | Pending |
@@ -89,8 +89,8 @@ parity-oriented verification before widening API surface or model scope.
 - Active requirements: 12 total
 - Mapped to phases: 12
 - Unmapped: 0
-- Complete: 2
-- Pending: 10
+- Complete: 4
+- Pending: 8
 
-**Last updated:** 2026-05-01 after Phase 148 established the parity asset boundary and passed
-focused paritychecker tests plus the changed-file scoped quality gate.
+**Last updated:** 2026-05-01 after Phase 149 split runner orchestration from parity engine
+implementation and passed focused paritychecker tests plus the changed-file scoped quality gate.
