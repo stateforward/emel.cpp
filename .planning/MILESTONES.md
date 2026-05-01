@@ -1,6 +1,6 @@
 # Project Milestones: EMEL
 
-## v1.17 Text Generator Domain Alignment (Ready To Complete: 2026-04-30)
+## v1.17 Text Generator Domain Alignment (Shipped: 2026-04-30)
 
 **Phases completed:** 18 phases, including Phase 147 final gap closure.
 

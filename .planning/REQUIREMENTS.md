@@ -1,79 +1,95 @@
-# Requirements: v1.17 Text Generator Domain Alignment
+# Requirements: v1.18 Parity Tool Boundary Refactor
 
-**Defined:** 2026-04-28
+**Defined:** 2026-05-01
+**Source:** GitHub issue #54, "Refactor parity tool for cleaner boundaries and pluggable engines"
 **Core Value:** Prove real end-to-end behavior with explicit SML orchestration and
 parity-oriented verification before widening API surface or model scope.
-**Closed after reopen:** 2026-04-30. Phase 147 removed the final source-backed `TEXTGEN-04` /
-`TEXTGEN-07` blocker by making maintained graph validation, bind, and extract callbacks
-guard-accepted only; they no longer reject graph execution or write callback error state through
-`err_out`.
 
 ## Active Requirements
 
-### Domain Ownership
+### Runner Boundary
 
-- [x] **TEXTGEN-01**: Maintainer can find the canonical generative text actor under
-  `src/emel/text/generator/**`, with canonical namespace and machine type
-  `emel::text::generator::sm`.
-- [x] **TEXTGEN-02**: Maintainer can verify no canonical production source remains under
-  `src/emel/generator/**`, and any temporary compatibility surface is explicit, non-owning, and
-  documented.
+- [ ] **PARITY-01**: `tools/paritychecker` has a shared runner boundary that owns CLI/config
+  parsing, asset resolution, fixture normalization, lane invocation, and result normalization.
+- [ ] **PARITY-02**: The shared runner no longer contains bulk per-mode parity implementation for
+  tokenizer, GBNF, kernel, Jinja, or generation modes.
+- [ ] **PARITY-03**: Existing parity modes preserve their current user-facing behavior, maintained
+  fixtures, output schemas, and failure semantics unless a change is explicitly documented and
+  approved.
 
-### Actor Move
+### Engine Interfaces
 
-- [x] **TEXTGEN-03**: Existing generation entrypoints, paritychecker, benchmarks, and
-  embedded-size probes build against the new `text/generator` ownership without changing
-  request/output behavior.
-- [x] **TEXTGEN-04**: Generator initializer and prefill child actors move with the parent under
-  `text/generator/**` while preserving destination-first Boost.SML transition tables and no-queue
-  RTC semantics.
-- [x] **TEXTGEN-05**: Generator tests live under `tests/text/generator/**` or otherwise explicitly
-  validate the text-domain generator namespace, includes, SML states, callbacks, and error paths.
+- [ ] **ENGINE-01**: Mode-specific parity logic is isolated behind explicit runner-facing engine
+  interfaces or adapters with narrow ownership of that mode's EMEL and reference execution.
+- [ ] **ENGINE-02**: Adding a future parity engine requires localized registration and adapter
+  implementation instead of broad edits through unrelated modes or runner internals.
 
-### Proof
+### Lane Isolation
 
-- [x] **TEXTGEN-06**: Domain-boundary checks fail on reintroduced `emel/generator` includes,
-  `src/emel/generator` paths, or `namespace emel::generator` ownership outside an approved
-  compatibility header.
-- [x] **TEXTGEN-07**: Existing generation parity and benchmark proof remains source-backed and
-  lane-isolated after the move; no new model family, fixture, sampling policy, or performance
-  claim is introduced by the refactor.
+- [ ] **LANE-01**: EMEL and reference lanes construct and own their model, vocab, tokenizer,
+  formatter, runtime, cache, and output state separately.
+- [ ] **LANE-02**: Tests or source checks fail if shared runner code reuses reference-created lane
+  objects in the EMEL lane or reaches into actor `actions.hpp`, `guards.hpp`, or `detail.hpp`
+  helpers directly.
+
+### Build And Registration
+
+- [ ] **BUILD-01**: `tools/paritychecker` CMake wiring exposes modular runner and engine build
+  boundaries instead of one monolithic mode implementation target.
+- [ ] **BUILD-02**: Engine registration is explicit and auditable from build/source structure, with
+  no hidden runtime fallback that silently changes which engine executes.
+
+### Dependency Manifests
+
+- [ ] **MANIFEST-01**: Each parity runner emits or maintains a per-runner dependency manifest that
+  names the source, config, fixture, model, and script inputs needed for conservative gate impact
+  detection.
+- [ ] **MANIFEST-02**: Missing, stale, or uncertain manifest data is treated as a reason to run the
+  relevant full parity gate, not as a reason to skip it.
+- [ ] **MANIFEST-03**: Manifest format and generation are documented well enough for later quality
+  gate work to consume without weakening mandatory parity behavior.
 
 ## Future Requirements
 
-- **TEXTGEN-F01**: Decode and sampler submachine extraction can be planned after the text-domain
-  move is stable.
-- **TEXTGEN-F02**: Public generation C ABI expansion can be planned separately after the canonical
-  text generator ownership is settled.
+- **PARITY-F01**: Out-of-process or foreign-language parity engines can be implemented after the
+  in-process adapter boundary is stable.
+- **PARITY-F02**: Quality-gate optimization that consumes dependency manifests can be planned
+  separately after manifest production is source-backed.
+- **PARITY-F03**: Benchmark runner dependency manifests are deferred to the benchmark tooling
+  milestone tracked outside issue #54.
 
 ## Out of Scope
 
 | Feature | Reason |
 |---------|--------|
-| New generation model family support | This milestone is an ownership refactor, not a model-scope widening. |
-| Sampling, formatter, tokenizer, or decode semantic changes | Behavior must remain stable while ownership moves. |
-| Performance optimization | Existing benchmark/parity proof must remain truthful, but this milestone does not tune kernels. |
-| Broad `text/forward` extraction | A shared hidden-state forward domain is only justified when multiple top-level contracts need it. |
+| New parity semantics or new model-family support | This milestone refactors tool boundaries and must preserve existing behavior. |
+| Benchmark runner refactor | GitHub issue #54 is scoped to paritychecker; benchmark tooling has separate follow-on work. |
+| Quality-gate skip optimization | v1.18 produces conservative manifest truth, but gate selection changes should be validated separately. |
+| Replacing EMEL-owned runtime paths with tool-local fallbacks | Parity proof must continue to drive maintained EMEL lanes through public entrypoints. |
+| Public C API changes | The parity tool boundary can move without widening runtime API surface. |
 
 ## Traceability
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| TEXTGEN-01 | Phase 140 | Complete |
-| TEXTGEN-02 | Phase 135 | Complete |
-| TEXTGEN-03 | Phase 136 | Complete |
-| TEXTGEN-04 | Phase 147 | Complete |
-| TEXTGEN-05 | Phase 141 | Complete |
-| TEXTGEN-06 | Phase 140 | Complete |
-| TEXTGEN-07 | Phase 147 | Complete |
+| PARITY-01 | Phase 148 | Pending |
+| PARITY-02 | Phase 149 | Pending |
+| PARITY-03 | Phase 152 | Pending |
+| ENGINE-01 | Phase 149 | Pending |
+| ENGINE-02 | Phase 150 | Pending |
+| LANE-01 | Phase 148 | Pending |
+| LANE-02 | Phase 152 | Pending |
+| BUILD-01 | Phase 150 | Pending |
+| BUILD-02 | Phase 150 | Pending |
+| MANIFEST-01 | Phase 151 | Pending |
+| MANIFEST-02 | Phase 151 | Pending |
+| MANIFEST-03 | Phase 151 | Pending |
 
 **Coverage:**
-- Active requirements: 7 total
-- Mapped to phases: 7
+- Active requirements: 12 total
+- Mapped to phases: 12
 - Unmapped: 0
-- Complete: 7
-- Pending: 0
+- Complete: 0
+- Pending: 12
 
-**Last updated:** 2026-04-30 after Phase 147 graph callback outcome ownership closure passed
-focused tests, domain-boundary checks, paritychecker, generation benchmark evidence, and the
-changed-file scoped quality gate.
+**Last updated:** 2026-05-01 after initializing v1.18 from GitHub issue #54.

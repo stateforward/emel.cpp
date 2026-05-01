@@ -1,41 +1,40 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.17
-milestone_name: Text Generator Domain Alignment
-status: pr_opened
-stopped_at: PR #75 opened for v1.17; awaiting review and CI
-last_updated: "2026-04-30T19:56:44Z"
-last_activity: 2026-04-30
+milestone: v1.18
+milestone_name: Parity Tool Boundary Refactor
+status: ready_to_plan
+stopped_at: Milestone v1.18 initialized from GitHub issue #54; Phase 148 ready to plan
+last_updated: "2026-05-01T00:00:00Z"
+last_activity: 2026-05-01
 progress:
-  total_phases: 4
-  completed_phases: 4
-  total_plans: 4
-  completed_plans: 4
-  percent: 100
+  total_phases: 5
+  completed_phases: 0
+  total_plans: 0
+  completed_plans: 0
+  percent: 0
 ---
 
 # Project State
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-04-28)
+See: .planning/PROJECT.md (updated 2026-05-01)
 
 **Core value:** Prove real end-to-end behavior with explicit SML orchestration and parity-oriented
 verification before widening API surface or model scope.
-**Current focus:** Review and merge PR #75 for v1.17 after the Phase 147 full gate and audit pass.
+**Current focus:** Plan Phase 148 for v1.18, starting the GitHub issue #54 paritychecker boundary
+refactor.
 
 ## Current Position
 
-Phase: 147
-Plan: 147-01 complete
-Status: Phase 147 closed the sixth source-backed audit blocker for `TEXTGEN-04` and `TEXTGEN-07`.
-Maintained graph validation, bind, and extract callbacks are now guard-accepted execution
-callbacks, and source regressions prove the old detail callback outcome path is no longer wired.
-The required full closeout quality gate and final source-backed milestone audit both passed. PR #75
-is open for review.
-Last activity: 2026-04-30
+Phase: 148
+Plan: —
+Status: v1.18 requirements and roadmap are defined from GitHub issue #54. The next step is to plan
+the shared parity runner asset boundary before splitting engines, build registration, dependency
+manifests, and closeout proof.
+Last activity: 2026-05-01 — Milestone v1.18 started
 
-Progress: [##########] 100%
+Progress: [----------] 0%
 
 ## Deferred Items
 
@@ -51,17 +50,15 @@ Items acknowledged and still deferred at milestone close on 2026-04-26:
 
 ## Performance Metrics
 
-**Latest reopened milestone:**
+**Current milestone:**
 
-- Milestone: v1.17 Text Generator Domain Alignment
+- Milestone: v1.18 Parity Tool Boundary Refactor
 
-- Current planning shape: Phase 147 complete; full closeout gate passed; source-backed audit
-  passed.
-- Latest shipped milestone: `v1.16 ARM Whisper GGUF Parity And Performance`.
+- Current planning shape: phases 148-152 defined; Phase 148 ready to plan.
+- Latest shipped milestone: `v1.17 Text Generator Domain Alignment`.
 
-- Next action: review/merge PR #75, then `$gsd-complete-milestone`.
-- Current blocker: none known in source, full-gate validation, or final source-backed audit after
-  Phase 147.
+- Next action: `$gsd-plan-phase 148`.
+- Current blocker: none known; no implementation has started for v1.18.
 
 ## Accumulated Context
 
@@ -69,6 +66,16 @@ Items acknowledged and still deferred at milestone close on 2026-04-26:
 
 Decisions are logged in PROJECT.md Key Decisions table.
 Recent decisions affecting current work:
+
+- `v1.18` starts from GitHub issue #54 and targets paritychecker runner/engine/build/manifest
+  boundaries rather than new parity semantics.
+
+- The paritychecker refactor must preserve EMEL/reference lane isolation: no shared
+  model/vocab/tokenizer/runtime/cache objects across lanes and no actor-internal helper calls from
+  parity harnesses.
+
+- Missing, stale, or uncertain parity dependency manifests must trigger the relevant full parity
+  gate; manifest data cannot be used as a permissive skip by default.
 
 - `v1.15` targets one maintained ARM diarization slice for
   `openresearchtools/diar_streaming_sortformer_4spk-v2.1-gguf`.
@@ -389,7 +396,6 @@ Recent decisions affecting current work:
 
 ## Session Continuity
 
-Last session: 2026-04-30T19:23:23Z
-Stopped at: completed Phase 147 gap closure and full closeout gate for v1.17; next action is
-`$gsd-audit-milestone`.
+Last session: 2026-05-01T00:00:00Z
+Stopped at: initialized v1.18 from GitHub issue #54; next action is `$gsd-plan-phase 148`.
 Resume file: None
