@@ -411,6 +411,36 @@ process_capture run_generation_paritychecker_capture_with_args(
   return capture;
 }
 
+#if !defined(_WIN32)
+process_capture run_paritychecker_capture_with_stdin(const std::vector<std::string> & args,
+                                                     const std::string & stdin_text) {
+  const std::filesystem::path stdout_path = make_temp_capture_path("paritychecker-stdin-stdout");
+  const std::filesystem::path stderr_path = make_temp_capture_path("paritychecker-stdin-stderr");
+
+  std::string command = "ulimit -s 8192; printf %s ";
+  command += quote_arg_posix(stdin_text);
+  command += " | ";
+  command += quote_arg_posix(paritychecker_binary_path().string());
+  for (const auto & arg : args) {
+    command += " ";
+    command += quote_arg_posix(arg);
+  }
+  command += " > ";
+  command += quote_arg_posix(stdout_path.string());
+  command += " 2> ";
+  command += quote_arg_posix(stderr_path.string());
+
+  const int status = std::system(command.c_str());
+  process_capture capture{};
+  capture.exit_code = WIFEXITED(status) ? WEXITSTATUS(status) : -1;
+  capture.stdout_text = read_text_file(stdout_path);
+  capture.stderr_text = read_text_file(stderr_path);
+  std::filesystem::remove(stdout_path);
+  std::filesystem::remove(stderr_path);
+  return capture;
+}
+#endif
+
 process_capture run_generation_paritychecker_capture(const std::filesystem::path & model_path,
                                                      const std::string & text,
                                                      const int32_t max_tokens = 1) {
@@ -718,6 +748,22 @@ TEST_CASE("parity runner owns cli parsing and validation") {
   CHECK(runner_source.find("int run_parity_cli(int argc, char ** argv)") != std::string::npos);
   CHECK(runner_source.find("bool parse_args(int argc, char ** argv") != std::string::npos);
   CHECK(runner_source.find("void print_usage(const char * exe)") != std::string::npos);
+}
+
+TEST_CASE("parity runner accepts non-seekable text-file inputs") {
+#if defined(_WIN32)
+  MESSAGE("POSIX /dev/stdin compatibility test skipped on Windows");
+#else
+  const process_capture capture = run_paritychecker_capture_with_stdin({
+    "--gbnf",
+    "--text-file",
+    "/dev/stdin",
+  }, "root ::= [a-z]+");
+
+  CHECK(capture.exit_code == 0);
+  CHECK(capture.stdout_text.find("parity ok") != std::string::npos);
+  CHECK(capture.stderr_text.empty());
+#endif
 }
 
 TEST_CASE("parity assets resolve maintained generation fixtures centrally") {

@@ -435,5 +435,5 @@ Recent decisions affecting current work:
 ## Session Continuity
 
 Last session: 2026-05-01T00:00:00Z
-Stopped at: initialized v1.18 from GitHub issue #54; next action is `$gsd-plan-phase 148`.
+Stopped at: v1.18 milestone completed and archived; next action is `$gsd-new-milestone`.
 Resume file: None

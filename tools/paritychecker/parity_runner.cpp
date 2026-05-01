@@ -6,9 +6,10 @@
 
 #include <cstdio>
 #include <cstdlib>
+#include <fstream>
+#include <iterator>
 #include <string>
 #include <string_view>
-#include <vector>
 
 namespace emel::paritychecker {
 
@@ -80,11 +81,16 @@ bool parse_positive_i32(std::string_view text, int32_t & out) {
 }
 
 bool load_text_file(const char * path, std::string & out) {
-  std::vector<uint8_t> bytes;
-  if (!assets::read_file_bytes(path, bytes)) {
+  std::ifstream input(path, std::ios::binary);
+  if (!input.good()) {
+    out.clear();
     return false;
   }
-  out.assign(reinterpret_cast<const char *>(bytes.data()), bytes.size());
+  out.assign(std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>());
+  if (input.bad()) {
+    out.clear();
+    return false;
+  }
   return true;
 }
 
