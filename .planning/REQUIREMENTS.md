@@ -37,9 +37,9 @@ parity-oriented verification before widening API surface or model scope.
 
 ### Validation And Guardrails
 
-- [ ] **VAL-01**: Maintainer can run focused and changed-file scoped quality gates proving the
+- [x] **VAL-01**: Maintainer can run focused and changed-file scoped quality gates proving the
   dependency bump and namespace migration preserve maintained runtime behavior.
-- [ ] **VAL-02**: Maintainer can run source checks that fail on new unapproved legacy
+- [x] **VAL-02**: Maintainer can run source checks that fail on new unapproved legacy
   SML includes or namespace references in active project-owned code/docs.
 - [ ] **VAL-03**: Maintainer can close the milestone only after source-backed audit evidence
   proves all active SML migration requirements are satisfied.
@@ -80,8 +80,8 @@ Which phases cover which requirements. Updated during roadmap creation.
 | DOC-01 | Phase 175 | Complete |
 | DOC-02 | Phase 175 | Complete |
 | DOC-03 | Phase 175 | Complete |
-| VAL-01 | Phase 176 | Pending |
-| VAL-02 | Phase 176 | Pending |
+| VAL-01 | Phase 176 | Complete |
+| VAL-02 | Phase 176 | Complete |
 | VAL-03 | Phase 177 | Pending |
 
 **Coverage:**

@@ -115,6 +115,10 @@ run_domain_boundary_gate() {
   "$ROOT_DIR/scripts/check_domain_boundaries.sh"
 }
 
+run_sml_surface_gate() {
+  "$ROOT_DIR/scripts/check_legacy_sml_surface.sh"
+}
+
 is_coverage_excluded_src_file() {
   local file="$1"
   case "$file" in
@@ -734,6 +738,7 @@ if [[ -z "$test_shard_list" &&
 fi
 
 run_step domain_boundaries run_domain_boundary_gate
+run_step legacy_sml_surface run_sml_surface_gate
 run_step build_with_zig env \
   EMEL_ZIG_TEST_SHARDS="$test_shard_list" \
   "$ROOT_DIR/scripts/build_with_zig.sh"
@@ -755,9 +760,7 @@ run_parity_gate
 # Temporarily disabled (SML UBSAN issue under asan_ubsan).
 # TODO: re-enable once stateforward/sml.cpp fix lands.
 run_fuzz_gate
-# Temporarily disabled during hard-cutover tree migration.
-# TODO: re-enable once lint snapshot baseline is intentionally regenerated.
-# run_step lint_snapshot "$ROOT_DIR/scripts/lint_snapshot.sh"
+run_step lint_snapshot "$ROOT_DIR/scripts/lint_snapshot.sh"
 if run_benchmark_gates; then
   bench_status=0
 else
