@@ -56,7 +56,8 @@ actor-model rules or maintained parity/benchmark evidence.
 
 **Source:** GitHub issue #56
 
-**Requirements:** 12 active requirements, all mapped.
+**Requirements:** 12 active requirements, all mapped. Reopened by source-backed audit on
+2026-05-01 for gap closure phases 173-177.
 
 | Phase | Name | Goal | Requirements |
 |-------|------|------|--------------|
@@ -66,6 +67,11 @@ actor-model rules or maintained parity/benchmark evidence.
 | 170 | SML Rules And Documentation Migration | Update contributor rules, docs, examples, docsgen, and planning guidance so active instructions no longer point at legacy naming. | DOC-01, DOC-02, DOC-03 |
 | 171 | Legacy SML Reference Guardrails | Add source checks and scoped quality gates that prevent unapproved legacy SML drift while preserving maintained behavior. | VAL-01, VAL-02 |
 | 172 | v1.20 Source-Backed Closeout | Run source-backed audit and close the milestone only after all active migration requirements are proven. | VAL-03 |
+| 173 | SML Migration Evidence Reconstruction | Reconstruct source-backed phase evidence for the dependency pin and source namespace migration gaps found by audit. | DEP-01, DEP-02, DEP-03, SRC-01, SRC-02 |
+| 174 | SML Orchestration Surface Proof | Add or restore live proof for logger, dispatch-table, unexpected-event, and state-inspection behavior after the namespace migration. | SRC-03 |
+| 175 | SML Documentation Rule Path Repair | Repair stale rule-path guidance and prove docs/examples/planning guidance no longer conflict on the migrated SML surface. | DOC-01, DOC-02, DOC-03 |
+| 176 | Legacy SML Guardrail And Quality Gate Repair | Wire maintained legacy SML drift checks and restore scoped quality-gate coverage without weakening required lanes. | VAL-01, VAL-02 |
+| 177 | v1.20 Final Source-Backed Closeout Rerun | Backfill Nyquist evidence and rerun source-backed audit after all reopened v1.20 gaps are closed. | VAL-03 |
 
 ### Phase 167: SML Upstream Pin And Surface Audit
 
@@ -148,3 +154,91 @@ contract before changing broad code.
    before closeout.
 3. Benchmark/parity claims remain source-backed and do not depend on synthetic or stale artifacts.
 4. `v1.20` closeout artifacts archive the milestone with the next action clearly stated.
+
+### Phase 173: SML Migration Evidence Reconstruction
+
+**Goal:** Reconstruct source-backed evidence for the dependency pin and source namespace migration
+requirements reopened by `.planning/v1.20-MILESTONE-AUDIT.md`.
+
+**Requirements:** DEP-01, DEP-02, DEP-03, SRC-01, SRC-02
+
+**Gap Closure:** Closes audit gaps for missing Phase 167/168 SUMMARY.md, VERIFICATION.md, and
+VALIDATION.md evidence, plus source-backed provenance for the current and target SML pin.
+
+**Success criteria:**
+1. Source-backed evidence identifies the previous EMEL SML pin, the target upstream commit, and the
+   live `cmake/sml_version.cmake` pin.
+2. Active source/test/tool include and namespace migration evidence is captured from live repo
+   scans, not planning artifacts alone.
+3. Any compatibility exception or absence of exceptions is documented with a bounded allowlist.
+4. Phase artifacts record the commands and files proving DEP-01, DEP-02, DEP-03, SRC-01, and
+   SRC-02.
+
+### Phase 174: SML Orchestration Surface Proof
+
+**Goal:** Prove all SML behavior surfaces named by SRC-03 compile and behave through the migrated
+`stateforward::sml` surface.
+
+**Requirements:** SRC-03
+
+**Gap Closure:** Closes audit findings for docs-only logger/dispatch-table evidence and incomplete
+live behavior proof.
+
+**Success criteria:**
+1. Active tests or source-backed proof cover transition tables, completion/internal transitions,
+   `sml::unexpected_event`, state inspection, logger wiring, and dispatch-table usage.
+2. Any intentionally unused upstream surface is explicitly documented and removed from the active
+   requirement wording or proved by a focused compile/test surface.
+3. Maintained runtime smoke tests pass through the migrated SML surface.
+4. Phase artifacts capture the focused commands and source locations used as evidence.
+
+### Phase 175: SML Documentation Rule Path Repair
+
+**Goal:** Remove conflicting SML rule-path guidance and prove active documentation consistently
+points contributors at `docs/rules/sml.rules.md` and `stateforward::sml`.
+
+**Requirements:** DOC-01, DOC-02, DOC-03
+
+**Gap Closure:** Closes audit findings for stale `docs/sml.rules.md` references and incomplete
+archival/exemption evidence.
+
+**Success criteria:**
+1. `AGENTS.md`, active plans, generated-doc tooling, and contributor docs reference the normative
+   `docs/rules/sml.rules.md` path where applicable.
+2. Active examples and docsgen output use `stateforward::sml` and the preferred include path.
+3. Historical legacy SML references are archival, quoted, or explicitly exempted.
+4. Documentation and lint snapshot checks pass after the repair.
+
+### Phase 176: Legacy SML Guardrail And Quality Gate Repair
+
+**Goal:** Add maintained drift checks and restore quality-gate coverage for the v1.20 migration.
+
+**Requirements:** VAL-01, VAL-02
+
+**Gap Closure:** Closes audit findings for missing legacy SML source-check wiring, disabled
+`lint_snapshot` in `scripts/quality_gates.sh`, and failed scoped benchmark-gate selection.
+
+**Success criteria:**
+1. A maintained source check fails on unapproved active legacy SML include or namespace references.
+2. `scripts/quality_gates.sh` runs the required lint/docs/parity/benchmark/coverage lanes or
+   records an explicitly approved, bounded exception with equivalent maintained enforcement.
+3. The changed-file scoped quality gate passes for the migration and guardrail files without
+   weakening relevant lanes.
+4. Phase artifacts capture the gate output and source-check evidence.
+
+### Phase 177: v1.20 Final Source-Backed Closeout Rerun
+
+**Goal:** Complete v1.20 only after all reopened gaps have source-backed evidence and Nyquist
+validation.
+
+**Requirements:** VAL-03
+
+**Gap Closure:** Closes audit findings for missing closeout evidence, missing validation artifacts,
+and the failed milestone audit.
+
+**Success criteria:**
+1. SUMMARY.md, VERIFICATION.md, and VALIDATION.md artifacts exist for all v1.20 closure phases.
+2. The milestone audit rerun traces requirements to live code, docs, checks, and quality-gate
+   evidence.
+3. All 12 active requirements are complete with no orphaned verification rows.
+4. `v1.20` closeout artifacts state the final status and next action.

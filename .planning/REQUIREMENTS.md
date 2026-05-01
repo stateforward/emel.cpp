@@ -9,39 +9,39 @@ parity-oriented verification before widening API surface or model scope.
 
 ### Dependency Pin
 
-- [x] **DEP-01**: Maintainer can identify the current EMEL SML pin and the intended newer
+- [ ] **DEP-01**: Maintainer can identify the current EMEL SML pin and the intended newer
   `stateforward/sml.cpp` upstream commit before changing the dependency.
-- [x] **DEP-02**: Maintainer can build EMEL against the intended newer `stateforward/sml.cpp`
+- [ ] **DEP-02**: Maintainer can build EMEL against the intended newer `stateforward/sml.cpp`
   commit pinned in `cmake/sml_version.cmake`.
-- [x] **DEP-03**: Maintainer can explain whether EMEL relies on any upstream legacy SML
+- [ ] **DEP-03**: Maintainer can explain whether EMEL relies on any upstream legacy SML
   compatibility shim, with each exception documented and bounded.
 
 ### Source Migration
 
-- [x] **SRC-01**: Maintainer can include SML through the preferred upstream
+- [ ] **SRC-01**: Maintainer can include SML through the preferred upstream
   `stateforward` include path in project-owned code where that path is supported.
-- [x] **SRC-02**: Maintainer can use `stateforward::sml` naming in project-owned source,
+- [ ] **SRC-02**: Maintainer can use `stateforward::sml` naming in project-owned source,
   tests, and tools without changing actor behavior.
-- [x] **SRC-03**: Maintainer can verify that SML transition tables, logger wiring,
+- [ ] **SRC-03**: Maintainer can verify that SML transition tables, logger wiring,
   `unexpected_event`, dispatch tables, and state inspection still compile and behave after the
   namespace migration.
 
 ### Documentation And Rules
 
-- [x] **DOC-01**: Contributor-facing rules describe the `stateforward::sml` namespace and
+- [ ] **DOC-01**: Contributor-facing rules describe the `stateforward::sml` namespace and
   preferred include path instead of instructing new work to use legacy SML naming.
-- [x] **DOC-02**: Project documentation, examples, generated-doc tooling, and planning
+- [ ] **DOC-02**: Project documentation, examples, generated-doc tooling, and planning
   artifacts no longer create conflicting SML namespace guidance.
-- [x] **DOC-03**: Any remaining historical legacy SML references are clearly archival,
+- [ ] **DOC-03**: Any remaining historical legacy SML references are clearly archival,
   quoted, or intentionally exempted from active contributor guidance.
 
 ### Validation And Guardrails
 
-- [x] **VAL-01**: Maintainer can run focused and changed-file scoped quality gates proving the
+- [ ] **VAL-01**: Maintainer can run focused and changed-file scoped quality gates proving the
   dependency bump and namespace migration preserve maintained runtime behavior.
-- [x] **VAL-02**: Maintainer can run source checks that fail on new unapproved legacy
+- [ ] **VAL-02**: Maintainer can run source checks that fail on new unapproved legacy
   SML includes or namespace references in active project-owned code/docs.
-- [x] **VAL-03**: Maintainer can close the milestone only after source-backed audit evidence
+- [ ] **VAL-03**: Maintainer can close the milestone only after source-backed audit evidence
   proves all active SML migration requirements are satisfied.
 
 ## v2 Requirements
@@ -71,24 +71,25 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| DEP-01 | Phase 167 | Complete |
-| DEP-02 | Phase 167 | Complete |
-| DEP-03 | Phase 167 | Complete |
-| SRC-01 | Phase 168 | Complete |
-| SRC-02 | Phase 168 | Complete |
-| SRC-03 | Phase 169 | Complete |
-| DOC-01 | Phase 170 | Complete |
-| DOC-02 | Phase 170 | Complete |
-| DOC-03 | Phase 170 | Complete |
-| VAL-01 | Phase 171 | Complete |
-| VAL-02 | Phase 171 | Complete |
-| VAL-03 | Phase 172 | Complete |
+| DEP-01 | Phase 173 | Pending |
+| DEP-02 | Phase 173 | Pending |
+| DEP-03 | Phase 173 | Pending |
+| SRC-01 | Phase 173 | Pending |
+| SRC-02 | Phase 173 | Pending |
+| SRC-03 | Phase 174 | Pending |
+| DOC-01 | Phase 175 | Pending |
+| DOC-02 | Phase 175 | Pending |
+| DOC-03 | Phase 175 | Pending |
+| VAL-01 | Phase 176 | Pending |
+| VAL-02 | Phase 176 | Pending |
+| VAL-03 | Phase 177 | Pending |
 
 **Coverage:**
 - v1 requirements: 12 total
 - Mapped to phases: 12
+- Open after v1.20 audit: 12
 - Unmapped: 0
 
 ---
 *Requirements defined: 2026-05-01*
-*Last updated: 2026-05-01 after initial v1.20 definition*
+*Last updated: 2026-05-01 after source-backed v1.20 audit reopened gap closure phases*
