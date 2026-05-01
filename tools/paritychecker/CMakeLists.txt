@@ -110,9 +110,28 @@ add_subdirectory(${reference_impl_SOURCE_DIR}/src llama_src)
 set(EMEL_ENABLE_TESTS OFF CACHE BOOL "" FORCE)
 add_subdirectory(${EMEL_ROOT} emel)
 
-add_executable(paritychecker
+set(PARITYCHECKER_CLI_SOURCES
   ${CMAKE_CURRENT_SOURCE_DIR}/parity_main.cpp
+)
+
+set(PARITYCHECKER_RUNNER_SOURCES
+  ${CMAKE_CURRENT_SOURCE_DIR}/parity_assets.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/parity_runner.cpp
+)
+
+set(PARITYCHECKER_MANIFEST_SOURCES
+  ${CMAKE_CURRENT_SOURCE_DIR}/parity_dependency_manifest.cpp
+)
+
+set(PARITYCHECKER_ENGINE_REGISTRATION_SOURCES
+  ${CMAKE_CURRENT_SOURCE_DIR}/parity_engine.cpp
+)
+
+set(PARITYCHECKER_ENGINE_IMPLEMENTATION_SOURCES
+  ${CMAKE_CURRENT_SOURCE_DIR}/parity_engines.cpp
+)
+
+set(PARITYCHECKER_TOKENIZER_ENGINE_SOURCES
   ${CMAKE_CURRENT_SOURCE_DIR}/tokenizer_parity_common.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/tokenizer_spm_parity.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/tokenizer_bpe_parity.cpp
@@ -121,6 +140,9 @@ add_executable(paritychecker
   ${CMAKE_CURRENT_SOURCE_DIR}/tokenizer_rwkv_parity.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/tokenizer_plamo2_parity.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/tokenizer_fallback_parity.cpp
+)
+
+set(PARITYCHECKER_REFERENCE_SUPPORT_SOURCES
   ${reference_impl_SOURCE_DIR}/common/jinja/lexer.cpp
   ${reference_impl_SOURCE_DIR}/common/jinja/parser.cpp
   ${reference_impl_SOURCE_DIR}/common/jinja/runtime.cpp
@@ -128,6 +150,20 @@ add_executable(paritychecker
   ${reference_impl_SOURCE_DIR}/common/jinja/string.cpp
   ${reference_impl_SOURCE_DIR}/common/jinja/caps.cpp
   ${reference_impl_SOURCE_DIR}/common/unicode.cpp
+)
+
+set(PARITYCHECKER_COMMON_SOURCES
+  ${PARITYCHECKER_RUNNER_SOURCES}
+  ${PARITYCHECKER_MANIFEST_SOURCES}
+  ${PARITYCHECKER_ENGINE_REGISTRATION_SOURCES}
+  ${PARITYCHECKER_ENGINE_IMPLEMENTATION_SOURCES}
+  ${PARITYCHECKER_TOKENIZER_ENGINE_SOURCES}
+  ${PARITYCHECKER_REFERENCE_SUPPORT_SOURCES}
+)
+
+add_executable(paritychecker
+  ${PARITYCHECKER_CLI_SOURCES}
+  ${PARITYCHECKER_COMMON_SOURCES}
 )
 
 target_link_libraries(paritychecker
@@ -162,22 +198,7 @@ endif()
 
 add_executable(paritychecker_tests
   ${CMAKE_CURRENT_SOURCE_DIR}/paritychecker_tests.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/parity_runner.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/tokenizer_parity_common.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/tokenizer_spm_parity.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/tokenizer_bpe_parity.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/tokenizer_wpm_parity.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/tokenizer_ugm_parity.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/tokenizer_rwkv_parity.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/tokenizer_plamo2_parity.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/tokenizer_fallback_parity.cpp
-  ${reference_impl_SOURCE_DIR}/common/jinja/lexer.cpp
-  ${reference_impl_SOURCE_DIR}/common/jinja/parser.cpp
-  ${reference_impl_SOURCE_DIR}/common/jinja/runtime.cpp
-  ${reference_impl_SOURCE_DIR}/common/jinja/value.cpp
-  ${reference_impl_SOURCE_DIR}/common/jinja/string.cpp
-  ${reference_impl_SOURCE_DIR}/common/jinja/caps.cpp
-  ${reference_impl_SOURCE_DIR}/common/unicode.cpp
+  ${PARITYCHECKER_COMMON_SOURCES}
 )
 
 target_link_libraries(paritychecker_tests

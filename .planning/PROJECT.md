@@ -16,23 +16,50 @@ before widening API surface or model scope.
 
 ## Current State
 
-Current milestone: `v1.17 Text Generator Domain Alignment` final closeout
+Current milestone: none active
 
-Latest shipped milestone: `v1.16 ARM Whisper GGUF Parity And Performance`
+Latest shipped milestone: `v1.18 Parity Tool Boundary Refactor`
 
-Status: `v1.17` is ready to complete after Phase 147. The canonical generative text actor is
-moved under `text/generator`, source-backed generator parity and benchmark proof is preserved, all
-`TEXTGEN-*` requirements are complete, and the required full closeout quality gate and final
-source-backed milestone audit both passed.
+Status: `v1.18` shipped on 2026-05-01 after reopened source-backed gap closure. The paritychecker
+now has runner-owned CLI/config parsing, live reference generation truth, actor-boundary source
+checks, and maintained dependency-manifest freshness gating.
 
-Current planning focus: complete/archive `v1.17`.
+Current planning focus: start the next milestone with fresh requirements.
 
-## Active Closeout Milestone: v1.17 Text Generator Domain Alignment
+## Previous Shipped Milestone: v1.18 Parity Tool Boundary Refactor
+
+**Goal:** Refactor `tools/paritychecker` into explicit runner, engine, asset-loading, and
+dependency-manifest boundaries so new parity engines can be added locally without weakening
+EMEL/reference lane isolation or existing parity behavior.
+
+**Initial closeout:** 2026-05-01 from GitHub issue #54
+**Shipped:** 2026-05-01 after reopened source-backed gap closure
+
+**Delivered:**
+- Runner-owned path, byte-loading, and maintained generation fixture resolution helpers.
+- Explicit tokenizer, GBNF, kernel, Jinja, and generation parity engine adapters behind a small
+  runner-facing registration surface.
+- Modular `tools/paritychecker` CMake source groups shared by the executable and tests.
+- `parity_dependency_manifest/v1` records with conservative missing/stale/uncertain full-gate
+  semantics.
+- Source-backed behavior and lane-isolation closure proving shared runner files stay free of
+  lane-owned runtime objects while maintained parity tests continue to pass.
+- Runner-owned CLI/config parsing through `run_parity_cli(...)`.
+- Maintained generation comparison against live reference-lane output before baseline load; stored
+  baselines are publication artifacts, and legacy non-current Qwen drift is reported truthfully.
+- Paritychecker source ownership now goes through public GGUF/model/llama wrapper surfaces instead
+  of non-kernel actor/detail includes, with broad source checks guarding the boundary.
+- Maintained dependency-manifest CLI emission/check operations and quality-gate freshness
+  escalation now force full parity when manifest data is missing, stale, or uncertain.
+
+**Audit:** Final source-backed audit passed with 12/12 active requirements satisfied.
+
+## Previous Shipped Milestone: v1.17 Text Generator Domain Alignment
 
 **Goal:** Move the canonical generative text actor to `text/generator` so generation ownership
 matches the text-domain layout and aligns with the existing `embeddings/generator` actor.
 
-**Implementation complete:** 2026-04-30 after Phase 147
+**Shipped:** 2026-04-30 after Phase 147
 
 **Delivered:**
 - Established `src/emel/text/generator/**`, `emel/text/generator/**`, and
@@ -182,8 +209,20 @@ truth anchor and without broadening into generic Liquid-family support.
 
 ## Requirements
 
+### Active
+
+No active milestone requirements. Start the next milestone with `$gsd-new-milestone`.
+
 ### Validated
 
+- ✓ v1.18 refactored `tools/paritychecker` so shared runner orchestration owns asset/config
+  loading, CLI parsing, and result normalization while mode-specific parity behavior lives behind
+  explicit engine adapters.
+- ✓ v1.18 preserves existing tokenizer, GBNF, kernel, Jinja, and generation parity behavior while
+  maintaining EMEL/reference model, tokenizer, runtime, cache, and output ownership isolation by
+  lane.
+- ✓ v1.18 adds maintained per-runner dependency manifest emission/checking and conservative
+  quality-gate escalation when manifest data is missing, stale, or uncertain.
 - ✓ v1.0 proved one canonical `Llama-68M-Chat-v1-Q2_K.gguf` slice end to end through
   `tools/paritychecker` with real GGUF/model loading, bounded generation, and subprocess coverage.
 - ✓ v1.1 added one truthful canonical generation benchmark in `tools/bench`, published through the
@@ -291,8 +330,7 @@ truth anchor and without broadening into generic Liquid-family support.
 
 ### Active
 
-- [ ] Run the full closeout quality gate and final source-backed audit for `v1.17`.
-- [ ] Define the next maintained milestone scope after `v1.17` closes.
+- [ ] Start the next milestone with fresh requirements.
 
 ### Out of Scope
 
@@ -304,18 +342,17 @@ truth anchor and without broadening into generic Liquid-family support.
 - New model/runtime support added solely to demonstrate the benchmark registry
 - Broader performance tuning beyond the shipped maintained Sortformer ONNX single-thread closure
 - Decode extraction, sampler redesign, new generation model support, or public generation C ABI
-  expansion during the text-domain move
+  expansion during the parity tool boundary refactor
 
 ## Context
 
 This remains a brownfield repository with an existing codebase map under `.planning/codebase/`.
-The repo stays governed by `AGENTS.md` and `docs/rules/sml.rules.md`. `v1.17` is the active
-closeout milestone, and `v1.16` is the latest shipped milestone until the final v1.17 audit and
-completion step finish. The required v1.17 full closeout quality gate has passed. The current
-maintained state includes repo-owned EMEL generation, embedding, diarization, and Whisper ASR lanes
-plus pluggable reference backends that publish through canonical compare contracts without shared
-runtime state. The generative text actor now lives under `text/generator`, with maintained
-generation parity and benchmark proof still driven through public actor events.
+The repo stays governed by `AGENTS.md` and `docs/rules/sml.rules.md`. `v1.18` is the latest
+shipped milestone after the reopened Phase 153-156 source-backed gap closure and final passing
+audit. The current maintained state includes repo-owned EMEL generation, embedding, diarization,
+and Whisper ASR lanes plus pluggable reference backends that publish through canonical compare
+contracts without shared runtime state. The generative text actor now lives under `text/generator`,
+with maintained generation parity and benchmark proof still driven through public actor events.
 
 ## Constraints
 
@@ -327,8 +364,8 @@ generation parity and benchmark proof still driven through public actor events.
   identity, and enough metadata to reproduce results.
 - **Comparability**: Record formatter, tokenization, seed, and sampling metadata explicitly so
   benchmark or parity claims never hide apples-to-oranges drift.
-- **Lifecycle**: Keep current milestone requirements in `.planning/REQUIREMENTS.md` and archived
-  shipped requirements under `.planning/milestones/`.
+- **Lifecycle**: Keep active milestone requirements in `.planning/REQUIREMENTS.md` when a
+  milestone is open, and archive shipped requirements under `.planning/milestones/`.
 - **Diarization scope**: Any future diarization widening must start from a new milestone and keep
   the shipped `v1.15` Sortformer slice truthful before broadening into general speech, ASR,
   streaming-service, or media-ingestion support.
@@ -339,6 +376,7 @@ generation parity and benchmark proof still driven through public actor events.
 
 | Decision | Rationale | Outcome |
 |----------|-----------|---------|
+| Start v1.18 from GitHub issue #54 as a paritychecker boundary refactor | The existing parity tool has grown mode-specific implementation, asset loading, and build wiring in places that make future engines harder to add and harder to gate conservatively | ✓ Shipped |
 | Move the canonical generator actor to `text/generator` in v1.17 | The existing generator is a generative text actor, and placing it under the text domain aligns it with text tokenizer/formatter ownership and the established `embeddings/generator` top-level actor pattern | ✓ Implementation complete |
 | Start v1.15 as one maintained ARM Sortformer diarization GGUF slice | The user asked for ARM support for `openresearchtools/diar_streaming_sortformer_4spk-v2.1-gguf`; the model card defines a diarization contract, not generation or embedding behavior | ✓ Shipped |
 | Require native EMEL-owned Sortformer execution for the EMEL lane | Tool-only Python, ONNX, NeMo, llama.cpp, or ggml compute would not satisfy ARM support in `src/` and would violate lane-isolation expectations | ✓ Shipped |
@@ -389,4 +427,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-04-30 after Phase 147 v1.17 closeout implementation*
+*Last updated: 2026-05-01 after v1.18 milestone closeout*

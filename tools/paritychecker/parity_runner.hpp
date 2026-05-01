@@ -25,6 +25,7 @@ struct parity_options {
   bool attribution = false;
 };
 
+int run_parity_cli(int argc, char ** argv);
 int run_parity(const parity_options & opts);
 
 }  // namespace emel::paritychecker

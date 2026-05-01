@@ -1,16 +1,16 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.17
-milestone_name: Text Generator Domain Alignment
-status: pr_opened
-stopped_at: PR #75 opened for v1.17; awaiting review and CI
-last_updated: "2026-04-30T19:56:44Z"
-last_activity: 2026-04-30
+milestone: v1.18
+milestone_name: Parity Tool Boundary Refactor
+status: milestone_complete
+stopped_at: "v1.18 milestone completed and archived; next action is `$gsd-new-milestone`."
+last_updated: "2026-05-01T05:04:02Z"
+last_activity: 2026-05-01
 progress:
-  total_phases: 4
-  completed_phases: 4
-  total_plans: 4
-  completed_plans: 4
+  total_phases: 9
+  completed_phases: 9
+  total_plans: 9
+  completed_plans: 9
   percent: 100
 ---
 
@@ -18,28 +18,24 @@ progress:
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-04-28)
+See: .planning/PROJECT.md (updated 2026-05-01)
 
 **Core value:** Prove real end-to-end behavior with explicit SML orchestration and parity-oriented
 verification before widening API surface or model scope.
-**Current focus:** Review and merge PR #75 for v1.17 after the Phase 147 full gate and audit pass.
+**Current focus:** No active milestone; start the next milestone with fresh requirements.
 
 ## Current Position
 
-Phase: 147
-Plan: 147-01 complete
-Status: Phase 147 closed the sixth source-backed audit blocker for `TEXTGEN-04` and `TEXTGEN-07`.
-Maintained graph validation, bind, and extract callbacks are now guard-accepted execution
-callbacks, and source regressions prove the old detail callback outcome path is no longer wired.
-The required full closeout quality gate and final source-backed milestone audit both passed. PR #75
-is open for review.
-Last activity: 2026-04-30
+Phase: —
+Plan: —
+Status: v1.18 milestone complete and archived.
+Last activity: 2026-05-01
 
 Progress: [##########] 100%
 
 ## Deferred Items
 
-Items acknowledged and still deferred at milestone close on 2026-04-26:
+Items acknowledged and still deferred at milestone close on 2026-05-01:
 
 | Category | Item | Status |
 |----------|------|--------|
@@ -51,17 +47,15 @@ Items acknowledged and still deferred at milestone close on 2026-04-26:
 
 ## Performance Metrics
 
-**Latest reopened milestone:**
+**Current milestone:**
 
-- Milestone: v1.17 Text Generator Domain Alignment
+- Milestone: none active
 
-- Current planning shape: Phase 147 complete; full closeout gate passed; source-backed audit
-  passed.
-- Latest shipped milestone: `v1.16 ARM Whisper GGUF Parity And Performance`.
+- Current planning shape: milestone closed; next milestone not yet defined.
+- Latest shipped milestone: `v1.18 Parity Tool Boundary Refactor`.
 
-- Next action: review/merge PR #75, then `$gsd-complete-milestone`.
-- Current blocker: none known in source, full-gate validation, or final source-backed audit after
-  Phase 147.
+- Next action: start a new milestone with `$gsd-new-milestone`.
+- Current blocker: none known.
 
 ## Accumulated Context
 
@@ -69,6 +63,57 @@ Items acknowledged and still deferred at milestone close on 2026-04-26:
 
 Decisions are logged in PROJECT.md Key Decisions table.
 Recent decisions affecting current work:
+
+- `v1.18` starts from GitHub issue #54 and targets paritychecker runner/engine/build/manifest
+  boundaries rather than new parity semantics.
+
+- The paritychecker refactor must preserve EMEL/reference lane isolation: no shared
+  model/vocab/tokenizer/runtime/cache objects across lanes and no actor-internal helper calls from
+  parity harnesses.
+
+- Missing, stale, or uncertain parity dependency manifests must trigger the relevant full parity
+  gate; manifest data cannot be used as a permissive skip by default.
+
+- Phase 148 established the parity asset boundary only for paths, byte loading, and maintained
+  fixture identity; Phase 149 still owns mode implementation adapter boundaries.
+
+- Phase 149 established the first explicit parity engine adapter boundary while keeping the
+  implementation bundle intact for behavior stability. Phase 150 owns finer build and registration
+  modularity.
+
+- Phase 150 established the modular CMake/source registration boundary and kept invalid engine
+  lookup fail-closed. Phase 151 can use the explicit source groups as manifest input.
+
+- Phase 151 added deterministic per-mode parity dependency manifests and documented
+  `parity_dependency_manifest/v1`. Missing, stale, or uncertain manifest freshness is explicitly a
+  full relevant parity gate trigger.
+
+- Phase 152 closed the originally planned parity behavior and lane-isolation proof, but the
+  source-backed milestone audit reopened v1.18 because live code still has partial runner
+  ownership, generation reference truth, actor-boundary, and manifest-gate gaps. Phases 153-156 are
+  the active closure path.
+
+- User explicitly approved snapshot and model updates for the v1.18 gap closure phases when those
+  updates are required for truthful maintained-path proof.
+
+- Phase 153 closed `PARITY-01`: `parity_main.cpp` now delegates to runner-owned
+  `run_parity_cli(...)`, while `parity_runner.cpp` owns usage text, CLI/config parsing, text-file
+  loading, and validation. Focused paritychecker tests and the scoped quality gate passed.
+
+- Phase 154 closed `PARITY-03` and `LANE-01`: maintained generation now compares EMEL output
+  against a live reference-lane generation result before baseline load. Stored baselines are
+  secondary publication artifacts, and the legacy non-current Qwen fixture now reports
+  live-reference drift instead of succeeding from an EMEL-authored baseline.
+
+- Phase 155 closed `LANE-02`: paritychecker now uses public GGUF/model/llama wrapper surfaces
+  instead of direct non-kernel actor/detail includes, keeps only an approved kernel-owned AArch64
+  detail arithmetic surface for flash diagnostics, and scans all paritychecker source/header files
+  for actor internal include/namespace regressions.
+
+- Phase 156 closed `MANIFEST-01` and `MANIFEST-02`: paritychecker now exposes maintained
+  dependency-manifest write/check CLI operations, the generated manifest baseline is checked in,
+  and `scripts/quality_gates.sh` forces full parity when manifest freshness is missing, stale, or
+  uncertain.
 
 - `v1.15` targets one maintained ARM diarization slice for
   `openresearchtools/diar_streaming_sortformer_4spk-v2.1-gguf`.
@@ -389,7 +434,6 @@ Recent decisions affecting current work:
 
 ## Session Continuity
 
-Last session: 2026-04-30T19:23:23Z
-Stopped at: completed Phase 147 gap closure and full closeout gate for v1.17; next action is
-`$gsd-audit-milestone`.
+Last session: 2026-05-01T00:00:00Z
+Stopped at: v1.18 milestone completed and archived; next action is `$gsd-new-milestone`.
 Resume file: None

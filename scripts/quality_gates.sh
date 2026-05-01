@@ -16,6 +16,16 @@ QUALITY_GATES_BENCH_TOLERANCE="${EMEL_QUALITY_GATES_BENCH_TOLERANCE:-0.30}"
 QUALITY_GATES_ALLOW_BENCH_REGRESSION="${EMEL_QUALITY_GATES_ALLOW_BENCH_REGRESSION:-0}"
 QUALITY_GATES_PARITY="${EMEL_QUALITY_GATES_PARITY:-auto}"
 QUALITY_GATES_FUZZ="${EMEL_QUALITY_GATES_FUZZ:-auto}"
+PARITY_DEPENDENCY_MANIFEST_BASELINE="${EMEL_PARITY_DEPENDENCY_MANIFEST_BASELINE:-}"
+PARITY_DEPENDENCY_MANIFEST_CURRENT="${EMEL_PARITY_DEPENDENCY_MANIFEST_CURRENT:-}"
+PARITYCHECKER_BINARY="${EMEL_PARITYCHECKER_BINARY:-$ROOT_DIR/build/paritychecker_zig/paritychecker}"
+PARITY_DEPENDENCY_MANIFEST_UNCERTAIN="${EMEL_PARITY_DEPENDENCY_MANIFEST_UNCERTAIN:-0}"
+if [[ -z "$PARITY_DEPENDENCY_MANIFEST_BASELINE" ]]; then
+  PARITY_DEPENDENCY_MANIFEST_BASELINE="$ROOT_DIR/tools/paritychecker/dependency_manifest.txt"
+fi
+if [[ -z "$PARITY_DEPENDENCY_MANIFEST_CURRENT" ]]; then
+  PARITY_DEPENDENCY_MANIFEST_CURRENT="$ROOT_DIR/build/paritychecker_zig/parity_dependency_manifest.current.txt"
+fi
 
 if [[ -z "${EMEL_QUALITY_GATES_INNER:-}" ]]; then
   timeout_cmd=()
@@ -392,12 +402,25 @@ infer_quality_gate_scope() {
 }
 
 run_parity_gate() {
+  local manifest_full=false
+
+  if [[ "$QUALITY_GATES_PARITY" != "always" ]]; then
+    if parity_dependency_manifest_requires_full_gate; then
+      manifest_full=true
+      parity_needed=true
+    fi
+  fi
+
   case "$QUALITY_GATES_PARITY" in
     always)
       run_step paritychecker "$ROOT_DIR/scripts/paritychecker.sh"
       ;;
     never)
-      record_skipped_step paritychecker "disabled by EMEL_QUALITY_GATES_PARITY=never"
+      if $manifest_full; then
+        run_step paritychecker "$ROOT_DIR/scripts/paritychecker.sh"
+      else
+        record_skipped_step paritychecker "disabled by EMEL_QUALITY_GATES_PARITY=never"
+      fi
       ;;
     auto)
       if $parity_needed; then
@@ -411,6 +434,50 @@ run_parity_gate() {
       exit 1
       ;;
   esac
+}
+
+parity_dependency_manifest_requires_full_gate() {
+  local output
+  local status
+  local check_args
+
+  check_args=("--check-dependency-manifest" "$PARITY_DEPENDENCY_MANIFEST_BASELINE")
+  case "$PARITY_DEPENDENCY_MANIFEST_UNCERTAIN" in
+    1|true|yes)
+      check_args+=("--dependency-manifest-uncertain")
+      ;;
+  esac
+
+  if [[ ! -x "$PARITYCHECKER_BINARY" ]]; then
+    echo "dependency manifest requires full parity gate: reason=uncertain paritychecker binary missing" >&2
+    return 0
+  fi
+
+  mkdir -p "$(dirname "$PARITY_DEPENDENCY_MANIFEST_CURRENT")"
+  if output="$("$PARITYCHECKER_BINARY" \
+      --write-dependency-manifest "$PARITY_DEPENDENCY_MANIFEST_CURRENT" 2>&1)"; then
+    echo "$output" >&2
+  else
+    status=$?
+    echo "$output" >&2
+    echo "dependency manifest requires full parity gate: reason=uncertain emit_status=$status" >&2
+    return 0
+  fi
+
+  if output="$("$PARITYCHECKER_BINARY" "${check_args[@]}" 2>&1)"; then
+    echo "$output" >&2
+    return 1
+  fi
+
+  status=$?
+  echo "$output" >&2
+  if [[ "$status" -eq 3 ]]; then
+    echo "dependency manifest requires full parity gate: $output" >&2
+    return 0
+  fi
+
+  echo "dependency manifest requires full parity gate: reason=uncertain check_status=$status" >&2
+  return 0
 }
 
 run_fuzz_gate() {
