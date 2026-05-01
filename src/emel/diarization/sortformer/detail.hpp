@@ -13,6 +13,22 @@ struct dense_weight_cache {
   std::vector<float> lhs_4row = {};
 };
 
+float compute_dot_64(const float *lhs, const float *rhs) noexcept;
+
+float compute_dot_24(const float *lhs, const float *rhs) noexcept;
+
+void compute_weighted_sum_64(const float *weights,
+                             const float *values,
+                             size_t value_stride,
+                             size_t value_count,
+                             float *output) noexcept;
+
+void compute_weighted_sum_24(const float *weights,
+                             const float *values,
+                             size_t value_stride,
+                             size_t value_count,
+                             float *output) noexcept;
+
 bool prepare_dense_weight_cache(std::span<const float> weights,
                                 size_t input_dim,
                                 size_t output_dim,

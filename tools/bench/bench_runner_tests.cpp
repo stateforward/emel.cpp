@@ -304,6 +304,42 @@ TEST_CASE("bench_runner generation compare keeps maintained Qwen and Liquid fixt
   CHECK(parse_named_metric(binary_size_line, "llama_bytes") > 0u);
 }
 
+TEST_CASE("generation_stage_probe_emel_path_does_not_bypass_generator_actor") {
+  const std::string source =
+      read_file(repo_root() / "tools" / "bench" / "generation_bench.cpp");
+  REQUIRE_FALSE(source.empty());
+
+  const std::vector<std::string> forbidden_source_patterns = {
+    "#include \"emel/text/generator/detail.hpp\"",
+    "#include \"emel/text/generator/actions.hpp\"",
+    "#include \"emel/text/generator/guards.hpp\"",
+    "#include \"emel/text/generator/prefill/guards.hpp\"",
+    "emel::text::generator::detail::",
+    "emel::text::generator::action::",
+    "emel::text::generator::guard::",
+    "emel::text::generator::prefill::guard::",
+    "->generation_",
+  };
+  for (const std::string & pattern : forbidden_source_patterns) {
+    CHECK_MESSAGE(source.find(pattern) == std::string::npos,
+                  "generation_bench.cpp contains forbidden pattern " << pattern);
+  }
+
+  const std::string marker = "bool measure_emel_stage_probe(";
+  const auto start = source.find(marker);
+  REQUIRE(start != std::string::npos);
+  const auto end = source.find("bool measure_reference_stage_probe(", start);
+  REQUIRE(end != std::string::npos);
+
+  const std::string probe_source = source.substr(start, end - start);
+  CHECK(probe_source.find("emel::text::generator::detail::") == std::string::npos);
+  CHECK(probe_source.find("emel::text::generator::guard::") == std::string::npos);
+  CHECK(probe_source.find("emel::text::generator::prefill::guard::") == std::string::npos);
+  CHECK(probe_source.find("emel::text::generator::action::context") == std::string::npos);
+  CHECK(probe_source.find("emel::text::generator::prefill::action::context") ==
+        std::string::npos);
+}
+
 TEST_CASE("bench_runner generation jsonl emits manifest-driven workload metadata and explicit comparability") {
   const process_capture emel_capture = run_generation_bench_capture("emel", true);
   CHECK(emel_capture.exit_code == 0);

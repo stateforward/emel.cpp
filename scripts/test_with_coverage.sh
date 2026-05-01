@@ -53,6 +53,9 @@ unknown_changed_src=0
 is_coverage_excluded_src_file() {
   local file="$1"
   case "$file" in
+    src/emel/generator/*.hpp|src/emel/generator/**/*.hpp)
+      return 0
+      ;;
     src/emel/*/sm.hpp)
       return 0
       ;;
@@ -103,7 +106,7 @@ add_test_dirs_for_shard() {
       add_selected_test_dir tests/batch
       ;;
     generator_and_runtime)
-      add_selected_test_dir tests/generator
+      add_selected_test_dir tests/text/generator
       add_selected_test_dir tests/embeddings
       add_selected_test_dir tests/logits
       add_selected_test_dir tests/token
@@ -204,7 +207,10 @@ if [[ "$COVERAGE_CHANGED_ONLY" == "1" ]]; then
       src/emel/model/*|src/emel/model*.hpp|src/emel/gguf/*|src/emel/gbnf/*|src/emel/batch/*)
         add_changed_shard model_and_batch
         ;;
-      src/emel/generator/*|src/emel/embeddings/*|src/emel/logits/*|src/emel/token/*)
+      src/emel/generator/*|src/emel/generator/**/*)
+        add_changed_shard generator_and_runtime
+        ;;
+      src/emel/text/generator/*|src/emel/embeddings/*|src/emel/logits/*|src/emel/token/*)
         add_changed_shard generator_and_runtime
         ;;
       src/emel/diarization/*)
@@ -354,7 +360,7 @@ if [[ "$COVERAGE_CHANGED_ONLY" == "1" &&
     tests/gguf
     tests/gbnf
     tests/batch
-    tests/generator
+    tests/text/generator
     tests/embeddings
     tests/logits
     tests/token

@@ -183,7 +183,7 @@ Scoring rule for `StaticStatus`:
 | `src/emel/gbnf/sampler/matcher_parser/sm.hpp` | PASS | 1 | 1 | 1 | 0 | 0 | 1 | 0 | 0 | 1 | 1 | designed |
 | `src/emel/gbnf/sampler/sm.hpp` | PASS | 1 | 1 | 1 | 1 | 0 | 1 | 0 | 0 | 1 | 1 | designed |
 | `src/emel/gbnf/sampler/token_parser/sm.hpp` | PASS | 1 | 1 | 1 | 0 | 0 | 1 | 0 | 0 | 1 | 1 | designed |
-| `src/emel/generator/sm.hpp` | PASS | 1 | 1 | 1 | 1 | 0 | 1 | 0 | 0 | 1 | 1 | none |
+| `src/emel/text/generator/sm.hpp` | PASS | 1 | 1 | 1 | 1 | 0 | 1 | 0 | 0 | 1 | 1 | none |
 | `src/emel/gguf/loader/sm.hpp` | PASS | 1 | 1 | 1 | 1 | 0 | 1 | 0 | 0 | 1 | 1 | none |
 | `src/emel/graph/allocator/liveness_pass/sm.hpp` | PASS | 1 | 1 | 1 | 0 | 0 | 1 | 0 | 0 | 1 | 1 | designed |
 | `src/emel/graph/allocator/ordering_pass/sm.hpp` | PASS | 1 | 1 | 1 | 0 | 0 | 1 | 0 | 0 | 1 | 1 | designed |

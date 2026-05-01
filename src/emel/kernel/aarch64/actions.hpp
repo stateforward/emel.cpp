@@ -6995,7 +6995,7 @@ inline bool execute_neon_mul_mat_prepared_f32_lhs_4row(
   constexpr uint64_t row_block = 4u;
   constexpr uint64_t col_vec = 4u;
   constexpr uint64_t col_block = 256u;
-  constexpr uint64_t depth_block = 256u;
+  constexpr uint64_t depth_block = 512u;
 
   for (uint64_t jb = 0u; jb < n; jb += col_block) {
     const uint64_t j_end = std::min<uint64_t>(n, jb + col_block);
@@ -7015,6 +7015,221 @@ inline bool execute_neon_mul_mat_prepared_f32_lhs_4row(
 #endif
 
       uint64_t j = jb;
+      for (; j + (col_vec * 3u) <= j_vec_end; j += col_vec * 3u) {
+        const uint64_t j_offset = j - jb;
+        uint64_t i = 0u;
+        for (; i + (row_block * 2u) <= m; i += row_block * 2u) {
+          float32x4_t acc0_0 = zero;
+          float32x4_t acc0_1 = zero;
+          float32x4_t acc0_2 = zero;
+          float32x4_t acc1_0 = zero;
+          float32x4_t acc1_1 = zero;
+          float32x4_t acc1_2 = zero;
+          float32x4_t acc2_0 = zero;
+          float32x4_t acc2_1 = zero;
+          float32x4_t acc2_2 = zero;
+          float32x4_t acc3_0 = zero;
+          float32x4_t acc3_1 = zero;
+          float32x4_t acc3_2 = zero;
+          float32x4_t acc4_0 = zero;
+          float32x4_t acc4_1 = zero;
+          float32x4_t acc4_2 = zero;
+          float32x4_t acc5_0 = zero;
+          float32x4_t acc5_1 = zero;
+          float32x4_t acc5_2 = zero;
+          float32x4_t acc6_0 = zero;
+          float32x4_t acc6_1 = zero;
+          float32x4_t acc6_2 = zero;
+          float32x4_t acc7_0 = zero;
+          float32x4_t acc7_1 = zero;
+          float32x4_t acc7_2 = zero;
+          if (!first_depth_block) {
+            acc0_0 = vld1q_f32(c + (i + 0u) * n + j);
+            acc0_1 = vld1q_f32(c + (i + 0u) * n + j + col_vec);
+            acc0_2 = vld1q_f32(c + (i + 0u) * n + j + (col_vec * 2u));
+            acc1_0 = vld1q_f32(c + (i + 1u) * n + j);
+            acc1_1 = vld1q_f32(c + (i + 1u) * n + j + col_vec);
+            acc1_2 = vld1q_f32(c + (i + 1u) * n + j + (col_vec * 2u));
+            acc2_0 = vld1q_f32(c + (i + 2u) * n + j);
+            acc2_1 = vld1q_f32(c + (i + 2u) * n + j + col_vec);
+            acc2_2 = vld1q_f32(c + (i + 2u) * n + j + (col_vec * 2u));
+            acc3_0 = vld1q_f32(c + (i + 3u) * n + j);
+            acc3_1 = vld1q_f32(c + (i + 3u) * n + j + col_vec);
+            acc3_2 = vld1q_f32(c + (i + 3u) * n + j + (col_vec * 2u));
+            acc4_0 = vld1q_f32(c + (i + 4u) * n + j);
+            acc4_1 = vld1q_f32(c + (i + 4u) * n + j + col_vec);
+            acc4_2 = vld1q_f32(c + (i + 4u) * n + j + (col_vec * 2u));
+            acc5_0 = vld1q_f32(c + (i + 5u) * n + j);
+            acc5_1 = vld1q_f32(c + (i + 5u) * n + j + col_vec);
+            acc5_2 = vld1q_f32(c + (i + 5u) * n + j + (col_vec * 2u));
+            acc6_0 = vld1q_f32(c + (i + 6u) * n + j);
+            acc6_1 = vld1q_f32(c + (i + 6u) * n + j + col_vec);
+            acc6_2 = vld1q_f32(c + (i + 6u) * n + j + (col_vec * 2u));
+            acc7_0 = vld1q_f32(c + (i + 7u) * n + j);
+            acc7_1 = vld1q_f32(c + (i + 7u) * n + j + col_vec);
+            acc7_2 = vld1q_f32(c + (i + 7u) * n + j + (col_vec * 2u));
+          }
+
+          const float *a0_ptr =
+              prepared_lhs + (((i / row_block) * k + pb) * row_block);
+          const float *a1_ptr =
+              prepared_lhs +
+              ((((i + row_block) / row_block) * k + pb) * row_block);
+          const float *b_ptr = b_panel + j_offset;
+          for (uint64_t kk = 0u; kk < depth; ++kk) {
+            const float32x4_t av0 = vld1q_f32(a0_ptr);
+            const float32x4_t av1 = vld1q_f32(a1_ptr);
+            const float32x4_t bv0 = vld1q_f32(b_ptr);
+            const float32x4_t bv1 = vld1q_f32(b_ptr + col_vec);
+            const float32x4_t bv2 = vld1q_f32(b_ptr + (col_vec * 2u));
+            acc0_0 = neon_fma_lane_f32<0>(acc0_0, bv0, av0);
+            acc0_1 = neon_fma_lane_f32<0>(acc0_1, bv1, av0);
+            acc0_2 = neon_fma_lane_f32<0>(acc0_2, bv2, av0);
+            acc1_0 = neon_fma_lane_f32<1>(acc1_0, bv0, av0);
+            acc1_1 = neon_fma_lane_f32<1>(acc1_1, bv1, av0);
+            acc1_2 = neon_fma_lane_f32<1>(acc1_2, bv2, av0);
+            acc2_0 = neon_fma_lane_f32<2>(acc2_0, bv0, av0);
+            acc2_1 = neon_fma_lane_f32<2>(acc2_1, bv1, av0);
+            acc2_2 = neon_fma_lane_f32<2>(acc2_2, bv2, av0);
+            acc3_0 = neon_fma_lane_f32<3>(acc3_0, bv0, av0);
+            acc3_1 = neon_fma_lane_f32<3>(acc3_1, bv1, av0);
+            acc3_2 = neon_fma_lane_f32<3>(acc3_2, bv2, av0);
+            acc4_0 = neon_fma_lane_f32<0>(acc4_0, bv0, av1);
+            acc4_1 = neon_fma_lane_f32<0>(acc4_1, bv1, av1);
+            acc4_2 = neon_fma_lane_f32<0>(acc4_2, bv2, av1);
+            acc5_0 = neon_fma_lane_f32<1>(acc5_0, bv0, av1);
+            acc5_1 = neon_fma_lane_f32<1>(acc5_1, bv1, av1);
+            acc5_2 = neon_fma_lane_f32<1>(acc5_2, bv2, av1);
+            acc6_0 = neon_fma_lane_f32<2>(acc6_0, bv0, av1);
+            acc6_1 = neon_fma_lane_f32<2>(acc6_1, bv1, av1);
+            acc6_2 = neon_fma_lane_f32<2>(acc6_2, bv2, av1);
+            acc7_0 = neon_fma_lane_f32<3>(acc7_0, bv0, av1);
+            acc7_1 = neon_fma_lane_f32<3>(acc7_1, bv1, av1);
+            acc7_2 = neon_fma_lane_f32<3>(acc7_2, bv2, av1);
+            a0_ptr += row_block;
+            a1_ptr += row_block;
+            b_ptr += n;
+          }
+
+          vst1q_f32(c + (i + 0u) * n + j, acc0_0);
+          vst1q_f32(c + (i + 0u) * n + j + col_vec, acc0_1);
+          vst1q_f32(c + (i + 0u) * n + j + (col_vec * 2u), acc0_2);
+          vst1q_f32(c + (i + 1u) * n + j, acc1_0);
+          vst1q_f32(c + (i + 1u) * n + j + col_vec, acc1_1);
+          vst1q_f32(c + (i + 1u) * n + j + (col_vec * 2u), acc1_2);
+          vst1q_f32(c + (i + 2u) * n + j, acc2_0);
+          vst1q_f32(c + (i + 2u) * n + j + col_vec, acc2_1);
+          vst1q_f32(c + (i + 2u) * n + j + (col_vec * 2u), acc2_2);
+          vst1q_f32(c + (i + 3u) * n + j, acc3_0);
+          vst1q_f32(c + (i + 3u) * n + j + col_vec, acc3_1);
+          vst1q_f32(c + (i + 3u) * n + j + (col_vec * 2u), acc3_2);
+          vst1q_f32(c + (i + 4u) * n + j, acc4_0);
+          vst1q_f32(c + (i + 4u) * n + j + col_vec, acc4_1);
+          vst1q_f32(c + (i + 4u) * n + j + (col_vec * 2u), acc4_2);
+          vst1q_f32(c + (i + 5u) * n + j, acc5_0);
+          vst1q_f32(c + (i + 5u) * n + j + col_vec, acc5_1);
+          vst1q_f32(c + (i + 5u) * n + j + (col_vec * 2u), acc5_2);
+          vst1q_f32(c + (i + 6u) * n + j, acc6_0);
+          vst1q_f32(c + (i + 6u) * n + j + col_vec, acc6_1);
+          vst1q_f32(c + (i + 6u) * n + j + (col_vec * 2u), acc6_2);
+          vst1q_f32(c + (i + 7u) * n + j, acc7_0);
+          vst1q_f32(c + (i + 7u) * n + j + col_vec, acc7_1);
+          vst1q_f32(c + (i + 7u) * n + j + (col_vec * 2u), acc7_2);
+        }
+
+        for (; i + row_block <= m; i += row_block) {
+          float32x4_t acc0_0 = zero;
+          float32x4_t acc0_1 = zero;
+          float32x4_t acc0_2 = zero;
+          float32x4_t acc1_0 = zero;
+          float32x4_t acc1_1 = zero;
+          float32x4_t acc1_2 = zero;
+          float32x4_t acc2_0 = zero;
+          float32x4_t acc2_1 = zero;
+          float32x4_t acc2_2 = zero;
+          float32x4_t acc3_0 = zero;
+          float32x4_t acc3_1 = zero;
+          float32x4_t acc3_2 = zero;
+          if (!first_depth_block) {
+            acc0_0 = vld1q_f32(c + (i + 0u) * n + j);
+            acc0_1 = vld1q_f32(c + (i + 0u) * n + j + col_vec);
+            acc0_2 = vld1q_f32(c + (i + 0u) * n + j + (col_vec * 2u));
+            acc1_0 = vld1q_f32(c + (i + 1u) * n + j);
+            acc1_1 = vld1q_f32(c + (i + 1u) * n + j + col_vec);
+            acc1_2 = vld1q_f32(c + (i + 1u) * n + j + (col_vec * 2u));
+            acc2_0 = vld1q_f32(c + (i + 2u) * n + j);
+            acc2_1 = vld1q_f32(c + (i + 2u) * n + j + col_vec);
+            acc2_2 = vld1q_f32(c + (i + 2u) * n + j + (col_vec * 2u));
+            acc3_0 = vld1q_f32(c + (i + 3u) * n + j);
+            acc3_1 = vld1q_f32(c + (i + 3u) * n + j + col_vec);
+            acc3_2 = vld1q_f32(c + (i + 3u) * n + j + (col_vec * 2u));
+          }
+
+          const float *a_ptr =
+              prepared_lhs + (((i / row_block) * k + pb) * row_block);
+          const float *b_ptr = b_panel + j_offset;
+          for (uint64_t kk = 0u; kk < depth; ++kk) {
+            const float32x4_t av = vld1q_f32(a_ptr);
+            const float32x4_t bv0 = vld1q_f32(b_ptr);
+            const float32x4_t bv1 = vld1q_f32(b_ptr + col_vec);
+            const float32x4_t bv2 = vld1q_f32(b_ptr + (col_vec * 2u));
+            acc0_0 = neon_fma_lane_f32<0>(acc0_0, bv0, av);
+            acc0_1 = neon_fma_lane_f32<0>(acc0_1, bv1, av);
+            acc0_2 = neon_fma_lane_f32<0>(acc0_2, bv2, av);
+            acc1_0 = neon_fma_lane_f32<1>(acc1_0, bv0, av);
+            acc1_1 = neon_fma_lane_f32<1>(acc1_1, bv1, av);
+            acc1_2 = neon_fma_lane_f32<1>(acc1_2, bv2, av);
+            acc2_0 = neon_fma_lane_f32<2>(acc2_0, bv0, av);
+            acc2_1 = neon_fma_lane_f32<2>(acc2_1, bv1, av);
+            acc2_2 = neon_fma_lane_f32<2>(acc2_2, bv2, av);
+            acc3_0 = neon_fma_lane_f32<3>(acc3_0, bv0, av);
+            acc3_1 = neon_fma_lane_f32<3>(acc3_1, bv1, av);
+            acc3_2 = neon_fma_lane_f32<3>(acc3_2, bv2, av);
+            a_ptr += row_block;
+            b_ptr += n;
+          }
+
+          vst1q_f32(c + (i + 0u) * n + j, acc0_0);
+          vst1q_f32(c + (i + 0u) * n + j + col_vec, acc0_1);
+          vst1q_f32(c + (i + 0u) * n + j + (col_vec * 2u), acc0_2);
+          vst1q_f32(c + (i + 1u) * n + j, acc1_0);
+          vst1q_f32(c + (i + 1u) * n + j + col_vec, acc1_1);
+          vst1q_f32(c + (i + 1u) * n + j + (col_vec * 2u), acc1_2);
+          vst1q_f32(c + (i + 2u) * n + j, acc2_0);
+          vst1q_f32(c + (i + 2u) * n + j + col_vec, acc2_1);
+          vst1q_f32(c + (i + 2u) * n + j + (col_vec * 2u), acc2_2);
+          vst1q_f32(c + (i + 3u) * n + j, acc3_0);
+          vst1q_f32(c + (i + 3u) * n + j + col_vec, acc3_1);
+          vst1q_f32(c + (i + 3u) * n + j + (col_vec * 2u), acc3_2);
+        }
+
+        for (; i < m; ++i) {
+          const uint64_t lane = i % row_block;
+          float32x4_t acc0 = zero;
+          float32x4_t acc1 = zero;
+          float32x4_t acc2 = zero;
+          if (!first_depth_block) {
+            acc0 = vld1q_f32(c + i * n + j);
+            acc1 = vld1q_f32(c + i * n + j + col_vec);
+            acc2 = vld1q_f32(c + i * n + j + (col_vec * 2u));
+          }
+          const float *a_ptr =
+              prepared_lhs + (((i / row_block) * k + pb) * row_block) + lane;
+          const float *b_ptr = b_panel + j_offset;
+          for (uint64_t kk = 0u; kk < depth; ++kk) {
+            const float av = *a_ptr;
+            acc0 = vmlaq_n_f32(acc0, vld1q_f32(b_ptr), av);
+            acc1 = vmlaq_n_f32(acc1, vld1q_f32(b_ptr + col_vec), av);
+            acc2 = vmlaq_n_f32(acc2, vld1q_f32(b_ptr + (col_vec * 2u)), av);
+            a_ptr += row_block;
+            b_ptr += n;
+          }
+          vst1q_f32(c + i * n + j, acc0);
+          vst1q_f32(c + i * n + j + col_vec, acc1);
+          vst1q_f32(c + i * n + j + (col_vec * 2u), acc2);
+        }
+      }
+
       for (; j + (col_vec * 2u) <= j_vec_end; j += col_vec * 2u) {
         const uint64_t j_offset = j - jb;
         uint64_t i = 0u;

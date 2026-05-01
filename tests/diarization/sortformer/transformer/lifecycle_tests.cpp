@@ -2,6 +2,7 @@
 #include <algorithm>
 #include <cstdio>
 #include <cstring>
+#include <memory>
 #include <span>
 #include <string_view>
 
@@ -137,11 +138,11 @@ void prepare_test_weight_caches(
 }  // namespace
 
 TEST_CASE("sortformer transformer binds maintained tensor contract") {
-  emel::model::data model = {};
-  build_transformer_model(model, true, true);
+  auto model = std::make_unique<emel::model::data>();
+  build_transformer_model(*model, true, true);
 
   transformer_detail::contract contract = {};
-  REQUIRE(transformer_detail::bind_contract(model, contract));
+  REQUIRE(transformer_detail::bind_contract(*model, contract));
   CHECK(contract.tensor_count == static_cast<uint32_t>(
                                      transformer_detail::k_layer_count *
                                      transformer_detail::k_layer_tensor_count));
@@ -150,19 +151,19 @@ TEST_CASE("sortformer transformer binds maintained tensor contract") {
 }
 
 TEST_CASE("sortformer transformer rejects missing maintained tensor") {
-  emel::model::data model = {};
-  build_transformer_model(model, false, true);
+  auto model = std::make_unique<emel::model::data>();
+  build_transformer_model(*model, false, true);
 
   transformer_detail::contract contract = {};
-  CHECK_FALSE(transformer_detail::bind_contract(model, contract));
+  CHECK_FALSE(transformer_detail::bind_contract(*model, contract));
 }
 
 TEST_CASE("sortformer transformer rejects maintained shape drift") {
-  emel::model::data model = {};
-  build_transformer_model(model, true, false);
+  auto model = std::make_unique<emel::model::data>();
+  build_transformer_model(*model, true, false);
 
   transformer_detail::contract contract = {};
-  CHECK_FALSE(transformer_detail::bind_contract(model, contract));
+  CHECK_FALSE(transformer_detail::bind_contract(*model, contract));
 }
 
 TEST_CASE("sortformer transformer layer norm is deterministic") {

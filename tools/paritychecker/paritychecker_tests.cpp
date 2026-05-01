@@ -33,6 +33,14 @@ std::filesystem::path models_dir() {
 #endif
 }
 
+std::filesystem::path repo_root_dir() {
+#ifdef PARITYCHECKER_REPO_ROOT
+  return std::filesystem::path(PARITYCHECKER_REPO_ROOT);
+#else
+  return std::filesystem::current_path();
+#endif
+}
+
 std::filesystem::path parity_texts_dir() {
 #ifdef PARITYCHECKER_REPO_ROOT
   std::filesystem::path root = PARITYCHECKER_REPO_ROOT;
@@ -673,6 +681,41 @@ TEST_CASE("paritychecker help describes the maintained generation fixture contra
   CHECK(capture.stderr_text.find("snapshots/parity/") != std::string::npos);
   CHECK(capture.stderr_text.find("append-only") != std::string::npos);
   CHECK(capture.stderr_text.find("error:") == std::string::npos);
+}
+
+TEST_CASE("paritychecker sources do not bridge into text generator actor internals") {
+  const auto paritychecker_dir = repo_root_dir() / "tools" / "paritychecker";
+  REQUIRE(!file_exists(paritychecker_dir / ("generation_internal_" "diagnostics.hpp")));
+
+  const std::vector<std::string> forbidden = {
+    "#include \"emel/text/generator/" "detail.hpp\"",
+    "#include \"emel/text/generator/" "actions.hpp\"",
+    "#include \"emel/text/generator/" "guards.hpp\"",
+    "#include \"emel/text/generator/prefill/" "guards.hpp\"",
+    "emel::text::generator::" "detail::",
+    "namespace emel::text::generator::" "detail",
+    "emel::text::generator::" "action::",
+    "emel::text::generator::" "guard::",
+    "emel::text::generator::prefill::" "guard::",
+    "->generation_",
+    "generation_internal_" "diagnostics.hpp",
+  };
+
+  for (const auto & entry : std::filesystem::directory_iterator(paritychecker_dir)) {
+    const auto path = entry.path();
+    if (!entry.is_regular_file() || path.filename() == "paritychecker_tests.cpp") {
+      continue;
+    }
+    if (path.extension() != ".cpp" && path.extension() != ".hpp") {
+      continue;
+    }
+    const std::string source = read_text_file(path);
+    REQUIRE_FALSE(source.empty());
+    for (const auto & pattern : forbidden) {
+      CHECK_MESSAGE(source.find(pattern) == std::string::npos,
+                    path.filename().string() << " contains forbidden pattern " << pattern);
+    }
+  }
 }
 
 TEST_CASE("paritychecker generation reports a deterministic missing-model failure") {

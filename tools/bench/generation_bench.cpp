@@ -26,13 +26,9 @@
 #include "emel/gguf/loader/errors.hpp"
 #include "emel/gguf/loader/events.hpp"
 #include "emel/gguf/loader/sm.hpp"
-#include "emel/generator/errors.hpp"
-#include "emel/generator/events.hpp"
-#include "emel/generator/context.hpp"
-#include "emel/generator/detail.hpp"
-#include "emel/generator/prefill/context.hpp"
-#include "emel/generator/prefill/guards.hpp"
-#include "emel/generator/sm.hpp"
+#include "emel/text/generator/errors.hpp"
+#include "emel/text/generator/events.hpp"
+#include "emel/text/generator/sm.hpp"
 #include "emel/logits/sampler/events.hpp"
 #include "emel/model/data.hpp"
 #include "emel/model/detail.hpp"
@@ -415,13 +411,13 @@ struct load_capture {
 struct initialize_capture {
   bool done = false;
   bool error = false;
-  emel::error::type err = emel::error::cast(emel::generator::error::none);
+  emel::error::type err = emel::error::cast(emel::text::generator::error::none);
 };
 
 struct generation_capture {
   bool done = false;
   bool error = false;
-  emel::error::type err = emel::error::cast(emel::generator::error::none);
+  emel::error::type err = emel::error::cast(emel::text::generator::error::none);
   int32_t tokens_generated = 0;
   size_t output_length = 0u;
 };
@@ -515,7 +511,7 @@ struct emel_session {
   emel::model::data model_data = {};
   emel::text::tokenizer::sm tokenizer = {};
   emel::text::conditioner::sm conditioner = {};
-  std::unique_ptr<emel::generator::sm> generator = {};
+  std::unique_ptr<emel::text::generator::sm> generator = {};
   std::array<emel::logits::sampler::fn, 1> samplers = {};
   emel::tools::generation_formatter_contract::formatter_binding formatter_binding = {};
   generation_seam_audit seam = {};
@@ -643,6 +639,16 @@ void reset_load_capture(emel_fixture & fixture) { fixture.load = {}; }
 void reset_initialize_capture(emel_session & session) { session.initialize = {}; }
 void reset_generation_capture(emel_session & session) { session.generation = {}; }
 
+bool capture_generator_diagnostics(
+    emel_session & session,
+    emel::text::generator::diagnostics & diagnostics_out) {
+  if (session.generator == nullptr) {
+    return false;
+  }
+  return session.generator->process_event(
+      emel::text::generator::event::capture_diagnostics{diagnostics_out});
+}
+
 template <class fixture_type>
 void on_probe_done_impl(void * owner, const emel::gguf::loader::events::probe_done & ev) {
   auto & fixture = *static_cast<fixture_type *>(owner);
@@ -767,29 +773,29 @@ void on_load_error(void * owner, const emel::model::loader::events::load_error &
   fixture.load.err = ev.err;
 }
 
-void on_initialize_done(void * owner, const emel::generator::events::initialize_done &) {
+void on_initialize_done(void * owner, const emel::text::generator::events::initialize_done &) {
   auto & session = *static_cast<emel_session *>(owner);
   session.initialize.done = true;
   session.initialize.error = false;
-  session.initialize.err = emel::error::cast(emel::generator::error::none);
+  session.initialize.err = emel::error::cast(emel::text::generator::error::none);
 }
 
-void on_initialize_error(void * owner, const emel::generator::events::initialize_error & ev) {
+void on_initialize_error(void * owner, const emel::text::generator::events::initialize_error & ev) {
   auto & session = *static_cast<emel_session *>(owner);
   session.initialize.error = true;
   session.initialize.err = ev.err;
 }
 
-void on_generation_done(void * owner, const emel::generator::events::generation_done & ev) {
+void on_generation_done(void * owner, const emel::text::generator::events::generation_done & ev) {
   auto & session = *static_cast<emel_session *>(owner);
   session.generation.done = true;
   session.generation.error = false;
-  session.generation.err = emel::error::cast(emel::generator::error::none);
+  session.generation.err = emel::error::cast(emel::text::generator::error::none);
   session.generation.tokens_generated = ev.tokens_generated;
   session.generation.output_length = ev.output_length;
 }
 
-void on_generation_error(void * owner, const emel::generator::events::generation_error & ev) {
+void on_generation_error(void * owner, const emel::text::generator::events::generation_error & ev) {
   auto & session = *static_cast<emel_session *>(owner);
   session.generation.error = true;
   session.generation.err = ev.err;
@@ -854,12 +860,12 @@ void verify_emel_generation_seam(const generation_seam_audit & seam) {
 }
 
 std::string_view generator_error_name(const emel::error::type err) noexcept {
-  switch (static_cast<emel::generator::error>(err)) {
-    case emel::generator::error::none:
+  switch (static_cast<emel::text::generator::error>(err)) {
+    case emel::text::generator::error::none:
       return "none";
-    case emel::generator::error::invalid_request:
+    case emel::text::generator::error::invalid_request:
       return "invalid_request";
-    case emel::generator::error::backend:
+    case emel::text::generator::error::backend:
       return "backend";
   }
   return "unknown";
@@ -1665,7 +1671,7 @@ llama_context_ptr make_reference_context(
 void prepare_emel_session(const emel_fixture & fixture, emel_session & session) {
   session.model_data = fixture.model_data;
   session.formatter_binding = fixture.formatter_binding;
-  session.generator = std::make_unique<emel::generator::sm>(
+  session.generator = std::make_unique<emel::text::generator::sm>(
       session.model_data,
       session.conditioner,
       session.formatter_binding.formatter_ctx,
@@ -1689,8 +1695,8 @@ bool initialize_emel_session(emel_session & session, const generation_case_spec 
   const int32_t block_capacity = std::max<int32_t>(8, prompt_capacity + decode_capacity);
 
   reset_initialize_capture(session);
-  emel::error::type error_out = emel::error::cast(emel::generator::error::none);
-  emel::generator::event::initialize request{
+  emel::error::type error_out = emel::error::cast(emel::text::generator::error::none);
+  emel::text::generator::event::initialize request{
       &session.tokenizer,
       tokenizer_bind_dispatch,
       tokenizer_tokenize_dispatch,
@@ -1700,7 +1706,7 @@ bool initialize_emel_session(emel_session & session, const generation_case_spec 
   request.encoder_variant = generation_encoder_variant(session.model_data);
   request.add_special = false;
   request.parse_special = false;
-  request.selection_mode = emel::generator::selection_mode::preselected_argmax;
+  request.selection_mode = emel::text::generator::selection_mode::preselected_argmax;
   request.max_prompt_tokens = prompt_capacity;
   request.max_generated_tokens = decode_capacity;
   request.max_blocks = block_capacity;
@@ -1712,7 +1718,7 @@ bool initialize_emel_session(emel_session & session, const generation_case_spec 
 
   const bool accepted = session.generator->process_event(request);
   if ((!accepted || !session.initialize.done || session.initialize.error ||
-       error_out != emel::error::cast(emel::generator::error::none)) &&
+       error_out != emel::error::cast(emel::text::generator::error::none)) &&
       std::getenv("EMEL_DEBUG_GENERATION_BENCH") != nullptr) {
     std::fprintf(stderr,
                  "initialize_emel_session debug accepted=%d done=%d error=%d callback_err=%s "
@@ -1729,7 +1735,7 @@ bool initialize_emel_session(emel_session & session, const generation_case_spec 
                  spec.name.data());
   }
   return accepted && session.initialize.done && !session.initialize.error &&
-         error_out == emel::error::cast(emel::generator::error::none);
+         error_out == emel::error::cast(emel::text::generator::error::none);
 }
 
 bool run_emel_generate(emel_session & session,
@@ -1741,9 +1747,9 @@ bool run_emel_generate(emel_session & session,
 
   result_out = {};
   reset_generation_capture(session);
-  emel::error::type error_out = emel::error::cast(emel::generator::error::none);
+  emel::error::type error_out = emel::error::cast(emel::text::generator::error::none);
   std::array<emel::text::formatter::chat_message, 1> message_storage = {};
-  emel::generator::event::generate request{
+  emel::text::generator::event::generate request{
       emel::tools::generation_formatter_contract::single_user_messages(
           message_storage, spec.prompt),
       spec.max_tokens,
@@ -1757,7 +1763,7 @@ bool run_emel_generate(emel_session & session,
   request.on_error = {&session, on_generation_error};
   const bool accepted = session.generator->process_event(request);
   if ((!accepted || !session.generation.done || session.generation.error ||
-       error_out != emel::error::cast(emel::generator::error::none)) &&
+       error_out != emel::error::cast(emel::text::generator::error::none)) &&
       std::getenv("EMEL_DEBUG_GENERATION_BENCH") != nullptr) {
     std::fprintf(stderr,
                  "run_emel_generate debug accepted=%d done=%d error=%d callback_err=%s "
@@ -1774,7 +1780,7 @@ bool run_emel_generate(emel_session & session,
                  spec.name.data());
   }
   if (!accepted || !session.generation.done || session.generation.error ||
-      error_out != emel::error::cast(emel::generator::error::none)) {
+      error_out != emel::error::cast(emel::text::generator::error::none)) {
     return false;
   }
 
@@ -1962,66 +1968,6 @@ std::uint64_t saturating_remainder(const std::uint64_t total,
   return measured >= total ? 0u : total - measured;
 }
 
-std::uint64_t prefill_probe_breakdown_total(const prefill_probe_breakdown & breakdown) noexcept {
-  return breakdown.linear_ns + breakdown.attention_ns + breakdown.misc_ns;
-}
-
-template <class fn_type>
-bool measure_probe_bool(std::uint64_t & bucket_ns, fn_type && fn) {
-  const auto start = steady_clock::now();
-  const bool ok = fn();
-  bucket_ns += elapsed_ns(start, steady_clock::now());
-  return ok;
-}
-
-template <class fn_type>
-void measure_probe_void(std::uint64_t & bucket_ns, fn_type && fn) {
-  const auto start = steady_clock::now();
-  fn();
-  bucket_ns += elapsed_ns(start, steady_clock::now());
-}
-
-template <class fn_type>
-bool measure_subprobe_bool(std::uint64_t & total_bucket_ns,
-                           std::uint64_t & sub_bucket_ns,
-                           fn_type && fn) {
-  const auto start = steady_clock::now();
-  const bool ok = fn();
-  const auto elapsed = elapsed_ns(start, steady_clock::now());
-  total_bucket_ns += elapsed;
-  sub_bucket_ns += elapsed;
-  return ok;
-}
-
-template <class fn_type>
-void measure_subprobe_void(std::uint64_t & total_bucket_ns,
-                           std::uint64_t & sub_bucket_ns,
-                           fn_type && fn) {
-  const auto start = steady_clock::now();
-  fn();
-  const auto elapsed = elapsed_ns(start, steady_clock::now());
-  total_bucket_ns += elapsed;
-  sub_bucket_ns += elapsed;
-}
-
-bool bind_emel_prefill_probe_inputs(emel::generator::detail::native_backend & backend,
-                                    const std::vector<int32_t> & prompt_tokens) {
-  if (prompt_tokens.empty() ||
-      prompt_tokens.size() > backend.bound_tokens.size() ||
-      prompt_tokens.size() > backend.bound_positions.size()) {
-    return false;
-  }
-
-  std::copy(prompt_tokens.begin(), prompt_tokens.end(), backend.bound_tokens.begin());
-  for (size_t index = 0; index < prompt_tokens.size(); ++index) {
-    backend.bound_positions[index] = static_cast<int32_t>(index);
-  }
-  backend.bound_token_count = static_cast<int32_t>(prompt_tokens.size());
-  backend.bound_position_count = static_cast<int32_t>(prompt_tokens.size());
-  backend.bound_ready = true;
-  return true;
-}
-
 enum class reference_prefill_probe_bucket : uint8_t {
   linear = 0u,
   attention = 1u,
@@ -2112,1558 +2058,6 @@ bool tokenize_conditioned_prompt(emel_session & session,
   return true;
 }
 
-const char * prefill_contract_name(
-    emel::generator::prefill_compute_contract contract) noexcept;
-bool inspect_emel_prefill_plan(const emel::model::data & model_data,
-                               const std::vector<int32_t> & prompt_tokens,
-                               int32_t & step_size_out);
-bool inspect_emel_prefill_contract(const emel::model::data & model_data,
-                                   int32_t prompt_token_count,
-                                   emel::generator::prefill_compute_contract & contract_out);
-
-const char * prefill_contract_name(
-    const emel::generator::prefill_compute_contract contract) noexcept {
-  switch (contract) {
-    case emel::generator::prefill_compute_contract::none:
-      return "none";
-    case emel::generator::prefill_compute_contract::flash_materialized_scalar:
-      return "flash_materialized_scalar";
-    case emel::generator::prefill_compute_contract::flash_materialized_chunk4_packed_q8_0:
-      return "flash_materialized_chunk4_packed_q8_0";
-    case emel::generator::prefill_compute_contract::flash_preselected_scalar:
-      return "flash_preselected_scalar";
-    case emel::generator::prefill_compute_contract::flash_preselected_chunk4_packed_q8_0:
-      return "flash_preselected_chunk4_packed_q8_0";
-    case emel::generator::prefill_compute_contract::nonflash_materialized_scalar:
-      return "nonflash_materialized_scalar";
-    case emel::generator::prefill_compute_contract::nonflash_materialized_chunk4_packed_q8_0:
-      return "nonflash_materialized_chunk4_packed_q8_0";
-    case emel::generator::prefill_compute_contract::nonflash_preselected_scalar:
-      return "nonflash_preselected_scalar";
-    case emel::generator::prefill_compute_contract::nonflash_preselected_chunk4_packed_q8_0:
-      return "nonflash_preselected_chunk4_packed_q8_0";
-    case emel::generator::prefill_compute_contract::flash_materialized_chunk4_q8_k:
-      return "flash_materialized_chunk4_q8_k";
-    case emel::generator::prefill_compute_contract::flash_preselected_chunk4_q8_k:
-      return "flash_preselected_chunk4_q8_k";
-    case emel::generator::prefill_compute_contract::nonflash_materialized_chunk4_q8_k:
-      return "nonflash_materialized_chunk4_q8_k";
-    case emel::generator::prefill_compute_contract::nonflash_preselected_chunk4_q8_k:
-      return "nonflash_preselected_chunk4_q8_k";
-    case emel::generator::prefill_compute_contract::flash_materialized_chunk8_q8_k:
-      return "flash_materialized_chunk8_q8_k";
-    case emel::generator::prefill_compute_contract::flash_preselected_chunk8_q8_k:
-      return "flash_preselected_chunk8_q8_k";
-    case emel::generator::prefill_compute_contract::nonflash_materialized_chunk8_q8_k:
-      return "nonflash_materialized_chunk8_q8_k";
-    case emel::generator::prefill_compute_contract::nonflash_preselected_chunk8_q8_k:
-      return "nonflash_preselected_chunk8_q8_k";
-  }
-  return "unknown";
-}
-
-struct bench_plan_capture {
-  emel::error::type err = emel::error::cast(emel::batch::planner::error::none);
-  int32_t step_size = 0;
-  int32_t step_count = 0;
-  int32_t total_outputs = 0;
-  bool done = false;
-  bool error = false;
-};
-
-void capture_bench_plan_done(bench_plan_capture & capture,
-                             const emel::batch::planner::events::plan_done & ev) noexcept {
-  capture.done = true;
-  capture.error = false;
-  capture.step_size = ev.step_count > 0 && ev.step_sizes != nullptr ? ev.step_sizes[0] : 0;
-  capture.step_count = ev.step_count;
-  capture.total_outputs = ev.total_outputs;
-}
-
-void capture_bench_plan_error(bench_plan_capture & capture,
-                              const emel::batch::planner::events::plan_error & ev) noexcept {
-  capture.done = false;
-  capture.error = true;
-  capture.err = ev.err;
-}
-
-bool resolve_emel_prefill_plan_step(const emel::model::data & model_data,
-                                    const int32_t prompt_token_count,
-                                    int32_t & step_size_out) {
-  emel::generator::action::context generator_context{};
-  generator_context.model = &model_data;
-  generator_context.state.selection_mode =
-      emel::generator::selection_mode::preselected_argmax;
-
-  const auto prepare_err = emel::generator::detail::prepare(
-      generator_context.compute.backend, model_data);
-  if (prepare_err !=
-      emel::error::cast(emel::model::loader::error::none)) {
-    return false;
-  }
-
-  std::array<char, 1> output = {};
-  size_t output_length = 0;
-  const std::span<const emel::text::formatter::chat_message> messages = {};
-  emel::generator::event::generate request{
-    messages,
-    1,
-    std::span<char>{output.data(), output.size()},
-    output_length,
-  };
-  emel::generator::event::generate_ctx generate_context{};
-  generate_context.prompt_token_count = prompt_token_count;
-  const emel::generator::event::generate_run generate_run{request, generate_context};
-
-  const bool uses_chunk8 =
-      emel::generator::guard::planning_uses_chunk8_prefill{}(generate_run, generator_context);
-  const bool uses_chunk4 =
-      emel::generator::guard::planning_uses_chunk4_prefill{}(generate_run, generator_context);
-  if (uses_chunk8) {
-    step_size_out = emel::generator::detail::k_prefill_q8_chunk8_rows;
-    return true;
-  }
-  step_size_out = uses_chunk4 ? emel::generator::detail::k_prefill_q8_chunk_rows : 1;
-  return true;
-}
-
-bool inspect_emel_prefill_plan(const emel::model::data & model_data,
-                               const std::vector<int32_t> & prompt_tokens,
-                               int32_t & step_size_out) {
-  int32_t resolved_step_size = 0;
-  if (!resolve_emel_prefill_plan_step(
-          model_data,
-          static_cast<int32_t>(prompt_tokens.size()),
-          resolved_step_size)) {
-    return false;
-  }
-
-  bench_plan_capture capture = {};
-  emel::batch::planner::sm planner = {};
-  const auto on_done =
-      emel::callback<void(const emel::batch::planner::events::plan_done &)>::from<
-          bench_plan_capture,
-          capture_bench_plan_done>(&capture);
-  const auto on_error =
-      emel::callback<void(const emel::batch::planner::events::plan_error &)>::from<
-          bench_plan_capture,
-          capture_bench_plan_error>(&capture);
-  emel::batch::planner::event::plan_request request{
-    .token_ids = prompt_tokens.data(),
-    .n_tokens = static_cast<int32_t>(prompt_tokens.size()),
-    .n_steps = resolved_step_size,
-    .mode = emel::batch::planner::event::plan_mode::simple,
-    .seq_masks = nullptr,
-    .seq_masks_count = 0,
-    .seq_primary_ids = nullptr,
-    .seq_primary_ids_count = 0,
-    .equal_sequential = true,
-    .seq_mask_words = emel::generator::action::k_sequence_mask_words,
-    .output_mask = nullptr,
-    .output_mask_count = 0,
-    .output_all = false,
-    .on_done = on_done,
-    .on_error = on_error,
-  };
-  if (!planner.process_event(request) || capture.error || !capture.done) {
-    return false;
-  }
-  step_size_out = capture.step_size;
-  return step_size_out > 0;
-}
-
-bool inspect_emel_prefill_contract(const emel::model::data & model_data,
-                                   const int32_t prompt_token_count,
-                                   emel::generator::prefill_compute_contract & contract_out) {
-  emel::generator::action::context generator_context{};
-  generator_context.model = &model_data;
-  generator_context.state.selection_mode =
-      emel::generator::selection_mode::preselected_argmax;
-  if (emel::generator::detail::prepare(generator_context.compute.backend, model_data) !=
-      emel::error::cast(emel::model::loader::error::none)) {
-    return false;
-  }
-
-  emel::generator::prefill::action::context prefill_context{generator_context};
-  std::array<emel::text::formatter::chat_message, 1> message_storage = {};
-  std::array<char, 1> output_storage = {};
-  std::size_t output_length = 0u;
-  emel::generator::event::generate request{
-      emel::tools::generation_formatter_contract::single_user_messages(message_storage, "probe"),
-      1,
-      std::span<char>{output_storage.data(), output_storage.size()},
-      output_length,
-  };
-  request.add_generation_prompt = true;
-  request.enable_thinking = false;
-  emel::generator::event::generate_ctx generate_context{};
-  generate_context.prompt_token_count = prompt_token_count;
-  emel::generator::prefill::event::run prefill_run{request, generate_context};
-
-  if (emel::generator::prefill::guard::flash_runtime_supported{}(
-          prefill_run, prefill_context)) {
-    if (emel::generator::prefill::guard::uses_materialized_logits_with_chunk8_q8_k{}(
-            prefill_run, prefill_context)) {
-      contract_out =
-          emel::generator::prefill_compute_contract::flash_materialized_chunk8_q8_k;
-      return true;
-    }
-    if (emel::generator::prefill::guard::uses_materialized_logits_with_chunk4_packed_q8_0{}(
-            prefill_run, prefill_context)) {
-      contract_out =
-          emel::generator::prefill_compute_contract::flash_materialized_chunk4_packed_q8_0;
-      return true;
-    }
-    if (emel::generator::prefill::guard::uses_materialized_logits_with_chunk4_q8_k{}(
-            prefill_run, prefill_context)) {
-      contract_out =
-          emel::generator::prefill_compute_contract::flash_materialized_chunk4_q8_k;
-      return true;
-    }
-    if (emel::generator::prefill::guard::uses_materialized_logits_with_scalar{}(
-            prefill_run, prefill_context)) {
-      contract_out = emel::generator::prefill_compute_contract::flash_materialized_scalar;
-      return true;
-    }
-    if (emel::generator::prefill::guard::uses_preselected_argmax_with_chunk4_packed_q8_0{}(
-            prefill_run, prefill_context)) {
-      contract_out =
-          emel::generator::prefill_compute_contract::flash_preselected_chunk4_packed_q8_0;
-      return true;
-    }
-    if (emel::generator::prefill::guard::uses_preselected_argmax_with_chunk8_q8_k{}(
-            prefill_run, prefill_context)) {
-      contract_out = emel::generator::prefill_compute_contract::flash_preselected_chunk8_q8_k;
-      return true;
-    }
-    if (emel::generator::prefill::guard::uses_preselected_argmax_with_chunk4_q8_k{}(
-            prefill_run, prefill_context)) {
-      contract_out = emel::generator::prefill_compute_contract::flash_preselected_chunk4_q8_k;
-      return true;
-    }
-    if (emel::generator::prefill::guard::uses_preselected_argmax_with_scalar{}(
-            prefill_run, prefill_context)) {
-      contract_out = emel::generator::prefill_compute_contract::flash_preselected_scalar;
-      return true;
-    }
-    return false;
-  }
-
-  if (emel::generator::prefill::guard::uses_materialized_logits_with_chunk8_q8_k{}(
-          prefill_run, prefill_context)) {
-    contract_out = emel::generator::prefill_compute_contract::nonflash_materialized_chunk8_q8_k;
-    return true;
-  }
-  if (emel::generator::prefill::guard::uses_materialized_logits_with_chunk4_packed_q8_0{}(
-          prefill_run, prefill_context)) {
-    contract_out =
-        emel::generator::prefill_compute_contract::nonflash_materialized_chunk4_packed_q8_0;
-    return true;
-  }
-  if (emel::generator::prefill::guard::uses_materialized_logits_with_chunk4_q8_k{}(
-          prefill_run, prefill_context)) {
-    contract_out = emel::generator::prefill_compute_contract::nonflash_materialized_chunk4_q8_k;
-    return true;
-  }
-  if (emel::generator::prefill::guard::uses_materialized_logits_with_scalar{}(
-          prefill_run, prefill_context)) {
-    contract_out = emel::generator::prefill_compute_contract::nonflash_materialized_scalar;
-    return true;
-  }
-  if (emel::generator::prefill::guard::uses_preselected_argmax_with_chunk4_packed_q8_0{}(
-          prefill_run, prefill_context)) {
-    contract_out =
-        emel::generator::prefill_compute_contract::nonflash_preselected_chunk4_packed_q8_0;
-    return true;
-  }
-  if (emel::generator::prefill::guard::uses_preselected_argmax_with_chunk8_q8_k{}(
-          prefill_run, prefill_context)) {
-    contract_out = emel::generator::prefill_compute_contract::nonflash_preselected_chunk8_q8_k;
-    return true;
-  }
-  if (emel::generator::prefill::guard::uses_preselected_argmax_with_chunk4_q8_k{}(
-          prefill_run, prefill_context)) {
-    contract_out = emel::generator::prefill_compute_contract::nonflash_preselected_chunk4_q8_k;
-    return true;
-  }
-  if (emel::generator::prefill::guard::uses_preselected_argmax_with_scalar{}(
-          prefill_run, prefill_context)) {
-    contract_out = emel::generator::prefill_compute_contract::nonflash_preselected_scalar;
-    return true;
-  }
-  return false;
-}
-
-bool initialize_emel_renderer(const emel::model::data & model_data,
-                              emel::text::renderer::sm & renderer) {
-  int32_t renderer_err = emel::error::cast(emel::text::renderer::error::none);
-  emel::text::renderer::event::initialize initialize_renderer_ev{model_data.vocab_data};
-  initialize_renderer_ev.strip_leading_space = false;
-  initialize_renderer_ev.stop_sequences = nullptr;
-  initialize_renderer_ev.stop_sequence_count = 0;
-  initialize_renderer_ev.error_out = &renderer_err;
-  return renderer.process_event(initialize_renderer_ev) &&
-         renderer_err == emel::error::cast(emel::text::renderer::error::none);
-}
-
-bool append_rendered_token(emel::text::renderer::sm & renderer,
-                           const int32_t token_id,
-                           generation_result & result_out) {
-  if (result_out.output_length > result_out.output.size()) {
-    return false;
-  }
-
-  size_t appended_length = 0;
-  emel::text::renderer::sequence_status status =
-      emel::text::renderer::sequence_status::running;
-  int32_t render_err = emel::error::cast(emel::text::renderer::error::none);
-  emel::text::renderer::event::render render_ev = {};
-  render_ev.token_id = token_id;
-  render_ev.sequence_id = 0;
-  render_ev.emit_special = false;
-  render_ev.output = result_out.output.data() + result_out.output_length;
-  render_ev.output_capacity = result_out.output.size() - result_out.output_length;
-  render_ev.output_length_out = &appended_length;
-  render_ev.status_out = &status;
-  render_ev.error_out = &render_err;
-  if (!renderer.process_event(render_ev) ||
-      render_err != emel::error::cast(emel::text::renderer::error::none)) {
-    return false;
-  }
-
-  result_out.output_length += appended_length;
-  return true;
-}
-
-bool flush_rendered_output(emel::text::renderer::sm & renderer,
-                           generation_result & result_out) {
-  if (result_out.output_length > result_out.output.size()) {
-    return false;
-  }
-
-  size_t flush_length = 0;
-  emel::text::renderer::sequence_status status =
-      emel::text::renderer::sequence_status::running;
-  int32_t flush_err = emel::error::cast(emel::text::renderer::error::none);
-  emel::text::renderer::event::flush flush_ev = {};
-  flush_ev.sequence_id = 0;
-  flush_ev.output = result_out.output.data() + result_out.output_length;
-  flush_ev.output_capacity = result_out.output.size() - result_out.output_length;
-  flush_ev.output_length_out = &flush_length;
-  flush_ev.status_out = &status;
-  flush_ev.error_out = &flush_err;
-  if (!renderer.process_event(flush_ev) ||
-      flush_err != emel::error::cast(emel::text::renderer::error::none)) {
-    return false;
-  }
-
-  result_out.output_length += flush_length;
-  return true;
-}
-
-template <emel::generator::attention_mode mode>
-bool run_emel_runtime_layer_probe_scalar(emel::generator::detail::native_backend & backend,
-                                         const int32_t layer_index,
-                                         const int32_t position,
-                                         prefill_probe_breakdown & breakdown) {
-  auto & block = backend.blocks[static_cast<size_t>(layer_index)];
-  auto q = std::span<float>(backend.q.data(), static_cast<size_t>(block.attention_q_dim));
-  auto k = std::span<float>(backend.k.data(), static_cast<size_t>(block.attention_kv_dim));
-  auto v = std::span<float>(backend.v.data(), static_cast<size_t>(block.attention_kv_dim));
-  auto attn_ctx =
-      std::span<float>(backend.attn_ctx.data(), static_cast<size_t>(block.attention_q_dim));
-  if (!measure_probe_bool(
-          breakdown.misc_ns,
-          [&]() {
-            return emel::generator::detail::rms_norm(
-                backend.hidden, block.attention_norm, backend.rms_epsilon, backend.norm);
-          })) {
-    return false;
-  }
-
-  if (block.uses_attention) {
-    const bool qkv_shared_packed_q8_0 =
-        emel::generator::detail::packed_q8_0_input_path_supported(backend, block.attention_q) &&
-        emel::generator::detail::packed_q8_0_input_path_supported(backend, block.attention_k) &&
-        emel::generator::detail::packed_q8_0_input_path_supported(backend, block.attention_v);
-    const bool qkv_shared_q8 =
-        emel::generator::detail::q8_input_path_supported(backend, block.attention_q) &&
-        emel::generator::detail::q8_input_path_supported(backend, block.attention_k) &&
-        emel::generator::detail::q8_input_path_supported(backend, block.attention_v);
-    if (qkv_shared_packed_q8_0) {
-      if (!measure_probe_bool(
-              breakdown.linear_ns,
-              [&]() {
-                return emel::generator::detail::prepare_packed_q8_0_input(backend, backend.norm) &&
-                    emel::generator::detail::matmul_vector_prepared_packed_q8_0_input(
-                               backend, block.attention_q, block.attention_q.cols, q) &&
-                    emel::generator::detail::matmul_vector_prepared_packed_q8_0_input(
-                               backend, block.attention_k, block.attention_k.cols, k) &&
-                    emel::generator::detail::matmul_vector_prepared_packed_q8_0_input(
-                               backend, block.attention_v, block.attention_v.cols, v);
-              })) {
-        return false;
-      }
-    } else if (qkv_shared_q8) {
-      const size_t block_count =
-          static_cast<size_t>(backend.n_embd) /
-          static_cast<size_t>(emel::generator::detail::quant::QK_K);
-      if (block_count == 0u || block_count > backend.q8_input_storage.size()) {
-        return false;
-      }
-      auto q8_input = std::span<emel::kernel::detail::quant::block_q8_k>(
-          backend.q8_input_storage.data(), block_count);
-      if (!measure_probe_bool(
-              breakdown.linear_ns,
-              [&]() {
-                return emel::generator::detail::quantize_vector_q8_k(backend.norm, q8_input) &&
-                    emel::generator::detail::matmul_vector_q8_input(
-                               backend, block.attention_q, q8_input, block.attention_q.cols, q) &&
-                    emel::generator::detail::matmul_vector_q8_input(
-                               backend, block.attention_k, q8_input, block.attention_k.cols, k) &&
-                    emel::generator::detail::matmul_vector_q8_input(
-                               backend, block.attention_v, q8_input, block.attention_v.cols, v);
-              })) {
-        return false;
-      }
-    } else if (!measure_probe_bool(
-                   breakdown.linear_ns,
-                   [&]() {
-                     return emel::generator::detail::matmul_vector(
-                                backend, block.attention_q, backend.norm, q) &&
-                         emel::generator::detail::matmul_vector(
-                                backend, block.attention_k, backend.norm, k) &&
-                         emel::generator::detail::matmul_vector(
-                                backend, block.attention_v, backend.norm, v);
-                   })) {
-      return false;
-    }
-
-    if (emel::generator::detail::requires_attention_qk_norm(backend, block) &&
-        !measure_probe_bool(
-            breakdown.misc_ns,
-            [&]() { return emel::generator::detail::apply_attention_qk_norm(backend, block); })) {
-      return false;
-    }
-
-    measure_probe_void(
-        breakdown.misc_ns,
-        [&]() {
-          emel::generator::detail::apply_rope(
-              q,
-              backend.n_head,
-              block.attention_head_dim,
-              block.attention_rope_dim,
-              position,
-              block.attention_rope_freq_base);
-          emel::generator::detail::apply_rope(
-              k,
-              backend.n_head_kv,
-              block.attention_head_dim_kv,
-              block.attention_rope_dim,
-              position,
-              block.attention_rope_freq_base);
-        });
-
-    if (!measure_probe_bool(
-            breakdown.misc_ns,
-            [&]() {
-              return emel::generator::detail::store_attention_kv_cache(
-                  backend,
-                  block,
-                  layer_index,
-                  position,
-                  std::span<const float>(k.data(), k.size()),
-                  std::span<const float>(v.data(), v.size()));
-            }) ||
-        !measure_probe_bool(
-            breakdown.attention_ns,
-            [&]() {
-              return emel::generator::detail::run_attention<mode>(
-                  backend, block, layer_index, position);
-            }) ||
-        !measure_probe_bool(
-            breakdown.linear_ns,
-            [&]() {
-              return emel::generator::detail::matmul_vector(
-                  backend, block.attention_output, attn_ctx, backend.projected);
-            })) {
-      return false;
-    }
-
-    measure_probe_void(
-        breakdown.misc_ns,
-        [&]() {
-          for (int32_t idx = 0; idx < backend.n_embd; ++idx) {
-            backend.hidden[static_cast<size_t>(idx)] += backend.projected[static_cast<size_t>(idx)];
-          }
-        });
-  } else if (!measure_probe_bool(
-                 breakdown.misc_ns,
-                 [&]() {
-                   return emel::generator::detail::run_shortconv_block(
-                       backend, block, layer_index);
-                 })) {
-    return false;
-  }
-
-  if (!measure_probe_bool(
-          breakdown.misc_ns,
-          [&]() {
-            return emel::generator::detail::rms_norm(
-                backend.hidden, block.feed_forward_norm, backend.rms_epsilon, backend.norm);
-          })) {
-    return false;
-  }
-
-  const int32_t ffn_dim = block.feed_forward_gate.rows;
-  auto gate = std::span<float>(backend.gate.data(), static_cast<size_t>(ffn_dim));
-  auto up = std::span<float>(backend.up.data(), static_cast<size_t>(ffn_dim));
-  auto ffn_hidden = std::span<float>(backend.ffn_hidden.data(), static_cast<size_t>(ffn_dim));
-  const bool gate_up_shared_packed_q8_0 =
-      emel::generator::detail::packed_q8_0_input_path_supported(backend, block.feed_forward_gate) &&
-      emel::generator::detail::packed_q8_0_input_path_supported(backend, block.feed_forward_up);
-  const bool gate_up_shared_q8 =
-      emel::generator::detail::q8_input_path_supported(backend, block.feed_forward_gate) &&
-      emel::generator::detail::q8_input_path_supported(backend, block.feed_forward_up);
-  if (gate_up_shared_packed_q8_0) {
-    if (!measure_probe_bool(
-            breakdown.linear_ns,
-            [&]() {
-              return emel::generator::detail::prepare_packed_q8_0_input(backend, backend.norm) &&
-                  emel::generator::detail::matmul_vector_prepared_packed_q8_0_input(
-                             backend,
-                             block.feed_forward_gate,
-                             block.feed_forward_gate.cols,
-                             gate) &&
-                  emel::generator::detail::matmul_vector_prepared_packed_q8_0_input(
-                             backend, block.feed_forward_up, block.feed_forward_up.cols, up);
-            })) {
-      return false;
-    }
-  } else if (gate_up_shared_q8) {
-    const size_t block_count =
-        static_cast<size_t>(backend.n_embd) /
-        static_cast<size_t>(emel::generator::detail::quant::QK_K);
-    if (block_count == 0u || block_count > backend.q8_input_storage.size()) {
-      return false;
-    }
-    auto q8_input = std::span<emel::kernel::detail::quant::block_q8_k>(
-        backend.q8_input_storage.data(), block_count);
-    if (!measure_probe_bool(
-            breakdown.linear_ns,
-            [&]() {
-              return emel::generator::detail::quantize_vector_q8_k(backend.norm, q8_input) &&
-                  emel::generator::detail::matmul_vector_q8_input(
-                             backend,
-                             block.feed_forward_gate,
-                             q8_input,
-                             block.feed_forward_gate.cols,
-                             gate) &&
-                  emel::generator::detail::matmul_vector_q8_input(
-                             backend,
-                             block.feed_forward_up,
-                             q8_input,
-                             block.feed_forward_up.cols,
-                             up);
-            })) {
-      return false;
-    }
-  } else if (!measure_probe_bool(
-                 breakdown.linear_ns,
-                 [&]() {
-                   return emel::generator::detail::matmul_vector(
-                              backend, block.feed_forward_gate, backend.norm, gate) &&
-                       emel::generator::detail::matmul_vector(
-                              backend, block.feed_forward_up, backend.norm, up);
-                 })) {
-    return false;
-  }
-
-  measure_probe_void(
-      breakdown.misc_ns,
-      [&]() {
-        for (size_t idx = 0; idx < gate.size(); ++idx) {
-          ffn_hidden[idx] = emel::generator::detail::silu(gate[idx]) * up[idx];
-        }
-      });
-
-  if (!measure_probe_bool(
-          breakdown.linear_ns,
-          [&]() {
-            return emel::generator::detail::matmul_vector(
-                backend, block.feed_forward_down, ffn_hidden, backend.projected);
-          })) {
-    return false;
-  }
-
-  measure_probe_void(
-      breakdown.misc_ns,
-      [&]() {
-        for (int32_t idx = 0; idx < backend.n_embd; ++idx) {
-          backend.hidden[static_cast<size_t>(idx)] += backend.projected[static_cast<size_t>(idx)];
-        }
-      });
-  return true;
-}
-
-template <emel::generator::attention_mode mode, emel::generator::detail::chunk4_rhs_route route>
-bool run_emel_runtime_layer_probe_chunk4(emel::generator::detail::native_backend & backend,
-                                         const int32_t layer_index,
-                                         const size_t token_base,
-                                         prefill_probe_breakdown & breakdown) {
-  auto & block = backend.blocks[static_cast<size_t>(layer_index)];
-  const int32_t q_dim = block.attention_q_dim;
-  const int32_t kv_dim = block.attention_kv_dim;
-  const int32_t ffn_dim = block.feed_forward_gate.rows;
-
-  if (!measure_subprobe_bool(
-          breakdown.misc_ns,
-          breakdown.misc_attention_norm_ns,
-          [&]() {
-            return emel::generator::detail::rms_norm_chunk4(
-                backend.hidden_chunk4,
-                backend.n_embd,
-                block.attention_norm,
-                backend.rms_epsilon,
-                backend.norm_chunk4);
-          })) {
-    return false;
-  }
-  if (block.uses_attention) {
-    if (!measure_probe_bool(
-            breakdown.linear_ns,
-            [&]() {
-              return emel::generator::detail::prepare_chunk4_rhs<route>(
-                         backend, backend.norm_chunk4, backend.n_embd) &&
-                  emel::generator::detail::matmul_chunk4_prepared<route>(
-                             backend, block.attention_q, backend.n_embd, backend.q_chunk4) &&
-                  emel::generator::detail::matmul_chunk4_prepared<route>(
-                             backend, block.attention_k, backend.n_embd, backend.k_chunk4) &&
-                  emel::generator::detail::matmul_chunk4_prepared<route>(
-                             backend, block.attention_v, backend.n_embd, backend.v_chunk4);
-            })) {
-      return false;
-    }
-
-    const bool qk_norm_runtime = emel::generator::detail::requires_attention_qk_norm(backend, block);
-    for (int32_t row = 0; row < emel::generator::detail::k_prefill_q8_chunk_rows; ++row) {
-      const int32_t position = backend.bound_positions[token_base + static_cast<size_t>(row)];
-      auto q_row = emel::generator::detail::chunk4_row_span<float>(
-          std::span<float>(backend.q_chunk4), row, q_dim);
-      auto k_row = emel::generator::detail::chunk4_row_span<float>(
-          std::span<float>(backend.k_chunk4), row, kv_dim);
-      const auto v_row = emel::generator::detail::chunk4_row_span<const float>(
-          std::span<const float>(backend.v_chunk4), row, kv_dim);
-
-      if (qk_norm_runtime &&
-          !measure_subprobe_bool(
-              breakdown.misc_ns,
-              breakdown.misc_qk_norm_ns,
-              [&]() {
-                return emel::generator::detail::apply_headwise_rms_norm(
-                           q_row,
-                           block.attention_q_norm,
-                           backend.n_head,
-                           block.attention_head_dim,
-                           backend.rms_epsilon) &&
-                    emel::generator::detail::apply_headwise_rms_norm(
-                           k_row,
-                           block.attention_k_norm,
-                           backend.n_head_kv,
-                           block.attention_head_dim_kv,
-                           backend.rms_epsilon);
-              })) {
-        return false;
-      }
-      measure_subprobe_void(
-          breakdown.misc_ns,
-          breakdown.misc_rope_ns,
-          [&]() {
-            emel::generator::detail::apply_rope(
-                q_row,
-                backend.n_head,
-                block.attention_head_dim,
-                block.attention_rope_dim,
-                position,
-                block.attention_rope_freq_base);
-            emel::generator::detail::apply_rope(
-                k_row,
-                backend.n_head_kv,
-                block.attention_head_dim_kv,
-                block.attention_rope_dim,
-                position,
-                block.attention_rope_freq_base);
-          });
-
-      if (!measure_subprobe_bool(
-              breakdown.misc_ns,
-              breakdown.misc_kv_store_ns,
-              [&]() {
-                return emel::generator::detail::store_attention_kv_cache(
-                    backend, block, layer_index, position, k_row, v_row);
-              }) ||
-          !measure_probe_bool(
-              breakdown.attention_ns,
-              [&]() {
-                return emel::generator::detail::run_attention_for_q_vector<mode>(
-                    backend, block, layer_index, position, q_row);
-              })) {
-        return false;
-      }
-
-      measure_subprobe_void(
-          breakdown.misc_ns,
-          breakdown.misc_ctx_copy_ns,
-          [&]() {
-            std::copy(
-                backend.attn_ctx.begin(),
-                backend.attn_ctx.begin() + q_dim,
-                emel::generator::detail::chunk4_row_span<float>(
-                    std::span<float>(backend.attn_ctx_chunk4), row, q_dim)
-                    .begin());
-            backend.kv_cache_tokens = position + 1;
-          });
-    }
-
-    if (!measure_probe_bool(
-            breakdown.linear_ns,
-            [&]() {
-              return emel::generator::detail::prepare_chunk4_rhs<route>(
-                         backend, backend.attn_ctx_chunk4, q_dim) &&
-                  emel::generator::detail::matmul_chunk4_prepared<route>(
-                             backend, block.attention_output, q_dim, backend.projected_chunk4) &&
-                  emel::generator::detail::add_chunk4_rows_in_place(
-                             backend.hidden_chunk4, backend.projected_chunk4, backend.n_embd);
-            })) {
-      return false;
-    }
-  } else {
-    if (backend.shortconv_kernel_size <= 0 ||
-        backend.shortconv_state_size <= 0 ||
-        block.shortconv_in_proj.tensor == nullptr ||
-        block.shortconv_out_proj.tensor == nullptr ||
-        static_cast<size_t>(block.shortconv_in_proj.rows) !=
-            static_cast<size_t>(3 * backend.n_embd) ||
-        block.shortconv_in_proj.cols != backend.n_embd ||
-        static_cast<size_t>(block.shortconv_out_proj.rows) !=
-            static_cast<size_t>(backend.n_embd) ||
-        block.shortconv_out_proj.cols != backend.n_embd ||
-        block.shortconv_conv.size() !=
-            static_cast<size_t>(backend.shortconv_kernel_size) *
-                static_cast<size_t>(backend.n_embd) ||
-        backend.shortconv_bcx_chunk4.size() !=
-            static_cast<size_t>(emel::generator::detail::k_prefill_q8_chunk_rows) *
-                static_cast<size_t>(3 * backend.n_embd) ||
-        backend.shortconv_bx.size() != static_cast<size_t>(backend.n_embd) ||
-        backend.shortconv_conv_out_chunk4.size() != backend.hidden_chunk4.size()) {
-      return false;
-    }
-
-    if (!measure_subprobe_bool(
-            breakdown.linear_ns,
-            breakdown.shortconv_in_proj_prepare_ns,
-            [&]() {
-              return emel::generator::detail::prepare_chunk4_rhs<route>(
-                  backend, backend.norm_chunk4, backend.n_embd);
-            }) ||
-        !measure_subprobe_bool(
-            breakdown.linear_ns,
-            breakdown.shortconv_in_proj_ns,
-            [&]() {
-              return emel::generator::detail::matmul_chunk4_prepared<route>(
-                  backend,
-                  block.shortconv_in_proj,
-                  backend.n_embd,
-                  backend.shortconv_bcx_chunk4);
-            })) {
-      return false;
-    }
-
-    const size_t layer_offset = emel::generator::detail::shortconv_state_layer_offset(
-        backend, layer_index);
-    float * state = backend.recurrent_shortconv_cache.data() + layer_offset;
-    for (int32_t row = 0; row < emel::generator::detail::k_prefill_q8_chunk_rows; ++row) {
-      const auto bcx_row = emel::generator::detail::chunk4_row_span<const float>(
-          std::span<const float>(backend.shortconv_bcx_chunk4), row, 3 * backend.n_embd);
-      auto conv_out_row = emel::generator::detail::chunk4_row_span<float>(
-          std::span<float>(backend.shortconv_conv_out_chunk4), row, backend.n_embd);
-      auto b = bcx_row.subspan(0u, static_cast<size_t>(backend.n_embd));
-      auto c = bcx_row.subspan(
-          static_cast<size_t>(backend.n_embd), static_cast<size_t>(backend.n_embd));
-      auto x = bcx_row.subspan(
-          static_cast<size_t>(2 * backend.n_embd), static_cast<size_t>(backend.n_embd));
-
-      measure_subprobe_void(
-          breakdown.misc_ns,
-          breakdown.shortconv_conv_ns,
-          [&]() {
-            for (int32_t idx = 0; idx < backend.n_embd; ++idx) {
-              const size_t dim = static_cast<size_t>(idx);
-              const float bx = b[dim] * x[dim];
-              backend.shortconv_bx[dim] = bx;
-
-              const float * kernel =
-                  block.shortconv_conv.data() +
-                  (dim * static_cast<size_t>(backend.shortconv_kernel_size));
-              float conv_sum = bx * kernel[static_cast<size_t>(backend.shortconv_state_size)];
-              for (int32_t tap = 0; tap < backend.shortconv_state_size; ++tap) {
-                conv_sum +=
-                    state[static_cast<size_t>(tap) * static_cast<size_t>(backend.n_embd) + dim] *
-                    kernel[static_cast<size_t>(tap)];
-              }
-
-              conv_out_row[dim] = c[dim] * conv_sum;
-            }
-          });
-
-      measure_subprobe_void(
-          breakdown.misc_ns,
-          breakdown.shortconv_state_shift_ns,
-          [&]() {
-            if (backend.shortconv_state_size > 1) {
-              const size_t move_count =
-                  static_cast<size_t>(backend.shortconv_state_size - 1) *
-                  static_cast<size_t>(backend.n_embd);
-              std::memmove(
-                  state,
-                  state + static_cast<size_t>(backend.n_embd),
-                  move_count * sizeof(float));
-            }
-            std::memcpy(
-                state + static_cast<size_t>(backend.shortconv_state_size - 1) *
-                            static_cast<size_t>(backend.n_embd),
-                backend.shortconv_bx.data(),
-                static_cast<size_t>(backend.n_embd) * sizeof(float));
-          });
-    }
-
-    if (!measure_subprobe_bool(
-            breakdown.linear_ns,
-            breakdown.shortconv_out_proj_prepare_ns,
-            [&]() {
-              return emel::generator::detail::prepare_chunk4_rhs<route>(
-                  backend, backend.shortconv_conv_out_chunk4, backend.n_embd);
-            }) ||
-        !measure_subprobe_bool(
-            breakdown.linear_ns,
-            breakdown.shortconv_out_proj_ns,
-            [&]() {
-              return emel::generator::detail::matmul_chunk4_prepared<route>(
-                         backend,
-                         block.shortconv_out_proj,
-                         backend.n_embd,
-                         backend.projected_chunk4) &&
-                  emel::generator::detail::add_chunk4_rows_in_place(
-                      backend.hidden_chunk4, backend.projected_chunk4, backend.n_embd);
-            })) {
-      return false;
-    }
-
-    breakdown.misc_shortconv_ns =
-        breakdown.shortconv_conv_ns + breakdown.shortconv_state_shift_ns;
-  }
-
-  if (!measure_subprobe_bool(
-          breakdown.misc_ns,
-          breakdown.misc_ffn_norm_ns,
-          [&]() {
-            return emel::generator::detail::rms_norm_chunk4(
-                backend.hidden_chunk4,
-                backend.n_embd,
-                block.feed_forward_norm,
-                backend.rms_epsilon,
-                backend.norm_chunk4);
-          })) {
-    return false;
-  }
-
-  if (!measure_probe_bool(
-          breakdown.linear_ns,
-          [&]() {
-            auto gate_chunk =
-                std::span<float>(backend.gate_chunk4.data(),
-                                 static_cast<size_t>(emel::generator::detail::k_prefill_q8_chunk_rows) *
-                                     static_cast<size_t>(ffn_dim));
-            auto up_chunk =
-                std::span<float>(backend.up_chunk4.data(),
-                                 static_cast<size_t>(emel::generator::detail::k_prefill_q8_chunk_rows) *
-                                     static_cast<size_t>(ffn_dim));
-            return emel::generator::detail::prepare_chunk4_rhs<route>(
-                       backend, backend.norm_chunk4, backend.n_embd) &&
-                emel::generator::detail::matmul_chunk4_prepared<route>(
-                           backend, block.feed_forward_gate, backend.n_embd, gate_chunk) &&
-                emel::generator::detail::matmul_chunk4_prepared<route>(
-                           backend, block.feed_forward_up, backend.n_embd, up_chunk);
-          })) {
-    return false;
-  }
-
-  if (!measure_subprobe_bool(
-          breakdown.misc_ns,
-          breakdown.misc_silu_ns,
-          [&]() {
-            auto gate_chunk =
-                std::span<float>(backend.gate_chunk4.data(),
-                                 static_cast<size_t>(emel::generator::detail::k_prefill_q8_chunk_rows) *
-                                     static_cast<size_t>(ffn_dim));
-            auto up_chunk =
-                std::span<float>(backend.up_chunk4.data(),
-                                 static_cast<size_t>(emel::generator::detail::k_prefill_q8_chunk_rows) *
-                                     static_cast<size_t>(ffn_dim));
-            auto ffn_hidden_chunk =
-                std::span<float>(backend.ffn_hidden_chunk4.data(),
-                                 static_cast<size_t>(emel::generator::detail::k_prefill_q8_chunk_rows) *
-                                     static_cast<size_t>(ffn_dim));
-            return emel::generator::detail::apply_silu_mul_chunk4(
-                gate_chunk, up_chunk, ffn_dim, ffn_hidden_chunk);
-          })) {
-    return false;
-  }
-
-  if (!measure_probe_bool(
-          breakdown.linear_ns,
-          [&]() {
-            auto ffn_hidden_chunk =
-                std::span<float>(backend.ffn_hidden_chunk4.data(),
-                                 static_cast<size_t>(emel::generator::detail::k_prefill_q8_chunk_rows) *
-                                     static_cast<size_t>(ffn_dim));
-            return emel::generator::detail::prepare_chunk4_rhs<route>(
-                       backend, ffn_hidden_chunk, ffn_dim) &&
-                emel::generator::detail::matmul_chunk4_prepared<route>(
-                           backend, block.feed_forward_down, ffn_dim, backend.projected_chunk4) &&
-                emel::generator::detail::add_chunk4_rows_in_place(
-                           backend.hidden_chunk4, backend.projected_chunk4, backend.n_embd);
-          })) {
-    return false;
-  }
-
-  return true;
-}
-
-template <emel::generator::attention_mode mode>
-bool run_emel_runtime_layer_probe_chunk8(emel::generator::detail::native_backend & backend,
-                                         const int32_t layer_index,
-                                         const size_t token_base,
-                                         prefill_probe_breakdown & breakdown) {
-  auto & block = backend.blocks[static_cast<size_t>(layer_index)];
-  const int32_t q_dim = block.attention_q_dim;
-  const int32_t kv_dim = block.attention_kv_dim;
-  const int32_t ffn_dim = block.feed_forward_gate.rows;
-
-  if (!measure_subprobe_bool(
-          breakdown.misc_ns,
-          breakdown.misc_attention_norm_ns,
-          [&]() {
-            return emel::generator::detail::rms_norm_chunk8(
-                backend.hidden_chunk8,
-                backend.n_embd,
-                block.attention_norm,
-                backend.rms_epsilon,
-                backend.norm_chunk8);
-          })) {
-    return false;
-  }
-  if (block.uses_attention) {
-    if (!measure_probe_bool(
-            breakdown.linear_ns,
-            [&]() {
-              return emel::generator::detail::prepare_q8_chunk8_input(
-                         backend, backend.norm_chunk8, backend.n_embd) &&
-                  emel::generator::detail::matmul_chunk8_q8_input(
-                             backend, block.attention_q, backend.n_embd, backend.q_chunk8) &&
-                  emel::generator::detail::matmul_chunk8_q8_input(
-                             backend, block.attention_k, backend.n_embd, backend.k_chunk8) &&
-                  emel::generator::detail::matmul_chunk8_q8_input(
-                             backend, block.attention_v, backend.n_embd, backend.v_chunk8);
-            })) {
-      return false;
-    }
-
-    const bool qk_norm_runtime = emel::generator::detail::requires_attention_qk_norm(backend, block);
-    for (int32_t row = 0; row < emel::generator::detail::k_prefill_q8_chunk8_rows; ++row) {
-      const int32_t position = backend.bound_positions[token_base + static_cast<size_t>(row)];
-      auto q_row = emel::generator::detail::chunk8_row_span<float>(
-          std::span<float>(backend.q_chunk8), row, q_dim);
-      auto k_row = emel::generator::detail::chunk8_row_span<float>(
-          std::span<float>(backend.k_chunk8), row, kv_dim);
-      const auto v_row = emel::generator::detail::chunk8_row_span<const float>(
-          std::span<const float>(backend.v_chunk8), row, kv_dim);
-
-      if (qk_norm_runtime &&
-          !measure_subprobe_bool(
-              breakdown.misc_ns,
-              breakdown.misc_qk_norm_ns,
-              [&]() {
-                return emel::generator::detail::apply_headwise_rms_norm(
-                           q_row,
-                           block.attention_q_norm,
-                           backend.n_head,
-                           block.attention_head_dim,
-                           backend.rms_epsilon) &&
-                    emel::generator::detail::apply_headwise_rms_norm(
-                           k_row,
-                           block.attention_k_norm,
-                           backend.n_head_kv,
-                           block.attention_head_dim_kv,
-                           backend.rms_epsilon);
-              })) {
-        return false;
-      }
-      measure_subprobe_void(
-          breakdown.misc_ns,
-          breakdown.misc_rope_ns,
-          [&]() {
-            emel::generator::detail::apply_rope(
-                q_row,
-                backend.n_head,
-                block.attention_head_dim,
-                block.attention_rope_dim,
-                position,
-                block.attention_rope_freq_base);
-            emel::generator::detail::apply_rope(
-                k_row,
-                backend.n_head_kv,
-                block.attention_head_dim_kv,
-                block.attention_rope_dim,
-                position,
-                block.attention_rope_freq_base);
-          });
-
-      if (!measure_subprobe_bool(
-              breakdown.misc_ns,
-              breakdown.misc_kv_store_ns,
-              [&]() {
-                return emel::generator::detail::store_attention_kv_cache(
-                    backend, block, layer_index, position, k_row, v_row);
-              }) ||
-          !measure_probe_bool(
-              breakdown.attention_ns,
-              [&]() {
-                return emel::generator::detail::run_attention_for_q_vector<mode>(
-                    backend, block, layer_index, position, q_row);
-              })) {
-        return false;
-      }
-
-      measure_subprobe_void(
-          breakdown.misc_ns,
-          breakdown.misc_ctx_copy_ns,
-          [&]() {
-            std::copy(
-                backend.attn_ctx.begin(),
-                backend.attn_ctx.begin() + q_dim,
-                emel::generator::detail::chunk8_row_span<float>(
-                    std::span<float>(backend.attn_ctx_chunk8), row, q_dim)
-                    .begin());
-            backend.kv_cache_tokens = position + 1;
-          });
-    }
-
-    if (!measure_probe_bool(
-            breakdown.linear_ns,
-            [&]() {
-              return emel::generator::detail::prepare_q8_chunk8_input(
-                         backend, backend.attn_ctx_chunk8, q_dim) &&
-                  emel::generator::detail::matmul_chunk8_q8_input(
-                             backend, block.attention_output, q_dim, backend.projected_chunk8) &&
-                  emel::generator::detail::add_chunk8_rows_in_place(
-                             backend.hidden_chunk8, backend.projected_chunk8, backend.n_embd);
-            })) {
-      return false;
-    }
-  } else {
-    if (backend.shortconv_kernel_size <= 0 ||
-        backend.shortconv_state_size <= 0 ||
-        block.shortconv_in_proj.tensor == nullptr ||
-        block.shortconv_out_proj.tensor == nullptr ||
-        static_cast<size_t>(block.shortconv_in_proj.rows) !=
-            static_cast<size_t>(3 * backend.n_embd) ||
-        block.shortconv_in_proj.cols != backend.n_embd ||
-        static_cast<size_t>(block.shortconv_out_proj.rows) !=
-            static_cast<size_t>(backend.n_embd) ||
-        block.shortconv_out_proj.cols != backend.n_embd ||
-        block.shortconv_conv.size() !=
-            static_cast<size_t>(backend.shortconv_kernel_size) *
-                static_cast<size_t>(backend.n_embd) ||
-        backend.shortconv_bcx_chunk8.size() !=
-            static_cast<size_t>(emel::generator::detail::k_prefill_q8_chunk8_rows) *
-                static_cast<size_t>(3 * backend.n_embd) ||
-        backend.shortconv_bx.size() != static_cast<size_t>(backend.n_embd) ||
-        backend.shortconv_conv_out_chunk8.size() != backend.hidden_chunk8.size()) {
-      return false;
-    }
-
-    if (!measure_subprobe_bool(
-            breakdown.linear_ns,
-            breakdown.shortconv_in_proj_prepare_ns,
-            [&]() {
-              return emel::generator::detail::prepare_q8_chunk8_input(
-                  backend, backend.norm_chunk8, backend.n_embd);
-            }) ||
-        !measure_subprobe_bool(
-            breakdown.linear_ns,
-            breakdown.shortconv_in_proj_ns,
-            [&]() {
-              return emel::generator::detail::matmul_chunk8_q8_input(
-                  backend,
-                  block.shortconv_in_proj,
-                  backend.n_embd,
-                  backend.shortconv_bcx_chunk8);
-            })) {
-      return false;
-    }
-
-    const size_t layer_offset = emel::generator::detail::shortconv_state_layer_offset(
-        backend, layer_index);
-    float * state = backend.recurrent_shortconv_cache.data() + layer_offset;
-    for (int32_t row = 0; row < emel::generator::detail::k_prefill_q8_chunk8_rows; ++row) {
-      const auto bcx_row = emel::generator::detail::chunk8_row_span<const float>(
-          std::span<const float>(backend.shortconv_bcx_chunk8), row, 3 * backend.n_embd);
-      auto conv_out_row = emel::generator::detail::chunk8_row_span<float>(
-          std::span<float>(backend.shortconv_conv_out_chunk8), row, backend.n_embd);
-      auto b = bcx_row.subspan(0u, static_cast<size_t>(backend.n_embd));
-      auto c = bcx_row.subspan(
-          static_cast<size_t>(backend.n_embd), static_cast<size_t>(backend.n_embd));
-      auto x = bcx_row.subspan(
-          static_cast<size_t>(2 * backend.n_embd), static_cast<size_t>(backend.n_embd));
-
-      measure_subprobe_void(
-          breakdown.misc_ns,
-          breakdown.shortconv_conv_ns,
-          [&]() {
-            for (int32_t idx = 0; idx < backend.n_embd; ++idx) {
-              const size_t dim = static_cast<size_t>(idx);
-              const float bx = b[dim] * x[dim];
-              backend.shortconv_bx[dim] = bx;
-
-              const float * kernel =
-                  block.shortconv_conv.data() +
-                  (dim * static_cast<size_t>(backend.shortconv_kernel_size));
-              float conv_sum = bx * kernel[static_cast<size_t>(backend.shortconv_state_size)];
-              for (int32_t tap = 0; tap < backend.shortconv_state_size; ++tap) {
-                conv_sum +=
-                    state[static_cast<size_t>(tap) * static_cast<size_t>(backend.n_embd) + dim] *
-                    kernel[static_cast<size_t>(tap)];
-              }
-
-              conv_out_row[dim] = c[dim] * conv_sum;
-            }
-          });
-
-      measure_subprobe_void(
-          breakdown.misc_ns,
-          breakdown.shortconv_state_shift_ns,
-          [&]() {
-            if (backend.shortconv_state_size > 1) {
-              const size_t move_count =
-                  static_cast<size_t>(backend.shortconv_state_size - 1) *
-                  static_cast<size_t>(backend.n_embd);
-              std::memmove(
-                  state,
-                  state + static_cast<size_t>(backend.n_embd),
-                  move_count * sizeof(float));
-            }
-            std::memcpy(
-                state + static_cast<size_t>(backend.shortconv_state_size - 1) *
-                            static_cast<size_t>(backend.n_embd),
-                backend.shortconv_bx.data(),
-                static_cast<size_t>(backend.n_embd) * sizeof(float));
-          });
-    }
-
-    if (!measure_subprobe_bool(
-            breakdown.linear_ns,
-            breakdown.shortconv_out_proj_prepare_ns,
-            [&]() {
-              return emel::generator::detail::prepare_q8_chunk8_input(
-                  backend, backend.shortconv_conv_out_chunk8, backend.n_embd);
-            }) ||
-        !measure_subprobe_bool(
-            breakdown.linear_ns,
-            breakdown.shortconv_out_proj_ns,
-            [&]() {
-              return emel::generator::detail::matmul_chunk8_q8_input(
-                         backend,
-                         block.shortconv_out_proj,
-                         backend.n_embd,
-                         backend.projected_chunk8) &&
-                  emel::generator::detail::add_chunk8_rows_in_place(
-                      backend.hidden_chunk8, backend.projected_chunk8, backend.n_embd);
-            })) {
-      return false;
-    }
-
-    breakdown.misc_shortconv_ns =
-        breakdown.shortconv_conv_ns + breakdown.shortconv_state_shift_ns;
-  }
-
-  if (!measure_subprobe_bool(
-          breakdown.misc_ns,
-          breakdown.misc_ffn_norm_ns,
-          [&]() {
-            return emel::generator::detail::rms_norm_chunk8(
-                backend.hidden_chunk8,
-                backend.n_embd,
-                block.feed_forward_norm,
-                backend.rms_epsilon,
-                backend.norm_chunk8);
-          })) {
-    return false;
-  }
-
-  if (!measure_probe_bool(
-          breakdown.linear_ns,
-          [&]() {
-            auto gate_chunk =
-                std::span<float>(backend.gate_chunk8.data(),
-                                 static_cast<size_t>(emel::generator::detail::k_prefill_q8_chunk8_rows) *
-                                     static_cast<size_t>(ffn_dim));
-            auto up_chunk =
-                std::span<float>(backend.up_chunk8.data(),
-                                 static_cast<size_t>(emel::generator::detail::k_prefill_q8_chunk8_rows) *
-                                     static_cast<size_t>(ffn_dim));
-            return emel::generator::detail::prepare_q8_chunk8_input(
-                       backend, backend.norm_chunk8, backend.n_embd) &&
-                emel::generator::detail::matmul_chunk8_q8_input(
-                           backend, block.feed_forward_gate, backend.n_embd, gate_chunk) &&
-                emel::generator::detail::matmul_chunk8_q8_input(
-                           backend, block.feed_forward_up, backend.n_embd, up_chunk);
-          })) {
-    return false;
-  }
-
-  if (!measure_subprobe_bool(
-          breakdown.misc_ns,
-          breakdown.misc_silu_ns,
-          [&]() {
-            auto gate_chunk =
-                std::span<float>(backend.gate_chunk8.data(),
-                                 static_cast<size_t>(emel::generator::detail::k_prefill_q8_chunk8_rows) *
-                                     static_cast<size_t>(ffn_dim));
-            auto up_chunk =
-                std::span<float>(backend.up_chunk8.data(),
-                                 static_cast<size_t>(emel::generator::detail::k_prefill_q8_chunk8_rows) *
-                                     static_cast<size_t>(ffn_dim));
-            auto ffn_hidden_chunk =
-                std::span<float>(backend.ffn_hidden_chunk8.data(),
-                                 static_cast<size_t>(emel::generator::detail::k_prefill_q8_chunk8_rows) *
-                                     static_cast<size_t>(ffn_dim));
-            return emel::generator::detail::apply_silu_mul_chunk8(
-                gate_chunk, up_chunk, ffn_dim, ffn_hidden_chunk);
-          })) {
-    return false;
-  }
-
-  if (!measure_probe_bool(
-          breakdown.linear_ns,
-          [&]() {
-            auto ffn_hidden_chunk =
-                std::span<float>(backend.ffn_hidden_chunk8.data(),
-                                 static_cast<size_t>(emel::generator::detail::k_prefill_q8_chunk8_rows) *
-                                     static_cast<size_t>(ffn_dim));
-            return emel::generator::detail::prepare_q8_chunk8_input(
-                       backend, ffn_hidden_chunk, ffn_dim) &&
-                emel::generator::detail::matmul_chunk8_q8_input(
-                           backend, block.feed_forward_down, ffn_dim, backend.projected_chunk8) &&
-                emel::generator::detail::add_chunk8_rows_in_place(
-                           backend.hidden_chunk8, backend.projected_chunk8, backend.n_embd);
-          })) {
-    return false;
-  }
-
-  return true;
-}
-
-template <emel::generator::attention_mode mode>
-bool run_emel_prefill_probe_scalar(emel::generator::detail::native_backend & backend,
-                                   int32_t & selected_index,
-                                   float & selected_score,
-                                   prefill_probe_breakdown & breakdown) {
-  backend.kv_cache_tokens = 0;
-  measure_probe_void(
-      breakdown.misc_ns, [&]() { emel::generator::detail::reset_shortconv_cache(backend); });
-  for (size_t token_index = 0; token_index < static_cast<size_t>(backend.bound_token_count);
-       ++token_index) {
-    const int32_t token_id = backend.bound_tokens[token_index];
-    const int32_t position = backend.bound_positions[token_index];
-    if (token_id < 0 || token_id >= backend.token_embedding.rows ||
-        position < 0 || position >= backend.n_ctx) {
-      return false;
-    }
-    if (!measure_probe_bool(
-            breakdown.misc_ns,
-            [&]() {
-              return emel::generator::detail::copy_tensor_row(
-                  *backend.token_embedding.tensor, token_id, backend.hidden);
-            })) {
-      return false;
-    }
-    for (int32_t layer = 0; layer < backend.n_layer; ++layer) {
-      if (!run_emel_runtime_layer_probe_scalar<mode>(backend, layer, position, breakdown)) {
-        return false;
-      }
-    }
-    backend.kv_cache_tokens = position + 1;
-  }
-  return measure_probe_bool(
-      breakdown.linear_ns,
-      [&]() {
-        return emel::generator::detail::compute_logits_preselected_argmax(
-            backend, selected_index, selected_score);
-      });
-}
-
-template <emel::generator::attention_mode mode, emel::generator::detail::chunk4_rhs_route route>
-bool run_emel_prefill_probe_chunk4(emel::generator::detail::native_backend & backend,
-                                   int32_t & selected_index,
-                                   float & selected_score,
-                                   prefill_probe_breakdown & breakdown) {
-  backend.kv_cache_tokens = 0;
-  measure_probe_void(
-      breakdown.misc_ns, [&]() { emel::generator::detail::reset_shortconv_cache(backend); });
-
-  const size_t token_count = static_cast<size_t>(backend.bound_token_count);
-  const size_t chunk_rows =
-      static_cast<size_t>(emel::generator::detail::k_prefill_q8_chunk_rows);
-  const size_t chunk_limit = token_count - (token_count % chunk_rows);
-  if (chunk_limit == 0u) {
-    return false;
-  }
-
-  for (size_t token_base = 0; token_base < chunk_limit; token_base += chunk_rows) {
-    for (int32_t row = 0; row < emel::generator::detail::k_prefill_q8_chunk_rows; ++row) {
-      const size_t token_index = token_base + static_cast<size_t>(row);
-      const int32_t token_id = backend.bound_tokens[token_index];
-      const int32_t position = backend.bound_positions[token_index];
-      if (token_id < 0 || token_id >= backend.token_embedding.rows ||
-          position < 0 || position >= backend.n_ctx) {
-        return false;
-      }
-      if (!measure_probe_bool(
-              breakdown.misc_ns,
-              [&]() {
-                return emel::generator::detail::copy_tensor_row(
-                    *backend.token_embedding.tensor,
-                    token_id,
-                    emel::generator::detail::chunk4_row_span<float>(
-                        std::span<float>(backend.hidden_chunk4), row, backend.n_embd));
-              })) {
-        return false;
-      }
-    }
-
-    for (int32_t layer = 0; layer < backend.n_layer; ++layer) {
-      if (!run_emel_runtime_layer_probe_chunk4<mode, route>(
-              backend, layer, token_base, breakdown)) {
-        return false;
-      }
-    }
-
-    std::copy(
-        emel::generator::detail::chunk4_row_span<const float>(
-            std::span<const float>(backend.hidden_chunk4),
-            emel::generator::detail::k_prefill_q8_chunk_rows - 1,
-            backend.n_embd)
-            .begin(),
-        emel::generator::detail::chunk4_row_span<const float>(
-            std::span<const float>(backend.hidden_chunk4),
-            emel::generator::detail::k_prefill_q8_chunk_rows - 1,
-            backend.n_embd)
-            .end(),
-        backend.hidden.begin());
-  }
-
-  for (size_t token_index = chunk_limit; token_index < token_count; ++token_index) {
-    const int32_t token_id = backend.bound_tokens[token_index];
-    const int32_t position = backend.bound_positions[token_index];
-    if (token_id < 0 || token_id >= backend.token_embedding.rows ||
-        position < 0 || position >= backend.n_ctx) {
-      return false;
-    }
-    if (!measure_probe_bool(
-            breakdown.misc_ns,
-            [&]() {
-              return emel::generator::detail::copy_tensor_row(
-                  *backend.token_embedding.tensor, token_id, backend.hidden);
-            })) {
-      return false;
-    }
-    for (int32_t layer = 0; layer < backend.n_layer; ++layer) {
-      if (!run_emel_runtime_layer_probe_scalar<mode>(backend, layer, position, breakdown)) {
-        return false;
-      }
-    }
-    backend.kv_cache_tokens = position + 1;
-  }
-
-  return measure_probe_bool(
-      breakdown.linear_ns,
-      [&]() {
-        return emel::generator::detail::compute_logits_preselected_argmax(
-            backend, selected_index, selected_score);
-      });
-}
-
-template <emel::generator::attention_mode mode>
-bool run_emel_prefill_probe_chunk8(emel::generator::detail::native_backend & backend,
-                                   int32_t & selected_index,
-                                   float & selected_score,
-                                   prefill_probe_breakdown & breakdown) {
-  backend.kv_cache_tokens = 0;
-  measure_probe_void(
-      breakdown.misc_ns, [&]() { emel::generator::detail::reset_shortconv_cache(backend); });
-
-  const size_t token_count = static_cast<size_t>(backend.bound_token_count);
-  const size_t chunk_rows =
-      static_cast<size_t>(emel::generator::detail::k_prefill_q8_chunk8_rows);
-  const size_t chunk_limit = token_count - (token_count % chunk_rows);
-  if (chunk_limit == 0u) {
-    return false;
-  }
-
-  for (size_t token_base = 0; token_base < chunk_limit; token_base += chunk_rows) {
-    for (int32_t row = 0; row < emel::generator::detail::k_prefill_q8_chunk8_rows; ++row) {
-      const size_t token_index = token_base + static_cast<size_t>(row);
-      const int32_t token_id = backend.bound_tokens[token_index];
-      const int32_t position = backend.bound_positions[token_index];
-      if (token_id < 0 || token_id >= backend.token_embedding.rows ||
-          position < 0 || position >= backend.n_ctx) {
-        return false;
-      }
-      if (!measure_probe_bool(
-              breakdown.misc_ns,
-              [&]() {
-                return emel::generator::detail::copy_tensor_row(
-                    *backend.token_embedding.tensor,
-                    token_id,
-                    emel::generator::detail::chunk8_row_span<float>(
-                        std::span<float>(backend.hidden_chunk8), row, backend.n_embd));
-              })) {
-        return false;
-      }
-    }
-
-    for (int32_t layer = 0; layer < backend.n_layer; ++layer) {
-      if (!run_emel_runtime_layer_probe_chunk8<mode>(backend, layer, token_base, breakdown)) {
-        return false;
-      }
-    }
-
-    std::copy(
-        emel::generator::detail::chunk8_row_span<const float>(
-            std::span<const float>(backend.hidden_chunk8),
-            emel::generator::detail::k_prefill_q8_chunk8_rows - 1,
-            backend.n_embd)
-            .begin(),
-        emel::generator::detail::chunk8_row_span<const float>(
-            std::span<const float>(backend.hidden_chunk8),
-            emel::generator::detail::k_prefill_q8_chunk8_rows - 1,
-            backend.n_embd)
-            .end(),
-        backend.hidden.begin());
-  }
-
-  for (size_t token_index = chunk_limit; token_index < token_count; ++token_index) {
-    const int32_t token_id = backend.bound_tokens[token_index];
-    const int32_t position = backend.bound_positions[token_index];
-    if (token_id < 0 || token_id >= backend.token_embedding.rows ||
-        position < 0 || position >= backend.n_ctx) {
-      return false;
-    }
-    if (!measure_probe_bool(
-            breakdown.misc_ns,
-            [&]() {
-              return emel::generator::detail::copy_tensor_row(
-                  *backend.token_embedding.tensor, token_id, backend.hidden);
-            })) {
-      return false;
-    }
-    for (int32_t layer = 0; layer < backend.n_layer; ++layer) {
-      if (!run_emel_runtime_layer_probe_scalar<mode>(backend, layer, position, breakdown)) {
-        return false;
-      }
-    }
-    backend.kv_cache_tokens = position + 1;
-  }
-
-  return measure_probe_bool(
-      breakdown.linear_ns,
-      [&]() {
-        return emel::generator::detail::compute_logits_preselected_argmax(
-            backend, selected_index, selected_score);
-      });
-}
-
-bool measure_emel_prefill_probe(emel::generator::detail::native_backend & backend,
-                                const std::vector<int32_t> & prompt_tokens,
-                                const emel::generator::prefill_compute_contract contract,
-                                prefill_probe_breakdown & breakdown_out,
-                                int32_t & selected_index_out) {
-  if (!bind_emel_prefill_probe_inputs(backend, prompt_tokens)) {
-    return false;
-  }
-
-  float selected_score = 0.0f;
-  switch (contract) {
-    case emel::generator::prefill_compute_contract::flash_preselected_chunk8_q8_k:
-      return run_emel_prefill_probe_chunk8<emel::generator::attention_mode::flash>(
-          backend, selected_index_out, selected_score, breakdown_out);
-    case emel::generator::prefill_compute_contract::flash_preselected_chunk4_packed_q8_0:
-      return run_emel_prefill_probe_chunk4<
-          emel::generator::attention_mode::flash,
-          emel::generator::detail::chunk4_rhs_route::packed_q8_0>(
-          backend, selected_index_out, selected_score, breakdown_out);
-    case emel::generator::prefill_compute_contract::flash_preselected_chunk4_q8_k:
-      return run_emel_prefill_probe_chunk4<
-          emel::generator::attention_mode::flash,
-          emel::generator::detail::chunk4_rhs_route::q8_k>(
-          backend, selected_index_out, selected_score, breakdown_out);
-    case emel::generator::prefill_compute_contract::flash_preselected_scalar:
-      return run_emel_prefill_probe_scalar<emel::generator::attention_mode::flash>(
-          backend, selected_index_out, selected_score, breakdown_out);
-    case emel::generator::prefill_compute_contract::nonflash_preselected_chunk8_q8_k:
-      return run_emel_prefill_probe_chunk8<emel::generator::attention_mode::nonflash>(
-          backend, selected_index_out, selected_score, breakdown_out);
-    case emel::generator::prefill_compute_contract::nonflash_preselected_chunk4_packed_q8_0:
-      return run_emel_prefill_probe_chunk4<
-          emel::generator::attention_mode::nonflash,
-          emel::generator::detail::chunk4_rhs_route::packed_q8_0>(
-          backend, selected_index_out, selected_score, breakdown_out);
-    case emel::generator::prefill_compute_contract::nonflash_preselected_chunk4_q8_k:
-      return run_emel_prefill_probe_chunk4<
-          emel::generator::attention_mode::nonflash,
-          emel::generator::detail::chunk4_rhs_route::q8_k>(
-          backend, selected_index_out, selected_score, breakdown_out);
-    case emel::generator::prefill_compute_contract::nonflash_preselected_scalar:
-      return run_emel_prefill_probe_scalar<emel::generator::attention_mode::nonflash>(
-          backend, selected_index_out, selected_score, breakdown_out);
-    case emel::generator::prefill_compute_contract::flash_materialized_chunk8_q8_k:
-    case emel::generator::prefill_compute_contract::flash_materialized_chunk4_packed_q8_0:
-    case emel::generator::prefill_compute_contract::flash_materialized_chunk4_q8_k:
-    case emel::generator::prefill_compute_contract::flash_materialized_scalar:
-    case emel::generator::prefill_compute_contract::nonflash_materialized_chunk8_q8_k:
-    case emel::generator::prefill_compute_contract::nonflash_materialized_chunk4_packed_q8_0:
-    case emel::generator::prefill_compute_contract::nonflash_materialized_chunk4_q8_k:
-    case emel::generator::prefill_compute_contract::nonflash_materialized_scalar:
-    case emel::generator::prefill_compute_contract::none:
-      return false;
-  }
-  return false;
-}
-
-bool emel_token_is_stop(const emel::model::data::vocab & vocab, const int32_t token_id) {
-  return token_id == vocab.eos_id || token_id == vocab.eot_id;
-}
-
-bool run_emel_runtime_layer(emel::generator::detail::native_backend & backend,
-                            const int32_t layer_index,
-                            const int32_t position) {
-  return emel::generator::detail::flash_attention_supported(backend, position)
-      ? emel::generator::detail::run_layer_flash(backend, layer_index, position)
-      : emel::generator::detail::run_layer_nonflash(backend, layer_index, position);
-}
-
 bool measure_emel_stage_probe(emel_session & session,
                               const generation_case_spec & spec,
                               emel::bench::generation_stage_probe & probe_out) {
@@ -3681,104 +2075,8 @@ bool measure_emel_stage_probe(emel_session & session,
   }
   probe_out.emel_conditioning_ns = elapsed_ns(conditioning_start, steady_clock::now());
   probe_out.emel_prompt_tokens = static_cast<int32_t>(prompt_tokens.size());
-  if (!inspect_emel_prefill_plan(
-          session.model_data, prompt_tokens, probe_out.emel_prefill_step_size)) {
-    return false;
-  }
-  emel::generator::prefill_compute_contract contract =
-      emel::generator::prefill_compute_contract::none;
-  if (!inspect_emel_prefill_contract(
-          session.model_data, probe_out.emel_prompt_tokens, contract)) {
-    return false;
-  }
-  probe_out.emel_prefill_contract = prefill_contract_name(contract);
-
-  emel::generator::detail::native_backend backend = {};
-  if (emel::generator::detail::prepare(backend, session.model_data) !=
-      emel::error::cast(emel::model::loader::error::none)) {
-    return false;
-  }
-
-  emel::text::renderer::sm renderer = {};
-  if (!initialize_emel_renderer(session.model_data, renderer)) {
-    return false;
-  }
-
-  generation_result result_out = {};
-  int32_t selected_token =
-      std::numeric_limits<int32_t>::min();
-  const auto prefill_start = steady_clock::now();
-  prefill_probe_breakdown prefill_breakdown = {};
-  if (!measure_emel_prefill_probe(
-          backend,
-          prompt_tokens,
-          contract,
-          prefill_breakdown,
-          selected_token)) {
-    return false;
-  }
-  if (spec.max_tokens == 1) {
-    probe_out.emel_prefill_linear_probe_ns = prefill_breakdown.linear_ns;
-    probe_out.emel_prefill_attention_probe_ns = prefill_breakdown.attention_ns;
-    probe_out.emel_prefill_misc_probe_ns = prefill_breakdown.misc_ns;
-    probe_out.emel_prefill_misc_attention_norm_ns = prefill_breakdown.misc_attention_norm_ns;
-    probe_out.emel_prefill_misc_qk_norm_ns = prefill_breakdown.misc_qk_norm_ns;
-    probe_out.emel_prefill_misc_rope_ns = prefill_breakdown.misc_rope_ns;
-    probe_out.emel_prefill_misc_kv_store_ns = prefill_breakdown.misc_kv_store_ns;
-    probe_out.emel_prefill_misc_ctx_copy_ns = prefill_breakdown.misc_ctx_copy_ns;
-    probe_out.emel_prefill_misc_shortconv_ns = prefill_breakdown.misc_shortconv_ns;
-    probe_out.emel_prefill_shortconv_in_proj_ns = prefill_breakdown.shortconv_in_proj_ns;
-    probe_out.emel_prefill_shortconv_in_proj_prepare_ns =
-        prefill_breakdown.shortconv_in_proj_prepare_ns;
-    probe_out.emel_prefill_shortconv_conv_ns = prefill_breakdown.shortconv_conv_ns;
-    probe_out.emel_prefill_shortconv_state_shift_ns = prefill_breakdown.shortconv_state_shift_ns;
-    probe_out.emel_prefill_shortconv_out_proj_ns = prefill_breakdown.shortconv_out_proj_ns;
-    probe_out.emel_prefill_shortconv_out_proj_prepare_ns =
-        prefill_breakdown.shortconv_out_proj_prepare_ns;
-    probe_out.emel_prefill_misc_ffn_norm_ns = prefill_breakdown.misc_ffn_norm_ns;
-    probe_out.emel_prefill_misc_silu_ns = prefill_breakdown.misc_silu_ns;
-  }
-  probe_out.emel_prefill_ns = elapsed_ns(prefill_start, steady_clock::now());
-
-  for (int32_t step = 0; step < spec.max_tokens; ++step) {
-    result_out.tokens_generated += 1;
-    if (!append_rendered_token(renderer, selected_token, result_out)) {
-      return false;
-    }
-    if (emel_token_is_stop(session.model_data.vocab_data, selected_token)) {
-      break;
-    }
-
-    const auto decode_start = steady_clock::now();
-    const int32_t position =
-        static_cast<int32_t>(prompt_tokens.size()) + result_out.tokens_generated - 1;
-    if (!emel::generator::detail::copy_tensor_row(
-            *backend.token_embedding.tensor, selected_token, backend.hidden)) {
-      return false;
-    }
-    for (int32_t layer = 0; layer < backend.n_layer; ++layer) {
-      if (!run_emel_runtime_layer(backend, layer, position)) {
-        return false;
-      }
-    }
-    backend.kv_cache_tokens = position + 1;
-    if (!emel::generator::detail::compute_logits(backend)) {
-      return false;
-    }
-    const auto decode_ns = elapsed_ns(decode_start, steady_clock::now());
-    selected_token = static_cast<int32_t>(select_argmax_token_from_logits(
-        backend.bound_logits.data(), backend.n_vocab));
-    if (step == 0) {
-      probe_out.emel_first_decode_ns = decode_ns;
-    } else {
-      probe_out.emel_steady_decode_ns += decode_ns;
-    }
-  }
-
-  if (!flush_rendered_output(renderer, result_out)) {
-    return false;
-  }
-
+  probe_out.emel_prefill_contract = "actor_public_generate";
+  probe_out.emel_prefill_step_size = 0;
   probe_out.emel_unattributed_ns =
       saturating_remainder(probe_out.emel_total_ns,
                            probe_out.emel_conditioning_ns,
@@ -4234,98 +2532,51 @@ void append_emel_generation_cases(std::vector<result> & results, const config & 
 
         auto fn = [&]() {
           reset_generation_seam(session->seam);
-          const std::uint64_t flash_dispatch_calls_before =
-              session->generator->generation_flash_attention_dispatch_calls();
-          const std::uint64_t optimized_flash_dispatch_calls_before =
-              session->generator->generation_optimized_flash_dispatch_calls();
-          const std::uint64_t shared_flash_dispatch_calls_before =
-              session->generator->generation_shared_flash_dispatch_calls();
-          native_quantized_stage_count =
-              session->generator->generation_native_quantized_stage_count();
-          approved_dense_f32_stage_count =
-              session->generator->generation_approved_dense_f32_stage_count();
-          disallowed_fallback_stage_count =
-              session->generator->generation_disallowed_fallback_stage_count();
-          explicit_no_claim_stage_count =
-              session->generator->generation_explicit_no_claim_stage_count();
-          const std::uint64_t native_q8_0_dispatch_calls_before =
-              session->generator->generation_native_q8_0_dispatch_calls();
-          const std::uint64_t packed_q8_0_dispatch_calls_before =
-              session->generator->generation_packed_q8_0_dispatch_calls();
-          const std::uint64_t optimized_q2_dispatch_calls_before =
-              session->generator->generation_optimized_q2_dispatch_calls();
-          const std::uint64_t shared_q2_dispatch_calls_before =
-              session->generator->generation_shared_q2_dispatch_calls();
-          const std::uint64_t optimized_q3_dispatch_calls_before =
-              session->generator->generation_optimized_q3_dispatch_calls();
-          const std::uint64_t shared_q3_dispatch_calls_before =
-              session->generator->generation_shared_q3_dispatch_calls();
-          const std::uint64_t optimized_q4_dispatch_calls_before =
-              session->generator->generation_optimized_q4_dispatch_calls();
-          const std::uint64_t shared_q4_dispatch_calls_before =
-              session->generator->generation_shared_q4_dispatch_calls();
-          const std::uint64_t optimized_q6_dispatch_calls_before =
-              session->generator->generation_optimized_q6_dispatch_calls();
-          const std::uint64_t shared_q6_dispatch_calls_before =
-              session->generator->generation_shared_q6_dispatch_calls();
+          emel::text::generator::diagnostics before = {};
+          if (!capture_generator_diagnostics(*session, before)) {
+            fail_bench_setup("capture_generator_diagnostics_before", generation_case.name.data());
+          }
+          native_quantized_stage_count = before.native_quantized_stage_count;
+          approved_dense_f32_stage_count = before.approved_dense_f32_stage_count;
+          disallowed_fallback_stage_count = before.disallowed_fallback_stage_count;
+          explicit_no_claim_stage_count = before.explicit_no_claim_stage_count;
 
           generation_result generated{};
           if (!run_emel_generate(*session, generation_case, generated)) {
             fail_bench_setup("run_emel_generate", generation_case.name.data());
           }
           latest_generated = generated;
-          const std::uint64_t flash_dispatch_calls_after =
-              session->generator->generation_flash_attention_dispatch_calls();
-          const std::uint64_t optimized_flash_dispatch_calls_after =
-              session->generator->generation_optimized_flash_dispatch_calls();
-          const std::uint64_t shared_flash_dispatch_calls_after =
-              session->generator->generation_shared_flash_dispatch_calls();
-          const std::uint64_t native_q8_0_dispatch_calls_after =
-              session->generator->generation_native_q8_0_dispatch_calls();
-          const std::uint64_t packed_q8_0_dispatch_calls_after =
-              session->generator->generation_packed_q8_0_dispatch_calls();
-          const std::uint64_t optimized_q2_dispatch_calls_after =
-              session->generator->generation_optimized_q2_dispatch_calls();
-          const std::uint64_t shared_q2_dispatch_calls_after =
-              session->generator->generation_shared_q2_dispatch_calls();
-          const std::uint64_t optimized_q3_dispatch_calls_after =
-              session->generator->generation_optimized_q3_dispatch_calls();
-          const std::uint64_t shared_q3_dispatch_calls_after =
-              session->generator->generation_shared_q3_dispatch_calls();
-          const std::uint64_t optimized_q4_dispatch_calls_after =
-              session->generator->generation_optimized_q4_dispatch_calls();
-          const std::uint64_t shared_q4_dispatch_calls_after =
-              session->generator->generation_shared_q4_dispatch_calls();
-          const std::uint64_t optimized_q6_dispatch_calls_after =
-              session->generator->generation_optimized_q6_dispatch_calls();
-          const std::uint64_t shared_q6_dispatch_calls_after =
-              session->generator->generation_shared_q6_dispatch_calls();
+          emel::text::generator::diagnostics after = {};
+          if (!capture_generator_diagnostics(*session, after)) {
+            fail_bench_setup("capture_generator_diagnostics_after", generation_case.name.data());
+          }
           seam = session->seam;
-          flash_dispatch_calls = flash_dispatch_calls_after - flash_dispatch_calls_before;
+          flash_dispatch_calls =
+              after.flash_attention_dispatch_calls - before.flash_attention_dispatch_calls;
           optimized_flash_dispatch_calls =
-              optimized_flash_dispatch_calls_after - optimized_flash_dispatch_calls_before;
+              after.optimized_flash_dispatch_calls - before.optimized_flash_dispatch_calls;
           shared_flash_dispatch_calls =
-              shared_flash_dispatch_calls_after - shared_flash_dispatch_calls_before;
+              after.shared_flash_dispatch_calls - before.shared_flash_dispatch_calls;
           native_q8_0_dispatch_calls =
-              native_q8_0_dispatch_calls_after - native_q8_0_dispatch_calls_before;
+              after.native_q8_0_dispatch_calls - before.native_q8_0_dispatch_calls;
           packed_q8_0_dispatch_calls =
-              packed_q8_0_dispatch_calls_after - packed_q8_0_dispatch_calls_before;
+              after.packed_q8_0_dispatch_calls - before.packed_q8_0_dispatch_calls;
           optimized_q2_dispatch_calls =
-              optimized_q2_dispatch_calls_after - optimized_q2_dispatch_calls_before;
+              after.optimized_q2_dispatch_calls - before.optimized_q2_dispatch_calls;
           shared_q2_dispatch_calls =
-              shared_q2_dispatch_calls_after - shared_q2_dispatch_calls_before;
+              after.shared_q2_dispatch_calls - before.shared_q2_dispatch_calls;
           optimized_q3_dispatch_calls =
-              optimized_q3_dispatch_calls_after - optimized_q3_dispatch_calls_before;
+              after.optimized_q3_dispatch_calls - before.optimized_q3_dispatch_calls;
           shared_q3_dispatch_calls =
-              shared_q3_dispatch_calls_after - shared_q3_dispatch_calls_before;
+              after.shared_q3_dispatch_calls - before.shared_q3_dispatch_calls;
           optimized_q4_dispatch_calls =
-              optimized_q4_dispatch_calls_after - optimized_q4_dispatch_calls_before;
+              after.optimized_q4_dispatch_calls - before.optimized_q4_dispatch_calls;
           shared_q4_dispatch_calls =
-              shared_q4_dispatch_calls_after - shared_q4_dispatch_calls_before;
+              after.shared_q4_dispatch_calls - before.shared_q4_dispatch_calls;
           optimized_q6_dispatch_calls =
-              optimized_q6_dispatch_calls_after - optimized_q6_dispatch_calls_before;
+              after.optimized_q6_dispatch_calls - before.optimized_q6_dispatch_calls;
           shared_q6_dispatch_calls =
-              shared_q6_dispatch_calls_after - shared_q6_dispatch_calls_before;
+              after.shared_q6_dispatch_calls - before.shared_q6_dispatch_calls;
           sink ^= generated.output_length;
         };
 
@@ -4445,98 +2696,53 @@ void append_emel_generation_cases(std::vector<result> & results, const config & 
 
       auto fn = [&]() {
         reset_generation_seam(session->seam);
-        const std::uint64_t flash_dispatch_calls_before =
-            session->generator->generation_flash_attention_dispatch_calls();
-        const std::uint64_t optimized_flash_dispatch_calls_before =
-            session->generator->generation_optimized_flash_dispatch_calls();
-        const std::uint64_t shared_flash_dispatch_calls_before =
-            session->generator->generation_shared_flash_dispatch_calls();
-        native_quantized_stage_count =
-            session->generator->generation_native_quantized_stage_count();
-        approved_dense_f32_stage_count =
-            session->generator->generation_approved_dense_f32_stage_count();
-        disallowed_fallback_stage_count =
-            session->generator->generation_disallowed_fallback_stage_count();
-        explicit_no_claim_stage_count =
-            session->generator->generation_explicit_no_claim_stage_count();
-        const std::uint64_t native_q8_0_dispatch_calls_before =
-            session->generator->generation_native_q8_0_dispatch_calls();
-        const std::uint64_t packed_q8_0_dispatch_calls_before =
-            session->generator->generation_packed_q8_0_dispatch_calls();
-        const std::uint64_t optimized_q2_dispatch_calls_before =
-            session->generator->generation_optimized_q2_dispatch_calls();
-        const std::uint64_t shared_q2_dispatch_calls_before =
-            session->generator->generation_shared_q2_dispatch_calls();
-        const std::uint64_t optimized_q3_dispatch_calls_before =
-            session->generator->generation_optimized_q3_dispatch_calls();
-        const std::uint64_t shared_q3_dispatch_calls_before =
-            session->generator->generation_shared_q3_dispatch_calls();
-        const std::uint64_t optimized_q4_dispatch_calls_before =
-            session->generator->generation_optimized_q4_dispatch_calls();
-        const std::uint64_t shared_q4_dispatch_calls_before =
-            session->generator->generation_shared_q4_dispatch_calls();
-        const std::uint64_t optimized_q6_dispatch_calls_before =
-            session->generator->generation_optimized_q6_dispatch_calls();
-        const std::uint64_t shared_q6_dispatch_calls_before =
-            session->generator->generation_shared_q6_dispatch_calls();
+        emel::text::generator::diagnostics before = {};
+        if (!capture_generator_diagnostics(*session, before)) {
+          fail_bench_setup("capture_generator_diagnostics_before",
+                           generation_case.name.data());
+        }
+        native_quantized_stage_count = before.native_quantized_stage_count;
+        approved_dense_f32_stage_count = before.approved_dense_f32_stage_count;
+        disallowed_fallback_stage_count = before.disallowed_fallback_stage_count;
+        explicit_no_claim_stage_count = before.explicit_no_claim_stage_count;
 
         generation_result generated{};
         if (!run_emel_generate(*session, generation_case, generated)) {
           fail_bench_setup("run_emel_generate", generation_case.name.data());
         }
         latest_generated = generated;
-        const std::uint64_t flash_dispatch_calls_after =
-            session->generator->generation_flash_attention_dispatch_calls();
-        const std::uint64_t optimized_flash_dispatch_calls_after =
-            session->generator->generation_optimized_flash_dispatch_calls();
-        const std::uint64_t shared_flash_dispatch_calls_after =
-            session->generator->generation_shared_flash_dispatch_calls();
-        const std::uint64_t native_q8_0_dispatch_calls_after =
-            session->generator->generation_native_q8_0_dispatch_calls();
-        const std::uint64_t packed_q8_0_dispatch_calls_after =
-            session->generator->generation_packed_q8_0_dispatch_calls();
-        const std::uint64_t optimized_q2_dispatch_calls_after =
-            session->generator->generation_optimized_q2_dispatch_calls();
-        const std::uint64_t shared_q2_dispatch_calls_after =
-            session->generator->generation_shared_q2_dispatch_calls();
-        const std::uint64_t optimized_q3_dispatch_calls_after =
-            session->generator->generation_optimized_q3_dispatch_calls();
-        const std::uint64_t shared_q3_dispatch_calls_after =
-            session->generator->generation_shared_q3_dispatch_calls();
-        const std::uint64_t optimized_q4_dispatch_calls_after =
-            session->generator->generation_optimized_q4_dispatch_calls();
-        const std::uint64_t shared_q4_dispatch_calls_after =
-            session->generator->generation_shared_q4_dispatch_calls();
-        const std::uint64_t optimized_q6_dispatch_calls_after =
-            session->generator->generation_optimized_q6_dispatch_calls();
-        const std::uint64_t shared_q6_dispatch_calls_after =
-            session->generator->generation_shared_q6_dispatch_calls();
+        emel::text::generator::diagnostics after = {};
+        if (!capture_generator_diagnostics(*session, after)) {
+          fail_bench_setup("capture_generator_diagnostics_after",
+                           generation_case.name.data());
+        }
         seam = session->seam;
-        flash_dispatch_calls = flash_dispatch_calls_after - flash_dispatch_calls_before;
+        flash_dispatch_calls =
+            after.flash_attention_dispatch_calls - before.flash_attention_dispatch_calls;
         optimized_flash_dispatch_calls =
-            optimized_flash_dispatch_calls_after - optimized_flash_dispatch_calls_before;
+            after.optimized_flash_dispatch_calls - before.optimized_flash_dispatch_calls;
         shared_flash_dispatch_calls =
-            shared_flash_dispatch_calls_after - shared_flash_dispatch_calls_before;
+            after.shared_flash_dispatch_calls - before.shared_flash_dispatch_calls;
         native_q8_0_dispatch_calls =
-            native_q8_0_dispatch_calls_after - native_q8_0_dispatch_calls_before;
+            after.native_q8_0_dispatch_calls - before.native_q8_0_dispatch_calls;
         packed_q8_0_dispatch_calls =
-            packed_q8_0_dispatch_calls_after - packed_q8_0_dispatch_calls_before;
+            after.packed_q8_0_dispatch_calls - before.packed_q8_0_dispatch_calls;
         optimized_q2_dispatch_calls =
-            optimized_q2_dispatch_calls_after - optimized_q2_dispatch_calls_before;
+            after.optimized_q2_dispatch_calls - before.optimized_q2_dispatch_calls;
         shared_q2_dispatch_calls =
-            shared_q2_dispatch_calls_after - shared_q2_dispatch_calls_before;
+            after.shared_q2_dispatch_calls - before.shared_q2_dispatch_calls;
         optimized_q3_dispatch_calls =
-            optimized_q3_dispatch_calls_after - optimized_q3_dispatch_calls_before;
+            after.optimized_q3_dispatch_calls - before.optimized_q3_dispatch_calls;
         shared_q3_dispatch_calls =
-            shared_q3_dispatch_calls_after - shared_q3_dispatch_calls_before;
+            after.shared_q3_dispatch_calls - before.shared_q3_dispatch_calls;
         optimized_q4_dispatch_calls =
-            optimized_q4_dispatch_calls_after - optimized_q4_dispatch_calls_before;
+            after.optimized_q4_dispatch_calls - before.optimized_q4_dispatch_calls;
         shared_q4_dispatch_calls =
-            shared_q4_dispatch_calls_after - shared_q4_dispatch_calls_before;
+            after.shared_q4_dispatch_calls - before.shared_q4_dispatch_calls;
         optimized_q6_dispatch_calls =
-            optimized_q6_dispatch_calls_after - optimized_q6_dispatch_calls_before;
+            after.optimized_q6_dispatch_calls - before.optimized_q6_dispatch_calls;
         shared_q6_dispatch_calls =
-            shared_q6_dispatch_calls_after - shared_q6_dispatch_calls_before;
+            after.shared_q6_dispatch_calls - before.shared_q6_dispatch_calls;
         sink ^= generated.output_length;
       };
 

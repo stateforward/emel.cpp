@@ -1578,6 +1578,28 @@ inline size_t quantized_row_storage_bytes(const uint8_t code, const uint64_t col
   return 0u;
 }
 
+inline size_t row_storage_bytes_for_dtype(const uint8_t code, const uint64_t cols) noexcept {
+  if (code == dtype_f32) {
+    return static_cast<size_t>(cols) * sizeof(float);
+  }
+  if (code == dtype_q8_0_x4_bl4 || code == dtype_q8_0_x4_bl8) {
+    return quant::packed_q8_0_x4_group_storage_bytes(cols);
+  }
+  if (code == dtype_q4_k_x8_bl4 || code == dtype_q4_k_x8_bl8) {
+    return quant::packed_q4_k_x8_group_storage_bytes(cols);
+  }
+  if (code == dtype_q6_k_x8) {
+    return quant::packed_q6_k_x8_group_storage_bytes(cols);
+  }
+  if (code == dtype_q6_k_x8_q8_prepared) {
+    return quant::prepared_q6_k_x8_q8_group_storage_bytes(cols);
+  }
+  if (code == dtype_q6_k_x8_q8_argmax_prepared) {
+    return quant::argmax_prepared_q6_k_x8_q8_group_storage_bytes(cols);
+  }
+  return quantized_row_storage_bytes(code, cols);
+}
+
 template <class tensor_type>
 inline uint64_t tensor_element_count(const tensor_type & tensor) noexcept {
   uint64_t count = 1;
@@ -1602,8 +1624,8 @@ inline bool has_valid_tensor_layout(const tensor_type & tensor) noexcept {
   const uint64_t elem_size = dtype_size_bytes(dtype_code(tensor.type));
   const bool elem_valid = elem_size != 0u;
   const bool explicit_stride = tensor.nb[0] != 0u;
-  const bool aligned_stride =
-      explicit_stride && tensor.nb[0] >= elem_size && (tensor.nb[0] % elem_size) == 0u;
+  const bool aligned_stride = elem_valid && explicit_stride && tensor.nb[0] >= elem_size &&
+      (tensor.nb[0] % elem_size) == 0u;
 
   bool dims_valid = true;
   for (size_t i = 0; i < 4; ++i) {

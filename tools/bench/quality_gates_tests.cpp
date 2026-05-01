@@ -41,3 +41,15 @@ TEST_CASE("quality gates full benchmark branch preserves failure status") {
   CHECK(full_branch.find("return \"$status\"") != std::string::npos);
   CHECK(full_branch.find("return $?") == std::string::npos);
 }
+
+TEST_CASE("quality gates exclude nested sml machine headers from coverage source set") {
+  const std::string script = read_file(repo_root() / "scripts" / "quality_gates.sh");
+  const std::size_t helper_start = script.find("is_coverage_excluded_src_file()");
+  REQUIRE(helper_start != std::string::npos);
+
+  const std::size_t helper_end = script.find("changed_files=()", helper_start);
+  REQUIRE(helper_end != std::string::npos);
+
+  const std::string helper = script.substr(helper_start, helper_end - helper_start);
+  CHECK(helper.find("src/emel/**/*/sm.hpp") != std::string::npos);
+}

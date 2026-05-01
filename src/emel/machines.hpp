@@ -10,13 +10,13 @@
 #include "emel/text/encoders/sm.hpp"
 #include "emel/text/conditioner/sm.hpp"
 #include "emel/text/detokenizer/sm.hpp"
-#include "emel/generator/sm.hpp"
 #include "emel/memory/hybrid/sm.hpp"
 #include "emel/memory/kv/sm.hpp"
 #include "emel/memory/recurrent/sm.hpp"
 #include "emel/model/loader/sm.hpp"
 #include "emel/gguf/loader/sm.hpp"
 #include "emel/model/weight_loader/sm.hpp"
+#include "emel/text/generator/sm.hpp"
 #include "emel/text/renderer/sm.hpp"
 #include "emel/text/tokenizer/sm.hpp"
 
@@ -37,7 +37,7 @@ using EncoderUgm = emel::text::encoders::ugm::sm;
 using EncoderRwkv = emel::text::encoders::rwkv::sm;
 using EncoderPlamo2 = emel::text::encoders::plamo2::sm;
 using EncoderFallback = emel::text::encoders::fallback::sm;
-using Generator = emel::generator::sm;
+using Generator = emel::text::generator::sm;
 using MemoryHybrid = emel::memory::hybrid::sm;
 using KvCache = emel::memory::kv::sm;
 using MemoryRecurrent = emel::memory::recurrent::sm;

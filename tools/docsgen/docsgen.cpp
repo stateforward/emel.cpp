@@ -1,6 +1,5 @@
 #include <boost/sml.hpp>
 
-#include <charconv>
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
@@ -360,29 +359,6 @@ std::optional<std::string> render_template(const fs::path & template_path,
 }
 
 std::optional<std::unordered_map<std::string, std::string>>
-parse_key_value_file(const fs::path & path) {
-  const std::string content = read_file(path);
-  if (content.empty()) {
-    std::fprintf(stderr, "error: unable to read %s\n", path.string().c_str());
-    return std::nullopt;
-  }
-
-  std::unordered_map<std::string, std::string> fields;
-  std::istringstream input(content);
-  for (std::string line; std::getline(input, line);) {
-    if (line.empty() || line[0] == '#') {
-      continue;
-    }
-    const std::size_t separator = line.find('=');
-    if (separator == std::string::npos || separator == 0u) {
-      continue;
-    }
-    fields.emplace(line.substr(0u, separator), line.substr(separator + 1u));
-  }
-  return fields;
-}
-
-std::optional<std::unordered_map<std::string, std::string>>
 parse_inline_key_value_fields(const std::string & line, const char * prefix) {
   const std::string_view prefix_view{prefix};
   if (line.rfind(prefix_view.data(), 0u) != 0) {
@@ -735,19 +711,90 @@ std::optional<benchmark_snapshot> parse_benchmarks_snapshot(const doc_paths & pa
 }
 
 std::optional<std::string> build_benchmarks_table(const benchmark_snapshot & snapshot) {
-  std::string table;
-  table += "| Benchmark | emel.cpp ns/op | llama.cpp ns/op | ratio |\n";
-  table += "| --- | ---: | ---: | ---: |\n";
+  struct table_row {
+    std::string name;
+    std::string emel_ns;
+    std::string reference;
+    std::string reference_ns;
+    std::string comparison;
+  };
+
+  const auto parse_ns = [](const std::string & raw) -> std::optional<double> {
+    char * end = nullptr;
+    const double value = std::strtod(raw.c_str(), &end);
+    if (end == raw.c_str() || *end != '\0') {
+      return std::nullopt;
+    }
+    return value;
+  };
+
+  const auto format_comparison =
+      [&](const benchmark_diarization_compare_row & row) -> std::optional<std::string> {
+    const auto emel_ns = parse_ns(row.emel_ns);
+    const auto reference_ns = parse_ns(row.reference_ns);
+    if (!emel_ns.has_value() || !reference_ns.has_value() || *reference_ns == 0.0) {
+      return std::nullopt;
+    }
+
+    char timing[64];
+    const double ratio = *emel_ns / *reference_ns;
+    const double delta_pct = ((*emel_ns - *reference_ns) / *reference_ns) * 100.0;
+    std::snprintf(timing, sizeof(timing), "%.3fx (%+.1f%%)", ratio, delta_pct);
+
+    std::string comparison = timing;
+    comparison += ", ";
+    comparison += row.proof_status;
+    return comparison;
+  };
+
+  std::vector<table_row> rows;
+  rows.reserve(snapshot.rows.size() + snapshot.diarization_compare_rows.size());
   for (const auto & row : snapshot.rows) {
+    rows.push_back(table_row{
+        .name = row.name,
+        .emel_ns = row.emel_ns,
+        .reference = "llama.cpp",
+        .reference_ns = row.llama_ns,
+        .comparison = row.ratio + "x",
+    });
+  }
+  for (const auto & row : snapshot.diarization_compare_rows) {
+    if (row.reference_label == "reference-baseline") {
+      continue;
+    }
+    const auto comparison = format_comparison(row);
+    if (!comparison.has_value()) {
+      std::fprintf(stderr, "error: invalid diarization timing row for %s\n", row.name.c_str());
+      return std::nullopt;
+    }
+    rows.push_back(table_row{
+        .name = row.name,
+        .emel_ns = row.emel_ns,
+        .reference = row.reference_label,
+        .reference_ns = row.reference_ns,
+        .comparison = *comparison,
+    });
+  }
+
+  std::sort(rows.begin(), rows.end(), [](const table_row & lhs, const table_row & rhs) {
+    return lhs.name < rhs.name;
+  });
+
+  std::string table;
+  table += "| Benchmark | emel.cpp ns/op | Reference | Reference ns/op | Comparison |\n";
+  table += "| --- | ---: | --- | ---: | --- |\n";
+  for (const auto & row : rows) {
     table += "| `";
     table += row.name;
     table += "` | ";
     table += row.emel_ns;
     table += " | ";
-    table += row.llama_ns;
+    table += row.reference;
     table += " | ";
-    table += row.ratio;
-    table += "x |\n";
+    table += row.reference_ns;
+    table += " | ";
+    table += row.comparison;
+    table += " |\n";
   }
   return table;
 }
@@ -982,294 +1029,16 @@ const benchmark_diarization_compare_row * find_diarization_compare_row(
   return nullptr;
 }
 
-std::optional<double> parse_double_field(const std::string & raw_value,
-                                         const char * field_name,
-                                         const fs::path & source_path) {
-  double value = 0.0;
-  const char * const begin = raw_value.data();
-  const char * const end = begin + raw_value.size();
-  const auto result = std::from_chars(begin, end, value);
-  const bool parsed_ok = result.ec == std::errc{} && result.ptr == end;
-  if (!parsed_ok) {
-    std::fprintf(stderr,
-                 "error: invalid %s=%s in %s\n",
-                 field_name,
-                 raw_value.c_str(),
-                 source_path.string().c_str());
-    return std::nullopt;
-  }
-  return value;
-}
-
-std::optional<std::string> build_flash_publication_section(const doc_paths & paths,
-                                                           const benchmark_snapshot & snapshot) {
-  const benchmark_row * current = find_benchmark_row(snapshot, snapshot.flash_case);
-  if (current == nullptr) {
-    std::fprintf(stderr,
-                 "error: missing benchmark row for %s in %s\n",
-                 snapshot.flash_case.c_str(),
-                 paths.benchmarks_snapshot.string().c_str());
-    return std::nullopt;
-  }
-
-  std::string section;
-  section += "## Current Generation Evidence\n\n";
-  section += "- Source snapshot: `snapshots/bench/benchmarks_compare.txt`\n";
-  section += "- `benchmark_config: ";
-  section += snapshot.benchmark_config;
-  section += "`\n";
-  section += "- `reference_impl: source=";
-  section += snapshot.reference_source;
-  section += " ref=";
-  section += snapshot.reference_ref;
-  section += "`\n";
-  if (!snapshot.architecture_contract.empty()) {
-    section += "- `generation_architecture: ";
-    section += snapshot.architecture_contract;
-    section += "`\n";
-  }
-  section += "- `generation_formatter_contract: ";
-  section += snapshot.formatter_contract;
-  section += "`\n";
-  section += "- `generation_flash_evidence: case=";
-  section += snapshot.flash_case;
-  section += " flash_dispatch_calls=";
-  section += snapshot.flash_dispatch_calls;
-  section += " optimized_flash_dispatch_calls=";
-  section += snapshot.optimized_flash_dispatch_calls;
-  section += " shared_flash_dispatch_calls=";
-  section += snapshot.shared_flash_dispatch_calls;
-  section += " emel_decode_calls=";
-  section += snapshot.emel_decode_calls;
-  section += " emel_logits_calls=";
-  section += snapshot.emel_logits_calls;
-  section += " reference_decode_calls=";
-  section += snapshot.reference_decode_calls;
-  section += " reference_logits_calls=";
-  section += snapshot.reference_logits_calls;
-  section += "`\n";
-  section += "- Current compare row: `";
-  section += current->name;
-  section += " emel.cpp ";
-  section += current->emel_ns;
-  section += " ns/op, llama.cpp ";
-  section += current->llama_ns;
-  section += " ns/op, ratio=";
-  section += current->ratio;
-  section += "x`\n\n";
-  section += "- The compare table below keeps additive generation rows for all maintained "
-             "supported fixtures; this evidence block stays tied to the current maintained "
-             "publication case.\n\n";
-  section += "## Current Quantized Evidence\n\n";
-  section += "- Source snapshot: `snapshots/bench/benchmarks_compare.txt`\n";
-  section += "- `generation_runtime_contract: case=";
-  section += snapshot.runtime_contract_case;
-  section += " native_quantized=";
-  section += snapshot.native_quantized_stage_count;
-  section += " approved_dense_f32_by_contract=";
-  section += snapshot.approved_dense_f32_stage_count;
-  section += " disallowed_fallback=";
-  section += snapshot.disallowed_fallback_stage_count;
-  section += " explicit_no_claim=";
-  section += snapshot.explicit_no_claim_stage_count;
-  section += "`\n";
-  section += "- `generation_quantized_evidence: case=";
-  section += snapshot.quantized_case;
-  section += " native_q8_0_dispatch_calls=";
-  section += snapshot.native_q8_0_dispatch_calls;
-  section += " packed_q8_0_dispatch_calls=";
-  section += snapshot.packed_q8_0_dispatch_calls;
-  section += " optimized_q2_dispatch_calls=";
-  section += snapshot.optimized_q2_dispatch_calls;
-  section += " shared_q2_dispatch_calls=";
-  section += snapshot.shared_q2_dispatch_calls;
-  section += " optimized_q3_dispatch_calls=";
-  section += snapshot.optimized_q3_dispatch_calls;
-  section += " shared_q3_dispatch_calls=";
-  section += snapshot.shared_q3_dispatch_calls;
-  section += " optimized_q4_dispatch_calls=";
-  section += snapshot.optimized_q4_dispatch_calls;
-  section += " shared_q4_dispatch_calls=";
-  section += snapshot.shared_q4_dispatch_calls;
-  section += " optimized_q6_dispatch_calls=";
-  section += snapshot.optimized_q6_dispatch_calls;
-  section += " shared_q6_dispatch_calls=";
-  section += snapshot.shared_q6_dispatch_calls;
-  section += "`\n\n";
-  section += "- Contract summary: the maintained canonical ";
-  section += snapshot.architecture_contract == "lfm2" ? "Liquid" : "generation";
-  section += " workload stayed on the approved runtime contract with explicit "
-             "dense-f32-by-contract stages, native quantized dispatch on the maintained path, "
-             "and no disallowed fallback or explicit no-claim branch on the supported path.\n\n";
-
-  if (!snapshot.generation_stage_probes.empty()) {
-    section += "## Generation Stage Probes\n\n";
-    section += "- These are single-run benchmark-local probes. Full-request totals are exact, "
-               "and the emitted EMEL prompt metadata records the resolved prefill contract, "
-               "prompt-token count, and planner step size used to interpret the split.\n";
-    for (const auto & probe : snapshot.generation_stage_probes) {
-      section += "- `generation_stage_probe: case=";
-      section += probe.name;
-      section += " emel_prefill_contract=";
-      section += probe.emel_prefill_contract;
-      section += " emel_prompt_tokens=";
-      section += probe.emel_prompt_tokens;
-      section += " emel_prefill_step_size=";
-      section += probe.emel_prefill_step_size;
-      section += " emel_total_ns=";
-      section += probe.emel_total_ns;
-      section += " emel_conditioning_ns=";
-      section += probe.emel_conditioning_ns;
-      section += " emel_prefill_ns=";
-      section += probe.emel_prefill_ns;
-    section += " emel_first_decode_ns=";
-    section += probe.emel_first_decode_ns;
-    section += " emel_steady_decode_ns=";
-    section += probe.emel_steady_decode_ns;
-    section += " emel_unattributed_ns=";
-    section += probe.emel_unattributed_ns;
-    section += " emel_prefill_linear_probe_ns=";
-    section += probe.emel_prefill_linear_probe_ns;
-    section += " emel_prefill_attention_probe_ns=";
-    section += probe.emel_prefill_attention_probe_ns;
-    section += " emel_prefill_misc_probe_ns=";
-    section += probe.emel_prefill_misc_probe_ns;
-    section += " reference_total_ns=";
-    section += probe.reference_total_ns;
-    section += " reference_conditioning_ns=";
-    section += probe.reference_conditioning_ns;
-    section += " reference_prefill_ns=";
-      section += probe.reference_prefill_ns;
-    section += " reference_first_decode_ns=";
-    section += probe.reference_first_decode_ns;
-    section += " reference_steady_decode_ns=";
-    section += probe.reference_steady_decode_ns;
-    section += " reference_unattributed_ns=";
-    section += probe.reference_unattributed_ns;
-    section += " reference_prefill_linear_probe_ns=";
-    section += probe.reference_prefill_linear_probe_ns;
-    section += " reference_prefill_attention_probe_ns=";
-    section += probe.reference_prefill_attention_probe_ns;
-    section += " reference_prefill_misc_probe_ns=";
-    section += probe.reference_prefill_misc_probe_ns;
-    section += "`\n";
-  }
-    section += "\n";
-  }
-
-  if (!fs::exists(paths.generation_pre_arm_flash_optimized_baseline)) {
-    return section;
-  }
-
-  const auto baseline =
-      parse_key_value_file(paths.generation_pre_arm_flash_optimized_baseline);
-  if (!baseline.has_value()) {
-    return std::nullopt;
-  }
-
-  for (const char * field : {"source_commit",
-                             "baseline_ref",
-                             "case",
-                             "baseline_emel_ns",
-                             "baseline_reference_ns",
-                             "baseline_ratio"}) {
-    if (!baseline->contains(field)) {
-      std::fprintf(stderr,
-                   "error: missing %s in %s\n",
-                   field,
-                   paths.generation_pre_arm_flash_optimized_baseline.string().c_str());
-      return std::nullopt;
-    }
-  }
-
-  section += "## Preserved ARM Flash Baseline\n\n";
-  section += "- Preserved baseline artifact: "
-             "`snapshots/bench/generation_pre_arm_flash_optimized_baseline.txt`\n";
-  section += "- `source_commit=";
-  section += baseline->at("source_commit");
-  section += "`\n";
-  section += "- `baseline_ref=";
-  section += baseline->at("baseline_ref");
-  section += "`\n";
-  section += "- `case=";
-  section += baseline->at("case");
-  section += "`\n";
-  section += "- `baseline_emel_ns=";
-  section += baseline->at("baseline_emel_ns");
-  section += "`\n";
-  section += "- `baseline_reference_ns=";
-  section += baseline->at("baseline_reference_ns");
-  section += "`\n";
-  section += "- `baseline_ratio=";
-  section += baseline->at("baseline_ratio");
-  section += "`\n";
-
-  const std::string & baseline_case = baseline->at("case");
-  const benchmark_row * current_baseline_case = find_benchmark_row(snapshot, baseline_case);
-  if (current_baseline_case == nullptr) {
-    section += "- Note: this preserved ARM flash baseline remains tied to the archived Llama "
-               "canonical slice and is not directly compared against the current maintained "
-               "publication because the benchmark case identity changed explicitly.\n";
-    return section;
-  }
-
-  const auto baseline_emel =
-      parse_double_field(baseline->at("baseline_emel_ns"),
-                         "baseline_emel_ns",
-                         paths.generation_pre_arm_flash_optimized_baseline);
-  if (!baseline_emel.has_value()) {
-    return std::nullopt;
-  }
-
-  const auto current_emel =
-      parse_double_field(current_baseline_case->emel_ns,
-                         "current_emel_ns",
-                         paths.benchmarks_snapshot);
-  if (!current_emel.has_value()) {
-    return std::nullopt;
-  }
-
-  const double speedup = *baseline_emel / *current_emel;
-  const double latency_drop_pct = ((*baseline_emel - *current_emel) / *baseline_emel) * 100.0;
-
-  char speedup_buf[32];
-  char latency_buf[32];
-  std::snprintf(speedup_buf, sizeof(speedup_buf), "%.3fx", speedup);
-  std::snprintf(latency_buf, sizeof(latency_buf), "%.1f", latency_drop_pct);
-  section += "- `current_emel_ns=";
-  section += current_baseline_case->emel_ns;
-  section += "`\n";
-  section += "- `current_reference_ns=";
-  section += current_baseline_case->llama_ns;
-  section += "`\n";
-  section += "- `current_ratio=";
-  section += current_baseline_case->ratio;
-  section += "x`\n";
-  section += "- `speedup=";
-  section += speedup_buf;
-  section += "`\n";
-  section += "- `latency_drop_pct=";
-  section += latency_buf;
-  section += "`\n";
-
-  return section;
-}
-
 std::optional<std::string> build_sortformer_publication_section(const doc_paths & paths,
                                                                 const benchmark_snapshot & snapshot) {
   const std::string primary_case =
       "diarization/sortformer/ami_en2002b_mix_headset_137.00_152.04_16khz_mono";
-  const std::string profile_case =
-      "diarization/sortformer/profile_ami_en2002b_mix_headset_137.00_152.04_16khz_mono";
 
   const auto * primary_emel = find_diarization_record(snapshot, primary_case, "emel");
   const auto * primary_reference = find_diarization_record(snapshot, primary_case, "reference");
-  const auto * profile_emel = find_diarization_record(snapshot, profile_case, "emel");
   const auto * primary_row = find_diarization_compare_row(snapshot, primary_case);
-  const auto * profile_row = find_diarization_compare_row(snapshot, profile_case);
 
-  if (primary_emel == nullptr || primary_reference == nullptr || profile_emel == nullptr ||
-      primary_row == nullptr || profile_row == nullptr) {
+  if (primary_emel == nullptr || primary_reference == nullptr || primary_row == nullptr) {
     std::fprintf(stderr,
                  "error: missing diarization publication metadata in %s\n",
                  paths.benchmarks_snapshot.string().c_str());
@@ -1312,28 +1081,8 @@ std::optional<std::string> build_sortformer_publication_section(const doc_paths 
                "reference. PyTorch/NeMo remains the independent parity reference, and the ONNX "
                "row is only a closeout target after it exact-matches that parity lane.\n";
   }
-  section += "- Primary steady-state case: `";
-  section += primary_row->name;
-  section += " emel.cpp ";
-  section += primary_row->emel_ns;
-  section += " ns/op, ";
-  section += primary_row->reference_label;
-  section += " ";
-  section += primary_row->reference_ns;
-  section += " ns/op, proof_status=";
-  section += primary_row->proof_status;
-  section += "`\n";
-  section += "- Profile case: `";
-  section += profile_row->name;
-  section += " emel.cpp ";
-  section += profile_row->emel_ns;
-  section += " ns/op, ";
-  section += profile_row->reference_label;
-  section += " ";
-  section += profile_row->reference_ns;
-  section += " ns/op, proof_status=";
-  section += profile_row->proof_status;
-  section += "`\n";
+  section += "- Table row: the primary steady-state case is included in the benchmark table "
+             "above with its real reference timing and proof status.\n";
   section += "- Publication workflow: the deterministic compare artifacts now live under "
              "`scripts/bench_diarization_compare.sh`, which writes `raw/emel.jsonl`, "
              "`raw/reference.jsonl`, optional `raw/onnx_reference.jsonl`, and "
@@ -1378,8 +1127,6 @@ int main(int argc, char ** argv) {
   paths.benchmarks_md = paths.docs_dir / "benchmarks.md";
   paths.benchmarks_snapshot = paths.root / "snapshots/bench/benchmarks_compare.txt";
   paths.embedded_size_snapshot = paths.root / "snapshots/embedded_size/summary.txt";
-  paths.generation_pre_arm_flash_optimized_baseline =
-      paths.root / "snapshots/bench/generation_pre_arm_flash_optimized_baseline.txt";
   paths.benchmarks_template = paths.docs_dir / "templates/benchmarks.md.j2";
   paths.readme_template = paths.docs_dir / "templates/README.md.j2";
   paths.readme_path = paths.root / "README.md";
@@ -1417,11 +1164,6 @@ int main(int argc, char ** argv) {
   if (!benchmarks_table.has_value()) {
     return 1;
   }
-  const auto flash_publication_section =
-      build_flash_publication_section(paths, *benchmarks_snapshot);
-  if (!flash_publication_section.has_value()) {
-    return 1;
-  }
   const auto sortformer_publication_section =
       build_sortformer_publication_section(paths, *benchmarks_snapshot);
   if (!sortformer_publication_section.has_value()) {
@@ -1430,8 +1172,7 @@ int main(int argc, char ** argv) {
 
   const auto benchmarks_doc = render_template(
       paths.benchmarks_template,
-      {template_var{"flash_publication_section", *flash_publication_section},
-       template_var{"sortformer_publication_section", *sortformer_publication_section},
+      {template_var{"sortformer_publication_section", *sortformer_publication_section},
        template_var{"benchmarks_table", *benchmarks_table}});
   if (!benchmarks_doc.has_value()) {
     return 1;
