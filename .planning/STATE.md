@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.18
 milestone_name: Parity Tool Boundary Refactor
-status: milestone_ready_for_audit
-stopped_at: "Phase 156 completed; next action is v1.18 milestone re-audit."
-last_updated: "2026-05-01T06:10:00.000Z"
+status: milestone_complete
+stopped_at: "v1.18 milestone completed and archived; next action is `$gsd-new-milestone`."
+last_updated: "2026-05-01T05:04:02Z"
 last_activity: 2026-05-01
 progress:
-  total_phases: 4
-  completed_phases: 4
-  total_plans: 4
-  completed_plans: 4
+  total_phases: 9
+  completed_phases: 9
+  total_plans: 9
+  completed_plans: 9
   percent: 100
 ---
 
@@ -22,13 +22,13 @@ See: .planning/PROJECT.md (updated 2026-05-01)
 
 **Core value:** Prove real end-to-end behavior with explicit SML orchestration and parity-oriented
 verification before widening API surface or model scope.
-**Current focus:** Close v1.18 source-backed audit gaps before milestone archival resumes.
+**Current focus:** No active milestone; start the next milestone with fresh requirements.
 
 ## Current Position
 
-Phase: 156
+Phase: —
 Plan: —
-Status: Phase 156 complete; v1.18 ready for re-audit.
+Status: v1.18 milestone complete and archived.
 Last activity: 2026-05-01
 
 Progress: [##########] 100%
@@ -49,15 +49,13 @@ Items acknowledged and still deferred at milestone close on 2026-05-01:
 
 **Current milestone:**
 
-- Milestone: v1.18 Parity Tool Boundary Refactor
+- Milestone: none active
 
-- Current planning shape: reopened v1.18 gap closure.
-- Latest shipped milestone: `v1.17 Text Generator Domain Alignment`; v1.18 is not closeout-ready
-  until the reopened source-backed gaps pass audit.
+- Current planning shape: milestone closed; next milestone not yet defined.
+- Latest shipped milestone: `v1.18 Parity Tool Boundary Refactor`.
 
-- Next action: rerun v1.18 milestone audit and complete closeout if it passes.
-- Current blocker: none known after Phase 156; prior partial `MANIFEST-01` and `MANIFEST-02`
-  gaps have source-backed closure evidence.
+- Next action: start a new milestone with `$gsd-new-milestone`.
+- Current blocker: none known.
 
 ## Accumulated Context
 

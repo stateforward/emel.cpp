@@ -1,31 +1,45 @@
 # Project Milestones: EMEL
 
-## v1.18 Parity Tool Boundary Refactor (Shipped: 2026-05-01, Reopened: 2026-05-01)
+## v1.18 Parity Tool Boundary Refactor (Shipped: 2026-05-01)
 
-**Phases completed:** 5 phases, 5 plans, 0 tasks. Reopened gap closure phases 153-156 are now
-planned.
+**Phases completed:** 9 phases, 9 plans, 0 tasks, including reopened closure phases 153-156.
 
 **Delivered:** `tools/paritychecker` now has explicit runner, asset, engine, build-registration,
-dependency-manifest, behavior-preservation, and lane-isolation boundaries for existing tokenizer,
-GBNF, kernel, Jinja, and generation parity modes.
+dependency-manifest, behavior-preservation, lane-isolation, runner-owned CLI/config, live
+reference generation, actor-boundary enforcement, and manifest quality-gate boundaries for
+existing tokenizer, GBNF, kernel, Jinja, and generation parity modes.
 
 **Key accomplishments:**
 
 - Centralized paritychecker asset/path/byte-loading and maintained generation fixture resolution
   behind `parity_assets`.
+
 - Split tokenizer, GBNF, kernel, Jinja, and generation modes behind explicit `engine_adapter`
   registration.
+
 - Factored CMake into modular runner, manifest, engine-registration, engine-implementation,
   tokenizer-engine, reference-support, and common source groups.
+
 - Added `parity_dependency_manifest/v1` with deterministic per-mode records and conservative
   missing/stale/uncertain full-gate semantics.
+
 - Removed a reference-side bridge into EMEL detokenizer action detail and added lane-isolation
   source checks for shared runner and engine code.
 
-**Audit:** Reopened after a source-backed rerun found `gaps_found` with `6/12` active requirements
-satisfied. The blocker set is runner CLI/config ownership (`PARITY-01`), generation live reference
-truth (`PARITY-03`, `LANE-01`), actor-helper boundary enforcement (`LANE-02`), and dependency
-manifest production/gate consumption (`MANIFEST-01`, `MANIFEST-02`).
+- Moved usage text, argument parsing, text-file loading, and CLI validation behind the runner-owned
+  `run_parity_cli(...)` boundary.
+
+- Corrected maintained generation parity so it compares against live reference-lane output before
+  loading stored publication baselines.
+
+- Replaced paritychecker actor-internal includes with public GGUF/model/llama wrapper surfaces and
+  broadened source checks across all paritychecker sources.
+
+- Added maintained manifest write/check CLI operations and wired quality gates to force full parity
+  when manifest data is missing, stale, or uncertain.
+
+**Audit:** Final source-backed audit passed with 12/12 active requirements satisfied. The earlier
+`gaps_found` audit is superseded by the reopened Phase 153-156 closure chain.
 
 **Known deferred items at close:** 5 old non-phase items acknowledged and deferred; see
 `.planning/STATE.md` `Deferred Items`.

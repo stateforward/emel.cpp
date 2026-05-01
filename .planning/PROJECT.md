@@ -16,24 +16,24 @@ before widening API surface or model scope.
 
 ## Current State
 
-Current milestone: `v1.18 Parity Tool Boundary Refactor` reopened for source-backed gap closure
+Current milestone: none active
 
-Latest fully shipped milestone: `v1.17 Text Generator Domain Alignment`
+Latest shipped milestone: `v1.18 Parity Tool Boundary Refactor`
 
-Status: `v1.18` was reopened on 2026-05-01 after a source-backed audit found partial runner
-ownership, live generation reference truth, actor-boundary, and manifest-gate gaps. Phases 153-156
-have closed the reopened gap set; the milestone is ready for re-audit.
+Status: `v1.18` shipped on 2026-05-01 after reopened source-backed gap closure. The paritychecker
+now has runner-owned CLI/config parsing, live reference generation truth, actor-boundary source
+checks, and maintained dependency-manifest freshness gating.
 
-Current planning focus: re-audit v1.18 and proceed to milestone closeout if the audit passes.
+Current planning focus: start the next milestone with fresh requirements.
 
-## Reopened Milestone: v1.18 Parity Tool Boundary Refactor
+## Previous Shipped Milestone: v1.18 Parity Tool Boundary Refactor
 
 **Goal:** Refactor `tools/paritychecker` into explicit runner, engine, asset-loading, and
 dependency-manifest boundaries so new parity engines can be added locally without weakening
 EMEL/reference lane isolation or existing parity behavior.
 
 **Initial closeout:** 2026-05-01 from GitHub issue #54
-**Reopened:** 2026-05-01 for source-backed audit gap closure
+**Shipped:** 2026-05-01 after reopened source-backed gap closure
 
 **Delivered:**
 - Runner-owned path, byte-loading, and maintained generation fixture resolution helpers.
@@ -52,7 +52,7 @@ EMEL/reference lane isolation or existing parity behavior.
 - Maintained dependency-manifest CLI emission/check operations and quality-gate freshness
   escalation now force full parity when manifest data is missing, stale, or uncertain.
 
-**Open closure gaps:** None after Phase 156; pending re-audit.
+**Audit:** Final source-backed audit passed with 12/12 active requirements satisfied.
 
 ## Previous Shipped Milestone: v1.17 Text Generator Domain Alignment
 
@@ -211,16 +211,18 @@ truth anchor and without broadening into generic Liquid-family support.
 
 ### Active
 
-- v1.18 refactors `tools/paritychecker` so shared runner orchestration owns asset/config loading
-  and result normalization while mode-specific parity behavior lives behind explicit engine
-  adapters.
-- v1.18 preserves existing tokenizer, GBNF, kernel, Jinja, and generation parity behavior and keeps
-  EMEL/reference model, tokenizer, runtime, cache, and output ownership isolated by lane.
-- v1.18 adds per-runner dependency manifests so later quality gates can choose conservative parity
-  impact checks without treating missing or stale manifest data as a reason to skip relevant gates.
+No active milestone requirements. Start the next milestone with `$gsd-new-milestone`.
 
 ### Validated
 
+- ✓ v1.18 refactored `tools/paritychecker` so shared runner orchestration owns asset/config
+  loading, CLI parsing, and result normalization while mode-specific parity behavior lives behind
+  explicit engine adapters.
+- ✓ v1.18 preserves existing tokenizer, GBNF, kernel, Jinja, and generation parity behavior while
+  maintaining EMEL/reference model, tokenizer, runtime, cache, and output ownership isolation by
+  lane.
+- ✓ v1.18 adds maintained per-runner dependency manifest emission/checking and conservative
+  quality-gate escalation when manifest data is missing, stale, or uncertain.
 - ✓ v1.0 proved one canonical `Llama-68M-Chat-v1-Q2_K.gguf` slice end to end through
   `tools/paritychecker` with real GGUF/model loading, bounded generation, and subprocess coverage.
 - ✓ v1.1 added one truthful canonical generation benchmark in `tools/bench`, published through the
@@ -328,8 +330,7 @@ truth anchor and without broadening into generic Liquid-family support.
 
 ### Active
 
-- [x] Execute Phase 156 for dependency-manifest production/gate consumption.
-- [ ] Re-audit v1.18 after Phases 153-156 complete.
+- [ ] Start the next milestone with fresh requirements.
 
 ### Out of Scope
 
@@ -346,13 +347,12 @@ truth anchor and without broadening into generic Liquid-family support.
 ## Context
 
 This remains a brownfield repository with an existing codebase map under `.planning/codebase/`.
-The repo stays governed by `AGENTS.md` and `docs/rules/sml.rules.md`. `v1.18` is the active
-reopened milestone, and `v1.17` is the latest fully shipped milestone after the Phase 147 closeout
-gate and source-backed audit. The current maintained state includes repo-owned EMEL generation, embedding,
-diarization, and Whisper ASR lanes plus pluggable reference backends that publish through canonical
-compare contracts without shared runtime state. The generative text actor now lives under
-`text/generator`, with maintained generation parity and benchmark proof still driven through public
-actor events.
+The repo stays governed by `AGENTS.md` and `docs/rules/sml.rules.md`. `v1.18` is the latest
+shipped milestone after the reopened Phase 153-156 source-backed gap closure and final passing
+audit. The current maintained state includes repo-owned EMEL generation, embedding, diarization,
+and Whisper ASR lanes plus pluggable reference backends that publish through canonical compare
+contracts without shared runtime state. The generative text actor now lives under `text/generator`,
+with maintained generation parity and benchmark proof still driven through public actor events.
 
 ## Constraints
 
@@ -364,8 +364,8 @@ actor events.
   identity, and enough metadata to reproduce results.
 - **Comparability**: Record formatter, tokenization, seed, and sampling metadata explicitly so
   benchmark or parity claims never hide apples-to-oranges drift.
-- **Lifecycle**: Keep current milestone requirements in `.planning/REQUIREMENTS.md` and archived
-  shipped requirements under `.planning/milestones/`.
+- **Lifecycle**: Keep active milestone requirements in `.planning/REQUIREMENTS.md` when a
+  milestone is open, and archive shipped requirements under `.planning/milestones/`.
 - **Diarization scope**: Any future diarization widening must start from a new milestone and keep
   the shipped `v1.15` Sortformer slice truthful before broadening into general speech, ASR,
   streaming-service, or media-ingestion support.
@@ -427,4 +427,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-05-01 after Phase 155 actor-boundary closure*
+*Last updated: 2026-05-01 after v1.18 milestone closeout*
