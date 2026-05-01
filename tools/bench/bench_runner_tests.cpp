@@ -705,6 +705,69 @@ TEST_CASE("bench runner process seam rejects incompatible jsonl suite requests")
   CHECK(diarization_result.error_message.find("diarization jsonl") != std::string::npos);
 }
 
+TEST_CASE("bench runner process seam rejects invalid serialized run counts") {
+  emel::bench::runner_request zero_runs_request = {};
+  zero_runs_request.mode = emel::bench::runner_mode::emel;
+  zero_runs_request.suite = "batch_planner";
+  zero_runs_request.cfg.iterations = 1u;
+  zero_runs_request.cfg.runs = 0u;
+  zero_runs_request.cfg.warmup_iterations = 0u;
+  zero_runs_request.cfg.warmup_runs = 0u;
+
+  std::string zero_runs_result_text;
+  const process_capture zero_runs_capture =
+      run_serialized_request_capture(emel::bench::serialize_runner_request(zero_runs_request),
+                                     "process-seam-zero-runs",
+                                     zero_runs_result_text);
+
+  CHECK(zero_runs_capture.exit_code == 2);
+  CHECK(zero_runs_capture.stdout_text.empty());
+
+  emel::bench::runner_result zero_runs_result = {};
+  REQUIRE(emel::bench::parse_runner_result(zero_runs_result_text, zero_runs_result));
+  CHECK(zero_runs_result.exit_code == 2);
+  CHECK(zero_runs_result.error_kind == "invalid_request");
+  CHECK(zero_runs_result.error_message.find("runs") != std::string::npos);
+
+  emel::bench::runner_request too_many_runs_request = zero_runs_request;
+  too_many_runs_request.cfg.runs = 26u;
+
+  std::string too_many_runs_result_text;
+  const process_capture too_many_runs_capture =
+      run_serialized_request_capture(emel::bench::serialize_runner_request(too_many_runs_request),
+                                     "process-seam-too-many-runs",
+                                     too_many_runs_result_text);
+
+  CHECK(too_many_runs_capture.exit_code == 2);
+  CHECK(too_many_runs_capture.stdout_text.empty());
+
+  emel::bench::runner_result too_many_runs_result = {};
+  REQUIRE(emel::bench::parse_runner_result(too_many_runs_result_text, too_many_runs_result));
+  CHECK(too_many_runs_result.exit_code == 2);
+  CHECK(too_many_runs_result.error_kind == "invalid_request");
+  CHECK(too_many_runs_result.error_message.find("runs") != std::string::npos);
+
+  emel::bench::runner_request too_many_warmups_request = zero_runs_request;
+  too_many_warmups_request.cfg.runs = 1u;
+  too_many_warmups_request.cfg.warmup_runs = 26u;
+
+  std::string too_many_warmups_result_text;
+  const process_capture too_many_warmups_capture = run_serialized_request_capture(
+      emel::bench::serialize_runner_request(too_many_warmups_request),
+      "process-seam-too-many-warmup-runs",
+      too_many_warmups_result_text);
+
+  CHECK(too_many_warmups_capture.exit_code == 2);
+  CHECK(too_many_warmups_capture.stdout_text.empty());
+
+  emel::bench::runner_result too_many_warmups_result = {};
+  REQUIRE(emel::bench::parse_runner_result(too_many_warmups_result_text,
+                                           too_many_warmups_result));
+  CHECK(too_many_warmups_result.exit_code == 2);
+  CHECK(too_many_warmups_result.error_kind == "invalid_request");
+  CHECK(too_many_warmups_result.error_message.find("warmup_runs") != std::string::npos);
+}
+
 TEST_CASE("benchmark runner registration is localized outside the orchestrator") {
   CHECK(emel::bench::registered_runner_count() >= 29u);
   CHECK(emel::bench::find_registered_runner("generation") != nullptr);

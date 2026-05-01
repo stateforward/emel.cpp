@@ -1080,6 +1080,16 @@ bench::runner_result validate_process_runner_request(const bench::runner_request
                              "invalid_request",
                              "generation and diarization jsonl modes cannot be combined");
   }
+  if (request.cfg.runs == 0u || request.cfg.runs > k_max_runs) {
+    return make_runner_error(2,
+                             "invalid_request",
+                             "serialized request runs must be between 1 and 25");
+  }
+  if (request.cfg.warmup_runs > k_max_runs) {
+    return make_runner_error(2,
+                             "invalid_request",
+                             "serialized request warmup_runs must be at most 25");
+  }
   if (!k_bench_compiled_suite.empty() && request.suite != k_bench_compiled_suite) {
     return make_runner_error(2,
                              "unknown_suite",

@@ -4,6 +4,7 @@
 
 #include <charconv>
 #include <cstdint>
+#include <limits>
 #include <string>
 #include <string_view>
 
@@ -116,6 +117,16 @@ inline bool parse_runner_i32(const std::string_view text, std::int32_t & out) no
   return true;
 }
 
+inline bool parse_runner_size(const std::string_view text, std::size_t & out) noexcept {
+  std::uint64_t parsed = 0u;
+  if (!parse_runner_u64(text, parsed) ||
+      parsed > static_cast<std::uint64_t>(std::numeric_limits<std::size_t>::max())) {
+    return false;
+  }
+  out = static_cast<std::size_t>(parsed);
+  return true;
+}
+
 inline bool parse_runner_bool(const std::string_view text, bool & out) noexcept {
   if (text == "1") {
     out = true;
@@ -202,9 +213,7 @@ inline bool parse_runner_request_line(const std::string_view key,
     return saw_iterations;
   }
   if (key == "runs") {
-    std::uint64_t parsed = 0u;
-    saw_runs = parse_runner_u64(value, parsed);
-    out.cfg.runs = static_cast<std::size_t>(parsed);
+    saw_runs = parse_runner_size(value, out.cfg.runs);
     return saw_runs;
   }
   if (key == "warmup_iterations") {
@@ -212,9 +221,7 @@ inline bool parse_runner_request_line(const std::string_view key,
     return saw_warmup_iterations;
   }
   if (key == "warmup_runs") {
-    std::uint64_t parsed = 0u;
-    saw_warmup_runs = parse_runner_u64(value, parsed);
-    out.cfg.warmup_runs = static_cast<std::size_t>(parsed);
+    saw_warmup_runs = parse_runner_size(value, out.cfg.warmup_runs);
     return saw_warmup_runs;
   }
   if (key == "generation_jsonl") {
