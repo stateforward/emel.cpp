@@ -1,17 +1,17 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.18
-milestone_name: Parity Tool Boundary Refactor
-status: milestone_complete
-stopped_at: "v1.18 milestone completed and archived; next action is `$gsd-new-milestone`."
-last_updated: "2026-05-01T05:04:02Z"
+milestone: v1.19
+milestone_name: Benchmark Tool Pluggable Runner Refactor
+status: defining_requirements
+stopped_at: "v1.19 milestone started from GitHub issue #55; defining requirements and roadmap."
+last_updated: "2026-05-01T06:05:00Z"
 last_activity: 2026-05-01
 progress:
-  total_phases: 9
-  completed_phases: 9
-  total_plans: 9
-  completed_plans: 9
-  percent: 100
+  total_phases: 0
+  completed_phases: 0
+  total_plans: 0
+  completed_plans: 0
+  percent: 0
 ---
 
 # Project State
@@ -22,16 +22,16 @@ See: .planning/PROJECT.md (updated 2026-05-01)
 
 **Core value:** Prove real end-to-end behavior with explicit SML orchestration and parity-oriented
 verification before widening API surface or model scope.
-**Current focus:** No active milestone; start the next milestone with fresh requirements.
+**Current focus:** v1.19 Benchmark Tool Pluggable Runner Refactor.
 
 ## Current Position
 
-Phase: —
-Plan: —
-Status: v1.18 milestone complete and archived.
-Last activity: 2026-05-01
+Phase: Not started (defining requirements)
+Plan: -
+Status: Defining requirements for v1.19 from GitHub issue #55.
+Last activity: 2026-05-01 - Milestone v1.19 started
 
-Progress: [##########] 100%
+Progress: [----------] 0%
 
 ## Deferred Items
 
@@ -49,12 +49,12 @@ Items acknowledged and still deferred at milestone close on 2026-05-01:
 
 **Current milestone:**
 
-- Milestone: none active
+- Milestone: `v1.19 Benchmark Tool Pluggable Runner Refactor`
 
-- Current planning shape: milestone closed; next milestone not yet defined.
+- Current planning shape: requirements and roadmap being defined from GitHub issue #55.
 - Latest shipped milestone: `v1.18 Parity Tool Boundary Refactor`.
 
-- Next action: start a new milestone with `$gsd-new-milestone`.
+- Next action: define scoped requirements, then create the milestone roadmap.
 - Current blocker: none known.
 
 ## Accumulated Context
@@ -63,6 +63,16 @@ Items acknowledged and still deferred at milestone close on 2026-05-01:
 
 Decisions are logged in PROJECT.md Key Decisions table.
 Recent decisions affecting current work:
+
+- `v1.19` starts from GitHub issue #55 and targets benchmark orchestrator, runner, build,
+  discovery, and dependency-manifest boundaries rather than new benchmark semantics.
+
+- The benchmark refactor must preserve explicit EMEL/reference lane isolation: no shared
+  model/vocab/tokenizer/runtime/cache objects, no shared bootstrap paths, and no actor-internal
+  helper calls from benchmark harnesses.
+
+- Missing, stale, or uncertain benchmark runner dependency manifests must force the relevant
+  benchmark gate instead of enabling a permissive skip.
 
 - `v1.18` starts from GitHub issue #54 and targets paritychecker runner/engine/build/manifest
   boundaries rather than new parity semantics.

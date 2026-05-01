@@ -16,15 +16,39 @@ before widening API surface or model scope.
 
 ## Current State
 
-Current milestone: none active
+Current milestone: `v1.19 Benchmark Tool Pluggable Runner Refactor`
 
 Latest shipped milestone: `v1.18 Parity Tool Boundary Refactor`
 
-Status: `v1.18` shipped on 2026-05-01 after reopened source-backed gap closure. The paritychecker
-now has runner-owned CLI/config parsing, live reference generation truth, actor-boundary source
-checks, and maintained dependency-manifest freshness gating.
+Status: `v1.19` started on 2026-05-01 from GitHub issue #55. Requirements and roadmap are being
+defined for a `tools/bench` boundary refactor that follows the paritychecker direction without
+weakening maintained benchmark behavior or lane isolation.
 
-Current planning focus: start the next milestone with fresh requirements.
+Current planning focus: make benchmark runners pluggable and independently buildable while keeping
+shared orchestration limited to CLI/config parsing, asset resolution, result normalization, and
+conservative quality-gate inputs.
+
+## Current Milestone: v1.19 Benchmark Tool Pluggable Runner Refactor
+
+**Goal:** Refactor `tools/bench` so shared benchmark orchestration owns config, asset, and report
+normalization while benchmark-family execution lives behind pluggable runner boundaries that can
+be built and gated independently.
+
+**Source:** GitHub issue #55, "Refactor benchmark tool for cleaner boundaries and pluggable
+runners"
+
+**Target features:**
+- Shared benchmark orchestrator boundary for CLI/config parsing, asset resolution, request
+  normalization, and report/result normalization.
+- Narrow runner request/result contract that supports strongly isolated process-level or
+  foreign-language runner seams.
+- Runtime runner discovery or registration that avoids turning `bench_main.cpp` into a broad
+  compile-time switchboard.
+- Independent CMake runner targets so new runners do not force source edits or rebuilds of
+  untouched benchmark families.
+- Build-emitted per-runner dependency manifests consumed conservatively by quality gates.
+- Source-backed proof that existing EMEL/reference benchmark lanes remain behavior-compatible and
+  do not share model, vocab, tokenizer, runtime, cache, or bootstrap state.
 
 ## Previous Shipped Milestone: v1.18 Parity Tool Boundary Refactor
 
@@ -330,7 +354,15 @@ No active milestone requirements. Start the next milestone with `$gsd-new-milest
 
 ### Active
 
-- [ ] Start the next milestone with fresh requirements.
+- [ ] Refactor `tools/bench` around a shared orchestrator that owns common benchmark setup and
+  reporting without owning per-family execution behavior.
+- [ ] Move benchmark-family execution behind explicit runner boundaries that can be added locally.
+- [ ] Make benchmark runner discovery, registration, and build wiring localized enough that new
+  runners do not require touching or rebuilding unrelated runners.
+- [ ] Emit and consume per-runner dependency manifests with conservative missing, stale, or
+  uncertain-data fallback behavior.
+- [ ] Preserve existing maintained benchmark families, report schemas, and EMEL/reference lane
+  isolation while the tool boundary moves.
 
 ### Out of Scope
 
@@ -343,16 +375,24 @@ No active milestone requirements. Start the next milestone with `$gsd-new-milest
 - Broader performance tuning beyond the shipped maintained Sortformer ONNX single-thread closure
 - Decode extraction, sampler redesign, new generation model support, or public generation C ABI
   expansion during the parity tool boundary refactor
+- New benchmark semantics, new benchmark families, or improved performance claims solely to prove
+  runner pluggability
+- A public third-party benchmark plugin SDK or distribution format beyond a repo-owned runner
+  contract
+- Hash-only quality-gate skipping that bypasses conservative build-graph dependency manifests
 
 ## Context
 
 This remains a brownfield repository with an existing codebase map under `.planning/codebase/`.
 The repo stays governed by `AGENTS.md` and `docs/rules/sml.rules.md`. `v1.18` is the latest
 shipped milestone after the reopened Phase 153-156 source-backed gap closure and final passing
-audit. The current maintained state includes repo-owned EMEL generation, embedding, diarization,
-and Whisper ASR lanes plus pluggable reference backends that publish through canonical compare
-contracts without shared runtime state. The generative text actor now lives under `text/generator`,
-with maintained generation parity and benchmark proof still driven through public actor events.
+audit. `v1.19` applies the same boundary discipline to `tools/bench`, where the current monolithic
+runner and broad case registration make new benchmark families expensive to add and hard to gate
+selectively. The current maintained state includes repo-owned EMEL generation, embedding,
+diarization, and Whisper ASR lanes plus pluggable reference backends that publish through canonical
+compare contracts without shared runtime state. The generative text actor now lives under
+`text/generator`, with maintained generation parity and benchmark proof still driven through
+public actor events.
 
 ## Constraints
 
@@ -371,11 +411,14 @@ with maintained generation parity and benchmark proof still driven through publi
   streaming-service, or media-ingestion support.
 - **Text generator scope**: Moving `generator` to `text/generator` must be an ownership refactor;
   it must not introduce new sampling semantics, model-family support, or performance claims.
+- **Benchmark refactor scope**: `v1.19` moves `tools/bench` boundaries only; it must preserve
+  maintained benchmark intent unless a behavior change is separately approved.
 
 ## Key Decisions
 
 | Decision | Rationale | Outcome |
 |----------|-----------|---------|
+| Start v1.19 from GitHub issue #55 as a benchmark runner boundary refactor | `tools/bench` has accumulated broad runner build wiring and static case registration; the next milestone should make benchmark runners pluggable, independently buildable, and conservatively gateable without weakening lane isolation | -- Pending |
 | Start v1.18 from GitHub issue #54 as a paritychecker boundary refactor | The existing parity tool has grown mode-specific implementation, asset loading, and build wiring in places that make future engines harder to add and harder to gate conservatively | ✓ Shipped |
 | Move the canonical generator actor to `text/generator` in v1.17 | The existing generator is a generative text actor, and placing it under the text domain aligns it with text tokenizer/formatter ownership and the established `embeddings/generator` top-level actor pattern | ✓ Implementation complete |
 | Start v1.15 as one maintained ARM Sortformer diarization GGUF slice | The user asked for ARM support for `openresearchtools/diar_streaming_sortformer_4spk-v2.1-gguf`; the model card defines a diarization contract, not generation or embedding behavior | ✓ Shipped |
@@ -427,4 +470,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-05-01 after v1.18 milestone closeout*
+*Last updated: 2026-05-01 after starting v1.19 from GitHub issue #55*
