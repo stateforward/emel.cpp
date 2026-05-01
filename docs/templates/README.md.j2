@@ -1,6 +1,6 @@
 # EMEL
 
-Deterministic, production-grade C++ inference engine built around Boost.SML orchestration.
+ARM-first deterministic C++ inference engine built around Boost.SML orchestration.
 
 ## Status: WIP
 
@@ -10,13 +10,22 @@ allocator, and execution pipelines stabilize.
 
 This inference engine is being implemented by AI under human engineering and architecture direction.
 
+## ARM-first scope
+
+EMEL is an ARM-first inference engine. Maintained runtime claims are made only for source-backed
+ARM/AArch64 slices with EMEL-owned kernels, lane-isolated parity proof, and benchmark evidence.
+Non-ARM backend namespaces may exist as historical scaffolding, generated architecture inventory,
+or future backend placeholders, but they are not supported runtime claims unless a milestone
+explicitly backs them with maintained tests, parity, and benchmark evidence.
+
 ## Implementation priorities
 
-1. Architect first, then scaffold cleanly.
-2. Port math, instructions, and behavior without mirroring reference control flow.
-3. Prove parity against llama.cpp.
-4. Match model/tokenizer intent as defined by their creators (transformers).
-5. Optimize once correctness is locked.
+1. Keep the maintained end-to-end path ARM/AArch64 first.
+2. Architect first, then scaffold cleanly.
+3. Port math, instructions, and behavior without mirroring reference control flow.
+4. Prove parity against isolated reference lanes.
+5. Match model/tokenizer intent as defined by their creators.
+6. Optimize once correctness is locked.
 
 ## Why EMEL
 
@@ -86,9 +95,9 @@ environments, while Zig remains the default for day-to-day builds.
 ## Documentation
 
 - [Architecture](.planning/architecture/) (generated state-machine docs + Mermaid diagrams)
+- [ARM-first Inventory](docs/arm-first-inventory.md) (non-ARM surface inventory and removal notes)
 - [Benchmarks](docs/benchmarks.md) (generated benchmark snapshot table)
 - [SML Conventions](docs/third_party/sml.md) (Boost.SML conventions and usage)
-- [Parity Audit](docs/gaps.md) (parity audit status)
 
 ## Docs index
 

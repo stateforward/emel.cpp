@@ -11,4 +11,3 @@ enum class error : emel::error::type {
 };
 
 }  // namespace emel::text::generator
-

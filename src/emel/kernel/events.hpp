@@ -271,16 +271,8 @@ enum class phase_outcome : uint8_t {
 struct dispatch_ctx {
   bool primary_accepted = false;
   bool secondary_accepted = false;
-  bool tertiary_accepted = false;
-  bool quaternary_accepted = false;
-  bool quinary_accepted = false;
-  bool senary_accepted = false;
   phase_outcome primary_outcome = phase_outcome::unknown;
   phase_outcome secondary_outcome = phase_outcome::unknown;
-  phase_outcome tertiary_outcome = phase_outcome::unknown;
-  phase_outcome quaternary_outcome = phase_outcome::unknown;
-  phase_outcome quinary_outcome = phase_outcome::unknown;
-  phase_outcome senary_outcome = phase_outcome::unknown;
   int32_t err = static_cast<int32_t>(emel::error::cast(error::none));
 };
 
