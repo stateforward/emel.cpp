@@ -10,52 +10,52 @@ parity-oriented verification before widening API surface or model scope.
 
 ### Orchestrator Boundary
 
-- [ ] **ORCH-01**: `tools/bench` has a shared benchmark orchestrator boundary that owns
+- [x] **ORCH-01**: `tools/bench` has a shared benchmark orchestrator boundary that owns
   CLI/config parsing, asset resolution, request normalization, and result/report normalization.
-- [ ] **ORCH-02**: Existing benchmark invocations preserve their current user-facing arguments,
+- [x] **ORCH-02**: Existing benchmark invocations preserve their current user-facing arguments,
   maintained fixtures, output schemas, and failure semantics unless a change is explicitly
   documented and approved.
 
 ### Runner Interfaces
 
-- [ ] **RUNNER-01**: Maintainers can add a benchmark family by implementing a runner contract and
+- [x] **RUNNER-01**: Maintainers can add a benchmark family by implementing a runner contract and
   localized registration without editing unrelated runner sources.
-- [ ] **RUNNER-02**: The orchestrator-to-runner contract supports a process-level runner seam with
+- [x] **RUNNER-02**: The orchestrator-to-runner contract supports a process-level runner seam with
   serialized request/result payloads, so future foreign-language runners do not require shared
   in-process runtime state.
 
 ### Discovery And Registration
 
-- [ ] **DISC-01**: The benchmark orchestrator discovers or registers available runners from a
+- [x] **DISC-01**: The benchmark orchestrator discovers or registers available runners from a
   small runner metadata surface instead of broad static case wiring in `bench_main.cpp`.
 
 ### Build Isolation
 
-- [ ] **BUILD-01**: Each maintained benchmark runner builds as its own CMake target or isolated
+- [x] **BUILD-01**: Each maintained benchmark runner builds as its own CMake target or isolated
   runner source group so modifying one runner does not force rebuilding untouched runners.
-- [ ] **BUILD-02**: Source or build checks prove new runner registration stays localized and does
+- [x] **BUILD-02**: Source or build checks prove new runner registration stays localized and does
   not require broad edits through existing runner implementation files.
 
 ### Dependency Manifests
 
-- [ ] **MANIFEST-01**: Each benchmark runner emits or maintains a build-time dependency manifest
+- [x] **MANIFEST-01**: Each benchmark runner emits or maintains a build-time dependency manifest
   that names source, config, fixture, model, and script inputs needed for conservative gate impact
   detection.
-- [ ] **MANIFEST-02**: The benchmark dependency-manifest format is deterministic, documented, and
+- [x] **MANIFEST-02**: The benchmark dependency-manifest format is deterministic, documented, and
   explicit about missing, stale, or uncertain-data semantics.
 
 ### Quality Gates
 
-- [ ] **GATE-01**: `scripts/quality_gates.sh` can use per-runner benchmark dependency manifests
+- [x] **GATE-01**: `scripts/quality_gates.sh` can use per-runner benchmark dependency manifests
   to choose the relevant benchmark gate when changed files affect runner inputs.
-- [ ] **GATE-02**: Missing, stale, or uncertain benchmark manifest data forces the relevant
+- [x] **GATE-02**: Missing, stale, or uncertain benchmark manifest data forces the relevant
   benchmark gate or full benchmark gate instead of permitting a skip.
 
 ### Lane Isolation
 
-- [ ] **LANE-01**: Existing EMEL and reference benchmark lanes construct and own their model,
+- [x] **LANE-01**: Existing EMEL and reference benchmark lanes construct and own their model,
   vocab, tokenizer, formatter, runtime, cache, and output state separately.
-- [ ] **LANE-02**: Tests or source checks fail if shared benchmark orchestration or runner code
+- [x] **LANE-02**: Tests or source checks fail if shared benchmark orchestration or runner code
   shares lane-owned runtime objects, shared bootstrap paths, or direct actor
   `actions.hpp`/`guards.hpp`/`detail.hpp` helper calls.
 
