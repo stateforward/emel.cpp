@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.18
 milestone_name: Parity Tool Boundary Refactor
 status: phase_in_progress
-stopped_at: "Phase 153 completed; next action is autonomous execution of Phase 154."
-last_updated: "2026-05-01T03:46:11.945Z"
+stopped_at: "Phase 154 completed; next action is autonomous execution of Phase 155."
+last_updated: "2026-05-01T04:55:00.000Z"
 last_activity: 2026-05-01
 progress:
   total_phases: 4
-  completed_phases: 1
-  total_plans: 1
-  completed_plans: 1
-  percent: 25
+  completed_phases: 2
+  total_plans: 2
+  completed_plans: 2
+  percent: 50
 ---
 
 # Project State
@@ -26,12 +26,12 @@ verification before widening API surface or model scope.
 
 ## Current Position
 
-Phase: 154
+Phase: 155
 Plan: —
-Status: Phase 153 complete; Phase 154 pending.
+Status: Phase 154 complete; Phase 155 pending.
 Last activity: 2026-05-01
 
-Progress: [##--------] 25%
+Progress: [#####-----] 50%
 
 ## Deferred Items
 
@@ -55,9 +55,9 @@ Items acknowledged and still deferred at milestone close on 2026-05-01:
 - Latest shipped milestone: `v1.17 Text Generator Domain Alignment`; v1.18 is not closeout-ready
   until the reopened source-backed gaps pass audit.
 
-- Next action: continue autonomous execution with Phase 154.
-- Current blocker: v1.18 milestone audit is `gaps_found` with remaining partial `PARITY-03`,
-  `LANE-01`, `LANE-02`, `MANIFEST-01`, and `MANIFEST-02`.
+- Next action: continue autonomous execution with Phase 155.
+- Current blocker: v1.18 milestone audit is `gaps_found` with remaining partial `LANE-02`,
+  `MANIFEST-01`, and `MANIFEST-02`.
 
 ## Accumulated Context
 
@@ -101,6 +101,11 @@ Recent decisions affecting current work:
 - Phase 153 closed `PARITY-01`: `parity_main.cpp` now delegates to runner-owned
   `run_parity_cli(...)`, while `parity_runner.cpp` owns usage text, CLI/config parsing, text-file
   loading, and validation. Focused paritychecker tests and the scoped quality gate passed.
+
+- Phase 154 closed `PARITY-03` and `LANE-01`: maintained generation now compares EMEL output
+  against a live reference-lane generation result before baseline load. Stored baselines are
+  secondary publication artifacts, and the legacy non-current Qwen fixture now reports
+  live-reference drift instead of succeeding from an EMEL-authored baseline.
 
 - `v1.15` targets one maintained ARM diarization slice for
   `openresearchtools/diar_streaming_sortformer_4spk-v2.1-gguf`.

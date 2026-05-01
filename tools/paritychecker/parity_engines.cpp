@@ -926,6 +926,8 @@ bool load_generation_baseline_file(const std::filesystem::path & path,
   if (!output_bytes.empty()) {
     std::memcpy(record_out.result.output.data(), output_bytes.data(), output_bytes.size());
   }
+  record_out.result.trace_available =
+      record_out.result.trace.token_count == record_out.result.tokens_generated;
 
   return true;
 }
@@ -18474,16 +18476,45 @@ int run_generation_harness_contract(const emel::paritychecker::parity_options & 
     }
   }
 
+  generation_result reference_result{};
+  const emel::error::type reference_generation_err =
+      run_reference_generate(state.reference, opts, reference_result);
+  if (reference_generation_err != emel::error::cast(emel::text::generator::error::none)) {
+    std::fprintf(stderr,
+                 "generation reference error (fixture=%s err=%s)\n",
+                 fixture->name.data(),
+                 generator_error_name(reference_generation_err));
+    dump_generation_failure_surface(state, &emel_result, nullptr, opts);
+    return 1;
+  }
+  reference_result.trace_available =
+      reference_result.trace.token_count == reference_result.tokens_generated;
+
+  if (!generation_results_match(emel_result, reference_result)) {
+    const size_t mismatch_offset = first_mismatch_offset(emel_result, reference_result);
+    std::fprintf(stderr,
+                 "generation parity mismatch (fixture=%s emel_tokens=%d reference_tokens=%d "
+                 "emel_bytes=%zu reference_bytes=%zu first_mismatch=%zu)\n",
+                 fixture->name.data(),
+                 emel_result.tokens_generated,
+                 reference_result.tokens_generated,
+                 emel_result.output_length,
+                 reference_result.output_length,
+                 mismatch_offset);
+    dump_generation_failure_surface(state, &emel_result, &reference_result, opts);
+    return 1;
+  }
+
   const std::filesystem::path baseline_path = opts.write_generation_baseline_path.empty()
       ? default_generation_baseline_path(*fixture, opts)
       : std::filesystem::path(opts.write_generation_baseline_path);
   if (!opts.write_generation_baseline_path.empty()) {
-    if (!write_generation_baseline_file(baseline_path, *fixture, opts, emel_result)) {
+    if (!write_generation_baseline_file(baseline_path, *fixture, opts, reference_result)) {
       std::fprintf(stderr,
                    "generation baseline write failed (fixture=%s baseline=%s)\n",
                    fixture->name.data(),
                    baseline_path.string().c_str());
-      dump_generation_failure_surface(state, &emel_result, nullptr, opts);
+      dump_generation_failure_surface(state, &emel_result, &reference_result, opts);
       return 1;
     }
 
@@ -18496,11 +18527,11 @@ int run_generation_harness_contract(const emel::paritychecker::parity_options & 
                  k_generation_baseline_contract.data(),
                  opts.text.size(),
                  opts.max_tokens,
-                 emel_result.tokens_generated,
-                 emel_result.output_length);
+                 reference_result.tokens_generated,
+                 reference_result.output_length);
     print_generation_formatter_contract(stdout, state, *fixture);
     std::fprintf(stdout,
-                 "reference_impl: source=%.*s contract=%.*s baseline=%s\n",
+                 "generation_baseline: source=%.*s contract=%.*s baseline=%s\n",
                  static_cast<int>(k_generation_baseline_source.size()),
                  k_generation_baseline_source.data(),
                  static_cast<int>(k_generation_baseline_contract.size()),
@@ -18530,23 +18561,26 @@ int run_generation_harness_contract(const emel::paritychecker::parity_options & 
                  baseline_record.fixture_name.c_str(),
                  baseline_record.prompt.size(),
                  baseline_record.max_tokens);
-    dump_generation_failure_surface(state, &emel_result, nullptr, opts);
+    dump_generation_failure_surface(state, &emel_result, &reference_result, opts);
     return 1;
   }
-  generation_result & reference_result = baseline_record.result;
+  const generation_result & baseline_result = baseline_record.result;
 
-  if (!generation_results_match(emel_result, reference_result)) {
-    const size_t mismatch_offset = first_mismatch_offset(emel_result, reference_result);
+  if (!generation_results_match(reference_result, baseline_result)) {
+    const size_t mismatch_offset = first_mismatch_offset(reference_result, baseline_result);
     std::fprintf(stderr,
-                 "generation parity mismatch (fixture=%s emel_tokens=%d reference_tokens=%d "
-                 "emel_bytes=%zu reference_bytes=%zu first_mismatch=%zu)\n",
+                 "generation baseline mismatch (fixture=%s reference_tokens=%d baseline_tokens=%d "
+                 "reference_bytes=%zu baseline_bytes=%zu first_mismatch=%zu)\n",
                  fixture->name.data(),
-                 emel_result.tokens_generated,
                  reference_result.tokens_generated,
-                 emel_result.output_length,
+                 baseline_result.tokens_generated,
                  reference_result.output_length,
+                 baseline_result.output_length,
                  mismatch_offset);
     dump_generation_failure_surface(state, &emel_result, &reference_result, opts);
+    if (opts.dump) {
+      dump_generation_result("baseline", baseline_result);
+    }
     return 1;
   }
 
@@ -18567,7 +18601,7 @@ int run_generation_harness_contract(const emel::paritychecker::parity_options & 
                emel_result.output.data());
   print_generation_formatter_contract(stdout, state, *fixture);
   std::fprintf(stdout,
-               "reference_impl: source=%.*s contract=%.*s baseline=%s\n",
+               "generation_baseline: source=%.*s contract=%.*s baseline=%s\n",
                static_cast<int>(k_generation_baseline_source.size()),
                k_generation_baseline_source.data(),
                static_cast<int>(k_generation_baseline_contract.size()),

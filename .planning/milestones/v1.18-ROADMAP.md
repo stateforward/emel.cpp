@@ -60,7 +60,7 @@ manifest gate consumption.
   behave the same and lane isolation remains enforceable.
 - [x] **Phase 153: Parity Runner Config Ownership Closure** - Move CLI/config parsing ownership
   behind the shared runner boundary and preserve existing CLI behavior.
-- [ ] **Phase 154: Generation Live Reference Truth Closure** - Make maintained generation parity
+- [x] **Phase 154: Generation Live Reference Truth Closure** - Make maintained generation parity
   compare against live reference-lane output while preserving lane isolation and snapshot
   publication semantics.
 - [ ] **Phase 155: Parity Actor Boundary Enforcement Closure** - Replace direct paritychecker
@@ -223,8 +223,9 @@ against live reference-lane generation output on the normal success path.
 4. Focused paritychecker tests cover live-reference success, deterministic missing-model failure,
    baseline mismatch/reporting behavior, and output schema stability.
 
-**Status:** Pending. Snapshot and model updates are allowed for this closure phase when required by
-the maintained live-reference proof.
+**Status:** Complete. Maintained generation now compares EMEL output against live reference-lane
+generation before baseline load. Snapshot baselines are secondary publication artifacts, and the
+legacy non-current Qwen drift is reported instead of being masked by the stored baseline.
 
 ### Phase 155: Parity Actor Boundary Enforcement Closure
 

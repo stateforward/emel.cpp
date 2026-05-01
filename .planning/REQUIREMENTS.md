@@ -14,9 +14,11 @@ parity-oriented verification before widening API surface or model scope.
   parsing, asset resolution, fixture normalization, lane invocation, and result normalization.
 - [x] **PARITY-02**: The shared runner no longer contains bulk per-mode parity implementation for
   tokenizer, GBNF, kernel, Jinja, or generation modes.
-- [ ] **PARITY-03**: Existing parity modes preserve their current user-facing behavior, maintained
+- [x] **PARITY-03**: Existing parity modes preserve their current user-facing behavior, maintained
   fixtures, output schemas, and failure semantics unless a change is explicitly documented and
-  approved.
+  approved. Phase 154 documents the intentional correction that the legacy non-current Qwen
+  generation fixture now reports live-reference drift instead of succeeding from an EMEL-authored
+  stored baseline.
 
 ### Engine Interfaces
 
@@ -27,7 +29,7 @@ parity-oriented verification before widening API surface or model scope.
 
 ### Lane Isolation
 
-- [ ] **LANE-01**: EMEL and reference lanes construct and own their model, vocab, tokenizer,
+- [x] **LANE-01**: EMEL and reference lanes construct and own their model, vocab, tokenizer,
   formatter, runtime, cache, and output state separately.
 - [ ] **LANE-02**: Tests or source checks fail if shared runner code reuses reference-created lane
   objects in the EMEL lane or reaches into actor `actions.hpp`, `guards.hpp`, or `detail.hpp`
@@ -75,10 +77,10 @@ parity-oriented verification before widening API surface or model scope.
 |-------------|-------|--------|
 | PARITY-01 | Phase 153 | Complete |
 | PARITY-02 | Phase 149 | Complete |
-| PARITY-03 | Phase 154 | Pending |
+| PARITY-03 | Phase 154 | Complete |
 | ENGINE-01 | Phase 149 | Complete |
 | ENGINE-02 | Phase 150 | Complete |
-| LANE-01 | Phase 154 | Pending |
+| LANE-01 | Phase 154 | Complete |
 | LANE-02 | Phase 155 | Pending |
 | BUILD-01 | Phase 150 | Complete |
 | BUILD-02 | Phase 150 | Complete |
@@ -90,8 +92,8 @@ parity-oriented verification before widening API surface or model scope.
 - Active requirements: 12 total
 - Mapped to phases: 12
 - Unmapped: 0
-- Complete: 7
-- Pending: 5
+- Complete: 9
+- Pending: 3
 
 **Last updated:** 2026-05-01 after Phase 153 closed `PARITY-01` by moving CLI/config parsing
 behind the shared runner boundary. Snapshot and model updates are explicitly allowed during the

@@ -1013,6 +1013,24 @@ TEST_CASE("parity engine source keeps EMEL and reference lane objects separate")
   CHECK(source.find("state.model_loader.process_event(request)") != std::string::npos);
   CHECK(source.find("run_emel_generate(state,") != std::string::npos);
 
+  const size_t harness_pos = source.find("int run_generation_harness_contract(");
+  REQUIRE(harness_pos != std::string::npos);
+  const size_t live_reference_pos =
+      source.find("run_reference_generate(state.reference", harness_pos);
+  const size_t parity_compare_pos =
+      source.find("generation_results_match(emel_result, reference_result)", harness_pos);
+  const size_t baseline_load_pos =
+      source.find("load_generation_baseline_file(baseline_path, baseline_record)", harness_pos);
+  CHECK(live_reference_pos != std::string::npos);
+  CHECK(parity_compare_pos != std::string::npos);
+  CHECK(baseline_load_pos != std::string::npos);
+  if (live_reference_pos != std::string::npos &&
+      parity_compare_pos != std::string::npos &&
+      baseline_load_pos != std::string::npos) {
+    CHECK(live_reference_pos < parity_compare_pos);
+    CHECK(parity_compare_pos < baseline_load_pos);
+  }
+
   const std::vector<std::string> forbidden = {
     "emel_vocab = llama_vocab",
     "llama_vocab_ptr = emel_vocab",
@@ -1022,6 +1040,7 @@ TEST_CASE("parity engine source keeps EMEL and reference lane objects separate")
     "state.reference.vocab = state.model_data",
     "reference_result = emel_result",
     "emel_result = reference_result",
+    "generation_result & reference_result = baseline_record.result",
     "parse_plamo2_byte_token(piece_view",
   };
 
@@ -1140,9 +1159,12 @@ TEST_CASE("paritychecker generation keeps append-only maintained baselines for s
   }
 }
 
-TEST_CASE("paritychecker matches maintained generation baselines across supported fixtures") {
+TEST_CASE("paritychecker matches current maintained generation publication against live reference") {
   for (const auto & fixture :
        emel::tools::generation_fixture_registry::k_maintained_generation_fixtures) {
+    if (!fixture.current_publication) {
+      continue;
+    }
     const std::filesystem::path model_path = maintained_generation_fixture_path(fixture);
     INFO("fixture: " << fixture.name);
     if (!file_exists(model_path)) {
@@ -1159,6 +1181,37 @@ TEST_CASE("paritychecker matches maintained generation baselines across supporte
           std::string::npos);
     CHECK(capture.stdout_text.find("formatter_contract=") != std::string::npos);
     CHECK(capture.stdout_text.find("reference_impl:") != std::string::npos);
+    CHECK(capture.stdout_text.find("generation_baseline:") != std::string::npos);
+    CHECK(capture.stdout_text.find("reference_impl: source=maintained_generation_baseline") ==
+          std::string::npos);
+    CHECK(parse_named_metric_on_line(
+              capture.stdout_text, "reference_decode_seams:", "reference_decode_calls") > 0);
+  }
+}
+
+TEST_CASE("paritychecker reports legacy maintained generation live-reference drift") {
+  for (const auto & fixture :
+       emel::tools::generation_fixture_registry::k_maintained_generation_fixtures) {
+    if (fixture.current_publication) {
+      continue;
+    }
+    const std::filesystem::path model_path = maintained_generation_fixture_path(fixture);
+    INFO("fixture: " << fixture.name);
+    if (!file_exists(model_path)) {
+      INFO("skipping missing maintained fixture: " << model_path.string());
+      continue;
+    }
+
+    const process_capture capture = run_generation_paritychecker_capture(model_path, "hello");
+
+    CHECK(capture.exit_code == 1);
+    CHECK(capture.stderr_text.find("generation parity mismatch") != std::string::npos);
+    CHECK(capture.stdout_text.find("reference_impl:") != std::string::npos);
+    CHECK(capture.stdout_text.find("generation_baseline:") == std::string::npos);
+    CHECK(capture.stdout_text.find("reference_impl: source=maintained_generation_baseline") ==
+          std::string::npos);
+    CHECK(parse_named_metric_on_line(
+              capture.stdout_text, "reference_decode_seams:", "reference_decode_calls") > 0);
   }
 }
 

@@ -21,10 +21,11 @@ Current milestone: `v1.18 Parity Tool Boundary Refactor` reopened for source-bac
 Latest fully shipped milestone: `v1.17 Text Generator Domain Alignment`
 
 Status: `v1.18` was reopened on 2026-05-01 after a source-backed audit found partial runner
-ownership, live generation reference truth, actor-boundary, and manifest-gate gaps. Phases 153-156
-are the active closure path before the milestone can be treated as shipped.
+ownership, live generation reference truth, actor-boundary, and manifest-gate gaps. Phases 153 and
+154 have closed the runner and generation-truth gaps; Phases 155-156 remain before the milestone
+can be treated as shipped.
 
-Current planning focus: plan and execute Phase 153, then re-audit v1.18 after Phases 153-156.
+Current planning focus: execute Phase 155, then Phase 156, then re-audit v1.18.
 
 ## Reopened Milestone: v1.18 Parity Tool Boundary Refactor
 
@@ -44,11 +45,11 @@ EMEL/reference lane isolation or existing parity behavior.
   semantics.
 - Source-backed behavior and lane-isolation closure proving shared runner files stay free of
   lane-owned runtime objects while maintained parity tests continue to pass.
+- Runner-owned CLI/config parsing through `run_parity_cli(...)`.
+- Maintained generation comparison against live reference-lane output before baseline load; stored
+  baselines are publication artifacts, and legacy non-current Qwen drift is reported truthfully.
 
 **Open closure gaps:**
-- Move CLI/config parsing ownership into the shared runner boundary (`PARITY-01`).
-- Make maintained generation parity compare against live reference-lane output (`PARITY-03`,
-  `LANE-01`).
 - Remove remaining paritychecker actor-helper/detail reaches or replace them with public
   state-machine/kernel-owned surfaces (`LANE-02`).
 - Wire dependency-manifest emission and missing/stale/uncertain full-gate semantics into production
@@ -328,10 +329,9 @@ truth anchor and without broadening into generic Liquid-family support.
 
 ### Active
 
-- [ ] Plan and execute Phase 151 for the v1.18 parity dependency manifest emission.
-- [ ] Preserve existing parity mode behavior while splitting runner, engine, build-registration,
-  and dependency-manifest responsibilities.
-- [ ] Prove EMEL/reference lane isolation remains explicit and enforceable after the refactor.
+- [ ] Execute Phase 155 for paritychecker actor-boundary enforcement.
+- [ ] Execute Phase 156 for dependency-manifest production/gate consumption.
+- [ ] Re-audit v1.18 after Phases 155-156 complete.
 
 ### Out of Scope
 
@@ -429,4 +429,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-05-01 after reopening v1.18 for source-backed gap closure*
+*Last updated: 2026-05-01 after Phase 154 live-reference truth closure*
