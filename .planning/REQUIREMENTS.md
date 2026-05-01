@@ -13,7 +13,7 @@ parity-oriented verification before widening API surface or model scope.
   parsing, asset resolution, fixture normalization, lane invocation, and result normalization.
 - [x] **PARITY-02**: The shared runner no longer contains bulk per-mode parity implementation for
   tokenizer, GBNF, kernel, Jinja, or generation modes.
-- [ ] **PARITY-03**: Existing parity modes preserve their current user-facing behavior, maintained
+- [x] **PARITY-03**: Existing parity modes preserve their current user-facing behavior, maintained
   fixtures, output schemas, and failure semantics unless a change is explicitly documented and
   approved.
 
@@ -28,7 +28,7 @@ parity-oriented verification before widening API surface or model scope.
 
 - [x] **LANE-01**: EMEL and reference lanes construct and own their model, vocab, tokenizer,
   formatter, runtime, cache, and output state separately.
-- [ ] **LANE-02**: Tests or source checks fail if shared runner code reuses reference-created lane
+- [x] **LANE-02**: Tests or source checks fail if shared runner code reuses reference-created lane
   objects in the EMEL lane or reaches into actor `actions.hpp`, `guards.hpp`, or `detail.hpp`
   helpers directly.
 
@@ -74,11 +74,11 @@ parity-oriented verification before widening API surface or model scope.
 |-------------|-------|--------|
 | PARITY-01 | Phase 148 | Complete |
 | PARITY-02 | Phase 149 | Complete |
-| PARITY-03 | Phase 152 | Pending |
+| PARITY-03 | Phase 152 | Complete |
 | ENGINE-01 | Phase 149 | Complete |
 | ENGINE-02 | Phase 150 | Complete |
 | LANE-01 | Phase 148 | Complete |
-| LANE-02 | Phase 152 | Pending |
+| LANE-02 | Phase 152 | Complete |
 | BUILD-01 | Phase 150 | Complete |
 | BUILD-02 | Phase 150 | Complete |
 | MANIFEST-01 | Phase 151 | Complete |
@@ -89,8 +89,8 @@ parity-oriented verification before widening API surface or model scope.
 - Active requirements: 12 total
 - Mapped to phases: 12
 - Unmapped: 0
-- Complete: 10
-- Pending: 2
+- Complete: 12
+- Pending: 0
 
-**Last updated:** 2026-05-01 after Phase 151 added deterministic parity dependency manifests and
-passed focused paritychecker tests plus the changed-file scoped quality gate.
+**Last updated:** 2026-05-01 after Phase 152 closed parity behavior and lane-isolation proof for
+v1.18, with focused paritychecker tests and the changed-file scoped quality gate passing.

@@ -52,7 +52,7 @@ preserving existing parity behavior and EMEL/reference lane isolation.
   modular enough for localized future engine additions.
 - [x] **Phase 151: Parity Dependency Manifest Emission** - Emit per-runner dependency manifests
   with conservative stale/missing-data semantics.
-- [ ] **Phase 152: Parity Behavior And Lane-Isolation Closure** - Prove all existing modes still
+- [x] **Phase 152: Parity Behavior And Lane-Isolation Closure** - Prove all existing modes still
   behave the same and lane isolation remains enforceable.
 
 ## Phase Details
@@ -157,4 +157,7 @@ refactor and that lane isolation is explicit, enforced, and source-backed.
 5. The relevant scoped quality gate passes, and no parity behavior change is reported as a
    boundary refactor without explicit approval.
 
-**Status:** Pending.
+**Status:** Complete. Phase 152 preserved maintained parity behavior under `paritychecker_tests`,
+removed the reference-side direct dependency on EMEL detokenizer action detail, and added source
+checks proving shared runner files stay free of lane runtime objects while tokenizer/generation
+engine code keeps EMEL and reference model/vocab/runtime state separate.

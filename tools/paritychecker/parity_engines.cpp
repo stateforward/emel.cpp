@@ -47,10 +47,8 @@
 #include "emel/model/weight_loader/events.hpp"
 #include "emel/model/weight_loader/sm.hpp"
 #include "emel/text/conditioner/sm.hpp"
-#include "emel/text/detokenizer/actions.hpp"
 #include "emel/text/formatter/format.hpp"
 #include "emel/text/jinja/formatter/sm.hpp"
-#include "emel/text/jinja/parser/detail.hpp"
 #include "emel/text/jinja/parser/errors.hpp"
 #include "emel/text/jinja/parser/sm.hpp"
 #include "emel/text/renderer/sm.hpp"
@@ -1792,6 +1790,39 @@ float * read_direct_reference_logits(reference_backend & backend, llama_context 
   return llama_get_logits_ith(ctx, -1);
 }
 
+bool parse_reference_hex_nibble(const char c, uint8_t & value) {
+  if (c >= '0' && c <= '9') {
+    value = static_cast<uint8_t>(c - '0');
+    return true;
+  }
+  if (c >= 'a' && c <= 'f') {
+    value = static_cast<uint8_t>(10 + (c - 'a'));
+    return true;
+  }
+  if (c >= 'A' && c <= 'F') {
+    value = static_cast<uint8_t>(10 + (c - 'A'));
+    return true;
+  }
+  value = 0;
+  return false;
+}
+
+bool parse_reference_byte_piece(const std::string_view piece, uint8_t & value) {
+  if (piece.size() != 6 || piece[0] != '<' || piece[1] != '0' || piece[2] != 'x' ||
+      piece[5] != '>') {
+    return false;
+  }
+
+  uint8_t hi = 0;
+  uint8_t lo = 0;
+  if (!parse_reference_hex_nibble(piece[3], hi) ||
+      !parse_reference_hex_nibble(piece[4], lo)) {
+    return false;
+  }
+  value = static_cast<uint8_t>((hi << 4) | lo);
+  return true;
+}
+
 bool append_reference_piece(const reference_backend & backend,
                             const llama_token token,
                             generation_result & result_out) {
@@ -1813,8 +1844,7 @@ bool append_reference_piece(const reference_backend & backend,
   const bool is_byte_token = (attr & LLAMA_TOKEN_ATTR_BYTE) != 0;
   if (is_byte_token) {
     uint8_t byte_value = 0;
-    const bool parsed =
-        emel::text::detokenizer::action::detail::parse_plamo2_byte_token(piece_view, byte_value);
+    const bool parsed = parse_reference_byte_piece(piece_view, byte_value);
     if (!parsed || result_out.output_length + 1u > result_out.output.size()) {
       return false;
     }

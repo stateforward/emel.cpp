@@ -902,6 +902,10 @@ TEST_CASE("paritychecker sources do not bridge into text generator actor interna
     "emel::text::generator::" "action::",
     "emel::text::generator::" "guard::",
     "emel::text::generator::prefill::" "guard::",
+    "#include \"emel/text/detokenizer/" "actions.hpp\"",
+    "#include \"emel/text/jinja/parser/" "detail.hpp\"",
+    "emel::text::detokenizer::" "action::detail::",
+    "emel::text::jinja::parser::" "detail::",
     "->generation_",
     "generation_internal_" "diagnostics.hpp",
   };
@@ -920,6 +924,76 @@ TEST_CASE("paritychecker sources do not bridge into text generator actor interna
       CHECK_MESSAGE(source.find(pattern) == std::string::npos,
                     path.filename().string() << " contains forbidden pattern " << pattern);
     }
+  }
+}
+
+TEST_CASE("parity shared runner sources stay free of lane-owned runtime objects") {
+  const auto paritychecker_dir = repo_root_dir() / "tools" / "paritychecker";
+  const std::vector<std::filesystem::path> shared_runner_sources = {
+      paritychecker_dir / "parity_runner.cpp",
+      paritychecker_dir / "parity_engine.cpp",
+      paritychecker_dir / "parity_assets.cpp",
+      paritychecker_dir / "parity_dependency_manifest.cpp",
+  };
+  const std::vector<std::string> forbidden = {
+    "#include \"llama",
+    "#include \"ggml",
+    "llama_",
+    "ggml_",
+    "reference_backend",
+    "llama_model",
+    "llama_context",
+    "llama_vocab",
+    "emel::text::generator::action::",
+    "emel::text::generator::guard::",
+    "emel::text::generator::detail::",
+    "emel::model::data",
+  };
+
+  for (const auto & path : shared_runner_sources) {
+    const std::string source = read_text_file(path);
+    REQUIRE_FALSE(source.empty());
+    for (const auto & pattern : forbidden) {
+      CHECK_MESSAGE(source.find(pattern) == std::string::npos,
+                    path.filename().string() << " contains shared-lane pattern " << pattern);
+    }
+  }
+}
+
+TEST_CASE("parity engine source keeps EMEL and reference lane objects separate") {
+  const std::string source =
+      read_text_file(repo_root_dir() / "tools" / "paritychecker" / "parity_engines.cpp");
+  REQUIRE_FALSE(source.empty());
+
+  CHECK(source.find("const llama_vocab * llama_vocab_ptr") != std::string::npos);
+  CHECK(source.find("auto emel_vocab = std::make_unique<emel::model::data::vocab>()") !=
+        std::string::npos);
+  CHECK(source.find("load_emel_vocab_from_gguf_file(opts.model_path, *emel_vocab)") !=
+        std::string::npos);
+  CHECK(source.find("struct reference_backend") != std::string::npos);
+  CHECK(source.find("llama_model_ptr model") != std::string::npos);
+  CHECK(source.find("std::unique_ptr<emel::model::data> model_data") != std::string::npos);
+  CHECK(source.find("reference_backend reference") != std::string::npos);
+  CHECK(source.find("load_generation_reference_backend(opts.model_path, state)") !=
+        std::string::npos);
+  CHECK(source.find("state.model_loader.process_event(request)") != std::string::npos);
+  CHECK(source.find("run_emel_generate(state,") != std::string::npos);
+
+  const std::vector<std::string> forbidden = {
+    "emel_vocab = llama_vocab",
+    "llama_vocab_ptr = emel_vocab",
+    "state.model_data = state.reference",
+    "state.reference.model = state.model_data",
+    "state.reference.vocab = &state.model_data",
+    "state.reference.vocab = state.model_data",
+    "reference_result = emel_result",
+    "emel_result = reference_result",
+    "parse_plamo2_byte_token(piece_view",
+  };
+
+  for (const auto & pattern : forbidden) {
+    CHECK_MESSAGE(source.find(pattern) == std::string::npos,
+                  "parity_engines.cpp contains lane-sharing pattern " << pattern);
   }
 }
 

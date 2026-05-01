@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.18
 milestone_name: Parity Tool Boundary Refactor
-status: ready_to_plan
-stopped_at: Phase 151 complete; Phase 152 ready to plan
+status: milestone_implementation_complete
+stopped_at: Phase 152 complete; v1.18 ready for milestone audit
 last_updated: "2026-05-01T00:00:00Z"
 last_activity: 2026-05-01
 progress:
   total_phases: 5
-  completed_phases: 4
-  total_plans: 4
-  completed_plans: 4
-  percent: 80
+  completed_phases: 5
+  total_plans: 5
+  completed_plans: 5
+  percent: 100
 ---
 
 # Project State
@@ -22,19 +22,18 @@ See: .planning/PROJECT.md (updated 2026-05-01)
 
 **Core value:** Prove real end-to-end behavior with explicit SML orchestration and parity-oriented
 verification before widening API surface or model scope.
-**Current focus:** Plan Phase 152 for v1.18, proving behavior preservation and lane-isolation
-closure after dependency manifests landed.
+**Current focus:** Audit and close v1.18 after all parity tool boundary phases completed.
 
 ## Current Position
 
-Phase: 152
+Phase: closeout
 Plan: —
-Status: Phase 151 added deterministic dependency manifest records for every registered
-paritychecker mode, documented `parity_dependency_manifest/v1`, and proved missing/stale/uncertain
-freshness requires the relevant full parity gate.
-Last activity: 2026-05-01 — Phase 151 complete
+Status: Phase 152 passed maintained paritychecker behavior tests, removed the direct EMEL
+detokenizer action-detail bridge from reference output rendering, and added source checks for
+shared runner lane-object isolation.
+Last activity: 2026-05-01 — Phase 152 complete
 
-Progress: [########--] 80%
+Progress: [##########] 100%
 
 ## Deferred Items
 
@@ -54,11 +53,11 @@ Items acknowledged and still deferred at milestone close on 2026-04-26:
 
 - Milestone: v1.18 Parity Tool Boundary Refactor
 
-- Current planning shape: Phases 148-151 complete; Phase 152 ready to plan.
+- Current planning shape: Phases 148-152 complete; milestone audit ready.
 - Latest shipped milestone: `v1.17 Text Generator Domain Alignment`.
 
-- Next action: `$gsd-plan-phase 152`.
-- Current blocker: none known after Phase 151.
+- Next action: `$gsd-audit-milestone`.
+- Current blocker: none known after Phase 152.
 
 ## Accumulated Context
 
@@ -90,6 +89,10 @@ Recent decisions affecting current work:
 - Phase 151 added deterministic per-mode parity dependency manifests and documented
   `parity_dependency_manifest/v1`. Missing, stale, or uncertain manifest freshness is explicitly a
   full relevant parity gate trigger.
+
+- Phase 152 closed parity behavior and lane-isolation proof. Maintained paritychecker tests passed,
+  shared runner source checks now reject lane-owned runtime objects, and the generation reference
+  renderer no longer calls EMEL detokenizer action detail helpers.
 
 - `v1.15` targets one maintained ARM diarization slice for
   `openresearchtools/diar_streaming_sortformer_4spk-v2.1-gguf`.
