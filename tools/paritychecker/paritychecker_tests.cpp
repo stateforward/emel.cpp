@@ -686,6 +686,40 @@ TEST_CASE("paritychecker help describes the maintained generation fixture contra
   CHECK(capture.stderr_text.find("error:") == std::string::npos);
 }
 
+TEST_CASE("parity runner owns cli parsing and validation") {
+  const process_capture no_args = run_generation_paritychecker_capture_with_args({});
+  CHECK(no_args.exit_code == 2);
+  CHECK(no_args.stdout_text.empty());
+  CHECK(no_args.stderr_text.find("usage:") != std::string::npos);
+
+  const process_capture invalid_combo = run_generation_paritychecker_capture_with_args({
+    "--gbnf",
+    "--text",
+    "root ::= \"a\"",
+    "--attribution",
+  });
+  CHECK(invalid_combo.exit_code == 2);
+  CHECK(invalid_combo.stdout_text.empty());
+  CHECK(invalid_combo.stderr_text.find("usage:") != std::string::npos);
+
+  const std::string main_source =
+      read_text_file(repo_root_dir() / "tools" / "paritychecker" / "parity_main.cpp");
+  REQUIRE_FALSE(main_source.empty());
+  CHECK(main_source.find("run_parity_cli(argc, argv)") != std::string::npos);
+  CHECK(main_source.find("parse_args") == std::string::npos);
+  CHECK(main_source.find("print_usage") == std::string::npos);
+  CHECK(main_source.find("generation_fixture_registry") == std::string::npos);
+  CHECK(main_source.find("std::strtol") == std::string::npos);
+  CHECK(main_source.find("std::fopen") == std::string::npos);
+
+  const std::string runner_source =
+      read_text_file(repo_root_dir() / "tools" / "paritychecker" / "parity_runner.cpp");
+  REQUIRE_FALSE(runner_source.empty());
+  CHECK(runner_source.find("int run_parity_cli(int argc, char ** argv)") != std::string::npos);
+  CHECK(runner_source.find("bool parse_args(int argc, char ** argv") != std::string::npos);
+  CHECK(runner_source.find("void print_usage(const char * exe)") != std::string::npos);
+}
+
 TEST_CASE("parity assets resolve maintained generation fixtures centrally") {
   const std::string fixture_list =
       emel::paritychecker::assets::maintained_generation_fixture_list();

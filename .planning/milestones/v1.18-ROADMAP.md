@@ -58,7 +58,7 @@ manifest gate consumption.
   with conservative stale/missing-data semantics.
 - [x] **Phase 152: Parity Behavior And Lane-Isolation Closure** - Prove all existing modes still
   behave the same and lane isolation remains enforceable.
-- [ ] **Phase 153: Parity Runner Config Ownership Closure** - Move CLI/config parsing ownership
+- [x] **Phase 153: Parity Runner Config Ownership Closure** - Move CLI/config parsing ownership
   behind the shared runner boundary and preserve existing CLI behavior.
 - [ ] **Phase 154: Generation Live Reference Truth Closure** - Make maintained generation parity
   compare against live reference-lane output while preserving lane isolation and snapshot
@@ -197,8 +197,9 @@ normalization instead of leaving that behavior in `parity_main.cpp`.
    tokenizer, and generation argument validation through the runner boundary.
 4. Source checks fail if CLI/config parsing ownership drifts back into `parity_main.cpp`.
 
-**Status:** Pending. User has explicitly approved snapshot and model updates when they are required
-for truthful maintained-path proof.
+**Status:** Complete. Phase 153 moved usage text, argument parsing, text-file loading, and CLI
+validation behind `run_parity_cli(...)`, leaving `parity_main.cpp` as a process shim. Focused
+paritychecker tests and the changed-file scoped quality gate passed.
 
 ### Phase 154: Generation Live Reference Truth Closure
 

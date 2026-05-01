@@ -10,7 +10,7 @@ parity-oriented verification before widening API surface or model scope.
 
 ### Runner Boundary
 
-- [ ] **PARITY-01**: `tools/paritychecker` has a shared runner boundary that owns CLI/config
+- [x] **PARITY-01**: `tools/paritychecker` has a shared runner boundary that owns CLI/config
   parsing, asset resolution, fixture normalization, lane invocation, and result normalization.
 - [x] **PARITY-02**: The shared runner no longer contains bulk per-mode parity implementation for
   tokenizer, GBNF, kernel, Jinja, or generation modes.
@@ -73,7 +73,7 @@ parity-oriented verification before widening API surface or model scope.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| PARITY-01 | Phase 153 | Pending |
+| PARITY-01 | Phase 153 | Complete |
 | PARITY-02 | Phase 149 | Complete |
 | PARITY-03 | Phase 154 | Pending |
 | ENGINE-01 | Phase 149 | Complete |
@@ -90,9 +90,9 @@ parity-oriented verification before widening API surface or model scope.
 - Active requirements: 12 total
 - Mapped to phases: 12
 - Unmapped: 0
-- Complete: 6
-- Pending: 6
+- Complete: 7
+- Pending: 5
 
-**Last updated:** 2026-05-01 after the source-backed milestone audit downgraded v1.18 to
-`gaps_found` and added gap-closure Phases 153-156. Snapshot and model updates are explicitly
-allowed during these closure phases when required for truthful maintained-path proof.
+**Last updated:** 2026-05-01 after Phase 153 closed `PARITY-01` by moving CLI/config parsing
+behind the shared runner boundary. Snapshot and model updates are explicitly allowed during the
+remaining closure phases when required for truthful maintained-path proof.

@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.18
 milestone_name: Parity Tool Boundary Refactor
-status: gap_closure_planned
-stopped_at: "v1.18 reopened after source-backed audit gaps; next action is `$gsd-plan-phase 153`."
+status: phase_in_progress
+stopped_at: "Phase 153 completed; next action is autonomous execution of Phase 154."
 last_updated: "2026-05-01T03:46:11.945Z"
 last_activity: 2026-05-01
 progress:
   total_phases: 4
-  completed_phases: 0
-  total_plans: 0
-  completed_plans: 0
-  percent: 0
+  completed_phases: 1
+  total_plans: 1
+  completed_plans: 1
+  percent: 25
 ---
 
 # Project State
@@ -26,12 +26,12 @@ verification before widening API surface or model scope.
 
 ## Current Position
 
-Phase: 153
+Phase: 154
 Plan: —
-Status: gap closure phases 153-156 created after a source-backed `gaps_found` audit.
+Status: Phase 153 complete; Phase 154 pending.
 Last activity: 2026-05-01
 
-Progress: [----------] 0%
+Progress: [##--------] 25%
 
 ## Deferred Items
 
@@ -55,9 +55,9 @@ Items acknowledged and still deferred at milestone close on 2026-05-01:
 - Latest shipped milestone: `v1.17 Text Generator Domain Alignment`; v1.18 is not closeout-ready
   until the reopened source-backed gaps pass audit.
 
-- Next action: `$gsd-plan-phase 153`.
-- Current blocker: v1.18 milestone audit is `gaps_found` with partial `PARITY-01`,
-  `PARITY-03`, `LANE-01`, `LANE-02`, `MANIFEST-01`, and `MANIFEST-02`.
+- Next action: continue autonomous execution with Phase 154.
+- Current blocker: v1.18 milestone audit is `gaps_found` with remaining partial `PARITY-03`,
+  `LANE-01`, `LANE-02`, `MANIFEST-01`, and `MANIFEST-02`.
 
 ## Accumulated Context
 
@@ -97,6 +97,10 @@ Recent decisions affecting current work:
 
 - User explicitly approved snapshot and model updates for the v1.18 gap closure phases when those
   updates are required for truthful maintained-path proof.
+
+- Phase 153 closed `PARITY-01`: `parity_main.cpp` now delegates to runner-owned
+  `run_parity_cli(...)`, while `parity_runner.cpp` owns usage text, CLI/config parsing, text-file
+  loading, and validation. Focused paritychecker tests and the scoped quality gate passed.
 
 - `v1.15` targets one maintained ARM diarization slice for
   `openresearchtools/diar_streaming_sortformer_4spk-v2.1-gguf`.
