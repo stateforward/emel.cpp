@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.19
 milestone_name: Benchmark Tool Pluggable Runner Refactor
-status: phase_in_progress
-stopped_at: "Phase 162 complete; next action is `$gsd-discuss-phase 163`."
-last_updated: "2026-05-01T08:05:00Z"
+status: milestone_ready_for_audit
+stopped_at: "Phase 163 complete; next action is `$gsd-audit-milestone`."
+last_updated: "2026-05-01T08:20:00Z"
 last_activity: 2026-05-01
 progress:
   total_phases: 7
-  completed_phases: 6
-  total_plans: 6
-  completed_plans: 6
-  percent: 86
+  completed_phases: 7
+  total_plans: 7
+  completed_plans: 7
+  percent: 100
 ---
 
 # Project State
@@ -26,12 +26,12 @@ verification before widening API surface or model scope.
 
 ## Current Position
 
-Phase: 163 Benchmark Behavior And Lane-Isolation Closure
+Phase: -
 Plan: -
-Status: Phase 162 complete; Phase 163 not started.
-Last activity: 2026-05-01 - Phase 162 completed
+Status: v1.19 implementation complete; milestone audit pending.
+Last activity: 2026-05-01 - Phase 163 completed
 
-Progress: [#########-] 86%
+Progress: [##########] 100%
 
 ## Deferred Items
 
@@ -51,10 +51,10 @@ Items acknowledged and still deferred at milestone close on 2026-05-01:
 
 - Milestone: `v1.19 Benchmark Tool Pluggable Runner Refactor`
 
-- Current planning shape: 7 phases, 13 active requirements mapped; 6 phases complete.
+- Current planning shape: 7 phases, 13 active requirements mapped; 7 phases complete.
 - Latest shipped milestone: `v1.18 Parity Tool Boundary Refactor`.
 
-- Next action: `$gsd-discuss-phase 163` or `$gsd-plan-phase 163`.
+- Next action: `$gsd-audit-milestone`.
 - Current blocker: none known.
 
 ## Accumulated Context
@@ -102,6 +102,10 @@ Recent decisions affecting current work:
 - Phase 162 completed benchmark manifest quality-gate consumption by mapping changed files through
   `tools/bench/dependency_manifest.txt`, checking manifest freshness before benchmark skip
   decisions, and forcing benchmark gates for missing, stale, or uncertain manifest state.
+
+- Phase 163 completed maintained behavior and lane-isolation closure with source-backed checks for
+  shared benchmark lane neutrality, actor-boundary cleanliness, direct suite-wiring drift, and
+  maintained generation/diarization behavior coverage.
 
 - Phases 161-162 own build-time benchmark dependency manifests and conservative quality-gate
   consumption. Phase 163 closes maintained behavior and lane-isolation proof.

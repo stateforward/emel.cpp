@@ -88,7 +88,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | Requirement | Phase | Status |
 |-------------|-------|--------|
 | ORCH-01 | Phase 157 | Complete |
-| ORCH-02 | Phase 163 | Pending |
+| ORCH-02 | Phase 163 | Complete |
 | RUNNER-01 | Phase 158 | Complete |
 | RUNNER-02 | Phase 158 | Complete |
 | DISC-01 | Phase 159 | Complete |
@@ -99,7 +99,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | GATE-01 | Phase 162 | Complete |
 | GATE-02 | Phase 162 | Complete |
 | LANE-01 | Phase 157 | Complete |
-| LANE-02 | Phase 163 | Pending |
+| LANE-02 | Phase 163 | Complete |
 
 **Coverage:**
 - Active requirements: 13 total

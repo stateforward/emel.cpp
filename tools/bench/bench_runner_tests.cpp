@@ -635,6 +635,67 @@ TEST_CASE("bench_runner cli emits and checks dependency manifest freshness") {
         std::string::npos);
 }
 
+TEST_CASE("shared benchmark orchestration stays lane-neutral and actor-boundary clean") {
+  const std::vector<std::filesystem::path> shared_paths = {
+    repo_root() / "tools" / "bench" / "bench_main.cpp",
+    repo_root() / "tools" / "bench" / "bench_runner.cpp",
+    repo_root() / "tools" / "bench" / "bench_runner.hpp",
+    repo_root() / "tools" / "bench" / "bench_runner_contract.hpp",
+    repo_root() / "tools" / "bench" / "bench_runner_registry.cpp",
+    repo_root() / "tools" / "bench" / "bench_runner_registry.hpp",
+    repo_root() / "tools" / "bench" / "bench_dependency_manifest.cpp",
+    repo_root() / "tools" / "bench" / "bench_dependency_manifest.hpp",
+  };
+  const std::vector<std::string> forbidden_patterns = {
+    "/actions.hpp",
+    "/guards.hpp",
+    "/detail.hpp",
+    "emel::text::generator::action::",
+    "emel::text::generator::guard::",
+    "emel::text::generator::detail::",
+    "llama_model",
+    "llama_context",
+    "llama_vocab",
+    "ggml_context",
+    "shared_runtime",
+    "shared_cache",
+  };
+
+  for (const std::filesystem::path & path : shared_paths) {
+    const std::string source = read_file(path);
+    REQUIRE_MESSAGE(!source.empty(), "missing source " << path.string());
+    for (const std::string & pattern : forbidden_patterns) {
+      CHECK_MESSAGE(source.find(pattern) == std::string::npos,
+                    path.string() << " contains forbidden pattern " << pattern);
+    }
+  }
+
+  const std::string runner_source =
+      read_file(repo_root() / "tools" / "bench" / "bench_runner.cpp");
+  CHECK(runner_source.find("append_emel_generation_cases") == std::string::npos);
+  CHECK(runner_source.find("append_reference_generation_cases") == std::string::npos);
+  CHECK(runner_source.find("append_emel_sortformer_diarization_cases") == std::string::npos);
+  CHECK(runner_source.find("append_reference_sortformer_diarization_cases") == std::string::npos);
+}
+
+TEST_CASE("maintained benchmark behavior coverage remains source-backed") {
+  const std::string tests_source =
+      read_file(repo_root() / "tools" / "bench" / "bench_runner_tests.cpp");
+
+  CHECK(tests_source.find("bench_main shim delegates to benchmark runner cli") !=
+        std::string::npos);
+  CHECK(tests_source.find("bench_runner generation jsonl emits manifest-driven workload metadata") !=
+        std::string::npos);
+  CHECK(tests_source.find("bench_runner diarization jsonl emits structured maintained parity metadata") !=
+        std::string::npos);
+  CHECK(tests_source.find("benchmark runner registration is localized outside the orchestrator") !=
+        std::string::npos);
+  CHECK(tests_source.find("benchmark dependency manifest renders and writes deterministic output") !=
+        std::string::npos);
+  CHECK(tests_source.find("shared benchmark orchestration stays lane-neutral") !=
+        std::string::npos);
+}
+
 TEST_CASE("generation_stage_probe_emel_path_does_not_bypass_generator_actor") {
   const std::string source =
       read_file(repo_root() / "tools" / "bench" / "generation_bench.cpp");

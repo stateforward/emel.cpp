@@ -66,7 +66,7 @@ manifests.
   dependency manifests from build/source-backed inputs.
 - [x] **Phase 162: Benchmark Manifest Quality-Gate Consumption** - Wire conservative
   manifest-driven benchmark gate selection into quality gates.
-- [ ] **Phase 163: Benchmark Behavior And Lane-Isolation Closure** - Prove existing benchmark
+- [x] **Phase 163: Benchmark Behavior And Lane-Isolation Closure** - Prove existing benchmark
   behavior and EMEL/reference lane isolation remain source-backed after the refactor.
 
 ## Phase Details
@@ -213,4 +213,6 @@ same comparison intent and that EMEL/reference lane isolation remains explicit a
 5. The relevant scoped quality gate passes and requirement traceability shows 13/13 active
    requirements mapped.
 
-**Status:** Pending.
+**Status:** Complete. Phase 163 added source-backed checks for shared benchmark lane neutrality,
+actor-boundary cleanliness, and maintained behavior-test coverage. Full-suite
+`bench_runner_tests` and the generation-scoped quality gate passed.
