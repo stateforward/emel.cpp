@@ -4,13 +4,13 @@ milestone: v1.19
 milestone_name: Benchmark Tool Pluggable Runner Refactor
 status: completed
 stopped_at: v1.19 milestone completed and archived; next action is `$gsd-new-milestone`.
-last_updated: "2026-05-01T08:42:07.560Z"
+last_updated: "2026-05-01T15:50:50.333Z"
 last_activity: 2026-05-01
 progress:
-  total_phases: 7
-  completed_phases: 7
-  total_plans: 7
-  completed_plans: 7
+  total_phases: 10
+  completed_phases: 10
+  total_plans: 10
+  completed_plans: 10
   percent: 100
 ---
 
@@ -51,7 +51,8 @@ Items acknowledged and still deferred at milestone close on 2026-05-01:
 
 - Milestone: `v1.19 Benchmark Tool Pluggable Runner Refactor`
 
-- Completed shape: 7 phases, 13 active requirements mapped; 7 phases complete.
+- Completed shape: 10 phases, 13 active requirements mapped; 10 phases complete, 0 closure phases
+  pending.
 - Latest shipped milestone: `v1.19 Benchmark Tool Pluggable Runner Refactor`.
 
 - Next action: `$gsd-new-milestone`.
@@ -109,6 +110,30 @@ Recent decisions affecting current work:
 
 - Phases 161-162 own build-time benchmark dependency manifests and conservative quality-gate
   consumption. Phase 163 closes maintained behavior and lane-isolation proof.
+
+- The 2026-05-01 source-backed milestone audit rerun reopened v1.19 because `RUNNER-02` serialized
+  process-seam support is helper/test-only, `LANE-02` actor-boundary enforcement misses maintained
+  runner sources, and phases 157-163 lack Nyquist validation artifacts.
+
+- Phase 164 will close `RUNNER-02` by wiring `bench_runner_request/v1` and
+  `bench_runner_result/v1` through a live runner process entrypoint.
+
+- Phase 165 will close `LANE-02` by removing benchmark actor action/detail reach-through or
+  broadening source checks to fail any prohibited maintained runner reach-through.
+
+- Phase 166 will backfill validation artifacts for reopened v1.19 after source-backed closure
+  phases land.
+
+- Phase 164 closed `RUNNER-02` by adding live `bench_runner_request/v1` /
+  `bench_runner_result/v1` process flags to `bench_runner`, with live binary coverage and scoped
+  quality-gate evidence.
+
+- Phase 165 closed `LANE-02` by removing maintained benchmark actor reach-through, broadening the
+  source-backed runner scan over `tools/bench` `.cpp`/`.hpp` files, and passing full
+  `bench_runner_tests` plus the affected benchmark scoped quality gate.
+
+- Phase 166 closed the Nyquist validation backfill gap by adding validation artifacts for phases
+  157-163 and updating the v1.19 milestone audit to source-backed pass.
 
 - `v1.18` starts from GitHub issue #54 and targets paritychecker runner/engine/build/manifest
   boundaries rather than new parity semantics.
@@ -481,5 +506,5 @@ Recent decisions affecting current work:
 ## Session Continuity
 
 Last session: 2026-05-01T00:00:00Z
-Stopped at: v1.18 milestone completed and archived; next action is `$gsd-new-milestone`.
+Stopped at: v1.19 milestone completed and archived; next action is `$gsd-new-milestone`.
 Resume file: None

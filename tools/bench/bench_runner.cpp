@@ -5,9 +5,13 @@
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
+#include <fstream>
+#include <span>
+#include <sstream>
 #include <string>
 #include <string_view>
 #include <system_error>
+#include <utility>
 #include <vector>
 
 #include "bench_cases.hpp"
@@ -113,6 +117,25 @@ struct artifact_size {
   std::uintmax_t bytes = 0u;
   bool available = false;
 };
+
+std::string read_text_file(const std::string & path) {
+  std::ifstream input(path, std::ios::binary);
+  if (!input) {
+    return {};
+  }
+  std::ostringstream out;
+  out << input.rdbuf();
+  return out.str();
+}
+
+bool write_text_file(const std::string & path, const std::string_view text) {
+  std::ofstream output(path, std::ios::binary | std::ios::trunc);
+  if (!output) {
+    return false;
+  }
+  output.write(text.data(), static_cast<std::streamsize>(text.size()));
+  return static_cast<bool>(output);
+}
 
 artifact_size read_artifact_size(const std::string_view raw_path) {
   artifact_size result{};
@@ -266,12 +289,18 @@ void print_benchmark_config(const bench::config & cfg) {
 std::vector<bench::result> run_benchmarks(const bench::config & cfg,
                                           const std::span<const bench::test_case> cases,
                                           const bool reference,
-                                          const bool include_tokenizer) {
+                                          const bool include_tokenizer,
+                                          const std::string_view selected_suite_override = {}) {
   std::vector<bench::result> results;
   results.reserve(cases.size());
   const std::int32_t selected_case_index = read_env_i32("EMEL_BENCH_CASE_INDEX", -1);
-  const char * selected_suite = std::getenv("EMEL_BENCH_SUITE");
-  const bool filter_by_suite = selected_suite != nullptr && selected_suite[0] != '\0';
+  const char * selected_suite_env = std::getenv("EMEL_BENCH_SUITE");
+  const std::string_view selected_suite =
+      selected_suite_override.empty()
+          ? (selected_suite_env == nullptr ? std::string_view{}
+                                           : std::string_view{selected_suite_env})
+          : selected_suite_override;
+  const bool filter_by_suite = !selected_suite.empty();
   bool suite_seen = false;
 
   std::size_t case_index = 0;
@@ -294,7 +323,10 @@ std::vector<bench::result> run_benchmarks(const bench::config & cfg,
   }
 
   if (filter_by_suite && !suite_seen) {
-    std::fprintf(stderr, "error: unknown benchmark suite '%s'\n", selected_suite);
+    std::fprintf(stderr,
+                 "error: unknown benchmark suite '%.*s'\n",
+                 static_cast<int>(selected_suite.size()),
+                 selected_suite.data());
     std::exit(1);
   }
   return results;
@@ -890,6 +922,42 @@ struct manifest_args {
   bool uncertain = false;
 };
 
+struct process_request_args {
+  bool present = false;
+  bool valid = false;
+  std::string request_path = {};
+  std::string result_path = {};
+};
+
+process_request_args parse_process_request_args(int argc, char ** argv) {
+  process_request_args out{};
+  for (int i = 1; i < argc; ++i) {
+    const std::string_view arg = argv[i];
+    if (arg == "--run-serialized-request") {
+      out.present = true;
+      if (i + 1 >= argc || !out.request_path.empty()) {
+        return out;
+      }
+      out.request_path = argv[++i];
+      continue;
+    }
+    if (arg == "--write-serialized-result") {
+      out.present = true;
+      if (i + 1 >= argc || !out.result_path.empty()) {
+        return out;
+      }
+      out.result_path = argv[++i];
+      continue;
+    }
+    if (arg.rfind("--", 0u) == 0u) {
+      return out;
+    }
+    return out;
+  }
+  out.valid = out.present && !out.request_path.empty() && !out.result_path.empty();
+  return out;
+}
+
 bool parse_manifest_args(int argc, char ** argv, manifest_args & out) {
   out = {};
   for (int i = 1; i < argc; ++i) {
@@ -961,9 +1029,151 @@ std::string freshness_reason(const bench::dependency_manifest::freshness_state s
   return reason;
 }
 
+bench::runner_result make_runner_error(std::int32_t exit_code,
+                                       std::string error_kind,
+                                       std::string error_message) {
+  bench::runner_result result{};
+  result.exit_code = exit_code;
+  result.error_kind = std::move(error_kind);
+  result.error_message = std::move(error_message);
+  return result;
+}
+
+bool suite_available_in_cases(const std::string_view suite,
+                              const std::span<const bench::test_case> cases) {
+  if (suite.empty()) {
+    return true;
+  }
+  for (const bench::test_case & tc : cases) {
+    if (tc.suite == suite) {
+      return true;
+    }
+  }
+  return false;
+}
+
+bool request_uses_kernel_cases(const bench::runner_mode mode) {
+  return mode == bench::runner_mode::kernel_emel ||
+    mode == bench::runner_mode::kernel_reference ||
+    mode == bench::runner_mode::kernel_compare;
+}
+
+bench::runner_result validate_process_runner_request(const bench::runner_request & request) {
+  if (request.generation_jsonl && request.diarization_jsonl) {
+    return make_runner_error(2,
+                             "invalid_request",
+                             "generation and diarization jsonl modes cannot be combined");
+  }
+  if (!k_bench_compiled_suite.empty() && request.suite != k_bench_compiled_suite) {
+    return make_runner_error(2,
+                             "unknown_suite",
+                             "serialized request suite does not match compiled runner suite");
+  }
+
+  const std::span<const bench::test_case> cases =
+      request_uses_kernel_cases(request.mode) ? bench::kernel_runner_cases()
+                                              : bench::default_runner_cases();
+  if (!suite_available_in_cases(request.suite, cases)) {
+    return make_runner_error(2, "unknown_suite", "unknown benchmark suite");
+  }
+  return {};
+}
+
+int execute_runner_request(const bench::runner_request & request) {
+  if (request.mode == bench::runner_mode::kernel_emel) {
+    const auto results =
+        run_benchmarks(request.cfg, bench::kernel_runner_cases(), false, false, request.suite);
+    print_snapshot(results, request.cfg);
+    return 0;
+  }
+
+  if (request.mode == bench::runner_mode::kernel_reference) {
+    const auto results =
+        run_benchmarks(request.cfg, bench::kernel_runner_cases(), true, false, request.suite);
+    print_snapshot(results, request.cfg);
+    return 0;
+  }
+
+  if (request.mode == bench::runner_mode::kernel_compare) {
+    const auto emel_results =
+        run_benchmarks(request.cfg, bench::kernel_runner_cases(), false, false, request.suite);
+    const auto ref_results =
+        run_benchmarks(request.cfg, bench::kernel_runner_cases(), true, false, request.suite);
+    print_compare(emel_results, ref_results, request.cfg);
+    return 0;
+  }
+
+  if (request.mode == bench::runner_mode::emel) {
+    bench::set_generation_lane_mode(bench::generation_lane_mode::emel);
+    const auto results =
+        run_benchmarks(request.cfg, bench::default_runner_cases(), false, true, request.suite);
+    if (request.generation_jsonl) {
+      print_generation_jsonl(results);
+    } else if (request.diarization_jsonl) {
+      print_diarization_jsonl(results);
+    } else {
+      print_snapshot(results, request.cfg);
+    }
+    return 0;
+  }
+
+  if (request.mode == bench::runner_mode::reference) {
+    bench::set_generation_lane_mode(bench::generation_lane_mode::reference);
+    const auto results =
+        run_benchmarks(request.cfg, bench::default_runner_cases(), true, true, request.suite);
+    if (request.generation_jsonl) {
+      print_generation_jsonl(results);
+    } else if (request.diarization_jsonl) {
+      print_diarization_jsonl(results);
+    } else {
+      print_snapshot(results, request.cfg);
+    }
+    return 0;
+  }
+
+  bench::set_generation_lane_mode(bench::generation_lane_mode::compare);
+  const auto emel_results =
+      run_benchmarks(request.cfg, bench::default_runner_cases(), false, true, request.suite);
+  const auto ref_results =
+      run_benchmarks(request.cfg, bench::default_runner_cases(), true, true, request.suite);
+  print_compare(emel_results, ref_results, request.cfg);
+  return 0;
+}
+
+int run_serialized_process_request(const process_request_args & args) {
+  bench::runner_result result{};
+  bench::runner_request request{};
+
+  const std::string request_text = read_text_file(args.request_path);
+  if (request_text.empty() || !bench::parse_runner_request(request_text, request)) {
+    result = make_runner_error(2, "invalid_request", "failed to parse serialized request");
+  } else {
+    result = validate_process_runner_request(request);
+    if (result.exit_code == 0) {
+      result.exit_code = execute_runner_request(request);
+    }
+  }
+
+  if (!write_text_file(args.result_path, bench::serialize_runner_result(result))) {
+    std::fprintf(stderr, "error: failed to write serialized runner result: %s\n",
+                 args.result_path.c_str());
+    return 1;
+  }
+  return result.exit_code;
+}
+
 }  // namespace
 
 int emel::bench::run_bench_cli(int argc, char ** argv) {
+  const process_request_args process_request = parse_process_request_args(argc, argv);
+  if (process_request.present) {
+    if (!process_request.valid) {
+      std::fprintf(stderr, "error: invalid serialized runner arguments\n");
+      return 2;
+    }
+    return run_serialized_process_request(process_request);
+  }
+
   manifest_args manifest = {};
   if (!parse_manifest_args(argc, argv, manifest)) {
     std::fprintf(stderr, "error: invalid dependency manifest arguments\n");
@@ -1021,62 +1231,5 @@ int emel::bench::run_bench_cli(int argc, char ** argv) {
     return 1;
   }
 
-  if (request.mode == bench::runner_mode::kernel_emel) {
-    const auto results =
-      run_benchmarks(request.cfg, bench::kernel_runner_cases(), false, false);
-    print_snapshot(results, request.cfg);
-    return 0;
-  }
-
-  if (request.mode == bench::runner_mode::kernel_reference) {
-    const auto results =
-      run_benchmarks(request.cfg, bench::kernel_runner_cases(), true, false);
-    print_snapshot(results, request.cfg);
-    return 0;
-  }
-
-  if (request.mode == bench::runner_mode::kernel_compare) {
-    const auto emel_results =
-      run_benchmarks(request.cfg, bench::kernel_runner_cases(), false, false);
-    const auto ref_results =
-      run_benchmarks(request.cfg, bench::kernel_runner_cases(), true, false);
-    print_compare(emel_results, ref_results, request.cfg);
-    return 0;
-  }
-
-  if (request.mode == bench::runner_mode::emel) {
-    bench::set_generation_lane_mode(bench::generation_lane_mode::emel);
-    const auto results =
-      run_benchmarks(request.cfg, bench::default_runner_cases(), false, true);
-    if (request.generation_jsonl) {
-      print_generation_jsonl(results);
-    } else if (request.diarization_jsonl) {
-      print_diarization_jsonl(results);
-    } else {
-      print_snapshot(results, request.cfg);
-    }
-    return 0;
-  }
-
-  if (request.mode == bench::runner_mode::reference) {
-    bench::set_generation_lane_mode(bench::generation_lane_mode::reference);
-    const auto results =
-      run_benchmarks(request.cfg, bench::default_runner_cases(), true, true);
-    if (request.generation_jsonl) {
-      print_generation_jsonl(results);
-    } else if (request.diarization_jsonl) {
-      print_diarization_jsonl(results);
-    } else {
-      print_snapshot(results, request.cfg);
-    }
-    return 0;
-  }
-
-  bench::set_generation_lane_mode(bench::generation_lane_mode::compare);
-  const auto emel_results =
-    run_benchmarks(request.cfg, bench::default_runner_cases(), false, true);
-  const auto ref_results =
-    run_benchmarks(request.cfg, bench::default_runner_cases(), true, true);
-  print_compare(emel_results, ref_results, request.cfg);
-  return 0;
+  return execute_runner_request(request);
 }

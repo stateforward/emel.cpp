@@ -72,8 +72,8 @@ milestone section explicitly names them as maintained evidence.
 | `text/encoders/ugm_short` | 711.459 | llama.cpp | 728.083 | 0.977x |
 | `text/encoders/wpm_long` | 30303.667 | llama.cpp | 30499.167 | 0.994x |
 | `text/encoders/wpm_short` | 579.958 | llama.cpp | 546.333 | 1.062x |
-| `text/jinja/formatter_long` | 60.541 | llama.cpp | 217732.916 | 0.000x |
-| `text/jinja/formatter_short` | 15.583 | llama.cpp | 3876.583 | 0.004x |
+| `text/jinja/formatter_long` | 119.900 | llama.cpp | 222883.033 | 0.001x |
+| `text/jinja/formatter_short` | 31.142 | llama.cpp | 3746.575 | 0.008x |
 | `text/jinja/parser_long` | 65722.792 | llama.cpp | 49943.250 | 1.316x |
 | `text/jinja/parser_short` | 982.792 | llama.cpp | 505.125 | 1.946x |
 | `tokenizer/full_bpe_long` | 13085.167 | llama.cpp | 13487.333 | 0.970x |

@@ -2,12 +2,15 @@
 
 ## v1.19 Benchmark Tool Pluggable Runner Refactor (Shipped: 2026-05-01)
 
-**Phases completed:** 7 phases, 7 plans, 0 tasks
+**Phases completed:** 10 phases, 10 plans, 0 tasks, including reopened closure phases 164-166.
 
 **Delivered:** `tools/bench` now has a shared runner boundary, explicit runner
 request/result contracts, localized runner registration, per-suite build targets, deterministic
 benchmark dependency manifests, conservative quality-gate consumption, and source-backed
-behavior/lane-isolation closure for the maintained generation and diarization benchmark flows.
+behavior/lane-isolation closure for the maintained generation and diarization benchmark flows. The
+milestone was reopened after source-backed audit gaps and closed with live serialized runner
+process-seam coverage, broadened maintained runner actor-boundary enforcement, and Nyquist
+validation artifacts for the full v1.19 phase set.
 
 **Key accomplishments:**
 
@@ -30,12 +33,21 @@ behavior/lane-isolation closure for the maintained generation and diarization be
   clean while maintained generation and diarization JSONL behavior tests continue to run through
   `bench_runner`.
 
+- Wired `bench_runner_request/v1` and `bench_runner_result/v1` through a live `bench_runner`
+  process entrypoint with deterministic fail-closed behavior.
+
+- Removed maintained benchmark runner reach-through into actor action/detail helpers and broadened
+  source checks across maintained `tools/bench` `.cpp` and `.hpp` files.
+
+- Backfilled Nyquist validation evidence for phases 157 through 166 and reran the source-backed
+  milestone audit to a passing result.
+
 **Audit:** Final source-backed audit passed with 13/13 active requirements satisfied.
 
 **Known deferred items at close:** 5 old non-phase items acknowledged and deferred; see
 `.planning/STATE.md` `Deferred Items`.
 
-**Git range:** `b420e1b` -> `9b1af29`
+**Git range:** `b420e1b` -> final reopened closeout commit.
 
 ---
 

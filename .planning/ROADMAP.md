@@ -43,10 +43,9 @@
     audit passed with 12/12 active requirements satisfied.
 
 - [x] [v1.19: Benchmark Tool Pluggable Runner Refactor](.planning/milestones/v1.19-ROADMAP.md)
-  - Shipped 2026-05-01 with shared benchmark orchestration, runner contracts, localized
-    registration, per-suite build targets, deterministic dependency manifests, manifest-driven
-    quality gates, and source-backed maintained behavior/lane-isolation proof.
+  - Shipped 2026-05-01 after reopened source-backed gap closure through Phases 164-166; final
+    audit passed with 13/13 active requirements satisfied.
 
 ## Current Milestone
 
-No active milestone. Next action: run `$gsd-new-milestone` when the next scope is ready.
+No active milestone. Start the next milestone with `$gsd-new-milestone`.

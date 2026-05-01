@@ -33,8 +33,7 @@ void ensure_emel_parses(const std::string & templ) {
   emel::text::jinja::program program{};
   int32_t err = static_cast<int32_t>(emel::text::jinja::parser::error::none);
   size_t error_pos = 0;
-  emel::text::jinja::parser::action::context ctx{};
-  emel::text::jinja::parser::sm machine{ctx};
+  emel::text::jinja::parser::sm machine{};
 
   const emel::text::jinja::event::parse ev{
       templ,
@@ -73,8 +72,7 @@ void append_emel_jinja_parser_cases(std::vector<result> & results, const config 
   ensure_emel_parses(short_template);
   ensure_emel_parses(long_template);
 
-  emel::text::jinja::parser::action::context parser_ctx{};
-  emel::text::jinja::parser::sm machine{parser_ctx};
+  emel::text::jinja::parser::sm machine{};
   const emel::text::jinja::event::parse::done_callback done_cb =
       emel::text::jinja::event::parse::done_callback::from<&parser_done_sink>();
   const emel::text::jinja::event::parse::error_callback error_cb =

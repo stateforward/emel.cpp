@@ -1,9 +1,12 @@
 # quality_gates timing (seconds)
 domain_boundaries 1
 build_with_zig 1
-test_with_coverage 456
-paritychecker 11
-fuzz_smoke 48
-bench_snapshot 3947
-generate_docs 2
-total 4466
+test_with_coverage 0
+paritychecker 0
+fuzz_smoke 0
+bench_snapshot_jinja_formatter 12
+bench_snapshot_batch_planner 10
+bench_snapshot_jinja_parser 13
+bench_snapshot_diarization_sortformer 8
+generate_docs 28
+total 73

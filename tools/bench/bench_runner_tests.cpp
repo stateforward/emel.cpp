@@ -6,6 +6,7 @@
 #include <filesystem>
 #include <fstream>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include <doctest/doctest.h>
@@ -54,6 +55,13 @@ std::string read_file(const std::filesystem::path & path) {
     return {};
   }
   return std::string{std::istreambuf_iterator<char>{input}, std::istreambuf_iterator<char>{}};
+}
+
+void write_file(const std::filesystem::path & path, const std::string_view text) {
+  std::ofstream output(path, std::ios::binary | std::ios::trunc);
+  REQUIRE(output);
+  output.write(text.data(), static_cast<std::streamsize>(text.size()));
+  REQUIRE(output);
 }
 
 std::string quote_arg_posix(const std::string & arg) {
@@ -124,6 +132,75 @@ process_capture run_bench_runner_capture(const std::vector<std::string> & args,
   capture.stderr_text = read_file(stderr_path);
 
   std::error_code ec;
+  std::filesystem::remove(stdout_path, ec);
+  std::filesystem::remove(stderr_path, ec);
+
+  if (status == -1) {
+    return capture;
+  }
+#if defined(_WIN32)
+  capture.exit_code = status;
+#else
+  if (!WIFEXITED(status)) {
+    return capture;
+  }
+  capture.exit_code = WEXITSTATUS(status);
+#endif
+  return capture;
+}
+
+process_capture run_serialized_request_capture(const std::string_view request_text,
+                                               const std::string & tag,
+                                               std::string & result_text,
+                                               const bool enable_internal = false) {
+  const std::filesystem::path tmp_dir =
+      std::filesystem::temp_directory_path() / "emel-bench-runner-tests" / tag;
+  std::filesystem::create_directories(tmp_dir);
+  const std::filesystem::path request_path = tmp_dir / "request.txt";
+  const std::filesystem::path result_path = tmp_dir / "result.txt";
+  const std::filesystem::path stdout_path = tmp_dir / "stdout.txt";
+  const std::filesystem::path stderr_path = tmp_dir / "stderr.txt";
+  write_file(request_path, request_text);
+
+  std::string command;
+#if defined(_WIN32)
+  if (enable_internal) {
+    command = "set EMEL_BENCH_INTERNAL=1 && ";
+  }
+  command += quote_arg_windows(bench_runner_binary_path().string());
+  command += " --run-serialized-request ";
+  command += quote_arg_windows(request_path.string());
+  command += " --write-serialized-result ";
+  command += quote_arg_windows(result_path.string());
+  command += " > ";
+  command += quote_arg_windows(stdout_path.string());
+  command += " 2> ";
+  command += quote_arg_windows(stderr_path.string());
+#else
+  command = "ulimit -s 8192; ";
+  if (enable_internal) {
+    command += "EMEL_BENCH_INTERNAL=1 ";
+  }
+  command += quote_arg_posix(bench_runner_binary_path().string());
+  command += " --run-serialized-request ";
+  command += quote_arg_posix(request_path.string());
+  command += " --write-serialized-result ";
+  command += quote_arg_posix(result_path.string());
+  command += " > ";
+  command += quote_arg_posix(stdout_path.string());
+  command += " 2> ";
+  command += quote_arg_posix(stderr_path.string());
+#endif
+
+  const int status = std::system(command.c_str());
+  process_capture capture{};
+  capture.stdout_text = read_file(stdout_path);
+  capture.stderr_text = read_file(stderr_path);
+  result_text = read_file(result_path);
+
+  std::error_code ec;
+  std::filesystem::remove(request_path, ec);
+  std::filesystem::remove(result_path, ec);
   std::filesystem::remove(stdout_path, ec);
   std::filesystem::remove(stderr_path, ec);
 
@@ -446,6 +523,128 @@ TEST_CASE("bench runner contract rejects malformed process payloads") {
     "schema=bench_runner_result/v1\nexit_code=bad\n", result));
 }
 
+TEST_CASE("bench runner process seam executes a serialized request through the live binary") {
+  emel::bench::runner_request request = {};
+  request.mode = emel::bench::runner_mode::emel;
+  request.suite = "generation";
+  request.cfg.iterations = 1u;
+  request.cfg.runs = 1u;
+  request.cfg.warmup_iterations = 0u;
+  request.cfg.warmup_runs = 0u;
+
+  std::string result_text;
+  const process_capture capture =
+      run_serialized_request_capture(emel::bench::serialize_runner_request(request),
+                                     "process-seam-generation",
+                                     result_text);
+
+  CHECK(capture.exit_code == 0);
+  CHECK(capture.stderr_text.find("error:") == std::string::npos);
+  CHECK(capture.stdout_text.find("# benchmark_config:") != std::string::npos);
+  CHECK(capture.stdout_text.find("generation/preloaded_request/") != std::string::npos);
+
+  emel::bench::runner_result result = {};
+  REQUIRE(emel::bench::parse_runner_result(result_text, result));
+  CHECK(result.exit_code == 0);
+  CHECK(result.error_kind.empty());
+  CHECK(result.error_message.empty());
+}
+
+TEST_CASE("bench runner process seam writes deterministic errors for malformed payloads") {
+  std::string result_text;
+  const process_capture capture =
+      run_serialized_request_capture("schema=bench_runner_request/v1\n",
+                                     "process-seam-malformed",
+                                     result_text);
+
+  CHECK(capture.exit_code == 2);
+  CHECK(capture.stdout_text.empty());
+
+  emel::bench::runner_result result = {};
+  REQUIRE(emel::bench::parse_runner_result(result_text, result));
+  CHECK(result.exit_code == 2);
+  CHECK(result.error_kind == "invalid_request");
+  CHECK(result.error_message.find("parse") != std::string::npos);
+}
+
+TEST_CASE("bench runner process seam writes deterministic errors for unknown modes") {
+  std::string result_text;
+  const process_capture capture =
+      run_serialized_request_capture(
+        "schema=bench_runner_request/v1\n"
+        "mode=unknown\n"
+        "suite=generation\n"
+        "iterations=1\n"
+        "runs=1\n"
+        "warmup_iterations=0\n"
+        "warmup_runs=0\n"
+        "generation_jsonl=0\n"
+        "diarization_jsonl=0\n",
+        "process-seam-unknown-mode",
+        result_text);
+
+  CHECK(capture.exit_code == 2);
+  CHECK(capture.stdout_text.empty());
+
+  emel::bench::runner_result result = {};
+  REQUIRE(emel::bench::parse_runner_result(result_text, result));
+  CHECK(result.exit_code == 2);
+  CHECK(result.error_kind == "invalid_request");
+  CHECK(result.error_message.find("parse") != std::string::npos);
+}
+
+TEST_CASE("bench runner process seam writes deterministic errors for unknown suites") {
+  emel::bench::runner_request request = {};
+  request.mode = emel::bench::runner_mode::emel;
+  request.suite = "missing_suite";
+  request.cfg.iterations = 1u;
+  request.cfg.runs = 1u;
+  request.cfg.warmup_iterations = 0u;
+  request.cfg.warmup_runs = 0u;
+
+  std::string result_text;
+  const process_capture capture =
+      run_serialized_request_capture(emel::bench::serialize_runner_request(request),
+                                     "process-seam-unknown-suite",
+                                     result_text);
+
+  CHECK(capture.exit_code == 2);
+  CHECK(capture.stdout_text.empty());
+
+  emel::bench::runner_result result = {};
+  REQUIRE(emel::bench::parse_runner_result(result_text, result));
+  CHECK(result.exit_code == 2);
+  CHECK(result.error_kind == "unknown_suite");
+  CHECK_FALSE(result.error_message.empty());
+}
+
+TEST_CASE("bench runner process seam rejects conflicting jsonl output modes") {
+  emel::bench::runner_request request = {};
+  request.mode = emel::bench::runner_mode::emel;
+  request.suite = "generation";
+  request.cfg.iterations = 1u;
+  request.cfg.runs = 1u;
+  request.cfg.warmup_iterations = 0u;
+  request.cfg.warmup_runs = 0u;
+  request.generation_jsonl = true;
+  request.diarization_jsonl = true;
+
+  std::string result_text;
+  const process_capture capture =
+      run_serialized_request_capture(emel::bench::serialize_runner_request(request),
+                                     "process-seam-conflicting-jsonl",
+                                     result_text);
+
+  CHECK(capture.exit_code == 2);
+  CHECK(capture.stdout_text.empty());
+
+  emel::bench::runner_result result = {};
+  REQUIRE(emel::bench::parse_runner_result(result_text, result));
+  CHECK(result.exit_code == 2);
+  CHECK(result.error_kind == "invalid_request");
+  CHECK(result.error_message.find("jsonl") != std::string::npos);
+}
+
 TEST_CASE("benchmark runner registration is localized outside the orchestrator") {
   CHECK(emel::bench::registered_runner_count() >= 29u);
   CHECK(emel::bench::find_registered_runner("generation") != nullptr);
@@ -678,6 +877,56 @@ TEST_CASE("shared benchmark orchestration stays lane-neutral and actor-boundary 
   CHECK(runner_source.find("append_reference_sortformer_diarization_cases") == std::string::npos);
 }
 
+TEST_CASE("maintained benchmark runner sources avoid actor internals") {
+  const std::vector<std::string> forbidden_patterns = {
+    "/actions.hpp",
+    "/guards.hpp",
+    "::action::",
+    "::guard::",
+    "emel/batch/planner/detail.hpp",
+    "emel/diarization/request/detail.hpp",
+    "emel/diarization/sortformer/executor/detail.hpp",
+    "emel/diarization/sortformer/pipeline/detail.hpp",
+    "emel/text/generator/detail.hpp",
+    "emel/text/generator/prefill/detail.hpp",
+    "emel/text/jinja/formatter/detail.hpp",
+    "emel/text/jinja/parser/detail.hpp",
+    "emel::batch::planner::detail::",
+    "emel::diarization::request::detail::",
+    "emel::diarization::sortformer::executor::detail::",
+    "emel::diarization::sortformer::pipeline::detail::",
+    "emel::text::generator::detail::",
+    "emel::text::generator::prefill::detail::",
+    "emel::text::jinja::formatter::detail::",
+    "emel::text::jinja::parser::detail::",
+  };
+
+  std::size_t checked_files = 0u;
+  const std::filesystem::path bench_dir = repo_root() / "tools" / "bench";
+  for (const auto & entry : std::filesystem::recursive_directory_iterator(bench_dir)) {
+    if (!entry.is_regular_file()) {
+      continue;
+    }
+    const std::filesystem::path path = entry.path();
+    const std::string ext = path.extension().string();
+    if (ext != ".cpp" && ext != ".hpp") {
+      continue;
+    }
+    if (path.filename() == "bench_runner_tests.cpp") {
+      continue;
+    }
+
+    const std::string source = read_file(path);
+    REQUIRE_MESSAGE(!source.empty(), "missing source " << path.string());
+    checked_files += 1u;
+    for (const std::string & pattern : forbidden_patterns) {
+      CHECK_MESSAGE(source.find(pattern) == std::string::npos,
+                    path.string() << " contains forbidden actor-internal pattern " << pattern);
+    }
+  }
+  CHECK(checked_files > 20u);
+}
+
 TEST_CASE("maintained benchmark behavior coverage remains source-backed") {
   const std::string tests_source =
       read_file(repo_root() / "tools" / "bench" / "bench_runner_tests.cpp");
@@ -693,6 +942,8 @@ TEST_CASE("maintained benchmark behavior coverage remains source-backed") {
   CHECK(tests_source.find("benchmark dependency manifest renders and writes deterministic output") !=
         std::string::npos);
   CHECK(tests_source.find("shared benchmark orchestration stays lane-neutral") !=
+        std::string::npos);
+  CHECK(tests_source.find("maintained benchmark runner sources avoid actor internals") !=
         std::string::npos);
 }
 

@@ -23,7 +23,7 @@ namespace {
 
 namespace fixture = emel::bench::diarization::sortformer_fixture;
 namespace pipeline = emel::diarization::sortformer::pipeline;
-namespace pipeline_detail = emel::diarization::sortformer::pipeline::detail;
+namespace output_detail = emel::diarization::sortformer::output::detail;
 
 constexpr const char * k_proof_status = "maintained_loader_real_audio";
 constexpr const char * k_emel_backend_id = "emel.diarization.sortformer";
@@ -132,12 +132,11 @@ void maybe_write_onnx_probe_inputs(const fixture::model_fixture & model,
     return;
   }
   std::vector<float> hidden_frames(static_cast<size_t>(
-      emel::diarization::sortformer::executor::detail::k_required_hidden_value_count));
+      output_detail::k_required_hidden_value_count));
   int32_t hidden_frame_count = 0;
   int32_t hidden_dim = 0;
   emel::error::type err =
-      emel::diarization::sortformer::executor::detail::to_error(
-          emel::diarization::sortformer::executor::error::none);
+      emel::error::cast(emel::diarization::sortformer::executor::error::none);
   auto executor = std::make_unique<emel::diarization::sortformer::executor::sm>();
   emel::diarization::sortformer::executor::event::execute request{
       model.contract,
@@ -148,10 +147,9 @@ void maybe_write_onnx_probe_inputs(const fixture::model_fixture & model,
   };
   request.error_out = &err;
   if (!executor->process_event(request) ||
-      err != emel::diarization::sortformer::executor::detail::to_error(
-                 emel::diarization::sortformer::executor::error::none) ||
-      hidden_frame_count != emel::diarization::sortformer::executor::detail::k_frame_count ||
-      hidden_dim != emel::diarization::sortformer::executor::detail::k_hidden_dim) {
+      err != emel::error::cast(emel::diarization::sortformer::executor::error::none) ||
+      hidden_frame_count != output_detail::k_frame_count ||
+      hidden_dim != output_detail::k_hidden_dim) {
     fail_sortformer_setup("onnx_hidden_compute");
   }
   write_float_probe_file(hidden_path, hidden_frames);
@@ -256,7 +254,7 @@ result make_profile_emel_result(const fixture::model_fixture & model,
   });
 
   if (!g_stage_ok_sink ||
-      pipeline_result.err != pipeline_detail::to_error(pipeline::error::none) ||
+      pipeline_result.err != emel::error::cast(pipeline::error::none) ||
       pipeline_result.segment_count <= 0) {
     fail_sortformer_setup("profile_pipeline_run");
   }
@@ -285,16 +283,17 @@ result make_stage_profile_result(const fixture::model_fixture & model,
                                  const fixture::expected_output_baseline & baseline) {
   namespace encoder_detail = emel::diarization::sortformer::encoder::detail;
   namespace feature_detail = emel::diarization::sortformer::encoder::feature_extractor::detail;
-  namespace output_detail = emel::diarization::sortformer::output::detail;
 
   std::vector<float> features(static_cast<size_t>(feature_detail::k_required_feature_count));
   std::vector<float> encoder_frames(static_cast<size_t>(
       encoder_detail::k_required_encoder_value_count));
   std::vector<float> hidden_frames(static_cast<size_t>(
-      emel::diarization::sortformer::executor::detail::k_required_hidden_value_count));
+      output_detail::k_required_hidden_value_count));
   std::vector<float> probabilities(static_cast<size_t>(
       output_detail::k_required_probability_value_count));
-  std::array<output_detail::segment_record, pipeline_detail::k_max_segment_count> segments = {};
+  std::array<output_detail::segment_record,
+             output_detail::k_frame_count * output_detail::k_speaker_count>
+      segments = {};
 
   const auto feature_contract = feature_detail::make_contract(model.model);
   encoder_detail::contract encoder_contract = {};
@@ -305,8 +304,7 @@ result make_stage_profile_result(const fixture::model_fixture & model,
   int32_t hidden_dim = 0;
   int32_t segment_count = 0;
   emel::error::type executor_err =
-      emel::diarization::sortformer::executor::detail::to_error(
-          emel::diarization::sortformer::executor::error::none);
+      emel::error::cast(emel::diarization::sortformer::executor::error::none);
 
   if (!feature_detail::contract_valid(feature_contract) ||
       !encoder_detail::bind_contract(model.model, encoder_contract) ||
@@ -340,8 +338,7 @@ result make_stage_profile_result(const fixture::model_fixture & model,
     g_stage_ok_sink = executor->process_event(request);
   });
   if (!g_stage_ok_sink ||
-      executor_err != emel::diarization::sortformer::executor::detail::to_error(
-                          emel::diarization::sortformer::executor::error::none)) {
+      executor_err != emel::error::cast(emel::diarization::sortformer::executor::error::none)) {
     fail_sortformer_setup("stage_profile_executor");
   }
 
@@ -416,7 +413,7 @@ void append_emel_sortformer_diarization_cases(std::vector<result> & results,
                                             pipeline_result);
     g_checksum_sink = fixture::compute_checksum(pipeline_result.segments, pipeline_result.segment_count);
   });
-  if (!g_stage_ok_sink || pipeline_result.err != pipeline_detail::to_error(pipeline::error::none) ||
+  if (!g_stage_ok_sink || pipeline_result.err != emel::error::cast(pipeline::error::none) ||
       pipeline_result.segment_count <= 0) {
     fail_sortformer_setup("steady_state_pipeline_run");
   }

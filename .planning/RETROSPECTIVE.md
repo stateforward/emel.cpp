@@ -185,14 +185,14 @@
 ## Milestone: v1.19 - Benchmark Tool Pluggable Runner Refactor
 
 **Shipped:** 2026-05-01
-**Phases:** 7 | **Plans:** 7 | **Sessions:** autonomous execution and closeout
+**Phases:** 10 | **Plans:** 10 | **Sessions:** autonomous execution, reopened gap closure, and closeout
 
 ### What Was Built
 
 - Shared benchmark orchestration behind `emel::bench::run_bench_cli(...)`, with `bench_main.cpp`
   left as a process shim.
-- Deterministic `bench_runner_request/v1` and `bench_runner_result/v1` contracts for a future
-  process-level runner seam.
+- Deterministic `bench_runner_request/v1` and `bench_runner_result/v1` contracts wired through a
+  live `bench_runner` process-level runner seam.
 - Localized benchmark suite registration and lookup through `bench_runner_registry.hpp` / `.cpp`.
 - Per-suite `bench_runner_suite_<suite>` CMake object targets for maintained runner source
   isolation.
@@ -200,6 +200,8 @@
   operations, and manifest-driven quality-gate escalation.
 - Source-backed generation and diarization behavior coverage plus shared runner lane-isolation and
   actor-boundary checks.
+- Reopened closure phases closed the live process-seam, maintained runner actor-boundary, and
+  Nyquist validation artifact gaps found by source-backed audit.
 
 ### What Worked
 
@@ -253,7 +255,7 @@
 
 | Milestone | Sessions | Phases | Key Change |
 |-----------|----------|--------|------------|
-| v1.19 | autonomous execution/closeout | 7 | Benchmark runner boundaries now mirror paritychecker boundaries with manifests and source-backed lane-isolation proof. |
+| v1.19 | autonomous execution/reopened closeout | 10 | Benchmark runner boundaries now mirror paritychecker boundaries with manifests, live process-seam proof, and source-backed lane-isolation enforcement. |
 | v1.18 | autonomous execution/closeout | 5 | Paritychecker boundaries became explicit runner, engine, build, manifest, and lane-isolation contracts. |
 | v1.15 | autonomous execution/closeout | 24 | Source-backed audit and recursive profiling became mandatory before milestone archive. |
 | v1.13 | current closeout | 8 | Audit gaps became explicit repair phases before archive. |
