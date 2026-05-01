@@ -63,7 +63,7 @@ manifest gate consumption.
 - [x] **Phase 154: Generation Live Reference Truth Closure** - Make maintained generation parity
   compare against live reference-lane output while preserving lane isolation and snapshot
   publication semantics.
-- [ ] **Phase 155: Parity Actor Boundary Enforcement Closure** - Replace direct paritychecker
+- [x] **Phase 155: Parity Actor Boundary Enforcement Closure** - Replace direct paritychecker
   actor-helper/detail reaches with public state-machine or owned-kernel surfaces and broaden source
   checks.
 - [ ] **Phase 156: Parity Dependency Manifest Gate Closure** - Wire manifest emission and
@@ -247,7 +247,8 @@ legacy non-current Qwen drift is reported instead of being masked by the stored 
    namespace patterns, not only selected generator/detokenizer/Jinja strings.
 4. Focused paritychecker tests and the scoped quality gate pass after the boundary tightening.
 
-**Status:** Pending.
+**Status:** Complete. Paritychecker now uses public GGUF/model/llama wrapper surfaces instead of
+direct non-kernel actor/detail includes, and broad source checks cover all paritychecker sources.
 
 ### Phase 156: Parity Dependency Manifest Gate Closure
 

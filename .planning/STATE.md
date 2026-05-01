@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.18
 milestone_name: Parity Tool Boundary Refactor
 status: phase_in_progress
-stopped_at: "Phase 154 completed; next action is autonomous execution of Phase 155."
-last_updated: "2026-05-01T04:55:00.000Z"
+stopped_at: "Phase 155 completed; next action is autonomous execution of Phase 156."
+last_updated: "2026-05-01T05:20:00.000Z"
 last_activity: 2026-05-01
 progress:
   total_phases: 4
-  completed_phases: 2
-  total_plans: 2
-  completed_plans: 2
-  percent: 50
+  completed_phases: 3
+  total_plans: 3
+  completed_plans: 3
+  percent: 75
 ---
 
 # Project State
@@ -26,12 +26,12 @@ verification before widening API surface or model scope.
 
 ## Current Position
 
-Phase: 155
+Phase: 156
 Plan: —
-Status: Phase 154 complete; Phase 155 pending.
+Status: Phase 155 complete; Phase 156 pending.
 Last activity: 2026-05-01
 
-Progress: [#####-----] 50%
+Progress: [########--] 75%
 
 ## Deferred Items
 
@@ -55,9 +55,9 @@ Items acknowledged and still deferred at milestone close on 2026-05-01:
 - Latest shipped milestone: `v1.17 Text Generator Domain Alignment`; v1.18 is not closeout-ready
   until the reopened source-backed gaps pass audit.
 
-- Next action: continue autonomous execution with Phase 155.
-- Current blocker: v1.18 milestone audit is `gaps_found` with remaining partial `LANE-02`,
-  `MANIFEST-01`, and `MANIFEST-02`.
+- Next action: continue autonomous execution with Phase 156.
+- Current blocker: v1.18 milestone audit is `gaps_found` with remaining partial `MANIFEST-01`
+  and `MANIFEST-02`.
 
 ## Accumulated Context
 
@@ -106,6 +106,11 @@ Recent decisions affecting current work:
   against a live reference-lane generation result before baseline load. Stored baselines are
   secondary publication artifacts, and the legacy non-current Qwen fixture now reports
   live-reference drift instead of succeeding from an EMEL-authored baseline.
+
+- Phase 155 closed `LANE-02`: paritychecker now uses public GGUF/model/llama wrapper surfaces
+  instead of direct non-kernel actor/detail includes, keeps only an approved kernel-owned AArch64
+  detail arithmetic surface for flash diagnostics, and scans all paritychecker source/header files
+  for actor internal include/namespace regressions.
 
 - `v1.15` targets one maintained ARM diarization slice for
   `openresearchtools/diar_streaming_sortformer_4spk-v2.1-gguf`.

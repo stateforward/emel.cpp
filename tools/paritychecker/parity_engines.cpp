@@ -23,7 +23,7 @@
 #include <utility>
 #include <vector>
 
-#include "emel/gguf/loader/detail.hpp"
+#include "emel/gguf/loader/any.hpp"
 #include "emel/gguf/loader/errors.hpp"
 #include "emel/gguf/loader/events.hpp"
 #include "emel/gguf/loader/sm.hpp"
@@ -32,14 +32,14 @@
 #include "emel/text/generator/errors.hpp"
 #include "emel/text/generator/events.hpp"
 #include "emel/text/generator/sm.hpp"
-#include "emel/kernel/aarch64/actions.hpp"
+#include "emel/kernel/aarch64/detail.hpp"
 #include "emel/kernel/aarch64/sm.hpp"
 #include "emel/kernel/events.hpp"
 #include "emel/kernel/x86_64/sm.hpp"
 #include "emel/logits/sampler/events.hpp"
 #include "emel/model/data.hpp"
-#include "emel/model/detail.hpp"
-#include "emel/model/llama/detail.hpp"
+#include "emel/model/any.hpp"
+#include "emel/model/llama/any.hpp"
 #include "emel/model/loader/errors.hpp"
 #include "emel/model/loader/events.hpp"
 #include "emel/model/loader/sm.hpp"
@@ -251,60 +251,60 @@ bool on_jinja_render_error(void * owner,
 }
 
 quantized_contract_summary build_quantized_contract_summary(
-    const emel::model::llama::detail::quantized_path_audit & audit) {
+    const emel::model::llama::quantized_path_audit & audit) {
   quantized_contract_summary summary{};
   for (const auto & stage : audit.stages) {
     summary.native_quantized += static_cast<uint32_t>(
-        stage.contract == emel::model::llama::detail::quantized_contract_kind::native_quantized);
+        stage.contract == emel::model::llama::quantized_contract_kind::native_quantized);
     summary.approved_dense_f32_by_contract += static_cast<uint32_t>(
         stage.contract ==
-        emel::model::llama::detail::quantized_contract_kind::approved_dense_f32_by_contract);
+        emel::model::llama::quantized_contract_kind::approved_dense_f32_by_contract);
     summary.disallowed_fallback += static_cast<uint32_t>(
-        stage.contract == emel::model::llama::detail::quantized_contract_kind::disallowed_fallback);
+        stage.contract == emel::model::llama::quantized_contract_kind::disallowed_fallback);
     summary.explicit_no_claim += static_cast<uint32_t>(
-        stage.contract == emel::model::llama::detail::quantized_contract_kind::explicit_no_claim);
+        stage.contract == emel::model::llama::quantized_contract_kind::explicit_no_claim);
   }
   return summary;
 }
 
 bool build_execution_surface(const emel::model::data & model_data,
-                            emel::model::llama::detail::execution_view & execution_out) {
-  return emel::model::llama::detail::build_execution_view(model_data, execution_out) ==
+                            emel::model::llama::execution_view & execution_out) {
+  return emel::model::llama::build_execution_view(model_data, execution_out) ==
          emel::error::cast(emel::model::loader::error::none);
 }
 
 bool build_execution_audit(const emel::model::data & model_data,
-                           emel::model::llama::detail::quantized_path_audit & audit_out) {
-  emel::model::llama::detail::execution_view execution{};
+                           emel::model::llama::quantized_path_audit & audit_out) {
+  emel::model::llama::execution_view execution{};
   if (!build_execution_surface(model_data, execution)) {
     return false;
   }
 
-  audit_out = emel::model::llama::detail::build_quantized_path_audit(execution);
+  audit_out = emel::model::llama::build_quantized_path_audit(execution);
   return true;
 }
 
 bool build_execution_audit(const emel::model::data & model_data,
-                           emel::model::llama::detail::execution_view & execution_out,
-                           emel::model::llama::detail::quantized_path_audit & audit_out) {
+                           emel::model::llama::execution_view & execution_out,
+                           emel::model::llama::quantized_path_audit & audit_out) {
   if (!build_execution_surface(model_data, execution_out)) {
     return false;
   }
 
-  audit_out = emel::model::llama::detail::build_quantized_path_audit(execution_out);
+  audit_out = emel::model::llama::build_quantized_path_audit(execution_out);
   return true;
 }
 
 bool build_execution_surface_with_audit(
     const emel::model::data & model_data,
-    emel::model::llama::detail::execution_view & execution_out,
-    emel::model::llama::detail::quantized_path_audit & audit_out) {
-  if (emel::model::llama::detail::build_execution_view(model_data, execution_out) !=
+    emel::model::llama::execution_view & execution_out,
+    emel::model::llama::quantized_path_audit & audit_out) {
+  if (emel::model::llama::build_execution_view(model_data, execution_out) !=
       emel::error::cast(emel::model::loader::error::none)) {
     return false;
   }
 
-  audit_out = emel::model::llama::detail::build_quantized_path_audit(execution_out);
+  audit_out = emel::model::llama::build_quantized_path_audit(execution_out);
   return true;
 }
 
@@ -1031,8 +1031,8 @@ struct generation_load_state {
             this)} {}
 };
 
-emel::model::detail::kv_binding kv_binding_from_state(const generation_load_state & state) {
-  return emel::model::detail::kv_binding{
+emel::model::kv_binding kv_binding_from_state(const generation_load_state & state) {
+  return emel::model::kv_binding{
       .arena = std::span<const uint8_t>{state.kv_arena.data(), state.kv_arena.size()},
       .entries = std::span<const emel::gguf::loader::kv_entry>{state.kv_entries.data(),
                                                                state.kv_entries.size()},
@@ -1226,7 +1226,7 @@ emel::error::type parse_gguf_kv_storage(generation_load_state & state,
   }
 
   const uint64_t arena_bytes =
-      emel::gguf::loader::detail::required_kv_arena_bytes(requirements);
+      emel::gguf::loader::required_kv_arena_bytes(requirements);
   if (arena_bytes == std::numeric_limits<uint64_t>::max()) {
     return emel::error::cast(emel::model::loader::error::backend_error);
   }
@@ -1542,7 +1542,7 @@ bool load_generation_reference_backend(const std::string & model_path,
     return false;
   }
 
-  if (!emel::model::detail::load_vocab_from_gguf(
+  if (!emel::model::load_vocab_from_gguf(
           kv_binding_from_state(state),
           state.model_data->vocab_data)) {
     return false;
@@ -1581,7 +1581,7 @@ bool load_emel_vocab_from_gguf_file(const std::string & model_path,
     return false;
   }
 
-  return emel::model::detail::load_vocab_from_gguf(kv_binding_from_state(state), vocab_out);
+  return emel::model::load_vocab_from_gguf(kv_binding_from_state(state), vocab_out);
 }
 
 emel::error::type run_emel_initialize_generator(
@@ -11801,8 +11801,8 @@ void dump_generation_tensor_compare(generation_load_state & state,
       "tensor_compare.token_embedding",
       *backend.token_embedding.tensor,
       prompt_tokens.front());
-  emel::model::llama::detail::block_view block_view = {};
-  if (emel::model::llama::detail::lookup_block_view(backend.execution, 0, block_view) ==
+  emel::model::llama::block_view block_view = {};
+  if (emel::model::llama::lookup_block_view(backend.execution, 0, block_view) ==
       emel::error::cast(emel::model::loader::error::none)) {
     dump_vector_compare(
         "tensor_compare.layer0.attn_norm",
@@ -11813,7 +11813,7 @@ void dump_generation_tensor_compare(generation_load_state & state,
         *block_view.feed_forward_norm.tensor,
         backend.blocks[0].feed_forward_norm);
   }
-  if (emel::model::llama::detail::lookup_block_view(backend.execution, 1, block_view) ==
+  if (emel::model::llama::lookup_block_view(backend.execution, 1, block_view) ==
       emel::error::cast(emel::model::loader::error::none)) {
     dump_vector_compare(
         "tensor_compare.layer1.attn_norm",
@@ -16142,7 +16142,7 @@ void dump_reference_decode_seam(generation_load_state & state) {
                runtime_contract.disallowed_fallback,
                runtime_contract.explicit_no_claim);
 
-  emel::model::llama::detail::quantized_path_audit build_audit{};
+  emel::model::llama::quantized_path_audit build_audit{};
   if (build_execution_audit(*state.model_data, build_audit)) {
     const auto audit_contract = build_quantized_contract_summary(build_audit);
 
@@ -16155,12 +16155,12 @@ void dump_reference_decode_seam(generation_load_state & state) {
                  audit_contract.explicit_no_claim);
     for (const auto & stage : build_audit.stages) {
       const auto stage_name =
-          emel::model::llama::detail::quantized_stage_family_name(stage.family);
-      const auto tensor_name = emel::model::llama::detail::tensor_type_name(stage.tensor_type);
+          emel::model::llama::quantized_stage_family_name(stage.family);
+      const auto tensor_name = emel::model::llama::tensor_type_name(stage.tensor_type);
       const auto contract_name =
-          emel::model::llama::detail::quantized_contract_kind_name(stage.contract);
+          emel::model::llama::quantized_contract_kind_name(stage.contract);
       const uint32_t supported =
-          stage.contract == emel::model::llama::detail::quantized_contract_kind::explicit_no_claim
+          stage.contract == emel::model::llama::quantized_contract_kind::explicit_no_claim
               ? 0u
               : 1u;
       std::fprintf(stdout,
@@ -16255,7 +16255,7 @@ bool decode_integer_value(const generation_load_state & state,
                           const emel::gguf::loader::kv_entry & entry,
                           uint64_t & value_out) {
   const std::span<const uint8_t> bytes = kv_value_view(state, entry);
-  namespace constants = emel::gguf::loader::detail::constants;
+  namespace constants = emel::gguf::loader::constants;
 
   switch (entry.value_type) {
     case constants::gguf_type_uint8:
@@ -16301,7 +16301,7 @@ bool decode_string_value(const generation_load_state & state,
                          const emel::gguf::loader::kv_entry & entry,
                          std::string_view & value_out) {
   const std::span<const uint8_t> bytes = kv_value_view(state, entry);
-  namespace constants = emel::gguf::loader::detail::constants;
+  namespace constants = emel::gguf::loader::constants;
 
   if (entry.value_type != constants::gguf_type_string ||
       bytes.size() < sizeof(uint64_t)) {
@@ -16324,7 +16324,7 @@ bool decode_string_array_count(const generation_load_state & state,
                                const emel::gguf::loader::kv_entry & entry,
                                uint32_t & count_out) {
   const std::span<const uint8_t> bytes = kv_value_view(state, entry);
-  namespace constants = emel::gguf::loader::detail::constants;
+  namespace constants = emel::gguf::loader::constants;
 
   if (entry.value_type != constants::gguf_type_array ||
       bytes.size() < sizeof(uint32_t) + sizeof(uint64_t)) {
@@ -16349,7 +16349,7 @@ bool decode_integer_array_first_nonzero(const generation_load_state & state,
                                         const emel::gguf::loader::kv_entry & entry,
                                         int32_t & value_out) {
   const std::span<const uint8_t> bytes = kv_value_view(state, entry);
-  namespace constants = emel::gguf::loader::detail::constants;
+  namespace constants = emel::gguf::loader::constants;
 
   if (entry.value_type != constants::gguf_type_array ||
       bytes.size() < sizeof(uint32_t) + sizeof(uint64_t)) {
@@ -16431,7 +16431,7 @@ bool decode_float_value(const generation_load_state & state,
                         const emel::gguf::loader::kv_entry & entry,
                         float & value_out) {
   const std::span<const uint8_t> bytes = kv_value_view(state, entry);
-  namespace constants = emel::gguf::loader::detail::constants;
+  namespace constants = emel::gguf::loader::constants;
 
   switch (entry.value_type) {
     case constants::gguf_type_float32: {
@@ -16461,7 +16461,7 @@ bool decode_bool_value(const generation_load_state & state,
                        const emel::gguf::loader::kv_entry & entry,
                        bool & value_out) {
   const std::span<const uint8_t> bytes = kv_value_view(state, entry);
-  namespace constants = emel::gguf::loader::detail::constants;
+  namespace constants = emel::gguf::loader::constants;
   if (entry.value_type != constants::gguf_type_bool || bytes.size() != 1u) {
     return false;
   }
@@ -16537,7 +16537,7 @@ bool try_parse_block_index(const std::string_view name, int32_t & block_index_ou
 
 emel::error::type populate_model_metadata(const generation_load_state & state,
                                           emel::model::data & model_data) {
-  return emel::model::detail::load_hparams_from_gguf(kv_binding_from_state(state), model_data)
+  return emel::model::load_hparams_from_gguf(kv_binding_from_state(state), model_data)
              ? emel::error::cast(emel::model::loader::error::none)
              : emel::error::cast(emel::model::loader::error::model_invalid);
 }
@@ -18296,11 +18296,11 @@ int run_generation_harness_contract(const emel::paritychecker::parity_options & 
                  output_weight_count,
                  q_norm_count,
                  k_norm_count);
-    emel::model::llama::detail::execution_view debug_execution{};
-    emel::model::llama::detail::quantized_path_audit debug_audit{};
+    emel::model::llama::execution_view debug_execution{};
+    emel::model::llama::quantized_path_audit debug_audit{};
     if (build_execution_surface_with_audit(*state.model_data, debug_execution, debug_audit)) {
-      emel::model::llama::detail::block_view debug_block{};
-      if (emel::model::llama::detail::lookup_block_view(debug_execution, 0, debug_block) ==
+      emel::model::llama::block_view debug_block{};
+      if (emel::model::llama::lookup_block_view(debug_execution, 0, debug_block) ==
           emel::error::cast(emel::model::loader::error::none)) {
         const auto print_tensor_shape = [&](const char * label,
                                             const emel::model::data::tensor_record * tensor) {
@@ -18452,7 +18452,7 @@ int run_generation_harness_contract(const emel::paritychecker::parity_options & 
     return 1;
   }
 
-  emel::model::llama::detail::quantized_path_audit audit_view{};
+  emel::model::llama::quantized_path_audit audit_view{};
   if (build_execution_audit(*state.model_data, audit_view)) {
     const auto audit_contract = build_quantized_contract_summary(audit_view);
     if (!quantized_contract_matches(runtime_contract, audit_contract)) {

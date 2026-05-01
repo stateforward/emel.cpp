@@ -22,10 +22,10 @@ Latest fully shipped milestone: `v1.17 Text Generator Domain Alignment`
 
 Status: `v1.18` was reopened on 2026-05-01 after a source-backed audit found partial runner
 ownership, live generation reference truth, actor-boundary, and manifest-gate gaps. Phases 153 and
-154 have closed the runner and generation-truth gaps; Phases 155-156 remain before the milestone
-can be treated as shipped.
+154 have closed the runner and generation-truth gaps, and Phase 155 has closed the actor-boundary
+gap. Phase 156 remains before the milestone can be treated as shipped.
 
-Current planning focus: execute Phase 155, then Phase 156, then re-audit v1.18.
+Current planning focus: execute Phase 156, then re-audit v1.18.
 
 ## Reopened Milestone: v1.18 Parity Tool Boundary Refactor
 
@@ -48,10 +48,10 @@ EMEL/reference lane isolation or existing parity behavior.
 - Runner-owned CLI/config parsing through `run_parity_cli(...)`.
 - Maintained generation comparison against live reference-lane output before baseline load; stored
   baselines are publication artifacts, and legacy non-current Qwen drift is reported truthfully.
+- Paritychecker source ownership now goes through public GGUF/model/llama wrapper surfaces instead
+  of non-kernel actor/detail includes, with broad source checks guarding the boundary.
 
 **Open closure gaps:**
-- Remove remaining paritychecker actor-helper/detail reaches or replace them with public
-  state-machine/kernel-owned surfaces (`LANE-02`).
 - Wire dependency-manifest emission and missing/stale/uncertain full-gate semantics into production
   paritychecker or quality-gate entrypoints (`MANIFEST-01`, `MANIFEST-02`).
 
@@ -329,7 +329,6 @@ truth anchor and without broadening into generic Liquid-family support.
 
 ### Active
 
-- [ ] Execute Phase 155 for paritychecker actor-boundary enforcement.
 - [ ] Execute Phase 156 for dependency-manifest production/gate consumption.
 - [ ] Re-audit v1.18 after Phases 155-156 complete.
 
@@ -429,4 +428,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-05-01 after Phase 154 live-reference truth closure*
+*Last updated: 2026-05-01 after Phase 155 actor-boundary closure*

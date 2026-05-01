@@ -922,11 +922,11 @@ TEST_CASE("parity dependency manifest renders and writes a deterministic format"
   CHECK(docs.find("Missing, stale, or uncertain") != std::string::npos);
 }
 
-TEST_CASE("paritychecker sources do not bridge into text generator actor internals") {
+TEST_CASE("paritychecker sources do not bridge into actor internals") {
   const auto paritychecker_dir = repo_root_dir() / "tools" / "paritychecker";
   REQUIRE(!file_exists(paritychecker_dir / ("generation_internal_" "diagnostics.hpp")));
 
-  const std::vector<std::string> forbidden = {
+  const std::vector<std::string> forbidden_patterns = {
     "#include \"emel/text/generator/" "detail.hpp\"",
     "#include \"emel/text/generator/" "actions.hpp\"",
     "#include \"emel/text/generator/" "guards.hpp\"",
@@ -942,6 +942,10 @@ TEST_CASE("paritychecker sources do not bridge into text generator actor interna
     "emel::text::jinja::parser::" "detail::",
     "->generation_",
     "generation_internal_" "diagnostics.hpp",
+    "emel::gguf::loader::" "detail::",
+    "emel::model::" "detail::",
+    "emel::model::llama::" "detail::",
+    "emel::model::loader::" "detail::",
   };
 
   for (const auto & entry : std::filesystem::directory_iterator(paritychecker_dir)) {
@@ -954,9 +958,35 @@ TEST_CASE("paritychecker sources do not bridge into text generator actor interna
     }
     const std::string source = read_text_file(path);
     REQUIRE_FALSE(source.empty());
-    for (const auto & pattern : forbidden) {
+    for (const auto & pattern : forbidden_patterns) {
       CHECK_MESSAGE(source.find(pattern) == std::string::npos,
                     path.filename().string() << " contains forbidden pattern " << pattern);
+    }
+
+    size_t line_begin = 0u;
+    while (line_begin <= source.size()) {
+      size_t line_end = source.find('\n', line_begin);
+      if (line_end == std::string::npos) {
+        line_end = source.size();
+      }
+      const std::string line = source.substr(line_begin, line_end - line_begin);
+      if (line.find("#include \"emel/") != std::string::npos) {
+        const bool actor_internal_include =
+            line.find("/actions.hpp\"") != std::string::npos ||
+            line.find("/guards.hpp\"") != std::string::npos ||
+            line.find("/detail.hpp\"") != std::string::npos;
+        const bool approved_kernel_surface =
+            line.find("#include \"emel/kernel/detail.hpp\"") != std::string::npos ||
+            line.find("#include \"emel/kernel/aarch64/detail.hpp\"") != std::string::npos ||
+            line.find("#include \"emel/kernel/x86_64/detail.hpp\"") != std::string::npos;
+        const bool include_allowed = !actor_internal_include || approved_kernel_surface;
+        CHECK_MESSAGE(include_allowed,
+                      path.filename().string() << " contains actor-internal include " << line);
+      }
+      if (line_end == source.size()) {
+        break;
+      }
+      line_begin = line_end + 1u;
     }
   }
 }
