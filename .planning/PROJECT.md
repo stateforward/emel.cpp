@@ -20,12 +20,11 @@ Current milestone: `v1.18 Parity Tool Boundary Refactor`
 
 Latest shipped milestone: `v1.17 Text Generator Domain Alignment`
 
-Status: `v1.18` is initialized from GitHub issue #54. The milestone will refactor
-`tools/paritychecker` around explicit runner-owned asset loading, lane-isolated engine adapters,
-modular build wiring, and per-runner dependency manifests while preserving existing parity
-behavior.
+Status: `v1.18` is executing from GitHub issue #54. The milestone has landed explicit
+runner-owned asset loading, lane-isolated engine adapters, modular build wiring, and deterministic
+per-mode dependency manifests. The remaining closeout work is behavior and lane-isolation proof.
 
-Current planning focus: plan and execute Phase 151.
+Current planning focus: plan and execute Phase 152.
 
 ## Current Milestone: v1.18 Parity Tool Boundary Refactor
 

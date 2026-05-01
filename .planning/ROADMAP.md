@@ -50,7 +50,7 @@ preserving existing parity behavior and EMEL/reference lane isolation.
   generation mode implementations behind explicit engine adapters.
 - [x] **Phase 150: Parity Build Registration Boundary** - Make CMake and source registration
   modular enough for localized future engine additions.
-- [ ] **Phase 151: Parity Dependency Manifest Emission** - Emit per-runner dependency manifests
+- [x] **Phase 151: Parity Dependency Manifest Emission** - Emit per-runner dependency manifests
   with conservative stale/missing-data semantics.
 - [ ] **Phase 152: Parity Behavior And Lane-Isolation Closure** - Prove all existing modes still
   behave the same and lane isolation remains enforceable.
@@ -135,7 +135,10 @@ inputs for conservative quality-gate impact selection.
 4. Manifest format is deterministic and documented for later quality-gate consumption.
 5. Tests cover manifest generation and stale/missing-data semantics.
 
-**Status:** Pending.
+**Status:** Complete. Phase 151 added `parity_dependency_manifest/v1` with deterministic per-mode
+records for tokenizer, GBNF, kernel, Jinja, and generation parity inputs. The manifest covers
+source, config, fixture, model, script, and snapshot inputs, documents conservative freshness
+semantics, and tests render/write behavior plus missing/stale/uncertain full-gate triggers.
 
 ### Phase 152: Parity Behavior And Lane-Isolation Closure
 

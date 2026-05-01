@@ -18,6 +18,7 @@
 #include "../generation_formatter_contract.hpp"
 #include "../generation_fixture_registry.hpp"
 #include "parity_assets.hpp"
+#include "parity_dependency_manifest.hpp"
 #include "parity_engine.hpp"
 
 #if !defined(_WIN32)
@@ -790,6 +791,101 @@ TEST_CASE("paritychecker build registration keeps runner and engine sources modu
   CHECK(engine_source.find("default:\n      return nullptr;") != std::string::npos);
   CHECK(engine_source.find("default:\n      return &k_tokenizer_engine;") ==
         std::string::npos);
+}
+
+TEST_CASE("parity dependency manifest covers registered engines conservatively") {
+  namespace manifest = emel::paritychecker::dependency_manifest;
+
+  const auto records = manifest::records();
+  REQUIRE_FALSE(records.empty());
+  CHECK(manifest::kind_name(manifest::dependency_kind::source) == "source");
+  CHECK(manifest::kind_name(manifest::dependency_kind::snapshot) == "snapshot");
+  CHECK_FALSE(manifest::requires_full_gate({}));
+  CHECK(manifest::requires_full_gate({.missing = true}));
+  CHECK(manifest::requires_full_gate({.stale = true}));
+  CHECK(manifest::requires_full_gate({.uncertain = true}));
+
+  const auto assert_runner =
+      [](const emel::paritychecker::parity_mode mode,
+         const bool needs_fixture,
+         const bool needs_model,
+         const bool needs_snapshot) {
+        namespace manifest = emel::paritychecker::dependency_manifest;
+
+        const emel::paritychecker::engine_adapter * engine =
+            emel::paritychecker::find_engine(mode);
+        REQUIRE(engine != nullptr);
+
+        bool has_source = false;
+        bool has_config = false;
+        bool has_fixture = false;
+        bool has_model = false;
+        bool has_script = false;
+        bool has_snapshot = false;
+        const auto runner_records = manifest::records_for(mode);
+        REQUIRE_FALSE(runner_records.empty());
+        for (const auto & record : runner_records) {
+          CHECK(record.runner == engine->name);
+          has_source = has_source || record.kind == manifest::dependency_kind::source;
+          has_config = has_config || record.kind == manifest::dependency_kind::config;
+          has_fixture = has_fixture || record.kind == manifest::dependency_kind::fixture;
+          has_model = has_model || record.kind == manifest::dependency_kind::model;
+          has_script = has_script || record.kind == manifest::dependency_kind::script;
+          has_snapshot = has_snapshot || record.kind == manifest::dependency_kind::snapshot;
+        }
+
+        CHECK(has_source);
+        CHECK(has_config);
+        CHECK(has_script);
+        CHECK(has_fixture == needs_fixture);
+        CHECK(has_model == needs_model);
+        CHECK(has_snapshot == needs_snapshot);
+      };
+
+  assert_runner(emel::paritychecker::parity_mode::tokenizer, true, true, false);
+  assert_runner(emel::paritychecker::parity_mode::gbnf_parser, true, false, false);
+  assert_runner(emel::paritychecker::parity_mode::kernel, false, false, false);
+  assert_runner(emel::paritychecker::parity_mode::jinja, true, false, false);
+  assert_runner(emel::paritychecker::parity_mode::generation, true, true, true);
+  CHECK(manifest::records_for(static_cast<emel::paritychecker::parity_mode>(255)).empty());
+}
+
+TEST_CASE("parity dependency manifest renders and writes a deterministic format") {
+  namespace manifest = emel::paritychecker::dependency_manifest;
+
+  const std::string rendered = manifest::render();
+  REQUIRE_FALSE(rendered.empty());
+  CHECK(rendered == manifest::render());
+  CHECK(rendered.rfind(std::string(manifest::k_schema) + "\n", 0) == 0);
+  CHECK(rendered.find("full_gate_on=missing,stale,uncertain\n") != std::string::npos);
+  CHECK(rendered.find("record runner=tokenizer mode=tokenizer kind=fixture "
+                      "path=tests/text/tokenizer/parity_texts reason=tokenizer_text_cases\n") !=
+        std::string::npos);
+  CHECK(rendered.find("record runner=generation mode=generation kind=source "
+                      "path=tools/generation_fixture_registry.hpp "
+                      "reason=maintained_fixture_registration\n") != std::string::npos);
+  CHECK(rendered.find("record runner=generation mode=generation kind=snapshot "
+                      "path=snapshots/parity "
+                      "reason=append_only_generation_baselines\n") != std::string::npos);
+
+  const std::filesystem::path manifest_path =
+      make_temp_capture_path("parity-dependency-manifest");
+  REQUIRE(manifest::write(manifest_path));
+  CHECK(read_text_file(manifest_path) == rendered);
+  std::filesystem::remove(manifest_path);
+
+  const std::string cmake_source =
+      read_text_file(repo_root_dir() / "tools" / "paritychecker" / "CMakeLists.txt");
+  REQUIRE_FALSE(cmake_source.empty());
+  CHECK(cmake_source.find("set(PARITYCHECKER_MANIFEST_SOURCES") != std::string::npos);
+  CHECK(cmake_source.find("${PARITYCHECKER_MANIFEST_SOURCES}") != std::string::npos);
+
+  const std::string docs =
+      read_text_file(repo_root_dir() / "tools" / "paritychecker" / "dependency_manifest.md");
+  REQUIRE_FALSE(docs.empty());
+  CHECK(docs.find(manifest::k_schema) != std::string::npos);
+  CHECK(docs.find("full_gate_on=missing,stale,uncertain") != std::string::npos);
+  CHECK(docs.find("Missing, stale, or uncertain") != std::string::npos);
 }
 
 TEST_CASE("paritychecker sources do not bridge into text generator actor internals") {

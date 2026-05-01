@@ -41,12 +41,12 @@ parity-oriented verification before widening API surface or model scope.
 
 ### Dependency Manifests
 
-- [ ] **MANIFEST-01**: Each parity runner emits or maintains a per-runner dependency manifest that
+- [x] **MANIFEST-01**: Each parity runner emits or maintains a per-runner dependency manifest that
   names the source, config, fixture, model, and script inputs needed for conservative gate impact
   detection.
-- [ ] **MANIFEST-02**: Missing, stale, or uncertain manifest data is treated as a reason to run the
+- [x] **MANIFEST-02**: Missing, stale, or uncertain manifest data is treated as a reason to run the
   relevant full parity gate, not as a reason to skip it.
-- [ ] **MANIFEST-03**: Manifest format and generation are documented well enough for later quality
+- [x] **MANIFEST-03**: Manifest format and generation are documented well enough for later quality
   gate work to consume without weakening mandatory parity behavior.
 
 ## Future Requirements
@@ -81,17 +81,16 @@ parity-oriented verification before widening API surface or model scope.
 | LANE-02 | Phase 152 | Pending |
 | BUILD-01 | Phase 150 | Complete |
 | BUILD-02 | Phase 150 | Complete |
-| MANIFEST-01 | Phase 151 | Pending |
-| MANIFEST-02 | Phase 151 | Pending |
-| MANIFEST-03 | Phase 151 | Pending |
+| MANIFEST-01 | Phase 151 | Complete |
+| MANIFEST-02 | Phase 151 | Complete |
+| MANIFEST-03 | Phase 151 | Complete |
 
 **Coverage:**
 - Active requirements: 12 total
 - Mapped to phases: 12
 - Unmapped: 0
-- Complete: 7
-- Pending: 5
+- Complete: 10
+- Pending: 2
 
-**Last updated:** 2026-05-01 after Phase 150 established modular paritychecker build and
-registration boundaries and passed focused paritychecker tests plus the changed-file scoped quality
-gate.
+**Last updated:** 2026-05-01 after Phase 151 added deterministic parity dependency manifests and
+passed focused paritychecker tests plus the changed-file scoped quality gate.
