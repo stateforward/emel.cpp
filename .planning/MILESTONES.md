@@ -1,5 +1,33 @@
 # Project Milestones: EMEL
 
+## v1.18 Parity Tool Boundary Refactor (Shipped: 2026-05-01)
+
+**Phases completed:** 5 phases, 5 plans, 0 tasks
+
+**Delivered:** `tools/paritychecker` now has explicit runner, asset, engine, build-registration,
+dependency-manifest, behavior-preservation, and lane-isolation boundaries for existing tokenizer,
+GBNF, kernel, Jinja, and generation parity modes.
+
+**Key accomplishments:**
+
+- Centralized paritychecker asset/path/byte-loading and maintained generation fixture resolution
+  behind `parity_assets`.
+- Split tokenizer, GBNF, kernel, Jinja, and generation modes behind explicit `engine_adapter`
+  registration.
+- Factored CMake into modular runner, manifest, engine-registration, engine-implementation,
+  tokenizer-engine, reference-support, and common source groups.
+- Added `parity_dependency_manifest/v1` with deterministic per-mode records and conservative
+  missing/stale/uncertain full-gate semantics.
+- Removed a reference-side bridge into EMEL detokenizer action detail and added lane-isolation
+  source checks for shared runner and engine code.
+
+**Audit:** Passed with `12/12` active requirements satisfied.
+
+**Known deferred items at close:** 5 old non-phase items acknowledged and deferred; see
+`.planning/STATE.md` `Deferred Items`.
+
+---
+
 ## v1.17 Text Generator Domain Alignment (Shipped: 2026-04-30)
 
 **Phases completed:** 18 phases, including Phase 147 final gap closure.

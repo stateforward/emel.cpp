@@ -16,35 +16,34 @@ before widening API surface or model scope.
 
 ## Current State
 
-Current milestone: `v1.18 Parity Tool Boundary Refactor`
+Current milestone: none active
 
-Latest shipped milestone: `v1.17 Text Generator Domain Alignment`
+Latest shipped milestone: `v1.18 Parity Tool Boundary Refactor`
 
-Status: `v1.18` implementation is complete from GitHub issue #54. The milestone has landed explicit
-runner-owned asset loading, lane-isolated engine adapters, modular build wiring, and deterministic
-per-mode dependency manifests, with maintained parity behavior and lane-isolation source checks
-passing.
+Status: `v1.18` shipped from GitHub issue #54. `tools/paritychecker` now has explicit
+runner-owned asset loading, lane-isolated engine adapters, modular build wiring, deterministic
+per-mode dependency manifests, maintained parity behavior proof, and source checks that keep shared
+runner code free of lane-owned runtime objects.
 
-Current planning focus: audit and close v1.18.
+Current planning focus: start the next milestone with `$gsd-new-milestone`.
 
-## Current Milestone: v1.18 Parity Tool Boundary Refactor
+## Previous Shipped Milestone: v1.18 Parity Tool Boundary Refactor
 
 **Goal:** Refactor `tools/paritychecker` into explicit runner, engine, asset-loading, and
 dependency-manifest boundaries so new parity engines can be added locally without weakening
 EMEL/reference lane isolation or existing parity behavior.
 
-**Started:** 2026-05-01 from GitHub issue #54
+**Shipped:** 2026-05-01 from GitHub issue #54
 
-**Target Features:**
-- Runner-owned CLI/config parsing, asset resolution, fixture normalization, and result
-  normalization for parity workflows.
-- Mode-specific parity logic behind explicit runner-facing engine interfaces or adapters instead
-  of bulk per-mode implementation in the core runner.
-- Modular `tools/paritychecker` CMake registration and build boundaries for existing and future
-  engines.
-- Per-runner dependency manifests that support conservative quality-gate impact selection.
-- Source-backed tests proving existing tokenizer, GBNF, kernel, Jinja, and generation parity modes
-  preserve behavior while EMEL/reference lane objects remain isolated.
+**Delivered:**
+- Runner-owned path, byte-loading, and maintained generation fixture resolution helpers.
+- Explicit tokenizer, GBNF, kernel, Jinja, and generation parity engine adapters behind a small
+  runner-facing registration surface.
+- Modular `tools/paritychecker` CMake source groups shared by the executable and tests.
+- `parity_dependency_manifest/v1` records with conservative missing/stale/uncertain full-gate
+  semantics.
+- Source-backed behavior and lane-isolation closure proving shared runner files stay free of
+  lane-owned runtime objects while maintained parity tests continue to pass.
 
 ## Previous Shipped Milestone: v1.17 Text Generator Domain Alignment
 
@@ -370,7 +369,7 @@ actor events.
 
 | Decision | Rationale | Outcome |
 |----------|-----------|---------|
-| Start v1.18 from GitHub issue #54 as a paritychecker boundary refactor | The existing parity tool has grown mode-specific implementation, asset loading, and build wiring in places that make future engines harder to add and harder to gate conservatively | ✓ Active |
+| Start v1.18 from GitHub issue #54 as a paritychecker boundary refactor | The existing parity tool has grown mode-specific implementation, asset loading, and build wiring in places that make future engines harder to add and harder to gate conservatively | ✓ Shipped |
 | Move the canonical generator actor to `text/generator` in v1.17 | The existing generator is a generative text actor, and placing it under the text domain aligns it with text tokenizer/formatter ownership and the established `embeddings/generator` top-level actor pattern | ✓ Implementation complete |
 | Start v1.15 as one maintained ARM Sortformer diarization GGUF slice | The user asked for ARM support for `openresearchtools/diar_streaming_sortformer_4spk-v2.1-gguf`; the model card defines a diarization contract, not generation or embedding behavior | ✓ Shipped |
 | Require native EMEL-owned Sortformer execution for the EMEL lane | Tool-only Python, ONNX, NeMo, llama.cpp, or ggml compute would not satisfy ARM support in `src/` and would violate lane-isolation expectations | ✓ Shipped |
@@ -421,4 +420,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-05-01 after starting v1.18 from GitHub issue #54*
+*Last updated: 2026-05-01 after shipping v1.18 Parity Tool Boundary Refactor*

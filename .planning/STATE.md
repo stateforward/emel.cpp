@@ -1,10 +1,10 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.18
-milestone_name: Parity Tool Boundary Refactor
-status: milestone_implementation_complete
-stopped_at: Phase 152 complete; v1.18 ready for milestone audit
-last_updated: "2026-05-01T00:00:00Z"
+milestone: none
+milestone_name: none
+status: milestone_completed
+stopped_at: "v1.18 shipped and archived; next action is `$gsd-new-milestone`."
+last_updated: "2026-05-01T03:06:38.886Z"
 last_activity: 2026-05-01
 progress:
   total_phases: 5
@@ -22,22 +22,20 @@ See: .planning/PROJECT.md (updated 2026-05-01)
 
 **Core value:** Prove real end-to-end behavior with explicit SML orchestration and parity-oriented
 verification before widening API surface or model scope.
-**Current focus:** Audit and close v1.18 after all parity tool boundary phases completed.
+**Current focus:** Start the next milestone.
 
 ## Current Position
 
-Phase: closeout
+Phase: —
 Plan: —
-Status: Phase 152 passed maintained paritychecker behavior tests, removed the direct EMEL
-detokenizer action-detail bridge from reference output rendering, and added source checks for
-shared runner lane-object isolation.
-Last activity: 2026-05-01 — Phase 152 complete
+Status: v1.18 shipped and archived after a passing milestone audit.
+Last activity: 2026-05-01
 
 Progress: [##########] 100%
 
 ## Deferred Items
 
-Items acknowledged and still deferred at milestone close on 2026-04-26:
+Items acknowledged and still deferred at milestone close on 2026-05-01:
 
 | Category | Item | Status |
 |----------|------|--------|
@@ -51,13 +49,13 @@ Items acknowledged and still deferred at milestone close on 2026-04-26:
 
 **Current milestone:**
 
-- Milestone: v1.18 Parity Tool Boundary Refactor
+- Milestone: none active
 
-- Current planning shape: Phases 148-152 complete; milestone audit ready.
-- Latest shipped milestone: `v1.17 Text Generator Domain Alignment`.
+- Current planning shape: no active milestone.
+- Latest shipped milestone: `v1.18 Parity Tool Boundary Refactor`.
 
-- Next action: `$gsd-audit-milestone`.
-- Current blocker: none known after Phase 152.
+- Next action: `$gsd-new-milestone`.
+- Current blocker: none known after v1.18 closeout.
 
 ## Accumulated Context
 
