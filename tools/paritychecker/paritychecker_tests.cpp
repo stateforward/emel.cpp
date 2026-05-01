@@ -762,6 +762,36 @@ TEST_CASE("parity runner dispatches through explicit engine adapters") {
   CHECK(runner_source.find("#include \"ggml") == std::string::npos);
 }
 
+TEST_CASE("paritychecker build registration keeps runner and engine sources modular") {
+  const std::string cmake_source =
+      read_text_file(repo_root_dir() / "tools" / "paritychecker" / "CMakeLists.txt");
+  REQUIRE_FALSE(cmake_source.empty());
+
+  CHECK(cmake_source.find("set(PARITYCHECKER_RUNNER_SOURCES") != std::string::npos);
+  CHECK(cmake_source.find("set(PARITYCHECKER_ENGINE_REGISTRATION_SOURCES") !=
+        std::string::npos);
+  CHECK(cmake_source.find("set(PARITYCHECKER_ENGINE_IMPLEMENTATION_SOURCES") !=
+        std::string::npos);
+  CHECK(cmake_source.find("set(PARITYCHECKER_TOKENIZER_ENGINE_SOURCES") !=
+        std::string::npos);
+  CHECK(cmake_source.find("set(PARITYCHECKER_REFERENCE_SUPPORT_SOURCES") !=
+        std::string::npos);
+  CHECK(cmake_source.find("set(PARITYCHECKER_COMMON_SOURCES") != std::string::npos);
+  CHECK(cmake_source.find("add_executable(paritychecker\n"
+                          "  ${PARITYCHECKER_CLI_SOURCES}\n"
+                          "  ${PARITYCHECKER_COMMON_SOURCES}") != std::string::npos);
+  CHECK(cmake_source.find("add_executable(paritychecker_tests\n"
+                          "  ${CMAKE_CURRENT_SOURCE_DIR}/paritychecker_tests.cpp\n"
+                          "  ${PARITYCHECKER_COMMON_SOURCES}") != std::string::npos);
+
+  const std::string engine_source =
+      read_text_file(repo_root_dir() / "tools" / "paritychecker" / "parity_engine.cpp");
+  REQUIRE_FALSE(engine_source.empty());
+  CHECK(engine_source.find("default:\n      return nullptr;") != std::string::npos);
+  CHECK(engine_source.find("default:\n      return &k_tokenizer_engine;") ==
+        std::string::npos);
+}
+
 TEST_CASE("paritychecker sources do not bridge into text generator actor internals") {
   const auto paritychecker_dir = repo_root_dir() / "tools" / "paritychecker";
   REQUIRE(!file_exists(paritychecker_dir / ("generation_internal_" "diagnostics.hpp")));

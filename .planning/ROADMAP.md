@@ -48,7 +48,7 @@ preserving existing parity behavior and EMEL/reference lane isolation.
   centralize asset/config/fixture normalization without changing mode behavior.
 - [x] **Phase 149: Parity Engine Adapter Split** - Move tokenizer, GBNF, kernel, Jinja, and
   generation mode implementations behind explicit engine adapters.
-- [ ] **Phase 150: Parity Build Registration Boundary** - Make CMake and source registration
+- [x] **Phase 150: Parity Build Registration Boundary** - Make CMake and source registration
   modular enough for localized future engine additions.
 - [ ] **Phase 151: Parity Dependency Manifest Emission** - Emit per-runner dependency manifests
   with conservative stale/missing-data semantics.
@@ -113,7 +113,11 @@ future engines do not require broad runner rewrites or unrelated mode edits.
 4. No hidden runtime fallback silently changes which engine handles a mode.
 5. Build and focused paritychecker tests pass on the modular target layout.
 
-**Status:** Pending.
+**Status:** Complete. Phase 150 factored paritychecker CMake into explicit runner, engine
+registration, engine implementation, tokenizer-engine, reference-support, and shared common source
+groups. Source regressions prove both targets consume the shared group and invalid engine lookup
+remains fail-closed. Focused paritychecker builds/tests and the changed-file scoped quality gate
+passed.
 
 ### Phase 151: Parity Dependency Manifest Emission
 

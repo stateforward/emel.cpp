@@ -21,7 +21,7 @@ parity-oriented verification before widening API surface or model scope.
 
 - [x] **ENGINE-01**: Mode-specific parity logic is isolated behind explicit runner-facing engine
   interfaces or adapters with narrow ownership of that mode's EMEL and reference execution.
-- [ ] **ENGINE-02**: Adding a future parity engine requires localized registration and adapter
+- [x] **ENGINE-02**: Adding a future parity engine requires localized registration and adapter
   implementation instead of broad edits through unrelated modes or runner internals.
 
 ### Lane Isolation
@@ -34,9 +34,9 @@ parity-oriented verification before widening API surface or model scope.
 
 ### Build And Registration
 
-- [ ] **BUILD-01**: `tools/paritychecker` CMake wiring exposes modular runner and engine build
+- [x] **BUILD-01**: `tools/paritychecker` CMake wiring exposes modular runner and engine build
   boundaries instead of one monolithic mode implementation target.
-- [ ] **BUILD-02**: Engine registration is explicit and auditable from build/source structure, with
+- [x] **BUILD-02**: Engine registration is explicit and auditable from build/source structure, with
   no hidden runtime fallback that silently changes which engine executes.
 
 ### Dependency Manifests
@@ -76,11 +76,11 @@ parity-oriented verification before widening API surface or model scope.
 | PARITY-02 | Phase 149 | Complete |
 | PARITY-03 | Phase 152 | Pending |
 | ENGINE-01 | Phase 149 | Complete |
-| ENGINE-02 | Phase 150 | Pending |
+| ENGINE-02 | Phase 150 | Complete |
 | LANE-01 | Phase 148 | Complete |
 | LANE-02 | Phase 152 | Pending |
-| BUILD-01 | Phase 150 | Pending |
-| BUILD-02 | Phase 150 | Pending |
+| BUILD-01 | Phase 150 | Complete |
+| BUILD-02 | Phase 150 | Complete |
 | MANIFEST-01 | Phase 151 | Pending |
 | MANIFEST-02 | Phase 151 | Pending |
 | MANIFEST-03 | Phase 151 | Pending |
@@ -89,8 +89,9 @@ parity-oriented verification before widening API surface or model scope.
 - Active requirements: 12 total
 - Mapped to phases: 12
 - Unmapped: 0
-- Complete: 4
-- Pending: 8
+- Complete: 7
+- Pending: 5
 
-**Last updated:** 2026-05-01 after Phase 149 split runner orchestration from parity engine
-implementation and passed focused paritychecker tests plus the changed-file scoped quality gate.
+**Last updated:** 2026-05-01 after Phase 150 established modular paritychecker build and
+registration boundaries and passed focused paritychecker tests plus the changed-file scoped quality
+gate.
