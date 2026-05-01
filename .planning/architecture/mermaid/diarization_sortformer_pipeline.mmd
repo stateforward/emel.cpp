@@ -21,11 +21,14 @@ stateDiagram-v2
   state_prepare_decision --> state_publish_error : completion_run_flow_ [guard_has_error_] / none
   state_binding_encoder --> state_computing_encoder : completion_run_flow_ [always] / effect_bind_encoder_
   state_computing_encoder --> state_executing_hidden : completion_run_flow_ [always] / effect_compute_encoder_frames_
-  state_executing_hidden --> state_execute_decision : completion_run_flow_ [always] / effect_execute_hidden_
+  state_executing_hidden --> state_execute_decision : completion_run_flow_ [guard_no_error_] / effect_execute_hidden_
+  state_executing_hidden --> state_publish_error : completion_run_flow_ [guard_has_error_] / none
   state_execute_decision --> state_binding_modules : completion_run_flow_ [guard_no_error_] / none
   state_execute_decision --> state_publish_error : completion_run_flow_ [guard_has_error_] / none
   state_binding_modules --> state_computing_probabilities : completion_run_flow_ [always] / effect_bind_modules_
-  state_computing_probabilities --> state_decoding_segments : completion_run_flow_ [always] / effect_compute_probabilities_
+  state_computing_probabilities --> state_probability_decision : completion_run_flow_ [always] / effect_compute_probabilities_
+  state_probability_decision --> state_decoding_segments : completion_run_flow_ [guard_no_error_] / none
+  state_probability_decision --> state_publish_error : completion_run_flow_ [guard_has_error_] / none
   state_decoding_segments --> state_publish_success : completion_run_flow_ [always] / effect_decode_segments_
   state_publish_success --> state_done : completion_run_flow_ [always] / effect_publish_success_
   state_publish_error --> state_errored : completion_run_flow_ [always] / effect_publish_error_
@@ -47,6 +50,7 @@ stateDiagram-v2
   state_execute_decision --> state_ready : _ [always] / effect_on_unexpected_
   state_binding_modules --> state_ready : _ [always] / effect_on_unexpected_
   state_computing_probabilities --> state_ready : _ [always] / effect_on_unexpected_
+  state_probability_decision --> state_ready : _ [always] / effect_on_unexpected_
   state_decoding_segments --> state_ready : _ [always] / effect_on_unexpected_
   state_publish_success --> state_ready : _ [always] / effect_on_unexpected_
   state_publish_error --> state_ready : _ [always] / effect_on_unexpected_
