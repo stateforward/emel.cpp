@@ -57,7 +57,7 @@ actor-model rules or maintained parity/benchmark evidence.
 **Source:** GitHub issue #56
 
 **Requirements:** 12 active requirements, all mapped. Reopened by source-backed audit on
-2026-05-01 for gap closure phases 173-177.
+2026-05-01 for gap closure phases 173-178.
 
 | Phase | Name | Goal | Requirements |
 |-------|------|------|--------------|
@@ -72,6 +72,7 @@ actor-model rules or maintained parity/benchmark evidence.
 | 175 | SML Documentation Rule Path Repair | Repair stale rule-path guidance and prove docs/examples/planning guidance no longer conflict on the migrated SML surface. | DOC-01, DOC-02, DOC-03 |
 | 176 | Legacy SML Guardrail And Quality Gate Repair | Wire maintained legacy SML drift checks and restore scoped quality-gate coverage without weakening required lanes. | VAL-01, VAL-02 |
 | 177 | v1.20 Final Source-Backed Closeout Rerun | Backfill Nyquist evidence and rerun source-backed audit after all reopened v1.20 gaps are closed. | VAL-03 |
+| 178 | v1.20 Closeout Gate And Evidence Repair | Resolve the blocked full closeout gate, repair contradicted closeout evidence, and produce final source-backed VAL-03 artifacts. | VAL-03 |
 
 ### Phase 167: SML Upstream Pin And Surface Audit
 
@@ -242,3 +243,25 @@ and the failed milestone audit.
    evidence.
 3. All 12 active requirements are complete with no orphaned verification rows.
 4. `v1.20` closeout artifacts state the final status and next action.
+
+### Phase 178: v1.20 Closeout Gate And Evidence Repair
+
+**Goal:** Close the remaining VAL-03 audit gaps by resolving the full closeout benchmark timeout,
+repairing contradicted closeout evidence, and producing the final source-backed closeout artifacts.
+
+**Requirements:** VAL-03
+
+**Gap Closure:** Closes `.planning/v1.20-MILESTONE-AUDIT.md` findings for the blocked full
+quality-gate benchmark comparison, missing Phase 177 closeout artifacts, and contradicted Phase 172
+VAL-03 completion claim.
+
+**Success criteria:**
+1. The benchmark comparison timeout is reproduced or isolated with the narrowest command that still
+   exercises the required full benchmark comparison contract.
+2. The maintained closeout path either completes `EMEL_QUALITY_GATES_SCOPE=full
+   scripts/quality_gates.sh` successfully or records an explicitly approved, source-backed
+   closeout path that does not weaken benchmark, parity, coverage, fuzz, docs, or lint requirements.
+3. Phase 172/177 closeout evidence is superseded or repaired so no artifact claims VAL-03 complete
+   before the final source-backed validation passes.
+4. Final SUMMARY.md, VERIFICATION.md, and VALIDATION.md artifacts exist for the authoritative
+   closeout phase, and the milestone audit rerun reports all 12 active requirements satisfied.

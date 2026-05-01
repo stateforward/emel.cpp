@@ -82,14 +82,14 @@ Which phases cover which requirements. Updated during roadmap creation.
 | DOC-03 | Phase 175 | Complete |
 | VAL-01 | Phase 176 | Complete |
 | VAL-02 | Phase 176 | Complete |
-| VAL-03 | Phase 177 | Pending |
+| VAL-03 | Phase 178 | Pending |
 
 **Coverage:**
 - v1 requirements: 12 total
 - Mapped to phases: 12
-- Open after v1.20 gap closure: 1
+- Open after latest v1.20 audit: 1
 - Unmapped: 0
 
 ---
 *Requirements defined: 2026-05-01*
-*Last updated: 2026-05-01 after source-backed v1.20 audit reopened gap closure phases*
+*Last updated: 2026-05-01 after planning Phase 178 for the remaining VAL-03 closeout gap*
