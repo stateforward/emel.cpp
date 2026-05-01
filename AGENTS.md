@@ -4,8 +4,8 @@ these rules define the engineering contract for emel.cpp. they are aligned with
 `docs/rules/sml.rules.md`. if a rule here conflicts with `docs/rules/sml.rules.md`, the doc
 wins and this file must be updated.
 
-## stateforward.SML actor model (aligned with docs/sml.rules.md)
-ALWAYS follow the RTC actor model and no-queue invariant from `docs/sml.rules.md`.
+## stateforward.SML actor model (aligned with docs/rules/sml.rules.md)
+ALWAYS follow the RTC actor model and no-queue invariant from `docs/rules/sml.rules.md`.
 NEVER use `sml::process_queue`, `sml::defer_queue`, or any mailbox/post-for-later
 mechanism.
 ALWAYS keep dispatch run-to-completion and single-writer per actor.

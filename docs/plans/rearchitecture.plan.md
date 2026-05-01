@@ -32,7 +32,7 @@ goal: remove legacy artifacts and establish a scaffolded, buildable baseline ali
 - [ ] align directory layout, namespaces, and includes to the design domain structure.
 - [ ] introduce scaffolds for any missing machines to keep compilation green.
 - [ ] ensure scaffolds include: events + outcomes, context, guards/actions stubs,
-      and `sml::unexpected_event` handling per `docs/sml.rules.md`.
+      and `sml::unexpected_event` handling per `docs/rules/sml.rules.md`.
 - [ ] update CMake/test/bench manifests to match the new layout (no legacy paths).
 - [ ] reduce tests to design-aligned contracts only; remove legacy-only expectations.
 - [ ] verify no tracked artifacts (`.DS_Store`, `Testing/*`, tmp logs) remain.

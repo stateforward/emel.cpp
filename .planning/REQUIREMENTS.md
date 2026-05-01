@@ -28,11 +28,11 @@ parity-oriented verification before widening API surface or model scope.
 
 ### Documentation And Rules
 
-- [ ] **DOC-01**: Contributor-facing rules describe the `stateforward::sml` namespace and
+- [x] **DOC-01**: Contributor-facing rules describe the `stateforward::sml` namespace and
   preferred include path instead of instructing new work to use legacy SML naming.
-- [ ] **DOC-02**: Project documentation, examples, generated-doc tooling, and planning
+- [x] **DOC-02**: Project documentation, examples, generated-doc tooling, and planning
   artifacts no longer create conflicting SML namespace guidance.
-- [ ] **DOC-03**: Any remaining historical legacy SML references are clearly archival,
+- [x] **DOC-03**: Any remaining historical legacy SML references are clearly archival,
   quoted, or intentionally exempted from active contributor guidance.
 
 ### Validation And Guardrails
@@ -77,9 +77,9 @@ Which phases cover which requirements. Updated during roadmap creation.
 | SRC-01 | Phase 173 | Complete |
 | SRC-02 | Phase 173 | Complete |
 | SRC-03 | Phase 174 | Complete |
-| DOC-01 | Phase 175 | Pending |
-| DOC-02 | Phase 175 | Pending |
-| DOC-03 | Phase 175 | Pending |
+| DOC-01 | Phase 175 | Complete |
+| DOC-02 | Phase 175 | Complete |
+| DOC-03 | Phase 175 | Complete |
 | VAL-01 | Phase 176 | Pending |
 | VAL-02 | Phase 176 | Pending |
 | VAL-03 | Phase 177 | Pending |
