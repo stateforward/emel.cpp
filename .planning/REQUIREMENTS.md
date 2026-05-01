@@ -96,8 +96,8 @@ Which phases cover which requirements. Updated during roadmap creation.
 | BUILD-02 | Phase 160 | Complete |
 | MANIFEST-01 | Phase 161 | Complete |
 | MANIFEST-02 | Phase 161 | Complete |
-| GATE-01 | Phase 162 | Pending |
-| GATE-02 | Phase 162 | Pending |
+| GATE-01 | Phase 162 | Complete |
+| GATE-02 | Phase 162 | Complete |
 | LANE-01 | Phase 157 | Complete |
 | LANE-02 | Phase 163 | Pending |
 

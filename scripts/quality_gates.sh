@@ -20,11 +20,21 @@ PARITY_DEPENDENCY_MANIFEST_BASELINE="${EMEL_PARITY_DEPENDENCY_MANIFEST_BASELINE:
 PARITY_DEPENDENCY_MANIFEST_CURRENT="${EMEL_PARITY_DEPENDENCY_MANIFEST_CURRENT:-}"
 PARITYCHECKER_BINARY="${EMEL_PARITYCHECKER_BINARY:-$ROOT_DIR/build/paritychecker_zig/paritychecker}"
 PARITY_DEPENDENCY_MANIFEST_UNCERTAIN="${EMEL_PARITY_DEPENDENCY_MANIFEST_UNCERTAIN:-0}"
+BENCH_DEPENDENCY_MANIFEST_BASELINE="${EMEL_BENCH_DEPENDENCY_MANIFEST_BASELINE:-}"
+BENCH_DEPENDENCY_MANIFEST_CURRENT="${EMEL_BENCH_DEPENDENCY_MANIFEST_CURRENT:-}"
+BENCH_RUNNER_BINARY="${EMEL_BENCH_RUNNER_BINARY:-$ROOT_DIR/build/bench_tools_ninja/bench_runner}"
+BENCH_DEPENDENCY_MANIFEST_UNCERTAIN="${EMEL_BENCH_DEPENDENCY_MANIFEST_UNCERTAIN:-0}"
 if [[ -z "$PARITY_DEPENDENCY_MANIFEST_BASELINE" ]]; then
   PARITY_DEPENDENCY_MANIFEST_BASELINE="$ROOT_DIR/tools/paritychecker/dependency_manifest.txt"
 fi
 if [[ -z "$PARITY_DEPENDENCY_MANIFEST_CURRENT" ]]; then
   PARITY_DEPENDENCY_MANIFEST_CURRENT="$ROOT_DIR/build/paritychecker_zig/parity_dependency_manifest.current.txt"
+fi
+if [[ -z "$BENCH_DEPENDENCY_MANIFEST_BASELINE" ]]; then
+  BENCH_DEPENDENCY_MANIFEST_BASELINE="$ROOT_DIR/tools/bench/dependency_manifest.txt"
+fi
+if [[ -z "$BENCH_DEPENDENCY_MANIFEST_CURRENT" ]]; then
+  BENCH_DEPENDENCY_MANIFEST_CURRENT="$ROOT_DIR/build/bench_tools_ninja/bench_dependency_manifest.current.txt"
 fi
 
 if [[ -z "${EMEL_QUALITY_GATES_INNER:-}" ]]; then
@@ -256,6 +266,68 @@ add_bench_suite() {
   bench_suites+=("$suite")
 }
 
+bench_dependency_manifest_record_matches_file() {
+  local manifest_path="$1"
+  local changed_file="$2"
+
+  [[ -n "$manifest_path" ]] || return 1
+  [[ "$changed_file" == "$manifest_path" || "$changed_file" == "$manifest_path"/* ]]
+}
+
+bench_dependency_manifest_apply_changed_files() {
+  local file
+  local line
+  local token
+  local runner
+  local path
+  local matched
+
+  if [[ ! -f "$BENCH_DEPENDENCY_MANIFEST_BASELINE" ]]; then
+    bench_full=true
+    return
+  fi
+
+  for file in "${changed_files[@]+${changed_files[@]}}"; do
+    matched=false
+    while IFS= read -r line; do
+      [[ "$line" == record\ * ]] || continue
+      runner=""
+      path=""
+      for token in $line; do
+        case "$token" in
+          runner=*)
+            runner="${token#runner=}"
+            ;;
+          path=*)
+            path="${token#path=}"
+            ;;
+        esac
+      done
+      if [[ -z "$runner" || -z "$path" ]]; then
+        continue
+      fi
+      if ! bench_dependency_manifest_record_matches_file "$path" "$file"; then
+        continue
+      fi
+      matched=true
+      if [[ "$runner" == "all" ]]; then
+        bench_full=true
+        return
+      fi
+      add_bench_suite "$runner"
+    done < "$BENCH_DEPENDENCY_MANIFEST_BASELINE"
+
+    case "$file" in
+      tools/bench/*|tools/bench/**/*)
+        if [[ "$matched" == "false" ]]; then
+          bench_full=true
+          return
+        fi
+        ;;
+    esac
+  done
+}
+
 collect_changed_files() {
   local base_ref
   local file
@@ -394,11 +466,15 @@ infer_quality_gate_scope() {
       tests/kernel/*|tests/graph/*|tests/memory/*|tests/tensor/*)
         bench_full=true
         ;;
-      src/emel/*|tools/bench/*)
+      src/emel/*)
         bench_full=true
         ;;
     esac
   done
+
+  if [[ -z "$QUALITY_GATES_BENCH_SUITE" && "$bench_full" == "false" ]]; then
+    bench_dependency_manifest_apply_changed_files
+  fi
 }
 
 run_parity_gate() {
@@ -480,6 +556,57 @@ parity_dependency_manifest_requires_full_gate() {
   return 0
 }
 
+bench_dependency_manifest_check_needed() {
+  if $bench_full || [[ ${#bench_suites[@]} -gt 0 ]]; then
+    return 0
+  fi
+  return 1
+}
+
+bench_dependency_manifest_requires_full_gate() {
+  local output
+  local status
+  local check_args
+
+  check_args=("--check-dependency-manifest" "$BENCH_DEPENDENCY_MANIFEST_BASELINE")
+  case "$BENCH_DEPENDENCY_MANIFEST_UNCERTAIN" in
+    1|true|yes)
+      check_args+=("--dependency-manifest-uncertain")
+      ;;
+  esac
+
+  if [[ ! -x "$BENCH_RUNNER_BINARY" ]]; then
+    echo "dependency manifest requires full benchmark gate: reason=uncertain bench_runner binary missing" >&2
+    return 0
+  fi
+
+  mkdir -p "$(dirname "$BENCH_DEPENDENCY_MANIFEST_CURRENT")"
+  if output="$("$BENCH_RUNNER_BINARY" \
+      --write-dependency-manifest "$BENCH_DEPENDENCY_MANIFEST_CURRENT" 2>&1)"; then
+    echo "$output" >&2
+  else
+    status=$?
+    echo "$output" >&2
+    echo "dependency manifest requires full benchmark gate: reason=uncertain emit_status=$status" >&2
+    return 0
+  fi
+
+  if output="$("$BENCH_RUNNER_BINARY" "${check_args[@]}" 2>&1)"; then
+    echo "$output" >&2
+    return 1
+  fi
+
+  status=$?
+  echo "$output" >&2
+  if [[ "$status" -eq 3 ]]; then
+    echo "dependency manifest requires full benchmark gate: $output" >&2
+    return 0
+  fi
+
+  echo "dependency manifest requires full benchmark gate: reason=uncertain check_status=$status" >&2
+  return 0
+}
+
 run_fuzz_gate() {
   case "$QUALITY_GATES_FUZZ" in
     always)
@@ -510,6 +637,12 @@ run_benchmark_gates() {
   local bench_warmup_iters
   local bench_warmup_runs
   local bench_tolerance
+
+  if bench_dependency_manifest_check_needed; then
+    if bench_dependency_manifest_requires_full_gate; then
+      bench_full=true
+    fi
+  fi
 
   if $bench_full; then
     if run_step_allow_fail bench_snapshot env \

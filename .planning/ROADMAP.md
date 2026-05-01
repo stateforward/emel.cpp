@@ -64,7 +64,7 @@ manifests.
   build independently and additions stay local.
 - [x] **Phase 161: Benchmark Dependency Manifest Emission** - Emit deterministic per-runner
   dependency manifests from build/source-backed inputs.
-- [ ] **Phase 162: Benchmark Manifest Quality-Gate Consumption** - Wire conservative
+- [x] **Phase 162: Benchmark Manifest Quality-Gate Consumption** - Wire conservative
   manifest-driven benchmark gate selection into quality gates.
 - [ ] **Phase 163: Benchmark Behavior And Lane-Isolation Closure** - Prove existing benchmark
   behavior and EMEL/reference lane isolation remain source-backed after the refactor.
@@ -190,7 +190,9 @@ changed-file scoped gates select relevant benchmark lanes conservatively.
 5. Focused tests or scripted checks cover impacted, unrelated, missing, stale, and uncertain
    manifest cases.
 
-**Status:** Pending.
+**Status:** Complete. Phase 162 wired `tools/bench/dependency_manifest.txt` into changed-file
+scoped benchmark gate selection, added benchmark manifest freshness checks before skip decisions,
+and added source tests for scoped runner mapping plus full-gate escalation.
 
 ### Phase 163: Benchmark Behavior And Lane-Isolation Closure
 
