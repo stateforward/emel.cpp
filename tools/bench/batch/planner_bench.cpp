@@ -4,6 +4,8 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <tuple>
+#include <utility>
 #include <vector>
 
 #include "emel/batch/planner/context.hpp"
@@ -32,11 +34,13 @@ constexpr int32_t error_code(const bench_error code) noexcept {
 
 constexpr int32_t k_error_none = error_code(bench_error::none);
 constexpr int32_t k_error_backend = error_code(bench_error::backend);
+constexpr std::size_t k_plan_step_capacity = std::tuple_size_v<decltype(
+    std::declval<emel::batch::planner::event::plan_scratch>().step_sizes)>;
 
 struct plan_result {
-  std::array<int32_t, emel::batch::planner::action::MAX_PLAN_STEPS> ubatch_sizes = {};
-  std::array<int32_t, emel::batch::planner::action::MAX_PLAN_STEPS> ubatch_token_indices = {};
-  std::array<int32_t, emel::batch::planner::action::MAX_PLAN_STEPS + 1> ubatch_offsets = {};
+  std::array<int32_t, k_plan_step_capacity> ubatch_sizes = {};
+  std::array<int32_t, k_plan_step_capacity> ubatch_token_indices = {};
+  std::array<int32_t, k_plan_step_capacity + 1u> ubatch_offsets = {};
   int32_t ubatch_count = 0;
   int32_t token_indices_count = 0;
   int32_t total_outputs = 0;
@@ -215,7 +219,7 @@ bool collect_llama_plan(emel::batch::planner::event::plan_mode mode,
     if (ubatch.n_tokens == 0) {
       break;
     }
-    if (out.ubatch_count >= emel::batch::planner::action::MAX_PLAN_STEPS) {
+    if (out.ubatch_count >= static_cast<int32_t>(k_plan_step_capacity)) {
       out.err = k_error_backend;
       return false;
     }
@@ -224,7 +228,7 @@ bool collect_llama_plan(emel::batch::planner::event::plan_mode mode,
     out.ubatch_count += 1;
 
     for (uint32_t i = 0; i < ubatch.n_tokens; ++i) {
-      if (out.token_indices_count >= emel::batch::planner::action::MAX_PLAN_STEPS) {
+      if (out.token_indices_count >= static_cast<int32_t>(k_plan_step_capacity)) {
         out.err = k_error_backend;
         return false;
       }

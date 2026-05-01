@@ -1,16 +1,16 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.18
-milestone_name: Parity Tool Boundary Refactor
-status: milestone_complete
-stopped_at: "v1.18 milestone completed and archived; next action is `$gsd-new-milestone`."
-last_updated: "2026-05-01T05:04:02Z"
+milestone: v1.19
+milestone_name: Benchmark Tool Pluggable Runner Refactor
+status: completed
+stopped_at: v1.19 milestone completed and archived; next action is `$gsd-new-milestone`.
+last_updated: "2026-05-01T15:50:50.333Z"
 last_activity: 2026-05-01
 progress:
-  total_phases: 9
-  completed_phases: 9
-  total_plans: 9
-  completed_plans: 9
+  total_phases: 10
+  completed_phases: 10
+  total_plans: 10
+  completed_plans: 10
   percent: 100
 ---
 
@@ -22,13 +22,13 @@ See: .planning/PROJECT.md (updated 2026-05-01)
 
 **Core value:** Prove real end-to-end behavior with explicit SML orchestration and parity-oriented
 verification before widening API surface or model scope.
-**Current focus:** No active milestone; start the next milestone with fresh requirements.
+**Current focus:** Planning next milestone.
 
 ## Current Position
 
-Phase: —
-Plan: —
-Status: v1.18 milestone complete and archived.
+Phase: -
+Plan: -
+Status: v1.19 shipped, audited, and archived.
 Last activity: 2026-05-01
 
 Progress: [##########] 100%
@@ -47,14 +47,15 @@ Items acknowledged and still deferred at milestone close on 2026-05-01:
 
 ## Performance Metrics
 
-**Current milestone:**
+**Latest milestone:**
 
-- Milestone: none active
+- Milestone: `v1.19 Benchmark Tool Pluggable Runner Refactor`
 
-- Current planning shape: milestone closed; next milestone not yet defined.
-- Latest shipped milestone: `v1.18 Parity Tool Boundary Refactor`.
+- Completed shape: 10 phases, 13 active requirements mapped; 10 phases complete, 0 closure phases
+  pending.
+- Latest shipped milestone: `v1.19 Benchmark Tool Pluggable Runner Refactor`.
 
-- Next action: start a new milestone with `$gsd-new-milestone`.
+- Next action: `$gsd-new-milestone`.
 - Current blocker: none known.
 
 ## Accumulated Context
@@ -63,6 +64,76 @@ Items acknowledged and still deferred at milestone close on 2026-05-01:
 
 Decisions are logged in PROJECT.md Key Decisions table.
 Recent decisions affecting current work:
+
+- `v1.19` starts from GitHub issue #55 and targets benchmark orchestrator, runner, build,
+  discovery, and dependency-manifest boundaries rather than new benchmark semantics.
+
+- The benchmark refactor must preserve explicit EMEL/reference lane isolation: no shared
+  model/vocab/tokenizer/runtime/cache objects, no shared bootstrap paths, and no actor-internal
+  helper calls from benchmark harnesses.
+
+- Missing, stale, or uncertain benchmark runner dependency manifests must force the relevant
+  benchmark gate instead of enabling a permissive skip.
+
+- Phase 157 starts the milestone by establishing the shared benchmark orchestrator boundary while
+  keeping EMEL/reference lane-owned assets separate.
+
+- Phase 157 completed by extracting `emel::bench::run_bench_cli(...)`, making `bench_main.cpp` a
+  process shim, and preserving existing benchmark lane construction and behavior under focused
+  bench runner tests plus a generation-scoped quality gate.
+
+- Phases 158-160 own runner contract, discovery/registration, and independent build-target
+  boundaries before manifest and quality-gate work begins.
+
+- Phase 158 completed the runner request/result contract with deterministic serialized process
+  seam payloads and malformed-payload tests.
+
+- Phase 159 completed benchmark runner discovery and registration by moving suite metadata into a
+  localized registry, updating the orchestrator to consume registered runner spans, and preserving
+  tokenizer inclusion behavior with focused source checks.
+
+- Phase 160 completed independent benchmark build targets by compiling selected suite sources
+  through `bench_runner_suite_<suite>` object targets while preserving the existing
+  operator-facing `bench_runner` executable and filtered disabled-stub behavior.
+
+- Phase 161 completed deterministic benchmark dependency manifest emission with
+  `bench_dependency_manifest/v1`, a generated baseline, schema docs, runner CLI write/check
+  operations, and conservative missing/stale/uncertain freshness semantics.
+
+- Phase 162 completed benchmark manifest quality-gate consumption by mapping changed files through
+  `tools/bench/dependency_manifest.txt`, checking manifest freshness before benchmark skip
+  decisions, and forcing benchmark gates for missing, stale, or uncertain manifest state.
+
+- Phase 163 completed maintained behavior and lane-isolation closure with source-backed checks for
+  shared benchmark lane neutrality, actor-boundary cleanliness, direct suite-wiring drift, and
+  maintained generation/diarization behavior coverage.
+
+- Phases 161-162 own build-time benchmark dependency manifests and conservative quality-gate
+  consumption. Phase 163 closes maintained behavior and lane-isolation proof.
+
+- The 2026-05-01 source-backed milestone audit rerun reopened v1.19 because `RUNNER-02` serialized
+  process-seam support is helper/test-only, `LANE-02` actor-boundary enforcement misses maintained
+  runner sources, and phases 157-163 lack Nyquist validation artifacts.
+
+- Phase 164 will close `RUNNER-02` by wiring `bench_runner_request/v1` and
+  `bench_runner_result/v1` through a live runner process entrypoint.
+
+- Phase 165 will close `LANE-02` by removing benchmark actor action/detail reach-through or
+  broadening source checks to fail any prohibited maintained runner reach-through.
+
+- Phase 166 will backfill validation artifacts for reopened v1.19 after source-backed closure
+  phases land.
+
+- Phase 164 closed `RUNNER-02` by adding live `bench_runner_request/v1` /
+  `bench_runner_result/v1` process flags to `bench_runner`, with live binary coverage and scoped
+  quality-gate evidence.
+
+- Phase 165 closed `LANE-02` by removing maintained benchmark actor reach-through, broadening the
+  source-backed runner scan over `tools/bench` `.cpp`/`.hpp` files, and passing full
+  `bench_runner_tests` plus the affected benchmark scoped quality gate.
+
+- Phase 166 closed the Nyquist validation backfill gap by adding validation artifacts for phases
+  157-163 and updating the v1.19 milestone audit to source-backed pass.
 
 - `v1.18` starts from GitHub issue #54 and targets paritychecker runner/engine/build/manifest
   boundaries rather than new parity semantics.
@@ -435,5 +506,5 @@ Recent decisions affecting current work:
 ## Session Continuity
 
 Last session: 2026-05-01T00:00:00Z
-Stopped at: v1.18 milestone completed and archived; next action is `$gsd-new-milestone`.
+Stopped at: v1.19 milestone completed and archived; next action is `$gsd-new-milestone`.
 Resume file: None

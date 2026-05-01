@@ -35,8 +35,7 @@ emel::text::jinja::program parse_emel(const std::string & templ) {
   emel::text::jinja::program program{};
   int32_t parse_err = static_cast<int32_t>(emel::text::jinja::parser::error::none);
   size_t parse_error_pos = 0;
-  emel::text::jinja::parser::action::context parse_ctx{};
-  emel::text::jinja::parser::sm parser{parse_ctx};
+  emel::text::jinja::parser::sm parser{};
   const emel::text::jinja::event::parse parse_ev{
       templ,
       program,
@@ -126,8 +125,7 @@ void append_emel_jinja_formatter_cases(std::vector<result> & results, const conf
   entries[2].val = items_val;
   emel::text::jinja::object_value globals{entries.data(), entries.size(), entries.size(), false};
 
-  emel::text::jinja::formatter::action::context ctx{};
-  emel::text::jinja::formatter::sm machine{ctx};
+  emel::text::jinja::formatter::sm machine{};
   const emel::text::jinja::event::render::done_callback done_cb =
       emel::text::jinja::event::render::done_callback::from<&formatter_done_sink>();
   const emel::text::jinja::event::render::error_callback error_cb =

@@ -1,0 +1,1272 @@
+#include <algorithm>
+#include <cinttypes>
+#include <cstddef>
+#include <cstdint>
+#include <cstdio>
+#include <cstdlib>
+#include <filesystem>
+#include <fstream>
+#include <span>
+#include <sstream>
+#include <string>
+#include <string_view>
+#include <system_error>
+#include <utility>
+#include <vector>
+
+#include "bench_cases.hpp"
+#include "bench_common.hpp"
+#include "bench_dependency_manifest.hpp"
+#include "bench_runner_contract.hpp"
+#include "bench_runner.hpp"
+#include "bench_runner_registry.hpp"
+#include "diarization_compare_contract.hpp"
+#include "generation_compare_contract.hpp"
+
+namespace emel::bench {
+
+bool generation_flash_evidence_ready() noexcept;
+std::uint64_t generation_flash_evidence_dispatch_calls() noexcept;
+std::uint64_t generation_flash_evidence_optimized_dispatch_calls() noexcept;
+std::uint64_t generation_flash_evidence_shared_dispatch_calls() noexcept;
+std::string_view generation_formatter_contract() noexcept;
+std::uint32_t generation_runtime_contract_native_quantized_stage_count() noexcept;
+std::uint32_t generation_runtime_contract_approved_dense_f32_stage_count() noexcept;
+std::uint32_t generation_runtime_contract_disallowed_fallback_stage_count() noexcept;
+std::uint32_t generation_runtime_contract_explicit_no_claim_stage_count() noexcept;
+std::uint64_t generation_quantized_evidence_native_q8_0_dispatch_calls() noexcept;
+std::uint64_t generation_quantized_evidence_packed_q8_0_dispatch_calls() noexcept;
+std::uint64_t generation_quantized_evidence_optimized_q2_dispatch_calls() noexcept;
+std::uint64_t generation_quantized_evidence_shared_q2_dispatch_calls() noexcept;
+std::uint64_t generation_quantized_evidence_optimized_q3_dispatch_calls() noexcept;
+std::uint64_t generation_quantized_evidence_shared_q3_dispatch_calls() noexcept;
+std::uint64_t generation_quantized_evidence_optimized_q4_dispatch_calls() noexcept;
+std::uint64_t generation_quantized_evidence_shared_q4_dispatch_calls() noexcept;
+std::uint64_t generation_quantized_evidence_optimized_q6_dispatch_calls() noexcept;
+std::uint64_t generation_quantized_evidence_shared_q6_dispatch_calls() noexcept;
+std::int32_t generation_flash_evidence_emel_decode_calls() noexcept;
+std::int32_t generation_flash_evidence_emel_logits_calls() noexcept;
+std::int32_t generation_flash_evidence_reference_decode_calls() noexcept;
+std::int32_t generation_flash_evidence_reference_logits_calls() noexcept;
+std::string_view generation_architecture_contract() noexcept;
+std::size_t generation_stage_probe_count() noexcept;
+generation_stage_probe generation_stage_probe_at(std::size_t index) noexcept;
+
+}  // namespace emel::bench
+
+namespace {
+namespace bench = emel::bench;
+
+constexpr std::uint64_t k_default_iterations = 1000;
+constexpr std::size_t k_default_runs = 3;
+constexpr std::uint64_t k_default_warmup_iterations = 100;
+constexpr std::size_t k_default_warmup_runs = 1;
+constexpr std::size_t k_max_runs = 25;
+constexpr std::string_view k_generation_suite = "generation";
+constexpr std::string_view k_diarization_sortformer_suite = "diarization_sortformer";
+
+constexpr bool k_host_is_x86_64 =
+#if defined(__x86_64__) || defined(_M_X64)
+  true;
+#else
+  false;
+#endif
+
+constexpr bool k_host_is_aarch64 =
+#if defined(__aarch64__) || defined(_M_ARM64)
+  true;
+#else
+  false;
+#endif
+
+constexpr std::string_view k_bench_reference_source =
+#ifdef BENCH_REFERENCE_SOURCE
+  BENCH_REFERENCE_SOURCE;
+#else
+  "unknown";
+#endif
+
+constexpr std::string_view k_bench_reference_ref =
+#ifdef BENCH_REFERENCE_REF
+  BENCH_REFERENCE_REF;
+#else
+  "unknown";
+#endif
+
+constexpr std::string_view k_bench_emel_artifact_path =
+#ifdef EMEL_BENCH_EMEL_ARTIFACT_PATH
+  EMEL_BENCH_EMEL_ARTIFACT_PATH;
+#else
+  "";
+#endif
+
+constexpr std::string_view k_bench_llama_artifact_path =
+#ifdef EMEL_BENCH_LLAMA_ARTIFACT_PATH
+  EMEL_BENCH_LLAMA_ARTIFACT_PATH;
+#else
+  "";
+#endif
+
+constexpr std::string_view k_bench_compiled_suite =
+#ifdef EMEL_BENCH_COMPILED_SUITE
+  EMEL_BENCH_COMPILED_SUITE;
+#else
+  "";
+#endif
+
+struct artifact_size {
+  std::string target = {};
+  std::uintmax_t bytes = 0u;
+  bool available = false;
+};
+
+std::string read_text_file(const std::string & path) {
+  std::ifstream input(path, std::ios::binary);
+  if (!input) {
+    return {};
+  }
+  std::ostringstream out;
+  out << input.rdbuf();
+  return out.str();
+}
+
+bool write_text_file(const std::string & path, const std::string_view text) {
+  std::ofstream output(path, std::ios::binary | std::ios::trunc);
+  if (!output) {
+    return false;
+  }
+  output.write(text.data(), static_cast<std::streamsize>(text.size()));
+  return static_cast<bool>(output);
+}
+
+artifact_size read_artifact_size(const std::string_view raw_path) {
+  artifact_size result{};
+  if (raw_path.empty()) {
+    result.target = "unknown";
+    return result;
+  }
+
+  const std::filesystem::path path(raw_path);
+  result.target = path.filename().string();
+  if (result.target.empty()) {
+    result.target = path.string();
+  }
+
+  std::error_code ec;
+  result.bytes = std::filesystem::file_size(path, ec);
+  result.available = !ec;
+  if (!result.available) {
+    result.bytes = 0u;
+  }
+  return result;
+}
+
+void print_binary_size_compare_metadata() {
+  const artifact_size emel_size = read_artifact_size(k_bench_emel_artifact_path);
+  const artifact_size llama_size = read_artifact_size(k_bench_llama_artifact_path);
+
+  if (!emel_size.available || !llama_size.available || llama_size.bytes == 0u) {
+    std::printf("# binary_size_compare: status=unavailable emel_target=%s llama_target=%s\n",
+                emel_size.target.c_str(),
+                llama_size.target.c_str());
+    return;
+  }
+
+  const double ratio =
+      static_cast<double>(emel_size.bytes) / static_cast<double>(llama_size.bytes);
+  std::printf("# binary_size_compare: status=ok emel_target=%s emel_bytes=%" PRIuMAX
+              " llama_target=%s llama_bytes=%" PRIuMAX " ratio=%.3fx\n",
+              emel_size.target.c_str(),
+              static_cast<uintmax_t>(emel_size.bytes),
+              llama_size.target.c_str(),
+              static_cast<uintmax_t>(llama_size.bytes),
+              ratio);
+}
+
+bool is_generation_case_name(const std::string & name) {
+  return name.rfind("generation/preloaded_request/", 0u) == 0u;
+}
+
+bool is_diarization_sortformer_case_name(const std::string & name) {
+  return name.rfind("diarization/sortformer/", 0u) == 0u;
+}
+
+bool case_supported_on_host(const bench::test_case & tc) {
+  if (tc.append_emel == bench::append_emel_kernel_x86_64_cases ||
+      tc.append_reference == bench::append_reference_kernel_x86_64_cases) {
+    return k_host_is_x86_64;
+  }
+  if (tc.append_emel == bench::append_emel_kernel_aarch64_cases ||
+      tc.append_reference == bench::append_reference_kernel_aarch64_cases) {
+    return k_host_is_aarch64;
+  }
+  return true;
+}
+
+std::uint64_t read_env_u64(const char * name, std::uint64_t fallback) {
+  const char * value = std::getenv(name);
+  if (value == nullptr || value[0] == '\0') {
+    return fallback;
+  }
+  char * end = nullptr;
+  const auto parsed = std::strtoull(value, &end, 10);
+  if (end == value) {
+    return fallback;
+  }
+  return static_cast<std::uint64_t>(parsed);
+}
+
+std::size_t read_env_size(const char * name, std::size_t fallback) {
+  const auto parsed = read_env_u64(name, static_cast<std::uint64_t>(fallback));
+  if (parsed == 0) {
+    return fallback;
+  }
+  if (parsed > static_cast<std::uint64_t>(k_max_runs)) {
+    return k_max_runs;
+  }
+  return static_cast<std::size_t>(parsed);
+}
+
+std::int32_t read_env_i32(const char * name, const std::int32_t fallback) {
+  const char * value = std::getenv(name);
+  if (value == nullptr || value[0] == '\0') {
+    return fallback;
+  }
+  char * end = nullptr;
+  const long parsed = std::strtol(value, &end, 10);
+  if (end == value) {
+    return fallback;
+  }
+  return static_cast<std::int32_t>(parsed);
+}
+
+void enforce_compiled_suite_filter() {
+  if (k_bench_compiled_suite.empty()) {
+    return;
+  }
+
+  const char * selected_suite = std::getenv("EMEL_BENCH_SUITE");
+  if (selected_suite == nullptr || selected_suite[0] == '\0') {
+    std::fprintf(stderr,
+                 "error: this bench_runner was compiled for suite '%.*s'; set "
+                 "EMEL_BENCH_SUITE to the same value\n",
+                 static_cast<int>(k_bench_compiled_suite.size()),
+                 k_bench_compiled_suite.data());
+    std::exit(1);
+  }
+
+  if (std::string_view{selected_suite} != k_bench_compiled_suite) {
+    std::fprintf(stderr,
+                 "error: this bench_runner was compiled for suite '%.*s' but "
+                 "EMEL_BENCH_SUITE='%s'\n",
+                 static_cast<int>(k_bench_compiled_suite.size()),
+                 k_bench_compiled_suite.data(),
+                 selected_suite);
+    std::exit(1);
+  }
+}
+
+void print_benchmark_config(const bench::config & cfg) {
+  const auto generation_iterations = read_env_u64("EMEL_BENCH_GENERATION_ITERS", 1u);
+  const auto generation_runs = read_env_size("EMEL_BENCH_GENERATION_RUNS", cfg.runs);
+  const auto generation_warmup_iterations =
+      read_env_u64("EMEL_BENCH_GENERATION_WARMUP_ITERS", 0u);
+  const auto generation_warmup_runs =
+      read_env_size("EMEL_BENCH_GENERATION_WARMUP_RUNS", 0u);
+  std::printf("# benchmark_config: iterations=%" PRIu64
+              " runs=%zu warmup_iterations=%" PRIu64
+              " warmup_runs=%zu generation_iterations=%" PRIu64
+              " generation_runs=%zu generation_warmup_iterations=%" PRIu64
+              " generation_warmup_runs=%zu\n",
+              cfg.iterations,
+              cfg.runs,
+              cfg.warmup_iterations,
+              cfg.warmup_runs,
+              generation_iterations,
+              generation_runs,
+              generation_warmup_iterations,
+              generation_warmup_runs);
+}
+
+std::vector<bench::result> run_benchmarks(const bench::config & cfg,
+                                          const std::span<const bench::test_case> cases,
+                                          const bool reference,
+                                          const bool include_tokenizer,
+                                          const std::string_view selected_suite_override = {}) {
+  std::vector<bench::result> results;
+  results.reserve(cases.size());
+  const std::int32_t selected_case_index = read_env_i32("EMEL_BENCH_CASE_INDEX", -1);
+  const char * selected_suite_env = std::getenv("EMEL_BENCH_SUITE");
+  const std::string_view selected_suite =
+      selected_suite_override.empty()
+          ? (selected_suite_env == nullptr ? std::string_view{}
+                                           : std::string_view{selected_suite_env})
+          : selected_suite_override;
+  const bool filter_by_suite = !selected_suite.empty();
+  bool suite_seen = false;
+
+  std::size_t case_index = 0;
+  for (const bench::test_case & tc : cases) {
+    const bool selected_case = selected_case_index < 0 ||
+        static_cast<std::int32_t>(case_index) == selected_case_index;
+    const bool selected_suite_case = !filter_by_suite || tc.suite == selected_suite;
+    suite_seen = suite_seen || selected_suite_case;
+    case_index += 1;
+    if (!selected_case || !selected_suite_case) {
+      continue;
+    }
+    if (tc.tokenizer_case && !include_tokenizer) {
+      continue;
+    }
+    if (!case_supported_on_host(tc)) {
+      continue;
+    }
+    bench::append_test_case(results, cfg, tc, reference);
+  }
+
+  if (filter_by_suite && !suite_seen) {
+    std::fprintf(stderr,
+                 "error: unknown benchmark suite '%.*s'\n",
+                 static_cast<int>(selected_suite.size()),
+                 selected_suite.data());
+    std::exit(1);
+  }
+  return results;
+}
+
+void print_snapshot(const std::vector<bench::result> & results, const bench::config & cfg) {
+  std::vector<bench::result> sorted = results;
+  std::sort(sorted.begin(), sorted.end(), [](const bench::result & a, const bench::result & b) {
+    return a.name < b.name;
+  });
+
+  print_benchmark_config(cfg);
+  for (const auto & entry : sorted) {
+    if (is_diarization_sortformer_case_name(entry.name)) {
+      std::printf("# diarization_sortformer: lane=%s case=%s model_id=%s fixture_id=%s "
+                  "workload_id=%s output_dim=%" PRIu64 " output_checksum=%" PRIu64
+                  " %s\n",
+                  entry.lane.c_str(),
+                  entry.name.c_str(),
+                  entry.model_id.c_str(),
+                  entry.fixture_id.c_str(),
+                  entry.workload_id.c_str(),
+                  entry.output_dim,
+                  entry.output_checksum,
+                  entry.note.c_str());
+    }
+    std::printf("%s ns_per_op=%.3f iter=%" PRIu64 " runs=%zu\n",
+                entry.name.c_str(),
+                entry.ns_per_op,
+                entry.iterations,
+                entry.runs);
+  }
+}
+
+void print_generation_jsonl(const std::vector<bench::result> & results) {
+  std::vector<bench::result> sorted = results;
+  std::sort(sorted.begin(), sorted.end(), [](const bench::result & a, const bench::result & b) {
+    return a.name < b.name;
+  });
+
+  bool emitted = false;
+  for (const auto & entry : sorted) {
+    if (!is_generation_case_name(entry.name)) {
+      continue;
+    }
+
+    bench::generation_compare_record record{};
+    record.case_name = entry.name;
+    record.compare_group = entry.compare_group.empty() ? entry.name : entry.compare_group;
+    record.lane = entry.lane;
+    record.backend_id = entry.backend_id;
+    record.backend_language = entry.backend_language;
+    record.workload_id = entry.workload_id;
+    record.workload_manifest_path = entry.workload_manifest_path;
+    record.comparison_mode = entry.comparison_mode;
+    record.model_id = entry.model_id;
+    record.fixture_id = entry.fixture_id;
+    record.prompt_fixture_id = entry.prompt_fixture_id;
+    record.prompt_fixture_path = entry.prompt_fixture_path;
+    record.prompt_id = entry.prompt_id;
+    record.formatter_mode = entry.formatter_mode;
+    record.formatter_contract = entry.formatter_contract;
+    record.sampling_id = entry.sampling_id;
+    record.stop_id = entry.stop_id;
+    record.seed = entry.seed;
+    record.comparable = entry.comparable;
+    record.max_output_tokens = entry.max_output_tokens;
+    record.ns_per_op = entry.ns_per_op;
+    record.ns_min_per_op = entry.ns_min_per_op;
+    record.ns_mean_per_op = entry.ns_mean_per_op;
+    record.ns_max_per_op = entry.ns_max_per_op;
+    record.prepare_ns_per_op = entry.prepare_ns_per_op;
+    record.encode_ns_per_op = entry.encode_ns_per_op;
+    record.publish_ns_per_op = entry.publish_ns_per_op;
+    record.output_tokens = entry.output_tokens;
+    record.output_bytes = entry.output_bytes;
+    record.output_checksum = entry.output_checksum;
+    record.iterations = entry.iterations;
+    record.runs = entry.runs;
+    record.output_text = entry.output_text;
+    record.note = entry.note;
+    record.error_kind = entry.error_kind;
+    record.error_message = entry.error_message;
+    bench::maybe_dump_generation_output(record);
+    bench::print_generation_compare_record_jsonl(record);
+    emitted = true;
+  }
+
+  if (!emitted) {
+    std::fprintf(stderr, "error: generation compare jsonl mode emitted no generation records\n");
+    std::exit(1);
+  }
+}
+
+void print_diarization_jsonl(const std::vector<bench::result> & results) {
+  std::vector<bench::result> sorted = results;
+  std::sort(sorted.begin(), sorted.end(), [](const bench::result & a, const bench::result & b) {
+    return a.name < b.name;
+  });
+
+  bool emitted = false;
+  for (const auto & entry : sorted) {
+    if (!is_diarization_sortformer_case_name(entry.name)) {
+      continue;
+    }
+
+    bench::diarization_compare_record record{};
+    record.case_name = entry.name;
+    record.compare_group = entry.compare_group.empty() ? entry.name : entry.compare_group;
+    record.lane = entry.lane;
+    record.backend_id = entry.backend_id;
+    record.backend_language = entry.backend_language;
+    record.comparison_mode = entry.comparison_mode;
+    record.model_id = entry.model_id;
+    record.fixture_id = entry.fixture_id;
+    record.workload_id = entry.workload_id;
+    record.comparable = entry.comparable;
+    record.ns_per_op = entry.ns_per_op;
+    record.ns_min_per_op = entry.ns_min_per_op;
+    record.ns_mean_per_op = entry.ns_mean_per_op;
+    record.ns_max_per_op = entry.ns_max_per_op;
+    record.prepare_ns_per_op = entry.prepare_ns_per_op;
+    record.encode_ns_per_op = entry.encode_ns_per_op;
+    record.publish_ns_per_op = entry.publish_ns_per_op;
+    record.output_bytes = static_cast<std::uint64_t>(entry.output_text.size());
+    record.output_dim = entry.output_dim;
+    record.output_checksum = entry.output_checksum;
+    record.iterations = entry.iterations;
+    record.runs = entry.runs;
+    record.output_text = entry.output_text;
+    record.note = entry.note;
+    record.error_kind = entry.error_kind;
+    record.error_message = entry.error_message;
+    bench::maybe_dump_diarization_output(record);
+    bench::print_diarization_compare_record_jsonl(record);
+    emitted = true;
+  }
+
+  if (!emitted) {
+    std::fprintf(stderr, "error: diarization compare jsonl mode emitted no diarization records\n");
+    std::exit(1);
+  }
+}
+
+void print_compare(const std::vector<bench::result> & emel_results,
+                   const std::vector<bench::result> & reference_results,
+                   const bench::config & cfg) {
+  std::vector<bench::result> emel_sorted = emel_results;
+  std::vector<bench::result> ref_sorted = reference_results;
+
+  std::sort(emel_sorted.begin(), emel_sorted.end(), [](const bench::result & a,
+                                                       const bench::result & b) {
+    return a.name < b.name;
+  });
+  std::sort(ref_sorted.begin(), ref_sorted.end(), [](const bench::result & a,
+                                                     const bench::result & b) {
+    return a.name < b.name;
+  });
+
+  const auto duplicate_emel = std::adjacent_find(
+    emel_sorted.begin(), emel_sorted.end(), [](const bench::result & a, const bench::result & b) {
+      return a.name == b.name;
+    });
+  if (duplicate_emel != emel_sorted.end()) {
+    std::fprintf(stderr, "error: duplicate emel case %s\n", duplicate_emel->name.c_str());
+    std::exit(1);
+  }
+
+  const auto duplicate_ref = std::adjacent_find(
+    ref_sorted.begin(), ref_sorted.end(), [](const bench::result & a, const bench::result & b) {
+      return a.name == b.name;
+    });
+  if (duplicate_ref != ref_sorted.end()) {
+    std::fprintf(stderr, "error: duplicate reference case %s\n", duplicate_ref->name.c_str());
+    std::exit(1);
+  }
+
+  const auto generation_emel = std::find_if(
+    emel_sorted.begin(), emel_sorted.end(), [](const bench::result & entry) {
+      return entry.name == bench::k_generation_case_name;
+    });
+  const auto generation_ref = std::find_if(
+    ref_sorted.begin(), ref_sorted.end(), [](const bench::result & entry) {
+      return entry.name == bench::k_generation_case_name;
+    });
+  const bool any_generation_emel =
+      std::any_of(emel_sorted.begin(), emel_sorted.end(), [](const bench::result & entry) {
+        return is_generation_case_name(entry.name);
+      });
+  const bool any_generation_ref =
+      std::any_of(ref_sorted.begin(), ref_sorted.end(), [](const bench::result & entry) {
+        return is_generation_case_name(entry.name);
+      });
+  if (any_generation_emel != any_generation_ref) {
+    std::fprintf(stderr, "error: generation suite mismatch between emel and reference\n");
+    std::exit(1);
+  }
+  const bool generation_present = generation_emel != emel_sorted.end() ||
+      generation_ref != ref_sorted.end();
+  if ((any_generation_emel || any_generation_ref) && !generation_present) {
+    std::fprintf(stderr,
+                 "error: missing current maintained generation case %.*s\n",
+                 static_cast<int>(bench::k_generation_case_name.size()),
+                 bench::k_generation_case_name.data());
+    std::exit(1);
+  }
+  if ((generation_emel == emel_sorted.end()) != (generation_ref == ref_sorted.end())) {
+    std::fprintf(stderr, "error: generation case mismatch between emel and reference\n");
+    std::exit(1);
+  }
+  if (generation_present && generation_emel == emel_sorted.end()) {
+    std::fprintf(stderr, "error: missing emel generation case %.*s\n",
+                 static_cast<int>(bench::k_generation_case_name.size()),
+                 bench::k_generation_case_name.data());
+    std::exit(1);
+  }
+  if (generation_present && generation_ref == ref_sorted.end()) {
+    std::fprintf(stderr, "error: missing reference generation case %.*s\n",
+                 static_cast<int>(bench::k_generation_case_name.size()),
+                 bench::k_generation_case_name.data());
+    std::exit(1);
+  }
+
+  if (emel_sorted.size() != ref_sorted.size()) {
+    std::fprintf(stderr, "error: case count mismatch emel=%zu reference=%zu\n",
+                 emel_sorted.size(),
+                 ref_sorted.size());
+    std::exit(1);
+  }
+
+  std::printf("# reference_impl: source=%.*s ref=%.*s\n",
+              static_cast<int>(k_bench_reference_source.size()),
+              k_bench_reference_source.data(),
+              static_cast<int>(k_bench_reference_ref.size()),
+              k_bench_reference_ref.data());
+  print_benchmark_config(cfg);
+  print_binary_size_compare_metadata();
+  if (generation_present) {
+    const std::string_view formatter_contract = bench::generation_formatter_contract();
+    const std::string_view architecture_contract = bench::generation_architecture_contract();
+    if (!architecture_contract.empty()) {
+      std::printf("# generation_architecture: %.*s\n",
+                  static_cast<int>(architecture_contract.size()),
+                  architecture_contract.data());
+    }
+    if (!formatter_contract.empty()) {
+      std::printf("# generation_formatter_contract: %.*s\n",
+                  static_cast<int>(formatter_contract.size()),
+                  formatter_contract.data());
+    }
+  }
+
+  if (generation_present) {
+    if (!bench::generation_flash_evidence_ready()) {
+      std::fprintf(stderr, "error: missing generation runtime evidence\n");
+      std::exit(1);
+    }
+
+    const auto flash_dispatch_calls = bench::generation_flash_evidence_dispatch_calls();
+    const auto optimized_flash_dispatch_calls =
+        bench::generation_flash_evidence_optimized_dispatch_calls();
+    const auto shared_flash_dispatch_calls =
+        bench::generation_flash_evidence_shared_dispatch_calls();
+    const auto native_quantized_stage_count =
+        bench::generation_runtime_contract_native_quantized_stage_count();
+    const auto approved_dense_f32_stage_count =
+        bench::generation_runtime_contract_approved_dense_f32_stage_count();
+    const auto disallowed_fallback_stage_count =
+        bench::generation_runtime_contract_disallowed_fallback_stage_count();
+    const auto explicit_no_claim_stage_count =
+        bench::generation_runtime_contract_explicit_no_claim_stage_count();
+    const auto native_q8_0_dispatch_calls =
+        bench::generation_quantized_evidence_native_q8_0_dispatch_calls();
+    const auto packed_q8_0_dispatch_calls =
+        bench::generation_quantized_evidence_packed_q8_0_dispatch_calls();
+    const auto optimized_q2_dispatch_calls =
+        bench::generation_quantized_evidence_optimized_q2_dispatch_calls();
+    const auto shared_q2_dispatch_calls =
+        bench::generation_quantized_evidence_shared_q2_dispatch_calls();
+    const auto optimized_q3_dispatch_calls =
+        bench::generation_quantized_evidence_optimized_q3_dispatch_calls();
+    const auto shared_q3_dispatch_calls =
+        bench::generation_quantized_evidence_shared_q3_dispatch_calls();
+    const auto optimized_q4_dispatch_calls =
+        bench::generation_quantized_evidence_optimized_q4_dispatch_calls();
+    const auto shared_q4_dispatch_calls =
+        bench::generation_quantized_evidence_shared_q4_dispatch_calls();
+    const auto optimized_q6_dispatch_calls =
+        bench::generation_quantized_evidence_optimized_q6_dispatch_calls();
+    const auto shared_q6_dispatch_calls =
+        bench::generation_quantized_evidence_shared_q6_dispatch_calls();
+    const bool is_lfm2_generation =
+        bench::generation_architecture_contract() == std::string_view{"lfm2"};
+    const auto emel_decode_calls = bench::generation_flash_evidence_emel_decode_calls();
+    const auto emel_logits_calls = bench::generation_flash_evidence_emel_logits_calls();
+    const auto reference_decode_calls = bench::generation_flash_evidence_reference_decode_calls();
+    const auto reference_logits_calls = bench::generation_flash_evidence_reference_logits_calls();
+    if (emel_decode_calls != 0 || emel_logits_calls != 0 ||
+        reference_decode_calls != 0 || reference_logits_calls != 0) {
+      std::fprintf(stderr,
+                   "error: invalid generation runtime evidence flash_dispatch_calls=%" PRIu64
+                   " optimized_flash_dispatch_calls=%" PRIu64
+                   " shared_flash_dispatch_calls=%" PRIu64
+                   " emel_decode_calls=%d emel_logits_calls=%d reference_decode_calls=%d "
+                   "reference_logits_calls=%d\n",
+                   flash_dispatch_calls,
+                   optimized_flash_dispatch_calls,
+                   shared_flash_dispatch_calls,
+                   emel_decode_calls,
+                   emel_logits_calls,
+                   reference_decode_calls,
+                   reference_logits_calls);
+      std::exit(1);
+    }
+    if (flash_dispatch_calls == 0 &&
+        (optimized_flash_dispatch_calls != 0 || shared_flash_dispatch_calls != 0)) {
+      std::fprintf(stderr,
+                   "error: invalid zero-flash attribution optimized_flash_dispatch_calls=%" PRIu64
+                   " shared_flash_dispatch_calls=%" PRIu64 "\n",
+                   optimized_flash_dispatch_calls,
+                   shared_flash_dispatch_calls);
+      std::exit(1);
+    }
+    if (k_host_is_aarch64 && flash_dispatch_calls == 0) {
+      std::fprintf(stderr,
+                   "error: missing ARM flash attribution flash_dispatch_calls=%" PRIu64 "\n",
+                   flash_dispatch_calls);
+      std::exit(1);
+    }
+    if (flash_dispatch_calls != 0 && k_host_is_aarch64 &&
+        (optimized_flash_dispatch_calls == 0 || shared_flash_dispatch_calls != 0)) {
+      std::fprintf(stderr,
+                   "error: invalid ARM flash attribution optimized_flash_dispatch_calls=%" PRIu64
+                   " shared_flash_dispatch_calls=%" PRIu64 "\n",
+                   optimized_flash_dispatch_calls,
+                   shared_flash_dispatch_calls);
+      std::exit(1);
+    }
+    if (flash_dispatch_calls != 0 && !k_host_is_aarch64 &&
+        (optimized_flash_dispatch_calls != 0 || shared_flash_dispatch_calls != 0)) {
+      std::fprintf(stderr,
+                   "error: invalid non-ARM flash attribution optimized_flash_dispatch_calls=%" PRIu64
+                   " shared_flash_dispatch_calls=%" PRIu64 "\n",
+                   optimized_flash_dispatch_calls,
+                   shared_flash_dispatch_calls);
+      std::exit(1);
+    }
+    const bool invalid_lfm2_quantized_evidence =
+        native_q8_0_dispatch_calls != 0 || packed_q8_0_dispatch_calls != 0 ||
+        optimized_q2_dispatch_calls != 0 || shared_q2_dispatch_calls != 0 ||
+        optimized_q3_dispatch_calls != 0 || shared_q3_dispatch_calls != 0 ||
+        optimized_q4_dispatch_calls == 0 || shared_q4_dispatch_calls != 0 ||
+        optimized_q6_dispatch_calls == 0 || shared_q6_dispatch_calls != 0;
+    const bool invalid_default_quantized_evidence =
+        (native_q8_0_dispatch_calls + packed_q8_0_dispatch_calls) == 0 ||
+        optimized_q2_dispatch_calls != 0 || shared_q2_dispatch_calls != 0 ||
+        optimized_q3_dispatch_calls != 0 || shared_q3_dispatch_calls != 0 ||
+        optimized_q4_dispatch_calls != 0 || shared_q4_dispatch_calls != 0 ||
+        optimized_q6_dispatch_calls != 0 || shared_q6_dispatch_calls != 0;
+    if ((is_lfm2_generation && invalid_lfm2_quantized_evidence) ||
+        (!is_lfm2_generation && invalid_default_quantized_evidence)) {
+      std::fprintf(stderr,
+                   "error: invalid generation quantized evidence native_q8_0_dispatch_calls=%" PRIu64
+                   " packed_q8_0_dispatch_calls=%" PRIu64
+                   " optimized_q2_dispatch_calls=%" PRIu64
+                   " shared_q2_dispatch_calls=%" PRIu64
+                   " optimized_q3_dispatch_calls=%" PRIu64
+                   " shared_q3_dispatch_calls=%" PRIu64
+                   " optimized_q4_dispatch_calls=%" PRIu64
+                   " shared_q4_dispatch_calls=%" PRIu64
+                   " optimized_q6_dispatch_calls=%" PRIu64
+                   " shared_q6_dispatch_calls=%" PRIu64 "\n",
+                   native_q8_0_dispatch_calls,
+                   packed_q8_0_dispatch_calls,
+                   optimized_q2_dispatch_calls,
+                   shared_q2_dispatch_calls,
+                   optimized_q3_dispatch_calls,
+                   shared_q3_dispatch_calls,
+                   optimized_q4_dispatch_calls,
+                   shared_q4_dispatch_calls,
+                   optimized_q6_dispatch_calls,
+                   shared_q6_dispatch_calls);
+      std::exit(1);
+    }
+    if (native_quantized_stage_count != 8u || approved_dense_f32_stage_count != 6u ||
+        disallowed_fallback_stage_count != 0u || explicit_no_claim_stage_count != 0u) {
+      std::fprintf(stderr,
+                   "error: invalid generation runtime contract native_quantized=%" PRIu32
+                   " approved_dense_f32_by_contract=%" PRIu32
+                   " disallowed_fallback=%" PRIu32
+                   " explicit_no_claim=%" PRIu32 "\n",
+                native_quantized_stage_count,
+                approved_dense_f32_stage_count,
+                disallowed_fallback_stage_count,
+                explicit_no_claim_stage_count);
+      std::exit(1);
+    }
+
+    std::printf("# generation_flash_evidence: case=%.*s flash_dispatch_calls=%" PRIu64
+                " optimized_flash_dispatch_calls=%" PRIu64
+                " shared_flash_dispatch_calls=%" PRIu64
+                " emel_decode_calls=%d emel_logits_calls=%d reference_decode_calls=%d "
+                "reference_logits_calls=%d\n",
+                static_cast<int>(bench::k_generation_case_name.size()),
+                bench::k_generation_case_name.data(),
+                flash_dispatch_calls,
+                optimized_flash_dispatch_calls,
+                shared_flash_dispatch_calls,
+                emel_decode_calls,
+                emel_logits_calls,
+                reference_decode_calls,
+                reference_logits_calls);
+    std::printf("# generation_runtime_contract: case=%.*s native_quantized=%" PRIu32
+                " approved_dense_f32_by_contract=%" PRIu32
+                " disallowed_fallback=%" PRIu32
+                " explicit_no_claim=%" PRIu32 "\n",
+                static_cast<int>(bench::k_generation_case_name.size()),
+                bench::k_generation_case_name.data(),
+                native_quantized_stage_count,
+                approved_dense_f32_stage_count,
+                disallowed_fallback_stage_count,
+                explicit_no_claim_stage_count);
+    std::printf("# generation_quantized_evidence: case=%.*s native_q8_0_dispatch_calls=%" PRIu64
+                " packed_q8_0_dispatch_calls=%" PRIu64
+                " optimized_q2_dispatch_calls=%" PRIu64
+                " shared_q2_dispatch_calls=%" PRIu64
+                " optimized_q3_dispatch_calls=%" PRIu64
+                " shared_q3_dispatch_calls=%" PRIu64
+                " optimized_q4_dispatch_calls=%" PRIu64
+                " shared_q4_dispatch_calls=%" PRIu64
+                " optimized_q6_dispatch_calls=%" PRIu64
+                " shared_q6_dispatch_calls=%" PRIu64 "\n",
+                static_cast<int>(bench::k_generation_case_name.size()),
+                bench::k_generation_case_name.data(),
+                native_q8_0_dispatch_calls,
+                packed_q8_0_dispatch_calls,
+                optimized_q2_dispatch_calls,
+                shared_q2_dispatch_calls,
+                optimized_q3_dispatch_calls,
+                shared_q3_dispatch_calls,
+                optimized_q4_dispatch_calls,
+                shared_q4_dispatch_calls,
+                optimized_q6_dispatch_calls,
+                shared_q6_dispatch_calls);
+    for (std::size_t idx = 0; idx < bench::generation_stage_probe_count(); ++idx) {
+      const auto probe = bench::generation_stage_probe_at(idx);
+      if (probe.name.empty()) {
+        continue;
+      }
+      std::printf("# generation_stage_probe: case=%s emel_total_ns=%" PRIu64
+                  " emel_prefill_contract=%s"
+                  " emel_prompt_tokens=%d"
+                  " emel_prefill_step_size=%d"
+                  " emel_conditioning_ns=%" PRIu64
+                  " emel_prefill_ns=%" PRIu64
+                  " emel_first_decode_ns=%" PRIu64
+                  " emel_steady_decode_ns=%" PRIu64
+                  " emel_unattributed_ns=%" PRIu64
+                  " emel_prefill_linear_probe_ns=%" PRIu64
+                  " emel_prefill_attention_probe_ns=%" PRIu64
+                  " emel_prefill_misc_probe_ns=%" PRIu64
+                  " emel_prefill_misc_attention_norm_ns=%" PRIu64
+                  " emel_prefill_misc_qk_norm_ns=%" PRIu64
+                  " emel_prefill_misc_rope_ns=%" PRIu64
+                  " emel_prefill_misc_kv_store_ns=%" PRIu64
+                  " emel_prefill_misc_ctx_copy_ns=%" PRIu64
+                  " emel_prefill_misc_shortconv_ns=%" PRIu64
+                  " emel_prefill_shortconv_in_proj_ns=%" PRIu64
+                  " emel_prefill_shortconv_in_proj_prepare_ns=%" PRIu64
+                  " emel_prefill_shortconv_conv_ns=%" PRIu64
+                  " emel_prefill_shortconv_state_shift_ns=%" PRIu64
+                  " emel_prefill_shortconv_out_proj_ns=%" PRIu64
+                  " emel_prefill_shortconv_out_proj_prepare_ns=%" PRIu64
+                  " emel_prefill_misc_ffn_norm_ns=%" PRIu64
+                  " emel_prefill_misc_silu_ns=%" PRIu64
+                  " reference_total_ns=%" PRIu64
+                  " reference_conditioning_ns=%" PRIu64
+                  " reference_prefill_ns=%" PRIu64
+                  " reference_first_decode_ns=%" PRIu64
+                  " reference_steady_decode_ns=%" PRIu64
+                  " reference_unattributed_ns=%" PRIu64
+                  " reference_prefill_linear_probe_ns=%" PRIu64
+                  " reference_prefill_attention_probe_ns=%" PRIu64
+                  " reference_prefill_misc_probe_ns=%" PRIu64 "\n",
+                  probe.name.c_str(),
+                  probe.emel_total_ns,
+                  probe.emel_prefill_contract.c_str(),
+                  probe.emel_prompt_tokens,
+                  probe.emel_prefill_step_size,
+                  probe.emel_conditioning_ns,
+                  probe.emel_prefill_ns,
+                  probe.emel_first_decode_ns,
+                  probe.emel_steady_decode_ns,
+                  probe.emel_unattributed_ns,
+                  probe.emel_prefill_linear_probe_ns,
+                  probe.emel_prefill_attention_probe_ns,
+                  probe.emel_prefill_misc_probe_ns,
+                  probe.emel_prefill_misc_attention_norm_ns,
+                  probe.emel_prefill_misc_qk_norm_ns,
+                  probe.emel_prefill_misc_rope_ns,
+                  probe.emel_prefill_misc_kv_store_ns,
+                  probe.emel_prefill_misc_ctx_copy_ns,
+                  probe.emel_prefill_misc_shortconv_ns,
+                  probe.emel_prefill_shortconv_in_proj_ns,
+                  probe.emel_prefill_shortconv_in_proj_prepare_ns,
+                  probe.emel_prefill_shortconv_conv_ns,
+                  probe.emel_prefill_shortconv_state_shift_ns,
+                  probe.emel_prefill_shortconv_out_proj_ns,
+                  probe.emel_prefill_shortconv_out_proj_prepare_ns,
+                  probe.emel_prefill_misc_ffn_norm_ns,
+                  probe.emel_prefill_misc_silu_ns,
+                  probe.reference_total_ns,
+                  probe.reference_conditioning_ns,
+                  probe.reference_prefill_ns,
+                  probe.reference_first_decode_ns,
+                  probe.reference_steady_decode_ns,
+                  probe.reference_unattributed_ns,
+                  probe.reference_prefill_linear_probe_ns,
+                  probe.reference_prefill_attention_probe_ns,
+                  probe.reference_prefill_misc_probe_ns);
+    }
+  }
+
+  const std::size_t count = std::min(emel_sorted.size(), ref_sorted.size());
+  for (std::size_t i = 0; i < count; ++i) {
+    const auto & emel_entry = emel_sorted[i];
+    const auto & ref_entry = ref_sorted[i];
+    if (emel_entry.name != ref_entry.name) {
+      std::fprintf(stderr, "error: case mismatch %s vs %s\n",
+                   emel_entry.name.c_str(), ref_entry.name.c_str());
+      std::exit(1);
+    }
+    if (is_diarization_sortformer_case_name(emel_entry.name)) {
+      std::printf("# diarization_sortformer: lane=%s case=%s model_id=%s fixture_id=%s "
+                  "workload_id=%s output_dim=%" PRIu64 " output_checksum=%" PRIu64
+                  " %s\n",
+                  emel_entry.lane.c_str(),
+                  emel_entry.name.c_str(),
+                  emel_entry.model_id.c_str(),
+                  emel_entry.fixture_id.c_str(),
+                  emel_entry.workload_id.c_str(),
+                  emel_entry.output_dim,
+                  emel_entry.output_checksum,
+                  emel_entry.note.c_str());
+      std::printf("# diarization_sortformer: lane=%s case=%s model_id=%s fixture_id=%s "
+                  "workload_id=%s output_dim=%" PRIu64 " output_checksum=%" PRIu64
+                  " %s\n",
+                  ref_entry.lane.c_str(),
+                  ref_entry.name.c_str(),
+                  ref_entry.model_id.c_str(),
+                  ref_entry.fixture_id.c_str(),
+                  ref_entry.workload_id.c_str(),
+                  ref_entry.output_dim,
+                  ref_entry.output_checksum,
+                  ref_entry.note.c_str());
+      std::printf("%s emel.cpp %.3f ns/op, reference-baseline %.3f ns/op, "
+                  "proof_status=%s\n",
+                  emel_entry.name.c_str(),
+                  emel_entry.ns_per_op,
+                  ref_entry.ns_per_op,
+                  emel_entry.comparable ? "baseline_matched" : "measurement_only");
+      continue;
+    }
+    const double ratio = emel_entry.ns_per_op / ref_entry.ns_per_op;
+    std::printf("%s emel.cpp %.3f ns/op, llama.cpp %.3f ns/op, ratio=%.3fx\n",
+                emel_entry.name.c_str(),
+                emel_entry.ns_per_op,
+                ref_entry.ns_per_op,
+                ratio);
+  }
+}
+
+bench::runner_mode parse_mode(int argc, char ** argv) {
+  bench::runner_mode parsed = bench::runner_mode::emel;
+  for (int i = 1; i < argc; ++i) {
+    const std::string arg = argv[i];
+    if (bench::parse_runner_mode_arg(arg, parsed)) {
+      return parsed;
+    }
+  }
+  return parsed;
+}
+
+enum class manifest_operation {
+  none,
+  write,
+  check,
+};
+
+struct manifest_args {
+  manifest_operation operation = manifest_operation::none;
+  std::string path = {};
+  bool uncertain = false;
+};
+
+struct process_request_args {
+  bool present = false;
+  bool valid = false;
+  std::string request_path = {};
+  std::string result_path = {};
+};
+
+process_request_args parse_process_request_args(int argc, char ** argv) {
+  process_request_args out{};
+  for (int i = 1; i < argc; ++i) {
+    const std::string_view arg = argv[i];
+    if (arg == "--run-serialized-request") {
+      out.present = true;
+      if (i + 1 >= argc || !out.request_path.empty()) {
+        return out;
+      }
+      out.request_path = argv[++i];
+      continue;
+    }
+    if (arg == "--write-serialized-result") {
+      out.present = true;
+      if (i + 1 >= argc || !out.result_path.empty()) {
+        return out;
+      }
+      out.result_path = argv[++i];
+      continue;
+    }
+    if (arg.rfind("--", 0u) == 0u) {
+      return out;
+    }
+    return out;
+  }
+  out.valid = out.present && !out.request_path.empty() && !out.result_path.empty();
+  return out;
+}
+
+bool parse_manifest_args(int argc, char ** argv, manifest_args & out) {
+  out = {};
+  for (int i = 1; i < argc; ++i) {
+    const std::string_view arg = argv[i];
+    if (arg == "--write-dependency-manifest") {
+      if (i + 1 >= argc || out.operation != manifest_operation::none) {
+        return false;
+      }
+      out.operation = manifest_operation::write;
+      out.path = argv[++i];
+      continue;
+    }
+    if (arg == "--check-dependency-manifest") {
+      if (i + 1 >= argc || out.operation != manifest_operation::none) {
+        return false;
+      }
+      out.operation = manifest_operation::check;
+      out.path = argv[++i];
+      continue;
+    }
+    if (arg == "--dependency-manifest-uncertain") {
+      out.uncertain = true;
+      continue;
+    }
+  }
+
+  if (out.operation == manifest_operation::none) {
+    return !out.uncertain;
+  }
+  if (out.path.empty() || (out.operation == manifest_operation::write && out.uncertain)) {
+    return false;
+  }
+
+  for (int i = 1; i < argc; ++i) {
+    const std::string_view arg = argv[i];
+    if (arg == "--write-dependency-manifest" || arg == "--check-dependency-manifest") {
+      ++i;
+      continue;
+    }
+    if (arg == "--dependency-manifest-uncertain") {
+      continue;
+    }
+    return false;
+  }
+  return true;
+}
+
+std::string freshness_reason(const bench::dependency_manifest::freshness_state state) {
+  if (!bench::dependency_manifest::requires_full_gate(state)) {
+    return "fresh";
+  }
+
+  std::string reason;
+  if (state.missing) {
+    reason += "missing";
+  }
+  if (state.stale) {
+    if (!reason.empty()) {
+      reason += ",";
+    }
+    reason += "stale";
+  }
+  if (state.uncertain) {
+    if (!reason.empty()) {
+      reason += ",";
+    }
+    reason += "uncertain";
+  }
+  return reason;
+}
+
+bench::runner_result make_runner_error(std::int32_t exit_code,
+                                       std::string error_kind,
+                                       std::string error_message) {
+  bench::runner_result result{};
+  result.exit_code = exit_code;
+  result.error_kind = std::move(error_kind);
+  result.error_message = std::move(error_message);
+  return result;
+}
+
+bool suite_available_in_cases(const std::string_view suite,
+                              const std::span<const bench::test_case> cases) {
+  if (suite.empty()) {
+    return true;
+  }
+  for (const bench::test_case & tc : cases) {
+    if (tc.suite == suite) {
+      return true;
+    }
+  }
+  return false;
+}
+
+bool request_uses_kernel_cases(const bench::runner_mode mode) {
+  return mode == bench::runner_mode::kernel_emel ||
+    mode == bench::runner_mode::kernel_reference ||
+    mode == bench::runner_mode::kernel_compare;
+}
+
+bool request_uses_jsonl_lane_mode(const bench::runner_mode mode) {
+  return mode == bench::runner_mode::emel || mode == bench::runner_mode::reference;
+}
+
+bool request_supports_generation_jsonl(const bench::runner_request & request) {
+  return request_uses_jsonl_lane_mode(request.mode) &&
+    std::string_view{request.suite} == k_generation_suite;
+}
+
+bool request_supports_diarization_jsonl(const bench::runner_request & request) {
+  return request_uses_jsonl_lane_mode(request.mode) &&
+    std::string_view{request.suite} == k_diarization_sortformer_suite;
+}
+
+bench::runner_result validate_process_runner_request(const bench::runner_request & request) {
+  if (request.generation_jsonl && request.diarization_jsonl) {
+    return make_runner_error(2,
+                             "invalid_request",
+                             "generation and diarization jsonl modes cannot be combined");
+  }
+  if (request.cfg.runs == 0u || request.cfg.runs > k_max_runs) {
+    return make_runner_error(2,
+                             "invalid_request",
+                             "serialized request runs must be between 1 and 25");
+  }
+  if (request.cfg.warmup_runs > k_max_runs) {
+    return make_runner_error(2,
+                             "invalid_request",
+                             "serialized request warmup_runs must be at most 25");
+  }
+  if (!k_bench_compiled_suite.empty() && request.suite != k_bench_compiled_suite) {
+    return make_runner_error(2,
+                             "unknown_suite",
+                             "serialized request suite does not match compiled runner suite");
+  }
+
+  const std::span<const bench::test_case> cases =
+      request_uses_kernel_cases(request.mode) ? bench::kernel_runner_cases()
+                                              : bench::default_runner_cases();
+  if (!suite_available_in_cases(request.suite, cases)) {
+    return make_runner_error(2, "unknown_suite", "unknown benchmark suite");
+  }
+  if (request.generation_jsonl && !request_supports_generation_jsonl(request)) {
+    return make_runner_error(2,
+                             "invalid_request",
+                             "generation jsonl requires mode emel/reference and suite generation");
+  }
+  if (request.diarization_jsonl && !request_supports_diarization_jsonl(request)) {
+    return make_runner_error(
+      2,
+      "invalid_request",
+      "diarization jsonl requires mode emel/reference and suite diarization_sortformer");
+  }
+  return {};
+}
+
+int execute_runner_request(const bench::runner_request & request) {
+  if (request.mode == bench::runner_mode::kernel_emel) {
+    const auto results =
+        run_benchmarks(request.cfg, bench::kernel_runner_cases(), false, false, request.suite);
+    print_snapshot(results, request.cfg);
+    return 0;
+  }
+
+  if (request.mode == bench::runner_mode::kernel_reference) {
+    const auto results =
+        run_benchmarks(request.cfg, bench::kernel_runner_cases(), true, false, request.suite);
+    print_snapshot(results, request.cfg);
+    return 0;
+  }
+
+  if (request.mode == bench::runner_mode::kernel_compare) {
+    const auto emel_results =
+        run_benchmarks(request.cfg, bench::kernel_runner_cases(), false, false, request.suite);
+    const auto ref_results =
+        run_benchmarks(request.cfg, bench::kernel_runner_cases(), true, false, request.suite);
+    print_compare(emel_results, ref_results, request.cfg);
+    return 0;
+  }
+
+  if (request.mode == bench::runner_mode::emel) {
+    bench::set_generation_lane_mode(bench::generation_lane_mode::emel);
+    const auto results =
+        run_benchmarks(request.cfg, bench::default_runner_cases(), false, true, request.suite);
+    if (request.generation_jsonl) {
+      print_generation_jsonl(results);
+    } else if (request.diarization_jsonl) {
+      print_diarization_jsonl(results);
+    } else {
+      print_snapshot(results, request.cfg);
+    }
+    return 0;
+  }
+
+  if (request.mode == bench::runner_mode::reference) {
+    bench::set_generation_lane_mode(bench::generation_lane_mode::reference);
+    const auto results =
+        run_benchmarks(request.cfg, bench::default_runner_cases(), true, true, request.suite);
+    if (request.generation_jsonl) {
+      print_generation_jsonl(results);
+    } else if (request.diarization_jsonl) {
+      print_diarization_jsonl(results);
+    } else {
+      print_snapshot(results, request.cfg);
+    }
+    return 0;
+  }
+
+  bench::set_generation_lane_mode(bench::generation_lane_mode::compare);
+  const auto emel_results =
+      run_benchmarks(request.cfg, bench::default_runner_cases(), false, true, request.suite);
+  const auto ref_results =
+      run_benchmarks(request.cfg, bench::default_runner_cases(), true, true, request.suite);
+  print_compare(emel_results, ref_results, request.cfg);
+  return 0;
+}
+
+int run_serialized_process_request(const process_request_args & args) {
+  bench::runner_result result{};
+  bench::runner_request request{};
+
+  const std::string request_text = read_text_file(args.request_path);
+  if (request_text.empty() || !bench::parse_runner_request(request_text, request)) {
+    result = make_runner_error(2, "invalid_request", "failed to parse serialized request");
+  } else {
+    result = validate_process_runner_request(request);
+    if (result.exit_code == 0) {
+      result.exit_code = execute_runner_request(request);
+    }
+  }
+
+  if (!write_text_file(args.result_path, bench::serialize_runner_result(result))) {
+    std::fprintf(stderr, "error: failed to write serialized runner result: %s\n",
+                 args.result_path.c_str());
+    return 1;
+  }
+  return result.exit_code;
+}
+
+}  // namespace
+
+int emel::bench::run_bench_cli(int argc, char ** argv) {
+  const process_request_args process_request = parse_process_request_args(argc, argv);
+  if (process_request.present) {
+    if (!process_request.valid) {
+      std::fprintf(stderr, "error: invalid serialized runner arguments\n");
+      return 2;
+    }
+    return run_serialized_process_request(process_request);
+  }
+
+  manifest_args manifest = {};
+  if (!parse_manifest_args(argc, argv, manifest)) {
+    std::fprintf(stderr, "error: invalid dependency manifest arguments\n");
+    return 2;
+  }
+  if (manifest.operation == manifest_operation::write) {
+    if (!bench::dependency_manifest::write(manifest.path)) {
+      std::fprintf(stderr,
+                   "error: failed to write dependency manifest: %s\n",
+                   manifest.path.c_str());
+      return 1;
+    }
+    std::printf("dependency_manifest: action=write schema=%.*s records=%zu path=%s\n",
+                static_cast<int>(bench::dependency_manifest::k_schema.size()),
+                bench::dependency_manifest::k_schema.data(),
+                bench::dependency_manifest::records().size(),
+                manifest.path.c_str());
+    return 0;
+  }
+  if (manifest.operation == manifest_operation::check) {
+    const bench::dependency_manifest::freshness_state state =
+      bench::dependency_manifest::inspect(manifest.path, manifest.uncertain);
+    const bool full_gate = bench::dependency_manifest::requires_full_gate(state);
+    const std::string reason = freshness_reason(state);
+    std::printf("dependency_manifest: action=check schema=%.*s full_gate=%u reason=%s path=%s\n",
+                static_cast<int>(bench::dependency_manifest::k_schema.size()),
+                bench::dependency_manifest::k_schema.data(),
+                full_gate ? 1u : 0u,
+                reason.c_str(),
+                manifest.path.c_str());
+    return full_gate ? 3 : 0;
+  }
+
+  enforce_compiled_suite_filter();
+
+  bench::config cfg;
+  cfg.iterations = read_env_u64("EMEL_BENCH_ITERS", k_default_iterations);
+  cfg.runs = read_env_size("EMEL_BENCH_RUNS", k_default_runs);
+  cfg.warmup_iterations = read_env_u64(
+    "EMEL_BENCH_WARMUP_ITERS",
+    std::min(cfg.iterations, k_default_warmup_iterations));
+  cfg.warmup_runs = read_env_size("EMEL_BENCH_WARMUP_RUNS", k_default_warmup_runs);
+
+  const char * selected_suite = std::getenv("EMEL_BENCH_SUITE");
+  const bench::runner_request request{
+    .mode = parse_mode(argc, argv),
+    .cfg = cfg,
+    .suite = selected_suite == nullptr ? std::string{} : std::string{selected_suite},
+    .generation_jsonl = bench::generation_compare_emit_jsonl(),
+    .diarization_jsonl = bench::diarization_compare_emit_jsonl(),
+  };
+  if (request.generation_jsonl && request.diarization_jsonl) {
+    std::fprintf(stderr,
+                 "error: generation and diarization jsonl modes cannot be enabled together\n");
+    return 1;
+  }
+
+  return execute_runner_request(request);
+}

@@ -13,9 +13,8 @@
 #include <string_view>
 #include <vector>
 
-#include "emel/diarization/request/detail.hpp"
+#include "emel/diarization/sortformer/encoder/feature_extractor/detail.hpp"
 #include "emel/diarization/sortformer/output/detail.hpp"
-#include "emel/diarization/sortformer/pipeline/detail.hpp"
 #include "emel/diarization/sortformer/pipeline/sm.hpp"
 #include "emel/gguf/loader/detail.hpp"
 #include "emel/gguf/loader/events.hpp"
@@ -34,8 +33,7 @@ namespace emel::bench::diarization::sortformer_fixture {
 
 namespace output_detail = emel::diarization::sortformer::output::detail;
 namespace pipeline = emel::diarization::sortformer::pipeline;
-namespace pipeline_detail = emel::diarization::sortformer::pipeline::detail;
-namespace request_detail = emel::diarization::request::detail;
+namespace feature_detail = emel::diarization::sortformer::encoder::feature_extractor::detail;
 
 inline constexpr const char * k_case_name =
     "diarization/sortformer/ami_en2002b_mix_headset_137.00_152.04_16khz_mono";
@@ -701,7 +699,7 @@ inline bool prepare(pcm_fixture & fixture) {
   wav_fmt_chunk fmt = {};
   if (!parse_wav_fmt_chunk(fmt_chunk, fmt) || fmt.audio_format != 1u ||
       fmt.channel_count != 1u ||
-      fmt.sample_rate != static_cast<uint32_t>(request_detail::k_sample_rate) ||
+      fmt.sample_rate != static_cast<uint32_t>(feature_detail::k_sample_rate) ||
       fmt.bits_per_sample != 16u) {
     return false;
   }
@@ -782,12 +780,14 @@ inline std::uint64_t compute_checksum(std::span<const output_detail::segment_rec
 
 struct run_result {
   std::vector<float> probabilities =
-      std::vector<float>(static_cast<size_t>(pipeline_detail::k_required_probability_value_count));
-  std::array<output_detail::segment_record, pipeline_detail::k_max_segment_count> segments = {};
+      std::vector<float>(static_cast<size_t>(output_detail::k_required_probability_value_count));
+  std::array<output_detail::segment_record,
+             output_detail::k_frame_count * output_detail::k_speaker_count>
+      segments = {};
   int32_t frame_count = -1;
   int32_t probability_count = -1;
   int32_t segment_count = -1;
-  emel::error::type err = pipeline_detail::to_error(pipeline::error::unexpected);
+  emel::error::type err = emel::error::cast(pipeline::error::unexpected);
   bool accepted = false;
 };
 
@@ -797,7 +797,7 @@ inline void reset(run_result & result) noexcept {
   result.frame_count = -1;
   result.probability_count = -1;
   result.segment_count = -1;
-  result.err = pipeline_detail::to_error(pipeline::error::unexpected);
+  result.err = emel::error::cast(pipeline::error::unexpected);
   result.accepted = false;
 }
 
@@ -814,7 +814,7 @@ inline pipeline::event::run make_run_event(
   return pipeline::event::run{contract,
                               pcm,
                               sample_rate,
-                              request_detail::k_channel_count,
+                              feature_detail::k_channel_count,
                               probabilities,
                               segments,
                               frame_count,

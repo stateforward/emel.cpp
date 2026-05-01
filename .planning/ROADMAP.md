@@ -42,6 +42,10 @@
   - Shipped 2026-05-01 after reopened source-backed gap closure through Phases 153-156; final
     audit passed with 12/12 active requirements satisfied.
 
+- [x] [v1.19: Benchmark Tool Pluggable Runner Refactor](.planning/milestones/v1.19-ROADMAP.md)
+  - Shipped 2026-05-01 after reopened source-backed gap closure through Phases 164-166; final
+    audit passed with 13/13 active requirements satisfied.
+
 ## Current Milestone
 
-No active milestone is currently planned. Start the next milestone with `$gsd-new-milestone`.
+No active milestone. Start the next milestone with `$gsd-new-milestone`.

@@ -1,5 +1,56 @@
 # Project Milestones: EMEL
 
+## v1.19 Benchmark Tool Pluggable Runner Refactor (Shipped: 2026-05-01)
+
+**Phases completed:** 10 phases, 10 plans, 0 tasks, including reopened closure phases 164-166.
+
+**Delivered:** `tools/bench` now has a shared runner boundary, explicit runner
+request/result contracts, localized runner registration, per-suite build targets, deterministic
+benchmark dependency manifests, conservative quality-gate consumption, and source-backed
+behavior/lane-isolation closure for the maintained generation and diarization benchmark flows. The
+milestone was reopened after source-backed audit gaps and closed with live serialized runner
+process-seam coverage, broadened maintained runner actor-boundary enforcement, and Nyquist
+validation artifacts for the full v1.19 phase set.
+
+**Key accomplishments:**
+
+- Extracted shared benchmark CLI/config/report orchestration behind `emel::bench::run_bench_cli(...)`
+  while keeping `bench_main.cpp` as a process shim.
+
+- Added deterministic `bench_runner_request/v1` and `bench_runner_result/v1` payloads for a
+  process-level runner seam.
+
+- Moved suite metadata and lookup into localized runner registry files instead of broad static
+  wiring in the orchestrator.
+
+- Split selected benchmark suite sources into `bench_runner_suite_<suite>` object targets.
+
+- Added `bench_dependency_manifest/v1`, manifest write/check CLI operations, a checked-in
+  dependency baseline, and quality-gate logic that escalates missing, stale, or uncertain manifest
+  state to relevant benchmark gates.
+
+- Added source checks proving shared benchmark orchestration stays lane-neutral and actor-boundary
+  clean while maintained generation and diarization JSONL behavior tests continue to run through
+  `bench_runner`.
+
+- Wired `bench_runner_request/v1` and `bench_runner_result/v1` through a live `bench_runner`
+  process entrypoint with deterministic fail-closed behavior.
+
+- Removed maintained benchmark runner reach-through into actor action/detail helpers and broadened
+  source checks across maintained `tools/bench` `.cpp` and `.hpp` files.
+
+- Backfilled Nyquist validation evidence for phases 157 through 166 and reran the source-backed
+  milestone audit to a passing result.
+
+**Audit:** Final source-backed audit passed with 13/13 active requirements satisfied.
+
+**Known deferred items at close:** 5 old non-phase items acknowledged and deferred; see
+`.planning/STATE.md` `Deferred Items`.
+
+**Git range:** `b420e1b` -> final reopened closeout commit.
+
+---
+
 ## v1.18 Parity Tool Boundary Refactor (Shipped: 2026-05-01)
 
 **Phases completed:** 9 phases, 9 plans, 0 tasks, including reopened closure phases 153-156.
