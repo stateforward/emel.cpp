@@ -2,9 +2,9 @@
 gsd_state_version: 1.0
 milestone: v1.19
 milestone_name: Benchmark Tool Pluggable Runner Refactor
-status: milestone_ready_for_audit
-stopped_at: "Phase 163 complete; next action is `$gsd-audit-milestone`."
-last_updated: "2026-05-01T08:20:00Z"
+status: completed
+stopped_at: v1.19 milestone completed and archived; next action is `$gsd-new-milestone`.
+last_updated: "2026-05-01T08:42:07.560Z"
 last_activity: 2026-05-01
 progress:
   total_phases: 7
@@ -22,14 +22,14 @@ See: .planning/PROJECT.md (updated 2026-05-01)
 
 **Core value:** Prove real end-to-end behavior with explicit SML orchestration and parity-oriented
 verification before widening API surface or model scope.
-**Current focus:** v1.19 Benchmark Tool Pluggable Runner Refactor.
+**Current focus:** Planning next milestone.
 
 ## Current Position
 
 Phase: -
 Plan: -
-Status: v1.19 implementation complete; milestone audit pending.
-Last activity: 2026-05-01 - Phase 163 completed
+Status: v1.19 shipped, audited, and archived.
+Last activity: 2026-05-01
 
 Progress: [##########] 100%
 
@@ -47,14 +47,14 @@ Items acknowledged and still deferred at milestone close on 2026-05-01:
 
 ## Performance Metrics
 
-**Current milestone:**
+**Latest milestone:**
 
 - Milestone: `v1.19 Benchmark Tool Pluggable Runner Refactor`
 
-- Current planning shape: 7 phases, 13 active requirements mapped; 7 phases complete.
-- Latest shipped milestone: `v1.18 Parity Tool Boundary Refactor`.
+- Completed shape: 7 phases, 13 active requirements mapped; 7 phases complete.
+- Latest shipped milestone: `v1.19 Benchmark Tool Pluggable Runner Refactor`.
 
-- Next action: `$gsd-audit-milestone`.
+- Next action: `$gsd-new-milestone`.
 - Current blocker: none known.
 
 ## Accumulated Context
