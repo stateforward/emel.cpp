@@ -141,7 +141,6 @@ if(EMEL_ENABLE_TESTS)
     tests/sm/callback_tests.cpp
     tests/sm/sm_policy_tests.cpp
     tests/sm/sm_any_tests.cpp
-    tests/sm/sml_surface_tests.cpp
     tests/graph/wrapper_visibility_tests.cpp
     tests/graph/allocator/allocator_tests.cpp
     tests/graph/allocator/allocator_action_branch_tests.cpp

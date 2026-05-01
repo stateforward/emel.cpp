@@ -13,6 +13,7 @@ created: 2026-05-01
 
 - `EMEL_ZIG_TEST_SHARDS=sm scripts/build_with_zig.sh`
 - `ctest --test-dir build/zig -R '^emel_tests_sm$' --output-on-failure`
+- `scripts/lint_snapshot.sh`
 
 ## Rule Compliance Evidence
 
@@ -24,4 +25,3 @@ created: 2026-05-01
 ## Notes
 
 No unresolved escalations or manual-only blockers remain for this phase.
-

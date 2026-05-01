@@ -33,7 +33,7 @@ dispatch tables, logger policies, unexpected-event handling, and state inspectio
 - SML tests use `stateforward::sml::state<...>` and `machine.is(...)` for state inspection.
 
 ### Integration Points
-- New SML surface proof belongs under `tests/sm`.
+- New SML surface proof belongs in the existing `tests/sm` shard.
 - The focused verification command is `EMEL_ZIG_TEST_SHARDS=sm scripts/build_with_zig.sh` followed
   by `ctest --test-dir build/zig -R '^emel_tests_sm$' --output-on-failure`.
 
@@ -52,4 +52,3 @@ No user-facing behavior. This is a focused infrastructure proof phase.
 Legacy SML drift guardrails and full quality-gate repair are deferred to Phase 176.
 
 </deferred>
-
