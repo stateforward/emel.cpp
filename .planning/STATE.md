@@ -1,17 +1,17 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.19
-milestone_name: Benchmark Tool Pluggable Runner Refactor
-status: completed
-stopped_at: v1.19 milestone completed and archived; next action is `$gsd-new-milestone`.
-last_updated: "2026-05-01T15:50:50.333Z"
+milestone: v1.20
+milestone_name: SML Dependency And Namespace Migration
+status: defining_requirements
+stopped_at: v1.20 milestone started from GitHub issue #56; next action is `$gsd-plan-phase 167`.
+last_updated: "2026-05-01T17:35:00.000Z"
 last_activity: 2026-05-01
 progress:
-  total_phases: 10
-  completed_phases: 10
-  total_plans: 10
-  completed_plans: 10
-  percent: 100
+  total_phases: 6
+  completed_phases: 0
+  total_plans: 0
+  completed_plans: 0
+  percent: 0
 ---
 
 # Project State
@@ -22,16 +22,16 @@ See: .planning/PROJECT.md (updated 2026-05-01)
 
 **Core value:** Prove real end-to-end behavior with explicit SML orchestration and parity-oriented
 verification before widening API surface or model scope.
-**Current focus:** Planning next milestone.
+**Current focus:** v1.20 SML dependency and namespace migration.
 
 ## Current Position
 
-Phase: -
-Plan: -
-Status: v1.19 shipped, audited, and archived.
-Last activity: 2026-05-01
+Phase: 167 (not started)
+Plan: —
+Status: Roadmap ready
+Last activity: 2026-05-01 — Milestone v1.20 started from GitHub issue #56
 
-Progress: [##########] 100%
+Progress: [----------] 0%
 
 ## Deferred Items
 
@@ -49,13 +49,12 @@ Items acknowledged and still deferred at milestone close on 2026-05-01:
 
 **Latest milestone:**
 
-- Milestone: `v1.19 Benchmark Tool Pluggable Runner Refactor`
+- Milestone: `v1.20 SML Dependency And Namespace Migration`
 
-- Completed shape: 10 phases, 13 active requirements mapped; 10 phases complete, 0 closure phases
-  pending.
+- Planned shape: 6 phases, 12 active requirements mapped; 0 phases complete.
 - Latest shipped milestone: `v1.19 Benchmark Tool Pluggable Runner Refactor`.
 
-- Next action: `$gsd-new-milestone`.
+- Next action: `$gsd-plan-phase 167`.
 - Current blocker: none known.
 
 ## Accumulated Context
@@ -67,6 +66,16 @@ Recent decisions affecting current work:
 
 - `v1.19` starts from GitHub issue #55 and targets benchmark orchestrator, runner, build,
   discovery, and dependency-manifest boundaries rather than new benchmark semantics.
+
+- `v1.20` starts from GitHub issue #56 and targets the `stateforward/sml.cpp` dependency bump plus
+  repo-wide migration from legacy `boost::sml` naming to `stateforward::sml` naming.
+
+- The v1.20 upstream target is `stateforward/sml.cpp` `main` at
+  `4a7109b5dd4aae40e78304e3ac03440ccc35031e`; the current repo pin before migration is
+  `02cbea023f035185cfb400e6015c981f9b946bae`.
+
+- The migration must preserve `docs/rules/sml.rules.md` actor semantics, the no-queue invariant,
+  maintained runtime behavior, and the existing parity/benchmark lane-isolation proof.
 
 - The benchmark refactor must preserve explicit EMEL/reference lane isolation: no shared
   model/vocab/tokenizer/runtime/cache objects, no shared bootstrap paths, and no actor-internal
