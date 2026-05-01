@@ -16,24 +16,24 @@ before widening API surface or model scope.
 
 ## Current State
 
-Current milestone: none active
+Current milestone: `v1.18 Parity Tool Boundary Refactor` reopened for source-backed gap closure
 
-Latest shipped milestone: `v1.18 Parity Tool Boundary Refactor`
+Latest fully shipped milestone: `v1.17 Text Generator Domain Alignment`
 
-Status: `v1.18` shipped from GitHub issue #54. `tools/paritychecker` now has explicit
-runner-owned asset loading, lane-isolated engine adapters, modular build wiring, deterministic
-per-mode dependency manifests, maintained parity behavior proof, and source checks that keep shared
-runner code free of lane-owned runtime objects.
+Status: `v1.18` was reopened on 2026-05-01 after a source-backed audit found partial runner
+ownership, live generation reference truth, actor-boundary, and manifest-gate gaps. Phases 153-156
+are the active closure path before the milestone can be treated as shipped.
 
-Current planning focus: start the next milestone with `$gsd-new-milestone`.
+Current planning focus: plan and execute Phase 153, then re-audit v1.18 after Phases 153-156.
 
-## Previous Shipped Milestone: v1.18 Parity Tool Boundary Refactor
+## Reopened Milestone: v1.18 Parity Tool Boundary Refactor
 
 **Goal:** Refactor `tools/paritychecker` into explicit runner, engine, asset-loading, and
 dependency-manifest boundaries so new parity engines can be added locally without weakening
 EMEL/reference lane isolation or existing parity behavior.
 
-**Shipped:** 2026-05-01 from GitHub issue #54
+**Initial closeout:** 2026-05-01 from GitHub issue #54
+**Reopened:** 2026-05-01 for source-backed audit gap closure
 
 **Delivered:**
 - Runner-owned path, byte-loading, and maintained generation fixture resolution helpers.
@@ -44,6 +44,15 @@ EMEL/reference lane isolation or existing parity behavior.
   semantics.
 - Source-backed behavior and lane-isolation closure proving shared runner files stay free of
   lane-owned runtime objects while maintained parity tests continue to pass.
+
+**Open closure gaps:**
+- Move CLI/config parsing ownership into the shared runner boundary (`PARITY-01`).
+- Make maintained generation parity compare against live reference-lane output (`PARITY-03`,
+  `LANE-01`).
+- Remove remaining paritychecker actor-helper/detail reaches or replace them with public
+  state-machine/kernel-owned surfaces (`LANE-02`).
+- Wire dependency-manifest emission and missing/stale/uncertain full-gate semantics into production
+  paritychecker or quality-gate entrypoints (`MANIFEST-01`, `MANIFEST-02`).
 
 ## Previous Shipped Milestone: v1.17 Text Generator Domain Alignment
 
@@ -340,8 +349,8 @@ truth anchor and without broadening into generic Liquid-family support.
 
 This remains a brownfield repository with an existing codebase map under `.planning/codebase/`.
 The repo stays governed by `AGENTS.md` and `docs/rules/sml.rules.md`. `v1.18` is the active
-milestone, and `v1.17` is the latest shipped milestone after the Phase 147 closeout gate and
-source-backed audit. The current maintained state includes repo-owned EMEL generation, embedding,
+reopened milestone, and `v1.17` is the latest fully shipped milestone after the Phase 147 closeout
+gate and source-backed audit. The current maintained state includes repo-owned EMEL generation, embedding,
 diarization, and Whisper ASR lanes plus pluggable reference backends that publish through canonical
 compare contracts without shared runtime state. The generative text actor now lives under
 `text/generator`, with maintained generation parity and benchmark proof still driven through public
@@ -420,4 +429,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-05-01 after shipping v1.18 Parity Tool Boundary Refactor*
+*Last updated: 2026-05-01 after reopening v1.18 for source-backed gap closure*

@@ -1,8 +1,9 @@
 # Project Milestones: EMEL
 
-## v1.18 Parity Tool Boundary Refactor (Shipped: 2026-05-01)
+## v1.18 Parity Tool Boundary Refactor (Shipped: 2026-05-01, Reopened: 2026-05-01)
 
-**Phases completed:** 5 phases, 5 plans, 0 tasks
+**Phases completed:** 5 phases, 5 plans, 0 tasks. Reopened gap closure phases 153-156 are now
+planned.
 
 **Delivered:** `tools/paritychecker` now has explicit runner, asset, engine, build-registration,
 dependency-manifest, behavior-preservation, and lane-isolation boundaries for existing tokenizer,
@@ -21,7 +22,10 @@ GBNF, kernel, Jinja, and generation parity modes.
 - Removed a reference-side bridge into EMEL detokenizer action detail and added lane-isolation
   source checks for shared runner and engine code.
 
-**Audit:** Passed with `12/12` active requirements satisfied.
+**Audit:** Reopened after a source-backed rerun found `gaps_found` with `6/12` active requirements
+satisfied. The blocker set is runner CLI/config ownership (`PARITY-01`), generation live reference
+truth (`PARITY-03`, `LANE-01`), actor-helper boundary enforcement (`LANE-02`), and dependency
+manifest production/gate consumption (`MANIFEST-01`, `MANIFEST-02`).
 
 **Known deferred items at close:** 5 old non-phase items acknowledged and deferred; see
 `.planning/STATE.md` `Deferred Items`.

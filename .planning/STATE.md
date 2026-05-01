@@ -1,17 +1,17 @@
 ---
 gsd_state_version: 1.0
-milestone: none
-milestone_name: none
-status: milestone_completed
-stopped_at: "v1.18 shipped and archived; next action is `$gsd-new-milestone`."
-last_updated: "2026-05-01T03:06:38.886Z"
+milestone: v1.18
+milestone_name: Parity Tool Boundary Refactor
+status: gap_closure_planned
+stopped_at: "v1.18 reopened after source-backed audit gaps; next action is `$gsd-plan-phase 153`."
+last_updated: "2026-05-01T03:46:11.945Z"
 last_activity: 2026-05-01
 progress:
-  total_phases: 5
-  completed_phases: 5
-  total_plans: 5
-  completed_plans: 5
-  percent: 100
+  total_phases: 4
+  completed_phases: 0
+  total_plans: 0
+  completed_plans: 0
+  percent: 0
 ---
 
 # Project State
@@ -22,16 +22,16 @@ See: .planning/PROJECT.md (updated 2026-05-01)
 
 **Core value:** Prove real end-to-end behavior with explicit SML orchestration and parity-oriented
 verification before widening API surface or model scope.
-**Current focus:** Start the next milestone.
+**Current focus:** Close v1.18 source-backed audit gaps before milestone archival resumes.
 
 ## Current Position
 
-Phase: —
+Phase: 153
 Plan: —
-Status: v1.18 shipped and archived after a passing milestone audit.
+Status: gap closure phases 153-156 created after a source-backed `gaps_found` audit.
 Last activity: 2026-05-01
 
-Progress: [##########] 100%
+Progress: [----------] 0%
 
 ## Deferred Items
 
@@ -49,13 +49,15 @@ Items acknowledged and still deferred at milestone close on 2026-05-01:
 
 **Current milestone:**
 
-- Milestone: none active
+- Milestone: v1.18 Parity Tool Boundary Refactor
 
-- Current planning shape: no active milestone.
-- Latest shipped milestone: `v1.18 Parity Tool Boundary Refactor`.
+- Current planning shape: reopened v1.18 gap closure.
+- Latest shipped milestone: `v1.17 Text Generator Domain Alignment`; v1.18 is not closeout-ready
+  until the reopened source-backed gaps pass audit.
 
-- Next action: `$gsd-new-milestone`.
-- Current blocker: none known after v1.18 closeout.
+- Next action: `$gsd-plan-phase 153`.
+- Current blocker: v1.18 milestone audit is `gaps_found` with partial `PARITY-01`,
+  `PARITY-03`, `LANE-01`, `LANE-02`, `MANIFEST-01`, and `MANIFEST-02`.
 
 ## Accumulated Context
 
@@ -88,9 +90,13 @@ Recent decisions affecting current work:
   `parity_dependency_manifest/v1`. Missing, stale, or uncertain manifest freshness is explicitly a
   full relevant parity gate trigger.
 
-- Phase 152 closed parity behavior and lane-isolation proof. Maintained paritychecker tests passed,
-  shared runner source checks now reject lane-owned runtime objects, and the generation reference
-  renderer no longer calls EMEL detokenizer action detail helpers.
+- Phase 152 closed the originally planned parity behavior and lane-isolation proof, but the
+  source-backed milestone audit reopened v1.18 because live code still has partial runner
+  ownership, generation reference truth, actor-boundary, and manifest-gate gaps. Phases 153-156 are
+  the active closure path.
+
+- User explicitly approved snapshot and model updates for the v1.18 gap closure phases when those
+  updates are required for truthful maintained-path proof.
 
 - `v1.15` targets one maintained ARM diarization slice for
   `openresearchtools/diar_streaming_sortformer_4spk-v2.1-gguf`.

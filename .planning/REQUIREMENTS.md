@@ -1,13 +1,3 @@
-# Requirements Archive: v1.18 Parity Tool Boundary Refactor
-
-**Archived:** 2026-05-01
-**Status:** REOPENED FOR GAP CLOSURE
-
-The active reopened requirements are mirrored in `.planning/REQUIREMENTS.md` until the v1.18
-source-backed gap closure audit passes.
-
----
-
 # Requirements: v1.18 Parity Tool Boundary Refactor
 
 **Defined:** 2026-05-01
