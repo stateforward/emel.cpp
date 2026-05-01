@@ -489,6 +489,16 @@ TEST_CASE("bench runner contract serializes requests and results for a process s
   CHECK(parsed_result.exit_code == 2);
   CHECK(parsed_result.error_kind == "invalid_request");
   CHECK(parsed_result.error_message == "bad runner payload");
+
+  result.exit_code = -1;
+  const std::string negative_result_text = emel::bench::serialize_runner_result(result);
+  CHECK(negative_result_text.find("exit_code=-1\n") != std::string::npos);
+
+  emel::bench::runner_result parsed_negative_result = {};
+  CHECK(emel::bench::parse_runner_result(negative_result_text, parsed_negative_result));
+  CHECK(parsed_negative_result.exit_code == -1);
+  CHECK(parsed_negative_result.error_kind == "invalid_request");
+  CHECK(parsed_negative_result.error_message == "bad runner payload");
 }
 
 TEST_CASE("bench runner contract rejects malformed process payloads") {
@@ -645,6 +655,56 @@ TEST_CASE("bench runner process seam rejects conflicting jsonl output modes") {
   CHECK(result.error_message.find("jsonl") != std::string::npos);
 }
 
+TEST_CASE("bench runner process seam rejects incompatible jsonl suite requests") {
+  emel::bench::runner_request generation_request = {};
+  generation_request.mode = emel::bench::runner_mode::emel;
+  generation_request.suite = "batch_planner";
+  generation_request.cfg.iterations = 1u;
+  generation_request.cfg.runs = 1u;
+  generation_request.cfg.warmup_iterations = 0u;
+  generation_request.cfg.warmup_runs = 0u;
+  generation_request.generation_jsonl = true;
+
+  std::string generation_result_text;
+  const process_capture generation_capture =
+      run_serialized_request_capture(emel::bench::serialize_runner_request(generation_request),
+                                     "process-seam-bad-generation-jsonl-suite",
+                                     generation_result_text);
+
+  CHECK(generation_capture.exit_code == 2);
+  CHECK(generation_capture.stdout_text.empty());
+
+  emel::bench::runner_result generation_result = {};
+  REQUIRE(emel::bench::parse_runner_result(generation_result_text, generation_result));
+  CHECK(generation_result.exit_code == 2);
+  CHECK(generation_result.error_kind == "invalid_request");
+  CHECK(generation_result.error_message.find("generation jsonl") != std::string::npos);
+
+  emel::bench::runner_request diarization_request = {};
+  diarization_request.mode = emel::bench::runner_mode::reference;
+  diarization_request.suite = "generation";
+  diarization_request.cfg.iterations = 1u;
+  diarization_request.cfg.runs = 1u;
+  diarization_request.cfg.warmup_iterations = 0u;
+  diarization_request.cfg.warmup_runs = 0u;
+  diarization_request.diarization_jsonl = true;
+
+  std::string diarization_result_text;
+  const process_capture diarization_capture =
+      run_serialized_request_capture(emel::bench::serialize_runner_request(diarization_request),
+                                     "process-seam-bad-diarization-jsonl-suite",
+                                     diarization_result_text);
+
+  CHECK(diarization_capture.exit_code == 2);
+  CHECK(diarization_capture.stdout_text.empty());
+
+  emel::bench::runner_result diarization_result = {};
+  REQUIRE(emel::bench::parse_runner_result(diarization_result_text, diarization_result));
+  CHECK(diarization_result.exit_code == 2);
+  CHECK(diarization_result.error_kind == "invalid_request");
+  CHECK(diarization_result.error_message.find("diarization jsonl") != std::string::npos);
+}
+
 TEST_CASE("benchmark runner registration is localized outside the orchestrator") {
   CHECK(emel::bench::registered_runner_count() >= 29u);
   CHECK(emel::bench::find_registered_runner("generation") != nullptr);
@@ -706,6 +766,12 @@ TEST_CASE("benchmark dependency manifest covers registered runners conservativel
 
   const auto all_records = manifest::records_for("all");
   REQUIRE_FALSE(all_records.empty());
+  const std::size_t total_all_records = static_cast<std::size_t>(std::count_if(
+      manifest::records().begin(),
+      manifest::records().end(),
+      [](const auto & record) { return record.runner == std::string_view{"all"}; }));
+  CHECK(all_records.size() == total_all_records);
+
   bool saw_cmake = false;
   bool saw_quality_gate = false;
   for (const auto & record : all_records) {
@@ -720,6 +786,12 @@ TEST_CASE("benchmark dependency manifest covers registered runners conservativel
     const std::string_view runner = emel::bench::registered_runner_suite_at(i);
     const auto records = manifest::records_for(runner);
     CHECK_MESSAGE(!records.empty(), "missing manifest records for runner " << runner);
+    const std::size_t total_records = static_cast<std::size_t>(std::count_if(
+        manifest::records().begin(),
+        manifest::records().end(),
+        [runner](const auto & record) { return record.runner == runner; }));
+    CHECK_MESSAGE(records.size() == total_records,
+                  "manifest records are not contiguous for runner " << runner);
     bool has_source = false;
     for (const auto & record : records) {
       has_source = has_source || record.kind == manifest::dependency_kind::source;

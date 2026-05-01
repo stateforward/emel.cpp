@@ -143,6 +143,12 @@ inline void append_runner_contract_line(std::string & out,
   append_runner_contract_line(out, key, std::to_string(value));
 }
 
+inline void append_runner_contract_line(std::string & out,
+                                        const std::string_view key,
+                                        const std::int32_t value) {
+  append_runner_contract_line(out, key, std::to_string(value));
+}
+
 inline std::string serialize_runner_request(const runner_request & request) {
   std::string out = {};
   append_runner_contract_line(out, "schema", "bench_runner_request/v1");
@@ -162,7 +168,7 @@ inline std::string serialize_runner_request(const runner_request & request) {
 inline std::string serialize_runner_result(const runner_result & result) {
   std::string out = {};
   append_runner_contract_line(out, "schema", "bench_runner_result/v1");
-  append_runner_contract_line(out, "exit_code", static_cast<std::uint64_t>(result.exit_code));
+  append_runner_contract_line(out, "exit_code", result.exit_code);
   append_runner_contract_line(out, "error_kind", result.error_kind);
   append_runner_contract_line(out, "error_message", result.error_message);
   return out;

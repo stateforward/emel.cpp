@@ -62,6 +62,8 @@ constexpr std::size_t k_default_runs = 3;
 constexpr std::uint64_t k_default_warmup_iterations = 100;
 constexpr std::size_t k_default_warmup_runs = 1;
 constexpr std::size_t k_max_runs = 25;
+constexpr std::string_view k_generation_suite = "generation";
+constexpr std::string_view k_diarization_sortformer_suite = "diarization_sortformer";
 
 constexpr bool k_host_is_x86_64 =
 #if defined(__x86_64__) || defined(_M_X64)
@@ -1058,6 +1060,20 @@ bool request_uses_kernel_cases(const bench::runner_mode mode) {
     mode == bench::runner_mode::kernel_compare;
 }
 
+bool request_uses_jsonl_lane_mode(const bench::runner_mode mode) {
+  return mode == bench::runner_mode::emel || mode == bench::runner_mode::reference;
+}
+
+bool request_supports_generation_jsonl(const bench::runner_request & request) {
+  return request_uses_jsonl_lane_mode(request.mode) &&
+    std::string_view{request.suite} == k_generation_suite;
+}
+
+bool request_supports_diarization_jsonl(const bench::runner_request & request) {
+  return request_uses_jsonl_lane_mode(request.mode) &&
+    std::string_view{request.suite} == k_diarization_sortformer_suite;
+}
+
 bench::runner_result validate_process_runner_request(const bench::runner_request & request) {
   if (request.generation_jsonl && request.diarization_jsonl) {
     return make_runner_error(2,
@@ -1075,6 +1091,17 @@ bench::runner_result validate_process_runner_request(const bench::runner_request
                                               : bench::default_runner_cases();
   if (!suite_available_in_cases(request.suite, cases)) {
     return make_runner_error(2, "unknown_suite", "unknown benchmark suite");
+  }
+  if (request.generation_jsonl && !request_supports_generation_jsonl(request)) {
+    return make_runner_error(2,
+                             "invalid_request",
+                             "generation jsonl requires mode emel/reference and suite generation");
+  }
+  if (request.diarization_jsonl && !request_supports_diarization_jsonl(request)) {
+    return make_runner_error(
+      2,
+      "invalid_request",
+      "diarization jsonl requires mode emel/reference and suite diarization_sortformer");
   }
   return {};
 }
