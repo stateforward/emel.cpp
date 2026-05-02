@@ -1,5 +1,51 @@
 # Project Milestones: EMEL
 
+## v1.21 Quality Gate Selective Runner Optimization (Shipped: 2026-05-02)
+
+**Phases completed:** 5 phases, 5 plans, 0 tasks
+
+**Key accomplishments:**
+
+- (none recorded)
+
+---
+
+## v1.20 SML Dependency And Namespace Migration (Shipped: 2026-05-02)
+
+**Phases completed:** 13 phases, 13 plans, 0 tasks, including reopened closure phases 173-179.
+
+**Delivered:** EMEL now builds and documents against the current `stateforward/sml.cpp`
+dependency surface, with project-owned code and contributor guidance migrated from legacy SML
+naming to the upstream `stateforward::sml` surface. The milestone was reopened after
+source-backed audit gaps and closed with live behavior proof, legacy-reference guardrails,
+reproducible bench-tool validation, and a passing full quality gate.
+
+**Key accomplishments:**
+
+- Pinned the intended upstream `stateforward/sml.cpp` commit in `cmake/sml_version.cmake` and
+  documented the old and new dependency truth.
+
+- Migrated active project-owned source, tests, tools, examples, and docs to the preferred
+  `stateforward` include and namespace surface where supported.
+
+- Added live proof for transition tables, completion/internal transitions, `sml::unexpected_event`,
+  logger wiring, dispatch tables, and state inspection after the namespace migration.
+
+- Repaired contributor rules and documentation so active guidance consistently points to
+  `docs/rules/sml.rules.md` and `stateforward::sml`.
+
+- Added maintained drift checks for unapproved active legacy SML references and restored scoped
+  quality-gate coverage for the migration.
+
+- Repaired closeout reproducibility with `scripts/bench.sh --test-tools`, suite-specific
+  benchmark tool build directories, pinned benchmark reference truth, and a final full quality
+  gate at 91.6% line coverage.
+
+**Audit:** Final source-backed audit passed with 12/12 active requirements satisfied after
+Phase 179.
+
+---
+
 ## v1.19 Benchmark Tool Pluggable Runner Refactor (Shipped: 2026-05-01)
 
 **Phases completed:** 10 phases, 10 plans, 0 tasks, including reopened closure phases 164-166.
