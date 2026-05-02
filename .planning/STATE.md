@@ -54,7 +54,10 @@ Items acknowledged and still deferred at milestone close on 2026-05-01:
 - Milestone: `v1.20 SML Dependency And Namespace Migration`
 
 - Implemented shape: 13 phases planned, 13 completed; 12 of 12 active requirements satisfied.
-- Latest shipped milestone: `v1.19 Benchmark Tool Pluggable Runner Refactor`.
+- Latest shipped milestone: `v1.19 Benchmark Tool Pluggable Runner Refactor`
+  (archived phase evidence retained under `.planning/milestones/v1.19-phases/`; archived v1.19
+  Nyquist/validation audit commands target that milestone archive rather than active
+  `.planning/phases`).
 
 - Next action: archive v1.20 with `$gsd-complete-milestone`.
 - Current blocker: none.

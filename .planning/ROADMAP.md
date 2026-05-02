@@ -46,8 +46,6 @@
   - Shipped 2026-05-01 after reopened source-backed gap closure through Phases 164-166; final
     audit passed with 13/13 active requirements satisfied.
 
-## Current Milestone
-
 ## v1.20 SML Dependency And Namespace Migration
 
 **Goal:** Upgrade EMEL to the current `stateforward/sml.cpp` dependency and migrate
@@ -145,7 +143,7 @@ contract before changing broad code.
    contexts.
 4. Maintained domain-boundary checks remain green after the guardrail update.
 
-### Phase 172: v1.20 Source-Backed Closeout
+### Phase 172: Source-Backed Closeout
 
 **Goal:** Close v1.20 only after source-backed evidence proves the migration is complete.
 
@@ -229,7 +227,7 @@ archival/exemption evidence.
    weakening relevant lanes.
 4. Phase artifacts capture the gate output and source-check evidence.
 
-### Phase 177: v1.20 Final Source-Backed Closeout Rerun
+### Phase 177: Final Source-Backed Closeout Rerun
 
 **Goal:** Complete v1.20 only after all reopened gaps have source-backed evidence and Nyquist
 validation.
@@ -246,7 +244,7 @@ and the failed milestone audit.
 3. All 12 active requirements are complete with no orphaned verification rows.
 4. `v1.20` closeout artifacts state the final status and next action.
 
-### Phase 178: v1.20 Closeout Gate And Evidence Repair
+### Phase 178: Closeout Gate And Evidence Repair
 
 **Goal:** Close the remaining VAL-03 audit gaps by resolving the full closeout benchmark timeout,
 repairing contradicted closeout evidence, and producing the final source-backed closeout artifacts.
@@ -268,7 +266,7 @@ VAL-03 completion claim.
 4. Final SUMMARY.md, VERIFICATION.md, and VALIDATION.md artifacts exist for the authoritative
    closeout phase, and the milestone audit rerun reports all 12 active requirements satisfied.
 
-### Phase 179: v1.20 Closeout Evidence Reproducibility Repair
+### Phase 179: Closeout Evidence Reproducibility Repair
 
 **Goal:** Close the remaining VAL-01 and VAL-03 audit gaps by making the closeout validation
 reproducible from maintained commands and repairing stale closeout artifacts.

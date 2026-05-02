@@ -198,6 +198,6 @@ TEST_CASE("quality gates check benchmark manifest before deciding benchmark bran
   const std::string pre_full = script.substr(run_start, full_branch - run_start);
   CHECK(pre_full.find("bench_dependency_manifest_check_needed") != std::string::npos);
   CHECK(pre_full.find("bench_dependency_manifest_requires_full_gate") != std::string::npos);
-  CHECK(pre_full.find("if ! $bench_all_suites; then") != std::string::npos);
   CHECK(pre_full.find("bench_full=true") != std::string::npos);
+  CHECK(pre_full.find("if ! $bench_full && $bench_all_suites") != std::string::npos);
 }

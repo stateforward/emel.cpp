@@ -740,16 +740,14 @@ run_benchmark_gates() {
   local bench_warmup_runs
   local bench_tolerance
 
-  if $bench_all_suites && [[ ${#bench_suites[@]} -eq 0 ]]; then
-    add_all_benchmark_suites_from_manifest
-  fi
-
   if bench_dependency_manifest_check_needed; then
     if bench_dependency_manifest_requires_full_gate; then
-      if ! $bench_all_suites; then
-        bench_full=true
-      fi
+      bench_full=true
     fi
+  fi
+
+  if ! $bench_full && $bench_all_suites && [[ ${#bench_suites[@]} -eq 0 ]]; then
+    add_all_benchmark_suites_from_manifest
   fi
 
   if $bench_full; then
