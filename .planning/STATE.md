@@ -1,17 +1,17 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.21
-milestone_name: Quality Gate Selective Runner Optimization
-status: completed
-stopped_at: v1.21 milestone completed and archived.
-last_updated: "2026-05-02T16:34:17.915Z"
+milestone: v1.22
+milestone_name: Weight Loading Ownership Cutover
+status: ready
+stopped_at: v1.22 roadmap created; ready for Phase 185.
+last_updated: "2026-05-02T19:08:00Z"
 last_activity: 2026-05-02
 progress:
   total_phases: 5
-  completed_phases: 5
-  total_plans: 5
-  completed_plans: 5
-  percent: 100
+  completed_phases: 0
+  total_plans: 0
+  completed_plans: 0
+  percent: 0
 ---
 
 # Project State
@@ -22,24 +22,24 @@ See: .planning/PROJECT.md (updated 2026-05-02)
 
 **Core value:** Prove real end-to-end behavior with explicit SML orchestration and
 parity-oriented verification before widening API surface or model scope.
-**Current focus:** No active milestone. Ready for `$gsd-new-milestone`.
+**Current focus:** v1.22 Weight Loading Ownership Cutover.
 
 ## Current Position
 
-Phase: Milestone complete
+Phase: 185
 Plan: Not started
-Status: v1.21 milestone complete
-Last activity: 2026-05-02
+Status: Ready to start Phase 185
+Last activity: 2026-05-02 - Milestone v1.22 requirements and roadmap created from GitHub issue #59
 
-Progress: [##########] 100%
+Progress: [----------] 0%
 
 ## Performance Metrics
 
 **Latest shipped milestone:** `v1.21 Quality Gate Selective Runner Optimization`
 
 - v1.21 shipped on 2026-05-02 with 5 phases completed and 14/14 active requirements satisfied.
-- v1.21 quality-gate optimization artifacts are archived under `.planning/milestones/`.
-- Next action: `$gsd-new-milestone`.
+- v1.22 starts from GitHub issue #59 and targets model weight-loading ownership.
+- v1.22 roadmap contains 5 phases, starting at Phase 185 and covering 14 active requirements.
 - Current blocker: none.
 
 ## Accumulated Context
@@ -49,19 +49,22 @@ Progress: [##########] 100%
 Decisions are logged in PROJECT.md Key Decisions table.
 Recent decisions affecting current work:
 
-- v1.21 starts from GitHub issue #58 and optimizes the mandatory quality gate after v1.18/v1.19
-  added parity and benchmark dependency manifests.
+- v1.22 starts from GitHub issue #59 and moves weight-loading ownership from
+  `src/emel/model/weight_loader` to `src/emel/model/tensor`.
 
-- `scripts/quality_gates.sh` remains mandatory; selective execution only chooses parity and
-  benchmark runners inside that gate.
+- `model/tensor` must own tensor load, bind, evict, and residency semantics after the cutover.
 
-- Missing, stale, uncertain, malformed, or failed manifest impact resolution must fall back to the
-  affected tool's full relevant runner set.
+- `model/loader` must orchestrate tensor-owned behavior and must not absorb backend-specific or
+  strategy-specific loading logic.
 
-- Parallel gate work must preserve lane isolation, clear per-lane logs, and deterministic exit
-  status reporting.
+- This milestone is not the future `emel/io` strategy implementation and does not introduce
+  asynchronous loading.
 
-- `commit_docs` is false for this milestone setup; roadmap artifacts are not auto-committed.
+- Any temporary adapter used during the migration must be explicit, bounded, and unable to become a
+  second tensor-residency ownership layer.
+
+- `commit_docs` is false for this milestone setup; roadmap artifacts are not auto-committed by the
+  GSD helper.
 
 ### Pending Todos
 
@@ -88,6 +91,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-05-02T14:17:09Z
-Stopped at: v1.21 milestone completed and archived.
+Last session: 2026-05-02T19:08:00Z
+Stopped at: v1.22 roadmap created; ready for Phase 185.
 Resume file: None
