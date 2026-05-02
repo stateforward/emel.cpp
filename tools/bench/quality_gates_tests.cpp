@@ -68,6 +68,110 @@ TEST_CASE("quality gates consume benchmark dependency manifest conservatively") 
   CHECK(script.find("dependency manifest requires full benchmark gate") != std::string::npos);
 }
 
+TEST_CASE("quality gates consume parity dependency manifest for runner selection") {
+  const std::string script = read_file(repo_root() / "scripts" / "quality_gates.sh");
+
+  CHECK(script.find("PARITY_DEPENDENCY_MANIFEST_BASELINE") != std::string::npos);
+  CHECK(script.find("tools/paritychecker/dependency_manifest.txt") != std::string::npos);
+  CHECK(script.find("parity_dependency_manifest_apply_changed_files()") != std::string::npos);
+  CHECK(script.find("parity_toolchain_file_requires_full_gate()") != std::string::npos);
+  CHECK(script.find("select_full_parity_gate \"paritychecker toolchain change path=$file\"") !=
+        std::string::npos);
+  CHECK(script.find("add_parity_runner \"$runner\" \"manifest path=$path\"") !=
+        std::string::npos);
+  CHECK(script.find("select_full_parity_gate \"unmatched parity-relevant change path=$file\"") !=
+        std::string::npos);
+  CHECK(script.find("scripts/paritychecker.sh\" \"${runner_args[@]}\"") != std::string::npos);
+}
+
+TEST_CASE("quality gates check parity manifest freshness before deciding skip branch") {
+  const std::string script = read_file(repo_root() / "scripts" / "quality_gates.sh");
+  const std::size_t run_start = script.find("run_parity_gate()");
+  REQUIRE(run_start != std::string::npos);
+
+  const std::size_t case_branch = script.find("case \"$QUALITY_GATES_PARITY\" in", run_start);
+  REQUIRE(case_branch != std::string::npos);
+
+  const std::string pre_case = script.substr(run_start, case_branch - run_start);
+  CHECK(pre_case.find("[[ \"$QUALITY_GATES_PARITY\" != \"always\" ]]") != std::string::npos);
+  CHECK(pre_case.find("parity_dependency_manifest_requires_full_gate") != std::string::npos);
+  CHECK(pre_case.find("select_full_parity_gate \"dependency manifest freshness gap\"") !=
+        std::string::npos);
+  CHECK(pre_case.find("parity_dependency_manifest_check_needed") == std::string::npos);
+}
+
+TEST_CASE("paritychecker script supports selected maintained runners") {
+  const std::string script = read_file(repo_root() / "scripts" / "paritychecker.sh");
+
+  CHECK(script.find("--runner=<name>|--mode=<name>") != std::string::npos);
+  CHECK(script.find("selected_runners=()") != std::string::npos);
+  CHECK(script.find("gbnf)\n      runner=\"gbnf_parser\"") != std::string::npos);
+  CHECK(script.find("paritychecker: runner=$runner") != std::string::npos);
+  CHECK(script.find("--test-case=\"*tokens across tiny models*\"") != std::string::npos);
+  CHECK(script.find("--test-case=\"*gbnf parser outputs*\"") != std::string::npos);
+  CHECK(script.find("--test-case=\"*kernel outputs*\"") != std::string::npos);
+  CHECK(script.find("--test-case=\"*jinja parser and formatter outputs*\"") !=
+        std::string::npos);
+  CHECK(script.find("--test-case=\"paritychecker matches current maintained generation "
+                    "publication against live reference\"") != std::string::npos);
+}
+
+TEST_CASE("quality gates preserve failing lane status in parallel children") {
+  const std::string script = read_file(repo_root() / "scripts" / "quality_gates.sh");
+  const std::size_t helper_start = script.find("run_step()");
+  REQUIRE(helper_start != std::string::npos);
+
+  const std::size_t helper_end = script.find("run_step_allow_fail()", helper_start);
+  REQUIRE(helper_end != std::string::npos);
+
+  const std::string helper = script.substr(helper_start, helper_end - helper_start);
+  CHECK(helper.find("local status=0") != std::string::npos);
+  CHECK(helper.find("if \"$@\"; then") != std::string::npos);
+  CHECK(helper.find("status=$?") != std::string::npos);
+  CHECK(helper.find("return \"$status\"") != std::string::npos);
+}
+
+TEST_CASE("quality gates can run independent heavy lanes in ordered parallel group") {
+  const std::string script = read_file(repo_root() / "scripts" / "quality_gates.sh");
+
+  CHECK(script.find("QUALITY_GATES_PARALLEL") != std::string::npos);
+  CHECK(script.find("parallel_enabled()") != std::string::npos);
+  CHECK(script.find("start_parallel_step bench_snapshot run_benchmark_gates") !=
+        std::string::npos);
+  CHECK(script.find("start_parallel_step test_with_coverage run_coverage_gate") !=
+        std::string::npos);
+  CHECK(script.find("start_parallel_step paritychecker run_parity_gate") != std::string::npos);
+  CHECK(script.find("start_parallel_step fuzz_smoke run_fuzz_gate") != std::string::npos);
+  CHECK(script.find("quality_gates: log begin name=$name") != std::string::npos);
+  CHECK(script.find("quality_gates: log end name=$name status=$status") != std::string::npos);
+  CHECK(script.find("EMEL_QUALITY_GATES_PARALLEL_CHILD=1") != std::string::npos);
+  CHECK(script.find("set +e\n    \"$@\" >\"$log_file\" 2>&1") != std::string::npos);
+  CHECK(script.find("printf '%s\\n' \"$status\" >\"$status_file\"") != std::string::npos);
+}
+
+TEST_CASE("quality gate script changes keep mandatory lanes conservative") {
+  const std::string script = read_file(repo_root() / "scripts" / "quality_gates.sh");
+
+  const std::size_t infer_start = script.find("infer_quality_gate_scope()");
+  REQUIRE(infer_start != std::string::npos);
+
+  const std::size_t infer_end = script.find("if [[ \"$QUALITY_GATES_PARITY\"", infer_start);
+  REQUIRE(infer_end != std::string::npos);
+
+  const std::string infer_body = script.substr(infer_start, infer_end - infer_start);
+  CHECK(infer_body.find("scripts/quality_gates.sh)") != std::string::npos);
+  CHECK(infer_body.find("coverage_all_required=true") != std::string::npos);
+  CHECK(infer_body.find("select_full_parity_gate \"quality gate script changed path=$file\"") !=
+        std::string::npos);
+  CHECK(infer_body.find("quality_gates: select benchmark runner=all "
+                        "reason=quality gate script changed path=$file") != std::string::npos);
+  CHECK(infer_body.find("bench_all_suites=true") != std::string::npos);
+  CHECK(infer_body.find("add_all_benchmark_suites_from_manifest") !=
+        std::string::npos);
+  CHECK(script.find("\"$QUALITY_GATES_SCOPE\" == \"full\" || "
+                    "\"$coverage_all_required\" == \"true\"") != std::string::npos);
+}
+
 TEST_CASE("bench script keeps suite-filtered builds out of canonical bench-tools cache") {
   const std::string script = read_file(repo_root() / "scripts" / "bench.sh");
 

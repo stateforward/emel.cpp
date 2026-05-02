@@ -1,95 +1,11 @@
-# Requirements: EMEL v1.20 SML Dependency And Namespace Migration
+# Requirements: No Active Milestone
 
-**Defined:** 2026-05-01
-**Source:** GitHub issue #56
-**Core Value:** Prove real end-to-end behavior with explicit SML orchestration and
-parity-oriented verification before widening API surface or model scope.
+The latest milestone, `v1.21 Quality Gate Selective Runner Optimization`, shipped on 2026-05-02.
 
-## v1 Requirements
+Archived requirement records:
 
-### Dependency Pin
+- [v1.21 requirements](milestones/v1.21-REQUIREMENTS.md)
+- [v1.21 roadmap](milestones/v1.21-ROADMAP.md)
+- [v1.21 audit](milestones/v1.21-MILESTONE-AUDIT.md)
 
-- [x] **DEP-01**: Maintainer can identify the current EMEL SML pin and the intended newer
-  `stateforward/sml.cpp` upstream commit before changing the dependency.
-- [x] **DEP-02**: Maintainer can build EMEL against the intended newer `stateforward/sml.cpp`
-  commit pinned in `cmake/sml_version.cmake`.
-- [x] **DEP-03**: Maintainer can explain whether EMEL relies on any upstream legacy SML
-  compatibility shim, with each exception documented and bounded.
-
-### Source Migration
-
-- [x] **SRC-01**: Maintainer can include SML through the preferred upstream
-  `stateforward` include path in project-owned code where that path is supported.
-- [x] **SRC-02**: Maintainer can use `stateforward::sml` naming in project-owned source,
-  tests, and tools without changing actor behavior.
-- [x] **SRC-03**: Maintainer can verify that SML transition tables, logger wiring,
-  `unexpected_event`, dispatch tables, and state inspection still compile and behave after the
-  namespace migration.
-
-### Documentation And Rules
-
-- [x] **DOC-01**: Contributor-facing rules describe the `stateforward::sml` namespace and
-  preferred include path instead of instructing new work to use legacy SML naming.
-- [x] **DOC-02**: Project documentation, examples, generated-doc tooling, and planning
-  artifacts no longer create conflicting SML namespace guidance.
-- [x] **DOC-03**: Any remaining historical legacy SML references are clearly archival,
-  quoted, or intentionally exempted from active contributor guidance.
-
-### Validation And Guardrails
-
-- [x] **VAL-01**: Maintainer can run focused and changed-file scoped quality gates proving the
-  dependency bump and namespace migration preserve maintained runtime behavior.
-- [x] **VAL-02**: Maintainer can run source checks that fail on new unapproved legacy
-  SML includes or namespace references in active project-owned code/docs.
-- [x] **VAL-03**: Maintainer can close the milestone only after source-backed audit evidence
-  proves all active SML migration requirements are satisfied.
-
-## v2 Requirements
-
-Deferred to future releases. Tracked but not in current roadmap.
-
-### SML Surface Expansion
-
-- **SML-EXT-01**: Maintainer can adopt new upstream SML features beyond namespace/include
-  migration when a future milestone has a behavior-specific need.
-- **SML-EXT-02**: Maintainer can remove any explicitly bounded compatibility exception after the
-  active codebase no longer needs it.
-
-## Out of Scope
-
-| Feature | Reason |
-|---------|--------|
-| Runtime behavior redesign | Issue #56 is a dependency/API-surface migration, not a new actor semantics milestone. |
-| Queue/mailbox actor patterns | The existing no-queue RTC invariant remains in force. |
-| New model-family support | The namespace migration should not broaden runtime/model scope. |
-| Performance claims unrelated to the migration | Existing parity and benchmark proof must be preserved, not repurposed for new claims. |
-| Linking EMEL to llama.cpp or ggml runtime paths | Existing EMEL/reference lane isolation remains unchanged. |
-
-## Traceability
-
-Which phases cover which requirements. Updated during roadmap creation.
-
-| Requirement | Phase | Status |
-|-------------|-------|--------|
-| DEP-01 | Phase 173 | Complete |
-| DEP-02 | Phase 173 | Complete |
-| DEP-03 | Phase 173 | Complete |
-| SRC-01 | Phase 173 | Complete |
-| SRC-02 | Phase 173 | Complete |
-| SRC-03 | Phase 174 | Complete |
-| DOC-01 | Phase 175 | Complete |
-| DOC-02 | Phase 175 | Complete |
-| DOC-03 | Phase 175 | Complete |
-| VAL-01 | Phase 179 | Complete |
-| VAL-02 | Phase 176 | Complete |
-| VAL-03 | Phase 179 | Complete |
-
-**Coverage:**
-- v1 requirements: 12 total
-- Mapped to phases: 12
-- Open after latest v1.20 audit: 0
-- Unmapped: 0
-
----
-*Requirements defined: 2026-05-01*
-*Last updated: 2026-05-02 after Phase 179 closed VAL-01 and VAL-03 with source-backed validation*
+Start the next milestone with `$gsd-new-milestone`.

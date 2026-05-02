@@ -16,6 +16,7 @@ QUALITY_GATES_BENCH_TOLERANCE="${EMEL_QUALITY_GATES_BENCH_TOLERANCE:-0.30}"
 QUALITY_GATES_ALLOW_BENCH_REGRESSION="${EMEL_QUALITY_GATES_ALLOW_BENCH_REGRESSION:-0}"
 QUALITY_GATES_PARITY="${EMEL_QUALITY_GATES_PARITY:-auto}"
 QUALITY_GATES_FUZZ="${EMEL_QUALITY_GATES_FUZZ:-auto}"
+QUALITY_GATES_PARALLEL="${EMEL_QUALITY_GATES_PARALLEL:-auto}"
 PARITY_DEPENDENCY_MANIFEST_BASELINE="${EMEL_PARITY_DEPENDENCY_MANIFEST_BASELINE:-}"
 PARITY_DEPENDENCY_MANIFEST_CURRENT="${EMEL_PARITY_DEPENDENCY_MANIFEST_CURRENT:-}"
 PARITYCHECKER_BINARY="${EMEL_PARITYCHECKER_BINARY:-$ROOT_DIR/build/paritychecker_zig/paritychecker}"
@@ -55,6 +56,11 @@ fi
 timing_lines=()
 total_start="$(date +%s)"
 bench_status=0
+parallel_group_status=0
+
+timing_enabled() {
+  [[ "${EMEL_QUALITY_GATES_PARALLEL_CHILD:-0}" != "1" ]]
+}
 
 write_timing_snapshot() {
   local total_now
@@ -75,12 +81,20 @@ run_step() {
   local start
   local end
   local duration
+  local status=0
   start="$(date +%s)"
-  "$@"
+  if "$@"; then
+    status=0
+  else
+    status=$?
+  fi
   end="$(date +%s)"
   duration="$(( end - start ))"
-  timing_lines+=("$name $duration")
-  write_timing_snapshot
+  if timing_enabled; then
+    timing_lines+=("$name $duration")
+    write_timing_snapshot
+  fi
+  return "$status"
 }
 
 run_step_allow_fail() {
@@ -98,8 +112,10 @@ run_step_allow_fail() {
   fi
   end="$(date +%s)"
   duration="$(( end - start ))"
-  timing_lines+=("$name $duration")
-  write_timing_snapshot
+  if timing_enabled; then
+    timing_lines+=("$name $duration")
+    write_timing_snapshot
+  fi
   return "$status"
 }
 
@@ -107,8 +123,10 @@ record_skipped_step() {
   local name="$1"
   local reason="$2"
   echo "skipping ${name}: ${reason}" >&2
-  timing_lines+=("$name 0")
-  write_timing_snapshot
+  if timing_enabled; then
+    timing_lines+=("$name 0")
+    write_timing_snapshot
+  fi
 }
 
 run_domain_boundary_gate() {
@@ -138,6 +156,10 @@ test_shards=()
 bench_suites=()
 bench_full=false
 bench_all_suites=false
+parity_runners=()
+parity_full=false
+parity_all_runners=false
+coverage_all_required=false
 docs_needed=false
 parity_needed=false
 fuzz_needed=false
@@ -255,6 +277,7 @@ infer_test_shard_for_src() {
 
 add_bench_suite() {
   local suite="$1"
+  local reason="${2:-scope}"
   local existing
   if [[ -z "$suite" ]]; then
     return
@@ -269,6 +292,45 @@ add_bench_suite() {
     fi
   done
   bench_suites+=("$suite")
+  echo "quality_gates: select benchmark runner=$suite reason=$reason" >&2
+}
+
+select_full_benchmark_gate() {
+  local reason="$1"
+  bench_full=true
+  echo "quality_gates: select benchmark runner=all reason=$reason" >&2
+}
+
+add_parity_runner() {
+  local runner="$1"
+  local reason="${2:-scope}"
+  local existing
+  if [[ -z "$runner" ]]; then
+    return
+  fi
+  if [[ "$runner" == "gbnf" ]]; then
+    runner="gbnf_parser"
+  fi
+  if [[ "$runner" == "all" ]]; then
+    parity_all_runners=true
+    parity_needed=true
+    return
+  fi
+  for existing in "${parity_runners[@]+${parity_runners[@]}}"; do
+    if [[ "$existing" == "$runner" ]]; then
+      return
+    fi
+  done
+  parity_runners+=("$runner")
+  parity_needed=true
+  echo "quality_gates: select parity runner=$runner reason=$reason" >&2
+}
+
+select_full_parity_gate() {
+  local reason="$1"
+  parity_full=true
+  parity_needed=true
+  echo "quality_gates: select parity runner=all reason=$reason" >&2
 }
 
 bench_suite_supported_for_host() {
@@ -298,7 +360,7 @@ add_all_benchmark_suites_from_manifest() {
   local priority_runner
 
   if [[ ! -f "$BENCH_DEPENDENCY_MANIFEST_BASELINE" ]]; then
-    bench_full=true
+    select_full_benchmark_gate "missing benchmark dependency manifest"
     return
   fi
 
@@ -331,11 +393,11 @@ add_all_benchmark_suites_from_manifest() {
     if ! bench_suite_supported_for_host "$runner"; then
       continue
     fi
-    add_bench_suite "$runner"
+    add_bench_suite "$runner" "manifest-full-expansion"
   done < "$BENCH_DEPENDENCY_MANIFEST_BASELINE"
 
   if [[ ${#bench_suites[@]} -eq 0 ]]; then
-    bench_full=true
+    select_full_benchmark_gate "no supported benchmark runners in manifest"
   fi
 }
 
@@ -361,7 +423,7 @@ add_benchmark_suite_from_manifest() {
     if ! bench_suite_supported_for_host "$runner"; then
       return
     fi
-    add_bench_suite "$runner"
+    add_bench_suite "$runner" "manifest-priority"
     return
   done < "$BENCH_DEPENDENCY_MANIFEST_BASELINE"
 }
@@ -383,7 +445,7 @@ bench_dependency_manifest_apply_changed_files() {
   local matched
 
   if [[ ! -f "$BENCH_DEPENDENCY_MANIFEST_BASELINE" ]]; then
-    bench_full=true
+    select_full_benchmark_gate "missing benchmark dependency manifest"
     return
   fi
 
@@ -415,17 +477,118 @@ bench_dependency_manifest_apply_changed_files() {
         add_all_benchmark_suites_from_manifest
         return
       fi
-      add_bench_suite "$runner"
+      add_bench_suite "$runner" "manifest path=$path"
     done < "$BENCH_DEPENDENCY_MANIFEST_BASELINE"
 
     case "$file" in
       tools/bench/*|tools/bench/**/*)
         if [[ "$matched" == "false" ]]; then
-          bench_full=true
+          select_full_benchmark_gate "unmatched benchmark tool change path=$file"
           return
         fi
         ;;
     esac
+  done
+}
+
+parity_file_requires_manifest_match() {
+  local file="$1"
+  case "$file" in
+    src/emel/model/sortformer/*|src/emel/model/sortformer/**/*|\
+    src/emel/text/encoders/plamo2/*|src/emel/text/encoders/plamo2/**/*)
+      return 1
+      ;;
+    scripts/paritychecker.sh|tools/paritychecker/*|tools/paritychecker/**/*|\
+    src/emel/gguf/*|src/emel/gguf/**/*|\
+    src/emel/model/*|src/emel/model/**/*|\
+    src/emel/text/*|src/emel/text/**/*|\
+    src/emel/token/*|src/emel/token/**/*|\
+    src/emel/kernel/*|src/emel/kernel/**/*|\
+    tools/generation_fixture_registry.hpp|tools/generation_formatter_contract.hpp|\
+    tests/text/tokenizer/parity_texts|tests/text/tokenizer/parity_texts/*|\
+    tests/gbnf/parity_texts|tests/gbnf/parity_texts/*|\
+    tests/text/jinja/parity_texts|tests/text/jinja/parity_texts/*|\
+    tests/models|tests/models/*|snapshots/parity|snapshots/parity/*)
+      return 0
+      ;;
+  esac
+  return 1
+}
+
+parity_toolchain_file_requires_full_gate() {
+  local file="$1"
+  case "$file" in
+    tools/paritychecker/CMakeLists.txt|\
+    tools/paritychecker/AGENTS.md|\
+    tools/paritychecker/dependency_manifest.md|\
+    tools/paritychecker/dependency_manifest.txt|\
+    tools/paritychecker/parity_assets.*|\
+    tools/paritychecker/parity_dependency_manifest.*|\
+    tools/paritychecker/parity_engine.*|\
+    tools/paritychecker/parity_engines.*|\
+    tools/paritychecker/parity_main.cpp|\
+    tools/paritychecker/parity_runner.*|\
+    tools/paritychecker/paritychecker_tests.cpp|\
+    tools/paritychecker/reference_ref.txt)
+      return 0
+      ;;
+  esac
+  return 1
+}
+
+parity_dependency_manifest_apply_changed_files() {
+  local file
+  local line
+  local token
+  local runner
+  local path
+  local matched
+
+  if [[ ! -f "$PARITY_DEPENDENCY_MANIFEST_BASELINE" ]]; then
+    select_full_parity_gate "missing parity dependency manifest"
+    return
+  fi
+
+  for file in "${changed_files[@]+${changed_files[@]}}"; do
+    if parity_toolchain_file_requires_full_gate "$file"; then
+      select_full_parity_gate "paritychecker toolchain change path=$file"
+      return
+    fi
+
+    matched=false
+    while IFS= read -r line; do
+      [[ "$line" == record\ * ]] || continue
+      runner=""
+      path=""
+      for token in $line; do
+        case "$token" in
+          runner=*)
+            runner="${token#runner=}"
+            ;;
+          path=*)
+            path="${token#path=}"
+            ;;
+        esac
+      done
+      if [[ -z "$runner" || -z "$path" ]]; then
+        continue
+      fi
+      if ! bench_dependency_manifest_record_matches_file "$path" "$file"; then
+        continue
+      fi
+      matched=true
+      if [[ "$runner" == "all" ]]; then
+        parity_all_runners=true
+        parity_needed=true
+        return
+      fi
+      add_parity_runner "$runner" "manifest path=$path"
+    done < "$PARITY_DEPENDENCY_MANIFEST_BASELINE"
+
+    if [[ "$matched" == "false" ]] && parity_file_requires_manifest_match "$file"; then
+      select_full_parity_gate "unmatched parity-relevant change path=$file"
+      return
+    fi
   done
 }
 
@@ -503,6 +666,17 @@ infer_quality_gate_scope() {
 
   for file in "${changed_files[@]+${changed_files[@]}}"; do
     case "$file" in
+      scripts/quality_gates.sh)
+        coverage_all_required=true
+        docs_needed=true
+        fuzz_needed=true
+        select_full_parity_gate "quality gate script changed path=$file"
+        if [[ -z "$QUALITY_GATES_BENCH_SUITE" ]]; then
+          bench_all_suites=true
+          echo "quality_gates: select benchmark runner=all reason=quality gate script changed path=$file" >&2
+          add_all_benchmark_suites_from_manifest
+        fi
+        ;;
       src/emel/generator/*|src/emel/generator/**/*)
         ;;
       docs/templates/*|tools/docsgen/*|snapshots/bench/*|snapshots/embedded_size/*|src/emel/**/sm.hpp)
@@ -512,21 +686,9 @@ infer_quality_gate_scope() {
 
     case "$file" in
       scripts/paritychecker.sh|tools/paritychecker/*|tools/paritychecker/**/*|\
-      src/emel/gguf/*|src/emel/gguf/**/*|\
-      src/emel/model/*|src/emel/model/**/*|\
-      src/emel/text/*|src/emel/text/**/*|\
-      src/emel/token/*|src/emel/token/**/*)
-        case "$file" in
-          src/emel/model/sortformer/*|src/emel/model/sortformer/**/*)
-            ;;
-          src/emel/text/encoders/plamo2/*|src/emel/text/encoders/plamo2/**/*)
-            # The maintained GGUF parity fixture set has no PLAMO2 tokenizer model, so the
-            # reference paritychecker sweep is not source-backed for this encoder family.
-            ;;
-          *)
-            parity_needed=true
-            ;;
-        esac
+      src/emel/gguf/*|src/emel/gguf/**/*|src/emel/model/*|src/emel/model/**/*|\
+      src/emel/text/*|src/emel/text/**/*|src/emel/token/*|src/emel/token/**/*|\
+      snapshots/parity|snapshots/parity/*)
         ;;
     esac
 
@@ -550,29 +712,33 @@ infer_quality_gate_scope() {
       src/emel/diarization/*|src/emel/model/sortformer/*|tests/diarization/*|\
       tools/bench/diarization*|scripts/bench_diarization_compare.sh|\
       scripts/setup_diarization_pytorch_ref_env.sh)
-        add_bench_suite diarization_sortformer
+        add_bench_suite diarization_sortformer "scope path=$file"
         ;;
       src/emel/text/generator/*|tools/bench/generation*|scripts/bench_generation*)
-        add_bench_suite generation
+        add_bench_suite generation "scope path=$file"
         ;;
       src/emel/batch/*|tests/batch/*)
-        add_bench_suite batch_planner
+        add_bench_suite batch_planner "scope path=$file"
         ;;
       src/emel/kernel/aarch64/*|tests/kernel/aarch64*)
-        add_bench_suite kernel_aarch64
+        add_bench_suite kernel_aarch64 "scope path=$file"
         ;;
       src/emel/kernel/x86_64/*|tests/kernel/x86_64*)
-        add_bench_suite kernel_x86_64
+        add_bench_suite kernel_x86_64 "scope path=$file"
         ;;
       src/emel/kernel/*|src/emel/graph/*|src/emel/memory/*|src/emel/tensor/*|\
       tests/kernel/*|tests/graph/*|tests/memory/*|tests/tensor/*)
-        bench_full=true
+        select_full_benchmark_gate "broad benchmark-affecting path=$file"
         ;;
       src/emel/*)
-        bench_full=true
+        select_full_benchmark_gate "broad src path=$file"
         ;;
     esac
   done
+
+  if [[ "$QUALITY_GATES_PARITY" != "always" && "$parity_full" == "false" ]]; then
+    parity_dependency_manifest_apply_changed_files
+  fi
 
   if [[ -z "$QUALITY_GATES_BENCH_SUITE" && "$bench_full" == "false" ]]; then
     bench_dependency_manifest_apply_changed_files
@@ -581,11 +747,13 @@ infer_quality_gate_scope() {
 
 run_parity_gate() {
   local manifest_full=false
+  local runner_args=()
+  local runner
 
   if [[ "$QUALITY_GATES_PARITY" != "always" ]]; then
     if parity_dependency_manifest_requires_full_gate; then
       manifest_full=true
-      parity_needed=true
+      select_full_parity_gate "dependency manifest freshness gap"
     fi
   fi
 
@@ -601,7 +769,14 @@ run_parity_gate() {
       fi
       ;;
     auto)
-      if $parity_needed; then
+      if $parity_full || $parity_all_runners; then
+        run_step paritychecker "$ROOT_DIR/scripts/paritychecker.sh"
+      elif [[ ${#parity_runners[@]} -gt 0 ]]; then
+        for runner in "${parity_runners[@]}"; do
+          runner_args+=("--runner=$runner")
+        done
+        run_step paritychecker "$ROOT_DIR/scripts/paritychecker.sh" "${runner_args[@]}"
+      elif $parity_needed; then
         run_step paritychecker "$ROOT_DIR/scripts/paritychecker.sh"
       else
         record_skipped_step paritychecker "no paritychecker-affecting changed files"
@@ -818,6 +993,142 @@ run_benchmark_gates() {
   return "$status"
 }
 
+run_coverage_gate() {
+  if [[ "$coverage_changed_only" == "1" &&
+        "$QUALITY_GATES_SCOPE" != "full" &&
+        -z "$coverage_changed_files" ]]; then
+    record_skipped_step test_with_coverage "no changed src/emel files"
+  else
+    run_step test_with_coverage env \
+      EMEL_COVERAGE_CHANGED_ONLY="$coverage_changed_only" \
+      EMEL_COVERAGE_CLEAN="${EMEL_QUALITY_GATES_COVERAGE_CLEAN:-0}" \
+      EMEL_COVERAGE_CHANGED_FILES="$coverage_changed_files" \
+      EMEL_COVERAGE_GCOV_JOBS="${EMEL_QUALITY_GATES_COVERAGE_GCOV_JOBS:-}" \
+      EMEL_COVERAGE_TEST_EXTRA_ARG="${EMEL_QUALITY_GATES_COVERAGE_TEST_EXTRA_ARG:-}" \
+      EMEL_COVERAGE_TEST_SHARDS="$test_shard_list" \
+      "$ROOT_DIR/scripts/test_with_coverage.sh"
+  fi
+}
+
+parallel_enabled() {
+  case "$QUALITY_GATES_PARALLEL" in
+    auto|always|1|true|yes)
+      return 0
+      ;;
+    never|0|false|no)
+      return 1
+      ;;
+    *)
+      echo "error: unknown EMEL_QUALITY_GATES_PARALLEL value '$QUALITY_GATES_PARALLEL'" >&2
+      exit 1
+      ;;
+  esac
+}
+
+parallel_names=()
+parallel_pids=()
+parallel_logs=()
+parallel_status_files=()
+parallel_duration_files=()
+parallel_dir=""
+
+start_parallel_step() {
+  local name="$1"
+  shift
+  local log_file="$parallel_dir/${name}.log"
+  local status_file="$parallel_dir/${name}.status"
+  local duration_file="$parallel_dir/${name}.duration"
+
+  (
+    export EMEL_QUALITY_GATES_PARALLEL_CHILD=1
+    start="$(date +%s)"
+    set +e
+    "$@" >"$log_file" 2>&1
+    status="$?"
+    set -e
+    end="$(date +%s)"
+    printf '%s\n' "$status" >"$status_file"
+    printf '%s\n' "$(( end - start ))" >"$duration_file"
+    exit 0
+  ) &
+
+  parallel_names+=("$name")
+  parallel_pids+=("$!")
+  parallel_logs+=("$log_file")
+  parallel_status_files+=("$status_file")
+  parallel_duration_files+=("$duration_file")
+}
+
+finish_parallel_steps() {
+  local idx
+  local pid
+  local name
+  local log_file
+  local status_file
+  local duration_file
+  local status
+  local duration
+  local failed_status=0
+
+  for pid in "${parallel_pids[@]+${parallel_pids[@]}}"; do
+    if wait "$pid"; then
+      :
+    else
+      :
+    fi
+  done
+
+  for idx in "${!parallel_names[@]}"; do
+    name="${parallel_names[$idx]}"
+    log_file="${parallel_logs[$idx]}"
+    status_file="${parallel_status_files[$idx]}"
+    duration_file="${parallel_duration_files[$idx]}"
+    status=1
+    duration=0
+    if [[ -f "$status_file" ]]; then
+      status="$(cat "$status_file")"
+    fi
+    if [[ -f "$duration_file" ]]; then
+      duration="$(cat "$duration_file")"
+    fi
+    if [[ -s "$log_file" ]]; then
+      echo "quality_gates: log begin name=$name" >&2
+      cat "$log_file" >&2
+      echo "quality_gates: log end name=$name status=$status duration=${duration}s" >&2
+    fi
+    timing_lines+=("$name $duration")
+    if [[ "$name" == "bench_snapshot" ]]; then
+      bench_status="$status"
+    elif [[ "$status" -ne 0 && "$failed_status" -eq 0 ]]; then
+      failed_status="$status"
+    fi
+  done
+  write_timing_snapshot
+  return "$failed_status"
+}
+
+run_parallel_quality_group() {
+  parallel_dir="$(mktemp -d "${TMPDIR:-/tmp}/emel-quality-gates.XXXXXX")"
+  parallel_names=()
+  parallel_pids=()
+  parallel_logs=()
+  parallel_status_files=()
+  parallel_duration_files=()
+
+  start_parallel_step bench_snapshot run_benchmark_gates
+  start_parallel_step test_with_coverage run_coverage_gate
+  start_parallel_step paritychecker run_parity_gate
+  start_parallel_step fuzz_smoke run_fuzz_gate
+
+  if finish_parallel_steps; then
+    parallel_group_status=0
+  else
+    parallel_group_status="$?"
+  fi
+  rm -rf "$parallel_dir"
+  return "$parallel_group_status"
+}
+
 infer_quality_gate_scope
 
 coverage_changed_files="${EMEL_QUALITY_GATES_COVERAGE_CHANGED_FILES:-}"
@@ -827,7 +1138,7 @@ if [[ -z "$coverage_changed_files" &&
   coverage_changed_files="$(printf '%s\n' "${coverage_src_files[@]}")"
 fi
 coverage_changed_only_default=1
-if [[ "$QUALITY_GATES_SCOPE" == "full" ]]; then
+if [[ "$QUALITY_GATES_SCOPE" == "full" || "$coverage_all_required" == "true" ]]; then
   coverage_changed_only_default=0
 fi
 coverage_changed_only="${EMEL_QUALITY_GATES_COVERAGE_CHANGED_ONLY:-$coverage_changed_only_default}"
@@ -844,29 +1155,28 @@ run_step legacy_sml_surface run_sml_surface_gate
 run_step build_with_zig env \
   EMEL_ZIG_TEST_SHARDS="$test_shard_list" \
   "$ROOT_DIR/scripts/build_with_zig.sh"
-if run_benchmark_gates; then
-  bench_status=0
+
+if parallel_enabled; then
+  if run_parallel_quality_group; then
+    :
+  else
+    parallel_group_status=$?
+  fi
 else
-  bench_status=$?
+  if run_benchmark_gates; then
+    bench_status=0
+  else
+    bench_status=$?
+  fi
+  run_coverage_gate
+  run_parity_gate
+  run_fuzz_gate
 fi
-if [[ "$coverage_changed_only" == "1" &&
-      "$QUALITY_GATES_SCOPE" != "full" &&
-      -z "$coverage_changed_files" ]]; then
-  record_skipped_step test_with_coverage "no changed src/emel files"
-else
-  run_step test_with_coverage env \
-    EMEL_COVERAGE_CHANGED_ONLY="$coverage_changed_only" \
-    EMEL_COVERAGE_CLEAN="${EMEL_QUALITY_GATES_COVERAGE_CLEAN:-0}" \
-    EMEL_COVERAGE_CHANGED_FILES="$coverage_changed_files" \
-    EMEL_COVERAGE_GCOV_JOBS="${EMEL_QUALITY_GATES_COVERAGE_GCOV_JOBS:-}" \
-    EMEL_COVERAGE_TEST_EXTRA_ARG="${EMEL_QUALITY_GATES_COVERAGE_TEST_EXTRA_ARG:-}" \
-    EMEL_COVERAGE_TEST_SHARDS="$test_shard_list" \
-    "$ROOT_DIR/scripts/test_with_coverage.sh"
+
+if [[ $parallel_group_status -ne 0 ]]; then
+  exit "$parallel_group_status"
 fi
-run_parity_gate
-# Temporarily disabled (SML UBSAN issue under asan_ubsan).
-# TODO: re-enable once stateforward/sml.cpp fix lands.
-run_fuzz_gate
+
 run_step lint_snapshot "$ROOT_DIR/scripts/lint_snapshot.sh"
 case "$QUALITY_GATES_DOCS" in
   always)

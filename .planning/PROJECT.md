@@ -16,40 +16,66 @@ before widening API surface or model scope.
 
 ## Current State
 
-Current milestone: `v1.20 SML Dependency And Namespace Migration`
+Current milestone: none
 
-Latest shipped milestone: `v1.19 Benchmark Tool Pluggable Runner Refactor`
+Latest shipped milestone: `v1.21 Quality Gate Selective Runner Optimization`
 
-Status: `v1.19` shipped on 2026-05-01 from GitHub issue #55. The benchmark runner boundary
-refactor is archived with a passing source-backed audit. `v1.20` is now open from GitHub issue
-#56.
+Status: `v1.21` shipped on 2026-05-02 from GitHub issue #58. The quality-gate selective runner
+optimization is archived with a passing source-backed audit.
 
-Current planning focus: upgrade the pinned `stateforward/sml.cpp` dependency and migrate
-project-owned code/docs from the legacy SML surface to the upstream `stateforward::sml` surface.
+Current planning focus: no active milestone. Start the next milestone with `$gsd-new-milestone`.
 
-## Current Milestone: v1.20 SML Dependency And Namespace Migration
+## Previous Shipped Milestone: v1.21 Quality Gate Selective Runner Optimization
+
+**Goal:** Teach the required quality gate to use manifest-backed parity/benchmark impact
+selection and safe parallelism so localized changes do less unnecessary work without weakening
+coverage guarantees, lane isolation, or failure reporting.
+
+**Source:** GitHub issue #58, "Optimize quality gates after #54 and #55 land"
+
+**Shipped:** 2026-05-02
+
+**Delivered:**
+- Kept `scripts/quality_gates.sh` as the mandatory top-level gate entrypoint for implementation
+  changes.
+- Added manifest-backed parity runner impact selection from `parity_dependency_manifest/v1` data.
+- Preserved manifest-backed benchmark runner impact selection from `bench_dependency_manifest/v1`
+  data.
+- Kept conservative full relevant fallback for missing, stale, uncertain, or failed manifest
+  resolution.
+- Added selected parity execution through `scripts/paritychecker.sh --runner=<name>` and retained
+  selected benchmark execution through `scripts/bench.sh --suite=<runner>`.
+- Parallelized independent benchmark, coverage, parity, and fuzz lanes after serial preflight and
+  build.
+- Added source-backed quality-gate regression coverage and closeout evidence showing a 508 second
+  full scoped gate and a 19 second representative selective gate.
+
+**Audit:** Source-backed audit passed with 14/14 active requirements satisfied.
+
+## Previous Shipped Milestone: v1.20 SML Dependency And Namespace Migration
 
 **Goal:** Upgrade EMEL to the current `stateforward/sml.cpp` dependency and migrate
 project-owned code/docs from the legacy SML surface to `stateforward::sml` without weakening
 actor-model rules or maintained parity/benchmark evidence.
 
-**Source:** GitHub issue #56, hard cutover to the latest `stateforward/sml.cpp`
-surface.
+**Source:** GitHub issue #56, hard cutover to the latest `stateforward/sml.cpp` surface.
 
-**Target upstream commit:** `4a7109b5dd4aae40e78304e3ac03440ccc35031e` on
-`stateforward/sml.cpp` `main`
+**Shipped:** 2026-05-02
 
-**Target features:**
-- Bump `cmake/sml_version.cmake` from the current `stateforward/sml.cpp` pin to the intended
-  newer upstream commit.
-- Audit the newer upstream include/namespace surface and compatibility shims before changing
-  EMEL-owned code.
-- Migrate project-owned include sites and namespace references from the legacy SML surface to the
-  preferred `stateforward` API surface.
-- Update rules, docs, examples, generated-doc tooling, and source checks so contributor guidance
-  matches the new dependency naming.
-- Preserve maintained runtime, parity, benchmark, and quality-gate behavior while making any
-  temporary compatibility exception explicit and bounded.
+**Delivered:**
+- Pinned the intended upstream `stateforward/sml.cpp` commit and documented dependency provenance.
+- Migrated active project-owned source, tests, tools, examples, and docs to the preferred
+  `stateforward` include and namespace surface.
+- Proved transition tables, completion/internal transitions, unexpected-event behavior, logger
+  wiring, dispatch tables, and state inspection through the migrated surface.
+- Repaired contributor rules and documentation so active guidance points to
+  `docs/rules/sml.rules.md` and `stateforward::sml`.
+- Added maintained guardrails for unapproved active legacy SML references.
+- Repaired closeout reproducibility and passed the final full quality gate with coverage above the
+  required threshold.
+
+**Audit:** Final source-backed audit passed with 12/12 active requirements satisfied after
+Phase 179.
 
 ## Previous Shipped Milestone: v1.19 Benchmark Tool Pluggable Runner Refactor
 
@@ -262,14 +288,25 @@ truth anchor and without broadening into generic Liquid-family support.
 
 ### Active
 
-- [ ] Upgrade the pinned `stateforward/sml.cpp` dependency to the intended newer upstream commit.
-- [ ] Migrate EMEL-owned source, tests, tools, and docs from the legacy SML surface to
-  `stateforward::sml` naming where the upstream surface supports it.
-- [ ] Keep actor-model rules, domain-boundary checks, parity proof, benchmark proof, and quality
-  gates truthful throughout the migration.
+- None. The latest milestone, v1.21 Quality Gate Selective Runner Optimization, shipped on
+  2026-05-02.
 
 ### Validated
 
+- ✓ v1.21 keeps `scripts/quality_gates.sh` mandatory while selecting only impacted parity and
+  benchmark runners when dependency-manifest evidence is trustworthy.
+- ✓ v1.21 fails closed to the affected full relevant parity or benchmark runner set when manifest
+  impact resolution is missing, stale, uncertain, malformed, or failed.
+- ✓ v1.21 runs independent heavy quality-gate lanes in safe parallel groups with ordered logs,
+  deterministic status reporting, and timing output.
+- ✓ v1.21 closed with source-backed evidence for focused regressions, a full scoped gate, and a
+  representative selective-runner speedup without weakening required validation lanes.
+- ✓ v1.20 upgraded EMEL to the current `stateforward/sml.cpp` dependency surface and migrated
+  active project-owned code/docs to `stateforward::sml` naming.
+- ✓ v1.20 proved the migrated SML orchestration surfaces with live behavior tests and maintained
+  legacy-reference guardrails.
+- ✓ v1.20 preserved actor-model rules, maintained runtime behavior, and quality-gate evidence
+  through a passing source-backed closeout audit.
 - ✓ v1.19 refactored `tools/bench` around shared CLI/config/report orchestration while keeping
   benchmark-family execution behind explicit runner boundaries.
 - ✓ v1.19 added localized benchmark runner discovery, registration, and per-suite build targets so
@@ -411,16 +448,14 @@ truth anchor and without broadening into generic Liquid-family support.
 ## Context
 
 This remains a brownfield repository with an existing codebase map under `.planning/codebase/`.
-The repo stays governed by `AGENTS.md` and `docs/rules/sml.rules.md`. `v1.19` is the latest
-shipped milestone, extending the v1.18 paritychecker boundary pattern to `tools/bench` with
-explicit runner contracts, localized registration, independent suite build targets, deterministic
-dependency manifests, and conservative manifest-driven quality gates. The current maintained state
-includes repo-owned EMEL generation, embedding, diarization, and Whisper ASR lanes plus pluggable
-parity and benchmark tooling that publishes through canonical compare/benchmark contracts without
-shared runtime state. The generative text actor now lives under `text/generator`, with maintained
-generation parity and benchmark proof still driven through public actor events.
-`v1.20` starts from issue #56 and is a dependency/API-surface migration milestone, not a runtime
-behavior expansion milestone.
+The repo stays governed by `AGENTS.md` and `docs/rules/sml.rules.md`. `v1.21` is the latest
+shipped milestone, optimizing the mandatory quality gate with manifest-backed selective runners,
+conservative fallback, and parallel lane reporting. The current maintained state includes repo-owned
+EMEL generation, embedding, diarization, and Whisper ASR lanes plus pluggable parity and benchmark
+tooling that publishes through canonical compare/benchmark contracts without shared runtime state.
+`v1.18` and `v1.19` provide the parity and benchmark dependency manifests that v1.21 now consumes
+from the top-level quality-gate orchestration. `v1.21` shipped from issue #58 and did not weaken
+mandatory validation or change benchmark/parity semantics.
 
 ## Constraints
 
@@ -444,12 +479,17 @@ behavior expansion milestone.
 - **SML migration scope**: `v1.20` must preserve the RTC actor model and no-queue invariant while
   changing dependency pins, includes, namespaces, documentation, and checks. It must not use the
   namespace migration as a reason to broaden runtime semantics.
+- **Quality gate optimization scope**: `v1.21` may reduce unnecessary parity and benchmark runner
+  execution only through conservative dependency-manifest impact resolution inside the mandatory
+  gate. It must not introduce permissive skips, hash-only trust, hidden runner suppression, or
+  unclear failure logs.
 
 ## Key Decisions
 
 | Decision | Rationale | Outcome |
 |----------|-----------|---------|
-| Start v1.20 from GitHub issue #56 as an SML dependency and namespace migration | The repo already sources `stateforward/sml.cpp` but still used legacy SML includes, namespaces, and contributor guidance; the next milestone should align code and docs with the current upstream naming before more actor work accumulates on the old surface | — Pending |
+| Start v1.21 from GitHub issue #58 as quality-gate selective runner optimization | v1.18 and v1.19 added parity and benchmark dependency manifests; the next milestone should cash in that structure at the mandatory gate-orchestration level without weakening conservative fallback behavior | ✓ Shipped |
+| Start v1.20 from GitHub issue #56 as an SML dependency and namespace migration | The repo already sources `stateforward/sml.cpp` but still used legacy SML includes, namespaces, and contributor guidance; the next milestone should align code and docs with the current upstream naming before more actor work accumulates on the old surface | ✓ Shipped |
 | Start v1.19 from GitHub issue #55 as a benchmark runner boundary refactor | `tools/bench` has accumulated broad runner build wiring and static case registration; the next milestone should make benchmark runners pluggable, independently buildable, and conservatively gateable without weakening lane isolation | ✓ Shipped |
 | Start v1.18 from GitHub issue #54 as a paritychecker boundary refactor | The existing parity tool has grown mode-specific implementation, asset loading, and build wiring in places that make future engines harder to add and harder to gate conservatively | ✓ Shipped |
 | Move the canonical generator actor to `text/generator` in v1.17 | The existing generator is a generative text actor, and placing it under the text domain aligns it with text tokenizer/formatter ownership and the established `embeddings/generator` top-level actor pattern | ✓ Implementation complete |
@@ -502,4 +542,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-05-01 after starting v1.20*
+*Last updated: 2026-05-02 after shipping v1.21*
