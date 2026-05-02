@@ -61,6 +61,7 @@ TEST_CASE("quality gates consume benchmark dependency manifest conservatively") 
   CHECK(script.find("tools/bench/dependency_manifest.txt") != std::string::npos);
   CHECK(script.find("BENCH_RUNNER_BINARY") != std::string::npos);
   CHECK(script.find("bench_dependency_manifest_apply_changed_files()") != std::string::npos);
+  CHECK(script.find("add_all_benchmark_suites_from_manifest()") != std::string::npos);
   CHECK(script.find("bench_dependency_manifest_requires_full_gate()") != std::string::npos);
   CHECK(script.find("--write-dependency-manifest") != std::string::npos);
   CHECK(script.find("--check-dependency-manifest") != std::string::npos);
@@ -80,9 +81,59 @@ TEST_CASE("quality gates map benchmark manifest records to scoped or full benchm
   CHECK(helper.find("path=\"\"") != std::string::npos);
   CHECK(helper.find("runner=*)") != std::string::npos);
   CHECK(helper.find("path=*)") != std::string::npos);
-  CHECK(helper.find("bench_full=true") != std::string::npos);
+  CHECK(helper.find("bench_all_suites=true") != std::string::npos);
+  CHECK(helper.find("add_all_benchmark_suites_from_manifest") != std::string::npos);
   CHECK(helper.find("add_bench_suite \"$runner\"") != std::string::npos);
   CHECK(helper.find("tools/bench/*|tools/bench/**/*") != std::string::npos);
+}
+
+TEST_CASE("quality gates expand full benchmark scope into all manifest suites") {
+  const std::string script = read_file(repo_root() / "scripts" / "quality_gates.sh");
+  const std::size_t helper_start = script.find("add_all_benchmark_suites_from_manifest()");
+  REQUIRE(helper_start != std::string::npos);
+
+  const std::size_t helper_end =
+      script.find("bench_dependency_manifest_record_matches_file()", helper_start);
+  REQUIRE(helper_end != std::string::npos);
+
+  const std::string helper = script.substr(helper_start, helper_end - helper_start);
+  CHECK(helper.find("add_benchmark_suite_from_manifest \"$priority_runner\"") !=
+        std::string::npos);
+  CHECK(helper.find("gbnf_rule_parser") != std::string::npos);
+  CHECK(helper.find("kernel_aarch64") != std::string::npos);
+  CHECK(helper.find("runner=\"\"") != std::string::npos);
+  CHECK(helper.find("runner=*)") != std::string::npos);
+  CHECK(helper.find("\"$runner\" == \"all\"") != std::string::npos);
+  CHECK(helper.find("bench_suite_supported_for_host \"$runner\"") != std::string::npos);
+  CHECK(helper.find("add_bench_suite \"$runner\"") != std::string::npos);
+
+  const std::size_t infer_start = script.find("infer_quality_gate_scope()");
+  REQUIRE(infer_start != std::string::npos);
+  const std::size_t infer_end = script.find("collect_changed_files", infer_start);
+  REQUIRE(infer_end != std::string::npos);
+  const std::string full_scope = script.substr(infer_start, infer_end - infer_start);
+  CHECK(full_scope.find("bench_all_suites=true") != std::string::npos);
+  CHECK(full_scope.find("add_all_benchmark_suites_from_manifest") != std::string::npos);
+}
+
+TEST_CASE("quality gates skip host-incompatible benchmark suites during full expansion") {
+  const std::string script = read_file(repo_root() / "scripts" / "quality_gates.sh");
+  const std::size_t helper_start = script.find("bench_suite_supported_for_host()");
+  REQUIRE(helper_start != std::string::npos);
+
+  const std::size_t helper_end =
+      script.find("add_all_benchmark_suites_from_manifest()", helper_start);
+  REQUIRE(helper_end != std::string::npos);
+
+  const std::string helper = script.substr(helper_start, helper_end - helper_start);
+  CHECK(helper.find("kernel_x86_64)") != std::string::npos);
+  CHECK(helper.find("\"x86_64\"") != std::string::npos);
+  CHECK(helper.find("\"amd64\"") != std::string::npos);
+  CHECK(helper.find("kernel_aarch64)") != std::string::npos);
+  CHECK(helper.find("\"aarch64\"") != std::string::npos);
+  CHECK(helper.find("\"arm64\"") != std::string::npos);
+  CHECK(helper.find("sm_any)") != std::string::npos);
+  CHECK(helper.find("EMEL_BENCH_INTERNAL") != std::string::npos);
 }
 
 TEST_CASE("quality gates check benchmark manifest before deciding benchmark branch") {
@@ -96,5 +147,6 @@ TEST_CASE("quality gates check benchmark manifest before deciding benchmark bran
   const std::string pre_full = script.substr(run_start, full_branch - run_start);
   CHECK(pre_full.find("bench_dependency_manifest_check_needed") != std::string::npos);
   CHECK(pre_full.find("bench_dependency_manifest_requires_full_gate") != std::string::npos);
+  CHECK(pre_full.find("if ! $bench_all_suites; then") != std::string::npos);
   CHECK(pre_full.find("bench_full=true") != std::string::npos);
 }

@@ -814,6 +814,12 @@ TEST_CASE("bench runner suites build through independent object targets") {
   CHECK(cmake_source.find("add_bench_runner_suite(generation generation_bench.cpp") !=
         std::string::npos);
   CHECK(cmake_source.find("add_bench_runner_suite(diarization_sortformer") != std::string::npos);
+  CHECK(cmake_source.find("EMEL_BENCH_SUITE_FILTER STREQUAL \"memory_kv\"") !=
+        std::string::npos);
+  CHECK(cmake_source.find("EMEL_BENCH_SUITE_FILTER STREQUAL \"memory_recurrent\"") !=
+        std::string::npos);
+  CHECK(cmake_source.find("EMEL_BENCH_SUITE_FILTER STREQUAL \"memory_hybrid\"") !=
+        std::string::npos);
   CHECK(cmake_source.find("BENCH_RUNNER_SUITE_TARGETS") != std::string::npos);
 }
 
