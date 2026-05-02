@@ -4,13 +4,13 @@ milestone: v1.20
 milestone_name: SML Dependency And Namespace Migration
 status: complete
 stopped_at: ""
-last_updated: "2026-05-02T00:00:00.000Z"
+last_updated: "2026-05-02T06:44:29.000Z"
 last_activity: 2026-05-02
 progress:
-  total_phases: 12
-  completed_phases: 12
-  total_plans: 12
-  completed_plans: 12
+  total_phases: 13
+  completed_phases: 13
+  total_plans: 13
+  completed_plans: 13
   percent: 100
 ---
 
@@ -26,11 +26,12 @@ verification before widening API surface or model scope.
 
 ## Current Position
 
-Phase: 178 (complete)
-Plan: closeout gate and evidence repair
+Phase: 179 (complete)
+Plan: closeout evidence reproducibility repair
 Status: Complete
-Last activity: 2026-05-02 — Phase 178 repaired the full closeout gate, updated approved
-benchmark snapshots, and passed the final full quality gate.
+Last activity: 2026-05-02 — Phase 179 repaired bench-tool validation reproducibility, pinned the
+benchmark reference used by closeout snapshots, superseded stale Phase 172/178 closeout claims,
+and passed the literal full quality gate plus milestone audit.
 
 Progress: [##########] 100%
 
@@ -52,7 +53,7 @@ Items acknowledged and still deferred at milestone close on 2026-05-01:
 
 - Milestone: `v1.20 SML Dependency And Namespace Migration`
 
-- Implemented shape: 12 phases planned, 12 completed; 12 of 12 active requirements satisfied.
+- Implemented shape: 13 phases planned, 13 completed; 12 of 12 active requirements satisfied.
 - Latest shipped milestone: `v1.19 Benchmark Tool Pluggable Runner Refactor`.
 
 - Next action: archive v1.20 with `$gsd-complete-milestone`.

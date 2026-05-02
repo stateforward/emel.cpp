@@ -3,7 +3,9 @@ phase: 178-v1-20-closeout-gate-and-evidence-repair
 plan: 01
 completed: 2026-05-02
 commit: 794b52f
-requirements-completed:
+status: superseded
+superseded_by: 179-v1-20-closeout-evidence-reproducibility-repair
+requirements-addressed:
   - VAL-03
 ---
 
@@ -21,3 +23,7 @@ full-gate measurements.
 Final verification passed:
 
 - `EMEL_QUALITY_GATES_SCOPE=full EMEL_QUALITY_GATES_COVERAGE_CLEAN=1 scripts/quality_gates.sh`
+
+This artifact is historical after the later source-backed audit found the bench tooling validation
+path was not reproducible from the current maintained build state. Phase 179 owns the
+authoritative VAL-01 and VAL-03 closeout evidence.

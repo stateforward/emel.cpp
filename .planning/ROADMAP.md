@@ -56,8 +56,8 @@ actor-model rules or maintained parity/benchmark evidence.
 
 **Source:** GitHub issue #56
 
-**Requirements:** 12 active requirements, all mapped and satisfied. Reopened by source-backed
-audit on 2026-05-01 for gap closure phases 173-178; final full closeout validation passed on
+**Requirements:** 12 active requirements, all 12 satisfied after Phase 179 repaired the
+closeout evidence reproducibility gap and reran the source-backed full milestone gate on
 2026-05-02.
 
 | Phase | Name | Goal | Requirements |
@@ -74,6 +74,7 @@ audit on 2026-05-01 for gap closure phases 173-178; final full closeout validati
 | 176 | Legacy SML Guardrail And Quality Gate Repair | Wire maintained legacy SML drift checks and restore scoped quality-gate coverage without weakening required lanes. | VAL-01, VAL-02 |
 | 177 | v1.20 Final Source-Backed Closeout Rerun | Backfill Nyquist evidence and rerun source-backed audit after all reopened v1.20 gaps are closed. | VAL-03 |
 | 178 | v1.20 Closeout Gate And Evidence Repair | Resolve the blocked full closeout gate, repair contradicted closeout evidence, and produce final source-backed VAL-03 artifacts. | VAL-03 |
+| 179 | v1.20 Closeout Evidence Reproducibility Repair | Repair stale closeout claims and make the bench tooling validation reproducible from a maintained build command before final audit rerun. | VAL-01, VAL-03 |
 
 ### Phase 167: SML Upstream Pin And Surface Audit
 
@@ -266,3 +267,25 @@ VAL-03 completion claim.
    before the final source-backed validation passes.
 4. Final SUMMARY.md, VERIFICATION.md, and VALIDATION.md artifacts exist for the authoritative
    closeout phase, and the milestone audit rerun reports all 12 active requirements satisfied.
+
+### Phase 179: v1.20 Closeout Evidence Reproducibility Repair
+
+**Goal:** Close the remaining VAL-01 and VAL-03 audit gaps by making the closeout validation
+reproducible from maintained commands and repairing stale closeout artifacts.
+
+**Requirements:** VAL-01, VAL-03
+
+**Gap Closure:** Closes `.planning/v1.20-MILESTONE-AUDIT.md` findings for the current
+`bench_runner_tests` failure under `build/bench_tools_ninja`, the tokenizer-filtered bench-tools
+build cache, and the stale Phase 172 VAL-03 completion claim.
+
+**Success criteria:**
+1. The bench tooling validation uses a maintained build command whose suite filter cannot hide the
+   generation, diarization, and batch suites required by `bench_runner_tests`.
+2. `ctest --test-dir build/bench_tools_ninja -R 'quality_gates_tests|bench_runner_tests'
+   --output-on-failure` passes from the documented maintained build state.
+3. Phase 172 closeout artifacts are repaired or superseded so they no longer claim VAL-03 complete
+   before the authoritative final closeout evidence.
+4. The final full closeout validation and milestone audit rerun pass with benchmark, parity,
+   coverage, fuzz, docs, and lint lanes intact. Benchmark and snapshot updates are explicitly
+   approved for this closure phase when required for truthful maintained evidence.

@@ -80,9 +80,9 @@ Which phases cover which requirements. Updated during roadmap creation.
 | DOC-01 | Phase 175 | Complete |
 | DOC-02 | Phase 175 | Complete |
 | DOC-03 | Phase 175 | Complete |
-| VAL-01 | Phase 176 | Complete |
+| VAL-01 | Phase 179 | Complete |
 | VAL-02 | Phase 176 | Complete |
-| VAL-03 | Phase 178 | Complete |
+| VAL-03 | Phase 179 | Complete |
 
 **Coverage:**
 - v1 requirements: 12 total
@@ -92,4 +92,4 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 ---
 *Requirements defined: 2026-05-01*
-*Last updated: 2026-05-02 after Phase 178 full closeout validation passed*
+*Last updated: 2026-05-02 after Phase 179 closed VAL-01 and VAL-03 with source-backed validation*

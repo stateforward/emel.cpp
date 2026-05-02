@@ -8,6 +8,7 @@ SNAPSHOT=false
 COMPARE=false
 COMPARE_UPDATE=false
 UPDATE=false
+TEST_TOOLS=false
 USE_ZIG=true
 MODE_FLAG=""
 SUITE_FILTER=""
@@ -15,12 +16,13 @@ COMBINED=false
 
 usage() {
   cat <<'USAGE'
-usage: scripts/bench.sh [--snapshot] [--compare] [--compare-update] [--update] [--zig|--system] [--llama-only|--emel-only] [--generation-only|--suite=<name>]
+usage: scripts/bench.sh [--snapshot] [--compare] [--compare-update] [--update] [--test-tools] [--zig|--system] [--llama-only|--emel-only] [--generation-only|--suite=<name>]
 
   --snapshot   run EMEL benchmark snapshot gate
   --compare    build and run reference comparison
   --compare-update update reference comparison snapshot
   --update     update snapshot baseline (requires --snapshot)
+  --test-tools configure an unfiltered bench-tools build and run focused bench tool tests
   --zig        use zig cc/zig c++ as the toolchain (default)
   --system     use system cc/c++
   --llama-only run only the reference benchmarks
@@ -36,6 +38,7 @@ for arg in "$@"; do
     --compare) COMPARE=true ;;
     --compare-update) COMPARE=true; COMPARE_UPDATE=true ;;
     --update) UPDATE=true ;;
+    --test-tools) TEST_TOOLS=true ;;
     --zig) USE_ZIG=true ;;
     --system) USE_ZIG=false ;;
     --llama-only) MODE_FLAG="--mode=reference" ;;
@@ -63,7 +66,20 @@ if [[ -z "$ref_value" ]]; then
   ref_value="master"
 fi
 
-if ! $SNAPSHOT && ! $COMPARE; then
+bench_suite_build_dir() {
+  local suite="$1"
+  local safe_suite
+
+  if [[ -z "$suite" ]]; then
+    printf "%s\n" "$ROOT_DIR/build/bench_tools_ninja"
+    return
+  fi
+
+  safe_suite="${suite//[^A-Za-z0-9_]/_}"
+  printf "%s\n" "$ROOT_DIR/build/bench_tools_ninja_${safe_suite}"
+}
+
+if ! $TEST_TOOLS && ! $SNAPSHOT && ! $COMPARE; then
   COMPARE=true
 fi
 
@@ -78,6 +94,11 @@ fi
 
 if $COMBINED && [[ -n "$MODE_FLAG" ]]; then
   echo "error: --llama-only/--emel-only cannot be used with --snapshot and --compare together" >&2
+  exit 1
+fi
+
+if $COMPARE_UPDATE && [[ -n "$SUITE_FILTER" ]]; then
+  echo "error: --compare-update cannot be combined with --suite or --generation-only" >&2
   exit 1
 fi
 
@@ -138,6 +159,101 @@ configure_bench_build() {
   cmake --build "$build_dir" --parallel --target bench_runner >&2
 }
 
+update_snapshot_baseline() {
+  local baseline="$1"
+  local current="$2"
+  local merged
+
+  mkdir -p "$(dirname "$baseline")"
+  if [[ -z "$SUITE_FILTER" ]]; then
+    {
+      printf "# ref=%s\n" "$ref_value"
+      printf "# toolchain=%s\n" "$bench_cxx"
+      cat "$current"
+    } > "$baseline"
+    echo "updated $baseline"
+    return
+  fi
+
+  if [[ ! -f "$baseline" ]]; then
+    echo "error: missing baseline $baseline (run scripts/bench.sh --snapshot --update)" >&2
+    exit 1
+  fi
+
+  merged="$(mktemp)"
+  awk -v ref="$ref_value" -v toolchain="$bench_cxx" '
+    function entry_name(line,    n, fields) {
+      if (line == "" || line ~ /^#/) {
+        return "";
+      }
+      n = split(line, fields, " ");
+      return fields[1];
+    }
+    FNR == NR {
+      name = entry_name($0);
+      if (name != "") {
+        curr[name] = $0;
+        order[++order_count] = name;
+      }
+      next;
+    }
+    {
+      if ($0 ~ /^# ref=/) {
+        print "# ref=" ref;
+        next;
+      }
+      if ($0 ~ /^# toolchain=/) {
+        print "# toolchain=" toolchain;
+        next;
+      }
+      name = entry_name($0);
+      if (name != "" && (name in curr)) {
+        print curr[name];
+        seen[name] = 1;
+        next;
+      }
+      print $0;
+    }
+    END {
+      for (i = 1; i <= order_count; ++i) {
+        name = order[i];
+        if (!(name in seen)) {
+          print curr[name];
+        }
+      }
+    }
+  ' "$current" "$baseline" > "$merged"
+  mv "$merged" "$baseline"
+  echo "updated $baseline (merged suite $SUITE_FILTER)"
+}
+
+if $TEST_TOOLS; then
+  if $SNAPSHOT || $COMPARE || $COMPARE_UPDATE || $UPDATE || [[ -n "$MODE_FLAG" ||
+      -n "$SUITE_FILTER" ]]; then
+    echo "error: --test-tools cannot be combined with benchmark run mode or suite options" >&2
+    exit 1
+  fi
+
+  for tool in cmake ninja git; do
+    if ! command -v "$tool" >/dev/null 2>&1; then
+      echo "error: required tool missing: $tool" >&2
+      exit 1
+    fi
+  done
+  if $USE_ZIG && ! command -v zig >/dev/null 2>&1; then
+    echo "error: zig not found (use --system to use system compilers)" >&2
+    exit 1
+  fi
+
+  prepare_toolchain
+
+  build_dir="${BENCH_TOOLS_TEST_BUILD_DIR:-$ROOT_DIR/build/bench_tools_ninja}"
+  configure_bench_build "$build_dir"
+  cmake --build "$build_dir" --parallel --target bench_runner_tests quality_gates_tests >&2
+  ctest --test-dir "$build_dir" -R 'quality_gates_tests|bench_runner_tests' --output-on-failure
+  exit 0
+fi
+
 if $COMBINED; then
   for tool in cmake ninja git; do
     if ! command -v "$tool" >/dev/null 2>&1; then
@@ -152,7 +268,7 @@ if $COMBINED; then
 
   prepare_toolchain
 
-  build_dir="${BENCH_COMPARE_BUILD_DIR:-$ROOT_DIR/build/bench_tools_ninja}"
+  build_dir="${BENCH_COMPARE_BUILD_DIR:-$(bench_suite_build_dir "$SUITE_FILTER")}"
   configure_bench_build "$build_dir"
 
   compare_output="$(mktemp)"
@@ -222,13 +338,7 @@ if $COMBINED; then
   done
 
   if $UPDATE; then
-    mkdir -p "$(dirname "$BASELINE")"
-    {
-      printf "# ref=%s\n" "$ref_value"
-      printf "# toolchain=%s\n" "$bench_cxx"
-      cat "$current_snapshot"
-    } > "$BASELINE"
-    echo "updated $BASELINE"
+    update_snapshot_baseline "$BASELINE" "$current_snapshot"
   else
     if [[ ! -f "$BASELINE" ]]; then
       echo "error: missing baseline $BASELINE (run scripts/bench.sh --snapshot --update)" >&2
@@ -387,7 +497,7 @@ if $SNAPSHOT; then
     fi
   done
 
-  build_dir="${BENCH_BUILD_DIR:-$ROOT_DIR/build/bench_tools_ninja}"
+  build_dir="${BENCH_BUILD_DIR:-$(bench_suite_build_dir "$SUITE_FILTER")}"
   bench_cc="${BENCH_CC:-cc}"
   bench_cxx="${BENCH_CXX:-c++}"
   bench_c_flags=""
@@ -440,13 +550,7 @@ if $SNAPSHOT; then
   done
 
   if $UPDATE; then
-    mkdir -p "$(dirname "$BASELINE")"
-    {
-      printf "# ref=%s\n" "$ref_value"
-      printf "# toolchain=%s\n" "$bench_cxx"
-      cat "$CURRENT"
-    } > "$BASELINE"
-    echo "updated $BASELINE"
+    update_snapshot_baseline "$BASELINE" "$CURRENT"
   else
     if [[ ! -f "$BASELINE" ]]; then
       echo "error: missing baseline $BASELINE (run scripts/bench.sh --snapshot --update)" >&2
@@ -554,7 +658,7 @@ if $COMPARE; then
     exit 1
   fi
 
-  compare_build_dir="${BENCH_COMPARE_BUILD_DIR:-$ROOT_DIR/build/bench_tools_ninja}"
+  compare_build_dir="${BENCH_COMPARE_BUILD_DIR:-$(bench_suite_build_dir "$SUITE_FILTER")}"
   bench_cc="${BENCH_CC:-cc}"
   bench_cxx="${BENCH_CXX:-c++}"
   bench_c_flags=""

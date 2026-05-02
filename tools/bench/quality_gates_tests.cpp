@@ -68,6 +68,57 @@ TEST_CASE("quality gates consume benchmark dependency manifest conservatively") 
   CHECK(script.find("dependency manifest requires full benchmark gate") != std::string::npos);
 }
 
+TEST_CASE("bench script keeps suite-filtered builds out of canonical bench-tools cache") {
+  const std::string script = read_file(repo_root() / "scripts" / "bench.sh");
+
+  CHECK(script.find("bench_suite_build_dir()") != std::string::npos);
+  CHECK(script.find("build/bench_tools_ninja_${safe_suite}") != std::string::npos);
+  CHECK(script.find("BENCH_COMPARE_BUILD_DIR:-$(bench_suite_build_dir") !=
+        std::string::npos);
+  CHECK(script.find("BENCH_BUILD_DIR:-$(bench_suite_build_dir") != std::string::npos);
+}
+
+TEST_CASE("bench script exposes unfiltered bench tool validation command") {
+  const std::string script = read_file(repo_root() / "scripts" / "bench.sh");
+
+  CHECK(script.find("--test-tools") != std::string::npos);
+  CHECK(script.find("--test-tools cannot be combined") != std::string::npos);
+  CHECK(script.find("BENCH_TOOLS_TEST_BUILD_DIR:-$ROOT_DIR/build/bench_tools_ninja") !=
+        std::string::npos);
+  CHECK(script.find("bench_runner_tests quality_gates_tests") != std::string::npos);
+  const std::string ctest_contract =
+      "ctest --test-dir \"$build_dir\" -R 'quality_gates_tests|bench_runner_tests'";
+  CHECK(script.find(ctest_contract) != std::string::npos);
+}
+
+TEST_CASE("bench script merges scoped snapshot updates into the full baseline") {
+  const std::string script = read_file(repo_root() / "scripts" / "bench.sh");
+
+  CHECK(script.find("update_snapshot_baseline()") != std::string::npos);
+  CHECK(script.find("if [[ -z \"$SUITE_FILTER\" ]]") != std::string::npos);
+  CHECK(script.find("-v ref=\"$ref_value\" -v toolchain=\"$bench_cxx\"") !=
+        std::string::npos);
+  CHECK(script.find("print \"# ref=\" ref") != std::string::npos);
+  CHECK(script.find("print \"# toolchain=\" toolchain") != std::string::npos);
+  CHECK(script.find("curr[name] = $0") != std::string::npos);
+  CHECK(script.find("order[++order_count] = name") != std::string::npos);
+  CHECK(script.find("updated $baseline (merged suite $SUITE_FILTER)") !=
+        std::string::npos);
+  CHECK(script.find("update_snapshot_baseline \"$BASELINE\" \"$current_snapshot\"") !=
+        std::string::npos);
+  CHECK(script.find("update_snapshot_baseline \"$BASELINE\" \"$CURRENT\"") !=
+        std::string::npos);
+}
+
+TEST_CASE("bench script rejects scoped compare baseline updates") {
+  const std::string script = read_file(repo_root() / "scripts" / "bench.sh");
+
+  CHECK(script.find("if $COMPARE_UPDATE && [[ -n \"$SUITE_FILTER\" ]]") !=
+        std::string::npos);
+  CHECK(script.find("--compare-update cannot be combined with --suite or --generation-only") !=
+        std::string::npos);
+}
+
 TEST_CASE("quality gates map benchmark manifest records to scoped or full benchmark gates") {
   const std::string script = read_file(repo_root() / "scripts" / "quality_gates.sh");
   const std::size_t helper_start = script.find("bench_dependency_manifest_apply_changed_files()");

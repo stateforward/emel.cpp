@@ -1,10 +1,11 @@
 ---
 phase: 178
 slug: v1-20-closeout-gate-and-evidence-repair
-status: validated
-nyquist_compliant: true
+status: superseded
+nyquist_compliant: false
 wave_0_complete: true
 created: 2026-05-02
+superseded_by: 179
 ---
 
 # Phase 178 — Validation Strategy
@@ -27,5 +28,5 @@ created: 2026-05-02
 
 ## Notes
 
-No unresolved VAL-03 blockers remain.
-
+Phase 178 is retained as a historical repair attempt. Phase 179 owns the final reproducible
+closeout validation after repairing the bench-tools build-state gap found by the milestone audit.

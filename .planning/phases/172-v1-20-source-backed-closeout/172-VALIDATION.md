@@ -1,10 +1,11 @@
 ---
 phase: 172
 slug: v1-20-source-backed-closeout
-status: validated
-nyquist_compliant: true
-wave_0_complete: true
+status: superseded
+nyquist_compliant: false
+wave_0_complete: false
 created: 2026-05-01
+superseded_by: 179
 ---
 
 # Phase 172 — Validation Strategy
@@ -15,6 +16,6 @@ created: 2026-05-01
 
 ## Rule Compliance Evidence
 
-- This backfill preserves the audit trail: the first closeout attempt found blockers, and Phase 177
-  owns the final rerun after gap closure.
-
+- This backfill preserves the audit trail: the first closeout attempt found blockers.
+- Phase 172 is not VAL-03 completion evidence.
+- Phase 179 owns the final rerun after the latest closeout reproducibility gap closure.
