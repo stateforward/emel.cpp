@@ -69,7 +69,7 @@ TEST_CASE("generator_initialize_rejects_missing_injected_dependencies") {
       &tracker, on_initialize_error);
 
   CHECK_FALSE(generator.process_event(request));
-  CHECK(generator.is(boost::sml::state<emel::text::generator::uninitialized>));
+  CHECK(generator.is(stateforward::sml::state<emel::text::generator::uninitialized>));
   CHECK(tracker.initialize_error_called);
   CHECK(error == emel::error::cast(emel::text::generator::error::invalid_request));
 }

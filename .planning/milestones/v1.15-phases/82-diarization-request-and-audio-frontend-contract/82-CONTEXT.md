@@ -40,7 +40,7 @@ or add parity/benchmark surfaces.
 
 ### Error Routing
 - Model sample-rate, channel-count, empty-payload, shape, and output-capacity rejection with
-  explicit Boost.SML guards and error states.
+  explicit Stateforward.SML guards and error states.
 - Keep request validation decisions in `guards.hpp`; actions only mark already-chosen outcomes or
   run bounded feature-extractor numeric work.
 - Use one empty persistent context for this contract actor; dispatch-local data travels through

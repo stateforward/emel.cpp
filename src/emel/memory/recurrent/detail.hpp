@@ -4,8 +4,8 @@
 #include <cstddef>
 #include <cstdint>
 
-#include <boost/sml.hpp>
-#include <boost/sml/utility/sm_pool.hpp>
+#include <stateforward/sml.hpp>
+#include <stateforward/sml/utility/sm_pool.hpp>
 
 #include "emel/error/error.hpp"
 
@@ -43,7 +43,7 @@ struct slot_storage {
 
 struct slot_router_model {
   auto operator()() const {
-    namespace sml = boost::sml;
+    namespace sml = stateforward::sml;
 
     struct can_activate {
       bool operator()(const slot_storage & storage,
@@ -86,6 +86,6 @@ struct slot_router_model {
   }
 };
 
-using slot_pool = boost::sml::utility::sm_pool<slot_storage, slot_router_model>;
+using slot_pool = stateforward::sml::utility::sm_pool<slot_storage, slot_router_model>;
 
 }  // namespace emel::memory::recurrent::detail

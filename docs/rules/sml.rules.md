@@ -1,19 +1,22 @@
 # sml.rules.md
 
 ## 1. scope
-these rules define how to use boost.SML (boost::ext SML) to build a high-performance, real-time friendly architecture that behaves like a pure actor model while remaining synchronous run-to-completion (RTC) and using no message queue.
+these rules define how to use stateforward.SML to build a high-performance,
+real-time friendly architecture that behaves like a pure actor model while
+remaining synchronous run-to-completion (RTC) and using no message queue.
 
 these rules apply to:
-- boost.SML state machines (`boost::sml::sm<...>`) and their composition (composite state machines, orthogonal regions).
+- stateforward.SML state machines (`stateforward::sml::sm<...>`) and their composition (composite state machines, orthogonal regions).
 - synchronous dispatch only (no background workers, no mailboxes, no async buffering).
 
-the rules assume the project-pinned boost.SML semantics as implemented in the
+the rules assume the project-pinned stateforward.SML semantics as implemented in the
 local header and utility dispatch table, including typed completion propagation
 via `sml::completion<TEvent>`.
 
 primary sources consulted (non-exhaustive)
-- docs: https://boost-ext.github.io/sml/ (introduction), https://boost-ext.github.io/sml/tutorial.html (tutorial), https://boost-ext.github.io/sml/user_guide.html (user guide), https://boost-ext.github.io/sml/benchmarks.html (benchmarks), https://boost-ext.github.io/sml/overview.html (overview)
-- source code: https://github.com/boost-ext/sml/blob/v1.1.13/include/boost/sml.hpp , https://github.com/boost-ext/sml/blob/v1.1.13/include/boost/sml/utility/dispatch_table.hpp
+- project-pinned source: https://github.com/stateforward/sml.cpp/blob/4a7109b5dd4aae40e78304e3ac03440ccc35031e/include/stateforward/sml.hpp
+- local configured dependency tree and generated dispatch-table behavior from
+  the pinned stateforward/sml.cpp revision.
 - author talk (overview of design/perf goals): https://www.youtube.com/watch?v=lg3t_iact5_fw
 
 ## 2. definitions
@@ -79,8 +82,8 @@ primary sources consulted (non-exhaustive)
 ## 6. actions and guards
 ### selection and evaluation order
 1. guards MUST be pure predicates of `(event, context)` and MUST return `bool`.
-2. for a given (state, event), transitions are attempted in transition-table order, and the first transition whose guard returns true is taken. this follows SML’s `transitions<T, ts...>::execute` recursion: it executes `T` first and only tries `ts...` if `T` does not execute. (source: `boost/sml.hpp`, `transitions<T, ts...>`.)
-3. for an external transition with entry/exit enabled, the order MUST be: guard, on-exit, state update, action, on-entry. this follows `transition<...>::execute` which calls `on_exit`, updates current state, executes action, then calls `on_entry`. (source: `boost/sml.hpp`, `transition<state<s1>, state<s2>, event<E>, G, A>::execute`.)
+2. for a given (state, event), transitions are attempted in transition-table order, and the first transition whose guard returns true is taken. this follows SML’s `transitions<T, ts...>::execute` recursion: it executes `T` first and only tries `ts...` if `T` does not execute. (source: `stateforward/sml.hpp`, `transitions<T, ts...>`.)
+3. for an external transition with entry/exit enabled, the order MUST be: guard, on-exit, state update, action, on-entry. this follows `transition<...>::execute` which calls `on_exit`, updates current state, executes action, then calls `on_entry`. (source: `stateforward/sml.hpp`, `transition<state<s1>, state<s2>, event<E>, G, A>::execute`.)
 
 ### real-time and determinism constraints
 4. guards and actions MUST be bounded time and MUST NOT block (no I/O waits, no mutex waits, no sleeps).
@@ -114,7 +117,7 @@ primary sources consulted (non-exhaustive)
 14. when modeling unexpected events, always prefer:
     - `sml::unexpected_event<specific_external_event>` for explicit unexpected handling, or
     - `sml::unexpected_event<sml::_>` as the catchall (NO guard). guards that exclude
-      `boost::sml::back::internal_event` will suppress the unexpected event itself because
+      `stateforward::sml::back::internal_event` will suppress the unexpected event itself because
       `unexpected_event<_>` is an internal_event.
 15. guards MAY branch only on `(event, persistent_context)` and MUST NOT depend
     on dispatch-local context fields.
@@ -147,7 +150,7 @@ primary sources consulted (non-exhaustive)
    model per-element or per-item data loops. those loops MUST execute inside
    one allocation-free action/detail kernel per phase so compiler
    vectorization and predictable throughput are preserved.
-4. anonymous transition graphs MUST be acyclic or MUST have a statically provable bound on firings per top-level event. SML’s `process_event` loops internal anonymous processing to quiescence (`while (process_internal_events(anonymous{}, ...)) {}`), so cycles can create unbounded work. (source: `boost/sml.hpp`, `sm_impl::process_event` loop.)
+4. anonymous transition graphs MUST be acyclic or MUST have a statically provable bound on firings per top-level event. SML’s `process_event` loops internal anonymous processing to quiescence (`while (process_internal_events(anonymous{}, ...)) {}`), so cycles can create unbounded work. (source: `stateforward/sml.hpp`, `sm_impl::process_event` loop.)
 5. cross-actor nested dispatch (A calls B synchronously) MAY be used, but MUST obey:
    - no re-entrancy into the same actor instance within a single RTC chain.
    - acyclic call graph per top-level dispatch (enforced by orchestrator stack tracking or design discipline).
@@ -180,7 +183,7 @@ primary sources consulted (non-exhaustive)
 
 ## 9. performance rules
 1. actors MUST compile with optimizations appropriate for latency (`-o2` or `-o3`) and with exceptions disabled where possible. SML is designed to not use exceptions internally and can be built with `-fno-exceptions`. (docs: overview “exception safety”.)
-2. the dispatch mechanism SHOULD be constant-time over states. SML provides dispatch policies including a jump table (`dispatch_table[current_state]`) using a constexpr static function-pointer array. (source: `boost/sml.hpp`, `back::policies::jump_table`.)
+2. the dispatch mechanism SHOULD be constant-time over states. SML provides dispatch policies including a jump table (`dispatch_table[current_state]`) using a constexpr static function-pointer array. (source: `stateforward/sml.hpp`, `back::policies::jump_table`.)
 3. for maximum predictability, actors SHOULD:
    - avoid RTTI and virtual dispatch in guards/actions,
    - avoid type erasure and `std::function` in hot paths,
@@ -207,8 +210,8 @@ primary sources consulted (non-exhaustive)
 1. composite state machines MAY be used to represent hierarchical actors or subcomponents, but each submachine MUST still obey the same no-queue and RTC rules.
 2. if using SML submachines, designers MUST account for SML’s event propagation behavior:
    - submachine gets first chance to handle events,
-   - if unhandled, parent transitions may run (fallback). (source: `boost/sml.hpp`, `transitions_sub<sm<tsm>, ...>::execute_impl`.)
-3. entry into a composite state MUST initialize its submachine(s) deterministically. SML updates composite state initialization during state updates. (source: `boost/sml.hpp`, `update_current_state` overload for `state<back::sm<T>>`.)
+   - if unhandled, parent transitions may run (fallback). (source: `stateforward/sml.hpp`, `transitions_sub<sm<tsm>, ...>::execute_impl`.)
+3. entry into a composite state MUST initialize its submachine(s) deterministically. SML updates composite state initialization during state updates. (source: `stateforward/sml.hpp`, `update_current_state` overload for `state<back::sm<T>>`.)
 4. do NOT introduce ad-hoc shared base classes for machine wrappers (e.g. `sm_base`). inheritance from project base wrappers in `emel/sm.hpp` (for example `emel::sm<model>`) is acceptable. each machine MUST own its context and define its own `process_event` wrapper. share behavior via `actions.hpp`/`detail.hpp` helpers and `sm_any` dispatch.
 ### orthogonal regions
 4. orthogonal regions (multiple initial states) MUST be designed so that the same event does not cause side effects in more than one region, unless those side effects commute and ordering does not matter.
@@ -252,8 +255,8 @@ primary sources consulted (non-exhaustive)
 ## 14. reference examples
 ### example A: actor wrapper with synchronous, no-queue dispatch
 ```cpp
-#include <boost/sml.hpp>
-namespace sml = boost::sml;
+#include <stateforward/sml.hpp>
+namespace sml = stateforward::sml;
 
 struct tick { uint64_t now_ns; };
 struct start { uint64_t now_ns; };
@@ -287,8 +290,8 @@ struct actor {
 
 ### example B: bounded internal progress using anonymous transitions (no self-dispatch)
 ```cpp
-#include <boost/sml.hpp>
-namespace sml = boost::sml;
+#include <stateforward/sml.hpp>
+namespace sml = stateforward::sml;
 
 struct step {};
 struct ctx { int i = 0; };
@@ -329,9 +332,9 @@ rule check: the anonymous self-loop is bounded by `i < 3`; cycles without bounds
 
 ### example C: runtime event dispatch without dynamic allocation
 ```cpp
-#include <boost/sml.hpp>
-#include <boost/sml/utility/dispatch_table.hpp>
-namespace sml = boost::sml;
+#include <stateforward/sml.hpp>
+#include <stateforward/sml/utility/dispatch_table.hpp>
+namespace sml = stateforward::sml;
 
 struct runtime_ev { int id; /* payload */ };
 struct ev1 { static constexpr auto id = 1; ev1(const runtime_ev&) {} };
@@ -377,9 +380,9 @@ int main() {
 
 ### example D: indexed pooled dispatch
 ```cpp
-#include <boost/sml.hpp>
-#include <boost/sml/utility/sm_pool.hpp>
-namespace sml = boost::sml;
+#include <stateforward/sml.hpp>
+#include <stateforward/sml/utility/sm_pool.hpp>
+namespace sml = stateforward::sml;
 
 struct ev_tick {};
 using pooled_tick = sml::utility::indexed_event<ev_tick>;

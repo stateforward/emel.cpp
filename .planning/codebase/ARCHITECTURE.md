@@ -2,14 +2,14 @@
 
 ## Overview
 
-`emel.cpp` is a deterministic C++ inference engine whose orchestration layer is modeled as Boost.SML
+`emel.cpp` is a deterministic C++ inference engine whose orchestration layer is modeled as Stateforward.SML
 actors rather than ad hoc control flow. The project-level statement is in `README.md`, the core
 SML contract is in `docs/rules/sml.rules.md`, and the local wrapper that standardizes machine
 construction and dispatch lives in `src/emel/sm.hpp`.
 
 The build graph in `CMakeLists.txt` shows the current packaging shape:
 
-- `emel_core` is an interface target exporting `include/`, `src/`, and the vendored Boost.SML
+- `emel_core` is an interface target exporting `include/`, `src/`, and the vendored Stateforward.SML
   headers.
 - `emel` is a static library that currently compiles only `src/emel/model/data.cpp`; almost all
   orchestration and behavior lives in headers under `src/emel/`.
@@ -26,7 +26,7 @@ Every major runtime component is expressed as a `struct model` transition table 
 
 The shared wrapper in `src/emel/sm.hpp` provides:
 
-- context injection into `boost::sml::sm<...>`
+- context injection into `stateforward::sml::sm<...>`
 - normalized `process_event(...)` return handling
 - state inspection through `is(...)` and `visit_current_states(...)`
 - `sm_any`, a zero-virtual-dispatch variant holder used by `src/emel/kernel/any.hpp`,

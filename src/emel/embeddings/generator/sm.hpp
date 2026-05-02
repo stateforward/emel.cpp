@@ -1,7 +1,7 @@
 #pragma once
 // benchmark: designed
 
-#include <boost/sml.hpp>
+#include <stateforward/sml.hpp>
 
 #include "emel/embeddings/generator/actions.hpp"
 #include "emel/embeddings/generator/context.hpp"
@@ -35,7 +35,7 @@ struct state_errored {};
 
 struct model {
   auto operator()() const {
-    namespace sml = boost::sml;
+    namespace sml = stateforward::sml;
 
     // clang-format off
     return sml::make_transition_table(

@@ -15,7 +15,7 @@ Passed.
 
 | Requirement | Source Plan | Description | Status | Evidence |
 |-------------|-------------|-------------|--------|----------|
-| TEXTGEN-04 | 133-01 | Generator initializer and prefill child actors stay under `text/generator/**` while preserving destination-first Boost.SML transition tables and no-queue RTC semantics. | passed | Initialize invalid-request routing now uses existing `valid_initialize` / `invalid_initialize` transition rows; focused source and behavioral regressions passed. |
+| TEXTGEN-04 | 133-01 | Generator initializer and prefill child actors stay under `text/generator/**` while preserving destination-first Stateforward.SML transition tables and no-queue RTC semantics. | passed | Initialize invalid-request routing now uses existing `valid_initialize` / `invalid_initialize` transition rows; focused source and behavioral regressions passed. |
 
 ## Evidence
 

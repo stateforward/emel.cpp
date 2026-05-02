@@ -2,7 +2,7 @@
 #include <cstdint>
 #include <vector>
 
-#include <boost/sml.hpp>
+#include <stateforward/sml.hpp>
 #include "doctest/doctest.h"
 
 #include "emel/embeddings/generator/detail.hpp"
@@ -99,7 +99,7 @@ TEST_CASE("embeddings vision lane returns normalized TE embeddings when fixture 
             red_embedding.data(),
             static_cast<size_t>(red_dimension)}) ==
         doctest::Approx(1.0f).epsilon(1.0e-4f));
-  CHECK(embedding_generator.is(boost::sml::state<emel::embeddings::generator::state_done>));
+  CHECK(embedding_generator.is(stateforward::sml::state<emel::embeddings::generator::state_done>));
 
   emel::embeddings::generator::event::embed_image blue_request{
     blue_square,
@@ -222,7 +222,7 @@ TEST_CASE("embeddings vision lane supports truncation and rejects malformed imag
   CHECK_FALSE(embedding_generator.process_event(invalid_request));
   CHECK(invalid_error == emel::error::cast(emel::embeddings::generator::error::invalid_request));
   CHECK(invalid_dimension == 0);
-  CHECK(embedding_generator.is(boost::sml::state<emel::embeddings::generator::state_errored>));
+  CHECK(embedding_generator.is(stateforward::sml::state<emel::embeddings::generator::state_errored>));
 }
 
 TEST_CASE("embeddings vision lane surfaces runtime encode failures as backend errors") {
@@ -265,7 +265,7 @@ TEST_CASE("embeddings vision lane surfaces runtime encode failures as backend er
   CHECK_FALSE(embedding_generator.process_event(request));
   CHECK(embed_error == emel::error::cast(emel::embeddings::generator::error::backend));
   CHECK(output_dimension == 0);
-  CHECK(embedding_generator.is(boost::sml::state<emel::embeddings::generator::state_errored>));
+  CHECK(embedding_generator.is(stateforward::sml::state<emel::embeddings::generator::state_errored>));
 }
 
 TEST_CASE("embeddings vision helper paths cover image request callbacks and validation") {

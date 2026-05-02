@@ -59,7 +59,7 @@ struct set_beta_second {
 
 struct first_model {
   auto operator()() const {
-    namespace sml = boost::sml;
+    namespace sml = stateforward::sml;
     return sml::make_transition_table(
         *sml::state<idle_state> + sml::event<event_alpha> / set_alpha_first{} =
             sml::state<idle_state>,
@@ -70,7 +70,7 @@ struct first_model {
 
 struct second_model {
   auto operator()() const {
-    namespace sml = boost::sml;
+    namespace sml = stateforward::sml;
     return sml::make_transition_table(
         *sml::state<idle_state> + sml::event<event_alpha> / set_alpha_second{} =
             sml::state<idle_state>,
@@ -87,8 +87,8 @@ enum class test_kind : uint8_t {
   second = 1,
 };
 
-using sm_list = boost::sml::aux::type_list<first_sm, second_sm>;
-using event_list = boost::sml::aux::type_list<event_alpha, event_beta>;
+using sm_list = stateforward::sml::aux::type_list<first_sm, second_sm>;
+using event_list = stateforward::sml::aux::type_list<event_alpha, event_beta>;
 using any_sm = emel::sm_any<test_kind, sm_list, event_list>;
 
 }  // namespace

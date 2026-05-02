@@ -8,7 +8,7 @@
 #include <string_view>
 #include <vector>
 
-#include <boost/sml.hpp>
+#include <stateforward/sml.hpp>
 #include "doctest/doctest.h"
 
 #include "emel/diarization/sortformer/executor/detail.hpp"
@@ -478,7 +478,7 @@ TEST_CASE("sortformer executor produces deterministic hidden frames") {
 
   executor::sm machine{};
   REQUIRE(machine.process_event(request));
-  CHECK(machine.is(boost::sml::state<executor::state_ready>));
+  CHECK(machine.is(stateforward::sml::state<executor::state_ready>));
   CHECK(err == emel::error::cast(executor::error::none));
   CHECK(frame_count == executor_detail::k_frame_count);
   CHECK(hidden_dim == executor_detail::k_hidden_dim);

@@ -13,7 +13,7 @@ requirements-completed:
 ## Changes
 
 - Added `src/emel/diarization/request/` as the isolated diarization request/feature-extractor actor.
-- Implemented explicit Boost.SML validation states for:
+- Implemented explicit Stateforward.SML validation states for:
   - Sortformer execution-contract profile validity
   - 16 kHz sample-rate acceptance
   - mono channel-count acceptance

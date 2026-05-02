@@ -2,7 +2,7 @@
 
 ## What This Is
 
-EMEL is a deterministic C++ inference engine built around explicit Boost.SML orchestration, with
+EMEL is a deterministic C++ inference engine built around explicit Stateforward.SML orchestration, with
 runtime behavior modeled as explicit actors instead of ad hoc control flow. The repo now ships
 maintained GGUF generation slices, one explicit maintained trimodal embedding slice for
 `augmem/TE-75M-GGUF`, one maintained Sortformer diarization GGUF slice, and one maintained Whisper
@@ -16,14 +16,40 @@ before widening API surface or model scope.
 
 ## Current State
 
-Current milestone: none
+Current milestone: `v1.20 SML Dependency And Namespace Migration`
 
 Latest shipped milestone: `v1.19 Benchmark Tool Pluggable Runner Refactor`
 
 Status: `v1.19` shipped on 2026-05-01 from GitHub issue #55. The benchmark runner boundary
-refactor is archived with a passing source-backed audit.
+refactor is archived with a passing source-backed audit. `v1.20` is now open from GitHub issue
+#56.
 
-Current planning focus: select and scope the next milestone.
+Current planning focus: upgrade the pinned `stateforward/sml.cpp` dependency and migrate
+project-owned code/docs from the legacy SML surface to the upstream `stateforward::sml` surface.
+
+## Current Milestone: v1.20 SML Dependency And Namespace Migration
+
+**Goal:** Upgrade EMEL to the current `stateforward/sml.cpp` dependency and migrate
+project-owned code/docs from the legacy SML surface to `stateforward::sml` without weakening
+actor-model rules or maintained parity/benchmark evidence.
+
+**Source:** GitHub issue #56, hard cutover to the latest `stateforward/sml.cpp`
+surface.
+
+**Target upstream commit:** `4a7109b5dd4aae40e78304e3ac03440ccc35031e` on
+`stateforward/sml.cpp` `main`
+
+**Target features:**
+- Bump `cmake/sml_version.cmake` from the current `stateforward/sml.cpp` pin to the intended
+  newer upstream commit.
+- Audit the newer upstream include/namespace surface and compatibility shims before changing
+  EMEL-owned code.
+- Migrate project-owned include sites and namespace references from the legacy SML surface to the
+  preferred `stateforward` API surface.
+- Update rules, docs, examples, generated-doc tooling, and source checks so contributor guidance
+  matches the new dependency naming.
+- Preserve maintained runtime, parity, benchmark, and quality-gate behavior while making any
+  temporary compatibility exception explicit and bounded.
 
 ## Previous Shipped Milestone: v1.19 Benchmark Tool Pluggable Runner Refactor
 
@@ -236,7 +262,11 @@ truth anchor and without broadening into generic Liquid-family support.
 
 ### Active
 
-No active milestone requirements. Next milestone not started.
+- [ ] Upgrade the pinned `stateforward/sml.cpp` dependency to the intended newer upstream commit.
+- [ ] Migrate EMEL-owned source, tests, tools, and docs from the legacy SML surface to
+  `stateforward::sml` naming where the upstream surface supports it.
+- [ ] Keep actor-model rules, domain-boundary checks, parity proof, benchmark proof, and quality
+  gates truthful throughout the migration.
 
 ### Validated
 
@@ -389,6 +419,8 @@ includes repo-owned EMEL generation, embedding, diarization, and Whisper ASR lan
 parity and benchmark tooling that publishes through canonical compare/benchmark contracts without
 shared runtime state. The generative text actor now lives under `text/generator`, with maintained
 generation parity and benchmark proof still driven through public actor events.
+`v1.20` starts from issue #56 and is a dependency/API-surface migration milestone, not a runtime
+behavior expansion milestone.
 
 ## Constraints
 
@@ -409,11 +441,15 @@ generation parity and benchmark proof still driven through public actor events.
   it must not introduce new sampling semantics, model-family support, or performance claims.
 - **Benchmark refactor scope**: `v1.19` moves `tools/bench` boundaries only; it must preserve
   maintained benchmark intent unless a behavior change is separately approved.
+- **SML migration scope**: `v1.20` must preserve the RTC actor model and no-queue invariant while
+  changing dependency pins, includes, namespaces, documentation, and checks. It must not use the
+  namespace migration as a reason to broaden runtime semantics.
 
 ## Key Decisions
 
 | Decision | Rationale | Outcome |
 |----------|-----------|---------|
+| Start v1.20 from GitHub issue #56 as an SML dependency and namespace migration | The repo already sources `stateforward/sml.cpp` but still used legacy SML includes, namespaces, and contributor guidance; the next milestone should align code and docs with the current upstream naming before more actor work accumulates on the old surface | — Pending |
 | Start v1.19 from GitHub issue #55 as a benchmark runner boundary refactor | `tools/bench` has accumulated broad runner build wiring and static case registration; the next milestone should make benchmark runners pluggable, independently buildable, and conservatively gateable without weakening lane isolation | ✓ Shipped |
 | Start v1.18 from GitHub issue #54 as a paritychecker boundary refactor | The existing parity tool has grown mode-specific implementation, asset loading, and build wiring in places that make future engines harder to add and harder to gate conservatively | ✓ Shipped |
 | Move the canonical generator actor to `text/generator` in v1.17 | The existing generator is a generative text actor, and placing it under the text domain aligns it with text tokenizer/formatter ownership and the established `embeddings/generator` top-level actor pattern | ✓ Implementation complete |
@@ -466,4 +502,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-05-01 after shipping v1.19*
+*Last updated: 2026-05-01 after starting v1.20*

@@ -59,7 +59,7 @@ struct callback_tracker {
 TEST_CASE("jinja_formatter_starts_initialized") {
   context ctx{};
   sm machine{ctx};
-  CHECK(machine.is(boost::sml::state<initialized>));
+  CHECK(machine.is(stateforward::sml::state<initialized>));
 }
 
 TEST_CASE("jinja_formatter_copies_source_text") {
@@ -87,7 +87,7 @@ TEST_CASE("jinja_formatter_copies_source_text") {
   };
 
   CHECK(machine.process_event(ev));
-  CHECK(machine.is(boost::sml::state<done>));
+  CHECK(machine.is(stateforward::sml::state<done>));
   CHECK(err == static_cast<int32_t>(error::none));
   CHECK(error_pos == 0);
   CHECK(output_truncated == false);
@@ -118,7 +118,7 @@ TEST_CASE("jinja_formatter_handles_empty_source_text") {
   };
 
   CHECK(machine.process_event(ev));
-  CHECK(machine.is(boost::sml::state<done>));
+  CHECK(machine.is(stateforward::sml::state<done>));
   CHECK(err == static_cast<int32_t>(error::none));
   CHECK(output_length == 0);
   CHECK(output_truncated == false);
@@ -149,7 +149,7 @@ TEST_CASE("jinja_formatter_reports_capacity_error") {
   };
 
   CHECK_FALSE(machine.process_event(ev));
-  CHECK(machine.is(boost::sml::state<errored>));
+  CHECK(machine.is(stateforward::sml::state<errored>));
   CHECK(err == static_cast<int32_t>(error::invalid_request));
   CHECK(output_length == 0);
   CHECK(output_truncated == true);
@@ -181,7 +181,7 @@ TEST_CASE("jinja_formatter_rejects_invalid_request") {
   };
 
   CHECK_FALSE(machine.process_event(ev));
-  CHECK(machine.is(boost::sml::state<errored>));
+  CHECK(machine.is(stateforward::sml::state<errored>));
   CHECK(err == static_cast<int32_t>(error::invalid_request));
   CHECK(output_length == 0);
   CHECK(output_truncated == false);
@@ -213,7 +213,7 @@ TEST_CASE("jinja_formatter_rejects_missing_callbacks") {
   };
 
   CHECK_FALSE(machine.process_event(ev));
-  CHECK(machine.is(boost::sml::state<errored>));
+  CHECK(machine.is(stateforward::sml::state<errored>));
   CHECK(err == static_cast<int32_t>(error::invalid_request));
   CHECK(output_length == 0);
   CHECK(output_truncated == false);
@@ -289,5 +289,5 @@ TEST_CASE("jinja_formatter_unexpected_event_transitions_state") {
   sm machine{ctx};
   machine.process_event(unknown_event{});
 
-  CHECK(machine.is(boost::sml::state<unexpected>));
+  CHECK(machine.is(stateforward::sml::state<unexpected>));
 }

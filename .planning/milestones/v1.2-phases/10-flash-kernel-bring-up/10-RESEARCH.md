@@ -36,7 +36,7 @@ yet, and does not claim user-visible parity or benchmark completion.
 
 ## Specific Ideas
 
-- Keep Boost.SML orchestration unchanged; this phase is a data-plane replacement only.
+- Keep Stateforward.SML orchestration unchanged; this phase is a data-plane replacement only.
 - Treat "flash attention" claims narrowly until the shipped generator path actually adopts the new
   kernel in Phase 11.
 - Avoid proving completion through `tools/` output this early; Phase 10 should finish with kernel
@@ -79,7 +79,7 @@ applies RoPE, copies K/V into the persistent caches, materializes `attn_scores` 
 and then accumulates `attn_ctx`. Phase 10 should not touch that generator flow. Instead, it should
 add a kernel-local canonical `op_flash_attn_ext` path that matches the current shipped Llama-68M
 single-query causal attention slice and rejects everything else explicitly. Phase 11 can then swap
-the generator over to that operator without changing Boost.SML structure.
+the generator over to that operator without changing Stateforward.SML structure.
 
 The most practical implementation is a shared scalar kernel in `src/emel/kernel/detail.hpp` using
 an online-softmax accumulation over the existing K/V cache layout, not a generic ggml-compatible
@@ -96,7 +96,7 @@ shapes/flags, and prove correctness plus zero hot-path allocation with new kerne
 `CLAUDE.md` is a symlink to `AGENTS.md`, so the engineering contract is the same file the user
 explicitly provided. Phase 10 must honor these directives:
 
-- Keep Boost.SML orchestration unchanged for this phase; this is a data-plane kernel bring-up.
+- Keep Stateforward.SML orchestration unchanged for this phase; this is a data-plane kernel bring-up.
 - Do not add queues, deferred events, mailboxes, self-dispatch, or any other non-RTC behavior.
 - Do not change state-machine structure without explicit user approval.
 - Keep actions bounded, non-blocking, and allocation-free during dispatch.
@@ -107,7 +107,7 @@ explicitly provided. Phase 10 must honor these directives:
 - Keep performance as a first-class goal; do not allocate in inference hot paths.
 - Do not replace missing hot-path native behavior with a whole-tensor dequantize-to-f32 fallback
   unless the user explicitly approves an interim milestone.
-- Keep `src/` Boost.SML machines as the source of truth; do not move orchestration into docs or
+- Keep `src/` Stateforward.SML machines as the source of truth; do not move orchestration into docs or
   tool-only scaffolding.
 - Use doctest for unit tests.
 - Keep test files scoped to one machine, one system, or one behavior.
@@ -121,7 +121,7 @@ explicitly provided. Phase 10 must honor these directives:
 | Library / Component | Version | Purpose | Why Standard |
 |---------------------|---------|---------|--------------|
 | `src/emel/kernel/detail.hpp` shared scalar kernel path | repo local | Canonical place for backend-agnostic kernel validation and execution | Existing x86_64/aarch64 backends already call into shared scalar helpers; Phase 10 can land here without changing SML structure |
-| Boost.SML (`stateforward/sml.cpp`) | pinned commit `02cbea023f035185cfb400e6015c981f9b946bae` | Orchestration for kernel/backend wrappers | Already wired through every kernel backend and constrained by repo rules |
+| Stateforward.SML (`stateforward/sml.cpp`) | pinned commit `02cbea023f035185cfb400e6015c981f9b946bae` | Orchestration for kernel/backend wrappers | Already wired through every kernel backend and constrained by repo rules |
 | `emel::kernel::any` / backend `sm` wrappers | repo local | Dispatches public kernel events to platform backends | Existing public kernel surface already routes `op_flash_attn_ext` |
 
 ### Supporting

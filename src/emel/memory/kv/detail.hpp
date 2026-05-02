@@ -4,8 +4,8 @@
 #include <cstddef>
 #include <cstdint>
 
-#include <boost/sml.hpp>
-#include <boost/sml/utility/sm_pool.hpp>
+#include <stateforward/sml.hpp>
+#include <stateforward/sml/utility/sm_pool.hpp>
 
 #include "emel/emel.h"
 #include "emel/error/error.hpp"
@@ -47,7 +47,7 @@ struct block_storage {
 
 struct block_router_model {
   auto operator()() const {
-    namespace sml = boost::sml;
+    namespace sml = stateforward::sml;
 
     struct valid_link {
       bool operator()(const block_storage & storage,
@@ -90,6 +90,6 @@ struct block_router_model {
   }
 };
 
-using block_pool = boost::sml::utility::sm_pool<block_storage, block_router_model>;
+using block_pool = stateforward::sml::utility::sm_pool<block_storage, block_router_model>;
 
 }  // namespace emel::memory::kv::detail

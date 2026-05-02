@@ -38,7 +38,7 @@ compute fallbacks.
   continuing to record deferred `100/1000` parity debt instead of hiding it.
 
 ### Guardrails
-- Do not edit Boost.SML transition tables for generator, graph, processor, or kernel actors.
+- Do not edit Stateforward.SML transition tables for generator, graph, processor, or kernel actors.
 - Do not widen runtime wrappers beyond additive attribution accessors.
 - Do not claim full `1/10/100/1000` parity closure in this phase while the user-approved longer
   decode defer remains active.

@@ -90,7 +90,7 @@ The current `exact_match` evidence is not direct pinned-artifact parity because 
 
 ## Project Constraints (from rule files)
 
-- Boost.SML dispatch must remain synchronous run-to-completion with no queues, no mailboxes, deterministic single-writer processing, no heap allocation during guards/actions/entry/exit/anonymous progress, and bounded work per dispatch. [VERIFIED: docs/rules/sml.rules.md; VERIFIED: AGENTS.md]
+- Stateforward.SML dispatch must remain synchronous run-to-completion with no queues, no mailboxes, deterministic single-writer processing, no heap allocation during guards/actions/entry/exit/anonymous progress, and bounded work per dispatch. [VERIFIED: docs/rules/sml.rules.md; VERIFIED: AGENTS.md]
 - Runtime behavior selection must be modeled with explicit guards/states/transitions in `sm.hpp`, not hidden in actions, member functions, or helpers called from actions. [VERIFIED: docs/rules/sml.rules.md; VERIFIED: AGENTS.md]
 - Actions must be bounded, non-blocking, allocation-free during dispatch, and may only run an already-selected behavior path. [VERIFIED: docs/rules/sml.rules.md; VERIFIED: AGENTS.md]
 - Context may store persistent actor-owned state only; per-dispatch data must travel through events or typed completion transitions. [VERIFIED: docs/rules/sml.rules.md; VERIFIED: AGENTS.md]
@@ -108,7 +108,7 @@ The current `exact_match` evidence is not direct pinned-artifact parity because 
 
 | Library / Surface | Version | Purpose | Why Standard |
 |-------------------|---------|---------|--------------|
-| Boost.SML | Project-pinned local dependency, not re-versioned for this phase. [VERIFIED: docs/rules/sml.rules.md] | State-machine orchestration. [VERIFIED: docs/rules/sml.rules.md] | Repository rules require Boost.SML for orchestration and define the SML actor contract. [VERIFIED: AGENTS.md; VERIFIED: docs/rules/sml.rules.md] |
+| Stateforward.SML | Project-pinned local dependency, not re-versioned for this phase. [VERIFIED: docs/rules/sml.rules.md] | State-machine orchestration. [VERIFIED: docs/rules/sml.rules.md] | Repository rules require Stateforward.SML for orchestration and define the SML actor contract. [VERIFIED: AGENTS.md; VERIFIED: docs/rules/sml.rules.md] |
 | C++20 EMEL runtime | Repository target, built by CMake. [VERIFIED: CMakeLists.txt] | Maintained EMEL speech recognizer, model contract, GGUF loader, and Whisper kernel path. [VERIFIED: tools/bench/whisper_emel_parity_runner.cpp; VERIFIED: src/emel/speech/recognizer/sm.hpp] | The phase is about source-backed EMEL behavior, not a new external library stack. [VERIFIED: AGENTS.md; VERIFIED: .planning/milestones/v1.16-MILESTONE-AUDIT.md] |
 | whisper.cpp reference lane | `v1.7.6`, commit `a8d002cfd879315632a579e73f0148d06959de36`. [VERIFIED: scripts/setup_whisper_cpp_reference.sh; VERIFIED: tools/bench/reference_backends/whisper_cpp_asr.json] | Reference transcript generation for the pinned ASR lane. [VERIFIED: tools/bench/reference_backends/whisper_cpp_asr.json] | The roadmap defines whisper.cpp as the parity/reference lane for this milestone. [VERIFIED: .planning/STATE.md; VERIFIED: .planning/ROADMAP.md] |
 | doctest + CTest | doctest header checked in `third_party/doctest`; CTest enabled when tests are enabled. [VERIFIED: CMakeLists.txt] | Unit and integration tests. [VERIFIED: CMakeLists.txt] | Repository rules require doctest and ctest targets. [VERIFIED: AGENTS.md] |

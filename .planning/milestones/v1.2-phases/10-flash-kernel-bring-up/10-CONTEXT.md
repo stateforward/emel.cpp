@@ -37,7 +37,7 @@ yet, and does not claim user-visible parity or benchmark completion.
 
 ## Specific Ideas
 
-- Keep Boost.SML orchestration unchanged; this phase is a data-plane replacement only.
+- Keep Stateforward.SML orchestration unchanged; this phase is a data-plane replacement only.
 - Treat "flash attention" claims narrowly until the shipped generator path actually adopts the new
   kernel in Phase 11.
 - Avoid proving completion through `tools/` output this early; Phase 10 should finish with kernel

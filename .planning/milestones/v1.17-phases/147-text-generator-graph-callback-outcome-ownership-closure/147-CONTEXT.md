@@ -19,7 +19,7 @@ writes.
 
 ### Locked Decisions
 - Treat the milestone audit as source-backed truth: artifacts alone cannot satisfy this phase.
-- Keep runtime behavior choice in Boost.SML guards and destination-first transition rows.
+- Keep runtime behavior choice in Stateforward.SML guards and destination-first transition rows.
 - Keep graph compute readiness checks in parent/prefill guards before graph dispatch.
 - Keep `detail.hpp` callbacks limited to already-accepted binding/copying for the maintained path.
 - Do not substitute benchmark, model, snapshot, fixture, or tool-only evidence for source repair.
@@ -38,7 +38,7 @@ writes.
 
 ### Rule Set
 - `AGENTS.md` - Project-level SML, detail-helper, context, and quality-gate contract.
-- `docs/rules/sml.rules.md` - Normative Boost.SML RTC and routing rules.
+- `docs/rules/sml.rules.md` - Normative Stateforward.SML RTC and routing rules.
 
 ### Audit Evidence
 - `.planning/v1.17-MILESTONE-AUDIT.md` - Current source-backed gap report.

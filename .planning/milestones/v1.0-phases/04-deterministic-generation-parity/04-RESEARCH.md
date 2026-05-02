@@ -62,7 +62,7 @@ structured mismatch diagnostics.
 | Library | Version | Purpose | Why Standard |
 |---------|---------|---------|--------------|
 | C++20 | repo standard | Tool and runtime implementation | Already enforced across the repo |
-| Boost.SML | pinned in repo | Generator orchestration | Required by project rules and existing machines |
+| Stateforward.SML | pinned in repo | Generator orchestration | Required by project rules and existing machines |
 | doctest | vendored in repo | Focused generator behavior coverage | Already used across `tests/generator/*` |
 
 ### Supporting

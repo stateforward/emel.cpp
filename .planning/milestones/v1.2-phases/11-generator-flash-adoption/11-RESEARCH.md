@@ -12,7 +12,7 @@ slice
 ## Phase Boundary
 
 Phase 11 adopts the Phase 10 flash-attention kernel inside the shipped canonical generation path
-under `src/emel/generator` without changing Boost.SML orchestration, public APIs, or tool-facing
+under `src/emel/generator` without changing Stateforward.SML orchestration, public APIs, or tool-facing
 contracts. This phase is about generator/runtime truth only: supported canonical requests must run
 through the real `op_flash_attn_ext` backend route, and unsupported requests must behave
 deterministically without silently claiming flash execution.
@@ -23,7 +23,7 @@ deterministically without silently claiming flash execution.
 - Phase 11 only targets the canonical CPU-hosted Llama-68M generation slice already shipped by the
   generator.
 - Flash adoption happens inside `src/emel/generator/detail.hpp` after Q/K/V matmuls, RoPE, and K/V
-  cache writes; Boost.SML orchestration stays unchanged.
+  cache writes; Stateforward.SML orchestration stays unchanged.
 
 ### Unsupported Request Behavior
 - If the generator cannot form a canonical `op_flash_attn_ext` request, the request must fail
@@ -89,7 +89,7 @@ plus deterministic unsupported-request failure.
 
 Phase 11 must honor the repo contract:
 
-- Keep Boost.SML orchestration unchanged unless the user explicitly approves structural changes.
+- Keep Stateforward.SML orchestration unchanged unless the user explicitly approves structural changes.
 - Preserve RTC/no-queue behavior and avoid self-dispatch.
 - Keep actions bounded, non-blocking, and allocation-free during dispatch.
 - Do not silently claim flash-path execution on a non-flash path.
@@ -105,7 +105,7 @@ Phase 11 must honor the repo contract:
 |---------------------|---------|---------|--------------|
 | `src/emel/generator/detail.hpp` native backend | repo local | Generator data-plane execution and attention seam | This is where attention is still materialized today and where flash adoption must occur |
 | `src/emel/kernel/detail.hpp` + backend `sm` wrappers | repo local | Canonical flash-attention contract and execution | Phase 10 already verified this path and Phase 11 must reuse it rather than duplicating math |
-| Boost.SML generator/graph/kernel machines | pinned repo state | Orchestration | Milestone goal explicitly says orchestration stays unchanged |
+| Stateforward.SML generator/graph/kernel machines | pinned repo state | Orchestration | Milestone goal explicitly says orchestration stays unchanged |
 
 ### Supporting
 | Library / Component | Version | Purpose | When to Use |

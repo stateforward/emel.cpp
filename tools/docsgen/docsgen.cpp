@@ -1,4 +1,4 @@
-#include <boost/sml.hpp>
+#include <stateforward/sml.hpp>
 
 #include <algorithm>
 #include <cstddef>
@@ -331,7 +331,7 @@ std::optional<std::string> render_template(const fs::path & template_path,
 
   parser.process_event(parse_ev);
   if (parse_err != static_cast<int32_t>(emel::text::jinja::parser::error::none) ||
-      !parser.is(boost::sml::state<emel::text::jinja::parser::done>)) {
+      !parser.is(stateforward::sml::state<emel::text::jinja::parser::done>)) {
     std::fprintf(stderr, "error: jinja parse failed\n");
     return std::nullopt;
   }

@@ -1,7 +1,7 @@
 # Phase 1: Generation Harness Contract - Research
 
 **Researched:** 2026-03-07
-**Domain:** paritychecker CLI and harness scaffolding for a brownfield Boost.SML inference slice
+**Domain:** paritychecker CLI and harness scaffolding for a brownfield Stateforward.SML inference slice
 **Confidence:** HIGH
 
 <user_constraints>
@@ -42,7 +42,7 @@ This phase reuses the repo's existing stack rather than introducing anything new
 | Library | Version | Purpose | Why Standard |
 |---------|---------|---------|--------------|
 | C++20 | repo standard | Tool and runtime implementation | Already enforced by `CMakeLists.txt` and `tools/paritychecker/CMakeLists.txt` |
-| Boost.SML | pinned in repo | Downstream actor orchestration contract | The harness must prepare for the real actors instead of bypassing them |
+| Stateforward.SML | pinned in repo | Downstream actor orchestration contract | The harness must prepare for the real actors instead of bypassing them |
 | doctest | vendored in repo | Existing paritychecker subprocess regression surface | Later phases rely on the same test harness |
 
 ### Supporting

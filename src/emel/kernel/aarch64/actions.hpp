@@ -2141,6 +2141,16 @@ inline bool execute_neon_sqr(const event::op_sqr &request) noexcept {
   float *dst = static_cast<float *>(request.dst.data);
 
   uint64_t i = 0;
+  for (; i + 16 <= count; i += 16) {
+    const float32x4_t v0 = vld1q_f32(src + i);
+    const float32x4_t v1 = vld1q_f32(src + i + 4);
+    const float32x4_t v2 = vld1q_f32(src + i + 8);
+    const float32x4_t v3 = vld1q_f32(src + i + 12);
+    vst1q_f32(dst + i, vmulq_f32(v0, v0));
+    vst1q_f32(dst + i + 4, vmulq_f32(v1, v1));
+    vst1q_f32(dst + i + 8, vmulq_f32(v2, v2));
+    vst1q_f32(dst + i + 12, vmulq_f32(v3, v3));
+  }
   for (; i + 4 <= count; i += 4) {
     const float32x4_t v = vld1q_f32(src + i);
     vst1q_f32(dst + i, vmulq_f32(v, v));

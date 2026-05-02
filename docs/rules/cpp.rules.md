@@ -7,10 +7,10 @@ globs: src/**/*, include/**/*, tests/**/*
 
 ## 1. scope and assumptions
 
-- **CPPRT-001** MUST comply with the **RTC**, **no-queue**, **determinism**, **single-writer**, **no-heap-during-dispatch**, and **bounded-work** invariants defined in `sml.rules.md` for any boost.SML-based actor/state-machine dispatch chain.
+- **CPPRT-001** MUST comply with the **RTC**, **no-queue**, **determinism**, **single-writer**, **no-heap-during-dispatch**, and **bounded-work** invariants defined in `sml.rules.md` for any stateforward.SML-based actor/state-machine dispatch chain.
 
 - **CPPRT-002** MUST treat the following as **dispatch-critical** (real-time constrained) code paths:
-  - `boost::sml::sm<...>::process_event(...)` execution, including guards, actions, entry/exit actions, and anonymous/internal transitions.
+  - `stateforward::sml::sm<...>::process_event(...)` execution, including guards, actions, entry/exit actions, and anonymous/internal transitions.
   - any synchronous cross-actor call that occurs inside the above chain.
 
 - **CPPRT-003** MUST separate execution into **initialization/configuration phase** (not time critical) and **dispatch/RTC phase** (time critical).

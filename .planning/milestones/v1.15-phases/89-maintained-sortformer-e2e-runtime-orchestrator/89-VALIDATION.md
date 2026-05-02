@@ -20,7 +20,7 @@ created: 2026-04-23
 
 | Rule Input | Read | Result |
 |------------|------|--------|
-| `AGENTS.md` | ✅ | The retained proof keeps the maintained raw-PCM-to-segment path in Boost.SML orchestration with component-owned numeric work. |
+| `AGENTS.md` | ✅ | The retained proof keeps the maintained raw-PCM-to-segment path in Stateforward.SML orchestration with component-owned numeric work. |
 | `docs/rules/sml.rules.md` | ✅ | Validation scope records the existing bounded pipeline actor and does not introduce queue/defer or self-dispatch behavior. |
 | `docs/rules/cpp.rules.md` | ✅ | No C++ source changed during this validation backfill. |
 

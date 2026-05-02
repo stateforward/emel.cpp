@@ -26,11 +26,11 @@ option(EMEL_ENABLE_AARCH64_HOST_FEATURES
 include(FetchContent)
 include(cmake/sml_version.cmake)
 FetchContent_Declare(
-  boost_sml
-  GIT_REPOSITORY ${EMEL_BOOST_SML_GIT_REPOSITORY}
-  GIT_TAG ${EMEL_BOOST_SML_GIT_TAG}
+  stateforward_sml
+  GIT_REPOSITORY ${EMEL_SML_GIT_REPOSITORY}
+  GIT_TAG ${EMEL_SML_GIT_TAG}
 )
-FetchContent_MakeAvailable(boost_sml)
+FetchContent_MakeAvailable(stateforward_sml)
 
 add_library(emel_core INTERFACE)
 
@@ -38,7 +38,7 @@ target_include_directories(emel_core
   INTERFACE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
     ${CMAKE_CURRENT_SOURCE_DIR}/src
-    ${boost_sml_SOURCE_DIR}/include
+    ${stateforward_sml_SOURCE_DIR}/include
 )
 
 set(EMEL_AARCH64_HOST_CXX_FLAG "")
@@ -273,7 +273,7 @@ if(EMEL_ENABLE_TESTS)
       ${CMAKE_CURRENT_SOURCE_DIR}/src
       ${CMAKE_CURRENT_SOURCE_DIR}/include
       ${CMAKE_CURRENT_SOURCE_DIR}/tools/bench
-      ${boost_sml_SOURCE_DIR}/include
+      ${stateforward_sml_SOURCE_DIR}/include
       ${DOCTEST_INCLUDE_DIR}
   )
 

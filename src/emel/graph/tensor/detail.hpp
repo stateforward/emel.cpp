@@ -4,8 +4,8 @@
 #include <cstddef>
 #include <cstdint>
 
-#include <boost/sml.hpp>
-#include <boost/sml/utility/sm_pool.hpp>
+#include <stateforward/sml.hpp>
+#include <stateforward/sml/utility/sm_pool.hpp>
 
 #include "emel/error/error.hpp"
 #include "emel/graph/tensor/errors.hpp"
@@ -105,7 +105,7 @@ struct router_ready {};
 
 struct tensor_router_model {
   auto operator()() const {
-    namespace sml = boost::sml;
+    namespace sml = stateforward::sml;
 
     struct can_reserve {
       bool operator()(const tensor_storage & storage,
@@ -354,6 +354,6 @@ struct tensor_router_model {
   }
 };
 
-using tensor_pool = boost::sml::utility::sm_pool<tensor_storage, tensor_router_model>;
+using tensor_pool = stateforward::sml::utility::sm_pool<tensor_storage, tensor_router_model>;
 
 }  // namespace emel::graph::tensor::detail

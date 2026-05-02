@@ -1,6 +1,6 @@
 # EMEL
 
-ARM-first deterministic C++ inference engine built around Boost.SML orchestration.
+ARM-first deterministic C++ inference engine built around Stateforward.SML orchestration.
 
 ## Status: WIP
 
@@ -30,7 +30,7 @@ explicitly backs them with maintained tests, parity, and benchmark evidence.
 ## Why EMEL
 
 EMEL exists to make inference behavior explicit and verifiable. Instead of ad-hoc control flow,
-orchestration is modeled as Boost.SML state machines with deterministic, testable transitions.
+orchestration is modeled as Stateforward.SML state machines with deterministic, testable transitions.
 That enables:
 
 1. Clear operational semantics and failure modes.
@@ -97,7 +97,7 @@ environments, while Zig remains the default for day-to-day builds.
 - [Architecture](.planning/architecture/) (generated state-machine docs + Mermaid diagrams)
 - [ARM-first Inventory](docs/arm-first-inventory.md) (non-ARM surface inventory and removal notes)
 - [Benchmarks](docs/benchmarks.md) (generated benchmark snapshot table)
-- [SML Conventions](docs/third_party/sml.md) (Boost.SML conventions and usage)
+- [SML Conventions](docs/third_party/sml.md) (Stateforward.SML conventions and usage)
 
 ## Docs index
 

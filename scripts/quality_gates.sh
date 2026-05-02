@@ -115,6 +115,10 @@ run_domain_boundary_gate() {
   "$ROOT_DIR/scripts/check_domain_boundaries.sh"
 }
 
+run_sml_surface_gate() {
+  "$ROOT_DIR/scripts/check_legacy_sml_surface.sh"
+}
+
 is_coverage_excluded_src_file() {
   local file="$1"
   case "$file" in
@@ -133,6 +137,7 @@ coverage_src_files=()
 test_shards=()
 bench_suites=()
 bench_full=false
+bench_all_suites=false
 docs_needed=false
 parity_needed=false
 fuzz_needed=false
@@ -255,7 +260,7 @@ add_bench_suite() {
     return
   fi
   if [[ "$suite" == "full" ]]; then
-    bench_full=true
+    bench_all_suites=true
     return
   fi
   for existing in ${bench_suites[@]+"${bench_suites[@]}"}; do
@@ -264,6 +269,101 @@ add_bench_suite() {
     fi
   done
   bench_suites+=("$suite")
+}
+
+bench_suite_supported_for_host() {
+  local suite="$1"
+  local host_arch
+  host_arch="$(uname -m)"
+  case "$suite" in
+    kernel_x86_64)
+      [[ "$host_arch" == "x86_64" || "$host_arch" == "amd64" ]]
+      ;;
+    kernel_aarch64)
+      [[ "$host_arch" == "aarch64" || "$host_arch" == "arm64" ]]
+      ;;
+    sm_any)
+      [[ -n "${EMEL_BENCH_INTERNAL:-}" && "${EMEL_BENCH_INTERNAL:-}" != "0" ]]
+      ;;
+    *)
+      return 0
+      ;;
+  esac
+}
+
+add_all_benchmark_suites_from_manifest() {
+  local line
+  local token
+  local runner
+  local priority_runner
+
+  if [[ ! -f "$BENCH_DEPENDENCY_MANIFEST_BASELINE" ]]; then
+    bench_full=true
+    return
+  fi
+
+  for priority_runner in \
+      gbnf_rule_parser \
+      jinja_formatter \
+      jinja_parser \
+      logits_sampler \
+      logits_validator \
+      kernel_aarch64 \
+      kernel_x86_64 \
+      batch_planner \
+      sm_any; do
+    add_benchmark_suite_from_manifest "$priority_runner"
+  done
+
+  while IFS= read -r line; do
+    [[ "$line" == record\ * ]] || continue
+    runner=""
+    for token in $line; do
+      case "$token" in
+        runner=*)
+          runner="${token#runner=}"
+          ;;
+      esac
+    done
+    if [[ -z "$runner" || "$runner" == "all" ]]; then
+      continue
+    fi
+    if ! bench_suite_supported_for_host "$runner"; then
+      continue
+    fi
+    add_bench_suite "$runner"
+  done < "$BENCH_DEPENDENCY_MANIFEST_BASELINE"
+
+  if [[ ${#bench_suites[@]} -eq 0 ]]; then
+    bench_full=true
+  fi
+}
+
+add_benchmark_suite_from_manifest() {
+  local wanted_runner="$1"
+  local line
+  local token
+  local runner
+
+  while IFS= read -r line; do
+    [[ "$line" == record\ * ]] || continue
+    runner=""
+    for token in $line; do
+      case "$token" in
+        runner=*)
+          runner="${token#runner=}"
+          ;;
+      esac
+    done
+    if [[ "$runner" != "$wanted_runner" ]]; then
+      continue
+    fi
+    if ! bench_suite_supported_for_host "$runner"; then
+      return
+    fi
+    add_bench_suite "$runner"
+    return
+  done < "$BENCH_DEPENDENCY_MANIFEST_BASELINE"
 }
 
 bench_dependency_manifest_record_matches_file() {
@@ -311,7 +411,8 @@ bench_dependency_manifest_apply_changed_files() {
       fi
       matched=true
       if [[ "$runner" == "all" ]]; then
-        bench_full=true
+        bench_all_suites=true
+        add_all_benchmark_suites_from_manifest
         return
       fi
       add_bench_suite "$runner"
@@ -383,7 +484,8 @@ infer_quality_gate_scope() {
         add_bench_suite "$raw_suite"
       done < <(printf '%s\n' "$QUALITY_GATES_BENCH_SUITE" | tr ':,' '\n')
     else
-      bench_full=true
+      bench_all_suites=true
+      add_all_benchmark_suites_from_manifest
     fi
     docs_needed=true
     parity_needed=true
@@ -557,7 +659,7 @@ parity_dependency_manifest_requires_full_gate() {
 }
 
 bench_dependency_manifest_check_needed() {
-  if $bench_full || [[ ${#bench_suites[@]} -gt 0 ]]; then
+  if $bench_full || $bench_all_suites || [[ ${#bench_suites[@]} -gt 0 ]]; then
     return 0
   fi
   return 1
@@ -642,6 +744,10 @@ run_benchmark_gates() {
     if bench_dependency_manifest_requires_full_gate; then
       bench_full=true
     fi
+  fi
+
+  if ! $bench_full && $bench_all_suites && [[ ${#bench_suites[@]} -eq 0 ]]; then
+    add_all_benchmark_suites_from_manifest
   fi
 
   if $bench_full; then
@@ -734,9 +840,15 @@ if [[ -z "$test_shard_list" &&
 fi
 
 run_step domain_boundaries run_domain_boundary_gate
+run_step legacy_sml_surface run_sml_surface_gate
 run_step build_with_zig env \
   EMEL_ZIG_TEST_SHARDS="$test_shard_list" \
   "$ROOT_DIR/scripts/build_with_zig.sh"
+if run_benchmark_gates; then
+  bench_status=0
+else
+  bench_status=$?
+fi
 if [[ "$coverage_changed_only" == "1" &&
       "$QUALITY_GATES_SCOPE" != "full" &&
       -z "$coverage_changed_files" ]]; then
@@ -755,14 +867,7 @@ run_parity_gate
 # Temporarily disabled (SML UBSAN issue under asan_ubsan).
 # TODO: re-enable once stateforward/sml.cpp fix lands.
 run_fuzz_gate
-# Temporarily disabled during hard-cutover tree migration.
-# TODO: re-enable once lint snapshot baseline is intentionally regenerated.
-# run_step lint_snapshot "$ROOT_DIR/scripts/lint_snapshot.sh"
-if run_benchmark_gates; then
-  bench_status=0
-else
-  bench_status=$?
-fi
+run_step lint_snapshot "$ROOT_DIR/scripts/lint_snapshot.sh"
 case "$QUALITY_GATES_DOCS" in
   always)
     run_step generate_docs "$ROOT_DIR/scripts/generate_docs.sh"

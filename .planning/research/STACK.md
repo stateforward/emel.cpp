@@ -6,7 +6,7 @@
 
 ## Existing Repo Stack
 
-- C++ runtime organized around Boost.SML actors and explicit event-driven orchestration.
+- C++ runtime organized around Stateforward.SML actors and explicit event-driven orchestration.
 - GGUF loading and model-family validation under `src/emel/model/**`.
 - ARM kernel and tensor execution surfaces under `src/emel/kernel/**`.
 - Existing audio support is embedding-specific through `src/emel/embeddings/generator` and

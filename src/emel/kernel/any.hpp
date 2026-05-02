@@ -307,8 +307,8 @@ class any {
   }
 
  private:
-  using sm_list = boost::sml::aux::type_list<x86_64::sm, aarch64::sm>;
-  using event_list = boost::sml::aux::type_list<
+  using sm_list = stateforward::sml::aux::type_list<x86_64::sm, aarch64::sm>;
+  using event_list = stateforward::sml::aux::type_list<
       event::dispatch
 #define EMEL_KERNEL_ANY_EVENT_TYPE(op_name) , event::op_name
       EMEL_KERNEL_OP_EVENT_LIST(EMEL_KERNEL_ANY_EVENT_TYPE)

@@ -7,7 +7,7 @@
 ## Phase Boundary
 
 Phase 11 adopts the Phase 10 flash-attention kernel inside the shipped canonical generation path
-under `src/emel/generator` without changing Boost.SML orchestration, public APIs, or tool-facing
+under `src/emel/generator` without changing Stateforward.SML orchestration, public APIs, or tool-facing
 contracts. This phase is about generator/runtime truth only: supported canonical requests must run
 through the real `op_flash_attn_ext` backend route, and unsupported requests must behave
 deterministically without silently claiming flash execution.
@@ -21,7 +21,7 @@ deterministically without silently claiming flash execution.
 - **D-01:** Phase 11 only targets the canonical CPU-hosted Llama-68M generation slice already
   shipped by the generator, not broader model or shape coverage.
 - **D-02:** Flash adoption happens inside `src/emel/generator/detail.hpp` at the existing
-  attention seam after Q/K/V matmuls, RoPE, and K/V cache writes; Boost.SML orchestration stays
+  attention seam after Q/K/V matmuls, RoPE, and K/V cache writes; Stateforward.SML orchestration stays
   unchanged.
 
 ### Unsupported Request Behavior

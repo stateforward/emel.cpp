@@ -1,4 +1,4 @@
-#include <boost/sml.hpp>
+#include <stateforward/sml.hpp>
 #include <doctest/doctest.h>
 #include <array>
 #include <string_view>
@@ -53,7 +53,7 @@ struct callback_tracker {
 TEST_CASE("jinja_parser_starts_initialized") {
   emel::text::jinja::parser::action::context ctx{};
   emel::text::jinja::parser::sm machine{ctx};
-  CHECK(machine.is(boost::sml::state<emel::text::jinja::parser::initialized>));
+  CHECK(machine.is(stateforward::sml::state<emel::text::jinja::parser::initialized>));
 }
 
 TEST_CASE("jinja_program_parser_parse_error_guards_classify_runtime_error_explicitly") {
@@ -161,7 +161,7 @@ TEST_CASE("jinja_parser_valid_parse_reaches_done") {
   };
 
   CHECK(machine.process_event(ev));
-  CHECK(machine.is(boost::sml::state<emel::text::jinja::parser::done>));
+  CHECK(machine.is(stateforward::sml::state<emel::text::jinja::parser::done>));
   CHECK(tracker.done_called);
   CHECK_FALSE(tracker.error_called);
   CHECK(err == static_cast<int32_t>(emel::text::jinja::parser::error::none));
@@ -188,7 +188,7 @@ TEST_CASE("jinja_parser_invalid_request_with_callbacks_dispatches_error") {
   };
 
   CHECK_FALSE(machine.process_event(ev));
-  CHECK(machine.is(boost::sml::state<emel::text::jinja::parser::errored>));
+  CHECK(machine.is(stateforward::sml::state<emel::text::jinja::parser::errored>));
   CHECK_FALSE(tracker.done_called);
   CHECK(tracker.error_called);
   CHECK(err == static_cast<int32_t>(emel::text::jinja::parser::error::invalid_request));
@@ -213,7 +213,7 @@ TEST_CASE("jinja_parser_missing_callbacks_returns_error_without_dispatch") {
   };
 
   CHECK_FALSE(machine.process_event(ev));
-  CHECK(machine.is(boost::sml::state<emel::text::jinja::parser::errored>));
+  CHECK(machine.is(stateforward::sml::state<emel::text::jinja::parser::errored>));
   CHECK(err == static_cast<int32_t>(emel::text::jinja::parser::error::invalid_request));
   CHECK(error_pos == 0);
   CHECK(program.body.empty());
@@ -237,7 +237,7 @@ TEST_CASE("jinja_parser_parse_failure_reports_error") {
   };
 
   CHECK_FALSE(machine.process_event(ev));
-  CHECK(machine.is(boost::sml::state<emel::text::jinja::parser::errored>));
+  CHECK(machine.is(stateforward::sml::state<emel::text::jinja::parser::errored>));
   CHECK_FALSE(tracker.done_called);
   CHECK(tracker.error_called);
   CHECK(err == static_cast<int32_t>(emel::text::jinja::parser::error::parse_failed));
@@ -263,7 +263,7 @@ TEST_CASE("jinja_parser_lex_failure_reports_error") {
   };
 
   CHECK_FALSE(machine.process_event(ev));
-  CHECK(machine.is(boost::sml::state<emel::text::jinja::parser::errored>));
+  CHECK(machine.is(stateforward::sml::state<emel::text::jinja::parser::errored>));
   CHECK_FALSE(tracker.done_called);
   CHECK(tracker.error_called);
   CHECK(err == static_cast<int32_t>(emel::text::jinja::parser::error::parse_failed));
@@ -299,7 +299,7 @@ TEST_CASE("jinja_parser_parses_control_statements") {
   };
 
   CHECK(machine.process_event(ev));
-  CHECK(machine.is(boost::sml::state<emel::text::jinja::parser::done>));
+  CHECK(machine.is(stateforward::sml::state<emel::text::jinja::parser::done>));
   CHECK(err == static_cast<int32_t>(emel::text::jinja::parser::error::none));
   CHECK(program.body.size() >= 7);
 }
@@ -332,7 +332,7 @@ TEST_CASE("jinja_parser_parses_expressions") {
   };
 
   CHECK(machine.process_event(ev));
-  CHECK(machine.is(boost::sml::state<emel::text::jinja::parser::done>));
+  CHECK(machine.is(stateforward::sml::state<emel::text::jinja::parser::done>));
   CHECK(err == static_cast<int32_t>(emel::text::jinja::parser::error::none));
   CHECK(program.body.size() >= 9);
 }
@@ -365,7 +365,7 @@ TEST_CASE("jinja_parser_parses_additional_expressions") {
   };
 
   CHECK(machine.process_event(ev));
-  CHECK(machine.is(boost::sml::state<emel::text::jinja::parser::done>));
+  CHECK(machine.is(stateforward::sml::state<emel::text::jinja::parser::done>));
   CHECK(err == static_cast<int32_t>(emel::text::jinja::parser::error::none));
   CHECK(program.body.size() >= 8);
 }
@@ -392,7 +392,7 @@ TEST_CASE("jinja_parser_parses_slices_and_loops") {
   };
 
   CHECK(machine.process_event(ev));
-  CHECK(machine.is(boost::sml::state<emel::text::jinja::parser::done>));
+  CHECK(machine.is(stateforward::sml::state<emel::text::jinja::parser::done>));
   CHECK(err == static_cast<int32_t>(emel::text::jinja::parser::error::none));
   CHECK(program.body.size() >= 5);
 }
@@ -414,7 +414,7 @@ TEST_CASE("jinja_parser_rejects_unknown_statement") {
   };
 
   CHECK_FALSE(machine.process_event(ev));
-  CHECK(machine.is(boost::sml::state<emel::text::jinja::parser::errored>));
+  CHECK(machine.is(stateforward::sml::state<emel::text::jinja::parser::errored>));
   CHECK(err == static_cast<int32_t>(emel::text::jinja::parser::error::parse_failed));
   CHECK(program.body.empty());
 }
@@ -428,5 +428,5 @@ TEST_CASE("jinja_parser_unexpected_event_transitions_state") {
   emel::text::jinja::parser::sm machine{ctx};
   machine.process_event(unknown_event{});
 
-  CHECK(machine.is(boost::sml::state<emel::text::jinja::parser::unexpected>));
+  CHECK(machine.is(stateforward::sml::state<emel::text::jinja::parser::unexpected>));
 }

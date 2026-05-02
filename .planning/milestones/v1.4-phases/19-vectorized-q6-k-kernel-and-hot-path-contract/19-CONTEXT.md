@@ -12,7 +12,7 @@ path to the same effective operand class with zero-allocation dispatch behavior 
 `q2_K/q3_K/q6_K` requests.
 
 This phase stays inside the existing backend and maintained test surfaces. It does not change
-Boost.SML structure, public APIs, runtime wrappers, or benchmark/parity publication surfaces.
+Stateforward.SML structure, public APIs, runtime wrappers, or benchmark/parity publication surfaces.
 
 </domain>
 

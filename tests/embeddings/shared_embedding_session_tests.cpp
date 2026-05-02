@@ -2,7 +2,7 @@
 #include <cstdint>
 #include <string>
 
-#include <boost/sml.hpp>
+#include <stateforward/sml.hpp>
 #include "doctest/doctest.h"
 
 #include "emel/docs/detail.hpp"
@@ -37,7 +37,7 @@ inline constexpr uint64_t k_fnv_offset_basis = 1469598103934665603ull;
 inline constexpr uint64_t k_fnv_prime = 1099511628211ull;
 
 template <class... Ts, class fn>
-constexpr void for_each_type(boost::sml::aux::type_list<Ts...>, fn && visitor) {
+constexpr void for_each_type(stateforward::sml::aux::type_list<Ts...>, fn && visitor) {
   (visitor.template operator()<Ts>(), ...);
 }
 
@@ -82,10 +82,10 @@ inline uint64_t hash_tensor_metadata(const emel::model::data & model) noexcept {
 }
 
 inline void warm_generator_sm_introspection_paths() {
-  using initializer_machine = boost::sml::sm<emel::text::generator::initializer::model>;
+  using initializer_machine = stateforward::sml::sm<emel::text::generator::initializer::model>;
   using initializer_states = typename initializer_machine::states;
   using initializer_transitions = typename initializer_machine::transitions;
-  using prefill_machine = boost::sml::sm<emel::text::generator::prefill::model>;
+  using prefill_machine = stateforward::sml::sm<emel::text::generator::prefill::model>;
   using prefill_states = typename prefill_machine::states;
   using prefill_transitions = typename prefill_machine::transitions;
 
@@ -180,7 +180,7 @@ inline void exercise_shared_truncation_contract(const emel::model::data & model)
     REQUIRE(embedding_generator.process_event(text_request));
     CHECK(text_error == emel::error::cast(emel::embeddings::generator::error::none));
     CHECK(text_dimension == dimension);
-    CHECK(embedding_generator.is(boost::sml::state<emel::embeddings::generator::state_done>));
+    CHECK(embedding_generator.is(stateforward::sml::state<emel::embeddings::generator::state_done>));
     check_normalized(text_output, text_dimension);
 
     emel::embeddings::generator::event::embed_image image_request{
@@ -195,7 +195,7 @@ inline void exercise_shared_truncation_contract(const emel::model::data & model)
     REQUIRE(embedding_generator.process_event(image_request));
     CHECK(image_error == emel::error::cast(emel::embeddings::generator::error::none));
     CHECK(image_dimension == dimension);
-    CHECK(embedding_generator.is(boost::sml::state<emel::embeddings::generator::state_done>));
+    CHECK(embedding_generator.is(stateforward::sml::state<emel::embeddings::generator::state_done>));
     check_normalized(image_output, image_dimension);
 
     emel::embeddings::generator::event::embed_audio audio_request{
@@ -209,7 +209,7 @@ inline void exercise_shared_truncation_contract(const emel::model::data & model)
     REQUIRE(embedding_generator.process_event(audio_request));
     CHECK(audio_error == emel::error::cast(emel::embeddings::generator::error::none));
     CHECK(audio_dimension == dimension);
-    CHECK(embedding_generator.is(boost::sml::state<emel::embeddings::generator::state_done>));
+    CHECK(embedding_generator.is(stateforward::sml::state<emel::embeddings::generator::state_done>));
     check_normalized(audio_output, audio_dimension);
   }
 }
@@ -352,7 +352,7 @@ TEST_CASE("embeddings shared contract rejects unsupported truncation uniformly a
   CHECK_FALSE(embedding_generator.process_event(text_request));
   CHECK(text_error == emel::error::cast(emel::embeddings::generator::error::invalid_request));
   CHECK(text_dimension == 0);
-  CHECK(embedding_generator.is(boost::sml::state<emel::embeddings::generator::state_errored>));
+  CHECK(embedding_generator.is(stateforward::sml::state<emel::embeddings::generator::state_errored>));
 
   emel::embeddings::generator::event::embed_image image_request{
     image,
@@ -366,7 +366,7 @@ TEST_CASE("embeddings shared contract rejects unsupported truncation uniformly a
   CHECK_FALSE(embedding_generator.process_event(image_request));
   CHECK(image_error == emel::error::cast(emel::embeddings::generator::error::invalid_request));
   CHECK(image_dimension == 0);
-  CHECK(embedding_generator.is(boost::sml::state<emel::embeddings::generator::state_errored>));
+  CHECK(embedding_generator.is(stateforward::sml::state<emel::embeddings::generator::state_errored>));
 
   emel::embeddings::generator::event::embed_audio audio_request{
     audio,
@@ -379,7 +379,7 @@ TEST_CASE("embeddings shared contract rejects unsupported truncation uniformly a
   CHECK_FALSE(embedding_generator.process_event(audio_request));
   CHECK(audio_error == emel::error::cast(emel::embeddings::generator::error::invalid_request));
   CHECK(audio_dimension == 0);
-  CHECK(embedding_generator.is(boost::sml::state<emel::embeddings::generator::state_errored>));
+  CHECK(embedding_generator.is(stateforward::sml::state<emel::embeddings::generator::state_errored>));
 }
 
 TEST_CASE("embeddings initialize rejects omniembed fixtures missing a required modality family") {

@@ -1,6 +1,6 @@
 #pragma once
 
-#include <boost/sml.hpp>
+#include <stateforward/sml.hpp>
 #include <algorithm>
 #include <array>
 #include <concepts>
@@ -55,7 +55,7 @@ struct process_support {
 };
 
 template <class... types, class fn>
-constexpr void for_each_type(boost::sml::aux::type_list<types...>, fn && visitor) {
+constexpr void for_each_type(stateforward::sml::aux::type_list<types...>, fn && visitor) {
   (visitor.template operator()<types>(), ...);
 }
 
@@ -63,7 +63,7 @@ template <class list>
 struct type_list_size;
 
 template <class... types>
-struct type_list_size<boost::sml::aux::type_list<types...>>
+struct type_list_size<stateforward::sml::aux::type_list<types...>>
     : std::integral_constant<std::size_t, sizeof...(types)> {};
 
 template <class list>
@@ -73,7 +73,7 @@ template <class list>
 struct type_list_max;
 
 template <class... types>
-struct type_list_max<boost::sml::aux::type_list<types...>> {
+struct type_list_max<stateforward::sml::aux::type_list<types...>> {
   static constexpr std::size_t size = std::max({sizeof(types)...});
   static constexpr std::size_t align = std::max({alignof(types)...});
 };
@@ -82,7 +82,7 @@ template <class type, class list>
 struct type_list_contains;
 
 template <class type, class... types>
-struct type_list_contains<type, boost::sml::aux::type_list<types...>>
+struct type_list_contains<type, stateforward::sml::aux::type_list<types...>>
     : std::bool_constant<(std::is_same_v<type, types> || ...)> {};
 
 template <class sm>
@@ -114,7 +114,7 @@ template <class list>
 struct sm_any_construct_table;
 
 template <class... types>
-struct sm_any_construct_table<boost::sml::aux::type_list<types...>> {
+struct sm_any_construct_table<stateforward::sml::aux::type_list<types...>> {
   using fn = void (*)(void *);
   inline static constexpr std::array<fn, sizeof...(types)> table = {
       &sm_any_construct<types>...};
@@ -124,7 +124,7 @@ template <class list>
 struct sm_any_destroy_table;
 
 template <class... types>
-struct sm_any_destroy_table<boost::sml::aux::type_list<types...>> {
+struct sm_any_destroy_table<stateforward::sml::aux::type_list<types...>> {
   using fn = void (*)(void *) noexcept;
   inline static constexpr std::array<fn, sizeof...(types)> table = {
       &sm_any_destroy<types>...};
@@ -134,7 +134,7 @@ template <class event, class list>
 struct sm_any_event_table;
 
 template <class event, class... types>
-struct sm_any_event_table<event, boost::sml::aux::type_list<types...>> {
+struct sm_any_event_table<event, stateforward::sml::aux::type_list<types...>> {
   using fn = bool (*)(void *, const event &);
   inline static constexpr std::array<fn, sizeof...(types)> table = {
       &sm_any_process_event<types, event>...};
@@ -144,7 +144,7 @@ template <class event_list>
 struct sm_any_process_event_table;
 
 template <class... events>
-struct sm_any_process_event_table<boost::sml::aux::type_list<events...>> {
+struct sm_any_process_event_table<stateforward::sml::aux::type_list<events...>> {
   template <class event>
   using fn = bool (*)(void *, const event &);
 
@@ -165,7 +165,7 @@ template <class list>
 struct sm_any_visit;
 
 template <class... types>
-struct sm_any_visit<boost::sml::aux::type_list<types...>> {
+struct sm_any_visit<stateforward::sml::aux::type_list<types...>> {
   template <std::size_t idx, class visitor, class first, class... rest>
   static void apply_index(std::size_t target, void * storage, visitor && visitor_fn) {
     const bool matched = target == idx;
@@ -223,7 +223,7 @@ class sm<model, void, policies...> {
  public:
   using model_type = model;
   using context_type = void;
-  using state_machine_type = boost::sml::sm<model, policies...>;
+  using state_machine_type = stateforward::sml::sm<model, policies...>;
 
   sm() = default;
   ~sm() = default;
@@ -267,7 +267,7 @@ class sm {
 
   using model_type = model;
   using context_type = context;
-  using state_machine_type = boost::sml::sm<model, policies...>;
+  using state_machine_type = stateforward::sml::sm<model, policies...>;
 
   sm() : state_machine_(context_) {}
   explicit sm(const context_type & context_in)

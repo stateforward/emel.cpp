@@ -1,4 +1,4 @@
-#include <boost/sml.hpp>
+#include <stateforward/sml.hpp>
 #include <array>
 #include <doctest/doctest.h>
 #include <type_traits>
@@ -80,7 +80,7 @@ TEST_CASE("batch_planner_public_alias_uses_canonical_planner_name") {
                                emel::batch::planner::action::context>);
 
   emel::BatchPlanner machine{};
-  CHECK(machine.is(boost::sml::state<emel::batch::planner::state_idle>));
+  CHECK(machine.is(stateforward::sml::state<emel::batch::planner::state_idle>));
 }
 
 TEST_CASE("batch_planner_mode_surfaces_export_canonical_mode_aliases") {

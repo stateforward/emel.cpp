@@ -1,6 +1,6 @@
 #pragma once
 
-#include <boost/sml.hpp>
+#include <stateforward/sml.hpp>
 
 #include <cstdint>
 #include <cstdlib>
@@ -37,7 +37,7 @@ std::string md_link(const std::string & label, const std::string & source_path);
 bool write_file(const std::filesystem::path & path, const std::string & content, bool check);
 
 template <class... Ts, class fn>
-constexpr void for_each_type(boost::sml::aux::type_list<Ts...>, fn && visitor) {
+constexpr void for_each_type(stateforward::sml::aux::type_list<Ts...>, fn && visitor) {
   (visitor.template operator()<Ts>(), ...);
 }
 
@@ -48,7 +48,7 @@ std::string mermaid_state_name() {
 
 template <class T>
 std::string table_name() {
-  if constexpr (std::is_same_v<T, boost::sml::back::anonymous>) {
+  if constexpr (std::is_same_v<T, stateforward::sml::back::anonymous>) {
     return "-";
   }
   return emel::docs::detail::shorten_type_name(emel::docs::detail::raw_type_name<T>());
@@ -70,7 +70,7 @@ struct transition_row {
 
 template <class model>
 void emit_machine(const machine_spec & spec, const doc_paths & paths, bool check) {
-  using sm_t = boost::sml::sm<model>;
+  using sm_t = stateforward::sml::sm<model>;
   using transitions = typename sm_t::transitions;
 
   std::vector<transition_row> rows;
@@ -106,7 +106,7 @@ void emit_machine(const machine_spec & spec, const doc_paths & paths, bool check
     row.guard = emel::docs::detail::shorten_type_name(emel::docs::detail::raw_type_name<guard>());
     row.action =
         emel::docs::detail::shorten_type_name(emel::docs::detail::raw_type_name<action>());
-    row.is_anonymous_event = std::is_same_v<event, boost::sml::back::anonymous>;
+    row.is_anonymous_event = std::is_same_v<event, stateforward::sml::back::anonymous>;
 
     rows.push_back(std::move(row));
   });

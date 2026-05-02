@@ -1,4 +1,4 @@
-#include <boost/sml.hpp>
+#include <stateforward/sml.hpp>
 #include <doctest/doctest.h>
 
 #include <string>
@@ -68,7 +68,7 @@ emel::gbnf::rule_parser::event::parse make_parse_event(std::string_view grammar_
 
 TEST_CASE("gbnf_parser_starts_ready") {
   emel::gbnf::rule_parser::sm machine{};
-  CHECK(machine.is(boost::sml::state<emel::gbnf::rule_parser::ready>));
+  CHECK(machine.is(stateforward::sml::state<emel::gbnf::rule_parser::ready>));
 }
 
 TEST_CASE("gbnf_parser_valid_parse_dispatches_done") {
@@ -86,7 +86,7 @@ TEST_CASE("gbnf_parser_valid_parse_dispatches_done") {
   CHECK_FALSE(error.called);
   CHECK(grammar.rule_count > 0);
   CHECK(grammar.element_count > 0);
-  CHECK(machine.is(boost::sml::state<emel::gbnf::rule_parser::ready>));
+  CHECK(machine.is(stateforward::sml::state<emel::gbnf::rule_parser::ready>));
 }
 
 TEST_CASE("gbnf_parser_invalid_request_dispatches_invalid_request_error") {

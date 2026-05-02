@@ -1,4 +1,4 @@
-#include <boost/sml.hpp>
+#include <stateforward/sml.hpp>
 #include <cstdint>
 
 #include <doctest/doctest.h>
@@ -90,7 +90,7 @@ bool prepare_graph_checks_memory_payload(const execute_t & ev, bool * reused_out
 
 TEST_CASE("graph_processor_starts_initialized") {
   emel::graph::processor::sm machine{};
-  CHECK(machine.is(boost::sml::state<emel::graph::processor::initialized>));
+  CHECK(machine.is(stateforward::sml::state<emel::graph::processor::initialized>));
 }
 
 TEST_CASE("graph_processor_execute_success_path") {

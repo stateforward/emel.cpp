@@ -56,7 +56,7 @@ generation case.
   snapshot churn.
 - `scripts/quality_gates.sh` is still required after implementation changes, but its current
   warning-only benchmark policy must not be mistaken for proof that Phase 13 is complete.
-- Preserve current Boost.SML / generator / graph runtime boundaries; benchmark publication is a
+- Preserve current Stateforward.SML / generator / graph runtime boundaries; benchmark publication is a
   tool-surface phase, not a state-machine redesign.
 
 ## Standard Stack

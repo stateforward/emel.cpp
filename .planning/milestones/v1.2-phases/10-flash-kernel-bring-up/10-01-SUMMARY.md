@@ -23,7 +23,7 @@ key-decisions:
   - "Use a failing kernel regression first, then land the shared scalar implementation behind the existing backend dispatch rows."
 patterns-established:
   - "New kernel ops must reproduce the missing path with a failing doctest before implementation."
-  - "Canonical flash-attention bring-up can land in shared kernel detail code without changing Boost.SML structure."
+  - "Canonical flash-attention bring-up can land in shared kernel detail code without changing Stateforward.SML structure."
 requirements-completed: []
 duration: 0min
 completed: 2026-03-21

@@ -7,7 +7,7 @@
 #include <string_view>
 #include <vector>
 
-#include <boost/sml.hpp>
+#include <stateforward/sml.hpp>
 #include "doctest/doctest.h"
 
 #include "emel/diarization/request/detail.hpp"
@@ -184,7 +184,7 @@ TEST_CASE("diarization request extracts deterministic Sortformer features") {
 
   diarization_request::sm machine{};
   REQUIRE(machine.process_event(request));
-  CHECK(machine.is(boost::sml::state<diarization_request::state_ready>));
+  CHECK(machine.is(stateforward::sml::state<diarization_request::state_ready>));
   CHECK(err == emel::error::cast(diarization_request::error::none));
   CHECK(frame_count == feature_extractor_detail::k_feature_frame_count);
   CHECK(feature_bin_count == diarization_detail::k_feature_bin_count);
