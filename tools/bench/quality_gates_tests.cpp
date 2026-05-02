@@ -74,7 +74,6 @@ TEST_CASE("quality gates consume parity dependency manifest for runner selection
   CHECK(script.find("PARITY_DEPENDENCY_MANIFEST_BASELINE") != std::string::npos);
   CHECK(script.find("tools/paritychecker/dependency_manifest.txt") != std::string::npos);
   CHECK(script.find("parity_dependency_manifest_apply_changed_files()") != std::string::npos);
-  CHECK(script.find("parity_dependency_manifest_check_needed()") != std::string::npos);
   CHECK(script.find("parity_toolchain_file_requires_full_gate()") != std::string::npos);
   CHECK(script.find("select_full_parity_gate \"paritychecker toolchain change path=$file\"") !=
         std::string::npos);
@@ -83,6 +82,22 @@ TEST_CASE("quality gates consume parity dependency manifest for runner selection
   CHECK(script.find("select_full_parity_gate \"unmatched parity-relevant change path=$file\"") !=
         std::string::npos);
   CHECK(script.find("scripts/paritychecker.sh\" \"${runner_args[@]}\"") != std::string::npos);
+}
+
+TEST_CASE("quality gates check parity manifest freshness before deciding skip branch") {
+  const std::string script = read_file(repo_root() / "scripts" / "quality_gates.sh");
+  const std::size_t run_start = script.find("run_parity_gate()");
+  REQUIRE(run_start != std::string::npos);
+
+  const std::size_t case_branch = script.find("case \"$QUALITY_GATES_PARITY\" in", run_start);
+  REQUIRE(case_branch != std::string::npos);
+
+  const std::string pre_case = script.substr(run_start, case_branch - run_start);
+  CHECK(pre_case.find("[[ \"$QUALITY_GATES_PARITY\" != \"always\" ]]") != std::string::npos);
+  CHECK(pre_case.find("parity_dependency_manifest_requires_full_gate") != std::string::npos);
+  CHECK(pre_case.find("select_full_parity_gate \"dependency manifest freshness gap\"") !=
+        std::string::npos);
+  CHECK(pre_case.find("parity_dependency_manifest_check_needed") == std::string::npos);
 }
 
 TEST_CASE("paritychecker script supports selected maintained runners") {

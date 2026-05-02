@@ -745,19 +745,12 @@ infer_quality_gate_scope() {
   fi
 }
 
-parity_dependency_manifest_check_needed() {
-  if $parity_full || $parity_all_runners || [[ ${#parity_runners[@]} -gt 0 ]]; then
-    return 0
-  fi
-  return 1
-}
-
 run_parity_gate() {
   local manifest_full=false
   local runner_args=()
   local runner
 
-  if [[ "$QUALITY_GATES_PARITY" != "always" ]] && parity_dependency_manifest_check_needed; then
+  if [[ "$QUALITY_GATES_PARITY" != "always" ]]; then
     if parity_dependency_manifest_requires_full_gate; then
       manifest_full=true
       select_full_parity_gate "dependency manifest freshness gap"
