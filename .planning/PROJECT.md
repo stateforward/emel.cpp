@@ -288,17 +288,19 @@ truth anchor and without broadening into generic Liquid-family support.
 
 ### Active
 
-- [ ] `scripts/quality_gates.sh` remains mandatory while selecting only impacted parity and
-  benchmark runners when dependency-manifest evidence is trustworthy.
-- [ ] Missing, stale, uncertain, or failed manifest impact resolution falls back conservatively to
-  the affected tool's full relevant runner set instead of silently skipping work.
-- [ ] Independent quality-gate lanes run in safe parallel groups with clear, deterministic failure
-  reporting and timing output.
-- [ ] End-to-end gate evidence shows material wall-time improvement for typical localized changes
-  without weakening coverage, parity, benchmark, fuzz, lint, docs, or lane-isolation guarantees.
+- None. The latest milestone, v1.21 Quality Gate Selective Runner Optimization, shipped on
+  2026-05-02.
 
 ### Validated
 
+- ✓ v1.21 keeps `scripts/quality_gates.sh` mandatory while selecting only impacted parity and
+  benchmark runners when dependency-manifest evidence is trustworthy.
+- ✓ v1.21 fails closed to the affected full relevant parity or benchmark runner set when manifest
+  impact resolution is missing, stale, uncertain, malformed, or failed.
+- ✓ v1.21 runs independent heavy quality-gate lanes in safe parallel groups with ordered logs,
+  deterministic status reporting, and timing output.
+- ✓ v1.21 closed with source-backed evidence for focused regressions, a full scoped gate, and a
+  representative selective-runner speedup without weakening required validation lanes.
 - ✓ v1.20 upgraded EMEL to the current `stateforward/sml.cpp` dependency surface and migrated
   active project-owned code/docs to `stateforward::sml` naming.
 - ✓ v1.20 proved the migrated SML orchestration surfaces with live behavior tests and maintained
@@ -540,4 +542,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-05-02 after starting v1.21*
+*Last updated: 2026-05-02 after shipping v1.21*

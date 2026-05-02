@@ -6,7 +6,22 @@
 
 **Key accomplishments:**
 
-- (none recorded)
+- Kept `scripts/quality_gates.sh` as the required top-level gate while making parity and benchmark
+  lanes select impacted runners from checked-in dependency manifests when those manifests are
+  trustworthy.
+
+- Preserved conservative fallback behavior for missing, stale, uncertain, malformed, or failed
+  manifest resolution so affected parity and benchmark validation fails closed to full relevant
+  runner sets.
+
+- Added selected parity execution through `scripts/paritychecker.sh --runner=<name>` and kept
+  selected benchmark execution on the maintained `scripts/bench.sh --suite=<runner>` entrypoint.
+
+- Added ordered parallel execution for independent benchmark, coverage, parity, and fuzz lanes with
+  captured logs, status files, durations, and parent-owned timing output.
+
+- Closed with focused regression coverage, full scoped quality-gate evidence, representative
+  selective-runner evidence, and a source-backed milestone audit.
 
 ---
 

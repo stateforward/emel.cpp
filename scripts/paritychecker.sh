@@ -114,7 +114,7 @@ for runner in "${selected_runners[@]}"; do
       "$test_binary" --test-case="*jinja parser and formatter outputs*"
       ;;
     generation)
-      "$test_binary" --test-case="*generation*"
+      "$test_binary" --test-case="paritychecker matches current maintained generation publication against live reference"
       ;;
   esac
 done

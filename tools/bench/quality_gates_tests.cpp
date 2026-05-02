@@ -75,6 +75,9 @@ TEST_CASE("quality gates consume parity dependency manifest for runner selection
   CHECK(script.find("tools/paritychecker/dependency_manifest.txt") != std::string::npos);
   CHECK(script.find("parity_dependency_manifest_apply_changed_files()") != std::string::npos);
   CHECK(script.find("parity_dependency_manifest_check_needed()") != std::string::npos);
+  CHECK(script.find("parity_toolchain_file_requires_full_gate()") != std::string::npos);
+  CHECK(script.find("select_full_parity_gate \"paritychecker toolchain change path=$file\"") !=
+        std::string::npos);
   CHECK(script.find("add_parity_runner \"$runner\" \"manifest path=$path\"") !=
         std::string::npos);
   CHECK(script.find("select_full_parity_gate \"unmatched parity-relevant change path=$file\"") !=
@@ -94,7 +97,23 @@ TEST_CASE("paritychecker script supports selected maintained runners") {
   CHECK(script.find("--test-case=\"*kernel outputs*\"") != std::string::npos);
   CHECK(script.find("--test-case=\"*jinja parser and formatter outputs*\"") !=
         std::string::npos);
-  CHECK(script.find("--test-case=\"*generation*\"") != std::string::npos);
+  CHECK(script.find("--test-case=\"paritychecker matches current maintained generation "
+                    "publication against live reference\"") != std::string::npos);
+}
+
+TEST_CASE("quality gates preserve failing lane status in parallel children") {
+  const std::string script = read_file(repo_root() / "scripts" / "quality_gates.sh");
+  const std::size_t helper_start = script.find("run_step()");
+  REQUIRE(helper_start != std::string::npos);
+
+  const std::size_t helper_end = script.find("run_step_allow_fail()", helper_start);
+  REQUIRE(helper_end != std::string::npos);
+
+  const std::string helper = script.substr(helper_start, helper_end - helper_start);
+  CHECK(helper.find("local status=0") != std::string::npos);
+  CHECK(helper.find("if \"$@\"; then") != std::string::npos);
+  CHECK(helper.find("status=$?") != std::string::npos);
+  CHECK(helper.find("return \"$status\"") != std::string::npos);
 }
 
 TEST_CASE("quality gates can run independent heavy lanes in ordered parallel group") {

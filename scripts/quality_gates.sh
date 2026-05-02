@@ -81,14 +81,20 @@ run_step() {
   local start
   local end
   local duration
+  local status=0
   start="$(date +%s)"
-  "$@"
+  if "$@"; then
+    status=0
+  else
+    status=$?
+  fi
   end="$(date +%s)"
   duration="$(( end - start ))"
   if timing_enabled; then
     timing_lines+=("$name $duration")
     write_timing_snapshot
   fi
+  return "$status"
 }
 
 run_step_allow_fail() {
@@ -509,6 +515,27 @@ parity_file_requires_manifest_match() {
   return 1
 }
 
+parity_toolchain_file_requires_full_gate() {
+  local file="$1"
+  case "$file" in
+    tools/paritychecker/CMakeLists.txt|\
+    tools/paritychecker/AGENTS.md|\
+    tools/paritychecker/dependency_manifest.md|\
+    tools/paritychecker/dependency_manifest.txt|\
+    tools/paritychecker/parity_assets.*|\
+    tools/paritychecker/parity_dependency_manifest.*|\
+    tools/paritychecker/parity_engine.*|\
+    tools/paritychecker/parity_engines.*|\
+    tools/paritychecker/parity_main.cpp|\
+    tools/paritychecker/parity_runner.*|\
+    tools/paritychecker/paritychecker_tests.cpp|\
+    tools/paritychecker/reference_ref.txt)
+      return 0
+      ;;
+  esac
+  return 1
+}
+
 parity_dependency_manifest_apply_changed_files() {
   local file
   local line
@@ -523,6 +550,11 @@ parity_dependency_manifest_apply_changed_files() {
   fi
 
   for file in "${changed_files[@]+${changed_files[@]}}"; do
+    if parity_toolchain_file_requires_full_gate "$file"; then
+      select_full_parity_gate "paritychecker toolchain change path=$file"
+      return
+    fi
+
     matched=false
     while IFS= read -r line; do
       [[ "$line" == record\ * ]] || continue
