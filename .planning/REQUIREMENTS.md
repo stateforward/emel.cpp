@@ -41,7 +41,7 @@ parity-oriented verification before widening API surface or model scope.
   dependency bump and namespace migration preserve maintained runtime behavior.
 - [x] **VAL-02**: Maintainer can run source checks that fail on new unapproved legacy
   SML includes or namespace references in active project-owned code/docs.
-- [ ] **VAL-03**: Maintainer can close the milestone only after source-backed audit evidence
+- [x] **VAL-03**: Maintainer can close the milestone only after source-backed audit evidence
   proves all active SML migration requirements are satisfied.
 
 ## v2 Requirements
@@ -82,14 +82,14 @@ Which phases cover which requirements. Updated during roadmap creation.
 | DOC-03 | Phase 175 | Complete |
 | VAL-01 | Phase 176 | Complete |
 | VAL-02 | Phase 176 | Complete |
-| VAL-03 | Phase 178 | Pending |
+| VAL-03 | Phase 178 | Complete |
 
 **Coverage:**
 - v1 requirements: 12 total
 - Mapped to phases: 12
-- Open after latest v1.20 audit: 1
+- Open after latest v1.20 audit: 0
 - Unmapped: 0
 
 ---
 *Requirements defined: 2026-05-01*
-*Last updated: 2026-05-01 after planning Phase 178 for the remaining VAL-03 closeout gap*
+*Last updated: 2026-05-02 after Phase 178 full closeout validation passed*

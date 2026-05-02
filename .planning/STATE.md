@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.20
 milestone_name: SML Dependency And Namespace Migration
-status: blocked
-stopped_at: Phase 177 full closeout gate timed out in benchmark comparison.
-last_updated: "2026-05-01T20:45:00.000Z"
-last_activity: 2026-05-01
+status: complete
+stopped_at: ""
+last_updated: "2026-05-02T00:00:00.000Z"
+last_activity: 2026-05-02
 progress:
-  total_phases: 11
-  completed_phases: 10
-  total_plans: 11
-  completed_plans: 10
-  percent: 91
+  total_phases: 12
+  completed_phases: 12
+  total_plans: 12
+  completed_plans: 12
+  percent: 100
 ---
 
 # Project State
@@ -26,13 +26,13 @@ verification before widening API surface or model scope.
 
 ## Current Position
 
-Phase: 177 (blocked)
-Plan: final source-backed closeout rerun
-Status: Blocked on full quality-gate benchmark comparison timeout
-Last activity: 2026-05-01 — v1.20 gap closure phases 173-176 completed; final closeout gate
-timed out in `bench_runner --mode=compare`.
+Phase: 178 (complete)
+Plan: closeout gate and evidence repair
+Status: Complete
+Last activity: 2026-05-02 — Phase 178 repaired the full closeout gate, updated approved
+benchmark snapshots, and passed the final full quality gate.
 
-Progress: [#########-] 91%
+Progress: [##########] 100%
 
 ## Deferred Items
 
@@ -52,12 +52,11 @@ Items acknowledged and still deferred at milestone close on 2026-05-01:
 
 - Milestone: `v1.20 SML Dependency And Namespace Migration`
 
-- Implemented shape: 11 phases planned, 10 completed; 11 of 12 active requirements satisfied.
+- Implemented shape: 12 phases planned, 12 completed; 12 of 12 active requirements satisfied.
 - Latest shipped milestone: `v1.19 Benchmark Tool Pluggable Runner Refactor`.
 
-- Next action: resume Phase 177 and complete or isolate the full-scope benchmark comparison lane.
-- Current blocker: `EMEL_QUALITY_GATES_SCOPE=full scripts/quality_gates.sh` exited 124 while
-  running `build/bench_tools_ninja/bench_runner --mode=compare`.
+- Next action: archive v1.20 with `$gsd-complete-milestone`.
+- Current blocker: none.
 
 ## Accumulated Context
 
