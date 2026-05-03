@@ -115,9 +115,18 @@ struct model_has_no_tensors {
   }
 };
 
+struct model_tensor_count_within_capacity {
+  bool operator()(const event::load_runtime &ev) const noexcept {
+    return ev.request.model_data.n_tensors <=
+           static_cast<uint32_t>(emel::model::data::k_max_tensors);
+  }
+};
+
 struct can_load_tensors {
   bool operator()(const event::load_runtime &ev) const noexcept {
-    return model_has_tensors{}(ev) && ev.request.tensor_loader != nullptr &&
+    return model_has_tensors{}(ev) &&
+           model_tensor_count_within_capacity{}(ev) &&
+           ev.request.tensor_loader != nullptr &&
            ev.request.effect_requests.size() >=
                ev.request.model_data.n_tensors &&
            ev.request.effect_results.size() >= ev.request.model_data.n_tensors;

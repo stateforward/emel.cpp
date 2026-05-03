@@ -1359,6 +1359,33 @@ TEST_CASE(
   CHECK(guard(runtime));
 }
 
+TEST_CASE("model loader rejects tensor counts above model storage capacity") {
+  auto model = std::make_unique<emel::model::data>();
+  emel::model::tensor::sm tensor_loader{};
+  emel::model::loader::event::load_ctx load_ctx{};
+  emel::model::loader::event::parse_model_fn parse_model{nullptr, parse_ok};
+  emel::model::loader::event::load request{*model, parse_model};
+  loader_tensor_phase_fixture tensor_phases{};
+  emel::model::loader::event::load_runtime runtime{request, load_ctx,
+                                                   tensor_phases.events};
+  std::array<emel::model::tensor::effect_request, 1> effect_requests{};
+  std::array<emel::model::tensor::effect_result, 1> effect_results{};
+  const auto excessive_tensor_count =
+      static_cast<uint32_t>(emel::model::data::k_max_tensors) + 1u;
+
+  model->n_tensors = excessive_tensor_count;
+  request.tensor_loader = &tensor_loader;
+  request.effect_requests =
+      std::span<emel::model::tensor::effect_request>{
+          effect_requests.data(), excessive_tensor_count};
+  request.effect_results =
+      std::span<emel::model::tensor::effect_result>{effect_results.data(),
+                                                    excessive_tensor_count};
+
+  CHECK_FALSE(emel::model::loader::guard::can_load_tensors{}(runtime));
+  CHECK(emel::model::loader::guard::cannot_load_tensors{}(runtime));
+}
+
 TEST_CASE("model loader renamed tensor seam covers guard and noop branches") {
   auto model = std::make_unique<emel::model::data>();
   emel::model::loader::action::context action_ctx{};
