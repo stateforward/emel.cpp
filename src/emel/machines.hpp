@@ -5,17 +5,17 @@
 #include "emel/diarization/sortformer/executor/sm.hpp"
 #include "emel/diarization/sortformer/pipeline/sm.hpp"
 #include "emel/embeddings/generator/sm.hpp"
+#include "emel/gguf/loader/sm.hpp"
 #include "emel/graph/processor/sm.hpp"
-#include "emel/text/encoders/any.hpp"
-#include "emel/text/encoders/sm.hpp"
-#include "emel/text/conditioner/sm.hpp"
-#include "emel/text/detokenizer/sm.hpp"
 #include "emel/memory/hybrid/sm.hpp"
 #include "emel/memory/kv/sm.hpp"
 #include "emel/memory/recurrent/sm.hpp"
 #include "emel/model/loader/sm.hpp"
-#include "emel/gguf/loader/sm.hpp"
-#include "emel/model/weight_loader/sm.hpp"
+#include "emel/model/tensor/sm.hpp"
+#include "emel/text/conditioner/sm.hpp"
+#include "emel/text/detokenizer/sm.hpp"
+#include "emel/text/encoders/any.hpp"
+#include "emel/text/encoders/sm.hpp"
 #include "emel/text/generator/sm.hpp"
 #include "emel/text/renderer/sm.hpp"
 #include "emel/text/tokenizer/sm.hpp"
@@ -46,6 +46,6 @@ using Model = emel::model::loader::sm;
 using Parser = emel::gguf::loader::sm;
 using Renderer = emel::text::renderer::sm;
 using Tokenizer = emel::text::tokenizer::sm;
-using WeightLoader = emel::model::weight_loader::sm;
+using ModelTensor = emel::model::tensor::sm;
 
-}  // namespace emel
+} // namespace emel

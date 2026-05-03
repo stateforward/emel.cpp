@@ -6,35 +6,99 @@
 
 namespace emel::model::tensor::action {
 
+namespace output {
+
+inline void write_error_code(int32_t &target,
+                             const emel::error::type err) noexcept {
+  target = static_cast<int32_t>(err);
+}
+
+} // namespace output
+
 struct begin_bind_tensor {
-  void operator()(const detail::bind_tensor_runtime & ev, context &) const noexcept {
+  void operator()(const detail::bind_tensor_runtime &ev,
+                  context &) const noexcept {
     ev.ctx.err = emel::error::cast(error::none);
     ev.ctx.ok = false;
     ev.ctx.accepted = false;
-    ev.error_code_out = static_cast<int32_t>(emel::error::cast(error::none));
   }
 };
 
 struct begin_evict_tensor {
-  void operator()(const detail::evict_tensor_runtime & ev, context &) const noexcept {
+  void operator()(const detail::evict_tensor_runtime &ev,
+                  context &) const noexcept {
     ev.ctx.err = emel::error::cast(error::none);
     ev.ctx.ok = false;
     ev.ctx.accepted = false;
-    ev.error_code_out = static_cast<int32_t>(emel::error::cast(error::none));
   }
 };
 
 struct begin_capture_tensor_state {
-  void operator()(const detail::capture_tensor_state_runtime & ev, context &) const noexcept {
+  void operator()(const detail::capture_tensor_state_runtime &ev,
+                  context &) const noexcept {
     ev.ctx.err = emel::error::cast(error::none);
     ev.ctx.ok = false;
     ev.ctx.accepted = false;
-    ev.error_code_out = static_cast<int32_t>(emel::error::cast(error::none));
+  }
+};
+
+struct effect_bind_storage {
+  void operator()(const event::bind_storage &ev, context &ctx) const noexcept {
+    ctx.bound_records = ev.tensors;
+    for (size_t tensor_id = 0u; tensor_id < ctx.bound_records.size();
+         ++tensor_id) {
+      ctx.tensors.lifecycle[tensor_id] = event::lifecycle::unbound;
+      ctx.tensors.buffer[tensor_id] = nullptr;
+      ctx.tensors.buffer_bytes[tensor_id] = 0u;
+      ctx.tensors.file_offset[tensor_id] =
+          ctx.bound_records[tensor_id].file_offset;
+      ctx.tensors.data_size[tensor_id] = ctx.bound_records[tensor_id].data_size;
+      ctx.tensors.file_index[tensor_id] =
+          ctx.bound_records[tensor_id].file_index;
+      ctx.tensors.tensor_type[tensor_id] = ctx.bound_records[tensor_id].type;
+    }
+  }
+};
+
+struct effect_plan_load {
+  template <class event_type>
+  void operator()(const event_type &ev, context &ctx) const noexcept {
+    const auto &request = tensor::detail::request_event(ev);
+    for (size_t tensor_id = 0u; tensor_id < ctx.bound_records.size();
+         ++tensor_id) {
+      const auto &tensor = ctx.bound_records[tensor_id];
+      request.effects[tensor_id] = event::effect_request{
+          .kind = event::effect_kind::k_none,
+          .offset = tensor.file_offset,
+          .size = tensor.data_size,
+          .target = const_cast<void *>(tensor.data),
+      };
+    }
+  }
+};
+
+struct effect_apply_results {
+  template <class event_type>
+  void operator()(const event_type &ev, context &ctx) const noexcept {
+    const auto &request = tensor::detail::request_event(ev);
+    for (size_t tensor_id = 0u; tensor_id < ctx.bound_records.size();
+         ++tensor_id) {
+      auto &tensor = ctx.bound_records[tensor_id];
+      tensor.data = request.results[tensor_id].handle;
+      ctx.tensors.lifecycle[tensor_id] = event::lifecycle::resident;
+      ctx.tensors.buffer[tensor_id] = request.results[tensor_id].handle;
+      ctx.tensors.buffer_bytes[tensor_id] = tensor.data_size;
+      ctx.tensors.file_offset[tensor_id] = tensor.file_offset;
+      ctx.tensors.data_size[tensor_id] = tensor.data_size;
+      ctx.tensors.file_index[tensor_id] = tensor.file_index;
+      ctx.tensors.tensor_type[tensor_id] = tensor.type;
+    }
   }
 };
 
 struct exec_bind_tensor {
-  void operator()(const detail::bind_tensor_runtime & ev, context & ctx) const noexcept {
+  void operator()(const detail::bind_tensor_runtime &ev,
+                  context &ctx) const noexcept {
     const size_t tensor_id = static_cast<size_t>(ev.request.tensor_id);
     ctx.tensors.lifecycle[tensor_id] = event::lifecycle::resident;
     ctx.tensors.buffer[tensor_id] = ev.request.buffer;
@@ -48,7 +112,8 @@ struct exec_bind_tensor {
 };
 
 struct exec_evict_tensor {
-  void operator()(const detail::evict_tensor_runtime & ev, context & ctx) const noexcept {
+  void operator()(const detail::evict_tensor_runtime &ev,
+                  context &ctx) const noexcept {
     const size_t tensor_id = static_cast<size_t>(ev.request.tensor_id);
     ctx.tensors.lifecycle[tensor_id] = event::lifecycle::evicted;
     ctx.tensors.buffer[tensor_id] = nullptr;
@@ -58,9 +123,10 @@ struct exec_evict_tensor {
 };
 
 struct exec_capture_tensor_state {
-  void operator()(const detail::capture_tensor_state_runtime & ev, context & ctx) const noexcept {
+  void operator()(const detail::capture_tensor_state_runtime &ev,
+                  context &ctx) const noexcept {
     const size_t tensor_id = static_cast<size_t>(ev.request.tensor_id);
-    event::tensor_state & out = *ev.request.state_out;
+    event::tensor_state &out = *ev.request.state_out;
     out.lifecycle_state = ctx.tensors.lifecycle[tensor_id];
     out.buffer = ctx.tensors.buffer[tensor_id];
     out.buffer_bytes = ctx.tensors.buffer_bytes[tensor_id];
@@ -72,42 +138,239 @@ struct exec_capture_tensor_state {
   }
 };
 
-struct mark_invalid_request {
-  template <class runtime_event_type>
-  void operator()(const runtime_event_type & ev, context &) const noexcept {
-    auto & runtime_ev = tensor::detail::unwrap_runtime_event(ev);
+struct publish_bind_storage_done {
+  void operator()(const event::bind_storage &ev, context &) const noexcept {
+    ev.on_done(events::bind_storage_done{
+        .request = ev,
+    });
+  }
+};
+
+struct publish_bind_storage_error {
+  void operator()(const event::bind_storage &ev, context &) const noexcept {
+    ev.on_error(events::bind_storage_error{
+        .request = ev,
+        .err = emel::error::cast(error::invalid_request),
+    });
+  }
+};
+
+struct record_plan_load_done {
+  template <class event_type>
+  void operator()(const event_type &ev, context &) const noexcept {
+    auto &runtime_ev = tensor::detail::unwrap_runtime_event(ev);
+    runtime_ev.ctx.err = emel::error::cast(error::none);
+    runtime_ev.ctx.ok = true;
+  }
+};
+
+struct publish_plan_load_done {
+  template <class event_type>
+  void operator()(const event_type &ev, context &ctx) const noexcept {
+    auto &runtime_ev = tensor::detail::unwrap_runtime_event(ev);
+    const auto &request = tensor::detail::request_event(ev);
+    runtime_ev.ctx.err = emel::error::cast(error::none);
+    runtime_ev.ctx.ok = true;
+    request.on_done(events::plan_load_done{
+        .request = request,
+        .effect_count = static_cast<uint32_t>(ctx.bound_records.size()),
+    });
+  }
+};
+
+struct record_plan_load_invalid_request {
+  template <class event_type>
+  void operator()(const event_type &ev, context &) const noexcept {
+    auto &runtime_ev = tensor::detail::unwrap_runtime_event(ev);
     runtime_ev.ctx.err = emel::error::cast(error::invalid_request);
     runtime_ev.ctx.ok = false;
-    runtime_ev.error_code_out = static_cast<int32_t>(runtime_ev.ctx.err);
+  }
+};
+
+struct publish_plan_load_invalid_request {
+  template <class event_type>
+  void operator()(const event_type &ev, context &) const noexcept {
+    auto &runtime_ev = tensor::detail::unwrap_runtime_event(ev);
+    const auto &request = tensor::detail::request_event(ev);
+    runtime_ev.ctx.err = emel::error::cast(error::invalid_request);
+    runtime_ev.ctx.ok = false;
+    request.on_error(events::plan_load_error{
+        .request = request,
+        .err = emel::error::cast(error::invalid_request),
+    });
+  }
+};
+
+struct record_plan_load_capacity_error {
+  template <class event_type>
+  void operator()(const event_type &ev, context &) const noexcept {
+    auto &runtime_ev = tensor::detail::unwrap_runtime_event(ev);
+    runtime_ev.ctx.err = emel::error::cast(error::capacity);
+    runtime_ev.ctx.ok = false;
+  }
+};
+
+struct publish_plan_load_capacity_error {
+  template <class event_type>
+  void operator()(const event_type &ev, context &) const noexcept {
+    auto &runtime_ev = tensor::detail::unwrap_runtime_event(ev);
+    const auto &request = tensor::detail::request_event(ev);
+    runtime_ev.ctx.err = emel::error::cast(error::capacity);
+    runtime_ev.ctx.ok = false;
+    request.on_error(events::plan_load_error{
+        .request = request,
+        .err = emel::error::cast(error::capacity),
+    });
+  }
+};
+
+struct record_apply_effect_results_done {
+  template <class event_type>
+  void operator()(const event_type &ev, context &) const noexcept {
+    auto &runtime_ev = tensor::detail::unwrap_runtime_event(ev);
+    runtime_ev.ctx.err = emel::error::cast(error::none);
+    runtime_ev.ctx.ok = true;
+  }
+};
+
+struct publish_apply_effect_results_done {
+  template <class event_type>
+  void operator()(const event_type &ev, context &) const noexcept {
+    auto &runtime_ev = tensor::detail::unwrap_runtime_event(ev);
+    const auto &request = tensor::detail::request_event(ev);
+    runtime_ev.ctx.err = emel::error::cast(error::none);
+    runtime_ev.ctx.ok = true;
+    request.on_done(events::apply_effect_results_done{
+        .request = request,
+    });
+  }
+};
+
+struct record_apply_effect_results_invalid_request {
+  template <class event_type>
+  void operator()(const event_type &ev, context &) const noexcept {
+    auto &runtime_ev = tensor::detail::unwrap_runtime_event(ev);
+    runtime_ev.ctx.err = emel::error::cast(error::invalid_request);
+    runtime_ev.ctx.ok = false;
+  }
+};
+
+struct publish_apply_effect_results_invalid_request {
+  template <class event_type>
+  void operator()(const event_type &ev, context &) const noexcept {
+    auto &runtime_ev = tensor::detail::unwrap_runtime_event(ev);
+    const auto &request = tensor::detail::request_event(ev);
+    runtime_ev.ctx.err = emel::error::cast(error::invalid_request);
+    runtime_ev.ctx.ok = false;
+    request.on_error(events::apply_effect_results_error{
+        .request = request,
+        .err = emel::error::cast(error::invalid_request),
+    });
+  }
+};
+
+struct record_apply_effect_results_backend_error {
+  template <class event_type>
+  void operator()(const event_type &ev, context &) const noexcept {
+    auto &runtime_ev = tensor::detail::unwrap_runtime_event(ev);
+    runtime_ev.ctx.err = emel::error::cast(error::backend_error);
+    runtime_ev.ctx.ok = false;
+  }
+};
+
+struct publish_apply_effect_results_backend_error {
+  template <class event_type>
+  void operator()(const event_type &ev, context &) const noexcept {
+    auto &runtime_ev = tensor::detail::unwrap_runtime_event(ev);
+    const auto &request = tensor::detail::request_event(ev);
+    runtime_ev.ctx.err = emel::error::cast(error::backend_error);
+    runtime_ev.ctx.ok = false;
+    request.on_error(events::apply_effect_results_error{
+        .request = request,
+        .err = emel::error::cast(error::backend_error),
+    });
+  }
+};
+
+struct mark_invalid_request {
+  template <class runtime_event_type>
+  void operator()(const runtime_event_type &ev, context &) const noexcept {
+    auto &runtime_ev = tensor::detail::unwrap_runtime_event(ev);
+    runtime_ev.ctx.err = emel::error::cast(error::invalid_request);
+    runtime_ev.ctx.ok = false;
+  }
+};
+
+struct mark_capacity {
+  template <class runtime_event_type>
+  void operator()(const runtime_event_type &ev, context &) const noexcept {
+    auto &runtime_ev = tensor::detail::unwrap_runtime_event(ev);
+    runtime_ev.ctx.err = emel::error::cast(error::capacity);
+  }
+};
+
+struct mark_backend_error {
+  template <class runtime_event_type>
+  void operator()(const runtime_event_type &ev, context &) const noexcept {
+    auto &runtime_ev = tensor::detail::unwrap_runtime_event(ev);
+    runtime_ev.ctx.err = emel::error::cast(error::backend_error);
+  }
+};
+
+struct mark_bulk_invalid_request {
+  template <class runtime_event_type>
+  void operator()(const runtime_event_type &ev, context &) const noexcept {
+    auto &runtime_ev = tensor::detail::unwrap_runtime_event(ev);
+    runtime_ev.ctx.err = emel::error::cast(error::invalid_request);
   }
 };
 
 struct publish_done {
   template <class runtime_event_type>
-  void operator()(const runtime_event_type & ev, context &) const noexcept {
-    auto & runtime_ev = tensor::detail::unwrap_runtime_event(ev);
+  void operator()(const runtime_event_type &ev, context &) const noexcept {
+    auto &runtime_ev = tensor::detail::unwrap_runtime_event(ev);
     runtime_ev.ctx.err = emel::error::cast(error::none);
     runtime_ev.ctx.ok = true;
-    runtime_ev.error_code_out = static_cast<int32_t>(emel::error::cast(error::none));
+  }
+};
+
+struct publish_done_with_error_code {
+  template <class runtime_event_type>
+  void operator()(const runtime_event_type &ev, context &) const noexcept {
+    auto &runtime_ev = tensor::detail::unwrap_runtime_event(ev);
+    runtime_ev.ctx.err = emel::error::cast(error::none);
+    runtime_ev.ctx.ok = true;
+    output::write_error_code(*runtime_ev.error_code_out,
+                             emel::error::cast(error::none));
   }
 };
 
 struct publish_error {
   template <class runtime_event_type>
-  void operator()(const runtime_event_type & ev, context &) const noexcept {
-    auto & runtime_ev = tensor::detail::unwrap_runtime_event(ev);
+  void operator()(const runtime_event_type &ev, context &) const noexcept {
+    auto &runtime_ev = tensor::detail::unwrap_runtime_event(ev);
     runtime_ev.ctx.ok = false;
-    runtime_ev.error_code_out = static_cast<int32_t>(runtime_ev.ctx.err);
+  }
+};
+
+struct publish_error_with_error_code {
+  template <class runtime_event_type>
+  void operator()(const runtime_event_type &ev, context &) const noexcept {
+    auto &runtime_ev = tensor::detail::unwrap_runtime_event(ev);
+    runtime_ev.ctx.ok = false;
+    output::write_error_code(*runtime_ev.error_code_out, runtime_ev.ctx.err);
   }
 };
 
 struct on_unexpected {
   template <class event_type>
-  void operator()(const event_type & ev, context &) const noexcept {
-    if constexpr (requires { ev.ctx.err; ev.error_code_out; }) {
+  void operator()(const event_type &ev, context &) const noexcept {
+    if constexpr (requires {
+                    ev.ctx.err;
+                    ev.error_code_out;
+                  }) {
       ev.ctx.err = emel::error::cast(error::internal_error);
       ev.ctx.ok = false;
-      ev.error_code_out = static_cast<int32_t>(ev.ctx.err);
     }
   }
 };
@@ -115,12 +378,44 @@ struct on_unexpected {
 inline constexpr begin_bind_tensor begin_bind_tensor{};
 inline constexpr begin_evict_tensor begin_evict_tensor{};
 inline constexpr begin_capture_tensor_state begin_capture_tensor_state{};
+inline constexpr effect_bind_storage effect_bind_storage{};
+inline constexpr effect_plan_load effect_plan_load{};
+inline constexpr effect_apply_results effect_apply_results{};
 inline constexpr exec_bind_tensor exec_bind_tensor{};
 inline constexpr exec_evict_tensor exec_evict_tensor{};
 inline constexpr exec_capture_tensor_state exec_capture_tensor_state{};
+inline constexpr publish_bind_storage_done publish_bind_storage_done{};
+inline constexpr publish_bind_storage_error publish_bind_storage_error{};
+inline constexpr record_plan_load_done record_plan_load_done{};
+inline constexpr publish_plan_load_done publish_plan_load_done{};
+inline constexpr record_plan_load_invalid_request
+    record_plan_load_invalid_request{};
+inline constexpr publish_plan_load_invalid_request
+    publish_plan_load_invalid_request{};
+inline constexpr record_plan_load_capacity_error
+    record_plan_load_capacity_error{};
+inline constexpr publish_plan_load_capacity_error
+    publish_plan_load_capacity_error{};
+inline constexpr record_apply_effect_results_done
+    record_apply_effect_results_done{};
+inline constexpr publish_apply_effect_results_done
+    publish_apply_effect_results_done{};
+inline constexpr record_apply_effect_results_invalid_request
+    record_apply_effect_results_invalid_request{};
+inline constexpr publish_apply_effect_results_invalid_request
+    publish_apply_effect_results_invalid_request{};
+inline constexpr record_apply_effect_results_backend_error
+    record_apply_effect_results_backend_error{};
+inline constexpr publish_apply_effect_results_backend_error
+    publish_apply_effect_results_backend_error{};
 inline constexpr mark_invalid_request mark_invalid_request{};
+inline constexpr mark_capacity mark_capacity{};
+inline constexpr mark_backend_error mark_backend_error{};
+inline constexpr mark_bulk_invalid_request mark_bulk_invalid_request{};
 inline constexpr publish_done publish_done{};
+inline constexpr publish_done_with_error_code publish_done_with_error_code{};
 inline constexpr publish_error publish_error{};
+inline constexpr publish_error_with_error_code publish_error_with_error_code{};
 inline constexpr on_unexpected on_unexpected{};
 
-}  // namespace emel::model::tensor::action
+} // namespace emel::model::tensor::action

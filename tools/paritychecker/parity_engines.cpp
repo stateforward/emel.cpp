@@ -1,9 +1,9 @@
-#include "parity_runner.hpp"
-#include "parity_assets.hpp"
 #include "parity_engines.hpp"
-#include "tokenizer_parity.hpp"
-#include "../generation_formatter_contract.hpp"
 #include "../generation_fixture_registry.hpp"
+#include "../generation_formatter_contract.hpp"
+#include "parity_assets.hpp"
+#include "parity_runner.hpp"
+#include "tokenizer_parity.hpp"
 
 #include <algorithm>
 #include <array>
@@ -11,8 +11,8 @@
 #include <chrono>
 #include <cinttypes>
 #include <cmath>
-#include <cstdlib>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <limits>
@@ -23,31 +23,31 @@
 #include <utility>
 #include <vector>
 
+#include "emel/gbnf/rule_parser/events.hpp"
+#include "emel/gbnf/rule_parser/sm.hpp"
 #include "emel/gguf/loader/any.hpp"
 #include "emel/gguf/loader/errors.hpp"
 #include "emel/gguf/loader/events.hpp"
 #include "emel/gguf/loader/sm.hpp"
-#include "emel/gbnf/rule_parser/events.hpp"
-#include "emel/gbnf/rule_parser/sm.hpp"
-#include "emel/text/generator/errors.hpp"
-#include "emel/text/generator/events.hpp"
-#include "emel/text/generator/sm.hpp"
 #include "emel/kernel/aarch64/detail.hpp"
 #include "emel/kernel/aarch64/sm.hpp"
 #include "emel/kernel/events.hpp"
 #include "emel/kernel/x86_64/sm.hpp"
 #include "emel/logits/sampler/events.hpp"
-#include "emel/model/data.hpp"
 #include "emel/model/any.hpp"
+#include "emel/model/data.hpp"
 #include "emel/model/llama/any.hpp"
 #include "emel/model/loader/errors.hpp"
 #include "emel/model/loader/events.hpp"
 #include "emel/model/loader/sm.hpp"
-#include "emel/model/weight_loader/errors.hpp"
-#include "emel/model/weight_loader/events.hpp"
-#include "emel/model/weight_loader/sm.hpp"
+#include "emel/model/tensor/errors.hpp"
+#include "emel/model/tensor/events.hpp"
+#include "emel/model/tensor/sm.hpp"
 #include "emel/text/conditioner/sm.hpp"
 #include "emel/text/formatter/format.hpp"
+#include "emel/text/generator/errors.hpp"
+#include "emel/text/generator/events.hpp"
+#include "emel/text/generator/sm.hpp"
 #include "emel/text/jinja/formatter/sm.hpp"
 #include "emel/text/jinja/parser/errors.hpp"
 #include "emel/text/jinja/parser/sm.hpp"
@@ -59,49 +59,46 @@
 #include "jinja/lexer.h"
 #include "jinja/parser.h"
 #include "jinja/runtime.h"
-#include "llama.h"
 #include "llama-context.h"
+#include "llama-grammar.h"
 #include "llama-kv-cache.h"
 #include "llama-model.h"
-#include "llama-grammar.h"
 #include "llama-vocab.h"
+#include "llama.h"
 
 #undef QK_K
 
 using reference_ggml_float = double;
 
 extern "C" {
-void ggml_vec_dot_f16(
-    int n,
-    float * s,
-    size_t bs,
-    ggml_fp16_t * x,
-    size_t bx,
-    ggml_fp16_t * y,
-    size_t by,
-    int nrc);
-reference_ggml_float ggml_vec_soft_max_f32(int n, float * y, const float * x, float max);
-void ggml_vec_dot_q2_K_q8_K(
-    int n, float * s, size_t bs, const void * vx, size_t bx, const void * vy, size_t by, int nrc);
-void ggml_vec_dot_q3_K_q8_K(
-    int n, float * s, size_t bs, const void * vx, size_t bx, const void * vy, size_t by, int nrc);
-void ggml_vec_dot_q6_K_q8_K(
-    int n, float * s, size_t bs, const void * vx, size_t bx, const void * vy, size_t by, int nrc);
-void ggml_vec_dot_q2_K_q8_K_generic(
-    int n, float * s, size_t bs, const void * vx, size_t bx, const void * vy, size_t by, int nrc);
-void ggml_vec_dot_q3_K_q8_K_generic(
-    int n, float * s, size_t bs, const void * vx, size_t bx, const void * vy, size_t by, int nrc);
-void ggml_vec_dot_q6_K_q8_K_generic(
-    int n, float * s, size_t bs, const void * vx, size_t bx, const void * vy, size_t by, int nrc);
+void ggml_vec_dot_f16(int n, float *s, size_t bs, ggml_fp16_t *x, size_t bx,
+                      ggml_fp16_t *y, size_t by, int nrc);
+reference_ggml_float ggml_vec_soft_max_f32(int n, float *y, const float *x,
+                                           float max);
+void ggml_vec_dot_q2_K_q8_K(int n, float *s, size_t bs, const void *vx,
+                            size_t bx, const void *vy, size_t by, int nrc);
+void ggml_vec_dot_q3_K_q8_K(int n, float *s, size_t bs, const void *vx,
+                            size_t bx, const void *vy, size_t by, int nrc);
+void ggml_vec_dot_q6_K_q8_K(int n, float *s, size_t bs, const void *vx,
+                            size_t bx, const void *vy, size_t by, int nrc);
+void ggml_vec_dot_q2_K_q8_K_generic(int n, float *s, size_t bs, const void *vx,
+                                    size_t bx, const void *vy, size_t by,
+                                    int nrc);
+void ggml_vec_dot_q3_K_q8_K_generic(int n, float *s, size_t bs, const void *vx,
+                                    size_t bx, const void *vy, size_t by,
+                                    int nrc);
+void ggml_vec_dot_q6_K_q8_K_generic(int n, float *s, size_t bs, const void *vx,
+                                    size_t bx, const void *vy, size_t by,
+                                    int nrc);
 struct reference_block_q8_k {
   float d = 0.0f;
   std::array<int8_t, ::emel::kernel::detail::quant::QK_K> qs = {};
   std::array<int16_t, ::emel::kernel::detail::quant::QK_K / 16> bsums = {};
 };
-void quantize_row_q8_K_ref(const float * x, reference_block_q8_k * y, int64_t k);
-void dequantize_row_q2_K(const void * x, float * y, int64_t k);
-void dequantize_row_q3_K(const void * x, float * y, int64_t k);
-void dequantize_row_q6_K(const void * x, float * y, int64_t k);
+void quantize_row_q8_K_ref(const float *x, reference_block_q8_k *y, int64_t k);
+void dequantize_row_q2_K(const void *x, float *y, int64_t k);
+void dequantize_row_q3_K(const void *x, float *y, int64_t k);
+void dequantize_row_q6_K(const void *x, float *y, int64_t k);
 }
 
 namespace {
@@ -110,8 +107,10 @@ constexpr int32_t k_error_ok = 0;
 constexpr int32_t k_error_internal = 3;
 constexpr size_t k_generation_output_capacity = 65536u;
 constexpr size_t k_generation_token_trace_capacity = 4096u;
-constexpr std::string_view k_generation_baseline_source = "maintained_generation_baseline";
-constexpr std::string_view k_generation_baseline_format = "emel_generation_baseline_v1";
+constexpr std::string_view k_generation_baseline_source =
+    "maintained_generation_baseline";
+constexpr std::string_view k_generation_baseline_format =
+    "emel_generation_baseline_v1";
 constexpr std::string_view k_generation_baseline_contract =
     "generation_online_f16_final_normalize_v1";
 constexpr std::string_view k_reference_impl_source =
@@ -128,7 +127,8 @@ constexpr std::string_view k_reference_impl_ref =
     "unknown";
 #endif
 
-using llama_model_ptr = std::unique_ptr<llama_model, decltype(&llama_model_free)>;
+using llama_model_ptr =
+    std::unique_ptr<llama_model, decltype(&llama_model_free)>;
 using llama_context_ptr = std::unique_ptr<llama_context, decltype(&llama_free)>;
 namespace kernel_quant = emel::kernel::detail::quant;
 namespace parity_assets = emel::paritychecker::assets;
@@ -137,24 +137,26 @@ using maintained_generation_fixture =
 
 struct parser_done_capture {
   bool called = false;
-  const emel::gbnf::grammar * grammar = nullptr;
+  const emel::gbnf::grammar *grammar = nullptr;
 };
 
 struct parser_error_capture {
   bool called = false;
-  const emel::gbnf::grammar * grammar = nullptr;
+  const emel::gbnf::grammar *grammar = nullptr;
   int32_t err = 0;
 };
 
-bool on_gbnf_done(void * owner, const emel::gbnf::rule_parser::events::parsing_done & ev) {
-  auto * capture = static_cast<parser_done_capture *>(owner);
+bool on_gbnf_done(void *owner,
+                  const emel::gbnf::rule_parser::events::parsing_done &ev) {
+  auto *capture = static_cast<parser_done_capture *>(owner);
   capture->called = true;
   capture->grammar = &ev.grammar;
   return true;
 }
 
-bool on_gbnf_error(void * owner, const emel::gbnf::rule_parser::events::parsing_error & ev) {
-  auto * capture = static_cast<parser_error_capture *>(owner);
+bool on_gbnf_error(void *owner,
+                   const emel::gbnf::rule_parser::events::parsing_error &ev) {
+  auto *capture = static_cast<parser_error_capture *>(owner);
   capture->called = true;
   capture->grammar = &ev.grammar;
   capture->err = ev.err;
@@ -162,17 +164,14 @@ bool on_gbnf_error(void * owner, const emel::gbnf::rule_parser::events::parsing_
 }
 
 bool run_emel_gbnf_parse(std::string_view grammar_text,
-                         emel::gbnf::grammar & grammar_out,
-                         int32_t & err_out) {
+                         emel::gbnf::grammar &grammar_out, int32_t &err_out) {
   parser_done_capture done_capture{};
   parser_error_capture error_capture{};
 
-  emel::callback<bool(const emel::gbnf::rule_parser::events::parsing_done &)> done_cb{
-      &done_capture,
-      on_gbnf_done};
-  emel::callback<bool(const emel::gbnf::rule_parser::events::parsing_error &)> error_cb{
-      &error_capture,
-      on_gbnf_error};
+  emel::callback<bool(const emel::gbnf::rule_parser::events::parsing_done &)>
+      done_cb{&done_capture, on_gbnf_done};
+  emel::callback<bool(const emel::gbnf::rule_parser::events::parsing_error &)>
+      error_cb{&error_capture, on_gbnf_error};
 
   emel::gbnf::rule_parser::event::parse parse_ev{
       .grammar_text = grammar_text,
@@ -195,7 +194,8 @@ bool run_emel_gbnf_parse(std::string_view grammar_text,
   return false;
 }
 
-bool run_llama_gbnf_parse(std::string_view grammar_text, llama_grammar_rules & rules_out) {
+bool run_llama_gbnf_parse(std::string_view grammar_text,
+                          llama_grammar_rules &rules_out) {
   std::string grammar(grammar_text);
   llama_grammar_parser parser{nullptr};
   if (!parser.parse(grammar.c_str())) {
@@ -222,59 +222,64 @@ struct quantized_contract_summary {
   uint32_t explicit_no_claim = 0u;
 };
 
-bool on_jinja_parse_done(void * owner,
+bool on_jinja_parse_done(void *owner,
                          const emel::text::jinja::events::parsing_done &) {
-  auto * capture = static_cast<jinja_parse_capture *>(owner);
+  auto *capture = static_cast<jinja_parse_capture *>(owner);
   capture->done_called = true;
   return true;
 }
 
-bool on_jinja_parse_error(void * owner,
+bool on_jinja_parse_error(void *owner,
                           const emel::text::jinja::events::parsing_error &) {
-  auto * capture = static_cast<jinja_parse_capture *>(owner);
+  auto *capture = static_cast<jinja_parse_capture *>(owner);
   capture->error_called = true;
   return true;
 }
 
-bool on_jinja_render_done(void * owner,
+bool on_jinja_render_done(void *owner,
                           const emel::text::jinja::events::rendering_done &) {
-  auto * capture = static_cast<jinja_render_capture *>(owner);
+  auto *capture = static_cast<jinja_render_capture *>(owner);
   capture->done_called = true;
   return true;
 }
 
-bool on_jinja_render_error(void * owner,
+bool on_jinja_render_error(void *owner,
                            const emel::text::jinja::events::rendering_error &) {
-  auto * capture = static_cast<jinja_render_capture *>(owner);
+  auto *capture = static_cast<jinja_render_capture *>(owner);
   capture->error_called = true;
   return true;
 }
 
 quantized_contract_summary build_quantized_contract_summary(
-    const emel::model::llama::quantized_path_audit & audit) {
+    const emel::model::llama::quantized_path_audit &audit) {
   quantized_contract_summary summary{};
-  for (const auto & stage : audit.stages) {
+  for (const auto &stage : audit.stages) {
     summary.native_quantized += static_cast<uint32_t>(
-        stage.contract == emel::model::llama::quantized_contract_kind::native_quantized);
-    summary.approved_dense_f32_by_contract += static_cast<uint32_t>(
         stage.contract ==
-        emel::model::llama::quantized_contract_kind::approved_dense_f32_by_contract);
+        emel::model::llama::quantized_contract_kind::native_quantized);
+    summary.approved_dense_f32_by_contract += static_cast<uint32_t>(
+        stage.contract == emel::model::llama::quantized_contract_kind::
+                              approved_dense_f32_by_contract);
     summary.disallowed_fallback += static_cast<uint32_t>(
-        stage.contract == emel::model::llama::quantized_contract_kind::disallowed_fallback);
+        stage.contract ==
+        emel::model::llama::quantized_contract_kind::disallowed_fallback);
     summary.explicit_no_claim += static_cast<uint32_t>(
-        stage.contract == emel::model::llama::quantized_contract_kind::explicit_no_claim);
+        stage.contract ==
+        emel::model::llama::quantized_contract_kind::explicit_no_claim);
   }
   return summary;
 }
 
-bool build_execution_surface(const emel::model::data & model_data,
-                            emel::model::llama::execution_view & execution_out) {
+bool build_execution_surface(
+    const emel::model::data &model_data,
+    emel::model::llama::execution_view &execution_out) {
   return emel::model::llama::build_execution_view(model_data, execution_out) ==
          emel::error::cast(emel::model::loader::error::none);
 }
 
-bool build_execution_audit(const emel::model::data & model_data,
-                           emel::model::llama::quantized_path_audit & audit_out) {
+bool build_execution_audit(
+    const emel::model::data &model_data,
+    emel::model::llama::quantized_path_audit &audit_out) {
   emel::model::llama::execution_view execution{};
   if (!build_execution_surface(model_data, execution)) {
     return false;
@@ -284,9 +289,10 @@ bool build_execution_audit(const emel::model::data & model_data,
   return true;
 }
 
-bool build_execution_audit(const emel::model::data & model_data,
-                           emel::model::llama::execution_view & execution_out,
-                           emel::model::llama::quantized_path_audit & audit_out) {
+bool build_execution_audit(
+    const emel::model::data &model_data,
+    emel::model::llama::execution_view &execution_out,
+    emel::model::llama::quantized_path_audit &audit_out) {
   if (!build_execution_surface(model_data, execution_out)) {
     return false;
   }
@@ -296,9 +302,9 @@ bool build_execution_audit(const emel::model::data & model_data,
 }
 
 bool build_execution_surface_with_audit(
-    const emel::model::data & model_data,
-    emel::model::llama::execution_view & execution_out,
-    emel::model::llama::quantized_path_audit & audit_out) {
+    const emel::model::data &model_data,
+    emel::model::llama::execution_view &execution_out,
+    emel::model::llama::quantized_path_audit &audit_out) {
   if (emel::model::llama::build_execution_view(model_data, execution_out) !=
       emel::error::cast(emel::model::loader::error::none)) {
     return false;
@@ -309,33 +315,27 @@ bool build_execution_surface_with_audit(
 }
 
 bool run_emel_jinja_parse(std::string_view template_text,
-                          emel::text::jinja::program & program_out,
-                          int32_t & parse_err_out,
-                          size_t & parse_error_pos_out) {
+                          emel::text::jinja::program &program_out,
+                          int32_t &parse_err_out, size_t &parse_error_pos_out) {
   jinja_parse_capture capture{};
   emel::text::jinja::parser::action::context parse_ctx{};
   emel::text::jinja::parser::sm parser{parse_ctx};
   const emel::text::jinja::event::parse::done_callback done_cb{
-      &capture,
-      on_jinja_parse_done};
+      &capture, on_jinja_parse_done};
   const emel::text::jinja::event::parse::error_callback error_cb{
-      &capture,
-      on_jinja_parse_error};
+      &capture, on_jinja_parse_error};
   const emel::text::jinja::event::parse parse_ev{
-      template_text,
-      program_out,
-      done_cb,
-      error_cb,
-      parse_err_out,
-      parse_error_pos_out,
+      template_text, program_out,   done_cb,
+      error_cb,      parse_err_out, parse_error_pos_out,
   };
   const bool accepted = parser.process_event(parse_ev);
   return accepted && capture.done_called && !capture.error_called &&
-         parse_err_out == static_cast<int32_t>(emel::text::jinja::parser::error::none);
+         parse_err_out ==
+             static_cast<int32_t>(emel::text::jinja::parser::error::none);
 }
 
 bool run_reference_jinja_parse(std::string_view template_text,
-                               ::jinja::program & program_out) {
+                               ::jinja::program &program_out) {
   try {
     ::jinja::lexer lex;
     ::jinja::lexer_result lex_res = lex.tokenize(std::string(template_text));
@@ -346,48 +346,40 @@ bool run_reference_jinja_parse(std::string_view template_text,
   }
 }
 
-bool run_emel_jinja_render(const emel::text::jinja::program & program,
+bool run_emel_jinja_render(const emel::text::jinja::program &program,
                            std::string_view template_text,
-                           std::string & rendered_out) {
+                           std::string &rendered_out) {
   jinja_render_capture capture{};
   emel::text::jinja::formatter::action::context formatter_ctx{};
   emel::text::jinja::formatter::sm formatter{formatter_ctx};
   std::vector<char> output_buffer(
       std::max<size_t>(1, static_cast<size_t>(template_text.size() + 1)));
   size_t output_len = 0;
-  int32_t render_err = static_cast<int32_t>(emel::text::jinja::formatter::error::none);
+  int32_t render_err =
+      static_cast<int32_t>(emel::text::jinja::formatter::error::none);
   size_t render_error_pos = 0;
   const emel::text::jinja::event::render::done_callback done_cb{
-      &capture,
-      on_jinja_render_done};
+      &capture, on_jinja_render_done};
   const emel::text::jinja::event::render::error_callback error_cb{
-      &capture,
-      on_jinja_render_error};
+      &capture, on_jinja_render_error};
   const emel::text::jinja::event::render render_ev{
-      program,
-      template_text,
-      output_buffer[0],
-      output_buffer.size(),
-      done_cb,
-      error_cb,
-      nullptr,
-      &output_len,
-      nullptr,
-      &render_err,
-      &render_error_pos,
+      program, template_text, output_buffer[0],  output_buffer.size(),
+      done_cb, error_cb,      nullptr,           &output_len,
+      nullptr, &render_err,   &render_error_pos,
   };
 
   const bool accepted = formatter.process_event(render_ev);
   if (!accepted || capture.error_called ||
-      render_err != static_cast<int32_t>(emel::text::jinja::formatter::error::none)) {
+      render_err !=
+          static_cast<int32_t>(emel::text::jinja::formatter::error::none)) {
     return false;
   }
   rendered_out.assign(output_buffer.data(), output_len);
   return true;
 }
 
-bool run_reference_jinja_render(const ::jinja::program & program,
-                                std::string & rendered_out) {
+bool run_reference_jinja_render(const ::jinja::program &program,
+                                std::string &rendered_out) {
   try {
     ::jinja::context ctx;
     ctx.set_val("name", ::jinja::mk_val<::jinja::value_string>("world"));
@@ -407,7 +399,7 @@ bool run_reference_jinja_render(const ::jinja::program & program,
   }
 }
 
-std::string_view strip_trailing_newline(const std::string & value) {
+std::string_view strip_trailing_newline(const std::string &value) {
   size_t len = value.size();
   if (len > 0 && value[len - 1] == '\n') {
     --len;
@@ -415,42 +407,34 @@ std::string_view strip_trailing_newline(const std::string & value) {
   return std::string_view(value.data(), len);
 }
 
-bool compare_grammars(const emel::gbnf::grammar & emel_grammar,
-                      const llama_grammar_rules & llama_rules) {
+bool compare_grammars(const emel::gbnf::grammar &emel_grammar,
+                      const llama_grammar_rules &llama_rules) {
   if (emel_grammar.rule_count != llama_rules.size()) {
-    std::fprintf(stderr,
-                 "rule count mismatch: emel=%u llama=%zu\n",
-                 emel_grammar.rule_count,
-                 llama_rules.size());
+    std::fprintf(stderr, "rule count mismatch: emel=%u llama=%zu\n",
+                 emel_grammar.rule_count, llama_rules.size());
     return false;
   }
 
   for (uint32_t rule_id = 0; rule_id < emel_grammar.rule_count; ++rule_id) {
     const emel::gbnf::rule_view emel_rule = emel_grammar.rule(rule_id);
-    const llama_grammar_rule & llama_rule = llama_rules[rule_id];
+    const llama_grammar_rule &llama_rule = llama_rules[rule_id];
     const uint32_t llama_len = static_cast<uint32_t>(llama_rule.size());
     if (emel_rule.length != llama_len) {
       std::fprintf(stderr,
                    "rule length mismatch at rule %u: emel=%u llama=%u\n",
-                   rule_id,
-                   emel_rule.length,
-                   llama_len);
+                   rule_id, emel_rule.length, llama_len);
       return false;
     }
     for (uint32_t i = 0; i < emel_rule.length; ++i) {
-      const emel::gbnf::element & emel_elem = emel_rule.elements[i];
-      const llama_grammar_element & llama_elem = llama_rule[i];
+      const emel::gbnf::element &emel_elem = emel_rule.elements[i];
+      const llama_grammar_element &llama_elem = llama_rule[i];
       const uint32_t emel_type = static_cast<uint32_t>(emel_elem.type);
       const uint32_t llama_type = static_cast<uint32_t>(llama_elem.type);
       if (emel_type != llama_type || emel_elem.value != llama_elem.value) {
         std::fprintf(stderr,
                      "element mismatch at rule %u index %u: "
                      "emel(type=%u,value=%u) llama(type=%u,value=%u)\n",
-                     rule_id,
-                     i,
-                     emel_type,
-                     emel_elem.value,
-                     llama_type,
+                     rule_id, i, emel_type, emel_elem.value, llama_type,
                      llama_elem.value);
         return false;
       }
@@ -459,34 +443,28 @@ bool compare_grammars(const emel::gbnf::grammar & emel_grammar,
   return true;
 }
 
-void dump_emel_grammar(const emel::gbnf::grammar & grammar) {
-  std::fprintf(stdout,
-               "emel grammar: rules=%u elements=%u\n",
-               grammar.rule_count,
-               grammar.element_count);
+void dump_emel_grammar(const emel::gbnf::grammar &grammar) {
+  std::fprintf(stdout, "emel grammar: rules=%u elements=%u\n",
+               grammar.rule_count, grammar.element_count);
   for (uint32_t rule_id = 0; rule_id < grammar.rule_count; ++rule_id) {
     const emel::gbnf::rule_view rule = grammar.rule(rule_id);
     std::fprintf(stdout, "  rule[%u] len=%u:", rule_id, rule.length);
     for (uint32_t i = 0; i < rule.length; ++i) {
-      const emel::gbnf::element & elem = rule.elements[i];
-      std::fprintf(stdout,
-                   " (%u,%u)",
-                   static_cast<uint32_t>(elem.type),
+      const emel::gbnf::element &elem = rule.elements[i];
+      std::fprintf(stdout, " (%u,%u)", static_cast<uint32_t>(elem.type),
                    elem.value);
     }
     std::fprintf(stdout, "\n");
   }
 }
 
-void dump_llama_grammar(const llama_grammar_rules & rules) {
+void dump_llama_grammar(const llama_grammar_rules &rules) {
   std::fprintf(stdout, "llama grammar: rules=%zu\n", rules.size());
   for (size_t rule_id = 0; rule_id < rules.size(); ++rule_id) {
-    const llama_grammar_rule & rule = rules[rule_id];
+    const llama_grammar_rule &rule = rules[rule_id];
     std::fprintf(stdout, "  rule[%zu] len=%zu:", rule_id, rule.size());
-    for (const auto & elem : rule) {
-      std::fprintf(stdout,
-                   " (%u,%u)",
-                   static_cast<unsigned int>(elem.type),
+    for (const auto &elem : rule) {
+      std::fprintf(stdout, " (%u,%u)", static_cast<unsigned int>(elem.type),
                    static_cast<unsigned int>(elem.value));
     }
     std::fprintf(stdout, "\n");
@@ -494,33 +472,28 @@ void dump_llama_grammar(const llama_grammar_rules & rules) {
 }
 
 struct llama_backend_guard {
-  llama_backend_guard() {
-    llama_backend_init();
-  }
+  llama_backend_guard() { llama_backend_init(); }
 
-  ~llama_backend_guard() {
-    llama_backend_free();
-  }
+  ~llama_backend_guard() { llama_backend_free(); }
 };
 
 void silence_llama_log(ggml_log_level, const char *, void *) {}
 
 struct llama_log_silencer {
   ggml_log_callback callback = nullptr;
-  void * user_data = nullptr;
+  void *user_data = nullptr;
 
   llama_log_silencer() {
     llama_log_get(&callback, &user_data);
     llama_log_set(silence_llama_log, nullptr);
   }
 
-  ~llama_log_silencer() {
-    llama_log_set(callback, user_data);
-  }
+  ~llama_log_silencer() { llama_log_set(callback, user_data); }
 };
 
 template <size_t k_array_size>
-void copy_name(std::array<char, k_array_size> & dst, const std::string_view value) {
+void copy_name(std::array<char, k_array_size> &dst,
+               const std::string_view value) {
   static_assert(k_array_size > 0, "copy_name requires non-empty destination");
   dst.fill('\0');
   const size_t copy_len = std::min(value.size(), k_array_size - 1);
@@ -538,17 +511,6 @@ struct gguf_capture {
   bool parse_error = false;
   emel::gguf::loader::requirements requirements = {};
   emel::error::type err = emel::error::cast(emel::gguf::loader::error::none);
-};
-
-struct weight_capture {
-  bool bind_done = false;
-  bool bind_error = false;
-  bool plan_done = false;
-  bool plan_error = false;
-  bool apply_done = false;
-  bool apply_error = false;
-  uint32_t effect_count = 0u;
-  emel::error::type err = emel::error::cast(emel::model::weight_loader::error::none);
 };
 
 struct load_capture {
@@ -569,7 +531,7 @@ struct initialize_capture {
 struct generation_capture {
   bool done = false;
   bool error = false;
-  const emel::text::generator::event::generate * request = nullptr;
+  const emel::text::generator::event::generate *request = nullptr;
   emel::error::type err = emel::error::cast(emel::text::generator::error::none);
   int32_t tokens_generated = 0;
   size_t output_length = 0u;
@@ -627,16 +589,17 @@ std::string generation_prompt_slug(std::string_view text) {
 }
 
 std::filesystem::path default_generation_baseline_path(
-    const maintained_generation_fixture & fixture,
-    const emel::paritychecker::parity_options & opts) {
+    const maintained_generation_fixture &fixture,
+    const emel::paritychecker::parity_options &opts) {
   const std::string prompt_slug = generation_prompt_slug(opts.text);
   return parity_assets::generation_baseline_directory_path() /
-      ("generation_" + std::string(fixture.slug) + "_prompt_" + prompt_slug +
-       "_max_tokens_" + std::to_string(opts.max_tokens) + ".txt");
+         ("generation_" + std::string(fixture.slug) + "_prompt_" + prompt_slug +
+          "_max_tokens_" + std::to_string(opts.max_tokens) + ".txt");
 }
 
 char hex_digit(const uint8_t nibble) {
-  return static_cast<char>(nibble < 10u ? ('0' + nibble) : ('a' + (nibble - 10u)));
+  return static_cast<char>(nibble < 10u ? ('0' + nibble)
+                                        : ('a' + (nibble - 10u)));
 }
 
 std::string encode_hex(std::span<const std::byte> bytes) {
@@ -650,7 +613,7 @@ std::string encode_hex(std::span<const std::byte> bytes) {
   return out;
 }
 
-bool decode_hex_char(const char ch, uint8_t & value_out) {
+bool decode_hex_char(const char ch, uint8_t &value_out) {
   if (ch >= '0' && ch <= '9') {
     value_out = static_cast<uint8_t>(ch - '0');
     return true;
@@ -666,7 +629,7 @@ bool decode_hex_char(const char ch, uint8_t & value_out) {
   return false;
 }
 
-bool decode_hex(std::string_view text, std::vector<uint8_t> & out) {
+bool decode_hex(std::string_view text, std::vector<uint8_t> &out) {
   out.clear();
   if ((text.size() % 2u) != 0u) {
     return false;
@@ -685,9 +648,8 @@ bool decode_hex(std::string_view text, std::vector<uint8_t> & out) {
   return true;
 }
 
-bool find_named_line_value(std::string_view text,
-                           std::string_view key,
-                           std::string_view & value_out) {
+bool find_named_line_value(std::string_view text, std::string_view key,
+                           std::string_view &value_out) {
   size_t line_begin = 0u;
   while (line_begin <= text.size()) {
     size_t line_end = text.find('\n', line_begin);
@@ -711,14 +673,15 @@ bool find_named_line_value(std::string_view text,
   return false;
 }
 
-bool parse_i32_text(std::string_view text, int32_t & out) {
+bool parse_i32_text(std::string_view text, int32_t &out) {
   if (text.empty()) {
     return false;
   }
   std::string buffer(text);
-  char * end = nullptr;
+  char *end = nullptr;
   const long parsed = std::strtol(buffer.c_str(), &end, 10);
-  if (end == buffer.c_str() || *end != '\0' || parsed < std::numeric_limits<int32_t>::min() ||
+  if (end == buffer.c_str() || *end != '\0' ||
+      parsed < std::numeric_limits<int32_t>::min() ||
       parsed > std::numeric_limits<int32_t>::max()) {
     return false;
   }
@@ -726,12 +689,12 @@ bool parse_i32_text(std::string_view text, int32_t & out) {
   return true;
 }
 
-bool parse_size_text(std::string_view text, size_t & out) {
+bool parse_size_text(std::string_view text, size_t &out) {
   if (text.empty()) {
     return false;
   }
   std::string buffer(text);
-  char * end = nullptr;
+  char *end = nullptr;
   const unsigned long long parsed = std::strtoull(buffer.c_str(), &end, 10);
   if (end == buffer.c_str() || *end != '\0') {
     return false;
@@ -740,12 +703,12 @@ bool parse_size_text(std::string_view text, size_t & out) {
   return true;
 }
 
-bool parse_float_text(std::string_view text, float & out) {
+bool parse_float_text(std::string_view text, float &out) {
   if (text.empty()) {
     return false;
   }
   std::string buffer(text);
-  char * end = nullptr;
+  char *end = nullptr;
   const float parsed = std::strtof(buffer.c_str(), &end);
   if (end == buffer.c_str() || *end != '\0') {
     return false;
@@ -755,10 +718,8 @@ bool parse_float_text(std::string_view text, float & out) {
 }
 
 template <class value_type, class parse_fn>
-bool parse_csv_values(std::string_view text,
-                      std::span<value_type> out,
-                      int32_t & count_out,
-                      parse_fn parse_value) {
+bool parse_csv_values(std::string_view text, std::span<value_type> out,
+                      int32_t &count_out, parse_fn parse_value) {
   count_out = 0;
   if (text.empty()) {
     return true;
@@ -767,7 +728,8 @@ bool parse_csv_values(std::string_view text,
   size_t token_begin = 0u;
   while (token_begin <= text.size()) {
     const size_t token_end = text.find(',', token_begin);
-    const size_t safe_end = token_end == std::string_view::npos ? text.size() : token_end;
+    const size_t safe_end =
+        token_end == std::string_view::npos ? text.size() : token_end;
     if (count_out < 0 || static_cast<size_t>(count_out) >= out.size()) {
       return false;
     }
@@ -787,10 +749,11 @@ bool parse_csv_values(std::string_view text,
   return true;
 }
 
-bool write_generation_baseline_file(const std::filesystem::path & path,
-                                    const maintained_generation_fixture & fixture,
-                                    const emel::paritychecker::parity_options & opts,
-                                    const generation_result & result) {
+bool write_generation_baseline_file(
+    const std::filesystem::path &path,
+    const maintained_generation_fixture &fixture,
+    const emel::paritychecker::parity_options &opts,
+    const generation_result &result) {
   const std::filesystem::path parent = path.parent_path();
   if (!parent.empty()) {
     std::error_code create_error;
@@ -800,18 +763,21 @@ bool write_generation_baseline_file(const std::filesystem::path & path,
     }
   }
 
-  std::FILE * file = std::fopen(path.string().c_str(), "wb");
+  std::FILE *file = std::fopen(path.string().c_str(), "wb");
   if (file == nullptr) {
     return false;
   }
 
-  const std::string prompt_hex = encode_hex(std::as_bytes(std::span<const char>(opts.text.data(), opts.text.size())));
-  const std::string output_hex = encode_hex(std::as_bytes(std::span<const char>(
-      result.output.data(), result.output_length)));
+  const std::string prompt_hex = encode_hex(
+      std::as_bytes(std::span<const char>(opts.text.data(), opts.text.size())));
+  const std::string output_hex = encode_hex(std::as_bytes(
+      std::span<const char>(result.output.data(), result.output_length)));
 
-  std::fprintf(file, "format=%.*s\n", static_cast<int>(k_generation_baseline_format.size()),
+  std::fprintf(file, "format=%.*s\n",
+               static_cast<int>(k_generation_baseline_format.size()),
                k_generation_baseline_format.data());
-  std::fprintf(file, "contract=%.*s\n", static_cast<int>(k_generation_baseline_contract.size()),
+  std::fprintf(file, "contract=%.*s\n",
+               static_cast<int>(k_generation_baseline_contract.size()),
                k_generation_baseline_contract.data());
   std::fprintf(file, "fixture=%s\n", fixture.name.data());
   std::fprintf(file, "prompt_hex=%s\n", prompt_hex.c_str());
@@ -832,7 +798,8 @@ bool write_generation_baseline_file(const std::filesystem::path & path,
     if (idx > 0) {
       std::fputc(',', file);
     }
-    std::fprintf(file, "%.9g", result.trace.top_score_gaps[static_cast<size_t>(idx)]);
+    std::fprintf(file, "%.9g",
+                 result.trace.top_score_gaps[static_cast<size_t>(idx)]);
   }
   std::fputc('\n', file);
   std::fprintf(file, "output_hex=%s\n", output_hex.c_str());
@@ -840,8 +807,8 @@ bool write_generation_baseline_file(const std::filesystem::path & path,
   return std::fclose(file) == 0;
 }
 
-bool load_generation_baseline_file(const std::filesystem::path & path,
-                                   generation_baseline_record & record_out) {
+bool load_generation_baseline_file(const std::filesystem::path &path,
+                                   generation_baseline_record &record_out) {
   std::vector<uint8_t> file_bytes;
   if (!parity_assets::read_file_bytes(path.string(), file_bytes)) {
     return false;
@@ -850,10 +817,12 @@ bool load_generation_baseline_file(const std::filesystem::path & path,
   const std::string text(file_bytes.begin(), file_bytes.end());
   std::string_view value = {};
 
-  if (!find_named_line_value(text, "format", value) || value != k_generation_baseline_format) {
+  if (!find_named_line_value(text, "format", value) ||
+      value != k_generation_baseline_format) {
     return false;
   }
-  if (!find_named_line_value(text, "contract", value) || value != k_generation_baseline_contract) {
+  if (!find_named_line_value(text, "contract", value) ||
+      value != k_generation_baseline_contract) {
     return false;
   }
   if (!find_named_line_value(text, "fixture", value)) {
@@ -868,7 +837,8 @@ bool load_generation_baseline_file(const std::filesystem::path & path,
   if (!decode_hex(value, prompt_bytes)) {
     return false;
   }
-  record_out.prompt.assign(reinterpret_cast<const char *>(prompt_bytes.data()), prompt_bytes.size());
+  record_out.prompt.assign(reinterpret_cast<const char *>(prompt_bytes.data()),
+                           prompt_bytes.size());
 
   if (!find_named_line_value(text, "max_tokens", value) ||
       !parse_i32_text(value, record_out.max_tokens)) {
@@ -893,10 +863,9 @@ bool load_generation_baseline_file(const std::filesystem::path & path,
   int32_t token_count = 0;
   if (!find_named_line_value(text, "token_ids", value) ||
       !parse_csv_values<int32_t>(
-          value,
-          std::span<int32_t>(record_out.result.trace.token_ids),
+          value, std::span<int32_t>(record_out.result.trace.token_ids),
           token_count,
-          [](std::string_view token_text, int32_t & token_out) {
+          [](std::string_view token_text, int32_t &token_out) {
             return parse_i32_text(token_text, token_out);
           }) ||
       token_count != record_out.result.trace.token_count) {
@@ -906,10 +875,9 @@ bool load_generation_baseline_file(const std::filesystem::path & path,
   int32_t gap_count = 0;
   if (!find_named_line_value(text, "top_score_gaps", value) ||
       !parse_csv_values<float>(
-          value,
-          std::span<float>(record_out.result.trace.top_score_gaps),
+          value, std::span<float>(record_out.result.trace.top_score_gaps),
           gap_count,
-          [](std::string_view gap_text, float & gap_out) {
+          [](std::string_view gap_text, float &gap_out) {
             return parse_float_text(gap_text, gap_out);
           }) ||
       gap_count != record_out.result.trace.token_count) {
@@ -920,11 +888,13 @@ bool load_generation_baseline_file(const std::filesystem::path & path,
     return false;
   }
   std::vector<uint8_t> output_bytes;
-  if (!decode_hex(value, output_bytes) || output_bytes.size() != record_out.result.output_length) {
+  if (!decode_hex(value, output_bytes) ||
+      output_bytes.size() != record_out.result.output_length) {
     return false;
   }
   if (!output_bytes.empty()) {
-    std::memcpy(record_out.result.output.data(), output_bytes.data(), output_bytes.size());
+    std::memcpy(record_out.result.output.data(), output_bytes.data(),
+                output_bytes.size());
   }
   record_out.result.trace_available =
       record_out.result.trace.token_count == record_out.result.tokens_generated;
@@ -934,9 +904,10 @@ bool load_generation_baseline_file(const std::filesystem::path & path,
 
 struct reference_backend {
   llama_model_ptr model = {nullptr, llama_model_free};
-  const llama_vocab * vocab = nullptr;
+  const llama_vocab *vocab = nullptr;
   int32_t vocab_size = 0;
-  emel::tools::generation_formatter_contract::reference_formatter_info formatter = {};
+  emel::tools::generation_formatter_contract::reference_formatter_info
+      formatter = {};
   int32_t emel_reference_decode_calls = 0;
   int32_t emel_reference_logits_calls = 0;
   int32_t direct_reference_decode_calls = 0;
@@ -949,9 +920,9 @@ struct argmax_summary {
   float second_best_score = -std::numeric_limits<float>::infinity();
 };
 
-argmax_summary summarize_argmax_scores(const int32_t & candidate_ids,
-                                       const float & candidate_scores,
-                                       const int32_t & candidate_count) {
+argmax_summary summarize_argmax_scores(const int32_t &candidate_ids,
+                                       const float &candidate_scores,
+                                       const int32_t &candidate_count) {
   argmax_summary summary{};
   if (candidate_count <= 0) {
     return summary;
@@ -977,10 +948,8 @@ argmax_summary summarize_argmax_scores(const int32_t & candidate_ids,
   return summary;
 }
 
-void append_trace_token(generation_trace & trace,
-                        const int32_t token_id,
-                        const float best_score,
-                        const float second_best_score) {
+void append_trace_token(generation_trace &trace, const int32_t token_id,
+                        const float best_score, const float second_best_score) {
   if (trace.token_count < 0 ||
       static_cast<size_t>(trace.token_count) >= trace.token_ids.size()) {
     return;
@@ -994,54 +963,60 @@ void append_trace_token(generation_trace & trace,
 
 struct generation_load_state;
 
-emel::error::type sampler_select_argmax(generation_load_state & state,
-                                        int32_t & candidate_ids,
-                                        float & candidate_scores,
-                                        int32_t & candidate_count,
-                                        int32_t & selected_token_out);
+emel::error::type sampler_select_argmax(generation_load_state &state,
+                                        int32_t &candidate_ids,
+                                        float &candidate_scores,
+                                        int32_t &candidate_count,
+                                        int32_t &selected_token_out);
 
-emel::error::type run_emel_parse_model(void * owner,
-                                       const emel::model::loader::event::load & req);
+emel::error::type
+run_emel_parse_model(void *owner, const emel::model::loader::event::load &req);
 
 struct generation_load_state {
-  std::unique_ptr<emel::model::data> model_data = std::make_unique<emel::model::data>();
+  std::unique_ptr<emel::model::data> model_data =
+      std::make_unique<emel::model::data>();
   std::vector<uint8_t> file_bytes = {};
   emel::gguf::loader::sm gguf_loader = {};
-  emel::model::weight_loader::sm weight_loader = {};
+  emel::model::tensor::sm tensor_loader = {};
   emel::model::loader::sm model_loader = {};
   emel::text::tokenizer::sm tokenizer = {};
   emel::text::conditioner::sm conditioner = {};
   std::unique_ptr<emel::text::generator::sm> generator = {};
   reference_backend reference = {};
-  generation_trace * emel_trace = nullptr;
+  generation_trace *emel_trace = nullptr;
   std::array<emel::logits::sampler::fn, 1> samplers = {};
   std::vector<uint8_t> kv_arena = {};
   std::vector<emel::gguf::loader::kv_entry> kv_entries = {};
-  std::vector<emel::model::weight_loader::effect_request> effect_requests = {};
-  std::vector<emel::model::weight_loader::effect_result> effect_results = {};
+  uint32_t gguf_tensor_count = 0u;
+  std::vector<emel::model::tensor::effect_request> effect_requests = {};
+  std::vector<emel::model::tensor::effect_result> effect_results = {};
   gguf_capture gguf = {};
-  weight_capture weight = {};
   load_capture load = {};
   initialize_capture initialize = {};
   generation_capture generation = {};
-  emel::tools::generation_formatter_contract::formatter_binding formatter_binding = {};
+  emel::tools::generation_formatter_contract::formatter_binding
+      formatter_binding = {};
 
   generation_load_state()
-      : samplers{emel::logits::sampler::fn::from<generation_load_state, sampler_select_argmax>(
-            this)} {}
+      : samplers{emel::logits::sampler::fn::from<generation_load_state,
+                                                 sampler_select_argmax>(this)} {
+  }
 };
 
-emel::model::kv_binding kv_binding_from_state(const generation_load_state & state) {
+emel::model::kv_binding
+kv_binding_from_state(const generation_load_state &state) {
   return emel::model::kv_binding{
-      .arena = std::span<const uint8_t>{state.kv_arena.data(), state.kv_arena.size()},
-      .entries = std::span<const emel::gguf::loader::kv_entry>{state.kv_entries.data(),
-                                                               state.kv_entries.size()},
+      .arena = std::span<const uint8_t>{state.kv_arena.data(),
+                                        state.kv_arena.size()},
+      .entries =
+          std::span<const emel::gguf::loader::kv_entry>{
+              state.kv_entries.data(), state.kv_entries.size()},
   };
 }
 
 bool capture_generator_diagnostics(
-    generation_load_state & state,
-    emel::text::generator::diagnostics & diagnostics_out) {
+    generation_load_state &state,
+    emel::text::generator::diagnostics &diagnostics_out) {
   if (state.generator == nullptr) {
     return false;
   }
@@ -1050,16 +1025,18 @@ bool capture_generator_diagnostics(
 }
 
 quantized_contract_summary runtime_quantized_contract_summary(
-    const emel::text::generator::diagnostics & diagnostics) {
+    const emel::text::generator::diagnostics &diagnostics) {
   return quantized_contract_summary{
       .native_quantized = diagnostics.native_quantized_stage_count,
-      .approved_dense_f32_by_contract = diagnostics.approved_dense_f32_stage_count,
+      .approved_dense_f32_by_contract =
+          diagnostics.approved_dense_f32_stage_count,
       .disallowed_fallback = diagnostics.disallowed_fallback_stage_count,
       .explicit_no_claim = diagnostics.explicit_no_claim_stage_count,
   };
 }
 
-quantized_contract_summary runtime_quantized_contract_summary(generation_load_state & state) {
+quantized_contract_summary
+runtime_quantized_contract_summary(generation_load_state &state) {
   emel::text::generator::diagnostics diagnostics = {};
   if (!capture_generator_diagnostics(state, diagnostics)) {
     return {};
@@ -1067,25 +1044,26 @@ quantized_contract_summary runtime_quantized_contract_summary(generation_load_st
   return runtime_quantized_contract_summary(diagnostics);
 }
 
-bool quantized_contract_matches(const quantized_contract_summary & lhs,
-                                const quantized_contract_summary & rhs) {
+bool quantized_contract_matches(const quantized_contract_summary &lhs,
+                                const quantized_contract_summary &rhs) {
   return lhs.native_quantized == rhs.native_quantized &&
-         lhs.approved_dense_f32_by_contract == rhs.approved_dense_f32_by_contract &&
+         lhs.approved_dense_f32_by_contract ==
+             rhs.approved_dense_f32_by_contract &&
          lhs.disallowed_fallback == rhs.disallowed_fallback &&
          lhs.explicit_no_claim == rhs.explicit_no_claim;
 }
 
-emel::error::type sampler_select_argmax(generation_load_state & state,
-                                        int32_t & candidate_ids,
-                                        float & candidate_scores,
-                                        int32_t & candidate_count,
-                                        int32_t & selected_token_out) {
+emel::error::type sampler_select_argmax(generation_load_state &state,
+                                        int32_t &candidate_ids,
+                                        float &candidate_scores,
+                                        int32_t &candidate_count,
+                                        int32_t &selected_token_out) {
   const argmax_summary summary =
       summarize_argmax_scores(candidate_ids, candidate_scores, candidate_count);
   selected_token_out = summary.selected_token;
   if (state.emel_trace != nullptr) {
-    append_trace_token(
-        *state.emel_trace, summary.selected_token, summary.best_score, summary.second_best_score);
+    append_trace_token(*state.emel_trace, summary.selected_token,
+                       summary.best_score, summary.second_best_score);
   }
   return emel::error::cast(emel::logits::sampler::error::none);
 }
@@ -1106,41 +1084,41 @@ uint64_t read_u64_le(const std::span<const uint8_t> bytes) {
   return value;
 }
 
-const char * model_loader_error_name(const emel::error::type err) {
+const char *model_loader_error_name(const emel::error::type err) {
   using error = emel::model::loader::error;
 
   switch (err) {
-    case emel::error::cast(error::none):
-      return "none";
-    case emel::error::cast(error::invalid_request):
-      return "invalid_request";
-    case emel::error::cast(error::parse_failed):
-      return "parse_failed";
-    case emel::error::cast(error::backend_error):
-      return "backend_error";
-    case emel::error::cast(error::model_invalid):
-      return "model_invalid";
-    case emel::error::cast(error::internal_error):
-      return "internal_error";
-    case emel::error::cast(error::untracked):
-      return "untracked";
-    default:
-      return "unknown";
+  case emel::error::cast(error::none):
+    return "none";
+  case emel::error::cast(error::invalid_request):
+    return "invalid_request";
+  case emel::error::cast(error::parse_failed):
+    return "parse_failed";
+  case emel::error::cast(error::backend_error):
+    return "backend_error";
+  case emel::error::cast(error::model_invalid):
+    return "model_invalid";
+  case emel::error::cast(error::internal_error):
+    return "internal_error";
+  case emel::error::cast(error::untracked):
+    return "untracked";
+  default:
+    return "unknown";
   }
 }
 
-const char * generator_error_name(const emel::error::type err) {
+const char *generator_error_name(const emel::error::type err) {
   using error = emel::text::generator::error;
 
   switch (err) {
-    case emel::error::cast(error::none):
-      return "none";
-    case emel::error::cast(error::invalid_request):
-      return "invalid_request";
-    case emel::error::cast(error::backend):
-      return "backend";
-    default:
-      return "unknown";
+  case emel::error::cast(error::none):
+    return "none";
+  case emel::error::cast(error::invalid_request):
+    return "invalid_request";
+  case emel::error::cast(error::backend):
+    return "backend";
+  default:
+    return "unknown";
   }
 }
 
@@ -1149,79 +1127,65 @@ emel::error::type map_gguf_error(const emel::error::type err) {
   using model_error = emel::model::loader::error;
 
   switch (err) {
-    case emel::error::cast(gguf_error::none):
-      return emel::error::cast(model_error::none);
-    case emel::error::cast(gguf_error::invalid_request):
-      return emel::error::cast(model_error::invalid_request);
-    case emel::error::cast(gguf_error::model_invalid):
-      return emel::error::cast(model_error::model_invalid);
-    case emel::error::cast(gguf_error::capacity):
-      return emel::error::cast(model_error::backend_error);
-    case emel::error::cast(gguf_error::parse_failed):
-      return emel::error::cast(model_error::parse_failed);
-    case emel::error::cast(gguf_error::internal_error):
-      return emel::error::cast(model_error::internal_error);
-    case emel::error::cast(gguf_error::untracked):
-      return emel::error::cast(model_error::untracked);
-    default:
-      return emel::error::cast(model_error::untracked);
+  case emel::error::cast(gguf_error::none):
+    return emel::error::cast(model_error::none);
+  case emel::error::cast(gguf_error::invalid_request):
+    return emel::error::cast(model_error::invalid_request);
+  case emel::error::cast(gguf_error::model_invalid):
+    return emel::error::cast(model_error::model_invalid);
+  case emel::error::cast(gguf_error::capacity):
+    return emel::error::cast(model_error::backend_error);
+  case emel::error::cast(gguf_error::parse_failed):
+    return emel::error::cast(model_error::parse_failed);
+  case emel::error::cast(gguf_error::internal_error):
+    return emel::error::cast(model_error::internal_error);
+  case emel::error::cast(gguf_error::untracked):
+    return emel::error::cast(model_error::untracked);
+  default:
+    return emel::error::cast(model_error::untracked);
   }
 }
 
-emel::error::type map_weight_loader_error(const emel::error::type err) {
-  using weight_error = emel::model::weight_loader::error;
-  using model_error = emel::model::loader::error;
+void reset_gguf_capture(generation_load_state &state);
+void on_probe_done(void *owner,
+                   const emel::gguf::loader::events::probe_done &ev);
+void on_probe_error(void *owner,
+                    const emel::gguf::loader::events::probe_error &ev);
+void on_bind_done(void *owner, const emel::gguf::loader::events::bind_done &ev);
+void on_bind_error(void *owner,
+                   const emel::gguf::loader::events::bind_error &ev);
+void on_parse_done(void *owner,
+                   const emel::gguf::loader::events::parse_done &ev);
+void on_parse_error(void *owner,
+                    const emel::gguf::loader::events::parse_error &ev);
 
-  switch (err) {
-    case emel::error::cast(weight_error::none):
-      return emel::error::cast(model_error::none);
-    case emel::error::cast(weight_error::invalid_request):
-      return emel::error::cast(model_error::invalid_request);
-    case emel::error::cast(weight_error::capacity):
-    case emel::error::cast(weight_error::backend_error):
-    case emel::error::cast(weight_error::out_of_memory):
-      return emel::error::cast(model_error::backend_error);
-    case emel::error::cast(weight_error::model_invalid):
-      return emel::error::cast(model_error::model_invalid);
-    case emel::error::cast(weight_error::internal_error):
-      return emel::error::cast(model_error::internal_error);
-    case emel::error::cast(weight_error::untracked):
-      return emel::error::cast(model_error::untracked);
-    default:
-      return emel::error::cast(model_error::untracked);
+emel::error::type prebind_gguf_kv_storage(
+    generation_load_state &state, const std::span<const uint8_t> file_image) {
+  if (file_image.empty()) {
+    return emel::error::cast(emel::model::loader::error::invalid_request);
   }
-}
 
-void reset_gguf_capture(generation_load_state & state);
-void on_probe_done(void * owner, const emel::gguf::loader::events::probe_done & ev);
-void on_probe_error(void * owner, const emel::gguf::loader::events::probe_error & ev);
-void on_bind_done(void * owner, const emel::gguf::loader::events::bind_done & ev);
-void on_bind_error(void * owner, const emel::gguf::loader::events::bind_error & ev);
-void on_parse_done(void * owner, const emel::gguf::loader::events::parse_done & ev);
-void on_parse_error(void * owner, const emel::gguf::loader::events::parse_error & ev);
-
-emel::error::type parse_gguf_kv_storage(generation_load_state & state,
-                                        const std::span<const uint8_t> file_image,
-                                        emel::model::data & model_data,
-                                        uint32_t & tensor_count_out) {
+  state.gguf_tensor_count = 0u;
   reset_gguf_capture(state);
-  const emel::gguf::loader::event::probe_done_fn probe_done_cb{&state, on_probe_done};
-  const emel::gguf::loader::event::probe_error_fn probe_error_cb{&state, on_probe_error};
+  const emel::gguf::loader::event::probe_done_fn probe_done_cb{&state,
+                                                               on_probe_done};
+  const emel::gguf::loader::event::probe_error_fn probe_error_cb{
+      &state, on_probe_error};
   emel::gguf::loader::requirements requirements = {};
   const emel::gguf::loader::event::probe probe_ev{
-    file_image,
-    requirements,
-    probe_done_cb,
-    probe_error_cb,
+      file_image,
+      requirements,
+      probe_done_cb,
+      probe_error_cb,
   };
 
-  if (!state.gguf_loader.process_event(probe_ev) ||
-      !state.gguf.probe_done ||
+  if (!state.gguf_loader.process_event(probe_ev) || !state.gguf.probe_done ||
       state.gguf.probe_error) {
     return map_gguf_error(state.gguf.err);
   }
 
-  if (requirements.tensor_count > static_cast<uint32_t>(emel::model::data::k_max_tensors)) {
+  if (requirements.tensor_count >
+      static_cast<uint32_t>(emel::model::data::k_max_tensors)) {
     return emel::error::cast(emel::model::loader::error::model_invalid);
   }
 
@@ -1233,149 +1197,112 @@ emel::error::type parse_gguf_kv_storage(generation_load_state & state,
 
   state.kv_arena.resize(static_cast<size_t>(arena_bytes));
   state.kv_entries.resize(requirements.kv_count);
+  state.gguf_tensor_count = requirements.tensor_count;
+  return emel::error::cast(emel::model::loader::error::none);
+}
 
+emel::error::type parse_gguf_kv_storage(
+    generation_load_state &state, const std::span<const uint8_t> file_image,
+    emel::model::data &model_data, uint32_t &tensor_count_out) {
   reset_gguf_capture(state);
-  const emel::gguf::loader::event::bind_done_fn bind_done_cb{&state, on_bind_done};
-  const emel::gguf::loader::event::bind_error_fn bind_error_cb{&state, on_bind_error};
+  const emel::gguf::loader::event::bind_done_fn bind_done_cb{&state,
+                                                             on_bind_done};
+  const emel::gguf::loader::event::bind_error_fn bind_error_cb{&state,
+                                                               on_bind_error};
   const emel::gguf::loader::event::bind_storage bind_ev{
-    std::span<uint8_t>{state.kv_arena},
-    std::span<emel::gguf::loader::kv_entry>{state.kv_entries},
-    std::span<emel::model::data::tensor_record>{model_data.tensors.data(), requirements.tensor_count},
-    bind_done_cb,
-    bind_error_cb,
+      std::span<uint8_t>{state.kv_arena},
+      std::span<emel::gguf::loader::kv_entry>{state.kv_entries},
+      std::span<emel::model::data::tensor_record>{model_data.tensors.data(),
+                                                  state.gguf_tensor_count},
+      bind_done_cb,
+      bind_error_cb,
   };
 
-  if (!state.gguf_loader.process_event(bind_ev) ||
-      !state.gguf.bind_done ||
+  if (!state.gguf_loader.process_event(bind_ev) || !state.gguf.bind_done ||
       state.gguf.bind_error) {
     return map_gguf_error(state.gguf.err);
   }
 
   reset_gguf_capture(state);
-  const emel::gguf::loader::event::parse_done_fn parse_done_cb{&state, on_parse_done};
-  const emel::gguf::loader::event::parse_error_fn parse_error_cb{&state, on_parse_error};
+  const emel::gguf::loader::event::parse_done_fn parse_done_cb{&state,
+                                                               on_parse_done};
+  const emel::gguf::loader::event::parse_error_fn parse_error_cb{
+      &state, on_parse_error};
   const emel::gguf::loader::event::parse parse_ev{
-    file_image,
-    parse_done_cb,
-    parse_error_cb,
+      file_image,
+      parse_done_cb,
+      parse_error_cb,
   };
 
-  if (!state.gguf_loader.process_event(parse_ev) ||
-      !state.gguf.parse_done ||
+  if (!state.gguf_loader.process_event(parse_ev) || !state.gguf.parse_done ||
       state.gguf.parse_error) {
     return map_gguf_error(state.gguf.err);
   }
 
-  tensor_count_out = requirements.tensor_count;
+  tensor_count_out = state.gguf_tensor_count;
   return emel::error::cast(emel::model::loader::error::none);
 }
 
-void reset_gguf_capture(generation_load_state & state) {
-  state.gguf = {};
-}
+void reset_gguf_capture(generation_load_state &state) { state.gguf = {}; }
 
-void reset_weight_capture(generation_load_state & state) {
-  state.weight = {};
-}
+void reset_load_capture(generation_load_state &state) { state.load = {}; }
 
-void reset_load_capture(generation_load_state & state) {
-  state.load = {};
-}
-
-void reset_initialize_capture(generation_load_state & state) {
+void reset_initialize_capture(generation_load_state &state) {
   state.initialize = {};
 }
 
-void reset_generation_capture(generation_load_state & state) {
+void reset_generation_capture(generation_load_state &state) {
   state.generation = {};
 }
 
-void on_probe_done(void * owner, const emel::gguf::loader::events::probe_done & ev) {
-  auto & state = *static_cast<generation_load_state *>(owner);
+void on_probe_done(void *owner,
+                   const emel::gguf::loader::events::probe_done &ev) {
+  auto &state = *static_cast<generation_load_state *>(owner);
   state.gguf.probe_done = true;
   state.gguf.probe_error = false;
   state.gguf.requirements = ev.requirements_out;
 }
 
-void on_probe_error(void * owner, const emel::gguf::loader::events::probe_error & ev) {
-  auto & state = *static_cast<generation_load_state *>(owner);
+void on_probe_error(void *owner,
+                    const emel::gguf::loader::events::probe_error &ev) {
+  auto &state = *static_cast<generation_load_state *>(owner);
   state.gguf.probe_done = false;
   state.gguf.probe_error = true;
   state.gguf.err = ev.err;
 }
 
-void on_bind_done(void * owner, const emel::gguf::loader::events::bind_done &) {
-  auto & state = *static_cast<generation_load_state *>(owner);
+void on_bind_done(void *owner, const emel::gguf::loader::events::bind_done &) {
+  auto &state = *static_cast<generation_load_state *>(owner);
   state.gguf.bind_done = true;
   state.gguf.bind_error = false;
 }
 
-void on_bind_error(void * owner, const emel::gguf::loader::events::bind_error & ev) {
-  auto & state = *static_cast<generation_load_state *>(owner);
+void on_bind_error(void *owner,
+                   const emel::gguf::loader::events::bind_error &ev) {
+  auto &state = *static_cast<generation_load_state *>(owner);
   state.gguf.bind_done = false;
   state.gguf.bind_error = true;
   state.gguf.err = ev.err;
 }
 
-void on_parse_done(void * owner, const emel::gguf::loader::events::parse_done &) {
-  auto & state = *static_cast<generation_load_state *>(owner);
+void on_parse_done(void *owner,
+                   const emel::gguf::loader::events::parse_done &) {
+  auto &state = *static_cast<generation_load_state *>(owner);
   state.gguf.parse_done = true;
   state.gguf.parse_error = false;
 }
 
-void on_parse_error(void * owner, const emel::gguf::loader::events::parse_error & ev) {
-  auto & state = *static_cast<generation_load_state *>(owner);
+void on_parse_error(void *owner,
+                    const emel::gguf::loader::events::parse_error &ev) {
+  auto &state = *static_cast<generation_load_state *>(owner);
   state.gguf.parse_done = false;
   state.gguf.parse_error = true;
   state.gguf.err = ev.err;
 }
 
-void on_weight_bind_done(void * owner, const emel::model::weight_loader::events::bind_done &) {
-  auto & state = *static_cast<generation_load_state *>(owner);
-  state.weight.bind_done = true;
-  state.weight.bind_error = false;
-}
-
-void on_weight_bind_error(void * owner,
-                          const emel::model::weight_loader::events::bind_error & ev) {
-  auto & state = *static_cast<generation_load_state *>(owner);
-  state.weight.bind_done = false;
-  state.weight.bind_error = true;
-  state.weight.err = ev.err;
-}
-
-void on_weight_plan_done(void * owner,
-                         const emel::model::weight_loader::events::plan_done & ev) {
-  auto & state = *static_cast<generation_load_state *>(owner);
-  state.weight.plan_done = true;
-  state.weight.plan_error = false;
-  state.weight.effect_count = ev.effect_count;
-}
-
-void on_weight_plan_error(void * owner,
-                          const emel::model::weight_loader::events::plan_error & ev) {
-  auto & state = *static_cast<generation_load_state *>(owner);
-  state.weight.plan_done = false;
-  state.weight.plan_error = true;
-  state.weight.err = ev.err;
-}
-
-void on_weight_apply_done(void * owner, const emel::model::weight_loader::events::apply_done &) {
-  auto & state = *static_cast<generation_load_state *>(owner);
-  state.weight.apply_done = true;
-  state.weight.apply_error = false;
-}
-
-void on_weight_apply_error(void * owner,
-                           const emel::model::weight_loader::events::apply_error & ev) {
-  auto & state = *static_cast<generation_load_state *>(owner);
-  state.weight.apply_done = false;
-  state.weight.apply_error = true;
-  state.weight.err = ev.err;
-}
-
-void on_load_done(void * owner, const emel::model::loader::events::load_done & ev) {
-  auto & state = *static_cast<generation_load_state *>(owner);
+void on_load_done(void *owner,
+                  const emel::model::loader::events::load_done &ev) {
+  auto &state = *static_cast<generation_load_state *>(owner);
   state.load.done = true;
   state.load.error = false;
   state.load.err = emel::error::cast(emel::model::loader::error::none);
@@ -1384,29 +1311,33 @@ void on_load_done(void * owner, const emel::model::loader::events::load_done & e
   state.load.used_mmap = ev.used_mmap;
 }
 
-void on_load_error(void * owner, const emel::model::loader::events::load_error & ev) {
-  auto & state = *static_cast<generation_load_state *>(owner);
+void on_load_error(void *owner,
+                   const emel::model::loader::events::load_error &ev) {
+  auto &state = *static_cast<generation_load_state *>(owner);
   state.load.done = false;
   state.load.error = true;
   state.load.err = ev.err;
 }
 
-void on_initialize_done(void * owner, const emel::text::generator::events::initialize_done &) {
-  auto & state = *static_cast<generation_load_state *>(owner);
+void on_initialize_done(
+    void *owner, const emel::text::generator::events::initialize_done &) {
+  auto &state = *static_cast<generation_load_state *>(owner);
   state.initialize.done = true;
   state.initialize.error = false;
   state.initialize.err = emel::error::cast(emel::text::generator::error::none);
 }
 
-void on_initialize_error(void * owner, const emel::text::generator::events::initialize_error & ev) {
-  auto & state = *static_cast<generation_load_state *>(owner);
+void on_initialize_error(
+    void *owner, const emel::text::generator::events::initialize_error &ev) {
+  auto &state = *static_cast<generation_load_state *>(owner);
   state.initialize.done = false;
   state.initialize.error = true;
   state.initialize.err = ev.err;
 }
 
-void on_generation_done(void * owner, const emel::text::generator::events::generation_done & ev) {
-  auto & state = *static_cast<generation_load_state *>(owner);
+void on_generation_done(
+    void *owner, const emel::text::generator::events::generation_done &ev) {
+  auto &state = *static_cast<generation_load_state *>(owner);
   state.generation.done = true;
   state.generation.error = false;
   state.generation.request = ev.request;
@@ -1415,8 +1346,9 @@ void on_generation_done(void * owner, const emel::text::generator::events::gener
   state.generation.output_length = ev.output_length;
 }
 
-void on_generation_error(void * owner, const emel::text::generator::events::generation_error & ev) {
-  auto & state = *static_cast<generation_load_state *>(owner);
+void on_generation_error(
+    void *owner, const emel::text::generator::events::generation_error &ev) {
+  auto &state = *static_cast<generation_load_state *>(owner);
   state.generation.done = false;
   state.generation.error = true;
   state.generation.request = ev.request;
@@ -1425,81 +1357,83 @@ void on_generation_error(void * owner, const emel::text::generator::events::gene
   state.generation.output_length = ev.output_length;
 }
 
-bool tokenizer_bind_dispatch(void * tokenizer_sm,
-                             const emel::text::tokenizer::event::bind & ev) {
-  return static_cast<emel::text::tokenizer::sm *>(tokenizer_sm)->process_event(ev);
+bool tokenizer_bind_dispatch(void *tokenizer_sm,
+                             const emel::text::tokenizer::event::bind &ev) {
+  return static_cast<emel::text::tokenizer::sm *>(tokenizer_sm)
+      ->process_event(ev);
 }
 
 bool tokenizer_tokenize_dispatch(
-    void * tokenizer_sm,
-    const emel::text::tokenizer::event::tokenize & ev) {
-  return static_cast<emel::text::tokenizer::sm *>(tokenizer_sm)->process_event(ev);
+    void *tokenizer_sm, const emel::text::tokenizer::event::tokenize &ev) {
+  return static_cast<emel::text::tokenizer::sm *>(tokenizer_sm)
+      ->process_event(ev);
 }
 
-void reset_reference_decode_seam(reference_backend & backend) {
+void reset_reference_decode_seam(reference_backend &backend) {
   backend.emel_reference_decode_calls = 0;
   backend.emel_reference_logits_calls = 0;
   backend.direct_reference_decode_calls = 0;
   backend.direct_reference_logits_calls = 0;
 }
 
-emel::text::tokenizer::preprocessor::preprocessor_kind generation_preprocessor_variant(
-    const emel::model::data & model_data) {
+emel::text::tokenizer::preprocessor::preprocessor_kind
+generation_preprocessor_variant(const emel::model::data &model_data) {
   using tokenizer_model = emel::model::data::tokenizer_model;
-  using preprocessor_kind = emel::text::tokenizer::preprocessor::preprocessor_kind;
+  using preprocessor_kind =
+      emel::text::tokenizer::preprocessor::preprocessor_kind;
 
   switch (model_data.vocab_data.tokenizer_model_id) {
-    case tokenizer_model::SPM:
-      return preprocessor_kind::spm;
-    case tokenizer_model::BPE:
-      return preprocessor_kind::bpe;
-    case tokenizer_model::WPM:
-      return preprocessor_kind::wpm;
-    case tokenizer_model::UGM:
-      return preprocessor_kind::ugm;
-    case tokenizer_model::RWKV:
-      return preprocessor_kind::rwkv;
-    case tokenizer_model::PLAMO2:
-      return preprocessor_kind::plamo2;
-    case tokenizer_model::NONE:
-    case tokenizer_model::UNKNOWN:
-    default:
-      return preprocessor_kind::fallback;
+  case tokenizer_model::SPM:
+    return preprocessor_kind::spm;
+  case tokenizer_model::BPE:
+    return preprocessor_kind::bpe;
+  case tokenizer_model::WPM:
+    return preprocessor_kind::wpm;
+  case tokenizer_model::UGM:
+    return preprocessor_kind::ugm;
+  case tokenizer_model::RWKV:
+    return preprocessor_kind::rwkv;
+  case tokenizer_model::PLAMO2:
+    return preprocessor_kind::plamo2;
+  case tokenizer_model::NONE:
+  case tokenizer_model::UNKNOWN:
+  default:
+    return preprocessor_kind::fallback;
   }
 }
 
-emel::text::encoders::encoder_kind generation_encoder_variant(
-    const emel::model::data & model_data) {
+emel::text::encoders::encoder_kind
+generation_encoder_variant(const emel::model::data &model_data) {
   using tokenizer_model = emel::model::data::tokenizer_model;
   using encoder_kind = emel::text::encoders::encoder_kind;
 
   switch (model_data.vocab_data.tokenizer_model_id) {
-    case tokenizer_model::SPM:
-      return encoder_kind::spm;
-    case tokenizer_model::BPE:
-      return encoder_kind::bpe;
-    case tokenizer_model::WPM:
-      return encoder_kind::wpm;
-    case tokenizer_model::UGM:
-      return encoder_kind::ugm;
-    case tokenizer_model::RWKV:
-      return encoder_kind::rwkv;
-    case tokenizer_model::PLAMO2:
-      return encoder_kind::plamo2;
-    case tokenizer_model::NONE:
-    case tokenizer_model::UNKNOWN:
-    default:
-      return encoder_kind::fallback;
+  case tokenizer_model::SPM:
+    return encoder_kind::spm;
+  case tokenizer_model::BPE:
+    return encoder_kind::bpe;
+  case tokenizer_model::WPM:
+    return encoder_kind::wpm;
+  case tokenizer_model::UGM:
+    return encoder_kind::ugm;
+  case tokenizer_model::RWKV:
+    return encoder_kind::rwkv;
+  case tokenizer_model::PLAMO2:
+    return encoder_kind::plamo2;
+  case tokenizer_model::NONE:
+  case tokenizer_model::UNKNOWN:
+  default:
+    return encoder_kind::fallback;
   }
 }
 
-std::string_view vocab_token_view(const emel::model::data::vocab & vocab,
+std::string_view vocab_token_view(const emel::model::data::vocab &vocab,
                                   const int32_t token_id) {
   if (token_id < 0 || static_cast<uint32_t>(token_id) >= vocab.n_tokens) {
     return {};
   }
 
-  const auto & entry = vocab.entries[static_cast<size_t>(token_id)];
+  const auto &entry = vocab.entries[static_cast<size_t>(token_id)];
   const size_t begin = static_cast<size_t>(entry.text_offset);
   const size_t length = static_cast<size_t>(entry.text_length);
   if (begin + length > static_cast<size_t>(vocab.token_bytes_used)) {
@@ -1524,8 +1458,8 @@ bool is_printable_ascii_token(const std::string_view piece) {
   return true;
 }
 
-bool load_generation_reference_backend(const std::string & model_path,
-                                       generation_load_state & state) {
+bool load_generation_reference_backend(const std::string &model_path,
+                                       generation_load_state &state) {
   llama_model_params model_params = llama_model_default_params();
   model_params.check_tensors = false;
   model_params.n_gpu_layers = 0;
@@ -1537,14 +1471,13 @@ bool load_generation_reference_backend(const std::string & model_path,
     return false;
   }
 
-  const llama_vocab * vocab_ptr = llama_model_get_vocab(model.get());
+  const llama_vocab *vocab_ptr = llama_model_get_vocab(model.get());
   if (vocab_ptr == nullptr) {
     return false;
   }
 
-  if (!emel::model::load_vocab_from_gguf(
-          kv_binding_from_state(state),
-          state.model_data->vocab_data)) {
+  if (!emel::model::load_vocab_from_gguf(kv_binding_from_state(state),
+                                         state.model_data->vocab_data)) {
     return false;
   }
 
@@ -1552,8 +1485,8 @@ bool load_generation_reference_backend(const std::string & model_path,
       static_cast<int32_t>(state.model_data->vocab_data.n_tokens);
   state.reference.vocab = vocab_ptr;
   state.reference.vocab_size = llama_vocab_n_tokens(vocab_ptr);
-  state.reference.formatter =
-      emel::tools::generation_formatter_contract::resolve_reference_formatter_info(model.get());
+  state.reference.formatter = emel::tools::generation_formatter_contract::
+      resolve_reference_formatter_info(model.get());
   if (!emel::tools::generation_formatter_contract::reference_binding_supported(
           state.reference.formatter)) {
     return false;
@@ -1563,30 +1496,39 @@ bool load_generation_reference_backend(const std::string & model_path,
   return true;
 }
 
-bool load_emel_vocab_from_gguf_file(const std::string & model_path,
-                                    emel::model::data::vocab & vocab_out) {
+bool load_emel_vocab_from_gguf_file(const std::string &model_path,
+                                    emel::model::data::vocab &vocab_out) {
   generation_load_state state{};
   if (!parity_assets::read_file_bytes(model_path, state.file_bytes) ||
       state.file_bytes.empty()) {
     return false;
   }
 
+  const std::span<const uint8_t> file_image{
+      state.file_bytes.data(),
+      state.file_bytes.size(),
+  };
+  const emel::error::type prebind_err =
+      prebind_gguf_kv_storage(state, file_image);
+  if (prebind_err != emel::error::cast(emel::model::loader::error::none)) {
+    return false;
+  }
+
   uint32_t tensor_count = 0u;
-  const emel::error::type parse_err = parse_gguf_kv_storage(
-      state,
-      std::span<const uint8_t>{state.file_bytes.data(), state.file_bytes.size()},
-      *state.model_data,
-      tensor_count);
+  const emel::error::type parse_err =
+      parse_gguf_kv_storage(state, file_image, *state.model_data,
+                            tensor_count);
   if (parse_err != emel::error::cast(emel::model::loader::error::none)) {
     return false;
   }
 
-  return emel::model::load_vocab_from_gguf(kv_binding_from_state(state), vocab_out);
+  return emel::model::load_vocab_from_gguf(kv_binding_from_state(state),
+                                           vocab_out);
 }
 
-emel::error::type run_emel_initialize_generator(
-    generation_load_state & state,
-    const emel::paritychecker::parity_options & opts) {
+emel::error::type
+run_emel_initialize_generator(generation_load_state &state,
+                              const emel::paritychecker::parity_options &opts) {
   if (state.model_data == nullptr) {
     return emel::error::cast(emel::text::generator::error::invalid_request);
   }
@@ -1600,27 +1542,30 @@ emel::error::type run_emel_initialize_generator(
   const int32_t prompt_capacity =
       std::max<int32_t>(32, static_cast<int32_t>(formatted_prompt.size()) + 8);
   const int32_t decode_capacity = std::max<int32_t>(4, opts.max_tokens);
-  const int32_t block_capacity = std::max<int32_t>(8, prompt_capacity + decode_capacity);
+  const int32_t block_capacity =
+      std::max<int32_t>(8, prompt_capacity + decode_capacity);
 
   state.generator = std::make_unique<emel::text::generator::sm>(
-      *state.model_data,
-      state.conditioner,
+      *state.model_data, state.conditioner,
       state.formatter_binding.formatter_ctx,
       state.formatter_binding.format_prompt);
 
   reset_initialize_capture(state);
-  emel::error::type error_out = emel::error::cast(emel::text::generator::error::none);
+  emel::error::type error_out =
+      emel::error::cast(emel::text::generator::error::none);
   emel::text::generator::event::initialize request{
-    &state.tokenizer,
-    tokenizer_bind_dispatch,
-    tokenizer_tokenize_dispatch,
-    std::span<emel::logits::sampler::fn>{},
+      &state.tokenizer,
+      tokenizer_bind_dispatch,
+      tokenizer_tokenize_dispatch,
+      std::span<emel::logits::sampler::fn>{},
   };
-  request.preprocessor_variant = generation_preprocessor_variant(*state.model_data);
+  request.preprocessor_variant =
+      generation_preprocessor_variant(*state.model_data);
   request.encoder_variant = generation_encoder_variant(*state.model_data);
   request.add_special = false;
   request.parse_special = false;
-  request.selection_mode = emel::text::generator::selection_mode::preselected_argmax;
+  request.selection_mode =
+      emel::text::generator::selection_mode::preselected_argmax;
   request.max_prompt_tokens = prompt_capacity;
   request.max_generated_tokens = decode_capacity;
   request.max_blocks = block_capacity;
@@ -1643,11 +1588,11 @@ emel::error::type run_emel_initialize_generator(
   return emel::error::cast(emel::text::generator::error::invalid_request);
 }
 
-emel::error::type run_emel_generate(generation_load_state & state,
-                                    const emel::paritychecker::parity_options & opts,
-                                    std::span<char> output,
-                                    size_t & output_length_out,
-                                    generation_trace & trace_out) {
+emel::error::type
+run_emel_generate(generation_load_state &state,
+                  const emel::paritychecker::parity_options &opts,
+                  std::span<char> output, size_t &output_length_out,
+                  generation_trace &trace_out) {
   if (state.generator == nullptr) {
     return emel::error::cast(emel::text::generator::error::invalid_request);
   }
@@ -1655,14 +1600,15 @@ emel::error::type run_emel_generate(generation_load_state & state,
   reset_generation_capture(state);
   trace_out = {};
   state.emel_trace = &trace_out;
-  emel::error::type error_out = emel::error::cast(emel::text::generator::error::none);
+  emel::error::type error_out =
+      emel::error::cast(emel::text::generator::error::none);
   std::array<emel::text::formatter::chat_message, 1> message_storage = {};
   emel::text::generator::event::generate request{
-    emel::tools::generation_formatter_contract::single_user_messages(
-        message_storage, opts.text),
-    opts.max_tokens,
-    output,
-    output_length_out,
+      emel::tools::generation_formatter_contract::single_user_messages(
+          message_storage, opts.text),
+      opts.max_tokens,
+      output,
+      output_length_out,
   };
   request.add_generation_prompt = true;
   request.enable_thinking = false;
@@ -1684,7 +1630,8 @@ emel::error::type run_emel_generate(generation_load_state & state,
   return emel::error::cast(emel::text::generator::error::invalid_request);
 }
 
-argmax_summary select_argmax_from_logits(const float * logits, const int32_t vocab_size) {
+argmax_summary select_argmax_from_logits(const float *logits,
+                                         const int32_t vocab_size) {
   argmax_summary summary{};
   if (logits == nullptr || vocab_size <= 0) {
     return summary;
@@ -1710,41 +1657,34 @@ argmax_summary select_argmax_from_logits(const float * logits, const int32_t voc
   return summary;
 }
 
-bool tokenize_reference_prompt(const reference_backend & backend,
-                               const emel::paritychecker::parity_options & opts,
-                               std::vector<llama_token> & tokens_out) {
+bool tokenize_reference_prompt(const reference_backend &backend,
+                               const emel::paritychecker::parity_options &opts,
+                               std::vector<llama_token> &tokens_out) {
   if (backend.vocab == nullptr) {
     return false;
   }
 
   std::string formatted_prompt = {};
-  if (!emel::tools::generation_formatter_contract::format_reference_single_user_prompt(
-          backend.formatter, opts.text, formatted_prompt)) {
+  if (!emel::tools::generation_formatter_contract::
+          format_reference_single_user_prompt(backend.formatter, opts.text,
+                                              formatted_prompt)) {
     return false;
   }
 
   int32_t token_capacity = static_cast<int32_t>(formatted_prompt.size()) + 8;
   token_capacity = std::max(token_capacity, 8);
   tokens_out.resize(static_cast<size_t>(token_capacity));
-  int32_t token_count = llama_tokenize(
-      backend.vocab,
-      formatted_prompt.c_str(),
-      static_cast<int32_t>(formatted_prompt.size()),
-      tokens_out.data(),
-      token_capacity,
-      false,
-      false);
+  int32_t token_count =
+      llama_tokenize(backend.vocab, formatted_prompt.c_str(),
+                     static_cast<int32_t>(formatted_prompt.size()),
+                     tokens_out.data(), token_capacity, false, false);
   if (token_count < 0) {
     token_capacity = -token_count;
     tokens_out.resize(static_cast<size_t>(token_capacity));
-    token_count = llama_tokenize(
-        backend.vocab,
-        formatted_prompt.c_str(),
-        static_cast<int32_t>(formatted_prompt.size()),
-        tokens_out.data(),
-        token_capacity,
-        false,
-        false);
+    token_count =
+        llama_tokenize(backend.vocab, formatted_prompt.c_str(),
+                       static_cast<int32_t>(formatted_prompt.size()),
+                       tokens_out.data(), token_capacity, false, false);
   }
   if (token_count <= 0) {
     return false;
@@ -1754,9 +1694,10 @@ bool tokenize_reference_prompt(const reference_backend & backend,
   return true;
 }
 
-bool tokenize_conditioned_prompt(generation_load_state & state,
-                                 const emel::paritychecker::parity_options & opts,
-                                 std::vector<int32_t> & tokens_out) {
+bool tokenize_conditioned_prompt(
+    generation_load_state &state,
+    const emel::paritychecker::parity_options &opts,
+    std::vector<int32_t> &tokens_out) {
   const int32_t token_capacity =
       std::max<int32_t>(1024, static_cast<int32_t>(opts.text.size()) * 8 + 64);
   tokens_out.assign(static_cast<size_t>(token_capacity), 0);
@@ -1764,15 +1705,18 @@ bool tokenize_conditioned_prompt(generation_load_state & state,
   int32_t token_count = 0;
   int32_t conditioned_error = 0;
   std::array<emel::text::formatter::chat_message, 1> message_storage = {};
-  emel::text::conditioner::event::prepare prepare_ev{token_count, conditioned_error};
+  emel::text::conditioner::event::prepare prepare_ev{token_count,
+                                                     conditioned_error};
   prepare_ev.messages =
-      emel::tools::generation_formatter_contract::single_user_messages(message_storage, opts.text);
+      emel::tools::generation_formatter_contract::single_user_messages(
+          message_storage, opts.text);
   prepare_ev.add_generation_prompt = true;
   prepare_ev.enable_thinking = false;
   prepare_ev.token_ids_out = tokens_out.data();
   prepare_ev.token_capacity = token_capacity;
   const bool accepted = state.conditioner.process_event(prepare_ev);
-  if (!accepted || conditioned_error != 0 || token_count <= 0 || token_count > token_capacity) {
+  if (!accepted || conditioned_error != 0 || token_count <= 0 ||
+      token_count > token_capacity) {
     return false;
   }
 
@@ -1780,19 +1724,20 @@ bool tokenize_conditioned_prompt(generation_load_state & state,
   return true;
 }
 
-int32_t run_direct_reference_decode(reference_backend & backend,
-                                    llama_context * ctx,
+int32_t run_direct_reference_decode(reference_backend &backend,
+                                    llama_context *ctx,
                                     const llama_batch batch) {
   backend.direct_reference_decode_calls += 1;
   return llama_decode(ctx, batch);
 }
 
-float * read_direct_reference_logits(reference_backend & backend, llama_context * ctx) {
+float *read_direct_reference_logits(reference_backend &backend,
+                                    llama_context *ctx) {
   backend.direct_reference_logits_calls += 1;
   return llama_get_logits_ith(ctx, -1);
 }
 
-bool parse_reference_hex_nibble(const char c, uint8_t & value) {
+bool parse_reference_hex_nibble(const char c, uint8_t &value) {
   if (c >= '0' && c <= '9') {
     value = static_cast<uint8_t>(c - '0');
     return true;
@@ -1809,9 +1754,9 @@ bool parse_reference_hex_nibble(const char c, uint8_t & value) {
   return false;
 }
 
-bool parse_reference_byte_piece(const std::string_view piece, uint8_t & value) {
-  if (piece.size() != 6 || piece[0] != '<' || piece[1] != '0' || piece[2] != 'x' ||
-      piece[5] != '>') {
+bool parse_reference_byte_piece(const std::string_view piece, uint8_t &value) {
+  if (piece.size() != 6 || piece[0] != '<' || piece[1] != '0' ||
+      piece[2] != 'x' || piece[5] != '>') {
     return false;
   }
 
@@ -1825,18 +1770,20 @@ bool parse_reference_byte_piece(const std::string_view piece, uint8_t & value) {
   return true;
 }
 
-bool append_reference_piece(const reference_backend & backend,
+bool append_reference_piece(const reference_backend &backend,
                             const llama_token token,
-                            generation_result & result_out) {
-  if (backend.vocab == nullptr || result_out.output_length >= result_out.output.size()) {
+                            generation_result &result_out) {
+  if (backend.vocab == nullptr ||
+      result_out.output_length >= result_out.output.size()) {
     return false;
   }
 
-  if (llama_vocab_is_control(backend.vocab, token) || llama_vocab_is_eog(backend.vocab, token)) {
+  if (llama_vocab_is_control(backend.vocab, token) ||
+      llama_vocab_is_eog(backend.vocab, token)) {
     return true;
   }
 
-  const char * piece = llama_vocab_get_text(backend.vocab, token);
+  const char *piece = llama_vocab_get_text(backend.vocab, token);
   if (piece == nullptr) {
     return false;
   }
@@ -1860,15 +1807,16 @@ bool append_reference_piece(const reference_backend & backend,
     return false;
   }
   if (piece_len > 0u) {
-    std::memcpy(result_out.output.data() + result_out.output_length, piece_view.data(), piece_len);
+    std::memcpy(result_out.output.data() + result_out.output_length,
+                piece_view.data(), piece_len);
   }
   result_out.output_length += piece_len;
   return true;
 }
 
-bool append_rendered_token(emel::text::renderer::sm & renderer,
+bool append_rendered_token(emel::text::renderer::sm &renderer,
                            const int32_t token_id,
-                           generation_result & result_out) {
+                           generation_result &result_out) {
   if (result_out.output_length > result_out.output.size()) {
     return false;
   }
@@ -1882,7 +1830,8 @@ bool append_rendered_token(emel::text::renderer::sm & renderer,
   render_ev.sequence_id = 0;
   render_ev.emit_special = false;
   render_ev.output = result_out.output.data() + result_out.output_length;
-  render_ev.output_capacity = result_out.output.size() - result_out.output_length;
+  render_ev.output_capacity =
+      result_out.output.size() - result_out.output_length;
   render_ev.output_length_out = &appended_length;
   render_ev.status_out = &status;
   render_ev.error_out = &render_err;
@@ -1895,8 +1844,8 @@ bool append_rendered_token(emel::text::renderer::sm & renderer,
   return true;
 }
 
-bool flush_rendered_output(emel::text::renderer::sm & renderer,
-                           generation_result & result_out) {
+bool flush_rendered_output(emel::text::renderer::sm &renderer,
+                           generation_result &result_out) {
   if (result_out.output_length > result_out.output.size()) {
     return false;
   }
@@ -1908,7 +1857,8 @@ bool flush_rendered_output(emel::text::renderer::sm & renderer,
   emel::text::renderer::event::flush flush_ev = {};
   flush_ev.sequence_id = 0;
   flush_ev.output = result_out.output.data() + result_out.output_length;
-  flush_ev.output_capacity = result_out.output.size() - result_out.output_length;
+  flush_ev.output_capacity =
+      result_out.output.size() - result_out.output_length;
   flush_ev.output_length_out = &flush_length;
   flush_ev.status_out = &status;
   flush_ev.error_out = &flush_err;
@@ -1921,10 +1871,11 @@ bool flush_rendered_output(emel::text::renderer::sm & renderer,
   return true;
 }
 
-bool initialize_emel_renderer(const emel::model::data & model_data,
-                              emel::text::renderer::sm & renderer) {
+bool initialize_emel_renderer(const emel::model::data &model_data,
+                              emel::text::renderer::sm &renderer) {
   int32_t renderer_err = emel::error::cast(emel::text::renderer::error::none);
-  emel::text::renderer::event::initialize initialize_renderer_ev{model_data.vocab_data};
+  emel::text::renderer::event::initialize initialize_renderer_ev{
+      model_data.vocab_data};
   initialize_renderer_ev.strip_leading_space = false;
   initialize_renderer_ev.stop_sequences = nullptr;
   initialize_renderer_ev.stop_sequence_count = 0;
@@ -1933,16 +1884,19 @@ bool initialize_emel_renderer(const emel::model::data & model_data,
          renderer_err == emel::error::cast(emel::text::renderer::error::none);
 }
 
-bool emel_token_is_stop(const emel::model::data::vocab & vocab, const int32_t token_id) {
+bool emel_token_is_stop(const emel::model::data::vocab &vocab,
+                        const int32_t token_id) {
   return token_id == vocab.eos_id || token_id == vocab.eot_id;
 }
 
-llama_context_ptr make_reference_context(reference_backend & backend) {
+llama_context_ptr make_reference_context(reference_backend &backend) {
   llama_context_params context_params = llama_context_default_params();
   context_params.flash_attn_type = LLAMA_FLASH_ATTN_TYPE_DISABLED;
   context_params.n_ctx = 0;
   const int32_t batch_capacity =
-      backend.model != nullptr ? std::max(512, llama_model_n_ctx_train(backend.model.get())) : 512;
+      backend.model != nullptr
+          ? std::max(512, llama_model_n_ctx_train(backend.model.get()))
+          : 512;
   context_params.n_batch = batch_capacity;
   context_params.n_ubatch = batch_capacity;
   context_params.n_seq_max = 1;
@@ -1950,15 +1904,19 @@ llama_context_ptr make_reference_context(reference_backend & backend) {
   context_params.n_threads_batch = 1;
   context_params.embeddings = false;
   return llama_context_ptr{
-      backend.model != nullptr ? llama_init_from_model(backend.model.get(), context_params) : nullptr,
+      backend.model != nullptr
+          ? llama_init_from_model(backend.model.get(), context_params)
+          : nullptr,
       llama_free,
   };
 }
 
-emel::error::type run_reference_generate(reference_backend & backend,
-                                         const emel::paritychecker::parity_options & opts,
-                                         generation_result & result_out) {
-  if (backend.model == nullptr || backend.vocab == nullptr || backend.vocab_size <= 0) {
+emel::error::type
+run_reference_generate(reference_backend &backend,
+                       const emel::paritychecker::parity_options &opts,
+                       generation_result &result_out) {
+  if (backend.model == nullptr || backend.vocab == nullptr ||
+      backend.vocab_size <= 0) {
     return emel::error::cast(emel::text::generator::error::invalid_request);
   }
 
@@ -1972,22 +1930,24 @@ emel::error::type run_reference_generate(reference_backend & backend,
     return emel::error::cast(emel::text::generator::error::invalid_request);
   }
 
-  llama_batch prompt_batch =
-      llama_batch_get_one(prompt_tokens.data(), static_cast<int32_t>(prompt_tokens.size()));
+  llama_batch prompt_batch = llama_batch_get_one(
+      prompt_tokens.data(), static_cast<int32_t>(prompt_tokens.size()));
   if (run_direct_reference_decode(backend, ctx.get(), prompt_batch) != 0) {
     return emel::error::cast(emel::text::generator::error::backend);
   }
 
   for (int32_t step = 0; step < opts.max_tokens; ++step) {
-    float * logits = read_direct_reference_logits(backend, ctx.get());
+    float *logits = read_direct_reference_logits(backend, ctx.get());
     if (logits == nullptr) {
       return emel::error::cast(emel::text::generator::error::backend);
     }
 
-    const argmax_summary summary = select_argmax_from_logits(logits, backend.vocab_size);
-    const llama_token selected = static_cast<llama_token>(summary.selected_token);
-    append_trace_token(
-        result_out.trace, summary.selected_token, summary.best_score, summary.second_best_score);
+    const argmax_summary summary =
+        select_argmax_from_logits(logits, backend.vocab_size);
+    const llama_token selected =
+        static_cast<llama_token>(summary.selected_token);
+    append_trace_token(result_out.trace, summary.selected_token,
+                       summary.best_score, summary.second_best_score);
     result_out.tokens_generated += 1;
     if (!append_reference_piece(backend, selected, result_out)) {
       return emel::error::cast(emel::text::generator::error::backend);
@@ -2006,7 +1966,8 @@ emel::error::type run_reference_generate(reference_backend & backend,
   return emel::error::cast(emel::text::generator::error::none);
 }
 
-int32_t first_token_mismatch_index(const generation_result & lhs, const generation_result & rhs) {
+int32_t first_token_mismatch_index(const generation_result &lhs,
+                                   const generation_result &rhs) {
   const int32_t shared = std::min(lhs.trace.token_count, rhs.trace.token_count);
   for (int32_t idx = 0; idx < shared; ++idx) {
     if (lhs.trace.token_ids[static_cast<size_t>(idx)] !=
@@ -2017,7 +1978,8 @@ int32_t first_token_mismatch_index(const generation_result & lhs, const generati
   return shared;
 }
 
-size_t first_mismatch_offset(const generation_result & lhs, const generation_result & rhs) {
+size_t first_mismatch_offset(const generation_result &lhs,
+                             const generation_result &rhs) {
   const size_t shared = std::min(lhs.output_length, rhs.output_length);
   for (size_t idx = 0; idx < shared; ++idx) {
     if (lhs.output[idx] != rhs.output[idx]) {
@@ -2027,8 +1989,8 @@ size_t first_mismatch_offset(const generation_result & lhs, const generation_res
   return shared;
 }
 
-bool generation_results_match(const generation_result & emel_result,
-                              const generation_result & reference_result) {
+bool generation_results_match(const generation_result &emel_result,
+                              const generation_result &reference_result) {
   if (emel_result.tokens_generated != reference_result.tokens_generated ||
       emel_result.output_length != reference_result.output_length) {
     return false;
@@ -2044,9 +2006,10 @@ bool generation_results_match(const generation_result & emel_result,
       }
     }
   }
-  return
-         std::string_view{emel_result.output.data(), emel_result.output_length} ==
-             std::string_view{reference_result.output.data(), reference_result.output_length};
+  return std::string_view{emel_result.output.data(),
+                          emel_result.output_length} ==
+         std::string_view{reference_result.output.data(),
+                          reference_result.output_length};
 }
 
 #if 0
@@ -2198,7 +2161,8 @@ inline float read_debug_value(std::span<const float> values, const size_t idx) {
   return values[idx];
 }
 
-inline float read_debug_value(std::span<const uint16_t> values, const size_t idx) {
+inline float read_debug_value(std::span<const uint16_t> values,
+                              const size_t idx) {
   return fp16_storage_to_fp32(values[idx]);
 }
 
@@ -10054,52 +10018,47 @@ void dump_scalar_attention_debug(const generation_load_state & state,
 
 #endif
 
-std::string_view token_piece_view(const reference_backend & backend, const int32_t token_id) {
+std::string_view token_piece_view(const reference_backend &backend,
+                                  const int32_t token_id) {
   if (backend.vocab == nullptr || token_id < 0) {
     return {};
   }
 
-  const char * piece = llama_vocab_get_text(backend.vocab, token_id);
+  const char *piece = llama_vocab_get_text(backend.vocab, token_id);
   if (piece == nullptr) {
     return {};
   }
   return piece;
 }
 
-void dump_generation_result(const char * label, const generation_result & result) {
-  std::fprintf(stdout,
-               "%s: generated_tokens=%d output_bytes=%zu text=%.*s\n",
-               label,
-               result.tokens_generated,
-               result.output_length,
-               static_cast<int>(result.output_length),
-               result.output.data());
+void dump_generation_result(const char *label,
+                            const generation_result &result) {
+  std::fprintf(stdout, "%s: generated_tokens=%d output_bytes=%zu text=%.*s\n",
+               label, result.tokens_generated, result.output_length,
+               static_cast<int>(result.output_length), result.output.data());
 }
 
-void dump_generation_trace_window(const char * label,
-                                  const reference_backend & backend,
-                                  const generation_result & result,
+void dump_generation_trace_window(const char *label,
+                                  const reference_backend &backend,
+                                  const generation_result &result,
                                   const int32_t center_index) {
   const int32_t start = std::max(0, center_index - 2);
   const int32_t stop = std::min(result.trace.token_count, center_index + 3);
   for (int32_t idx = start; idx < stop; ++idx) {
     const int32_t token_id = result.trace.token_ids[static_cast<size_t>(idx)];
     const std::string_view piece = token_piece_view(backend, token_id);
-    std::fprintf(stdout,
-                 "%s.trace[%d]: token=%d gap=%g piece=%.*s\n",
-                 label,
-                 idx,
-                 token_id,
+    std::fprintf(stdout, "%s.trace[%d]: token=%d gap=%g piece=%.*s\n", label,
+                 idx, token_id,
                  result.trace.top_score_gaps[static_cast<size_t>(idx)],
                  static_cast<int>(piece.size()),
                  piece.data() != nullptr ? piece.data() : "");
   }
 }
 
-bool quantize_input_blocks(std::span<const float> input,
-                           std::array<kernel_quant::block_q8_k,
-                                      kernel_quant::MAX_Q8_K_BLOCKS> & blocks,
-                           uint64_t & block_count_out) {
+bool quantize_input_blocks(
+    std::span<const float> input,
+    std::array<kernel_quant::block_q8_k, kernel_quant::MAX_Q8_K_BLOCKS> &blocks,
+    uint64_t &block_count_out) {
   if ((input.size() % kernel_quant::QK_K) != 0u) {
     return false;
   }
@@ -10109,16 +10068,18 @@ bool quantize_input_blocks(std::span<const float> input,
   }
   for (uint64_t block = 0; block < block_count_out; ++block) {
     kernel_quant::quantize_row_q8_k_strided(
-        input.data() + block * kernel_quant::QK_K, 1, &blocks[block], kernel_quant::QK_K);
+        input.data() + block * kernel_quant::QK_K, 1, &blocks[block],
+        kernel_quant::QK_K);
   }
   return true;
 }
 
-bool quantize_input_blocks_reference(std::span<const float> input,
-                                     std::array<reference_block_q8_k,
-                                                kernel_quant::MAX_Q8_K_BLOCKS> & blocks,
-                                     uint64_t & block_count_out) {
-  static_assert(sizeof(reference_block_q8_k) == sizeof(kernel_quant::block_q8_k));
+bool quantize_input_blocks_reference(
+    std::span<const float> input,
+    std::array<reference_block_q8_k, kernel_quant::MAX_Q8_K_BLOCKS> &blocks,
+    uint64_t &block_count_out) {
+  static_assert(sizeof(reference_block_q8_k) ==
+                sizeof(kernel_quant::block_q8_k));
   if ((input.size() % kernel_quant::QK_K) != 0u) {
     return false;
   }
@@ -10127,8 +10088,8 @@ bool quantize_input_blocks_reference(std::span<const float> input,
     return false;
   }
   for (uint64_t block = 0; block < block_count_out; ++block) {
-    quantize_row_q8_K_ref(
-        input.data() + block * kernel_quant::QK_K, &blocks[block], kernel_quant::QK_K);
+    quantize_row_q8_K_ref(input.data() + block * kernel_quant::QK_K,
+                          &blocks[block], kernel_quant::QK_K);
   }
   return true;
 }
@@ -16081,38 +16042,38 @@ void dump_generation_live_backend_prefix_debug(const generation_load_state & sta
 
 #endif
 
-const char * kernel_kind_name(const emel::kernel::kernel_kind kind) {
+const char *kernel_kind_name(const emel::kernel::kernel_kind kind) {
   switch (kind) {
-    case emel::kernel::kernel_kind::x86_64:
-      return "x86_64";
-    case emel::kernel::kernel_kind::aarch64:
-      return "aarch64";
+  case emel::kernel::kernel_kind::x86_64:
+    return "x86_64";
+  case emel::kernel::kernel_kind::aarch64:
+    return "aarch64";
   }
   return "unknown";
 }
 
-void dump_reference_decode_seam(generation_load_state & state) {
+void dump_reference_decode_seam(generation_load_state &state) {
   emel::text::generator::diagnostics diagnostics = {};
   static_cast<void>(capture_generator_diagnostics(state, diagnostics));
-  std::fprintf(stdout,
-               "reference_impl: source=%.*s ref=%.*s\n",
+  std::fprintf(stdout, "reference_impl: source=%.*s ref=%.*s\n",
                static_cast<int>(k_reference_impl_source.size()),
                k_reference_impl_source.data(),
                static_cast<int>(k_reference_impl_ref.size()),
                k_reference_impl_ref.data());
-  std::fprintf(stdout,
-               "reference_decode_seams: emel_decode_calls=%d emel_logits_calls=%d "
-               "reference_decode_calls=%d reference_logits_calls=%d\n",
-               state.reference.emel_reference_decode_calls,
-               state.reference.emel_reference_logits_calls,
-               state.reference.direct_reference_decode_calls,
-               state.reference.direct_reference_logits_calls);
-  std::fprintf(stdout,
-               "kernel_dispatch: kind=%s calls=%" PRIu64 "\n",
+  std::fprintf(
+      stdout,
+      "reference_decode_seams: emel_decode_calls=%d emel_logits_calls=%d "
+      "reference_decode_calls=%d reference_logits_calls=%d\n",
+      state.reference.emel_reference_decode_calls,
+      state.reference.emel_reference_logits_calls,
+      state.reference.direct_reference_decode_calls,
+      state.reference.direct_reference_logits_calls);
+  std::fprintf(stdout, "kernel_dispatch: kind=%s calls=%" PRIu64 "\n",
                kernel_kind_name(diagnostics.kernel_kind),
                diagnostics.kernel_dispatch_calls);
   std::fprintf(stdout,
-               "flash_dispatch: calls=%" PRIu64 " optimized=%" PRIu64 " shared=%" PRIu64 "\n",
+               "flash_dispatch: calls=%" PRIu64 " optimized=%" PRIu64
+               " shared=%" PRIu64 "\n",
                diagnostics.flash_attention_dispatch_calls,
                diagnostics.optimized_flash_dispatch_calls,
                diagnostics.shared_flash_dispatch_calls);
@@ -16136,7 +16097,8 @@ void dump_reference_decode_seam(generation_load_state & state) {
   const auto runtime_contract = runtime_quantized_contract_summary(diagnostics);
   std::fprintf(stdout,
                "quantized_runtime_contract: native_quantized=%u "
-               "approved_dense_f32_by_contract=%u disallowed_fallback=%u explicit_no_claim=%u\n",
+               "approved_dense_f32_by_contract=%u disallowed_fallback=%u "
+               "explicit_no_claim=%u\n",
                runtime_contract.native_quantized,
                runtime_contract.approved_dense_f32_by_contract,
                runtime_contract.disallowed_fallback,
@@ -16148,41 +16110,41 @@ void dump_reference_decode_seam(generation_load_state & state) {
 
     std::fprintf(stdout,
                  "quantized_stage_inventory: native_quantized=%u "
-                 "approved_dense_f32_by_contract=%u disallowed_fallback=%u explicit_no_claim=%u\n",
+                 "approved_dense_f32_by_contract=%u disallowed_fallback=%u "
+                 "explicit_no_claim=%u\n",
                  audit_contract.native_quantized,
                  audit_contract.approved_dense_f32_by_contract,
                  audit_contract.disallowed_fallback,
                  audit_contract.explicit_no_claim);
-    for (const auto & stage : build_audit.stages) {
+    for (const auto &stage : build_audit.stages) {
       const auto stage_name =
           emel::model::llama::quantized_stage_family_name(stage.family);
-      const auto tensor_name = emel::model::llama::tensor_type_name(stage.tensor_type);
+      const auto tensor_name =
+          emel::model::llama::tensor_type_name(stage.tensor_type);
       const auto contract_name =
           emel::model::llama::quantized_contract_kind_name(stage.contract);
       const uint32_t supported =
-          stage.contract == emel::model::llama::quantized_contract_kind::explicit_no_claim
+          stage.contract ==
+                  emel::model::llama::quantized_contract_kind::explicit_no_claim
               ? 0u
               : 1u;
-      std::fprintf(stdout,
-                   "quantized_stage_audit: stage=%.*s tensor_type=%.*s contract=%.*s "
-                   "supported=%u consistent_across_layers=%u\n",
-                   static_cast<int>(stage_name.size()),
-                   stage_name.data(),
-                   static_cast<int>(tensor_name.size()),
-                   tensor_name.data(),
-                   static_cast<int>(contract_name.size()),
-                   contract_name.data(),
-                   supported,
-                   stage.consistent_across_layers ? 1u : 0u);
+      std::fprintf(
+          stdout,
+          "quantized_stage_audit: stage=%.*s tensor_type=%.*s contract=%.*s "
+          "supported=%u consistent_across_layers=%u\n",
+          static_cast<int>(stage_name.size()), stage_name.data(),
+          static_cast<int>(tensor_name.size()), tensor_name.data(),
+          static_cast<int>(contract_name.size()), contract_name.data(),
+          supported, stage.consistent_across_layers ? 1u : 0u);
     }
   }
 }
 
-void dump_generation_failure_surface(generation_load_state & state,
-                                     const generation_result * emel_result,
-                                     const generation_result * reference_result,
-                                     const emel::paritychecker::parity_options & opts) {
-  (void) opts;
+void dump_generation_failure_surface(
+    generation_load_state &state, const generation_result *emel_result,
+    const generation_result *reference_result,
+    const emel::paritychecker::parity_options &opts) {
+  (void)opts;
   dump_reference_decode_seam(state);
   if (emel_result != nullptr) {
     dump_generation_result("emel", *emel_result);
@@ -16191,59 +16153,73 @@ void dump_generation_failure_surface(generation_load_state & state,
     dump_generation_result("reference", *reference_result);
   }
   if (emel_result != nullptr && reference_result != nullptr) {
-    const int32_t token_mismatch_index = first_token_mismatch_index(*emel_result, *reference_result);
+    const int32_t token_mismatch_index =
+        first_token_mismatch_index(*emel_result, *reference_result);
     const bool have_emel_token =
-        token_mismatch_index >= 0 && token_mismatch_index < emel_result->trace.token_count;
+        token_mismatch_index >= 0 &&
+        token_mismatch_index < emel_result->trace.token_count;
     const bool have_reference_token =
-        token_mismatch_index >= 0 && token_mismatch_index < reference_result->trace.token_count;
+        token_mismatch_index >= 0 &&
+        token_mismatch_index < reference_result->trace.token_count;
     std::fprintf(stdout,
-                 "generation_trace: emel_tokens=%d reference_tokens=%d first_token_mismatch=%d\n",
+                 "generation_trace: emel_tokens=%d reference_tokens=%d "
+                 "first_token_mismatch=%d\n",
                  emel_result->trace.token_count,
-                 reference_result->trace.token_count,
-                 token_mismatch_index);
+                 reference_result->trace.token_count, token_mismatch_index);
     if (have_emel_token && have_reference_token) {
-      std::fprintf(stdout,
-                   "generation_trace.mismatch: emel_token=%d emel_gap=%g reference_token=%d "
-                   "reference_gap=%g\n",
-                   emel_result->trace.token_ids[static_cast<size_t>(token_mismatch_index)],
-                   emel_result->trace.top_score_gaps[static_cast<size_t>(token_mismatch_index)],
-                   reference_result->trace.token_ids[static_cast<size_t>(token_mismatch_index)],
-                   reference_result->trace.top_score_gaps[static_cast<size_t>(token_mismatch_index)]);
-      dump_generation_trace_window("emel", state.reference, *emel_result, token_mismatch_index);
-      dump_generation_trace_window("reference", state.reference, *reference_result, token_mismatch_index);
+      std::fprintf(
+          stdout,
+          "generation_trace.mismatch: emel_token=%d emel_gap=%g "
+          "reference_token=%d "
+          "reference_gap=%g\n",
+          emel_result->trace
+              .token_ids[static_cast<size_t>(token_mismatch_index)],
+          emel_result->trace
+              .top_score_gaps[static_cast<size_t>(token_mismatch_index)],
+          reference_result->trace
+              .token_ids[static_cast<size_t>(token_mismatch_index)],
+          reference_result->trace
+              .top_score_gaps[static_cast<size_t>(token_mismatch_index)]);
+      dump_generation_trace_window("emel", state.reference, *emel_result,
+                                   token_mismatch_index);
+      dump_generation_trace_window("reference", state.reference,
+                                   *reference_result, token_mismatch_index);
     }
   }
 }
 
-std::string_view kv_key_view(const generation_load_state & state,
-                             const emel::gguf::loader::kv_entry & entry) {
-  if (static_cast<size_t>(entry.key_offset) + static_cast<size_t>(entry.key_length) >
+std::string_view kv_key_view(const generation_load_state &state,
+                             const emel::gguf::loader::kv_entry &entry) {
+  if (static_cast<size_t>(entry.key_offset) +
+          static_cast<size_t>(entry.key_length) >
       state.kv_arena.size()) {
     return {};
   }
 
   return std::string_view{
-    reinterpret_cast<const char *>(state.kv_arena.data() + entry.key_offset),
-    entry.key_length,
+      reinterpret_cast<const char *>(state.kv_arena.data() + entry.key_offset),
+      entry.key_length,
   };
 }
 
-std::span<const uint8_t> kv_value_view(const generation_load_state & state,
-                                       const emel::gguf::loader::kv_entry & entry) {
-  if (static_cast<size_t>(entry.value_offset) + static_cast<size_t>(entry.value_length) >
+std::span<const uint8_t>
+kv_value_view(const generation_load_state &state,
+              const emel::gguf::loader::kv_entry &entry) {
+  if (static_cast<size_t>(entry.value_offset) +
+          static_cast<size_t>(entry.value_length) >
       state.kv_arena.size()) {
     return {};
   }
 
   return std::span<const uint8_t>{
-    state.kv_arena.data() + entry.value_offset,
-    entry.value_length,
+      state.kv_arena.data() + entry.value_offset,
+      entry.value_length,
   };
 }
 
-const emel::gguf::loader::kv_entry * find_kv_entry(const generation_load_state & state,
-                                                   const std::string_view key) {
-  for (const auto & entry : state.kv_entries) {
+const emel::gguf::loader::kv_entry *
+find_kv_entry(const generation_load_state &state, const std::string_view key) {
+  for (const auto &entry : state.kv_entries) {
     if (kv_key_view(state, entry) == key) {
       return &entry;
     }
@@ -16251,55 +16227,55 @@ const emel::gguf::loader::kv_entry * find_kv_entry(const generation_load_state &
   return nullptr;
 }
 
-bool decode_integer_value(const generation_load_state & state,
-                          const emel::gguf::loader::kv_entry & entry,
-                          uint64_t & value_out) {
+bool decode_integer_value(const generation_load_state &state,
+                          const emel::gguf::loader::kv_entry &entry,
+                          uint64_t &value_out) {
   const std::span<const uint8_t> bytes = kv_value_view(state, entry);
   namespace constants = emel::gguf::loader::constants;
 
   switch (entry.value_type) {
-    case constants::gguf_type_uint8:
-      if (bytes.size() != 1u) {
-        return false;
-      }
-      value_out = bytes[0];
-      return true;
-    case constants::gguf_type_int8:
-      if (bytes.size() != 1u) {
-        return false;
-      }
-      value_out = static_cast<uint64_t>(static_cast<int8_t>(bytes[0]));
-      return true;
-    case constants::gguf_type_uint16:
-    case constants::gguf_type_int16:
-      if (bytes.size() != 2u) {
-        return false;
-      }
-      value_out = static_cast<uint64_t>(bytes[0]) |
-                  (static_cast<uint64_t>(bytes[1]) << 8u);
-      return true;
-    case constants::gguf_type_uint32:
-    case constants::gguf_type_int32:
-      if (bytes.size() != sizeof(uint32_t)) {
-        return false;
-      }
-      value_out = read_u32_le(bytes);
-      return true;
-    case constants::gguf_type_uint64:
-    case constants::gguf_type_int64:
-      if (bytes.size() != sizeof(uint64_t)) {
-        return false;
-      }
-      value_out = read_u64_le(bytes);
-      return true;
-    default:
+  case constants::gguf_type_uint8:
+    if (bytes.size() != 1u) {
       return false;
+    }
+    value_out = bytes[0];
+    return true;
+  case constants::gguf_type_int8:
+    if (bytes.size() != 1u) {
+      return false;
+    }
+    value_out = static_cast<uint64_t>(static_cast<int8_t>(bytes[0]));
+    return true;
+  case constants::gguf_type_uint16:
+  case constants::gguf_type_int16:
+    if (bytes.size() != 2u) {
+      return false;
+    }
+    value_out = static_cast<uint64_t>(bytes[0]) |
+                (static_cast<uint64_t>(bytes[1]) << 8u);
+    return true;
+  case constants::gguf_type_uint32:
+  case constants::gguf_type_int32:
+    if (bytes.size() != sizeof(uint32_t)) {
+      return false;
+    }
+    value_out = read_u32_le(bytes);
+    return true;
+  case constants::gguf_type_uint64:
+  case constants::gguf_type_int64:
+    if (bytes.size() != sizeof(uint64_t)) {
+      return false;
+    }
+    value_out = read_u64_le(bytes);
+    return true;
+  default:
+    return false;
   }
 }
 
-bool decode_string_value(const generation_load_state & state,
-                         const emel::gguf::loader::kv_entry & entry,
-                         std::string_view & value_out) {
+bool decode_string_value(const generation_load_state &state,
+                         const emel::gguf::loader::kv_entry &entry,
+                         std::string_view &value_out) {
   const std::span<const uint8_t> bytes = kv_value_view(state, entry);
   namespace constants = emel::gguf::loader::constants;
 
@@ -16314,15 +16290,15 @@ bool decode_string_value(const generation_load_state & state,
   }
 
   value_out = std::string_view{
-    reinterpret_cast<const char *>(bytes.data() + sizeof(uint64_t)),
-    static_cast<size_t>(length),
+      reinterpret_cast<const char *>(bytes.data() + sizeof(uint64_t)),
+      static_cast<size_t>(length),
   };
   return true;
 }
 
-bool decode_string_array_count(const generation_load_state & state,
-                               const emel::gguf::loader::kv_entry & entry,
-                               uint32_t & count_out) {
+bool decode_string_array_count(const generation_load_state &state,
+                               const emel::gguf::loader::kv_entry &entry,
+                               uint32_t &count_out) {
   const std::span<const uint8_t> bytes = kv_value_view(state, entry);
   namespace constants = emel::gguf::loader::constants;
 
@@ -16336,7 +16312,8 @@ bool decode_string_array_count(const generation_load_state & state,
     return false;
   }
 
-  const uint64_t count = read_u64_le(bytes.subspan(sizeof(uint32_t), sizeof(uint64_t)));
+  const uint64_t count =
+      read_u64_le(bytes.subspan(sizeof(uint32_t), sizeof(uint64_t)));
   if (count > static_cast<uint64_t>(std::numeric_limits<uint32_t>::max())) {
     return false;
   }
@@ -16345,9 +16322,9 @@ bool decode_string_array_count(const generation_load_state & state,
   return true;
 }
 
-bool decode_integer_array_first_nonzero(const generation_load_state & state,
-                                        const emel::gguf::loader::kv_entry & entry,
-                                        int32_t & value_out) {
+bool decode_integer_array_first_nonzero(
+    const generation_load_state &state,
+    const emel::gguf::loader::kv_entry &entry, int32_t &value_out) {
   const std::span<const uint8_t> bytes = kv_value_view(state, entry);
   namespace constants = emel::gguf::loader::constants;
 
@@ -16357,30 +16334,31 @@ bool decode_integer_array_first_nonzero(const generation_load_state & state,
   }
 
   const uint32_t element_type = read_u32_le(bytes.first(sizeof(uint32_t)));
-  const uint64_t count = read_u64_le(bytes.subspan(sizeof(uint32_t), sizeof(uint64_t)));
+  const uint64_t count =
+      read_u64_le(bytes.subspan(sizeof(uint32_t), sizeof(uint64_t)));
   const std::span<const uint8_t> payload =
       bytes.subspan(sizeof(uint32_t) + sizeof(uint64_t));
 
   size_t element_size = 0u;
   switch (element_type) {
-    case constants::gguf_type_uint8:
-    case constants::gguf_type_int8:
-      element_size = 1u;
-      break;
-    case constants::gguf_type_uint16:
-    case constants::gguf_type_int16:
-      element_size = 2u;
-      break;
-    case constants::gguf_type_uint32:
-    case constants::gguf_type_int32:
-      element_size = 4u;
-      break;
-    case constants::gguf_type_uint64:
-    case constants::gguf_type_int64:
-      element_size = 8u;
-      break;
-    default:
-      return false;
+  case constants::gguf_type_uint8:
+  case constants::gguf_type_int8:
+    element_size = 1u;
+    break;
+  case constants::gguf_type_uint16:
+  case constants::gguf_type_int16:
+    element_size = 2u;
+    break;
+  case constants::gguf_type_uint32:
+  case constants::gguf_type_int32:
+    element_size = 4u;
+    break;
+  case constants::gguf_type_uint64:
+  case constants::gguf_type_int64:
+    element_size = 8u;
+    break;
+  default:
+    return false;
   }
 
   if (count == 0u || payload.size() != count * element_size) {
@@ -16388,35 +16366,36 @@ bool decode_integer_array_first_nonzero(const generation_load_state & state,
   }
 
   for (uint64_t index = 0u; index < count; ++index) {
-    const std::span<const uint8_t> element =
-        payload.subspan(static_cast<size_t>(index * element_size), element_size);
+    const std::span<const uint8_t> element = payload.subspan(
+        static_cast<size_t>(index * element_size), element_size);
     uint64_t raw_value = 0u;
     switch (element_type) {
-      case constants::gguf_type_uint8:
-        raw_value = element[0];
-        break;
-      case constants::gguf_type_int8:
-        raw_value = static_cast<uint64_t>(static_cast<int8_t>(element[0]));
-        break;
-      case constants::gguf_type_uint16:
-      case constants::gguf_type_int16:
-        raw_value = static_cast<uint64_t>(element[0]) |
-                    (static_cast<uint64_t>(element[1]) << 8u);
-        break;
-      case constants::gguf_type_uint32:
-      case constants::gguf_type_int32:
-        raw_value = read_u32_le(element);
-        break;
-      case constants::gguf_type_uint64:
-      case constants::gguf_type_int64:
-        raw_value = read_u64_le(element);
-        break;
-      default:
-        return false;
+    case constants::gguf_type_uint8:
+      raw_value = element[0];
+      break;
+    case constants::gguf_type_int8:
+      raw_value = static_cast<uint64_t>(static_cast<int8_t>(element[0]));
+      break;
+    case constants::gguf_type_uint16:
+    case constants::gguf_type_int16:
+      raw_value = static_cast<uint64_t>(element[0]) |
+                  (static_cast<uint64_t>(element[1]) << 8u);
+      break;
+    case constants::gguf_type_uint32:
+    case constants::gguf_type_int32:
+      raw_value = read_u32_le(element);
+      break;
+    case constants::gguf_type_uint64:
+    case constants::gguf_type_int64:
+      raw_value = read_u64_le(element);
+      break;
+    default:
+      return false;
     }
 
     if (raw_value == 0u ||
-        raw_value > static_cast<uint64_t>(std::numeric_limits<int32_t>::max())) {
+        raw_value >
+            static_cast<uint64_t>(std::numeric_limits<int32_t>::max())) {
       continue;
     }
 
@@ -16427,39 +16406,39 @@ bool decode_integer_array_first_nonzero(const generation_load_state & state,
   return false;
 }
 
-bool decode_float_value(const generation_load_state & state,
-                        const emel::gguf::loader::kv_entry & entry,
-                        float & value_out) {
+bool decode_float_value(const generation_load_state &state,
+                        const emel::gguf::loader::kv_entry &entry,
+                        float &value_out) {
   const std::span<const uint8_t> bytes = kv_value_view(state, entry);
   namespace constants = emel::gguf::loader::constants;
 
   switch (entry.value_type) {
-    case constants::gguf_type_float32: {
-      if (bytes.size() != sizeof(uint32_t)) {
-        return false;
-      }
-      const uint32_t bits = read_u32_le(bytes);
-      std::memcpy(&value_out, &bits, sizeof(value_out));
-      return true;
-    }
-    case constants::gguf_type_float64: {
-      if (bytes.size() != sizeof(uint64_t)) {
-        return false;
-      }
-      const uint64_t bits = read_u64_le(bytes);
-      double value = 0.0;
-      std::memcpy(&value, &bits, sizeof(value));
-      value_out = static_cast<float>(value);
-      return true;
-    }
-    default:
+  case constants::gguf_type_float32: {
+    if (bytes.size() != sizeof(uint32_t)) {
       return false;
+    }
+    const uint32_t bits = read_u32_le(bytes);
+    std::memcpy(&value_out, &bits, sizeof(value_out));
+    return true;
+  }
+  case constants::gguf_type_float64: {
+    if (bytes.size() != sizeof(uint64_t)) {
+      return false;
+    }
+    const uint64_t bits = read_u64_le(bytes);
+    double value = 0.0;
+    std::memcpy(&value, &bits, sizeof(value));
+    value_out = static_cast<float>(value);
+    return true;
+  }
+  default:
+    return false;
   }
 }
 
-bool decode_bool_value(const generation_load_state & state,
-                       const emel::gguf::loader::kv_entry & entry,
-                       bool & value_out) {
+bool decode_bool_value(const generation_load_state &state,
+                       const emel::gguf::loader::kv_entry &entry,
+                       bool &value_out) {
   const std::span<const uint8_t> bytes = kv_value_view(state, entry);
   namespace constants = emel::gguf::loader::constants;
   if (entry.value_type != constants::gguf_type_bool || bytes.size() != 1u) {
@@ -16469,23 +16448,24 @@ bool decode_bool_value(const generation_load_state & state,
   return true;
 }
 
-bool copy_tensor_names(const std::span<const uint8_t> file_image, emel::model::data & model_data) {
+bool copy_tensor_names(const std::span<const uint8_t> file_image,
+                       emel::model::data &model_data) {
   model_data.name_bytes_used = 0u;
 
   for (uint32_t i = 0u; i < model_data.n_tensors; ++i) {
-    auto & tensor = model_data.tensors[i];
+    auto &tensor = model_data.tensors[i];
     const size_t name_offset = static_cast<size_t>(tensor.name_offset);
     const size_t name_length = static_cast<size_t>(tensor.name_length);
     if (name_offset + name_length > file_image.size() ||
-        model_data.name_bytes_used + name_length > model_data.name_storage.size()) {
+        model_data.name_bytes_used + name_length >
+            model_data.name_storage.size()) {
       return false;
     }
 
     const uint32_t copied_offset = model_data.name_bytes_used;
     if (name_length > 0u) {
       std::memcpy(model_data.name_storage.data() + copied_offset,
-                  file_image.data() + name_offset,
-                  name_length);
+                  file_image.data() + name_offset, name_length);
     }
 
     model_data.name_bytes_used += static_cast<uint32_t>(name_length);
@@ -16495,20 +16475,23 @@ bool copy_tensor_names(const std::span<const uint8_t> file_image, emel::model::d
   return true;
 }
 
-std::string_view tensor_name_view(const emel::model::data & model_data,
-                                  const emel::model::data::tensor_record & tensor) {
-  if (static_cast<size_t>(tensor.name_offset) + static_cast<size_t>(tensor.name_length) >
+std::string_view
+tensor_name_view(const emel::model::data &model_data,
+                 const emel::model::data::tensor_record &tensor) {
+  if (static_cast<size_t>(tensor.name_offset) +
+          static_cast<size_t>(tensor.name_length) >
       model_data.name_storage.size()) {
     return {};
   }
 
   return std::string_view{
-    model_data.name_storage.data() + tensor.name_offset,
-    tensor.name_length,
+      model_data.name_storage.data() + tensor.name_offset,
+      tensor.name_length,
   };
 }
 
-bool try_parse_block_index(const std::string_view name, int32_t & block_index_out) {
+bool try_parse_block_index(const std::string_view name,
+                           int32_t &block_index_out) {
   constexpr std::string_view k_prefix = "blk.";
   if (!name.starts_with(k_prefix)) {
     return false;
@@ -16535,14 +16518,15 @@ bool try_parse_block_index(const std::string_view name, int32_t & block_index_ou
   return true;
 }
 
-emel::error::type populate_model_metadata(const generation_load_state & state,
-                                          emel::model::data & model_data) {
-  return emel::model::load_hparams_from_gguf(kv_binding_from_state(state), model_data)
+emel::error::type populate_model_metadata(const generation_load_state &state,
+                                          emel::model::data &model_data) {
+  return emel::model::load_hparams_from_gguf(kv_binding_from_state(state),
+                                             model_data)
              ? emel::error::cast(emel::model::loader::error::none)
              : emel::error::cast(emel::model::loader::error::model_invalid);
 }
 
-std::string_view architecture_name_view(const emel::model::data & model_data) {
+std::string_view architecture_name_view(const emel::model::data &model_data) {
   size_t length = 0u;
   while (length < model_data.architecture_name.size() &&
          model_data.architecture_name[length] != '\0') {
@@ -16552,21 +16536,25 @@ std::string_view architecture_name_view(const emel::model::data & model_data) {
   return std::string_view{model_data.architecture_name.data(), length};
 }
 
-void resolve_generation_formatter_binding(generation_load_state & state) {
+void resolve_generation_formatter_binding(generation_load_state &state) {
   std::string_view primary_template = {};
-  const auto * entry = find_kv_entry(state, "tokenizer.chat_template");
-  if (entry != nullptr && !decode_string_value(state, *entry, primary_template)) {
-    state.formatter_binding = emel::tools::generation_formatter_contract::formatter_binding{
-      .formatter_ctx = nullptr,
-      .format_prompt = emel::text::formatter::format_raw,
-      .support = emel::tools::generation_formatter_contract::support_kind::unsupported_template,
-      .contract = emel::tools::generation_formatter_contract::k_unsupported_template_contract,
-    };
+  const auto *entry = find_kv_entry(state, "tokenizer.chat_template");
+  if (entry != nullptr &&
+      !decode_string_value(state, *entry, primary_template)) {
+    state.formatter_binding =
+        emel::tools::generation_formatter_contract::formatter_binding{
+            .formatter_ctx = nullptr,
+            .format_prompt = emel::text::formatter::format_raw,
+            .support = emel::tools::generation_formatter_contract::
+                support_kind::unsupported_template,
+            .contract = emel::tools::generation_formatter_contract::
+                k_unsupported_template_contract,
+        };
     return;
   }
 
   uint32_t named_template_count = 0u;
-  for (const auto & candidate : state.kv_entries) {
+  for (const auto &candidate : state.kv_entries) {
     const std::string_view key = kv_key_view(state, candidate);
     if (key.starts_with("tokenizer.chat_template.") &&
         key != "tokenizer.chat_template") {
@@ -16574,48 +16562,43 @@ void resolve_generation_formatter_binding(generation_load_state & state) {
     }
   }
 
-  state.formatter_binding =
-      emel::tools::generation_formatter_contract::resolve_primary_template_binding(
-          primary_template,
-          named_template_count);
+  state.formatter_binding = emel::tools::generation_formatter_contract::
+      resolve_primary_template_binding(primary_template, named_template_count);
 }
 
-void print_generation_formatter_contract(FILE * stream,
-                                         const generation_load_state & state,
-                                         const maintained_generation_fixture & fixture) {
+void print_generation_formatter_contract(
+    FILE *stream, const generation_load_state &state,
+    const maintained_generation_fixture &fixture) {
   if (stream == nullptr || state.formatter_binding.contract.empty()) {
     return;
   }
-  std::fprintf(stream,
-               "fixture_path=%.*s\n",
+  std::fprintf(stream, "fixture_path=%.*s\n",
                static_cast<int>(fixture.fixture_rel.size()),
                fixture.fixture_rel.data());
   const std::string_view architecture =
-      state.model_data != nullptr ? emel::model::architecture_name_view(*state.model_data)
-                                  : std::string_view{};
+      state.model_data != nullptr
+          ? emel::model::architecture_name_view(*state.model_data)
+          : std::string_view{};
   if (!architecture.empty()) {
-    std::fprintf(stream,
-                 "architecture_contract=%.*s\n",
-                 static_cast<int>(architecture.size()),
-                 architecture.data());
+    std::fprintf(stream, "architecture_contract=%.*s\n",
+                 static_cast<int>(architecture.size()), architecture.data());
   }
-  std::fprintf(stream,
-               "formatter_contract=%.*s\n",
+  std::fprintf(stream, "formatter_contract=%.*s\n",
                static_cast<int>(state.formatter_binding.contract.size()),
                state.formatter_binding.contract.data());
 }
 
-emel::error::type run_emel_parse_model(void * owner,
-                                       const emel::model::loader::event::load & req) {
-  auto & state = *static_cast<generation_load_state *>(owner);
+emel::error::type
+run_emel_parse_model(void *owner, const emel::model::loader::event::load &req) {
+  auto &state = *static_cast<generation_load_state *>(owner);
 
   if (req.file_image == nullptr || req.file_size == 0u) {
     return emel::error::cast(emel::model::loader::error::invalid_request);
   }
 
   const std::span<const uint8_t> file_image{
-    static_cast<const uint8_t *>(req.file_image),
-    static_cast<size_t>(req.file_size),
+      static_cast<const uint8_t *>(req.file_image),
+      static_cast<size_t>(req.file_size),
   };
 
   uint32_t tensor_count = 0u;
@@ -16633,84 +16616,14 @@ emel::error::type run_emel_parse_model(void * owner,
   return populate_model_metadata(state, req.model_data);
 }
 
-emel::error::type run_emel_load_weights(void * owner,
-                                        const emel::model::loader::event::load & req,
-                                        uint64_t & bytes_total,
-                                        uint64_t & bytes_done,
-                                        bool & used_mmap) {
-  auto & state = *static_cast<generation_load_state *>(owner);
-  if (req.model_data.n_tensors == 0u) {
-    return emel::error::cast(emel::model::loader::error::model_invalid);
-  }
-
-  state.effect_requests.resize(req.model_data.n_tensors);
-  state.effect_results.resize(req.model_data.n_tensors);
-
-  reset_weight_capture(state);
-  emel::model::weight_loader::event::bind_storage bind_ev{
-    std::span<emel::model::data::tensor_record>{req.model_data.tensors.data(),
-                                                req.model_data.n_tensors},
-  };
-  bind_ev.on_done = {&state, on_weight_bind_done};
-  bind_ev.on_error = {&state, on_weight_bind_error};
-  if (!state.weight_loader.process_event(bind_ev) ||
-      !state.weight.bind_done ||
-      state.weight.bind_error) {
-    return map_weight_loader_error(state.weight.err);
-  }
-
-  reset_weight_capture(state);
-  emel::model::weight_loader::event::plan_load plan_ev{
-    std::span<emel::model::weight_loader::effect_request>{state.effect_requests},
-  };
-  plan_ev.on_done = {&state, on_weight_plan_done};
-  plan_ev.on_error = {&state, on_weight_plan_error};
-  if (!state.weight_loader.process_event(plan_ev) ||
-      !state.weight.plan_done ||
-      state.weight.plan_error) {
-    return map_weight_loader_error(state.weight.err);
-  }
-
-  const uint32_t effect_count = state.weight.effect_count;
-  for (uint32_t i = 0u; i < effect_count; ++i) {
-    state.effect_results[i] = emel::model::weight_loader::effect_result{
-      .kind = state.effect_requests[i].kind,
-      .handle = state.effect_requests[i].target,
-      .err = emel::error::cast(emel::model::weight_loader::error::none),
-    };
-  }
-
-  reset_weight_capture(state);
-  emel::model::weight_loader::event::apply_effect_results apply_ev{
-    std::span<const emel::model::weight_loader::effect_result>{state.effect_results.data(),
-                                                               effect_count},
-  };
-  apply_ev.on_done = {&state, on_weight_apply_done};
-  apply_ev.on_error = {&state, on_weight_apply_error};
-  if (!state.weight_loader.process_event(apply_ev) ||
-      !state.weight.apply_done ||
-      state.weight.apply_error) {
-    return map_weight_loader_error(state.weight.err);
-  }
-
-  req.model_data.weights_data = req.file_image;
-  req.model_data.weights_size = req.file_size;
-  req.model_data.weights_mapped = false;
-  req.model_data.weights_split_count = 1u;
-  req.model_data.weights_split_offsets[0] = 0u;
-  req.model_data.weights_split_sizes[0] = req.file_size;
-  bytes_total = req.file_size;
-  bytes_done = req.file_size;
-  used_mmap = false;
-  return emel::error::cast(emel::model::loader::error::none);
-}
-
-emel::error::type run_emel_map_layers(void *, const emel::model::loader::event::load & req) {
+emel::error::type
+run_emel_map_layers(void *, const emel::model::loader::event::load &req) {
   int32_t max_block_index = -1;
   for (uint32_t i = 0u; i < req.model_data.n_tensors; ++i) {
     int32_t block_index = -1;
     if (emel::model::try_parse_block_index(
-            emel::model::tensor_name_view(req.model_data, req.model_data.tensors[i]),
+            emel::model::tensor_name_view(req.model_data,
+                                          req.model_data.tensors[i]),
             block_index) &&
         block_index > max_block_index) {
       max_block_index = block_index;
@@ -16730,10 +16643,10 @@ emel::error::type run_emel_map_layers(void *, const emel::model::loader::event::
   return emel::error::cast(emel::model::loader::error::model_invalid);
 }
 
-emel::error::type run_emel_validate_structure(void *,
-                                              const emel::model::loader::event::load & req) {
-  if (req.model_data.n_tensors == 0u ||
-      req.model_data.n_layers <= 0 ||
+emel::error::type
+run_emel_validate_structure(void *,
+                            const emel::model::loader::event::load &req) {
+  if (req.model_data.n_tensors == 0u || req.model_data.n_layers <= 0 ||
       req.model_data.weights_data == nullptr ||
       req.model_data.weights_size == 0u) {
     return emel::error::cast(emel::model::loader::error::model_invalid);
@@ -16742,9 +16655,9 @@ emel::error::type run_emel_validate_structure(void *,
   return emel::error::cast(emel::model::loader::error::none);
 }
 
-emel::error::type run_emel_validate_architecture(
-    void *,
-    const emel::model::loader::event::load & req) {
+emel::error::type
+run_emel_validate_architecture(void *,
+                               const emel::model::loader::event::load &req) {
   return emel::model::validate_execution_contract(req.model_data);
 }
 
@@ -16758,7 +16671,8 @@ constexpr int64_t k_mm_k = 48;
 constexpr int64_t k_mm_m = 24;
 constexpr int64_t k_mm_n = 32;
 
-std::vector<float> make_signed_data(const int64_t count, const float scale, const float bias) {
+std::vector<float> make_signed_data(const int64_t count, const float scale,
+                                    const float bias) {
   std::vector<float> out(static_cast<size_t>(count));
   for (int64_t i = 0; i < count; ++i) {
     const float wave = std::sin(static_cast<float>(i) * 0.013f) * scale;
@@ -16768,16 +16682,16 @@ std::vector<float> make_signed_data(const int64_t count, const float scale, cons
   return out;
 }
 
-std::vector<float> make_positive_data(const int64_t count, const float scale, const float bias) {
+std::vector<float> make_positive_data(const int64_t count, const float scale,
+                                      const float bias) {
   std::vector<float> out = make_signed_data(count, scale, bias);
-  for (float & value : out) {
+  for (float &value : out) {
     value = std::fabs(value) + 0.5f;
   }
   return out;
 }
 
-template <class tensor_type>
-void fill_default_nb(tensor_type & tensor) {
+template <class tensor_type> void fill_default_nb(tensor_type &tensor) {
   constexpr uint64_t elem_size = sizeof(float);
   tensor.nb[0] = elem_size;
   tensor.nb[1] = tensor.nb[0] * tensor.ne[0];
@@ -16785,11 +16699,9 @@ void fill_default_nb(tensor_type & tensor) {
   tensor.nb[3] = tensor.nb[2] * tensor.ne[2];
 }
 
-emel::kernel::event::tensor_view make_src_view(const float * data,
-                                               const uint64_t ne0,
-                                               const uint64_t ne1 = 1,
-                                               const uint64_t ne2 = 1,
-                                               const uint64_t ne3 = 1) {
+emel::kernel::event::tensor_view
+make_src_view(const float *data, const uint64_t ne0, const uint64_t ne1 = 1,
+              const uint64_t ne2 = 1, const uint64_t ne3 = 1) {
   emel::kernel::event::tensor_view tensor{};
   tensor.data = data;
   tensor.type = emel::kernel::event::dtype::f32;
@@ -16798,11 +16710,9 @@ emel::kernel::event::tensor_view make_src_view(const float * data,
   return tensor;
 }
 
-emel::kernel::event::tensor_view_mut make_dst_view(float * data,
-                                                   const uint64_t ne0,
-                                                   const uint64_t ne1 = 1,
-                                                   const uint64_t ne2 = 1,
-                                                   const uint64_t ne3 = 1) {
+emel::kernel::event::tensor_view_mut
+make_dst_view(float *data, const uint64_t ne0, const uint64_t ne1 = 1,
+              const uint64_t ne2 = 1, const uint64_t ne3 = 1) {
   emel::kernel::event::tensor_view_mut tensor{};
   tensor.data = data;
   tensor.type = emel::kernel::event::dtype::f32;
@@ -16812,34 +16722,26 @@ emel::kernel::event::tensor_view_mut make_dst_view(float * data,
 }
 
 bool almost_equal_f32(const float actual, const float expected) {
-  const double diff = std::fabs(static_cast<double>(actual) - static_cast<double>(expected));
-  const double tol = k_f32_atol + k_f32_rtol * std::fabs(static_cast<double>(expected));
+  const double diff =
+      std::fabs(static_cast<double>(actual) - static_cast<double>(expected));
+  const double tol =
+      k_f32_atol + k_f32_rtol * std::fabs(static_cast<double>(expected));
   return diff <= tol;
 }
 
-bool compare_f32_vectors(const char * backend,
-                         const char * case_name,
-                         const std::vector<float> & actual,
-                         const std::vector<float> & expected) {
+bool compare_f32_vectors(const char *backend, const char *case_name,
+                         const std::vector<float> &actual,
+                         const std::vector<float> &expected) {
   if (actual.size() != expected.size()) {
-    std::fprintf(stderr,
-                 "[%s] %s size mismatch: emel=%zu ggml=%zu\n",
-                 backend,
-                 case_name,
-                 actual.size(),
-                 expected.size());
+    std::fprintf(stderr, "[%s] %s size mismatch: emel=%zu ggml=%zu\n", backend,
+                 case_name, actual.size(), expected.size());
     return false;
   }
 
   for (size_t i = 0; i < actual.size(); ++i) {
     if (!almost_equal_f32(actual[i], expected[i])) {
-      std::fprintf(stderr,
-                   "[%s] %s mismatch at %zu: emel=%0.8f ggml=%0.8f\n",
-                   backend,
-                   case_name,
-                   i,
-                   actual[i],
-                   expected[i]);
+      std::fprintf(stderr, "[%s] %s mismatch at %zu: emel=%0.8f ggml=%0.8f\n",
+                   backend, case_name, i, actual[i], expected[i]);
       return false;
     }
   }
@@ -16848,7 +16750,7 @@ bool compare_f32_vectors(const char * backend,
 
 struct ggml_case_context {
   std::vector<uint8_t> arena;
-  ggml_context * ctx = nullptr;
+  ggml_context *ctx = nullptr;
 
   explicit ggml_case_context(const size_t arena_bytes = 64u * 1024u * 1024u)
       : arena(arena_bytes) {
@@ -16866,12 +16768,13 @@ struct ggml_case_context {
   }
 };
 
-void set_tensor_f32(ggml_tensor * tensor, const std::vector<float> & values) {
-  std::memcpy(ggml_get_data_f32(tensor), values.data(), values.size() * sizeof(float));
+void set_tensor_f32(ggml_tensor *tensor, const std::vector<float> &values) {
+  std::memcpy(ggml_get_data_f32(tensor), values.data(),
+              values.size() * sizeof(float));
 }
 
-bool compute_graph(ggml_case_context & c, ggml_tensor * out) {
-  ggml_cgraph * graph = ggml_new_graph(c.ctx);
+bool compute_graph(ggml_case_context &c, ggml_tensor *out) {
+  ggml_cgraph *graph = ggml_new_graph(c.ctx);
   if (graph == nullptr || out == nullptr) {
     return false;
   }
@@ -16880,67 +16783,71 @@ bool compute_graph(ggml_case_context & c, ggml_tensor * out) {
 }
 
 template <class build_fn>
-bool run_ggml_unary(const std::vector<float> & src,
-                    std::vector<float> & out,
+bool run_ggml_unary(const std::vector<float> &src, std::vector<float> &out,
                     build_fn build) {
   ggml_case_context c{};
-  ggml_tensor * a = ggml_new_tensor_1d(c.ctx, GGML_TYPE_F32, static_cast<int64_t>(src.size()));
+  ggml_tensor *a = ggml_new_tensor_1d(c.ctx, GGML_TYPE_F32,
+                                      static_cast<int64_t>(src.size()));
   set_tensor_f32(a, src);
-  ggml_tensor * out_tensor = build(c.ctx, a);
+  ggml_tensor *out_tensor = build(c.ctx, a);
   if (!compute_graph(c, out_tensor)) {
     return false;
   }
-  const float * out_data = ggml_get_data_f32(out_tensor);
+  const float *out_data = ggml_get_data_f32(out_tensor);
   out.assign(out_data, out_data + src.size());
   return true;
 }
 
 template <class build_fn>
-bool run_ggml_binary(const std::vector<float> & lhs,
-                     const std::vector<float> & rhs,
-                     std::vector<float> & out,
+bool run_ggml_binary(const std::vector<float> &lhs,
+                     const std::vector<float> &rhs, std::vector<float> &out,
                      build_fn build) {
   ggml_case_context c{};
-  ggml_tensor * a = ggml_new_tensor_1d(c.ctx, GGML_TYPE_F32, static_cast<int64_t>(lhs.size()));
-  ggml_tensor * b = ggml_new_tensor_1d(c.ctx, GGML_TYPE_F32, static_cast<int64_t>(rhs.size()));
+  ggml_tensor *a = ggml_new_tensor_1d(c.ctx, GGML_TYPE_F32,
+                                      static_cast<int64_t>(lhs.size()));
+  ggml_tensor *b = ggml_new_tensor_1d(c.ctx, GGML_TYPE_F32,
+                                      static_cast<int64_t>(rhs.size()));
   set_tensor_f32(a, lhs);
   set_tensor_f32(b, rhs);
-  ggml_tensor * out_tensor = build(c.ctx, a, b);
+  ggml_tensor *out_tensor = build(c.ctx, a, b);
   if (!compute_graph(c, out_tensor)) {
     return false;
   }
-  const float * out_data = ggml_get_data_f32(out_tensor);
+  const float *out_data = ggml_get_data_f32(out_tensor);
   out.assign(out_data, out_data + lhs.size());
   return true;
 }
 
-bool run_ggml_softmax(const std::vector<float> & src, std::vector<float> & out) {
+bool run_ggml_softmax(const std::vector<float> &src, std::vector<float> &out) {
   ggml_case_context c{};
-  ggml_tensor * a = ggml_new_tensor_2d(c.ctx, GGML_TYPE_F32, k_softmax_width, k_softmax_rows);
+  ggml_tensor *a =
+      ggml_new_tensor_2d(c.ctx, GGML_TYPE_F32, k_softmax_width, k_softmax_rows);
   set_tensor_f32(a, src);
-  ggml_tensor * out_tensor = ggml_soft_max(c.ctx, a);
+  ggml_tensor *out_tensor = ggml_soft_max(c.ctx, a);
   if (!compute_graph(c, out_tensor)) {
     return false;
   }
-  const float * out_data = ggml_get_data_f32(out_tensor);
+  const float *out_data = ggml_get_data_f32(out_tensor);
   out.assign(out_data, out_data + src.size());
   return true;
 }
 
-bool run_ggml_mul_mat(const std::vector<float> & matrix_a,
-                      const std::vector<float> & matrix_b,
-                      std::vector<float> & out) {
+bool run_ggml_mul_mat(const std::vector<float> &matrix_a,
+                      const std::vector<float> &matrix_b,
+                      std::vector<float> &out) {
   ggml_case_context c{};
-  ggml_tensor * a = ggml_new_tensor_2d(c.ctx, GGML_TYPE_F32, k_mm_k, k_mm_n); // [n, k]
-  ggml_tensor * b = ggml_new_tensor_2d(c.ctx, GGML_TYPE_F32, k_mm_k, k_mm_m); // [m, k]
+  ggml_tensor *a =
+      ggml_new_tensor_2d(c.ctx, GGML_TYPE_F32, k_mm_k, k_mm_n); // [n, k]
+  ggml_tensor *b =
+      ggml_new_tensor_2d(c.ctx, GGML_TYPE_F32, k_mm_k, k_mm_m); // [m, k]
   set_tensor_f32(a, matrix_a);
   set_tensor_f32(b, matrix_b);
 
-  ggml_tensor * out_tensor = ggml_mul_mat(c.ctx, a, b);
+  ggml_tensor *out_tensor = ggml_mul_mat(c.ctx, a, b);
   if (!compute_graph(c, out_tensor)) {
     return false;
   }
-  const float * out_data = ggml_get_data_f32(out_tensor);
+  const float *out_data = ggml_get_data_f32(out_tensor);
   out.assign(out_data, out_data + static_cast<size_t>(k_mm_n * k_mm_m));
   return true;
 }
@@ -17045,29 +16952,30 @@ bool compute_attention_with_ggml_nonflash_exact_scores_prod_value(
 
 #endif
 
-bool run_ggml_nonflash_attn_case(std::span<const float> q_data,
-                                 std::span<const float> k_data,
-                                 std::span<const float> v_data,
-                                 const int64_t head_dim,
-                                 const int64_t kv_tokens,
-                                 const int64_t active_kv_tokens,
-                                 const int64_t head_count,
-                                 const int64_t kv_head_count,
-                                 const float scale,
-                                 std::vector<float> & out) {
+bool run_ggml_nonflash_attn_case(
+    std::span<const float> q_data, std::span<const float> k_data,
+    std::span<const float> v_data, const int64_t head_dim,
+    const int64_t kv_tokens, const int64_t active_kv_tokens,
+    const int64_t head_count, const int64_t kv_head_count, const float scale,
+    std::vector<float> &out) {
   const size_t q_size = static_cast<size_t>(head_dim * head_count);
-  const size_t kv_size = static_cast<size_t>(head_dim * kv_tokens * kv_head_count);
-  if (q_data.size() != q_size || k_data.size() != kv_size || v_data.size() != kv_size ||
-      head_dim <= 0 || kv_tokens <= 0 || active_kv_tokens <= 0 || active_kv_tokens > kv_tokens ||
+  const size_t kv_size =
+      static_cast<size_t>(head_dim * kv_tokens * kv_head_count);
+  if (q_data.size() != q_size || k_data.size() != kv_size ||
+      v_data.size() != kv_size || head_dim <= 0 || kv_tokens <= 0 ||
+      active_kv_tokens <= 0 || active_kv_tokens > kv_tokens ||
       head_count <= 0 || kv_head_count <= 0) {
     return false;
   }
 
   ggml_case_context c{};
-  ggml_tensor * q = ggml_new_tensor_3d(c.ctx, GGML_TYPE_F32, head_dim, 1, head_count);
-  ggml_tensor * k = ggml_new_tensor_3d(c.ctx, GGML_TYPE_F16, head_dim, kv_tokens, kv_head_count);
-  ggml_tensor * v = ggml_new_tensor_3d(c.ctx, GGML_TYPE_F16, kv_tokens, head_dim, kv_head_count);
-  ggml_tensor * mask = ggml_new_tensor_2d(c.ctx, GGML_TYPE_F32, kv_tokens, 1);
+  ggml_tensor *q =
+      ggml_new_tensor_3d(c.ctx, GGML_TYPE_F32, head_dim, 1, head_count);
+  ggml_tensor *k = ggml_new_tensor_3d(c.ctx, GGML_TYPE_F16, head_dim, kv_tokens,
+                                      kv_head_count);
+  ggml_tensor *v = ggml_new_tensor_3d(c.ctx, GGML_TYPE_F16, kv_tokens, head_dim,
+                                      kv_head_count);
+  ggml_tensor *mask = ggml_new_tensor_2d(c.ctx, GGML_TYPE_F32, kv_tokens, 1);
   if (q == nullptr || k == nullptr || v == nullptr || mask == nullptr) {
     return false;
   }
@@ -17081,24 +16989,26 @@ bool run_ggml_nonflash_attn_case(std::span<const float> q_data,
       for (int64_t dim = 0; dim < head_dim; ++dim) {
         const size_t src_index = static_cast<size_t>(
             ((token * kv_head_count) + head) * head_dim + dim);
-        const size_t k_dst_index = static_cast<size_t>(
-            ((head * kv_tokens) + token) * head_dim + dim);
-        const size_t v_dst_index = static_cast<size_t>(
-            ((head * head_dim) + dim) * kv_tokens + token);
+        const size_t k_dst_index =
+            static_cast<size_t>(((head * kv_tokens) + token) * head_dim + dim);
+        const size_t v_dst_index =
+            static_cast<size_t>(((head * head_dim) + dim) * kv_tokens + token);
         k_f16[k_dst_index] = ggml_fp32_to_fp16(k_data[src_index]);
         v_f16[v_dst_index] = ggml_fp32_to_fp16(v_data[src_index]);
       }
     }
   }
 
-  std::memcpy(ggml_get_data(k), k_f16.data(), k_f16.size() * sizeof(ggml_fp16_t));
-  std::memcpy(ggml_get_data(v), v_f16.data(), v_f16.size() * sizeof(ggml_fp16_t));
-  auto * mask_data = ggml_get_data_f32(mask);
+  std::memcpy(ggml_get_data(k), k_f16.data(),
+              k_f16.size() * sizeof(ggml_fp16_t));
+  std::memcpy(ggml_get_data(v), v_f16.data(),
+              v_f16.size() * sizeof(ggml_fp16_t));
+  auto *mask_data = ggml_get_data_f32(mask);
   for (int64_t token = 0; token < kv_tokens; ++token) {
     mask_data[token] = token < active_kv_tokens ? 0.0f : -INFINITY;
   }
 
-  ggml_tensor * kq = ggml_mul_mat(c.ctx, k, q);
+  ggml_tensor *kq = ggml_mul_mat(c.ctx, k, q);
   if (kq == nullptr) {
     return false;
   }
@@ -17108,55 +17018,43 @@ bool run_ggml_nonflash_attn_case(std::span<const float> q_data,
     return false;
   }
 
-  ggml_tensor * kqv = ggml_mul_mat(c.ctx, v, kq);
+  ggml_tensor *kqv = ggml_mul_mat(c.ctx, v, kq);
   if (kqv == nullptr || !compute_graph(c, kqv)) {
     return false;
   }
 
-  const float * out_data = ggml_get_data_f32(kqv);
+  const float *out_data = ggml_get_data_f32(kqv);
   out.assign(out_data, out_data + q_size);
   return true;
 }
 
-bool run_ggml_nonflash_attn_case(std::span<const float> q_data,
-                                 std::span<const uint16_t> k_data,
-                                 std::span<const uint16_t> v_data,
-                                 const int64_t head_dim,
-                                 const int64_t kv_tokens,
-                                 const int64_t active_kv_tokens,
-                                 const int64_t head_count,
-                                 const int64_t kv_head_count,
-                                 const float scale,
-                                 std::vector<float> & out) {
+bool run_ggml_nonflash_attn_case(
+    std::span<const float> q_data, std::span<const uint16_t> k_data,
+    std::span<const uint16_t> v_data, const int64_t head_dim,
+    const int64_t kv_tokens, const int64_t active_kv_tokens,
+    const int64_t head_count, const int64_t kv_head_count, const float scale,
+    std::vector<float> &out) {
   const std::vector<float> k_decoded = decode_fp16_storage(k_data);
   const std::vector<float> v_decoded = decode_fp16_storage(v_data);
-  return run_ggml_nonflash_attn_case(q_data,
-                                     k_decoded,
-                                     v_decoded,
-                                     head_dim,
-                                     kv_tokens,
-                                     active_kv_tokens,
-                                     head_count,
-                                     kv_head_count,
-                                     scale,
-                                     out);
+  return run_ggml_nonflash_attn_case(q_data, k_decoded, v_decoded, head_dim,
+                                     kv_tokens, active_kv_tokens, head_count,
+                                     kv_head_count, scale, out);
 }
 
-bool run_emel_nonflash_f16_ggml_softmax_case(std::span<const float> q_data,
-                                             std::span<const float> k_data,
-                                             std::span<const float> v_data,
-                                             const int64_t head_dim,
-                                             const int64_t kv_tokens,
-                                             const int64_t active_kv_tokens,
-                                             const int64_t head_count,
-                                             const int64_t kv_head_count,
-                                             const float scale,
-                                             std::vector<float> & out) {
+bool run_emel_nonflash_f16_ggml_softmax_case(
+    std::span<const float> q_data, std::span<const float> k_data,
+    std::span<const float> v_data, const int64_t head_dim,
+    const int64_t kv_tokens, const int64_t active_kv_tokens,
+    const int64_t head_count, const int64_t kv_head_count, const float scale,
+    std::vector<float> &out) {
   const size_t q_size = static_cast<size_t>(head_dim * head_count);
-  const size_t kv_size = static_cast<size_t>(head_dim * kv_tokens * kv_head_count);
-  if (q_data.size() != q_size || k_data.size() != kv_size || v_data.size() != kv_size ||
-      head_dim <= 0 || kv_tokens <= 0 || active_kv_tokens <= 0 || active_kv_tokens > kv_tokens ||
-      head_count <= 0 || kv_head_count <= 0 || head_count % kv_head_count != 0) {
+  const size_t kv_size =
+      static_cast<size_t>(head_dim * kv_tokens * kv_head_count);
+  if (q_data.size() != q_size || k_data.size() != kv_size ||
+      v_data.size() != kv_size || head_dim <= 0 || kv_tokens <= 0 ||
+      active_kv_tokens <= 0 || active_kv_tokens > kv_tokens ||
+      head_count <= 0 || kv_head_count <= 0 ||
+      head_count % kv_head_count != 0) {
     return false;
   }
 
@@ -17174,33 +17072,31 @@ bool run_emel_nonflash_f16_ggml_softmax_case(std::span<const float> q_data,
     const size_t q_offset = static_cast<size_t>(head * head_dim);
 
     for (int64_t dim = 0; dim < head_dim; ++dim) {
-      q_f16[static_cast<size_t>(dim)] = ggml_fp32_to_fp16(q_data[q_offset + static_cast<size_t>(dim)]);
+      q_f16[static_cast<size_t>(dim)] =
+          ggml_fp32_to_fp16(q_data[q_offset + static_cast<size_t>(dim)]);
     }
 
     float max_score = -std::numeric_limits<float>::infinity();
     for (int64_t token = 0; token < active_kv_tokens; ++token) {
-      const size_t kv_offset = static_cast<size_t>(((token * kv_head_count) + kv_head) * head_dim);
+      const size_t kv_offset =
+          static_cast<size_t>(((token * kv_head_count) + kv_head) * head_dim);
       for (int64_t dim = 0; dim < head_dim; ++dim) {
-        k_f16[static_cast<size_t>(dim)] = ggml_fp32_to_fp16(k_data[kv_offset + static_cast<size_t>(dim)]);
+        k_f16[static_cast<size_t>(dim)] =
+            ggml_fp32_to_fp16(k_data[kv_offset + static_cast<size_t>(dim)]);
       }
 
       float score = 0.0f;
-      ggml_vec_dot_f16(static_cast<int>(head_dim),
-                       &score,
-                       0u,
-                       k_f16.data(),
-                       0u,
-                       q_f16.data(),
-                       0u,
-                       1);
+      ggml_vec_dot_f16(static_cast<int>(head_dim), &score, 0u, k_f16.data(), 0u,
+                       q_f16.data(), 0u, 1);
       score *= scale;
       scores[static_cast<size_t>(token)] = score;
       max_score = std::max(max_score, score);
     }
 
-    const reference_ggml_float score_sum =
-        ggml_vec_soft_max_f32(static_cast<int>(kv_tokens), probs.data(), scores.data(), max_score);
-    const float inv_score_sum = score_sum == 0.0 ? 0.0f : static_cast<float>(1.0 / score_sum);
+    const reference_ggml_float score_sum = ggml_vec_soft_max_f32(
+        static_cast<int>(kv_tokens), probs.data(), scores.data(), max_score);
+    const float inv_score_sum =
+        score_sum == 0.0 ? 0.0f : static_cast<float>(1.0 / score_sum);
     for (int64_t token = 0; token < kv_tokens; ++token) {
       const float weight = probs[static_cast<size_t>(token)] * inv_score_sum;
       weight_f16[static_cast<size_t>(token)] = ggml_fp32_to_fp16(weight);
@@ -17208,19 +17104,15 @@ bool run_emel_nonflash_f16_ggml_softmax_case(std::span<const float> q_data,
 
     for (int64_t dim = 0; dim < head_dim; ++dim) {
       for (int64_t token = 0; token < kv_tokens; ++token) {
-        const size_t kv_offset = static_cast<size_t>(((token * kv_head_count) + kv_head) * head_dim);
-        value_f16[static_cast<size_t>(token)] = ggml_fp32_to_fp16(v_data[kv_offset + static_cast<size_t>(dim)]);
+        const size_t kv_offset =
+            static_cast<size_t>(((token * kv_head_count) + kv_head) * head_dim);
+        value_f16[static_cast<size_t>(token)] =
+            ggml_fp32_to_fp16(v_data[kv_offset + static_cast<size_t>(dim)]);
       }
 
       float dot = 0.0f;
-      ggml_vec_dot_f16(static_cast<int>(kv_tokens),
-                       &dot,
-                       0u,
-                       value_f16.data(),
-                       0u,
-                       weight_f16.data(),
-                       0u,
-                       1);
+      ggml_vec_dot_f16(static_cast<int>(kv_tokens), &dot, 0u, value_f16.data(),
+                       0u, weight_f16.data(), 0u, 1);
       out[q_offset + static_cast<size_t>(dim)] = dot;
     }
   }
@@ -17228,45 +17120,33 @@ bool run_emel_nonflash_f16_ggml_softmax_case(std::span<const float> q_data,
   return true;
 }
 
-bool run_emel_nonflash_f16_ggml_softmax_case(std::span<const float> q_data,
-                                             std::span<const uint16_t> k_data,
-                                             std::span<const uint16_t> v_data,
-                                             const int64_t head_dim,
-                                             const int64_t kv_tokens,
-                                             const int64_t active_kv_tokens,
-                                             const int64_t head_count,
-                                             const int64_t kv_head_count,
-                                             const float scale,
-                                             std::vector<float> & out) {
+bool run_emel_nonflash_f16_ggml_softmax_case(
+    std::span<const float> q_data, std::span<const uint16_t> k_data,
+    std::span<const uint16_t> v_data, const int64_t head_dim,
+    const int64_t kv_tokens, const int64_t active_kv_tokens,
+    const int64_t head_count, const int64_t kv_head_count, const float scale,
+    std::vector<float> &out) {
   const std::vector<float> k_decoded = decode_fp16_storage(k_data);
   const std::vector<float> v_decoded = decode_fp16_storage(v_data);
-  return run_emel_nonflash_f16_ggml_softmax_case(q_data,
-                                                 k_decoded,
-                                                 v_decoded,
-                                                 head_dim,
-                                                 kv_tokens,
-                                                 active_kv_tokens,
-                                                 head_count,
-                                                 kv_head_count,
-                                                 scale,
-                                                 out);
+  return run_emel_nonflash_f16_ggml_softmax_case(
+      q_data, k_decoded, v_decoded, head_dim, kv_tokens, active_kv_tokens,
+      head_count, kv_head_count, scale, out);
 }
 
-bool run_emel_prod_style_attn_case(std::span<const float> q_data,
-                                   std::span<const float> k_data,
-                                   std::span<const float> v_data,
-                                   const int64_t head_dim,
-                                   const int64_t kv_tokens,
-                                   const int64_t active_kv_tokens,
-                                   const int64_t head_count,
-                                   const int64_t kv_head_count,
-                                   const float scale,
-                                   std::vector<float> & out) {
+bool run_emel_prod_style_attn_case(
+    std::span<const float> q_data, std::span<const float> k_data,
+    std::span<const float> v_data, const int64_t head_dim,
+    const int64_t kv_tokens, const int64_t active_kv_tokens,
+    const int64_t head_count, const int64_t kv_head_count, const float scale,
+    std::vector<float> &out) {
   const size_t q_size = static_cast<size_t>(head_dim * head_count);
-  const size_t kv_size = static_cast<size_t>(head_dim * kv_tokens * kv_head_count);
-  if (q_data.size() != q_size || k_data.size() != kv_size || v_data.size() != kv_size ||
-      head_dim <= 0 || kv_tokens <= 0 || active_kv_tokens <= 0 || active_kv_tokens > kv_tokens ||
-      head_count <= 0 || kv_head_count <= 0 || head_count % kv_head_count != 0) {
+  const size_t kv_size =
+      static_cast<size_t>(head_dim * kv_tokens * kv_head_count);
+  if (q_data.size() != q_size || k_data.size() != kv_size ||
+      v_data.size() != kv_size || head_dim <= 0 || kv_tokens <= 0 ||
+      active_kv_tokens <= 0 || active_kv_tokens > kv_tokens ||
+      head_count <= 0 || kv_head_count <= 0 ||
+      head_count % kv_head_count != 0) {
     return false;
   }
 
@@ -17282,11 +17162,13 @@ bool run_emel_prod_style_attn_case(std::span<const float> q_data,
 
     float max_score = -std::numeric_limits<float>::infinity();
     for (int64_t token = 0; token < active_kv_tokens; ++token) {
-      const size_t kv_offset = static_cast<size_t>(((token * kv_head_count) + kv_head) * head_dim);
-      const float score = ::emel::kernel::detail::dot_product_ggml_f16_scores(
-                              q_data.data() + static_cast<std::ptrdiff_t>(q_offset),
-                              k_data.data() + static_cast<std::ptrdiff_t>(kv_offset),
-                              static_cast<uint64_t>(head_dim)) *
+      const size_t kv_offset =
+          static_cast<size_t>(((token * kv_head_count) + kv_head) * head_dim);
+      const float score =
+          ::emel::kernel::detail::dot_product_ggml_f16_scores(
+              q_data.data() + static_cast<std::ptrdiff_t>(q_offset),
+              k_data.data() + static_cast<std::ptrdiff_t>(kv_offset),
+              static_cast<uint64_t>(head_dim)) *
           scale;
       scores[static_cast<size_t>(token)] = score;
       max_score = std::max(max_score, score);
@@ -17294,14 +17176,17 @@ bool run_emel_prod_style_attn_case(std::span<const float> q_data,
 
     double score_sum = 0.0;
     for (int64_t token = 0; token < active_kv_tokens; ++token) {
-      const float prob = std::exp(scores[static_cast<size_t>(token)] - max_score);
+      const float prob =
+          std::exp(scores[static_cast<size_t>(token)] - max_score);
       rounded_probs[static_cast<size_t>(token)] = prob;
       score_sum += static_cast<double>(prob);
     }
 
-    const float inv_score_sum = score_sum == 0.0 ? 0.0f : static_cast<float>(1.0 / score_sum);
+    const float inv_score_sum =
+        score_sum == 0.0 ? 0.0f : static_cast<float>(1.0 / score_sum);
     for (int64_t token = 0; token < active_kv_tokens; ++token) {
-      const float weight = rounded_probs[static_cast<size_t>(token)] * inv_score_sum;
+      const float weight =
+          rounded_probs[static_cast<size_t>(token)] * inv_score_sum;
       rounded_probs[static_cast<size_t>(token)] =
           ::emel::kernel::detail::round_fp16_weight(weight);
     }
@@ -17312,60 +17197,52 @@ bool run_emel_prod_style_attn_case(std::span<const float> q_data,
     for (int64_t dim = 0; dim < head_dim; ++dim) {
       for (int64_t token = 0; token < kv_tokens; ++token) {
         if (token < active_kv_tokens) {
-          const size_t kv_offset = static_cast<size_t>(((token * kv_head_count) + kv_head) * head_dim);
-          value_column[static_cast<size_t>(token)] = v_data[kv_offset + static_cast<size_t>(dim)];
+          const size_t kv_offset = static_cast<size_t>(
+              ((token * kv_head_count) + kv_head) * head_dim);
+          value_column[static_cast<size_t>(token)] =
+              v_data[kv_offset + static_cast<size_t>(dim)];
         } else {
           value_column[static_cast<size_t>(token)] = 0.0f;
         }
       }
 
-      out[q_offset + static_cast<size_t>(dim)] = ::emel::kernel::detail::dot_product_ggml_f16_scores(
-          value_column.data(), rounded_probs.data(), static_cast<uint64_t>(kv_tokens));
+      out[q_offset + static_cast<size_t>(dim)] =
+          ::emel::kernel::detail::dot_product_ggml_f16_scores(
+              value_column.data(), rounded_probs.data(),
+              static_cast<uint64_t>(kv_tokens));
     }
   }
 
   return true;
 }
 
-bool run_emel_prod_style_attn_case(std::span<const float> q_data,
-                                   std::span<const uint16_t> k_data,
-                                   std::span<const uint16_t> v_data,
-                                   const int64_t head_dim,
-                                   const int64_t kv_tokens,
-                                   const int64_t active_kv_tokens,
-                                   const int64_t head_count,
-                                   const int64_t kv_head_count,
-                                   const float scale,
-                                   std::vector<float> & out) {
+bool run_emel_prod_style_attn_case(
+    std::span<const float> q_data, std::span<const uint16_t> k_data,
+    std::span<const uint16_t> v_data, const int64_t head_dim,
+    const int64_t kv_tokens, const int64_t active_kv_tokens,
+    const int64_t head_count, const int64_t kv_head_count, const float scale,
+    std::vector<float> &out) {
   const std::vector<float> k_decoded = decode_fp16_storage(k_data);
   const std::vector<float> v_decoded = decode_fp16_storage(v_data);
-  return run_emel_prod_style_attn_case(q_data,
-                                       k_decoded,
-                                       v_decoded,
-                                       head_dim,
-                                       kv_tokens,
-                                       active_kv_tokens,
-                                       head_count,
-                                       kv_head_count,
-                                       scale,
-                                       out);
+  return run_emel_prod_style_attn_case(q_data, k_decoded, v_decoded, head_dim,
+                                       kv_tokens, active_kv_tokens, head_count,
+                                       kv_head_count, scale, out);
 }
 
-bool run_emel_prod_style_float_value_attn_case(std::span<const float> q_data,
-                                               std::span<const float> k_data,
-                                               std::span<const float> v_data,
-                                               const int64_t head_dim,
-                                               const int64_t kv_tokens,
-                                               const int64_t active_kv_tokens,
-                                               const int64_t head_count,
-                                               const int64_t kv_head_count,
-                                               const float scale,
-                                               std::vector<float> & out) {
+bool run_emel_prod_style_float_value_attn_case(
+    std::span<const float> q_data, std::span<const float> k_data,
+    std::span<const float> v_data, const int64_t head_dim,
+    const int64_t kv_tokens, const int64_t active_kv_tokens,
+    const int64_t head_count, const int64_t kv_head_count, const float scale,
+    std::vector<float> &out) {
   const size_t q_size = static_cast<size_t>(head_dim * head_count);
-  const size_t kv_size = static_cast<size_t>(head_dim * kv_tokens * kv_head_count);
-  if (q_data.size() != q_size || k_data.size() != kv_size || v_data.size() != kv_size ||
-      head_dim <= 0 || kv_tokens <= 0 || active_kv_tokens <= 0 || active_kv_tokens > kv_tokens ||
-      head_count <= 0 || kv_head_count <= 0 || head_count % kv_head_count != 0) {
+  const size_t kv_size =
+      static_cast<size_t>(head_dim * kv_tokens * kv_head_count);
+  if (q_data.size() != q_size || k_data.size() != kv_size ||
+      v_data.size() != kv_size || head_dim <= 0 || kv_tokens <= 0 ||
+      active_kv_tokens <= 0 || active_kv_tokens > kv_tokens ||
+      head_count <= 0 || kv_head_count <= 0 ||
+      head_count % kv_head_count != 0) {
     return false;
   }
 
@@ -17380,11 +17257,13 @@ bool run_emel_prod_style_float_value_attn_case(std::span<const float> q_data,
 
     float max_score = -std::numeric_limits<float>::infinity();
     for (int64_t token = 0; token < active_kv_tokens; ++token) {
-      const size_t kv_offset = static_cast<size_t>(((token * kv_head_count) + kv_head) * head_dim);
-      const float score = ::emel::kernel::detail::dot_product_ggml_f16_scores(
-                              q_data.data() + static_cast<std::ptrdiff_t>(q_offset),
-                              k_data.data() + static_cast<std::ptrdiff_t>(kv_offset),
-                              static_cast<uint64_t>(head_dim)) *
+      const size_t kv_offset =
+          static_cast<size_t>(((token * kv_head_count) + kv_head) * head_dim);
+      const float score =
+          ::emel::kernel::detail::dot_product_ggml_f16_scores(
+              q_data.data() + static_cast<std::ptrdiff_t>(q_offset),
+              k_data.data() + static_cast<std::ptrdiff_t>(kv_offset),
+              static_cast<uint64_t>(head_dim)) *
           scale;
       scores[static_cast<size_t>(token)] = score;
       max_score = std::max(max_score, score);
@@ -17392,14 +17271,17 @@ bool run_emel_prod_style_float_value_attn_case(std::span<const float> q_data,
 
     double score_sum = 0.0;
     for (int64_t token = 0; token < active_kv_tokens; ++token) {
-      const float prob = std::exp(scores[static_cast<size_t>(token)] - max_score);
+      const float prob =
+          std::exp(scores[static_cast<size_t>(token)] - max_score);
       rounded_probs[static_cast<size_t>(token)] = prob;
       score_sum += static_cast<double>(prob);
     }
 
-    const float inv_score_sum = score_sum == 0.0 ? 0.0f : static_cast<float>(1.0 / score_sum);
+    const float inv_score_sum =
+        score_sum == 0.0 ? 0.0f : static_cast<float>(1.0 / score_sum);
     for (int64_t token = 0; token < active_kv_tokens; ++token) {
-      const float weight = rounded_probs[static_cast<size_t>(token)] * inv_score_sum;
+      const float weight =
+          rounded_probs[static_cast<size_t>(token)] * inv_score_sum;
       rounded_probs[static_cast<size_t>(token)] =
           ::emel::kernel::detail::round_fp16_weight(weight);
     }
@@ -17410,9 +17292,10 @@ bool run_emel_prod_style_float_value_attn_case(std::span<const float> q_data,
     for (int64_t dim = 0; dim < head_dim; ++dim) {
       float value_sum = 0.0f;
       for (int64_t token = 0; token < active_kv_tokens; ++token) {
-        const size_t kv_offset = static_cast<size_t>(((token * kv_head_count) + kv_head) * head_dim);
+        const size_t kv_offset =
+            static_cast<size_t>(((token * kv_head_count) + kv_head) * head_dim);
         value_sum += rounded_probs[static_cast<size_t>(token)] *
-            v_data[kv_offset + static_cast<size_t>(dim)];
+                     v_data[kv_offset + static_cast<size_t>(dim)];
       }
       out[q_offset + static_cast<size_t>(dim)] = value_sum;
     }
@@ -17421,86 +17304,64 @@ bool run_emel_prod_style_float_value_attn_case(std::span<const float> q_data,
   return true;
 }
 
-bool run_emel_prod_style_float_value_attn_case(std::span<const float> q_data,
-                                               std::span<const uint16_t> k_data,
-                                               std::span<const uint16_t> v_data,
-                                               const int64_t head_dim,
-                                               const int64_t kv_tokens,
-                                               const int64_t active_kv_tokens,
-                                               const int64_t head_count,
-                                               const int64_t kv_head_count,
-                                               const float scale,
-                                               std::vector<float> & out) {
+bool run_emel_prod_style_float_value_attn_case(
+    std::span<const float> q_data, std::span<const uint16_t> k_data,
+    std::span<const uint16_t> v_data, const int64_t head_dim,
+    const int64_t kv_tokens, const int64_t active_kv_tokens,
+    const int64_t head_count, const int64_t kv_head_count, const float scale,
+    std::vector<float> &out) {
   const std::vector<float> k_decoded = decode_fp16_storage(k_data);
   const std::vector<float> v_decoded = decode_fp16_storage(v_data);
-  return run_emel_prod_style_float_value_attn_case(q_data,
-                                                   k_decoded,
-                                                   v_decoded,
-                                                   head_dim,
-                                                   kv_tokens,
-                                                   active_kv_tokens,
-                                                   head_count,
-                                                   kv_head_count,
-                                                   scale,
-                                                   out);
+  return run_emel_prod_style_float_value_attn_case(
+      q_data, k_decoded, v_decoded, head_dim, kv_tokens, active_kv_tokens,
+      head_count, kv_head_count, scale, out);
 }
 
-bool run_ggml_flash_attn_ext_case(std::span<const float> q_data,
-                                  std::span<const float> k_data,
-                                  std::span<const float> v_data,
-                                  const int64_t head_dim,
-                                  const int64_t kv_tokens,
-                                  const int64_t head_count,
-                                  const int64_t kv_head_count,
-                                  const float scale,
-                                  std::vector<float> & out) {
+bool run_ggml_flash_attn_ext_case(
+    std::span<const float> q_data, std::span<const float> k_data,
+    std::span<const float> v_data, const int64_t head_dim,
+    const int64_t kv_tokens, const int64_t head_count,
+    const int64_t kv_head_count, const float scale, std::vector<float> &out) {
   const size_t q_size = static_cast<size_t>(head_dim * head_count);
-  const size_t kv_size = static_cast<size_t>(head_dim * kv_tokens * kv_head_count);
-  if (q_data.size() != q_size || k_data.size() != kv_size || v_data.size() != kv_size ||
-      head_dim <= 0 || kv_tokens <= 0 || head_count <= 0 || kv_head_count <= 0) {
+  const size_t kv_size =
+      static_cast<size_t>(head_dim * kv_tokens * kv_head_count);
+  if (q_data.size() != q_size || k_data.size() != kv_size ||
+      v_data.size() != kv_size || head_dim <= 0 || kv_tokens <= 0 ||
+      head_count <= 0 || kv_head_count <= 0) {
     return false;
   }
 
   ggml_case_context c{};
-  ggml_tensor * q_backing = ggml_new_tensor_1d(c.ctx, GGML_TYPE_F32, static_cast<int64_t>(q_size));
-  ggml_tensor * q = q_backing == nullptr
-      ? nullptr
-      : ggml_view_3d(c.ctx,
-                     q_backing,
-                     head_dim,
-                     1,
-                     head_count,
-                     sizeof(float) * static_cast<size_t>(head_dim),
-                     sizeof(float) * static_cast<size_t>(head_dim),
-                     0);
+  ggml_tensor *q_backing =
+      ggml_new_tensor_1d(c.ctx, GGML_TYPE_F32, static_cast<int64_t>(q_size));
+  ggml_tensor *q =
+      q_backing == nullptr
+          ? nullptr
+          : ggml_view_3d(c.ctx, q_backing, head_dim, 1, head_count,
+                         sizeof(float) * static_cast<size_t>(head_dim),
+                         sizeof(float) * static_cast<size_t>(head_dim), 0);
 
-  ggml_tensor * k_backing =
+  ggml_tensor *k_backing =
       ggml_new_tensor_1d(c.ctx, GGML_TYPE_F16, static_cast<int64_t>(kv_size));
-  ggml_tensor * k = k_backing == nullptr
-      ? nullptr
-      : ggml_view_3d(c.ctx,
-                     k_backing,
-                     head_dim,
-                     kv_tokens,
-                     kv_head_count,
-                     sizeof(ggml_fp16_t) *
-                         static_cast<size_t>(head_dim * kv_head_count),
-                     sizeof(ggml_fp16_t) * static_cast<size_t>(head_dim),
-                     0);
+  ggml_tensor *k =
+      k_backing == nullptr
+          ? nullptr
+          : ggml_view_3d(c.ctx, k_backing, head_dim, kv_tokens, kv_head_count,
+                         sizeof(ggml_fp16_t) *
+                             static_cast<size_t>(head_dim * kv_head_count),
+                         sizeof(ggml_fp16_t) * static_cast<size_t>(head_dim),
+                         0);
 
-  ggml_tensor * v_backing =
+  ggml_tensor *v_backing =
       ggml_new_tensor_1d(c.ctx, GGML_TYPE_F16, static_cast<int64_t>(kv_size));
-  ggml_tensor * v = v_backing == nullptr
-      ? nullptr
-      : ggml_view_3d(c.ctx,
-                     v_backing,
-                     head_dim,
-                     kv_tokens,
-                     kv_head_count,
-                     sizeof(ggml_fp16_t) *
-                         static_cast<size_t>(head_dim * kv_head_count),
-                     sizeof(ggml_fp16_t) * static_cast<size_t>(head_dim),
-                     0);
+  ggml_tensor *v =
+      v_backing == nullptr
+          ? nullptr
+          : ggml_view_3d(c.ctx, v_backing, head_dim, kv_tokens, kv_head_count,
+                         sizeof(ggml_fp16_t) *
+                             static_cast<size_t>(head_dim * kv_head_count),
+                         sizeof(ggml_fp16_t) * static_cast<size_t>(head_dim),
+                         0);
 
   if (q == nullptr || k == nullptr || v == nullptr) {
     return false;
@@ -17514,10 +17375,12 @@ bool run_ggml_flash_attn_ext_case(std::span<const float> q_data,
     k_f16[idx] = ggml_fp32_to_fp16(k_data[idx]);
     v_f16[idx] = ggml_fp32_to_fp16(v_data[idx]);
   }
-  std::memcpy(ggml_get_data(k_backing), k_f16.data(), k_f16.size() * sizeof(ggml_fp16_t));
-  std::memcpy(ggml_get_data(v_backing), v_f16.data(), v_f16.size() * sizeof(ggml_fp16_t));
+  std::memcpy(ggml_get_data(k_backing), k_f16.data(),
+              k_f16.size() * sizeof(ggml_fp16_t));
+  std::memcpy(ggml_get_data(v_backing), v_f16.data(),
+              v_f16.size() * sizeof(ggml_fp16_t));
 
-  ggml_tensor * out_tensor =
+  ggml_tensor *out_tensor =
       ggml_flash_attn_ext(c.ctx, q, k, v, nullptr, scale, 0.0f, 0.0f);
   if (out_tensor == nullptr) {
     return false;
@@ -17527,86 +17390,72 @@ bool run_ggml_flash_attn_ext_case(std::span<const float> q_data,
     return false;
   }
 
-  const float * out_data = ggml_get_data_f32(out_tensor);
+  const float *out_data = ggml_get_data_f32(out_tensor);
   out.assign(out_data, out_data + q_size);
   return true;
 }
 
-bool run_ggml_flash_attn_ext_case(std::span<const float> q_data,
-                                  std::span<const uint16_t> k_data,
-                                  std::span<const uint16_t> v_data,
-                                  const int64_t head_dim,
-                                  const int64_t kv_tokens,
-                                  const int64_t head_count,
-                                  const int64_t kv_head_count,
-                                  const float scale,
-                                  std::vector<float> & out) {
+bool run_ggml_flash_attn_ext_case(
+    std::span<const float> q_data, std::span<const uint16_t> k_data,
+    std::span<const uint16_t> v_data, const int64_t head_dim,
+    const int64_t kv_tokens, const int64_t head_count,
+    const int64_t kv_head_count, const float scale, std::vector<float> &out) {
   const std::vector<float> k_decoded = decode_fp16_storage(k_data);
   const std::vector<float> v_decoded = decode_fp16_storage(v_data);
-  return run_ggml_flash_attn_ext_case(
-      q_data, k_decoded, v_decoded, head_dim, kv_tokens, head_count, kv_head_count, scale, out);
+  return run_ggml_flash_attn_ext_case(q_data, k_decoded, v_decoded, head_dim,
+                                      kv_tokens, head_count, kv_head_count,
+                                      scale, out);
 }
 
-bool run_ggml_flash_attn_ext_masked_case(std::span<const float> q_data,
-                                         std::span<const float> k_data,
-                                         std::span<const float> v_data,
-                                         const int64_t head_dim,
-                                         const int64_t kv_tokens,
-                                         const int64_t active_kv_tokens,
-                                         const int64_t head_count,
-                                         const int64_t kv_head_count,
-                                         const float scale,
-                                         std::vector<float> & out) {
+bool run_ggml_flash_attn_ext_masked_case(
+    std::span<const float> q_data, std::span<const float> k_data,
+    std::span<const float> v_data, const int64_t head_dim,
+    const int64_t kv_tokens, const int64_t active_kv_tokens,
+    const int64_t head_count, const int64_t kv_head_count, const float scale,
+    std::vector<float> &out) {
   const size_t q_size = static_cast<size_t>(head_dim * head_count);
-  const size_t kv_size = static_cast<size_t>(head_dim * kv_tokens * kv_head_count);
-  if (q_data.size() != q_size || k_data.size() != kv_size || v_data.size() != kv_size ||
-      head_dim <= 0 || kv_tokens <= 0 || active_kv_tokens <= 0 || active_kv_tokens > kv_tokens ||
+  const size_t kv_size =
+      static_cast<size_t>(head_dim * kv_tokens * kv_head_count);
+  if (q_data.size() != q_size || k_data.size() != kv_size ||
+      v_data.size() != kv_size || head_dim <= 0 || kv_tokens <= 0 ||
+      active_kv_tokens <= 0 || active_kv_tokens > kv_tokens ||
       head_count <= 0 || kv_head_count <= 0) {
     return false;
   }
 
   ggml_case_context c{};
-  ggml_tensor * q_backing = ggml_new_tensor_1d(c.ctx, GGML_TYPE_F32, static_cast<int64_t>(q_size));
-  ggml_tensor * q = q_backing == nullptr
-      ? nullptr
-      : ggml_view_3d(c.ctx,
-                     q_backing,
-                     head_dim,
-                     1,
-                     head_count,
-                     sizeof(float) * static_cast<size_t>(head_dim),
-                     sizeof(float) * static_cast<size_t>(head_dim),
-                     0);
+  ggml_tensor *q_backing =
+      ggml_new_tensor_1d(c.ctx, GGML_TYPE_F32, static_cast<int64_t>(q_size));
+  ggml_tensor *q =
+      q_backing == nullptr
+          ? nullptr
+          : ggml_view_3d(c.ctx, q_backing, head_dim, 1, head_count,
+                         sizeof(float) * static_cast<size_t>(head_dim),
+                         sizeof(float) * static_cast<size_t>(head_dim), 0);
 
-  ggml_tensor * k_backing =
+  ggml_tensor *k_backing =
       ggml_new_tensor_1d(c.ctx, GGML_TYPE_F16, static_cast<int64_t>(kv_size));
-  ggml_tensor * k = k_backing == nullptr
-      ? nullptr
-      : ggml_view_3d(c.ctx,
-                     k_backing,
-                     head_dim,
-                     kv_tokens,
-                     kv_head_count,
-                     sizeof(ggml_fp16_t) *
-                         static_cast<size_t>(head_dim * kv_head_count),
-                     sizeof(ggml_fp16_t) * static_cast<size_t>(head_dim),
-                     0);
+  ggml_tensor *k =
+      k_backing == nullptr
+          ? nullptr
+          : ggml_view_3d(c.ctx, k_backing, head_dim, kv_tokens, kv_head_count,
+                         sizeof(ggml_fp16_t) *
+                             static_cast<size_t>(head_dim * kv_head_count),
+                         sizeof(ggml_fp16_t) * static_cast<size_t>(head_dim),
+                         0);
 
-  ggml_tensor * v_backing =
+  ggml_tensor *v_backing =
       ggml_new_tensor_1d(c.ctx, GGML_TYPE_F16, static_cast<int64_t>(kv_size));
-  ggml_tensor * v = v_backing == nullptr
-      ? nullptr
-      : ggml_view_3d(c.ctx,
-                     v_backing,
-                     head_dim,
-                     kv_tokens,
-                     kv_head_count,
-                     sizeof(ggml_fp16_t) *
-                         static_cast<size_t>(head_dim * kv_head_count),
-                     sizeof(ggml_fp16_t) * static_cast<size_t>(head_dim),
-                     0);
+  ggml_tensor *v =
+      v_backing == nullptr
+          ? nullptr
+          : ggml_view_3d(c.ctx, v_backing, head_dim, kv_tokens, kv_head_count,
+                         sizeof(ggml_fp16_t) *
+                             static_cast<size_t>(head_dim * kv_head_count),
+                         sizeof(ggml_fp16_t) * static_cast<size_t>(head_dim),
+                         0);
 
-  ggml_tensor * mask = ggml_new_tensor_2d(c.ctx, GGML_TYPE_F16, kv_tokens, 1);
+  ggml_tensor *mask = ggml_new_tensor_2d(c.ctx, GGML_TYPE_F16, kv_tokens, 1);
   if (q == nullptr || k == nullptr || v == nullptr || mask == nullptr) {
     return false;
   }
@@ -17619,16 +17468,18 @@ bool run_ggml_flash_attn_ext_masked_case(std::span<const float> q_data,
     k_f16[idx] = ggml_fp32_to_fp16(k_data[idx]);
     v_f16[idx] = ggml_fp32_to_fp16(v_data[idx]);
   }
-  std::memcpy(ggml_get_data(k_backing), k_f16.data(), k_f16.size() * sizeof(ggml_fp16_t));
-  std::memcpy(ggml_get_data(v_backing), v_f16.data(), v_f16.size() * sizeof(ggml_fp16_t));
+  std::memcpy(ggml_get_data(k_backing), k_f16.data(),
+              k_f16.size() * sizeof(ggml_fp16_t));
+  std::memcpy(ggml_get_data(v_backing), v_f16.data(),
+              v_f16.size() * sizeof(ggml_fp16_t));
 
-  auto * mask_data = reinterpret_cast<ggml_fp16_t *>(ggml_get_data(mask));
+  auto *mask_data = reinterpret_cast<ggml_fp16_t *>(ggml_get_data(mask));
   for (int64_t token = 0; token < kv_tokens; ++token) {
     const float value = token < active_kv_tokens ? 0.0f : -INFINITY;
     mask_data[token] = ggml_fp32_to_fp16(value);
   }
 
-  ggml_tensor * out_tensor =
+  ggml_tensor *out_tensor =
       ggml_flash_attn_ext(c.ctx, q, k, v, mask, scale, 0.0f, 0.0f);
   if (out_tensor == nullptr) {
     return false;
@@ -17638,40 +17489,29 @@ bool run_ggml_flash_attn_ext_masked_case(std::span<const float> q_data,
     return false;
   }
 
-  const float * out_data = ggml_get_data_f32(out_tensor);
+  const float *out_data = ggml_get_data_f32(out_tensor);
   out.assign(out_data, out_data + q_size);
   return true;
 }
 
-bool run_ggml_flash_attn_ext_masked_case(std::span<const float> q_data,
-                                         std::span<const uint16_t> k_data,
-                                         std::span<const uint16_t> v_data,
-                                         const int64_t head_dim,
-                                         const int64_t kv_tokens,
-                                         const int64_t active_kv_tokens,
-                                         const int64_t head_count,
-                                         const int64_t kv_head_count,
-                                         const float scale,
-                                         std::vector<float> & out) {
+bool run_ggml_flash_attn_ext_masked_case(
+    std::span<const float> q_data, std::span<const uint16_t> k_data,
+    std::span<const uint16_t> v_data, const int64_t head_dim,
+    const int64_t kv_tokens, const int64_t active_kv_tokens,
+    const int64_t head_count, const int64_t kv_head_count, const float scale,
+    std::vector<float> &out) {
   const std::vector<float> k_decoded = decode_fp16_storage(k_data);
   const std::vector<float> v_decoded = decode_fp16_storage(v_data);
-  return run_ggml_flash_attn_ext_masked_case(q_data,
-                                             k_decoded,
-                                             v_decoded,
-                                             head_dim,
-                                             kv_tokens,
-                                             active_kv_tokens,
-                                             head_count,
-                                             kv_head_count,
-                                             scale,
-                                             out);
+  return run_ggml_flash_attn_ext_masked_case(
+      q_data, k_decoded, v_decoded, head_dim, kv_tokens, active_kv_tokens,
+      head_count, kv_head_count, scale, out);
 }
 
 template <class exec_fn>
-bool run_backend_kernel_parity(const char * backend, exec_fn exec) {
+bool run_backend_kernel_parity(const char *backend, exec_fn exec) {
   bool ok = true;
 
-  auto fail = [&](const char * case_name, const char * reason) {
+  auto fail = [&](const char *case_name, const char *reason) {
     std::fprintf(stderr, "[%s] %s failed: %s\n", backend, case_name, reason);
     ok = false;
   };
@@ -17680,16 +17520,17 @@ bool run_backend_kernel_parity(const char * backend, exec_fn exec) {
     auto src = make_signed_data(k_vec_len, 1.25f, 0.1f);
     std::vector<float> emel_out(static_cast<size_t>(k_vec_len));
     emel::kernel::event::op_dup ev{
-      .src0 = make_src_view(src.data(), static_cast<uint64_t>(k_vec_len)),
-      .dst = make_dst_view(emel_out.data(), static_cast<uint64_t>(k_vec_len)),
-      .nth = 1,
+        .src0 = make_src_view(src.data(), static_cast<uint64_t>(k_vec_len)),
+        .dst = make_dst_view(emel_out.data(), static_cast<uint64_t>(k_vec_len)),
+        .nth = 1,
     };
     std::vector<float> ggml_out;
     if (!exec(ev)) {
       fail("op_dup", "emel rejected request");
-    } else if (!run_ggml_unary(src, ggml_out, [](ggml_context * ctx, ggml_tensor * a) {
-                 return ggml_dup(ctx, a);
-               })) {
+    } else if (!run_ggml_unary(src, ggml_out,
+                               [](ggml_context *ctx, ggml_tensor *a) {
+                                 return ggml_dup(ctx, a);
+                               })) {
       fail("op_dup", "ggml execution failed");
     } else if (!compare_f32_vectors(backend, "op_dup", emel_out, ggml_out)) {
       ok = false;
@@ -17701,18 +17542,19 @@ bool run_backend_kernel_parity(const char * backend, exec_fn exec) {
     auto rhs = make_signed_data(k_vec_len, 0.55f, -0.25f);
     std::vector<float> emel_out(static_cast<size_t>(k_vec_len));
     emel::kernel::event::op_add ev{
-      .src0 = make_src_view(lhs.data(), static_cast<uint64_t>(k_vec_len)),
-      .src1 = make_src_view(rhs.data(), static_cast<uint64_t>(k_vec_len)),
-      .dst = make_dst_view(emel_out.data(), static_cast<uint64_t>(k_vec_len)),
-      .nth = 1,
+        .src0 = make_src_view(lhs.data(), static_cast<uint64_t>(k_vec_len)),
+        .src1 = make_src_view(rhs.data(), static_cast<uint64_t>(k_vec_len)),
+        .dst = make_dst_view(emel_out.data(), static_cast<uint64_t>(k_vec_len)),
+        .nth = 1,
     };
     std::vector<float> ggml_out;
     if (!exec(ev)) {
       fail("op_add", "emel rejected request");
-    } else if (!run_ggml_binary(lhs, rhs, ggml_out, [](ggml_context * ctx, ggml_tensor * a,
-                                                        ggml_tensor * b) {
-                 return ggml_add(ctx, a, b);
-               })) {
+    } else if (!run_ggml_binary(
+                   lhs, rhs, ggml_out,
+                   [](ggml_context *ctx, ggml_tensor *a, ggml_tensor *b) {
+                     return ggml_add(ctx, a, b);
+                   })) {
       fail("op_add", "ggml execution failed");
     } else if (!compare_f32_vectors(backend, "op_add", emel_out, ggml_out)) {
       ok = false;
@@ -17724,18 +17566,19 @@ bool run_backend_kernel_parity(const char * backend, exec_fn exec) {
     auto rhs = make_signed_data(k_vec_len, 0.55f, -0.25f);
     std::vector<float> emel_out(static_cast<size_t>(k_vec_len));
     emel::kernel::event::op_sub ev{
-      .src0 = make_src_view(lhs.data(), static_cast<uint64_t>(k_vec_len)),
-      .src1 = make_src_view(rhs.data(), static_cast<uint64_t>(k_vec_len)),
-      .dst = make_dst_view(emel_out.data(), static_cast<uint64_t>(k_vec_len)),
-      .nth = 1,
+        .src0 = make_src_view(lhs.data(), static_cast<uint64_t>(k_vec_len)),
+        .src1 = make_src_view(rhs.data(), static_cast<uint64_t>(k_vec_len)),
+        .dst = make_dst_view(emel_out.data(), static_cast<uint64_t>(k_vec_len)),
+        .nth = 1,
     };
     std::vector<float> ggml_out;
     if (!exec(ev)) {
       fail("op_sub", "emel rejected request");
-    } else if (!run_ggml_binary(lhs, rhs, ggml_out, [](ggml_context * ctx, ggml_tensor * a,
-                                                        ggml_tensor * b) {
-                 return ggml_sub(ctx, a, b);
-               })) {
+    } else if (!run_ggml_binary(
+                   lhs, rhs, ggml_out,
+                   [](ggml_context *ctx, ggml_tensor *a, ggml_tensor *b) {
+                     return ggml_sub(ctx, a, b);
+                   })) {
       fail("op_sub", "ggml execution failed");
     } else if (!compare_f32_vectors(backend, "op_sub", emel_out, ggml_out)) {
       ok = false;
@@ -17747,18 +17590,19 @@ bool run_backend_kernel_parity(const char * backend, exec_fn exec) {
     auto rhs = make_signed_data(k_vec_len, 0.45f, 0.5f);
     std::vector<float> emel_out(static_cast<size_t>(k_vec_len));
     emel::kernel::event::op_mul ev{
-      .src0 = make_src_view(lhs.data(), static_cast<uint64_t>(k_vec_len)),
-      .src1 = make_src_view(rhs.data(), static_cast<uint64_t>(k_vec_len)),
-      .dst = make_dst_view(emel_out.data(), static_cast<uint64_t>(k_vec_len)),
-      .nth = 1,
+        .src0 = make_src_view(lhs.data(), static_cast<uint64_t>(k_vec_len)),
+        .src1 = make_src_view(rhs.data(), static_cast<uint64_t>(k_vec_len)),
+        .dst = make_dst_view(emel_out.data(), static_cast<uint64_t>(k_vec_len)),
+        .nth = 1,
     };
     std::vector<float> ggml_out;
     if (!exec(ev)) {
       fail("op_mul", "emel rejected request");
-    } else if (!run_ggml_binary(lhs, rhs, ggml_out, [](ggml_context * ctx, ggml_tensor * a,
-                                                        ggml_tensor * b) {
-                 return ggml_mul(ctx, a, b);
-               })) {
+    } else if (!run_ggml_binary(
+                   lhs, rhs, ggml_out,
+                   [](ggml_context *ctx, ggml_tensor *a, ggml_tensor *b) {
+                     return ggml_mul(ctx, a, b);
+                   })) {
       fail("op_mul", "ggml execution failed");
     } else if (!compare_f32_vectors(backend, "op_mul", emel_out, ggml_out)) {
       ok = false;
@@ -17770,18 +17614,19 @@ bool run_backend_kernel_parity(const char * backend, exec_fn exec) {
     auto rhs = make_positive_data(k_vec_len, 0.2f, 0.75f);
     std::vector<float> emel_out(static_cast<size_t>(k_vec_len));
     emel::kernel::event::op_div ev{
-      .src0 = make_src_view(lhs.data(), static_cast<uint64_t>(k_vec_len)),
-      .src1 = make_src_view(rhs.data(), static_cast<uint64_t>(k_vec_len)),
-      .dst = make_dst_view(emel_out.data(), static_cast<uint64_t>(k_vec_len)),
-      .nth = 1,
+        .src0 = make_src_view(lhs.data(), static_cast<uint64_t>(k_vec_len)),
+        .src1 = make_src_view(rhs.data(), static_cast<uint64_t>(k_vec_len)),
+        .dst = make_dst_view(emel_out.data(), static_cast<uint64_t>(k_vec_len)),
+        .nth = 1,
     };
     std::vector<float> ggml_out;
     if (!exec(ev)) {
       fail("op_div", "emel rejected request");
-    } else if (!run_ggml_binary(lhs, rhs, ggml_out, [](ggml_context * ctx, ggml_tensor * a,
-                                                        ggml_tensor * b) {
-                 return ggml_div(ctx, a, b);
-               })) {
+    } else if (!run_ggml_binary(
+                   lhs, rhs, ggml_out,
+                   [](ggml_context *ctx, ggml_tensor *a, ggml_tensor *b) {
+                     return ggml_div(ctx, a, b);
+                   })) {
       fail("op_div", "ggml execution failed");
     } else if (!compare_f32_vectors(backend, "op_div", emel_out, ggml_out)) {
       ok = false;
@@ -17792,16 +17637,17 @@ bool run_backend_kernel_parity(const char * backend, exec_fn exec) {
     auto src = make_signed_data(k_vec_len, 0.5f, 0.125f);
     std::vector<float> emel_out(static_cast<size_t>(k_vec_len));
     emel::kernel::event::op_sqr ev{
-      .src0 = make_src_view(src.data(), static_cast<uint64_t>(k_vec_len)),
-      .dst = make_dst_view(emel_out.data(), static_cast<uint64_t>(k_vec_len)),
-      .nth = 1,
+        .src0 = make_src_view(src.data(), static_cast<uint64_t>(k_vec_len)),
+        .dst = make_dst_view(emel_out.data(), static_cast<uint64_t>(k_vec_len)),
+        .nth = 1,
     };
     std::vector<float> ggml_out;
     if (!exec(ev)) {
       fail("op_sqr", "emel rejected request");
-    } else if (!run_ggml_unary(src, ggml_out, [](ggml_context * ctx, ggml_tensor * a) {
-                 return ggml_sqr(ctx, a);
-               })) {
+    } else if (!run_ggml_unary(src, ggml_out,
+                               [](ggml_context *ctx, ggml_tensor *a) {
+                                 return ggml_sqr(ctx, a);
+                               })) {
       fail("op_sqr", "ggml execution failed");
     } else if (!compare_f32_vectors(backend, "op_sqr", emel_out, ggml_out)) {
       ok = false;
@@ -17812,16 +17658,17 @@ bool run_backend_kernel_parity(const char * backend, exec_fn exec) {
     auto src = make_positive_data(k_vec_len, 0.35f, 0.2f);
     std::vector<float> emel_out(static_cast<size_t>(k_vec_len));
     emel::kernel::event::op_sqrt ev{
-      .src0 = make_src_view(src.data(), static_cast<uint64_t>(k_vec_len)),
-      .dst = make_dst_view(emel_out.data(), static_cast<uint64_t>(k_vec_len)),
-      .nth = 1,
+        .src0 = make_src_view(src.data(), static_cast<uint64_t>(k_vec_len)),
+        .dst = make_dst_view(emel_out.data(), static_cast<uint64_t>(k_vec_len)),
+        .nth = 1,
     };
     std::vector<float> ggml_out;
     if (!exec(ev)) {
       fail("op_sqrt", "emel rejected request");
-    } else if (!run_ggml_unary(src, ggml_out, [](ggml_context * ctx, ggml_tensor * a) {
-                 return ggml_sqrt(ctx, a);
-               })) {
+    } else if (!run_ggml_unary(src, ggml_out,
+                               [](ggml_context *ctx, ggml_tensor *a) {
+                                 return ggml_sqrt(ctx, a);
+                               })) {
       fail("op_sqrt", "ggml execution failed");
     } else if (!compare_f32_vectors(backend, "op_sqrt", emel_out, ggml_out)) {
       ok = false;
@@ -17832,16 +17679,17 @@ bool run_backend_kernel_parity(const char * backend, exec_fn exec) {
     auto src = make_positive_data(k_vec_len, 0.4f, 0.125f);
     std::vector<float> emel_out(static_cast<size_t>(k_vec_len));
     emel::kernel::event::op_log ev{
-      .src0 = make_src_view(src.data(), static_cast<uint64_t>(k_vec_len)),
-      .dst = make_dst_view(emel_out.data(), static_cast<uint64_t>(k_vec_len)),
-      .nth = 1,
+        .src0 = make_src_view(src.data(), static_cast<uint64_t>(k_vec_len)),
+        .dst = make_dst_view(emel_out.data(), static_cast<uint64_t>(k_vec_len)),
+        .nth = 1,
     };
     std::vector<float> ggml_out;
     if (!exec(ev)) {
       fail("op_log", "emel rejected request");
-    } else if (!run_ggml_unary(src, ggml_out, [](ggml_context * ctx, ggml_tensor * a) {
-                 return ggml_log(ctx, a);
-               })) {
+    } else if (!run_ggml_unary(src, ggml_out,
+                               [](ggml_context *ctx, ggml_tensor *a) {
+                                 return ggml_log(ctx, a);
+                               })) {
       fail("op_log", "ggml execution failed");
     } else if (!compare_f32_vectors(backend, "op_log", emel_out, ggml_out)) {
       ok = false;
@@ -17852,16 +17700,17 @@ bool run_backend_kernel_parity(const char * backend, exec_fn exec) {
     auto src = make_signed_data(k_vec_len, 0.2f, 0.1f);
     std::vector<float> emel_out(static_cast<size_t>(k_vec_len));
     emel::kernel::event::op_sin ev{
-      .src0 = make_src_view(src.data(), static_cast<uint64_t>(k_vec_len)),
-      .dst = make_dst_view(emel_out.data(), static_cast<uint64_t>(k_vec_len)),
-      .nth = 1,
+        .src0 = make_src_view(src.data(), static_cast<uint64_t>(k_vec_len)),
+        .dst = make_dst_view(emel_out.data(), static_cast<uint64_t>(k_vec_len)),
+        .nth = 1,
     };
     std::vector<float> ggml_out;
     if (!exec(ev)) {
       fail("op_sin", "emel rejected request");
-    } else if (!run_ggml_unary(src, ggml_out, [](ggml_context * ctx, ggml_tensor * a) {
-                 return ggml_sin(ctx, a);
-               })) {
+    } else if (!run_ggml_unary(src, ggml_out,
+                               [](ggml_context *ctx, ggml_tensor *a) {
+                                 return ggml_sin(ctx, a);
+                               })) {
       fail("op_sin", "ggml execution failed");
     } else if (!compare_f32_vectors(backend, "op_sin", emel_out, ggml_out)) {
       ok = false;
@@ -17872,16 +17721,17 @@ bool run_backend_kernel_parity(const char * backend, exec_fn exec) {
     auto src = make_signed_data(k_vec_len, 0.2f, -0.2f);
     std::vector<float> emel_out(static_cast<size_t>(k_vec_len));
     emel::kernel::event::op_cos ev{
-      .src0 = make_src_view(src.data(), static_cast<uint64_t>(k_vec_len)),
-      .dst = make_dst_view(emel_out.data(), static_cast<uint64_t>(k_vec_len)),
-      .nth = 1,
+        .src0 = make_src_view(src.data(), static_cast<uint64_t>(k_vec_len)),
+        .dst = make_dst_view(emel_out.data(), static_cast<uint64_t>(k_vec_len)),
+        .nth = 1,
     };
     std::vector<float> ggml_out;
     if (!exec(ev)) {
       fail("op_cos", "emel rejected request");
-    } else if (!run_ggml_unary(src, ggml_out, [](ggml_context * ctx, ggml_tensor * a) {
-                 return ggml_cos(ctx, a);
-               })) {
+    } else if (!run_ggml_unary(src, ggml_out,
+                               [](ggml_context *ctx, ggml_tensor *a) {
+                                 return ggml_cos(ctx, a);
+                               })) {
       fail("op_cos", "ggml execution failed");
     } else if (!compare_f32_vectors(backend, "op_cos", emel_out, ggml_out)) {
       ok = false;
@@ -17890,22 +17740,24 @@ bool run_backend_kernel_parity(const char * backend, exec_fn exec) {
 
   {
     auto src = make_signed_data(k_softmax_width * k_softmax_rows, 0.1f, 0.05f);
-    std::vector<float> emel_out(static_cast<size_t>(k_softmax_width * k_softmax_rows));
+    std::vector<float> emel_out(
+        static_cast<size_t>(k_softmax_width * k_softmax_rows));
     emel::kernel::event::op_soft_max ev{
-      .src0 = make_src_view(src.data(),
-                            static_cast<uint64_t>(k_softmax_width),
-                            static_cast<uint64_t>(k_softmax_rows)),
-      .dst = make_dst_view(emel_out.data(),
-                           static_cast<uint64_t>(k_softmax_width),
-                           static_cast<uint64_t>(k_softmax_rows)),
-      .nth = 1,
+        .src0 =
+            make_src_view(src.data(), static_cast<uint64_t>(k_softmax_width),
+                          static_cast<uint64_t>(k_softmax_rows)),
+        .dst = make_dst_view(emel_out.data(),
+                             static_cast<uint64_t>(k_softmax_width),
+                             static_cast<uint64_t>(k_softmax_rows)),
+        .nth = 1,
     };
     std::vector<float> ggml_out;
     if (!exec(ev)) {
       fail("op_soft_max", "emel rejected request");
     } else if (!run_ggml_softmax(src, ggml_out)) {
       fail("op_soft_max", "ggml execution failed");
-    } else if (!compare_f32_vectors(backend, "op_soft_max", emel_out, ggml_out)) {
+    } else if (!compare_f32_vectors(backend, "op_soft_max", emel_out,
+                                    ggml_out)) {
       ok = false;
     }
   }
@@ -17916,22 +17768,27 @@ bool run_backend_kernel_parity(const char * backend, exec_fn exec) {
     std::vector<float> src1(static_cast<size_t>(k_mm_k * k_mm_n));
     for (int64_t p = 0; p < k_mm_k; ++p) {
       for (int64_t j = 0; j < k_mm_n; ++j) {
-        src1[static_cast<size_t>(p * k_mm_n + j)] = matrix_a[static_cast<size_t>(j * k_mm_k + p)];
+        src1[static_cast<size_t>(p * k_mm_n + j)] =
+            matrix_a[static_cast<size_t>(j * k_mm_k + p)];
       }
     }
     std::vector<float> emel_out(static_cast<size_t>(k_mm_n * k_mm_m));
     emel::kernel::event::op_mul_mat ev{
-      .src0 = make_src_view(matrix_b.data(), static_cast<uint64_t>(k_mm_k), static_cast<uint64_t>(k_mm_m)),
-      .src1 = make_src_view(src1.data(), static_cast<uint64_t>(k_mm_n), static_cast<uint64_t>(k_mm_k)),
-      .dst = make_dst_view(emel_out.data(), static_cast<uint64_t>(k_mm_n), static_cast<uint64_t>(k_mm_m)),
-      .nth = 1,
+        .src0 = make_src_view(matrix_b.data(), static_cast<uint64_t>(k_mm_k),
+                              static_cast<uint64_t>(k_mm_m)),
+        .src1 = make_src_view(src1.data(), static_cast<uint64_t>(k_mm_n),
+                              static_cast<uint64_t>(k_mm_k)),
+        .dst = make_dst_view(emel_out.data(), static_cast<uint64_t>(k_mm_n),
+                             static_cast<uint64_t>(k_mm_m)),
+        .nth = 1,
     };
     std::vector<float> ggml_out;
     if (!exec(ev)) {
       fail("op_mul_mat", "emel rejected request");
     } else if (!run_ggml_mul_mat(matrix_a, matrix_b, ggml_out)) {
       fail("op_mul_mat", "ggml execution failed");
-    } else if (!compare_f32_vectors(backend, "op_mul_mat", emel_out, ggml_out)) {
+    } else if (!compare_f32_vectors(backend, "op_mul_mat", emel_out,
+                                    ggml_out)) {
       ok = false;
     }
   }
@@ -17940,19 +17797,21 @@ bool run_backend_kernel_parity(const char * backend, exec_fn exec) {
     auto src = make_signed_data(k_vec_len, 0.75f, -0.25f);
     std::vector<float> emel_out(static_cast<size_t>(k_vec_len));
     emel::kernel::event::op_unary ev{
-      .src0 = make_src_view(src.data(), static_cast<uint64_t>(k_vec_len)),
-      .dst = make_dst_view(emel_out.data(), static_cast<uint64_t>(k_vec_len)),
-      .nth = 1,
-      .subop = emel::kernel::event::unary_subop::neg,
+        .src0 = make_src_view(src.data(), static_cast<uint64_t>(k_vec_len)),
+        .dst = make_dst_view(emel_out.data(), static_cast<uint64_t>(k_vec_len)),
+        .nth = 1,
+        .subop = emel::kernel::event::unary_subop::neg,
     };
     std::vector<float> ggml_out;
     if (!exec(ev)) {
       fail("op_unary_neg", "emel rejected request");
-    } else if (!run_ggml_unary(src, ggml_out, [](ggml_context * ctx, ggml_tensor * a) {
-                 return ggml_neg(ctx, a);
-               })) {
+    } else if (!run_ggml_unary(src, ggml_out,
+                               [](ggml_context *ctx, ggml_tensor *a) {
+                                 return ggml_neg(ctx, a);
+                               })) {
       fail("op_unary_neg", "ggml execution failed");
-    } else if (!compare_f32_vectors(backend, "op_unary_neg", emel_out, ggml_out)) {
+    } else if (!compare_f32_vectors(backend, "op_unary_neg", emel_out,
+                                    ggml_out)) {
       ok = false;
     }
   }
@@ -17961,19 +17820,21 @@ bool run_backend_kernel_parity(const char * backend, exec_fn exec) {
     auto src = make_signed_data(k_vec_len, 0.75f, -0.25f);
     std::vector<float> emel_out(static_cast<size_t>(k_vec_len));
     emel::kernel::event::op_unary ev{
-      .src0 = make_src_view(src.data(), static_cast<uint64_t>(k_vec_len)),
-      .dst = make_dst_view(emel_out.data(), static_cast<uint64_t>(k_vec_len)),
-      .nth = 1,
-      .subop = emel::kernel::event::unary_subop::relu,
+        .src0 = make_src_view(src.data(), static_cast<uint64_t>(k_vec_len)),
+        .dst = make_dst_view(emel_out.data(), static_cast<uint64_t>(k_vec_len)),
+        .nth = 1,
+        .subop = emel::kernel::event::unary_subop::relu,
     };
     std::vector<float> ggml_out;
     if (!exec(ev)) {
       fail("op_unary_relu", "emel rejected request");
-    } else if (!run_ggml_unary(src, ggml_out, [](ggml_context * ctx, ggml_tensor * a) {
-                 return ggml_relu(ctx, a);
-               })) {
+    } else if (!run_ggml_unary(src, ggml_out,
+                               [](ggml_context *ctx, ggml_tensor *a) {
+                                 return ggml_relu(ctx, a);
+                               })) {
       fail("op_unary_relu", "ggml execution failed");
-    } else if (!compare_f32_vectors(backend, "op_unary_relu", emel_out, ggml_out)) {
+    } else if (!compare_f32_vectors(backend, "op_unary_relu", emel_out,
+                                    ggml_out)) {
       ok = false;
     }
   }
@@ -17982,19 +17843,21 @@ bool run_backend_kernel_parity(const char * backend, exec_fn exec) {
     auto src = make_signed_data(k_vec_len, 0.35f, 0.1f);
     std::vector<float> emel_out(static_cast<size_t>(k_vec_len));
     emel::kernel::event::op_unary ev{
-      .src0 = make_src_view(src.data(), static_cast<uint64_t>(k_vec_len)),
-      .dst = make_dst_view(emel_out.data(), static_cast<uint64_t>(k_vec_len)),
-      .nth = 1,
-      .subop = emel::kernel::event::unary_subop::exp,
+        .src0 = make_src_view(src.data(), static_cast<uint64_t>(k_vec_len)),
+        .dst = make_dst_view(emel_out.data(), static_cast<uint64_t>(k_vec_len)),
+        .nth = 1,
+        .subop = emel::kernel::event::unary_subop::exp,
     };
     std::vector<float> ggml_out;
     if (!exec(ev)) {
       fail("op_unary_exp", "emel rejected request");
-    } else if (!run_ggml_unary(src, ggml_out, [](ggml_context * ctx, ggml_tensor * a) {
-                 return ggml_exp(ctx, a);
-               })) {
+    } else if (!run_ggml_unary(src, ggml_out,
+                               [](ggml_context *ctx, ggml_tensor *a) {
+                                 return ggml_exp(ctx, a);
+                               })) {
       fail("op_unary_exp", "ggml execution failed");
-    } else if (!compare_f32_vectors(backend, "op_unary_exp", emel_out, ggml_out)) {
+    } else if (!compare_f32_vectors(backend, "op_unary_exp", emel_out,
+                                    ggml_out)) {
       ok = false;
     }
   }
@@ -18003,9 +17866,9 @@ bool run_backend_kernel_parity(const char * backend, exec_fn exec) {
     auto src = make_signed_data(k_vec_len, 0.75f, 0.0f);
     std::vector<float> emel_out(static_cast<size_t>(k_vec_len));
     emel::kernel::event::op_sum ev{
-      .src0 = make_src_view(src.data(), static_cast<uint64_t>(k_vec_len)),
-      .dst = make_dst_view(emel_out.data(), static_cast<uint64_t>(k_vec_len)),
-      .nth = 1,
+        .src0 = make_src_view(src.data(), static_cast<uint64_t>(k_vec_len)),
+        .dst = make_dst_view(emel_out.data(), static_cast<uint64_t>(k_vec_len)),
+        .nth = 1,
     };
     if (exec(ev)) {
       fail("op_sum", "expected unsupported op to be rejected");
@@ -18019,10 +17882,8 @@ int run_kernel_parity(const emel::paritychecker::parity_options &) {
   emel::kernel::x86_64::sm x86_machine{};
   emel::kernel::aarch64::sm aarch_machine{};
 
-  auto x86_exec = [&](const auto & ev) {
-    return x86_machine.process_event(ev);
-  };
-  auto aarch_exec = [&](const auto & ev) {
+  auto x86_exec = [&](const auto &ev) { return x86_machine.process_event(ev); };
+  auto aarch_exec = [&](const auto &ev) {
     return aarch_machine.process_event(ev);
   };
 
@@ -18036,7 +17897,7 @@ int run_kernel_parity(const emel::paritychecker::parity_options &) {
   return 1;
 }
 
-int run_tokenizer_parity(const emel::paritychecker::parity_options & opts) {
+int run_tokenizer_parity(const emel::paritychecker::parity_options &opts) {
   llama_backend_guard backend_guard{};
 
   llama_model_params model_params = llama_model_default_params();
@@ -18051,9 +17912,10 @@ int run_tokenizer_parity(const emel::paritychecker::parity_options & opts) {
     return 1;
   }
 
-  const llama_vocab * llama_vocab_ptr = llama_model_get_vocab(model.get());
+  const llama_vocab *llama_vocab_ptr = llama_model_get_vocab(model.get());
   if (llama_vocab_ptr == nullptr) {
-    std::fprintf(stderr, "model has no vocabulary: %s\n", opts.model_path.c_str());
+    std::fprintf(stderr, "model has no vocabulary: %s\n",
+                 opts.model_path.c_str());
     return 1;
   }
 
@@ -18065,33 +17927,33 @@ int run_tokenizer_parity(const emel::paritychecker::parity_options & opts) {
 
   using tokenizer_model = emel::model::data::tokenizer_model;
   switch (emel_vocab->tokenizer_model_id) {
-    case tokenizer_model::SPM:
-      return emel::paritychecker::run_tokenizer_spm_parity(
-          opts, *llama_vocab_ptr, *emel_vocab);
-    case tokenizer_model::BPE:
-      return emel::paritychecker::run_tokenizer_bpe_parity(
-          opts, *llama_vocab_ptr, *emel_vocab);
-    case tokenizer_model::WPM:
-      return emel::paritychecker::run_tokenizer_wpm_parity(
-          opts, *llama_vocab_ptr, *emel_vocab);
-    case tokenizer_model::UGM:
-      return emel::paritychecker::run_tokenizer_ugm_parity(
-          opts, *llama_vocab_ptr, *emel_vocab);
-    case tokenizer_model::RWKV:
-      return emel::paritychecker::run_tokenizer_rwkv_parity(
-          opts, *llama_vocab_ptr, *emel_vocab);
-    case tokenizer_model::PLAMO2:
-      return emel::paritychecker::run_tokenizer_plamo2_parity(
-          opts, *llama_vocab_ptr, *emel_vocab);
-    case tokenizer_model::NONE:
-    case tokenizer_model::UNKNOWN:
-    default:
-      return emel::paritychecker::run_tokenizer_fallback_parity(
-          opts, *llama_vocab_ptr, *emel_vocab);
+  case tokenizer_model::SPM:
+    return emel::paritychecker::run_tokenizer_spm_parity(opts, *llama_vocab_ptr,
+                                                         *emel_vocab);
+  case tokenizer_model::BPE:
+    return emel::paritychecker::run_tokenizer_bpe_parity(opts, *llama_vocab_ptr,
+                                                         *emel_vocab);
+  case tokenizer_model::WPM:
+    return emel::paritychecker::run_tokenizer_wpm_parity(opts, *llama_vocab_ptr,
+                                                         *emel_vocab);
+  case tokenizer_model::UGM:
+    return emel::paritychecker::run_tokenizer_ugm_parity(opts, *llama_vocab_ptr,
+                                                         *emel_vocab);
+  case tokenizer_model::RWKV:
+    return emel::paritychecker::run_tokenizer_rwkv_parity(
+        opts, *llama_vocab_ptr, *emel_vocab);
+  case tokenizer_model::PLAMO2:
+    return emel::paritychecker::run_tokenizer_plamo2_parity(
+        opts, *llama_vocab_ptr, *emel_vocab);
+  case tokenizer_model::NONE:
+  case tokenizer_model::UNKNOWN:
+  default:
+    return emel::paritychecker::run_tokenizer_fallback_parity(
+        opts, *llama_vocab_ptr, *emel_vocab);
   }
 }
 
-int run_gbnf_parser_parity(const emel::paritychecker::parity_options & opts) {
+int run_gbnf_parser_parity(const emel::paritychecker::parity_options &opts) {
   emel::gbnf::grammar emel_grammar{};
   int32_t emel_err = k_error_ok;
   const bool emel_ok = run_emel_gbnf_parse(opts.text, emel_grammar, emel_err);
@@ -18102,9 +17964,7 @@ int run_gbnf_parser_parity(const emel::paritychecker::parity_options & opts) {
   if (emel_ok != llama_ok) {
     std::fprintf(stderr,
                  "parse outcome mismatch: emel=%s llama=%s (emel_err=%d)\n",
-                 emel_ok ? "ok" : "error",
-                 llama_ok ? "ok" : "error",
-                 emel_err);
+                 emel_ok ? "ok" : "error", llama_ok ? "ok" : "error", emel_err);
     if (opts.dump) {
       if (emel_ok) {
         dump_emel_grammar(emel_grammar);
@@ -18133,29 +17993,29 @@ int run_gbnf_parser_parity(const emel::paritychecker::parity_options & opts) {
   if (opts.dump) {
     dump_emel_grammar(emel_grammar);
   }
-  std::fprintf(stdout,
-               "parity ok (%u rules, %u elements)\n",
-               emel_grammar.rule_count,
-               emel_grammar.element_count);
+  std::fprintf(stdout, "parity ok (%u rules, %u elements)\n",
+               emel_grammar.rule_count, emel_grammar.element_count);
   return 0;
 }
 
-int run_jinja_parity(const emel::paritychecker::parity_options & opts) {
+int run_jinja_parity(const emel::paritychecker::parity_options &opts) {
   emel::text::jinja::program emel_program{};
-  int32_t emel_parse_err = static_cast<int32_t>(emel::text::jinja::parser::error::none);
+  int32_t emel_parse_err =
+      static_cast<int32_t>(emel::text::jinja::parser::error::none);
   size_t emel_parse_error_pos = 0;
   const bool emel_parse_ok = run_emel_jinja_parse(
       opts.text, emel_program, emel_parse_err, emel_parse_error_pos);
 
   ::jinja::program reference_program;
-  const bool reference_parse_ok = run_reference_jinja_parse(opts.text, reference_program);
+  const bool reference_parse_ok =
+      run_reference_jinja_parse(opts.text, reference_program);
 
   if (emel_parse_ok != reference_parse_ok) {
     std::fprintf(stderr,
-                 "jinja parse outcome mismatch: emel=%s reference=%s (emel_err=%d at %zu)\n",
+                 "jinja parse outcome mismatch: emel=%s reference=%s "
+                 "(emel_err=%d at %zu)\n",
                  emel_parse_ok ? "ok" : "error",
-                 reference_parse_ok ? "ok" : "error",
-                 emel_parse_err,
+                 reference_parse_ok ? "ok" : "error", emel_parse_err,
                  emel_parse_error_pos);
     return 1;
   }
@@ -18178,12 +18038,12 @@ int run_jinja_parity(const emel::paritychecker::parity_options & opts) {
   }
 
   const std::string_view emel_cmp = strip_trailing_newline(emel_rendered);
-  const std::string_view reference_cmp = strip_trailing_newline(reference_rendered);
+  const std::string_view reference_cmp =
+      strip_trailing_newline(reference_rendered);
   if (emel_cmp != reference_cmp) {
     std::fprintf(stderr,
                  "jinja render mismatch: emel_len=%zu reference_len=%zu\n",
-                 emel_rendered.size(),
-                 reference_rendered.size());
+                 emel_rendered.size(), reference_rendered.size());
     if (opts.dump) {
       std::fprintf(stdout, "emel:\n%s\n", emel_rendered.c_str());
       std::fprintf(stdout, "reference:\n%s\n", reference_rendered.c_str());
@@ -18191,65 +18051,88 @@ int run_jinja_parity(const emel::paritychecker::parity_options & opts) {
     return 1;
   }
 
-  std::fprintf(stdout, "jinja parity ok (output bytes=%zu)\n", emel_rendered.size());
+  std::fprintf(stdout, "jinja parity ok (output bytes=%zu)\n",
+               emel_rendered.size());
   return 0;
 }
 
-int run_generation_harness_contract(const emel::paritychecker::parity_options & opts) {
+int run_generation_harness_contract(
+    const emel::paritychecker::parity_options &opts) {
   llama_backend_guard backend_guard{};
   llama_log_silencer log_silencer{};
 
   if (!parity_assets::file_exists(opts.model_path)) {
-    std::fprintf(stderr, "generation load failed: missing model file %s\n", opts.model_path.c_str());
-    return 1;
-  }
-  const maintained_generation_fixture * fixture =
-      parity_assets::find_generation_fixture(opts.model_path);
-  if (fixture == nullptr) {
-    const std::string supported_fixtures = parity_assets::maintained_generation_fixture_list();
-    std::fprintf(stderr,
-                 "generation requires maintained fixture path (%s), got %s\n",
-                 supported_fixtures.c_str(),
+    std::fprintf(stderr, "generation load failed: missing model file %s\n",
                  opts.model_path.c_str());
     return 1;
   }
-  if (opts.attribution) {
+  const maintained_generation_fixture *fixture =
+      parity_assets::find_generation_fixture(opts.model_path);
+  if (fixture == nullptr) {
+    const std::string supported_fixtures =
+        parity_assets::maintained_generation_fixture_list();
     std::fprintf(stderr,
-                 "generation attribution is unsupported until a public generator diagnostics "
-                 "contract exists\n");
+                 "generation requires maintained fixture path (%s), got %s\n",
+                 supported_fixtures.c_str(), opts.model_path.c_str());
+    return 1;
+  }
+  if (opts.attribution) {
+    std::fprintf(stderr, "generation attribution is unsupported until a public "
+                         "generator diagnostics "
+                         "contract exists\n");
     return 1;
   }
 
   generation_load_state state{};
   if (!parity_assets::read_file_bytes(opts.model_path, state.file_bytes) ||
       state.file_bytes.empty()) {
-    std::fprintf(stderr, "generation load failed: unable to read model file %s\n", opts.model_path.c_str());
+    std::fprintf(stderr,
+                 "generation load failed: unable to read model file %s\n",
+                 opts.model_path.c_str());
+    return 1;
+  }
+
+  const std::span<const uint8_t> file_image{
+      state.file_bytes.data(),
+      state.file_bytes.size(),
+  };
+  const emel::error::type prebind_err =
+      prebind_gguf_kv_storage(state, file_image);
+  if (prebind_err != emel::error::cast(emel::model::loader::error::none)) {
+    std::fprintf(stderr, "generation load failed: gguf prebind failed (%s)\n",
+                 model_loader_error_name(prebind_err));
     return 1;
   }
 
   reset_load_capture(state);
-  emel::model::loader::event::parse_model_fn parse_model{&state, run_emel_parse_model};
+  state.effect_requests.resize(emel::model::data::k_max_tensors);
+  state.effect_results.resize(emel::model::data::k_max_tensors);
+  emel::model::loader::event::parse_model_fn parse_model{&state,
+                                                         run_emel_parse_model};
   emel::model::loader::event::load request{*state.model_data, parse_model};
   request.model_path = opts.model_path;
   request.file_image = state.file_bytes.data();
   request.file_size = state.file_bytes.size();
-  request.load_weights = {&state, run_emel_load_weights};
+  request.tensor_loader = &state.tensor_loader;
+  request.effect_requests = std::span{state.effect_requests};
+  request.effect_results = std::span{state.effect_results};
   request.map_layers = {nullptr, run_emel_map_layers};
   request.validate_structure = {nullptr, run_emel_validate_structure};
-  request.validate_architecture_impl = {nullptr, run_emel_validate_architecture};
+  request.validate_architecture_impl = {nullptr,
+                                        run_emel_validate_architecture};
   request.on_done = {&state, on_load_done};
   request.on_error = {&state, on_load_error};
 
-  if (!state.model_loader.process_event(request) || !state.load.done || state.load.error) {
+  if (!state.model_loader.process_event(request) || !state.load.done ||
+      state.load.error) {
     resolve_generation_formatter_binding(state);
     print_generation_formatter_contract(stderr, state, *fixture);
-    const emel::error::type err = state.load.error
-                                      ? state.load.err
-                                      : emel::error::cast(emel::model::loader::error::internal_error);
-    std::fprintf(stderr,
-                 "generation load failed (fixture=%s err=%s)\n",
-                 fixture->name.data(),
-                 model_loader_error_name(err));
+    const emel::error::type err =
+        state.load.error
+            ? state.load.err
+            : emel::error::cast(emel::model::loader::error::internal_error);
+    std::fprintf(stderr, "generation load failed (fixture=%s err=%s)\n",
+                 fixture->name.data(), model_loader_error_name(err));
     return 1;
   }
 
@@ -18257,66 +18140,70 @@ int run_generation_harness_contract(const emel::paritychecker::parity_options & 
   if (!emel::tools::generation_formatter_contract::binding_supported(
           state.formatter_binding)) {
     print_generation_formatter_contract(stderr, state, *fixture);
-    std::fprintf(stderr,
-                 "generation load failed (fixture=%s err=%s)\n",
+    std::fprintf(stderr, "generation load failed (fixture=%s err=%s)\n",
                  fixture->name.data(),
-                 model_loader_error_name(
-                     emel::error::cast(emel::model::loader::error::model_invalid)));
+                 model_loader_error_name(emel::error::cast(
+                     emel::model::loader::error::model_invalid)));
     return 1;
   }
 
   if (!load_generation_reference_backend(opts.model_path, state)) {
     print_generation_formatter_contract(stderr, state, *fixture);
-    std::fprintf(stderr,
-                 "generation vocab load failed (fixture=%s)\n",
+    std::fprintf(stderr, "generation vocab load failed (fixture=%s)\n",
                  fixture->name.data());
     return 1;
   }
 
-  const emel::error::type initialize_err = run_emel_initialize_generator(state, opts);
+  const emel::error::type initialize_err =
+      run_emel_initialize_generator(state, opts);
   if (initialize_err != emel::error::cast(emel::text::generator::error::none)) {
     print_generation_formatter_contract(stderr, state, *fixture);
     int32_t output_weight_count = 0;
     int32_t q_norm_count = 0;
     int32_t k_norm_count = 0;
     for (uint32_t idx = 0; idx < state.model_data->n_tensors; ++idx) {
-      const std::string_view name =
-          emel::model::tensor_name_view(*state.model_data, state.model_data->tensors[idx]);
+      const std::string_view name = emel::model::tensor_name_view(
+          *state.model_data, state.model_data->tensors[idx]);
       output_weight_count += static_cast<int32_t>(name == "output.weight");
-      q_norm_count += static_cast<int32_t>(name.find("attn_q_norm.weight") != std::string_view::npos);
-      k_norm_count += static_cast<int32_t>(name.find("attn_k_norm.weight") != std::string_view::npos);
+      q_norm_count += static_cast<int32_t>(name.find("attn_q_norm.weight") !=
+                                           std::string_view::npos);
+      k_norm_count += static_cast<int32_t>(name.find("attn_k_norm.weight") !=
+                                           std::string_view::npos);
     }
-    std::fprintf(stderr,
-                 "generation initialize debug architecture=%.*s n_layers=%d n_tensors=%u "
-                 "output_weight=%d q_norm=%d k_norm=%d\n",
-                 static_cast<int>(emel::model::architecture_name_view(*state.model_data).size()),
-                 emel::model::architecture_name_view(*state.model_data).data(),
-                 state.model_data->n_layers,
-                 state.model_data->n_tensors,
-                 output_weight_count,
-                 q_norm_count,
-                 k_norm_count);
+    std::fprintf(
+        stderr,
+        "generation initialize debug architecture=%.*s n_layers=%d "
+        "n_tensors=%u "
+        "output_weight=%d q_norm=%d k_norm=%d\n",
+        static_cast<int>(
+            emel::model::architecture_name_view(*state.model_data).size()),
+        emel::model::architecture_name_view(*state.model_data).data(),
+        state.model_data->n_layers, state.model_data->n_tensors,
+        output_weight_count, q_norm_count, k_norm_count);
     emel::model::llama::execution_view debug_execution{};
     emel::model::llama::quantized_path_audit debug_audit{};
-    if (build_execution_surface_with_audit(*state.model_data, debug_execution, debug_audit)) {
+    if (build_execution_surface_with_audit(*state.model_data, debug_execution,
+                                           debug_audit)) {
       emel::model::llama::block_view debug_block{};
-      if (emel::model::llama::lookup_block_view(debug_execution, 0, debug_block) ==
+      if (emel::model::llama::lookup_block_view(debug_execution, 0,
+                                                debug_block) ==
           emel::error::cast(emel::model::loader::error::none)) {
-        const auto print_tensor_shape = [&](const char * label,
-                                            const emel::model::data::tensor_record * tensor) {
-          if (tensor == nullptr) {
-            std::fprintf(stderr, "generation initialize debug %s=<null>\n", label);
-            return;
-          }
-          const uint64_t dim0 = tensor->n_dims > 0 ? tensor->dims[0] : 0u;
-          const uint64_t dim1 = tensor->n_dims > 1 ? tensor->dims[1] : 1u;
-          std::fprintf(stderr,
-                       "generation initialize debug %s type=%d dims=%" PRIu64 "x%" PRIu64 "\n",
-                       label,
-                       tensor->type,
-                       dim0,
-                       dim1);
-        };
+        const auto print_tensor_shape =
+            [&](const char *label,
+                const emel::model::data::tensor_record *tensor) {
+              if (tensor == nullptr) {
+                std::fprintf(stderr, "generation initialize debug %s=<null>\n",
+                             label);
+                return;
+              }
+              const uint64_t dim0 = tensor->n_dims > 0 ? tensor->dims[0] : 0u;
+              const uint64_t dim1 = tensor->n_dims > 1 ? tensor->dims[1] : 1u;
+              std::fprintf(
+                  stderr,
+                  "generation initialize debug %s type=%d dims=%" PRIu64
+                  "x%" PRIu64 "\n",
+                  label, tensor->type, dim0, dim1);
+            };
         print_tensor_shape("attn_q", debug_block.attention_q.tensor);
         print_tensor_shape("attn_k", debug_block.attention_k.tensor);
         print_tensor_shape("attn_q_norm", debug_block.attention_q_norm.tensor);
@@ -18324,29 +18211,25 @@ int run_generation_harness_contract(const emel::paritychecker::parity_options & 
         print_tensor_shape("output", debug_execution.output.tensor);
       }
     } else {
-      std::fprintf(stderr, "generation initialize debug build_execution_view failed\n");
+      std::fprintf(stderr,
+                   "generation initialize debug build_execution_view failed\n");
     }
-    std::fprintf(stderr,
-                 "generation initialize failed (fixture=%s err=%s)\n",
-                 fixture->name.data(),
-                 generator_error_name(initialize_err));
+    std::fprintf(stderr, "generation initialize failed (fixture=%s err=%s)\n",
+                 fixture->name.data(), generator_error_name(initialize_err));
     return 1;
   }
 
   reset_reference_decode_seam(state.reference);
   generation_result emel_result{};
   const emel::error::type generation_err =
-      run_emel_generate(state,
-                        opts,
-                        std::span<char>{emel_result.output},
-                        emel_result.output_length,
-                        emel_result.trace);
+      run_emel_generate(state, opts, std::span<char>{emel_result.output},
+                        emel_result.output_length, emel_result.trace);
   if (generation_err != emel::error::cast(emel::text::generator::error::none)) {
     print_generation_formatter_contract(stderr, state, *fixture);
     std::fprintf(stderr,
-                 "generation error (fixture=%s err=%s generated_tokens=%d output_bytes=%zu)\n",
-                 fixture->name.data(),
-                 generator_error_name(generation_err),
+                 "generation error (fixture=%s err=%s generated_tokens=%d "
+                 "output_bytes=%zu)\n",
+                 fixture->name.data(), generator_error_name(generation_err),
                  state.generation.tokens_generated,
                  state.generation.output_length);
     dump_generation_failure_surface(state, nullptr, nullptr, opts);
@@ -18387,7 +18270,8 @@ int run_generation_harness_contract(const emel::paritychecker::parity_options & 
       generation_diagnostics.optimized_q6_dispatch_calls;
   const uint64_t shared_q6_dispatch_calls =
       generation_diagnostics.shared_q6_dispatch_calls;
-  const auto runtime_contract = runtime_quantized_contract_summary(generation_diagnostics);
+  const auto runtime_contract =
+      runtime_quantized_contract_summary(generation_diagnostics);
   if (generation_kernel_kind == emel::kernel::kernel_kind::aarch64 &&
       (flash_dispatch_calls == 0u || optimized_flash_dispatch_calls == 0u ||
        shared_flash_dispatch_calls != 0u)) {
@@ -18396,58 +18280,55 @@ int run_generation_harness_contract(const emel::paritychecker::parity_options & 
                  "flash_dispatch_calls=%" PRIu64
                  " optimized_flash_dispatch_calls=%" PRIu64
                  " shared_flash_dispatch_calls=%" PRIu64 ")\n",
-                 fixture->name.data(),
-                 kernel_kind_name(generation_kernel_kind),
-                 flash_dispatch_calls,
-                 optimized_flash_dispatch_calls,
+                 fixture->name.data(), kernel_kind_name(generation_kernel_kind),
+                 flash_dispatch_calls, optimized_flash_dispatch_calls,
                  shared_flash_dispatch_calls);
     dump_generation_failure_surface(state, &emel_result, nullptr, opts);
     return 1;
   }
   if (generation_kernel_kind != emel::kernel::kernel_kind::aarch64 &&
-      (optimized_flash_dispatch_calls != 0u || shared_flash_dispatch_calls != 0u)) {
+      (optimized_flash_dispatch_calls != 0u ||
+       shared_flash_dispatch_calls != 0u)) {
     std::fprintf(stderr,
-                 "generation non-arm flash attribution failed (fixture=%s kernel_kind=%s "
+                 "generation non-arm flash attribution failed (fixture=%s "
+                 "kernel_kind=%s "
                  "optimized_flash_dispatch_calls=%" PRIu64
                  " shared_flash_dispatch_calls=%" PRIu64 ")\n",
-                 fixture->name.data(),
-                 kernel_kind_name(generation_kernel_kind),
-                 optimized_flash_dispatch_calls,
-                 shared_flash_dispatch_calls);
+                 fixture->name.data(), kernel_kind_name(generation_kernel_kind),
+                 optimized_flash_dispatch_calls, shared_flash_dispatch_calls);
     dump_generation_failure_surface(state, &emel_result, nullptr, opts);
     return 1;
   }
   if (optimized_q2_dispatch_calls != 0u || shared_q2_dispatch_calls != 0u ||
       optimized_q3_dispatch_calls != 0u || shared_q3_dispatch_calls != 0u ||
       shared_q6_dispatch_calls != 0u) {
-    std::fprintf(stderr,
-                 "generation quantized dispatch proof failed (fixture=%s kernel_kind=%s "
-                 "optimized_q2_dispatch_calls=%" PRIu64
-                 " shared_q2_dispatch_calls=%" PRIu64
-                 " optimized_q3_dispatch_calls=%" PRIu64
-                 " shared_q3_dispatch_calls=%" PRIu64
-                 " optimized_q6_dispatch_calls=%" PRIu64
-                 " shared_q6_dispatch_calls=%" PRIu64 ")\n",
-                 fixture->name.data(),
-                 kernel_kind_name(generation_kernel_kind),
-                 optimized_q2_dispatch_calls,
-                 shared_q2_dispatch_calls,
-                 optimized_q3_dispatch_calls,
-                 shared_q3_dispatch_calls,
-                 optimized_q6_dispatch_calls,
-                 shared_q6_dispatch_calls);
+    std::fprintf(
+        stderr,
+        "generation quantized dispatch proof failed (fixture=%s kernel_kind=%s "
+        "optimized_q2_dispatch_calls=%" PRIu64
+        " shared_q2_dispatch_calls=%" PRIu64
+        " optimized_q3_dispatch_calls=%" PRIu64
+        " shared_q3_dispatch_calls=%" PRIu64
+        " optimized_q6_dispatch_calls=%" PRIu64
+        " shared_q6_dispatch_calls=%" PRIu64 ")\n",
+        fixture->name.data(), kernel_kind_name(generation_kernel_kind),
+        optimized_q2_dispatch_calls, shared_q2_dispatch_calls,
+        optimized_q3_dispatch_calls, shared_q3_dispatch_calls,
+        optimized_q6_dispatch_calls, shared_q6_dispatch_calls);
     dump_generation_failure_surface(state, &emel_result, nullptr, opts);
     return 1;
   }
-  if (runtime_contract.disallowed_fallback != 0u || runtime_contract.explicit_no_claim != 0u) {
-    std::fprintf(stderr,
-                 "generation quantized contract failed (fixture=%s native_quantized=%u "
-                 "approved_dense_f32_by_contract=%u disallowed_fallback=%u explicit_no_claim=%u)\n",
-                 fixture->name.data(),
-                 runtime_contract.native_quantized,
-                 runtime_contract.approved_dense_f32_by_contract,
-                 runtime_contract.disallowed_fallback,
-                 runtime_contract.explicit_no_claim);
+  if (runtime_contract.disallowed_fallback != 0u ||
+      runtime_contract.explicit_no_claim != 0u) {
+    std::fprintf(
+        stderr,
+        "generation quantized contract failed (fixture=%s native_quantized=%u "
+        "approved_dense_f32_by_contract=%u disallowed_fallback=%u "
+        "explicit_no_claim=%u)\n",
+        fixture->name.data(), runtime_contract.native_quantized,
+        runtime_contract.approved_dense_f32_by_contract,
+        runtime_contract.disallowed_fallback,
+        runtime_contract.explicit_no_claim);
     dump_generation_failure_surface(state, &emel_result, nullptr, opts);
     return 1;
   }
@@ -18456,21 +18337,20 @@ int run_generation_harness_contract(const emel::paritychecker::parity_options & 
   if (build_execution_audit(*state.model_data, audit_view)) {
     const auto audit_contract = build_quantized_contract_summary(audit_view);
     if (!quantized_contract_matches(runtime_contract, audit_contract)) {
-      std::fprintf(stderr,
-                   "generation quantized attribution mismatch (fixture=%s "
-                   "runtime_native_quantized=%u runtime_approved_dense_f32_by_contract=%u "
-                   "runtime_disallowed_fallback=%u runtime_explicit_no_claim=%u "
-                   "audit_native_quantized=%u audit_approved_dense_f32_by_contract=%u "
-                   "audit_disallowed_fallback=%u audit_explicit_no_claim=%u)\n",
-                   fixture->name.data(),
-                   runtime_contract.native_quantized,
-                   runtime_contract.approved_dense_f32_by_contract,
-                   runtime_contract.disallowed_fallback,
-                   runtime_contract.explicit_no_claim,
-                   audit_contract.native_quantized,
-                   audit_contract.approved_dense_f32_by_contract,
-                   audit_contract.disallowed_fallback,
-                   audit_contract.explicit_no_claim);
+      std::fprintf(
+          stderr,
+          "generation quantized attribution mismatch (fixture=%s "
+          "runtime_native_quantized=%u "
+          "runtime_approved_dense_f32_by_contract=%u "
+          "runtime_disallowed_fallback=%u runtime_explicit_no_claim=%u "
+          "audit_native_quantized=%u audit_approved_dense_f32_by_contract=%u "
+          "audit_disallowed_fallback=%u audit_explicit_no_claim=%u)\n",
+          fixture->name.data(), runtime_contract.native_quantized,
+          runtime_contract.approved_dense_f32_by_contract,
+          runtime_contract.disallowed_fallback,
+          runtime_contract.explicit_no_claim, audit_contract.native_quantized,
+          audit_contract.approved_dense_f32_by_contract,
+          audit_contract.disallowed_fallback, audit_contract.explicit_no_claim);
       dump_generation_failure_surface(state, &emel_result, nullptr, opts);
       return 1;
     }
@@ -18479,9 +18359,9 @@ int run_generation_harness_contract(const emel::paritychecker::parity_options & 
   generation_result reference_result{};
   const emel::error::type reference_generation_err =
       run_reference_generate(state.reference, opts, reference_result);
-  if (reference_generation_err != emel::error::cast(emel::text::generator::error::none)) {
-    std::fprintf(stderr,
-                 "generation reference error (fixture=%s err=%s)\n",
+  if (reference_generation_err !=
+      emel::error::cast(emel::text::generator::error::none)) {
+    std::fprintf(stderr, "generation reference error (fixture=%s err=%s)\n",
                  fixture->name.data(),
                  generator_error_name(reference_generation_err));
     dump_generation_failure_surface(state, &emel_result, nullptr, opts);
@@ -18491,52 +18371,52 @@ int run_generation_harness_contract(const emel::paritychecker::parity_options & 
       reference_result.trace.token_count == reference_result.tokens_generated;
 
   if (!generation_results_match(emel_result, reference_result)) {
-    const size_t mismatch_offset = first_mismatch_offset(emel_result, reference_result);
+    const size_t mismatch_offset =
+        first_mismatch_offset(emel_result, reference_result);
     std::fprintf(stderr,
-                 "generation parity mismatch (fixture=%s emel_tokens=%d reference_tokens=%d "
+                 "generation parity mismatch (fixture=%s emel_tokens=%d "
+                 "reference_tokens=%d "
                  "emel_bytes=%zu reference_bytes=%zu first_mismatch=%zu)\n",
-                 fixture->name.data(),
-                 emel_result.tokens_generated,
-                 reference_result.tokens_generated,
-                 emel_result.output_length,
-                 reference_result.output_length,
-                 mismatch_offset);
-    dump_generation_failure_surface(state, &emel_result, &reference_result, opts);
+                 fixture->name.data(), emel_result.tokens_generated,
+                 reference_result.tokens_generated, emel_result.output_length,
+                 reference_result.output_length, mismatch_offset);
+    dump_generation_failure_surface(state, &emel_result, &reference_result,
+                                    opts);
     return 1;
   }
 
-  const std::filesystem::path baseline_path = opts.write_generation_baseline_path.empty()
-      ? default_generation_baseline_path(*fixture, opts)
-      : std::filesystem::path(opts.write_generation_baseline_path);
+  const std::filesystem::path baseline_path =
+      opts.write_generation_baseline_path.empty()
+          ? default_generation_baseline_path(*fixture, opts)
+          : std::filesystem::path(opts.write_generation_baseline_path);
   if (!opts.write_generation_baseline_path.empty()) {
-    if (!write_generation_baseline_file(baseline_path, *fixture, opts, reference_result)) {
-      std::fprintf(stderr,
-                   "generation baseline write failed (fixture=%s baseline=%s)\n",
-                   fixture->name.data(),
-                   baseline_path.string().c_str());
-      dump_generation_failure_surface(state, &emel_result, &reference_result, opts);
+    if (!write_generation_baseline_file(baseline_path, *fixture, opts,
+                                        reference_result)) {
+      std::fprintf(
+          stderr, "generation baseline write failed (fixture=%s baseline=%s)\n",
+          fixture->name.data(), baseline_path.string().c_str());
+      dump_generation_failure_surface(state, &emel_result, &reference_result,
+                                      opts);
       return 1;
     }
 
-    std::fprintf(stdout,
-                 "generation baseline written (fixture=%s baseline=%s contract=%.*s "
-                 "prompt_bytes=%zu max_tokens=%d generated_tokens=%d output_bytes=%zu)\n",
-                 fixture->name.data(),
-                 baseline_path.string().c_str(),
-                 static_cast<int>(k_generation_baseline_contract.size()),
-                 k_generation_baseline_contract.data(),
-                 opts.text.size(),
-                 opts.max_tokens,
-                 reference_result.tokens_generated,
-                 reference_result.output_length);
+    std::fprintf(
+        stdout,
+        "generation baseline written (fixture=%s baseline=%s contract=%.*s "
+        "prompt_bytes=%zu max_tokens=%d generated_tokens=%d "
+        "output_bytes=%zu)\n",
+        fixture->name.data(), baseline_path.string().c_str(),
+        static_cast<int>(k_generation_baseline_contract.size()),
+        k_generation_baseline_contract.data(), opts.text.size(),
+        opts.max_tokens, reference_result.tokens_generated,
+        reference_result.output_length);
     print_generation_formatter_contract(stdout, state, *fixture);
-    std::fprintf(stdout,
-                 "generation_baseline: source=%.*s contract=%.*s baseline=%s\n",
-                 static_cast<int>(k_generation_baseline_source.size()),
-                 k_generation_baseline_source.data(),
-                 static_cast<int>(k_generation_baseline_contract.size()),
-                 k_generation_baseline_contract.data(),
-                 baseline_path.string().c_str());
+    std::fprintf(
+        stdout, "generation_baseline: source=%.*s contract=%.*s baseline=%s\n",
+        static_cast<int>(k_generation_baseline_source.size()),
+        k_generation_baseline_source.data(),
+        static_cast<int>(k_generation_baseline_contract.size()),
+        k_generation_baseline_contract.data(), baseline_path.string().c_str());
     dump_reference_decode_seam(state);
     return 0;
   }
@@ -18545,39 +18425,40 @@ int run_generation_harness_contract(const emel::paritychecker::parity_options & 
   if (!load_generation_baseline_file(baseline_path, baseline_record)) {
     std::fprintf(stderr,
                  "generation baseline load failed (fixture=%s baseline=%s)\n",
-                 fixture->name.data(),
-                 baseline_path.string().c_str());
+                 fixture->name.data(), baseline_path.string().c_str());
     dump_generation_failure_surface(state, &emel_result, nullptr, opts);
     return 1;
   }
   if (baseline_record.fixture_name != fixture->name ||
       baseline_record.prompt != opts.text ||
       baseline_record.max_tokens != opts.max_tokens) {
-    std::fprintf(stderr,
-                 "generation baseline contract mismatch (fixture=%s baseline=%s "
-                 "baseline_fixture=%s baseline_prompt_bytes=%zu baseline_max_tokens=%d)\n",
-                 fixture->name.data(),
-                 baseline_path.string().c_str(),
-                 baseline_record.fixture_name.c_str(),
-                 baseline_record.prompt.size(),
-                 baseline_record.max_tokens);
-    dump_generation_failure_surface(state, &emel_result, &reference_result, opts);
+    std::fprintf(
+        stderr,
+        "generation baseline contract mismatch (fixture=%s baseline=%s "
+        "baseline_fixture=%s baseline_prompt_bytes=%zu "
+        "baseline_max_tokens=%d)\n",
+        fixture->name.data(), baseline_path.string().c_str(),
+        baseline_record.fixture_name.c_str(), baseline_record.prompt.size(),
+        baseline_record.max_tokens);
+    dump_generation_failure_surface(state, &emel_result, &reference_result,
+                                    opts);
     return 1;
   }
-  const generation_result & baseline_result = baseline_record.result;
+  const generation_result &baseline_result = baseline_record.result;
 
   if (!generation_results_match(reference_result, baseline_result)) {
-    const size_t mismatch_offset = first_mismatch_offset(reference_result, baseline_result);
+    const size_t mismatch_offset =
+        first_mismatch_offset(reference_result, baseline_result);
     std::fprintf(stderr,
-                 "generation baseline mismatch (fixture=%s reference_tokens=%d baseline_tokens=%d "
+                 "generation baseline mismatch (fixture=%s reference_tokens=%d "
+                 "baseline_tokens=%d "
                  "reference_bytes=%zu baseline_bytes=%zu first_mismatch=%zu)\n",
-                 fixture->name.data(),
-                 reference_result.tokens_generated,
+                 fixture->name.data(), reference_result.tokens_generated,
                  baseline_result.tokens_generated,
-                 reference_result.output_length,
-                 baseline_result.output_length,
+                 reference_result.output_length, baseline_result.output_length,
                  mismatch_offset);
-    dump_generation_failure_surface(state, &emel_result, &reference_result, opts);
+    dump_generation_failure_surface(state, &emel_result, &reference_result,
+                                    opts);
     if (opts.dump) {
       dump_generation_result("baseline", baseline_result);
     }
@@ -18585,28 +18466,24 @@ int run_generation_harness_contract(const emel::paritychecker::parity_options & 
   }
 
   std::fprintf(stdout,
-               "generation parity ok (fixture=%s prompt_bytes=%zu max_tokens=%d generated_tokens=%d "
+               "generation parity ok (fixture=%s prompt_bytes=%zu "
+               "max_tokens=%d generated_tokens=%d "
                "output_bytes=%zu flash_dispatch_calls=%" PRIu64
                " optimized_flash_dispatch_calls=%" PRIu64
                " shared_flash_dispatch_calls=%" PRIu64 " text=%.*s)\n",
-               fixture->name.data(),
-               opts.text.size(),
-               opts.max_tokens,
-               emel_result.tokens_generated,
-               emel_result.output_length,
-               flash_dispatch_calls,
-               optimized_flash_dispatch_calls,
+               fixture->name.data(), opts.text.size(), opts.max_tokens,
+               emel_result.tokens_generated, emel_result.output_length,
+               flash_dispatch_calls, optimized_flash_dispatch_calls,
                shared_flash_dispatch_calls,
                static_cast<int>(emel_result.output_length),
                emel_result.output.data());
   print_generation_formatter_contract(stdout, state, *fixture);
-  std::fprintf(stdout,
-               "generation_baseline: source=%.*s contract=%.*s baseline=%s\n",
-               static_cast<int>(k_generation_baseline_source.size()),
-               k_generation_baseline_source.data(),
-               static_cast<int>(k_generation_baseline_contract.size()),
-               k_generation_baseline_contract.data(),
-               baseline_path.string().c_str());
+  std::fprintf(
+      stdout, "generation_baseline: source=%.*s contract=%.*s baseline=%s\n",
+      static_cast<int>(k_generation_baseline_source.size()),
+      k_generation_baseline_source.data(),
+      static_cast<int>(k_generation_baseline_contract.size()),
+      k_generation_baseline_contract.data(), baseline_path.string().c_str());
   dump_reference_decode_seam(state);
   if (opts.dump) {
     dump_generation_result("emel", emel_result);
@@ -18615,28 +18492,24 @@ int run_generation_harness_contract(const emel::paritychecker::parity_options & 
   return 0;
 }
 
-}  // namespace
+} // namespace
 
 namespace emel::paritychecker::engines {
 
-int run_tokenizer(const parity_options & opts) {
+int run_tokenizer(const parity_options &opts) {
   return run_tokenizer_parity(opts);
 }
 
-int run_gbnf_parser(const parity_options & opts) {
+int run_gbnf_parser(const parity_options &opts) {
   return run_gbnf_parser_parity(opts);
 }
 
-int run_kernel(const parity_options & opts) {
-  return run_kernel_parity(opts);
-}
+int run_kernel(const parity_options &opts) { return run_kernel_parity(opts); }
 
-int run_jinja(const parity_options & opts) {
-  return run_jinja_parity(opts);
-}
+int run_jinja(const parity_options &opts) { return run_jinja_parity(opts); }
 
-int run_generation(const parity_options & opts) {
+int run_generation(const parity_options &opts) {
   return run_generation_harness_contract(opts);
 }
 
-}  // namespace emel::paritychecker::engines
+} // namespace emel::paritychecker::engines

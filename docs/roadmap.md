@@ -12,16 +12,16 @@ scaffolding decisions live in [scaffold.plan.md](plans/scaffold.plan.md).
   byte fallback aligned with reference vocab behavior.
 - [x] model parser: GGUF metadata mapping and orchestration aligned with reference parser behavior.
 - [x] model loader: orchestration and GGUF callbacks aligned with reference behavior.
-- [x] weight loader: loader callback parity implemented; backend-specific direct I/O and async
-  upload exposed via callbacks.
+- [x] model tensor loading: tensor-owned loader orchestration implemented; concrete I/O strategy
+  work remains deferred below the future `emel/io` seam.
 - [x] tools: `tools/bench` and `tools/paritychecker` parity harnesses implemented.
 - [x] jinja: templating and orchestration implemented.
 
 **open behavior gaps**
-- [ ] loader/parser/weight-loader C API parity: public C API entrypoints and exact C-boundary
+- [ ] loader/parser C API parity: public C API entrypoints and exact C-boundary
   status mapping are still pending.
-- [ ] weight-loading full parity audit: callback-path parity is implemented, but full behavioral
-  validation against the reference loader paths is still pending.
+- [ ] tensor residency parity audit: tensor-owned load and residency behavior has maintained-path
+  coverage, but full behavioral validation against the reference loader paths is still pending.
 - [ ] KV cache: stream-aware cell tracking (`n_stream`, `seq_to_stream`, per-stream heads) and
   stream selection parity.
 - [ ] KV cache: sequence operations (`seq_rm`, `seq_cp`, `seq_keep`, `seq_add`, `seq_div`) and
@@ -59,4 +59,4 @@ next: decoder parity.
    repeated graph scans in `graph_needs_realloc`.
 4. [ ] audit generator + sampler pipeline parity against reference sampling paths.
 5. [ ] audit tensor allocator/lifetime analyzer parity against `ggml` alloc paths.
-6. [ ] add public C API parity for loader/parser/weight loader paths.
+6. [ ] add public C API parity for loader/parser model-load paths.

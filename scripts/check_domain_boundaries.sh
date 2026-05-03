@@ -36,6 +36,23 @@ check_no_matches_except() {
   rm -f /tmp/emel_domain_boundary_matches.$$
 }
 
+check_absent_path() {
+  local label="$1"
+  shift
+
+  local matched=0
+  for path in "$@"; do
+    if [[ -e "$path" ]]; then
+      echo "error: domain boundary leak: ${label}: ${path}" >&2
+      matched=1
+    fi
+  done
+
+  if [[ "$matched" -ne 0 ]]; then
+    status=1
+  fi
+}
+
 cd "$ROOT_DIR"
 
 check_no_matches "forbidden model-family runtime roots" \
@@ -58,5 +75,21 @@ check_no_matches "Whisper leaked into generic speech recognizer" \
 check_no_matches "Whisper model binding leaked into speech encoder/decoder runtime" \
   'emel/model/whisper|model::whisper' \
   src/emel/speech/encoder src/emel/speech/decoder
+
+check_absent_path "retired model weight-loader owner path" \
+  src/emel/model/weight_loader \
+  tests/model/weight_loader \
+  docs/architecture/model_weight_loader.md \
+  docs/architecture/mermaid/model_weight_loader.mmd \
+  .planning/architecture/model_weight_loader.md \
+  .planning/architecture/mermaid/model_weight_loader.mmd
+
+check_no_matches "retired model weight-loader owner references" \
+  'model/weight_loader|model_weight_loader|namespace emel::model::weight_loader|WeightLoader|load_weights|bind_weights|src/emel/model/weight_loader|tests/model/weight_loader' \
+  src tests tools docs README.md CMakeLists.txt snapshots/lint .planning/codebase .planning/architecture
+
+check_no_matches "retired model weight-loader public docs prose" \
+  'weight loader|weight-loader|weight-loading|loader callback parity|async[[:space:]]+upload|loader/parser/weight loader|loader/parser/weight-loader' \
+  docs/roadmap.md
 
 exit "$status"

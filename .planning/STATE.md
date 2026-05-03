@@ -2,69 +2,64 @@
 gsd_state_version: 1.0
 milestone: v1.22
 milestone_name: Weight Loading Ownership Cutover
-status: ready
-stopped_at: v1.22 roadmap created; ready for Phase 185.
-last_updated: "2026-05-02T19:08:00Z"
-last_activity: 2026-05-02
+status: milestone_archived
+stopped_at: v1.22 archived after Phase 196 state closeout metadata repair.
+last_updated: "2026-05-03T14:51:33Z"
+last_activity: 2026-05-03
 progress:
-  total_phases: 5
-  completed_phases: 0
-  total_plans: 0
-  completed_plans: 0
-  percent: 0
+  total_phases: 12
+  completed_phases: 12
+  total_plans: 12
+  completed_plans: 12
+  percent: 100
 ---
 
 # Project State
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-05-02)
+See: .planning/PROJECT.md (updated 2026-05-03)
 
 **Core value:** Prove real end-to-end behavior with explicit SML orchestration and
 parity-oriented verification before widening API surface or model scope.
-**Current focus:** v1.22 Weight Loading Ownership Cutover.
+**Current focus:** No active milestone is open; start the next milestone with `$gsd-new-milestone`.
 
 ## Current Position
 
-Phase: 185
-Plan: Not started
-Status: Ready to start Phase 185
-Last activity: 2026-05-02 - Milestone v1.22 requirements and roadmap created from GitHub issue #59
+Phase: none
+Plan: none
+Status: v1.22 archived
+Last activity: 2026-05-03 - Archived v1.22 after Phase 196 repaired the final state closeout
+metadata contradiction.
 
-Progress: [----------] 0%
+Progress: [██████████] 100%
 
 ## Performance Metrics
 
-**Latest shipped milestone:** `v1.21 Quality Gate Selective Runner Optimization`
+**Latest audited milestone:** `v1.22 Weight Loading Ownership Cutover`
 
-- v1.21 shipped on 2026-05-02 with 5 phases completed and 14/14 active requirements satisfied.
-- v1.22 starts from GitHub issue #59 and targets model weight-loading ownership.
-- v1.22 roadmap contains 5 phases, starting at Phase 185 and covering 14 active requirements.
-- Current blocker: none.
+- v1.22 was archived on 2026-05-03, then reopened for a source-backed maintained-path gap.
+- Phase 194 restored `TENSOR-02` and `LOAD-02`.
+- Phase 195 closed the strict loader/tensor outcome and wrapper rule contradictions.
+- Phase 196 repaired stale closeout state metadata that still referenced Phase 194.
+- Final audit status is `passed` with 14/14 active requirements satisfied.
+- Current archive files live under `.planning/milestones/`.
 
 ## Accumulated Context
 
 ### Decisions
 
 Decisions are logged in PROJECT.md Key Decisions table.
-Recent decisions affecting current work:
+Recent decisions affecting this work:
 
-- v1.22 starts from GitHub issue #59 and moves weight-loading ownership from
-  `src/emel/model/weight_loader` to `src/emel/model/tensor`.
-
-- `model/tensor` must own tensor load, bind, evict, and residency semantics after the cutover.
-
-- `model/loader` must orchestrate tensor-owned behavior and must not absorb backend-specific or
-  strategy-specific loading logic.
-
-- This milestone is not the future `emel/io` strategy implementation and does not introduce
-  asynchronous loading.
-
-- Any temporary adapter used during the migration must be explicit, bounded, and unable to become a
-  second tensor-residency ownership layer.
-
-- `commit_docs` is false for this milestone setup; roadmap artifacts are not auto-committed by the
-  GSD helper.
+- `model/tensor` owns tensor load, bind, evict, and residency semantics.
+- `model/loader` orchestrates tensor-owned behavior and must not absorb backend-specific loading
+  strategy logic.
+- Concrete I/O strategy work remains deferred to a future `emel/io` milestone.
+- Guardrails must continue to reject a second model-weight residency owner and stale retired-owner
+  public prose.
+- User approved updates to snapshots, benchmarks, and model artifacts when required for this
+  gap-closure work.
 
 ### Pending Todos
 
@@ -79,7 +74,7 @@ None.
 
 ## Deferred Items
 
-Items acknowledged and carried forward from previous milestone close:
+Items acknowledged and deferred at v1.22 milestone close on 2026-05-03:
 
 | Category | Item | Status |
 |----------|------|--------|
@@ -91,6 +86,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-05-02T19:08:00Z
-Stopped at: v1.22 roadmap created; ready for Phase 185.
+Last session: 2026-05-03T04:38:04Z
+Stopped at: v1.22 archived after Phase 196 state closeout metadata repair.
 Resume file: None

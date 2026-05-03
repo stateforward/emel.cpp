@@ -16,18 +16,18 @@ before widening API surface or model scope.
 
 ## Current State
 
-Current milestone: `v1.22 Weight Loading Ownership Cutover`
+Current milestone: none open.
 
-Latest shipped milestone: `v1.21 Quality Gate Selective Runner Optimization`
+Latest shipped milestone: `v1.22 Weight Loading Ownership Cutover`
 
-Status: `v1.22` started on 2026-05-02 from GitHub issue #59. The milestone cuts tensor residency
-ownership over from `model/weight_loader` to `model/tensor` while preserving model-loading behavior
-and keeping future loading-strategy work below tensor ownership.
+Status: `v1.22` shipped on 2026-05-03 and was reclosed after Phase 194's maintained-path gap
+closure. The repo now treats `src/emel/model/tensor` as the canonical owner of tensor load, bind,
+evict, and residency semantics, while `model/loader` orchestrates that owned behavior without
+becoming a backend-specific loading strategy owner.
 
-Current planning focus: define and execute the weight-loading ownership cutover without introducing
-asynchronous loading, a new `io` strategy implementation, or a second residency owner.
+Current planning focus: start the next milestone with `$gsd-new-milestone`.
 
-## Current Milestone: v1.22 Weight Loading Ownership Cutover
+## Previous Shipped Milestone: v1.22 Weight Loading Ownership Cutover
 
 **Goal:** Make `src/emel/model/tensor` the canonical owner of tensor load, bind, evict, and
 residency transitions while removing `src/emel/model/weight_loader` from the primary runtime load
@@ -36,16 +36,22 @@ path.
 **Source:** GitHub issue #59, "Cut over weight loading ownership from model/weight_loader to
 model/tensor"
 
-**Target features:**
-- Tensor-owned loading and residency semantics colocated with existing per-tensor lifecycle state.
-- Model loader orchestration that targets tensor-owned behavior instead of the long-term bulk
-  `load_weights_fn` seam.
-- Retirement or explicitly bounded transition of the existing `model/weight_loader` ownership
-  layer from the primary runtime path.
-- Behavior-preserving tests and guardrails that keep model loading green and prevent a parallel
-  tensor-residency owner from reappearing.
-- A clean architectural seam for a future `emel/io` loading-strategy milestone, without implementing
-  that follow-on strategy layer now.
+**Shipped:** 2026-05-03
+
+**Delivered:**
+- Made `src/emel/model/tensor` the canonical owner of tensor load and residency behavior.
+- Rewired `model/loader` to coordinate tensor-owned bind, plan, and apply behavior through public
+  tensor actor events.
+- Removed the retired `model/weight_loader` source/test path from maintained runtime ownership.
+- Added explicit loader tensor outcome decision states so tensor bulk success and failure no longer
+  depend on local callback flag capture.
+- Added guardrails and public documentation that prevent stale retired-owner prose and keep concrete
+  I/O strategy implementation deferred under the future `emel/io` seam.
+- Moved maintained generation benchmark, Sortformer benchmark, embedded-size probe, and paritychecker
+  GGUF KV storage growth before model-loader dispatch.
+
+**Audit:** Source-backed audit passed with 14/14 active requirements satisfied after Phase 194
+closed the maintained loader tool prebind gap.
 
 ## Previous Shipped Milestone: v1.21 Quality Gate Selective Runner Optimization
 
@@ -577,4 +583,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-05-02 after starting v1.22*
+*Last updated: 2026-05-03 after shipping v1.22*

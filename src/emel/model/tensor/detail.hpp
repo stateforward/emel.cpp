@@ -13,7 +13,8 @@ namespace emel::model::tensor::detail {
 inline constexpr int32_t max_tensors = emel::model::data::k_max_tensors;
 
 template <class runtime_event_type>
-constexpr decltype(auto) unwrap_runtime_event(const runtime_event_type & ev) noexcept {
+constexpr decltype(auto)
+unwrap_runtime_event(const runtime_event_type &ev) noexcept {
   if constexpr (requires { ev.event_; }) {
     return ev.event_;
   } else {
@@ -21,10 +22,14 @@ constexpr decltype(auto) unwrap_runtime_event(const runtime_event_type & ev) noe
   }
 }
 
-template <class value_type>
-value_type & bind_or_sink(value_type * ptr, value_type & sink) noexcept {
-  value_type * choices[2] = {&sink, ptr};
-  return *choices[static_cast<size_t>(ptr != nullptr)];
+template <class runtime_event_type>
+constexpr decltype(auto) request_event(const runtime_event_type &ev) noexcept {
+  const auto &runtime_ev = unwrap_runtime_event(ev);
+  if constexpr (requires { runtime_ev.request; }) {
+    return (runtime_ev.request);
+  } else {
+    return (runtime_ev);
+  }
 }
 
 struct runtime_status {
@@ -33,22 +38,32 @@ struct runtime_status {
   bool accepted = false;
 };
 
+struct plan_load_runtime {
+  const event::plan_load & request;
+  runtime_status & ctx;
+};
+
+struct apply_effect_results_runtime {
+  const event::apply_effect_results & request;
+  runtime_status & ctx;
+};
+
 struct bind_tensor_runtime {
   const event::bind_tensor & request;
   runtime_status & ctx;
-  int32_t & error_code_out;
+  int32_t * error_code_out = nullptr;
 };
 
 struct evict_tensor_runtime {
   const event::evict_tensor & request;
   runtime_status & ctx;
-  int32_t & error_code_out;
+  int32_t * error_code_out = nullptr;
 };
 
 struct capture_tensor_state_runtime {
   const event::capture_tensor_state & request;
   runtime_status & ctx;
-  int32_t & error_code_out;
+  int32_t * error_code_out = nullptr;
 };
 
 struct tensor_storage {

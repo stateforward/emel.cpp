@@ -1,43 +1,53 @@
 #pragma once
 
 #include <cstdint>
+#include <span>
 #include <string_view>
 
 #include "emel/callback.hpp"
 #include "emel/error/error.hpp"
 #include "emel/model/data.hpp"
 #include "emel/model/loader/errors.hpp"
+#include "emel/model/tensor/events.hpp"
+#include "emel/model/tensor/sm.hpp"
 
 namespace emel::model::loader::events {
 
+struct tensor_bind_done;
+struct tensor_bind_error;
+struct tensor_plan_done;
+struct tensor_plan_error;
+struct tensor_apply_done;
+struct tensor_apply_error;
 struct load_done;
 struct load_error;
 
-}  // namespace emel::model::loader::events
+} // namespace emel::model::loader::events
 
 namespace emel::model::loader::event {
 
 struct load;
 
 using parse_model_fn = emel::callback<emel::error::type(const load &)>;
-using load_weights_fn = emel::callback<
-  emel::error::type(const load &, uint64_t &, uint64_t &, bool &)>;
 using map_layers_fn = emel::callback<emel::error::type(const load &)>;
 using validate_structure_fn = emel::callback<emel::error::type(const load &)>;
-using validate_architecture_fn = emel::callback<emel::error::type(const load &)>;
+using validate_architecture_fn =
+    emel::callback<emel::error::type(const load &)>;
 
 struct load {
-  emel::model::data & model_data;
-  parse_model_fn & parse_model;
+  emel::model::data &model_data;
+  parse_model_fn &parse_model;
 
   std::string_view model_path = {};
-  const void * file_image = nullptr;
+  const void *file_image = nullptr;
   uint64_t file_size = 0;
   bool check_tensors = true;
   bool vocab_only = false;
   bool validate_architecture = true;
 
-  load_weights_fn load_weights = {};
+  emel::model::tensor::sm *tensor_loader = nullptr;
+  std::span<emel::model::tensor::effect_request> effect_requests = {};
+  std::span<emel::model::tensor::effect_result> effect_results = {};
   map_layers_fn map_layers = {};
   validate_structure_fn validate_structure = {};
   validate_architecture_fn validate_architecture_impl = {};
@@ -45,7 +55,8 @@ struct load {
   emel::callback<void(const events::load_done &)> on_done = {};
   emel::callback<void(const events::load_error &)> on_error = {};
 
-  load(emel::model::data & model_data_in, parse_model_fn & parse_model_in) noexcept
+  load(emel::model::data &model_data_in,
+       parse_model_fn &parse_model_in) noexcept
       : model_data(model_data_in), parse_model(parse_model_in) {}
 };
 
@@ -56,25 +67,66 @@ struct load_ctx {
   bool used_mmap = false;
 };
 
-struct load_runtime {
-  const load & request;
-  load_ctx & ctx;
+struct tensor_phase_events {
+  events::tensor_bind_done &bind_done;
+  events::tensor_bind_error &bind_error;
+  events::tensor_plan_done &plan_done;
+  events::tensor_plan_error &plan_error;
+  events::tensor_apply_done &apply_done;
+  events::tensor_apply_error &apply_error;
 };
 
-}  // namespace emel::model::loader::event
+struct load_runtime {
+  const load &request;
+  load_ctx &ctx;
+  mutable tensor_phase_events tensor_events;
+};
+
+} // namespace emel::model::loader::event
 
 namespace emel::model::loader::events {
 
+struct tensor_bind_done {
+  bool raised = false;
+};
+
+struct tensor_bind_error {
+  bool raised = false;
+  emel::error::type err =
+      emel::error::cast(emel::model::tensor::error::none);
+};
+
+struct tensor_plan_done {
+  bool raised = false;
+  uint32_t effect_count = 0u;
+};
+
+struct tensor_plan_error {
+  bool raised = false;
+  emel::error::type err =
+      emel::error::cast(emel::model::tensor::error::none);
+};
+
+struct tensor_apply_done {
+  bool raised = false;
+};
+
+struct tensor_apply_error {
+  bool raised = false;
+  emel::error::type err =
+      emel::error::cast(emel::model::tensor::error::none);
+};
+
 struct load_done {
-  const event::load & request;
+  const event::load &request;
   uint64_t bytes_total = 0;
   uint64_t bytes_done = 0;
   bool used_mmap = false;
 };
 
 struct load_error {
-  const event::load & request;
+  const event::load &request;
   emel::error::type err = emel::error::cast(error::none);
 };
 
-}  // namespace emel::model::loader::events
+} // namespace emel::model::loader::events
