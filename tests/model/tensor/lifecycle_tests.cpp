@@ -315,6 +315,177 @@ TEST_CASE("model_tensor_storage_load_rejects_invalid_inputs") {
   CHECK(owner.err == emel::error::cast(emel::model::tensor::error::capacity));
 }
 
+TEST_CASE("model_tensor_invalid_rebind_clears_prior_bulk_binding") {
+  emel::model::tensor::sm machine{};
+  owner_state owner{};
+  std::array<emel::model::data::tensor_record, 1> tensors{};
+  tensors[0].file_offset = 4096u;
+  tensors[0].data_size = 32u;
+  tensors[0].file_index = 1u;
+  tensors[0].type = 7;
+
+  emel::model::tensor::event::bind_storage bind{std::span{tensors}};
+  bind.on_done = {&owner, on_bind_storage_done};
+  bind.on_error = {&owner, on_bind_storage_error};
+  REQUIRE(machine.process_event(bind));
+
+  emel::model::tensor::event::bind_storage invalid_bind{
+      std::span{tensors}.subspan(0u, 0u)};
+  invalid_bind.on_done = {&owner, on_bind_storage_done};
+  invalid_bind.on_error = {&owner, on_bind_storage_error};
+  owner.bind_done = false;
+  owner.bind_error = false;
+  CHECK_FALSE(machine.process_event(invalid_bind));
+  CHECK_FALSE(owner.bind_done);
+  CHECK(owner.bind_error);
+  CHECK(owner.err ==
+        emel::error::cast(emel::model::tensor::error::invalid_request));
+
+  std::array<emel::model::tensor::effect_request, 1> effects{};
+  emel::model::tensor::event::plan_load plan{std::span{effects}};
+  plan.on_done = {&owner, on_plan_load_done};
+  plan.on_error = {&owner, on_plan_load_error};
+  owner.plan_done = false;
+  owner.plan_error = false;
+  CHECK_FALSE(machine.process_event(plan));
+  CHECK_FALSE(owner.plan_done);
+  CHECK(owner.plan_error);
+  CHECK(owner.err ==
+        emel::error::cast(emel::model::tensor::error::invalid_request));
+
+  emel::model::tensor::event::tensor_state state{};
+  CHECK(machine.process_event(emel::model::tensor::event::capture_tensor_state{
+      .tensor_id = 0,
+      .state_out = &state,
+  }));
+  CHECK(state.lifecycle_state ==
+        emel::model::tensor::event::lifecycle::unbound);
+  CHECK(state.buffer == nullptr);
+  CHECK(state.buffer_bytes == 0u);
+  CHECK(state.file_offset == 0u);
+  CHECK(state.data_size == 0u);
+  CHECK(state.file_index == 0u);
+  CHECK(state.tensor_type == 0);
+}
+
+TEST_CASE("model_tensor_bulk_storage_supports_absent_callbacks") {
+  std::array<emel::model::data::tensor_record, 1> tensors{};
+  tensors[0].file_offset = 4096u;
+  tensors[0].data_size = 32u;
+  tensors[0].file_index = 1u;
+  tensors[0].type = 7;
+
+  {
+    emel::model::tensor::sm machine{};
+    emel::model::tensor::event::bind_storage bind{std::span{tensors}};
+    REQUIRE(machine.process_event(bind));
+
+    std::array<emel::model::tensor::effect_request, 1> effects{};
+    emel::model::tensor::event::plan_load plan{std::span{effects}};
+    REQUIRE(machine.process_event(plan));
+
+    std::array<emel::model::tensor::effect_result, 1> results{
+        emel::model::tensor::effect_result{
+            .kind = emel::model::tensor::effect_kind::k_none,
+            .handle = const_cast<void *>(fake_buffer(0xA000u)),
+            .err = emel::error::cast(emel::model::tensor::error::none),
+        },
+    };
+    emel::model::tensor::event::apply_effect_results apply{
+        std::span<const emel::model::tensor::effect_result>{results}};
+    CHECK(machine.process_event(apply));
+    CHECK(tensors[0].data == fake_buffer(0xA000u));
+  }
+
+  {
+    emel::model::tensor::sm machine{};
+    std::array<emel::model::tensor::effect_request, 1> effects{};
+    emel::model::tensor::event::plan_load plan{std::span{effects}};
+    CHECK_FALSE(machine.process_event(plan));
+  }
+
+  {
+    emel::model::tensor::sm machine{};
+    emel::model::tensor::event::bind_storage bind{std::span{tensors}};
+    REQUIRE(machine.process_event(bind));
+
+    std::array<emel::model::tensor::effect_request, 0> effects{};
+    emel::model::tensor::event::plan_load plan{std::span{effects}};
+    CHECK_FALSE(machine.process_event(plan));
+  }
+
+  {
+    emel::model::tensor::sm machine{};
+    emel::model::tensor::event::bind_storage bind{std::span{tensors}};
+    REQUIRE(machine.process_event(bind));
+
+    std::array<emel::model::tensor::effect_request, 1> effects{};
+    emel::model::tensor::event::plan_load plan{std::span{effects}};
+    REQUIRE(machine.process_event(plan));
+
+    emel::model::tensor::event::bind_storage invalid_rebind{
+        std::span{tensors}.subspan(0u, 0u)};
+    CHECK_FALSE(machine.process_event(invalid_rebind));
+
+    std::array<emel::model::tensor::effect_result, 1> results{
+        emel::model::tensor::effect_result{
+            .kind = emel::model::tensor::effect_kind::k_none,
+            .handle = const_cast<void *>(fake_buffer(0xB000u)),
+            .err = emel::error::cast(emel::model::tensor::error::none),
+        },
+    };
+    emel::model::tensor::event::apply_effect_results apply{
+        std::span<const emel::model::tensor::effect_result>{results}};
+    CHECK(machine.process_event(apply));
+    CHECK(tensors[0].data == fake_buffer(0xB000u));
+  }
+
+  {
+    emel::model::tensor::sm machine{};
+    emel::model::tensor::event::bind_storage bind{std::span{tensors}};
+    REQUIRE(machine.process_event(bind));
+
+    std::array<emel::model::tensor::effect_request, 1> effects{};
+    emel::model::tensor::event::plan_load plan{std::span{effects}};
+    REQUIRE(machine.process_event(plan));
+
+    std::array<emel::model::tensor::effect_result, 0> results{};
+    emel::model::tensor::event::apply_effect_results apply{
+        std::span<const emel::model::tensor::effect_result>{results}};
+    CHECK_FALSE(machine.process_event(apply));
+  }
+
+  {
+    emel::model::tensor::sm machine{};
+    emel::model::tensor::event::bind_storage bind{std::span{tensors}};
+    REQUIRE(machine.process_event(bind));
+
+    std::array<emel::model::tensor::effect_request, 1> effects{};
+    emel::model::tensor::event::plan_load plan{std::span{effects}};
+    REQUIRE(machine.process_event(plan));
+
+    std::array<emel::model::tensor::effect_result, 1> results{
+        emel::model::tensor::effect_result{
+            .kind = emel::model::tensor::effect_kind::k_none,
+            .handle = nullptr,
+            .err = emel::error::cast(emel::model::tensor::error::out_of_memory),
+        },
+    };
+    emel::model::tensor::event::apply_effect_results apply{
+        std::span<const emel::model::tensor::effect_result>{results}};
+    CHECK_FALSE(machine.process_event(apply));
+  }
+}
+
+TEST_CASE("model_tensor_single_tensor_errors_support_absent_error_output") {
+  emel::model::tensor::sm machine{};
+  auto tensor_record = make_tensor_record();
+
+  auto invalid_bind =
+      emel::model::tensor::event::bind_tensor{0, tensor_record, nullptr, 512u};
+  CHECK_FALSE(machine.process_event(invalid_bind));
+}
+
 TEST_CASE("model_tensor_rejects_rebind_while_awaiting_effects") {
   emel::model::tensor::sm machine{};
   owner_state owner{};

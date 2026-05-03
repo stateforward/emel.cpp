@@ -54,7 +54,7 @@ struct model {
           / action::effect_bind_storage
       , sml::state<state_bind_storage_error_decision> <= sml::state<ready>
           + sml::event<detail::bind_storage_runtime> [ guard::storage_bind_invalid{} ]
-          / action::record_bind_storage_invalid_request
+          / action::record_bind_storage_invalid_request_and_clear_binding
 
       , sml::state<state_bind_storage_done_decision> <= sml::state<state_bind_storage_decision>
           + sml::completion<detail::bind_storage_runtime>

@@ -15,6 +15,24 @@ inline void write_error_code(int32_t &target,
 
 } // namespace output
 
+namespace binding {
+
+inline void reset_storage_binding(context &ctx) noexcept {
+  ctx.bound_records = {};
+  for (size_t tensor_id = 0u; tensor_id < ctx.tensors.lifecycle.size();
+       ++tensor_id) {
+    ctx.tensors.lifecycle[tensor_id] = event::lifecycle::unbound;
+    ctx.tensors.buffer[tensor_id] = nullptr;
+    ctx.tensors.buffer_bytes[tensor_id] = 0u;
+    ctx.tensors.file_offset[tensor_id] = 0u;
+    ctx.tensors.data_size[tensor_id] = 0u;
+    ctx.tensors.file_index[tensor_id] = 0u;
+    ctx.tensors.tensor_type[tensor_id] = 0;
+  }
+}
+
+} // namespace binding
+
 struct begin_bind_tensor {
   void operator()(const detail::bind_tensor_runtime &ev,
                   context &) const noexcept {
@@ -47,17 +65,8 @@ struct effect_bind_storage {
   void operator()(const event_type &ev, context &ctx) const noexcept {
     auto &runtime_ev = tensor::detail::unwrap_runtime_event(ev);
     const auto &request = tensor::detail::request_event(ev);
+    binding::reset_storage_binding(ctx);
     ctx.bound_records = request.tensors;
-    for (size_t tensor_id = 0u; tensor_id < ctx.tensors.lifecycle.size();
-         ++tensor_id) {
-      ctx.tensors.lifecycle[tensor_id] = event::lifecycle::unbound;
-      ctx.tensors.buffer[tensor_id] = nullptr;
-      ctx.tensors.buffer_bytes[tensor_id] = 0u;
-      ctx.tensors.file_offset[tensor_id] = 0u;
-      ctx.tensors.data_size[tensor_id] = 0u;
-      ctx.tensors.file_index[tensor_id] = 0u;
-      ctx.tensors.tensor_type[tensor_id] = 0;
-    }
     for (size_t tensor_id = 0u; tensor_id < ctx.bound_records.size();
          ++tensor_id) {
       ctx.tensors.lifecycle[tensor_id] = event::lifecycle::unbound;
@@ -192,6 +201,16 @@ struct record_bind_storage_done {
 struct record_bind_storage_invalid_request {
   template <class event_type>
   void operator()(const event_type &ev, context &) const noexcept {
+    auto &runtime_ev = tensor::detail::unwrap_runtime_event(ev);
+    runtime_ev.ctx.err = emel::error::cast(error::invalid_request);
+    runtime_ev.ctx.ok = false;
+  }
+};
+
+struct record_bind_storage_invalid_request_and_clear_binding {
+  template <class event_type>
+  void operator()(const event_type &ev, context &ctx) const noexcept {
+    binding::reset_storage_binding(ctx);
     auto &runtime_ev = tensor::detail::unwrap_runtime_event(ev);
     runtime_ev.ctx.err = emel::error::cast(error::invalid_request);
     runtime_ev.ctx.ok = false;
@@ -429,6 +448,8 @@ inline constexpr publish_bind_storage_error publish_bind_storage_error{};
 inline constexpr record_bind_storage_done record_bind_storage_done{};
 inline constexpr record_bind_storage_invalid_request
     record_bind_storage_invalid_request{};
+inline constexpr record_bind_storage_invalid_request_and_clear_binding
+    record_bind_storage_invalid_request_and_clear_binding{};
 inline constexpr record_plan_load_done record_plan_load_done{};
 inline constexpr publish_plan_load_done publish_plan_load_done{};
 inline constexpr record_plan_load_invalid_request

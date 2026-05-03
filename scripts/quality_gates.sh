@@ -13,6 +13,12 @@ QUALITY_GATES_BENCH_RUNS="${EMEL_QUALITY_GATES_BENCH_RUNS:-3}"
 QUALITY_GATES_BENCH_WARMUP_ITERS="${EMEL_QUALITY_GATES_BENCH_WARMUP_ITERS:-100}"
 QUALITY_GATES_BENCH_WARMUP_RUNS="${EMEL_QUALITY_GATES_BENCH_WARMUP_RUNS:-1}"
 QUALITY_GATES_BENCH_TOLERANCE="${EMEL_QUALITY_GATES_BENCH_TOLERANCE:-0.30}"
+QUALITY_GATES_GENERATION_BENCH_ITERS="${EMEL_QUALITY_GATES_GENERATION_BENCH_ITERS:-1}"
+QUALITY_GATES_GENERATION_BENCH_RUNS="${EMEL_QUALITY_GATES_GENERATION_BENCH_RUNS:-1}"
+QUALITY_GATES_GENERATION_BENCH_WARMUP_ITERS="${EMEL_QUALITY_GATES_GENERATION_BENCH_WARMUP_ITERS:-0}"
+QUALITY_GATES_GENERATION_BENCH_WARMUP_RUNS="${EMEL_QUALITY_GATES_GENERATION_BENCH_WARMUP_RUNS:-0}"
+QUALITY_GATES_GENERATION_WORKLOAD_ID="${EMEL_QUALITY_GATES_GENERATION_WORKLOAD_ID:-${EMEL_GENERATION_WORKLOAD_ID:-}}"
+QUALITY_GATES_DEFAULT_GENERATION_WORKLOAD_ID="${EMEL_QUALITY_GATES_DEFAULT_GENERATION_WORKLOAD_ID:-lfm2_single_user_hello_max_tokens_1_v1}"
 QUALITY_GATES_ALLOW_BENCH_REGRESSION="${EMEL_QUALITY_GATES_ALLOW_BENCH_REGRESSION:-0}"
 QUALITY_GATES_PARITY="${EMEL_QUALITY_GATES_PARITY:-auto}"
 QUALITY_GATES_FUZZ="${EMEL_QUALITY_GATES_FUZZ:-auto}"
@@ -297,8 +303,13 @@ add_bench_suite() {
 
 select_full_benchmark_gate() {
   local reason="$1"
-  bench_full=true
   echo "quality_gates: select benchmark runner=all reason=$reason" >&2
+  if [[ "$QUALITY_GATES_SCOPE" == "full" ]]; then
+    bench_full=true
+    return
+  fi
+  bench_all_suites=true
+  add_all_benchmark_suites_from_manifest
 }
 
 add_parity_runner() {
@@ -914,6 +925,8 @@ run_benchmark_gates() {
   local bench_warmup_iters
   local bench_warmup_runs
   local bench_tolerance
+  local generation_workload_id
+  local -a bench_extra_env
 
   if bench_dependency_manifest_check_needed; then
     if bench_dependency_manifest_requires_full_gate; then
@@ -951,7 +964,23 @@ run_benchmark_gates() {
     bench_warmup_iters="$QUALITY_GATES_BENCH_WARMUP_ITERS"
     bench_warmup_runs="$QUALITY_GATES_BENCH_WARMUP_RUNS"
     bench_tolerance="$QUALITY_GATES_BENCH_TOLERANCE"
+    bench_extra_env=()
     case "$suite" in
+      generation)
+        generation_workload_id="$QUALITY_GATES_GENERATION_WORKLOAD_ID"
+        if [[ -z "$generation_workload_id" && "$QUALITY_GATES_SCOPE" != "full" ]]; then
+          generation_workload_id="$QUALITY_GATES_DEFAULT_GENERATION_WORKLOAD_ID"
+        fi
+        bench_extra_env+=(
+          EMEL_BENCH_GENERATION_ITERS="$QUALITY_GATES_GENERATION_BENCH_ITERS"
+          EMEL_BENCH_GENERATION_RUNS="$QUALITY_GATES_GENERATION_BENCH_RUNS"
+          EMEL_BENCH_GENERATION_WARMUP_ITERS="$QUALITY_GATES_GENERATION_BENCH_WARMUP_ITERS"
+          EMEL_BENCH_GENERATION_WARMUP_RUNS="$QUALITY_GATES_GENERATION_BENCH_WARMUP_RUNS"
+        )
+        if [[ -n "$generation_workload_id" && "$generation_workload_id" != "all" ]]; then
+          bench_extra_env+=(EMEL_GENERATION_WORKLOAD_ID="$generation_workload_id")
+        fi
+        ;;
       diarization_sortformer)
         bench_iters="${EMEL_QUALITY_GATES_DIARIZATION_BENCH_ITERS:-1}"
         bench_runs="${EMEL_QUALITY_GATES_DIARIZATION_BENCH_RUNS:-5}"
@@ -984,6 +1013,7 @@ run_benchmark_gates() {
       EMEL_BENCH_WARMUP_ITERS="$bench_warmup_iters" \
       EMEL_BENCH_WARMUP_RUNS="$bench_warmup_runs" \
       BENCH_TOLERANCE="$bench_tolerance" \
+      "${bench_extra_env[@]}" \
       "$ROOT_DIR/scripts/bench.sh" --snapshot --compare --suite="$suite"; then
       continue
     else
