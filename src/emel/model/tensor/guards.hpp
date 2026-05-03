@@ -20,15 +20,18 @@ bool operation_dispatched(const runtime_event_type &ev) noexcept {
 } // namespace detail
 
 struct storage_bind_valid {
-  bool operator()(const event::bind_storage &ev) const noexcept {
-    return ev.tensors.data() != nullptr && !ev.tensors.empty() &&
-           ev.tensors.size() <=
+  template <class event_type>
+  bool operator()(const event_type &ev) const noexcept {
+    const auto &request = tensor::detail::request_event(ev);
+    return request.tensors.data() != nullptr && !request.tensors.empty() &&
+           request.tensors.size() <=
                static_cast<size_t>(tensor::detail::max_tensors);
   }
 };
 
 struct storage_bind_invalid {
-  bool operator()(const event::bind_storage &ev) const noexcept {
+  template <class event_type>
+  bool operator()(const event_type &ev) const noexcept {
     return !storage_bind_valid{}(ev);
   }
 };
@@ -233,28 +236,32 @@ struct error_unknown {
 };
 
 struct bind_storage_done_callback_present {
-  bool operator()(const event::bind_storage &ev,
+  template <class event_type>
+  bool operator()(const event_type &ev,
                   const action::context &) const noexcept {
-    return static_cast<bool>(ev.on_done);
+    return static_cast<bool>(tensor::detail::request_event(ev).on_done);
   }
 };
 
 struct bind_storage_done_callback_absent {
-  bool operator()(const event::bind_storage &ev,
+  template <class event_type>
+  bool operator()(const event_type &ev,
                   const action::context &ctx) const noexcept {
     return !bind_storage_done_callback_present{}(ev, ctx);
   }
 };
 
 struct bind_storage_error_callback_present {
-  bool operator()(const event::bind_storage &ev,
+  template <class event_type>
+  bool operator()(const event_type &ev,
                   const action::context &) const noexcept {
-    return static_cast<bool>(ev.on_error);
+    return static_cast<bool>(tensor::detail::request_event(ev).on_error);
   }
 };
 
 struct bind_storage_error_callback_absent {
-  bool operator()(const event::bind_storage &ev,
+  template <class event_type>
+  bool operator()(const event_type &ev,
                   const action::context &ctx) const noexcept {
     return !bind_storage_error_callback_present{}(ev, ctx);
   }

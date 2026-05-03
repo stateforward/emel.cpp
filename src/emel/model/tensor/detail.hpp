@@ -38,6 +38,11 @@ struct runtime_status {
   bool accepted = false;
 };
 
+struct bind_storage_runtime {
+  const event::bind_storage & request;
+  runtime_status & ctx;
+};
+
 struct plan_load_runtime {
   const event::plan_load & request;
   runtime_status & ctx;

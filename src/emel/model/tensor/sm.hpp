@@ -16,6 +16,7 @@ struct state_bind_storage_done_decision {};
 struct state_bind_storage_done_callback {};
 struct state_bind_storage_error_decision {};
 struct state_bind_storage_error_callback {};
+struct state_bind_storage_busy_error_callback {};
 struct state_plan_load_decision {};
 struct state_plan_load_done_decision {};
 struct state_plan_load_done_callback {};
@@ -50,35 +51,50 @@ struct model {
       //------------------------------------------------------------------------------//
       // Tensor-owned bulk storage binding.
         sml::state<state_bind_storage_decision> <= *sml::state<ready>
-          + sml::event<event::bind_storage> [ guard::storage_bind_valid{} ]
+          + sml::event<detail::bind_storage_runtime> [ guard::storage_bind_valid{} ]
           / action::effect_bind_storage
       , sml::state<state_bind_storage_error_decision> <= sml::state<ready>
-          + sml::event<event::bind_storage> [ guard::storage_bind_invalid{} ]
+          + sml::event<detail::bind_storage_runtime> [ guard::storage_bind_invalid{} ]
+          / action::record_bind_storage_invalid_request
 
       , sml::state<state_bind_storage_done_decision> <= sml::state<state_bind_storage_decision>
-          + sml::completion<event::bind_storage>
+          + sml::completion<detail::bind_storage_runtime>
 
       , sml::state<state_bind_storage_done_callback> <=
           sml::state<state_bind_storage_done_decision>
-          + sml::completion<event::bind_storage>
+          + sml::completion<detail::bind_storage_runtime>
           [ guard::bind_storage_done_callback_present{} ]
           / action::publish_bind_storage_done
       , sml::state<ready> <= sml::state<state_bind_storage_done_decision>
-          + sml::completion<event::bind_storage>
+          + sml::completion<detail::bind_storage_runtime>
           [ guard::bind_storage_done_callback_absent{} ]
+          / action::record_bind_storage_done
       , sml::state<ready> <= sml::state<state_bind_storage_done_callback>
-          + sml::completion<event::bind_storage>
+          + sml::completion<detail::bind_storage_runtime>
 
       , sml::state<state_bind_storage_error_callback> <=
           sml::state<state_bind_storage_error_decision>
-          + sml::completion<event::bind_storage>
+          + sml::completion<detail::bind_storage_runtime>
           [ guard::bind_storage_error_callback_present{} ]
           / action::publish_bind_storage_error
       , sml::state<ready> <= sml::state<state_bind_storage_error_decision>
-          + sml::completion<event::bind_storage>
+          + sml::completion<detail::bind_storage_runtime>
           [ guard::bind_storage_error_callback_absent{} ]
       , sml::state<ready> <= sml::state<state_bind_storage_error_callback>
-          + sml::completion<event::bind_storage>
+          + sml::completion<detail::bind_storage_runtime>
+
+      , sml::state<state_bind_storage_busy_error_callback> <=
+          sml::state<state_awaiting_effects>
+          + sml::event<detail::bind_storage_runtime>
+          [ guard::bind_storage_error_callback_present{} ]
+          / action::publish_bind_storage_error
+      , sml::state<state_awaiting_effects> <= sml::state<state_awaiting_effects>
+          + sml::event<detail::bind_storage_runtime>
+          [ guard::bind_storage_error_callback_absent{} ]
+          / action::record_bind_storage_invalid_request
+      , sml::state<state_awaiting_effects> <=
+          sml::state<state_bind_storage_busy_error_callback>
+          + sml::completion<detail::bind_storage_runtime>
 
       //------------------------------------------------------------------------------//
       // Tensor-owned load planning.
@@ -285,6 +301,9 @@ struct model {
           + sml::unexpected_event<sml::_> / action::on_unexpected
       , sml::state<ready> <= sml::state<state_bind_storage_error_callback>
           + sml::unexpected_event<sml::_> / action::on_unexpected
+      , sml::state<state_awaiting_effects> <=
+          sml::state<state_bind_storage_busy_error_callback>
+          + sml::unexpected_event<sml::_> / action::on_unexpected
       , sml::state<ready> <= sml::state<state_plan_load_decision>
           + sml::unexpected_event<sml::_> / action::on_unexpected
       , sml::state<ready> <= sml::state<state_plan_load_done_decision>
@@ -345,9 +364,10 @@ struct sm : public emel::sm<model, action::context> {
   using base_type::visit_current_states;
 
   bool process_event(const event::bind_storage &ev) {
-    const bool valid = guard::storage_bind_valid{}(ev);
-    const bool accepted = base_type::process_event(ev);
-    return accepted && valid;
+    detail::runtime_status ctx{};
+    detail::bind_storage_runtime runtime{ev, ctx};
+    const bool accepted = base_type::process_event(runtime);
+    return accepted && ctx.ok;
   }
 
   bool process_event(const event::plan_load &ev) {
