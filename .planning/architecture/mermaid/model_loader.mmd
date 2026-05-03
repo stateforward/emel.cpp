@@ -6,7 +6,7 @@ stateDiagram-v2
   request_decision --> errored : completion_load_runtime_ [invalid_request_] / mark_invalid_request_
   parsing --> parse_decision : completion_load_runtime_ [always] / run_parse_
   parse_decision --> parse_phase_decision : completion_load_runtime_ [always] / none
-  parse_phase_decision --> parse_load_weights_policy_decision : completion_load_runtime_ [error_none_] / none
+  parse_phase_decision --> parse_load_tensors_policy_decision : completion_load_runtime_ [error_none_] / none
   parse_phase_decision --> errored : completion_load_runtime_ [error_invalid_request_] / none
   parse_phase_decision --> errored : completion_load_runtime_ [error_parse_failed_] / none
   parse_phase_decision --> errored : completion_load_runtime_ [error_backend_error_] / none
@@ -14,22 +14,26 @@ stateDiagram-v2
   parse_phase_decision --> errored : completion_load_runtime_ [error_internal_error_] / none
   parse_phase_decision --> errored : completion_load_runtime_ [error_untracked_] / none
   parse_phase_decision --> errored : completion_load_runtime_ [error_unclassified_code_] / none
-  parse_load_weights_policy_decision --> parse_load_weights_handler_decision : completion_load_runtime_ [should_load_weights_] / none
-  parse_load_weights_policy_decision --> structure_decision : completion_load_runtime_ [skip_load_weights_] / none
-  parse_load_weights_policy_decision --> errored : completion_load_runtime_ [always] / mark_internal_error_
-  parse_load_weights_handler_decision --> loading_weights : completion_load_runtime_ [can_load_weights_] / none
-  parse_load_weights_handler_decision --> errored : completion_load_runtime_ [cannot_load_weights_] / mark_invalid_request_
-  parse_load_weights_handler_decision --> errored : completion_load_runtime_ [always] / mark_internal_error_
-  loading_weights --> load_decision : completion_load_runtime_ [always] / run_load_weights_
-  load_decision --> load_phase_decision : completion_load_runtime_ [always] / none
-  load_phase_decision --> load_map_policy_decision : completion_load_runtime_ [error_none_] / none
-  load_phase_decision --> errored : completion_load_runtime_ [error_invalid_request_] / none
-  load_phase_decision --> errored : completion_load_runtime_ [error_parse_failed_] / none
-  load_phase_decision --> errored : completion_load_runtime_ [error_backend_error_] / none
-  load_phase_decision --> errored : completion_load_runtime_ [error_model_invalid_] / none
-  load_phase_decision --> errored : completion_load_runtime_ [error_internal_error_] / none
-  load_phase_decision --> errored : completion_load_runtime_ [error_untracked_] / none
-  load_phase_decision --> errored : completion_load_runtime_ [error_unclassified_code_] / none
+  parse_load_tensors_policy_decision --> parse_load_tensors_handler_decision : completion_load_runtime_ [should_load_tensors_] / none
+  parse_load_tensors_policy_decision --> structure_decision : completion_load_runtime_ [skip_load_tensors_] / none
+  parse_load_tensors_policy_decision --> errored : completion_load_runtime_ [always] / mark_internal_error_
+  parse_load_tensors_handler_decision --> loading_tensors : completion_load_runtime_ [can_load_tensors_] / none
+  parse_load_tensors_handler_decision --> errored : completion_load_runtime_ [model_has_no_tensors_] / mark_model_invalid_
+  parse_load_tensors_handler_decision --> errored : completion_load_runtime_ [cannot_load_tensors_] / mark_invalid_request_
+  parse_load_tensors_handler_decision --> errored : completion_load_runtime_ [always] / mark_internal_error_
+  loading_tensors --> state_tensor_bind_decision : completion_load_runtime_ [always] / effect_dispatch_tensor_bind_storage_
+  state_tensor_bind_decision --> state_tensor_plan_dispatch : completion_load_runtime_ [tensor_bind_done_raised_] / none
+  state_tensor_bind_decision --> errored : completion_load_runtime_ [tensor_bind_error_raised_] / effect_mark_tensor_bind_error_
+  state_tensor_bind_decision --> errored : completion_load_runtime_ [tensor_bind_unhandled_] / mark_internal_error_
+  state_tensor_plan_dispatch --> state_tensor_plan_decision : completion_load_runtime_ [always] / effect_dispatch_tensor_plan_load_
+  state_tensor_plan_decision --> state_tensor_apply_dispatch : completion_load_runtime_ [tensor_plan_done_raised_] / none
+  state_tensor_plan_decision --> errored : completion_load_runtime_ [tensor_plan_error_raised_] / effect_mark_tensor_plan_error_
+  state_tensor_plan_decision --> errored : completion_load_runtime_ [tensor_plan_unhandled_] / mark_internal_error_
+  state_tensor_apply_dispatch --> state_tensor_apply_decision : completion_load_runtime_ [always] / effect_dispatch_tensor_apply_results_
+  state_tensor_apply_decision --> load_map_policy_decision : completion_load_runtime_ [tensor_apply_done_with_file_image_] / effect_publish_tensor_load_done_from_file_image_
+  state_tensor_apply_decision --> load_map_policy_decision : completion_load_runtime_ [tensor_apply_done_without_file_image_] / effect_publish_tensor_load_done_from_model_data_
+  state_tensor_apply_decision --> errored : completion_load_runtime_ [tensor_apply_error_raised_] / effect_mark_tensor_apply_error_
+  state_tensor_apply_decision --> errored : completion_load_runtime_ [tensor_apply_unhandled_] / mark_internal_error_
   load_map_policy_decision --> mapping_layers : completion_load_runtime_ [can_map_layers_] / none
   load_map_policy_decision --> errored : completion_load_runtime_ [cannot_map_layers_] / mark_invalid_request_
   load_map_policy_decision --> errored : completion_load_runtime_ [always] / mark_internal_error_
@@ -79,11 +83,14 @@ stateDiagram-v2
   parsing --> ready : _ [always] / on_unexpected_
   parse_decision --> ready : _ [always] / on_unexpected_
   parse_phase_decision --> ready : _ [always] / on_unexpected_
-  parse_load_weights_policy_decision --> ready : _ [always] / on_unexpected_
-  parse_load_weights_handler_decision --> ready : _ [always] / on_unexpected_
-  loading_weights --> ready : _ [always] / on_unexpected_
-  load_decision --> ready : _ [always] / on_unexpected_
-  load_phase_decision --> ready : _ [always] / on_unexpected_
+  parse_load_tensors_policy_decision --> ready : _ [always] / on_unexpected_
+  parse_load_tensors_handler_decision --> ready : _ [always] / on_unexpected_
+  loading_tensors --> ready : _ [always] / on_unexpected_
+  state_tensor_bind_decision --> ready : _ [always] / on_unexpected_
+  state_tensor_plan_dispatch --> ready : _ [always] / on_unexpected_
+  state_tensor_plan_decision --> ready : _ [always] / on_unexpected_
+  state_tensor_apply_dispatch --> ready : _ [always] / on_unexpected_
+  state_tensor_apply_decision --> ready : _ [always] / on_unexpected_
   load_map_policy_decision --> ready : _ [always] / on_unexpected_
   mapping_layers --> ready : _ [always] / on_unexpected_
   map_layers_decision --> ready : _ [always] / on_unexpected_

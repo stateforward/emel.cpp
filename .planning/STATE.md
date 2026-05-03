@@ -1,16 +1,16 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.21
-milestone_name: Quality Gate Selective Runner Optimization
-status: completed
-stopped_at: v1.21 milestone completed and archived.
-last_updated: "2026-05-02T16:34:17.915Z"
-last_activity: 2026-05-02
+milestone: v1.22
+milestone_name: Weight Loading Ownership Cutover
+status: milestone_archived_pr_open
+stopped_at: v1.22 archived and prepared for PR #81.
+last_updated: "2026-05-03T16:13:12Z"
+last_activity: 2026-05-03
 progress:
-  total_phases: 5
-  completed_phases: 5
-  total_plans: 5
-  completed_plans: 5
+  total_phases: 12
+  completed_phases: 12
+  total_plans: 12
+  completed_plans: 12
   percent: 100
 ---
 
@@ -18,50 +18,52 @@ progress:
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-05-02)
+See: .planning/PROJECT.md (updated 2026-05-03)
 
 **Core value:** Prove real end-to-end behavior with explicit SML orchestration and
 parity-oriented verification before widening API surface or model scope.
-**Current focus:** No active milestone. Ready for `$gsd-new-milestone`.
+**Current focus:** v1.22 is archived and open for review in PR #81; start the next milestone with
+`$gsd-new-milestone` after merge.
 
 ## Current Position
 
-Phase: Milestone complete
-Plan: Not started
-Status: v1.21 milestone complete
-Last activity: 2026-05-02
+Phase: none
+Plan: none
+Status: v1.22 archived and PR #81 open
+Last activity: 2026-05-03 - Cleaned up v1.22 audit tech debt, refreshed the audit to passed, and
+pushed PR #81 for review.
 
-Progress: [##########] 100%
+Progress: [██████████] 100%
 
 ## Performance Metrics
 
-**Latest shipped milestone:** `v1.21 Quality Gate Selective Runner Optimization`
+**Latest audited milestone:** `v1.22 Weight Loading Ownership Cutover`
 
-- v1.21 shipped on 2026-05-02 with 5 phases completed and 14/14 active requirements satisfied.
-- v1.21 quality-gate optimization artifacts are archived under `.planning/milestones/`.
-- Next action: `$gsd-new-milestone`.
-- Current blocker: none.
+- v1.22 was archived on 2026-05-03, then reopened for a source-backed maintained-path gap.
+- Phase 194 restored `TENSOR-02` and `LOAD-02`.
+- Phase 195 closed the strict loader/tensor outcome and wrapper rule contradictions.
+- Phase 196 repaired stale closeout state metadata that still referenced Phase 194.
+- Final cleanup normalized validation/frontmatter evidence and public GGUF loader wrapper use in
+  maintained tool lanes.
+- Final audit status is `passed` with 14/14 active requirements satisfied.
+- PR #81 is open: https://github.com/stateforward/emel.cpp/pull/81
+- Current archive files live under `.planning/milestones/`.
 
 ## Accumulated Context
 
 ### Decisions
 
 Decisions are logged in PROJECT.md Key Decisions table.
-Recent decisions affecting current work:
+Recent decisions affecting this work:
 
-- v1.21 starts from GitHub issue #58 and optimizes the mandatory quality gate after v1.18/v1.19
-  added parity and benchmark dependency manifests.
-
-- `scripts/quality_gates.sh` remains mandatory; selective execution only chooses parity and
-  benchmark runners inside that gate.
-
-- Missing, stale, uncertain, malformed, or failed manifest impact resolution must fall back to the
-  affected tool's full relevant runner set.
-
-- Parallel gate work must preserve lane isolation, clear per-lane logs, and deterministic exit
-  status reporting.
-
-- `commit_docs` is false for this milestone setup; roadmap artifacts are not auto-committed.
+- `model/tensor` owns tensor load, bind, evict, and residency semantics.
+- `model/loader` orchestrates tensor-owned behavior and must not absorb backend-specific loading
+  strategy logic.
+- Concrete I/O strategy work remains deferred to a future `emel/io` milestone.
+- Guardrails must continue to reject a second model-weight residency owner and stale retired-owner
+  public prose.
+- User approved updates to snapshots, benchmarks, and model artifacts when required for this
+  gap-closure work.
 
 ### Pending Todos
 
@@ -76,7 +78,7 @@ None.
 
 ## Deferred Items
 
-Items acknowledged and carried forward from previous milestone close:
+Items acknowledged and deferred at v1.22 milestone close on 2026-05-03:
 
 | Category | Item | Status |
 |----------|------|--------|
@@ -88,6 +90,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-05-02T14:17:09Z
-Stopped at: v1.21 milestone completed and archived.
+Last session: 2026-05-03T04:38:04Z
+Stopped at: v1.22 archived after Phase 196 state closeout metadata repair.
 Resume file: None

@@ -1167,7 +1167,7 @@ TEST_CASE("parity engine source keeps EMEL and reference lane objects separate")
       read_text_file(repo_root_dir() / "tools" / "paritychecker" / "parity_engines.cpp");
   REQUIRE_FALSE(source.empty());
 
-  CHECK(source.find("const llama_vocab * llama_vocab_ptr") != std::string::npos);
+  CHECK(source.find("const llama_vocab *llama_vocab_ptr") != std::string::npos);
   CHECK(source.find("auto emel_vocab = std::make_unique<emel::model::data::vocab>()") !=
         std::string::npos);
   CHECK(source.find("load_emel_vocab_from_gguf_file(opts.model_path, *emel_vocab)") !=

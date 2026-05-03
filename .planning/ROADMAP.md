@@ -1,14 +1,23 @@
 # Roadmap: EMEL
 
-## No Active Milestone
+## Milestones
 
-The latest milestone, `v1.21 Quality Gate Selective Runner Optimization`, shipped on 2026-05-02.
+- ✅ **v1.22 Weight Loading Ownership Cutover** — Phases 185-196, shipped 2026-05-03
+  after strict source-backed audit closeout and state metadata repair.
 
-Archived milestone records:
+## Current Status
 
-- [v1.21 roadmap](milestones/v1.21-ROADMAP.md)
-- [v1.21 requirements](milestones/v1.21-REQUIREMENTS.md)
-- [v1.21 audit](milestones/v1.21-MILESTONE-AUDIT.md)
-- [v1.21 phase artifacts](milestones/v1.21-phases/)
+No active milestone is open.
 
-Start the next milestone with `$gsd-new-milestone`.
+Start the next milestone with:
+
+```bash
+$gsd-new-milestone
+```
+
+## Archive
+
+- [v1.22 roadmap](milestones/v1.22-ROADMAP.md)
+- [v1.22 requirements](milestones/v1.22-REQUIREMENTS.md)
+- [v1.22 audit](milestones/v1.22-MILESTONE-AUDIT.md)
+- [v1.22 phase artifacts](milestones/v1.22-phases/)

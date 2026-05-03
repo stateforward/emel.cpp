@@ -214,7 +214,6 @@ Scoring rule for `StaticStatus`:
 | `src/emel/memory/kv/sm.hpp` | PASS | 1 | 1 | 1 | 1 | 0 | 1 | 0 | 0 | 1 | 1 | none |
 | `src/emel/memory/recurrent/sm.hpp` | PASS | 1 | 1 | 1 | 1 | 0 | 1 | 0 | 0 | 1 | 1 | designed |
 | `src/emel/model/loader/sm.hpp` | PASS | 1 | 1 | 1 | 1 | 0 | 1 | 0 | 0 | 1 | 1 | none |
-| `src/emel/model/weight_loader/sm.hpp` | PASS | 1 | 1 | 1 | 1 | 0 | 1 | 0 | 0 | 1 | 1 | none |
 | `src/emel/tensor/sm.hpp` | PASS | 1 | 1 | 1 | 1 | 0 | 1 | 0 | 0 | 1 | 1 | designed |
 | `src/emel/tensor/view/sm.hpp` | PASS | 1 | 1 | 1 | 1 | 0 | 1 | 0 | 0 | 1 | 1 | designed |
 | `src/emel/text/conditioner/sm.hpp` | PASS | 1 | 1 | 1 | 1 | 0 | 1 | 0 | 0 | 1 | 1 | none |

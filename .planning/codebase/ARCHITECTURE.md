@@ -64,15 +64,15 @@ the docs tooling in `src/emel/docs/detail.hpp`.
 Model ingestion is split across four layers:
 
 - `src/emel/gguf/loader/sm.hpp` probes, binds, and parses GGUF storage
-- `src/emel/model/loader/sm.hpp` orchestrates parse, optional weight loading, layer mapping, and
+- `src/emel/model/loader/sm.hpp` orchestrates parse, optional tensor loading, layer mapping, and
   structural / architectural validation
-- `src/emel/model/weight_loader/sm.hpp` manages bind, plan, and apply phases for weight materialization
+- `src/emel/model/tensor/sm.hpp` manages bind, plan, and apply phases for tensor residency
 - `src/emel/model/data.hpp` and `src/emel/model/data.cpp` hold the large fixed-capacity in-memory
   model representation, including vocabulary, tensor records, and hyperparameters
 
 This path is callback-driven at the edges. `src/emel/model/loader/events.hpp` shows the abstract
-operations that the loader expects: `parse_model`, `load_weights`, `map_layers`,
-`validate_structure`, and `validate_architecture_impl`.
+operations that the loader expects: `parse_model`, tensor-loader spans / actor binding,
+`map_layers`, `validate_structure`, and `validate_architecture_impl`.
 
 ### Text processing
 
@@ -183,7 +183,7 @@ Nested orchestration is done with submachine states rather than direct action ca
 The dominant model-load path is:
 
 `src/emel/gguf/loader/sm.hpp` -> `src/emel/model/loader/sm.hpp` ->
-`src/emel/model/weight_loader/sm.hpp` -> `src/emel/model/data.hpp`
+`src/emel/model/tensor/sm.hpp` -> `src/emel/model/data.hpp`
 
 The data object is passed by reference through events, not mirrored across multiple orchestration
 layers. `src/emel/model/loader/events.hpp` and `src/emel/gguf/loader/events.hpp` show this request

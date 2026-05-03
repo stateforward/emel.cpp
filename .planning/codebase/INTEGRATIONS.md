@@ -67,7 +67,7 @@ the main boundaries between `src/emel/` and the outside world.
 ## Model And Data Integrations
 
 - The main model format boundary is GGUF. Production loaders live in `src/emel/gguf/loader/sm.hpp`,
-  `src/emel/model/loader/sm.hpp`, and `src/emel/model/weight_loader/sm.hpp`.
+  `src/emel/model/loader/sm.hpp`, and `src/emel/model/tensor/sm.hpp`.
 - Test and benchmark model artifacts are stored locally in `tests/models/`, with provenance,
   license, and download URLs documented in `tests/models/README.md`.
 - `tools/bench/memory/kv_bench.cpp`, `tools/bench/memory/recurrent_bench.cpp`, and
@@ -105,4 +105,5 @@ the main boundaries between `src/emel/` and the outside world.
   `src/emel/kernel/wasm/` define backend-specific state-machine boundaries, but explicit vendor SDK
   linkage is not yet wired into the root `CMakeLists.txt`.
 - `tools/mock_main.cpp` is a local harness that exercises model-loader and GGUF-loader boundaries
-  directly through machine `process_event(...)` calls and is useful as a narrow integration probe.
+  directly through current machine `process_event(...)` calls and remains a bounded, manual
+  integration probe.

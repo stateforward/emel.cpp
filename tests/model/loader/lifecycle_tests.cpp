@@ -6,6 +6,7 @@
 #include <filesystem>
 #include <fstream>
 #include <initializer_list>
+#include <iterator>
 #include <memory>
 #include <span>
 #include <string>
@@ -20,8 +21,11 @@
 #include "emel/kernel/events.hpp"
 #include "emel/model/detail.hpp"
 #include "emel/model/llama/detail.hpp"
+#include "emel/model/loader/actions.hpp"
 #include "emel/model/loader/errors.hpp"
+#include "emel/model/loader/guards.hpp"
 #include "emel/model/loader/sm.hpp"
+#include "emel/model/tensor/sm.hpp"
 #include "emel/model/omniembed/detail.hpp"
 #include "emel/model/sortformer/detail.hpp"
 #include "emel/model/whisper/detail.hpp"
@@ -63,30 +67,54 @@ parse_ok(void *, const emel::model::loader::event::load &req) noexcept {
 }
 
 emel::error::type
-parse_fail(void *, const emel::model::loader::event::load &) noexcept {
-  return emel::error::cast(emel::model::loader::error::parse_failed);
-}
-
-emel::error::type load_weights_ok(void *,
-                                  const emel::model::loader::event::load &req,
-                                  uint64_t &bytes_total, uint64_t &bytes_done,
-                                  bool &used_mmap) noexcept {
-  static_cast<void>(req);
-  bytes_total = 4096;
-  bytes_done = 4096;
-  used_mmap = true;
+parse_model_path_weights_ok(
+    void *, const emel::model::loader::event::load &req) noexcept {
+  req.model_data.n_tensors = 1;
+  req.model_data.n_layers = 1;
+  req.model_data.weights_data = req.model_data.tensors.data();
+  req.model_data.weights_size = 777u;
+  req.model_data.weights_mapped = true;
+  req.model_data.weights_split_count = 2u;
+  req.model_data.weights_split_offsets[0] = 11u;
+  req.model_data.weights_split_offsets[1] = 22u;
+  req.model_data.weights_split_sizes[0] = 333u;
+  req.model_data.weights_split_sizes[1] = 444u;
   return emel::error::cast(emel::model::loader::error::none);
 }
 
 emel::error::type
-load_weights_backend_error(void *, const emel::model::loader::event::load &,
-                           uint64_t &bytes_total, uint64_t &bytes_done,
-                           bool &used_mmap) noexcept {
-  bytes_total = 0;
-  bytes_done = 0;
-  used_mmap = false;
-  return emel::error::cast(emel::model::loader::error::backend_error);
+parse_fail(void *, const emel::model::loader::event::load &) noexcept {
+  return emel::error::cast(emel::model::loader::error::parse_failed);
 }
+
+struct tensor_loader_fixture {
+  emel::model::tensor::sm machine{};
+  std::array<emel::model::tensor::effect_request, 4> effect_requests{};
+  std::array<emel::model::tensor::effect_result, 4> effect_results{};
+
+  void bind(emel::model::loader::event::load &request) noexcept {
+    request.tensor_loader = &machine;
+    request.effect_requests = std::span{effect_requests};
+    request.effect_results = std::span{effect_results};
+  }
+};
+
+struct loader_tensor_phase_fixture {
+  emel::model::loader::events::tensor_bind_done bind_done{};
+  emel::model::loader::events::tensor_bind_error bind_error{};
+  emel::model::loader::events::tensor_plan_done plan_done{};
+  emel::model::loader::events::tensor_plan_error plan_error{};
+  emel::model::loader::events::tensor_apply_done apply_done{};
+  emel::model::loader::events::tensor_apply_error apply_error{};
+  emel::model::loader::event::tensor_phase_events events{
+      bind_done,
+      bind_error,
+      plan_done,
+      plan_error,
+      apply_done,
+      apply_error,
+  };
+};
 
 emel::error::type
 map_layers_ok(void *, const emel::model::loader::event::load &req) noexcept {
@@ -740,6 +768,39 @@ std::vector<uint8_t> read_binary_file(const std::filesystem::path &path) {
   return bytes;
 }
 
+std::string read_text_file(const std::filesystem::path &path) {
+  std::ifstream stream(path);
+  REQUIRE(stream.good());
+  return std::string{std::istreambuf_iterator<char>{stream},
+                     std::istreambuf_iterator<char>{}};
+}
+
+std::string_view function_source(const std::string &source,
+                                 const std::string_view function_name) {
+  const size_t name_pos = source.find(function_name);
+  REQUIRE(name_pos != std::string::npos);
+
+  const size_t body_begin = source.find('{', name_pos);
+  REQUIRE(body_begin != std::string::npos);
+
+  size_t depth = 0u;
+  for (size_t cursor = body_begin; cursor < source.size(); ++cursor) {
+    if (source[cursor] == '{') {
+      depth += 1u;
+    } else if (source[cursor] == '}') {
+      REQUIRE(depth > 0u);
+      depth -= 1u;
+      if (depth == 0u) {
+        return std::string_view{source.data() + name_pos,
+                                cursor + 1u - name_pos};
+      }
+    }
+  }
+
+  FAIL("function body not closed");
+  return {};
+}
+
 void noop_probe_done(const emel::gguf::loader::events::probe_done &) {}
 void noop_probe_error(const emel::gguf::loader::events::probe_error &) {}
 void noop_bind_done(const emel::gguf::loader::events::bind_done &) {}
@@ -823,12 +884,13 @@ TEST_CASE("model loader lifecycle succeeds on full load path") {
   emel::model::loader::sm machine{};
   owner_state owner{};
   emel::model::loader::event::parse_model_fn parse_model{nullptr, parse_ok};
+  tensor_loader_fixture tensor_loader{};
 
   uint8_t file_bytes[8] = {};
   emel::model::loader::event::load request{*model, parse_model};
   request.file_image = file_bytes;
   request.file_size = sizeof(file_bytes);
-  request.load_weights = {nullptr, load_weights_ok};
+  tensor_loader.bind(request);
   request.map_layers = {nullptr, map_layers_ok};
   request.validate_structure = {nullptr, validate_structure_ok};
   request.validate_architecture_impl = {nullptr, validate_architecture_ok};
@@ -838,9 +900,42 @@ TEST_CASE("model loader lifecycle succeeds on full load path") {
   CHECK(machine.process_event(request));
   CHECK(owner.done);
   CHECK_FALSE(owner.error);
-  CHECK(owner.bytes_total == 4096);
-  CHECK(owner.bytes_done == 4096);
+  CHECK(owner.bytes_total == sizeof(file_bytes));
+  CHECK(owner.bytes_done == sizeof(file_bytes));
+  CHECK_FALSE(owner.used_mmap);
+}
+
+TEST_CASE("model loader preserves parser weight metadata on model-path load") {
+  auto model = std::make_unique<emel::model::data>();
+  emel::model::loader::sm machine{};
+  owner_state owner{};
+  emel::model::loader::event::parse_model_fn parse_model{
+      nullptr, parse_model_path_weights_ok};
+  tensor_loader_fixture tensor_loader{};
+
+  emel::model::loader::event::load request{*model, parse_model};
+  request.model_path = "model.gguf";
+  tensor_loader.bind(request);
+  request.map_layers = {nullptr, map_layers_ok};
+  request.validate_structure = {nullptr, validate_structure_ok};
+  request.validate_architecture_impl = {nullptr, validate_architecture_ok};
+  request.on_done = {&owner, on_done};
+  request.on_error = {&owner, on_error};
+
+  CHECK(machine.process_event(request));
+  CHECK(owner.done);
+  CHECK_FALSE(owner.error);
+  CHECK(owner.bytes_total == 777u);
+  CHECK(owner.bytes_done == 777u);
   CHECK(owner.used_mmap);
+  CHECK(model->weights_data == model->tensors.data());
+  CHECK(model->weights_size == 777u);
+  CHECK(model->weights_mapped);
+  CHECK(model->weights_split_count == 2u);
+  CHECK(model->weights_split_offsets[0] == 11u);
+  CHECK(model->weights_split_offsets[1] == 22u);
+  CHECK(model->weights_split_sizes[0] == 333u);
+  CHECK(model->weights_split_sizes[1] == 444u);
 }
 
 TEST_CASE("model loader rejects missing source payload") {
@@ -905,7 +1000,7 @@ TEST_CASE("model loader propagates parse failure") {
         emel::error::cast(emel::model::loader::error::parse_failed));
 }
 
-TEST_CASE("model loader rejects full load without load_weights callback") {
+TEST_CASE("model loader rejects full load without tensor loader") {
   auto model = std::make_unique<emel::model::data>();
   emel::model::loader::sm machine{};
   owner_state owner{};
@@ -933,12 +1028,13 @@ TEST_CASE("model loader rejects full load without map_layers callback") {
   emel::model::loader::sm machine{};
   owner_state owner{};
   emel::model::loader::event::parse_model_fn parse_model{nullptr, parse_ok};
+  tensor_loader_fixture tensor_loader{};
 
   uint8_t file_bytes[8] = {};
   emel::model::loader::event::load request{*model, parse_model};
   request.file_image = file_bytes;
   request.file_size = sizeof(file_bytes);
-  request.load_weights = {nullptr, load_weights_ok};
+  tensor_loader.bind(request);
   request.validate_structure = {nullptr, validate_structure_ok};
   request.validate_architecture_impl = {nullptr, validate_architecture_ok};
   request.on_done = {&owner, on_done};
@@ -951,17 +1047,18 @@ TEST_CASE("model loader rejects full load without map_layers callback") {
         emel::error::cast(emel::model::loader::error::invalid_request));
 }
 
-TEST_CASE("model loader propagates load_weights backend error") {
+TEST_CASE("model loader rejects full load without tensor effect storage") {
   auto model = std::make_unique<emel::model::data>();
   emel::model::loader::sm machine{};
   owner_state owner{};
   emel::model::loader::event::parse_model_fn parse_model{nullptr, parse_ok};
+  emel::model::tensor::sm tensor_loader{};
 
   uint8_t file_bytes[8] = {};
   emel::model::loader::event::load request{*model, parse_model};
   request.file_image = file_bytes;
   request.file_size = sizeof(file_bytes);
-  request.load_weights = {nullptr, load_weights_backend_error};
+  request.tensor_loader = &tensor_loader;
   request.map_layers = {nullptr, map_layers_ok};
   request.validate_structure = {nullptr, validate_structure_ok};
   request.validate_architecture_impl = {nullptr, validate_architecture_ok};
@@ -972,7 +1069,265 @@ TEST_CASE("model loader propagates load_weights backend error") {
   CHECK_FALSE(owner.done);
   CHECK(owner.error);
   CHECK(owner.err ==
-        emel::error::cast(emel::model::loader::error::backend_error));
+        emel::error::cast(emel::model::loader::error::invalid_request));
+}
+
+TEST_CASE("model loader tensor bulk phase does not use local capture routing") {
+  const std::string actions_source =
+      read_text_file(repo_root() / "src" / "emel" / "model" / "loader" /
+                     "actions.hpp");
+  const std::string sm_source =
+      read_text_file(repo_root() / "src" / "emel" / "model" / "loader" /
+                     "sm.hpp");
+
+  CHECK(actions_source.find("tensor_load_capture") == std::string::npos);
+  CHECK(actions_source.find("capture.bind_done") == std::string::npos);
+  CHECK(actions_source.find("capture.plan_done") == std::string::npos);
+  CHECK(actions_source.find("capture.apply_done") == std::string::npos);
+  CHECK(actions_source.find("detail::map_tensor_error(capture.err)") ==
+        std::string::npos);
+  CHECK(sm_source.find("state_tensor_bind_decision") != std::string::npos);
+  CHECK(sm_source.find("state_tensor_plan_decision") != std::string::npos);
+  CHECK(sm_source.find("state_tensor_apply_decision") != std::string::npos);
+}
+
+TEST_CASE("model loader tensor outcomes use typed phase events not result enum "
+          "routing") {
+  const std::string actions_source =
+      read_text_file(repo_root() / "src" / "emel" / "model" / "loader" /
+                     "actions.hpp");
+  const std::string events_source =
+      read_text_file(repo_root() / "src" / "emel" / "model" / "loader" /
+                     "events.hpp");
+  const std::string guards_source =
+      read_text_file(repo_root() / "src" / "emel" / "model" / "loader" /
+                     "guards.hpp");
+
+  CHECK(events_source.find("tensor_load_result") == std::string::npos);
+  CHECK(events_source.find("tensor_load_result_kind") == std::string::npos);
+  CHECK(actions_source.find("reset_tensor_result") == std::string::npos);
+  CHECK(actions_source.find("on_tensor_bind_done") == std::string::npos);
+  CHECK(actions_source.find("on_tensor_plan_done") == std::string::npos);
+  CHECK(actions_source.find("on_tensor_apply_done") == std::string::npos);
+  CHECK(guards_source.find("tensor_result_is") == std::string::npos);
+  CHECK(guards_source.find("guard_tensor_bind_done") == std::string::npos);
+  CHECK(guards_source.find("guard_tensor_plan_done") == std::string::npos);
+  CHECK(guards_source.find("guard_tensor_apply_done") == std::string::npos);
+}
+
+TEST_CASE("model tensor state-machine wrappers keep context and optional output "
+          "routing in transitions") {
+  const std::string detail_source =
+      read_text_file(repo_root() / "src" / "emel" / "model" / "tensor" /
+                     "detail.hpp");
+  const std::string sm_source =
+      read_text_file(repo_root() / "src" / "emel" / "model" / "tensor" /
+                     "sm.hpp");
+
+  CHECK(detail_source.find("bind_or_sink") == std::string::npos);
+  CHECK(detail_source.find("choices[") == std::string::npos);
+  CHECK(sm_source.find("this->context_") == std::string::npos);
+  CHECK(sm_source.find("bind_or_sink") == std::string::npos);
+}
+
+TEST_CASE("maintained tool parse callbacks do not resize gguf kv storage during "
+          "loader dispatch") {
+  struct callback_source {
+    const char *path;
+    const char *function_name;
+    const char *prebind_name;
+  };
+
+  const callback_source sources[] = {
+      {"tools/bench/generation_bench.cpp", "run_emel_parse_model",
+       "prebind_emel_gguf_storage"},
+      {"tools/bench/diarization/sortformer_fixture.hpp",
+       "run_emel_parse_model", "prebind_emel_gguf_storage"},
+      {"tools/embedded_size/emel_probe/main.cpp", "run_emel_parse_model",
+       "prebind_emel_gguf_storage"},
+      {"tools/paritychecker/parity_engines.cpp", "parse_gguf_kv_storage",
+       "prebind_gguf_kv_storage"},
+  };
+
+  for (const auto &source_info : sources) {
+    CAPTURE(source_info.path);
+    const std::string source = read_text_file(repo_root() / source_info.path);
+    const std::string_view callback =
+        function_source(source, source_info.function_name);
+
+    CHECK(source.find(source_info.prebind_name) != std::string::npos);
+    CHECK(callback.find(".kv_arena.resize") == std::string_view::npos);
+    CHECK(callback.find(".kv_entries.resize") == std::string_view::npos);
+  }
+}
+
+TEST_CASE("model loader tensor outcome contract maps callbacks and guards") {
+  namespace loader_action = emel::model::loader::action::detail;
+  using loader_error = emel::model::loader::error;
+  using tensor_error = emel::model::tensor::error;
+
+  std::array<emel::model::data::tensor_record, 1> tensor_records{};
+  emel::model::tensor::event::bind_storage bind_request{
+      std::span{tensor_records},
+  };
+
+  std::array<emel::model::tensor::effect_request, 1> effect_requests{};
+  emel::model::tensor::event::plan_load plan_request{
+      std::span{effect_requests},
+  };
+
+  std::array<emel::model::tensor::effect_result, 1> effect_results{};
+  emel::model::tensor::event::apply_effect_results apply_request{
+      std::span<const emel::model::tensor::effect_result>{effect_results},
+  };
+
+  loader_tensor_phase_fixture phases{};
+
+  phases.bind_done.raised = true;
+  phases.bind_error.raised = true;
+  phases.bind_error.err = emel::error::cast(tensor_error::backend_error);
+  loader_action::reset_tensor_bind_events(phases.events);
+  CHECK_FALSE(phases.bind_done.raised);
+  CHECK_FALSE(phases.bind_error.raised);
+  CHECK(phases.bind_error.err == emel::error::cast(tensor_error::none));
+
+  loader_action::record_bind_done_event(
+      &phases.events, emel::model::tensor::events::bind_done{bind_request});
+  CHECK(phases.bind_done.raised);
+  CHECK_FALSE(phases.bind_error.raised);
+
+  loader_action::record_bind_error_event(
+      &phases.events,
+      emel::model::tensor::events::bind_error{
+          bind_request, emel::error::cast(tensor_error::model_invalid)});
+  CHECK_FALSE(phases.bind_done.raised);
+  CHECK(phases.bind_error.raised);
+  CHECK(phases.bind_error.err ==
+        emel::error::cast(tensor_error::model_invalid));
+
+  phases.plan_done.raised = true;
+  phases.plan_done.effect_count = 7u;
+  phases.plan_error.raised = true;
+  phases.plan_error.err = emel::error::cast(tensor_error::backend_error);
+  loader_action::reset_tensor_plan_events(phases.events);
+  CHECK_FALSE(phases.plan_done.raised);
+  CHECK(phases.plan_done.effect_count == 0u);
+  CHECK_FALSE(phases.plan_error.raised);
+  CHECK(phases.plan_error.err == emel::error::cast(tensor_error::none));
+
+  loader_action::record_plan_done_event(
+      &phases.events, emel::model::tensor::events::plan_done{plan_request, 3u});
+  CHECK(phases.plan_done.raised);
+  CHECK(phases.plan_done.effect_count == 3u);
+  CHECK_FALSE(phases.plan_error.raised);
+
+  loader_action::record_plan_error_event(
+      &phases.events,
+      emel::model::tensor::events::plan_error{
+          plan_request, emel::error::cast(tensor_error::internal_error)});
+  CHECK_FALSE(phases.plan_done.raised);
+  CHECK(phases.plan_done.effect_count == 0u);
+  CHECK(phases.plan_error.raised);
+  CHECK(phases.plan_error.err ==
+        emel::error::cast(tensor_error::internal_error));
+
+  phases.apply_done.raised = true;
+  phases.apply_error.raised = true;
+  phases.apply_error.err = emel::error::cast(tensor_error::backend_error);
+  loader_action::reset_tensor_apply_events(phases.events);
+  CHECK_FALSE(phases.apply_done.raised);
+  CHECK_FALSE(phases.apply_error.raised);
+  CHECK(phases.apply_error.err == emel::error::cast(tensor_error::none));
+
+  loader_action::record_apply_done_event(
+      &phases.events, emel::model::tensor::events::apply_done{apply_request});
+  CHECK(phases.apply_done.raised);
+  CHECK_FALSE(phases.apply_error.raised);
+
+  loader_action::record_apply_error_event(
+      &phases.events,
+      emel::model::tensor::events::apply_error{
+          apply_request, emel::error::cast(tensor_error::untracked)});
+  CHECK_FALSE(phases.apply_done.raised);
+  CHECK(phases.apply_error.raised);
+  CHECK(phases.apply_error.err == emel::error::cast(tensor_error::untracked));
+
+  CHECK(loader_action::map_tensor_error(emel::error::cast(tensor_error::none)) ==
+        emel::error::cast(loader_error::none));
+  CHECK(loader_action::map_tensor_error(
+            emel::error::cast(tensor_error::invalid_request)) ==
+        emel::error::cast(loader_error::invalid_request));
+  CHECK(loader_action::map_tensor_error(
+            emel::error::cast(tensor_error::model_invalid)) ==
+        emel::error::cast(loader_error::model_invalid));
+  CHECK(loader_action::map_tensor_error(
+            emel::error::cast(tensor_error::internal_error)) ==
+        emel::error::cast(loader_error::internal_error));
+  CHECK(loader_action::map_tensor_error(
+            emel::error::cast(tensor_error::untracked)) ==
+        emel::error::cast(loader_error::untracked));
+  CHECK(loader_action::map_tensor_error(
+            static_cast<emel::error::type>(0xFFFFu)) ==
+        emel::error::cast(loader_error::backend_error));
+
+  auto model = std::make_unique<emel::model::data>();
+  emel::model::loader::event::load_ctx load_ctx{};
+  emel::model::loader::event::parse_model_fn parse_model{nullptr, parse_ok};
+  emel::model::loader::event::load request{*model, parse_model};
+  emel::model::loader::event::load_runtime runtime{request, load_ctx,
+                                                   phases.events};
+  emel::model::loader::action::context action_ctx{};
+
+  loader_action::reset_tensor_bind_events(phases.events);
+  loader_action::reset_tensor_plan_events(phases.events);
+  loader_action::reset_tensor_apply_events(phases.events);
+  CHECK(emel::model::loader::guard::tensor_bind_unhandled{}(runtime));
+  CHECK(emel::model::loader::guard::tensor_plan_unhandled{}(runtime));
+  CHECK(emel::model::loader::guard::tensor_apply_unhandled{}(runtime));
+
+  phases.bind_done.raised = true;
+  CHECK(emel::model::loader::guard::tensor_bind_done_raised{}(runtime));
+  CHECK_FALSE(emel::model::loader::guard::tensor_bind_unhandled{}(runtime));
+  phases.bind_done.raised = false;
+
+  phases.bind_error.raised = true;
+  CHECK(emel::model::loader::guard::tensor_bind_error_raised{}(runtime));
+  phases.bind_error.raised = false;
+
+  phases.plan_done.raised = true;
+  CHECK(emel::model::loader::guard::tensor_plan_done_raised{}(runtime));
+  CHECK_FALSE(emel::model::loader::guard::tensor_plan_unhandled{}(runtime));
+  phases.plan_done.raised = false;
+
+  phases.plan_error.raised = true;
+  CHECK(emel::model::loader::guard::tensor_plan_error_raised{}(runtime));
+  phases.plan_error.raised = false;
+
+  phases.apply_done.raised = true;
+  CHECK(emel::model::loader::guard::tensor_apply_done_raised{}(runtime));
+  CHECK_FALSE(emel::model::loader::guard::tensor_apply_unhandled{}(runtime));
+  phases.apply_done.raised = false;
+
+  phases.apply_error.raised = true;
+  CHECK(emel::model::loader::guard::tensor_apply_error_raised{}(runtime));
+
+  phases.bind_error.err = emel::error::cast(tensor_error::invalid_request);
+  emel::model::loader::action::effect_mark_tensor_bind_error(runtime,
+                                                             action_ctx);
+  CHECK(load_ctx.err == emel::error::cast(loader_error::invalid_request));
+
+  phases.plan_error.err = emel::error::cast(tensor_error::internal_error);
+  emel::model::loader::action::effect_mark_tensor_plan_error(runtime,
+                                                             action_ctx);
+  CHECK(load_ctx.err == emel::error::cast(loader_error::internal_error));
+
+  phases.apply_error.err = emel::error::cast(tensor_error::untracked);
+  emel::model::loader::action::effect_mark_tensor_apply_error(runtime,
+                                                              action_ctx);
+  CHECK(load_ctx.err == emel::error::cast(loader_error::untracked));
+
+  emel::model::loader::action::mark_model_invalid(runtime, action_ctx);
+  CHECK(load_ctx.err == emel::error::cast(loader_error::model_invalid));
 }
 
 TEST_CASE(
@@ -981,7 +1336,9 @@ TEST_CASE(
   emel::model::loader::event::parse_model_fn parse_model{nullptr, parse_ok};
   emel::model::loader::event::load request{*model, parse_model};
   emel::model::loader::event::load_ctx load_ctx{};
-  emel::model::loader::event::load_runtime runtime{request, load_ctx};
+  loader_tensor_phase_fixture tensor_phases{};
+  emel::model::loader::event::load_runtime runtime{request, load_ctx,
+                                                   tensor_phases.events};
   const auto guard = emel::model::loader::guard::error_unclassified_code{};
 
   load_ctx.err = emel::error::cast(emel::model::loader::error::none);
@@ -1000,6 +1357,108 @@ TEST_CASE(
   CHECK_FALSE(guard(runtime));
   load_ctx.err = static_cast<emel::error::type>(0xFFFFu);
   CHECK(guard(runtime));
+}
+
+TEST_CASE("model loader rejects tensor counts above model storage capacity") {
+  auto model = std::make_unique<emel::model::data>();
+  emel::model::tensor::sm tensor_loader{};
+  emel::model::loader::event::load_ctx load_ctx{};
+  emel::model::loader::event::parse_model_fn parse_model{nullptr, parse_ok};
+  emel::model::loader::event::load request{*model, parse_model};
+  loader_tensor_phase_fixture tensor_phases{};
+  emel::model::loader::event::load_runtime runtime{request, load_ctx,
+                                                   tensor_phases.events};
+  std::array<emel::model::tensor::effect_request, 1> effect_requests{};
+  std::array<emel::model::tensor::effect_result, 1> effect_results{};
+  const auto excessive_tensor_count =
+      static_cast<uint32_t>(emel::model::data::k_max_tensors) + 1u;
+
+  model->n_tensors = excessive_tensor_count;
+  request.tensor_loader = &tensor_loader;
+  request.effect_requests =
+      std::span<emel::model::tensor::effect_request>{
+          effect_requests.data(), excessive_tensor_count};
+  request.effect_results =
+      std::span<emel::model::tensor::effect_result>{effect_results.data(),
+                                                    excessive_tensor_count};
+
+  CHECK_FALSE(emel::model::loader::guard::can_load_tensors{}(runtime));
+  CHECK(emel::model::loader::guard::cannot_load_tensors{}(runtime));
+}
+
+TEST_CASE("model loader renamed tensor seam covers guard and noop branches") {
+  auto model = std::make_unique<emel::model::data>();
+  emel::model::loader::action::context action_ctx{};
+  emel::model::loader::event::load_ctx load_ctx{};
+  emel::model::loader::event::parse_model_fn parse_model{nullptr, parse_ok};
+  emel::model::loader::event::load request{*model, parse_model};
+  loader_tensor_phase_fixture tensor_phases{};
+  emel::model::loader::event::load_runtime runtime{request, load_ctx,
+                                                   tensor_phases.events};
+
+  CHECK_FALSE(emel::model::loader::guard::valid_request{}(runtime, action_ctx));
+  uint8_t file_bytes[8] = {};
+  request.file_image = file_bytes;
+  request.file_size = sizeof(file_bytes);
+  CHECK(emel::model::loader::guard::valid_request{}(runtime, action_ctx));
+  request.file_image = nullptr;
+  request.file_size = 0u;
+  request.model_path = "model.gguf";
+  CHECK(emel::model::loader::guard::valid_request{}(runtime, action_ctx));
+  request.model_path = {};
+
+  emel::model::loader::action::mark_internal_error(runtime, action_ctx);
+  CHECK(load_ctx.err ==
+        emel::error::cast(emel::model::loader::error::internal_error));
+  CHECK(emel::model::loader::guard::error_internal_error{}(runtime));
+
+  load_ctx.err = emel::error::cast(emel::model::loader::error::model_invalid);
+  CHECK(emel::model::loader::guard::error_model_invalid{}(runtime));
+
+  load_ctx.err = emel::error::cast(emel::model::loader::error::untracked);
+  CHECK(emel::model::loader::guard::error_untracked{}(runtime));
+
+  request.check_tensors = true;
+  request.validate_structure = {};
+  CHECK(emel::model::loader::guard::cannot_validate_structure{}(runtime));
+  CHECK_FALSE(emel::model::loader::guard::can_validate_structure{}(runtime));
+  request.check_tensors = false;
+  CHECK(emel::model::loader::guard::skip_validate_structure{}(runtime));
+  CHECK_FALSE(emel::model::loader::guard::cannot_validate_structure{}(runtime));
+  request.check_tensors = true;
+  request.validate_structure = {nullptr, validate_structure_ok};
+  CHECK(emel::model::loader::guard::can_validate_structure{}(runtime));
+
+  request.validate_architecture = true;
+  request.validate_architecture_impl = {};
+  CHECK(emel::model::loader::guard::cannot_validate_architecture{}(runtime));
+  CHECK_FALSE(emel::model::loader::guard::can_validate_architecture{}(runtime));
+  request.validate_architecture = false;
+  CHECK(emel::model::loader::guard::skip_validate_architecture{}(runtime));
+  CHECK_FALSE(
+      emel::model::loader::guard::cannot_validate_architecture{}(runtime));
+  request.validate_architecture = true;
+  request.validate_architecture_impl = {nullptr, validate_architecture_ok};
+  CHECK(emel::model::loader::guard::can_validate_architecture{}(runtime));
+
+  CHECK(emel::model::loader::guard::done_callback_absent{}(runtime));
+  CHECK(emel::model::loader::guard::error_callback_absent{}(runtime));
+  request.on_done = {nullptr, on_done};
+  request.on_error = {nullptr, on_error};
+  CHECK(emel::model::loader::guard::done_callback_present{}(runtime));
+  CHECK(emel::model::loader::guard::error_callback_present{}(runtime));
+
+  load_ctx.err = emel::error::cast(emel::model::loader::error::backend_error);
+  emel::model::loader::action::publish_error_noop(runtime, action_ctx);
+  CHECK(load_ctx.err ==
+        emel::error::cast(emel::model::loader::error::backend_error));
+
+  emel::model::loader::action::publish_done_noop(runtime, action_ctx);
+  CHECK(load_ctx.err == emel::error::cast(emel::model::loader::error::none));
+
+  emel::model::loader::action::on_unexpected(runtime, action_ctx);
+  CHECK(load_ctx.err ==
+        emel::error::cast(emel::model::loader::error::internal_error));
 }
 
 TEST_CASE("model_llama_detail_builds_execution_view_for_canonical_tensor_set") {

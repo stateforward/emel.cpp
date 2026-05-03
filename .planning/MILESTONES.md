@@ -1,5 +1,54 @@
 # Project Milestones: EMEL
 
+## v1.22 Weight Loading Ownership Cutover (Shipped: 2026-05-03)
+
+**Phases completed:** 12 phases, 12 plans, 0 tasks
+
+**Delivered:** Tensor residency ownership now lives under `src/emel/model/tensor`, the maintained
+model loader coordinates tensor-owned bind/plan/apply behavior, and the retired
+`model/weight_loader` owner is removed from source, tests, public docs, and guardrail baselines.
+After a source-backed closeout audit found a maintained-path allocation gap, Phase 194 moved GGUF
+KV storage growth before loader dispatch in the generation benchmark, Sortformer benchmark,
+embedded-size probe, and paritychecker lanes. Phase 195 then closed the strict loader/tensor
+outcome and wrapper contradictions, and Phase 196 repaired stale state metadata that still
+referenced Phase 194 as the closeout stop point.
+
+**Key accomplishments:**
+
+- Established the tensor-owned loading boundary and future `emel/io` seam before changing runtime
+  behavior.
+
+- Added tensor-owned bulk residency events, guards, actions, and tests while preserving existing
+  per-tensor lifecycle behavior.
+
+- Rewired the model loader and maintained generation, Sortformer, embedded probe, and paritychecker
+  entrypoints to pre-bind tensor effect storage and dispatch through the tensor actor.
+
+- Removed the retired `model/weight_loader` source/test path and added source-backed guardrails
+  against reintroducing a parallel residency owner.
+
+- Closed post-audit loader outcome gaps by routing tensor bind, plan, and apply outcomes through
+  explicit loader decision states instead of local callback flag capture.
+
+- Updated public roadmap prose and guardrails so v1.22 clearly defers concrete I/O strategy work
+  under the future `emel/io` seam.
+
+- Closed the final maintained-path audit gap by prebinding GGUF KV arena and entry storage before
+  `model_loader.process_event(...)` in maintained benchmark, probe, and parity entrypoints.
+
+- Closed the strict loader/tensor closeout by replacing result-enum routing with typed internal
+  tensor phase events and explicit guarded tensor wrapper exits.
+
+- Repaired archived state and milestone metadata so the final closeout record consistently names
+  Phase 195 runtime closure and Phase 196 state metadata repair.
+
+**Audit:** Source-backed audit passed with 14/14 active requirements satisfied after Phase 196
+closed the state closeout metadata contradiction.
+
+**Known deferred items at close:** 5 (see `.planning/STATE.md` Deferred Items).
+
+---
+
 ## v1.21 Quality Gate Selective Runner Optimization (Shipped: 2026-05-02)
 
 **Phases completed:** 5 phases, 5 plans, 0 tasks

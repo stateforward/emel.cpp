@@ -28,7 +28,7 @@ The main code lives under `src/emel/`. The directory layout maps closely to name
 
 - `src/emel/model/data.hpp` and `src/emel/model/data.cpp`: model data structures and storage
 - `src/emel/model/loader/`: orchestration for loading and validating model state
-- `src/emel/model/weight_loader/`: bind / plan / apply flow for weight loading
+- `src/emel/model/tensor/`: bind / plan / apply flow for tensor residency
 - `src/emel/gguf/loader/`: GGUF probe, bind, and parse actor
 
 ### Text stack
@@ -136,7 +136,7 @@ public C++ aliases.
 
 Tests mirror subsystem structure under `tests/`:
 
-- `tests/model/loader/` and `tests/model/weight_loader/`
+- `tests/model/loader/` and `tests/model/tensor/`
 - `tests/gguf/loader/`
 - `tests/gbnf/`
 - `tests/generator/`

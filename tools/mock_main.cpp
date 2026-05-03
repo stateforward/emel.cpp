@@ -1,118 +1,111 @@
+#include <array>
 #include <cstdio>
+#include <span>
 
+#include "emel/error/error.hpp"
 #include "emel/model/loader/sm.hpp"
-#include "emel/model/weight_loader/sm.hpp"
-#include "emel/gguf/loader/sm.hpp"
+#include "emel/model/tensor/sm.hpp"
 
 namespace {
 
-void print_step(const char * step, const bool accepted) {
+void print_step(const char *step, const bool accepted) {
   std::printf("[%s] accepted=%s\n", step, accepted ? "true" : "false");
 }
 
-bool dispatch_probe(void * parser_sm, const emel::gguf::loader::event::probe & ev) {
-  auto * machine = static_cast<emel::gguf::loader::sm *>(parser_sm);
-  return machine != nullptr && machine->process_event(ev);
+struct load_probe_state {
+  bool done = false;
+  bool error = false;
+  emel::error::type err = emel::error::cast(emel::model::loader::error::none);
+};
+
+emel::error::type
+parse_model_ok(void *, const emel::model::loader::event::load &req) noexcept {
+  req.model_data.n_tensors = 1u;
+  req.model_data.n_layers = 1;
+  auto &tensor = req.model_data.tensors[0];
+  tensor.file_offset = 0u;
+  tensor.data_size = req.file_size;
+  tensor.data = const_cast<void *>(req.file_image);
+  return emel::error::cast(emel::model::loader::error::none);
 }
 
-bool dispatch_bind_storage(void * parser_sm, const emel::gguf::loader::event::bind_storage & ev) {
-  auto * machine = static_cast<emel::gguf::loader::sm *>(parser_sm);
-  return machine != nullptr && machine->process_event(ev);
+emel::error::type
+parse_model_fail(void *, const emel::model::loader::event::load &) noexcept {
+  return emel::error::cast(emel::model::loader::error::parse_failed);
 }
 
-bool dispatch_parse(void * parser_sm, const emel::gguf::loader::event::parse & ev) {
-  auto * machine = static_cast<emel::gguf::loader::sm *>(parser_sm);
-  return machine != nullptr && machine->process_event(ev);
+emel::error::type
+map_layers_ok(void *, const emel::model::loader::event::load &) noexcept {
+  return emel::error::cast(emel::model::loader::error::none);
 }
 
-bool dispatch_bind_weights(void * weight_loader_sm,
-                           const emel::model::weight_loader::event::bind_storage & ev) {
-  auto * machine = static_cast<emel::model::weight_loader::sm *>(weight_loader_sm);
-  return machine != nullptr && machine->process_event(ev);
+void on_load_done(void *object,
+                  const emel::model::loader::events::load_done &) noexcept {
+  auto *state = static_cast<load_probe_state *>(object);
+  state->done = true;
+  state->error = false;
 }
 
-bool dispatch_plan_load(void * weight_loader_sm,
-                        const emel::model::weight_loader::event::plan_load & ev) {
-  auto * machine = static_cast<emel::model::weight_loader::sm *>(weight_loader_sm);
-  return machine != nullptr && machine->process_event(ev);
+void on_load_error(void *object,
+                   const emel::model::loader::events::load_error &ev) noexcept {
+  auto *state = static_cast<load_probe_state *>(object);
+  state->done = false;
+  state->error = true;
+  state->err = ev.err;
 }
 
-bool dispatch_apply_results(void * weight_loader_sm,
-                            const emel::model::weight_loader::event::apply_effect_results & ev) {
-  auto * machine = static_cast<emel::model::weight_loader::sm *>(weight_loader_sm);
-  return machine != nullptr && machine->process_event(ev);
-}
-
-bool map_layers_ok(const emel::model::loader::event::load &, int32_t * err_out) {
-  if (err_out != nullptr) {
-    *err_out = EMEL_OK;
-  }
-  return true;
-}
-
-}  // namespace
+} // namespace
 
 int main() {
   {
     std::printf("=== model_load happy path ===\n");
-    emel::model::weight_loader::sm weight_sm;
-    emel::gguf::loader::sm parser_sm;
+    emel::model::tensor::sm tensor_sm;
     emel::model::loader::sm loader_sm;
     emel::model::data model_data = {};
-    uint8_t file_bytes[4] = {0};
-    uint8_t kv_arena[8] = {};
-    emel::model::data::tensor_record tensors[1] = {};
-    emel::model::weight_loader::effect_request effects[1] = {};
+    std::array<uint8_t, 4> file_bytes = {};
+    std::array<emel::model::tensor::effect_request, 1> effect_requests = {};
+    std::array<emel::model::tensor::effect_result, 1> effect_results = {};
+    load_probe_state state{};
 
-    int32_t err = EMEL_OK;
-    print_step(
-      "load",
-      loader_sm.process_event(emel::model::loader::event::load{
-        .model_data = model_data,
-        .file_image = file_bytes,
-        .file_size = sizeof(file_bytes),
-        .check_tensors = false,
-        .validate_architecture = false,
-        .parser_sm = &parser_sm,
-        .dispatch_probe = dispatch_probe,
-        .dispatch_bind_storage = dispatch_bind_storage,
-        .dispatch_parse = dispatch_parse,
-        .parser_kv_arena = kv_arena,
-        .parser_kv_arena_size = sizeof(kv_arena),
-        .parser_tensors = tensors,
-        .parser_tensor_capacity = 1,
-        .weight_loader_sm = &weight_sm,
-        .dispatch_bind_weights = dispatch_bind_weights,
-        .dispatch_plan_load = dispatch_plan_load,
-        .dispatch_apply_results = dispatch_apply_results,
-        .effect_requests = effects,
-        .effect_capacity = 1,
-        .map_layers = map_layers_ok,
-        .error_out = &err,
-      })
-    );
-    std::printf("load error_out=%d\n", err);
+    emel::model::loader::event::parse_model_fn parse_model{nullptr,
+                                                           parse_model_ok};
+    emel::model::loader::event::load request{model_data, parse_model};
+    request.file_image = file_bytes.data();
+    request.file_size = file_bytes.size();
+    request.check_tensors = false;
+    request.validate_architecture = false;
+    request.tensor_loader = &tensor_sm;
+    request.effect_requests = std::span{effect_requests};
+    request.effect_results = std::span{effect_results};
+    request.map_layers = {nullptr, map_layers_ok};
+    request.on_done = {&state, on_load_done};
+    request.on_error = {&state, on_load_error};
+
+    print_step("load", loader_sm.process_event(request));
+    std::printf("load done=%s error=%s err=%d\n",
+                state.done ? "true" : "false",
+                state.error ? "true" : "false", static_cast<int>(state.err));
   }
 
   {
-    std::printf("=== model_load missing parser ===\n");
-    emel::model::weight_loader::sm weight_sm;
+    std::printf("=== model_load parse failure ===\n");
     emel::model::loader::sm loader_sm;
     emel::model::data model_data = {};
-    uint8_t file_bytes[4] = {0};
+    std::array<uint8_t, 4> file_bytes = {};
+    load_probe_state state{};
 
-    int32_t err = EMEL_OK;
-    print_step(
-      "load",
-      loader_sm.process_event(emel::model::loader::event::load{
-        .model_data = model_data,
-        .file_image = file_bytes,
-        .file_size = sizeof(file_bytes),
-        .weight_loader_sm = &weight_sm,
-        .error_out = &err,
-      })
-    );
-    std::printf("load error_out=%d\n", err);
+    emel::model::loader::event::parse_model_fn parse_model{nullptr,
+                                                           parse_model_fail};
+    emel::model::loader::event::load request{model_data, parse_model};
+    request.file_image = file_bytes.data();
+    request.file_size = file_bytes.size();
+    request.on_done = {&state, on_load_done};
+    request.on_error = {&state, on_load_error};
+
+    print_step("load", loader_sm.process_event(request));
+    std::printf("load done=%s error=%s err=%d\n",
+                state.done ? "true" : "false",
+                state.error ? "true" : "false", static_cast<int>(state.err));
   }
 
   return 0;

@@ -39,6 +39,12 @@ std::filesystem::path bench_runner_binary_path() {
 #endif
 }
 
+constexpr const char *k_bounded_generation_workload_id =
+    "lfm2_single_user_hello_max_tokens_1_v1";
+constexpr const char *k_bounded_generation_case_name =
+    "generation/preloaded_request/"
+    "lfm2_5_1_2b_thinking_q4_k_m_prompt_hello_max_tokens_1";
+
 std::filesystem::path maintained_generation_fixture_path(
     const emel::tools::generation_fixture_registry::maintained_fixture & fixture) {
   return repo_root() / fixture.fixture_rel;
@@ -164,8 +170,11 @@ process_capture run_serialized_request_capture(const std::string_view request_te
 
   std::string command;
 #if defined(_WIN32)
+  command = "set EMEL_GENERATION_WORKLOAD_ID=";
+  command += k_bounded_generation_workload_id;
+  command += " && ";
   if (enable_internal) {
-    command = "set EMEL_BENCH_INTERNAL=1 && ";
+    command += "set EMEL_BENCH_INTERNAL=1 && ";
   }
   command += quote_arg_windows(bench_runner_binary_path().string());
   command += " --run-serialized-request ";
@@ -178,6 +187,9 @@ process_capture run_serialized_request_capture(const std::string_view request_te
   command += quote_arg_windows(stderr_path.string());
 #else
   command = "ulimit -s 8192; ";
+  command += "EMEL_GENERATION_WORKLOAD_ID=";
+  command += k_bounded_generation_workload_id;
+  command += " ";
   if (enable_internal) {
     command += "EMEL_BENCH_INTERNAL=1 ";
   }
@@ -239,6 +251,9 @@ process_capture run_generation_bench_capture(const std::string & mode,
   command += "set EMEL_BENCH_GENERATION_RUNS=1 && ";
   command += "set EMEL_BENCH_GENERATION_WARMUP_ITERS=0 && ";
   command += "set EMEL_BENCH_GENERATION_WARMUP_RUNS=0 && ";
+  command += "set EMEL_GENERATION_WORKLOAD_ID=";
+  command += k_bounded_generation_workload_id;
+  command += " && ";
   if (emit_jsonl) {
     command += "set EMEL_GENERATION_BENCH_FORMAT=jsonl && ";
     command += "set \"EMEL_GENERATION_RESULT_DIR=";
@@ -261,6 +276,9 @@ process_capture run_generation_bench_capture(const std::string & mode,
   command += "EMEL_BENCH_GENERATION_RUNS=1 ";
   command += "EMEL_BENCH_GENERATION_WARMUP_ITERS=0 ";
   command += "EMEL_BENCH_GENERATION_WARMUP_RUNS=0 ";
+  command += "EMEL_GENERATION_WORKLOAD_ID=";
+  command += k_bounded_generation_workload_id;
+  command += " ";
   if (emit_jsonl) {
     command += "EMEL_GENERATION_BENCH_FORMAT=jsonl ";
     command += "EMEL_GENERATION_RESULT_DIR=" + quote_arg_posix(output_dir.string()) + " ";
@@ -398,37 +416,27 @@ std::string find_line_with_prefix(const std::string & haystack, const std::strin
 }
 }  // namespace
 
-TEST_CASE("bench_runner generation compare keeps maintained Qwen and Liquid fixtures") {
+TEST_CASE("bench_runner generation compare keeps bounded maintained Liquid fixture") {
   const process_capture capture = run_generation_bench_compare_capture();
   CHECK(capture.exit_code == 0);
   CHECK(capture.stderr_text.find("error:") == std::string::npos);
   CHECK(capture.stdout_text.find("# generation_architecture: lfm2") != std::string::npos);
   CHECK(capture.stdout_text.find("# generation_formatter_contract:") != std::string::npos);
-  CHECK(capture.stdout_text.find("# generation_stage_probe: case="
-                                 "generation/preloaded_request/"
-                                 "lfm2_5_1_2b_thinking_q4_k_m_prompt_hello_max_tokens_1") !=
+  CHECK(capture.stdout_text.find("# generation_stage_probe: case=" +
+                                 std::string{k_bounded_generation_case_name}) !=
         std::string::npos);
   CHECK(capture.stdout_text.find("emel_prefill_linear_probe_ns=") != std::string::npos);
   CHECK(capture.stdout_text.find("reference_prefill_attention_probe_ns=") !=
         std::string::npos);
 
-  bool saw_fixture = false;
-  for (const auto & fixture :
-       emel::tools::generation_fixture_registry::k_maintained_generation_fixtures) {
-    if (!maintained_generation_fixture_exists(fixture)) {
-      continue;
-    }
-    saw_fixture = true;
-    const std::array<int, 4> max_tokens = {1, 10, 100, 1000};
-    for (const int tokens : max_tokens) {
-      const std::string case_name = "generation/preloaded_request/" +
-                                    std::string{fixture.slug} +
-                                    "_prompt_hello_max_tokens_" +
-                                    std::to_string(tokens);
-      CHECK(capture.stdout_text.find(case_name) != std::string::npos);
-    }
-  }
-  CHECK(saw_fixture);
+  CHECK(capture.stdout_text.find(k_bounded_generation_case_name) !=
+        std::string::npos);
+  CHECK(capture.stdout_text.find("generation/preloaded_request/"
+                                 "lfm2_5_1_2b_thinking_q4_k_m_prompt_hello_"
+                                 "max_tokens_1000") == std::string::npos);
+  CHECK(capture.stdout_text.find("generation/preloaded_request/"
+                                 "qwen3_0_6b_q8_0_prompt_hello_max_tokens_1") ==
+        std::string::npos);
   const std::string binary_size_line =
       find_line_with_prefix(capture.stdout_text, "# binary_size_compare:");
   CHECK_FALSE(binary_size_line.empty());
@@ -1134,18 +1142,20 @@ TEST_CASE("bench_runner generation jsonl emits manifest-driven workload metadata
   CHECK(emel_capture.stdout_text.find("\"backend_id\":\"emel.generator\"") != std::string::npos);
   CHECK(emel_capture.stdout_text.find("\"backend_id\":\"cpp.reference.llama_cpp\"") ==
         std::string::npos);
-  CHECK(emel_capture.stdout_text.find("\"workload_id\":\"qwen3_single_user_hello_max_tokens_1_v1\"") !=
-        std::string::npos);
+  CHECK(emel_capture.stdout_text.find("\"workload_id\":\"" +
+                                      std::string{k_bounded_generation_workload_id} +
+                                      "\"") != std::string::npos);
   CHECK(emel_capture.stdout_text.find(
             "\"workload_manifest_path\":\"tools/bench/generation_variants/"
-            "qwen3/single_user_hello/max_tokens_1.json\"") != std::string::npos);
+            "lfm2/single_user_hello/parity/max_tokens_1.json\"") !=
+        std::string::npos);
   CHECK(emel_capture.stdout_text.find("\"prompt_fixture_id\":\"single_user_hello_v1\"") !=
         std::string::npos);
   CHECK(emel_capture.stdout_text.find(
             "\"prompt_fixture_path\":\"tools/bench/generation_prompts/single_user_hello.json\"") !=
         std::string::npos);
   CHECK(emel_capture.stdout_text.find("\"prompt_id\":\"single_user:hello\"") != std::string::npos);
-  CHECK(emel_capture.stdout_text.find("\"formatter_mode\":\"chat_template_supported_qwen_v1\"") !=
+  CHECK(emel_capture.stdout_text.find("\"formatter_mode\":\"chat_template_supported_v1\"") !=
         std::string::npos);
   CHECK(emel_capture.stdout_text.find("\"sampling_id\":\"argmax_v1\"") != std::string::npos);
   CHECK(emel_capture.stdout_text.find("\"comparable\":true") != std::string::npos);

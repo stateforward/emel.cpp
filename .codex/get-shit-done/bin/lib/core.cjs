@@ -1434,6 +1434,19 @@ function getMilestoneInfo(cwd) {
         name: headingMatch[2].trim(),
       };
     }
+
+    // Third: archived root ROADMAP.md entries keep the milestone name in a
+    // compact list item after closeout.
+    const shippedListMatch = cleaned.match(
+      /[-*]\s*✅\s*\*\*v(\d+(?:\.\d+)+)\s+([^*]+)\*\*/
+    );
+    if (shippedListMatch) {
+      return {
+        version: 'v' + shippedListMatch[1],
+        name: shippedListMatch[2].trim(),
+      };
+    }
+
     // Fallback: try bare version match (greedy — capture longest version string)
     const versionMatch = cleaned.match(/v(\d+(?:\.\d+)+)/);
     return {

@@ -14,11 +14,14 @@ struct request_decision {};
 struct parsing {};
 struct parse_decision {};
 struct parse_phase_decision {};
-struct parse_load_weights_policy_decision {};
-struct parse_load_weights_handler_decision {};
-struct loading_weights {};
-struct load_decision {};
-struct load_phase_decision {};
+struct parse_load_tensors_policy_decision {};
+struct parse_load_tensors_handler_decision {};
+struct loading_tensors {};
+struct state_tensor_bind_decision {};
+struct state_tensor_plan_dispatch {};
+struct state_tensor_plan_decision {};
+struct state_tensor_apply_dispatch {};
+struct state_tensor_apply_decision {};
 struct load_map_policy_decision {};
 struct mapping_layers {};
 struct map_layers_decision {};
@@ -54,7 +57,7 @@ struct model {
 
       , sml::state<parse_phase_decision> <= sml::state<parse_decision>
           + sml::completion<event::load_runtime>
-      , sml::state<parse_load_weights_policy_decision> <= sml::state<parse_phase_decision>
+      , sml::state<parse_load_tensors_policy_decision> <= sml::state<parse_phase_decision>
           + sml::completion<event::load_runtime> [ guard::error_none{} ]
       , sml::state<errored> <= sml::state<parse_phase_decision>
           + sml::completion<event::load_runtime> [ guard::error_invalid_request{} ]
@@ -71,45 +74,67 @@ struct model {
       , sml::state<errored> <= sml::state<parse_phase_decision>
           + sml::completion<event::load_runtime> [ guard::error_unclassified_code{} ]
 
-      , sml::state<parse_load_weights_handler_decision> <=
-          sml::state<parse_load_weights_policy_decision> + sml::completion<event::load_runtime>
-          [ guard::should_load_weights{} ]
-      , sml::state<structure_decision> <= sml::state<parse_load_weights_policy_decision>
-          + sml::completion<event::load_runtime> [ guard::skip_load_weights{} ]
-      , sml::state<errored> <= sml::state<parse_load_weights_policy_decision>
+      , sml::state<parse_load_tensors_handler_decision> <=
+          sml::state<parse_load_tensors_policy_decision> + sml::completion<event::load_runtime>
+          [ guard::should_load_tensors{} ]
+      , sml::state<structure_decision> <= sml::state<parse_load_tensors_policy_decision>
+          + sml::completion<event::load_runtime> [ guard::skip_load_tensors{} ]
+      , sml::state<errored> <= sml::state<parse_load_tensors_policy_decision>
           + sml::completion<event::load_runtime> / action::mark_internal_error
 
-      , sml::state<loading_weights> <= sml::state<parse_load_weights_handler_decision>
-          + sml::completion<event::load_runtime> [ guard::can_load_weights{} ]
-      , sml::state<errored> <= sml::state<parse_load_weights_handler_decision>
+      , sml::state<loading_tensors> <= sml::state<parse_load_tensors_handler_decision>
+          + sml::completion<event::load_runtime> [ guard::can_load_tensors{} ]
+      , sml::state<errored> <= sml::state<parse_load_tensors_handler_decision>
           + sml::completion<event::load_runtime>
-          [ guard::cannot_load_weights{} ]
+          [ guard::model_has_no_tensors{} ]
+          / action::mark_model_invalid
+      , sml::state<errored> <= sml::state<parse_load_tensors_handler_decision>
+          + sml::completion<event::load_runtime>
+          [ guard::cannot_load_tensors{} ]
           / action::mark_invalid_request
-      , sml::state<errored> <= sml::state<parse_load_weights_handler_decision>
+      , sml::state<errored> <= sml::state<parse_load_tensors_handler_decision>
           + sml::completion<event::load_runtime> / action::mark_internal_error
 
       //------------------------------------------------------------------------------//
-      , sml::state<load_decision> <= sml::state<loading_weights>
-          + sml::completion<event::load_runtime> / action::run_load_weights
-
-      , sml::state<load_phase_decision> <= sml::state<load_decision>
+      , sml::state<state_tensor_bind_decision> <= sml::state<loading_tensors>
           + sml::completion<event::load_runtime>
-      , sml::state<load_map_policy_decision> <= sml::state<load_phase_decision>
-          + sml::completion<event::load_runtime> [ guard::error_none{} ]
-      , sml::state<errored> <= sml::state<load_phase_decision>
-          + sml::completion<event::load_runtime> [ guard::error_invalid_request{} ]
-      , sml::state<errored> <= sml::state<load_phase_decision>
-          + sml::completion<event::load_runtime> [ guard::error_parse_failed{} ]
-      , sml::state<errored> <= sml::state<load_phase_decision>
-          + sml::completion<event::load_runtime> [ guard::error_backend_error{} ]
-      , sml::state<errored> <= sml::state<load_phase_decision>
-          + sml::completion<event::load_runtime> [ guard::error_model_invalid{} ]
-      , sml::state<errored> <= sml::state<load_phase_decision>
-          + sml::completion<event::load_runtime> [ guard::error_internal_error{} ]
-      , sml::state<errored> <= sml::state<load_phase_decision>
-          + sml::completion<event::load_runtime> [ guard::error_untracked{} ]
-      , sml::state<errored> <= sml::state<load_phase_decision>
-          + sml::completion<event::load_runtime> [ guard::error_unclassified_code{} ]
+          / action::effect_dispatch_tensor_bind_storage
+      , sml::state<state_tensor_plan_dispatch> <= sml::state<state_tensor_bind_decision>
+          + sml::completion<event::load_runtime> [ guard::tensor_bind_done_raised{} ]
+      , sml::state<errored> <= sml::state<state_tensor_bind_decision>
+          + sml::completion<event::load_runtime> [ guard::tensor_bind_error_raised{} ]
+          / action::effect_mark_tensor_bind_error
+      , sml::state<errored> <= sml::state<state_tensor_bind_decision>
+          + sml::completion<event::load_runtime> [ guard::tensor_bind_unhandled{} ]
+          / action::mark_internal_error
+
+      , sml::state<state_tensor_plan_decision> <= sml::state<state_tensor_plan_dispatch>
+          + sml::completion<event::load_runtime>
+          / action::effect_dispatch_tensor_plan_load
+      , sml::state<state_tensor_apply_dispatch> <= sml::state<state_tensor_plan_decision>
+          + sml::completion<event::load_runtime> [ guard::tensor_plan_done_raised{} ]
+      , sml::state<errored> <= sml::state<state_tensor_plan_decision>
+          + sml::completion<event::load_runtime> [ guard::tensor_plan_error_raised{} ]
+          / action::effect_mark_tensor_plan_error
+      , sml::state<errored> <= sml::state<state_tensor_plan_decision>
+          + sml::completion<event::load_runtime> [ guard::tensor_plan_unhandled{} ]
+          / action::mark_internal_error
+
+      , sml::state<state_tensor_apply_decision> <= sml::state<state_tensor_apply_dispatch>
+          + sml::completion<event::load_runtime>
+          / action::effect_dispatch_tensor_apply_results
+      , sml::state<load_map_policy_decision> <= sml::state<state_tensor_apply_decision>
+          + sml::completion<event::load_runtime> [ guard::tensor_apply_done_with_file_image{} ]
+          / action::effect_publish_tensor_load_done_from_file_image
+      , sml::state<load_map_policy_decision> <= sml::state<state_tensor_apply_decision>
+          + sml::completion<event::load_runtime> [ guard::tensor_apply_done_without_file_image{} ]
+          / action::effect_publish_tensor_load_done_from_model_data
+      , sml::state<errored> <= sml::state<state_tensor_apply_decision>
+          + sml::completion<event::load_runtime> [ guard::tensor_apply_error_raised{} ]
+          / action::effect_mark_tensor_apply_error
+      , sml::state<errored> <= sml::state<state_tensor_apply_decision>
+          + sml::completion<event::load_runtime> [ guard::tensor_apply_unhandled{} ]
+          / action::mark_internal_error
 
       , sml::state<mapping_layers> <= sml::state<load_map_policy_decision>
           + sml::completion<event::load_runtime> [ guard::can_map_layers{} ]
@@ -234,15 +259,23 @@ struct model {
           / action::on_unexpected
       , sml::state<ready> <= sml::state<parse_phase_decision> + sml::unexpected_event<sml::_>
           / action::on_unexpected
-      , sml::state<ready> <= sml::state<parse_load_weights_policy_decision> + sml::unexpected_event<sml::_>
+      , sml::state<ready> <= sml::state<parse_load_tensors_policy_decision> + sml::unexpected_event<sml::_>
           / action::on_unexpected
-      , sml::state<ready> <= sml::state<parse_load_weights_handler_decision> + sml::unexpected_event<sml::_>
+      , sml::state<ready> <= sml::state<parse_load_tensors_handler_decision> + sml::unexpected_event<sml::_>
           / action::on_unexpected
-      , sml::state<ready> <= sml::state<loading_weights> + sml::unexpected_event<sml::_>
+      , sml::state<ready> <= sml::state<loading_tensors> + sml::unexpected_event<sml::_>
           / action::on_unexpected
-      , sml::state<ready> <= sml::state<load_decision> + sml::unexpected_event<sml::_>
+      , sml::state<ready> <= sml::state<state_tensor_bind_decision>
+          + sml::unexpected_event<sml::_>
           / action::on_unexpected
-      , sml::state<ready> <= sml::state<load_phase_decision> + sml::unexpected_event<sml::_>
+      , sml::state<ready> <= sml::state<state_tensor_plan_dispatch>
+          + sml::unexpected_event<sml::_> / action::on_unexpected
+      , sml::state<ready> <= sml::state<state_tensor_plan_decision>
+          + sml::unexpected_event<sml::_> / action::on_unexpected
+      , sml::state<ready> <= sml::state<state_tensor_apply_dispatch>
+          + sml::unexpected_event<sml::_> / action::on_unexpected
+      , sml::state<ready> <= sml::state<state_tensor_apply_decision>
+          + sml::unexpected_event<sml::_>
           / action::on_unexpected
       , sml::state<ready> <= sml::state<load_map_policy_decision> + sml::unexpected_event<sml::_>
           / action::on_unexpected
@@ -283,12 +316,29 @@ struct sm : public emel::sm<model, action::context> {
 
   sm() : base_type() {}
 
-  bool process_event(const event::load & ev) {
+  bool process_event(const event::load &ev) {
     event::load_ctx ctx{};
-    event::load_runtime runtime{ev, ctx};
+    events::tensor_bind_done tensor_bind_done{};
+    events::tensor_bind_error tensor_bind_error{};
+    events::tensor_plan_done tensor_plan_done{};
+    events::tensor_plan_error tensor_plan_error{};
+    events::tensor_apply_done tensor_apply_done{};
+    events::tensor_apply_error tensor_apply_error{};
+    event::load_runtime runtime{
+        ev,
+        ctx,
+        event::tensor_phase_events{
+            .bind_done = tensor_bind_done,
+            .bind_error = tensor_bind_error,
+            .plan_done = tensor_plan_done,
+            .plan_error = tensor_plan_error,
+            .apply_done = tensor_apply_done,
+            .apply_error = tensor_apply_error,
+        },
+    };
     const bool accepted = base_type::process_event(runtime);
     return accepted && ctx.err == emel::error::cast(error::none);
   }
 };
 
-}  // namespace emel::model::loader
+} // namespace emel::model::loader

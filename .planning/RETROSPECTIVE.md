@@ -2,6 +2,76 @@
 
 *A living document updated after each milestone. Lessons feed forward into future planning.*
 
+## Milestone: v1.22 - Weight Loading Ownership Cutover
+
+**Shipped:** 2026-05-03
+**Phases:** 10 | **Plans:** 10 | **Sessions:** autonomous audit, gap closure, and closeout
+
+### What Was Built
+
+- Tensor load and residency ownership moved under `src/emel/model/tensor`.
+- The maintained model loader now coordinates tensor-owned bind, plan, and apply behavior through
+  public tensor actor events.
+- The retired `model/weight_loader` owner path was removed from source, tests, CMake wiring, docs,
+  and lint baselines.
+- Loader tensor bulk outcomes now route through explicit bind, plan, and apply decision states
+  instead of local callback flag capture.
+- Public roadmap prose and domain-boundary guardrails now keep concrete I/O strategy work deferred
+  under the future `emel/io` seam.
+- Maintained generation benchmark, Sortformer benchmark, embedded-size probe, and paritychecker
+  lanes now prebind GGUF KV storage before model-loader dispatch.
+
+### What Worked
+
+- The milestone audit caught two real closeout contradictions that earlier artifacts had claimed as
+  complete.
+- Adding Phases 192, 193, and 194 as gap-closure phases kept the repair scope narrow and
+  source-backed.
+- The final changed-file quality gates were able to scope benchmark work to the maintained
+  generation and Sortformer entrypoints.
+- User-approved snapshot/model/benchmark updates avoided artificial blockers around lint and
+  benchmark evidence.
+
+### What Was Inefficient
+
+- The first Phase 194 quality-gate run used a space-separated changed-file list, which the script
+  treated as one path and forced a rerun with colon-separated files.
+- The all-suite benchmark gate timed out before the milestone-relevant suite override was applied.
+- Header-only coverage needed additional direct callback and guard coverage to satisfy the required
+  threshold.
+- The archive tool created an empty accomplishments section, requiring manual MILESTONES cleanup.
+
+### Patterns Established
+
+- For `scripts/quality_gates.sh`, pass changed files as colon, comma, or newline-separated values.
+- Loader/tensor ownership audits should include source scans for local capture structs and stale
+  public prose, not only exact retired paths.
+- Maintained-path audits should trace allocations inside callbacks reached from
+  `model_loader.process_event(...)`, not only source ownership boundaries.
+- Same-RTC callback result handoff can be acceptable when the transition graph still performs the
+  outcome selection through explicit guards and states.
+- Public docs need semantic guardrails when a retired owner has human-readable names that do not
+  appear as exact source identifiers.
+
+### Key Lessons
+
+1. Closeout claims about retired runtime ownership need a semantic public-doc check, not only source
+   path checks.
+2. Header-only actor changes should add focused unit coverage for callback, guard, and error-mapping
+   contracts before running the full quality gate.
+3. Archive automation still needs manual review for accomplishments and current-state wording.
+4. Benchmark snapshot updates should use the maintained update command and then rerun the scoped
+   gate without `EMEL_QUALITY_GATES_ALLOW_BENCH_REGRESSION`.
+
+### Cost Observations
+
+- Model mix: not measured.
+- Sessions: one autonomous audit/gap/closeout session.
+- Notable: the corrected Phase 194 scoped quality gate ran generation and diarization Sortformer
+  benchmarks plus full paritychecker validation after the generation snapshot update.
+
+---
+
 ## Milestone: v1.15 - ARM Sortformer Diarization GGUF Slice
 
 **Shipped:** 2026-04-25

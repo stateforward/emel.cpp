@@ -305,3 +305,38 @@ TEST_CASE("quality gates check benchmark manifest before deciding benchmark bran
   CHECK(pre_full.find("bench_full=true") != std::string::npos);
   CHECK(pre_full.find("if ! $bench_full && $bench_all_suites") != std::string::npos);
 }
+
+TEST_CASE("quality gates expand broad benchmark scope without monolithic changed gate") {
+  const std::string script = read_file(repo_root() / "scripts" / "quality_gates.sh");
+  const std::size_t helper_start = script.find("select_full_benchmark_gate()");
+  REQUIRE(helper_start != std::string::npos);
+
+  const std::size_t helper_end = script.find("add_parity_runner()", helper_start);
+  REQUIRE(helper_end != std::string::npos);
+
+  const std::string helper = script.substr(helper_start, helper_end - helper_start);
+  CHECK(helper.find("\"$QUALITY_GATES_SCOPE\" == \"full\"") != std::string::npos);
+  CHECK(helper.find("bench_all_suites=true") != std::string::npos);
+  CHECK(helper.find("add_all_benchmark_suites_from_manifest") != std::string::npos);
+}
+
+TEST_CASE("quality gates bound scoped generation benchmark workload explicitly") {
+  const std::string script = read_file(repo_root() / "scripts" / "quality_gates.sh");
+
+  CHECK(script.find("QUALITY_GATES_DEFAULT_GENERATION_WORKLOAD_ID") != std::string::npos);
+  CHECK(script.find("lfm2_single_user_hello_max_tokens_1_v1") != std::string::npos);
+  CHECK(script.find("EMEL_BENCH_GENERATION_ITERS") != std::string::npos);
+  CHECK(script.find("EMEL_BENCH_GENERATION_RUNS") != std::string::npos);
+  CHECK(script.find("EMEL_GENERATION_WORKLOAD_ID=\"$generation_workload_id\"") !=
+        std::string::npos);
+}
+
+TEST_CASE("bench runner generation tests use a bounded workload filter") {
+  const std::string tests =
+      read_file(repo_root() / "tools" / "bench" / "bench_runner_tests.cpp");
+
+  CHECK(tests.find("k_bounded_generation_workload_id") != std::string::npos);
+  CHECK(tests.find("lfm2_single_user_hello_max_tokens_1_v1") !=
+        std::string::npos);
+  CHECK(tests.find("EMEL_GENERATION_WORKLOAD_ID=") != std::string::npos);
+}
