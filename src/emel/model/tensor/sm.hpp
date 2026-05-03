@@ -154,8 +154,13 @@ struct model {
       , sml::state<state_apply_effect_results_done_decision> <=
           sml::state<state_apply_effect_results_request_decision>
           + sml::completion<detail::apply_effect_results_runtime>
-          [ guard::apply_results_valid_without_effect_errors{} ]
+          [ guard::apply_results_valid_without_effect_errors_without_record_output{} ]
           / action::effect_apply_results
+      , sml::state<state_apply_effect_results_done_decision> <=
+          sml::state<state_apply_effect_results_request_decision>
+          + sml::completion<detail::apply_effect_results_runtime>
+          [ guard::apply_results_valid_without_effect_errors_with_record_output{} ]
+          / action::effect_apply_results_with_record_output
 
       , sml::state<state_apply_effect_results_error_decision> <= sml::state<ready>
           + sml::event<detail::apply_effect_results_runtime>

@@ -38,7 +38,7 @@ struct storage_bind_invalid {
 
 struct storage_bound {
   bool operator()(const action::context &ctx) const noexcept {
-    return ctx.bound_records.data() != nullptr && !ctx.bound_records.empty();
+    return ctx.bound_count != 0u;
   }
 };
 
@@ -47,7 +47,7 @@ struct plan_load_has_capacity {
   bool operator()(const event_type &ev,
                   const action::context &ctx) const noexcept {
     const auto &request = tensor::detail::request_event(ev);
-    return request.effects.size() >= ctx.bound_records.size();
+    return request.effects.size() >= static_cast<size_t>(ctx.bound_count);
   }
 };
 
@@ -80,7 +80,35 @@ struct apply_results_count_matches {
   bool operator()(const event_type &ev,
                   const action::context &ctx) const noexcept {
     const auto &request = tensor::detail::request_event(ev);
-    return request.results.size() == ctx.bound_records.size();
+    return request.results.size() == static_cast<size_t>(ctx.bound_count);
+  }
+};
+
+struct apply_results_record_output_present {
+  template <class event_type>
+  bool operator()(const event_type &ev,
+                  const action::context &) const noexcept {
+    const auto &request = tensor::detail::request_event(ev);
+    return request.tensors.data() != nullptr && !request.tensors.empty();
+  }
+};
+
+struct apply_results_record_output_absent {
+  template <class event_type>
+  bool operator()(const event_type &ev,
+                  const action::context &) const noexcept {
+    const auto &request = tensor::detail::request_event(ev);
+    return request.tensors.empty();
+  }
+};
+
+struct apply_results_record_output_has_capacity {
+  template <class event_type>
+  bool operator()(const event_type &ev,
+                  const action::context &ctx) const noexcept {
+    const auto &request = tensor::detail::request_event(ev);
+    return apply_results_record_output_present{}(ev, ctx) &&
+           request.tensors.size() >= static_cast<size_t>(ctx.bound_count);
   }
 };
 
@@ -88,7 +116,9 @@ struct apply_results_valid {
   template <class event_type>
   bool operator()(const event_type &ev,
                   const action::context &ctx) const noexcept {
-    return storage_bound{}(ctx) && apply_results_count_matches{}(ev, ctx);
+    return storage_bound{}(ctx) && apply_results_count_matches{}(ev, ctx) &&
+           (apply_results_record_output_absent{}(ev, ctx) ||
+            apply_results_record_output_has_capacity{}(ev, ctx));
   }
 };
 
@@ -137,6 +167,24 @@ struct apply_results_valid_without_effect_errors {
                   const action::context &ctx) const noexcept {
     return apply_results_valid{}(ev, ctx) &&
            apply_effect_errors_absent{}(ev, ctx);
+  }
+};
+
+struct apply_results_valid_without_effect_errors_with_record_output {
+  template <class event_type>
+  bool operator()(const event_type &ev,
+                  const action::context &ctx) const noexcept {
+    return apply_results_valid_without_effect_errors{}(ev, ctx) &&
+           apply_results_record_output_present{}(ev, ctx);
+  }
+};
+
+struct apply_results_valid_without_effect_errors_without_record_output {
+  template <class event_type>
+  bool operator()(const event_type &ev,
+                  const action::context &ctx) const noexcept {
+    return apply_results_valid_without_effect_errors{}(ev, ctx) &&
+           apply_results_record_output_absent{}(ev, ctx);
   }
 };
 

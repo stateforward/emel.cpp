@@ -27,7 +27,8 @@ stateDiagram-v2
   state_awaiting_effects --> state_apply_effect_results_request_decision : apply_effect_results_runtime [always] / none
   state_apply_effect_results_request_decision --> state_apply_effect_results_error_decision : completion_apply_effect_results_runtime_ [apply_results_invalid_] / none
   state_apply_effect_results_request_decision --> state_apply_effect_results_backend_error_decision : completion_apply_effect_results_runtime_ [apply_results_valid_with_effect_errors_] / none
-  state_apply_effect_results_request_decision --> state_apply_effect_results_done_decision : completion_apply_effect_results_runtime_ [apply_results_valid_without_effect_errors_] / effect_apply_results_
+  state_apply_effect_results_request_decision --> state_apply_effect_results_done_decision : completion_apply_effect_results_runtime_ [apply_results_valid_without_effect_errors_without_record_output_] / effect_apply_results_
+  state_apply_effect_results_request_decision --> state_apply_effect_results_done_decision : completion_apply_effect_results_runtime_ [apply_results_valid_without_effect_errors_with_record_output_] / effect_apply_results_with_record_output_
   ready --> state_apply_effect_results_error_decision : apply_effect_results_runtime [always] / none
   state_apply_effect_results_done_decision --> state_apply_effect_results_done_callback : completion_apply_effect_results_runtime_ [apply_effect_results_done_callback_present_] / publish_apply_effect_results_done_
   state_apply_effect_results_done_decision --> ready : completion_apply_effect_results_runtime_ [apply_effect_results_done_callback_absent_] / record_apply_effect_results_done_

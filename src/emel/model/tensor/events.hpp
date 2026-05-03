@@ -133,6 +133,7 @@ struct plan_load {
 
 struct apply_effect_results {
   std::span<const effect_result> results = {};
+  std::span<emel::model::data::tensor_record> tensors = {};
   emel::callback<void(const events::apply_effect_results_done &)> on_done = {};
   emel::callback<void(const events::apply_effect_results_error &)> on_error =
       {};
@@ -140,6 +141,11 @@ struct apply_effect_results {
   explicit apply_effect_results(
       std::span<const effect_result> results_in) noexcept
       : results(results_in) {}
+
+  apply_effect_results(
+      std::span<const effect_result> results_in,
+      std::span<emel::model::data::tensor_record> tensors_in) noexcept
+      : results(results_in), tensors(tensors_in) {}
 };
 
 } // namespace emel::model::tensor::event

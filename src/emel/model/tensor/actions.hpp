@@ -18,7 +18,7 @@ inline void write_error_code(int32_t &target,
 namespace binding {
 
 inline void reset_storage_binding(context &ctx) noexcept {
-  ctx.bound_records = {};
+  ctx.bound_count = 0u;
   for (size_t tensor_id = 0u; tensor_id < ctx.tensors.lifecycle.size();
        ++tensor_id) {
     ctx.tensors.lifecycle[tensor_id] = event::lifecycle::unbound;
@@ -66,18 +66,16 @@ struct effect_bind_storage {
     auto &runtime_ev = tensor::detail::unwrap_runtime_event(ev);
     const auto &request = tensor::detail::request_event(ev);
     binding::reset_storage_binding(ctx);
-    ctx.bound_records = request.tensors;
-    for (size_t tensor_id = 0u; tensor_id < ctx.bound_records.size();
-         ++tensor_id) {
+    ctx.bound_count = static_cast<uint32_t>(request.tensors.size());
+    for (size_t tensor_id = 0u; tensor_id < ctx.bound_count; ++tensor_id) {
+      const auto &tensor = request.tensors[tensor_id];
       ctx.tensors.lifecycle[tensor_id] = event::lifecycle::unbound;
-      ctx.tensors.buffer[tensor_id] = nullptr;
+      ctx.tensors.buffer[tensor_id] = tensor.data;
       ctx.tensors.buffer_bytes[tensor_id] = 0u;
-      ctx.tensors.file_offset[tensor_id] =
-          ctx.bound_records[tensor_id].file_offset;
-      ctx.tensors.data_size[tensor_id] = ctx.bound_records[tensor_id].data_size;
-      ctx.tensors.file_index[tensor_id] =
-          ctx.bound_records[tensor_id].file_index;
-      ctx.tensors.tensor_type[tensor_id] = ctx.bound_records[tensor_id].type;
+      ctx.tensors.file_offset[tensor_id] = tensor.file_offset;
+      ctx.tensors.data_size[tensor_id] = tensor.data_size;
+      ctx.tensors.file_index[tensor_id] = tensor.file_index;
+      ctx.tensors.tensor_type[tensor_id] = tensor.type;
     }
     runtime_ev.ctx.err = emel::error::cast(error::none);
     runtime_ev.ctx.ok = true;
@@ -88,14 +86,12 @@ struct effect_plan_load {
   template <class event_type>
   void operator()(const event_type &ev, context &ctx) const noexcept {
     const auto &request = tensor::detail::request_event(ev);
-    for (size_t tensor_id = 0u; tensor_id < ctx.bound_records.size();
-         ++tensor_id) {
-      const auto &tensor = ctx.bound_records[tensor_id];
+    for (size_t tensor_id = 0u; tensor_id < ctx.bound_count; ++tensor_id) {
       request.effects[tensor_id] = event::effect_request{
           .kind = event::effect_kind::k_none,
-          .offset = tensor.file_offset,
-          .size = tensor.data_size,
-          .target = const_cast<void *>(tensor.data),
+          .offset = ctx.tensors.file_offset[tensor_id],
+          .size = ctx.tensors.data_size[tensor_id],
+          .target = const_cast<void *>(ctx.tensors.buffer[tensor_id]),
       };
     }
   }
@@ -105,17 +101,21 @@ struct effect_apply_results {
   template <class event_type>
   void operator()(const event_type &ev, context &ctx) const noexcept {
     const auto &request = tensor::detail::request_event(ev);
-    for (size_t tensor_id = 0u; tensor_id < ctx.bound_records.size();
-         ++tensor_id) {
-      auto &tensor = ctx.bound_records[tensor_id];
-      tensor.data = request.results[tensor_id].handle;
+    for (size_t tensor_id = 0u; tensor_id < ctx.bound_count; ++tensor_id) {
       ctx.tensors.lifecycle[tensor_id] = event::lifecycle::resident;
       ctx.tensors.buffer[tensor_id] = request.results[tensor_id].handle;
-      ctx.tensors.buffer_bytes[tensor_id] = tensor.data_size;
-      ctx.tensors.file_offset[tensor_id] = tensor.file_offset;
-      ctx.tensors.data_size[tensor_id] = tensor.data_size;
-      ctx.tensors.file_index[tensor_id] = tensor.file_index;
-      ctx.tensors.tensor_type[tensor_id] = tensor.type;
+      ctx.tensors.buffer_bytes[tensor_id] = ctx.tensors.data_size[tensor_id];
+    }
+  }
+};
+
+struct effect_apply_results_with_record_output {
+  template <class event_type>
+  void operator()(const event_type &ev, context &ctx) const noexcept {
+    effect_apply_results{}(ev, ctx);
+    const auto &request = tensor::detail::request_event(ev);
+    for (size_t tensor_id = 0u; tensor_id < ctx.bound_count; ++tensor_id) {
+      request.tensors[tensor_id].data = request.results[tensor_id].handle;
     }
   }
 };
@@ -235,7 +235,7 @@ struct publish_plan_load_done {
     runtime_ev.ctx.ok = true;
     request.on_done(events::plan_load_done{
         .request = request,
-        .effect_count = static_cast<uint32_t>(ctx.bound_records.size()),
+        .effect_count = ctx.bound_count,
     });
   }
 };
@@ -440,6 +440,8 @@ inline constexpr begin_capture_tensor_state begin_capture_tensor_state{};
 inline constexpr effect_bind_storage effect_bind_storage{};
 inline constexpr effect_plan_load effect_plan_load{};
 inline constexpr effect_apply_results effect_apply_results{};
+inline constexpr effect_apply_results_with_record_output
+    effect_apply_results_with_record_output{};
 inline constexpr exec_bind_tensor exec_bind_tensor{};
 inline constexpr exec_evict_tensor exec_evict_tensor{};
 inline constexpr exec_capture_tensor_state exec_capture_tensor_state{};

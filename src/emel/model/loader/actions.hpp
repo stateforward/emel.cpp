@@ -217,6 +217,8 @@ struct effect_dispatch_tensor_apply_results {
     emel::model::tensor::event::apply_effect_results apply{
         std::span<const emel::model::tensor::effect_result>{
             ev.request.effect_results.data(), effect_count},
+        std::span<emel::model::data::tensor_record>{
+            ev.request.model_data.tensors.data(), ev.request.model_data.n_tensors},
     };
     apply.on_done = {&ev.tensor_events, detail::record_apply_done_event};
     apply.on_error = {&ev.tensor_events, detail::record_apply_error_event};
