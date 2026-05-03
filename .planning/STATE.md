@@ -2,9 +2,9 @@
 gsd_state_version: 1.0
 milestone: v1.22
 milestone_name: Weight Loading Ownership Cutover
-status: milestone_archived
-stopped_at: v1.22 archived after Phase 196 state closeout metadata repair.
-last_updated: "2026-05-03T14:51:33Z"
+status: milestone_archived_pr_open
+stopped_at: v1.22 archived and prepared for PR #81.
+last_updated: "2026-05-03T16:13:12Z"
 last_activity: 2026-05-03
 progress:
   total_phases: 12
@@ -22,15 +22,16 @@ See: .planning/PROJECT.md (updated 2026-05-03)
 
 **Core value:** Prove real end-to-end behavior with explicit SML orchestration and
 parity-oriented verification before widening API surface or model scope.
-**Current focus:** No active milestone is open; start the next milestone with `$gsd-new-milestone`.
+**Current focus:** v1.22 is archived and open for review in PR #81; start the next milestone with
+`$gsd-new-milestone` after merge.
 
 ## Current Position
 
 Phase: none
 Plan: none
-Status: v1.22 archived
-Last activity: 2026-05-03 - Archived v1.22 after Phase 196 repaired the final state closeout
-metadata contradiction.
+Status: v1.22 archived and PR #81 open
+Last activity: 2026-05-03 - Cleaned up v1.22 audit tech debt, refreshed the audit to passed, and
+pushed PR #81 for review.
 
 Progress: [██████████] 100%
 
@@ -42,7 +43,10 @@ Progress: [██████████] 100%
 - Phase 194 restored `TENSOR-02` and `LOAD-02`.
 - Phase 195 closed the strict loader/tensor outcome and wrapper rule contradictions.
 - Phase 196 repaired stale closeout state metadata that still referenced Phase 194.
+- Final cleanup normalized validation/frontmatter evidence and public GGUF loader wrapper use in
+  maintained tool lanes.
 - Final audit status is `passed` with 14/14 active requirements satisfied.
+- PR #81 is open: https://github.com/stateforward/emel.cpp/pull/81
 - Current archive files live under `.planning/milestones/`.
 
 ## Accumulated Context
