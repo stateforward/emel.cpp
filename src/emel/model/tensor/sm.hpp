@@ -17,7 +17,6 @@ struct state_bind_storage_done_callback {};
 struct state_bind_storage_error_decision {};
 struct state_bind_storage_error_callback {};
 struct state_bind_storage_busy_error_callback {};
-struct state_plan_load_decision {};
 struct state_plan_load_done_decision {};
 struct state_plan_load_done_callback {};
 struct state_plan_load_error_decision {};
@@ -303,8 +302,6 @@ struct model {
           + sml::unexpected_event<sml::_> / action::on_unexpected
       , sml::state<state_awaiting_effects> <=
           sml::state<state_bind_storage_busy_error_callback>
-          + sml::unexpected_event<sml::_> / action::on_unexpected
-      , sml::state<ready> <= sml::state<state_plan_load_decision>
           + sml::unexpected_event<sml::_> / action::on_unexpected
       , sml::state<ready> <= sml::state<state_plan_load_done_decision>
           + sml::unexpected_event<sml::_> / action::on_unexpected

@@ -67,6 +67,22 @@ parse_ok(void *, const emel::model::loader::event::load &req) noexcept {
 }
 
 emel::error::type
+parse_model_path_weights_ok(
+    void *, const emel::model::loader::event::load &req) noexcept {
+  req.model_data.n_tensors = 1;
+  req.model_data.n_layers = 1;
+  req.model_data.weights_data = req.model_data.tensors.data();
+  req.model_data.weights_size = 777u;
+  req.model_data.weights_mapped = true;
+  req.model_data.weights_split_count = 2u;
+  req.model_data.weights_split_offsets[0] = 11u;
+  req.model_data.weights_split_offsets[1] = 22u;
+  req.model_data.weights_split_sizes[0] = 333u;
+  req.model_data.weights_split_sizes[1] = 444u;
+  return emel::error::cast(emel::model::loader::error::none);
+}
+
+emel::error::type
 parse_fail(void *, const emel::model::loader::event::load &) noexcept {
   return emel::error::cast(emel::model::loader::error::parse_failed);
 }
@@ -887,6 +903,39 @@ TEST_CASE("model loader lifecycle succeeds on full load path") {
   CHECK(owner.bytes_total == sizeof(file_bytes));
   CHECK(owner.bytes_done == sizeof(file_bytes));
   CHECK_FALSE(owner.used_mmap);
+}
+
+TEST_CASE("model loader preserves parser weight metadata on model-path load") {
+  auto model = std::make_unique<emel::model::data>();
+  emel::model::loader::sm machine{};
+  owner_state owner{};
+  emel::model::loader::event::parse_model_fn parse_model{
+      nullptr, parse_model_path_weights_ok};
+  tensor_loader_fixture tensor_loader{};
+
+  emel::model::loader::event::load request{*model, parse_model};
+  request.model_path = "model.gguf";
+  tensor_loader.bind(request);
+  request.map_layers = {nullptr, map_layers_ok};
+  request.validate_structure = {nullptr, validate_structure_ok};
+  request.validate_architecture_impl = {nullptr, validate_architecture_ok};
+  request.on_done = {&owner, on_done};
+  request.on_error = {&owner, on_error};
+
+  CHECK(machine.process_event(request));
+  CHECK(owner.done);
+  CHECK_FALSE(owner.error);
+  CHECK(owner.bytes_total == 777u);
+  CHECK(owner.bytes_done == 777u);
+  CHECK(owner.used_mmap);
+  CHECK(model->weights_data == model->tensors.data());
+  CHECK(model->weights_size == 777u);
+  CHECK(model->weights_mapped);
+  CHECK(model->weights_split_count == 2u);
+  CHECK(model->weights_split_offsets[0] == 11u);
+  CHECK(model->weights_split_offsets[1] == 22u);
+  CHECK(model->weights_split_sizes[0] == 333u);
+  CHECK(model->weights_split_sizes[1] == 444u);
 }
 
 TEST_CASE("model loader rejects missing source payload") {

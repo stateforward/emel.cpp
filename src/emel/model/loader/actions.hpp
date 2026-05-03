@@ -224,7 +224,7 @@ struct effect_dispatch_tensor_apply_results {
   }
 };
 
-struct effect_publish_tensor_load_done {
+struct effect_publish_tensor_load_done_from_file_image {
   void operator()(const event::load_runtime &ev, context &) const noexcept {
     ev.ctx.bytes_total = ev.request.file_size;
     ev.ctx.bytes_done = ev.request.file_size;
@@ -236,6 +236,15 @@ struct effect_publish_tensor_load_done {
     ev.request.model_data.weights_split_count = 1u;
     ev.request.model_data.weights_split_offsets[0] = 0u;
     ev.request.model_data.weights_split_sizes[0] = ev.request.file_size;
+  }
+};
+
+struct effect_publish_tensor_load_done_from_model_data {
+  void operator()(const event::load_runtime &ev, context &) const noexcept {
+    ev.ctx.bytes_total = ev.request.model_data.weights_size;
+    ev.ctx.bytes_done = ev.request.model_data.weights_size;
+    ev.ctx.used_mmap = ev.request.model_data.weights_mapped;
+    ev.ctx.err = emel::error::cast(error::none);
   }
 };
 
@@ -335,8 +344,10 @@ inline constexpr effect_dispatch_tensor_plan_load
     effect_dispatch_tensor_plan_load{};
 inline constexpr effect_dispatch_tensor_apply_results
     effect_dispatch_tensor_apply_results{};
-inline constexpr effect_publish_tensor_load_done
-    effect_publish_tensor_load_done{};
+inline constexpr effect_publish_tensor_load_done_from_file_image
+    effect_publish_tensor_load_done_from_file_image{};
+inline constexpr effect_publish_tensor_load_done_from_model_data
+    effect_publish_tensor_load_done_from_model_data{};
 inline constexpr effect_mark_tensor_bind_error effect_mark_tensor_bind_error{};
 inline constexpr effect_mark_tensor_plan_error effect_mark_tensor_plan_error{};
 inline constexpr effect_mark_tensor_apply_error effect_mark_tensor_apply_error{};

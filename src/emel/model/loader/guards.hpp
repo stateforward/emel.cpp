@@ -172,6 +172,18 @@ struct tensor_apply_done_raised {
   }
 };
 
+struct tensor_apply_done_with_file_image {
+  bool operator()(const event::load_runtime &ev) const noexcept {
+    return tensor_apply_done_raised{}(ev) && has_file_image{}(ev);
+  }
+};
+
+struct tensor_apply_done_without_file_image {
+  bool operator()(const event::load_runtime &ev) const noexcept {
+    return tensor_apply_done_raised{}(ev) && !has_file_image{}(ev);
+  }
+};
+
 struct tensor_apply_error_raised {
   bool operator()(const event::load_runtime &ev) const noexcept {
     return ev.tensor_events.apply_error.raised;

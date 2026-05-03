@@ -124,8 +124,11 @@ struct model {
           + sml::completion<event::load_runtime>
           / action::effect_dispatch_tensor_apply_results
       , sml::state<load_map_policy_decision> <= sml::state<state_tensor_apply_decision>
-          + sml::completion<event::load_runtime> [ guard::tensor_apply_done_raised{} ]
-          / action::effect_publish_tensor_load_done
+          + sml::completion<event::load_runtime> [ guard::tensor_apply_done_with_file_image{} ]
+          / action::effect_publish_tensor_load_done_from_file_image
+      , sml::state<load_map_policy_decision> <= sml::state<state_tensor_apply_decision>
+          + sml::completion<event::load_runtime> [ guard::tensor_apply_done_without_file_image{} ]
+          / action::effect_publish_tensor_load_done_from_model_data
       , sml::state<errored> <= sml::state<state_tensor_apply_decision>
           + sml::completion<event::load_runtime> [ guard::tensor_apply_error_raised{} ]
           / action::effect_mark_tensor_apply_error

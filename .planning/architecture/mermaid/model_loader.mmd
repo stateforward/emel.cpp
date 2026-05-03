@@ -30,7 +30,8 @@ stateDiagram-v2
   state_tensor_plan_decision --> errored : completion_load_runtime_ [tensor_plan_error_raised_] / effect_mark_tensor_plan_error_
   state_tensor_plan_decision --> errored : completion_load_runtime_ [tensor_plan_unhandled_] / mark_internal_error_
   state_tensor_apply_dispatch --> state_tensor_apply_decision : completion_load_runtime_ [always] / effect_dispatch_tensor_apply_results_
-  state_tensor_apply_decision --> load_map_policy_decision : completion_load_runtime_ [tensor_apply_done_raised_] / effect_publish_tensor_load_done_
+  state_tensor_apply_decision --> load_map_policy_decision : completion_load_runtime_ [tensor_apply_done_with_file_image_] / effect_publish_tensor_load_done_from_file_image_
+  state_tensor_apply_decision --> load_map_policy_decision : completion_load_runtime_ [tensor_apply_done_without_file_image_] / effect_publish_tensor_load_done_from_model_data_
   state_tensor_apply_decision --> errored : completion_load_runtime_ [tensor_apply_error_raised_] / effect_mark_tensor_apply_error_
   state_tensor_apply_decision --> errored : completion_load_runtime_ [tensor_apply_unhandled_] / mark_internal_error_
   load_map_policy_decision --> mapping_layers : completion_load_runtime_ [can_map_layers_] / none

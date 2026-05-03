@@ -2,9 +2,11 @@
 
 #include <array>
 #include <span>
+#include <string>
 
 #include <doctest/doctest.h>
 
+#include "emel/docs/detail.hpp"
 #include "emel/model/data.hpp"
 #include "emel/model/tensor/actions.hpp"
 #include "emel/model/tensor/events.hpp"
@@ -12,6 +14,12 @@
 #include "emel/model/tensor/sm.hpp"
 
 namespace {
+
+template <class... types, class fn>
+constexpr void for_each_type(stateforward::sml::aux::type_list<types...>,
+                             fn &&visitor) {
+  (visitor.template operator()<types>(), ...);
+}
 
 emel::model::data::tensor_record make_tensor_record() {
   emel::model::data::tensor_record tensor{};
@@ -191,6 +199,21 @@ TEST_CASE("model_tensor_unexpected_event_keeps_machine_dispatchable") {
   CHECK(machine.process_event(bind));
   CHECK(err == static_cast<int32_t>(
                    emel::error::cast(emel::model::tensor::error::none)));
+}
+
+TEST_CASE("model_tensor_sm_excludes_unreachable_plan_load_decision_state") {
+  using machine_t = stateforward::sml::sm<emel::model::tensor::model>;
+  using states = typename machine_t::states;
+
+  bool has_unreachable_state = false;
+  for_each_type(states{}, [&]<class state_type>() {
+    const std::string name = emel::docs::detail::raw_type_name<state_type>();
+    if (name.find("state_plan_load_decision") != std::string_view::npos) {
+      has_unreachable_state = true;
+    }
+  });
+
+  CHECK_FALSE(has_unreachable_state);
 }
 
 TEST_CASE("model_tensor_bind_plan_apply_storage_lifecycle") {
