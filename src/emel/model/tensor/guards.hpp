@@ -59,6 +59,39 @@ struct plan_load_valid {
   }
 };
 
+struct plan_load_strategy_none {
+  template <class event_type>
+  bool operator()(const event_type &ev,
+                  const action::context &) const noexcept {
+    const auto &request = tensor::detail::request_event(ev);
+    return request.strategy == emel::io::loader::event::strategy_kind::none;
+  }
+};
+
+struct plan_load_strategy_present {
+  template <class event_type>
+  bool operator()(const event_type &ev,
+                  const action::context &ctx) const noexcept {
+    return !plan_load_strategy_none{}(ev, ctx);
+  }
+};
+
+struct plan_load_valid_without_io_strategy {
+  template <class event_type>
+  bool operator()(const event_type &ev,
+                  const action::context &ctx) const noexcept {
+    return plan_load_valid{}(ev, ctx) && plan_load_strategy_none{}(ev, ctx);
+  }
+};
+
+struct plan_load_valid_with_io_strategy {
+  template <class event_type>
+  bool operator()(const event_type &ev,
+                  const action::context &ctx) const noexcept {
+    return plan_load_valid{}(ev, ctx) && plan_load_strategy_present{}(ev, ctx);
+  }
+};
+
 struct plan_load_invalid_request {
   template <class event_type>
   bool operator()(const event_type &,

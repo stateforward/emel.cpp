@@ -89,6 +89,27 @@ struct effect_plan_load {
     for (size_t tensor_id = 0u; tensor_id < ctx.bound_count; ++tensor_id) {
       request.effects[tensor_id] = event::effect_request{
           .kind = event::effect_kind::k_none,
+          .strategy = emel::io::loader::event::strategy_kind::none,
+          .tensor_id = static_cast<int32_t>(tensor_id),
+          .file_index = ctx.tensors.file_index[tensor_id],
+          .offset = ctx.tensors.file_offset[tensor_id],
+          .size = ctx.tensors.data_size[tensor_id],
+          .target = const_cast<void *>(ctx.tensors.buffer[tensor_id]),
+      };
+    }
+  }
+};
+
+struct effect_plan_io_load {
+  template <class event_type>
+  void operator()(const event_type &ev, context &ctx) const noexcept {
+    const auto &request = tensor::detail::request_event(ev);
+    for (size_t tensor_id = 0u; tensor_id < ctx.bound_count; ++tensor_id) {
+      request.effects[tensor_id] = event::effect_request{
+          .kind = event::effect_kind::k_io_load,
+          .strategy = request.strategy,
+          .tensor_id = static_cast<int32_t>(tensor_id),
+          .file_index = ctx.tensors.file_index[tensor_id],
           .offset = ctx.tensors.file_offset[tensor_id],
           .size = ctx.tensors.data_size[tensor_id],
           .target = const_cast<void *>(ctx.tensors.buffer[tensor_id]),
@@ -439,6 +460,7 @@ inline constexpr begin_evict_tensor begin_evict_tensor{};
 inline constexpr begin_capture_tensor_state begin_capture_tensor_state{};
 inline constexpr effect_bind_storage effect_bind_storage{};
 inline constexpr effect_plan_load effect_plan_load{};
+inline constexpr effect_plan_io_load effect_plan_io_load{};
 inline constexpr effect_apply_results effect_apply_results{};
 inline constexpr effect_apply_results_with_record_output
     effect_apply_results_with_record_output{};

@@ -1,0 +1,24 @@
+stateDiagram-v2
+  direction TB
+  [*] --> state_ready
+  state_ready --> state_request_decision : load_tensor_runtime [tensor_span_valid_] / effect_begin_load_tensor_
+  state_request_decision --> state_no_strategy_error_decision : completion_load_tensor_runtime_ [strategy_none_] / effect_mark_unsupported_strategy_
+  state_request_decision --> state_unsupported_strategy_error_decision : completion_load_tensor_runtime_ [strategy_mapped_file_] / effect_mark_unsupported_strategy_
+  state_request_decision --> state_unsupported_strategy_error_decision : completion_load_tensor_runtime_ [strategy_staged_read_] / effect_mark_unsupported_strategy_
+  state_request_decision --> state_unsupported_strategy_error_decision : completion_load_tensor_runtime_ [strategy_external_buffer_] / effect_mark_unsupported_strategy_
+  state_ready --> state_no_strategy_error_decision : load_tensor_runtime [tensor_span_invalid_] / effect_mark_invalid_request_
+  state_done_decision --> state_done_callback : completion_load_tensor_runtime_ [done_callback_present_] / effect_publish_load_tensor_done_
+  state_done_decision --> state_ready : completion_load_tensor_runtime_ [done_callback_absent_] / effect_record_load_tensor_done_
+  state_done_callback --> state_ready : completion_load_tensor_runtime_ [always] / effect_record_load_tensor_done_
+  state_no_strategy_error_decision --> state_error_callback : completion_load_tensor_runtime_ [error_callback_present_] / effect_publish_load_tensor_error_
+  state_no_strategy_error_decision --> state_ready : completion_load_tensor_runtime_ [error_callback_absent_] / effect_record_load_tensor_error_
+  state_unsupported_strategy_error_decision --> state_error_callback : completion_load_tensor_runtime_ [error_callback_present_] / effect_publish_load_tensor_error_
+  state_unsupported_strategy_error_decision --> state_ready : completion_load_tensor_runtime_ [error_callback_absent_] / effect_record_load_tensor_error_
+  state_error_callback --> state_ready : completion_load_tensor_runtime_ [always] / effect_record_load_tensor_error_
+  state_ready --> state_ready : _ [always] / effect_on_unexpected_
+  state_request_decision --> state_ready : _ [always] / effect_on_unexpected_
+  state_no_strategy_error_decision --> state_ready : _ [always] / effect_on_unexpected_
+  state_unsupported_strategy_error_decision --> state_ready : _ [always] / effect_on_unexpected_
+  state_error_callback --> state_ready : _ [always] / effect_on_unexpected_
+  state_done_decision --> state_ready : _ [always] / effect_on_unexpected_
+  state_done_callback --> state_ready : _ [always] / effect_on_unexpected_

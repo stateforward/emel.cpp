@@ -6,10 +6,17 @@
 
 #include "emel/callback.hpp"
 #include "emel/error/error.hpp"
+#include "emel/io/loader/events.hpp"
 #include "emel/model/data.hpp"
 #include "emel/model/loader/errors.hpp"
 #include "emel/model/tensor/events.hpp"
 #include "emel/model/tensor/sm.hpp"
+
+namespace emel::io::loader {
+
+struct sm;
+
+} // namespace emel::io::loader
 
 namespace emel::model::loader::events {
 
@@ -19,6 +26,8 @@ struct tensor_plan_done;
 struct tensor_plan_error;
 struct tensor_apply_done;
 struct tensor_apply_error;
+struct io_load_done;
+struct io_load_error;
 struct load_done;
 struct load_error;
 
@@ -46,6 +55,9 @@ struct load {
   bool validate_architecture = true;
 
   emel::model::tensor::sm *tensor_loader = nullptr;
+  emel::io::loader::sm *io_loader = nullptr;
+  emel::io::loader::event::strategy_kind io_strategy =
+      emel::io::loader::event::strategy_kind::none;
   std::span<emel::model::tensor::effect_request> effect_requests = {};
   std::span<emel::model::tensor::effect_result> effect_results = {};
   map_layers_fn map_layers = {};
@@ -76,10 +88,16 @@ struct tensor_phase_events {
   events::tensor_apply_error &apply_error;
 };
 
+struct io_phase_events {
+  events::io_load_done &load_done;
+  events::io_load_error &load_error;
+};
+
 struct load_runtime {
   const load &request;
   load_ctx &ctx;
   mutable tensor_phase_events tensor_events;
+  mutable io_phase_events *io_events = nullptr;
 };
 
 } // namespace emel::model::loader::event
@@ -92,8 +110,7 @@ struct tensor_bind_done {
 
 struct tensor_bind_error {
   bool raised = false;
-  emel::error::type err =
-      emel::error::cast(emel::model::tensor::error::none);
+  emel::error::type err = emel::error::cast(emel::model::tensor::error::none);
 };
 
 struct tensor_plan_done {
@@ -103,8 +120,7 @@ struct tensor_plan_done {
 
 struct tensor_plan_error {
   bool raised = false;
-  emel::error::type err =
-      emel::error::cast(emel::model::tensor::error::none);
+  emel::error::type err = emel::error::cast(emel::model::tensor::error::none);
 };
 
 struct tensor_apply_done {
@@ -113,8 +129,18 @@ struct tensor_apply_done {
 
 struct tensor_apply_error {
   bool raised = false;
-  emel::error::type err =
-      emel::error::cast(emel::model::tensor::error::none);
+  emel::error::type err = emel::error::cast(emel::model::tensor::error::none);
+};
+
+struct io_load_done {
+  bool raised = false;
+  uint32_t expected_count = 0u;
+  uint32_t done_count = 0u;
+};
+
+struct io_load_error {
+  bool raised = false;
+  emel::error::type err = emel::error::cast(emel::io::loader::error::none);
 };
 
 struct load_done {

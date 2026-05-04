@@ -1,5 +1,25 @@
 # Project Milestones: EMEL
 
+## v1.23 I/O Loading Strategy Boundary (Shipped: 2026-05-04)
+
+**Phases completed:** 5 phases, 5 plans, 0 tasks
+
+**Key accomplishments:**
+
+- Established `src/emel/io` as a Stateforward.SML loading-boundary module with fail-closed strategy scaffolding and public aliases.
+- Added explicit IO request/result/error events and tensor IO load effects without moving tensor residency ownership.
+- Modeled IO strategy policy and rejection through explicit guards and transitions, with no hidden action/detail routing.
+- Integrated model-loader orchestration with the public IO actor boundary while keeping maintained tool lanes off actor internals.
+- Closed the IO boundary milestone with lifecycle tests, source guardrails, generated docs, permitted snapshots, and a passing quality gate.
+
+**Audit:** Source-backed audit passed with 14/14 active requirements satisfied after the delegated
+final source audit returned no blockers.
+
+**Known deferred items at close:** Concrete mmap/read/copy/device/async strategies remain
+follow-on work, with issue #61 expected to own the mmap strategy path.
+
+---
+
 ## v1.22 Weight Loading Ownership Cutover (Shipped: 2026-05-03)
 
 **Phases completed:** 12 phases, 12 plans, 0 tasks

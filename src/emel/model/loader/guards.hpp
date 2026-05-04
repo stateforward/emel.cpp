@@ -6,7 +6,7 @@
 namespace emel::model::loader::guard {
 
 struct has_model_path {
-  bool operator()(const event::load_runtime & ev) const noexcept {
+  bool operator()(const event::load_runtime &ev) const noexcept {
     return !ev.request.model_path.empty();
   }
 };
@@ -78,6 +78,12 @@ struct error_untracked {
   }
 };
 
+struct error_io_strategy_unavailable {
+  bool operator()(const event::load_runtime &ev) const noexcept {
+    return error_is(ev, emel::error::cast(error::io_strategy_unavailable));
+  }
+};
+
 struct error_unclassified_code {
   bool operator()(const event::load_runtime &ev) const noexcept {
     const emel::error::type err = ev.ctx.err;
@@ -87,7 +93,8 @@ struct error_unclassified_code {
            err != emel::error::cast(error::backend_error) &&
            err != emel::error::cast(error::model_invalid) &&
            err != emel::error::cast(error::internal_error) &&
-           err != emel::error::cast(error::untracked);
+           err != emel::error::cast(error::untracked) &&
+           err != emel::error::cast(error::io_strategy_unavailable);
   }
 };
 
@@ -160,6 +167,116 @@ struct tensor_bind_unhandled {
 struct tensor_plan_done_raised {
   bool operator()(const event::load_runtime &ev) const noexcept {
     return ev.tensor_events.plan_done.raised;
+  }
+};
+
+struct io_strategy_none {
+  bool operator()(const event::load_runtime &ev) const noexcept {
+    return ev.request.io_strategy ==
+           emel::io::loader::event::strategy_kind::none;
+  }
+};
+
+struct io_strategy_present {
+  bool operator()(const event::load_runtime &ev) const noexcept {
+    return !io_strategy_none{}(ev);
+  }
+};
+
+struct io_loader_present {
+  bool operator()(const event::load_runtime &ev) const noexcept {
+    return ev.request.io_loader != nullptr;
+  }
+};
+
+struct io_loader_absent {
+  bool operator()(const event::load_runtime &ev) const noexcept {
+    return !io_loader_present{}(ev);
+  }
+};
+
+struct tensor_plan_done_without_io_strategy {
+  bool operator()(const event::load_runtime &ev) const noexcept {
+    return tensor_plan_done_raised{}(ev) && io_strategy_none{}(ev);
+  }
+};
+
+struct tensor_plan_done_with_io_strategy_without_loader {
+  bool operator()(const event::load_runtime &ev) const noexcept {
+    return tensor_plan_done_raised{}(ev) && io_strategy_present{}(ev) &&
+           io_loader_absent{}(ev);
+  }
+};
+
+struct tensor_plan_done_with_io_strategy_with_loader {
+  bool operator()(const event::load_runtime &ev) const noexcept {
+    return tensor_plan_done_raised{}(ev) && io_strategy_present{}(ev) &&
+           io_loader_present{}(ev);
+  }
+};
+
+struct io_load_done_all {
+  bool operator()(const event::load_runtime &ev) const noexcept {
+    return ev.io_events != nullptr && ev.io_events->load_done.raised &&
+           !ev.io_events->load_error.raised &&
+           ev.io_events->load_done.done_count ==
+               ev.io_events->load_done.expected_count;
+  }
+};
+
+struct io_load_error_raised {
+  bool operator()(const event::load_runtime &ev) const noexcept {
+    return ev.io_events != nullptr && ev.io_events->load_error.raised;
+  }
+};
+
+inline bool io_load_error_is(const event::load_runtime &ev,
+                             const emel::error::type expected) noexcept {
+  return io_load_error_raised{}(ev) && ev.io_events->load_error.err == expected;
+}
+
+struct io_load_error_invalid_request {
+  bool operator()(const event::load_runtime &ev) const noexcept {
+    return io_load_error_is(
+        ev, emel::error::cast(emel::io::loader::error::invalid_request));
+  }
+};
+
+struct io_load_error_strategy_unavailable {
+  bool operator()(const event::load_runtime &ev) const noexcept {
+    return io_load_error_is(
+               ev, emel::error::cast(
+                       emel::io::loader::error::unsupported_strategy)) ||
+           io_load_error_is(
+               ev, emel::error::cast(emel::io::loader::error::unavailable));
+  }
+};
+
+struct io_load_error_internal {
+  bool operator()(const event::load_runtime &ev) const noexcept {
+    return io_load_error_is(
+        ev, emel::error::cast(emel::io::loader::error::internal_error));
+  }
+};
+
+struct io_load_error_untracked {
+  bool operator()(const event::load_runtime &ev) const noexcept {
+    return io_load_error_is(
+        ev, emel::error::cast(emel::io::loader::error::untracked));
+  }
+};
+
+struct io_load_error_unclassified {
+  bool operator()(const event::load_runtime &ev) const noexcept {
+    return io_load_error_raised{}(ev) && !io_load_error_invalid_request{}(ev) &&
+           !io_load_error_strategy_unavailable{}(ev) &&
+           !io_load_error_internal{}(ev) && !io_load_error_untracked{}(ev);
+  }
+};
+
+struct io_load_unhandled {
+  bool operator()(const event::load_runtime &ev) const noexcept {
+    return !io_load_done_all{}(ev) && !io_load_error_raised{}(ev);
   }
 };
 

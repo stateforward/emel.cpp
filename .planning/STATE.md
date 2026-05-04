@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.23
 milestone_name: I/O Loading Strategy Boundary
-status: milestone_started
-stopped_at: v1.23 requirements and roadmap initialized for issue #60.
-last_updated: "2026-05-04T00:02:00Z"
+status: milestone_archived_pr_open
+stopped_at: v1.23 archived and prepared for PR #82.
+last_updated: "2026-05-04T01:18:34Z"
 last_activity: 2026-05-04
 progress:
   total_phases: 5
-  completed_phases: 0
-  total_plans: 0
-  completed_plans: 0
-  percent: 0
+  completed_phases: 5
+  total_plans: 5
+  completed_plans: 5
+  percent: 100
 ---
 
 # Project State
@@ -22,30 +22,32 @@ See: .planning/PROJECT.md (updated 2026-05-04)
 
 **Core value:** Prove real end-to-end behavior with explicit SML orchestration and
 parity-oriented verification before widening API surface or model scope.
-**Current focus:** v1.23 I/O Loading Strategy Boundary from GitHub issue #60.
+**Current focus:** v1.23 is archived and open for review in PR #82; start the next milestone with
+`$gsd-new-milestone` after merge.
 
 ## Current Position
 
-Phase: 197 - I/O Module Skeleton And Ownership Contract
-Plan: Not started
-Status: Ready to discuss or plan Phase 197
-Last activity: 2026-05-04 - Started v1.23 from GitHub issue #60 and initialized requirements and
-roadmap for the `emel/io` boundary milestone.
+Phase: none
+Plan: none
+Status: v1.23 archived and PR #82 open
+Last activity: 2026-05-04 - Completed and archived the GitHub issue #60 `emel/io` boundary
+milestone after source-backed audit, delegated final audit, focused tests, domain guardrails,
+coverage, benchmarks, snapshots, docs generation, and the changed-file scoped quality gate passed.
 
-Progress: [----------] 0%
+Progress: [██████████] 100%
 
 ## Performance Metrics
 
-**Latest audited milestone:** `v1.22 Weight Loading Ownership Cutover`
+**Latest audited milestone:** `v1.23 I/O Loading Strategy Boundary`
 
-- v1.22 was archived on 2026-05-03, then reopened for a source-backed maintained-path gap.
-- Phase 194 restored `TENSOR-02` and `LOAD-02`.
-- Phase 195 closed the strict loader/tensor outcome and wrapper rule contradictions.
-- Phase 196 repaired stale closeout state metadata that still referenced Phase 194.
-- Final cleanup normalized validation/frontmatter evidence and public GGUF loader wrapper use in
-  maintained tool lanes.
+- v1.23 was archived on 2026-05-04 after Phases 197-201 completed.
+- Added `src/emel/io` as a first-class Stateforward.SML loading strategy boundary.
+- Wired tensor planning and model-loader orchestration to the IO boundary without moving tensor
+  residency ownership or adding concrete strategy behavior.
+- Final delegated source audit passed with no blockers.
 - Final audit status is `passed` with 14/14 active requirements satisfied.
-- PR #81 is open: https://github.com/stateforward/emel.cpp/pull/81
+- Final changed-file scoped quality gate passed with 99.1% line coverage.
+- PR #82 is open: https://github.com/stateforward/emel.cpp/pull/82
 - Current archive files live under `.planning/milestones/`.
 
 ## Accumulated Context
@@ -58,10 +60,11 @@ Recent decisions affecting this work:
 - `model/tensor` owns tensor load, bind, evict, and residency semantics.
 - `model/loader` orchestrates tensor-owned behavior and must not absorb backend-specific loading
   strategy logic.
-- Concrete I/O strategy work remains deferred to follow-on strategy milestones after the v1.23
-  boundary exists.
-- Guardrails must continue to reject a second model-weight residency owner and stale retired-owner
-  public prose.
+- `emel/io` owns loading strategy boundaries and transport/staging strategy slots.
+- Concrete mmap, staged read, copy, device-specific, and cooperative async strategies are deferred
+  to follow-on milestones after the v1.23 boundary.
+- Guardrails must reject a second tensor residency owner, low-level IO in `model/loader`, concrete
+  strategy leakage in this milestone, and maintained tool reach-through into actor internals.
 - User approved updates to snapshots, benchmarks, and model artifacts when required for this
   milestone.
 
@@ -90,6 +93,6 @@ Items acknowledged and deferred at v1.22 milestone close on 2026-05-03:
 
 ## Session Continuity
 
-Last session: 2026-05-03T04:38:04Z
-Stopped at: v1.22 archived after Phase 196 state closeout metadata repair.
+Last session: 2026-05-04T01:18:34Z
+Stopped at: v1.23 archived and PR #82 ready for update.
 Resume file: None

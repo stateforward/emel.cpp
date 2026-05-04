@@ -17,6 +17,7 @@
 #include "emel/gguf/loader/detail.hpp"
 #include "emel/gguf/loader/events.hpp"
 #include "emel/gguf/loader/sm.hpp"
+#include "emel/io/loader/sm.hpp"
 #include "emel/kernel/detail.hpp"
 #include "emel/kernel/events.hpp"
 #include "emel/model/detail.hpp"
@@ -25,9 +26,9 @@
 #include "emel/model/loader/errors.hpp"
 #include "emel/model/loader/guards.hpp"
 #include "emel/model/loader/sm.hpp"
-#include "emel/model/tensor/sm.hpp"
 #include "emel/model/omniembed/detail.hpp"
 #include "emel/model/sortformer/detail.hpp"
+#include "emel/model/tensor/sm.hpp"
 #include "emel/model/whisper/detail.hpp"
 
 namespace {
@@ -66,8 +67,7 @@ parse_ok(void *, const emel::model::loader::event::load &req) noexcept {
   return emel::error::cast(emel::model::loader::error::none);
 }
 
-emel::error::type
-parse_model_path_weights_ok(
+emel::error::type parse_model_path_weights_ok(
     void *, const emel::model::loader::event::load &req) noexcept {
   req.model_data.n_tensors = 1;
   req.model_data.n_layers = 1;
@@ -79,6 +79,19 @@ parse_model_path_weights_ok(
   req.model_data.weights_split_offsets[1] = 22u;
   req.model_data.weights_split_sizes[0] = 333u;
   req.model_data.weights_split_sizes[1] = 444u;
+  return emel::error::cast(emel::model::loader::error::none);
+}
+
+emel::error::type
+parse_tensor_span_ok(void *,
+                     const emel::model::loader::event::load &req) noexcept {
+  req.model_data.n_tensors = 1;
+  req.model_data.n_layers = 1;
+  auto &tensor = req.model_data.tensors[0];
+  tensor.file_offset = 2048u;
+  tensor.data_size = 128u;
+  tensor.file_index = 3u;
+  tensor.data = &tensor;
   return emel::error::cast(emel::model::loader::error::none);
 }
 
@@ -107,12 +120,16 @@ struct loader_tensor_phase_fixture {
   emel::model::loader::events::tensor_apply_done apply_done{};
   emel::model::loader::events::tensor_apply_error apply_error{};
   emel::model::loader::event::tensor_phase_events events{
-      bind_done,
-      bind_error,
-      plan_done,
-      plan_error,
-      apply_done,
-      apply_error,
+      bind_done, bind_error, plan_done, plan_error, apply_done, apply_error,
+  };
+};
+
+struct loader_io_phase_fixture {
+  emel::model::loader::events::io_load_done load_done{};
+  emel::model::loader::events::io_load_error load_error{};
+  emel::model::loader::event::io_phase_events events{
+      load_done,
+      load_error,
   };
 };
 
@@ -905,6 +922,75 @@ TEST_CASE("model loader lifecycle succeeds on full load path") {
   CHECK_FALSE(owner.used_mmap);
 }
 
+TEST_CASE("model loader rejects io strategy when no io actor is bound") {
+  auto model = std::make_unique<emel::model::data>();
+  emel::model::loader::sm machine{};
+  owner_state owner{};
+  emel::model::loader::event::parse_model_fn parse_model{nullptr,
+                                                         parse_tensor_span_ok};
+  tensor_loader_fixture tensor_loader{};
+
+  uint8_t file_bytes[8] = {};
+  emel::model::loader::event::load request{*model, parse_model};
+  request.file_image = file_bytes;
+  request.file_size = sizeof(file_bytes);
+  tensor_loader.bind(request);
+  request.io_strategy = emel::io::loader::event::strategy_kind::staged_read;
+  request.on_done = {&owner, on_done};
+  request.on_error = {&owner, on_error};
+
+  CHECK_FALSE(machine.process_event(request));
+  CHECK_FALSE(owner.done);
+  CHECK(owner.error);
+  CHECK(owner.err ==
+        emel::error::cast(emel::model::loader::error::io_strategy_unavailable));
+  CHECK(tensor_loader.effect_requests[0].kind ==
+        emel::model::tensor::effect_kind::k_io_load);
+  CHECK(tensor_loader.effect_requests[0].strategy ==
+        emel::io::loader::event::strategy_kind::staged_read);
+  CHECK(tensor_loader.effect_requests[0].tensor_id == 0);
+  CHECK(tensor_loader.effect_requests[0].file_index == 3u);
+  CHECK(tensor_loader.effect_requests[0].offset == 2048u);
+  CHECK(tensor_loader.effect_requests[0].size == 128u);
+  CHECK(tensor_loader.effect_requests[0].target == &model->tensors[0]);
+}
+
+TEST_CASE(
+    "model loader dispatches io actor and fails closed before strategies") {
+  auto model = std::make_unique<emel::model::data>();
+  emel::model::loader::sm machine{};
+  emel::io::loader::sm io_loader{};
+  owner_state owner{};
+  emel::model::loader::event::parse_model_fn parse_model{nullptr,
+                                                         parse_tensor_span_ok};
+  tensor_loader_fixture tensor_loader{};
+
+  uint8_t file_bytes[8] = {};
+  emel::model::loader::event::load request{*model, parse_model};
+  request.file_image = file_bytes;
+  request.file_size = sizeof(file_bytes);
+  tensor_loader.bind(request);
+  request.io_loader = &io_loader;
+  request.io_strategy = emel::io::loader::event::strategy_kind::mapped_file;
+  request.on_done = {&owner, on_done};
+  request.on_error = {&owner, on_error};
+
+  CHECK_FALSE(machine.process_event(request));
+  CHECK_FALSE(owner.done);
+  CHECK(owner.error);
+  CHECK(owner.err ==
+        emel::error::cast(emel::model::loader::error::io_strategy_unavailable));
+  CHECK(tensor_loader.effect_requests[0].kind ==
+        emel::model::tensor::effect_kind::k_io_load);
+  CHECK(tensor_loader.effect_requests[0].strategy ==
+        emel::io::loader::event::strategy_kind::mapped_file);
+  CHECK(tensor_loader.effect_requests[0].tensor_id == 0);
+  CHECK(tensor_loader.effect_requests[0].file_index == 3u);
+  CHECK(tensor_loader.effect_requests[0].offset == 2048u);
+  CHECK(tensor_loader.effect_requests[0].size == 128u);
+  CHECK(tensor_loader.effect_results[0].handle == nullptr);
+}
+
 TEST_CASE("model loader preserves parser weight metadata on model-path load") {
   auto model = std::make_unique<emel::model::data>();
   emel::model::loader::sm machine{};
@@ -1073,12 +1159,10 @@ TEST_CASE("model loader rejects full load without tensor effect storage") {
 }
 
 TEST_CASE("model loader tensor bulk phase does not use local capture routing") {
-  const std::string actions_source =
-      read_text_file(repo_root() / "src" / "emel" / "model" / "loader" /
-                     "actions.hpp");
-  const std::string sm_source =
-      read_text_file(repo_root() / "src" / "emel" / "model" / "loader" /
-                     "sm.hpp");
+  const std::string actions_source = read_text_file(
+      repo_root() / "src" / "emel" / "model" / "loader" / "actions.hpp");
+  const std::string sm_source = read_text_file(repo_root() / "src" / "emel" /
+                                               "model" / "loader" / "sm.hpp");
 
   CHECK(actions_source.find("tensor_load_capture") == std::string::npos);
   CHECK(actions_source.find("capture.bind_done") == std::string::npos);
@@ -1093,15 +1177,12 @@ TEST_CASE("model loader tensor bulk phase does not use local capture routing") {
 
 TEST_CASE("model loader tensor outcomes use typed phase events not result enum "
           "routing") {
-  const std::string actions_source =
-      read_text_file(repo_root() / "src" / "emel" / "model" / "loader" /
-                     "actions.hpp");
-  const std::string events_source =
-      read_text_file(repo_root() / "src" / "emel" / "model" / "loader" /
-                     "events.hpp");
-  const std::string guards_source =
-      read_text_file(repo_root() / "src" / "emel" / "model" / "loader" /
-                     "guards.hpp");
+  const std::string actions_source = read_text_file(
+      repo_root() / "src" / "emel" / "model" / "loader" / "actions.hpp");
+  const std::string events_source = read_text_file(
+      repo_root() / "src" / "emel" / "model" / "loader" / "events.hpp");
+  const std::string guards_source = read_text_file(
+      repo_root() / "src" / "emel" / "model" / "loader" / "guards.hpp");
 
   CHECK(events_source.find("tensor_load_result") == std::string::npos);
   CHECK(events_source.find("tensor_load_result_kind") == std::string::npos);
@@ -1115,14 +1196,31 @@ TEST_CASE("model loader tensor outcomes use typed phase events not result enum "
   CHECK(guards_source.find("guard_tensor_apply_done") == std::string::npos);
 }
 
-TEST_CASE("model tensor state-machine wrappers keep context and optional output "
-          "routing in transitions") {
-  const std::string detail_source =
-      read_text_file(repo_root() / "src" / "emel" / "model" / "tensor" /
-                     "detail.hpp");
-  const std::string sm_source =
-      read_text_file(repo_root() / "src" / "emel" / "model" / "tensor" /
-                     "sm.hpp");
+TEST_CASE(
+    "model loader io boundary uses actor events without helper exposure") {
+  const std::string actions_source = read_text_file(
+      repo_root() / "src" / "emel" / "model" / "loader" / "actions.hpp");
+  const std::string events_source = read_text_file(
+      repo_root() / "src" / "emel" / "model" / "loader" / "events.hpp");
+  const std::string sm_source = read_text_file(repo_root() / "src" / "emel" /
+                                               "model" / "loader" / "sm.hpp");
+
+  CHECK(actions_source.find("emel/io/loader/actions.hpp") == std::string::npos);
+  CHECK(actions_source.find("emel/io/loader/detail.hpp") == std::string::npos);
+  CHECK(actions_source.find("map_io_error") == std::string::npos);
+  CHECK(events_source.find("emel/io/loader/sm.hpp") == std::string::npos);
+  CHECK(sm_source.find("state_io_load_dispatch") != std::string::npos);
+  CHECK(sm_source.find("io_load_error_strategy_unavailable") !=
+        std::string::npos);
+}
+
+TEST_CASE(
+    "model tensor state-machine wrappers keep context and optional output "
+    "routing in transitions") {
+  const std::string detail_source = read_text_file(
+      repo_root() / "src" / "emel" / "model" / "tensor" / "detail.hpp");
+  const std::string sm_source = read_text_file(repo_root() / "src" / "emel" /
+                                               "model" / "tensor" / "sm.hpp");
 
   CHECK(detail_source.find("bind_or_sink") == std::string::npos);
   CHECK(detail_source.find("choices[") == std::string::npos);
@@ -1130,8 +1228,9 @@ TEST_CASE("model tensor state-machine wrappers keep context and optional output 
   CHECK(sm_source.find("bind_or_sink") == std::string::npos);
 }
 
-TEST_CASE("maintained tool parse callbacks do not resize gguf kv storage during "
-          "loader dispatch") {
+TEST_CASE(
+    "maintained tool parse callbacks do not resize gguf kv storage during "
+    "loader dispatch") {
   struct callback_source {
     const char *path;
     const char *function_name;
@@ -1141,8 +1240,8 @@ TEST_CASE("maintained tool parse callbacks do not resize gguf kv storage during 
   const callback_source sources[] = {
       {"tools/bench/generation_bench.cpp", "run_emel_parse_model",
        "prebind_emel_gguf_storage"},
-      {"tools/bench/diarization/sortformer_fixture.hpp",
-       "run_emel_parse_model", "prebind_emel_gguf_storage"},
+      {"tools/bench/diarization/sortformer_fixture.hpp", "run_emel_parse_model",
+       "prebind_emel_gguf_storage"},
       {"tools/embedded_size/emel_probe/main.cpp", "run_emel_parse_model",
        "prebind_emel_gguf_storage"},
       {"tools/paritychecker/parity_engines.cpp", "parse_gguf_kv_storage",
@@ -1252,8 +1351,8 @@ TEST_CASE("model loader tensor outcome contract maps callbacks and guards") {
   CHECK(phases.apply_error.raised);
   CHECK(phases.apply_error.err == emel::error::cast(tensor_error::untracked));
 
-  CHECK(loader_action::map_tensor_error(emel::error::cast(tensor_error::none)) ==
-        emel::error::cast(loader_error::none));
+  CHECK(loader_action::map_tensor_error(emel::error::cast(
+            tensor_error::none)) == emel::error::cast(loader_error::none));
   CHECK(loader_action::map_tensor_error(
             emel::error::cast(tensor_error::invalid_request)) ==
         emel::error::cast(loader_error::invalid_request));
@@ -1266,9 +1365,8 @@ TEST_CASE("model loader tensor outcome contract maps callbacks and guards") {
   CHECK(loader_action::map_tensor_error(
             emel::error::cast(tensor_error::untracked)) ==
         emel::error::cast(loader_error::untracked));
-  CHECK(loader_action::map_tensor_error(
-            static_cast<emel::error::type>(0xFFFFu)) ==
-        emel::error::cast(loader_error::backend_error));
+  CHECK(loader_action::map_tensor_error(static_cast<emel::error::type>(
+            0xFFFFu)) == emel::error::cast(loader_error::backend_error));
 
   auto model = std::make_unique<emel::model::data>();
   emel::model::loader::event::load_ctx load_ctx{};
@@ -1276,14 +1374,21 @@ TEST_CASE("model loader tensor outcome contract maps callbacks and guards") {
   emel::model::loader::event::load request{*model, parse_model};
   emel::model::loader::event::load_runtime runtime{request, load_ctx,
                                                    phases.events};
+  loader_io_phase_fixture io_phases{};
+  runtime.io_events = &io_phases.events;
   emel::model::loader::action::context action_ctx{};
 
   loader_action::reset_tensor_bind_events(phases.events);
   loader_action::reset_tensor_plan_events(phases.events);
   loader_action::reset_tensor_apply_events(phases.events);
+  emel::model::loader::action::effect_reset_io_load_events(io_phases.events,
+                                                           2u);
   CHECK(emel::model::loader::guard::tensor_bind_unhandled{}(runtime));
   CHECK(emel::model::loader::guard::tensor_plan_unhandled{}(runtime));
   CHECK(emel::model::loader::guard::tensor_apply_unhandled{}(runtime));
+  CHECK(emel::model::loader::guard::io_load_unhandled{}(runtime));
+  CHECK(io_phases.load_done.expected_count == 2u);
+  CHECK(io_phases.load_done.done_count == 0u);
 
   phases.bind_done.raised = true;
   CHECK(emel::model::loader::guard::tensor_bind_done_raised{}(runtime));
@@ -1311,6 +1416,70 @@ TEST_CASE("model loader tensor outcome contract maps callbacks and guards") {
   phases.apply_error.raised = true;
   CHECK(emel::model::loader::guard::tensor_apply_error_raised{}(runtime));
 
+  const emel::io::loader::event::tensor_load_span io_tensor{
+      .tensor_id = 0,
+      .file_index = 1u,
+      .file_offset = 64u,
+      .byte_size = 32u,
+      .target = effect_requests.data(),
+  };
+  const emel::io::loader::event::strategy_policy io_policy{
+      emel::io::loader::event::strategy_kind::mapped_file,
+  };
+  emel::io::loader::event::load_tensor io_request{io_tensor, io_policy};
+
+  emel::model::loader::action::effect_record_io_load_done_event(
+      &io_phases.events,
+      emel::io::loader::events::load_tensor_done{
+          io_request,
+          emel::io::loader::event::strategy_kind::mapped_file,
+          effect_requests.data(),
+          32u,
+      });
+  CHECK(emel::model::loader::guard::io_load_done_all{}(runtime) == false);
+  CHECK(io_phases.load_done.raised);
+  CHECK(io_phases.load_done.done_count == 1u);
+  CHECK_FALSE(io_phases.load_error.raised);
+
+  emel::model::loader::action::effect_record_io_load_error_event(
+      &io_phases.events,
+      emel::io::loader::events::load_tensor_error{
+          io_request,
+          emel::error::cast(emel::io::loader::error::unsupported_strategy),
+      });
+  CHECK_FALSE(io_phases.load_done.raised);
+  CHECK(io_phases.load_error.raised);
+  CHECK(emel::model::loader::guard::io_load_error_raised{}(runtime));
+  CHECK(emel::model::loader::guard::io_load_error_strategy_unavailable{}(
+      runtime));
+
+  io_phases.load_error.err =
+      emel::error::cast(emel::io::loader::error::invalid_request);
+  CHECK(emel::model::loader::guard::io_load_error_invalid_request{}(runtime));
+  io_phases.load_error.err =
+      emel::error::cast(emel::io::loader::error::internal_error);
+  CHECK(emel::model::loader::guard::io_load_error_internal{}(runtime));
+  io_phases.load_error.err =
+      emel::error::cast(emel::io::loader::error::untracked);
+  CHECK(emel::model::loader::guard::io_load_error_untracked{}(runtime));
+  io_phases.load_error.err = static_cast<emel::error::type>(0xFFFFu);
+  CHECK(emel::model::loader::guard::io_load_error_unclassified{}(runtime));
+
+  emel::model::loader::action::effect_record_io_load_done_event(
+      &io_phases.events,
+      emel::io::loader::events::load_tensor_done{
+          io_request,
+          emel::io::loader::event::strategy_kind::mapped_file,
+          effect_requests.data(),
+          32u,
+      });
+  CHECK_FALSE(emel::model::loader::guard::io_load_done_all{}(runtime));
+  CHECK(emel::model::loader::guard::io_load_error_raised{}(runtime));
+
+  io_phases.load_error.raised = false;
+  io_phases.load_done.done_count = io_phases.load_done.expected_count;
+  CHECK(emel::model::loader::guard::io_load_done_all{}(runtime));
+
   phases.bind_error.err = emel::error::cast(tensor_error::invalid_request);
   emel::model::loader::action::effect_mark_tensor_bind_error(runtime,
                                                              action_ctx);
@@ -1328,6 +1497,11 @@ TEST_CASE("model loader tensor outcome contract maps callbacks and guards") {
 
   emel::model::loader::action::mark_model_invalid(runtime, action_ctx);
   CHECK(load_ctx.err == emel::error::cast(loader_error::model_invalid));
+
+  emel::model::loader::action::effect_mark_io_strategy_unavailable(runtime,
+                                                                   action_ctx);
+  CHECK(load_ctx.err ==
+        emel::error::cast(loader_error::io_strategy_unavailable));
 }
 
 TEST_CASE(
@@ -1355,6 +1529,9 @@ TEST_CASE(
   CHECK_FALSE(guard(runtime));
   load_ctx.err = emel::error::cast(emel::model::loader::error::untracked);
   CHECK_FALSE(guard(runtime));
+  load_ctx.err =
+      emel::error::cast(emel::model::loader::error::io_strategy_unavailable);
+  CHECK_FALSE(guard(runtime));
   load_ctx.err = static_cast<emel::error::type>(0xFFFFu);
   CHECK(guard(runtime));
 }
@@ -1375,12 +1552,10 @@ TEST_CASE("model loader rejects tensor counts above model storage capacity") {
 
   model->n_tensors = excessive_tensor_count;
   request.tensor_loader = &tensor_loader;
-  request.effect_requests =
-      std::span<emel::model::tensor::effect_request>{
-          effect_requests.data(), excessive_tensor_count};
-  request.effect_results =
-      std::span<emel::model::tensor::effect_result>{effect_results.data(),
-                                                    excessive_tensor_count};
+  request.effect_requests = std::span<emel::model::tensor::effect_request>{
+      effect_requests.data(), excessive_tensor_count};
+  request.effect_results = std::span<emel::model::tensor::effect_result>{
+      effect_results.data(), excessive_tensor_count};
 
   CHECK_FALSE(emel::model::loader::guard::can_load_tensors{}(runtime));
   CHECK(emel::model::loader::guard::cannot_load_tensors{}(runtime));

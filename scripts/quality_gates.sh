@@ -214,6 +214,9 @@ add_changed_file() {
     tests/text/*)
       add_test_shard text
       ;;
+    tests/io/*|tests/io/**/*)
+      add_test_shard io
+      ;;
   esac
 }
 
@@ -251,6 +254,9 @@ infer_test_shard_for_src() {
       ;;
     src/emel/sm/*)
       add_test_shard sm
+      ;;
+    src/emel/io/*|src/emel/io/**/*)
+      add_test_shard io
       ;;
     src/emel/text/encoders/plamo2/*|src/emel/text/encoders/plamo2/**/*)
       add_test_shard text_encoder_plamo2
@@ -731,6 +737,8 @@ infer_quality_gate_scope() {
       src/emel/batch/*|tests/batch/*)
         add_bench_suite batch_planner "scope path=$file"
         ;;
+      src/emel/io/*|src/emel/io/**/*|tests/io/*|tests/io/**/*)
+        ;;
       src/emel/kernel/aarch64/*|tests/kernel/aarch64*)
         add_bench_suite kernel_aarch64 "scope path=$file"
         ;;
@@ -926,7 +934,7 @@ run_benchmark_gates() {
   local bench_warmup_runs
   local bench_tolerance
   local generation_workload_id
-  local -a bench_extra_env
+  local -a bench_extra_env=()
 
   if bench_dependency_manifest_check_needed; then
     if bench_dependency_manifest_requires_full_gate; then
@@ -1013,7 +1021,7 @@ run_benchmark_gates() {
       EMEL_BENCH_WARMUP_ITERS="$bench_warmup_iters" \
       EMEL_BENCH_WARMUP_RUNS="$bench_warmup_runs" \
       BENCH_TOLERANCE="$bench_tolerance" \
-      "${bench_extra_env[@]}" \
+      ${bench_extra_env[@]+"${bench_extra_env[@]}"} \
       "$ROOT_DIR/scripts/bench.sh" --snapshot --compare --suite="$suite"; then
       continue
     else

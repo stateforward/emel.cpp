@@ -12,6 +12,7 @@ enum class error : emel::error::type {
   model_invalid = (1u << 3),
   internal_error = (1u << 4),
   untracked = (1u << 5),
+  io_strategy_unavailable = (1u << 6),
 };
 
-}  // namespace emel::model::loader
+} // namespace emel::model::loader

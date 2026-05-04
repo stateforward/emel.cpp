@@ -68,6 +68,18 @@ check_no_matches "text generator actor internals in maintained generation parity
   'emel/text/generator/(detail|actions|guards)\.hpp|emel::text::generator::(detail|action|guard)::|emel::text::generator::prefill::guard::|generation_internal_diagnostics' \
   tools/bench/generation_bench.cpp tools/paritychecker/parity_runner.cpp tools/paritychecker/parity_runner.hpp
 
+check_no_matches "IO loader concrete system I/O before strategy implementation" \
+  'mmap[[:space:]]*\(|munmap[[:space:]]*\(|pread[[:space:]]*\(|CreateFileMapping|MapViewOfFile|std::ifstream|std::fstream|::open[[:space:]]*\(' \
+  src/emel/io
+
+check_no_matches "model loader low-level IO strategy implementation" \
+  'mmap[[:space:]]*\(|munmap[[:space:]]*\(|pread[[:space:]]*\(|CreateFileMapping|MapViewOfFile|std::ifstream|std::fstream|::open[[:space:]]*\(' \
+  src/emel/model/loader
+
+check_no_matches "maintained benchmark/parity lanes reaching IO or tensor actor internals" \
+  'emel/(io/loader|model/tensor|model/loader)/(actions|detail|guards)\.hpp|emel::io::loader::(action|detail|guard)::|emel::model::tensor::(action|detail|guard)::|emel::model::loader::(action|detail|guard)::' \
+  tools/bench tools/paritychecker tools/embedded_size
+
 check_no_matches "Whisper leaked into generic speech recognizer" \
   'whisper|model/whisper|speech/tokenizer/whisper|speech/encoder/whisper|speech/decoder/whisper|model::whisper|tokenizer::whisper|encoder::whisper|decoder::whisper' \
   src/emel/speech/recognizer tests/speech/recognizer
