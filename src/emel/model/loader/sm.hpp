@@ -22,6 +22,7 @@ struct state_tensor_plan_dispatch {};
 struct state_tensor_plan_decision {};
 struct state_io_load_dispatch {};
 struct state_io_load_decision {};
+struct state_tensor_effect_error_cleanup {};
 struct state_tensor_apply_dispatch {};
 struct state_tensor_apply_decision {};
 struct load_map_policy_decision {};
@@ -119,10 +120,11 @@ struct model {
       , sml::state<state_tensor_apply_dispatch> <= sml::state<state_tensor_plan_decision>
           + sml::completion<event::load_runtime>
           [ guard::tensor_plan_done_without_io_strategy{} ]
-      , sml::state<errored> <= sml::state<state_tensor_plan_decision>
+      , sml::state<state_tensor_effect_error_cleanup> <=
+          sml::state<state_tensor_plan_decision>
           + sml::completion<event::load_runtime>
           [ guard::tensor_plan_done_with_io_strategy_without_loader{} ]
-          / action::effect_mark_io_strategy_unavailable
+          / action::effect_dispatch_tensor_apply_error_results
       , sml::state<state_io_load_dispatch> <= sml::state<state_tensor_plan_decision>
           + sml::completion<event::load_runtime>
           [ guard::tensor_plan_done_with_io_strategy_with_loader{} ]
@@ -138,29 +140,44 @@ struct model {
           / action::effect_dispatch_io_loads
       , sml::state<state_tensor_apply_dispatch> <= sml::state<state_io_load_decision>
           + sml::completion<event::load_runtime> [ guard::io_load_done_all{} ]
-      , sml::state<errored> <= sml::state<state_io_load_decision>
+      , sml::state<state_tensor_effect_error_cleanup> <=
+          sml::state<state_io_load_decision>
+          + sml::completion<event::load_runtime> [ guard::io_load_error_raised{} ]
+          / action::effect_dispatch_tensor_apply_error_results
+      , sml::state<state_tensor_effect_error_cleanup> <=
+          sml::state<state_io_load_decision>
+          + sml::completion<event::load_runtime> [ guard::io_load_unhandled{} ]
+          / action::effect_dispatch_tensor_apply_error_results
+
+      , sml::state<errored> <= sml::state<state_tensor_effect_error_cleanup>
+          + sml::completion<event::load_runtime>
+          [ guard::tensor_plan_done_with_io_strategy_without_loader{} ]
+          / action::effect_mark_io_strategy_unavailable
+      , sml::state<errored> <= sml::state<state_tensor_effect_error_cleanup>
           + sml::completion<event::load_runtime>
           [ guard::io_load_error_invalid_request{} ]
           / action::mark_invalid_request
-      , sml::state<errored> <= sml::state<state_io_load_decision>
+      , sml::state<errored> <= sml::state<state_tensor_effect_error_cleanup>
           + sml::completion<event::load_runtime>
           [ guard::io_load_error_strategy_unavailable{} ]
           / action::effect_mark_io_strategy_unavailable
-      , sml::state<errored> <= sml::state<state_io_load_decision>
+      , sml::state<errored> <= sml::state<state_tensor_effect_error_cleanup>
           + sml::completion<event::load_runtime>
           [ guard::io_load_error_internal{} ]
           / action::mark_internal_error
-      , sml::state<errored> <= sml::state<state_io_load_decision>
+      , sml::state<errored> <= sml::state<state_tensor_effect_error_cleanup>
           + sml::completion<event::load_runtime>
           [ guard::io_load_error_untracked{} ]
           / action::mark_untracked
-      , sml::state<errored> <= sml::state<state_io_load_decision>
+      , sml::state<errored> <= sml::state<state_tensor_effect_error_cleanup>
           + sml::completion<event::load_runtime>
           [ guard::io_load_error_unclassified{} ]
           / action::mark_internal_error
-      , sml::state<errored> <= sml::state<state_io_load_decision>
+      , sml::state<errored> <= sml::state<state_tensor_effect_error_cleanup>
           + sml::completion<event::load_runtime> [ guard::io_load_unhandled{} ]
           / action::mark_internal_error
+      , sml::state<errored> <= sml::state<state_tensor_effect_error_cleanup>
+          + sml::completion<event::load_runtime> / action::mark_internal_error
 
       , sml::state<state_tensor_apply_decision> <= sml::state<state_tensor_apply_dispatch>
           + sml::completion<event::load_runtime>
@@ -326,6 +343,8 @@ struct model {
       , sml::state<ready> <= sml::state<state_io_load_dispatch>
           + sml::unexpected_event<sml::_> / action::on_unexpected
       , sml::state<ready> <= sml::state<state_io_load_decision>
+          + sml::unexpected_event<sml::_> / action::on_unexpected
+      , sml::state<ready> <= sml::state<state_tensor_effect_error_cleanup>
           + sml::unexpected_event<sml::_> / action::on_unexpected
       , sml::state<ready> <= sml::state<state_tensor_apply_dispatch>
           + sml::unexpected_event<sml::_> / action::on_unexpected

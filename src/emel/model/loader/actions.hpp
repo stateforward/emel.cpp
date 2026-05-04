@@ -6,6 +6,8 @@
 
 namespace emel::model::loader::action {
 
+namespace err = emel::error;
+
 namespace detail {
 
 template <class runtime_event_type>
@@ -192,8 +194,7 @@ struct mark_model_invalid {
 struct mark_untracked {
   template <class runtime_event_type>
   void operator()(const runtime_event_type &ev, context &) const noexcept {
-    const auto &runtime_ev = detail::unwrap_runtime_event(ev);
-    runtime_ev.ctx.err = emel::error::cast(error::untracked);
+    detail::unwrap_runtime_event(ev).ctx.err = err::cast(error::untracked);
   }
 };
 
@@ -269,6 +270,32 @@ struct effect_dispatch_tensor_apply_results {
           .kind = ev.request.effect_requests[index].kind,
           .handle = ev.request.effect_requests[index].target,
           .err = emel::error::cast(emel::model::tensor::error::none),
+      };
+    }
+
+    emel::model::tensor::event::apply_effect_results apply{
+        std::span<const emel::model::tensor::effect_result>{
+            ev.request.effect_results.data(), effect_count},
+        std::span<emel::model::data::tensor_record>{
+            ev.request.model_data.tensors.data(),
+            ev.request.model_data.n_tensors},
+    };
+    apply.on_done = {&ev.tensor_events, detail::record_apply_done_event};
+    apply.on_error = {&ev.tensor_events, detail::record_apply_error_event};
+    static_cast<void>(ev.request.tensor_loader->process_event(apply));
+  }
+};
+
+struct effect_dispatch_tensor_apply_error_results {
+  void operator()(const event::load_runtime &ev, context &) const noexcept {
+    const uint32_t effect_count = ev.tensor_events.plan_done.effect_count;
+    detail::reset_tensor_apply_events(ev.tensor_events);
+
+    for (uint32_t index = 0u; index < effect_count; ++index) {
+      ev.request.effect_results[index] = emel::model::tensor::effect_result{
+          .kind = ev.request.effect_requests[index].kind,
+          .handle = nullptr,
+          .err = emel::error::cast(emel::model::tensor::error::backend_error),
       };
     }
 
@@ -409,6 +436,8 @@ inline constexpr effect_mark_io_strategy_unavailable
 inline constexpr effect_dispatch_io_loads effect_dispatch_io_loads{};
 inline constexpr effect_dispatch_tensor_apply_results
     effect_dispatch_tensor_apply_results{};
+inline constexpr effect_dispatch_tensor_apply_error_results
+    effect_dispatch_tensor_apply_error_results{};
 inline constexpr effect_publish_tensor_load_done_from_file_image
     effect_publish_tensor_load_done_from_file_image{};
 inline constexpr effect_publish_tensor_load_done_from_model_data
