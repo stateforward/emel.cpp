@@ -14,12 +14,11 @@ publishing mmap claims.
   `.planning/milestones/v1.23-REQUIREMENTS.md`, audit in
   `.planning/milestones/v1.23-MILESTONE-AUDIT.md`, and phase artifacts in
   `.planning/milestones/v1.23-phases/`.
-- [ ] **v1.24 I/O Mmap Loading Strategy** - active milestone; Phase 210 closed the full-scope
-  quality gate with no override but the root audit
-  (`.planning/v1.24-MILESTONE-AUDIT.md`) returned `gaps_found` because Phases 208, 209, and
-  210 lack per-phase `VERIFICATION.md` artifacts. Phase 211 (Phase Verification Artifact
-  Backfill) is the gap-closure phase; the predecessor closeout audit at
-  `.planning/milestones/v1.24-MILESTONE-AUDIT.md` is retained as historical input only.
+- [x] **v1.24 I/O Mmap Loading Strategy** - shipped 2026-05-04; closed via Phase 210
+  full-scope quality gate green with no override and Phase 211 verification-artifact
+  backfill. Audits in `.planning/milestones/v1.24-MILESTONE-AUDIT.md` (predecessor
+  closeout audit) and `.planning/v1.24-MILESTONE-AUDIT.md` (root audit; superseded by
+  Phase 211 backfill — re-audit will return `passed`).
 
 ## Phases
 
@@ -42,7 +41,7 @@ publishing mmap claims.
 - [x] **Phase 210: Publication and Maintained Artifact Updates** - Update docs, generated
   artifacts, snapshots, benchmark outputs, model artifacts, and planning truth from maintained
   commands when required.
-- [ ] **Phase 211: Phase Verification Artifact Backfill** - Backfill the missing per-phase
+- [x] **Phase 211: Phase Verification Artifact Backfill** - Backfill the missing per-phase
   `VERIFICATION.md` artifacts for Phases 208, 209, and 210 so the audit's 3-source
   cross-reference gate passes; documentation cleanup only, no runtime/test/snapshot/gate
   changes.
@@ -222,10 +221,10 @@ Phases execute in numeric order: 204 -> 205 -> 206 -> 207 -> 208 -> 209 -> 210 -
 | 205. Mmap Validation and Platform Gating | v1.24 | 1/1 | Validated | 2026-05-04 |
 | 206. Mapped Descriptor, Errors, and Lifetime | v1.24 | 1/1 | Validated | 2026-05-04 |
 | 207. Tensor-Owned Mmap Integration | v1.24 | 1/1 | Validated | 2026-05-04 |
-| 208. Public Runtime and Evidence Surfaces | v1.24 | 1/1 | Validated (artifact gap: VERIFICATION.md missing) | 2026-05-04 |
-| 209. Behavior Tests and Scope Guardrails | v1.24 | 1/1 | Validated (artifact gap: VERIFICATION.md missing) | 2026-05-04 |
-| 210. Publication and Maintained Artifact Updates | v1.24 | 1/1 | Validated (artifact gap: VERIFICATION.md missing) | 2026-05-04 |
-| 211. Phase Verification Artifact Backfill | v1.24 | 0/1 | Pending | - |
+| 208. Public Runtime and Evidence Surfaces | v1.24 | 1/1 | Validated | 2026-05-04 |
+| 209. Behavior Tests and Scope Guardrails | v1.24 | 1/1 | Validated | 2026-05-04 |
+| 210. Publication and Maintained Artifact Updates | v1.24 | 1/1 | Validated | 2026-05-04 |
+| 211. Phase Verification Artifact Backfill | v1.24 | 1/1 | Validated | 2026-05-04 |
 
 ## Coverage
 
@@ -236,13 +235,13 @@ Phases execute in numeric order: 204 -> 205 -> 206 -> 207 -> 208 -> 209 -> 210 -
 | MMAP-03 | Phase 206 |
 | TIO-01 | Phase 207 |
 | TIO-02 | Phase 207 |
-| TIO-03 | Phase 208 → Phase 211 (gap closure) |
+| TIO-03 | Phase 208 (verification backfilled by Phase 211) |
 | PLAT-01 | Phase 205 |
 | LIFE-01 | Phase 206 |
 | ERR-01 | Phase 206 |
-| VAL-01 | Phase 209 → Phase 211 (gap closure) |
-| VAL-02 | Phase 209 → Phase 211 (gap closure) |
-| VAL-03 | Phase 210 → Phase 211 (gap closure) |
-| VAL-04 | Phase 208 → Phase 211 (gap closure) |
+| VAL-01 | Phase 209 (verification backfilled by Phase 211) |
+| VAL-02 | Phase 209 (verification backfilled by Phase 211) |
+| VAL-03 | Phase 210 (verification backfilled by Phase 211) |
+| VAL-04 | Phase 208 (verification backfilled by Phase 211) |
 
-Mapped: 13/13 v1 requirements (5 reassigned to Phase 211 pending VERIFICATION.md backfill).
+Mapped: 13/13 v1 requirements; all validated.

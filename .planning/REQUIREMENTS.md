@@ -27,10 +27,9 @@ Requirements for this milestone. Each maps to exactly one active roadmap phase.
 - [x] **TIO-02**: Tensor-to-I/O mmap success, unsupported, validation failure, and mapping failure
   outcomes are represented with explicit `_done` and `_error` events or states, not mirrored status
   fields, action-selected callbacks, or context phase flags.
-- [ ] **TIO-03**: `model/loader`, maintained benchmark lanes, paritychecker lanes, and embedded
+- [x] **TIO-03**: `model/loader`, maintained benchmark lanes, paritychecker lanes, and embedded
   probes can select or report mmap-backed loading only through public runtime surfaces, with no
-  low-level mmap logic or actor-internal reach-through. *(Implementation complete; pending
-  Phase 211 VERIFICATION.md backfill so the audit's 3-source cross-reference passes.)*
+  low-level mmap logic or actor-internal reach-through.
 
 ### Platform And Lifetime
 
@@ -45,21 +44,17 @@ Requirements for this milestone. Each maps to exactly one active roadmap phase.
 
 ### Validation And Publication
 
-- [ ] **VAL-01**: Doctest coverage proves supported mmap behavior and representative failure
-  handling through `process_event(...)` and SML state inspection. *(Implementation complete;
-  pending Phase 211 VERIFICATION.md backfill so the audit's 3-source cross-reference passes.)*
-- [ ] **VAL-02**: Domain and source guardrails fail if mmap implementation leaks into
+- [x] **VAL-01**: Doctest coverage proves supported mmap behavior and representative failure
+  handling through `process_event(...)` and SML state inspection.
+- [x] **VAL-02**: Domain and source guardrails fail if mmap implementation leaks into
   `model/loader`, if tensor residency ownership moves out of `model/tensor`, or if staged
-  read/copy/device/async strategies land in this milestone. *(Implementation complete; pending
-  Phase 211 VERIFICATION.md backfill so the audit's 3-source cross-reference passes.)*
-- [ ] **VAL-03**: Public docs, generated architecture docs, planning artifacts, lint snapshots,
+  read/copy/device/async strategies land in this milestone.
+- [x] **VAL-03**: Public docs, generated architecture docs, planning artifacts, lint snapshots,
   benchmark snapshots, benchmark outputs, and model artifacts are updated from maintained commands
-  when required and describe mmap support truthfully. *(Implementation complete; pending
-  Phase 211 VERIFICATION.md backfill so the audit's 3-source cross-reference passes.)*
-- [ ] **VAL-04**: Maintained benchmark and parity evidence reports mmap usage only when the EMEL
+  when required and describe mmap support truthfully.
+- [x] **VAL-04**: Maintained benchmark and parity evidence reports mmap usage only when the EMEL
   lane actually runs the mmap-backed runtime path and does not present unsupported fallback behavior
-  as mmap strategy parity or performance. *(Implementation complete; pending Phase 211
-  VERIFICATION.md backfill so the audit's 3-source cross-reference passes.)*
+  as mmap strategy parity or performance.
 
 ## v2 Requirements
 
@@ -98,22 +93,22 @@ Which phases cover which requirements. Updated during roadmap creation.
 | MMAP-03 | Phase 206 | Validated |
 | TIO-01 | Phase 207 | Validated |
 | TIO-02 | Phase 207 | Validated |
-| TIO-03 | Phase 211 (gap closure) | Pending |
+| TIO-03 | Phase 208 (verification backfilled by Phase 211) | Validated |
 | PLAT-01 | Phase 205 | Validated |
 | LIFE-01 | Phase 206 | Validated |
 | ERR-01 | Phase 206 | Validated |
-| VAL-01 | Phase 211 (gap closure) | Pending |
-| VAL-02 | Phase 211 (gap closure) | Pending |
-| VAL-03 | Phase 211 (gap closure) | Pending |
-| VAL-04 | Phase 211 (gap closure) | Pending |
+| VAL-01 | Phase 209 (verification backfilled by Phase 211) | Validated |
+| VAL-02 | Phase 209 (verification backfilled by Phase 211) | Validated |
+| VAL-03 | Phase 210 (verification backfilled by Phase 211) | Validated |
+| VAL-04 | Phase 208 (verification backfilled by Phase 211) | Validated |
 
 **Coverage:**
 - v1 requirements: 13 total
 - Mapped to phases: 13
-- Validated: 8
-- Pending: 5 (TIO-03, VAL-01, VAL-02, VAL-03, VAL-04 — pending Phase 211 VERIFICATION.md backfill)
+- Validated: 13
+- Pending: 0
 - Unmapped: 0
 
 ---
 *Requirements defined: 2026-05-04*
-*Last updated: 2026-05-04 after `.planning/v1.24-MILESTONE-AUDIT.md` returned `gaps_found` (artifact-format only — implementation and validation evidence already present in SUMMARY.md and VALIDATION.md; Phase 211 backfills the missing per-phase VERIFICATION.md).*
+*Last updated: 2026-05-04 after Phase 211 backfilled the missing per-phase VERIFICATION.md artifacts for Phases 208/209/210; v1.24 milestone audit re-passes (13/13 satisfied).*
