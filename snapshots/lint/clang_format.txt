@@ -344,12 +344,8 @@ src/emel/model/lfm2/detail.hpp
 src/emel/model/llama/any.hpp
 src/emel/model/llama/detail.cpp
 src/emel/model/llama/detail.hpp
-src/emel/model/loader/actions.hpp
 src/emel/model/loader/context.hpp
 src/emel/model/loader/detail.hpp
-src/emel/model/loader/errors.hpp
-src/emel/model/loader/events.hpp
-src/emel/model/loader/guards.hpp
 src/emel/model/omniembed/detail.cpp
 src/emel/model/omniembed/detail.hpp
 src/emel/model/qwen3/detail.cpp
@@ -420,7 +416,6 @@ src/emel/text/encoders/rwkv/detail.hpp
 src/emel/text/encoders/rwkv/errors.hpp
 src/emel/text/encoders/rwkv/guards.hpp
 src/emel/text/encoders/rwkv/sm.hpp
-src/emel/text/encoders/sm.hpp
 src/emel/text/encoders/spm/actions.hpp
 src/emel/text/encoders/spm/context.hpp
 src/emel/text/encoders/spm/detail.hpp
@@ -579,6 +574,7 @@ tests/graph/processor/processor_sm_transition_tests.cpp
 tests/graph/processor/processor_tests.cpp
 tests/graph/tensor/lifecycle_tests.cpp
 tests/graph/wrapper_visibility_tests.cpp
+tests/io/loader/lifecycle_tests.cpp
 tests/kernel/aarch64_tests.cpp
 tests/kernel/lifecycle_tests.cpp
 tests/kernel/test_helpers.hpp
@@ -589,8 +585,6 @@ tests/memory/hybrid/lifecycle_tests.cpp
 tests/memory/kv/lifecycle_tests.cpp
 tests/memory/recurrent/lifecycle_tests.cpp
 tests/model/fixture_manifest_tests.cpp
-tests/model/loader/lifecycle_tests.cpp
-tests/model/tensor/lifecycle_tests.cpp
 tests/sm/callback_tests.cpp
 tests/sm/sm_any_tests.cpp
 tests/sm/sm_policy_tests.cpp

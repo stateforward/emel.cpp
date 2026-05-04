@@ -556,6 +556,8 @@ std::string_view model_loader_error_name(const emel::error::type err) noexcept {
     return "model_invalid";
   case emel::model::loader::error::internal_error:
     return "internal_error";
+  case emel::model::loader::error::io_strategy_unavailable:
+    return "io_strategy_unavailable";
   case emel::model::loader::error::untracked:
     return "untracked";
   }

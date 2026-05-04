@@ -174,6 +174,7 @@ if(EMEL_ENABLE_TESTS)
 
   list(APPEND EMEL_TEST_SOURCES
     tests/gguf/loader/lifecycle_tests.cpp
+    tests/io/loader/lifecycle_tests.cpp
     tests/text/jinja/parser_tests.cpp
     tests/text/jinja/lexer_tests.cpp
     tests/text/jinja/formatter_tests.cpp
@@ -217,7 +218,9 @@ if(EMEL_ENABLE_TESTS)
       set(keep_test_source FALSE)
       foreach(test_shard IN LISTS EMEL_TEST_SELECTED_SHARDS)
         if((test_shard STREQUAL "model_and_batch" AND
-              test_source MATCHES "^tests/(model|gguf|gbnf|batch)/") OR
+              test_source MATCHES "^tests/(model|gguf|gbnf|batch|io)/") OR
+           (test_shard STREQUAL "io" AND
+              test_source MATCHES "^tests/io/") OR
            (test_shard STREQUAL "generator_and_runtime" AND
               test_source MATCHES "^tests/(text/generator|embeddings|logits|token)/") OR
            (test_shard STREQUAL "diarization" AND
@@ -292,7 +295,11 @@ if(EMEL_ENABLE_TESTS)
 
   emel_add_doctest_shard(
     model_and_batch
-    "*tests/model/*,*tests/gguf/*,*tests/gbnf/*,*tests/batch/*"
+    "*tests/model/*,*tests/gguf/*,*tests/gbnf/*,*tests/batch/*,*tests/io/*"
+  )
+  emel_add_doctest_shard(
+    io
+    "*tests/io/*"
   )
   emel_add_doctest_shard(
     generator_and_runtime

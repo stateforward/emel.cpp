@@ -98,8 +98,13 @@ struct model {
       //------------------------------------------------------------------------------//
       // Tensor-owned load planning.
       , sml::state<state_plan_load_done_decision> <= sml::state<ready>
-          + sml::event<detail::plan_load_runtime> [ guard::plan_load_valid{} ]
+          + sml::event<detail::plan_load_runtime>
+          [ guard::plan_load_valid_without_io_strategy{} ]
           / action::effect_plan_load
+      , sml::state<state_plan_load_done_decision> <= sml::state<ready>
+          + sml::event<detail::plan_load_runtime>
+          [ guard::plan_load_valid_with_io_strategy{} ]
+          / action::effect_plan_io_load
       , sml::state<state_plan_load_error_decision> <= sml::state<ready>
           + sml::event<detail::plan_load_runtime>
           [ guard::plan_load_invalid_request{} ]

@@ -5,6 +5,7 @@
 
 #include "emel/callback.hpp"
 #include "emel/error/error.hpp"
+#include "emel/io/loader/events.hpp"
 #include "emel/model/data.hpp"
 #include "emel/model/tensor/errors.hpp"
 
@@ -29,10 +30,15 @@ struct tensor_state {
 
 enum class effect_kind : uint8_t {
   k_none = 0,
+  k_io_load = 1,
 };
 
 struct effect_request {
   effect_kind kind = effect_kind::k_none;
+  emel::io::loader::event::strategy_kind strategy =
+      emel::io::loader::event::strategy_kind::none;
+  int32_t tensor_id = 0;
+  uint16_t file_index = 0u;
   uint64_t offset = 0;
   uint64_t size = 0;
   void *target = nullptr;
@@ -124,6 +130,8 @@ struct bind_storage {
 
 struct plan_load {
   std::span<effect_request> effects = {};
+  emel::io::loader::event::strategy_kind strategy =
+      emel::io::loader::event::strategy_kind::none;
   emel::callback<void(const events::plan_load_done &)> on_done = {};
   emel::callback<void(const events::plan_load_error &)> on_error = {};
 

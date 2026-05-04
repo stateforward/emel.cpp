@@ -151,6 +151,9 @@ add_test_dirs_for_shard() {
       add_selected_test_dir tests/memory
       add_selected_test_dir tests/tensor
       ;;
+    io)
+      add_selected_test_dir tests/io
+      ;;
   esac
 }
 
@@ -221,6 +224,9 @@ if [[ "$COVERAGE_CHANGED_ONLY" == "1" ]]; then
         ;;
       src/emel/sm/*)
         add_changed_shard sm
+        ;;
+      src/emel/io/*|src/emel/io/**/*)
+        add_changed_shard io
         ;;
       src/emel/text/encoders/plamo2/*|src/emel/text/encoders/plamo2/**/*)
         add_changed_shard text_encoder_plamo2
@@ -380,6 +386,7 @@ if [[ "$COVERAGE_CHANGED_ONLY" == "1" &&
     tests/graph
     tests/memory
     tests/tensor
+    tests/io
   )
   for dir in "${all_test_dirs[@]}"; do
     keep=0

@@ -13,6 +13,7 @@ stateDiagram-v2
   parse_phase_decision --> errored : completion_load_runtime_ [error_model_invalid_] / none
   parse_phase_decision --> errored : completion_load_runtime_ [error_internal_error_] / none
   parse_phase_decision --> errored : completion_load_runtime_ [error_untracked_] / none
+  parse_phase_decision --> errored : completion_load_runtime_ [error_io_strategy_unavailable_] / none
   parse_phase_decision --> errored : completion_load_runtime_ [error_unclassified_code_] / none
   parse_load_tensors_policy_decision --> parse_load_tensors_handler_decision : completion_load_runtime_ [should_load_tensors_] / none
   parse_load_tensors_policy_decision --> structure_decision : completion_load_runtime_ [skip_load_tensors_] / none
@@ -26,9 +27,23 @@ stateDiagram-v2
   state_tensor_bind_decision --> errored : completion_load_runtime_ [tensor_bind_error_raised_] / effect_mark_tensor_bind_error_
   state_tensor_bind_decision --> errored : completion_load_runtime_ [tensor_bind_unhandled_] / mark_internal_error_
   state_tensor_plan_dispatch --> state_tensor_plan_decision : completion_load_runtime_ [always] / effect_dispatch_tensor_plan_load_
-  state_tensor_plan_decision --> state_tensor_apply_dispatch : completion_load_runtime_ [tensor_plan_done_raised_] / none
+  state_tensor_plan_decision --> state_tensor_apply_dispatch : completion_load_runtime_ [tensor_plan_done_without_io_strategy_] / none
+  state_tensor_plan_decision --> state_tensor_effect_error_cleanup : completion_load_runtime_ [tensor_plan_done_with_io_strategy_without_loader_] / effect_dispatch_tensor_apply_error_results_
+  state_tensor_plan_decision --> state_io_load_dispatch : completion_load_runtime_ [tensor_plan_done_with_io_strategy_with_loader_] / none
   state_tensor_plan_decision --> errored : completion_load_runtime_ [tensor_plan_error_raised_] / effect_mark_tensor_plan_error_
   state_tensor_plan_decision --> errored : completion_load_runtime_ [tensor_plan_unhandled_] / mark_internal_error_
+  state_io_load_dispatch --> state_io_load_decision : completion_load_runtime_ [always] / effect_dispatch_io_loads_
+  state_io_load_decision --> state_tensor_apply_dispatch : completion_load_runtime_ [io_load_done_all_] / none
+  state_io_load_decision --> state_tensor_effect_error_cleanup : completion_load_runtime_ [io_load_error_raised_] / effect_dispatch_tensor_apply_error_results_
+  state_io_load_decision --> state_tensor_effect_error_cleanup : completion_load_runtime_ [io_load_unhandled_] / effect_dispatch_tensor_apply_error_results_
+  state_tensor_effect_error_cleanup --> errored : completion_load_runtime_ [tensor_plan_done_with_io_strategy_without_loader_] / effect_mark_io_strategy_unavailable_
+  state_tensor_effect_error_cleanup --> errored : completion_load_runtime_ [io_load_error_invalid_request_] / mark_invalid_request_
+  state_tensor_effect_error_cleanup --> errored : completion_load_runtime_ [io_load_error_strategy_unavailable_] / effect_mark_io_strategy_unavailable_
+  state_tensor_effect_error_cleanup --> errored : completion_load_runtime_ [io_load_error_internal_] / mark_internal_error_
+  state_tensor_effect_error_cleanup --> errored : completion_load_runtime_ [io_load_error_untracked_] / mark_untracked_
+  state_tensor_effect_error_cleanup --> errored : completion_load_runtime_ [io_load_error_unclassified_] / mark_internal_error_
+  state_tensor_effect_error_cleanup --> errored : completion_load_runtime_ [io_load_unhandled_] / mark_internal_error_
+  state_tensor_effect_error_cleanup --> errored : completion_load_runtime_ [always] / mark_internal_error_
   state_tensor_apply_dispatch --> state_tensor_apply_decision : completion_load_runtime_ [always] / effect_dispatch_tensor_apply_results_
   state_tensor_apply_decision --> load_map_policy_decision : completion_load_runtime_ [tensor_apply_done_with_file_image_] / effect_publish_tensor_load_done_from_file_image_
   state_tensor_apply_decision --> load_map_policy_decision : completion_load_runtime_ [tensor_apply_done_without_file_image_] / effect_publish_tensor_load_done_from_model_data_
@@ -45,6 +60,7 @@ stateDiagram-v2
   map_layers_decision --> errored : completion_load_runtime_ [error_model_invalid_] / none
   map_layers_decision --> errored : completion_load_runtime_ [error_internal_error_] / none
   map_layers_decision --> errored : completion_load_runtime_ [error_untracked_] / none
+  map_layers_decision --> errored : completion_load_runtime_ [error_io_strategy_unavailable_] / none
   map_layers_decision --> errored : completion_load_runtime_ [error_unclassified_code_] / none
   structure_decision --> structure_policy_decision : completion_load_runtime_ [always] / none
   structure_policy_decision --> architecture_decision : completion_load_runtime_ [skip_validate_structure_] / none
@@ -59,6 +75,7 @@ stateDiagram-v2
   structure_validation_decision --> errored : completion_load_runtime_ [error_model_invalid_] / none
   structure_validation_decision --> errored : completion_load_runtime_ [error_internal_error_] / none
   structure_validation_decision --> errored : completion_load_runtime_ [error_untracked_] / none
+  structure_validation_decision --> errored : completion_load_runtime_ [error_io_strategy_unavailable_] / none
   structure_validation_decision --> errored : completion_load_runtime_ [error_unclassified_code_] / none
   architecture_decision --> architecture_policy_decision : completion_load_runtime_ [always] / none
   architecture_policy_decision --> done : completion_load_runtime_ [skip_validate_architecture_] / none
@@ -73,6 +90,7 @@ stateDiagram-v2
   architecture_validation_decision --> errored : completion_load_runtime_ [error_model_invalid_] / none
   architecture_validation_decision --> errored : completion_load_runtime_ [error_internal_error_] / none
   architecture_validation_decision --> errored : completion_load_runtime_ [error_untracked_] / none
+  architecture_validation_decision --> errored : completion_load_runtime_ [error_io_strategy_unavailable_] / none
   architecture_validation_decision --> errored : completion_load_runtime_ [error_unclassified_code_] / none
   done --> ready : completion_load_runtime_ [done_callback_present_] / publish_done_
   done --> ready : completion_load_runtime_ [done_callback_absent_] / publish_done_noop_
@@ -89,6 +107,9 @@ stateDiagram-v2
   state_tensor_bind_decision --> ready : _ [always] / on_unexpected_
   state_tensor_plan_dispatch --> ready : _ [always] / on_unexpected_
   state_tensor_plan_decision --> ready : _ [always] / on_unexpected_
+  state_io_load_dispatch --> ready : _ [always] / on_unexpected_
+  state_io_load_decision --> ready : _ [always] / on_unexpected_
+  state_tensor_effect_error_cleanup --> ready : _ [always] / on_unexpected_
   state_tensor_apply_dispatch --> ready : _ [always] / on_unexpected_
   state_tensor_apply_decision --> ready : _ [always] / on_unexpected_
   load_map_policy_decision --> ready : _ [always] / on_unexpected_

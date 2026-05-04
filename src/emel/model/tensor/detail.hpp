@@ -72,6 +72,7 @@ struct capture_tensor_state_runtime {
 };
 
 struct tensor_storage {
+  uint32_t active_extent = 0u;
   std::array<event::lifecycle, static_cast<size_t>(max_tensors)> lifecycle = {};
   std::array<const void *, static_cast<size_t>(max_tensors)> buffer = {};
   std::array<uint64_t, static_cast<size_t>(max_tensors)> buffer_bytes = {};

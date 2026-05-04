@@ -1,16 +1,16 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.22
-milestone_name: Weight Loading Ownership Cutover
-status: milestone_archived_pr_open
-stopped_at: v1.22 archived and prepared for PR #81.
-last_updated: "2026-05-03T16:13:12Z"
-last_activity: 2026-05-03
+milestone: none
+milestone_name: none
+status: completed
+stopped_at: v1.23 shipped and archived; ready for next milestone.
+last_updated: "2026-05-04T03:48:19.530Z"
+last_activity: 2026-05-04
 progress:
-  total_phases: 12
-  completed_phases: 12
-  total_plans: 12
-  completed_plans: 12
+  total_phases: 0
+  completed_phases: 0
+  total_plans: 0
+  completed_plans: 0
   percent: 100
 ---
 
@@ -18,36 +18,35 @@ progress:
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-05-03)
+See: .planning/PROJECT.md (updated 2026-05-04)
 
 **Core value:** Prove real end-to-end behavior with explicit SML orchestration and
 parity-oriented verification before widening API surface or model scope.
-**Current focus:** v1.22 is archived and open for review in PR #81; start the next milestone with
-`$gsd-new-milestone` after merge.
+**Current focus:** v1.23 shipped and archived. Start the next milestone when ready.
 
 ## Current Position
 
 Phase: none
 Plan: none
-Status: v1.22 archived and PR #81 open
-Last activity: 2026-05-03 - Cleaned up v1.22 audit tech debt, refreshed the audit to passed, and
-pushed PR #81 for review.
+Status: v1.23 milestone complete and archived
+Last activity: 2026-05-04 - v1.23 shipped after final source-backed audit passed.
 
 Progress: [██████████] 100%
 
 ## Performance Metrics
 
-**Latest audited milestone:** `v1.22 Weight Loading Ownership Cutover`
+**Latest audited milestone:** `v1.23 I/O Loading Strategy Boundary`
 
-- v1.22 was archived on 2026-05-03, then reopened for a source-backed maintained-path gap.
-- Phase 194 restored `TENSOR-02` and `LOAD-02`.
-- Phase 195 closed the strict loader/tensor outcome and wrapper rule contradictions.
-- Phase 196 repaired stale closeout state metadata that still referenced Phase 194.
-- Final cleanup normalized validation/frontmatter evidence and public GGUF loader wrapper use in
-  maintained tool lanes.
-- Final audit status is `passed` with 14/14 active requirements satisfied.
-- PR #81 is open: https://github.com/stateforward/emel.cpp/pull/81
-- Current archive files live under `.planning/milestones/`.
+- v1.23 was reopened on 2026-05-04 after the source-backed milestone audit found closeout proof
+  gaps.
+- Runtime IO/tensor/model-loader wiring passed source-backed checks.
+- Maintained benchmark, paritychecker, and embedded probe lanes still drive public runtime surfaces.
+- Phase 202 repaired the prior `gaps_found` audit items for VAL-01, VAL-02, and VAL-03.
+- The follow-up audit returned `tech_debt`, not runtime blockers. Phase 203 now closes VAL-04.
+- Active v1.23 requirements are now 15/15 complete.
+- Final v1.23 audit passed and archives live under `.planning/milestones/`.
+- User approved updating model artifacts, generated docs, snapshots, benchmarks, and benchmark
+  outputs when required to close the milestone correctly.
 
 ## Accumulated Context
 
@@ -59,11 +58,16 @@ Recent decisions affecting this work:
 - `model/tensor` owns tensor load, bind, evict, and residency semantics.
 - `model/loader` orchestrates tensor-owned behavior and must not absorb backend-specific loading
   strategy logic.
-- Concrete I/O strategy work remains deferred to a future `emel/io` milestone.
-- Guardrails must continue to reject a second model-weight residency owner and stale retired-owner
-  public prose.
+
+- `emel/io` owns loading strategy boundaries and transport/staging strategy slots.
+- Concrete mmap, staged read, copy, device-specific, and cooperative async strategies are deferred
+  to follow-on milestones after the v1.23 boundary.
+
+- Guardrails must reject a second tensor residency owner, low-level IO in `model/loader`, concrete
+  strategy leakage in this milestone, and maintained tool reach-through into actor internals.
+
 - User approved updates to snapshots, benchmarks, and model artifacts when required for this
-  gap-closure work.
+  milestone.
 
 ### Pending Todos
 
@@ -74,7 +78,10 @@ Recent decisions affecting this work:
 
 ### Blockers/Concerns
 
-None.
+- `gsd-tools audit-open` still reports the previously deferred non-v1.23 quick task and four
+  optimization todos; they remain recorded deferred items, not v1.23 blockers.
+
+- No v1.23 blockers remain.
 
 ## Deferred Items
 
@@ -90,6 +97,6 @@ Items acknowledged and deferred at v1.22 milestone close on 2026-05-03:
 
 ## Session Continuity
 
-Last session: 2026-05-03T04:38:04Z
-Stopped at: v1.22 archived after Phase 196 state closeout metadata repair.
+Last session: 2026-05-04T03:48:19Z
+Stopped at: v1.23 shipped and archived.
 Resume file: None

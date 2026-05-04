@@ -2,22 +2,17 @@
 
 ## Milestones
 
-- ✅ **v1.22 Weight Loading Ownership Cutover** — Phases 185-196, shipped 2026-05-03
-  after strict source-backed audit closeout and state metadata repair.
+- [x] **v1.23 I/O Loading Strategy Boundary** — shipped 2026-05-04; archived in
+  `.planning/milestones/v1.23-ROADMAP.md`, requirements in
+  `.planning/milestones/v1.23-REQUIREMENTS.md`, audit in
+  `.planning/milestones/v1.23-MILESTONE-AUDIT.md`, and phase artifacts in
+  `.planning/milestones/v1.23-phases/`.
 
-## Current Status
+## Current Work
 
-No active milestone is open.
+No active milestone is open. Start the next milestone with `$gsd-new-milestone`.
 
-Start the next milestone with:
+## Deferred Items
 
-```bash
-$gsd-new-milestone
-```
-
-## Archive
-
-- [v1.22 roadmap](milestones/v1.22-ROADMAP.md)
-- [v1.22 requirements](milestones/v1.22-REQUIREMENTS.md)
-- [v1.22 audit](milestones/v1.22-MILESTONE-AUDIT.md)
-- [v1.22 phase artifacts](milestones/v1.22-phases/)
+Previously acknowledged non-v1.23 quick task and optimization todos remain tracked in
+`.planning/STATE.md`.
