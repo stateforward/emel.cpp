@@ -9,6 +9,7 @@ namespace emel::io::mmap::action {
 
 struct slot {
   bool in_use = false;
+  int32_t tensor_id = -1;
   void *base = nullptr;
   uint64_t mapped_bytes = 0u;
   intptr_t os_resource = -1;

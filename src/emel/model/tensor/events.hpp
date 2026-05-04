@@ -167,9 +167,9 @@ struct apply_effect_results {
 
 // Public surface for tensor-owned mmap-backed loading. The actor dispatches
 // to an injected emel::io::mmap::sm via process_event(...). The caller MUST
-// keep the storage backing file_path alive AND null-terminated for the
-// duration of dispatch, because the io/mmap platform helper consumes
-// file_path.data() (Phase 206 contract).
+// keep the storage backing file_path alive for the duration of dispatch.
+// io/mmap validates the view and copies it into a bounded null-terminated
+// stack buffer before platform C APIs consume it.
 struct request_mapped_load {
   int32_t tensor_id = -1;
   std::string_view file_path = {};

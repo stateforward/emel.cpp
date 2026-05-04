@@ -55,7 +55,7 @@ check_absent_path() {
 
 cd "$ROOT_DIR"
 
-concrete_io_api_pattern='(^|[^[:alnum:]_:])(mmap|munmap|pread|read|fread|fopen|fclose|open|openat|CreateFile|CreateFileMapping|MapViewOfFile|ReadFile)[[:space:]]*\(|std::(ifstream|fstream|filebuf|fread|fopen|freopen)'
+concrete_io_api_pattern='(^|[^[:alnum:]_])(::)?(mmap|munmap|pread|read|fread|fopen|fclose|open|openat|CreateFile|CreateFileMapping|MapViewOfFile|ReadFile)[[:space:]]*\(|std::(ifstream|fstream|filebuf|fread|fopen|freopen)'
 
 check_no_matches "forbidden model-family runtime roots" \
   'emel/whisper|namespace emel::whisper|kernel/whisper|kernel::whisper|model/whisper/(runtime|inference|encoder|decoder)|model::whisper::(runtime|inference|encoder|decoder)|speech/asr/whisper|speech::asr::whisper|speech/whisper|speech::whisper|recognizer/detail/whisper|recognizer::detail::whisper' \
@@ -72,7 +72,7 @@ check_no_matches "text generator actor internals in maintained generation parity
 
 check_no_matches "IO loader concrete system I/O before strategy implementation" \
   "$concrete_io_api_pattern" \
-  src/emel/io
+  src/emel/io/loader
 
 check_no_matches "model loader low-level IO strategy implementation" \
   "$concrete_io_api_pattern" \

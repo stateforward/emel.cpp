@@ -23,17 +23,19 @@ struct request_span_invalid {
   }
 };
 
-struct file_path_non_empty {
+struct file_path_valid {
   bool operator()(const detail::map_tensor_runtime &ev,
                   const action::context &) const noexcept {
-    return !ev.request.request.file_path.empty();
+    const auto path = ev.request.request.file_path;
+    return !path.empty() && path.size() <= k_max_file_path_bytes &&
+           path.find('\0') == std::string_view::npos;
   }
 };
 
-struct file_path_empty {
+struct file_path_invalid {
   bool operator()(const detail::map_tensor_runtime &ev,
                   const action::context &ctx) const noexcept {
-    return !file_path_non_empty{}(ev, ctx);
+    return !file_path_valid{}(ev, ctx);
   }
 };
 
@@ -205,6 +207,36 @@ struct release_slot_not_in_use {
   bool operator()(const detail::release_mapping_runtime &ev,
                   const action::context &ctx) const noexcept {
     return !release_slot_in_use{}(ev, ctx);
+  }
+};
+
+struct release_slot_owned_by_tensor {
+  bool operator()(const detail::release_mapping_runtime &ev,
+                  const action::context &ctx) const noexcept {
+    return ctx.slots[ev.request.handle].tensor_id == ev.request.tensor_id;
+  }
+};
+
+struct release_slot_not_owned_by_tensor {
+  bool operator()(const detail::release_mapping_runtime &ev,
+                  const action::context &ctx) const noexcept {
+    return !release_slot_owned_by_tensor{}(ev, ctx);
+  }
+};
+
+struct release_slot_in_use_owned_by_tensor {
+  bool operator()(const detail::release_mapping_runtime &ev,
+                  const action::context &ctx) const noexcept {
+    return release_slot_in_use{}(ev, ctx) &&
+           release_slot_owned_by_tensor{}(ev, ctx);
+  }
+};
+
+struct release_slot_in_use_not_owned_by_tensor {
+  bool operator()(const detail::release_mapping_runtime &ev,
+                  const action::context &ctx) const noexcept {
+    return release_slot_in_use{}(ev, ctx) &&
+           release_slot_not_owned_by_tensor{}(ev, ctx);
   }
 };
 

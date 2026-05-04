@@ -4,8 +4,8 @@ stateDiagram-v2
   state_ready --> state_request_decision : map_tensor_runtime [always] / effect_begin_map_tensor_
   state_request_decision --> state_file_path_decision : completion_map_tensor_runtime_ [request_span_valid_] / none
   state_request_decision --> state_invalid_request_error_decision : completion_map_tensor_runtime_ [request_span_invalid_] / effect_mark_invalid_request_
-  state_file_path_decision --> state_file_decision : completion_map_tensor_runtime_ [file_path_non_empty_] / none
-  state_file_path_decision --> state_invalid_request_error_decision : completion_map_tensor_runtime_ [file_path_empty_] / effect_mark_invalid_request_
+  state_file_path_decision --> state_file_decision : completion_map_tensor_runtime_ [file_path_valid_] / none
+  state_file_path_decision --> state_invalid_request_error_decision : completion_map_tensor_runtime_ [file_path_invalid_] / effect_mark_invalid_request_
   state_file_decision --> state_offset_decision : completion_map_tensor_runtime_ [file_index_valid_] / none
   state_file_decision --> state_unsupported_resource_error_decision : completion_map_tensor_runtime_ [file_index_invalid_] / effect_mark_unsupported_file_
   state_offset_decision --> state_length_decision : completion_map_tensor_runtime_ [offset_aligned_] / none
@@ -41,8 +41,9 @@ stateDiagram-v2
   state_ready --> state_release_decision : release_mapping_runtime [always] / effect_begin_release_
   state_release_decision --> state_release_in_use_decision : completion_release_mapping_runtime_ [release_handle_in_range_] / none
   state_release_decision --> state_release_invalid_handle_error_decision : completion_release_mapping_runtime_ [release_handle_out_of_range_] / effect_mark_release_invalid_handle_
-  state_release_in_use_decision --> state_unmap_decision : completion_release_mapping_runtime_ [release_slot_in_use_] / effect_attempt_unmap_
+  state_release_in_use_decision --> state_unmap_decision : completion_release_mapping_runtime_ [release_slot_in_use_owned_by_tensor_] / effect_attempt_unmap_
   state_release_in_use_decision --> state_release_invalid_handle_error_decision : completion_release_mapping_runtime_ [release_slot_not_in_use_] / effect_mark_release_invalid_handle_
+  state_release_in_use_decision --> state_release_invalid_handle_error_decision : completion_release_mapping_runtime_ [release_slot_in_use_not_owned_by_tensor_] / effect_mark_release_invalid_handle_
   state_unmap_decision --> state_release_publish_done_decision : completion_release_mapping_runtime_ [unmap_succeeded_] / effect_release_slot_after_unmap_
   state_unmap_decision --> state_unmap_failed_error_decision : completion_release_mapping_runtime_ [unmap_failed_] / effect_mark_unmap_failed_and_release_slot_
   state_release_publish_done_decision --> state_release_done_callback : completion_release_mapping_runtime_ [release_done_callback_present_] / effect_publish_release_mapping_done_

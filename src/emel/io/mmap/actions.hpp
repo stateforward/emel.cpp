@@ -91,6 +91,7 @@ struct effect_commit_mapping {
   void operator()(const detail::map_tensor_runtime &ev,
                   context &ctx) const noexcept {
     auto &slot_ref = ctx.slots[ev.status.reserved_slot];
+    slot_ref.tensor_id = ev.request.request.tensor_id;
     slot_ref.base = ev.status.mapped_base;
     slot_ref.mapped_bytes = ev.status.mapped_bytes;
     slot_ref.os_resource = ev.status.os_resource;
@@ -105,6 +106,12 @@ struct effect_release_reserved_slot_on_open_failure {
                   context &ctx) const noexcept {
     auto &slot_ref = ctx.slots[ev.status.reserved_slot];
     slot_ref.in_use = false;
+    slot_ref.tensor_id = -1;
+    slot_ref.base = nullptr;
+    slot_ref.mapped_bytes = 0u;
+    slot_ref.os_resource = -1;
+    slot_ref.file_offset = 0u;
+    slot_ref.requested_bytes = 0u;
     ctx.free_stack[ctx.free_count] = ev.status.reserved_slot;
     ctx.free_count += 1u;
     ev.status.err = emel::error::cast(error::file_open_failed);
@@ -180,6 +187,7 @@ struct effect_release_slot_after_unmap {
                   context &ctx) const noexcept {
     auto &slot_ref = ctx.slots[ev.status.target_slot];
     slot_ref.in_use = false;
+    slot_ref.tensor_id = -1;
     slot_ref.base = nullptr;
     slot_ref.mapped_bytes = 0u;
     slot_ref.os_resource = -1;
@@ -196,6 +204,7 @@ struct effect_mark_unmap_failed_and_release_slot {
                   context &ctx) const noexcept {
     auto &slot_ref = ctx.slots[ev.status.target_slot];
     slot_ref.in_use = false;
+    slot_ref.tensor_id = -1;
     slot_ref.base = nullptr;
     slot_ref.mapped_bytes = 0u;
     slot_ref.os_resource = -1;

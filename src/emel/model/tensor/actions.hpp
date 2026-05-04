@@ -634,7 +634,8 @@ struct effect_attempt_release_mapped_load_dispatch {
   void operator()(const detail::release_mapped_load_runtime &ev,
                   context &ctx) const noexcept {
     ev.status.target_handle = ev.request.mapping_handle;
-    emel::io::mmap::event::release_mapping inner_event{ev.status.target_handle};
+    emel::io::mmap::event::release_mapping inner_event{ev.request.tensor_id,
+                                                       ev.status.target_handle};
     inner_event.on_done = {static_cast<void *>(&ev.status),
                            mapped_load_callbacks::on_io_mmap_release_done};
     inner_event.on_error = {static_cast<void *>(&ev.status),

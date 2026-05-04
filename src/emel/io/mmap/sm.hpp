@@ -1,5 +1,7 @@
 #pragma once
 
+// benchmark: designed
+
 #include "emel/io/mmap/actions.hpp"
 #include "emel/io/mmap/context.hpp"
 #include "emel/io/mmap/detail.hpp"
@@ -68,11 +70,11 @@ struct model {
       // File path validation.
       , sml::state<state_file_decision> <= sml::state<state_file_path_decision>
           + sml::completion<detail::map_tensor_runtime>
-          [ guard::file_path_non_empty{} ]
+          [ guard::file_path_valid{} ]
       , sml::state<state_invalid_request_error_decision> <=
           sml::state<state_file_path_decision>
           + sml::completion<detail::map_tensor_runtime>
-          [ guard::file_path_empty{} ]
+          [ guard::file_path_invalid{} ]
           / action::effect_mark_invalid_request
 
       //------------------------------------------------------------------------------//
@@ -268,12 +270,17 @@ struct model {
       , sml::state<state_unmap_decision> <=
           sml::state<state_release_in_use_decision>
           + sml::completion<detail::release_mapping_runtime>
-          [ guard::release_slot_in_use{} ]
+          [ guard::release_slot_in_use_owned_by_tensor{} ]
           / action::effect_attempt_unmap
       , sml::state<state_release_invalid_handle_error_decision> <=
           sml::state<state_release_in_use_decision>
           + sml::completion<detail::release_mapping_runtime>
           [ guard::release_slot_not_in_use{} ]
+          / action::effect_mark_release_invalid_handle
+      , sml::state<state_release_invalid_handle_error_decision> <=
+          sml::state<state_release_in_use_decision>
+          + sml::completion<detail::release_mapping_runtime>
+          [ guard::release_slot_in_use_not_owned_by_tensor{} ]
           / action::effect_mark_release_invalid_handle
       , sml::state<state_release_publish_done_decision> <=
           sml::state<state_unmap_decision>

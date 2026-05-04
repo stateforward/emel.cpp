@@ -2,17 +2,7 @@
 
 ## v1.24 I/O Mmap Loading Strategy (Shipped: 2026-05-04)
 
-**Phases completed:** 1 phases, 1 plans, 0 tasks
-
-**Key accomplishments:**
-
-- Backfilled missing per-phase VERIFICATION.md artifacts for Phases 208, 209, and 210; closed v1.24 audit's 3-source cross-reference gap.
-
----
-
-## v1.24 I/O Mmap Loading Strategy (Shipped: 2026-05-04)
-
-**Phases completed:** 7 phases, 7 plans, 0 tasks
+**Phases completed:** 8 phases, 8 plans, 0 tasks
 
 **Key accomplishments:**
 
@@ -41,6 +31,9 @@
   implemented mmap path; refreshed `snapshots/bench/benchmarks.txt` for `encoder_spm`
   and `encoder_wpm` via maintained scoped `scripts/bench.sh --snapshot --compare --update`;
   removed the Phase 204 transitional bench-regression override.
+
+- Backfilled missing per-phase VERIFICATION.md artifacts for Phases 208, 209, and 210;
+  closed the v1.24 audit's 3-source cross-reference gap.
 
 **Audit:** Final source-backed audit passed with 13/13 active requirements satisfied
 (MMAP-01..03, TIO-01..03, PLAT-01, LIFE-01, ERR-01, VAL-01..04). Closing

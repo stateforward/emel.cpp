@@ -23,6 +23,9 @@ struct map_tensor_request {
   uint16_t file_index = 0u;
   uint64_t file_offset = 0u;
   uint64_t byte_size = 0u;
+  // The action layer copies this view into a bounded stack buffer before
+  // calling platform C APIs; callers do not need to pass a null-terminated
+  // view. Embedded NUL bytes are rejected by the file-path guard.
   std::string_view file_path = {};
 };
 
@@ -36,11 +39,13 @@ struct map_tensor {
 };
 
 struct release_mapping {
+  int32_t tensor_id = -1;
   uint32_t handle = k_invalid_mapping_handle;
   emel::callback<void(const events::release_mapping_done &)> on_done = {};
   emel::callback<void(const events::release_mapping_error &)> on_error = {};
 
-  explicit release_mapping(uint32_t handle_in) noexcept : handle(handle_in) {}
+  release_mapping(int32_t tensor_id_in, uint32_t handle_in) noexcept
+      : tensor_id(tensor_id_in), handle(handle_in) {}
 };
 
 } // namespace emel::io::mmap::event

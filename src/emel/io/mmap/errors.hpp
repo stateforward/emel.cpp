@@ -28,7 +28,14 @@ enum class error : emel::error::type {
 };
 
 inline constexpr uint16_t k_max_file_index = 65534u;
+#if defined(_WIN32)
+inline constexpr uint64_t k_required_offset_alignment = 65536u;
+#elif defined(__APPLE__) && (defined(__aarch64__) || defined(__arm64__))
+inline constexpr uint64_t k_required_offset_alignment = 16384u;
+#else
 inline constexpr uint64_t k_required_offset_alignment = 4096u;
+#endif
+inline constexpr uint64_t k_max_file_path_bytes = 4095u;
 inline constexpr uint64_t k_max_mapping_bytes = (1ULL << 40);
 
 #ifndef EMEL_IO_MMAP_MAX_MAPPINGS

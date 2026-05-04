@@ -498,7 +498,11 @@ struct request_mapped_load_request_valid {
     const int32_t id = ev.request.tensor_id;
     return detail::valid_tensor_id(id) &&
            static_cast<uint32_t>(id) < ctx.tensors.active_extent &&
-           !ev.request.file_path.empty() && ev.request.byte_size > 0u;
+           !ev.request.file_path.empty() &&
+           ev.request.file_path.size() <=
+               emel::io::mmap::k_max_file_path_bytes &&
+           ev.request.file_path.find('\0') == std::string_view::npos &&
+           ev.request.byte_size > 0u;
   }
 };
 

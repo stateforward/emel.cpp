@@ -1,6 +1,9 @@
 #include "emel/io/mmap/actions.hpp"
 
+#include <array>
+#include <cstddef>
 #include <cstdint>
+#include <string_view>
 
 #if defined(_WIN32)
 #define WIN32_LEAN_AND_MEAN
@@ -16,10 +19,17 @@ namespace emel::io::mmap::action {
 
 namespace {
 
-bool platform_open(const char *path, intptr_t &os_resource_out) noexcept {
+bool platform_open(std::string_view path, intptr_t &os_resource_out) noexcept {
+  std::array<char, k_max_file_path_bytes + 1u> path_buffer{};
+  for (std::size_t i = 0; i < path.size(); ++i) {
+    path_buffer[i] = path[i];
+  }
+  path_buffer[path.size()] = '\0';
+
 #if defined(_WIN32)
-  HANDLE handle = ::CreateFileA(path, GENERIC_READ, FILE_SHARE_READ, nullptr,
-                                OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+  HANDLE handle =
+      ::CreateFileA(path_buffer.data(), GENERIC_READ, FILE_SHARE_READ, nullptr,
+                    OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
   if (handle == INVALID_HANDLE_VALUE) {
     os_resource_out = -1;
     return false;
@@ -27,7 +37,7 @@ bool platform_open(const char *path, intptr_t &os_resource_out) noexcept {
   os_resource_out = reinterpret_cast<intptr_t>(handle);
   return true;
 #else
-  const int fd = ::open(path, O_RDONLY);
+  const int fd = ::open(path_buffer.data(), O_RDONLY);
   if (fd < 0) {
     os_resource_out = -1;
     return false;
@@ -112,11 +122,11 @@ void effect_reserve_top_free_slot_then_attempt_open::operator()(
   ctx.free_count -= 1u;
   const uint32_t slot_index = ctx.free_stack[ctx.free_count];
   ctx.slots[slot_index].in_use = true;
+  ctx.slots[slot_index].tensor_id = -1;
   ev.status.reserved_slot = slot_index;
 
   intptr_t os_resource = -1;
-  const bool open_ok =
-      platform_open(ev.request.request.file_path.data(), os_resource);
+  const bool open_ok = platform_open(ev.request.request.file_path, os_resource);
   ev.status.os_resource = os_resource;
   ev.status.file_open_ok = open_ok;
 }
@@ -138,6 +148,12 @@ void effect_close_open_resource_and_release_slot_on_mapping_failure::operator()(
   platform_close(ev.status.os_resource);
   auto &slot_ref = ctx.slots[ev.status.reserved_slot];
   slot_ref.in_use = false;
+  slot_ref.tensor_id = -1;
+  slot_ref.base = nullptr;
+  slot_ref.mapped_bytes = 0u;
+  slot_ref.os_resource = -1;
+  slot_ref.file_offset = 0u;
+  slot_ref.requested_bytes = 0u;
   ctx.free_stack[ctx.free_count] = ev.status.reserved_slot;
   ctx.free_count += 1u;
   ev.status.err = emel::error::cast(error::mapping_failed);

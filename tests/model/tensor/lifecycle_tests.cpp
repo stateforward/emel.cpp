@@ -1009,6 +1009,65 @@ TEST_CASE("model_tensor_release_mapped_load_evicts_and_clears_handle") {
   std::filesystem::remove(path);
 }
 
+TEST_CASE("model_tensor_release_mapped_load_rejects_foreign_mapping_handle") {
+  emel::io::mmap::sm io_mmap_actor{};
+  emel::model::tensor::sm machine = make_tensor_sm_with_io_mmap(io_mmap_actor);
+  std::array<emel::model::data::tensor_record, 2> tensors{};
+  tensors[0].file_offset = 0u;
+  tensors[0].data_size = 4096u;
+  tensors[0].file_index = 0u;
+  tensors[0].type = 1;
+  tensors[1] = tensors[0];
+  emel::model::tensor::event::bind_storage bind{std::span{tensors}};
+  REQUIRE(machine.process_event(bind));
+
+  const auto payload = make_tensor_payload(4096u, 0x45u);
+  const auto path = make_tensor_temp_file("foreign_handle", payload);
+  const std::string path_str = path.string();
+
+  mapped_owner_state first{};
+  emel::model::tensor::event::request_mapped_load first_request{0, path_str, 0u,
+                                                                4096u};
+  first_request.on_done = {&first, on_request_mapped_load_done};
+  first_request.on_error = {&first, on_request_mapped_load_error};
+  REQUIRE(machine.process_event(first_request));
+
+  mapped_owner_state second{};
+  emel::model::tensor::event::request_mapped_load second_request{1, path_str,
+                                                                 0u, 4096u};
+  second_request.on_done = {&second, on_request_mapped_load_done};
+  second_request.on_error = {&second, on_request_mapped_load_error};
+  REQUIRE(machine.process_event(second_request));
+
+  mapped_owner_state release_owner{};
+  emel::model::tensor::event::release_mapped_load wrong_release{
+      0, second.mapping_handle};
+  wrong_release.on_error = {&release_owner, on_release_mapped_load_error};
+  CHECK_FALSE(machine.process_event(wrong_release));
+  CHECK(release_owner.release_error);
+  CHECK(release_owner.release_err ==
+        emel::error::cast(emel::model::tensor::error::io_mmap_failed));
+  CHECK(release_owner.release_io_err ==
+        emel::error::cast(emel::io::mmap::error::invalid_request));
+
+  emel::model::tensor::event::tensor_state first_state{};
+  CHECK(machine.process_event(emel::model::tensor::event::capture_tensor_state{
+      .tensor_id = 0,
+      .state_out = &first_state,
+  }));
+  CHECK(first_state.lifecycle_state ==
+        emel::model::tensor::event::lifecycle::mmap_resident);
+  CHECK(first_state.buffer == first.buffer);
+
+  emel::model::tensor::event::release_mapped_load cleanup_first{
+      0, first.mapping_handle};
+  CHECK(machine.process_event(cleanup_first));
+  emel::model::tensor::event::release_mapped_load cleanup_second{
+      1, second.mapping_handle};
+  CHECK(machine.process_event(cleanup_second));
+  std::filesystem::remove(path);
+}
+
 TEST_CASE("model_tensor_release_mapped_load_rejects_unmapped_tensor") {
   emel::io::mmap::sm io_mmap_actor{};
   emel::model::tensor::sm machine = make_tensor_sm_with_io_mmap(io_mmap_actor);

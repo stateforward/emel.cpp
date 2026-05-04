@@ -133,7 +133,7 @@ TEST_CASE("io mmap reports state_ready via visit_current_states after a full "
   map_request.on_error = {&map_owner, on_map_error};
   REQUIRE(strategy.process_event(map_request));
 
-  emel::io::mmap::event::release_mapping release_request{map_owner.handle};
+  emel::io::mmap::event::release_mapping release_request{600, map_owner.handle};
   release_request.on_done = {&release_owner, on_release_done};
   release_request.on_error = {&release_owner, on_release_error};
   REQUIRE(strategy.process_event(release_request));
@@ -172,8 +172,8 @@ TEST_CASE("io mmap validation rejection does not consume a slot") {
                      .file_path = {}}); // empty file_path
   rejects.push_back(
       {.tensor_id = 3,
-       .file_index = static_cast<uint16_t>(emel::io::mmap::k_max_file_index +
-                                           1u),
+       .file_index =
+           static_cast<uint16_t>(emel::io::mmap::k_max_file_index + 1u),
        .file_offset = 0u,
        .byte_size = 1024u,
        .file_path = ok_path}); // unsupported_resource (file_index)
@@ -217,7 +217,7 @@ TEST_CASE("io mmap validation rejection does not consume a slot") {
   }
 
   for (uint32_t h : taken_handles) {
-    emel::io::mmap::event::release_mapping cleanup{h};
+    emel::io::mmap::event::release_mapping cleanup{9001, h};
     CHECK(strategy.process_event(cleanup));
   }
   std::filesystem::remove(file_path);
@@ -252,6 +252,28 @@ TEST_CASE("io mmap rejects empty file_path as invalid_request") {
       .file_offset = 0u,
       .byte_size = 1024u,
       .file_path = {},
+  };
+  emel::io::mmap::event::map_tensor map_request{request};
+  map_request.on_error = {&owner, on_map_error};
+
+  CHECK_FALSE(strategy.process_event(map_request));
+  CHECK(owner.error);
+  CHECK(owner.err == emel::error::cast(emel::io::mmap::error::invalid_request));
+  CHECK(strategy.is(stateforward::sml::state<emel::io::mmap::state_ready>));
+}
+
+TEST_CASE("io mmap rejects embedded NUL file_path as invalid_request") {
+  emel::io::mmap::sm strategy{};
+  map_owner_state owner{};
+  std::string path_with_nul = "/tmp/emel_io_mmap";
+  path_with_nul.push_back('\0');
+  path_with_nul += "hidden.bin";
+  const emel::io::mmap::event::map_tensor_request request{
+      .tensor_id = 8,
+      .file_index = 0u,
+      .file_offset = 0u,
+      .byte_size = 1024u,
+      .file_path = path_with_nul,
   };
   emel::io::mmap::event::map_tensor map_request{request};
   map_request.on_error = {&owner, on_map_error};
@@ -402,7 +424,38 @@ TEST_CASE("io mmap returns a deterministic mapped descriptor on success") {
   CHECK(static_cast<const uint8_t *>(owner.buffer)[4095] == payload[4095]);
   CHECK(strategy.is(stateforward::sml::state<emel::io::mmap::state_ready>));
 
-  emel::io::mmap::event::release_mapping release_request{owner.handle};
+  emel::io::mmap::event::release_mapping release_request{1001, owner.handle};
+  CHECK(strategy.process_event(release_request));
+  std::filesystem::remove(path);
+}
+
+TEST_CASE(
+    "io mmap copies non-terminated file_path views before platform open") {
+  emel::io::mmap::sm strategy{};
+  map_owner_state owner{};
+  const auto payload = make_payload(4096u, 0x66u);
+  const auto path = make_temp_file("sliced_path", payload);
+  const std::string path_str = path.string();
+  const std::string path_with_suffix = path_str + "_suffix";
+  const std::string_view sliced_path{path_with_suffix.data(), path_str.size()};
+  const emel::io::mmap::event::map_tensor_request request{
+      .tensor_id = 1002,
+      .file_index = 0u,
+      .file_offset = 0u,
+      .byte_size = 4096u,
+      .file_path = sliced_path,
+  };
+  emel::io::mmap::event::map_tensor map_request{request};
+  map_request.on_done = {&owner, on_map_done};
+  map_request.on_error = {&owner, on_map_error};
+
+  CHECK(strategy.process_event(map_request));
+  CHECK(owner.done);
+  CHECK_FALSE(owner.error);
+  REQUIRE(owner.buffer != nullptr);
+  CHECK(static_cast<const uint8_t *>(owner.buffer)[0] == payload[0]);
+
+  emel::io::mmap::event::release_mapping release_request{1002, owner.handle};
   CHECK(strategy.process_event(release_request));
   std::filesystem::remove(path);
 }
@@ -428,7 +481,7 @@ TEST_CASE("io mmap release happy path returns slot to the free pool") {
   CHECK(strategy.process_event(map_request));
   REQUIRE(map_owner.handle != emel::io::mmap::k_invalid_mapping_handle);
 
-  emel::io::mmap::event::release_mapping release_request{map_owner.handle};
+  emel::io::mmap::event::release_mapping release_request{200, map_owner.handle};
   release_request.on_done = {&release_owner, on_release_done};
   release_request.on_error = {&release_owner, on_release_error};
   CHECK(strategy.process_event(release_request));
@@ -444,7 +497,39 @@ TEST_CASE("io mmap release happy path returns slot to the free pool") {
   CHECK(strategy.process_event(second_map));
   CHECK(second_owner.handle == map_owner.handle);
 
-  emel::io::mmap::event::release_mapping cleanup{second_owner.handle};
+  emel::io::mmap::event::release_mapping cleanup{200, second_owner.handle};
+  CHECK(strategy.process_event(cleanup));
+  std::filesystem::remove(path);
+}
+
+TEST_CASE("io mmap release rejects handles owned by another tensor") {
+  emel::io::mmap::sm strategy{};
+  map_owner_state map_owner{};
+  release_owner_state wrong_owner{};
+
+  const auto payload = make_payload(4096u, 0x12u);
+  const auto path = make_temp_file("release_wrong_tensor", payload);
+  const std::string path_str = path.string();
+  const emel::io::mmap::event::map_tensor_request request{
+      .tensor_id = 700,
+      .file_index = 0u,
+      .file_offset = 0u,
+      .byte_size = 4096u,
+      .file_path = path_str,
+  };
+  emel::io::mmap::event::map_tensor map_request{request};
+  map_request.on_done = {&map_owner, on_map_done};
+  map_request.on_error = {&map_owner, on_map_error};
+  REQUIRE(strategy.process_event(map_request));
+
+  emel::io::mmap::event::release_mapping wrong_release{701, map_owner.handle};
+  wrong_release.on_error = {&wrong_owner, on_release_error};
+  CHECK_FALSE(strategy.process_event(wrong_release));
+  CHECK(wrong_owner.error);
+  CHECK(wrong_owner.err ==
+        emel::error::cast(emel::io::mmap::error::invalid_request));
+
+  emel::io::mmap::event::release_mapping cleanup{700, map_owner.handle};
   CHECK(strategy.process_event(cleanup));
   std::filesystem::remove(path);
 }
@@ -453,7 +538,7 @@ TEST_CASE("io mmap release rejects out-of-range handle") {
   emel::io::mmap::sm strategy{};
   release_owner_state owner{};
   emel::io::mmap::event::release_mapping release_request{
-      emel::io::mmap::k_max_mappings};
+      1, emel::io::mmap::k_max_mappings};
   release_request.on_error = {&owner, on_release_error};
 
   CHECK_FALSE(strategy.process_event(release_request));
@@ -481,11 +566,11 @@ TEST_CASE("io mmap release rejects double release on the same handle") {
   map_request.on_error = {&map_owner, on_map_error};
   REQUIRE(strategy.process_event(map_request));
 
-  emel::io::mmap::event::release_mapping first_release{map_owner.handle};
+  emel::io::mmap::event::release_mapping first_release{300, map_owner.handle};
   CHECK(strategy.process_event(first_release));
 
   release_owner_state second_owner{};
-  emel::io::mmap::event::release_mapping second_release{map_owner.handle};
+  emel::io::mmap::event::release_mapping second_release{300, map_owner.handle};
   second_release.on_error = {&second_owner, on_release_error};
   CHECK_FALSE(strategy.process_event(second_release));
   CHECK(second_owner.error);
@@ -506,7 +591,7 @@ TEST_CASE("io mmap fails closed without an error callback") {
   CHECK(strategy.is(stateforward::sml::state<emel::io::mmap::state_ready>));
 
   emel::io::mmap::event::release_mapping invalid_release{
-      emel::io::mmap::k_max_mappings};
+      1, emel::io::mmap::k_max_mappings};
   CHECK_FALSE(strategy.process_event(invalid_release));
   CHECK(strategy.is(stateforward::sml::state<emel::io::mmap::state_ready>));
 }
@@ -528,7 +613,7 @@ TEST_CASE("io mmap success records when no done callback is supplied") {
   CHECK(strategy.process_event(map_request));
   CHECK(strategy.is(stateforward::sml::state<emel::io::mmap::state_ready>));
 
-  emel::io::mmap::event::release_mapping release_request{0u};
+  emel::io::mmap::event::release_mapping release_request{1234, 0u};
   CHECK(strategy.process_event(release_request));
   std::filesystem::remove(path);
 }
@@ -567,7 +652,7 @@ TEST_CASE("io mmap surfaces resource_exhausted when slot pool is full") {
   CHECK(strategy.is(stateforward::sml::state<emel::io::mmap::state_ready>));
 
   for (uint32_t h : taken_handles) {
-    emel::io::mmap::event::release_mapping cleanup{h};
+    emel::io::mmap::event::release_mapping cleanup{50, h};
     CHECK(strategy.process_event(cleanup));
   }
   std::filesystem::remove(path);
