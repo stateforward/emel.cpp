@@ -38,7 +38,7 @@ struct storage_bind_invalid {
 
 struct storage_bound {
   bool operator()(const action::context &ctx) const noexcept {
-    return ctx.bound_count != 0u;
+    return ctx.tensors.active_extent != 0u;
   }
 };
 
@@ -47,7 +47,8 @@ struct plan_load_has_capacity {
   bool operator()(const event_type &ev,
                   const action::context &ctx) const noexcept {
     const auto &request = tensor::detail::request_event(ev);
-    return request.effects.size() >= static_cast<size_t>(ctx.bound_count);
+    return request.effects.size() >=
+           static_cast<size_t>(ctx.tensors.active_extent);
   }
 };
 
@@ -113,7 +114,8 @@ struct apply_results_count_matches {
   bool operator()(const event_type &ev,
                   const action::context &ctx) const noexcept {
     const auto &request = tensor::detail::request_event(ev);
-    return request.results.size() == static_cast<size_t>(ctx.bound_count);
+    return request.results.size() ==
+           static_cast<size_t>(ctx.tensors.active_extent);
   }
 };
 
@@ -141,7 +143,8 @@ struct apply_results_record_output_has_capacity {
                   const action::context &ctx) const noexcept {
     const auto &request = tensor::detail::request_event(ev);
     return apply_results_record_output_present{}(ev, ctx) &&
-           request.tensors.size() >= static_cast<size_t>(ctx.bound_count);
+           request.tensors.size() >=
+               static_cast<size_t>(ctx.tensors.active_extent);
   }
 };
 

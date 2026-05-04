@@ -55,6 +55,8 @@ check_absent_path() {
 
 cd "$ROOT_DIR"
 
+concrete_io_api_pattern='(^|[^[:alnum:]_:])(mmap|munmap|pread|read|fread|fopen|fclose|open|openat|CreateFile|CreateFileMapping|MapViewOfFile|ReadFile)[[:space:]]*\(|std::(ifstream|fstream|filebuf|fread|fopen|freopen)'
+
 check_no_matches "forbidden model-family runtime roots" \
   'emel/whisper|namespace emel::whisper|kernel/whisper|kernel::whisper|model/whisper/(runtime|inference|encoder|decoder)|model::whisper::(runtime|inference|encoder|decoder)|speech/asr/whisper|speech::asr::whisper|speech/whisper|speech::whisper|recognizer/detail/whisper|recognizer::detail::whisper' \
   src tests tools CMakeLists.txt
@@ -69,12 +71,20 @@ check_no_matches "text generator actor internals in maintained generation parity
   tools/bench/generation_bench.cpp tools/paritychecker/parity_runner.cpp tools/paritychecker/parity_runner.hpp
 
 check_no_matches "IO loader concrete system I/O before strategy implementation" \
-  'mmap[[:space:]]*\(|munmap[[:space:]]*\(|pread[[:space:]]*\(|CreateFileMapping|MapViewOfFile|std::ifstream|std::fstream|::open[[:space:]]*\(' \
+  "$concrete_io_api_pattern" \
   src/emel/io
 
 check_no_matches "model loader low-level IO strategy implementation" \
-  'mmap[[:space:]]*\(|munmap[[:space:]]*\(|pread[[:space:]]*\(|CreateFileMapping|MapViewOfFile|std::ifstream|std::fstream|::open[[:space:]]*\(' \
+  "$concrete_io_api_pattern" \
   src/emel/model/loader
+
+check_no_matches "model tensor concrete IO strategy implementation" \
+  "$concrete_io_api_pattern" \
+  src/emel/model/tensor
+
+check_no_matches "shadow model tensor residency ownership outside model/tensor" \
+  'model::tensor::event::lifecycle::|lifecycle_state|event::tensor_state' \
+  src/emel/model/loader src/emel/io
 
 check_no_matches "maintained benchmark/parity lanes reaching IO or tensor actor internals" \
   'emel/(io/loader|model/tensor|model/loader)/(actions|detail|guards)\.hpp|emel::io::loader::(action|detail|guard)::|emel::model::tensor::(action|detail|guard)::|emel::model::loader::(action|detail|guard)::' \

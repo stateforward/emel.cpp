@@ -16,16 +16,16 @@ before widening API surface or model scope.
 
 ## Current State
 
-Current milestone: none open.
+Current milestone: none open
 
 Latest shipped milestone: `v1.23 I/O Loading Strategy Boundary`
 
-Status: `v1.23` shipped on 2026-05-04 and is open for review in PR #82. The repo now treats
+Status: `v1.23` shipped on 2026-05-04 after final source-backed audit passed. The repo now treats
 `src/emel/io` as the loading strategy boundary owner, `src/emel/model/tensor` as the canonical
 owner of tensor load, bind, evict, and residency semantics, and `model/loader` as the orchestrator
 across those public actor surfaces.
 
-Current planning focus: start the next milestone with `$gsd-new-milestone` after PR #82.
+Current planning focus: start the next milestone when ready.
 
 ## Previous Shipped Milestone: v1.23 I/O Loading Strategy Boundary
 
@@ -48,13 +48,15 @@ of `model/tensor` or low-level byte strategy into `model/loader`.
   concrete strategies can land independently.
 - Added tests, docs, and source-backed guardrails that prevent `model/loader` from regaining
   low-level loading strategy ownership.
+- Closed follow-up closeout tech debt by aligning active/archive planning truth, labeling
+  superseded proof, cleaning tensor context state, and replacing IO scaffold benchmark markers.
 
 **Validation:** Focused model/tensor/IO tests, domain-boundary guardrails, changed-file coverage,
 lint snapshots, benchmark snapshots, docs generation, and the changed-file scoped quality gate
 passed on 2026-05-04. Concrete mmap/read/copy/device/async strategies remain deferred.
 
-**Audit:** Source-backed audit passed with 14/14 active requirements satisfied after the delegated
-final source audit returned no blockers.
+**Audit:** Final source-backed audit passed with 15/15 active requirements satisfied after Phase
+203 closed follow-up closeout-state and rule-debt items.
 
 ## Previous Shipped Milestone: v1.22 Weight Loading Ownership Cutover
 
@@ -520,7 +522,7 @@ tooling that publishes through canonical compare/benchmark contracts without sha
 from the top-level quality-gate orchestration. `v1.21` shipped from issue #58 and did not weaken
 mandatory validation or change benchmark/parity semantics. `v1.22` shipped from issue #59 and made
 `model/tensor` the canonical owner of tensor load, bind, evict, and residency behavior while
-keeping concrete I/O strategy work deferred. `v1.23` shipped from issue #60 and added the missing
+keeping concrete I/O strategy work deferred. `v1.23` is open from issue #60 and adds the missing
 `emel/io` orchestration boundary under tensor-owned residency without implementing concrete mmap,
 read/copy, staged, chunked, or asynchronous strategy machines.
 
@@ -561,7 +563,7 @@ read/copy, staged, chunked, or asynchronous strategy machines.
 
 | Decision | Rationale | Outcome |
 |----------|-----------|---------|
-| Start v1.23 from GitHub issue #60 as the `emel/io` boundary milestone | v1.22 moved tensor residency ownership into `model/tensor`; the next architecture step is the explicit I/O strategy seam beneath tensor-owned residency before concrete mmap or staged strategy work lands | ✓ Shipped |
+| Start v1.23 from GitHub issue #60 as the `emel/io` boundary milestone | v1.22 moved tensor residency ownership into `model/tensor`; the next architecture step is the explicit I/O strategy seam beneath tensor-owned residency before concrete mmap or staged strategy work lands | Phase 203 closeout cleanup |
 | Start v1.22 from GitHub issue #59 as the weight-loading ownership cutover | `model/tensor` owns individual tensor lifecycle state while `model/weight_loader` still owns bulk residency transition planning; the next runtime architecture milestone should remove that split before adding future I/O strategy work | ✓ Shipped |
 | Start v1.21 from GitHub issue #58 as quality-gate selective runner optimization | v1.18 and v1.19 added parity and benchmark dependency manifests; the next milestone should cash in that structure at the mandatory gate-orchestration level without weakening conservative fallback behavior | ✓ Shipped |
 | Start v1.20 from GitHub issue #56 as an SML dependency and namespace migration | The repo already sources `stateforward/sml.cpp` but still used legacy SML includes, namespaces, and contributor guidance; the next milestone should align code and docs with the current upstream naming before more actor work accumulates on the old surface | ✓ Shipped |
@@ -617,4 +619,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-05-04 after archiving v1.23 from GitHub issue #60*
+*Last updated: 2026-05-04 during Phase 203 closeout cleanup for v1.23*

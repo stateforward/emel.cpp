@@ -35,12 +35,12 @@ kernel/aarch64/op_sub ns_per_op=105.000
 kernel/aarch64/op_unary_exp ns_per_op=1316.500
 kernel/aarch64/op_unary_neg ns_per_op=114.417
 kernel/aarch64/op_unary_relu ns_per_op=133.167
-logits/sampler_raw/vocab_128000 ns_per_op=19521.958
-logits/sampler_raw/vocab_256000 ns_per_op=36718.958
-logits/sampler_raw/vocab_32000 ns_per_op=5863.750
-logits/sampler_sml/vocab_128000 ns_per_op=17665.500
-logits/sampler_sml/vocab_256000 ns_per_op=33306.666
-logits/sampler_sml/vocab_32000 ns_per_op=3867.583
+logits/sampler_raw/vocab_128000 ns_per_op=20733.250 iter=1000 runs=3
+logits/sampler_raw/vocab_256000 ns_per_op=38839.541 iter=1000 runs=3
+logits/sampler_raw/vocab_32000 ns_per_op=5377.750 iter=1000 runs=3
+logits/sampler_sml/vocab_128000 ns_per_op=19638.750 iter=1000 runs=3
+logits/sampler_sml/vocab_256000 ns_per_op=37439.125 iter=1000 runs=3
+logits/sampler_sml/vocab_32000 ns_per_op=5425.959 iter=1000 runs=3
 logits/validator_raw/vocab_128000 ns_per_op=88531.834
 logits/validator_raw/vocab_256000 ns_per_op=174681.583
 logits/validator_raw/vocab_32000 ns_per_op=23683.042

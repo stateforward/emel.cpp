@@ -3,10 +3,14 @@ phase: 201-guardrails-docs-and-closeout-proof
 status: passed
 nyquist_compliant: true
 wave_0_complete: true
+superseded_by: 202-closeout-proof-repair
 validated: 2026-05-04T01:10:00Z
 ---
 
 # Phase 201 Validation
+
+> Superseded closeout proof: this validation is historical. Phase 202 is the active source-backed
+> validation for VAL-01, VAL-02, and VAL-03.
 
 ## Commands
 

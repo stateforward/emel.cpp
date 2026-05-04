@@ -2,6 +2,10 @@
 
 Source: [`emel/model/loader/sm.hpp`](https://github.com/stateforward/emel.cpp/blob/main/src/emel/model/loader/sm.hpp)
 
+## Ownership
+
+`model/loader` orchestrates parser callbacks, the tensor actor, and the I/O actor. It must not implement low-level file APIs or tensor residency lifecycle.
+
 ## Mermaid
 
 ```mermaid

@@ -1,6 +1,7 @@
 ---
 phase: 201-guardrails-docs-and-closeout-proof
 status: passed
+superseded_by: 202-closeout-proof-repair
 requirements:
   - VAL-01
   - VAL-02
@@ -9,6 +10,9 @@ verified: 2026-05-04T01:10:00Z
 ---
 
 # Phase 201 Verification
+
+> Superseded closeout proof: this verification is historical. Phase 202 is the active source-backed
+> verification for VAL-01, VAL-02, and VAL-03.
 
 Status: `passed`
 

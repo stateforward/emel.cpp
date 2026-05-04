@@ -18,7 +18,7 @@ inline void write_error_code(int32_t &target,
 namespace binding {
 
 inline void reset_storage_binding(context &ctx) noexcept {
-  ctx.bound_count = 0u;
+  ctx.tensors.active_extent = 0u;
   for (size_t tensor_id = 0u; tensor_id < ctx.tensors.lifecycle.size();
        ++tensor_id) {
     ctx.tensors.lifecycle[tensor_id] = event::lifecycle::unbound;
@@ -66,8 +66,9 @@ struct effect_bind_storage {
     auto &runtime_ev = tensor::detail::unwrap_runtime_event(ev);
     const auto &request = tensor::detail::request_event(ev);
     binding::reset_storage_binding(ctx);
-    ctx.bound_count = static_cast<uint32_t>(request.tensors.size());
-    for (size_t tensor_id = 0u; tensor_id < ctx.bound_count; ++tensor_id) {
+    ctx.tensors.active_extent = static_cast<uint32_t>(request.tensors.size());
+    for (size_t tensor_id = 0u; tensor_id < ctx.tensors.active_extent;
+         ++tensor_id) {
       const auto &tensor = request.tensors[tensor_id];
       ctx.tensors.lifecycle[tensor_id] = event::lifecycle::unbound;
       ctx.tensors.buffer[tensor_id] = tensor.data;
@@ -86,7 +87,8 @@ struct effect_plan_load {
   template <class event_type>
   void operator()(const event_type &ev, context &ctx) const noexcept {
     const auto &request = tensor::detail::request_event(ev);
-    for (size_t tensor_id = 0u; tensor_id < ctx.bound_count; ++tensor_id) {
+    for (size_t tensor_id = 0u; tensor_id < ctx.tensors.active_extent;
+         ++tensor_id) {
       request.effects[tensor_id] = event::effect_request{
           .kind = event::effect_kind::k_none,
           .strategy = emel::io::loader::event::strategy_kind::none,
@@ -104,7 +106,8 @@ struct effect_plan_io_load {
   template <class event_type>
   void operator()(const event_type &ev, context &ctx) const noexcept {
     const auto &request = tensor::detail::request_event(ev);
-    for (size_t tensor_id = 0u; tensor_id < ctx.bound_count; ++tensor_id) {
+    for (size_t tensor_id = 0u; tensor_id < ctx.tensors.active_extent;
+         ++tensor_id) {
       request.effects[tensor_id] = event::effect_request{
           .kind = event::effect_kind::k_io_load,
           .strategy = request.strategy,
@@ -122,7 +125,8 @@ struct effect_apply_results {
   template <class event_type>
   void operator()(const event_type &ev, context &ctx) const noexcept {
     const auto &request = tensor::detail::request_event(ev);
-    for (size_t tensor_id = 0u; tensor_id < ctx.bound_count; ++tensor_id) {
+    for (size_t tensor_id = 0u; tensor_id < ctx.tensors.active_extent;
+         ++tensor_id) {
       ctx.tensors.lifecycle[tensor_id] = event::lifecycle::resident;
       ctx.tensors.buffer[tensor_id] = request.results[tensor_id].handle;
       ctx.tensors.buffer_bytes[tensor_id] = ctx.tensors.data_size[tensor_id];
@@ -135,7 +139,8 @@ struct effect_apply_results_with_record_output {
   void operator()(const event_type &ev, context &ctx) const noexcept {
     effect_apply_results{}(ev, ctx);
     const auto &request = tensor::detail::request_event(ev);
-    for (size_t tensor_id = 0u; tensor_id < ctx.bound_count; ++tensor_id) {
+    for (size_t tensor_id = 0u; tensor_id < ctx.tensors.active_extent;
+         ++tensor_id) {
       request.tensors[tensor_id].data = request.results[tensor_id].handle;
     }
   }
@@ -256,7 +261,7 @@ struct publish_plan_load_done {
     runtime_ev.ctx.ok = true;
     request.on_done(events::plan_load_done{
         .request = request,
-        .effect_count = ctx.bound_count,
+        .effect_count = ctx.tensors.active_extent,
     });
   }
 };

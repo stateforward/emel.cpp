@@ -56,6 +56,18 @@ intentionally deferred until single-threaded behavior is verified. That doesn't 
 plan for it — the actor model makes adding concurrency easier than it looks, and it will be
 introduced only where measurement says it's necessary.
 
+## I/O and tensor ownership
+
+`model/tensor` is the canonical owner of tensor bind, load, evict, and residency lifecycle
+semantics. `emel/io` owns loading strategy, transport, mapping, staging, and
+device/resource-specific strategy boundaries without owning residency. `model/loader` stays
+orchestration-only: it can dispatch the tensor and I/O actors, but it must not regain low-level
+file APIs or a shadow tensor residency lifecycle.
+
+Concrete mmap, read/copy, and async loading strategies are follow-on work below `emel/io`.
+Until those strategy actors exist, maintained runtime proof is the boundary, failure routing,
+and tensor-owned residency behavior rather than a concrete file-transport implementation.
+
 ## The name
 
 “EMEL” is pronounced like “ML”. It’s a short, neutral name that doesn’t carry existing

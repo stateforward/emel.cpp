@@ -2,6 +2,10 @@
 
 Source: [`emel/model/tensor/sm.hpp`](https://github.com/stateforward/emel.cpp/blob/main/src/emel/model/tensor/sm.hpp)
 
+## Ownership
+
+`model/tensor` owns tensor bind, load, evict, and residency lifecycle semantics. It may emit I/O strategy effect requests, but residency remains tensor-owned.
+
 ## Mermaid
 
 ```mermaid

@@ -8,12 +8,8 @@
 
 #include <doctest/doctest.h>
 
-#include "emel/io/loader/actions.hpp"
-#include "emel/io/loader/context.hpp"
-#include "emel/io/loader/detail.hpp"
 #include "emel/io/loader/errors.hpp"
 #include "emel/io/loader/events.hpp"
-#include "emel/io/loader/guards.hpp"
 #include "emel/io/loader/sm.hpp"
 #include "emel/machines.hpp"
 
@@ -138,79 +134,45 @@ TEST_CASE("io loader fails closed for absent and explicit strategies") {
   }
 }
 
-TEST_CASE("io loader action and guard contract covers publication effects") {
+TEST_CASE("io loader fails closed and recovers for unknown strategies") {
+  emel::io::loader::sm loader{};
   owner_state owner{};
-  emel::io::loader::action::context action_ctx{};
-  emel::io::loader::detail::runtime_status status{};
   const emel::io::loader::event::tensor_load_span tensor{
       .tensor_id = 4,
-      .file_index = 9u,
-      .file_offset = 1024u,
-      .byte_size = 256u,
-      .target = fake_target(0xE000u),
+      .file_index = 1u,
+      .file_offset = 8192u,
+      .byte_size = 128u,
+      .target = fake_target(0xD800u),
   };
-  const emel::io::loader::event::strategy_policy policy{
-      emel::io::loader::event::strategy_kind::external_buffer,
+  const emel::io::loader::event::strategy_policy unknown_policy{
+      static_cast<emel::io::loader::event::strategy_kind>(0xFFu),
   };
-  emel::io::loader::event::load_tensor request{tensor, policy};
-  emel::io::loader::detail::load_tensor_runtime runtime{request, status};
+  emel::io::loader::event::load_tensor unknown_request{tensor,
+                                                       unknown_policy};
+  unknown_request.on_done = {&owner, on_load_done};
+  unknown_request.on_error = {&owner, on_load_error};
 
-  CHECK(emel::io::loader::guard::tensor_span_valid{}(runtime, action_ctx));
-  CHECK_FALSE(
-      emel::io::loader::guard::tensor_span_invalid{}(runtime, action_ctx));
-  CHECK_FALSE(emel::io::loader::guard::strategy_none{}(runtime));
-  CHECK_FALSE(emel::io::loader::guard::strategy_mapped_file{}(runtime));
-  CHECK_FALSE(emel::io::loader::guard::strategy_staged_read{}(runtime));
-  CHECK(emel::io::loader::guard::strategy_external_buffer{}(runtime));
-  CHECK(emel::io::loader::guard::done_callback_absent{}(runtime));
-  CHECK(emel::io::loader::guard::error_callback_absent{}(runtime));
-
-  request.on_done = {&owner, on_load_done};
-  request.on_error = {&owner, on_load_error};
-  CHECK(emel::io::loader::guard::done_callback_present{}(runtime));
-  CHECK(emel::io::loader::guard::error_callback_present{}(runtime));
-
-  emel::io::loader::action::effect_begin_load_tensor(runtime, action_ctx);
-  CHECK(status.err == emel::error::cast(emel::io::loader::error::none));
-  CHECK_FALSE(status.ok);
-
-  emel::io::loader::action::effect_record_load_tensor_done(runtime, action_ctx);
-  CHECK(status.err == emel::error::cast(emel::io::loader::error::none));
-  CHECK(status.ok);
-
-  emel::io::loader::action::effect_publish_load_tensor_done(runtime,
-                                                            action_ctx);
-  CHECK(owner.done);
-  CHECK_FALSE(owner.error);
-  CHECK(owner.strategy ==
-        emel::io::loader::event::strategy_kind::external_buffer);
-  CHECK(owner.buffer == fake_target(0xE000u));
-  CHECK(owner.buffer_bytes == 256u);
-
-  emel::io::loader::action::effect_mark_invalid_request(runtime, action_ctx);
-  CHECK(status.err ==
-        emel::error::cast(emel::io::loader::error::invalid_request));
-  CHECK_FALSE(status.ok);
-
-  emel::io::loader::action::effect_mark_unsupported_strategy(runtime,
-                                                             action_ctx);
-  CHECK(status.err ==
-        emel::error::cast(emel::io::loader::error::unsupported_strategy));
-  CHECK_FALSE(status.ok);
-
-  emel::io::loader::action::effect_publish_load_tensor_error(runtime,
-                                                             action_ctx);
+  CHECK_FALSE(loader.process_event(unknown_request));
   CHECK_FALSE(owner.done);
   CHECK(owner.error);
   CHECK(owner.err ==
         emel::error::cast(emel::io::loader::error::unsupported_strategy));
+  CHECK(loader.is(stateforward::sml::state<emel::io::loader::state_ready>));
 
-  emel::io::loader::action::effect_record_load_tensor_error(runtime,
-                                                            action_ctx);
-  emel::io::loader::action::effect_on_unexpected(runtime, action_ctx);
-  CHECK(status.err ==
-        emel::error::cast(emel::io::loader::error::internal_error));
-  CHECK_FALSE(status.ok);
+  owner = {};
+  const emel::io::loader::event::strategy_policy explicit_policy{
+      emel::io::loader::event::strategy_kind::staged_read,
+  };
+  emel::io::loader::event::load_tensor explicit_request{tensor,
+                                                        explicit_policy};
+  explicit_request.on_done = {&owner, on_load_done};
+  explicit_request.on_error = {&owner, on_load_error};
+
+  CHECK_FALSE(loader.process_event(explicit_request));
+  CHECK(owner.error);
+  CHECK(owner.err ==
+        emel::error::cast(emel::io::loader::error::unsupported_strategy));
+  CHECK(loader.is(stateforward::sml::state<emel::io::loader::state_ready>));
 }
 
 TEST_CASE("io loader boundary has no concrete system IO strategy code") {

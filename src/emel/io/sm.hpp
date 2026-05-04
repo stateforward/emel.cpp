@@ -1,6 +1,6 @@
 #pragma once
 
-// benchmark: scaffold
+// benchmark: designed
 
 #include "emel/io/loader/sm.hpp"
 

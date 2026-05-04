@@ -1,6 +1,6 @@
 #pragma once
 
-// benchmark: scaffold
+// benchmark: designed
 
 #include "emel/io/loader/actions.hpp"
 #include "emel/io/loader/context.hpp"
@@ -49,6 +49,10 @@ struct model {
           sml::state<state_request_decision>
           + sml::completion<detail::load_tensor_runtime>
           [ guard::strategy_external_buffer{} ]
+          / action::effect_mark_unsupported_strategy
+      , sml::state<state_unsupported_strategy_error_decision> <=
+          sml::state<state_request_decision>
+          + sml::completion<detail::load_tensor_runtime>
           / action::effect_mark_unsupported_strategy
       , sml::state<state_no_strategy_error_decision> <= sml::state<state_ready>
           + sml::event<detail::load_tensor_runtime>
