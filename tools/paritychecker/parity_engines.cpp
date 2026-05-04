@@ -1308,7 +1308,15 @@ void on_load_done(void *owner,
   state.load.err = emel::error::cast(emel::model::loader::error::none);
   state.load.bytes_total = ev.bytes_total;
   state.load.bytes_done = ev.bytes_done;
-  state.load.used_mmap = ev.used_mmap;
+  emel::model::tensor::event::tensor_state tstate{};
+  emel::model::tensor::event::capture_tensor_state capture{
+      .tensor_id = 0,
+      .state_out = &tstate,
+  };
+  static_cast<void>(state.tensor_loader.process_event(capture));
+  state.load.used_mmap =
+      (tstate.lifecycle_state ==
+       emel::model::tensor::event::lifecycle::mmap_resident);
 }
 
 void on_load_error(void *owner,

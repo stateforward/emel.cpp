@@ -209,7 +209,6 @@ loaded_whisper_fixture load_fixture_or_skip() {
   REQUIRE(emel::model::detail::load_hparams_from_gguf(binding, *loaded.model));
   loaded.model->weights_data = loaded.file_bytes.data();
   loaded.model->weights_size = loaded.file_bytes.size();
-  loaded.model->weights_mapped = true;
   materialize_tensor_names_from_file(*loaded.model, loaded.file_bytes);
   emel::model::whisper::detail::execution_contract model_contract = {};
   REQUIRE(emel::model::whisper::detail::build_execution_contract(

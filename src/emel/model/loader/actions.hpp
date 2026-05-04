@@ -316,11 +316,9 @@ struct effect_publish_tensor_load_done_from_file_image {
   void operator()(const event::load_runtime &ev, context &) const noexcept {
     ev.ctx.bytes_total = ev.request.file_size;
     ev.ctx.bytes_done = ev.request.file_size;
-    ev.ctx.used_mmap = false;
     ev.ctx.err = emel::error::cast(error::none);
     ev.request.model_data.weights_data = ev.request.file_image;
     ev.request.model_data.weights_size = ev.request.file_size;
-    ev.request.model_data.weights_mapped = false;
     ev.request.model_data.weights_split_count = 1u;
     ev.request.model_data.weights_split_offsets[0] = 0u;
     ev.request.model_data.weights_split_sizes[0] = ev.request.file_size;
@@ -331,7 +329,6 @@ struct effect_publish_tensor_load_done_from_model_data {
   void operator()(const event::load_runtime &ev, context &) const noexcept {
     ev.ctx.bytes_total = ev.request.model_data.weights_size;
     ev.ctx.bytes_done = ev.request.model_data.weights_size;
-    ev.ctx.used_mmap = ev.request.model_data.weights_mapped;
     ev.ctx.err = emel::error::cast(error::none);
   }
 };

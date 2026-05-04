@@ -2,10 +2,12 @@
 
 #include <cstdint>
 #include <span>
+#include <string_view>
 
 #include "emel/callback.hpp"
 #include "emel/error/error.hpp"
 #include "emel/io/loader/events.hpp"
+#include "emel/io/mmap/errors.hpp"
 #include "emel/model/data.hpp"
 #include "emel/model/tensor/errors.hpp"
 
@@ -16,6 +18,7 @@ enum class lifecycle : uint8_t {
   resident = 1u,
   evicted = 2u,
   internal_error = 3u,
+  mmap_resident = 4u,
 };
 
 struct tensor_state {
@@ -53,6 +56,8 @@ struct effect_result {
 struct bind_storage;
 struct plan_load;
 struct apply_effect_results;
+struct request_mapped_load;
+struct release_mapped_load;
 
 struct bind_tensor {
   int32_t tensor_id = 0;
@@ -89,6 +94,10 @@ struct plan_load_done;
 struct plan_load_error;
 struct apply_effect_results_done;
 struct apply_effect_results_error;
+struct request_mapped_load_done;
+struct request_mapped_load_error;
+struct release_mapped_load_done;
+struct release_mapped_load_error;
 
 struct bind_tensor_done {
   const event::bind_tensor *request = nullptr;
@@ -156,6 +165,34 @@ struct apply_effect_results {
       : results(results_in), tensors(tensors_in) {}
 };
 
+// Public surface for tensor-owned mmap-backed loading. The actor dispatches
+// to an injected emel::io::mmap::sm via process_event(...). The caller MUST
+// keep the storage backing file_path alive AND null-terminated for the
+// duration of dispatch, because the io/mmap platform helper consumes
+// file_path.data() (Phase 206 contract).
+struct request_mapped_load {
+  int32_t tensor_id = -1;
+  std::string_view file_path = {};
+  uint64_t file_offset = 0u;
+  uint64_t byte_size = 0u;
+  emel::callback<void(const events::request_mapped_load_done &)> on_done = {};
+  emel::callback<void(const events::request_mapped_load_error &)> on_error = {};
+
+  request_mapped_load(int32_t id, std::string_view path, uint64_t offset,
+                      uint64_t size) noexcept
+      : tensor_id(id), file_path(path), file_offset(offset), byte_size(size) {}
+};
+
+struct release_mapped_load {
+  int32_t tensor_id = -1;
+  uint32_t mapping_handle = emel::io::mmap::k_invalid_mapping_handle;
+  emel::callback<void(const events::release_mapped_load_done &)> on_done = {};
+  emel::callback<void(const events::release_mapped_load_error &)> on_error = {};
+
+  release_mapped_load(int32_t id, uint32_t handle) noexcept
+      : tensor_id(id), mapping_handle(handle) {}
+};
+
 } // namespace emel::model::tensor::event
 
 namespace emel::model::tensor::events {
@@ -186,6 +223,31 @@ struct apply_effect_results_done {
 struct apply_effect_results_error {
   const event::apply_effect_results &request;
   emel::error::type err = emel::error::cast(error::none);
+};
+
+struct request_mapped_load_done {
+  const event::request_mapped_load &request;
+  uint32_t mapping_handle = emel::io::mmap::k_invalid_mapping_handle;
+  const void *buffer = nullptr;
+  uint64_t buffer_bytes = 0u;
+};
+
+struct request_mapped_load_error {
+  const event::request_mapped_load &request;
+  emel::error::type err = emel::error::cast(error::none);
+  emel::error::type io_mmap_err =
+      emel::error::cast(emel::io::mmap::error::none);
+};
+
+struct release_mapped_load_done {
+  const event::release_mapped_load &request;
+};
+
+struct release_mapped_load_error {
+  const event::release_mapped_load &request;
+  emel::error::type err = emel::error::cast(error::none);
+  emel::error::type io_mmap_err =
+      emel::error::cast(emel::io::mmap::error::none);
 };
 
 } // namespace emel::model::tensor::events

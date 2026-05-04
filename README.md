@@ -64,9 +64,13 @@ device/resource-specific strategy boundaries without owning residency. `model/lo
 orchestration-only: it can dispatch the tensor and I/O actors, but it must not regain low-level
 file APIs or a shadow tensor residency lifecycle.
 
-Concrete mmap, read/copy, and async loading strategies are follow-on work below `emel/io`.
-Until those strategy actors exist, maintained runtime proof is the boundary, failure routing,
-and tensor-owned residency behavior rather than a concrete file-transport implementation.
+The mmap strategy actor is implemented under `src/emel/io/mmap` and is the maintained
+loading path for tensor-backed mmap-resident loads. `model/tensor` requests mmap-backed
+loading via public `request_mapped_load` / `release_mapped_load` events; `emel/io/mmap`
+owns mapping, slot reservation, and lifetime contracts. Concrete read/copy, async, and
+device-specific loading strategies are still follow-on work — until those strategy actors
+exist, maintained runtime proof for those paths remains the boundary and failure routing
+rather than a concrete file-transport implementation.
 
 ## The name
 
@@ -156,6 +160,7 @@ environments, while Zig remains the default for day-to-day builds.
 - [`.planning/architecture/graph.md`](.planning/architecture/graph.md)
 - [`.planning/architecture/graph_tensor.md`](.planning/architecture/graph_tensor.md)
 - [`.planning/architecture/io_loader.md`](.planning/architecture/io_loader.md)
+- [`.planning/architecture/io_mmap.md`](.planning/architecture/io_mmap.md)
 - [`.planning/architecture/kernel_aarch64.md`](.planning/architecture/kernel_aarch64.md)
 - [`.planning/architecture/kernel_x86_64.md`](.planning/architecture/kernel_x86_64.md)
 - [`.planning/architecture/logits_sampler.md`](.planning/architecture/logits_sampler.md)

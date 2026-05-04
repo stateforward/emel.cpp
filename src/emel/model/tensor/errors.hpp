@@ -13,6 +13,10 @@ enum class error : emel::error::type {
   out_of_memory = (1u << 4),
   internal_error = (1u << 5),
   untracked = (1u << 6),
+  io_mmap_unsupported = (1u << 7),
+  io_mmap_failed = (1u << 8),
+  tensor_already_resident = (1u << 9),
+  tensor_unmapped = (1u << 10),
 };
 
 } // namespace emel::model::tensor

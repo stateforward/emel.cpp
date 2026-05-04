@@ -509,7 +509,6 @@ struct data {
   std::array<tensor_record, k_max_tensors> tensors = {};
   const void *weights_data = nullptr;
   uint64_t weights_size = 0;
-  bool weights_mapped = false;
   uint16_t weights_split_count = 1;
   std::array<uint64_t, k_max_split_files> weights_split_sizes = {};
   std::array<uint64_t, k_max_split_files> weights_split_offsets = {};

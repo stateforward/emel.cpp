@@ -244,7 +244,15 @@ inline void on_load_done(void *owner,
   fixture.load.err = emel::error::cast(emel::model::loader::error::none);
   fixture.load.bytes_total = ev.bytes_total;
   fixture.load.bytes_done = ev.bytes_done;
-  fixture.load.used_mmap = ev.used_mmap;
+  emel::model::tensor::event::tensor_state state{};
+  emel::model::tensor::event::capture_tensor_state capture{
+      .tensor_id = 0,
+      .state_out = &state,
+  };
+  static_cast<void>(fixture.tensor_loader.process_event(capture));
+  fixture.load.used_mmap =
+      (state.lifecycle_state ==
+       emel::model::tensor::event::lifecycle::mmap_resident);
 }
 
 inline void on_load_error(void *owner,

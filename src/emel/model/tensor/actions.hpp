@@ -1,5 +1,8 @@
 #pragma once
 
+#include "emel/io/mmap/errors.hpp"
+#include "emel/io/mmap/events.hpp"
+#include "emel/io/mmap/sm.hpp"
 #include "emel/model/tensor/context.hpp"
 #include "emel/model/tensor/detail.hpp"
 #include "emel/model/tensor/errors.hpp"
@@ -457,7 +460,261 @@ struct on_unexpected {
       ev.ctx.err = emel::error::cast(error::internal_error);
       ev.ctx.ok = false;
     }
+    if constexpr (requires { ev.status.err; }) {
+      ev.status.err = emel::error::cast(error::internal_error);
+      ev.status.ok = false;
+    }
   }
+};
+
+namespace mapped_load_callbacks {
+
+inline void on_io_mmap_request_done(
+    void *object, const emel::io::mmap::events::map_tensor_done &ev) noexcept {
+  auto *status =
+      static_cast<tensor::detail::request_mapped_load_status *>(object);
+  status->io_mmap_ok = true;
+  status->mapping_handle = ev.handle;
+  status->buffer = ev.buffer;
+  status->buffer_bytes = ev.buffer_bytes;
+}
+
+inline void on_io_mmap_request_error(
+    void *object, const emel::io::mmap::events::map_tensor_error &ev) noexcept {
+  auto *status =
+      static_cast<tensor::detail::request_mapped_load_status *>(object);
+  status->io_mmap_ok = false;
+  status->io_mmap_err = ev.err;
+}
+
+inline void on_io_mmap_release_done(
+    void *object,
+    const emel::io::mmap::events::release_mapping_done &) noexcept {
+  auto *status =
+      static_cast<tensor::detail::release_mapped_load_status *>(object);
+  status->io_mmap_ok = true;
+}
+
+inline void on_io_mmap_release_error(
+    void *object,
+    const emel::io::mmap::events::release_mapping_error &ev) noexcept {
+  auto *status =
+      static_cast<tensor::detail::release_mapped_load_status *>(object);
+  status->io_mmap_ok = false;
+  status->io_mmap_err = ev.err;
+}
+
+} // namespace mapped_load_callbacks
+
+struct effect_begin_request_mapped_load {
+  void operator()(const detail::request_mapped_load_runtime &ev,
+                  context &) const noexcept {
+    ev.status.err = emel::error::cast(error::none);
+    ev.status.ok = false;
+    ev.status.accepted = false;
+    ev.status.io_mmap_ok = false;
+    ev.status.io_mmap_err = emel::error::cast(emel::io::mmap::error::none);
+    ev.status.mapping_handle = emel::io::mmap::k_invalid_mapping_handle;
+    ev.status.buffer = nullptr;
+    ev.status.buffer_bytes = 0u;
+  }
+};
+
+struct effect_attempt_request_mapped_load_dispatch {
+  void operator()(const detail::request_mapped_load_runtime &ev,
+                  context &ctx) const noexcept {
+    emel::io::mmap::event::map_tensor_request inner{
+        .tensor_id = ev.request.tensor_id,
+        .file_index = 0u,
+        .file_offset = ev.request.file_offset,
+        .byte_size = ev.request.byte_size,
+        .file_path = ev.request.file_path,
+    };
+    emel::io::mmap::event::map_tensor inner_event{inner};
+    inner_event.on_done = {static_cast<void *>(&ev.status),
+                           mapped_load_callbacks::on_io_mmap_request_done};
+    inner_event.on_error = {static_cast<void *>(&ev.status),
+                            mapped_load_callbacks::on_io_mmap_request_error};
+    ctx.io_mmap->process_event(inner_event);
+  }
+};
+
+struct effect_commit_request_mapped_load {
+  void operator()(const detail::request_mapped_load_runtime &ev,
+                  context &ctx) const noexcept {
+    const size_t id = static_cast<size_t>(ev.request.tensor_id);
+    ctx.tensors.lifecycle[id] = event::lifecycle::mmap_resident;
+    ctx.tensors.buffer[id] = ev.status.buffer;
+    ctx.tensors.buffer_bytes[id] = ev.status.buffer_bytes;
+    ctx.tensors.file_offset[id] = ev.request.file_offset;
+    ctx.tensors.data_size[id] = ev.request.byte_size;
+    ev.status.ok = true;
+    ev.status.accepted = true;
+  }
+};
+
+struct effect_mark_request_mapped_load_invalid_request {
+  void operator()(const detail::request_mapped_load_runtime &ev,
+                  context &) const noexcept {
+    ev.status.err = emel::error::cast(error::invalid_request);
+    ev.status.ok = false;
+  }
+};
+
+struct effect_mark_request_mapped_load_unsupported_io_mmap {
+  void operator()(const detail::request_mapped_load_runtime &ev,
+                  context &) const noexcept {
+    ev.status.err = emel::error::cast(error::io_mmap_unsupported);
+    ev.status.ok = false;
+  }
+};
+
+struct effect_mark_request_mapped_load_tensor_already_resident {
+  void operator()(const detail::request_mapped_load_runtime &ev,
+                  context &) const noexcept {
+    ev.status.err = emel::error::cast(error::tensor_already_resident);
+    ev.status.ok = false;
+  }
+};
+
+struct effect_mark_request_mapped_load_io_mmap_failed {
+  void operator()(const detail::request_mapped_load_runtime &ev,
+                  context &) const noexcept {
+    ev.status.err = emel::error::cast(error::io_mmap_failed);
+    ev.status.ok = false;
+  }
+};
+
+struct effect_publish_request_mapped_load_done {
+  void operator()(const detail::request_mapped_load_runtime &ev,
+                  context &) const noexcept {
+    ev.request.on_done(events::request_mapped_load_done{
+        .request = ev.request,
+        .mapping_handle = ev.status.mapping_handle,
+        .buffer = ev.status.buffer,
+        .buffer_bytes = ev.status.buffer_bytes,
+    });
+  }
+};
+
+struct effect_record_request_mapped_load_done {
+  void operator()(const detail::request_mapped_load_runtime &,
+                  context &) const noexcept {}
+};
+
+struct effect_publish_request_mapped_load_error {
+  void operator()(const detail::request_mapped_load_runtime &ev,
+                  context &) const noexcept {
+    ev.request.on_error(events::request_mapped_load_error{
+        .request = ev.request,
+        .err = ev.status.err,
+        .io_mmap_err = ev.status.io_mmap_err,
+    });
+  }
+};
+
+struct effect_record_request_mapped_load_error {
+  void operator()(const detail::request_mapped_load_runtime &,
+                  context &) const noexcept {}
+};
+
+struct effect_begin_release_mapped_load {
+  void operator()(const detail::release_mapped_load_runtime &ev,
+                  context &) const noexcept {
+    ev.status.err = emel::error::cast(error::none);
+    ev.status.ok = false;
+    ev.status.accepted = false;
+    ev.status.io_mmap_ok = false;
+    ev.status.io_mmap_err = emel::error::cast(emel::io::mmap::error::none);
+    ev.status.target_handle = emel::io::mmap::k_invalid_mapping_handle;
+  }
+};
+
+struct effect_attempt_release_mapped_load_dispatch {
+  void operator()(const detail::release_mapped_load_runtime &ev,
+                  context &ctx) const noexcept {
+    ev.status.target_handle = ev.request.mapping_handle;
+    emel::io::mmap::event::release_mapping inner_event{ev.status.target_handle};
+    inner_event.on_done = {static_cast<void *>(&ev.status),
+                           mapped_load_callbacks::on_io_mmap_release_done};
+    inner_event.on_error = {static_cast<void *>(&ev.status),
+                            mapped_load_callbacks::on_io_mmap_release_error};
+    ctx.io_mmap->process_event(inner_event);
+  }
+};
+
+struct effect_commit_release_mapped_load {
+  void operator()(const detail::release_mapped_load_runtime &ev,
+                  context &ctx) const noexcept {
+    const size_t id = static_cast<size_t>(ev.request.tensor_id);
+    ctx.tensors.lifecycle[id] = event::lifecycle::evicted;
+    ctx.tensors.buffer[id] = nullptr;
+    ctx.tensors.buffer_bytes[id] = 0u;
+    ev.status.ok = true;
+    ev.status.accepted = true;
+  }
+};
+
+struct effect_mark_release_mapped_load_invalid_request {
+  void operator()(const detail::release_mapped_load_runtime &ev,
+                  context &) const noexcept {
+    ev.status.err = emel::error::cast(error::invalid_request);
+    ev.status.ok = false;
+  }
+};
+
+struct effect_mark_release_mapped_load_unsupported_io_mmap {
+  void operator()(const detail::release_mapped_load_runtime &ev,
+                  context &) const noexcept {
+    ev.status.err = emel::error::cast(error::io_mmap_unsupported);
+    ev.status.ok = false;
+  }
+};
+
+struct effect_mark_release_mapped_load_handle_absent {
+  void operator()(const detail::release_mapped_load_runtime &ev,
+                  context &) const noexcept {
+    ev.status.err = emel::error::cast(error::tensor_unmapped);
+    ev.status.ok = false;
+  }
+};
+
+struct effect_mark_release_mapped_load_io_mmap_failed {
+  void operator()(const detail::release_mapped_load_runtime &ev,
+                  context &) const noexcept {
+    ev.status.err = emel::error::cast(error::io_mmap_failed);
+    ev.status.ok = false;
+  }
+};
+
+struct effect_publish_release_mapped_load_done {
+  void operator()(const detail::release_mapped_load_runtime &ev,
+                  context &) const noexcept {
+    ev.request.on_done(events::release_mapped_load_done{
+        .request = ev.request,
+    });
+  }
+};
+
+struct effect_record_release_mapped_load_done {
+  void operator()(const detail::release_mapped_load_runtime &,
+                  context &) const noexcept {}
+};
+
+struct effect_publish_release_mapped_load_error {
+  void operator()(const detail::release_mapped_load_runtime &ev,
+                  context &) const noexcept {
+    ev.request.on_error(events::release_mapped_load_error{
+        .request = ev.request,
+        .err = ev.status.err,
+        .io_mmap_err = ev.status.io_mmap_err,
+    });
+  }
+};
+
+struct effect_record_release_mapped_load_error {
+  void operator()(const detail::release_mapped_load_runtime &,
+                  context &) const noexcept {}
 };
 
 inline constexpr begin_bind_tensor begin_bind_tensor{};
@@ -510,5 +767,49 @@ inline constexpr publish_done_with_error_code publish_done_with_error_code{};
 inline constexpr publish_error publish_error{};
 inline constexpr publish_error_with_error_code publish_error_with_error_code{};
 inline constexpr on_unexpected on_unexpected{};
+inline constexpr effect_begin_request_mapped_load
+    effect_begin_request_mapped_load{};
+inline constexpr effect_attempt_request_mapped_load_dispatch
+    effect_attempt_request_mapped_load_dispatch{};
+inline constexpr effect_commit_request_mapped_load
+    effect_commit_request_mapped_load{};
+inline constexpr effect_mark_request_mapped_load_invalid_request
+    effect_mark_request_mapped_load_invalid_request{};
+inline constexpr effect_mark_request_mapped_load_unsupported_io_mmap
+    effect_mark_request_mapped_load_unsupported_io_mmap{};
+inline constexpr effect_mark_request_mapped_load_tensor_already_resident
+    effect_mark_request_mapped_load_tensor_already_resident{};
+inline constexpr effect_mark_request_mapped_load_io_mmap_failed
+    effect_mark_request_mapped_load_io_mmap_failed{};
+inline constexpr effect_publish_request_mapped_load_done
+    effect_publish_request_mapped_load_done{};
+inline constexpr effect_record_request_mapped_load_done
+    effect_record_request_mapped_load_done{};
+inline constexpr effect_publish_request_mapped_load_error
+    effect_publish_request_mapped_load_error{};
+inline constexpr effect_record_request_mapped_load_error
+    effect_record_request_mapped_load_error{};
+inline constexpr effect_begin_release_mapped_load
+    effect_begin_release_mapped_load{};
+inline constexpr effect_attempt_release_mapped_load_dispatch
+    effect_attempt_release_mapped_load_dispatch{};
+inline constexpr effect_commit_release_mapped_load
+    effect_commit_release_mapped_load{};
+inline constexpr effect_mark_release_mapped_load_invalid_request
+    effect_mark_release_mapped_load_invalid_request{};
+inline constexpr effect_mark_release_mapped_load_unsupported_io_mmap
+    effect_mark_release_mapped_load_unsupported_io_mmap{};
+inline constexpr effect_mark_release_mapped_load_handle_absent
+    effect_mark_release_mapped_load_handle_absent{};
+inline constexpr effect_mark_release_mapped_load_io_mmap_failed
+    effect_mark_release_mapped_load_io_mmap_failed{};
+inline constexpr effect_publish_release_mapped_load_done
+    effect_publish_release_mapped_load_done{};
+inline constexpr effect_record_release_mapped_load_done
+    effect_record_release_mapped_load_done{};
+inline constexpr effect_publish_release_mapped_load_error
+    effect_publish_release_mapped_load_error{};
+inline constexpr effect_record_release_mapped_load_error
+    effect_record_release_mapped_load_error{};
 
 } // namespace emel::model::tensor::action

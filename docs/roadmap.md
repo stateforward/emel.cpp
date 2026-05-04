@@ -13,8 +13,10 @@ scaffolding decisions live in [scaffold.plan.md](plans/scaffold.plan.md).
 - [x] model parser: GGUF metadata mapping and orchestration aligned with reference parser behavior.
 - [x] model loader: orchestration and GGUF callbacks aligned with reference behavior.
 - [x] model tensor loading: `model/tensor` owns tensor residency and lifecycle; `emel/io`
-  provides the loading strategy boundary. Concrete I/O strategies (mmap, read, copy, async)
-  are follow-on work.
+  provides the loading strategy boundary; the mmap strategy actor under `src/emel/io/mmap`
+  implements the mmap loading path with explicit validation, platform gating, slot pool,
+  and deterministic unmap (parity tests + scope guardrails included). Read/copy, async, and
+  device-specific I/O strategies remain follow-on work.
 - [x] tools: `tools/bench` and `tools/paritychecker` parity harnesses implemented.
 - [x] jinja: templating and orchestration implemented.
 

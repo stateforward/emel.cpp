@@ -365,13 +365,13 @@ int main(int argc, char **argv) {
   }
 
   const auto model_load_start = steady_clock::now();
-  mapped_binary_file mapped_model;
-  if (!mapped_model.open(opts.model)) {
-    std::fprintf(stderr, "error: failed to map model file\n");
+  std::vector<uint8_t> mapped_model = read_binary_file(opts.model);
+  if (mapped_model.empty()) {
+    std::fprintf(stderr, "error: failed to load model file\n");
     return 2;
   }
   std::vector<uint8_t> source_owned_gguf = {};
-  std::span<const uint8_t> model_image = mapped_model.bytes();
+  std::span<const uint8_t> model_image{mapped_model};
   if (emel::model::whisper::is_legacy_lmgg_whisper(model_image)) {
     if (!emel::model::whisper::normalize_legacy_lmgg_to_gguf(
             model_image, source_owned_gguf)) {
@@ -419,7 +419,6 @@ int main(int argc, char **argv) {
   }
   model->weights_data = model_image.data();
   model->weights_size = model_image.size();
-  model->weights_mapped = true;
   if (!materialize_tensor_names_from_file(*model, model_image)) {
     std::fprintf(stderr, "error: invalid Whisper tensor name metadata\n");
     return 2;

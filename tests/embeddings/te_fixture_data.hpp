@@ -298,7 +298,6 @@ inline loaded_te_fixture load_te_fixture(const std::filesystem::path & model_pat
 
   fixture.model->weights_data = fixture.file_bytes.data();
   fixture.model->weights_size = fixture.file_bytes.size();
-  fixture.model->weights_mapped = true;
   materialize_tensor_names(fixture);
   return fixture;
 }
