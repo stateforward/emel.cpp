@@ -1,5 +1,57 @@
 # Project Milestones: EMEL
 
+## v1.24 I/O Mmap Loading Strategy (Shipped: 2026-05-04)
+
+**Phases completed:** 1 phases, 1 plans, 0 tasks
+
+**Key accomplishments:**
+
+- Backfilled missing per-phase VERIFICATION.md artifacts for Phases 208, 209, and 210; closed v1.24 audit's 3-source cross-reference gap.
+
+---
+
+## v1.24 I/O Mmap Loading Strategy (Shipped: 2026-05-04)
+
+**Phases completed:** 7 phases, 7 plans, 0 tasks
+
+**Key accomplishments:**
+
+- Established the canonical `src/emel/io/mmap` Stateforward.SML actor with component-local
+  context, events, guards, actions, errors, and `emel::io::mmap::sm` ownership.
+
+- Modeled mmap request/platform/file/offset/length/layout validation and unsupported-platform
+  rejection through explicit guards and transitions before any mapping attempt.
+
+- Added real `open`+`mmap`+`munmap` paths under `#if defined(_WIN32)` selection, a
+  fixed-capacity slot pool (`EMEL_IO_MMAP_MAX_MAPPINGS = 256`), `event::release_mapping`
+  as the actor-owned unmap surface, and a deterministic mmap error taxonomy.
+
+- Added `event::request_mapped_load` / `event::release_mapped_load`,
+  `lifecycle::mmap_resident`, and `sm(emel::io::mmap::sm*)` injection on `model/tensor`,
+  preserving tensor-owned load/bind/evict/residency orchestration with zero handle state in
+  tensor.
+
+- Kept `model/loader`, maintained benchmark, paritychecker, and embedded-probe lanes off
+  actor internals; mmap reporting flows through public tensor surfaces only.
+
+- Added doctest proof of supported and rejection mmap behavior through `process_event(...)`
+  and three new domain-boundary script rules guarding scope and ownership.
+
+- Aligned README, README template, parity roadmap, and architecture docs with the
+  implemented mmap path; refreshed `snapshots/bench/benchmarks.txt` for `encoder_spm`
+  and `encoder_wpm` via maintained scoped `scripts/bench.sh --snapshot --compare --update`;
+  removed the Phase 204 transitional bench-regression override.
+
+**Audit:** Final source-backed audit passed with 13/13 active requirements satisfied
+(MMAP-01..03, TIO-01..03, PLAT-01, LIFE-01, ERR-01, VAL-01..04). Closing
+`EMEL_QUALITY_GATES_SCOPE=full scripts/quality_gates.sh` exit 0 (no override; total 432s).
+
+**Known deferred items at close:** Concrete read/copy/async/device strategies remain
+follow-on work below the `emel/io` boundary. The previously deferred non-v1.23 quick
+task and four optimization todos remain tracked in `.planning/STATE.md`.
+
+---
+
 ## v1.23 I/O Loading Strategy Boundary (Shipped: 2026-05-04)
 
 **Phases completed:** 7 phases, 7 plans, 0 tasks
@@ -8,12 +60,16 @@
 
 - Established `src/emel/io` as a Stateforward.SML loading-boundary module with fail-closed strategy
   scaffolding and public aliases.
+
 - Added explicit IO request/result/error events and tensor IO load effects without moving tensor
   residency ownership.
+
 - Modeled IO strategy policy and rejection through explicit guards and transitions, with no hidden
   action/detail routing.
+
 - Integrated model-loader orchestration with the public IO actor boundary while keeping maintained
   tool lanes off actor internals.
+
 - Repaired v1.23 closeout proof with public test surfaces, stronger guardrails, generated docs truth, and passing scoped gates.
 - Closed v1.23 closeout tech debt with planning-state truth, tensor context cleanup, IO benchmark-state markers, and passing gates.
 

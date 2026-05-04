@@ -1,16 +1,16 @@
 ---
 gsd_state_version: 1.0
 milestone: v1.24
-milestone_name: I/O Mmap Loading Strategy
-status: milestone_complete
-stopped_at: Phase 211 verification-artifact backfill executed; 208/209/210 VERIFICATION.md created with status: passed and source-backed requirement tables; v1.24 13/13 requirements validated.
-last_updated: "2026-05-04T22:18:00Z"
+milestone_name: milestone
+status: completed
+stopped_at: Phase 211 verification-artifact backfill executed; v1.24 milestone closed with 13/13 requirements validated.
+last_updated: "2026-05-04T22:21:57.164Z"
 last_activity: 2026-05-04
 progress:
   total_phases: 8
-  completed_phases: 8
-  total_plans: 8
-  completed_plans: 8
+  completed_phases: 1
+  total_plans: 1
+  completed_plans: 1
   percent: 100
 ---
 
@@ -34,7 +34,7 @@ and the per-phase VERIFICATION.md gap (`.planning/v1.24-MILESTONE-AUDIT.md` init
 frontmatter (`status: passed`) and source-backed requirement tables; 208 and 209
 SUMMARY/VALIDATION received minimal YAML frontmatter; 13/13 v1.24 requirements
 validated.
-Last activity: 2026-05-04 - Phase 211 verification-artifact backfill executed.
+Last activity: 2026-05-04
 
 Progress: [##########] 100%
 
@@ -45,10 +45,12 @@ Progress: [##########] 100%
 - v1.24 shipped on 2026-05-04 after Phase 210 closing full-scope quality gate passed with
   no override. 13/13 v1.24 requirements satisfied (MMAP-01..03, TIO-01..03, PLAT-01,
   LIFE-01, ERR-01, VAL-01..04).
+
 - User approved updates to model artifacts, generated docs, snapshots, benchmarks, and benchmark
   outputs when required to close the current milestone correctly. The Phase 210 closeout used
   that authorization to refresh `snapshots/bench/benchmarks.txt` for `encoder_spm` and
   `encoder_wpm` via maintained scoped `scripts/bench.sh --snapshot --compare --update`.
+
 - v1.23 shipped on 2026-05-04 after final source-backed audit passed with 15/15 active
   requirements satisfied.
 
@@ -64,17 +66,21 @@ Recent decisions affecting this work:
 - `model/loader` remains orchestration-only and must not absorb low-level mmap byte access.
 - Staged read/copy, device-specific, cooperative async, model-family widening, and tool-only mmap
   scaffolds are out of scope.
+
 - Phase 205 introduced compile-time `EMEL_IO_MMAP_PLATFORM_SUPPORTED` (default `0`) as the
   platform-selection knob.
+
 - Phase 206 flipped the macro default to `1` on POSIX/Windows hosts, added the actor-owned
   fixed-capacity slot pool inside io/mmap `action::context` (`EMEL_IO_MMAP_MAX_MAPPINGS = 256`),
   added `event::release_mapping` as the only public unmap surface, and placed all platform OS
   calls behind `#if defined(_WIN32)` selection inside `src/emel/io/mmap/actions.cpp`.
+
 - Phase 207 added `event::request_mapped_load` and `event::release_mapped_load` on
   `emel::model::tensor::event` plus an `mmap_resident` lifecycle value and an
   `sm(emel::io::mmap::sm*)` injection constructor. Tensor stores zero handle state — the
   release event carries `(tensor_id, mapping_handle)` (caller obtains handle from the request
   done callback) so the actor never scans or maintains a mapping table.
+
 - Phase 208 closed TIO-03 and VAL-04: `model/loader` references no tensor-residency or
   mmap-lifecycle symbols; `tools/bench`, `tools/paritychecker`, and `tools/embedded_size` reach
   tensor state only via the public `process_event(capture_tensor_state{...})` event — no
@@ -87,6 +93,7 @@ Recent decisions affecting this work:
   `model_tensor_bulk_storage_supports_absent_callbacks` to `std::make_unique` heap allocation
   (Phase 207's expanded SM grew sizeof to ~2.5 MiB; six stack instances overflowed macOS's
   default + ASan red zones).
+
 - Phase 209 closed VAL-01 and VAL-02 (repair pass after a prior worker landed premature
   validation/summary placeholders). Added two new io mmap doctests:
   `io mmap reports state_ready via visit_current_states after a full map-then-release dispatch`
@@ -102,6 +109,7 @@ Recent decisions affecting this work:
   `src/emel/io`. `scripts/lint_snapshot.sh --update` regenerated the maintained lint baseline
   to include `tests/io/mmap/lifecycle_tests.cpp` (added in earlier phases but never baselined)
   and to drop retired `src/emel/model/tensor/detail.hpp`.
+
 - Phase 210 closed VAL-03 and the v1.24 milestone. README + README template + parity roadmap
   describe mmap as implemented; deferred v2 read/copy/async/device strategies remain
   explicitly out of scope. `snapshots/bench/benchmarks.txt` refreshed for `encoder_spm`
@@ -123,13 +131,16 @@ Recent decisions affecting this work:
   `EMEL_QUALITY_GATES_ALLOW_BENCH_REGRESSION` and reported `status=0` across all benchmark
   suites previously affected (`tokenizer/preprocessor_rwkv_long`, `text/encoders/rwkv_long`,
   `logits/sampler`, `logits/validator`, `batch/planner_simple`, `batch/planner_equal`).
+
 - Two encoder benchmark suites (`text/encoders/spm_short`, `text/encoders/wpm_long`) showed
   intermittent under-load timing spikes (~31% above prior baseline) during the Phase 210
   closing gate runs. Each was refreshed via the maintained scoped update path. Worth
   monitoring on subsequent gates; not a v1.24 blocker.
+
 - Phase 207's uncovered guard-branch and unexpected-event sentinel spans were re-measured
   under the Phase 210 full-scope coverage run; total line coverage is 91.7% and branch
   coverage 56.9% (above the gate thresholds of 90% / 50%).
+
 - The previously deferred non-v1.23 quick task and four optimization todos remain carried forward
   and are not blockers for the next milestone.
 
