@@ -1,39 +1,38 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.22
-milestone_name: Weight Loading Ownership Cutover
-status: milestone_archived_pr_open
-stopped_at: v1.22 archived and prepared for PR #81.
-last_updated: "2026-05-03T16:13:12Z"
-last_activity: 2026-05-03
+milestone: v1.23
+milestone_name: I/O Loading Strategy Boundary
+status: milestone_started
+stopped_at: v1.23 requirements and roadmap initialized for issue #60.
+last_updated: "2026-05-04T00:02:00Z"
+last_activity: 2026-05-04
 progress:
-  total_phases: 12
-  completed_phases: 12
-  total_plans: 12
-  completed_plans: 12
-  percent: 100
+  total_phases: 5
+  completed_phases: 0
+  total_plans: 0
+  completed_plans: 0
+  percent: 0
 ---
 
 # Project State
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-05-03)
+See: .planning/PROJECT.md (updated 2026-05-04)
 
 **Core value:** Prove real end-to-end behavior with explicit SML orchestration and
 parity-oriented verification before widening API surface or model scope.
-**Current focus:** v1.22 is archived and open for review in PR #81; start the next milestone with
-`$gsd-new-milestone` after merge.
+**Current focus:** v1.23 I/O Loading Strategy Boundary from GitHub issue #60.
 
 ## Current Position
 
-Phase: none
-Plan: none
-Status: v1.22 archived and PR #81 open
-Last activity: 2026-05-03 - Cleaned up v1.22 audit tech debt, refreshed the audit to passed, and
-pushed PR #81 for review.
+Phase: 197 - I/O Module Skeleton And Ownership Contract
+Plan: Not started
+Status: Ready to discuss or plan Phase 197
+Last activity: 2026-05-04 - Started v1.23 from GitHub issue #60 and initialized requirements and
+roadmap for the `emel/io` boundary milestone.
 
-Progress: [██████████] 100%
+Progress: [----------] 0%
 
 ## Performance Metrics
 
@@ -59,11 +58,12 @@ Recent decisions affecting this work:
 - `model/tensor` owns tensor load, bind, evict, and residency semantics.
 - `model/loader` orchestrates tensor-owned behavior and must not absorb backend-specific loading
   strategy logic.
-- Concrete I/O strategy work remains deferred to a future `emel/io` milestone.
+- Concrete I/O strategy work remains deferred to follow-on strategy milestones after the v1.23
+  boundary exists.
 - Guardrails must continue to reject a second model-weight residency owner and stale retired-owner
   public prose.
 - User approved updates to snapshots, benchmarks, and model artifacts when required for this
-  gap-closure work.
+  milestone.
 
 ### Pending Todos
 

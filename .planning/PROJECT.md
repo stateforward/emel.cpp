@@ -16,16 +16,36 @@ before widening API surface or model scope.
 
 ## Current State
 
-Current milestone: none open.
+Current milestone: `v1.23 I/O Loading Strategy Boundary`
 
 Latest shipped milestone: `v1.22 Weight Loading Ownership Cutover`
 
-Status: `v1.22` shipped on 2026-05-03 and was reclosed after Phase 194's maintained-path gap
-closure. The repo now treats `src/emel/model/tensor` as the canonical owner of tensor load, bind,
-evict, and residency semantics, while `model/loader` orchestrates that owned behavior without
-becoming a backend-specific loading strategy owner.
+Status: `v1.22` shipped on 2026-05-03 and was reclosed after Phase 196's state metadata repair.
+The repo now treats `src/emel/model/tensor` as the canonical owner of tensor load, bind, evict, and
+residency semantics, while `model/loader` orchestrates that owned behavior without becoming a
+backend-specific loading strategy owner.
 
-Current planning focus: start the next milestone with `$gsd-new-milestone`.
+Current planning focus: start Phase 197 for the `emel/io` boundary milestone.
+
+## Current Milestone: v1.23 I/O Loading Strategy Boundary
+
+**Goal:** Add `src/emel/io` as the first-class owner of loading strategy and transport boundaries,
+then wire `model/tensor` to an explicit I/O contract without moving tensor residency semantics out
+of `model/tensor` or low-level byte strategy into `model/loader`.
+
+**Source:** GitHub issue #60, "Add emel/io module and tensor-to-io orchestration boundary"
+
+**Target features:**
+- Add an `src/emel/io` module with Stateforward.SML actor organization and public component
+  aliases that match existing EMEL machine conventions.
+- Define explicit tensor-to-I/O request, result, and error events for loading strategy handoff
+  without hidden shared state.
+- Allow tensor-owned load flow to target an I/O strategy boundary while `model/tensor` remains the
+  residency lifecycle owner.
+- Model strategy policy injection and behavior selection with guards and transitions so future
+  concrete strategies can land independently.
+- Add tests, docs, and source-backed guardrails that prevent `model/loader` from regaining
+  low-level loading strategy ownership.
 
 ## Previous Shipped Milestone: v1.22 Weight Loading Ownership Cutover
 
@@ -489,10 +509,11 @@ EMEL generation, embedding, diarization, and Whisper ASR lanes plus pluggable pa
 tooling that publishes through canonical compare/benchmark contracts without shared runtime state.
 `v1.18` and `v1.19` provide the parity and benchmark dependency manifests that v1.21 now consumes
 from the top-level quality-gate orchestration. `v1.21` shipped from issue #58 and did not weaken
-mandatory validation or change benchmark/parity semantics. `v1.22` starts from issue #59 and
-returns to runtime architecture ownership: `model/tensor` already owns individual tensor lifecycle
-state, while `model/weight_loader` still owns bulk binding/load planning. The milestone closes that
-ownership split before adding future I/O loading strategies.
+mandatory validation or change benchmark/parity semantics. `v1.22` shipped from issue #59 and made
+`model/tensor` the canonical owner of tensor load, bind, evict, and residency behavior while
+keeping concrete I/O strategy work deferred. `v1.23` starts from issue #60 and adds the missing
+`emel/io` orchestration boundary under tensor-owned residency without implementing concrete mmap,
+read/copy, staged, chunked, or asynchronous strategy machines.
 
 ## Constraints
 
@@ -523,12 +544,16 @@ ownership split before adding future I/O loading strategies.
 - **Weight-loading ownership scope**: `v1.22` is an ownership and orchestration cutover. It must not
   introduce asynchronous loading, a new `emel/io` implementation, backend-specific loading logic in
   `model/loader`, or a renamed shadow owner for tensor residency.
+- **I/O boundary scope**: `v1.23` creates the `emel/io` module and tensor-to-I/O contract only. It
+  must not implement concrete mmap, read/copy, staged/chunked, device-specific, or cooperative async
+  loading strategies; those belong in follow-on milestones such as issue #61.
 
 ## Key Decisions
 
 | Decision | Rationale | Outcome |
 |----------|-----------|---------|
-| Start v1.22 from GitHub issue #59 as the weight-loading ownership cutover | `model/tensor` owns individual tensor lifecycle state while `model/weight_loader` still owns bulk residency transition planning; the next runtime architecture milestone should remove that split before adding future I/O strategy work | Active |
+| Start v1.23 from GitHub issue #60 as the `emel/io` boundary milestone | v1.22 moved tensor residency ownership into `model/tensor`; the next architecture step is the explicit I/O strategy seam beneath tensor-owned residency before concrete mmap or staged strategy work lands | Active |
+| Start v1.22 from GitHub issue #59 as the weight-loading ownership cutover | `model/tensor` owns individual tensor lifecycle state while `model/weight_loader` still owns bulk residency transition planning; the next runtime architecture milestone should remove that split before adding future I/O strategy work | ✓ Shipped |
 | Start v1.21 from GitHub issue #58 as quality-gate selective runner optimization | v1.18 and v1.19 added parity and benchmark dependency manifests; the next milestone should cash in that structure at the mandatory gate-orchestration level without weakening conservative fallback behavior | ✓ Shipped |
 | Start v1.20 from GitHub issue #56 as an SML dependency and namespace migration | The repo already sources `stateforward/sml.cpp` but still used legacy SML includes, namespaces, and contributor guidance; the next milestone should align code and docs with the current upstream naming before more actor work accumulates on the old surface | ✓ Shipped |
 | Start v1.19 from GitHub issue #55 as a benchmark runner boundary refactor | `tools/bench` has accumulated broad runner build wiring and static case registration; the next milestone should make benchmark runners pluggable, independently buildable, and conservatively gateable without weakening lane isolation | ✓ Shipped |
@@ -583,4 +608,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-05-03 after shipping v1.22*
+*Last updated: 2026-05-04 after starting v1.23 from GitHub issue #60*
