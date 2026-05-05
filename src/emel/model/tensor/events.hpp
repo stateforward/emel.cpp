@@ -169,7 +169,8 @@ struct apply_effect_results {
 // to an injected emel::io::mmap::sm via process_event(...). The caller MUST
 // keep the storage backing file_path alive for the duration of dispatch.
 // io/mmap validates the view and copies it into a bounded null-terminated
-// stack buffer before platform C APIs consume it.
+// stack buffer before platform C APIs consume it. on_done is required because
+// request_mapped_load_done carries the release token for the mapped resource.
 struct request_mapped_load {
   int32_t tensor_id = -1;
   std::string_view file_path = {};

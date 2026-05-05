@@ -139,6 +139,30 @@ void platform_close(intptr_t os_resource) noexcept {
 
 } // namespace
 
+context::~context() noexcept {
+  for (auto &slot_ref : slots) {
+    if (!slot_ref.in_use) {
+      continue;
+    }
+
+    if (slot_ref.base != nullptr && slot_ref.mapped_bytes != 0u &&
+        slot_ref.os_resource != -1) {
+      (void)platform_unmap(slot_ref.os_resource, slot_ref.base,
+                           slot_ref.mapped_bytes);
+    } else if (slot_ref.os_resource != -1) {
+      platform_close(slot_ref.os_resource);
+    }
+
+    slot_ref.in_use = false;
+    slot_ref.tensor_id = -1;
+    slot_ref.base = nullptr;
+    slot_ref.mapped_bytes = 0u;
+    slot_ref.os_resource = -1;
+    slot_ref.file_offset = 0u;
+    slot_ref.requested_bytes = 0u;
+  }
+}
+
 void effect_reserve_top_free_slot_then_attempt_open::operator()(
     const detail::map_tensor_runtime &ev, context &ctx) const noexcept {
   ctx.free_count -= 1u;

@@ -928,6 +928,7 @@ TEST_CASE(
   mapped_owner_state owner{};
   emel::model::tensor::event::request_mapped_load request{0, missing, 0u,
                                                           4096u};
+  request.on_done = {&owner, on_request_mapped_load_done};
   request.on_error = {&owner, on_request_mapped_load_error};
 
   CHECK_FALSE(machine.process_event(request));
@@ -936,6 +937,28 @@ TEST_CASE(
         emel::error::cast(emel::model::tensor::error::io_mmap_failed));
   CHECK(owner.request_io_err ==
         emel::error::cast(emel::io::mmap::error::file_open_failed));
+}
+
+TEST_CASE("model_tensor_request_mapped_load_requires_done_callback") {
+  emel::io::mmap::sm io_mmap_actor{};
+  emel::model::tensor::sm machine = make_tensor_sm_with_io_mmap(io_mmap_actor);
+  std::array<emel::model::data::tensor_record, 1> tensors{};
+  prepare_storage_for_one_tensor(machine, tensors);
+
+  const auto payload = make_tensor_payload(4096u, 0xB3u);
+  const auto path = make_tensor_temp_file("missing_done_callback", payload);
+  const std::string path_str = path.string();
+
+  mapped_owner_state owner{};
+  emel::model::tensor::event::request_mapped_load request{0, path_str, 0u,
+                                                          4096u};
+  request.on_error = {&owner, on_request_mapped_load_error};
+
+  CHECK_FALSE(machine.process_event(request));
+  CHECK(owner.request_error);
+  CHECK(owner.request_err ==
+        emel::error::cast(emel::model::tensor::error::invalid_request));
+  std::filesystem::remove(path);
 }
 
 TEST_CASE("model_tensor_request_mapped_load_rejects_already_resident_tensor") {

@@ -371,6 +371,8 @@ struct model {
           + sml::unexpected_event<sml::_> / action::effect_on_unexpected
       , sml::state<state_ready> <= sml::state<state_file_open_decision>
           + sml::unexpected_event<sml::_> / action::effect_on_unexpected
+      , sml::state<state_ready> <= sml::state<state_file_size_decision>
+          + sml::unexpected_event<sml::_> / action::effect_on_unexpected
       , sml::state<state_ready> <= sml::state<state_mapping_decision>
           + sml::unexpected_event<sml::_> / action::effect_on_unexpected
       , sml::state<state_ready> <= sml::state<state_publish_done_decision>

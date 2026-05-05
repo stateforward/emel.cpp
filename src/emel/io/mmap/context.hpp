@@ -28,6 +28,8 @@ struct context {
     }
     free_count = k_max_mappings;
   }
+
+  ~context() noexcept;
 };
 
 } // namespace emel::io::mmap::action

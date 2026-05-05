@@ -359,11 +359,6 @@ struct model {
           + sml::completion<detail::request_mapped_load_runtime>
           [ guard::request_mapped_load_done_callback_present{} ]
           / action::effect_publish_request_mapped_load_done
-      , sml::state<ready>
-            <= sml::state<state_request_mapped_load_publish_done_decision>
-          + sml::completion<detail::request_mapped_load_runtime>
-          [ guard::request_mapped_load_done_callback_absent{} ]
-          / action::effect_record_request_mapped_load_done
       , sml::state<ready> <= sml::state<state_request_mapped_load_done_callback>
           + sml::completion<detail::request_mapped_load_runtime>
           / action::effect_record_request_mapped_load_done

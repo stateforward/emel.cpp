@@ -456,6 +456,33 @@ TEST_CASE("io mmap returns a deterministic mapped descriptor on success") {
   std::filesystem::remove(path);
 }
 
+TEST_CASE("io mmap actor destruction releases active mappings") {
+  const auto payload = make_payload(4096u, 0x24u);
+  const auto path = make_temp_file("destructor_releases", payload);
+  const std::string path_str = path.string();
+
+  {
+    emel::io::mmap::sm strategy{};
+    map_owner_state owner{};
+    const emel::io::mmap::event::map_tensor_request request{
+        .tensor_id = 1003,
+        .file_index = 0u,
+        .file_offset = 0u,
+        .byte_size = 4096u,
+        .file_path = path_str,
+    };
+    emel::io::mmap::event::map_tensor map_request{request};
+    map_request.on_done = {&owner, on_map_done};
+    map_request.on_error = {&owner, on_map_error};
+
+    REQUIRE(strategy.process_event(map_request));
+    CHECK(owner.handle != emel::io::mmap::k_invalid_mapping_handle);
+    CHECK(owner.buffer != nullptr);
+  }
+
+  CHECK(std::filesystem::remove(path));
+}
+
 TEST_CASE(
     "io mmap copies non-terminated file_path views before platform open") {
   emel::io::mmap::sm strategy{};

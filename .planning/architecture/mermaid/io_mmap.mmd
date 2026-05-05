@@ -66,6 +66,7 @@ stateDiagram-v2
   state_platform_decision --> state_ready : _ [always] / effect_on_unexpected_
   state_slot_reservation_decision --> state_ready : _ [always] / effect_on_unexpected_
   state_file_open_decision --> state_ready : _ [always] / effect_on_unexpected_
+  state_file_size_decision --> state_ready : _ [always] / effect_on_unexpected_
   state_mapping_decision --> state_ready : _ [always] / effect_on_unexpected_
   state_publish_done_decision --> state_ready : _ [always] / effect_on_unexpected_
   state_done_callback --> state_ready : _ [always] / effect_on_unexpected_

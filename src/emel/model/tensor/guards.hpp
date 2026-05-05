@@ -502,7 +502,7 @@ struct request_mapped_load_request_valid {
            ev.request.file_path.size() <=
                emel::io::mmap::k_max_file_path_bytes &&
            ev.request.file_path.find('\0') == std::string_view::npos &&
-           ev.request.byte_size > 0u;
+           ev.request.byte_size > 0u && static_cast<bool>(ev.request.on_done);
   }
 };
 
