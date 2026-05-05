@@ -68,6 +68,7 @@ if(NOT EMEL_AARCH64_HOST_CXX_FLAG STREQUAL "")
 endif()
 
 add_library(emel STATIC
+  src/emel/io/mmap/actions.cpp
   src/emel/model/architecture/detail.cpp
   src/emel/model/detail.cpp
   src/emel/model/data.cpp
@@ -175,6 +176,7 @@ if(EMEL_ENABLE_TESTS)
   list(APPEND EMEL_TEST_SOURCES
     tests/gguf/loader/lifecycle_tests.cpp
     tests/io/loader/lifecycle_tests.cpp
+    tests/io/mmap/lifecycle_tests.cpp
     tests/text/jinja/parser_tests.cpp
     tests/text/jinja/lexer_tests.cpp
     tests/text/jinja/formatter_tests.cpp

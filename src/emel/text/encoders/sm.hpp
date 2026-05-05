@@ -10,8 +10,8 @@ design doc: docs/designs/text/encoders/encoder.design.md
  # text/encoders architecture design
 
  this document defines the text-domain encoder actor cluster that maps
-preprocessed text fragments to token ids. this is distinct from model encoders
-(vision/audio/etc) and lives under the text domain for clarity.
+ preprocessed text fragments to token ids. this is distinct from model
+ encoders (vision/audio/etc) and lives under the text domain for clarity.
 
  ## role
  - text/encoders is the algorithmic encoder cluster used by the tokenizer codec.
@@ -29,7 +29,7 @@ preprocessed text fragments to token ids. this is distinct from model encoders
    - outputs: `token_count_out` and `error_out`.
 
  callbacks (`dispatch_done`/`dispatch_error`) are invoked synchronously and are
-not stored.
+ not stored.
 
  ## composition
  - per-algorithm SMs:
@@ -38,7 +38,7 @@ not stored.
    `initialized` -> `encoding` -> `encode_decision` -> (`done` | `errored`),
    with explicit unexpected-event handling.
  - `text/encoders::any` (sm_any) selects the active encoder kind and dispatches
-`event::encode`.
+   `event::encode`.
 
  ## invariants
  - no allocations during dispatch.
@@ -47,18 +47,18 @@ not stored.
 
  ## error mapping
  - invalid requests or capacity errors ->
-`emel::text::encoders::error::to_emel(emel::text::encoders::error::code::invalid_argument)`.
+   `emel::text::encoders::error::to_emel(emel::text::encoders::error::code::invalid_argument)`.
  - kernel/data errors propagate via `error_out`.
 
  ## status
  - implemented under `src/emel/text/encoders/...` with namespace
-`emel::text::encoders`.
+   `emel::text::encoders`.
 
  ## open questions
  - should `text/encoder` expose a unified `sm` alias or require `any`
-everywhere?
+   everywhere?
  - how should byte-fallback support be represented (encoder vs tokenizer
-helper)?
+   helper)?
 */
 
 // benchmark: designed

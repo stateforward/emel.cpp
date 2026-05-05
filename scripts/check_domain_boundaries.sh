@@ -55,7 +55,7 @@ check_absent_path() {
 
 cd "$ROOT_DIR"
 
-concrete_io_api_pattern='(^|[^[:alnum:]_:])(mmap|munmap|pread|read|fread|fopen|fclose|open|openat|CreateFile|CreateFileMapping|MapViewOfFile|ReadFile)[[:space:]]*\(|std::(ifstream|fstream|filebuf|fread|fopen|freopen)'
+concrete_io_api_pattern='(^|[^[:alnum:]_])(::)?(mmap|munmap|pread|read|fread|fopen|fclose|open|openat|CreateFile|CreateFileMapping|MapViewOfFile|ReadFile)[[:space:]]*\(|std::(ifstream|fstream|filebuf|fread|fopen|freopen)'
 
 check_no_matches "forbidden model-family runtime roots" \
   'emel/whisper|namespace emel::whisper|kernel/whisper|kernel::whisper|model/whisper/(runtime|inference|encoder|decoder)|model::whisper::(runtime|inference|encoder|decoder)|speech/asr/whisper|speech::asr::whisper|speech/whisper|speech::whisper|recognizer/detail/whisper|recognizer::detail::whisper' \
@@ -72,7 +72,7 @@ check_no_matches "text generator actor internals in maintained generation parity
 
 check_no_matches "IO loader concrete system I/O before strategy implementation" \
   "$concrete_io_api_pattern" \
-  src/emel/io
+  src/emel/io/loader
 
 check_no_matches "model loader low-level IO strategy implementation" \
   "$concrete_io_api_pattern" \
@@ -84,6 +84,32 @@ check_no_matches "model tensor concrete IO strategy implementation" \
 
 check_no_matches "shadow model tensor residency ownership outside model/tensor" \
   'model::tensor::event::lifecycle::|lifecycle_state|event::tensor_state' \
+  src/emel/model/loader src/emel/io
+
+# v1.24 mmap component scope: only the io/mmap strategy can land here. Staged
+# read/external buffer/async/device/copy strategy markers must not appear in
+# the mmap actor; those belong in io/loader (strategy router) or future v2
+# milestones. The doctest source-string check inside the test is informative,
+# but VAL-02 demands the gate fail closed at the script level.
+check_no_matches "out-of-scope strategy markers leaked into io/mmap actor" \
+  'strategy_staged_read|strategy_external_buffer|strategy_async|strategy_device|strategy_copy' \
+  src/emel/io/mmap
+
+# v2 strategy implementations are deferred. Until those milestones land, no
+# src/ code should declare async, device, or copy strategy guards/states.
+# (Staged-read and external-buffer routing legitimately exists today only in
+# src/emel/io/loader, so they are excluded here.)
+check_no_matches "deferred v2 strategy implementations leaked into src/" \
+  'strategy_async|strategy_device|strategy_copy' \
+  src
+
+# VAL-02: tensor residency lifecycle ownership stays in model/tensor.
+# Loader, mmap, and io must never write or branch on the lifecycle::*
+# residency enumerators (mmap_resident, resident, evicted, none). Tools and
+# tests legitimately read residency through the public capture_tensor_state
+# event and may inspect lifecycle values, so they are not scanned here.
+check_no_matches "tensor residency lifecycle enumerators escaped model/tensor" \
+  'lifecycle::mmap_resident|lifecycle::resident|lifecycle::evicted' \
   src/emel/model/loader src/emel/io
 
 check_no_matches "maintained benchmark/parity lanes reaching IO or tensor actor internals" \

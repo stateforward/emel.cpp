@@ -71,7 +71,6 @@ emel::error::type parse_model_path_weights_ok(
   req.model_data.n_layers = 1;
   req.model_data.weights_data = req.model_data.tensors.data();
   req.model_data.weights_size = 777u;
-  req.model_data.weights_mapped = true;
   req.model_data.weights_split_count = 2u;
   req.model_data.weights_split_offsets[0] = 11u;
   req.model_data.weights_split_offsets[1] = 22u;
@@ -1102,10 +1101,9 @@ TEST_CASE("model loader preserves parser weight metadata on model-path load") {
   CHECK_FALSE(owner.error);
   CHECK(owner.bytes_total == 777u);
   CHECK(owner.bytes_done == 777u);
-  CHECK(owner.used_mmap);
+  CHECK_FALSE(owner.used_mmap);
   CHECK(model->weights_data == model->tensors.data());
   CHECK(model->weights_size == 777u);
-  CHECK(model->weights_mapped);
   CHECK(model->weights_split_count == 2u);
   CHECK(model->weights_split_offsets[0] == 11u);
   CHECK(model->weights_split_offsets[1] == 22u);
@@ -2310,7 +2308,6 @@ TEST_CASE(
   REQUIRE(emel::model::detail::load_hparams_from_gguf(binding, *model));
   model->weights_data = file_bytes.data();
   model->weights_size = file_bytes.size();
-  model->weights_mapped = true;
   materialize_tensor_names_from_file(*model, file_bytes);
 
   emel::model::whisper::detail::execution_contract contract = {};
@@ -2399,7 +2396,6 @@ TEST_CASE("model_whisper_detail_builds_execution_contract_from_q4_0_fixture") {
   REQUIRE(emel::model::detail::load_hparams_from_gguf(binding, *model));
   model->weights_data = file_bytes.data();
   model->weights_size = file_bytes.size();
-  model->weights_mapped = true;
   materialize_tensor_names_from_file(*model, file_bytes);
 
   emel::model::whisper::detail::execution_contract contract = {};
@@ -2442,7 +2438,6 @@ TEST_CASE("model_whisper_detail_builds_execution_contract_from_q4_1_fixture") {
   REQUIRE(emel::model::detail::load_hparams_from_gguf(binding, *model));
   model->weights_data = file_bytes.data();
   model->weights_size = file_bytes.size();
-  model->weights_mapped = true;
   materialize_tensor_names_from_file(*model, file_bytes);
 
   emel::model::whisper::detail::execution_contract contract = {};

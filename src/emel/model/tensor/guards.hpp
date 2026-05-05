@@ -36,6 +36,41 @@ struct storage_bind_invalid {
   }
 };
 
+struct guard_storage_has_mmap_resident {
+  bool operator()(const action::context &ctx) const noexcept {
+    for (size_t tensor_id = 0u; tensor_id < ctx.tensors.active_extent;
+         ++tensor_id) {
+      if (ctx.tensors.lifecycle[tensor_id] == event::lifecycle::mmap_resident) {
+        return true;
+      }
+    }
+    return false;
+  }
+};
+
+struct guard_storage_has_no_mmap_resident {
+  bool operator()(const action::context &ctx) const noexcept {
+    return !guard_storage_has_mmap_resident{}(ctx);
+  }
+};
+
+struct guard_storage_bind_valid_without_mmap_resident {
+  template <class event_type>
+  bool operator()(const event_type &ev,
+                  const action::context &ctx) const noexcept {
+    return storage_bind_valid{}(ev) &&
+           guard_storage_has_no_mmap_resident{}(ctx);
+  }
+};
+
+struct guard_storage_bind_valid_with_mmap_resident {
+  template <class event_type>
+  bool operator()(const event_type &ev,
+                  const action::context &ctx) const noexcept {
+    return storage_bind_valid{}(ev) && guard_storage_has_mmap_resident{}(ctx);
+  }
+};
+
 struct storage_bound {
   bool operator()(const action::context &ctx) const noexcept {
     return ctx.tensors.active_extent != 0u;
@@ -431,8 +466,13 @@ struct error_code_output_absent {
 
 struct bind_tensor_request_valid {
   bool operator()(const tensor::detail::bind_tensor_runtime &ev,
-                  const action::context &) const noexcept {
-    return detail::valid_tensor_id(ev.request.tensor_id) &&
+                  const action::context &ctx) const noexcept {
+    if (!detail::valid_tensor_id(ev.request.tensor_id)) {
+      return false;
+    }
+    const auto lifecycle =
+        ctx.tensors.lifecycle[static_cast<size_t>(ev.request.tensor_id)];
+    return lifecycle != event::lifecycle::mmap_resident &&
            ev.request.buffer != nullptr && ev.request.buffer_bytes > 0u &&
            ev.request.tensor_record.data_size > 0u;
   }
@@ -446,11 +486,20 @@ struct bind_tensor_request_invalid {
 };
 
 struct evict_tensor_request_valid {
+  // Reject legacy eviction of mmap_resident tensors: their mapping must be
+  // released through `release_mapped_load`/`io::mmap::release_mapping` so the
+  // OS mapping and slot are properly torn down. Allowing a legacy evict to
+  // null the buffer here would leak the mmap slot and OS mapping. See PR #83
+  // review thread PRRT_kwDORRHzJs5_hhby.
   bool operator()(const tensor::detail::evict_tensor_runtime &ev,
                   const action::context &ctx) const noexcept {
-    return detail::valid_tensor_id(ev.request.tensor_id) &&
-           ctx.tensors.lifecycle[static_cast<size_t>(ev.request.tensor_id)] !=
-               event::lifecycle::unbound;
+    if (!detail::valid_tensor_id(ev.request.tensor_id)) {
+      return false;
+    }
+    const auto lifecycle =
+        ctx.tensors.lifecycle[static_cast<size_t>(ev.request.tensor_id)];
+    return lifecycle != event::lifecycle::unbound &&
+           lifecycle != event::lifecycle::mmap_resident;
   }
 };
 
@@ -489,6 +538,233 @@ struct operation_not_dispatched {
   template <class runtime_event_type>
   bool operator()(const runtime_event_type &ev) const noexcept {
     return !detail::operation_dispatched(ev);
+  }
+};
+
+struct request_mapped_load_request_valid {
+  bool operator()(const tensor::detail::request_mapped_load_runtime &ev,
+                  const action::context &ctx) const noexcept {
+    const int32_t id = ev.request.tensor_id;
+    return detail::valid_tensor_id(id) &&
+           static_cast<uint32_t>(id) < ctx.tensors.active_extent &&
+           !ev.request.file_path.empty() &&
+           ev.request.file_path.size() <=
+               emel::io::mmap::k_max_file_path_bytes &&
+           ev.request.file_path.find('\0') == std::string_view::npos &&
+           ev.request.byte_size > 0u && static_cast<bool>(ev.request.on_done);
+  }
+};
+
+struct request_mapped_load_request_invalid {
+  bool operator()(const tensor::detail::request_mapped_load_runtime &ev,
+                  const action::context &ctx) const noexcept {
+    return !request_mapped_load_request_valid{}(ev, ctx);
+  }
+};
+
+struct request_mapped_load_io_mmap_present {
+  bool operator()(const tensor::detail::request_mapped_load_runtime &,
+                  const action::context &ctx) const noexcept {
+    return ctx.io_mmap != nullptr;
+  }
+};
+
+struct request_mapped_load_io_mmap_absent {
+  bool operator()(const tensor::detail::request_mapped_load_runtime &ev,
+                  const action::context &ctx) const noexcept {
+    return !request_mapped_load_io_mmap_present{}(ev, ctx);
+  }
+};
+
+struct request_mapped_load_tensor_already_resident {
+  bool operator()(const tensor::detail::request_mapped_load_runtime &ev,
+                  const action::context &ctx) const noexcept {
+    const size_t id = static_cast<size_t>(ev.request.tensor_id);
+    return ctx.tensors.lifecycle[id] == event::lifecycle::resident ||
+           ctx.tensors.lifecycle[id] == event::lifecycle::mmap_resident;
+  }
+};
+
+struct request_mapped_load_tensor_unbound {
+  bool operator()(const tensor::detail::request_mapped_load_runtime &ev,
+                  const action::context &ctx) const noexcept {
+    return !request_mapped_load_tensor_already_resident{}(ev, ctx);
+  }
+};
+
+struct request_mapped_load_io_mmap_succeeded {
+  bool operator()(const tensor::detail::request_mapped_load_runtime &ev,
+                  const action::context &) const noexcept {
+    return ev.status.io_mmap_ok;
+  }
+};
+
+struct request_mapped_load_io_mmap_failed {
+  bool operator()(const tensor::detail::request_mapped_load_runtime &ev,
+                  const action::context &ctx) const noexcept {
+    return !request_mapped_load_io_mmap_succeeded{}(ev, ctx);
+  }
+};
+
+struct request_mapped_load_done_callback_present {
+  bool operator()(
+      const tensor::detail::request_mapped_load_runtime &ev) const noexcept {
+    return static_cast<bool>(ev.request.on_done);
+  }
+};
+
+struct request_mapped_load_error_callback_present {
+  bool operator()(
+      const tensor::detail::request_mapped_load_runtime &ev) const noexcept {
+    return static_cast<bool>(ev.request.on_error);
+  }
+};
+
+struct request_mapped_load_error_callback_absent {
+  bool operator()(
+      const tensor::detail::request_mapped_load_runtime &ev) const noexcept {
+    return !request_mapped_load_error_callback_present{}(ev);
+  }
+};
+
+struct release_mapped_load_request_valid {
+  bool operator()(const tensor::detail::release_mapped_load_runtime &ev,
+                  const action::context &ctx) const noexcept {
+    const int32_t id = ev.request.tensor_id;
+    return detail::valid_tensor_id(id) &&
+           static_cast<uint32_t>(id) < ctx.tensors.active_extent;
+  }
+};
+
+struct release_mapped_load_request_invalid {
+  bool operator()(const tensor::detail::release_mapped_load_runtime &ev,
+                  const action::context &ctx) const noexcept {
+    return !release_mapped_load_request_valid{}(ev, ctx);
+  }
+};
+
+struct release_mapped_load_io_mmap_present {
+  bool operator()(const tensor::detail::release_mapped_load_runtime &,
+                  const action::context &ctx) const noexcept {
+    return ctx.io_mmap != nullptr;
+  }
+};
+
+struct release_mapped_load_io_mmap_absent {
+  bool operator()(const tensor::detail::release_mapped_load_runtime &ev,
+                  const action::context &ctx) const noexcept {
+    return !release_mapped_load_io_mmap_present{}(ev, ctx);
+  }
+};
+
+struct release_mapped_load_handle_present {
+  bool operator()(const tensor::detail::release_mapped_load_runtime &ev,
+                  const action::context &ctx) const noexcept {
+    const size_t id = static_cast<size_t>(ev.request.tensor_id);
+    return ev.request.mapping_handle !=
+               emel::io::mmap::k_invalid_mapping_handle &&
+           ctx.tensors.lifecycle[id] == event::lifecycle::mmap_resident;
+  }
+};
+
+struct release_mapped_load_handle_absent {
+  bool operator()(const tensor::detail::release_mapped_load_runtime &ev,
+                  const action::context &ctx) const noexcept {
+    return !release_mapped_load_handle_present{}(ev, ctx);
+  }
+};
+
+struct release_mapped_load_io_mmap_succeeded {
+  bool operator()(const tensor::detail::release_mapped_load_runtime &ev,
+                  const action::context &) const noexcept {
+    return ev.status.io_mmap_ok;
+  }
+};
+
+struct release_mapped_load_io_mmap_failed {
+  bool operator()(const tensor::detail::release_mapped_load_runtime &ev,
+                  const action::context &ctx) const noexcept {
+    return !release_mapped_load_io_mmap_succeeded{}(ev, ctx);
+  }
+};
+
+struct release_mapped_load_done_callback_present {
+  bool operator()(
+      const tensor::detail::release_mapped_load_runtime &ev) const noexcept {
+    return static_cast<bool>(ev.request.on_done);
+  }
+};
+
+struct release_mapped_load_done_callback_absent {
+  bool operator()(
+      const tensor::detail::release_mapped_load_runtime &ev) const noexcept {
+    return !release_mapped_load_done_callback_present{}(ev);
+  }
+};
+
+struct release_mapped_load_error_callback_present {
+  bool operator()(
+      const tensor::detail::release_mapped_load_runtime &ev) const noexcept {
+    return static_cast<bool>(ev.request.on_error);
+  }
+};
+
+struct release_mapped_load_error_callback_absent {
+  bool operator()(
+      const tensor::detail::release_mapped_load_runtime &ev) const noexcept {
+    return !release_mapped_load_error_callback_present{}(ev);
+  }
+};
+
+struct request_mapped_load_io_mmap_present_request_invalid {
+  bool operator()(const tensor::detail::request_mapped_load_runtime &ev,
+                  const action::context &ctx) const noexcept {
+    return request_mapped_load_io_mmap_present{}(ev, ctx) &&
+           request_mapped_load_request_invalid{}(ev, ctx);
+  }
+};
+
+struct request_mapped_load_io_mmap_present_request_valid_already_resident {
+  bool operator()(const tensor::detail::request_mapped_load_runtime &ev,
+                  const action::context &ctx) const noexcept {
+    return request_mapped_load_io_mmap_present{}(ev, ctx) &&
+           request_mapped_load_request_valid{}(ev, ctx) &&
+           request_mapped_load_tensor_already_resident{}(ev, ctx);
+  }
+};
+
+struct request_mapped_load_io_mmap_present_request_valid_tensor_unbound {
+  bool operator()(const tensor::detail::request_mapped_load_runtime &ev,
+                  const action::context &ctx) const noexcept {
+    return request_mapped_load_io_mmap_present{}(ev, ctx) &&
+           request_mapped_load_request_valid{}(ev, ctx) &&
+           request_mapped_load_tensor_unbound{}(ev, ctx);
+  }
+};
+
+struct release_mapped_load_io_mmap_present_request_invalid {
+  bool operator()(const tensor::detail::release_mapped_load_runtime &ev,
+                  const action::context &ctx) const noexcept {
+    return release_mapped_load_io_mmap_present{}(ev, ctx) &&
+           release_mapped_load_request_invalid{}(ev, ctx);
+  }
+};
+
+struct release_mapped_load_io_mmap_present_request_valid_handle_absent {
+  bool operator()(const tensor::detail::release_mapped_load_runtime &ev,
+                  const action::context &ctx) const noexcept {
+    return release_mapped_load_io_mmap_present{}(ev, ctx) &&
+           release_mapped_load_request_valid{}(ev, ctx) &&
+           release_mapped_load_handle_absent{}(ev, ctx);
+  }
+};
+
+struct release_mapped_load_io_mmap_present_request_valid_handle_present {
+  bool operator()(const tensor::detail::release_mapped_load_runtime &ev,
+                  const action::context &ctx) const noexcept {
+    return release_mapped_load_io_mmap_present{}(ev, ctx) &&
+           release_mapped_load_request_valid{}(ev, ctx) &&
+           release_mapped_load_handle_present{}(ev, ctx);
   }
 };
 

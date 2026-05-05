@@ -16,7 +16,7 @@ before widening API surface or model scope.
 
 ## Current State
 
-Current milestone: none open
+Current milestone: `v1.24 I/O Mmap Loading Strategy`
 
 Latest shipped milestone: `v1.23 I/O Loading Strategy Boundary`
 
@@ -25,7 +25,27 @@ Status: `v1.23` shipped on 2026-05-04 after final source-backed audit passed. Th
 owner of tensor load, bind, evict, and residency semantics, and `model/loader` as the orchestrator
 across those public actor surfaces.
 
-Current planning focus: start the next milestone when ready.
+Current planning focus: implement the issue #61 mmap strategy path beneath the v1.23 I/O
+boundary.
+
+## Current Milestone: v1.24 I/O Mmap Loading Strategy
+
+**Goal:** Add a dedicated `io/mmap` Stateforward.SML strategy actor under `src/emel/io` so
+tensor-owned model loading can request memory-mapped residency through the existing I/O boundary
+without moving tensor lifecycle ownership out of `model/tensor` or adding read/copy/async strategy
+behavior.
+
+**Source:** GitHub issue #61, "Add io/mmap state machine for tensor-backed model loading"
+
+**Target features:**
+- Dedicated `src/emel/io/mmap` machine, events, guards, actions, context, errors, and public
+  aliases for mmap-backed tensor loading.
+- Tensor-to-I/O integration that lets `model/tensor` request mmap-backed residency while retaining
+  tensor-owned load, bind, evict, and residency semantics.
+- Explicit mmap success, unsupported, validation, and platform/resource failure outcomes surfaced
+  deterministically through events and states.
+- Maintained tests, docs, lint snapshots, benchmark snapshots, benchmark outputs, and model
+  artifacts updated from maintained commands when required.
 
 ## Previous Shipped Milestone: v1.23 I/O Loading Strategy Boundary
 
@@ -347,14 +367,14 @@ truth anchor and without broadening into generic Liquid-family support.
 
 ### Active
 
-- v1.22 cuts weight-loading ownership from `src/emel/model/weight_loader` into
-  `src/emel/model/tensor` while preserving existing model-loading behavior.
-- v1.22 updates `src/emel/model/loader` so bulk model loading orchestrates tensor-owned behavior
-  instead of treating `load_weights_fn` as the long-term architecture seam.
-- v1.22 retires or explicitly bounds the old `model/weight_loader` path so the codebase does not
-  retain a second tensor-residency owner under a new name.
-- v1.22 prepares, but does not implement, the future `emel/io` strategy layer below tensor
-  ownership.
+- v1.24 adds a dedicated `src/emel/io/mmap` Stateforward.SML strategy actor for mmap-backed
+  tensor loading.
+- v1.24 integrates mmap-backed residency requests through the existing tensor-to-I/O boundary while
+  `model/tensor` remains the tensor lifecycle and residency owner.
+- v1.24 models mmap support, validation, success, and failure as explicit guard/state/event
+  behavior without hiding runtime strategy choice in actions or detail helpers.
+- v1.24 keeps staged read/copy, device-specific loading, cooperative async loading, new model
+  families, and broad public API expansion out of scope.
 
 ### Validated
 
@@ -521,10 +541,11 @@ tooling that publishes through canonical compare/benchmark contracts without sha
 `v1.18` and `v1.19` provide the parity and benchmark dependency manifests that v1.21 now consumes
 from the top-level quality-gate orchestration. `v1.21` shipped from issue #58 and did not weaken
 mandatory validation or change benchmark/parity semantics. `v1.22` shipped from issue #59 and made
-`model/tensor` the canonical owner of tensor load, bind, evict, and residency behavior while
-keeping concrete I/O strategy work deferred. `v1.23` is open from issue #60 and adds the missing
-`emel/io` orchestration boundary under tensor-owned residency without implementing concrete mmap,
-read/copy, staged, chunked, or asynchronous strategy machines.
+`model/tensor` the canonical owner of tensor load, bind, evict, and residency behavior. `v1.23`
+shipped from issue #60 and added the missing `emel/io` orchestration boundary under tensor-owned
+residency while explicitly deferring concrete mmap, read/copy, staged, chunked, and asynchronous
+strategy machines. `v1.24` starts issue #61 and is the first concrete strategy milestone: mmap
+only, under `src/emel/io`, with tensor residency still owned by `model/tensor`.
 
 ## Constraints
 
@@ -558,11 +579,15 @@ read/copy, staged, chunked, or asynchronous strategy machines.
 - **I/O boundary scope**: `v1.23` creates the `emel/io` module and tensor-to-I/O contract only. It
   must not implement concrete mmap, read/copy, staged/chunked, device-specific, or cooperative async
   loading strategies; those belong in follow-on milestones such as issue #61.
+- **Mmap strategy scope**: `v1.24` implements only the mmap strategy behind `emel/io`. It must not
+  add staged read/copy, chunked, device-specific, or cooperative async loading behavior, and must
+  not move tensor residency lifecycle ownership out of `model/tensor`.
 
 ## Key Decisions
 
 | Decision | Rationale | Outcome |
 |----------|-----------|---------|
+| Start v1.24 from GitHub issue #61 as the `io/mmap` loading strategy milestone | v1.23 established the `emel/io` strategy boundary and explicitly deferred concrete mmap behavior; issue #61 is the next narrow strategy path to land beneath tensor-owned residency | - Pending |
 | Start v1.23 from GitHub issue #60 as the `emel/io` boundary milestone | v1.22 moved tensor residency ownership into `model/tensor`; the next architecture step is the explicit I/O strategy seam beneath tensor-owned residency before concrete mmap or staged strategy work lands | Phase 203 closeout cleanup |
 | Start v1.22 from GitHub issue #59 as the weight-loading ownership cutover | `model/tensor` owns individual tensor lifecycle state while `model/weight_loader` still owns bulk residency transition planning; the next runtime architecture milestone should remove that split before adding future I/O strategy work | ✓ Shipped |
 | Start v1.21 from GitHub issue #58 as quality-gate selective runner optimization | v1.18 and v1.19 added parity and benchmark dependency manifests; the next milestone should cash in that structure at the mandatory gate-orchestration level without weakening conservative fallback behavior | ✓ Shipped |
@@ -619,4 +644,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-05-04 during Phase 203 closeout cleanup for v1.23*
+*Last updated: 2026-05-04 after starting v1.24 I/O mmap loading strategy milestone*

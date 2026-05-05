@@ -40,6 +40,23 @@ struct capture_tensor_state_exec {};
 struct capture_tensor_state_result_decision {};
 struct done {};
 struct errored {};
+struct state_request_mapped_load_decision {};
+struct state_request_mapped_load_dispatch_decision {};
+struct state_request_mapped_load_done_callback {};
+struct state_request_mapped_load_invalid_request_error_decision {};
+struct state_request_mapped_load_unsupported_io_mmap_error_decision {};
+struct state_request_mapped_load_already_resident_error_decision {};
+struct state_request_mapped_load_io_mmap_error_decision {};
+struct state_request_mapped_load_error_callback {};
+struct state_release_mapped_load_decision {};
+struct state_release_mapped_load_dispatch_decision {};
+struct state_release_mapped_load_publish_done_decision {};
+struct state_release_mapped_load_done_callback {};
+struct state_release_mapped_load_invalid_request_error_decision {};
+struct state_release_mapped_load_unsupported_io_mmap_error_decision {};
+struct state_release_mapped_load_handle_absent_error_decision {};
+struct state_release_mapped_load_io_mmap_error_decision {};
+struct state_release_mapped_load_error_callback {};
 
 struct model {
   auto operator()() const {
@@ -50,11 +67,16 @@ struct model {
       //------------------------------------------------------------------------------//
       // Tensor-owned bulk storage binding.
         sml::state<state_bind_storage_decision> <= *sml::state<ready>
-          + sml::event<detail::bind_storage_runtime> [ guard::storage_bind_valid{} ]
+          + sml::event<detail::bind_storage_runtime>
+          [ guard::guard_storage_bind_valid_without_mmap_resident{} ]
           / action::effect_bind_storage
       , sml::state<state_bind_storage_error_decision> <= sml::state<ready>
           + sml::event<detail::bind_storage_runtime> [ guard::storage_bind_invalid{} ]
-          / action::record_bind_storage_invalid_request_and_clear_binding
+          / action::record_bind_storage_invalid_request
+      , sml::state<state_bind_storage_error_decision> <= sml::state<ready>
+          + sml::event<detail::bind_storage_runtime>
+          [ guard::guard_storage_bind_valid_with_mmap_resident{} ]
+          / action::record_bind_storage_invalid_request
 
       , sml::state<state_bind_storage_done_decision> <= sml::state<state_bind_storage_decision>
           + sml::completion<detail::bind_storage_runtime>
@@ -298,6 +320,190 @@ struct model {
           / action::publish_error
 
       //------------------------------------------------------------------------------//
+      // Tensor-owned mmap-backed load via injected emel::io::mmap::sm.
+      , sml::state<state_request_mapped_load_decision> <= sml::state<ready>
+          + sml::event<detail::request_mapped_load_runtime>
+          / action::effect_begin_request_mapped_load
+      , sml::state<state_request_mapped_load_unsupported_io_mmap_error_decision>
+            <= sml::state<state_request_mapped_load_decision>
+          + sml::completion<detail::request_mapped_load_runtime>
+          [ guard::request_mapped_load_io_mmap_absent{} ]
+          / action::effect_mark_request_mapped_load_unsupported_io_mmap
+      , sml::state<state_request_mapped_load_invalid_request_error_decision>
+            <= sml::state<state_request_mapped_load_decision>
+          + sml::completion<detail::request_mapped_load_runtime>
+          [ guard::request_mapped_load_io_mmap_present_request_invalid{} ]
+          / action::effect_mark_request_mapped_load_invalid_request
+      , sml::state<state_request_mapped_load_already_resident_error_decision>
+            <= sml::state<state_request_mapped_load_decision>
+          + sml::completion<detail::request_mapped_load_runtime>
+          [ guard::
+                request_mapped_load_io_mmap_present_request_valid_already_resident{} ]
+          / action::effect_mark_request_mapped_load_tensor_already_resident
+      , sml::state<state_request_mapped_load_dispatch_decision>
+            <= sml::state<state_request_mapped_load_decision>
+          + sml::completion<detail::request_mapped_load_runtime>
+          [ guard::
+                request_mapped_load_io_mmap_present_request_valid_tensor_unbound{} ]
+          / action::effect_attempt_request_mapped_load_dispatch
+
+      , sml::state<state_request_mapped_load_done_callback>
+            <= sml::state<state_request_mapped_load_dispatch_decision>
+          + sml::completion<detail::request_mapped_load_runtime>
+          [ guard::request_mapped_load_io_mmap_succeeded{} ]
+          / action::effect_commit_request_mapped_load
+      , sml::state<state_request_mapped_load_io_mmap_error_decision>
+            <= sml::state<state_request_mapped_load_dispatch_decision>
+          + sml::completion<detail::request_mapped_load_runtime>
+          [ guard::request_mapped_load_io_mmap_failed{} ]
+          / action::effect_mark_request_mapped_load_io_mmap_failed
+
+      , sml::state<ready> <= sml::state<state_request_mapped_load_done_callback>
+          + sml::completion<detail::request_mapped_load_runtime>
+          / action::effect_publish_request_mapped_load_done
+
+      , sml::state<state_request_mapped_load_error_callback>
+            <= sml::state<state_request_mapped_load_invalid_request_error_decision>
+          + sml::completion<detail::request_mapped_load_runtime>
+          [ guard::request_mapped_load_error_callback_present{} ]
+          / action::effect_publish_request_mapped_load_error
+      , sml::state<ready>
+            <= sml::state<state_request_mapped_load_invalid_request_error_decision>
+          + sml::completion<detail::request_mapped_load_runtime>
+          [ guard::request_mapped_load_error_callback_absent{} ]
+          / action::effect_record_request_mapped_load_error
+      , sml::state<state_request_mapped_load_error_callback>
+            <= sml::state<state_request_mapped_load_unsupported_io_mmap_error_decision>
+          + sml::completion<detail::request_mapped_load_runtime>
+          [ guard::request_mapped_load_error_callback_present{} ]
+          / action::effect_publish_request_mapped_load_error
+      , sml::state<ready>
+            <= sml::state<state_request_mapped_load_unsupported_io_mmap_error_decision>
+          + sml::completion<detail::request_mapped_load_runtime>
+          [ guard::request_mapped_load_error_callback_absent{} ]
+          / action::effect_record_request_mapped_load_error
+      , sml::state<state_request_mapped_load_error_callback>
+            <= sml::state<state_request_mapped_load_already_resident_error_decision>
+          + sml::completion<detail::request_mapped_load_runtime>
+          [ guard::request_mapped_load_error_callback_present{} ]
+          / action::effect_publish_request_mapped_load_error
+      , sml::state<ready>
+            <= sml::state<state_request_mapped_load_already_resident_error_decision>
+          + sml::completion<detail::request_mapped_load_runtime>
+          [ guard::request_mapped_load_error_callback_absent{} ]
+          / action::effect_record_request_mapped_load_error
+      , sml::state<state_request_mapped_load_error_callback>
+            <= sml::state<state_request_mapped_load_io_mmap_error_decision>
+          + sml::completion<detail::request_mapped_load_runtime>
+          [ guard::request_mapped_load_error_callback_present{} ]
+          / action::effect_publish_request_mapped_load_error
+      , sml::state<ready>
+            <= sml::state<state_request_mapped_load_io_mmap_error_decision>
+          + sml::completion<detail::request_mapped_load_runtime>
+          [ guard::request_mapped_load_error_callback_absent{} ]
+          / action::effect_record_request_mapped_load_error
+      , sml::state<ready> <= sml::state<state_request_mapped_load_error_callback>
+          + sml::completion<detail::request_mapped_load_runtime>
+          / action::effect_record_request_mapped_load_error
+
+      //------------------------------------------------------------------------------//
+      // Tensor-owned mmap release.
+      , sml::state<state_release_mapped_load_decision> <= sml::state<ready>
+          + sml::event<detail::release_mapped_load_runtime>
+          / action::effect_begin_release_mapped_load
+      , sml::state<state_release_mapped_load_unsupported_io_mmap_error_decision>
+            <= sml::state<state_release_mapped_load_decision>
+          + sml::completion<detail::release_mapped_load_runtime>
+          [ guard::release_mapped_load_io_mmap_absent{} ]
+          / action::effect_mark_release_mapped_load_unsupported_io_mmap
+      , sml::state<state_release_mapped_load_invalid_request_error_decision>
+            <= sml::state<state_release_mapped_load_decision>
+          + sml::completion<detail::release_mapped_load_runtime>
+          [ guard::release_mapped_load_io_mmap_present_request_invalid{} ]
+          / action::effect_mark_release_mapped_load_invalid_request
+      , sml::state<state_release_mapped_load_handle_absent_error_decision>
+            <= sml::state<state_release_mapped_load_decision>
+          + sml::completion<detail::release_mapped_load_runtime>
+          [ guard::
+                release_mapped_load_io_mmap_present_request_valid_handle_absent{} ]
+          / action::effect_mark_release_mapped_load_handle_absent
+      , sml::state<state_release_mapped_load_dispatch_decision>
+            <= sml::state<state_release_mapped_load_decision>
+          + sml::completion<detail::release_mapped_load_runtime>
+          [ guard::
+                release_mapped_load_io_mmap_present_request_valid_handle_present{} ]
+          / action::effect_attempt_release_mapped_load_dispatch
+
+      , sml::state<state_release_mapped_load_publish_done_decision>
+            <= sml::state<state_release_mapped_load_dispatch_decision>
+          + sml::completion<detail::release_mapped_load_runtime>
+          [ guard::release_mapped_load_io_mmap_succeeded{} ]
+          / action::effect_commit_release_mapped_load
+      , sml::state<state_release_mapped_load_io_mmap_error_decision>
+            <= sml::state<state_release_mapped_load_dispatch_decision>
+          + sml::completion<detail::release_mapped_load_runtime>
+          [ guard::release_mapped_load_io_mmap_failed{} ]
+          / action::effect_mark_release_mapped_load_io_mmap_failed
+
+      , sml::state<state_release_mapped_load_done_callback>
+            <= sml::state<state_release_mapped_load_publish_done_decision>
+          + sml::completion<detail::release_mapped_load_runtime>
+          [ guard::release_mapped_load_done_callback_present{} ]
+          / action::effect_publish_release_mapped_load_done
+      , sml::state<ready>
+            <= sml::state<state_release_mapped_load_publish_done_decision>
+          + sml::completion<detail::release_mapped_load_runtime>
+          [ guard::release_mapped_load_done_callback_absent{} ]
+          / action::effect_record_release_mapped_load_done
+      , sml::state<ready> <= sml::state<state_release_mapped_load_done_callback>
+          + sml::completion<detail::release_mapped_load_runtime>
+          / action::effect_record_release_mapped_load_done
+
+      , sml::state<state_release_mapped_load_error_callback>
+            <= sml::state<state_release_mapped_load_invalid_request_error_decision>
+          + sml::completion<detail::release_mapped_load_runtime>
+          [ guard::release_mapped_load_error_callback_present{} ]
+          / action::effect_publish_release_mapped_load_error
+      , sml::state<ready>
+            <= sml::state<state_release_mapped_load_invalid_request_error_decision>
+          + sml::completion<detail::release_mapped_load_runtime>
+          [ guard::release_mapped_load_error_callback_absent{} ]
+          / action::effect_record_release_mapped_load_error
+      , sml::state<state_release_mapped_load_error_callback>
+            <= sml::state<state_release_mapped_load_unsupported_io_mmap_error_decision>
+          + sml::completion<detail::release_mapped_load_runtime>
+          [ guard::release_mapped_load_error_callback_present{} ]
+          / action::effect_publish_release_mapped_load_error
+      , sml::state<ready>
+            <= sml::state<state_release_mapped_load_unsupported_io_mmap_error_decision>
+          + sml::completion<detail::release_mapped_load_runtime>
+          [ guard::release_mapped_load_error_callback_absent{} ]
+          / action::effect_record_release_mapped_load_error
+      , sml::state<state_release_mapped_load_error_callback>
+            <= sml::state<state_release_mapped_load_handle_absent_error_decision>
+          + sml::completion<detail::release_mapped_load_runtime>
+          [ guard::release_mapped_load_error_callback_present{} ]
+          / action::effect_publish_release_mapped_load_error
+      , sml::state<ready>
+            <= sml::state<state_release_mapped_load_handle_absent_error_decision>
+          + sml::completion<detail::release_mapped_load_runtime>
+          [ guard::release_mapped_load_error_callback_absent{} ]
+          / action::effect_record_release_mapped_load_error
+      , sml::state<state_release_mapped_load_error_callback>
+            <= sml::state<state_release_mapped_load_io_mmap_error_decision>
+          + sml::completion<detail::release_mapped_load_runtime>
+          [ guard::release_mapped_load_error_callback_present{} ]
+          / action::effect_publish_release_mapped_load_error
+      , sml::state<ready>
+            <= sml::state<state_release_mapped_load_io_mmap_error_decision>
+          + sml::completion<detail::release_mapped_load_runtime>
+          [ guard::release_mapped_load_error_callback_absent{} ]
+          / action::effect_record_release_mapped_load_error
+      , sml::state<ready> <= sml::state<state_release_mapped_load_error_callback>
+          + sml::completion<detail::release_mapped_load_runtime>
+          / action::effect_record_release_mapped_load_error
+
+      //------------------------------------------------------------------------------//
       , sml::state<ready> <= sml::state<ready> + sml::unexpected_event<sml::_>
           / action::on_unexpected
       , sml::state<ready> <= sml::state<state_bind_storage_decision>
@@ -359,6 +565,51 @@ struct model {
           / action::on_unexpected
       , sml::state<ready> <= sml::state<errored> + sml::unexpected_event<sml::_>
           / action::on_unexpected
+      , sml::state<ready> <= sml::state<state_request_mapped_load_decision>
+          + sml::unexpected_event<sml::_> / action::on_unexpected
+      , sml::state<ready>
+            <= sml::state<state_request_mapped_load_dispatch_decision>
+          + sml::unexpected_event<sml::_> / action::on_unexpected
+      , sml::state<ready> <= sml::state<state_request_mapped_load_done_callback>
+          + sml::unexpected_event<sml::_> / action::on_unexpected
+      , sml::state<ready>
+            <= sml::state<state_request_mapped_load_invalid_request_error_decision>
+          + sml::unexpected_event<sml::_> / action::on_unexpected
+      , sml::state<ready>
+            <= sml::state<state_request_mapped_load_unsupported_io_mmap_error_decision>
+          + sml::unexpected_event<sml::_> / action::on_unexpected
+      , sml::state<ready>
+            <= sml::state<state_request_mapped_load_already_resident_error_decision>
+          + sml::unexpected_event<sml::_> / action::on_unexpected
+      , sml::state<ready>
+            <= sml::state<state_request_mapped_load_io_mmap_error_decision>
+          + sml::unexpected_event<sml::_> / action::on_unexpected
+      , sml::state<ready> <= sml::state<state_request_mapped_load_error_callback>
+          + sml::unexpected_event<sml::_> / action::on_unexpected
+      , sml::state<ready> <= sml::state<state_release_mapped_load_decision>
+          + sml::unexpected_event<sml::_> / action::on_unexpected
+      , sml::state<ready>
+            <= sml::state<state_release_mapped_load_dispatch_decision>
+          + sml::unexpected_event<sml::_> / action::on_unexpected
+      , sml::state<ready>
+            <= sml::state<state_release_mapped_load_publish_done_decision>
+          + sml::unexpected_event<sml::_> / action::on_unexpected
+      , sml::state<ready> <= sml::state<state_release_mapped_load_done_callback>
+          + sml::unexpected_event<sml::_> / action::on_unexpected
+      , sml::state<ready>
+            <= sml::state<state_release_mapped_load_invalid_request_error_decision>
+          + sml::unexpected_event<sml::_> / action::on_unexpected
+      , sml::state<ready>
+            <= sml::state<state_release_mapped_load_unsupported_io_mmap_error_decision>
+          + sml::unexpected_event<sml::_> / action::on_unexpected
+      , sml::state<ready>
+            <= sml::state<state_release_mapped_load_handle_absent_error_decision>
+          + sml::unexpected_event<sml::_> / action::on_unexpected
+      , sml::state<ready>
+            <= sml::state<state_release_mapped_load_io_mmap_error_decision>
+          + sml::unexpected_event<sml::_> / action::on_unexpected
+      , sml::state<ready> <= sml::state<state_release_mapped_load_error_callback>
+          + sml::unexpected_event<sml::_> / action::on_unexpected
     );
     // clang-format on
   }
@@ -366,9 +617,14 @@ struct model {
 
 struct sm : public emel::sm<model, action::context> {
   using base_type = emel::sm<model, action::context>;
+  using base_type::base_type;
   using base_type::is;
   using base_type::process_event;
   using base_type::visit_current_states;
+
+  sm() = default;
+  explicit sm(emel::io::mmap::sm *io_mmap_actor)
+      : base_type(make_context_with_io_mmap(io_mmap_actor)) {}
 
   bool process_event(const event::bind_storage &ev) {
     detail::runtime_status ctx{};
@@ -410,6 +666,28 @@ struct sm : public emel::sm<model, action::context> {
     detail::capture_tensor_state_runtime runtime{ev, ctx, ev.error_out};
     const bool accepted = base_type::process_event(runtime);
     return accepted && ctx.ok;
+  }
+
+  bool process_event(const event::request_mapped_load &ev) {
+    detail::request_mapped_load_status status{};
+    detail::request_mapped_load_runtime runtime{ev, status};
+    const bool accepted = base_type::process_event(runtime);
+    return accepted && status.ok;
+  }
+
+  bool process_event(const event::release_mapped_load &ev) {
+    detail::release_mapped_load_status status{};
+    detail::release_mapped_load_runtime runtime{ev, status};
+    const bool accepted = base_type::process_event(runtime);
+    return accepted && status.ok;
+  }
+
+private:
+  static action::context
+  make_context_with_io_mmap(emel::io::mmap::sm *io_mmap_actor) noexcept {
+    action::context ctx{};
+    ctx.io_mmap = io_mmap_actor;
+    return ctx;
   }
 };
 
