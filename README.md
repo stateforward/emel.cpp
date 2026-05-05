@@ -161,6 +161,7 @@ environments, while Zig remains the default for day-to-day builds.
 - [`.planning/architecture/graph_tensor.md`](.planning/architecture/graph_tensor.md)
 - [`.planning/architecture/io_loader.md`](.planning/architecture/io_loader.md)
 - [`.planning/architecture/io_mmap.md`](.planning/architecture/io_mmap.md)
+- [`.planning/architecture/io_read.md`](.planning/architecture/io_read.md)
 - [`.planning/architecture/kernel_aarch64.md`](.planning/architecture/kernel_aarch64.md)
 - [`.planning/architecture/kernel_x86_64.md`](.planning/architecture/kernel_x86_64.md)
 - [`.planning/architecture/logits_sampler.md`](.planning/architecture/logits_sampler.md)

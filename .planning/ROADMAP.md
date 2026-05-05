@@ -37,7 +37,7 @@ Adds a dedicated `src/emel/io/read` Stateforward.SML actor for explicit read/cop
 loading beneath tensor-owned residency. Mmap, staged/chunked constrained-memory, async,
 and device strategies remain out of scope.
 
-- [ ] Phase 212: Read Strategy Component Boundary (0/1 plans)
+- [x] Phase 212: Read Strategy Component Boundary (1/1 plans) — completed 2026-05-05
 - [ ] Phase 213: Read Validation and Platform Gating (0/1 plans)
 - [ ] Phase 214: Read Execution, Errors, and Lifetime (0/1 plans)
 - [ ] Phase 215: Tensor-Owned Read Integration (0/1 plans)
@@ -63,7 +63,8 @@ Active artifacts:
   3. Maintainer can confirm the component is read/copy-only and contains no mmap, staged or
      chunked constrained-memory, cooperative async, device-specific, loader-owned byte access,
      model-family widening, or tool-only read scaffold behavior.
-**Plans**: TBD (run `$gsd-plan-phase 212`).
+**Plans**: 01 — Validated 2026-05-05; established canonical `io/read` boundary actor
+and lifecycle tests.
 
 #### Phase 213: Read Validation and Platform Gating
 **Goal**: The read actor accepts read attempts only after explicit request, platform, file,
@@ -183,7 +184,7 @@ describe read-strategy support exactly as implemented.
 | VAL-02 | Phase 217 |
 | VAL-03 | Phase 218 |
 
-Mapped: 13/13 v1 requirements; all pending.
+Mapped: 13/13 v1 requirements; validated 1, pending 12.
 
 <details>
 <summary>✅ v1.24 I/O Mmap Loading Strategy (Phases 204-211) — SHIPPED 2026-05-04</summary>
@@ -226,7 +227,7 @@ strategies remain deferred follow-on work below the `emel/io` boundary.
 
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
-| 212. Read Strategy Component Boundary | v1.25 | 0/1 | Pending | — |
+| 212. Read Strategy Component Boundary | v1.25 | 1/1 | Validated | 2026-05-05 |
 | 213. Read Validation and Platform Gating | v1.25 | 0/1 | Pending | — |
 | 214. Read Execution, Errors, and Lifetime | v1.25 | 0/1 | Pending | — |
 | 215. Tensor-Owned Read Integration | v1.25 | 0/1 | Pending | — |

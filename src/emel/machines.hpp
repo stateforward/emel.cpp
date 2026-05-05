@@ -8,6 +8,7 @@
 #include "emel/gguf/loader/sm.hpp"
 #include "emel/graph/processor/sm.hpp"
 #include "emel/io/mmap/sm.hpp"
+#include "emel/io/read/sm.hpp"
 #include "emel/io/sm.hpp"
 #include "emel/memory/hybrid/sm.hpp"
 #include "emel/memory/kv/sm.hpp"
@@ -42,6 +43,7 @@ using EncoderFallback = emel::text::encoders::fallback::sm;
 using Generator = emel::text::generator::sm;
 using IoLoader = emel::io::loader::sm;
 using IoMmap = emel::io::mmap::sm;
+using IoRead = emel::io::read::sm;
 using MemoryHybrid = emel::memory::hybrid::sm;
 using KvCache = emel::memory::kv::sm;
 using MemoryRecurrent = emel::memory::recurrent::sm;

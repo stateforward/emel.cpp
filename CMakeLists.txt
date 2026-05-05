@@ -177,6 +177,7 @@ if(EMEL_ENABLE_TESTS)
     tests/gguf/loader/lifecycle_tests.cpp
     tests/io/loader/lifecycle_tests.cpp
     tests/io/mmap/lifecycle_tests.cpp
+    tests/io/read/lifecycle_tests.cpp
     tests/text/jinja/parser_tests.cpp
     tests/text/jinja/lexer_tests.cpp
     tests/text/jinja/formatter_tests.cpp

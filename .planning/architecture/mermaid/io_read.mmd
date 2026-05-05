@@ -1,0 +1,12 @@
+stateDiagram-v2
+  direction TB
+  [*] --> state_ready
+  state_ready --> state_request_decision : read_tensor_runtime [always] / effect_begin_read_tensor_
+  state_request_decision --> state_unsupported_platform_error_decision : completion_read_tensor_runtime_ [guard_request_accepted_] / effect_mark_unsupported_platform_
+  state_unsupported_platform_error_decision --> state_error_callback : completion_read_tensor_runtime_ [error_callback_present_] / effect_publish_read_tensor_error_
+  state_unsupported_platform_error_decision --> state_ready : completion_read_tensor_runtime_ [error_callback_absent_] / effect_record_read_tensor_error_
+  state_error_callback --> state_ready : completion_read_tensor_runtime_ [always] / effect_record_read_tensor_error_
+  state_ready --> state_ready : _ [always] / effect_on_unexpected_
+  state_request_decision --> state_ready : _ [always] / effect_on_unexpected_
+  state_unsupported_platform_error_decision --> state_ready : _ [always] / effect_on_unexpected_
+  state_error_callback --> state_ready : _ [always] / effect_on_unexpected_
