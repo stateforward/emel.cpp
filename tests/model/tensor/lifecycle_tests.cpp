@@ -1116,6 +1116,64 @@ TEST_CASE("model_tensor_invalid_bind_preserves_mmap_resident_release") {
   std::filesystem::remove(path);
 }
 
+TEST_CASE("model_tensor_bind_tensor_rejects_mmap_resident_tensor") {
+  emel::io::mmap::sm io_mmap_actor{};
+  emel::model::tensor::sm machine = make_tensor_sm_with_io_mmap(io_mmap_actor);
+  std::array<emel::model::data::tensor_record, 1> tensors{};
+  prepare_storage_for_one_tensor(machine, tensors);
+
+  const auto payload = make_tensor_payload(4096u, 0x47u);
+  const auto path = make_tensor_temp_file("bind_tensor_mmap_resident", payload);
+  const std::string path_str = path.string();
+
+  mapped_owner_state mapped_owner{};
+  emel::model::tensor::event::request_mapped_load request{0, path_str, 0u,
+                                                          4096u};
+  request.on_done = {&mapped_owner, on_request_mapped_load_done};
+  request.on_error = {&mapped_owner, on_request_mapped_load_error};
+  REQUIRE(machine.process_event(request));
+
+  auto replacement = make_tensor_record();
+  replacement.file_offset = 8192u;
+  replacement.data_size = 128u;
+  replacement.file_index = 2u;
+  replacement.type = 8;
+  int32_t err =
+      static_cast<int32_t>(emel::error::cast(emel::model::tensor::error::none));
+  emel::model::tensor::event::bind_tensor bind{0, replacement,
+                                               fake_buffer(0x9800u), 128u};
+  bind.error_out = &err;
+  CHECK_FALSE(machine.process_event(bind));
+  CHECK(err == static_cast<int32_t>(emel::error::cast(
+                   emel::model::tensor::error::invalid_request)));
+
+  emel::model::tensor::event::tensor_state state{};
+  REQUIRE(
+      machine.process_event(emel::model::tensor::event::capture_tensor_state{
+          .tensor_id = 0,
+          .state_out = &state,
+      }));
+  CHECK(state.lifecycle_state ==
+        emel::model::tensor::event::lifecycle::mmap_resident);
+  CHECK(state.buffer == mapped_owner.buffer);
+  CHECK(state.buffer_bytes == 4096u);
+
+  emel::model::tensor::event::release_mapped_load release{
+      0, mapped_owner.mapping_handle};
+  release.on_done = {&mapped_owner, on_release_mapped_load_done};
+  release.on_error = {&mapped_owner, on_release_mapped_load_error};
+  CHECK(machine.process_event(release));
+  CHECK(mapped_owner.release_done);
+
+  err =
+      static_cast<int32_t>(emel::error::cast(emel::model::tensor::error::none));
+  CHECK(machine.process_event(bind));
+  CHECK(err == static_cast<int32_t>(
+                   emel::error::cast(emel::model::tensor::error::none)));
+
+  std::filesystem::remove(path);
+}
+
 TEST_CASE("model_tensor_request_mapped_load_rejects_already_resident_tensor") {
   emel::io::mmap::sm io_mmap_actor{};
   emel::model::tensor::sm machine = make_tensor_sm_with_io_mmap(io_mmap_actor);

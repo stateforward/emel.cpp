@@ -466,8 +466,13 @@ struct error_code_output_absent {
 
 struct bind_tensor_request_valid {
   bool operator()(const tensor::detail::bind_tensor_runtime &ev,
-                  const action::context &) const noexcept {
-    return detail::valid_tensor_id(ev.request.tensor_id) &&
+                  const action::context &ctx) const noexcept {
+    if (!detail::valid_tensor_id(ev.request.tensor_id)) {
+      return false;
+    }
+    const auto lifecycle =
+        ctx.tensors.lifecycle[static_cast<size_t>(ev.request.tensor_id)];
+    return lifecycle != event::lifecycle::mmap_resident &&
            ev.request.buffer != nullptr && ev.request.buffer_bytes > 0u &&
            ev.request.tensor_record.data_size > 0u;
   }
