@@ -278,6 +278,7 @@ src/emel/graph/tensor/errors.hpp
 src/emel/graph/tensor/events.hpp
 src/emel/graph/tensor/guards.hpp
 src/emel/graph/tensor/sm.hpp
+src/emel/io/read/guards.hpp
 src/emel/kernel/aarch64/context.hpp
 src/emel/kernel/aarch64/errors.hpp
 src/emel/kernel/aarch64/events.hpp

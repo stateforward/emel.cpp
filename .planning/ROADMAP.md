@@ -38,7 +38,7 @@ loading beneath tensor-owned residency. Mmap, staged/chunked constrained-memory,
 and device strategies remain out of scope.
 
 - [x] Phase 212: Read Strategy Component Boundary (1/1 plans) — completed 2026-05-05
-- [ ] Phase 213: Read Validation and Platform Gating (0/1 plans)
+- [x] Phase 213: Read Validation and Platform Gating (1/1 plans) — completed 2026-05-05
 - [ ] Phase 214: Read Execution, Errors, and Lifetime (0/1 plans)
 - [ ] Phase 215: Tensor-Owned Read Integration (0/1 plans)
 - [ ] Phase 216: Public Runtime and Evidence Surfaces (0/1 plans)
@@ -79,7 +79,8 @@ offset, length, layout, and target-buffer preconditions pass.
   3. Maintainer can inspect SML guards and transitions and see validation outcomes modeled
      before the open/read attempt.
   4. Supported requests reach a read-attempt state only after all read preconditions are true.
-**Plans**: TBD (run `$gsd-plan-phase 213`).
+**Plans**: 01 — Validated 2026-05-05; added explicit read validation and platform
+gating before the read-attempt placeholder.
 
 #### Phase 214: Read Execution, Errors, and Lifetime
 **Goal**: Successful read requests deliver deterministic copied bytes into the caller-owned
@@ -184,7 +185,7 @@ describe read-strategy support exactly as implemented.
 | VAL-02 | Phase 217 |
 | VAL-03 | Phase 218 |
 
-Mapped: 13/13 v1 requirements; validated 1, pending 12.
+Mapped: 13/13 v1 requirements; validated 3, pending 10.
 
 <details>
 <summary>✅ v1.24 I/O Mmap Loading Strategy (Phases 204-211) — SHIPPED 2026-05-04</summary>
@@ -228,7 +229,7 @@ strategies remain deferred follow-on work below the `emel/io` boundary.
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
 | 212. Read Strategy Component Boundary | v1.25 | 1/1 | Validated | 2026-05-05 |
-| 213. Read Validation and Platform Gating | v1.25 | 0/1 | Pending | — |
+| 213. Read Validation and Platform Gating | v1.25 | 1/1 | Validated | 2026-05-05 |
 | 214. Read Execution, Errors, and Lifetime | v1.25 | 0/1 | Pending | — |
 | 215. Tensor-Owned Read Integration | v1.25 | 0/1 | Pending | — |
 | 216. Public Runtime and Evidence Surfaces | v1.25 | 0/1 | Pending | — |

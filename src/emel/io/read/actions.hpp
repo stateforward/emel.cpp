@@ -23,6 +23,22 @@ struct effect_mark_unsupported_platform {
   }
 };
 
+struct effect_mark_invalid_request {
+  void operator()(const detail::read_tensor_runtime &ev,
+                  context &) const noexcept {
+    ev.status.err = emel::error::cast(error::invalid_request);
+    ev.status.ok = false;
+  }
+};
+
+struct effect_mark_unsupported_resource {
+  void operator()(const detail::read_tensor_runtime &ev,
+                  context &) const noexcept {
+    ev.status.err = emel::error::cast(error::unsupported_resource);
+    ev.status.ok = false;
+  }
+};
+
 struct effect_publish_read_tensor_error {
   void operator()(const detail::read_tensor_runtime &ev,
                   context &) const noexcept {
@@ -48,6 +64,9 @@ struct effect_on_unexpected {
 inline constexpr effect_begin_read_tensor effect_begin_read_tensor{};
 inline constexpr effect_mark_unsupported_platform
     effect_mark_unsupported_platform{};
+inline constexpr effect_mark_invalid_request effect_mark_invalid_request{};
+inline constexpr effect_mark_unsupported_resource
+    effect_mark_unsupported_resource{};
 inline constexpr effect_publish_read_tensor_error
     effect_publish_read_tensor_error{};
 inline constexpr effect_record_read_tensor_error

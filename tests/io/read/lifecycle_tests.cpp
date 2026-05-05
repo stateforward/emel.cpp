@@ -72,6 +72,14 @@ emel::io::read::event::read_tensor_request make_request(
 
 struct unrelated_event {};
 
+constexpr emel::error::type supported_platform_boundary_error() noexcept {
+#if EMEL_IO_READ_PLATFORM_SUPPORTED != 0
+  return emel::error::cast(emel::io::read::error::unsupported_resource);
+#else
+  return emel::error::cast(emel::io::read::error::unsupported_platform);
+#endif
+}
+
 } // namespace
 
 TEST_CASE("io read exposes canonical machine aliases at component boundary") {
@@ -83,7 +91,7 @@ TEST_CASE("io read exposes canonical machine aliases at component boundary") {
       top_level_read.is(stateforward::sml::state<emel::io::read::state_ready>));
 }
 
-TEST_CASE("io read fails closed for accepted boundary requests") {
+TEST_CASE("io read validates then fails closed before execution") {
   emel::io::read::sm strategy{};
   read_owner_state owner{};
   uint8_t target[16]{};
@@ -96,8 +104,7 @@ TEST_CASE("io read fails closed for accepted boundary requests") {
   CHECK_FALSE(strategy.process_event(read_request));
   CHECK_FALSE(owner.done);
   REQUIRE(owner.error);
-  CHECK(owner.err ==
-        emel::error::cast(emel::io::read::error::unsupported_platform));
+  CHECK(owner.err == supported_platform_boundary_error());
   CHECK(strategy.is(stateforward::sml::state<emel::io::read::state_ready>));
 }
 
@@ -110,6 +117,130 @@ TEST_CASE("io read fails closed without an error callback") {
 
   CHECK_FALSE(strategy.process_event(read_request));
   CHECK(strategy.is(stateforward::sml::state<emel::io::read::state_ready>));
+}
+
+TEST_CASE("io read rejects invalid request preconditions before platform gate") {
+  emel::io::read::sm strategy{};
+  read_owner_state owner{};
+  uint8_t target[8]{};
+  auto request = make_request("/tmp/emel_io_read_invalid.bin", target,
+                              static_cast<uint64_t>(sizeof(target)));
+  request.byte_size = 0u;
+  emel::io::read::event::read_tensor read_request{request};
+  read_request.on_done = {&owner, on_read_done};
+  read_request.on_error = {&owner, on_read_error};
+
+  CHECK_FALSE(strategy.process_event(read_request));
+  REQUIRE(owner.error);
+  CHECK(owner.err == emel::error::cast(emel::io::read::error::invalid_request));
+  CHECK(strategy.is(stateforward::sml::state<emel::io::read::state_ready>));
+}
+
+TEST_CASE("io read rejects invalid file path preconditions") {
+  emel::io::read::sm strategy{};
+  read_owner_state owner{};
+  uint8_t target[8]{};
+  const char path_with_nul[] = {'/', 't', 'm', 'p', '\0', 'x'};
+  const auto request =
+      make_request(std::string_view{path_with_nul, sizeof(path_with_nul)},
+                   target, static_cast<uint64_t>(sizeof(target)));
+  emel::io::read::event::read_tensor read_request{request};
+  read_request.on_done = {&owner, on_read_done};
+  read_request.on_error = {&owner, on_read_error};
+
+  CHECK_FALSE(strategy.process_event(read_request));
+  REQUIRE(owner.error);
+  CHECK(owner.err == emel::error::cast(emel::io::read::error::invalid_request));
+  CHECK(strategy.is(stateforward::sml::state<emel::io::read::state_ready>));
+}
+
+TEST_CASE("io read rejects unsupported file and length preconditions") {
+  emel::io::read::sm strategy{};
+  read_owner_state owner{};
+  uint8_t target[8]{};
+  auto request = make_request("/tmp/emel_io_read_file_index.bin", target,
+                              static_cast<uint64_t>(sizeof(target)));
+  request.file_index = emel::io::read::k_max_file_index + 1u;
+  emel::io::read::event::read_tensor read_request{request};
+  read_request.on_done = {&owner, on_read_done};
+  read_request.on_error = {&owner, on_read_error};
+
+  CHECK_FALSE(strategy.process_event(read_request));
+  REQUIRE(owner.error);
+  CHECK(owner.err ==
+        emel::error::cast(emel::io::read::error::unsupported_resource));
+  CHECK(strategy.is(stateforward::sml::state<emel::io::read::state_ready>));
+}
+
+TEST_CASE("io read rejects oversized length preconditions") {
+  emel::io::read::sm strategy{};
+  read_owner_state owner{};
+  uint8_t target[8]{};
+  auto request = make_request("/tmp/emel_io_read_length.bin", target,
+                              emel::io::read::k_max_read_bytes + 1u);
+  request.byte_size = emel::io::read::k_max_read_bytes + 1u;
+  request.target_buffer_bytes = emel::io::read::k_max_read_bytes + 1u;
+  emel::io::read::event::read_tensor read_request{request};
+  read_request.on_done = {&owner, on_read_done};
+  read_request.on_error = {&owner, on_read_error};
+
+  CHECK_FALSE(strategy.process_event(read_request));
+  REQUIRE(owner.error);
+  CHECK(owner.err ==
+        emel::error::cast(emel::io::read::error::unsupported_resource));
+  CHECK(strategy.is(stateforward::sml::state<emel::io::read::state_ready>));
+}
+
+TEST_CASE("io read rejects unsupported layout preconditions") {
+  emel::io::read::sm strategy{};
+  read_owner_state owner{};
+  uint8_t target[8]{};
+  auto request = make_request("/tmp/emel_io_read_layout.bin", target,
+                              static_cast<uint64_t>(sizeof(target)));
+  request.file_offset = static_cast<uint64_t>(-4);
+  request.byte_size = 8u;
+  request.target_buffer_bytes = 8u;
+  emel::io::read::event::read_tensor read_request{request};
+  read_request.on_done = {&owner, on_read_done};
+  read_request.on_error = {&owner, on_read_error};
+
+  CHECK_FALSE(strategy.process_event(read_request));
+  REQUIRE(owner.error);
+  CHECK(owner.err ==
+        emel::error::cast(emel::io::read::error::unsupported_resource));
+  CHECK(strategy.is(stateforward::sml::state<emel::io::read::state_ready>));
+}
+
+TEST_CASE("io read rejects invalid target-buffer preconditions") {
+  emel::io::read::sm strategy{};
+  read_owner_state owner{};
+  uint8_t target[4]{};
+  auto request = make_request("/tmp/emel_io_read_target.bin", target, 4u);
+  request.target_buffer_bytes = 2u;
+  emel::io::read::event::read_tensor read_request{request};
+  read_request.on_done = {&owner, on_read_done};
+  read_request.on_error = {&owner, on_read_error};
+
+  CHECK_FALSE(strategy.process_event(read_request));
+  REQUIRE(owner.error);
+  CHECK(owner.err == emel::error::cast(emel::io::read::error::invalid_request));
+  CHECK(strategy.is(stateforward::sml::state<emel::io::read::state_ready>));
+}
+
+TEST_CASE("io read platform guard and unsupported action are explicit") {
+  emel::io::read::action::context ctx{};
+  emel::io::read::detail::read_attempt_status status{};
+  uint8_t target[4]{};
+  const auto request = make_request("/tmp/emel_io_read_platform.bin", target, 4u);
+  emel::io::read::event::read_tensor read_request{request};
+  emel::io::read::detail::read_tensor_runtime runtime{read_request, status};
+
+  CHECK(emel::io::read::guard::platform_read_supported{}(runtime, ctx) !=
+        emel::io::read::guard::platform_read_unsupported{}(runtime, ctx));
+  emel::io::read::action::effect_mark_unsupported_platform(runtime, ctx);
+  CHECK(status.err ==
+        emel::error::cast(emel::io::read::error::unsupported_platform));
+  CHECK_FALSE(status.ok);
 }
 
 TEST_CASE("io read recovers to ready after fail-closed dispatches") {

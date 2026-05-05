@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.25
 milestone_name: v1.25 I/O Read Loading Strategy
 status: in_progress
-stopped_at: Phase 212 read strategy component boundary validated; ready for Phase 213.
-last_updated: "2026-05-05T14:52:27Z"
+stopped_at: Phase 213 read validation and platform gating validated; ready for Phase 214.
+last_updated: "2026-05-05T15:10:00Z"
 last_activity: 2026-05-05
 progress:
   total_phases: 7
-  completed_phases: 1
+  completed_phases: 2
   total_plans: 7
-  completed_plans: 1
-  percent: 14
+  completed_plans: 2
+  percent: 29
 ---
 
 # Project State
@@ -28,14 +28,15 @@ residency, per GitHub issue #62.
 
 ## Current Position
 
-Phase: 213 (2 of 7) — pending plan
+Phase: 214 (3 of 7) — pending plan
 Plan: 01 — pending
-Status: Phase 212 validated 2026-05-05. `src/emel/io/read` now exposes the canonical
-read/copy boundary actor and lifecycle tests; scoped quality gates passed with
-source-backed evidence. Phase 213 is ready to plan request validation and platform gating.
+Status: Phase 213 validated 2026-05-05. `src/emel/io/read` now validates request span,
+file path, file index, length, layout, target buffer, and platform support before the
+read-attempt placeholder. Phase 214 is ready to add concrete read execution, errors, and
+lifetime management.
 Last activity: 2026-05-05
 
-Progress: [#         ] 14%
+Progress: [###       ] 29%
 
 ## Performance Metrics
 
@@ -68,10 +69,13 @@ Recent decisions affecting this work (v1.25 scope):
 - v1.25 phase numbering continues after v1.24's last phase (211), so phases run 212-218.
 - User explicitly authorized maintained snapshot, benchmark, and model artifact updates
   when required to follow existing rules and conventions during v1.25 closeout.
-- Phase 212 keeps `src/emel/io/read` boundary-only and fail-closed: accepted requests
-  publish `unsupported_platform`; no request-value validation, platform read primitive,
-  transient resource lifetime, tensor integration, or loader byte access is implemented
-  before Phase 213/214.
+- Phase 212 established `src/emel/io/read` as a boundary-only fail-closed actor with no
+  request-value validation, platform read primitive, transient resource lifetime, tensor
+  integration, or loader byte access.
+- Phase 213 introduces validation/platform gates but still does not perform file open,
+  seek, read, or close. Supported-platform requests reach `state_read_attempt_decision`
+  only after all preconditions pass, then fail closed with `unsupported_resource` until
+  Phase 214 replaces the placeholder with real execution.
 
 Carried-forward decisions from v1.24 still in effect:
 
@@ -115,6 +119,6 @@ Items acknowledged and deferred at v1.22 milestone close on 2026-05-03 (still ca
 
 ## Session Continuity
 
-Last session: 2026-05-05T14:52:27Z
-Stopped at: Phase 212 read strategy component boundary validated; ready to start Phase 213.
+Last session: 2026-05-05T15:10:00Z
+Stopped at: Phase 213 read validation and platform gating validated; ready to start Phase 214.
 Resume file: `.planning/REQUIREMENTS.md` (v1.25 active).

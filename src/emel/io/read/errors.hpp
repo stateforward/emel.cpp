@@ -1,17 +1,31 @@
 #pragma once
 
+#include <cstdint>
+
 #include "emel/error/error.hpp"
 
 namespace emel::io::read {
 
-// Boundary error taxonomy for Phase 212. The component routes every accepted
-// request to a fail-closed `unsupported_platform` outcome. Phase 213
-// introduces real validation/platform guards, and Phase 214 extends this enum
-// with the read execution-error taxonomy required by ERR-01.
+#ifndef EMEL_IO_READ_PLATFORM_SUPPORTED
+#if defined(__APPLE__) || defined(__linux__) || defined(__unix__) ||           \
+    defined(_WIN32)
+#define EMEL_IO_READ_PLATFORM_SUPPORTED 1
+#else
+#define EMEL_IO_READ_PLATFORM_SUPPORTED 0
+#endif
+#endif
+
+// Validation and platform-gating taxonomy. Phase 214 extends this enum with
+// concrete file-open / seek / read execution failures required by ERR-01.
 enum class error : emel::error::type {
   none = 0u,
   invalid_request = (1u << 0),
   unsupported_platform = (1u << 1),
+  unsupported_resource = (1u << 2),
 };
+
+inline constexpr uint16_t k_max_file_index = 65534u;
+inline constexpr uint64_t k_max_file_path_bytes = 4095u;
+inline constexpr uint64_t k_max_read_bytes = (1ULL << 40);
 
 } // namespace emel::io::read

@@ -11,10 +11,10 @@ Requirements for this milestone. Each maps to exactly one active roadmap phase.
 
 ### Read Strategy
 
-- [ ] **READ-01**: Maintainer can identify a dedicated `src/emel/io/read` Stateforward.SML
+- [x] **READ-01**: Maintainer can identify a dedicated `src/emel/io/read` Stateforward.SML
   component with component-local `context`, `events`, `guards`, `actions`, `errors`, `sm`, and
   canonical `emel::io::read::sm` ownership.
-- [ ] **READ-02**: The read strategy validates request, platform, file, offset, length, layout,
+- [x] **READ-02**: The read strategy validates request, platform, file, offset, length, layout,
   and target-buffer preconditions through explicit guards and transitions before any open or
   read attempt is accepted.
 - [ ] **READ-03**: The read strategy returns a deterministic copied-bytes outcome into the
@@ -36,7 +36,7 @@ Requirements for this milestone. Each maps to exactly one active roadmap phase.
 
 ### Platform And Lifetime
 
-- [ ] **PLAT-01**: Platform-specific file-read details are hidden behind the I/O abstraction
+- [x] **PLAT-01**: Platform-specific file-read details are hidden behind the I/O abstraction
   boundary and fail closed on unsupported platforms or unsupported file/resource shapes.
 - [ ] **LIFE-01**: Read transient resource lifetime (file descriptor / handle) is deterministic,
   bounded, and tied to the actor-owned attempt; no kernel handle is held across `_done`
@@ -97,10 +97,10 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| READ-01 | Phase 212 | Pending |
-| READ-02 | Phase 213 | Pending |
+| READ-01 | Phase 212 | Validated |
+| READ-02 | Phase 213 | Validated |
 | READ-03 | Phase 214 | Pending |
-| PLAT-01 | Phase 213 | Pending |
+| PLAT-01 | Phase 213 | Validated |
 | LIFE-01 | Phase 214 | Pending |
 | ERR-01 | Phase 214 | Pending |
 | TIO-01 | Phase 215 | Pending |
@@ -114,6 +114,6 @@ Which phases cover which requirements. Updated during roadmap creation.
 **Coverage:**
 - v1 requirements: 13 total
 - Mapped to phases: 13
-- Validated: 0
-- Pending: 13
+- Validated: 3
+- Pending: 10
 - Unmapped: 0
