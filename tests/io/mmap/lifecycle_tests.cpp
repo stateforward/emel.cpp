@@ -953,3 +953,66 @@ TEST_CASE("io mmap boundary keeps platform calls inside actions.cpp") {
   CHECK(sm_source.find("strategy_device") == std::string::npos);
   CHECK(sm_source.find("strategy_copy") == std::string::npos);
 }
+
+// PR #83 P1 (PRRT_kwDORRHzJs5_hhbx): when platform_unmap fails, the actor must
+// retain ownership of the slot (in_use=true with base/bytes/os_resource intact)
+// so the caller can retry release. Pushing the handle back onto free_stack
+// would let a later map_tensor reuse the slot while the OS mapping is still
+// alive.
+TEST_CASE("io mmap unmap failure keeps mapping slot owned for retry") {
+  emel::io::mmap::action::context ctx{};
+  const uint32_t initial_free_count = ctx.free_count;
+  REQUIRE(initial_free_count == emel::io::mmap::k_max_mappings);
+
+  // Reserve slot 0 with a representative live mapping.
+  const uint32_t target_slot = 0u;
+  ctx.slots[target_slot].in_use = true;
+  ctx.slots[target_slot].tensor_id = 4242;
+  ctx.slots[target_slot].base = reinterpret_cast<void *>(0xCAFEBABEu);
+  ctx.slots[target_slot].mapped_bytes = 4096u;
+  ctx.slots[target_slot].os_resource = 17;
+  ctx.slots[target_slot].file_offset = 0u;
+  ctx.slots[target_slot].requested_bytes = 4096u;
+  // Pop the slot from the free stack so free_count reflects an in-use slot.
+  for (uint32_t i = 0u; i < ctx.free_count; ++i) {
+    if (ctx.free_stack[i] == target_slot) {
+      ctx.free_stack[i] = ctx.free_stack[ctx.free_count - 1u];
+      ctx.free_count -= 1u;
+      break;
+    }
+  }
+  const uint32_t free_count_with_slot_in_use = ctx.free_count;
+  REQUIRE(free_count_with_slot_in_use ==
+          emel::io::mmap::k_max_mappings - 1u);
+
+  emel::io::mmap::detail::release_attempt_status status{};
+  status.target_slot = target_slot;
+  status.unmap_base = ctx.slots[target_slot].base;
+  status.unmap_bytes = ctx.slots[target_slot].mapped_bytes;
+  status.os_resource = ctx.slots[target_slot].os_resource;
+  status.unmap_ok = false;
+  const emel::io::mmap::event::release_mapping release_request{4242,
+                                                                target_slot};
+  const emel::io::mmap::detail::release_mapping_runtime runtime{release_request,
+                                                                status};
+
+  emel::io::mmap::action::effect_mark_unmap_failed_and_release_slot(runtime,
+                                                                     ctx);
+
+  CHECK(status.err ==
+        emel::error::cast(emel::io::mmap::error::unmap_failed));
+  CHECK_FALSE(status.ok);
+
+  // Slot must remain owned (in_use=true) so the caller can retry release.
+  CHECK(ctx.slots[target_slot].in_use);
+  CHECK(ctx.slots[target_slot].tensor_id == 4242);
+  CHECK(ctx.slots[target_slot].base == reinterpret_cast<void *>(0xCAFEBABEu));
+  CHECK(ctx.slots[target_slot].mapped_bytes == 4096u);
+  CHECK(ctx.slots[target_slot].os_resource == 17);
+
+  // Free stack must NOT have grown — the slot stays unavailable for reuse.
+  CHECK(ctx.free_count == free_count_with_slot_in_use);
+  for (uint32_t i = 0u; i < ctx.free_count; ++i) {
+    CHECK(ctx.free_stack[i] != target_slot);
+  }
+}

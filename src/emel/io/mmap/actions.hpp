@@ -207,18 +207,14 @@ struct effect_release_slot_after_unmap {
 };
 
 struct effect_mark_unmap_failed_and_release_slot {
+  // When platform_unmap fails, the OS mapping (and its file handle) may still
+  // be live. Keep the slot owned (in_use, base, mapped_bytes, os_resource,
+  // tensor_id intact) and do NOT push the handle back onto free_stack so the
+  // caller can retry release and a later map_tensor cannot reuse the slot
+  // while the prior mapping is still alive. See PR #83 review thread
+  // PRRT_kwDORRHzJs5_hhbx.
   void operator()(const detail::release_mapping_runtime &ev,
-                  context &ctx) const noexcept {
-    auto &slot_ref = ctx.slots[ev.status.target_slot];
-    slot_ref.in_use = false;
-    slot_ref.tensor_id = -1;
-    slot_ref.base = nullptr;
-    slot_ref.mapped_bytes = 0u;
-    slot_ref.os_resource = -1;
-    slot_ref.file_offset = 0u;
-    slot_ref.requested_bytes = 0u;
-    ctx.free_stack[ctx.free_count] = ev.status.target_slot;
-    ctx.free_count += 1u;
+                  context &) const noexcept {
     ev.status.err = emel::error::cast(error::unmap_failed);
     ev.status.ok = false;
   }

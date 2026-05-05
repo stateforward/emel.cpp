@@ -1140,3 +1140,71 @@ TEST_CASE("model_tensor_request_mapped_load_rejects_invalid_request") {
   CHECK(owner.request_err ==
         emel::error::cast(emel::model::tensor::error::invalid_request));
 }
+
+// PR #83 P1 (PRRT_kwDORRHzJs5_hhby): legacy evict_tensor must not silently
+// "evict" a mmap_resident tensor without releasing the underlying mmap mapping.
+// Either reject eviction for mmap_resident tensors or route through
+// release_mapped_load. We pick rejection: the validity guard treats
+// mmap_resident lifecycle as not-evictable so legacy eviction routes to the
+// errored state, leaving the mapping alive for a proper release_mapped_load
+// dispatch.
+TEST_CASE("model_tensor_evict_tensor_rejects_mmap_resident_tensors") {
+  emel::io::mmap::sm io_mmap_actor{};
+  emel::model::tensor::sm machine = make_tensor_sm_with_io_mmap(io_mmap_actor);
+  std::array<emel::model::data::tensor_record, 1> tensors{};
+  prepare_storage_for_one_tensor(machine, tensors);
+
+  const auto payload = make_tensor_payload(4096u, 0x77u);
+  const auto path = make_tensor_temp_file("evict_mmap_resident", payload);
+  const std::string path_str = path.string();
+
+  mapped_owner_state owner{};
+  emel::model::tensor::event::request_mapped_load request{0, path_str, 0u,
+                                                          4096u};
+  request.on_done = {&owner, on_request_mapped_load_done};
+  request.on_error = {&owner, on_request_mapped_load_error};
+  REQUIRE(machine.process_event(request));
+
+  // Confirm tensor is mmap_resident before the legacy evict attempt.
+  emel::model::tensor::event::tensor_state state_before{};
+  REQUIRE(
+      machine.process_event(emel::model::tensor::event::capture_tensor_state{
+          .tensor_id = 0,
+          .state_out = &state_before,
+      }));
+  REQUIRE(state_before.lifecycle_state ==
+          emel::model::tensor::event::lifecycle::mmap_resident);
+
+  // Legacy evict_tensor on a mmap_resident tensor must be rejected so the
+  // mmap slot is not silently leaked.
+  int32_t err =
+      static_cast<int32_t>(emel::error::cast(emel::model::tensor::error::none));
+  CHECK_FALSE(machine.process_event(emel::model::tensor::event::evict_tensor{
+      .tensor_id = 0,
+      .error_out = &err,
+  }));
+  CHECK(err == static_cast<int32_t>(emel::error::cast(
+                   emel::model::tensor::error::invalid_request)));
+
+  // Lifecycle/buffer/handle must survive the rejected legacy eviction.
+  emel::model::tensor::event::tensor_state state_after{};
+  REQUIRE(
+      machine.process_event(emel::model::tensor::event::capture_tensor_state{
+          .tensor_id = 0,
+          .state_out = &state_after,
+      }));
+  CHECK(state_after.lifecycle_state ==
+        emel::model::tensor::event::lifecycle::mmap_resident);
+  CHECK(state_after.buffer == state_before.buffer);
+  CHECK(state_after.buffer_bytes == state_before.buffer_bytes);
+
+  // Proper release path still works after the rejected legacy evict.
+  emel::model::tensor::event::release_mapped_load release{0,
+                                                          owner.mapping_handle};
+  release.on_done = {&owner, on_release_mapped_load_done};
+  release.on_error = {&owner, on_release_mapped_load_error};
+  CHECK(machine.process_event(release));
+  CHECK(owner.release_done);
+
+  std::filesystem::remove(path);
+}

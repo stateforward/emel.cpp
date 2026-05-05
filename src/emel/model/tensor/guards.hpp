@@ -446,11 +446,20 @@ struct bind_tensor_request_invalid {
 };
 
 struct evict_tensor_request_valid {
+  // Reject legacy eviction of mmap_resident tensors: their mapping must be
+  // released through `release_mapped_load`/`io::mmap::release_mapping` so the
+  // OS mapping and slot are properly torn down. Allowing a legacy evict to
+  // null the buffer here would leak the mmap slot and OS mapping. See PR #83
+  // review thread PRRT_kwDORRHzJs5_hhby.
   bool operator()(const tensor::detail::evict_tensor_runtime &ev,
                   const action::context &ctx) const noexcept {
-    return detail::valid_tensor_id(ev.request.tensor_id) &&
-           ctx.tensors.lifecycle[static_cast<size_t>(ev.request.tensor_id)] !=
-               event::lifecycle::unbound;
+    if (!detail::valid_tensor_id(ev.request.tensor_id)) {
+      return false;
+    }
+    const auto lifecycle =
+        ctx.tensors.lifecycle[static_cast<size_t>(ev.request.tensor_id)];
+    return lifecycle != event::lifecycle::unbound &&
+           lifecycle != event::lifecycle::mmap_resident;
   }
 };
 

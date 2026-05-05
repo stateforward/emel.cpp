@@ -574,6 +574,7 @@ tests/graph/processor/processor_tests.cpp
 tests/graph/tensor/lifecycle_tests.cpp
 tests/graph/wrapper_visibility_tests.cpp
 tests/io/loader/lifecycle_tests.cpp
+tests/io/mmap/lifecycle_tests.cpp
 tests/kernel/aarch64_tests.cpp
 tests/kernel/lifecycle_tests.cpp
 tests/kernel/test_helpers.hpp
