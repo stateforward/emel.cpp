@@ -67,11 +67,16 @@ struct model {
       //------------------------------------------------------------------------------//
       // Tensor-owned bulk storage binding.
         sml::state<state_bind_storage_decision> <= *sml::state<ready>
-          + sml::event<detail::bind_storage_runtime> [ guard::storage_bind_valid{} ]
+          + sml::event<detail::bind_storage_runtime>
+          [ guard::guard_storage_bind_valid_without_mmap_resident{} ]
           / action::effect_bind_storage
       , sml::state<state_bind_storage_error_decision> <= sml::state<ready>
           + sml::event<detail::bind_storage_runtime> [ guard::storage_bind_invalid{} ]
-          / action::record_bind_storage_invalid_request_and_clear_binding
+          / action::record_bind_storage_invalid_request
+      , sml::state<state_bind_storage_error_decision> <= sml::state<ready>
+          + sml::event<detail::bind_storage_runtime>
+          [ guard::guard_storage_bind_valid_with_mmap_resident{} ]
+          / action::record_bind_storage_invalid_request
 
       , sml::state<state_bind_storage_done_decision> <= sml::state<state_bind_storage_decision>
           + sml::completion<detail::bind_storage_runtime>

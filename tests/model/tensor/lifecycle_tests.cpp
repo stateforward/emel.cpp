@@ -397,7 +397,7 @@ TEST_CASE("model_tensor_storage_load_rejects_invalid_inputs") {
   CHECK(owner.err == emel::error::cast(emel::model::tensor::error::capacity));
 }
 
-TEST_CASE("model_tensor_invalid_rebind_clears_prior_bulk_binding") {
+TEST_CASE("model_tensor_invalid_rebind_preserves_prior_bulk_binding") {
   emel::model::tensor::sm machine{};
   owner_state owner{};
   std::array<emel::model::data::tensor_record, 1> tensors{};
@@ -423,18 +423,6 @@ TEST_CASE("model_tensor_invalid_rebind_clears_prior_bulk_binding") {
   CHECK(owner.err ==
         emel::error::cast(emel::model::tensor::error::invalid_request));
 
-  std::array<emel::model::tensor::effect_request, 1> effects{};
-  emel::model::tensor::event::plan_load plan{std::span{effects}};
-  plan.on_done = {&owner, on_plan_load_done};
-  plan.on_error = {&owner, on_plan_load_error};
-  owner.plan_done = false;
-  owner.plan_error = false;
-  CHECK_FALSE(machine.process_event(plan));
-  CHECK_FALSE(owner.plan_done);
-  CHECK(owner.plan_error);
-  CHECK(owner.err ==
-        emel::error::cast(emel::model::tensor::error::invalid_request));
-
   emel::model::tensor::event::tensor_state state{};
   CHECK(machine.process_event(emel::model::tensor::event::capture_tensor_state{
       .tensor_id = 0,
@@ -444,10 +432,22 @@ TEST_CASE("model_tensor_invalid_rebind_clears_prior_bulk_binding") {
         emel::model::tensor::event::lifecycle::unbound);
   CHECK(state.buffer == nullptr);
   CHECK(state.buffer_bytes == 0u);
-  CHECK(state.file_offset == 0u);
-  CHECK(state.data_size == 0u);
-  CHECK(state.file_index == 0u);
-  CHECK(state.tensor_type == 0);
+  CHECK(state.file_offset == 4096u);
+  CHECK(state.data_size == 32u);
+  CHECK(state.file_index == 1u);
+  CHECK(state.tensor_type == 7);
+
+  std::array<emel::model::tensor::effect_request, 1> effects{};
+  emel::model::tensor::event::plan_load plan{std::span{effects}};
+  plan.on_done = {&owner, on_plan_load_done};
+  plan.on_error = {&owner, on_plan_load_error};
+  owner.plan_done = false;
+  owner.plan_error = false;
+  CHECK(machine.process_event(plan));
+  CHECK(owner.plan_done);
+  CHECK_FALSE(owner.plan_error);
+  CHECK(effects[0].offset == 4096u);
+  CHECK(effects[0].size == 32u);
 }
 
 TEST_CASE("model_tensor_bulk_storage_supports_absent_callbacks") {
@@ -1004,6 +1004,115 @@ TEST_CASE("model_tensor_request_mapped_load_requires_done_callback") {
   CHECK(owner.request_error);
   CHECK(owner.request_err ==
         emel::error::cast(emel::model::tensor::error::invalid_request));
+  std::filesystem::remove(path);
+}
+
+TEST_CASE("model_tensor_bind_storage_rejects_mmap_resident_rebind") {
+  emel::io::mmap::sm io_mmap_actor{};
+  emel::model::tensor::sm machine = make_tensor_sm_with_io_mmap(io_mmap_actor);
+  std::array<emel::model::data::tensor_record, 1> tensors{};
+  prepare_storage_for_one_tensor(machine, tensors);
+
+  const auto payload = make_tensor_payload(4096u, 0x45u);
+  const auto path = make_tensor_temp_file("rebind_mmap_resident", payload);
+  const std::string path_str = path.string();
+
+  mapped_owner_state mapped_owner{};
+  emel::model::tensor::event::request_mapped_load request{0, path_str, 0u,
+                                                          4096u};
+  request.on_done = {&mapped_owner, on_request_mapped_load_done};
+  request.on_error = {&mapped_owner, on_request_mapped_load_error};
+  REQUIRE(machine.process_event(request));
+
+  std::array<emel::model::data::tensor_record, 1> replacement{};
+  replacement[0].file_offset = 8192u;
+  replacement[0].data_size = 64u;
+  replacement[0].file_index = 2u;
+  replacement[0].type = 8;
+  owner_state bind_owner{};
+  emel::model::tensor::event::bind_storage rebind{std::span{replacement}};
+  rebind.on_done = {&bind_owner, on_bind_storage_done};
+  rebind.on_error = {&bind_owner, on_bind_storage_error};
+  CHECK_FALSE(machine.process_event(rebind));
+  CHECK_FALSE(bind_owner.bind_done);
+  CHECK(bind_owner.bind_error);
+  CHECK(bind_owner.err ==
+        emel::error::cast(emel::model::tensor::error::invalid_request));
+
+  emel::model::tensor::event::tensor_state state{};
+  REQUIRE(
+      machine.process_event(emel::model::tensor::event::capture_tensor_state{
+          .tensor_id = 0,
+          .state_out = &state,
+      }));
+  CHECK(state.lifecycle_state ==
+        emel::model::tensor::event::lifecycle::mmap_resident);
+  CHECK(state.buffer == mapped_owner.buffer);
+  CHECK(state.buffer_bytes == 4096u);
+
+  emel::model::tensor::event::release_mapped_load release{
+      0, mapped_owner.mapping_handle};
+  release.on_done = {&mapped_owner, on_release_mapped_load_done};
+  release.on_error = {&mapped_owner, on_release_mapped_load_error};
+  CHECK(machine.process_event(release));
+  CHECK(mapped_owner.release_done);
+
+  bind_owner.bind_done = false;
+  bind_owner.bind_error = false;
+  CHECK(machine.process_event(rebind));
+  CHECK(bind_owner.bind_done);
+  CHECK_FALSE(bind_owner.bind_error);
+
+  std::filesystem::remove(path);
+}
+
+TEST_CASE("model_tensor_invalid_bind_preserves_mmap_resident_release") {
+  emel::io::mmap::sm io_mmap_actor{};
+  emel::model::tensor::sm machine = make_tensor_sm_with_io_mmap(io_mmap_actor);
+  std::array<emel::model::data::tensor_record, 1> tensors{};
+  prepare_storage_for_one_tensor(machine, tensors);
+
+  const auto payload = make_tensor_payload(4096u, 0x46u);
+  const auto path =
+      make_tensor_temp_file("invalid_bind_mmap_resident", payload);
+  const std::string path_str = path.string();
+
+  mapped_owner_state mapped_owner{};
+  emel::model::tensor::event::request_mapped_load request{0, path_str, 0u,
+                                                          4096u};
+  request.on_done = {&mapped_owner, on_request_mapped_load_done};
+  request.on_error = {&mapped_owner, on_request_mapped_load_error};
+  REQUIRE(machine.process_event(request));
+
+  owner_state bind_owner{};
+  emel::model::tensor::event::bind_storage invalid_bind{
+      std::span{tensors}.subspan(0u, 0u)};
+  invalid_bind.on_done = {&bind_owner, on_bind_storage_done};
+  invalid_bind.on_error = {&bind_owner, on_bind_storage_error};
+  CHECK_FALSE(machine.process_event(invalid_bind));
+  CHECK_FALSE(bind_owner.bind_done);
+  CHECK(bind_owner.bind_error);
+  CHECK(bind_owner.err ==
+        emel::error::cast(emel::model::tensor::error::invalid_request));
+
+  emel::model::tensor::event::tensor_state state{};
+  REQUIRE(
+      machine.process_event(emel::model::tensor::event::capture_tensor_state{
+          .tensor_id = 0,
+          .state_out = &state,
+      }));
+  CHECK(state.lifecycle_state ==
+        emel::model::tensor::event::lifecycle::mmap_resident);
+  CHECK(state.buffer == mapped_owner.buffer);
+  CHECK(state.buffer_bytes == 4096u);
+
+  emel::model::tensor::event::release_mapped_load release{
+      0, mapped_owner.mapping_handle};
+  release.on_done = {&mapped_owner, on_release_mapped_load_done};
+  release.on_error = {&mapped_owner, on_release_mapped_load_error};
+  CHECK(machine.process_event(release));
+  CHECK(mapped_owner.release_done);
+
   std::filesystem::remove(path);
 }
 

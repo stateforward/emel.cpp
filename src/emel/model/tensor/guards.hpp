@@ -36,6 +36,41 @@ struct storage_bind_invalid {
   }
 };
 
+struct guard_storage_has_mmap_resident {
+  bool operator()(const action::context &ctx) const noexcept {
+    for (size_t tensor_id = 0u; tensor_id < ctx.tensors.active_extent;
+         ++tensor_id) {
+      if (ctx.tensors.lifecycle[tensor_id] == event::lifecycle::mmap_resident) {
+        return true;
+      }
+    }
+    return false;
+  }
+};
+
+struct guard_storage_has_no_mmap_resident {
+  bool operator()(const action::context &ctx) const noexcept {
+    return !guard_storage_has_mmap_resident{}(ctx);
+  }
+};
+
+struct guard_storage_bind_valid_without_mmap_resident {
+  template <class event_type>
+  bool operator()(const event_type &ev,
+                  const action::context &ctx) const noexcept {
+    return storage_bind_valid{}(ev) &&
+           guard_storage_has_no_mmap_resident{}(ctx);
+  }
+};
+
+struct guard_storage_bind_valid_with_mmap_resident {
+  template <class event_type>
+  bool operator()(const event_type &ev,
+                  const action::context &ctx) const noexcept {
+    return storage_bind_valid{}(ev) && guard_storage_has_mmap_resident{}(ctx);
+  }
+};
+
 struct storage_bound {
   bool operator()(const action::context &ctx) const noexcept {
     return ctx.tensors.active_extent != 0u;

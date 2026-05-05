@@ -236,16 +236,6 @@ struct record_bind_storage_invalid_request {
   }
 };
 
-struct record_bind_storage_invalid_request_and_clear_binding {
-  template <class event_type>
-  void operator()(const event_type &ev, context &ctx) const noexcept {
-    binding::reset_storage_binding(ctx);
-    auto &runtime_ev = tensor::detail::unwrap_runtime_event(ev);
-    runtime_ev.ctx.err = emel::error::cast(error::invalid_request);
-    runtime_ev.ctx.ok = false;
-  }
-};
-
 struct record_plan_load_done {
   template <class event_type>
   void operator()(const event_type &ev, context &) const noexcept {
@@ -728,8 +718,6 @@ inline constexpr publish_bind_storage_error publish_bind_storage_error{};
 inline constexpr record_bind_storage_done record_bind_storage_done{};
 inline constexpr record_bind_storage_invalid_request
     record_bind_storage_invalid_request{};
-inline constexpr record_bind_storage_invalid_request_and_clear_binding
-    record_bind_storage_invalid_request_and_clear_binding{};
 inline constexpr record_plan_load_done record_plan_load_done{};
 inline constexpr publish_plan_load_done publish_plan_load_done{};
 inline constexpr record_plan_load_invalid_request
