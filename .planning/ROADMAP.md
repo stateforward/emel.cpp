@@ -48,6 +48,143 @@ and device strategies remain out of scope.
 Active artifacts:
 - `.planning/REQUIREMENTS.md` (v1.25 active requirements)
 
+**Execution Order:** Phases execute in numeric order: 212 -> 213 -> 214 -> 215 -> 216 -> 217 -> 218.
+
+#### Phase 212: Read Strategy Component Boundary
+**Goal**: Maintainers can identify `io/read` as the canonical read/copy strategy actor under
+`src/emel/io`.
+**Depends on**: Phase 211
+**Requirements**: READ-01
+**Success Criteria** (what must be TRUE):
+  1. Maintainer can inspect `src/emel/io/read` and find component-local `context`, `events`,
+     `guards`, `actions`, `errors`, and `sm` ownership.
+  2. Maintainer can use canonical `emel::io::read::sm` ownership and public aliases without
+     reaching into actor internals.
+  3. Maintainer can confirm the component is read/copy-only and contains no mmap, staged or
+     chunked constrained-memory, cooperative async, device-specific, loader-owned byte access,
+     model-family widening, or tool-only read scaffold behavior.
+**Plans**: TBD (run `$gsd-plan-phase 212`).
+
+#### Phase 213: Read Validation and Platform Gating
+**Goal**: The read actor accepts read attempts only after explicit request, platform, file,
+offset, length, layout, and target-buffer preconditions pass.
+**Depends on**: Phase 212
+**Requirements**: READ-02, PLAT-01
+**Success Criteria** (what must be TRUE):
+  1. Caller sees invalid request, file, offset, length, layout, or target-buffer preconditions
+     rejected before any open or read attempt is accepted.
+  2. Caller sees unsupported platforms and unsupported file/resource shapes fail closed
+     deterministically through the I/O abstraction boundary.
+  3. Maintainer can inspect SML guards and transitions and see validation outcomes modeled
+     before the open/read attempt.
+  4. Supported requests reach a read-attempt state only after all read preconditions are true.
+**Plans**: TBD (run `$gsd-plan-phase 213`).
+
+#### Phase 214: Read Execution, Errors, and Lifetime
+**Goal**: Successful read requests deliver deterministic copied bytes into the caller-owned
+target buffer with deterministic transient-resource lifetime and deterministic failure
+outcomes, without taking tensor residency ownership.
+**Depends on**: Phase 213
+**Requirements**: READ-03, LIFE-01, ERR-01
+**Success Criteria** (what must be TRUE):
+  1. Caller receives a deterministic copied-bytes outcome on success with the requested byte
+     span written into the caller-provided owned target buffer; the read strategy never claims
+     residency ownership.
+  2. Read failures surface deterministic error categories (invalid request, unsupported
+     resource, unsupported platform, file open failed, file seek failed, file read failed,
+     short read, internal error) instead of thrown exceptions or ambiguous status mirroring.
+  3. Transient OS resources (file descriptor / handle) are released through the actor-owned
+     attempt before `_done` is published; no kernel handle is held across publication.
+  4. Maintainer can verify dispatch-local request data is not stored in `read::context` and
+     tensor residency semantics remain owned by `model/tensor`.
+**Plans**: TBD (run `$gsd-plan-phase 214`).
+
+#### Phase 215: Tensor-Owned Read Integration
+**Goal**: `model/tensor` can request and consume read-backed I/O through the public `emel/io`
+boundary while retaining load, bind, evict, and residency orchestration.
+**Depends on**: Phase 214
+**Requirements**: TIO-01, TIO-02
+**Success Criteria** (what must be TRUE):
+  1. Tensor load flow can request read-based (copy) loading through public `emel/io` events
+     without direct low-level read calls.
+  2. Tensor bind, residency, and evict transitions remain in `model/tensor` and consume read
+     success outcomes that reference the caller-owned target buffer.
+  3. Read success, unsupported, validation failure, file open failure, and file read failure
+     are visible as explicit `_done` and `_error` events or states.
+  4. Maintainer can verify no callback-selected outcomes, mirrored status fields, or context
+     phase flags decide tensor-to-I/O outcomes for read-backed loading.
+**Plans**: TBD (run `$gsd-plan-phase 215`).
+
+#### Phase 216: Public Runtime and Evidence Surfaces
+**Goal**: Runtime entrypoints and maintained tool lanes can select or report read-backed
+loading only through public surfaces, and evidence reflects the actual EMEL runtime path.
+**Depends on**: Phase 215
+**Requirements**: TIO-03, VAL-04
+**Success Criteria** (what must be TRUE):
+  1. `model/loader`, maintained benchmark lanes, paritychecker lanes, and embedded probes can
+     select or report read-backed loading only through public tensor and I/O runtime contracts.
+  2. Maintained benchmark, paritychecker, and embedded probe lanes avoid actor-internal
+     reach-through and contain no low-level read logic.
+  3. Benchmark and parity output reports read-strategy usage only when the EMEL lane executed
+     the read-backed runtime path.
+  4. Unsupported or fallback behavior is reported as unsupported or non-read-strategy, not as
+     read-strategy parity or performance evidence.
+**Plans**: TBD (run `$gsd-plan-phase 216`).
+
+#### Phase 217: Behavior Tests and Scope Guardrails
+**Goal**: Tests and guardrails prove read behavior through public dispatch and prevent scope
+or ownership leaks.
+**Depends on**: Phase 216
+**Requirements**: VAL-01, VAL-02
+**Success Criteria** (what must be TRUE):
+  1. Doctests drive supported read behavior through `process_event(...)` and inspect SML states
+     via `visit_current_states` and/or `is(...)`.
+  2. Doctests cover representative unsupported, validation failure, file open failure, and file
+     read failure outcomes through public events.
+  3. Guardrails fail if read implementation leaks into `model/loader` or tensor residency
+     ownership moves out of `model/tensor`.
+  4. Guardrails fail if mmap, staged or chunked constrained-memory, cooperative async,
+     device-specific, model-family widening, loader-owned byte access, or tool-only read
+     scaffold behavior enters this milestone.
+**Plans**: TBD (run `$gsd-plan-phase 217`).
+
+#### Phase 218: Publication and Maintained Artifact Updates
+**Goal**: Maintained docs, snapshots, benchmark outputs, model artifacts, and planning truth
+describe read-strategy support exactly as implemented.
+**Depends on**: Phase 217
+**Requirements**: VAL-03
+**Success Criteria** (what must be TRUE):
+  1. Public docs and generated architecture docs describe the read/copy strategy path,
+     ownership boundaries, and deferred strategies (mmap shipped in v1.24; staged/async/device
+     remain deferred) truthfully.
+  2. Lint snapshots, benchmark snapshots, benchmark outputs, and model artifacts are updated
+     from maintained commands when the implementation changes them.
+  3. Planning artifacts record final requirement coverage, validation evidence, and any
+     approved artifact updates for v1.25.
+  4. Closeout artifacts do not claim read-strategy support beyond source-backed maintained
+     runtime behavior.
+**Plans**: TBD (run `$gsd-plan-phase 218`).
+
+#### Coverage
+
+| Requirement | Phase |
+|-------------|-------|
+| READ-01 | Phase 212 |
+| READ-02 | Phase 213 |
+| PLAT-01 | Phase 213 |
+| READ-03 | Phase 214 |
+| LIFE-01 | Phase 214 |
+| ERR-01 | Phase 214 |
+| TIO-01 | Phase 215 |
+| TIO-02 | Phase 215 |
+| TIO-03 | Phase 216 |
+| VAL-04 | Phase 216 |
+| VAL-01 | Phase 217 |
+| VAL-02 | Phase 217 |
+| VAL-03 | Phase 218 |
+
+Mapped: 13/13 v1 requirements; all pending.
+
 <details>
 <summary>✅ v1.24 I/O Mmap Loading Strategy (Phases 204-211) — SHIPPED 2026-05-04</summary>
 
