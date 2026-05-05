@@ -69,6 +69,7 @@ endif()
 
 add_library(emel STATIC
   src/emel/io/mmap/actions.cpp
+  src/emel/io/read/actions.cpp
   src/emel/model/architecture/detail.cpp
   src/emel/model/detail.cpp
   src/emel/model/data.cpp

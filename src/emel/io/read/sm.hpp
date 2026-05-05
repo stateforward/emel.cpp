@@ -18,9 +18,16 @@ struct state_layout_decision {};
 struct state_target_buffer_decision {};
 struct state_platform_decision {};
 struct state_read_attempt_decision {};
+struct state_file_open_decision {};
+struct state_file_read_decision {};
+struct state_done_callback {};
 struct state_invalid_request_error_decision {};
 struct state_unsupported_resource_error_decision {};
 struct state_unsupported_platform_error_decision {};
+struct state_file_open_failed_error_decision {};
+struct state_file_seek_failed_error_decision {};
+struct state_file_read_failed_error_decision {};
+struct state_short_read_error_decision {};
 struct state_error_callback {};
 
 struct model {
@@ -108,13 +115,12 @@ struct model {
           / action::effect_mark_invalid_request
 
       //------------------------------------------------------------------------------//
-      // Platform validation. Phase 214 replaces the read-attempt placeholder
-      // with concrete open/seek/read execution and lifetime management.
+      // Platform validation.
       , sml::state<state_read_attempt_decision> <=
           sml::state<state_platform_decision>
           + sml::completion<detail::read_tensor_runtime>
           [ guard::platform_read_supported{} ]
-          / action::effect_mark_unsupported_resource
+          / action::effect_attempt_open
       , sml::state<state_unsupported_platform_error_decision> <=
           sml::state<state_platform_decision>
           + sml::completion<detail::read_tensor_runtime>
@@ -122,18 +128,49 @@ struct model {
           / action::effect_mark_unsupported_platform
 
       //------------------------------------------------------------------------------//
-      // Read-attempt placeholder publication. Reaching this state proves all
-      // Phase 213 preconditions passed; Phase 214 supplies the actual attempt.
-      , sml::state<state_error_callback> <=
+      // Open, seek, read, and close lifetime. The read action closes the
+      // transient OS resource before any done publication is reachable.
+      , sml::state<state_file_open_decision> <=
           sml::state<state_read_attempt_decision>
           + sml::completion<detail::read_tensor_runtime>
-          [ guard::error_callback_present{} ]
-          / action::effect_publish_read_tensor_error
-      , sml::state<state_ready> <=
+          [ guard::file_open_succeeded{} ]
+          / action::effect_attempt_seek
+      , sml::state<state_file_open_failed_error_decision> <=
           sml::state<state_read_attempt_decision>
           + sml::completion<detail::read_tensor_runtime>
-          [ guard::error_callback_absent{} ]
-          / action::effect_record_read_tensor_error
+          [ guard::file_open_failed{} ]
+          / action::effect_mark_file_open_failed
+      , sml::state<state_file_read_decision> <=
+          sml::state<state_file_open_decision>
+          + sml::completion<detail::read_tensor_runtime>
+          [ guard::file_seek_succeeded{} ]
+          / action::effect_attempt_read_and_close
+      , sml::state<state_file_seek_failed_error_decision> <=
+          sml::state<state_file_open_decision>
+          + sml::completion<detail::read_tensor_runtime>
+          [ guard::file_seek_failed{} ]
+          / action::effect_mark_file_seek_failed_and_close
+      , sml::state<state_file_read_failed_error_decision> <=
+          sml::state<state_file_read_decision>
+          + sml::completion<detail::read_tensor_runtime>
+          [ guard::file_read_failed{} ]
+          / action::effect_mark_file_read_failed
+      , sml::state<state_short_read_error_decision> <=
+          sml::state<state_file_read_decision>
+          + sml::completion<detail::read_tensor_runtime>
+          [ guard::file_read_short{} ]
+          / action::effect_mark_short_read
+      , sml::state<state_done_callback> <=
+          sml::state<state_file_read_decision>
+          + sml::completion<detail::read_tensor_runtime>
+          [ guard::file_read_succeeded{} ]
+          / action::effect_mark_read_tensor_done
+
+      //------------------------------------------------------------------------------//
+      // Done publication.
+      , sml::state<state_ready> <= sml::state<state_done_callback>
+          + sml::completion<detail::read_tensor_runtime>
+          / action::effect_publish_read_tensor_done
 
       //------------------------------------------------------------------------------//
       // Read_tensor error publication for validation/platform legs.
@@ -167,6 +204,46 @@ struct model {
           + sml::completion<detail::read_tensor_runtime>
           [ guard::error_callback_absent{} ]
           / action::effect_record_read_tensor_error
+      , sml::state<state_error_callback> <=
+          sml::state<state_file_open_failed_error_decision>
+          + sml::completion<detail::read_tensor_runtime>
+          [ guard::error_callback_present{} ]
+          / action::effect_publish_read_tensor_error
+      , sml::state<state_ready> <=
+          sml::state<state_file_open_failed_error_decision>
+          + sml::completion<detail::read_tensor_runtime>
+          [ guard::error_callback_absent{} ]
+          / action::effect_record_read_tensor_error
+      , sml::state<state_error_callback> <=
+          sml::state<state_file_seek_failed_error_decision>
+          + sml::completion<detail::read_tensor_runtime>
+          [ guard::error_callback_present{} ]
+          / action::effect_publish_read_tensor_error
+      , sml::state<state_ready> <=
+          sml::state<state_file_seek_failed_error_decision>
+          + sml::completion<detail::read_tensor_runtime>
+          [ guard::error_callback_absent{} ]
+          / action::effect_record_read_tensor_error
+      , sml::state<state_error_callback> <=
+          sml::state<state_file_read_failed_error_decision>
+          + sml::completion<detail::read_tensor_runtime>
+          [ guard::error_callback_present{} ]
+          / action::effect_publish_read_tensor_error
+      , sml::state<state_ready> <=
+          sml::state<state_file_read_failed_error_decision>
+          + sml::completion<detail::read_tensor_runtime>
+          [ guard::error_callback_absent{} ]
+          / action::effect_record_read_tensor_error
+      , sml::state<state_error_callback> <=
+          sml::state<state_short_read_error_decision>
+          + sml::completion<detail::read_tensor_runtime>
+          [ guard::error_callback_present{} ]
+          / action::effect_publish_read_tensor_error
+      , sml::state<state_ready> <=
+          sml::state<state_short_read_error_decision>
+          + sml::completion<detail::read_tensor_runtime>
+          [ guard::error_callback_absent{} ]
+          / action::effect_record_read_tensor_error
 
       //------------------------------------------------------------------------------//
       // Synchronous error callback recovery.
@@ -195,6 +272,12 @@ struct model {
           + sml::unexpected_event<sml::_> / action::effect_on_unexpected
       , sml::state<state_ready> <= sml::state<state_read_attempt_decision>
           + sml::unexpected_event<sml::_> / action::effect_on_unexpected
+      , sml::state<state_ready> <= sml::state<state_file_open_decision>
+          + sml::unexpected_event<sml::_> / action::effect_on_unexpected
+      , sml::state<state_ready> <= sml::state<state_file_read_decision>
+          + sml::unexpected_event<sml::_> / action::effect_on_unexpected
+      , sml::state<state_ready> <= sml::state<state_done_callback>
+          + sml::unexpected_event<sml::_> / action::effect_on_unexpected
       , sml::state<state_ready> <=
           sml::state<state_invalid_request_error_decision>
           + sml::unexpected_event<sml::_> / action::effect_on_unexpected
@@ -203,6 +286,18 @@ struct model {
           + sml::unexpected_event<sml::_> / action::effect_on_unexpected
       , sml::state<state_ready> <=
           sml::state<state_unsupported_platform_error_decision>
+          + sml::unexpected_event<sml::_> / action::effect_on_unexpected
+      , sml::state<state_ready> <=
+          sml::state<state_file_open_failed_error_decision>
+          + sml::unexpected_event<sml::_> / action::effect_on_unexpected
+      , sml::state<state_ready> <=
+          sml::state<state_file_seek_failed_error_decision>
+          + sml::unexpected_event<sml::_> / action::effect_on_unexpected
+      , sml::state<state_ready> <=
+          sml::state<state_file_read_failed_error_decision>
+          + sml::unexpected_event<sml::_> / action::effect_on_unexpected
+      , sml::state<state_ready> <=
+          sml::state<state_short_read_error_decision>
           + sml::unexpected_event<sml::_> / action::effect_on_unexpected
       , sml::state<state_ready> <= sml::state<state_error_callback>
           + sml::unexpected_event<sml::_> / action::effect_on_unexpected

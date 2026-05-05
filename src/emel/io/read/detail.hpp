@@ -11,6 +11,11 @@ namespace emel::io::read::detail {
 struct read_attempt_status {
   emel::error::type err = emel::error::cast(error::none);
   bool ok = false;
+  intptr_t os_resource = -1;
+  uint64_t bytes_copied = 0u;
+  bool file_open_ok = false;
+  bool file_seek_ok = false;
+  bool file_read_ok = false;
 };
 
 // Internal-only carrier that bridges a public `event::read_tensor` trigger

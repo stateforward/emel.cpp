@@ -3,6 +3,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <cstring>
 #include <string>
 #include <string_view>
 
@@ -55,6 +56,13 @@ std::string read_text_file(const std::filesystem::path &path) {
                      std::istreambuf_iterator<char>{}};
 }
 
+void write_text_file(const std::filesystem::path &path, std::string_view text) {
+  std::ofstream output{path, std::ios::binary};
+  REQUIRE(output.good());
+  output.write(text.data(), static_cast<std::streamsize>(text.size()));
+  REQUIRE(output.good());
+}
+
 emel::io::read::event::read_tensor_request make_request(
     std::string_view path,
     void *target_buffer,
@@ -72,14 +80,6 @@ emel::io::read::event::read_tensor_request make_request(
 
 struct unrelated_event {};
 
-constexpr emel::error::type supported_platform_boundary_error() noexcept {
-#if EMEL_IO_READ_PLATFORM_SUPPORTED != 0
-  return emel::error::cast(emel::io::read::error::unsupported_resource);
-#else
-  return emel::error::cast(emel::io::read::error::unsupported_platform);
-#endif
-}
-
 } // namespace
 
 TEST_CASE("io read exposes canonical machine aliases at component boundary") {
@@ -91,11 +91,34 @@ TEST_CASE("io read exposes canonical machine aliases at component boundary") {
       top_level_read.is(stateforward::sml::state<emel::io::read::state_ready>));
 }
 
-TEST_CASE("io read validates then fails closed before execution") {
+TEST_CASE("io read copies requested bytes into caller-owned target buffer") {
   emel::io::read::sm strategy{};
   read_owner_state owner{};
-  uint8_t target[16]{};
-  const auto request = make_request("/tmp/emel_io_read_boundary.bin", target,
+  uint8_t target[4]{};
+  const auto path = repo_root() / "build" / "emel_io_read_success.bin";
+  write_text_file(path, "abcdef");
+  const std::string path_text = path.string();
+  auto request = make_request(path_text, target, 3u);
+  request.file_offset = 2u;
+  request.byte_size = 3u;
+  emel::io::read::event::read_tensor read_request{request};
+  read_request.on_done = {&owner, on_read_done};
+  read_request.on_error = {&owner, on_read_error};
+
+  REQUIRE(strategy.process_event(read_request));
+  REQUIRE(owner.done);
+  CHECK_FALSE(owner.error);
+  CHECK(owner.bytes_copied == 3u);
+  CHECK(owner.target_buffer == target);
+  CHECK(std::memcmp(target, "cde", 3u) == 0);
+  CHECK(strategy.is(stateforward::sml::state<emel::io::read::state_ready>));
+}
+
+TEST_CASE("io read reports file open failures deterministically") {
+  emel::io::read::sm strategy{};
+  read_owner_state owner{};
+  uint8_t target[8]{};
+  const auto request = make_request("/tmp/emel_io_read_missing.bin", target,
                                     static_cast<uint64_t>(sizeof(target)));
   emel::io::read::event::read_tensor read_request{request};
   read_request.on_done = {&owner, on_read_done};
@@ -104,7 +127,8 @@ TEST_CASE("io read validates then fails closed before execution") {
   CHECK_FALSE(strategy.process_event(read_request));
   CHECK_FALSE(owner.done);
   REQUIRE(owner.error);
-  CHECK(owner.err == supported_platform_boundary_error());
+  CHECK(owner.err ==
+        emel::error::cast(emel::io::read::error::file_open_failed));
   CHECK(strategy.is(stateforward::sml::state<emel::io::read::state_ready>));
 }
 
@@ -243,6 +267,25 @@ TEST_CASE("io read platform guard and unsupported action are explicit") {
   CHECK_FALSE(status.ok);
 }
 
+TEST_CASE("io read reports short reads deterministically") {
+  emel::io::read::sm strategy{};
+  read_owner_state owner{};
+  uint8_t target[8]{};
+  const auto path = repo_root() / "build" / "emel_io_read_short.bin";
+  write_text_file(path, "abc");
+  const std::string path_text = path.string();
+  const auto request = make_request(path_text, target, sizeof(target));
+  emel::io::read::event::read_tensor read_request{request};
+  read_request.on_done = {&owner, on_read_done};
+  read_request.on_error = {&owner, on_read_error};
+
+  CHECK_FALSE(strategy.process_event(read_request));
+  CHECK_FALSE(owner.done);
+  REQUIRE(owner.error);
+  CHECK(owner.err == emel::error::cast(emel::io::read::error::short_read));
+  CHECK(strategy.is(stateforward::sml::state<emel::io::read::state_ready>));
+}
+
 TEST_CASE("io read recovers to ready after fail-closed dispatches") {
   emel::io::read::sm strategy{};
   read_owner_state first{};
@@ -295,10 +338,11 @@ TEST_CASE("io read handles unexpected events deterministically") {
   CHECK(strategy.is(stateforward::sml::state<emel::io::read::state_ready>));
 }
 
-TEST_CASE("io read boundary contains no concrete platform read calls") {
+TEST_CASE("io read component contains no mmap or async strategy behavior") {
   const auto root = repo_root();
   const std::filesystem::path component = root / "src/emel/io/read";
   const std::string combined =
+      read_text_file(component / "actions.cpp") +
       read_text_file(component / "context.hpp") +
       read_text_file(component / "detail.hpp") +
       read_text_file(component / "errors.hpp") +
@@ -308,16 +352,9 @@ TEST_CASE("io read boundary contains no concrete platform read calls") {
       read_text_file(component / "sm.hpp");
 
   const std::string_view source{combined};
-  CHECK(source.find("pread") == std::string_view::npos);
-  CHECK(source.find("read(") == std::string_view::npos);
-  CHECK(source.find("lseek") == std::string_view::npos);
-  CHECK(source.find("open(") == std::string_view::npos);
-  CHECK(source.find("close(") == std::string_view::npos);
-  CHECK(source.find("ReadFile") == std::string_view::npos);
-  CHECK(source.find("CreateFileW") == std::string_view::npos);
-  CHECK(source.find("ifstream") == std::string_view::npos);
-  CHECK(source.find("fread") == std::string_view::npos);
-  CHECK(source.find("fopen") == std::string_view::npos);
-  CHECK(source.find("fseek") == std::string_view::npos);
-  CHECK(source.find("fclose") == std::string_view::npos);
+  CHECK(source.find("mmap") == std::string_view::npos);
+  CHECK(source.find("MapViewOfFile") == std::string_view::npos);
+  CHECK(source.find("async") == std::string_view::npos);
+  CHECK(source.find("staged") == std::string_view::npos);
+  CHECK(source.find("chunked") == std::string_view::npos);
 }

@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.25
 milestone_name: v1.25 I/O Read Loading Strategy
 status: in_progress
-stopped_at: Phase 213 read validation and platform gating validated; ready for Phase 214.
-last_updated: "2026-05-05T15:10:00Z"
+stopped_at: Phase 214 read execution, errors, and lifetime validated; ready for Phase 215.
+last_updated: "2026-05-05T15:35:00Z"
 last_activity: 2026-05-05
 progress:
   total_phases: 7
-  completed_phases: 2
+  completed_phases: 3
   total_plans: 7
-  completed_plans: 2
-  percent: 29
+  completed_plans: 3
+  percent: 43
 ---
 
 # Project State
@@ -28,15 +28,15 @@ residency, per GitHub issue #62.
 
 ## Current Position
 
-Phase: 214 (3 of 7) — pending plan
+Phase: 215 (4 of 7) — pending plan
 Plan: 01 — pending
-Status: Phase 213 validated 2026-05-05. `src/emel/io/read` now validates request span,
-file path, file index, length, layout, target buffer, and platform support before the
-read-attempt placeholder. Phase 214 is ready to add concrete read execution, errors, and
-lifetime management.
+Status: Phase 214 validated 2026-05-05. `src/emel/io/read` now performs concrete
+open/seek/read/close execution, publishes copied-byte success, and reports deterministic
+read execution errors. Phase 215 is ready to integrate tensor-owned read requests and
+outcome consumption.
 Last activity: 2026-05-05
 
-Progress: [###       ] 29%
+Progress: [####      ] 43%
 
 ## Performance Metrics
 
@@ -76,6 +76,9 @@ Recent decisions affecting this work (v1.25 scope):
   seek, read, or close. Supported-platform requests reach `state_read_attempt_decision`
   only after all preconditions pass, then fail closed with `unsupported_resource` until
   Phase 214 replaces the placeholder with real execution.
+- Phase 214 replaced the placeholder with component-local open/seek/read/close actions.
+  The read actor closes the transient OS resource before `_done` and still leaves tensor
+  load, bind, evict, and residency ownership to `model/tensor`.
 
 Carried-forward decisions from v1.24 still in effect:
 
@@ -119,6 +122,6 @@ Items acknowledged and deferred at v1.22 milestone close on 2026-05-03 (still ca
 
 ## Session Continuity
 
-Last session: 2026-05-05T15:10:00Z
-Stopped at: Phase 213 read validation and platform gating validated; ready to start Phase 214.
+Last session: 2026-05-05T15:35:00Z
+Stopped at: Phase 214 read execution, errors, and lifetime validated; ready to start Phase 215.
 Resume file: `.planning/REQUIREMENTS.md` (v1.25 active).

@@ -22,6 +22,11 @@ enum class error : emel::error::type {
   invalid_request = (1u << 0),
   unsupported_platform = (1u << 1),
   unsupported_resource = (1u << 2),
+  file_open_failed = (1u << 3),
+  file_seek_failed = (1u << 4),
+  file_read_failed = (1u << 5),
+  short_read = (1u << 6),
+  internal_error = (1u << 7),
 };
 
 inline constexpr uint16_t k_max_file_index = 65534u;

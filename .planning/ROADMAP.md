@@ -39,7 +39,7 @@ and device strategies remain out of scope.
 
 - [x] Phase 212: Read Strategy Component Boundary (1/1 plans) — completed 2026-05-05
 - [x] Phase 213: Read Validation and Platform Gating (1/1 plans) — completed 2026-05-05
-- [ ] Phase 214: Read Execution, Errors, and Lifetime (0/1 plans)
+- [x] Phase 214: Read Execution, Errors, and Lifetime (1/1 plans) — completed 2026-05-05
 - [ ] Phase 215: Tensor-Owned Read Integration (0/1 plans)
 - [ ] Phase 216: Public Runtime and Evidence Surfaces (0/1 plans)
 - [ ] Phase 217: Behavior Tests and Scope Guardrails (0/1 plans)
@@ -99,7 +99,8 @@ outcomes, without taking tensor residency ownership.
      attempt before `_done` is published; no kernel handle is held across publication.
   4. Maintainer can verify dispatch-local request data is not stored in `read::context` and
      tensor residency semantics remain owned by `model/tensor`.
-**Plans**: TBD (run `$gsd-plan-phase 214`).
+**Plans**: 01 — Validated 2026-05-05; added concrete read execution, copied-byte
+success, deterministic read errors, and close-before-done lifetime behavior.
 
 #### Phase 215: Tensor-Owned Read Integration
 **Goal**: `model/tensor` can request and consume read-backed I/O through the public `emel/io`
@@ -185,7 +186,7 @@ describe read-strategy support exactly as implemented.
 | VAL-02 | Phase 217 |
 | VAL-03 | Phase 218 |
 
-Mapped: 13/13 v1 requirements; validated 3, pending 10.
+Mapped: 13/13 v1 requirements; validated 6, pending 7.
 
 <details>
 <summary>✅ v1.24 I/O Mmap Loading Strategy (Phases 204-211) — SHIPPED 2026-05-04</summary>
@@ -230,7 +231,7 @@ strategies remain deferred follow-on work below the `emel/io` boundary.
 |-------|-----------|----------------|--------|-----------|
 | 212. Read Strategy Component Boundary | v1.25 | 1/1 | Validated | 2026-05-05 |
 | 213. Read Validation and Platform Gating | v1.25 | 1/1 | Validated | 2026-05-05 |
-| 214. Read Execution, Errors, and Lifetime | v1.25 | 0/1 | Pending | — |
+| 214. Read Execution, Errors, and Lifetime | v1.25 | 1/1 | Validated | 2026-05-05 |
 | 215. Tensor-Owned Read Integration | v1.25 | 0/1 | Pending | — |
 | 216. Public Runtime and Evidence Surfaces | v1.25 | 0/1 | Pending | — |
 | 217. Behavior Tests and Scope Guardrails | v1.25 | 0/1 | Pending | — |

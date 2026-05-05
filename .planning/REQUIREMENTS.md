@@ -17,7 +17,7 @@ Requirements for this milestone. Each maps to exactly one active roadmap phase.
 - [x] **READ-02**: The read strategy validates request, platform, file, offset, length, layout,
   and target-buffer preconditions through explicit guards and transitions before any open or
   read attempt is accepted.
-- [ ] **READ-03**: The read strategy returns a deterministic copied-bytes outcome into the
+- [x] **READ-03**: The read strategy returns a deterministic copied-bytes outcome into the
   caller-provided owned target buffer on success, releases all transient OS resources before
   publishing `_done`, and stores no dispatch-local request data in `context`.
 
@@ -38,11 +38,11 @@ Requirements for this milestone. Each maps to exactly one active roadmap phase.
 
 - [x] **PLAT-01**: Platform-specific file-read details are hidden behind the I/O abstraction
   boundary and fail closed on unsupported platforms or unsupported file/resource shapes.
-- [ ] **LIFE-01**: Read transient resource lifetime (file descriptor / handle) is deterministic,
+- [x] **LIFE-01**: Read transient resource lifetime (file descriptor / handle) is deterministic,
   bounded, and tied to the actor-owned attempt; no kernel handle is held across `_done`
   publication. The caller-provided target buffer remains owned by `model/tensor`; the
   read strategy never takes residency ownership.
-- [ ] **ERR-01**: Read-specific failures surface deterministic error categories (invalid
+- [x] **ERR-01**: Read-specific failures surface deterministic error categories (invalid
   request, unsupported resource, unsupported platform, file open failed, file seek failed,
   file read failed, short read, internal error) with enough source-backed evidence for
   tests and diagnostics, without throwing exceptions across API or actor boundaries.
@@ -99,10 +99,10 @@ Which phases cover which requirements. Updated during roadmap creation.
 |-------------|-------|--------|
 | READ-01 | Phase 212 | Validated |
 | READ-02 | Phase 213 | Validated |
-| READ-03 | Phase 214 | Pending |
+| READ-03 | Phase 214 | Validated |
 | PLAT-01 | Phase 213 | Validated |
-| LIFE-01 | Phase 214 | Pending |
-| ERR-01 | Phase 214 | Pending |
+| LIFE-01 | Phase 214 | Validated |
+| ERR-01 | Phase 214 | Validated |
 | TIO-01 | Phase 215 | Pending |
 | TIO-02 | Phase 215 | Pending |
 | TIO-03 | Phase 216 | Pending |
@@ -114,6 +114,6 @@ Which phases cover which requirements. Updated during roadmap creation.
 **Coverage:**
 - v1 requirements: 13 total
 - Mapped to phases: 13
-- Validated: 3
-- Pending: 10
+- Validated: 6
+- Pending: 7
 - Unmapped: 0

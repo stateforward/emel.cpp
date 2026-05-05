@@ -116,6 +116,57 @@ struct platform_read_unsupported {
   }
 };
 
+struct file_open_succeeded {
+  bool operator()(const detail::read_tensor_runtime &ev,
+                  const action::context &) const noexcept {
+    return ev.status.file_open_ok;
+  }
+};
+
+struct file_open_failed {
+  bool operator()(const detail::read_tensor_runtime &ev,
+                  const action::context &ctx) const noexcept {
+    return !file_open_succeeded{}(ev, ctx);
+  }
+};
+
+struct file_seek_succeeded {
+  bool operator()(const detail::read_tensor_runtime &ev,
+                  const action::context &) const noexcept {
+    return ev.status.file_seek_ok;
+  }
+};
+
+struct file_seek_failed {
+  bool operator()(const detail::read_tensor_runtime &ev,
+                  const action::context &ctx) const noexcept {
+    return !file_seek_succeeded{}(ev, ctx);
+  }
+};
+
+struct file_read_succeeded {
+  bool operator()(const detail::read_tensor_runtime &ev,
+                  const action::context &) const noexcept {
+    return ev.status.file_read_ok &&
+           ev.status.bytes_copied == ev.request.request.byte_size;
+  }
+};
+
+struct file_read_failed {
+  bool operator()(const detail::read_tensor_runtime &ev,
+                  const action::context &) const noexcept {
+    return !ev.status.file_read_ok;
+  }
+};
+
+struct file_read_short {
+  bool operator()(const detail::read_tensor_runtime &ev,
+                  const action::context &) const noexcept {
+    return ev.status.file_read_ok &&
+           ev.status.bytes_copied != ev.request.request.byte_size;
+  }
+};
+
 struct error_callback_present {
   bool operator()(const detail::read_tensor_runtime &ev) const noexcept {
     return static_cast<bool>(ev.request.on_error);
