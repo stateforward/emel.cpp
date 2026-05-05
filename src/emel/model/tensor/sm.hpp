@@ -42,7 +42,6 @@ struct done {};
 struct errored {};
 struct state_request_mapped_load_decision {};
 struct state_request_mapped_load_dispatch_decision {};
-struct state_request_mapped_load_publish_done_decision {};
 struct state_request_mapped_load_done_callback {};
 struct state_request_mapped_load_invalid_request_error_decision {};
 struct state_request_mapped_load_unsupported_io_mmap_error_decision {};
@@ -343,7 +342,7 @@ struct model {
                 request_mapped_load_io_mmap_present_request_valid_tensor_unbound{} ]
           / action::effect_attempt_request_mapped_load_dispatch
 
-      , sml::state<state_request_mapped_load_publish_done_decision>
+      , sml::state<state_request_mapped_load_done_callback>
             <= sml::state<state_request_mapped_load_dispatch_decision>
           + sml::completion<detail::request_mapped_load_runtime>
           [ guard::request_mapped_load_io_mmap_succeeded{} ]
@@ -354,14 +353,9 @@ struct model {
           [ guard::request_mapped_load_io_mmap_failed{} ]
           / action::effect_mark_request_mapped_load_io_mmap_failed
 
-      , sml::state<state_request_mapped_load_done_callback>
-            <= sml::state<state_request_mapped_load_publish_done_decision>
-          + sml::completion<detail::request_mapped_load_runtime>
-          [ guard::request_mapped_load_done_callback_present{} ]
-          / action::effect_publish_request_mapped_load_done
       , sml::state<ready> <= sml::state<state_request_mapped_load_done_callback>
           + sml::completion<detail::request_mapped_load_runtime>
-          / action::effect_record_request_mapped_load_done
+          / action::effect_publish_request_mapped_load_done
 
       , sml::state<state_request_mapped_load_error_callback>
             <= sml::state<state_request_mapped_load_invalid_request_error_decision>
@@ -570,9 +564,6 @@ struct model {
           + sml::unexpected_event<sml::_> / action::on_unexpected
       , sml::state<ready>
             <= sml::state<state_request_mapped_load_dispatch_decision>
-          + sml::unexpected_event<sml::_> / action::on_unexpected
-      , sml::state<ready>
-            <= sml::state<state_request_mapped_load_publish_done_decision>
           + sml::unexpected_event<sml::_> / action::on_unexpected
       , sml::state<ready> <= sml::state<state_request_mapped_load_done_callback>
           + sml::unexpected_event<sml::_> / action::on_unexpected

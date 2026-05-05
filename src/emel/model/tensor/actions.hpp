@@ -597,11 +597,6 @@ struct effect_publish_request_mapped_load_done {
   }
 };
 
-struct effect_record_request_mapped_load_done {
-  void operator()(const detail::request_mapped_load_runtime &,
-                  context &) const noexcept {}
-};
-
 struct effect_publish_request_mapped_load_error {
   void operator()(const detail::request_mapped_load_runtime &ev,
                   context &) const noexcept {
@@ -784,8 +779,6 @@ inline constexpr effect_mark_request_mapped_load_io_mmap_failed
     effect_mark_request_mapped_load_io_mmap_failed{};
 inline constexpr effect_publish_request_mapped_load_done
     effect_publish_request_mapped_load_done{};
-inline constexpr effect_record_request_mapped_load_done
-    effect_record_request_mapped_load_done{};
 inline constexpr effect_publish_request_mapped_load_error
     effect_publish_request_mapped_load_error{};
 inline constexpr effect_record_request_mapped_load_error

@@ -564,13 +564,6 @@ struct request_mapped_load_done_callback_present {
   }
 };
 
-struct request_mapped_load_done_callback_absent {
-  bool operator()(
-      const tensor::detail::request_mapped_load_runtime &ev) const noexcept {
-    return !request_mapped_load_done_callback_present{}(ev);
-  }
-};
-
 struct request_mapped_load_error_callback_present {
   bool operator()(
       const tensor::detail::request_mapped_load_runtime &ev) const noexcept {
