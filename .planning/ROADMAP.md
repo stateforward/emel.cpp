@@ -26,8 +26,27 @@
 - ✅ **v1.22 Weight Loading Ownership Cutover** — shipped 2026-05-03
 - ✅ **v1.23 I/O Loading Strategy Boundary** — shipped 2026-05-04
 - ✅ **v1.24 I/O Mmap Loading Strategy** — shipped 2026-05-04 (Phases 204-211)
+- 🚧 **v1.25 I/O Read Loading Strategy** — active, planned 2026-05-05 (Phases 212-218)
 
 ## Phases
+
+### 🚧 v1.25 I/O Read Loading Strategy (Phases 212-218) — ACTIVE
+
+Source: GitHub issue #62, "Add io/read state machine for copy-based tensor loading".
+Adds a dedicated `src/emel/io/read` Stateforward.SML actor for explicit read/copy tensor
+loading beneath tensor-owned residency. Mmap, staged/chunked constrained-memory, async,
+and device strategies remain out of scope.
+
+- [ ] Phase 212: Read Strategy Component Boundary (0/1 plans)
+- [ ] Phase 213: Read Validation and Platform Gating (0/1 plans)
+- [ ] Phase 214: Read Execution, Errors, and Lifetime (0/1 plans)
+- [ ] Phase 215: Tensor-Owned Read Integration (0/1 plans)
+- [ ] Phase 216: Public Runtime and Evidence Surfaces (0/1 plans)
+- [ ] Phase 217: Behavior Tests and Scope Guardrails (0/1 plans)
+- [ ] Phase 218: Publication and Maintained Artifact Updates (0/1 plans)
+
+Active artifacts:
+- `.planning/REQUIREMENTS.md` (v1.25 active requirements)
 
 <details>
 <summary>✅ v1.24 I/O Mmap Loading Strategy (Phases 204-211) — SHIPPED 2026-05-04</summary>
@@ -62,14 +81,21 @@ Archive:
 
 ### 📋 Next Milestone
 
-Define the next milestone (v1.25 or higher) via `$gsd-new-milestone`. Concrete read/copy,
-async, and device loading strategies remain deferred follow-on work below the
-`emel/io` boundary.
+After v1.25 ships, the next milestone selection happens via `$gsd-new-milestone`.
+Staged/chunked constrained-memory, cooperative async, and device-specific loading
+strategies remain deferred follow-on work below the `emel/io` boundary.
 
 ## Progress
 
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
+| 212. Read Strategy Component Boundary | v1.25 | 0/1 | Pending | — |
+| 213. Read Validation and Platform Gating | v1.25 | 0/1 | Pending | — |
+| 214. Read Execution, Errors, and Lifetime | v1.25 | 0/1 | Pending | — |
+| 215. Tensor-Owned Read Integration | v1.25 | 0/1 | Pending | — |
+| 216. Public Runtime and Evidence Surfaces | v1.25 | 0/1 | Pending | — |
+| 217. Behavior Tests and Scope Guardrails | v1.25 | 0/1 | Pending | — |
+| 218. Publication and Maintained Artifact Updates | v1.25 | 0/1 | Pending | — |
 | 204. Mmap Strategy Component Boundary | v1.24 | 1/1 | Complete | 2026-05-04 |
 | 205. Mmap Validation and Platform Gating | v1.24 | 1/1 | Complete | 2026-05-04 |
 | 206. Mapped Descriptor, Errors, and Lifetime | v1.24 | 1/1 | Complete | 2026-05-04 |

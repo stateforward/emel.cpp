@@ -16,19 +16,46 @@ before widening API surface or model scope.
 
 ## Current State
 
-Current milestone: `v1.24 I/O Mmap Loading Strategy`
+Current milestone: `v1.25 I/O Read Loading Strategy`
 
-Latest shipped milestone: `v1.23 I/O Loading Strategy Boundary`
+Latest shipped milestone: `v1.24 I/O Mmap Loading Strategy`
 
-Status: `v1.23` shipped on 2026-05-04 after final source-backed audit passed. The repo now treats
-`src/emel/io` as the loading strategy boundary owner, `src/emel/model/tensor` as the canonical
-owner of tensor load, bind, evict, and residency semantics, and `model/loader` as the orchestrator
-across those public actor surfaces.
+Status: `v1.24` shipped on 2026-05-04 after Phase 210 closing full-scope quality gate
+passed with no override (13/13 requirements satisfied) and Phase 211 closed the
+per-phase VERIFICATION.md backfill gap. The repo now ships `src/emel/io/mmap` as the
+canonical mmap strategy actor beneath the `src/emel/io` boundary, with tensor-owned
+mmap residency via `model::tensor::event::request_mapped_load` /
+`release_mapped_load` and a fixed-capacity actor-owned slot pool.
 
-Current planning focus: implement the issue #61 mmap strategy path beneath the v1.23 I/O
-boundary.
+Current planning focus: implement the issue #62 read/copy strategy path beneath the
+existing `src/emel/io` boundary while preserving tensor-owned residency.
 
-## Current Milestone: v1.24 I/O Mmap Loading Strategy
+## Current Milestone: v1.25 I/O Read Loading Strategy
+
+**Goal:** Add a dedicated `io/read` Stateforward.SML strategy actor under `src/emel/io`
+so tensor-owned model loading can request explicit file-read/copy residency into a
+caller-provided owned target buffer through the existing I/O boundary, without moving
+tensor lifecycle ownership out of `model/tensor` and without folding mmap, staged/chunked
+constrained-memory, async, or device strategy behavior into this issue.
+
+**Source:** GitHub issue #62, "Add io/read state machine for copy-based tensor loading"
+
+**Target features:**
+- Dedicated `src/emel/io/read` machine, events, guards, actions, context, errors, and
+  public aliases for read/copy tensor loading.
+- Tensor-to-I/O integration that lets `model/tensor` request read-based residency through
+  the public `emel/io` boundary while retaining tensor-owned load, bind, evict, and
+  residency semantics. The read strategy operates on a caller-provided owned target
+  buffer; the strategy never takes residency ownership.
+- Explicit read/copy success, unsupported, validation, file-open, file-read, and
+  short-read failure outcomes surfaced deterministically through events and states.
+- Deterministic transient-resource lifetime: any file descriptor / handle opened by the
+  read attempt is released before `_done` publication; no kernel handle pool persists
+  beyond the dispatch.
+- Maintained tests, docs, lint snapshots, benchmark snapshots, benchmark outputs, and
+  model artifacts updated from maintained commands when required.
+
+## Previous Shipped Milestone: v1.24 I/O Mmap Loading Strategy
 
 **Goal:** Add a dedicated `io/mmap` Stateforward.SML strategy actor under `src/emel/io` so
 tensor-owned model loading can request memory-mapped residency through the existing I/O boundary
@@ -37,15 +64,25 @@ behavior.
 
 **Source:** GitHub issue #61, "Add io/mmap state machine for tensor-backed model loading"
 
-**Target features:**
-- Dedicated `src/emel/io/mmap` machine, events, guards, actions, context, errors, and public
-  aliases for mmap-backed tensor loading.
-- Tensor-to-I/O integration that lets `model/tensor` request mmap-backed residency while retaining
-  tensor-owned load, bind, evict, and residency semantics.
-- Explicit mmap success, unsupported, validation, and platform/resource failure outcomes surfaced
-  deterministically through events and states.
-- Maintained tests, docs, lint snapshots, benchmark snapshots, benchmark outputs, and model
-  artifacts updated from maintained commands when required.
+**Shipped:** 2026-05-04
+
+**Delivered:**
+- Established the canonical `src/emel/io/mmap` Stateforward.SML actor with component-local
+  context, events, guards, actions, errors, and `emel::io::mmap::sm` ownership.
+- Modeled mmap request/platform/file/offset/length/layout validation and unsupported-platform
+  rejection through explicit guards and transitions before any mapping attempt.
+- Added real `open`+`mmap`+`munmap` paths under `#if defined(_WIN32)` selection, a
+  fixed-capacity slot pool (`EMEL_IO_MMAP_MAX_MAPPINGS = 256`), `event::release_mapping`
+  as the actor-owned unmap surface, and a deterministic mmap error taxonomy.
+- Added `event::request_mapped_load` / `event::release_mapped_load`,
+  `lifecycle::mmap_resident`, and `sm(emel::io::mmap::sm*)` injection on `model/tensor`,
+  preserving tensor-owned load/bind/evict/residency orchestration with zero handle state in
+  tensor.
+- Kept `model/loader`, maintained benchmark, paritychecker, and embedded-probe lanes off
+  actor internals; mmap reporting flows through public tensor surfaces only.
+
+**Audit:** Final source-backed audit passed with 13/13 active requirements satisfied
+(MMAP-01..03, TIO-01..03, PLAT-01, LIFE-01, ERR-01, VAL-01..04).
 
 ## Previous Shipped Milestone: v1.23 I/O Loading Strategy Boundary
 
