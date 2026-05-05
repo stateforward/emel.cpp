@@ -21,6 +21,7 @@ struct state_layout_decision {};
 struct state_platform_decision {};
 struct state_slot_reservation_decision {};
 struct state_file_open_decision {};
+struct state_file_size_decision {};
 struct state_mapping_decision {};
 struct state_publish_done_decision {};
 struct state_done_callback {};
@@ -150,15 +151,28 @@ struct model {
       //------------------------------------------------------------------------------//
       // File open decision. Entry action above already attempted the open and
       // recorded the raw result; this state routes success vs. failure.
-      , sml::state<state_mapping_decision> <= sml::state<state_file_open_decision>
+      , sml::state<state_file_size_decision> <= sml::state<state_file_open_decision>
           + sml::completion<detail::map_tensor_runtime>
           [ guard::file_open_succeeded{} ]
-          / action::effect_attempt_mapping
+          / action::effect_measure_open_file_size
       , sml::state<state_file_open_failed_error_decision> <=
           sml::state<state_file_open_decision>
           + sml::completion<detail::map_tensor_runtime>
           [ guard::file_open_failed{} ]
           / action::effect_release_reserved_slot_on_open_failure
+
+      //------------------------------------------------------------------------------//
+      // File size decision. The actor rejects spans beyond the opened file
+      // before mapping, avoiding deferred SIGBUS-style failures on access.
+      , sml::state<state_mapping_decision> <= sml::state<state_file_size_decision>
+          + sml::completion<detail::map_tensor_runtime>
+          [ guard::file_span_within_file{} ]
+          / action::effect_attempt_mapping
+      , sml::state<state_unsupported_resource_error_decision> <=
+          sml::state<state_file_size_decision>
+          + sml::completion<detail::map_tensor_runtime>
+          [ guard::file_span_exceeds_file{} ]
+          / action::effect_close_open_resource_and_release_slot_on_file_span_failure
 
       //------------------------------------------------------------------------------//
       // Mapping decision. Entry action above attempted mmap and recorded the

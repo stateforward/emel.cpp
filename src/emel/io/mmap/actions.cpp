@@ -91,6 +91,28 @@ bool platform_map(intptr_t os_resource, uint64_t file_offset,
 #endif
 }
 
+bool platform_file_size(intptr_t os_resource,
+                        uint64_t &file_size_bytes_out) noexcept {
+#if defined(_WIN32)
+  HANDLE file_handle = reinterpret_cast<HANDLE>(os_resource);
+  LARGE_INTEGER size{};
+  if (::GetFileSizeEx(file_handle, &size) == 0 || size.QuadPart < 0) {
+    file_size_bytes_out = 0u;
+    return false;
+  }
+  file_size_bytes_out = static_cast<uint64_t>(size.QuadPart);
+  return true;
+#else
+  struct stat st{};
+  if (::fstat(static_cast<int>(os_resource), &st) != 0 || st.st_size < 0) {
+    file_size_bytes_out = 0u;
+    return false;
+  }
+  file_size_bytes_out = static_cast<uint64_t>(st.st_size);
+  return true;
+#endif
+}
+
 bool platform_unmap(intptr_t os_resource, void *base,
                     uint64_t mapped_bytes) noexcept {
 #if defined(_WIN32)
@@ -131,6 +153,15 @@ void effect_reserve_top_free_slot_then_attempt_open::operator()(
   ev.status.file_open_ok = open_ok;
 }
 
+void effect_measure_open_file_size::operator()(
+    const detail::map_tensor_runtime &ev, context &) const noexcept {
+  uint64_t file_size_bytes = 0u;
+  const bool size_ok =
+      platform_file_size(ev.status.os_resource, file_size_bytes);
+  ev.status.file_size_bytes = file_size_bytes;
+  ev.status.file_size_ok = size_ok;
+}
+
 void effect_attempt_mapping::operator()(const detail::map_tensor_runtime &ev,
                                         context &) const noexcept {
   void *base = nullptr;
@@ -141,6 +172,23 @@ void effect_attempt_mapping::operator()(const detail::map_tensor_runtime &ev,
   ev.status.mapped_base = base;
   ev.status.mapped_bytes = mapped_bytes;
   ev.status.mapping_ok = mapping_ok;
+}
+
+void effect_close_open_resource_and_release_slot_on_file_span_failure::
+operator()(const detail::map_tensor_runtime &ev, context &ctx) const noexcept {
+  platform_close(ev.status.os_resource);
+  auto &slot_ref = ctx.slots[ev.status.reserved_slot];
+  slot_ref.in_use = false;
+  slot_ref.tensor_id = -1;
+  slot_ref.base = nullptr;
+  slot_ref.mapped_bytes = 0u;
+  slot_ref.os_resource = -1;
+  slot_ref.file_offset = 0u;
+  slot_ref.requested_bytes = 0u;
+  ctx.free_stack[ctx.free_count] = ev.status.reserved_slot;
+  ctx.free_count += 1u;
+  ev.status.err = emel::error::cast(error::unsupported_resource);
+  ev.status.ok = false;
 }
 
 void effect_close_open_resource_and_release_slot_on_mapping_failure::operator()(

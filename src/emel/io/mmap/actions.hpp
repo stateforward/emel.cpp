@@ -16,7 +16,9 @@ struct effect_begin_map_tensor {
     ev.status.os_resource = -1;
     ev.status.mapped_base = nullptr;
     ev.status.mapped_bytes = 0u;
+    ev.status.file_size_bytes = 0u;
     ev.status.file_open_ok = false;
+    ev.status.file_size_ok = false;
     ev.status.mapping_ok = false;
   }
 };
@@ -87,6 +89,11 @@ struct effect_attempt_mapping {
                   context &ctx) const noexcept;
 };
 
+struct effect_measure_open_file_size {
+  void operator()(const detail::map_tensor_runtime &ev,
+                  context &ctx) const noexcept;
+};
+
 struct effect_commit_mapping {
   void operator()(const detail::map_tensor_runtime &ev,
                   context &ctx) const noexcept {
@@ -120,6 +127,11 @@ struct effect_release_reserved_slot_on_open_failure {
 };
 
 struct effect_close_open_resource_and_release_slot_on_mapping_failure {
+  void operator()(const detail::map_tensor_runtime &ev,
+                  context &ctx) const noexcept;
+};
+
+struct effect_close_open_resource_and_release_slot_on_file_span_failure {
   void operator()(const detail::map_tensor_runtime &ev,
                   context &ctx) const noexcept;
 };
@@ -272,11 +284,14 @@ inline constexpr effect_mark_resource_exhausted
 inline constexpr effect_reserve_top_free_slot_then_attempt_open
     effect_reserve_top_free_slot_then_attempt_open{};
 inline constexpr effect_attempt_mapping effect_attempt_mapping{};
+inline constexpr effect_measure_open_file_size effect_measure_open_file_size{};
 inline constexpr effect_commit_mapping effect_commit_mapping{};
 inline constexpr effect_release_reserved_slot_on_open_failure
     effect_release_reserved_slot_on_open_failure{};
 inline constexpr effect_close_open_resource_and_release_slot_on_mapping_failure
     effect_close_open_resource_and_release_slot_on_mapping_failure{};
+inline constexpr effect_close_open_resource_and_release_slot_on_file_span_failure
+    effect_close_open_resource_and_release_slot_on_file_span_failure{};
 inline constexpr effect_publish_map_tensor_done
     effect_publish_map_tensor_done{};
 inline constexpr effect_record_map_tensor_done effect_record_map_tensor_done{};

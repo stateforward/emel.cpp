@@ -9,8 +9,11 @@
 
 #include <doctest/doctest.h>
 
+#include "emel/io/mmap/actions.hpp"
+#include "emel/io/mmap/detail.hpp"
 #include "emel/io/mmap/errors.hpp"
 #include "emel/io/mmap/events.hpp"
+#include "emel/io/mmap/guards.hpp"
 #include "emel/io/mmap/sm.hpp"
 #include "emel/machines.hpp"
 
@@ -260,6 +263,30 @@ TEST_CASE("io mmap rejects empty file_path as invalid_request") {
   CHECK(owner.error);
   CHECK(owner.err == emel::error::cast(emel::io::mmap::error::invalid_request));
   CHECK(strategy.is(stateforward::sml::state<emel::io::mmap::state_ready>));
+}
+
+TEST_CASE("io mmap rejects map spans beyond file size before mapping") {
+  emel::io::mmap::sm strategy{};
+  map_owner_state owner{};
+  const auto payload = make_payload(4096u, 0x5Au);
+  const auto path = make_temp_file("span_beyond_eof", payload);
+  const std::string path_str = path.string();
+  const emel::io::mmap::event::map_tensor_request request{
+      .tensor_id = 9,
+      .file_index = 0u,
+      .file_offset = 0u,
+      .byte_size = 8192u,
+      .file_path = path_str,
+  };
+  emel::io::mmap::event::map_tensor map_request{request};
+  map_request.on_error = {&owner, on_map_error};
+
+  CHECK_FALSE(strategy.process_event(map_request));
+  CHECK(owner.error);
+  CHECK(owner.err ==
+        emel::error::cast(emel::io::mmap::error::unsupported_resource));
+  CHECK(strategy.is(stateforward::sml::state<emel::io::mmap::state_ready>));
+  std::filesystem::remove(path);
 }
 
 TEST_CASE("io mmap rejects embedded NUL file_path as invalid_request") {
@@ -534,6 +561,84 @@ TEST_CASE("io mmap release rejects handles owned by another tensor") {
   std::filesystem::remove(path);
 }
 
+TEST_CASE("io mmap pre-map failure actions release reserved slot") {
+  emel::io::mmap::action::context ctx{};
+  emel::io::mmap::detail::map_attempt_status status{};
+  const emel::io::mmap::event::map_tensor_request request{
+      .tensor_id = 77,
+      .file_index = 0u,
+      .file_offset = 0u,
+      .byte_size = 4096u,
+      .file_path = "/tmp/emel_io_mmap_direct_failure.bin",
+  };
+  const emel::io::mmap::event::map_tensor map_request{request};
+  const emel::io::mmap::detail::map_tensor_runtime runtime{map_request, status};
+
+  status.reserved_slot = ctx.free_stack[ctx.free_count - 1u];
+  status.os_resource = -1;
+  ctx.free_count -= 1u;
+  ctx.slots[status.reserved_slot].in_use = true;
+  emel::io::mmap::action::
+      effect_close_open_resource_and_release_slot_on_mapping_failure(runtime,
+                                                                     ctx);
+
+  CHECK(status.err == emel::error::cast(emel::io::mmap::error::mapping_failed));
+  CHECK_FALSE(ctx.slots[status.reserved_slot].in_use);
+  CHECK(ctx.free_count == emel::io::mmap::k_max_mappings);
+
+  status.reserved_slot = ctx.free_stack[ctx.free_count - 1u];
+  status.os_resource = -1;
+  ctx.free_count -= 1u;
+  ctx.slots[status.reserved_slot].in_use = true;
+  emel::io::mmap::action::
+      effect_close_open_resource_and_release_slot_on_file_span_failure(runtime,
+                                                                       ctx);
+
+  CHECK(status.err ==
+        emel::error::cast(emel::io::mmap::error::unsupported_resource));
+  CHECK_FALSE(ctx.slots[status.reserved_slot].in_use);
+  CHECK(ctx.free_count == emel::io::mmap::k_max_mappings);
+}
+
+TEST_CASE("io mmap file-size and failure guards classify raw status") {
+  emel::io::mmap::action::context ctx{};
+  emel::io::mmap::detail::map_attempt_status map_status{};
+  const emel::io::mmap::event::map_tensor_request request{
+      .tensor_id = 78,
+      .file_index = 0u,
+      .file_offset = 4096u,
+      .byte_size = 4096u,
+      .file_path = "/tmp/emel_io_mmap_guard_failure.bin",
+  };
+  const emel::io::mmap::event::map_tensor map_request{request};
+  const emel::io::mmap::detail::map_tensor_runtime map_runtime{map_request,
+                                                               map_status};
+
+  map_status.os_resource = -1;
+  emel::io::mmap::action::effect_measure_open_file_size(map_runtime, ctx);
+  CHECK_FALSE(map_status.file_size_ok);
+  CHECK(emel::io::mmap::guard::file_span_exceeds_file{}(map_runtime, ctx));
+
+  map_status.file_size_ok = true;
+  map_status.file_size_bytes = 8192u;
+  CHECK(emel::io::mmap::guard::file_span_within_file{}(map_runtime, ctx));
+
+  map_status.mapping_ok = false;
+  CHECK(emel::io::mmap::guard::mapping_failed{}(map_runtime, ctx));
+  CHECK_FALSE(
+      emel::io::mmap::guard::platform_mmap_unsupported{}(map_runtime, ctx));
+
+  emel::io::mmap::detail::release_attempt_status release_status{};
+  const emel::io::mmap::event::release_mapping release_request{78, 0u};
+  const emel::io::mmap::detail::release_mapping_runtime release_runtime{
+      release_request, release_status};
+  CHECK(emel::io::mmap::guard::unmap_failed{}(release_runtime, ctx));
+
+  emel::io::mmap::action::effect_mark_unsupported_platform(map_runtime, ctx);
+  CHECK(map_status.err ==
+        emel::error::cast(emel::io::mmap::error::unsupported_platform));
+}
+
 TEST_CASE("io mmap release rejects out-of-range handle") {
   emel::io::mmap::sm strategy{};
   release_owner_state owner{};
@@ -662,9 +767,9 @@ TEST_CASE("io mmap surfaces mapping_failed when mmap call fails") {
   emel::io::mmap::sm strategy{};
   map_owner_state owner{};
   // POSIX permits open() on a directory but mmap() on a directory fd
-  // returns EACCES/ENODEV. The actor must surface mapping_failed (or
-  // file_open_failed on platforms that reject the directory open up
-  // front) and recover to ready, releasing both the slot and the fd.
+  // returns EACCES/ENODEV. Platforms may reject it during open, file-size
+  // measurement, or mmap; each path must recover to ready and release any slot
+  // or fd it acquired.
   const std::string path = "/";
   const emel::io::mmap::event::map_tensor_request request{
       .tensor_id = 500,
@@ -679,7 +784,9 @@ TEST_CASE("io mmap surfaces mapping_failed when mmap call fails") {
   CHECK(owner.error);
   CHECK((
       owner.err == emel::error::cast(emel::io::mmap::error::mapping_failed) ||
-      owner.err == emel::error::cast(emel::io::mmap::error::file_open_failed)));
+      owner.err == emel::error::cast(emel::io::mmap::error::file_open_failed) ||
+      owner.err ==
+          emel::error::cast(emel::io::mmap::error::unsupported_resource)));
   CHECK(strategy.is(stateforward::sml::state<emel::io::mmap::state_ready>));
 }
 

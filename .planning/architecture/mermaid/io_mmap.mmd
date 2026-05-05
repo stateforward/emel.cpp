@@ -18,8 +18,10 @@ stateDiagram-v2
   state_platform_decision --> state_unsupported_platform_error_decision : completion_map_tensor_runtime_ [platform_mmap_unsupported_] / effect_mark_unsupported_platform_
   state_slot_reservation_decision --> state_file_open_decision : completion_map_tensor_runtime_ [slot_capacity_available_] / effect_reserve_top_free_slot_then_attempt_open_
   state_slot_reservation_decision --> state_resource_exhausted_error_decision : completion_map_tensor_runtime_ [slot_pool_exhausted_] / effect_mark_resource_exhausted_
-  state_file_open_decision --> state_mapping_decision : completion_map_tensor_runtime_ [file_open_succeeded_] / effect_attempt_mapping_
+  state_file_open_decision --> state_file_size_decision : completion_map_tensor_runtime_ [file_open_succeeded_] / effect_measure_open_file_size_
   state_file_open_decision --> state_file_open_failed_error_decision : completion_map_tensor_runtime_ [file_open_failed_] / effect_release_reserved_slot_on_open_failure_
+  state_file_size_decision --> state_mapping_decision : completion_map_tensor_runtime_ [file_span_within_file_] / effect_attempt_mapping_
+  state_file_size_decision --> state_unsupported_resource_error_decision : completion_map_tensor_runtime_ [file_span_exceeds_file_] / effect_close_open_resource_and_release_slot_on_file_span_failure_
   state_mapping_decision --> state_publish_done_decision : completion_map_tensor_runtime_ [mapping_succeeded_] / effect_commit_mapping_
   state_mapping_decision --> state_mapping_failed_error_decision : completion_map_tensor_runtime_ [mapping_failed_] / effect_close_open_resource_and_release_slot_on_mapping_failure_
   state_publish_done_decision --> state_done_callback : completion_map_tensor_runtime_ [done_callback_present_] / effect_publish_map_tensor_done_

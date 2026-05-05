@@ -15,7 +15,9 @@ struct map_attempt_status {
   intptr_t os_resource = -1;
   void *mapped_base = nullptr;
   uint64_t mapped_bytes = 0u;
+  uint64_t file_size_bytes = 0u;
   bool file_open_ok = false;
+  bool file_size_ok = false;
   bool mapping_ok = false;
 };
 

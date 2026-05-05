@@ -144,6 +144,23 @@ struct file_open_failed {
   }
 };
 
+struct file_span_within_file {
+  bool operator()(const detail::map_tensor_runtime &ev,
+                  const action::context &) const noexcept {
+    const uint64_t offset = ev.request.request.file_offset;
+    const uint64_t size = ev.request.request.byte_size;
+    return ev.status.file_size_ok && offset <= ev.status.file_size_bytes &&
+           size <= (ev.status.file_size_bytes - offset);
+  }
+};
+
+struct file_span_exceeds_file {
+  bool operator()(const detail::map_tensor_runtime &ev,
+                  const action::context &ctx) const noexcept {
+    return !file_span_within_file{}(ev, ctx);
+  }
+};
+
 struct mapping_succeeded {
   bool operator()(const detail::map_tensor_runtime &ev,
                   const action::context &) const noexcept {
