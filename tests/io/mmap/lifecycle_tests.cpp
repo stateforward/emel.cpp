@@ -189,6 +189,7 @@ TEST_CASE("io mmap validation rejection does not consume a slot") {
   for (const auto &r : rejects) {
     map_owner_state owner{};
     emel::io::mmap::event::map_tensor map_request{r};
+    map_request.on_done = {&owner, on_map_done};
     map_request.on_error = {&owner, on_map_error};
     CHECK_FALSE(strategy.process_event(map_request));
     CHECK(owner.error);
@@ -238,6 +239,7 @@ TEST_CASE("io mmap rejects invalid request spans before any mapping attempt") {
       .file_path = path,
   };
   emel::io::mmap::event::map_tensor map_request{request};
+  map_request.on_done = {&owner, on_map_done};
   map_request.on_error = {&owner, on_map_error};
 
   CHECK_FALSE(strategy.process_event(map_request));
@@ -257,6 +259,7 @@ TEST_CASE("io mmap rejects empty file_path as invalid_request") {
       .file_path = {},
   };
   emel::io::mmap::event::map_tensor map_request{request};
+  map_request.on_done = {&owner, on_map_done};
   map_request.on_error = {&owner, on_map_error};
 
   CHECK_FALSE(strategy.process_event(map_request));
@@ -279,6 +282,7 @@ TEST_CASE("io mmap rejects map spans beyond file size before mapping") {
       .file_path = path_str,
   };
   emel::io::mmap::event::map_tensor map_request{request};
+  map_request.on_done = {&owner, on_map_done};
   map_request.on_error = {&owner, on_map_error};
 
   CHECK_FALSE(strategy.process_event(map_request));
@@ -303,6 +307,7 @@ TEST_CASE("io mmap rejects embedded NUL file_path as invalid_request") {
       .file_path = path_with_nul,
   };
   emel::io::mmap::event::map_tensor map_request{request};
+  map_request.on_done = {&owner, on_map_done};
   map_request.on_error = {&owner, on_map_error};
 
   CHECK_FALSE(strategy.process_event(map_request));
@@ -324,6 +329,7 @@ TEST_CASE("io mmap rejects out-of-range file_index as unsupported resource") {
       .file_path = path,
   };
   emel::io::mmap::event::map_tensor map_request{request};
+  map_request.on_done = {&owner, on_map_done};
   map_request.on_error = {&owner, on_map_error};
 
   CHECK_FALSE(strategy.process_event(map_request));
@@ -345,6 +351,7 @@ TEST_CASE("io mmap rejects unaligned file_offset as unsupported resource") {
       .file_path = path,
   };
   emel::io::mmap::event::map_tensor map_request{request};
+  map_request.on_done = {&owner, on_map_done};
   map_request.on_error = {&owner, on_map_error};
 
   CHECK_FALSE(strategy.process_event(map_request));
@@ -352,6 +359,26 @@ TEST_CASE("io mmap rejects unaligned file_offset as unsupported resource") {
   CHECK(owner.err ==
         emel::error::cast(emel::io::mmap::error::unsupported_resource));
   CHECK(strategy.is(stateforward::sml::state<emel::io::mmap::state_ready>));
+}
+
+TEST_CASE("io mmap offset guard uses actor-local required alignment") {
+  emel::io::mmap::action::context ctx{};
+  ctx.required_offset_alignment =
+      emel::io::mmap::k_required_offset_alignment * 2u;
+
+  emel::io::mmap::detail::map_attempt_status status{};
+  const emel::io::mmap::event::map_tensor_request request{
+      .tensor_id = 220,
+      .file_index = 0u,
+      .file_offset = emel::io::mmap::k_required_offset_alignment,
+      .byte_size = 1024u,
+      .file_path = "/tmp/emel_io_mmap_alignment_guard.bin",
+  };
+  const emel::io::mmap::event::map_tensor map_request{request};
+  const emel::io::mmap::detail::map_tensor_runtime runtime{map_request, status};
+
+  CHECK_FALSE(emel::io::mmap::guard::offset_aligned{}(runtime, ctx));
+  CHECK(emel::io::mmap::guard::offset_unaligned{}(runtime, ctx));
 }
 
 TEST_CASE("io mmap rejects byte_size above maximum as unsupported resource") {
@@ -366,6 +393,7 @@ TEST_CASE("io mmap rejects byte_size above maximum as unsupported resource") {
       .file_path = path,
   };
   emel::io::mmap::event::map_tensor map_request{request};
+  map_request.on_done = {&owner, on_map_done};
   map_request.on_error = {&owner, on_map_error};
 
   CHECK_FALSE(strategy.process_event(map_request));
@@ -392,6 +420,7 @@ TEST_CASE("io mmap rejects layouts that overflow the address space") {
       .file_path = path,
   };
   emel::io::mmap::event::map_tensor map_request{request};
+  map_request.on_done = {&owner, on_map_done};
   map_request.on_error = {&owner, on_map_error};
 
   CHECK_FALSE(strategy.process_event(map_request));
@@ -414,6 +443,7 @@ TEST_CASE("io mmap surfaces file_open_failed when the path does not exist") {
       .file_path = path,
   };
   emel::io::mmap::event::map_tensor map_request{request};
+  map_request.on_done = {&owner, on_map_done};
   map_request.on_error = {&owner, on_map_error};
 
   CHECK_FALSE(strategy.process_event(map_request));
@@ -453,6 +483,35 @@ TEST_CASE("io mmap returns a deterministic mapped descriptor on success") {
 
   emel::io::mmap::event::release_mapping release_request{1001, owner.handle};
   CHECK(strategy.process_event(release_request));
+  std::filesystem::remove(path);
+}
+
+TEST_CASE("io mmap rejects map_tensor without done callback") {
+  const auto payload = make_payload(4096u, 0x5Au);
+  const auto path = make_temp_file("missing_done_callback", payload);
+  const std::string path_str = path.string();
+
+  {
+    emel::io::mmap::sm strategy{};
+    map_owner_state owner{};
+    const emel::io::mmap::event::map_tensor_request request{
+        .tensor_id = 1002,
+        .file_index = 0u,
+        .file_offset = 0u,
+        .byte_size = 4096u,
+        .file_path = path_str,
+    };
+    emel::io::mmap::event::map_tensor map_request{request};
+    map_request.on_error = {&owner, on_map_error};
+
+    CHECK_FALSE(strategy.process_event(map_request));
+    CHECK_FALSE(owner.done);
+    CHECK(owner.error);
+    CHECK(owner.err ==
+          emel::error::cast(emel::io::mmap::error::invalid_request));
+    CHECK(strategy.is(stateforward::sml::state<emel::io::mmap::state_ready>));
+  }
+
   std::filesystem::remove(path);
 }
 
@@ -728,28 +787,6 @@ TEST_CASE("io mmap fails closed without an error callback") {
   CHECK(strategy.is(stateforward::sml::state<emel::io::mmap::state_ready>));
 }
 
-TEST_CASE("io mmap success records when no done callback is supplied") {
-  emel::io::mmap::sm strategy{};
-  const auto payload = make_payload(4096u, 0x77u);
-  const auto path = make_temp_file("done_absent", payload);
-  const std::string path_str = path.string();
-  const emel::io::mmap::event::map_tensor_request request{
-      .tensor_id = 1234,
-      .file_index = 0u,
-      .file_offset = 0u,
-      .byte_size = 4096u,
-      .file_path = path_str,
-  };
-  emel::io::mmap::event::map_tensor map_request{request};
-
-  CHECK(strategy.process_event(map_request));
-  CHECK(strategy.is(stateforward::sml::state<emel::io::mmap::state_ready>));
-
-  emel::io::mmap::event::release_mapping release_request{1234, 0u};
-  CHECK(strategy.process_event(release_request));
-  std::filesystem::remove(path);
-}
-
 TEST_CASE("io mmap surfaces resource_exhausted when slot pool is full") {
   emel::io::mmap::sm strategy{};
   const auto payload = make_payload(4096u, 0x55u);
@@ -776,6 +813,7 @@ TEST_CASE("io mmap surfaces resource_exhausted when slot pool is full") {
 
   map_owner_state exhausted_owner{};
   emel::io::mmap::event::map_tensor exhausted_request{request};
+  exhausted_request.on_done = {&exhausted_owner, on_map_done};
   exhausted_request.on_error = {&exhausted_owner, on_map_error};
   CHECK_FALSE(strategy.process_event(exhausted_request));
   CHECK(exhausted_owner.error);
@@ -806,6 +844,7 @@ TEST_CASE("io mmap surfaces mapping_failed when mmap call fails") {
       .file_path = path,
   };
   emel::io::mmap::event::map_tensor map_request{request};
+  map_request.on_done = {&owner, on_map_done};
   map_request.on_error = {&owner, on_map_error};
   CHECK_FALSE(strategy.process_event(map_request));
   CHECK(owner.error);
@@ -835,6 +874,7 @@ TEST_CASE("io mmap handles unexpected events deterministically") {
       .file_path = path,
   };
   emel::io::mmap::event::map_tensor map_request{request};
+  map_request.on_done = {&owner, on_map_done};
   map_request.on_error = {&owner, on_map_error};
   CHECK_FALSE(strategy.process_event(map_request));
   CHECK(owner.err ==
@@ -890,7 +930,7 @@ TEST_CASE("io mmap boundary keeps platform calls inside actions.cpp") {
   CHECK(sm_source.find("state_slot_reservation_decision") != std::string::npos);
   CHECK(sm_source.find("state_file_open_decision") != std::string::npos);
   CHECK(sm_source.find("state_mapping_decision") != std::string::npos);
-  CHECK(sm_source.find("state_publish_done_decision") != std::string::npos);
+  CHECK(sm_source.find("state_done_callback") != std::string::npos);
   CHECK(sm_source.find("state_release_decision") != std::string::npos);
   CHECK(sm_source.find("state_unmap_decision") != std::string::npos);
 

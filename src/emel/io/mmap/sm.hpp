@@ -23,7 +23,6 @@ struct state_slot_reservation_decision {};
 struct state_file_open_decision {};
 struct state_file_size_decision {};
 struct state_mapping_decision {};
-struct state_publish_done_decision {};
 struct state_done_callback {};
 struct state_invalid_request_error_decision {};
 struct state_unsupported_resource_error_decision {};
@@ -177,7 +176,7 @@ struct model {
       //------------------------------------------------------------------------------//
       // Mapping decision. Entry action above attempted mmap and recorded the
       // raw result; this state routes success vs. failure.
-      , sml::state<state_publish_done_decision> <= sml::state<state_mapping_decision>
+      , sml::state<state_done_callback> <= sml::state<state_mapping_decision>
           + sml::completion<detail::map_tensor_runtime>
           [ guard::mapping_succeeded{} ]
           / action::effect_commit_mapping
@@ -189,17 +188,9 @@ struct model {
 
       //------------------------------------------------------------------------------//
       // Done publication.
-      , sml::state<state_done_callback> <= sml::state<state_publish_done_decision>
-          + sml::completion<detail::map_tensor_runtime>
-          [ guard::done_callback_present{} ]
-          / action::effect_publish_map_tensor_done
-      , sml::state<state_ready> <= sml::state<state_publish_done_decision>
-          + sml::completion<detail::map_tensor_runtime>
-          [ guard::done_callback_absent{} ]
-          / action::effect_record_map_tensor_done
       , sml::state<state_ready> <= sml::state<state_done_callback>
           + sml::completion<detail::map_tensor_runtime>
-          / action::effect_record_map_tensor_done
+          / action::effect_publish_map_tensor_done
 
       //------------------------------------------------------------------------------//
       // Map_tensor error publication for every error decision state.
@@ -374,8 +365,6 @@ struct model {
       , sml::state<state_ready> <= sml::state<state_file_size_decision>
           + sml::unexpected_event<sml::_> / action::effect_on_unexpected
       , sml::state<state_ready> <= sml::state<state_mapping_decision>
-          + sml::unexpected_event<sml::_> / action::effect_on_unexpected
-      , sml::state<state_ready> <= sml::state<state_publish_done_decision>
           + sml::unexpected_event<sml::_> / action::effect_on_unexpected
       , sml::state<state_ready> <= sml::state<state_done_callback>
           + sml::unexpected_event<sml::_> / action::effect_on_unexpected

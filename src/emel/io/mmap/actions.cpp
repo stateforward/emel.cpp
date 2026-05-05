@@ -19,6 +19,20 @@ namespace emel::io::mmap::action {
 
 namespace {
 
+uint64_t platform_required_offset_alignment() noexcept {
+#if defined(_WIN32)
+  SYSTEM_INFO info{};
+  ::GetSystemInfo(&info);
+  return info.dwAllocationGranularity != 0u
+             ? static_cast<uint64_t>(info.dwAllocationGranularity)
+             : k_required_offset_alignment;
+#else
+  const long page_size = ::sysconf(_SC_PAGE_SIZE);
+  return page_size > 0 ? static_cast<uint64_t>(page_size)
+                       : k_required_offset_alignment;
+#endif
+}
+
 bool platform_open(std::string_view path, intptr_t &os_resource_out) noexcept {
   std::array<char, k_max_file_path_bytes + 1u> path_buffer{};
   for (std::size_t i = 0; i < path.size(); ++i) {
@@ -138,6 +152,14 @@ void platform_close(intptr_t os_resource) noexcept {
 }
 
 } // namespace
+
+context::context() noexcept
+    : required_offset_alignment(platform_required_offset_alignment()) {
+  for (uint32_t i = 0; i < k_max_mappings; ++i) {
+    free_stack[i] = (k_max_mappings - 1u) - i;
+  }
+  free_count = k_max_mappings;
+}
 
 context::~context() noexcept {
   for (auto &slot_ref : slots) {

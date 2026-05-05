@@ -31,6 +31,8 @@ struct map_tensor_request {
 
 struct map_tensor {
   const map_tensor_request &request;
+  // Required for valid map requests because map_tensor_done carries the
+  // handle needed to release the mapped resource.
   emel::callback<void(const events::map_tensor_done &)> on_done = {};
   emel::callback<void(const events::map_tensor_error &)> on_error = {};
 

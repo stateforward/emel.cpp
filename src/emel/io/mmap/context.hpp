@@ -21,14 +21,9 @@ struct context {
   std::array<slot, k_max_mappings> slots{};
   std::array<uint32_t, k_max_mappings> free_stack{};
   uint32_t free_count = 0u;
+  uint64_t required_offset_alignment = k_required_offset_alignment;
 
-  context() noexcept {
-    for (uint32_t i = 0; i < k_max_mappings; ++i) {
-      free_stack[i] = (k_max_mappings - 1u) - i;
-    }
-    free_count = k_max_mappings;
-  }
-
+  context() noexcept;
   ~context() noexcept;
 };
 

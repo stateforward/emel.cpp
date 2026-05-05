@@ -148,11 +148,6 @@ struct effect_publish_map_tensor_done {
   }
 };
 
-struct effect_record_map_tensor_done {
-  void operator()(const detail::map_tensor_runtime &,
-                  context &) const noexcept {}
-};
-
 struct effect_publish_map_tensor_error {
   void operator()(const detail::map_tensor_runtime &ev,
                   context &) const noexcept {
@@ -294,7 +289,6 @@ inline constexpr effect_close_open_resource_and_release_slot_on_file_span_failur
     effect_close_open_resource_and_release_slot_on_file_span_failure{};
 inline constexpr effect_publish_map_tensor_done
     effect_publish_map_tensor_done{};
-inline constexpr effect_record_map_tensor_done effect_record_map_tensor_done{};
 inline constexpr effect_publish_map_tensor_error
     effect_publish_map_tensor_error{};
 inline constexpr effect_record_map_tensor_error

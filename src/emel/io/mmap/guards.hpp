@@ -12,7 +12,8 @@ namespace emel::io::mmap::guard {
 struct request_span_valid {
   bool operator()(const detail::map_tensor_runtime &ev,
                   const action::context &) const noexcept {
-    return ev.request.request.byte_size > 0u;
+    return ev.request.request.byte_size > 0u &&
+           static_cast<bool>(ev.request.on_done);
   }
 };
 
@@ -55,8 +56,10 @@ struct file_index_invalid {
 
 struct offset_aligned {
   bool operator()(const detail::map_tensor_runtime &ev,
-                  const action::context &) const noexcept {
-    return (ev.request.request.file_offset % k_required_offset_alignment) == 0u;
+                  const action::context &ctx) const noexcept {
+    return ctx.required_offset_alignment != 0u &&
+           (ev.request.request.file_offset % ctx.required_offset_alignment) ==
+               0u;
   }
 };
 
@@ -178,12 +181,6 @@ struct mapping_failed {
 struct done_callback_present {
   bool operator()(const detail::map_tensor_runtime &ev) const noexcept {
     return static_cast<bool>(ev.request.on_done);
-  }
-};
-
-struct done_callback_absent {
-  bool operator()(const detail::map_tensor_runtime &ev) const noexcept {
-    return !done_callback_present{}(ev);
   }
 };
 
