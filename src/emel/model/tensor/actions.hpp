@@ -546,8 +546,6 @@ struct effect_commit_request_mapped_load {
     ctx.tensors.lifecycle[id] = event::lifecycle::mmap_resident;
     ctx.tensors.buffer[id] = ev.status.buffer;
     ctx.tensors.buffer_bytes[id] = ev.status.buffer_bytes;
-    ctx.tensors.file_offset[id] = ev.request.file_offset;
-    ctx.tensors.data_size[id] = ev.request.byte_size;
     ev.status.ok = true;
     ev.status.accepted = true;
   }

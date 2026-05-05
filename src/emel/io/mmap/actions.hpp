@@ -173,6 +173,8 @@ struct effect_begin_release {
     ev.status.unmap_bytes = 0u;
     ev.status.os_resource = -1;
     ev.status.unmap_ok = false;
+    ev.status.unmap_base_released = false;
+    ev.status.os_resource_released = false;
   }
 };
 
@@ -214,10 +216,7 @@ struct effect_mark_unmap_failed_and_release_slot {
   // while the prior mapping is still alive. See PR #83 review thread
   // PRRT_kwDORRHzJs5_hhbx.
   void operator()(const detail::release_mapping_runtime &ev,
-                  context &) const noexcept {
-    ev.status.err = emel::error::cast(error::unmap_failed);
-    ev.status.ok = false;
-  }
+                  context &ctx) const noexcept;
 };
 
 struct effect_publish_release_mapping_done {

@@ -1015,4 +1015,70 @@ TEST_CASE("io mmap unmap failure keeps mapping slot owned for retry") {
   for (uint32_t i = 0u; i < ctx.free_count; ++i) {
     CHECK(ctx.free_stack[i] != target_slot);
   }
+
+  ctx.slots[target_slot].in_use = false;
+  ctx.slots[target_slot].base = nullptr;
+  ctx.slots[target_slot].mapped_bytes = 0u;
+  ctx.slots[target_slot].os_resource = -1;
+}
+
+TEST_CASE("io mmap unmap failure clears resources already released") {
+  emel::io::mmap::action::context ctx{};
+  const uint32_t target_slot = 0u;
+  ctx.slots[target_slot].in_use = true;
+  ctx.slots[target_slot].tensor_id = 5150;
+  ctx.slots[target_slot].base = reinterpret_cast<void *>(0xABCD0000u);
+  ctx.slots[target_slot].mapped_bytes = 8192u;
+  ctx.slots[target_slot].os_resource = 23;
+  ctx.slots[target_slot].file_offset = 4096u;
+  ctx.slots[target_slot].requested_bytes = 8192u;
+  for (uint32_t i = 0u; i < ctx.free_count; ++i) {
+    if (ctx.free_stack[i] == target_slot) {
+      ctx.free_stack[i] = ctx.free_stack[ctx.free_count - 1u];
+      ctx.free_count -= 1u;
+      break;
+    }
+  }
+  const uint32_t free_count_with_slot_in_use = ctx.free_count;
+
+  emel::io::mmap::detail::release_attempt_status status{};
+  status.target_slot = target_slot;
+  status.unmap_base = ctx.slots[target_slot].base;
+  status.unmap_bytes = ctx.slots[target_slot].mapped_bytes;
+  status.os_resource = ctx.slots[target_slot].os_resource;
+  status.unmap_ok = false;
+  status.unmap_base_released = true;
+  status.os_resource_released = false;
+  const emel::io::mmap::event::release_mapping release_request{5150,
+                                                               target_slot};
+  const emel::io::mmap::detail::release_mapping_runtime runtime{release_request,
+                                                                status};
+
+  emel::io::mmap::action::effect_mark_unmap_failed_and_release_slot(runtime,
+                                                                    ctx);
+
+  CHECK(ctx.slots[target_slot].in_use);
+  CHECK(ctx.slots[target_slot].base == nullptr);
+  CHECK(ctx.slots[target_slot].mapped_bytes == 0u);
+  CHECK(ctx.slots[target_slot].os_resource == 23);
+  CHECK(ctx.free_count == free_count_with_slot_in_use);
+
+  ctx.slots[target_slot].base = reinterpret_cast<void *>(0xABCD0000u);
+  ctx.slots[target_slot].mapped_bytes = 8192u;
+  status.unmap_base_released = false;
+  status.os_resource_released = true;
+
+  emel::io::mmap::action::effect_mark_unmap_failed_and_release_slot(runtime,
+                                                                    ctx);
+
+  CHECK(ctx.slots[target_slot].in_use);
+  CHECK(ctx.slots[target_slot].base == reinterpret_cast<void *>(0xABCD0000u));
+  CHECK(ctx.slots[target_slot].mapped_bytes == 8192u);
+  CHECK(ctx.slots[target_slot].os_resource == -1);
+  CHECK(ctx.free_count == free_count_with_slot_in_use);
+
+  ctx.slots[target_slot].in_use = false;
+  ctx.slots[target_slot].base = nullptr;
+  ctx.slots[target_slot].mapped_bytes = 0u;
+  ctx.slots[target_slot].os_resource = -1;
 }

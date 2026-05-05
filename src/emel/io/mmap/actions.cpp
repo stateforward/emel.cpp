@@ -19,6 +19,12 @@ namespace emel::io::mmap::action {
 
 namespace {
 
+struct platform_unmap_result {
+  bool unmap_base_released = false;
+  bool os_resource_released = false;
+  bool ok = false;
+};
+
 uint64_t platform_required_offset_alignment() noexcept {
 #if defined(_WIN32)
   SYSTEM_INFO info{};
@@ -127,19 +133,24 @@ bool platform_file_size(intptr_t os_resource,
 #endif
 }
 
-bool platform_unmap(intptr_t os_resource, void *base,
-                    uint64_t mapped_bytes) noexcept {
+platform_unmap_result platform_unmap(intptr_t os_resource, void *base,
+                                     uint64_t mapped_bytes) noexcept {
+  platform_unmap_result result{};
+  const bool mapping_absent = base == nullptr || mapped_bytes == 0u;
+  const bool resource_absent = os_resource == -1;
 #if defined(_WIN32)
   HANDLE file_handle = reinterpret_cast<HANDLE>(os_resource);
-  const BOOL view_ok = ::UnmapViewOfFile(base);
-  const BOOL handle_ok = ::CloseHandle(file_handle);
-  (void)mapped_bytes;
-  return view_ok != 0 && handle_ok != 0;
+  result.unmap_base_released = mapping_absent || ::UnmapViewOfFile(base) != 0;
+  result.os_resource_released =
+      resource_absent || ::CloseHandle(file_handle) != 0;
 #else
-  const int munmap_rc = ::munmap(base, static_cast<size_t>(mapped_bytes));
-  const int close_rc = ::close(static_cast<int>(os_resource));
-  return munmap_rc == 0 && close_rc == 0;
+  result.unmap_base_released =
+      mapping_absent || ::munmap(base, static_cast<size_t>(mapped_bytes)) == 0;
+  result.os_resource_released =
+      resource_absent || ::close(static_cast<int>(os_resource)) == 0;
 #endif
+  result.ok = result.unmap_base_released && result.os_resource_released;
+  return result;
 }
 
 void platform_close(intptr_t os_resource) noexcept {
@@ -167,13 +178,8 @@ context::~context() noexcept {
       continue;
     }
 
-    if (slot_ref.base != nullptr && slot_ref.mapped_bytes != 0u &&
-        slot_ref.os_resource != -1) {
-      (void)platform_unmap(slot_ref.os_resource, slot_ref.base,
-                           slot_ref.mapped_bytes);
-    } else if (slot_ref.os_resource != -1) {
-      platform_close(slot_ref.os_resource);
-    }
+    (void)platform_unmap(slot_ref.os_resource, slot_ref.base,
+                         slot_ref.mapped_bytes);
 
     slot_ref.in_use = false;
     slot_ref.tensor_id = -1;
@@ -260,9 +266,28 @@ void effect_attempt_unmap::operator()(const detail::release_mapping_runtime &ev,
   ev.status.unmap_base = slot_ref.base;
   ev.status.unmap_bytes = slot_ref.mapped_bytes;
   ev.status.os_resource = slot_ref.os_resource;
-  const bool unmap_ok = platform_unmap(
+  const platform_unmap_result unmap_result = platform_unmap(
       ev.status.os_resource, ev.status.unmap_base, ev.status.unmap_bytes);
-  ev.status.unmap_ok = unmap_ok;
+  ev.status.unmap_ok = unmap_result.ok;
+  ev.status.unmap_base_released = unmap_result.unmap_base_released;
+  ev.status.os_resource_released = unmap_result.os_resource_released;
+}
+
+void effect_mark_unmap_failed_and_release_slot::operator()(
+    const detail::release_mapping_runtime &ev, context &ctx) const noexcept {
+  auto &slot_ref = ctx.slots[ev.status.target_slot];
+  const std::uintptr_t keep_mapping =
+      static_cast<std::uintptr_t>(!ev.status.unmap_base_released);
+  const std::uintptr_t mapping_mask = 0u - keep_mapping;
+  slot_ref.base = reinterpret_cast<void *>(
+      reinterpret_cast<std::uintptr_t>(slot_ref.base) & mapping_mask);
+  slot_ref.mapped_bytes *= static_cast<uint64_t>(keep_mapping);
+  const intptr_t keep_resource =
+      static_cast<intptr_t>(!ev.status.os_resource_released);
+  slot_ref.os_resource = (slot_ref.os_resource * keep_resource) -
+                         static_cast<intptr_t>(ev.status.os_resource_released);
+  ev.status.err = emel::error::cast(error::unmap_failed);
+  ev.status.ok = false;
 }
 
 } // namespace emel::io::mmap::action

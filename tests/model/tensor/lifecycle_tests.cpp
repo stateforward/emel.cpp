@@ -915,6 +915,52 @@ TEST_CASE("model_tensor_request_mapped_load_dispatches_through_io_mmap") {
   std::filesystem::remove(path);
 }
 
+TEST_CASE("model_tensor_mapped_load_commit_keeps_bound_metadata") {
+  const auto payload = make_tensor_payload(8192u, 0x31u);
+  const auto path = make_tensor_temp_file("metadata_immutable", payload);
+  {
+    emel::io::mmap::sm io_mmap_actor{};
+    emel::model::tensor::sm machine =
+        make_tensor_sm_with_io_mmap(io_mmap_actor);
+    std::array<emel::model::data::tensor_record, 1> tensors{};
+    tensors[0].file_offset = 1234u;
+    tensors[0].data_size = 5678u;
+    tensors[0].file_index = 0u;
+    tensors[0].type = 1;
+    emel::model::tensor::event::bind_storage bind{std::span{tensors}};
+    REQUIRE(machine.process_event(bind));
+
+    const std::string path_str = path.string();
+    mapped_owner_state owner{};
+    emel::model::tensor::event::request_mapped_load request{0, path_str, 0u,
+                                                            4096u};
+    request.on_done = {&owner, on_request_mapped_load_done};
+    request.on_error = {&owner, on_request_mapped_load_error};
+    REQUIRE(machine.process_event(request));
+    REQUIRE(owner.request_done);
+
+    emel::model::tensor::event::tensor_state state{};
+    REQUIRE(
+        machine.process_event(emel::model::tensor::event::capture_tensor_state{
+            .tensor_id = 0,
+            .state_out = &state,
+        }));
+    CHECK(state.lifecycle_state ==
+          emel::model::tensor::event::lifecycle::mmap_resident);
+    CHECK(state.buffer == owner.buffer);
+    CHECK(state.buffer_bytes == 4096u);
+    CHECK(state.file_offset == 1234u);
+    CHECK(state.data_size == 5678u);
+
+    std::array<emel::model::tensor::event::effect_request, 1> effects{};
+    emel::model::tensor::event::plan_load plan{std::span{effects}};
+    REQUIRE(machine.process_event(plan));
+    CHECK(effects[0].offset == 1234u);
+    CHECK(effects[0].size == 5678u);
+  }
+  std::filesystem::remove(path);
+}
+
 TEST_CASE(
     "model_tensor_request_mapped_load_surfaces_io_mmap_file_open_failed") {
   emel::io::mmap::sm io_mmap_actor{};

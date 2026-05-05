@@ -29,6 +29,8 @@ struct release_attempt_status {
   uint64_t unmap_bytes = 0u;
   intptr_t os_resource = -1;
   bool unmap_ok = false;
+  bool unmap_base_released = false;
+  bool os_resource_released = false;
 };
 
 struct map_tensor_runtime {
