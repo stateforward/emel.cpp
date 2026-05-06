@@ -31,7 +31,7 @@ are distinguished from current direct focused CTest evidence.
 
 Milestone: v1.25 I/O Read Loading Strategy — SHIPPED
 Plan: complete
-Status: Milestone complete — ready for next milestone definition
+Status: Milestone complete — PR #84 open for review
 Phase 226 closed `.planning/v1.25-MILESTONE-AUDIT.md` tech debt: public
 `read_tensor_batch` now has an independent span cap, and closeout evidence records both
 historical dyld fallback wording and current focused CTest pass evidence.
