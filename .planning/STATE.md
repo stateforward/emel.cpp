@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.25
 milestone_name: I/O Read Loading Strategy
 status: executing
-stopped_at: Completed 225-04-PLAN.md
-last_updated: "2026-05-06T15:28:36.819Z"
+stopped_at: Completed 225-05-PLAN.md
+last_updated: "2026-05-06T15:34:52.581Z"
 last_activity: 2026-05-06
 progress:
   total_phases: 15
   completed_phases: 0
   total_plans: 6
-  completed_plans: 4
-  percent: 67
+  completed_plans: 5
+  percent: 83
 ---
 
 # Project State
@@ -30,8 +30,8 @@ artifact path truth.
 ## Current Position
 
 Phase: 225 (read-closeout-runtime-validation-and-sml-repair) — EXECUTING
-Plan: 5 of 6
-Status: Ready to execute; Plans 01-04 complete and Plans 05-06 pending
+Plan: 6 of 6
+Status: Ready to execute
 Phase 225 closes `.planning/v1.25-MILESTONE-AUDIT.md` findings through six
 linear plans: current
 `emel_tests_model_and_batch` dyld launch failure, model-loader action-loop
@@ -172,6 +172,8 @@ Carried-forward decisions from v1.24 still in effect:
 - [Phase 225-read-closeout-runtime-validation-and-sml-repair]: io/loader batch errors now publish failed_index so model-loader can preserve concrete same-RTC error evidence.
 - [Phase 225-read-closeout-runtime-validation-and-sml-repair]: Maintained caller scratch is owned by request fixture/state and resized before dispatch, matching the existing effect request/result setup pattern.
 - [Phase 225-read-closeout-runtime-validation-and-sml-repair]: Guardrails stay source-scoped to maintained EMEL lanes and reject actor-internal io/read reach-through.
+- [Phase 225-read-closeout-runtime-validation-and-sml-repair]: Kept Phase 225 requirements pending until Plan 06 publishes current command evidence.
+- [Phase 225-read-closeout-runtime-validation-and-sml-repair]: Kept STATE at Plan 5 of 6 because Plans 01-04 are already complete in the current execution state.
 
 ### Pending Todos
 
@@ -208,9 +210,10 @@ Items acknowledged and deferred at v1.22 milestone close on 2026-05-03 (still ca
 | Phase 225-read-closeout-runtime-validation-and-sml-repair P02 | 14min | 2 tasks | 6 files |
 | Phase 225-read-closeout-runtime-validation-and-sml-repair P03 | 20min | 2 tasks | 7 files |
 | Phase 225-read-closeout-runtime-validation-and-sml-repair P04 | 7min | 2 tasks | 5 files |
+| Phase 225-read-closeout-runtime-validation-and-sml-repair P05 | 4min | 2 tasks | 5 files |
 
 ## Session Continuity
 
-Last session: 2026-05-06T15:28:36.816Z
-Stopped at: Completed 225-04-PLAN.md
+Last session: 2026-05-06T15:34:52.578Z
+Stopped at: Completed 225-05-PLAN.md
 Resume file: None
