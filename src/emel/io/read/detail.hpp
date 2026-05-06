@@ -11,12 +11,23 @@ namespace emel::io::read::detail {
 struct read_attempt_status {
   emel::error::type err = emel::error::cast(error::none);
   bool ok = false;
-  intptr_t os_resource = -1;
   uint64_t bytes_copied = 0u;
-  bool file_open_ok = false;
-  bool file_seek_ok = false;
-  bool file_read_ok = false;
 };
+
+struct read_tensor_batch_status {
+  emel::error::type err = emel::error::cast(error::none);
+  bool ok = false;
+  uint32_t done_count = 0u;
+  uint64_t bytes_copied = 0u;
+  uint32_t failed_index = 0u;
+};
+
+inline void ignore_read_tensor_done(void *,
+                                    const events::read_tensor_done &) noexcept {
+}
+
+inline void
+ignore_read_tensor_error(void *, const events::read_tensor_error &) noexcept {}
 
 // Internal-only carrier that bridges a public `event::read_tensor` trigger
 // to internal completion progress without copying request payload into
@@ -25,6 +36,11 @@ struct read_attempt_status {
 struct read_tensor_runtime {
   const event::read_tensor &request;
   read_attempt_status &status;
+};
+
+struct read_tensor_batch_runtime {
+  const event::read_tensor_batch &request;
+  read_tensor_batch_status &status;
 };
 
 } // namespace emel::io::read::detail
