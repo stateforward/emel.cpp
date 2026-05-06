@@ -127,7 +127,12 @@ struct model {
           / action::effect_dispatch_tensor_apply_error_results
       , sml::state<state_io_load_dispatch> <= sml::state<state_tensor_plan_decision>
           + sml::completion<event::load_runtime>
-          [ guard::tensor_plan_done_with_io_strategy_with_loader{} ]
+          [ guard::tensor_plan_done_with_io_strategy_with_loader_and_batch_span_ready{} ]
+      , sml::state<state_tensor_effect_error_cleanup> <=
+          sml::state<state_tensor_plan_decision>
+          + sml::completion<event::load_runtime>
+          [ guard::tensor_plan_done_with_io_strategy_with_loader_and_batch_span_missing{} ]
+          / action::effect_dispatch_tensor_apply_error_results
       , sml::state<errored> <= sml::state<state_tensor_plan_decision>
           + sml::completion<event::load_runtime> [ guard::tensor_plan_error_raised{} ]
           / action::effect_mark_tensor_plan_error
@@ -137,9 +142,10 @@ struct model {
 
       , sml::state<state_io_load_decision> <= sml::state<state_io_load_dispatch>
           + sml::completion<event::load_runtime>
-          / action::effect_dispatch_io_loads
+          / action::effect_dispatch_io_load_batch
       , sml::state<state_tensor_apply_dispatch> <= sml::state<state_io_load_decision>
           + sml::completion<event::load_runtime> [ guard::io_load_done_all{} ]
+          / action::effect_mark_io_strategy_used
       , sml::state<state_tensor_effect_error_cleanup> <=
           sml::state<state_io_load_decision>
           + sml::completion<event::load_runtime> [ guard::io_load_error_raised{} ]
@@ -152,6 +158,10 @@ struct model {
       , sml::state<errored> <= sml::state<state_tensor_effect_error_cleanup>
           + sml::completion<event::load_runtime>
           [ guard::tensor_plan_done_with_io_strategy_without_loader{} ]
+          / action::effect_mark_io_strategy_unavailable
+      , sml::state<errored> <= sml::state<state_tensor_effect_error_cleanup>
+          + sml::completion<event::load_runtime>
+          [ guard::tensor_plan_done_with_io_strategy_with_loader_and_batch_span_missing{} ]
           / action::effect_mark_io_strategy_unavailable
       , sml::state<errored> <= sml::state<state_tensor_effect_error_cleanup>
           + sml::completion<event::load_runtime>

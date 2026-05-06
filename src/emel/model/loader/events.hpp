@@ -6,6 +6,7 @@
 
 #include "emel/callback.hpp"
 #include "emel/error/error.hpp"
+#include "emel/io/events.hpp"
 #include "emel/io/loader/events.hpp"
 #include "emel/model/data.hpp"
 #include "emel/model/loader/errors.hpp"
@@ -60,6 +61,7 @@ struct load {
       emel::io::loader::event::strategy_kind::none;
   std::span<emel::model::tensor::effect_request> effect_requests = {};
   std::span<emel::model::tensor::effect_result> effect_results = {};
+  std::span<emel::io::event::tensor_load_span> io_load_spans = {};
   map_layers_fn map_layers = {};
   validate_structure_fn validate_structure = {};
   validate_architecture_fn validate_architecture_impl = {};
@@ -77,6 +79,8 @@ struct load_ctx {
   uint64_t bytes_total = 0;
   uint64_t bytes_done = 0;
   bool used_mmap = false;
+  emel::io::loader::event::strategy_kind used_io_strategy =
+      emel::io::loader::event::strategy_kind::none;
 };
 
 struct tensor_phase_events {
@@ -136,11 +140,15 @@ struct io_load_done {
   bool raised = false;
   uint32_t expected_count = 0u;
   uint32_t done_count = 0u;
+  uint64_t bytes_done = 0u;
 };
 
 struct io_load_error {
   bool raised = false;
   emel::error::type err = emel::error::cast(emel::io::loader::error::none);
+  emel::error::type strategy_err =
+      emel::error::cast(emel::io::loader::error::none);
+  uint32_t failed_index = 0u;
 };
 
 struct load_done {
@@ -148,11 +156,17 @@ struct load_done {
   uint64_t bytes_total = 0;
   uint64_t bytes_done = 0;
   bool used_mmap = false;
+  emel::io::loader::event::strategy_kind used_io_strategy =
+      emel::io::loader::event::strategy_kind::none;
 };
 
 struct load_error {
   const event::load &request;
   emel::error::type err = emel::error::cast(error::none);
+  emel::io::loader::event::strategy_kind requested_io_strategy =
+      emel::io::loader::event::strategy_kind::none;
+  emel::io::loader::event::strategy_kind used_io_strategy =
+      emel::io::loader::event::strategy_kind::none;
 };
 
 } // namespace emel::model::loader::events

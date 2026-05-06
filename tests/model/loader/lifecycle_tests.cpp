@@ -156,6 +156,38 @@ parse_fail(void *, const emel::model::loader::event::load &) noexcept {
   return emel::error::cast(emel::model::loader::error::parse_failed);
 }
 
+emel::error::type
+parse_backend_fail(void *, const emel::model::loader::event::load &) noexcept {
+  return emel::error::cast(emel::model::loader::error::backend_error);
+}
+
+emel::error::type
+parse_model_invalid_fail(void *,
+                         const emel::model::loader::event::load &) noexcept {
+  return emel::error::cast(emel::model::loader::error::model_invalid);
+}
+
+emel::error::type
+parse_internal_fail(void *, const emel::model::loader::event::load &) noexcept {
+  return emel::error::cast(emel::model::loader::error::internal_error);
+}
+
+emel::error::type
+parse_untracked_fail(void *,
+                     const emel::model::loader::event::load &) noexcept {
+  return emel::error::cast(emel::model::loader::error::untracked);
+}
+
+emel::error::type parse_io_strategy_unavailable_fail(
+    void *, const emel::model::loader::event::load &) noexcept {
+  return emel::error::cast(emel::model::loader::error::io_strategy_unavailable);
+}
+
+emel::error::type
+parse_unknown_fail(void *, const emel::model::loader::event::load &) noexcept {
+  return emel::error::type{0x5e17u};
+}
+
 struct tensor_loader_fixture {
   emel::model::tensor::sm machine{};
   std::array<emel::model::tensor::effect_request, 4> effect_requests{};
@@ -875,6 +907,29 @@ void noop_bind_error(const emel::gguf::loader::events::bind_error &) {}
 void noop_parse_done(const emel::gguf::loader::events::parse_done &) {}
 void noop_parse_error(const emel::gguf::loader::events::parse_error &) {}
 
+using parse_callback_fn = emel::error::type (*)(
+    void *, const emel::model::loader::event::load &) noexcept;
+
+void check_loader_parse_error(const parse_callback_fn parse_fn,
+                              const emel::error::type expected) {
+  auto model = std::make_unique<emel::model::data>();
+  emel::model::loader::sm machine{};
+  owner_state owner{};
+  emel::model::loader::event::parse_model_fn parse_model{nullptr, parse_fn};
+
+  uint8_t file_bytes[8] = {};
+  emel::model::loader::event::load request{*model, parse_model};
+  request.file_image = file_bytes;
+  request.file_size = sizeof(file_bytes);
+  request.on_done = {&owner, on_done};
+  request.on_error = {&owner, on_error};
+
+  CHECK_FALSE(machine.process_event(request));
+  CHECK_FALSE(owner.done);
+  CHECK(owner.error);
+  CHECK(owner.err == expected);
+}
+
 void materialize_tensor_names_from_file(
     emel::model::data &model_data, const std::vector<uint8_t> &file_bytes) {
   model_data.name_bytes_used = 0u;
@@ -1206,6 +1261,49 @@ TEST_CASE("model loader read copy requires request owned io batch span") {
   CHECK(target[3] == 0u);
 }
 
+TEST_CASE("model loader read copy batch error keeps used strategy unset") {
+  auto model = std::make_unique<emel::model::data>();
+  emel::model::loader::sm machine{};
+  emel::io::loader::sm io_loader{};
+  owner_state owner{};
+  tensor_loader_fixture tensor_loader{};
+  std::array<uint8_t, 4> target{};
+  read_copy_parse_state parse_state{.target = &target};
+  emel::model::loader::event::parse_model_fn parse_model{
+      &parse_state, parse_read_copy_tensor};
+
+  std::array<uint8_t, 8> file_bytes{'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'};
+  emel::model::loader::event::load request{*model, parse_model};
+  request.model_path = "fixture.gguf";
+  request.file_image = file_bytes.data();
+  request.file_size = file_bytes.size();
+  tensor_loader.bind(request);
+  std::array<emel::io::event::tensor_load_span, 1> io_load_spans{};
+  request.io_load_spans = std::span{io_load_spans};
+  request.io_loader = &io_loader;
+  request.io_strategy = emel::io::loader::event::strategy_kind::read_copy;
+  request.map_layers = {nullptr, map_layers_ok};
+  request.validate_structure = {nullptr, validate_structure_ok};
+  request.validate_architecture_impl = {nullptr, validate_architecture_ok};
+  request.on_done = {&owner, on_done};
+  request.on_error = {&owner, on_error};
+
+  const bool accepted = machine.process_event(request);
+  CHECK_FALSE(accepted);
+  CHECK_FALSE(owner.done);
+  CHECK(owner.error);
+  CHECK(owner.err ==
+        emel::error::cast(emel::model::loader::error::io_strategy_unavailable));
+  CHECK(owner.requested_io_strategy ==
+        emel::io::loader::event::strategy_kind::read_copy);
+  CHECK(owner.used_io_strategy == emel::io::loader::event::strategy_kind::none);
+  CHECK(tensor_loader.effect_results[0].handle == nullptr);
+  CHECK(target[0] == 0u);
+  CHECK(target[1] == 0u);
+  CHECK(target[2] == 0u);
+  CHECK(target[3] == 0u);
+}
+
 TEST_CASE("model loader reports tensor bind errors from the tensor actor") {
   auto model = std::make_unique<emel::model::data>();
   emel::model::loader::sm machine{};
@@ -1394,6 +1492,25 @@ TEST_CASE("model loader propagates parse failure") {
         emel::error::cast(emel::model::loader::error::parse_failed));
 }
 
+TEST_CASE("model loader classifies parse error variants") {
+  check_loader_parse_error(
+      parse_backend_fail,
+      emel::error::cast(emel::model::loader::error::backend_error));
+  check_loader_parse_error(
+      parse_model_invalid_fail,
+      emel::error::cast(emel::model::loader::error::model_invalid));
+  check_loader_parse_error(
+      parse_internal_fail,
+      emel::error::cast(emel::model::loader::error::internal_error));
+  check_loader_parse_error(
+      parse_untracked_fail,
+      emel::error::cast(emel::model::loader::error::untracked));
+  check_loader_parse_error(
+      parse_io_strategy_unavailable_fail,
+      emel::error::cast(emel::model::loader::error::io_strategy_unavailable));
+  check_loader_parse_error(parse_unknown_fail, emel::error::type{0x5e17u});
+}
+
 TEST_CASE("model loader rejects full load without tensor loader") {
   auto model = std::make_unique<emel::model::data>();
   emel::model::loader::sm machine{};
@@ -1439,6 +1556,77 @@ TEST_CASE("model loader rejects full load without map_layers callback") {
   CHECK(owner.error);
   CHECK(owner.err ==
         emel::error::cast(emel::model::loader::error::invalid_request));
+}
+
+TEST_CASE("model loader rejects full load without structure validator") {
+  auto model = std::make_unique<emel::model::data>();
+  emel::model::loader::sm machine{};
+  owner_state owner{};
+  emel::model::loader::event::parse_model_fn parse_model{nullptr, parse_ok};
+  tensor_loader_fixture tensor_loader{};
+
+  uint8_t file_bytes[8] = {};
+  emel::model::loader::event::load request{*model, parse_model};
+  request.file_image = file_bytes;
+  request.file_size = sizeof(file_bytes);
+  tensor_loader.bind(request);
+  request.map_layers = {nullptr, map_layers_ok};
+  request.validate_architecture_impl = {nullptr, validate_architecture_ok};
+  request.on_done = {&owner, on_done};
+  request.on_error = {&owner, on_error};
+
+  CHECK_FALSE(machine.process_event(request));
+  CHECK_FALSE(owner.done);
+  CHECK(owner.error);
+  CHECK(owner.err ==
+        emel::error::cast(emel::model::loader::error::invalid_request));
+}
+
+TEST_CASE("model loader rejects full load without architecture validator") {
+  auto model = std::make_unique<emel::model::data>();
+  emel::model::loader::sm machine{};
+  owner_state owner{};
+  emel::model::loader::event::parse_model_fn parse_model{nullptr, parse_ok};
+  tensor_loader_fixture tensor_loader{};
+
+  uint8_t file_bytes[8] = {};
+  emel::model::loader::event::load request{*model, parse_model};
+  request.file_image = file_bytes;
+  request.file_size = sizeof(file_bytes);
+  tensor_loader.bind(request);
+  request.map_layers = {nullptr, map_layers_ok};
+  request.validate_structure = {nullptr, validate_structure_ok};
+  request.on_done = {&owner, on_done};
+  request.on_error = {&owner, on_error};
+
+  CHECK_FALSE(machine.process_event(request));
+  CHECK_FALSE(owner.done);
+  CHECK(owner.error);
+  CHECK(owner.err ==
+        emel::error::cast(emel::model::loader::error::invalid_request));
+}
+
+TEST_CASE("model loader can skip architecture validation after full load") {
+  auto model = std::make_unique<emel::model::data>();
+  emel::model::loader::sm machine{};
+  owner_state owner{};
+  emel::model::loader::event::parse_model_fn parse_model{nullptr, parse_ok};
+  tensor_loader_fixture tensor_loader{};
+
+  uint8_t file_bytes[8] = {};
+  emel::model::loader::event::load request{*model, parse_model};
+  request.file_image = file_bytes;
+  request.file_size = sizeof(file_bytes);
+  tensor_loader.bind(request);
+  request.map_layers = {nullptr, map_layers_ok};
+  request.validate_structure = {nullptr, validate_structure_ok};
+  request.validate_architecture = false;
+  request.on_done = {&owner, on_done};
+  request.on_error = {&owner, on_error};
+
+  CHECK(machine.process_event(request));
+  CHECK(owner.done);
+  CHECK_FALSE(owner.error);
 }
 
 TEST_CASE("model loader rejects full load without tensor effect storage") {

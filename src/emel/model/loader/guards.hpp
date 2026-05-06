@@ -215,6 +215,34 @@ struct tensor_plan_done_with_io_strategy_with_loader {
   }
 };
 
+struct io_load_batch_span_ready {
+  bool operator()(const event::load_runtime &ev) const noexcept {
+    return ev.request.io_load_spans.size() >=
+           ev.tensor_events.plan_done.effect_count;
+  }
+};
+
+struct io_load_batch_span_missing {
+  bool operator()(const event::load_runtime &ev) const noexcept {
+    return ev.request.io_load_spans.size() <
+           ev.tensor_events.plan_done.effect_count;
+  }
+};
+
+struct tensor_plan_done_with_io_strategy_with_loader_and_batch_span_ready {
+  bool operator()(const event::load_runtime &ev) const noexcept {
+    return tensor_plan_done_with_io_strategy_with_loader{}(ev) &&
+           io_load_batch_span_ready{}(ev);
+  }
+};
+
+struct tensor_plan_done_with_io_strategy_with_loader_and_batch_span_missing {
+  bool operator()(const event::load_runtime &ev) const noexcept {
+    return tensor_plan_done_with_io_strategy_with_loader{}(ev) &&
+           io_load_batch_span_missing{}(ev);
+  }
+};
+
 struct io_load_done_all {
   bool operator()(const event::load_runtime &ev) const noexcept {
     return ev.io_events != nullptr && ev.io_events->load_done.raised &&

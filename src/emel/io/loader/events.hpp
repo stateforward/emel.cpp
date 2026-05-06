@@ -83,6 +83,7 @@ struct load_tensor_batch_error {
   const event::load_tensor_batch &request;
   emel::error::type err = emel::error::cast(error::none);
   emel::error::type strategy_err = emel::error::cast(error::none);
+  uint32_t failed_index = 0u;
 };
 
 } // namespace emel::io::loader::events

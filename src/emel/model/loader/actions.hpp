@@ -97,8 +97,12 @@ effect_reset_io_load_events(event::io_phase_events &events,
   events.load_done.raised = false;
   events.load_done.expected_count = expected_count;
   events.load_done.done_count = 0u;
+  events.load_done.bytes_done = 0u;
   events.load_error.raised = false;
   events.load_error.err = emel::error::cast(emel::io::loader::error::none);
+  events.load_error.strategy_err =
+      emel::error::cast(emel::io::loader::error::none);
+  events.load_error.failed_index = 0u;
 }
 
 inline void effect_record_io_load_done_event(
@@ -115,6 +119,28 @@ inline void effect_record_io_load_error_event(
   events->load_done.raised = false;
   events->load_error.raised = true;
   events->load_error.err = ev.err;
+  events->load_error.strategy_err = ev.strategy_err;
+}
+
+inline void effect_record_io_load_batch_done_event(
+    void *object,
+    const emel::io::loader::events::load_tensor_batch_done &ev) noexcept {
+  auto *events = static_cast<event::io_phase_events *>(object);
+  events->load_done.raised = true;
+  events->load_error.raised = false;
+  events->load_done.done_count = ev.done_count;
+  events->load_done.bytes_done = ev.bytes_done;
+}
+
+inline void effect_record_io_load_batch_error_event(
+    void *object,
+    const emel::io::loader::events::load_tensor_batch_error &ev) noexcept {
+  auto *events = static_cast<event::io_phase_events *>(object);
+  events->load_done.raised = false;
+  events->load_error.raised = true;
+  events->load_error.err = ev.err;
+  events->load_error.strategy_err = ev.strategy_err;
+  events->load_error.failed_index = ev.failed_index;
 }
 
 namespace detail {
@@ -164,6 +190,7 @@ struct begin_load {
     ev.ctx.bytes_total = 0;
     ev.ctx.bytes_done = 0;
     ev.ctx.used_mmap = false;
+    ev.ctx.used_io_strategy = emel::io::loader::event::strategy_kind::none;
   }
 };
 
@@ -237,26 +264,44 @@ struct effect_mark_io_strategy_unavailable {
   }
 };
 
-struct effect_dispatch_io_loads {
+struct effect_mark_io_strategy_used {
+  void operator()(const event::load_runtime &ev, context &) const noexcept {
+    ev.ctx.used_io_strategy = ev.request.io_strategy;
+    ev.ctx.used_mmap = ev.request.io_strategy ==
+                       emel::io::loader::event::strategy_kind::mapped_file;
+  }
+};
+
+struct effect_dispatch_io_load_batch {
   void operator()(const event::load_runtime &ev, context &) const noexcept {
     const uint32_t effect_count = ev.tensor_events.plan_done.effect_count;
     effect_reset_io_load_events(*ev.io_events, effect_count);
 
-    for (uint32_t index = 0u; index < effect_count; ++index) {
+    uint32_t index = 0u;
+    while (index < effect_count) {
       const auto &effect = ev.request.effect_requests[index];
-      const emel::io::loader::event::strategy_policy policy{effect.strategy};
-      const emel::io::loader::event::tensor_load_span tensor{
+      ev.request.io_load_spans[index] = emel::io::event::tensor_load_span{
           .tensor_id = effect.tensor_id,
           .file_index = effect.file_index,
           .file_offset = effect.offset,
           .byte_size = effect.size,
+          .file_path = ev.request.model_path,
+          .source_buffer = ev.request.file_image,
+          .source_buffer_bytes = ev.request.file_size,
           .target = effect.target,
+          .target_bytes = effect.size,
       };
-      emel::io::loader::event::load_tensor load{tensor, policy};
-      load.on_done = {ev.io_events, effect_record_io_load_done_event};
-      load.on_error = {ev.io_events, effect_record_io_load_error_event};
-      static_cast<void>(ev.request.io_loader->process_event(load));
+      ++index;
     }
+
+    const emel::io::loader::event::strategy_policy policy{
+        ev.request.io_strategy};
+    const std::span<const emel::io::event::tensor_load_span> span{
+        ev.request.io_load_spans.data(), effect_count};
+    emel::io::loader::event::load_tensor_batch load{span, policy};
+    load.on_done = {ev.io_events, effect_record_io_load_batch_done_event};
+    load.on_error = {ev.io_events, effect_record_io_load_batch_error_event};
+    static_cast<void>(ev.request.io_loader->process_event(load));
   }
 };
 
@@ -379,6 +424,7 @@ struct publish_done {
         .bytes_total = runtime_ev.ctx.bytes_total,
         .bytes_done = runtime_ev.ctx.bytes_done,
         .used_mmap = runtime_ev.ctx.used_mmap,
+        .used_io_strategy = runtime_ev.ctx.used_io_strategy,
     });
   }
 };
@@ -398,6 +444,8 @@ struct publish_error {
     runtime_ev.request.on_error(events::load_error{
         .request = runtime_ev.request,
         .err = runtime_ev.ctx.err,
+        .requested_io_strategy = runtime_ev.request.io_strategy,
+        .used_io_strategy = runtime_ev.ctx.used_io_strategy,
     });
   }
 };
@@ -430,7 +478,8 @@ inline constexpr effect_dispatch_tensor_plan_load
     effect_dispatch_tensor_plan_load{};
 inline constexpr effect_mark_io_strategy_unavailable
     effect_mark_io_strategy_unavailable{};
-inline constexpr effect_dispatch_io_loads effect_dispatch_io_loads{};
+inline constexpr effect_mark_io_strategy_used effect_mark_io_strategy_used{};
+inline constexpr effect_dispatch_io_load_batch effect_dispatch_io_load_batch{};
 inline constexpr effect_dispatch_tensor_apply_results
     effect_dispatch_tensor_apply_results{};
 inline constexpr effect_dispatch_tensor_apply_error_results

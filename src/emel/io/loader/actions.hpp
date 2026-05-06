@@ -89,6 +89,7 @@ struct effect_publish_load_tensor_batch_error {
         .request = ev.request,
         .err = ev.status.err,
         .strategy_err = ev.status.strategy_err,
+        .failed_index = ev.status.failed_index,
     });
   }
 };
