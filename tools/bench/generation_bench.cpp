@@ -28,8 +28,8 @@
 #include "emel/gguf/loader/events.hpp"
 #include "emel/gguf/loader/sm.hpp"
 #include "emel/io/events.hpp"
-#include "emel/io/source/any.hpp"
 #include "emel/io/read/sm.hpp"
+#include "emel/io/source/any.hpp"
 #include "emel/logits/sampler/events.hpp"
 #include "emel/model/data.hpp"
 #include "emel/model/detail.hpp"
@@ -1476,8 +1476,7 @@ run_emel_validate_architecture(void *,
 
 bool prepare_emel_fixture(emel_fixture &fixture,
                           const std::string &model_path) {
-  if (emel::io::source::load_file_bytes(model_path,
-                                                     fixture.file_bytes) !=
+  if (emel::io::source::load_file_bytes(model_path, fixture.file_bytes) !=
       emel::error::cast(emel::io::read::error::none)) {
     return false;
   }
@@ -1494,6 +1493,7 @@ bool prepare_emel_fixture(emel_fixture &fixture,
   emel::model::loader::event::parse_model_fn parse_model{&fixture,
                                                          run_emel_parse_model};
   emel::model::loader::event::load load_ev{fixture.model_data, parse_model};
+  load_ev.model_path = model_path;
   load_ev.file_image = fixture.file_bytes.data();
   load_ev.file_size = fixture.file_bytes.size();
   load_ev.tensor_loader = &fixture.tensor_loader;

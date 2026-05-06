@@ -1798,6 +1798,20 @@ TEST_CASE("model loader done evidence reports the public io strategy used") {
   }
 }
 
+TEST_CASE("generation benchmark read-copy load passes source model path") {
+  const std::string source =
+      read_text_file(repo_root() / "tools" / "bench" / "generation_bench.cpp");
+  const std::string_view prepare_fixture =
+      function_source(source, "prepare_emel_fixture");
+
+  CHECK(prepare_fixture.find("load_ev.model_path = model_path;") !=
+        std::string_view::npos);
+  CHECK(prepare_fixture.find("bind_model_load_io_strategy(load_ev") !=
+        std::string_view::npos);
+  CHECK(prepare_fixture.find("load_ev.model_path = model_path;") <
+        prepare_fixture.find("bind_model_load_io_strategy(load_ev"));
+}
+
 TEST_CASE(
     "model tensor state-machine wrappers keep context and optional output "
     "routing in transitions") {

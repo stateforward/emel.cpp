@@ -858,8 +858,7 @@ TEST_CASE("parity assets use public io source file loading") {
   CHECK(source.find("#include \"emel/io/read/detail.hpp\"") ==
         std::string::npos);
   CHECK(source.find("emel::io::read::detail::") == std::string::npos);
-  CHECK(source.find("emel::io::source::load_file_bytes") !=
-        std::string::npos);
+  CHECK(source.find("emel::io::source::load_file_bytes") != std::string::npos);
   CHECK(source.find("bool file_exists(") == std::string::npos);
   CHECK(source.find("bool read_file_bytes(") == std::string::npos);
   CHECK(source.find(
@@ -867,6 +866,26 @@ TEST_CASE("parity assets use public io source file loading") {
         std::string::npos);
   CHECK(source.find("std::string maintained_generation_fixture_list(") ==
         std::string::npos);
+}
+
+TEST_CASE("public io source file loading validates paths before opening") {
+  std::vector<uint8_t> bytes{1u, 2u, 3u};
+  CHECK(emel::io::source::load_file_bytes("", bytes) ==
+        emel::error::cast(emel::io::read::error::invalid_request));
+  CHECK(bytes.empty());
+
+  bytes = {1u, 2u, 3u};
+  const std::string embedded_nul{"reference_ref.txt\0other", 23u};
+  CHECK(emel::io::source::load_file_bytes(embedded_nul, bytes) ==
+        emel::error::cast(emel::io::read::error::invalid_request));
+  CHECK(bytes.empty());
+
+  bytes = {1u, 2u, 3u};
+  const std::string oversized_path(emel::io::read::k_max_file_path_bytes + 1u,
+                                   'a');
+  CHECK(emel::io::source::load_file_bytes(oversized_path, bytes) ==
+        emel::error::cast(emel::io::read::error::invalid_request));
+  CHECK(bytes.empty());
 }
 
 TEST_CASE("parity runner dispatches through explicit engine adapters") {
