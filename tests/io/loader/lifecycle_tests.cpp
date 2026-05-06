@@ -392,6 +392,134 @@ TEST_CASE("io loader read copy batch fails closed without read actor") {
   CHECK(loader.is(stateforward::sml::state<emel::io::loader::state_ready>));
 }
 
+TEST_CASE("io loader read copy batch rejects invalid spans") {
+  emel::io::read::sm read_actor{};
+  emel::io::loader::sm loader{{.io_read = &read_actor}};
+  owner_state owner{};
+  constexpr char source[] = "abcdef";
+  std::array<char, 3> target{};
+  const std::array<emel::io::loader::event::tensor_load_span, 1> tensors{{
+      {
+          .tensor_id = 13,
+          .file_index = 1u,
+          .file_offset = 1u,
+          .byte_size = 0u,
+          .file_path = "fixtures.bin",
+          .source_buffer = source,
+          .source_buffer_bytes = sizeof(source) - 1u,
+          .target = target.data(),
+          .target_bytes = target.size(),
+      },
+  }};
+  const emel::io::loader::event::strategy_policy policy{
+      emel::io::loader::event::strategy_kind::read_copy,
+  };
+  emel::io::loader::event::load_tensor_batch request{tensors, policy};
+  request.on_done = {&owner, on_load_batch_done};
+  request.on_error = {&owner, on_load_batch_error};
+
+  CHECK_FALSE(loader.process_event(request));
+  CHECK_FALSE(owner.done);
+  CHECK(owner.error);
+  CHECK(owner.err ==
+        emel::error::cast(emel::io::loader::error::invalid_request));
+  CHECK(loader.is(stateforward::sml::state<emel::io::loader::state_ready>));
+}
+
+TEST_CASE("io loader read copy batch accepts success without done callback") {
+  emel::io::read::sm read_actor{};
+  emel::io::loader::sm loader{{.io_read = &read_actor}};
+  constexpr char source[] = "abcdef";
+  std::array<char, 3> target{};
+  const std::array<emel::io::loader::event::tensor_load_span, 1> tensors{{
+      {
+          .tensor_id = 14,
+          .file_index = 1u,
+          .file_offset = 2u,
+          .byte_size = target.size(),
+          .file_path = "fixtures.bin",
+          .source_buffer = source,
+          .source_buffer_bytes = sizeof(source) - 1u,
+          .target = target.data(),
+          .target_bytes = target.size(),
+      },
+  }};
+  const emel::io::loader::event::strategy_policy policy{
+      emel::io::loader::event::strategy_kind::read_copy,
+  };
+  emel::io::loader::event::load_tensor_batch request{tensors, policy};
+
+  CHECK(loader.process_event(request));
+  CHECK(target[0] == 'c');
+  CHECK(target[1] == 'd');
+  CHECK(target[2] == 'e');
+  CHECK(loader.is(stateforward::sml::state<emel::io::loader::state_ready>));
+}
+
+TEST_CASE("io loader read copy batch reports read failures") {
+  emel::io::read::sm read_actor{};
+  emel::io::loader::sm loader{{.io_read = &read_actor}};
+  owner_state owner{};
+  constexpr char source[] = "abcdef";
+  std::array<char, 3> target{};
+  const std::array<emel::io::loader::event::tensor_load_span, 1> tensors{{
+      {
+          .tensor_id = 15,
+          .file_index = 1u,
+          .file_offset = 1u,
+          .byte_size = target.size(),
+          .file_path = "fixtures.bin",
+          .source_buffer = source,
+          .source_buffer_bytes = sizeof(source) - 1u,
+          .source_error =
+              emel::error::cast(emel::io::read::error::file_read_failed),
+          .target = target.data(),
+          .target_bytes = target.size(),
+      },
+  }};
+  const emel::io::loader::event::strategy_policy policy{
+      emel::io::loader::event::strategy_kind::read_copy,
+  };
+  emel::io::loader::event::load_tensor_batch request{tensors, policy};
+  request.on_done = {&owner, on_load_batch_done};
+  request.on_error = {&owner, on_load_batch_error};
+
+  CHECK_FALSE(loader.process_event(request));
+  CHECK_FALSE(owner.done);
+  CHECK(owner.error);
+  CHECK(owner.err == emel::error::cast(emel::io::loader::error::unavailable));
+  CHECK(owner.strategy_err ==
+        emel::error::cast(emel::io::read::error::file_read_failed));
+  CHECK(loader.is(stateforward::sml::state<emel::io::loader::state_ready>));
+}
+
+TEST_CASE(
+    "io loader read copy batch rejects missing actor without error callback") {
+  emel::io::loader::sm loader{};
+  constexpr char source[] = "abcdef";
+  std::array<char, 3> target{};
+  const std::array<emel::io::loader::event::tensor_load_span, 1> tensors{{
+      {
+          .tensor_id = 16,
+          .file_index = 1u,
+          .file_offset = 1u,
+          .byte_size = target.size(),
+          .file_path = "fixtures.bin",
+          .source_buffer = source,
+          .source_buffer_bytes = sizeof(source) - 1u,
+          .target = target.data(),
+          .target_bytes = target.size(),
+      },
+  }};
+  const emel::io::loader::event::strategy_policy policy{
+      emel::io::loader::event::strategy_kind::read_copy,
+  };
+  emel::io::loader::event::load_tensor_batch request{tensors, policy};
+
+  CHECK_FALSE(loader.process_event(request));
+  CHECK(loader.is(stateforward::sml::state<emel::io::loader::state_ready>));
+}
+
 TEST_CASE("io loader rejects unsupported strategy without error callback") {
   emel::io::loader::sm loader{};
   const emel::io::loader::event::tensor_load_span tensor{
