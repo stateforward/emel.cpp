@@ -47,8 +47,8 @@ inline bool batch_span_source_seek_succeeded(
 inline bool batch_span_file_read_failed(
     const emel::io::event::tensor_load_span &span) noexcept {
   const auto source_error = span.source_error;
-  return source_error == emel::error::cast(error::file_read_failed) ||
-         source_error == emel::error::cast(error::internal_error);
+  return source_error != emel::error::cast(error::none) &&
+         source_error != emel::error::cast(error::short_read);
 }
 
 inline bool
@@ -317,8 +317,8 @@ struct file_read_failed {
   bool operator()(const detail::read_tensor_runtime &ev,
                   const action::context &) const noexcept {
     const auto source_error = ev.request.request.source_error;
-    return source_error == emel::error::cast(error::file_read_failed) ||
-           source_error == emel::error::cast(error::internal_error);
+    return source_error != emel::error::cast(error::none) &&
+           source_error != emel::error::cast(error::short_read);
   }
 };
 

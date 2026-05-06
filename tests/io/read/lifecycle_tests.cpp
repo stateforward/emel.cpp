@@ -419,6 +419,52 @@ TEST_CASE("io read batch reports file read span index") {
   CHECK(strategy.is(stateforward::sml::state<emel::io::read::state_ready>));
 }
 
+TEST_CASE("io read batch classifies unrecognized source errors as read failures") {
+  emel::io::read::sm strategy{};
+  batch_owner_state owner{};
+  uint8_t first_target[3]{};
+  uint8_t second_target[4]{};
+  constexpr char first_source[] = "abcdef";
+  constexpr char second_source[] = "wxyz";
+  const emel::io::event::tensor_load_span tensors[] = {
+      {
+          .tensor_id = 19,
+          .file_index = 0u,
+          .file_offset = 0u,
+          .byte_size = 3u,
+          .file_path = "emel_io_read_batch_unknown_valid.bin",
+          .source_buffer = first_source,
+          .source_buffer_bytes = sizeof(first_source) - 1u,
+          .source_error = emel::error::cast(emel::io::read::error::none),
+          .target = first_target,
+          .target_bytes = sizeof(first_target),
+      },
+      {
+          .tensor_id = 20,
+          .file_index = 0u,
+          .file_offset = 0u,
+          .byte_size = 4u,
+          .file_path = "emel_io_read_batch_unknown_bad.bin",
+          .source_buffer = second_source,
+          .source_buffer_bytes = sizeof(second_source) - 1u,
+          .source_error = emel::error::type{0x5e17u},
+          .target = second_target,
+          .target_bytes = sizeof(second_target),
+      },
+  };
+  emel::io::read::event::read_tensor_batch read_request{tensors};
+  read_request.on_done = {&owner, on_batch_done};
+  read_request.on_error = {&owner, on_batch_error};
+
+  CHECK_FALSE(strategy.process_event(read_request));
+  CHECK_FALSE(owner.done);
+  REQUIRE(owner.error);
+  CHECK(owner.err ==
+        emel::error::cast(emel::io::read::error::file_read_failed));
+  CHECK(owner.failed_index == 1u);
+  CHECK(strategy.is(stateforward::sml::state<emel::io::read::state_ready>));
+}
+
 TEST_CASE("io read batch fails closed without error callback") {
   emel::io::read::sm strategy{};
   uint8_t target[1]{};
@@ -533,6 +579,28 @@ TEST_CASE("io read reports file read failures deterministically") {
   request.source_buffer_bytes = sizeof(source) - 1u;
   request.source_error =
       emel::error::cast(emel::io::read::error::file_read_failed);
+  emel::io::read::event::read_tensor read_request{request};
+  read_request.on_done = {&owner, on_read_done};
+  read_request.on_error = {&owner, on_read_error};
+
+  CHECK_FALSE(strategy.process_event(read_request));
+  CHECK_FALSE(owner.done);
+  REQUIRE(owner.error);
+  CHECK(owner.err ==
+        emel::error::cast(emel::io::read::error::file_read_failed));
+  CHECK(strategy.is(stateforward::sml::state<emel::io::read::state_ready>));
+}
+
+TEST_CASE("io read classifies unrecognized source errors as read failures") {
+  emel::io::read::sm strategy{};
+  read_owner_state owner{};
+  uint8_t target[8]{};
+  constexpr char source[] = "abcdefgh";
+  auto request = make_request("emel_io_read_unknown_error.bin", target,
+                              static_cast<uint64_t>(sizeof(target)));
+  request.source_buffer = source;
+  request.source_buffer_bytes = sizeof(source) - 1u;
+  request.source_error = emel::error::type{0x5e17u};
   emel::io::read::event::read_tensor read_request{request};
   read_request.on_done = {&owner, on_read_done};
   read_request.on_error = {&owner, on_read_error};
