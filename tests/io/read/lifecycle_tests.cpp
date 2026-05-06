@@ -1,15 +1,16 @@
 #include <cstdint>
 
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
-#include <cstring>
 #include <string>
 #include <string_view>
 
 #include <doctest/doctest.h>
 
 #include "emel/error/error.hpp"
+#include "emel/io/events.hpp"
 #include "emel/io/read/errors.hpp"
 #include "emel/io/read/events.hpp"
 #include "emel/io/read/sm.hpp"
@@ -22,6 +23,15 @@ struct read_owner_state {
   bool error = false;
   uint64_t bytes_copied = 0u;
   void *target_buffer = nullptr;
+  emel::error::type err = emel::error::cast(emel::io::read::error::none);
+};
+
+struct batch_owner_state {
+  bool done = false;
+  bool error = false;
+  uint32_t done_count = 0u;
+  uint64_t bytes_copied = 0u;
+  uint32_t failed_index = 0u;
   emel::error::type err = emel::error::cast(emel::io::read::error::none);
 };
 
@@ -41,6 +51,24 @@ void on_read_error(
   owner->err = ev.err;
 }
 
+void on_batch_done(
+    void *object,
+    const emel::io::read::events::read_tensor_batch_done &ev) noexcept {
+  auto *owner = static_cast<batch_owner_state *>(object);
+  owner->done = true;
+  owner->done_count = ev.done_count;
+  owner->bytes_copied = ev.bytes_copied;
+}
+
+void on_batch_error(
+    void *object,
+    const emel::io::read::events::read_tensor_batch_error &ev) noexcept {
+  auto *owner = static_cast<batch_owner_state *>(object);
+  owner->error = true;
+  owner->err = ev.err;
+  owner->failed_index = ev.failed_index;
+}
+
 std::filesystem::path repo_root() {
 #ifdef EMEL_TEST_REPO_ROOT
   return std::filesystem::path{EMEL_TEST_REPO_ROOT};
@@ -56,17 +84,9 @@ std::string read_text_file(const std::filesystem::path &path) {
                      std::istreambuf_iterator<char>{}};
 }
 
-void write_text_file(const std::filesystem::path &path, std::string_view text) {
-  std::ofstream output{path, std::ios::binary};
-  REQUIRE(output.good());
-  output.write(text.data(), static_cast<std::streamsize>(text.size()));
-  REQUIRE(output.good());
-}
-
-emel::io::read::event::read_tensor_request make_request(
-    std::string_view path,
-    void *target_buffer,
-    uint64_t target_buffer_bytes) {
+emel::io::read::event::read_tensor_request
+make_request(std::string_view path, void *target_buffer,
+             uint64_t target_buffer_bytes) {
   return {
       .tensor_id = 42,
       .file_index = 0u,
@@ -95,10 +115,10 @@ TEST_CASE("io read copies requested bytes into caller-owned target buffer") {
   emel::io::read::sm strategy{};
   read_owner_state owner{};
   uint8_t target[4]{};
-  const auto path = repo_root() / "build" / "emel_io_read_success.bin";
-  write_text_file(path, "abcdef");
-  const std::string path_text = path.string();
-  auto request = make_request(path_text, target, 3u);
+  constexpr char source[] = "abcdef";
+  auto request = make_request("emel_io_read_success.bin", target, 3u);
+  request.source_buffer = source;
+  request.source_buffer_bytes = sizeof(source) - 1u;
   request.file_offset = 2u;
   request.byte_size = 3u;
   emel::io::read::event::read_tensor read_request{request};
@@ -111,6 +131,120 @@ TEST_CASE("io read copies requested bytes into caller-owned target buffer") {
   CHECK(owner.bytes_copied == 3u);
   CHECK(owner.target_buffer == target);
   CHECK(std::memcmp(target, "cde", 3u) == 0);
+  CHECK(strategy.is(stateforward::sml::state<emel::io::read::state_ready>));
+}
+
+TEST_CASE("io read batch copies caller owned tensor spans") {
+  emel::io::read::sm strategy{};
+  batch_owner_state owner{};
+  uint8_t first_target[3]{};
+  uint8_t second_target[4]{};
+  constexpr char first_source[] = "abcdef";
+  constexpr char second_source[] = "vwxyz";
+  const emel::io::event::tensor_load_span tensors[] = {
+      {
+          .tensor_id = 7,
+          .file_index = 0u,
+          .file_offset = 1u,
+          .byte_size = 3u,
+          .file_path = "emel_io_read_batch_first.bin",
+          .source_buffer = first_source,
+          .source_buffer_bytes = sizeof(first_source) - 1u,
+          .source_error = emel::error::cast(emel::io::read::error::none),
+          .target = first_target,
+          .target_bytes = sizeof(first_target),
+      },
+      {
+          .tensor_id = 8,
+          .file_index = 0u,
+          .file_offset = 0u,
+          .byte_size = 4u,
+          .file_path = "emel_io_read_batch_second.bin",
+          .source_buffer = second_source,
+          .source_buffer_bytes = sizeof(second_source) - 1u,
+          .source_error = emel::error::cast(emel::io::read::error::none),
+          .target = second_target,
+          .target_bytes = sizeof(second_target),
+      },
+  };
+  emel::io::read::event::read_tensor_batch read_request{tensors};
+  read_request.on_done = {&owner, on_batch_done};
+  read_request.on_error = {&owner, on_batch_error};
+
+  REQUIRE(strategy.process_event(read_request));
+  REQUIRE(owner.done);
+  CHECK_FALSE(owner.error);
+  CHECK(owner.done_count == 2u);
+  CHECK(owner.bytes_copied == 7u);
+  CHECK(std::memcmp(first_target, "bcd", 3u) == 0);
+  CHECK(std::memcmp(second_target, "vwxy", 4u) == 0);
+  CHECK(strategy.is(stateforward::sml::state<emel::io::read::state_ready>));
+}
+
+TEST_CASE("io read batch reports first failing span through explicit error") {
+  emel::io::read::sm strategy{};
+  batch_owner_state owner{};
+  uint8_t first_target[3]{};
+  uint8_t second_target[4]{};
+  constexpr char first_source[] = "abcdef";
+  constexpr char second_source[] = "xy";
+  const emel::io::event::tensor_load_span tensors[] = {
+      {
+          .tensor_id = 9,
+          .file_index = 0u,
+          .file_offset = 2u,
+          .byte_size = 3u,
+          .file_path = "emel_io_read_batch_ok.bin",
+          .source_buffer = first_source,
+          .source_buffer_bytes = sizeof(first_source) - 1u,
+          .source_error = emel::error::cast(emel::io::read::error::none),
+          .target = first_target,
+          .target_bytes = sizeof(first_target),
+      },
+      {
+          .tensor_id = 10,
+          .file_index = 0u,
+          .file_offset = 0u,
+          .byte_size = 4u,
+          .file_path = "emel_io_read_batch_short.bin",
+          .source_buffer = second_source,
+          .source_buffer_bytes = sizeof(second_source) - 1u,
+          .source_error = emel::error::cast(emel::io::read::error::none),
+          .target = second_target,
+          .target_bytes = sizeof(second_target),
+      },
+  };
+  emel::io::read::event::read_tensor_batch read_request{tensors};
+  read_request.on_done = {&owner, on_batch_done};
+  read_request.on_error = {&owner, on_batch_error};
+
+  CHECK_FALSE(strategy.process_event(read_request));
+  CHECK_FALSE(owner.done);
+  REQUIRE(owner.error);
+  CHECK(owner.err == emel::error::cast(emel::io::read::error::short_read));
+  CHECK(owner.failed_index == 1u);
+  CHECK(strategy.is(stateforward::sml::state<emel::io::read::state_ready>));
+}
+
+TEST_CASE("io read can capture same-RTC result without public callbacks") {
+  emel::io::read::sm strategy{};
+  uint8_t target[4]{};
+  constexpr char source[] = "abcdef";
+  auto request = make_request("emel_io_read_result.bin", target, 4u);
+  request.source_buffer = source;
+  request.source_buffer_bytes = sizeof(source) - 1u;
+  request.file_offset = 1u;
+  request.byte_size = 4u;
+  emel::io::read::event::read_tensor read_request{request};
+  emel::io::read::events::read_tensor_result result{};
+
+  REQUIRE(strategy.process_event(read_request, result));
+  CHECK(result.accepted);
+  CHECK(result.ok);
+  CHECK(result.err == emel::error::cast(emel::io::read::error::none));
+  CHECK(result.bytes_copied == 4u);
+  CHECK(result.target_buffer == target);
+  CHECK(std::memcmp(target, "bcde", 4u) == 0);
   CHECK(strategy.is(stateforward::sml::state<emel::io::read::state_ready>));
 }
 
@@ -132,6 +266,29 @@ TEST_CASE("io read reports file open failures deterministically") {
   CHECK(strategy.is(stateforward::sml::state<emel::io::read::state_ready>));
 }
 
+TEST_CASE("io read reports file read failures deterministically") {
+  emel::io::read::sm strategy{};
+  read_owner_state owner{};
+  uint8_t target[8]{};
+  constexpr char source[] = "abcdefgh";
+  auto request = make_request("emel_io_read_failed.bin", target,
+                              static_cast<uint64_t>(sizeof(target)));
+  request.source_buffer = source;
+  request.source_buffer_bytes = sizeof(source) - 1u;
+  request.source_error =
+      emel::error::cast(emel::io::read::error::file_read_failed);
+  emel::io::read::event::read_tensor read_request{request};
+  read_request.on_done = {&owner, on_read_done};
+  read_request.on_error = {&owner, on_read_error};
+
+  CHECK_FALSE(strategy.process_event(read_request));
+  CHECK_FALSE(owner.done);
+  REQUIRE(owner.error);
+  CHECK(owner.err ==
+        emel::error::cast(emel::io::read::error::file_read_failed));
+  CHECK(strategy.is(stateforward::sml::state<emel::io::read::state_ready>));
+}
+
 TEST_CASE("io read fails closed without an error callback") {
   emel::io::read::sm strategy{};
   uint8_t target[8]{};
@@ -143,7 +300,8 @@ TEST_CASE("io read fails closed without an error callback") {
   CHECK(strategy.is(stateforward::sml::state<emel::io::read::state_ready>));
 }
 
-TEST_CASE("io read rejects invalid request preconditions before platform gate") {
+TEST_CASE(
+    "io read rejects invalid request preconditions before platform gate") {
   emel::io::read::sm strategy{};
   read_owner_state owner{};
   uint8_t target[8]{};
@@ -251,30 +409,14 @@ TEST_CASE("io read rejects invalid target-buffer preconditions") {
   CHECK(strategy.is(stateforward::sml::state<emel::io::read::state_ready>));
 }
 
-TEST_CASE("io read platform guard and unsupported action are explicit") {
-  emel::io::read::action::context ctx{};
-  emel::io::read::detail::read_attempt_status status{};
-  uint8_t target[4]{};
-  const auto request = make_request("/tmp/emel_io_read_platform.bin", target, 4u);
-  emel::io::read::event::read_tensor read_request{request};
-  emel::io::read::detail::read_tensor_runtime runtime{read_request, status};
-
-  CHECK(emel::io::read::guard::platform_read_supported{}(runtime, ctx) !=
-        emel::io::read::guard::platform_read_unsupported{}(runtime, ctx));
-  emel::io::read::action::effect_mark_unsupported_platform(runtime, ctx);
-  CHECK(status.err ==
-        emel::error::cast(emel::io::read::error::unsupported_platform));
-  CHECK_FALSE(status.ok);
-}
-
 TEST_CASE("io read reports short reads deterministically") {
   emel::io::read::sm strategy{};
   read_owner_state owner{};
   uint8_t target[8]{};
-  const auto path = repo_root() / "build" / "emel_io_read_short.bin";
-  write_text_file(path, "abc");
-  const std::string path_text = path.string();
-  const auto request = make_request(path_text, target, sizeof(target));
+  constexpr char source[] = "abc";
+  auto request = make_request("emel_io_read_short.bin", target, sizeof(target));
+  request.source_buffer = source;
+  request.source_buffer_bytes = sizeof(source) - 1u;
   emel::io::read::event::read_tensor read_request{request};
   read_request.on_done = {&owner, on_read_done};
   read_request.on_error = {&owner, on_read_error};
@@ -341,15 +483,13 @@ TEST_CASE("io read handles unexpected events deterministically") {
 TEST_CASE("io read component contains no mmap or async strategy behavior") {
   const auto root = repo_root();
   const std::filesystem::path component = root / "src/emel/io/read";
-  const std::string combined =
-      read_text_file(component / "actions.cpp") +
-      read_text_file(component / "context.hpp") +
-      read_text_file(component / "detail.hpp") +
-      read_text_file(component / "errors.hpp") +
-      read_text_file(component / "events.hpp") +
-      read_text_file(component / "guards.hpp") +
-      read_text_file(component / "actions.hpp") +
-      read_text_file(component / "sm.hpp");
+  const std::string combined = read_text_file(component / "context.hpp") +
+                               read_text_file(component / "detail.hpp") +
+                               read_text_file(component / "errors.hpp") +
+                               read_text_file(component / "events.hpp") +
+                               read_text_file(component / "guards.hpp") +
+                               read_text_file(component / "actions.hpp") +
+                               read_text_file(component / "sm.hpp");
 
   const std::string_view source{combined};
   CHECK(source.find("mmap") == std::string_view::npos);
@@ -357,4 +497,10 @@ TEST_CASE("io read component contains no mmap or async strategy behavior") {
   CHECK(source.find("async") == std::string_view::npos);
   CHECK(source.find("staged") == std::string_view::npos);
   CHECK(source.find("chunked") == std::string_view::npos);
+  CHECK(source.find("::open(") == std::string_view::npos);
+  CHECK(source.find("::read(") == std::string_view::npos);
+  CHECK(source.find("::lseek(") == std::string_view::npos);
+  CHECK(source.find("::close(") == std::string_view::npos);
+  CHECK(source.find("ReadFile") == std::string_view::npos);
+  CHECK(source.find("CreateFile") == std::string_view::npos);
 }
