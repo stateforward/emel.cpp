@@ -55,7 +55,7 @@ completed: 2026-05-06
 ## Task Commits
 
 1. **Task 1: Run and record current validation commands** - `40a901ce` (`docs`)
-2. **Task 2: Publish audit and summary evidence** - pending until Task 2 commit is recorded
+2. **Task 2: Publish audit and summary evidence** - `357409df` (`docs`)
 
 ## Files Created/Modified
 
@@ -140,6 +140,16 @@ None - no external service configuration required.
 ## Next Phase Readiness
 
 Phase 225 closeout evidence is published. The remaining risk is the environment-specific direct `build/zig` dyld launch blocker, which is recorded and backed by passing coverage-built CTest plus source scans.
+
+## Self-Check: PASSED
+
+- Found `.planning/phases/225-read-closeout-runtime-validation-and-sml-repair/225-VERIFICATION.md`.
+- Found `.planning/phases/225-read-closeout-runtime-validation-and-sml-repair/225-VALIDATION.md`.
+- Found `.planning/phases/225-read-closeout-runtime-validation-and-sml-repair/225-06-SUMMARY.md`.
+- Found `.planning/v1.25-MILESTONE-AUDIT.md`.
+- Found `.planning/milestones/v1.25-MILESTONE-AUDIT.md`.
+- Found task commit `40a901ce`.
+- Found task commit `357409df`.
 
 ---
 *Phase: 225-read-closeout-runtime-validation-and-sml-repair*

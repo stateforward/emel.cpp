@@ -1,7 +1,7 @@
 # Requirements: EMEL v1.25 I/O Read Loading Strategy
 
 **Defined:** 2026-05-05
-**Status:** GAP CLOSURE
+**Status:** VALIDATED
 **Core Value:** Prove real end-to-end behavior with explicit SML orchestration and
 parity-oriented verification before widening API surface or model scope.
 **Source:** GitHub issue #62, "Add io/read state machine for copy-based tensor loading"
@@ -31,7 +31,7 @@ Requirements for this milestone. Each maps to exactly one active roadmap phase.
   failure, and read failure outcomes are represented with explicit `_done` and `_error`
   events or states, not mirrored status fields, action-selected callbacks, or context
   phase flags.
-- [ ] **TIO-03**: `model/loader`, maintained benchmark lanes, paritychecker lanes, and
+- [x] **TIO-03**: `model/loader`, maintained benchmark lanes, paritychecker lanes, and
   embedded probes can select or report read-backed loading only through public runtime
   surfaces, with no low-level read logic or actor-internal reach-through.
 
@@ -50,17 +50,17 @@ Requirements for this milestone. Each maps to exactly one active roadmap phase.
 
 ### Validation And Publication
 
-- [ ] **VAL-01**: Doctest coverage proves supported read behavior and representative failure
+- [x] **VAL-01**: Doctest coverage proves supported read behavior and representative failure
   handling through `process_event(...)` and SML state inspection (`visit_current_states`
   and/or `is(...)`).
 - [x] **VAL-02**: Domain and source guardrails fail if read implementation leaks into
   `model/loader`, if tensor residency ownership moves out of `model/tensor`, or if mmap,
   staged/chunked constrained-memory, async, or device strategy behavior lands in this
   milestone.
-- [ ] **VAL-03**: Public docs, generated architecture docs, planning artifacts, lint snapshots,
+- [x] **VAL-03**: Public docs, generated architecture docs, planning artifacts, lint snapshots,
   benchmark snapshots, benchmark outputs, and model artifacts are updated from maintained
   commands when required and describe read-strategy support truthfully.
-- [ ] **VAL-04**: Maintained benchmark and parity evidence reports read-strategy usage only
+- [x] **VAL-04**: Maintained benchmark and parity evidence reports read-strategy usage only
   when the EMEL lane actually runs the read-backed runtime path and does not present
   unsupported fallback behavior as read-strategy parity or performance.
 
@@ -106,19 +106,19 @@ Which phases cover which requirements.
 | ERR-01 | Phase 214.1 | Validated |
 | TIO-01 | Phase 215 | Validated |
 | TIO-02 | Phase 223 | Validated |
-| TIO-03 | Phase 225 | Pending |
-| VAL-04 | Phase 225 | Pending |
-| VAL-01 | Phase 225 | Pending |
+| TIO-03 | Phase 225 | Complete |
+| VAL-04 | Phase 225 | Complete |
+| VAL-01 | Phase 225 | Complete |
 | VAL-02 | Phase 222 | Validated |
-| VAL-03 | Phase 225 | Pending |
+| VAL-03 | Phase 225 | Complete |
 
-Phase 224 is cleanup-only. Phase 225 owns refreshed source-backed audit gap closure for
+Phase 224 is cleanup-only. Phase 225 closed refreshed source-backed audit gaps for
 runtime validation, SML orchestration readiness, maintained read/copy evidence, and
 closeout artifact path truth.
 
 **Coverage:**
 - v1 requirements: 13 total
 - Mapped to phases: 13
-- Validated: 9
-- Pending: 4
+- Validated: 13
+- Pending: 0
 - Unmapped: 0

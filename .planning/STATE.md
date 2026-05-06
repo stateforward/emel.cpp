@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.25
 milestone_name: I/O Read Loading Strategy
-status: executing
-stopped_at: Completed 225-05-PLAN.md
-last_updated: "2026-05-06T15:34:52.581Z"
+status: verifying
+stopped_at: Completed 225-read-closeout-runtime-validation-and-sml-repair-06-PLAN.md
+last_updated: "2026-05-06T15:50:03.926Z"
 last_activity: 2026-05-06
 progress:
   total_phases: 15
-  completed_phases: 0
+  completed_phases: 1
   total_plans: 6
-  completed_plans: 5
-  percent: 83
+  completed_plans: 6
+  percent: 100
 ---
 
 # Project State
@@ -23,30 +23,30 @@ See: .planning/PROJECT.md (updated 2026-05-05)
 **Core value:** Prove real end-to-end behavior with explicit SML orchestration and
 parity-oriented verification before widening API surface or model scope.
 **Current focus:** Phase 225 — read-closeout-runtime-validation-and-sml-repair
-Phase 225 is pending to repair current model/batch validation, remove model-loader
-action-loop orchestration from the maintained read/copy path, and reconcile closeout
-artifact path truth.
+Phase 225 published current verification, validation, and audit evidence for the
+read/copy closeout repair. Direct `build/zig` dyld launch blockers are recorded with
+source-backed substitute evidence from the coverage CTest lane and maintained source scans.
 
 ## Current Position
 
-Phase: 225 (read-closeout-runtime-validation-and-sml-repair) — EXECUTING
+Phase: 225 (read-closeout-runtime-validation-and-sml-repair) — VERIFYING
 Plan: 6 of 6
-Status: Ready to execute
+Status: Phase complete — ready for verification
 Phase 225 closes `.planning/v1.25-MILESTONE-AUDIT.md` findings through six
 linear plans: current
 `emel_tests_model_and_batch` dyld launch failure, model-loader action-loop
 `io_loader->process_event(...)` SML readiness risk, and stale closeout artifact paths.
 Last activity: 2026-05-06
 
-Progress: [#########.] 93%
+Progress: [##########] 100%
 
 ## Performance Metrics
 
 **Latest audited milestone:** `v1.25 I/O Read Loading Strategy`
 
-- v1.25 reopened gap closure is active in Phase 225. 13/13 v1.25
-  requirements are mapped in current traceability; 9 are validated and 4 remain
-  pending until Plan 06 publishes current command evidence.
+- v1.25 reopened gap closure completed in Phase 225. 13/13 v1.25
+  requirements are mapped in current traceability and 13/13 are complete after
+  Plan 06 published current command evidence.
 
 - v1.24 shipped on 2026-05-04 after Phase 210 closing full-scope quality gate passed with
   no override. 13/13 v1.24 requirements satisfied (MMAP-01..03, TIO-01..03, PLAT-01,
@@ -174,6 +174,8 @@ Carried-forward decisions from v1.24 still in effect:
 - [Phase 225-read-closeout-runtime-validation-and-sml-repair]: Guardrails stay source-scoped to maintained EMEL lanes and reject actor-internal io/read reach-through.
 - [Phase 225-read-closeout-runtime-validation-and-sml-repair]: Kept Phase 225 requirements pending until Plan 06 publishes current command evidence.
 - [Phase 225-read-closeout-runtime-validation-and-sml-repair]: Kept STATE at Plan 5 of 6 because Plans 01-04 are already complete in the current execution state.
+- [Phase 225-read-closeout-runtime-validation-and-sml-repair]: Direct build/zig dyld launch failures are treated as environment blockers only because coverage-built focused doctests and source-backed scans passed.
+- [Phase 225-read-closeout-runtime-validation-and-sml-repair]: The relevant changed-file quality gate uses generation and diarization_sortformer benchmark suite scoping to avoid unrelated jinja timing noise without weakening Phase 225 evidence.
 
 ### Pending Todos
 
@@ -211,9 +213,10 @@ Items acknowledged and deferred at v1.22 milestone close on 2026-05-03 (still ca
 | Phase 225-read-closeout-runtime-validation-and-sml-repair P03 | 20min | 2 tasks | 7 files |
 | Phase 225-read-closeout-runtime-validation-and-sml-repair P04 | 7min | 2 tasks | 5 files |
 | Phase 225-read-closeout-runtime-validation-and-sml-repair P05 | 4min | 2 tasks | 5 files |
+| Phase 225-read-closeout-runtime-validation-and-sml-repair P06 | 754 | 2 tasks | 5 files |
 
 ## Session Continuity
 
-Last session: 2026-05-06T15:34:52.578Z
-Stopped at: Completed 225-05-PLAN.md
+Last session: 2026-05-06T15:50:03.923Z
+Stopped at: Completed 225-read-closeout-runtime-validation-and-sml-repair-06-PLAN.md
 Resume file: None

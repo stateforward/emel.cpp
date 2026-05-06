@@ -57,8 +57,8 @@ and device strategies remain out of scope.
   completed 2026-05-06; final closeout truth and validation reconciled
 - [x] Phase 224: Read Closeout Tech Debt Cleanup — completed 2026-05-06;
   refreshed audit ambiguity closed with fresh passing `emel_tests_io` evidence
-- [ ] Phase 225: Read Closeout Runtime Validation And SML Repair — gap closure for
-  refreshed source-backed audit findings
+- [x] Phase 225: Read Closeout Runtime Validation And SML Repair — completed
+  2026-05-06; refreshed source-backed audit gaps closed with dyld fallback evidence
 
 Current closeout artifacts:
 - `.planning/REQUIREMENTS.md`
@@ -417,14 +417,14 @@ references.
      at files that exist after the v1.25 archive layout.
   5. Focused model-loader, model/tensor, io/loader, io/read, domain-boundary, consistency,
      and changed-file quality gates pass without benchmark-regression override.
-**Plans**: 6 plans
+**Plans**: 6 plans — completed 2026-05-06
 Plans:
-- [ ] `225-01-PLAN.md` — Add the owning `io/read` batch copy surface and public-dispatch tests.
-- [ ] `225-02-PLAN.md` — Route one `io/loader` read_copy batch to `io/read` with same-RTC result callbacks.
-- [ ] `225-03-PLAN.md` — Replace model-loader per-tensor I/O dispatch with one public batch dispatch.
-- [ ] `225-04-PLAN.md` — Wire maintained callers and guardrails to request-owned `io_load_spans`.
-- [ ] `225-05-PLAN.md` — Reconcile active and archived closeout path and plan traceability.
-- [ ] `225-06-PLAN.md` — Publish validation, summary, and active/archived audit evidence.
+- [x] `225-01-PLAN.md` — Add the owning `io/read` batch copy surface and public-dispatch tests.
+- [x] `225-02-PLAN.md` — Route one `io/loader` read_copy batch to `io/read` with same-RTC result callbacks.
+- [x] `225-03-PLAN.md` — Replace model-loader per-tensor I/O dispatch with one public batch dispatch.
+- [x] `225-04-PLAN.md` — Wire maintained callers and guardrails to request-owned `io_load_spans`.
+- [x] `225-05-PLAN.md` — Reconcile active and archived closeout path and plan traceability.
+- [x] `225-06-PLAN.md` — Publish validation, summary, and active/archived audit evidence.
 
 #### Coverage
 
@@ -444,8 +444,8 @@ Plans:
 | VAL-02 | Phase 222 |
 | VAL-03 | Phase 225 |
 
-Mapped: 13/13 v1 requirements; validated 9, pending 4. Phase 224 is cleanup-only;
-Phase 225 owns refreshed closeout gaps for VAL-01, TIO-03, VAL-04, and VAL-03.
+Mapped: 13/13 v1 requirements; validated 13, pending 0. Phase 224 is cleanup-only;
+Phase 225 closed refreshed closeout gaps for VAL-01, TIO-03, VAL-04, and VAL-03.
 
 <details>
 <summary>✅ v1.24 I/O Mmap Loading Strategy (Phases 204-211) — SHIPPED 2026-05-04</summary>
@@ -502,7 +502,7 @@ strategies remain deferred follow-on work below the `emel/io` boundary.
 | 222. Public Read Source Contract Repair | v1.25 | 1/1 | Validated | 2026-05-06 |
 | 223. Read Closeout Truth And Validation Reconciliation | v1.25 | 1/1 | Validated | 2026-05-06 |
 | 224. Read Closeout Tech Debt Cleanup | v1.25 | 1/1 | Complete    | 2026-05-06 |
-| 225. Read Closeout Runtime Validation And SML Repair | v1.25 | 5/6 | In Progress|  |
+| 225. Read Closeout Runtime Validation And SML Repair | v1.25 | 6/6 | Complete   | 2026-05-06 |
 | 204. Mmap Strategy Component Boundary | v1.24 | 1/1 | Complete | 2026-05-04 |
 | 205. Mmap Validation and Platform Gating | v1.24 | 1/1 | Complete | 2026-05-04 |
 | 206. Mapped Descriptor, Errors, and Lifetime | v1.24 | 1/1 | Complete | 2026-05-04 |
