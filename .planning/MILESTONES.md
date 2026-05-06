@@ -2,7 +2,7 @@
 
 ## v1.25 I/O Read Loading Strategy (Shipped: 2026-05-06)
 
-**Phases completed:** 15 phases, 20 plans, 12 tasks
+**Phases completed:** 16 phases, 21 plans, 12 tasks
 
 **Key accomplishments:**
 
@@ -13,9 +13,11 @@
 - Added tensor-owned public read/copy load orchestration through io/read.
 - Reopened closeout with Phase 225 to replace the model-loader per-tensor I/O action loop with one public batch dispatch, wire maintained callers through request-owned `io_load_spans`, and publish source-backed validation evidence.
 - Closed Phase 225 code review findings for missing parse callback validation and unclassified read source errors; post-fix review is clean.
+- Closed Phase 226 audit tech debt by adding an independent public `io/read`
+  batch cap and exact-cap/over-cap public-dispatch doctests.
 
 **Audit:** Final source-backed audit passed with 13/13 active requirements
-satisfied and no current tech-debt rows after Phase 225 review-fix cleanup.
+satisfied and no current tech-debt rows after Phase 226 cleanup.
 
 **Known deferred items at close:** 5 carried-forward items remain outside v1.25
 (one non-v1.23 quick task and four optimization todos; see STATE.md Deferred

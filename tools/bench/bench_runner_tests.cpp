@@ -12,6 +12,7 @@
 #include <doctest/doctest.h>
 
 #include "../generation_fixture_registry.hpp"
+#include "bench_common.hpp"
 #include "bench_dependency_manifest.hpp"
 #include "bench_runner_contract.hpp"
 #include "bench_runner_registry.hpp"
@@ -507,6 +508,16 @@ TEST_CASE("bench runner contract serializes requests and results for a process s
   CHECK(parsed_negative_result.exit_code == -1);
   CHECK(parsed_negative_result.error_kind == "invalid_request");
   CHECK(parsed_negative_result.error_message == "bad runner payload");
+}
+
+TEST_CASE("benchmark snapshot value uses the lower quartile timing run") {
+  const std::vector<double> sorted_samples{5.0, 8.0, 100.0};
+
+  CHECK(emel::bench::select_reported_ns_per_op(sorted_samples) == doctest::Approx(5.0));
+
+  const std::vector<double> five_samples{5.0, 8.0, 9.0, 10.0, 100.0};
+
+  CHECK(emel::bench::select_reported_ns_per_op(five_samples) == doctest::Approx(8.0));
 }
 
 TEST_CASE("bench runner contract rejects malformed process payloads") {

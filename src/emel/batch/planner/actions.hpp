@@ -58,9 +58,6 @@ inline constexpr auto effect_begin_planning = [](const event::plan_runtime & ev,
   ev.ctx.effective_step_size = 0;
   ev.ctx.step_count = 0;
   ev.ctx.total_outputs = 0;
-  ev.ctx.step_sizes.fill(0);
-  ev.ctx.step_token_indices.fill(0);
-  ev.ctx.step_token_offsets.fill(0);
   ev.ctx.token_indices_count = 0;
 };
 

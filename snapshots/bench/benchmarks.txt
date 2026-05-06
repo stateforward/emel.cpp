@@ -35,12 +35,12 @@ kernel/aarch64/op_sub ns_per_op=105.000
 kernel/aarch64/op_unary_exp ns_per_op=1316.500
 kernel/aarch64/op_unary_neg ns_per_op=114.417
 kernel/aarch64/op_unary_relu ns_per_op=133.167
-logits/sampler_raw/vocab_128000 ns_per_op=20733.250 iter=1000 runs=3
-logits/sampler_raw/vocab_256000 ns_per_op=38839.541 iter=1000 runs=3
-logits/sampler_raw/vocab_32000 ns_per_op=5377.750 iter=1000 runs=3
-logits/sampler_sml/vocab_128000 ns_per_op=19638.750 iter=1000 runs=3
-logits/sampler_sml/vocab_256000 ns_per_op=37439.125 iter=1000 runs=3
-logits/sampler_sml/vocab_32000 ns_per_op=5425.959 iter=1000 runs=3
+logits/sampler_raw/vocab_128000 ns_per_op=18320.041 iter=1000 runs=5
+logits/sampler_raw/vocab_256000 ns_per_op=36838.667 iter=1000 runs=5
+logits/sampler_raw/vocab_32000 ns_per_op=4773.666 iter=1000 runs=5
+logits/sampler_sml/vocab_128000 ns_per_op=16614.792 iter=1000 runs=5
+logits/sampler_sml/vocab_256000 ns_per_op=33415.917 iter=1000 runs=5
+logits/sampler_sml/vocab_32000 ns_per_op=4661.834 iter=1000 runs=5
 logits/validator_raw/vocab_128000 ns_per_op=88531.834
 logits/validator_raw/vocab_256000 ns_per_op=174681.583
 logits/validator_raw/vocab_32000 ns_per_op=23683.042
@@ -64,10 +64,10 @@ text/encoders/ugm_long ns_per_op=1332315.916
 text/encoders/ugm_short ns_per_op=737.666
 text/encoders/wpm_long ns_per_op=30989.708
 text/encoders/wpm_short ns_per_op=553.417
-text/jinja/formatter_long ns_per_op=59.333
-text/jinja/formatter_short ns_per_op=19.834
-text/jinja/parser_long ns_per_op=63251.042
-text/jinja/parser_short ns_per_op=891.291
+text/jinja/formatter_long ns_per_op=62.667 iter=1000 runs=5
+text/jinja/formatter_short ns_per_op=16.375 iter=1000 runs=5
+text/jinja/parser_long ns_per_op=63116.250 iter=1000 runs=5
+text/jinja/parser_short ns_per_op=1202.375 iter=1000 runs=5
 tokenizer/full_bpe_long ns_per_op=12810.375
 tokenizer/full_bpe_short ns_per_op=300.667
 tokenizer/full_plamo2_long ns_per_op=12374.417

@@ -15,8 +15,7 @@ namespace emel::io::read {
 #endif
 #endif
 
-// Validation and platform-gating taxonomy. Phase 214 extends this enum with
-// concrete file-open / seek / read execution failures required by ERR-01.
+// Validation, platform-gating, and externally supplied source-result taxonomy.
 enum class error : emel::error::type {
   none = 0u,
   invalid_request = (1u << 0),
@@ -32,5 +31,6 @@ enum class error : emel::error::type {
 inline constexpr uint16_t k_max_file_index = 65534u;
 inline constexpr uint64_t k_max_file_path_bytes = 4095u;
 inline constexpr uint64_t k_max_read_bytes = (1ULL << 40);
+inline constexpr uint32_t k_max_read_batch_tensors = 65536u;
 
 } // namespace emel::io::read

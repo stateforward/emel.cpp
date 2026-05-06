@@ -1,8 +1,10 @@
 #include <cstdint>
 
 #include <array>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <memory>
 #include <span>
 #include <string>
@@ -14,6 +16,8 @@
 #include "emel/io/loader/events.hpp"
 #include "emel/io/mmap/errors.hpp"
 #include "emel/io/mmap/sm.hpp"
+#include "emel/io/read/errors.hpp"
+#include "emel/io/read/sm.hpp"
 #include "emel/model/data.hpp"
 #include "emel/model/tensor/events.hpp"
 #include "emel/model/tensor/sm.hpp"
@@ -37,6 +41,21 @@ emel::model::data::tensor_record make_tensor_record() {
 
 const void *fake_buffer(const uintptr_t value) {
   return reinterpret_cast<const void *>(value);
+}
+
+std::filesystem::path repo_root() {
+#ifdef EMEL_TEST_REPO_ROOT
+  return std::filesystem::path{EMEL_TEST_REPO_ROOT};
+#else
+  return std::filesystem::current_path();
+#endif
+}
+
+std::string read_text_file(const std::filesystem::path &path) {
+  std::ifstream input{path};
+  REQUIRE(input.good());
+  return std::string{std::istreambuf_iterator<char>{input},
+                     std::istreambuf_iterator<char>{}};
 }
 
 struct owner_state {
@@ -299,7 +318,7 @@ TEST_CASE("model_tensor_bind_plan_apply_storage_lifecycle") {
   CHECK(state.tensor_type == 8);
 }
 
-TEST_CASE("model_tensor_plan_load_marks_io_strategy_effect_requests") {
+TEST_CASE("model_tensor_plan_load_marks_read_strategy_effect_requests") {
   emel::model::tensor::sm machine{};
   owner_state owner{};
   std::array<emel::model::data::tensor_record, 1> tensors{};
@@ -316,7 +335,7 @@ TEST_CASE("model_tensor_plan_load_marks_io_strategy_effect_requests") {
 
   std::array<emel::model::tensor::effect_request, 1> effects{};
   emel::model::tensor::event::plan_load plan{std::span{effects}};
-  plan.strategy = emel::io::loader::event::strategy_kind::mapped_file;
+  plan.strategy = emel::io::loader::event::strategy_kind::read_copy;
   plan.on_done = {&owner, on_plan_load_done};
   plan.on_error = {&owner, on_plan_load_error};
 
@@ -326,7 +345,7 @@ TEST_CASE("model_tensor_plan_load_marks_io_strategy_effect_requests") {
   CHECK(owner.effect_count == 1u);
   CHECK(effects[0].kind == emel::model::tensor::effect_kind::k_io_load);
   CHECK(effects[0].strategy ==
-        emel::io::loader::event::strategy_kind::mapped_file);
+        emel::io::loader::event::strategy_kind::read_copy);
   CHECK(effects[0].tensor_id == 0);
   CHECK(effects[0].file_index == 5u);
   CHECK(effects[0].offset == 16384u);
@@ -780,6 +799,17 @@ struct mapped_owner_state {
       emel::error::cast(emel::io::mmap::error::none);
 };
 
+struct read_owner_state {
+  bool request_done = false;
+  bool request_error = false;
+  void *buffer = nullptr;
+  uint64_t buffer_bytes = 0u;
+  emel::error::type request_err =
+      emel::error::cast(emel::model::tensor::error::none);
+  emel::error::type request_io_err =
+      emel::error::cast(emel::io::read::error::none);
+};
+
 void on_request_mapped_load_done(
     void *object,
     const emel::model::tensor::events::request_mapped_load_done &ev) noexcept {
@@ -815,6 +845,24 @@ void on_release_mapped_load_error(
   owner->release_io_err = ev.io_mmap_err;
 }
 
+void on_request_read_load_done(
+    void *object,
+    const emel::model::tensor::events::request_read_load_done &ev) noexcept {
+  auto *owner = static_cast<read_owner_state *>(object);
+  owner->request_done = true;
+  owner->buffer = ev.buffer;
+  owner->buffer_bytes = ev.buffer_bytes;
+}
+
+void on_request_read_load_error(
+    void *object,
+    const emel::model::tensor::events::request_read_load_error &ev) noexcept {
+  auto *owner = static_cast<read_owner_state *>(object);
+  owner->request_error = true;
+  owner->request_err = ev.err;
+  owner->request_io_err = ev.io_read_err;
+}
+
 std::filesystem::path
 make_tensor_temp_file(std::string_view tag,
                       const std::vector<uint8_t> &payload) {
@@ -844,6 +892,11 @@ make_tensor_sm_with_io_mmap(emel::io::mmap::sm &io_mmap_actor) {
   return emel::model::tensor::sm{&io_mmap_actor};
 }
 
+emel::model::tensor::sm
+make_tensor_sm_with_io_read(emel::io::read::sm &io_read_actor) {
+  return emel::model::tensor::sm{&io_read_actor};
+}
+
 void prepare_storage_for_one_tensor(
     emel::model::tensor::sm &machine,
     std::array<emel::model::data::tensor_record, 1> &tensors) {
@@ -855,7 +908,192 @@ void prepare_storage_for_one_tensor(
   REQUIRE(machine.process_event(bind));
 }
 
+void prepare_read_storage_for_one_tensor(
+    emel::model::tensor::sm &machine,
+    std::array<emel::model::data::tensor_record, 1> &tensors,
+    void *target_buffer, const uint64_t target_bytes) {
+  tensors[0].file_offset = 0u;
+  tensors[0].data_size = target_bytes;
+  tensors[0].file_index = 0u;
+  tensors[0].type = 1;
+  tensors[0].data = target_buffer;
+  emel::model::tensor::event::bind_storage bind{std::span{tensors}};
+  REQUIRE(machine.process_event(bind));
+}
+
 } // namespace
+
+TEST_CASE("model_tensor_request_read_load_rejects_when_io_read_absent") {
+  emel::model::tensor::sm machine{};
+  std::array<emel::model::data::tensor_record, 1> tensors{};
+  uint8_t target[8]{};
+  prepare_read_storage_for_one_tensor(machine, tensors, target,
+                                      static_cast<uint64_t>(sizeof(target)));
+
+  read_owner_state owner{};
+  constexpr char source[] = "abcdefgh";
+  emel::model::tensor::event::request_read_load request{
+      0, std::string_view{"/tmp/emel_does_not_matter.bin"}, 0u, 4u};
+  request.source_buffer = source;
+  request.source_buffer_bytes = sizeof(source) - 1u;
+  request.on_done = {&owner, on_request_read_load_done};
+  request.on_error = {&owner, on_request_read_load_error};
+
+  CHECK_FALSE(machine.process_event(request));
+  CHECK_FALSE(owner.request_done);
+  CHECK(owner.request_error);
+  CHECK(owner.request_err ==
+        emel::error::cast(emel::model::tensor::error::io_read_unsupported));
+  CHECK(machine.is(stateforward::sml::state<emel::model::tensor::ready>));
+}
+
+TEST_CASE("model_tensor_request_read_load_dispatches_through_io_read") {
+  emel::io::read::sm io_read_actor{};
+  emel::model::tensor::sm machine = make_tensor_sm_with_io_read(io_read_actor);
+  std::array<emel::model::data::tensor_record, 1> tensors{};
+  uint8_t target[8]{};
+  prepare_read_storage_for_one_tensor(machine, tensors, target,
+                                      static_cast<uint64_t>(sizeof(target)));
+
+  read_owner_state owner{};
+  constexpr char source[] = "abcdefgh";
+  emel::model::tensor::event::request_read_load request{
+      0, std::string_view{"/tmp/emel_tensor_read_success.bin"}, 2u, 4u};
+  request.source_buffer = source;
+  request.source_buffer_bytes = sizeof(source) - 1u;
+  request.on_done = {&owner, on_request_read_load_done};
+  request.on_error = {&owner, on_request_read_load_error};
+
+  CHECK(machine.process_event(request));
+  CHECK(owner.request_done);
+  CHECK_FALSE(owner.request_error);
+  CHECK(owner.buffer == target);
+  CHECK(owner.buffer_bytes == 4u);
+  CHECK(std::memcmp(target, "cdef", 4u) == 0);
+
+  emel::model::tensor::event::tensor_state state{};
+  CHECK(machine.process_event(emel::model::tensor::event::capture_tensor_state{
+      .tensor_id = 0,
+      .state_out = &state,
+  }));
+  CHECK(state.lifecycle_state ==
+        emel::model::tensor::event::lifecycle::resident);
+  CHECK(state.buffer == target);
+  CHECK(state.buffer_bytes == 4u);
+  CHECK(machine.is(stateforward::sml::state<emel::model::tensor::ready>));
+}
+
+TEST_CASE("model_tensor_request_read_load_reports_validation_failure") {
+  emel::io::read::sm io_read_actor{};
+  emel::model::tensor::sm machine = make_tensor_sm_with_io_read(io_read_actor);
+  std::array<emel::model::data::tensor_record, 1> tensors{};
+  uint8_t target[4]{};
+  prepare_read_storage_for_one_tensor(machine, tensors, target,
+                                      static_cast<uint64_t>(sizeof(target)));
+
+  read_owner_state owner{};
+  constexpr char source[] = "abcdefgh";
+  emel::model::tensor::event::request_read_load request{
+      0, std::string_view{"/tmp/emel_tensor_read_invalid.bin"}, 0u, 8u};
+  request.source_buffer = source;
+  request.source_buffer_bytes = sizeof(source) - 1u;
+  request.on_done = {&owner, on_request_read_load_done};
+  request.on_error = {&owner, on_request_read_load_error};
+
+  CHECK_FALSE(machine.process_event(request));
+  CHECK_FALSE(owner.request_done);
+  CHECK(owner.request_error);
+  CHECK(owner.request_err ==
+        emel::error::cast(emel::model::tensor::error::invalid_request));
+  CHECK(machine.is(stateforward::sml::state<emel::model::tensor::ready>));
+}
+
+TEST_CASE("model_tensor_request_read_load_surfaces_file_open_failed") {
+  emel::io::read::sm io_read_actor{};
+  emel::model::tensor::sm machine = make_tensor_sm_with_io_read(io_read_actor);
+  std::array<emel::model::data::tensor_record, 1> tensors{};
+  uint8_t target[8]{};
+  prepare_read_storage_for_one_tensor(machine, tensors, target,
+                                      static_cast<uint64_t>(sizeof(target)));
+
+  read_owner_state owner{};
+  emel::model::tensor::event::request_read_load request{
+      0, std::string_view{"/tmp/emel_tensor_read_missing.bin"}, 0u, 4u};
+  request.source_error =
+      emel::error::cast(emel::io::read::error::file_open_failed);
+  request.on_done = {&owner, on_request_read_load_done};
+  request.on_error = {&owner, on_request_read_load_error};
+
+  CHECK_FALSE(machine.process_event(request));
+  CHECK_FALSE(owner.request_done);
+  CHECK(owner.request_error);
+  CHECK(owner.request_err ==
+        emel::error::cast(emel::model::tensor::error::io_read_failed));
+  CHECK(owner.request_io_err ==
+        emel::error::cast(emel::io::read::error::file_open_failed));
+  CHECK(machine.is(stateforward::sml::state<emel::model::tensor::ready>));
+}
+
+TEST_CASE("model_tensor_request_read_load_surfaces_file_read_failed") {
+  emel::io::read::sm io_read_actor{};
+  emel::model::tensor::sm machine = make_tensor_sm_with_io_read(io_read_actor);
+  std::array<emel::model::data::tensor_record, 1> tensors{};
+  uint8_t target[8]{};
+  prepare_read_storage_for_one_tensor(machine, tensors, target,
+                                      static_cast<uint64_t>(sizeof(target)));
+
+  read_owner_state owner{};
+  constexpr char source[] = "abcdefgh";
+  emel::model::tensor::event::request_read_load request{
+      0, std::string_view{"/tmp/emel_tensor_read_error.bin"}, 0u, 4u};
+  request.source_buffer = source;
+  request.source_buffer_bytes = sizeof(source) - 1u;
+  request.source_error =
+      emel::error::cast(emel::io::read::error::file_read_failed);
+  request.on_done = {&owner, on_request_read_load_done};
+  request.on_error = {&owner, on_request_read_load_error};
+
+  CHECK_FALSE(machine.process_event(request));
+  CHECK_FALSE(owner.request_done);
+  CHECK(owner.request_error);
+  CHECK(owner.request_err ==
+        emel::error::cast(emel::model::tensor::error::io_read_failed));
+  CHECK(owner.request_io_err ==
+        emel::error::cast(emel::io::read::error::file_read_failed));
+  CHECK(machine.is(stateforward::sml::state<emel::model::tensor::ready>));
+}
+
+TEST_CASE("model_tensor_owns_read_copy_residency_boundary") {
+  const std::string actions_source = read_text_file(
+      repo_root() / "src" / "emel" / "model" / "tensor" / "actions.hpp");
+  const std::string events_source = read_text_file(
+      repo_root() / "src" / "emel" / "model" / "tensor" / "events.hpp");
+  const std::string detail_source = read_text_file(
+      repo_root() / "src" / "emel" / "model" / "tensor" / "detail.hpp");
+  const std::string read_source =
+      read_text_file(repo_root() / "src" / "emel" / "io" / "read" /
+                     "events.hpp") +
+      read_text_file(repo_root() / "src" / "emel" / "io" / "read" /
+                     "actions.hpp") +
+      read_text_file(repo_root() / "src" / "emel" / "io" / "read" / "sm.hpp");
+
+  CHECK(
+      events_source.find("Public surface for tensor-owned read/copy loading") !=
+      std::string::npos);
+  CHECK(actions_source.find("effect_commit_request_read_load") !=
+        std::string::npos);
+  CHECK(actions_source.find("event::lifecycle::resident") != std::string::npos);
+  CHECK(actions_source.find("ctx.tensors.buffer[id] = ev.status.buffer") !=
+        std::string::npos);
+  CHECK(actions_source.find("read_load_callbacks") == std::string::npos);
+  CHECK(actions_source.find("on_io_read_done") == std::string::npos);
+  CHECK(actions_source.find("process_event(read, ev.status.io_read)") !=
+        std::string::npos);
+  CHECK(detail_source.find("io_read_ok") == std::string::npos);
+  CHECK(detail_source.find("io_read_err") == std::string::npos);
+  CHECK(read_source.find("model/tensor") == std::string::npos);
+  CHECK(read_source.find("lifecycle::resident") == std::string::npos);
+}
 
 TEST_CASE("model_tensor_request_mapped_load_rejects_when_io_mmap_absent") {
   emel::model::tensor::sm machine{};

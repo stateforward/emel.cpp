@@ -346,13 +346,26 @@ struct error_callback_absent {
   }
 };
 
+struct batch_count_valid {
+  bool operator()(const detail::read_tensor_batch_runtime &ev,
+                  const action::context &) const noexcept {
+    return !ev.request.tensors.empty() &&
+           ev.request.tensors.size() <= k_max_read_batch_tensors &&
+           ev.request.tensors.size() <= std::numeric_limits<uint32_t>::max();
+  }
+};
+
+struct batch_count_invalid {
+  bool operator()(const detail::read_tensor_batch_runtime &ev,
+                  const action::context &ctx) const noexcept {
+    return !batch_count_valid{}(ev, ctx);
+  }
+};
+
 struct batch_request_valid {
   bool operator()(const detail::read_tensor_batch_runtime &ev,
                   const action::context &) const noexcept {
-    bool valid =
-        !ev.request.tensors.empty() &&
-        ev.request.tensors.size() <= std::numeric_limits<uint32_t>::max() &&
-        static_cast<bool>(ev.request.on_done);
+    bool valid = static_cast<bool>(ev.request.on_done);
     for (uint32_t index = 0u;
          valid && index < static_cast<uint32_t>(ev.request.tensors.size());
          ++index) {

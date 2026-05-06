@@ -26,11 +26,11 @@
 - ✅ **v1.22 Weight Loading Ownership Cutover** — shipped 2026-05-03
 - ✅ **v1.23 I/O Loading Strategy Boundary** — shipped 2026-05-04
 - ✅ **v1.24 I/O Mmap Loading Strategy** — shipped 2026-05-04 (Phases 204-211)
-- ✅ **v1.25 I/O Read Loading Strategy** — shipped 2026-05-06 (Phases 212-225 + 214.1)
+- ✅ **v1.25 I/O Read Loading Strategy** — shipped 2026-05-06 (Phases 212-226 + 214.1)
 
 ## Phases
 
-### ✅ v1.25 I/O Read Loading Strategy (Phases 212-225 + 214.1) — SHIPPED 2026-05-06
+### ✅ v1.25 I/O Read Loading Strategy (Phases 212-226 + 214.1) — SHIPPED 2026-05-06
 
 Source: GitHub issue #62, "Add io/read state machine for copy-based tensor loading".
 Adds a dedicated `src/emel/io/read` Stateforward.SML actor for explicit read/copy tensor
@@ -59,6 +59,8 @@ and device strategies remain out of scope.
   refreshed audit ambiguity closed with fresh passing `emel_tests_io` evidence
 - [x] Phase 225: Read Closeout Runtime Validation And SML Repair — completed
   2026-05-06; refreshed source-backed audit gaps closed with dyld fallback evidence
+- [x] Phase 226: Read Batch Cap And Closeout Evidence Refresh — completed
+  2026-05-06; refreshed audit tech debt closed
 
 Archived closeout artifacts:
 - `.planning/milestones/v1.25-ROADMAP.md`
@@ -67,10 +69,11 @@ Archived closeout artifacts:
 - `.planning/milestones/v1.25-phases/`
 
 **Execution Order:** Phases execute in numeric order:
-212 -> 213 -> 214 -> 214.1 -> 215 -> 216 -> 217 -> 218 -> 219 -> 220 -> 222 -> 223 -> 224 -> 225.
+212 -> 213 -> 214 -> 214.1 -> 215 -> 216 -> 217 -> 218 -> 219 -> 220 -> 222 -> 223 -> 224 -> 225 -> 226.
 Phase 221 is a completed superseded closeout planning stub and Phase 223 owns final
 source-backed closeout truth. Phase 224 is cleanup-only; Phase 225 owns the refreshed
-2026-05-06 audit gaps before archive.
+2026-05-06 audit gaps before archive. Phase 226 closes the post-audit nonblocking
+tech-debt items before final closeout.
 
 #### Phase 212: Read Strategy Component Boundary
 **Goal**: Maintainers can identify `io/read` as the canonical read/copy strategy actor under
@@ -422,6 +425,32 @@ Plans:
 - [x] `225-05-PLAN.md` — Reconcile active and archived closeout path and plan traceability.
 - [x] `225-06-PLAN.md` — Publish validation, summary, and active/archived audit evidence.
 
+#### Phase 226: Read Batch Cap And Closeout Evidence Refresh
+**Goal**: Close the nonblocking tech-debt items from `.planning/v1.25-MILESTONE-AUDIT.md`
+by bounding the public read/copy batch API independently and refreshing closeout evidence
+to match current executable validation.
+**Depends on**: Phase 225
+**Requirements**: none — all v1.25 requirements remain satisfied; this phase is cleanup only
+**Gap Closure**: Closes audit tech debt for the uncapped public `io/read`
+`read_tensor_batch` span and stale dyld-fallback closeout wording after current focused
+CTest passed.
+**Success Criteria** (what must be TRUE):
+  1. Public `io/read::event::read_tensor_batch` dispatch rejects over-large spans before
+     iterating or copying, with the cap owned by a public/read-side contract rather than
+     relying only on maintained model-loader callers.
+  2. Doctests prove accepted boundary-size batches and rejected over-large batches through
+     public `process_event(...)` dispatch and SML state inspection.
+  3. Active and archived closeout evidence distinguishes historical dyld fallback evidence
+     from current direct `build/zig` focused CTest evidence.
+  4. If the repaired implementation changes maintained snapshots, benchmark outputs,
+     benchmark snapshots, or model artifacts, those artifacts are updated only through
+     maintained commands. User permission for those updates was granted with this phase.
+  5. Changed-file quality gates pass without benchmark-regression override, and the
+     refreshed milestone audit reports no blockers.
+**Plans**: 01 — Validated 2026-05-06; public `io/read` batch cap added,
+exact-cap and over-cap doctests passed, closeout evidence refreshed, and
+changed-file quality gate passed.
+
 #### Coverage
 
 | Requirement | Phase |
@@ -440,8 +469,9 @@ Plans:
 | VAL-02 | Phase 222 |
 | VAL-03 | Phase 225 |
 
-Mapped: 13/13 v1 requirements; validated 13, pending 0. Phase 224 is cleanup-only;
-Phase 225 closed refreshed closeout gaps for VAL-01, TIO-03, VAL-04, and VAL-03.
+Mapped: 13/13 v1 requirements; validated 13, pending 0. Phases 224 and 226 are
+cleanup-only; Phase 225 closed refreshed closeout gaps for VAL-01, TIO-03, VAL-04,
+and VAL-03.
 
 <details>
 <summary>✅ v1.24 I/O Mmap Loading Strategy (Phases 204-211) — SHIPPED 2026-05-04</summary>
@@ -499,6 +529,7 @@ strategies remain deferred follow-on work below the `emel/io` boundary.
 | 223. Read Closeout Truth And Validation Reconciliation | v1.25 | 1/1 | Validated | 2026-05-06 |
 | 224. Read Closeout Tech Debt Cleanup | v1.25 | 1/1 | Complete    | 2026-05-06 |
 | 225. Read Closeout Runtime Validation And SML Repair | v1.25 | 6/6 | Complete   | 2026-05-06 |
+| 226. Read Batch Cap And Closeout Evidence Refresh | v1.25 | 1/1 | Validated | 2026-05-06 |
 | 204. Mmap Strategy Component Boundary | v1.24 | 1/1 | Complete | 2026-05-04 |
 | 205. Mmap Validation and Platform Gating | v1.24 | 1/1 | Complete | 2026-05-04 |
 | 206. Mapped Descriptor, Errors, and Lifetime | v1.24 | 1/1 | Complete | 2026-05-04 |

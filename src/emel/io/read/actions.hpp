@@ -64,6 +64,15 @@ struct effect_mark_read_tensor_batch_invalid_request {
   }
 };
 
+struct effect_mark_read_tensor_batch_count_invalid {
+  void operator()(const detail::read_tensor_batch_runtime &ev,
+                  context &) const noexcept {
+    ev.status.err = emel::error::cast(error::invalid_request);
+    ev.status.ok = false;
+    ev.status.failed_index = 0u;
+  }
+};
+
 struct effect_mark_read_tensor_batch_unsupported_resource {
   void operator()(const detail::read_tensor_batch_runtime &ev,
                   context &) const noexcept {
@@ -261,6 +270,8 @@ inline constexpr effect_mark_unsupported_resource
     effect_mark_unsupported_resource{};
 inline constexpr effect_mark_read_tensor_batch_invalid_request
     effect_mark_read_tensor_batch_invalid_request{};
+inline constexpr effect_mark_read_tensor_batch_count_invalid
+    effect_mark_read_tensor_batch_count_invalid{};
 inline constexpr effect_mark_read_tensor_batch_unsupported_resource
     effect_mark_read_tensor_batch_unsupported_resource{};
 inline constexpr effect_prepare_read_attempt effect_prepare_read_attempt{};

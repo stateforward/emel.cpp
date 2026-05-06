@@ -339,12 +339,9 @@ inline bool push_step_size(plan_scratch & ctx, const int32_t size) noexcept {
 }
 
 inline void clear_plan(plan_scratch & ctx) noexcept {
-  ctx.step_sizes.fill(0);
   ctx.step_count = 0;
   ctx.total_outputs = 0;
-  ctx.step_token_indices.fill(0);
   ctx.token_indices_count = 0;
-  ctx.step_token_offsets.fill(0);
 }
 
 template <class runtime_event>

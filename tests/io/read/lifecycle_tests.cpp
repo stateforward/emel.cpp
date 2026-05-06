@@ -6,6 +6,7 @@
 #include <iterator>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include <doctest/doctest.h>
 
@@ -267,6 +268,57 @@ TEST_CASE("io read batch reports invalid request span index") {
   REQUIRE(owner.error);
   CHECK(owner.err == emel::error::cast(emel::io::read::error::invalid_request));
   CHECK(owner.failed_index == 1u);
+  CHECK(strategy.is(stateforward::sml::state<emel::io::read::state_ready>));
+}
+
+TEST_CASE("io read batch accepts the public batch cap boundary") {
+  emel::io::read::sm strategy{};
+  batch_owner_state owner{};
+  uint8_t target[1]{};
+  constexpr char source[] = "x";
+  std::vector<emel::io::event::tensor_load_span> tensors(
+      emel::io::read::k_max_read_batch_tensors);
+  for (auto &tensor : tensors) {
+    tensor = {
+        .tensor_id = 21,
+        .file_index = 0u,
+        .file_offset = 0u,
+        .byte_size = 1u,
+        .file_path = "emel_io_read_batch_cap.bin",
+        .source_buffer = source,
+        .source_buffer_bytes = sizeof(source) - 1u,
+        .source_error = emel::error::cast(emel::io::read::error::none),
+        .target = target,
+        .target_bytes = sizeof(target),
+    };
+  }
+  emel::io::read::event::read_tensor_batch read_request{tensors};
+  read_request.on_done = {&owner, on_batch_done};
+  read_request.on_error = {&owner, on_batch_error};
+
+  REQUIRE(strategy.process_event(read_request));
+  REQUIRE(owner.done);
+  CHECK_FALSE(owner.error);
+  CHECK(owner.done_count == emel::io::read::k_max_read_batch_tensors);
+  CHECK(owner.bytes_copied == emel::io::read::k_max_read_batch_tensors);
+  CHECK(target[0] == static_cast<uint8_t>('x'));
+  CHECK(strategy.is(stateforward::sml::state<emel::io::read::state_ready>));
+}
+
+TEST_CASE("io read batch rejects over cap before per span validation") {
+  emel::io::read::sm strategy{};
+  batch_owner_state owner{};
+  std::vector<emel::io::event::tensor_load_span> tensors(
+      static_cast<std::size_t>(emel::io::read::k_max_read_batch_tensors) + 1u);
+  emel::io::read::event::read_tensor_batch read_request{tensors};
+  read_request.on_done = {&owner, on_batch_done};
+  read_request.on_error = {&owner, on_batch_error};
+
+  CHECK_FALSE(strategy.process_event(read_request));
+  CHECK_FALSE(owner.done);
+  REQUIRE(owner.error);
+  CHECK(owner.err == emel::error::cast(emel::io::read::error::invalid_request));
+  CHECK(owner.failed_index == 0u);
   CHECK(strategy.is(stateforward::sml::state<emel::io::read::state_ready>));
 }
 

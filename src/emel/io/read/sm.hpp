@@ -32,6 +32,7 @@ struct state_file_read_failed_error_decision {};
 struct state_short_read_error_decision {};
 struct state_error_callback {};
 struct state_batch_request_decision {};
+struct state_batch_count_decision {};
 struct state_batch_resource_decision {};
 struct state_batch_source_open_decision {};
 struct state_batch_source_seek_decision {};
@@ -191,10 +192,19 @@ struct model {
       // Read_tensor_batch acceptance and aggregate validation. The batch path
       // remains a fixed phase chain; per-span work is guard validation plus one
       // already-selected copy loop in effect_mark_read_tensor_batch_done.
-      , sml::state<state_batch_request_decision> <=
+      , sml::state<state_batch_count_decision> <=
           *sml::state<state_ready>
           + sml::event<detail::read_tensor_batch_runtime>
           / action::effect_begin_read_tensor_batch
+      , sml::state<state_batch_request_decision> <=
+          sml::state<state_batch_count_decision>
+          + sml::completion<detail::read_tensor_batch_runtime>
+          [ guard::batch_count_valid{} ]
+      , sml::state<state_batch_invalid_request_error_decision> <=
+          sml::state<state_batch_count_decision>
+          + sml::completion<detail::read_tensor_batch_runtime>
+          [ guard::batch_count_invalid{} ]
+          / action::effect_mark_read_tensor_batch_count_invalid
       , sml::state<state_batch_resource_decision> <=
           sml::state<state_batch_request_decision>
           + sml::completion<detail::read_tensor_batch_runtime>
@@ -444,6 +454,9 @@ struct model {
           sml::state<state_short_read_error_decision>
           + sml::unexpected_event<sml::_> / action::effect_on_unexpected
       , sml::state<state_ready> <= sml::state<state_error_callback>
+          + sml::unexpected_event<sml::_> / action::effect_on_unexpected
+      , sml::state<state_ready> <=
+          sml::state<state_batch_count_decision>
           + sml::unexpected_event<sml::_> / action::effect_on_unexpected
       , sml::state<state_ready> <=
           sml::state<state_batch_request_decision>

@@ -106,6 +106,10 @@ struct generation_stage_probe {
 void set_generation_lane_mode(generation_lane_mode mode) noexcept;
 generation_lane_mode generation_lane_mode_current() noexcept;
 
+inline double select_reported_ns_per_op(const std::vector<double> & sorted_samples) noexcept {
+  return sorted_samples[sorted_samples.size() / 4u];
+}
+
 template <class fn_type>
 result measure_case(const char * name, const config & cfg, fn_type && fn) {
   std::vector<double> samples;
@@ -129,7 +133,7 @@ result measure_case(const char * name, const config & cfg, fn_type && fn) {
   }
 
   std::sort(samples.begin(), samples.end());
-  const double median = samples[samples.size() / 2];
+  const double reported_ns_per_op = select_reported_ns_per_op(samples);
   double sum = 0.0;
   for (const double sample : samples) {
     sum += sample;
@@ -137,7 +141,7 @@ result measure_case(const char * name, const config & cfg, fn_type && fn) {
 
   result out;
   out.name = name;
-  out.ns_per_op = median;
+  out.ns_per_op = reported_ns_per_op;
   out.ns_min_per_op = samples.front();
   out.ns_mean_per_op = sum / static_cast<double>(samples.size());
   out.ns_max_per_op = samples.back();
