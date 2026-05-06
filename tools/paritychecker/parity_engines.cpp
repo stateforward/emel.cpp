@@ -1,4 +1,5 @@
 #include "parity_engines.hpp"
+#include "../bench/model_load_strategy.hpp"
 #include "../generation_fixture_registry.hpp"
 #include "../generation_formatter_contract.hpp"
 #include "parity_assets.hpp"
@@ -29,6 +30,9 @@
 #include "emel/gguf/loader/errors.hpp"
 #include "emel/gguf/loader/events.hpp"
 #include "emel/gguf/loader/sm.hpp"
+#include "emel/io/events.hpp"
+#include "emel/io/source/any.hpp"
+#include "emel/io/read/sm.hpp"
 #include "emel/kernel/aarch64/detail.hpp"
 #include "emel/kernel/aarch64/sm.hpp"
 #include "emel/kernel/events.hpp"
@@ -520,6 +524,10 @@ struct load_capture {
   uint64_t bytes_total = 0u;
   uint64_t bytes_done = 0u;
   bool used_mmap = false;
+  emel::io::loader::event::strategy_kind requested_io_strategy =
+      emel::io::loader::event::strategy_kind::none;
+  emel::io::loader::event::strategy_kind used_io_strategy =
+      emel::io::loader::event::strategy_kind::none;
 };
 
 struct initialize_capture {
@@ -810,7 +818,9 @@ bool write_generation_baseline_file(
 bool load_generation_baseline_file(const std::filesystem::path &path,
                                    generation_baseline_record &record_out) {
   std::vector<uint8_t> file_bytes;
-  if (!parity_assets::read_file_bytes(path.string(), file_bytes)) {
+  if (emel::io::source::load_file_bytes(path.string(),
+                                                     file_bytes) !=
+      emel::error::cast(emel::io::read::error::none)) {
     return false;
   }
 
@@ -977,6 +987,8 @@ struct generation_load_state {
       std::make_unique<emel::model::data>();
   std::vector<uint8_t> file_bytes = {};
   emel::gguf::loader::sm gguf_loader = {};
+  emel::io::read::sm io_read = {};
+  emel::io::loader::sm io_loader{{.io_read = &io_read}};
   emel::model::tensor::sm tensor_loader = {};
   emel::model::loader::sm model_loader = {};
   emel::text::tokenizer::sm tokenizer = {};
@@ -990,6 +1002,7 @@ struct generation_load_state {
   uint32_t gguf_tensor_count = 0u;
   std::vector<emel::model::tensor::effect_request> effect_requests = {};
   std::vector<emel::model::tensor::effect_result> effect_results = {};
+  std::vector<emel::io::event::tensor_load_span> io_load_spans = {};
   gguf_capture gguf = {};
   load_capture load = {};
   initialize_capture initialize = {};
@@ -1159,8 +1172,9 @@ void on_parse_done(void *owner,
 void on_parse_error(void *owner,
                     const emel::gguf::loader::events::parse_error &ev);
 
-emel::error::type prebind_gguf_kv_storage(
-    generation_load_state &state, const std::span<const uint8_t> file_image) {
+emel::error::type
+prebind_gguf_kv_storage(generation_load_state &state,
+                        const std::span<const uint8_t> file_image) {
   if (file_image.empty()) {
     return emel::error::cast(emel::model::loader::error::invalid_request);
   }
@@ -1308,15 +1322,8 @@ void on_load_done(void *owner,
   state.load.err = emel::error::cast(emel::model::loader::error::none);
   state.load.bytes_total = ev.bytes_total;
   state.load.bytes_done = ev.bytes_done;
-  emel::model::tensor::event::tensor_state tstate{};
-  emel::model::tensor::event::capture_tensor_state capture{
-      .tensor_id = 0,
-      .state_out = &tstate,
-  };
-  static_cast<void>(state.tensor_loader.process_event(capture));
-  state.load.used_mmap =
-      (tstate.lifecycle_state ==
-       emel::model::tensor::event::lifecycle::mmap_resident);
+  state.load.used_mmap = ev.used_mmap;
+  state.load.used_io_strategy = ev.used_io_strategy;
 }
 
 void on_load_error(void *owner,
@@ -1325,6 +1332,8 @@ void on_load_error(void *owner,
   state.load.done = false;
   state.load.error = true;
   state.load.err = ev.err;
+  state.load.requested_io_strategy = ev.requested_io_strategy;
+  state.load.used_io_strategy = ev.used_io_strategy;
 }
 
 void on_initialize_done(
@@ -1507,7 +1516,9 @@ bool load_generation_reference_backend(const std::string &model_path,
 bool load_emel_vocab_from_gguf_file(const std::string &model_path,
                                     emel::model::data::vocab &vocab_out) {
   generation_load_state state{};
-  if (!parity_assets::read_file_bytes(model_path, state.file_bytes) ||
+  if (emel::io::source::load_file_bytes(model_path,
+                                                     state.file_bytes) !=
+          emel::error::cast(emel::io::read::error::none) ||
       state.file_bytes.empty()) {
     return false;
   }
@@ -1524,8 +1535,7 @@ bool load_emel_vocab_from_gguf_file(const std::string &model_path,
 
   uint32_t tensor_count = 0u;
   const emel::error::type parse_err =
-      parse_gguf_kv_storage(state, file_image, *state.model_data,
-                            tensor_count);
+      parse_gguf_kv_storage(state, file_image, *state.model_data, tensor_count);
   if (parse_err != emel::error::cast(emel::model::loader::error::none)) {
     return false;
   }
@@ -16594,6 +16604,10 @@ void print_generation_formatter_contract(
   std::fprintf(stream, "formatter_contract=%.*s\n",
                static_cast<int>(state.formatter_binding.contract.size()),
                state.formatter_binding.contract.data());
+  const std::string_view load_strategy =
+      emel::tools::model_load_io_strategy_name(state.load.used_io_strategy);
+  std::fprintf(stream, "model_load_strategy=%.*s\n",
+               static_cast<int>(load_strategy.size()), load_strategy.data());
 }
 
 emel::error::type
@@ -18092,7 +18106,9 @@ int run_generation_harness_contract(
   }
 
   generation_load_state state{};
-  if (!parity_assets::read_file_bytes(opts.model_path, state.file_bytes) ||
+  if (emel::io::source::load_file_bytes(opts.model_path,
+                                                     state.file_bytes) !=
+          emel::error::cast(emel::io::read::error::none) ||
       state.file_bytes.empty()) {
     std::fprintf(stderr,
                  "generation load failed: unable to read model file %s\n",
@@ -18115,6 +18131,7 @@ int run_generation_harness_contract(
   reset_load_capture(state);
   state.effect_requests.resize(emel::model::data::k_max_tensors);
   state.effect_results.resize(emel::model::data::k_max_tensors);
+  state.io_load_spans.resize(emel::model::data::k_max_tensors);
   emel::model::loader::event::parse_model_fn parse_model{&state,
                                                          run_emel_parse_model};
   emel::model::loader::event::load request{*state.model_data, parse_model};
@@ -18124,6 +18141,9 @@ int run_generation_harness_contract(
   request.tensor_loader = &state.tensor_loader;
   request.effect_requests = std::span{state.effect_requests};
   request.effect_results = std::span{state.effect_results};
+  request.io_load_spans = std::span<emel::io::event::tensor_load_span>{
+      state.io_load_spans.data(), state.io_load_spans.size()};
+  emel::tools::bind_model_load_io_strategy(request, state.io_loader);
   request.map_layers = {nullptr, run_emel_map_layers};
   request.validate_structure = {nullptr, run_emel_validate_structure};
   request.validate_architecture_impl = {nullptr,
