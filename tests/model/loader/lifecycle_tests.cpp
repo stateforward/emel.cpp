@@ -1737,6 +1737,7 @@ TEST_CASE("maintained tool read copy surfaces avoid direct io read events") {
     CAPTURE(source_path);
     const std::string source = read_text_file(repo_root() / source_path);
     CHECK(source.find("bind_model_load_io_strategy") != std::string::npos);
+    CHECK(source.find("io_load_spans") != std::string::npos);
     CHECK(source.find("emel/io/read/events.hpp") == std::string::npos);
     CHECK(source.find("emel/io/read/detail.hpp") == std::string::npos);
     CHECK(source.find("read_tensor_request") == std::string::npos);
