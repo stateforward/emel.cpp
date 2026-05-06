@@ -419,7 +419,8 @@ TEST_CASE("io read batch reports file read span index") {
   CHECK(strategy.is(stateforward::sml::state<emel::io::read::state_ready>));
 }
 
-TEST_CASE("io read batch classifies unrecognized source errors as read failures") {
+TEST_CASE(
+    "io read batch classifies unrecognized source errors as read failures") {
   emel::io::read::sm strategy{};
   batch_owner_state owner{};
   uint8_t first_target[3]{};
