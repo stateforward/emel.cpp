@@ -107,7 +107,7 @@ Which phases cover which requirements.
 | TIO-01 | Phase 215 | Validated |
 | TIO-02 | Phase 223 | Validated |
 | TIO-03 | Phase 225 | Complete |
-| VAL-04 | Phase 225 | Pending |
+| VAL-04 | Phase 225 | Complete |
 | VAL-01 | Phase 225 | Complete |
 | VAL-02 | Phase 222 | Validated |
 | VAL-03 | Phase 225 | Pending |

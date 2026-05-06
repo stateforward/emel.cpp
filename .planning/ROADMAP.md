@@ -502,7 +502,7 @@ strategies remain deferred follow-on work below the `emel/io` boundary.
 | 222. Public Read Source Contract Repair | v1.25 | 1/1 | Validated | 2026-05-06 |
 | 223. Read Closeout Truth And Validation Reconciliation | v1.25 | 1/1 | Validated | 2026-05-06 |
 | 224. Read Closeout Tech Debt Cleanup | v1.25 | 1/1 | Complete    | 2026-05-06 |
-| 225. Read Closeout Runtime Validation And SML Repair | v1.25 | 1/6 | In Progress|  |
+| 225. Read Closeout Runtime Validation And SML Repair | v1.25 | 2/6 | In Progress|  |
 | 204. Mmap Strategy Component Boundary | v1.24 | 1/1 | Complete | 2026-05-04 |
 | 205. Mmap Validation and Platform Gating | v1.24 | 1/1 | Complete | 2026-05-04 |
 | 206. Mapped Descriptor, Errors, and Lifetime | v1.24 | 1/1 | Complete | 2026-05-04 |

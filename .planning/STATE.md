@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.25
 milestone_name: I/O Read Loading Strategy
 status: executing
-stopped_at: Completed 225-01-PLAN.md
-last_updated: "2026-05-06T14:37:20.082Z"
+stopped_at: Completed 225-02-PLAN.md
+last_updated: "2026-05-06T14:54:12.051Z"
 last_activity: 2026-05-06
 progress:
   total_phases: 15
   completed_phases: 0
   total_plans: 6
-  completed_plans: 1
-  percent: 17
+  completed_plans: 2
+  percent: 33
 ---
 
 # Project State
@@ -30,7 +30,7 @@ artifact path truth.
 ## Current Position
 
 Phase: 225 (read-closeout-runtime-validation-and-sml-repair) — EXECUTING
-Plan: 2 of 6
+Plan: 3 of 6
 Status: Ready to execute
 Phase 225 closes `.planning/v1.25-MILESTONE-AUDIT.md` findings through six
 linear plans: current
@@ -165,6 +165,8 @@ Carried-forward decisions from v1.24 still in effect:
 
 - [Phase 225-read-closeout-runtime-validation-and-sml-repair]: Batch failed-index scans use monotonic branchless helper logic so actions do not call helper-local if/break control flow.
 - [Phase 225-read-closeout-runtime-validation-and-sml-repair]: Coverage gate changed-file input must be colon-separated; space-separated input is parsed as one filename by the existing script.
+- [Phase 225-read-closeout-runtime-validation-and-sml-repair]: Batch read/copy result status lives in wrapper-local stack storage, not io/loader context.
+- [Phase 225-read-closeout-runtime-validation-and-sml-repair]: Batch route actions use separate batch-specific action symbols so SML completion propagation resolves the originating runtime event.
 
 ### Pending Todos
 
@@ -198,9 +200,10 @@ Items acknowledged and deferred at v1.22 milestone close on 2026-05-03 (still ca
 | todo | 2026-04-02-reuse-q8-rhs-across-lfm2-5-prefill-matmuls.md | pending |
 | Phase 224 P01 | 1 min | 3 tasks | 6 files |
 | Phase 225-read-closeout-runtime-validation-and-sml-repair P01 | 1243 | 2 tasks | 7 files |
+| Phase 225-read-closeout-runtime-validation-and-sml-repair P02 | 14min | 2 tasks | 6 files |
 
 ## Session Continuity
 
-Last session: 2026-05-06T14:37:19.648Z
-Stopped at: Completed 225-01-PLAN.md
+Last session: 2026-05-06T14:54:12.048Z
+Stopped at: Completed 225-02-PLAN.md
 Resume file: None
