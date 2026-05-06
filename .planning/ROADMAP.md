@@ -26,11 +26,11 @@
 - ✅ **v1.22 Weight Loading Ownership Cutover** — shipped 2026-05-03
 - ✅ **v1.23 I/O Loading Strategy Boundary** — shipped 2026-05-04
 - ✅ **v1.24 I/O Mmap Loading Strategy** — shipped 2026-05-04 (Phases 204-211)
-- ⚠ **v1.25 I/O Read Loading Strategy** — gap closure reopened 2026-05-06 (Phases 212-225 + 214.1)
+- ✅ **v1.25 I/O Read Loading Strategy** — shipped 2026-05-06 (Phases 212-225 + 214.1)
 
 ## Phases
 
-### ⚠ v1.25 I/O Read Loading Strategy (Phases 212-225 + 214.1) — GAP CLOSURE
+### ✅ v1.25 I/O Read Loading Strategy (Phases 212-225 + 214.1) — SHIPPED 2026-05-06
 
 Source: GitHub issue #62, "Add io/read state machine for copy-based tensor loading".
 Adds a dedicated `src/emel/io/read` Stateforward.SML actor for explicit read/copy tensor
@@ -60,11 +60,7 @@ and device strategies remain out of scope.
 - [x] Phase 225: Read Closeout Runtime Validation And SML Repair — completed
   2026-05-06; refreshed source-backed audit gaps closed with dyld fallback evidence
 
-Current closeout artifacts:
-- `.planning/REQUIREMENTS.md`
-- `.planning/v1.25-MILESTONE-AUDIT.md`
-
-Prior archive snapshot:
+Archived closeout artifacts:
 - `.planning/milestones/v1.25-ROADMAP.md`
 - `.planning/milestones/v1.25-REQUIREMENTS.md`
 - `.planning/milestones/v1.25-MILESTONE-AUDIT.md`

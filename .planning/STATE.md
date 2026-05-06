@@ -2,13 +2,13 @@
 gsd_state_version: 1.0
 milestone: v1.25
 milestone_name: I/O Read Loading Strategy
-status: verifying
-stopped_at: Completed 225-read-closeout-runtime-validation-and-sml-repair-06-PLAN.md
-last_updated: "2026-05-06T15:50:03.926Z"
+status: shipped
+stopped_at: Completed v1.25 I/O Read Loading Strategy milestone
+last_updated: "2026-05-06T16:42:41.818Z"
 last_activity: 2026-05-06
 progress:
   total_phases: 15
-  completed_phases: 1
+  completed_phases: 15
   total_plans: 6
   completed_plans: 6
   percent: 100
@@ -22,16 +22,17 @@ See: .planning/PROJECT.md (updated 2026-05-05)
 
 **Core value:** Prove real end-to-end behavior with explicit SML orchestration and
 parity-oriented verification before widening API surface or model scope.
-**Current focus:** Phase 225 — read-closeout-runtime-validation-and-sml-repair
-Phase 225 published current verification, validation, and audit evidence for the
-read/copy closeout repair. Direct `build/zig` dyld launch blockers are recorded with
-source-backed substitute evidence from the coverage CTest lane and maintained source scans.
+**Current focus:** v1.25 shipped — ready to define the next milestone.
+Phase 225 published current verification, validation, audit, code-review, and post-fix
+evidence for the read/copy closeout repair. Direct `build/zig` dyld launch blockers are
+recorded with source-backed substitute evidence from the coverage CTest lane and maintained
+source scans.
 
 ## Current Position
 
-Phase: 225 (read-closeout-runtime-validation-and-sml-repair) — VERIFYING
-Plan: 6 of 6
-Status: Phase complete — ready for verification
+Milestone: v1.25 I/O Read Loading Strategy — SHIPPED
+Plan: complete
+Status: Milestone complete — ready for next milestone definition
 Phase 225 closes `.planning/v1.25-MILESTONE-AUDIT.md` findings through six
 linear plans: current
 `emel_tests_model_and_batch` dyld launch failure, model-loader action-loop
@@ -198,7 +199,7 @@ Carried-forward decisions from v1.24 still in effect:
 
 ## Deferred Items
 
-Items acknowledged and deferred at v1.22 milestone close on 2026-05-03 (still carried):
+Items acknowledged and deferred at v1.25 milestone close on 2026-05-06:
 
 | Category | Item | Status |
 |----------|------|--------|
@@ -207,13 +208,6 @@ Items acknowledged and deferred at v1.22 milestone close on 2026-05-03 (still ca
 | todo | 2026-04-02-optimize-lfm2-5-q4-prefill-kernel.md | pending |
 | todo | 2026-04-02-optimize-lfm2-5-q6-prefill-kernel.md | pending |
 | todo | 2026-04-02-reuse-q8-rhs-across-lfm2-5-prefill-matmuls.md | pending |
-| Phase 224 P01 | 1 min | 3 tasks | 6 files |
-| Phase 225-read-closeout-runtime-validation-and-sml-repair P01 | 1243 | 2 tasks | 7 files |
-| Phase 225-read-closeout-runtime-validation-and-sml-repair P02 | 14min | 2 tasks | 6 files |
-| Phase 225-read-closeout-runtime-validation-and-sml-repair P03 | 20min | 2 tasks | 7 files |
-| Phase 225-read-closeout-runtime-validation-and-sml-repair P04 | 7min | 2 tasks | 5 files |
-| Phase 225-read-closeout-runtime-validation-and-sml-repair P05 | 4min | 2 tasks | 5 files |
-| Phase 225-read-closeout-runtime-validation-and-sml-repair P06 | 754 | 2 tasks | 5 files |
 
 ## Session Continuity
 

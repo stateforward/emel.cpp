@@ -17,6 +17,11 @@ one-liner: "Added concrete read/copy execution, deterministic read errors, and t
 
 # Phase 214 Plan 01 Summary
 
+> Phase 221 closeout note: this historical summary is superseded for runtime
+> truth by Phase 214.1. The maintained `src/emel/io/read` path now consumes
+> caller-provided source spans and `source_error` data; it does not perform
+> dispatch-time platform open/seek/read/close work.
+
 ## Outcome
 
 The read actor now opens, seeks, reads into the caller-owned target buffer, closes the

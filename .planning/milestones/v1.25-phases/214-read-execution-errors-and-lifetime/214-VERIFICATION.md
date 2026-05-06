@@ -10,6 +10,13 @@ requirements:
 
 # Phase 214 Verification
 
+> Phase 221 closeout note: this historical verification is superseded for live
+> runtime truth by Phase 214.1. Use
+> `.planning/phases/214.1-rtc-safe-read-execution-boundary-repair/214.1-VERIFICATION.md`
+> for source-backed evidence of the maintained read actor. The current
+> implementation copies from caller-provided source spans and has no
+> dispatch-time filesystem or OS-resource lifetime.
+
 ## Requirement Status
 
 | Requirement | Status | Source-Backed Evidence |

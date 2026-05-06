@@ -2,6 +2,55 @@
 
 *A living document updated after each milestone. Lessons feed forward into future planning.*
 
+## Milestone: v1.25 - I/O Read Loading Strategy
+
+**Shipped:** 2026-05-06
+**Phases:** 15 | **Plans:** 20 | **Sessions:** autonomous audit, cleanup, and closeout
+
+### What Was Built
+
+- Canonical `src/emel/io/read` Stateforward.SML actor for read/copy tensor loading.
+- RTC-safe source-span read/copy execution into caller-owned target buffers.
+- Tensor-owned public `request_read_load` route through injected `io/read`.
+- Maintained model-loader read/copy evidence through public source loading, tensor plan/apply,
+  and `io/loader -> io/read`.
+- Final closeout artifacts distinguishing the direct tensor result-carrier path from maintained
+  model-loader lanes.
+
+### What Worked
+
+- The final integration check caught an overbroad audit claim before archive.
+- Phase 224 was useful as a cleanup-only phase because it closed ambiguity without changing source.
+- Re-running `emel_tests_io` after the transient dyld launch failure produced fresh passing evidence.
+
+### What Was Inefficient
+
+- Milestone archive automation counted only the reopened active phase after earlier phase archival,
+  leaving duplicate/stale planning prose that needed manual cleanup.
+- The audit truth around direct `request_read_load` versus maintained model-loader lanes required a
+  second integration pass to phrase precisely.
+
+### Patterns Established
+
+- Closeout audits must distinguish direct public actor routes from maintained benchmark/parity lanes
+  when they use different same-RTC handoff mechanisms.
+- Archived phase directories should be folded under `.planning/milestones/vX.Y-phases/` before
+  treating the active roadmap as clean.
+
+### Key Lessons
+
+1. Source-backed wording needs to name the exact lane it applies to.
+2. Transient local launch failures should be rerun before becoming archive-time tech debt.
+3. Milestone completion should be followed by a consistency check after phase-directory cleanup.
+
+### Cost Observations
+
+- Model mix: not measured.
+- Sessions: one autonomous closeout session with verifier and integration-checker agents.
+- Notable: `commit_docs=false` skipped all planning commits, so archive changes remain local.
+
+---
+
 ## Milestone: v1.22 - Weight Loading Ownership Cutover
 
 **Shipped:** 2026-05-03

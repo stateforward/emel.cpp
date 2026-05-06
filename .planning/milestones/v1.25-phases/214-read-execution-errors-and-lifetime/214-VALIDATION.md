@@ -11,6 +11,11 @@ requirements:
 
 # Phase 214 Validation
 
+> Phase 221 closeout note: this historical validation is superseded for live
+> runtime truth by Phase 214.1. The source-backed validation point for READ-03,
+> PLAT-01, LIFE-01, and ERR-01 is the Phase 214.1 validation artifact, which
+> records the maintained source-span read/copy implementation.
+
 ## Nyquist Result
 
 Compliant. Phase 214 implements and tests concrete read execution, copied-byte success,

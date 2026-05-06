@@ -16,24 +16,27 @@ before widening API surface or model scope.
 
 ## Current State
 
-Current milestone: `v1.25 I/O Read Loading Strategy`
+Current milestone: not yet defined
 
-Latest shipped milestone: `v1.24 I/O Mmap Loading Strategy`
+Latest shipped milestone: `v1.25 I/O Read Loading Strategy`
 
-Status: `v1.24` shipped on 2026-05-04 after Phase 210 closing full-scope quality gate
-passed with no override (13/13 requirements satisfied) and Phase 211 closed the
-per-phase VERIFICATION.md backfill gap. The repo now ships `src/emel/io/mmap` as the
-canonical mmap strategy actor beneath the `src/emel/io` boundary, with tensor-owned
-mmap residency via `model::tensor::event::request_mapped_load` /
-`release_mapped_load` and a fixed-capacity actor-owned slot pool.
+Status: `v1.25` shipped on 2026-05-06 after Phase 225 review-fix cleanup and a
+refreshed source-backed milestone audit passed. The repo now ships the issue #62 read/copy
+strategy path beneath the existing `src/emel/io` boundary while preserving
+tensor-owned residency. `src/emel/io/read` is the canonical read/copy actor,
+`model/tensor` owns the target buffer and residency commit, and maintained
+loader/tool lanes select/report read/copy through public runtime surfaces.
+Maintained source-byte loading for benchmark, paritychecker, and embedded probe
+evidence now uses the public `emel::io::source::load_file_bytes` setup-time
+contract instead of actor-internal `io/read/detail.hpp`. Phase 224 also
+confirmed Phase 214 is historical, clarified the direct `request_read_load`
+coverage shape, and captured fresh passing `emel_tests_io` evidence before
+archive.
 
-Current planning focus: implement the issue #62 read/copy strategy path beneath the
-existing `src/emel/io` boundary while preserving tensor-owned residency.
-
-## Current Milestone: v1.25 I/O Read Loading Strategy
+## Latest Shipped Milestone: v1.25 I/O Read Loading Strategy
 
 **Goal:** Add a dedicated `io/read` Stateforward.SML strategy actor under `src/emel/io`
-so tensor-owned model loading can request explicit file-read/copy residency into a
+so tensor-owned model loading can request explicit read/copy residency into a
 caller-provided owned target buffer through the existing I/O boundary, without moving
 tensor lifecycle ownership out of `model/tensor` and without folding mmap, staged/chunked
 constrained-memory, async, or device strategy behavior into this issue.
@@ -47,13 +50,15 @@ constrained-memory, async, or device strategy behavior into this issue.
   the public `emel/io` boundary while retaining tensor-owned load, bind, evict, and
   residency semantics. The read strategy operates on a caller-provided owned target
   buffer; the strategy never takes residency ownership.
-- Explicit read/copy success, unsupported, validation, file-open, file-read, and
+- Explicit read/copy success, unsupported, validation, source-open, source-read, and
   short-read failure outcomes surfaced deterministically through events and states.
-- Deterministic transient-resource lifetime: any file descriptor / handle opened by the
-  read attempt is released before `_done` publication; no kernel handle pool persists
-  beyond the dispatch.
+- RTC-safe source/result handling: filesystem work is externalized from SML dispatch,
+  `io/read` stores no dispatch-local request data in context, and no kernel handle pool
+  persists beyond dispatch.
 - Maintained tests, docs, lint snapshots, benchmark snapshots, benchmark outputs, and
   model artifacts updated from maintained commands when required.
+- Public setup-time source-byte loading under `emel::io::source`, with benchmark and
+  parity lanes kept off actor `detail.hpp` helpers.
 
 ## Previous Shipped Milestone: v1.24 I/O Mmap Loading Strategy
 
@@ -404,14 +409,20 @@ truth anchor and without broadening into generic Liquid-family support.
 
 ### Active
 
-- v1.24 adds a dedicated `src/emel/io/mmap` Stateforward.SML strategy actor for mmap-backed
+- Next milestone requirements are not defined yet. Run `$gsd-new-milestone` to choose
+  the next scope.
+
+### Recently Validated
+
+- v1.25 added a dedicated `src/emel/io/read` Stateforward.SML strategy actor for read/copy
   tensor loading.
-- v1.24 integrates mmap-backed residency requests through the existing tensor-to-I/O boundary while
-  `model/tensor` remains the tensor lifecycle and residency owner.
-- v1.24 models mmap support, validation, success, and failure as explicit guard/state/event
-  behavior without hiding runtime strategy choice in actions or detail helpers.
-- v1.24 keeps staged read/copy, device-specific loading, cooperative async loading, new model
-  families, and broad public API expansion out of scope.
+- v1.25 integrated read-backed residency requests through the public tensor-to-I/O boundary
+  while `model/tensor` remains the tensor lifecycle and residency owner.
+- v1.25 modeled read/copy support, validation, success, and failure as explicit
+  guard/state/event behavior without hidden runtime behavior selection in actions or detail
+  helpers.
+- v1.25 kept mmap changes, staged/chunked read policy, device-specific loading, cooperative
+  async loading, new model families, and broad public API expansion out of scope.
 
 ### Validated
 
@@ -619,12 +630,17 @@ only, under `src/emel/io`, with tensor residency still owned by `model/tensor`.
 - **Mmap strategy scope**: `v1.24` implements only the mmap strategy behind `emel/io`. It must not
   add staged read/copy, chunked, device-specific, or cooperative async loading behavior, and must
   not move tensor residency lifecycle ownership out of `model/tensor`.
+- **Read strategy scope**: `v1.25` implements only the read/copy strategy behind `emel/io`. It must
+  not change the shipped mmap runtime, add staged/chunked constrained-memory policy, add
+  device-specific or cooperative async loading behavior, or move tensor residency lifecycle
+  ownership out of `model/tensor`.
 
 ## Key Decisions
 
 | Decision | Rationale | Outcome |
 |----------|-----------|---------|
-| Start v1.24 from GitHub issue #61 as the `io/mmap` loading strategy milestone | v1.23 established the `emel/io` strategy boundary and explicitly deferred concrete mmap behavior; issue #61 is the next narrow strategy path to land beneath tensor-owned residency | - Pending |
+| Start v1.25 from GitHub issue #62 as the `io/read` loading strategy milestone | v1.24 shipped the mmap strategy and left read/copy as the next narrow concrete strategy path beneath tensor-owned residency | ✓ Shipped |
+| Start v1.24 from GitHub issue #61 as the `io/mmap` loading strategy milestone | v1.23 established the `emel/io` strategy boundary and explicitly deferred concrete mmap behavior; issue #61 is the next narrow strategy path to land beneath tensor-owned residency | ✓ Shipped |
 | Start v1.23 from GitHub issue #60 as the `emel/io` boundary milestone | v1.22 moved tensor residency ownership into `model/tensor`; the next architecture step is the explicit I/O strategy seam beneath tensor-owned residency before concrete mmap or staged strategy work lands | Phase 203 closeout cleanup |
 | Start v1.22 from GitHub issue #59 as the weight-loading ownership cutover | `model/tensor` owns individual tensor lifecycle state while `model/weight_loader` still owns bulk residency transition planning; the next runtime architecture milestone should remove that split before adding future I/O strategy work | ✓ Shipped |
 | Start v1.21 from GitHub issue #58 as quality-gate selective runner optimization | v1.18 and v1.19 added parity and benchmark dependency manifests; the next milestone should cash in that structure at the mandatory gate-orchestration level without weakening conservative fallback behavior | ✓ Shipped |
