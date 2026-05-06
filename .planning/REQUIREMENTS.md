@@ -31,7 +31,7 @@ Requirements for this milestone. Each maps to exactly one active roadmap phase.
   failure, and read failure outcomes are represented with explicit `_done` and `_error`
   events or states, not mirrored status fields, action-selected callbacks, or context
   phase flags.
-- [x] **TIO-03**: `model/loader`, maintained benchmark lanes, paritychecker lanes, and
+- [ ] **TIO-03**: `model/loader`, maintained benchmark lanes, paritychecker lanes, and
   embedded probes can select or report read-backed loading only through public runtime
   surfaces, with no low-level read logic or actor-internal reach-through.
 
@@ -50,7 +50,7 @@ Requirements for this milestone. Each maps to exactly one active roadmap phase.
 
 ### Validation And Publication
 
-- [x] **VAL-01**: Doctest coverage proves supported read behavior and representative failure
+- [ ] **VAL-01**: Doctest coverage proves supported read behavior and representative failure
   handling through `process_event(...)` and SML state inspection (`visit_current_states`
   and/or `is(...)`).
 - [x] **VAL-02**: Domain and source guardrails fail if read implementation leaks into
@@ -60,7 +60,7 @@ Requirements for this milestone. Each maps to exactly one active roadmap phase.
 - [ ] **VAL-03**: Public docs, generated architecture docs, planning artifacts, lint snapshots,
   benchmark snapshots, benchmark outputs, and model artifacts are updated from maintained
   commands when required and describe read-strategy support truthfully.
-- [x] **VAL-04**: Maintained benchmark and parity evidence reports read-strategy usage only
+- [ ] **VAL-04**: Maintained benchmark and parity evidence reports read-strategy usage only
   when the EMEL lane actually runs the read-backed runtime path and does not present
   unsupported fallback behavior as read-strategy parity or performance.
 
@@ -106,9 +106,9 @@ Which phases cover which requirements.
 | ERR-01 | Phase 214.1 | Validated |
 | TIO-01 | Phase 215 | Validated |
 | TIO-02 | Phase 223 | Validated |
-| TIO-03 | Phase 225 | Complete |
-| VAL-04 | Phase 225 | Complete |
-| VAL-01 | Phase 225 | Complete |
+| TIO-03 | Phase 225 | Pending |
+| VAL-04 | Phase 225 | Pending |
+| VAL-01 | Phase 225 | Pending |
 | VAL-02 | Phase 222 | Validated |
 | VAL-03 | Phase 225 | Pending |
 

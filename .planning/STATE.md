@@ -31,7 +31,7 @@ artifact path truth.
 
 Phase: 225 (read-closeout-runtime-validation-and-sml-repair) — EXECUTING
 Plan: 5 of 6
-Status: Ready to execute
+Status: Ready to execute; Plans 01-04 complete and Plans 05-06 pending
 Phase 225 closes `.planning/v1.25-MILESTONE-AUDIT.md` findings through six
 linear plans: current
 `emel_tests_model_and_batch` dyld launch failure, model-loader action-loop
@@ -44,9 +44,9 @@ Progress: [#########.] 93%
 
 **Latest audited milestone:** `v1.25 I/O Read Loading Strategy`
 
-- v1.25 gap closure and cleanup passed after Phase 224. 13/13 v1.25
-  requirements are validated in current traceability. The refreshed milestone
-  audit reports `status: passed` with no current tech-debt rows.
+- v1.25 reopened gap closure is active in Phase 225. 13/13 v1.25
+  requirements are mapped in current traceability; 9 are validated and 4 remain
+  pending until Plan 06 publishes current command evidence.
 
 - v1.24 shipped on 2026-05-04 after Phase 210 closing full-scope quality gate passed with
   no override. 13/13 v1.24 requirements satisfied (MMAP-01..03, TIO-01..03, PLAT-01,
