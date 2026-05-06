@@ -1447,6 +1447,27 @@ TEST_CASE("model loader rejects missing source payload") {
         emel::error::cast(emel::model::loader::error::invalid_request));
 }
 
+TEST_CASE("model loader rejects missing parse callback before parsing") {
+  auto model = std::make_unique<emel::model::data>();
+  emel::model::loader::sm machine{};
+  owner_state owner{};
+  emel::model::loader::event::parse_model_fn parse_model{};
+
+  uint8_t file_bytes[8] = {};
+  emel::model::loader::event::load request{*model, parse_model};
+  request.file_image = file_bytes;
+  request.file_size = sizeof(file_bytes);
+  request.on_done = {&owner, on_done};
+  request.on_error = {&owner, on_error};
+
+  CHECK_FALSE(machine.process_event(request));
+  CHECK_FALSE(owner.done);
+  CHECK(owner.error);
+  CHECK(owner.err ==
+        emel::error::cast(emel::model::loader::error::invalid_request));
+  CHECK(machine.is(stateforward::sml::state<emel::model::loader::ready>));
+}
+
 TEST_CASE(
     "model loader allows vocab-only parse without weight and map callbacks") {
   auto model = std::make_unique<emel::model::data>();

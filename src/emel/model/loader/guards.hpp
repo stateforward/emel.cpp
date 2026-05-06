@@ -17,10 +17,17 @@ struct has_file_image {
   }
 };
 
+struct parse_model_present {
+  bool operator()(const event::load_runtime &ev) const noexcept {
+    return static_cast<bool>(ev.request.parse_model);
+  }
+};
+
 struct valid_request {
   bool operator()(const event::load_runtime &ev,
                   const action::context &) const noexcept {
-    return has_model_path{}(ev) || has_file_image{}(ev);
+    return parse_model_present{}(ev) &&
+           (has_model_path{}(ev) || has_file_image{}(ev));
   }
 };
 
