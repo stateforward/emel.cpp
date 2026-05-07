@@ -191,7 +191,8 @@ struct request_mapped_load {
 // Public surface for tensor-owned read/copy loading. The tensor actor owns
 // residency and dispatches the copy through an injected emel::io::read::sm.
 // Filesystem work remains outside both actors; callers provide the source
-// span and any source-result error for the duration of dispatch.
+// span, mutable destination span, and any source-result error for the duration
+// of dispatch.
 struct request_read_load {
   int32_t tensor_id = -1;
   uint16_t file_index = 0u;
@@ -200,6 +201,8 @@ struct request_read_load {
   uint64_t byte_size = 0u;
   const void *source_buffer = nullptr;
   uint64_t source_buffer_bytes = 0u;
+  void *target_buffer = nullptr;
+  uint64_t target_buffer_bytes = 0u;
   emel::error::type source_error =
       emel::error::cast(emel::io::read::error::none);
   emel::callback<void(const events::request_read_load_done &)> on_done = {};

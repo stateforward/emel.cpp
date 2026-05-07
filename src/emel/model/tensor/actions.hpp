@@ -619,7 +619,6 @@ struct effect_begin_request_read_load {
 struct effect_attempt_request_read_load_dispatch {
   void operator()(const detail::request_read_load_runtime &ev,
                   context &ctx) const noexcept {
-    const size_t id = static_cast<size_t>(ev.request.tensor_id);
     emel::io::read::event::read_tensor_request inner{
         .tensor_id = ev.request.tensor_id,
         .file_index = ev.request.file_index,
@@ -629,8 +628,8 @@ struct effect_attempt_request_read_load_dispatch {
         .source_buffer = ev.request.source_buffer,
         .source_buffer_bytes = ev.request.source_buffer_bytes,
         .source_error = ev.request.source_error,
-        .target_buffer = const_cast<void *>(ctx.tensors.buffer[id]),
-        .target_buffer_bytes = ctx.tensors.data_size[id],
+        .target_buffer = ev.request.target_buffer,
+        .target_buffer_bytes = ev.request.target_buffer_bytes,
     };
     emel::io::read::event::read_tensor read{inner};
     static_cast<void>(ctx.io_read->process_event(read, ev.status.io_read));

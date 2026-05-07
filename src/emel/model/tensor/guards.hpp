@@ -639,9 +639,10 @@ struct request_read_load_request_valid {
                emel::io::read::k_max_file_path_bytes &&
            ev.request.file_path.find('\0') == std::string_view::npos &&
            ev.request.byte_size > 0u && static_cast<bool>(ev.request.on_done) &&
-           ctx.tensors.buffer[static_cast<size_t>(id)] != nullptr &&
            ctx.tensors.data_size[static_cast<size_t>(id)] >=
-               ev.request.byte_size;
+               ev.request.byte_size &&
+           ev.request.target_buffer != nullptr &&
+           ev.request.target_buffer_bytes >= ev.request.byte_size;
   }
 };
 

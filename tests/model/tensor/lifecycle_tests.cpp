@@ -936,6 +936,8 @@ TEST_CASE("model_tensor_request_read_load_rejects_when_io_read_absent") {
       0, std::string_view{"/tmp/emel_does_not_matter.bin"}, 0u, 4u};
   request.source_buffer = source;
   request.source_buffer_bytes = sizeof(source) - 1u;
+  request.target_buffer = target;
+  request.target_buffer_bytes = sizeof(target);
   request.on_done = {&owner, on_request_read_load_done};
   request.on_error = {&owner, on_request_read_load_error};
 
@@ -961,6 +963,8 @@ TEST_CASE("model_tensor_request_read_load_dispatches_through_io_read") {
       0, std::string_view{"/tmp/emel_tensor_read_success.bin"}, 2u, 4u};
   request.source_buffer = source;
   request.source_buffer_bytes = sizeof(source) - 1u;
+  request.target_buffer = target;
+  request.target_buffer_bytes = sizeof(target);
   request.on_done = {&owner, on_request_read_load_done};
   request.on_error = {&owner, on_request_read_load_error};
 
@@ -997,6 +1001,8 @@ TEST_CASE("model_tensor_request_read_load_reports_validation_failure") {
       0, std::string_view{"/tmp/emel_tensor_read_invalid.bin"}, 0u, 8u};
   request.source_buffer = source;
   request.source_buffer_bytes = sizeof(source) - 1u;
+  request.target_buffer = target;
+  request.target_buffer_bytes = sizeof(target);
   request.on_done = {&owner, on_request_read_load_done};
   request.on_error = {&owner, on_request_read_load_error};
 
@@ -1021,6 +1027,8 @@ TEST_CASE("model_tensor_request_read_load_surfaces_file_open_failed") {
       0, std::string_view{"/tmp/emel_tensor_read_missing.bin"}, 0u, 4u};
   request.source_error =
       emel::error::cast(emel::io::read::error::file_open_failed);
+  request.target_buffer = target;
+  request.target_buffer_bytes = sizeof(target);
   request.on_done = {&owner, on_request_read_load_done};
   request.on_error = {&owner, on_request_read_load_error};
 
@@ -1050,6 +1058,8 @@ TEST_CASE("model_tensor_request_read_load_surfaces_file_read_failed") {
   request.source_buffer_bytes = sizeof(source) - 1u;
   request.source_error =
       emel::error::cast(emel::io::read::error::file_read_failed);
+  request.target_buffer = target;
+  request.target_buffer_bytes = sizeof(target);
   request.on_done = {&owner, on_request_read_load_done};
   request.on_error = {&owner, on_request_read_load_error};
 
@@ -1060,6 +1070,81 @@ TEST_CASE("model_tensor_request_read_load_surfaces_file_read_failed") {
         emel::error::cast(emel::model::tensor::error::io_read_failed));
   CHECK(owner.request_io_err ==
         emel::error::cast(emel::io::read::error::file_read_failed));
+  CHECK(machine.is(stateforward::sml::state<emel::model::tensor::ready>));
+}
+
+TEST_CASE("model_tensor_request_read_load_requires_explicit_target_storage") {
+  emel::io::read::sm io_read_actor{};
+  emel::model::tensor::sm machine = make_tensor_sm_with_io_read(io_read_actor);
+  std::array<emel::model::data::tensor_record, 1> tensors{};
+  constexpr char bound_file_image[] = "abcdefgh";
+  tensors[0].file_offset = 0u;
+  tensors[0].data_size = 4u;
+  tensors[0].file_index = 0u;
+  tensors[0].type = 1;
+  tensors[0].data = bound_file_image + 2u;
+  emel::model::tensor::event::bind_storage bind{std::span{tensors}};
+  REQUIRE(machine.process_event(bind));
+
+  read_owner_state owner{};
+  emel::model::tensor::event::request_read_load request{
+      0, std::string_view{"/tmp/emel_tensor_read_missing_target.bin"}, 2u, 4u};
+  request.source_buffer = bound_file_image;
+  request.source_buffer_bytes = sizeof(bound_file_image) - 1u;
+  request.on_done = {&owner, on_request_read_load_done};
+  request.on_error = {&owner, on_request_read_load_error};
+
+  CHECK_FALSE(machine.process_event(request));
+  CHECK_FALSE(owner.request_done);
+  CHECK(owner.request_error);
+  CHECK(owner.request_err ==
+        emel::error::cast(emel::model::tensor::error::invalid_request));
+  CHECK(tensors[0].data == bound_file_image + 2u);
+  CHECK(machine.is(stateforward::sml::state<emel::model::tensor::ready>));
+}
+
+TEST_CASE(
+    "model_tensor_request_read_load_does_not_write_bound_source_pointer") {
+  emel::io::read::sm io_read_actor{};
+  emel::model::tensor::sm machine = make_tensor_sm_with_io_read(io_read_actor);
+  std::array<emel::model::data::tensor_record, 1> tensors{};
+  std::array<char, 4> bound_source{{'x', 'x', 'x', 'x'}};
+  uint8_t target[4]{};
+  tensors[0].file_offset = 0u;
+  tensors[0].data_size = sizeof(target);
+  tensors[0].file_index = 0u;
+  tensors[0].type = 1;
+  tensors[0].data = bound_source.data();
+  emel::model::tensor::event::bind_storage bind{std::span{tensors}};
+  REQUIRE(machine.process_event(bind));
+
+  read_owner_state owner{};
+  constexpr char source[] = "abcdefgh";
+  emel::model::tensor::event::request_read_load request{
+      0, std::string_view{"/tmp/emel_tensor_read_explicit_target.bin"}, 2u, 4u};
+  request.source_buffer = source;
+  request.source_buffer_bytes = sizeof(source) - 1u;
+  request.target_buffer = target;
+  request.target_buffer_bytes = sizeof(target);
+  request.on_done = {&owner, on_request_read_load_done};
+  request.on_error = {&owner, on_request_read_load_error};
+
+  CHECK(machine.process_event(request));
+  CHECK(owner.request_done);
+  CHECK_FALSE(owner.request_error);
+  CHECK(owner.buffer == target);
+  CHECK(std::memcmp(target, "cdef", 4u) == 0);
+  CHECK(std::memcmp(bound_source.data(), "xxxx", 4u) == 0);
+
+  emel::model::tensor::event::tensor_state state{};
+  CHECK(machine.process_event(emel::model::tensor::event::capture_tensor_state{
+      .tensor_id = 0,
+      .state_out = &state,
+  }));
+  CHECK(state.lifecycle_state ==
+        emel::model::tensor::event::lifecycle::resident);
+  CHECK(state.buffer == target);
+  CHECK(state.buffer_bytes == 4u);
   CHECK(machine.is(stateforward::sml::state<emel::model::tensor::ready>));
 }
 
@@ -1084,6 +1169,11 @@ TEST_CASE("model_tensor_owns_read_copy_residency_boundary") {
         std::string::npos);
   CHECK(actions_source.find("event::lifecycle::resident") != std::string::npos);
   CHECK(actions_source.find("ctx.tensors.buffer[id] = ev.status.buffer") !=
+        std::string::npos);
+  CHECK(actions_source.find(".target_buffer = ev.request.target_buffer") !=
+        std::string::npos);
+  CHECK(actions_source.find(
+            ".target_buffer = const_cast<void *>(ctx.tensors.buffer[id])") ==
         std::string::npos);
   CHECK(actions_source.find("read_load_callbacks") == std::string::npos);
   CHECK(actions_source.find("on_io_read_done") == std::string::npos);
