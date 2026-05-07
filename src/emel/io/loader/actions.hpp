@@ -237,6 +237,10 @@ struct effect_on_unexpected {
     if constexpr (requires { ev.ctx.err; }) {
       ev.ctx.err = emel::error::cast(error::internal_error);
       ev.ctx.ok = false;
+    } else if constexpr (requires { ev.status.err; }) {
+      ev.status.err = emel::error::cast(error::internal_error);
+      ev.status.ok = false;
+      ev.status.accepted = false;
     }
   }
 };

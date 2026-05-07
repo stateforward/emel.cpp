@@ -15,6 +15,7 @@ struct requirements {
   uint32_t kv_count = 0;
   uint32_t max_key_bytes = 0;
   uint32_t max_value_bytes = 0;
+  uint64_t tensor_data_bytes = 0;
 };
 
 struct kv_entry {

@@ -62,6 +62,7 @@ struct load {
   std::span<emel::model::tensor::effect_request> effect_requests = {};
   std::span<emel::model::tensor::effect_result> effect_results = {};
   std::span<emel::io::event::tensor_load_span> io_load_spans = {};
+  std::span<uint8_t> read_copy_storage = {};
   map_layers_fn map_layers = {};
   validate_structure_fn validate_structure = {};
   validate_architecture_fn validate_architecture_impl = {};

@@ -31,8 +31,8 @@
 #include "emel/gguf/loader/events.hpp"
 #include "emel/gguf/loader/sm.hpp"
 #include "emel/io/events.hpp"
-#include "emel/io/source/any.hpp"
 #include "emel/io/read/sm.hpp"
+#include "emel/io/source/any.hpp"
 #include "emel/kernel/aarch64/detail.hpp"
 #include "emel/kernel/aarch64/sm.hpp"
 #include "emel/kernel/events.hpp"
@@ -818,8 +818,7 @@ bool write_generation_baseline_file(
 bool load_generation_baseline_file(const std::filesystem::path &path,
                                    generation_baseline_record &record_out) {
   std::vector<uint8_t> file_bytes;
-  if (emel::io::source::load_file_bytes(path.string(),
-                                                     file_bytes) !=
+  if (emel::io::source::load_file_bytes(path.string(), file_bytes) !=
       emel::error::cast(emel::io::read::error::none)) {
     return false;
   }
@@ -998,6 +997,8 @@ struct generation_load_state {
   generation_trace *emel_trace = nullptr;
   std::array<emel::logits::sampler::fn, 1> samplers = {};
   std::vector<uint8_t> kv_arena = {};
+  uint64_t gguf_tensor_data_bytes = 0u;
+  std::vector<uint8_t> read_copy_storage = {};
   std::vector<emel::gguf::loader::kv_entry> kv_entries = {};
   uint32_t gguf_tensor_count = 0u;
   std::vector<emel::model::tensor::effect_request> effect_requests = {};
@@ -1212,6 +1213,7 @@ prebind_gguf_kv_storage(generation_load_state &state,
   state.kv_arena.resize(static_cast<size_t>(arena_bytes));
   state.kv_entries.resize(requirements.kv_count);
   state.gguf_tensor_count = requirements.tensor_count;
+  state.gguf_tensor_data_bytes = requirements.tensor_data_bytes;
   return emel::error::cast(emel::model::loader::error::none);
 }
 
@@ -1516,8 +1518,7 @@ bool load_generation_reference_backend(const std::string &model_path,
 bool load_emel_vocab_from_gguf_file(const std::string &model_path,
                                     emel::model::data::vocab &vocab_out) {
   generation_load_state state{};
-  if (emel::io::source::load_file_bytes(model_path,
-                                                     state.file_bytes) !=
+  if (emel::io::source::load_file_bytes(model_path, state.file_bytes) !=
           emel::error::cast(emel::io::read::error::none) ||
       state.file_bytes.empty()) {
     return false;
@@ -18106,8 +18107,7 @@ int run_generation_harness_contract(
   }
 
   generation_load_state state{};
-  if (emel::io::source::load_file_bytes(opts.model_path,
-                                                     state.file_bytes) !=
+  if (emel::io::source::load_file_bytes(opts.model_path, state.file_bytes) !=
           emel::error::cast(emel::io::read::error::none) ||
       state.file_bytes.empty()) {
     std::fprintf(stderr,
@@ -18144,6 +18144,12 @@ int run_generation_harness_contract(
   request.io_load_spans = std::span<emel::io::event::tensor_load_span>{
       state.io_load_spans.data(), state.io_load_spans.size()};
   emel::tools::bind_model_load_io_strategy(request, state.io_loader);
+  if (request.io_strategy ==
+      emel::io::loader::event::strategy_kind::read_copy) {
+    state.read_copy_storage.resize(
+        static_cast<size_t>(state.gguf_tensor_data_bytes));
+    request.read_copy_storage = std::span<uint8_t>{state.read_copy_storage};
+  }
   request.map_layers = {nullptr, run_emel_map_layers};
   request.validate_structure = {nullptr, run_emel_validate_structure};
   request.validate_architecture_impl = {nullptr,

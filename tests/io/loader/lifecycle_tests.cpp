@@ -584,6 +584,11 @@ TEST_CASE("io loader boundary has no concrete system IO strategy code") {
   CHECK(actions_source.find("pread(") == std::string::npos);
   CHECK(actions_source.find("std::ifstream") == std::string::npos);
   CHECK(actions_source.find("CreateFileMapping") == std::string::npos);
+  CHECK(actions_source.find("requires { ev.status.err; }") !=
+        std::string::npos);
+  CHECK(actions_source.find(
+            "ev.status.err = emel::error::cast(error::internal_error)") !=
+        std::string::npos);
   CHECK(sm_source.find("strategy_mapped_file") != std::string::npos);
   CHECK(sm_source.find("strategy_read_copy") != std::string::npos);
   CHECK(sm_source.find("strategy_read_copy_with_actor") != std::string::npos);

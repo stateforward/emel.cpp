@@ -100,46 +100,39 @@ parse_tensor_span_ok(void *,
   return emel::error::cast(emel::model::loader::error::none);
 }
 
-struct read_copy_parse_state {
-  std::array<uint8_t, 4> *target = nullptr;
-};
-
 emel::error::type
 parse_read_copy_tensor(void *object,
                        const emel::model::loader::event::load &req) noexcept {
-  auto *state = static_cast<read_copy_parse_state *>(object);
+  static_cast<void>(object);
   req.model_data.n_tensors = 1;
   req.model_data.n_layers = 1;
   auto &tensor = req.model_data.tensors[0];
   tensor.file_offset = 2u;
-  tensor.data_size = state->target->size();
+  tensor.data_size = 4u;
   tensor.file_index = 0u;
-  tensor.data = state->target->data();
+  tensor.data =
+      static_cast<const uint8_t *>(req.file_image) + tensor.file_offset;
   return emel::error::cast(emel::model::loader::error::none);
 }
 
-struct read_copy_batch_parse_state {
-  std::array<uint8_t, 4> *first_target = nullptr;
-  std::array<uint8_t, 3> *second_target = nullptr;
-};
-
 emel::error::type parse_read_copy_two_tensors(
     void *object, const emel::model::loader::event::load &req) noexcept {
-  auto *state = static_cast<read_copy_batch_parse_state *>(object);
+  static_cast<void>(object);
   req.model_data.n_tensors = 2;
   req.model_data.n_layers = 1;
 
   auto &first = req.model_data.tensors[0];
   first.file_offset = 2u;
-  first.data_size = state->first_target->size();
+  first.data_size = 4u;
   first.file_index = 0u;
-  first.data = state->first_target->data();
+  first.data = static_cast<const uint8_t *>(req.file_image) + first.file_offset;
 
   auto &second = req.model_data.tensors[1];
   second.file_offset = 5u;
-  second.data_size = state->second_target->size();
+  second.data_size = 3u;
   second.file_index = 0u;
-  second.data = state->second_target->data();
+  second.data =
+      static_cast<const uint8_t *>(req.file_image) + second.file_offset;
 
   return emel::error::cast(emel::model::loader::error::none);
 }
@@ -1121,9 +1114,8 @@ TEST_CASE("model loader loads read/copy tensors through maintained actors") {
   owner_state owner{};
   tensor_loader_fixture tensor_loader{};
   std::array<uint8_t, 4> target{};
-  read_copy_parse_state parse_state{.target = &target};
   emel::model::loader::event::parse_model_fn parse_model{
-      &parse_state, parse_read_copy_tensor};
+      nullptr, parse_read_copy_tensor};
 
   std::array<uint8_t, 8> file_bytes{'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'};
   emel::model::loader::event::load request{*model, parse_model};
@@ -1133,6 +1125,7 @@ TEST_CASE("model loader loads read/copy tensors through maintained actors") {
   tensor_loader.bind(request);
   std::array<emel::io::event::tensor_load_span, 1> io_load_spans{};
   request.io_load_spans = std::span{io_load_spans};
+  request.read_copy_storage = std::span{target};
   request.io_loader = &io_loader;
   request.io_strategy = emel::io::loader::event::strategy_kind::read_copy;
   request.map_layers = {nullptr, map_layers_ok};
@@ -1155,6 +1148,7 @@ TEST_CASE("model loader loads read/copy tensors through maintained actors") {
         emel::model::tensor::effect_kind::k_io_load);
   CHECK(tensor_loader.effect_requests[0].strategy ==
         emel::io::loader::event::strategy_kind::read_copy);
+  CHECK(tensor_loader.effect_requests[0].target == target.data());
   CHECK(tensor_loader.effect_results[0].handle == target.data());
   CHECK(model->tensors[0].data == target.data());
   CHECK(target[0] == 'c');
@@ -1171,11 +1165,9 @@ TEST_CASE("model loader read copy uses one io loader batch dispatch") {
   owner_state owner{};
   tensor_loader_fixture tensor_loader{};
   std::array<uint8_t, 4> first_target{};
-  std::array<uint8_t, 3> second_target{};
-  read_copy_batch_parse_state parse_state{.first_target = &first_target,
-                                          .second_target = &second_target};
+  std::array<uint8_t, 7> read_copy_storage{};
   emel::model::loader::event::parse_model_fn parse_model{
-      &parse_state, parse_read_copy_two_tensors};
+      nullptr, parse_read_copy_two_tensors};
 
   std::array<uint8_t, 9> file_bytes{'a', 'b', 'c', 'd', 'e',
                                     'f', 'g', 'h', 'i'};
@@ -1186,6 +1178,7 @@ TEST_CASE("model loader read copy uses one io loader batch dispatch") {
   tensor_loader.bind(request);
   std::array<emel::io::event::tensor_load_span, 2> io_load_spans{};
   request.io_load_spans = std::span{io_load_spans};
+  request.read_copy_storage = std::span{read_copy_storage};
   request.io_loader = &io_loader;
   request.io_strategy = emel::io::loader::event::strategy_kind::read_copy;
   request.map_layers = {nullptr, map_layers_ok};
@@ -1206,17 +1199,19 @@ TEST_CASE("model loader read copy uses one io loader batch dispatch") {
         emel::model::tensor::effect_kind::k_io_load);
   CHECK(tensor_loader.effect_requests[1].kind ==
         emel::model::tensor::effect_kind::k_io_load);
-  CHECK(tensor_loader.effect_results[0].handle == first_target.data());
-  CHECK(tensor_loader.effect_results[1].handle == second_target.data());
-  CHECK(model->tensors[0].data == first_target.data());
-  CHECK(model->tensors[1].data == second_target.data());
-  CHECK(first_target[0] == 'c');
-  CHECK(first_target[1] == 'd');
-  CHECK(first_target[2] == 'e');
-  CHECK(first_target[3] == 'f');
-  CHECK(second_target[0] == 'f');
-  CHECK(second_target[1] == 'g');
-  CHECK(second_target[2] == 'h');
+  CHECK(tensor_loader.effect_results[0].handle == read_copy_storage.data());
+  CHECK(tensor_loader.effect_results[1].handle ==
+        read_copy_storage.data() + first_target.size());
+  CHECK(model->tensors[0].data == read_copy_storage.data());
+  CHECK(model->tensors[1].data ==
+        read_copy_storage.data() + first_target.size());
+  CHECK(read_copy_storage[0] == 'c');
+  CHECK(read_copy_storage[1] == 'd');
+  CHECK(read_copy_storage[2] == 'e');
+  CHECK(read_copy_storage[3] == 'f');
+  CHECK(read_copy_storage[4] == 'f');
+  CHECK(read_copy_storage[5] == 'g');
+  CHECK(read_copy_storage[6] == 'h');
 }
 
 TEST_CASE("model loader read copy requires request owned io batch span") {
@@ -1227,9 +1222,8 @@ TEST_CASE("model loader read copy requires request owned io batch span") {
   owner_state owner{};
   tensor_loader_fixture tensor_loader{};
   std::array<uint8_t, 4> target{};
-  read_copy_parse_state parse_state{.target = &target};
   emel::model::loader::event::parse_model_fn parse_model{
-      &parse_state, parse_read_copy_tensor};
+      nullptr, parse_read_copy_tensor};
 
   std::array<uint8_t, 8> file_bytes{'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'};
   emel::model::loader::event::load request{*model, parse_model};
@@ -1261,16 +1255,15 @@ TEST_CASE("model loader read copy requires request owned io batch span") {
   CHECK(target[3] == 0u);
 }
 
-TEST_CASE("model loader read copy batch error keeps used strategy unset") {
+TEST_CASE("model loader read copy requires caller-owned tensor storage") {
   auto model = std::make_unique<emel::model::data>();
   emel::model::loader::sm machine{};
-  emel::io::loader::sm io_loader{};
+  emel::io::read::sm read_actor{};
+  emel::io::loader::sm io_loader{{.io_read = &read_actor}};
   owner_state owner{};
   tensor_loader_fixture tensor_loader{};
-  std::array<uint8_t, 4> target{};
-  read_copy_parse_state parse_state{.target = &target};
   emel::model::loader::event::parse_model_fn parse_model{
-      &parse_state, parse_read_copy_tensor};
+      nullptr, parse_read_copy_tensor};
 
   std::array<uint8_t, 8> file_bytes{'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'};
   emel::model::loader::event::load request{*model, parse_model};
@@ -1280,6 +1273,43 @@ TEST_CASE("model loader read copy batch error keeps used strategy unset") {
   tensor_loader.bind(request);
   std::array<emel::io::event::tensor_load_span, 1> io_load_spans{};
   request.io_load_spans = std::span{io_load_spans};
+  request.io_loader = &io_loader;
+  request.io_strategy = emel::io::loader::event::strategy_kind::read_copy;
+  request.map_layers = {nullptr, map_layers_ok};
+  request.validate_structure = {nullptr, validate_structure_ok};
+  request.validate_architecture_impl = {nullptr, validate_architecture_ok};
+  request.on_done = {&owner, on_done};
+  request.on_error = {&owner, on_error};
+
+  const bool accepted = machine.process_event(request);
+  CHECK_FALSE(accepted);
+  CHECK_FALSE(owner.done);
+  CHECK(owner.error);
+  CHECK(owner.err ==
+        emel::error::cast(emel::model::loader::error::invalid_request));
+  CHECK(tensor_loader.effect_results[0].handle == nullptr);
+  CHECK(model->tensors[0].data == file_bytes.data() + 2u);
+}
+
+TEST_CASE("model loader read copy batch error keeps used strategy unset") {
+  auto model = std::make_unique<emel::model::data>();
+  emel::model::loader::sm machine{};
+  emel::io::loader::sm io_loader{};
+  owner_state owner{};
+  tensor_loader_fixture tensor_loader{};
+  std::array<uint8_t, 4> target{};
+  emel::model::loader::event::parse_model_fn parse_model{
+      nullptr, parse_read_copy_tensor};
+
+  std::array<uint8_t, 8> file_bytes{'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'};
+  emel::model::loader::event::load request{*model, parse_model};
+  request.model_path = "fixture.gguf";
+  request.file_image = file_bytes.data();
+  request.file_size = file_bytes.size();
+  tensor_loader.bind(request);
+  std::array<emel::io::event::tensor_load_span, 1> io_load_spans{};
+  request.io_load_spans = std::span{io_load_spans};
+  request.read_copy_storage = std::span{target};
   request.io_loader = &io_loader;
   request.io_strategy = emel::io::loader::event::strategy_kind::read_copy;
   request.map_layers = {nullptr, map_layers_ok};

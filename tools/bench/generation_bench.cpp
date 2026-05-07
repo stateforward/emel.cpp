@@ -461,6 +461,8 @@ struct emel_fixture {
   emel::model::data model_data = {};
   std::vector<uint8_t> file_bytes = {};
   std::vector<uint8_t> kv_arena = {};
+  uint64_t gguf_tensor_data_bytes = 0u;
+  std::vector<uint8_t> read_copy_storage = {};
   std::vector<emel::gguf::loader::kv_entry> kv_entries = {};
   uint32_t gguf_tensor_count = 0u;
   std::vector<emel::model::tensor::effect_request> effect_requests = {};
@@ -1367,6 +1369,7 @@ emel::error::type prebind_emel_gguf_storage(emel_fixture &fixture) {
   fixture.kv_arena.resize(static_cast<size_t>(arena_bytes));
   fixture.kv_entries.resize(requirements.kv_count);
   fixture.gguf_tensor_count = requirements.tensor_count;
+  fixture.gguf_tensor_data_bytes = requirements.tensor_data_bytes;
   return emel::error::cast(emel::model::loader::error::none);
 }
 
@@ -1502,6 +1505,12 @@ bool prepare_emel_fixture(emel_fixture &fixture,
   load_ev.io_load_spans = std::span<emel::io::event::tensor_load_span>{
       fixture.io_load_spans.data(), fixture.io_load_spans.size()};
   emel::tools::bind_model_load_io_strategy(load_ev, fixture.io_loader);
+  if (load_ev.io_strategy ==
+      emel::io::loader::event::strategy_kind::read_copy) {
+    fixture.read_copy_storage.resize(
+        static_cast<size_t>(fixture.gguf_tensor_data_bytes));
+    load_ev.read_copy_storage = std::span<uint8_t>{fixture.read_copy_storage};
+  }
   load_ev.map_layers = {nullptr, run_emel_map_layers};
   load_ev.validate_structure = {nullptr, run_emel_validate_structure};
   load_ev.validate_architecture_impl = {nullptr,
