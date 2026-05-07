@@ -3,8 +3,10 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
+#include <filesystem>
 #include <string>
 #include <string_view>
+#include <system_error>
 #include <vector>
 
 #include "emel/error/error.hpp"
@@ -29,11 +31,10 @@ inline emel::error::type load_file_bytes(const std::string_view path,
     return emel::error::cast(::emel::io::read::error::file_open_failed);
   }
 
-  const bool seek_end_ok = std::fseek(file, 0, SEEK_END) == 0;
-  const long file_size = seek_end_ok ? std::ftell(file) : -1L;
-  const bool seek_start_ok =
-      file_size >= 0L && std::fseek(file, 0, SEEK_SET) == 0;
-  if (!seek_end_ok || file_size < 0L || !seek_start_ok) {
+  std::error_code file_size_error;
+  const auto file_size = std::filesystem::file_size(
+      std::filesystem::path{path_copy}, file_size_error);
+  if (file_size_error) {
     std::fclose(file);
     return emel::error::cast(::emel::io::read::error::file_seek_failed);
   }

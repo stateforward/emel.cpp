@@ -5,6 +5,7 @@
 #include <fstream>
 #include <iterator>
 #include <string>
+#include <vector>
 
 #include <doctest/doctest.h>
 
@@ -13,6 +14,7 @@
 #include "emel/io/loader/sm.hpp"
 #include "emel/io/read/errors.hpp"
 #include "emel/io/read/sm.hpp"
+#include "emel/io/source/any.hpp"
 #include "emel/machines.hpp"
 
 namespace {
@@ -608,6 +610,91 @@ TEST_CASE("io loader batch route dispatches one selected read actor event") {
         std::string::npos);
   CHECK(occurrence_count(dispatch_source, "process_event(read)") == 1u);
   CHECK(dispatch_source.find("for (") == std::string_view::npos);
+}
+
+TEST_CASE("public io source loads bytes through 64-bit file size path") {
+  const auto path =
+      std::filesystem::temp_directory_path() / "emel_io_source_bytes.bin";
+  std::filesystem::remove(path);
+  {
+    std::ofstream output{path, std::ios::binary};
+    REQUIRE(output.good());
+    output << "source-bytes";
+  }
+
+  std::vector<uint8_t> bytes;
+  CHECK(emel::io::source::load_file_bytes(path.string(), bytes) ==
+        emel::error::cast(emel::io::read::error::none));
+  CHECK(std::string{bytes.begin(), bytes.end()} == "source-bytes");
+  std::filesystem::remove(path);
+
+  const std::string source = read_text_file(repo_root() / "src" / "emel" /
+                                            "io" / "source" / "any.hpp");
+  CHECK(source.find("std::filesystem::file_size") != std::string::npos);
+  CHECK(source.find("std::ftell") == std::string::npos);
+}
+
+TEST_CASE("public io source validates paths before opening") {
+  std::vector<uint8_t> bytes{1u, 2u, 3u};
+
+  CHECK(emel::io::source::load_file_bytes({}, bytes) ==
+        emel::error::cast(emel::io::read::error::invalid_request));
+  CHECK(bytes.empty());
+
+  const std::string overlong_path(
+      static_cast<size_t>(emel::io::read::k_max_file_path_bytes + 1u), 'x');
+  CHECK(emel::io::source::load_file_bytes(overlong_path, bytes) ==
+        emel::error::cast(emel::io::read::error::invalid_request));
+
+  const std::string embedded_nul_path{"source\0bytes", 12u};
+  CHECK(emel::io::source::load_file_bytes(embedded_nul_path, bytes) ==
+        emel::error::cast(emel::io::read::error::invalid_request));
+}
+
+TEST_CASE("public io source reports open failures") {
+  const auto path =
+      std::filesystem::temp_directory_path() / "emel_io_source_missing.bin";
+  std::filesystem::remove(path);
+
+  std::vector<uint8_t> bytes;
+  CHECK(emel::io::source::load_file_bytes(path.string(), bytes) ==
+        emel::error::cast(emel::io::read::error::file_open_failed));
+  CHECK(bytes.empty());
+}
+
+TEST_CASE("public io source reports file size failures") {
+  const auto path =
+      std::filesystem::temp_directory_path() / "emel_io_source_directory";
+  std::filesystem::remove_all(path);
+  std::filesystem::create_directory(path);
+
+  std::vector<uint8_t> bytes;
+  const emel::error::type result =
+      emel::io::source::load_file_bytes(path.string(), bytes);
+  CHECK((result == emel::error::cast(emel::io::read::error::file_seek_failed) ||
+         result == emel::error::cast(emel::io::read::error::file_open_failed)));
+  std::filesystem::remove_all(path);
+}
+
+TEST_CASE("public io source rejects oversized files before allocation") {
+  const auto path =
+      std::filesystem::temp_directory_path() / "emel_io_source_oversized.bin";
+  std::filesystem::remove(path);
+  {
+    std::ofstream output{path, std::ios::binary};
+    REQUIRE(output.good());
+  }
+
+  std::error_code resize_error;
+  std::filesystem::resize_file(path, emel::io::read::k_max_read_bytes + 1u,
+                               resize_error);
+  REQUIRE_FALSE(resize_error);
+
+  std::vector<uint8_t> bytes;
+  CHECK(emel::io::source::load_file_bytes(path.string(), bytes) ==
+        emel::error::cast(emel::io::read::error::unsupported_resource));
+  CHECK(bytes.empty());
+  std::filesystem::remove(path);
 }
 
 TEST_CASE("io loader names the copy strategy without staged-policy wording") {

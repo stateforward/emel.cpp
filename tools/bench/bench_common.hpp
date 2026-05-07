@@ -108,7 +108,7 @@ generation_lane_mode generation_lane_mode_current() noexcept;
 
 inline double
 select_reported_ns_per_op(const std::vector<double> &sorted_samples) noexcept {
-  return sorted_samples[sorted_samples.size() / 4u];
+  return sorted_samples[sorted_samples.size() / 2u];
 }
 
 template <class fn_type>

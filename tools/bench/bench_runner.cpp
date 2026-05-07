@@ -274,7 +274,7 @@ void print_benchmark_config(const bench::config & cfg) {
   const auto generation_warmup_runs =
       read_env_size("EMEL_BENCH_GENERATION_WARMUP_RUNS", 0u);
   std::printf("# benchmark_config: iterations=%" PRIu64
-              " runs=%zu sample_policy=lower_quartile warmup_iterations=%" PRIu64
+              " runs=%zu sample_policy=median warmup_iterations=%" PRIu64
               " warmup_runs=%zu generation_iterations=%" PRIu64
               " generation_runs=%zu generation_warmup_iterations=%" PRIu64
               " generation_warmup_runs=%zu\n",
