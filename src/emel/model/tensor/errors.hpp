@@ -17,6 +17,8 @@ enum class error : emel::error::type {
   io_mmap_failed = (1u << 8),
   tensor_already_resident = (1u << 9),
   tensor_unmapped = (1u << 10),
+  io_read_unsupported = (1u << 11),
+  io_read_failed = (1u << 12),
 };
 
 } // namespace emel::model::tensor

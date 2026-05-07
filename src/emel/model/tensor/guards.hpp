@@ -1,5 +1,6 @@
 #pragma once
 
+#include "emel/io/read/errors.hpp"
 #include "emel/model/tensor/context.hpp"
 #include "emel/model/tensor/detail.hpp"
 #include "emel/model/tensor/errors.hpp"
@@ -627,6 +628,125 @@ struct request_mapped_load_error_callback_absent {
   }
 };
 
+struct request_read_load_request_valid {
+  bool operator()(const tensor::detail::request_read_load_runtime &ev,
+                  const action::context &ctx) const noexcept {
+    const int32_t id = ev.request.tensor_id;
+    return detail::valid_tensor_id(id) &&
+           static_cast<uint32_t>(id) < ctx.tensors.active_extent &&
+           !ev.request.file_path.empty() &&
+           ev.request.file_path.size() <=
+               emel::io::read::k_max_file_path_bytes &&
+           ev.request.file_path.find('\0') == std::string_view::npos &&
+           ev.request.byte_size > 0u && static_cast<bool>(ev.request.on_done) &&
+           ctx.tensors.data_size[static_cast<size_t>(id)] >=
+               ev.request.byte_size &&
+           ev.request.target_buffer != nullptr &&
+           ev.request.target_buffer_bytes >= ev.request.byte_size;
+  }
+};
+
+struct request_read_load_request_invalid {
+  bool operator()(const tensor::detail::request_read_load_runtime &ev,
+                  const action::context &ctx) const noexcept {
+    return !request_read_load_request_valid{}(ev, ctx);
+  }
+};
+
+struct request_read_load_io_read_present {
+  bool operator()(const tensor::detail::request_read_load_runtime &,
+                  const action::context &ctx) const noexcept {
+    return ctx.io_read != nullptr;
+  }
+};
+
+struct request_read_load_io_read_absent {
+  bool operator()(const tensor::detail::request_read_load_runtime &ev,
+                  const action::context &ctx) const noexcept {
+    return !request_read_load_io_read_present{}(ev, ctx);
+  }
+};
+
+struct request_read_load_tensor_already_resident {
+  bool operator()(const tensor::detail::request_read_load_runtime &ev,
+                  const action::context &ctx) const noexcept {
+    const size_t id = static_cast<size_t>(ev.request.tensor_id);
+    return ctx.tensors.lifecycle[id] == event::lifecycle::resident ||
+           ctx.tensors.lifecycle[id] == event::lifecycle::mmap_resident;
+  }
+};
+
+struct request_read_load_tensor_unbound {
+  bool operator()(const tensor::detail::request_read_load_runtime &ev,
+                  const action::context &ctx) const noexcept {
+    return !request_read_load_tensor_already_resident{}(ev, ctx);
+  }
+};
+
+struct request_read_load_io_read_succeeded {
+  bool operator()(const tensor::detail::request_read_load_runtime &ev,
+                  const action::context &) const noexcept {
+    return ev.status.io_read.accepted && ev.status.io_read.ok;
+  }
+};
+
+struct request_read_load_io_read_failed {
+  bool operator()(const tensor::detail::request_read_load_runtime &ev,
+                  const action::context &ctx) const noexcept {
+    return !request_read_load_io_read_succeeded{}(ev, ctx);
+  }
+};
+
+struct request_read_load_io_read_invalid_request {
+  bool operator()(const tensor::detail::request_read_load_runtime &ev,
+                  const action::context &) const noexcept {
+    return ev.status.io_read.err ==
+           emel::error::cast(emel::io::read::error::invalid_request);
+  }
+};
+
+struct request_read_load_io_read_unsupported {
+  bool operator()(const tensor::detail::request_read_load_runtime &ev,
+                  const action::context &) const noexcept {
+    return ev.status.io_read.err ==
+               emel::error::cast(emel::io::read::error::unsupported_platform) ||
+           ev.status.io_read.err ==
+               emel::error::cast(emel::io::read::error::unsupported_resource);
+  }
+};
+
+struct request_read_load_io_read_file_open_failed {
+  bool operator()(const tensor::detail::request_read_load_runtime &ev,
+                  const action::context &) const noexcept {
+    return ev.status.io_read.err ==
+           emel::error::cast(emel::io::read::error::file_open_failed);
+  }
+};
+
+struct request_read_load_io_read_file_read_or_other_failed {
+  bool operator()(const tensor::detail::request_read_load_runtime &ev,
+                  const action::context &ctx) const noexcept {
+    return request_read_load_io_read_failed{}(ev, ctx) &&
+           !request_read_load_io_read_invalid_request{}(ev, ctx) &&
+           !request_read_load_io_read_unsupported{}(ev, ctx) &&
+           !request_read_load_io_read_file_open_failed{}(ev, ctx);
+  }
+};
+
+struct request_read_load_error_callback_present {
+  bool operator()(
+      const tensor::detail::request_read_load_runtime &ev) const noexcept {
+    return static_cast<bool>(ev.request.on_error);
+  }
+};
+
+struct request_read_load_error_callback_absent {
+  bool operator()(
+      const tensor::detail::request_read_load_runtime &ev) const noexcept {
+    return !request_read_load_error_callback_present{}(ev);
+  }
+};
+
 struct release_mapped_load_request_valid {
   bool operator()(const tensor::detail::release_mapped_load_runtime &ev,
                   const action::context &ctx) const noexcept {
@@ -739,6 +859,32 @@ struct request_mapped_load_io_mmap_present_request_valid_tensor_unbound {
     return request_mapped_load_io_mmap_present{}(ev, ctx) &&
            request_mapped_load_request_valid{}(ev, ctx) &&
            request_mapped_load_tensor_unbound{}(ev, ctx);
+  }
+};
+
+struct request_read_load_io_read_present_request_invalid {
+  bool operator()(const tensor::detail::request_read_load_runtime &ev,
+                  const action::context &ctx) const noexcept {
+    return request_read_load_io_read_present{}(ev, ctx) &&
+           request_read_load_request_invalid{}(ev, ctx);
+  }
+};
+
+struct request_read_load_io_read_present_request_valid_already_resident {
+  bool operator()(const tensor::detail::request_read_load_runtime &ev,
+                  const action::context &ctx) const noexcept {
+    return request_read_load_io_read_present{}(ev, ctx) &&
+           request_read_load_request_valid{}(ev, ctx) &&
+           request_read_load_tensor_already_resident{}(ev, ctx);
+  }
+};
+
+struct request_read_load_io_read_present_request_valid_tensor_unbound {
+  bool operator()(const tensor::detail::request_read_load_runtime &ev,
+                  const action::context &ctx) const noexcept {
+    return request_read_load_io_read_present{}(ev, ctx) &&
+           request_read_load_request_valid{}(ev, ctx) &&
+           request_read_load_tensor_unbound{}(ev, ctx);
   }
 };
 

@@ -467,6 +467,10 @@ inline emel::error::type probe_requirements(const std::span<const uint8_t> & fil
     if (size_err != cast_loader_error(error::none)) {
       return size_err;
     }
+    if (!add_u64(requirements_out.tensor_data_bytes, tensor_data_size,
+                 requirements_out.tensor_data_bytes)) {
+      return cast_loader_error(error::capacity);
+    }
 
     if (tensor_data_offset != expected_tensor_offset) {
       return cast_loader_error(error::parse_failed);

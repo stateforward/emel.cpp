@@ -36,10 +36,10 @@ struct machine_spec {
 inline std::string machine_ownership_note(const std::string &name) {
   if (name == "io_loader") {
     return "`emel/io` owns loading strategy-boundary events and failure "
-           "routing. It does "
-           "not own tensor residency, and concrete mmap/read/copy/async "
-           "strategies remain "
-           "unsupported until strategy actors land.";
+           "routing. It does not own tensor residency. `read_copy` dispatches "
+           "to the injected `io/read` actor when available; mmap remains a "
+           "separate `io/mmap` strategy, and staged/async/device strategies "
+           "remain deferred.";
   }
   if (name == "model_tensor") {
     return "`model/tensor` owns tensor bind, load, evict, and residency "

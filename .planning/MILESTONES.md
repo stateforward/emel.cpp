@@ -1,5 +1,30 @@
 # Project Milestones: EMEL
 
+## v1.25 I/O Read Loading Strategy (Shipped: 2026-05-06)
+
+**Phases completed:** 16 phases, 21 plans, 12 tasks
+
+**Key accomplishments:**
+
+- Established the canonical src/emel/io/read Stateforward.SML boundary actor with fail-closed read/copy semantics and scoped lifecycle tests.
+- Added explicit read request validation and platform gates before the read-attempt placeholder.
+- Added concrete read/copy execution, deterministic read errors, and transient resource close-before-done behavior.
+- Reconciled the read actor with its RTC-safe source-span implementation.
+- Added tensor-owned public read/copy load orchestration through io/read.
+- Reopened closeout with Phase 225 to replace the model-loader per-tensor I/O action loop with one public batch dispatch, wire maintained callers through request-owned `io_load_spans`, and publish source-backed validation evidence.
+- Closed Phase 225 code review findings for missing parse callback validation and unclassified read source errors; post-fix review is clean.
+- Closed Phase 226 audit tech debt by adding an independent public `io/read`
+  batch cap and exact-cap/over-cap public-dispatch doctests.
+
+**Audit:** Final source-backed audit passed with 13/13 active requirements
+satisfied and no current tech-debt rows after Phase 226 cleanup.
+
+**Known deferred items at close:** 5 carried-forward items remain outside v1.25
+(one non-v1.23 quick task and four optimization todos; see STATE.md Deferred
+Items).
+
+---
+
 ## v1.24 I/O Mmap Loading Strategy (Shipped: 2026-05-04)
 
 **Phases completed:** 8 phases, 8 plans, 0 tasks

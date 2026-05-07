@@ -3,7 +3,6 @@
 #include <cstdint>
 #include <filesystem>
 #include <string>
-#include <vector>
 
 #include "../generation_fixture_registry.hpp"
 
@@ -16,17 +15,16 @@ std::filesystem::path repo_root_path();
 
 std::filesystem::path generation_baseline_directory_path();
 
-bool file_exists(const std::string & path);
+bool file_exists(const std::string &path);
 
-bool read_file_bytes(const std::string & path, std::vector<uint8_t> & out);
+std::filesystem::path normalize_path(const std::filesystem::path &path);
 
-std::filesystem::path normalize_path(const std::filesystem::path & path);
+std::filesystem::path
+expected_generation_fixture_path(const maintained_generation_fixture &fixture);
 
-std::filesystem::path expected_generation_fixture_path(
-    const maintained_generation_fixture & fixture);
-
-const maintained_generation_fixture * find_generation_fixture(const std::string & model_path);
+const maintained_generation_fixture *
+find_generation_fixture(const std::string &model_path);
 
 std::string maintained_generation_fixture_list();
 
-}  // namespace emel::paritychecker::assets
+} // namespace emel::paritychecker::assets

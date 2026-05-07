@@ -19,6 +19,9 @@
 #include "emel/gguf/loader/any.hpp"
 #include "emel/gguf/loader/events.hpp"
 #include "emel/gguf/loader/sm.hpp"
+#include "emel/io/events.hpp"
+#include "emel/io/read/sm.hpp"
+#include "emel/io/source/any.hpp"
 #include "emel/model/data.hpp"
 #include "emel/model/detail.hpp"
 #include "emel/model/loader/errors.hpp"
@@ -28,6 +31,7 @@
 #include "emel/model/tensor/errors.hpp"
 #include "emel/model/tensor/events.hpp"
 #include "emel/model/tensor/sm.hpp"
+#include "model_load_strategy.hpp"
 
 namespace emel::bench::diarization::sortformer_fixture {
 
@@ -98,31 +102,6 @@ inline uint64_t read_u64_le(const std::span<const uint8_t> bytes) {
   return value;
 }
 
-inline bool read_file_bytes(const std::filesystem::path &path,
-                            std::vector<uint8_t> &out) {
-  out.clear();
-
-  std::FILE *file = std::fopen(path.string().c_str(), "rb");
-  if (file == nullptr) {
-    return false;
-  }
-
-  const bool seek_end_ok = std::fseek(file, 0, SEEK_END) == 0;
-  const long file_size = seek_end_ok ? std::ftell(file) : -1L;
-  const bool seek_start_ok =
-      file_size >= 0L && std::fseek(file, 0, SEEK_SET) == 0;
-  if (!seek_end_ok || file_size < 0L || !seek_start_ok) {
-    std::fclose(file);
-    return false;
-  }
-
-  out.resize(static_cast<size_t>(file_size));
-  const size_t read_size =
-      out.empty() ? 0u : std::fread(out.data(), 1u, out.size(), file);
-  std::fclose(file);
-  return read_size == out.size();
-}
-
 struct gguf_capture {
   bool probe_done = false;
   bool probe_error = false;
@@ -141,6 +120,10 @@ struct load_capture {
   uint64_t bytes_total = 0u;
   uint64_t bytes_done = 0u;
   bool used_mmap = false;
+  emel::io::loader::event::strategy_kind requested_io_strategy =
+      emel::io::loader::event::strategy_kind::none;
+  emel::io::loader::event::strategy_kind used_io_strategy =
+      emel::io::loader::event::strategy_kind::none;
 };
 
 struct model_fixture {
@@ -148,11 +131,16 @@ struct model_fixture {
   emel::model::sortformer::detail::execution_contract contract = {};
   std::vector<uint8_t> file_bytes = {};
   std::vector<uint8_t> kv_arena = {};
+  uint64_t gguf_tensor_data_bytes = 0u;
+  std::vector<uint8_t> read_copy_storage = {};
   std::vector<emel::gguf::loader::kv_entry> kv_entries = {};
   uint32_t gguf_tensor_count = 0u;
   std::vector<emel::model::tensor::effect_request> effect_requests = {};
   std::vector<emel::model::tensor::effect_result> effect_results = {};
+  std::vector<emel::io::event::tensor_load_span> io_load_spans = {};
   emel::gguf::loader::sm gguf_loader = {};
+  emel::io::read::sm io_read = {};
+  emel::io::loader::sm io_loader{{.io_read = &io_read}};
   emel::model::tensor::sm tensor_loader = {};
   emel::model::loader::sm model_loader = {};
   gguf_capture gguf = {};
@@ -244,15 +232,8 @@ inline void on_load_done(void *owner,
   fixture.load.err = emel::error::cast(emel::model::loader::error::none);
   fixture.load.bytes_total = ev.bytes_total;
   fixture.load.bytes_done = ev.bytes_done;
-  emel::model::tensor::event::tensor_state state{};
-  emel::model::tensor::event::capture_tensor_state capture{
-      .tensor_id = 0,
-      .state_out = &state,
-  };
-  static_cast<void>(fixture.tensor_loader.process_event(capture));
-  fixture.load.used_mmap =
-      (state.lifecycle_state ==
-       emel::model::tensor::event::lifecycle::mmap_resident);
+  fixture.load.used_mmap = ev.used_mmap;
+  fixture.load.used_io_strategy = ev.used_io_strategy;
 }
 
 inline void on_load_error(void *owner,
@@ -260,6 +241,8 @@ inline void on_load_error(void *owner,
   auto &fixture = *static_cast<model_fixture *>(owner);
   fixture.load.error = true;
   fixture.load.err = ev.err;
+  fixture.load.requested_io_strategy = ev.requested_io_strategy;
+  fixture.load.used_io_strategy = ev.used_io_strategy;
 }
 
 inline emel::error::type map_gguf_error(const emel::error::type err) {
@@ -413,6 +396,7 @@ inline emel::error::type prebind_emel_gguf_storage(model_fixture &fixture) {
   fixture.kv_arena.resize(static_cast<size_t>(arena_bytes));
   fixture.kv_entries.resize(requirements.kv_count);
   fixture.gguf_tensor_count = requirements.tensor_count;
+  fixture.gguf_tensor_data_bytes = requirements.tensor_data_bytes;
   return emel::error::cast(emel::model::loader::error::none);
 }
 
@@ -515,8 +499,9 @@ run_emel_validate_architecture(void *,
 inline bool prepare(model_fixture &fixture) {
   fixture.ready = false;
   fixture.contract = {};
-  if (!read_file_bytes(resolve_repo_path(k_model_rel_path),
-                       fixture.file_bytes)) {
+  if (emel::io::source::load_file_bytes(
+          resolve_repo_path(k_model_rel_path).string(), fixture.file_bytes) !=
+      emel::error::cast(emel::io::read::error::none)) {
     return false;
   }
 
@@ -528,6 +513,7 @@ inline bool prepare(model_fixture &fixture) {
   reset_load_capture(fixture);
   fixture.effect_requests.resize(emel::model::data::k_max_tensors);
   fixture.effect_results.resize(emel::model::data::k_max_tensors);
+  fixture.io_load_spans.resize(emel::model::data::k_max_tensors);
   emel::model::loader::event::parse_model_fn parse_model{&fixture,
                                                          run_emel_parse_model};
   emel::model::loader::event::load load_ev{fixture.model, parse_model};
@@ -537,6 +523,15 @@ inline bool prepare(model_fixture &fixture) {
   load_ev.tensor_loader = &fixture.tensor_loader;
   load_ev.effect_requests = std::span{fixture.effect_requests};
   load_ev.effect_results = std::span{fixture.effect_results};
+  load_ev.io_load_spans = std::span<emel::io::event::tensor_load_span>{
+      fixture.io_load_spans.data(), fixture.io_load_spans.size()};
+  emel::tools::bind_model_load_io_strategy(load_ev, fixture.io_loader);
+  if (load_ev.io_strategy ==
+      emel::io::loader::event::strategy_kind::read_copy) {
+    fixture.read_copy_storage.resize(
+        static_cast<size_t>(fixture.gguf_tensor_data_bytes));
+    load_ev.read_copy_storage = std::span<uint8_t>{fixture.read_copy_storage};
+  }
   load_ev.map_layers = {nullptr, run_emel_map_layers};
   load_ev.validate_structure = {nullptr, run_emel_validate_structure};
   load_ev.validate_architecture_impl = {nullptr,
@@ -600,7 +595,9 @@ inline bool prepare(pcm_fixture &fixture) {
   fixture.sample_rate = 0;
 
   std::vector<uint8_t> file_bytes = {};
-  if (!read_file_bytes(resolve_repo_path(k_audio_rel_path), file_bytes) ||
+  if (emel::io::source::load_file_bytes(
+          resolve_repo_path(k_audio_rel_path).string(), file_bytes) !=
+          emel::error::cast(emel::io::read::error::none) ||
       file_bytes.size() < 12u) {
     return false;
   }
@@ -644,7 +641,9 @@ inline bool prepare(expected_output_baseline &baseline) {
   baseline = {};
 
   std::vector<uint8_t> file_bytes = {};
-  if (!read_file_bytes(resolve_repo_path(k_baseline_rel_path), file_bytes) ||
+  if (emel::io::source::load_file_bytes(
+          resolve_repo_path(k_baseline_rel_path).string(), file_bytes) !=
+          emel::error::cast(emel::io::read::error::none) ||
       file_bytes.empty()) {
     return false;
   }

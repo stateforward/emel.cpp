@@ -67,10 +67,11 @@ file APIs or a shadow tensor residency lifecycle.
 The mmap strategy actor is implemented under `src/emel/io/mmap` and is the maintained
 loading path for tensor-backed mmap-resident loads. `model/tensor` requests mmap-backed
 loading via public `request_mapped_load` / `release_mapped_load` events; `emel/io/mmap`
-owns mapping, slot reservation, and lifetime contracts. Concrete read/copy, async, and
-device-specific loading strategies are still follow-on work — until those strategy actors
-exist, maintained runtime proof for those paths remains the boundary and failure routing
-rather than a concrete file-transport implementation.
+owns mapping, slot reservation, and lifetime contracts. The read/copy strategy actor is
+implemented under `src/emel/io/read`; `model/tensor` requests read-backed loading through
+public `request_read_load` events, retains tensor residency ownership, and commits the
+caller-owned target buffer only after the maintained read/copy path succeeds. Staged/chunked,
+async, and device-specific loading strategies remain follow-on work.
 
 ## The name
 

@@ -17,10 +17,17 @@ struct has_file_image {
   }
 };
 
+struct guard_parse_model_present {
+  bool operator()(const event::load_runtime &ev) const noexcept {
+    return static_cast<bool>(ev.request.parse_model);
+  }
+};
+
 struct valid_request {
   bool operator()(const event::load_runtime &ev,
                   const action::context &) const noexcept {
-    return has_model_path{}(ev) || has_file_image{}(ev);
+    return guard_parse_model_present{}(ev) &&
+           (has_model_path{}(ev) || has_file_image{}(ev));
   }
 };
 
@@ -183,6 +190,19 @@ struct io_strategy_present {
   }
 };
 
+struct io_strategy_read_copy {
+  bool operator()(const event::load_runtime &ev) const noexcept {
+    return ev.request.io_strategy ==
+           emel::io::loader::event::strategy_kind::read_copy;
+  }
+};
+
+struct io_strategy_not_read_copy {
+  bool operator()(const event::load_runtime &ev) const noexcept {
+    return !io_strategy_read_copy{}(ev);
+  }
+};
+
 struct io_loader_present {
   bool operator()(const event::load_runtime &ev) const noexcept {
     return ev.request.io_loader != nullptr;
@@ -212,6 +232,80 @@ struct tensor_plan_done_with_io_strategy_with_loader {
   bool operator()(const event::load_runtime &ev) const noexcept {
     return tensor_plan_done_raised{}(ev) && io_strategy_present{}(ev) &&
            io_loader_present{}(ev);
+  }
+};
+
+struct io_load_batch_span_ready {
+  bool operator()(const event::load_runtime &ev) const noexcept {
+    return ev.request.io_load_spans.size() >=
+           ev.tensor_events.plan_done.effect_count;
+  }
+};
+
+struct io_load_batch_span_missing {
+  bool operator()(const event::load_runtime &ev) const noexcept {
+    return ev.request.io_load_spans.size() <
+           ev.tensor_events.plan_done.effect_count;
+  }
+};
+
+inline uint64_t
+read_copy_storage_required_bytes(const event::load_runtime &ev) noexcept {
+  uint64_t required = 0u;
+  uint32_t index = 0u;
+  while (index < ev.tensor_events.plan_done.effect_count) {
+    const uint64_t size = ev.request.effect_requests[index].size;
+    if (required > static_cast<uint64_t>(-1) - size) {
+      return static_cast<uint64_t>(-1);
+    }
+    required += size;
+    ++index;
+  }
+  return required;
+}
+
+struct read_copy_storage_ready {
+  bool operator()(const event::load_runtime &ev) const noexcept {
+    return ev.request.read_copy_storage.size() >=
+           read_copy_storage_required_bytes(ev);
+  }
+};
+
+struct read_copy_storage_missing {
+  bool operator()(const event::load_runtime &ev) const noexcept {
+    return ev.request.read_copy_storage.size() <
+           read_copy_storage_required_bytes(ev);
+  }
+};
+
+struct tensor_plan_done_with_io_strategy_with_loader_and_batch_span_ready {
+  bool operator()(const event::load_runtime &ev) const noexcept {
+    return tensor_plan_done_with_io_strategy_with_loader{}(ev) &&
+           io_strategy_not_read_copy{}(ev) && io_load_batch_span_ready{}(ev);
+  }
+};
+
+struct tensor_plan_done_with_read_copy_strategy_with_loader_and_storage_ready {
+  bool operator()(const event::load_runtime &ev) const noexcept {
+    return tensor_plan_done_with_io_strategy_with_loader{}(ev) &&
+           io_strategy_read_copy{}(ev) && io_load_batch_span_ready{}(ev) &&
+           read_copy_storage_ready{}(ev);
+  }
+};
+
+struct
+    tensor_plan_done_with_read_copy_strategy_with_loader_and_storage_missing {
+  bool operator()(const event::load_runtime &ev) const noexcept {
+    return tensor_plan_done_with_io_strategy_with_loader{}(ev) &&
+           io_strategy_read_copy{}(ev) && io_load_batch_span_ready{}(ev) &&
+           read_copy_storage_missing{}(ev);
+  }
+};
+
+struct tensor_plan_done_with_io_strategy_with_loader_and_batch_span_missing {
+  bool operator()(const event::load_runtime &ev) const noexcept {
+    return tensor_plan_done_with_io_strategy_with_loader{}(ev) &&
+           io_load_batch_span_missing{}(ev);
   }
 };
 

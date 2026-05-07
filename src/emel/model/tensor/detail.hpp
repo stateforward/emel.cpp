@@ -6,6 +6,8 @@
 
 #include "emel/error/error.hpp"
 #include "emel/io/mmap/errors.hpp"
+#include "emel/io/read/errors.hpp"
+#include "emel/io/read/events.hpp"
 #include "emel/model/tensor/errors.hpp"
 #include "emel/model/tensor/events.hpp"
 
@@ -84,6 +86,15 @@ struct request_mapped_load_status {
   uint64_t buffer_bytes = 0u;
 };
 
+struct request_read_load_status {
+  emel::error::type err = emel::error::cast(error::none);
+  bool ok = false;
+  bool accepted = false;
+  ::emel::io::read::events::read_tensor_result io_read = {};
+  void *buffer = nullptr;
+  uint64_t buffer_bytes = 0u;
+};
+
 struct release_mapped_load_status {
   emel::error::type err = emel::error::cast(error::none);
   bool ok = false;
@@ -97,6 +108,11 @@ struct release_mapped_load_status {
 struct request_mapped_load_runtime {
   const event::request_mapped_load &request;
   request_mapped_load_status &status;
+};
+
+struct request_read_load_runtime {
+  const event::request_read_load &request;
+  request_read_load_status &status;
 };
 
 struct release_mapped_load_runtime {

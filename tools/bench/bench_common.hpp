@@ -106,10 +106,17 @@ struct generation_stage_probe {
 void set_generation_lane_mode(generation_lane_mode mode) noexcept;
 generation_lane_mode generation_lane_mode_current() noexcept;
 
+inline double
+select_reported_ns_per_op(const std::vector<double> &sorted_samples) noexcept {
+  return sorted_samples[sorted_samples.size() / 2u];
+}
+
 template <class fn_type>
-result measure_case(const char * name, const config & cfg, fn_type && fn) {
+result measure_case(const char *name, const config &cfg, fn_type &&fn) {
+  const auto runs = std::max<std::size_t>(cfg.runs, 1u);
+  const auto iterations = std::max<std::uint64_t>(cfg.iterations, 1u);
   std::vector<double> samples;
-  samples.reserve(cfg.runs);
+  samples.reserve(runs);
 
   for (std::size_t run = 0; run < cfg.warmup_runs; ++run) {
     for (std::uint64_t i = 0; i < cfg.warmup_iterations; ++i) {
@@ -117,19 +124,21 @@ result measure_case(const char * name, const config & cfg, fn_type && fn) {
     }
   }
 
-  for (std::size_t run = 0; run < cfg.runs; ++run) {
+  for (std::size_t run = 0; run < runs; ++run) {
     const auto start = std::chrono::steady_clock::now();
-    for (std::uint64_t i = 0; i < cfg.iterations; ++i) {
+    for (std::uint64_t i = 0; i < iterations; ++i) {
       fn();
     }
     const auto end = std::chrono::steady_clock::now();
     const auto duration_ns =
-      std::chrono::duration_cast<std::chrono::nanoseconds>(end - start).count();
-    samples.push_back(static_cast<double>(duration_ns) / static_cast<double>(cfg.iterations));
+        std::chrono::duration_cast<std::chrono::nanoseconds>(end - start)
+            .count();
+    samples.push_back(static_cast<double>(duration_ns) /
+                      static_cast<double>(iterations));
   }
 
   std::sort(samples.begin(), samples.end());
-  const double median = samples[samples.size() / 2];
+  const double reported_ns_per_op = select_reported_ns_per_op(samples);
   double sum = 0.0;
   for (const double sample : samples) {
     sum += sample;
@@ -137,13 +146,13 @@ result measure_case(const char * name, const config & cfg, fn_type && fn) {
 
   result out;
   out.name = name;
-  out.ns_per_op = median;
+  out.ns_per_op = reported_ns_per_op;
   out.ns_min_per_op = samples.front();
   out.ns_mean_per_op = sum / static_cast<double>(samples.size());
   out.ns_max_per_op = samples.back();
-  out.iterations = cfg.iterations;
-  out.runs = cfg.runs;
+  out.iterations = iterations;
+  out.runs = runs;
   return out;
 }
 
-}  // namespace emel::bench
+} // namespace emel::bench

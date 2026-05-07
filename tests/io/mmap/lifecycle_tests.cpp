@@ -947,7 +947,7 @@ TEST_CASE("io mmap boundary keeps platform calls inside actions.cpp") {
         std::string::npos);
 
   // Out-of-scope strategy markers must remain absent.
-  CHECK(sm_source.find("strategy_staged_read") == std::string::npos);
+  CHECK(sm_source.find("strategy_read_copy") == std::string::npos);
   CHECK(sm_source.find("strategy_external_buffer") == std::string::npos);
   CHECK(sm_source.find("strategy_async") == std::string::npos);
   CHECK(sm_source.find("strategy_device") == std::string::npos);
@@ -982,8 +982,7 @@ TEST_CASE("io mmap unmap failure keeps mapping slot owned for retry") {
     }
   }
   const uint32_t free_count_with_slot_in_use = ctx.free_count;
-  REQUIRE(free_count_with_slot_in_use ==
-          emel::io::mmap::k_max_mappings - 1u);
+  REQUIRE(free_count_with_slot_in_use == emel::io::mmap::k_max_mappings - 1u);
 
   emel::io::mmap::detail::release_attempt_status status{};
   status.target_slot = target_slot;
@@ -992,15 +991,14 @@ TEST_CASE("io mmap unmap failure keeps mapping slot owned for retry") {
   status.os_resource = ctx.slots[target_slot].os_resource;
   status.unmap_ok = false;
   const emel::io::mmap::event::release_mapping release_request{4242,
-                                                                target_slot};
+                                                               target_slot};
   const emel::io::mmap::detail::release_mapping_runtime runtime{release_request,
                                                                 status};
 
   emel::io::mmap::action::effect_mark_unmap_failed_and_release_slot(runtime,
-                                                                     ctx);
+                                                                    ctx);
 
-  CHECK(status.err ==
-        emel::error::cast(emel::io::mmap::error::unmap_failed));
+  CHECK(status.err == emel::error::cast(emel::io::mmap::error::unmap_failed));
   CHECK_FALSE(status.ok);
 
   // Slot must remain owned (in_use=true) so the caller can retry release.

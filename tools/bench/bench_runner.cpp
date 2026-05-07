@@ -58,7 +58,7 @@ namespace {
 namespace bench = emel::bench;
 
 constexpr std::uint64_t k_default_iterations = 1000;
-constexpr std::size_t k_default_runs = 3;
+constexpr std::size_t k_default_runs = 5;
 constexpr std::uint64_t k_default_warmup_iterations = 100;
 constexpr std::size_t k_default_warmup_runs = 1;
 constexpr std::size_t k_max_runs = 25;
@@ -274,7 +274,7 @@ void print_benchmark_config(const bench::config & cfg) {
   const auto generation_warmup_runs =
       read_env_size("EMEL_BENCH_GENERATION_WARMUP_RUNS", 0u);
   std::printf("# benchmark_config: iterations=%" PRIu64
-              " runs=%zu warmup_iterations=%" PRIu64
+              " runs=%zu sample_policy=median warmup_iterations=%" PRIu64
               " warmup_runs=%zu generation_iterations=%" PRIu64
               " generation_runs=%zu generation_warmup_iterations=%" PRIu64
               " generation_warmup_runs=%zu\n",

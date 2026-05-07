@@ -1,16 +1,16 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.24
-milestone_name: v1.24 I/O Mmap Loading Strategy
-status: completed
-stopped_at: Phase 211 verification-artifact backfill executed; v1.24 milestone closed with 13/13 requirements validated.
-last_updated: "2026-05-04T22:21:57.164Z"
-last_activity: 2026-05-04
+milestone: v1.25
+milestone_name: I/O Read Loading Strategy
+status: shipped
+stopped_at: Completed Phase 226 Read Batch Cap And Closeout Evidence Refresh
+last_updated: "2026-05-06T18:44:38.175Z"
+last_activity: 2026-05-06
 progress:
-  total_phases: 8
-  completed_phases: 8
-  total_plans: 8
-  completed_plans: 8
+  total_phases: 16
+  completed_phases: 16
+  total_plans: 21
+  completed_plans: 21
   percent: 100
 ---
 
@@ -18,38 +18,37 @@ progress:
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-05-04)
+See: .planning/PROJECT.md (updated 2026-05-05)
 
 **Core value:** Prove real end-to-end behavior with explicit SML orchestration and
 parity-oriented verification before widening API surface or model scope.
-**Current focus:** v1.24 milestone closed; ready to plan next milestone.
+**Current focus:** v1.25 shipped and archived — ready to define the next milestone.
+Phase 226 closed the refreshed audit tech debt by independently capping the public
+`io/read` batch API and refreshing closeout evidence so historical dyld fallback notes
+are distinguished from current direct focused CTest evidence.
 
 ## Current Position
 
-Phase: 211 (8 of 8) — validated
-Plan: 01 — validated
-Status: v1.24 milestone complete; full-scope quality gate green (Phase 210, no override),
-and the per-phase VERIFICATION.md gap (`.planning/v1.24-MILESTONE-AUDIT.md` initial
-`gaps_found`) is closed by Phase 211. 208/209/210 VERIFICATION.md backfilled with YAML
-frontmatter (`status: passed`) and source-backed requirement tables; 208 and 209
-SUMMARY/VALIDATION received minimal YAML frontmatter; 13/13 v1.24 requirements
-validated.
-Last activity: 2026-05-04
+Milestone: v1.25 I/O Read Loading Strategy — SHIPPED
+Plan: complete
+Status: Milestone complete — PR #84 open for review
+Phase 226 closed `.planning/v1.25-MILESTONE-AUDIT.md` tech debt: public
+`read_tensor_batch` now has an independent span cap, and closeout evidence records both
+historical dyld fallback wording and current focused CTest pass evidence.
+Last activity: 2026-05-06
 
 Progress: [##########] 100%
 
 ## Performance Metrics
 
-**Latest audited milestone:** `v1.24 I/O Mmap Loading Strategy`
+**Latest audited milestone:** `v1.25 I/O Read Loading Strategy`
+
+- v1.25 cleanup-only Phase 226 is complete. 13/13 v1.25 requirements remain
+  mapped and satisfied; the current milestone audit is `passed`.
 
 - v1.24 shipped on 2026-05-04 after Phase 210 closing full-scope quality gate passed with
   no override. 13/13 v1.24 requirements satisfied (MMAP-01..03, TIO-01..03, PLAT-01,
   LIFE-01, ERR-01, VAL-01..04).
-
-- User approved updates to model artifacts, generated docs, snapshots, benchmarks, and benchmark
-  outputs when required to close the current milestone correctly. The Phase 210 closeout used
-  that authorization to refresh `snapshots/bench/benchmarks.txt` for `encoder_spm` and
-  `encoder_wpm` via maintained scoped `scripts/bench.sh --snapshot --compare --update`.
 
 - v1.23 shipped on 2026-05-04 after final source-backed audit passed with 15/15 active
   requirements satisfied.
@@ -59,63 +58,125 @@ Progress: [##########] 100%
 ### Decisions
 
 Decisions are logged in PROJECT.md Key Decisions table.
-Recent decisions affecting this work:
+Recent decisions affecting this work (v1.25 scope):
 
-- `v1.24` implements only the mmap strategy under `src/emel/io`.
-- `model/tensor` owns tensor load, bind, evict, and residency semantics.
-- `model/loader` remains orchestration-only and must not absorb low-level mmap byte access.
-- Staged read/copy, device-specific, cooperative async, model-family widening, and tool-only mmap
-  scaffolds are out of scope.
+- `v1.25` implements only the read/copy strategy under `src/emel/io/read`; mmap
+  (v1.24) remains untouched at the runtime level.
 
-- Phase 205 introduced compile-time `EMEL_IO_MMAP_PLATFORM_SUPPORTED` (default `0`) as the
-  platform-selection knob.
+- `model/tensor` continues to own tensor load, bind, evict, and residency semantics;
+  the read strategy never takes residency ownership.
 
-- Phase 206 flipped the macro default to `1` on POSIX/Windows hosts, added the actor-owned
-  fixed-capacity slot pool inside io/mmap `action::context` (`EMEL_IO_MMAP_MAX_MAPPINGS = 256`),
-  added `event::release_mapping` as the only public unmap surface, and placed all platform OS
-  calls behind `#if defined(_WIN32)` selection inside `src/emel/io/mmap/actions.cpp`.
+- The read strategy operates on a caller-provided owned target buffer and never owns
+  tensor residency. Phase 214.1 repaired the Phase 214 evidence to use a caller-provided
+  source span plus explicit source-result errors, so no filesystem call or kernel handle
+  lifetime exists inside SML dispatch.
 
-- Phase 207 added `event::request_mapped_load` and `event::release_mapped_load` on
-  `emel::model::tensor::event` plus an `mmap_resident` lifecycle value and an
-  `sm(emel::io::mmap::sm*)` injection constructor. Tensor stores zero handle state — the
-  release event carries `(tensor_id, mapping_handle)` (caller obtains handle from the request
-  done callback) so the actor never scans or maintains a mapping table.
+- Staged/chunked constrained-memory read policy, cooperative async loading, device-
+  specific strategies, model-family widening, loader-owned byte access, and tool-only
+  read scaffolds are out of scope for v1.25.
 
-- Phase 208 closed TIO-03 and VAL-04: `model/loader` references no tensor-residency or
-  mmap-lifecycle symbols; `tools/bench`, `tools/paritychecker`, and `tools/embedded_size` reach
-  tensor state only via the public `process_event(capture_tensor_state{...})` event — no
-  `actions.hpp`/`detail.hpp`/`guards.hpp` reach-through. Loader's `load_done.used_mmap` is
-  hard-coded to `false` (no inferred mmap from tensor residency). The repair pass also fixed a
-  callback object/type mismatch in `effect_dispatch_io_loads` (passed
-  `event::load_runtime*` via `const_cast`; restored to `event::io_phase_events*`), removed
-  dangling writes to the retired `emel::model::data::weights_mapped` field in three test
-  fixtures, and switched six scoped `tensor::sm` instances in
-  `model_tensor_bulk_storage_supports_absent_callbacks` to `std::make_unique` heap allocation
-  (Phase 207's expanded SM grew sizeof to ~2.5 MiB; six stack instances overflowed macOS's
-  default + ASan red zones).
+- v1.25 phase numbering continues after v1.24's last phase (211), with gap
+  closure and cleanup phases extending the active milestone through Phase 226.
 
-- Phase 209 closed VAL-01 and VAL-02 (repair pass after a prior worker landed premature
-  validation/summary placeholders). Added two new io mmap doctests:
-  `io mmap reports state_ready via visit_current_states after a full map-then-release dispatch`
-  (the SML rule's preferred state-inspection helper alongside `is(...)`) and
-  `io mmap validation rejection does not consume a slot` (drives four representative reject
-  paths and proves the slot pool stays untouched by then mapping `k_max_mappings` files).
-  Extended `scripts/check_domain_boundaries.sh` with three real script-level rules so VAL-02
-  no longer rests on source-string assertions inside the doctest:
-  (1) out-of-scope strategy markers leaked into `src/emel/io/mmap`,
-  (2) deferred v2 `strategy_async`/`strategy_device`/`strategy_copy` implementations anywhere
-  in `src`, (3) tensor residency lifecycle enumerators (`lifecycle::mmap_resident`,
-  `lifecycle::resident`, `lifecycle::evicted`) escaping `src/emel/model/loader` or
-  `src/emel/io`. `scripts/lint_snapshot.sh --update` regenerated the maintained lint baseline
-  to include `tests/io/mmap/lifecycle_tests.cpp` (added in earlier phases but never baselined)
-  and to drop retired `src/emel/model/tensor/detail.hpp`.
+- User explicitly authorized maintained snapshot, benchmark, and model artifact updates
+  when required to follow existing rules and conventions during v1.25 closeout.
 
-- Phase 210 closed VAL-03 and the v1.24 milestone. README + README template + parity roadmap
-  describe mmap as implemented; deferred v2 read/copy/async/device strategies remain
-  explicitly out of scope. `snapshots/bench/benchmarks.txt` refreshed for `encoder_spm`
-  (text/encoders/spm_short ns_per_op=1300.292) and `encoder_wpm` (text/encoders/wpm_long
-  ns_per_op=30989.708) via maintained scoped `scripts/bench.sh --snapshot --compare
-  --update`. Closing full-scope quality gate exit 0 with no override; total 432s.
+- User explicitly authorized maintained snapshot, benchmark, and model artifact updates
+  as necessary for Phase 226 cleanup.
+
+- Phase 212 established `src/emel/io/read` as a boundary-only fail-closed actor with no
+  request-value validation, platform read primitive, transient resource lifetime, tensor
+  integration, or loader byte access.
+
+- Phase 213 introduces validation/platform gates but still does not perform file open,
+  seek, read, or close. Supported-platform requests reach `state_read_attempt_decision`
+  only after all preconditions pass, then fail closed with `unsupported_resource` until
+  Phase 214 replaces the placeholder with real execution.
+
+- Phase 214.1 superseded the stale Phase 214 platform-call plan with source-backed
+  validation: `src/emel/io/read` has no `actions.cpp`, stores no dispatch-local request
+  data in context, and publishes copied-byte `_done` plus deterministic `_error`
+  outcomes through explicit states/events.
+
+- Phase 215 added tensor-owned `request_read_load` orchestration. `model/tensor` injects
+  `emel::io::read::sm`, dispatches through public `io/read` events, commits only the
+  caller-owned target buffer as resident on read success, and maps read validation,
+  unsupported, file-open, and file-read outcomes through explicit tensor error states
+  while preserving the upstream `io/read` error for diagnostics.
+
+- Phase 216 added public model-loader load-strategy evidence and maintained tool
+  selection/reporting through `EMEL_MODEL_LOAD_IO_STRATEGY`, `io::loader::sm` injection,
+  and model-loader done/error callbacks. Generation, Sortformer diarization, embedded
+  probe, and paritychecker lanes no longer infer strategy usage through load-callback
+  actor probes.
+
+- Phase 217 renamed the read strategy to `read_copy`, regenerated `io_loader`
+  architecture docs, updated lint snapshot through the maintained script, and added
+  guardrails proving public behavior coverage, tensor-owned read/copy residency, and
+  no direct `io/read` event reach-through from model-loader or maintained tools.
+
+- Phase 218 finalized publication truth. README, docs roadmap, README template,
+  generated architecture docs, ROADMAP, REQUIREMENTS, STATE, PROJECT, MILESTONES, and the
+  v1.25 audit now describe read/copy as shipped without claiming staged/chunked, async,
+  or device strategy support. The Jinja formatter benchmark snapshot was refreshed through
+  `scripts/bench.sh --snapshot --suite=jinja_formatter --update` after repeated isolated
+  closeout-gate timing failures with no Jinja source changes. The serialized full quality
+  gate then passed.
+
+- Phase 219 replaced tool-local read source helpers in generation, Sortformer
+  diarization, embedded probe, and paritychecker EMEL lanes. Phase 222 later
+  moved the maintained helper out of `io/read/detail.hpp` to public
+  `emel::io::source::load_file_bytes`, so Phase 219's original helper placement
+  is superseded while its no-tool-local-substitute intent remains valid.
+
+- Phase 220 replaced callback-mutated tensor read outcome selection with an
+  explicit same-RTC `io/read::events::read_tensor_result` carrier and tensor
+  guards/transitions over that typed result. Public tensor callbacks remain
+  immediate reply publication, not outcome-routing inputs.
+
+- Phase 221 is a superseded closeout planning stub. It owns no runtime or
+  requirement validation; Phase 223 owns final closeout truth.
+
+- Phase 222 repaired the maintained source-byte contract by adding
+  `emel::io::source::load_file_bytes` in `src/emel/io/source/any.hpp`, removing
+  the setup-time file loader from `io/read/detail.hpp`, and rewiring generation,
+  Sortformer diarization, embedded probe, and paritychecker lanes away from
+  actor-detail reach-through. Model-loader, paritychecker, generation compare,
+  domain-boundary, and changed-file quality gate evidence passed.
+
+- Phase 223 reconciled final closeout truth after Phase 222. Generated docs
+  checks, lint snapshot checks, public-dispatch doctests, paritychecker tests,
+  maintained generation compare, domain-boundary checks, consistency checks, and
+  the source-backed milestone audit all passed. A stable `batch/planner_simple`
+  snapshot regression surfaced during the full closeout gate and was repaired by
+  removing redundant dispatch-local scratch-array clears from the batch planner;
+  the final full-scope quality gate passed with no benchmark-regression
+  override.
+
+Carried-forward decisions from v1.24 still in effect:
+
+- `model/loader` remains orchestration-only and must not absorb low-level read or mmap
+  byte access.
+
+- Public C ABI boundaries continue to use fixed-width integers and error codes (no
+  exceptions across the boundary).
+
+- Tensor-to-I/O integration uses public events (`request_*` / `release_*`) on
+  `model::tensor::event`, not direct cross-actor function calls.
+
+- [Phase 225-read-closeout-runtime-validation-and-sml-repair]: Batch failed-index scans use monotonic branchless helper logic so actions do not call helper-local if/break control flow.
+- [Phase 225-read-closeout-runtime-validation-and-sml-repair]: Coverage gate changed-file input must be colon-separated; space-separated input is parsed as one filename by the existing script.
+- [Phase 225-read-closeout-runtime-validation-and-sml-repair]: Batch read/copy result status lives in wrapper-local stack storage, not io/loader context.
+- [Phase 225-read-closeout-runtime-validation-and-sml-repair]: Batch route actions use separate batch-specific action symbols so SML completion propagation resolves the originating runtime event.
+- [Phase 225-read-closeout-runtime-validation-and-sml-repair]: Model-loader batch readiness is guarded in sm.hpp/guards.hpp; actions only bind already-selected tensor metadata and dispatch one child event.
+- [Phase 225-read-closeout-runtime-validation-and-sml-repair]: used_io_strategy is marked only after io_load_done_all observes the public io/loader batch success.
+- [Phase 225-read-closeout-runtime-validation-and-sml-repair]: io/loader batch errors now publish failed_index so model-loader can preserve concrete same-RTC error evidence.
+- [Phase 225-read-closeout-runtime-validation-and-sml-repair]: Maintained caller scratch is owned by request fixture/state and resized before dispatch, matching the existing effect request/result setup pattern.
+- [Phase 225-read-closeout-runtime-validation-and-sml-repair]: Guardrails stay source-scoped to maintained EMEL lanes and reject actor-internal io/read reach-through.
+- [Phase 225-read-closeout-runtime-validation-and-sml-repair]: Kept Phase 225 requirements pending until Plan 06 publishes current command evidence.
+- [Phase 225-read-closeout-runtime-validation-and-sml-repair]: Kept STATE at Plan 5 of 6 because Plans 01-04 are already complete in the current execution state.
+- [Phase 225-read-closeout-runtime-validation-and-sml-repair]: Direct build/zig dyld launch failures are treated as environment blockers only because coverage-built focused doctests and source-backed scans passed.
+- [Phase 225-read-closeout-runtime-validation-and-sml-repair]: The relevant changed-file quality gate uses generation and diarization_sortformer benchmark suite scoping to avoid unrelated jinja timing noise without weakening Phase 225 evidence.
 
 ### Pending Todos
 
@@ -126,27 +187,19 @@ Recent decisions affecting this work:
 
 ### Blockers/Concerns
 
-- v1.24 has no open blockers. The Phase 204 transitional bench-regression override is fully
-  removed: the Phase 210 closing full-scope gate ran without
-  `EMEL_QUALITY_GATES_ALLOW_BENCH_REGRESSION` and reported `status=0` across all benchmark
-  suites previously affected (`tokenizer/preprocessor_rwkv_long`, `text/encoders/rwkv_long`,
-  `logits/sampler`, `logits/validator`, `batch/planner_simple`, `batch/planner_equal`).
+- No v1.25 blocker remains before milestone closeout.
 
 - Two encoder benchmark suites (`text/encoders/spm_short`, `text/encoders/wpm_long`) showed
-  intermittent under-load timing spikes (~31% above prior baseline) during the Phase 210
-  closing gate runs. Each was refreshed via the maintained scoped update path. Worth
-  monitoring on subsequent gates; not a v1.24 blocker.
+  intermittent under-load timing spikes (~31% above prior baseline) during the v1.24
+  Phase 210 closing gate runs and were refreshed via the maintained scoped update path.
+  Worth monitoring on v1.25 gates; not a v1.25 blocker.
 
-- Phase 207's uncovered guard-branch and unexpected-event sentinel spans were re-measured
-  under the Phase 210 full-scope coverage run; total line coverage is 91.7% and branch
-  coverage 56.9% (above the gate thresholds of 90% / 50%).
-
-- The previously deferred non-v1.23 quick task and four optimization todos remain carried forward
-  and are not blockers for the next milestone.
+- The previously deferred non-v1.23 quick task and four optimization todos remain
+  carried forward and are not blockers for v1.25.
 
 ## Deferred Items
 
-Items acknowledged and deferred at v1.22 milestone close on 2026-05-03:
+Items acknowledged and deferred at v1.25 milestone close on 2026-05-06:
 
 | Category | Item | Status |
 |----------|------|--------|
@@ -158,6 +211,6 @@ Items acknowledged and deferred at v1.22 milestone close on 2026-05-03:
 
 ## Session Continuity
 
-Last session: 2026-05-04T22:18:00Z
-Stopped at: Phase 211 verification-artifact backfill executed; v1.24 milestone closed with 13/13 requirements validated.
-Resume file: .planning/milestones/v1.24-MILESTONE-AUDIT.md (or run `$gsd-audit-milestone` to confirm passed status)
+Last session: 2026-05-06T15:50:03.923Z
+Stopped at: Completed 225-read-closeout-runtime-validation-and-sml-repair-06-PLAN.md
+Resume file: None

@@ -18,6 +18,7 @@
 #include "emel/gguf/loader/events.hpp"
 #include "emel/gguf/loader/sm.hpp"
 #include "emel/io/loader/sm.hpp"
+#include "emel/io/read/sm.hpp"
 #include "emel/kernel/detail.hpp"
 #include "emel/kernel/events.hpp"
 #include "emel/model/detail.hpp"
@@ -38,6 +39,10 @@ struct owner_state {
   uint64_t bytes_total = 0;
   uint64_t bytes_done = 0;
   bool used_mmap = false;
+  emel::io::loader::event::strategy_kind requested_io_strategy =
+      emel::io::loader::event::strategy_kind::none;
+  emel::io::loader::event::strategy_kind used_io_strategy =
+      emel::io::loader::event::strategy_kind::none;
 };
 
 void on_done(void *object,
@@ -48,6 +53,7 @@ void on_done(void *object,
   owner->bytes_total = ev.bytes_total;
   owner->bytes_done = ev.bytes_done;
   owner->used_mmap = ev.used_mmap;
+  owner->used_io_strategy = ev.used_io_strategy;
 }
 
 void on_error(void *object,
@@ -56,6 +62,8 @@ void on_error(void *object,
   owner->done = false;
   owner->error = true;
   owner->err = ev.err;
+  owner->requested_io_strategy = ev.requested_io_strategy;
+  owner->used_io_strategy = ev.used_io_strategy;
 }
 
 emel::error::type
@@ -93,6 +101,43 @@ parse_tensor_span_ok(void *,
 }
 
 emel::error::type
+parse_read_copy_tensor(void *object,
+                       const emel::model::loader::event::load &req) noexcept {
+  static_cast<void>(object);
+  req.model_data.n_tensors = 1;
+  req.model_data.n_layers = 1;
+  auto &tensor = req.model_data.tensors[0];
+  tensor.file_offset = 2u;
+  tensor.data_size = 4u;
+  tensor.file_index = 0u;
+  tensor.data =
+      static_cast<const uint8_t *>(req.file_image) + tensor.file_offset;
+  return emel::error::cast(emel::model::loader::error::none);
+}
+
+emel::error::type parse_read_copy_two_tensors(
+    void *object, const emel::model::loader::event::load &req) noexcept {
+  static_cast<void>(object);
+  req.model_data.n_tensors = 2;
+  req.model_data.n_layers = 1;
+
+  auto &first = req.model_data.tensors[0];
+  first.file_offset = 2u;
+  first.data_size = 4u;
+  first.file_index = 0u;
+  first.data = static_cast<const uint8_t *>(req.file_image) + first.file_offset;
+
+  auto &second = req.model_data.tensors[1];
+  second.file_offset = 5u;
+  second.data_size = 3u;
+  second.file_index = 0u;
+  second.data =
+      static_cast<const uint8_t *>(req.file_image) + second.file_offset;
+
+  return emel::error::cast(emel::model::loader::error::none);
+}
+
+emel::error::type
 parse_no_tensors(void *, const emel::model::loader::event::load &req) noexcept {
   req.model_data.n_tensors = 0;
   req.model_data.n_layers = 1;
@@ -102,6 +147,38 @@ parse_no_tensors(void *, const emel::model::loader::event::load &req) noexcept {
 emel::error::type
 parse_fail(void *, const emel::model::loader::event::load &) noexcept {
   return emel::error::cast(emel::model::loader::error::parse_failed);
+}
+
+emel::error::type
+parse_backend_fail(void *, const emel::model::loader::event::load &) noexcept {
+  return emel::error::cast(emel::model::loader::error::backend_error);
+}
+
+emel::error::type
+parse_model_invalid_fail(void *,
+                         const emel::model::loader::event::load &) noexcept {
+  return emel::error::cast(emel::model::loader::error::model_invalid);
+}
+
+emel::error::type
+parse_internal_fail(void *, const emel::model::loader::event::load &) noexcept {
+  return emel::error::cast(emel::model::loader::error::internal_error);
+}
+
+emel::error::type
+parse_untracked_fail(void *,
+                     const emel::model::loader::event::load &) noexcept {
+  return emel::error::cast(emel::model::loader::error::untracked);
+}
+
+emel::error::type parse_io_strategy_unavailable_fail(
+    void *, const emel::model::loader::event::load &) noexcept {
+  return emel::error::cast(emel::model::loader::error::io_strategy_unavailable);
+}
+
+emel::error::type
+parse_unknown_fail(void *, const emel::model::loader::event::load &) noexcept {
+  return emel::error::type{0x5e17u};
 }
 
 struct tensor_loader_fixture {
@@ -801,12 +878,50 @@ std::string_view function_source(const std::string &source,
   return {};
 }
 
+size_t count_occurrences(const std::string_view source,
+                         const std::string_view needle) {
+  size_t count = 0u;
+  size_t cursor = 0u;
+  while (cursor < source.size()) {
+    const size_t next = source.find(needle, cursor);
+    if (next == std::string_view::npos) {
+      return count;
+    }
+    ++count;
+    cursor = next + needle.size();
+  }
+  return count;
+}
+
 void noop_probe_done(const emel::gguf::loader::events::probe_done &) {}
 void noop_probe_error(const emel::gguf::loader::events::probe_error &) {}
 void noop_bind_done(const emel::gguf::loader::events::bind_done &) {}
 void noop_bind_error(const emel::gguf::loader::events::bind_error &) {}
 void noop_parse_done(const emel::gguf::loader::events::parse_done &) {}
 void noop_parse_error(const emel::gguf::loader::events::parse_error &) {}
+
+using parse_callback_fn = emel::error::type (*)(
+    void *, const emel::model::loader::event::load &) noexcept;
+
+void check_loader_parse_error(const parse_callback_fn parse_fn,
+                              const emel::error::type expected) {
+  auto model = std::make_unique<emel::model::data>();
+  emel::model::loader::sm machine{};
+  owner_state owner{};
+  emel::model::loader::event::parse_model_fn parse_model{nullptr, parse_fn};
+
+  uint8_t file_bytes[8] = {};
+  emel::model::loader::event::load request{*model, parse_model};
+  request.file_image = file_bytes;
+  request.file_size = sizeof(file_bytes);
+  request.on_done = {&owner, on_done};
+  request.on_error = {&owner, on_error};
+
+  CHECK_FALSE(machine.process_event(request));
+  CHECK_FALSE(owner.done);
+  CHECK(owner.error);
+  CHECK(owner.err == expected);
+}
 
 void materialize_tensor_names_from_file(
     emel::model::data &model_data, const std::vector<uint8_t> &file_bytes) {
@@ -918,7 +1033,7 @@ TEST_CASE("model loader rejects io strategy when no io actor is bound") {
   request.file_image = file_bytes;
   request.file_size = sizeof(file_bytes);
   tensor_loader.bind(request);
-  request.io_strategy = emel::io::loader::event::strategy_kind::staged_read;
+  request.io_strategy = emel::io::loader::event::strategy_kind::read_copy;
   request.on_done = {&owner, on_done};
   request.on_error = {&owner, on_error};
 
@@ -927,10 +1042,13 @@ TEST_CASE("model loader rejects io strategy when no io actor is bound") {
   CHECK(owner.error);
   CHECK(owner.err ==
         emel::error::cast(emel::model::loader::error::io_strategy_unavailable));
+  CHECK(owner.requested_io_strategy ==
+        emel::io::loader::event::strategy_kind::read_copy);
+  CHECK(owner.used_io_strategy == emel::io::loader::event::strategy_kind::none);
   CHECK(tensor_loader.effect_requests[0].kind ==
         emel::model::tensor::effect_kind::k_io_load);
   CHECK(tensor_loader.effect_requests[0].strategy ==
-        emel::io::loader::event::strategy_kind::staged_read);
+        emel::io::loader::event::strategy_kind::read_copy);
   CHECK(tensor_loader.effect_requests[0].tensor_id == 0);
   CHECK(tensor_loader.effect_requests[0].file_index == 3u);
   CHECK(tensor_loader.effect_requests[0].offset == 2048u);
@@ -963,6 +1081,9 @@ TEST_CASE(
   CHECK(owner.error);
   CHECK(owner.err ==
         emel::error::cast(emel::model::loader::error::io_strategy_unavailable));
+  CHECK(owner.requested_io_strategy ==
+        emel::io::loader::event::strategy_kind::mapped_file);
+  CHECK(owner.used_io_strategy == emel::io::loader::event::strategy_kind::none);
   CHECK(tensor_loader.effect_requests[0].kind ==
         emel::model::tensor::effect_kind::k_io_load);
   CHECK(tensor_loader.effect_requests[0].strategy ==
@@ -983,6 +1104,234 @@ TEST_CASE(
   CHECK(machine.process_event(request));
   CHECK(owner.done);
   CHECK_FALSE(owner.error);
+}
+
+TEST_CASE("model loader loads read/copy tensors through maintained actors") {
+  auto model = std::make_unique<emel::model::data>();
+  emel::model::loader::sm machine{};
+  emel::io::read::sm read_actor{};
+  emel::io::loader::sm io_loader{{.io_read = &read_actor}};
+  owner_state owner{};
+  tensor_loader_fixture tensor_loader{};
+  std::array<uint8_t, 4> target{};
+  emel::model::loader::event::parse_model_fn parse_model{
+      nullptr, parse_read_copy_tensor};
+
+  std::array<uint8_t, 8> file_bytes{'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'};
+  emel::model::loader::event::load request{*model, parse_model};
+  request.model_path = "fixture.gguf";
+  request.file_image = file_bytes.data();
+  request.file_size = file_bytes.size();
+  tensor_loader.bind(request);
+  std::array<emel::io::event::tensor_load_span, 1> io_load_spans{};
+  request.io_load_spans = std::span{io_load_spans};
+  request.read_copy_storage = std::span{target};
+  request.io_loader = &io_loader;
+  request.io_strategy = emel::io::loader::event::strategy_kind::read_copy;
+  request.map_layers = {nullptr, map_layers_ok};
+  request.validate_structure = {nullptr, validate_structure_ok};
+  request.validate_architecture_impl = {nullptr, validate_architecture_ok};
+  request.on_done = {&owner, on_done};
+  request.on_error = {&owner, on_error};
+
+  const bool accepted = machine.process_event(request);
+  CAPTURE(owner.err);
+  CHECK(accepted);
+  CHECK(owner.done);
+  CHECK_FALSE(owner.error);
+  CHECK(owner.bytes_total == file_bytes.size());
+  CHECK(owner.bytes_done == file_bytes.size());
+  CHECK_FALSE(owner.used_mmap);
+  CHECK(owner.used_io_strategy ==
+        emel::io::loader::event::strategy_kind::read_copy);
+  CHECK(tensor_loader.effect_requests[0].kind ==
+        emel::model::tensor::effect_kind::k_io_load);
+  CHECK(tensor_loader.effect_requests[0].strategy ==
+        emel::io::loader::event::strategy_kind::read_copy);
+  CHECK(tensor_loader.effect_requests[0].target == target.data());
+  CHECK(tensor_loader.effect_results[0].handle == target.data());
+  CHECK(model->tensors[0].data == target.data());
+  CHECK(target[0] == 'c');
+  CHECK(target[1] == 'd');
+  CHECK(target[2] == 'e');
+  CHECK(target[3] == 'f');
+}
+
+TEST_CASE("model loader read copy uses one io loader batch dispatch") {
+  auto model = std::make_unique<emel::model::data>();
+  emel::model::loader::sm machine{};
+  emel::io::read::sm read_actor{};
+  emel::io::loader::sm io_loader{{.io_read = &read_actor}};
+  owner_state owner{};
+  tensor_loader_fixture tensor_loader{};
+  std::array<uint8_t, 4> first_target{};
+  std::array<uint8_t, 7> read_copy_storage{};
+  emel::model::loader::event::parse_model_fn parse_model{
+      nullptr, parse_read_copy_two_tensors};
+
+  std::array<uint8_t, 9> file_bytes{'a', 'b', 'c', 'd', 'e',
+                                    'f', 'g', 'h', 'i'};
+  emel::model::loader::event::load request{*model, parse_model};
+  request.model_path = "fixture.gguf";
+  request.file_image = file_bytes.data();
+  request.file_size = file_bytes.size();
+  tensor_loader.bind(request);
+  std::array<emel::io::event::tensor_load_span, 2> io_load_spans{};
+  request.io_load_spans = std::span{io_load_spans};
+  request.read_copy_storage = std::span{read_copy_storage};
+  request.io_loader = &io_loader;
+  request.io_strategy = emel::io::loader::event::strategy_kind::read_copy;
+  request.map_layers = {nullptr, map_layers_ok};
+  request.validate_structure = {nullptr, validate_structure_ok};
+  request.validate_architecture_impl = {nullptr, validate_architecture_ok};
+  request.on_done = {&owner, on_done};
+  request.on_error = {&owner, on_error};
+
+  const bool accepted = machine.process_event(request);
+  CAPTURE(owner.err);
+  CHECK(accepted);
+  CHECK(owner.done);
+  CHECK_FALSE(owner.error);
+  CHECK_FALSE(owner.used_mmap);
+  CHECK(owner.used_io_strategy ==
+        emel::io::loader::event::strategy_kind::read_copy);
+  CHECK(tensor_loader.effect_requests[0].kind ==
+        emel::model::tensor::effect_kind::k_io_load);
+  CHECK(tensor_loader.effect_requests[1].kind ==
+        emel::model::tensor::effect_kind::k_io_load);
+  CHECK(tensor_loader.effect_results[0].handle == read_copy_storage.data());
+  CHECK(tensor_loader.effect_results[1].handle ==
+        read_copy_storage.data() + first_target.size());
+  CHECK(model->tensors[0].data == read_copy_storage.data());
+  CHECK(model->tensors[1].data ==
+        read_copy_storage.data() + first_target.size());
+  CHECK(read_copy_storage[0] == 'c');
+  CHECK(read_copy_storage[1] == 'd');
+  CHECK(read_copy_storage[2] == 'e');
+  CHECK(read_copy_storage[3] == 'f');
+  CHECK(read_copy_storage[4] == 'f');
+  CHECK(read_copy_storage[5] == 'g');
+  CHECK(read_copy_storage[6] == 'h');
+}
+
+TEST_CASE("model loader read copy requires request owned io batch span") {
+  auto model = std::make_unique<emel::model::data>();
+  emel::model::loader::sm machine{};
+  emel::io::read::sm read_actor{};
+  emel::io::loader::sm io_loader{{.io_read = &read_actor}};
+  owner_state owner{};
+  tensor_loader_fixture tensor_loader{};
+  std::array<uint8_t, 4> target{};
+  emel::model::loader::event::parse_model_fn parse_model{
+      nullptr, parse_read_copy_tensor};
+
+  std::array<uint8_t, 8> file_bytes{'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'};
+  emel::model::loader::event::load request{*model, parse_model};
+  request.model_path = "fixture.gguf";
+  request.file_image = file_bytes.data();
+  request.file_size = file_bytes.size();
+  tensor_loader.bind(request);
+  request.io_loader = &io_loader;
+  request.io_strategy = emel::io::loader::event::strategy_kind::read_copy;
+  request.map_layers = {nullptr, map_layers_ok};
+  request.validate_structure = {nullptr, validate_structure_ok};
+  request.validate_architecture_impl = {nullptr, validate_architecture_ok};
+  request.on_done = {&owner, on_done};
+  request.on_error = {&owner, on_error};
+
+  const bool accepted = machine.process_event(request);
+  CHECK_FALSE(accepted);
+  CHECK_FALSE(owner.done);
+  CHECK(owner.error);
+  CHECK(owner.err ==
+        emel::error::cast(emel::model::loader::error::io_strategy_unavailable));
+  CHECK(owner.requested_io_strategy ==
+        emel::io::loader::event::strategy_kind::read_copy);
+  CHECK(owner.used_io_strategy == emel::io::loader::event::strategy_kind::none);
+  CHECK(tensor_loader.effect_results[0].handle == nullptr);
+  CHECK(target[0] == 0u);
+  CHECK(target[1] == 0u);
+  CHECK(target[2] == 0u);
+  CHECK(target[3] == 0u);
+}
+
+TEST_CASE("model loader read copy requires caller-owned tensor storage") {
+  auto model = std::make_unique<emel::model::data>();
+  emel::model::loader::sm machine{};
+  emel::io::read::sm read_actor{};
+  emel::io::loader::sm io_loader{{.io_read = &read_actor}};
+  owner_state owner{};
+  tensor_loader_fixture tensor_loader{};
+  emel::model::loader::event::parse_model_fn parse_model{
+      nullptr, parse_read_copy_tensor};
+
+  std::array<uint8_t, 8> file_bytes{'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'};
+  emel::model::loader::event::load request{*model, parse_model};
+  request.model_path = "fixture.gguf";
+  request.file_image = file_bytes.data();
+  request.file_size = file_bytes.size();
+  tensor_loader.bind(request);
+  std::array<emel::io::event::tensor_load_span, 1> io_load_spans{};
+  request.io_load_spans = std::span{io_load_spans};
+  request.io_loader = &io_loader;
+  request.io_strategy = emel::io::loader::event::strategy_kind::read_copy;
+  request.map_layers = {nullptr, map_layers_ok};
+  request.validate_structure = {nullptr, validate_structure_ok};
+  request.validate_architecture_impl = {nullptr, validate_architecture_ok};
+  request.on_done = {&owner, on_done};
+  request.on_error = {&owner, on_error};
+
+  const bool accepted = machine.process_event(request);
+  CHECK_FALSE(accepted);
+  CHECK_FALSE(owner.done);
+  CHECK(owner.error);
+  CHECK(owner.err ==
+        emel::error::cast(emel::model::loader::error::invalid_request));
+  CHECK(tensor_loader.effect_results[0].handle == nullptr);
+  CHECK(model->tensors[0].data == file_bytes.data() + 2u);
+}
+
+TEST_CASE("model loader read copy batch error keeps used strategy unset") {
+  auto model = std::make_unique<emel::model::data>();
+  emel::model::loader::sm machine{};
+  emel::io::loader::sm io_loader{};
+  owner_state owner{};
+  tensor_loader_fixture tensor_loader{};
+  std::array<uint8_t, 4> target{};
+  emel::model::loader::event::parse_model_fn parse_model{
+      nullptr, parse_read_copy_tensor};
+
+  std::array<uint8_t, 8> file_bytes{'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'};
+  emel::model::loader::event::load request{*model, parse_model};
+  request.model_path = "fixture.gguf";
+  request.file_image = file_bytes.data();
+  request.file_size = file_bytes.size();
+  tensor_loader.bind(request);
+  std::array<emel::io::event::tensor_load_span, 1> io_load_spans{};
+  request.io_load_spans = std::span{io_load_spans};
+  request.read_copy_storage = std::span{target};
+  request.io_loader = &io_loader;
+  request.io_strategy = emel::io::loader::event::strategy_kind::read_copy;
+  request.map_layers = {nullptr, map_layers_ok};
+  request.validate_structure = {nullptr, validate_structure_ok};
+  request.validate_architecture_impl = {nullptr, validate_architecture_ok};
+  request.on_done = {&owner, on_done};
+  request.on_error = {&owner, on_error};
+
+  const bool accepted = machine.process_event(request);
+  CHECK_FALSE(accepted);
+  CHECK_FALSE(owner.done);
+  CHECK(owner.error);
+  CHECK(owner.err ==
+        emel::error::cast(emel::model::loader::error::io_strategy_unavailable));
+  CHECK(owner.requested_io_strategy ==
+        emel::io::loader::event::strategy_kind::read_copy);
+  CHECK(owner.used_io_strategy == emel::io::loader::event::strategy_kind::none);
+  CHECK(tensor_loader.effect_results[0].handle == nullptr);
+  CHECK(target[0] == 0u);
+  CHECK(target[1] == 0u);
+  CHECK(target[2] == 0u);
+  CHECK(target[3] == 0u);
 }
 
 TEST_CASE("model loader reports tensor bind errors from the tensor actor") {
@@ -1128,6 +1477,27 @@ TEST_CASE("model loader rejects missing source payload") {
         emel::error::cast(emel::model::loader::error::invalid_request));
 }
 
+TEST_CASE("model loader rejects missing parse callback before parsing") {
+  auto model = std::make_unique<emel::model::data>();
+  emel::model::loader::sm machine{};
+  owner_state owner{};
+  emel::model::loader::event::parse_model_fn parse_model{};
+
+  uint8_t file_bytes[8] = {};
+  emel::model::loader::event::load request{*model, parse_model};
+  request.file_image = file_bytes;
+  request.file_size = sizeof(file_bytes);
+  request.on_done = {&owner, on_done};
+  request.on_error = {&owner, on_error};
+
+  CHECK_FALSE(machine.process_event(request));
+  CHECK_FALSE(owner.done);
+  CHECK(owner.error);
+  CHECK(owner.err ==
+        emel::error::cast(emel::model::loader::error::invalid_request));
+  CHECK(machine.is(stateforward::sml::state<emel::model::loader::ready>));
+}
+
 TEST_CASE(
     "model loader allows vocab-only parse without weight and map callbacks") {
   auto model = std::make_unique<emel::model::data>();
@@ -1171,6 +1541,25 @@ TEST_CASE("model loader propagates parse failure") {
   CHECK(owner.error);
   CHECK(owner.err ==
         emel::error::cast(emel::model::loader::error::parse_failed));
+}
+
+TEST_CASE("model loader classifies parse error variants") {
+  check_loader_parse_error(
+      parse_backend_fail,
+      emel::error::cast(emel::model::loader::error::backend_error));
+  check_loader_parse_error(
+      parse_model_invalid_fail,
+      emel::error::cast(emel::model::loader::error::model_invalid));
+  check_loader_parse_error(
+      parse_internal_fail,
+      emel::error::cast(emel::model::loader::error::internal_error));
+  check_loader_parse_error(
+      parse_untracked_fail,
+      emel::error::cast(emel::model::loader::error::untracked));
+  check_loader_parse_error(
+      parse_io_strategy_unavailable_fail,
+      emel::error::cast(emel::model::loader::error::io_strategy_unavailable));
+  check_loader_parse_error(parse_unknown_fail, emel::error::type{0x5e17u});
 }
 
 TEST_CASE("model loader rejects full load without tensor loader") {
@@ -1218,6 +1607,77 @@ TEST_CASE("model loader rejects full load without map_layers callback") {
   CHECK(owner.error);
   CHECK(owner.err ==
         emel::error::cast(emel::model::loader::error::invalid_request));
+}
+
+TEST_CASE("model loader rejects full load without structure validator") {
+  auto model = std::make_unique<emel::model::data>();
+  emel::model::loader::sm machine{};
+  owner_state owner{};
+  emel::model::loader::event::parse_model_fn parse_model{nullptr, parse_ok};
+  tensor_loader_fixture tensor_loader{};
+
+  uint8_t file_bytes[8] = {};
+  emel::model::loader::event::load request{*model, parse_model};
+  request.file_image = file_bytes;
+  request.file_size = sizeof(file_bytes);
+  tensor_loader.bind(request);
+  request.map_layers = {nullptr, map_layers_ok};
+  request.validate_architecture_impl = {nullptr, validate_architecture_ok};
+  request.on_done = {&owner, on_done};
+  request.on_error = {&owner, on_error};
+
+  CHECK_FALSE(machine.process_event(request));
+  CHECK_FALSE(owner.done);
+  CHECK(owner.error);
+  CHECK(owner.err ==
+        emel::error::cast(emel::model::loader::error::invalid_request));
+}
+
+TEST_CASE("model loader rejects full load without architecture validator") {
+  auto model = std::make_unique<emel::model::data>();
+  emel::model::loader::sm machine{};
+  owner_state owner{};
+  emel::model::loader::event::parse_model_fn parse_model{nullptr, parse_ok};
+  tensor_loader_fixture tensor_loader{};
+
+  uint8_t file_bytes[8] = {};
+  emel::model::loader::event::load request{*model, parse_model};
+  request.file_image = file_bytes;
+  request.file_size = sizeof(file_bytes);
+  tensor_loader.bind(request);
+  request.map_layers = {nullptr, map_layers_ok};
+  request.validate_structure = {nullptr, validate_structure_ok};
+  request.on_done = {&owner, on_done};
+  request.on_error = {&owner, on_error};
+
+  CHECK_FALSE(machine.process_event(request));
+  CHECK_FALSE(owner.done);
+  CHECK(owner.error);
+  CHECK(owner.err ==
+        emel::error::cast(emel::model::loader::error::invalid_request));
+}
+
+TEST_CASE("model loader can skip architecture validation after full load") {
+  auto model = std::make_unique<emel::model::data>();
+  emel::model::loader::sm machine{};
+  owner_state owner{};
+  emel::model::loader::event::parse_model_fn parse_model{nullptr, parse_ok};
+  tensor_loader_fixture tensor_loader{};
+
+  uint8_t file_bytes[8] = {};
+  emel::model::loader::event::load request{*model, parse_model};
+  request.file_image = file_bytes;
+  request.file_size = sizeof(file_bytes);
+  tensor_loader.bind(request);
+  request.map_layers = {nullptr, map_layers_ok};
+  request.validate_structure = {nullptr, validate_structure_ok};
+  request.validate_architecture = false;
+  request.on_done = {&owner, on_done};
+  request.on_error = {&owner, on_error};
+
+  CHECK(machine.process_event(request));
+  CHECK(owner.done);
+  CHECK_FALSE(owner.error);
 }
 
 TEST_CASE("model loader rejects full load without tensor effect storage") {
@@ -1294,11 +1754,92 @@ TEST_CASE(
 
   CHECK(actions_source.find("emel/io/loader/actions.hpp") == std::string::npos);
   CHECK(actions_source.find("emel/io/loader/detail.hpp") == std::string::npos);
+  CHECK(actions_source.find("emel/io/read/events.hpp") == std::string::npos);
+  CHECK(actions_source.find("read_tensor_request") == std::string::npos);
+  CHECK(actions_source.find("effect_dispatch_io_loads") == std::string::npos);
+  CHECK(actions_source.find("effect_dispatch_io_load_batch") !=
+        std::string::npos);
+  CHECK(actions_source.find("std::ifstream") == std::string::npos);
+  CHECK(actions_source.find("::read(") == std::string::npos);
+  CHECK(actions_source.find("pread(") == std::string::npos);
+  CHECK(actions_source.find("ReadFile") == std::string::npos);
+  CHECK(actions_source.find("CreateFile") == std::string::npos);
   CHECK(actions_source.find("map_io_error") == std::string::npos);
+  const std::string_view batch_dispatch =
+      function_source(actions_source, "effect_dispatch_io_load_batch");
+  CHECK(count_occurrences(batch_dispatch, "io_loader->process_event(load)") ==
+        1u);
+  CHECK(batch_dispatch.find("for (") == std::string_view::npos);
   CHECK(events_source.find("emel/io/loader/sm.hpp") == std::string::npos);
   CHECK(sm_source.find("state_io_load_dispatch") != std::string::npos);
   CHECK(sm_source.find("io_load_error_strategy_unavailable") !=
         std::string::npos);
+}
+
+TEST_CASE("maintained tool read copy surfaces avoid direct io read events") {
+  const std::array tool_sources{
+      "tools/bench/generation_bench.cpp",
+      "tools/bench/diarization/sortformer_fixture.hpp",
+      "tools/embedded_size/emel_probe/main.cpp",
+      "tools/paritychecker/parity_engines.cpp",
+  };
+
+  for (const auto *source_path : tool_sources) {
+    CAPTURE(source_path);
+    const std::string source = read_text_file(repo_root() / source_path);
+    CHECK(source.find("bind_model_load_io_strategy") != std::string::npos);
+    CHECK(source.find("io_load_spans") != std::string::npos);
+    CHECK(source.find("emel/io/read/events.hpp") == std::string::npos);
+    CHECK(source.find("emel/io/read/detail.hpp") == std::string::npos);
+    CHECK(source.find("read_tensor_request") == std::string::npos);
+    CHECK(source.find("read_file_bytes") == std::string::npos);
+    CHECK(source.find("emel/io/source/any.hpp") != std::string::npos);
+    CHECK(source.find("emel::io::source::load_file_bytes") !=
+          std::string::npos);
+    CHECK(source.find("emel::io::read::event::read_tensor") ==
+          std::string::npos);
+    CHECK(source.find("process_event(capture)") == std::string::npos);
+  }
+}
+
+TEST_CASE("model loader done evidence reports the public io strategy used") {
+  const std::string events_source = read_text_file(
+      repo_root() / "src" / "emel" / "model" / "loader" / "events.hpp");
+  const std::string actions_source = read_text_file(
+      repo_root() / "src" / "emel" / "model" / "loader" / "actions.hpp");
+  const std::array tool_sources{
+      "tools/bench/generation_bench.cpp",
+      "tools/bench/diarization/sortformer_fixture.hpp",
+      "tools/embedded_size/emel_probe/main.cpp",
+      "tools/paritychecker/parity_engines.cpp",
+  };
+
+  CHECK(events_source.find("used_io_strategy") != std::string::npos);
+  CHECK(events_source.find("requested_io_strategy") != std::string::npos);
+  CHECK(actions_source.find("effect_mark_io_strategy_used") !=
+        std::string::npos);
+  for (const auto *source_path : tool_sources) {
+    CAPTURE(source_path);
+    const std::string source = read_text_file(repo_root() / source_path);
+    CHECK(source.find("bind_model_load_io_strategy") != std::string::npos);
+    CHECK(source.find(".used_io_strategy = ev.used_io_strategy") !=
+          std::string::npos);
+    CHECK(source.find("process_event(capture)") == std::string::npos);
+  }
+}
+
+TEST_CASE("generation benchmark read-copy load passes source model path") {
+  const std::string source =
+      read_text_file(repo_root() / "tools" / "bench" / "generation_bench.cpp");
+  const std::string_view prepare_fixture =
+      function_source(source, "prepare_emel_fixture");
+
+  CHECK(prepare_fixture.find("load_ev.model_path = model_path;") !=
+        std::string_view::npos);
+  CHECK(prepare_fixture.find("bind_model_load_io_strategy(load_ev") !=
+        std::string_view::npos);
+  CHECK(prepare_fixture.find("load_ev.model_path = model_path;") <
+        prepare_fixture.find("bind_model_load_io_strategy(load_ev"));
 }
 
 TEST_CASE(

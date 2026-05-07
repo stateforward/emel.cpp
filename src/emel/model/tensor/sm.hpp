@@ -48,6 +48,15 @@ struct state_request_mapped_load_unsupported_io_mmap_error_decision {};
 struct state_request_mapped_load_already_resident_error_decision {};
 struct state_request_mapped_load_io_mmap_error_decision {};
 struct state_request_mapped_load_error_callback {};
+struct state_request_read_load_decision {};
+struct state_request_read_load_dispatch_decision {};
+struct state_request_read_load_done_callback {};
+struct state_request_read_load_invalid_request_error_decision {};
+struct state_request_read_load_unsupported_io_read_error_decision {};
+struct state_request_read_load_already_resident_error_decision {};
+struct state_request_read_load_io_read_file_open_error_decision {};
+struct state_request_read_load_io_read_file_read_error_decision {};
+struct state_request_read_load_error_callback {};
 struct state_release_mapped_load_decision {};
 struct state_release_mapped_load_dispatch_decision {};
 struct state_release_mapped_load_publish_done_decision {};
@@ -407,6 +416,118 @@ struct model {
           / action::effect_record_request_mapped_load_error
 
       //------------------------------------------------------------------------------//
+      // Tensor-owned read/copy load via injected emel::io::read::sm.
+      , sml::state<state_request_read_load_decision> <= sml::state<ready>
+          + sml::event<detail::request_read_load_runtime>
+          / action::effect_begin_request_read_load
+      , sml::state<state_request_read_load_unsupported_io_read_error_decision>
+            <= sml::state<state_request_read_load_decision>
+          + sml::completion<detail::request_read_load_runtime>
+          [ guard::request_read_load_io_read_absent{} ]
+          / action::effect_mark_request_read_load_unsupported_io_read
+      , sml::state<state_request_read_load_invalid_request_error_decision>
+            <= sml::state<state_request_read_load_decision>
+          + sml::completion<detail::request_read_load_runtime>
+          [ guard::request_read_load_io_read_present_request_invalid{} ]
+          / action::effect_mark_request_read_load_invalid_request
+      , sml::state<state_request_read_load_already_resident_error_decision>
+            <= sml::state<state_request_read_load_decision>
+          + sml::completion<detail::request_read_load_runtime>
+          [ guard::
+                request_read_load_io_read_present_request_valid_already_resident{} ]
+          / action::effect_mark_request_read_load_tensor_already_resident
+      , sml::state<state_request_read_load_dispatch_decision>
+            <= sml::state<state_request_read_load_decision>
+          + sml::completion<detail::request_read_load_runtime>
+          [ guard::
+                request_read_load_io_read_present_request_valid_tensor_unbound{} ]
+          / action::effect_attempt_request_read_load_dispatch
+
+      , sml::state<state_request_read_load_done_callback>
+            <= sml::state<state_request_read_load_dispatch_decision>
+          + sml::completion<detail::request_read_load_runtime>
+          [ guard::request_read_load_io_read_succeeded{} ]
+          / action::effect_commit_request_read_load
+      , sml::state<state_request_read_load_invalid_request_error_decision>
+            <= sml::state<state_request_read_load_dispatch_decision>
+          + sml::completion<detail::request_read_load_runtime>
+          [ guard::request_read_load_io_read_invalid_request{} ]
+          / action::effect_mark_request_read_load_invalid_request
+      , sml::state<state_request_read_load_unsupported_io_read_error_decision>
+            <= sml::state<state_request_read_load_dispatch_decision>
+          + sml::completion<detail::request_read_load_runtime>
+          [ guard::request_read_load_io_read_unsupported{} ]
+          / action::effect_mark_request_read_load_unsupported_io_read
+      , sml::state<state_request_read_load_io_read_file_open_error_decision>
+            <= sml::state<state_request_read_load_dispatch_decision>
+          + sml::completion<detail::request_read_load_runtime>
+          [ guard::request_read_load_io_read_file_open_failed{} ]
+          / action::effect_mark_request_read_load_io_read_failed
+      , sml::state<state_request_read_load_io_read_file_read_error_decision>
+            <= sml::state<state_request_read_load_dispatch_decision>
+          + sml::completion<detail::request_read_load_runtime>
+          [ guard::request_read_load_io_read_file_read_or_other_failed{} ]
+          / action::effect_mark_request_read_load_io_read_failed
+
+      , sml::state<ready> <= sml::state<state_request_read_load_done_callback>
+          + sml::completion<detail::request_read_load_runtime>
+          / action::effect_publish_request_read_load_done
+
+      , sml::state<state_request_read_load_error_callback>
+            <= sml::state<state_request_read_load_invalid_request_error_decision>
+          + sml::completion<detail::request_read_load_runtime>
+          [ guard::request_read_load_error_callback_present{} ]
+          / action::effect_publish_request_read_load_error
+      , sml::state<ready>
+            <= sml::state<state_request_read_load_invalid_request_error_decision>
+          + sml::completion<detail::request_read_load_runtime>
+          [ guard::request_read_load_error_callback_absent{} ]
+          / action::effect_record_request_read_load_error
+      , sml::state<state_request_read_load_error_callback>
+            <= sml::state<state_request_read_load_unsupported_io_read_error_decision>
+          + sml::completion<detail::request_read_load_runtime>
+          [ guard::request_read_load_error_callback_present{} ]
+          / action::effect_publish_request_read_load_error
+      , sml::state<ready>
+            <= sml::state<state_request_read_load_unsupported_io_read_error_decision>
+          + sml::completion<detail::request_read_load_runtime>
+          [ guard::request_read_load_error_callback_absent{} ]
+          / action::effect_record_request_read_load_error
+      , sml::state<state_request_read_load_error_callback>
+            <= sml::state<state_request_read_load_already_resident_error_decision>
+          + sml::completion<detail::request_read_load_runtime>
+          [ guard::request_read_load_error_callback_present{} ]
+          / action::effect_publish_request_read_load_error
+      , sml::state<ready>
+            <= sml::state<state_request_read_load_already_resident_error_decision>
+          + sml::completion<detail::request_read_load_runtime>
+          [ guard::request_read_load_error_callback_absent{} ]
+          / action::effect_record_request_read_load_error
+      , sml::state<state_request_read_load_error_callback>
+            <= sml::state<state_request_read_load_io_read_file_open_error_decision>
+          + sml::completion<detail::request_read_load_runtime>
+          [ guard::request_read_load_error_callback_present{} ]
+          / action::effect_publish_request_read_load_error
+      , sml::state<ready>
+            <= sml::state<state_request_read_load_io_read_file_open_error_decision>
+          + sml::completion<detail::request_read_load_runtime>
+          [ guard::request_read_load_error_callback_absent{} ]
+          / action::effect_record_request_read_load_error
+      , sml::state<state_request_read_load_error_callback>
+            <= sml::state<state_request_read_load_io_read_file_read_error_decision>
+          + sml::completion<detail::request_read_load_runtime>
+          [ guard::request_read_load_error_callback_present{} ]
+          / action::effect_publish_request_read_load_error
+      , sml::state<ready>
+            <= sml::state<state_request_read_load_io_read_file_read_error_decision>
+          + sml::completion<detail::request_read_load_runtime>
+          [ guard::request_read_load_error_callback_absent{} ]
+          / action::effect_record_request_read_load_error
+      , sml::state<ready> <= sml::state<state_request_read_load_error_callback>
+          + sml::completion<detail::request_read_load_runtime>
+          / action::effect_record_request_read_load_error
+
+      //------------------------------------------------------------------------------//
       // Tensor-owned mmap release.
       , sml::state<state_release_mapped_load_decision> <= sml::state<ready>
           + sml::event<detail::release_mapped_load_runtime>
@@ -586,6 +707,30 @@ struct model {
           + sml::unexpected_event<sml::_> / action::on_unexpected
       , sml::state<ready> <= sml::state<state_request_mapped_load_error_callback>
           + sml::unexpected_event<sml::_> / action::on_unexpected
+      , sml::state<ready> <= sml::state<state_request_read_load_decision>
+          + sml::unexpected_event<sml::_> / action::on_unexpected
+      , sml::state<ready>
+            <= sml::state<state_request_read_load_dispatch_decision>
+          + sml::unexpected_event<sml::_> / action::on_unexpected
+      , sml::state<ready> <= sml::state<state_request_read_load_done_callback>
+          + sml::unexpected_event<sml::_> / action::on_unexpected
+      , sml::state<ready>
+            <= sml::state<state_request_read_load_invalid_request_error_decision>
+          + sml::unexpected_event<sml::_> / action::on_unexpected
+      , sml::state<ready>
+            <= sml::state<state_request_read_load_unsupported_io_read_error_decision>
+          + sml::unexpected_event<sml::_> / action::on_unexpected
+      , sml::state<ready>
+            <= sml::state<state_request_read_load_already_resident_error_decision>
+          + sml::unexpected_event<sml::_> / action::on_unexpected
+      , sml::state<ready>
+            <= sml::state<state_request_read_load_io_read_file_open_error_decision>
+          + sml::unexpected_event<sml::_> / action::on_unexpected
+      , sml::state<ready>
+            <= sml::state<state_request_read_load_io_read_file_read_error_decision>
+          + sml::unexpected_event<sml::_> / action::on_unexpected
+      , sml::state<ready> <= sml::state<state_request_read_load_error_callback>
+          + sml::unexpected_event<sml::_> / action::on_unexpected
       , sml::state<ready> <= sml::state<state_release_mapped_load_decision>
           + sml::unexpected_event<sml::_> / action::on_unexpected
       , sml::state<ready>
@@ -625,6 +770,11 @@ struct sm : public emel::sm<model, action::context> {
   sm() = default;
   explicit sm(emel::io::mmap::sm *io_mmap_actor)
       : base_type(make_context_with_io_mmap(io_mmap_actor)) {}
+  explicit sm(emel::io::read::sm *io_read_actor)
+      : base_type(make_context_with_io_read(io_read_actor)) {}
+  sm(emel::io::mmap::sm *io_mmap_actor, emel::io::read::sm *io_read_actor)
+      : base_type(make_context_with_io_mmap_and_io_read(io_mmap_actor,
+                                                        io_read_actor)) {}
 
   bool process_event(const event::bind_storage &ev) {
     detail::runtime_status ctx{};
@@ -675,6 +825,13 @@ struct sm : public emel::sm<model, action::context> {
     return accepted && status.ok;
   }
 
+  bool process_event(const event::request_read_load &ev) {
+    detail::request_read_load_status status{};
+    detail::request_read_load_runtime runtime{ev, status};
+    const bool accepted = base_type::process_event(runtime);
+    return accepted && status.ok;
+  }
+
   bool process_event(const event::release_mapped_load &ev) {
     detail::release_mapped_load_status status{};
     detail::release_mapped_load_runtime runtime{ev, status};
@@ -687,6 +844,22 @@ private:
   make_context_with_io_mmap(emel::io::mmap::sm *io_mmap_actor) noexcept {
     action::context ctx{};
     ctx.io_mmap = io_mmap_actor;
+    return ctx;
+  }
+
+  static action::context
+  make_context_with_io_read(emel::io::read::sm *io_read_actor) noexcept {
+    action::context ctx{};
+    ctx.io_read = io_read_actor;
+    return ctx;
+  }
+
+  static action::context make_context_with_io_mmap_and_io_read(
+      emel::io::mmap::sm *io_mmap_actor,
+      emel::io::read::sm *io_read_actor) noexcept {
+    action::context ctx{};
+    ctx.io_mmap = io_mmap_actor;
+    ctx.io_read = io_read_actor;
     return ctx;
   }
 };

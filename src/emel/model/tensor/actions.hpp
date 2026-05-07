@@ -3,6 +3,9 @@
 #include "emel/io/mmap/errors.hpp"
 #include "emel/io/mmap/events.hpp"
 #include "emel/io/mmap/sm.hpp"
+#include "emel/io/read/errors.hpp"
+#include "emel/io/read/events.hpp"
+#include "emel/io/read/sm.hpp"
 #include "emel/model/tensor/context.hpp"
 #include "emel/model/tensor/detail.hpp"
 #include "emel/model/tensor/errors.hpp"
@@ -601,6 +604,112 @@ struct effect_record_request_mapped_load_error {
                   context &) const noexcept {}
 };
 
+struct effect_begin_request_read_load {
+  void operator()(const detail::request_read_load_runtime &ev,
+                  context &) const noexcept {
+    ev.status.err = emel::error::cast(error::none);
+    ev.status.ok = false;
+    ev.status.accepted = false;
+    ev.status.io_read = {};
+    ev.status.buffer = nullptr;
+    ev.status.buffer_bytes = 0u;
+  }
+};
+
+struct effect_attempt_request_read_load_dispatch {
+  void operator()(const detail::request_read_load_runtime &ev,
+                  context &ctx) const noexcept {
+    emel::io::read::event::read_tensor_request inner{
+        .tensor_id = ev.request.tensor_id,
+        .file_index = ev.request.file_index,
+        .file_offset = ev.request.file_offset,
+        .byte_size = ev.request.byte_size,
+        .file_path = ev.request.file_path,
+        .source_buffer = ev.request.source_buffer,
+        .source_buffer_bytes = ev.request.source_buffer_bytes,
+        .source_error = ev.request.source_error,
+        .target_buffer = ev.request.target_buffer,
+        .target_buffer_bytes = ev.request.target_buffer_bytes,
+    };
+    emel::io::read::event::read_tensor read{inner};
+    static_cast<void>(ctx.io_read->process_event(read, ev.status.io_read));
+    ev.status.buffer = ev.status.io_read.target_buffer;
+    ev.status.buffer_bytes = ev.status.io_read.bytes_copied;
+  }
+};
+
+struct effect_commit_request_read_load {
+  void operator()(const detail::request_read_load_runtime &ev,
+                  context &ctx) const noexcept {
+    const size_t id = static_cast<size_t>(ev.request.tensor_id);
+    ctx.tensors.lifecycle[id] = event::lifecycle::resident;
+    ctx.tensors.buffer[id] = ev.status.buffer;
+    ctx.tensors.buffer_bytes[id] = ev.status.buffer_bytes;
+    ev.status.err = emel::error::cast(error::none);
+    ev.status.ok = true;
+    ev.status.accepted = true;
+  }
+};
+
+struct effect_mark_request_read_load_invalid_request {
+  void operator()(const detail::request_read_load_runtime &ev,
+                  context &) const noexcept {
+    ev.status.err = emel::error::cast(error::invalid_request);
+    ev.status.ok = false;
+  }
+};
+
+struct effect_mark_request_read_load_unsupported_io_read {
+  void operator()(const detail::request_read_load_runtime &ev,
+                  context &) const noexcept {
+    ev.status.err = emel::error::cast(error::io_read_unsupported);
+    ev.status.ok = false;
+  }
+};
+
+struct effect_mark_request_read_load_tensor_already_resident {
+  void operator()(const detail::request_read_load_runtime &ev,
+                  context &) const noexcept {
+    ev.status.err = emel::error::cast(error::tensor_already_resident);
+    ev.status.ok = false;
+  }
+};
+
+struct effect_mark_request_read_load_io_read_failed {
+  void operator()(const detail::request_read_load_runtime &ev,
+                  context &) const noexcept {
+    ev.status.err = emel::error::cast(error::io_read_failed);
+    ev.status.ok = false;
+  }
+};
+
+struct effect_publish_request_read_load_done {
+  void operator()(const detail::request_read_load_runtime &ev,
+                  context &) const noexcept {
+    ev.request.on_done(events::request_read_load_done{
+        .request = ev.request,
+        .buffer = ev.status.buffer,
+        .buffer_bytes = ev.status.buffer_bytes,
+    });
+  }
+};
+
+struct effect_publish_request_read_load_error {
+  void operator()(const detail::request_read_load_runtime &ev,
+                  context &) const noexcept {
+    ev.request.on_error(events::request_read_load_error{
+        .request = ev.request,
+        .err = ev.status.err,
+        .io_read_err = ev.status.io_read.err,
+    });
+  }
+};
+
+struct effect_record_request_read_load_error {
+  void operator()(const detail::request_read_load_runtime &,
+                  context &) const noexcept {}
+};
+
 struct effect_begin_release_mapped_load {
   void operator()(const detail::release_mapped_load_runtime &ev,
                   context &) const noexcept {
@@ -769,6 +878,26 @@ inline constexpr effect_publish_request_mapped_load_error
     effect_publish_request_mapped_load_error{};
 inline constexpr effect_record_request_mapped_load_error
     effect_record_request_mapped_load_error{};
+inline constexpr effect_begin_request_read_load
+    effect_begin_request_read_load{};
+inline constexpr effect_attempt_request_read_load_dispatch
+    effect_attempt_request_read_load_dispatch{};
+inline constexpr effect_commit_request_read_load
+    effect_commit_request_read_load{};
+inline constexpr effect_mark_request_read_load_invalid_request
+    effect_mark_request_read_load_invalid_request{};
+inline constexpr effect_mark_request_read_load_unsupported_io_read
+    effect_mark_request_read_load_unsupported_io_read{};
+inline constexpr effect_mark_request_read_load_tensor_already_resident
+    effect_mark_request_read_load_tensor_already_resident{};
+inline constexpr effect_mark_request_read_load_io_read_failed
+    effect_mark_request_read_load_io_read_failed{};
+inline constexpr effect_publish_request_read_load_done
+    effect_publish_request_read_load_done{};
+inline constexpr effect_publish_request_read_load_error
+    effect_publish_request_read_load_error{};
+inline constexpr effect_record_request_read_load_error
+    effect_record_request_read_load_error{};
 inline constexpr effect_begin_release_mapped_load
     effect_begin_release_mapped_load{};
 inline constexpr effect_attempt_release_mapped_load_dispatch
