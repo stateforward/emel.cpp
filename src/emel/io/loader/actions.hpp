@@ -250,11 +250,13 @@ struct effect_dispatch_staged_read_tensor {
   void operator()(const detail::load_tensor_runtime &ev,
                   context &ctx) const noexcept {
     const auto &tensor = ev.request.tensor;
-    const auto *source_bytes = static_cast<const uint8_t *>(tensor.source_buffer);
+    const auto *source_bytes =
+        static_cast<const uint8_t *>(tensor.source_buffer);
     const auto request = emel::io::staged_read::event::staged_window_request{
         .file_offset = tensor.file_offset,
         .logical_byte_length = tensor.byte_size,
-        .stage_chunk_bytes = tensor.byte_size,
+        .stage_chunk_bytes = detail::compute_staged_chunk_bytes(
+            ev.request.policy.staged_chunk_bytes, tensor.byte_size),
         .source_span = source_bytes + tensor.file_offset,
         .source_span_bytes = tensor.byte_size,
         .target_buffer = tensor.target,
@@ -285,29 +287,33 @@ struct effect_dispatch_staged_read_tensor_batch {
   void operator()(const detail::load_tensor_batch_runtime &ev,
                   context &ctx) const noexcept {
     emel::io::staged_read::event::staged_window_batch batch{
-        ev.request.tensors};
-    batch.on_done = {static_cast<void *>(&ev.status),
-                     [](void *object, const emel::io::staged_read::events::staged_window_batch_done &done) noexcept {
-                       auto *status =
-                           static_cast<detail::batch_runtime_status *>(object);
-                       status->accepted = true;
-                       status->ok = true;
-                       status->err = emel::error::cast(error::none);
-                       status->strategy_err =
-                           emel::error::cast(emel::io::staged_read::error::none);
-                       status->done_count = done.done_count;
-                       status->bytes_done = done.bytes_committed;
-                     }};
-    batch.on_error = {static_cast<void *>(&ev.status),
-                      [](void *object, const emel::io::staged_read::events::staged_window_batch_error &err_ev) noexcept {
-                        auto *status =
-                            static_cast<detail::batch_runtime_status *>(object);
-                        status->accepted = false;
-                        status->ok = false;
-                        status->err = emel::error::cast(error::unavailable);
-                        status->strategy_err = err_ev.err;
-                        status->failed_index = err_ev.failed_index;
-                      }};
+        ev.request.tensors, ev.request.policy.staged_chunk_bytes};
+    batch.on_done = {
+        static_cast<void *>(&ev.status),
+        [](void *object,
+           const emel::io::staged_read::events::staged_window_batch_done
+               &done) noexcept {
+          auto *status = static_cast<detail::batch_runtime_status *>(object);
+          status->accepted = true;
+          status->ok = true;
+          status->err = emel::error::cast(error::none);
+          status->strategy_err =
+              emel::error::cast(emel::io::staged_read::error::none);
+          status->done_count = done.done_count;
+          status->bytes_done = done.bytes_committed;
+        }};
+    batch.on_error = {
+        static_cast<void *>(&ev.status),
+        [](void *object,
+           const emel::io::staged_read::events::staged_window_batch_error
+               &err_ev) noexcept {
+          auto *status = static_cast<detail::batch_runtime_status *>(object);
+          status->accepted = false;
+          status->ok = false;
+          status->err = emel::error::cast(error::unavailable);
+          status->strategy_err = err_ev.err;
+          status->failed_index = err_ev.failed_index;
+        }};
     ev.status.accepted = ctx.io_staged_read->process_event(batch);
   }
 };

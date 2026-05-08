@@ -23,6 +23,7 @@ struct staged_owner_state {
   emel::error::type err = emel::error::cast(emel::io::staged_read::error::none);
   void *target_buffer = nullptr;
   uint64_t bytes_committed = 0u;
+  uint32_t failed_index = 0u;
 };
 
 struct staged_runtime_trace {
@@ -78,6 +79,25 @@ void on_captured_done(
 void on_ignore_error(
     void *,
     const emel::io::staged_read::events::staged_window_error &) noexcept {}
+
+void on_staged_batch_done(
+    void *object, const emel::io::staged_read::events::staged_window_batch_done
+                      &ev) noexcept {
+  auto *owner = static_cast<staged_owner_state *>(object);
+  owner->done = true;
+  owner->done_count = static_cast<int>(ev.done_count);
+  owner->bytes_committed = ev.bytes_committed;
+}
+
+void on_staged_batch_error(
+    void *object, const emel::io::staged_read::events::staged_window_batch_error
+                      &ev) noexcept {
+  auto *owner = static_cast<staged_owner_state *>(object);
+  owner->error = true;
+  owner->error_count++;
+  owner->err = ev.err;
+  owner->failed_index = ev.failed_index;
+}
 
 struct unrelated_event {};
 
@@ -534,6 +554,46 @@ TEST_CASE("io staged_window records error without firing on_error when both "
   REQUIRE_FALSE(machine.process_event(intent));
   REQUIRE_FALSE(owner.done);
   REQUIRE_FALSE(owner.error);
+}
+
+TEST_CASE("io staged_window_batch reports first invalid tensor index") {
+  emel::IoStagedRead machine{};
+  staged_owner_state owner{};
+  constexpr char source[] = "abcdefgh";
+  std::array<char, 2> first_target{};
+  std::array<char, 4> second_target{};
+  const std::array<emel::io::event::tensor_load_span, 2> tensors{{
+      {
+          .tensor_id = 1,
+          .file_offset = 0u,
+          .byte_size = first_target.size(),
+          .source_buffer = source,
+          .source_buffer_bytes = sizeof(source) - 1u,
+          .target = first_target.data(),
+          .target_bytes = first_target.size(),
+      },
+      {
+          .tensor_id = 2,
+          .file_offset = 6u,
+          .byte_size = second_target.size(),
+          .source_buffer = source,
+          .source_buffer_bytes = sizeof(source) - 1u,
+          .target = second_target.data(),
+          .target_bytes = second_target.size(),
+      },
+  }};
+
+  emel::io::staged_read::event::staged_window_batch intent{tensors, 2u};
+  intent.on_done = {&owner, on_staged_batch_done};
+  intent.on_error = {&owner, on_staged_batch_error};
+
+  REQUIRE_FALSE(machine.process_event(intent));
+  REQUIRE_FALSE(owner.done);
+  REQUIRE(owner.error);
+  REQUIRE(
+      owner.err ==
+      emel::error::cast(emel::io::staged_read::error::invalid_stage_contract));
+  REQUIRE(owner.failed_index == 1u);
 }
 
 TEST_CASE("io staged_read handles unexpected events deterministically") {

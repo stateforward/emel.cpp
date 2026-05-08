@@ -34,4 +34,12 @@ struct load_tensor_batch_runtime {
   batch_runtime_status &status;
 };
 
+inline uint64_t compute_staged_chunk_bytes(const uint64_t requested,
+                                           const uint64_t logical) noexcept {
+  const uint64_t requested_is_smaller =
+      static_cast<uint64_t>(requested < logical);
+  return (requested * requested_is_smaller) +
+         (logical * (1u - requested_is_smaller));
+}
+
 } // namespace emel::io::loader::detail

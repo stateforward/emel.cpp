@@ -8,6 +8,39 @@
 
 namespace emel::io::staged_read::guard {
 
+inline bool batch_tensor_request_valid(
+    const emel::io::event::tensor_load_span &tensor) noexcept {
+  return tensor.byte_size > 0u &&
+         tensor.file_offset <= ~0ull - tensor.byte_size &&
+         tensor.target != nullptr && tensor.target_bytes >= tensor.byte_size &&
+         tensor.source_buffer != nullptr &&
+         tensor.source_buffer_bytes >= tensor.file_offset &&
+         (tensor.source_buffer_bytes - tensor.file_offset) >= tensor.byte_size;
+}
+
+inline void update_first_batch_failure_index(uint32_t &failed_index,
+                                             uint32_t &found,
+                                             const uint32_t index,
+                                             const bool failed) noexcept {
+  const uint32_t failed_value = static_cast<uint32_t>(failed);
+  const uint32_t take = (1u - found) * failed_value;
+  failed_index = (failed_index * (1u - take)) + (index * take);
+  found = found | failed_value;
+}
+
+inline uint32_t first_batch_invalid_request_index(
+    const detail::staged_window_batch_runtime &ev) noexcept {
+  uint32_t failed_index = 0u;
+  uint32_t found = 0u;
+  for (uint32_t index = 0u;
+       index < static_cast<uint32_t>(ev.request.tensors.size()); ++index) {
+    update_first_batch_failure_index(
+        failed_index, found, index,
+        !batch_tensor_request_valid(ev.request.tensors[index]));
+  }
+  return failed_index;
+}
+
 struct guard_staged_window_callbacks_present {
   bool operator()(const detail::staged_window_runtime &ev,
                   const action::context &) const noexcept {
@@ -171,21 +204,11 @@ struct guard_staged_window_batch_callbacks_missing {
 struct guard_stg_batch_requests_valid {
   bool operator()(const detail::staged_window_batch_runtime &ev,
                   const action::context &) const noexcept {
-    if (ev.request.tensors.empty()) {
-      return false;
-    }
-    bool valid = true;
+    bool valid =
+        !ev.request.tensors.empty() && ev.request.stage_chunk_bytes > 0u;
     for (uint32_t index = 0u;
          index < static_cast<uint32_t>(ev.request.tensors.size()); ++index) {
-      const auto &tensor = ev.request.tensors[index];
-      valid = valid && tensor.byte_size > 0u &&
-              tensor.file_offset <= ~0ull - tensor.byte_size &&
-              tensor.target != nullptr &&
-              tensor.target_bytes >= tensor.byte_size &&
-              tensor.source_buffer != nullptr &&
-              tensor.source_buffer_bytes >= tensor.file_offset &&
-              (tensor.source_buffer_bytes - tensor.file_offset) >=
-                  tensor.byte_size;
+      valid = valid && batch_tensor_request_valid(ev.request.tensors[index]);
     }
     return valid;
   }
@@ -217,13 +240,15 @@ struct guard_platform_staged_read_batch_unsupported {
 };
 
 struct batch_error_callback_present {
-  bool operator()(const detail::staged_window_batch_runtime &ev) const noexcept {
+  bool
+  operator()(const detail::staged_window_batch_runtime &ev) const noexcept {
     return static_cast<bool>(ev.request.on_error);
   }
 };
 
 struct batch_error_callback_absent {
-  bool operator()(const detail::staged_window_batch_runtime &ev) const noexcept {
+  bool
+  operator()(const detail::staged_window_batch_runtime &ev) const noexcept {
     return !batch_error_callback_present{}(ev);
   }
 };

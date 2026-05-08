@@ -33,6 +33,7 @@ struct owner_state {
   uint64_t buffer_bytes = 0u;
   uint32_t done_count = 0u;
   uint64_t bytes_done = 0u;
+  uint32_t failed_index = 0u;
 };
 
 void on_load_done(
@@ -75,6 +76,7 @@ void on_load_batch_error(
   owner->error = true;
   owner->err = ev.err;
   owner->strategy_err = ev.strategy_err;
+  owner->failed_index = ev.failed_index;
 }
 
 void *fake_target(const uintptr_t value) {
@@ -791,7 +793,8 @@ TEST_CASE("public io source rejects oversized files before allocation") {
   std::filesystem::remove(path);
 }
 
-TEST_CASE("io loader exposes staged-read strategy naming via public contracts") {
+TEST_CASE(
+    "io loader exposes staged-read strategy naming via public contracts") {
   const auto root = repo_root();
   const std::array runtime_sources{
       "src/emel/io/loader/events.hpp",
@@ -821,6 +824,7 @@ TEST_CASE("io loader exposes staged-read strategy naming via public contracts") 
         std::string::npos);
   CHECK(helper_source.find("\"read_copy\"") != std::string::npos);
   CHECK(helper_source.find("\"staged_read\"") != std::string::npos);
+  CHECK(events_source.find("staged_chunk_bytes") != std::string::npos);
 
   for (const auto *source_path : runtime_sources) {
     CAPTURE(source_path);
@@ -829,4 +833,20 @@ TEST_CASE("io loader exposes staged-read strategy naming via public contracts") 
     CHECK(source.find("emel/io/staged_read/actions.hpp") == std::string::npos);
     CHECK(source.find("emel/io/staged_read/guards.hpp") == std::string::npos);
   }
+}
+
+TEST_CASE("io loader staged-read dispatch uses bounded chunk policy") {
+  const auto root = repo_root();
+  const std::string actions_source =
+      read_text_file(root / "src" / "emel" / "io" / "loader" / "actions.hpp");
+  const std::string detail_source =
+      read_text_file(root / "src" / "emel" / "io" / "loader" / "detail.hpp");
+  const std::string staged_events_source = read_text_file(
+      root / "src" / "emel" / "io" / "staged_read" / "events.hpp");
+
+  CHECK(actions_source.find(".stage_chunk_bytes = tensor.byte_size") ==
+        std::string::npos);
+  CHECK(actions_source.find("compute_staged_chunk_bytes") != std::string::npos);
+  CHECK(detail_source.find("compute_staged_chunk_bytes") != std::string::npos);
+  CHECK(staged_events_source.find("stage_chunk_bytes") != std::string::npos);
 }

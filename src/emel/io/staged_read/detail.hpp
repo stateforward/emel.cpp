@@ -30,4 +30,12 @@ struct staged_window_batch_runtime {
   staged_window_batch_attempt_status &status;
 };
 
+inline uint64_t compute_stage_chunk_bytes(const uint64_t requested,
+                                          const uint64_t logical) noexcept {
+  const uint64_t requested_is_smaller =
+      static_cast<uint64_t>(requested < logical);
+  return (requested * requested_is_smaller) +
+         (logical * (1u - requested_is_smaller));
+}
+
 } // namespace emel::io::staged_read::detail

@@ -7,6 +7,7 @@
 #include "emel/io/staged_read/detail.hpp"
 #include "emel/io/staged_read/errors.hpp"
 #include "emel/io/staged_read/events.hpp"
+#include "emel/io/staged_read/guards.hpp"
 
 namespace emel::io::staged_read::action {
 
@@ -66,6 +67,7 @@ struct effect_mark_batch_invalid_staging_contract {
                   context &) const noexcept {
     ev.status.err = emel::error::cast(error::invalid_stage_contract);
     ev.status.ok = false;
+    ev.status.failed_index = guard::first_batch_invalid_request_index(ev);
   }
 };
 
@@ -197,7 +199,8 @@ struct effect_publish_staged_window_batch_done {
           static_cast<const unsigned char *>(tensor.source_buffer);
       const auto *origin = source_bytes + tensor.file_offset;
       const uint64_t logical = tensor.byte_size;
-      const uint64_t chunk = tensor.byte_size;
+      const uint64_t chunk = detail::compute_stage_chunk_bytes(
+          ev.request.stage_chunk_bytes, logical);
       const uint64_t tail_bytes = logical % chunk;
       const uint64_t covered = logical - tail_bytes;
 

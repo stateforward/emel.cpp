@@ -41,12 +41,14 @@ struct staged_window {
 
 struct staged_window_batch {
   std::span<const emel::io::event::tensor_load_span> tensors = {};
+  uint64_t stage_chunk_bytes = 0u;
   emel::callback<void(const events::staged_window_batch_done &)> on_done = {};
   emel::callback<void(const events::staged_window_batch_error &)> on_error = {};
 
   explicit staged_window_batch(
-      std::span<const emel::io::event::tensor_load_span> tensors_in) noexcept
-      : tensors(tensors_in) {}
+      std::span<const emel::io::event::tensor_load_span> tensors_in,
+      const uint64_t stage_chunk_bytes_in) noexcept
+      : tensors(tensors_in), stage_chunk_bytes(stage_chunk_bytes_in) {}
 };
 
 } // namespace emel::io::staged_read::event

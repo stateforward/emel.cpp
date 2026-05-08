@@ -278,9 +278,7 @@ src/emel/graph/tensor/errors.hpp
 src/emel/graph/tensor/events.hpp
 src/emel/graph/tensor/guards.hpp
 src/emel/graph/tensor/sm.hpp
-src/emel/io/loader/actions.hpp
 src/emel/io/loader/guards.hpp
-src/emel/io/staged_read/guards.hpp
 src/emel/kernel/aarch64/context.hpp
 src/emel/kernel/aarch64/errors.hpp
 src/emel/kernel/aarch64/events.hpp
@@ -581,7 +579,6 @@ tests/graph/processor/processor_sm_transition_tests.cpp
 tests/graph/processor/processor_tests.cpp
 tests/graph/tensor/lifecycle_tests.cpp
 tests/graph/wrapper_visibility_tests.cpp
-tests/io/loader/lifecycle_tests.cpp
 tests/kernel/aarch64_tests.cpp
 tests/kernel/lifecycle_tests.cpp
 tests/kernel/test_helpers.hpp

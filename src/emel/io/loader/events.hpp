@@ -20,6 +20,8 @@ struct load_tensor_batch_error;
 
 namespace emel::io::loader::event {
 
+inline constexpr uint64_t k_default_staged_read_chunk_bytes = 64u * 1024u;
+
 enum class strategy_kind : uint8_t {
   none = 0u,
   mapped_file = 1u,
@@ -30,6 +32,7 @@ enum class strategy_kind : uint8_t {
 
 struct strategy_policy {
   strategy_kind strategy = strategy_kind::none;
+  uint64_t staged_chunk_bytes = k_default_staged_read_chunk_bytes;
 };
 
 using tensor_load_span = emel::io::event::tensor_load_span;
