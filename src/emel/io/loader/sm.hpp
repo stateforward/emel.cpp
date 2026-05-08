@@ -17,12 +17,14 @@ struct state_no_strategy_error_decision {};
 struct state_unsupported_strategy_error_decision {};
 struct state_error_callback {};
 struct state_read_dispatch_decision {};
+struct state_staged_read_dispatch_decision {};
 struct state_done_decision {};
 struct state_done_callback {};
 struct state_batch_request_decision {};
 struct state_batch_unsupported_strategy_error_decision {};
 struct state_batch_error_callback {};
 struct state_batch_read_dispatch_decision {};
+struct state_batch_staged_read_dispatch_decision {};
 struct state_batch_done_decision {};
 struct state_batch_done_callback {};
 
@@ -52,10 +54,25 @@ struct model {
           + sml::completion<detail::load_tensor_runtime>
           [ guard::strategy_read_copy_with_actor{} ]
           / action::effect_dispatch_read_tensor
+      , sml::state<state_staged_read_dispatch_decision> <=
+          sml::state<state_request_decision>
+          + sml::completion<detail::load_tensor_runtime>
+          [ guard::strategy_staged_read_with_actor_and_source_span_valid{} ]
+          / action::effect_dispatch_staged_read_tensor
+      , sml::state<state_no_strategy_error_decision> <=
+          sml::state<state_request_decision>
+          + sml::completion<detail::load_tensor_runtime>
+          [ guard::strategy_staged_read_with_actor_and_source_span_invalid{} ]
+          / action::effect_mark_invalid_request
       , sml::state<state_unsupported_strategy_error_decision> <=
           sml::state<state_request_decision>
           + sml::completion<detail::load_tensor_runtime>
           [ guard::strategy_read_copy_without_actor{} ]
+          / action::effect_mark_unsupported_strategy
+      , sml::state<state_unsupported_strategy_error_decision> <=
+          sml::state<state_request_decision>
+          + sml::completion<detail::load_tensor_runtime>
+          [ guard::strategy_staged_read_without_actor{} ]
           / action::effect_mark_unsupported_strategy
       , sml::state<state_unsupported_strategy_error_decision> <=
           sml::state<state_request_decision>
@@ -76,6 +93,14 @@ struct model {
           [ guard::read_load_succeeded{} ]
       , sml::state<state_unsupported_strategy_error_decision> <=
           sml::state<state_read_dispatch_decision>
+          + sml::completion<detail::load_tensor_runtime>
+          [ guard::read_load_failed{} ]
+      , sml::state<state_done_decision> <=
+          sml::state<state_staged_read_dispatch_decision>
+          + sml::completion<detail::load_tensor_runtime>
+          [ guard::read_load_succeeded{} ]
+      , sml::state<state_unsupported_strategy_error_decision> <=
+          sml::state<state_staged_read_dispatch_decision>
           + sml::completion<detail::load_tensor_runtime>
           [ guard::read_load_failed{} ]
 
@@ -132,10 +157,25 @@ struct model {
           + sml::completion<detail::load_tensor_batch_runtime>
           [ guard::strategy_read_copy_batch_with_actor{} ]
           / action::effect_dispatch_read_tensor_batch
+      , sml::state<state_batch_staged_read_dispatch_decision> <=
+          sml::state<state_batch_request_decision>
+          + sml::completion<detail::load_tensor_batch_runtime>
+          [ guard::strategy_staged_read_batch_with_actor_and_source_span_valid{} ]
+          / action::effect_dispatch_staged_read_tensor_batch
+      , sml::state<state_batch_unsupported_strategy_error_decision> <=
+          sml::state<state_batch_request_decision>
+          + sml::completion<detail::load_tensor_batch_runtime>
+          [ guard::strategy_staged_read_batch_with_actor_and_source_span_invalid{} ]
+          / action::effect_mark_load_tensor_batch_invalid_request
       , sml::state<state_batch_unsupported_strategy_error_decision> <=
           sml::state<state_batch_request_decision>
           + sml::completion<detail::load_tensor_batch_runtime>
           [ guard::strategy_read_copy_batch_without_actor{} ]
+          / action::effect_mark_load_tensor_batch_unsupported_strategy
+      , sml::state<state_batch_unsupported_strategy_error_decision> <=
+          sml::state<state_batch_request_decision>
+          + sml::completion<detail::load_tensor_batch_runtime>
+          [ guard::strategy_staged_read_batch_without_actor{} ]
           / action::effect_mark_load_tensor_batch_unsupported_strategy
       , sml::state<state_batch_unsupported_strategy_error_decision> <=
           sml::state<state_batch_request_decision>
@@ -148,6 +188,15 @@ struct model {
           [ guard::read_batch_succeeded{} ]
       , sml::state<state_batch_unsupported_strategy_error_decision> <=
           sml::state<state_batch_read_dispatch_decision>
+          + sml::completion<detail::load_tensor_batch_runtime>
+          [ guard::read_batch_failed{} ]
+          / action::effect_record_read_tensor_batch_failed
+      , sml::state<state_batch_done_decision> <=
+          sml::state<state_batch_staged_read_dispatch_decision>
+          + sml::completion<detail::load_tensor_batch_runtime>
+          [ guard::read_batch_succeeded{} ]
+      , sml::state<state_batch_unsupported_strategy_error_decision> <=
+          sml::state<state_batch_staged_read_dispatch_decision>
           + sml::completion<detail::load_tensor_batch_runtime>
           [ guard::read_batch_failed{} ]
           / action::effect_record_read_tensor_batch_failed
@@ -195,6 +244,9 @@ struct model {
           + sml::unexpected_event<sml::_> / action::effect_on_unexpected
       , sml::state<state_ready> <= sml::state<state_read_dispatch_decision>
           + sml::unexpected_event<sml::_> / action::effect_on_unexpected
+      , sml::state<state_ready> <=
+          sml::state<state_staged_read_dispatch_decision>
+          + sml::unexpected_event<sml::_> / action::effect_on_unexpected
       , sml::state<state_ready> <= sml::state<state_done_decision>
           + sml::unexpected_event<sml::_> / action::effect_on_unexpected
       , sml::state<state_ready> <= sml::state<state_done_callback>
@@ -208,6 +260,9 @@ struct model {
           + sml::unexpected_event<sml::_> / action::effect_on_unexpected
       , sml::state<state_ready> <=
           sml::state<state_batch_read_dispatch_decision>
+          + sml::unexpected_event<sml::_> / action::effect_on_unexpected
+      , sml::state<state_ready> <=
+          sml::state<state_batch_staged_read_dispatch_decision>
           + sml::unexpected_event<sml::_> / action::effect_on_unexpected
       , sml::state<state_ready> <= sml::state<state_batch_done_decision>
           + sml::unexpected_event<sml::_> / action::effect_on_unexpected

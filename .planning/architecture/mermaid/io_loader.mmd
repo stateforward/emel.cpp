@@ -5,12 +5,17 @@ stateDiagram-v2
   state_request_decision --> state_no_strategy_error_decision : completion_load_tensor_runtime_ [strategy_none_] / effect_mark_unsupported_strategy_
   state_request_decision --> state_unsupported_strategy_error_decision : completion_load_tensor_runtime_ [strategy_mapped_file_] / effect_mark_unsupported_strategy_
   state_request_decision --> state_read_dispatch_decision : completion_load_tensor_runtime_ [strategy_read_copy_with_actor_] / effect_dispatch_read_tensor_
+  state_request_decision --> state_staged_read_dispatch_decision : completion_load_tensor_runtime_ [strategy_staged_read_with_actor_and_source_span_valid_] / effect_dispatch_staged_read_tensor_
+  state_request_decision --> state_no_strategy_error_decision : completion_load_tensor_runtime_ [strategy_staged_read_with_actor_and_source_span_invalid_] / effect_mark_invalid_request_
   state_request_decision --> state_unsupported_strategy_error_decision : completion_load_tensor_runtime_ [strategy_read_copy_without_actor_] / effect_mark_unsupported_strategy_
+  state_request_decision --> state_unsupported_strategy_error_decision : completion_load_tensor_runtime_ [strategy_staged_read_without_actor_] / effect_mark_unsupported_strategy_
   state_request_decision --> state_unsupported_strategy_error_decision : completion_load_tensor_runtime_ [strategy_external_buffer_] / effect_mark_unsupported_strategy_
   state_request_decision --> state_unsupported_strategy_error_decision : completion_load_tensor_runtime_ [always] / effect_mark_unsupported_strategy_
   state_ready --> state_no_strategy_error_decision : load_tensor_runtime [tensor_span_invalid_] / effect_mark_invalid_request_
   state_read_dispatch_decision --> state_done_decision : completion_load_tensor_runtime_ [read_load_succeeded_] / none
   state_read_dispatch_decision --> state_unsupported_strategy_error_decision : completion_load_tensor_runtime_ [read_load_failed_] / none
+  state_staged_read_dispatch_decision --> state_done_decision : completion_load_tensor_runtime_ [read_load_succeeded_] / none
+  state_staged_read_dispatch_decision --> state_unsupported_strategy_error_decision : completion_load_tensor_runtime_ [read_load_failed_] / none
   state_done_decision --> state_done_callback : completion_load_tensor_runtime_ [done_callback_present_] / effect_publish_load_tensor_done_
   state_done_decision --> state_ready : completion_load_tensor_runtime_ [done_callback_absent_] / effect_record_load_tensor_done_
   state_done_callback --> state_ready : completion_load_tensor_runtime_ [always] / effect_record_load_tensor_done_
@@ -22,10 +27,15 @@ stateDiagram-v2
   state_ready --> state_batch_request_decision : load_tensor_batch_runtime [batch_span_valid_] / effect_begin_load_tensor_batch_
   state_ready --> state_batch_unsupported_strategy_error_decision : load_tensor_batch_runtime [batch_span_invalid_] / effect_mark_load_tensor_batch_invalid_request_
   state_batch_request_decision --> state_batch_read_dispatch_decision : completion_load_tensor_batch_runtime_ [strategy_read_copy_batch_with_actor_] / effect_dispatch_read_tensor_batch_
+  state_batch_request_decision --> state_batch_staged_read_dispatch_decision : completion_load_tensor_batch_runtime_ [strategy_staged_read_batch_with_actor_and_source_span_valid_] / effect_dispatch_staged_read_tensor_batch_
+  state_batch_request_decision --> state_batch_unsupported_strategy_error_decision : completion_load_tensor_batch_runtime_ [strategy_staged_read_batch_with_actor_and_source_span_invalid_] / effect_mark_load_tensor_batch_invalid_request_
   state_batch_request_decision --> state_batch_unsupported_strategy_error_decision : completion_load_tensor_batch_runtime_ [strategy_read_copy_batch_without_actor_] / effect_mark_load_tensor_batch_unsupported_strategy_
+  state_batch_request_decision --> state_batch_unsupported_strategy_error_decision : completion_load_tensor_batch_runtime_ [strategy_staged_read_batch_without_actor_] / effect_mark_load_tensor_batch_unsupported_strategy_
   state_batch_request_decision --> state_batch_unsupported_strategy_error_decision : completion_load_tensor_batch_runtime_ [always] / effect_mark_load_tensor_batch_unsupported_strategy_
   state_batch_read_dispatch_decision --> state_batch_done_decision : completion_load_tensor_batch_runtime_ [read_batch_succeeded_] / none
   state_batch_read_dispatch_decision --> state_batch_unsupported_strategy_error_decision : completion_load_tensor_batch_runtime_ [read_batch_failed_] / effect_record_read_tensor_batch_failed_
+  state_batch_staged_read_dispatch_decision --> state_batch_done_decision : completion_load_tensor_batch_runtime_ [read_batch_succeeded_] / none
+  state_batch_staged_read_dispatch_decision --> state_batch_unsupported_strategy_error_decision : completion_load_tensor_batch_runtime_ [read_batch_failed_] / effect_record_read_tensor_batch_failed_
   state_batch_done_decision --> state_batch_done_callback : completion_load_tensor_batch_runtime_ [batch_done_callback_present_] / effect_publish_load_tensor_batch_done_
   state_batch_done_decision --> state_ready : completion_load_tensor_batch_runtime_ [batch_done_callback_absent_] / effect_record_load_tensor_batch_done_
   state_batch_done_callback --> state_ready : completion_load_tensor_batch_runtime_ [always] / effect_record_load_tensor_batch_done_
@@ -38,11 +48,13 @@ stateDiagram-v2
   state_unsupported_strategy_error_decision --> state_ready : _ [always] / effect_on_unexpected_
   state_error_callback --> state_ready : _ [always] / effect_on_unexpected_
   state_read_dispatch_decision --> state_ready : _ [always] / effect_on_unexpected_
+  state_staged_read_dispatch_decision --> state_ready : _ [always] / effect_on_unexpected_
   state_done_decision --> state_ready : _ [always] / effect_on_unexpected_
   state_done_callback --> state_ready : _ [always] / effect_on_unexpected_
   state_batch_request_decision --> state_ready : _ [always] / effect_on_unexpected_
   state_batch_unsupported_strategy_error_decision --> state_ready : _ [always] / effect_on_unexpected_
   state_batch_error_callback --> state_ready : _ [always] / effect_on_unexpected_
   state_batch_read_dispatch_decision --> state_ready : _ [always] / effect_on_unexpected_
+  state_batch_staged_read_dispatch_decision --> state_ready : _ [always] / effect_on_unexpected_
   state_batch_done_decision --> state_ready : _ [always] / effect_on_unexpected_
   state_batch_done_callback --> state_ready : _ [always] / effect_on_unexpected_

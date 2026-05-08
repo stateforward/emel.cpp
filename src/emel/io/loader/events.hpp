@@ -25,6 +25,7 @@ enum class strategy_kind : uint8_t {
   mapped_file = 1u,
   read_copy = 2u,
   external_buffer = 3u,
+  staged_read = 4u,
 };
 
 struct strategy_policy {

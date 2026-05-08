@@ -30,8 +30,8 @@ stateDiagram-v2
   state_tensor_plan_decision --> state_tensor_apply_dispatch : completion_load_runtime_ [tensor_plan_done_without_io_strategy_] / none
   state_tensor_plan_decision --> state_tensor_effect_error_cleanup : completion_load_runtime_ [tensor_plan_done_with_io_strategy_without_loader_] / effect_dispatch_tensor_apply_error_results_
   state_tensor_plan_decision --> state_io_load_dispatch : completion_load_runtime_ [tensor_plan_done_with_io_strategy_with_loader_and_batch_span_ready_] / none
-  state_tensor_plan_decision --> state_io_read_copy_load_dispatch : completion_load_runtime_ [tensor_plan_done_with_read_copy_strategy_with_loader_and_storage_ready_] / none
-  state_tensor_plan_decision --> state_tensor_effect_error_cleanup : completion_load_runtime_ [tensor_plan_done_with_read_copy_strategy_with_loader_and_storage_missing_] / effect_dispatch_tensor_apply_error_results_
+  state_tensor_plan_decision --> state_io_read_copy_load_dispatch : completion_load_runtime_ [tensor_plan_done_with_storage_backed_strategy_with_loader_and_storage_ready_] / none
+  state_tensor_plan_decision --> state_tensor_effect_error_cleanup : completion_load_runtime_ [tensor_plan_done_with_storage_backed_strategy_with_loader_and_storage_missing_] / effect_dispatch_tensor_apply_error_results_
   state_tensor_plan_decision --> state_tensor_effect_error_cleanup : completion_load_runtime_ [tensor_plan_done_with_io_strategy_with_loader_and_batch_span_missing_] / effect_dispatch_tensor_apply_error_results_
   state_tensor_plan_decision --> errored : completion_load_runtime_ [tensor_plan_error_raised_] / effect_mark_tensor_plan_error_
   state_tensor_plan_decision --> errored : completion_load_runtime_ [tensor_plan_unhandled_] / mark_internal_error_
@@ -42,7 +42,7 @@ stateDiagram-v2
   state_io_load_decision --> state_tensor_effect_error_cleanup : completion_load_runtime_ [io_load_unhandled_] / effect_dispatch_tensor_apply_error_results_
   state_tensor_effect_error_cleanup --> errored : completion_load_runtime_ [tensor_plan_done_with_io_strategy_without_loader_] / effect_mark_io_strategy_unavailable_
   state_tensor_effect_error_cleanup --> errored : completion_load_runtime_ [tensor_plan_done_with_io_strategy_with_loader_and_batch_span_missing_] / effect_mark_io_strategy_unavailable_
-  state_tensor_effect_error_cleanup --> errored : completion_load_runtime_ [tensor_plan_done_with_read_copy_strategy_with_loader_and_storage_missing_] / mark_invalid_request_
+  state_tensor_effect_error_cleanup --> errored : completion_load_runtime_ [tensor_plan_done_with_storage_backed_strategy_with_loader_and_storage_missing_] / mark_invalid_request_
   state_tensor_effect_error_cleanup --> errored : completion_load_runtime_ [io_load_error_invalid_request_] / mark_invalid_request_
   state_tensor_effect_error_cleanup --> errored : completion_load_runtime_ [io_load_error_strategy_unavailable_] / effect_mark_io_strategy_unavailable_
   state_tensor_effect_error_cleanup --> errored : completion_load_runtime_ [io_load_error_internal_] / mark_internal_error_

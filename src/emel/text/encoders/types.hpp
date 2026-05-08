@@ -55,14 +55,13 @@ struct naive_trie {
   void insert(const char *text, const size_t len, const int32_t value) {
     size_t idx = 0;
     for (size_t i = 0; i < len; ++i) {
-      node &node = nodes[idx];
       const uint8_t byte = static_cast<uint8_t>(text[i]);
-      if (node.next[byte] < 0) {
-        node.next[byte] = static_cast<int32_t>(nodes.size());
+      if (nodes[idx].next[byte] < 0) {
+        nodes[idx].next[byte] = static_cast<int32_t>(nodes.size());
         nodes.emplace_back();
         nodes.back().nodes_ref = &nodes;
       }
-      idx = static_cast<size_t>(node.next[byte]);
+      idx = static_cast<size_t>(nodes[idx].next[byte]);
     }
     nodes[idx].has_value = true;
     nodes[idx].value = value;

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "emel/io/read/errors.hpp"
+#include "emel/io/staged_read/errors.hpp"
 #include "emel/model/tensor/context.hpp"
 #include "emel/model/tensor/detail.hpp"
 #include "emel/model/tensor/errors.hpp"
@@ -747,6 +748,130 @@ struct request_read_load_error_callback_absent {
   }
 };
 
+struct request_staged_load_request_valid {
+  bool operator()(const tensor::detail::request_staged_load_runtime &ev,
+                  const action::context &ctx) const noexcept {
+    const int32_t id = ev.request.tensor_id;
+    return detail::valid_tensor_id(id) &&
+           static_cast<uint32_t>(id) < ctx.tensors.active_extent &&
+           ev.request.byte_size > 0u &&
+           ev.request.stage_chunk_bytes > 0u &&
+           ev.request.source_buffer != nullptr &&
+           ev.request.file_offset <= ev.request.source_buffer_bytes &&
+           ev.request.byte_size <=
+               (ev.request.source_buffer_bytes - ev.request.file_offset) &&
+           static_cast<bool>(ev.request.on_done) &&
+           ctx.tensors.data_size[static_cast<size_t>(id)] >=
+               ev.request.byte_size &&
+           ev.request.target_buffer != nullptr &&
+           ev.request.target_buffer_bytes >= ev.request.byte_size;
+  }
+};
+
+struct request_staged_load_request_invalid {
+  bool operator()(const tensor::detail::request_staged_load_runtime &ev,
+                  const action::context &ctx) const noexcept {
+    return !request_staged_load_request_valid{}(ev, ctx);
+  }
+};
+
+struct request_staged_load_io_staged_read_present {
+  bool operator()(const tensor::detail::request_staged_load_runtime &,
+                  const action::context &ctx) const noexcept {
+    return ctx.io_staged_read != nullptr;
+  }
+};
+
+struct request_staged_load_io_staged_read_absent {
+  bool operator()(const tensor::detail::request_staged_load_runtime &ev,
+                  const action::context &ctx) const noexcept {
+    return !request_staged_load_io_staged_read_present{}(ev, ctx);
+  }
+};
+
+struct request_staged_load_tensor_already_resident {
+  bool operator()(const tensor::detail::request_staged_load_runtime &ev,
+                  const action::context &ctx) const noexcept {
+    const size_t id = static_cast<size_t>(ev.request.tensor_id);
+    return ctx.tensors.lifecycle[id] == event::lifecycle::resident ||
+           ctx.tensors.lifecycle[id] == event::lifecycle::mmap_resident;
+  }
+};
+
+struct request_staged_load_tensor_unbound {
+  bool operator()(const tensor::detail::request_staged_load_runtime &ev,
+                  const action::context &ctx) const noexcept {
+    return !request_staged_load_tensor_already_resident{}(ev, ctx);
+  }
+};
+
+struct request_staged_load_io_staged_read_succeeded {
+  bool operator()(const tensor::detail::request_staged_load_runtime &ev,
+                  const action::context &) const noexcept {
+    return ev.status.io_staged_read_ok;
+  }
+};
+
+struct request_staged_load_io_staged_read_failed {
+  bool operator()(const tensor::detail::request_staged_load_runtime &ev,
+                  const action::context &ctx) const noexcept {
+    return !request_staged_load_io_staged_read_succeeded{}(ev, ctx);
+  }
+};
+
+struct request_staged_load_io_staged_read_invalid_request {
+  bool operator()(const tensor::detail::request_staged_load_runtime &ev,
+                  const action::context &) const noexcept {
+    return ev.status.io_staged_read_err ==
+               emel::error::cast(emel::io::staged_read::error::invalid_callbacks) ||
+           ev.status.io_staged_read_err ==
+               emel::error::cast(
+                   emel::io::staged_read::error::invalid_stage_contract) ||
+           ev.status.io_staged_read_err ==
+               emel::error::cast(
+                   emel::io::staged_read::error::invalid_target_window) ||
+           ev.status.io_staged_read_err ==
+               emel::error::cast(emel::io::staged_read::error::null_source_span) ||
+           ev.status.io_staged_read_err ==
+               emel::error::cast(
+                   emel::io::staged_read::error::source_span_size_mismatch) ||
+           ev.status.io_staged_read_err ==
+               emel::error::cast(
+                   emel::io::staged_read::error::insufficient_source_span);
+  }
+};
+
+struct request_staged_load_io_staged_read_unsupported {
+  bool operator()(const tensor::detail::request_staged_load_runtime &ev,
+                  const action::context &) const noexcept {
+    return ev.status.io_staged_read_err ==
+           emel::error::cast(emel::io::staged_read::error::unsupported_platform);
+  }
+};
+
+struct request_staged_load_io_staged_read_other_failed {
+  bool operator()(const tensor::detail::request_staged_load_runtime &ev,
+                  const action::context &ctx) const noexcept {
+    return request_staged_load_io_staged_read_failed{}(ev, ctx) &&
+           !request_staged_load_io_staged_read_invalid_request{}(ev, ctx) &&
+           !request_staged_load_io_staged_read_unsupported{}(ev, ctx);
+  }
+};
+
+struct request_staged_load_error_callback_present {
+  bool operator()(
+      const tensor::detail::request_staged_load_runtime &ev) const noexcept {
+    return static_cast<bool>(ev.request.on_error);
+  }
+};
+
+struct request_staged_load_error_callback_absent {
+  bool operator()(
+      const tensor::detail::request_staged_load_runtime &ev) const noexcept {
+    return !request_staged_load_error_callback_present{}(ev);
+  }
+};
+
 struct release_mapped_load_request_valid {
   bool operator()(const tensor::detail::release_mapped_load_runtime &ev,
                   const action::context &ctx) const noexcept {
@@ -885,6 +1010,32 @@ struct request_read_load_io_read_present_request_valid_tensor_unbound {
     return request_read_load_io_read_present{}(ev, ctx) &&
            request_read_load_request_valid{}(ev, ctx) &&
            request_read_load_tensor_unbound{}(ev, ctx);
+  }
+};
+
+struct request_staged_load_io_staged_read_present_request_invalid {
+  bool operator()(const tensor::detail::request_staged_load_runtime &ev,
+                  const action::context &ctx) const noexcept {
+    return request_staged_load_io_staged_read_present{}(ev, ctx) &&
+           request_staged_load_request_invalid{}(ev, ctx);
+  }
+};
+
+struct request_staged_load_io_staged_read_present_request_valid_already_resident {
+  bool operator()(const tensor::detail::request_staged_load_runtime &ev,
+                  const action::context &ctx) const noexcept {
+    return request_staged_load_io_staged_read_present{}(ev, ctx) &&
+           request_staged_load_request_valid{}(ev, ctx) &&
+           request_staged_load_tensor_already_resident{}(ev, ctx);
+  }
+};
+
+struct request_staged_load_io_staged_read_present_request_valid_tensor_unbound {
+  bool operator()(const tensor::detail::request_staged_load_runtime &ev,
+                  const action::context &ctx) const noexcept {
+    return request_staged_load_io_staged_read_present{}(ev, ctx) &&
+           request_staged_load_request_valid{}(ev, ctx) &&
+           request_staged_load_tensor_unbound{}(ev, ctx);
   }
 };
 

@@ -10,6 +10,7 @@
 #include "emel/io/mmap/sm.hpp"
 #include "emel/io/read/sm.hpp"
 #include "emel/io/sm.hpp"
+#include "emel/io/staged_read/sm.hpp"
 #include "emel/memory/hybrid/sm.hpp"
 #include "emel/memory/kv/sm.hpp"
 #include "emel/memory/recurrent/sm.hpp"
@@ -44,6 +45,7 @@ using Generator = emel::text::generator::sm;
 using IoLoader = emel::io::loader::sm;
 using IoMmap = emel::io::mmap::sm;
 using IoRead = emel::io::read::sm;
+using IoStagedRead = emel::io::staged_read::sm;
 using MemoryHybrid = emel::memory::hybrid::sm;
 using KvCache = emel::memory::kv::sm;
 using MemoryRecurrent = emel::memory::recurrent::sm;

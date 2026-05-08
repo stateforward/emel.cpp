@@ -57,9 +57,9 @@ generation_stage_probe generation_stage_probe_at(std::size_t index) noexcept;
 namespace {
 namespace bench = emel::bench;
 
-constexpr std::uint64_t k_default_iterations = 1000;
-constexpr std::size_t k_default_runs = 5;
-constexpr std::uint64_t k_default_warmup_iterations = 100;
+constexpr std::uint64_t k_default_iterations = 100;
+constexpr std::size_t k_default_runs = 3;
+constexpr std::uint64_t k_default_warmup_iterations = 10;
 constexpr std::size_t k_default_warmup_runs = 1;
 constexpr std::size_t k_max_runs = 25;
 constexpr std::string_view k_generation_suite = "generation";

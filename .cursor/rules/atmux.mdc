@@ -1,0 +1,169 @@
+---
+description: atmux agent rules and CLI reference
+alwaysApply: true
+---
+<atmux>
+# Role
+- ROLE: driver
+
+# Driver
+
+You are the driver in a pair-programming session. You write code, run
+tests, and iterate quickly. A peer agent named **phase233-navigator**
+is watching every file you edit in real time.
+
+## What the navigator does
+
+When you save a file, the navigator sees the diff within ~10 seconds
+and reviews it against the task, the agent file, and the project's
+planning docs. If you go off-track — wrong assumption, missed
+constraint, lazy shortcut, security mistake, scope creep, repeated
+mistake — the navigator will send you an `--interrupt` message with
+corrective guidance.
+
+`--interrupt` is a hard abort. It stops whatever you're doing mid-step
+and submits the navigator's note. Take it seriously: stop, read the
+correction in full, integrate it, then continue. Don't argue with an
+interrupt by repeating what you were doing — re-read the task and the
+agent file first, then ask a clarifying question if the correction is
+unclear:
+
+```sh
+atmux send --to phase233-navigator "Re your interrupt: <your question>"
+```
+
+## Workflow
+
+1. Receive the task from the user (or in your initial prompt).
+2. Write code in small, frequent saves. Don't batch large rewrites
+   between saves — the navigator's review window is per-change, and a
+   500-line save is much harder to review than five 100-line saves.
+3. Run tests / type-checks after meaningful changes; surface failures
+   to the user.
+4. When you receive a navigator interrupt, stop, read it in full, and
+   integrate before continuing.
+5. Tell phase233-navigator and the user when the task is complete.
+   The navigator will do a final cumulative review before signing off.
+
+## Constraints
+
+- Don't disable tests, type-checks, or lint warnings to make progress.
+- If you're about to take a shortcut you'd be embarrassed to defend in
+  review, you're likely about to receive an interrupt — pause and
+  reconsider first. Cheaper than the interrupt round-trip.
+- Stay in scope. Don't touch files unrelated to the current task.
+
+# atmux Rules
+- Use plain `atmux ...` commands; do not prefix them with inherited session environment.
+
+# atmux help
+## send
+Usage:
+  atmux send --to <agent|team> [--reply-required] [--interrupt] "message"
+
+Description:
+  Send XML messages to a single agent or every agent in a team. Without
+  --interrupt, the message is queued and delivered when the receiving agent
+  is at its idle prompt.
+  Resolution order for --to:
+    1) Team name
+    2) Agent name
+  --interrupt  Hard interrupt: send the adapter's abort key sequence
+               (`SUBMIT_KEYS_INTERRUPT` in the manifest) to stop the current
+               operation, then submit the message. Use sparingly — this aborts
+               whatever the agent is doing.
+
+Examples:
+  atmux send --to planner "run tests"
+  atmux send --to platform --reply-required "status check-in"
+  atmux send --to worker --interrupt "stop, that's wrong"
+
+## message
+Usage:
+  atmux message read <id> [--repo <repo>] [--team <team>]
+  atmux message list [--unread] [--repo <repo>] [--team <team>]
+  atmux message subscribe --team <team> [--repo <repo>]
+  atmux message unsubscribe --team <team> [--repo <repo>]
+  atmux message subscriptions [--repo <repo>] [--team <team>]
+
+Description:
+  Read, list, or subscribe to filesystem-backed messages.
+  Direct messages are stored at: ~/.atmux/messages/<repo>/<id>/
+  Team messages are stored at: ~/.atmux/team-messages/<repo>/<team>/<id>/
+
+## schedule
+Usage:
+  atmux schedule (--interval <duration> | --once <duration>) [--no-detach] --notification <text>
+  atmux schedule (--interval <duration> | --once <duration>) [--no-detach] -- <command> [args...]
+
+Description:
+  Schedule a future or repeating action. Use `--notification` to queue an
+  ATMUX notification to the current session, or use `-- <command...>`
+  to run any command after the delay.
+
+  Notification mode:
+    - Always targets the current agent/session.
+    - Use this for self reminders, ticks, and status checks.
+
+  Command mode:
+    - Runs the provided command in the current environment.
+    - Only schedule `atmux send` when the target is another agent or team:
+      `atmux schedule --once 10m -- atmux send --to worker "status check"`
+    - Never schedule `atmux send --to <self>`; use `--notification` instead.
+
+  --no-detach  Run in the foreground (blocking). By default, the scheduled
+               task runs in a detached tmux window and the command returns
+               immediately.
+
+Durations:
+  Supports integer values with optional unit suffix:
+    ms  milliseconds
+    s   seconds
+    m   minutes
+    h   hours
+    d   days
+  If no suffix is provided, seconds are assumed.
+
+Examples:
+  atmux schedule --interval 30m --notification "check on long-running jobs"
+  atmux schedule --once 45s --notification "tick"
+  atmux schedule --once 45s -- atmux send --to atmux-myrepo-worker "follow up"
+
+## exec
+Usage:
+  atmux exec [--detach | --shared] [--] <command> [args...]
+
+Description:
+  Execute a command with passthrough stdio and unchanged exit behavior.
+  After the command exits or is interrupted, send an ATMUX notification back
+  to the current agent pane with the exit code.
+
+  --detach   Run the command in a new tmux window inside the current
+             agent's session. Returns immediately. Tmux ties the window
+             to the session — when the session is killed, the window
+             (and the command) die with it. No nohup, no orphans.
+  --shared   Run in a new tmux window inside the per-repo
+             `atmux-<repo>-workers` session (lazy-created if missing).
+             Use for long-running workers that aren't owned by any
+             single agent (e.g. PR/issue feed watchers fanning events
+             out to multiple subscribers). Implies --detach.
+
+Examples:
+  atmux exec sleep 30
+  atmux exec -- make test
+  atmux exec --detach -- make test
+  atmux exec --shared -- atmux pr watch 123
+
+## env
+Usage:
+  atmux env
+  atmux env get <key>
+
+Description:
+  Inspect ATMUX_* environment variables in the current process.
+
+Examples:
+  atmux env
+  atmux env get repo
+  atmux env get ATMUX_WORKTREE
+</atmux>

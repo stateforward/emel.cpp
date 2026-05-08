@@ -1,48 +1,80 @@
-# Research Summary
+# Project Research Summary
 
-**Milestone:** `v1.15 ARM Sortformer Diarization GGUF Slice`
-**Summarized:** 2026-04-22
+**Project:** EMEL (emel.cpp)
+**Domain:** Constrained-memory tensor loading via staged read I/O strategy
+**Researched:** 2026-05-07
+**Confidence:** HIGH for process constraints; MEDIUM for final public event names and chunk policy parameters (plan-phase work)
 
-## Recommended Scope
+## Executive Summary
 
-Build one truthful maintained Sortformer diarization vertical slice:
+v1.26 adds a third concrete loading strategy under `src/emel/io`, focused on
+chunked or windowed reads when hosts cannot materialize a full tensor byte span
+in one shot. The work must stay consistent with shipped `io/mmap` and `io/read`
+actors: tensor residency remains with `model/tensor`, filesystem work stays out
+of SML dispatch per established patterns, and runtime routing stays in guards
+and transition tables. Cooperative coroutine scheduling is explicitly excluded
+unless approved as a separate effort.
 
-- pin `openresearchtools/diar_streaming_sortformer_4spk-v2.1-gguf` as the maintained GGUF target
-- add explicit Sortformer model-family acceptance and execution-contract validation
-- add a diarization-owned actor for mono 16 kHz PCM requests
-- run the maintained Sortformer path natively in EMEL-owned `src/` code on ARM
-- emit deterministic `T x 4` probabilities and bounded four-speaker segment records
-- prove behavior against a lane-isolated trusted reference baseline
-- publish one maintained ARM benchmark with fixture/profile/proof metadata
+The milestone should follow the same macro-phase pattern as v1.24/v1.25:
+component boundary, validation gates, execution and lifetime, tensor
+integration, public runtime evidence, tests/guardrails, then publication and
+artifact refresh when implementation lands.
 
-## Stack Additions
+## Key Findings
 
-- `src/emel/model/sortformer/` for GGUF/model-family contract and tensor-family validation
-- `src/emel/audio/diarization/` for the diarization request/result/error actor
-- `src/emel/audio/diarization/sortformer/` for the maintained Sortformer implementation family
-- `src/emel/kernel/**` additions for Sortformer numeric work that belongs in kernel ownership
-- `tools/paritychecker/**` or `tools/bench/**` reference-lane additions for proof and benchmark
+### Recommended stack
 
-## Table Stakes
+No new third-party dependencies. Reuse SML, existing I/O module layout, doctest,
+and quality-gate workflow. Add only the `staged_read` component and minimal
+public wiring.
 
-- one exact maintained GGUF fixture contract with provenance/checksum
-- explicit loader rejection for incompatible or incomplete Sortformer GGUF files
-- one mono `float32` PCM, 16,000 Hz input contract
-- native frontend/input tensor preparation
-- native ARM Sortformer execution without external compute fallback
-- deterministic `T x 4` speaker probability output with 0.08-second frame semantics
-- stable `speaker_0` through `speaker_3` segment output
-- lane-isolated reference proof and ARM benchmark publication
+### Expected features
 
-## Watch Out For
+**Table stakes:** Chunked copy with deterministic ordering; explicit errors;
+tensor-owned target buffer; fail-closed validation.
 
-- do not route this through embeddings/generator just because existing audio embedding support
-  exists
-- do not use Python, NeMo, ONNX, llama.cpp, or ggml as the EMEL compute path
-- do not add media decode, resampling, live microphone capture, or service streaming in v1
-- do not hide streaming profile or cache-readiness routing in actions/detail helpers
-- do not call the milestone maintained with segment-only proof and no probability-matrix truth
-- do not share model/cache/tensor/output objects between EMEL and reference lanes
+**Defer:** Coroutine/async scheduling, device transfer strategies, automatic
+buffer pool management hidden from callers.
+
+### Architecture approach
+
+Parallel `io/staged_read` actor; tensor requests staged loads through the same
+class of public I/O boundary events used for mmap/read; loader and tools
+observe strategy only through public surfaces.
+
+### Critical pitfalls
+
+Coroutines-as-control-flow, context misuse for stage indices, behavior selection
+in `detail`, cross-strategy regressions, and misleading benchmark reporting.
+
+## Implications for roadmap
+
+| Phase | Name | Rationale |
+|-------|------|-----------|
+| 227 | Component boundary | Canonical `io/staged_read` scaffold |
+| 228 | Span/target/platform gating | Preconditions entirely guard-modeled |
+| 229 | Copy progress + completion | Deterministic staged byte semantics |
+| 230 | Context + handle lifetime + strategy non-residency | EMEL dispatch-local rules |
+| 231 | Error taxonomy | Observable exception-free categories |
+| 232 | Tensor integration graph | Public tensor↔IO + explicit terminals |
+| 233 | Public entrypoints | Loader/bench/parity/probe isolation |
+| 234 | Dispatch tests | Doctest success/failure coverage |
+| 235 | Guardrails | Loader/tensor/coroutine + mmap/read non-regression |
+| 236 | Publication truth | Docs, lint snapshots, bench snapshots, evidence labels |
+
+## Confidence assessment
+
+| Area | Confidence | Notes |
+|------|------------|-------|
+| Stack | HIGH | Brownfield patterns exist |
+| Features | MEDIUM | Exact chunk API to be specified in early execution phases |
+| Architecture | HIGH | Matches #60/#62/#63 narrative |
+| Pitfalls | HIGH | SML rules are explicit |
+
+### Gaps to address in plan-phase
+
+- Exact event naming and tensor load effect shape for staged requests.
+- Whether staging reuses `io/read` primitives internally or duplicates minimal read steps (design choice with review impact).
 
 ## Sources
 
@@ -50,9 +82,8 @@ Build one truthful maintained Sortformer diarization vertical slice:
 - `.planning/research/FEATURES.md`
 - `.planning/research/ARCHITECTURE.md`
 - `.planning/research/PITFALLS.md`
-- https://huggingface.co/openresearchtools/diar_streaming_sortformer_4spk-v2.1-gguf
-- https://huggingface.co/nvidia/diar_streaming_sortformer_4spk-v2.1
-- https://developer.nvidia.com/blog/identify-speakers-in-meetings-calls-and-voice-apps-in-real-time-with-nvidia-streaming-sortformer/
+- GitHub issue #63 (manager brief)
 
 ---
-*Research summarized: 2026-04-22*
+*Research completed: 2026-05-07*
+*Ready for roadmap: yes*

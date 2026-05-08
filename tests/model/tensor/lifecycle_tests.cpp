@@ -18,6 +18,8 @@
 #include "emel/io/mmap/sm.hpp"
 #include "emel/io/read/errors.hpp"
 #include "emel/io/read/sm.hpp"
+#include "emel/io/staged_read/errors.hpp"
+#include "emel/io/staged_read/sm.hpp"
 #include "emel/model/data.hpp"
 #include "emel/model/tensor/events.hpp"
 #include "emel/model/tensor/sm.hpp"
@@ -810,6 +812,17 @@ struct read_owner_state {
       emel::error::cast(emel::io::read::error::none);
 };
 
+struct staged_owner_state {
+  bool request_done = false;
+  bool request_error = false;
+  void *buffer = nullptr;
+  uint64_t buffer_bytes = 0u;
+  emel::error::type request_err =
+      emel::error::cast(emel::model::tensor::error::none);
+  emel::error::type request_io_err =
+      emel::error::cast(emel::io::staged_read::error::none);
+};
+
 void on_request_mapped_load_done(
     void *object,
     const emel::model::tensor::events::request_mapped_load_done &ev) noexcept {
@@ -863,6 +876,24 @@ void on_request_read_load_error(
   owner->request_io_err = ev.io_read_err;
 }
 
+void on_request_staged_load_done(
+    void *object,
+    const emel::model::tensor::events::request_staged_load_done &ev) noexcept {
+  auto *owner = static_cast<staged_owner_state *>(object);
+  owner->request_done = true;
+  owner->buffer = ev.buffer;
+  owner->buffer_bytes = ev.buffer_bytes;
+}
+
+void on_request_staged_load_error(
+    void *object,
+    const emel::model::tensor::events::request_staged_load_error &ev) noexcept {
+  auto *owner = static_cast<staged_owner_state *>(object);
+  owner->request_error = true;
+  owner->request_err = ev.err;
+  owner->request_io_err = ev.io_staged_read_err;
+}
+
 std::filesystem::path
 make_tensor_temp_file(std::string_view tag,
                       const std::vector<uint8_t> &payload) {
@@ -895,6 +926,11 @@ make_tensor_sm_with_io_mmap(emel::io::mmap::sm &io_mmap_actor) {
 emel::model::tensor::sm
 make_tensor_sm_with_io_read(emel::io::read::sm &io_read_actor) {
   return emel::model::tensor::sm{&io_read_actor};
+}
+
+emel::model::tensor::sm make_tensor_sm_with_io_staged_read(
+    emel::io::staged_read::sm &io_staged_read_actor) {
+  return emel::model::tensor::sm{&io_staged_read_actor};
 }
 
 void prepare_storage_for_one_tensor(
@@ -1146,6 +1182,205 @@ TEST_CASE(
   CHECK(state.buffer == target);
   CHECK(state.buffer_bytes == 4u);
   CHECK(machine.is(stateforward::sml::state<emel::model::tensor::ready>));
+}
+
+TEST_CASE("model_tensor_request_staged_load_rejects_when_io_staged_read_absent") {
+  emel::model::tensor::sm machine{};
+  std::array<emel::model::data::tensor_record, 1> tensors{};
+  uint8_t target[8]{};
+  prepare_read_storage_for_one_tensor(machine, tensors, target,
+                                      static_cast<uint64_t>(sizeof(target)));
+
+  staged_owner_state owner{};
+  constexpr char source[] = "abcdefgh";
+  emel::model::tensor::event::request_staged_load request{0, 0u, 8u};
+  request.stage_chunk_bytes = 4u;
+  request.source_buffer = source;
+  request.source_buffer_bytes = sizeof(source) - 1u;
+  request.target_buffer = target;
+  request.target_buffer_bytes = sizeof(target);
+  request.on_done = {&owner, on_request_staged_load_done};
+  request.on_error = {&owner, on_request_staged_load_error};
+
+  CHECK_FALSE(machine.process_event(request));
+  CHECK_FALSE(owner.request_done);
+  CHECK(owner.request_error);
+  CHECK(owner.request_err ==
+        emel::error::cast(
+            emel::model::tensor::error::io_staged_read_unsupported));
+  CHECK(machine.is(stateforward::sml::state<emel::model::tensor::ready>));
+}
+
+TEST_CASE(
+    "model_tensor_request_staged_load_dispatches_through_io_staged_read") {
+  emel::io::staged_read::sm io_staged_read_actor{};
+  emel::model::tensor::sm machine =
+      make_tensor_sm_with_io_staged_read(io_staged_read_actor);
+  std::array<emel::model::data::tensor_record, 1> tensors{};
+  uint8_t target[8]{};
+  prepare_read_storage_for_one_tensor(machine, tensors, target,
+                                      static_cast<uint64_t>(sizeof(target)));
+
+  staged_owner_state owner{};
+  constexpr char source[] = "abcdefgh";
+  emel::model::tensor::event::request_staged_load request{0, 0u, 8u};
+  request.stage_chunk_bytes = 4u;
+  request.source_buffer = source;
+  request.source_buffer_bytes = sizeof(source) - 1u;
+  request.target_buffer = target;
+  request.target_buffer_bytes = sizeof(target);
+  request.on_done = {&owner, on_request_staged_load_done};
+  request.on_error = {&owner, on_request_staged_load_error};
+
+  CHECK(machine.process_event(request));
+  CHECK(owner.request_done);
+  CHECK_FALSE(owner.request_error);
+  CHECK(owner.buffer == target);
+  CHECK(owner.buffer_bytes == 8u);
+  CHECK(std::memcmp(target, source, 8u) == 0);
+
+  emel::model::tensor::event::tensor_state state{};
+  CHECK(machine.process_event(emel::model::tensor::event::capture_tensor_state{
+      .tensor_id = 0,
+      .state_out = &state,
+  }));
+  CHECK(state.lifecycle_state ==
+        emel::model::tensor::event::lifecycle::resident);
+  CHECK(state.buffer == target);
+  CHECK(state.buffer_bytes == 8u);
+  CHECK(machine.is(stateforward::sml::state<emel::model::tensor::ready>));
+}
+
+TEST_CASE("model_tensor_request_staged_load_applies_nonzero_file_offset") {
+  emel::io::staged_read::sm io_staged_read_actor{};
+  emel::model::tensor::sm machine =
+      make_tensor_sm_with_io_staged_read(io_staged_read_actor);
+  std::array<emel::model::data::tensor_record, 1> tensors{};
+  uint8_t target[4]{};
+  prepare_read_storage_for_one_tensor(machine, tensors, target,
+                                      static_cast<uint64_t>(sizeof(target)));
+
+  staged_owner_state owner{};
+  constexpr char source[] = "abcdefgh";
+  emel::model::tensor::event::request_staged_load request{0, 2u, 4u};
+  request.stage_chunk_bytes = 2u;
+  request.source_buffer = source;
+  request.source_buffer_bytes = sizeof(source) - 1u;
+  request.target_buffer = target;
+  request.target_buffer_bytes = sizeof(target);
+  request.on_done = {&owner, on_request_staged_load_done};
+  request.on_error = {&owner, on_request_staged_load_error};
+
+  CHECK(machine.process_event(request));
+  CHECK(owner.request_done);
+  CHECK_FALSE(owner.request_error);
+  CHECK(owner.buffer == target);
+  CHECK(owner.buffer_bytes == 4u);
+  CHECK(std::memcmp(target, "cdef", 4u) == 0);
+
+  emel::model::tensor::event::tensor_state state{};
+  CHECK(machine.process_event(emel::model::tensor::event::capture_tensor_state{
+      .tensor_id = 0,
+      .state_out = &state,
+  }));
+  CHECK(state.lifecycle_state ==
+        emel::model::tensor::event::lifecycle::resident);
+  CHECK(state.buffer == target);
+  CHECK(state.buffer_bytes == 4u);
+  CHECK(machine.is(stateforward::sml::state<emel::model::tensor::ready>));
+}
+
+TEST_CASE(
+    "model_tensor_request_staged_load_surfaces_staged_read_validation_error") {
+  emel::io::staged_read::sm io_staged_read_actor{};
+  emel::model::tensor::sm machine =
+      make_tensor_sm_with_io_staged_read(io_staged_read_actor);
+  std::array<emel::model::data::tensor_record, 1> tensors{};
+  uint8_t target[8]{};
+  prepare_read_storage_for_one_tensor(machine, tensors, target,
+                                      static_cast<uint64_t>(sizeof(target)));
+
+  staged_owner_state owner{};
+  constexpr char source[] = "abcdefghijklmnop";
+  emel::model::tensor::event::request_staged_load request{0, 0u, 8u};
+  request.stage_chunk_bytes = 16u;
+  request.source_buffer = source;
+  request.source_buffer_bytes = sizeof(source) - 1u;
+  request.target_buffer = target;
+  request.target_buffer_bytes = sizeof(target);
+  request.on_done = {&owner, on_request_staged_load_done};
+  request.on_error = {&owner, on_request_staged_load_error};
+
+  CHECK_FALSE(machine.process_event(request));
+  CHECK_FALSE(owner.request_done);
+  CHECK(owner.request_error);
+  CHECK(owner.request_err ==
+        emel::error::cast(emel::model::tensor::error::invalid_request));
+  CHECK(owner.request_io_err ==
+        emel::error::cast(
+            emel::io::staged_read::error::invalid_stage_contract));
+  CHECK(machine.is(stateforward::sml::state<emel::model::tensor::ready>));
+}
+
+TEST_CASE("model_tensor_owns_staged_read_residency_boundary") {
+  const std::string actions_source = read_text_file(
+      repo_root() / "src" / "emel" / "model" / "tensor" / "actions.hpp");
+  const std::string events_source = read_text_file(
+      repo_root() / "src" / "emel" / "model" / "tensor" / "events.hpp");
+  const std::array no_residency_sources{
+      "src/emel/model/loader/actions.hpp",
+      "src/emel/model/loader/context.hpp",
+      "src/emel/model/loader/detail.hpp",
+      "src/emel/model/loader/errors.hpp",
+      "src/emel/model/loader/events.hpp",
+      "src/emel/model/loader/guards.hpp",
+      "src/emel/model/loader/sm.hpp",
+      "src/emel/io/loader/actions.hpp",
+      "src/emel/io/loader/context.hpp",
+      "src/emel/io/loader/detail.hpp",
+      "src/emel/io/loader/errors.hpp",
+      "src/emel/io/loader/events.hpp",
+      "src/emel/io/loader/guards.hpp",
+      "src/emel/io/loader/sm.hpp",
+      "src/emel/io/staged_read/actions.hpp",
+      "src/emel/io/staged_read/context.hpp",
+      "src/emel/io/staged_read/detail.hpp",
+      "src/emel/io/staged_read/errors.hpp",
+      "src/emel/io/staged_read/events.hpp",
+      "src/emel/io/staged_read/guards.hpp",
+      "src/emel/io/staged_read/sm.hpp",
+  };
+  const std::string staged_source =
+      read_text_file(repo_root() / "src" / "emel" / "io" / "staged_read" /
+                     "events.hpp") +
+      read_text_file(repo_root() / "src" / "emel" / "io" / "staged_read" /
+                     "actions.hpp") +
+      read_text_file(repo_root() / "src" / "emel" / "io" / "staged_read" /
+                     "sm.hpp");
+
+  CHECK(events_source.find("struct request_staged_load") != std::string::npos);
+  CHECK(events_source.find("request_staged_load_done") != std::string::npos);
+  CHECK(events_source.find("request_staged_load_error") != std::string::npos);
+  CHECK(actions_source.find("request_staged_load") !=
+        std::string::npos);
+  CHECK(actions_source.find(
+            ".source_span = source_bytes + ev.request.file_offset") !=
+        std::string::npos);
+  CHECK(actions_source.find(".source_span_bytes = ev.request.byte_size") !=
+        std::string::npos);
+  CHECK(actions_source.find(".target_buffer = ev.request.target_buffer") !=
+        std::string::npos);
+  CHECK(actions_source.find("process_event(") != std::string::npos);
+  CHECK(actions_source.find("lifecycle::resident") !=
+        std::string::npos);
+  CHECK(staged_source.find("model/tensor") == std::string::npos);
+  CHECK(staged_source.find("lifecycle::resident") == std::string::npos);
+  for (const auto *source_path : no_residency_sources) {
+    CAPTURE(source_path);
+    const std::string source = read_text_file(repo_root() / source_path);
+    CHECK(source.find("event::lifecycle::resident") == std::string::npos);
+    CHECK(source.find("lifecycle::resident") == std::string::npos);
+  }
 }
 
 TEST_CASE("model_tensor_owns_read_copy_residency_boundary") {

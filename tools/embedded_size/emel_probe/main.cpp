@@ -19,6 +19,7 @@
 #include "emel/gguf/loader/sm.hpp"
 #include "emel/io/events.hpp"
 #include "emel/io/read/sm.hpp"
+#include "emel/io/staged_read/sm.hpp"
 #include "emel/io/source/any.hpp"
 #include "emel/logits/sampler/events.hpp"
 #include "emel/model/data.hpp"
@@ -125,7 +126,9 @@ struct emel_fixture {
   std::vector<emel::io::event::tensor_load_span> io_load_spans = {};
   emel::gguf::loader::sm gguf_loader = {};
   emel::io::read::sm io_read = {};
-  emel::io::loader::sm io_loader{{.io_read = &io_read}};
+  emel::io::staged_read::sm io_staged_read = {};
+  emel::io::loader::sm io_loader{
+      {.io_read = &io_read, .io_staged_read = &io_staged_read}};
   emel::model::tensor::sm tensor_loader = {};
   emel::model::loader::sm model_loader = {};
   gguf_capture gguf = {};
@@ -1088,7 +1091,9 @@ bool prepare_emel_fixture(emel_fixture &fixture,
       fixture.io_load_spans.data(), fixture.io_load_spans.size()};
   emel::tools::bind_model_load_io_strategy(load_ev, fixture.io_loader);
   if (load_ev.io_strategy ==
-      emel::io::loader::event::strategy_kind::read_copy) {
+          emel::io::loader::event::strategy_kind::read_copy ||
+      load_ev.io_strategy ==
+          emel::io::loader::event::strategy_kind::staged_read) {
     fixture.read_copy_storage.resize(
         static_cast<size_t>(fixture.gguf_tensor_data_bytes));
     load_ev.read_copy_storage = std::span<uint8_t>{fixture.read_copy_storage};

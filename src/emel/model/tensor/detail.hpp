@@ -8,6 +8,7 @@
 #include "emel/io/mmap/errors.hpp"
 #include "emel/io/read/errors.hpp"
 #include "emel/io/read/events.hpp"
+#include "emel/io/staged_read/errors.hpp"
 #include "emel/model/tensor/errors.hpp"
 #include "emel/model/tensor/events.hpp"
 
@@ -105,6 +106,17 @@ struct release_mapped_load_status {
   uint32_t target_handle = emel::io::mmap::k_invalid_mapping_handle;
 };
 
+struct request_staged_load_status {
+  emel::error::type err = emel::error::cast(error::none);
+  bool ok = false;
+  bool accepted = false;
+  bool io_staged_read_ok = false;
+  emel::error::type io_staged_read_err =
+      emel::error::cast(emel::io::staged_read::error::none);
+  void *buffer = nullptr;
+  uint64_t buffer_bytes = 0u;
+};
+
 struct request_mapped_load_runtime {
   const event::request_mapped_load &request;
   request_mapped_load_status &status;
@@ -118,6 +130,11 @@ struct request_read_load_runtime {
 struct release_mapped_load_runtime {
   const event::release_mapped_load &request;
   release_mapped_load_status &status;
+};
+
+struct request_staged_load_runtime {
+  const event::request_staged_load &request;
+  request_staged_load_status &status;
 };
 
 struct tensor_storage {

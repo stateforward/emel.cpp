@@ -23,6 +23,10 @@ selected_model_load_io_strategy() noexcept {
   if (std::strcmp(value, "read") == 0 || std::strcmp(value, "read_copy") == 0) {
     return emel::io::loader::event::strategy_kind::read_copy;
   }
+  if (std::strcmp(value, "staged") == 0 ||
+      std::strcmp(value, "staged_read") == 0) {
+    return emel::io::loader::event::strategy_kind::staged_read;
+  }
   if (std::strcmp(value, "mapped_file") == 0 ||
       std::strcmp(value, "mmap") == 0) {
     return emel::io::loader::event::strategy_kind::mapped_file;
@@ -42,6 +46,8 @@ inline std::string_view model_load_io_strategy_name(
     return "mapped_file";
   case emel::io::loader::event::strategy_kind::read_copy:
     return "read_copy";
+  case emel::io::loader::event::strategy_kind::staged_read:
+    return "staged_read";
   case emel::io::loader::event::strategy_kind::external_buffer:
     return "external_buffer";
   }

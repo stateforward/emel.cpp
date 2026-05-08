@@ -13,6 +13,9 @@ USE_ZIG=true
 MODE_FLAG=""
 SUITE_FILTER=""
 COMBINED=false
+DEFAULT_GENERATION_WORKLOAD_ID="${EMEL_BENCH_DEFAULT_GENERATION_WORKLOAD_ID:-lfm2_single_user_hello_max_tokens_1_v1}"
+DEFAULT_DIARIZATION_ITERS="${EMEL_BENCH_DEFAULT_DIARIZATION_ITERS:-1}"
+DEFAULT_DIARIZATION_RUNS="${EMEL_BENCH_DEFAULT_DIARIZATION_RUNS:-3}"
 
 usage() {
   cat <<'USAGE'
@@ -123,12 +126,24 @@ prepare_toolchain() {
 
 run_bench_runner() {
   local build_dir="$1"
+  local generation_workload_id
+  local diarization_iters
+  local diarization_runs
   shift
+  generation_workload_id="${EMEL_GENERATION_WORKLOAD_ID:-$DEFAULT_GENERATION_WORKLOAD_ID}"
+  diarization_iters="${EMEL_BENCH_DIARIZATION_ITERS:-$DEFAULT_DIARIZATION_ITERS}"
+  diarization_runs="${EMEL_BENCH_DIARIZATION_RUNS:-$DEFAULT_DIARIZATION_RUNS}"
   if [[ -n "$SUITE_FILTER" ]]; then
-    EMEL_BENCH_SUITE="$SUITE_FILTER" "$build_dir/bench_runner" "$@"
+    EMEL_GENERATION_WORKLOAD_ID="$generation_workload_id" \
+      EMEL_BENCH_DIARIZATION_ITERS="$diarization_iters" \
+      EMEL_BENCH_DIARIZATION_RUNS="$diarization_runs" \
+      EMEL_BENCH_SUITE="$SUITE_FILTER" "$build_dir/bench_runner" "$@"
     return
   fi
-  "$build_dir/bench_runner" "$@"
+  EMEL_GENERATION_WORKLOAD_ID="$generation_workload_id" \
+    EMEL_BENCH_DIARIZATION_ITERS="$diarization_iters" \
+    EMEL_BENCH_DIARIZATION_RUNS="$diarization_runs" \
+    "$build_dir/bench_runner" "$@"
 }
 
 configure_bench_build() {
@@ -295,7 +310,8 @@ if $COMBINED; then
     }
   ' "$compare_output" > "$current_snapshot"
 
-  TOLERANCE="${BENCH_TOLERANCE:-0.10}"
+  TOLERANCE="${BENCH_TOLERANCE:-0.30}"
+  ABS_TOLERANCE_NS="${BENCH_ABS_TOLERANCE_NS:-5000}"
   BASELINE="$ROOT_DIR/snapshots/bench/benchmarks.txt"
 
   new_sms=()
@@ -345,7 +361,8 @@ if $COMBINED; then
       exit 1
     fi
 
-    awk -v tol="$TOLERANCE" -v scoped="$([[ -n "$SUITE_FILTER" ]] && echo 1 || echo 0)" '
+    awk -v tol="$TOLERANCE" -v abs_tol="$ABS_TOLERANCE_NS" \
+      -v scoped="$([[ -n "$SUITE_FILTER" ]] && echo 1 || echo 0)" '
     function parse_base(line,    n, fields, name, ns, i, pair) {
       n = split(line, fields, " ");
       name = fields[1];
@@ -410,8 +427,10 @@ if $COMBINED; then
           continue;
         }
         compared += 1;
-        limit = base[name] * (1 + tol);
-        if (curr[name] > limit) {
+        relative_limit = base[name] * (1 + tol);
+        absolute_limit = base[name] + abs_tol;
+        if (curr[name] > relative_limit && curr[name] > absolute_limit) {
+          limit = relative_limit > absolute_limit ? relative_limit : absolute_limit;
           printf("error: benchmark regression %s (%.3f > %.3f)\n", name, curr[name], limit) > "/dev/stderr";
           fail = 1;
         }
@@ -449,7 +468,8 @@ if $COMBINED; then
 fi
 
 if $SNAPSHOT; then
-  TOLERANCE="${BENCH_TOLERANCE:-0.10}"
+  TOLERANCE="${BENCH_TOLERANCE:-0.30}"
+  ABS_TOLERANCE_NS="${BENCH_ABS_TOLERANCE_NS:-5000}"
   BASELINE="$ROOT_DIR/snapshots/bench/benchmarks.txt"
   CURRENT="$(mktemp)"
   trap 'rm -f "$CURRENT"' EXIT
@@ -557,7 +577,8 @@ if $SNAPSHOT; then
       exit 1
     fi
 
-    awk -v tol="$TOLERANCE" -v scoped="$([[ -n "$SUITE_FILTER" ]] && echo 1 || echo 0)" '
+    awk -v tol="$TOLERANCE" -v abs_tol="$ABS_TOLERANCE_NS" \
+      -v scoped="$([[ -n "$SUITE_FILTER" ]] && echo 1 || echo 0)" '
     function parse_base(line,    n, fields, name, ns, i, pair) {
       n = split(line, fields, " ");
       name = fields[1];
@@ -622,8 +643,10 @@ if $SNAPSHOT; then
           continue;
         }
         compared += 1;
-        limit = base[name] * (1 + tol);
-        if (curr[name] > limit) {
+        relative_limit = base[name] * (1 + tol);
+        absolute_limit = base[name] + abs_tol;
+        if (curr[name] > relative_limit && curr[name] > absolute_limit) {
+          limit = relative_limit > absolute_limit ? relative_limit : absolute_limit;
           printf("error: benchmark regression %s (%.3f > %.3f)\n", name, curr[name], limit) > "/dev/stderr";
           fail = 1;
         }

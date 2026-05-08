@@ -11,6 +11,7 @@ done
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BUILD_DIR="${EMEL_FUZZ_BUILD_DIR:-$ROOT_DIR/build/fuzz}"
 FUZZ_CLEAN="${EMEL_FUZZ_CLEAN:-0}"
+FUZZ_OUTER_TIMEOUT="${EMEL_FUZZ_OUTER_TIMEOUT:-30s}"
 
 detect_fuzzer_toolchain() {
   if [[ -n "${CC:-}" && -n "${CXX:-}" ]]; then
@@ -36,6 +37,15 @@ detect_fuzzer_toolchain() {
 }
 
 read -r fuzz_cc fuzz_cxx < <(detect_fuzzer_toolchain)
+fuzz_timeout_cmd=()
+if command -v timeout >/dev/null 2>&1; then
+  fuzz_timeout_cmd=(timeout "$FUZZ_OUTER_TIMEOUT")
+elif command -v gtimeout >/dev/null 2>&1; then
+  fuzz_timeout_cmd=(gtimeout "$FUZZ_OUTER_TIMEOUT")
+else
+  echo "error: timeout tool missing (install coreutils for gtimeout on macOS)" >&2
+  exit 1
+fi
 fuzz_cxx_flags=""
 fuzz_link_flags=""
 fuzz_root="$(cd "$(dirname "$fuzz_cc")/.." && pwd)"
@@ -69,8 +79,18 @@ cmake --build "$BUILD_DIR" --parallel
 run_fuzzer() {
   local name="$1"
   local corpus="$2"
+  local status=0
   mkdir -p "$corpus"
-  "$BUILD_DIR/$name" -seed=1 -max_total_time=10 -max_len=4096 "$corpus"
+  "${fuzz_timeout_cmd[@]}" \
+    "$BUILD_DIR/$name" \
+    -seed=1 \
+    -max_total_time=10 \
+    -max_len=4096 \
+    "$corpus" || status=$?
+  if [[ "$status" -eq 124 ]]; then
+    echo "error: fuzzer timed out after $FUZZ_OUTER_TIMEOUT: $name" >&2
+  fi
+  return "$status"
 }
 
 if [[ -x "$BUILD_DIR/emel_fuzz_gguf_parser" ]]; then

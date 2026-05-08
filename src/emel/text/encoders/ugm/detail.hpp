@@ -75,41 +75,6 @@ inline std::string_view ugm_token_text(const emel::model::data::vocab &vocab,
                           static_cast<size_t>(length));
 }
 
-inline void ugm_trie_insert_none(emel::text::encoders::detail::naive_trie::node &,
-                                 emel::text::encoders::detail::naive_trie &,
-                                 const uint8_t) noexcept {}
-
-inline void ugm_trie_insert_some(emel::text::encoders::detail::naive_trie::node &node,
-                                 emel::text::encoders::detail::naive_trie &trie,
-                                 const uint8_t byte) noexcept {
-  node.next[byte] = static_cast<int32_t>(trie.nodes.size());
-  trie.nodes.emplace_back();
-  trie.nodes.back().nodes_ref = &trie.nodes;
-}
-
-inline void ugm_trie_insert(emel::text::encoders::detail::naive_trie &trie,
-                            const char *text,
-                            const size_t len,
-                            const int32_t value) noexcept {
-  size_t idx = 0;
-  for (size_t i = 0; i < len; ++i) {
-    auto &node = trie.nodes[idx];
-    const uint8_t byte = static_cast<uint8_t>(text[i]);
-    const bool missing = node.next[byte] < 0;
-    using trie_insert_handler_t = void (*)(emel::text::encoders::detail::naive_trie::node &,
-                                           emel::text::encoders::detail::naive_trie &,
-                                           uint8_t) noexcept;
-    const trie_insert_handler_t trie_insert_handlers[2] = {
-        ugm_trie_insert_none,
-        ugm_trie_insert_some,
-    };
-    trie_insert_handlers[static_cast<size_t>(missing)](node, trie, byte);
-    idx = static_cast<size_t>(node.next[byte]);
-  }
-  trie.nodes[idx].has_value = true;
-  trie.nodes[idx].value = value;
-}
-
 inline const emel::text::encoders::detail::naive_trie::node *ugm_trie_root(
   const emel::text::encoders::detail::naive_trie &trie,
   const char c) noexcept {
@@ -210,7 +175,7 @@ inline void ugm_insert_token_none(emel::text::encoders::detail::naive_trie &,
 inline void ugm_insert_token_some(emel::text::encoders::detail::naive_trie &trie,
                                   const std::string_view text,
                                   const int32_t id) noexcept {
-  ugm_trie_insert(trie, text.data(), text.size(), id);
+  trie.insert(text.data(), text.size(), id);
 }
 
 inline bool rebuild_ugm_tables(emel::text::encoders::ugm::action::context &ctx,

@@ -70,8 +70,10 @@ loading via public `request_mapped_load` / `release_mapped_load` events; `emel/i
 owns mapping, slot reservation, and lifetime contracts. The read/copy strategy actor is
 implemented under `src/emel/io/read`; `model/tensor` requests read-backed loading through
 public `request_read_load` events, retains tensor residency ownership, and commits the
-caller-owned target buffer only after the maintained read/copy path succeeds. Staged/chunked,
-async, and device-specific loading strategies remain follow-on work.
+caller-owned target buffer only after the maintained read/copy path succeeds. The staged
+constrained-memory strategy actor is implemented under `src/emel/io/staged_read` and is
+routed through public `io::loader` strategy selection when staged source-span contracts are
+provided; async and device-specific loading strategies remain follow-on work.
 
 ## The name
 
@@ -163,6 +165,7 @@ environments, while Zig remains the default for day-to-day builds.
 - [`.planning/architecture/io_loader.md`](.planning/architecture/io_loader.md)
 - [`.planning/architecture/io_mmap.md`](.planning/architecture/io_mmap.md)
 - [`.planning/architecture/io_read.md`](.planning/architecture/io_read.md)
+- [`.planning/architecture/io_staged_read.md`](.planning/architecture/io_staged_read.md)
 - [`.planning/architecture/kernel_aarch64.md`](.planning/architecture/kernel_aarch64.md)
 - [`.planning/architecture/kernel_x86_64.md`](.planning/architecture/kernel_x86_64.md)
 - [`.planning/architecture/logits_sampler.md`](.planning/architecture/logits_sampler.md)

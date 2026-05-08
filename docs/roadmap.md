@@ -16,8 +16,10 @@ scaffolding decisions live in [scaffold.plan.md](plans/scaffold.plan.md).
   provides the loading strategy boundary. The mmap strategy actor under `src/emel/io/mmap`
   implements the mmap loading path with explicit validation, platform gating, slot pool,
   and deterministic unmap. The read/copy strategy actor under `src/emel/io/read` implements
-  caller-owned-buffer read/copy loading through public tensor/I/O events. Async, staged/chunked,
-  and device-specific I/O strategies remain follow-on work.
+  caller-owned-buffer read/copy loading through public tensor/I/O events. The staged
+  constrained-memory strategy actor under `src/emel/io/staged_read` is now implemented and
+  routed through public `io::loader` strategy selection. Async and device-specific I/O
+  strategies remain follow-on work.
 - [x] tools: `tools/bench` and `tools/paritychecker` parity harnesses implemented.
 - [x] jinja: templating and orchestration implemented.
 
