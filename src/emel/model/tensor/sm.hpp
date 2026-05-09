@@ -66,6 +66,15 @@ struct state_request_staged_load_unsupported_io_staged_read_error_decision {};
 struct state_request_staged_load_already_resident_error_decision {};
 struct state_request_staged_load_io_staged_read_error_decision {};
 struct state_request_staged_load_error_callback {};
+struct state_request_async_load_decision {};
+struct state_request_async_load_dispatch_decision {};
+struct state_request_async_load_progress_callback {};
+struct state_request_async_load_done_callback {};
+struct state_request_async_load_invalid_request_error_decision {};
+struct state_request_async_load_unsupported_io_async_error_decision {};
+struct state_request_async_load_already_resident_error_decision {};
+struct state_request_async_load_io_async_error_decision {};
+struct state_request_async_load_error_callback {};
 struct state_release_mapped_load_decision {};
 struct state_release_mapped_load_dispatch_decision {};
 struct state_release_mapped_load_publish_done_decision {};
@@ -632,6 +641,109 @@ struct model {
           / action::effect_record_request_staged_load_error
 
       //------------------------------------------------------------------------------//
+      // Tensor-owned cooperative async load via injected emel::io::async::sm.
+      , sml::state<state_request_async_load_decision> <= sml::state<ready>
+          + sml::event<detail::request_async_load_runtime>
+          / action::effect_begin_request_async_load
+      , sml::state<state_request_async_load_unsupported_io_async_error_decision>
+            <= sml::state<state_request_async_load_decision>
+          + sml::completion<detail::request_async_load_runtime>
+          [ guard::request_async_load_io_async_absent{} ]
+          / action::effect_mark_request_async_load_unsupported_io_async
+      , sml::state<state_request_async_load_invalid_request_error_decision>
+            <= sml::state<state_request_async_load_decision>
+          + sml::completion<detail::request_async_load_runtime>
+          [ guard::request_async_load_io_async_present_request_invalid{} ]
+          / action::effect_mark_request_async_load_invalid_request
+      , sml::state<state_request_async_load_already_resident_error_decision>
+            <= sml::state<state_request_async_load_decision>
+          + sml::completion<detail::request_async_load_runtime>
+          [ guard::request_async_load_io_async_present_request_valid_already_resident{} ]
+          / action::effect_mark_request_async_load_tensor_already_resident
+      , sml::state<state_request_async_load_dispatch_decision>
+            <= sml::state<state_request_async_load_decision>
+          + sml::completion<detail::request_async_load_runtime>
+          [ guard::request_async_load_io_async_present_request_valid_tensor_unbound{} ]
+          / action::effect_attempt_request_async_load_dispatch
+
+      , sml::state<state_request_async_load_progress_callback>
+            <= sml::state<state_request_async_load_dispatch_decision>
+          + sml::completion<detail::request_async_load_runtime>
+          [ guard::request_async_load_io_async_progressed{} ]
+          / action::effect_record_request_async_load_progress
+      , sml::state<state_request_async_load_done_callback>
+            <= sml::state<state_request_async_load_dispatch_decision>
+          + sml::completion<detail::request_async_load_runtime>
+          [ guard::request_async_load_io_async_done{} ]
+          / action::effect_commit_request_async_load
+      , sml::state<state_request_async_load_invalid_request_error_decision>
+            <= sml::state<state_request_async_load_dispatch_decision>
+          + sml::completion<detail::request_async_load_runtime>
+          [ guard::request_async_load_io_async_invalid_request{} ]
+          / action::effect_mark_request_async_load_invalid_request
+      , sml::state<state_request_async_load_unsupported_io_async_error_decision>
+            <= sml::state<state_request_async_load_dispatch_decision>
+          + sml::completion<detail::request_async_load_runtime>
+          [ guard::request_async_load_io_async_unsupported{} ]
+          / action::effect_mark_request_async_load_unsupported_io_async
+      , sml::state<state_request_async_load_io_async_error_decision>
+            <= sml::state<state_request_async_load_dispatch_decision>
+          + sml::completion<detail::request_async_load_runtime>
+          [ guard::request_async_load_io_async_other_failed{} ]
+          / action::effect_mark_request_async_load_io_async_failed
+
+      , sml::state<ready> <= sml::state<state_request_async_load_progress_callback>
+          + sml::completion<detail::request_async_load_runtime>
+          / action::effect_publish_request_async_load_progress_done
+      , sml::state<ready> <= sml::state<state_request_async_load_done_callback>
+          + sml::completion<detail::request_async_load_runtime>
+          / action::effect_publish_request_async_load_done
+
+      , sml::state<state_request_async_load_error_callback>
+            <= sml::state<state_request_async_load_invalid_request_error_decision>
+          + sml::completion<detail::request_async_load_runtime>
+          [ guard::request_async_load_error_callback_present{} ]
+          / action::effect_publish_request_async_load_error
+      , sml::state<ready>
+            <= sml::state<state_request_async_load_invalid_request_error_decision>
+          + sml::completion<detail::request_async_load_runtime>
+          [ guard::request_async_load_error_callback_absent{} ]
+          / action::effect_record_request_async_load_error
+      , sml::state<state_request_async_load_error_callback>
+            <= sml::state<state_request_async_load_unsupported_io_async_error_decision>
+          + sml::completion<detail::request_async_load_runtime>
+          [ guard::request_async_load_error_callback_present{} ]
+          / action::effect_publish_request_async_load_error
+      , sml::state<ready>
+            <= sml::state<state_request_async_load_unsupported_io_async_error_decision>
+          + sml::completion<detail::request_async_load_runtime>
+          [ guard::request_async_load_error_callback_absent{} ]
+          / action::effect_record_request_async_load_error
+      , sml::state<state_request_async_load_error_callback>
+            <= sml::state<state_request_async_load_already_resident_error_decision>
+          + sml::completion<detail::request_async_load_runtime>
+          [ guard::request_async_load_error_callback_present{} ]
+          / action::effect_publish_request_async_load_error
+      , sml::state<ready>
+            <= sml::state<state_request_async_load_already_resident_error_decision>
+          + sml::completion<detail::request_async_load_runtime>
+          [ guard::request_async_load_error_callback_absent{} ]
+          / action::effect_record_request_async_load_error
+      , sml::state<state_request_async_load_error_callback>
+            <= sml::state<state_request_async_load_io_async_error_decision>
+          + sml::completion<detail::request_async_load_runtime>
+          [ guard::request_async_load_error_callback_present{} ]
+          / action::effect_publish_request_async_load_error
+      , sml::state<ready>
+            <= sml::state<state_request_async_load_io_async_error_decision>
+          + sml::completion<detail::request_async_load_runtime>
+          [ guard::request_async_load_error_callback_absent{} ]
+          / action::effect_record_request_async_load_error
+      , sml::state<ready> <= sml::state<state_request_async_load_error_callback>
+          + sml::completion<detail::request_async_load_runtime>
+          / action::effect_record_request_async_load_error
+
+      //------------------------------------------------------------------------------//
       // Tensor-owned mmap release.
       , sml::state<state_release_mapped_load_decision> <= sml::state<ready>
           + sml::event<detail::release_mapped_load_runtime>
@@ -856,6 +968,30 @@ struct model {
           + sml::unexpected_event<sml::_> / action::on_unexpected
       , sml::state<ready> <= sml::state<state_request_staged_load_error_callback>
           + sml::unexpected_event<sml::_> / action::on_unexpected
+      , sml::state<ready> <= sml::state<state_request_async_load_decision>
+          + sml::unexpected_event<sml::_> / action::on_unexpected
+      , sml::state<ready>
+            <= sml::state<state_request_async_load_dispatch_decision>
+          + sml::unexpected_event<sml::_> / action::on_unexpected
+      , sml::state<ready>
+            <= sml::state<state_request_async_load_progress_callback>
+          + sml::unexpected_event<sml::_> / action::on_unexpected
+      , sml::state<ready> <= sml::state<state_request_async_load_done_callback>
+          + sml::unexpected_event<sml::_> / action::on_unexpected
+      , sml::state<ready>
+            <= sml::state<state_request_async_load_invalid_request_error_decision>
+          + sml::unexpected_event<sml::_> / action::on_unexpected
+      , sml::state<ready>
+            <= sml::state<state_request_async_load_unsupported_io_async_error_decision>
+          + sml::unexpected_event<sml::_> / action::on_unexpected
+      , sml::state<ready>
+            <= sml::state<state_request_async_load_already_resident_error_decision>
+          + sml::unexpected_event<sml::_> / action::on_unexpected
+      , sml::state<ready>
+            <= sml::state<state_request_async_load_io_async_error_decision>
+          + sml::unexpected_event<sml::_> / action::on_unexpected
+      , sml::state<ready> <= sml::state<state_request_async_load_error_callback>
+          + sml::unexpected_event<sml::_> / action::on_unexpected
       , sml::state<ready> <= sml::state<state_release_mapped_load_decision>
           + sml::unexpected_event<sml::_> / action::on_unexpected
       , sml::state<ready>
@@ -899,6 +1035,8 @@ struct sm : public emel::sm<model, action::context> {
       : base_type(make_context_with_io_read(io_read_actor)) {}
   explicit sm(emel::io::staged_read::sm *io_staged_read_actor)
       : base_type(make_context_with_io_staged_read(io_staged_read_actor)) {}
+  explicit sm(emel::io::async::sm *io_async_actor)
+      : base_type(make_context_with_io_async(io_async_actor)) {}
   sm(emel::io::mmap::sm *io_mmap_actor, emel::io::read::sm *io_read_actor)
       : base_type(make_context_with_io_mmap_and_io_read(io_mmap_actor,
                                                         io_read_actor)) {}
@@ -966,6 +1104,13 @@ struct sm : public emel::sm<model, action::context> {
     return accepted && status.ok;
   }
 
+  bool process_event(const event::request_async_load &ev) {
+    detail::request_async_load_status status{};
+    detail::request_async_load_runtime runtime{ev, status};
+    const bool accepted = base_type::process_event(runtime);
+    return accepted && status.ok;
+  }
+
   bool process_event(const event::release_mapped_load &ev) {
     detail::release_mapped_load_status status{};
     detail::release_mapped_load_runtime runtime{ev, status};
@@ -995,6 +1140,13 @@ private:
     return ctx;
   }
 
+  static action::context
+  make_context_with_io_async(emel::io::async::sm *io_async_actor) noexcept {
+    action::context ctx{};
+    ctx.io_async = io_async_actor;
+    return ctx;
+  }
+
   static action::context make_context_with_io_mmap_and_io_read(
       emel::io::mmap::sm *io_mmap_actor,
       emel::io::read::sm *io_read_actor) noexcept {
@@ -1003,7 +1155,6 @@ private:
     ctx.io_read = io_read_actor;
     return ctx;
   }
-
 };
 
 } // namespace emel::model::tensor

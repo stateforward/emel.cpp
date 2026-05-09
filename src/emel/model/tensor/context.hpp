@@ -17,6 +17,10 @@ namespace emel::io::staged_read {
 struct sm;
 } // namespace emel::io::staged_read
 
+namespace emel::io::async {
+struct sm;
+} // namespace emel::io::async
+
 namespace emel::model::tensor::action {
 
 struct context {
@@ -24,6 +28,7 @@ struct context {
   emel::io::mmap::sm *io_mmap = nullptr;
   emel::io::read::sm *io_read = nullptr;
   emel::io::staged_read::sm *io_staged_read = nullptr;
+  emel::io::async::sm *io_async = nullptr;
 };
 
 } // namespace emel::model::tensor::action

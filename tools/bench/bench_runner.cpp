@@ -49,6 +49,18 @@ std::int32_t generation_flash_evidence_emel_logits_calls() noexcept;
 std::int32_t generation_flash_evidence_reference_decode_calls() noexcept;
 std::int32_t generation_flash_evidence_reference_logits_calls() noexcept;
 std::string_view generation_architecture_contract() noexcept;
+bool generation_load_profile_ready() noexcept;
+std::string_view generation_load_profile_kind() noexcept;
+std::string_view generation_load_profile_source_residency() noexcept;
+std::string_view generation_load_profile_strategy() noexcept;
+std::uint64_t generation_load_profile_model_file_bytes() noexcept;
+std::uint64_t generation_load_profile_tensor_data_bytes() noexcept;
+std::uint64_t generation_load_profile_effective_ram_constraint_bytes() noexcept;
+std::uint64_t generation_load_profile_async_chunk_bytes() noexcept;
+std::uint64_t generation_load_profile_peak_resident_bytes() noexcept;
+std::uint64_t generation_load_profile_load_dispatches() noexcept;
+std::uint64_t generation_load_profile_progress_dispatches() noexcept;
+std::uint64_t generation_load_profile_load_elapsed_ns() noexcept;
 std::size_t generation_stage_probe_count() noexcept;
 generation_stage_probe generation_stage_probe_at(std::size_t index) noexcept;
 
@@ -773,6 +785,38 @@ void print_compare(const std::vector<bench::result> & emel_results,
                 shared_q4_dispatch_calls,
                 optimized_q6_dispatch_calls,
                 shared_q6_dispatch_calls);
+    if (bench::generation_load_profile_ready()) {
+      const auto profile_kind = bench::generation_load_profile_kind();
+      const auto source_residency =
+          bench::generation_load_profile_source_residency();
+      const auto load_strategy = bench::generation_load_profile_strategy();
+      std::printf("# generation_load_profile: case=%.*s profile_kind=%.*s"
+                  " load_strategy=%.*s source_residency=%.*s"
+                  " model_file_bytes=%" PRIu64
+                  " tensor_data_bytes=%" PRIu64
+                  " effective_ram_constraint_bytes=%" PRIu64
+                  " async_chunk_bytes=%" PRIu64
+                  " peak_resident_bytes=%" PRIu64
+                  " load_dispatches=%" PRIu64
+                  " progress_dispatches=%" PRIu64
+                  " load_elapsed_ns=%" PRIu64 "\n",
+                  static_cast<int>(bench::k_generation_case_name.size()),
+                  bench::k_generation_case_name.data(),
+                  static_cast<int>(profile_kind.size()),
+                  profile_kind.data(),
+                  static_cast<int>(load_strategy.size()),
+                  load_strategy.data(),
+                  static_cast<int>(source_residency.size()),
+                  source_residency.data(),
+                  bench::generation_load_profile_model_file_bytes(),
+                  bench::generation_load_profile_tensor_data_bytes(),
+                  bench::generation_load_profile_effective_ram_constraint_bytes(),
+                  bench::generation_load_profile_async_chunk_bytes(),
+                  bench::generation_load_profile_peak_resident_bytes(),
+                  bench::generation_load_profile_load_dispatches(),
+                  bench::generation_load_profile_progress_dispatches(),
+                  bench::generation_load_profile_load_elapsed_ns());
+    }
     for (std::size_t idx = 0; idx < bench::generation_stage_probe_count(); ++idx) {
       const auto probe = bench::generation_stage_probe_at(idx);
       if (probe.name.empty()) {

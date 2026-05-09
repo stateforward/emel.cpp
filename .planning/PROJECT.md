@@ -16,30 +16,53 @@ before widening API surface or model scope.
 
 ## Current State
 
-Current milestone: `v1.26 I/O Staged Read Loading Strategy` (GitHub issue #63)
+Current milestone: planning next milestone
 
-Latest shipped milestone: `v1.25 I/O Read Loading Strategy`
+Latest completed milestone: `v1.27 co_sm Cooperative Async I/O Strategy`
 
-Status: `v1.25` shipped on 2026-05-06 after Phase 225 review-fix cleanup and a
-refreshed source-backed milestone audit passed. The repo now ships the issue #62 read/copy
-strategy path beneath the existing `src/emel/io` boundary while preserving
-tensor-owned residency. `src/emel/io/read` is the canonical read/copy actor,
-`model/tensor` owns the target buffer and residency commit, and maintained
-loader/tool lanes select/report read/copy through public runtime surfaces.
-Maintained source-byte loading for benchmark, paritychecker, and embedded probe
-evidence now uses the public `emel::io::source::load_file_bytes` setup-time
-contract instead of actor-internal `io/read/detail.hpp`. Phase 224 also
-confirmed Phase 214 is historical, clarified the direct `request_read_load`
-coverage shape, and captured fresh passing `emel_tests_io` evidence before
-archive.
+Status: `v1.27` completed on 2026-05-09 after a final source-backed milestone
+audit passed with 32/32 requirements satisfied. The repo now ships the first
+real repository use of `stateforward::sml`
+coroutine orchestration via `co_sm` / async dispatch for a separate cooperative
+async I/O loading strategy. The milestone codifies the coroutine actor contract,
+keeps resumable progress explicit, and avoids reintroducing hidden mailboxes,
+retained stack-backed spans, or callback storage that violates the existing
+actor/lifetime rules.
 
-Planning for `v1.26` (issue #63) adds a bounded `src/emel/io/staged_read`
-Stateforward.SML actor for constrained-memory chunked/staged tensor loads,
-integrated through the existing tensor-to-I/O boundary from issue #60, without
-moving tensor residency ownership out of `model/tensor` and without cooperative
-coroutine scheduling unless separately approved.
+## Latest Completed Milestone: v1.27 co_sm Cooperative Async I/O Strategy
 
-## Current Milestone: v1.26 I/O Staged Read Loading Strategy
+**Goal:** Add a separate `co_sm`-based cooperative async I/O strategy for
+resumable tensor loading under `src/emel/io`, integrated through the existing
+tensor-owned loading architecture and I/O boundary, without regressing the
+shipped mmap, read/copy, or staged-read synchronous strategies.
+
+**Source:** GitHub issue #64, "Add co_sm-based cooperative async io strategy for
+resumable tensor loading" (blocked historically by issue #56; depends on issue
+#59 tensor ownership, issue #60 I/O boundary, and follows issue #63 staged read).
+
+**Target features:**
+- Coroutine actor contract for EMEL `co_sm` use: documented SML rules, lifecycle
+  constraints, no hidden mailbox semantics, no public C ABI exposure of coroutine
+  task/scheduler types, and deterministic trace expectations.
+- Dedicated cooperative async I/O strategy under `src/emel/io`, separate from
+  `io/mmap`, `io/read`, and `io/staged_read`, with canonical component layout,
+  events, guards, actions, errors, context, and public aliases.
+- Explicit suspend/resume progress semantics for bounded forward loading
+  progress, including deterministic partial-progress, completion, cancellation
+  or rejection, and error propagation behavior.
+- Suspension-safe request/progress ownership: no borrowed stack-backed request
+  spans or mutable references retained across suspension, and no stored
+  synchronous callbacks invoked later outside the original RTC contract.
+- Tensor integration through the public `model/tensor -> emel/io` boundary while
+  `model/tensor` remains the tensor lifecycle and residency owner.
+- Maintained tests, docs, guardrails, lint snapshots, benchmark/parity reporting,
+  and quality-gate evidence that prove async behavior and protect shipped
+  synchronous loading strategies from regression.
+- Maintained constrained-RAM profiling evidence through the public model-loader
+  -> `io/loader` -> tensor path, with truthful source residency and chunk/window
+  reporting for `cooperative_async`.
+
+## Latest Completed Milestone: v1.26 I/O Staged Read Loading Strategy
 
 **Goal:** Add a dedicated `io/staged_read` Stateforward.SML strategy actor under
 `src/emel/io` so tensor-owned model loading can request bounded staging/chunked
@@ -51,24 +74,18 @@ cooperative scheduling, or device strategy behavior into this issue.
 constrained-memory tensor loading" (depends on issue #60 boundary; follows
 v1.24 mmap and v1.25 read/copy strategy milestones).
 
-**Target features:**
-- Dedicated `src/emel/io/staged_read` machine: events, guards, actions, context,
-  errors, and public aliases following `AGENTS.md` / `docs/rules/sml.rules.md`
-  (destination-first transitions, no dispatch-local context handoff, explicit
-  guard-modeled validation and chunk/stage policy).
-- Tensor-to-I/O integration that lets `model/tensor` request staged read loading
-  through the public `emel/io` boundary while `model/tensor` remains the
-  residency lifecycle owner; the staged strategy never takes residency
-  ownership of the target tensor buffer.
-- Deterministic multi-stage progress: explicit success, chunk/short-read,
-  validation, platform-unsupported, and file errors surfaced through states and
-  events without hidden behavior selection in actions or `detail` helpers.
-- RTC-safe externalization of blocking filesystem work per project conventions;
-  bounded transient resources per stage; no handle pool retained across dispatch
-  boundaries beyond what prior I/O actors allow.
-- Maintained tests, docs, lint snapshots, benchmark snapshots, and model
-  artifacts updated from maintained commands when required; public reporting
-  reflects actual staged-read runtime usage.
+**Delivered:**
+- Added the canonical `src/emel/io/staged_read` machine with component-local
+  context, events, guards, actions, errors, and `emel::io::staged_read::sm`
+  ownership.
+- Modeled source span, target window, stage/chunk, platform, and error outcomes
+  through explicit guards and transitions before any accepted staged copy.
+- Proved deterministic monotone staged copy progress and terminal success through
+  public `process_event(...)` dispatch and SML state inspection.
+- Integrated staged loads through `model/tensor` and `io/loader` while keeping
+  tensor residency lifecycle owned by `model/tensor`.
+- Repaired the direct tensor staged-load nonzero-offset source-window contract in
+  Phase 237 and reconciled final audit/reporting truth in Phase 238.
 
 ## Latest Shipped Milestone: v1.25 I/O Read Loading Strategy
 
@@ -446,12 +463,22 @@ truth anchor and without broadening into generic Liquid-family support.
 
 ### Active
 
-- v1.26 defines scoped staged/chunked constrained-memory loading under
-  `src/emel/io/staged_read` with tensor-owned residency (see
+- v1.27 defines the first approved `co_sm` / cooperative async I/O loading
+  strategy under `src/emel/io`, with explicit coroutine actor rules,
+  suspension-safe request/progress ownership, bounded resumable progress, and
+  tensor-owned residency preserved through the public I/O boundary (see
   `.planning/REQUIREMENTS.md` and `.planning/ROADMAP.md`).
 
 ### Recently Validated
 
+- v1.26 added a dedicated `src/emel/io/staged_read` Stateforward.SML strategy
+  actor for constrained-memory staged source-span tensor loading.
+- v1.26 integrated staged-load residency requests through the public
+  tensor-to-I/O boundary while `model/tensor` remains the tensor lifecycle and
+  residency owner.
+- v1.26 modeled staged validation, monotone progress, deterministic success,
+  source-contract errors, and scope guardrails as explicit guard/state/event
+  behavior without hidden coroutine scheduling.
 - v1.25 added a dedicated `src/emel/io/read` Stateforward.SML strategy actor for read/copy
   tensor loading.
 - v1.25 integrated read-backed residency requests through the public tensor-to-I/O boundary
@@ -461,9 +488,9 @@ truth anchor and without broadening into generic Liquid-family support.
   helpers.
 - v1.25 kept mmap changes, staged/chunked read policy, device-specific loading, cooperative
   async loading, new model families, and broad public API expansion out of scope.
-- v1.26 is the dedicated follow-on for staged/chunked constrained-memory reads; it keeps
-  cooperative coroutine scheduling and device-specific strategies out of scope unless
-  separately approved and must not regress shipped mmap or bulk `io/read` semantics.
+- v1.27 is the dedicated follow-on for cooperative coroutine scheduling. It must
+  not regress shipped mmap, bulk `io/read`, or staged-read semantics, and it
+  must not broaden into device-specific loading strategies.
 
 ### Validated
 
@@ -622,10 +649,10 @@ truth anchor and without broadening into generic Liquid-family support.
 ## Context
 
 This remains a brownfield repository with an existing codebase map under `.planning/codebase/`.
-The repo stays governed by `AGENTS.md` and `docs/rules/sml.rules.md`. `v1.25` is
-the latest shipped I/O milestone; `v1.26` plans constrained-memory staged reads
-below the same boundary. Earlier shipped work includes quality gate optimization
-(`v1.21`) with manifest-backed selective runners,
+The repo stays governed by `AGENTS.md` and `docs/rules/sml.rules.md`. `v1.26` is
+the latest completed I/O milestone; `v1.27` plans cooperative async loading on
+top of the same tensor-owned residency and `emel/io` boundaries. Earlier shipped
+work includes quality gate optimization (`v1.21`) with manifest-backed selective runners,
 conservative fallback, and parallel lane reporting. The current maintained state includes repo-owned
 EMEL generation, embedding, diarization, and Whisper ASR lanes plus pluggable parity and benchmark
 tooling that publishes through canonical compare/benchmark contracts without shared runtime state.
@@ -635,8 +662,10 @@ mandatory validation or change benchmark/parity semantics. `v1.22` shipped from 
 `model/tensor` the canonical owner of tensor load, bind, evict, and residency behavior. `v1.23`
 shipped from issue #60 and added the missing `emel/io` orchestration boundary under tensor-owned
 residency while deferring concrete strategy machines to follow-on milestones (mmap #61,
-read/copy #62, staged read #63). `v1.24` shipped mmap; `v1.25` shipped bulk read/copy. `v1.26`
-owns constrained-memory staged reads under issue #63.
+read/copy #62, staged read #63, cooperative async #64). `v1.24` shipped mmap;
+`v1.25` shipped bulk read/copy. `v1.26` shipped constrained-memory staged reads
+under issue #63, and `v1.27` owns the approved first `co_sm` cooperative async
+loading experiment under issue #64.
 
 ## Constraints
 
@@ -681,12 +710,19 @@ owns constrained-memory staged reads under issue #63.
   `src/emel/io/staged_read` beneath tensor-owned residency. It must not regress shipped mmap or
   bulk read/copy strategy machines, introduce cooperative coroutine scheduling, add device-specific
   strategies, or move tensor residency ownership out of `model/tensor`.
+- **Cooperative async I/O scope**: `v1.27` implements a separate `co_sm`-based
+  cooperative async loading strategy beneath tensor-owned residency. It must
+  first codify coroutine actor rules, keep suspend/resume behavior explicit and
+  deterministic, avoid retaining stack-backed request data across suspension,
+  avoid stored callbacks outside the same RTC contract, preserve the shipped
+  synchronous strategies, and avoid device-specific strategy work.
 
 ## Key Decisions
 
 | Decision | Rationale | Outcome |
 |----------|-----------|---------|
-| Start v1.26 from GitHub issue #63 as the `io/staged_read` constrained-memory milestone | v1.25 shipped bulk read/copy; constrained-memory staging is the next narrow strategy slice under tensor-owned residency and the issue #60 boundary | ⏳ Planned |
+| Start v1.27 from GitHub issue #64 as the first `co_sm` cooperative async I/O milestone | v1.26 shipped the synchronous staged-read strategy and issue #64 is the approved follow-on experiment for resumable loading with `stateforward::sml` coroutine support; the repo needs rules and tests before relying on coroutine orchestration | ✓ Shipped |
+| Start v1.26 from GitHub issue #63 as the `io/staged_read` constrained-memory milestone | v1.25 shipped bulk read/copy; constrained-memory staging is the next narrow strategy slice under tensor-owned residency and the issue #60 boundary | ✓ Complete |
 | Start v1.25 from GitHub issue #62 as the `io/read` loading strategy milestone | v1.24 shipped the mmap strategy and left read/copy as the next narrow concrete strategy path beneath tensor-owned residency | ✓ Shipped |
 | Start v1.24 from GitHub issue #61 as the `io/mmap` loading strategy milestone | v1.23 established the `emel/io` strategy boundary and explicitly deferred concrete mmap behavior; issue #61 is the next narrow strategy path to land beneath tensor-owned residency | ✓ Shipped |
 | Start v1.23 from GitHub issue #60 as the `emel/io` boundary milestone | v1.22 moved tensor residency ownership into `model/tensor`; the next architecture step is the explicit I/O strategy seam beneath tensor-owned residency before concrete mmap or staged strategy work lands | Phase 203 closeout cleanup |
@@ -745,4 +781,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-05-07 after starting v1.26 I/O staged read loading strategy milestone (issue #63)*
+*Last updated: 2026-05-09 after Phase 252 constrained-RAM profiling evidence for v1.27 (issue #64)*

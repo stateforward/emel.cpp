@@ -18,6 +18,9 @@ struct state_unsupported_strategy_error_decision {};
 struct state_error_callback {};
 struct state_read_dispatch_decision {};
 struct state_staged_read_dispatch_decision {};
+struct state_async_dispatch_decision {};
+struct state_async_progress_decision {};
+struct state_async_progress_callback {};
 struct state_done_decision {};
 struct state_done_callback {};
 struct state_batch_request_decision {};
@@ -25,6 +28,9 @@ struct state_batch_unsupported_strategy_error_decision {};
 struct state_batch_error_callback {};
 struct state_batch_read_dispatch_decision {};
 struct state_batch_staged_read_dispatch_decision {};
+struct state_batch_async_dispatch_decision {};
+struct state_batch_async_progress_decision {};
+struct state_batch_async_progress_callback {};
 struct state_batch_done_decision {};
 struct state_batch_done_callback {};
 
@@ -59,10 +65,20 @@ struct model {
           + sml::completion<detail::load_tensor_runtime>
           [ guard::strategy_staged_read_with_actor_and_source_span_valid{} ]
           / action::effect_dispatch_staged_read_tensor
+      , sml::state<state_async_dispatch_decision> <=
+          sml::state<state_request_decision>
+          + sml::completion<detail::load_tensor_runtime>
+          [ guard::strategy_cooperative_async_with_actor_and_source_span_valid{} ]
+          / action::effect_dispatch_async_tensor
       , sml::state<state_no_strategy_error_decision> <=
           sml::state<state_request_decision>
           + sml::completion<detail::load_tensor_runtime>
           [ guard::strategy_staged_read_with_actor_and_source_span_invalid{} ]
+          / action::effect_mark_invalid_request
+      , sml::state<state_no_strategy_error_decision> <=
+          sml::state<state_request_decision>
+          + sml::completion<detail::load_tensor_runtime>
+          [ guard::strategy_cooperative_async_with_actor_and_source_span_invalid{} ]
           / action::effect_mark_invalid_request
       , sml::state<state_unsupported_strategy_error_decision> <=
           sml::state<state_request_decision>
@@ -73,6 +89,11 @@ struct model {
           sml::state<state_request_decision>
           + sml::completion<detail::load_tensor_runtime>
           [ guard::strategy_staged_read_without_actor{} ]
+          / action::effect_mark_unsupported_strategy
+      , sml::state<state_unsupported_strategy_error_decision> <=
+          sml::state<state_request_decision>
+          + sml::completion<detail::load_tensor_runtime>
+          [ guard::strategy_cooperative_async_without_actor{} ]
           / action::effect_mark_unsupported_strategy
       , sml::state<state_unsupported_strategy_error_decision> <=
           sml::state<state_request_decision>
@@ -103,9 +124,35 @@ struct model {
           sml::state<state_staged_read_dispatch_decision>
           + sml::completion<detail::load_tensor_runtime>
           [ guard::read_load_failed{} ]
+      , sml::state<state_done_decision> <=
+          sml::state<state_async_dispatch_decision>
+          + sml::completion<detail::load_tensor_runtime>
+          [ guard::async_load_succeeded{} ]
+      , sml::state<state_async_progress_decision> <=
+          sml::state<state_async_dispatch_decision>
+          + sml::completion<detail::load_tensor_runtime>
+          [ guard::async_load_progressed{} ]
+      , sml::state<state_unsupported_strategy_error_decision> <=
+          sml::state<state_async_dispatch_decision>
+          + sml::completion<detail::load_tensor_runtime>
+          [ guard::async_load_failed{} ]
 
       //------------------------------------------------------------------------------//
       // Completion/error publication is explicit even before concrete strategies exist.
+      , sml::state<state_async_progress_callback> <=
+          sml::state<state_async_progress_decision>
+          + sml::completion<detail::load_tensor_runtime>
+          [ guard::progress_callback_present{} ]
+          / action::effect_publish_load_tensor_progress
+      , sml::state<state_ready> <=
+          sml::state<state_async_progress_decision>
+          + sml::completion<detail::load_tensor_runtime>
+          [ guard::progress_callback_absent{} ]
+          / action::effect_record_load_tensor_progress
+      , sml::state<state_ready> <= sml::state<state_async_progress_callback>
+          + sml::completion<detail::load_tensor_runtime>
+          / action::effect_record_load_tensor_progress
+
       , sml::state<state_done_callback> <= sml::state<state_done_decision>
           + sml::completion<detail::load_tensor_runtime>
           [ guard::done_callback_present{} ]
@@ -162,10 +209,20 @@ struct model {
           + sml::completion<detail::load_tensor_batch_runtime>
           [ guard::strategy_staged_read_batch_with_actor_and_source_span_valid{} ]
           / action::effect_dispatch_staged_read_tensor_batch
+      , sml::state<state_batch_async_dispatch_decision> <=
+          sml::state<state_batch_request_decision>
+          + sml::completion<detail::load_tensor_batch_runtime>
+          [ guard::strategy_cooperative_async_batch_with_actor_and_source_span_valid{} ]
+          / action::effect_dispatch_async_tensor_batch
       , sml::state<state_batch_unsupported_strategy_error_decision> <=
           sml::state<state_batch_request_decision>
           + sml::completion<detail::load_tensor_batch_runtime>
           [ guard::strategy_staged_read_batch_with_actor_and_source_span_invalid{} ]
+          / action::effect_mark_load_tensor_batch_invalid_request
+      , sml::state<state_batch_unsupported_strategy_error_decision> <=
+          sml::state<state_batch_request_decision>
+          + sml::completion<detail::load_tensor_batch_runtime>
+          [ guard::strategy_cooperative_async_batch_with_actor_and_source_span_invalid{} ]
           / action::effect_mark_load_tensor_batch_invalid_request
       , sml::state<state_batch_unsupported_strategy_error_decision> <=
           sml::state<state_batch_request_decision>
@@ -180,6 +237,11 @@ struct model {
       , sml::state<state_batch_unsupported_strategy_error_decision> <=
           sml::state<state_batch_request_decision>
           + sml::completion<detail::load_tensor_batch_runtime>
+          [ guard::strategy_cooperative_async_batch_without_actor{} ]
+          / action::effect_mark_load_tensor_batch_unsupported_strategy
+      , sml::state<state_batch_unsupported_strategy_error_decision> <=
+          sml::state<state_batch_request_decision>
+          + sml::completion<detail::load_tensor_batch_runtime>
           / action::effect_mark_load_tensor_batch_unsupported_strategy
 
       , sml::state<state_batch_done_decision> <=
@@ -200,9 +262,37 @@ struct model {
           + sml::completion<detail::load_tensor_batch_runtime>
           [ guard::read_batch_failed{} ]
           / action::effect_record_read_tensor_batch_failed
+      , sml::state<state_batch_done_decision> <=
+          sml::state<state_batch_async_dispatch_decision>
+          + sml::completion<detail::load_tensor_batch_runtime>
+          [ guard::async_batch_succeeded{} ]
+      , sml::state<state_batch_async_progress_decision> <=
+          sml::state<state_batch_async_dispatch_decision>
+          + sml::completion<detail::load_tensor_batch_runtime>
+          [ guard::async_batch_progressed{} ]
+      , sml::state<state_batch_unsupported_strategy_error_decision> <=
+          sml::state<state_batch_async_dispatch_decision>
+          + sml::completion<detail::load_tensor_batch_runtime>
+          [ guard::async_batch_failed{} ]
+          / action::effect_record_read_tensor_batch_failed
 
       //------------------------------------------------------------------------------//
       // Batch completion/error publication.
+      , sml::state<state_batch_async_progress_callback> <=
+          sml::state<state_batch_async_progress_decision>
+          + sml::completion<detail::load_tensor_batch_runtime>
+          [ guard::batch_progress_callback_present{} ]
+          / action::effect_publish_load_tensor_batch_progress
+      , sml::state<state_ready> <=
+          sml::state<state_batch_async_progress_decision>
+          + sml::completion<detail::load_tensor_batch_runtime>
+          [ guard::batch_progress_callback_absent{} ]
+          / action::effect_record_load_tensor_batch_progress
+      , sml::state<state_ready> <=
+          sml::state<state_batch_async_progress_callback>
+          + sml::completion<detail::load_tensor_batch_runtime>
+          / action::effect_record_load_tensor_batch_progress
+
       , sml::state<state_batch_done_callback> <=
           sml::state<state_batch_done_decision>
           + sml::completion<detail::load_tensor_batch_runtime>
@@ -247,6 +337,14 @@ struct model {
       , sml::state<state_ready> <=
           sml::state<state_staged_read_dispatch_decision>
           + sml::unexpected_event<sml::_> / action::effect_on_unexpected
+      , sml::state<state_ready> <= sml::state<state_async_dispatch_decision>
+          + sml::unexpected_event<sml::_> / action::effect_on_unexpected
+      , sml::state<state_ready> <=
+          sml::state<state_async_progress_decision>
+          + sml::unexpected_event<sml::_> / action::effect_on_unexpected
+      , sml::state<state_ready> <=
+          sml::state<state_async_progress_callback>
+          + sml::unexpected_event<sml::_> / action::effect_on_unexpected
       , sml::state<state_ready> <= sml::state<state_done_decision>
           + sml::unexpected_event<sml::_> / action::effect_on_unexpected
       , sml::state<state_ready> <= sml::state<state_done_callback>
@@ -263,6 +361,15 @@ struct model {
           + sml::unexpected_event<sml::_> / action::effect_on_unexpected
       , sml::state<state_ready> <=
           sml::state<state_batch_staged_read_dispatch_decision>
+          + sml::unexpected_event<sml::_> / action::effect_on_unexpected
+      , sml::state<state_ready> <=
+          sml::state<state_batch_async_dispatch_decision>
+          + sml::unexpected_event<sml::_> / action::effect_on_unexpected
+      , sml::state<state_ready> <=
+          sml::state<state_batch_async_progress_decision>
+          + sml::unexpected_event<sml::_> / action::effect_on_unexpected
+      , sml::state<state_ready> <=
+          sml::state<state_batch_async_progress_callback>
           + sml::unexpected_event<sml::_> / action::effect_on_unexpected
       , sml::state<state_ready> <= sml::state<state_batch_done_decision>
           + sml::unexpected_event<sml::_> / action::effect_on_unexpected
@@ -284,14 +391,14 @@ struct sm : public emel::sm<model, action::context> {
     detail::runtime_status ctx{};
     detail::load_tensor_runtime runtime{ev, ctx};
     const bool accepted = base_type::process_event(runtime);
-    return accepted && ctx.ok;
+    return accepted && (ctx.ok || ctx.partial || ctx.done);
   }
 
   bool process_event(const event::load_tensor_batch &ev) {
     detail::batch_runtime_status status{};
     detail::load_tensor_batch_runtime runtime{ev, status};
     const bool accepted = base_type::process_event(runtime);
-    return accepted && status.ok;
+    return accepted && (status.ok || status.partial || status.done);
   }
 };
 

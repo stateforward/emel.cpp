@@ -29,9 +29,10 @@
 #include "emel/gguf/loader/sm.hpp"
 #include "emel/io/events.hpp"
 #include "emel/io/read/sm.hpp"
-#include "emel/io/staged_read/sm.hpp"
 #include "emel/io/source/any.hpp"
+#include "emel/io/staged_read/sm.hpp"
 #include "emel/logits/sampler/events.hpp"
+#include "emel/machines.hpp"
 #include "emel/model/data.hpp"
 #include "emel/model/detail.hpp"
 #include "emel/model/loader/errors.hpp"
@@ -408,9 +409,17 @@ struct gguf_capture {
 struct load_capture {
   bool done = false;
   bool error = false;
+  bool progress = false;
   emel::error::type err = emel::error::cast(emel::model::loader::error::none);
   uint64_t bytes_total = 0u;
   uint64_t bytes_done = 0u;
+  uint64_t bytes_delta = 0u;
+  uint64_t progress_dispatches = 0u;
+  uint64_t load_dispatches = 0u;
+  uint64_t load_elapsed_ns = 0u;
+  uint64_t async_chunk_bytes = 0u;
+  uint64_t effective_ram_constraint_bytes = 0u;
+  uint64_t peak_resident_bytes = 0u;
   bool used_mmap = false;
   emel::io::loader::event::strategy_kind requested_io_strategy =
       emel::io::loader::event::strategy_kind::none;
@@ -469,11 +478,17 @@ struct emel_fixture {
   std::vector<emel::model::tensor::effect_request> effect_requests = {};
   std::vector<emel::model::tensor::effect_result> effect_results = {};
   std::vector<emel::io::event::tensor_load_span> io_load_spans = {};
+  std::vector<emel::io::loader::event::cooperative_async_progress>
+      io_load_progress = {};
+  emel::io::loader::event::cooperative_async_batch_progress
+      io_load_batch_progress = {};
   emel::gguf::loader::sm gguf_loader = {};
   emel::io::read::sm io_read = {};
   emel::io::staged_read::sm io_staged_read = {};
-  emel::io::loader::sm io_loader{
-      {.io_read = &io_read, .io_staged_read = &io_staged_read}};
+  std::unique_ptr<emel::IoAsync> io_async = std::make_unique<emel::IoAsync>();
+  emel::io::loader::sm io_loader{{.io_read = &io_read,
+                                  .io_staged_read = &io_staged_read,
+                                  .io_async = io_async.get()}};
   emel::model::tensor::sm tensor_loader = {};
   emel::model::loader::sm model_loader = {};
   gguf_capture gguf = {};
@@ -524,6 +539,21 @@ struct generation_flash_evidence_state {
   std::uint64_t optimized_q6_dispatch_calls = 0u;
   std::uint64_t shared_q6_dispatch_calls = 0u;
   generation_seam_audit seam = {};
+};
+
+struct generation_load_profile_state {
+  bool ready = false;
+  std::string profile_kind = {};
+  std::string source_residency = {};
+  std::string load_strategy = {};
+  uint64_t model_file_bytes = 0u;
+  uint64_t tensor_data_bytes = 0u;
+  uint64_t effective_ram_constraint_bytes = 0u;
+  uint64_t async_chunk_bytes = 0u;
+  uint64_t peak_resident_bytes = 0u;
+  uint64_t load_dispatches = 0u;
+  uint64_t progress_dispatches = 0u;
+  uint64_t load_elapsed_ns = 0u;
 };
 
 struct emel_session {
@@ -592,6 +622,7 @@ kv_binding_from_fixture(const emel_fixture &fixture) {
 }
 
 generation_flash_evidence_state g_generation_flash_evidence = {};
+generation_load_profile_state g_generation_load_profile = {};
 std::vector<emel::bench::generation_stage_probe> g_generation_stage_probes = {};
 std::string g_generation_formatter_contract = {};
 std::string g_generation_architecture_contract = {};
@@ -745,6 +776,17 @@ void on_load_done(void *owner,
   fixture.load.used_io_strategy = ev.used_io_strategy;
 }
 
+void on_load_progress(void *owner,
+                      const emel::model::loader::events::load_progress &ev) {
+  auto &fixture = *static_cast<emel_fixture *>(owner);
+  fixture.load.progress = true;
+  fixture.load.error = false;
+  fixture.load.bytes_done = ev.bytes_done;
+  fixture.load.bytes_delta = ev.bytes_delta;
+  fixture.load.progress_dispatches += 1u;
+  fixture.load.used_io_strategy = ev.used_io_strategy;
+}
+
 void on_load_error(void *owner,
                    const emel::model::loader::events::load_error &ev) {
   auto &fixture = *static_cast<emel_fixture *>(owner);
@@ -806,10 +848,40 @@ void reset_generation_seam(generation_seam_audit &seam) { seam = {}; }
 
 void reset_generation_flash_evidence() {
   g_generation_flash_evidence = {};
+  g_generation_load_profile = {};
   g_generation_stage_probes.clear();
   g_generation_formatter_contract.clear();
   g_generation_architecture_contract.clear();
   g_generation_fixture_rel = {};
+}
+
+void record_generation_load_profile(const generation_fixture_spec &spec,
+                                    const emel_fixture &fixture) {
+  if (!spec.fixture->current_publication) {
+    return;
+  }
+  const auto strategy = fixture.load.used_io_strategy;
+  if (strategy != emel::io::loader::event::strategy_kind::cooperative_async) {
+    return;
+  }
+  g_generation_load_profile.ready = true;
+  g_generation_load_profile.profile_kind = "constrained_ram_emulation";
+  g_generation_load_profile.source_residency =
+      "setup_time_fixture_file_image_and_full_target_storage";
+  g_generation_load_profile.load_strategy.assign(
+      emel::tools::model_load_io_strategy_name(strategy));
+  g_generation_load_profile.model_file_bytes =
+      static_cast<uint64_t>(fixture.file_bytes.size());
+  g_generation_load_profile.tensor_data_bytes = fixture.gguf_tensor_data_bytes;
+  g_generation_load_profile.effective_ram_constraint_bytes =
+      fixture.load.effective_ram_constraint_bytes;
+  g_generation_load_profile.async_chunk_bytes = fixture.load.async_chunk_bytes;
+  g_generation_load_profile.peak_resident_bytes =
+      fixture.load.peak_resident_bytes;
+  g_generation_load_profile.load_dispatches = fixture.load.load_dispatches;
+  g_generation_load_profile.progress_dispatches =
+      fixture.load.progress_dispatches;
+  g_generation_load_profile.load_elapsed_ns = fixture.load.load_elapsed_ns;
 }
 
 bool generation_seam_audit_enabled() {
@@ -1496,6 +1568,8 @@ bool prepare_emel_fixture(emel_fixture &fixture,
   fixture.effect_requests.resize(emel::model::data::k_max_tensors);
   fixture.effect_results.resize(emel::model::data::k_max_tensors);
   fixture.io_load_spans.resize(emel::model::data::k_max_tensors);
+  fixture.io_load_progress.assign(emel::model::data::k_max_tensors, {});
+  fixture.io_load_batch_progress = {};
   emel::model::loader::event::parse_model_fn parse_model{&fixture,
                                                          run_emel_parse_model};
   emel::model::loader::event::load load_ev{fixture.model_data, parse_model};
@@ -1507,23 +1581,59 @@ bool prepare_emel_fixture(emel_fixture &fixture,
   load_ev.effect_results = std::span{fixture.effect_results};
   load_ev.io_load_spans = std::span<emel::io::event::tensor_load_span>{
       fixture.io_load_spans.data(), fixture.io_load_spans.size()};
+  load_ev.io_load_progress =
+      std::span<emel::io::loader::event::cooperative_async_progress>{
+          fixture.io_load_progress.data(), fixture.io_load_progress.size()};
+  load_ev.io_load_batch_progress = &fixture.io_load_batch_progress;
   emel::tools::bind_model_load_io_strategy(load_ev, fixture.io_loader);
+  fixture.load.async_chunk_bytes = load_ev.io_staged_chunk_bytes;
+  fixture.load.effective_ram_constraint_bytes =
+      emel::tools::selected_model_load_constrained_ram_bytes();
   if (load_ev.io_strategy ==
           emel::io::loader::event::strategy_kind::read_copy ||
       load_ev.io_strategy ==
-          emel::io::loader::event::strategy_kind::staged_read) {
+          emel::io::loader::event::strategy_kind::staged_read ||
+      load_ev.io_strategy ==
+          emel::io::loader::event::strategy_kind::cooperative_async) {
     fixture.read_copy_storage.resize(
         static_cast<size_t>(fixture.gguf_tensor_data_bytes));
     load_ev.read_copy_storage = std::span<uint8_t>{fixture.read_copy_storage};
   }
+  fixture.load.peak_resident_bytes =
+      static_cast<uint64_t>(fixture.file_bytes.size()) +
+      static_cast<uint64_t>(fixture.read_copy_storage.size()) +
+      static_cast<uint64_t>(fixture.kv_arena.size());
   load_ev.map_layers = {nullptr, run_emel_map_layers};
   load_ev.validate_structure = {nullptr, run_emel_validate_structure};
   load_ev.validate_architecture_impl = {nullptr,
                                         run_emel_validate_architecture};
+  load_ev.on_progress = {&fixture, on_load_progress};
   load_ev.on_done = {&fixture, on_load_done};
   load_ev.on_error = {&fixture, on_load_error};
-  if (!fixture.model_loader.process_event(load_ev) || !fixture.load.done ||
-      fixture.load.error) {
+  const uint64_t load_chunk_bytes = load_ev.io_staged_chunk_bytes > 0u
+                                        ? load_ev.io_staged_chunk_bytes
+                                        : 1u;
+  const uint64_t load_dispatch_limit =
+      (fixture.gguf_tensor_data_bytes / load_chunk_bytes) +
+      fixture.gguf_tensor_count + 2u;
+  uint64_t load_dispatch_count = 0u;
+  bool load_accepted = true;
+  const auto load_start = std::chrono::steady_clock::now();
+  while (!fixture.load.done && !fixture.load.error &&
+         load_dispatch_count < load_dispatch_limit) {
+    load_accepted = fixture.model_loader.process_event(load_ev);
+    ++load_dispatch_count;
+    if (!load_accepted) {
+      break;
+    }
+  }
+  const auto load_end = std::chrono::steady_clock::now();
+  fixture.load.load_dispatches = load_dispatch_count;
+  fixture.load.load_elapsed_ns = static_cast<uint64_t>(
+      std::chrono::duration_cast<std::chrono::nanoseconds>(load_end -
+                                                           load_start)
+          .count());
+  if (!load_accepted || !fixture.load.done || fixture.load.error) {
     fixture.formatter_binding = resolve_fixture_formatter_binding(fixture);
     return false;
   }
@@ -2239,6 +2349,7 @@ void prepare_emel_generation_fixture(
   }
   prepared_fixture.emel.model_data.params.n_vocab = static_cast<int32_t>(
       prepared_fixture.emel.model_data.vocab_data.n_tokens);
+  record_generation_load_profile(spec, prepared_fixture.emel);
 }
 
 void prepare_reference_generation_fixture(
@@ -2303,6 +2414,7 @@ void prepare_compare_generation_fixture(
   }
   prepared_fixture.emel.model_data.params.n_vocab = static_cast<int32_t>(
       prepared_fixture.emel.model_data.vocab_data.n_tokens);
+  record_generation_load_profile(spec, prepared_fixture.emel);
 
   ensure_llama_backend_ready();
   if (!prepare_reference_fixture(prepared_fixture.reference, model_path)) {
@@ -2481,6 +2593,55 @@ generation_quantized_evidence_shared_q6_dispatch_calls() noexcept {
 
 std::string_view generation_architecture_contract() noexcept {
   return g_generation_architecture_contract;
+}
+
+bool generation_load_profile_ready() noexcept {
+  return g_generation_load_profile.ready;
+}
+
+std::string_view generation_load_profile_kind() noexcept {
+  return g_generation_load_profile.profile_kind;
+}
+
+std::string_view generation_load_profile_source_residency() noexcept {
+  return g_generation_load_profile.source_residency;
+}
+
+std::string_view generation_load_profile_strategy() noexcept {
+  return g_generation_load_profile.load_strategy;
+}
+
+std::uint64_t generation_load_profile_model_file_bytes() noexcept {
+  return g_generation_load_profile.model_file_bytes;
+}
+
+std::uint64_t generation_load_profile_tensor_data_bytes() noexcept {
+  return g_generation_load_profile.tensor_data_bytes;
+}
+
+std::uint64_t
+generation_load_profile_effective_ram_constraint_bytes() noexcept {
+  return g_generation_load_profile.effective_ram_constraint_bytes;
+}
+
+std::uint64_t generation_load_profile_async_chunk_bytes() noexcept {
+  return g_generation_load_profile.async_chunk_bytes;
+}
+
+std::uint64_t generation_load_profile_peak_resident_bytes() noexcept {
+  return g_generation_load_profile.peak_resident_bytes;
+}
+
+std::uint64_t generation_load_profile_load_dispatches() noexcept {
+  return g_generation_load_profile.load_dispatches;
+}
+
+std::uint64_t generation_load_profile_progress_dispatches() noexcept {
+  return g_generation_load_profile.progress_dispatches;
+}
+
+std::uint64_t generation_load_profile_load_elapsed_ns() noexcept {
+  return g_generation_load_profile.load_elapsed_ns;
 }
 
 std::int32_t generation_flash_evidence_emel_decode_calls() noexcept {

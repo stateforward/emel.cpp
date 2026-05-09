@@ -5,6 +5,8 @@
 #include <cstdint>
 
 #include "emel/error/error.hpp"
+#include "emel/io/async/errors.hpp"
+#include "emel/io/async/events.hpp"
 #include "emel/io/mmap/errors.hpp"
 #include "emel/io/read/errors.hpp"
 #include "emel/io/read/events.hpp"
@@ -117,6 +119,20 @@ struct request_staged_load_status {
   uint64_t buffer_bytes = 0u;
 };
 
+struct request_async_load_status {
+  emel::error::type err = emel::error::cast(error::none);
+  bool ok = false;
+  bool accepted = false;
+  bool io_async_progressed = false;
+  bool io_async_done = false;
+  emel::error::type io_async_err =
+      emel::error::cast(emel::io::async::error::none);
+  void *buffer = nullptr;
+  uint64_t buffer_bytes = 0u;
+  uint64_t bytes_committed = 0u;
+  uint64_t bytes_delta = 0u;
+};
+
 struct request_mapped_load_runtime {
   const event::request_mapped_load &request;
   request_mapped_load_status &status;
@@ -135,6 +151,11 @@ struct release_mapped_load_runtime {
 struct request_staged_load_runtime {
   const event::request_staged_load &request;
   request_staged_load_status &status;
+};
+
+struct request_async_load_runtime {
+  const event::request_async_load &request;
+  request_async_load_status &status;
 };
 
 struct tensor_storage {

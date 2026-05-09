@@ -13,6 +13,9 @@
 #include <doctest/doctest.h>
 
 #include "emel/docs/detail.hpp"
+#include "emel/io/async/errors.hpp"
+#include "emel/io/async/events.hpp"
+#include "emel/io/async/sm.hpp"
 #include "emel/io/loader/events.hpp"
 #include "emel/io/mmap/errors.hpp"
 #include "emel/io/mmap/sm.hpp"
@@ -823,6 +826,20 @@ struct staged_owner_state {
       emel::error::cast(emel::io::staged_read::error::none);
 };
 
+struct async_owner_state {
+  bool request_progress = false;
+  bool request_done = false;
+  bool request_error = false;
+  void *buffer = nullptr;
+  uint64_t buffer_bytes = 0u;
+  uint64_t bytes_committed = 0u;
+  uint64_t bytes_delta = 0u;
+  emel::error::type request_err =
+      emel::error::cast(emel::model::tensor::error::none);
+  emel::error::type request_io_err =
+      emel::error::cast(emel::io::async::error::none);
+};
+
 void on_request_mapped_load_done(
     void *object,
     const emel::model::tensor::events::request_mapped_load_done &ev) noexcept {
@@ -894,6 +911,39 @@ void on_request_staged_load_error(
   owner->request_io_err = ev.io_staged_read_err;
 }
 
+void on_request_async_load_progress(
+    void *object,
+    const emel::model::tensor::events::request_async_load_progress_done
+        &ev) noexcept {
+  auto *owner = static_cast<async_owner_state *>(object);
+  owner->request_progress = true;
+  owner->request_done = false;
+  owner->request_error = false;
+  owner->buffer = ev.buffer;
+  owner->bytes_committed = ev.bytes_committed;
+  owner->bytes_delta = ev.bytes_delta;
+}
+
+void on_request_async_load_done(
+    void *object,
+    const emel::model::tensor::events::request_async_load_done &ev) noexcept {
+  auto *owner = static_cast<async_owner_state *>(object);
+  owner->request_done = true;
+  owner->request_error = false;
+  owner->buffer = ev.buffer;
+  owner->buffer_bytes = ev.buffer_bytes;
+}
+
+void on_request_async_load_error(
+    void *object,
+    const emel::model::tensor::events::request_async_load_error &ev) noexcept {
+  auto *owner = static_cast<async_owner_state *>(object);
+  owner->request_done = false;
+  owner->request_error = true;
+  owner->request_err = ev.err;
+  owner->request_io_err = ev.io_async_err;
+}
+
 std::filesystem::path
 make_tensor_temp_file(std::string_view tag,
                       const std::vector<uint8_t> &payload) {
@@ -926,6 +976,11 @@ make_tensor_sm_with_io_mmap(emel::io::mmap::sm &io_mmap_actor) {
 emel::model::tensor::sm
 make_tensor_sm_with_io_read(emel::io::read::sm &io_read_actor) {
   return emel::model::tensor::sm{&io_read_actor};
+}
+
+emel::model::tensor::sm
+make_tensor_sm_with_io_async(emel::io::async::sm &io_async_actor) {
+  return emel::model::tensor::sm{&io_async_actor};
 }
 
 emel::model::tensor::sm make_tensor_sm_with_io_staged_read(
@@ -1184,7 +1239,8 @@ TEST_CASE(
   CHECK(machine.is(stateforward::sml::state<emel::model::tensor::ready>));
 }
 
-TEST_CASE("model_tensor_request_staged_load_rejects_when_io_staged_read_absent") {
+TEST_CASE(
+    "model_tensor_request_staged_load_rejects_when_io_staged_read_absent") {
   emel::model::tensor::sm machine{};
   std::array<emel::model::data::tensor_record, 1> tensors{};
   uint8_t target[8]{};
@@ -1316,9 +1372,128 @@ TEST_CASE(
   CHECK(owner.request_error);
   CHECK(owner.request_err ==
         emel::error::cast(emel::model::tensor::error::invalid_request));
+  CHECK(
+      owner.request_io_err ==
+      emel::error::cast(emel::io::staged_read::error::invalid_stage_contract));
+  CHECK(machine.is(stateforward::sml::state<emel::model::tensor::ready>));
+}
+
+TEST_CASE("model_tensor_request_async_load_rejects_when_io_async_absent") {
+  emel::model::tensor::sm machine{};
+  std::array<emel::model::data::tensor_record, 1> tensors{};
+  uint8_t target[8]{};
+  prepare_read_storage_for_one_tensor(machine, tensors, target,
+                                      static_cast<uint64_t>(sizeof(target)));
+
+  async_owner_state owner{};
+  emel::io::async::event::load_window_progress progress{};
+  constexpr char source[] = "abcdefgh";
+  emel::model::tensor::event::request_async_load request{0, 0u, 8u, progress};
+  request.progress_chunk_bytes = 4u;
+  request.source_buffer = source;
+  request.source_buffer_bytes = sizeof(source) - 1u;
+  request.target_buffer = target;
+  request.target_buffer_bytes = sizeof(target);
+  request.on_progress = {&owner, on_request_async_load_progress};
+  request.on_done = {&owner, on_request_async_load_done};
+  request.on_error = {&owner, on_request_async_load_error};
+
+  CHECK_FALSE(machine.process_event(request));
+  CHECK_FALSE(owner.request_done);
+  CHECK(owner.request_error);
+  CHECK(owner.request_err ==
+        emel::error::cast(emel::model::tensor::error::io_async_unsupported));
+  CHECK(machine.is(stateforward::sml::state<emel::model::tensor::ready>));
+}
+
+TEST_CASE("model_tensor_request_async_load_progresses_then_commits_residency") {
+  emel::io::async::sm io_async_actor{};
+  emel::model::tensor::sm machine =
+      make_tensor_sm_with_io_async(io_async_actor);
+  std::array<emel::model::data::tensor_record, 1> tensors{};
+  uint8_t target[8]{};
+  prepare_read_storage_for_one_tensor(machine, tensors, target,
+                                      static_cast<uint64_t>(sizeof(target)));
+
+  async_owner_state owner{};
+  emel::io::async::event::load_window_progress progress{};
+  constexpr char source[] = "abcdefgh";
+  emel::model::tensor::event::request_async_load request{0, 0u, 8u, progress};
+  request.progress_chunk_bytes = 4u;
+  request.source_buffer = source;
+  request.source_buffer_bytes = sizeof(source) - 1u;
+  request.target_buffer = target;
+  request.target_buffer_bytes = sizeof(target);
+  request.on_progress = {&owner, on_request_async_load_progress};
+  request.on_done = {&owner, on_request_async_load_done};
+  request.on_error = {&owner, on_request_async_load_error};
+
+  CHECK(machine.process_event(request));
+  CHECK(owner.request_progress);
+  CHECK_FALSE(owner.request_done);
+  CHECK_FALSE(owner.request_error);
+  CHECK(owner.buffer == target);
+  CHECK(owner.bytes_committed == 4u);
+  CHECK(owner.bytes_delta == 4u);
+  CHECK(std::memcmp(target, "abcd", 4u) == 0);
+
+  emel::model::tensor::event::tensor_state state{};
+  CHECK(machine.process_event(emel::model::tensor::event::capture_tensor_state{
+      .tensor_id = 0,
+      .state_out = &state,
+  }));
+  CHECK(state.lifecycle_state ==
+        emel::model::tensor::event::lifecycle::unbound);
+
+  owner = {};
+  CHECK(machine.process_event(request));
+  CHECK(owner.request_done);
+  CHECK_FALSE(owner.request_error);
+  CHECK(owner.buffer == target);
+  CHECK(owner.buffer_bytes == 8u);
+  CHECK(std::memcmp(target, source, 8u) == 0);
+
+  CHECK(machine.process_event(emel::model::tensor::event::capture_tensor_state{
+      .tensor_id = 0,
+      .state_out = &state,
+  }));
+  CHECK(state.lifecycle_state ==
+        emel::model::tensor::event::lifecycle::resident);
+  CHECK(state.buffer == target);
+  CHECK(state.buffer_bytes == 8u);
+  CHECK(machine.is(stateforward::sml::state<emel::model::tensor::ready>));
+}
+
+TEST_CASE("model_tensor_request_async_load_surfaces_async_failure") {
+  emel::io::async::sm io_async_actor{};
+  emel::model::tensor::sm machine =
+      make_tensor_sm_with_io_async(io_async_actor);
+  std::array<emel::model::data::tensor_record, 1> tensors{};
+  uint8_t target[8]{};
+  prepare_read_storage_for_one_tensor(machine, tensors, target,
+                                      static_cast<uint64_t>(sizeof(target)));
+
+  async_owner_state owner{};
+  emel::io::async::event::load_window_progress progress{.cancel_requested =
+                                                            true};
+  constexpr char source[] = "abcdefgh";
+  emel::model::tensor::event::request_async_load request{0, 0u, 8u, progress};
+  request.progress_chunk_bytes = 4u;
+  request.source_buffer = source;
+  request.source_buffer_bytes = sizeof(source) - 1u;
+  request.target_buffer = target;
+  request.target_buffer_bytes = sizeof(target);
+  request.on_progress = {&owner, on_request_async_load_progress};
+  request.on_done = {&owner, on_request_async_load_done};
+  request.on_error = {&owner, on_request_async_load_error};
+
+  CHECK_FALSE(machine.process_event(request));
+  CHECK_FALSE(owner.request_done);
+  CHECK(owner.request_error);
+  CHECK(owner.request_err ==
+        emel::error::cast(emel::model::tensor::error::io_async_failed));
   CHECK(owner.request_io_err ==
-        emel::error::cast(
-            emel::io::staged_read::error::invalid_stage_contract));
+        emel::error::cast(emel::io::async::error::cancelled));
   CHECK(machine.is(stateforward::sml::state<emel::model::tensor::ready>));
 }
 
@@ -1361,8 +1536,7 @@ TEST_CASE("model_tensor_owns_staged_read_residency_boundary") {
   CHECK(events_source.find("struct request_staged_load") != std::string::npos);
   CHECK(events_source.find("request_staged_load_done") != std::string::npos);
   CHECK(events_source.find("request_staged_load_error") != std::string::npos);
-  CHECK(actions_source.find("request_staged_load") !=
-        std::string::npos);
+  CHECK(actions_source.find("request_staged_load") != std::string::npos);
   CHECK(actions_source.find(
             ".source_span = source_bytes + ev.request.file_offset") !=
         std::string::npos);
@@ -1371,8 +1545,7 @@ TEST_CASE("model_tensor_owns_staged_read_residency_boundary") {
   CHECK(actions_source.find(".target_buffer = ev.request.target_buffer") !=
         std::string::npos);
   CHECK(actions_source.find("process_event(") != std::string::npos);
-  CHECK(actions_source.find("lifecycle::resident") !=
-        std::string::npos);
+  CHECK(actions_source.find("lifecycle::resident") != std::string::npos);
   CHECK(staged_source.find("model/tensor") == std::string::npos);
   CHECK(staged_source.find("lifecycle::resident") == std::string::npos);
   for (const auto *source_path : no_residency_sources) {

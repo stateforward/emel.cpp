@@ -1,5 +1,6 @@
 #pragma once
 
+#include "emel/io/async/errors.hpp"
 #include "emel/io/read/errors.hpp"
 #include "emel/io/staged_read/errors.hpp"
 #include "emel/model/tensor/context.hpp"
@@ -754,8 +755,7 @@ struct request_staged_load_request_valid {
     const int32_t id = ev.request.tensor_id;
     return detail::valid_tensor_id(id) &&
            static_cast<uint32_t>(id) < ctx.tensors.active_extent &&
-           ev.request.byte_size > 0u &&
-           ev.request.stage_chunk_bytes > 0u &&
+           ev.request.byte_size > 0u && ev.request.stage_chunk_bytes > 0u &&
            ev.request.source_buffer != nullptr &&
            ev.request.file_offset <= ev.request.source_buffer_bytes &&
            ev.request.byte_size <=
@@ -823,7 +823,8 @@ struct request_staged_load_io_staged_read_invalid_request {
   bool operator()(const tensor::detail::request_staged_load_runtime &ev,
                   const action::context &) const noexcept {
     return ev.status.io_staged_read_err ==
-               emel::error::cast(emel::io::staged_read::error::invalid_callbacks) ||
+               emel::error::cast(
+                   emel::io::staged_read::error::invalid_callbacks) ||
            ev.status.io_staged_read_err ==
                emel::error::cast(
                    emel::io::staged_read::error::invalid_stage_contract) ||
@@ -831,7 +832,8 @@ struct request_staged_load_io_staged_read_invalid_request {
                emel::error::cast(
                    emel::io::staged_read::error::invalid_target_window) ||
            ev.status.io_staged_read_err ==
-               emel::error::cast(emel::io::staged_read::error::null_source_span) ||
+               emel::error::cast(
+                   emel::io::staged_read::error::null_source_span) ||
            ev.status.io_staged_read_err ==
                emel::error::cast(
                    emel::io::staged_read::error::source_span_size_mismatch) ||
@@ -845,7 +847,8 @@ struct request_staged_load_io_staged_read_unsupported {
   bool operator()(const tensor::detail::request_staged_load_runtime &ev,
                   const action::context &) const noexcept {
     return ev.status.io_staged_read_err ==
-           emel::error::cast(emel::io::staged_read::error::unsupported_platform);
+           emel::error::cast(
+               emel::io::staged_read::error::unsupported_platform);
   }
 };
 
@@ -869,6 +872,164 @@ struct request_staged_load_error_callback_absent {
   bool operator()(
       const tensor::detail::request_staged_load_runtime &ev) const noexcept {
     return !request_staged_load_error_callback_present{}(ev);
+  }
+};
+
+struct request_async_load_request_valid {
+  bool operator()(const tensor::detail::request_async_load_runtime &ev,
+                  const action::context &ctx) const noexcept {
+    const int32_t id = ev.request.tensor_id;
+    const bool id_ok = detail::valid_tensor_id(id);
+    const size_t index = static_cast<size_t>(id_ok ? id : 0);
+    return id_ok && index < ctx.tensors.active_extent &&
+           ev.request.byte_size > 0u && ev.request.progress_chunk_bytes > 0u &&
+           ev.request.file_offset <= ~0ull - ev.request.byte_size &&
+           ev.request.source_buffer != nullptr &&
+           ev.request.source_buffer_bytes >= ev.request.file_offset &&
+           (ev.request.source_buffer_bytes - ev.request.file_offset) >=
+               ev.request.byte_size &&
+           ev.request.target_buffer != nullptr &&
+           ev.request.target_buffer_bytes >= ev.request.byte_size &&
+           static_cast<bool>(ev.request.on_progress) &&
+           static_cast<bool>(ev.request.on_done) &&
+           static_cast<bool>(ev.request.on_error);
+  }
+};
+
+struct request_async_load_request_invalid {
+  bool operator()(const tensor::detail::request_async_load_runtime &ev,
+                  const action::context &ctx) const noexcept {
+    return !request_async_load_request_valid{}(ev, ctx);
+  }
+};
+
+struct request_async_load_io_async_present {
+  bool operator()(const tensor::detail::request_async_load_runtime &,
+                  const action::context &ctx) const noexcept {
+    return ctx.io_async != nullptr;
+  }
+};
+
+struct request_async_load_io_async_absent {
+  bool operator()(const tensor::detail::request_async_load_runtime &ev,
+                  const action::context &ctx) const noexcept {
+    return !request_async_load_io_async_present{}(ev, ctx);
+  }
+};
+
+struct request_async_load_tensor_already_resident {
+  bool operator()(const tensor::detail::request_async_load_runtime &ev,
+                  const action::context &ctx) const noexcept {
+    const size_t id = static_cast<size_t>(ev.request.tensor_id);
+    return ctx.tensors.lifecycle[id] == event::lifecycle::resident ||
+           ctx.tensors.lifecycle[id] == event::lifecycle::mmap_resident;
+  }
+};
+
+struct request_async_load_tensor_unbound {
+  bool operator()(const tensor::detail::request_async_load_runtime &ev,
+                  const action::context &ctx) const noexcept {
+    return !request_async_load_tensor_already_resident{}(ev, ctx);
+  }
+};
+
+struct request_async_load_io_async_progressed {
+  bool operator()(const tensor::detail::request_async_load_runtime &ev,
+                  const action::context &) const noexcept {
+    return ev.status.io_async_progressed;
+  }
+};
+
+struct request_async_load_io_async_done {
+  bool operator()(const tensor::detail::request_async_load_runtime &ev,
+                  const action::context &) const noexcept {
+    return ev.status.io_async_done;
+  }
+};
+
+struct request_async_load_io_async_failed {
+  bool operator()(const tensor::detail::request_async_load_runtime &ev,
+                  const action::context &ctx) const noexcept {
+    return !request_async_load_io_async_progressed{}(ev, ctx) &&
+           !request_async_load_io_async_done{}(ev, ctx);
+  }
+};
+
+struct request_async_load_io_async_invalid_request {
+  bool operator()(const tensor::detail::request_async_load_runtime &ev,
+                  const action::context &) const noexcept {
+    return ev.status.io_async_err ==
+               emel::error::cast(emel::io::async::error::invalid_callbacks) ||
+           ev.status.io_async_err ==
+               emel::error::cast(
+                   emel::io::async::error::invalid_source_contract) ||
+           ev.status.io_async_err ==
+               emel::error::cast(
+                   emel::io::async::error::invalid_target_window) ||
+           ev.status.io_async_err ==
+               emel::error::cast(
+                   emel::io::async::error::invalid_progress_contract);
+  }
+};
+
+struct request_async_load_io_async_unsupported {
+  bool operator()(const tensor::detail::request_async_load_runtime &ev,
+                  const action::context &) const noexcept {
+    return ev.status.io_async_err ==
+               emel::error::cast(
+                   emel::io::async::error::unsupported_strategy) ||
+           ev.status.io_async_err ==
+               emel::error::cast(
+                   emel::io::async::error::invalid_scheduler_contract);
+  }
+};
+
+struct request_async_load_io_async_other_failed {
+  bool operator()(const tensor::detail::request_async_load_runtime &ev,
+                  const action::context &ctx) const noexcept {
+    return request_async_load_io_async_failed{}(ev, ctx) &&
+           !request_async_load_io_async_invalid_request{}(ev, ctx) &&
+           !request_async_load_io_async_unsupported{}(ev, ctx);
+  }
+};
+
+struct request_async_load_error_callback_present {
+  bool operator()(
+      const tensor::detail::request_async_load_runtime &ev) const noexcept {
+    return static_cast<bool>(ev.request.on_error);
+  }
+};
+
+struct request_async_load_error_callback_absent {
+  bool operator()(
+      const tensor::detail::request_async_load_runtime &ev) const noexcept {
+    return !request_async_load_error_callback_present{}(ev);
+  }
+};
+
+struct request_async_load_io_async_present_request_invalid {
+  bool operator()(const tensor::detail::request_async_load_runtime &ev,
+                  const action::context &ctx) const noexcept {
+    return request_async_load_io_async_present{}(ev, ctx) &&
+           request_async_load_request_invalid{}(ev, ctx);
+  }
+};
+
+struct request_async_load_io_async_present_request_valid_already_resident {
+  bool operator()(const tensor::detail::request_async_load_runtime &ev,
+                  const action::context &ctx) const noexcept {
+    return request_async_load_io_async_present{}(ev, ctx) &&
+           request_async_load_request_valid{}(ev, ctx) &&
+           request_async_load_tensor_already_resident{}(ev, ctx);
+  }
+};
+
+struct request_async_load_io_async_present_request_valid_tensor_unbound {
+  bool operator()(const tensor::detail::request_async_load_runtime &ev,
+                  const action::context &ctx) const noexcept {
+    return request_async_load_io_async_present{}(ev, ctx) &&
+           request_async_load_request_valid{}(ev, ctx) &&
+           request_async_load_tensor_unbound{}(ev, ctx);
   }
 };
 
@@ -1021,7 +1182,8 @@ struct request_staged_load_io_staged_read_present_request_invalid {
   }
 };
 
-struct request_staged_load_io_staged_read_present_request_valid_already_resident {
+struct
+    request_staged_load_io_staged_read_present_request_valid_already_resident {
   bool operator()(const tensor::detail::request_staged_load_runtime &ev,
                   const action::context &ctx) const noexcept {
     return request_staged_load_io_staged_read_present{}(ev, ctx) &&

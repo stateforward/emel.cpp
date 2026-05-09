@@ -73,7 +73,11 @@ public `request_read_load` events, retains tensor residency ownership, and commi
 caller-owned target buffer only after the maintained read/copy path succeeds. The staged
 constrained-memory strategy actor is implemented under `src/emel/io/staged_read` and is
 routed through public `io::loader` strategy selection when staged source-span contracts are
-provided; async and device-specific loading strategies remain follow-on work.
+provided. The cooperative async strategy actor is implemented under `src/emel/io/async` and
+is exposed through public `io::loader` / model-loader progress contracts for bounded
+resumable loading; maintained generation benchmarks can report constrained-RAM load-profile
+metadata for that public path. Device-specific loading strategies and broader async inference
+remain follow-on work.
 
 ## The name
 
@@ -162,6 +166,7 @@ environments, while Zig remains the default for day-to-day builds.
 - [`.planning/architecture/graph_processor_validate_step.md`](.planning/architecture/graph_processor_validate_step.md)
 - [`.planning/architecture/graph.md`](.planning/architecture/graph.md)
 - [`.planning/architecture/graph_tensor.md`](.planning/architecture/graph_tensor.md)
+- [`.planning/architecture/io_async.md`](.planning/architecture/io_async.md)
 - [`.planning/architecture/io_loader.md`](.planning/architecture/io_loader.md)
 - [`.planning/architecture/io_mmap.md`](.planning/architecture/io_mmap.md)
 - [`.planning/architecture/io_read.md`](.planning/architecture/io_read.md)

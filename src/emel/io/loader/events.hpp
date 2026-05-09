@@ -12,8 +12,10 @@
 namespace emel::io::loader::events {
 
 struct load_tensor_done;
+struct load_tensor_progress;
 struct load_tensor_error;
 struct load_tensor_batch_done;
+struct load_tensor_batch_progress;
 struct load_tensor_batch_error;
 
 } // namespace emel::io::loader::events
@@ -28,6 +30,7 @@ enum class strategy_kind : uint8_t {
   read_copy = 2u,
   external_buffer = 3u,
   staged_read = 4u,
+  cooperative_async = 5u,
 };
 
 struct strategy_policy {
@@ -37,9 +40,23 @@ struct strategy_policy {
 
 using tensor_load_span = emel::io::event::tensor_load_span;
 
+struct cooperative_async_progress {
+  uint64_t bytes_committed = 0u;
+  bool cancel_requested = false;
+};
+
+struct cooperative_async_batch_progress {
+  uint32_t expected_count = 0u;
+  uint32_t next_index = 0u;
+  uint32_t done_count = 0u;
+  uint64_t bytes_done = 0u;
+};
+
 struct load_tensor {
   const tensor_load_span &tensor;
   const strategy_policy &policy;
+  cooperative_async_progress *async_progress = nullptr;
+  emel::callback<void(const events::load_tensor_progress &)> on_progress = {};
   emel::callback<void(const events::load_tensor_done &)> on_done = {};
   emel::callback<void(const events::load_tensor_error &)> on_error = {};
 
@@ -51,6 +68,10 @@ struct load_tensor {
 struct load_tensor_batch {
   std::span<const tensor_load_span> tensors = {};
   const strategy_policy &policy;
+  std::span<cooperative_async_progress> async_progress = {};
+  cooperative_async_batch_progress *async_batch_progress = nullptr;
+  emel::callback<void(const events::load_tensor_batch_progress &)> on_progress =
+      {};
   emel::callback<void(const events::load_tensor_batch_done &)> on_done = {};
   emel::callback<void(const events::load_tensor_batch_error &)> on_error = {};
 
@@ -70,6 +91,14 @@ struct load_tensor_done {
   uint64_t buffer_bytes = 0u;
 };
 
+struct load_tensor_progress {
+  const event::load_tensor &request;
+  event::strategy_kind strategy = event::strategy_kind::none;
+  const void *buffer = nullptr;
+  uint64_t bytes_done = 0u;
+  uint64_t bytes_delta = 0u;
+};
+
 struct load_tensor_error {
   const event::load_tensor &request;
   emel::error::type err = emel::error::cast(error::none);
@@ -81,6 +110,15 @@ struct load_tensor_batch_done {
   event::strategy_kind strategy = event::strategy_kind::none;
   uint32_t done_count = 0u;
   uint64_t bytes_done = 0u;
+};
+
+struct load_tensor_batch_progress {
+  const event::load_tensor_batch &request;
+  event::strategy_kind strategy = event::strategy_kind::none;
+  uint32_t current_index = 0u;
+  uint32_t done_count = 0u;
+  uint64_t bytes_done = 0u;
+  uint64_t bytes_delta = 0u;
 };
 
 struct load_tensor_batch_error {

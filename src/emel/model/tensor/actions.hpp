@@ -1,5 +1,8 @@
 #pragma once
 
+#include "emel/io/async/errors.hpp"
+#include "emel/io/async/events.hpp"
+#include "emel/io/async/sm.hpp"
 #include "emel/io/mmap/errors.hpp"
 #include "emel/io/mmap/events.hpp"
 #include "emel/io/mmap/sm.hpp"
@@ -716,8 +719,10 @@ struct effect_record_request_read_load_error {
 namespace staged_load_callbacks {
 
 inline void on_io_staged_read_done(
-    void *object, const emel::io::staged_read::events::staged_window_done &ev) noexcept {
-  auto *status = static_cast<tensor::detail::request_staged_load_status *>(object);
+    void *object,
+    const emel::io::staged_read::events::staged_window_done &ev) noexcept {
+  auto *status =
+      static_cast<tensor::detail::request_staged_load_status *>(object);
   status->io_staged_read_ok = true;
   status->buffer = ev.target_buffer;
   status->buffer_bytes = ev.bytes_committed;
@@ -726,7 +731,8 @@ inline void on_io_staged_read_done(
 inline void on_io_staged_read_error(
     void *object,
     const emel::io::staged_read::events::staged_window_error &ev) noexcept {
-  auto *status = static_cast<tensor::detail::request_staged_load_status *>(object);
+  auto *status =
+      static_cast<tensor::detail::request_staged_load_status *>(object);
   status->io_staged_read_ok = false;
   status->io_staged_read_err = ev.err;
 }
@@ -839,6 +845,178 @@ struct effect_publish_request_staged_load_error {
 
 struct effect_record_request_staged_load_error {
   void operator()(const detail::request_staged_load_runtime &,
+                  context &) const noexcept {}
+};
+
+namespace async_load_callbacks {
+
+inline void on_io_async_progress_done(
+    void *object,
+    const emel::io::async::events::load_window_progress_done &ev) noexcept {
+  auto *status =
+      static_cast<tensor::detail::request_async_load_status *>(object);
+  status->io_async_progressed = true;
+  status->io_async_done = false;
+  status->buffer = ev.target_buffer;
+  status->bytes_committed = ev.bytes_committed;
+  status->bytes_delta = ev.bytes_delta;
+}
+
+inline void
+on_io_async_done(void *object,
+                 const emel::io::async::events::load_window_done &ev) noexcept {
+  auto *status =
+      static_cast<tensor::detail::request_async_load_status *>(object);
+  status->io_async_progressed = false;
+  status->io_async_done = true;
+  status->buffer = ev.target_buffer;
+  status->buffer_bytes = ev.bytes_committed;
+  status->bytes_committed = ev.bytes_committed;
+}
+
+inline void on_io_async_error(
+    void *object,
+    const emel::io::async::events::load_window_error &ev) noexcept {
+  auto *status =
+      static_cast<tensor::detail::request_async_load_status *>(object);
+  status->io_async_progressed = false;
+  status->io_async_done = false;
+  status->io_async_err = ev.err;
+}
+
+} // namespace async_load_callbacks
+
+struct effect_begin_request_async_load {
+  void operator()(const detail::request_async_load_runtime &ev,
+                  context &) const noexcept {
+    ev.status.err = emel::error::cast(error::none);
+    ev.status.ok = false;
+    ev.status.accepted = false;
+    ev.status.io_async_progressed = false;
+    ev.status.io_async_done = false;
+    ev.status.io_async_err = emel::error::cast(emel::io::async::error::none);
+    ev.status.buffer = nullptr;
+    ev.status.buffer_bytes = 0u;
+    ev.status.bytes_committed = 0u;
+    ev.status.bytes_delta = 0u;
+  }
+};
+
+struct effect_attempt_request_async_load_dispatch {
+  void operator()(const detail::request_async_load_runtime &ev,
+                  context &ctx) const noexcept {
+    emel::io::async::event::load_window_storage inner_storage{
+        .file_offset = ev.request.file_offset,
+        .logical_byte_length = ev.request.byte_size,
+        .progress_chunk_bytes = ev.request.progress_chunk_bytes,
+        .source_span = ev.request.source_buffer,
+        .source_span_bytes = ev.request.source_buffer_bytes,
+        .target_buffer = ev.request.target_buffer,
+        .target_window_bytes = ev.request.target_buffer_bytes,
+    };
+    emel::io::async::event::load_window_request inner_request{
+        inner_storage, ev.request.progress};
+    emel::io::async::event::load_window inner_event{inner_request};
+    inner_event.on_progress = {static_cast<void *>(&ev.status),
+                               async_load_callbacks::on_io_async_progress_done};
+    inner_event.on_done = {static_cast<void *>(&ev.status),
+                           async_load_callbacks::on_io_async_done};
+    inner_event.on_error = {static_cast<void *>(&ev.status),
+                            async_load_callbacks::on_io_async_error};
+    ctx.io_async->process_event(inner_event);
+  }
+};
+
+struct effect_commit_request_async_load {
+  void operator()(const detail::request_async_load_runtime &ev,
+                  context &ctx) const noexcept {
+    const size_t id = static_cast<size_t>(ev.request.tensor_id);
+    ctx.tensors.lifecycle[id] = event::lifecycle::resident;
+    ctx.tensors.buffer[id] = ev.status.buffer;
+    ctx.tensors.buffer_bytes[id] = ev.status.buffer_bytes;
+    ev.status.err = emel::error::cast(error::none);
+    ev.status.ok = true;
+    ev.status.accepted = true;
+  }
+};
+
+struct effect_record_request_async_load_progress {
+  void operator()(const detail::request_async_load_runtime &ev,
+                  context &) const noexcept {
+    ev.status.err = emel::error::cast(error::none);
+    ev.status.ok = true;
+    ev.status.accepted = true;
+  }
+};
+
+struct effect_mark_request_async_load_invalid_request {
+  void operator()(const detail::request_async_load_runtime &ev,
+                  context &) const noexcept {
+    ev.status.err = emel::error::cast(error::invalid_request);
+    ev.status.ok = false;
+  }
+};
+
+struct effect_mark_request_async_load_unsupported_io_async {
+  void operator()(const detail::request_async_load_runtime &ev,
+                  context &) const noexcept {
+    ev.status.err = emel::error::cast(error::io_async_unsupported);
+    ev.status.ok = false;
+  }
+};
+
+struct effect_mark_request_async_load_tensor_already_resident {
+  void operator()(const detail::request_async_load_runtime &ev,
+                  context &) const noexcept {
+    ev.status.err = emel::error::cast(error::tensor_already_resident);
+    ev.status.ok = false;
+  }
+};
+
+struct effect_mark_request_async_load_io_async_failed {
+  void operator()(const detail::request_async_load_runtime &ev,
+                  context &) const noexcept {
+    ev.status.err = emel::error::cast(error::io_async_failed);
+    ev.status.ok = false;
+  }
+};
+
+struct effect_publish_request_async_load_progress_done {
+  void operator()(const detail::request_async_load_runtime &ev,
+                  context &) const noexcept {
+    ev.request.on_progress(events::request_async_load_progress_done{
+        .request = ev.request,
+        .buffer = ev.status.buffer,
+        .bytes_committed = ev.status.bytes_committed,
+        .bytes_delta = ev.status.bytes_delta,
+    });
+  }
+};
+
+struct effect_publish_request_async_load_done {
+  void operator()(const detail::request_async_load_runtime &ev,
+                  context &) const noexcept {
+    ev.request.on_done(events::request_async_load_done{
+        .request = ev.request,
+        .buffer = ev.status.buffer,
+        .buffer_bytes = ev.status.buffer_bytes,
+    });
+  }
+};
+
+struct effect_publish_request_async_load_error {
+  void operator()(const detail::request_async_load_runtime &ev,
+                  context &) const noexcept {
+    ev.request.on_error(events::request_async_load_error{
+        .request = ev.request,
+        .err = ev.status.err,
+        .io_async_err = ev.status.io_async_err,
+    });
+  }
+};
+
+struct effect_record_request_async_load_error {
+  void operator()(const detail::request_async_load_runtime &,
                   context &) const noexcept {}
 };
 
@@ -1050,6 +1228,30 @@ inline constexpr effect_publish_request_staged_load_error
     effect_publish_request_staged_load_error{};
 inline constexpr effect_record_request_staged_load_error
     effect_record_request_staged_load_error{};
+inline constexpr effect_begin_request_async_load
+    effect_begin_request_async_load{};
+inline constexpr effect_attempt_request_async_load_dispatch
+    effect_attempt_request_async_load_dispatch{};
+inline constexpr effect_commit_request_async_load
+    effect_commit_request_async_load{};
+inline constexpr effect_record_request_async_load_progress
+    effect_record_request_async_load_progress{};
+inline constexpr effect_mark_request_async_load_invalid_request
+    effect_mark_request_async_load_invalid_request{};
+inline constexpr effect_mark_request_async_load_unsupported_io_async
+    effect_mark_request_async_load_unsupported_io_async{};
+inline constexpr effect_mark_request_async_load_tensor_already_resident
+    effect_mark_request_async_load_tensor_already_resident{};
+inline constexpr effect_mark_request_async_load_io_async_failed
+    effect_mark_request_async_load_io_async_failed{};
+inline constexpr effect_publish_request_async_load_progress_done
+    effect_publish_request_async_load_progress_done{};
+inline constexpr effect_publish_request_async_load_done
+    effect_publish_request_async_load_done{};
+inline constexpr effect_publish_request_async_load_error
+    effect_publish_request_async_load_error{};
+inline constexpr effect_record_request_async_load_error
+    effect_record_request_async_load_error{};
 inline constexpr effect_begin_release_mapped_load
     effect_begin_release_mapped_load{};
 inline constexpr effect_attempt_release_mapped_load_dispatch

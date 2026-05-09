@@ -18,6 +18,7 @@
 #include "emel/gguf/loader/detail.hpp"
 #include "emel/gguf/loader/events.hpp"
 #include "emel/gguf/loader/sm.hpp"
+#include "emel/io/async/sm.hpp"
 #include "emel/io/loader/sm.hpp"
 #include "emel/io/read/sm.hpp"
 #include "emel/io/staged_read/sm.hpp"
@@ -40,6 +41,10 @@ struct owner_state {
   emel::error::type err = emel::error::cast(emel::model::loader::error::none);
   uint64_t bytes_total = 0;
   uint64_t bytes_done = 0;
+  uint64_t bytes_delta = 0;
+  uint32_t progress_count = 0u;
+  uint32_t current_index = 0u;
+  uint32_t done_count = 0u;
   bool used_mmap = false;
   emel::io::loader::event::strategy_kind requested_io_strategy =
       emel::io::loader::event::strategy_kind::none;
@@ -66,6 +71,20 @@ void on_error(void *object,
   owner->err = ev.err;
   owner->requested_io_strategy = ev.requested_io_strategy;
   owner->used_io_strategy = ev.used_io_strategy;
+}
+
+void on_progress(
+    void *object,
+    const emel::model::loader::events::load_progress &ev) noexcept {
+  auto *owner = static_cast<owner_state *>(object);
+  owner->done = false;
+  owner->error = false;
+  owner->bytes_done = ev.bytes_done;
+  owner->bytes_delta = ev.bytes_delta;
+  owner->current_index = ev.current_index;
+  owner->done_count = ev.done_count;
+  owner->used_io_strategy = ev.used_io_strategy;
+  owner->progress_count += 1u;
 }
 
 void check_model_loader_ready_state(emel::model::loader::sm &machine) {
@@ -129,6 +148,19 @@ parse_read_copy_tensor(void *object,
   tensor.file_index = 0u;
   tensor.data =
       static_cast<const uint8_t *>(req.file_image) + tensor.file_offset;
+  return emel::error::cast(emel::model::loader::error::none);
+}
+
+emel::error::type parse_cooperative_async_tensor(
+    void *object, const emel::model::loader::event::load &req) noexcept {
+  static_cast<void>(object);
+  req.model_data.n_tensors = 1;
+  req.model_data.n_layers = 1;
+  auto &tensor = req.model_data.tensors[0];
+  tensor.file_offset = 2u;
+  tensor.data_size = 4u;
+  tensor.file_index = 0u;
+  tensor.data = nullptr;
   return emel::error::cast(emel::model::loader::error::none);
 }
 
@@ -1123,6 +1155,84 @@ TEST_CASE(
   CHECK_FALSE(owner.error);
 }
 
+TEST_CASE("model loader resumes cooperative async through public io loader") {
+  auto model = std::make_unique<emel::model::data>();
+  emel::model::loader::sm machine{};
+  emel::io::async::sm async_actor{};
+  emel::io::loader::sm io_loader{{.io_async = &async_actor}};
+  owner_state owner{};
+  emel::model::loader::event::parse_model_fn parse_model{
+      nullptr, parse_cooperative_async_tensor};
+  tensor_loader_fixture tensor_loader{};
+  std::array<emel::io::event::tensor_load_span, 1> io_load_spans{};
+  std::array<emel::io::loader::event::cooperative_async_progress, 1>
+      io_load_progress{};
+  emel::io::loader::event::cooperative_async_batch_progress io_batch_progress{};
+  std::array<uint8_t, 4> target{};
+
+  std::array<uint8_t, 8> file_bytes{'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'};
+  emel::model::loader::event::load request{*model, parse_model};
+  request.model_path = "fixture.gguf";
+  request.file_image = file_bytes.data();
+  request.file_size = file_bytes.size();
+  tensor_loader.bind(request);
+  request.io_load_spans = std::span{io_load_spans};
+  request.io_load_progress = std::span{io_load_progress};
+  request.io_load_batch_progress = &io_batch_progress;
+  request.read_copy_storage = std::span{target};
+  request.io_loader = &io_loader;
+  request.io_strategy =
+      emel::io::loader::event::strategy_kind::cooperative_async;
+  request.io_staged_chunk_bytes = 2u;
+  request.map_layers = {nullptr, map_layers_ok};
+  request.validate_structure = {nullptr, validate_structure_ok};
+  request.validate_architecture_impl = {nullptr, validate_architecture_ok};
+  request.on_progress = {&owner, on_progress};
+  request.on_done = {&owner, on_done};
+  request.on_error = {&owner, on_error};
+
+  bool accepted = machine.process_event(request);
+  CAPTURE(owner.err);
+  CHECK(accepted);
+  CHECK_FALSE(owner.done);
+  CHECK_FALSE(owner.error);
+  CHECK(owner.progress_count == 1u);
+  CHECK(owner.bytes_done == 2u);
+  CHECK(owner.bytes_delta == 2u);
+  CHECK(owner.current_index == 0u);
+  CHECK(owner.done_count == 0u);
+  CHECK(owner.used_io_strategy ==
+        emel::io::loader::event::strategy_kind::cooperative_async);
+  CHECK(io_load_progress[0].bytes_committed == 2u);
+  CHECK(io_batch_progress.next_index == 0u);
+  CHECK(target[0] == 'c');
+  CHECK(target[1] == 'd');
+  CHECK(target[2] == 0u);
+  CHECK(target[3] == 0u);
+  CHECK(tensor_loader.effect_results[0].handle == nullptr);
+  check_model_loader_ready_state(machine);
+
+  accepted = machine.process_event(request);
+  CAPTURE(owner.err);
+  CHECK(accepted);
+  CHECK(owner.done);
+  CHECK_FALSE(owner.error);
+  CHECK(owner.used_io_strategy ==
+        emel::io::loader::event::strategy_kind::cooperative_async);
+  CHECK(tensor_loader.effect_requests[0].kind ==
+        emel::model::tensor::effect_kind::k_io_load);
+  CHECK(tensor_loader.effect_requests[0].strategy ==
+        emel::io::loader::event::strategy_kind::cooperative_async);
+  CHECK(tensor_loader.effect_requests[0].target == target.data());
+  CHECK(tensor_loader.effect_results[0].handle == target.data());
+  CHECK(model->tensors[0].data == target.data());
+  CHECK(target[0] == 'c');
+  CHECK(target[1] == 'd');
+  CHECK(target[2] == 'e');
+  CHECK(target[3] == 'f');
+  check_model_loader_ready_state(machine);
+}
+
 TEST_CASE("model loader loads read/copy tensors through maintained actors") {
   auto model = std::make_unique<emel::model::data>();
   emel::model::loader::sm machine{};
@@ -1275,7 +1385,8 @@ TEST_CASE("model loader read copy uses one io loader batch dispatch") {
   CHECK(read_copy_storage[6] == 'h');
 }
 
-TEST_CASE("model loader staged read uses request-owned storage-backed targets") {
+TEST_CASE(
+    "model loader staged read uses request-owned storage-backed targets") {
   auto model = std::make_unique<emel::model::data>();
   emel::model::loader::sm machine{};
   emel::io::read::sm read_actor{};
@@ -1450,7 +1561,8 @@ TEST_CASE("model loader read copy batch error keeps used strategy unset") {
   CHECK(target[3] == 0u);
 }
 
-TEST_CASE("model loader staged-read dispatch failures surface error and ready state") {
+TEST_CASE("model loader staged-read dispatch failures surface error and ready "
+          "state") {
   auto model = std::make_unique<emel::model::data>();
   emel::model::loader::event::parse_model_fn parse_model{
       nullptr, parse_read_copy_tensor};
@@ -1482,8 +1594,9 @@ TEST_CASE("model loader staged-read dispatch failures surface error and ready st
     CHECK_FALSE(machine.process_event(request));
     CHECK_FALSE(owner.done);
     CHECK(owner.error);
-    CHECK(owner.err == emel::error::cast(
-                           emel::model::loader::error::io_strategy_unavailable));
+    CHECK(
+        owner.err ==
+        emel::error::cast(emel::model::loader::error::io_strategy_unavailable));
     CHECK(owner.requested_io_strategy ==
           emel::io::loader::event::strategy_kind::staged_read);
     CHECK(owner.used_io_strategy ==
@@ -1939,52 +2052,29 @@ TEST_CASE("model loader tensor outcomes use typed phase events not result enum "
 TEST_CASE(
     "model loader io boundary uses actor events without helper exposure") {
   const std::array guarded_component_sources{
-      "src/emel/model/loader/actions.hpp",
-      "src/emel/model/loader/context.hpp",
-      "src/emel/model/loader/detail.hpp",
-      "src/emel/model/loader/errors.hpp",
-      "src/emel/model/loader/events.hpp",
-      "src/emel/model/loader/guards.hpp",
-      "src/emel/model/loader/sm.hpp",
-      "src/emel/io/loader/actions.hpp",
-      "src/emel/io/loader/context.hpp",
-      "src/emel/io/loader/detail.hpp",
-      "src/emel/io/loader/errors.hpp",
-      "src/emel/io/loader/events.hpp",
-      "src/emel/io/loader/guards.hpp",
-      "src/emel/io/loader/sm.hpp",
-      "src/emel/io/read/actions.hpp",
-      "src/emel/io/read/context.hpp",
-      "src/emel/io/read/detail.hpp",
-      "src/emel/io/read/errors.hpp",
-      "src/emel/io/read/events.hpp",
-      "src/emel/io/read/guards.hpp",
-      "src/emel/io/read/sm.hpp",
-      "src/emel/io/mmap/actions.hpp",
-      "src/emel/io/mmap/context.hpp",
-      "src/emel/io/mmap/detail.hpp",
-      "src/emel/io/mmap/errors.hpp",
-      "src/emel/io/mmap/events.hpp",
-      "src/emel/io/mmap/guards.hpp",
-      "src/emel/io/mmap/sm.hpp",
-      "src/emel/model/tensor/actions.hpp",
-      "src/emel/model/tensor/context.hpp",
-      "src/emel/model/tensor/detail.hpp",
-      "src/emel/model/tensor/errors.hpp",
-      "src/emel/model/tensor/events.hpp",
-      "src/emel/model/tensor/guards.hpp",
+      "src/emel/model/loader/actions.hpp", "src/emel/model/loader/context.hpp",
+      "src/emel/model/loader/detail.hpp",  "src/emel/model/loader/errors.hpp",
+      "src/emel/model/loader/events.hpp",  "src/emel/model/loader/guards.hpp",
+      "src/emel/model/loader/sm.hpp",      "src/emel/io/loader/actions.hpp",
+      "src/emel/io/loader/context.hpp",    "src/emel/io/loader/detail.hpp",
+      "src/emel/io/loader/errors.hpp",     "src/emel/io/loader/events.hpp",
+      "src/emel/io/loader/guards.hpp",     "src/emel/io/loader/sm.hpp",
+      "src/emel/io/read/actions.hpp",      "src/emel/io/read/context.hpp",
+      "src/emel/io/read/detail.hpp",       "src/emel/io/read/errors.hpp",
+      "src/emel/io/read/events.hpp",       "src/emel/io/read/guards.hpp",
+      "src/emel/io/read/sm.hpp",           "src/emel/io/mmap/actions.hpp",
+      "src/emel/io/mmap/context.hpp",      "src/emel/io/mmap/detail.hpp",
+      "src/emel/io/mmap/errors.hpp",       "src/emel/io/mmap/events.hpp",
+      "src/emel/io/mmap/guards.hpp",       "src/emel/io/mmap/sm.hpp",
+      "src/emel/model/tensor/actions.hpp", "src/emel/model/tensor/context.hpp",
+      "src/emel/model/tensor/detail.hpp",  "src/emel/model/tensor/errors.hpp",
+      "src/emel/model/tensor/events.hpp",  "src/emel/model/tensor/guards.hpp",
       "src/emel/model/tensor/sm.hpp",
   };
   const std::array forbidden_syscall_tokens{
-      "pread(",
-      "::read(",
-      "fread(",
-      "open(",
-      "ReadFile",
-      "CreateFile",
-      "std::ifstream",
-      "std::fstream",
-      "std::filesystem::file_size",
+      "pread(",        "::read(",      "fread(",
+      "open(",         "ReadFile",     "CreateFile",
+      "std::ifstream", "std::fstream", "std::filesystem::file_size",
   };
   const std::string actions_source = read_text_file(
       repo_root() / "src" / "emel" / "model" / "loader" / "actions.hpp");
@@ -2041,6 +2131,32 @@ TEST_CASE("model loader done evidence reports the public io strategy used") {
     CHECK(source.find(".used_io_strategy = ev.used_io_strategy") !=
           std::string::npos);
     CHECK(source.find("process_event(capture)") == std::string::npos);
+  }
+}
+
+TEST_CASE(
+    "maintained tool cooperative async surface stays public-contract only") {
+  const std::array tool_sources{
+      "tools/bench/generation_bench.cpp",
+      "tools/bench/diarization/sortformer_fixture.hpp",
+      "tools/embedded_size/emel_probe/main.cpp",
+      "tools/paritychecker/parity_engines.cpp",
+  };
+  const std::string helper_source = read_text_file(
+      repo_root() / "tools" / "bench" / "model_load_strategy.hpp");
+
+  CHECK(helper_source.find("\"cooperative_async\"") != std::string::npos);
+  CHECK(helper_source.find("strategy_kind::cooperative_async") !=
+        std::string::npos);
+  CHECK(helper_source.find("emel/io/async/") == std::string::npos);
+
+  for (const auto *source_path : tool_sources) {
+    CAPTURE(source_path);
+    const std::string source = read_text_file(repo_root() / source_path);
+    CHECK(source.find("bind_model_load_io_strategy") != std::string::npos);
+    CHECK(source.find("emel/io/async/") == std::string::npos);
+    CHECK(source.find("request_async_load") == std::string::npos);
+    CHECK(source.find("load_window") == std::string::npos);
   }
 }
 
@@ -2113,12 +2229,10 @@ TEST_CASE("model loader staged-read routing uses storage-backed io path") {
   CHECK(guards_source.find("io_strategy_staged_read") != std::string::npos);
   CHECK(guards_source.find("io_strategy_requires_staging_storage") !=
         std::string::npos);
-  CHECK(guards_source.find(
-            "tensor_plan_done_with_storage_backed_strategy_with_loader_and_storage_ready") !=
-        std::string::npos);
-  CHECK(sm_source.find(
-            "tensor_plan_done_with_storage_backed_strategy_with_loader_and_storage_ready") !=
-        std::string::npos);
+  CHECK(guards_source.find("tensor_plan_done_with_storage_backed_strategy_with_"
+                           "loader_and_storage_ready") != std::string::npos);
+  CHECK(sm_source.find("tensor_plan_done_with_storage_backed_strategy_with_"
+                       "loader_and_storage_ready") != std::string::npos);
   CHECK(actions_source.find("effect_dispatch_io_read_copy_load_batch") !=
         std::string::npos);
 }
@@ -2156,16 +2270,9 @@ TEST_CASE(
       "src/emel/model/tensor/sm.hpp",
   };
   const std::array forbidden_tokens{
-      "co_await",
-      "co_yield",
-      "co_return",
-      "<coroutine>",
-      "std::coroutine",
-      "suspend_always",
-      "suspend_never",
-      "await_ready(",
-      "await_suspend(",
-      "await_resume(",
+      "co_await",       "co_yield",       "co_return",     "<coroutine>",
+      "std::coroutine", "suspend_always", "suspend_never", "await_ready(",
+      "await_suspend(", "await_resume(",
   };
 
   for (const auto *source_path : guarded_component_sources) {
@@ -2276,6 +2383,124 @@ TEST_CASE("io boundary closeout tests avoid actor internal reach-through") {
       CAPTURE(needle);
       CHECK(source.find(needle) == std::string::npos);
     }
+  }
+}
+
+TEST_CASE(
+    "phase 246 coroutine types stay out of public abi and generic contracts") {
+  const std::array<std::string, 14> public_contract_sources{
+      "include/emel/emel.h",
+      "include/emel/callback.hpp",
+      "include/emel/error/error.hpp",
+      "src/emel/model/any.hpp",
+      "src/emel/model/data.hpp",
+      "src/emel/model/loader/context.hpp",
+      "src/emel/model/loader/errors.hpp",
+      "src/emel/model/loader/events.hpp",
+      std::string{"src/emel/"} + "generator/context.hpp",
+      std::string{"src/emel/"} + "generator/errors.hpp",
+      std::string{"src/emel/"} + "generator/events.hpp",
+      "src/emel/text/generator/context.hpp",
+      "src/emel/text/generator/errors.hpp",
+      "src/emel/text/generator/events.hpp",
+  };
+  const std::array forbidden_tokens{
+      std::string{"co_"} + "sm",
+      std::string{"bool_"} + "task",
+      std::string{"fixed_coroutine_"} + "allocator",
+      std::string{"fifo_"} + "scheduler",
+      std::string{"<"} + "coroutine>",
+      std::string{"co_"} + "await",
+      std::string{"co_"} + "return",
+      std::string{"await_"} + "ready",
+      std::string{"await_"} + "suspend",
+      std::string{"await_"} + "resume",
+  };
+
+  for (const auto &source_path : public_contract_sources) {
+    CAPTURE(source_path);
+    const std::string source = read_text_file(repo_root() / source_path);
+    for (const auto &token : forbidden_tokens) {
+      CAPTURE(token);
+      CHECK(source.find(token) == std::string::npos);
+    }
+  }
+}
+
+TEST_CASE("phase 246 maintained entrypoints avoid async actor internals") {
+  const std::array maintained_sources{
+      "src/emel/model/loader/actions.hpp",
+      "src/emel/model/loader/context.hpp",
+      "src/emel/model/loader/detail.hpp",
+      "src/emel/model/loader/events.hpp",
+      "src/emel/model/loader/guards.hpp",
+      "src/emel/model/loader/sm.hpp",
+      "tools/bench/generation_bench.cpp",
+      "tools/bench/diarization/sortformer_fixture.hpp",
+      "tools/embedded_size/emel_probe/main.cpp",
+      "tools/paritychecker/parity_engines.cpp",
+  };
+  const std::array forbidden_tokens{
+      std::string{"emel/io/async/"} + "actions.hpp",
+      std::string{"emel/io/async/"} + "detail.hpp",
+      std::string{"emel/io/async/"} + "guards.hpp",
+      std::string{"emel/io/async/"} + "sm.hpp",
+      std::string{"emel::io::async::"} + "action::",
+      std::string{"emel::io::async::"} + "detail::",
+      std::string{"emel::io::async::"} + "guard::",
+      std::string{"request_"} + "async_load",
+      std::string{"load_window_"} + "request",
+      std::string{"load_window_"} + "storage",
+  };
+
+  for (const auto *source_path : maintained_sources) {
+    CAPTURE(source_path);
+    const std::string source = read_text_file(repo_root() / source_path);
+    for (const auto &token : forbidden_tokens) {
+      CAPTURE(token);
+      CHECK(source.find(token) == std::string::npos);
+    }
+  }
+}
+
+TEST_CASE("phase 246 async actions and detail do not choose behavior") {
+  const std::string actions_source = read_text_file(
+      repo_root() / "src" / "emel" / "io" / "async" / "actions.hpp");
+  const std::string detail_source = read_text_file(
+      repo_root() / "src" / "emel" / "io" / "async" / "detail.hpp");
+  const std::string guards_source = read_text_file(
+      repo_root() / "src" / "emel" / "io" / "async" / "guards.hpp");
+  const std::string sm_source =
+      read_text_file(repo_root() / "src" / "emel" / "io" / "async" / "sm.hpp");
+
+  CHECK(actions_source.find("if (") == std::string::npos);
+  CHECK(actions_source.find("switch (") == std::string::npos);
+  CHECK(actions_source.find("strategy_") == std::string::npos);
+  CHECK(detail_source.find("if (") == std::string::npos);
+  CHECK(detail_source.find("switch (") == std::string::npos);
+  CHECK(detail_source.find("strategy_") == std::string::npos);
+  CHECK(guards_source.find("guard_load_window_callbacks_present") !=
+        std::string::npos);
+  CHECK(guards_source.find("guard_partial_progress_ready") !=
+        std::string::npos);
+  CHECK(sm_source.find("guard_progress_kind_decision") != std::string::npos);
+}
+
+TEST_CASE("phase 246 shipped io strategy regression tests remain public") {
+  const std::array regression_sources{
+      "tests/io/mmap/lifecycle_tests.cpp",
+      "tests/io/read/lifecycle_tests.cpp",
+      "tests/io/staged_read/lifecycle_tests.cpp",
+      "tests/io/loader/lifecycle_tests.cpp",
+      "tests/model/tensor/lifecycle_tests.cpp",
+      "tests/model/loader/lifecycle_tests.cpp",
+  };
+
+  for (const auto *source_path : regression_sources) {
+    CAPTURE(source_path);
+    const std::string source = read_text_file(repo_root() / source_path);
+    CHECK(source.find("process_event") != std::string::npos);
+    CHECK(source.find("stateforward::sml::state") != std::string::npos);
   }
 }
 
