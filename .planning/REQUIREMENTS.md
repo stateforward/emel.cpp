@@ -1,279 +1,210 @@
-# Requirements: EMEL v1.26 I/O Staged Read Loading Strategy
+# Requirements: EMEL v1.27 co_sm Cooperative Async I/O Strategy
 
-**Defined:** 2026-05-07  
-**Revised:** 2026-05-08 (milestone audit gap closure phases **237-238** added)  
-**Status:** COMPLETE (v1.26 phases **227-238 complete**; `ESG-02B` deferred/future)  
+**Defined:** 2026-05-09  
+**Status:** ACTIVE  
 **Core Value:** Prove real end-to-end behavior with explicit SML orchestration and
 parity-oriented verification before widening API surface or model scope.  
-**Source:** GitHub issue #63, "Add io/staged_read state machine for constrained-memory tensor loading"
+**Source:** GitHub issue #64, "Add co_sm-based cooperative async io strategy for
+resumable tensor loading"
 
-## v1.26 Requirements
+## v1.27 Requirements
 
-Each requirement is one independently testable obligation and maps to **exactly
-one** roadmap phase. REQ-IDs are unique to this milestone (no overlap with
-satisfied v1.25 identifiers).
+Each requirement is one independently testable obligation and maps to exactly one roadmap phase.
+REQ-IDs are unique to this milestone.
 
-### Staged read component and pre-I/O guards
+### Coroutine actor contract
 
-- [x] **STG-01**: Maintainer can identify a dedicated `src/emel/io/staged_read`
-  Stateforward.SML component with component-local `context`, `events`, `guards`,
-  `actions`, `errors`, `sm`, and canonical `emel::io::staged_read::sm` ownership.
+- [x] **CO-01**: Maintainer can read `docs/rules/sml.rules.md` and `AGENTS.md` and find an
+  explicit `co_sm` coroutine actor contract that preserves RTC, no-queue, no hidden mailbox,
+  guard/action, callback, lifetime, and allocation invariants.
 
-- [x] **STG-02**: Guards reject invalid overall source span or invalid
-  staging/chunk contract (including offset/total-length/chunk sizing rules as
-  defined by implementation) **before** any staged file I/O attempt is accepted.
+- [x] **CO-02**: Maintainer can use a project-owned opt-in `emel::co_sm` wrapper parallel to
+  `emel::sm` without changing existing synchronous machine aliases or behavior.
 
-- [x] **STG-03**: Guards reject invalid caller-owned target-buffer window or
-  layout precondition for staged copy **before** any staged file I/O attempt is
-  accepted.
+- [x] **CO-03**: Scheduler policy types used by `emel::co_sm` prove FIFO, single-consumer, and
+  run-to-completion guarantees at compile time.
 
-- [x] **PLAT-02**: Unsupported platform hosts or unsupported staged resource
-  shapes fail closed through explicit guarded transitions/states/events (not via
-  unmodeled unchecked platform calls). *Satisfaction evidence is the compile-time
-  platform guard plus the explicit SML unsupported branch on this milestone’s
-  hosts; this ledger does **not** claim an executed CI/runtime proof on an
-  “unsupported-host” OS image.*
+- [x] **CO-04**: Coroutine frame and scheduler storage for the milestone path is fixed-capacity or
+  setup-time-owned, with tests proving no heap allocation during dispatch/progress.
 
-### Staged execution semantics (actor body)
+- [x] **CO-05**: Deterministic coroutine trace tests prove suspend/resume ordering and same-tick
+  run-to-completion semantics through public machine APIs.
 
-- [x] **STG-04**: On each accepted stage boundary, staged read copies the
-  intended contiguous source byte sub-span into the designated caller-owned
-  target region for that stage deterministically (verifiable by test vectors).
-  *(Satisfied via single-dispatch tiling loop in **`effect_publish_staged_window_done`**
-  backed by doctest vectors; staged “window” aligns with **`stage_chunk_bytes`**
-  plus deterministic tail.)*
+### Async I/O strategy component
 
-- [x] **STG-05**: A fully successful staged run covers the entire requested
-  logical source byte span with strictly monotonic forward progress across
-  stages (no gaps or backward contract motion in the logical span).
-  *(Monotonicity evidenced by oracle memcmp covering the contiguous logical span
-  (`tests/io/staged_read/lifecycle_tests.cpp`), including uneven chunk remainders.)*
+- [x] **AIO-01**: Maintainer can identify a dedicated cooperative async I/O strategy component under
+  `src/emel/io` with canonical `context`, `events`, `guards`, `actions`, `errors`, `sm`, and public
+  aliases.
 
-- [x] **STG-06**: A fully successful staged run publishes a single terminal
-  success outcome that corresponds to the complete logical span being copied per
-  the staged-read contract.
-  *(Exactly one **`staged_window_done`** with **`bytes_committed == logical_byte_length`**.)*
+- [x] **AIO-02**: The async strategy is separate from shipped `io/mmap`, `io/read`, and
+  `io/staged_read` implementations and does not modify their runtime semantics.
 
-- [x] **STG-07**: `staged_read::context` does not retain dispatch-local request
-  payload (no pointers, references, or mirrored handles to the current request
-  stored in context for multi-event handoff that violates EMEL dispatch-local
-  rules).
+- [x] **AIO-03**: Async loading accepts only validated source, target, progress, and scheduler
+  contracts before any resumable progress attempt is accepted.
 
-### Lifetime and ownership (staged actor)
+- [ ] **AIO-04**: Async loading publishes bounded partial-progress outcomes explicitly rather than
+  hiding progress in context-only mutation or scheduler internals.
 
-- [x] **LIFE-02**: Transient OS resources acquired for a stage attempt are
-  released before that stage’s terminal outcome is published, and no kernel
-  handle is retained past the staged-read actor’s published `_done` for the
-  overall request. *(Current Phase 230 source-backed caveat: staged_read
-  consumes caller-provided `source_span` bytes and acquires no OS handle, so
-  there is no staged_read-owned kernel handle to retain.)*
+- [x] **AIO-05**: Async loading publishes deterministic terminal success when the requested logical
+  byte span has completed.
 
-- [x] **SNR-01**: The staged-read strategy actor never claims tensor residency
-  ownership of the destination buffer (copy-only semantics into caller/tensor
-  windows).
+- [ ] **AIO-06**: Async loading publishes deterministic terminal errors for validation,
+  source-contract, scheduler/resource, cancellation/rejection, and partial-progress failure
+  categories.
 
-### Error taxonomy
+### Suspension-safe ownership
 
-- [x] **ESG-01**: Pre-I/O guard failures map to named deterministic staged-read
-  error categories. **Supported-host doctests cover the forceable validation
-  categories** exercised in staged-read lifecycle tests. **Unsupported platform
-  and unsupported resource-category outcomes remain source-backed via the
-  compiled guard, transition, and action graph** (`sm.hpp`, `errors.hpp`).
-  Unsupported-host runtime forcing for those terminals is deferred to future
-  platform-targeted validation.
+- [x] **OWN-01**: No stack-backed event payload, source span, target window, mutable reference, or
+  dispatch-local request pointer is retained across suspension.
 
-- [x] **ESG-02A**: Source-contract read-surface failures in the current
-  source-span staged-read design (null source, `source_span_bytes` mismatch, and
-  insufficient/short source span) map to named deterministic staged-read error
-  categories observable in tests.
+- [x] **OWN-02**: Suspension-surviving request and progress state is owned by stable actor,
+  scheduler, or caller-provided storage with explicit lifetime documented in events/context.
 
-- [ ] **ESG-02B** (**Deferred/Future**): Real file open, seek, and read failures,
-  including per-stage short read, map to named deterministic staged-read error
-  categories observable in tests only after an approved file-backed staged-read
-  source path owns handle/syscall behavior.
+- [x] **OWN-03**: Synchronous callbacks are not stored for later invocation outside the same RTC
+  contract; any async completion reporting uses explicit events/states.
 
-- [x] **ESG-03**: Staged sequencing or stage-contract violations map to a named
-  deterministic staged-read error category observable in tests.
+- [x] **OWN-04**: Async strategy context does not mirror dispatch-local request fields merely to
+  bridge phases.
 
-- [x] **ESG-04**: Staged-read handling does not throw exceptions across the
-  staged-read actor boundary or public C ABI surfaces.
+### Tensor and loader integration
 
-### Tensor integration
+- [x] **TNX-01**: `model/tensor` initiates cooperative async loading only through public `emel/io`
+  request events, never private cross-actor calls or direct async strategy helpers.
 
-- [x] **TNX-01**: `model/tensor` initiates staged read loading only through
-  public `emel/io` request events (no new private cross-actor calls).
-  *(Phase 237 evidence: direct tensor `request_staged_load` dispatch still uses
-  injected public `emel::io::staged_read::sm` via `process_event(...)` while
-  applying the nonzero source window.)*
+- [x] **TNX-02**: `model/tensor` remains the sole owner of tensor load, bind, evict, and residency
+  lifecycle transitions for async-loaded tensors.
 
-- [x] **TNX-02**: For tensors using staged reads, `model/tensor` remains the
-  sole owner of load, bind, evict, and residency lifecycle transitions.
+- [ ] **TNX-03**: Async load progress, success, and failure are visible to tensor integrators
+  through explicit `_done` / `_error` events or states.
 
-- [x] **TNX-03**: Staged-load success is visible to integrators through explicit
-  terminal success `_done`/states in the tensor integration graph (not only
-  through silent context mutation).
-  *(Phase 237 evidence: `request_staged_load_done`, resident tensor state, and
-  copied nonzero-offset bytes are asserted in public dispatch doctests.)*
+- [x] **TNX-04**: `io/loader` and maintained model-loader paths can select/report the async strategy
+  only through public runtime contracts.
 
-- [x] **TNX-04**: Staged-load failure is visible through explicit terminal
-  `_error`/error states/events in the tensor integration graph.
-  *(Phase 237 evidence: direct staged-load validation failure maps to
-  `request_staged_load_error` with explicit tensor and staged-read errors.)*
+### Tests and non-regression
 
-### Maintained surfaces
+- [x] **TST-01**: Doctests prove coroutine wrapper and scheduler behavior through public machine
+  dispatch and SML state inspection.
 
-- [x] **PUB-01**: `model/loader` selects or reports staged-read usage only via
-  public runtime contracts applicable to loaders (no `staged_read` detail
-  includes).
+- [x] **TST-02**: Doctests prove async I/O suspend/resume ordering, partial progress, success, and
+  representative failure modes through public dispatch.
 
-- [x] **PUB-02**: Maintained benchmark entrypoints select or report staged-read
-  usage only via public runtime contracts (no `staged_read` detail includes).
+- [x] **TST-03**: Doctests prove direct tensor async-load success and failure through public
+  `process_event(...)` / async dispatch surfaces and SML state inspection.
 
-- [x] **PUB-03**: Maintained paritychecker entrypoints select or report
-  staged-read usage only via public runtime contracts.
+- [x] **GRD-01**: Repository guardrails fail if coroutine task, scheduler, or awaitable types leak
+  into public C ABI or generic public model/generator contracts.
 
-- [x] **PUB-04**: Maintained embedded-size probe entrypoints select or report
-  staged-read usage only via public runtime contracts.
+- [x] **GRD-02**: Repository guardrails fail if async actor internals are included by
+  `tools/bench`, `tools/paritychecker`, probes, or model-loader code.
 
-- [x] **PUB-05**: Maintained loaders and tools do not embed a second
-  unconstrained POSIX-style staged read/copy loop duplicate of actor-owned file
-  work (source scan or doctest-enforced invariant).
+- [x] **GRD-03**: Repository guardrails fail if awaitables/actions/detail helpers choose runtime
+  behavior that belongs in guards/transitions.
 
-### Tests
+- [x] **GRD-04**: Regression tests prove shipped mmap, read/copy, and staged-read strategies still
+  pass their public behavior checks after async strategy work lands.
 
-- [x] **TST-01**: Doctest proves at least one fully successful staged-load path
-  through `process_event(...)` with explicit SML state inspection.
-  *(Phase 237 evidence: `model_tensor_request_staged_load_applies_nonzero_file_offset`
-  covers direct staged-load success through public `process_event(...)` and `is(...)`.)*
+### Publication and evidence
 
-- [x] **TST-02**: Doctest proves representative staged failure modes through
-  `process_event(...)` including at least one pre-I/O guard failure path.
-  *(Phase 237 evidence: direct staged-load validation-error doctest covers explicit
-  failure publication through public dispatch.)*
+- [ ] **DOC-01**: Maintained docs accurately describe the `co_sm` coroutine actor contract, async I/O
+  strategy scope, and deferred broader scheduler/device work.
 
-### Guardrails (non-regression and scope)
+- [ ] **EVI-01**: Benchmark, parity, and probe artifacts do not report async/cooperative loading
+  unless the EMEL lane actually executed the async strategy path.
 
-- [x] **GRD-01**: Repository guardrail or focused test fails when staged-read
-  file syscall loop ownership leaks into `model/loader`.
+- [ ] **PERF-01**: Maintained benchmark evidence compares the effective loading-strategy
+  performance differences for mmap, read/copy, staged-read, and cooperative async loading through a
+  maintained end-to-end path. Unsupported async boundary runs must be reported honestly, but
+  unsupported `cooperative_async` execution does not satisfy this requirement.
 
-- [x] **GRD-02**: Repository guardrail or focused test fails when tensor residency
-  lifecycle migrates out of `model/tensor` for the staged-load path.
+- [ ] **PERF-02**: Maintained large-model or constrained-RAM profiling recursively measures and
+  optimizes the cooperative async loading path through public runtime contracts, reporting model
+  size, effective RAM constraint, chunk/window behavior, peak memory, and truthful performance
+  evidence without tool-only fallback claims.
 
-- [x] **GRD-03**: Repository guardrail fails when cooperative coroutine staged
-  scheduling scaffolding lands without documented separate approval.
+- [x] **LNT-01**: `lint_snapshot` or successor lint gate passes with updated baselines only when the
+  implementation requires snapshot changes.
 
-- [x] **GRD-04**: Repository regression proof fails when shipped mmap strategy
-  semantics regress.
-
-- [x] **GRD-05**: Repository regression proof fails when shipped bulk `io/read`
-  strategy semantics regress.
-
-### Publication and artifact truth
-
-- [x] **DOC-01**: Checked-in prose under maintained doc entrypoints accurately
-  states whether staged constrained-memory loading is implemented and how it is
-  reached.
-
-- [x] **LNT-01**: `lint_snapshot` (or successor maintained lint gate) passes
-  with an updated baseline when and only when staged-read-affected edits require
-  it.
-
-- [x] **BNH-01**: Benchmark snapshot deltas for suites affected by staged reads
-  are refreshed only via the maintained benchmark snapshot/update workflow.
-
-- [x] **EVI-01**: Maintained parity or benchmark artifacts do not label a run as
-  staged-read-backed unless the staged runtime path actually executed.
+- [x] **QG-01**: Changed-file scoped quality gates pass for coroutine wrapper, async I/O, tensor
+  integration, docs, guardrails, and tests without benchmark-regression override.
 
 ## v2 Requirements (deferred)
 
-Tracked for future milestones; not part of v1.26 roadmap.
+Tracked for future milestones; not part of v1.27 roadmap.
 
-### Async and device strategies
+### Broader async inference
 
-- **ASYNC-01**: Cooperative or resumable loading with explicit scheduling while
-  preserving RTC invariants (only after dedicated milestone approval).
-
-- **DEVICE-01**: Device/resource-specific loading strategies behind `emel/io`.
-
-### Broader staging
-
-- **STG-FUTURE-01**: Adaptive chunk sizing from runtime memory pressure signals.
+- **DECODE-01**: Continuous decode batching uses `co_sm` to keep AArch64 x4/x8 routes fed across
+  multiple sequences.
+- **TOK-01**: Tokenizer/detokenizer overlap is measured and optionally shipped if it beats an
+  agreed latency threshold.
+- **FAULT-01**: Platform-specific first-token cold-load overlap uses real `io_uring`,
+  residency-hint, or equivalent OS-backed completion primitives.
+- **ACCEL-01**: Vendor accelerator, NPU, DSP, DMA, or GPU async completion is modeled only behind a
+  target-specific kernel/backend route.
 
 ## Out of Scope
 
-Explicit exclusions for milestone v1.26:
+Explicit exclusions for milestone v1.27:
 
 | Feature | Reason |
 |---------|--------|
-| Cooperative coroutine scheduling / async suspension | Separate approval required per project brief |
-| Device-specific transfers | Device-strategy milestone |
-| Changing mmap semantics | v1.24 owns mmap |
-| Replacing bulk `io/read` | Staged strategy is additive |
-| Moving tensor residency out of `model/tensor` | Invariant |
-| New model families / fixture widening | Strategy milestone only |
-| Tool-only staged scaffolds without `src/` path | Evidence rule |
+| Continuous decode batching | Broader async inference scheduler milestone, not issue #64 I/O loading |
+| Tokenizer/detokenizer overlap | Broader scheduler optimization |
+| Platform-specific `io_uring`, `madvise`, DMA, NPU, DSP, GPU work | Requires separate target approval after generic coroutine contract is proven |
+| Kernel-internal `co_await` | Kernels remain synchronous, allocation-free numeric work |
+| Thread-pool offload as async substitute | Would hide behavior outside the SML graph |
+| Moving tensor residency out of `model/tensor` | Violates shipped ownership invariant |
+| Replacing shipped mmap/read/staged-read strategies | Async strategy is additive |
+| Public C ABI coroutine types | ABI must remain fixed-width error-code style, not C++ coroutine surface |
 
 ## Traceability
 
-Each row appears **exactly once**. Phases continue after v1.25’s Phase 226.
+Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| STG-01 | Phase 227 | Satisfied |
-| STG-02 | Phase 228 | Satisfied |
-| STG-03 | Phase 228 | Satisfied |
-| PLAT-02 | Phase 228 | Satisfied |
-| STG-04 | Phase 229 | Satisfied |
-| STG-05 | Phase 229 | Satisfied |
-| STG-06 | Phase 229 | Satisfied |
-| STG-07 | Phase 230 | Satisfied |
-| LIFE-02 | Phase 230 | Satisfied |
-| SNR-01 | Phase 230 | Satisfied |
-| ESG-01 | Phase 231 | Satisfied |
-| ESG-02A | Phase 231 | Satisfied |
-| ESG-02B | Deferred/Future (post-v1.26) | Deferred |
-| ESG-03 | Phase 231 | Satisfied |
-| ESG-04 | Phase 231 | Satisfied |
-| TNX-01 | Phase 237 | Satisfied |
-| TNX-02 | Phase 232 | Satisfied |
-| TNX-03 | Phase 237 | Satisfied |
-| TNX-04 | Phase 237 | Satisfied |
-| PUB-01 | Phase 233 | Satisfied |
-| PUB-02 | Phase 233 | Satisfied |
-| PUB-03 | Phase 233 | Satisfied |
-| PUB-04 | Phase 233 | Satisfied |
-| PUB-05 | Phase 233 | Satisfied |
-| TST-01 | Phase 237 | Satisfied |
-| TST-02 | Phase 237 | Satisfied |
-| GRD-01 | Phase 235 | Satisfied |
-| GRD-02 | Phase 235 | Satisfied |
-| GRD-03 | Phase 235 | Satisfied |
-| GRD-04 | Phase 235 | Satisfied |
-| GRD-05 | Phase 235 | Satisfied |
-| DOC-01 | Phase 236 | Satisfied |
-| LNT-01 | Phase 236 | Satisfied |
-| BNH-01 | Phase 236 | Satisfied |
-| EVI-01 | Phase 236 | Satisfied |
-
-**Verification evidence — Phase 228 closeout (STG-02, STG-03, PLAT-02)**  
-(manager-scoped run; do not extrapolate beyond this record):
-
-- `scripts/quality_gates.sh` finished with exit **0**; exit snapshot:
-  **`/tmp/emel_phase228_quality_gates_final.exit`** contains **`0`**.
-- **`emel_tests_io`** passed during that gated run.
-- Scoped **`staged_read` coverage reporting:** **91.9%** lines /
-  **100.0%** branches (per gate output summarized by manager).
+| CO-01 | Phase 239 | Satisfied |
+| CO-02 | Phase 240 | Satisfied |
+| CO-03 | Phase 240 | Satisfied |
+| CO-04 | Phase 240 | Satisfied |
+| CO-05 | Phase 240 | Satisfied |
+| AIO-01 | Phase 241 | Satisfied |
+| AIO-02 | Phase 241 | Satisfied |
+| AIO-03 | Phase 242 | Satisfied |
+| AIO-04 | Phase 250 | Pending |
+| AIO-05 | Phase 243 | Satisfied |
+| AIO-06 | Phase 249 | Pending |
+| OWN-01 | Phase 242 | Satisfied |
+| OWN-02 | Phase 242 | Satisfied |
+| OWN-03 | Phase 242 | Satisfied |
+| OWN-04 | Phase 242 | Satisfied |
+| TNX-01 | Phase 244 | Satisfied |
+| TNX-02 | Phase 244 | Satisfied |
+| TNX-03 | Phase 250 | Pending |
+| TNX-04 | Phase 245 | Satisfied |
+| TST-01 | Phase 240 | Satisfied |
+| TST-02 | Phase 243 | Satisfied |
+| TST-03 | Phase 244 | Satisfied |
+| GRD-01 | Phase 246 | Satisfied |
+| GRD-02 | Phase 246 | Satisfied |
+| GRD-03 | Phase 246 | Satisfied |
+| GRD-04 | Phase 246 | Satisfied |
+| DOC-01 | Phase 251 | Pending |
+| EVI-01 | Phase 251 | Pending |
+| PERF-01 | Phase 250 | Pending |
+| PERF-02 | Phase 252 | Pending |
+| LNT-01 | Phase 247 | Satisfied |
+| QG-01 | Phase 247 | Satisfied |
 
 **Coverage:**
 
-- v1.26 requirements: 35 total  
-- Mapped to phases: 35  
-- Satisfied: 34 active requirements  
-- Pending gap closure: 0 active requirements  
-- Deferred/future: 1 requirement (`ESG-02B`)  
+- v1.27 requirements: 32 total  
+- Mapped to phases: 32  
+- Satisfied: 25  
+- Pending: 7
 - Unmapped: 0  
 - Duplicate mappings: 0
 
 ---
-*Requirements defined: 2026-05-07*  
-*Last updated: 2026-05-08 Phase 237 source repair closed reopened requirement gaps*
+*Requirements defined: 2026-05-09*
+*Last updated: 2026-05-09 after planning gap-closure phases 249-252*
