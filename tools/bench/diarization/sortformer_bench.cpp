@@ -37,6 +37,8 @@ constexpr const char *k_hidden_probe_env =
 constexpr const char *k_probability_probe_env =
     "EMEL_DIARIZATION_PROBABILITY_PROBE_OUTPUT";
 constexpr const char *k_stage_profile_env = "EMEL_DIARIZATION_STAGE_PROFILE";
+constexpr const char *k_diarization_iters_env = "EMEL_BENCH_DIARIZATION_ITERS";
+constexpr const char *k_diarization_runs_env = "EMEL_BENCH_DIARIZATION_RUNS";
 volatile std::uint64_t g_checksum_sink = 0;
 volatile bool g_stage_ok_sink = false;
 
@@ -60,6 +62,24 @@ void require_pcm_fixture(fixture::pcm_fixture &pcm) {
   if (!fixture::prepare(pcm)) {
     fail_sortformer_setup("prepare_pcm_fixture");
   }
+}
+
+std::uint64_t read_env_u64_or(const char *name, const std::uint64_t fallback) noexcept {
+  const char *value = std::getenv(name);
+  if (value == nullptr || value[0] == '\0') {
+    return fallback;
+  }
+  char *end = nullptr;
+  const auto parsed = std::strtoull(value, &end, 10);
+  if (end == value || (end != nullptr && *end != '\0') || parsed == 0) {
+    return fallback;
+  }
+  return static_cast<std::uint64_t>(parsed);
+}
+
+std::size_t read_env_size_or(const char *name, const std::size_t fallback) noexcept {
+  return static_cast<std::size_t>(
+      read_env_u64_or(name, static_cast<std::uint64_t>(fallback)));
 }
 
 void require_baseline(fixture::expected_output_baseline &baseline) {
@@ -160,8 +180,8 @@ void maybe_write_onnx_probe_inputs(const fixture::model_fixture &model,
 
 config pipeline_benchmark_config(const config &cfg) noexcept {
   config out = cfg;
-  out.iterations = std::max<std::uint64_t>(1u, cfg.iterations);
-  out.runs = std::max<std::size_t>(1u, cfg.runs);
+  out.iterations = read_env_u64_or(k_diarization_iters_env, 1u);
+  out.runs = read_env_size_or(k_diarization_runs_env, std::min<std::size_t>(cfg.runs, 3u));
   return out;
 }
 

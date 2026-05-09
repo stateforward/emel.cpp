@@ -27,9 +27,231 @@
 - ✅ **v1.23 I/O Loading Strategy Boundary** — shipped 2026-05-04
 - ✅ **v1.24 I/O Mmap Loading Strategy** — shipped 2026-05-04 (Phases 204-211)
 - ✅ **v1.25 I/O Read Loading Strategy** — shipped 2026-05-06 (Phases 212-226 + 214.1)
+- ✅ **v1.26 I/O Staged Read Loading Strategy** — completed 2026-05-08
+  (12 / 12 phases complete; issue #63; `ESG-02B` deferred/future)
 
 ## Phases
 
+### ✅ v1.26 I/O Staged Read Loading Strategy (Phases 227-238) — COMPLETE 2026-05-08
+
+Source: GitHub issue #63, "Add io/staged_read state machine for constrained-memory tensor loading".
+Adds `src/emel/io/staged_read` for bounded chunked/windowed reads under tensor-owned residency.
+Depends on the tensor-to-I/O boundary from issue #60. Cooperative coroutine scheduling is out of
+scope unless separately approved. Shipped mmap (`io/mmap`) and bulk read/copy (`io/read`) must not
+regress.
+
+Execution order: 227, 228, 229, 230, 231, 232, 233, 234, 235, 236, 237, 238.
+
+**Milestone progress (v1.26):** **12 / 12** phases recorded **Complete** in the table below.
+The source-backed milestone audit found a direct tensor staged-load offset-contract gap plus
+closeout artifact debt; Phases 237-238 closed those gaps. `ESG-02B` remains deferred/future
+because file-backed staged-read source ownership is out of scope.
+
+- [x] Phase 227: Staged Read Strategy Component Boundary (STG-01)
+- [x] Phase 228: Span, Target-Window, and Platform Gating (STG-02, STG-03, PLAT-02)
+- [x] Phase 229: Staged Copy Progress and Completion Semantics (STG-04, STG-05, STG-06)
+- [x] Phase 230: Context Cleanness and Per-Attempt Lifetime (STG-07, LIFE-02, SNR-01)
+- [x] Phase 231: Deterministic Error Taxonomy (ESG-01, ESG-02A, ESG-03, ESG-04; ESG-02B deferred)
+- [x] Phase 232: Tensor-Owned Integration Graph (TNX-01, TNX-02, TNX-03, TNX-04)
+- [x] Phase 233: Public Loader and Maintained Entrypoints (PUB-01, PUB-02, PUB-03, PUB-04, PUB-05)
+- [x] Phase 234: Public Dispatch Tests (TST-01, TST-02)
+- [x] Phase 235: Scope and Non-Regression Guardrails (GRD-01, GRD-02, GRD-03, GRD-04, GRD-05)
+- [x] Phase 236: Publication and Evidence Truthfulness (DOC-01, LNT-01, BNH-01, EVI-01)
+- [x] Phase 237: Direct Tensor Staged Offset Contract Repair (TNX-01, TNX-03, TNX-04, TST-01, TST-02)
+- [x] Phase 238: Audit Artifact and Probe Reporting Cleanup (cleanup-only)
+
+#### Phase 227: Staged Read Strategy Component Boundary
+
+**Goal:** Locate canonical `src/emel/io/staged_read` with standard I/O component layout.
+**Depends on:** Phase 226
+**Requirements:** STG-01
+
+**Success criteria:**
+
+1. `src/emel/io/staged_read` exists with canonical `emel::io::staged_read::sm` alias.
+2. Component scope excludes mmap, device transfer, or cooperative async runtime.
+3. Initial fail-closed or smoke dispatch proves actors are wired like sibling I/O strategies.
+
+#### Phase 228: Span, Target-Window, and Platform Gating
+
+**Goal:** All staged preconditions enforced in guards/transitions before any file work.
+**Depends on:** Phase 227
+**Requirements:** STG-02, STG-03, PLAT-02
+
+**Success criteria:**
+
+1. Invalid source staging contract rejected solely via guard-modeled transitions.
+2. Invalid target window/layout rejected solely via guard-modeled transitions.
+3. Unsupported hosts/resources fail closed with explicit unsupported terminal shape.
+
+#### Phase 229: Staged Copy Progress and Completion Semantics
+
+**Goal:** Prove per-stage deterministic copy plus full-span monotone completion.
+**Depends on:** Phase 228
+**Requirements:** STG-04, STG-05, STG-06
+
+**Success criteria:**
+
+1. Test vectors observe correct bytes per staged window.
+2. Completeness tests cover entire logical span order.
+3. Terminal success aligns with copied full span per contract.
+
+#### Phase 230: Context Cleanness and Per-Attempt Lifetime
+
+**Goal:** Bounded handles and residency clarity for the staged actor.
+**Depends on:** Phase 229
+**Requirements:** STG-07, LIFE-02, SNR-01
+
+**Success criteria:**
+
+1. Static or dynamic review shows zero forbidden dispatch-local context mirrors.
+2. Handle lifetime tests/tools show release-before-done semantics.
+3. Tests confirm strategy never asserts tensor residency commits.
+
+#### Phase 231: Deterministic Error Taxonomy
+
+**Goal:** Errors are categorical, observable, exception-free.
+**Depends on:** Phase 230
+**Requirements:** ESG-01, ESG-02A, ESG-03, ESG-04 (`ESG-02B` deferred)
+
+**Success criteria:**
+
+1. At least one doctest per taxonomy family (pre-I/O guard, source-contract read-surface, sequencing/contract) demonstrates deterministic categories through `process_event(...)`.
+2. Source-backed docs explicitly defer `ESG-02B` file open/seek/read + per-stage short-read categories until approved file-backed staged-read ownership exists.
+3. ABI boundary scans show noexcept expectations for surfaced API.
+
+#### Phase 232: Tensor-Owned Integration Graph
+
+**Goal:** Integrate staged loads through explicit tensor+I/O graphs.
+**Depends on:** Phase 231
+**Requirements:** TNX-01, TNX-02, TNX-03, TNX-04
+
+**Closeout ledger (verified):** Manager-scoped **`scripts/quality_gates.sh`** for Phase 232
+changed-file corpus exited **2** (red — **not** exit 0). **`232-VERIFICATION.md`** records **bench_snapshot**
+suite regressions unrelated to staged tensor-integration files and a **paritychecker** failure outside
+Phase 232 scope. Phase 232 completion is ledger-approved **without** claiming a passing full-repo gate run.
+
+**Success criteria:**
+
+1. Requests flow only via public tensors↔IO events.
+2. Residency proofs remain tensor-owned (`model/tensor` retains lifecycle ownership).
+3. Success/failure each have explicit observable terminal representations.
+
+#### Phase 233: Public Loader and Maintained Entrypoints
+
+**Goal:** Strategies observable without actor detail reach-through or duplicate POSIX loops in tools.
+**Depends on:** Phase 232
+**Requirements:** PUB-01, PUB-02, PUB-03, PUB-04, PUB-05
+
+**Closeout (2026-05-08):** **`PUB-01`–`PUB-05`** satisfied per **`233-VERIFICATION.md`** (manager validation +
+**phase233-navigator final review PASS**). Public **`staged_read`** access is through **`io::loader`** and maintained
+tool entrypoints with **`io_staged_read`** wiring; **`tests/model/loader/lifecycle_tests.cpp`** covers the
+storage-backed **`staged_read`** route and include guards.
+
+**Residual:** **`scripts/quality_gates.sh`** was **not** run on a Phase **233** changed-file corpus in
+this closeout slice — **no Phase 233 scoped gate pass is claimed** (full-repo gate truth unchanged from
+Phase **232** ledger where applicable).
+
+**Success criteria:**
+
+1–4. Each lane (loader/bench/parity/probe) has independent proof of public-contract-only access.
+5. Source scan enforcement or doctest proves no duplicated unconstrained staged read shim in tools.
+
+#### Phase 234: Public Dispatch Tests
+
+**Goal:** Core success/failure behavior demonstrated through `process_event`.
+**Depends on:** Phase 233
+**Requirements:** TST-01, TST-02
+
+**Success criteria:**
+
+1. Passing success-path doctest with `visit_current_states` or equivalent.
+2. Passing failure-path doctest for guard rejection.
+
+#### Phase 235: Scope and Non-Regression Guardrails
+
+**Goal:** Freeze architecture invariants relative to loaders, mmap, and read strategies.
+**Depends on:** Phase 234
+**Requirements:** GRD-01, GRD-02, GRD-03, GRD-04, GRD-05
+
+**Success criteria:** Each of GRD-01, GRD-02, GRD-03, GRD-04, and GRD-05 has either a deterministic script failure mode or a narrowed regression doctest proving the invariant holds.
+
+#### Phase 236: Publication and Evidence Truthfulness
+
+**Goal:** Align docs and frozen artifacts with real staged/runtime usage.
+**Depends on:** Phase 235
+**Requirements:** DOC-01, LNT-01, BNH-01, EVI-01
+
+**Success criteria:**
+
+1. Doc diff review verifies accurate staged-read wording.
+2. Lint snapshot regeneration path documented/passing.
+3. Benchmark snapshot regeneration obeys policy.
+4. Parity/compare metadata never mislabels unstaged workloads as staged.
+
+**Closeout (2026-05-08):** **`DOC-01`–`EVI-01`** satisfied per
+**`236-VERIFICATION.md`**. Serial full quality gate passed:
+`EMEL_QUALITY_GATES_SCOPE=full EMEL_QUALITY_GATES_PARALLEL=0 scripts/quality_gates.sh`
+(exit **0**, ended `2026-05-08T21:21:42.028Z`). Benchmark defaults now use bounded routine
+settings (`100` iterations, `3` runs, `10` warmup iterations) with bounded generation and
+diarization defaults.
+
+#### Phase 237: Direct Tensor Staged Offset Contract Repair
+
+**Goal:** Repair direct `model/tensor` staged-load nonzero-offset source-window behavior and prove it through public dispatch.
+**Depends on:** Phase 236
+**Requirements:** TNX-01, TNX-03, TNX-04, TST-01, TST-02
+**Gap Closure:** Closes `.planning/v1.26-MILESTONE-AUDIT.md` findings
+`direct-tensor-staged-offset-contract` and `direct-tensor-staged-nonzero-offset`.
+
+**Success Criteria:**
+
+1. A public `model/tensor::event::request_staged_load` doctest fails before repair and passes after
+   repair for a nonzero `file_offset` against a whole-file source buffer.
+2. Direct tensor staged-load source-span construction is aligned with `io/loader` or the
+   pre-windowed-source contract is explicitly documented and enforced by validation/tests.
+3. Direct tensor staged-load success and failure outcomes remain explicit `_done` / `_error`
+   publications through public `process_event(...)` dispatch and SML state inspection.
+4. Changed-file quality gates for `model/tensor`, `io/staged_read`, and affected tests pass without
+   benchmark-regression override.
+5. If implementation changes maintained model or snapshot artifacts, those artifacts are refreshed
+   only through maintained workflows; model artifact updates are approved for this gap-closure work.
+
+**Closeout (2026-05-08):** Phase 237 completed with a failing-first public
+`request_staged_load` nonzero-offset doctest, repaired source-window dispatch in
+`model/tensor`, and passing scoped validation:
+`./build/emel_tests_bin --test-case="model_tensor_request_staged_load_*"`,
+`ctest --test-dir build -R '^emel_tests_model_and_batch$' --output-on-failure`,
+and changed-file `scripts/quality_gates.sh` (exit `0`). Reopened requirements
+`TNX-01`, `TNX-03`, `TNX-04`, `TST-01`, and `TST-02` are satisfied by
+`237-VERIFICATION.md`.
+
+#### Phase 238: Audit Artifact and Probe Reporting Cleanup
+
+**Goal:** Reconcile audit artifacts and probe reporting truth after the Phase 237 source repair.
+**Depends on:** Phase 237
+**Requirements:** none — cleanup-only; all reopened requirement closure belongs to Phase 237
+**Gap Closure:** Closes `.planning/v1.26-MILESTONE-AUDIT.md` tech-debt items for missing
+`requirements-completed` SUMMARY frontmatter and embedded-size probe reporting clarity.
+
+**Success Criteria:**
+
+1. Phase summaries for 232–236 expose accurate `requirements-completed` frontmatter or an explicit
+   cleanup rationale so the three-source audit matrix no longer needs manual reconciliation.
+2. Embedded-size probe evidence either prints the executed load strategy when appropriate or the
+   maintained docs/audit explain why captured `used_io_strategy` is the authoritative evidence
+   surface.
+3. REQUIREMENTS, ROADMAP, STATE, and the milestone audit are refreshed from source-backed evidence
+   after Phase 237.
+4. Focused lint/docs/audit commands pass; no maintained benchmark, model, or snapshot artifact is
+   updated unless the implementation actually requires it.
+
+**Closeout (2026-05-08):** Phase 238 completed summary frontmatter reconciliation,
+embedded probe reporting truth documentation, and refreshed `v1.26-MILESTONE-AUDIT.md`
+to `status: passed`. Changed-file `scripts/quality_gates.sh` passed with no benchmark,
+coverage, parity, fuzz, or docsgen-affecting lanes required.
+
+---
 ### ✅ v1.25 I/O Read Loading Strategy (Phases 212-226 + 214.1) — SHIPPED 2026-05-06
 
 Source: GitHub issue #62, "Add io/read state machine for copy-based tensor loading".
@@ -504,16 +726,28 @@ Archive:
 
 </details>
 
-### 📋 Next Milestone
+### 📋 Milestone backlog
 
-After v1.25 gap closure ships, the next milestone selection happens via `$gsd-new-milestone`.
-Staged/chunked constrained-memory, cooperative async, and device-specific loading
-strategies remain deferred follow-on work below the `emel/io` boundary.
+Older “next milestone” staging notes are superseded by **v1.26** (issue #63) in active planning
+artifacts (`REQUIREMENTS.md`, `STATE.md`). Future milestones after v1.26 continue via
+`$gsd-new-milestone`.
 
 ## Progress
 
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
+| 227. Staged Read Strategy Component Boundary | v1.26 | 1/1 | Complete | 2026-05-07 |
+| 228. Span, Target-Window, and Platform Gating | v1.26 | 1/1 | Complete | 2026-05-07 |
+| 229. Staged Copy Progress and Completion Semantics | v1.26 | 1/1 | Complete | 2026-05-07 |
+| 230. Context Cleanness and Per-Attempt Lifetime | v1.26 | 1/1 | Complete | 2026-05-07 |
+| 231. Deterministic Error Taxonomy | v1.26 | 1/1 | Complete | 2026-05-07 |
+| 232. Tensor-Owned Integration Graph | v1.26 | 1/1 | Complete | 2026-05-07 |
+| 233. Public Loader and Maintained Entrypoints | v1.26 | 1/1 | Complete | 2026-05-08 |
+| 234. Public Dispatch Tests | v1.26 | 1/1 | Complete | 2026-05-08 |
+| 235. Scope and Non-Regression Guardrails | v1.26 | 1/1 | Complete | 2026-05-08 |
+| 236. Publication and Evidence Truthfulness | v1.26 | 1/1 | Complete | 2026-05-08 |
+| 237. Direct Tensor Staged Offset Contract Repair | v1.26 | 1/1 | Complete | 2026-05-08 |
+| 238. Audit Artifact and Probe Reporting Cleanup | v1.26 | 1/1 | Complete | 2026-05-08 |
 | 212. Read Strategy Component Boundary | v1.25 | 1/1 | Validated | 2026-05-05 |
 | 213. Read Validation and Platform Gating | v1.25 | 1/1 | Validated | 2026-05-05 |
 | 214. Read Execution, Errors, and Lifetime | v1.25 | 1/1 | Validated | 2026-05-05 |

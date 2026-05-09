@@ -9,6 +9,7 @@
 #include "emel/io/loader/events.hpp"
 #include "emel/io/mmap/errors.hpp"
 #include "emel/io/read/errors.hpp"
+#include "emel/io/staged_read/errors.hpp"
 #include "emel/model/data.hpp"
 #include "emel/model/tensor/errors.hpp"
 
@@ -59,6 +60,7 @@ struct plan_load;
 struct apply_effect_results;
 struct request_mapped_load;
 struct request_read_load;
+struct request_staged_load;
 struct release_mapped_load;
 
 struct bind_tensor {
@@ -100,6 +102,8 @@ struct request_mapped_load_done;
 struct request_mapped_load_error;
 struct request_read_load_done;
 struct request_read_load_error;
+struct request_staged_load_done;
+struct request_staged_load_error;
 struct release_mapped_load_done;
 struct release_mapped_load_error;
 
@@ -213,6 +217,26 @@ struct request_read_load {
       : tensor_id(id), file_path(path), file_offset(offset), byte_size(size) {}
 };
 
+// Public surface for tensor-owned staged copy loading. The tensor actor keeps
+// residency ownership and dispatches staged copy work through an injected
+// emel::io::staged_read::sm via process_event(...).
+struct request_staged_load {
+  int32_t tensor_id = -1;
+  uint16_t file_index = 0u;
+  uint64_t file_offset = 0u;
+  uint64_t byte_size = 0u;
+  uint64_t stage_chunk_bytes = 0u;
+  const void *source_buffer = nullptr;
+  uint64_t source_buffer_bytes = 0u;
+  void *target_buffer = nullptr;
+  uint64_t target_buffer_bytes = 0u;
+  emel::callback<void(const events::request_staged_load_done &)> on_done = {};
+  emel::callback<void(const events::request_staged_load_error &)> on_error = {};
+
+  request_staged_load(int32_t id, uint64_t offset, uint64_t size) noexcept
+      : tensor_id(id), file_index(0u), file_offset(offset), byte_size(size) {}
+};
+
 struct release_mapped_load {
   int32_t tensor_id = -1;
   uint32_t mapping_handle = emel::io::mmap::k_invalid_mapping_handle;
@@ -280,6 +304,19 @@ struct request_read_load_error {
   emel::error::type err = emel::error::cast(error::none);
   emel::error::type io_read_err =
       emel::error::cast(emel::io::read::error::none);
+};
+
+struct request_staged_load_done {
+  const event::request_staged_load &request;
+  void *buffer = nullptr;
+  uint64_t buffer_bytes = 0u;
+};
+
+struct request_staged_load_error {
+  const event::request_staged_load &request;
+  emel::error::type err = emel::error::cast(error::none);
+  emel::error::type io_staged_read_err =
+      emel::error::cast(emel::io::staged_read::error::none);
 };
 
 struct release_mapped_load_done {

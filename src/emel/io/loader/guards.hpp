@@ -3,6 +3,7 @@
 #include "emel/io/loader/context.hpp"
 #include "emel/io/loader/detail.hpp"
 #include "emel/io/loader/events.hpp"
+#include "emel/io/staged_read/errors.hpp"
 
 namespace emel::io::loader::guard {
 
@@ -67,6 +68,18 @@ struct strategy_read_copy_batch {
   }
 };
 
+struct strategy_staged_read {
+  bool operator()(const detail::load_tensor_runtime &ev) const noexcept {
+    return ev.request.policy.strategy == event::strategy_kind::staged_read;
+  }
+};
+
+struct strategy_staged_read_batch {
+  bool operator()(const detail::load_tensor_batch_runtime &ev) const noexcept {
+    return ev.request.policy.strategy == event::strategy_kind::staged_read;
+  }
+};
+
 struct read_actor_present {
   bool operator()(const action::context &ctx) const noexcept {
     return ctx.io_read != nullptr;
@@ -76,6 +89,18 @@ struct read_actor_present {
 struct read_actor_absent {
   bool operator()(const action::context &ctx) const noexcept {
     return !read_actor_present{}(ctx);
+  }
+};
+
+struct staged_read_actor_present {
+  bool operator()(const action::context &ctx) const noexcept {
+    return ctx.io_staged_read != nullptr;
+  }
+};
+
+struct staged_read_actor_absent {
+  bool operator()(const action::context &ctx) const noexcept {
+    return !staged_read_actor_present{}(ctx);
   }
 };
 
@@ -93,6 +118,20 @@ struct strategy_read_copy_without_actor {
   }
 };
 
+struct strategy_staged_read_with_actor {
+  bool operator()(const detail::load_tensor_runtime &ev,
+                  const action::context &ctx) const noexcept {
+    return strategy_staged_read{}(ev) && staged_read_actor_present{}(ctx);
+  }
+};
+
+struct strategy_staged_read_without_actor {
+  bool operator()(const detail::load_tensor_runtime &ev,
+                  const action::context &ctx) const noexcept {
+    return strategy_staged_read{}(ev) && staged_read_actor_absent{}(ctx);
+  }
+};
+
 struct strategy_read_copy_batch_with_actor {
   bool operator()(const detail::load_tensor_batch_runtime &ev,
                   const action::context &ctx) const noexcept {
@@ -104,6 +143,91 @@ struct strategy_read_copy_batch_without_actor {
   bool operator()(const detail::load_tensor_batch_runtime &ev,
                   const action::context &ctx) const noexcept {
     return strategy_read_copy_batch{}(ev) && read_actor_absent{}(ctx);
+  }
+};
+
+struct strategy_staged_read_batch_with_actor {
+  bool operator()(const detail::load_tensor_batch_runtime &ev,
+                  const action::context &ctx) const noexcept {
+    return strategy_staged_read_batch{}(ev) &&
+           staged_read_actor_present{}(ctx);
+  }
+};
+
+struct strategy_staged_read_batch_without_actor {
+  bool operator()(const detail::load_tensor_batch_runtime &ev,
+                  const action::context &ctx) const noexcept {
+    return strategy_staged_read_batch{}(ev) &&
+           staged_read_actor_absent{}(ctx);
+  }
+};
+
+struct staged_read_source_span_valid {
+  bool operator()(const detail::load_tensor_runtime &ev) const noexcept {
+    const auto &tensor = ev.request.tensor;
+    return tensor.source_buffer != nullptr &&
+           tensor.source_buffer_bytes >= tensor.file_offset &&
+           (tensor.source_buffer_bytes - tensor.file_offset) >=
+               tensor.byte_size;
+  }
+};
+
+struct staged_read_source_span_invalid {
+  bool operator()(const detail::load_tensor_runtime &ev) const noexcept {
+    return !staged_read_source_span_valid{}(ev);
+  }
+};
+
+struct strategy_staged_read_with_actor_and_source_span_valid {
+  bool operator()(const detail::load_tensor_runtime &ev,
+                  const action::context &ctx) const noexcept {
+    return strategy_staged_read_with_actor{}(ev, ctx) &&
+           staged_read_source_span_valid{}(ev);
+  }
+};
+
+struct strategy_staged_read_with_actor_and_source_span_invalid {
+  bool operator()(const detail::load_tensor_runtime &ev,
+                  const action::context &ctx) const noexcept {
+    return strategy_staged_read_with_actor{}(ev, ctx) &&
+           staged_read_source_span_invalid{}(ev);
+  }
+};
+
+struct staged_read_batch_source_span_valid {
+  bool operator()(const detail::load_tensor_batch_runtime &ev) const noexcept {
+    bool valid = true;
+    for (uint32_t index = 0u;
+         index < static_cast<uint32_t>(ev.request.tensors.size()); ++index) {
+      const auto &tensor = ev.request.tensors[index];
+      valid = valid && tensor.source_buffer != nullptr &&
+              tensor.source_buffer_bytes >= tensor.file_offset &&
+              (tensor.source_buffer_bytes - tensor.file_offset) >=
+                  tensor.byte_size;
+    }
+    return valid;
+  }
+};
+
+struct staged_read_batch_source_span_invalid {
+  bool operator()(const detail::load_tensor_batch_runtime &ev) const noexcept {
+    return !staged_read_batch_source_span_valid{}(ev);
+  }
+};
+
+struct strategy_staged_read_batch_with_actor_and_source_span_valid {
+  bool operator()(const detail::load_tensor_batch_runtime &ev,
+                  const action::context &ctx) const noexcept {
+    return strategy_staged_read_batch_with_actor{}(ev, ctx) &&
+           staged_read_batch_source_span_valid{}(ev);
+  }
+};
+
+struct strategy_staged_read_batch_with_actor_and_source_span_invalid {
+  bool operator()(const detail::load_tensor_batch_runtime &ev,
+                  const action::context &ctx) const noexcept {
+    return strategy_staged_read_batch_with_actor{}(ev, ctx) &&
+           staged_read_batch_source_span_invalid{}(ev);
   }
 };
 

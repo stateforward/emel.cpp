@@ -191,6 +191,38 @@ TEST_CASE("encoder_ugm_encode_builds_tables_when_missing") {
   CHECK(out_tokens[0] == token_id);
 }
 
+TEST_CASE("encoder_detail_ugm_rebuild_preserves_inserted_trie_paths") {
+  vocab_builder builder{};
+  builder.set_model("t5");
+
+  std::vector<std::string> tokens{};
+  std::vector<int32_t> token_ids{};
+  tokens.reserve(192);
+  token_ids.reserve(192);
+
+  for (int i = 0; i < 192; ++i) {
+    tokens.push_back("tok_" + std::to_string(i) + "_ugm");
+    token_ids.push_back(builder.add_token(tokens.back().c_str(), 0.0f, 1));
+  }
+
+  emel::text::encoders::ugm::action::context ctx{};
+  ctx.vocab = builder.vocab;
+  REQUIRE(emel::text::encoders::ugm::detail::ensure_ugm_tables(ctx, *builder.vocab));
+
+  for (size_t i = 0; i < tokens.size(); ++i) {
+    const std::string_view token = tokens[i];
+    const auto *node = emel::text::encoders::ugm::detail::ugm_trie_root(
+      ctx.token_matcher, token[0]);
+    REQUIRE(node != nullptr);
+    for (size_t j = 1; j < token.size() && node != nullptr; ++j) {
+      node = emel::text::encoders::ugm::detail::ugm_trie_step(*node, token[j]);
+    }
+    REQUIRE(node != nullptr);
+    CHECK(node->has_value);
+    CHECK(node->value == token_ids[i]);
+  }
+}
+
 TEST_CASE("encoder_detail_ugm_append_space_and_overflow") {
   vocab_builder builder{};
   builder.set_model("t5");

@@ -195,6 +195,55 @@ TEST_CASE("bench script exposes unfiltered bench tool validation command") {
   CHECK(script.find(ctest_contract) != std::string::npos);
 }
 
+TEST_CASE("benchmark defaults stay bounded for routine quality gates") {
+  const std::string quality_gates = read_file(repo_root() / "scripts" / "quality_gates.sh");
+  const std::string bench_runner = read_file(repo_root() / "tools" / "bench" / "bench_runner.cpp");
+
+  CHECK(quality_gates.find("QUALITY_GATES_BENCH_ITERS=\"${EMEL_QUALITY_GATES_BENCH_ITERS:-100}\"") !=
+        std::string::npos);
+  CHECK(quality_gates.find("QUALITY_GATES_BENCH_RUNS=\"${EMEL_QUALITY_GATES_BENCH_RUNS:-3}\"") !=
+        std::string::npos);
+  CHECK(quality_gates.find(
+            "QUALITY_GATES_BENCH_WARMUP_ITERS=\"${EMEL_QUALITY_GATES_BENCH_WARMUP_ITERS:-10}\"") !=
+        std::string::npos);
+
+  CHECK(bench_runner.find("constexpr std::uint64_t k_default_iterations = 100;") !=
+        std::string::npos);
+  CHECK(bench_runner.find("constexpr std::size_t k_default_runs = 3;") != std::string::npos);
+  CHECK(bench_runner.find("constexpr std::uint64_t k_default_warmup_iterations = 10;") !=
+        std::string::npos);
+}
+
+TEST_CASE("bench script bounds default generation workload") {
+  const std::string script = read_file(repo_root() / "scripts" / "bench.sh");
+  const std::string generation_bench =
+      read_file(repo_root() / "tools" / "bench" / "generation_bench.cpp");
+  const std::string diarization_bench =
+      read_file(repo_root() / "tools" / "bench" / "diarization" / "sortformer_bench.cpp");
+
+  CHECK(script.find("DEFAULT_GENERATION_WORKLOAD_ID=") != std::string::npos);
+  CHECK(script.find("lfm2_single_user_hello_max_tokens_1_v1") != std::string::npos);
+  CHECK(script.find("EMEL_GENERATION_WORKLOAD_ID=\"$generation_workload_id\"") !=
+        std::string::npos);
+  CHECK(script.find("DEFAULT_DIARIZATION_ITERS=\"${EMEL_BENCH_DEFAULT_DIARIZATION_ITERS:-1}\"") !=
+        std::string::npos);
+  CHECK(script.find("DEFAULT_DIARIZATION_RUNS=\"${EMEL_BENCH_DEFAULT_DIARIZATION_RUNS:-3}\"") !=
+        std::string::npos);
+  CHECK(script.find("EMEL_BENCH_DIARIZATION_ITERS=\"$diarization_iters\"") !=
+        std::string::npos);
+  CHECK(script.find("EMEL_BENCH_DIARIZATION_RUNS=\"$diarization_runs\"") !=
+        std::string::npos);
+  CHECK(script.find("TOLERANCE=\"${BENCH_TOLERANCE:-0.30}\"") != std::string::npos);
+  CHECK(script.find("ABS_TOLERANCE_NS=\"${BENCH_ABS_TOLERANCE_NS:-5000}\"") !=
+        std::string::npos);
+  CHECK(script.find("curr[name] > relative_limit && curr[name] > absolute_limit") !=
+        std::string::npos);
+  CHECK(generation_bench.find("filter.empty() || filter == \"all\"") !=
+        std::string::npos);
+  CHECK(diarization_bench.find("EMEL_BENCH_DIARIZATION_ITERS") != std::string::npos);
+  CHECK(diarization_bench.find("EMEL_BENCH_DIARIZATION_RUNS") != std::string::npos);
+}
+
 TEST_CASE("bench script merges scoped snapshot updates into the full baseline") {
   const std::string script = read_file(repo_root() / "scripts" / "bench.sh");
 

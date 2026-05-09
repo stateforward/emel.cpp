@@ -6,6 +6,9 @@
 #include "emel/io/read/errors.hpp"
 #include "emel/io/read/events.hpp"
 #include "emel/io/read/sm.hpp"
+#include "emel/io/staged_read/errors.hpp"
+#include "emel/io/staged_read/events.hpp"
+#include "emel/io/staged_read/sm.hpp"
 #include "emel/model/tensor/context.hpp"
 #include "emel/model/tensor/detail.hpp"
 #include "emel/model/tensor/errors.hpp"
@@ -710,6 +713,135 @@ struct effect_record_request_read_load_error {
                   context &) const noexcept {}
 };
 
+namespace staged_load_callbacks {
+
+inline void on_io_staged_read_done(
+    void *object, const emel::io::staged_read::events::staged_window_done &ev) noexcept {
+  auto *status = static_cast<tensor::detail::request_staged_load_status *>(object);
+  status->io_staged_read_ok = true;
+  status->buffer = ev.target_buffer;
+  status->buffer_bytes = ev.bytes_committed;
+}
+
+inline void on_io_staged_read_error(
+    void *object,
+    const emel::io::staged_read::events::staged_window_error &ev) noexcept {
+  auto *status = static_cast<tensor::detail::request_staged_load_status *>(object);
+  status->io_staged_read_ok = false;
+  status->io_staged_read_err = ev.err;
+}
+
+} // namespace staged_load_callbacks
+
+struct effect_begin_request_staged_load {
+  void operator()(const detail::request_staged_load_runtime &ev,
+                  context &) const noexcept {
+    ev.status.err = emel::error::cast(error::none);
+    ev.status.ok = false;
+    ev.status.accepted = false;
+    ev.status.io_staged_read_ok = false;
+    ev.status.io_staged_read_err =
+        emel::error::cast(emel::io::staged_read::error::none);
+    ev.status.buffer = nullptr;
+    ev.status.buffer_bytes = 0u;
+  }
+};
+
+struct effect_attempt_request_staged_load_dispatch {
+  void operator()(const detail::request_staged_load_runtime &ev,
+                  context &ctx) const noexcept {
+    const auto *source_bytes =
+        static_cast<const unsigned char *>(ev.request.source_buffer);
+    emel::io::staged_read::event::staged_window_request inner_request{
+        .file_offset = ev.request.file_offset,
+        .logical_byte_length = ev.request.byte_size,
+        .stage_chunk_bytes = ev.request.stage_chunk_bytes,
+        .source_span = source_bytes + ev.request.file_offset,
+        .source_span_bytes = ev.request.byte_size,
+        .target_buffer = ev.request.target_buffer,
+        .target_window_bytes = ev.request.target_buffer_bytes,
+    };
+    emel::io::staged_read::event::staged_window inner_event{inner_request};
+    inner_event.on_done = {static_cast<void *>(&ev.status),
+                           staged_load_callbacks::on_io_staged_read_done};
+    inner_event.on_error = {static_cast<void *>(&ev.status),
+                            staged_load_callbacks::on_io_staged_read_error};
+    ctx.io_staged_read->process_event(inner_event);
+  }
+};
+
+struct effect_commit_request_staged_load {
+  void operator()(const detail::request_staged_load_runtime &ev,
+                  context &ctx) const noexcept {
+    const size_t id = static_cast<size_t>(ev.request.tensor_id);
+    ctx.tensors.lifecycle[id] = event::lifecycle::resident;
+    ctx.tensors.buffer[id] = ev.status.buffer;
+    ctx.tensors.buffer_bytes[id] = ev.status.buffer_bytes;
+    ev.status.err = emel::error::cast(error::none);
+    ev.status.ok = true;
+    ev.status.accepted = true;
+  }
+};
+
+struct effect_mark_request_staged_load_invalid_request {
+  void operator()(const detail::request_staged_load_runtime &ev,
+                  context &) const noexcept {
+    ev.status.err = emel::error::cast(error::invalid_request);
+    ev.status.ok = false;
+  }
+};
+
+struct effect_mark_request_staged_load_unsupported_io_staged_read {
+  void operator()(const detail::request_staged_load_runtime &ev,
+                  context &) const noexcept {
+    ev.status.err = emel::error::cast(error::io_staged_read_unsupported);
+    ev.status.ok = false;
+  }
+};
+
+struct effect_mark_request_staged_load_tensor_already_resident {
+  void operator()(const detail::request_staged_load_runtime &ev,
+                  context &) const noexcept {
+    ev.status.err = emel::error::cast(error::tensor_already_resident);
+    ev.status.ok = false;
+  }
+};
+
+struct effect_mark_request_staged_load_io_staged_read_failed {
+  void operator()(const detail::request_staged_load_runtime &ev,
+                  context &) const noexcept {
+    ev.status.err = emel::error::cast(error::io_staged_read_failed);
+    ev.status.ok = false;
+  }
+};
+
+struct effect_publish_request_staged_load_done {
+  void operator()(const detail::request_staged_load_runtime &ev,
+                  context &) const noexcept {
+    ev.request.on_done(events::request_staged_load_done{
+        .request = ev.request,
+        .buffer = ev.status.buffer,
+        .buffer_bytes = ev.status.buffer_bytes,
+    });
+  }
+};
+
+struct effect_publish_request_staged_load_error {
+  void operator()(const detail::request_staged_load_runtime &ev,
+                  context &) const noexcept {
+    ev.request.on_error(events::request_staged_load_error{
+        .request = ev.request,
+        .err = ev.status.err,
+        .io_staged_read_err = ev.status.io_staged_read_err,
+    });
+  }
+};
+
+struct effect_record_request_staged_load_error {
+  void operator()(const detail::request_staged_load_runtime &,
+                  context &) const noexcept {}
+};
+
 struct effect_begin_release_mapped_load {
   void operator()(const detail::release_mapped_load_runtime &ev,
                   context &) const noexcept {
@@ -898,6 +1030,26 @@ inline constexpr effect_publish_request_read_load_error
     effect_publish_request_read_load_error{};
 inline constexpr effect_record_request_read_load_error
     effect_record_request_read_load_error{};
+inline constexpr effect_begin_request_staged_load
+    effect_begin_request_staged_load{};
+inline constexpr effect_attempt_request_staged_load_dispatch
+    effect_attempt_request_staged_load_dispatch{};
+inline constexpr effect_commit_request_staged_load
+    effect_commit_request_staged_load{};
+inline constexpr effect_mark_request_staged_load_invalid_request
+    effect_mark_request_staged_load_invalid_request{};
+inline constexpr effect_mark_request_staged_load_unsupported_io_staged_read
+    effect_mark_request_staged_load_unsupported_io_staged_read{};
+inline constexpr effect_mark_request_staged_load_tensor_already_resident
+    effect_mark_request_staged_load_tensor_already_resident{};
+inline constexpr effect_mark_request_staged_load_io_staged_read_failed
+    effect_mark_request_staged_load_io_staged_read_failed{};
+inline constexpr effect_publish_request_staged_load_done
+    effect_publish_request_staged_load_done{};
+inline constexpr effect_publish_request_staged_load_error
+    effect_publish_request_staged_load_error{};
+inline constexpr effect_record_request_staged_load_error
+    effect_record_request_staged_load_error{};
 inline constexpr effect_begin_release_mapped_load
     effect_begin_release_mapped_load{};
 inline constexpr effect_attempt_release_mapped_load_dispatch

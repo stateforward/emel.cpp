@@ -11,6 +11,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <vector>
 
 #include "emel/error/error.hpp"
@@ -19,6 +20,7 @@
 #include "emel/gguf/loader/sm.hpp"
 #include "emel/io/loader/sm.hpp"
 #include "emel/io/read/sm.hpp"
+#include "emel/io/staged_read/sm.hpp"
 #include "emel/kernel/detail.hpp"
 #include "emel/kernel/events.hpp"
 #include "emel/model/detail.hpp"
@@ -64,6 +66,21 @@ void on_error(void *object,
   owner->err = ev.err;
   owner->requested_io_strategy = ev.requested_io_strategy;
   owner->used_io_strategy = ev.used_io_strategy;
+}
+
+void check_model_loader_ready_state(emel::model::loader::sm &machine) {
+  CHECK(machine.is(stateforward::sml::state<emel::model::loader::ready>));
+  std::size_t visited_states = 0u;
+  bool saw_ready = false;
+  machine.visit_current_states([&](auto state) noexcept {
+    ++visited_states;
+    using state_t = typename decltype(state)::type;
+    if constexpr (std::is_same_v<state_t, emel::model::loader::ready>) {
+      saw_ready = true;
+    }
+  });
+  CHECK(visited_states == 1u);
+  CHECK(saw_ready);
 }
 
 emel::error::type
@@ -1155,6 +1172,50 @@ TEST_CASE("model loader loads read/copy tensors through maintained actors") {
   CHECK(target[1] == 'd');
   CHECK(target[2] == 'e');
   CHECK(target[3] == 'f');
+  check_model_loader_ready_state(machine);
+}
+
+TEST_CASE(
+    "model loader staged-read dispatch success surfaces done and ready state") {
+  auto model = std::make_unique<emel::model::data>();
+  emel::model::loader::sm machine{};
+  emel::io::read::sm read_actor{};
+  emel::io::staged_read::sm staged_read_actor{};
+  emel::io::loader::sm io_loader{
+      {.io_read = &read_actor, .io_staged_read = &staged_read_actor}};
+  owner_state owner{};
+  tensor_loader_fixture tensor_loader{};
+  std::array<uint8_t, 4> target{};
+  emel::model::loader::event::parse_model_fn parse_model{
+      nullptr, parse_read_copy_tensor};
+
+  std::array<uint8_t, 8> file_bytes{'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'};
+  emel::model::loader::event::load request{*model, parse_model};
+  request.model_path = "fixture.gguf";
+  request.file_image = file_bytes.data();
+  request.file_size = file_bytes.size();
+  tensor_loader.bind(request);
+  std::array<emel::io::event::tensor_load_span, 1> io_load_spans{};
+  request.io_load_spans = std::span{io_load_spans};
+  request.read_copy_storage = std::span{target};
+  request.io_loader = &io_loader;
+  request.io_strategy = emel::io::loader::event::strategy_kind::staged_read;
+  request.map_layers = {nullptr, map_layers_ok};
+  request.validate_structure = {nullptr, validate_structure_ok};
+  request.validate_architecture_impl = {nullptr, validate_architecture_ok};
+  request.on_done = {&owner, on_done};
+  request.on_error = {&owner, on_error};
+
+  CHECK(machine.process_event(request));
+  CHECK(owner.done);
+  CHECK_FALSE(owner.error);
+  CHECK(owner.used_io_strategy ==
+        emel::io::loader::event::strategy_kind::staged_read);
+  CHECK(owner.bytes_total == file_bytes.size());
+  CHECK(owner.bytes_done == file_bytes.size());
+  CHECK(model->tensors[0].data == target.data());
+  CHECK(std::memcmp(target.data(), "cdef", target.size()) == 0);
+  check_model_loader_ready_state(machine);
 }
 
 TEST_CASE("model loader read copy uses one io loader batch dispatch") {
@@ -1212,6 +1273,61 @@ TEST_CASE("model loader read copy uses one io loader batch dispatch") {
   CHECK(read_copy_storage[4] == 'f');
   CHECK(read_copy_storage[5] == 'g');
   CHECK(read_copy_storage[6] == 'h');
+}
+
+TEST_CASE("model loader staged read uses request-owned storage-backed targets") {
+  auto model = std::make_unique<emel::model::data>();
+  emel::model::loader::sm machine{};
+  emel::io::read::sm read_actor{};
+  emel::io::staged_read::sm staged_read_actor{};
+  emel::io::loader::sm io_loader{
+      {.io_read = &read_actor, .io_staged_read = &staged_read_actor}};
+  owner_state owner{};
+  tensor_loader_fixture tensor_loader{};
+  std::array<uint8_t, 4> first_target{};
+  std::array<uint8_t, 7> staged_storage{};
+  emel::model::loader::event::parse_model_fn parse_model{
+      nullptr, parse_read_copy_two_tensors};
+
+  std::array<uint8_t, 9> file_bytes{'a', 'b', 'c', 'd', 'e',
+                                    'f', 'g', 'h', 'i'};
+  emel::model::loader::event::load request{*model, parse_model};
+  request.model_path = "fixture.gguf";
+  request.file_image = file_bytes.data();
+  request.file_size = file_bytes.size();
+  tensor_loader.bind(request);
+  std::array<emel::io::event::tensor_load_span, 2> io_load_spans{};
+  request.io_load_spans = std::span{io_load_spans};
+  request.read_copy_storage = std::span{staged_storage};
+  request.io_loader = &io_loader;
+  request.io_strategy = emel::io::loader::event::strategy_kind::staged_read;
+  request.map_layers = {nullptr, map_layers_ok};
+  request.validate_structure = {nullptr, validate_structure_ok};
+  request.validate_architecture_impl = {nullptr, validate_architecture_ok};
+  request.on_done = {&owner, on_done};
+  request.on_error = {&owner, on_error};
+
+  const bool accepted = machine.process_event(request);
+  CAPTURE(owner.err);
+  CHECK(accepted);
+  CHECK(owner.done);
+  CHECK_FALSE(owner.error);
+  CHECK_FALSE(owner.used_mmap);
+  CHECK(owner.used_io_strategy ==
+        emel::io::loader::event::strategy_kind::staged_read);
+  CHECK(tensor_loader.effect_results[0].handle == staged_storage.data());
+  CHECK(tensor_loader.effect_results[1].handle ==
+        staged_storage.data() + first_target.size());
+  CHECK(model->tensors[0].data == staged_storage.data());
+  CHECK(model->tensors[1].data == staged_storage.data() + first_target.size());
+  CHECK(staged_storage[0] == 'c');
+  CHECK(staged_storage[1] == 'd');
+  CHECK(staged_storage[2] == 'e');
+  CHECK(staged_storage[3] == 'f');
+  CHECK(staged_storage[4] == 'f');
+  CHECK(staged_storage[5] == 'g');
+  CHECK(staged_storage[6] == 'h');
+  check_model_loader_ready_state(machine);
 }
 
 TEST_CASE("model loader read copy requires request owned io batch span") {
@@ -1332,6 +1448,83 @@ TEST_CASE("model loader read copy batch error keeps used strategy unset") {
   CHECK(target[1] == 0u);
   CHECK(target[2] == 0u);
   CHECK(target[3] == 0u);
+}
+
+TEST_CASE("model loader staged-read dispatch failures surface error and ready state") {
+  auto model = std::make_unique<emel::model::data>();
+  emel::model::loader::event::parse_model_fn parse_model{
+      nullptr, parse_read_copy_tensor};
+  std::array<uint8_t, 8> file_bytes{'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'};
+
+  SUBCASE("missing io batch span reports io strategy unavailable") {
+    emel::model::loader::sm machine{};
+    emel::io::read::sm read_actor{};
+    emel::io::staged_read::sm staged_read_actor{};
+    emel::io::loader::sm io_loader{
+        {.io_read = &read_actor, .io_staged_read = &staged_read_actor}};
+    owner_state owner{};
+    tensor_loader_fixture tensor_loader{};
+    std::array<uint8_t, 4> target{};
+    emel::model::loader::event::load request{*model, parse_model};
+    request.model_path = "fixture.gguf";
+    request.file_image = file_bytes.data();
+    request.file_size = file_bytes.size();
+    tensor_loader.bind(request);
+    request.read_copy_storage = std::span{target};
+    request.io_loader = &io_loader;
+    request.io_strategy = emel::io::loader::event::strategy_kind::staged_read;
+    request.map_layers = {nullptr, map_layers_ok};
+    request.validate_structure = {nullptr, validate_structure_ok};
+    request.validate_architecture_impl = {nullptr, validate_architecture_ok};
+    request.on_done = {&owner, on_done};
+    request.on_error = {&owner, on_error};
+
+    CHECK_FALSE(machine.process_event(request));
+    CHECK_FALSE(owner.done);
+    CHECK(owner.error);
+    CHECK(owner.err == emel::error::cast(
+                           emel::model::loader::error::io_strategy_unavailable));
+    CHECK(owner.requested_io_strategy ==
+          emel::io::loader::event::strategy_kind::staged_read);
+    CHECK(owner.used_io_strategy ==
+          emel::io::loader::event::strategy_kind::none);
+    check_model_loader_ready_state(machine);
+  }
+
+  SUBCASE("missing staged-read storage reports invalid request") {
+    emel::model::loader::sm machine{};
+    emel::io::read::sm read_actor{};
+    emel::io::staged_read::sm staged_read_actor{};
+    emel::io::loader::sm io_loader{
+        {.io_read = &read_actor, .io_staged_read = &staged_read_actor}};
+    owner_state owner{};
+    tensor_loader_fixture tensor_loader{};
+    std::array<emel::io::event::tensor_load_span, 1> io_load_spans{};
+    emel::model::loader::event::load request{*model, parse_model};
+    request.model_path = "fixture.gguf";
+    request.file_image = file_bytes.data();
+    request.file_size = file_bytes.size();
+    tensor_loader.bind(request);
+    request.io_load_spans = std::span{io_load_spans};
+    request.io_loader = &io_loader;
+    request.io_strategy = emel::io::loader::event::strategy_kind::staged_read;
+    request.map_layers = {nullptr, map_layers_ok};
+    request.validate_structure = {nullptr, validate_structure_ok};
+    request.validate_architecture_impl = {nullptr, validate_architecture_ok};
+    request.on_done = {&owner, on_done};
+    request.on_error = {&owner, on_error};
+
+    CHECK_FALSE(machine.process_event(request));
+    CHECK_FALSE(owner.done);
+    CHECK(owner.error);
+    CHECK(owner.err ==
+          emel::error::cast(emel::model::loader::error::invalid_request));
+    CHECK(owner.requested_io_strategy ==
+          emel::io::loader::event::strategy_kind::staged_read);
+    CHECK(owner.used_io_strategy ==
+          emel::io::loader::event::strategy_kind::none);
+    check_model_loader_ready_state(machine);
+  }
 }
 
 TEST_CASE("model loader reports tensor bind errors from the tensor actor") {
@@ -1745,6 +1938,54 @@ TEST_CASE("model loader tensor outcomes use typed phase events not result enum "
 
 TEST_CASE(
     "model loader io boundary uses actor events without helper exposure") {
+  const std::array guarded_component_sources{
+      "src/emel/model/loader/actions.hpp",
+      "src/emel/model/loader/context.hpp",
+      "src/emel/model/loader/detail.hpp",
+      "src/emel/model/loader/errors.hpp",
+      "src/emel/model/loader/events.hpp",
+      "src/emel/model/loader/guards.hpp",
+      "src/emel/model/loader/sm.hpp",
+      "src/emel/io/loader/actions.hpp",
+      "src/emel/io/loader/context.hpp",
+      "src/emel/io/loader/detail.hpp",
+      "src/emel/io/loader/errors.hpp",
+      "src/emel/io/loader/events.hpp",
+      "src/emel/io/loader/guards.hpp",
+      "src/emel/io/loader/sm.hpp",
+      "src/emel/io/read/actions.hpp",
+      "src/emel/io/read/context.hpp",
+      "src/emel/io/read/detail.hpp",
+      "src/emel/io/read/errors.hpp",
+      "src/emel/io/read/events.hpp",
+      "src/emel/io/read/guards.hpp",
+      "src/emel/io/read/sm.hpp",
+      "src/emel/io/mmap/actions.hpp",
+      "src/emel/io/mmap/context.hpp",
+      "src/emel/io/mmap/detail.hpp",
+      "src/emel/io/mmap/errors.hpp",
+      "src/emel/io/mmap/events.hpp",
+      "src/emel/io/mmap/guards.hpp",
+      "src/emel/io/mmap/sm.hpp",
+      "src/emel/model/tensor/actions.hpp",
+      "src/emel/model/tensor/context.hpp",
+      "src/emel/model/tensor/detail.hpp",
+      "src/emel/model/tensor/errors.hpp",
+      "src/emel/model/tensor/events.hpp",
+      "src/emel/model/tensor/guards.hpp",
+      "src/emel/model/tensor/sm.hpp",
+  };
+  const std::array forbidden_syscall_tokens{
+      "pread(",
+      "::read(",
+      "fread(",
+      "open(",
+      "ReadFile",
+      "CreateFile",
+      "std::ifstream",
+      "std::fstream",
+      "std::filesystem::file_size",
+  };
   const std::string actions_source = read_text_file(
       repo_root() / "src" / "emel" / "model" / "loader" / "actions.hpp");
   const std::string events_source = read_text_file(
@@ -1757,14 +1998,6 @@ TEST_CASE(
   CHECK(actions_source.find("emel/io/read/events.hpp") == std::string::npos);
   CHECK(actions_source.find("read_tensor_request") == std::string::npos);
   CHECK(actions_source.find("effect_dispatch_io_loads") == std::string::npos);
-  CHECK(actions_source.find("effect_dispatch_io_load_batch") !=
-        std::string::npos);
-  CHECK(actions_source.find("std::ifstream") == std::string::npos);
-  CHECK(actions_source.find("::read(") == std::string::npos);
-  CHECK(actions_source.find("pread(") == std::string::npos);
-  CHECK(actions_source.find("ReadFile") == std::string::npos);
-  CHECK(actions_source.find("CreateFile") == std::string::npos);
-  CHECK(actions_source.find("map_io_error") == std::string::npos);
   const std::string_view batch_dispatch =
       function_source(actions_source, "effect_dispatch_io_load_batch");
   CHECK(count_occurrences(batch_dispatch, "io_loader->process_event(load)") ==
@@ -1774,6 +2007,73 @@ TEST_CASE(
   CHECK(sm_source.find("state_io_load_dispatch") != std::string::npos);
   CHECK(sm_source.find("io_load_error_strategy_unavailable") !=
         std::string::npos);
+
+  for (const auto *source_path : guarded_component_sources) {
+    CAPTURE(source_path);
+    const std::string source = read_text_file(repo_root() / source_path);
+    for (const auto *token : forbidden_syscall_tokens) {
+      CAPTURE(token);
+      CHECK(source.find(token) == std::string::npos);
+    }
+  }
+}
+
+TEST_CASE("model loader done evidence reports the public io strategy used") {
+  const std::string events_source = read_text_file(
+      repo_root() / "src" / "emel" / "model" / "loader" / "events.hpp");
+  const std::string actions_source = read_text_file(
+      repo_root() / "src" / "emel" / "model" / "loader" / "actions.hpp");
+  const std::array tool_sources{
+      "tools/bench/generation_bench.cpp",
+      "tools/bench/diarization/sortformer_fixture.hpp",
+      "tools/embedded_size/emel_probe/main.cpp",
+      "tools/paritychecker/parity_engines.cpp",
+  };
+
+  CHECK(events_source.find("used_io_strategy") != std::string::npos);
+  CHECK(events_source.find("requested_io_strategy") != std::string::npos);
+  CHECK(actions_source.find("effect_mark_io_strategy_used") !=
+        std::string::npos);
+  for (const auto *source_path : tool_sources) {
+    CAPTURE(source_path);
+    const std::string source = read_text_file(repo_root() / source_path);
+    CHECK(source.find("bind_model_load_io_strategy") != std::string::npos);
+    CHECK(source.find(".used_io_strategy = ev.used_io_strategy") !=
+          std::string::npos);
+    CHECK(source.find("process_event(capture)") == std::string::npos);
+  }
+}
+
+TEST_CASE("maintained tool staged-read surfaces wire only public actors") {
+  const std::array tool_sources{
+      "tools/bench/generation_bench.cpp",
+      "tools/bench/diarization/sortformer_fixture.hpp",
+      "tools/embedded_size/emel_probe/main.cpp",
+      "tools/paritychecker/parity_engines.cpp",
+  };
+
+  for (const auto *source_path : tool_sources) {
+    CAPTURE(source_path);
+    const std::string source = read_text_file(repo_root() / source_path);
+    CHECK(source.find("bind_model_load_io_strategy") != std::string::npos);
+    CHECK(source.find("io_load_spans") != std::string::npos);
+    CHECK(source.find("emel/io/staged_read/sm.hpp") != std::string::npos);
+    CHECK(source.find("io_staged_read") != std::string::npos);
+    CHECK(source.find("strategy_kind::staged_read") != std::string::npos);
+    CHECK(source.find("emel/io/read/events.hpp") == std::string::npos);
+    CHECK(source.find("emel/io/read/detail.hpp") == std::string::npos);
+    CHECK(source.find("emel/io/staged_read/actions.hpp") == std::string::npos);
+    CHECK(source.find("emel/io/staged_read/detail.hpp") == std::string::npos);
+    CHECK(source.find("emel/io/staged_read/guards.hpp") == std::string::npos);
+    CHECK(source.find("read_tensor_request") == std::string::npos);
+    CHECK(source.find("read_file_bytes") == std::string::npos);
+    CHECK(source.find("emel/io/source/any.hpp") != std::string::npos);
+    CHECK(source.find("emel::io::source::load_file_bytes") !=
+          std::string::npos);
+    CHECK(source.find("emel::io::read::event::read_tensor") ==
+          std::string::npos);
+    CHECK(source.find("process_event(capture)") == std::string::npos);
+  }
 }
 
 TEST_CASE("maintained tool read copy surfaces avoid direct io read events") {
@@ -1802,29 +2102,79 @@ TEST_CASE("maintained tool read copy surfaces avoid direct io read events") {
   }
 }
 
-TEST_CASE("model loader done evidence reports the public io strategy used") {
-  const std::string events_source = read_text_file(
-      repo_root() / "src" / "emel" / "model" / "loader" / "events.hpp");
+TEST_CASE("model loader staged-read routing uses storage-backed io path") {
+  const std::string guards_source = read_text_file(
+      repo_root() / "src" / "emel" / "model" / "loader" / "guards.hpp");
+  const std::string sm_source = read_text_file(repo_root() / "src" / "emel" /
+                                               "model" / "loader" / "sm.hpp");
   const std::string actions_source = read_text_file(
       repo_root() / "src" / "emel" / "model" / "loader" / "actions.hpp");
-  const std::array tool_sources{
-      "tools/bench/generation_bench.cpp",
-      "tools/bench/diarization/sortformer_fixture.hpp",
-      "tools/embedded_size/emel_probe/main.cpp",
-      "tools/paritychecker/parity_engines.cpp",
+
+  CHECK(guards_source.find("io_strategy_staged_read") != std::string::npos);
+  CHECK(guards_source.find("io_strategy_requires_staging_storage") !=
+        std::string::npos);
+  CHECK(guards_source.find(
+            "tensor_plan_done_with_storage_backed_strategy_with_loader_and_storage_ready") !=
+        std::string::npos);
+  CHECK(sm_source.find(
+            "tensor_plan_done_with_storage_backed_strategy_with_loader_and_storage_ready") !=
+        std::string::npos);
+  CHECK(actions_source.find("effect_dispatch_io_read_copy_load_batch") !=
+        std::string::npos);
+}
+
+TEST_CASE(
+    "phase 235 grd-03 staged scheduling has no coroutine scaffolding tokens") {
+  const std::array guarded_component_sources{
+      "src/emel/model/loader/actions.hpp",
+      "src/emel/model/loader/context.hpp",
+      "src/emel/model/loader/detail.hpp",
+      "src/emel/model/loader/errors.hpp",
+      "src/emel/model/loader/events.hpp",
+      "src/emel/model/loader/guards.hpp",
+      "src/emel/model/loader/sm.hpp",
+      "src/emel/io/loader/actions.hpp",
+      "src/emel/io/loader/context.hpp",
+      "src/emel/io/loader/detail.hpp",
+      "src/emel/io/loader/errors.hpp",
+      "src/emel/io/loader/events.hpp",
+      "src/emel/io/loader/guards.hpp",
+      "src/emel/io/loader/sm.hpp",
+      "src/emel/io/staged_read/actions.hpp",
+      "src/emel/io/staged_read/context.hpp",
+      "src/emel/io/staged_read/detail.hpp",
+      "src/emel/io/staged_read/errors.hpp",
+      "src/emel/io/staged_read/events.hpp",
+      "src/emel/io/staged_read/guards.hpp",
+      "src/emel/io/staged_read/sm.hpp",
+      "src/emel/model/tensor/actions.hpp",
+      "src/emel/model/tensor/context.hpp",
+      "src/emel/model/tensor/detail.hpp",
+      "src/emel/model/tensor/errors.hpp",
+      "src/emel/model/tensor/events.hpp",
+      "src/emel/model/tensor/guards.hpp",
+      "src/emel/model/tensor/sm.hpp",
+  };
+  const std::array forbidden_tokens{
+      "co_await",
+      "co_yield",
+      "co_return",
+      "<coroutine>",
+      "std::coroutine",
+      "suspend_always",
+      "suspend_never",
+      "await_ready(",
+      "await_suspend(",
+      "await_resume(",
   };
 
-  CHECK(events_source.find("used_io_strategy") != std::string::npos);
-  CHECK(events_source.find("requested_io_strategy") != std::string::npos);
-  CHECK(actions_source.find("effect_mark_io_strategy_used") !=
-        std::string::npos);
-  for (const auto *source_path : tool_sources) {
+  for (const auto *source_path : guarded_component_sources) {
     CAPTURE(source_path);
     const std::string source = read_text_file(repo_root() / source_path);
-    CHECK(source.find("bind_model_load_io_strategy") != std::string::npos);
-    CHECK(source.find(".used_io_strategy = ev.used_io_strategy") !=
-          std::string::npos);
-    CHECK(source.find("process_event(capture)") == std::string::npos);
+    for (const auto *token : forbidden_tokens) {
+      CAPTURE(token);
+      CHECK(source.find(token) == std::string::npos);
+    }
   }
 }
 

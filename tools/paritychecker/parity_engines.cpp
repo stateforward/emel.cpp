@@ -32,6 +32,7 @@
 #include "emel/gguf/loader/sm.hpp"
 #include "emel/io/events.hpp"
 #include "emel/io/read/sm.hpp"
+#include "emel/io/staged_read/sm.hpp"
 #include "emel/io/source/any.hpp"
 #include "emel/kernel/aarch64/detail.hpp"
 #include "emel/kernel/aarch64/sm.hpp"
@@ -987,7 +988,9 @@ struct generation_load_state {
   std::vector<uint8_t> file_bytes = {};
   emel::gguf::loader::sm gguf_loader = {};
   emel::io::read::sm io_read = {};
-  emel::io::loader::sm io_loader{{.io_read = &io_read}};
+  emel::io::staged_read::sm io_staged_read = {};
+  emel::io::loader::sm io_loader{
+      {.io_read = &io_read, .io_staged_read = &io_staged_read}};
   emel::model::tensor::sm tensor_loader = {};
   emel::model::loader::sm model_loader = {};
   emel::text::tokenizer::sm tokenizer = {};
@@ -18145,7 +18148,9 @@ int run_generation_harness_contract(
       state.io_load_spans.data(), state.io_load_spans.size()};
   emel::tools::bind_model_load_io_strategy(request, state.io_loader);
   if (request.io_strategy ==
-      emel::io::loader::event::strategy_kind::read_copy) {
+          emel::io::loader::event::strategy_kind::read_copy ||
+      request.io_strategy ==
+          emel::io::loader::event::strategy_kind::staged_read) {
     state.read_copy_storage.resize(
         static_cast<size_t>(state.gguf_tensor_data_bytes));
     request.read_copy_storage = std::span<uint8_t>{state.read_copy_storage};

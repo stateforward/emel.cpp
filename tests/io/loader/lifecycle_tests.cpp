@@ -15,6 +15,8 @@
 #include "emel/io/read/errors.hpp"
 #include "emel/io/read/sm.hpp"
 #include "emel/io/source/any.hpp"
+#include "emel/io/staged_read/errors.hpp"
+#include "emel/io/staged_read/sm.hpp"
 #include "emel/machines.hpp"
 
 namespace {
@@ -31,6 +33,7 @@ struct owner_state {
   uint64_t buffer_bytes = 0u;
   uint32_t done_count = 0u;
   uint64_t bytes_done = 0u;
+  uint32_t failed_index = 0u;
 };
 
 void on_load_done(
@@ -73,6 +76,7 @@ void on_load_batch_error(
   owner->error = true;
   owner->err = ev.err;
   owner->strategy_err = ev.strategy_err;
+  owner->failed_index = ev.failed_index;
 }
 
 void *fake_target(const uintptr_t value) {
@@ -183,6 +187,7 @@ TEST_CASE("io loader fails closed for absent and explicit strategies") {
       emel::io::loader::event::strategy_kind::none,
       emel::io::loader::event::strategy_kind::mapped_file,
       emel::io::loader::event::strategy_kind::read_copy,
+      emel::io::loader::event::strategy_kind::staged_read,
       emel::io::loader::event::strategy_kind::external_buffer,
   };
 
@@ -279,6 +284,43 @@ TEST_CASE("io loader dispatches read/copy requests through the read actor") {
   CHECK(loader.is(stateforward::sml::state<emel::io::loader::state_ready>));
 }
 
+TEST_CASE("io loader dispatches staged-read requests through staged actor") {
+  emel::io::staged_read::sm staged_actor{};
+  emel::io::loader::sm loader{{.io_staged_read = &staged_actor}};
+  owner_state owner{};
+  constexpr char source[] = "abcdefgh";
+  std::array<char, 4> target{};
+  const emel::io::loader::event::tensor_load_span tensor{
+      .tensor_id = 17,
+      .file_index = 1u,
+      .file_offset = 2u,
+      .byte_size = target.size(),
+      .file_path = "fixtures.bin",
+      .source_buffer = source,
+      .source_buffer_bytes = sizeof(source) - 1u,
+      .target = target.data(),
+      .target_bytes = target.size(),
+  };
+  const emel::io::loader::event::strategy_policy policy{
+      emel::io::loader::event::strategy_kind::staged_read,
+  };
+  emel::io::loader::event::load_tensor request{tensor, policy};
+  request.on_done = {&owner, on_load_done};
+  request.on_error = {&owner, on_load_error};
+
+  CHECK(loader.process_event(request));
+  CHECK(owner.done);
+  CHECK_FALSE(owner.error);
+  CHECK(owner.strategy == emel::io::loader::event::strategy_kind::staged_read);
+  CHECK(owner.buffer == target.data());
+  CHECK(owner.buffer_bytes == target.size());
+  CHECK(target[0] == 'c');
+  CHECK(target[1] == 'd');
+  CHECK(target[2] == 'e');
+  CHECK(target[3] == 'f');
+  CHECK(loader.is(stateforward::sml::state<emel::io::loader::state_ready>));
+}
+
 TEST_CASE("io loader accepts read/copy completion without done callback") {
   emel::io::read::sm read_actor{};
   emel::io::loader::sm loader{{.io_read = &read_actor}};
@@ -349,6 +391,60 @@ TEST_CASE("io loader read copy batch routes once through io read") {
   CHECK(owner.done);
   CHECK_FALSE(owner.error);
   CHECK(owner.strategy == emel::io::loader::event::strategy_kind::read_copy);
+  CHECK(owner.done_count == tensors.size());
+  CHECK(owner.bytes_done == first_target.size() + second_target.size());
+  CHECK(first_target[0] == 'b');
+  CHECK(first_target[1] == 'c');
+  CHECK(first_target[2] == 'd');
+  CHECK(second_target[0] == 'f');
+  CHECK(second_target[1] == 'g');
+  CHECK(second_target[2] == 'h');
+  CHECK(second_target[3] == 'i');
+  CHECK(loader.is(stateforward::sml::state<emel::io::loader::state_ready>));
+}
+
+TEST_CASE("io loader staged-read batch routes once through staged actor") {
+  emel::io::staged_read::sm staged_actor{};
+  emel::io::loader::sm loader{{.io_staged_read = &staged_actor}};
+  owner_state owner{};
+  constexpr char source[] = "abcdefghij";
+  std::array<char, 3> first_target{};
+  std::array<char, 4> second_target{};
+  const std::array<emel::io::loader::event::tensor_load_span, 2> tensors{{
+      {
+          .tensor_id = 18,
+          .file_index = 1u,
+          .file_offset = 1u,
+          .byte_size = first_target.size(),
+          .file_path = "fixtures.bin",
+          .source_buffer = source,
+          .source_buffer_bytes = sizeof(source) - 1u,
+          .target = first_target.data(),
+          .target_bytes = first_target.size(),
+      },
+      {
+          .tensor_id = 19,
+          .file_index = 1u,
+          .file_offset = 5u,
+          .byte_size = second_target.size(),
+          .file_path = "fixtures.bin",
+          .source_buffer = source,
+          .source_buffer_bytes = sizeof(source) - 1u,
+          .target = second_target.data(),
+          .target_bytes = second_target.size(),
+      },
+  }};
+  const emel::io::loader::event::strategy_policy policy{
+      emel::io::loader::event::strategy_kind::staged_read,
+  };
+  emel::io::loader::event::load_tensor_batch request{tensors, policy};
+  request.on_done = {&owner, on_load_batch_done};
+  request.on_error = {&owner, on_load_batch_error};
+
+  CHECK(loader.process_event(request));
+  CHECK(owner.done);
+  CHECK_FALSE(owner.error);
+  CHECK(owner.strategy == emel::io::loader::event::strategy_kind::staged_read);
   CHECK(owner.done_count == tensors.size());
   CHECK(owner.bytes_done == first_target.size() + second_target.size());
   CHECK(first_target[0] == 'b');
@@ -697,7 +793,8 @@ TEST_CASE("public io source rejects oversized files before allocation") {
   std::filesystem::remove(path);
 }
 
-TEST_CASE("io loader names the copy strategy without staged-policy wording") {
+TEST_CASE(
+    "io loader exposes staged-read strategy naming via public contracts") {
   const auto root = repo_root();
   const std::array runtime_sources{
       "src/emel/io/loader/events.hpp",
@@ -705,25 +802,51 @@ TEST_CASE("io loader names the copy strategy without staged-policy wording") {
       "src/emel/io/loader/sm.hpp",
       "tools/bench/model_load_strategy.hpp",
   };
-  const std::string forbidden_strategy = std::string{"staged_"} + "read";
-  const std::string forbidden_guard = std::string{"strategy_"} + "staged";
-
-  for (const auto *source_path : runtime_sources) {
-    CAPTURE(source_path);
-    const std::string source = read_text_file(root / source_path);
-    CHECK(source.find(forbidden_strategy) == std::string::npos);
-    CHECK(source.find(forbidden_guard) == std::string::npos);
-  }
 
   const std::string events_source =
       read_text_file(root / "src" / "emel" / "io" / "loader" / "events.hpp");
   const std::string guards_source =
       read_text_file(root / "src" / "emel" / "io" / "loader" / "guards.hpp");
+  const std::string sm_source =
+      read_text_file(root / "src" / "emel" / "io" / "loader" / "sm.hpp");
   const std::string helper_source =
       read_text_file(root / "tools" / "bench" / "model_load_strategy.hpp");
 
   CHECK(events_source.find("read_copy = 2u") != std::string::npos);
+  CHECK(events_source.find("staged_read = 4u") != std::string::npos);
   CHECK(guards_source.find("strategy_read_copy_with_actor") !=
         std::string::npos);
+  CHECK(guards_source.find("strategy_staged_read_with_actor") !=
+        std::string::npos);
+  CHECK(sm_source.find("effect_dispatch_staged_read_tensor") !=
+        std::string::npos);
+  CHECK(sm_source.find("effect_dispatch_staged_read_tensor_batch") !=
+        std::string::npos);
   CHECK(helper_source.find("\"read_copy\"") != std::string::npos);
+  CHECK(helper_source.find("\"staged_read\"") != std::string::npos);
+  CHECK(events_source.find("staged_chunk_bytes") != std::string::npos);
+
+  for (const auto *source_path : runtime_sources) {
+    CAPTURE(source_path);
+    const std::string source = read_text_file(root / source_path);
+    CHECK(source.find("emel/io/staged_read/detail.hpp") == std::string::npos);
+    CHECK(source.find("emel/io/staged_read/actions.hpp") == std::string::npos);
+    CHECK(source.find("emel/io/staged_read/guards.hpp") == std::string::npos);
+  }
+}
+
+TEST_CASE("io loader staged-read dispatch uses bounded chunk policy") {
+  const auto root = repo_root();
+  const std::string actions_source =
+      read_text_file(root / "src" / "emel" / "io" / "loader" / "actions.hpp");
+  const std::string detail_source =
+      read_text_file(root / "src" / "emel" / "io" / "loader" / "detail.hpp");
+  const std::string staged_events_source = read_text_file(
+      root / "src" / "emel" / "io" / "staged_read" / "events.hpp");
+
+  CHECK(actions_source.find(".stage_chunk_bytes = tensor.byte_size") ==
+        std::string::npos);
+  CHECK(actions_source.find("compute_staged_chunk_bytes") != std::string::npos);
+  CHECK(detail_source.find("compute_staged_chunk_bytes") != std::string::npos);
+  CHECK(staged_events_source.find("stage_chunk_bytes") != std::string::npos);
 }

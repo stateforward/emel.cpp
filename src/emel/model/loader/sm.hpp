@@ -132,11 +132,11 @@ struct model {
       , sml::state<state_io_read_copy_load_dispatch> <=
           sml::state<state_tensor_plan_decision>
           + sml::completion<event::load_runtime>
-          [ guard::tensor_plan_done_with_read_copy_strategy_with_loader_and_storage_ready{} ]
+          [ guard::tensor_plan_done_with_storage_backed_strategy_with_loader_and_storage_ready{} ]
       , sml::state<state_tensor_effect_error_cleanup> <=
           sml::state<state_tensor_plan_decision>
           + sml::completion<event::load_runtime>
-          [ guard::tensor_plan_done_with_read_copy_strategy_with_loader_and_storage_missing{} ]
+          [ guard::tensor_plan_done_with_storage_backed_strategy_with_loader_and_storage_missing{} ]
           / action::effect_dispatch_tensor_apply_error_results
       , sml::state<state_tensor_effect_error_cleanup> <=
           sml::state<state_tensor_plan_decision>
@@ -179,7 +179,7 @@ struct model {
           / action::effect_mark_io_strategy_unavailable
       , sml::state<errored> <= sml::state<state_tensor_effect_error_cleanup>
           + sml::completion<event::load_runtime>
-          [ guard::tensor_plan_done_with_read_copy_strategy_with_loader_and_storage_missing{} ]
+          [ guard::tensor_plan_done_with_storage_backed_strategy_with_loader_and_storage_missing{} ]
           / action::mark_invalid_request
       , sml::state<errored> <= sml::state<state_tensor_effect_error_cleanup>
           + sml::completion<event::load_runtime>

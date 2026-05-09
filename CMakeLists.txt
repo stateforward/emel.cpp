@@ -178,6 +178,7 @@ if(EMEL_ENABLE_TESTS)
     tests/io/loader/lifecycle_tests.cpp
     tests/io/mmap/lifecycle_tests.cpp
     tests/io/read/lifecycle_tests.cpp
+    tests/io/staged_read/lifecycle_tests.cpp
     tests/text/jinja/parser_tests.cpp
     tests/text/jinja/lexer_tests.cpp
     tests/text/jinja/formatter_tests.cpp
@@ -368,6 +369,9 @@ if(EMEL_ENABLE_FUZZ)
 
   set(EMEL_FUZZ_EXTRA_LINK_OPTIONS)
   if(APPLE)
+    # Homebrew LLVM ASan can deadlock during dyld/malloc initialization on recent macOS.
+    # Keep Darwin fuzz smoke executable with libFuzzer+UBSan; non-Apple builds retain ASan.
+    set(EMEL_FUZZ_SANITIZERS "fuzzer,undefined")
     if(CMAKE_CXX_COMPILER_ID STREQUAL "AppleClang")
       message(FATAL_ERROR
         "EMEL fuzz targets on macOS require Homebrew LLVM clang++ "
@@ -394,6 +398,8 @@ if(EMEL_ENABLE_FUZZ)
     list(APPEND EMEL_FUZZ_EXTRA_LINK_OPTIONS
       "-Wl,-ld_classic"
     )
+  else()
+    set(EMEL_FUZZ_SANITIZERS "fuzzer,address,undefined")
   endif()
 
   function(emel_configure_fuzzer target_name)
@@ -404,12 +410,12 @@ if(EMEL_ENABLE_FUZZ)
     )
     target_compile_options(${target_name}
       PRIVATE
-        -fsanitize=fuzzer,address,undefined
+        "-fsanitize=${EMEL_FUZZ_SANITIZERS}"
         -fno-omit-frame-pointer
     )
     target_link_options(${target_name}
       PRIVATE
-        -fsanitize=fuzzer,address,undefined
+        "-fsanitize=${EMEL_FUZZ_SANITIZERS}"
     )
     if(EMEL_FUZZ_EXTRA_LINK_OPTIONS)
       target_link_options(${target_name}

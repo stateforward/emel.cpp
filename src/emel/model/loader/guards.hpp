@@ -197,9 +197,22 @@ struct io_strategy_read_copy {
   }
 };
 
+struct io_strategy_staged_read {
+  bool operator()(const event::load_runtime &ev) const noexcept {
+    return ev.request.io_strategy ==
+           emel::io::loader::event::strategy_kind::staged_read;
+  }
+};
+
+struct io_strategy_requires_staging_storage {
+  bool operator()(const event::load_runtime &ev) const noexcept {
+    return io_strategy_read_copy{}(ev) || io_strategy_staged_read{}(ev);
+  }
+};
+
 struct io_strategy_not_read_copy {
   bool operator()(const event::load_runtime &ev) const noexcept {
-    return !io_strategy_read_copy{}(ev);
+    return !io_strategy_requires_staging_storage{}(ev);
   }
 };
 
@@ -285,20 +298,37 @@ struct tensor_plan_done_with_io_strategy_with_loader_and_batch_span_ready {
   }
 };
 
-struct tensor_plan_done_with_read_copy_strategy_with_loader_and_storage_ready {
+struct tensor_plan_done_with_storage_backed_strategy_with_loader_and_storage_ready {
   bool operator()(const event::load_runtime &ev) const noexcept {
     return tensor_plan_done_with_io_strategy_with_loader{}(ev) &&
-           io_strategy_read_copy{}(ev) && io_load_batch_span_ready{}(ev) &&
+           io_strategy_requires_staging_storage{}(ev) &&
+           io_load_batch_span_ready{}(ev) &&
            read_copy_storage_ready{}(ev);
+  }
+};
+
+struct tensor_plan_done_with_storage_backed_strategy_with_loader_and_storage_missing {
+  bool operator()(const event::load_runtime &ev) const noexcept {
+    return tensor_plan_done_with_io_strategy_with_loader{}(ev) &&
+           io_strategy_requires_staging_storage{}(ev) &&
+           io_load_batch_span_ready{}(ev) &&
+           read_copy_storage_missing{}(ev);
+  }
+};
+
+struct tensor_plan_done_with_read_copy_strategy_with_loader_and_storage_ready {
+  bool operator()(const event::load_runtime &ev) const noexcept {
+    return tensor_plan_done_with_storage_backed_strategy_with_loader_and_storage_ready{}(
+        ev);
   }
 };
 
 struct
     tensor_plan_done_with_read_copy_strategy_with_loader_and_storage_missing {
   bool operator()(const event::load_runtime &ev) const noexcept {
-    return tensor_plan_done_with_io_strategy_with_loader{}(ev) &&
-           io_strategy_read_copy{}(ev) && io_load_batch_span_ready{}(ev) &&
-           read_copy_storage_missing{}(ev);
+    return
+        tensor_plan_done_with_storage_backed_strategy_with_loader_and_storage_missing{}(
+            ev);
   }
 };
 

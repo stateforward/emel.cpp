@@ -1,105 +1,38 @@
 # Architecture Research
 
-**Domain:** ARM support for `openresearchtools/diar_streaming_sortformer_4spk-v2.1-gguf`
-**Researched:** 2026-04-22
-**Confidence:** MEDIUM
+**Domain:** `emel/io` staged read integration
+**Researched:** 2026-05-07
+**Confidence:** HIGH
 
-## Existing Architectural Footholds
+## Major components
 
-- `src/emel/model/architecture/detail.cpp` already centralizes supported execution architectures.
-  Sortformer support should enter through that model-family registry, not through a benchmark shim.
-- `src/emel/model/data.hpp` already holds audio-shaped metadata for embedding models. Sortformer
-  should add diarization-specific metadata deliberately instead of overloading `omniembed`.
-- `src/emel/embeddings/generator` proves that audio payloads can be routed through explicit SML
-  lanes, but its result contract is embeddings. Diarization should get its own actor/result shape.
-- Existing `tools/bench` and `tools/paritychecker` work already enforce lane isolation. The same
-  rule should govern any NeMo/reference comparison.
+1. **`io/staged_read` actor** — Owns staged read state machine, validation guards, and stage execution effects; mirrors component layout of `io/read` and `io/mmap`.
+2. **`model/tensor` orchestration** — Injects or selects staged strategy alongside existing mmap/read paths using explicit guards (no action-side strategy pick).
+3. **`io/loader` or existing loader surfaces** — Continues to report/select strategies through public contracts only; no reach-through to actor `detail`.
 
-## Recommended Component Shape
+## Data flow (intent)
 
-```text
-src/emel/model/sortformer/
-  detail.hpp / detail.cpp      # hidden metadata binding helpers used more than once
+- Request describes overall file span and staging constraints (max chunk size / window — exact fields to be decided in plan-phase).
+- Each stage copies a sub-span into the tensor-owned target region for that window.
+- Success commits residency only at tensor layer after final stage completes (pattern to align with existing read success semantics).
 
-src/emel/audio/diarization/
-  any.hpp
-  context.hpp
-  events.hpp
-  guards.hpp
-  actions.hpp
-  sm.hpp
+## Build order (for roadmap)
 
-src/emel/audio/diarization/sortformer/
-  context.hpp
-  events.hpp
-  guards.hpp
-  actions.hpp
-  sm.hpp
-  detail.hpp / detail.cpp      # shared non-routing numeric/binding helpers only
+1. Component boundary + fail-closed scaffold
+2. Validation / platform / chunk policy gates
+3. Stage execution + errors + lifetime
+4. Tensor integration + public reporting
+5. Tests, guardrails, publication
 
-src/emel/kernel/**
-  # ARM/native kernels required by Sortformer feature, conformer, transformer, cache, or head work
-```
+## Pitfalls cross-links
 
-This keeps the top-level contract as diarization and the maintained implementation family as
-Sortformer. If a future milestone adds a second diarization architecture, it can route through
-`audio/diarization/any.hpp` without treating Sortformer as the whole domain.
-
-## Recommended Data Flow
-
-```text
-maintained Sortformer GGUF fixture
-    -> GGUF parse/bind/load
-    -> model::sortformer execution contract
-    -> audio/diarization request validates PCM/profile/output buffers
-    -> Sortformer-owned frontend/input tensor preparation
-    -> Sortformer encoder/cache/transformer/head execution
-    -> T x 4 speaker probability matrix
-    -> deterministic segment decoding
-    -> callback/result or explicit error event
-```
-
-## SML Boundary Guidance
-
-- Runtime choices must live in `guards.hpp` and `sm.hpp`: supported model contract, profile
-  selection, cache readiness, output-capacity acceptance, and error outcomes.
-- `actions.hpp` should execute an already-chosen path and remain bounded/non-blocking.
-- `detail.hpp` and `detail.cpp` may contain shared non-routing numeric helpers, tensor binding, and
-  data-plane iteration only.
-- Do not store request pointers, output pointers, phase flags, frame counts, or temporary error
-  status in context. Carry dispatch-local data through typed internal events.
-- The maintained actor should expose an explicit unexpected-event behavior.
-
-## Build Order Recommendation
-
-1. Fixture and model contract: accept/reject truth before runtime.
-2. Diarization actor shell: request/result/error surface and SML lifecycle.
-3. Audio frontend/profile: mono PCM and input tensor preparation.
-4. Native Sortformer execution: feature/pre-encoder, cache, transformer, and head path.
-5. Output decoder: probabilities and segment records.
-6. Proof and benchmark: lane-isolated reference comparison and ARM timing publication.
-
-## Architectural Risks
-
-| Risk | Why It Matters | Mitigation |
-|------|----------------|------------|
-| Reusing embeddings/generator for diarization | It would blur result contracts and make future diarization APIs awkward. | Add a diarization-owned actor and keep embeddings unchanged. |
-| Hiding cache/profile choices in helpers | Violates SML behavior-selection rules. | Model choices as guards/transitions. |
-| Using reference runtime in EMEL lane | Fails the native ARM support contract. | Confine NeMo/reference code to tools/paritychecker or tools/bench reference lanes. |
-| Adding media ingestion during runtime bring-up | Expands determinism and test burden sharply. | Keep input as mono 16 kHz PCM. |
-| Treating probability output and segment output as interchangeable | Probability matrices are the model output; segments are a post-processing contract. | Test both contracts explicitly. |
+- Do not use completion-driven loops as data-plane iteration per SML rules; bulk work stays in bounded kernels within a transition where applicable.
+- Do not store dispatch-local request pointers or phase indices in `staged_read` context.
 
 ## Sources
 
-- https://huggingface.co/nvidia/diar_streaming_sortformer_4spk-v2.1
-- https://developer.nvidia.com/blog/identify-speakers-in-meetings-calls-and-voice-apps-in-real-time-with-nvidia-streaming-sortformer/
-- `AGENTS.md`
-- `src/emel/model/architecture/detail.cpp`
-- `src/emel/model/data.hpp`
-- `src/emel/embeddings/generator/sm.hpp`
-- `tools/bench/**`
-- `tools/paritychecker/**`
+- `AGENTS.md` architecture and composition section
+- v1.25/v1.24 milestone archives for I/O patterns
 
 ---
-*Architecture research for: ARM Sortformer diarization GGUF support in EMEL*
-*Researched: 2026-04-22*
+*Architecture research for v1.26*
