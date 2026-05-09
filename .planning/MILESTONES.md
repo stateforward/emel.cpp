@@ -1,5 +1,87 @@
 # Project Milestones: EMEL
 
+## v1.27 co_sm Cooperative Async I/O Strategy (Shipped: 2026-05-09)
+
+**Phases completed:** 14 of 14 phases, 14 of 14 plans, 0 tasks
+
+**Source-backed progress so far:**
+
+- Codified the project-owned `co_sm` coroutine actor contract in the SML rules and
+  agent guidance, preserving RTC, no-queue, callback, lifetime, and allocation invariants.
+
+- Added opt-in `emel::co_sm` infrastructure with scheduler contracts, fixed coroutine
+  storage, deterministic suspend/resume tests, and no change to existing synchronous
+  `emel::sm` behavior.
+
+- Established the canonical `src/emel/io/async` Stateforward.SML cooperative async I/O
+  actor with validated caller-owned source, target, progress, and scheduler contracts.
+
+- Implemented bounded partial progress, deterministic terminal success, cancellation,
+  and validation/error reporting through explicit events and transitions.
+
+- Integrated tensor-owned async loading through `model/tensor` while keeping tensor
+  load, bind, evict, and residency lifecycle ownership in `model/tensor`.
+
+- Exposed `cooperative_async` as a public `io/loader` strategy value and maintained
+  benchmark/model-loader option, then wired it through public `io/loader` contracts into the
+  async actor for the maintained generation path.
+
+- Added guardrails against public coroutine type leaks, async actor internals in
+  maintained tools, action/detail behavior selection, and mmap/read/staged-read
+  regressions.
+
+- Published loading-strategy benchmark evidence comparing accepted `none`, `read_copy`,
+  `staged_read`, and `cooperative_async` runs. The renewed Phase 250 source-backed cooperative
+  async run recorded `416407417 ns/op` EMEL vs `319636708 ns/op` reference (`1.303x`).
+
+- Added maintained constrained-RAM generation load-profile evidence for the public
+  model-loader -> `io/loader` -> tensor path. The Phase 252 64 KiB window run recorded 11,165
+  load dispatches and 26,901,458 ns load time; the scoped 1 MiB window run recorded 780 load
+  dispatches and 23,317,750 ns load time on the same publication fixture.
+
+**Audit:** Final source-backed audit passed with 32/32 requirements satisfied after Phases 249-252
+closed reopened scheduler/resource, loader resumability, evidence consistency, and constrained-RAM
+profiling gaps.
+
+**Known deferred items:** Broader continuous decode batching, tokenizer/detokenizer overlap,
+platform-specific OS async completion, and accelerator async completion remain future milestones.
+The pre-close artifact audit also carried forward 5 existing deferred planning items (see
+`STATE.md` Deferred Items).
+
+---
+
+## v1.26 I/O Staged Read Loading Strategy (Shipped: 2026-05-08)
+
+**Phases completed:** 12 phases, 12 plans, 0 tasks
+
+**Key accomplishments:**
+
+- Established the canonical `src/emel/io/staged_read` Stateforward.SML boundary actor for
+  constrained-memory source-span staging beneath the existing `emel/io` strategy boundary.
+
+- Added explicit source span, target window, staging/chunk, platform, and deterministic error
+  validation through guards and transitions before accepted staged copy work.
+
+- Proved monotone staged copy progress, full-span terminal success, and representative failure
+  behavior through public `process_event(...)` dispatch and SML state inspection.
+
+- Integrated staged loads through `model/tensor` and `io/loader` while keeping tensor load, bind,
+  evict, and residency lifecycle ownership in `model/tensor`.
+
+- Repaired the direct tensor staged-load nonzero-offset source-window contract in Phase 237.
+- Reconciled summary frontmatter, embedded probe reporting truth, requirements, roadmap, state, and
+  final milestone audit evidence in Phase 238.
+
+**Audit:** Final source-backed audit passed with all active v1.26 requirements satisfied. `ESG-02B`
+remains deferred/future by design until an approved file-backed staged source path owns real
+open/seek/read lifecycle behavior.
+
+**Known deferred items at close:** Cooperative coroutine scheduling / async suspension and
+device-specific strategies remain follow-on work. Issue #64 is the approved cooperative async
+follow-on milestone.
+
+---
+
 ## v1.25 I/O Read Loading Strategy (Shipped: 2026-05-06)
 
 **Phases completed:** 16 phases, 21 plans, 12 tasks

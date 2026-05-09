@@ -2,6 +2,7 @@ stateDiagram-v2
   direction TB
   [*] --> ready
   ready --> request_decision : load_runtime [always] / begin_load_
+  request_decision --> state_io_cooperative_async_resume_dispatch : completion_load_runtime_ [cooperative_async_resume_ready_] / none
   request_decision --> parsing : completion_load_runtime_ [valid_request_] / none
   request_decision --> errored : completion_load_runtime_ [invalid_request_] / mark_invalid_request_
   parsing --> parse_decision : completion_load_runtime_ [always] / run_parse_
@@ -31,15 +32,21 @@ stateDiagram-v2
   state_tensor_plan_decision --> state_tensor_effect_error_cleanup : completion_load_runtime_ [tensor_plan_done_with_io_strategy_without_loader_] / effect_dispatch_tensor_apply_error_results_
   state_tensor_plan_decision --> state_io_load_dispatch : completion_load_runtime_ [tensor_plan_done_with_io_strategy_with_loader_and_batch_span_ready_] / none
   state_tensor_plan_decision --> state_io_read_copy_load_dispatch : completion_load_runtime_ [tensor_plan_done_with_storage_backed_strategy_with_loader_and_storage_ready_] / none
+  state_tensor_plan_decision --> state_io_cooperative_async_load_dispatch : completion_load_runtime_ [tensor_plan_done_with_cooperative_async_storage_ready_] / none
   state_tensor_plan_decision --> state_tensor_effect_error_cleanup : completion_load_runtime_ [tensor_plan_done_with_storage_backed_strategy_with_loader_and_storage_missing_] / effect_dispatch_tensor_apply_error_results_
   state_tensor_plan_decision --> state_tensor_effect_error_cleanup : completion_load_runtime_ [tensor_plan_done_with_io_strategy_with_loader_and_batch_span_missing_] / effect_dispatch_tensor_apply_error_results_
   state_tensor_plan_decision --> errored : completion_load_runtime_ [tensor_plan_error_raised_] / effect_mark_tensor_plan_error_
   state_tensor_plan_decision --> errored : completion_load_runtime_ [tensor_plan_unhandled_] / mark_internal_error_
   state_io_load_dispatch --> state_io_load_decision : completion_load_runtime_ [always] / effect_dispatch_io_load_batch_
   state_io_read_copy_load_dispatch --> state_io_load_decision : completion_load_runtime_ [always] / effect_dispatch_io_read_copy_load_batch_
+  state_io_cooperative_async_load_dispatch --> state_io_load_decision : completion_load_runtime_ [always] / effect_dispatch_io_cooperative_async_load_batch_
+  state_io_cooperative_async_resume_dispatch --> state_io_load_decision : completion_load_runtime_ [always] / effect_dispatch_io_cooperative_async_resume_batch_
   state_io_load_decision --> state_tensor_apply_dispatch : completion_load_runtime_ [io_load_done_all_] / effect_mark_io_strategy_used_
+  state_io_load_decision --> state_io_load_progress_decision : completion_load_runtime_ [io_load_progress_raised_] / none
   state_io_load_decision --> state_tensor_effect_error_cleanup : completion_load_runtime_ [io_load_error_raised_] / effect_dispatch_tensor_apply_error_results_
   state_io_load_decision --> state_tensor_effect_error_cleanup : completion_load_runtime_ [io_load_unhandled_] / effect_dispatch_tensor_apply_error_results_
+  state_io_load_progress_decision --> ready : completion_load_runtime_ [progress_callback_present_] / publish_progress_
+  state_io_load_progress_decision --> ready : completion_load_runtime_ [progress_callback_absent_] / publish_progress_noop_
   state_tensor_effect_error_cleanup --> errored : completion_load_runtime_ [tensor_plan_done_with_io_strategy_without_loader_] / effect_mark_io_strategy_unavailable_
   state_tensor_effect_error_cleanup --> errored : completion_load_runtime_ [tensor_plan_done_with_io_strategy_with_loader_and_batch_span_missing_] / effect_mark_io_strategy_unavailable_
   state_tensor_effect_error_cleanup --> errored : completion_load_runtime_ [tensor_plan_done_with_storage_backed_strategy_with_loader_and_storage_missing_] / mark_invalid_request_
@@ -115,7 +122,10 @@ stateDiagram-v2
   state_tensor_plan_decision --> ready : _ [always] / on_unexpected_
   state_io_load_dispatch --> ready : _ [always] / on_unexpected_
   state_io_read_copy_load_dispatch --> ready : _ [always] / on_unexpected_
+  state_io_cooperative_async_load_dispatch --> ready : _ [always] / on_unexpected_
+  state_io_cooperative_async_resume_dispatch --> ready : _ [always] / on_unexpected_
   state_io_load_decision --> ready : _ [always] / on_unexpected_
+  state_io_load_progress_decision --> ready : _ [always] / on_unexpected_
   state_tensor_effect_error_cleanup --> ready : _ [always] / on_unexpected_
   state_tensor_apply_dispatch --> ready : _ [always] / on_unexpected_
   state_tensor_apply_decision --> ready : _ [always] / on_unexpected_

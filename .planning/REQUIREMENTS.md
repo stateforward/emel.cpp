@@ -42,13 +42,13 @@ REQ-IDs are unique to this milestone.
 - [x] **AIO-03**: Async loading accepts only validated source, target, progress, and scheduler
   contracts before any resumable progress attempt is accepted.
 
-- [ ] **AIO-04**: Async loading publishes bounded partial-progress outcomes explicitly rather than
+- [x] **AIO-04**: Async loading publishes bounded partial-progress outcomes explicitly rather than
   hiding progress in context-only mutation or scheduler internals.
 
 - [x] **AIO-05**: Async loading publishes deterministic terminal success when the requested logical
   byte span has completed.
 
-- [ ] **AIO-06**: Async loading publishes deterministic terminal errors for validation,
+- [x] **AIO-06**: Async loading publishes deterministic terminal errors for validation,
   source-contract, scheduler/resource, cancellation/rejection, and partial-progress failure
   categories.
 
@@ -74,7 +74,7 @@ REQ-IDs are unique to this milestone.
 - [x] **TNX-02**: `model/tensor` remains the sole owner of tensor load, bind, evict, and residency
   lifecycle transitions for async-loaded tensors.
 
-- [ ] **TNX-03**: Async load progress, success, and failure are visible to tensor integrators
+- [x] **TNX-03**: Async load progress, success, and failure are visible to tensor integrators
   through explicit `_done` / `_error` events or states.
 
 - [x] **TNX-04**: `io/loader` and maintained model-loader paths can select/report the async strategy
@@ -105,18 +105,18 @@ REQ-IDs are unique to this milestone.
 
 ### Publication and evidence
 
-- [ ] **DOC-01**: Maintained docs accurately describe the `co_sm` coroutine actor contract, async I/O
+- [x] **DOC-01**: Maintained docs accurately describe the `co_sm` coroutine actor contract, async I/O
   strategy scope, and deferred broader scheduler/device work.
 
-- [ ] **EVI-01**: Benchmark, parity, and probe artifacts do not report async/cooperative loading
+- [x] **EVI-01**: Benchmark, parity, and probe artifacts do not report async/cooperative loading
   unless the EMEL lane actually executed the async strategy path.
 
-- [ ] **PERF-01**: Maintained benchmark evidence compares the effective loading-strategy
+- [x] **PERF-01**: Maintained benchmark evidence compares the effective loading-strategy
   performance differences for mmap, read/copy, staged-read, and cooperative async loading through a
   maintained end-to-end path. Unsupported async boundary runs must be reported honestly, but
   unsupported `cooperative_async` execution does not satisfy this requirement.
 
-- [ ] **PERF-02**: Maintained large-model or constrained-RAM profiling recursively measures and
+- [x] **PERF-02**: Maintained large-model or constrained-RAM profiling recursively measures and
   optimizes the cooperative async loading path through public runtime contracts, reporting model
   size, effective RAM constraint, chunk/window behavior, peak memory, and truthful performance
   evidence without tool-only fallback claims.
@@ -171,16 +171,16 @@ Which phases cover which requirements. Updated during roadmap creation.
 | AIO-01 | Phase 241 | Satisfied |
 | AIO-02 | Phase 241 | Satisfied |
 | AIO-03 | Phase 242 | Satisfied |
-| AIO-04 | Phase 250 | Pending |
+| AIO-04 | Phase 250 | Satisfied |
 | AIO-05 | Phase 243 | Satisfied |
-| AIO-06 | Phase 249 | Pending |
+| AIO-06 | Phase 249 | Satisfied |
 | OWN-01 | Phase 242 | Satisfied |
 | OWN-02 | Phase 242 | Satisfied |
 | OWN-03 | Phase 242 | Satisfied |
 | OWN-04 | Phase 242 | Satisfied |
 | TNX-01 | Phase 244 | Satisfied |
 | TNX-02 | Phase 244 | Satisfied |
-| TNX-03 | Phase 250 | Pending |
+| TNX-03 | Phase 250 | Satisfied |
 | TNX-04 | Phase 245 | Satisfied |
 | TST-01 | Phase 240 | Satisfied |
 | TST-02 | Phase 243 | Satisfied |
@@ -189,22 +189,22 @@ Which phases cover which requirements. Updated during roadmap creation.
 | GRD-02 | Phase 246 | Satisfied |
 | GRD-03 | Phase 246 | Satisfied |
 | GRD-04 | Phase 246 | Satisfied |
-| DOC-01 | Phase 251 | Pending |
-| EVI-01 | Phase 251 | Pending |
-| PERF-01 | Phase 250 | Pending |
-| PERF-02 | Phase 252 | Pending |
+| DOC-01 | Phase 251 | Satisfied |
+| EVI-01 | Phase 251 | Satisfied |
+| PERF-01 | Phase 250 | Satisfied |
+| PERF-02 | Phase 252 | Satisfied |
 | LNT-01 | Phase 247 | Satisfied |
 | QG-01 | Phase 247 | Satisfied |
 
 **Coverage:**
 
-- v1.27 requirements: 32 total  
-- Mapped to phases: 32  
-- Satisfied: 25  
-- Pending: 7
-- Unmapped: 0  
+- v1.27 requirements: 32 total
+- Mapped to phases: 32
+- Satisfied: 32
+- Pending: 0
+- Unmapped: 0
 - Duplicate mappings: 0
 
 ---
 *Requirements defined: 2026-05-09*
-*Last updated: 2026-05-09 after planning gap-closure phases 249-252*
+*Last updated: 2026-05-09 after Phase 252 constrained-RAM profiling evidence*

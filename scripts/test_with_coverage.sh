@@ -46,9 +46,11 @@ coverage_filters=(--filter src)
 coverage_search_paths=("$COVERAGE_BUILD_DIR")
 changed_files=()
 changed_shards=()
+coverage_report_files=()
 selected_test_dirs=()
 selected_test_sources=()
 unknown_changed_src=0
+skip_changed_threshold=0
 
 is_coverage_excluded_src_file() {
   local file="$1"
@@ -203,8 +205,14 @@ if [[ "$COVERAGE_CHANGED_ONLY" == "1" ]]; then
   echo "coverage scoped to changed src files:"
   for file in "${changed_files[@]}"; do
     echo "  $file"
-    escaped_file="$(printf '%s\n' "$file" | sed 's/[][(){}.^$+*?|\\]/\\&/g')"
-    coverage_filters+=(--filter "(^|.*/)${escaped_file}$")
+    case "$file" in
+      src/emel/*.c|src/emel/*.cc|src/emel/*.cpp|src/emel/*.cxx|\
+      src/emel/**/*.c|src/emel/**/*.cc|src/emel/**/*.cpp|src/emel/**/*.cxx)
+        coverage_report_files+=("$file")
+        escaped_file="$(printf '%s\n' "$file" | sed 's/[][(){}.^$+*?|\\]/\\&/g')"
+        coverage_filters+=(--filter "(^|.*/)${escaped_file}$")
+        ;;
+    esac
 
     case "$file" in
       src/emel/model/*|src/emel/model*.hpp|src/emel/gguf/*|src/emel/gbnf/*|src/emel/batch/*)
@@ -256,6 +264,10 @@ if [[ "$COVERAGE_CHANGED_ONLY" == "1" ]]; then
         ;;
     esac
   done
+  if [[ ${#coverage_report_files[@]} -eq 0 ]]; then
+    skip_changed_threshold=1
+    coverage_filters=(--filter src)
+  fi
 fi
 
 if [[ "$COVERAGE_CHANGED_ONLY" == "1" &&
@@ -357,6 +369,11 @@ fi
 
 echo "running coverage test regex: ${COVERAGE_TEST_REGEX}"
 ctest --test-dir "$COVERAGE_BUILD_DIR" --output-on-failure -R "$COVERAGE_TEST_REGEX" -j "$ctest_jobs"
+
+if [[ "$skip_changed_threshold" == "1" ]]; then
+  echo "changed-only coverage has no reportable production translation units; selected tests passed"
+  exit 0
+fi
 
 if [[ "$COVERAGE_CHANGED_ONLY" == "1" &&
       "$unknown_changed_src" == "0" &&

@@ -1,3 +1,4 @@
+#include <cstddef>
 #include <doctest/doctest.h>
 #include <stateforward/sml/utility/dispatch_table.hpp>
 
@@ -6,7 +7,7 @@
 namespace {
 
 struct dummy_event {
-  int32_t * error_out = nullptr;
+  int32_t *error_out = nullptr;
 };
 
 struct owner_probe {
@@ -20,40 +21,34 @@ struct owner_probe {
 
 struct runtime_event {
   int id = 0;
-  int32_t & marker;
+  int32_t &marker;
 };
 
 struct event_one {
   static constexpr auto id = 1;
 
-  int32_t & marker;
+  int32_t &marker;
 
-  explicit event_one(const runtime_event & ev) noexcept
-    : marker(ev.marker) {}
+  explicit event_one(const runtime_event &ev) noexcept : marker(ev.marker) {}
 };
 
 struct event_two {
   static constexpr auto id = 2;
 
-  int32_t & marker;
+  int32_t &marker;
 
-  explicit event_two(const runtime_event & ev) noexcept
-    : marker(ev.marker) {}
+  explicit event_two(const runtime_event &ev) noexcept : marker(ev.marker) {}
 };
 
 struct state_idle {};
 struct state_seen_one {};
 
 struct effect_mark_one {
-  void operator()(const event_one & ev) const noexcept {
-    ev.marker = 1;
-  }
+  void operator()(const event_one &ev) const noexcept { ev.marker = 1; }
 };
 
 struct effect_mark_two {
-  void operator()(const event_two & ev) const noexcept {
-    ev.marker = 2;
-  }
+  void operator()(const event_two &ev) const noexcept { ev.marker = 2; }
 };
 
 struct dispatch_surface_model {
@@ -71,7 +66,7 @@ struct dispatch_surface_model {
 };
 
 struct logger_event {
-  int32_t & marker;
+  int32_t &marker;
 };
 
 struct logger_counters {
@@ -102,15 +97,11 @@ struct logger_counters {
 };
 
 struct guard_accept {
-  bool operator()() const noexcept {
-    return true;
-  }
+  bool operator()() const noexcept { return true; }
 };
 
 struct effect_mark_logged {
-  void operator()(const logger_event & ev) const noexcept {
-    ev.marker = 7;
-  }
+  void operator()(const logger_event &ev) const noexcept { ev.marker = 7; }
 };
 
 struct state_logger_idle {};
@@ -130,7 +121,7 @@ struct logger_surface_model {
   }
 };
 
-}  // namespace
+} // namespace
 
 TEST_CASE("sm_normalize_event_result_handles_error_out") {
   int32_t err = 0;
@@ -161,7 +152,8 @@ TEST_CASE("sm_process_support_dispatches_events") {
 TEST_CASE("stateforward_sml_dispatch_table_routes_runtime_events") {
   namespace sml = stateforward::sml;
   sml::sm<dispatch_surface_model> machine{};
-  auto dispatch_event = sml::utility::make_dispatch_table<runtime_event, 1, 2>(machine);
+  auto dispatch_event =
+      sml::utility::make_dispatch_table<runtime_event, 1, 2>(machine);
 
   int32_t marker = 0;
   CHECK(dispatch_event(runtime_event{.id = 1, .marker = marker}, 1));
@@ -191,4 +183,169 @@ TEST_CASE("stateforward_sml_logger_policy_observes_dispatch") {
   CHECK(logger.actions >= 1);
   CHECK(logger.state_changes >= 1);
   CHECK(machine.is(sml::state<state_logger_done>));
+}
+
+namespace {
+
+struct co_event_mark {
+  int32_t &marker;
+};
+
+struct co_event_error {
+  int32_t &error_out;
+};
+
+struct co_state_idle {};
+struct co_state_done {};
+
+struct co_effect_mark {
+  void operator()(const co_event_mark &ev) const noexcept { ev.marker = 42; }
+};
+
+struct co_effect_error {
+  void operator()(const co_event_error &ev) const noexcept { ev.error_out = 7; }
+};
+
+struct co_surface_model {
+  auto operator()() const noexcept {
+    namespace sml = stateforward::sml;
+    // clang-format off
+    return sml::make_transition_table(
+        sml::state<co_state_done> <= *sml::state<co_state_idle>
+          + sml::event<co_event_mark> / co_effect_mark{}
+      , sml::state<co_state_done> <= sml::state<co_state_idle>
+          + sml::event<co_event_error> / co_effect_error{}
+    );
+    // clang-format on
+  }
+};
+
+struct co_context_data {
+  int32_t value = 0;
+};
+
+struct co_event_context {};
+
+struct co_effect_context {
+  void operator()(co_context_data &context) const noexcept {
+    context.value = 11;
+  }
+};
+
+struct co_context_model {
+  auto operator()() const noexcept {
+    namespace sml = stateforward::sml;
+    // clang-format off
+    return sml::make_transition_table(
+      sml::state<co_state_done> <= *sml::state<co_state_idle>
+        + sml::event<co_event_context> / co_effect_context{}
+    );
+    // clang-format on
+  }
+};
+
+struct co_counting_allocator {
+  std::size_t allocate_calls = 0;
+  std::size_t deallocate_calls = 0;
+
+  void *allocate(const std::size_t, const std::size_t) noexcept {
+    ++allocate_calls;
+    return nullptr;
+  }
+
+  void deallocate(void *, const std::size_t, const std::size_t) noexcept {
+    ++deallocate_calls;
+  }
+};
+
+} // namespace
+
+TEST_CASE("co_sm_policy_aliases_expose_strict_scheduler_contracts") {
+  using scheduler = emel::policy::fifo_scheduler<8, 64>;
+
+  static_assert(scheduler::guarantees_fifo);
+  static_assert(scheduler::single_consumer);
+  static_assert(scheduler::run_to_completion);
+  static_assert(
+      stateforward::sml::utility::policy::strict_ordering_scheduler_contract<
+          scheduler>);
+}
+
+TEST_CASE("fixed_coroutine_allocator_has_no_heap_fallback") {
+  emel::policy::fixed_coroutine_allocator<128, 2> allocator{};
+
+  void *first = allocator.allocate(64, alignof(std::max_align_t));
+  void *second = allocator.allocate(64, alignof(std::max_align_t));
+  void *exhausted = allocator.allocate(64, alignof(std::max_align_t));
+  void *oversized = allocator.allocate(256, alignof(std::max_align_t));
+
+  CHECK(first != nullptr);
+  CHECK(second != nullptr);
+  CHECK(exhausted == nullptr);
+  CHECK(oversized == nullptr);
+
+  allocator.deallocate(first, 64, alignof(std::max_align_t));
+  void *recycled = allocator.allocate(64, alignof(std::max_align_t));
+  CHECK(recycled != nullptr);
+
+  allocator.deallocate(second, 64, alignof(std::max_align_t));
+  allocator.deallocate(recycled, 64, alignof(std::max_align_t));
+}
+
+TEST_CASE("co_sm_sync_process_event_matches_sm_surface_and_normalizes_errors") {
+  emel::co_sm<co_surface_model> machine{};
+
+  int32_t marker = 0;
+  CHECK(machine.process_event(co_event_mark{.marker = marker}));
+  CHECK(marker == 42);
+  CHECK(machine.is(stateforward::sml::state<co_state_done>));
+
+  emel::co_sm<co_surface_model> error_machine{};
+  int32_t error = 0;
+  CHECK_FALSE(error_machine.process_event(co_event_error{.error_out = error}));
+  CHECK(error == 7);
+}
+
+TEST_CASE("co_sm_inline_scheduler_async_dispatch_runs_immediately") {
+  using inline_policy =
+      emel::policy::coroutine_scheduler<emel::policy::inline_scheduler>;
+  using machine_type = emel::co_sm<co_surface_model, void, inline_policy>;
+
+  machine_type machine{};
+  int32_t marker = 0;
+  emel::bool_task task =
+      machine.process_event_async(co_event_mark{.marker = marker});
+
+  CHECK(task.await_ready());
+  CHECK(task.result());
+  CHECK(marker == 42);
+  CHECK(machine.is(stateforward::sml::state<co_state_done>));
+}
+
+TEST_CASE("co_sm_default_fifo_path_avoids_coroutine_frame_allocation_when_"
+          "immediate") {
+  using scheduler_policy =
+      emel::policy::coroutine_scheduler<emel::policy::fifo_scheduler<8, 64>>;
+  using allocator_policy =
+      emel::policy::coroutine_allocator<co_counting_allocator>;
+  using machine_type =
+      emel::co_sm<co_surface_model, void, scheduler_policy, allocator_policy>;
+
+  machine_type machine{};
+  int32_t marker = 0;
+  emel::bool_task task =
+      machine.process_event_async(co_event_mark{.marker = marker});
+
+  CHECK(task.await_ready());
+  CHECK(task.result());
+  CHECK(marker == 42);
+  CHECK(machine.allocator().allocate_calls == 0);
+  CHECK(machine.allocator().deallocate_calls == 0);
+}
+
+TEST_CASE("contextful_co_sm_injects_component_context") {
+  emel::co_sm<co_context_model, co_context_data> machine{};
+
+  CHECK(machine.process_event(co_event_context{}));
+  CHECK(machine.is(stateforward::sml::state<co_state_done>));
 }

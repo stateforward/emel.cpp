@@ -28,8 +28,10 @@ struct tensor_plan_error;
 struct tensor_apply_done;
 struct tensor_apply_error;
 struct io_load_done;
+struct io_load_progress;
 struct io_load_error;
 struct load_done;
+struct load_progress;
 struct load_error;
 
 } // namespace emel::model::loader::events
@@ -59,16 +61,24 @@ struct load {
   emel::io::loader::sm *io_loader = nullptr;
   emel::io::loader::event::strategy_kind io_strategy =
       emel::io::loader::event::strategy_kind::none;
+  uint64_t io_staged_chunk_bytes =
+      emel::io::loader::event::k_default_staged_read_chunk_bytes;
   std::span<emel::model::tensor::effect_request> effect_requests = {};
   std::span<emel::model::tensor::effect_result> effect_results = {};
   std::span<emel::io::event::tensor_load_span> io_load_spans = {};
+  std::span<emel::io::loader::event::cooperative_async_progress>
+      io_load_progress = {};
+  emel::io::loader::event::cooperative_async_batch_progress
+      *io_load_batch_progress = nullptr;
   // Shared caller-owned staging/output backing span for storage-backed strategies
-  // (`read_copy` and `staged_read`) before tensor apply publishes handles.
+  // (`read_copy`, `staged_read`, and `cooperative_async`) before tensor apply
+  // publishes handles.
   std::span<uint8_t> read_copy_storage = {};
   map_layers_fn map_layers = {};
   validate_structure_fn validate_structure = {};
   validate_architecture_fn validate_architecture_impl = {};
 
+  emel::callback<void(const events::load_progress &)> on_progress = {};
   emel::callback<void(const events::load_done &)> on_done = {};
   emel::callback<void(const events::load_error &)> on_error = {};
 
@@ -97,6 +107,7 @@ struct tensor_phase_events {
 
 struct io_phase_events {
   events::io_load_done &load_done;
+  events::io_load_progress &load_progress;
   events::io_load_error &load_error;
 };
 
@@ -146,6 +157,15 @@ struct io_load_done {
   uint64_t bytes_done = 0u;
 };
 
+struct io_load_progress {
+  bool raised = false;
+  uint32_t expected_count = 0u;
+  uint32_t current_index = 0u;
+  uint32_t done_count = 0u;
+  uint64_t bytes_done = 0u;
+  uint64_t bytes_delta = 0u;
+};
+
 struct io_load_error {
   bool raised = false;
   emel::error::type err = emel::error::cast(emel::io::loader::error::none);
@@ -159,6 +179,17 @@ struct load_done {
   uint64_t bytes_total = 0;
   uint64_t bytes_done = 0;
   bool used_mmap = false;
+  emel::io::loader::event::strategy_kind used_io_strategy =
+      emel::io::loader::event::strategy_kind::none;
+};
+
+struct load_progress {
+  const event::load &request;
+  uint32_t expected_count = 0u;
+  uint32_t current_index = 0u;
+  uint32_t done_count = 0u;
+  uint64_t bytes_done = 0u;
+  uint64_t bytes_delta = 0u;
   emel::io::loader::event::strategy_kind used_io_strategy =
       emel::io::loader::event::strategy_kind::none;
 };

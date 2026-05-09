@@ -98,6 +98,12 @@ effect_reset_io_load_events(event::io_phase_events &events,
   events.load_done.expected_count = expected_count;
   events.load_done.done_count = 0u;
   events.load_done.bytes_done = 0u;
+  events.load_progress.raised = false;
+  events.load_progress.expected_count = expected_count;
+  events.load_progress.current_index = 0u;
+  events.load_progress.done_count = 0u;
+  events.load_progress.bytes_done = 0u;
+  events.load_progress.bytes_delta = 0u;
   events.load_error.raised = false;
   events.load_error.err = emel::error::cast(emel::io::loader::error::none);
   events.load_error.strategy_err =
@@ -130,6 +136,19 @@ inline void effect_record_io_load_batch_done_event(
   events->load_error.raised = false;
   events->load_done.done_count = ev.done_count;
   events->load_done.bytes_done = ev.bytes_done;
+}
+
+inline void effect_record_io_load_batch_progress_event(
+    void *object,
+    const emel::io::loader::events::load_tensor_batch_progress &ev) noexcept {
+  auto *events = static_cast<event::io_phase_events *>(object);
+  events->load_done.raised = false;
+  events->load_progress.raised = true;
+  events->load_error.raised = false;
+  events->load_progress.current_index = ev.current_index;
+  events->load_progress.done_count = ev.done_count;
+  events->load_progress.bytes_done = ev.bytes_done;
+  events->load_progress.bytes_delta = ev.bytes_delta;
 }
 
 inline void effect_record_io_load_batch_error_event(
@@ -295,10 +314,16 @@ struct effect_dispatch_io_load_batch {
     }
 
     const emel::io::loader::event::strategy_policy policy{
-        ev.request.io_strategy};
+        .strategy = ev.request.io_strategy,
+        .staged_chunk_bytes = ev.request.io_staged_chunk_bytes,
+    };
     const std::span<const emel::io::event::tensor_load_span> span{
         ev.request.io_load_spans.data(), effect_count};
     emel::io::loader::event::load_tensor_batch load{span, policy};
+    load.async_progress = ev.request.io_load_progress;
+    load.async_batch_progress = ev.request.io_load_batch_progress;
+    load.on_progress = {ev.io_events,
+                        effect_record_io_load_batch_progress_event};
     load.on_done = {ev.io_events, effect_record_io_load_batch_done_event};
     load.on_error = {ev.io_events, effect_record_io_load_batch_error_event};
     static_cast<void>(ev.request.io_loader->process_event(load));
@@ -332,10 +357,85 @@ struct effect_dispatch_io_read_copy_load_batch {
     }
 
     const emel::io::loader::event::strategy_policy policy{
-        ev.request.io_strategy};
+        .strategy = ev.request.io_strategy,
+        .staged_chunk_bytes = ev.request.io_staged_chunk_bytes,
+    };
     const std::span<const emel::io::event::tensor_load_span> span{
         ev.request.io_load_spans.data(), effect_count};
     emel::io::loader::event::load_tensor_batch load{span, policy};
+    load.async_progress = ev.request.io_load_progress;
+    load.async_batch_progress = ev.request.io_load_batch_progress;
+    load.on_progress = {ev.io_events,
+                        effect_record_io_load_batch_progress_event};
+    load.on_done = {ev.io_events, effect_record_io_load_batch_done_event};
+    load.on_error = {ev.io_events, effect_record_io_load_batch_error_event};
+    static_cast<void>(ev.request.io_loader->process_event(load));
+  }
+};
+
+struct effect_dispatch_io_cooperative_async_load_batch {
+  void operator()(const event::load_runtime &ev, context &) const noexcept {
+    const uint32_t effect_count = ev.tensor_events.plan_done.effect_count;
+    effect_reset_io_load_events(*ev.io_events, effect_count);
+    ev.request.io_load_batch_progress->expected_count = effect_count;
+
+    uint32_t index = 0u;
+    uint64_t storage_offset = 0u;
+    while (index < effect_count) {
+      const auto &effect = ev.request.effect_requests[index];
+      auto *target = ev.request.read_copy_storage.data() + storage_offset;
+      ev.request.effect_requests[index].target = target;
+      ev.request.io_load_spans[index] = emel::io::event::tensor_load_span{
+          .tensor_id = effect.tensor_id,
+          .file_index = effect.file_index,
+          .file_offset = effect.offset,
+          .byte_size = effect.size,
+          .file_path = ev.request.model_path,
+          .source_buffer = ev.request.file_image,
+          .source_buffer_bytes = ev.request.file_size,
+          .target = target,
+          .target_bytes = effect.size,
+      };
+      storage_offset += effect.size;
+      ++index;
+    }
+
+    const emel::io::loader::event::strategy_policy policy{
+        .strategy = ev.request.io_strategy,
+        .staged_chunk_bytes = ev.request.io_staged_chunk_bytes,
+    };
+    const std::span<const emel::io::event::tensor_load_span> span{
+        ev.request.io_load_spans.data(), effect_count};
+    emel::io::loader::event::load_tensor_batch load{span, policy};
+    load.async_progress = ev.request.io_load_progress;
+    load.async_batch_progress = ev.request.io_load_batch_progress;
+    load.on_progress = {ev.io_events,
+                        effect_record_io_load_batch_progress_event};
+    load.on_done = {ev.io_events, effect_record_io_load_batch_done_event};
+    load.on_error = {ev.io_events, effect_record_io_load_batch_error_event};
+    static_cast<void>(ev.request.io_loader->process_event(load));
+  }
+};
+
+struct effect_dispatch_io_cooperative_async_resume_batch {
+  void operator()(const event::load_runtime &ev, context &) const noexcept {
+    const uint32_t effect_count =
+        ev.request.io_load_batch_progress->expected_count;
+    ev.tensor_events.plan_done.raised = true;
+    ev.tensor_events.plan_done.effect_count = effect_count;
+    effect_reset_io_load_events(*ev.io_events, effect_count);
+
+    const emel::io::loader::event::strategy_policy policy{
+        .strategy = ev.request.io_strategy,
+        .staged_chunk_bytes = ev.request.io_staged_chunk_bytes,
+    };
+    const std::span<const emel::io::event::tensor_load_span> span{
+        ev.request.io_load_spans.data(), effect_count};
+    emel::io::loader::event::load_tensor_batch load{span, policy};
+    load.async_progress = ev.request.io_load_progress;
+    load.async_batch_progress = ev.request.io_load_batch_progress;
+    load.on_progress = {ev.io_events,
+                        effect_record_io_load_batch_progress_event};
     load.on_done = {ev.io_events, effect_record_io_load_batch_done_event};
     load.on_error = {ev.io_events, effect_record_io_load_batch_error_event};
     static_cast<void>(ev.request.io_loader->process_event(load));
@@ -474,6 +574,29 @@ struct publish_done_noop {
   }
 };
 
+struct publish_progress {
+  void operator()(const event::load_runtime &ev, context &) const noexcept {
+    ev.ctx.err = emel::error::cast(error::none);
+    ev.ctx.used_io_strategy = ev.request.io_strategy;
+    ev.request.on_progress(events::load_progress{
+        .request = ev.request,
+        .expected_count = ev.io_events->load_progress.expected_count,
+        .current_index = ev.io_events->load_progress.current_index,
+        .done_count = ev.io_events->load_progress.done_count,
+        .bytes_done = ev.io_events->load_progress.bytes_done,
+        .bytes_delta = ev.io_events->load_progress.bytes_delta,
+        .used_io_strategy = ev.ctx.used_io_strategy,
+    });
+  }
+};
+
+struct publish_progress_noop {
+  void operator()(const event::load_runtime &ev, context &) const noexcept {
+    ev.ctx.err = emel::error::cast(error::none);
+    ev.ctx.used_io_strategy = ev.request.io_strategy;
+  }
+};
+
 struct publish_error {
   template <class runtime_event_type>
   void operator()(const runtime_event_type &ev, context &) const noexcept {
@@ -519,6 +642,10 @@ inline constexpr effect_mark_io_strategy_used effect_mark_io_strategy_used{};
 inline constexpr effect_dispatch_io_load_batch effect_dispatch_io_load_batch{};
 inline constexpr effect_dispatch_io_read_copy_load_batch
     effect_dispatch_io_read_copy_load_batch{};
+inline constexpr effect_dispatch_io_cooperative_async_load_batch
+    effect_dispatch_io_cooperative_async_load_batch{};
+inline constexpr effect_dispatch_io_cooperative_async_resume_batch
+    effect_dispatch_io_cooperative_async_resume_batch{};
 inline constexpr effect_dispatch_tensor_apply_results
     effect_dispatch_tensor_apply_results{};
 inline constexpr effect_dispatch_tensor_apply_error_results
@@ -536,6 +663,8 @@ inline constexpr run_validate_structure run_validate_structure{};
 inline constexpr run_validate_architecture run_validate_architecture{};
 inline constexpr publish_done publish_done{};
 inline constexpr publish_done_noop publish_done_noop{};
+inline constexpr publish_progress publish_progress{};
+inline constexpr publish_progress_noop publish_progress_noop{};
 inline constexpr publish_error publish_error{};
 inline constexpr publish_error_noop publish_error_noop{};
 inline constexpr on_unexpected on_unexpected{};

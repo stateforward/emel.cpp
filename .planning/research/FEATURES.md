@@ -1,43 +1,34 @@
-# Feature Research
+# Research: Feature Scope for v1.27 co_sm Cooperative Async I/O
 
-**Domain:** Bounded tensor byte loading under memory caps
-**Researched:** 2026-05-07
-**Confidence:** HIGH for scope boundaries; MEDIUM for user-visible chunk contract details
+**Date:** 2026-05-09
+**Milestone:** v1.27 co_sm Cooperative Async I/O Strategy
 
-## Feature Landscape
+## Table Stakes
 
-### Table stakes
+| Feature | Expected Behavior | Notes |
+|---------|-------------------|-------|
+| Coroutine actor contract | Maintainers can inspect project rules and understand exactly how `co_sm` preserves RTC, no-queue, allocation, callback, and lifetime invariants. | Must land before async runtime behavior. |
+| Opt-in `co_sm` wrapper | EMEL can construct a coroutine-capable machine through a project-owned alias/wrapper without migrating existing actors by default. | Keep synchronous `emel::sm` unchanged. |
+| Dedicated async I/O strategy | A separate `src/emel/io` strategy owns cooperative async/resumable loading behavior. | Do not mutate shipped `io/mmap`, `io/read`, or `io/staged_read` semantics. |
+| Explicit suspend/resume progress | Callers can advance bounded loading progress and observe partial progress, resume, success, and errors through explicit states/events. | No hidden mailbox or unbounded queue. |
+| Suspension-safe ownership | Any state that survives suspension is owned by the async strategy or fixed storage, not borrowed from stack-backed request spans or stored callbacks. | Issue #64 hard constraint. |
+| Tensor-owned integration | `model/tensor` can drive resumable loading through the public I/O boundary while retaining load/bind/evict/residency ownership. | Builds on #59/#60. |
+| Verification | Tests cover suspend/resume ordering, error propagation, partial progress, no-heap dispatch, and non-regression of synchronous strategies. | Must use public dispatch surfaces. |
 
-| Feature | Why expected | Complexity | Notes |
-|---------|--------------|------------|-------|
-| Chunked read into fixed windows | Host cannot map or allocate full tensor span at once | MEDIUM | Must preserve deterministic ordering and byte offsets |
-| Explicit completion / failure per stage | Operators need to reason about partial progress | MEDIUM | Model with `_done` / `_error`, not hidden retries |
-| Same residency rules as read/mmap | Architecture consistency | LOW | Tensor owns target; strategy copies bytes only |
+## Differentiators Worth Including
 
-### Differentiators (when done well)
+| Feature | Value | Scope Decision |
+|---------|-------|----------------|
+| Deterministic coroutine trace tests | Makes first `co_sm` adoption auditable and prevents scheduler behavior from becoming folklore. | In scope. |
+| Inline/no-op coroutine baseline | Proves `co_sm` overhead before real suspension code becomes load-bearing. | In scope if small and source-backed. |
+| Async strategy reporting | Maintained tool lanes can truthfully report async strategy usage only when the async runtime path executed. | In scope. |
 
-| Feature | Value | Complexity | Notes |
-|---------|-------|------------|-------|
-| Pure SML-visible stage graph | Auditable behavior; reviewable guards | MEDIUM | Avoids “smart” loops that encode routing |
-| Bounded transient resources | Predictable FD/handle use per stage | MEDIUM | Align with v1.24/v1.25 lifetime discipline |
+## Deferred
 
-### Anti-features (reject for v1.26)
-
-| Feature | Why tempting | Why problematic |
-|---------|--------------|-----------------|
-| Cooperative yield / coroutines | Natural for “streaming” | Explicitly out of scope unless separately approved; conflicts with stated RTC constraints |
-| Implicit internal buffering pools | Simpler API | Hides ownership; risks allocation during dispatch |
-
-## MVP (v1.26)
-
-- Deterministic multi-stage copy into caller-owned tensor-visible buffer regions.
-- Validation and unsupported paths fail closed like other I/O actors.
-- Integration only through public tensor↔I/O boundary established in #60.
-
-## Sources
-
-- Archived requirement STAGED-01 precursor in v1.25 requirements archive
-- Issue #63 wording (constrained-memory staged loading)
-
----
-*Feature research for v1.26*
+| Feature | Reason |
+|---------|--------|
+| Continuous decode batching | Valuable broader `co_sm` experiment, but issue #64 is about async I/O / resumable tensor loading. |
+| Tokenizer/detokenizer overlap | Broader inference scheduler work, not this I/O strategy milestone. |
+| `io_uring`, `madvise`, vendor DMA, or NPU implementation | Platform-specific source ownership belongs after the project has a safe coroutine actor contract and generic async strategy shape. |
+| Multi-threaded scheduler | Higher-risk target-specific work; first milestone should prove strict single-consumer semantics. |
+| Kernel coroutine integration | Explicitly out of scope; kernels stay synchronous and kernel-owned. |

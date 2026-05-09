@@ -28,6 +28,10 @@ primary sources consulted (non-exhaustive)
 - quiescence: a stable configuration where no further internal (anonymous) transitions are enabled.
 - orchestrator: the external driver that calls `process_event` on actors and provides time and ordering.
 - no message queue: no SML `process_queue`, no SML `defer_queue`, no user mailbox, and no “post for later” mechanism.
+- coroutine actor: an explicitly approved actor built with the project-owned
+  `co_sm` wrapper and driven by `process_event_async(...)` or an equivalent
+  bounded cooperative scheduler tick. coroutine actors are not the default SML
+  actor model and MUST obey the additional rules in section 10.1.
 
 ## 3. core invariants
 1. RTC invariant: A top-level `actor.dispatch(e)` MUST return only after the machine has reached quiescence for that event (and any internal anonymous transitions).
@@ -204,6 +208,47 @@ primary sources consulted (non-exhaustive)
    - hard fail (assert/terminate) in debug,
    - degrade gracefully (enter fault state) in production.
 5. for determinism in simulation/replay, “now” MUST be supplied by the caller, not read from the OS clock.
+
+## 10.1 coroutine actor rules (`co_sm`)
+`co_sm` is an opt-in coroutine actor utility, not a weakening of the default
+synchronous RTC actor model. A component MAY use `co_sm` only when a milestone
+explicitly approves coroutine behavior and this section is satisfied.
+
+1. coroutine continuations are internal actor/scheduler progress. they MUST NOT
+   be treated as mailbox messages, deferred events, or arbitrary "post for
+   later" work.
+2. every coroutine scheduler used by an actor MUST be bounded and MUST prove
+   FIFO ordering, single-consumer ownership for each actor, and
+   run-to-completion behavior for the selected cooperative tick.
+3. a cooperative tick MUST run the actor until an explicit modeled suspend
+   point, terminal outcome, or quiescence for that tick. resumption MUST happen
+   only through an explicit orchestrator tick/event or an explicitly modeled
+   completion source.
+4. `co_await` MAY appear only at phase boundaries that are visible in the SML
+   graph as states/transitions. `co_await` MUST NOT appear inside guards, hot
+   numeric loops, kernel loops, packing/quantization loops, or hidden helper
+   routing.
+5. runtime behavior selection remains in guards and transition tables.
+   coroutine bodies, awaitables, actions, detail helpers, and scheduler
+   callbacks MUST NOT choose dtype, backend, fallback, error channel, callback
+   lane, next phase, or externally observable behavior.
+6. coroutine frames, scheduler queues, and continuation storage MUST be
+   fixed-capacity or allocated before dispatch. heap allocation during
+   dispatch, suspend, resume, or progress is forbidden. pool exhaustion MUST be
+   a deterministic error or debug hard failure, never a heap fallback.
+7. event payloads, source spans, target windows, mutable references, callbacks,
+   and other stack-backed dispatch-local data MUST NOT be retained across
+   suspension. any data surviving suspension MUST be owned by stable
+   actor/scheduler/request storage with an explicit lifetime.
+8. synchronous callbacks remain same-RTC replies only. callbacks MUST NOT be
+   stored for later coroutine resumption or invoked after the original RTC
+   contract has ended.
+9. coroutine task, scheduler, awaitable, and frame types MUST NOT cross public C
+   ABI boundaries or generic public model/generator contracts. expose ordinary
+   events, status/error codes, and public actor surfaces instead.
+10. coroutine actor tests MUST prove deterministic suspend/resume ordering,
+    bounded progress, state inspection, no allocation during dispatch/progress,
+    and explicit success/error outcomes through public machine APIs.
 
 ## 11. composition rules
 ### hierarchy (composite state machines)

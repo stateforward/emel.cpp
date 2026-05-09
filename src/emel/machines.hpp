@@ -7,6 +7,7 @@
 #include "emel/embeddings/generator/sm.hpp"
 #include "emel/gguf/loader/sm.hpp"
 #include "emel/graph/processor/sm.hpp"
+#include "emel/io/async/sm.hpp"
 #include "emel/io/mmap/sm.hpp"
 #include "emel/io/read/sm.hpp"
 #include "emel/io/sm.hpp"
@@ -42,6 +43,7 @@ using EncoderRwkv = emel::text::encoders::rwkv::sm;
 using EncoderPlamo2 = emel::text::encoders::plamo2::sm;
 using EncoderFallback = emel::text::encoders::fallback::sm;
 using Generator = emel::text::generator::sm;
+using IoAsync = emel::io::async::sm;
 using IoLoader = emel::io::loader::sm;
 using IoMmap = emel::io::mmap::sm;
 using IoRead = emel::io::read::sm;

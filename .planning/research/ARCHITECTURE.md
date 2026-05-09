@@ -1,38 +1,53 @@
-# Architecture Research
+# Research: Architecture for v1.27 co_sm Cooperative Async I/O
 
-**Domain:** `emel/io` staged read integration
-**Researched:** 2026-05-07
-**Confidence:** HIGH
+**Date:** 2026-05-09
+**Milestone:** v1.27 co_sm Cooperative Async I/O Strategy
 
-## Major components
+## Existing Integration Points
 
-1. **`io/staged_read` actor** — Owns staged read state machine, validation guards, and stage execution effects; mirrors component layout of `io/read` and `io/mmap`.
-2. **`model/tensor` orchestration** — Injects or selects staged strategy alongside existing mmap/read paths using explicit guards (no action-side strategy pick).
-3. **`io/loader` or existing loader surfaces** — Continues to report/select strategies through public contracts only; no reach-through to actor `detail`.
+- `src/emel/sm.hpp` is the project-owned wrapper around `stateforward::sml::sm` and is the
+  natural place to add an opt-in `emel::co_sm` wrapper.
+- `docs/rules/sml.rules.md` and `AGENTS.md` are the source of truth for actor-model rules and
+  must describe coroutine actors before any production actor relies on them.
+- `src/emel/io` owns loading strategy boundaries. Synchronous strategies already exist for
+  mmap, read/copy, and staged source-span loading.
+- `src/emel/model/tensor` owns tensor load, bind, evict, and residency transitions. Async I/O
+  must remain below that boundary.
+- `model/loader`, benchmarks, paritychecker, and probes must route through public loader/tensor/I/O
+  surfaces and must not include actor internals.
 
-## Data flow (intent)
+## Recommended Build Order
 
-- Request describes overall file span and staging constraints (max chunk size / window — exact fields to be decided in plan-phase).
-- Each stage copies a sub-span into the tensor-owned target region for that window.
-- Success commits residency only at tensor layer after final stage completes (pattern to align with existing read success semantics).
+1. **Coroutine Rules and Wrapper:** Codify coroutine actor invariants, add `emel::co_sm`, add
+   scheduler concepts/policies, and prove synchronous behavior is unchanged.
+2. **Async I/O Component Boundary:** Add a dedicated cooperative async I/O strategy component with
+   fail-closed behavior and canonical layout.
+3. **Owned Progress State:** Define request/progress ownership that can survive suspension without
+   retaining stack-backed spans, mutable internal references, or callbacks.
+4. **Suspend/Resume Semantics:** Model bounded progress ticks, suspend/resume, completion, and
+   errors through explicit SML states/events.
+5. **Tensor Integration:** Wire `model/tensor` and `io/loader` through public events so tensor-owned
+   residency consumes async progress and terminal outcomes.
+6. **Maintained Surfaces and Guardrails:** Add tests, docs, reporting, and source checks that prove
+   async usage is truthful and does not regress synchronous strategies.
 
-## Build order (for roadmap)
+## Data and Control Flow
 
-1. Component boundary + fail-closed scaffold
-2. Validation / platform / chunk policy gates
-3. Stage execution + errors + lifetime
-4. Tensor integration + public reporting
-5. Tests, guardrails, publication
+```text
+caller/model_loader
+  -> model/tensor request_async_load
+  -> io/loader selects cooperative async strategy
+  -> io/async strategy co_sm processes bounded progress/resume events
+  -> io/async publishes progress/done/error
+  -> model/tensor commits residency only after explicit terminal success
+```
 
-## Pitfalls cross-links
+## Architectural Constraints
 
-- Do not use completion-driven loops as data-plane iteration per SML rules; bulk work stays in bounded kernels within a transition where applicable.
-- Do not store dispatch-local request pointers or phase indices in `staged_read` context.
-
-## Sources
-
-- `AGENTS.md` architecture and composition section
-- v1.25/v1.24 milestone archives for I/O patterns
-
----
-*Architecture research for v1.26*
+- Coroutine continuations are internal progress, not mailbox messages.
+- Scheduler ticks must be bounded and single-consumer per actor.
+- `co_await` is allowed only at explicit phase boundaries modeled in SML.
+- Runtime behavior selection remains in `guards.hpp` and `sm.hpp`; awaitables and actions do not
+  choose backend, fallback, error channel, callback path, or next behavior.
+- Any suspension-surviving data must be owned by stable actor/scheduler/request storage.
+- No public C ABI or generic public runtime header should expose coroutine implementation types.

@@ -204,15 +204,30 @@ struct io_strategy_staged_read {
   }
 };
 
+struct io_strategy_cooperative_async {
+  bool operator()(const event::load_runtime &ev) const noexcept {
+    return ev.request.io_strategy ==
+           emel::io::loader::event::strategy_kind::cooperative_async;
+  }
+};
+
 struct io_strategy_requires_staging_storage {
   bool operator()(const event::load_runtime &ev) const noexcept {
-    return io_strategy_read_copy{}(ev) || io_strategy_staged_read{}(ev);
+    return io_strategy_read_copy{}(ev) || io_strategy_staged_read{}(ev) ||
+           io_strategy_cooperative_async{}(ev);
   }
 };
 
 struct io_strategy_not_read_copy {
   bool operator()(const event::load_runtime &ev) const noexcept {
     return !io_strategy_requires_staging_storage{}(ev);
+  }
+};
+
+struct io_strategy_storage_backed_without_cooperative_async {
+  bool operator()(const event::load_runtime &ev) const noexcept {
+    return io_strategy_requires_staging_storage{}(ev) &&
+           !io_strategy_cooperative_async{}(ev);
   }
 };
 
@@ -291,6 +306,23 @@ struct read_copy_storage_missing {
   }
 };
 
+struct cooperative_async_progress_storage_ready {
+  bool operator()(const event::load_runtime &ev) const noexcept {
+    return !io_strategy_cooperative_async{}(ev) ||
+           (ev.request.io_load_progress.size() >=
+                ev.tensor_events.plan_done.effect_count &&
+            ev.request.io_load_batch_progress != nullptr &&
+            ev.request.io_load_batch_progress->next_index <
+                ev.tensor_events.plan_done.effect_count);
+  }
+};
+
+struct cooperative_async_progress_storage_missing {
+  bool operator()(const event::load_runtime &ev) const noexcept {
+    return !cooperative_async_progress_storage_ready{}(ev);
+  }
+};
+
 struct tensor_plan_done_with_io_strategy_with_loader_and_batch_span_ready {
   bool operator()(const event::load_runtime &ev) const noexcept {
     return tensor_plan_done_with_io_strategy_with_loader{}(ev) &&
@@ -301,9 +333,19 @@ struct tensor_plan_done_with_io_strategy_with_loader_and_batch_span_ready {
 struct tensor_plan_done_with_storage_backed_strategy_with_loader_and_storage_ready {
   bool operator()(const event::load_runtime &ev) const noexcept {
     return tensor_plan_done_with_io_strategy_with_loader{}(ev) &&
-           io_strategy_requires_staging_storage{}(ev) &&
+           io_strategy_storage_backed_without_cooperative_async{}(ev) &&
            io_load_batch_span_ready{}(ev) &&
            read_copy_storage_ready{}(ev);
+  }
+};
+
+struct tensor_plan_done_with_cooperative_async_storage_ready {
+  bool operator()(const event::load_runtime &ev) const noexcept {
+    return tensor_plan_done_with_io_strategy_with_loader{}(ev) &&
+           io_strategy_cooperative_async{}(ev) &&
+           io_load_batch_span_ready{}(ev) &&
+           read_copy_storage_ready{}(ev) &&
+           cooperative_async_progress_storage_ready{}(ev);
   }
 };
 
@@ -312,7 +354,29 @@ struct tensor_plan_done_with_storage_backed_strategy_with_loader_and_storage_mis
     return tensor_plan_done_with_io_strategy_with_loader{}(ev) &&
            io_strategy_requires_staging_storage{}(ev) &&
            io_load_batch_span_ready{}(ev) &&
-           read_copy_storage_missing{}(ev);
+           (read_copy_storage_missing{}(ev) ||
+            cooperative_async_progress_storage_missing{}(ev));
+  }
+};
+
+struct cooperative_async_resume_ready {
+  bool operator()(const event::load_runtime &ev) const noexcept {
+    return io_strategy_cooperative_async{}(ev) &&
+           ev.request.io_loader != nullptr &&
+           ev.request.io_load_batch_progress != nullptr &&
+           ev.request.io_load_batch_progress->expected_count > 0u &&
+           ev.request.io_load_batch_progress->next_index <
+               ev.request.io_load_batch_progress->expected_count &&
+           ev.request.io_load_spans.size() >=
+               ev.request.io_load_batch_progress->expected_count &&
+           ev.request.io_load_progress.size() >=
+               ev.request.io_load_batch_progress->expected_count;
+  }
+};
+
+struct cooperative_async_resume_absent {
+  bool operator()(const event::load_runtime &ev) const noexcept {
+    return !cooperative_async_resume_ready{}(ev);
   }
 };
 
@@ -351,6 +415,13 @@ struct io_load_done_all {
 struct io_load_error_raised {
   bool operator()(const event::load_runtime &ev) const noexcept {
     return ev.io_events != nullptr && ev.io_events->load_error.raised;
+  }
+};
+
+struct io_load_progress_raised {
+  bool operator()(const event::load_runtime &ev) const noexcept {
+    return ev.io_events != nullptr && ev.io_events->load_progress.raised &&
+           !ev.io_events->load_error.raised;
   }
 };
 
@@ -400,7 +471,8 @@ struct io_load_error_unclassified {
 
 struct io_load_unhandled {
   bool operator()(const event::load_runtime &ev) const noexcept {
-    return !io_load_done_all{}(ev) && !io_load_error_raised{}(ev);
+    return !io_load_done_all{}(ev) && !io_load_progress_raised{}(ev) &&
+           !io_load_error_raised{}(ev);
   }
 };
 
@@ -519,6 +591,18 @@ struct error_callback_present {
 struct error_callback_absent {
   bool operator()(const event::load_runtime &ev) const noexcept {
     return !error_callback_present{}(ev);
+  }
+};
+
+struct progress_callback_present {
+  bool operator()(const event::load_runtime &ev) const noexcept {
+    return static_cast<bool>(ev.request.on_progress);
+  }
+};
+
+struct progress_callback_absent {
+  bool operator()(const event::load_runtime &ev) const noexcept {
+    return !progress_callback_present{}(ev);
   }
 };
 

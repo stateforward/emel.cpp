@@ -21,6 +21,8 @@ enum class error : emel::error::type {
   io_read_failed = (1u << 12),
   io_staged_read_unsupported = (1u << 13),
   io_staged_read_failed = (1u << 14),
+  io_async_unsupported = (1u << 15),
+  io_async_failed = (1u << 16),
 };
 
 } // namespace emel::model::tensor

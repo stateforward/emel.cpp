@@ -9,6 +9,9 @@
 
 #include <doctest/doctest.h>
 
+#include "emel/io/async/errors.hpp"
+#include "emel/io/async/events.hpp"
+#include "emel/io/async/sm.hpp"
 #include "emel/io/loader/errors.hpp"
 #include "emel/io/loader/events.hpp"
 #include "emel/io/loader/sm.hpp"
@@ -31,9 +34,22 @@ struct owner_state {
       emel::io::loader::event::strategy_kind::none;
   const void *buffer = nullptr;
   uint64_t buffer_bytes = 0u;
+  uint64_t bytes_delta = 0u;
+  uint32_t progress_count = 0u;
+  uint32_t current_index = 0u;
   uint32_t done_count = 0u;
   uint64_t bytes_done = 0u;
   uint32_t failed_index = 0u;
+};
+
+struct async_owner_state {
+  bool done = false;
+  bool error = false;
+  emel::error::type err = emel::error::cast(emel::io::async::error::none);
+  void *target_buffer = nullptr;
+  uint64_t bytes_committed = 0u;
+  uint64_t bytes_delta = 0u;
+  uint32_t progress_count = 0u;
 };
 
 void on_load_done(
@@ -57,6 +73,19 @@ void on_load_error(
   owner->strategy_err = ev.strategy_err;
 }
 
+void on_load_progress(
+    void *object,
+    const emel::io::loader::events::load_tensor_progress &ev) noexcept {
+  auto *owner = static_cast<owner_state *>(object);
+  owner->done = false;
+  owner->error = false;
+  owner->strategy = ev.strategy;
+  owner->buffer = ev.buffer;
+  owner->bytes_done = ev.bytes_done;
+  owner->bytes_delta = ev.bytes_delta;
+  owner->progress_count += 1u;
+}
+
 void on_load_batch_done(
     void *object,
     const emel::io::loader::events::load_tensor_batch_done &ev) noexcept {
@@ -68,6 +97,20 @@ void on_load_batch_done(
   owner->bytes_done = ev.bytes_done;
 }
 
+void on_load_batch_progress(
+    void *object,
+    const emel::io::loader::events::load_tensor_batch_progress &ev) noexcept {
+  auto *owner = static_cast<owner_state *>(object);
+  owner->done = false;
+  owner->error = false;
+  owner->strategy = ev.strategy;
+  owner->current_index = ev.current_index;
+  owner->done_count = ev.done_count;
+  owner->bytes_done = ev.bytes_done;
+  owner->bytes_delta = ev.bytes_delta;
+  owner->progress_count += 1u;
+}
+
 void on_load_batch_error(
     void *object,
     const emel::io::loader::events::load_tensor_batch_error &ev) noexcept {
@@ -77,6 +120,37 @@ void on_load_batch_error(
   owner->err = ev.err;
   owner->strategy_err = ev.strategy_err;
   owner->failed_index = ev.failed_index;
+}
+
+void on_async_load_error(
+    void *object,
+    const emel::io::async::events::load_window_error &ev) noexcept {
+  auto *owner = static_cast<async_owner_state *>(object);
+  owner->done = false;
+  owner->error = true;
+  owner->err = ev.err;
+}
+
+void on_async_load_done(
+    void *object,
+    const emel::io::async::events::load_window_done &ev) noexcept {
+  auto *owner = static_cast<async_owner_state *>(object);
+  owner->done = true;
+  owner->error = false;
+  owner->target_buffer = ev.target_buffer;
+  owner->bytes_committed = ev.bytes_committed;
+}
+
+void on_async_load_progress(
+    void *object,
+    const emel::io::async::events::load_window_progress_done &ev) noexcept {
+  auto *owner = static_cast<async_owner_state *>(object);
+  owner->done = false;
+  owner->error = false;
+  owner->target_buffer = ev.target_buffer;
+  owner->bytes_committed = ev.bytes_committed;
+  owner->bytes_delta = ev.bytes_delta;
+  owner->progress_count += 1u;
 }
 
 void *fake_target(const uintptr_t value) {
@@ -189,6 +263,7 @@ TEST_CASE("io loader fails closed for absent and explicit strategies") {
       emel::io::loader::event::strategy_kind::read_copy,
       emel::io::loader::event::strategy_kind::staged_read,
       emel::io::loader::event::strategy_kind::external_buffer,
+      emel::io::loader::event::strategy_kind::cooperative_async,
   };
 
   for (const auto strategy : strategies) {
@@ -316,6 +391,62 @@ TEST_CASE("io loader dispatches staged-read requests through staged actor") {
   CHECK(owner.buffer_bytes == target.size());
   CHECK(target[0] == 'c');
   CHECK(target[1] == 'd');
+  CHECK(target[2] == 'e');
+  CHECK(target[3] == 'f');
+  CHECK(loader.is(stateforward::sml::state<emel::io::loader::state_ready>));
+}
+
+TEST_CASE(
+    "io loader cooperative async advances one public progress chunk") {
+  emel::io::async::sm async_actor{};
+  emel::io::loader::sm loader{{.io_async = &async_actor}};
+  owner_state owner{};
+  constexpr char source[] = "abcdefgh";
+  std::array<char, 4> target{};
+  const emel::io::loader::event::tensor_load_span tensor{
+      .tensor_id = 9,
+      .file_index = 0u,
+      .file_offset = 2u,
+      .byte_size = target.size(),
+      .source_buffer = source,
+      .source_buffer_bytes = sizeof(source),
+      .target = target.data(),
+      .target_bytes = target.size(),
+  };
+  const emel::io::loader::event::strategy_policy policy{
+      .strategy = emel::io::loader::event::strategy_kind::cooperative_async,
+      .staged_chunk_bytes = 2u,
+  };
+  emel::io::loader::event::cooperative_async_progress progress{};
+  emel::io::loader::event::load_tensor request{tensor, policy};
+  request.async_progress = &progress;
+  request.on_progress = {&owner, on_load_progress};
+  request.on_done = {&owner, on_load_done};
+  request.on_error = {&owner, on_load_error};
+
+  CHECK(loader.process_event(request));
+  CHECK_FALSE(owner.done);
+  CHECK_FALSE(owner.error);
+  CHECK(owner.progress_count == 1u);
+  CHECK(owner.strategy ==
+        emel::io::loader::event::strategy_kind::cooperative_async);
+  CHECK(owner.buffer == target.data());
+  CHECK(owner.bytes_done == 2u);
+  CHECK(owner.bytes_delta == 2u);
+  CHECK(progress.bytes_committed == 2u);
+  CHECK(target[0] == 'c');
+  CHECK(target[1] == 'd');
+  CHECK(target[2] == 0);
+  CHECK(target[3] == 0);
+  CHECK(loader.is(stateforward::sml::state<emel::io::loader::state_ready>));
+
+  CHECK(loader.process_event(request));
+  CHECK(owner.done);
+  CHECK_FALSE(owner.error);
+  CHECK(owner.progress_count == 1u);
+  CHECK(owner.buffer == target.data());
+  CHECK(owner.buffer_bytes == target.size());
+  CHECK(progress.bytes_committed == target.size());
   CHECK(target[2] == 'e');
   CHECK(target[3] == 'f');
   CHECK(loader.is(stateforward::sml::state<emel::io::loader::state_ready>));
@@ -452,6 +583,98 @@ TEST_CASE("io loader staged-read batch routes once through staged actor") {
   CHECK(first_target[2] == 'd');
   CHECK(second_target[0] == 'f');
   CHECK(second_target[1] == 'g');
+  CHECK(second_target[2] == 'h');
+  CHECK(second_target[3] == 'i');
+  CHECK(loader.is(stateforward::sml::state<emel::io::loader::state_ready>));
+}
+
+TEST_CASE("io loader cooperative async batch resumes one chunk at a time") {
+  emel::io::async::sm async_actor{};
+  emel::io::loader::sm loader{{.io_async = &async_actor}};
+  owner_state owner{};
+  constexpr char source[] = "abcdefghij";
+  std::array<char, 3> first_target{};
+  std::array<char, 4> second_target{};
+  const std::array<emel::io::loader::event::tensor_load_span, 2> tensors{{
+      {
+          .tensor_id = 1,
+          .file_index = 0u,
+          .file_offset = 1u,
+          .byte_size = first_target.size(),
+          .source_buffer = source,
+          .source_buffer_bytes = sizeof(source),
+          .target = first_target.data(),
+          .target_bytes = first_target.size(),
+      },
+      {
+          .tensor_id = 2,
+          .file_index = 0u,
+          .file_offset = 5u,
+          .byte_size = second_target.size(),
+          .source_buffer = source,
+          .source_buffer_bytes = sizeof(source),
+          .target = second_target.data(),
+          .target_bytes = second_target.size(),
+      },
+  }};
+  const emel::io::loader::event::strategy_policy policy{
+      .strategy = emel::io::loader::event::strategy_kind::cooperative_async,
+      .staged_chunk_bytes = 2u,
+  };
+  std::array<emel::io::loader::event::cooperative_async_progress, 2>
+      progress{};
+  emel::io::loader::event::cooperative_async_batch_progress batch_progress{};
+  emel::io::loader::event::load_tensor_batch request{tensors, policy};
+  request.async_progress = std::span{progress};
+  request.async_batch_progress = &batch_progress;
+  request.on_progress = {&owner, on_load_batch_progress};
+  request.on_done = {&owner, on_load_batch_done};
+  request.on_error = {&owner, on_load_batch_error};
+
+  CHECK(loader.process_event(request));
+  CHECK_FALSE(owner.done);
+  CHECK_FALSE(owner.error);
+  CHECK(owner.strategy ==
+        emel::io::loader::event::strategy_kind::cooperative_async);
+  CHECK(owner.current_index == 0u);
+  CHECK(owner.done_count == 0u);
+  CHECK(owner.bytes_done == 2u);
+  CHECK(owner.bytes_delta == 2u);
+  CHECK(progress[0].bytes_committed == 2u);
+  CHECK(batch_progress.next_index == 0u);
+  CHECK(first_target[0] == 'b');
+  CHECK(first_target[1] == 'c');
+  CHECK(first_target[2] == 0);
+  CHECK(second_target[0] == 0);
+
+  CHECK(loader.process_event(request));
+  CHECK_FALSE(owner.done);
+  CHECK_FALSE(owner.error);
+  CHECK(owner.current_index == 0u);
+  CHECK(owner.done_count == 1u);
+  CHECK(owner.bytes_done == first_target.size());
+  CHECK(progress[0].bytes_committed == first_target.size());
+  CHECK(batch_progress.next_index == 1u);
+  CHECK(first_target[2] == 'd');
+
+  CHECK(loader.process_event(request));
+  CHECK_FALSE(owner.done);
+  CHECK_FALSE(owner.error);
+  CHECK(owner.current_index == 1u);
+  CHECK(owner.done_count == 1u);
+  CHECK(owner.bytes_done == first_target.size() + 2u);
+  CHECK(progress[1].bytes_committed == 2u);
+  CHECK(second_target[0] == 'f');
+  CHECK(second_target[1] == 'g');
+  CHECK(second_target[2] == 0);
+  CHECK(second_target[3] == 0);
+
+  CHECK(loader.process_event(request));
+  CHECK(owner.done);
+  CHECK_FALSE(owner.error);
+  CHECK(owner.done_count == tensors.size());
+  CHECK(owner.bytes_done == first_target.size() + second_target.size());
+  CHECK(batch_progress.next_index == tensors.size());
   CHECK(second_target[2] == 'h');
   CHECK(second_target[3] == 'i');
   CHECK(loader.is(stateforward::sml::state<emel::io::loader::state_ready>));
@@ -708,6 +931,33 @@ TEST_CASE("io loader batch route dispatches one selected read actor event") {
   CHECK(dispatch_source.find("for (") == std::string_view::npos);
 }
 
+TEST_CASE("io loader cooperative async routes expose partial progress only") {
+  const std::string actions_source = read_text_file(
+      repo_root() / "src" / "emel" / "io" / "loader" / "actions.hpp");
+  const std::string detail_source = read_text_file(
+      repo_root() / "src" / "emel" / "io" / "loader" / "detail.hpp");
+  const std::string events_source = read_text_file(
+      repo_root() / "src" / "emel" / "io" / "loader" / "events.hpp");
+  const std::string sm_source = read_text_file(
+      repo_root() / "src" / "emel" / "io" / "loader" / "sm.hpp");
+  const std::string_view tensor_dispatch_source =
+      function_source(actions_source, "effect_dispatch_async_tensor");
+  const std::string_view batch_dispatch_source =
+      function_source(actions_source, "effect_dispatch_async_tensor_batch");
+
+  CHECK(occurrence_count(tensor_dispatch_source, "process_event(inner_event)") ==
+        1u);
+  CHECK(occurrence_count(batch_dispatch_source, "process_event(inner_event)") ==
+        1u);
+  CHECK(tensor_dispatch_source.find("while (") == std::string_view::npos);
+  CHECK(batch_dispatch_source.find("while (") == std::string_view::npos);
+  CHECK(detail_source.find("compute_async_step_count") == std::string::npos);
+  CHECK(events_source.find("load_tensor_progress") != std::string::npos);
+  CHECK(events_source.find("load_tensor_batch_progress") != std::string::npos);
+  CHECK(sm_source.find("async_load_progressed") != std::string::npos);
+  CHECK(sm_source.find("async_batch_progressed") != std::string::npos);
+}
+
 TEST_CASE("public io source loads bytes through 64-bit file size path") {
   const auto path =
       std::filesystem::temp_directory_path() / "emel_io_source_bytes.bin";
@@ -814,16 +1064,19 @@ TEST_CASE(
 
   CHECK(events_source.find("read_copy = 2u") != std::string::npos);
   CHECK(events_source.find("staged_read = 4u") != std::string::npos);
+  CHECK(events_source.find("cooperative_async = 5u") != std::string::npos);
   CHECK(guards_source.find("strategy_read_copy_with_actor") !=
         std::string::npos);
   CHECK(guards_source.find("strategy_staged_read_with_actor") !=
         std::string::npos);
+  CHECK(guards_source.find("strategy_cooperative_async") != std::string::npos);
   CHECK(sm_source.find("effect_dispatch_staged_read_tensor") !=
         std::string::npos);
   CHECK(sm_source.find("effect_dispatch_staged_read_tensor_batch") !=
         std::string::npos);
   CHECK(helper_source.find("\"read_copy\"") != std::string::npos);
   CHECK(helper_source.find("\"staged_read\"") != std::string::npos);
+  CHECK(helper_source.find("\"cooperative_async\"") != std::string::npos);
   CHECK(events_source.find("staged_chunk_bytes") != std::string::npos);
 
   for (const auto *source_path : runtime_sources) {
@@ -849,4 +1102,263 @@ TEST_CASE("io loader staged-read dispatch uses bounded chunk policy") {
   CHECK(actions_source.find("compute_staged_chunk_bytes") != std::string::npos);
   CHECK(detail_source.find("compute_staged_chunk_bytes") != std::string::npos);
   CHECK(staged_events_source.find("stage_chunk_bytes") != std::string::npos);
+}
+
+TEST_CASE("io async exposes canonical machine aliases at component boundary") {
+  emel::io::async::sm strategy{};
+  emel::IoAsync top_level_async{};
+
+  CHECK(strategy.is(stateforward::sml::state<emel::io::async::state_ready>));
+  CHECK(top_level_async.is(
+      stateforward::sml::state<emel::io::async::state_ready>));
+}
+
+TEST_CASE("io async strategy advances partial then terminal progress") {
+  emel::io::async::sm strategy{};
+  async_owner_state owner{};
+  const uint8_t source[4]{1u, 2u, 3u, 4u};
+  uint8_t target[4]{};
+  emel::io::async::event::load_window_storage storage{
+      .file_offset = 0u,
+      .logical_byte_length = sizeof(target),
+      .progress_chunk_bytes = 2u,
+      .source_span = source,
+      .source_span_bytes = sizeof(source),
+      .target_buffer = target,
+      .target_window_bytes = sizeof(target),
+  };
+  emel::io::async::event::load_window_progress progress{};
+  const emel::io::async::event::load_window_request request{storage, progress};
+  emel::io::async::event::load_window load_request{request};
+  load_request.on_progress = {&owner, on_async_load_progress};
+  load_request.on_done = {&owner, on_async_load_done};
+  load_request.on_error = {&owner, on_async_load_error};
+
+  CHECK(strategy.process_event(load_request));
+  CHECK_FALSE(owner.done);
+  CHECK_FALSE(owner.error);
+  CHECK(owner.progress_count == 1u);
+  CHECK(owner.bytes_committed == 2u);
+  CHECK(owner.bytes_delta == 2u);
+  CHECK(target[0] == source[0]);
+  CHECK(target[1] == source[1]);
+  CHECK(strategy.is(stateforward::sml::state<emel::io::async::state_ready>));
+
+  CHECK(strategy.process_event(load_request));
+  CHECK(owner.done);
+  CHECK_FALSE(owner.error);
+  CHECK(owner.bytes_committed == sizeof(target));
+  CHECK(progress.bytes_committed == sizeof(target));
+  CHECK(target[2] == source[2]);
+  CHECK(target[3] == source[3]);
+  CHECK(strategy.is(stateforward::sml::state<emel::io::async::state_ready>));
+}
+
+TEST_CASE("io async strategy rejects without callback and returns ready") {
+  emel::io::async::sm strategy{};
+  const uint8_t source[4]{1u, 2u, 3u, 4u};
+  uint8_t target[4]{};
+  emel::io::async::event::load_window_storage storage{
+      .file_offset = 0u,
+      .logical_byte_length = sizeof(target),
+      .progress_chunk_bytes = 2u,
+      .source_span = source,
+      .source_span_bytes = sizeof(source),
+      .target_buffer = target,
+      .target_window_bytes = sizeof(target),
+  };
+  emel::io::async::event::load_window_progress progress{};
+  const emel::io::async::event::load_window_request request{storage, progress};
+  emel::io::async::event::load_window load_request{request};
+
+  CHECK_FALSE(strategy.process_event(load_request));
+  CHECK(strategy.is(stateforward::sml::state<emel::io::async::state_ready>));
+}
+
+TEST_CASE("io async strategy reports missing completion callback") {
+  emel::io::async::sm strategy{};
+  async_owner_state owner{};
+  const uint8_t source[4]{1u, 2u, 3u, 4u};
+  uint8_t target[4]{};
+  emel::io::async::event::load_window_storage storage{
+      .file_offset = 0u,
+      .logical_byte_length = sizeof(target),
+      .progress_chunk_bytes = 2u,
+      .source_span = source,
+      .source_span_bytes = sizeof(source),
+      .target_buffer = target,
+      .target_window_bytes = sizeof(target),
+  };
+  emel::io::async::event::load_window_progress progress{};
+  const emel::io::async::event::load_window_request request{storage, progress};
+  emel::io::async::event::load_window load_request{request};
+  load_request.on_error = {&owner, on_async_load_error};
+
+  CHECK_FALSE(strategy.process_event(load_request));
+  REQUIRE(owner.error);
+  CHECK(owner.err ==
+        emel::error::cast(emel::io::async::error::invalid_callbacks));
+  CHECK(strategy.is(stateforward::sml::state<emel::io::async::state_ready>));
+}
+
+TEST_CASE("io async strategy validates source contract before progress") {
+  emel::io::async::sm strategy{};
+  async_owner_state owner{};
+  const uint8_t source[4]{1u, 2u, 3u, 4u};
+  uint8_t target[4]{};
+  emel::io::async::event::load_window_storage storage{
+      .file_offset = 0u,
+      .logical_byte_length = 0u,
+      .progress_chunk_bytes = 2u,
+      .source_span = source,
+      .source_span_bytes = sizeof(source),
+      .target_buffer = target,
+      .target_window_bytes = sizeof(target),
+  };
+  emel::io::async::event::load_window_progress progress{};
+  const emel::io::async::event::load_window_request request{storage, progress};
+  emel::io::async::event::load_window load_request{request};
+  load_request.on_progress = {&owner, on_async_load_progress};
+  load_request.on_done = {&owner, on_async_load_done};
+  load_request.on_error = {&owner, on_async_load_error};
+
+  CHECK_FALSE(strategy.process_event(load_request));
+  REQUIRE(owner.error);
+  CHECK(owner.err ==
+        emel::error::cast(emel::io::async::error::invalid_source_contract));
+  CHECK(strategy.is(stateforward::sml::state<emel::io::async::state_ready>));
+}
+
+TEST_CASE("io async strategy validates target window before progress") {
+  emel::io::async::sm strategy{};
+  async_owner_state owner{};
+  const uint8_t source[4]{1u, 2u, 3u, 4u};
+  uint8_t target[2]{};
+  emel::io::async::event::load_window_storage storage{
+      .file_offset = 0u,
+      .logical_byte_length = 4u,
+      .progress_chunk_bytes = 2u,
+      .source_span = source,
+      .source_span_bytes = sizeof(source),
+      .target_buffer = target,
+      .target_window_bytes = sizeof(target),
+  };
+  emel::io::async::event::load_window_progress progress{};
+  const emel::io::async::event::load_window_request request{storage, progress};
+  emel::io::async::event::load_window load_request{request};
+  load_request.on_progress = {&owner, on_async_load_progress};
+  load_request.on_done = {&owner, on_async_load_done};
+  load_request.on_error = {&owner, on_async_load_error};
+
+  CHECK_FALSE(strategy.process_event(load_request));
+  REQUIRE(owner.error);
+  CHECK(owner.err ==
+        emel::error::cast(emel::io::async::error::invalid_target_window));
+  CHECK(strategy.is(stateforward::sml::state<emel::io::async::state_ready>));
+}
+
+TEST_CASE("io async strategy validates caller-owned progress storage") {
+  emel::io::async::sm strategy{};
+  async_owner_state owner{};
+  const uint8_t source[4]{1u, 2u, 3u, 4u};
+  uint8_t target[4]{};
+  emel::io::async::event::load_window_storage storage{
+      .file_offset = 0u,
+      .logical_byte_length = sizeof(target),
+      .progress_chunk_bytes = 2u,
+      .source_span = source,
+      .source_span_bytes = sizeof(source),
+      .target_buffer = target,
+      .target_window_bytes = sizeof(target),
+  };
+  emel::io::async::event::load_window_progress progress{
+      .bytes_committed = sizeof(target) + 1u,
+  };
+  const emel::io::async::event::load_window_request request{storage, progress};
+  emel::io::async::event::load_window load_request{request};
+  load_request.on_progress = {&owner, on_async_load_progress};
+  load_request.on_done = {&owner, on_async_load_done};
+  load_request.on_error = {&owner, on_async_load_error};
+
+  CHECK_FALSE(strategy.process_event(load_request));
+  REQUIRE(owner.error);
+  CHECK(owner.err ==
+        emel::error::cast(emel::io::async::error::invalid_progress_contract));
+  CHECK(strategy.is(stateforward::sml::state<emel::io::async::state_ready>));
+}
+
+TEST_CASE("io async strategy publishes deterministic cancellation error") {
+  emel::io::async::sm strategy{};
+  async_owner_state owner{};
+  const uint8_t source[4]{1u, 2u, 3u, 4u};
+  uint8_t target[4]{};
+  emel::io::async::event::load_window_storage storage{
+      .file_offset = 0u,
+      .logical_byte_length = sizeof(target),
+      .progress_chunk_bytes = 2u,
+      .source_span = source,
+      .source_span_bytes = sizeof(source),
+      .target_buffer = target,
+      .target_window_bytes = sizeof(target),
+  };
+  emel::io::async::event::load_window_progress progress{
+      .cancel_requested = true,
+  };
+  const emel::io::async::event::load_window_request request{storage, progress};
+  emel::io::async::event::load_window load_request{request};
+  load_request.on_progress = {&owner, on_async_load_progress};
+  load_request.on_done = {&owner, on_async_load_done};
+  load_request.on_error = {&owner, on_async_load_error};
+
+  CHECK_FALSE(strategy.process_event(load_request));
+  REQUIRE(owner.error);
+  CHECK(owner.err == emel::error::cast(emel::io::async::error::cancelled));
+  CHECK(progress.bytes_committed == 0u);
+  CHECK(strategy.is(stateforward::sml::state<emel::io::async::state_ready>));
+}
+
+TEST_CASE("io async strategy publishes deterministic scheduler resource error") {
+  emel::io::async::sm strategy{};
+  async_owner_state owner{};
+  constexpr char source[] = "abcdefgh";
+  std::array<char, 4> target{};
+  emel::io::async::event::load_window_storage storage{
+      .file_offset = 0u,
+      .logical_byte_length = target.size(),
+      .progress_chunk_bytes = 4u,
+      .scheduler_resource_bytes = 2u,
+      .source_span = source,
+      .source_span_bytes = sizeof(source) - 1u,
+      .target_buffer = target.data(),
+      .target_window_bytes = target.size(),
+  };
+  emel::io::async::event::load_window_progress progress{};
+  const emel::io::async::event::load_window_request request{storage, progress};
+  emel::io::async::event::load_window load_request{request};
+  load_request.on_progress = {&owner, on_async_load_progress};
+  load_request.on_done = {&owner, on_async_load_done};
+  load_request.on_error = {&owner, on_async_load_error};
+
+  CHECK_FALSE(strategy.process_event(load_request));
+  REQUIRE(owner.error);
+  CHECK(owner.err ==
+        emel::error::cast(
+            emel::io::async::error::invalid_scheduler_contract));
+  CHECK(progress.bytes_committed == 0u);
+  CHECK(strategy.is(stateforward::sml::state<emel::io::async::state_ready>));
+}
+
+TEST_CASE("io async context does not retain request progress or callbacks") {
+  const std::string context_source =
+      read_text_file(repo_root() / "src/emel/io/async/context.hpp");
+
+  CHECK(context_source.find("request") == std::string::npos);
+  CHECK(context_source.find("progress") == std::string::npos);
+  CHECK(context_source.find("callback") == std::string::npos);
+  CHECK(context_source.find("target_buffer") == std::string::npos);
+}
+
+TEST_CASE("io async scheduler proves strict ordering contract") {
+  CHECK(emel::policy::strict_ordering_scheduler_contract<
+        typename emel::io::async::sm::scheduler_type>);
 }

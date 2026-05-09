@@ -22,7 +22,10 @@ struct state_tensor_plan_dispatch {};
 struct state_tensor_plan_decision {};
 struct state_io_load_dispatch {};
 struct state_io_read_copy_load_dispatch {};
+struct state_io_cooperative_async_load_dispatch {};
+struct state_io_cooperative_async_resume_dispatch {};
 struct state_io_load_decision {};
+struct state_io_load_progress_decision {};
 struct state_tensor_effect_error_cleanup {};
 struct state_tensor_apply_dispatch {};
 struct state_tensor_apply_decision {};
@@ -49,6 +52,10 @@ struct model {
         sml::state<request_decision> <= *sml::state<ready> + sml::event<event::load_runtime>
           / action::begin_load
 
+      , sml::state<state_io_cooperative_async_resume_dispatch> <=
+          sml::state<request_decision>
+          + sml::completion<event::load_runtime>
+          [ guard::cooperative_async_resume_ready{} ]
       , sml::state<parsing> <= sml::state<request_decision>
           + sml::completion<event::load_runtime> [ guard::valid_request{} ]
       , sml::state<errored> <= sml::state<request_decision>
@@ -133,6 +140,10 @@ struct model {
           sml::state<state_tensor_plan_decision>
           + sml::completion<event::load_runtime>
           [ guard::tensor_plan_done_with_storage_backed_strategy_with_loader_and_storage_ready{} ]
+      , sml::state<state_io_cooperative_async_load_dispatch> <=
+          sml::state<state_tensor_plan_decision>
+          + sml::completion<event::load_runtime>
+          [ guard::tensor_plan_done_with_cooperative_async_storage_ready{} ]
       , sml::state<state_tensor_effect_error_cleanup> <=
           sml::state<state_tensor_plan_decision>
           + sml::completion<event::load_runtime>
@@ -157,9 +168,21 @@ struct model {
           sml::state<state_io_read_copy_load_dispatch>
           + sml::completion<event::load_runtime>
           / action::effect_dispatch_io_read_copy_load_batch
+      , sml::state<state_io_load_decision> <=
+          sml::state<state_io_cooperative_async_load_dispatch>
+          + sml::completion<event::load_runtime>
+          / action::effect_dispatch_io_cooperative_async_load_batch
+      , sml::state<state_io_load_decision> <=
+          sml::state<state_io_cooperative_async_resume_dispatch>
+          + sml::completion<event::load_runtime>
+          / action::effect_dispatch_io_cooperative_async_resume_batch
       , sml::state<state_tensor_apply_dispatch> <= sml::state<state_io_load_decision>
           + sml::completion<event::load_runtime> [ guard::io_load_done_all{} ]
           / action::effect_mark_io_strategy_used
+      , sml::state<state_io_load_progress_decision> <=
+          sml::state<state_io_load_decision>
+          + sml::completion<event::load_runtime>
+          [ guard::io_load_progress_raised{} ]
       , sml::state<state_tensor_effect_error_cleanup> <=
           sml::state<state_io_load_decision>
           + sml::completion<event::load_runtime> [ guard::io_load_error_raised{} ]
@@ -168,6 +191,15 @@ struct model {
           sml::state<state_io_load_decision>
           + sml::completion<event::load_runtime> [ guard::io_load_unhandled{} ]
           / action::effect_dispatch_tensor_apply_error_results
+
+      , sml::state<ready> <= sml::state<state_io_load_progress_decision>
+          + sml::completion<event::load_runtime>
+          [ guard::progress_callback_present{} ]
+          / action::publish_progress
+      , sml::state<ready> <= sml::state<state_io_load_progress_decision>
+          + sml::completion<event::load_runtime>
+          [ guard::progress_callback_absent{} ]
+          / action::publish_progress_noop
 
       , sml::state<errored> <= sml::state<state_tensor_effect_error_cleanup>
           + sml::completion<event::load_runtime>
@@ -372,7 +404,15 @@ struct model {
           + sml::unexpected_event<sml::_> / action::on_unexpected
       , sml::state<ready> <= sml::state<state_io_read_copy_load_dispatch>
           + sml::unexpected_event<sml::_> / action::on_unexpected
+      , sml::state<ready> <=
+          sml::state<state_io_cooperative_async_load_dispatch>
+          + sml::unexpected_event<sml::_> / action::on_unexpected
+      , sml::state<ready> <=
+          sml::state<state_io_cooperative_async_resume_dispatch>
+          + sml::unexpected_event<sml::_> / action::on_unexpected
       , sml::state<ready> <= sml::state<state_io_load_decision>
+          + sml::unexpected_event<sml::_> / action::on_unexpected
+      , sml::state<ready> <= sml::state<state_io_load_progress_decision>
           + sml::unexpected_event<sml::_> / action::on_unexpected
       , sml::state<ready> <= sml::state<state_tensor_effect_error_cleanup>
           + sml::unexpected_event<sml::_> / action::on_unexpected
@@ -429,9 +469,11 @@ struct sm : public emel::sm<model, action::context> {
     events::tensor_apply_done tensor_apply_done{};
     events::tensor_apply_error tensor_apply_error{};
     events::io_load_done io_load_done{};
+    events::io_load_progress io_load_progress{};
     events::io_load_error io_load_error{};
     event::io_phase_events io_events{
         .load_done = io_load_done,
+        .load_progress = io_load_progress,
         .load_error = io_load_error,
     };
     event::load_runtime runtime{

@@ -1,5 +1,8 @@
 #pragma once
 
+#include "emel/io/async/errors.hpp"
+#include "emel/io/async/events.hpp"
+#include "emel/io/async/sm.hpp"
 #include "emel/io/loader/context.hpp"
 #include "emel/io/loader/detail.hpp"
 #include "emel/io/loader/errors.hpp"
@@ -18,8 +21,12 @@ struct effect_begin_load_tensor {
                   context &) const noexcept {
     ev.ctx.err = emel::error::cast(error::none);
     ev.ctx.strategy_err = emel::error::cast(error::none);
+    ev.ctx.accepted = false;
     ev.ctx.ok = false;
+    ev.ctx.partial = false;
+    ev.ctx.done = false;
     ev.ctx.bytes_copied = 0u;
+    ev.ctx.bytes_delta = 0u;
     ev.ctx.buffer = nullptr;
   }
 };
@@ -31,9 +38,15 @@ struct effect_begin_load_tensor_batch {
     ev.status.strategy_err = emel::error::cast(error::none);
     ev.status.accepted = false;
     ev.status.ok = false;
+    ev.status.partial = false;
+    ev.status.done = false;
     ev.status.done_count = 0u;
     ev.status.bytes_done = 0u;
+    ev.status.bytes_delta = 0u;
     ev.status.failed_index = 0u;
+    ev.status.current_index = 0u;
+    ev.status.done_delta = 0u;
+    ev.status.bytes_before = 0u;
   }
 };
 
@@ -114,6 +127,19 @@ struct effect_publish_load_tensor_done {
   }
 };
 
+struct effect_publish_load_tensor_progress {
+  void operator()(const detail::load_tensor_runtime &ev,
+                  context &) const noexcept {
+    ev.request.on_progress(events::load_tensor_progress{
+        .request = ev.request,
+        .strategy = ev.request.policy.strategy,
+        .buffer = ev.ctx.buffer,
+        .bytes_done = ev.ctx.bytes_copied,
+        .bytes_delta = ev.ctx.bytes_delta,
+    });
+  }
+};
+
 struct effect_publish_load_tensor_batch_done {
   void operator()(const detail::load_tensor_batch_runtime &ev,
                   context &) const noexcept {
@@ -122,6 +148,20 @@ struct effect_publish_load_tensor_batch_done {
         .strategy = ev.request.policy.strategy,
         .done_count = ev.status.done_count,
         .bytes_done = ev.status.bytes_done,
+    });
+  }
+};
+
+struct effect_publish_load_tensor_batch_progress {
+  void operator()(const detail::load_tensor_batch_runtime &ev,
+                  context &) const noexcept {
+    ev.request.on_progress(events::load_tensor_batch_progress{
+        .request = ev.request,
+        .strategy = ev.request.policy.strategy,
+        .current_index = ev.status.current_index,
+        .done_count = ev.status.done_count,
+        .bytes_done = ev.status.bytes_done,
+        .bytes_delta = ev.status.bytes_delta,
     });
   }
 };
@@ -140,6 +180,16 @@ struct effect_record_load_tensor_batch_done {
     ev.status.err = emel::error::cast(error::none);
     ev.status.ok = true;
   }
+};
+
+struct effect_record_load_tensor_progress {
+  void operator()(const detail::load_tensor_runtime &,
+                  context &) const noexcept {}
+};
+
+struct effect_record_load_tensor_batch_progress {
+  void operator()(const detail::load_tensor_batch_runtime &,
+                  context &) const noexcept {}
 };
 
 struct effect_record_read_tensor_batch_failed {
@@ -197,6 +247,87 @@ inline void on_staged_read_error(
 }
 
 } // namespace staged_read_callbacks
+
+namespace async_callbacks {
+
+inline void on_async_progress_done(
+    void *object,
+    const emel::io::async::events::load_window_progress_done &ev) noexcept {
+  auto *status = static_cast<detail::runtime_status *>(object);
+  status->err = emel::error::cast(error::none);
+  status->strategy_err = emel::error::cast(emel::io::async::error::none);
+  status->ok = true;
+  status->partial = true;
+  status->done = false;
+  status->bytes_copied = ev.bytes_committed;
+  status->bytes_delta = ev.bytes_delta;
+  status->buffer = ev.target_buffer;
+}
+
+inline void
+on_async_done(void *object,
+              const emel::io::async::events::load_window_done &ev) noexcept {
+  auto *status = static_cast<detail::runtime_status *>(object);
+  status->err = emel::error::cast(error::none);
+  status->strategy_err = emel::error::cast(emel::io::async::error::none);
+  status->ok = true;
+  status->partial = false;
+  status->done = true;
+  status->bytes_copied = ev.bytes_committed;
+  status->buffer = ev.target_buffer;
+}
+
+inline void
+on_async_error(void *object,
+               const emel::io::async::events::load_window_error &ev) noexcept {
+  auto *status = static_cast<detail::runtime_status *>(object);
+  status->err = emel::error::cast(error::unavailable);
+  status->strategy_err = ev.err;
+  status->ok = false;
+  status->partial = false;
+  status->done = false;
+}
+
+inline void on_async_batch_progress_done(
+    void *object,
+    const emel::io::async::events::load_window_progress_done &ev) noexcept {
+  auto *status = static_cast<detail::batch_runtime_status *>(object);
+  status->accepted = true;
+  status->ok = true;
+  status->partial = true;
+  status->done = false;
+  status->err = emel::error::cast(error::none);
+  status->strategy_err = emel::error::cast(emel::io::async::error::none);
+  status->bytes_delta = ev.bytes_delta;
+}
+
+inline void on_async_batch_done(
+    void *object,
+    const emel::io::async::events::load_window_done &ev) noexcept {
+  auto *status = static_cast<detail::batch_runtime_status *>(object);
+  status->accepted = true;
+  status->ok = true;
+  status->partial = false;
+  status->done = true;
+  status->err = emel::error::cast(error::none);
+  status->strategy_err = emel::error::cast(emel::io::async::error::none);
+  status->done_delta = 1u;
+  status->bytes_delta = ev.bytes_committed - status->bytes_before;
+}
+
+inline void on_async_batch_error(
+    void *object,
+    const emel::io::async::events::load_window_error &ev) noexcept {
+  auto *status = static_cast<detail::batch_runtime_status *>(object);
+  status->accepted = false;
+  status->ok = false;
+  status->err = emel::error::cast(error::unavailable);
+  status->strategy_err = ev.err;
+  status->partial = false;
+  status->done = false;
+}
+
+} // namespace async_callbacks
 
 namespace read_batch_callbacks {
 
@@ -271,6 +402,40 @@ struct effect_dispatch_staged_read_tensor {
   }
 };
 
+struct effect_dispatch_async_tensor {
+  void operator()(const detail::load_tensor_runtime &ev,
+                  context &ctx) const noexcept {
+    const auto &tensor = ev.request.tensor;
+    emel::io::async::event::load_window_progress progress{
+        .bytes_committed = ev.request.async_progress->bytes_committed,
+        .cancel_requested = ev.request.async_progress->cancel_requested,
+    };
+    const uint64_t chunk = detail::compute_async_chunk_bytes(
+        ev.request.policy.staged_chunk_bytes, tensor.byte_size);
+    emel::io::async::event::load_window_storage storage{
+        .file_offset = tensor.file_offset,
+        .logical_byte_length = tensor.byte_size,
+        .progress_chunk_bytes = chunk,
+        .source_span = tensor.source_buffer,
+        .source_span_bytes = tensor.source_buffer_bytes,
+        .target_buffer = tensor.target,
+        .target_window_bytes = tensor.target_bytes,
+    };
+    emel::io::async::event::load_window_request inner_request{storage,
+                                                              progress};
+    emel::io::async::event::load_window inner_event{inner_request};
+    inner_event.on_progress = {static_cast<void *>(&ev.ctx),
+                               async_callbacks::on_async_progress_done};
+    inner_event.on_done = {static_cast<void *>(&ev.ctx),
+                           async_callbacks::on_async_done};
+    inner_event.on_error = {static_cast<void *>(&ev.ctx),
+                            async_callbacks::on_async_error};
+    ev.ctx.accepted = ctx.io_async->process_event(inner_event);
+    ev.request.async_progress->bytes_committed = progress.bytes_committed;
+    ev.request.async_progress->cancel_requested = progress.cancel_requested;
+  }
+};
+
 struct effect_dispatch_read_tensor_batch {
   void operator()(const detail::load_tensor_batch_runtime &ev,
                   context &ctx) const noexcept {
@@ -318,6 +483,52 @@ struct effect_dispatch_staged_read_tensor_batch {
   }
 };
 
+struct effect_dispatch_async_tensor_batch {
+  void operator()(const detail::load_tensor_batch_runtime &ev,
+                  context &ctx) const noexcept {
+    auto &batch_progress = *ev.request.async_batch_progress;
+    const uint32_t index = batch_progress.next_index;
+    auto &window_progress = ev.request.async_progress[index];
+    const auto &tensor = ev.request.tensors[index];
+    emel::io::async::event::load_window_progress progress{
+        .bytes_committed = window_progress.bytes_committed,
+        .cancel_requested = window_progress.cancel_requested,
+    };
+    const uint64_t chunk = detail::compute_async_chunk_bytes(
+        ev.request.policy.staged_chunk_bytes, tensor.byte_size);
+    emel::io::async::event::load_window_storage storage{
+        .file_offset = tensor.file_offset,
+        .logical_byte_length = tensor.byte_size,
+        .progress_chunk_bytes = chunk,
+        .source_span = tensor.source_buffer,
+        .source_span_bytes = tensor.source_buffer_bytes,
+        .target_buffer = tensor.target,
+        .target_window_bytes = tensor.target_bytes,
+    };
+    emel::io::async::event::load_window_request inner_request{storage,
+                                                              progress};
+    emel::io::async::event::load_window inner_event{inner_request};
+    inner_event.on_progress = {static_cast<void *>(&ev.status),
+                               async_callbacks::on_async_batch_progress_done};
+    inner_event.on_done = {static_cast<void *>(&ev.status),
+                           async_callbacks::on_async_batch_done};
+    inner_event.on_error = {static_cast<void *>(&ev.status),
+                            async_callbacks::on_async_batch_error};
+    ev.status.current_index = index;
+    ev.status.done_count = batch_progress.done_count;
+    ev.status.bytes_done = batch_progress.bytes_done;
+    ev.status.bytes_before = progress.bytes_committed;
+    ev.status.accepted = ctx.io_async->process_event(inner_event);
+    window_progress.bytes_committed = progress.bytes_committed;
+    window_progress.cancel_requested = progress.cancel_requested;
+    batch_progress.done_count += ev.status.done_delta;
+    batch_progress.bytes_done += ev.status.bytes_delta;
+    batch_progress.next_index += ev.status.done_delta;
+    ev.status.done_count = batch_progress.done_count;
+    ev.status.bytes_done = batch_progress.bytes_done;
+  }
+};
+
 struct effect_on_unexpected {
   template <class event_type>
   void operator()(const event_type &ev, context &) const noexcept {
@@ -352,21 +563,32 @@ inline constexpr effect_record_load_tensor_batch_error
     effect_record_load_tensor_batch_error{};
 inline constexpr effect_publish_load_tensor_done
     effect_publish_load_tensor_done{};
+inline constexpr effect_publish_load_tensor_progress
+    effect_publish_load_tensor_progress{};
 inline constexpr effect_record_load_tensor_done
     effect_record_load_tensor_done{};
 inline constexpr effect_publish_load_tensor_batch_done
     effect_publish_load_tensor_batch_done{};
+inline constexpr effect_publish_load_tensor_batch_progress
+    effect_publish_load_tensor_batch_progress{};
 inline constexpr effect_record_load_tensor_batch_done
     effect_record_load_tensor_batch_done{};
+inline constexpr effect_record_load_tensor_progress
+    effect_record_load_tensor_progress{};
+inline constexpr effect_record_load_tensor_batch_progress
+    effect_record_load_tensor_batch_progress{};
 inline constexpr effect_record_read_tensor_batch_failed
     effect_record_read_tensor_batch_failed{};
 inline constexpr effect_dispatch_read_tensor effect_dispatch_read_tensor{};
 inline constexpr effect_dispatch_staged_read_tensor
     effect_dispatch_staged_read_tensor{};
+inline constexpr effect_dispatch_async_tensor effect_dispatch_async_tensor{};
 inline constexpr effect_dispatch_read_tensor_batch
     effect_dispatch_read_tensor_batch{};
 inline constexpr effect_dispatch_staged_read_tensor_batch
     effect_dispatch_staged_read_tensor_batch{};
+inline constexpr effect_dispatch_async_tensor_batch
+    effect_dispatch_async_tensor_batch{};
 inline constexpr effect_on_unexpected effect_on_unexpected{};
 
 } // namespace emel::io::loader::action
