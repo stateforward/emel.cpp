@@ -29,6 +29,19 @@ struct tensor_matrix {
   int32_t cols = 0;
 };
 
+struct rope_pairing {
+  int32_t x0_stride = 2;
+  int32_t x1_stride = 2;
+  int32_t x1_offset = 1;
+  int32_t x1_half_rot_offset = 0;
+};
+
+inline constexpr rope_pairing normal_rope_pairing() noexcept { return {}; }
+
+inline constexpr rope_pairing neox_rope_pairing() noexcept {
+  return rope_pairing{1, 1, 0, 1};
+}
+
 struct packed_matrix_binding {
   emel::model::data::tensor_record tensor = {};
   std::vector<uint8_t> storage = {};
@@ -42,6 +55,7 @@ struct block_weights {
   int32_t attention_head_dim_kv = 0;
   int32_t attention_rope_dim = 0;
   float attention_rope_freq_base = 10000.0f;
+  rope_pairing attention_rope_pairing = {};
   std::vector<float> attention_norm = {};
   tensor_matrix attention_q = {};
   packed_matrix_binding attention_q_packed = {};
@@ -1322,6 +1336,7 @@ inline bool prepare_packed_q6_matrix_layout(tensor_matrix & matrix,
 inline bool prepare_native_matrix_layout(native_backend & backend,
                                          tensor_matrix & matrix,
                                          packed_matrix_binding & packed) noexcept {
+  (void)packed;
   if (matrix.tensor == nullptr) {
     return false;
   }
@@ -2838,32 +2853,69 @@ inline void round_q_for_nonflash(std::span<const float> q_source,
   }
 }
 
-inline void apply_rope(std::span<float> vector,
-                       const int32_t head_count,
-                       const int32_t head_dim,
-                       const int32_t n_rot,
-                       const int32_t position,
-                       const float rope_freq_base) noexcept {
+inline void apply_rope_pairing(std::span<float> vector,
+                               const rope_pairing pairing,
+                               const int32_t head_count,
+                               const int32_t head_dim,
+                               const int32_t n_rot,
+                               const int32_t position,
+                               const float rope_freq_base) noexcept {
   const int32_t rot_dim = std::min(n_rot, head_dim);
   if (head_count <= 0 || head_dim <= 1 || rot_dim <= 1) {
     return;
   }
 
   const float theta_scale = ::powf(rope_freq_base, -2.0f / static_cast<float>(rot_dim));
+  const int32_t pair_count = rot_dim / 2;
+  const int32_t x1_base =
+      pairing.x1_offset + pairing.x1_half_rot_offset * pair_count;
   for (int32_t head = 0; head < head_count; ++head) {
     float * head_ptr =
         vector.data() + (static_cast<size_t>(head) * static_cast<size_t>(head_dim));
     float theta = static_cast<float>(position);
-    for (int32_t dim = 0; dim + 1 < rot_dim; dim += 2) {
+    for (int32_t pair = 0; pair < pair_count; ++pair) {
       const float cos_theta = ::cosf(theta);
       const float sin_theta = ::sinf(theta);
-      const float x0 = head_ptr[dim];
-      const float x1 = head_ptr[dim + 1];
-      head_ptr[dim] = x0 * cos_theta - x1 * sin_theta;
-      head_ptr[dim + 1] = x0 * sin_theta + x1 * cos_theta;
+      const int32_t dim0 = pair * pairing.x0_stride;
+      const int32_t dim1 = pair * pairing.x1_stride + x1_base;
+      const float x0 = head_ptr[dim0];
+      const float x1 = head_ptr[dim1];
+      head_ptr[dim0] = x0 * cos_theta - x1 * sin_theta;
+      head_ptr[dim1] = x0 * sin_theta + x1 * cos_theta;
       theta *= theta_scale;
     }
   }
+}
+
+inline void apply_rope(std::span<float> vector,
+                       const int32_t head_count,
+                       const int32_t head_dim,
+                       const int32_t n_rot,
+                       const int32_t position,
+                       const float rope_freq_base) noexcept {
+  apply_rope_pairing(vector,
+                     normal_rope_pairing(),
+                     head_count,
+                     head_dim,
+                     n_rot,
+                     position,
+                     rope_freq_base);
+}
+
+inline void apply_attention_rope(std::span<float> vector,
+                                 const block_weights & block,
+                                 const int32_t head_count,
+                                 const int32_t head_dim,
+                                 const int32_t n_rot,
+                                 const int32_t position,
+                                 const float rope_freq_base) noexcept {
+  apply_rope_pairing(vector,
+                     block.attention_rope_pairing,
+                     head_count,
+                     head_dim,
+                     n_rot,
+                     position,
+                     rope_freq_base);
 }
 
 #if defined(__ARM_NEON) && defined(__aarch64__)
@@ -3487,18 +3539,20 @@ inline bool run_layer(native_backend & backend,
       return false;
     }
 
-    apply_rope(q,
-               backend.n_head,
-               effective_attention_head_dim(backend, block),
-               effective_attention_rope_dim(backend, block),
-               position,
-               effective_attention_rope_freq_base(backend, block));
-    apply_rope(k,
-               backend.n_head_kv,
-               effective_attention_head_dim_kv(backend, block),
-               effective_attention_rope_dim(backend, block),
-               position,
-               effective_attention_rope_freq_base(backend, block));
+    apply_attention_rope(q,
+                         block,
+                         backend.n_head,
+                         effective_attention_head_dim(backend, block),
+                         effective_attention_rope_dim(backend, block),
+                         position,
+                         effective_attention_rope_freq_base(backend, block));
+    apply_attention_rope(k,
+                         block,
+                         backend.n_head_kv,
+                         effective_attention_head_dim_kv(backend, block),
+                         effective_attention_rope_dim(backend, block),
+                         position,
+                         effective_attention_rope_freq_base(backend, block));
     if (!store_attention_kv_cache(
             backend,
             block,
@@ -3941,18 +3995,20 @@ inline bool run_layer_chunk4(native_backend & backend,
         return false;
       }
 
-      apply_rope(q_row,
-                 backend.n_head,
-                 effective_attention_head_dim(backend, block),
-                 effective_attention_rope_dim(backend, block),
-                 position,
-                 effective_attention_rope_freq_base(backend, block));
-      apply_rope(k_row,
-                 backend.n_head_kv,
-                 effective_attention_head_dim_kv(backend, block),
-                 effective_attention_rope_dim(backend, block),
-                 position,
-                 effective_attention_rope_freq_base(backend, block));
+      apply_attention_rope(q_row,
+                           block,
+                           backend.n_head,
+                           effective_attention_head_dim(backend, block),
+                           effective_attention_rope_dim(backend, block),
+                           position,
+                           effective_attention_rope_freq_base(backend, block));
+      apply_attention_rope(k_row,
+                           block,
+                           backend.n_head_kv,
+                           effective_attention_head_dim_kv(backend, block),
+                           effective_attention_rope_dim(backend, block),
+                           position,
+                           effective_attention_rope_freq_base(backend, block));
 
       if (!store_attention_kv_cache(backend, block, layer_index, position, k_row, v_row) ||
           !run_attention_for_q_vector<mode>(backend, block, layer_index, position, q_row)) {
@@ -4081,18 +4137,20 @@ inline bool run_layer_chunk8_q8_k(native_backend & backend,
         return false;
       }
 
-      apply_rope(q_row,
-                 backend.n_head,
-                 effective_attention_head_dim(backend, block),
-                 effective_attention_rope_dim(backend, block),
-                 position,
-                 effective_attention_rope_freq_base(backend, block));
-      apply_rope(k_row,
-                 backend.n_head_kv,
-                 effective_attention_head_dim_kv(backend, block),
-                 effective_attention_rope_dim(backend, block),
-                 position,
-                 effective_attention_rope_freq_base(backend, block));
+      apply_attention_rope(q_row,
+                           block,
+                           backend.n_head,
+                           effective_attention_head_dim(backend, block),
+                           effective_attention_rope_dim(backend, block),
+                           position,
+                           effective_attention_rope_freq_base(backend, block));
+      apply_attention_rope(k_row,
+                           block,
+                           backend.n_head_kv,
+                           effective_attention_head_dim_kv(backend, block),
+                           effective_attention_rope_dim(backend, block),
+                           position,
+                           effective_attention_rope_freq_base(backend, block));
 
       if (!store_attention_kv_cache(backend, block, layer_index, position, k_row, v_row) ||
           !run_attention_for_q_vector<mode>(backend, block, layer_index, position, q_row)) {
@@ -4513,6 +4571,12 @@ inline emel::error::type prepare(native_backend & backend,
 
     auto & weights = backend.blocks[static_cast<size_t>(layer)];
     weights.uses_attention = block.uses_attention;
+    weights.attention_rope_pairing = {
+        model_data.params.rope_pair_x0_stride,
+        model_data.params.rope_pair_x1_stride,
+        model_data.params.rope_pair_x1_offset,
+        model_data.params.rope_pair_x1_half_rot_offset,
+    };
     const bool common_ok =
         dequantize_tensor_vector(*block.attention_norm.tensor, weights.attention_norm) &&
         dequantize_tensor_vector(*block.feed_forward_norm.tensor, weights.feed_forward_norm) &&

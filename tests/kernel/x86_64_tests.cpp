@@ -1,23 +1,120 @@
 #include <doctest/doctest.h>
 
 #include <array>
-#include <cstdint>
 #include <cmath>
+#include <cstring>
+#include <cstdint>
 #include <limits>
+#include <span>
+#include <vector>
 
-#include "test_helpers.hpp"
+#include "../allocation_tracker.hpp"
 #include "emel/kernel/x86_64/actions.hpp"
 #include "emel/kernel/x86_64/detail.hpp"
 #include "emel/kernel/x86_64/sm.hpp"
+#include "test_helpers.hpp"
 
 namespace {
 
 using x86_64_sm = emel::kernel::x86_64::sm;
+using allocation_scope = emel::test::allocation::allocation_scope;
 using emel::kernel::test::dtype;
+using emel::kernel::test::flash_attn_ext_fixture;
+using emel::kernel::test::flash_attn_reference_f16_scores;
+using emel::kernel::test::flash_attn_reference_masked_total_tokens;
+using emel::kernel::test::k_flash_online_f16_abs_tolerance;
 using emel::kernel::test::make_dst;
+using emel::kernel::test::make_flash_attn_ext_event;
+using emel::kernel::test::make_quantized_src;
 using emel::kernel::test::make_src;
+using emel::kernel::test::to_fp16_storage;
+using emel::kernel::test::within_flash_online_f16_tolerance;
 
-}  // namespace
+using emel::kernel::detail::quant::QK_K;
+using emel::kernel::detail::quant::block_q2_k;
+using emel::kernel::detail::quant::block_q3_k;
+using emel::kernel::detail::quant::block_q6_k;
+using emel::kernel::detail::quant::block_q8_k;
+
+template <size_t block_count>
+std::array<float, QK_K * block_count> make_quantized_rhs_values(
+    const uint32_t salt) {
+  std::array<float, QK_K * block_count> values = {};
+  for (size_t i = 0; i < values.size(); ++i) {
+    const int32_t centered =
+        static_cast<int32_t>(((i + salt) * (7u + salt)) % 41u) - 20;
+    values[i] = static_cast<float>(centered) * 0.03125f;
+  }
+  return values;
+}
+
+void fill_q2_block(block_q2_k & q2, const uint32_t salt) {
+  q2.d = static_cast<uint16_t>(0x3c00u + (salt % 17u));
+  q2.dmin = static_cast<uint16_t>(0x3800u + (salt % 11u));
+  for (size_t i = 0; i < q2.scales.size(); ++i) {
+    q2.scales[i] = static_cast<uint8_t>((((i + salt) % 13u) << 4u) |
+                                        (((i * 5u) + salt) % 15u));
+  }
+  for (size_t i = 0; i < q2.qs.size(); ++i) {
+    q2.qs[i] =
+        static_cast<uint8_t>((i * (23u + salt)) ^ ((i + salt) >> 1u));
+  }
+}
+
+void fill_q3_block(block_q3_k & q3, const uint32_t salt) {
+  q3.d = static_cast<uint16_t>(0x3c00u + (salt % 19u));
+  for (size_t i = 0; i < q3.scales.size(); ++i) {
+    q3.scales[i] =
+        static_cast<uint8_t>((i * (17u + salt)) ^ (0x5au + salt));
+  }
+  for (size_t i = 0; i < q3.hmask.size(); ++i) {
+    q3.hmask[i] =
+        static_cast<uint8_t>((i * (9u + salt)) ^ (0xa5u - salt));
+  }
+  for (size_t i = 0; i < q3.qs.size(); ++i) {
+    q3.qs[i] =
+        static_cast<uint8_t>((i * (13u + salt)) ^ (0x33u + salt * 7u));
+  }
+}
+
+void fill_q6_block(block_q6_k & q6, const uint32_t salt) {
+  q6.d = static_cast<uint16_t>(0x3c00u + (salt % 23u));
+  for (size_t i = 0; i < q6.scales.size(); ++i) {
+    const int32_t scale_value =
+        static_cast<int32_t>(((i + salt) * 3u) % 31u) - 15;
+    q6.scales[i] = static_cast<int8_t>(scale_value);
+  }
+  for (size_t i = 0; i < q6.ql.size(); ++i) {
+    q6.ql[i] =
+        static_cast<uint8_t>((i * (19u + salt)) ^ (0x6cu + salt));
+  }
+  for (size_t i = 0; i < q6.qh.size(); ++i) {
+    q6.qh[i] =
+        static_cast<uint8_t>((i * (7u + salt)) ^ (0x95u - salt));
+  }
+}
+
+emel::kernel::x86_64::detail::host_feature_contract avx2_fma_contract(
+    const bool enabled) {
+  return emel::kernel::x86_64::detail::host_feature_contract{
+      .avx2_available = enabled,
+      .fma_available = enabled,
+      .f16c_available = enabled,
+  };
+}
+
+bool host_has_avx2_fma() {
+  return emel::kernel::x86_64::detail::avx2_intrinsics_compiled &&
+         emel::kernel::x86_64::detail::detect_avx2() &&
+         emel::kernel::x86_64::detail::detect_fma();
+}
+
+bool host_has_avx2_fma_f16c() {
+  return host_has_avx2_fma() &&
+         emel::kernel::x86_64::detail::detect_f16c();
+}
+
+} // namespace
 
 TEST_CASE("kernel_x86_64_numeric_paths") {
   float lhs[4] = {1.0f, 2.0f, 3.0f, 4.0f};
@@ -56,7 +153,8 @@ TEST_CASE("kernel_x86_64_numeric_paths") {
 
 TEST_CASE("kernel_x86_64_scalar_path_honors_strides") {
   float lhs_storage[8] = {1.0f, 91.0f, 2.0f, 92.0f, 3.0f, 93.0f, 4.0f, 94.0f};
-  float rhs_storage[8] = {10.0f, 81.0f, 20.0f, 82.0f, 30.0f, 83.0f, 40.0f, 84.0f};
+  float rhs_storage[8] = {10.0f, 81.0f, 20.0f, 82.0f,
+                          30.0f, 83.0f, 40.0f, 84.0f};
   float dst_storage[8] = {};
 
   auto lhs = make_src(lhs_storage, dtype::f32, 4);
@@ -129,6 +227,619 @@ TEST_CASE("kernel_x86_64_forced_avx2_context_path") {
   CHECK(out[1] == doctest::Approx(7.0f));
   CHECK(out[2] == doctest::Approx(11.0f));
   CHECK(out[3] == doctest::Approx(15.0f));
+}
+
+TEST_CASE("kernel_x86_64_host_feature_contract_is_published") {
+  const emel::kernel::x86_64::detail::host_feature_contract contract{
+      .avx2_available = true,
+      .fma_available = true,
+      .f16c_available = true,
+  };
+
+  const x86_64_sm machine{
+      emel::kernel::x86_64::action::context{contract, {}, 0}};
+
+  CHECK(machine.avx2_available());
+  CHECK(machine.fma_available());
+  CHECK(machine.f16c_available());
+  CHECK(machine.avx2_fma_f16c_available());
+  CHECK_FALSE(machine.avx512_claimed());
+  CHECK_FALSE(machine.avx_vnni_claimed());
+  CHECK_FALSE(machine.amx_claimed());
+  CHECK_FALSE(machine.bf16_claimed());
+  CHECK_FALSE(machine.native_fp16_claimed());
+}
+
+TEST_CASE("kernel_x86_64_q2_row_avx2_fma_matches_scalar") {
+  if (!host_has_avx2_fma()) {
+    return;
+  }
+
+  constexpr size_t block_count = 4u;
+  std::array<block_q2_k, block_count> q2_blocks = {};
+  for (size_t block = 0; block < block_count; ++block) {
+    fill_q2_block(q2_blocks[block], static_cast<uint32_t>(block + 1u));
+  }
+
+  const auto rhs_values = make_quantized_rhs_values<block_count>(3u);
+  std::array<block_q8_k, block_count> q8_blocks = {};
+  emel::kernel::detail::quant::quantize_row_q8_k_strided(
+      rhs_values.data(), 1u, q8_blocks.data(), static_cast<int64_t>(QK_K * block_count));
+
+  const float scalar = emel::kernel::detail::dot_q2_k_q8_k_row_scalar(
+      q2_blocks.data(), q8_blocks.data(), block_count);
+  const float optimized =
+      emel::kernel::x86_64::detail::dot_q2_k_q8_k_row_avx2_fma(
+          q2_blocks.data(), q8_blocks.data(), block_count);
+
+  CHECK(optimized == doctest::Approx(scalar).epsilon(1e-6f));
+}
+
+TEST_CASE("kernel_x86_64_q3_row_avx2_fma_matches_scalar") {
+  if (!host_has_avx2_fma()) {
+    return;
+  }
+
+  constexpr size_t block_count = 4u;
+  std::array<block_q3_k, block_count> q3_blocks = {};
+  for (size_t block = 0; block < block_count; ++block) {
+    fill_q3_block(q3_blocks[block], static_cast<uint32_t>(block + 5u));
+  }
+
+  const auto rhs_values = make_quantized_rhs_values<block_count>(7u);
+  std::array<block_q8_k, block_count> q8_blocks = {};
+  emel::kernel::detail::quant::quantize_row_q8_k_strided(
+      rhs_values.data(), 1u, q8_blocks.data(), static_cast<int64_t>(QK_K * block_count));
+
+  const float scalar = emel::kernel::detail::dot_q3_k_q8_k_row_scalar(
+      q3_blocks.data(), q8_blocks.data(), block_count);
+  const float optimized =
+      emel::kernel::x86_64::detail::dot_q3_k_q8_k_row_avx2_fma(
+          q3_blocks.data(), q8_blocks.data(), block_count);
+
+  CHECK(optimized == doctest::Approx(scalar).epsilon(1e-6f));
+}
+
+TEST_CASE("kernel_x86_64_q2_mul_mat_uses_optimized_and_shared_routes") {
+  constexpr size_t block_count = 2u;
+  constexpr uint64_t k = QK_K * block_count;
+  constexpr uint64_t rows = 2u;
+  constexpr uint64_t cols = 2u;
+
+  std::array<block_q2_k, rows * block_count> q2_rows = {};
+  for (size_t idx = 0; idx < q2_rows.size(); ++idx) {
+    fill_q2_block(q2_rows[idx], static_cast<uint32_t>(idx + 11u));
+  }
+
+  std::array<float, k * cols> rhs = {};
+  for (size_t i = 0; i < rhs.size(); ++i) {
+    const int32_t centered = static_cast<int32_t>((i * 5u) % 31u) - 15;
+    rhs[i] = static_cast<float>(centered) * 0.0625f;
+  }
+
+  float expected[rows * cols] = {};
+  const emel::kernel::event::op_mul_mat scalar_ev{
+      .src0 = make_quantized_src(q2_rows.data(), dtype::q2_k, k, rows),
+      .src1 = make_src(rhs.data(), dtype::f32, cols, k),
+      .dst = make_dst(expected, dtype::f32, cols, rows),
+      .nth = 1,
+  };
+  CHECK(emel::kernel::detail::execute_scalar(scalar_ev));
+
+  if (host_has_avx2_fma()) {
+    float optimized_out[rows * cols] = {};
+    const emel::kernel::event::op_mul_mat optimized_ev{
+        .src0 = make_quantized_src(q2_rows.data(), dtype::q2_k, k, rows),
+        .src1 = make_src(rhs.data(), dtype::f32, cols, k),
+        .dst = make_dst(optimized_out, dtype::f32, cols, rows),
+        .nth = 1,
+    };
+    x86_64_sm optimized_machine{
+        emel::kernel::x86_64::action::context{avx2_fma_contract(true), {}, 0}};
+
+    CHECK(optimized_machine.process_event(optimized_ev));
+    CHECK(optimized_machine.optimized_q2_dispatch_count() == 1u);
+    CHECK(optimized_machine.shared_q2_dispatch_count() == 0u);
+    for (size_t i = 0; i < std::size(optimized_out); ++i) {
+      CHECK(optimized_out[i] == doctest::Approx(expected[i]).epsilon(1e-6f));
+    }
+  }
+
+  float shared_out[rows * cols] = {};
+  const emel::kernel::event::op_mul_mat shared_ev{
+      .src0 = make_quantized_src(q2_rows.data(), dtype::q2_k, k, rows),
+      .src1 = make_src(rhs.data(), dtype::f32, cols, k),
+      .dst = make_dst(shared_out, dtype::f32, cols, rows),
+      .nth = 1,
+  };
+  x86_64_sm shared_machine{
+      emel::kernel::x86_64::action::context{avx2_fma_contract(false), {}, 0}};
+
+  CHECK(shared_machine.process_event(shared_ev));
+  CHECK(shared_machine.optimized_q2_dispatch_count() == 0u);
+  CHECK(shared_machine.shared_q2_dispatch_count() == 1u);
+  for (size_t i = 0; i < std::size(shared_out); ++i) {
+    CHECK(shared_out[i] == doctest::Approx(expected[i]).epsilon(1e-6f));
+  }
+}
+
+TEST_CASE("kernel_x86_64_q3_mul_mat_uses_optimized_and_shared_routes") {
+  constexpr size_t block_count = 2u;
+  constexpr uint64_t k = QK_K * block_count;
+  constexpr uint64_t rows = 2u;
+  constexpr uint64_t cols = 2u;
+
+  std::array<block_q3_k, rows * block_count> q3_rows = {};
+  for (size_t idx = 0; idx < q3_rows.size(); ++idx) {
+    fill_q3_block(q3_rows[idx], static_cast<uint32_t>(idx + 19u));
+  }
+
+  std::array<float, k * cols> rhs = {};
+  for (size_t i = 0; i < rhs.size(); ++i) {
+    const int32_t centered = static_cast<int32_t>((i * 7u) % 37u) - 18;
+    rhs[i] = static_cast<float>(centered) * 0.0625f;
+  }
+
+  float expected[rows * cols] = {};
+  const emel::kernel::event::op_mul_mat scalar_ev{
+      .src0 = make_quantized_src(q3_rows.data(), dtype::q3_k, k, rows),
+      .src1 = make_src(rhs.data(), dtype::f32, cols, k),
+      .dst = make_dst(expected, dtype::f32, cols, rows),
+      .nth = 1,
+  };
+  CHECK(emel::kernel::detail::execute_scalar(scalar_ev));
+
+  if (host_has_avx2_fma()) {
+    float optimized_out[rows * cols] = {};
+    const emel::kernel::event::op_mul_mat optimized_ev{
+        .src0 = make_quantized_src(q3_rows.data(), dtype::q3_k, k, rows),
+        .src1 = make_src(rhs.data(), dtype::f32, cols, k),
+        .dst = make_dst(optimized_out, dtype::f32, cols, rows),
+        .nth = 1,
+    };
+    x86_64_sm optimized_machine{
+        emel::kernel::x86_64::action::context{avx2_fma_contract(true), {}, 0}};
+
+    CHECK(optimized_machine.process_event(optimized_ev));
+    CHECK(optimized_machine.optimized_q3_dispatch_count() == 1u);
+    CHECK(optimized_machine.shared_q3_dispatch_count() == 0u);
+    for (size_t i = 0; i < std::size(optimized_out); ++i) {
+      CHECK(optimized_out[i] == doctest::Approx(expected[i]).epsilon(1e-6f));
+    }
+  }
+
+  float shared_out[rows * cols] = {};
+  const emel::kernel::event::op_mul_mat shared_ev{
+      .src0 = make_quantized_src(q3_rows.data(), dtype::q3_k, k, rows),
+      .src1 = make_src(rhs.data(), dtype::f32, cols, k),
+      .dst = make_dst(shared_out, dtype::f32, cols, rows),
+      .nth = 1,
+  };
+  x86_64_sm shared_machine{
+      emel::kernel::x86_64::action::context{avx2_fma_contract(false), {}, 0}};
+
+  CHECK(shared_machine.process_event(shared_ev));
+  CHECK(shared_machine.optimized_q3_dispatch_count() == 0u);
+  CHECK(shared_machine.shared_q3_dispatch_count() == 1u);
+  for (size_t i = 0; i < std::size(shared_out); ++i) {
+    CHECK(shared_out[i] == doctest::Approx(expected[i]).epsilon(1e-6f));
+  }
+}
+
+TEST_CASE("kernel_x86_64_q6_row_avx2_fma_matches_scalar") {
+  if (!host_has_avx2_fma()) {
+    return;
+  }
+
+  constexpr size_t block_count = 4u;
+  std::array<block_q6_k, block_count> q6_blocks = {};
+  for (size_t block = 0; block < block_count; ++block) {
+    fill_q6_block(q6_blocks[block], static_cast<uint32_t>(block + 29u));
+  }
+
+  const auto rhs_values = make_quantized_rhs_values<block_count>(11u);
+  std::array<block_q8_k, block_count> q8_blocks = {};
+  emel::kernel::detail::quant::quantize_row_q8_k_strided(
+      rhs_values.data(), 1u, q8_blocks.data(),
+      static_cast<int64_t>(QK_K * block_count));
+
+  const float scalar = emel::kernel::detail::dot_q6_k_q8_k_row_scalar(
+      q6_blocks.data(), q8_blocks.data(), block_count);
+  const float optimized =
+      emel::kernel::x86_64::detail::dot_q6_k_q8_k_row_avx2_fma(
+          q6_blocks.data(), q8_blocks.data(), block_count);
+
+  CHECK(optimized == doctest::Approx(scalar).epsilon(1e-5f));
+}
+
+TEST_CASE("kernel_x86_64_q6_mul_mat_uses_optimized_and_shared_routes") {
+  constexpr size_t block_count = 2u;
+  constexpr uint64_t k = QK_K * block_count;
+  constexpr uint64_t rows = 2u;
+  constexpr uint64_t cols = 2u;
+
+  std::array<block_q6_k, rows * block_count> q6_rows = {};
+  for (size_t idx = 0; idx < q6_rows.size(); ++idx) {
+    fill_q6_block(q6_rows[idx], static_cast<uint32_t>(idx + 37u));
+  }
+
+  std::array<float, k * cols> rhs = {};
+  for (size_t i = 0; i < rhs.size(); ++i) {
+    const int32_t centered = static_cast<int32_t>((i * 11u) % 43u) - 21;
+    rhs[i] = static_cast<float>(centered) * 0.0625f;
+  }
+
+  float expected[rows * cols] = {};
+  const emel::kernel::event::op_mul_mat scalar_ev{
+      .src0 = make_quantized_src(q6_rows.data(), dtype::q6_k, k, rows),
+      .src1 = make_src(rhs.data(), dtype::f32, cols, k),
+      .dst = make_dst(expected, dtype::f32, cols, rows),
+      .nth = 1,
+  };
+  CHECK(emel::kernel::detail::execute_scalar(scalar_ev));
+
+  if (host_has_avx2_fma()) {
+    float optimized_out[rows * cols] = {};
+    const emel::kernel::event::op_mul_mat optimized_ev{
+        .src0 = make_quantized_src(q6_rows.data(), dtype::q6_k, k, rows),
+        .src1 = make_src(rhs.data(), dtype::f32, cols, k),
+        .dst = make_dst(optimized_out, dtype::f32, cols, rows),
+        .nth = 1,
+    };
+    x86_64_sm optimized_machine{
+        emel::kernel::x86_64::action::context{avx2_fma_contract(true), {}, 0}};
+
+    CHECK(optimized_machine.process_event(optimized_ev));
+    CHECK(optimized_machine.optimized_q6_dispatch_count() == 1u);
+    CHECK(optimized_machine.shared_q6_dispatch_count() == 0u);
+    for (size_t i = 0; i < std::size(optimized_out); ++i) {
+      CHECK(optimized_out[i] == doctest::Approx(expected[i]).epsilon(1e-5f));
+    }
+  }
+
+  float shared_out[rows * cols] = {};
+  const emel::kernel::event::op_mul_mat shared_ev{
+      .src0 = make_quantized_src(q6_rows.data(), dtype::q6_k, k, rows),
+      .src1 = make_src(rhs.data(), dtype::f32, cols, k),
+      .dst = make_dst(shared_out, dtype::f32, cols, rows),
+      .nth = 1,
+  };
+  x86_64_sm shared_machine{
+      emel::kernel::x86_64::action::context{avx2_fma_contract(false), {}, 0}};
+
+  CHECK(shared_machine.process_event(shared_ev));
+  CHECK(shared_machine.optimized_q6_dispatch_count() == 0u);
+  CHECK(shared_machine.shared_q6_dispatch_count() == 1u);
+  for (size_t i = 0; i < std::size(shared_out); ++i) {
+    CHECK(shared_out[i] == doctest::Approx(expected[i]).epsilon(1e-5f));
+  }
+}
+
+TEST_CASE("kernel_x86_64_quantized_hot_path_dispatches_without_allocation") {
+  if (!host_has_avx2_fma()) {
+    return;
+  }
+
+  constexpr size_t block_count = 1u;
+  constexpr uint64_t k = QK_K * block_count;
+  std::array<float, k> rhs = {};
+  for (size_t i = 0; i < rhs.size(); ++i) {
+    const int32_t centered = static_cast<int32_t>((i * 13u) % 47u) - 23;
+    rhs[i] = static_cast<float>(centered) * 0.03125f;
+  }
+
+  block_q2_k q2 = {};
+  block_q3_k q3 = {};
+  block_q6_k q6 = {};
+  fill_q2_block(q2, 43u);
+  fill_q3_block(q3, 47u);
+  fill_q6_block(q6, 53u);
+
+  float q2_out[1] = {};
+  float q3_out[1] = {};
+  float q6_out[1] = {};
+  const emel::kernel::event::op_mul_mat q2_ev{
+      .src0 = make_quantized_src(&q2, dtype::q2_k, k, 1u),
+      .src1 = make_src(rhs.data(), dtype::f32, 1u, k),
+      .dst = make_dst(q2_out, dtype::f32, 1u, 1u),
+      .nth = 1,
+  };
+  const emel::kernel::event::op_mul_mat q3_ev{
+      .src0 = make_quantized_src(&q3, dtype::q3_k, k, 1u),
+      .src1 = make_src(rhs.data(), dtype::f32, 1u, k),
+      .dst = make_dst(q3_out, dtype::f32, 1u, 1u),
+      .nth = 1,
+  };
+  const emel::kernel::event::op_mul_mat q6_ev{
+      .src0 = make_quantized_src(&q6, dtype::q6_k, k, 1u),
+      .src1 = make_src(rhs.data(), dtype::f32, 1u, k),
+      .dst = make_dst(q6_out, dtype::f32, 1u, 1u),
+      .nth = 1,
+  };
+
+  x86_64_sm machine{
+      emel::kernel::x86_64::action::context{avx2_fma_contract(true), {}, 0}};
+  allocation_scope allocations{};
+  CHECK(machine.process_event(q2_ev));
+  CHECK(machine.process_event(q3_ev));
+  CHECK(machine.process_event(q6_ev));
+  CHECK(allocations.allocations() == 0u);
+  CHECK(machine.optimized_q2_dispatch_count() == 1u);
+  CHECK(machine.shared_q2_dispatch_count() == 0u);
+  CHECK(machine.optimized_q3_dispatch_count() == 1u);
+  CHECK(machine.shared_q3_dispatch_count() == 0u);
+  CHECK(machine.optimized_q6_dispatch_count() == 1u);
+  CHECK(machine.shared_q6_dispatch_count() == 0u);
+}
+
+TEST_CASE("kernel_x86_64_flash_attn_ext_uses_optimized_backend_path") {
+  const bool host_flash =
+      emel::kernel::x86_64::detail::avx2_intrinsics_compiled &&
+      emel::kernel::x86_64::detail::detect_avx2() &&
+      emel::kernel::x86_64::detail::detect_fma() &&
+      emel::kernel::x86_64::detail::detect_f16c();
+  if (!host_flash ) {
+    return;
+  }
+
+  flash_attn_ext_fixture fixture{};
+  const auto request = make_flash_attn_ext_event(fixture);
+  const emel::kernel::x86_64::detail::host_feature_contract contract{
+      .avx2_available = true,
+      .fma_available = true,
+      .f16c_available = true,
+  };
+  x86_64_sm machine{emel::kernel::x86_64::action::context{contract, {}, 0}};
+
+  CHECK(machine.process_event(request));
+
+  const auto q = std::span<const float>(fixture.q, request.src0.ne[0]);
+  const auto k = std::span<const uint16_t>(fixture.k, request.src0.ne[0] *
+                                                          request.src1.ne[1]);
+  const auto v = std::span<const uint16_t>(fixture.v, request.src0.ne[0] *
+                                                          request.src2.ne[1]);
+  const std::vector<float> expected = flash_attn_reference_f16_scores(
+      q, k, v, request.src0.ne[0], request.src1.ne[1], 1.0f);
+  CHECK(machine.optimized_flash_dispatch_count() == 1u);
+  CHECK(machine.shared_flash_dispatch_count() == 0u);
+  CHECK(within_flash_online_f16_tolerance(fixture.dst[0], expected[0]));
+  CHECK(within_flash_online_f16_tolerance(fixture.dst[1], expected[1]));
+  CHECK(within_flash_online_f16_tolerance(fixture.dst[2], expected[2]));
+  CHECK(within_flash_online_f16_tolerance(fixture.dst[3], expected[3]));
+}
+
+TEST_CASE(
+    "kernel_x86_64_flash_attn_ext_falls_back_when_feature_contract_disabled") {
+  flash_attn_ext_fixture fixture{};
+  const auto request = make_flash_attn_ext_event(fixture);
+  const emel::kernel::x86_64::detail::host_feature_contract contract{
+      .avx2_available = false,
+      .fma_available = false,
+      .f16c_available = false,
+  };
+  x86_64_sm machine{emel::kernel::x86_64::action::context{contract, {}, 0}};
+
+  CHECK(machine.process_event(request));
+
+  const auto q = std::span<const float>(fixture.q, request.src0.ne[0]);
+  const auto k = std::span<const uint16_t>(fixture.k, request.src0.ne[0] *
+                                                          request.src1.ne[1]);
+  const auto v = std::span<const uint16_t>(fixture.v, request.src0.ne[0] *
+                                                          request.src2.ne[1]);
+  const std::vector<float> expected = flash_attn_reference_f16_scores(
+      q, k, v, request.src0.ne[0], request.src1.ne[1], 1.0f);
+  CHECK(machine.optimized_flash_dispatch_count() == 0u);
+  CHECK(machine.shared_flash_dispatch_count() == 1u);
+  CHECK(within_flash_online_f16_tolerance(fixture.dst[0], expected[0]));
+  CHECK(within_flash_online_f16_tolerance(fixture.dst[1], expected[1]));
+  CHECK(within_flash_online_f16_tolerance(fixture.dst[2], expected[2]));
+  CHECK(within_flash_online_f16_tolerance(fixture.dst[3], expected[3]));
+}
+
+TEST_CASE("kernel_x86_64_flash_attn_ext_reuses_persistent_workspace_on_"
+          "optimized_path") {
+  const bool host_flash =
+      emel::kernel::x86_64::detail::avx2_intrinsics_compiled &&
+      emel::kernel::x86_64::detail::detect_avx2() &&
+      emel::kernel::x86_64::detail::detect_fma() &&
+      emel::kernel::x86_64::detail::detect_f16c();
+  if (!host_flash) {
+    return;
+  }
+
+  flash_attn_ext_fixture fixture{};
+  const auto request = make_flash_attn_ext_event(fixture);
+  const emel::kernel::x86_64::detail::host_feature_contract contract{
+      .avx2_available = true,
+      .fma_available = true,
+      .f16c_available = true,
+  };
+  x86_64_sm machine{emel::kernel::x86_64::action::context{contract, {}, 0}};
+
+  CHECK(machine.process_event(request));
+  CHECK(machine.flash_attn_workspace_prepared_tokens() == 2u);
+  CHECK(machine.flash_attn_workspace_reuse_count() == 0u);
+
+  std::fill_n(fixture.dst, request.dst.ne[0], 0.0f);
+  CHECK(machine.process_event(request));
+  CHECK(machine.optimized_flash_dispatch_count() == 2u);
+  CHECK(machine.shared_flash_dispatch_count() == 0u);
+  CHECK(machine.flash_attn_workspace_prepared_tokens() == 2u);
+  CHECK(machine.flash_attn_workspace_reuse_count() == 1u);
+}
+
+TEST_CASE("kernel_x86_64_flash_attn_ext_matches_masked_total_token_reference") {
+  if (!host_has_avx2_fma_f16c()) {
+    return;
+  }
+
+  flash_attn_ext_fixture fixture{};
+  auto request = make_flash_attn_ext_event(fixture);
+  const uint32_t masked_total_tokens = 8u;
+  const float scale = 1.0f;
+  std::memcpy(request.op_params.data(), &scale, sizeof(scale));
+  std::memcpy(request.op_params.data() + sizeof(scale), &masked_total_tokens,
+              sizeof(masked_total_tokens));
+  request.op_params_size = sizeof(scale) + sizeof(masked_total_tokens);
+  const emel::kernel::x86_64::detail::host_feature_contract contract{
+      .avx2_available = true,
+      .fma_available = true,
+      .f16c_available = true,
+  };
+  x86_64_sm machine{emel::kernel::x86_64::action::context{contract, {}, 0}};
+
+  CHECK(machine.process_event(request));
+
+  const auto q = std::span<const float>(fixture.q, request.src0.ne[0]);
+  const auto k = std::span<const uint16_t>(fixture.k, request.src0.ne[0] *
+                                                          request.src1.ne[1]);
+  const auto v = std::span<const uint16_t>(fixture.v, request.src0.ne[0] *
+                                                          request.src2.ne[1]);
+  const std::vector<float> expected = flash_attn_reference_masked_total_tokens(
+      q, k, v, request.src0.ne[0], request.src1.ne[1], masked_total_tokens,
+      scale);
+  CHECK(machine.optimized_flash_dispatch_count() == 1u);
+  CHECK(machine.shared_flash_dispatch_count() == 0u);
+  CHECK(fixture.dst[0] ==
+        doctest::Approx(expected[0]).epsilon(k_flash_online_f16_abs_tolerance));
+  CHECK(fixture.dst[1] ==
+        doctest::Approx(expected[1]).epsilon(k_flash_online_f16_abs_tolerance));
+  CHECK(fixture.dst[2] ==
+        doctest::Approx(expected[2]).epsilon(k_flash_online_f16_abs_tolerance));
+  CHECK(fixture.dst[3] ==
+        doctest::Approx(expected[3]).epsilon(k_flash_online_f16_abs_tolerance));
+}
+
+TEST_CASE(
+    "kernel_x86_64_flash_attn_ext_matches_masked_total_token_reference_on_"
+    "long_multihead_kv") {
+  if (!host_has_avx2_fma_f16c()) {
+    return;
+  }
+
+  constexpr uint64_t head_dim = 64u;
+  constexpr uint64_t head_count = 12u;
+  constexpr uint64_t kv_head_count = 12u;
+  constexpr uint64_t kv_tokens = 769u;
+  constexpr uint32_t total_tokens = 2048u;
+  const uint64_t kv_dim = head_dim * kv_head_count;
+  const float scale = 1.0f / std::sqrt(static_cast<float>(head_dim));
+
+  std::vector<float> q(head_dim * head_count);
+  std::vector<float> k(kv_dim * kv_tokens);
+  std::vector<float> v(kv_dim * kv_tokens);
+  std::vector<float> dst(head_dim * head_count, 0.0f);
+
+  for (uint64_t head = 0; head < head_count; ++head) {
+    for (uint64_t dim = 0; dim < head_dim; ++dim) {
+      const double angle = static_cast<double>((head + 1u) * (dim + 3u));
+      q[head * head_dim + dim] =
+          emel::kernel::detail::quant::fp16_to_fp32(
+              emel::kernel::detail::quant::fp32_to_fp16(
+                  static_cast<float>(std::sin(angle * 0.03125))));
+    }
+  }
+
+  for (uint64_t token = 0; token < kv_tokens; ++token) {
+    for (uint64_t head = 0; head < kv_head_count; ++head) {
+      for (uint64_t dim = 0; dim < head_dim; ++dim) {
+        const uint64_t offset = token * kv_dim + head * head_dim + dim;
+        const double base =
+            static_cast<double>((token + 1u) * (head + 3u) * (dim + 5u));
+        k[offset] = emel::kernel::detail::quant::fp16_to_fp32(
+            emel::kernel::detail::quant::fp32_to_fp16(
+                static_cast<float>(std::cos(base * 0.0078125))));
+        v[offset] = emel::kernel::detail::quant::fp16_to_fp32(
+            emel::kernel::detail::quant::fp32_to_fp16(
+                static_cast<float>(std::sin(base * 0.01171875))));
+      }
+    }
+  }
+  const auto k_fp16 = to_fp16_storage(k);
+  const auto v_fp16 = to_fp16_storage(v);
+
+  emel::kernel::event::op_flash_attn_ext request{};
+  request.src0 = make_src(q.data(), dtype::f32, head_dim, 1u, head_count);
+  request.src1 = make_src(k_fp16.data(), dtype::f16, head_dim, kv_tokens,
+                          kv_head_count);
+  request.src2 = make_src(v_fp16.data(), dtype::f16, head_dim, kv_tokens,
+                          kv_head_count);
+  request.dst = make_dst(dst.data(), dtype::f32, head_dim, 1u, head_count);
+  request.src1.nb[1] = sizeof(uint16_t) * kv_dim;
+  request.src1.nb[2] = sizeof(uint16_t) * head_dim;
+  request.src2.nb[1] = sizeof(uint16_t) * kv_dim;
+  request.src2.nb[2] = sizeof(uint16_t) * head_dim;
+  request.nth = 1;
+  std::memcpy(request.op_params.data(), &scale, sizeof(scale));
+  std::memcpy(request.op_params.data() + sizeof(scale), &total_tokens,
+              sizeof(total_tokens));
+  request.op_params_size = sizeof(scale) + sizeof(total_tokens);
+
+  x86_64_sm machine{
+      emel::kernel::x86_64::action::context{avx2_fma_contract(true), {}, 0}};
+  REQUIRE(machine.process_event(request));
+  CHECK(machine.optimized_flash_dispatch_count() == 1u);
+  CHECK(machine.shared_flash_dispatch_count() == 0u);
+
+  std::vector<float> expected(head_dim * head_count, 0.0f);
+  for (uint64_t head = 0; head < head_count; ++head) {
+    std::vector<float> k_head(kv_tokens * head_dim);
+    std::vector<float> v_head(kv_tokens * head_dim);
+    for (uint64_t token = 0; token < kv_tokens; ++token) {
+      const uint64_t src_offset = token * kv_dim + head * head_dim;
+      const uint64_t dst_offset = token * head_dim;
+      std::memcpy(k_head.data() + dst_offset, k.data() + src_offset,
+                  sizeof(float) * head_dim);
+      std::memcpy(v_head.data() + dst_offset, v.data() + src_offset,
+                  sizeof(float) * head_dim);
+    }
+    const auto expected_head = flash_attn_reference_masked_total_tokens(
+        std::span<const float>(q.data() + head * head_dim, head_dim),
+        std::span<const float>(k_head.data(), k_head.size()),
+        std::span<const float>(v_head.data(), v_head.size()), head_dim,
+        kv_tokens, total_tokens, scale);
+    for (uint64_t dim = 0; dim < head_dim; ++dim) {
+      expected[head * head_dim + dim] =
+          expected_head[static_cast<size_t>(dim)];
+    }
+  }
+
+  for (size_t idx = 0; idx < dst.size(); ++idx) {
+    CHECK(within_flash_online_f16_tolerance(dst[idx], expected[idx]));
+  }
+}
+
+TEST_CASE("kernel_x86_64_host_feature_contract_can_fail_closed") {
+  const emel::kernel::x86_64::detail::host_feature_contract contract{};
+  const x86_64_sm machine{
+      emel::kernel::x86_64::action::context{contract, {}, 0}};
+
+  CHECK_FALSE(machine.avx2_available());
+  CHECK_FALSE(machine.fma_available());
+  CHECK_FALSE(machine.f16c_available());
+  CHECK_FALSE(machine.avx2_fma_f16c_available());
+  CHECK_FALSE(machine.avx512_claimed());
+  CHECK_FALSE(machine.avx_vnni_claimed());
+  CHECK_FALSE(machine.amx_claimed());
+  CHECK_FALSE(machine.bf16_claimed());
+  CHECK_FALSE(machine.native_fp16_claimed());
+}
+
+TEST_CASE("kernel_x86_64_detects_host_feature_contract") {
+  const auto contract =
+      emel::kernel::x86_64::detail::detect_host_feature_contract();
+
+  CHECK(contract.avx2_available == emel::kernel::x86_64::detail::detect_avx2());
+  CHECK(contract.fma_available == emel::kernel::x86_64::detail::detect_fma());
+  CHECK(contract.f16c_available == emel::kernel::x86_64::detail::detect_f16c());
+  CHECK(contract.avx2_fma_f16c_available() ==
+        (contract.avx2_available && contract.fma_available &&
+         contract.f16c_available));
+  CHECK_FALSE(contract.avx512_claimed);
+  CHECK_FALSE(contract.avx_vnni_claimed);
+  CHECK_FALSE(contract.amx_claimed);
+  CHECK_FALSE(contract.bf16_claimed);
+  CHECK_FALSE(contract.native_fp16_claimed);
 }
 
 TEST_CASE("kernel_x86_64_unary_subop_supported_and_unsupported_paths") {
@@ -215,8 +926,9 @@ TEST_CASE("kernel_x86_64_rejects_unimplemented_ops") {
 }
 
 TEST_CASE("kernel_x86_64_mul_mat_simd_matches_scalar_tiled_edges") {
-  const bool host_avx2 = emel::kernel::x86_64::detail::avx2_intrinsics_compiled &&
-                         emel::kernel::x86_64::detail::detect_avx2();
+  const bool host_avx2 =
+      emel::kernel::x86_64::detail::avx2_intrinsics_compiled &&
+      emel::kernel::x86_64::detail::detect_avx2();
   if (!host_avx2) {
     return;
   }
@@ -262,8 +974,9 @@ TEST_CASE("kernel_x86_64_mul_mat_simd_matches_scalar_tiled_edges") {
 }
 
 TEST_CASE("kernel_x86_64_mul_mat_tail_resets_nan_dst_on_first_depth_block") {
-  const bool host_avx2 = emel::kernel::x86_64::detail::avx2_intrinsics_compiled &&
-                         emel::kernel::x86_64::detail::detect_avx2();
+  const bool host_avx2 =
+      emel::kernel::x86_64::detail::avx2_intrinsics_compiled &&
+      emel::kernel::x86_64::detail::detect_avx2();
   if (!host_avx2) {
     return;
   }
@@ -286,7 +999,8 @@ TEST_CASE("kernel_x86_64_mul_mat_tail_resets_nan_dst_on_first_depth_block") {
     src1[static_cast<size_t>(i)] = static_cast<float>(centered) * 0.0625f;
   }
 
-  std::fill(dst_simd.begin(), dst_simd.end(), std::numeric_limits<float>::quiet_NaN());
+  std::fill(dst_simd.begin(), dst_simd.end(),
+            std::numeric_limits<float>::quiet_NaN());
   dst_scalar.fill(0.0f);
 
   const emel::kernel::event::op_mul_mat simd_ev{
@@ -313,8 +1027,9 @@ TEST_CASE("kernel_x86_64_mul_mat_tail_resets_nan_dst_on_first_depth_block") {
 }
 
 TEST_CASE("kernel_x86_64_detail_branch_paths") {
-  const bool host_avx2 = emel::kernel::x86_64::detail::avx2_intrinsics_compiled &&
-                         emel::kernel::x86_64::detail::detect_avx2();
+  const bool host_avx2 =
+      emel::kernel::x86_64::detail::avx2_intrinsics_compiled &&
+      emel::kernel::x86_64::detail::detect_avx2();
 
   float lhs[4] = {1.0f, 2.0f, 3.0f, 4.0f};
   float rhs[4] = {4.0f, 3.0f, 2.0f, 1.0f};
@@ -328,7 +1043,8 @@ TEST_CASE("kernel_x86_64_detail_branch_paths") {
   };
 
   CHECK_FALSE(emel::kernel::x86_64::detail::can_use_avx2(add_ev, false));
-  CHECK(emel::kernel::x86_64::detail::can_use_avx2(add_ev, host_avx2) == host_avx2);
+  CHECK(emel::kernel::x86_64::detail::can_use_avx2(add_ev, host_avx2) ==
+        host_avx2);
   CHECK(emel::kernel::x86_64::detail::execute_request(
       add_ev, emel::kernel::x86_64::action::context{host_avx2, {}, 0}));
 
@@ -354,14 +1070,16 @@ TEST_CASE("kernel_x86_64_detail_branch_paths") {
       .nth = 1,
       .subop = emel::kernel::event::unary_subop::relu,
   };
-  CHECK(emel::kernel::x86_64::detail::can_use_avx2(unary_ev, host_avx2) == host_avx2);
+  CHECK(emel::kernel::x86_64::detail::can_use_avx2(unary_ev, host_avx2) ==
+        host_avx2);
   unary_ev.subop = emel::kernel::event::unary_subop::exp;
   CHECK_FALSE(emel::kernel::x86_64::detail::can_use_avx2(unary_ev, host_avx2));
 }
 
 TEST_CASE("kernel_x86_64_detail_helper_edge_paths") {
-  const bool host_avx2 = emel::kernel::x86_64::detail::avx2_intrinsics_compiled &&
-                         emel::kernel::x86_64::detail::detect_avx2();
+  const bool host_avx2 =
+      emel::kernel::x86_64::detail::avx2_intrinsics_compiled &&
+      emel::kernel::x86_64::detail::detect_avx2();
 
   float src0[4] = {1.0f, 2.0f, 3.0f, 4.0f};
   float dst0[4] = {};
@@ -418,10 +1136,9 @@ TEST_CASE("kernel_x86_64_detail_helper_edge_paths") {
   };
   float src_mm0[8] = {1.0f, 0.5f, -1.0f, 2.0f, 0.0f, -0.5f, 3.0f, 1.0f};
   float src_mm1[32] = {
-      1.0f,  0.0f,  0.5f, -1.0f, 0.5f, 1.0f, -0.5f, 2.0f,
-      0.0f,  1.0f,  1.0f,  0.0f, 2.0f, 0.5f,  0.0f, 1.0f,
-      -1.0f, 2.0f,  0.0f,  1.0f, 1.5f, 0.0f,  2.0f, -0.5f,
-      2.0f,  -1.0f, 1.0f,  0.5f, 0.0f, 1.0f, -1.0f, 1.0f,
+      1.0f, 0.0f,  0.5f, -1.0f, 0.5f, 1.0f,  -0.5f, 2.0f, 0.0f,  1.0f, 1.0f,
+      0.0f, 2.0f,  0.5f, 0.0f,  1.0f, -1.0f, 2.0f,  0.0f, 1.0f,  1.5f, 0.0f,
+      2.0f, -0.5f, 2.0f, -1.0f, 1.0f, 0.5f,  0.0f,  1.0f, -1.0f, 1.0f,
   };
   float dst_mm[16] = {};
   const emel::kernel::event::op_mul_mat mul_mat_ev{
@@ -446,7 +1163,8 @@ TEST_CASE("kernel_x86_64_detail_helper_edge_paths") {
     CHECK(emel::kernel::x86_64::detail::execute_avx2_sqr(sqr_ev));
     CHECK(emel::kernel::x86_64::detail::execute_avx2_sqrt(sqrt_ev));
     CHECK(emel::kernel::x86_64::detail::execute_avx2_mul_mat(mul_mat_ev));
-    CHECK(emel::kernel::x86_64::detail::execute_avx2_unary(unary_ev));
+    emel::kernel::x86_64::detail::execute_simd_unary_subop_unchecked<
+        emel::kernel::event::unary_subop::relu>(unary_ev);
     CHECK(emel::kernel::x86_64::detail::execute_simd(dup_ev));
     CHECK(emel::kernel::x86_64::detail::execute_simd(add_ev));
     CHECK(emel::kernel::x86_64::detail::execute_simd(sub_ev));
@@ -455,7 +1173,7 @@ TEST_CASE("kernel_x86_64_detail_helper_edge_paths") {
     CHECK(emel::kernel::x86_64::detail::execute_simd(sqr_ev));
     CHECK(emel::kernel::x86_64::detail::execute_simd(sqrt_ev));
     CHECK(emel::kernel::x86_64::detail::execute_simd(mul_mat_ev));
-    CHECK(emel::kernel::x86_64::detail::execute_simd(unary_ev));
+    CHECK_FALSE(emel::kernel::x86_64::detail::execute_simd(unary_ev));
   }
 #if !(defined(__x86_64__) || defined(_M_X64))
   CHECK_FALSE(emel::kernel::x86_64::detail::execute_avx2_dup(dup_ev));
@@ -466,7 +1184,6 @@ TEST_CASE("kernel_x86_64_detail_helper_edge_paths") {
   CHECK_FALSE(emel::kernel::x86_64::detail::execute_avx2_sqr(sqr_ev));
   CHECK_FALSE(emel::kernel::x86_64::detail::execute_avx2_sqrt(sqrt_ev));
   CHECK_FALSE(emel::kernel::x86_64::detail::execute_avx2_mul_mat(mul_mat_ev));
-  CHECK_FALSE(emel::kernel::x86_64::detail::execute_avx2_unary(unary_ev));
   emel::kernel::x86_64::detail::execute_simd_unchecked(dup_ev);
   emel::kernel::x86_64::detail::execute_simd_unchecked(add_ev);
   emel::kernel::x86_64::detail::execute_simd_unchecked(sub_ev);
@@ -475,7 +1192,8 @@ TEST_CASE("kernel_x86_64_detail_helper_edge_paths") {
   emel::kernel::x86_64::detail::execute_simd_unchecked(sqr_ev);
   emel::kernel::x86_64::detail::execute_simd_unchecked(sqrt_ev);
   emel::kernel::x86_64::detail::execute_simd_unchecked(mul_mat_ev);
-  emel::kernel::x86_64::detail::execute_simd_unchecked(unary_ev);
+  emel::kernel::x86_64::detail::execute_simd_unary_subop_unchecked<
+      emel::kernel::event::unary_subop::relu>(unary_ev);
   CHECK_FALSE(emel::kernel::x86_64::detail::execute_simd(dup_ev));
   CHECK_FALSE(emel::kernel::x86_64::detail::execute_simd(add_ev));
   CHECK_FALSE(emel::kernel::x86_64::detail::execute_simd(sub_ev));
@@ -505,11 +1223,13 @@ TEST_CASE("kernel_x86_64_simd_action_exec_marks_done") {
 
   emel::kernel::x86_64::event::dispatch_ctx dispatch_ctx{};
   emel::kernel::x86_64::action::context ctx{false, {}, 0};
-  const emel::kernel::x86_64::event::dispatch_op_add dispatch_ev{add_ev, dispatch_ctx};
+  const emel::kernel::x86_64::event::dispatch_op_add dispatch_ev{add_ev,
+                                                                 dispatch_ctx};
 
   emel::kernel::x86_64::action::exec_simd_op_add(dispatch_ev, ctx);
 
-  CHECK(dispatch_ctx.outcome == emel::kernel::x86_64::events::phase_outcome::done);
-  CHECK(dispatch_ctx.err ==
-        static_cast<int32_t>(emel::error::cast(emel::kernel::x86_64::error::none)));
+  CHECK(dispatch_ctx.outcome ==
+        emel::kernel::x86_64::events::phase_outcome::done);
+  CHECK(dispatch_ctx.err == static_cast<int32_t>(emel::error::cast(
+                                emel::kernel::x86_64::error::none)));
 }

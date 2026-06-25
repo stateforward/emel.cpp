@@ -11,6 +11,7 @@
 #include "emel/diarization/sortformer/modules/detail.hpp"
 #include "emel/diarization/sortformer/output/detail.hpp"
 #include "emel/model/data.hpp"
+#include "../../../kernel/test_helpers.hpp"
 
 namespace {
 
@@ -58,7 +59,7 @@ struct modules_fixture {
                          0.0f);
 
   modules_fixture() {
-    std::memset(&model, 0, sizeof(model));
+    emel::tests::reset_model_data(model);
     for (int32_t index = 0; index < modules_detail::k_hidden_dim; ++index) {
       frame_hidden[(static_cast<size_t>(index) * static_cast<size_t>(modules_detail::k_hidden_dim)) +
                    static_cast<size_t>(index)] = 1.0f;

@@ -52,7 +52,7 @@ bool run_dense_matmul(std::span<const float> input,
               1u,
           },
           .nb = {
-              1u,
+              sizeof(float),
               row_bytes,
               row_bytes * static_cast<uint64_t>(output.size()),
               row_bytes * static_cast<uint64_t>(output.size()),
@@ -125,7 +125,7 @@ bool run_dense_batch_matmul_from_transposed(std::span<const float> transposed_in
               1u,
           },
           .nb = {
-              1u,
+              sizeof(float),
               input_row_bytes,
               input_row_bytes * static_cast<uint64_t>(output_dim),
               input_row_bytes * static_cast<uint64_t>(output_dim),
@@ -201,7 +201,7 @@ bool run_dense_batch_matmul_from_transposed_prepared(
               1u,
           },
           .nb = {
-              1u,
+              sizeof(float),
               input_row_bytes,
               input_row_bytes * static_cast<uint64_t>(output_dim),
               input_row_bytes * static_cast<uint64_t>(output_dim),
@@ -250,6 +250,7 @@ bool run_dense_batch_matmul_from_transposed_prepared(
     return false;
   }
 #else
+  (void)cache;
   if (!emel::kernel::detail::run_mul_mat(request)) {
     return false;
   }

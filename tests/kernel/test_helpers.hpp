@@ -4,12 +4,14 @@
 #include <cmath>
 #include <cstdint>
 #include <cstring>
+#include <memory>
 #include <span>
 #include <type_traits>
 #include <vector>
 
 #include "emel/kernel/detail.hpp"
 #include "emel/kernel/events.hpp"
+#include "emel/model/data.hpp"
 
 namespace emel::kernel::test {
 
@@ -678,3 +680,12 @@ inline event_type make_smoke_op_event() {
 }
 
 }  // namespace emel::kernel::test
+
+namespace emel::tests {
+
+inline void reset_model_data(emel::model::data & model) {
+  std::destroy_at(&model);
+  std::construct_at(&model);
+}
+
+}  // namespace emel::tests

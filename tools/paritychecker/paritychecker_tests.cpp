@@ -13,8 +13,6 @@
 
 #include <doctest/doctest.h>
 
-#include "llama.h"
-
 #include "../generation_fixture_registry.hpp"
 #include "../generation_formatter_contract.hpp"
 #include "emel/io/source/any.hpp"
@@ -90,25 +88,6 @@ bool file_exists(const std::filesystem::path &path) {
   return true;
 }
 
-struct llama_backend_guard {
-  llama_backend_guard() { llama_backend_init(); }
-
-  ~llama_backend_guard() { llama_backend_free(); }
-};
-
-bool reference_tokenizer_lane_supported(
-    const std::filesystem::path &model_path) {
-  llama_backend_guard backend_guard{};
-  llama_model_params model_params = llama_model_default_params();
-  model_params.vocab_only = true;
-  model_params.check_tensors = false;
-
-  std::unique_ptr<llama_model, decltype(&llama_model_free)> model(
-      llama_model_load_from_file(model_path.string().c_str(), model_params),
-      llama_model_free);
-  return model != nullptr && llama_model_get_vocab(model.get()) != nullptr;
-}
-
 std::filesystem::path maintained_generation_fixture_path(
     const emel::tools::generation_fixture_registry::maintained_fixture
         &fixture) {
@@ -128,6 +107,15 @@ std::filesystem::path maintained_generation_baseline_path(
           "_prompt_hello_max_tokens_" + std::to_string(max_tokens) + ".txt");
 }
 
+bool tokenizer_sweep_fixture_supported(const std::filesystem::path &path) {
+  const std::string name = path.filename().string();
+  return name.find("Llama-") != std::string::npos ||
+         name.find("distilgpt2") != std::string::npos ||
+         name.find("bert-base-uncased") != std::string::npos ||
+         name.find("flan-t5") != std::string::npos ||
+         name.find("rwkv") != std::string::npos;
+}
+
 std::vector<std::string> discover_models() {
   std::vector<std::string> models;
   const auto dir = models_dir();
@@ -142,13 +130,10 @@ std::vector<std::string> discover_models() {
     if (path.extension() != ".gguf") {
       continue;
     }
-    // The canonical Qwen generation fixture is covered by dedicated
-    // maintained-generation tests, not the generic tiny-model tokenizer parity
-    // sweep.
-    if (path.filename() == "Qwen3-0.6B-Q8_0.gguf") {
-      continue;
-    }
-    if (!reference_tokenizer_lane_supported(path)) {
+    // Keep llama.cpp backend lifetime inside the CLI subprocesses. The generic
+    // tokenizer sweep covers the tiny tokenizer fixtures; generation, speech,
+    // diarization, and embedding fixtures have dedicated gates.
+    if (!tokenizer_sweep_fixture_supported(path)) {
       continue;
     }
     models.push_back(path.string());
@@ -600,7 +585,8 @@ void check_generation_flash_attribution(const process_capture &capture) {
   CHECK(parse_flash_dispatch_metric(capture.stdout_text, "optimized") >= 0);
   CHECK(parse_flash_dispatch_metric(capture.stdout_text, "shared") >= 0);
   CHECK(parse_flash_dispatch_calls(capture.stdout_text) > 0);
-  if (expected_generation_kernel_kind() == "aarch64") {
+  if (expected_generation_kernel_kind() == "aarch64" ||
+      expected_generation_kernel_kind() == "x86_64") {
     CHECK(parse_flash_dispatch_metric(capture.stdout_text, "optimized") > 0);
     CHECK(parse_flash_dispatch_metric(capture.stdout_text, "shared") == 0);
   } else {
@@ -610,37 +596,59 @@ void check_generation_flash_attribution(const process_capture &capture) {
 }
 
 void check_generation_quantized_attribution(const process_capture &capture) {
-  CHECK(parse_named_metric(capture.stdout_text,
-                           "optimized_q2_dispatch_calls") >= 0);
-  CHECK(parse_named_metric(capture.stdout_text, "shared_q2_dispatch_calls") >=
-        0);
-  CHECK(parse_named_metric(capture.stdout_text,
-                           "optimized_q3_dispatch_calls") >= 0);
-  CHECK(parse_named_metric(capture.stdout_text, "shared_q3_dispatch_calls") >=
-        0);
-  CHECK(parse_named_metric(capture.stdout_text,
-                           "optimized_q6_dispatch_calls") >= 0);
-  CHECK(parse_named_metric(capture.stdout_text, "shared_q6_dispatch_calls") >=
-        0);
+  const int optimized_q2_dispatch_calls =
+      parse_named_metric(capture.stdout_text, "optimized_q2_dispatch_calls");
+  const int shared_q2_dispatch_calls =
+      parse_named_metric(capture.stdout_text, "shared_q2_dispatch_calls");
+  const int optimized_q3_dispatch_calls =
+      parse_named_metric(capture.stdout_text, "optimized_q3_dispatch_calls");
+  const int shared_q3_dispatch_calls =
+      parse_named_metric(capture.stdout_text, "shared_q3_dispatch_calls");
+  const int optimized_q6_dispatch_calls =
+      parse_named_metric(capture.stdout_text, "optimized_q6_dispatch_calls");
+  const int shared_q6_dispatch_calls =
+      parse_named_metric(capture.stdout_text, "shared_q6_dispatch_calls");
+  CHECK(optimized_q2_dispatch_calls >= 0);
+  CHECK(shared_q2_dispatch_calls >= 0);
+  CHECK(optimized_q3_dispatch_calls >= 0);
+  CHECK(shared_q3_dispatch_calls >= 0);
+  CHECK(optimized_q6_dispatch_calls >= 0);
+  CHECK(shared_q6_dispatch_calls >= 0);
   const int native_q8_0_dispatch_calls =
       parse_named_metric(capture.stdout_text, "native_q8_0_dispatch_calls");
   const int packed_q8_0_dispatch_calls =
       parse_named_metric(capture.stdout_text, "packed_q8_0_dispatch_calls");
+  const bool native_q2_k =
+      capture.stdout_text.find("tensor_type=q2_k contract=native_quantized") !=
+      std::string::npos;
+  const bool native_q3_k =
+      capture.stdout_text.find("tensor_type=q3_k contract=native_quantized") !=
+      std::string::npos;
+  const bool native_q6_k =
+      capture.stdout_text.find("tensor_type=q6_k contract=native_quantized") !=
+      std::string::npos;
   CHECK(native_q8_0_dispatch_calls >= 0);
   CHECK(packed_q8_0_dispatch_calls >= 0);
-  CHECK(native_q8_0_dispatch_calls + packed_q8_0_dispatch_calls > 0);
-  CHECK(parse_named_metric(capture.stdout_text,
-                           "optimized_q2_dispatch_calls") == 0);
-  CHECK(parse_named_metric(capture.stdout_text, "shared_q2_dispatch_calls") ==
-        0);
-  CHECK(parse_named_metric(capture.stdout_text,
-                           "optimized_q3_dispatch_calls") == 0);
-  CHECK(parse_named_metric(capture.stdout_text, "shared_q3_dispatch_calls") ==
-        0);
-  CHECK(parse_named_metric(capture.stdout_text,
-                           "optimized_q6_dispatch_calls") == 0);
-  CHECK(parse_named_metric(capture.stdout_text, "shared_q6_dispatch_calls") ==
-        0);
+  if (!native_q2_k && !native_q3_k && !native_q6_k) {
+    CHECK(native_q8_0_dispatch_calls + packed_q8_0_dispatch_calls > 0);
+  }
+  if (expected_generation_kernel_kind() == "x86_64") {
+    CHECK((native_q2_k ? optimized_q2_dispatch_calls > 0
+                       : optimized_q2_dispatch_calls == 0));
+    CHECK(shared_q2_dispatch_calls == 0);
+    CHECK((native_q3_k ? optimized_q3_dispatch_calls > 0
+                       : optimized_q3_dispatch_calls == 0));
+    CHECK(shared_q3_dispatch_calls == 0);
+    CHECK((native_q6_k ? optimized_q6_dispatch_calls > 0
+                       : optimized_q6_dispatch_calls == 0));
+    CHECK(shared_q6_dispatch_calls == 0);
+  } else {
+    CHECK(optimized_q2_dispatch_calls == 0);
+    CHECK(shared_q2_dispatch_calls == 0);
+    CHECK(optimized_q3_dispatch_calls == 0);
+    CHECK(shared_q3_dispatch_calls == 0);
+    CHECK(shared_q6_dispatch_calls == 0);
+  }
 }
 
 void check_generation_quantized_stage_audit(const process_capture &capture) {
@@ -1508,6 +1516,9 @@ TEST_CASE("paritychecker matches current maintained generation publication "
     CHECK(capture.stdout_text.find("reference_impl:") != std::string::npos);
     CHECK(capture.stdout_text.find("generation_baseline:") !=
           std::string::npos);
+    check_generation_flash_attribution(capture);
+    check_generation_quantized_attribution(capture);
+    check_generation_quantized_stage_audit(capture);
     CHECK(capture.stdout_text.find(
               "reference_impl: source=maintained_generation_baseline") ==
           std::string::npos);

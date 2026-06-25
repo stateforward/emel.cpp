@@ -54,6 +54,19 @@ TEST_CASE("quality gates exclude nested sml machine headers from coverage source
   CHECK(helper.find("src/emel/**/*/sm.hpp") != std::string::npos);
 }
 
+TEST_CASE("coverage script enforces thresholds on changed executable lines") {
+  const std::string script = read_file(repo_root() / "scripts" / "test_with_coverage.sh");
+
+  CHECK(script.find("COVERAGE_CHANGED_LINE_ONLY") != std::string::npos);
+  CHECK(script.find("required_tools+=(python3)") != std::string::npos);
+  CHECK(script.find("collect_changed_lines()") != std::string::npos);
+  CHECK(script.find("enforce_changed_line_coverage()") != std::string::npos);
+  CHECK(script.find("--json \"$coverage_json\"") != std::string::npos);
+  CHECK(script.find("changed-line coverage:") != std::string::npos);
+  CHECK(script.find("--fail-under-line \"$LINE_COVERAGE_MIN\"") != std::string::npos);
+  CHECK(script.find("--fail-under-branch \"$BRANCH_COVERAGE_MIN\"") != std::string::npos);
+}
+
 TEST_CASE("quality gates consume benchmark dependency manifest conservatively") {
   const std::string script = read_file(repo_root() / "scripts" / "quality_gates.sh");
 

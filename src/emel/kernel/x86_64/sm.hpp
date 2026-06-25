@@ -2,11 +2,11 @@
 
 // benchmark: kernel
 #include "emel/emel.h"
+#include "emel/kernel/detail.hpp"
 #include "emel/kernel/x86_64/actions.hpp"
 #include "emel/kernel/x86_64/errors.hpp"
 #include "emel/kernel/x86_64/events.hpp"
 #include "emel/kernel/x86_64/guards.hpp"
-#include "emel/kernel/detail.hpp"
 #include "emel/sm.hpp"
 
 namespace emel::kernel::x86_64 {
@@ -341,6 +341,21 @@ struct model {
                sml::event<::emel::kernel::x86_64::event::dispatch_op_l2_norm>
                  [ guard::invalid_op_l2_norm{} ]
                  / action::reject_invalid_op_l2_norm
+
+      , sml::state<ready> <= sml::state<ready> +
+               sml::event<::emel::kernel::x86_64::event::dispatch_op_mul_mat>
+                 [ guard::guard_simd_op_mul_mat_q2_k_q8_k{} ]
+                 / action::effect_exec_simd_op_mul_mat_q2_k_q8_k
+
+      , sml::state<ready> <= sml::state<ready> +
+               sml::event<::emel::kernel::x86_64::event::dispatch_op_mul_mat>
+                 [ guard::guard_simd_op_mul_mat_q3_k_q8_k{} ]
+                 / action::effect_exec_simd_op_mul_mat_q3_k_q8_k
+
+      , sml::state<ready> <= sml::state<ready> +
+               sml::event<::emel::kernel::x86_64::event::dispatch_op_mul_mat>
+                 [ guard::guard_simd_op_mul_mat_q6_k_q8_k{} ]
+                 / action::effect_exec_simd_op_mul_mat_q6_k_q8_k
 
       , sml::state<ready> <= sml::state<ready> +
                sml::event<::emel::kernel::x86_64::event::dispatch_op_mul_mat>
@@ -799,7 +814,12 @@ struct model {
 
       , sml::state<ready> <= sml::state<ready> +
                sml::event<::emel::kernel::x86_64::event::dispatch_op_flash_attn_ext>
-                 [ guard::valid_op_flash_attn_ext{} ]
+                 [ guard::simd_op_flash_attn_ext_f16kv_one_chunk{} ]
+                 / action::exec_simd_op_flash_attn_ext_f16kv_one_chunk
+
+      , sml::state<ready> <= sml::state<ready> +
+               sml::event<::emel::kernel::x86_64::event::dispatch_op_flash_attn_ext>
+                 [ guard::valid_op_flash_attn_ext_shared{} ]
                  / action::exec_op_flash_attn_ext
 
       , sml::state<ready> <= sml::state<ready> +
@@ -1060,7 +1080,7 @@ struct sm : public emel::sm<model, action::context> {
   using base_type = emel::sm<model, action::context>;
   using base_type::base_type;
 
-  bool process_event(const ::emel::kernel::event::dispatch & ev) {
+  bool process_event(const ::emel::kernel::event::dispatch &ev) {
     event::dispatch_ctx ctx{};
     const event::dispatch_request dispatch{ev, ctx};
     return process_dispatch_event(dispatch);
@@ -1068,19 +1088,84 @@ struct sm : public emel::sm<model, action::context> {
 
   template <class event_type>
     requires(::emel::kernel::is_op_event_v<event_type>)
-  bool process_event(const event_type & ev) {
+  bool process_event(const event_type &ev) {
     event::dispatch_ctx ctx{};
     using dispatch_event_type = event::dispatch_event_for_t<event_type>;
     const dispatch_event_type dispatch{ev, ctx};
     return process_dispatch_event(dispatch);
   }
 
+  bool avx2_available() const noexcept { return this->context_.avx2_available; }
+
+  bool fma_available() const noexcept { return this->context_.fma_available; }
+
+  bool f16c_available() const noexcept { return this->context_.f16c_available; }
+
+  bool avx2_fma_f16c_available() const noexcept {
+    return this->context_.host_features.avx2_fma_f16c_available();
+  }
+
+  bool avx512_claimed() const noexcept { return this->context_.avx512_claimed; }
+
+  bool avx_vnni_claimed() const noexcept {
+    return this->context_.avx_vnni_claimed;
+  }
+
+  bool amx_claimed() const noexcept { return this->context_.amx_claimed; }
+
+  bool bf16_claimed() const noexcept { return this->context_.bf16_claimed; }
+
+  bool native_fp16_claimed() const noexcept {
+    return this->context_.native_fp16_claimed;
+  }
+
+  uint64_t optimized_flash_dispatch_count() const noexcept {
+    return this->context_.optimized_flash_dispatch_count;
+  }
+
+  uint64_t shared_flash_dispatch_count() const noexcept {
+    return this->context_.shared_flash_dispatch_count;
+  }
+
+  uint64_t optimized_q2_dispatch_count() const noexcept {
+    return this->context_.optimized_q2_dispatch_count;
+  }
+
+  uint64_t shared_q2_dispatch_count() const noexcept {
+    return this->context_.shared_q2_dispatch_count;
+  }
+
+  uint64_t optimized_q3_dispatch_count() const noexcept {
+    return this->context_.optimized_q3_dispatch_count;
+  }
+
+  uint64_t shared_q3_dispatch_count() const noexcept {
+    return this->context_.shared_q3_dispatch_count;
+  }
+
+  uint64_t optimized_q6_dispatch_count() const noexcept {
+    return this->context_.optimized_q6_dispatch_count;
+  }
+
+  uint64_t shared_q6_dispatch_count() const noexcept {
+    return this->context_.shared_q6_dispatch_count;
+  }
+
+  uint64_t flash_attn_workspace_prepared_tokens() const noexcept {
+    return this->context_.flash_attn_workspace.prepared_tokens;
+  }
+
+  uint64_t flash_attn_workspace_reuse_count() const noexcept {
+    return this->context_.flash_attn_workspace.reuse_count;
+  }
+
  private:
   template <class dispatch_event_type>
-  bool process_dispatch_event(const dispatch_event_type & ev) {
+  bool process_dispatch_event(const dispatch_event_type &ev) {
     const bool accepted = base_type::process_event(ev);
-    return accepted && ev.ctx.err == static_cast<int32_t>(emel::error::cast(error::none));
+    return accepted &&
+           ev.ctx.err == static_cast<int32_t>(emel::error::cast(error::none));
   }
 };
 
-}  // namespace emel::kernel::x86_64
+} // namespace emel::kernel::x86_64

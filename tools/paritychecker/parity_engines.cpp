@@ -918,6 +918,8 @@ struct reference_backend {
   int32_t vocab_size = 0;
   emel::tools::generation_formatter_contract::reference_formatter_info
       formatter = {};
+  emel::tools::generation_formatter_contract::formatter_binding
+      formatter_binding = {};
   int32_t emel_reference_decode_calls = 0;
   int32_t emel_reference_logits_calls = 0;
   int32_t direct_reference_decode_calls = 0;
@@ -1068,6 +1070,20 @@ bool quantized_contract_matches(const quantized_contract_summary &lhs,
              rhs.approved_dense_f32_by_contract &&
          lhs.disallowed_fallback == rhs.disallowed_fallback &&
          lhs.explicit_no_claim == rhs.explicit_no_claim;
+}
+
+bool audit_has_native_quantized_tensor_type(
+    const emel::model::llama::quantized_path_audit &audit,
+    const emel::kernel::event::dtype dtype) {
+  const int32_t tensor_type = static_cast<int32_t>(dtype);
+  for (const auto &stage : audit.stages) {
+    if (stage.tensor_type == tensor_type &&
+        stage.contract ==
+            emel::model::llama::quantized_contract_kind::native_quantized) {
+      return true;
+    }
+  }
+  return false;
 }
 
 emel::error::type sampler_select_argmax(generation_load_state &state,
@@ -1687,9 +1703,8 @@ bool tokenize_reference_prompt(const reference_backend &backend,
   }
 
   std::string formatted_prompt = {};
-  if (!emel::tools::generation_formatter_contract::
-          format_reference_single_user_prompt(backend.formatter, opts.text,
-                                              formatted_prompt)) {
+  if (!emel::tools::generation_formatter_contract::format_single_user_prompt(
+          backend.formatter_binding, opts.text, formatted_prompt)) {
     return false;
   }
 
@@ -1911,16 +1926,27 @@ bool emel_token_is_stop(const emel::model::data::vocab &vocab,
   return token_id == vocab.eos_id || token_id == vocab.eot_id;
 }
 
-llama_context_ptr make_reference_context(reference_backend &backend) {
+uint32_t reference_context_capacity(const size_t prompt_token_count,
+                                    const int32_t max_tokens) noexcept {
+  constexpr uint32_t k_min_reference_context_tokens = 512u;
+  const uint64_t requested =
+      static_cast<uint64_t>(prompt_token_count) +
+      static_cast<uint64_t>(std::max(0, max_tokens)) + 1u;
+  const uint64_t bounded =
+      std::min<uint64_t>(requested, std::numeric_limits<uint32_t>::max());
+  return std::max<uint32_t>(k_min_reference_context_tokens,
+                            static_cast<uint32_t>(bounded));
+}
+
+llama_context_ptr make_reference_context(reference_backend &backend,
+                                         const uint32_t context_tokens = 512u) {
   llama_context_params context_params = llama_context_default_params();
+  const uint32_t reference_context_tokens =
+      std::max<uint32_t>(512u, context_tokens);
   context_params.flash_attn_type = LLAMA_FLASH_ATTN_TYPE_DISABLED;
-  context_params.n_ctx = 0;
-  const int32_t batch_capacity =
-      backend.model != nullptr
-          ? std::max(512, llama_model_n_ctx_train(backend.model.get()))
-          : 512;
-  context_params.n_batch = batch_capacity;
-  context_params.n_ubatch = batch_capacity;
+  context_params.n_ctx = reference_context_tokens;
+  context_params.n_batch = reference_context_tokens;
+  context_params.n_ubatch = reference_context_tokens;
   context_params.n_seq_max = 1;
   context_params.n_threads = 1;
   context_params.n_threads_batch = 1;
@@ -1942,14 +1968,16 @@ run_reference_generate(reference_backend &backend,
     return emel::error::cast(emel::text::generator::error::invalid_request);
   }
 
-  llama_context_ptr ctx = make_reference_context(backend);
-  if (ctx == nullptr) {
-    return emel::error::cast(emel::text::generator::error::backend);
-  }
-
   std::vector<llama_token> prompt_tokens;
   if (!tokenize_reference_prompt(backend, opts, prompt_tokens)) {
     return emel::error::cast(emel::text::generator::error::invalid_request);
+  }
+
+  llama_context_ptr ctx = make_reference_context(
+      backend,
+      reference_context_capacity(prompt_tokens.size(), opts.max_tokens));
+  if (ctx == nullptr) {
+    return emel::error::cast(emel::text::generator::error::backend);
   }
 
   llama_batch prompt_batch = llama_batch_get_one(
@@ -18192,6 +18220,7 @@ int run_generation_harness_contract(
                  fixture->name.data());
     return 1;
   }
+  state.reference.formatter_binding = state.formatter_binding;
 
   const emel::error::type initialize_err =
       run_emel_initialize_generator(state, opts);
@@ -18311,11 +18340,29 @@ int run_generation_harness_contract(
       generation_diagnostics.shared_q6_dispatch_calls;
   const auto runtime_contract =
       runtime_quantized_contract_summary(generation_diagnostics);
-  if (generation_kernel_kind == emel::kernel::kernel_kind::aarch64 &&
+  emel::model::llama::quantized_path_audit audit_view{};
+  const bool audit_available =
+      build_execution_audit(*state.model_data, audit_view);
+  const bool native_q2_k =
+      audit_available &&
+      audit_has_native_quantized_tensor_type(
+          audit_view, emel::kernel::event::dtype::q2_k);
+  const bool native_q3_k =
+      audit_available &&
+      audit_has_native_quantized_tensor_type(
+          audit_view, emel::kernel::event::dtype::q3_k);
+  const bool native_q6_k =
+      audit_available &&
+      audit_has_native_quantized_tensor_type(
+          audit_view, emel::kernel::event::dtype::q6_k);
+  const bool optimized_flash_kernel =
+      generation_kernel_kind == emel::kernel::kernel_kind::aarch64 ||
+      generation_kernel_kind == emel::kernel::kernel_kind::x86_64;
+  if (optimized_flash_kernel &&
       (flash_dispatch_calls == 0u || optimized_flash_dispatch_calls == 0u ||
        shared_flash_dispatch_calls != 0u)) {
     std::fprintf(stderr,
-                 "generation flash proof failed (fixture=%s kernel_kind=%s "
+                 "generation optimized flash proof failed (fixture=%s kernel_kind=%s "
                  "flash_dispatch_calls=%" PRIu64
                  " optimized_flash_dispatch_calls=%" PRIu64
                  " shared_flash_dispatch_calls=%" PRIu64 ")\n",
@@ -18325,7 +18372,7 @@ int run_generation_harness_contract(
     dump_generation_failure_surface(state, &emel_result, nullptr, opts);
     return 1;
   }
-  if (generation_kernel_kind != emel::kernel::kernel_kind::aarch64 &&
+  if (!optimized_flash_kernel &&
       (optimized_flash_dispatch_calls != 0u ||
        shared_flash_dispatch_calls != 0u)) {
     std::fprintf(stderr,
@@ -18338,9 +18385,23 @@ int run_generation_harness_contract(
     dump_generation_failure_surface(state, &emel_result, nullptr, opts);
     return 1;
   }
-  if (optimized_q2_dispatch_calls != 0u || shared_q2_dispatch_calls != 0u ||
-      optimized_q3_dispatch_calls != 0u || shared_q3_dispatch_calls != 0u ||
-      shared_q6_dispatch_calls != 0u) {
+  const bool x86_quantized_proof_failed =
+      generation_kernel_kind == emel::kernel::kernel_kind::x86_64 &&
+      ((native_q2_k && optimized_q2_dispatch_calls == 0u) ||
+       (!native_q2_k && optimized_q2_dispatch_calls != 0u) ||
+       shared_q2_dispatch_calls != 0u ||
+       (native_q3_k && optimized_q3_dispatch_calls == 0u) ||
+       (!native_q3_k && optimized_q3_dispatch_calls != 0u) ||
+       shared_q3_dispatch_calls != 0u ||
+       (native_q6_k && optimized_q6_dispatch_calls == 0u) ||
+       (!native_q6_k && optimized_q6_dispatch_calls != 0u) ||
+       shared_q6_dispatch_calls != 0u);
+  const bool non_x86_quantized_proof_failed =
+      generation_kernel_kind != emel::kernel::kernel_kind::x86_64 &&
+      (optimized_q2_dispatch_calls != 0u || shared_q2_dispatch_calls != 0u ||
+       optimized_q3_dispatch_calls != 0u || shared_q3_dispatch_calls != 0u ||
+       shared_q6_dispatch_calls != 0u);
+  if (x86_quantized_proof_failed || non_x86_quantized_proof_failed) {
     std::fprintf(
         stderr,
         "generation quantized dispatch proof failed (fixture=%s kernel_kind=%s "
@@ -18372,8 +18433,7 @@ int run_generation_harness_contract(
     return 1;
   }
 
-  emel::model::llama::quantized_path_audit audit_view{};
-  if (build_execution_audit(*state.model_data, audit_view)) {
+  if (audit_available) {
     const auto audit_contract = build_quantized_contract_summary(audit_view);
     if (!quantized_contract_matches(runtime_contract, audit_contract)) {
       std::fprintf(

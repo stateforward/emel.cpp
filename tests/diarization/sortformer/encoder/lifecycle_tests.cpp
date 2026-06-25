@@ -19,6 +19,7 @@
 #include "emel/kernel/aarch64/actions.hpp"
 #include "emel/model/data.hpp"
 #include "emel/model/sortformer/detail.hpp"
+#include "../../../kernel/test_helpers.hpp"
 
 namespace {
 
@@ -154,7 +155,7 @@ size_t tensor_value_count(const tensor_spec & spec) noexcept {
 void build_encoder_model(emel::model::data & model,
                          const bool include_all_tensors,
                          const bool valid_shapes) {
-  std::memset(&model, 0, sizeof(model));
+  emel::tests::reset_model_data(model);
 
   for (const auto & spec : k_pre_specs) {
     append_tensor(model, spec);
@@ -203,7 +204,7 @@ struct pre_encoder_fixture {
   std::vector<std::vector<float>> layer_storage = {};
 
   pre_encoder_fixture() {
-    std::memset(&model, 0, sizeof(model));
+    emel::tests::reset_model_data(model);
     layer_storage.reserve(static_cast<size_t>(encoder_detail::k_layer_count *
                                               encoder_detail::k_layer_tensor_count));
 
