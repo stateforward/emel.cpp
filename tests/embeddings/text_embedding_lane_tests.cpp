@@ -39,7 +39,7 @@ struct fake_tokenizer_dispatch_state {
   int32_t bind_error = emel::text::tokenizer::error_code(emel::text::tokenizer::error::none);
   bool tokenize_accept = true;
   int32_t tokenize_error = emel::text::tokenizer::error_code(emel::text::tokenizer::error::none);
-  std::array<int32_t, 4> token_ids = {};
+  std::array<int32_t, 32> token_ids = {};
   int32_t token_count = 1;
   bool saw_bind = false;
   bool saw_tokenize = false;
@@ -72,6 +72,53 @@ bool fake_tokenizer_tokenize_dispatch(
   }
   std::copy_n(state.token_ids.data(), state.token_count, ev.token_ids_out);
   *ev.token_count_out = state.token_count;
+  return true;
+}
+
+void use_minimal_te_tokens(fake_tokenizer_dispatch_state & state,
+                           const emel::model::data::vocab & vocab) noexcept {
+  state.token_ids[0] = vocab.cls_id;
+  state.token_ids[1] = vocab.sep_id;
+  state.token_count = 2;
+}
+
+bool use_real_te_tokens(fake_tokenizer_dispatch_state & state,
+                        const emel::model::data::vocab & vocab,
+                        const std::string_view text) {
+  emel::text::tokenizer::sm tokenizer{};
+  int32_t bind_error =
+      emel::text::tokenizer::error_code(emel::text::tokenizer::error::none);
+  emel::text::tokenizer::event::bind bind{
+    &vocab,
+    emel::text::tokenizer::preprocessor::preprocessor_kind::wpm,
+    emel::text::encoders::encoder_kind::wpm,
+    &bind_error,
+  };
+  if (!tokenizer.process_event(bind) ||
+      bind_error !=
+          emel::text::tokenizer::error_code(emel::text::tokenizer::error::none)) {
+    return false;
+  }
+
+  int32_t tokenize_error =
+      emel::text::tokenizer::error_code(emel::text::tokenizer::error::none);
+  int32_t token_count = 0;
+  emel::text::tokenizer::event::tokenize tokenize{};
+  tokenize.vocab = &vocab;
+  tokenize.text = text;
+  tokenize.add_special = true;
+  tokenize.parse_special = false;
+  tokenize.token_ids_out = state.token_ids.data();
+  tokenize.token_capacity = static_cast<int32_t>(state.token_ids.size());
+  tokenize.token_count_out = &token_count;
+  tokenize.error_out = &tokenize_error;
+  if (!tokenizer.process_event(tokenize) ||
+      tokenize_error !=
+          emel::text::tokenizer::error_code(emel::text::tokenizer::error::none) ||
+      token_count <= 0) {
+    return false;
+  }
+  state.token_count = token_count;
   return true;
 }
 
@@ -394,7 +441,10 @@ TEST_CASE("embeddings text lane supports TE matryoshka truncation when fixture p
     request.truncate_dimension = dimension;
     request.error_out = &embed_error;
 
-    REQUIRE(embedding_generator.process_event(request));
+    const bool embed_accepted = embedding_generator.process_event(request);
+    CAPTURE(static_cast<int>(embed_error));
+    CAPTURE(output_dimension);
+    REQUIRE(embed_accepted);
     CHECK(embed_error == emel::error::cast(emel::embeddings::generator::error::none));
     CHECK(output_dimension == dimension);
     CHECK(l2_norm(std::span<const float>{output.data(), static_cast<size_t>(dimension)}) ==
@@ -493,7 +543,7 @@ TEST_CASE("embeddings generator helper paths cover tensor binding callbacks and 
   CHECK_FALSE(embedding_detail::publish_embedding(context, 0, truncated_output));
 
   fake_tokenizer_dispatch_state fake_tokenizer = {};
-  fake_tokenizer.token_ids[0] = fixture.model->vocab_data.cls_id;
+  use_minimal_te_tokens(fake_tokenizer, fixture.model->vocab_data);
   emel::error::type initialize_error =
       emel::error::cast(emel::embeddings::generator::error::none);
   initialize_callback_probe initialize_probe = {};
@@ -716,8 +766,8 @@ TEST_CASE("embeddings generator state machine covers callback and prepare error 
 
   SUBCASE("initialize and embed done callbacks fire") {
     fake_tokenizer_dispatch_state fake_tokenizer = {};
-    fake_tokenizer.token_ids[0] = fixture.model->vocab_data.cls_id;
-    fake_tokenizer.token_count = 1;
+    REQUIRE(use_real_te_tokens(
+        fake_tokenizer, fixture.model->vocab_data, "callback coverage"));
     emel::text::conditioner::sm conditioner{};
     emel::embeddings::generator::sm embedding_generator{
       *fixture.model,
@@ -774,7 +824,11 @@ TEST_CASE("embeddings generator state machine covers callback and prepare error 
             embed_callback_probe,
             &embed_callback_probe::on_error>(&embed_probe);
 
-    REQUIRE(embedding_generator.process_event(request));
+    const bool callback_embed_accepted =
+        embedding_generator.process_event(request);
+    CAPTURE(static_cast<int>(embed_error));
+    CAPTURE(output_dimension);
+    REQUIRE(callback_embed_accepted);
     CHECK(embed_error == emel::error::cast(emel::embeddings::generator::error::none));
     CHECK(embed_probe.done_called);
     CHECK_FALSE(embed_probe.error_called);
@@ -816,8 +870,8 @@ TEST_CASE("embeddings generator state machine covers callback and prepare error 
 
   SUBCASE("unexpected embed before initialize rejects without trapping later requests") {
     fake_tokenizer_dispatch_state fake_tokenizer = {};
-    fake_tokenizer.token_ids[0] = fixture.model->vocab_data.cls_id;
-    fake_tokenizer.token_count = 1;
+    REQUIRE(use_real_te_tokens(
+        fake_tokenizer, fixture.model->vocab_data, "callback coverage"));
     emel::text::conditioner::sm conditioner{};
     emel::embeddings::generator::sm embedding_generator{
       *fixture.model,

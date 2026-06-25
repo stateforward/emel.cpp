@@ -2697,8 +2697,6 @@ inline bool pointwise_conv_hwc_direct_f32_impl(const action::matrix_view & matri
                                                const action::batch_norm_view * batch_norm,
                                                float * output) noexcept {
   if (matrix.dtype != emel::kernel::detail::dtype_f32 ||
-      matrix.packed_rhs_f32 == nullptr ||
-      matrix.packed_rhs_cols != matrix.rows ||
       matrix.rows <= 0 ||
       matrix.cols <= 0 ||
       input == nullptr ||
@@ -2706,6 +2704,16 @@ inline bool pointwise_conv_hwc_direct_f32_impl(const action::matrix_view & matri
       pixel_count <= 0) {
     return false;
   }
+#if defined(__aarch64__) || defined(__ARM_NEON)
+  if (matrix.packed_rhs_f32 == nullptr ||
+      matrix.packed_rhs_cols != matrix.rows) {
+    return false;
+  }
+#else
+  if (matrix.transposed_f32 == nullptr) {
+    return false;
+  }
+#endif
   if constexpr (fuse_batch_norm) {
     if (batch_norm == nullptr ||
         batch_norm->scale == nullptr ||
@@ -2742,6 +2750,13 @@ inline bool pointwise_conv_hwc_direct_f32_impl(const action::matrix_view & matri
             matrix.transposed_f32[static_cast<size_t>(input_channel) *
                                   static_cast<size_t>(matrix.rows) +
                                   static_cast<size_t>(output_channel)];
+      }
+      if constexpr (fuse_batch_norm) {
+        acc = (acc * batch_norm->scale[static_cast<size_t>(output_channel)]) +
+            batch_norm->shift[static_cast<size_t>(output_channel)];
+        if constexpr (apply_relu) {
+          acc = std::max(acc, 0.0f);
+        }
       }
       output_pixel[static_cast<size_t>(output_channel)] = acc;
     }
@@ -2852,6 +2867,7 @@ inline bool standard_conv_hwc_impl(const action::conv2d_view & conv,
   const int32_t pad_w = same_padding(conv.kernel_w, stride);
   (void) patch_buffer;
   (void) patch_capacity;
+  (void) kernel_channel_stride;
 
   for (int32_t output_y = 0; output_y < output_spatial; ++output_y) {
     for (int32_t output_x = 0; output_x < output_spatial; ++output_x) {

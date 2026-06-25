@@ -1307,7 +1307,7 @@ TEST_CASE("kernel_aarch64_q6_4rows_neon_matches_scalar") {
 
 TEST_CASE("kernel_aarch64_q4_k_row_neon_matches_scalar") {
 #if !(defined(__aarch64__) || defined(__ARM_NEON))
-  SUCCEED();
+  CHECK(true);
   return;
 #else
   using emel::kernel::detail::quant::QK_K;
@@ -1346,7 +1346,7 @@ TEST_CASE("kernel_aarch64_q4_k_row_neon_matches_scalar") {
 
 TEST_CASE("kernel_aarch64_q4_k_2rows_neon_matches_scalar") {
 #if !(defined(__aarch64__) || defined(__ARM_NEON))
-  SUCCEED();
+  CHECK(true);
   return;
 #else
   using emel::kernel::detail::quant::QK_K;
@@ -1879,6 +1879,9 @@ TEST_CASE("kernel_aarch64_q6_matrix_dispatch_does_not_claim_vector_path") {
 }
 
 TEST_CASE("kernel_aarch64_q6_packed_vector_route_is_explicit_and_numeric_match") {
+#if !(defined(__aarch64__) && defined(__ARM_NEON) && defined(__ARM_FEATURE_DOTPROD))
+  CHECK(true);
+#else
   using emel::kernel::detail::quant::QK_K;
   using emel::kernel::detail::quant::block_q6_k;
 
@@ -2004,11 +2007,12 @@ TEST_CASE("kernel_aarch64_q6_packed_vector_route_is_explicit_and_numeric_match")
   CHECK(prepared_machine.optimized_q6_vector_prepared_q8_rhs_i8mm_dispatch_count() == 0u);
   CHECK(prepared_machine.shared_q6_dispatch_count() == 0u);
 #endif
+#endif
 }
 
 TEST_CASE("kernel_aarch64_q4_packed_vector_route_is_explicit_and_numeric_match") {
 #if !(defined(__aarch64__) && defined(__ARM_NEON) && defined(__ARM_FEATURE_DOTPROD))
-  SUCCEED();
+  CHECK(true);
 #else
   using emel::kernel::detail::quant::Q4_K_X8_ROWS;
   using emel::kernel::detail::quant::QK_K;
@@ -2903,6 +2907,9 @@ TEST_CASE("kernel_aarch64_q8_0_vector_route_is_explicit_and_numeric_match") {
 }
 
 TEST_CASE("kernel_aarch64_q6_packed_vector_argmax_route_is_explicit_and_numeric_match") {
+#if !(defined(__aarch64__) && defined(__ARM_NEON) && defined(__ARM_FEATURE_DOTPROD))
+  CHECK(true);
+#else
   using emel::kernel::detail::quant::QK_K;
   using emel::kernel::detail::quant::block_q6_k;
 
@@ -3038,6 +3045,7 @@ TEST_CASE("kernel_aarch64_q6_packed_vector_argmax_route_is_explicit_and_numeric_
   CHECK(argmax_prepared_machine.optimized_q6_vector_q8_argmax_prepared_i8mm_dispatch_count() ==
         0u);
   CHECK(argmax_prepared_machine.shared_q6_dispatch_count() == 0u);
+#endif
 #endif
 }
 

@@ -9,6 +9,7 @@
 #include "emel/diarization/sortformer/cache/detail.hpp"
 #include "emel/diarization/sortformer/modules/detail.hpp"
 #include "emel/model/data.hpp"
+#include "../../../kernel/test_helpers.hpp"
 
 namespace {
 
@@ -56,7 +57,7 @@ void append_tensor(emel::model::data & model, const tensor_spec & spec) {
 void build_modules_model(emel::model::data & model,
                          const bool include_all_tensors,
                          const bool valid_shapes) {
-  std::memset(&model, 0, sizeof(model));
+  emel::tests::reset_model_data(model);
   for (size_t index = 0u; index < k_specs.size(); ++index) {
     if (!include_all_tensors && index == k_specs.size() - 1u) {
       continue;

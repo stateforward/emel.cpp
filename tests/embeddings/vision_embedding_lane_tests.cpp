@@ -92,7 +92,10 @@ TEST_CASE("embeddings vision lane returns normalized TE embeddings when fixture 
     red_dimension,
   };
   red_request.error_out = &red_error;
-  REQUIRE(embedding_generator.process_event(red_request));
+  const bool red_accepted = embedding_generator.process_event(red_request);
+  CAPTURE(static_cast<int>(red_error));
+  CAPTURE(red_dimension);
+  REQUIRE(red_accepted);
   CHECK(red_error == emel::error::cast(emel::embeddings::generator::error::none));
   CHECK(red_dimension == 1280);
   CHECK(l2_norm(std::span<const float>{
