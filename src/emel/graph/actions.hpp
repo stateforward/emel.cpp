@@ -95,6 +95,44 @@ inline void reset_compute_output(event::compute_output & output) noexcept {
   output.lifecycle = nullptr;
 }
 
+namespace detail {
+
+template <class compute_event>
+inline processor::event::execute bind_execute_request(const compute_event & ev,
+                                                      context & ctx,
+                                                      compute_capture & capture) noexcept {
+  return processor::event::execute{
+    .step_plan = ev.request.step_plan,
+    .output_out = &ev.ctx.execute_output,
+    .lifecycle = ev.request.lifecycle,
+    .tensor_machine = &ctx.tensor_actor,
+    .step_index = ev.request.step_index,
+    .step_size = ev.request.step_size,
+    .kv_tokens = ev.request.kv_tokens,
+    .memory_sm = ev.request.memory_sm,
+    .memory_view = ev.request.memory_view,
+    .expected_outputs = ev.request.expected_outputs,
+    .compute_ctx = ev.request.compute_ctx,
+    .positions = ev.request.positions,
+    .positions_count = ev.request.positions_count,
+    .seq_masks = ev.request.seq_masks,
+    .seq_mask_words = ev.request.seq_mask_words,
+    .seq_masks_count = ev.request.seq_masks_count,
+    .seq_primary_ids = ev.request.seq_primary_ids,
+    .seq_primary_ids_count = ev.request.seq_primary_ids_count,
+    .validate = ev.request.validate,
+    .prepare_graph = ev.request.prepare_graph,
+    .alloc_graph = ev.request.alloc_graph,
+    .bind_inputs = ev.request.bind_inputs,
+    .run_kernel = ev.request.run_kernel,
+    .extract_outputs = ev.request.extract_outputs,
+    .dispatch_done = {&capture, on_execute_done},
+    .dispatch_error = {&capture, on_execute_error},
+  };
+}
+
+}  // namespace detail
+
 struct reject_invalid_reserve_with_dispatch {
   void operator()(const event::reserve_graph & ev, context &) const noexcept {
     ev.ctx.err = emel::error::cast(error::invalid_request);
@@ -130,6 +168,17 @@ struct reject_invalid_compute_with_dispatch {
   }
 };
 
+struct effect_reject_invalid_reserved_compute_with_dispatch {
+  void operator()(const event::compute_reserved_graph & ev, context &) const noexcept {
+    ev.ctx.err = emel::error::cast(error::invalid_request);
+    reset_compute_output(*ev.request.output_out);
+    ev.request.dispatch_error(events::compute_error{
+      *ev.request.output_out,
+      static_cast<int32_t>(ev.ctx.err),
+    });
+  }
+};
+
 struct reject_invalid_compute_with_output_only {
   void operator()(const event::compute_graph & ev, context &) const noexcept {
     ev.ctx.err = emel::error::cast(error::invalid_request);
@@ -137,8 +186,21 @@ struct reject_invalid_compute_with_output_only {
   }
 };
 
+struct effect_reject_invalid_reserved_compute_with_output_only {
+  void operator()(const event::compute_reserved_graph & ev, context &) const noexcept {
+    ev.ctx.err = emel::error::cast(error::invalid_request);
+    reset_compute_output(*ev.request.output_out);
+  }
+};
+
 struct reject_invalid_compute_without_output {
   void operator()(const event::compute_graph & ev, context &) const noexcept {
+    ev.ctx.err = emel::error::cast(error::invalid_request);
+  }
+};
+
+struct effect_reject_invalid_reserved_compute_without_output {
+  void operator()(const event::compute_reserved_graph & ev, context &) const noexcept {
     ev.ctx.err = emel::error::cast(error::invalid_request);
   }
 };
@@ -163,6 +225,27 @@ struct begin_compute {
     ev.ctx.execute_output = {};
     ++ctx.dispatch_generation;
     reset_compute_output(*ev.request.output_out);
+  }
+};
+
+struct effect_begin_reserved_compute {
+  void operator()(const event::compute_reserved_graph & ev, context & ctx) const noexcept {
+    ev.ctx.err = emel::error::cast(error::none);
+    ev.ctx.assemble_outcome = event::phase_outcome::unknown;
+    ev.ctx.execute_outcome = event::phase_outcome::unknown;
+    ev.ctx.assemble_output = {};
+    ev.ctx.execute_output = {};
+    ++ctx.dispatch_generation;
+    reset_compute_output(*ev.request.output_out);
+    ev.ctx.assemble_outcome = event::phase_outcome::done;
+    ev.ctx.assemble_output.graph_topology = ctx.reservation.graph_topology;
+    ev.ctx.assemble_output.node_count = ctx.reservation.node_count;
+    ev.ctx.assemble_output.tensor_count = ctx.reservation.tensor_count;
+    ev.ctx.assemble_output.required_buffer_bytes =
+        ctx.reservation.required_buffer_bytes;
+    ev.ctx.assemble_output.version = ctx.reservation.version;
+    ev.ctx.assemble_output.reused_topology = 1u;
+    ev.ctx.assemble_output.lifecycle = ctx.reservation.lifecycle;
   }
 };
 
@@ -212,37 +295,19 @@ struct request_execute {
   void operator()(const event::compute_graph & ev, context & ctx) const noexcept {
     detail::compute_capture capture{&ev.ctx};
     ev.ctx.err = emel::error::cast(error::processor_failed);
+    const processor::event::execute request = detail::bind_execute_request(ev, ctx, capture);
 
-    const processor::event::execute request{
-      .step_plan = ev.request.step_plan,
-      .output_out = &ev.ctx.execute_output,
-      .lifecycle = ev.request.lifecycle,
-      .tensor_machine = &ctx.tensor_actor,
-      .step_index = ev.request.step_index,
-      .step_size = ev.request.step_size,
-      .kv_tokens = ev.request.kv_tokens,
-      .memory_sm = ev.request.memory_sm,
-      .memory_view = ev.request.memory_view,
-      .expected_outputs = ev.request.expected_outputs,
-      .compute_ctx = ev.request.compute_ctx,
-      .positions = ev.request.positions,
-      .positions_count = ev.request.positions_count,
-      .seq_masks = ev.request.seq_masks,
-      .seq_mask_words = ev.request.seq_mask_words,
-      .seq_masks_count = ev.request.seq_masks_count,
-      .seq_primary_ids = ev.request.seq_primary_ids,
-      .seq_primary_ids_count = ev.request.seq_primary_ids_count,
-      .validate = ev.request.validate,
-      .prepare_graph = ev.request.prepare_graph,
-      .alloc_graph = ev.request.alloc_graph,
-      .bind_inputs = ev.request.bind_inputs,
-      .run_kernel = ev.request.run_kernel,
-      .extract_outputs = ev.request.extract_outputs,
-      .dispatch_done = {&capture, detail::on_execute_done},
-      .dispatch_error = {&capture, detail::on_execute_error},
-    };
+    (void)ctx.processor_actor.process_event_async(request).result();
+  }
+};
 
-    (void)ctx.processor_actor.process_event(request);
+struct effect_request_reserved_execute {
+  void operator()(const event::compute_reserved_graph & ev, context & ctx) const noexcept {
+    detail::compute_capture capture{&ev.ctx};
+    ev.ctx.err = emel::error::cast(error::processor_failed);
+    const processor::event::execute request = detail::bind_execute_request(ev, ctx, capture);
+
+    (void)ctx.processor_actor.process_event_async(request).result();
   }
 };
 
@@ -286,13 +351,14 @@ struct request_tensor_reserve {
 };
 
 struct dispatch_reserve_done {
-  void operator()(const event::reserve_graph & ev, const context &) const noexcept {
+  void operator()(const event::reserve_graph & ev, context & ctx) const noexcept {
     ev.request.output_out->graph_topology = ev.ctx.reserve_output.graph_topology;
     ev.request.output_out->node_count = ev.ctx.reserve_output.node_count;
     ev.request.output_out->tensor_count = ev.ctx.reserve_output.tensor_count;
     ev.request.output_out->required_buffer_bytes = ev.ctx.reserve_output.required_buffer_bytes;
     ev.request.output_out->version = ev.ctx.reserve_output.version;
     ev.request.output_out->lifecycle = ev.ctx.reserve_output.lifecycle;
+    ctx.reservation = *ev.request.output_out;
 
     ev.request.dispatch_done(events::reserve_done{*ev.request.output_out});
   }
@@ -323,8 +389,33 @@ struct dispatch_compute_done {
   }
 };
 
+struct effect_dispatch_reserved_compute_done {
+  void operator()(const event::compute_reserved_graph & ev, const context &) const noexcept {
+    ev.request.output_out->graph_topology = ev.ctx.assemble_output.graph_topology;
+    ev.request.output_out->node_count = ev.ctx.assemble_output.node_count;
+    ev.request.output_out->tensor_count = ev.ctx.assemble_output.tensor_count;
+    ev.request.output_out->required_buffer_bytes = ev.ctx.assemble_output.required_buffer_bytes;
+    ev.request.output_out->version = ev.ctx.assemble_output.version;
+    ev.request.output_out->reused_topology = ev.ctx.assemble_output.reused_topology;
+    ev.request.output_out->outputs_produced = ev.ctx.execute_output.outputs_produced;
+    ev.request.output_out->graph_reused = ev.ctx.execute_output.graph_reused;
+    ev.request.output_out->lifecycle = ev.request.lifecycle;
+
+    ev.request.dispatch_done(events::compute_done{*ev.request.output_out});
+  }
+};
+
 struct dispatch_compute_error {
   void operator()(const event::compute_graph & ev, const context &) const noexcept {
+    ev.request.dispatch_error(events::compute_error{
+      *ev.request.output_out,
+      static_cast<int32_t>(ev.ctx.err),
+    });
+  }
+};
+
+struct effect_dispatch_reserved_compute_error {
+  void operator()(const event::compute_reserved_graph & ev, const context &) const noexcept {
     ev.request.dispatch_error(events::compute_error{
       *ev.request.output_out,
       static_cast<int32_t>(ev.ctx.err),
@@ -345,18 +436,28 @@ inline constexpr reject_invalid_reserve_with_dispatch reject_invalid_reserve_wit
 inline constexpr reject_invalid_reserve_with_output_only reject_invalid_reserve_with_output_only{};
 inline constexpr reject_invalid_reserve_without_output reject_invalid_reserve_without_output{};
 inline constexpr reject_invalid_compute_with_dispatch reject_invalid_compute_with_dispatch{};
+inline constexpr effect_reject_invalid_reserved_compute_with_dispatch
+    effect_reject_invalid_reserved_compute_with_dispatch{};
 inline constexpr reject_invalid_compute_with_output_only reject_invalid_compute_with_output_only{};
+inline constexpr effect_reject_invalid_reserved_compute_with_output_only
+    effect_reject_invalid_reserved_compute_with_output_only{};
 inline constexpr reject_invalid_compute_without_output reject_invalid_compute_without_output{};
+inline constexpr effect_reject_invalid_reserved_compute_without_output
+    effect_reject_invalid_reserved_compute_without_output{};
 inline constexpr begin_reserve begin_reserve{};
 inline constexpr begin_compute begin_compute{};
+inline constexpr effect_begin_reserved_compute effect_begin_reserved_compute{};
 inline constexpr request_reserve request_reserve{};
 inline constexpr request_tensor_reserve request_tensor_reserve{};
 inline constexpr request_assemble request_assemble{};
 inline constexpr request_execute request_execute{};
+inline constexpr effect_request_reserved_execute effect_request_reserved_execute{};
 inline constexpr dispatch_reserve_done dispatch_reserve_done{};
 inline constexpr dispatch_reserve_error dispatch_reserve_error{};
 inline constexpr dispatch_compute_done dispatch_compute_done{};
+inline constexpr effect_dispatch_reserved_compute_done effect_dispatch_reserved_compute_done{};
 inline constexpr dispatch_compute_error dispatch_compute_error{};
+inline constexpr effect_dispatch_reserved_compute_error effect_dispatch_reserved_compute_error{};
 inline constexpr on_unexpected on_unexpected{};
 
 }  // namespace emel::graph::action

@@ -47,6 +47,14 @@ constexpr bool host_is_aarch64() noexcept {
 #endif
 }
 
+constexpr bool host_is_x86_64() noexcept {
+#if defined(__x86_64__) || defined(_M_X64)
+  return true;
+#else
+  return false;
+#endif
+}
+
 struct callback_tracker {
   bool initialize_done_called = false;
   bool initialize_error_called = false;
@@ -1058,7 +1066,7 @@ TEST_CASE("generator_rejects_invalid_initialize_request") {
 }
 
 TEST_CASE("generator_initialize_rejects_missing_injected_dependencies_through_sml") {
-  emel::text::generator::sm generator{};
+  auto generator = std::make_unique<emel::text::generator::sm>();
   emel::text::tokenizer::sm tokenizer{};
   std::array<emel::logits::sampler::fn, 1> samplers = {
       emel::logits::sampler::fn::from<sampler_select_argmax>(),
@@ -1081,8 +1089,8 @@ TEST_CASE("generator_initialize_rejects_missing_injected_dependencies_through_sm
           &tracker,
           on_initialize_error);
 
-  CHECK_FALSE(generator.process_event(request));
-  CHECK(generator.is(stateforward::sml::state<emel::text::generator::uninitialized>));
+  CHECK_FALSE(generator->process_event(request));
+  CHECK(generator->is(stateforward::sml::state<emel::text::generator::uninitialized>));
   CHECK_FALSE(tracker.initialize_done_called);
   CHECK(tracker.initialize_error_called);
   CHECK(error == emel::error::cast(emel::text::generator::error::invalid_request));
@@ -1155,7 +1163,7 @@ TEST_CASE("generator_generate_runs_native_generator_contract") {
   const auto diagnostics = capture_generator_diagnostics(*fixture->generator);
   CHECK(diagnostics.kernel_dispatch_calls > 0u);
   CHECK(diagnostics.flash_attention_dispatch_calls > 0u);
-  if (host_is_aarch64()) {
+  if (host_is_aarch64() || host_is_x86_64()) {
     CHECK(diagnostics.optimized_flash_dispatch_calls > 0u);
     CHECK(diagnostics.shared_flash_dispatch_calls == 0u);
   } else {
@@ -1529,6 +1537,18 @@ TEST_CASE("generator_generate_quantized_contract_fixture_preserves_zero_disallow
     CHECK(diagnostics.optimized_q6_vector_prepared_q8_rhs_i8mm_dispatch_calls == 0u);
     CHECK(diagnostics.optimized_q6_vector_prepared_q8_rhs_dispatch_calls == 0u);
 #endif
+  } else if (host_is_x86_64()) {
+    CHECK(diagnostics.optimized_q2_dispatch_calls > 0u);
+    CHECK(diagnostics.shared_q2_dispatch_calls == 0u);
+    CHECK(diagnostics.optimized_q3_dispatch_calls > 0u);
+    CHECK(diagnostics.shared_q3_dispatch_calls == 0u);
+    CHECK(diagnostics.optimized_q6_dispatch_calls > 0u);
+    CHECK(diagnostics.shared_q6_dispatch_calls == 0u);
+    CHECK(diagnostics.optimized_q6_vector_dispatch_calls == 0u);
+    CHECK(diagnostics.optimized_q6_vector_packed_dispatch_calls == 0u);
+    CHECK(diagnostics.optimized_q6_vector_packed_q8_rhs_dispatch_calls == 0u);
+    CHECK(diagnostics.optimized_q6_vector_prepared_q8_rhs_dispatch_calls == 0u);
+    CHECK(diagnostics.optimized_q6_vector_prepared_q8_rhs_i8mm_dispatch_calls == 0u);
   } else {
     CHECK(diagnostics.optimized_q6_vector_dispatch_calls == 0u);
     CHECK(diagnostics.optimized_q6_vector_packed_dispatch_calls == 0u);

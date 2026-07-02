@@ -7,6 +7,7 @@
 #include <string_view>
 
 #include "emel/diarization/sortformer/detail.hpp"
+#include "emel/kernel/sm.hpp"
 #include "emel/model/data.hpp"
 
 namespace emel::diarization::sortformer::modules::detail {
@@ -39,7 +40,8 @@ struct contract {
 bool bind_contract(const emel::model::data & model_data,
                    contract & contract_out) noexcept;
 
-bool compute_encoder_projection(std::span<const float, k_encoder_dim> encoder_frame,
+bool compute_encoder_projection(emel::kernel::sm & kernel,
+                                std::span<const float, k_encoder_dim> encoder_frame,
                                 std::span<const float, k_hidden_dim * k_encoder_dim> weights,
                                 std::span<const float, k_hidden_dim> bias,
                                 std::span<float, k_hidden_dim> hidden_out) noexcept;
@@ -49,6 +51,7 @@ bool prepare_encoder_projection_weight_cache(
     emel::diarization::sortformer::detail::dense_weight_cache & cache) noexcept;
 
 bool compute_encoder_projection_batch(
+    emel::kernel::sm & kernel,
     std::span<const float> encoder_frames,
     size_t frame_count,
     std::span<const float, k_hidden_dim * k_encoder_dim> weights,

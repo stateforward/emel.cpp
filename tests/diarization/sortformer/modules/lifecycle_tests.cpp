@@ -9,11 +9,17 @@
 #include "emel/diarization/sortformer/cache/detail.hpp"
 #include "emel/diarization/sortformer/modules/detail.hpp"
 #include "emel/model/data.hpp"
+#include "../../../kernel/test_helpers.hpp"
 
 namespace {
 
 namespace cache_detail = emel::diarization::sortformer::cache::detail;
 namespace modules_detail = emel::diarization::sortformer::modules::detail;
+
+emel::kernel::sm & test_kernel() {
+  static emel::kernel::sm kernel{emel::kernel::detect_host_kind()};
+  return kernel;
+}
 
 struct tensor_spec {
   std::string_view name = {};
@@ -56,7 +62,7 @@ void append_tensor(emel::model::data & model, const tensor_spec & spec) {
 void build_modules_model(emel::model::data & model,
                          const bool include_all_tensors,
                          const bool valid_shapes) {
-  std::memset(&model, 0, sizeof(model));
+  emel::tests::reset_model_data(model);
   for (size_t index = 0u; index < k_specs.size(); ++index) {
     if (!include_all_tensors && index == k_specs.size() - 1u) {
       continue;
@@ -131,7 +137,7 @@ TEST_CASE("sortformer modules compute projection and speaker logits") {
   weights[1] = 0.25f;
   bias[0] = 0.125f;
 
-  REQUIRE(modules_detail::compute_encoder_projection(encoder_frame, weights, bias, hidden));
+  REQUIRE(modules_detail::compute_encoder_projection(test_kernel(), encoder_frame, weights, bias, hidden));
   CHECK(hidden[0] == doctest::Approx(0.875f));
 
   std::array<float, modules_detail::k_hidden_dim> cached_hidden = {};

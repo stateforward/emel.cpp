@@ -11,11 +11,17 @@
 #include "emel/diarization/sortformer/modules/detail.hpp"
 #include "emel/diarization/sortformer/output/detail.hpp"
 #include "emel/model/data.hpp"
+#include "../../../kernel/test_helpers.hpp"
 
 namespace {
 
 namespace modules_detail = emel::diarization::sortformer::modules::detail;
 namespace output_detail = emel::diarization::sortformer::output::detail;
+
+emel::kernel::sm & test_kernel() {
+  static emel::kernel::sm kernel{emel::kernel::detect_host_kind()};
+  return kernel;
+}
 
 struct tensor_spec {
   std::string_view name = {};
@@ -58,7 +64,7 @@ struct modules_fixture {
                          0.0f);
 
   modules_fixture() {
-    std::memset(&model, 0, sizeof(model));
+    emel::tests::reset_model_data(model);
     for (int32_t index = 0; index < modules_detail::k_hidden_dim; ++index) {
       frame_hidden[(static_cast<size_t>(index) * static_cast<size_t>(modules_detail::k_hidden_dim)) +
                    static_cast<size_t>(index)] = 1.0f;
@@ -126,7 +132,7 @@ TEST_CASE("sortformer output computes deterministic speaker probabilities") {
   std::vector<float> probabilities(static_cast<size_t>(
       output_detail::k_required_probability_value_count));
 
-  REQUIRE(output_detail::compute_speaker_probabilities(hidden_frames,
+  REQUIRE(output_detail::compute_speaker_probabilities(test_kernel(), hidden_frames,
                                                        contract,
                                                        probabilities));
   CHECK(probabilities[0] == doctest::Approx(0.5f));
@@ -135,7 +141,7 @@ TEST_CASE("sortformer output computes deterministic speaker probabilities") {
   CHECK(probabilities[3] == doctest::Approx(1.0f / (1.0f + std::exp(-2.0f))));
 
   std::vector<float> second(probabilities.size());
-  REQUIRE(output_detail::compute_speaker_probabilities(hidden_frames, contract, second));
+  REQUIRE(output_detail::compute_speaker_probabilities(test_kernel(), hidden_frames, contract, second));
   CHECK(second == probabilities);
 }
 
@@ -162,7 +168,7 @@ TEST_CASE("sortformer output uses non-aliased frame-hidden projection") {
   std::vector<float> probabilities(static_cast<size_t>(
       output_detail::k_required_probability_value_count), 0.0f);
 
-  REQUIRE(output_detail::compute_speaker_probabilities(hidden_frames,
+  REQUIRE(output_detail::compute_speaker_probabilities(test_kernel(), hidden_frames,
                                                        contract,
                                                        probabilities));
   CHECK(probabilities[0] == doctest::Approx(1.0f / (1.0f + std::exp(-0.75f))));
@@ -178,19 +184,19 @@ TEST_CASE("sortformer output rejects invalid probability inputs") {
       output_detail::k_required_hidden_value_count - 1), 0.0f);
   std::vector<float> probabilities(static_cast<size_t>(
       output_detail::k_required_probability_value_count));
-  CHECK_FALSE(output_detail::compute_speaker_probabilities(hidden_frames,
+  CHECK_FALSE(output_detail::compute_speaker_probabilities(test_kernel(), hidden_frames,
                                                           contract,
                                                           probabilities));
 
   hidden_frames.resize(static_cast<size_t>(output_detail::k_required_hidden_value_count));
   probabilities.resize(static_cast<size_t>(output_detail::k_required_probability_value_count - 1));
-  CHECK_FALSE(output_detail::compute_speaker_probabilities(hidden_frames,
+  CHECK_FALSE(output_detail::compute_speaker_probabilities(test_kernel(), hidden_frames,
                                                           contract,
                                                           probabilities));
 
   probabilities.resize(static_cast<size_t>(output_detail::k_required_probability_value_count));
   modules_detail::contract empty_contract = {};
-  CHECK_FALSE(output_detail::compute_speaker_probabilities(hidden_frames,
+  CHECK_FALSE(output_detail::compute_speaker_probabilities(test_kernel(), hidden_frames,
                                                           empty_contract,
                                                           probabilities));
 }

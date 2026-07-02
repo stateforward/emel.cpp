@@ -14,9 +14,9 @@
 #endif
 
 #include "emel/error/error.hpp"
-#include "emel/kernel/aarch64/actions.hpp"
 #include "emel/kernel/detail.hpp"
 #include "emel/kernel/events.hpp"
+#include "emel/kernel/sm.hpp"
 #include "emel/model/data.hpp"
 #include "emel/speech/encoder/whisper/errors.hpp"
 
@@ -310,14 +310,14 @@ inline float dot_linear_row(const emel::model::data::tensor_record &weight,
 template <uint64_t In, uint64_t Out, bool HasBias,
           aux_weight_variant Aux = aux_weight_variant::q8_0>
 inline void
-linear_q8_0_quantized_input(const emel::model::data::tensor_record &weight,
+linear_q8_0_quantized_input(::emel::kernel::sm &kernel,
+                            const emel::model::data::tensor_record &weight,
                             const emel::model::data::tensor_record *bias,
                             const float *input, float *output) noexcept {
   const uint64_t row_bytes =
       ::emel::kernel::detail::quantized_row_storage_bytes(
           ::emel::kernel::detail::dtype_q8_0, In);
-#if defined(__aarch64__) || defined(__ARM_NEON)
-  ::emel::kernel::event::op_mul_mat request{
+  const ::emel::kernel::event::op_mul_mat request{
       .src0 =
           {
               .data = weight.data,
@@ -351,27 +351,8 @@ linear_q8_0_quantized_input(const emel::model::data::tensor_record &weight,
                       sizeof(float) * Out,
                   },
           },
-      .nth = 1u,
   };
-  ::emel::kernel::aarch64::detail::execute_neon_mul_mat_q8_0_vector_unchecked(
-      request);
-#else
-  constexpr uint64_t block_count = In / ::emel::kernel::detail::quant::QK8_0;
-  std::array<::emel::kernel::detail::quant::block_q8_0,
-             static_cast<size_t>(block_count)>
-      input_blocks = {};
-  ::emel::kernel::detail::quant::quantize_row_q8_0_strided(
-      input, 1u, input_blocks.data(), static_cast<int64_t>(In));
-  for (uint64_t row = 0; row < Out; ++row) {
-    const auto *row_base =
-        static_cast<const uint8_t *>(weight.data) + row * row_bytes;
-    const auto *weight_blocks =
-        reinterpret_cast<const ::emel::kernel::detail::quant::block_q8_0 *>(
-            row_base);
-    output[row] = ::emel::kernel::detail::dot_q8_0_q8_0_row_scalar(
-        weight_blocks, input_blocks.data(), block_count);
-  }
-#endif
+  (void)kernel.process_event(request);
   if constexpr (HasBias) {
     for (uint64_t row = 0; row < Out; ++row) {
       output[row] += read_aux_vector<Aux>(*bias, row);
@@ -594,13 +575,15 @@ inline void layer_norm_frame(const float *input,
 
 template <linear_weight_variant Variant, uint64_t In, uint64_t Out,
           aux_weight_variant Aux = aux_weight_variant::q8_0>
-inline void linear(const emel::model::data::tensor_record &weight,
+inline void linear(::emel::kernel::sm &kernel,
+                   const emel::model::data::tensor_record &weight,
                    const emel::model::data::tensor_record &bias,
                    const float *input, float *output) noexcept {
   if constexpr (Variant == linear_weight_variant::q8_0) {
-    linear_q8_0_quantized_input<In, Out, true, Aux>(weight, &bias, input,
-                                                    output);
+    linear_q8_0_quantized_input<In, Out, true, Aux>(kernel, weight, &bias,
+                                                    input, output);
   } else {
+    (void)kernel;
     for (uint64_t row = 0; row < Out; ++row) {
       output[row] = dot_linear_row<Variant>(weight, row, input, In) +
                     read_aux_vector<Aux>(bias, row);
@@ -609,11 +592,14 @@ inline void linear(const emel::model::data::tensor_record &weight,
 }
 
 template <linear_weight_variant Variant, uint64_t In, uint64_t Out>
-inline void linear_no_bias(const emel::model::data::tensor_record &weight,
+inline void linear_no_bias(::emel::kernel::sm &kernel,
+                           const emel::model::data::tensor_record &weight,
                            const float *input, float *output) noexcept {
   if constexpr (Variant == linear_weight_variant::q8_0) {
-    linear_q8_0_quantized_input<In, Out, false>(weight, nullptr, input, output);
+    linear_q8_0_quantized_input<In, Out, false>(kernel, weight, nullptr, input,
+                                                output);
   } else {
+    (void)kernel;
     for (uint64_t row = 0; row < Out; ++row) {
       output[row] = dot_linear_row<Variant>(weight, row, input, In);
     }
@@ -773,10 +759,10 @@ inline uint64_t write_layer_tensor_name(char *output, const char *prefix,
 
 template <linear_weight_variant Variant, aux_weight_variant Aux>
 inline void
-run_encoder_layer(const emel::model::data &model, const uint64_t layer,
-                  const uint64_t encoder_frames, float *hidden, float *next,
-                  float *q, float *k, float *v, float *attn, float *norm,
-                  float *ff, float *scores) noexcept {
+run_encoder_layer(::emel::kernel::sm &kernel, const emel::model::data &model,
+                  const uint64_t layer, const uint64_t encoder_frames,
+                  float *hidden, float *next, float *q, float *k, float *v,
+                  float *attn, float *norm, float *ff, float *scores) noexcept {
   char name[96] = {};
   const auto layer_tensor = [&](const char *suffix) noexcept {
     const uint64_t name_size =
@@ -806,11 +792,14 @@ run_encoder_layer(const emel::model::data &model, const uint64_t layer,
         hidden + frame * static_cast<uint64_t>(k_embedding_length);
     layer_norm_frame<Aux>(frame_in, ln1_w, ln1_b, norm);
     linear<Variant, k_embedding_length, k_embedding_length, Aux>(
-        q_w, q_b, norm, q + frame * static_cast<uint64_t>(k_embedding_length));
+        kernel, q_w, q_b, norm,
+        q + frame * static_cast<uint64_t>(k_embedding_length));
     linear_no_bias<Variant, k_embedding_length, k_embedding_length>(
-        k_w, norm, k + frame * static_cast<uint64_t>(k_embedding_length));
+        kernel, k_w, norm,
+        k + frame * static_cast<uint64_t>(k_embedding_length));
     linear<Variant, k_embedding_length, k_embedding_length, Aux>(
-        v_w, v_b, norm, v + frame * static_cast<uint64_t>(k_embedding_length));
+        kernel, v_w, v_b, norm,
+        v + frame * static_cast<uint64_t>(k_embedding_length));
   }
 
   const float scale =
@@ -845,8 +834,8 @@ run_encoder_layer(const emel::model::data &model, const uint64_t layer,
       }
     }
     linear<Variant, k_embedding_length, k_embedding_length, Aux>(
-        o_w, o_b, attn + frame * static_cast<uint64_t>(k_embedding_length),
-        norm);
+        kernel, o_w, o_b,
+        attn + frame * static_cast<uint64_t>(k_embedding_length), norm);
     for (uint64_t dim = 0; dim < static_cast<uint64_t>(k_embedding_length);
          ++dim) {
       next[frame * static_cast<uint64_t>(k_embedding_length) + dim] =
@@ -860,13 +849,13 @@ run_encoder_layer(const emel::model::data &model, const uint64_t layer,
         next + frame * static_cast<uint64_t>(k_embedding_length);
     layer_norm_frame<Aux>(frame_data, ln2_w, ln2_b, norm);
     linear<Variant, k_embedding_length, k_feed_forward_length, Aux>(
-        fc1_w, fc1_b, norm, ff);
+        kernel, fc1_w, fc1_b, norm, ff);
     for (uint64_t dim = 0; dim < static_cast<uint64_t>(k_feed_forward_length);
          ++dim) {
       ff[dim] = gelu(ff[dim]);
     }
     linear<Variant, k_feed_forward_length, k_embedding_length, Aux>(
-        fc2_w, fc2_b, ff, norm);
+        kernel, fc2_w, fc2_b, ff, norm);
     for (uint64_t dim = 0; dim < static_cast<uint64_t>(k_embedding_length);
          ++dim) {
       hidden[frame * static_cast<uint64_t>(k_embedding_length) + dim] =
@@ -888,10 +877,10 @@ inline uint64_t digest_f32(const float *values, const uint64_t count) noexcept {
 
 template <linear_weight_variant Variant,
           aux_weight_variant Aux = aux_weight_variant::q8_0>
-inline uint64_t run_encoder(const emel::model::data &model, const float *pcm,
-                            const uint64_t sample_count, float *workspace,
-                            float *output,
-                            uint64_t &encoder_frames_out) noexcept {
+inline uint64_t
+run_encoder(::emel::kernel::sm &kernel, const emel::model::data &model,
+            const float *pcm, const uint64_t sample_count, float *workspace,
+            float *output, uint64_t &encoder_frames_out) noexcept {
   const uint64_t mel_frames = mel_frame_count_for_samples(sample_count);
   const uint64_t encoder_frames =
       encoder_frame_count_for_mel_frames(mel_frames);
@@ -941,8 +930,9 @@ inline uint64_t run_encoder(const emel::model::data &model, const float *pcm,
 
   for (uint64_t layer = 0; layer < static_cast<uint64_t>(k_encoder_block_count);
        ++layer) {
-    run_encoder_layer<Variant, Aux>(model, layer, encoder_frames, hidden, next,
-                                    q, k, v, attn, norm, ff, scores);
+    run_encoder_layer<Variant, Aux>(kernel, model, layer, encoder_frames,
+                                    hidden, next, q, k, v, attn, norm, ff,
+                                    scores);
   }
 
   const auto &final_w = *find_tensor(

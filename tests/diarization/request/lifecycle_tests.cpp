@@ -15,6 +15,7 @@
 #include "emel/diarization/request/sm.hpp"
 #include "emel/error/error.hpp"
 #include "emel/model/sortformer/detail.hpp"
+#include "../../kernel/test_helpers.hpp"
 
 namespace {
 
@@ -91,7 +92,7 @@ struct request_model_fixture {
       std::vector<float>(static_cast<size_t>(feature_extractor_detail::k_window_length), 1.0f);
 
   request_model_fixture() {
-    std::memset(&model, 0, sizeof(model));
+    emel::tests::reset_model_data(model);
 
     for (int32_t mel = 0; mel < feature_extractor_detail::k_feature_bin_count; ++mel) {
       for (int32_t bin = 0; bin < feature_extractor_detail::k_fft_bin_count; ++bin) {

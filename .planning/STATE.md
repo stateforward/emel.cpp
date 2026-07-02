@@ -1,17 +1,16 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.26
-milestone_name: I/O Staged Read Loading Strategy
-status: complete
-stopped_at: "v1.26 phases complete; milestone audit passed"
-last_updated: "2026-05-08T22:50:00.000Z"
-last_activity: 2026-05-08
+milestone: v1.27
+milestone_name: Ryzen AVX2/FMA Kernel Support
+status: ready_for_next_milestone
+stopped_at: "v1.27 shipped and archived; next step is new milestone definition"
+last_updated: "2026-06-25T14:35:28.048Z"
+last_activity: 2026-06-25
 progress:
-  # Matches v1.26 section in .planning/ROADMAP.md (Phases 227-238 inclusive).
-  total_phases: 12
-  completed_phases: 12
-  total_plans: 12
-  completed_plans: 12
+  total_phases: 6
+  completed_phases: 6
+  total_plans: 6
+  completed_plans: 6
   percent: 100
 ---
 
@@ -19,101 +18,109 @@ progress:
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-05-07)
+See: .planning/PROJECT.md (updated 2026-06-25)
 
 **Core value:** Prove real end-to-end behavior with explicit SML orchestration and
 parity-oriented verification before widening API surface or model scope.
 
-**Current focus:** Define and execute milestone `v1.26 I/O Staged Read Loading
-Strategy` (GitHub issue #63): bounded `src/emel/io/staged_read` actor for
-chunked constrained-memory loads through the tensor-to-I/O boundary (#60),
-tensor-owned residency unchanged, cooperative coroutine scheduling out of scope
-unless separately approved.
+**Current focus:** Define the next milestone after shipping native x86_64
+AVX2/FMA support for this AMD Ryzen 9 5950X host.
 
 ## Current Position
 
-Milestone: v1.26 I/O Staged Read Loading Strategy — complete (**Phases 227–238** complete).
-Status: **`v1.26-MILESTONE-AUDIT.md`** reports `status: passed`; **`ESG-02B`** remains
-deferred/future by design.
-Phase: none pending.
-Last activity: 2026-05-08 — Phase 238 reconciled summary frontmatter, embedded probe reporting
-truth, and the final source-backed milestone audit after the Phase 237 direct tensor staged-load
-offset repair.
+Milestone: v1.27 Ryzen AVX2/FMA Kernel Support
+Status: v1.27 shipped and archived. Phases 239-244 verified and the
+source-backed milestone audit passed. The repaired `kernel_x86_64` benchmark
+suite includes counter-checked optimized flash and q2/q3/q6 rows.
+Phase: ready for next milestone definition.
+Last activity: 2026-06-25 — `snapshots/bench/benchmarks.txt` plus the
+maintained LFM2 `10`, `100`, and `1000` token generation baselines were
+updated, the source-backed `XBN-01` benchmark gap was repaired, the x86_64
+unary SML rule debt was removed, focused validation and the changed-file scoped
+quality gate passed, the milestone audit passed, and the milestone was archived.
 
-Progress: [||||||||||] 100%
+Progress: [##########] 100%
 
-**Evidence (Phase 238 cleanup PASS — 2026-05-08):**
+**Host feature scope:**
 
-- Summary frontmatter source scan — pass.
-- Embedded probe `used_io_strategy` evidence scan — pass.
-- Phase 238 changed-file `scripts/quality_gates.sh` — exit **0**.
-- Final `.planning/v1.26-MILESTONE-AUDIT.md` — `status: passed`.
+- CPU: AMD Ryzen 9 5950X 16-Core Processor.
+- Supported target features: x86_64 AVX2, FMA, and F16C conversion.
+- Explicit no-claim features: AVX-512, AVX-VNNI, AMX, BF16, native FP16, and GPU
+  acceleration.
 
-Phase 237 source repair evidence remains in `237-VERIFICATION.md`.
+**Next implementation step:** define the next milestone with `$gsd-new-milestone`.
 
-**Residual / preserved gate truth:**
-
-- **Phase 235:** quality gate **not attempted** in final milestone-only pass; Phase 235 makes **no** separate `scripts/quality_gates.sh` pass claim.
-- **Phase 233/234:** earlier scoped gate truth remains as recorded in their phase artifacts.
-- **Phase 232:** scoped gate **exit 2** residual — **unchanged** in **`232-VERIFICATION.md`**.
-- **Phase 236:** serial full-repo quality gate **passed** with exit **0**; this is the maintained
-  milestone-level gate evidence for closeout.
-
-## Performance Metrics
-
-**Prior audited milestone:** `v1.25 I/O Read Loading Strategy` remains the latest shipped I/O milestone
-(13/13 requirements satisfied after Phase 226). v1.26 planning continues phase numbering after Phase 226.
+**Closeout gate:** complete.
 
 ## Accumulated Context
 
 ### Decisions
 
-Decisions are logged in PROJECT.md Key Decisions table. v1.26 source: GitHub issue #63.
+Decisions are logged in PROJECT.md Key Decisions table.
 
-Carry-forward architectural constraints from shipped I/O milestones:
+Carry-forward architectural constraints:
 
-- `model/tensor` remains the canonical residency owner; I/O strategies do not claim tensor buffer ownership.
-- `model/loader` stays orchestration-only with no low-level byte strategy in loader code paths.
-- Runtime behavior selection remains explicit guards and transitions (AGENTS.md / `docs/rules/sml.rules.md`).
+- Runtime behavior selection remains explicit guards and transitions
+  (`AGENTS.md` / `docs/rules/sml.rules.md`).
 
-### Pending Todos
+- Kernel arithmetic, lowering, packing, quant/dequant, and backend-specific
+  numeric work stays in the owning kernel layer.
+
+- The EMEL lane stays repo-owned and separate from llama.cpp/ggml reference
+  runtime state; reference linkage is comparison-only in tools.
+
+- Quantized kernel parity requires the same effective operand class as the
+  reference path; whole-tensor dequantize-to-f32 hot-path substitution requires
+  explicit user approval and is not part of v1.27.
+
+- Benchmark and parity claims must be source-backed by the maintained runtime
+  path, not only planning artifacts or tool-local scaffolds.
+
+### Carry-Forward Backlog
 
 - 2026-04-02 - Move eager quant prepack into generator initializer
+  (`.planning/todos/backlog/2026-04-02-move-eager-quant-prepack-into-generator-initializer.md`)
+
 - 2026-04-02 - Reuse q8 RHS across LFM2.5 prefill matmuls
+  (`.planning/todos/backlog/2026-04-02-reuse-q8-rhs-across-lfm2-5-prefill-matmuls.md`)
+
 - 2026-04-02 - Optimize LFM2.5 q4 prefill kernel
+  (`.planning/todos/backlog/2026-04-02-optimize-lfm2-5-q4-prefill-kernel.md`)
+
 - 2026-04-02 - Optimize LFM2.5 q6 prefill kernel
+  (`.planning/todos/backlog/2026-04-02-optimize-lfm2-5-q6-prefill-kernel.md`)
+
+These pre-existing LFM2.5 performance backlog items are outside the v1.27 Ryzen
+AVX2/FMA support contract and are not milestone close blockers.
 
 ### Blockers/Concerns
 
-- No active v1.26 blockers remain.
-- ESG-02B remains deferred by design until approved file-backed staged source ownership introduces real open/seek/read lifecycle semantics.
+- `ESG-02B` from v1.26 remains outside v1.27 processor scope until a file-backed
+  staged-read source path is separately approved.
+
+- v1.27 must not present AVX-512/VNNI/AMX/BF16/native-FP16 claims for this host.
 
 ### Prior milestone notes
 
-The following summarized v1.25 execution context and remains historical reference:
+`v1.26 I/O Staged Read Loading Strategy` completed on 2026-05-08. Its final
+audit passed after Phase 237 repaired direct tensor staged-load nonzero-offset
+behavior and Phase 238 reconciled artifact/reporting truth. Active v1.26
+evidence is archived under `.planning/milestones/v1.26-*`.
 
-<details>
-<summary>v1.25 phase trail (collapsed)</summary>
+## Historical Carry-Forward Items
 
-- Phase 225/226 refined read batch APIs, audit evidence, and SML hygiene for shipped `io/read`.
-- Public `read_tensor_batch` has an independent span cap; benchmarks and parity lanes use `emel::io::source::load_file_bytes` for setup-time bytes.
-
-</details>
-
-## Deferred Items
-
-Items acknowledged and deferred at v1.25 milestone close on 2026-05-06 (unchanged):
+Items acknowledged at v1.25 milestone close on 2026-05-06 (unchanged):
 
 | Category | Item | Status |
 |----------|------|--------|
-| quick_task | 260401-ejm-add-non-blocking-benchmark-binary-size-c | missing |
-| todo | 2026-04-02-move-eager-quant-prepack-into-generator-initializer.md | pending |
-| todo | 2026-04-02-optimize-lfm2-5-q4-prefill-kernel.md | pending |
-| todo | 2026-04-02-optimize-lfm2-5-q6-prefill-kernel.md | pending |
-| todo | 2026-04-02-reuse-q8-rhs-across-lfm2-5-prefill-matmuls.md | pending |
+| quick_task | 260401-ejm-add-non-blocking-benchmark-binary-size-c | complete |
+| todo | 2026-04-02-move-eager-quant-prepack-into-generator-initializer.md | backlog |
+| todo | 2026-04-02-optimize-lfm2-5-q4-prefill-kernel.md | backlog |
+| todo | 2026-04-02-optimize-lfm2-5-q6-prefill-kernel.md | backlog |
+| todo | 2026-04-02-reuse-q8-rhs-across-lfm2-5-prefill-matmuls.md | backlog |
 
 ## Session Continuity
 
-Last session: 2026-05-08 (v1.26 milestone audit and gap-closure phase creation)
-Stopped at: Phase **237** ready for discuss/plan/execute.
+Last session: 2026-06-25 (v1.27 closeout)
+Stopped at: v1.27 shipped and archived; ready for the next milestone.
 Resume file: None

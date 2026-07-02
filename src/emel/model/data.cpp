@@ -51,7 +51,16 @@ bool uses_attention_qk_norm(const std::string_view architecture) noexcept {
          uses_gemma4_block_contract(architecture);
 }
 
-bool is_lfm2_attention_layer(const int32_t block_index) noexcept {
+bool is_lfm2_attention_layer(const data &model_data,
+                             const int32_t block_index) noexcept {
+  const uint32_t pattern_count =
+      model_data.params.attention_layer_pattern_count;
+  if (pattern_count > 0u) {
+    return block_index >= 0 &&
+           static_cast<uint32_t>(block_index) < pattern_count &&
+           model_data.params.attention_layer_pattern_flags[static_cast<size_t>(
+               block_index)] != 0u;
+  }
   for (const int32_t candidate : k_lfm2_attention_layers) {
     if (candidate == block_index) {
       return true;
@@ -524,8 +533,9 @@ emel::error::type lookup_block_view(const execution_view &execution,
     return emel::error::cast(emel::model::loader::error::model_invalid);
   }
 
-  block_out.uses_attention = !uses_lfm2_block_contract(architecture) ||
-                             is_lfm2_attention_layer(block_index);
+  block_out.uses_attention =
+      !uses_lfm2_block_contract(architecture) ||
+      is_lfm2_attention_layer(*execution.model, block_index);
   if (!block_out.uses_attention) {
     const bool shortconv_ok =
         bind("shortconv.conv.weight", block_out.shortconv_conv) &&
@@ -618,7 +628,7 @@ emel::error::type build_topology(const execution_view &execution,
     uint32_t tensor_count = k_global_tensor_count;
     for (int32_t block_index = 0; block_index < execution.block_count;
          ++block_index) {
-      tensor_count += is_lfm2_attention_layer(block_index)
+      tensor_count += is_lfm2_attention_layer(*execution.model, block_index)
                           ? k_lfm2_attention_block_tensor_count
                           : k_lfm2_conv_block_tensor_count;
     }

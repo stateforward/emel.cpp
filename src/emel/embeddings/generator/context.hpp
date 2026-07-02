@@ -7,6 +7,7 @@
 
 #include "emel/kernel/detail.hpp"
 #include "emel/kernel/events.hpp"
+#include "emel/kernel/sm.hpp"
 #include "emel/model/data.hpp"
 #include "emel/model/omniembed/detail.hpp"
 #include "emel/text/conditioner/sm.hpp"
@@ -324,6 +325,7 @@ struct context {
   image_runtime image = {};
   audio_runtime audio = {};
   scratch_buffers scratch = {};
+  emel::kernel::sm kernel{emel::kernel::detect_host_kind()};
   bool initialized = false;
 };
 

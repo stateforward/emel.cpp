@@ -25,7 +25,9 @@ if(EMEL_BENCH_SUITE_FILTER STREQUAL "batch_planner" OR
    EMEL_BENCH_SUITE_FILTER STREQUAL "gbnf_rule_parser" OR
    EMEL_BENCH_SUITE_FILTER STREQUAL "flash_attention" OR
    EMEL_BENCH_SUITE_FILTER STREQUAL "kernel_x86_64" OR
-   EMEL_BENCH_SUITE_FILTER STREQUAL "kernel_aarch64")
+   EMEL_BENCH_SUITE_FILTER STREQUAL "kernel_aarch64" OR
+   EMEL_BENCH_SUITE_FILTER STREQUAL "decode_wavefront" OR
+   EMEL_BENCH_SUITE_FILTER STREQUAL "parallel_matmul")
   set(EMEL_BENCH_NEEDS_LLAMA ON)
 endif()
 
@@ -84,12 +86,62 @@ if(EMEL_BENCH_NEEDS_LLAMA)
   if(BENCH_REFERENCE_REF_VALUE STREQUAL "")
     set(BENCH_REFERENCE_REF_VALUE "${REF_IMPL_REF}")
   endif()
+
+  function(emel_patch_reference_metadata_logging reference_source_dir)
+    set(loader_path "${reference_source_dir}/src/llama-model-loader.cpp")
+    if(NOT EXISTS "${loader_path}")
+      message(FATAL_ERROR "Missing reference loader source at ${loader_path}")
+    endif()
+    file(READ "${loader_path}" loader_source)
+    set(patched_marker "            std::string value          = type == GGUF_TYPE_ARRAY")
+    string(FIND "${loader_source}" "${patched_marker}" patch_pos)
+    if(patch_pos EQUAL -1)
+      set(original_line "            std::string value          = gguf_kv_to_str(meta.get(), i);\n            const size_t MAX_VALUE_LEN = 40;")
+      set(patched_line "            std::string value          = type == GGUF_TYPE_ARRAY\n                ? \"<array>\"\n                : gguf_kv_to_str(meta.get(), i);\n            const size_t MAX_VALUE_LEN = 40;")
+      string(FIND "${loader_source}" "${original_line}" original_pos)
+      if(original_pos EQUAL -1)
+        set(original_line "            std::string value          = gguf_kv_to_str(metadata, i);\n            const size_t MAX_VALUE_LEN = 40;")
+        set(patched_line "            std::string value          = type == GGUF_TYPE_ARRAY\n                ? \"<array>\"\n                : gguf_kv_to_str(metadata, i);\n            const size_t MAX_VALUE_LEN = 40;")
+        string(FIND "${loader_source}" "${original_line}" original_pos)
+        if(original_pos EQUAL -1)
+          message(FATAL_ERROR
+            "Unable to patch reference loader metadata logging in ${loader_path}")
+        endif()
+      endif()
+      string(REPLACE "${original_line}" "${patched_line}" loader_source "${loader_source}")
+      file(WRITE "${loader_path}" "${loader_source}")
+    endif()
+
+    set(llama_path "${reference_source_dir}/src/llama.cpp")
+    if(NOT EXISTS "${llama_path}")
+      message(FATAL_ERROR "Missing reference llama source at ${llama_path}")
+    endif()
+    file(READ "${llama_path}" llama_source)
+    set(original_print "        model.load_stats(ml);\n        model.print_info();")
+    set(patched_print "        model.load_stats(ml);\n        // EMEL bench disables reference metadata-only logging here; decode remains unchanged.")
+    string(FIND "${llama_source}" "${patched_print}" print_patch_pos)
+    if(print_patch_pos EQUAL -1)
+      string(FIND "${llama_source}" "${original_print}" print_original_pos)
+      if(print_original_pos EQUAL -1)
+        message(FATAL_ERROR
+          "Unable to patch reference model info logging in ${llama_path}")
+      endif()
+      string(REPLACE "${original_print}" "${patched_print}" llama_source "${llama_source}")
+      file(WRITE "${llama_path}" "${llama_source}")
+    endif()
+  endfunction()
+
+  emel_patch_reference_metadata_logging("${reference_impl_SOURCE_DIR}")
 endif()
 
 set(EMEL_ENABLE_TESTS OFF CACHE BOOL "" FORCE)
 add_subdirectory(${EMEL_ROOT} emel)
 
 find_path(NLOHMANN_JSON_INCLUDE_DIR nlohmann/json.hpp)
+if(NOT NLOHMANN_JSON_INCLUDE_DIR AND EMEL_BENCH_NEEDS_LLAMA AND
+   EXISTS "${reference_impl_SOURCE_DIR}/vendor/nlohmann/json.hpp")
+  set(NLOHMANN_JSON_INCLUDE_DIR "${reference_impl_SOURCE_DIR}/vendor")
+endif()
 
 if(EMEL_BENCH_NEEDS_LLAMA)
   set(LLAMA_ALL_WARNINGS OFF CACHE BOOL "" FORCE)
@@ -202,8 +254,13 @@ function(configure_bench_runner_common_target target_name)
       ${CMAKE_CURRENT_SOURCE_DIR}
       ${EMEL_ROOT}/src
       ${EMEL_ROOT}/include
-      ${NLOHMANN_JSON_INCLUDE_DIR}
   )
+  if(NLOHMANN_JSON_INCLUDE_DIR)
+    target_include_directories(${target_name}
+      PRIVATE
+        ${NLOHMANN_JSON_INCLUDE_DIR}
+    )
+  endif()
   if(EMEL_BENCH_NEEDS_LLAMA)
     target_include_directories(${target_name}
       PRIVATE
@@ -211,6 +268,7 @@ function(configure_bench_runner_common_target target_name)
         ${reference_impl_SOURCE_DIR}/src
         ${reference_impl_SOURCE_DIR}/ggml/include
         ${reference_impl_SOURCE_DIR}/include
+        ${reference_impl_SOURCE_DIR}/vendor
     )
   endif()
 endfunction()
@@ -276,6 +334,13 @@ add_bench_runner_suite(logits_sampler logits/sampler_bench.cpp EMEL_BENCH_ENABLE
 add_bench_runner_suite(kernel_x86_64 kernel/x86_64_bench.cpp EMEL_BENCH_ENABLE_KERNEL_X86_64)
 add_bench_runner_suite(kernel_aarch64 kernel/aarch64_bench.cpp EMEL_BENCH_ENABLE_KERNEL_AARCH64)
 add_bench_runner_suite(sm_any sm_any_bench.cpp EMEL_BENCH_ENABLE_SM_ANY)
+add_bench_runner_suite(sm_scheduler sm_scheduler_bench.cpp EMEL_BENCH_ENABLE_SM_SCHEDULER)
+add_bench_runner_suite(graph_processor graph/processor_bench.cpp
+                       EMEL_BENCH_ENABLE_GRAPH_PROCESSOR)
+add_bench_runner_suite(decode_wavefront text/generator/decode_wavefront_bench.cpp
+                       EMEL_BENCH_ENABLE_DECODE_WAVEFRONT)
+add_bench_runner_suite(parallel_matmul text/generator/parallel_matmul_bench.cpp
+                       EMEL_BENCH_ENABLE_PARALLEL_MATMUL)
 add_bench_runner_suite(tokenizer_preprocessor_bpe text/tokenizer/preprocessor/bpe_bench.cpp
                        EMEL_BENCH_ENABLE_TOKENIZER_PREPROCESSOR_BPE)
 add_bench_runner_suite(tokenizer_preprocessor_spm text/tokenizer/preprocessor/spm_bench.cpp
