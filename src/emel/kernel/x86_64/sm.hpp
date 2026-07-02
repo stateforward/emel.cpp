@@ -354,12 +354,42 @@ struct model {
 
       , sml::state<ready> <= sml::state<ready> +
                sml::event<::emel::kernel::x86_64::event::dispatch_op_mul_mat>
+                 [ guard::guard_simd_op_mul_mat_q4_k_q8_k{} ]
+                 / action::effect_exec_simd_op_mul_mat_q4_k_q8_k
+
+      , sml::state<ready> <= sml::state<ready> +
+               sml::event<::emel::kernel::x86_64::event::dispatch_op_mul_mat>
                  [ guard::guard_simd_op_mul_mat_q6_k_q8_k{} ]
                  / action::effect_exec_simd_op_mul_mat_q6_k_q8_k
 
       , sml::state<ready> <= sml::state<ready> +
                sml::event<::emel::kernel::x86_64::event::dispatch_op_mul_mat>
-                 [ guard::simd_op_mul_mat{} ]
+                 [ guard::guard_simd_op_mul_mat_q4_0_q8_0{} ]
+                 / action::effect_exec_simd_op_mul_mat_q4_0_q8_0
+
+      , sml::state<ready> <= sml::state<ready> +
+               sml::event<::emel::kernel::x86_64::event::dispatch_op_mul_mat>
+                 [ guard::guard_simd_op_mul_mat_q4_1_q8_0{} ]
+                 / action::effect_exec_simd_op_mul_mat_q4_1_q8_0
+
+      , sml::state<ready> <= sml::state<ready> +
+               sml::event<::emel::kernel::x86_64::event::dispatch_op_mul_mat>
+                 [ guard::guard_simd_op_mul_mat_q5_0_q8_0{} ]
+                 / action::effect_exec_simd_op_mul_mat_q5_0_q8_0
+
+      , sml::state<ready> <= sml::state<ready> +
+               sml::event<::emel::kernel::x86_64::event::dispatch_op_mul_mat>
+                 [ guard::guard_simd_op_mul_mat_q8_0_q8_0{} ]
+                 / action::effect_exec_simd_op_mul_mat_q8_0_q8_0
+
+      , sml::state<ready> <= sml::state<ready> +
+               sml::event<::emel::kernel::x86_64::event::dispatch_op_mul_mat>
+                 [ guard::guard_simd_op_mul_mat_f32_fma{} ]
+                 / action::effect_exec_simd_op_mul_mat_f32_fma
+
+      , sml::state<ready> <= sml::state<ready> +
+               sml::event<::emel::kernel::x86_64::event::dispatch_op_mul_mat>
+                 [ guard::guard_simd_op_mul_mat_f32_avx2_only{} ]
                  / action::exec_simd_op_mul_mat
 
       , sml::state<ready> <= sml::state<ready> +
@@ -1143,6 +1173,14 @@ struct sm : public emel::sm<model, action::context> {
     return this->context_.shared_q3_dispatch_count;
   }
 
+  uint64_t optimized_f32_fma_dispatch_count() const noexcept {
+    return this->context_.optimized_f32_fma_dispatch_count;
+  }
+
+  uint64_t optimized_q4_dispatch_count() const noexcept {
+    return this->context_.optimized_q4_dispatch_count;
+  }
+
   uint64_t shared_q4_dispatch_count() const noexcept {
     return this->context_.shared_q4_dispatch_count;
   }
@@ -1153,6 +1191,38 @@ struct sm : public emel::sm<model, action::context> {
 
   uint64_t shared_q6_dispatch_count() const noexcept {
     return this->context_.shared_q6_dispatch_count;
+  }
+
+  uint64_t optimized_q4_0_dispatch_count() const noexcept {
+    return this->context_.optimized_q4_0_dispatch_count;
+  }
+
+  uint64_t shared_q4_0_dispatch_count() const noexcept {
+    return this->context_.shared_q4_0_dispatch_count;
+  }
+
+  uint64_t optimized_q4_1_dispatch_count() const noexcept {
+    return this->context_.optimized_q4_1_dispatch_count;
+  }
+
+  uint64_t shared_q4_1_dispatch_count() const noexcept {
+    return this->context_.shared_q4_1_dispatch_count;
+  }
+
+  uint64_t optimized_q5_0_dispatch_count() const noexcept {
+    return this->context_.optimized_q5_0_dispatch_count;
+  }
+
+  uint64_t shared_q5_0_dispatch_count() const noexcept {
+    return this->context_.shared_q5_0_dispatch_count;
+  }
+
+  uint64_t optimized_q8_0_dispatch_count() const noexcept {
+    return this->context_.optimized_q8_0_dispatch_count;
+  }
+
+  uint64_t shared_q8_0_dispatch_count() const noexcept {
+    return this->context_.shared_q8_0_dispatch_count;
   }
 
   uint64_t flash_attn_workspace_prepared_tokens() const noexcept {
