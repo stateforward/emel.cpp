@@ -3073,9 +3073,69 @@ inline bool run_mul_mat(const request_type & request) noexcept {
       request.dst.ne[2] != 1 || request.dst.ne[3] != 1;
   const bool valid = !(has_empty_dim || shape_mismatch || invalid_rank);
   const uint8_t src0_type = dtype_code(request.src0.type);
+  const bool q4_0_src0 = is_q4_0_dtype(src0_type);
+  const bool q4_1_src0 = is_q4_1_dtype(src0_type);
   const bool q5_0_src0 = is_q5_0_dtype(src0_type);
   const bool q8_0_src0 = is_q8_0_dtype(src0_type);
   const bool quantized_src0 = is_quantized_k_dtype(src0_type);
+
+  if (valid && q4_0_src0) {
+    const auto * b_dense = static_cast<const float *>(request.src1.data);
+    auto * c_dense = static_cast<float *>(request.dst.data);
+    const auto * a_base = static_cast<const uint8_t *>(request.src0.data);
+    const size_t row_bytes = request.src0.nb[1];
+    const uint64_t block_count = k / quant::QK4_0;
+    std::array<quant::block_q8_0, quant::MAX_Q8_0_BLOCKS> q8_blocks = {};
+    if (block_count > q8_blocks.size()) {
+      return false;
+    }
+
+    for (uint64_t j = 0; j < n; ++j) {
+      for (uint64_t i = 0; i < m; ++i) {
+        c_dense[i * n + j] = 0.0f;
+      }
+      for (uint64_t block = 0; block < block_count; ++block) {
+        quant::quantize_row_q8_0_strided(
+            b_dense + block * quant::QK4_0 * n + j, n, &q8_blocks[block], quant::QK4_0);
+      }
+      for (uint64_t i = 0; i < m; ++i) {
+        const uint8_t * row_ptr = a_base + i * row_bytes;
+        c_dense[i * n + j] = dot_q4_0_q8_0_row_scalar(
+            reinterpret_cast<const quant::block_q4_0 *>(row_ptr), q8_blocks.data(), block_count);
+      }
+    }
+
+    return true;
+  }
+
+  if (valid && q4_1_src0) {
+    const auto * b_dense = static_cast<const float *>(request.src1.data);
+    auto * c_dense = static_cast<float *>(request.dst.data);
+    const auto * a_base = static_cast<const uint8_t *>(request.src0.data);
+    const size_t row_bytes = request.src0.nb[1];
+    const uint64_t block_count = k / quant::QK4_1;
+    std::array<quant::block_q8_0, quant::MAX_Q8_0_BLOCKS> q8_blocks = {};
+    if (block_count > q8_blocks.size()) {
+      return false;
+    }
+
+    for (uint64_t j = 0; j < n; ++j) {
+      for (uint64_t i = 0; i < m; ++i) {
+        c_dense[i * n + j] = 0.0f;
+      }
+      for (uint64_t block = 0; block < block_count; ++block) {
+        quant::quantize_row_q8_0_strided(
+            b_dense + block * quant::QK4_1 * n + j, n, &q8_blocks[block], quant::QK4_1);
+      }
+      for (uint64_t i = 0; i < m; ++i) {
+        const uint8_t * row_ptr = a_base + i * row_bytes;
+        c_dense[i * n + j] = dot_q4_1_q8_0_row_scalar(
+            reinterpret_cast<const quant::block_q4_1 *>(row_ptr), q8_blocks.data(), block_count);
+      }
+    }
+
+    return true;
+  }
 
   if (valid && q5_0_src0) {
     const auto * b_dense = static_cast<const float *>(request.src1.data);

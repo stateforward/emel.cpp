@@ -190,7 +190,8 @@ struct data {
     std::array<uint8_t, k_max_metadata_arrays>
         attention_sliding_window_pattern_flags = {};
     uint32_t attention_layer_pattern_count = 0;
-    std::array<uint8_t, k_max_metadata_arrays> attention_layer_pattern_flags = {};
+    std::array<uint8_t, k_max_metadata_arrays> attention_layer_pattern_flags =
+        {};
     float attention_scale = 0.0f;
     float attention_output_scale = 0.0f;
     int32_t attention_temperature_length = 0;

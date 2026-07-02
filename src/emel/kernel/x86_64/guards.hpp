@@ -18,6 +18,28 @@ template <class dispatch_event_type> struct simd_op {
   }
 };
 
+struct guard_simd_op_mul_mat_f32_fma {
+  bool operator()(
+      const ::emel::kernel::x86_64::event::dispatch_op_mul_mat &ev,
+      const action::context &ctx) const noexcept {
+    if (!::emel::kernel::detail::validate_dispatch_request(ev.request)) {
+      return false;
+    }
+    return ::emel::kernel::x86_64::detail::can_use_avx2_fma_f32_mul_mat(
+        ev.request, ctx.host_features);
+  }
+};
+
+struct guard_simd_op_mul_mat_f32_avx2_only {
+  bool operator()(
+      const ::emel::kernel::x86_64::event::dispatch_op_mul_mat &ev,
+      const action::context &ctx) const noexcept {
+    return simd_op<::emel::kernel::x86_64::event::dispatch_op_mul_mat>{}(
+               ev, ctx) &&
+           !guard_simd_op_mul_mat_f32_fma{}(ev, ctx);
+  }
+};
+
 struct guard_simd_op_mul_mat_q2_k_q8_k {
   bool operator()(
       const ::emel::kernel::x86_64::event::dispatch_op_mul_mat &ev,
@@ -42,6 +64,18 @@ struct guard_simd_op_mul_mat_q3_k_q8_k {
   }
 };
 
+struct guard_simd_op_mul_mat_q4_k_q8_k {
+  bool operator()(
+      const ::emel::kernel::x86_64::event::dispatch_op_mul_mat &ev,
+      const action::context &ctx) const noexcept {
+    if (!::emel::kernel::detail::validate_dispatch_request(ev.request)) {
+      return false;
+    }
+    return ::emel::kernel::x86_64::detail::
+        can_use_avx2_fma_q4_k_q8_k_mul_mat(ev.request, ctx.host_features);
+  }
+};
+
 struct guard_simd_op_mul_mat_q6_k_q8_k {
   bool operator()(
       const ::emel::kernel::x86_64::event::dispatch_op_mul_mat &ev,
@@ -51,6 +85,54 @@ struct guard_simd_op_mul_mat_q6_k_q8_k {
     }
     return ::emel::kernel::x86_64::detail::
         can_use_avx2_fma_q6_k_q8_k_mul_mat(ev.request, ctx.host_features);
+  }
+};
+
+struct guard_simd_op_mul_mat_q4_0_q8_0 {
+  bool operator()(
+      const ::emel::kernel::x86_64::event::dispatch_op_mul_mat &ev,
+      const action::context &ctx) const noexcept {
+    if (!::emel::kernel::detail::validate_dispatch_request(ev.request)) {
+      return false;
+    }
+    return ::emel::kernel::x86_64::detail::
+        can_use_avx2_fma_q4_0_q8_0_mul_mat(ev.request, ctx.host_features);
+  }
+};
+
+struct guard_simd_op_mul_mat_q4_1_q8_0 {
+  bool operator()(
+      const ::emel::kernel::x86_64::event::dispatch_op_mul_mat &ev,
+      const action::context &ctx) const noexcept {
+    if (!::emel::kernel::detail::validate_dispatch_request(ev.request)) {
+      return false;
+    }
+    return ::emel::kernel::x86_64::detail::
+        can_use_avx2_fma_q4_1_q8_0_mul_mat(ev.request, ctx.host_features);
+  }
+};
+
+struct guard_simd_op_mul_mat_q5_0_q8_0 {
+  bool operator()(
+      const ::emel::kernel::x86_64::event::dispatch_op_mul_mat &ev,
+      const action::context &ctx) const noexcept {
+    if (!::emel::kernel::detail::validate_dispatch_request(ev.request)) {
+      return false;
+    }
+    return ::emel::kernel::x86_64::detail::
+        can_use_avx2_fma_q5_0_q8_0_mul_mat(ev.request, ctx.host_features);
+  }
+};
+
+struct guard_simd_op_mul_mat_q8_0_q8_0 {
+  bool operator()(
+      const ::emel::kernel::x86_64::event::dispatch_op_mul_mat &ev,
+      const action::context &ctx) const noexcept {
+    if (!::emel::kernel::detail::validate_dispatch_request(ev.request)) {
+      return false;
+    }
+    return ::emel::kernel::x86_64::detail::
+        can_use_avx2_fma_q8_0_q8_0_mul_mat(ev.request, ctx.host_features);
   }
 };
 
@@ -69,7 +151,12 @@ template <class dispatch_event_type> struct valid_op {
       return !simd_op<dispatch_event_type>{}(ev, ctx) &&
              !guard_simd_op_mul_mat_q2_k_q8_k{}(ev, ctx) &&
              !guard_simd_op_mul_mat_q3_k_q8_k{}(ev, ctx) &&
-             !guard_simd_op_mul_mat_q6_k_q8_k{}(ev, ctx);
+             !guard_simd_op_mul_mat_q4_k_q8_k{}(ev, ctx) &&
+             !guard_simd_op_mul_mat_q6_k_q8_k{}(ev, ctx) &&
+             !guard_simd_op_mul_mat_q4_0_q8_0{}(ev, ctx) &&
+             !guard_simd_op_mul_mat_q4_1_q8_0{}(ev, ctx) &&
+             !guard_simd_op_mul_mat_q5_0_q8_0{}(ev, ctx) &&
+             !guard_simd_op_mul_mat_q8_0_q8_0{}(ev, ctx);
     }
     return !simd_op<dispatch_event_type>{}(ev, ctx);
   }
@@ -119,7 +206,12 @@ template <class dispatch_event_type> struct invalid_op {
       return !simd_op<dispatch_event_type>{}(ev, ctx) &&
              !guard_simd_op_mul_mat_q2_k_q8_k{}(ev, ctx) &&
              !guard_simd_op_mul_mat_q3_k_q8_k{}(ev, ctx) &&
+             !guard_simd_op_mul_mat_q4_k_q8_k{}(ev, ctx) &&
              !guard_simd_op_mul_mat_q6_k_q8_k{}(ev, ctx) &&
+             !guard_simd_op_mul_mat_q4_0_q8_0{}(ev, ctx) &&
+             !guard_simd_op_mul_mat_q4_1_q8_0{}(ev, ctx) &&
+             !guard_simd_op_mul_mat_q5_0_q8_0{}(ev, ctx) &&
+             !guard_simd_op_mul_mat_q8_0_q8_0{}(ev, ctx) &&
              !valid_op<dispatch_event_type>{}(ev, ctx);
     }
     return !simd_op<dispatch_event_type>{}(ev, ctx) &&

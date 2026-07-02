@@ -31,10 +31,18 @@ using emel::kernel::test::to_fp16_storage;
 using emel::kernel::test::within_flash_online_f16_tolerance;
 
 using emel::kernel::detail::quant::QK_K;
+using emel::kernel::detail::quant::QK4_0;
+using emel::kernel::detail::quant::QK4_1;
+using emel::kernel::detail::quant::QK5_0;
+using emel::kernel::detail::quant::QK8_0;
 using emel::kernel::detail::quant::block_q2_k;
 using emel::kernel::detail::quant::block_q3_k;
+using emel::kernel::detail::quant::block_q4_0;
+using emel::kernel::detail::quant::block_q4_1;
 using emel::kernel::detail::quant::block_q4_k;
+using emel::kernel::detail::quant::block_q5_0;
 using emel::kernel::detail::quant::block_q6_k;
+using emel::kernel::detail::quant::block_q8_0;
 using emel::kernel::detail::quant::block_q8_k;
 
 template <size_t block_count>
@@ -105,6 +113,40 @@ void fill_q6_block(block_q6_k & q6, const uint32_t salt) {
   for (size_t i = 0; i < q6.qh.size(); ++i) {
     q6.qh[i] =
         static_cast<uint8_t>((i * (7u + salt)) ^ (0x95u - salt));
+  }
+}
+
+void fill_q4_0_block(block_q4_0 & q4, const uint32_t salt) {
+  q4.d = static_cast<uint16_t>(0x3c00u + (salt % 17u));
+  for (size_t i = 0; i < q4.qs.size(); ++i) {
+    q4.qs[i] = static_cast<uint8_t>((i * (7u + salt)) ^ (0x53u + salt));
+  }
+}
+
+void fill_q4_1_block(block_q4_1 & q4, const uint32_t salt) {
+  q4.d = static_cast<uint16_t>(0x3c00u + (salt % 19u));
+  q4.m = static_cast<uint16_t>(0x3800u + (salt % 11u));
+  for (size_t i = 0; i < q4.qs.size(); ++i) {
+    q4.qs[i] = static_cast<uint8_t>((i * (11u + salt)) ^ (0x2eu + salt));
+  }
+}
+
+void fill_q5_0_block(block_q5_0 & q5, const uint32_t salt) {
+  q5.d = static_cast<uint16_t>(0x3c00u + (salt % 13u));
+  for (size_t i = 0; i < q5.qh.size(); ++i) {
+    q5.qh[i] = static_cast<uint8_t>((i * (29u + salt)) ^ (0xb4u - salt));
+  }
+  for (size_t i = 0; i < q5.qs.size(); ++i) {
+    q5.qs[i] = static_cast<uint8_t>((i * (13u + salt)) ^ (0x71u + salt));
+  }
+}
+
+void fill_q8_0_block(block_q8_0 & q8, const uint32_t salt) {
+  q8.d = static_cast<uint16_t>(0x3c00u + (salt % 23u));
+  for (size_t i = 0; i < q8.qs.size(); ++i) {
+    const int32_t centered =
+        static_cast<int32_t>(((i + salt) * (5u + salt)) % 251u) - 125;
+    q8.qs[i] = static_cast<int8_t>(centered);
   }
 }
 
@@ -290,6 +332,31 @@ TEST_CASE("kernel_x86_64_q3_row_avx2_fma_matches_scalar") {
   CHECK(optimized == doctest::Approx(scalar).epsilon(1e-6f));
 }
 
+TEST_CASE("kernel_x86_64_q4_row_avx2_fma_matches_scalar") {
+  if (!host_has_avx2_fma()) {
+    return;
+  }
+
+  constexpr size_t block_count = 4u;
+  std::array<block_q4_k, block_count> q4_blocks = {};
+  for (size_t block = 0; block < block_count; ++block) {
+    fill_q4_block(q4_blocks[block], static_cast<uint32_t>(block + 9u));
+  }
+
+  const auto rhs_values = make_quantized_rhs_values<block_count>(13u);
+  std::array<block_q8_k, block_count> q8_blocks = {};
+  emel::kernel::detail::quant::quantize_row_q8_k_strided(
+      rhs_values.data(), 1u, q8_blocks.data(), static_cast<int64_t>(QK_K * block_count));
+
+  const float scalar = emel::kernel::detail::dot_q4_k_q8_k_row_scalar(
+      q4_blocks.data(), q8_blocks.data(), block_count);
+  const float optimized =
+      emel::kernel::x86_64::detail::dot_q4_k_q8_k_row_avx2_fma(
+          q4_blocks.data(), q8_blocks.data(), block_count);
+
+  CHECK(optimized == doctest::Approx(scalar).epsilon(1e-6f));
+}
+
 TEST_CASE("kernel_x86_64_q2_mul_mat_uses_optimized_and_shared_routes") {
   constexpr size_t block_count = 2u;
   constexpr uint64_t k = QK_K * block_count;
@@ -410,7 +477,7 @@ TEST_CASE("kernel_x86_64_q3_mul_mat_uses_optimized_and_shared_routes") {
   }
 }
 
-TEST_CASE("kernel_x86_64_q4_mul_mat_reports_shared_route") {
+TEST_CASE("kernel_x86_64_q4_mul_mat_uses_optimized_and_shared_routes") {
   constexpr size_t block_count = 2u;
   constexpr uint64_t k = QK_K * block_count;
   constexpr uint64_t rows = 2u;
@@ -435,6 +502,24 @@ TEST_CASE("kernel_x86_64_q4_mul_mat_reports_shared_route") {
   };
   CHECK(emel::kernel::detail::execute_scalar(scalar_ev));
 
+  if (host_has_avx2_fma()) {
+    float optimized_out[rows * cols] = {};
+    const emel::kernel::event::op_mul_mat optimized_ev{
+        .src0 = make_quantized_src(q4_rows.data(), dtype::q4_k, k, rows),
+        .src1 = make_src(rhs.data(), dtype::f32, cols, k),
+        .dst = make_dst(optimized_out, dtype::f32, cols, rows),
+    };
+    x86_64_sm optimized_machine{
+        emel::kernel::x86_64::action::context{avx2_fma_contract(true), {}, 0}};
+
+    CHECK(optimized_machine.process_event(optimized_ev));
+    CHECK(optimized_machine.optimized_q4_dispatch_count() == 1u);
+    CHECK(optimized_machine.shared_q4_dispatch_count() == 0u);
+    for (size_t i = 0; i < std::size(optimized_out); ++i) {
+      CHECK(optimized_out[i] == doctest::Approx(expected[i]).epsilon(1e-6f));
+    }
+  }
+
   float shared_out[rows * cols] = {};
   const emel::kernel::event::op_mul_mat shared_ev{
       .src0 = make_quantized_src(q4_rows.data(), dtype::q4_k, k, rows),
@@ -442,10 +527,371 @@ TEST_CASE("kernel_x86_64_q4_mul_mat_reports_shared_route") {
       .dst = make_dst(shared_out, dtype::f32, cols, rows),
   };
   x86_64_sm shared_machine{
-      emel::kernel::x86_64::action::context{avx2_fma_contract(true), {}, 0}};
+      emel::kernel::x86_64::action::context{avx2_fma_contract(false), {}, 0}};
 
   CHECK(shared_machine.process_event(shared_ev));
+  CHECK(shared_machine.optimized_q4_dispatch_count() == 0u);
   CHECK(shared_machine.shared_q4_dispatch_count() == 1u);
+  for (size_t i = 0; i < std::size(shared_out); ++i) {
+    CHECK(shared_out[i] == doctest::Approx(expected[i]).epsilon(1e-6f));
+  }
+}
+
+TEST_CASE("kernel_x86_64_q4_0_row_avx2_fma_matches_scalar") {
+  if (!host_has_avx2_fma()) {
+    return;
+  }
+
+  constexpr size_t block_count = 8u;
+  constexpr size_t k = QK4_0 * block_count;
+  std::array<block_q4_0, block_count> q4_blocks = {};
+  for (size_t block = 0; block < block_count; ++block) {
+    fill_q4_0_block(q4_blocks[block], static_cast<uint32_t>(block + 3u));
+  }
+
+  std::array<float, k> rhs_values = {};
+  for (size_t i = 0; i < rhs_values.size(); ++i) {
+    const int32_t centered = static_cast<int32_t>((i * 5u) % 43u) - 21;
+    rhs_values[i] = static_cast<float>(centered) * 0.03125f;
+  }
+  std::array<block_q8_0, block_count> q8_blocks = {};
+  emel::kernel::detail::quant::quantize_row_q8_0_strided(
+      rhs_values.data(), 1u, q8_blocks.data(), static_cast<int64_t>(k));
+
+  const float scalar = emel::kernel::detail::dot_q4_0_q8_0_row_scalar(
+      q4_blocks.data(), q8_blocks.data(), block_count);
+  const float optimized =
+      emel::kernel::x86_64::detail::dot_q4_0_q8_0_row_avx2_fma(
+          q4_blocks.data(), q8_blocks.data(), block_count);
+
+  CHECK(optimized == doctest::Approx(scalar).epsilon(1e-6f));
+}
+
+TEST_CASE("kernel_x86_64_q4_1_row_avx2_fma_matches_scalar") {
+  if (!host_has_avx2_fma()) {
+    return;
+  }
+
+  constexpr size_t block_count = 8u;
+  constexpr size_t k = QK4_1 * block_count;
+  std::array<block_q4_1, block_count> q4_blocks = {};
+  for (size_t block = 0; block < block_count; ++block) {
+    fill_q4_1_block(q4_blocks[block], static_cast<uint32_t>(block + 5u));
+  }
+
+  std::array<float, k> rhs_values = {};
+  for (size_t i = 0; i < rhs_values.size(); ++i) {
+    const int32_t centered = static_cast<int32_t>((i * 7u) % 39u) - 19;
+    rhs_values[i] = static_cast<float>(centered) * 0.03125f;
+  }
+  std::array<block_q8_0, block_count> q8_blocks = {};
+  emel::kernel::detail::quant::quantize_row_q8_0_strided(
+      rhs_values.data(), 1u, q8_blocks.data(), static_cast<int64_t>(k));
+
+  const float scalar = emel::kernel::detail::dot_q4_1_q8_0_row_scalar(
+      q4_blocks.data(), q8_blocks.data(), block_count);
+  const float optimized =
+      emel::kernel::x86_64::detail::dot_q4_1_q8_0_row_avx2_fma(
+          q4_blocks.data(), q8_blocks.data(), block_count);
+
+  CHECK(optimized == doctest::Approx(scalar).epsilon(1e-6f));
+}
+
+TEST_CASE("kernel_x86_64_q5_0_row_avx2_fma_matches_scalar") {
+  if (!host_has_avx2_fma()) {
+    return;
+  }
+
+  constexpr size_t block_count = 8u;
+  constexpr size_t k = QK5_0 * block_count;
+  std::array<block_q5_0, block_count> q5_blocks = {};
+  for (size_t block = 0; block < block_count; ++block) {
+    fill_q5_0_block(q5_blocks[block], static_cast<uint32_t>(block + 7u));
+  }
+
+  std::array<float, k> rhs_values = {};
+  for (size_t i = 0; i < rhs_values.size(); ++i) {
+    const int32_t centered = static_cast<int32_t>((i * 11u) % 47u) - 23;
+    rhs_values[i] = static_cast<float>(centered) * 0.03125f;
+  }
+  std::array<block_q8_0, block_count> q8_blocks = {};
+  emel::kernel::detail::quant::quantize_row_q8_0_strided(
+      rhs_values.data(), 1u, q8_blocks.data(), static_cast<int64_t>(k));
+
+  const float scalar = emel::kernel::detail::dot_q5_0_q8_0_row_scalar(
+      q5_blocks.data(), q8_blocks.data(), block_count);
+  const float optimized =
+      emel::kernel::x86_64::detail::dot_q5_0_q8_0_row_avx2_fma(
+          q5_blocks.data(), q8_blocks.data(), block_count);
+
+  CHECK(optimized == doctest::Approx(scalar).epsilon(1e-6f));
+}
+
+TEST_CASE("kernel_x86_64_q8_0_row_avx2_fma_matches_scalar") {
+  if (!host_has_avx2_fma()) {
+    return;
+  }
+
+  constexpr size_t block_count = 8u;
+  constexpr size_t k = QK8_0 * block_count;
+  std::array<block_q8_0, block_count> lhs_blocks = {};
+  for (size_t block = 0; block < block_count; ++block) {
+    fill_q8_0_block(lhs_blocks[block], static_cast<uint32_t>(block + 9u));
+  }
+
+  std::array<float, k> rhs_values = {};
+  for (size_t i = 0; i < rhs_values.size(); ++i) {
+    const int32_t centered = static_cast<int32_t>((i * 13u) % 51u) - 25;
+    rhs_values[i] = static_cast<float>(centered) * 0.03125f;
+  }
+  std::array<block_q8_0, block_count> q8_blocks = {};
+  emel::kernel::detail::quant::quantize_row_q8_0_strided(
+      rhs_values.data(), 1u, q8_blocks.data(), static_cast<int64_t>(k));
+
+  const float scalar = emel::kernel::detail::dot_q8_0_q8_0_row_scalar(
+      lhs_blocks.data(), q8_blocks.data(), block_count);
+  const float optimized =
+      emel::kernel::x86_64::detail::dot_q8_0_q8_0_row_avx2_fma(
+          lhs_blocks.data(), q8_blocks.data(), block_count);
+
+  CHECK(optimized == doctest::Approx(scalar).epsilon(1e-6f));
+}
+
+TEST_CASE("kernel_x86_64_q4_0_mul_mat_uses_optimized_and_shared_routes") {
+  constexpr size_t block_count = 4u;
+  constexpr uint64_t k = QK4_0 * block_count;
+  constexpr uint64_t rows = 2u;
+  constexpr uint64_t cols = 2u;
+
+  std::array<block_q4_0, rows * block_count> q4_rows = {};
+  for (size_t idx = 0; idx < q4_rows.size(); ++idx) {
+    fill_q4_0_block(q4_rows[idx], static_cast<uint32_t>(idx + 31u));
+  }
+
+  std::array<float, k * cols> rhs = {};
+  for (size_t i = 0; i < rhs.size(); ++i) {
+    const int32_t centered = static_cast<int32_t>((i * 7u) % 37u) - 18;
+    rhs[i] = static_cast<float>(centered) * 0.0625f;
+  }
+
+  float expected[rows * cols] = {};
+  const emel::kernel::event::op_mul_mat scalar_ev{
+      .src0 = make_quantized_src(q4_rows.data(), dtype::q4_0, k, rows),
+      .src1 = make_src(rhs.data(), dtype::f32, cols, k),
+      .dst = make_dst(expected, dtype::f32, cols, rows),
+  };
+  CHECK(emel::kernel::detail::execute_scalar(scalar_ev));
+
+  if (host_has_avx2_fma()) {
+    float optimized_out[rows * cols] = {};
+    const emel::kernel::event::op_mul_mat optimized_ev{
+        .src0 = make_quantized_src(q4_rows.data(), dtype::q4_0, k, rows),
+        .src1 = make_src(rhs.data(), dtype::f32, cols, k),
+        .dst = make_dst(optimized_out, dtype::f32, cols, rows),
+    };
+    x86_64_sm optimized_machine{
+        emel::kernel::x86_64::action::context{avx2_fma_contract(true), {}, 0}};
+
+    CHECK(optimized_machine.process_event(optimized_ev));
+    CHECK(optimized_machine.optimized_q4_0_dispatch_count() == 1u);
+    CHECK(optimized_machine.shared_q4_0_dispatch_count() == 0u);
+    for (size_t i = 0; i < std::size(optimized_out); ++i) {
+      CHECK(optimized_out[i] == doctest::Approx(expected[i]).epsilon(1e-6f));
+    }
+  }
+
+  float shared_out[rows * cols] = {};
+  const emel::kernel::event::op_mul_mat shared_ev{
+      .src0 = make_quantized_src(q4_rows.data(), dtype::q4_0, k, rows),
+      .src1 = make_src(rhs.data(), dtype::f32, cols, k),
+      .dst = make_dst(shared_out, dtype::f32, cols, rows),
+  };
+  x86_64_sm shared_machine{
+      emel::kernel::x86_64::action::context{avx2_fma_contract(false), {}, 0}};
+
+  CHECK(shared_machine.process_event(shared_ev));
+  CHECK(shared_machine.optimized_q4_0_dispatch_count() == 0u);
+  CHECK(shared_machine.shared_q4_0_dispatch_count() == 1u);
+  for (size_t i = 0; i < std::size(shared_out); ++i) {
+    CHECK(shared_out[i] == doctest::Approx(expected[i]).epsilon(1e-6f));
+  }
+}
+
+TEST_CASE("kernel_x86_64_q4_1_mul_mat_uses_optimized_and_shared_routes") {
+  constexpr size_t block_count = 4u;
+  constexpr uint64_t k = QK4_1 * block_count;
+  constexpr uint64_t rows = 2u;
+  constexpr uint64_t cols = 2u;
+
+  std::array<block_q4_1, rows * block_count> q4_rows = {};
+  for (size_t idx = 0; idx < q4_rows.size(); ++idx) {
+    fill_q4_1_block(q4_rows[idx], static_cast<uint32_t>(idx + 37u));
+  }
+
+  std::array<float, k * cols> rhs = {};
+  for (size_t i = 0; i < rhs.size(); ++i) {
+    const int32_t centered = static_cast<int32_t>((i * 5u) % 33u) - 16;
+    rhs[i] = static_cast<float>(centered) * 0.0625f;
+  }
+
+  float expected[rows * cols] = {};
+  const emel::kernel::event::op_mul_mat scalar_ev{
+      .src0 = make_quantized_src(q4_rows.data(), dtype::q4_1, k, rows),
+      .src1 = make_src(rhs.data(), dtype::f32, cols, k),
+      .dst = make_dst(expected, dtype::f32, cols, rows),
+  };
+  CHECK(emel::kernel::detail::execute_scalar(scalar_ev));
+
+  if (host_has_avx2_fma()) {
+    float optimized_out[rows * cols] = {};
+    const emel::kernel::event::op_mul_mat optimized_ev{
+        .src0 = make_quantized_src(q4_rows.data(), dtype::q4_1, k, rows),
+        .src1 = make_src(rhs.data(), dtype::f32, cols, k),
+        .dst = make_dst(optimized_out, dtype::f32, cols, rows),
+    };
+    x86_64_sm optimized_machine{
+        emel::kernel::x86_64::action::context{avx2_fma_contract(true), {}, 0}};
+
+    CHECK(optimized_machine.process_event(optimized_ev));
+    CHECK(optimized_machine.optimized_q4_1_dispatch_count() == 1u);
+    CHECK(optimized_machine.shared_q4_1_dispatch_count() == 0u);
+    for (size_t i = 0; i < std::size(optimized_out); ++i) {
+      CHECK(optimized_out[i] == doctest::Approx(expected[i]).epsilon(1e-6f));
+    }
+  }
+
+  float shared_out[rows * cols] = {};
+  const emel::kernel::event::op_mul_mat shared_ev{
+      .src0 = make_quantized_src(q4_rows.data(), dtype::q4_1, k, rows),
+      .src1 = make_src(rhs.data(), dtype::f32, cols, k),
+      .dst = make_dst(shared_out, dtype::f32, cols, rows),
+  };
+  x86_64_sm shared_machine{
+      emel::kernel::x86_64::action::context{avx2_fma_contract(false), {}, 0}};
+
+  CHECK(shared_machine.process_event(shared_ev));
+  CHECK(shared_machine.optimized_q4_1_dispatch_count() == 0u);
+  CHECK(shared_machine.shared_q4_1_dispatch_count() == 1u);
+  for (size_t i = 0; i < std::size(shared_out); ++i) {
+    CHECK(shared_out[i] == doctest::Approx(expected[i]).epsilon(1e-6f));
+  }
+}
+
+TEST_CASE("kernel_x86_64_q5_0_mul_mat_uses_optimized_and_shared_routes") {
+  constexpr size_t block_count = 4u;
+  constexpr uint64_t k = QK5_0 * block_count;
+  constexpr uint64_t rows = 2u;
+  constexpr uint64_t cols = 2u;
+
+  std::array<block_q5_0, rows * block_count> q5_rows = {};
+  for (size_t idx = 0; idx < q5_rows.size(); ++idx) {
+    fill_q5_0_block(q5_rows[idx], static_cast<uint32_t>(idx + 41u));
+  }
+
+  std::array<float, k * cols> rhs = {};
+  for (size_t i = 0; i < rhs.size(); ++i) {
+    const int32_t centered = static_cast<int32_t>((i * 11u) % 41u) - 20;
+    rhs[i] = static_cast<float>(centered) * 0.0625f;
+  }
+
+  float expected[rows * cols] = {};
+  const emel::kernel::event::op_mul_mat scalar_ev{
+      .src0 = make_quantized_src(q5_rows.data(), dtype::q5_0, k, rows),
+      .src1 = make_src(rhs.data(), dtype::f32, cols, k),
+      .dst = make_dst(expected, dtype::f32, cols, rows),
+  };
+  CHECK(emel::kernel::detail::execute_scalar(scalar_ev));
+
+  if (host_has_avx2_fma()) {
+    float optimized_out[rows * cols] = {};
+    const emel::kernel::event::op_mul_mat optimized_ev{
+        .src0 = make_quantized_src(q5_rows.data(), dtype::q5_0, k, rows),
+        .src1 = make_src(rhs.data(), dtype::f32, cols, k),
+        .dst = make_dst(optimized_out, dtype::f32, cols, rows),
+    };
+    x86_64_sm optimized_machine{
+        emel::kernel::x86_64::action::context{avx2_fma_contract(true), {}, 0}};
+
+    CHECK(optimized_machine.process_event(optimized_ev));
+    CHECK(optimized_machine.optimized_q5_0_dispatch_count() == 1u);
+    CHECK(optimized_machine.shared_q5_0_dispatch_count() == 0u);
+    for (size_t i = 0; i < std::size(optimized_out); ++i) {
+      CHECK(optimized_out[i] == doctest::Approx(expected[i]).epsilon(1e-6f));
+    }
+  }
+
+  float shared_out[rows * cols] = {};
+  const emel::kernel::event::op_mul_mat shared_ev{
+      .src0 = make_quantized_src(q5_rows.data(), dtype::q5_0, k, rows),
+      .src1 = make_src(rhs.data(), dtype::f32, cols, k),
+      .dst = make_dst(shared_out, dtype::f32, cols, rows),
+  };
+  x86_64_sm shared_machine{
+      emel::kernel::x86_64::action::context{avx2_fma_contract(false), {}, 0}};
+
+  CHECK(shared_machine.process_event(shared_ev));
+  CHECK(shared_machine.optimized_q5_0_dispatch_count() == 0u);
+  CHECK(shared_machine.shared_q5_0_dispatch_count() == 1u);
+  for (size_t i = 0; i < std::size(shared_out); ++i) {
+    CHECK(shared_out[i] == doctest::Approx(expected[i]).epsilon(1e-6f));
+  }
+}
+
+TEST_CASE("kernel_x86_64_q8_0_mul_mat_uses_optimized_and_shared_routes") {
+  constexpr size_t block_count = 4u;
+  constexpr uint64_t k = QK8_0 * block_count;
+  constexpr uint64_t rows = 2u;
+  constexpr uint64_t cols = 2u;
+
+  std::array<block_q8_0, rows * block_count> q8_rows = {};
+  for (size_t idx = 0; idx < q8_rows.size(); ++idx) {
+    fill_q8_0_block(q8_rows[idx], static_cast<uint32_t>(idx + 43u));
+  }
+
+  std::array<float, k * cols> rhs = {};
+  for (size_t i = 0; i < rhs.size(); ++i) {
+    const int32_t centered = static_cast<int32_t>((i * 13u) % 45u) - 22;
+    rhs[i] = static_cast<float>(centered) * 0.0625f;
+  }
+
+  float expected[rows * cols] = {};
+  const emel::kernel::event::op_mul_mat scalar_ev{
+      .src0 = make_quantized_src(q8_rows.data(), dtype::q8_0, k, rows),
+      .src1 = make_src(rhs.data(), dtype::f32, cols, k),
+      .dst = make_dst(expected, dtype::f32, cols, rows),
+  };
+  CHECK(emel::kernel::detail::execute_scalar(scalar_ev));
+
+  if (host_has_avx2_fma()) {
+    float optimized_out[rows * cols] = {};
+    const emel::kernel::event::op_mul_mat optimized_ev{
+        .src0 = make_quantized_src(q8_rows.data(), dtype::q8_0, k, rows),
+        .src1 = make_src(rhs.data(), dtype::f32, cols, k),
+        .dst = make_dst(optimized_out, dtype::f32, cols, rows),
+    };
+    x86_64_sm optimized_machine{
+        emel::kernel::x86_64::action::context{avx2_fma_contract(true), {}, 0}};
+
+    CHECK(optimized_machine.process_event(optimized_ev));
+    CHECK(optimized_machine.optimized_q8_0_dispatch_count() == 1u);
+    CHECK(optimized_machine.shared_q8_0_dispatch_count() == 0u);
+    for (size_t i = 0; i < std::size(optimized_out); ++i) {
+      CHECK(optimized_out[i] == doctest::Approx(expected[i]).epsilon(1e-6f));
+    }
+  }
+
+  float shared_out[rows * cols] = {};
+  const emel::kernel::event::op_mul_mat shared_ev{
+      .src0 = make_quantized_src(q8_rows.data(), dtype::q8_0, k, rows),
+      .src1 = make_src(rhs.data(), dtype::f32, cols, k),
+      .dst = make_dst(shared_out, dtype::f32, cols, rows),
+  };
+  x86_64_sm shared_machine{
+      emel::kernel::x86_64::action::context{avx2_fma_contract(false), {}, 0}};
+
+  CHECK(shared_machine.process_event(shared_ev));
+  CHECK(shared_machine.optimized_q8_0_dispatch_count() == 0u);
+  CHECK(shared_machine.shared_q8_0_dispatch_count() == 1u);
   for (size_t i = 0; i < std::size(shared_out); ++i) {
     CHECK(shared_out[i] == doctest::Approx(expected[i]).epsilon(1e-6f));
   }
@@ -984,6 +1430,118 @@ TEST_CASE("kernel_x86_64_mul_mat_simd_matches_scalar_tiled_edges") {
   for (uint64_t idx = 0; idx < dst_simd.size(); ++idx) {
     CHECK(dst_simd[static_cast<size_t>(idx)] ==
           doctest::Approx(dst_scalar[static_cast<size_t>(idx)]).epsilon(1e-5f));
+  }
+}
+
+TEST_CASE("kernel_x86_64_f32_mul_mat_fma_simd_matches_scalar_tiled_edges") {
+  if (!host_has_avx2_fma()) {
+    return;
+  }
+
+  constexpr uint64_t k = 131;
+  constexpr uint64_t m = 7;
+  constexpr uint64_t n = 73;
+
+  std::array<float, k * m> src0{};
+  std::array<float, k * n> src1{};
+  std::array<float, n * m> dst_simd{};
+  std::array<float, n * m> dst_scalar{};
+
+  for (uint64_t i = 0; i < src0.size(); ++i) {
+    const int64_t centered = static_cast<int64_t>(i % 17u) - 8;
+    src0[static_cast<size_t>(i)] = static_cast<float>(centered) * 0.0625f;
+  }
+  for (uint64_t i = 0; i < src1.size(); ++i) {
+    const int64_t centered = static_cast<int64_t>(i % 23u) - 11;
+    src1[static_cast<size_t>(i)] = static_cast<float>(centered) * 0.03125f;
+  }
+
+  const emel::kernel::event::op_mul_mat simd_ev{
+      .src0 = make_src(src0.data(), dtype::f32, k, m),
+      .src1 = make_src(src1.data(), dtype::f32, n, k),
+      .dst = make_dst(dst_simd.data(), dtype::f32, n, m),
+  };
+  const emel::kernel::event::op_mul_mat scalar_ev{
+      .src0 = make_src(src0.data(), dtype::f32, k, m),
+      .src1 = make_src(src1.data(), dtype::f32, n, k),
+      .dst = make_dst(dst_scalar.data(), dtype::f32, n, m),
+  };
+
+  CHECK(emel::kernel::x86_64::detail::execute_avx2_fma_mul_mat(simd_ev));
+  CHECK(emel::kernel::detail::execute_scalar(scalar_ev));
+
+  for (uint64_t idx = 0; idx < dst_simd.size(); ++idx) {
+    CHECK(dst_simd[static_cast<size_t>(idx)] ==
+          doctest::Approx(dst_scalar[static_cast<size_t>(idx)]).epsilon(1e-5f));
+  }
+}
+
+TEST_CASE("kernel_x86_64_f32_mul_mat_uses_fma_and_avx2_only_routes") {
+  const bool host_avx2 =
+      emel::kernel::x86_64::detail::avx2_intrinsics_compiled &&
+      emel::kernel::x86_64::detail::detect_avx2();
+  if (!host_avx2) {
+    return;
+  }
+
+  constexpr uint64_t k = 16;
+  constexpr uint64_t m = 4;
+  constexpr uint64_t n = 8;
+
+  std::array<float, k * m> src0{};
+  std::array<float, k * n> src1{};
+  for (uint64_t i = 0; i < src0.size(); ++i) {
+    const int64_t centered = static_cast<int64_t>(i % 13u) - 6;
+    src0[static_cast<size_t>(i)] = static_cast<float>(centered) * 0.125f;
+  }
+  for (uint64_t i = 0; i < src1.size(); ++i) {
+    const int64_t centered = static_cast<int64_t>(i % 19u) - 9;
+    src1[static_cast<size_t>(i)] = static_cast<float>(centered) * 0.0625f;
+  }
+
+  std::array<float, n * m> expected{};
+  const emel::kernel::event::op_mul_mat scalar_ev{
+      .src0 = make_src(src0.data(), dtype::f32, k, m),
+      .src1 = make_src(src1.data(), dtype::f32, n, k),
+      .dst = make_dst(expected.data(), dtype::f32, n, m),
+  };
+  CHECK(emel::kernel::detail::execute_scalar(scalar_ev));
+
+  if (host_has_avx2_fma()) {
+    std::array<float, n * m> fma_out{};
+    const emel::kernel::event::op_mul_mat fma_ev{
+        .src0 = make_src(src0.data(), dtype::f32, k, m),
+        .src1 = make_src(src1.data(), dtype::f32, n, k),
+        .dst = make_dst(fma_out.data(), dtype::f32, n, m),
+    };
+    x86_64_sm fma_machine{
+        emel::kernel::x86_64::action::context{avx2_fma_contract(true), {}, 0}};
+
+    CHECK(fma_machine.process_event(fma_ev));
+    CHECK(fma_machine.optimized_f32_fma_dispatch_count() == 1u);
+    for (size_t i = 0; i < expected.size(); ++i) {
+      CHECK(fma_out[i] == doctest::Approx(expected[i]).epsilon(1e-5f));
+    }
+  }
+
+  std::array<float, n * m> avx2_out{};
+  const emel::kernel::event::op_mul_mat avx2_ev{
+      .src0 = make_src(src0.data(), dtype::f32, k, m),
+      .src1 = make_src(src1.data(), dtype::f32, n, k),
+      .dst = make_dst(avx2_out.data(), dtype::f32, n, m),
+  };
+  const emel::kernel::x86_64::detail::host_feature_contract avx2_only_contract{
+      .avx2_available = true,
+      .fma_available = false,
+      .f16c_available = false,
+  };
+  x86_64_sm avx2_machine{
+      emel::kernel::x86_64::action::context{avx2_only_contract, {}, 0}};
+
+  CHECK(avx2_machine.process_event(avx2_ev));
+  CHECK(avx2_machine.optimized_f32_fma_dispatch_count() == 0u);
+  for (size_t i = 0; i < expected.size(); ++i) {
+    CHECK(avx2_out[i] == doctest::Approx(expected[i]).epsilon(1e-5f));
   }
 }
 

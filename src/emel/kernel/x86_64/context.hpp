@@ -222,9 +222,19 @@ struct context {
   uint64_t shared_q2_dispatch_count = 0;
   uint64_t optimized_q3_dispatch_count = 0;
   uint64_t shared_q3_dispatch_count = 0;
+  uint64_t optimized_f32_fma_dispatch_count = 0;
+  uint64_t optimized_q4_dispatch_count = 0;
   uint64_t shared_q4_dispatch_count = 0;
   uint64_t optimized_q6_dispatch_count = 0;
   uint64_t shared_q6_dispatch_count = 0;
+  uint64_t optimized_q4_0_dispatch_count = 0;
+  uint64_t shared_q4_0_dispatch_count = 0;
+  uint64_t optimized_q4_1_dispatch_count = 0;
+  uint64_t shared_q4_1_dispatch_count = 0;
+  uint64_t optimized_q5_0_dispatch_count = 0;
+  uint64_t shared_q5_0_dispatch_count = 0;
+  uint64_t optimized_q8_0_dispatch_count = 0;
+  uint64_t shared_q8_0_dispatch_count = 0;
   // TODO(emel): remove once dispatch observability no longer relies on this
   // counter.
   uint64_t dispatch_generation = 0;
