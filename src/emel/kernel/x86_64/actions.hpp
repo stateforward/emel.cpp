@@ -600,6 +600,12 @@ inline __m256i expand_high_bits_32_avx2(const uint8_t *qh) noexcept {
   return _mm256_cmpeq_epi8(selected, _mm256_set1_epi64x(-1ll));
 }
 
+// Precondition: y lanes must be > -128. _mm256_sign_epi8 cannot negate -128
+// (two's-complement wrap), so a -128 y lane paired with a negative x lane
+// would flip the product sign. Every caller passes activations produced by
+// quantize_row_q8_0_strided, which clamps to [-127, 127]; x (weight lanes,
+// which may hold -128 in q8_0 model data) is only ever abs'd, where the
+// u8 reinterpretation of -128 as 128 is exact.
 EMEL_KERNEL_X86_AVX2_FMA_TARGET
 inline __m256i dot_i8_pairs_i32x8_avx2(const __m256i x,
                                        const __m256i y) noexcept {
