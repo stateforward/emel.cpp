@@ -1160,6 +1160,14 @@ struct seanet_plan_layer {
   const emel::model::data::tensor_record *res3_weight = nullptr;
   const emel::model::data::tensor_record *res3_bias = nullptr;
   int64_t in_length = 0;
+  // Resolved geometry: GGUF collapses trailing size-1 dims, so channel
+  // counts derive from the chain walk plus element counts, never from the
+  // dim list alone.
+  int64_t taps = 0;
+  int64_t in_channels = 0;
+  int64_t out_channels = 0;
+  int64_t res_taps = 0;
+  int64_t res_half = 0;
 };
 
 struct transformer_plan {
@@ -1183,26 +1191,49 @@ struct codec_plan {
   bool valid = false;
 };
 
-bool conv_dims(const emel::model::data::tensor_record *weight, int64_t &taps,
-               int64_t &in_channels, int64_t &out_channels) noexcept {
-  if (weight == nullptr || weight->n_dims < 2 || weight->n_dims > 3) {
+// Resolves conv geometry given the input channel count known from the chain
+// walk: taps from dim 0, out channels from the element count.
+bool resolve_conv_geometry(const emel::model::data::tensor_record *weight,
+                           const int64_t in_channels, int64_t &taps_out,
+                           int64_t &out_channels_out) noexcept {
+  if (weight == nullptr || weight->n_dims < 1 || weight->n_dims > 3 ||
+      in_channels <= 0) {
     return false;
   }
-  taps = weight->dims[0];
-  in_channels = weight->n_dims == 3 ? weight->dims[1] : 1;
-  out_channels = weight->n_dims == 3 ? weight->dims[2] : weight->dims[1];
-  return taps > 0 && in_channels > 0 && out_channels > 0;
+  taps_out = weight->dims[0];
+  if (taps_out <= 0) {
+    return false;
+  }
+  const uint64_t total = tensor_elements(*weight);
+  const uint64_t divisor =
+      static_cast<uint64_t>(taps_out) * static_cast<uint64_t>(in_channels);
+  if (divisor == 0u || total % divisor != 0u) {
+    return false;
+  }
+  out_channels_out = static_cast<int64_t>(total / divisor);
+  return out_channels_out > 0;
+}
+
+uint64_t conv_prepared_floats(const int64_t taps, const int64_t in_channels,
+                              const int64_t out_channels) noexcept {
+  return static_cast<uint64_t>(taps) * static_cast<uint64_t>(in_channels) *
+             static_cast<uint64_t>(out_channels) +
+         static_cast<uint64_t>(out_channels);
 }
 
 bool plan_seanet(
     const emel::model::data &model_data, const char *family,
     const std::array<seanet_layer_spec, k_max_seanet_layers> &topology,
     std::array<seanet_plan_layer, k_max_seanet_layers> &layers_out,
-    int64_t &length, codec_extents &extents, uint64_t &prepared) noexcept {
-  char format[64] = {};
+    int64_t &length, int64_t &channels, codec_extents &extents,
+    uint64_t &prepared) noexcept {
+  char conv_format[64] = {};
+  char convtr_format[64] = {};
   char res_format[72] = {};
-  std::snprintf(format, sizeof(format), "mimi.%s.model.%%d.conv.conv.%%s",
-                family);
+  std::snprintf(conv_format, sizeof(conv_format),
+                "mimi.%s.model.%%d.conv.conv.%%s", family);
+  std::snprintf(convtr_format, sizeof(convtr_format),
+                "mimi.%s.model.%%d.convtr.convtr.%%s", family);
   std::snprintf(res_format, sizeof(res_format), "mimi.%s.model.%%d.block.%%s",
                 family);
 
@@ -1212,6 +1243,7 @@ bool plan_seanet(
     layer.kind = spec.kind;
     layer.stride = spec.stride;
     layer.in_length = length;
+    layer.in_channels = channels;
     if (spec.kind == seanet_layer_kind::elu) {
       continue;
     }
@@ -1224,70 +1256,52 @@ bool plan_seanet(
                                             "3.conv.conv.weight");
       layer.res3_bias =
           find_layer_tensor(model_data, res_format, index, "3.conv.conv.bias");
-      int64_t taps = 0;
-      int64_t in_channels = 0;
-      int64_t out_channels = 0;
-      if (!conv_dims(layer.res1_weight, taps, in_channels, out_channels) ||
-          layer.res3_weight == nullptr) {
+      int64_t res_half = 0;
+      int64_t res_out = 0;
+      if (!resolve_conv_geometry(layer.res1_weight, channels, layer.res_taps,
+                                 res_half) ||
+          !resolve_conv_geometry(layer.res3_weight, res_half,
+                                 layer.out_channels, res_out) ||
+          layer.out_channels != 1 || res_out != channels) {
         return false;
       }
-      account_conv(extents, in_channels, out_channels, taps, 1, length, false);
-      prepared += static_cast<uint64_t>(taps) *
-                      static_cast<uint64_t>(in_channels) *
-                      static_cast<uint64_t>(out_channels) +
-                  static_cast<uint64_t>(out_channels);
-      if (!conv_dims(layer.res3_weight, taps, in_channels, out_channels)) {
-        return false;
-      }
-      account_conv(extents, in_channels, out_channels, taps, 1, length, false);
-      prepared += static_cast<uint64_t>(taps) *
-                      static_cast<uint64_t>(in_channels) *
-                      static_cast<uint64_t>(out_channels) +
-                  static_cast<uint64_t>(out_channels);
+      // res3 is a k1 conv (out_channels slot above held its taps=1)
+      layer.out_channels = channels;
+      layer.res_half = res_half;
+      account_conv(extents, channels, res_half, layer.res_taps, 1, length,
+                   false);
+      account_conv(extents, res_half, channels, 1, 1, length, false);
+      prepared += conv_prepared_floats(layer.res_taps, channels, res_half) +
+                  conv_prepared_floats(1, res_half, channels);
       continue;
     }
 
-    const char *weight_suffix =
-        spec.kind == seanet_layer_kind::conv_transpose ? "weight" : "weight";
-    char conv_format[64] = {};
-    if (spec.kind == seanet_layer_kind::conv_transpose) {
-      std::snprintf(conv_format, sizeof(conv_format),
-                    "mimi.%s.model.%%d.convtr.convtr.%%s", family);
-    } else {
-      std::snprintf(conv_format, sizeof(conv_format), "%s", format);
-    }
-    layer.weight =
-        find_layer_tensor(model_data, conv_format, index, weight_suffix);
-    layer.bias = find_layer_tensor(model_data, conv_format, index, "bias");
-    int64_t taps = 0;
-    int64_t in_channels = 0;
-    int64_t out_channels = 0;
-    if (!conv_dims(layer.weight, taps, in_channels, out_channels)) {
+    const bool transposed = spec.kind == seanet_layer_kind::conv_transpose;
+    layer.weight = find_layer_tensor(
+        model_data, transposed ? convtr_format : conv_format, index, "weight");
+    layer.bias = find_layer_tensor(
+        model_data, transposed ? convtr_format : conv_format, index, "bias");
+    if (!resolve_conv_geometry(layer.weight, channels, layer.taps,
+                               layer.out_channels)) {
       return false;
     }
-    if (spec.kind == seanet_layer_kind::conv_transpose) {
-      // stored [taps, out, in]
-      const int64_t stored_out = in_channels;
-      const int64_t stored_in = out_channels;
-      account_conv(extents, stored_in, stored_out, taps, spec.stride, length,
-                   true);
-      prepared += static_cast<uint64_t>(taps) *
-                      static_cast<uint64_t>(stored_in) *
-                      static_cast<uint64_t>(stored_out) +
-                  static_cast<uint64_t>(stored_out);
+    if (transposed) {
+      account_conv(extents, channels, layer.out_channels, layer.taps,
+                   spec.stride, length, true);
+      prepared +=
+          conv_prepared_floats(layer.taps, channels, layer.out_channels);
       length = length * spec.stride;
     } else {
       if (length % spec.stride != 0) {
         return false;
       }
-      account_conv(extents, in_channels, out_channels, taps, spec.stride,
-                   length, false);
-      prepared += static_cast<uint64_t>(taps) *
-                      static_cast<uint64_t>(in_channels) *
-                      static_cast<uint64_t>(out_channels) +
-                  static_cast<uint64_t>(out_channels);
+      account_conv(extents, channels, layer.out_channels, layer.taps,
+                   spec.stride, length, false);
+      prepared +=
+          conv_prepared_floats(layer.taps, channels, layer.out_channels);
       length = length / spec.stride;
     }
+    channels = layer.out_channels;
   }
   return true;
 }
@@ -1350,8 +1364,11 @@ bool plan_codec(const emel::model::data &model_data,
   }
 
   int64_t length = plan_out.frame_samples;
+  int64_t channels = 1;
   if (!plan_seanet(model_data, "encoder", k_encoder_topology, plan_out.encoder,
-                   length, plan_out.extents, plan_out.prepared_floats)) {
+                   length, channels, plan_out.extents,
+                   plan_out.prepared_floats) ||
+      channels != mimi.dim) {
     return false;
   }
   plan_out.encoder_tokens = length;
@@ -1366,18 +1383,17 @@ bool plan_codec(const emel::model::data &model_data,
       find_tensor(model_data, "mimi.downsample.conv.conv.conv.weight");
   plan_out.downsample.stride = 2;
   plan_out.downsample.in_length = length;
-  int64_t taps = 0;
-  int64_t in_channels = 0;
-  int64_t out_channels = 0;
-  if (!conv_dims(plan_out.downsample.weight, taps, in_channels, out_channels) ||
-      length % 2 != 0) {
+  plan_out.downsample.in_channels = channels;
+  if (!resolve_conv_geometry(plan_out.downsample.weight, channels,
+                             plan_out.downsample.taps,
+                             plan_out.downsample.out_channels) ||
+      plan_out.downsample.out_channels != mimi.dim || length % 2 != 0) {
     return false;
   }
-  account_conv(plan_out.extents, in_channels, out_channels, taps, 2, length,
-               false);
-  plan_out.prepared_floats += static_cast<uint64_t>(taps) *
-                              static_cast<uint64_t>(in_channels) *
-                              static_cast<uint64_t>(out_channels);
+  account_conv(plan_out.extents, channels, plan_out.downsample.out_channels,
+               plan_out.downsample.taps, 2, length, false);
+  plan_out.prepared_floats += conv_prepared_floats(
+      plan_out.downsample.taps, channels, plan_out.downsample.out_channels);
   length = length / 2;
   if (length != 1) {
     return false;
@@ -1394,18 +1410,26 @@ bool plan_codec(const emel::model::data &model_data,
 
   // decode chain
   int64_t decode_length = 1;
+  int64_t decode_channels = mimi.dim;
   plan_out.upsample.weight =
       find_tensor(model_data, "mimi.upsample.convtr.convtr.convtr.weight");
   plan_out.upsample.stride = 2;
   plan_out.upsample.in_length = decode_length;
-  if (!conv_dims(plan_out.upsample.weight, taps, in_channels, out_channels)) {
+  plan_out.upsample.in_channels = decode_channels;
+  plan_out.upsample.out_channels = decode_channels;
+  // depthwise: stored [taps, 1, channels] with elements == taps * channels
+  if (plan_out.upsample.weight == nullptr ||
+      plan_out.upsample.weight->dims[0] <= 0 ||
+      tensor_elements(*plan_out.upsample.weight) !=
+          static_cast<uint64_t>(plan_out.upsample.weight->dims[0]) *
+              static_cast<uint64_t>(decode_channels)) {
     return false;
   }
-  // depthwise: stored [taps, 1, channels]
-  account_conv(plan_out.extents, out_channels, out_channels, taps, 2,
-               decode_length, true);
-  plan_out.prepared_floats +=
-      static_cast<uint64_t>(taps) * static_cast<uint64_t>(out_channels);
+  plan_out.upsample.taps = plan_out.upsample.weight->dims[0];
+  account_conv(plan_out.extents, decode_channels, decode_channels,
+               plan_out.upsample.taps, 2, decode_length, true);
+  plan_out.prepared_floats += static_cast<uint64_t>(plan_out.upsample.taps) *
+                              static_cast<uint64_t>(decode_channels);
   decode_length = decode_length * 2;
   plan_out.decoder_tokens = decode_length;
 
@@ -1416,10 +1440,11 @@ bool plan_codec(const emel::model::data &model_data,
   plan_out.prepared_floats += plan_out.decoder_transformer.prepared;
 
   if (!plan_seanet(model_data, "decoder", k_decoder_topology, plan_out.decoder,
-                   decode_length, plan_out.extents, plan_out.prepared_floats)) {
+                   decode_length, decode_channels, plan_out.extents,
+                   plan_out.prepared_floats)) {
     return false;
   }
-  if (decode_length != plan_out.frame_samples) {
+  if (decode_length != plan_out.frame_samples || decode_channels != 1) {
     return false;
   }
 
@@ -1451,32 +1476,29 @@ uint64_t workspace_floats_from_plan(const emel::model::data &model_data,
   return std::max(std::max(stack_ws, transformer_ws), rvq_ws) + 64u;
 }
 
+// Binds one conv from its plan-resolved geometry (taps / in / out already
+// derived from the chain walk, so collapsed GGUF dims are irrelevant here).
 bool bind_conv(arena_cursor &cursor, uint64_t &state_cursor,
-               const emel::model::data &model_data,
                const seanet_plan_layer &plan_layer, const bool transposed,
                conv_weights &conv_out) noexcept {
-  int64_t taps = 0;
-  int64_t in_channels = 0;
-  int64_t out_channels = 0;
-  if (!conv_dims(plan_layer.weight, taps, in_channels, out_channels)) {
+  const int64_t taps = plan_layer.taps;
+  const int64_t in_channels = plan_layer.in_channels;
+  const int64_t out_channels = plan_layer.out_channels;
+  if (taps <= 0 || in_channels <= 0 || out_channels <= 0) {
     return false;
   }
   if (transposed) {
-    // stored [taps, out, in]
-    const int64_t stored_out = in_channels;
-    const int64_t stored_in = out_channels;
+    // stored [taps, out, in], consumed verbatim by op_conv_transpose_1d
     conv_out.weight = prepare_conv_transpose(
         cursor, plan_layer.weight,
-        static_cast<uint64_t>(taps) * static_cast<uint64_t>(stored_out) *
-            static_cast<uint64_t>(stored_in));
-    conv_out.in_channels = static_cast<int32_t>(stored_in);
-    conv_out.out_channels = static_cast<int32_t>(stored_out);
+        static_cast<uint64_t>(taps) * static_cast<uint64_t>(in_channels) *
+            static_cast<uint64_t>(out_channels));
   } else {
     conv_out.weight = prepare_conv_gemm(cursor, plan_layer.weight, taps,
                                         in_channels, out_channels);
-    conv_out.in_channels = static_cast<int32_t>(in_channels);
-    conv_out.out_channels = static_cast<int32_t>(out_channels);
   }
+  conv_out.in_channels = static_cast<int32_t>(in_channels);
+  conv_out.out_channels = static_cast<int32_t>(out_channels);
   conv_out.bias =
       plan_layer.bias != nullptr
           ? prepare_vector(cursor, plan_layer.bias, conv_out.out_channels)
@@ -1499,7 +1521,6 @@ bool bind_conv(arena_cursor &cursor, uint64_t &state_cursor,
                             static_cast<uint64_t>(conv_out.in_channels);
   }
   state_cursor += conv_out.state_floats;
-  (void)model_data;
   return true;
 }
 
@@ -1632,7 +1653,6 @@ bool bind_rvq_split(arena_cursor &cursor, const emel::model::data &model_data,
 
 bool bind_seanet(
     arena_cursor &cursor, uint64_t &state_cursor,
-    const emel::model::data &model_data,
     const std::array<seanet_plan_layer, k_max_seanet_layers> &plan_layers,
     std::array<seanet_layer_weights, k_max_seanet_layers>
         &layers_out) noexcept {
@@ -1642,7 +1662,7 @@ bool bind_seanet(
     layer.kind = plan_layer.kind;
     if (plan_layer.kind == seanet_layer_kind::conv ||
         plan_layer.kind == seanet_layer_kind::conv_transpose) {
-      if (!bind_conv(cursor, state_cursor, model_data, plan_layer,
+      if (!bind_conv(cursor, state_cursor, plan_layer,
                      plan_layer.kind == seanet_layer_kind::conv_transpose,
                      layer.conv)) {
         return false;
@@ -1653,14 +1673,18 @@ bool bind_seanet(
       shim.in_length = plan_layer.in_length;
       shim.weight = plan_layer.res1_weight;
       shim.bias = plan_layer.res1_bias;
-      if (!bind_conv(cursor, state_cursor, model_data, shim, false,
-                     layer.resnet.block_1)) {
+      shim.taps = plan_layer.res_taps;
+      shim.in_channels = plan_layer.in_channels;
+      shim.out_channels = plan_layer.res_half;
+      if (!bind_conv(cursor, state_cursor, shim, false, layer.resnet.block_1)) {
         return false;
       }
       shim.weight = plan_layer.res3_weight;
       shim.bias = plan_layer.res3_bias;
-      if (!bind_conv(cursor, state_cursor, model_data, shim, false,
-                     layer.resnet.block_3)) {
+      shim.taps = 1;
+      shim.in_channels = plan_layer.res_half;
+      shim.out_channels = plan_layer.in_channels;
+      if (!bind_conv(cursor, state_cursor, shim, false, layer.resnet.block_3)) {
         return false;
       }
     }
@@ -1717,7 +1741,7 @@ bool bind_codec_runtime(const emel::model::data &model_data,
   arena_cursor cursor{prepared, 0};
   uint64_t state_cursor = 0;
 
-  if (!bind_seanet(cursor, state_cursor, model_data, plan.encoder,
+  if (!bind_seanet(cursor, state_cursor, plan.encoder,
                    runtime_out.encoder_layers) ||
       !bind_transformer(cursor, state_cursor, model_data, "encoder_transformer",
                         plan.encoder_transformer,
@@ -1726,12 +1750,9 @@ bool bind_codec_runtime(const emel::model::data &model_data,
     return false;
   }
 
-  {
-    seanet_plan_layer shim = plan.downsample;
-    if (!bind_conv(cursor, state_cursor, model_data, shim, false,
-                   runtime_out.downsample)) {
-      return false;
-    }
+  if (!bind_conv(cursor, state_cursor, plan.downsample, false,
+                 runtime_out.downsample)) {
+    return false;
   }
 
   if (!bind_rvq_split(cursor, model_data, "rvq_first", mimi.semantic_n_q,
@@ -1745,12 +1766,8 @@ bool bind_codec_runtime(const emel::model::data &model_data,
   {
     // depthwise upsample: stored [taps, 1, channels]; keep the per-channel
     // tap layout verbatim
-    int64_t taps = 0;
-    int64_t one = 0;
-    int64_t channels = 0;
-    if (!conv_dims(plan.upsample.weight, taps, one, channels) || one != 1) {
-      return false;
-    }
+    const int64_t taps = plan.upsample.taps;
+    const int64_t channels = plan.upsample.out_channels;
     auto &upsample = runtime_out.upsample;
     upsample.weight = prepare_conv_transpose(
         cursor, plan.upsample.weight,
@@ -1775,7 +1792,7 @@ bool bind_codec_runtime(const emel::model::data &model_data,
                         plan.decoder_transformer,
                         static_cast<int32_t>(plan.decoder_tokens),
                         runtime_out.decoder_transformer) ||
-      !bind_seanet(cursor, state_cursor, model_data, plan.decoder,
+      !bind_seanet(cursor, state_cursor, plan.decoder,
                    runtime_out.decoder_layers)) {
     return false;
   }

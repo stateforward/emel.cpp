@@ -18408,6 +18408,77 @@ bool run_backend_kernel_parity(const char *backend, exec_fn exec) {
   }
 
   {
+    // row-broadcast add/mul: src1 is one dst row (ggml repeat-broadcast
+    // semantics with src1 ne = {ne0, 1})
+    constexpr int64_t k_bcast_cols = 24;
+    constexpr int64_t k_bcast_rows = 6;
+    auto rows_data = make_signed_data(k_bcast_cols * k_bcast_rows, 0.7f, 0.15f);
+    auto row_operand = make_signed_data(k_bcast_cols, 0.4f, -0.2f);
+    const struct {
+      const char *name;
+      bool multiply;
+    } bcast_cases[] = {
+        {"op_add_broadcast_row", false},
+        {"op_mul_broadcast_row", true},
+    };
+    for (const auto &bcast_case : bcast_cases) {
+      std::vector<float> emel_out(rows_data.size());
+      std::vector<float> ggml_out;
+      bool emel_ok = false;
+      if (bcast_case.multiply) {
+        emel::kernel::event::op_mul ev{
+            .src0 = make_src_view(rows_data.data(),
+                                  static_cast<uint64_t>(k_bcast_cols),
+                                  static_cast<uint64_t>(k_bcast_rows)),
+            .src1 = make_src_view(row_operand.data(),
+                                  static_cast<uint64_t>(k_bcast_cols), 1u),
+            .dst = make_dst_view(emel_out.data(),
+                                 static_cast<uint64_t>(k_bcast_cols),
+                                 static_cast<uint64_t>(k_bcast_rows)),
+        };
+        emel_ok = exec(ev);
+      } else {
+        emel::kernel::event::op_add ev{
+            .src0 = make_src_view(rows_data.data(),
+                                  static_cast<uint64_t>(k_bcast_cols),
+                                  static_cast<uint64_t>(k_bcast_rows)),
+            .src1 = make_src_view(row_operand.data(),
+                                  static_cast<uint64_t>(k_bcast_cols), 1u),
+            .dst = make_dst_view(emel_out.data(),
+                                 static_cast<uint64_t>(k_bcast_cols),
+                                 static_cast<uint64_t>(k_bcast_rows)),
+        };
+        emel_ok = exec(ev);
+      }
+      const bool ggml_ok = [&] {
+        ggml_case_context c{};
+        ggml_tensor *a = ggml_new_tensor_2d(c.ctx, GGML_TYPE_F32, k_bcast_cols,
+                                            k_bcast_rows);
+        ggml_tensor *b =
+            ggml_new_tensor_2d(c.ctx, GGML_TYPE_F32, k_bcast_cols, 1);
+        set_tensor_f32(a, rows_data);
+        set_tensor_f32(b, row_operand);
+        ggml_tensor *out_tensor = bcast_case.multiply ? ggml_mul(c.ctx, a, b)
+                                                      : ggml_add(c.ctx, a, b);
+        if (!compute_graph(c, out_tensor)) {
+          return false;
+        }
+        const float *out_data = ggml_get_data_f32(out_tensor);
+        ggml_out.assign(out_data, out_data + rows_data.size());
+        return true;
+      }();
+      if (!emel_ok) {
+        fail(bcast_case.name, "emel rejected request");
+      } else if (!ggml_ok) {
+        fail(bcast_case.name, "ggml execution failed");
+      } else if (!compare_f32_vectors(backend, bcast_case.name, emel_out,
+                                      ggml_out)) {
+        ok = false;
+      }
+    }
+  }
+
+  {
     auto src = make_signed_data(k_vec_len, 0.75f, 0.0f);
     std::vector<float> emel_out(static_cast<size_t>(k_vec_len));
     emel::kernel::event::op_sum ev{

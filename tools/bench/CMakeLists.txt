@@ -435,6 +435,24 @@ add_executable(whisper_emel_parity_runner
   ${CMAKE_CURRENT_SOURCE_DIR}/whisper_emel_parity_runner.cpp
 )
 
+add_executable(mimi_emel_parity_runner
+  ${CMAKE_CURRENT_SOURCE_DIR}/speech/mimi_emel_parity_runner.cpp
+)
+
+target_link_libraries(mimi_emel_parity_runner
+  PRIVATE
+    emel_core
+    emel
+)
+
+target_include_directories(mimi_emel_parity_runner
+  PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${EMEL_ROOT}
+    ${EMEL_ROOT}/src
+    ${EMEL_ROOT}/include
+)
+
 target_link_libraries(whisper_emel_parity_runner
   PRIVATE
     emel_core
