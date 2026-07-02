@@ -89,6 +89,17 @@ bench_suite_build_dir() {
     return
   fi
 
+  # The unfiltered runner contains every suite and selects at run time via
+  # EMEL_BENCH_SUITE (run_bench_runner). When it is already built, reuse it
+  # instead of configuring a per-suite tree - each per-suite tree clones and
+  # compiles its own llama.cpp reference (~1GB and many minutes apiece).
+  # Per-suite trees remain the cold-start path so single-suite iteration on a
+  # fresh checkout stays cheap.
+  if [[ -x "$ROOT_DIR/build/bench_tools_ninja/bench_runner" ]]; then
+    printf "%s\n" "$ROOT_DIR/build/bench_tools_ninja"
+    return
+  fi
+
   safe_suite="${suite//[^A-Za-z0-9_]/_}"
   printf "%s\n" "$ROOT_DIR/build/bench_tools_ninja_${safe_suite}"
 }
@@ -219,11 +230,19 @@ run_bench_runner() {
 
 configure_bench_build() {
   local build_dir="$1"
+  local build_suite_filter="$SUITE_FILTER"
+
+  # The default tree is always configured unfiltered: it serves every suite
+  # via the runtime EMEL_BENCH_SUITE selector, and a filtered reconfigure
+  # would thrash its cached objects.
+  if [[ "$build_dir" == "$ROOT_DIR/build/bench_tools_ninja" ]]; then
+    build_suite_filter=""
+  fi
 
   cmake_args=(-S "$TOOLS_DIR" -B "$build_dir" -G Ninja -DCMAKE_BUILD_TYPE=Release
               -DEMEL_ENABLE_TESTS=OFF
               -DREF_IMPL_REF="$ref_value"
-              -DEMEL_BENCH_SUITE_FILTER="$SUITE_FILTER")
+              -DEMEL_BENCH_SUITE_FILTER="$build_suite_filter")
   cmake_args+=("-DCMAKE_C_COMPILER=$bench_cc")
   cmake_args+=("-DCMAKE_CXX_COMPILER=$bench_cxx")
   cmake_args+=("-DCMAKE_ASM_COMPILER=$bench_cc")
