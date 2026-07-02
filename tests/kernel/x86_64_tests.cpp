@@ -2018,3 +2018,39 @@ TEST_CASE("kernel_x86_64_im2col_and_conv_transpose_1d") {
   CHECK(up_out[2] == doctest::Approx(6.0f));
   CHECK(up_out[3] == doctest::Approx(10.0f));
 }
+
+TEST_CASE("kernel_x86_64_add_and_mul_broadcast_row_variants") {
+  x86_64_sm machine{emel::kernel::x86_64::action::context{false, {}, 0}};
+
+  float rows[6] = {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f}; // 2 rows of 3
+  float bias[3] = {10.0f, 20.0f, 30.0f};
+  float out[6] = {};
+
+  emel::kernel::event::op_add add_ev{
+      .src0 = make_src(rows, dtype::f32, 3, 2),
+      .src1 = make_src(bias, dtype::f32, 3, 1),
+      .dst = make_dst(out, dtype::f32, 3, 2),
+  };
+  CHECK(machine.process_event(add_ev));
+  CHECK(out[0] == doctest::Approx(11.0f));
+  CHECK(out[2] == doctest::Approx(33.0f));
+  CHECK(out[3] == doctest::Approx(14.0f));
+  CHECK(out[5] == doctest::Approx(36.0f));
+
+  emel::kernel::event::op_mul mul_ev{
+      .src0 = make_src(rows, dtype::f32, 3, 2),
+      .src1 = make_src(bias, dtype::f32, 3, 1),
+      .dst = make_dst(out, dtype::f32, 3, 2),
+  };
+  CHECK(machine.process_event(mul_ev));
+  CHECK(out[0] == doctest::Approx(10.0f));
+  CHECK(out[5] == doctest::Approx(180.0f));
+
+  // row length mismatch is rejected, not silently broadcast
+  emel::kernel::event::op_add bad_ev{
+      .src0 = make_src(rows, dtype::f32, 3, 2),
+      .src1 = make_src(bias, dtype::f32, 2, 1),
+      .dst = make_dst(out, dtype::f32, 3, 2),
+  };
+  CHECK_FALSE(machine.process_event(bad_ev));
+}

@@ -198,19 +198,60 @@ def mimi_tensors(rng: Lcg) -> list[tuple[str, tuple[int, ...], int, bytes]]:
         card),
       t("mimi.quantizer.rvq_rest.input_proj.weight", 1, dim, cb_dim),
       t("mimi.quantizer.rvq_rest.output_proj.weight", 1, cb_dim, dim),
-      t("mimi.encoder.model.0.conv.conv.weight", 7, 1, dim),
-      t("mimi.encoder.model.0.conv.conv.bias", dim),
-      t("mimi.encoder.model.14.conv.conv.weight", 3, dim, dim),
-      t("mimi.encoder.model.14.conv.conv.bias", dim),
-      t("mimi.decoder.model.0.conv.conv.weight", 3, dim, dim),
-      t("mimi.decoder.model.0.conv.conv.bias", dim),
-      t("mimi.decoder.model.2.convtr.convtr.weight", 4, dim, dim),
-      t("mimi.decoder.model.2.convtr.convtr.bias", dim),
-      t("mimi.decoder.model.14.conv.conv.weight", 3, dim, 1),
-      t("mimi.decoder.model.14.conv.conv.bias", 1),
-      t("mimi.downsample.conv.conv.conv.weight", 2, dim, dim),
-      t("mimi.upsample.convtr.convtr.convtr.weight", 2, dim, dim),
+      t("mimi.downsample.conv.conv.conv.weight", 4, dim, dim),
+      # depthwise (groups == channels): stored [taps, 1, channels]
+      t("mimi.upsample.convtr.convtr.convtr.weight", 4, 1, dim),
   ]
+
+  # Full mimi_v0_1 SEANet topology at tiny scale (base 4 channels doubling
+  # per stage to 64, final conv k3 -> dim). Kernel = 2*stride on stage convs,
+  # matching the real model family.
+  def resnet(family, index, channels):
+    half = channels // 2
+    return [
+        t(f"mimi.{family}.model.{index}.block.1.conv.conv.weight", 3, channels,
+          half),
+        t(f"mimi.{family}.model.{index}.block.1.conv.conv.bias", half),
+        t(f"mimi.{family}.model.{index}.block.3.conv.conv.weight", 1, half,
+          channels),
+        t(f"mimi.{family}.model.{index}.block.3.conv.conv.bias", channels),
+    ]
+
+  def conv(family, index, taps, in_channels, out_channels):
+    return [
+        t(f"mimi.{family}.model.{index}.conv.conv.weight", taps, in_channels,
+          out_channels),
+        t(f"mimi.{family}.model.{index}.conv.conv.bias", out_channels),
+    ]
+
+  def convtr(family, index, taps, out_channels, in_channels):
+    return [
+        t(f"mimi.{family}.model.{index}.convtr.convtr.weight", taps,
+          out_channels, in_channels),
+        t(f"mimi.{family}.model.{index}.convtr.convtr.bias", out_channels),
+    ]
+
+  tensors += conv("encoder", 0, 7, 1, 4)
+  tensors += resnet("encoder", 1, 4)
+  tensors += conv("encoder", 3, 8, 4, 8)
+  tensors += resnet("encoder", 4, 8)
+  tensors += conv("encoder", 6, 10, 8, 16)
+  tensors += resnet("encoder", 7, 16)
+  tensors += conv("encoder", 9, 12, 16, 32)
+  tensors += resnet("encoder", 10, 32)
+  tensors += conv("encoder", 12, 16, 32, 64)
+  tensors += conv("encoder", 14, 3, 64, dim)
+
+  tensors += conv("decoder", 0, 7, dim, 64)
+  tensors += convtr("decoder", 2, 16, 32, 64)
+  tensors += resnet("decoder", 3, 32)
+  tensors += convtr("decoder", 5, 12, 16, 32)
+  tensors += resnet("decoder", 6, 16)
+  tensors += convtr("decoder", 8, 10, 8, 16)
+  tensors += resnet("decoder", 9, 8)
+  tensors += convtr("decoder", 11, 8, 4, 8)
+  tensors += resnet("decoder", 12, 4)
+  tensors += conv("decoder", 14, 3, 4, 1)
   for i in range(n_q - preset["semantic_n_q"]):
     tensors.append(
         t(f"mimi.quantizer.rvq_rest.vq.layers.{i}._codebook.embedding", cb_dim,

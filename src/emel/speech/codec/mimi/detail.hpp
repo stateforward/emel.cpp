@@ -1,0 +1,282 @@
+#pragma once
+
+#include <array>
+#include <cstdint>
+#include <span>
+#include <string_view>
+
+#include "emel/error/error.hpp"
+#include "emel/kernel/events.hpp"
+#include "emel/kernel/sm.hpp"
+#include "emel/model/data.hpp"
+
+// Shared Mimi codec binding, sizing, and kernel-dispatch compute helpers.
+//
+// The Mimi streaming codec (Kyutai Moshi / NVIDIA PersonaPlex) maps 24 kHz
+// mono PCM to n_q discrete codebook streams at 12.5 Hz and back:
+//   encode: SEANet conv frontend (25 Hz) -> downsample conv (12.5 Hz)
+//           -> codec transformer -> split RVQ nearest-codebook search
+//   decode: split RVQ codebook sums -> codec transformer -> depthwise
+//           transposed-conv upsample (25 Hz) -> SEANet conv decoder (24 kHz)
+//
+// All numeric work is dispatched to the kernel backend machines as op events
+// (generator pattern: the runtime struct owns an emel::kernel::sm). Helpers
+// here are non-routing data-plane sequences for the already-chosen variant;
+// behavior selection lives in the owning actors' guards and transitions.
+//
+// Streaming semantics (must match the reference bit-for-bit on the encode
+// path):
+//  - streaming conv: carries the last (kernel - stride) input samples as left
+//    context (zero-initialized), convolves concat(state, frame) unpadded.
+//  - streaming transposed conv: full output of length (len-1)*stride + kernel;
+//    the first (kernel - stride) outputs accumulate the previous call's tail;
+//    the tail is withheld (emitted next call); bias applies to emitted range.
+namespace emel::speech::codec::mimi::detail {
+
+inline constexpr int32_t k_max_seanet_layers = 15;
+inline constexpr int32_t k_max_transformer_layers = 16;
+inline constexpr int32_t k_max_quantizer_levels = 32;
+
+enum class seanet_layer_kind : uint8_t {
+  none = 0,
+  conv = 1,
+  resnet = 2,
+  elu = 3,
+  conv_transpose = 4,
+};
+
+// Fixed mimi_v0_1 SEANet topology (module index -> layer kind and stride).
+// Kernel sizes and channel counts are read from the bound tensor shapes and
+// cross-checked against the contract at prepare time.
+struct seanet_layer_spec {
+  seanet_layer_kind kind = seanet_layer_kind::none;
+  int32_t stride = 1;
+};
+
+inline constexpr std::array<seanet_layer_spec, k_max_seanet_layers>
+    k_encoder_topology = {{
+        {seanet_layer_kind::conv, 1},   // model.0  k7 1->C
+        {seanet_layer_kind::resnet, 1}, // model.1
+        {seanet_layer_kind::elu, 1},    // model.2
+        {seanet_layer_kind::conv, 4},   // model.3  k8
+        {seanet_layer_kind::resnet, 1}, // model.4
+        {seanet_layer_kind::elu, 1},    // model.5
+        {seanet_layer_kind::conv, 5},   // model.6  k10
+        {seanet_layer_kind::resnet, 1}, // model.7
+        {seanet_layer_kind::elu, 1},    // model.8
+        {seanet_layer_kind::conv, 6},   // model.9  k12
+        {seanet_layer_kind::resnet, 1}, // model.10
+        {seanet_layer_kind::elu, 1},    // model.11
+        {seanet_layer_kind::conv, 8},   // model.12 k16
+        {seanet_layer_kind::elu, 1},    // model.13
+        {seanet_layer_kind::conv, 1},   // model.14 k3 -> dim
+    }};
+
+inline constexpr std::array<seanet_layer_spec, k_max_seanet_layers>
+    k_decoder_topology = {{
+        {seanet_layer_kind::conv, 1},           // model.0  k7 dim->C
+        {seanet_layer_kind::elu, 1},            // model.1
+        {seanet_layer_kind::conv_transpose, 8}, // model.2  k16
+        {seanet_layer_kind::resnet, 1},         // model.3
+        {seanet_layer_kind::elu, 1},            // model.4
+        {seanet_layer_kind::conv_transpose, 6}, // model.5  k12
+        {seanet_layer_kind::resnet, 1},         // model.6
+        {seanet_layer_kind::elu, 1},            // model.7
+        {seanet_layer_kind::conv_transpose, 5}, // model.8  k10
+        {seanet_layer_kind::resnet, 1},         // model.9
+        {seanet_layer_kind::elu, 1},            // model.10
+        {seanet_layer_kind::conv_transpose, 4}, // model.11 k8
+        {seanet_layer_kind::resnet, 1},         // model.12
+        {seanet_layer_kind::elu, 1},            // model.13
+        {seanet_layer_kind::conv, 1},           // model.14 k3 -> 1
+    }};
+
+// One bound conv weight: canonical f32 taps in the prepared arena. The
+// state fields locate this layer's streaming slice (left context for convs,
+// full-output overlap tail for transposed convs) inside the state arena.
+struct conv_weights {
+  const float *weight = nullptr; // [taps * in_channels * out_channels]
+  const float *bias = nullptr;   // [out_channels] or nullptr
+  int32_t taps = 0;
+  int32_t in_channels = 0;
+  int32_t out_channels = 0;
+  int32_t stride = 1;
+  int32_t frame_length = 0; // input time steps per dispatch at this layer
+  uint64_t state_offset = 0;
+  uint64_t state_floats = 0;
+};
+
+struct resnet_weights {
+  conv_weights block_1 = {}; // k3 C -> C/2
+  conv_weights block_3 = {}; // k1 C/2 -> C
+};
+
+struct seanet_layer_weights {
+  seanet_layer_kind kind = seanet_layer_kind::none;
+  conv_weights conv = {};
+  resnet_weights resnet = {};
+};
+
+struct transformer_layer_weights {
+  const float *norm1_weight = nullptr;
+  const float *norm1_bias = nullptr;
+  const float *in_proj = nullptr;  // [dim, 3*dim] fused qkv
+  const float *out_proj = nullptr; // [dim, dim]
+  const float *layer_scale_1 = nullptr;
+  const float *norm2_weight = nullptr;
+  const float *norm2_bias = nullptr;
+  const float *linear1 = nullptr; // [dim, mlp_dim]
+  const float *linear2 = nullptr; // [mlp_dim, dim]
+  const float *layer_scale_2 = nullptr;
+  int32_t mlp_dim = 0;
+};
+
+struct transformer_weights {
+  std::array<transformer_layer_weights, k_max_transformer_layers> layers = {};
+  int32_t layer_count = 0;
+  int32_t dim = 0;
+  int32_t head_count = 0;
+  int32_t context = 0;
+  int32_t max_period = 0;
+  int32_t frame_tokens = 0;  // tokens per dispatch (2 at 25 Hz)
+  uint64_t state_offset = 0; // K/V ring: layers * 2 * context * dim floats
+  uint64_t state_floats = 0;
+};
+
+// One RVQ split (rvq_first carries the semantic level, rvq_rest the acoustic
+// levels). Codebook search operands are prepared at bind time: the argmax
+// score for level codebooks is x . c - |c|^2 / 2, so the prepared table
+// appends the bias column and the input vector a trailing 1.
+struct rvq_split_weights {
+  const float *input_proj = nullptr;  // [dim, codebook_dim] (conv1x1)
+  const float *output_proj = nullptr; // [codebook_dim, dim]
+  // per level: prepared search table [codebook_dim + 1, entries] and raw
+  // codebook rows [codebook_dim, entries]
+  std::array<const float *, k_max_quantizer_levels> search_tables = {};
+  std::array<const float *, k_max_quantizer_levels> codebooks = {};
+  int32_t level_count = 0;
+};
+
+struct quantizer_weights {
+  rvq_split_weights semantic = {};
+  rvq_split_weights acoustic = {};
+  int32_t codebook_entries = 0;
+  int32_t codebook_dim = 0;
+};
+
+// Prepared, bound codec runtime. Weights point into the prepared arena (f16
+// sources canonicalized to f32 once at prepare; fp16 -> fp32 is lossless so
+// the effective operand class is unchanged). Owned by the facade context;
+// injected into the actors by reference.
+struct codec_runtime {
+  const emel::model::data *model = nullptr;
+  emel::kernel::sm kernel = {};
+  emel::kernel::kernel_kind kernel_kind = emel::kernel::kernel_kind::x86_64;
+
+  std::array<seanet_layer_weights, k_max_seanet_layers> encoder_layers = {};
+  conv_weights downsample = {};
+  transformer_weights encoder_transformer = {};
+  quantizer_weights quantizer = {};
+  conv_weights upsample = {}; // depthwise transposed conv
+  transformer_weights decoder_transformer = {};
+  std::array<seanet_layer_weights, k_max_seanet_layers> decoder_layers = {};
+
+  int32_t sample_rate = 0;
+  int32_t frame_samples = 0; // 1920 at 24 kHz / 12.5 Hz
+  int32_t n_q = 0;
+  int32_t dim = 0;
+
+  std::span<float> prepared_arena = {};
+  uint64_t prepared_floats_used = 0;
+};
+
+// Streaming state layout: one contiguous caller-owned float arena, carved at
+// prepare time into per-conv left-context rings, per-convtr overlap tails,
+// and per-transformer rolling KV windows.
+struct codec_streaming_state {
+  std::span<float> arena = {};
+  int64_t encoder_positions = 0; // frames seen by the encoder transformer
+  int64_t decoder_positions = 0;
+};
+
+//------------------------------------------------------------------------------//
+// Sizing (callers allocate one-time before any dispatch).
+//------------------------------------------------------------------------------//
+
+uint64_t required_prepared_floats(const emel::model::data &model_data) noexcept;
+
+uint64_t required_state_floats(const emel::model::data &model_data) noexcept;
+
+// Scratch for one frame of encode or decode across all stages (actors process
+// exactly one 80 ms frame per dispatch).
+uint64_t
+required_workspace_floats(const emel::model::data &model_data) noexcept;
+
+// Widest time-major stage buffer one frame flows through (the actor-owned
+// io buffer must hold at least this many floats).
+uint64_t required_frame_floats(const emel::model::data &model_data) noexcept;
+
+//------------------------------------------------------------------------------//
+// Binding (one-time, non-hot-path).
+//------------------------------------------------------------------------------//
+
+// Canonicalizes weights into `prepared`, carves `state`, fills `runtime_out`.
+// Returns false when the model contract and the fixed topology disagree.
+bool bind_codec_runtime(const emel::model::data &model_data,
+                        std::span<float> prepared, std::span<float> state,
+                        codec_runtime &runtime_out,
+                        codec_streaming_state &state_out) noexcept;
+
+void reset_streaming_state(const codec_runtime &runtime,
+                           codec_streaming_state &state) noexcept;
+
+//------------------------------------------------------------------------------//
+// Compute (data-plane only; each helper executes one already-chosen stage as
+// bounded kernel op dispatches and reports dispatch success).
+//------------------------------------------------------------------------------//
+
+struct frame_buffer {
+  float *data = nullptr;
+  int32_t channels = 0;
+  int32_t length = 0; // time steps
+};
+
+bool compute_seanet_stack(codec_runtime &runtime,
+                          std::span<const seanet_layer_weights> layers,
+                          codec_streaming_state &state, frame_buffer &io,
+                          std::span<float> workspace) noexcept;
+
+bool compute_streaming_conv(codec_runtime &runtime, const conv_weights &conv,
+                            codec_streaming_state &state, frame_buffer &io,
+                            std::span<float> workspace) noexcept;
+
+bool compute_streaming_conv_transpose(codec_runtime &runtime,
+                                      const conv_weights &conv,
+                                      codec_streaming_state &state,
+                                      frame_buffer &io,
+                                      std::span<float> workspace) noexcept;
+
+// Grouped (groups == channels) variant used only by the decoder upsample
+// stage; the owning actor selects it through its own transition, never by
+// sniffing weight shapes here.
+bool compute_streaming_conv_transpose_depthwise(
+    codec_runtime &runtime, const conv_weights &conv,
+    codec_streaming_state &state, frame_buffer &io,
+    std::span<float> workspace) noexcept;
+
+bool compute_transformer(codec_runtime &runtime,
+                         const transformer_weights &weights,
+                         codec_streaming_state &state, int64_t &positions,
+                         frame_buffer &io, std::span<float> workspace) noexcept;
+
+// latent [dim, frames] -> codes [n_q, frames]
+bool compute_rvq_encode(codec_runtime &runtime, const frame_buffer &latent,
+                        std::span<int32_t> codes_out,
+                        std::span<float> workspace) noexcept;
+
+// codes [n_q, frames] -> latent [dim, frames]
+bool compute_rvq_decode(codec_runtime &runtime, std::span<const int32_t> codes,
+                        int32_t frames, frame_buffer &latent_out,
+                        std::span<float> workspace) noexcept;
+
+} // namespace emel::speech::codec::mimi::detail

@@ -315,7 +315,11 @@ same-host ARM comparison matrix in Phase `59.1.1`.
   - `moshi-tokenizer-tiny.model`: `5ed25a383b9e3034941550f8b67d360d4178792a88f3f06b35ffba4417bc58e5`
   - `moshi-tiny-lm-raw.gguf`: `06e5824e6b586956147e388caf27c6dd52053cdb2ab2a1e4190ddb64bd0dab23`
   - `moshi-tiny-lm.gguf`: `c83570ad540fed7a7390178046c161cf719dbf1b080c1421dec0a0af91c4f1bf`
-  - `mimi-tiny.gguf`: `002876d888b0a12c7fe0906a64c34786ca9415d597bd35c5822549fc91e7488e`
+  - `mimi-tiny.gguf`: `92873fc4a6127f10a6798c03d3f0ce805ab2fa5544ca4d0b1efce996f72f0821`
+    (v1.28 M2 update: carries the full tiny-scale mimi_v0_1 SEANet topology —
+    base 4 channels doubling to 64, kernel = 2×stride stage convs, resnet
+    blocks, depthwise [4,1,16] upsample — so the codec compute layer can run
+    complete encode/decode chains against it)
   - `moshi-tiny-voice.gguf`: `84e1680f0cecbcb96e9d09bb99d9609342ac67b61d746ce6cb1b648a23a73b09`
 - Modeled contract (tiny scale, not real weights): PersonaPlex-shaped `lm` component
   (dim `32`, `2` layers/`2` heads, `n_q=4`, `dep_q=4`, `card=32`, `text_card=64`,

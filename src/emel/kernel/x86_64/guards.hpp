@@ -342,6 +342,37 @@ using valid_op_conv_transpose_1d_f16 =
         valid_op<::emel::kernel::x86_64::event::dispatch_op_conv_transpose_1d>,
         conv_transpose_1d_weight_dtype_is<true>>;
 
+template <class dispatch_event_type> struct binary_equal_shape_is {
+  bool operator()(const dispatch_event_type &ev,
+                  const action::context &) const noexcept {
+    return ::emel::kernel::detail::can_run_binary(ev.request);
+  }
+};
+
+template <class dispatch_event_type> struct binary_broadcast_row_is {
+  bool operator()(const dispatch_event_type &ev,
+                  const action::context &) const noexcept {
+    return ::emel::kernel::detail::can_run_binary_broadcast_row(ev.request);
+  }
+};
+
+using valid_op_add_equal = ::emel::kernel::detail::valid_variant_guard<
+    ::emel::kernel::x86_64::event::dispatch_op_add, action::context,
+    valid_op<::emel::kernel::x86_64::event::dispatch_op_add>,
+    binary_equal_shape_is<::emel::kernel::x86_64::event::dispatch_op_add>>;
+using valid_op_add_broadcast_row = ::emel::kernel::detail::valid_variant_guard<
+    ::emel::kernel::x86_64::event::dispatch_op_add, action::context,
+    valid_op<::emel::kernel::x86_64::event::dispatch_op_add>,
+    binary_broadcast_row_is<::emel::kernel::x86_64::event::dispatch_op_add>>;
+using valid_op_mul_equal = ::emel::kernel::detail::valid_variant_guard<
+    ::emel::kernel::x86_64::event::dispatch_op_mul, action::context,
+    valid_op<::emel::kernel::x86_64::event::dispatch_op_mul>,
+    binary_equal_shape_is<::emel::kernel::x86_64::event::dispatch_op_mul>>;
+using valid_op_mul_broadcast_row = ::emel::kernel::detail::valid_variant_guard<
+    ::emel::kernel::x86_64::event::dispatch_op_mul, action::context,
+    valid_op<::emel::kernel::x86_64::event::dispatch_op_mul>,
+    binary_broadcast_row_is<::emel::kernel::x86_64::event::dispatch_op_mul>>;
+
 #define EMEL_KERNEL_DECLARE_GUARD_ALIAS(op_name)                               \
   using simd_##op_name =                                                       \
       simd_op<::emel::kernel::x86_64::event::dispatch_##op_name>;              \

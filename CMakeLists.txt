@@ -107,6 +107,7 @@ add_library(emel STATIC
   src/emel/model/sortformer/detail.cpp
   src/emel/model/whisper/detail.cpp
   src/emel/model/moshi/detail.cpp
+  src/emel/speech/codec/mimi/detail.cpp
   src/emel/speech/recognizer_routes/whisper/detail.cpp
   src/emel/diarization/sortformer/detail.cpp
   src/emel/diarization/sortformer/encoder/feature_extractor/detail.cpp
@@ -155,6 +156,7 @@ if(EMEL_ENABLE_TESTS)
     tests/diarization/sortformer/pipeline/lifecycle_tests.cpp
     tests/diarization/sortformer/parity/lifecycle_tests.cpp
     tests/diarization/sortformer/transformer/lifecycle_tests.cpp
+    tests/speech/codec/mimi_detail_tests.cpp
     tests/speech/encoder/whisper/lifecycle_tests.cpp
     tests/speech/decoder/whisper/lifecycle_tests.cpp
     tests/speech/encoder/whisper/detail_tests.cpp

@@ -3625,6 +3625,43 @@ inline bool can_run_binary(const request_type &request) noexcept {
          count == tensor_element_count(request.src1);
 }
 
+// Row-broadcast binary variant: src1 is one row of dst.ne[0] values applied
+// to every dst row (bias adds, norm weights, layer scales). Modeled as its
+// own guard-selected transition row per backend.
+template <class request_type>
+inline bool can_run_binary_broadcast_row(const request_type &request) noexcept {
+  const bool same_shape = request.src0.ne[0] == request.dst.ne[0] &&
+                          request.src0.ne[1] == request.dst.ne[1] &&
+                          request.src0.ne[2] == request.dst.ne[2] &&
+                          request.src0.ne[3] == request.dst.ne[3];
+  return same_shape && request.dst.ne[0] > 0 &&
+         tensor_element_count(request.dst) >
+             tensor_element_count(request.src1) &&
+         request.src1.ne[0] == request.dst.ne[0] && request.src1.ne[1] == 1 &&
+         request.src1.ne[2] == 1 && request.src1.ne[3] == 1 &&
+         dtype_code(request.src0.type) == dtype_f32 &&
+         dtype_code(request.src1.type) == dtype_f32 &&
+         dtype_code(request.dst.type) == dtype_f32 &&
+         has_valid_tensor_layout(request.src0) &&
+         has_valid_tensor_layout(request.src1) &&
+         has_valid_tensor_layout(request.dst);
+}
+
+template <class request_type, class op_type>
+inline bool run_binary_broadcast_row(const request_type &request,
+                                     op_type op) noexcept {
+  const uint64_t cols = request.dst.ne[0];
+  const uint64_t rows = tensor_element_count(request.dst) / cols;
+  for (uint64_t row = 0; row < rows; ++row) {
+    for (uint64_t col = 0; col < cols; ++col) {
+      const uint64_t index = row * cols + col;
+      write_f32(request.dst, index,
+                op(read_f32(request.src0, index), read_f32(request.src1, col)));
+    }
+  }
+  return true;
+}
+
 template <class request_type>
 inline bool can_run_unary(const request_type &request) noexcept {
   return tensor_element_count(request.dst) ==
@@ -4447,6 +4484,24 @@ struct exec_scalar_conv_transpose_1d_op {
   }
 };
 
+template <class dispatch_event_type, class context_type, class mark_done_type,
+          bool multiply>
+struct exec_scalar_binary_broadcast_row_op {
+  void operator()(const dispatch_event_type &ev,
+                  context_type &ctx) const noexcept {
+    if constexpr (multiply) {
+      (void)run_binary_broadcast_row(
+          ev.request,
+          [](const float lhs, const float rhs) { return lhs * rhs; });
+    } else {
+      (void)run_binary_broadcast_row(
+          ev.request,
+          [](const float lhs, const float rhs) { return lhs + rhs; });
+    }
+    mark_done_type{}(ev, ctx);
+  }
+};
+
 template <class request_type>
 inline bool can_run_unary_subop(const request_type &request) noexcept {
   const auto subop = static_cast<uint8_t>(request.subop);
@@ -4620,6 +4675,9 @@ inline bool can_run_backend_request(const request_type &request) noexcept {
   } else if constexpr (std::is_same_v<request_type,
                                       event::op_conv_transpose_1d>) {
     return can_run_conv_transpose_1d(request);
+  } else if constexpr (std::is_same_v<request_type, event::op_add> ||
+                       std::is_same_v<request_type, event::op_mul>) {
+    return can_run_binary(request) || can_run_binary_broadcast_row(request);
   }
   return can_execute_scalar(request);
 }

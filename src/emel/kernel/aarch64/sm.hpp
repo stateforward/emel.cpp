@@ -49,8 +49,13 @@ struct model {
 
       , sml::state<ready> <= sml::state<ready> +
                sml::event<::emel::kernel::aarch64::event::dispatch_op_add>
-                 [ guard::valid_op_add{} ]
+                 [ guard::valid_op_add_equal{} ]
                  / action::exec_op_add
+
+      , sml::state<ready> <= sml::state<ready> +
+               sml::event<::emel::kernel::aarch64::event::dispatch_op_add>
+                 [ guard::valid_op_add_broadcast_row{} ]
+                 / action::exec_scalar_op_add_broadcast_row
 
       , sml::state<ready> <= sml::state<ready> +
                sml::event<::emel::kernel::aarch64::event::dispatch_op_add>
@@ -109,8 +114,13 @@ struct model {
 
       , sml::state<ready> <= sml::state<ready> +
                sml::event<::emel::kernel::aarch64::event::dispatch_op_mul>
-                 [ guard::valid_op_mul{} ]
+                 [ guard::valid_op_mul_equal{} ]
                  / action::exec_op_mul
+
+      , sml::state<ready> <= sml::state<ready> +
+               sml::event<::emel::kernel::aarch64::event::dispatch_op_mul>
+                 [ guard::valid_op_mul_broadcast_row{} ]
+                 / action::exec_scalar_op_mul_broadcast_row
 
       , sml::state<ready> <= sml::state<ready> +
                sml::event<::emel::kernel::aarch64::event::dispatch_op_mul>

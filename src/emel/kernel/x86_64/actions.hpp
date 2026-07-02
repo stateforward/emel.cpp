@@ -203,6 +203,15 @@ inline bool can_use_avx2(const request_type &request,
                          ::emel::kernel::detail::dtype_f32 &&
                      is_dense_contiguous(request.src1);
   }
+  // Row-broadcast add/mul variants execute through their own scalar rows;
+  // the elementwise SIMD kernels require equally sized operands.
+  if constexpr (std::is_same_v<request_type, event::op_add> ||
+                std::is_same_v<request_type, event::op_mul>) {
+    src1_supported =
+        src1_supported &&
+        ::emel::kernel::detail::tensor_element_count(request.src1) ==
+            ::emel::kernel::detail::tensor_element_count(request.dst);
+  }
 
   bool unary_supported = true;
   if constexpr (std::is_same_v<request_type, event::op_unary>) {
@@ -2543,6 +2552,15 @@ using exec_scalar_op_conv_transpose_1d_f16_t =
         ::emel::kernel::x86_64::event::dispatch_op_conv_transpose_1d, context,
         detail::mark_done_op, true>;
 
+using exec_scalar_op_add_broadcast_row_t =
+    ::emel::kernel::detail::exec_scalar_binary_broadcast_row_op<
+        ::emel::kernel::x86_64::event::dispatch_op_add, context,
+        detail::mark_done_op, false>;
+using exec_scalar_op_mul_broadcast_row_t =
+    ::emel::kernel::detail::exec_scalar_binary_broadcast_row_op<
+        ::emel::kernel::x86_64::event::dispatch_op_mul, context,
+        detail::mark_done_op, true>;
+
 #define EMEL_KERNEL_DECLARE_REJECT_TYPE(op_name)                               \
   using reject_invalid_##op_name##_t =                                         \
       detail::reject_op<::emel::kernel::x86_64::event::dispatch_##op_name>;
@@ -2616,6 +2634,10 @@ inline constexpr exec_scalar_op_conv_transpose_1d_f32_t
     exec_scalar_op_conv_transpose_1d_f32{};
 inline constexpr exec_scalar_op_conv_transpose_1d_f16_t
     exec_scalar_op_conv_transpose_1d_f16{};
+inline constexpr exec_scalar_op_add_broadcast_row_t
+    exec_scalar_op_add_broadcast_row{};
+inline constexpr exec_scalar_op_mul_broadcast_row_t
+    exec_scalar_op_mul_broadcast_row{};
 
 #define EMEL_KERNEL_DEFINE_RUN_ACTION(op_name)                                 \
   inline constexpr exec_##op_name##_t exec_##op_name{};
