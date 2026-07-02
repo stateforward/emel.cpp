@@ -48,6 +48,29 @@ inline constexpr std::string_view k_unsupported_template_contract =
     "add_generation_prompt=true enable_thinking=false keep_past_thinking=false "
     "bos=<|startoftext|>";
 
+// LFM2.5 template revision that renames keep_past_thinking to
+// preserve_thinking (e.g. LFM2.5-230M); simple system/user chats render
+// byte-identically to the keep_past_thinking revision, so both bind the same
+// formatter. The parity lane's token-identical check guards this equivalence.
+inline constexpr std::string_view k_supported_preserve_thinking_contract =
+    "source=tokenizer.chat_template support=supported_contract "
+    "shape=structured_chat_messages_v1 roles=system,user tools=none "
+    "add_generation_prompt=true enable_thinking=false preserve_thinking=false "
+    "bos=<|startoftext|>";
+
+inline constexpr std::array<std::string_view, 9>
+    k_supported_preserve_thinking_template_markers = {
+        "{{- bos_token -}}",
+        "preserve_thinking",
+        "messages[0][\"role\"] == \"system\"",
+        "\"List of tools: [\"",
+        "message.role == \"assistant\"",
+        "</think>",
+        "add_generation_prompt",
+        "<|im_start|>assistant\\n",
+        "<|im_start|>system\\n",
+};
+
 inline constexpr std::array<std::string_view, 9> k_supported_primary_template_markers = {
     "{{- bos_token -}}",
     "keep_past_thinking",
@@ -381,6 +404,16 @@ inline bool template_matches_supported_contract(
   return true;
 }
 
+inline bool template_matches_supported_preserve_thinking_contract(
+    const std::string_view primary_template) noexcept {
+  for (const std::string_view marker : k_supported_preserve_thinking_template_markers) {
+    if (primary_template.find(marker) == std::string_view::npos) {
+      return false;
+    }
+  }
+  return true;
+}
+
 inline bool template_matches_supported_qwen_contract(
     const std::string_view primary_template) noexcept {
   for (const std::string_view marker : k_supported_qwen_primary_template_markers) {
@@ -421,6 +454,14 @@ inline formatter_binding resolve_primary_template_binding(
         .format_prompt = format_supported_contract,
         .support = support_kind::supported_contract,
         .contract = k_supported_contract,
+    };
+  }
+  if (template_matches_supported_preserve_thinking_contract(primary_template)) {
+    return formatter_binding{
+        .formatter_ctx = &k_supported_formatter_sentinel,
+        .format_prompt = format_supported_contract,
+        .support = support_kind::supported_contract,
+        .contract = k_supported_preserve_thinking_contract,
     };
   }
   if (template_matches_supported_qwen_contract(primary_template)) {
@@ -506,6 +547,12 @@ inline reference_formatter_info resolve_reference_formatter_info(
     return formatter;
   }
 
+  if (template_matches_supported_preserve_thinking_contract(formatter.primary_template)) {
+    formatter.support = support_kind::supported_contract;
+    formatter.contract = k_supported_preserve_thinking_contract;
+    return formatter;
+  }
+
   if (template_matches_supported_qwen_contract(formatter.primary_template)) {
     formatter.support = support_kind::supported_contract;
     formatter.contract = k_supported_qwen_contract;
@@ -538,7 +585,9 @@ inline size_t formatted_capacity_upper_bound(
     const std::span<const emel::text::formatter::chat_message> messages,
     const bool add_generation_prompt) noexcept {
   size_t capacity = 0u;
-  if (binding.contract == k_supported_contract || binding.contract == k_no_template_contract) {
+  if (binding.contract == k_supported_contract ||
+      binding.contract == k_supported_preserve_thinking_contract ||
+      binding.contract == k_no_template_contract) {
     capacity += k_bos.size();
   }
   if (binding.contract == k_supported_gemma4_contract) {

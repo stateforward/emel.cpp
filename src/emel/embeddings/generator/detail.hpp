@@ -2072,7 +2072,6 @@ inline bool matmul_q5_0(const action::matrix_view & matrix,
     .src0 = make_dense_src0_view(matrix),
     .src1 = make_dense_vector_src1_view(input),
     .dst = make_dense_vector_dst_view(output),
-    .nth = 1u,
   };
   return ::emel::kernel::aarch64::detail::execute_neon_mul_mat_q5_0_vector(request);
 #else
@@ -2115,7 +2114,6 @@ inline bool matmul_q8_0(const action::matrix_view & matrix,
     .src0 = make_dense_src0_view(matrix),
     .src1 = make_dense_vector_src1_view(input),
     .dst = make_dense_vector_dst_view(output),
-    .nth = 1u,
   };
   ::emel::kernel::aarch64::detail::execute_neon_mul_mat_q8_0_vector_unchecked(request);
   return true;
@@ -2176,7 +2174,6 @@ inline bool matmul_f32(const action::matrix_view & matrix,
     .src0 = make_dense_src0_view(matrix),
     .src1 = make_dense_vector_src1_view(input),
     .dst = make_dense_vector_dst_view(output),
-    .nth = 1u,
   };
   return ::emel::kernel::aarch64::detail::execute_neon_mul_mat(request);
 #else
@@ -2212,7 +2209,6 @@ inline bool matmul_f32_matrix(const action::matrix_view & matrix,
     .src0 = make_dense_src0_view(matrix),
     .src1 = make_dense_matrix_src1_view(input, input_cols, matrix.cols),
     .dst = make_dense_matrix_dst_view(output, input_cols, matrix.rows),
-    .nth = 1u,
   };
   return ::emel::kernel::aarch64::detail::execute_neon_mul_mat(request);
 #else

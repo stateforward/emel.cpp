@@ -141,7 +141,6 @@ void append_emel_backend_cases(std::vector<emel::bench::result> & results,
     emel::kernel::event::op_dup ev{
       .src0 = make_src_view(src.data(), static_cast<uint64_t>(k_vec_len)),
       .dst = make_dst_view(dst.data(), static_cast<uint64_t>(k_vec_len)),
-      .nth = 1,
     };
 
     auto fn = [&]() {
@@ -159,7 +158,6 @@ void append_emel_backend_cases(std::vector<emel::bench::result> & results,
       .src0 = make_src_view(lhs.data(), static_cast<uint64_t>(k_vec_len)),
       .src1 = make_src_view(rhs.data(), static_cast<uint64_t>(k_vec_len)),
       .dst = make_dst_view(dst.data(), static_cast<uint64_t>(k_vec_len)),
-      .nth = 1,
     };
 
     auto fn = [&]() {
@@ -177,7 +175,6 @@ void append_emel_backend_cases(std::vector<emel::bench::result> & results,
       .src0 = make_src_view(lhs.data(), static_cast<uint64_t>(k_vec_len)),
       .src1 = make_src_view(rhs.data(), static_cast<uint64_t>(k_vec_len)),
       .dst = make_dst_view(dst.data(), static_cast<uint64_t>(k_vec_len)),
-      .nth = 1,
     };
 
     auto fn = [&]() {
@@ -195,7 +192,6 @@ void append_emel_backend_cases(std::vector<emel::bench::result> & results,
       .src0 = make_src_view(lhs.data(), static_cast<uint64_t>(k_vec_len)),
       .src1 = make_src_view(rhs.data(), static_cast<uint64_t>(k_vec_len)),
       .dst = make_dst_view(dst.data(), static_cast<uint64_t>(k_vec_len)),
-      .nth = 1,
     };
 
     auto fn = [&]() {
@@ -213,7 +209,6 @@ void append_emel_backend_cases(std::vector<emel::bench::result> & results,
       .src0 = make_src_view(lhs.data(), static_cast<uint64_t>(k_vec_len)),
       .src1 = make_src_view(rhs.data(), static_cast<uint64_t>(k_vec_len)),
       .dst = make_dst_view(dst.data(), static_cast<uint64_t>(k_vec_len)),
-      .nth = 1,
     };
 
     auto fn = [&]() {
@@ -229,7 +224,6 @@ void append_emel_backend_cases(std::vector<emel::bench::result> & results,
     emel::kernel::event::op_sqr ev{
       .src0 = make_src_view(src.data(), static_cast<uint64_t>(k_vec_len)),
       .dst = make_dst_view(dst.data(), static_cast<uint64_t>(k_vec_len)),
-      .nth = 1,
     };
 
     auto fn = [&]() {
@@ -245,7 +239,6 @@ void append_emel_backend_cases(std::vector<emel::bench::result> & results,
     emel::kernel::event::op_sqrt ev{
       .src0 = make_src_view(src.data(), static_cast<uint64_t>(k_vec_len)),
       .dst = make_dst_view(dst.data(), static_cast<uint64_t>(k_vec_len)),
-      .nth = 1,
     };
 
     auto fn = [&]() {
@@ -261,7 +254,6 @@ void append_emel_backend_cases(std::vector<emel::bench::result> & results,
     emel::kernel::event::op_log ev{
       .src0 = make_src_view(src.data(), static_cast<uint64_t>(k_vec_len)),
       .dst = make_dst_view(dst.data(), static_cast<uint64_t>(k_vec_len)),
-      .nth = 1,
     };
 
     auto fn = [&]() {
@@ -277,7 +269,6 @@ void append_emel_backend_cases(std::vector<emel::bench::result> & results,
     emel::kernel::event::op_sin ev{
       .src0 = make_src_view(src.data(), static_cast<uint64_t>(k_vec_len)),
       .dst = make_dst_view(dst.data(), static_cast<uint64_t>(k_vec_len)),
-      .nth = 1,
     };
 
     auto fn = [&]() {
@@ -293,7 +284,6 @@ void append_emel_backend_cases(std::vector<emel::bench::result> & results,
     emel::kernel::event::op_cos ev{
       .src0 = make_src_view(src.data(), static_cast<uint64_t>(k_vec_len)),
       .dst = make_dst_view(dst.data(), static_cast<uint64_t>(k_vec_len)),
-      .nth = 1,
     };
 
     auto fn = [&]() {
@@ -313,7 +303,6 @@ void append_emel_backend_cases(std::vector<emel::bench::result> & results,
       .dst = make_dst_view(dst.data(),
                            static_cast<uint64_t>(k_softmax_width),
                            static_cast<uint64_t>(k_softmax_rows)),
-      .nth = 1,
     };
 
     auto fn = [&]() {
@@ -344,7 +333,6 @@ void append_emel_backend_cases(std::vector<emel::bench::result> & results,
       .dst = make_dst_view(dst.data(),
                            static_cast<uint64_t>(k_mm_n),
                            static_cast<uint64_t>(k_mm_m)),
-      .nth = 1,
     };
 
     auto fn = [&]() {
@@ -360,7 +348,6 @@ void append_emel_backend_cases(std::vector<emel::bench::result> & results,
     emel::kernel::event::op_unary ev{
       .src0 = make_src_view(src.data(), static_cast<uint64_t>(k_vec_len)),
       .dst = make_dst_view(dst.data(), static_cast<uint64_t>(k_vec_len)),
-      .nth = 1,
       .subop = emel::kernel::event::unary_subop::neg,
     };
 
@@ -378,7 +365,6 @@ void append_emel_backend_cases(std::vector<emel::bench::result> & results,
     emel::kernel::event::op_unary ev{
       .src0 = make_src_view(src.data(), static_cast<uint64_t>(k_vec_len)),
       .dst = make_dst_view(dst.data(), static_cast<uint64_t>(k_vec_len)),
-      .nth = 1,
       .subop = emel::kernel::event::unary_subop::relu,
     };
 
@@ -396,7 +382,6 @@ void append_emel_backend_cases(std::vector<emel::bench::result> & results,
     emel::kernel::event::op_unary ev{
       .src0 = make_src_view(src.data(), static_cast<uint64_t>(k_vec_len)),
       .dst = make_dst_view(dst.data(), static_cast<uint64_t>(k_vec_len)),
-      .nth = 1,
       .subop = emel::kernel::event::unary_subop::exp,
     };
 

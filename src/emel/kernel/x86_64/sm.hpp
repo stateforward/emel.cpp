@@ -1143,6 +1143,10 @@ struct sm : public emel::sm<model, action::context> {
     return this->context_.shared_q3_dispatch_count;
   }
 
+  uint64_t shared_q4_dispatch_count() const noexcept {
+    return this->context_.shared_q4_dispatch_count;
+  }
+
   uint64_t optimized_q6_dispatch_count() const noexcept {
     return this->context_.optimized_q6_dispatch_count;
   }

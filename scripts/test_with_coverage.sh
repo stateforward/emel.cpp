@@ -285,8 +285,8 @@ cmake -S . -B "$COVERAGE_BUILD_DIR" -G Ninja \
   -DCMAKE_BUILD_TYPE=Debug \
   -DCMAKE_C_COMPILER=gcc \
   -DCMAKE_CXX_COMPILER=g++ \
-  -DCMAKE_C_FLAGS="--coverage -O0" \
-  -DCMAKE_CXX_FLAGS="--coverage -O0" \
+  -DCMAKE_C_FLAGS="--coverage -O0 -fprofile-update=atomic" \
+  -DCMAKE_CXX_FLAGS="--coverage -O0 -fprofile-update=atomic" \
   -DCMAKE_EXE_LINKER_FLAGS="--coverage" \
   -DEMEL_TEST_EXTRA_ARG="$COVERAGE_TEST_EXTRA_ARG" \
   -DEMEL_TEST_SHARDS="$COVERAGE_TEST_SHARDS"
@@ -607,6 +607,8 @@ if [[ "$COVERAGE_CHANGED_ONLY" == "1" && "$COVERAGE_CHANGED_LINE_ONLY" != "0" ]]
     --exclude 'src/emel/.*/sm.hpp' \
     --gcov-ignore-errors no_working_dir_found \
     --gcov-ignore-parse-errors suspicious_hits.warn_once_per_file \
+    --gcov-ignore-parse-errors negative_hits.warn_once_per_file \
+    --merge-mode-functions separate \
     --exclude-throw-branches \
     --exclude-unreachable-branches \
     --txt-summary \
@@ -623,6 +625,8 @@ else
     --exclude 'src/emel/.*/sm.hpp' \
     --gcov-ignore-errors no_working_dir_found \
     --gcov-ignore-parse-errors suspicious_hits.warn_once_per_file \
+    --gcov-ignore-parse-errors negative_hits.warn_once_per_file \
+    --merge-mode-functions separate \
     --exclude-throw-branches \
     --exclude-unreachable-branches \
     --txt-summary \

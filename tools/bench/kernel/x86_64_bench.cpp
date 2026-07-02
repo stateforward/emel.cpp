@@ -160,7 +160,6 @@ void append_emel_x86_quantized_case(std::vector<emel::bench::result> & results,
                                 k_x86_quantized_k),
       .dst = make_x86_dst_view(dst.data(), dtype::f32, k_x86_quantized_cols,
                                k_x86_quantized_rows),
-      .nth = 1,
   };
   emel::kernel::x86_64::sm machine{};
   volatile float sink = 0.0f;
@@ -197,7 +196,6 @@ void append_reference_x86_quantized_case(
                                 k_x86_quantized_k),
       .dst = make_x86_dst_view(dst.data(), dtype::f32, k_x86_quantized_cols,
                                k_x86_quantized_rows),
-      .nth = 1,
   };
   volatile float sink = 0.0f;
 
@@ -232,7 +230,6 @@ emel::kernel::event::op_flash_attn_ext make_x86_flash_event(
   ev.src1 = make_x86_src_view(fixture.k, dtype::f16, 4u, 2u, 1u);
   ev.src2 = make_x86_src_view(fixture.v, dtype::f16, 4u, 2u, 1u);
   ev.dst = make_x86_dst_view(fixture.dst, dtype::f32, 4u, 1u, 1u);
-  ev.nth = 1;
   const float scale = 1.0f;
   std::memcpy(ev.op_params.data(), &scale, sizeof(scale));
   ev.op_params_size = sizeof(scale);

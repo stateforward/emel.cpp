@@ -33,6 +33,7 @@ using emel::kernel::test::within_flash_online_f16_tolerance;
 using emel::kernel::detail::quant::QK_K;
 using emel::kernel::detail::quant::block_q2_k;
 using emel::kernel::detail::quant::block_q3_k;
+using emel::kernel::detail::quant::block_q4_k;
 using emel::kernel::detail::quant::block_q6_k;
 using emel::kernel::detail::quant::block_q8_k;
 
@@ -74,6 +75,19 @@ void fill_q3_block(block_q3_k & q3, const uint32_t salt) {
   for (size_t i = 0; i < q3.qs.size(); ++i) {
     q3.qs[i] =
         static_cast<uint8_t>((i * (13u + salt)) ^ (0x33u + salt * 7u));
+  }
+}
+
+void fill_q4_block(block_q4_k & q4, const uint32_t salt) {
+  q4.d = static_cast<uint16_t>(0x3c00u + (salt % 17u));
+  q4.dmin = static_cast<uint16_t>(0x3800u + (salt % 13u));
+  for (size_t i = 0; i < q4.scales.size(); ++i) {
+    q4.scales[i] =
+        static_cast<uint8_t>((i * (11u + salt)) ^ (0x47u + salt));
+  }
+  for (size_t i = 0; i < q4.qs.size(); ++i) {
+    q4.qs[i] =
+        static_cast<uint8_t>((i * (5u + salt)) ^ (0x9du - salt));
   }
 }
 
@@ -126,13 +140,11 @@ TEST_CASE("kernel_x86_64_numeric_paths") {
       .src0 = make_src(lhs, dtype::f32, 4),
       .src1 = make_src(rhs, dtype::f32, 4),
       .dst = make_dst(out_add, dtype::f32, 4),
-      .nth = 1,
   };
   const emel::kernel::event::op_mul mul_ev{
       .src0 = make_src(lhs, dtype::f32, 4),
       .src1 = make_src(rhs, dtype::f32, 4),
       .dst = make_dst(out_mul, dtype::f32, 4),
-      .nth = 1,
   };
 
   x86_64_sm machine{emel::kernel::x86_64::action::context{false, {}, 0}};
@@ -172,7 +184,6 @@ TEST_CASE("kernel_x86_64_scalar_path_honors_strides") {
       .src0 = lhs,
       .src1 = rhs,
       .dst = dst,
-      .nth = 1,
   };
 
   x86_64_sm machine{emel::kernel::x86_64::action::context{false, {}, 0}};
@@ -182,26 +193,6 @@ TEST_CASE("kernel_x86_64_scalar_path_honors_strides") {
   CHECK(dst_storage[2] == doctest::Approx(22.0f));
   CHECK(dst_storage[4] == doctest::Approx(33.0f));
   CHECK(dst_storage[6] == doctest::Approx(44.0f));
-}
-
-TEST_CASE("kernel_x86_64_rejects_non_single_thread_dispatch") {
-  float lhs[4] = {1.0f, 2.0f, 3.0f, 4.0f};
-  float rhs[4] = {5.0f, 6.0f, 7.0f, 8.0f};
-  float out[4] = {};
-
-  emel::kernel::event::op_add invalid_nth{
-      .src0 = make_src(lhs, dtype::f32, 4),
-      .src1 = make_src(rhs, dtype::f32, 4),
-      .dst = make_dst(out, dtype::f32, 4),
-      .nth = 2,
-  };
-  emel::kernel::event::op_add invalid_ith = invalid_nth;
-  invalid_ith.nth = 1;
-  invalid_ith.ith = 1;
-
-  x86_64_sm machine{};
-  CHECK_FALSE(machine.process_event(invalid_nth));
-  CHECK_FALSE(machine.process_event(invalid_ith));
 }
 
 TEST_CASE("kernel_x86_64_forced_avx2_context_path") {
@@ -218,7 +209,6 @@ TEST_CASE("kernel_x86_64_forced_avx2_context_path") {
       .src0 = make_src(lhs, dtype::f32, 4),
       .src1 = make_src(rhs, dtype::f32, 4),
       .dst = make_dst(out, dtype::f32, 4),
-      .nth = 1,
   };
 
   x86_64_sm machine{emel::kernel::x86_64::action::context{true, {}, 0}};
@@ -322,7 +312,6 @@ TEST_CASE("kernel_x86_64_q2_mul_mat_uses_optimized_and_shared_routes") {
       .src0 = make_quantized_src(q2_rows.data(), dtype::q2_k, k, rows),
       .src1 = make_src(rhs.data(), dtype::f32, cols, k),
       .dst = make_dst(expected, dtype::f32, cols, rows),
-      .nth = 1,
   };
   CHECK(emel::kernel::detail::execute_scalar(scalar_ev));
 
@@ -332,7 +321,6 @@ TEST_CASE("kernel_x86_64_q2_mul_mat_uses_optimized_and_shared_routes") {
         .src0 = make_quantized_src(q2_rows.data(), dtype::q2_k, k, rows),
         .src1 = make_src(rhs.data(), dtype::f32, cols, k),
         .dst = make_dst(optimized_out, dtype::f32, cols, rows),
-        .nth = 1,
     };
     x86_64_sm optimized_machine{
         emel::kernel::x86_64::action::context{avx2_fma_contract(true), {}, 0}};
@@ -350,7 +338,6 @@ TEST_CASE("kernel_x86_64_q2_mul_mat_uses_optimized_and_shared_routes") {
       .src0 = make_quantized_src(q2_rows.data(), dtype::q2_k, k, rows),
       .src1 = make_src(rhs.data(), dtype::f32, cols, k),
       .dst = make_dst(shared_out, dtype::f32, cols, rows),
-      .nth = 1,
   };
   x86_64_sm shared_machine{
       emel::kernel::x86_64::action::context{avx2_fma_contract(false), {}, 0}};
@@ -385,7 +372,6 @@ TEST_CASE("kernel_x86_64_q3_mul_mat_uses_optimized_and_shared_routes") {
       .src0 = make_quantized_src(q3_rows.data(), dtype::q3_k, k, rows),
       .src1 = make_src(rhs.data(), dtype::f32, cols, k),
       .dst = make_dst(expected, dtype::f32, cols, rows),
-      .nth = 1,
   };
   CHECK(emel::kernel::detail::execute_scalar(scalar_ev));
 
@@ -395,7 +381,6 @@ TEST_CASE("kernel_x86_64_q3_mul_mat_uses_optimized_and_shared_routes") {
         .src0 = make_quantized_src(q3_rows.data(), dtype::q3_k, k, rows),
         .src1 = make_src(rhs.data(), dtype::f32, cols, k),
         .dst = make_dst(optimized_out, dtype::f32, cols, rows),
-        .nth = 1,
     };
     x86_64_sm optimized_machine{
         emel::kernel::x86_64::action::context{avx2_fma_contract(true), {}, 0}};
@@ -413,7 +398,6 @@ TEST_CASE("kernel_x86_64_q3_mul_mat_uses_optimized_and_shared_routes") {
       .src0 = make_quantized_src(q3_rows.data(), dtype::q3_k, k, rows),
       .src1 = make_src(rhs.data(), dtype::f32, cols, k),
       .dst = make_dst(shared_out, dtype::f32, cols, rows),
-      .nth = 1,
   };
   x86_64_sm shared_machine{
       emel::kernel::x86_64::action::context{avx2_fma_contract(false), {}, 0}};
@@ -421,6 +405,47 @@ TEST_CASE("kernel_x86_64_q3_mul_mat_uses_optimized_and_shared_routes") {
   CHECK(shared_machine.process_event(shared_ev));
   CHECK(shared_machine.optimized_q3_dispatch_count() == 0u);
   CHECK(shared_machine.shared_q3_dispatch_count() == 1u);
+  for (size_t i = 0; i < std::size(shared_out); ++i) {
+    CHECK(shared_out[i] == doctest::Approx(expected[i]).epsilon(1e-6f));
+  }
+}
+
+TEST_CASE("kernel_x86_64_q4_mul_mat_reports_shared_route") {
+  constexpr size_t block_count = 2u;
+  constexpr uint64_t k = QK_K * block_count;
+  constexpr uint64_t rows = 2u;
+  constexpr uint64_t cols = 2u;
+
+  std::array<block_q4_k, rows * block_count> q4_rows = {};
+  for (size_t idx = 0; idx < q4_rows.size(); ++idx) {
+    fill_q4_block(q4_rows[idx], static_cast<uint32_t>(idx + 29u));
+  }
+
+  std::array<float, k * cols> rhs = {};
+  for (size_t i = 0; i < rhs.size(); ++i) {
+    const int32_t centered = static_cast<int32_t>((i * 7u) % 37u) - 18;
+    rhs[i] = static_cast<float>(centered) * 0.0625f;
+  }
+
+  float expected[rows * cols] = {};
+  const emel::kernel::event::op_mul_mat scalar_ev{
+      .src0 = make_quantized_src(q4_rows.data(), dtype::q4_k, k, rows),
+      .src1 = make_src(rhs.data(), dtype::f32, cols, k),
+      .dst = make_dst(expected, dtype::f32, cols, rows),
+  };
+  CHECK(emel::kernel::detail::execute_scalar(scalar_ev));
+
+  float shared_out[rows * cols] = {};
+  const emel::kernel::event::op_mul_mat shared_ev{
+      .src0 = make_quantized_src(q4_rows.data(), dtype::q4_k, k, rows),
+      .src1 = make_src(rhs.data(), dtype::f32, cols, k),
+      .dst = make_dst(shared_out, dtype::f32, cols, rows),
+  };
+  x86_64_sm shared_machine{
+      emel::kernel::x86_64::action::context{avx2_fma_contract(true), {}, 0}};
+
+  CHECK(shared_machine.process_event(shared_ev));
+  CHECK(shared_machine.shared_q4_dispatch_count() == 1u);
   for (size_t i = 0; i < std::size(shared_out); ++i) {
     CHECK(shared_out[i] == doctest::Approx(expected[i]).epsilon(1e-6f));
   }
@@ -474,7 +499,6 @@ TEST_CASE("kernel_x86_64_q6_mul_mat_uses_optimized_and_shared_routes") {
       .src0 = make_quantized_src(q6_rows.data(), dtype::q6_k, k, rows),
       .src1 = make_src(rhs.data(), dtype::f32, cols, k),
       .dst = make_dst(expected, dtype::f32, cols, rows),
-      .nth = 1,
   };
   CHECK(emel::kernel::detail::execute_scalar(scalar_ev));
 
@@ -484,7 +508,6 @@ TEST_CASE("kernel_x86_64_q6_mul_mat_uses_optimized_and_shared_routes") {
         .src0 = make_quantized_src(q6_rows.data(), dtype::q6_k, k, rows),
         .src1 = make_src(rhs.data(), dtype::f32, cols, k),
         .dst = make_dst(optimized_out, dtype::f32, cols, rows),
-        .nth = 1,
     };
     x86_64_sm optimized_machine{
         emel::kernel::x86_64::action::context{avx2_fma_contract(true), {}, 0}};
@@ -502,7 +525,6 @@ TEST_CASE("kernel_x86_64_q6_mul_mat_uses_optimized_and_shared_routes") {
       .src0 = make_quantized_src(q6_rows.data(), dtype::q6_k, k, rows),
       .src1 = make_src(rhs.data(), dtype::f32, cols, k),
       .dst = make_dst(shared_out, dtype::f32, cols, rows),
-      .nth = 1,
   };
   x86_64_sm shared_machine{
       emel::kernel::x86_64::action::context{avx2_fma_contract(false), {}, 0}};
@@ -542,19 +564,16 @@ TEST_CASE("kernel_x86_64_quantized_hot_path_dispatches_without_allocation") {
       .src0 = make_quantized_src(&q2, dtype::q2_k, k, 1u),
       .src1 = make_src(rhs.data(), dtype::f32, 1u, k),
       .dst = make_dst(q2_out, dtype::f32, 1u, 1u),
-      .nth = 1,
   };
   const emel::kernel::event::op_mul_mat q3_ev{
       .src0 = make_quantized_src(&q3, dtype::q3_k, k, 1u),
       .src1 = make_src(rhs.data(), dtype::f32, 1u, k),
       .dst = make_dst(q3_out, dtype::f32, 1u, 1u),
-      .nth = 1,
   };
   const emel::kernel::event::op_mul_mat q6_ev{
       .src0 = make_quantized_src(&q6, dtype::q6_k, k, 1u),
       .src1 = make_src(rhs.data(), dtype::f32, 1u, k),
       .dst = make_dst(q6_out, dtype::f32, 1u, 1u),
-      .nth = 1,
   };
 
   x86_64_sm machine{
@@ -769,7 +788,6 @@ TEST_CASE(
   request.src1.nb[2] = sizeof(uint16_t) * head_dim;
   request.src2.nb[1] = sizeof(uint16_t) * kv_dim;
   request.src2.nb[2] = sizeof(uint16_t) * head_dim;
-  request.nth = 1;
   std::memcpy(request.op_params.data(), &scale, sizeof(scale));
   std::memcpy(request.op_params.data() + sizeof(scale), &total_tokens,
               sizeof(total_tokens));
@@ -849,7 +867,6 @@ TEST_CASE("kernel_x86_64_unary_subop_supported_and_unsupported_paths") {
   emel::kernel::event::op_unary unary_ev{
       .src0 = make_src(src, dtype::f32, 4),
       .dst = make_dst(dst, dtype::f32, 4),
-      .nth = 1,
       .subop = emel::kernel::event::unary_subop::neg,
   };
 
@@ -918,7 +935,6 @@ TEST_CASE("kernel_x86_64_rejects_unimplemented_ops") {
   const emel::kernel::event::op_sum sum_ev{
       .src0 = make_src(src, dtype::f32, 4),
       .dst = make_dst(dst, dtype::f32, 4),
-      .nth = 1,
   };
 
   x86_64_sm machine{};
@@ -955,13 +971,11 @@ TEST_CASE("kernel_x86_64_mul_mat_simd_matches_scalar_tiled_edges") {
       .src0 = make_src(src0.data(), dtype::f32, k, m),
       .src1 = make_src(src1.data(), dtype::f32, n, k),
       .dst = make_dst(dst_simd.data(), dtype::f32, n, m),
-      .nth = 1,
   };
   const emel::kernel::event::op_mul_mat scalar_ev{
       .src0 = make_src(src0.data(), dtype::f32, k, m),
       .src1 = make_src(src1.data(), dtype::f32, n, k),
       .dst = make_dst(dst_scalar.data(), dtype::f32, n, m),
-      .nth = 1,
   };
 
   CHECK(emel::kernel::x86_64::detail::execute_avx2_mul_mat(simd_ev));
@@ -1007,13 +1021,11 @@ TEST_CASE("kernel_x86_64_mul_mat_tail_resets_nan_dst_on_first_depth_block") {
       .src0 = make_src(src0.data(), dtype::f32, k, m),
       .src1 = make_src(src1.data(), dtype::f32, n, k),
       .dst = make_dst(dst_simd.data(), dtype::f32, n, m),
-      .nth = 1,
   };
   const emel::kernel::event::op_mul_mat scalar_ev{
       .src0 = make_src(src0.data(), dtype::f32, k, m),
       .src1 = make_src(src1.data(), dtype::f32, n, k),
       .dst = make_dst(dst_scalar.data(), dtype::f32, n, m),
-      .nth = 1,
   };
 
   CHECK(emel::kernel::x86_64::detail::execute_avx2_mul_mat(simd_ev));
@@ -1039,7 +1051,6 @@ TEST_CASE("kernel_x86_64_detail_branch_paths") {
       .src0 = make_src(lhs, dtype::f32, 4),
       .src1 = make_src(rhs, dtype::f32, 4),
       .dst = make_dst(dst, dtype::f32, 4),
-      .nth = 1,
   };
 
   CHECK_FALSE(emel::kernel::x86_64::detail::can_use_avx2(add_ev, false));
@@ -1067,7 +1078,6 @@ TEST_CASE("kernel_x86_64_detail_branch_paths") {
   emel::kernel::event::op_unary unary_ev{
       .src0 = make_src(lhs, dtype::f32, 4),
       .dst = make_dst(dst, dtype::f32, 4),
-      .nth = 1,
       .subop = emel::kernel::event::unary_subop::relu,
   };
   CHECK(emel::kernel::x86_64::detail::can_use_avx2(unary_ev, host_avx2) ==
@@ -1098,41 +1108,34 @@ TEST_CASE("kernel_x86_64_detail_helper_edge_paths") {
   const emel::kernel::event::op_dup dup_ev{
       .src0 = make_src(src0, dtype::f32, 4),
       .dst = make_dst(dst0, dtype::f32, 4),
-      .nth = 1,
   };
   const emel::kernel::event::op_add add_ev{
       .src0 = make_src(src0, dtype::f32, 4),
       .src1 = make_src(src0, dtype::f32, 4),
       .dst = make_dst(dst0, dtype::f32, 4),
-      .nth = 1,
   };
   const emel::kernel::event::op_mul mul_ev{
       .src0 = make_src(src0, dtype::f32, 4),
       .src1 = make_src(src0, dtype::f32, 4),
       .dst = make_dst(dst0, dtype::f32, 4),
-      .nth = 1,
   };
   const emel::kernel::event::op_div div_ev{
       .src0 = make_src(src0, dtype::f32, 4),
       .src1 = make_src(src0, dtype::f32, 4),
       .dst = make_dst(dst0, dtype::f32, 4),
-      .nth = 1,
   };
   const emel::kernel::event::op_sqr sqr_ev{
       .src0 = make_src(src0, dtype::f32, 4),
       .dst = make_dst(dst0, dtype::f32, 4),
-      .nth = 1,
   };
   const emel::kernel::event::op_sqrt sqrt_ev{
       .src0 = make_src(src0, dtype::f32, 4),
       .dst = make_dst(dst0, dtype::f32, 4),
-      .nth = 1,
   };
   const emel::kernel::event::op_sub sub_ev{
       .src0 = make_src(src0, dtype::f32, 4),
       .src1 = make_src(src0, dtype::f32, 4),
       .dst = make_dst(dst0, dtype::f32, 4),
-      .nth = 1,
   };
   float src_mm0[8] = {1.0f, 0.5f, -1.0f, 2.0f, 0.0f, -0.5f, 3.0f, 1.0f};
   float src_mm1[32] = {
@@ -1145,12 +1148,10 @@ TEST_CASE("kernel_x86_64_detail_helper_edge_paths") {
       .src0 = make_src(src_mm0, dtype::f32, 4, 2),
       .src1 = make_src(src_mm1, dtype::f32, 8, 4),
       .dst = make_dst(dst_mm, dtype::f32, 8, 2),
-      .nth = 1,
   };
   emel::kernel::event::op_unary unary_ev{
       .src0 = make_src(src0, dtype::f32, 4),
       .dst = make_dst(dst0, dtype::f32, 4),
-      .nth = 1,
       .subop = emel::kernel::event::unary_subop::relu,
   };
 
@@ -1218,7 +1219,6 @@ TEST_CASE("kernel_x86_64_simd_action_exec_marks_done") {
       .src0 = make_src(src0, dtype::f32, 4),
       .src1 = make_src(src1, dtype::f32, 4),
       .dst = make_dst(dst, dtype::f32, 4),
-      .nth = 1,
   };
 
   emel::kernel::x86_64::event::dispatch_ctx dispatch_ctx{};

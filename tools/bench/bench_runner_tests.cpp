@@ -315,6 +315,71 @@ process_capture run_generation_bench_capture(const std::string & mode,
   return capture;
 }
 
+process_capture run_suite_bench_capture(const std::string & suite,
+                                        const std::string & mode,
+                                        const std::string & tag,
+                                        const bool enable_internal = false) {
+  const std::filesystem::path tmp_dir =
+      std::filesystem::temp_directory_path() / "emel-bench-runner-tests" / tag;
+  std::filesystem::create_directories(tmp_dir);
+  const std::filesystem::path stdout_path = tmp_dir / "stdout.txt";
+  const std::filesystem::path stderr_path = tmp_dir / "stderr.txt";
+
+  std::string command;
+#if defined(_WIN32)
+  command = "set EMEL_BENCH_SUITE=" + suite + " && ";
+  command += "set EMEL_BENCH_ITERS=1 && ";
+  command += "set EMEL_BENCH_RUNS=1 && ";
+  command += "set EMEL_BENCH_WARMUP_ITERS=0 && ";
+  command += "set EMEL_BENCH_WARMUP_RUNS=0 && ";
+  if (enable_internal) {
+    command += "set EMEL_BENCH_INTERNAL=1 && ";
+  }
+  command += quote_arg_windows(bench_runner_binary_path().string());
+  command += " --mode=" + mode + " > ";
+  command += quote_arg_windows(stdout_path.string());
+  command += " 2> ";
+  command += quote_arg_windows(stderr_path.string());
+#else
+  command = "ulimit -s 8192; ";
+  command += "EMEL_BENCH_SUITE=" + quote_arg_posix(suite) + " ";
+  command += "EMEL_BENCH_ITERS=1 ";
+  command += "EMEL_BENCH_RUNS=1 ";
+  command += "EMEL_BENCH_WARMUP_ITERS=0 ";
+  command += "EMEL_BENCH_WARMUP_RUNS=0 ";
+  if (enable_internal) {
+    command += "EMEL_BENCH_INTERNAL=1 ";
+  }
+  command += quote_arg_posix(bench_runner_binary_path().string());
+  command += " --mode=" + mode + " > ";
+  command += quote_arg_posix(stdout_path.string());
+  command += " 2> ";
+  command += quote_arg_posix(stderr_path.string());
+#endif
+
+  const int status = std::system(command.c_str());
+  process_capture capture{};
+  capture.stdout_text = read_file(stdout_path);
+  capture.stderr_text = read_file(stderr_path);
+
+  std::error_code ec;
+  std::filesystem::remove(stdout_path, ec);
+  std::filesystem::remove(stderr_path, ec);
+
+  if (status == -1) {
+    return capture;
+  }
+#if defined(_WIN32)
+  capture.exit_code = status;
+#else
+  if (!WIFEXITED(status)) {
+    return capture;
+  }
+  capture.exit_code = WEXITSTATUS(status);
+#endif
+  return capture;
+}
+
 process_capture run_diarization_bench_capture(const std::string & mode,
                                               const bool emit_jsonl = false) {
   const std::filesystem::path tmp_dir =
@@ -806,18 +871,23 @@ TEST_CASE("benchmark runner registration is localized outside the orchestrator")
   CHECK(emel::bench::registered_runner_count() >= 29u);
   CHECK(emel::bench::find_registered_runner("generation") != nullptr);
   CHECK(emel::bench::find_registered_runner("diarization_sortformer") != nullptr);
+  CHECK(emel::bench::find_registered_runner("sm_scheduler") != nullptr);
   CHECK(emel::bench::find_registered_runner("tokenizer") != nullptr);
   CHECK(emel::bench::find_registered_runner("missing_suite") == nullptr);
 
   bool saw_generation = false;
+  bool saw_sm_scheduler = false;
   bool saw_tokenizer = false;
   for (std::size_t i = 0; i < emel::bench::registered_runner_count(); ++i) {
     saw_generation = saw_generation ||
       emel::bench::registered_runner_suite_at(i) == std::string_view{"generation"};
+    saw_sm_scheduler = saw_sm_scheduler ||
+      emel::bench::registered_runner_suite_at(i) == std::string_view{"sm_scheduler"};
     saw_tokenizer = saw_tokenizer ||
       emel::bench::registered_runner_suite_at(i) == std::string_view{"tokenizer"};
   }
   CHECK(saw_generation);
+  CHECK(saw_sm_scheduler);
   CHECK(saw_tokenizer);
 }
 
@@ -848,6 +918,7 @@ TEST_CASE("bench runner suites build through independent object targets") {
   CHECK(cmake_source.find("add_bench_runner_suite(generation generation_bench.cpp") !=
         std::string::npos);
   CHECK(cmake_source.find("add_bench_runner_suite(diarization_sortformer") != std::string::npos);
+  CHECK(cmake_source.find("add_bench_runner_suite(sm_scheduler") != std::string::npos);
   CHECK(cmake_source.find("EMEL_BENCH_SUITE_FILTER STREQUAL \"memory_kv\"") !=
         std::string::npos);
   CHECK(cmake_source.find("EMEL_BENCH_SUITE_FILTER STREQUAL \"memory_recurrent\"") !=
@@ -855,6 +926,27 @@ TEST_CASE("bench runner suites build through independent object targets") {
   CHECK(cmake_source.find("EMEL_BENCH_SUITE_FILTER STREQUAL \"memory_hybrid\"") !=
         std::string::npos);
   CHECK(cmake_source.find("BENCH_RUNNER_SUITE_TARGETS") != std::string::npos);
+}
+
+TEST_CASE("bench runner emits internal sm scheduler cases") {
+  const process_capture capture =
+      run_suite_bench_capture("sm_scheduler", "compare", "sm-scheduler-compare", true);
+
+  CHECK(capture.exit_code == 0);
+  CHECK(capture.stderr_text.find("error:") == std::string::npos);
+  CHECK(capture.stdout_text.find("sm_scheduler/idle_async") != std::string::npos);
+  CHECK(capture.stdout_text.find("sm_scheduler/busy_worker_async") != std::string::npos);
+  CHECK(capture.stdout_text.find("thread_pool") != std::string::npos);
+  CHECK(capture.stdout_text.find("inline_co_sm") != std::string::npos);
+}
+
+TEST_CASE("bench runner rejects internal sm scheduler suite without explicit enable") {
+  const process_capture capture =
+      run_suite_bench_capture("sm_scheduler", "compare", "sm-scheduler-disabled");
+
+  CHECK(capture.exit_code != 0);
+  CHECK(capture.stderr_text.find("no benchmark entries matched selected suite 'sm_scheduler'") !=
+        std::string::npos);
 }
 
 TEST_CASE("benchmark dependency manifest covers registered runners conservatively") {

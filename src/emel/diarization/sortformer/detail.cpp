@@ -90,7 +90,6 @@ bool run_dense_matmul(std::span<const float> input,
               sizeof(float) * static_cast<uint64_t>(output.size()),
           },
       },
-      .nth = 1u,
   };
 
 #if defined(__aarch64__) || defined(__ARM_NEON)
@@ -163,7 +162,6 @@ bool run_dense_batch_matmul_from_transposed(std::span<const float> transposed_in
               frame_row_bytes * static_cast<uint64_t>(output_dim),
           },
       },
-      .nth = 1u,
   };
 
 #if defined(__aarch64__) || defined(__ARM_NEON)
@@ -239,7 +237,6 @@ bool run_dense_batch_matmul_from_transposed_prepared(
               frame_row_bytes * static_cast<uint64_t>(output_dim),
           },
       },
-      .nth = 1u,
   };
 
 #if defined(__aarch64__) || defined(__ARM_NEON)

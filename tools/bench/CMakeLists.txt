@@ -25,7 +25,9 @@ if(EMEL_BENCH_SUITE_FILTER STREQUAL "batch_planner" OR
    EMEL_BENCH_SUITE_FILTER STREQUAL "gbnf_rule_parser" OR
    EMEL_BENCH_SUITE_FILTER STREQUAL "flash_attention" OR
    EMEL_BENCH_SUITE_FILTER STREQUAL "kernel_x86_64" OR
-   EMEL_BENCH_SUITE_FILTER STREQUAL "kernel_aarch64")
+   EMEL_BENCH_SUITE_FILTER STREQUAL "kernel_aarch64" OR
+   EMEL_BENCH_SUITE_FILTER STREQUAL "decode_wavefront" OR
+   EMEL_BENCH_SUITE_FILTER STREQUAL "parallel_matmul")
   set(EMEL_BENCH_NEEDS_LLAMA ON)
 endif()
 
@@ -252,8 +254,13 @@ function(configure_bench_runner_common_target target_name)
       ${CMAKE_CURRENT_SOURCE_DIR}
       ${EMEL_ROOT}/src
       ${EMEL_ROOT}/include
-      ${NLOHMANN_JSON_INCLUDE_DIR}
   )
+  if(NLOHMANN_JSON_INCLUDE_DIR)
+    target_include_directories(${target_name}
+      PRIVATE
+        ${NLOHMANN_JSON_INCLUDE_DIR}
+    )
+  endif()
   if(EMEL_BENCH_NEEDS_LLAMA)
     target_include_directories(${target_name}
       PRIVATE
@@ -327,6 +334,13 @@ add_bench_runner_suite(logits_sampler logits/sampler_bench.cpp EMEL_BENCH_ENABLE
 add_bench_runner_suite(kernel_x86_64 kernel/x86_64_bench.cpp EMEL_BENCH_ENABLE_KERNEL_X86_64)
 add_bench_runner_suite(kernel_aarch64 kernel/aarch64_bench.cpp EMEL_BENCH_ENABLE_KERNEL_AARCH64)
 add_bench_runner_suite(sm_any sm_any_bench.cpp EMEL_BENCH_ENABLE_SM_ANY)
+add_bench_runner_suite(sm_scheduler sm_scheduler_bench.cpp EMEL_BENCH_ENABLE_SM_SCHEDULER)
+add_bench_runner_suite(graph_processor graph/processor_bench.cpp
+                       EMEL_BENCH_ENABLE_GRAPH_PROCESSOR)
+add_bench_runner_suite(decode_wavefront text/generator/decode_wavefront_bench.cpp
+                       EMEL_BENCH_ENABLE_DECODE_WAVEFRONT)
+add_bench_runner_suite(parallel_matmul text/generator/parallel_matmul_bench.cpp
+                       EMEL_BENCH_ENABLE_PARALLEL_MATMUL)
 add_bench_runner_suite(tokenizer_preprocessor_bpe text/tokenizer/preprocessor/bpe_bench.cpp
                        EMEL_BENCH_ENABLE_TOKENIZER_PREPROCESSOR_BPE)
 add_bench_runner_suite(tokenizer_preprocessor_spm text/tokenizer/preprocessor/spm_bench.cpp
