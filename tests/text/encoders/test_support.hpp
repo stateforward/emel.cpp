@@ -119,7 +119,9 @@ struct vocab_builder {
   emel::model::data::vocab * vocab = nullptr;
 
   vocab_builder() : vocab(&vocab_storage()) {
-    std::memset(vocab, 0, sizeof(*vocab));
+    // Value-initialize in place: vocab is non-trivial, so memset is UB and
+    // g++ rejects it under -Werror=class-memaccess.
+    *vocab = emel::model::data::vocab{};
   }
 
   void set_model(const char * value) {
