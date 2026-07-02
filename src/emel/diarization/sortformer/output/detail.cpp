@@ -49,7 +49,6 @@ bool append_segment(std::span<segment_record> segments_out,
 }  // namespace
 
 bool compute_speaker_probabilities(
-    emel::kernel::sm & kernel,
     std::span<const float> hidden_frames,
     const emel::diarization::sortformer::modules::detail::contract & modules_contract,
     std::span<float> probabilities_out) noexcept {
@@ -83,7 +82,6 @@ bool compute_speaker_probabilities(
     }
 
     if (!emel::diarization::sortformer::detail::compute_dense(
-            kernel,
             intermediate, frame_hidden_weights, frame_hidden_bias, frame_hidden)) {
       return false;
     }
@@ -92,7 +90,7 @@ bool compute_speaker_probabilities(
       intermediate[index] = relu(frame_hidden[index]);
     }
 
-    if (!emel::diarization::sortformer::detail::compute_dense(kernel, intermediate, weights, bias, logits)) {
+    if (!emel::diarization::sortformer::detail::compute_dense(intermediate, weights, bias, logits)) {
       return false;
     }
 

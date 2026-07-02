@@ -2189,7 +2189,6 @@ inline bool execute_neon_sqrt(const event::op_sqrt &request) noexcept {
 #endif
 }
 
-#if defined(__aarch64__) || defined(__ARM_NEON)
 inline uint8x16x2_t load_u8x16x2(const uint8_t *ptr) noexcept {
   uint8x16x2_t out{};
   out.val[0] = vld1q_u8(ptr);
@@ -2205,7 +2204,6 @@ inline int8x16x4_t load_s8x16x4(const int8_t *ptr) noexcept {
   out.val[3] = vld1q_s8(ptr + 48);
   return out;
 }
-#endif
 
 inline float dot_q2_k_q8_k_block_neon(
     const ::emel::kernel::detail::quant::block_q2_k &lhs,
@@ -2568,7 +2566,6 @@ decode_q4_k_scales_words(const ::emel::kernel::detail::quant::block_q4_k &lhs,
   decoded_words[0] &= kmask1;
 }
 
-#if defined(__aarch64__) || defined(__ARM_NEON)
 inline int32_t q4_k_min_sum_neon(const uint8_t *mins,
                                  const int16x8_t q8_pair_sums) noexcept {
   const int16x8_t mins_s16 = vreinterpretq_s16_u16(vmovl_u8(vld1_u8(mins)));
@@ -2577,7 +2574,6 @@ inline int32_t q4_k_min_sum_neon(const uint8_t *mins,
       vmull_s16(vget_high_s16(q8_pair_sums), vget_high_s16(mins_s16)));
   return vaddvq_s32(min_prod);
 }
-#endif
 
 inline float dot_q4_k_q8_k_block_neon(
     const ::emel::kernel::detail::quant::block_q4_k &lhs,
@@ -3573,7 +3569,6 @@ dot_q6_k_q8_k_row_neon(const ::emel::kernel::detail::quant::block_q6_k *lhs,
   return sum;
 }
 
-#if defined(__aarch64__) || defined(__ARM_NEON)
 inline int32_t horizontal_sum_s32_neon(const int32x4_t value) noexcept {
 #if defined(__aarch64__)
   return vaddvq_s32(value);
@@ -3609,7 +3604,6 @@ inline int32_t dot_q8_0_q8_0_block_sum_neon(
 #endif
   return horizontal_sum_s32_neon(acc);
 }
-#endif
 
 inline constexpr std::array<std::array<uint8_t, 8>, 256>
 make_q5_0_high_bit_lookup() noexcept {
@@ -3624,7 +3618,6 @@ make_q5_0_high_bit_lookup() noexcept {
 
 inline constexpr auto k_q5_0_high_bit_lookup = make_q5_0_high_bit_lookup();
 
-#if defined(__aarch64__) || defined(__ARM_NEON)
 inline uint8x8_t load_q5_0_high_bit_mask_u8(const uint8_t bits) noexcept {
   return vld1_u8(k_q5_0_high_bit_lookup[bits].data());
 }
@@ -3647,7 +3640,6 @@ decode_q5_0_block_neon(const ::emel::kernel::detail::quant::block_q5_0 &block,
   high_out =
       vsubq_s8(vreinterpretq_s8_u8(vorrq_u8(high_nibbles, high_mask)), bias);
 }
-#endif
 
 inline float
 dot_q5_0_q8_0_row_neon(const ::emel::kernel::detail::quant::block_q5_0 *lhs,
@@ -3926,9 +3918,8 @@ dot_q4_0_q8_0_4rows_neon(const ::emel::kernel::detail::quant::block_q4_0 *row0,
 #endif
 }
 
-#if defined(__aarch64__) || defined(__ARM_NEON)
 inline int32_t horizontal_sum_s8_neon(const int8x16_t value) noexcept {
-#if defined(__aarch64__)
+#if defined(__aarch64__) && defined(__ARM_NEON)
   const int16x8_t widened =
       vaddq_s16(vmovl_s8(vget_low_s8(value)), vmovl_s8(vget_high_s8(value)));
   const int32x4_t pair = vpaddlq_s16(widened);
@@ -3938,7 +3929,6 @@ inline int32_t horizontal_sum_s8_neon(const int8x16_t value) noexcept {
   return 0;
 #endif
 }
-#endif
 
 inline float
 dot_q4_1_q8_0_row_neon(const ::emel::kernel::detail::quant::block_q4_1 *lhs,
@@ -4104,10 +4094,6 @@ inline float
 dot_q8_0_q8_0_row_neon(const ::emel::kernel::detail::quant::block_q8_0 *lhs,
                        const ::emel::kernel::detail::quant::block_q8_0 *rhs,
                        const uint64_t block_count) noexcept {
-#if !(defined(__aarch64__) || defined(__ARM_NEON))
-  return ::emel::kernel::detail::dot_q8_0_q8_0_row_scalar(lhs, rhs,
-                                                          block_count);
-#else
   float sum = 0.0f;
   for (uint64_t block = 0; block < block_count; ++block) {
     const int32_t sumi = dot_q8_0_q8_0_block_sum_neon(lhs[block], rhs[block]);
@@ -4116,10 +4102,8 @@ dot_q8_0_q8_0_row_neon(const ::emel::kernel::detail::quant::block_q8_0 *lhs,
             ::emel::kernel::detail::quant::fp16_to_fp32(rhs[block].d));
   }
   return sum;
-#endif
 }
 
-#if defined(__aarch64__) || defined(__ARM_NEON)
 inline float32x4_t
 dot_q8_0_q8_0_4row_neon(const ::emel::kernel::detail::quant::block_q8_0 *row0,
                         const ::emel::kernel::detail::quant::block_q8_0 *row1,
@@ -4362,7 +4346,6 @@ inline int32x4_t q6_k_upper_half_dot_accumulate_neon(
   return next;
 #endif
 }
-#endif
 
 inline void
 dot_q6_k_q8_k_4rows_neon(const ::emel::kernel::detail::quant::block_q6_k *lhs0,
@@ -6980,7 +6963,6 @@ prepare_neon_mul_mat_f32_lhs_4row(const float *src, const uint64_t k,
   return true;
 }
 
-#if defined(__aarch64__) || defined(__ARM_NEON)
 template <int Lane>
 inline float32x4_t neon_fma_lane_f32(const float32x4_t acc,
                                      const float32x4_t rhs,
@@ -6991,7 +6973,6 @@ inline float32x4_t neon_fma_lane_f32(const float32x4_t acc,
   return vmlaq_n_f32(acc, rhs, vgetq_lane_f32(lhs, Lane));
 #endif
 }
-#endif
 
 inline bool execute_neon_mul_mat_prepared_f32_lhs_4row(
     const event::op_mul_mat &request, const float *prepared_lhs,

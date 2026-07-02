@@ -92,23 +92,16 @@ constexpr generation_fixture_spec k_gemma4_generation_fixture = {
     .fixture = &k_gemma4_emel_generation_fixture,
 };
 
-constexpr generation_fixture_spec k_lfm2_230m_generation_fixture = {
-    .fixture = &emel::tools::generation_fixture_registry::
-        k_lfm2_230m_generation_fixture,
-};
-
-constexpr std::array<generation_fixture_spec, 3> k_compare_generation_fixtures =
+constexpr std::array<generation_fixture_spec, 2> k_compare_generation_fixtures =
     {
         k_qwen3_generation_fixture,
         k_lfm2_generation_fixture,
-        k_lfm2_230m_generation_fixture,
 };
 
-constexpr std::array<generation_fixture_spec, 4> k_emel_generation_fixtures = {
+constexpr std::array<generation_fixture_spec, 3> k_emel_generation_fixtures = {
     k_qwen3_generation_fixture,
     k_lfm2_generation_fixture,
     k_gemma4_generation_fixture,
-    k_lfm2_230m_generation_fixture,
 };
 
 using llama_model_ptr =
@@ -1632,15 +1625,8 @@ make_reference_context(llama_model *model,
   params.n_batch = 512;
   params.n_ubatch = 512;
   params.n_seq_max = 1;
-  // Matched-core comparisons set EMEL_BENCH_REFERENCE_THREADS to EMEL's lane
-  // count; the maintained publication rows stay at the 1-thread default.
-  int32_t reference_threads = 1;
-  if (const char * threads_env = std::getenv("EMEL_BENCH_REFERENCE_THREADS");
-      threads_env != nullptr && threads_env[0] != '\0') {
-    reference_threads = std::max<int32_t>(1, std::atoi(threads_env));
-  }
-  params.n_threads = reference_threads;
-  params.n_threads_batch = reference_threads;
+  params.n_threads = 1;
+  params.n_threads_batch = 1;
   params.embeddings = false;
   params.cb_eval = eval_callback;
   params.cb_eval_user_data = eval_user_data;

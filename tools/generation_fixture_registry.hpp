@@ -26,17 +26,9 @@ inline constexpr maintained_fixture k_lfm2_generation_fixture = {
     .current_publication = true,
 };
 
-inline constexpr maintained_fixture k_lfm2_230m_generation_fixture = {
-    .name = "LFM2.5-230M-Q8_0.gguf",
-    .slug = "lfm2_5_230m_q8_0",
-    .fixture_rel = "tests/models/LFM2.5-230M-Q8_0.gguf",
-    .current_publication = false,
-};
-
-inline constexpr std::array<maintained_fixture, 3> k_maintained_generation_fixtures = {
+inline constexpr std::array<maintained_fixture, 2> k_maintained_generation_fixtures = {
     k_qwen3_generation_fixture,
     k_lfm2_generation_fixture,
-    k_lfm2_230m_generation_fixture,
 };
 
 }  // namespace emel::tools::generation_fixture_registry

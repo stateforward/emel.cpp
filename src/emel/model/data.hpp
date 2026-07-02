@@ -189,9 +189,6 @@ struct data {
     uint32_t attention_sliding_window_pattern_count = 0;
     std::array<uint8_t, k_max_metadata_arrays>
         attention_sliding_window_pattern_flags = {};
-    uint32_t attention_layer_pattern_count = 0;
-    std::array<uint8_t, k_max_metadata_arrays> attention_layer_pattern_flags =
-        {};
     float attention_scale = 0.0f;
     float attention_output_scale = 0.0f;
     int32_t attention_temperature_length = 0;
@@ -205,10 +202,6 @@ struct data {
     float rope_freq_base = 0.0f;
     float rope_freq_base_swa = 0.0f;
     int32_t n_rot_swa = 0;
-    int32_t rope_pair_x0_stride = 2;
-    int32_t rope_pair_x1_stride = 2;
-    int32_t rope_pair_x1_offset = 1;
-    int32_t rope_pair_x1_half_rot_offset = 0;
     float rope_scale_linear = 0.0f;
     int32_t rope_dimension_sections_count = 0;
     std::array<int32_t, k_max_rope_dimension_sections> rope_dimension_sections =

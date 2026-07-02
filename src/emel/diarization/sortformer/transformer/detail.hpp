@@ -7,7 +7,6 @@
 #include <string_view>
 
 #include "emel/diarization/sortformer/detail.hpp"
-#include "emel/kernel/sm.hpp"
 #include "emel/model/data.hpp"
 
 namespace emel::diarization::sortformer::transformer::detail {
@@ -57,8 +56,6 @@ struct contract {
 
 struct layer_workspace {
   layer_workspace();
-
-  emel::kernel::sm kernel{emel::kernel::detect_host_kind()};
 
   std::array<float, k_max_frame_count * k_hidden_dim> query = {};
   std::array<float, k_max_frame_count * k_hidden_dim> key = {};

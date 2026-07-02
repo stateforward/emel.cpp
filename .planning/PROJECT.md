@@ -16,83 +16,61 @@ before widening API surface or model scope.
 
 ## Current State
 
-Current milestone: none.
+Current milestone: `v1.26 I/O Staged Read Loading Strategy` (GitHub issue #63)
 
-Latest shipped milestone: `v1.27 Ryzen AVX2/FMA Kernel Support`
+Latest shipped milestone: `v1.25 I/O Read Loading Strategy`
 
-Status: `v1.27` shipped on 2026-06-25 for this host CPU, an AMD Ryzen 9 5950X.
-The practical native feature contract is x86_64 AVX2 plus FMA, with F16C
-conversion support only. Phases 239-244 are verified for the host contract,
-optimized flash attention, q2_K/q3_K, q6_K, allocation-free quantized hot-path
-contract, runtime integration, maintained parity attribution, and truthful
-benchmark publication. Approved snapshot updates landed for the
-`kernel_x86_64` benchmark baseline and the maintained LFM2 generation
-publication baselines. The source-backed milestone audit passed after repairing
-the `XBN-01` optimized benchmark attribution gap and removing the x86_64 unary
-SML rule debt; the scoped quality gate passed after those updates.
+Status: `v1.25` shipped on 2026-05-06 after Phase 225 review-fix cleanup and a
+refreshed source-backed milestone audit passed. The repo now ships the issue #62 read/copy
+strategy path beneath the existing `src/emel/io` boundary while preserving
+tensor-owned residency. `src/emel/io/read` is the canonical read/copy actor,
+`model/tensor` owns the target buffer and residency commit, and maintained
+loader/tool lanes select/report read/copy through public runtime surfaces.
+Maintained source-byte loading for benchmark, paritychecker, and embedded probe
+evidence now uses the public `emel::io::source::load_file_bytes` setup-time
+contract instead of actor-internal `io/read/detail.hpp`. Phase 224 also
+confirmed Phase 214 is historical, clarified the direct `request_read_load`
+coverage shape, and captured fresh passing `emel_tests_io` evidence before
+archive.
 
-## Latest Shipped Milestone: v1.27 Ryzen AVX2/FMA Kernel Support
+Planning for `v1.26` (issue #63) adds a bounded `src/emel/io/staged_read`
+Stateforward.SML actor for constrained-memory chunked/staged tensor loads,
+integrated through the existing tensor-to-I/O boundary from issue #60, without
+moving tensor residency ownership out of `model/tensor` and without cooperative
+coroutine scheduling unless separately approved.
 
-**Goal:** Bring the maintained x86_64 runtime path on this Ryzen host up to the
-same standard as the earlier NEON/AArch64 support: EMEL-owned AVX2/FMA flash
-and quantized hot-path kernels, explicit runtime attribution, maintained parity
-proof, and truthful benchmark publication.
-
-**Source:** User request on 2026-06-25: "add support for this processor exactly
-how NEON was added"; local host inspection reports AMD Ryzen 9 5950X with
-AVX2, FMA, and F16C, and without AVX-512/VNNI/AMX/BF16/native FP16.
-
-**Target features:**
-- x86_64 host feature contract that detects and publishes AVX2, FMA, and F16C
-  availability while explicitly marking unsupported feature families as no-claim.
-- Host-tuned x86_64 build/config support analogous to the AArch64 host-feature
-  switch, without requiring unsupported AVX-512, AVX-VNNI, AMX, BF16, or native
-  FP16 instructions.
-- EMEL-owned AVX2/FMA flash-attention implementation for supported x86_64
-  requests, with deterministic fallback/no-claim behavior for unsupported
-  shapes and operand contracts.
-- EMEL-owned AVX2/FMA `q2_K/q3_K/q6_K x q8_K` hot-path kernels using the same
-  effective operand class as the reference path, with zero hot-path allocation
-  and no whole-tensor dequantize-to-f32 substitution.
-- Runtime integration through the shipped generator -> graph -> processor ->
-  kernel chain, with counters/attribution, maintained `1/10/100/1000` parity
-  proof, and source-backed tests for supported and fallback behavior.
-- Benchmark and documentation publication that truthfully distinguishes x86_64
-  Ryzen evidence from ARM-first claims and from reference-lane results.
-
-**Archive:** `.planning/milestones/v1.27-ROADMAP.md`
-**Requirements:** `.planning/milestones/v1.27-REQUIREMENTS.md`
-**Audit:** `.planning/milestones/v1.27-MILESTONE-AUDIT.md`
-
-## Latest Shipped Milestone: v1.26 I/O Staged Read Loading Strategy
+## Current Milestone: v1.26 I/O Staged Read Loading Strategy
 
 **Goal:** Add a dedicated `io/staged_read` Stateforward.SML strategy actor under
 `src/emel/io` so tensor-owned model loading can request bounded staging/chunked
-read residency into caller-owned target memory through the public I/O boundary.
+read residency into caller-owned target memory through the public I/O boundary,
+without folding mmap, full-span single-shot read/copy internals, async
+cooperative scheduling, or device strategy behavior into this issue.
 
 **Source:** GitHub issue #63, "Add io/staged_read state machine for
-constrained-memory tensor loading"
+constrained-memory tensor loading" (depends on issue #60 boundary; follows
+v1.24 mmap and v1.25 read/copy strategy milestones).
 
-**Shipped:** 2026-05-08
+**Target features:**
+- Dedicated `src/emel/io/staged_read` machine: events, guards, actions, context,
+  errors, and public aliases following `AGENTS.md` / `docs/rules/sml.rules.md`
+  (destination-first transitions, no dispatch-local context handoff, explicit
+  guard-modeled validation and chunk/stage policy).
+- Tensor-to-I/O integration that lets `model/tensor` request staged read loading
+  through the public `emel/io` boundary while `model/tensor` remains the
+  residency lifecycle owner; the staged strategy never takes residency
+  ownership of the target tensor buffer.
+- Deterministic multi-stage progress: explicit success, chunk/short-read,
+  validation, platform-unsupported, and file errors surfaced through states and
+  events without hidden behavior selection in actions or `detail` helpers.
+- RTC-safe externalization of blocking filesystem work per project conventions;
+  bounded transient resources per stage; no handle pool retained across dispatch
+  boundaries beyond what prior I/O actors allow.
+- Maintained tests, docs, lint snapshots, benchmark snapshots, and model
+  artifacts updated from maintained commands when required; public reporting
+  reflects actual staged-read runtime usage.
 
-**Delivered:**
-- Added the canonical `src/emel/io/staged_read` Stateforward.SML actor with
-  guard-modeled source span, target window, stage sizing, and platform/resource
-  validation.
-- Implemented deterministic source-span staged copy semantics with monotonic
-  forward progress, explicit terminal success, and named deterministic errors.
-- Preserved tensor-owned residency: `model/tensor` dispatches through public
-  `emel/io` events and remains the load/bind/evict/residency owner.
-- Kept maintained loader, benchmark, paritychecker, and embedded probe lanes on
-  public runtime contracts, with no reach-through into actor internals.
-- Closed the source-backed audit by repairing direct tensor staged-load
-  nonzero-offset behavior and reconciling closeout artifact/reporting truth.
-
-**Audit:** Final source-backed audit passed with all active requirements
-satisfied. `ESG-02B` remains deferred/future for a separately approved
-file-backed staged-read source path.
-
-## Previous Shipped Milestone: v1.25 I/O Read Loading Strategy
+## Latest Shipped Milestone: v1.25 I/O Read Loading Strategy
 
 **Goal:** Add a dedicated `io/read` Stateforward.SML strategy actor under `src/emel/io`
 so tensor-owned model loading can request explicit read/copy residency into a
@@ -468,23 +446,12 @@ truth anchor and without broadening into generic Liquid-family support.
 
 ### Active
 
-- v1.27 defines scoped x86_64 Ryzen AVX2/FMA kernel support that mirrors the
-  earlier NEON/AArch64 optimization path: host feature contract, flash
-  attention, quantized hot-path kernels, maintained runtime/parity proof, and
-  benchmark attribution (see `.planning/REQUIREMENTS.md` and
-  `.planning/ROADMAP.md`).
+- v1.26 defines scoped staged/chunked constrained-memory loading under
+  `src/emel/io/staged_read` with tensor-owned residency (see
+  `.planning/REQUIREMENTS.md` and `.planning/ROADMAP.md`).
 
 ### Recently Validated
 
-- v1.26 added the dedicated `src/emel/io/staged_read` Stateforward.SML strategy
-  actor for bounded staged/chunked source-span reads under tensor-owned
-  residency.
-- v1.26 proved staged copy progress, explicit success/failure outcomes, public
-  tensor-to-I/O integration, maintained loader/tool publication truth, and
-  non-regression guardrails for shipped mmap and bulk read/copy strategies.
-- v1.26 intentionally deferred real file open/seek/read and per-stage short-read
-  taxonomy (`ESG-02B`) until a future file-backed staged-read source path is
-  approved.
 - v1.25 added a dedicated `src/emel/io/read` Stateforward.SML strategy actor for read/copy
   tensor loading.
 - v1.25 integrated read-backed residency requests through the public tensor-to-I/O boundary
@@ -494,6 +461,9 @@ truth anchor and without broadening into generic Liquid-family support.
   helpers.
 - v1.25 kept mmap changes, staged/chunked read policy, device-specific loading, cooperative
   async loading, new model families, and broad public API expansion out of scope.
+- v1.26 is the dedicated follow-on for staged/chunked constrained-memory reads; it keeps
+  cooperative coroutine scheduling and device-specific strategies out of scope unless
+  separately approved and must not regress shipped mmap or bulk `io/read` semantics.
 
 ### Validated
 
@@ -652,11 +622,9 @@ truth anchor and without broadening into generic Liquid-family support.
 ## Context
 
 This remains a brownfield repository with an existing codebase map under `.planning/codebase/`.
-The repo stays governed by `AGENTS.md` and `docs/rules/sml.rules.md`. `v1.26` is
-the latest shipped I/O milestone; `v1.27` returns to native kernel performance
-work on this x86_64 Ryzen host by mirroring the earlier NEON/AArch64 progression
-for flash, quantized kernels, runtime proof, and benchmark attribution. Earlier
-shipped work includes quality gate optimization
+The repo stays governed by `AGENTS.md` and `docs/rules/sml.rules.md`. `v1.25` is
+the latest shipped I/O milestone; `v1.26` plans constrained-memory staged reads
+below the same boundary. Earlier shipped work includes quality gate optimization
 (`v1.21`) with manifest-backed selective runners,
 conservative fallback, and parallel lane reporting. The current maintained state includes repo-owned
 EMEL generation, embedding, diarization, and Whisper ASR lanes plus pluggable parity and benchmark
@@ -668,7 +636,7 @@ mandatory validation or change benchmark/parity semantics. `v1.22` shipped from 
 shipped from issue #60 and added the missing `emel/io` orchestration boundary under tensor-owned
 residency while deferring concrete strategy machines to follow-on milestones (mmap #61,
 read/copy #62, staged read #63). `v1.24` shipped mmap; `v1.25` shipped bulk read/copy. `v1.26`
-shipped constrained-memory staged reads under issue #63.
+owns constrained-memory staged reads under issue #63.
 
 ## Constraints
 
@@ -713,17 +681,12 @@ shipped constrained-memory staged reads under issue #63.
   `src/emel/io/staged_read` beneath tensor-owned residency. It must not regress shipped mmap or
   bulk read/copy strategy machines, introduce cooperative coroutine scheduling, add device-specific
   strategies, or move tensor residency ownership out of `model/tensor`.
-- **x86_64 Ryzen kernel scope**: `v1.27` targets this host's AVX2/FMA feature set with F16C
-  conversion only. It must not claim AVX-512, AVX-VNNI, AMX, BF16, native FP16 arithmetic, GPU
-  acceleration, broad public API widening, or dequantize-to-f32 hot-path substitution unless a
-  future user-approved milestone explicitly changes that performance contract.
 
 ## Key Decisions
 
 | Decision | Rationale | Outcome |
 |----------|-----------|---------|
-| Start v1.27 as Ryzen AVX2/FMA kernel support | The user asked to add support for this processor exactly how NEON was added; this host is an AMD Ryzen 9 5950X with AVX2/FMA/F16C but no AVX-512/VNNI/AMX/BF16/native FP16, so the milestone mirrors the NEON flash/quantized/runtime/benchmark progression for x86_64 | Phases 239-244 verified; milestone audit and closeout lifecycle next |
-| Start v1.26 from GitHub issue #63 as the `io/staged_read` constrained-memory milestone | v1.25 shipped bulk read/copy; constrained-memory staging is the next narrow strategy slice under tensor-owned residency and the issue #60 boundary | ✓ Shipped |
+| Start v1.26 from GitHub issue #63 as the `io/staged_read` constrained-memory milestone | v1.25 shipped bulk read/copy; constrained-memory staging is the next narrow strategy slice under tensor-owned residency and the issue #60 boundary | ⏳ Planned |
 | Start v1.25 from GitHub issue #62 as the `io/read` loading strategy milestone | v1.24 shipped the mmap strategy and left read/copy as the next narrow concrete strategy path beneath tensor-owned residency | ✓ Shipped |
 | Start v1.24 from GitHub issue #61 as the `io/mmap` loading strategy milestone | v1.23 established the `emel/io` strategy boundary and explicitly deferred concrete mmap behavior; issue #61 is the next narrow strategy path to land beneath tensor-owned residency | ✓ Shipped |
 | Start v1.23 from GitHub issue #60 as the `emel/io` boundary milestone | v1.22 moved tensor residency ownership into `model/tensor`; the next architecture step is the explicit I/O strategy seam beneath tensor-owned residency before concrete mmap or staged strategy work lands | Phase 203 closeout cleanup |
@@ -782,4 +745,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-06-25 after starting v1.27 Ryzen AVX2/FMA kernel support milestone*
+*Last updated: 2026-05-07 after starting v1.26 I/O staged read loading strategy milestone (issue #63)*

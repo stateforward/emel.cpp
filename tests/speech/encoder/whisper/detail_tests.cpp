@@ -150,17 +150,14 @@ TEST_CASE("whisper detail q4 helpers decode both lanes and dot rows") {
                                  static_cast<int64_t>(kernel::quant::QK8_0),
                                  2);
   std::array<float, 2> linear_out{};
-  emel::kernel::sm linear_kernel{emel::kernel::detect_host_kind()};
   whisper::linear<whisper::linear_weight_variant::q4_0,
                   kernel::quant::QK4_0,
-                  2>(linear_kernel, q4_0_tensor, bias_tensor, input.data(),
-                     linear_out.data());
+                  2>(q4_0_tensor, bias_tensor, input.data(), linear_out.data());
   CHECK(linear_out[0] == doctest::Approx(-6.0f));
 
   whisper::linear_no_bias<whisper::linear_weight_variant::q4_1,
                           kernel::quant::QK4_1,
-                          2>(linear_kernel, q4_1_tensor, input.data(),
-                             linear_out.data());
+                          2>(q4_1_tensor, input.data(), linear_out.data());
   CHECK(linear_out[0] == doctest::Approx(28.0f));
 }
 
@@ -219,16 +216,14 @@ TEST_CASE("whisper detail q8 helpers decode rows and linear outputs") {
                           1);
 
   std::array<float, 2> output{};
-  emel::kernel::sm linear_kernel{emel::kernel::detect_host_kind()};
   whisper::linear<whisper::linear_weight_variant::q8_0,
                   kernel::quant::QK8_0,
-                  2>(linear_kernel, weight, bias, input.data(), output.data());
+                  2>(weight, bias, input.data(), output.data());
   CHECK(output[0] == doctest::Approx(0.75f).epsilon(0.001));
 
   whisper::linear_no_bias<whisper::linear_weight_variant::q8_0,
                           kernel::quant::QK8_0,
-                          2>(linear_kernel, weight, input.data(),
-                             output.data());
+                          2>(weight, input.data(), output.data());
   CHECK(output[1] == doctest::Approx(-3.75f).epsilon(0.001));
 }
 

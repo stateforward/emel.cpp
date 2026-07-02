@@ -8,7 +8,6 @@
 #include <vector>
 
 #include "emel/diarization/sortformer/detail.hpp"
-#include "emel/kernel/sm.hpp"
 #include "emel/diarization/sortformer/encoder/feature_extractor/detail.hpp"
 #include "emel/model/data.hpp"
 
@@ -69,8 +68,6 @@ struct contract {
 
 struct pre_encoder_workspace {
   pre_encoder_workspace();
-
-  emel::kernel::sm kernel{emel::kernel::detect_host_kind()};
 
   std::array<std::array<float, k_conv0_row_value_count>, 3> conv0_rows = {};
   std::array<std::array<float, k_stage1_row_value_count>, 3> stage1_rows = {};

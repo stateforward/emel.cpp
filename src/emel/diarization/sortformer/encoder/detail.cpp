@@ -294,7 +294,6 @@ bool compute_pointwise_row(std::span<const float> input,
                            pre_encoder_workspace & workspace,
                            std::span<float> output) noexcept {
   if (!emel::diarization::sortformer::detail::compute_dense_batch(
-          workspace.kernel,
           input,
           static_cast<size_t>(freq_count),
           static_cast<size_t>(k_pre_channel_count),
@@ -412,7 +411,6 @@ bool compute_position_projection(
     pre_encoder_workspace & workspace,
     std::span<float, k_relative_position_count * k_model_dim> output) noexcept {
   return emel::diarization::sortformer::detail::compute_dense_batch_without_bias_prepared(
-      workspace.kernel,
       positions,
       static_cast<size_t>(k_relative_position_count),
       static_cast<size_t>(k_model_dim),
@@ -448,7 +446,6 @@ bool compute_feed_forward_block(
   }
 
   if (!emel::diarization::sortformer::detail::compute_dense_batch_to_transposed_prepared(
-          workspace.kernel,
           fixed_span<k_required_encoder_value_count>(workspace.layer_norm),
           static_cast<size_t>(k_frame_count),
           static_cast<size_t>(k_model_dim),
@@ -470,7 +467,6 @@ bool compute_feed_forward_block(
 
   if (!emel::diarization::sortformer::detail::
           compute_dense_batch_from_transposed_scaled_residual_prepared(
-          workspace.kernel,
           std::span<const float>{workspace.dense_transposed_output.data(),
                                  feed_forward_value_count},
           static_cast<size_t>(k_frame_count),
@@ -595,7 +591,6 @@ bool compute_attention_block(
           static_cast<size_t>(k_model_dim),
           qkv_transposed) ||
       !emel::diarization::sortformer::detail::compute_dense_batch_from_transposed_prepared(
-          workspace.kernel,
           qkv_transposed,
           static_cast<size_t>(k_frame_count),
           static_cast<size_t>(k_model_dim),
@@ -606,7 +601,6 @@ bool compute_attention_block(
           workspace.dense_transposed_output,
           fixed_span<k_required_encoder_value_count>(workspace.query)) ||
       !emel::diarization::sortformer::detail::compute_dense_batch_from_transposed_prepared(
-          workspace.kernel,
           qkv_transposed,
           static_cast<size_t>(k_frame_count),
           static_cast<size_t>(k_model_dim),
@@ -617,7 +611,6 @@ bool compute_attention_block(
           workspace.dense_transposed_output,
           fixed_span<k_required_encoder_value_count>(workspace.key)) ||
       !emel::diarization::sortformer::detail::compute_dense_batch_from_transposed_prepared(
-          workspace.kernel,
           qkv_transposed,
           static_cast<size_t>(k_frame_count),
           static_cast<size_t>(k_model_dim),
@@ -660,7 +653,6 @@ bool compute_attention_block(
   }
 
   if (!emel::diarization::sortformer::detail::compute_dense_batch_residual_prepared(
-          workspace.kernel,
           fixed_span<k_required_encoder_value_count>(workspace.layer_result),
           static_cast<size_t>(k_frame_count),
           static_cast<size_t>(k_model_dim),
@@ -710,7 +702,6 @@ bool compute_convolution_block(
       static_cast<size_t>(k_frame_count * 2 * k_model_dim),
   };
   if (!emel::diarization::sortformer::detail::compute_dense_batch_prepared(
-          workspace.kernel,
           fixed_span<k_required_encoder_value_count>(workspace.layer_norm),
           static_cast<size_t>(k_frame_count),
           static_cast<size_t>(k_model_dim),
@@ -760,7 +751,6 @@ bool compute_convolution_block(
   }
 
   if (!emel::diarization::sortformer::detail::compute_dense_batch_residual_prepared(
-          workspace.kernel,
           fixed_span<k_required_encoder_value_count>(workspace.layer_output),
           static_cast<size_t>(k_frame_count),
           static_cast<size_t>(k_model_dim),
@@ -1210,7 +1200,6 @@ bool compute_encoder_frames_from_features(
   }
 
   if (!emel::diarization::sortformer::detail::compute_dense_batch_prepared(
-          workspace.kernel,
           workspace.pre_encoder_rows,
           static_cast<size_t>(k_frame_count),
           static_cast<size_t>(k_pre_expanded_dim),

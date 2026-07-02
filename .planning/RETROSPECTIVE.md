@@ -2,50 +2,6 @@
 
 *A living document updated after each milestone. Lessons feed forward into future planning.*
 
-## Milestone: v1.27 - Ryzen AVX2/FMA Kernel Support
-
-**Shipped:** 2026-06-25
-**Phases:** 6 | **Plans:** 6 | **Sessions:** autonomous execution, source-backed audit, and closeout
-
-### What Was Built
-
-- x86_64 host feature contract for AVX2, FMA, and F16C on the Ryzen 9 5950X.
-- EMEL-owned AVX2/FMA/F16C flash-attention path with explicit fallback/no-claim behavior.
-- EMEL-owned AVX2/FMA q2_K/q3_K/q6_K x q8_K hot-path kernels.
-- Maintained generator and paritychecker attribution proving optimized x86_64 dispatch.
-- `kernel_x86_64` benchmark publication with counter-checked optimized flash and q2/q3/q6 rows.
-
-### What Worked
-
-- The source-backed audit caught a real benchmark-publication gap after phase artifacts looked green.
-- Counter checks in benchmarks made optimized/shared attribution mechanically enforceable.
-- Keeping x86_64 routing in explicit SML guards/transitions made the unary rule-debt repair small.
-
-### What Was Inefficient
-
-- The first benchmark snapshot update only covered common x86_64 rows and had to be repaired before closeout.
-- The quality gate coverage shard was slow under coverage instrumentation, so closeout needed long-running observation.
-
-### Patterns Established
-
-- Benchmark parity claims need counter-backed maintained entries for each optimized lane, not only suite-level presence.
-- x86_64 support should mirror NEON by proving host contract, native kernels, runtime attribution, parity, and publication as one slice.
-- Pre-close audits should separate current milestone blockers from historical backlog artifacts before archiving.
-
-### Key Lessons
-
-1. Artifact agreement is not enough for benchmark truth; source entrypoints and counters must match the claim.
-2. Runtime behavior selection debt can survive in helper APIs even when production transitions are explicit.
-3. Snapshot updates need a second source-backed pass when they create a new benchmark suite.
-
-### Cost Observations
-
-- Model mix: not measured.
-- Sessions: one long autonomous closeout session with an integration-checker agent.
-- Notable: `commit_docs=false` left archive and planning changes local instead of committing them.
-
----
-
 ## Milestone: v1.25 - I/O Read Loading Strategy
 
 **Shipped:** 2026-05-06

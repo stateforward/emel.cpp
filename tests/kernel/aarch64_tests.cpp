@@ -58,11 +58,13 @@ TEST_CASE("kernel_aarch64_numeric_paths") {
       .src0 = make_src(lhs, dtype::f32, 4),
       .src1 = make_src(rhs, dtype::f32, 4),
       .dst = make_dst(out_add, dtype::f32, 4),
+      .nth = 1,
   };
   const emel::kernel::event::op_mul mul_ev{
       .src0 = make_src(lhs, dtype::f32, 4),
       .src1 = make_src(rhs, dtype::f32, 4),
       .dst = make_dst(out_mul, dtype::f32, 4),
+      .nth = 1,
   };
 
   aarch64_sm machine{emel::kernel::aarch64::action::context{false, {}, 0}};
@@ -101,6 +103,7 @@ TEST_CASE("kernel_aarch64_scalar_path_honors_strides") {
       .src0 = lhs,
       .src1 = rhs,
       .dst = dst,
+      .nth = 1,
   };
 
   aarch64_sm machine{emel::kernel::aarch64::action::context{false, {}, 0}};
@@ -112,6 +115,26 @@ TEST_CASE("kernel_aarch64_scalar_path_honors_strides") {
   CHECK(dst_storage[6] == doctest::Approx(44.0f));
 }
 
+TEST_CASE("kernel_aarch64_rejects_non_single_thread_dispatch") {
+  float lhs[4] = {1.0f, 2.0f, 3.0f, 4.0f};
+  float rhs[4] = {5.0f, 6.0f, 7.0f, 8.0f};
+  float out[4] = {};
+
+  emel::kernel::event::op_add invalid_nth{
+      .src0 = make_src(lhs, dtype::f32, 4),
+      .src1 = make_src(rhs, dtype::f32, 4),
+      .dst = make_dst(out, dtype::f32, 4),
+      .nth = 2,
+  };
+  emel::kernel::event::op_add invalid_ith = invalid_nth;
+  invalid_ith.nth = 1;
+  invalid_ith.ith = 1;
+
+  aarch64_sm machine{};
+  CHECK_FALSE(machine.process_event(invalid_nth));
+  CHECK_FALSE(machine.process_event(invalid_ith));
+}
+
 TEST_CASE("kernel_aarch64_forced_neon_context_path") {
   float lhs[4] = {2.0f, 4.0f, 6.0f, 8.0f};
   float rhs[4] = {1.0f, 3.0f, 5.0f, 7.0f};
@@ -121,6 +144,7 @@ TEST_CASE("kernel_aarch64_forced_neon_context_path") {
       .src0 = make_src(lhs, dtype::f32, 4),
       .src1 = make_src(rhs, dtype::f32, 4),
       .dst = make_dst(out, dtype::f32, 4),
+      .nth = 1,
   };
 
   aarch64_sm machine{emel::kernel::aarch64::action::context{true, {}, 0}};
@@ -157,11 +181,13 @@ TEST_CASE("kernel_aarch64_mul_mat_simd_matches_scalar_tiled_edges") {
       .src0 = make_src(src0.data(), dtype::f32, k, m),
       .src1 = make_src(src1.data(), dtype::f32, n, k),
       .dst = make_dst(dst_simd.data(), dtype::f32, n, m),
+      .nth = 1,
   };
   const emel::kernel::event::op_mul_mat scalar_ev{
       .src0 = make_src(src0.data(), dtype::f32, k, m),
       .src1 = make_src(src1.data(), dtype::f32, n, k),
       .dst = make_dst(dst_scalar.data(), dtype::f32, n, m),
+      .nth = 1,
   };
 
   CHECK(emel::kernel::aarch64::detail::execute_neon_mul_mat(simd_ev));
@@ -203,11 +229,13 @@ TEST_CASE("kernel_aarch64_mul_mat_tail_resets_nan_dst_on_first_depth_block") {
       .src0 = make_src(src0.data(), dtype::f32, k, m),
       .src1 = make_src(src1.data(), dtype::f32, n, k),
       .dst = make_dst(dst_simd.data(), dtype::f32, n, m),
+      .nth = 1,
   };
   const emel::kernel::event::op_mul_mat scalar_ev{
       .src0 = make_src(src0.data(), dtype::f32, k, m),
       .src1 = make_src(src1.data(), dtype::f32, n, k),
       .dst = make_dst(dst_scalar.data(), dtype::f32, n, m),
+      .nth = 1,
   };
 
   CHECK(emel::kernel::aarch64::detail::execute_neon_mul_mat(simd_ev));
@@ -247,11 +275,13 @@ TEST_CASE("kernel_aarch64_mul_mat_simd_matches_scalar_when_matrix_has_eight_rows
       .src0 = make_src(src0.data(), dtype::f32, k, m),
       .src1 = make_src(src1.data(), dtype::f32, n, k),
       .dst = make_dst(dst_simd.data(), dtype::f32, n, m),
+      .nth = 1,
   };
   const emel::kernel::event::op_mul_mat scalar_ev{
       .src0 = make_src(src0.data(), dtype::f32, k, m),
       .src1 = make_src(src1.data(), dtype::f32, n, k),
       .dst = make_dst(dst_scalar.data(), dtype::f32, n, m),
+      .nth = 1,
   };
 
   CHECK(emel::kernel::aarch64::detail::execute_neon_mul_mat(simd_ev));
@@ -302,11 +332,13 @@ TEST_CASE("kernel_aarch64_prepared_f32_lhs_4row_matches_scalar_with_depth_and_ta
       .src0 = make_src(src0.data(), dtype::f32, k, m),
       .src1 = make_src(src1.data(), dtype::f32, n, k),
       .dst = make_dst(dst_prepared.data(), dtype::f32, n, m),
+      .nth = 1,
   };
   const emel::kernel::event::op_mul_mat scalar_ev{
       .src0 = make_src(src0.data(), dtype::f32, k, m),
       .src1 = make_src(src1.data(), dtype::f32, n, k),
       .dst = make_dst(dst_scalar.data(), dtype::f32, n, m),
+      .nth = 1,
   };
 
   CHECK(emel::kernel::aarch64::detail::execute_neon_mul_mat_prepared_f32_lhs_4row(
@@ -361,11 +393,13 @@ TEST_CASE("kernel_aarch64_prepared_f32_lhs_4row_accumulates_twelve_column_depth_
       .src0 = make_src(src0.data(), dtype::f32, k, m),
       .src1 = make_src(src1.data(), dtype::f32, n, k),
       .dst = make_dst(dst_prepared.data(), dtype::f32, n, m),
+      .nth = 1,
   };
   const emel::kernel::event::op_mul_mat scalar_ev{
       .src0 = make_src(src0.data(), dtype::f32, k, m),
       .src1 = make_src(src1.data(), dtype::f32, n, k),
       .dst = make_dst(dst_scalar.data(), dtype::f32, n, m),
+      .nth = 1,
   };
 
   CHECK(emel::kernel::aarch64::detail::execute_neon_mul_mat_prepared_f32_lhs_4row(
@@ -415,6 +449,7 @@ TEST_CASE("kernel_aarch64_prepared_f32_lhs_4row_rejects_invalid_contract") {
       .src0 = make_src(src0.data(), dtype::f32, k, m),
       .src1 = make_src(src1.data(), dtype::f32, n, k),
       .dst = make_dst(dst.data(), dtype::f32, n, m),
+      .nth = 1,
   };
 
   CHECK_FALSE(emel::kernel::aarch64::detail::execute_neon_mul_mat_prepared_f32_lhs_4row(
@@ -676,11 +711,13 @@ TEST_CASE("kernel_aarch64_quantized_mul_mat_simd_matches_scalar") {
         .src0 = make_quantized_src(&block, type, QK_K, 1),
         .src1 = make_src(src1.data(), dtype::f32, 1, QK_K),
         .dst = make_dst(dst_simd.data(), dtype::f32, 1, 1),
+        .nth = 1,
     };
     const emel::kernel::event::op_mul_mat scalar_ev{
         .src0 = make_quantized_src(&block, type, QK_K, 1),
         .src1 = make_src(src1.data(), dtype::f32, 1, QK_K),
         .dst = make_dst(dst_scalar.data(), dtype::f32, 1, 1),
+        .nth = 1,
     };
 
     CHECK(emel::kernel::aarch64::detail::can_use_neon(simd_ev, true));
@@ -742,6 +779,7 @@ TEST_CASE("kernel_aarch64_q4_0_vector_route_is_explicit_and_numeric_match") {
       .src0 = make_quantized_src(q4_rows.data(), dtype::q4_0, QK4_0, row_count),
       .src1 = make_src(input.data(), dtype::f32, 1u, QK4_0),
       .dst = make_dst(simd_out.data(), dtype::f32, 1u, row_count),
+      .nth = 1,
   };
 
   CHECK(emel::kernel::aarch64::detail::can_use_neon_mul_mat_q4_0_vector(ev, true));
@@ -805,6 +843,7 @@ TEST_CASE("kernel_aarch64_q4_1_vector_route_is_explicit_and_numeric_match") {
       .src0 = make_quantized_src(q4_rows.data(), dtype::q4_1, QK4_1, row_count),
       .src1 = make_src(input.data(), dtype::f32, 1u, QK4_1),
       .dst = make_dst(simd_out.data(), dtype::f32, 1u, row_count),
+      .nth = 1,
   };
 
   CHECK(emel::kernel::aarch64::detail::can_use_neon_mul_mat_q4_1_vector(ev, true));
@@ -868,6 +907,7 @@ TEST_CASE("kernel_aarch64_q5_0_vector_route_is_explicit_and_numeric_match") {
       .src0 = make_quantized_src(q5_rows.data(), dtype::q5_0, QK5_0, row_count),
       .src1 = make_src(input.data(), dtype::f32, 1u, QK5_0),
       .dst = make_dst(simd_out.data(), dtype::f32, 1u, row_count),
+      .nth = 1,
   };
 
   CHECK(emel::kernel::aarch64::detail::can_use_neon_mul_mat_q5_0_vector(ev, true));
@@ -941,6 +981,7 @@ TEST_CASE("kernel_aarch64_q4_q5_vector_unchecked_paths_match_scalar_with_tail_ro
                                    row_count),
         .src1 = make_src(input.data(), dtype::f32, 1u, QK4_0),
         .dst = make_dst(optimized.data(), dtype::f32, 1u, row_count),
+        .nth = 1,
     };
 
     emel::kernel::aarch64::detail::execute_neon_mul_mat_q4_0_vector_unchecked(
@@ -983,6 +1024,7 @@ TEST_CASE("kernel_aarch64_q4_q5_vector_unchecked_paths_match_scalar_with_tail_ro
                                    row_count),
         .src1 = make_src(input.data(), dtype::f32, 1u, QK4_1),
         .dst = make_dst(optimized.data(), dtype::f32, 1u, row_count),
+        .nth = 1,
     };
 
     emel::kernel::aarch64::detail::execute_neon_mul_mat_q4_1_vector_unchecked(
@@ -1025,6 +1067,7 @@ TEST_CASE("kernel_aarch64_q4_q5_vector_unchecked_paths_match_scalar_with_tail_ro
                                    row_count),
         .src1 = make_src(input.data(), dtype::f32, 1u, QK5_0),
         .dst = make_dst(optimized.data(), dtype::f32, 1u, row_count),
+        .nth = 1,
     };
 
     emel::kernel::aarch64::detail::execute_neon_mul_mat_q5_0_vector_unchecked(
@@ -1264,7 +1307,7 @@ TEST_CASE("kernel_aarch64_q6_4rows_neon_matches_scalar") {
 
 TEST_CASE("kernel_aarch64_q4_k_row_neon_matches_scalar") {
 #if !(defined(__aarch64__) || defined(__ARM_NEON))
-  CHECK(true);
+  SUCCEED();
   return;
 #else
   using emel::kernel::detail::quant::QK_K;
@@ -1303,7 +1346,7 @@ TEST_CASE("kernel_aarch64_q4_k_row_neon_matches_scalar") {
 
 TEST_CASE("kernel_aarch64_q4_k_2rows_neon_matches_scalar") {
 #if !(defined(__aarch64__) || defined(__ARM_NEON))
-  CHECK(true);
+  SUCCEED();
   return;
 #else
   using emel::kernel::detail::quant::QK_K;
@@ -1389,11 +1432,13 @@ TEST_CASE("kernel_aarch64_sm_reports_q2_vectorized_dispatch_at_kernel_seam") {
       .src0 = make_quantized_src(&q2, dtype::q2_k, QK_K, 1),
       .src1 = make_src(input.data(), dtype::f32, 1, QK_K),
       .dst = make_dst(q2_out, dtype::f32, 1, 1),
+      .nth = 1,
   };
   const emel::kernel::event::op_mul_mat q3_ev{
       .src0 = make_quantized_src(&q3, dtype::q3_k, QK_K, 1),
       .src1 = make_src(input.data(), dtype::f32, 1, QK_K),
       .dst = make_dst(q3_out, dtype::f32, 1, 1),
+      .nth = 1,
   };
 
   aarch64_sm machine{};
@@ -1451,11 +1496,13 @@ TEST_CASE("kernel_aarch64_sm_reports_q3_vectorized_dispatch_at_kernel_seam") {
       .src0 = make_quantized_src(&q2, dtype::q2_k, QK_K, 1),
       .src1 = make_src(input.data(), dtype::f32, 1, QK_K),
       .dst = make_dst(q2_out, dtype::f32, 1, 1),
+      .nth = 1,
   };
   const emel::kernel::event::op_mul_mat q3_ev{
       .src0 = make_quantized_src(&q3, dtype::q3_k, QK_K, 1),
       .src1 = make_src(input.data(), dtype::f32, 1, QK_K),
       .dst = make_dst(q3_out, dtype::f32, 1, 1),
+      .nth = 1,
   };
 
   aarch64_sm machine{};
@@ -1527,16 +1574,19 @@ TEST_CASE("kernel_aarch64_sm_reports_q6_vectorized_dispatch_at_kernel_seam") {
       .src0 = make_quantized_src(&q2, dtype::q2_k, QK_K, 1),
       .src1 = make_src(input.data(), dtype::f32, 1, QK_K),
       .dst = make_dst(q2_out, dtype::f32, 1, 1),
+      .nth = 1,
   };
   const emel::kernel::event::op_mul_mat q3_ev{
       .src0 = make_quantized_src(&q3, dtype::q3_k, QK_K, 1),
       .src1 = make_src(input.data(), dtype::f32, 1, QK_K),
       .dst = make_dst(q3_out, dtype::f32, 1, 1),
+      .nth = 1,
   };
   const emel::kernel::event::op_mul_mat q6_ev{
       .src0 = make_quantized_src(&q6, dtype::q6_k, QK_K, 1),
       .src1 = make_src(input.data(), dtype::f32, 1, QK_K),
       .dst = make_dst(q6_out, dtype::f32, 1, 1),
+      .nth = 1,
   };
 
   aarch64_sm machine{};
@@ -1574,6 +1624,7 @@ TEST_CASE("kernel_aarch64_sm_reports_q8_0_vectorized_dispatch_at_kernel_seam") {
       .src0 = make_quantized_src(&q8, dtype::q8_0, QK8_0, 1),
       .src1 = make_src(input.data(), dtype::f32, 1, QK8_0),
       .dst = make_dst(q8_out, dtype::f32, 1, 1),
+      .nth = 1,
   };
 
   aarch64_sm machine{};
@@ -1624,11 +1675,13 @@ TEST_CASE("kernel_aarch64_q4_k_uses_neon_dispatch_when_dotprod_is_available") {
       .src0 = make_quantized_src(&q4, dtype::q4_k, QK_K, 1),
       .src1 = make_src(input.data(), dtype::f32, 1, QK_K),
       .dst = make_dst(shared_out, dtype::f32, 1, 1),
+      .nth = 1,
   };
   const emel::kernel::event::op_mul_mat scalar_ev{
       .src0 = make_quantized_src(&q4, dtype::q4_k, QK_K, 1),
       .src1 = make_src(input.data(), dtype::f32, 1, QK_K),
       .dst = make_dst(scalar_out, dtype::f32, 1, 1),
+      .nth = 1,
   };
 
   CHECK(emel::kernel::detail::execute_scalar(scalar_ev));
@@ -1694,16 +1747,19 @@ TEST_CASE("kernel_aarch64_supported_quantized_dispatch_is_alloc_free") {
       .src0 = make_quantized_src(&q2, dtype::q2_k, QK_K, 1),
       .src1 = make_src(input.data(), dtype::f32, 1, QK_K),
       .dst = make_dst(q2_out, dtype::f32, 1, 1),
+      .nth = 1,
   };
   const emel::kernel::event::op_mul_mat q3_ev{
       .src0 = make_quantized_src(&q3, dtype::q3_k, QK_K, 1),
       .src1 = make_src(input.data(), dtype::f32, 1, QK_K),
       .dst = make_dst(q3_out, dtype::f32, 1, 1),
+      .nth = 1,
   };
   const emel::kernel::event::op_mul_mat q6_ev{
       .src0 = make_quantized_src(&q6, dtype::q6_k, QK_K, 1),
       .src1 = make_src(input.data(), dtype::f32, 1, QK_K),
       .dst = make_dst(q6_out, dtype::f32, 1, 1),
+      .nth = 1,
   };
   const std::array<float, QK8_0> q8_input = [] {
     std::array<float, QK8_0> values = {};
@@ -1717,6 +1773,7 @@ TEST_CASE("kernel_aarch64_supported_quantized_dispatch_is_alloc_free") {
       .src0 = make_quantized_src(&q8, dtype::q8_0, QK8_0, 1),
       .src1 = make_src(q8_input.data(), dtype::f32, 1, QK8_0),
       .dst = make_dst(q8_out, dtype::f32, 1, 1),
+      .nth = 1,
   };
   std::array<block_q8_0, 4> q8_rows = {};
   for (size_t row = 0; row < q8_rows.size(); ++row) {
@@ -1734,6 +1791,7 @@ TEST_CASE("kernel_aarch64_supported_quantized_dispatch_is_alloc_free") {
       .src0 = make_packed_q8_0_x4_bl4_src(q8_packed_storage.data(), QK8_0, 4u),
       .src1 = make_q8_0_vector_src(q8_input.data(), QK8_0),
       .dst = make_dst(q8_out, dtype::f32, 1, 4u),
+      .nth = 1,
   };
 
   aarch64_sm machine{};
@@ -1803,6 +1861,7 @@ TEST_CASE("kernel_aarch64_q6_matrix_dispatch_does_not_claim_vector_path") {
       .src0 = make_quantized_src(&q6, dtype::q6_k, QK_K, 1),
       .src1 = make_src(input.data(), dtype::f32, 2u, QK_K),
       .dst = make_dst(out.data(), dtype::f32, 2u, 1u),
+      .nth = 1,
   };
 
   aarch64_sm machine{};
@@ -1820,9 +1879,6 @@ TEST_CASE("kernel_aarch64_q6_matrix_dispatch_does_not_claim_vector_path") {
 }
 
 TEST_CASE("kernel_aarch64_q6_packed_vector_route_is_explicit_and_numeric_match") {
-#if !(defined(__aarch64__) && defined(__ARM_NEON) && defined(__ARM_FEATURE_DOTPROD))
-  CHECK(true);
-#else
   using emel::kernel::detail::quant::QK_K;
   using emel::kernel::detail::quant::block_q6_k;
 
@@ -1890,16 +1946,19 @@ TEST_CASE("kernel_aarch64_q6_packed_vector_route_is_explicit_and_numeric_match")
       .src0 = make_quantized_src(native_rows.data(), dtype::q6_k, QK_K, k_rows),
       .src1 = make_src(input.data(), dtype::f32, 1u, QK_K),
       .dst = make_dst(native_out.data(), dtype::f32, 1u, k_rows),
+      .nth = 1,
   };
   const emel::kernel::event::op_mul_mat packed_ev{
       .src0 = make_packed_q6_k_x8_src(packed_storage.data(), QK_K, k_rows),
       .src1 = make_q8_k_vector_src(q8_input.data(), QK_K),
       .dst = make_dst(packed_out.data(), dtype::f32, 1u, k_rows),
+      .nth = 1,
   };
   const emel::kernel::event::op_mul_mat prepared_ev{
       .src0 = make_prepared_q6_k_x8_q8_src(prepared_storage.data(), QK_K, k_rows),
       .src1 = make_q8_k_vector_src(q8_input.data(), QK_K),
       .dst = make_dst(prepared_out.data(), dtype::f32, 1u, k_rows),
+      .nth = 1,
   };
 
   aarch64_sm native_machine{};
@@ -1945,12 +2004,11 @@ TEST_CASE("kernel_aarch64_q6_packed_vector_route_is_explicit_and_numeric_match")
   CHECK(prepared_machine.optimized_q6_vector_prepared_q8_rhs_i8mm_dispatch_count() == 0u);
   CHECK(prepared_machine.shared_q6_dispatch_count() == 0u);
 #endif
-#endif
 }
 
 TEST_CASE("kernel_aarch64_q4_packed_vector_route_is_explicit_and_numeric_match") {
 #if !(defined(__aarch64__) && defined(__ARM_NEON) && defined(__ARM_FEATURE_DOTPROD))
-  CHECK(true);
+  SUCCEED();
 #else
   using emel::kernel::detail::quant::Q4_K_X8_ROWS;
   using emel::kernel::detail::quant::QK_K;
@@ -1996,16 +2054,19 @@ TEST_CASE("kernel_aarch64_q4_packed_vector_route_is_explicit_and_numeric_match")
       .src0 = make_quantized_src(native_rows.data(), dtype::q4_k, QK_K, Q4_K_X8_ROWS),
       .src1 = make_src(input.data(), dtype::f32, 1u, QK_K),
       .dst = make_dst(native_out.data(), dtype::f32, 1u, Q4_K_X8_ROWS),
+      .nth = 1,
   };
   const emel::kernel::event::op_mul_mat packed_bl4_ev{
       .src0 = make_packed_q4_k_x8_bl4_src(packed_bl4_storage.data(), QK_K, Q4_K_X8_ROWS),
       .src1 = make_q8_k_vector_src(q8_input.data(), QK_K),
       .dst = make_dst(packed_bl4_out.data(), dtype::f32, 1u, Q4_K_X8_ROWS),
+      .nth = 1,
   };
   const emel::kernel::event::op_mul_mat packed_bl8_ev{
       .src0 = make_packed_q4_k_x8_bl8_src(packed_bl8_storage.data(), QK_K, Q4_K_X8_ROWS),
       .src1 = make_q8_k_vector_src(q8_input.data(), QK_K),
       .dst = make_dst(packed_bl8_out.data(), dtype::f32, 1u, Q4_K_X8_ROWS),
+      .nth = 1,
   };
 
   aarch64_sm native_machine{};
@@ -2081,6 +2142,7 @@ TEST_CASE("kernel_aarch64_sm_reports_q8_0_packed_dispatch_at_kernel_seam") {
       .src0 = make_packed_q8_0_x4_bl8_src(packed_bl8.data(), QK8_0, row_count),
       .src1 = make_q8_0_vector_src(q8_input.data(), QK8_0),
       .dst = make_dst(out, dtype::f32, 1u, row_count),
+      .nth = 1,
   };
   CHECK(machine.process_event(ev));
   CHECK(machine.optimized_q8_0_dispatch_count() == 1u);
@@ -2095,6 +2157,7 @@ TEST_CASE("kernel_aarch64_sm_reports_q8_0_packed_dispatch_at_kernel_seam") {
       .src0 = make_packed_q8_0_x4_bl4_src(packed_bl4.data(), QK8_0, row_count),
       .src1 = make_q8_0_vector_src(q8_input.data(), QK8_0),
       .dst = make_dst(out, dtype::f32, 1u, row_count),
+      .nth = 1,
   };
   CHECK(machine.process_event(ev));
   CHECK(machine.optimized_q8_0_dispatch_count() == 1u);
@@ -2109,6 +2172,7 @@ TEST_CASE("kernel_aarch64_sm_reports_q8_0_packed_dispatch_at_kernel_seam") {
       .src0 = make_packed_q8_0_x4_bl4_src(packed_bl4.data(), QK8_0, row_count),
       .src1 = make_q8_0_vector_src(q8_input.data(), QK8_0),
       .dst = make_dst(out, dtype::f32, 1u, row_count),
+      .nth = 1,
   };
   CHECK_FALSE(machine.process_event(ev));
   CHECK(machine.optimized_q8_0_dispatch_count() == 0u);
@@ -2175,6 +2239,7 @@ TEST_CASE("kernel_aarch64_q8_0_packed_route_is_explicit_and_numeric_match") {
       .src0 = make_packed_q8_0_x4_bl8_src(packed_bl8.data(), QK8_0, row_count),
       .src1 = make_q8_0_vector_src(q8_input.data(), QK8_0),
       .dst = make_dst(packed_out.data(), dtype::f32, 1u, row_count),
+      .nth = 1,
   };
   CHECK(machine.process_event(ev));
   for (size_t row = 0; row < packed_out.size(); ++row) {
@@ -2192,6 +2257,7 @@ TEST_CASE("kernel_aarch64_q8_0_packed_route_is_explicit_and_numeric_match") {
       .src0 = make_packed_q8_0_x4_bl4_src(packed_bl4.data(), QK8_0, row_count),
       .src1 = make_q8_0_vector_src(q8_input.data(), QK8_0),
       .dst = make_dst(packed_out.data(), dtype::f32, 1u, row_count),
+      .nth = 1,
   };
   CHECK(machine.process_event(ev));
   for (size_t row = 0; row < packed_out.size(); ++row) {
@@ -2209,6 +2275,7 @@ TEST_CASE("kernel_aarch64_q8_0_packed_route_is_explicit_and_numeric_match") {
       .src0 = make_packed_q8_0_x4_bl4_src(packed_bl4.data(), QK8_0, row_count),
       .src1 = make_q8_0_vector_src(q8_input.data(), QK8_0),
       .dst = make_dst(packed_out.data(), dtype::f32, 1u, row_count),
+      .nth = 1,
   };
   CHECK_FALSE(machine.process_event(ev));
   CHECK(machine.optimized_q8_0_dispatch_count() == 0u);
@@ -2281,6 +2348,7 @@ TEST_CASE("kernel_aarch64_q8_0_packed_route_matches_multi_block_native_reference
       .src0 = make_packed_q8_0_x4_bl8_src(packed_bl8.data(), col_count, row_count),
       .src1 = make_q8_0_vector_src(q8_input.data(), col_count),
       .dst = make_dst(packed_out.data(), dtype::f32, 1u, row_count),
+      .nth = 1,
   };
   CHECK(machine.process_event(ev));
   for (size_t row = 0; row < packed_out.size(); ++row) {
@@ -2295,6 +2363,7 @@ TEST_CASE("kernel_aarch64_q8_0_packed_route_matches_multi_block_native_reference
       .src0 = make_packed_q8_0_x4_bl4_src(packed_bl4.data(), col_count, row_count),
       .src1 = make_q8_0_vector_src(q8_input.data(), col_count),
       .dst = make_dst(packed_out.data(), dtype::f32, 1u, row_count),
+      .nth = 1,
   };
   CHECK(machine.process_event(ev));
   for (size_t row = 0; row < packed_out.size(); ++row) {
@@ -2305,6 +2374,7 @@ TEST_CASE("kernel_aarch64_q8_0_packed_route_matches_multi_block_native_reference
       .src0 = make_packed_q8_0_x4_bl4_src(packed_bl4.data(), col_count, row_count),
       .src1 = make_q8_0_vector_src(q8_input.data(), col_count),
       .dst = make_dst(packed_out.data(), dtype::f32, 1u, row_count),
+      .nth = 1,
   };
   CHECK_FALSE(machine.process_event(ev));
 #endif
@@ -2383,6 +2453,7 @@ TEST_CASE("kernel_aarch64_q8_0_packed_bl8_matrix_x4_route_is_explicit_and_numeri
       .src0 = make_packed_q8_0_x4_bl8_src(packed_bl8.data(), col_count, row_count),
       .src1 = make_packed_q8_0_x4_bl8_rhs_src(rhs_packed_bl8.data(), rhs_rows, col_count),
       .dst = make_batch_major_dst(packed_out.data(), dtype::f32, rhs_rows, row_count),
+      .nth = 1,
   };
   CHECK(machine.process_event(ev));
   for (size_t idx = 0; idx < packed_out.size(); ++idx) {
@@ -2398,6 +2469,7 @@ TEST_CASE("kernel_aarch64_q8_0_packed_bl8_matrix_x4_route_is_explicit_and_numeri
       .src0 = make_packed_q8_0_x4_bl8_src(packed_bl8.data(), col_count, row_count),
       .src1 = make_packed_q8_0_x4_bl8_rhs_src(rhs_packed_bl8.data(), rhs_rows, col_count),
       .dst = make_batch_major_dst(packed_out.data(), dtype::f32, rhs_rows, row_count),
+      .nth = 1,
   };
   CHECK_FALSE(machine.process_event(ev));
   CHECK(machine.optimized_q8_0_packed_bl8_matrix_x4_dispatch_count() == 0u);
@@ -2472,6 +2544,7 @@ TEST_CASE("kernel_aarch64_q4_k_packed_bl8_matrix_x4_route_is_explicit_and_numeri
       .src0 = make_packed_q4_k_x8_bl8_src(packed_bl8.data(), col_count, row_count),
       .src1 = make_q8_k_x4_rhs_src(rhs_q8.data(), rhs_rows, col_count),
       .dst = make_batch_major_dst(packed_out.data(), dtype::f32, rhs_rows, row_count),
+      .nth = 1,
   };
   CHECK(machine.process_event(ev));
   for (size_t idx = 0; idx < packed_out.size(); ++idx) {
@@ -2486,6 +2559,7 @@ TEST_CASE("kernel_aarch64_q4_k_packed_bl8_matrix_x4_route_is_explicit_and_numeri
       .src0 = make_packed_q4_k_x8_bl8_src(packed_bl8.data(), col_count, row_count),
       .src1 = make_q8_k_x4_rhs_src(rhs_q8.data(), rhs_rows, col_count),
       .dst = make_batch_major_dst(packed_out.data(), dtype::f32, rhs_rows, row_count),
+      .nth = 1,
   };
   CHECK_FALSE(machine.process_event(ev));
 #endif
@@ -2559,6 +2633,7 @@ TEST_CASE("kernel_aarch64_q4_k_packed_bl8_matrix_x8_route_is_explicit_and_numeri
       .src0 = make_packed_q4_k_x8_bl8_src(packed_bl8.data(), col_count, row_count),
       .src1 = make_q8_k_x8_rhs_src(rhs_q8.data(), rhs_rows, col_count),
       .dst = make_batch_major_dst(packed_out.data(), dtype::f32, rhs_rows, row_count),
+      .nth = 1,
   };
   CHECK(machine.process_event(ev));
   for (size_t idx = 0; idx < packed_out.size(); ++idx) {
@@ -2573,6 +2648,7 @@ TEST_CASE("kernel_aarch64_q4_k_packed_bl8_matrix_x8_route_is_explicit_and_numeri
       .src0 = make_packed_q4_k_x8_bl8_src(packed_bl8.data(), col_count, row_count),
       .src1 = make_q8_k_x8_rhs_src(rhs_q8.data(), rhs_rows, col_count),
       .dst = make_batch_major_dst(packed_out.data(), dtype::f32, rhs_rows, row_count),
+      .nth = 1,
   };
   CHECK_FALSE(machine.process_event(ev));
 #endif
@@ -2650,6 +2726,7 @@ TEST_CASE(
       .src0 = make_prepared_q6_k_x8_q8_src(prepared_storage.data(), col_count, row_count),
       .src1 = make_q8_k_x4_rhs_src(rhs_q8.data(), rhs_rows, col_count),
       .dst = make_batch_major_dst(prepared_out.data(), dtype::f32, rhs_rows, row_count),
+      .nth = 1,
   };
   CHECK(machine.process_event(ev));
   for (size_t idx = 0; idx < prepared_out.size(); ++idx) {
@@ -2666,6 +2743,7 @@ TEST_CASE(
       .src0 = make_prepared_q6_k_x8_q8_src(prepared_storage.data(), col_count, row_count),
       .src1 = make_q8_k_x4_rhs_src(rhs_q8.data(), rhs_rows, col_count),
       .dst = make_batch_major_dst(prepared_out.data(), dtype::f32, rhs_rows, row_count),
+      .nth = 1,
   };
   CHECK_FALSE(machine.process_event(ev));
 #endif
@@ -2743,6 +2821,7 @@ TEST_CASE(
       .src0 = make_prepared_q6_k_x8_q8_src(prepared_storage.data(), col_count, row_count),
       .src1 = make_q8_k_x8_rhs_src(rhs_q8.data(), rhs_rows, col_count),
       .dst = make_batch_major_dst(prepared_out.data(), dtype::f32, rhs_rows, row_count),
+      .nth = 1,
   };
   CHECK(machine.process_event(ev));
   for (size_t idx = 0; idx < prepared_out.size(); ++idx) {
@@ -2759,6 +2838,7 @@ TEST_CASE(
       .src0 = make_prepared_q6_k_x8_q8_src(prepared_storage.data(), col_count, row_count),
       .src1 = make_q8_k_x8_rhs_src(rhs_q8.data(), rhs_rows, col_count),
       .dst = make_batch_major_dst(prepared_out.data(), dtype::f32, rhs_rows, row_count),
+      .nth = 1,
   };
   CHECK_FALSE(machine.process_event(ev));
 #endif
@@ -2794,11 +2874,13 @@ TEST_CASE("kernel_aarch64_q8_0_vector_route_is_explicit_and_numeric_match") {
       .src0 = make_quantized_src(q8_rows.data(), dtype::q8_0, QK8_0, row_count),
       .src1 = make_src(input.data(), dtype::f32, 1u, QK8_0),
       .dst = make_dst(optimized_out.data(), dtype::f32, 1u, row_count),
+      .nth = 1,
   };
   const emel::kernel::event::op_mul_mat scalar_ev{
       .src0 = make_quantized_src(q8_rows.data(), dtype::q8_0, QK8_0, row_count),
       .src1 = make_src(input.data(), dtype::f32, 1u, QK8_0),
       .dst = make_dst(scalar_out.data(), dtype::f32, 1u, row_count),
+      .nth = 1,
   };
 
   aarch64_sm machine{};
@@ -2821,9 +2903,6 @@ TEST_CASE("kernel_aarch64_q8_0_vector_route_is_explicit_and_numeric_match") {
 }
 
 TEST_CASE("kernel_aarch64_q6_packed_vector_argmax_route_is_explicit_and_numeric_match") {
-#if !(defined(__aarch64__) && defined(__ARM_NEON) && defined(__ARM_FEATURE_DOTPROD))
-  CHECK(true);
-#else
   using emel::kernel::detail::quant::QK_K;
   using emel::kernel::detail::quant::block_q6_k;
 
@@ -2882,6 +2961,7 @@ TEST_CASE("kernel_aarch64_q6_packed_vector_argmax_route_is_explicit_and_numeric_
       .src0 = make_quantized_src(native_rows.data(), dtype::q6_k, QK_K, k_rows),
       .src1 = make_src(input.data(), dtype::f32, 1u, QK_K),
       .dst = make_dst(native_out.data(), dtype::f32, 1u, k_rows),
+      .nth = 1,
   };
   float argmax_score = 0.0f;
   int32_t argmax_index = -1;
@@ -2891,12 +2971,14 @@ TEST_CASE("kernel_aarch64_q6_packed_vector_argmax_route_is_explicit_and_numeric_
       .src0 = make_packed_q6_k_x8_src(packed_storage.data(), QK_K, k_rows),
       .src1 = make_q8_k_vector_src(q8_input.data(), QK_K),
       .dst = make_dst(&argmax_score, dtype::f32, 1u, 1u),
+      .nth = 1,
       .index_out = &argmax_index,
   };
   const emel::kernel::event::op_mul_mat_argmax argmax_prepared_ev{
       .src0 = make_argmax_prepared_q6_k_x8_q8_src(argmax_prepared_storage.data(), QK_K, k_rows),
       .src1 = make_q8_k_vector_src(q8_input.data(), QK_K),
       .dst = make_dst(&argmax_prepared_score, dtype::f32, 1u, 1u),
+      .nth = 1,
       .index_out = &argmax_prepared_index,
   };
 
@@ -2957,7 +3039,6 @@ TEST_CASE("kernel_aarch64_q6_packed_vector_argmax_route_is_explicit_and_numeric_
         0u);
   CHECK(argmax_prepared_machine.shared_q6_dispatch_count() == 0u);
 #endif
-#endif
 }
 
 TEST_CASE("kernel_aarch64_detail_branch_paths") {
@@ -2969,6 +3050,7 @@ TEST_CASE("kernel_aarch64_detail_branch_paths") {
       .src0 = make_src(lhs, dtype::f32, 4),
       .src1 = make_src(rhs, dtype::f32, 4),
       .dst = make_dst(dst, dtype::f32, 4),
+      .nth = 1,
   };
 
   CHECK_FALSE(emel::kernel::aarch64::detail::can_use_neon(add_ev, false));
@@ -3009,6 +3091,7 @@ TEST_CASE("kernel_aarch64_detail_branch_paths") {
       .src0 = make_quantized_src(&q2, dtype::q2_k, QK_K, 1),
       .src1 = make_src(quant_rhs, dtype::f32, 1, QK_K),
       .dst = make_dst(quant_dst, dtype::f32, 1, 1),
+      .nth = 1,
   };
 #if defined(__aarch64__) || defined(__ARM_NEON)
   CHECK(emel::kernel::aarch64::detail::can_use_neon(quant_mul_mat_ev, true));
@@ -3019,6 +3102,7 @@ TEST_CASE("kernel_aarch64_detail_branch_paths") {
   emel::kernel::event::op_unary unary_ev{
       .src0 = make_src(lhs, dtype::f32, 4),
       .dst = make_dst(dst, dtype::f32, 4),
+      .nth = 1,
       .subop = emel::kernel::event::unary_subop::relu,
   };
 #if defined(__aarch64__) || defined(__ARM_NEON)
@@ -3048,34 +3132,41 @@ TEST_CASE("kernel_aarch64_detail_helper_edge_paths") {
   const emel::kernel::event::op_dup dup_ev{
       .src0 = make_src(src0, dtype::f32, 4),
       .dst = make_dst(dst0, dtype::f32, 4),
+      .nth = 1,
   };
   const emel::kernel::event::op_add add_ev{
       .src0 = make_src(src0, dtype::f32, 4),
       .src1 = make_src(src0, dtype::f32, 4),
       .dst = make_dst(dst0, dtype::f32, 4),
+      .nth = 1,
   };
   const emel::kernel::event::op_mul mul_ev{
       .src0 = make_src(src0, dtype::f32, 4),
       .src1 = make_src(src0, dtype::f32, 4),
       .dst = make_dst(dst0, dtype::f32, 4),
+      .nth = 1,
   };
   const emel::kernel::event::op_div div_ev{
       .src0 = make_src(src0, dtype::f32, 4),
       .src1 = make_src(src0, dtype::f32, 4),
       .dst = make_dst(dst0, dtype::f32, 4),
+      .nth = 1,
   };
   const emel::kernel::event::op_sqr sqr_ev{
       .src0 = make_src(src0, dtype::f32, 4),
       .dst = make_dst(dst0, dtype::f32, 4),
+      .nth = 1,
   };
   const emel::kernel::event::op_sqrt sqrt_ev{
       .src0 = make_src(src0, dtype::f32, 4),
       .dst = make_dst(dst0, dtype::f32, 4),
+      .nth = 1,
   };
   const emel::kernel::event::op_sub sub_ev{
       .src0 = make_src(src0, dtype::f32, 4),
       .src1 = make_src(src0, dtype::f32, 4),
       .dst = make_dst(dst0, dtype::f32, 4),
+      .nth = 1,
   };
   float src_mm0[8] = {1.0f, 0.5f, -1.0f, 2.0f, 0.0f, -0.5f, 3.0f, 1.0f};
   float src_mm1[32] = {
@@ -3089,10 +3180,12 @@ TEST_CASE("kernel_aarch64_detail_helper_edge_paths") {
       .src0 = make_src(src_mm0, dtype::f32, 4, 2),
       .src1 = make_src(src_mm1, dtype::f32, 8, 4),
       .dst = make_dst(dst_mm, dtype::f32, 8, 2),
+      .nth = 1,
   };
   emel::kernel::event::op_unary unary_ev{
       .src0 = make_src(src0, dtype::f32, 4),
       .dst = make_dst(dst0, dtype::f32, 4),
+      .nth = 1,
       .subop = emel::kernel::event::unary_subop::relu,
   };
 
@@ -3170,6 +3263,7 @@ TEST_CASE("kernel_aarch64_rejects_unimplemented_ops") {
   const emel::kernel::event::op_sum sum_ev{
       .src0 = make_src(src, dtype::f32, 4),
       .dst = make_dst(dst, dtype::f32, 4),
+      .nth = 1,
   };
 
   aarch64_sm machine{};
@@ -3183,6 +3277,7 @@ TEST_CASE("kernel_aarch64_unary_subop_scalar_paths") {
   emel::kernel::event::op_unary unary_ev{
       .src0 = make_src(src, dtype::f32, 4),
       .dst = make_dst(dst, dtype::f32, 4),
+      .nth = 1,
       .subop = emel::kernel::event::unary_subop::abs,
   };
 
@@ -3333,6 +3428,7 @@ TEST_CASE("kernel_aarch64_flash_attn_ext_matches_shared_workspace_on_long_kv_spa
   request.src1.nb[2] = sizeof(uint16_t) * head_dim;
   request.src2.nb[1] = sizeof(uint16_t) * kv_dim;
   request.src2.nb[2] = sizeof(uint16_t) * head_dim;
+  request.nth = 1;
 
   const float scale = 1.0f / std::sqrt(static_cast<float>(head_dim));
   std::memcpy(request.op_params.data(), &scale, sizeof(scale));
@@ -3402,6 +3498,7 @@ TEST_CASE("kernel_aarch64_flash_attn_ext_matches_online_softmax_f16_reference_on
   request.src1.nb[2] = sizeof(uint16_t) * head_dim;
   request.src2.nb[1] = sizeof(uint16_t) * kv_dim;
   request.src2.nb[2] = sizeof(uint16_t) * head_dim;
+  request.nth = 1;
 
   const float scale = 1.0f / std::sqrt(static_cast<float>(head_dim));
   std::memcpy(request.op_params.data(), &scale, sizeof(scale));
@@ -3490,6 +3587,7 @@ TEST_CASE("kernel_aarch64_flash_attn_ext_matches_masked_total_token_reference") 
   request.src1 = make_src(k_fp16.data(), dtype::f16, head_dim, kv_tokens, 1u, 1u);
   request.src2 = make_src(v_fp16.data(), dtype::f16, head_dim, kv_tokens, 1u, 1u);
   request.dst = make_dst(neon_dst.data(), dtype::f32, head_dim, 1u, 1u, 1u);
+  request.nth = 1;
   std::memcpy(request.op_params.data(), &scale, sizeof(scale));
   std::memcpy(request.op_params.data() + sizeof(scale), &total_tokens, sizeof(total_tokens));
   request.op_params_size = sizeof(scale) + sizeof(total_tokens);
@@ -3574,6 +3672,7 @@ TEST_CASE("kernel_aarch64_flash_attn_ext_matches_masked_total_token_reference_on
   request.src1.nb[2] = sizeof(uint16_t) * head_dim;
   request.src2.nb[1] = sizeof(uint16_t) * kv_dim;
   request.src2.nb[2] = sizeof(uint16_t) * head_dim;
+  request.nth = 1;
   std::memcpy(request.op_params.data(), &scale, sizeof(scale));
   std::memcpy(request.op_params.data() + sizeof(scale), &total_tokens, sizeof(total_tokens));
   request.op_params_size = sizeof(scale) + sizeof(total_tokens);
@@ -3700,6 +3799,7 @@ TEST_CASE("kernel_aarch64_flash_attn_ext_matches_online_softmax_f16_reference") 
   request.src1 = make_src(k_fp16.data(), dtype::f16, head_dim, kv_tokens, 1, 1);
   request.src2 = make_src(v_fp16.data(), dtype::f16, head_dim, kv_tokens, 1, 1);
   request.dst = make_dst(neon_dst.data(), dtype::f32, head_dim, 1, 1, 1);
+  request.nth = 1;
   std::memcpy(request.op_params.data(), &scale, sizeof(scale));
   request.op_params_size = sizeof(scale);
 

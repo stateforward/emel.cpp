@@ -139,21 +139,25 @@ TEST_CASE("kernel_mul_mat_accepts_quantized_qk_weights") {
       .src0 = make_quantized_src(&q2, dtype::q2_k, QK_K, 1),
       .src1 = make_src(input.data(), dtype::f32, 1, QK_K),
       .dst = make_dst(q2_out, dtype::f32, 1, 1),
+      .nth = 1,
   };
   const emel::kernel::event::op_mul_mat q3_ev{
       .src0 = make_quantized_src(&q3, dtype::q3_k, QK_K, 1),
       .src1 = make_src(input.data(), dtype::f32, 1, QK_K),
       .dst = make_dst(q3_out, dtype::f32, 1, 1),
+      .nth = 1,
   };
   const emel::kernel::event::op_mul_mat q4_ev{
       .src0 = make_quantized_src(&q4, dtype::q4_k, QK_K, 1),
       .src1 = make_src(input.data(), dtype::f32, 1, QK_K),
       .dst = make_dst(q4_out, dtype::f32, 1, 1),
+      .nth = 1,
   };
   const emel::kernel::event::op_mul_mat q6_ev{
       .src0 = make_quantized_src(&q6, dtype::q6_k, QK_K, 1),
       .src1 = make_src(input.data(), dtype::f32, 1, QK_K),
       .dst = make_dst(q6_out, dtype::f32, 1, 1),
+      .nth = 1,
   };
 
   CHECK(machine.process_event(q2_ev));
@@ -202,6 +206,7 @@ TEST_CASE("kernel_mul_mat_argmax_accepts_q4_k_weights") {
       .src0 = make_quantized_src(q4_rows.data(), dtype::q4_k, QK_K, 2),
       .src1 = make_src(input.data(), dtype::f32, 1, QK_K),
       .dst = make_dst(&best_score, dtype::f32, 1, 1),
+      .nth = 1,
       .index_out = &best_index,
   };
 
@@ -233,6 +238,7 @@ TEST_CASE("kernel_mul_mat_accepts_q8_0_weights") {
       .src0 = make_quantized_src(q8_rows.data(), dtype::q8_0, QK8_0, 2),
       .src1 = make_src(input.data(), dtype::f32, 1, QK8_0),
       .dst = make_dst(out.data(), dtype::f32, 1, 2),
+      .nth = 1,
   };
 
   CHECK(machine.process_event(q8_ev));
@@ -262,6 +268,7 @@ TEST_CASE("kernel_mul_mat_argmax_accepts_q8_0_weights") {
       .src0 = make_quantized_src(q8_rows.data(), dtype::q8_0, QK8_0, 2),
       .src1 = make_src(input.data(), dtype::f32, 1, QK8_0),
       .dst = make_dst(&best_score, dtype::f32, 1, 1),
+      .nth = 1,
       .index_out = &best_index,
   };
 
@@ -287,11 +294,13 @@ TEST_CASE("kernel_mul_mat_rejects_packed_q6_q8_requests_without_explicit_simd_ro
       .src0 = make_packed_q6_k_x8_src(packed_storage.data(), QK_K, k_rows),
       .src1 = make_q8_k_vector_src(q8_input.data(), QK_K),
       .dst = make_dst(packed_out.data(), dtype::f32, 1u, k_rows),
+      .nth = 1,
   };
   const emel::kernel::event::op_mul_mat prepared_ev{
       .src0 = make_prepared_q6_k_x8_q8_src(prepared_storage.data(), QK_K, k_rows),
       .src1 = make_q8_k_vector_src(q8_input.data(), QK_K),
       .dst = make_dst(prepared_out.data(), dtype::f32, 1u, k_rows),
+      .nth = 1,
   };
 
   CHECK(emel::kernel::detail::validate_dispatch_request(packed_ev));
@@ -321,6 +330,7 @@ TEST_CASE("kernel_aarch64_backend_reports_q2_vectorized_or_shared_dispatch") {
       .src0 = make_quantized_src(&q2, dtype::q2_k, QK_K, 1),
       .src1 = make_src(input.data(), dtype::f32, 1, QK_K),
       .dst = make_dst(q2_out, dtype::f32, 1, 1),
+      .nth = 1,
   };
 
   aarch64_sm machine{};
@@ -356,6 +366,7 @@ TEST_CASE("kernel_aarch64_backend_reports_q3_vectorized_or_shared_dispatch") {
       .src0 = make_quantized_src(&q3, dtype::q3_k, QK_K, 1),
       .src1 = make_src(input.data(), dtype::f32, 1, QK_K),
       .dst = make_dst(q3_out, dtype::f32, 1, 1),
+      .nth = 1,
   };
 
   aarch64_sm machine{};
@@ -391,6 +402,7 @@ TEST_CASE("kernel_aarch64_backend_reports_q6_vectorized_or_shared_dispatch") {
       .src0 = make_quantized_src(&q6, dtype::q6_k, QK_K, 1),
       .src1 = make_src(input.data(), dtype::f32, 1, QK_K),
       .dst = make_dst(q6_out, dtype::f32, 1, 1),
+      .nth = 1,
   };
 
   aarch64_sm machine{};
@@ -429,25 +441,30 @@ TEST_CASE("kernel_backends_expose_explicit_op_transitions") {
   const emel::kernel::event::op_dup op_dup_ok{
       .src0 = make_src(src0, dtype::f32, 4),
       .dst = make_dst(dst, dtype::f32, 4),
+      .nth = 1,
   };
   const emel::kernel::event::op_add op_add_ok{
       .src0 = make_src(src0, dtype::f32, 4),
       .src1 = make_src(src1, dtype::f32, 4),
       .dst = make_dst(dst, dtype::f32, 4),
+      .nth = 1,
   };
   const emel::kernel::event::op_mul op_mul_ok{
       .src0 = make_src(src0, dtype::f32, 4),
       .src1 = make_src(src1, dtype::f32, 4),
       .dst = make_dst(dst, dtype::f32, 4),
+      .nth = 1,
   };
   const emel::kernel::event::op_mul_mat op_mul_mat_ok{
       .src0 = make_src(src0, dtype::f32, 2, 2),
       .src1 = make_src(src1, dtype::f32, 2, 2),
       .dst = make_dst(dst, dtype::f32, 2, 2),
+      .nth = 1,
   };
   const emel::kernel::event::op_soft_max op_soft_max_ok{
       .src0 = make_src(src0, dtype::f32, 4),
       .dst = make_dst(dst, dtype::f32, 4),
+      .nth = 1,
   };
 
   emel::kernel::event::op_dup op_dup_invalid = op_dup_ok;
@@ -495,11 +512,13 @@ TEST_CASE("kernel_aggregate_actions_cover_maintained_lanes") {
       .src0 = make_src(lhs, dtype::f32, 4),
       .src1 = make_src(rhs, dtype::f32, 4),
       .dst = make_dst(primary_out, dtype::f32, 4),
+      .nth = 1,
   };
   const emel::kernel::event::op_add secondary_ev{
       .src0 = make_src(lhs, dtype::f32, 4),
       .src1 = make_src(rhs, dtype::f32, 4),
       .dst = make_dst(secondary_out, dtype::f32, 4),
+      .nth = 1,
   };
 
   emel::kernel::action::context ctx{};
@@ -537,6 +556,7 @@ TEST_CASE("kernel_validation_branch_paths") {
       .src0 = make_src(src0, dtype::f32, 4),
       .src1 = make_src(src1, dtype::f32, 4),
       .dst = make_dst(dst, dtype::f32, 4),
+      .nth = 1,
   };
 
   CHECK(emel::kernel::detail::validate_dispatch_request(ev));
@@ -551,6 +571,14 @@ TEST_CASE("kernel_validation_branch_paths") {
 
   invalid = ev;
   invalid.dst.data = nullptr;
+  CHECK_FALSE(emel::kernel::detail::validate_dispatch_request(invalid));
+
+  invalid = ev;
+  invalid.nth = 0;
+  CHECK_FALSE(emel::kernel::detail::validate_dispatch_request(invalid));
+
+  invalid = ev;
+  invalid.ith = 1;
   CHECK_FALSE(emel::kernel::detail::validate_dispatch_request(invalid));
 
   invalid = ev;
@@ -570,6 +598,7 @@ TEST_CASE("kernel_detail_negative_compute_paths") {
   emel::kernel::event::op_dup dup_ev{
       .src0 = make_src(src0, dtype::f32, 4),
       .dst = make_dst(dst, dtype::f32, 3),
+      .nth = 1,
   };
   CHECK_FALSE(emel::kernel::detail::run_copy(dup_ev));
 
@@ -577,6 +606,7 @@ TEST_CASE("kernel_detail_negative_compute_paths") {
       .src0 = make_src(src0, dtype::f32, 4),
       .src1 = make_src(src1, dtype::f32, 3),
       .dst = make_dst(dst, dtype::f32, 4),
+      .nth = 1,
   };
   CHECK_FALSE(emel::kernel::detail::run_binary(
       add_ev, [](const float lhs, const float rhs) { return lhs + rhs; }));
@@ -584,6 +614,7 @@ TEST_CASE("kernel_detail_negative_compute_paths") {
   emel::kernel::event::op_sqr sqr_ev{
       .src0 = make_src(src0, dtype::f32, 4),
       .dst = make_dst(dst, dtype::f32, 3),
+      .nth = 1,
   };
   CHECK_FALSE(emel::kernel::detail::run_unary(
       sqr_ev, [](const float value) { return value * value; }));
@@ -592,6 +623,7 @@ TEST_CASE("kernel_detail_negative_compute_paths") {
       .src0 = make_src(src0, dtype::f32, 2, 2),
       .src1 = make_src(src1, dtype::f32, 2, 3),
       .dst = make_dst(dst, dtype::f32, 2, 2),
+      .nth = 1,
   };
   CHECK_FALSE(emel::kernel::detail::run_mul_mat(mul_mat_ev));
   mul_mat_ev.src0.ne[0] = 0;
@@ -600,6 +632,7 @@ TEST_CASE("kernel_detail_negative_compute_paths") {
   emel::kernel::event::op_soft_max soft_max_ev{
       .src0 = make_src(src0, dtype::f32, 0, 2),
       .dst = make_dst(dst, dtype::f32, 4, 2),
+      .nth = 1,
   };
   CHECK_FALSE(emel::kernel::detail::run_soft_max(soft_max_ev));
 }
@@ -651,6 +684,7 @@ TEST_CASE("kernel_detail_stride_paths_and_scalar_helpers") {
       .src0 = src0,
       .src1 = src1,
       .dst = dst,
+      .nth = 1,
   };
   CHECK(emel::kernel::detail::run_binary(
       add_ev, [](const float lhs, const float rhs) { return lhs + rhs; }));
@@ -663,6 +697,7 @@ TEST_CASE("kernel_detail_stride_paths_and_scalar_helpers") {
       .src0 = make_src(src0_storage, dtype::f32, 2, 2),
       .src1 = make_src(src1_storage, dtype::f32, 2, 2),
       .dst = make_dst(dst_storage, dtype::f32, 2, 2),
+      .nth = 1,
   };
   mul_mat_ev.src0.nb[0] = sizeof(float) * 2;
   mul_mat_ev.src0.nb[1] = mul_mat_ev.src0.nb[0] * mul_mat_ev.src0.ne[0];
@@ -680,6 +715,7 @@ TEST_CASE("kernel_detail_stride_paths_and_scalar_helpers") {
   emel::kernel::event::op_soft_max soft_max_ev{
       .src0 = make_src(src0_storage, dtype::f32, 2, 2),
       .dst = make_dst(dst_storage, dtype::f32, 2, 2),
+      .nth = 1,
   };
   soft_max_ev.src0.nb[0] = sizeof(float) * 2;
   soft_max_ev.src0.nb[1] = soft_max_ev.src0.nb[0] * soft_max_ev.src0.ne[0];
@@ -694,6 +730,7 @@ TEST_CASE("kernel_detail_stride_paths_and_scalar_helpers") {
       .src0 = make_src(src0_storage, dtype::f32, 4),
       .src1 = make_src(src1_storage, dtype::f32, 4),
       .dst = make_dst(dst_storage, dtype::f32, 4),
+      .nth = 1,
   };
   emel::kernel::detail::execute_scalar_unchecked(div_ev);
   CHECK(dst_storage[0] == doctest::Approx(0.5f));
@@ -701,6 +738,7 @@ TEST_CASE("kernel_detail_stride_paths_and_scalar_helpers") {
   const emel::kernel::event::op_sum unsupported_ev{
       .src0 = make_src(src0_storage, dtype::f32, 4),
       .dst = make_dst(dst_storage, dtype::f32, 4),
+      .nth = 1,
   };
   CHECK_FALSE(emel::kernel::detail::execute_scalar(unsupported_ev));
 }
@@ -714,6 +752,7 @@ TEST_CASE("kernel_backends_reject_quantized_dispatch_dtypes") {
       .src0 = make_src(src0, dtype::q4_0, 4),
       .src1 = make_src(src1, dtype::q4_0, 4),
       .dst = make_dst(dst, dtype::q4_0, 4),
+      .nth = 1,
   };
 
   x86_64_sm x86_64_machine{};
@@ -781,6 +820,7 @@ TEST_CASE("kernel_flash_attn_ext_matches_online_softmax_f16_reference_small") {
   request_x86.src1 = make_src(k_fp16.data(), dtype::f16, head_dim, kv_tokens, 1u, 1u);
   request_x86.src2 = make_src(v_fp16.data(), dtype::f16, head_dim, kv_tokens, 1u, 1u);
   request_x86.dst = make_dst(dst_x86.data(), dtype::f32, head_dim, 1u, 1u, 1u);
+  request_x86.nth = 1;
   const float scale = 1.0f;
   std::memcpy(request_x86.op_params.data(), &scale, sizeof(scale));
   request_x86.op_params_size = sizeof(scale);
@@ -843,6 +883,7 @@ TEST_CASE("kernel_flash_attn_ext_matches_online_softmax_f16_reference") {
   request_x86.src1 = make_src(k_fp16.data(), dtype::f16, head_dim, kv_tokens, 1u, 1u);
   request_x86.src2 = make_src(v_fp16.data(), dtype::f16, head_dim, kv_tokens, 1u, 1u);
   request_x86.dst = make_dst(dst_x86.data(), dtype::f32, head_dim, 1u, 1u, 1u);
+  request_x86.nth = 1;
   std::memcpy(request_x86.op_params.data(), &scale, sizeof(scale));
   request_x86.op_params_size = sizeof(scale);
 
@@ -921,6 +962,7 @@ TEST_CASE("kernel_flash_attn_ext_matches_online_softmax_f16_reference_on_long_mu
   request_x86.src1.nb[2] = sizeof(uint16_t) * head_dim;
   request_x86.src2.nb[1] = sizeof(uint16_t) * kv_dim;
   request_x86.src2.nb[2] = sizeof(uint16_t) * head_dim;
+  request_x86.nth = 1;
   std::memcpy(request_x86.op_params.data(), &scale, sizeof(scale));
   request_x86.op_params_size = sizeof(scale);
 
@@ -1003,6 +1045,7 @@ TEST_CASE("kernel_flash_attn_ext_matches_masked_total_token_reference") {
   request_x86.src1 = make_src(k_fp16.data(), dtype::f16, head_dim, kv_tokens, 1u, 1u);
   request_x86.src2 = make_src(v_fp16.data(), dtype::f16, head_dim, kv_tokens, 1u, 1u);
   request_x86.dst = make_dst(dst_x86.data(), dtype::f32, head_dim, 1u, 1u, 1u);
+  request_x86.nth = 1;
   std::memcpy(request_x86.op_params.data(), &scale, sizeof(scale));
   std::memcpy(
       request_x86.op_params.data() + sizeof(scale), &total_tokens, sizeof(total_tokens));
@@ -1074,6 +1117,7 @@ TEST_CASE("kernel_flash_attn_ext_matches_masked_total_token_reference_on_long_mu
   request_x86.src1.nb[2] = sizeof(uint16_t) * head_dim;
   request_x86.src2.nb[1] = sizeof(uint16_t) * kv_dim;
   request_x86.src2.nb[2] = sizeof(uint16_t) * head_dim;
+  request_x86.nth = 1;
   std::memcpy(request_x86.op_params.data(), &scale, sizeof(scale));
   std::memcpy(
       request_x86.op_params.data() + sizeof(scale), &total_tokens, sizeof(total_tokens));

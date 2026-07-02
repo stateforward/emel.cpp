@@ -7,7 +7,6 @@
 #endif
 
 #include "emel/kernel/aarch64/actions.hpp"
-#include "emel/kernel/sm.hpp"
 #include "emel/kernel/detail.hpp"
 #include "emel/kernel/events.hpp"
 
@@ -37,8 +36,7 @@ float32x4_t compute_neon_fma(const float32x4_t acc,
 }
 #endif
 
-bool run_dense_matmul(emel::kernel::sm & kernel,
-                      std::span<const float> input,
+bool run_dense_matmul(std::span<const float> input,
                       std::span<const float> weights,
                       std::span<float> output) noexcept {
   const uint64_t row_bytes = sizeof(float) * static_cast<uint64_t>(input.size());
@@ -54,7 +52,7 @@ bool run_dense_matmul(emel::kernel::sm & kernel,
               1u,
           },
           .nb = {
-              sizeof(float),
+              1u,
               row_bytes,
               row_bytes * static_cast<uint64_t>(output.size()),
               row_bytes * static_cast<uint64_t>(output.size()),
@@ -92,16 +90,22 @@ bool run_dense_matmul(emel::kernel::sm & kernel,
               sizeof(float) * static_cast<uint64_t>(output.size()),
           },
       },
+      .nth = 1u,
   };
 
-  if (!kernel.process_event(request)) {
+#if defined(__aarch64__) || defined(__ARM_NEON)
+  if (!emel::kernel::aarch64::detail::execute_neon_mul_mat(request)) {
     return false;
   }
+#else
+  if (!emel::kernel::detail::run_mul_mat(request)) {
+    return false;
+  }
+#endif
   return true;
 }
 
-bool run_dense_batch_matmul_from_transposed(emel::kernel::sm & kernel,
-                                            std::span<const float> transposed_input,
+bool run_dense_batch_matmul_from_transposed(std::span<const float> transposed_input,
                                             const size_t row_count,
                                             const size_t input_dim,
                                             std::span<const float> weights,
@@ -121,7 +125,7 @@ bool run_dense_batch_matmul_from_transposed(emel::kernel::sm & kernel,
               1u,
           },
           .nb = {
-              sizeof(float),
+              1u,
               input_row_bytes,
               input_row_bytes * static_cast<uint64_t>(output_dim),
               input_row_bytes * static_cast<uint64_t>(output_dim),
@@ -159,17 +163,23 @@ bool run_dense_batch_matmul_from_transposed(emel::kernel::sm & kernel,
               frame_row_bytes * static_cast<uint64_t>(output_dim),
           },
       },
+      .nth = 1u,
   };
 
-  if (!kernel.process_event(request)) {
+#if defined(__aarch64__) || defined(__ARM_NEON)
+  if (!emel::kernel::aarch64::detail::execute_neon_mul_mat(request)) {
     return false;
   }
+#else
+  if (!emel::kernel::detail::run_mul_mat(request)) {
+    return false;
+  }
+#endif
 
   return true;
 }
 
 bool run_dense_batch_matmul_from_transposed_prepared(
-    emel::kernel::sm & kernel,
     std::span<const float> transposed_input,
     const size_t row_count,
     const size_t input_dim,
@@ -191,7 +201,7 @@ bool run_dense_batch_matmul_from_transposed_prepared(
               1u,
           },
           .nb = {
-              sizeof(float),
+              1u,
               input_row_bytes,
               input_row_bytes * static_cast<uint64_t>(output_dim),
               input_row_bytes * static_cast<uint64_t>(output_dim),
@@ -229,10 +239,10 @@ bool run_dense_batch_matmul_from_transposed_prepared(
               frame_row_bytes * static_cast<uint64_t>(output_dim),
           },
       },
+      .nth = 1u,
   };
 
 #if defined(__aarch64__) || defined(__ARM_NEON)
-  (void)kernel;
   if (!emel::kernel::aarch64::detail::execute_neon_mul_mat_prepared_f32_lhs_4row(
           request,
           cache.lhs_4row.data(),
@@ -240,8 +250,7 @@ bool run_dense_batch_matmul_from_transposed_prepared(
     return false;
   }
 #else
-  (void)cache;
-  if (!kernel.process_event(request)) {
+  if (!emel::kernel::detail::run_mul_mat(request)) {
     return false;
   }
 #endif
@@ -449,8 +458,7 @@ bool prepare_dense_weight_cache(std::span<const float> weights,
   return true;
 }
 
-bool compute_dense(emel::kernel::sm & kernel,
-                   std::span<const float> input,
+bool compute_dense(std::span<const float> input,
                    std::span<const float> weights,
                    std::span<const float> bias,
                    std::span<float> output) noexcept {
@@ -459,7 +467,7 @@ bool compute_dense(emel::kernel::sm & kernel,
     return false;
   }
 
-  if (!run_dense_matmul(kernel, input, weights, output)) {
+  if (!run_dense_matmul(input, weights, output)) {
     return false;
   }
 
@@ -470,15 +478,14 @@ bool compute_dense(emel::kernel::sm & kernel,
   return true;
 }
 
-bool compute_dense_without_bias(emel::kernel::sm & kernel,
-                                std::span<const float> input,
+bool compute_dense_without_bias(std::span<const float> input,
                                 std::span<const float> weights,
                                 std::span<float> output) noexcept {
   if (input.empty() || output.empty() || weights.size() != input.size() * output.size()) {
     return false;
   }
 
-  return run_dense_matmul(kernel, input, weights, output);
+  return run_dense_matmul(input, weights, output);
 }
 
 bool transpose_dense_input(std::span<const float> input_rows,
@@ -501,8 +508,7 @@ bool transpose_dense_input(std::span<const float> input_rows,
   return true;
 }
 
-bool compute_dense_batch(emel::kernel::sm & kernel,
-                         std::span<const float> input_rows,
+bool compute_dense_batch(std::span<const float> input_rows,
                          const size_t row_count,
                          const size_t input_dim,
                          std::span<const float> weights,
@@ -528,8 +534,7 @@ bool compute_dense_batch(emel::kernel::sm & kernel,
     }
   }
 
-  if (!run_dense_batch_matmul_from_transposed(kernel,
-                                              transposed_input,
+  if (!run_dense_batch_matmul_from_transposed(transposed_input,
                                               row_count,
                                               input_dim,
                                               weights,
@@ -548,8 +553,7 @@ bool compute_dense_batch(emel::kernel::sm & kernel,
   return true;
 }
 
-bool compute_dense_batch_prepared(emel::kernel::sm & kernel,
-                                  std::span<const float> input_rows,
+bool compute_dense_batch_prepared(std::span<const float> input_rows,
                                   const size_t row_count,
                                   const size_t input_dim,
                                   std::span<const float> weights,
@@ -579,8 +583,7 @@ bool compute_dense_batch_prepared(emel::kernel::sm & kernel,
     }
   }
 
-  if (!run_dense_batch_matmul_from_transposed_prepared(kernel,
-                                                       transposed_input,
+  if (!run_dense_batch_matmul_from_transposed_prepared(transposed_input,
                                                        row_count,
                                                        input_dim,
                                                        weights,
@@ -600,8 +603,7 @@ bool compute_dense_batch_prepared(emel::kernel::sm & kernel,
   return true;
 }
 
-bool compute_dense_batch_residual_prepared(emel::kernel::sm & kernel,
-                                           std::span<const float> input_rows,
+bool compute_dense_batch_residual_prepared(std::span<const float> input_rows,
                                            const size_t row_count,
                                            const size_t input_dim,
                                            std::span<const float> weights,
@@ -630,8 +632,7 @@ bool compute_dense_batch_residual_prepared(emel::kernel::sm & kernel,
     return false;
   }
 
-  return compute_dense_batch_from_transposed_scaled_residual_prepared(kernel,
-                                                                      transposed_input,
+  return compute_dense_batch_from_transposed_scaled_residual_prepared(transposed_input,
                                                                       row_count,
                                                                       input_dim,
                                                                       weights,
@@ -644,8 +645,7 @@ bool compute_dense_batch_residual_prepared(emel::kernel::sm & kernel,
                                                                       output_rows);
 }
 
-bool compute_dense_batch_without_bias(emel::kernel::sm & kernel,
-                                      std::span<const float> input_rows,
+bool compute_dense_batch_without_bias(std::span<const float> input_rows,
                                       const size_t row_count,
                                       const size_t input_dim,
                                       std::span<const float> weights,
@@ -669,8 +669,7 @@ bool compute_dense_batch_without_bias(emel::kernel::sm & kernel,
     }
   }
 
-  if (!run_dense_batch_matmul_from_transposed(kernel,
-                                              transposed_input,
+  if (!run_dense_batch_matmul_from_transposed(transposed_input,
                                               row_count,
                                               input_dim,
                                               weights,
@@ -689,8 +688,7 @@ bool compute_dense_batch_without_bias(emel::kernel::sm & kernel,
   return true;
 }
 
-bool compute_dense_batch_without_bias_prepared(emel::kernel::sm & kernel,
-                                               std::span<const float> input_rows,
+bool compute_dense_batch_without_bias_prepared(std::span<const float> input_rows,
                                                const size_t row_count,
                                                const size_t input_dim,
                                                std::span<const float> weights,
@@ -718,8 +716,7 @@ bool compute_dense_batch_without_bias_prepared(emel::kernel::sm & kernel,
     }
   }
 
-  if (!run_dense_batch_matmul_from_transposed_prepared(kernel,
-                                                       transposed_input,
+  if (!run_dense_batch_matmul_from_transposed_prepared(transposed_input,
                                                        row_count,
                                                        input_dim,
                                                        weights,
@@ -739,8 +736,7 @@ bool compute_dense_batch_without_bias_prepared(emel::kernel::sm & kernel,
   return true;
 }
 
-bool compute_dense_batch_to_transposed(emel::kernel::sm & kernel,
-                                       std::span<const float> input_rows,
+bool compute_dense_batch_to_transposed(std::span<const float> input_rows,
                                        const size_t row_count,
                                        const size_t input_dim,
                                        std::span<const float> weights,
@@ -764,8 +760,7 @@ bool compute_dense_batch_to_transposed(emel::kernel::sm & kernel,
     }
   }
 
-  if (!run_dense_batch_matmul_from_transposed(kernel,
-                                              transposed_input,
+  if (!run_dense_batch_matmul_from_transposed(transposed_input,
                                               row_count,
                                               input_dim,
                                               weights,
@@ -785,8 +780,7 @@ bool compute_dense_batch_to_transposed(emel::kernel::sm & kernel,
   return true;
 }
 
-bool compute_dense_batch_to_transposed_prepared(emel::kernel::sm & kernel,
-                                                std::span<const float> input_rows,
+bool compute_dense_batch_to_transposed_prepared(std::span<const float> input_rows,
                                                 const size_t row_count,
                                                 const size_t input_dim,
                                                 std::span<const float> weights,
@@ -814,8 +808,7 @@ bool compute_dense_batch_to_transposed_prepared(emel::kernel::sm & kernel,
     }
   }
 
-  if (!run_dense_batch_matmul_from_transposed_prepared(kernel,
-                                                       transposed_input,
+  if (!run_dense_batch_matmul_from_transposed_prepared(transposed_input,
                                                        row_count,
                                                        input_dim,
                                                        weights,
@@ -836,8 +829,7 @@ bool compute_dense_batch_to_transposed_prepared(emel::kernel::sm & kernel,
   return true;
 }
 
-bool compute_dense_batch_from_transposed(emel::kernel::sm & kernel,
-                                         std::span<const float> transposed_input,
+bool compute_dense_batch_from_transposed(std::span<const float> transposed_input,
                                          const size_t row_count,
                                          const size_t input_dim,
                                          std::span<const float> weights,
@@ -854,8 +846,7 @@ bool compute_dense_batch_from_transposed(emel::kernel::sm & kernel,
     return false;
   }
 
-  if (!run_dense_batch_matmul_from_transposed(kernel,
-                                              transposed_input,
+  if (!run_dense_batch_matmul_from_transposed(transposed_input,
                                               row_count,
                                               input_dim,
                                               weights,
@@ -874,8 +865,7 @@ bool compute_dense_batch_from_transposed(emel::kernel::sm & kernel,
   return true;
 }
 
-bool compute_dense_batch_from_transposed_prepared(emel::kernel::sm & kernel,
-                                                  std::span<const float> transposed_input,
+bool compute_dense_batch_from_transposed_prepared(std::span<const float> transposed_input,
                                                   const size_t row_count,
                                                   const size_t input_dim,
                                                   std::span<const float> weights,
@@ -896,8 +886,7 @@ bool compute_dense_batch_from_transposed_prepared(emel::kernel::sm & kernel,
     return false;
   }
 
-  if (!run_dense_batch_matmul_from_transposed_prepared(kernel,
-                                                       transposed_input,
+  if (!run_dense_batch_matmul_from_transposed_prepared(transposed_input,
                                                        row_count,
                                                        input_dim,
                                                        weights,
@@ -918,7 +907,6 @@ bool compute_dense_batch_from_transposed_prepared(emel::kernel::sm & kernel,
 }
 
 bool compute_dense_batch_from_transposed_scaled_residual_prepared(
-    emel::kernel::sm & kernel,
     std::span<const float> transposed_input,
     const size_t row_count,
     const size_t input_dim,
@@ -943,8 +931,7 @@ bool compute_dense_batch_from_transposed_scaled_residual_prepared(
     return false;
   }
 
-  if (!run_dense_batch_matmul_from_transposed_prepared(kernel,
-                                                       transposed_input,
+  if (!run_dense_batch_matmul_from_transposed_prepared(transposed_input,
                                                        row_count,
                                                        input_dim,
                                                        weights,

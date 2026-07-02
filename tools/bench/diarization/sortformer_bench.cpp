@@ -16,7 +16,6 @@
 #include "emel/diarization/sortformer/encoder/feature_extractor/detail.hpp"
 #include "emel/diarization/sortformer/executor/sm.hpp"
 #include "emel/diarization/sortformer/output/detail.hpp"
-#include "emel/kernel/sm.hpp"
 
 namespace emel::bench {
 
@@ -374,10 +373,9 @@ make_stage_profile_result(const fixture::model_fixture &model,
     fail_sortformer_setup("stage_profile_executor");
   }
 
-  static emel::kernel::sm probabilities_kernel{emel::kernel::detect_host_kind()};
   const double probabilities_ns = measure_once_ns([&]() {
     g_stage_ok_sink = output_detail::compute_speaker_probabilities(
-        probabilities_kernel, hidden_frames, modules_contract, probabilities);
+        hidden_frames, modules_contract, probabilities);
   });
   if (!g_stage_ok_sink) {
     fail_sortformer_setup("stage_profile_probabilities");

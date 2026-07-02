@@ -499,18 +499,8 @@ struct model {
 
       , sml::state<decode_compute_flash_decision> <= sml::state<decode_compute_flash>
                  + sml::completion<event::generate_run>
-                 [ guard::guard_decode_materialized_parallel_scalar_packed_q8_0_ready{} ]
-                 / action::request_decode_compute_flash_parallel_packed_q8_0
-
-      , sml::state<decode_compute_flash_decision> <= sml::state<decode_compute_flash>
-                 + sml::completion<event::generate_run>
                  [ guard::guard_decode_materialized_scalar_packed_q8_0_ready{} ]
                  / action::request_decode_compute_flash_packed_q8_0
-
-      , sml::state<decode_compute_flash_decision> <= sml::state<decode_compute_flash>
-                 + sml::completion<event::generate_run>
-                 [ guard::guard_decode_materialized_parallel_scalar_q8_k_ready{} ]
-                 / action::request_decode_compute_flash_parallel_q8_k
 
       , sml::state<decode_compute_flash_decision> <= sml::state<decode_compute_flash>
                  + sml::completion<event::generate_run>
@@ -519,28 +509,13 @@ struct model {
 
       , sml::state<decode_compute_flash_decision> <= sml::state<decode_compute_flash>
                  + sml::completion<event::generate_run>
-                 [ guard::guard_decode_materialized_parallel_scalar_native_quantized_q8_k_ready{} ]
-                 / action::request_decode_compute_flash_parallel_native_quantized_q8_k_logits
-
-      , sml::state<decode_compute_flash_decision> <= sml::state<decode_compute_flash>
-                 + sml::completion<event::generate_run>
                  [ guard::guard_decode_materialized_scalar_native_quantized_q8_k_ready{} ]
                  / action::request_decode_compute_flash_native_quantized_q8_k_logits
 
       , sml::state<decode_compute_flash_decision> <= sml::state<decode_compute_flash>
                  + sml::completion<event::generate_run>
-                 [ guard::guard_decode_materialized_parallel_scalar_native_quantized_kernel_ready{} ]
-                 / action::request_decode_compute_flash_parallel_native_quantized
-
-      , sml::state<decode_compute_flash_decision> <= sml::state<decode_compute_flash>
-                 + sml::completion<event::generate_run>
                  [ guard::guard_decode_materialized_scalar_native_quantized_kernel_ready{} ]
                  / action::request_decode_compute_flash_native_quantized
-
-      , sml::state<decode_compute_flash_decision> <= sml::state<decode_compute_flash>
-                 + sml::completion<event::generate_run>
-                 [ guard::guard_decode_materialized_parallel_scalar_kernel_ready{} ]
-                 / action::request_decode_compute_flash_parallel_kernel
 
       , sml::state<decode_compute_flash_decision> <= sml::state<decode_compute_flash>
                  + sml::completion<event::generate_run>
@@ -602,21 +577,8 @@ struct model {
       , sml::state<decode_compute_flash_preselected_argmax_decision> <=
                sml::state<decode_compute_flash_preselected_argmax>
                  + sml::completion<event::generate_run>
-                 [ guard::guard_decode_preselected_parallel_argmax_q8_k_ready{} ]
-                 / action::request_decode_compute_flash_parallel_preselected_argmax_q8_k
-
-      , sml::state<decode_compute_flash_preselected_argmax_decision> <=
-               sml::state<decode_compute_flash_preselected_argmax>
-                 + sml::completion<event::generate_run>
                  [ guard::guard_decode_preselected_argmax_q8_k_ready{} ]
                  / action::request_decode_compute_flash_preselected_argmax_q8_k
-
-      , sml::state<decode_compute_flash_preselected_argmax_decision> <=
-               sml::state<decode_compute_flash_preselected_argmax>
-                 + sml::completion<event::generate_run>
-                 [ guard::guard_decode_preselected_parallel_argmax_native_quantized_q8_k_ready{} ]
-                 / action::
-                       request_decode_compute_flash_parallel_preselected_argmax_native_quantized_q8_k
 
       , sml::state<decode_compute_flash_preselected_argmax_decision> <=
                sml::state<decode_compute_flash_preselected_argmax>
@@ -627,21 +589,8 @@ struct model {
       , sml::state<decode_compute_flash_preselected_argmax_decision> <=
                sml::state<decode_compute_flash_preselected_argmax>
                  + sml::completion<event::generate_run>
-                 [ guard::guard_decode_preselected_parallel_argmax_native_quantized_kernel_ready{} ]
-                 / action::
-                       request_decode_compute_flash_parallel_preselected_argmax_native_quantized_kernel
-
-      , sml::state<decode_compute_flash_preselected_argmax_decision> <=
-               sml::state<decode_compute_flash_preselected_argmax>
-                 + sml::completion<event::generate_run>
                  [ guard::guard_decode_preselected_argmax_native_quantized_kernel_ready{} ]
                  / action::request_decode_compute_flash_preselected_argmax_native_quantized_kernel
-
-      , sml::state<decode_compute_flash_preselected_argmax_decision> <=
-               sml::state<decode_compute_flash_preselected_argmax>
-                 + sml::completion<event::generate_run>
-                 [ guard::guard_decode_preselected_parallel_argmax_kernel_ready{} ]
-                 / action::request_decode_compute_flash_parallel_preselected_argmax_kernel
 
       , sml::state<decode_compute_flash_preselected_argmax_decision> <=
                sml::state<decode_compute_flash_preselected_argmax>

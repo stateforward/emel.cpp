@@ -26,10 +26,6 @@ bool load_hparams(const emel::model::detail::hparam_loader & loader,
   model_out.params.attention_value_length = value_length;
   model_out.params.n_embd_out = model_out.params.n_embd;
   model_out.params.tie_word_embeddings = true;
-  model_out.params.rope_pair_x0_stride = 1;
-  model_out.params.rope_pair_x1_stride = 1;
-  model_out.params.rope_pair_x1_offset = 0;
-  model_out.params.rope_pair_x1_half_rot_offset = 1;
   if (model_out.params.n_rot == 0) {
     model_out.params.n_rot = key_length;
   }

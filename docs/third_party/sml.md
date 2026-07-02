@@ -1718,16 +1718,15 @@ sml::sm<example, sml::logger<my_logger>, sml::thread_safe<std::recursive_mutex>>
 ### emel extension: coroutine scheduler policy
 
 `emel::co_sm` supports a scheduler policy in addition to SML policies.
-default is the inline scheduler to preserve EMEL's synchronous RTC/no-queue actor
-contract:
+default is:
 
 ```cpp
-emel::policy::coroutine_scheduler<emel::policy::inline_scheduler>
+emel::policy::coroutine_scheduler<emel::policy::fifo_scheduler<>>
 ```
 
 ```cpp
 using inline_policy = emel::policy::coroutine_scheduler<emel::policy::inline_scheduler>;
-emel::co_sm<example, void, inline_policy> co;
+emel::co_sm<example, inline_policy> co;
 ```
 
 custom scheduler requirement:

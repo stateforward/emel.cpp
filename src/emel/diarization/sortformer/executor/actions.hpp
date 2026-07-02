@@ -141,7 +141,6 @@ inline bool compute_encoder_projection_stage(
           *ctx.modules.encoder_projection_bias.tensor);
 
   return modules_detail::compute_encoder_projection_batch(
-      ctx.transformer_workspace.kernel,
       runtime_ev.request.encoder_frames,
       static_cast<size_t>(detail::k_frame_count),
       encoder_projection_weight,
