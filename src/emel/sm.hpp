@@ -928,7 +928,16 @@ class sm<model, void, policies...> {
   const state_machine_type & raw_sm() const { return state_machine_; }
 
  private:
+  // sml's policy-less back-end embeds aux::pool<> (a zero-size array); g++
+  // -Wpedantic flags members of such types at the declaration site.
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wpedantic"
+#endif
   state_machine_type state_machine_;
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic pop
+#endif
 };
 
 template <class model, class context, class... policies>
@@ -986,7 +995,16 @@ class sm {
   const state_machine_type & raw_sm() const { return state_machine_; }
 
  private:
+  // sml's policy-less back-end embeds aux::pool<> (a zero-size array); g++
+  // -Wpedantic flags members of such types at the declaration site.
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wpedantic"
+#endif
   state_machine_type state_machine_;
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic pop
+#endif
 };
 
 namespace detail {
@@ -1377,7 +1395,16 @@ class co_sm {
   const state_machine_type & raw_sm() const { return state_machine_; }
 
  private:
+  // sml's policy-less back-end embeds aux::pool<> (a zero-size array); g++
+  // -Wpedantic flags members of such types at the declaration site.
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wpedantic"
+#endif
   state_machine_type state_machine_;
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic pop
+#endif
 };
 
 template <class kind_enum, class sm_list, class event_list>

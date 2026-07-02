@@ -1,5 +1,7 @@
 #pragma once
 
+// benchmark: designed
+
 // Streaming weight window: tensor-owned residency for models larger than RAM.
 //
 // The machine owns a pinned whole-file mmap source plus a ring of K
