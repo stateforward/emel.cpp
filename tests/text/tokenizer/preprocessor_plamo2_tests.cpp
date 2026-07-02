@@ -16,7 +16,7 @@ namespace {
 
 emel::model::data::vocab & make_plamo2_vocab_with_specials() {
   static emel::model::data::vocab vocab = {};
-  std::memset(&vocab, 0, sizeof(vocab));
+  vocab = {};
   vocab.n_tokens = 2;
   vocab.tokenizer_model_id = emel::model::data::tokenizer_model::PLAMO2;
   vocab.entries[0].text_offset = 0;
@@ -36,7 +36,7 @@ emel::model::data::vocab & make_plamo2_vocab_with_specials() {
 
 TEST_CASE("tokenizer_preprocessor_plamo2_valid_request") {
   static emel::model::data::vocab vocab = {};
-  std::memset(&vocab, 0, sizeof(vocab));
+  vocab = {};
   vocab.n_tokens = 0;
   vocab.tokenizer_model_id = emel::model::data::tokenizer_model::PLAMO2;
 
@@ -119,7 +119,7 @@ TEST_CASE("tokenizer_preprocessor_plamo2_phase_result_guards") {
   using emel::text::tokenizer::preprocessor::event::preprocess_runtime;
 
   static emel::model::data::vocab vocab = {};
-  std::memset(&vocab, 0, sizeof(vocab));
+  vocab = {};
   vocab.tokenizer_model_id = emel::model::data::tokenizer_model::PLAMO2;
 
   std::array<emel::text::tokenizer::preprocessor::fragment, 1> fragments = {};

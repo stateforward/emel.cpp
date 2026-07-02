@@ -13,7 +13,7 @@ namespace {
 emel::model::data::vocab & make_vocab(
     const emel::model::data::tokenizer_pre pre) {
   static emel::model::data::vocab vocab = {};
-  std::memset(&vocab, 0, sizeof(vocab));
+  vocab = {};
   vocab.tokenizer_pre_id = pre;
   return vocab;
 }
