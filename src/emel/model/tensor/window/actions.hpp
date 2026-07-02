@@ -218,10 +218,10 @@ struct effect_record_bind_error {
 };
 
 //------------------------------------------------------------------------------//
-// acquire begin chain
+// acquire resolve chain (first dispatch)
 
-struct effect_begin_acquire {
-  void operator()(const detail::acquire_runtime &ev,
+struct effect_begin_acquire_resolve {
+  void operator()(const detail::acquire_resolve_runtime &ev,
                   context &) const noexcept {
     ev.status.err = emel::error::cast(error::none);
     ev.status.ok = false;
@@ -230,24 +230,60 @@ struct effect_begin_acquire {
   }
 };
 
-struct effect_mark_acquire_out_of_range {
-  void operator()(const detail::acquire_runtime &ev,
+struct effect_mark_resolve_out_of_range {
+  void operator()(const detail::acquire_resolve_runtime &ev,
                   context &) const noexcept {
     ev.status.err = emel::error::cast(error::layer_out_of_range);
   }
 };
 
-struct effect_mark_acquire_not_streaming {
-  void operator()(const detail::acquire_runtime &ev,
+// Joins the busy slot: the drain suspends this dispatch until the in-flight
+// load for the slot's current occupant fires and commits.
+struct effect_require_busy_slot {
+  void operator()(const detail::acquire_resolve_runtime &ev,
+                  context &ctx) const noexcept {
+    ev.scheduler.require(
+        detail::compute_slot_for_layer(ctx.window, ev.request.layer_index));
+  }
+};
+
+struct effect_mark_resolve_not_streaming {
+  void operator()(const detail::acquire_resolve_runtime &ev,
                   context &) const noexcept {
     ev.status.err = emel::error::cast(error::not_streaming);
   }
 };
 
-struct effect_mark_acquire_not_bound {
-  void operator()(const detail::acquire_runtime &ev,
+struct effect_mark_resolve_not_bound {
+  void operator()(const detail::acquire_resolve_runtime &ev,
                   context &) const noexcept {
     ev.status.err = emel::error::cast(error::not_bound);
+  }
+};
+
+struct effect_begin_resolve_not_streaming {
+  void operator()(const detail::acquire_resolve_runtime &ev,
+                  context &ctx) const noexcept {
+    effect_begin_acquire_resolve{}(ev, ctx);
+    effect_mark_resolve_not_streaming{}(ev, ctx);
+  }
+};
+
+struct effect_begin_resolve_not_bound {
+  void operator()(const detail::acquire_resolve_runtime &ev,
+                  context &ctx) const noexcept {
+    effect_begin_acquire_resolve{}(ev, ctx);
+    effect_mark_resolve_not_bound{}(ev, ctx);
+  }
+};
+
+//------------------------------------------------------------------------------//
+// acquire settle chain (second dispatch)
+
+struct effect_mark_acquire_out_of_range {
+  void operator()(const detail::acquire_runtime &ev,
+                  context &) const noexcept {
+    ev.status.err = emel::error::cast(error::layer_out_of_range);
   }
 };
 
@@ -398,6 +434,79 @@ struct effect_record_unbind_done {
                   context &) const noexcept {}
 };
 
+struct effect_mark_unbind_not_bound {
+  void operator()(const detail::unbind_runtime &ev,
+                  context &) const noexcept {
+    ev.status.err = emel::error::cast(error::not_bound);
+    ev.status.ok = false;
+  }
+};
+
+struct effect_mark_unbind_release_failed {
+  void operator()(const detail::unbind_finish_runtime &ev,
+                  context &) const noexcept {
+    ev.status.err = emel::error::cast(error::internal_error);
+    ev.status.ok = false;
+  }
+};
+
+struct effect_publish_unbind_error {
+  void operator()(const detail::unbind_finish_runtime &ev,
+                  context &) const noexcept {
+    ev.request.on_error(events::unbind_window_error{
+        .request = ev.request,
+        .err = ev.status.err,
+    });
+  }
+};
+
+struct effect_record_unbind_error {
+  void operator()(const detail::unbind_finish_runtime &,
+                  context &) const noexcept {}
+};
+
+// A completion that arrives with no bound window (post-unbind stray): record
+// only, never touch slot state.
+struct effect_record_stray_completion {
+  void operator()(const emel::event::completion &, context &) const noexcept {}
+};
+
+//------------------------------------------------------------------------------//
+// composed effects: one callable per transition row.
+
+struct effect_activate_passthrough_and_publish {
+  void operator()(const detail::bind_window_runtime &ev,
+                  context &ctx) const noexcept {
+    effect_activate_passthrough{}(ev, ctx);
+    effect_publish_bind_done{}(ev, ctx);
+  }
+};
+
+struct effect_activate_streaming_and_publish {
+  void operator()(const detail::bind_window_runtime &ev,
+                  context &ctx) const noexcept {
+    effect_activate_streaming{}(ev, ctx);
+    effect_prime_window{}(ev, ctx);
+    effect_publish_bind_done{}(ev, ctx);
+  }
+};
+
+struct effect_mark_already_bound_and_publish {
+  void operator()(const detail::bind_window_runtime &ev,
+                  context &ctx) const noexcept {
+    effect_mark_bind_already_bound{}(ev, ctx);
+    effect_publish_bind_error{}(ev, ctx);
+  }
+};
+
+struct effect_submit_and_require_layer {
+  void operator()(const detail::acquire_runtime &ev,
+                  context &ctx) const noexcept {
+    effect_submit_layer_load{}(ev, ctx);
+    effect_require_layer_completion{}(ev, ctx);
+  }
+};
+
 struct effect_on_unexpected {
   template <class event_type>
   void operator()(const event_type &ev, context &) const noexcept {
@@ -422,10 +531,12 @@ inline constexpr effect_publish_bind_done effect_publish_bind_done{};
 inline constexpr effect_record_bind_done effect_record_bind_done{};
 inline constexpr effect_publish_bind_error effect_publish_bind_error{};
 inline constexpr effect_record_bind_error effect_record_bind_error{};
-inline constexpr effect_begin_acquire effect_begin_acquire{};
+inline constexpr effect_begin_acquire_resolve effect_begin_acquire_resolve{};
+inline constexpr effect_mark_resolve_out_of_range effect_mark_resolve_out_of_range{};
+inline constexpr effect_require_busy_slot effect_require_busy_slot{};
+inline constexpr effect_begin_resolve_not_streaming effect_begin_resolve_not_streaming{};
+inline constexpr effect_begin_resolve_not_bound effect_begin_resolve_not_bound{};
 inline constexpr effect_mark_acquire_out_of_range effect_mark_acquire_out_of_range{};
-inline constexpr effect_mark_acquire_not_streaming effect_mark_acquire_not_streaming{};
-inline constexpr effect_mark_acquire_not_bound effect_mark_acquire_not_bound{};
 inline constexpr effect_submit_layer_load effect_submit_layer_load{};
 inline constexpr effect_require_layer_completion effect_require_layer_completion{};
 inline constexpr effect_commit_slot_load effect_commit_slot_load{};
@@ -440,6 +551,18 @@ inline constexpr effect_begin_unbind effect_begin_unbind{};
 inline constexpr effect_release_source_and_reset effect_release_source_and_reset{};
 inline constexpr effect_publish_unbind_done effect_publish_unbind_done{};
 inline constexpr effect_record_unbind_done effect_record_unbind_done{};
+inline constexpr effect_mark_unbind_not_bound effect_mark_unbind_not_bound{};
+inline constexpr effect_mark_unbind_release_failed effect_mark_unbind_release_failed{};
+inline constexpr effect_publish_unbind_error effect_publish_unbind_error{};
+inline constexpr effect_record_unbind_error effect_record_unbind_error{};
+inline constexpr effect_record_stray_completion effect_record_stray_completion{};
+inline constexpr effect_activate_passthrough_and_publish
+    effect_activate_passthrough_and_publish{};
+inline constexpr effect_activate_streaming_and_publish
+    effect_activate_streaming_and_publish{};
+inline constexpr effect_mark_already_bound_and_publish
+    effect_mark_already_bound_and_publish{};
+inline constexpr effect_submit_and_require_layer effect_submit_and_require_layer{};
 inline constexpr effect_on_unexpected effect_on_unexpected{};
 
 } // namespace emel::model::tensor::window::action

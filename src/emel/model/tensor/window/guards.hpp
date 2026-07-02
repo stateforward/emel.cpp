@@ -122,7 +122,48 @@ struct guard_bind_error_callback_absent {
 };
 
 //------------------------------------------------------------------------------//
-// acquire begin chain
+// acquire resolve chain (first dispatch)
+
+struct guard_resolve_layer_in_range {
+  bool operator()(const detail::acquire_resolve_runtime &ev,
+                  const action::context &ctx) const noexcept {
+    return ev.request.layer_index >= 0 &&
+           static_cast<uint32_t>(ev.request.layer_index) < ctx.window.layer_count;
+  }
+};
+
+struct guard_resolve_layer_out_of_range {
+  bool operator()(const detail::acquire_resolve_runtime &ev,
+                  const action::context &ctx) const noexcept {
+    return !guard_resolve_layer_in_range{}(ev, ctx);
+  }
+};
+
+// The target layer's ring slot is still mid-load for a different layer
+// (non-sequential access): its completion must be joined before reuse.
+struct guard_resolve_slot_busy_other_layer {
+  bool operator()(const detail::acquire_resolve_runtime &ev,
+                  const action::context &ctx) const noexcept {
+    if (!guard_resolve_layer_in_range{}(ev, ctx)) {
+      return false;
+    }
+    const detail::window_slot &slot =
+        ctx.window.slots[detail::compute_slot_for_layer(ctx.window, ev.request.layer_index)];
+    return slot.layer != ev.request.layer_index &&
+           slot.lifecycle == detail::slot_lifecycle::loading;
+  }
+};
+
+struct guard_resolve_slot_ready_for_target {
+  bool operator()(const detail::acquire_resolve_runtime &ev,
+                  const action::context &ctx) const noexcept {
+    return guard_resolve_layer_in_range{}(ev, ctx) &&
+           !guard_resolve_slot_busy_other_layer{}(ev, ctx);
+  }
+};
+
+//------------------------------------------------------------------------------//
+// acquire settle chain (second dispatch)
 
 struct guard_acquire_layer_in_range {
   bool operator()(const detail::acquire_runtime &ev,
@@ -209,7 +250,9 @@ struct guard_acquire_copy_failed {
 };
 
 // Ring advance: the layer prefetch_depth ahead (wrapping into the next pass)
-// still needs a load submitted for its slot.
+// still needs a load submitted for its slot. Never target the just-published
+// layer's slot — the caller is reading that view until its next acquire, and
+// the pass wrap can alias them when layer_count % slot_count != 0.
 struct guard_prefetch_ahead_needed {
   bool operator()(const detail::acquire_publish_runtime &ev,
                   const action::context &ctx) const noexcept {
@@ -217,8 +260,13 @@ struct guard_prefetch_ahead_needed {
                           static_cast<int32_t>(ctx.window.prefetch_depth);
     const int32_t wrapped =
         ahead % static_cast<int32_t>(ctx.window.layer_count);
-    const detail::window_slot &slot =
-        ctx.window.slots[detail::compute_slot_for_layer(ctx.window, wrapped)];
+    const uint32_t target_slot = detail::compute_slot_for_layer(ctx.window, wrapped);
+    const uint32_t published_slot =
+        detail::compute_slot_for_layer(ctx.window, ev.request.layer_index);
+    if (target_slot == published_slot) {
+      return false;
+    }
+    const detail::window_slot &slot = ctx.window.slots[target_slot];
     return slot.layer != wrapped &&
            slot.lifecycle != detail::slot_lifecycle::loading;
   }
@@ -258,6 +306,20 @@ struct guard_acquire_error_callback_absent {
 //------------------------------------------------------------------------------//
 // unbind chain
 
+struct guard_unbind_release_succeeded {
+  bool operator()(const detail::unbind_finish_runtime &ev,
+                  const action::context &) const noexcept {
+    return ev.status.ok;
+  }
+};
+
+struct guard_unbind_release_failed {
+  bool operator()(const detail::unbind_finish_runtime &ev,
+                  const action::context &ctx) const noexcept {
+    return !guard_unbind_release_succeeded{}(ev, ctx);
+  }
+};
+
 struct guard_unbind_done_callback_present {
   bool operator()(const detail::unbind_finish_runtime &ev) const noexcept {
     return static_cast<bool>(ev.request.on_done);
@@ -267,6 +329,18 @@ struct guard_unbind_done_callback_present {
 struct guard_unbind_done_callback_absent {
   bool operator()(const detail::unbind_finish_runtime &ev) const noexcept {
     return !guard_unbind_done_callback_present{}(ev);
+  }
+};
+
+struct guard_unbind_error_callback_present {
+  bool operator()(const detail::unbind_finish_runtime &ev) const noexcept {
+    return static_cast<bool>(ev.request.on_error);
+  }
+};
+
+struct guard_unbind_error_callback_absent {
+  bool operator()(const detail::unbind_finish_runtime &ev) const noexcept {
+    return !guard_unbind_error_callback_present{}(ev);
   }
 };
 

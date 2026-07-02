@@ -63,22 +63,38 @@ struct load_ticket {
   uint64_t stage_chunk_bytes = 0u;
   bool ok = false;
 
+  // staged_read requires both callbacks; the ticket reads the dispatch's
+  // synchronous bool result, so these only satisfy the contract.
+  static void on_copy_done(
+      void *, const emel::io::staged_read::events::staged_window_done &) noexcept {}
+  static void on_copy_error(
+      void *, const emel::io::staged_read::events::staged_window_error &) noexcept {}
+
   // Runs on an I/O pool worker (or inline on submit rejection): one staged
   // chunked copy per weight extent, monotonic bounded data-plane iteration.
   void run() noexcept {
     bool all_ok = true;
     for (uint32_t index = 0; index < layout->weight_count; ++index) {
       const weight_extent &extent = layout->weights[index];
+      // staged_read's single-window contract copies from the span start and
+      // requires an exact-size span: pre-position it at the extent and clamp
+      // the chunk to the logical length for small extents.
+      const uint64_t chunk = stage_chunk_bytes < extent.byte_size
+                                 ? stage_chunk_bytes
+                                 : extent.byte_size;
       const emel::io::staged_read::event::staged_window_request request{
           .file_offset = extent.file_offset,
           .logical_byte_length = extent.byte_size,
-          .stage_chunk_bytes = stage_chunk_bytes,
-          .source_span = source_base,
-          .source_span_bytes = source_bytes,
+          .stage_chunk_bytes = chunk,
+          .source_span =
+              static_cast<const uint8_t *>(source_base) + extent.file_offset,
+          .source_span_bytes = extent.byte_size,
           .target_buffer = slot_base + extent.slot_offset,
           .target_window_bytes = extent.byte_size,
       };
-      const emel::io::staged_read::event::staged_window copy{request};
+      emel::io::staged_read::event::staged_window copy{request};
+      copy.on_done = {nullptr, &load_ticket::on_copy_done};
+      copy.on_error = {nullptr, &load_ticket::on_copy_error};
       all_ok = io_staged->process_event(copy) && all_ok;
     }
     ok = all_ok;
@@ -211,6 +227,16 @@ struct bind_window_runtime {
   stream_scheduler &scheduler;
 };
 
+// First acquire dispatch: joins a slot that is still mid-load for a different
+// layer (non-sequential access) so the settle dispatch can safely reuse it.
+struct acquire_resolve_runtime {
+  const event::acquire_layer_window &request;
+  acquire_attempt_status &status;
+  stream_scheduler &scheduler;
+};
+
+// Second acquire dispatch: decides resident/loading/unscheduled for the
+// target layer, submitting and requiring its slot load as needed.
 struct acquire_runtime {
   const event::acquire_layer_window &request;
   acquire_attempt_status &status;
