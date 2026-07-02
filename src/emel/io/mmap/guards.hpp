@@ -292,4 +292,123 @@ struct release_error_callback_absent {
   }
 };
 
+struct guard_advise_handle_in_range {
+  bool operator()(const detail::advise_mapping_runtime &ev,
+                  const action::context &) const noexcept {
+    return ev.request.handle < k_max_mappings;
+  }
+};
+
+struct guard_advise_handle_out_of_range {
+  bool operator()(const detail::advise_mapping_runtime &ev,
+                  const action::context &ctx) const noexcept {
+    return !guard_advise_handle_in_range{}(ev, ctx);
+  }
+};
+
+struct guard_advise_slot_in_use_owned_by_tensor {
+  bool operator()(const detail::advise_mapping_runtime &ev,
+                  const action::context &ctx) const noexcept {
+    const action::slot &slot_ref = ctx.slots[ev.request.handle];
+    return slot_ref.in_use && slot_ref.tensor_id == ev.request.tensor_id;
+  }
+};
+
+struct guard_advise_slot_unavailable {
+  bool operator()(const detail::advise_mapping_runtime &ev,
+                  const action::context &ctx) const noexcept {
+    return !guard_advise_slot_in_use_owned_by_tensor{}(ev, ctx);
+  }
+};
+
+struct guard_advise_range_within_mapping {
+  bool operator()(const detail::advise_mapping_runtime &ev,
+                  const action::context &ctx) const noexcept {
+    const action::slot &slot_ref = ctx.slots[ev.request.handle];
+    return ev.request.length > 0u &&
+           ev.request.offset <= slot_ref.mapped_bytes &&
+           ev.request.length <= slot_ref.mapped_bytes - ev.request.offset;
+  }
+};
+
+struct guard_advise_range_outside_mapping {
+  bool operator()(const detail::advise_mapping_runtime &ev,
+                  const action::context &ctx) const noexcept {
+    return !guard_advise_range_within_mapping{}(ev, ctx);
+  }
+};
+
+struct guard_platform_advise_supported {
+  bool operator()(const detail::advise_mapping_runtime &,
+                  const action::context &) const noexcept {
+    return EMEL_IO_MMAP_PLATFORM_SUPPORTED != 0;
+  }
+};
+
+struct guard_platform_advise_unsupported {
+  bool operator()(const detail::advise_mapping_runtime &ev,
+                  const action::context &ctx) const noexcept {
+    return !guard_platform_advise_supported{}(ev, ctx);
+  }
+};
+
+struct guard_advise_kind_sequential {
+  bool operator()(const detail::advise_mapping_runtime &ev,
+                  const action::context &) const noexcept {
+    return ev.request.kind == event::advice::k_sequential;
+  }
+};
+
+struct guard_advise_kind_willneed {
+  bool operator()(const detail::advise_mapping_runtime &ev,
+                  const action::context &) const noexcept {
+    return ev.request.kind == event::advice::k_willneed;
+  }
+};
+
+struct guard_advise_kind_dontneed {
+  bool operator()(const detail::advise_mapping_runtime &ev,
+                  const action::context &) const noexcept {
+    return ev.request.kind == event::advice::k_dontneed;
+  }
+};
+
+struct guard_advise_succeeded {
+  bool operator()(const detail::advise_mapping_runtime &ev,
+                  const action::context &) const noexcept {
+    return ev.status.advise_ok;
+  }
+};
+
+struct guard_advise_failed {
+  bool operator()(const detail::advise_mapping_runtime &ev,
+                  const action::context &ctx) const noexcept {
+    return !guard_advise_succeeded{}(ev, ctx);
+  }
+};
+
+struct guard_advise_done_callback_present {
+  bool operator()(const detail::advise_mapping_runtime &ev) const noexcept {
+    return static_cast<bool>(ev.request.on_done);
+  }
+};
+
+struct guard_advise_done_callback_absent {
+  bool operator()(const detail::advise_mapping_runtime &ev) const noexcept {
+    return !guard_advise_done_callback_present{}(ev);
+  }
+};
+
+struct guard_advise_error_callback_present {
+  bool operator()(const detail::advise_mapping_runtime &ev) const noexcept {
+    return static_cast<bool>(ev.request.on_error);
+  }
+};
+
+struct guard_advise_error_callback_absent {
+  bool operator()(const detail::advise_mapping_runtime &ev) const noexcept {
+    return !guard_advise_error_callback_present{}(ev);
+  }
+};
+
 } // namespace emel::io::mmap::guard

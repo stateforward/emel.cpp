@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# shellcheck source=scripts/build_jobs.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/build_jobs.sh"
+
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TIMING_FILE="$ROOT_DIR/snapshots/quality_gates/timing.txt"
 QUALITY_GATES_TIMEOUT="${EMEL_QUALITY_GATES_TIMEOUT:-1800s}"

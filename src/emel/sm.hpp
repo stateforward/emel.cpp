@@ -2,6 +2,7 @@
 
 #include <stateforward/sml.hpp>
 #include <stateforward/sml/utility/co_sm.hpp>
+#include <stateforward/sml/utility/external_completion.hpp>
 #include <algorithm>
 #include <array>
 #include <atomic>
@@ -615,9 +616,23 @@ class thread_pool_scheduler_ref {
   scheduler * scheduler_ = nullptr;
 };
 
+using completion_source = stateforward::sml::utility::policy::completion_source;
+
+template <std::size_t source_count = 8>
+using external_completion_scheduler =
+    stateforward::sml::utility::policy::external_completion_scheduler<source_count>;
+
+template <class scheduler>
+concept external_completion_scheduler_contract =
+    stateforward::sml::utility::policy::external_completion_scheduler_contract<scheduler>;
+
 using default_coroutine_scheduler = coroutine_scheduler<inline_scheduler>;
 using default_coroutine_allocator =
     coroutine_allocator<fixed_coroutine_allocator<>>;
+
+template <std::size_t source_count = 8>
+using external_completion_co_policy =
+    coroutine_scheduler<external_completion_scheduler<source_count>>;
 
 template <class scheduler>
 concept strict_ordering_scheduler_contract =
@@ -632,6 +647,15 @@ concept strict_ordering_scheduler_contract =
 }  // namespace policy
 
 using bool_task = stateforward::sml::utility::bool_task;
+
+namespace event {
+
+// Generic completion trigger delivered by an external-completion co_sm:
+// source_index names the policy::completion_source that fired; machines map it
+// onto domain state (for example a window slot) via their own guards/actions.
+using completion = stateforward::sml::utility::completion;
+
+}  // namespace event
 
 namespace detail {
 
@@ -904,7 +928,16 @@ class sm<model, void, policies...> {
   const state_machine_type & raw_sm() const { return state_machine_; }
 
  private:
+  // sml's policy-less back-end embeds aux::pool<> (a zero-size array); g++
+  // -Wpedantic flags members of such types at the declaration site.
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wpedantic"
+#endif
   state_machine_type state_machine_;
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic pop
+#endif
 };
 
 template <class model, class context, class... policies>
@@ -962,7 +995,16 @@ class sm {
   const state_machine_type & raw_sm() const { return state_machine_; }
 
  private:
+  // sml's policy-less back-end embeds aux::pool<> (a zero-size array); g++
+  // -Wpedantic flags members of such types at the declaration site.
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wpedantic"
+#endif
   state_machine_type state_machine_;
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic pop
+#endif
 };
 
 namespace detail {
@@ -1064,7 +1106,16 @@ class multi_consumer_co_sm_backend {
   const state_machine_type & raw_sm() const { return state_machine_; }
 
  private:
+  // sml's policy-less back-end embeds aux::pool<> (a zero-size array); g++
+  // -Wpedantic flags members of such types at the declaration site.
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wpedantic"
+#endif
   state_machine_type state_machine_{};
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic pop
+#endif
   scheduler_type scheduler_;
   allocator_type allocator_{};
   mutable std::atomic<bool> dispatch_active_ = false;
@@ -1158,6 +1209,11 @@ class co_sm<model, void, scheduler_policy, allocator_policy, policies...> {
     if constexpr (std::is_same_v<scheduler_type, policy::inline_scheduler>) {
       const bool accepted = state_machine_.process_event_async(ev).result();
       return bool_task::from_value(detail::normalize_event_result(ev, accepted));
+    } else if constexpr (policy::external_completion_scheduler_contract<scheduler_type>) {
+      // The upstream backend drives suspension to completion on this thread
+      // before returning, so the task is always immediately ready.
+      const bool accepted = state_machine_.process_event(ev);
+      return bool_task::from_value(detail::normalize_event_result(ev, accepted));
     } else if constexpr (detail::is_multi_consumer_scheduler_v<scheduler_type>) {
       const bool accepted = state_machine_.process_event_async(ev).result();
       return bool_task::from_value(detail::normalize_event_result(ev, accepted));
@@ -1208,7 +1264,16 @@ class co_sm<model, void, scheduler_policy, allocator_policy, policies...> {
   const state_machine_type & raw_sm() const { return state_machine_; }
 
  private:
+  // sml's policy-less back-end embeds aux::pool<> (a zero-size array); g++
+  // -Wpedantic flags members of such types at the declaration site.
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wpedantic"
+#endif
   state_machine_type state_machine_;
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic pop
+#endif
 };
 
 template <class model, class context, class scheduler_policy,
@@ -1274,6 +1339,11 @@ class co_sm {
     if constexpr (std::is_same_v<scheduler_type, policy::inline_scheduler>) {
       const bool accepted = state_machine_.process_event_async(ev).result();
       return bool_task::from_value(detail::normalize_event_result(ev, accepted));
+    } else if constexpr (policy::external_completion_scheduler_contract<scheduler_type>) {
+      // The upstream backend drives suspension to completion on this thread
+      // before returning, so the task is always immediately ready.
+      const bool accepted = state_machine_.process_event(ev);
+      return bool_task::from_value(detail::normalize_event_result(ev, accepted));
     } else if constexpr (detail::is_multi_consumer_scheduler_v<scheduler_type>) {
       const bool accepted = state_machine_.process_event_async(ev).result();
       return bool_task::from_value(detail::normalize_event_result(ev, accepted));
@@ -1325,7 +1395,16 @@ class co_sm {
   const state_machine_type & raw_sm() const { return state_machine_; }
 
  private:
+  // sml's policy-less back-end embeds aux::pool<> (a zero-size array); g++
+  // -Wpedantic flags members of such types at the declaration site.
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wpedantic"
+#endif
   state_machine_type state_machine_;
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic pop
+#endif
 };
 
 template <class kind_enum, class sm_list, class event_list>

@@ -1064,6 +1064,31 @@ struct guard_decode_materialized_parallel_scalar_kernel_ready {
   }
 };
 
+// Streaming window engagement: the owner injected a bound tensor window actor
+// that reported streaming_active at bind. Mirrors the lane-pool capability
+// gate; composed with route readiness below so the streamed route row sits
+// above its resident siblings only when the window is live.
+struct guard_decode_stream_window_ready {
+  bool operator()(const event::generate_run &, const action::context & ctx) const noexcept {
+    return ctx.compute.backend.stream.window != nullptr &&
+           ctx.compute.backend.stream.active;
+  }
+};
+
+struct guard_decode_materialized_streamed_scalar_kernel_ready {
+  bool operator()(const event::generate_run & ev, const action::context & ctx) const noexcept {
+    return guard_decode_stream_window_ready{}(ev, ctx) &&
+           guard_decode_materialized_scalar_kernel_ready{}(ev, ctx);
+  }
+};
+
+struct guard_decode_materialized_streamed_scalar_native_quantized_ready {
+  bool operator()(const event::generate_run & ev, const action::context & ctx) const noexcept {
+    return guard_decode_stream_window_ready{}(ev, ctx) &&
+           guard_decode_materialized_scalar_native_quantized_kernel_ready{}(ev, ctx);
+  }
+};
+
 struct guard_decode_preselected_direct_ready {
   bool operator()(const event::generate_run & ev, const action::context & ctx) const noexcept {
     return detail::guard_decode_preselected_compute_ready(ev.ctx, ctx) &&

@@ -39,6 +39,19 @@ struct state_release_done_callback {};
 struct state_release_invalid_handle_error_decision {};
 struct state_unmap_failed_error_decision {};
 struct state_release_error_callback {};
+struct state_advise_decision {};
+struct state_advise_owned_decision {};
+struct state_advise_range_decision {};
+struct state_advise_platform_decision {};
+struct state_advise_kind_decision {};
+struct state_advise_attempt_decision {};
+struct state_advise_publish_done_decision {};
+struct state_advise_done_callback {};
+struct state_advise_invalid_handle_error_decision {};
+struct state_advise_invalid_range_error_decision {};
+struct state_advise_unsupported_platform_error_decision {};
+struct state_advise_failed_error_decision {};
+struct state_advise_error_callback {};
 
 struct model {
   auto operator()() const {
@@ -341,6 +354,136 @@ struct model {
           / action::effect_record_release_mapping_error
 
       //------------------------------------------------------------------------------//
+      // Advise acceptance and validation chain: handle -> ownership -> range ->
+      // platform, then explicit kind routing so each platform hint is its own
+      // guarded row (no kind branching in effects).
+      , sml::state<state_advise_decision> <= sml::state<state_ready>
+          + sml::event<detail::advise_mapping_runtime>
+          / action::effect_begin_advise
+      , sml::state<state_advise_owned_decision> <= sml::state<state_advise_decision>
+          + sml::completion<detail::advise_mapping_runtime>
+          [ guard::guard_advise_handle_in_range{} ]
+      , sml::state<state_advise_invalid_handle_error_decision> <=
+          sml::state<state_advise_decision>
+          + sml::completion<detail::advise_mapping_runtime>
+          [ guard::guard_advise_handle_out_of_range{} ]
+          / action::effect_mark_advise_invalid_handle
+      , sml::state<state_advise_range_decision> <=
+          sml::state<state_advise_owned_decision>
+          + sml::completion<detail::advise_mapping_runtime>
+          [ guard::guard_advise_slot_in_use_owned_by_tensor{} ]
+      , sml::state<state_advise_invalid_handle_error_decision> <=
+          sml::state<state_advise_owned_decision>
+          + sml::completion<detail::advise_mapping_runtime>
+          [ guard::guard_advise_slot_unavailable{} ]
+          / action::effect_mark_advise_invalid_handle
+      , sml::state<state_advise_platform_decision> <=
+          sml::state<state_advise_range_decision>
+          + sml::completion<detail::advise_mapping_runtime>
+          [ guard::guard_advise_range_within_mapping{} ]
+      , sml::state<state_advise_invalid_range_error_decision> <=
+          sml::state<state_advise_range_decision>
+          + sml::completion<detail::advise_mapping_runtime>
+          [ guard::guard_advise_range_outside_mapping{} ]
+          / action::effect_mark_advise_invalid_range
+      , sml::state<state_advise_kind_decision> <=
+          sml::state<state_advise_platform_decision>
+          + sml::completion<detail::advise_mapping_runtime>
+          [ guard::guard_platform_advise_supported{} ]
+      , sml::state<state_advise_unsupported_platform_error_decision> <=
+          sml::state<state_advise_platform_decision>
+          + sml::completion<detail::advise_mapping_runtime>
+          [ guard::guard_platform_advise_unsupported{} ]
+          / action::effect_mark_advise_unsupported_platform
+      , sml::state<state_advise_attempt_decision> <=
+          sml::state<state_advise_kind_decision>
+          + sml::completion<detail::advise_mapping_runtime>
+          [ guard::guard_advise_kind_sequential{} ]
+          / action::effect_attempt_advise_sequential
+      , sml::state<state_advise_attempt_decision> <=
+          sml::state<state_advise_kind_decision>
+          + sml::completion<detail::advise_mapping_runtime>
+          [ guard::guard_advise_kind_willneed{} ]
+          / action::effect_attempt_advise_willneed
+      , sml::state<state_advise_attempt_decision> <=
+          sml::state<state_advise_kind_decision>
+          + sml::completion<detail::advise_mapping_runtime>
+          [ guard::guard_advise_kind_dontneed{} ]
+          / action::effect_attempt_advise_dontneed
+      , sml::state<state_advise_publish_done_decision> <=
+          sml::state<state_advise_attempt_decision>
+          + sml::completion<detail::advise_mapping_runtime>
+          [ guard::guard_advise_succeeded{} ]
+          / action::effect_commit_advise
+      , sml::state<state_advise_failed_error_decision> <=
+          sml::state<state_advise_attempt_decision>
+          + sml::completion<detail::advise_mapping_runtime>
+          [ guard::guard_advise_failed{} ]
+          / action::effect_mark_advise_failed
+
+      //------------------------------------------------------------------------------//
+      // Advise done publication.
+      , sml::state<state_advise_done_callback> <=
+          sml::state<state_advise_publish_done_decision>
+          + sml::completion<detail::advise_mapping_runtime>
+          [ guard::guard_advise_done_callback_present{} ]
+          / action::effect_publish_advise_mapping_done
+      , sml::state<state_ready> <=
+          sml::state<state_advise_publish_done_decision>
+          + sml::completion<detail::advise_mapping_runtime>
+          [ guard::guard_advise_done_callback_absent{} ]
+          / action::effect_record_advise_mapping_done
+      , sml::state<state_ready> <= sml::state<state_advise_done_callback>
+          + sml::completion<detail::advise_mapping_runtime>
+          / action::effect_record_advise_mapping_done
+
+      //------------------------------------------------------------------------------//
+      // Advise error publication.
+      , sml::state<state_advise_error_callback> <=
+          sml::state<state_advise_invalid_handle_error_decision>
+          + sml::completion<detail::advise_mapping_runtime>
+          [ guard::guard_advise_error_callback_present{} ]
+          / action::effect_publish_advise_mapping_error
+      , sml::state<state_ready> <=
+          sml::state<state_advise_invalid_handle_error_decision>
+          + sml::completion<detail::advise_mapping_runtime>
+          [ guard::guard_advise_error_callback_absent{} ]
+          / action::effect_record_advise_mapping_error
+      , sml::state<state_advise_error_callback> <=
+          sml::state<state_advise_invalid_range_error_decision>
+          + sml::completion<detail::advise_mapping_runtime>
+          [ guard::guard_advise_error_callback_present{} ]
+          / action::effect_publish_advise_mapping_error
+      , sml::state<state_ready> <=
+          sml::state<state_advise_invalid_range_error_decision>
+          + sml::completion<detail::advise_mapping_runtime>
+          [ guard::guard_advise_error_callback_absent{} ]
+          / action::effect_record_advise_mapping_error
+      , sml::state<state_advise_error_callback> <=
+          sml::state<state_advise_unsupported_platform_error_decision>
+          + sml::completion<detail::advise_mapping_runtime>
+          [ guard::guard_advise_error_callback_present{} ]
+          / action::effect_publish_advise_mapping_error
+      , sml::state<state_ready> <=
+          sml::state<state_advise_unsupported_platform_error_decision>
+          + sml::completion<detail::advise_mapping_runtime>
+          [ guard::guard_advise_error_callback_absent{} ]
+          / action::effect_record_advise_mapping_error
+      , sml::state<state_advise_error_callback> <=
+          sml::state<state_advise_failed_error_decision>
+          + sml::completion<detail::advise_mapping_runtime>
+          [ guard::guard_advise_error_callback_present{} ]
+          / action::effect_publish_advise_mapping_error
+      , sml::state<state_ready> <=
+          sml::state<state_advise_failed_error_decision>
+          + sml::completion<detail::advise_mapping_runtime>
+          [ guard::guard_advise_error_callback_absent{} ]
+          / action::effect_record_advise_mapping_error
+      , sml::state<state_ready> <= sml::state<state_advise_error_callback>
+          + sml::completion<detail::advise_mapping_runtime>
+          / action::effect_record_advise_mapping_error
+
+      //------------------------------------------------------------------------------//
       // Unexpected event handling for every reachable state.
       , sml::state<state_ready> <= sml::state<state_ready>
           + sml::unexpected_event<sml::_> / action::effect_on_unexpected
@@ -406,6 +549,37 @@ struct model {
           + sml::unexpected_event<sml::_> / action::effect_on_unexpected
       , sml::state<state_ready> <= sml::state<state_release_error_callback>
           + sml::unexpected_event<sml::_> / action::effect_on_unexpected
+      , sml::state<state_ready> <= sml::state<state_advise_decision>
+          + sml::unexpected_event<sml::_> / action::effect_on_unexpected
+      , sml::state<state_ready> <= sml::state<state_advise_owned_decision>
+          + sml::unexpected_event<sml::_> / action::effect_on_unexpected
+      , sml::state<state_ready> <= sml::state<state_advise_range_decision>
+          + sml::unexpected_event<sml::_> / action::effect_on_unexpected
+      , sml::state<state_ready> <= sml::state<state_advise_platform_decision>
+          + sml::unexpected_event<sml::_> / action::effect_on_unexpected
+      , sml::state<state_ready> <= sml::state<state_advise_kind_decision>
+          + sml::unexpected_event<sml::_> / action::effect_on_unexpected
+      , sml::state<state_ready> <= sml::state<state_advise_attempt_decision>
+          + sml::unexpected_event<sml::_> / action::effect_on_unexpected
+      , sml::state<state_ready> <=
+          sml::state<state_advise_publish_done_decision>
+          + sml::unexpected_event<sml::_> / action::effect_on_unexpected
+      , sml::state<state_ready> <= sml::state<state_advise_done_callback>
+          + sml::unexpected_event<sml::_> / action::effect_on_unexpected
+      , sml::state<state_ready> <=
+          sml::state<state_advise_invalid_handle_error_decision>
+          + sml::unexpected_event<sml::_> / action::effect_on_unexpected
+      , sml::state<state_ready> <=
+          sml::state<state_advise_invalid_range_error_decision>
+          + sml::unexpected_event<sml::_> / action::effect_on_unexpected
+      , sml::state<state_ready> <=
+          sml::state<state_advise_unsupported_platform_error_decision>
+          + sml::unexpected_event<sml::_> / action::effect_on_unexpected
+      , sml::state<state_ready> <=
+          sml::state<state_advise_failed_error_decision>
+          + sml::unexpected_event<sml::_> / action::effect_on_unexpected
+      , sml::state<state_ready> <= sml::state<state_advise_error_callback>
+          + sml::unexpected_event<sml::_> / action::effect_on_unexpected
     );
     // clang-format on
   }
@@ -427,6 +601,13 @@ struct sm : public emel::sm<model, action::context> {
   bool process_event(const event::release_mapping &ev) {
     detail::release_attempt_status status{};
     detail::release_mapping_runtime runtime{ev, status};
+    const bool accepted = base_type::process_event(runtime);
+    return accepted && status.ok;
+  }
+
+  bool process_event(const event::advise_mapping &ev) {
+    detail::advise_attempt_status status{};
+    detail::advise_mapping_runtime runtime{ev, status};
     const bool accepted = base_type::process_event(runtime);
     return accepted && status.ok;
   }

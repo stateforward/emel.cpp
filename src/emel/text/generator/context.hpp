@@ -100,6 +100,10 @@ struct context {
   void * formatter_ctx = nullptr;
   emel::text::formatter::format_fn format_prompt =
       emel::text::formatter::format_raw;
+  // Streaming weight window collaborator (owner-bound; active reflects the
+  // owner's bind_window_done streaming_active report).
+  emel::model::tensor::window::sm * stream_window = nullptr;
+  bool stream_active = false;
 
   emel::text::renderer::sm renderer = {};
   emel::batch::planner::sm planner = {};

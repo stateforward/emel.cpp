@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# shellcheck source=scripts/build_jobs.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/build_jobs.sh"
+
 LINE_COVERAGE_MIN="${LINE_COVERAGE_MIN:-90}"
 BRANCH_COVERAGE_MIN="${BRANCH_COVERAGE_MIN:-50}"
 COVERAGE_BUILD_DIR="${EMEL_COVERAGE_BUILD_DIR:-build/coverage}"
@@ -291,7 +294,10 @@ cmake -S . -B "$COVERAGE_BUILD_DIR" -G Ninja \
   -DEMEL_TEST_EXTRA_ARG="$COVERAGE_TEST_EXTRA_ARG" \
   -DEMEL_TEST_SHARDS="$COVERAGE_TEST_SHARDS"
 
-cmake --build "$COVERAGE_BUILD_DIR" --parallel
+# Instrumented g++ peaks ~7-8GB on the template-heavy TUs: recompute the
+# bound with an 8GB per-job budget regardless of the inherited job count.
+COVERAGE_BUILD_JOBS="${EMEL_COVERAGE_BUILD_JOBS:-$(emel_compute_build_jobs 8)}"
+cmake --build "$COVERAGE_BUILD_DIR" --parallel "$COVERAGE_BUILD_JOBS"
 
 if [[ "$COVERAGE_CHANGED_ONLY" == "1" &&
       "$unknown_changed_src" == "0" &&

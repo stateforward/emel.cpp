@@ -614,6 +614,25 @@ Acceptance:
 - Synchronous CPU routes remain direct and are not slower.
 - The EMEL lane remains EMEL-owned; no llama.cpp/ggml object is shared into runtime execution.
 
+Status: completed for the OS-backed staged-read boundary (streaming weights
+milestone, 2026-07-02). The external-completion scheduler policy landed
+upstream-first (stateforward/sml.cpp PR #16: `completion_source`, park/drain
+in `co_sm`, ascending commit sweep, dispatch-thread-only resumption; emel pin
+follows the PR branch until merge). The first consumer is
+`emel::model::tensor::window` — a tensor-owned streaming weight window whose
+acquire dispatches suspend on in-flight slot loads fired by a 2-lane I/O pool
+running `io/staged_read` copies from a whole-file mmap source, with willneed/
+dontneed advise ahead of and behind the ring. The generator streams decode
+through it behind one engagement guard (`guard_decode_stream_window_ready`)
+with streamed rows above their resident/parallel siblings; streamed-vs-
+resident token parity is proven through the public generator path, and the
+opt-in `weight_streaming` bench compares emel window / emel mmap / llama.cpp
+mmap lanes under an optional systemd-run memory cap
+(`scripts/bench.sh --memory-max=...`). Follow-ons recorded in the milestone
+memory: wavefront x streaming multiplexing, aarch64 repack-on-acquire,
+session context caps for honest capped benches, MoE expert-granular
+streaming, co_sm-throughout sweep.
+
 ## Validation Checklist
 
 Before claiming the graph processor coroutine phase is complete:

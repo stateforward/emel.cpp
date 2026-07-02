@@ -28,6 +28,7 @@ if(EMEL_BENCH_SUITE_FILTER STREQUAL "batch_planner" OR
    EMEL_BENCH_SUITE_FILTER STREQUAL "kernel_aarch64" OR
    EMEL_BENCH_SUITE_FILTER STREQUAL "decode_wavefront" OR
    EMEL_BENCH_SUITE_FILTER STREQUAL "parallel_matmul" OR
+   EMEL_BENCH_SUITE_FILTER STREQUAL "weight_streaming" OR
    # speech_codec_mimi needs the llama.cpp checkout only for its ggml
    # subtree, which the moshi reference driver links against.
    EMEL_BENCH_SUITE_FILTER STREQUAL "speech_codec_mimi")
@@ -405,6 +406,8 @@ add_bench_runner_suite(decode_wavefront text/generator/decode_wavefront_bench.cp
                        EMEL_BENCH_ENABLE_DECODE_WAVEFRONT)
 add_bench_runner_suite(parallel_matmul text/generator/parallel_matmul_bench.cpp
                        EMEL_BENCH_ENABLE_PARALLEL_MATMUL)
+add_bench_runner_suite(weight_streaming model/tensor/window_streaming_bench.cpp
+                       EMEL_BENCH_ENABLE_WEIGHT_STREAMING)
 add_bench_runner_suite(tokenizer_preprocessor_bpe text/tokenizer/preprocessor/bpe_bench.cpp
                        EMEL_BENCH_ENABLE_TOKENIZER_PREPROCESSOR_BPE)
 add_bench_runner_suite(tokenizer_preprocessor_spm text/tokenizer/preprocessor/spm_bench.cpp

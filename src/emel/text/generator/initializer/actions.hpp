@@ -48,6 +48,15 @@ struct request_backend_prepare {
     ev.ctx.phase_accepted =
         ev.ctx.phase_code ==
         static_cast<int32_t>(emel::error::cast(emel::model::loader::error::none));
+    // Streaming engage bookkeeping: prepare() reconstructed the backend, so
+    // re-attach the owner-injected window and record the pristine per-layer
+    // weight records the streamed rebase clones from. Branch-free: with no
+    // window the flag stays false and pristine is harmless setup data.
+    generator.compute.backend.stream.window = generator.stream_window;
+    generator.compute.backend.stream.active =
+        generator.stream_active && (generator.stream_window != nullptr);
+    emel::text::generator::detail::scan_stream_pristine_records(
+        generator.compute.backend);
   }
 };
 

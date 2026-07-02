@@ -1,0 +1,11 @@
+format=emel_generation_baseline_v1
+contract=generation_online_f16_final_normalize_v1
+fixture=LFM2.5-230M-Q8_0.gguf
+prompt_hex=68656c6c6f
+max_tokens=10
+tokens_generated=10
+output_length=14
+trace_token_count=10
+token_ids=537,601,834,36509,601,539,539,539,539,539
+top_score_gaps=0.946845055,2.38924313,2.40393448,1.52797127,0.95406723,2.91764736,0.231761932,0.573626518,2.13187408,2.58219814
+output_hex=3c7c696d5f656e647c3e3e3e3e3e

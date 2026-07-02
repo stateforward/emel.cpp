@@ -248,6 +248,98 @@ struct effect_record_release_mapping_error {
                   context &) const noexcept {}
 };
 
+struct effect_begin_advise {
+  void operator()(const detail::advise_mapping_runtime &ev,
+                  context &) const noexcept {
+    ev.status.err = emel::error::cast(error::none);
+    ev.status.ok = false;
+    ev.status.advise_ok = false;
+  }
+};
+
+struct effect_mark_advise_invalid_handle {
+  void operator()(const detail::advise_mapping_runtime &ev,
+                  context &) const noexcept {
+    ev.status.err = emel::error::cast(error::invalid_request);
+    ev.status.ok = false;
+  }
+};
+
+struct effect_mark_advise_invalid_range {
+  void operator()(const detail::advise_mapping_runtime &ev,
+                  context &) const noexcept {
+    ev.status.err = emel::error::cast(error::invalid_advise_range);
+    ev.status.ok = false;
+  }
+};
+
+struct effect_mark_advise_unsupported_platform {
+  void operator()(const detail::advise_mapping_runtime &ev,
+                  context &) const noexcept {
+    ev.status.err = emel::error::cast(error::unsupported_platform);
+    ev.status.ok = false;
+  }
+};
+
+struct effect_attempt_advise_sequential {
+  void operator()(const detail::advise_mapping_runtime &ev,
+                  context &ctx) const noexcept;
+};
+
+struct effect_attempt_advise_willneed {
+  void operator()(const detail::advise_mapping_runtime &ev,
+                  context &ctx) const noexcept;
+};
+
+struct effect_attempt_advise_dontneed {
+  void operator()(const detail::advise_mapping_runtime &ev,
+                  context &ctx) const noexcept;
+};
+
+struct effect_mark_advise_failed {
+  void operator()(const detail::advise_mapping_runtime &ev,
+                  context &) const noexcept {
+    ev.status.err = emel::error::cast(error::advise_failed);
+    ev.status.ok = false;
+  }
+};
+
+struct effect_commit_advise {
+  void operator()(const detail::advise_mapping_runtime &ev,
+                  context &) const noexcept {
+    ev.status.ok = true;
+  }
+};
+
+struct effect_publish_advise_mapping_done {
+  void operator()(const detail::advise_mapping_runtime &ev,
+                  context &) const noexcept {
+    ev.request.on_done(events::advise_mapping_done{
+        .request = ev.request,
+    });
+  }
+};
+
+struct effect_record_advise_mapping_done {
+  void operator()(const detail::advise_mapping_runtime &,
+                  context &) const noexcept {}
+};
+
+struct effect_publish_advise_mapping_error {
+  void operator()(const detail::advise_mapping_runtime &ev,
+                  context &) const noexcept {
+    ev.request.on_error(events::advise_mapping_error{
+        .request = ev.request,
+        .err = ev.status.err,
+    });
+  }
+};
+
+struct effect_record_advise_mapping_error {
+  void operator()(const detail::advise_mapping_runtime &,
+                  context &) const noexcept {}
+};
+
 struct effect_on_unexpected {
   template <class event_type>
   void operator()(const event_type &ev, context &) const noexcept {
@@ -304,6 +396,29 @@ inline constexpr effect_publish_release_mapping_error
     effect_publish_release_mapping_error{};
 inline constexpr effect_record_release_mapping_error
     effect_record_release_mapping_error{};
+inline constexpr effect_begin_advise effect_begin_advise{};
+inline constexpr effect_mark_advise_invalid_handle
+    effect_mark_advise_invalid_handle{};
+inline constexpr effect_mark_advise_invalid_range
+    effect_mark_advise_invalid_range{};
+inline constexpr effect_mark_advise_unsupported_platform
+    effect_mark_advise_unsupported_platform{};
+inline constexpr effect_attempt_advise_sequential
+    effect_attempt_advise_sequential{};
+inline constexpr effect_attempt_advise_willneed
+    effect_attempt_advise_willneed{};
+inline constexpr effect_attempt_advise_dontneed
+    effect_attempt_advise_dontneed{};
+inline constexpr effect_mark_advise_failed effect_mark_advise_failed{};
+inline constexpr effect_commit_advise effect_commit_advise{};
+inline constexpr effect_publish_advise_mapping_done
+    effect_publish_advise_mapping_done{};
+inline constexpr effect_record_advise_mapping_done
+    effect_record_advise_mapping_done{};
+inline constexpr effect_publish_advise_mapping_error
+    effect_publish_advise_mapping_error{};
+inline constexpr effect_record_advise_mapping_error
+    effect_record_advise_mapping_error{};
 inline constexpr effect_on_unexpected effect_on_unexpected{};
 
 } // namespace emel::io::mmap::action
