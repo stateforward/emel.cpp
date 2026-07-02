@@ -74,6 +74,20 @@ struct guard_decode_shape_invalid {
   }
 };
 
+template <class runtime_event_type> struct guard_conv_f16 {
+  bool operator()(const runtime_event_type &runtime_ev,
+                  const action::context &) const noexcept {
+    return runtime_ev.request.runtime.conv_f16;
+  }
+};
+
+template <class runtime_event_type> struct guard_conv_f32 {
+  bool operator()(const runtime_event_type &runtime_ev,
+                  const action::context &) const noexcept {
+    return !runtime_ev.request.runtime.conv_f16;
+  }
+};
+
 template <class runtime_event_type> struct guard_stage_ok {
   bool operator()(const runtime_event_type &runtime_ev,
                   const action::context &) const noexcept {

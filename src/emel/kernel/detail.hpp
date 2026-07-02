@@ -3963,6 +3963,18 @@ inline float bf16_to_fp32(const uint16_t bits16) noexcept {
   return out;
 }
 
+// Exact port of ggml_compute_fp32_to_bf16 (round-to-nearest-even with the
+// NaN quieting ggml applies).
+inline uint16_t fp32_to_bf16(const float value) noexcept {
+  uint32_t bits32 = 0;
+  std::memcpy(&bits32, &value, sizeof(bits32));
+  if ((bits32 & 0x7fffffffu) > 0x7f800000u) {
+    return static_cast<uint16_t>((bits32 >> 16u) | 64u);
+  }
+  return static_cast<uint16_t>((bits32 + (0x7fffu + ((bits32 >> 16u) & 1u))) >>
+                               16u);
+}
+
 template <class tensor_type>
 inline int32_t read_i32_at(const tensor_type &tensor, const uint64_t i0,
                            const uint64_t i1 = 0,

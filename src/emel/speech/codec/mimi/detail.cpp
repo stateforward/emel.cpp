@@ -134,6 +134,25 @@ const float *prepare_linear(arena_cursor &cursor,
 
 // Prepares a conv kernel stored [taps, in, out] as the column-major GEMM
 // operand [out, in*taps]: prepared[out + (in*taps + tap) * out_count].
+// Copies raw f16 halfs verbatim into the arena (ggml reshape layout is the
+// source layout, so no repacking). Returns nullptr when the source is not
+// f16 or capacity is exceeded.
+const uint16_t *prepare_raw_f16(arena_cursor &cursor,
+                                const emel::model::data::tensor_record *tensor,
+                                const uint64_t expected_halfs) noexcept {
+  if (tensor == nullptr ||
+      static_cast<uint8_t>(tensor->type) != emel::kernel::detail::dtype_f16 ||
+      tensor_elements(*tensor) != expected_halfs || tensor->data == nullptr) {
+    return nullptr;
+  }
+  float *slot = cursor.take((expected_halfs + 1u) / 2u);
+  if (slot == nullptr) {
+    return nullptr;
+  }
+  std::memcpy(slot, tensor->data, expected_halfs * sizeof(uint16_t));
+  return reinterpret_cast<const uint16_t *>(slot);
+}
+
 const float *prepare_conv_gemm(arena_cursor &cursor,
                                const emel::model::data::tensor_record *tensor,
                                const int64_t taps, const int64_t in_count,
@@ -191,6 +210,32 @@ kev::tensor_view make_view(const float *data, const uint64_t ne0,
   view.nb[1] = view.nb[0] * ne0;
   view.nb[2] = view.nb[1] * ne1;
   view.nb[3] = view.nb[2] * ne2;
+  return view;
+}
+
+kev::tensor_view make_f16_view(const uint16_t *data, const uint64_t ne0,
+                               const uint64_t ne1 = 1) {
+  kev::tensor_view view{};
+  view.data = data;
+  view.type = kev::dtype::f16;
+  view.ne = {ne0, ne1, 1, 1};
+  view.nb[0] = sizeof(uint16_t);
+  view.nb[1] = view.nb[0] * ne0;
+  view.nb[2] = view.nb[1] * ne1;
+  view.nb[3] = view.nb[2];
+  return view;
+}
+
+kev::tensor_view_mut make_f16_view_mut(uint16_t *data, const uint64_t ne0,
+                                       const uint64_t ne1 = 1) {
+  kev::tensor_view_mut view{};
+  view.data = data;
+  view.type = kev::dtype::f16;
+  view.ne = {ne0, ne1, 1, 1};
+  view.nb[0] = sizeof(uint16_t);
+  view.nb[1] = view.nb[0] * ne0;
+  view.nb[2] = view.nb[1] * ne1;
+  view.nb[3] = view.nb[2];
   return view;
 }
 
@@ -407,6 +452,7 @@ void account_conv(codec_extents &extents, const int64_t in_channels,
 // Compute helpers.
 //------------------------------------------------------------------------------//
 
+template <bool conv_f16>
 bool compute_streaming_conv(codec_runtime &runtime, const conv_weights &conv,
                             codec_streaming_state &state, frame_buffer &io,
                             std::span<float> workspace) noexcept {
@@ -475,10 +521,21 @@ bool compute_streaming_conv(codec_runtime &runtime, const conv_weights &conv,
                              static_cast<uint64_t>(in_channels));
   im2col_ev.src1 = make_view(channel_major, static_cast<uint64_t>(padded),
                              static_cast<uint64_t>(in_channels));
-  im2col_ev.dst = make_view_mut(plan.columns.data(),
-                                static_cast<uint64_t>(in_channels) *
-                                    static_cast<uint64_t>(taps),
-                                static_cast<uint64_t>(out_length));
+  if constexpr (conv_f16) {
+    // reference operand class: the im2col output is rounded to f16, exactly
+    // as ggml_conv_1d does for f16 weights
+    im2col_ev.src0 = make_f16_view(conv.weight_f16, static_cast<uint64_t>(taps),
+                                   static_cast<uint64_t>(in_channels));
+    im2col_ev.dst = make_f16_view_mut(
+        reinterpret_cast<uint16_t *>(plan.columns.data()),
+        static_cast<uint64_t>(in_channels) * static_cast<uint64_t>(taps),
+        static_cast<uint64_t>(out_length));
+  } else {
+    im2col_ev.dst = make_view_mut(plan.columns.data(),
+                                  static_cast<uint64_t>(in_channels) *
+                                      static_cast<uint64_t>(taps),
+                                  static_cast<uint64_t>(out_length));
+  }
   set_param_i32(im2col_ev, 0u, static_cast<int32_t>(stride));
   set_param_i32(im2col_ev, 1u, 0);
   set_param_i32(im2col_ev, 2u, 0);
@@ -490,17 +547,35 @@ bool compute_streaming_conv(codec_runtime &runtime, const conv_weights &conv,
     return false;
   }
 
-  const bool multiplied = dispatch_mul_mat(
-      runtime,
-      make_view(plan.columns.data(),
-                static_cast<uint64_t>(in_channels) *
-                    static_cast<uint64_t>(taps),
-                static_cast<uint64_t>(out_length)),
-      make_view(conv.weight, static_cast<uint64_t>(out_channels),
-                static_cast<uint64_t>(in_channels) *
-                    static_cast<uint64_t>(taps)),
-      make_view_mut(io.data, static_cast<uint64_t>(out_channels),
-                    static_cast<uint64_t>(out_length)));
+  bool multiplied = false;
+  if constexpr (conv_f16) {
+    // ggml layout: src0 = raw f16 weight rows [k, out], src1 = f16 columns
+    // [k, positions], dst f32 [out, positions] (bit-exact ggml mul_mat)
+    multiplied = dispatch_mul_mat(
+        runtime,
+        make_f16_view(conv.weight_f16,
+                      static_cast<uint64_t>(in_channels) *
+                          static_cast<uint64_t>(taps),
+                      static_cast<uint64_t>(out_channels)),
+        make_f16_view(reinterpret_cast<const uint16_t *>(plan.columns.data()),
+                      static_cast<uint64_t>(in_channels) *
+                          static_cast<uint64_t>(taps),
+                      static_cast<uint64_t>(out_length)),
+        make_view_mut(io.data, static_cast<uint64_t>(out_channels),
+                      static_cast<uint64_t>(out_length)));
+  } else {
+    multiplied = dispatch_mul_mat(
+        runtime,
+        make_view(plan.columns.data(),
+                  static_cast<uint64_t>(in_channels) *
+                      static_cast<uint64_t>(taps),
+                  static_cast<uint64_t>(out_length)),
+        make_view(conv.weight, static_cast<uint64_t>(out_channels),
+                  static_cast<uint64_t>(in_channels) *
+                      static_cast<uint64_t>(taps)),
+        make_view_mut(io.data, static_cast<uint64_t>(out_channels),
+                      static_cast<uint64_t>(out_length)));
+  }
   if (!multiplied) {
     return false;
   }
@@ -672,6 +747,7 @@ bool compute_streaming_conv_transpose_depthwise(
                                                      workspace);
 }
 
+template <bool conv_f16>
 bool compute_seanet_stack(codec_runtime &runtime,
                           std::span<const seanet_layer_weights> layers,
                           codec_streaming_state &state, frame_buffer &io,
@@ -693,8 +769,8 @@ bool compute_seanet_stack(codec_runtime &runtime,
       continue;
     }
     if (layer.kind == seanet_layer_kind::conv) {
-      if (!compute_streaming_conv(runtime, layer.conv, state, io,
-                                  workspace.subspan(0, half))) {
+      if (!compute_streaming_conv<conv_f16>(runtime, layer.conv, state, io,
+                                            workspace.subspan(0, half))) {
         return false;
       }
       continue;
@@ -721,16 +797,16 @@ bool compute_seanet_stack(codec_runtime &runtime,
         dispatch_unary(runtime, kev::unary_subop::elu,
                        make_view(io.data, count),
                        make_view_mut(io.data, count)) &&
-        compute_streaming_conv(runtime, layer.resnet.block_1, state, io,
-                               workspace.subspan(0, half)) &&
+        compute_streaming_conv<conv_f16>(runtime, layer.resnet.block_1, state,
+                                         io, workspace.subspan(0, half)) &&
         dispatch_unary(
             runtime, kev::unary_subop::elu,
             make_view(io.data, static_cast<uint64_t>(io.channels) *
                                    static_cast<uint64_t>(io.length)),
             make_view_mut(io.data, static_cast<uint64_t>(io.channels) *
                                        static_cast<uint64_t>(io.length))) &&
-        compute_streaming_conv(runtime, layer.resnet.block_3, state, io,
-                               workspace.subspan(0, half));
+        compute_streaming_conv<conv_f16>(runtime, layer.resnet.block_3, state,
+                                         io, workspace.subspan(0, half));
     if (!block_ok || io.channels != in_channels || io.length != in_length) {
       return false;
     }
@@ -835,16 +911,13 @@ bool compute_transformer(codec_runtime &runtime,
         }
       }
 
-      // append k, v at the ring slot
-      const bool cached =
-          dispatch_copy(
-              runtime, make_view(qkv + dim, static_cast<uint64_t>(dim)),
-              make_view_mut(k_ring + slot * dim, static_cast<uint64_t>(dim))) &&
-          dispatch_copy(
-              runtime, make_view(qkv + 2 * dim, static_cast<uint64_t>(dim)),
-              make_view_mut(v_ring + slot * dim, static_cast<uint64_t>(dim)));
-      if (!cached) {
-        return false;
+      // append k, v at the ring slot, rounded through bf16 exactly as the
+      // reference caches them (moshi casts K and V to BF16 in the cache)
+      for (int64_t d = 0; d < dim; ++d) {
+        k_ring[slot * dim + d] = emel::kernel::detail::bf16_to_fp32(
+            emel::kernel::detail::fp32_to_bf16(qkv[dim + d]));
+        v_ring[slot * dim + d] = emel::kernel::detail::bf16_to_fp32(
+            emel::kernel::detail::fp32_to_bf16(qkv[2 * dim + d]));
       }
 
       // windowed attention per head; the ring window is at most two
@@ -976,6 +1049,7 @@ bool compute_transformer(codec_runtime &runtime,
   return true;
 }
 
+template <bool conv_f16>
 bool compute_rvq_encode(codec_runtime &runtime, const frame_buffer &latent,
                         std::span<int32_t> codes_out,
                         std::span<float> workspace) noexcept {
@@ -991,12 +1065,15 @@ bool compute_rvq_encode(codec_runtime &runtime, const frame_buffer &latent,
           static_cast<size_t>(n_q) * static_cast<size_t>(frames)) {
     return false;
   }
-  const uint64_t need = 2u * static_cast<uint64_t>(codebook_dim) + 2u;
+  const uint64_t need = 2u * static_cast<uint64_t>(codebook_dim) + 2u +
+                        (static_cast<uint64_t>(dim) + 1u) / 2u + 1u;
   if (workspace.size() < need) {
     return false;
   }
   float *residual = workspace.data(); // [codebook_dim + 1] with trailing 1
   float *chosen = residual + codebook_dim + 1;
+  auto *staged_f16 =
+      reinterpret_cast<uint16_t *>(chosen + codebook_dim + 1); // [dim] halfs
 
   for (int64_t frame = 0; frame < frames; ++frame) {
     const float *x = latent.data + frame * dim;
@@ -1008,12 +1085,27 @@ bool compute_rvq_encode(codec_runtime &runtime, const frame_buffer &latent,
         continue;
       }
       // project into codebook space; append the bias-fold constant
-      if (!dispatch_mul_mat(
-              runtime, make_view(x, static_cast<uint64_t>(dim), 1u),
-              make_view(split->input_proj, static_cast<uint64_t>(codebook_dim),
-                        static_cast<uint64_t>(dim)),
-              make_view_mut(residual, static_cast<uint64_t>(codebook_dim),
-                            1u))) {
+      bool projected_in = false;
+      if constexpr (conv_f16) {
+        // reference conv1x1 path: x rounds to f16 (ggml im2col k=1), then
+        // the ggml-exact f16 matmul against the raw f16 projection
+        for (int64_t d = 0; d < dim; ++d) {
+          staged_f16[d] = ::emel::kernel::detail::quant::fp32_to_fp16(x[d]);
+        }
+        projected_in = dispatch_mul_mat(
+            runtime,
+            make_f16_view(split->input_proj_f16, static_cast<uint64_t>(dim),
+                          static_cast<uint64_t>(codebook_dim)),
+            make_f16_view(staged_f16, static_cast<uint64_t>(dim), 1u),
+            make_view_mut(residual, static_cast<uint64_t>(codebook_dim), 1u));
+      } else {
+        projected_in = dispatch_mul_mat(
+            runtime, make_view(x, static_cast<uint64_t>(dim), 1u),
+            make_view(split->input_proj, static_cast<uint64_t>(codebook_dim),
+                      static_cast<uint64_t>(dim)),
+            make_view_mut(residual, static_cast<uint64_t>(codebook_dim), 1u));
+      }
+      if (!projected_in) {
         return false;
       }
       residual[codebook_dim] = 1.0f;
@@ -1064,6 +1156,7 @@ bool compute_rvq_encode(codec_runtime &runtime, const frame_buffer &latent,
   return true;
 }
 
+template <bool conv_f16>
 bool compute_rvq_decode(codec_runtime &runtime, std::span<const int32_t> codes,
                         int32_t frames, frame_buffer &latent_out,
                         std::span<float> workspace) noexcept {
@@ -1078,13 +1171,16 @@ bool compute_rvq_decode(codec_runtime &runtime, std::span<const int32_t> codes,
     return false;
   }
   const uint64_t need = 2u * static_cast<uint64_t>(codebook_dim) +
-                        static_cast<uint64_t>(dim) + 2u;
+                        static_cast<uint64_t>(dim) + 2u +
+                        (static_cast<uint64_t>(codebook_dim) + 1u) / 2u + 1u;
   if (workspace.size() < need) {
     return false;
   }
   float *summed = workspace.data();
   float *chosen = summed + codebook_dim;
   float *projected = chosen + codebook_dim;
+  auto *staged_f16 =
+      reinterpret_cast<uint16_t *>(projected + dim); // [codebook_dim] halfs
 
   for (int64_t frame = 0; frame < frames; ++frame) {
     float *out = latent_out.data + frame * dim;
@@ -1120,13 +1216,30 @@ bool compute_rvq_decode(codec_runtime &runtime, std::span<const int32_t> codes,
           return false;
         }
       }
+      bool projected_out = false;
+      if constexpr (conv_f16) {
+        // reference conv1x1 path: summed residual rounds to f16, then the
+        // ggml-exact f16 matmul against the raw f16 output projection
+        for (int64_t c = 0; c < codebook_dim; ++c) {
+          staged_f16[c] =
+              ::emel::kernel::detail::quant::fp32_to_fp16(summed[c]);
+        }
+        projected_out = dispatch_mul_mat(
+            runtime,
+            make_f16_view(split->output_proj_f16,
+                          static_cast<uint64_t>(codebook_dim),
+                          static_cast<uint64_t>(dim)),
+            make_f16_view(staged_f16, static_cast<uint64_t>(codebook_dim), 1u),
+            make_view_mut(projected, static_cast<uint64_t>(dim), 1u));
+      } else {
+        projected_out = dispatch_mul_mat(
+            runtime, make_view(summed, static_cast<uint64_t>(codebook_dim), 1u),
+            make_view(split->output_proj, static_cast<uint64_t>(dim),
+                      static_cast<uint64_t>(codebook_dim)),
+            make_view_mut(projected, static_cast<uint64_t>(dim), 1u));
+      }
       const bool projected_ok =
-          dispatch_mul_mat(
-              runtime,
-              make_view(summed, static_cast<uint64_t>(codebook_dim), 1u),
-              make_view(split->output_proj, static_cast<uint64_t>(dim),
-                        static_cast<uint64_t>(codebook_dim)),
-              make_view_mut(projected, static_cast<uint64_t>(dim), 1u)) &&
+          projected_out &&
           dispatch_add(runtime, make_view(out, static_cast<uint64_t>(dim)),
                        make_view(projected, static_cast<uint64_t>(dim)),
                        make_view_mut(out, static_cast<uint64_t>(dim)));
@@ -1188,6 +1301,7 @@ struct codec_plan {
   int32_t frame_samples = 0;
   int64_t encoder_tokens = 0;
   int64_t decoder_tokens = 0;
+  bool conv_f16 = false;
   bool valid = false;
 };
 
@@ -1221,12 +1335,21 @@ uint64_t conv_prepared_floats(const int64_t taps, const int64_t in_channels,
          static_cast<uint64_t>(out_channels);
 }
 
+// f16 raw-weight arena floats for one conv when the model carries f16 convs
+uint64_t conv_f16_prepared_floats(const int64_t taps, const int64_t in_channels,
+                                  const int64_t out_channels) noexcept {
+  const uint64_t halfs = static_cast<uint64_t>(taps) *
+                         static_cast<uint64_t>(in_channels) *
+                         static_cast<uint64_t>(out_channels);
+  return (halfs + 1u) / 2u;
+}
+
 bool plan_seanet(
     const emel::model::data &model_data, const char *family,
     const std::array<seanet_layer_spec, k_max_seanet_layers> &topology,
     std::array<seanet_plan_layer, k_max_seanet_layers> &layers_out,
-    int64_t &length, int64_t &channels, codec_extents &extents,
-    uint64_t &prepared) noexcept {
+    int64_t &length, int64_t &channels, const bool conv_f16,
+    codec_extents &extents, uint64_t &prepared) noexcept {
   char conv_format[64] = {};
   char convtr_format[64] = {};
   char res_format[72] = {};
@@ -1273,6 +1396,10 @@ bool plan_seanet(
       account_conv(extents, res_half, channels, 1, 1, length, false);
       prepared += conv_prepared_floats(layer.res_taps, channels, res_half) +
                   conv_prepared_floats(1, res_half, channels);
+      prepared += conv_f16 ? conv_f16_prepared_floats(layer.res_taps, channels,
+                                                      res_half) +
+                                 conv_f16_prepared_floats(1, res_half, channels)
+                           : 0u;
       continue;
     }
 
@@ -1299,6 +1426,9 @@ bool plan_seanet(
                    spec.stride, length, false);
       prepared +=
           conv_prepared_floats(layer.taps, channels, layer.out_channels);
+      prepared += conv_f16 ? conv_f16_prepared_floats(layer.taps, channels,
+                                                      layer.out_channels)
+                           : 0u;
       length = length / spec.stride;
     }
     channels = layer.out_channels;
@@ -1363,10 +1493,19 @@ bool plan_codec(const emel::model::data &model_data,
     return false;
   }
 
+  // Bound operand class: models storing f16 conv weights run the reference
+  // f16 pipeline (detected on the first encoder conv; bind cross-checks the
+  // rest via prepare_raw_f16 failures).
+  const auto *first_conv =
+      find_tensor(model_data, "mimi.encoder.model.0.conv.conv.weight");
+  plan_out.conv_f16 =
+      first_conv != nullptr &&
+      static_cast<uint8_t>(first_conv->type) == emel::kernel::detail::dtype_f16;
+
   int64_t length = plan_out.frame_samples;
   int64_t channels = 1;
   if (!plan_seanet(model_data, "encoder", k_encoder_topology, plan_out.encoder,
-                   length, channels, plan_out.extents,
+                   length, channels, plan_out.conv_f16, plan_out.extents,
                    plan_out.prepared_floats) ||
       channels != mimi.dim) {
     return false;
@@ -1394,6 +1533,11 @@ bool plan_codec(const emel::model::data &model_data,
                plan_out.downsample.taps, 2, length, false);
   plan_out.prepared_floats += conv_prepared_floats(
       plan_out.downsample.taps, channels, plan_out.downsample.out_channels);
+  plan_out.prepared_floats +=
+      plan_out.conv_f16
+          ? conv_f16_prepared_floats(plan_out.downsample.taps, channels,
+                                     plan_out.downsample.out_channels)
+          : 0u;
   length = length / 2;
   if (length != 1) {
     return false;
@@ -1407,6 +1551,11 @@ bool plan_codec(const emel::model::data &model_data,
   const uint64_t per_level = cb_dim * entries + (cb_dim + 1u) * entries;
   plan_out.prepared_floats +=
       2u * per_split_proj + static_cast<uint64_t>(mimi.n_q) * per_level;
+  // raw f16 projections (input + output per split)
+  plan_out.prepared_floats +=
+      plan_out.conv_f16
+          ? 4u * ((cb_dim * static_cast<uint64_t>(mimi.dim) + 1u) / 2u)
+          : 0u;
 
   // decode chain
   int64_t decode_length = 1;
@@ -1440,8 +1589,8 @@ bool plan_codec(const emel::model::data &model_data,
   plan_out.prepared_floats += plan_out.decoder_transformer.prepared;
 
   if (!plan_seanet(model_data, "decoder", k_decoder_topology, plan_out.decoder,
-                   decode_length, decode_channels, plan_out.extents,
-                   plan_out.prepared_floats)) {
+                   decode_length, decode_channels, plan_out.conv_f16,
+                   plan_out.extents, plan_out.prepared_floats)) {
     return false;
   }
   if (decode_length != plan_out.frame_samples || decode_channels != 1) {
@@ -1480,7 +1629,7 @@ uint64_t workspace_floats_from_plan(const emel::model::data &model_data,
 // derived from the chain walk, so collapsed GGUF dims are irrelevant here).
 bool bind_conv(arena_cursor &cursor, uint64_t &state_cursor,
                const seanet_plan_layer &plan_layer, const bool transposed,
-               conv_weights &conv_out) noexcept {
+               const bool with_f16, conv_weights &conv_out) noexcept {
   const int64_t taps = plan_layer.taps;
   const int64_t in_channels = plan_layer.in_channels;
   const int64_t out_channels = plan_layer.out_channels;
@@ -1496,6 +1645,17 @@ bool bind_conv(arena_cursor &cursor, uint64_t &state_cursor,
   } else {
     conv_out.weight = prepare_conv_gemm(cursor, plan_layer.weight, taps,
                                         in_channels, out_channels);
+    if (with_f16) {
+      // reference operand class: keep the raw f16 taps alongside the f32
+      // canonical copy; every conv in an f16 model must itself be f16
+      conv_out.weight_f16 = prepare_raw_f16(
+          cursor, plan_layer.weight,
+          static_cast<uint64_t>(taps) * static_cast<uint64_t>(in_channels) *
+              static_cast<uint64_t>(out_channels));
+      if (conv_out.weight_f16 == nullptr) {
+        return false;
+      }
+    }
   }
   conv_out.in_channels = static_cast<int32_t>(in_channels);
   conv_out.out_channels = static_cast<int32_t>(out_channels);
@@ -1597,6 +1757,7 @@ bool bind_transformer(arena_cursor &cursor, uint64_t &state_cursor,
 
 bool bind_rvq_split(arena_cursor &cursor, const emel::model::data &model_data,
                     const char *split, const int32_t level_count,
+                    const bool with_f16,
                     rvq_split_weights &split_out) noexcept {
   const auto &mimi = model_data.mimi;
   const int64_t dim = mimi.dim;
@@ -1614,6 +1775,23 @@ bool bind_rvq_split(arena_cursor &cursor, const emel::model::data &model_data,
       prepare_linear(cursor, find_tensor(model_data, name), cb_dim, dim);
   if (split_out.input_proj == nullptr || split_out.output_proj == nullptr) {
     return false;
+  }
+  if (with_f16) {
+    // reference operand class keeps the raw f16 conv1x1 projections
+    std::snprintf(name, sizeof(name), "mimi.quantizer.%s.input_proj.weight",
+                  split);
+    split_out.input_proj_f16 = prepare_raw_f16(
+        cursor, find_tensor(model_data, name),
+        static_cast<uint64_t>(dim) * static_cast<uint64_t>(cb_dim));
+    std::snprintf(name, sizeof(name), "mimi.quantizer.%s.output_proj.weight",
+                  split);
+    split_out.output_proj_f16 = prepare_raw_f16(
+        cursor, find_tensor(model_data, name),
+        static_cast<uint64_t>(dim) * static_cast<uint64_t>(cb_dim));
+    if (split_out.input_proj_f16 == nullptr ||
+        split_out.output_proj_f16 == nullptr) {
+      return false;
+    }
   }
 
   split_out.level_count = level_count;
@@ -1654,6 +1832,7 @@ bool bind_rvq_split(arena_cursor &cursor, const emel::model::data &model_data,
 bool bind_seanet(
     arena_cursor &cursor, uint64_t &state_cursor,
     const std::array<seanet_plan_layer, k_max_seanet_layers> &plan_layers,
+    const bool with_f16,
     std::array<seanet_layer_weights, k_max_seanet_layers>
         &layers_out) noexcept {
   for (int32_t index = 0; index < k_max_seanet_layers; ++index) {
@@ -1664,7 +1843,7 @@ bool bind_seanet(
         plan_layer.kind == seanet_layer_kind::conv_transpose) {
       if (!bind_conv(cursor, state_cursor, plan_layer,
                      plan_layer.kind == seanet_layer_kind::conv_transpose,
-                     layer.conv)) {
+                     with_f16, layer.conv)) {
         return false;
       }
     } else if (plan_layer.kind == seanet_layer_kind::resnet) {
@@ -1676,7 +1855,8 @@ bool bind_seanet(
       shim.taps = plan_layer.res_taps;
       shim.in_channels = plan_layer.in_channels;
       shim.out_channels = plan_layer.res_half;
-      if (!bind_conv(cursor, state_cursor, shim, false, layer.resnet.block_1)) {
+      if (!bind_conv(cursor, state_cursor, shim, false, with_f16,
+                     layer.resnet.block_1)) {
         return false;
       }
       shim.weight = plan_layer.res3_weight;
@@ -1684,7 +1864,8 @@ bool bind_seanet(
       shim.taps = 1;
       shim.in_channels = plan_layer.res_half;
       shim.out_channels = plan_layer.in_channels;
-      if (!bind_conv(cursor, state_cursor, shim, false, layer.resnet.block_3)) {
+      if (!bind_conv(cursor, state_cursor, shim, false, with_f16,
+                     layer.resnet.block_3)) {
         return false;
       }
     }
@@ -1741,7 +1922,7 @@ bool bind_codec_runtime(const emel::model::data &model_data,
   arena_cursor cursor{prepared, 0};
   uint64_t state_cursor = 0;
 
-  if (!bind_seanet(cursor, state_cursor, plan.encoder,
+  if (!bind_seanet(cursor, state_cursor, plan.encoder, plan.conv_f16,
                    runtime_out.encoder_layers) ||
       !bind_transformer(cursor, state_cursor, model_data, "encoder_transformer",
                         plan.encoder_transformer,
@@ -1750,15 +1931,16 @@ bool bind_codec_runtime(const emel::model::data &model_data,
     return false;
   }
 
-  if (!bind_conv(cursor, state_cursor, plan.downsample, false,
+  if (!bind_conv(cursor, state_cursor, plan.downsample, false, plan.conv_f16,
                  runtime_out.downsample)) {
     return false;
   }
 
+  runtime_out.conv_f16 = plan.conv_f16;
   if (!bind_rvq_split(cursor, model_data, "rvq_first", mimi.semantic_n_q,
-                      runtime_out.quantizer.semantic) ||
+                      plan.conv_f16, runtime_out.quantizer.semantic) ||
       !bind_rvq_split(cursor, model_data, "rvq_rest",
-                      mimi.n_q - mimi.semantic_n_q,
+                      mimi.n_q - mimi.semantic_n_q, plan.conv_f16,
                       runtime_out.quantizer.acoustic)) {
     return false;
   }
@@ -1792,7 +1974,7 @@ bool bind_codec_runtime(const emel::model::data &model_data,
                         plan.decoder_transformer,
                         static_cast<int32_t>(plan.decoder_tokens),
                         runtime_out.decoder_transformer) ||
-      !bind_seanet(cursor, state_cursor, plan.decoder,
+      !bind_seanet(cursor, state_cursor, plan.decoder, plan.conv_f16,
                    runtime_out.decoder_layers)) {
     return false;
   }
@@ -1802,6 +1984,41 @@ bool bind_codec_runtime(const emel::model::data &model_data,
   reset_streaming_state(runtime_out, state_out);
   return state_cursor <= state.size();
 }
+
+template bool compute_seanet_stack<false>(codec_runtime &,
+                                          std::span<const seanet_layer_weights>,
+                                          codec_streaming_state &,
+                                          frame_buffer &,
+                                          std::span<float>) noexcept;
+template bool compute_seanet_stack<true>(codec_runtime &,
+                                         std::span<const seanet_layer_weights>,
+                                         codec_streaming_state &,
+                                         frame_buffer &,
+                                         std::span<float>) noexcept;
+template bool compute_streaming_conv<false>(codec_runtime &,
+                                            const conv_weights &,
+                                            codec_streaming_state &,
+                                            frame_buffer &,
+                                            std::span<float>) noexcept;
+template bool compute_streaming_conv<true>(codec_runtime &,
+                                           const conv_weights &,
+                                           codec_streaming_state &,
+                                           frame_buffer &,
+                                           std::span<float>) noexcept;
+template bool compute_rvq_encode<false>(codec_runtime &, const frame_buffer &,
+                                        std::span<int32_t>,
+                                        std::span<float>) noexcept;
+template bool compute_rvq_encode<true>(codec_runtime &, const frame_buffer &,
+                                       std::span<int32_t>,
+                                       std::span<float>) noexcept;
+template bool compute_rvq_decode<false>(codec_runtime &,
+                                        std::span<const int32_t>, int32_t,
+                                        frame_buffer &,
+                                        std::span<float>) noexcept;
+template bool compute_rvq_decode<true>(codec_runtime &,
+                                       std::span<const int32_t>, int32_t,
+                                       frame_buffer &,
+                                       std::span<float>) noexcept;
 
 void reset_streaming_state(const codec_runtime &runtime,
                            codec_streaming_state &state) noexcept {

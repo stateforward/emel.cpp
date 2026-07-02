@@ -60,6 +60,20 @@ struct guard_buffer_capacity_invalid {
   }
 };
 
+struct guard_conv_f16 {
+  bool operator()(const event::decode_run &runtime_ev,
+                  const action::context &) const noexcept {
+    return runtime_ev.request.runtime.conv_f16;
+  }
+};
+
+struct guard_conv_f32 {
+  bool operator()(const event::decode_run &runtime_ev,
+                  const action::context &) const noexcept {
+    return !runtime_ev.request.runtime.conv_f16;
+  }
+};
+
 struct guard_stage_ok {
   bool operator()(const event::decode_run &runtime_ev,
                   const action::context &) const noexcept {

@@ -47,8 +47,9 @@ struct effect_mark_buffer_capacity_invalid {
 };
 
 // Stage the PCM frame into the io buffer and run the SEANet frontend
-// (24 kHz -> 25 Hz).
-struct effect_run_frontend {
+// (24 kHz -> 25 Hz). The operand class (f32 canonical vs reference f16) is
+// selected by the transition rows via guard_conv_f16 / guard_conv_f32.
+template <bool conv_f16> struct effect_run_frontend {
   void operator()(const event::encode_run &runtime_ev,
                   context &) const noexcept {
     const auto &request = runtime_ev.request;
@@ -56,7 +57,7 @@ struct effect_run_frontend {
     std::copy(request.pcm.begin(), request.pcm.end(), request.frame.begin());
     io = mimi::detail::frame_buffer{request.frame.data(), 1,
                                     request.runtime.frame_samples};
-    runtime_ev.ctx.stage_ok = mimi::detail::compute_seanet_stack(
+    runtime_ev.ctx.stage_ok = mimi::detail::compute_seanet_stack<conv_f16>(
         request.runtime,
         std::span<const mimi::detail::seanet_layer_weights>{
             request.runtime.encoder_layers},
@@ -90,12 +91,12 @@ struct effect_mark_transformer_failed {
 };
 
 // 25 Hz -> 12.5 Hz, then publish the latent column.
-struct effect_run_downsample {
+template <bool conv_f16> struct effect_run_downsample {
   void operator()(const event::encode_run &runtime_ev,
                   context &ctx) const noexcept {
     const auto &request = runtime_ev.request;
     runtime_ev.ctx.stage_ok =
-        mimi::detail::compute_streaming_conv(
+        mimi::detail::compute_streaming_conv<conv_f16>(
             request.runtime, request.runtime.downsample, request.streaming,
             runtime_ev.ctx.io, request.workspace) &&
         runtime_ev.ctx.io.length == 1 &&

@@ -91,14 +91,16 @@ struct effect_mark_transformer_failed {
   }
 };
 
-// SEANet decoder back to 24 kHz mono, then publish the PCM frame.
-struct effect_run_backend {
+// SEANet decoder back to 24 kHz mono, then publish the PCM frame. The
+// operand class is selected by the transition rows via guard_conv_f16 /
+// guard_conv_f32.
+template <bool conv_f16> struct effect_run_backend {
   void operator()(const event::decode_run &runtime_ev,
                   context &ctx) const noexcept {
     const auto &request = runtime_ev.request;
     auto &io = runtime_ev.ctx.io;
     runtime_ev.ctx.stage_ok =
-        mimi::detail::compute_seanet_stack(
+        mimi::detail::compute_seanet_stack<conv_f16>(
             request.runtime,
             std::span<const mimi::detail::seanet_layer_weights>{
                 request.runtime.decoder_layers},

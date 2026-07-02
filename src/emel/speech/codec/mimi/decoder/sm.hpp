@@ -20,6 +20,7 @@ struct state_shape_decision {};
 struct state_capacity_decision {};
 struct state_upsample_running {};
 struct state_transformer_running {};
+struct state_backend_variant_decision {};
 struct state_backend_running {};
 struct state_success_error_out_decision {};
 struct state_success_callback_decision {};
@@ -67,9 +68,14 @@ struct model {
           + sml::completion<event::decode_run> [ guard::guard_stage_failed{} ]
           / action::effect_mark_upsample_failed{}
 
-      , sml::state<state_backend_running> <= sml::state<state_transformer_running>
+      , sml::state<state_backend_variant_decision> <= sml::state<state_transformer_running>
           + sml::completion<event::decode_run> [ guard::guard_stage_ok{} ]
-          / action::effect_run_backend{}
+      , sml::state<state_backend_running> <= sml::state<state_backend_variant_decision>
+          + sml::completion<event::decode_run> [ guard::guard_conv_f32{} ]
+          / action::effect_run_backend<false>{}
+      , sml::state<state_backend_running> <= sml::state<state_backend_variant_decision>
+          + sml::completion<event::decode_run> [ guard::guard_conv_f16{} ]
+          / action::effect_run_backend<true>{}
       , sml::state<state_error_error_out_decision> <= sml::state<state_transformer_running>
           + sml::completion<event::decode_run> [ guard::guard_stage_failed{} ]
           / action::effect_mark_transformer_failed{}
@@ -120,6 +126,8 @@ struct model {
       , sml::state<state_ready> <= sml::state<state_upsample_running>
           + sml::unexpected_event<sml::_> / action::effect_on_unexpected{}
       , sml::state<state_ready> <= sml::state<state_transformer_running>
+          + sml::unexpected_event<sml::_> / action::effect_on_unexpected{}
+      , sml::state<state_ready> <= sml::state<state_backend_variant_decision>
           + sml::unexpected_event<sml::_> / action::effect_on_unexpected{}
       , sml::state<state_ready> <= sml::state<state_backend_running>
           + sml::unexpected_event<sml::_> / action::effect_on_unexpected{}

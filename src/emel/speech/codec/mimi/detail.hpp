@@ -96,7 +96,12 @@ inline constexpr std::array<seanet_layer_spec, k_max_seanet_layers>
 // full-output overlap tail for transposed convs) inside the state arena.
 struct conv_weights {
   const float *weight = nullptr; // [taps * in_channels * out_channels]
-  const float *bias = nullptr;   // [out_channels] or nullptr
+  // Raw f16 taps (ggml reshape layout [taps*in, out], out-channel rows
+  // contiguous) when the model stores f16 conv weights; the owning actor
+  // selects the f16 compute variant through guard rows on
+  // codec_runtime::conv_f16.
+  const uint16_t *weight_f16 = nullptr;
+  const float *bias = nullptr; // [out_channels] or nullptr
   int32_t taps = 0;
   int32_t in_channels = 0;
   int32_t out_channels = 0;
@@ -150,6 +155,9 @@ struct transformer_weights {
 struct rvq_split_weights {
   const float *input_proj = nullptr;  // [dim, codebook_dim] (conv1x1)
   const float *output_proj = nullptr; // [codebook_dim, dim]
+  // Raw f16 projections (ggml layout) when the model stores f16 weights.
+  const uint16_t *input_proj_f16 = nullptr;
+  const uint16_t *output_proj_f16 = nullptr;
   // per level: prepared search table [codebook_dim + 1, entries] and raw
   // codebook rows [codebook_dim, entries]
   std::array<const float *, k_max_quantizer_levels> search_tables = {};
@@ -172,6 +180,10 @@ struct codec_runtime {
   const emel::model::data *model = nullptr;
   emel::kernel::sm kernel = {};
   emel::kernel::kernel_kind kernel_kind = emel::kernel::kernel_kind::x86_64;
+  // Bound model property: true when conv / quantizer-projection weights are
+  // stored f16 (the reference operand class for such models). Guards on the
+  // owning actors read this to select the f16 compute rows.
+  bool conv_f16 = false;
 
   std::array<seanet_layer_weights, k_max_seanet_layers> encoder_layers = {};
   conv_weights downsample = {};
@@ -241,11 +253,16 @@ struct frame_buffer {
   int32_t length = 0; // time steps
 };
 
+// conv_f16 selects the reference f16 operand class (f16 im2col + ggml-exact
+// f16 mul_mat over raw f16 weights); instantiated for both values in
+// detail.cpp. The owning actors choose the instantiation via guard rows.
+template <bool conv_f16>
 bool compute_seanet_stack(codec_runtime &runtime,
                           std::span<const seanet_layer_weights> layers,
                           codec_streaming_state &state, frame_buffer &io,
                           std::span<float> workspace) noexcept;
 
+template <bool conv_f16>
 bool compute_streaming_conv(codec_runtime &runtime, const conv_weights &conv,
                             codec_streaming_state &state, frame_buffer &io,
                             std::span<float> workspace) noexcept;
@@ -270,11 +287,13 @@ bool compute_transformer(codec_runtime &runtime,
                          frame_buffer &io, std::span<float> workspace) noexcept;
 
 // latent [dim, frames] -> codes [n_q, frames]
+template <bool conv_f16>
 bool compute_rvq_encode(codec_runtime &runtime, const frame_buffer &latent,
                         std::span<int32_t> codes_out,
                         std::span<float> workspace) noexcept;
 
 // codes [n_q, frames] -> latent [dim, frames]
+template <bool conv_f16>
 bool compute_rvq_decode(codec_runtime &runtime, std::span<const int32_t> codes,
                         int32_t frames, frame_buffer &latent_out,
                         std::span<float> workspace) noexcept;
