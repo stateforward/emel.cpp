@@ -496,7 +496,6 @@ template <bool conv_f16>
 bool compute_streaming_conv(codec_runtime &runtime, const conv_weights &conv,
                             codec_streaming_state &state, frame_buffer &io,
                             std::span<float> workspace) noexcept {
-  runtime.kernel.set_kind(runtime.kernel_kind);
   const int64_t in_channels = conv.in_channels;
   const int64_t out_channels = conv.out_channels;
   const int64_t taps = conv.taps;
@@ -631,7 +630,6 @@ bool compute_streaming_conv_transpose_impl(
     codec_runtime &runtime, const conv_weights &conv,
     codec_streaming_state &state, frame_buffer &io,
     std::span<float> workspace) noexcept {
-  runtime.kernel.set_kind(runtime.kernel_kind);
   const int64_t in_channels = conv.in_channels;
   const int64_t out_channels = conv.out_channels;
   const int64_t taps = conv.taps;
@@ -769,41 +767,40 @@ bool compute_streaming_conv_transpose_depthwise(
                                                      workspace);
 }
 
-template <bool conv_f16>
-bool compute_seanet_stack(codec_runtime &runtime,
-                          std::span<const seanet_layer_weights> layers,
-                          codec_streaming_state &state, frame_buffer &io,
-                          std::span<float> workspace) noexcept {
-  const uint64_t half = workspace.size() / 2u;
-  const std::span<float> residual_span = workspace.subspan(half);
-  for (const auto &layer : layers) {
-    if (layer.kind == seanet_layer_kind::none) {
-      continue;
-    }
-    if (layer.kind == seanet_layer_kind::elu) {
-      const uint64_t count =
-          static_cast<uint64_t>(io.channels) * static_cast<uint64_t>(io.length);
-      if (!dispatch_unary(runtime, kev::unary_subop::elu,
+// One stack step, selected at COMPILE TIME from the constexpr topology
+// tables: the layer kind is a template parameter, so no runtime block-kind
+// selection happens here (rule: compile-time conditionals are allowed in
+// detail; runtime behavior selection is not).
+template <bool conv_f16, seanet_layer_kind kind>
+bool compute_stack_step(codec_runtime &runtime,
+                        const seanet_layer_weights &layer,
+                        codec_streaming_state &state, frame_buffer &io,
+                        const std::span<float> conv_workspace,
+                        const std::span<float> residual_span) noexcept {
+  if constexpr (kind == seanet_layer_kind::none) {
+    (void)runtime;
+    (void)layer;
+    (void)state;
+    (void)io;
+    (void)conv_workspace;
+    (void)residual_span;
+    return true;
+  } else if constexpr (kind == seanet_layer_kind::elu) {
+    (void)residual_span;
+    const uint64_t count =
+        static_cast<uint64_t>(io.channels) * static_cast<uint64_t>(io.length);
+    return dispatch_unary(runtime, kev::unary_subop::elu,
                           make_view(io.data, count),
-                          make_view_mut(io.data, count))) {
-        return false;
-      }
-      continue;
-    }
-    if (layer.kind == seanet_layer_kind::conv) {
-      if (!compute_streaming_conv<conv_f16>(runtime, layer.conv, state, io,
-                                            workspace.subspan(0, half))) {
-        return false;
-      }
-      continue;
-    }
-    if (layer.kind == seanet_layer_kind::conv_transpose) {
-      if (!compute_streaming_conv_transpose(runtime, layer.conv, state, io,
-                                            workspace.subspan(0, half))) {
-        return false;
-      }
-      continue;
-    }
+                          make_view_mut(io.data, count));
+  } else if constexpr (kind == seanet_layer_kind::conv) {
+    (void)residual_span;
+    return compute_streaming_conv<conv_f16>(runtime, layer.conv, state, io,
+                                            conv_workspace);
+  } else if constexpr (kind == seanet_layer_kind::conv_transpose) {
+    (void)residual_span;
+    return compute_streaming_conv_transpose(runtime, layer.conv, state, io,
+                                            conv_workspace);
+  } else {
     // resnet: residual = x; x = conv_k1(elu(conv_k3(elu(x)))); x += residual
     const uint64_t count =
         static_cast<uint64_t>(io.channels) * static_cast<uint64_t>(io.length);
@@ -819,7 +816,7 @@ bool compute_seanet_stack(codec_runtime &runtime,
                        make_view(io.data, count),
                        make_view_mut(io.data, count)) &&
         compute_streaming_conv<conv_f16>(runtime, layer.resnet.block_1, state,
-                                         io, workspace.subspan(0, half)) &&
+                                         io, conv_workspace) &&
         dispatch_unary(
             runtime, kev::unary_subop::elu,
             make_view(io.data, static_cast<uint64_t>(io.channels) *
@@ -827,17 +824,63 @@ bool compute_seanet_stack(codec_runtime &runtime,
             make_view_mut(io.data, static_cast<uint64_t>(io.channels) *
                                        static_cast<uint64_t>(io.length))) &&
         compute_streaming_conv<conv_f16>(runtime, layer.resnet.block_3, state,
-                                         io, workspace.subspan(0, half));
+                                         io, conv_workspace);
     if (!block_ok || io.channels != in_channels || io.length != in_length) {
       return false;
     }
-    if (!dispatch_add(runtime, make_view(io.data, count),
-                      make_view(residual, count),
-                      make_view_mut(io.data, count))) {
-      return false;
-    }
+    return dispatch_add(runtime, make_view(io.data, count),
+                        make_view(residual, count),
+                        make_view_mut(io.data, count));
   }
-  return true;
+}
+
+// Unrolls the fixed mimi_v0_1 topology at compile time: each step is
+// instantiated with its constexpr layer kind, in table order.
+template <bool conv_f16,
+          const std::array<seanet_layer_spec, k_max_seanet_layers> &topology,
+          size_t... indexes>
+bool compute_seanet_stack_unrolled(
+    std::index_sequence<indexes...>, codec_runtime &runtime,
+    std::span<const seanet_layer_weights> layers, codec_streaming_state &state,
+    frame_buffer &io, const std::span<float> conv_workspace,
+    const std::span<float> residual_span) noexcept {
+  return (
+      compute_stack_step<conv_f16, topology[indexes].kind>(
+          runtime, layers[indexes], state, io, conv_workspace, residual_span) &&
+      ...);
+}
+
+template <bool conv_f16,
+          const std::array<seanet_layer_spec, k_max_seanet_layers> &topology>
+bool compute_seanet_stack_for(codec_runtime &runtime,
+                              std::span<const seanet_layer_weights> layers,
+                              codec_streaming_state &state, frame_buffer &io,
+                              std::span<float> workspace) noexcept {
+  const uint64_t half = workspace.size() / 2u;
+  if (layers.size() < k_max_seanet_layers) {
+    return false;
+  }
+  return compute_seanet_stack_unrolled<conv_f16, topology>(
+      std::make_index_sequence<k_max_seanet_layers>{}, runtime, layers, state,
+      io, workspace.subspan(0, half), workspace.subspan(half));
+}
+
+template <bool conv_f16>
+bool compute_seanet_encoder(codec_runtime &runtime,
+                            codec_streaming_state &state, frame_buffer &io,
+                            std::span<float> workspace) noexcept {
+  return compute_seanet_stack_for<conv_f16, k_encoder_topology>(
+      runtime, std::span<const seanet_layer_weights>{runtime.encoder_layers},
+      state, io, workspace);
+}
+
+template <bool conv_f16>
+bool compute_seanet_decoder(codec_runtime &runtime,
+                            codec_streaming_state &state, frame_buffer &io,
+                            std::span<float> workspace) noexcept {
+  return compute_seanet_stack_for<conv_f16, k_decoder_topology>(
+      runtime, std::span<const seanet_layer_weights>{runtime.decoder_layers},
+      state, io, workspace);
 }
 
 template <bool proj_q8>
@@ -851,7 +894,6 @@ bool compute_transformer(codec_runtime &runtime,
   // GELU, timestep-embedding rope with half-split output, bf16 K/V cache
   // with bf16-rounded q and attention weights).
   namespace kd = ::emel::kernel::detail;
-  runtime.kernel.set_kind(runtime.kernel_kind);
   const int64_t dim = weights.dim;
   const int64_t heads = weights.head_count;
   const int64_t head_dim = dim / heads;
@@ -1056,7 +1098,6 @@ template <bool conv_f16, bool proj_q8>
 bool compute_rvq_encode(codec_runtime &runtime, const frame_buffer &latent,
                         std::span<int32_t> codes_out,
                         std::span<float> workspace) noexcept {
-  runtime.kernel.set_kind(runtime.kernel_kind);
   const auto &quantizer = runtime.quantizer;
   const int64_t dim = runtime.dim;
   const int64_t codebook_dim = quantizer.codebook_dim;
@@ -1166,7 +1207,6 @@ template <bool conv_f16, bool proj_q8>
 bool compute_rvq_decode(codec_runtime &runtime, std::span<const int32_t> codes,
                         int32_t frames, frame_buffer &latent_out,
                         std::span<float> workspace) noexcept {
-  runtime.kernel.set_kind(runtime.kernel_kind);
   const auto &quantizer = runtime.quantizer;
   const int64_t dim = runtime.dim;
   const int64_t codebook_dim = quantizer.codebook_dim;
@@ -2021,6 +2061,7 @@ bool bind_codec_runtime(const emel::model::data &model_data,
   runtime_out.conv_f16 = plan.conv_f16;
   runtime_out.proj_q8 = plan.proj_q8;
   runtime_out.rvq_q8 = plan.rvq_q8;
+  runtime_out.kernel.set_kind(runtime_out.kernel_kind);
   if (!bind_rvq_split(cursor, model_data, "rvq_first", mimi.semantic_n_q,
                       plan.conv_f16, plan.rvq_q8,
                       runtime_out.quantizer.semantic) ||
@@ -2070,16 +2111,22 @@ bool bind_codec_runtime(const emel::model::data &model_data,
   return state_cursor <= state.size();
 }
 
-template bool compute_seanet_stack<false>(codec_runtime &,
-                                          std::span<const seanet_layer_weights>,
-                                          codec_streaming_state &,
-                                          frame_buffer &,
-                                          std::span<float>) noexcept;
-template bool compute_seanet_stack<true>(codec_runtime &,
-                                         std::span<const seanet_layer_weights>,
-                                         codec_streaming_state &,
-                                         frame_buffer &,
-                                         std::span<float>) noexcept;
+template bool compute_seanet_encoder<false>(codec_runtime &,
+                                            codec_streaming_state &,
+                                            frame_buffer &,
+                                            std::span<float>) noexcept;
+template bool compute_seanet_encoder<true>(codec_runtime &,
+                                           codec_streaming_state &,
+                                           frame_buffer &,
+                                           std::span<float>) noexcept;
+template bool compute_seanet_decoder<false>(codec_runtime &,
+                                            codec_streaming_state &,
+                                            frame_buffer &,
+                                            std::span<float>) noexcept;
+template bool compute_seanet_decoder<true>(codec_runtime &,
+                                           codec_streaming_state &,
+                                           frame_buffer &,
+                                           std::span<float>) noexcept;
 template bool compute_streaming_conv<false>(codec_runtime &,
                                             const conv_weights &,
                                             codec_streaming_state &,

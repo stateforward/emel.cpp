@@ -57,11 +57,8 @@ template <bool conv_f16> struct effect_run_frontend {
     std::copy(request.pcm.begin(), request.pcm.end(), request.frame.begin());
     io = mimi::detail::frame_buffer{request.frame.data(), 1,
                                     request.runtime.frame_samples};
-    runtime_ev.ctx.stage_ok = mimi::detail::compute_seanet_stack<conv_f16>(
-        request.runtime,
-        std::span<const mimi::detail::seanet_layer_weights>{
-            request.runtime.encoder_layers},
-        request.streaming, io, request.workspace);
+    runtime_ev.ctx.stage_ok = mimi::detail::compute_seanet_encoder<conv_f16>(
+        request.runtime, request.streaming, io, request.workspace);
   }
 };
 
@@ -95,7 +92,7 @@ struct effect_mark_transformer_failed {
 // 25 Hz -> 12.5 Hz, then publish the latent column.
 template <bool conv_f16> struct effect_run_downsample {
   void operator()(const event::encode_run &runtime_ev,
-                  context &ctx) const noexcept {
+                  context &) const noexcept {
     const auto &request = runtime_ev.request;
     runtime_ev.ctx.stage_ok =
         mimi::detail::compute_streaming_conv<conv_f16>(
@@ -106,7 +103,6 @@ template <bool conv_f16> struct effect_run_downsample {
     const size_t dim = static_cast<size_t>(request.runtime.dim);
     const size_t copied = runtime_ev.ctx.stage_ok ? dim : 0u;
     std::copy_n(runtime_ev.ctx.io.data, copied, request.latent_out.begin());
-    ctx.frames_encoded += runtime_ev.ctx.stage_ok ? 1u : 0u;
   }
 };
 

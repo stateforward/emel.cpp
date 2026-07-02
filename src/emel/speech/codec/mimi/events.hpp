@@ -72,6 +72,11 @@ struct decode_frame {
 // Rewind both streaming directions to the first frame.
 struct reset_stream {};
 
+// Per-dispatch runtime ctx: the typed outcome channel of one top-level
+// dispatch, following the gguf loader / whisper encoder pattern (actions
+// record outcomes here from already-executed work; guards - pure predicates
+// of the runtime event - route the explicit success/error transitions).
+// Never stored in machine context; never outlives the dispatch.
 struct initialize_ctx {
   emel::error::type err = emel::error::cast(error::none);
   bool stage_ok = true;

@@ -220,14 +220,6 @@ struct sm : public emel::sm<model, action::context> {
     const bool accepted = base_type::process_event(runtime_ev);
     return accepted && ctx.err == action::detail::to_error(error::none);
   }
-
-  uint64_t frames_quantized() const noexcept {
-    return context_.frames_quantized;
-  }
-
-  uint64_t frames_dequantized() const noexcept {
-    return context_.frames_dequantized;
-  }
 };
 
 } // namespace emel::speech::codec::mimi::quantizer

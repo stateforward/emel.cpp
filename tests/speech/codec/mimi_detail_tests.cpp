@@ -178,10 +178,8 @@ bool encode_frame(bound_codec &codec_state, std::span<const float> pcm,
   codec::frame_buffer io{codec_state.frame.data(), 1, runtime.frame_samples};
   std::copy(pcm.begin(), pcm.end(), codec_state.frame.begin());
   const std::span<float> workspace{codec_state.workspace};
-  if (!codec::compute_seanet_stack<false>(
-          runtime,
-          std::span<const codec::seanet_layer_weights>{runtime.encoder_layers},
-          codec_state.streaming, io, workspace)) {
+  if (!codec::compute_seanet_encoder<false>(runtime, codec_state.streaming, io,
+                                            workspace)) {
     return false;
   }
   if (io.channels != runtime.dim ||
@@ -223,10 +221,8 @@ bool decode_frame(bound_codec &codec_state, std::span<const int32_t> codes,
           codec_state.streaming.decoder_positions, io, workspace)) {
     return false;
   }
-  if (!codec::compute_seanet_stack<false>(
-          runtime,
-          std::span<const codec::seanet_layer_weights>{runtime.decoder_layers},
-          codec_state.streaming, io, workspace)) {
+  if (!codec::compute_seanet_decoder<false>(runtime, codec_state.streaming, io,
+                                            workspace)) {
     return false;
   }
   if (io.channels != 1 || io.length != runtime.frame_samples) {

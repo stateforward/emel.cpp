@@ -26,6 +26,13 @@ namespace {
 
 namespace mimi = emel::speech::codec::mimi;
 
+int32_t g_frame_samples = 0;
+int32_t g_n_q = 0;
+void on_codec_initialized(const mimi::events::initialize_done &done) {
+  g_frame_samples = done.frame_samples;
+  g_n_q = done.n_q;
+}
+
 void noop_probe_done(const emel::gguf::loader::events::probe_done &) {}
 void noop_probe_error(const emel::gguf::loader::events::probe_error &) {}
 void noop_bind_done(const emel::gguf::loader::events::bind_done &) {}
@@ -135,16 +142,18 @@ bool load_fixture(codec_fixture &fixture) {
       *fixture.model, std::span<float>{fixture.prepared},
       std::span<float>{fixture.state}, std::span<float>{fixture.workspace},
       std::span<float>{fixture.frame}};
+  init.on_done = emel::callback<void(
+      const mimi::events::initialize_done &)>::from<&on_codec_initialized>();
   if (!fixture.codec->process_event(init)) {
     return false;
   }
-  const auto samples = static_cast<size_t>(fixture.codec->frame_samples());
+  const auto samples = static_cast<size_t>(g_frame_samples);
   fixture.pcm.resize(samples);
   for (size_t index = 0; index < samples; ++index) {
     fixture.pcm[index] =
         0.15f * static_cast<float>((index % 55u)) / 55.0f - 0.075f;
   }
-  fixture.codes.assign(static_cast<size_t>(fixture.codec->n_q()), 0);
+  fixture.codes.assign(static_cast<size_t>(g_n_q), 0);
   fixture.decoded.assign(samples, 0.0f);
   return true;
 }

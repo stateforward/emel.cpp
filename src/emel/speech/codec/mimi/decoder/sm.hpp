@@ -169,8 +169,6 @@ struct sm : public emel::sm<model, action::context> {
     const bool accepted = base_type::process_event(runtime_ev);
     return accepted && ctx.err == action::detail::to_error(error::none);
   }
-
-  uint64_t frames_decoded() const noexcept { return context_.frames_decoded; }
 };
 
 } // namespace emel::speech::codec::mimi::decoder

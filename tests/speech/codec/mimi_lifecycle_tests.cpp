@@ -24,6 +24,23 @@ namespace {
 
 namespace mimi = emel::speech::codec::mimi;
 
+// modeled-event observation: initialize_done carries the codec dims, and
+// the done callbacks count completed frames (no context peeking)
+int32_t g_frame_samples = 0;
+int32_t g_n_q = 0;
+uint32_t g_encode_done_count = 0;
+uint32_t g_decode_done_count = 0;
+void on_initialize_done(const mimi::events::initialize_done &done) {
+  g_frame_samples = done.frame_samples;
+  g_n_q = done.n_q;
+}
+void on_encode_frame_done(const mimi::events::encode_frame_done &) {
+  ++g_encode_done_count;
+}
+void on_decode_frame_done(const mimi::events::decode_frame_done &) {
+  ++g_decode_done_count;
+}
+
 void noop_probe_done(const emel::gguf::loader::events::probe_done &) {}
 void noop_probe_error(const emel::gguf::loader::events::probe_error &) {}
 void noop_bind_done(const emel::gguf::loader::events::bind_done &) {}
@@ -181,39 +198,48 @@ TEST_CASE("mimi codec facade initializes, encodes, and decodes frames") {
   CHECK(machine.is(sml::state<mimi::state_uninitialized>));
 
   emel::error::type err = emel::error::cast(mimi::error::none);
+  g_frame_samples = 0;
+  g_n_q = 0;
+  g_encode_done_count = 0;
+  g_decode_done_count = 0;
   mimi::event::initialize init{*loaded.model, std::span<float>{arenas.prepared},
                                std::span<float>{arenas.state},
                                std::span<float>{arenas.workspace},
                                std::span<float>{arenas.frame}};
   init.error_out = &err;
+  init.on_done = emel::callback<void(
+      const mimi::events::initialize_done &)>::from<&on_initialize_done>();
   REQUIRE(machine.process_event(init));
   CHECK(err == emel::error::cast(mimi::error::none));
   check_session_ready(machine);
-  CHECK(machine.frame_samples() == 1920);
-  CHECK(machine.n_q() == 4);
+  CHECK(g_frame_samples == 1920);
+  CHECK(g_n_q == 4);
 
-  const auto pcm = deterministic_pcm(machine.frame_samples());
-  std::vector<int32_t> codes(static_cast<size_t>(machine.n_q()), -1);
+  const auto pcm = deterministic_pcm(g_frame_samples);
+  std::vector<int32_t> codes(static_cast<size_t>(g_n_q), -1);
   mimi::event::encode_frame encode{std::span<const float>{pcm},
                                    std::span<int32_t>{codes}};
   encode.error_out = &err;
+  encode.on_done = emel::callback<void(
+      const mimi::events::encode_frame_done &)>::from<&on_encode_frame_done>();
   REQUIRE(machine.process_event(encode));
   CHECK(err == emel::error::cast(mimi::error::none));
   check_session_ready(machine);
-  CHECK(machine.frames_encoded() == 1u);
+  CHECK(g_encode_done_count == 1u);
   for (const int32_t code : codes) {
     CHECK(code >= 0);
   }
 
-  std::vector<float> decoded(static_cast<size_t>(machine.frame_samples()),
-                             0.0f);
+  std::vector<float> decoded(static_cast<size_t>(g_frame_samples), 0.0f);
   mimi::event::decode_frame decode{std::span<const int32_t>{codes},
                                    std::span<float>{decoded}};
   decode.error_out = &err;
+  decode.on_done = emel::callback<void(
+      const mimi::events::decode_frame_done &)>::from<&on_decode_frame_done>();
   REQUIRE(machine.process_event(decode));
   CHECK(err == emel::error::cast(mimi::error::none));
   check_session_ready(machine);
-  CHECK(machine.frames_decoded() == 1u);
+  CHECK(g_decode_done_count == 1u);
 
   // stream reset replays the exact same codes for the same first frame
   std::vector<int32_t> replay(codes.size(), -1);

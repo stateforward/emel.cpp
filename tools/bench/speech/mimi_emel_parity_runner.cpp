@@ -34,6 +34,14 @@ namespace {
 
 namespace mimi = emel::speech::codec::mimi;
 
+// initialize_done payload capture (emel::callback binds free functions)
+int32_t g_frame_samples = 0;
+int32_t g_n_q = 0;
+void on_codec_initialized(const mimi::events::initialize_done &done) {
+  g_frame_samples = done.frame_samples;
+  g_n_q = done.n_q;
+}
+
 void noop_probe_done(const emel::gguf::loader::events::probe_done &) {}
 void noop_probe_error(const emel::gguf::loader::events::probe_error &) {}
 void noop_bind_done(const emel::gguf::loader::events::bind_done &) {}
@@ -257,14 +265,16 @@ int main(int argc, char **argv) {
       *loaded.model, std::span<float>{prepared}, std::span<float>{state},
       std::span<float>{workspace}, std::span<float>{frame}};
   init.error_out = &err;
+  init.on_done = emel::callback<void(
+      const mimi::events::initialize_done &)>::from<&on_codec_initialized>();
   if (!codec.process_event(init)) {
     std::fprintf(stderr, "codec initialization failed: err=%" PRIu64 "\n",
                  static_cast<uint64_t>(err));
     return 1;
   }
 
-  const auto frame_samples = static_cast<size_t>(codec.frame_samples());
-  const auto n_q = static_cast<size_t>(codec.n_q());
+  const auto frame_samples = static_cast<size_t>(g_frame_samples);
+  const auto n_q = static_cast<size_t>(g_n_q);
   const size_t frames = pcm.size() / frame_samples;
   if (frames == 0u) {
     std::fprintf(stderr, "audio shorter than one 80 ms frame\n");

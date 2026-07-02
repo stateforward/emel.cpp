@@ -187,7 +187,9 @@ struct quantizer_weights {
 struct codec_runtime {
   const emel::model::data *model = nullptr;
   emel::kernel::sm kernel = {};
-  emel::kernel::kernel_kind kernel_kind = emel::kernel::kernel_kind::x86_64;
+  // Host backend, resolved at compile time and applied once at bind; the
+  // compute helpers never re-select it.
+  emel::kernel::kernel_kind kernel_kind = emel::kernel::detect_host_kind();
   // Bound model properties: conv_f16 selects the reference f16 conv operand
   // class; proj_q8 selects the emel-owned q8_0 projection operand class
   // (transformer + RVQ projections quantized by the converter). Guards on
@@ -267,11 +269,17 @@ struct frame_buffer {
 // conv_f16 selects the reference f16 operand class (f16 im2col + ggml-exact
 // f16 mul_mat over raw f16 weights); instantiated for both values in
 // detail.cpp. The owning actors choose the instantiation via guard rows.
+// Each stack is unrolled at compile time from its constexpr topology table,
+// so no runtime block-kind selection exists in the compute layer.
 template <bool conv_f16>
-bool compute_seanet_stack(codec_runtime &runtime,
-                          std::span<const seanet_layer_weights> layers,
-                          codec_streaming_state &state, frame_buffer &io,
-                          std::span<float> workspace) noexcept;
+bool compute_seanet_encoder(codec_runtime &runtime,
+                            codec_streaming_state &state, frame_buffer &io,
+                            std::span<float> workspace) noexcept;
+
+template <bool conv_f16>
+bool compute_seanet_decoder(codec_runtime &runtime,
+                            codec_streaming_state &state, frame_buffer &io,
+                            std::span<float> workspace) noexcept;
 
 template <bool conv_f16>
 bool compute_streaming_conv(codec_runtime &runtime, const conv_weights &conv,

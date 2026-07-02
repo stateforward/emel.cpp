@@ -4,9 +4,8 @@
 
 namespace emel::speech::codec::mimi::quantizer::action {
 
-struct context {
-  uint64_t frames_quantized = 0;
-  uint64_t frames_dequantized = 0;
-};
+// The actor keeps no persistent state across dispatches; per-dispatch data
+// travels in the typed runtime-event ctx.
+struct context {};
 
 } // namespace emel::speech::codec::mimi::quantizer::action

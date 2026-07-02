@@ -272,20 +272,6 @@ struct sm : public emel::sm<model, action::context> {
   bool process_event(const event::reset_stream &ev) {
     return base_type::process_event(ev);
   }
-
-  int32_t frame_samples() const noexcept {
-    return context_.runtime.frame_samples;
-  }
-
-  int32_t n_q() const noexcept { return context_.runtime.n_q; }
-
-  uint64_t frames_encoded() const noexcept {
-    return context_.frontend.frames_encoded();
-  }
-
-  uint64_t frames_decoded() const noexcept {
-    return context_.backend.frames_decoded();
-  }
 };
 
 using Codec = sm;

@@ -98,22 +98,18 @@ struct effect_mark_transformer_failed {
 // guard_conv_f32.
 template <bool conv_f16> struct effect_run_backend {
   void operator()(const event::decode_run &runtime_ev,
-                  context &ctx) const noexcept {
+                  context &) const noexcept {
     const auto &request = runtime_ev.request;
     auto &io = runtime_ev.ctx.io;
     runtime_ev.ctx.stage_ok =
-        mimi::detail::compute_seanet_stack<conv_f16>(
-            request.runtime,
-            std::span<const mimi::detail::seanet_layer_weights>{
-                request.runtime.decoder_layers},
-            request.streaming, io, request.workspace) &&
+        mimi::detail::compute_seanet_decoder<conv_f16>(
+            request.runtime, request.streaming, io, request.workspace) &&
         io.channels == 1 && io.length == request.runtime.frame_samples;
     const size_t copied =
         runtime_ev.ctx.stage_ok
             ? static_cast<size_t>(request.runtime.frame_samples)
             : 0u;
     std::copy_n(io.data, copied, request.pcm_out.begin());
-    ctx.frames_decoded += runtime_ev.ctx.stage_ok ? 1u : 0u;
   }
 };
 
