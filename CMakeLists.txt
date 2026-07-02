@@ -41,6 +41,11 @@ target_include_directories(emel_core
   INTERFACE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
     ${CMAKE_CURRENT_SOURCE_DIR}/src
+)
+# Third-party dependency headers are SYSTEM so -Wpedantic coverage builds do
+# not fail on upstream template internals (sml aux::pool zero-size array).
+target_include_directories(emel_core SYSTEM
+  INTERFACE
     ${stateforward_sml_SOURCE_DIR}/include
 )
 
@@ -168,6 +173,7 @@ if(EMEL_ENABLE_TESTS)
     tests/logits/sampler/pipeline_tests.cpp
     tests/sm/callback_tests.cpp
     tests/sm/sm_policy_tests.cpp
+    tests/sm/sm_external_completion_tests.cpp
     tests/sm/sm_any_tests.cpp
     tests/graph/wrapper_visibility_tests.cpp
     tests/graph/allocator/allocator_tests.cpp
@@ -204,6 +210,7 @@ if(EMEL_ENABLE_TESTS)
   list(APPEND EMEL_TEST_SOURCES
     tests/gguf/loader/lifecycle_tests.cpp
     tests/io/loader/lifecycle_tests.cpp
+    tests/io/mmap/advise_tests.cpp
     tests/io/mmap/lifecycle_tests.cpp
     tests/io/read/lifecycle_tests.cpp
     tests/io/staged_read/lifecycle_tests.cpp
@@ -307,8 +314,11 @@ if(EMEL_ENABLE_TESTS)
       ${CMAKE_CURRENT_SOURCE_DIR}/src
       ${CMAKE_CURRENT_SOURCE_DIR}/include
       ${CMAKE_CURRENT_SOURCE_DIR}/tools/bench
-      ${stateforward_sml_SOURCE_DIR}/include
       ${DOCTEST_INCLUDE_DIR}
+  )
+  target_include_directories(emel_tests_bin SYSTEM
+    PRIVATE
+      ${stateforward_sml_SOURCE_DIR}/include
   )
 
   target_compile_definitions(emel_tests_bin

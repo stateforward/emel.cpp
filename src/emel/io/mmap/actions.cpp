@@ -162,6 +162,54 @@ void platform_close(intptr_t os_resource) noexcept {
 #endif
 }
 
+// One platform helper per advice kind: the kind is routed by explicit guards
+// in the transition table, never branched on here.
+bool platform_advise_sequential(void *base, uint64_t offset,
+                                uint64_t length) noexcept {
+#if defined(_WIN32)
+  // Win32 has no sequential-readahead hint for a private read-only view; the
+  // hint degrades to a successful no-op.
+  (void)base;
+  (void)offset;
+  (void)length;
+  return true;
+#else
+  unsigned char *window = static_cast<unsigned char *>(base) + offset;
+  return ::posix_madvise(window, static_cast<size_t>(length),
+                         POSIX_MADV_SEQUENTIAL) == 0;
+#endif
+}
+
+bool platform_advise_willneed(void *base, uint64_t offset,
+                              uint64_t length) noexcept {
+  unsigned char *window = static_cast<unsigned char *>(base) + offset;
+#if defined(_WIN32)
+  WIN32_MEMORY_RANGE_ENTRY range{};
+  range.VirtualAddress = window;
+  range.NumberOfBytes = static_cast<SIZE_T>(length);
+  return ::PrefetchVirtualMemory(::GetCurrentProcess(), 1u, &range, 0) != 0;
+#else
+  return ::posix_madvise(window, static_cast<size_t>(length),
+                         POSIX_MADV_WILLNEED) == 0;
+#endif
+}
+
+bool platform_advise_dontneed(void *base, uint64_t offset,
+                              uint64_t length) noexcept {
+#if defined(_WIN32)
+  // Win32 reclaims pages of a private view under memory pressure on its own;
+  // the hint degrades to a successful no-op.
+  (void)base;
+  (void)offset;
+  (void)length;
+  return true;
+#else
+  unsigned char *window = static_cast<unsigned char *>(base) + offset;
+  return ::posix_madvise(window, static_cast<size_t>(length),
+                         POSIX_MADV_DONTNEED) == 0;
+#endif
+}
+
 } // namespace
 
 context::context() noexcept
@@ -288,6 +336,27 @@ void effect_mark_unmap_failed_and_release_slot::operator()(
                          static_cast<intptr_t>(ev.status.os_resource_released);
   ev.status.err = emel::error::cast(error::unmap_failed);
   ev.status.ok = false;
+}
+
+void effect_attempt_advise_sequential::operator()(
+    const detail::advise_mapping_runtime &ev, context &ctx) const noexcept {
+  const slot &slot_ref = ctx.slots[ev.request.handle];
+  ev.status.advise_ok = platform_advise_sequential(
+      slot_ref.base, ev.request.offset, ev.request.length);
+}
+
+void effect_attempt_advise_willneed::operator()(
+    const detail::advise_mapping_runtime &ev, context &ctx) const noexcept {
+  const slot &slot_ref = ctx.slots[ev.request.handle];
+  ev.status.advise_ok = platform_advise_willneed(
+      slot_ref.base, ev.request.offset, ev.request.length);
+}
+
+void effect_attempt_advise_dontneed::operator()(
+    const detail::advise_mapping_runtime &ev, context &ctx) const noexcept {
+  const slot &slot_ref = ctx.slots[ev.request.handle];
+  ev.status.advise_ok = platform_advise_dontneed(
+      slot_ref.base, ev.request.offset, ev.request.length);
 }
 
 } // namespace emel::io::mmap::action

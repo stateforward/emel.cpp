@@ -25,6 +25,8 @@ enum class error : emel::error::type {
   mapping_failed = (1u << 5),
   unmap_failed = (1u << 6),
   internal_error = (1u << 7),
+  invalid_advise_range = (1u << 8),
+  advise_failed = (1u << 9),
 };
 
 inline constexpr uint16_t k_max_file_index = 65534u;

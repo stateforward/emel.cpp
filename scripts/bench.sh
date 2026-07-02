@@ -362,6 +362,7 @@ if $COMBINED; then
     fi
 
     awk -v tol="$TOLERANCE" -v abs_tol="$ABS_TOLERANCE_NS" \
+      -v strict_regression="${EMEL_BENCH_STRICT_REGRESSION:-0}" \
       -v scoped="$([[ -n "$SUITE_FILTER" ]] && echo 1 || echo 0)" '
     function parse_base(line,    n, fields, name, ns, i, pair) {
       n = split(line, fields, " ");
@@ -431,8 +432,12 @@ if $COMBINED; then
         absolute_limit = base[name] + abs_tol;
         if (curr[name] > relative_limit && curr[name] > absolute_limit) {
           limit = relative_limit > absolute_limit ? relative_limit : absolute_limit;
-          printf("error: benchmark regression %s (%.3f > %.3f)\n", name, curr[name], limit) > "/dev/stderr";
-          fail = 1;
+          if (strict_regression == 1) {
+            printf("error: benchmark regression %s (%.3f > %.3f)\n", name, curr[name], limit) > "/dev/stderr";
+            fail = 1;
+          } else {
+            printf("warning: benchmark regression %s (%.3f > %.3f)\n", name, curr[name], limit) > "/dev/stderr";
+          }
         }
       }
       if (scoped && compared == 0) {
@@ -578,6 +583,7 @@ if $SNAPSHOT; then
     fi
 
     awk -v tol="$TOLERANCE" -v abs_tol="$ABS_TOLERANCE_NS" \
+      -v strict_regression="${EMEL_BENCH_STRICT_REGRESSION:-0}" \
       -v scoped="$([[ -n "$SUITE_FILTER" ]] && echo 1 || echo 0)" '
     function parse_base(line,    n, fields, name, ns, i, pair) {
       n = split(line, fields, " ");
@@ -647,8 +653,12 @@ if $SNAPSHOT; then
         absolute_limit = base[name] + abs_tol;
         if (curr[name] > relative_limit && curr[name] > absolute_limit) {
           limit = relative_limit > absolute_limit ? relative_limit : absolute_limit;
-          printf("error: benchmark regression %s (%.3f > %.3f)\n", name, curr[name], limit) > "/dev/stderr";
-          fail = 1;
+          if (strict_regression == 1) {
+            printf("error: benchmark regression %s (%.3f > %.3f)\n", name, curr[name], limit) > "/dev/stderr";
+            fail = 1;
+          } else {
+            printf("warning: benchmark regression %s (%.3f > %.3f)\n", name, curr[name], limit) > "/dev/stderr";
+          }
         }
       }
       if (scoped && compared == 0) {

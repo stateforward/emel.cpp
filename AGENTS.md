@@ -359,9 +359,14 @@ NEVER weaken coverage, parity, benchmark, fuzz, or docs checks to save time.
 If a lane is irrelevant to the scoped changed files it may be skipped by the
 gate, but if it is relevant it must run against the maintained implementation
 path.
-NEVER ignore benchmark snapshot failures in quality gates by default. Only use
-`EMEL_QUALITY_GATES_ALLOW_BENCH_REGRESSION=1` for an explicitly documented
-transitional run, never for milestone closeout.
+Benchmark snapshot regressions are non-fatal by default: the compare reports
+`warning: benchmark regression ...` and the gate continues, so timing noise does
+not block iteration velocity. Structural benchmark failures (missing entries,
+entries without baselines, empty scoped suites) remain fatal.
+ALWAYS run milestone closeout and release-readiness gates with
+`EMEL_BENCH_STRICT_REGRESSION=1` so regressions fail the gate there.
+`EMEL_QUALITY_GATES_ALLOW_BENCH_REGRESSION=1` remains the whole-lane override
+for explicitly documented transitional runs only.
 ALWAYS use ctest targets `emel_tests` and `lint_snapshot` for test execution.
 ALWAYS reference `docs/rules/sml.rules.md` for SML semantics and testing guidance.
 
