@@ -298,14 +298,6 @@ kev::tensor_view_mut make_strided_view_mut(float *data, const uint64_t ne0,
   return view;
 }
 
-bool dispatch_copy(codec_runtime &runtime, const kev::tensor_view &src,
-                   const kev::tensor_view_mut &dst) noexcept {
-  kev::op_dup ev{};
-  ev.src0 = src;
-  ev.dst = dst;
-  return runtime.kernel.process_event(ev);
-}
-
 bool dispatch_add(codec_runtime &runtime, const kev::tensor_view &lhs,
                   const kev::tensor_view &rhs,
                   const kev::tensor_view_mut &dst) noexcept {
@@ -483,36 +475,27 @@ bool compute_streaming_conv(codec_runtime &runtime, const conv_weights &conv,
   float *state_slice = state.arena.data() + conv.state_offset;
   const uint64_t row_bytes = static_cast<uint64_t>(padded) * sizeof(float);
 
-  // state -> [c][0..state_len), input -> [c][state_len..padded)
-  const bool staged =
-      (state_len == 0 ||
-       dispatch_copy(runtime,
-                     make_view(state_slice, static_cast<uint64_t>(state_len),
-                               static_cast<uint64_t>(in_channels)),
-                     make_strided_view_mut(channel_major,
-                                           static_cast<uint64_t>(state_len),
-                                           static_cast<uint64_t>(in_channels),
-                                           sizeof(float), row_bytes))) &&
-      dispatch_copy(
-          runtime,
-          make_strided_view(io.data, static_cast<uint64_t>(length),
-                            static_cast<uint64_t>(in_channels),
-                            static_cast<uint64_t>(in_channels) * sizeof(float),
-                            sizeof(float)),
-          make_strided_view_mut(
-              channel_major + state_len, static_cast<uint64_t>(length),
-              static_cast<uint64_t>(in_channels), sizeof(float), row_bytes)) &&
-      (state_len == 0 ||
-       dispatch_copy(
-           runtime,
-           make_strided_view(
-               channel_major + length, static_cast<uint64_t>(state_len),
-               static_cast<uint64_t>(in_channels), sizeof(float), row_bytes),
-           make_view_mut(state_slice, static_cast<uint64_t>(state_len),
-                         static_cast<uint64_t>(in_channels))));
-  if (!staged) {
-    return false;
+  // state -> [c][0..state_len), input -> [c][state_len..padded); direct
+  // data-plane copies (pure moves, no arithmetic - parity unaffected)
+  for (int64_t c = 0; c < in_channels; ++c) {
+    float *row = channel_major + c * padded;
+    if (state_len != 0) {
+      std::memcpy(row, state_slice + c * state_len,
+                  static_cast<size_t>(state_len) * sizeof(float));
+    }
+    const float *in = io.data + c;
+    for (int64_t t = 0; t < length; ++t) {
+      row[state_len + t] = in[t * in_channels];
+    }
   }
+  if (state_len != 0) {
+    for (int64_t c = 0; c < in_channels; ++c) {
+      std::memcpy(state_slice + c * state_len,
+                  channel_major + c * padded + length,
+                  static_cast<size_t>(state_len) * sizeof(float));
+    }
+  }
+  (void)row_bytes;
 
   kev::op_im2col im2col_ev{};
   im2col_ev.src0 = make_view(conv.weight, static_cast<uint64_t>(taps),
@@ -626,15 +609,13 @@ bool compute_streaming_conv_transpose_impl(
   float *full = plan.columns.data();
   float *state_slice = state.arena.data() + conv.state_offset;
 
-  if (!dispatch_copy(
-          runtime,
-          make_strided_view(io.data, static_cast<uint64_t>(length),
-                            static_cast<uint64_t>(in_channels),
-                            static_cast<uint64_t>(in_channels) * sizeof(float),
-                            sizeof(float)),
-          make_view_mut(channel_major, static_cast<uint64_t>(length),
-                        static_cast<uint64_t>(in_channels)))) {
-    return false;
+  // position-major -> channel-major staging (pure move)
+  for (int64_t c = 0; c < in_channels; ++c) {
+    const float *in = io.data + c;
+    float *row = channel_major + c * length;
+    for (int64_t t = 0; t < length; ++t) {
+      row[t] = in[t * in_channels];
+    }
   }
 
   if constexpr (depthwise) {
@@ -692,26 +673,19 @@ bool compute_streaming_conv_transpose_impl(
     return false;
   }
 
-  // Save the full pre-bias output as next frame's overlap state.
-  if (!dispatch_copy(runtime,
-                     make_view(full, static_cast<uint64_t>(lout_full),
-                               static_cast<uint64_t>(out_channels)),
-                     make_view_mut(state_slice,
-                                   static_cast<uint64_t>(lout_full),
-                                   static_cast<uint64_t>(out_channels)))) {
-    return false;
-  }
+  // Save the full pre-bias output as next frame's overlap state (pure move).
+  std::memcpy(state_slice, full,
+              static_cast<size_t>(lout_full) *
+                  static_cast<size_t>(out_channels) * sizeof(float));
 
-  // Trim the withheld tail and transpose back to time-major.
-  if (!dispatch_copy(runtime,
-                     make_strided_view(full,
-                                       static_cast<uint64_t>(out_channels),
-                                       static_cast<uint64_t>(emitted),
-                                       full_row_bytes, sizeof(float)),
-                     make_view_mut(io.data, static_cast<uint64_t>(out_channels),
-                                   static_cast<uint64_t>(emitted)))) {
-    return false;
+  // Trim the withheld tail and transpose back to time-major (pure move).
+  for (int64_t t = 0; t < emitted; ++t) {
+    float *out = io.data + t * out_channels;
+    for (int64_t c = 0; c < out_channels; ++c) {
+      out[c] = full[c * lout_full + t];
+    }
   }
+  (void)full_row_bytes;
 
   if (conv.bias != nullptr &&
       !dispatch_add(runtime,
@@ -789,9 +763,8 @@ bool compute_seanet_stack(codec_runtime &runtime,
     float *residual = residual_span.data();
     const int32_t in_channels = io.channels;
     const int32_t in_length = io.length;
+    std::memcpy(residual, io.data, static_cast<size_t>(count) * sizeof(float));
     const bool block_ok =
-        dispatch_copy(runtime, make_view(io.data, count),
-                      make_view_mut(residual, count)) &&
         dispatch_unary(runtime, kev::unary_subop::elu,
                        make_view(io.data, count),
                        make_view_mut(io.data, count)) &&
