@@ -338,6 +338,14 @@ inline bool pack_standard_conv_kernel_major(const float * src,
 }
 
 inline emel::kernel::event::tensor_view make_dense_src0_view(const action::matrix_view & matrix) noexcept {
+  // Quantized rows use the byte-stride convention (nb[0] == 1); dense float
+  // tensors carry their element size so kernel dispatch validation accepts
+  // the layout.
+  const uint64_t elem_bytes =
+      emel::kernel::detail::is_native_quantized_dtype(matrix.dtype)
+          ? 1u
+          : static_cast<uint64_t>(
+                emel::kernel::detail::dtype_size_bytes(matrix.dtype));
   return emel::kernel::event::tensor_view{
     .data = matrix.data,
     .type = static_cast<emel::kernel::event::dtype>(matrix.dtype),
@@ -348,7 +356,7 @@ inline emel::kernel::event::tensor_view make_dense_src0_view(const action::matri
       1u,
     },
     .nb = {
-      1u,
+      elem_bytes,
       static_cast<uint64_t>(matrix.row_bytes),
       static_cast<uint64_t>(matrix.row_bytes) * static_cast<uint64_t>(matrix.rows),
       static_cast<uint64_t>(matrix.row_bytes) * static_cast<uint64_t>(matrix.rows),
@@ -2048,7 +2056,8 @@ inline void set_error(const event::embed_audio_run & runtime_ev, const error err
   runtime_ev.ctx.err = to_error(err);
 }
 
-inline bool matmul_q5_0(const action::matrix_view & matrix,
+inline bool matmul_q5_0(emel::kernel::sm & kernel,
+                        const action::matrix_view & matrix,
                         std::span<const float> input,
                         std::span<emel::kernel::detail::quant::block_q8_0> q8_input,
                         std::span<float> output) noexcept {
@@ -2067,31 +2076,19 @@ inline bool matmul_q5_0(const action::matrix_view & matrix,
     return false;
   }
 
-#if defined(__aarch64__) || defined(__ARM_NEON)
-  emel::kernel::event::op_mul_mat request{
+  // Activation quantization is kernel-owned; the q8 scratch stays for
+  // signature stability with callers that still pre-reserve it.
+  (void) q8_input;
+  const emel::kernel::event::op_mul_mat request{
     .src0 = make_dense_src0_view(matrix),
     .src1 = make_dense_vector_src1_view(input),
     .dst = make_dense_vector_dst_view(output),
-    .nth = 1u,
   };
-  return ::emel::kernel::aarch64::detail::execute_neon_mul_mat_q5_0_vector(request);
-#else
-  emel::kernel::detail::quant::quantize_row_q8_0_strided(
-      input.data(), 1u, q8_input.data(), matrix.cols);
-  const auto * base = static_cast<const uint8_t *>(matrix.data);
-  for (int32_t row = 0; row < matrix.rows; ++row) {
-    const auto * row_ptr = base + static_cast<size_t>(row) * matrix.row_bytes;
-    output[static_cast<size_t>(row)] =
-        emel::kernel::detail::dot_q5_0_q8_0_row_scalar(
-            reinterpret_cast<const emel::kernel::detail::quant::block_q5_0 *>(row_ptr),
-            q8_input.data(),
-            block_count);
-  }
-  return true;
-#endif
+  return kernel.process_event(request);
 }
 
-inline bool matmul_q8_0(const action::matrix_view & matrix,
+inline bool matmul_q8_0(emel::kernel::sm & kernel,
+                        const action::matrix_view & matrix,
                         std::span<const float> input,
                         std::span<emel::kernel::detail::quant::block_q8_0> q8_input,
                         std::span<float> output) noexcept {
@@ -2110,29 +2107,15 @@ inline bool matmul_q8_0(const action::matrix_view & matrix,
     return false;
   }
 
-#if defined(__aarch64__) || defined(__ARM_NEON)
-  emel::kernel::event::op_mul_mat request{
+  // Activation quantization is kernel-owned; the q8 scratch stays for
+  // signature stability with callers that still pre-reserve it.
+  (void) q8_input;
+  const emel::kernel::event::op_mul_mat request{
     .src0 = make_dense_src0_view(matrix),
     .src1 = make_dense_vector_src1_view(input),
     .dst = make_dense_vector_dst_view(output),
-    .nth = 1u,
   };
-  ::emel::kernel::aarch64::detail::execute_neon_mul_mat_q8_0_vector_unchecked(request);
-  return true;
-#else
-  emel::kernel::detail::quant::quantize_row_q8_0_strided(
-      input.data(), 1u, q8_input.data(), matrix.cols);
-  const auto * base = static_cast<const uint8_t *>(matrix.data);
-  for (int32_t row = 0; row < matrix.rows; ++row) {
-    const auto * row_ptr = base + static_cast<size_t>(row) * matrix.row_bytes;
-    output[static_cast<size_t>(row)] =
-        emel::kernel::detail::dot_q8_0_q8_0_row_scalar(
-            reinterpret_cast<const emel::kernel::detail::quant::block_q8_0 *>(row_ptr),
-            q8_input.data(),
-            block_count);
-  }
-  return true;
-#endif
+  return kernel.process_event(request);
 }
 
 inline bool matmul_f16(const action::matrix_view & matrix,
@@ -2160,7 +2143,8 @@ inline bool matmul_f16(const action::matrix_view & matrix,
   return true;
 }
 
-inline bool matmul_f32(const action::matrix_view & matrix,
+inline bool matmul_f32(emel::kernel::sm & kernel,
+                       const action::matrix_view & matrix,
                        std::span<const float> input,
                        std::span<float> output) noexcept {
   if (matrix.dtype != emel::kernel::detail::dtype_f32 ||
@@ -2171,30 +2155,16 @@ inline bool matmul_f32(const action::matrix_view & matrix,
     return false;
   }
 
-#if defined(__aarch64__) || defined(__ARM_NEON)
-  emel::kernel::event::op_mul_mat request{
+  const emel::kernel::event::op_mul_mat request{
     .src0 = make_dense_src0_view(matrix),
     .src1 = make_dense_vector_src1_view(input),
     .dst = make_dense_vector_dst_view(output),
-    .nth = 1u,
   };
-  return ::emel::kernel::aarch64::detail::execute_neon_mul_mat(request);
-#else
-  const auto * base = static_cast<const uint8_t *>(matrix.data);
-  for (int32_t row = 0; row < matrix.rows; ++row) {
-    const auto * weights =
-        reinterpret_cast<const float *>(base + static_cast<size_t>(row) * matrix.row_bytes);
-    float acc = 0.0f;
-    for (int32_t col = 0; col < matrix.cols; ++col) {
-      acc += weights[col] * input[static_cast<size_t>(col)];
-    }
-    output[static_cast<size_t>(row)] = acc;
-  }
-  return true;
-#endif
+  return kernel.process_event(request);
 }
 
-inline bool matmul_f32_matrix(const action::matrix_view & matrix,
+inline bool matmul_f32_matrix(emel::kernel::sm & kernel,
+                              const action::matrix_view & matrix,
                               const float * input,
                               const int32_t input_cols,
                               float * output) noexcept {
@@ -2207,51 +2177,30 @@ inline bool matmul_f32_matrix(const action::matrix_view & matrix,
     return false;
   }
 
-#if defined(__aarch64__) || defined(__ARM_NEON)
-  emel::kernel::event::op_mul_mat request{
+  const emel::kernel::event::op_mul_mat request{
     .src0 = make_dense_src0_view(matrix),
     .src1 = make_dense_matrix_src1_view(input, input_cols, matrix.cols),
     .dst = make_dense_matrix_dst_view(output, input_cols, matrix.rows),
-    .nth = 1u,
   };
-  return ::emel::kernel::aarch64::detail::execute_neon_mul_mat(request);
-#else
-  const auto * weights_base = static_cast<const float *>(matrix.data);
-  for (int32_t row = 0; row < matrix.rows; ++row) {
-    const auto * weights =
-        reinterpret_cast<const float *>(static_cast<const uint8_t *>(matrix.data) +
-                                        static_cast<size_t>(row) * matrix.row_bytes);
-    float * output_row = output + static_cast<size_t>(row) * static_cast<size_t>(input_cols);
-    for (int32_t col = 0; col < input_cols; ++col) {
-      float acc = 0.0f;
-      for (int32_t depth = 0; depth < matrix.cols; ++depth) {
-        acc += weights[static_cast<size_t>(depth)] *
-            input[static_cast<size_t>(depth) * static_cast<size_t>(input_cols) +
-                  static_cast<size_t>(col)];
-      }
-      output_row[static_cast<size_t>(col)] = acc;
-    }
-  }
-  (void) weights_base;
-  return true;
-#endif
+  return kernel.process_event(request);
 }
 
-inline bool matmul(const action::matrix_view & matrix,
+inline bool matmul(emel::kernel::sm & kernel,
+                   const action::matrix_view & matrix,
                    std::span<const float> input,
                    std::span<emel::kernel::detail::quant::block_q8_0> q8_input,
                    std::span<float> output) noexcept {
   if (matrix.dtype == emel::kernel::detail::dtype_q5_0) {
-    return matmul_q5_0(matrix, input, q8_input, output);
+    return matmul_q5_0(kernel, matrix, input, q8_input, output);
   }
   if (matrix.dtype == emel::kernel::detail::dtype_q8_0) {
-    return matmul_q8_0(matrix, input, q8_input, output);
+    return matmul_q8_0(kernel, matrix, input, q8_input, output);
   }
   if (matrix.dtype == emel::kernel::detail::dtype_f16) {
     return matmul_f16(matrix, input, output);
   }
   if (matrix.dtype == emel::kernel::detail::dtype_f32) {
-    return matmul_f32(matrix, input, output);
+    return matmul_f32(kernel, matrix, input, output);
   }
   return false;
 }
@@ -2473,11 +2422,11 @@ inline bool run_attention_layer(action::context & ctx,
     auto query = token_span(ctx.scratch.query.get(), token_index, ctx.text.hidden_size);
     auto key = token_span(ctx.scratch.key.get(), token_index, ctx.text.hidden_size);
     auto value = token_span(ctx.scratch.value.get(), token_index, ctx.text.hidden_size);
-    if (!matmul(layer.attention_query, input, q8_input, query) ||
+    if (!matmul(ctx.kernel, layer.attention_query, input, q8_input, query) ||
         !add_bias(query, layer.attention_query_bias) ||
-        !matmul(layer.attention_key, input, q8_input, key) ||
+        !matmul(ctx.kernel, layer.attention_key, input, q8_input, key) ||
         !add_bias(key, layer.attention_key_bias) ||
-        !matmul(layer.attention_value, input, q8_input, value) ||
+        !matmul(ctx.kernel, layer.attention_value, input, q8_input, value) ||
         !add_bias(value, layer.attention_value_bias)) {
       return false;
     }
@@ -2522,7 +2471,7 @@ inline bool run_attention_layer(action::context & ctx,
 
     auto hidden = std::span<float>{ctx.scratch.token_hidden.get(), static_cast<size_t>(ctx.text.hidden_size)};
     const auto input = token_span(sequence_in, token_index, ctx.text.hidden_size);
-    if (!matmul(layer.attention_output, context, q8_input, hidden) ||
+    if (!matmul(ctx.kernel, layer.attention_output, context, q8_input, hidden) ||
         !add_bias(hidden, layer.attention_output_bias)) {
       return false;
     }
@@ -2538,14 +2487,14 @@ inline bool run_attention_layer(action::context & ctx,
     }
 
     auto feed_forward = std::span<float>{ctx.scratch.feed_forward.get(), static_cast<size_t>(ctx.text.intermediate_size)};
-    if (!matmul(layer.intermediate, hidden, q8_input, feed_forward) ||
+    if (!matmul(ctx.kernel, layer.intermediate, hidden, q8_input, feed_forward) ||
         !add_bias(feed_forward, layer.intermediate_bias)) {
       return false;
     }
     apply_gelu(feed_forward);
 
     auto output = token_span(sequence_out, token_index, ctx.text.hidden_size);
-    if (!matmul(layer.output, feed_forward, q8_input, output) ||
+    if (!matmul(ctx.kernel, layer.output, feed_forward, q8_input, output) ||
         !add_bias(output, layer.output_bias)) {
       return false;
     }
@@ -2657,7 +2606,8 @@ inline void apply_batch_norm_hwc(float * values,
   }
 }
 
-inline bool pointwise_conv_hwc(const action::matrix_view & matrix,
+inline bool pointwise_conv_hwc(emel::kernel::sm & kernel,
+                               const action::matrix_view & matrix,
                                const float * input,
                                const int32_t pixel_count,
                                float * output) noexcept {
@@ -2680,7 +2630,8 @@ inline bool pointwise_conv_hwc(const action::matrix_view & matrix,
         output + static_cast<size_t>(pixel_index) * static_cast<size_t>(matrix.rows),
         static_cast<size_t>(matrix.rows),
     };
-    if (!matmul(matrix,
+    if (!matmul(kernel,
+                matrix,
                 input_pixel,
                 std::span<emel::kernel::detail::quant::block_q8_0>{},
                 output_pixel)) {
@@ -2697,8 +2648,6 @@ inline bool pointwise_conv_hwc_direct_f32_impl(const action::matrix_view & matri
                                                const action::batch_norm_view * batch_norm,
                                                float * output) noexcept {
   if (matrix.dtype != emel::kernel::detail::dtype_f32 ||
-      matrix.packed_rhs_f32 == nullptr ||
-      matrix.packed_rhs_cols != matrix.rows ||
       matrix.rows <= 0 ||
       matrix.cols <= 0 ||
       input == nullptr ||
@@ -2706,6 +2655,16 @@ inline bool pointwise_conv_hwc_direct_f32_impl(const action::matrix_view & matri
       pixel_count <= 0) {
     return false;
   }
+#if defined(__aarch64__) || defined(__ARM_NEON)
+  if (matrix.packed_rhs_f32 == nullptr ||
+      matrix.packed_rhs_cols != matrix.rows) {
+    return false;
+  }
+#else
+  if (matrix.transposed_f32 == nullptr) {
+    return false;
+  }
+#endif
   if constexpr (fuse_batch_norm) {
     if (batch_norm == nullptr ||
         batch_norm->scale == nullptr ||
@@ -2742,6 +2701,13 @@ inline bool pointwise_conv_hwc_direct_f32_impl(const action::matrix_view & matri
             matrix.transposed_f32[static_cast<size_t>(input_channel) *
                                   static_cast<size_t>(matrix.rows) +
                                   static_cast<size_t>(output_channel)];
+      }
+      if constexpr (fuse_batch_norm) {
+        acc = (acc * batch_norm->scale[static_cast<size_t>(output_channel)]) +
+            batch_norm->shift[static_cast<size_t>(output_channel)];
+        if constexpr (apply_relu) {
+          acc = std::max(acc, 0.0f);
+        }
       }
       output_pixel[static_cast<size_t>(output_channel)] = acc;
     }
@@ -2852,6 +2818,7 @@ inline bool standard_conv_hwc_impl(const action::conv2d_view & conv,
   const int32_t pad_w = same_padding(conv.kernel_w, stride);
   (void) patch_buffer;
   (void) patch_capacity;
+  (void) kernel_channel_stride;
 
   for (int32_t output_y = 0; output_y < output_spatial; ++output_y) {
     for (int32_t output_x = 0; output_x < output_spatial; ++output_x) {
@@ -3284,7 +3251,8 @@ inline void apply_batch_norm_hwc_rect(float * values,
   }
 }
 
-inline bool standard_conv_hwc_rect(const action::conv2d_view & conv,
+inline bool standard_conv_hwc_rect(emel::kernel::sm & kernel,
+                                   const action::conv2d_view & conv,
                                    const float * input,
                                    const int32_t input_height,
                                    const int32_t input_width,
@@ -3332,7 +3300,8 @@ inline bool standard_conv_hwc_rect(const action::conv2d_view & conv,
               ox,
               patch_buffer,
               patch_capacity) ||
-          !matmul_f32(matrix,
+          !matmul_f32(kernel,
+                      matrix,
                       std::span<const float>{patch_buffer, patch_size},
                       std::span<float>{output_pixel, static_cast<size_t>(conv.output_channels)})) {
         return false;
@@ -3665,12 +3634,12 @@ inline bool run_audio_se(action::context & ctx,
   };
 
   average_pool_hwc_rect(values, height, width, se.input_size, pooled.data());
-  if (!matmul(se.fc1, pooled, q8_input, hidden) ||
+  if (!matmul(ctx.kernel, se.fc1, pooled, q8_input, hidden) ||
       !add_bias(hidden, se.fc1_bias)) {
     return false;
   }
   apply_activation_in_place<true, false>(hidden);
-  if (!matmul(se.fc2, hidden, q8_input, scale) ||
+  if (!matmul(ctx.kernel, se.fc2, hidden, q8_input, scale) ||
       !add_bias(scale, se.fc2_bias)) {
     return false;
   }
@@ -3716,6 +3685,7 @@ inline bool run_audio_block(action::context & ctx,
   int32_t work_width = width;
   if (block.has_expand) {
     if (!pointwise_conv_hwc(
+            ctx.kernel,
             block.expand,
             current_buffer,
             height * width,
@@ -3777,6 +3747,7 @@ inline bool run_audio_block(action::context & ctx,
 
   float * project_dst = depthwise_dst == current_buffer ? alternate_buffer : current_buffer;
   if (!pointwise_conv_hwc(
+          ctx.kernel,
           block.project,
           depthwise_dst,
           output_height * output_width,
@@ -3822,7 +3793,8 @@ inline emel::error::type run_audio_embedding(action::context & ctx) noexcept {
 
   int32_t height = 0;
   int32_t width = 0;
-  if (!standard_conv_hwc_rect(ctx.audio.stem.conv,
+  if (!standard_conv_hwc_rect(ctx.kernel,
+                              ctx.audio.stem.conv,
                               ctx.scratch.audio_input.get(),
                               ctx.audio.num_mel_bins,
                               ctx.audio.time_frames,
@@ -3858,7 +3830,8 @@ inline emel::error::type run_audio_embedding(action::context & ctx) noexcept {
 
   int32_t head_height = 0;
   int32_t head_width = 0;
-  if (!standard_conv_hwc_rect(ctx.audio.head.conv,
+  if (!standard_conv_hwc_rect(ctx.kernel,
+                              ctx.audio.head.conv,
                               current_buffer,
                               height,
                               width,
@@ -4111,7 +4084,7 @@ inline bool run_projection_head(action::context & ctx,
   auto full_embedding = std::span<float>{
       ctx.scratch.full_embedding.get(), static_cast<size_t>(projection.output_size)};
 
-  if (!matmul(projection.expand, input_embedding, q8_input, projection_hidden) ||
+  if (!matmul(ctx.kernel, projection.expand, input_embedding, q8_input, projection_hidden) ||
       !add_bias(projection_hidden, projection.expand_bias)) {
     return false;
   }
@@ -4127,7 +4100,7 @@ inline bool run_projection_head(action::context & ctx,
   std::memcpy(projection_residual.data(),
               projection_hidden.data(),
               projection_hidden.size_bytes());
-  if (!matmul(projection.residual, projection_hidden, q8_input, projection_residual) ||
+  if (!matmul(ctx.kernel, projection.residual, projection_hidden, q8_input, projection_residual) ||
       !add_bias(projection_residual, projection.residual_bias)) {
     return false;
   }
@@ -4141,7 +4114,7 @@ inline bool run_projection_head(action::context & ctx,
     return false;
   }
 
-  return matmul(projection.project, projection_residual, q8_input, full_embedding) &&
+  return matmul(ctx.kernel, projection.project, projection_residual, q8_input, full_embedding) &&
       add_bias(full_embedding, projection.project_bias) &&
       l2_normalize(full_embedding);
 }
@@ -4154,7 +4127,7 @@ inline bool run_text_projection(action::context & ctx) noexcept {
   auto pooled = std::span<const float>{ctx.scratch.pooled.get(), static_cast<size_t>(ctx.text.hidden_size)};
   auto text_embedding =
       std::span<float>{ctx.scratch.text_embedding.get(), static_cast<size_t>(ctx.text.output_size)};
-  if (!matmul(ctx.text.dense, pooled, q8_input, text_embedding) ||
+  if (!matmul(ctx.kernel, ctx.text.dense, pooled, q8_input, text_embedding) ||
       !add_bias(text_embedding, ctx.text.dense_bias) ||
       !l2_normalize(text_embedding)) {
     return false;

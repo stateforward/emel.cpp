@@ -188,6 +188,47 @@ void mark_encoder_aux_tensors_f32(emel::model::data &model) {
   }
 }
 
+void mark_encoder_linear_weights(emel::model::data &model,
+                                 const int32_t dtype) {
+  for (uint32_t index = 0; index < model.n_tensors; ++index) {
+    auto &tensor = model.tensors[index];
+    const auto name = emel::model::tensor_name_view(model, tensor);
+    if (name.starts_with("model.encoder.layers.") && tensor.n_dims == 2 &&
+        name.ends_with(".weight")) {
+      tensor.type = dtype;
+    }
+  }
+}
+
+// Rebinds every encoder aux tensor (biases, layer norms, positions) onto a
+// shared zero-filled f32 arena so a q8_0+f32-aux encode can run end to end
+// with in-bounds aux reads. The caller must keep the returned arena alive
+// for the lifetime of the mutated model.
+std::vector<float>
+repoint_encoder_aux_tensors_to_f32(emel::model::data &model) {
+  std::vector<float> arena(
+      static_cast<size_t>(encoder::detail::k_embedding_length) *
+          static_cast<size_t>(encoder::detail::k_max_encoder_frame_count),
+      0.0f);
+  for (uint32_t index = 0; index < model.n_tensors; ++index) {
+    auto &tensor = model.tensors[index];
+    const auto name = emel::model::tensor_name_view(model, tensor);
+    if (name.starts_with("model.encoder.") &&
+        (tensor.n_dims == 1 ||
+         name == "model.encoder.embed_positions.weight")) {
+      uint64_t count = 1u;
+      for (int32_t dim = 0; dim < tensor.n_dims; ++dim) {
+        count *= static_cast<uint64_t>(tensor.dims[static_cast<size_t>(dim)]);
+      }
+      REQUIRE(count <= arena.size());
+      tensor.type = static_cast<int32_t>(emel::kernel::detail::dtype_f32);
+      tensor.data = arena.data();
+      tensor.data_size = count * sizeof(float);
+    }
+  }
+  return arena;
+}
+
 loaded_whisper_fixture load_fixture_or_skip() {
   const auto fixture_path = whisper_fixture_path();
   if (!std::filesystem::exists(fixture_path)) {
@@ -403,6 +444,96 @@ TEST_CASE("whisper_encoder_runs_full_q8_encoder_from_public_event") {
   CHECK(frames_again == frames);
   CHECK(width_again == width);
   CHECK(digest_again == digest);
+}
+
+TEST_CASE("whisper_encoder_runs_q4_0_variant_from_public_event") {
+  auto loaded = load_fixture_or_skip();
+  if (loaded.model == nullptr) {
+    return;
+  }
+
+  mark_encoder_linear_weights(
+      *loaded.model, static_cast<int32_t>(emel::kernel::detail::dtype_q4_0));
+  const std::vector<float> pcm = deterministic_pcm(320);
+  std::vector<float> workspace(static_cast<size_t>(
+      encoder::detail::required_workspace_floats(pcm.size())));
+  std::vector<float> output(static_cast<size_t>(
+      encoder::detail::required_encoder_output_floats(pcm.size())));
+  int32_t frames = 0;
+  int32_t width = 0;
+  uint64_t digest = 0;
+  emel::error::type err = emel::error::cast(encoder::error::none);
+  encoder::sm machine{};
+  encoder::event::encode request{
+      loaded.contract, pcm, 16000, 1, workspace, output, frames, width, digest};
+  request.error_out = &err;
+  CHECK(machine.process_event(request));
+  CHECK(err == emel::error::cast(encoder::error::none));
+  CHECK(frames == 1);
+  CHECK(width == encoder::detail::k_embedding_length);
+  CHECK(machine.q4_0_dispatch_count() == 1u);
+  CHECK(machine.q8_0_dispatch_count() == 0u);
+  CHECK(machine.q4_1_dispatch_count() == 0u);
+}
+
+TEST_CASE("whisper_encoder_runs_q4_1_variant_from_public_event") {
+  auto loaded = load_fixture_or_skip();
+  if (loaded.model == nullptr) {
+    return;
+  }
+
+  mark_encoder_linear_weights(
+      *loaded.model, static_cast<int32_t>(emel::kernel::detail::dtype_q4_1));
+  const std::vector<float> pcm = deterministic_pcm(320);
+  std::vector<float> workspace(static_cast<size_t>(
+      encoder::detail::required_workspace_floats(pcm.size())));
+  std::vector<float> output(static_cast<size_t>(
+      encoder::detail::required_encoder_output_floats(pcm.size())));
+  int32_t frames = 0;
+  int32_t width = 0;
+  uint64_t digest = 0;
+  emel::error::type err = emel::error::cast(encoder::error::none);
+  encoder::sm machine{};
+  encoder::event::encode request{
+      loaded.contract, pcm, 16000, 1, workspace, output, frames, width, digest};
+  request.error_out = &err;
+  CHECK(machine.process_event(request));
+  CHECK(err == emel::error::cast(encoder::error::none));
+  CHECK(frames == 1);
+  CHECK(width == encoder::detail::k_embedding_length);
+  CHECK(machine.q4_1_dispatch_count() == 1u);
+  CHECK(machine.q8_0_dispatch_count() == 0u);
+  CHECK(machine.q4_0_dispatch_count() == 0u);
+}
+
+TEST_CASE("whisper_encoder_runs_q8_f32_aux_variant_from_public_event") {
+  auto loaded = load_fixture_or_skip();
+  if (loaded.model == nullptr) {
+    return;
+  }
+
+  const std::vector<float> aux_arena =
+      repoint_encoder_aux_tensors_to_f32(*loaded.model);
+  const std::vector<float> pcm = deterministic_pcm(320);
+  std::vector<float> workspace(static_cast<size_t>(
+      encoder::detail::required_workspace_floats(pcm.size())));
+  std::vector<float> output(static_cast<size_t>(
+      encoder::detail::required_encoder_output_floats(pcm.size())));
+  int32_t frames = 0;
+  int32_t width = 0;
+  uint64_t digest = 0;
+  emel::error::type err = emel::error::cast(encoder::error::none);
+  encoder::sm machine{};
+  encoder::event::encode request{
+      loaded.contract, pcm, 16000, 1, workspace, output, frames, width, digest};
+  request.error_out = &err;
+  CHECK(machine.process_event(request));
+  CHECK(err == emel::error::cast(encoder::error::none));
+  CHECK(frames == 1);
+  CHECK(width == encoder::detail::k_embedding_length);
+  CHECK(machine.q8_0_dispatch_count() == 1u);
+  CHECK(machine.q4_0_dispatch_count() == 0u);
+  CHECK(machine.q4_1_dispatch_count() == 0u);
 }
 
 TEST_CASE("whisper_recognizer_runs_fixture_through_public_actor") {

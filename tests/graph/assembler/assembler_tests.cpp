@@ -15,6 +15,7 @@
 #include "emel/model/detail.hpp"
 #include "emel/model/llama/detail.hpp"
 #include "emel/model/loader/errors.hpp"
+#include "../../kernel/test_helpers.hpp"
 
 namespace {
 
@@ -117,7 +118,7 @@ void append_tensor_name(emel::model::data & model,
 }
 
 void build_canonical_model(emel::model::data & model, const int32_t block_count) {
-  std::memset(&model, 0, sizeof(model));
+  emel::tests::reset_model_data(model);
   copy_architecture(model.architecture_name, "llama");
   model.n_layers = block_count;
   model.params.n_embd = 64;

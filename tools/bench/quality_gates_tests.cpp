@@ -54,6 +54,19 @@ TEST_CASE("quality gates exclude nested sml machine headers from coverage source
   CHECK(helper.find("src/emel/**/*/sm.hpp") != std::string::npos);
 }
 
+TEST_CASE("coverage script enforces thresholds on changed executable lines") {
+  const std::string script = read_file(repo_root() / "scripts" / "test_with_coverage.sh");
+
+  CHECK(script.find("COVERAGE_CHANGED_LINE_ONLY") != std::string::npos);
+  CHECK(script.find("required_tools+=(python3)") != std::string::npos);
+  CHECK(script.find("collect_changed_lines()") != std::string::npos);
+  CHECK(script.find("enforce_changed_line_coverage()") != std::string::npos);
+  CHECK(script.find("--json \"$coverage_json\"") != std::string::npos);
+  CHECK(script.find("changed-line coverage:") != std::string::npos);
+  CHECK(script.find("--fail-under-line \"$LINE_COVERAGE_MIN\"") != std::string::npos);
+  CHECK(script.find("--fail-under-branch \"$BRANCH_COVERAGE_MIN\"") != std::string::npos);
+}
+
 TEST_CASE("quality gates consume benchmark dependency manifest conservatively") {
   const std::string script = read_file(repo_root() / "scripts" / "quality_gates.sh");
 
@@ -336,8 +349,22 @@ TEST_CASE("quality gates skip host-incompatible benchmark suites during full exp
   CHECK(helper.find("kernel_aarch64)") != std::string::npos);
   CHECK(helper.find("\"aarch64\"") != std::string::npos);
   CHECK(helper.find("\"arm64\"") != std::string::npos);
-  CHECK(helper.find("sm_any)") != std::string::npos);
+  CHECK(helper.find("sm_any|sm_scheduler)") != std::string::npos);
   CHECK(helper.find("EMEL_BENCH_INTERNAL") != std::string::npos);
+}
+
+TEST_CASE("quality gates enable internal env for selected internal benchmark suites") {
+  const std::string script = read_file(repo_root() / "scripts" / "quality_gates.sh");
+  const std::size_t run_start = script.find("run_benchmark_gates()");
+  REQUIRE(run_start != std::string::npos);
+
+  const std::size_t run_end = script.find("run_coverage_gate()", run_start);
+  REQUIRE(run_end != std::string::npos);
+
+  const std::string run_body = script.substr(run_start, run_end - run_start);
+  CHECK(run_body.find("sm_any|sm_scheduler)") != std::string::npos);
+  CHECK(run_body.find("bench_extra_env+=(EMEL_BENCH_INTERNAL=1)") !=
+        std::string::npos);
 }
 
 TEST_CASE("quality gates check benchmark manifest before deciding benchmark branch") {

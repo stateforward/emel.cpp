@@ -31,6 +31,7 @@
 #include "emel/model/sortformer/detail.hpp"
 #include "emel/model/tensor/sm.hpp"
 #include "emel/model/whisper/detail.hpp"
+#include "../../kernel/test_helpers.hpp"
 
 namespace {
 
@@ -284,7 +285,7 @@ void append_tensor_with_shape(emel::model::data &model,
 
 void build_canonical_model(emel::model::data &model,
                            const int32_t block_count) {
-  std::memset(&model, 0, sizeof(model));
+  emel::tests::reset_model_data(model);
   copy_name(model.architecture_name, "llama");
   model.n_layers = block_count;
   model.params.n_embd = 64;
@@ -322,7 +323,7 @@ void build_canonical_model(emel::model::data &model,
 
 void build_qwen3_model(emel::model::data &model, const int32_t block_count,
                        const bool include_q_norm, const bool include_k_norm) {
-  std::memset(&model, 0, sizeof(model));
+  emel::tests::reset_model_data(model);
   copy_name(model.architecture_name, "qwen3");
   model.n_layers = block_count;
   model.params.n_embd = 64;
@@ -380,7 +381,7 @@ bool is_lfm2_attention_layer(const int32_t block_index) {
 
 void build_lfm2_model(emel::model::data &model, const bool include_output_norm,
                       const bool corrupt_conv_block_contract) {
-  std::memset(&model, 0, sizeof(model));
+  emel::tests::reset_model_data(model);
   copy_name(model.architecture_name, "lfm2");
   model.n_layers = 16;
   model.params.n_layer = 16;
@@ -440,9 +441,73 @@ void build_lfm2_model(emel::model::data &model, const bool include_output_norm,
   model.n_tensors = tensor_index;
 }
 
+// LFM2.5-230M geometry: 14 blocks, attention at even blocks >= 2, classified
+// via the per-layer kv-head pattern instead of the 1.2B fallback layout.
+void build_lfm2_230m_model(emel::model::data &model) {
+  emel::tests::reset_model_data(model);
+  copy_name(model.architecture_name, "lfm2");
+  model.n_layers = 14;
+  model.params.n_layer = 14;
+  model.params.n_ctx = 128000;
+  model.params.n_embd = 1024;
+  model.params.n_embd_out = 1024;
+  model.params.n_head = 16;
+  model.params.n_head_kv = 8;
+  model.params.n_vocab = 65536;
+  model.params.shortconv_l_cache = 3;
+  model.params.rope_freq_base = 1000000.0f;
+  model.params.attention_layer_pattern_count =
+      static_cast<uint32_t>(model.n_layers);
+  for (int32_t block = 0; block < model.n_layers; ++block) {
+    model.params.attention_layer_pattern_flags[static_cast<size_t>(block)] =
+        (block >= 2 && block % 2 == 0) ? 1u : 0u;
+  }
+  model.weights_data = model.tensors.data();
+  model.weights_size = 4096u;
+
+  uint32_t tensor_index = 0u;
+  const auto add = [&](const std::string_view name) {
+    append_tensor_name(model, model.tensors[tensor_index], name);
+    ++tensor_index;
+  };
+  const auto add_block = [&](const int32_t block,
+                             const std::string_view suffix) {
+    add(std::string{"blk."} + std::to_string(block) + "." +
+        std::string{suffix});
+  };
+
+  add("token_embd.weight");
+  add("token_embd_norm.weight");
+
+  for (int32_t block = 0; block < model.n_layers; ++block) {
+    add_block(block, "attn_norm.weight");
+    add_block(block, "ffn_norm.weight");
+    add_block(block, "ffn_gate.weight");
+    add_block(block, "ffn_down.weight");
+    add_block(block, "ffn_up.weight");
+
+    if (model.params.attention_layer_pattern_flags[static_cast<size_t>(
+            block)] != 0u) {
+      add_block(block, "attn_q.weight");
+      add_block(block, "attn_k.weight");
+      add_block(block, "attn_v.weight");
+      add_block(block, "attn_q_norm.weight");
+      add_block(block, "attn_k_norm.weight");
+      add_block(block, "attn_output.weight");
+      continue;
+    }
+
+    add_block(block, "shortconv.conv.weight");
+    add_block(block, "shortconv.in_proj.weight");
+    add_block(block, "shortconv.out_proj.weight");
+  }
+
+  model.n_tensors = tensor_index;
+}
+
 void build_gemma4_model(emel::model::data &model,
                         const bool include_output_weight) {
-  std::memset(&model, 0, sizeof(model));
+  emel::tests::reset_model_data(model);
   copy_name(model.architecture_name, "gemma4");
   model.n_layers = 35;
   model.params.n_layer = 35;
@@ -513,7 +578,7 @@ void build_gemma4_model(emel::model::data &model,
 
 void build_omniembed_model(emel::model::data &model,
                            const bool include_audio_projection) {
-  std::memset(&model, 0, sizeof(model));
+  emel::tests::reset_model_data(model);
   copy_name(model.architecture_name, "omniembed");
   model.params.n_embd = 1280;
   model.params.n_embd_out = 1280;
@@ -568,7 +633,7 @@ void build_omniembed_model(emel::model::data &model,
 
 void build_sortformer_model(emel::model::data &model,
                             const bool include_modules_family) {
-  std::memset(&model, 0, sizeof(model));
+  emel::tests::reset_model_data(model);
   copy_name(model.architecture_name, "sortformer");
   model.params.n_features = 4;
   model.weights_data = model.tensors.data();
@@ -592,7 +657,7 @@ void build_sortformer_model(emel::model::data &model,
 
 void build_whisper_model(emel::model::data &model,
                          const bool include_decoder_cross_attn) {
-  std::memset(&model, 0, sizeof(model));
+  emel::tests::reset_model_data(model);
   copy_name(model.architecture_name, "whisper");
   model.params.n_features = 80;
   model.params.n_vocab = 51865;
@@ -2497,6 +2562,26 @@ TEST_CASE("model_execution_contract_rejects_lfm2_with_noncanonical_hybrid_"
         emel::error::cast(emel::model::loader::error::model_invalid));
 }
 
+TEST_CASE("model_execution_contract_accepts_lfm2_230m_pattern_layout") {
+  auto model = std::make_unique<emel::model::data>();
+  build_lfm2_230m_model(*model);
+
+  CHECK(emel::model::validate_execution_contract(*model) ==
+        emel::error::cast(emel::model::loader::error::none));
+}
+
+TEST_CASE("model_execution_contract_rejects_lfm2_230m_when_pattern_"
+          "contradicts_block_tensors") {
+  auto model = std::make_unique<emel::model::data>();
+  build_lfm2_230m_model(*model);
+  // Block 2 carries attention tensors; flipping its pattern flag must fail the
+  // hybrid tensor contract instead of silently reclassifying the block.
+  model->params.attention_layer_pattern_flags[2] = 0u;
+
+  CHECK(emel::model::validate_execution_contract(*model) ==
+        emel::error::cast(emel::model::loader::error::model_invalid));
+}
+
 TEST_CASE("model_execution_contract_rejects_lfm2_attention_block_with_"
           "shortconv_weights") {
   auto model = std::make_unique<emel::model::data>();
@@ -2573,6 +2658,10 @@ TEST_CASE("model_detail_loads_gemma4_hparams_from_gguf_binding") {
   CHECK(model->params.attention_shared_kv_layers == 20);
   CHECK(model->params.n_rot == 512);
   CHECK(model->params.n_rot_swa == 256);
+  CHECK(model->params.rope_pair_x0_stride == 1);
+  CHECK(model->params.rope_pair_x1_stride == 1);
+  CHECK(model->params.rope_pair_x1_offset == 0);
+  CHECK(model->params.rope_pair_x1_half_rot_offset == 1);
   CHECK(model->params.full_attention_interval == 5);
   CHECK(model->params.final_logit_softcapping == doctest::Approx(30.0f));
   CHECK(model->params.rope_freq_base == doctest::Approx(1000000.0f));
@@ -2703,6 +2792,10 @@ TEST_CASE(
   CHECK(model->params.attention_key_length == 64);
   CHECK(model->params.attention_value_length == 80);
   CHECK(model->params.n_rot == 64);
+  CHECK(model->params.rope_pair_x0_stride == 1);
+  CHECK(model->params.rope_pair_x1_stride == 1);
+  CHECK(model->params.rope_pair_x1_offset == 0);
+  CHECK(model->params.rope_pair_x1_half_rot_offset == 1);
   CHECK(model->params.n_layer == 24);
   CHECK(model->params.n_vocab == 4);
   CHECK(model->params.tie_word_embeddings);
@@ -2750,6 +2843,10 @@ TEST_CASE("model_detail_loads_lfm2_hparams_from_gguf_binding") {
   CHECK(model->params.n_layer == 16);
   CHECK(model->params.n_vocab == 65536);
   CHECK(model->params.shortconv_l_cache == 3);
+  CHECK(model->params.rope_pair_x0_stride == 1);
+  CHECK(model->params.rope_pair_x1_stride == 1);
+  CHECK(model->params.rope_pair_x1_offset == 0);
+  CHECK(model->params.rope_pair_x1_half_rot_offset == 1);
   CHECK(model->params.tie_word_embeddings);
   CHECK(model->params.attention_layer_norm_rms_epsilon ==
         doctest::Approx(1e-6f));

@@ -129,9 +129,7 @@ enum class glu_subop : uint8_t {
   tensor_view src2 = {};                     \
   tensor_view_mut dst = {};                  \
   std::array<uint8_t, 64> op_params = {};    \
-  uint32_t op_params_size = 0;               \
-  uint32_t ith = 0;                          \
-  uint32_t nth = 1;
+  uint32_t op_params_size = 0;
 
 #define EMEL_KERNEL_DECLARE_OP(name) \
   struct name {                      \

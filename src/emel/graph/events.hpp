@@ -92,6 +92,13 @@ struct compute {
   ::emel::callback<bool(const ::emel::graph::events::compute_error &)> dispatch_error = {};
 };
 
+struct compute_reserved {
+  explicit compute_reserved(const compute & request_ref) noexcept
+    : request(request_ref) {}
+
+  const compute & request;
+};
+
 // Internal context object carried via completion<reserve_graph>.
 enum class phase_outcome : uint8_t {
   unknown = 0,
@@ -123,6 +130,12 @@ struct reserve_graph {
 
 // Internal event used by graph::sm wrapper; not part of public API.
 struct compute_graph {
+  const compute & request;
+  compute_ctx & ctx;
+};
+
+// Internal event used by graph::sm wrapper; not part of public API.
+struct compute_reserved_graph {
   const compute & request;
   compute_ctx & ctx;
 };
