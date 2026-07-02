@@ -16,6 +16,7 @@
 #include "emel/memory/recurrent/sm.hpp"
 #include "emel/model/loader/sm.hpp"
 #include "emel/model/tensor/sm.hpp"
+#include "emel/speech/codec/mimi/sm.hpp"
 #include "emel/text/conditioner/sm.hpp"
 #include "emel/text/detokenizer/sm.hpp"
 #include "emel/text/encoders/any.hpp"
@@ -33,6 +34,7 @@ using DiarizationRequest = emel::diarization::request::sm;
 using SortformerExecutor = emel::diarization::sortformer::executor::sm;
 using SortformerPipeline = emel::diarization::sortformer::pipeline::sm;
 using EmbeddingsGenerator = emel::embeddings::generator::sm;
+using MimiCodec = emel::speech::codec::mimi::sm;
 using EncoderAny = emel::text::encoders::any;
 using EncoderBpe = emel::text::encoders::bpe::sm;
 using EncoderSpm = emel::text::encoders::spm::sm;

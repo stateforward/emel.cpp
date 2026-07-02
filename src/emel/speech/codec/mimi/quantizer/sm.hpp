@@ -1,0 +1,211 @@
+#pragma once
+
+#include <stateforward/sml.hpp>
+
+#include "emel/sm.hpp"
+#include "emel/speech/codec/mimi/quantizer/actions.hpp"
+#include "emel/speech/codec/mimi/quantizer/context.hpp"
+#include "emel/speech/codec/mimi/quantizer/events.hpp"
+#include "emel/speech/codec/mimi/quantizer/guards.hpp"
+
+// Mimi split-RVQ actor: latent column <-> n_q codebook indexes. The encode
+// and decode flows are separate explicit state chains; stage outcomes are
+// routed by guards over the per-dispatch runtime ctx.
+namespace emel::speech::codec::mimi::quantizer {
+
+struct state_ready {};
+struct state_encode_runtime_decision {};
+struct state_encode_shape_decision {};
+struct state_encode_running {};
+struct state_encode_success_error_out_decision {};
+struct state_encode_success_callback_decision {};
+struct state_encode_error_error_out_decision {};
+struct state_encode_error_callback_decision {};
+struct state_encode_done {};
+struct state_encode_errored {};
+struct state_decode_runtime_decision {};
+struct state_decode_shape_decision {};
+struct state_decode_running {};
+struct state_decode_success_error_out_decision {};
+struct state_decode_success_callback_decision {};
+struct state_decode_error_error_out_decision {};
+struct state_decode_error_callback_decision {};
+struct state_decode_done {};
+struct state_decode_errored {};
+
+struct model {
+  auto operator()() const {
+    namespace sml = stateforward::sml;
+    using encode_run = event::encode_run;
+    using decode_run = event::decode_run;
+
+    // clang-format off
+    return sml::make_transition_table(
+      //------------------------------------------------------------------------------//
+      // Encode flow.
+        sml::state<state_encode_runtime_decision> <= *sml::state<state_ready>
+          + sml::event<encode_run>
+          / action::effect_begin<encode_run>{}
+      , sml::state<state_encode_shape_decision> <= sml::state<state_encode_runtime_decision>
+          + sml::completion<encode_run> [ guard::guard_runtime_bound<encode_run>{} ]
+      , sml::state<state_encode_error_error_out_decision> <= sml::state<state_encode_runtime_decision>
+          + sml::completion<encode_run> [ guard::guard_runtime_unbound<encode_run>{} ]
+          / action::effect_mark_runtime_unbound<encode_run>{}
+      , sml::state<state_encode_running> <= sml::state<state_encode_shape_decision>
+          + sml::completion<encode_run> [ guard::guard_encode_shape_valid{} ]
+          / action::effect_run_quantize{}
+      , sml::state<state_encode_error_error_out_decision> <= sml::state<state_encode_shape_decision>
+          + sml::completion<encode_run> [ guard::guard_encode_shape_invalid{} ]
+          / action::effect_mark_request_shape_invalid<encode_run>{}
+      , sml::state<state_encode_success_error_out_decision> <= sml::state<state_encode_running>
+          + sml::completion<encode_run> [ guard::guard_stage_ok<encode_run>{} ]
+      , sml::state<state_encode_error_error_out_decision> <= sml::state<state_encode_running>
+          + sml::completion<encode_run> [ guard::guard_stage_failed<encode_run>{} ]
+          / action::effect_mark_quantize_failed{}
+      , sml::state<state_encode_success_callback_decision> <= sml::state<state_encode_success_error_out_decision>
+          + sml::completion<encode_run> [ guard::guard_has_error_out<encode_run>{} ]
+          / action::effect_store_error_out<encode_run>{}
+      , sml::state<state_encode_success_callback_decision> <= sml::state<state_encode_success_error_out_decision>
+          + sml::completion<encode_run> [ guard::guard_no_error_out<encode_run>{} ]
+      , sml::state<state_encode_error_callback_decision> <= sml::state<state_encode_error_error_out_decision>
+          + sml::completion<encode_run> [ guard::guard_has_error_out<encode_run>{} ]
+          / action::effect_store_error_out<encode_run>{}
+      , sml::state<state_encode_error_callback_decision> <= sml::state<state_encode_error_error_out_decision>
+          + sml::completion<encode_run> [ guard::guard_no_error_out<encode_run>{} ]
+      , sml::state<state_encode_done> <= sml::state<state_encode_success_callback_decision>
+          + sml::completion<encode_run> [ guard::guard_has_done_callback<encode_run>{} ]
+          / action::effect_emit_encode_done{}
+      , sml::state<state_encode_done> <= sml::state<state_encode_success_callback_decision>
+          + sml::completion<encode_run> [ guard::guard_no_done_callback<encode_run>{} ]
+      , sml::state<state_encode_errored> <= sml::state<state_encode_error_callback_decision>
+          + sml::completion<encode_run> [ guard::guard_has_error_callback<encode_run>{} ]
+          / action::effect_emit_encode_error{}
+      , sml::state<state_encode_errored> <= sml::state<state_encode_error_callback_decision>
+          + sml::completion<encode_run> [ guard::guard_no_error_callback<encode_run>{} ]
+      , sml::state<state_ready> <= sml::state<state_encode_done>
+          + sml::completion<encode_run>
+      , sml::state<state_ready> <= sml::state<state_encode_errored>
+          + sml::completion<encode_run>
+
+      //------------------------------------------------------------------------------//
+      // Decode flow.
+      , sml::state<state_decode_runtime_decision> <= sml::state<state_ready>
+          + sml::event<decode_run>
+          / action::effect_begin<decode_run>{}
+      , sml::state<state_decode_shape_decision> <= sml::state<state_decode_runtime_decision>
+          + sml::completion<decode_run> [ guard::guard_runtime_bound<decode_run>{} ]
+      , sml::state<state_decode_error_error_out_decision> <= sml::state<state_decode_runtime_decision>
+          + sml::completion<decode_run> [ guard::guard_runtime_unbound<decode_run>{} ]
+          / action::effect_mark_runtime_unbound<decode_run>{}
+      , sml::state<state_decode_running> <= sml::state<state_decode_shape_decision>
+          + sml::completion<decode_run> [ guard::guard_decode_shape_valid{} ]
+          / action::effect_run_dequantize{}
+      , sml::state<state_decode_error_error_out_decision> <= sml::state<state_decode_shape_decision>
+          + sml::completion<decode_run> [ guard::guard_decode_shape_invalid{} ]
+          / action::effect_mark_request_shape_invalid<decode_run>{}
+      , sml::state<state_decode_success_error_out_decision> <= sml::state<state_decode_running>
+          + sml::completion<decode_run> [ guard::guard_stage_ok<decode_run>{} ]
+      , sml::state<state_decode_error_error_out_decision> <= sml::state<state_decode_running>
+          + sml::completion<decode_run> [ guard::guard_stage_failed<decode_run>{} ]
+          / action::effect_mark_dequantize_failed{}
+      , sml::state<state_decode_success_callback_decision> <= sml::state<state_decode_success_error_out_decision>
+          + sml::completion<decode_run> [ guard::guard_has_error_out<decode_run>{} ]
+          / action::effect_store_error_out<decode_run>{}
+      , sml::state<state_decode_success_callback_decision> <= sml::state<state_decode_success_error_out_decision>
+          + sml::completion<decode_run> [ guard::guard_no_error_out<decode_run>{} ]
+      , sml::state<state_decode_error_callback_decision> <= sml::state<state_decode_error_error_out_decision>
+          + sml::completion<decode_run> [ guard::guard_has_error_out<decode_run>{} ]
+          / action::effect_store_error_out<decode_run>{}
+      , sml::state<state_decode_error_callback_decision> <= sml::state<state_decode_error_error_out_decision>
+          + sml::completion<decode_run> [ guard::guard_no_error_out<decode_run>{} ]
+      , sml::state<state_decode_done> <= sml::state<state_decode_success_callback_decision>
+          + sml::completion<decode_run> [ guard::guard_has_done_callback<decode_run>{} ]
+          / action::effect_emit_decode_done{}
+      , sml::state<state_decode_done> <= sml::state<state_decode_success_callback_decision>
+          + sml::completion<decode_run> [ guard::guard_no_done_callback<decode_run>{} ]
+      , sml::state<state_decode_errored> <= sml::state<state_decode_error_callback_decision>
+          + sml::completion<decode_run> [ guard::guard_has_error_callback<decode_run>{} ]
+          / action::effect_emit_decode_error{}
+      , sml::state<state_decode_errored> <= sml::state<state_decode_error_callback_decision>
+          + sml::completion<decode_run> [ guard::guard_no_error_callback<decode_run>{} ]
+      , sml::state<state_ready> <= sml::state<state_decode_done>
+          + sml::completion<decode_run>
+      , sml::state<state_ready> <= sml::state<state_decode_errored>
+          + sml::completion<decode_run>
+
+      //------------------------------------------------------------------------------//
+      // Unexpected events.
+      , sml::state<state_ready> <= sml::state<state_ready> + sml::unexpected_event<sml::_>
+          / action::effect_on_unexpected{}
+      , sml::state<state_ready> <= sml::state<state_encode_runtime_decision>
+          + sml::unexpected_event<sml::_> / action::effect_on_unexpected{}
+      , sml::state<state_ready> <= sml::state<state_encode_shape_decision>
+          + sml::unexpected_event<sml::_> / action::effect_on_unexpected{}
+      , sml::state<state_ready> <= sml::state<state_encode_running>
+          + sml::unexpected_event<sml::_> / action::effect_on_unexpected{}
+      , sml::state<state_ready> <= sml::state<state_encode_success_error_out_decision>
+          + sml::unexpected_event<sml::_> / action::effect_on_unexpected{}
+      , sml::state<state_ready> <= sml::state<state_encode_success_callback_decision>
+          + sml::unexpected_event<sml::_> / action::effect_on_unexpected{}
+      , sml::state<state_ready> <= sml::state<state_encode_error_error_out_decision>
+          + sml::unexpected_event<sml::_> / action::effect_on_unexpected{}
+      , sml::state<state_ready> <= sml::state<state_encode_error_callback_decision>
+          + sml::unexpected_event<sml::_> / action::effect_on_unexpected{}
+      , sml::state<state_ready> <= sml::state<state_encode_done>
+          + sml::unexpected_event<sml::_> / action::effect_on_unexpected{}
+      , sml::state<state_ready> <= sml::state<state_encode_errored>
+          + sml::unexpected_event<sml::_> / action::effect_on_unexpected{}
+      , sml::state<state_ready> <= sml::state<state_decode_runtime_decision>
+          + sml::unexpected_event<sml::_> / action::effect_on_unexpected{}
+      , sml::state<state_ready> <= sml::state<state_decode_shape_decision>
+          + sml::unexpected_event<sml::_> / action::effect_on_unexpected{}
+      , sml::state<state_ready> <= sml::state<state_decode_running>
+          + sml::unexpected_event<sml::_> / action::effect_on_unexpected{}
+      , sml::state<state_ready> <= sml::state<state_decode_success_error_out_decision>
+          + sml::unexpected_event<sml::_> / action::effect_on_unexpected{}
+      , sml::state<state_ready> <= sml::state<state_decode_success_callback_decision>
+          + sml::unexpected_event<sml::_> / action::effect_on_unexpected{}
+      , sml::state<state_ready> <= sml::state<state_decode_error_error_out_decision>
+          + sml::unexpected_event<sml::_> / action::effect_on_unexpected{}
+      , sml::state<state_ready> <= sml::state<state_decode_error_callback_decision>
+          + sml::unexpected_event<sml::_> / action::effect_on_unexpected{}
+      , sml::state<state_ready> <= sml::state<state_decode_done>
+          + sml::unexpected_event<sml::_> / action::effect_on_unexpected{}
+      , sml::state<state_ready> <= sml::state<state_decode_errored>
+          + sml::unexpected_event<sml::_> / action::effect_on_unexpected{}
+    );
+    // clang-format on
+  }
+};
+
+struct sm : public emel::sm<model, action::context> {
+  using base_type = emel::sm<model, action::context>;
+  using base_type::is;
+  using base_type::visit_current_states;
+
+  sm() = default;
+
+  bool process_event(const event::encode &ev) {
+    event::encode_ctx ctx{};
+    event::encode_run runtime_ev{ev, ctx};
+    const bool accepted = base_type::process_event(runtime_ev);
+    return accepted && ctx.err == action::detail::to_error(error::none);
+  }
+
+  bool process_event(const event::decode &ev) {
+    event::decode_ctx ctx{};
+    event::decode_run runtime_ev{ev, ctx};
+    const bool accepted = base_type::process_event(runtime_ev);
+    return accepted && ctx.err == action::detail::to_error(error::none);
+  }
+
+  uint64_t frames_quantized() const noexcept {
+    return context_.frames_quantized;
+  }
+
+  uint64_t frames_dequantized() const noexcept {
+    return context_.frames_dequantized;
+  }
+};
+
+} // namespace emel::speech::codec::mimi::quantizer

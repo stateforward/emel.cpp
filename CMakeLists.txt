@@ -157,6 +157,7 @@ if(EMEL_ENABLE_TESTS)
     tests/diarization/sortformer/parity/lifecycle_tests.cpp
     tests/diarization/sortformer/transformer/lifecycle_tests.cpp
     tests/speech/codec/mimi_detail_tests.cpp
+    tests/speech/codec/mimi_lifecycle_tests.cpp
     tests/speech/encoder/whisper/lifecycle_tests.cpp
     tests/speech/decoder/whisper/lifecycle_tests.cpp
     tests/speech/encoder/whisper/detail_tests.cpp
