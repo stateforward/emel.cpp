@@ -117,7 +117,7 @@ check_no_matches "maintained benchmark/parity lanes reaching IO or tensor actor 
   tools/bench tools/paritychecker tools/embedded_size
 
 check_no_matches "forbidden moshi model-family runtime roots" \
-  'emel/moshi|namespace emel::moshi|kernel/moshi|kernel::moshi|kernel/mimi|kernel::mimi|model/moshi/(runtime|inference|encoder|decoder|codec)|model::moshi::(runtime|inference|encoder|decoder|codec)|speech/asr/moshi|speech::asr::moshi|speech/moshi|speech::moshi' \
+  'emel/moshi|namespace emel::moshi|kernel/moshi|kernel::moshi|kernel/mimi|kernel::mimi|model/moshi/(runtime|inference|encoder|decoder|codec)|model::moshi::(runtime|inference|encoder|decoder|codec)|speech/asr/moshi|speech::asr::moshi|speech/moshi/|speech::moshi' \
   src tests tools CMakeLists.txt
 
 check_no_matches "Moshi/Mimi leaked into generic speech recognizer" \
