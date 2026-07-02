@@ -329,6 +329,34 @@ TEST_CASE("decode wavefront groups compatible lanes with bounded explicit stages
   }
 }
 
+TEST_CASE("decode wavefront routes duplicate graph actors through serial path") {
+  int model_tag = 1;
+  int backend_tag = 2;
+  std::array<graph_lane_fixture, 2> fixtures{};
+  prepare_lane(fixtures[0]);
+
+  const auto key = make_key(&model_tag, &backend_tag);
+  std::array<wavefront::event::lane, 2> lanes{{
+      {fixtures[0].graph, fixtures[0].compute_request, key, fixtures[0].lane_accepted},
+      {fixtures[0].graph, fixtures[0].compute_request, key, fixtures[1].lane_accepted},
+  }};
+  wavefront::event::dispatch_summary summary{};
+  wavefront::event::run request{std::span<wavefront::event::lane>{lanes},
+                                summary};
+  wavefront::action::lane_pool pool{};
+  wavefront::sm machine{pool};
+
+  CHECK(machine.process_event(request));
+  CHECK(machine.is(stateforward::sml::state<wavefront::state_idle>));
+  CHECK(summary.grouped);
+  CHECK(summary.dispatched_lanes == 2);
+  CHECK(summary.failed_lane == wavefront::event::k_no_failed_lane);
+  CHECK(pool.scheduled_run_count() == 0u);
+  CHECK(fixtures[0].lane_accepted);
+  CHECK(fixtures[1].lane_accepted);
+  CHECK(fixtures[0].kernel_calls == 2);
+}
+
 TEST_CASE("decode wavefront lane pool dispatches compatible lanes concurrently") {
   int model_tag = 1;
   int backend_tag = 2;

@@ -511,6 +511,59 @@ TEST_CASE("graph_machine_rejects_reserved_compute_without_prepare_graph") {
   CHECK(g_kernel_calls == 0);
 }
 
+TEST_CASE("graph_machine_rejects_reserved_compute_with_mismatched_lifecycle") {
+  emel::graph::sm machine{};
+  lifecycle_fixture lifecycle{};
+  lifecycle_fixture other_lifecycle{};
+
+  emel::graph::event::reserve_output reserve_output{};
+  reserve_callbacks reserve_cb{};
+  REQUIRE(machine.process_event(emel::graph::event::reserve{
+    .model_topology = reinterpret_cast<const void *>(0xA5),
+    .output_out = &reserve_output,
+    .lifecycle = &lifecycle.reserve,
+    .max_node_count = 4u,
+    .max_tensor_count = 5u,
+    .bytes_per_tensor = 8u,
+    .workspace_capacity_bytes = 64u,
+    .dispatch_done = {&reserve_cb, reserve_callbacks::on_done},
+    .dispatch_error = {&reserve_cb, reserve_callbacks::on_error},
+  }));
+  REQUIRE(reserve_cb.done_called);
+
+  g_kernel_calls = 0;
+  emel::graph::event::compute_output compute_output{};
+  compute_callbacks compute_cb{};
+  const emel::graph::event::compute compute_request{
+    .step_plan = reinterpret_cast<const void *>(0xB8),
+    .output_out = &compute_output,
+    .lifecycle = &other_lifecycle.compute,
+    .node_count_hint = 0u,
+    .tensor_count_hint = 0u,
+    .bytes_per_tensor = 0u,
+    .workspace_capacity_bytes = 0u,
+    .step_index = 0,
+    .step_size = 1,
+    .kv_tokens = 1,
+    .expected_outputs = 1,
+    .validate = validate_ok,
+    .prepare_graph = prepare_graph_reuse,
+    .alloc_graph = alloc_graph_ok,
+    .bind_inputs = bind_inputs_ok,
+    .run_kernel = run_kernel_counting,
+    .extract_outputs = extract_outputs_ok,
+    .dispatch_done = {&compute_cb, compute_callbacks::on_done},
+    .dispatch_error = {&compute_cb, compute_callbacks::on_error},
+  };
+
+  CHECK_FALSE(machine.process_event(emel::graph::event::compute_reserved{compute_request}));
+  CHECK_FALSE(compute_cb.done_called);
+  CHECK(compute_cb.error_called);
+  CHECK(compute_cb.error_code ==
+        static_cast<int32_t>(emel::error::cast(emel::graph::error::invalid_request)));
+  CHECK(g_kernel_calls == 0);
+}
+
 TEST_CASE("graph_machine_rejects_reserved_compute_before_reserve") {
   emel::graph::sm machine{};
   lifecycle_fixture lifecycle{};

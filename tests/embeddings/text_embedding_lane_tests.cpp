@@ -632,12 +632,13 @@ TEST_CASE("embeddings generator numeric helpers handle valid and invalid inputs"
   };
 
   std::array<block_q8_0, 1> q8_scratch = {};
-  CHECK(embedding_detail::matmul_f32(f32_matrix, input, output));
+  emel::kernel::sm matmul_kernel{emel::kernel::detect_host_kind()};
+  CHECK(embedding_detail::matmul_f32(matmul_kernel, f32_matrix, input, output));
   CHECK(output[0] == doctest::Approx(6.0f));
   CHECK(output[1] == doctest::Approx(15.0f));
-  CHECK(embedding_detail::matmul(f32_matrix, input, q8_scratch, output));
+  CHECK(embedding_detail::matmul(matmul_kernel, f32_matrix, input, q8_scratch, output));
   CHECK_FALSE(embedding_detail::matmul_f32(
-      f32_matrix, std::span<const float>{input.data(), 2u}, output));
+      matmul_kernel, f32_matrix, std::span<const float>{input.data(), 2u}, output));
 
   std::array<uint16_t, 6> f16_weights = {{
       fp32_to_fp16(1.0f),
@@ -656,7 +657,7 @@ TEST_CASE("embeddings generator numeric helpers handle valid and invalid inputs"
   };
   CHECK(embedding_detail::matmul_f16(f16_matrix, input, output));
   CHECK(output[0] == doctest::Approx(6.0f).epsilon(1.0e-3f));
-  CHECK(embedding_detail::matmul(f16_matrix, input, q8_scratch, output));
+  CHECK(embedding_detail::matmul(matmul_kernel, f16_matrix, input, q8_scratch, output));
   CHECK_FALSE(embedding_detail::matmul_f16(
       f16_matrix, input, std::span<float>{output.data(), 1u}));
 
@@ -672,9 +673,9 @@ TEST_CASE("embeddings generator numeric helpers handle valid and invalid inputs"
     .row_bytes = sizeof(block_q8_0),
   };
   std::array<float, 1> q8_output = {};
-  CHECK(embedding_detail::matmul_q8_0(q8_matrix, q8_row, q8_scratch, q8_output));
+  CHECK(embedding_detail::matmul_q8_0(matmul_kernel, q8_matrix, q8_row, q8_scratch, q8_output));
   CHECK(q8_output[0] == doctest::Approx(static_cast<float>(QK8_0)).epsilon(1.0e-1f));
-  CHECK(embedding_detail::matmul(q8_matrix, q8_row, q8_scratch, q8_output));
+  CHECK(embedding_detail::matmul(matmul_kernel, q8_matrix, q8_row, q8_scratch, q8_output));
   std::array<float, QK8_0> dequantized = {};
   CHECK(embedding_detail::copy_embedding_row(q8_matrix, 0, dequantized));
   CHECK(dequantized[0] == doctest::Approx(1.0f).epsilon(2.0e-1f));
@@ -693,13 +694,29 @@ TEST_CASE("embeddings generator numeric helpers handle valid and invalid inputs"
     .row_bytes = sizeof(block_q5_0),
   };
   std::array<float, 1> q5_output = {};
-  CHECK(embedding_detail::matmul_q5_0(q5_matrix, q5_row, q8_scratch, q5_output));
+  CHECK(embedding_detail::matmul_q5_0(matmul_kernel, q5_matrix, q5_row, q8_scratch, q5_output));
   CHECK(q5_output[0] == doctest::Approx(static_cast<float>(QK5_0)).epsilon(3.0e-1f));
-  CHECK(embedding_detail::matmul(q5_matrix, q5_row, q8_scratch, q5_output));
+  CHECK(embedding_detail::matmul(matmul_kernel, q5_matrix, q5_row, q8_scratch, q5_output));
   std::array<float, QK5_0> q5_dequantized = {};
   CHECK(embedding_detail::copy_embedding_row(q5_matrix, 0, q5_dequantized));
   CHECK(q5_dequantized[0] == doctest::Approx(1.0f).epsilon(2.0e-1f));
   CHECK_FALSE(embedding_detail::copy_embedding_row(q5_matrix, 1, q5_dequantized));
+
+  // Pointwise conv routes each pixel through the kernel machine; a q8_0
+  // matrix whose column count is not block-aligned must fail the matmul and
+  // surface as a pointwise failure.
+  std::array<float, 8> pointwise_input = {};
+  std::array<float, 1> pointwise_output = {};
+  embedding_action::matrix_view misaligned_q8_matrix = {
+    .data = q8_row_storage.data(),
+    .dtype = dtype_q8_0,
+    .rows = 1,
+    .cols = 8,
+    .row_bytes = sizeof(block_q8_0),
+  };
+  CHECK_FALSE(embedding_detail::pointwise_conv_hwc(
+      matmul_kernel, misaligned_q8_matrix, pointwise_input.data(), 1,
+      pointwise_output.data()));
 
   std::array<float, 2> bias_data = {{0.5f, -0.5f}};
   embedding_action::vector_view bias_view = {
@@ -751,6 +768,37 @@ TEST_CASE("embeddings generator numeric helpers handle valid and invalid inputs"
   CHECK_FALSE(embedding_detail::l2_normalize(std::span<float>{}));
   CHECK(embedding_detail::gelu(0.0f) == doctest::Approx(0.0f));
   embedding_detail::apply_gelu(normalize_values);
+}
+
+TEST_CASE("embeddings generator dense matrix matmul routes multi-column input through kernel") {
+  using emel::kernel::detail::dtype_f32;
+
+  // Weights are 2 rows x 3 cols: {1 2 3} and {4 5 6}.
+  std::array<float, 6> f32_weights = {{1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f}};
+  embedding_action::matrix_view f32_matrix = {
+    .data = f32_weights.data(),
+    .dtype = dtype_f32,
+    .rows = 2,
+    .cols = 3,
+    .row_bytes = 3u * sizeof(float),
+  };
+
+  // Two input columns packed k-major: column 0 = (1, 1, 1), column 1 = (0, 1, 2).
+  constexpr int32_t input_cols = 2;
+  std::array<float, 6> input = {{1.0f, 0.0f, 1.0f, 1.0f, 1.0f, 2.0f}};
+  std::array<float, 4> output = {};
+  emel::kernel::sm matmul_kernel{emel::kernel::detect_host_kind()};
+  CHECK(embedding_detail::matmul_f32_matrix(
+      matmul_kernel, f32_matrix, input.data(), input_cols, output.data()));
+  CHECK(output[0] == doctest::Approx(6.0f));
+  CHECK(output[1] == doctest::Approx(8.0f));
+  CHECK(output[2] == doctest::Approx(15.0f));
+  CHECK(output[3] == doctest::Approx(17.0f));
+
+  CHECK_FALSE(embedding_detail::matmul_f32_matrix(
+      matmul_kernel, f32_matrix, nullptr, input_cols, output.data()));
+  CHECK_FALSE(embedding_detail::matmul_f32_matrix(
+      matmul_kernel, f32_matrix, input.data(), 0, output.data()));
 }
 
 TEST_CASE("embeddings generator state machine covers callback and prepare error branches when fixture present") {

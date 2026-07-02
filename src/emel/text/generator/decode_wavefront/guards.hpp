@@ -40,6 +40,22 @@ inline bool valid_lane_count(const event::run & ev) noexcept {
   return ev.lanes.size() > 0u && ev.lanes.size() <= event::k_max_lanes;
 }
 
+// Parallel dispatch requires one graph actor per lane: concurrent
+// process_event on a shared actor would break the RTC single-writer
+// contract. Lane count is bounded by k_max_lanes, so the pairwise scan is
+// statically bounded.
+inline bool all_lane_graphs_distinct(const event::run & ev) noexcept {
+  const size_t lane_count = ev.lanes.size();
+  for (size_t i = 0u; i < lane_count; ++i) {
+    for (size_t j = i + 1u; j < lane_count; ++j) {
+      if (&ev.lanes[i].graph == &ev.lanes[j].graph) {
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
 }  // namespace detail
 
 struct guard_valid_request {
@@ -68,13 +84,15 @@ struct guard_multi_lane_compatible {
 
 struct guard_serial_dispatch {
   bool operator()(const event::run & ev, const action::context & ctx) const noexcept {
-    return ctx.pool == nullptr || ev.lanes.size() == 1u;
+    return ctx.pool == nullptr || ev.lanes.size() == 1u ||
+           !detail::all_lane_graphs_distinct(ev);
   }
 };
 
 struct guard_parallel_dispatch {
   bool operator()(const event::run & ev, const action::context & ctx) const noexcept {
-    return ctx.pool != nullptr && ev.lanes.size() > 1u;
+    return ctx.pool != nullptr && ev.lanes.size() > 1u &&
+           detail::all_lane_graphs_distinct(ev);
   }
 };
 

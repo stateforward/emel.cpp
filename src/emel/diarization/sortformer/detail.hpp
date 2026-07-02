@@ -4,6 +4,8 @@
 #include <span>
 #include <vector>
 
+#include "emel/kernel/sm.hpp"
+
 namespace emel::diarization::sortformer::detail {
 
 struct dense_weight_cache {
@@ -34,12 +36,14 @@ bool prepare_dense_weight_cache(std::span<const float> weights,
                                 size_t output_dim,
                                 dense_weight_cache & cache) noexcept;
 
-bool compute_dense(std::span<const float> input,
+bool compute_dense(emel::kernel::sm & kernel,
+                   std::span<const float> input,
                    std::span<const float> weights,
                    std::span<const float> bias,
                    std::span<float> output) noexcept;
 
-bool compute_dense_without_bias(std::span<const float> input,
+bool compute_dense_without_bias(emel::kernel::sm & kernel,
+                                std::span<const float> input,
                                 std::span<const float> weights,
                                 std::span<float> output) noexcept;
 
@@ -48,7 +52,8 @@ bool transpose_dense_input(std::span<const float> input_rows,
                            size_t input_dim,
                            std::span<float> transposed_input) noexcept;
 
-bool compute_dense_batch(std::span<const float> input_rows,
+bool compute_dense_batch(emel::kernel::sm & kernel,
+                         std::span<const float> input_rows,
                          size_t row_count,
                          size_t input_dim,
                          std::span<const float> weights,
@@ -58,7 +63,8 @@ bool compute_dense_batch(std::span<const float> input_rows,
                          std::span<float> transposed_output,
                          std::span<float> output_rows) noexcept;
 
-bool compute_dense_batch_prepared(std::span<const float> input_rows,
+bool compute_dense_batch_prepared(emel::kernel::sm & kernel,
+                                  std::span<const float> input_rows,
                                   size_t row_count,
                                   size_t input_dim,
                                   std::span<const float> weights,
@@ -69,7 +75,8 @@ bool compute_dense_batch_prepared(std::span<const float> input_rows,
                                   std::span<float> transposed_output,
                                   std::span<float> output_rows) noexcept;
 
-bool compute_dense_batch_residual_prepared(std::span<const float> input_rows,
+bool compute_dense_batch_residual_prepared(emel::kernel::sm & kernel,
+                                           std::span<const float> input_rows,
                                            size_t row_count,
                                            size_t input_dim,
                                            std::span<const float> weights,
@@ -81,7 +88,8 @@ bool compute_dense_batch_residual_prepared(std::span<const float> input_rows,
                                            std::span<float> transposed_output,
                                            std::span<float> output_rows) noexcept;
 
-bool compute_dense_batch_without_bias(std::span<const float> input_rows,
+bool compute_dense_batch_without_bias(emel::kernel::sm & kernel,
+                                      std::span<const float> input_rows,
                                       size_t row_count,
                                       size_t input_dim,
                                       std::span<const float> weights,
@@ -90,7 +98,8 @@ bool compute_dense_batch_without_bias(std::span<const float> input_rows,
                                       std::span<float> transposed_output,
                                       std::span<float> output_rows) noexcept;
 
-bool compute_dense_batch_without_bias_prepared(std::span<const float> input_rows,
+bool compute_dense_batch_without_bias_prepared(emel::kernel::sm & kernel,
+                                               std::span<const float> input_rows,
                                                size_t row_count,
                                                size_t input_dim,
                                                std::span<const float> weights,
@@ -100,7 +109,8 @@ bool compute_dense_batch_without_bias_prepared(std::span<const float> input_rows
                                                std::span<float> transposed_output,
                                                std::span<float> output_rows) noexcept;
 
-bool compute_dense_batch_to_transposed(std::span<const float> input_rows,
+bool compute_dense_batch_to_transposed(emel::kernel::sm & kernel,
+                                       std::span<const float> input_rows,
                                        size_t row_count,
                                        size_t input_dim,
                                        std::span<const float> weights,
@@ -109,7 +119,8 @@ bool compute_dense_batch_to_transposed(std::span<const float> input_rows,
                                        std::span<float> transposed_input,
                                        std::span<float> transposed_output) noexcept;
 
-bool compute_dense_batch_to_transposed_prepared(std::span<const float> input_rows,
+bool compute_dense_batch_to_transposed_prepared(emel::kernel::sm & kernel,
+                                                std::span<const float> input_rows,
                                                 size_t row_count,
                                                 size_t input_dim,
                                                 std::span<const float> weights,
@@ -119,7 +130,8 @@ bool compute_dense_batch_to_transposed_prepared(std::span<const float> input_row
                                                 std::span<float> transposed_input,
                                                 std::span<float> transposed_output) noexcept;
 
-bool compute_dense_batch_from_transposed(std::span<const float> transposed_input,
+bool compute_dense_batch_from_transposed(emel::kernel::sm & kernel,
+                                         std::span<const float> transposed_input,
                                          size_t row_count,
                                          size_t input_dim,
                                          std::span<const float> weights,
@@ -128,7 +140,8 @@ bool compute_dense_batch_from_transposed(std::span<const float> transposed_input
                                          std::span<float> transposed_output,
                                          std::span<float> output_rows) noexcept;
 
-bool compute_dense_batch_from_transposed_prepared(std::span<const float> transposed_input,
+bool compute_dense_batch_from_transposed_prepared(emel::kernel::sm & kernel,
+                                                  std::span<const float> transposed_input,
                                                   size_t row_count,
                                                   size_t input_dim,
                                                   std::span<const float> weights,
@@ -139,6 +152,7 @@ bool compute_dense_batch_from_transposed_prepared(std::span<const float> transpo
                                                   std::span<float> output_rows) noexcept;
 
 bool compute_dense_batch_from_transposed_scaled_residual_prepared(
+    emel::kernel::sm & kernel,
     std::span<const float> transposed_input,
     size_t row_count,
     size_t input_dim,
