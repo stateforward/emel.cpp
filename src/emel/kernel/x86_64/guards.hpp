@@ -29,12 +29,26 @@ struct guard_simd_op_mul_mat_f32_fma {
   }
 };
 
+struct guard_simd_op_mul_mat_f32_fma_vector {
+  bool operator()(
+      const ::emel::kernel::x86_64::event::dispatch_op_mul_mat &ev,
+      const action::context &ctx) const noexcept {
+    if (!::emel::kernel::detail::validate_dispatch_request(ev.request)) {
+      return false;
+    }
+    return ::emel::kernel::x86_64::detail::can_use_avx2_fma_f32_vector_mul_mat(
+        ev.request, ctx.host_features);
+  }
+};
+
 struct guard_simd_op_mul_mat_f32_avx2_only {
-  bool operator()(const ::emel::kernel::x86_64::event::dispatch_op_mul_mat &ev,
-                  const action::context &ctx) const noexcept {
-    return simd_op<::emel::kernel::x86_64::event::dispatch_op_mul_mat>{}(ev,
-                                                                         ctx) &&
-           !guard_simd_op_mul_mat_f32_fma{}(ev, ctx);
+  bool operator()(
+      const ::emel::kernel::x86_64::event::dispatch_op_mul_mat &ev,
+      const action::context &ctx) const noexcept {
+    return simd_op<::emel::kernel::x86_64::event::dispatch_op_mul_mat>{}(
+               ev, ctx) &&
+           !guard_simd_op_mul_mat_f32_fma{}(ev, ctx) &&
+           !guard_simd_op_mul_mat_f32_fma_vector{}(ev, ctx);
   }
 };
 

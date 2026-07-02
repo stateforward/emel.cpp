@@ -76,7 +76,8 @@ struct effect_run_encoder_variant {
                   context &ctx) const noexcept {
     uint64_t frame_count = 0u;
     const uint64_t digest = kdetail::run_encoder<Variant, Aux>(
-        *runtime_ev.request.contract.model, runtime_ev.request.pcm.data(),
+        ctx.kernel, *runtime_ev.request.contract.model,
+        runtime_ev.request.pcm.data(),
         static_cast<uint64_t>(runtime_ev.request.pcm.size()),
         runtime_ev.request.workspace.data(),
         runtime_ev.request.encoder_state.data(), frame_count);

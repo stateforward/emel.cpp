@@ -394,6 +394,11 @@ struct model {
 
       , sml::state<ready> <= sml::state<ready> +
                sml::event<::emel::kernel::x86_64::event::dispatch_op_mul_mat>
+                 [ guard::guard_simd_op_mul_mat_f32_fma_vector{} ]
+                 / action::effect_exec_simd_op_mul_mat_f32_fma_vector
+
+      , sml::state<ready> <= sml::state<ready> +
+               sml::event<::emel::kernel::x86_64::event::dispatch_op_mul_mat>
                  [ guard::guard_simd_op_mul_mat_f32_fma{} ]
                  / action::effect_exec_simd_op_mul_mat_f32_fma
 
@@ -1250,6 +1255,10 @@ struct sm : public emel::sm<model, action::context> {
 
   uint64_t optimized_f32_fma_dispatch_count() const noexcept {
     return this->context_.optimized_f32_fma_dispatch_count;
+  }
+
+  uint64_t optimized_f32_fma_vector_dispatch_count() const noexcept {
+    return this->context_.optimized_f32_fma_vector_dispatch_count;
   }
 
   uint64_t optimized_q4_dispatch_count() const noexcept {

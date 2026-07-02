@@ -1561,6 +1561,50 @@ TEST_CASE("kernel_x86_64_f32_mul_mat_uses_fma_and_avx2_only_routes") {
   }
 }
 
+TEST_CASE("kernel_x86_64_f32_mul_mat_vector_fma_route_matches_scalar") {
+  if (!host_has_avx2_fma()) {
+    return;
+  }
+
+  constexpr uint64_t k = 133;
+  constexpr uint64_t m = 5;
+
+  std::array<float, k * m> src0{};
+  std::array<float, k> src1{};
+  for (uint64_t i = 0; i < src0.size(); ++i) {
+    const int64_t centered = static_cast<int64_t>(i % 29u) - 14;
+    src0[static_cast<size_t>(i)] = static_cast<float>(centered) * 0.0625f;
+  }
+  for (uint64_t i = 0; i < src1.size(); ++i) {
+    const int64_t centered = static_cast<int64_t>(i % 31u) - 15;
+    src1[static_cast<size_t>(i)] = static_cast<float>(centered) * 0.03125f;
+  }
+
+  std::array<float, m> expected{};
+  const emel::kernel::event::op_mul_mat scalar_ev{
+      .src0 = make_src(src0.data(), dtype::f32, k, m),
+      .src1 = make_src(src1.data(), dtype::f32, 1u, k),
+      .dst = make_dst(expected.data(), dtype::f32, 1u, m),
+  };
+  CHECK(emel::kernel::detail::execute_scalar(scalar_ev));
+
+  std::array<float, m> vector_out{};
+  const emel::kernel::event::op_mul_mat vector_ev{
+      .src0 = make_src(src0.data(), dtype::f32, k, m),
+      .src1 = make_src(src1.data(), dtype::f32, 1u, k),
+      .dst = make_dst(vector_out.data(), dtype::f32, 1u, m),
+  };
+  x86_64_sm vector_machine{
+      emel::kernel::x86_64::action::context{avx2_fma_contract(true), {}, 0}};
+
+  CHECK(vector_machine.process_event(vector_ev));
+  CHECK(vector_machine.optimized_f32_fma_vector_dispatch_count() == 1u);
+  CHECK(vector_machine.optimized_f32_fma_dispatch_count() == 0u);
+  for (size_t i = 0; i < expected.size(); ++i) {
+    CHECK(vector_out[i] == doctest::Approx(expected[i]).epsilon(1e-5f));
+  }
+}
+
 TEST_CASE("kernel_x86_64_mul_mat_tail_resets_nan_dst_on_first_depth_block") {
   const bool host_avx2 =
       emel::kernel::x86_64::detail::avx2_intrinsics_compiled &&
