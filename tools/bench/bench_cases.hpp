@@ -82,6 +82,8 @@ void append_emel_decode_wavefront_cases(std::vector<result> & results, const con
 void append_reference_decode_wavefront_cases(std::vector<result> & results, const config & cfg);
 void append_emel_parallel_matmul_cases(std::vector<result> & results, const config & cfg);
 void append_reference_parallel_matmul_cases(std::vector<result> & results, const config & cfg);
+void append_emel_weight_streaming_cases(std::vector<result> & results, const config & cfg);
+void append_reference_weight_streaming_cases(std::vector<result> & results, const config & cfg);
 void append_emel_tokenizer_preprocessor_bpe_cases(std::vector<result> & results,
                                                   const config & cfg);
 void append_reference_tokenizer_preprocessor_bpe_cases(std::vector<result> & results,

@@ -377,6 +377,10 @@ struct model {
   }
 };
 
+// Public context alias: owners (benches, fixtures) wire collaborators through
+// this name so they never reference the actor's internal namespaces.
+using context = action::context;
+
 // Typed wrappers drive the two-dispatch protocols unconditionally; runtime
 // carriers thread the co_sm scheduler to effects so context stays free of
 // dispatch-local pointers.

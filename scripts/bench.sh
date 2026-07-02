@@ -13,6 +13,9 @@ USE_ZIG=true
 MODE_FLAG=""
 SUITE_FILTER=""
 COMBINED=false
+MEMORY_MAX_RAW=""
+MEMORY_MAX_BYTES=""
+RUN_ONLY=false
 DEFAULT_GENERATION_WORKLOAD_ID="${EMEL_BENCH_DEFAULT_GENERATION_WORKLOAD_ID:-lfm2_single_user_hello_max_tokens_1_v1}"
 DEFAULT_DIARIZATION_ITERS="${EMEL_BENCH_DEFAULT_DIARIZATION_ITERS:-1}"
 DEFAULT_DIARIZATION_RUNS="${EMEL_BENCH_DEFAULT_DIARIZATION_RUNS:-3}"
@@ -32,6 +35,10 @@ usage: scripts/bench.sh [--snapshot] [--compare] [--compare-update] [--update] [
   --emel-only  run only the EMEL benchmarks
   --generation-only run only the generation benchmark suite
   --suite=...  run only the named benchmark suite
+  --memory-max=<bytes|NNpct|none> weight_streaming only: wrap the runner in a
+               systemd-run user scope with MemoryMax (and MemorySwapMax=0);
+               NNpct derives bytes from the fixture size; none runs unwrapped.
+               Runs the suite directly (no snapshot/compare gating).
 USAGE
 }
 
@@ -48,6 +55,7 @@ for arg in "$@"; do
     --emel-only) MODE_FLAG="--mode=emel" ;;
     --generation-only) SUITE_FILTER="generation" ;;
     --suite=*) SUITE_FILTER="${arg#--suite=}" ;;
+    --memory-max=*) MEMORY_MAX_RAW="${arg#--memory-max=}" ;;
     -h|--help) usage; exit 0 ;;
     *)
       echo "error: unknown argument '$arg'" >&2
@@ -82,7 +90,58 @@ bench_suite_build_dir() {
   printf "%s\n" "$ROOT_DIR/build/bench_tools_ninja_${safe_suite}"
 }
 
-if ! $TEST_TOOLS && ! $SNAPSHOT && ! $COMPARE; then
+if [[ -n "$MEMORY_MAX_RAW" && "$SUITE_FILTER" != "weight_streaming" ]]; then
+  echo "error: --memory-max requires --suite=weight_streaming" >&2
+  exit 1
+fi
+
+if [[ "$SUITE_FILTER" == "weight_streaming" ]]; then
+  # Opt-in suite: rows are emitted only when this is set, so default
+  # snapshot/compare runs carry no baseline requirement.
+  export EMEL_BENCH_WEIGHT_STREAMING=1
+fi
+
+if [[ -n "$MEMORY_MAX_RAW" && "$MEMORY_MAX_RAW" != "none" ]]; then
+  weight_streaming_fixture="$ROOT_DIR/tests/models/LFM2.5-230M-Q8_0.gguf"
+  if [[ "$MEMORY_MAX_RAW" == *pct ]]; then
+    memory_max_pct="${MEMORY_MAX_RAW%pct}"
+    if ! [[ "$memory_max_pct" =~ ^[0-9]+$ ]]; then
+      echo "error: invalid --memory-max value '$MEMORY_MAX_RAW'" >&2
+      exit 1
+    fi
+    if [[ ! -f "$weight_streaming_fixture" ]]; then
+      echo "error: --memory-max percentage needs the fixture: $weight_streaming_fixture" >&2
+      exit 1
+    fi
+    fixture_bytes="$(stat -c%s "$weight_streaming_fixture" 2>/dev/null ||                      stat -f%z "$weight_streaming_fixture")"
+    MEMORY_MAX_BYTES=$((fixture_bytes * memory_max_pct / 100))
+  elif [[ "$MEMORY_MAX_RAW" =~ ^[0-9]+$ ]]; then
+    MEMORY_MAX_BYTES="$MEMORY_MAX_RAW"
+  else
+    echo "error: invalid --memory-max value '$MEMORY_MAX_RAW'" >&2
+    exit 1
+  fi
+  # A requested limit without a working user cgroup wrapper is a hard failure
+  # (missing-tools rule), never a silent unwrapped run.
+  if ! command -v systemd-run >/dev/null 2>&1; then
+    echo "error: required tool missing: systemd-run (needed for --memory-max)" >&2
+    exit 1
+  fi
+  if ! systemd-run --user --scope -p MemoryMax=64M --collect true       >/dev/null 2>&1; then
+    echo "error: systemd-run user scope probe failed; --memory-max needs user cgroup delegation" >&2
+    exit 1
+  fi
+fi
+
+if [[ -n "$MEMORY_MAX_RAW" ]]; then
+  if $SNAPSHOT || $COMPARE || $TEST_TOOLS || $UPDATE; then
+    echo "error: --memory-max runs the suite directly and cannot combine with --snapshot/--compare/--update/--test-tools" >&2
+    exit 1
+  fi
+  RUN_ONLY=true
+fi
+
+if ! $TEST_TOOLS && ! $SNAPSHOT && ! $COMPARE && ! $RUN_ONLY; then
   COMPARE=true
 fi
 
@@ -129,21 +188,30 @@ run_bench_runner() {
   local generation_workload_id
   local diarization_iters
   local diarization_runs
+  local -a runner_prefix=()
   shift
   generation_workload_id="${EMEL_GENERATION_WORKLOAD_ID:-$DEFAULT_GENERATION_WORKLOAD_ID}"
   diarization_iters="${EMEL_BENCH_DIARIZATION_ITERS:-$DEFAULT_DIARIZATION_ITERS}"
   diarization_runs="${EMEL_BENCH_DIARIZATION_RUNS:-$DEFAULT_DIARIZATION_RUNS}"
+  if [[ -n "$MEMORY_MAX_BYTES" ]]; then
+    # The scope inherits this shell's environment; MemorySwapMax=0 keeps swap
+    # from masking the memory pressure the lane is meant to feel.
+    export EMEL_BENCH_MEMORY_MAX="$MEMORY_MAX_BYTES"
+    runner_prefix=(systemd-run --user --scope -p "MemoryMax=$MEMORY_MAX_BYTES"
+                   -p MemorySwapMax=0 --same-dir --collect)
+  fi
   if [[ -n "$SUITE_FILTER" ]]; then
     EMEL_GENERATION_WORKLOAD_ID="$generation_workload_id" \
       EMEL_BENCH_DIARIZATION_ITERS="$diarization_iters" \
       EMEL_BENCH_DIARIZATION_RUNS="$diarization_runs" \
-      EMEL_BENCH_SUITE="$SUITE_FILTER" "$build_dir/bench_runner" "$@"
+      EMEL_BENCH_SUITE="$SUITE_FILTER" \
+      ${runner_prefix[@]+"${runner_prefix[@]}"} "$build_dir/bench_runner" "$@"
     return
   fi
   EMEL_GENERATION_WORKLOAD_ID="$generation_workload_id" \
     EMEL_BENCH_DIARIZATION_ITERS="$diarization_iters" \
     EMEL_BENCH_DIARIZATION_RUNS="$diarization_runs" \
-    "$build_dir/bench_runner" "$@"
+    ${runner_prefix[@]+"${runner_prefix[@]}"} "$build_dir/bench_runner" "$@"
 }
 
 configure_bench_build() {
@@ -746,5 +814,56 @@ if $COMPARE; then
     else
       run_bench_runner "$compare_build_dir" --mode=compare
     fi
+  fi
+fi
+
+if $RUN_ONLY; then
+  for tool in cmake ninja git; do
+    if ! command -v "$tool" >/dev/null 2>&1; then
+      echo "error: required tool missing: $tool" >&2
+      exit 1
+    fi
+  done
+  if $USE_ZIG && ! command -v zig >/dev/null 2>&1; then
+    echo "error: zig not found (use --system to use system compilers)" >&2
+    exit 1
+  fi
+
+  # Reuse the default unfiltered build (runtime EMEL_BENCH_SUITE selects the
+  # suite) instead of configuring a per-suite tree: the reference build is
+  # multi-gigabyte and the run-only mode should not duplicate it.
+  run_only_build_dir="${BENCH_BUILD_DIR:-$(bench_suite_build_dir "")}"
+  prepare_toolchain
+
+  cmake_args=(-S "$TOOLS_DIR" -B "$run_only_build_dir" -G Ninja -DCMAKE_BUILD_TYPE=Release
+              -DEMEL_ENABLE_TESTS=OFF
+              -DREF_IMPL_REF="$ref_value"
+              -DEMEL_BENCH_SUITE_FILTER=)
+  cmake_args+=("-DCMAKE_C_COMPILER=$bench_cc")
+  cmake_args+=("-DCMAKE_CXX_COMPILER=$bench_cxx")
+  cmake_args+=("-DCMAKE_ASM_COMPILER=$bench_cc")
+  if [[ -n "$bench_cc_arg" ]]; then
+    cmake_args+=("-DCMAKE_C_COMPILER_ARG1=$bench_cc_arg")
+    cmake_args+=("-DCMAKE_ASM_COMPILER_ARG1=$bench_cc_arg")
+  fi
+  if [[ -n "$bench_cxx_arg" ]]; then
+    cmake_args+=("-DCMAKE_CXX_COMPILER_ARG1=$bench_cxx_arg")
+  fi
+  if [[ -n "$bench_c_flags" ]]; then
+    cmake_args+=("-DCMAKE_C_FLAGS=$bench_c_flags")
+  fi
+  if [[ -n "$bench_cxx_flags" ]]; then
+    cmake_args+=("-DCMAKE_CXX_FLAGS=$bench_cxx_flags")
+  fi
+
+  cmake "${cmake_args[@]}" >&2
+  cmake --build "$run_only_build_dir" --parallel 8 --target bench_runner >&2
+  if [[ -n "$MEMORY_MAX_BYTES" ]]; then
+    # Capped runs measure the EMEL lanes only: the llama.cpp baseline comes
+    # from the unwrapped --memory-max=none run (its 385MiB compute buffer would
+    # otherwise dominate any meaningful MemoryMax).
+    run_bench_runner "$run_only_build_dir" --mode=emel
+  else
+    run_bench_runner "$run_only_build_dir" --mode=compare
   fi
 fi

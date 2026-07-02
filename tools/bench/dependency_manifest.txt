@@ -63,6 +63,9 @@ record runner=decode_wavefront kind=source path=tools/bench/text/generator/decod
 record runner=decode_wavefront kind=source path=src/emel/text/generator/decode_wavefront reason=wavefront_actor
 record runner=parallel_matmul kind=source path=tools/bench/text/generator/parallel_matmul_bench.cpp reason=suite_source
 record runner=parallel_matmul kind=source path=src/emel/text/generator/detail.hpp reason=parallel_matmul_lanes
+record runner=weight_streaming kind=source path=tools/bench/model/tensor/window_streaming_bench.cpp reason=suite_source
+record runner=weight_streaming kind=source path=src/emel/model/tensor/window reason=window_actor
+record runner=weight_streaming kind=source path=scripts/bench.sh reason=memory_max_wrapper
 record runner=tokenizer_preprocessor_bpe kind=source path=tools/bench/text/tokenizer/preprocessor/bpe_bench.cpp reason=suite_source
 record runner=tokenizer_preprocessor_spm kind=source path=tools/bench/text/tokenizer/preprocessor/spm_bench.cpp reason=suite_source
 record runner=tokenizer_preprocessor_ugm kind=source path=tools/bench/text/tokenizer/preprocessor/ugm_bench.cpp reason=suite_source
