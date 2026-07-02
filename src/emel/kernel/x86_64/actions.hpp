@@ -1672,6 +1672,8 @@ template <class dispatch_event_type> struct exec_scalar_op {
             src0_type == ::emel::kernel::detail::dtype_q2_k);
         ctx.shared_q3_dispatch_count += static_cast<uint64_t>(
             src0_type == ::emel::kernel::detail::dtype_q3_k);
+        ctx.shared_q4_dispatch_count += static_cast<uint64_t>(
+            src0_type == ::emel::kernel::detail::dtype_q4_k);
         ctx.shared_q6_dispatch_count += static_cast<uint64_t>(
             src0_type == ::emel::kernel::detail::dtype_q6_k);
       }

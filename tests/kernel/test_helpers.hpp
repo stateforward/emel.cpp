@@ -317,7 +317,6 @@ inline emel::kernel::event::op_flash_attn_ext make_flash_attn_ext_event(
   ev.src1 = make_src(fixture.k, dtype::f16, 4, 2, 1, 1);
   ev.src2 = make_src(fixture.v, dtype::f16, 4, 2, 1, 1);
   ev.dst = make_dst(fixture.dst, dtype::f32, 4, 1, 1, 1);
-  ev.nth = 1;
 
   const float scale = 1.0f;
   std::memcpy(ev.op_params.data(), &scale, sizeof(scale));
@@ -651,8 +650,6 @@ inline event_type make_smoke_op_event() {
   ev.src1 = make_src(src1, dtype::f32, 4);
   ev.src2 = make_src(src2, dtype::f32, 4);
   ev.dst = make_dst(dst, dtype::f32, 4);
-  ev.ith = 0;
-  ev.nth = 1;
 
   if constexpr (std::is_same_v<event_type, emel::kernel::event::op_mul_mat>) {
     ev.src0 = make_src(src0, dtype::f32, 2, 2);

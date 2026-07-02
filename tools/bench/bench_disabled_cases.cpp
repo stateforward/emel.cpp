@@ -190,6 +190,26 @@ void append_emel_sm_any_cases(std::vector<result> &, const config &) {}
 void append_reference_sm_any_cases(std::vector<result> &, const config &) {}
 #endif
 
+#ifndef EMEL_BENCH_ENABLE_SM_SCHEDULER
+void append_emel_sm_scheduler_cases(std::vector<result> &, const config &) {}
+void append_reference_sm_scheduler_cases(std::vector<result> &, const config &) {}
+#endif
+
+#ifndef EMEL_BENCH_ENABLE_GRAPH_PROCESSOR
+void append_emel_graph_processor_cases(std::vector<result> &, const config &) {}
+void append_reference_graph_processor_cases(std::vector<result> &, const config &) {}
+#endif
+
+#ifndef EMEL_BENCH_ENABLE_DECODE_WAVEFRONT
+void append_emel_decode_wavefront_cases(std::vector<result> &, const config &) {}
+void append_reference_decode_wavefront_cases(std::vector<result> &, const config &) {}
+#endif
+
+#ifndef EMEL_BENCH_ENABLE_PARALLEL_MATMUL
+void append_emel_parallel_matmul_cases(std::vector<result> &, const config &) {}
+void append_reference_parallel_matmul_cases(std::vector<result> &, const config &) {}
+#endif
+
 #ifndef EMEL_BENCH_ENABLE_TOKENIZER_PREPROCESSOR_BPE
 void append_emel_tokenizer_preprocessor_bpe_cases(std::vector<result> &, const config &) {}
 void append_reference_tokenizer_preprocessor_bpe_cases(std::vector<result> &, const config &) {}

@@ -349,8 +349,22 @@ TEST_CASE("quality gates skip host-incompatible benchmark suites during full exp
   CHECK(helper.find("kernel_aarch64)") != std::string::npos);
   CHECK(helper.find("\"aarch64\"") != std::string::npos);
   CHECK(helper.find("\"arm64\"") != std::string::npos);
-  CHECK(helper.find("sm_any)") != std::string::npos);
+  CHECK(helper.find("sm_any|sm_scheduler)") != std::string::npos);
   CHECK(helper.find("EMEL_BENCH_INTERNAL") != std::string::npos);
+}
+
+TEST_CASE("quality gates enable internal env for selected internal benchmark suites") {
+  const std::string script = read_file(repo_root() / "scripts" / "quality_gates.sh");
+  const std::size_t run_start = script.find("run_benchmark_gates()");
+  REQUIRE(run_start != std::string::npos);
+
+  const std::size_t run_end = script.find("run_coverage_gate()", run_start);
+  REQUIRE(run_end != std::string::npos);
+
+  const std::string run_body = script.substr(run_start, run_end - run_start);
+  CHECK(run_body.find("sm_any|sm_scheduler)") != std::string::npos);
+  CHECK(run_body.find("bench_extra_env+=(EMEL_BENCH_INTERNAL=1)") !=
+        std::string::npos);
 }
 
 TEST_CASE("quality gates check benchmark manifest before deciding benchmark branch") {

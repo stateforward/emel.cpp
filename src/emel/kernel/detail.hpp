@@ -1826,9 +1826,8 @@ template <class request_type>
 inline bool validate_dispatch_request(const request_type & request) noexcept {
   const bool has_required_buffers =
       has_required_src0(request) && has_required_src1(request) && has_required_dst(request);
-  const bool has_valid_threading = request.ith == 0 && request.nth == 1;
   const bool has_valid_params = request.op_params_size <= request.op_params.size();
-  return has_required_buffers && has_valid_threading && has_valid_params;
+  return has_required_buffers && has_valid_params;
 }
 
 template <class tensor_type>

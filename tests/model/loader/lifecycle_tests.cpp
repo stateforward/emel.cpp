@@ -441,6 +441,70 @@ void build_lfm2_model(emel::model::data &model, const bool include_output_norm,
   model.n_tensors = tensor_index;
 }
 
+// LFM2.5-230M geometry: 14 blocks, attention at even blocks >= 2, classified
+// via the per-layer kv-head pattern instead of the 1.2B fallback layout.
+void build_lfm2_230m_model(emel::model::data &model) {
+  emel::tests::reset_model_data(model);
+  copy_name(model.architecture_name, "lfm2");
+  model.n_layers = 14;
+  model.params.n_layer = 14;
+  model.params.n_ctx = 128000;
+  model.params.n_embd = 1024;
+  model.params.n_embd_out = 1024;
+  model.params.n_head = 16;
+  model.params.n_head_kv = 8;
+  model.params.n_vocab = 65536;
+  model.params.shortconv_l_cache = 3;
+  model.params.rope_freq_base = 1000000.0f;
+  model.params.attention_layer_pattern_count =
+      static_cast<uint32_t>(model.n_layers);
+  for (int32_t block = 0; block < model.n_layers; ++block) {
+    model.params.attention_layer_pattern_flags[static_cast<size_t>(block)] =
+        (block >= 2 && block % 2 == 0) ? 1u : 0u;
+  }
+  model.weights_data = model.tensors.data();
+  model.weights_size = 4096u;
+
+  uint32_t tensor_index = 0u;
+  const auto add = [&](const std::string_view name) {
+    append_tensor_name(model, model.tensors[tensor_index], name);
+    ++tensor_index;
+  };
+  const auto add_block = [&](const int32_t block,
+                             const std::string_view suffix) {
+    add(std::string{"blk."} + std::to_string(block) + "." +
+        std::string{suffix});
+  };
+
+  add("token_embd.weight");
+  add("token_embd_norm.weight");
+
+  for (int32_t block = 0; block < model.n_layers; ++block) {
+    add_block(block, "attn_norm.weight");
+    add_block(block, "ffn_norm.weight");
+    add_block(block, "ffn_gate.weight");
+    add_block(block, "ffn_down.weight");
+    add_block(block, "ffn_up.weight");
+
+    if (model.params.attention_layer_pattern_flags[static_cast<size_t>(
+            block)] != 0u) {
+      add_block(block, "attn_q.weight");
+      add_block(block, "attn_k.weight");
+      add_block(block, "attn_v.weight");
+      add_block(block, "attn_q_norm.weight");
+      add_block(block, "attn_k_norm.weight");
+      add_block(block, "attn_output.weight");
+      continue;
+    }
+
+    add_block(block, "shortconv.conv.weight");
+    add_block(block, "shortconv.in_proj.weight");
+    add_block(block, "shortconv.out_proj.weight");
+  }
+
+  model.n_tensors = tensor_index;
+}
+
 void build_gemma4_model(emel::model::data &model,
                         const bool include_output_weight) {
   emel::tests::reset_model_data(model);
@@ -2493,6 +2557,26 @@ TEST_CASE("model_execution_contract_rejects_lfm2_with_noncanonical_hybrid_"
           "block_tensors") {
   auto model = std::make_unique<emel::model::data>();
   build_lfm2_model(*model, true, true);
+
+  CHECK(emel::model::validate_execution_contract(*model) ==
+        emel::error::cast(emel::model::loader::error::model_invalid));
+}
+
+TEST_CASE("model_execution_contract_accepts_lfm2_230m_pattern_layout") {
+  auto model = std::make_unique<emel::model::data>();
+  build_lfm2_230m_model(*model);
+
+  CHECK(emel::model::validate_execution_contract(*model) ==
+        emel::error::cast(emel::model::loader::error::none));
+}
+
+TEST_CASE("model_execution_contract_rejects_lfm2_230m_when_pattern_"
+          "contradicts_block_tensors") {
+  auto model = std::make_unique<emel::model::data>();
+  build_lfm2_230m_model(*model);
+  // Block 2 carries attention tensors; flipping its pattern flag must fail the
+  // hybrid tensor contract instead of silently reclassifying the block.
+  model->params.attention_layer_pattern_flags[2] = 0u;
 
   CHECK(emel::model::validate_execution_contract(*model) ==
         emel::error::cast(emel::model::loader::error::model_invalid));

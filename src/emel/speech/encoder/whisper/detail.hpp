@@ -351,7 +351,6 @@ linear_q8_0_quantized_input(const emel::model::data::tensor_record &weight,
                       sizeof(float) * Out,
                   },
           },
-      .nth = 1u,
   };
   ::emel::kernel::aarch64::detail::execute_neon_mul_mat_q8_0_vector_unchecked(
       request);

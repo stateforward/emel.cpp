@@ -75,13 +75,28 @@ struct model {
 
       , sml::state<compute_result_decision> <= sml::state<contract_flash_decision>
                  + sml::completion<event::run>
+                 [ guard::guard_materialized_logits_with_parallel_chunk8_q8_k_ready{} ]
+                 / action::request_contract_flash_materialized_parallel_chunk8_q8_k
+
+      , sml::state<compute_result_decision> <= sml::state<contract_flash_decision>
+                 + sml::completion<event::run>
                  [ guard::guard_materialized_logits_with_chunk8_q8_k_ready{} ]
                  / action::request_contract_flash_materialized_chunk8_q8_k
 
       , sml::state<compute_result_decision> <= sml::state<contract_flash_decision>
                  + sml::completion<event::run>
+                 [ guard::guard_materialized_logits_with_parallel_chunk4_packed_q8_0_ready{} ]
+                 / action::request_contract_flash_materialized_parallel_chunk4_packed_q8_0
+
+      , sml::state<compute_result_decision> <= sml::state<contract_flash_decision>
+                 + sml::completion<event::run>
                  [ guard::guard_materialized_logits_with_chunk4_packed_q8_0_ready{} ]
                  / action::request_contract_flash_materialized_chunk4_packed_q8_0
+
+      , sml::state<compute_result_decision> <= sml::state<contract_flash_decision>
+                 + sml::completion<event::run>
+                 [ guard::guard_materialized_logits_with_parallel_chunk4_q8_k_ready{} ]
+                 / action::request_contract_flash_materialized_parallel_chunk4_q8_k
 
       , sml::state<compute_result_decision> <= sml::state<contract_flash_decision>
                  + sml::completion<event::run>
@@ -115,13 +130,28 @@ struct model {
 
       , sml::state<compute_result_decision> <= sml::state<contract_flash_decision>
                  + sml::completion<event::run>
+                 [ guard::guard_preselected_argmax_with_parallel_chunk8_q8_k_ready{} ]
+                 / action::request_contract_flash_preselected_parallel_chunk8_q8_k
+
+      , sml::state<compute_result_decision> <= sml::state<contract_flash_decision>
+                 + sml::completion<event::run>
                  [ guard::guard_preselected_argmax_with_chunk8_q8_k_ready{} ]
                  / action::request_contract_flash_preselected_chunk8_q8_k
 
       , sml::state<compute_result_decision> <= sml::state<contract_flash_decision>
                  + sml::completion<event::run>
+                 [ guard::guard_preselected_argmax_with_parallel_chunk4_packed_q8_0_ready{} ]
+                 / action::request_contract_flash_preselected_parallel_chunk4_packed_q8_0
+
+      , sml::state<compute_result_decision> <= sml::state<contract_flash_decision>
+                 + sml::completion<event::run>
                  [ guard::guard_preselected_argmax_with_chunk4_packed_q8_0_ready{} ]
                  / action::request_contract_flash_preselected_chunk4_packed_q8_0
+
+      , sml::state<compute_result_decision> <= sml::state<contract_flash_decision>
+                 + sml::completion<event::run>
+                 [ guard::guard_preselected_argmax_with_parallel_chunk4_q8_k_ready{} ]
+                 / action::request_contract_flash_preselected_parallel_chunk4_q8_k
 
       , sml::state<compute_result_decision> <= sml::state<contract_flash_decision>
                  + sml::completion<event::run>

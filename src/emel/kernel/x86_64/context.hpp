@@ -222,6 +222,7 @@ struct context {
   uint64_t shared_q2_dispatch_count = 0;
   uint64_t optimized_q3_dispatch_count = 0;
   uint64_t shared_q3_dispatch_count = 0;
+  uint64_t shared_q4_dispatch_count = 0;
   uint64_t optimized_q6_dispatch_count = 0;
   uint64_t shared_q6_dispatch_count = 0;
   // TODO(emel): remove once dispatch observability no longer relies on this
