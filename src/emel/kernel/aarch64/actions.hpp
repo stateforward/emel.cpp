@@ -8188,6 +8188,61 @@ using exec_scalar_op_unary_relu_t =
 using exec_scalar_op_unary_exp_t = ::emel::kernel::detail::exec_scalar_unary_op<
     ::emel::kernel::aarch64::event::dispatch_op_unary, context,
     detail::mark_done_op, ::emel::kernel::event::unary_subop::exp>;
+using exec_scalar_op_unary_tanh_t =
+    ::emel::kernel::detail::exec_scalar_unary_op<
+        ::emel::kernel::aarch64::event::dispatch_op_unary, context,
+        detail::mark_done_op, ::emel::kernel::event::unary_subop::tanh>;
+using exec_scalar_op_unary_elu_t = ::emel::kernel::detail::exec_scalar_unary_op<
+    ::emel::kernel::aarch64::event::dispatch_op_unary, context,
+    detail::mark_done_op, ::emel::kernel::event::unary_subop::elu>;
+using exec_scalar_op_unary_gelu_t =
+    ::emel::kernel::detail::exec_scalar_unary_op<
+        ::emel::kernel::aarch64::event::dispatch_op_unary, context,
+        detail::mark_done_op, ::emel::kernel::event::unary_subop::gelu>;
+using exec_scalar_op_unary_silu_t =
+    ::emel::kernel::detail::exec_scalar_unary_op<
+        ::emel::kernel::aarch64::event::dispatch_op_unary, context,
+        detail::mark_done_op, ::emel::kernel::event::unary_subop::silu>;
+
+template <uint8_t src_dtype_code>
+using exec_scalar_op_get_rows_src_t =
+    ::emel::kernel::detail::exec_scalar_get_rows_op<
+        ::emel::kernel::aarch64::event::dispatch_op_get_rows, context,
+        detail::mark_done_op, src_dtype_code>;
+using exec_scalar_op_get_rows_f32_t =
+    exec_scalar_op_get_rows_src_t<::emel::kernel::detail::dtype_f32>;
+using exec_scalar_op_get_rows_f16_t =
+    exec_scalar_op_get_rows_src_t<::emel::kernel::detail::dtype_f16>;
+using exec_scalar_op_get_rows_bf16_t =
+    exec_scalar_op_get_rows_src_t<::emel::kernel::detail::dtype_bf16>;
+using exec_scalar_op_get_rows_q4_0_t =
+    exec_scalar_op_get_rows_src_t<::emel::kernel::detail::dtype_q4_0>;
+using exec_scalar_op_get_rows_q8_0_t =
+    exec_scalar_op_get_rows_src_t<::emel::kernel::detail::dtype_q8_0>;
+using exec_scalar_op_get_rows_q4_k_t =
+    exec_scalar_op_get_rows_src_t<::emel::kernel::detail::dtype_q4_k>;
+using exec_scalar_op_rope_norm_t = ::emel::kernel::detail::exec_scalar_rope_op<
+    ::emel::kernel::aarch64::event::dispatch_op_rope, context,
+    detail::mark_done_op, false>;
+using exec_scalar_op_rope_neox_t = ::emel::kernel::detail::exec_scalar_rope_op<
+    ::emel::kernel::aarch64::event::dispatch_op_rope, context,
+    detail::mark_done_op, true>;
+using exec_scalar_op_im2col_f32_t =
+    ::emel::kernel::detail::exec_scalar_im2col_op<
+        ::emel::kernel::aarch64::event::dispatch_op_im2col, context,
+        detail::mark_done_op, false>;
+using exec_scalar_op_im2col_f16_t =
+    ::emel::kernel::detail::exec_scalar_im2col_op<
+        ::emel::kernel::aarch64::event::dispatch_op_im2col, context,
+        detail::mark_done_op, true>;
+using exec_scalar_op_conv_transpose_1d_f32_t =
+    ::emel::kernel::detail::exec_scalar_conv_transpose_1d_op<
+        ::emel::kernel::aarch64::event::dispatch_op_conv_transpose_1d, context,
+        detail::mark_done_op, false>;
+using exec_scalar_op_conv_transpose_1d_f16_t =
+    ::emel::kernel::detail::exec_scalar_conv_transpose_1d_op<
+        ::emel::kernel::aarch64::event::dispatch_op_conv_transpose_1d, context,
+        detail::mark_done_op, true>;
 
 #define EMEL_KERNEL_DECLARE_REJECT_TYPE(op_name)                               \
   using reject_invalid_##op_name##_t =                                         \
@@ -8274,6 +8329,24 @@ inline constexpr exec_scalar_op_unary_abs_t exec_scalar_op_unary_abs{};
 inline constexpr exec_scalar_op_unary_neg_t exec_scalar_op_unary_neg{};
 inline constexpr exec_scalar_op_unary_relu_t exec_scalar_op_unary_relu{};
 inline constexpr exec_scalar_op_unary_exp_t exec_scalar_op_unary_exp{};
+inline constexpr exec_scalar_op_unary_tanh_t exec_scalar_op_unary_tanh{};
+inline constexpr exec_scalar_op_unary_elu_t exec_scalar_op_unary_elu{};
+inline constexpr exec_scalar_op_unary_gelu_t exec_scalar_op_unary_gelu{};
+inline constexpr exec_scalar_op_unary_silu_t exec_scalar_op_unary_silu{};
+inline constexpr exec_scalar_op_get_rows_f32_t exec_scalar_op_get_rows_f32{};
+inline constexpr exec_scalar_op_get_rows_f16_t exec_scalar_op_get_rows_f16{};
+inline constexpr exec_scalar_op_get_rows_bf16_t exec_scalar_op_get_rows_bf16{};
+inline constexpr exec_scalar_op_get_rows_q4_0_t exec_scalar_op_get_rows_q4_0{};
+inline constexpr exec_scalar_op_get_rows_q8_0_t exec_scalar_op_get_rows_q8_0{};
+inline constexpr exec_scalar_op_get_rows_q4_k_t exec_scalar_op_get_rows_q4_k{};
+inline constexpr exec_scalar_op_rope_norm_t exec_scalar_op_rope_norm{};
+inline constexpr exec_scalar_op_rope_neox_t exec_scalar_op_rope_neox{};
+inline constexpr exec_scalar_op_im2col_f32_t exec_scalar_op_im2col_f32{};
+inline constexpr exec_scalar_op_im2col_f16_t exec_scalar_op_im2col_f16{};
+inline constexpr exec_scalar_op_conv_transpose_1d_f32_t
+    exec_scalar_op_conv_transpose_1d_f32{};
+inline constexpr exec_scalar_op_conv_transpose_1d_f16_t
+    exec_scalar_op_conv_transpose_1d_f16{};
 
 #define EMEL_KERNEL_DEFINE_RUN_ACTION(op_name)                                 \
   inline constexpr exec_##op_name##_t exec_##op_name{};

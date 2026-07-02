@@ -2,8 +2,8 @@
 
 #include <array>
 #include <cmath>
-#include <cstring>
 #include <cstdint>
+#include <cstring>
 #include <limits>
 #include <span>
 #include <vector>
@@ -30,11 +30,6 @@ using emel::kernel::test::make_src;
 using emel::kernel::test::to_fp16_storage;
 using emel::kernel::test::within_flash_online_f16_tolerance;
 
-using emel::kernel::detail::quant::QK_K;
-using emel::kernel::detail::quant::QK4_0;
-using emel::kernel::detail::quant::QK4_1;
-using emel::kernel::detail::quant::QK5_0;
-using emel::kernel::detail::quant::QK8_0;
 using emel::kernel::detail::quant::block_q2_k;
 using emel::kernel::detail::quant::block_q3_k;
 using emel::kernel::detail::quant::block_q4_0;
@@ -44,10 +39,15 @@ using emel::kernel::detail::quant::block_q5_0;
 using emel::kernel::detail::quant::block_q6_k;
 using emel::kernel::detail::quant::block_q8_0;
 using emel::kernel::detail::quant::block_q8_k;
+using emel::kernel::detail::quant::QK4_0;
+using emel::kernel::detail::quant::QK4_1;
+using emel::kernel::detail::quant::QK5_0;
+using emel::kernel::detail::quant::QK8_0;
+using emel::kernel::detail::quant::QK_K;
 
 template <size_t block_count>
-std::array<float, QK_K * block_count> make_quantized_rhs_values(
-    const uint32_t salt) {
+std::array<float, QK_K * block_count>
+make_quantized_rhs_values(const uint32_t salt) {
   std::array<float, QK_K * block_count> values = {};
   for (size_t i = 0; i < values.size(); ++i) {
     const int32_t centered =
@@ -57,7 +57,7 @@ std::array<float, QK_K * block_count> make_quantized_rhs_values(
   return values;
 }
 
-void fill_q2_block(block_q2_k & q2, const uint32_t salt) {
+void fill_q2_block(block_q2_k &q2, const uint32_t salt) {
   q2.d = static_cast<uint16_t>(0x3c00u + (salt % 17u));
   q2.dmin = static_cast<uint16_t>(0x3800u + (salt % 11u));
   for (size_t i = 0; i < q2.scales.size(); ++i) {
@@ -65,41 +65,35 @@ void fill_q2_block(block_q2_k & q2, const uint32_t salt) {
                                         (((i * 5u) + salt) % 15u));
   }
   for (size_t i = 0; i < q2.qs.size(); ++i) {
-    q2.qs[i] =
-        static_cast<uint8_t>((i * (23u + salt)) ^ ((i + salt) >> 1u));
+    q2.qs[i] = static_cast<uint8_t>((i * (23u + salt)) ^ ((i + salt) >> 1u));
   }
 }
 
-void fill_q3_block(block_q3_k & q3, const uint32_t salt) {
+void fill_q3_block(block_q3_k &q3, const uint32_t salt) {
   q3.d = static_cast<uint16_t>(0x3c00u + (salt % 19u));
   for (size_t i = 0; i < q3.scales.size(); ++i) {
-    q3.scales[i] =
-        static_cast<uint8_t>((i * (17u + salt)) ^ (0x5au + salt));
+    q3.scales[i] = static_cast<uint8_t>((i * (17u + salt)) ^ (0x5au + salt));
   }
   for (size_t i = 0; i < q3.hmask.size(); ++i) {
-    q3.hmask[i] =
-        static_cast<uint8_t>((i * (9u + salt)) ^ (0xa5u - salt));
+    q3.hmask[i] = static_cast<uint8_t>((i * (9u + salt)) ^ (0xa5u - salt));
   }
   for (size_t i = 0; i < q3.qs.size(); ++i) {
-    q3.qs[i] =
-        static_cast<uint8_t>((i * (13u + salt)) ^ (0x33u + salt * 7u));
+    q3.qs[i] = static_cast<uint8_t>((i * (13u + salt)) ^ (0x33u + salt * 7u));
   }
 }
 
-void fill_q4_block(block_q4_k & q4, const uint32_t salt) {
+void fill_q4_block(block_q4_k &q4, const uint32_t salt) {
   q4.d = static_cast<uint16_t>(0x3c00u + (salt % 17u));
   q4.dmin = static_cast<uint16_t>(0x3800u + (salt % 13u));
   for (size_t i = 0; i < q4.scales.size(); ++i) {
-    q4.scales[i] =
-        static_cast<uint8_t>((i * (11u + salt)) ^ (0x47u + salt));
+    q4.scales[i] = static_cast<uint8_t>((i * (11u + salt)) ^ (0x47u + salt));
   }
   for (size_t i = 0; i < q4.qs.size(); ++i) {
-    q4.qs[i] =
-        static_cast<uint8_t>((i * (5u + salt)) ^ (0x9du - salt));
+    q4.qs[i] = static_cast<uint8_t>((i * (5u + salt)) ^ (0x9du - salt));
   }
 }
 
-void fill_q6_block(block_q6_k & q6, const uint32_t salt) {
+void fill_q6_block(block_q6_k &q6, const uint32_t salt) {
   q6.d = static_cast<uint16_t>(0x3c00u + (salt % 23u));
   for (size_t i = 0; i < q6.scales.size(); ++i) {
     const int32_t scale_value =
@@ -107,23 +101,21 @@ void fill_q6_block(block_q6_k & q6, const uint32_t salt) {
     q6.scales[i] = static_cast<int8_t>(scale_value);
   }
   for (size_t i = 0; i < q6.ql.size(); ++i) {
-    q6.ql[i] =
-        static_cast<uint8_t>((i * (19u + salt)) ^ (0x6cu + salt));
+    q6.ql[i] = static_cast<uint8_t>((i * (19u + salt)) ^ (0x6cu + salt));
   }
   for (size_t i = 0; i < q6.qh.size(); ++i) {
-    q6.qh[i] =
-        static_cast<uint8_t>((i * (7u + salt)) ^ (0x95u - salt));
+    q6.qh[i] = static_cast<uint8_t>((i * (7u + salt)) ^ (0x95u - salt));
   }
 }
 
-void fill_q4_0_block(block_q4_0 & q4, const uint32_t salt) {
+void fill_q4_0_block(block_q4_0 &q4, const uint32_t salt) {
   q4.d = static_cast<uint16_t>(0x3c00u + (salt % 17u));
   for (size_t i = 0; i < q4.qs.size(); ++i) {
     q4.qs[i] = static_cast<uint8_t>((i * (7u + salt)) ^ (0x53u + salt));
   }
 }
 
-void fill_q4_1_block(block_q4_1 & q4, const uint32_t salt) {
+void fill_q4_1_block(block_q4_1 &q4, const uint32_t salt) {
   q4.d = static_cast<uint16_t>(0x3c00u + (salt % 19u));
   q4.m = static_cast<uint16_t>(0x3800u + (salt % 11u));
   for (size_t i = 0; i < q4.qs.size(); ++i) {
@@ -131,7 +123,7 @@ void fill_q4_1_block(block_q4_1 & q4, const uint32_t salt) {
   }
 }
 
-void fill_q5_0_block(block_q5_0 & q5, const uint32_t salt) {
+void fill_q5_0_block(block_q5_0 &q5, const uint32_t salt) {
   q5.d = static_cast<uint16_t>(0x3c00u + (salt % 13u));
   for (size_t i = 0; i < q5.qh.size(); ++i) {
     q5.qh[i] = static_cast<uint8_t>((i * (29u + salt)) ^ (0xb4u - salt));
@@ -141,7 +133,7 @@ void fill_q5_0_block(block_q5_0 & q5, const uint32_t salt) {
   }
 }
 
-void fill_q8_0_block(block_q8_0 & q8, const uint32_t salt) {
+void fill_q8_0_block(block_q8_0 &q8, const uint32_t salt) {
   q8.d = static_cast<uint16_t>(0x3c00u + (salt % 23u));
   for (size_t i = 0; i < q8.qs.size(); ++i) {
     const int32_t centered =
@@ -150,8 +142,8 @@ void fill_q8_0_block(block_q8_0 & q8, const uint32_t salt) {
   }
 }
 
-emel::kernel::x86_64::detail::host_feature_contract avx2_fma_contract(
-    const bool enabled) {
+emel::kernel::x86_64::detail::host_feature_contract
+avx2_fma_contract(const bool enabled) {
   return emel::kernel::x86_64::detail::host_feature_contract{
       .avx2_available = enabled,
       .fma_available = enabled,
@@ -166,8 +158,7 @@ bool host_has_avx2_fma() {
 }
 
 bool host_has_avx2_fma_f16c() {
-  return host_has_avx2_fma() &&
-         emel::kernel::x86_64::detail::detect_f16c();
+  return host_has_avx2_fma() && emel::kernel::x86_64::detail::detect_f16c();
 }
 
 } // namespace
@@ -296,7 +287,8 @@ TEST_CASE("kernel_x86_64_q2_row_avx2_fma_matches_scalar") {
   const auto rhs_values = make_quantized_rhs_values<block_count>(3u);
   std::array<block_q8_k, block_count> q8_blocks = {};
   emel::kernel::detail::quant::quantize_row_q8_k_strided(
-      rhs_values.data(), 1u, q8_blocks.data(), static_cast<int64_t>(QK_K * block_count));
+      rhs_values.data(), 1u, q8_blocks.data(),
+      static_cast<int64_t>(QK_K * block_count));
 
   const float scalar = emel::kernel::detail::dot_q2_k_q8_k_row_scalar(
       q2_blocks.data(), q8_blocks.data(), block_count);
@@ -321,7 +313,8 @@ TEST_CASE("kernel_x86_64_q3_row_avx2_fma_matches_scalar") {
   const auto rhs_values = make_quantized_rhs_values<block_count>(7u);
   std::array<block_q8_k, block_count> q8_blocks = {};
   emel::kernel::detail::quant::quantize_row_q8_k_strided(
-      rhs_values.data(), 1u, q8_blocks.data(), static_cast<int64_t>(QK_K * block_count));
+      rhs_values.data(), 1u, q8_blocks.data(),
+      static_cast<int64_t>(QK_K * block_count));
 
   const float scalar = emel::kernel::detail::dot_q3_k_q8_k_row_scalar(
       q3_blocks.data(), q8_blocks.data(), block_count);
@@ -346,7 +339,8 @@ TEST_CASE("kernel_x86_64_q4_row_avx2_fma_matches_scalar") {
   const auto rhs_values = make_quantized_rhs_values<block_count>(13u);
   std::array<block_q8_k, block_count> q8_blocks = {};
   emel::kernel::detail::quant::quantize_row_q8_k_strided(
-      rhs_values.data(), 1u, q8_blocks.data(), static_cast<int64_t>(QK_K * block_count));
+      rhs_values.data(), 1u, q8_blocks.data(),
+      static_cast<int64_t>(QK_K * block_count));
 
   const float scalar = emel::kernel::detail::dot_q4_k_q8_k_row_scalar(
       q4_blocks.data(), q8_blocks.data(), block_count);
@@ -1043,7 +1037,7 @@ TEST_CASE("kernel_x86_64_flash_attn_ext_uses_optimized_backend_path") {
       emel::kernel::x86_64::detail::detect_avx2() &&
       emel::kernel::x86_64::detail::detect_fma() &&
       emel::kernel::x86_64::detail::detect_f16c();
-  if (!host_flash ) {
+  if (!host_flash) {
     return;
   }
 
@@ -1198,10 +1192,9 @@ TEST_CASE(
   for (uint64_t head = 0; head < head_count; ++head) {
     for (uint64_t dim = 0; dim < head_dim; ++dim) {
       const double angle = static_cast<double>((head + 1u) * (dim + 3u));
-      q[head * head_dim + dim] =
-          emel::kernel::detail::quant::fp16_to_fp32(
-              emel::kernel::detail::quant::fp32_to_fp16(
-                  static_cast<float>(std::sin(angle * 0.03125))));
+      q[head * head_dim + dim] = emel::kernel::detail::quant::fp16_to_fp32(
+          emel::kernel::detail::quant::fp32_to_fp16(
+              static_cast<float>(std::sin(angle * 0.03125))));
     }
   }
 
@@ -1225,10 +1218,10 @@ TEST_CASE(
 
   emel::kernel::event::op_flash_attn_ext request{};
   request.src0 = make_src(q.data(), dtype::f32, head_dim, 1u, head_count);
-  request.src1 = make_src(k_fp16.data(), dtype::f16, head_dim, kv_tokens,
-                          kv_head_count);
-  request.src2 = make_src(v_fp16.data(), dtype::f16, head_dim, kv_tokens,
-                          kv_head_count);
+  request.src1 =
+      make_src(k_fp16.data(), dtype::f16, head_dim, kv_tokens, kv_head_count);
+  request.src2 =
+      make_src(v_fp16.data(), dtype::f16, head_dim, kv_tokens, kv_head_count);
   request.dst = make_dst(dst.data(), dtype::f32, head_dim, 1u, head_count);
   request.src1.nb[1] = sizeof(uint16_t) * kv_dim;
   request.src1.nb[2] = sizeof(uint16_t) * head_dim;
@@ -1263,8 +1256,7 @@ TEST_CASE(
         std::span<const float>(v_head.data(), v_head.size()), head_dim,
         kv_tokens, total_tokens, scale);
     for (uint64_t dim = 0; dim < head_dim; ++dim) {
-      expected[head * head_dim + dim] =
-          expected_head[static_cast<size_t>(dim)];
+      expected[head * head_dim + dim] = expected_head[static_cast<size_t>(dim)];
     }
   }
 
@@ -1338,6 +1330,25 @@ TEST_CASE("kernel_x86_64_unary_subop_supported_and_unsupported_paths") {
   CHECK(dst[3] == doctest::Approx(std::exp(2.0f)));
 
   unary_ev.subop = emel::kernel::event::unary_subop::tanh;
+  CHECK(machine.process_event(unary_ev));
+  CHECK(dst[0] == doctest::Approx(std::tanh(-2.0f)));
+  CHECK(dst[3] == doctest::Approx(std::tanh(2.0f)));
+
+  unary_ev.subop = emel::kernel::event::unary_subop::elu;
+  CHECK(machine.process_event(unary_ev));
+  CHECK(dst[0] == doctest::Approx(std::expm1(-2.0f)));
+  CHECK(dst[3] == doctest::Approx(2.0f));
+
+  unary_ev.subop = emel::kernel::event::unary_subop::silu;
+  CHECK(machine.process_event(unary_ev));
+  CHECK(dst[0] == doctest::Approx(-2.0f / (1.0f + std::exp(2.0f))));
+  CHECK(dst[3] == doctest::Approx(2.0f / (1.0f + std::exp(-2.0f))));
+
+  unary_ev.subop = emel::kernel::event::unary_subop::gelu;
+  CHECK(machine.process_event(unary_ev));
+  CHECK(dst[3] > 1.9f);
+
+  unary_ev.subop = emel::kernel::event::unary_subop::sigmoid;
   CHECK_FALSE(machine.process_event(unary_ev));
 
   x86_64_sm scalar_machine{emel::kernel::x86_64::action::context{false, {}, 0}};
@@ -1371,6 +1382,11 @@ TEST_CASE("kernel_x86_64_unary_subop_supported_and_unsupported_paths") {
   CHECK(dst[3] == doctest::Approx(std::exp(2.0f)));
 
   unary_ev.subop = emel::kernel::event::unary_subop::tanh;
+  CHECK(scalar_machine.process_event(unary_ev));
+  CHECK(dst[0] == doctest::Approx(std::tanh(-2.0f)));
+  CHECK(dst[3] == doctest::Approx(std::tanh(2.0f)));
+
+  unary_ev.subop = emel::kernel::event::unary_subop::sigmoid;
   CHECK_FALSE(scalar_machine.process_event(unary_ev));
 }
 
@@ -1790,4 +1806,215 @@ TEST_CASE("kernel_x86_64_simd_action_exec_marks_done") {
         emel::kernel::x86_64::events::phase_outcome::done);
   CHECK(dispatch_ctx.err == static_cast<int32_t>(emel::error::cast(
                                 emel::kernel::x86_64::error::none)));
+}
+
+namespace {
+
+template <class event_type>
+void set_op_param_i32(event_type &ev, const uint32_t slot,
+                      const int32_t value) {
+  std::memcpy(ev.op_params.data() + slot * sizeof(int32_t), &value,
+              sizeof(value));
+  ev.op_params_size =
+      std::max<uint32_t>(ev.op_params_size, (slot + 1u) * sizeof(int32_t));
+}
+
+template <class event_type>
+void set_op_param_f32(event_type &ev, const uint32_t slot, const float value) {
+  std::memcpy(ev.op_params.data() + slot * sizeof(float), &value,
+              sizeof(value));
+  ev.op_params_size =
+      std::max<uint32_t>(ev.op_params_size, (slot + 1u) * sizeof(float));
+}
+
+} // namespace
+
+TEST_CASE("kernel_x86_64_get_rows_gathers_f32_and_q8_0_rows") {
+  x86_64_sm machine{emel::kernel::x86_64::action::context{false, {}, 0}};
+
+  float table[12] = {0.0f,  1.0f,  2.0f,  3.0f,  10.0f, 11.0f,
+                     12.0f, 13.0f, 20.0f, 21.0f, 22.0f, 23.0f};
+  int32_t indices[2] = {2, 0};
+  float gathered[8] = {};
+
+  emel::kernel::event::op_get_rows gather_ev{
+      .src0 = make_src(table, dtype::f32, 4, 3),
+      .src1 = make_src(indices, dtype::i32, 2),
+      .dst = make_dst(gathered, dtype::f32, 4, 2),
+  };
+  CHECK(machine.process_event(gather_ev));
+  CHECK(gathered[0] == doctest::Approx(20.0f));
+  CHECK(gathered[3] == doctest::Approx(23.0f));
+  CHECK(gathered[4] == doctest::Approx(0.0f));
+  CHECK(gathered[7] == doctest::Approx(3.0f));
+
+  int32_t bad_indices[2] = {3, 0};
+  gather_ev.src1 = make_src(bad_indices, dtype::i32, 2);
+  CHECK_FALSE(machine.process_event(gather_ev));
+
+  constexpr int64_t k_cols = 32;
+  float source_rows[2 * k_cols] = {};
+  for (int64_t i = 0; i < 2 * k_cols; ++i) {
+    source_rows[i] = 0.25f * static_cast<float>(i - k_cols);
+  }
+  emel::kernel::detail::quant::block_q8_0 blocks[2] = {};
+  emel::kernel::detail::quant::quantize_row_q8_0_strided(source_rows, 1u,
+                                                         &blocks[0], k_cols);
+  emel::kernel::detail::quant::quantize_row_q8_0_strided(
+      source_rows + k_cols, 1u, &blocks[1], k_cols);
+  float expected[k_cols] = {};
+  emel::kernel::detail::quant::dequantize_row_q8_0(&blocks[1], expected,
+                                                   k_cols);
+
+  int32_t quant_index[1] = {1};
+  float quant_out[k_cols] = {};
+  emel::kernel::event::op_get_rows quant_ev{
+      .src0 = emel::kernel::test::make_quantized_src(blocks, dtype::q8_0,
+                                                     k_cols, 2),
+      .src1 = make_src(quant_index, dtype::i32, 1),
+      .dst = make_dst(quant_out, dtype::f32, k_cols, 1),
+  };
+  CHECK(machine.process_event(quant_ev));
+  for (int64_t i = 0; i < k_cols; ++i) {
+    CHECK(quant_out[i] == doctest::Approx(expected[i]));
+  }
+}
+
+TEST_CASE("kernel_x86_64_rms_norm_and_norm_rows") {
+  x86_64_sm machine{emel::kernel::x86_64::action::context{false, {}, 0}};
+
+  float src[4] = {1.0f, 2.0f, 3.0f, 4.0f};
+  float dst[4] = {};
+  constexpr float k_eps = 1e-5f;
+
+  emel::kernel::event::op_rms_norm rms_ev{
+      .src0 = make_src(src, dtype::f32, 4),
+      .dst = make_dst(dst, dtype::f32, 4),
+  };
+  set_op_param_f32(rms_ev, 0u, k_eps);
+  CHECK(machine.process_event(rms_ev));
+  const float mean_sq = (1.0f + 4.0f + 9.0f + 16.0f) / 4.0f;
+  const float rms_scale = 1.0f / std::sqrt(mean_sq + k_eps);
+  CHECK(dst[0] == doctest::Approx(1.0f * rms_scale));
+  CHECK(dst[3] == doctest::Approx(4.0f * rms_scale));
+
+  emel::kernel::event::op_norm norm_ev{
+      .src0 = make_src(src, dtype::f32, 4),
+      .dst = make_dst(dst, dtype::f32, 4),
+  };
+  set_op_param_f32(norm_ev, 0u, k_eps);
+  CHECK(machine.process_event(norm_ev));
+  const float mean = 2.5f;
+  const float variance = (2.25f + 0.25f + 0.25f + 2.25f) / 4.0f;
+  const float norm_scale = 1.0f / std::sqrt(variance + k_eps);
+  CHECK(dst[0] == doctest::Approx((1.0f - mean) * norm_scale));
+  CHECK(dst[3] == doctest::Approx((4.0f - mean) * norm_scale));
+
+  emel::kernel::event::op_rms_norm missing_eps_ev{
+      .src0 = make_src(src, dtype::f32, 4),
+      .dst = make_dst(dst, dtype::f32, 4),
+  };
+  CHECK_FALSE(machine.process_event(missing_eps_ev));
+}
+
+TEST_CASE("kernel_x86_64_rope_rotates_norm_and_neox_pairs") {
+  x86_64_sm machine{emel::kernel::x86_64::action::context{false, {}, 0}};
+
+  // one head, head_dim 4, two tokens with positions {0, 1}
+  float src[8] = {1.0f, 0.0f, 1.0f, 0.0f, 1.0f, 0.0f, 1.0f, 0.0f};
+  int32_t positions[2] = {0, 1};
+  float dst[8] = {};
+
+  emel::kernel::event::op_rope rope_ev{
+      .src0 = make_src(src, dtype::f32, 4, 1, 2),
+      .src1 = make_src(positions, dtype::i32, 2),
+      .dst = make_dst(dst, dtype::f32, 4, 1, 2),
+  };
+  set_op_param_i32(rope_ev, 1u, 4);        // n_dims
+  set_op_param_i32(rope_ev, 2u, 0);        // mode = norm
+  set_op_param_f32(rope_ev, 5u, 10000.0f); // freq_base
+  set_op_param_f32(rope_ev, 6u, 1.0f);     // freq_scale
+  set_op_param_f32(rope_ev, 7u, 0.0f);     // ext_factor
+  set_op_param_f32(rope_ev, 8u, 1.0f);     // attn_factor
+  set_op_param_f32(rope_ev, 9u, 32.0f);    // beta_fast
+  set_op_param_f32(rope_ev, 10u, 1.0f);    // beta_slow
+  CHECK(machine.process_event(rope_ev));
+
+  // position 0 is the identity rotation
+  CHECK(dst[0] == doctest::Approx(1.0f));
+  CHECK(dst[1] == doctest::Approx(0.0f));
+  // position 1, pair 0: theta = 1, pair 1: theta = 10000^(-2/4)
+  CHECK(dst[4] == doctest::Approx(std::cos(1.0f)));
+  CHECK(dst[5] == doctest::Approx(std::sin(1.0f)));
+  const float theta1 = std::pow(10000.0f, -2.0f / 4.0f);
+  CHECK(dst[6] == doctest::Approx(std::cos(theta1)));
+  CHECK(dst[7] == doctest::Approx(std::sin(theta1)));
+
+  // neox pairing rotates (x[0], x[2]) and (x[1], x[3])
+  float neox_src[4] = {1.0f, 2.0f, 0.0f, 0.0f};
+  float neox_dst[4] = {};
+  int32_t neox_pos[1] = {1};
+  emel::kernel::event::op_rope neox_ev{
+      .src0 = make_src(neox_src, dtype::f32, 4, 1, 1),
+      .src1 = make_src(neox_pos, dtype::i32, 1),
+      .dst = make_dst(neox_dst, dtype::f32, 4, 1, 1),
+  };
+  set_op_param_i32(neox_ev, 1u, 4);
+  set_op_param_i32(neox_ev, 2u, 2); // mode = neox
+  set_op_param_f32(neox_ev, 5u, 10000.0f);
+  set_op_param_f32(neox_ev, 6u, 1.0f);
+  set_op_param_f32(neox_ev, 7u, 0.0f);
+  set_op_param_f32(neox_ev, 8u, 1.0f);
+  set_op_param_f32(neox_ev, 9u, 32.0f);
+  set_op_param_f32(neox_ev, 10u, 1.0f);
+  CHECK(machine.process_event(neox_ev));
+  CHECK(neox_dst[0] == doctest::Approx(std::cos(1.0f)));
+  CHECK(neox_dst[2] == doctest::Approx(std::sin(1.0f)));
+  CHECK(neox_dst[1] == doctest::Approx(2.0f * std::cos(theta1)));
+  CHECK(neox_dst[3] == doctest::Approx(2.0f * std::sin(theta1)));
+}
+
+TEST_CASE("kernel_x86_64_im2col_and_conv_transpose_1d") {
+  x86_64_sm machine{emel::kernel::x86_64::action::context{false, {}, 0}};
+
+  // conv1d frontend: L=4, IC=1, K=3, s=1, p=1, d=1 -> OW=4 columns of taps
+  float input[4] = {1.0f, 2.0f, 3.0f, 4.0f};
+  float kernel_shape_only[3] = {};
+  float columns[12] = {};
+  emel::kernel::event::op_im2col im2col_ev{
+      .src0 = make_src(kernel_shape_only, dtype::f32, 3, 1),
+      .src1 = make_src(input, dtype::f32, 4, 1),
+      .dst = make_dst(columns, dtype::f32, 3, 4),
+  };
+  set_op_param_i32(im2col_ev, 0u, 1); // s0
+  set_op_param_i32(im2col_ev, 1u, 0); // s1
+  set_op_param_i32(im2col_ev, 2u, 1); // p0
+  set_op_param_i32(im2col_ev, 3u, 0); // p1
+  set_op_param_i32(im2col_ev, 4u, 1); // d0
+  set_op_param_i32(im2col_ev, 5u, 0); // d1
+  set_op_param_i32(im2col_ev, 6u, 0); // is_2D
+  CHECK(machine.process_event(im2col_ev));
+  const float expected_columns[12] = {0.0f, 1.0f, 2.0f, 1.0f, 2.0f, 3.0f,
+                                      2.0f, 3.0f, 4.0f, 3.0f, 4.0f, 0.0f};
+  for (int i = 0; i < 12; ++i) {
+    CHECK(columns[i] == doctest::Approx(expected_columns[i]));
+  }
+
+  // transposed conv: K=2, s=2, IC=1, OC=1, L=2 -> OL=4
+  float up_input[2] = {1.0f, 2.0f};
+  float up_kernel[2] = {3.0f, 5.0f};
+  float up_out[4] = {};
+  emel::kernel::event::op_conv_transpose_1d convtr_ev{
+      .src0 = make_src(up_kernel, dtype::f32, 2, 1, 1),
+      .src1 = make_src(up_input, dtype::f32, 2, 1),
+      .dst = make_dst(up_out, dtype::f32, 4, 1),
+  };
+  set_op_param_i32(convtr_ev, 0u, 2); // s0
+  set_op_param_i32(convtr_ev, 1u, 0); // p0
+  set_op_param_i32(convtr_ev, 2u, 1); // d0
+  CHECK(machine.process_event(convtr_ev));
+  CHECK(up_out[0] == doctest::Approx(3.0f));
+  CHECK(up_out[1] == doctest::Approx(5.0f));
+  CHECK(up_out[2] == doctest::Approx(6.0f));
+  CHECK(up_out[3] == doctest::Approx(10.0f));
 }

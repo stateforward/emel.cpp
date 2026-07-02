@@ -11,7 +11,7 @@ template <class dispatch_event_type> struct simd_op {
   bool operator()(const dispatch_event_type &ev,
                   const action::context &ctx) const noexcept {
     if (!::emel::kernel::detail::validate_dispatch_request(ev.request)) {
-      return false ;
+      return false;
     }
     return ::emel::kernel::x86_64::detail::can_use_avx2(ev.request,
                                                         ctx.avx2_available);
@@ -19,9 +19,8 @@ template <class dispatch_event_type> struct simd_op {
 };
 
 struct guard_simd_op_mul_mat_f32_fma {
-  bool operator()(
-      const ::emel::kernel::x86_64::event::dispatch_op_mul_mat &ev,
-      const action::context &ctx) const noexcept {
+  bool operator()(const ::emel::kernel::x86_64::event::dispatch_op_mul_mat &ev,
+                  const action::context &ctx) const noexcept {
     if (!::emel::kernel::detail::validate_dispatch_request(ev.request)) {
       return false;
     }
@@ -31,108 +30,99 @@ struct guard_simd_op_mul_mat_f32_fma {
 };
 
 struct guard_simd_op_mul_mat_f32_avx2_only {
-  bool operator()(
-      const ::emel::kernel::x86_64::event::dispatch_op_mul_mat &ev,
-      const action::context &ctx) const noexcept {
-    return simd_op<::emel::kernel::x86_64::event::dispatch_op_mul_mat>{}(
-               ev, ctx) &&
+  bool operator()(const ::emel::kernel::x86_64::event::dispatch_op_mul_mat &ev,
+                  const action::context &ctx) const noexcept {
+    return simd_op<::emel::kernel::x86_64::event::dispatch_op_mul_mat>{}(ev,
+                                                                         ctx) &&
            !guard_simd_op_mul_mat_f32_fma{}(ev, ctx);
   }
 };
 
 struct guard_simd_op_mul_mat_q2_k_q8_k {
-  bool operator()(
-      const ::emel::kernel::x86_64::event::dispatch_op_mul_mat &ev,
-      const action::context &ctx) const noexcept {
+  bool operator()(const ::emel::kernel::x86_64::event::dispatch_op_mul_mat &ev,
+                  const action::context &ctx) const noexcept {
     if (!::emel::kernel::detail::validate_dispatch_request(ev.request)) {
       return false;
     }
-    return ::emel::kernel::x86_64::detail::
-        can_use_avx2_fma_q2_k_q8_k_mul_mat(ev.request, ctx.host_features);
+    return ::emel::kernel::x86_64::detail::can_use_avx2_fma_q2_k_q8_k_mul_mat(
+        ev.request, ctx.host_features);
   }
 };
 
 struct guard_simd_op_mul_mat_q3_k_q8_k {
-  bool operator()(
-      const ::emel::kernel::x86_64::event::dispatch_op_mul_mat &ev,
-      const action::context &ctx) const noexcept {
+  bool operator()(const ::emel::kernel::x86_64::event::dispatch_op_mul_mat &ev,
+                  const action::context &ctx) const noexcept {
     if (!::emel::kernel::detail::validate_dispatch_request(ev.request)) {
       return false;
     }
-    return ::emel::kernel::x86_64::detail::
-        can_use_avx2_fma_q3_k_q8_k_mul_mat(ev.request, ctx.host_features);
+    return ::emel::kernel::x86_64::detail::can_use_avx2_fma_q3_k_q8_k_mul_mat(
+        ev.request, ctx.host_features);
   }
 };
 
 struct guard_simd_op_mul_mat_q4_k_q8_k {
-  bool operator()(
-      const ::emel::kernel::x86_64::event::dispatch_op_mul_mat &ev,
-      const action::context &ctx) const noexcept {
+  bool operator()(const ::emel::kernel::x86_64::event::dispatch_op_mul_mat &ev,
+                  const action::context &ctx) const noexcept {
     if (!::emel::kernel::detail::validate_dispatch_request(ev.request)) {
       return false;
     }
-    return ::emel::kernel::x86_64::detail::
-        can_use_avx2_fma_q4_k_q8_k_mul_mat(ev.request, ctx.host_features);
+    return ::emel::kernel::x86_64::detail::can_use_avx2_fma_q4_k_q8_k_mul_mat(
+        ev.request, ctx.host_features);
   }
 };
 
 struct guard_simd_op_mul_mat_q6_k_q8_k {
-  bool operator()(
-      const ::emel::kernel::x86_64::event::dispatch_op_mul_mat &ev,
-      const action::context &ctx) const noexcept {
+  bool operator()(const ::emel::kernel::x86_64::event::dispatch_op_mul_mat &ev,
+                  const action::context &ctx) const noexcept {
     if (!::emel::kernel::detail::validate_dispatch_request(ev.request)) {
       return false;
     }
-    return ::emel::kernel::x86_64::detail::
-        can_use_avx2_fma_q6_k_q8_k_mul_mat(ev.request, ctx.host_features);
+    return ::emel::kernel::x86_64::detail::can_use_avx2_fma_q6_k_q8_k_mul_mat(
+        ev.request, ctx.host_features);
   }
 };
 
 struct guard_simd_op_mul_mat_q4_0_q8_0 {
-  bool operator()(
-      const ::emel::kernel::x86_64::event::dispatch_op_mul_mat &ev,
-      const action::context &ctx) const noexcept {
+  bool operator()(const ::emel::kernel::x86_64::event::dispatch_op_mul_mat &ev,
+                  const action::context &ctx) const noexcept {
     if (!::emel::kernel::detail::validate_dispatch_request(ev.request)) {
       return false;
     }
-    return ::emel::kernel::x86_64::detail::
-        can_use_avx2_fma_q4_0_q8_0_mul_mat(ev.request, ctx.host_features);
+    return ::emel::kernel::x86_64::detail::can_use_avx2_fma_q4_0_q8_0_mul_mat(
+        ev.request, ctx.host_features);
   }
 };
 
 struct guard_simd_op_mul_mat_q4_1_q8_0 {
-  bool operator()(
-      const ::emel::kernel::x86_64::event::dispatch_op_mul_mat &ev,
-      const action::context &ctx) const noexcept {
+  bool operator()(const ::emel::kernel::x86_64::event::dispatch_op_mul_mat &ev,
+                  const action::context &ctx) const noexcept {
     if (!::emel::kernel::detail::validate_dispatch_request(ev.request)) {
       return false;
     }
-    return ::emel::kernel::x86_64::detail::
-        can_use_avx2_fma_q4_1_q8_0_mul_mat(ev.request, ctx.host_features);
+    return ::emel::kernel::x86_64::detail::can_use_avx2_fma_q4_1_q8_0_mul_mat(
+        ev.request, ctx.host_features);
   }
 };
 
 struct guard_simd_op_mul_mat_q5_0_q8_0 {
-  bool operator()(
-      const ::emel::kernel::x86_64::event::dispatch_op_mul_mat &ev,
-      const action::context &ctx) const noexcept {
+  bool operator()(const ::emel::kernel::x86_64::event::dispatch_op_mul_mat &ev,
+                  const action::context &ctx) const noexcept {
     if (!::emel::kernel::detail::validate_dispatch_request(ev.request)) {
       return false;
     }
-    return ::emel::kernel::x86_64::detail::
-        can_use_avx2_fma_q5_0_q8_0_mul_mat(ev.request, ctx.host_features);
+    return ::emel::kernel::x86_64::detail::can_use_avx2_fma_q5_0_q8_0_mul_mat(
+        ev.request, ctx.host_features);
   }
 };
 
 struct guard_simd_op_mul_mat_q8_0_q8_0 {
-  bool operator()(
-      const ::emel::kernel::x86_64::event::dispatch_op_mul_mat &ev,
-      const action::context &ctx) const noexcept {
+  bool operator()(const ::emel::kernel::x86_64::event::dispatch_op_mul_mat &ev,
+                  const action::context &ctx) const noexcept {
     if (!::emel::kernel::detail::validate_dispatch_request(ev.request)) {
       return false;
     }
-    return ::emel::kernel::x86_64::detail::
-        can_use_avx2_fma_q8_0_q8_0_mul_mat(ev.request, ctx.host_features);
+    return ::emel::kernel::x86_64::detail::can_use_avx2_fma_q8_0_q8_0_mul_mat(
+        ev.request, ctx.host_features);
   }
 };
 
@@ -252,6 +242,105 @@ using valid_op_unary_relu =
     valid_op_unary_subop<::emel::kernel::event::unary_subop::relu>;
 using valid_op_unary_exp =
     valid_op_unary_subop<::emel::kernel::event::unary_subop::exp>;
+using valid_op_unary_tanh =
+    valid_op_unary_subop<::emel::kernel::event::unary_subop::tanh>;
+using valid_op_unary_elu =
+    valid_op_unary_subop<::emel::kernel::event::unary_subop::elu>;
+using valid_op_unary_gelu =
+    valid_op_unary_subop<::emel::kernel::event::unary_subop::gelu>;
+using valid_op_unary_silu =
+    valid_op_unary_subop<::emel::kernel::event::unary_subop::silu>;
+
+// Variant predicates for the ops whose dtype/mode choice is modeled as
+// explicit transition rows (op_unary pattern).
+template <uint8_t src_dtype_code> struct get_rows_src_dtype_is {
+  bool operator()(const ::emel::kernel::x86_64::event::dispatch_op_get_rows &ev,
+                  const action::context &) const noexcept {
+    return ::emel::kernel::detail::dtype_code(ev.request.src0.type) ==
+           src_dtype_code;
+  }
+};
+
+template <bool neox_mode> struct rope_mode_is {
+  bool operator()(const ::emel::kernel::x86_64::event::dispatch_op_rope &ev,
+                  const action::context &) const noexcept {
+    int32_t mode = 0;
+    return ::emel::kernel::detail::read_op_param_i32(
+               ev.request.op_params.data(), ev.request.op_params_size, 2u,
+               mode) &&
+           mode == (neox_mode ? ::emel::kernel::detail::rope_mode_neox
+                              : ::emel::kernel::detail::rope_mode_norm);
+  }
+};
+
+template <bool f16_dst> struct im2col_dst_dtype_is {
+  bool operator()(const ::emel::kernel::x86_64::event::dispatch_op_im2col &ev,
+                  const action::context &) const noexcept {
+    return ::emel::kernel::detail::dtype_code(ev.request.dst.type) ==
+           (f16_dst ? ::emel::kernel::detail::dtype_f16
+                    : ::emel::kernel::detail::dtype_f32);
+  }
+};
+
+template <bool f16_weights> struct conv_transpose_1d_weight_dtype_is {
+  bool operator()(
+      const ::emel::kernel::x86_64::event::dispatch_op_conv_transpose_1d &ev,
+      const action::context &) const noexcept {
+    return ::emel::kernel::detail::dtype_code(ev.request.src0.type) ==
+           (f16_weights ? ::emel::kernel::detail::dtype_f16
+                        : ::emel::kernel::detail::dtype_f32);
+  }
+};
+
+template <uint8_t src_dtype_code>
+using valid_op_get_rows_src = ::emel::kernel::detail::valid_variant_guard<
+    ::emel::kernel::x86_64::event::dispatch_op_get_rows, action::context,
+    valid_op<::emel::kernel::x86_64::event::dispatch_op_get_rows>,
+    get_rows_src_dtype_is<src_dtype_code>>;
+
+using valid_op_get_rows_f32 =
+    valid_op_get_rows_src<::emel::kernel::detail::dtype_f32>;
+using valid_op_get_rows_f16 =
+    valid_op_get_rows_src<::emel::kernel::detail::dtype_f16>;
+using valid_op_get_rows_bf16 =
+    valid_op_get_rows_src<::emel::kernel::detail::dtype_bf16>;
+using valid_op_get_rows_q4_0 =
+    valid_op_get_rows_src<::emel::kernel::detail::dtype_q4_0>;
+using valid_op_get_rows_q8_0 =
+    valid_op_get_rows_src<::emel::kernel::detail::dtype_q8_0>;
+using valid_op_get_rows_q4_k =
+    valid_op_get_rows_src<::emel::kernel::detail::dtype_q4_k>;
+
+using valid_op_rope_norm = ::emel::kernel::detail::valid_variant_guard<
+    ::emel::kernel::x86_64::event::dispatch_op_rope, action::context,
+    valid_op<::emel::kernel::x86_64::event::dispatch_op_rope>,
+    rope_mode_is<false>>;
+using valid_op_rope_neox = ::emel::kernel::detail::valid_variant_guard<
+    ::emel::kernel::x86_64::event::dispatch_op_rope, action::context,
+    valid_op<::emel::kernel::x86_64::event::dispatch_op_rope>,
+    rope_mode_is<true>>;
+
+using valid_op_im2col_f32 = ::emel::kernel::detail::valid_variant_guard<
+    ::emel::kernel::x86_64::event::dispatch_op_im2col, action::context,
+    valid_op<::emel::kernel::x86_64::event::dispatch_op_im2col>,
+    im2col_dst_dtype_is<false>>;
+using valid_op_im2col_f16 = ::emel::kernel::detail::valid_variant_guard<
+    ::emel::kernel::x86_64::event::dispatch_op_im2col, action::context,
+    valid_op<::emel::kernel::x86_64::event::dispatch_op_im2col>,
+    im2col_dst_dtype_is<true>>;
+
+using valid_op_conv_transpose_1d_f32 =
+    ::emel::kernel::detail::valid_variant_guard<
+        ::emel::kernel::x86_64::event::dispatch_op_conv_transpose_1d,
+        action::context,
+        valid_op<::emel::kernel::x86_64::event::dispatch_op_conv_transpose_1d>,
+        conv_transpose_1d_weight_dtype_is<false>>;
+using valid_op_conv_transpose_1d_f16 =
+    ::emel::kernel::detail::valid_variant_guard<
+        ::emel::kernel::x86_64::event::dispatch_op_conv_transpose_1d,
+        action::context,
+        valid_op<::emel::kernel::x86_64::event::dispatch_op_conv_transpose_1d>,
+        conv_transpose_1d_weight_dtype_is<true>>;
 
 #define EMEL_KERNEL_DECLARE_GUARD_ALIAS(op_name)                               \
   using simd_##op_name =                                                       \
