@@ -152,13 +152,6 @@ struct runtime_request_fixture {
   }
 };
 
-void bind_neox_rope_pairing(emel::model::data & model) {
-  model.params.rope_pair_x0_stride = 1;
-  model.params.rope_pair_x1_stride = 1;
-  model.params.rope_pair_x1_offset = 0;
-  model.params.rope_pair_x1_half_rot_offset = 1;
-}
-
 struct qwen3_runtime_fixture {
   emel::model::data model = {};
   std::vector<std::vector<float>> tensor_storage = {};
@@ -174,7 +167,6 @@ struct qwen3_runtime_fixture {
     model.params.n_layer = 1;
     model.params.attention_layer_norm_rms_epsilon = 1.0e-5f;
     model.params.rope_freq_base = 10000.0f;
-    bind_neox_rope_pairing(model);
     model.n_layers = 1;
     model.weights_data = model.tensors.data();
     model.weights_size = 1u;
@@ -286,7 +278,6 @@ struct gemma4_runtime_fixture {
     model.params.attention_layer_norm_rms_epsilon = 1.0e-6f;
     model.params.rope_freq_base = 10000.0f;
     model.params.tie_word_embeddings = true;
-    bind_neox_rope_pairing(model);
     model.n_layers = 1;
     model.weights_data = model.tensors.data();
     model.weights_size = 1u;
@@ -565,7 +556,6 @@ template <int32_t prompt_tokens> struct hybrid_chunked_q8_runtime_fixture {
 
   hybrid_chunked_q8_runtime_fixture() {
     std::memcpy(model.architecture_name.data(), "lfm2", 4u);
-    bind_neox_rope_pairing(model);
     for (int32_t token = 0; token < k_prompt_tokens; ++token) {
       token_ids[static_cast<size_t>(token)] = token;
       positions[static_cast<size_t>(token)] = token;
@@ -671,8 +661,6 @@ template <int32_t prompt_tokens> struct hybrid_chunked_q8_runtime_fixture {
     attention_block.attention_output = attention_block.attention_q;
     attention_block.attention_q_norm = attention_q_norm_storage;
     attention_block.attention_k_norm = attention_k_norm_storage;
-    attention_block.attention_rope_pairing =
-        emel::text::generator::detail::neox_rope_pairing();
     attention_block.feed_forward_norm = ffn_norm_storage;
     attention_block.feed_forward_gate = shortconv_block.feed_forward_gate;
     attention_block.feed_forward_down = shortconv_block.feed_forward_gate;
@@ -834,36 +822,6 @@ void apply_rope_reference(std::span<float> vector, const int32_t head_count,
   }
 }
 
-void apply_rope_neox_reference(std::span<float> vector,
-                               const int32_t head_count,
-                               const int32_t head_dim, const int32_t n_rot,
-                               const int32_t position,
-                               const float rope_freq_base) {
-  const int32_t rot_dim = std::min(n_rot, head_dim);
-  if (head_count <= 0 || head_dim <= 1 || rot_dim <= 1) {
-    return;
-  }
-
-  const float theta_scale =
-      ::powf(rope_freq_base, -2.0f / static_cast<float>(rot_dim));
-  const int32_t pair_stride = rot_dim / 2;
-  for (int32_t head = 0; head < head_count; ++head) {
-    float *head_ptr = vector.data() + (static_cast<size_t>(head) *
-                                       static_cast<size_t>(head_dim));
-    float theta = static_cast<float>(position);
-    for (int32_t dim = 0; dim < pair_stride; ++dim) {
-      const float cos_theta = ::cosf(theta);
-      const float sin_theta = ::sinf(theta);
-      const int32_t dim1 = dim + pair_stride;
-      const float x0 = head_ptr[dim];
-      const float x1 = head_ptr[dim1];
-      head_ptr[dim] = x0 * cos_theta - x1 * sin_theta;
-      head_ptr[dim1] = x0 * sin_theta + x1 * cos_theta;
-      theta *= theta_scale;
-    }
-  }
-}
-
 std::vector<float> flash_attention_online_reference(
     const emel::text::generator::detail::native_backend &backend,
     const int32_t layer_index, const int32_t position,
@@ -971,126 +929,6 @@ TEST_CASE("generator_detail_apply_rope_matches_ggml_float_recurrence") {
   }
 }
 
-TEST_CASE("generator_detail_lfm2_attention_uses_neox_rope_layout") {
-  constexpr int32_t k_embd = 64;
-  constexpr int32_t k_position = 3;
-  auto model = std::make_unique<emel::model::data>();
-  std::memcpy(model->architecture_name.data(), "lfm2", 4u);
-
-  std::vector<float> identity(static_cast<size_t>(k_embd) *
-                                  static_cast<size_t>(k_embd),
-                              0.0f);
-  std::vector<float> zero_matrix(static_cast<size_t>(k_embd) *
-                                     static_cast<size_t>(k_embd),
-                                 0.0f);
-  for (int32_t idx = 0; idx < k_embd; ++idx) {
-    identity[static_cast<size_t>(idx) * static_cast<size_t>(k_embd) +
-             static_cast<size_t>(idx)] = 1.0f;
-  }
-
-  auto identity_tensor =
-      make_tensor_record(identity.data(), emel::kernel::detail::dtype_f32,
-                         k_embd, k_embd);
-  auto zero_tensor =
-      make_tensor_record(zero_matrix.data(), emel::kernel::detail::dtype_f32,
-                         k_embd, k_embd);
-
-  auto backend =
-      std::make_unique<emel::text::generator::detail::native_backend>();
-  backend->model = model.get();
-  backend->kernel_kind = emel::kernel::kernel_kind::x86_64;
-  backend->n_embd = k_embd;
-  backend->n_head = 1;
-  backend->n_head_kv = 1;
-  backend->n_layer = 1;
-  backend->n_ctx = 8;
-  backend->n_rot = k_embd;
-  backend->head_dim = k_embd;
-  backend->head_dim_kv = k_embd;
-  backend->max_q_dim = k_embd;
-  backend->max_kv_dim = k_embd;
-  backend->n_rep = 1;
-  backend->rms_epsilon = 1.0e-6f;
-  backend->rope_freq_base = 1000000.0f;
-  backend->blocks.resize(1u);
-  backend->layer_cache_offsets = {0u};
-  backend->flash_layer_cache_offsets = {0u};
-  backend->hidden.resize(k_embd);
-  backend->norm.resize(k_embd);
-  backend->q.resize(k_embd);
-  backend->q_attn.resize(k_embd);
-  backend->k.resize(k_embd);
-  backend->v.resize(k_embd);
-  backend->attn_scores.resize(backend->n_ctx);
-  backend->attn_probs.resize(backend->n_ctx);
-  backend->attn_probs_rounded.resize(backend->n_ctx);
-  backend->attn_value_column.resize(backend->n_ctx);
-  backend->attn_ctx.resize(k_embd);
-  backend->projected.resize(k_embd);
-  backend->gate.resize(k_embd);
-  backend->up.resize(k_embd);
-  backend->ffn_hidden.resize(k_embd);
-  backend->key_cache.resize(static_cast<size_t>(backend->n_ctx) *
-                            static_cast<size_t>(k_embd));
-  backend->value_cache.resize(static_cast<size_t>(backend->n_ctx) *
-                              static_cast<size_t>(k_embd));
-  backend->flash_key_cache.resize(static_cast<size_t>(backend->n_ctx) *
-                                  static_cast<size_t>(k_embd));
-  backend->flash_value_cache.resize(static_cast<size_t>(backend->n_ctx) *
-                                    static_cast<size_t>(k_embd));
-
-  for (int32_t idx = 0; idx < k_embd; ++idx) {
-    backend->hidden[static_cast<size_t>(idx)] =
-        std::sin(static_cast<float>(idx + 1) * 0.03125f);
-  }
-
-  auto &block = backend->blocks.front();
-  block.uses_attention = true;
-  block.attention_norm.assign(k_embd, 1.0f);
-  block.attention_q.tensor = &identity_tensor;
-  block.attention_q.rows = k_embd;
-  block.attention_q.cols = k_embd;
-  block.attention_k = block.attention_q;
-  block.attention_v = block.attention_q;
-  block.attention_output = block.attention_q;
-  block.attention_q_norm.assign(k_embd, 1.0f);
-  block.attention_k_norm.assign(k_embd, 1.0f);
-  block.feed_forward_norm.assign(k_embd, 1.0f);
-  block.feed_forward_gate.tensor = &zero_tensor;
-  block.feed_forward_gate.rows = k_embd;
-  block.feed_forward_gate.cols = k_embd;
-  block.feed_forward_down = block.feed_forward_gate;
-  block.feed_forward_up = block.feed_forward_gate;
-  block.attention_q_dim = k_embd;
-  block.attention_kv_dim = k_embd;
-  block.attention_head_dim = k_embd;
-  block.attention_head_dim_kv = k_embd;
-  block.attention_rope_dim = k_embd;
-  block.attention_rope_freq_base = backend->rope_freq_base;
-  block.attention_rope_pairing =
-      emel::text::generator::detail::neox_rope_pairing();
-
-  std::array<float, k_embd> expected_k = {};
-  REQUIRE(emel::text::generator::detail::rms_norm(
-      backend->hidden, block.attention_norm, backend->rms_epsilon,
-      std::span<float>(expected_k.data(), expected_k.size())));
-  apply_qwen3_headwise_rms_norm(expected_k, block.attention_k_norm, 1, k_embd,
-                                backend->rms_epsilon);
-  apply_rope_neox_reference(expected_k, 1, k_embd, k_embd, k_position,
-                            backend->rope_freq_base);
-
-  REQUIRE(emel::text::generator::detail::run_layer_nonflash(
-      *backend, 0, k_position));
-  const size_t cache_offset = emel::text::generator::detail::layer_cache_offset(
-      *backend, block, 0, k_position);
-  for (size_t idx = 0; idx < expected_k.size(); ++idx) {
-    CHECK(backend->k[idx] == doctest::Approx(expected_k[idx]).epsilon(1.0e-5));
-    CHECK(emel::text::generator::detail::quant::fp16_to_fp32(
-              backend->key_cache[cache_offset + idx]) ==
-          doctest::Approx(round_fp16_value(expected_k[idx])).epsilon(1.0e-5));
-  }
-}
-
 TEST_CASE("generator_detail_dequantizes_q2_k_blocks") {
   block_q2_k block = {};
   block.d = 0x3c00u;
@@ -1175,14 +1013,8 @@ TEST_CASE(
   backend.output = backend.output_native;
   backend.output_argmax = backend.output_native;
 
-#if defined(__aarch64__) && defined(__ARM_NEON) &&                             \
-    defined(__ARM_FEATURE_DOTPROD)
   CHECK(
       emel::text::generator::detail::packed_q6_k_x8_logits_supported(backend));
-#else
-  CHECK_FALSE(
-      emel::text::generator::detail::packed_q6_k_x8_logits_supported(backend));
-#endif
 #if defined(__aarch64__) && defined(__ARM_NEON) &&                             \
     defined(__ARM_FEATURE_MATMUL_INT8)
   CHECK(emel::text::generator::detail::prepared_q6_k_x8_q8_logits_supported(
@@ -1195,21 +1027,11 @@ TEST_CASE(
 
   REQUIRE(emel::text::generator::detail::prepare_output_logits(backend));
   REQUIRE(emel::text::generator::detail::prepare_q8_input_workspace(backend));
-#if defined(__aarch64__) && defined(__ARM_NEON) &&                             \
-    (defined(__ARM_FEATURE_MATMUL_INT8) || defined(__ARM_FEATURE_DOTPROD))
   CHECK(backend.q8_input_storage.size() == 1u);
   CHECK(emel::text::generator::guard::detail::q8_input_path_supported(
       backend, backend.output));
   CHECK(emel::text::generator::guard::detail::q8_input_argmax_path_supported(
       backend, backend.output_argmax));
-#else
-  CHECK(backend.q8_input_storage.empty());
-  CHECK_FALSE(emel::text::generator::guard::detail::q8_input_path_supported(
-      backend, backend.output));
-  CHECK_FALSE(
-      emel::text::generator::guard::detail::q8_input_argmax_path_supported(
-          backend, backend.output_argmax));
-#endif
 
 #if defined(__aarch64__) && defined(__ARM_NEON) &&                             \
     defined(__ARM_FEATURE_MATMUL_INT8)
@@ -1447,7 +1269,7 @@ TEST_CASE("generator_detail_routes_static_q4_block_matrices_through_generic_q8_"
 
 TEST_CASE("generator_detail_q6_logits_paths_slice_oversized_q8_workspace") {
 #if !(defined(__aarch64__) && defined(__ARM_NEON))
-  CHECK(true);
+  SUCCEED();
 #else
   auto q6_rows = make_q6_rows();
   auto q6_tensor = make_tensor_record(
@@ -2266,16 +2088,9 @@ TEST_CASE(
   emel::model::data::tensor_record packed_tensor = q6_tensor;
   packed_tensor.type = emel::kernel::detail::dtype_q6_k_x8;
   backend.output_argmax.tensor = &packed_tensor;
-#if defined(__aarch64__) && defined(__ARM_NEON) &&                             \
-    defined(__ARM_FEATURE_DOTPROD)
   CHECK(
       emel::text::generator::guard::detail::preselected_argmax_direct_supported(
           backend));
-#else
-  CHECK_FALSE(
-      emel::text::generator::guard::detail::preselected_argmax_direct_supported(
-          backend));
-#endif
 
   emel::model::data::tensor_record unsupported_tensor = q6_tensor;
   unsupported_tensor.type = emel::kernel::detail::dtype_f32;
@@ -2583,7 +2398,7 @@ TEST_CASE("generator_detail_chunk4_packed_q8_0_helpers_are_explicit_and_"
   CHECK(backend.kernel_dispatch_calls == 1u);
   CHECK(backend.packed_q8_0_dispatch_calls == 1u);
 #else
-  REQUIRE(emel::text::generator::detail::prepare_packed_q8_0_chunk4_input(
+  CHECK_FALSE(emel::text::generator::detail::prepare_packed_q8_0_chunk4_input(
       backend, rhs_dense, col_count));
   std::vector<float> output(
       static_cast<size_t>(rhs_rows) * static_cast<size_t>(row_count), 0.0f);

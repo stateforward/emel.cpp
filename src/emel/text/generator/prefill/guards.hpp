@@ -57,13 +57,6 @@ inline bool uses_preselected_argmax_direct(const action::context & ctx) noexcept
              ctx.generator.compute.backend);
 }
 
-inline bool uses_parallel_matmul_lanes(const event::run & ev,
-                                       const action::context & ctx) noexcept {
-  return ctx.generator.compute.backend.lane_pool.has_value() &&
-         ev.ctx.prompt_token_count >=
-             emel::text::generator::detail::k_parallel_min_prefill_tokens;
-}
-
 inline bool uses_prefill_chunk4_q8_gemm(const event::run & ev,
                                         const action::context & ctx) noexcept {
   return ev.ctx.prompt_token_count >= emel::text::generator::detail::k_prefill_q8_chunk_rows &&
@@ -360,13 +353,6 @@ struct guard_materialized_logits_with_chunk8_q8_k_ready {
   }
 };
 
-struct guard_materialized_logits_with_parallel_chunk8_q8_k_ready {
-  bool operator()(const event::run & ev, const action::context & ctx) const noexcept {
-    return detail::uses_parallel_matmul_lanes(ev, ctx) &&
-           guard_materialized_logits_with_chunk8_q8_k_ready{}(ev, ctx);
-  }
-};
-
 struct guard_materialized_logits_with_chunk4_packed_q8_0_ready {
   bool operator()(const event::run & ev, const action::context & ctx) const noexcept {
     return emel::text::generator::guard::detail::guard_prefill_materialized_compute_ready(
@@ -375,25 +361,11 @@ struct guard_materialized_logits_with_chunk4_packed_q8_0_ready {
   }
 };
 
-struct guard_materialized_logits_with_parallel_chunk4_packed_q8_0_ready {
-  bool operator()(const event::run & ev, const action::context & ctx) const noexcept {
-    return detail::uses_parallel_matmul_lanes(ev, ctx) &&
-           guard_materialized_logits_with_chunk4_packed_q8_0_ready{}(ev, ctx);
-  }
-};
-
 struct guard_materialized_logits_with_chunk4_q8_k_ready {
   bool operator()(const event::run & ev, const action::context & ctx) const noexcept {
     return emel::text::generator::guard::detail::guard_prefill_materialized_compute_ready(
                ev.ctx, ctx.generator) &&
            uses_materialized_logits_with_chunk4_q8_k{}(ev, ctx);
-  }
-};
-
-struct guard_materialized_logits_with_parallel_chunk4_q8_k_ready {
-  bool operator()(const event::run & ev, const action::context & ctx) const noexcept {
-    return detail::uses_parallel_matmul_lanes(ev, ctx) &&
-           guard_materialized_logits_with_chunk4_q8_k_ready{}(ev, ctx);
   }
 };
 
@@ -445,13 +417,6 @@ struct guard_preselected_argmax_with_chunk8_q8_k_ready {
   }
 };
 
-struct guard_preselected_argmax_with_parallel_chunk8_q8_k_ready {
-  bool operator()(const event::run & ev, const action::context & ctx) const noexcept {
-    return detail::uses_parallel_matmul_lanes(ev, ctx) &&
-           guard_preselected_argmax_with_chunk8_q8_k_ready{}(ev, ctx);
-  }
-};
-
 struct guard_preselected_argmax_with_chunk4_packed_q8_0_ready {
   bool operator()(const event::run & ev, const action::context & ctx) const noexcept {
     return emel::text::generator::guard::detail::guard_prefill_preselected_compute_ready(
@@ -460,25 +425,11 @@ struct guard_preselected_argmax_with_chunk4_packed_q8_0_ready {
   }
 };
 
-struct guard_preselected_argmax_with_parallel_chunk4_packed_q8_0_ready {
-  bool operator()(const event::run & ev, const action::context & ctx) const noexcept {
-    return detail::uses_parallel_matmul_lanes(ev, ctx) &&
-           guard_preselected_argmax_with_chunk4_packed_q8_0_ready{}(ev, ctx);
-  }
-};
-
 struct guard_preselected_argmax_with_chunk4_q8_k_ready {
   bool operator()(const event::run & ev, const action::context & ctx) const noexcept {
     return emel::text::generator::guard::detail::guard_prefill_preselected_compute_ready(
                ev.ctx, ctx.generator) &&
            uses_preselected_argmax_with_chunk4_q8_k{}(ev, ctx);
-  }
-};
-
-struct guard_preselected_argmax_with_parallel_chunk4_q8_k_ready {
-  bool operator()(const event::run & ev, const action::context & ctx) const noexcept {
-    return detail::uses_parallel_matmul_lanes(ev, ctx) &&
-           guard_preselected_argmax_with_chunk4_q8_k_ready{}(ev, ctx);
   }
 };
 

@@ -278,8 +278,7 @@ struct request_memory_snapshot {
   }
 };
 
-template <emel::text::generator::detail::step_kind kind,
-          auto run_kernel_fn>
+template <emel::text::generator::detail::step_kind kind, auto run_kernel_fn>
 inline void request_phase_compute(const event::generate_run & ev, context & ctx) noexcept {
   ev.ctx.phase_code = static_cast<int32_t>(emel::error::cast(emel::graph::error::none));
   ev.ctx.graph_output = {};
@@ -364,8 +363,7 @@ inline void request_phase_compute(const event::generate_run & ev, context & ctx)
   ev.ctx.phase_accepted = ctx.graph.process_event(compute_ev);
 }
 
-template <emel::text::generator::detail::step_kind kind,
-          auto run_kernel_fn>
+template <emel::text::generator::detail::step_kind kind, auto run_kernel_fn>
 inline void request_phase_compute_preselected_argmax(const event::generate_run & ev,
                                                      context & ctx) noexcept {
   ev.ctx.phase_code = static_cast<int32_t>(emel::error::cast(emel::graph::error::none));
@@ -504,47 +502,6 @@ struct request_decode_compute_flash_kernel {
   }
 };
 
-struct request_decode_compute_flash_parallel_packed_q8_0 {
-  void operator()(const event::generate_run & ev, context & ctx) const noexcept {
-    request_phase_compute<emel::text::generator::detail::step_kind::decode,
-                          emel::text::generator::detail::
-                              run_kernel_flash_decode_parallel_packed_q8_0>(ev, ctx);
-  }
-};
-
-struct request_decode_compute_flash_parallel_q8_k {
-  void operator()(const event::generate_run & ev, context & ctx) const noexcept {
-    request_phase_compute<emel::text::generator::detail::step_kind::decode,
-                          emel::text::generator::detail::
-                              run_kernel_flash_decode_parallel_q8_k>(ev, ctx);
-  }
-};
-
-struct request_decode_compute_flash_parallel_native_quantized {
-  void operator()(const event::generate_run & ev, context & ctx) const noexcept {
-    request_phase_compute<emel::text::generator::detail::step_kind::decode,
-                          emel::text::generator::detail::
-                              run_kernel_flash_decode_parallel_native_quantized>(ev, ctx);
-  }
-};
-
-struct request_decode_compute_flash_parallel_native_quantized_q8_k_logits {
-  void operator()(const event::generate_run & ev, context & ctx) const noexcept {
-    request_phase_compute<emel::text::generator::detail::step_kind::decode,
-                          emel::text::generator::detail::
-                              run_kernel_flash_decode_parallel_native_quantized_q8_k_logits>(
-        ev, ctx);
-  }
-};
-
-struct request_decode_compute_flash_parallel_kernel {
-  void operator()(const event::generate_run & ev, context & ctx) const noexcept {
-    request_phase_compute<emel::text::generator::detail::step_kind::decode,
-                          emel::text::generator::detail::
-                              run_kernel_flash_decode_parallel_kernel>(ev, ctx);
-  }
-};
-
 struct request_decode_compute_nonflash_packed_q8_0 {
   void operator()(const event::generate_run & ev, context & ctx) const noexcept {
     request_phase_compute<emel::text::generator::detail::step_kind::decode,
@@ -621,46 +578,6 @@ struct request_decode_compute_flash_preselected_argmax_kernel {
     request_phase_compute_preselected_argmax<
         emel::text::generator::detail::step_kind::decode,
         emel::text::generator::detail::run_kernel_flash_decode_preselected_argmax_kernel>(
-        ev, ctx);
-  }
-};
-
-struct request_decode_compute_flash_parallel_preselected_argmax_q8_k {
-  void operator()(const event::generate_run & ev, context & ctx) const noexcept {
-    request_phase_compute_preselected_argmax<
-        emel::text::generator::detail::step_kind::decode,
-        emel::text::generator::detail::
-            run_kernel_flash_decode_parallel_preselected_argmax_q8_k>(
-        ev, ctx);
-  }
-};
-
-struct request_decode_compute_flash_parallel_preselected_argmax_native_quantized_q8_k {
-  void operator()(const event::generate_run & ev, context & ctx) const noexcept {
-    request_phase_compute_preselected_argmax<
-        emel::text::generator::detail::step_kind::decode,
-        emel::text::generator::detail::
-            run_kernel_flash_decode_parallel_preselected_argmax_native_quantized_q8_k>(
-        ev, ctx);
-  }
-};
-
-struct request_decode_compute_flash_parallel_preselected_argmax_native_quantized_kernel {
-  void operator()(const event::generate_run & ev, context & ctx) const noexcept {
-    request_phase_compute_preselected_argmax<
-        emel::text::generator::detail::step_kind::decode,
-        emel::text::generator::detail::
-            run_kernel_flash_decode_parallel_preselected_argmax_native_quantized_kernel>(
-        ev, ctx);
-  }
-};
-
-struct request_decode_compute_flash_parallel_preselected_argmax_kernel {
-  void operator()(const event::generate_run & ev, context & ctx) const noexcept {
-    request_phase_compute_preselected_argmax<
-        emel::text::generator::detail::step_kind::decode,
-        emel::text::generator::detail::
-            run_kernel_flash_decode_parallel_preselected_argmax_kernel>(
         ev, ctx);
   }
 };
@@ -963,50 +880,46 @@ struct on_unexpected {
 
 struct capture_diagnostics {
   void operator()(const event::capture_diagnostics & ev, const context & ctx) const noexcept {
-    const auto & backend = ctx.compute.backend;
-    const auto total = [&backend](auto counter) noexcept {
-      return detail::compute_kernel_counter_total(backend, counter);
-    };
-    ev.out.kernel_kind = backend.kernel_kind;
-    ev.out.kernel_dispatch_calls = backend.kernel_dispatch_calls;
-    ev.out.native_q8_0_dispatch_calls = backend.native_q8_0_dispatch_calls;
-    ev.out.packed_q8_0_dispatch_calls = backend.packed_q8_0_dispatch_calls;
-    ev.out.flash_attention_dispatch_calls = backend.flash_attention_dispatch_calls;
+    ev.out.kernel_kind = ctx.compute.backend.kernel_kind;
+    ev.out.kernel_dispatch_calls = ctx.compute.backend.kernel_dispatch_calls;
+    ev.out.native_q8_0_dispatch_calls = ctx.compute.backend.native_q8_0_dispatch_calls;
+    ev.out.packed_q8_0_dispatch_calls = ctx.compute.backend.packed_q8_0_dispatch_calls;
+    ev.out.flash_attention_dispatch_calls = ctx.compute.backend.flash_attention_dispatch_calls;
     ev.out.optimized_flash_dispatch_calls =
-        total(&emel::kernel::sm::optimized_flash_dispatch_count);
-    ev.out.shared_flash_dispatch_calls = total(&emel::kernel::sm::shared_flash_dispatch_count);
-    ev.out.optimized_q2_dispatch_calls = total(&emel::kernel::sm::optimized_q2_dispatch_count);
-    ev.out.shared_q2_dispatch_calls = total(&emel::kernel::sm::shared_q2_dispatch_count);
-    ev.out.optimized_q3_dispatch_calls = total(&emel::kernel::sm::optimized_q3_dispatch_count);
-    ev.out.shared_q3_dispatch_calls = total(&emel::kernel::sm::shared_q3_dispatch_count);
-    ev.out.optimized_q4_dispatch_calls = total(&emel::kernel::sm::optimized_q4_dispatch_count);
+        ctx.compute.backend.kernel.optimized_flash_dispatch_count();
+    ev.out.shared_flash_dispatch_calls = ctx.compute.backend.kernel.shared_flash_dispatch_count();
+    ev.out.optimized_q2_dispatch_calls = ctx.compute.backend.kernel.optimized_q2_dispatch_count();
+    ev.out.shared_q2_dispatch_calls = ctx.compute.backend.kernel.shared_q2_dispatch_count();
+    ev.out.optimized_q3_dispatch_calls = ctx.compute.backend.kernel.optimized_q3_dispatch_count();
+    ev.out.shared_q3_dispatch_calls = ctx.compute.backend.kernel.shared_q3_dispatch_count();
+    ev.out.optimized_q4_dispatch_calls = ctx.compute.backend.kernel.optimized_q4_dispatch_count();
     ev.out.optimized_q4_vector_dispatch_calls =
-        total(&emel::kernel::sm::optimized_q4_vector_dispatch_count);
+        ctx.compute.backend.kernel.optimized_q4_vector_dispatch_count();
     ev.out.optimized_q4_vector_packed_dispatch_calls =
-        total(&emel::kernel::sm::optimized_q4_vector_packed_dispatch_count);
+        ctx.compute.backend.kernel.optimized_q4_vector_packed_dispatch_count();
     ev.out.optimized_q4_vector_packed_q8_rhs_dispatch_calls =
-        total(&emel::kernel::sm::optimized_q4_vector_packed_q8_rhs_dispatch_count);
-    ev.out.shared_q4_dispatch_calls = total(&emel::kernel::sm::shared_q4_dispatch_count);
-    ev.out.optimized_q6_dispatch_calls = total(&emel::kernel::sm::optimized_q6_dispatch_count);
+        ctx.compute.backend.kernel.optimized_q4_vector_packed_q8_rhs_dispatch_count();
+    ev.out.shared_q4_dispatch_calls = ctx.compute.backend.kernel.shared_q4_dispatch_count();
+    ev.out.optimized_q6_dispatch_calls = ctx.compute.backend.kernel.optimized_q6_dispatch_count();
     ev.out.optimized_q6_vector_dispatch_calls =
-        total(&emel::kernel::sm::optimized_q6_vector_dispatch_count);
+        ctx.compute.backend.kernel.optimized_q6_vector_dispatch_count();
     ev.out.optimized_q6_vector_argmax_dispatch_calls =
-        total(&emel::kernel::sm::optimized_q6_vector_argmax_dispatch_count);
+        ctx.compute.backend.kernel.optimized_q6_vector_argmax_dispatch_count();
     ev.out.optimized_q6_vector_packed_dispatch_calls =
-        total(&emel::kernel::sm::optimized_q6_vector_packed_dispatch_count);
+        ctx.compute.backend.kernel.optimized_q6_vector_packed_dispatch_count();
     ev.out.optimized_q6_vector_packed_q8_rhs_dispatch_calls =
-        total(&emel::kernel::sm::optimized_q6_vector_packed_q8_rhs_dispatch_count);
+        ctx.compute.backend.kernel.optimized_q6_vector_packed_q8_rhs_dispatch_count();
     ev.out.optimized_q6_vector_packed_q8_rhs_argmax_dispatch_calls =
-        total(&emel::kernel::sm::optimized_q6_vector_packed_q8_rhs_argmax_dispatch_count);
+        ctx.compute.backend.kernel.optimized_q6_vector_packed_q8_rhs_argmax_dispatch_count();
     ev.out.optimized_q6_vector_prepared_q8_rhs_dispatch_calls =
-        total(&emel::kernel::sm::optimized_q6_vector_prepared_q8_rhs_dispatch_count);
+        ctx.compute.backend.kernel.optimized_q6_vector_prepared_q8_rhs_dispatch_count();
     ev.out.optimized_q6_vector_prepared_q8_rhs_i8mm_dispatch_calls =
-        total(&emel::kernel::sm::optimized_q6_vector_prepared_q8_rhs_i8mm_dispatch_count);
+        ctx.compute.backend.kernel.optimized_q6_vector_prepared_q8_rhs_i8mm_dispatch_count();
     ev.out.optimized_q6_vector_prepared_q8_rhs_argmax_i8mm_dispatch_calls =
-        total(&emel::kernel::sm::optimized_q6_vector_prepared_q8_rhs_argmax_i8mm_dispatch_count);
+        ctx.compute.backend.kernel.optimized_q6_vector_prepared_q8_rhs_argmax_i8mm_dispatch_count();
     ev.out.optimized_q6_vector_q8_argmax_prepared_i8mm_dispatch_calls =
-        total(&emel::kernel::sm::optimized_q6_vector_q8_argmax_prepared_i8mm_dispatch_count);
-    ev.out.shared_q6_dispatch_calls = total(&emel::kernel::sm::shared_q6_dispatch_count);
+        ctx.compute.backend.kernel.optimized_q6_vector_q8_argmax_prepared_i8mm_dispatch_count();
+    ev.out.shared_q6_dispatch_calls = ctx.compute.backend.kernel.shared_q6_dispatch_count();
     ev.out.native_quantized_stage_count = detail::quantized_contract_stage_count(
         ctx.compute.backend,
         emel::model::llama::detail::quantized_contract_kind::native_quantized);
@@ -1080,16 +993,6 @@ inline constexpr request_decode_compute_flash_native_quantized
 inline constexpr request_decode_compute_flash_native_quantized_q8_k_logits
     request_decode_compute_flash_native_quantized_q8_k_logits{};
 inline constexpr request_decode_compute_flash_kernel request_decode_compute_flash_kernel{};
-inline constexpr request_decode_compute_flash_parallel_packed_q8_0
-    request_decode_compute_flash_parallel_packed_q8_0{};
-inline constexpr request_decode_compute_flash_parallel_q8_k
-    request_decode_compute_flash_parallel_q8_k{};
-inline constexpr request_decode_compute_flash_parallel_native_quantized
-    request_decode_compute_flash_parallel_native_quantized{};
-inline constexpr request_decode_compute_flash_parallel_native_quantized_q8_k_logits
-    request_decode_compute_flash_parallel_native_quantized_q8_k_logits{};
-inline constexpr request_decode_compute_flash_parallel_kernel
-    request_decode_compute_flash_parallel_kernel{};
 inline constexpr request_decode_compute_nonflash_packed_q8_0
     request_decode_compute_nonflash_packed_q8_0{};
 inline constexpr request_decode_compute_nonflash_q8_k request_decode_compute_nonflash_q8_k{};
@@ -1106,14 +1009,6 @@ inline constexpr request_decode_compute_flash_preselected_argmax_native_quantize
     request_decode_compute_flash_preselected_argmax_native_quantized_kernel{};
 inline constexpr request_decode_compute_flash_preselected_argmax_kernel
     request_decode_compute_flash_preselected_argmax_kernel{};
-inline constexpr request_decode_compute_flash_parallel_preselected_argmax_q8_k
-    request_decode_compute_flash_parallel_preselected_argmax_q8_k{};
-inline constexpr request_decode_compute_flash_parallel_preselected_argmax_native_quantized_q8_k
-    request_decode_compute_flash_parallel_preselected_argmax_native_quantized_q8_k{};
-inline constexpr request_decode_compute_flash_parallel_preselected_argmax_native_quantized_kernel
-    request_decode_compute_flash_parallel_preselected_argmax_native_quantized_kernel{};
-inline constexpr request_decode_compute_flash_parallel_preselected_argmax_kernel
-    request_decode_compute_flash_parallel_preselected_argmax_kernel{};
 inline constexpr request_decode_compute_nonflash_preselected_argmax_q8_k
     request_decode_compute_nonflash_preselected_argmax_q8_k{};
 inline constexpr request_decode_compute_nonflash_preselected_argmax_native_quantized_q8_k

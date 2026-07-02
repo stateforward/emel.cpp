@@ -175,7 +175,7 @@ inline bool load_te_vocab_from_file(const std::filesystem::path & path,
     return false;
   }
 
-  vocab_out = {};
+  std::memset(&vocab_out, 0, sizeof(vocab_out));
   vocab_out.tokenizer_model_id = emel::model::data::tokenizer_model::WPM;
   vocab_out.tokenizer_pre_id = emel::model::data::tokenizer_pre::DEFAULT;
   std::strncpy(vocab_out.tokenizer_model_name.data(),

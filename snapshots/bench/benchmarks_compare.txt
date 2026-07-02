@@ -59,16 +59,6 @@ logits/validator_sml/vocab_32000 emel.cpp 24274.209 ns/op, llama.cpp 23702.209 n
 memory/hybrid_full emel.cpp 444.458 ns/op, llama.cpp 34307.000 ns/op, ratio=0.013x
 memory/kv_full emel.cpp 131.833 ns/op, llama.cpp 33199.750 ns/op, ratio=0.004x
 memory/recurrent_full emel.cpp 148.625 ns/op, llama.cpp 4460.167 ns/op, ratio=0.033x
-parallel_matmul/gemm8_f32 emel.cpp 161865.350 ns/op, reference-baseline 1249248.735 ns/op, ratio=0.130x
-parallel_matmul/gemv_f32 emel.cpp 291074.740 ns/op, reference-baseline 2404805.169 ns/op, ratio=0.121x
-parallel_matmul/gemv_q4_k emel.cpp 68127.424 ns/op, reference-baseline 469031.650 ns/op, ratio=0.145x
-parallel_matmul/gemv_q6_k emel.cpp 43589.802 ns/op, reference-baseline 284102.823 ns/op, ratio=0.153x
-parallel_matmul/gemv_q8_0 emel.cpp 55314.849 ns/op, reference-baseline 371634.264 ns/op, ratio=0.149x
-parallel_matmul/ggml_gemm8_f32 emel.cpp 170008.552 ns/op, llama.cpp 201689.476 ns/op, ratio=0.843x
-parallel_matmul/ggml_gemv_f32 emel.cpp 284070.253 ns/op, llama.cpp 29684.396 ns/op, ratio=9.570x
-parallel_matmul/ggml_gemv_q4_k emel.cpp 68174.144 ns/op, llama.cpp 16335.825 ns/op, ratio=4.173x
-parallel_matmul/ggml_gemv_q6_k emel.cpp 44451.588 ns/op, llama.cpp 17805.679 ns/op, ratio=2.496x
-parallel_matmul/ggml_gemv_q8_0 emel.cpp 55579.414 ns/op, llama.cpp 20757.682 ns/op, ratio=2.678x
 text/encoders/bpe_long emel.cpp 65.417 ns/op, llama.cpp 66.333 ns/op, ratio=0.986x
 text/encoders/bpe_short emel.cpp 58.416 ns/op, llama.cpp 57.000 ns/op, ratio=1.025x
 text/encoders/fallback_long emel.cpp 2432.500 ns/op, llama.cpp 2504.917 ns/op, ratio=0.971x

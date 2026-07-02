@@ -986,25 +986,10 @@ struct guard_decode_compute_backend_unavailable {
   }
 };
 
-struct guard_decode_parallel_lanes_ready {
-  bool operator()(const event::generate_run &, const action::context & ctx) const noexcept {
-    return ctx.compute.backend.lane_pool.has_value() &&
-           ctx.compute.backend.n_embd >=
-               emel::text::generator::detail::k_parallel_min_gemv_dim;
-  }
-};
-
 struct guard_decode_materialized_scalar_packed_q8_0_ready {
   bool operator()(const event::generate_run & ev, const action::context & ctx) const noexcept {
     return detail::guard_decode_materialized_compute_ready(ev.ctx, ctx) &&
            compute_materialized_scalar_packed_q8_0_supported{}(ev, ctx);
-  }
-};
-
-struct guard_decode_materialized_parallel_scalar_packed_q8_0_ready {
-  bool operator()(const event::generate_run & ev, const action::context & ctx) const noexcept {
-    return guard_decode_parallel_lanes_ready{}(ev, ctx) &&
-           guard_decode_materialized_scalar_packed_q8_0_ready{}(ev, ctx);
   }
 };
 
@@ -1015,24 +1000,10 @@ struct guard_decode_materialized_scalar_q8_k_ready {
   }
 };
 
-struct guard_decode_materialized_parallel_scalar_q8_k_ready {
-  bool operator()(const event::generate_run & ev, const action::context & ctx) const noexcept {
-    return guard_decode_parallel_lanes_ready{}(ev, ctx) &&
-           guard_decode_materialized_scalar_q8_k_ready{}(ev, ctx);
-  }
-};
-
 struct guard_decode_materialized_scalar_native_quantized_q8_k_ready {
   bool operator()(const event::generate_run & ev, const action::context & ctx) const noexcept {
     return detail::guard_decode_materialized_compute_ready(ev.ctx, ctx) &&
            compute_materialized_scalar_native_quantized_q8_k_supported{}(ev, ctx);
-  }
-};
-
-struct guard_decode_materialized_parallel_scalar_native_quantized_q8_k_ready {
-  bool operator()(const event::generate_run & ev, const action::context & ctx) const noexcept {
-    return guard_decode_parallel_lanes_ready{}(ev, ctx) &&
-           guard_decode_materialized_scalar_native_quantized_q8_k_ready{}(ev, ctx);
   }
 };
 
@@ -1043,24 +1014,10 @@ struct guard_decode_materialized_scalar_native_quantized_kernel_ready {
   }
 };
 
-struct guard_decode_materialized_parallel_scalar_native_quantized_kernel_ready {
-  bool operator()(const event::generate_run & ev, const action::context & ctx) const noexcept {
-    return guard_decode_parallel_lanes_ready{}(ev, ctx) &&
-           guard_decode_materialized_scalar_native_quantized_kernel_ready{}(ev, ctx);
-  }
-};
-
 struct guard_decode_materialized_scalar_kernel_ready {
   bool operator()(const event::generate_run & ev, const action::context & ctx) const noexcept {
     return detail::guard_decode_materialized_compute_ready(ev.ctx, ctx) &&
            compute_materialized_scalar_kernel_required{}(ev, ctx);
-  }
-};
-
-struct guard_decode_materialized_parallel_scalar_kernel_ready {
-  bool operator()(const event::generate_run & ev, const action::context & ctx) const noexcept {
-    return guard_decode_parallel_lanes_ready{}(ev, ctx) &&
-           guard_decode_materialized_scalar_kernel_ready{}(ev, ctx);
   }
 };
 
@@ -1096,34 +1053,6 @@ struct guard_decode_preselected_argmax_kernel_ready {
   bool operator()(const event::generate_run & ev, const action::context & ctx) const noexcept {
     return detail::guard_decode_preselected_compute_ready(ev.ctx, ctx) &&
            compute_preselected_argmax_kernel_required{}(ev, ctx);
-  }
-};
-
-struct guard_decode_preselected_parallel_argmax_q8_k_ready {
-  bool operator()(const event::generate_run & ev, const action::context & ctx) const noexcept {
-    return guard_decode_parallel_lanes_ready{}(ev, ctx) &&
-           guard_decode_preselected_argmax_q8_k_ready{}(ev, ctx);
-  }
-};
-
-struct guard_decode_preselected_parallel_argmax_native_quantized_q8_k_ready {
-  bool operator()(const event::generate_run & ev, const action::context & ctx) const noexcept {
-    return guard_decode_parallel_lanes_ready{}(ev, ctx) &&
-           guard_decode_preselected_argmax_native_quantized_q8_k_ready{}(ev, ctx);
-  }
-};
-
-struct guard_decode_preselected_parallel_argmax_native_quantized_kernel_ready {
-  bool operator()(const event::generate_run & ev, const action::context & ctx) const noexcept {
-    return guard_decode_parallel_lanes_ready{}(ev, ctx) &&
-           guard_decode_preselected_argmax_native_quantized_kernel_ready{}(ev, ctx);
-  }
-};
-
-struct guard_decode_preselected_parallel_argmax_kernel_ready {
-  bool operator()(const event::generate_run & ev, const action::context & ctx) const noexcept {
-    return guard_decode_parallel_lanes_ready{}(ev, ctx) &&
-           guard_decode_preselected_argmax_kernel_ready{}(ev, ctx);
   }
 };
 

@@ -7,10 +7,7 @@ remaining synchronous run-to-completion (RTC) and using no message queue.
 
 these rules apply to:
 - stateforward.SML state machines (`stateforward::sml::sm<...>`) and their composition (composite state machines, orthogonal regions).
-- synchronous RTC semantics only (no background workers, no mailboxes, no deferred buffering).
-- coroutine or `async`-named APIs when the caller observes quiescence before
-  the top-level dispatch returns. `async` is not deferred by definition; hidden
-  retention of work for later is what violates RTC/no-queue semantics.
+- synchronous dispatch only (no background workers, no mailboxes, no async buffering).
 
 the rules assume the project-pinned stateforward.SML semantics as implemented in the
 local header and utility dispatch table, including typed completion propagation
@@ -28,10 +25,6 @@ primary sources consulted (non-exhaustive)
   exposed events are immutable. internal-only events that are not publicly
   exposed MAY carry mutable fields when needed for synchronous RTC handoff.
 - RTC chain: the complete, synchronous computation triggered by one top-level dispatch call, including SML internal anonymous transitions.
-- RTC async/coroutine dispatch: a coroutine-backed dispatch whose completion is
-  driven and observed within the same RTC chain. such a call may expose a task
-  object internally, but no incomplete task or continuation may escape the RTC
-  boundary unless the later completion is modeled as an explicit external event.
 - quiescence: a stable configuration where no further internal (anonymous) transitions are enabled.
 - orchestrator: the external driver that calls `process_event` on actors and provides time and ordering.
 - no message queue: no SML `process_queue`, no SML `defer_queue`, no user mailbox, and no “post for later” mechanism.
@@ -43,11 +36,6 @@ primary sources consulted (non-exhaustive)
 4. single-writer invariant: during any RTC chain, exactly one thread MUST be executing inside any given actor’s `process_event`.
 5. allocation invariant: no dynamic allocation (heap) MUST occur during dispatch (guards/actions/entry/exit/anonymous progress).
 6. bounded-work invariant: each top-level dispatch MUST have a provable upper bound on executed transitions and on total work.
-7. coroutine invariant: `process_event_async` or other coroutine-backed dispatch
-   surfaces MAY be used only when their completion is immediate or driven to
-   quiescence before the caller returns from the enclosing RTC dispatch. a
-   scheduler may sequence continuations inside that chain, but MUST NOT retain
-   work as hidden deferred state.
 
 ## 4. event model
 1. event types SHOULD be small, trivially copyable, and contain only immutable payload.
@@ -98,12 +86,7 @@ primary sources consulted (non-exhaustive)
 3. for an external transition with entry/exit enabled, the order MUST be: guard, on-exit, state update, action, on-entry. this follows `transition<...>::execute` which calls `on_exit`, updates current state, executes action, then calls `on_entry`. (source: `stateforward/sml.hpp`, `transition<state<s1>, state<s2>, event<E>, G, A>::execute`.)
 
 ### real-time and determinism constraints
-4. guards and actions MUST be bounded time and MUST NOT block on external
-   resources (no I/O waits, no mutex waits, no sleeps). an action MAY perform a
-   bounded RTC scheduler fork/join wait only after submitting child actor
-   dispatches whose completion is joined before the action returns; the join
-   MUST preserve single-writer per actor, MUST NOT re-enter the same actor, and
-   MUST NOT leave hidden deferred work.
+4. guards and actions MUST be bounded time and MUST NOT block (no I/O waits, no mutex waits, no sleeps).
 5. guards and actions MUST NOT allocate. if an action MUST allocate for rare paths (e.g., error reporting), it MUST do so outside dispatch and only pass references into dispatch.
 6. guards MUST NOT read wall-clock time. time MUST be provided explicitly via events (section 10).
 7. actions MUST NOT contain orchestration branching or validation logic. any runtime control-flow
@@ -119,7 +102,7 @@ primary sources consulted (non-exhaustive)
    transitions or explicit choices/states in the transition graph. only compile-time conditionals
    (e.g., `if constexpr`, `#if`) are allowed inside actions, member methods, or functions called
    from actions/member methods.
-9. actions SHOULD be short. long-running external work MUST be split:
+9. actions SHOULD be short. long-running work MUST be split:
    - action initiates work and transitions to a “waiting” state.
    - A later external event represents completion (still no queues).
 10. actions SHOULD be `noexcept` in production builds. if exceptions are enabled, the system MUST define a hard policy for exception events and document action-throws semantics (overview page notes different semantics for guard-throws vs action-throws).

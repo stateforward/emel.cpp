@@ -22,9 +22,6 @@ option(EMEL_ENABLE_FUZZ "Build fuzz targets" OFF)
 option(EMEL_ENABLE_AARCH64_HOST_FEATURES
   "Enable host-tuned AArch64 compile flags for EMEL-owned C++ code"
   ON)
-option(EMEL_ENABLE_X86_64_HOST_FEATURES
-  "Enable host-tuned x86_64 AVX2/FMA/F16C compile flags for EMEL-owned C++ code"
-  ON)
 
 include(FetchContent)
 include(cmake/sml_version.cmake)
@@ -68,29 +65,6 @@ if(NOT EMEL_AARCH64_HOST_CXX_FLAG STREQUAL "")
     INTERFACE
       "$<$<COMPILE_LANGUAGE:CXX>:${EMEL_AARCH64_HOST_CXX_FLAG}>"
   )
-endif()
-
-set(EMEL_X86_64_HOST_CXX_FLAGS "")
-if(EMEL_ENABLE_X86_64_HOST_FEATURES AND NOT CMAKE_CROSSCOMPILING AND NOT MSVC)
-  string(TOLOWER "${CMAKE_SYSTEM_PROCESSOR}" EMEL_SYSTEM_PROCESSOR_LOWER)
-  if(EMEL_SYSTEM_PROCESSOR_LOWER MATCHES "^(x86_64|amd64)$")
-    check_cxx_compiler_flag("-mavx2" EMEL_HAS_X86_64_AVX2_FLAG)
-    check_cxx_compiler_flag("-mfma" EMEL_HAS_X86_64_FMA_FLAG)
-    check_cxx_compiler_flag("-mf16c" EMEL_HAS_X86_64_F16C_FLAG)
-    if(EMEL_HAS_X86_64_AVX2_FLAG AND EMEL_HAS_X86_64_FMA_FLAG AND EMEL_HAS_X86_64_F16C_FLAG)
-      list(APPEND EMEL_X86_64_HOST_CXX_FLAGS "-mavx2" "-mfma" "-mf16c")
-    endif()
-  endif()
-endif()
-
-if(EMEL_X86_64_HOST_CXX_FLAGS)
-  message(STATUS "EMEL enabling x86_64 host compile flags: ${EMEL_X86_64_HOST_CXX_FLAGS}")
-  foreach(EMEL_X86_64_HOST_CXX_FLAG IN LISTS EMEL_X86_64_HOST_CXX_FLAGS)
-    target_compile_options(emel_core
-      INTERFACE
-        "$<$<COMPILE_LANGUAGE:CXX>:${EMEL_X86_64_HOST_CXX_FLAG}>"
-    )
-  endforeach()
 endif()
 
 add_library(emel STATIC
@@ -141,8 +115,6 @@ if(EMEL_ENABLE_TESTS)
     tests/text/generator/lifecycle_tests.cpp
     tests/text/generator/action_guard_tests.cpp
     tests/text/generator/detail_tests.cpp
-    tests/text/generator/parallel_matmul_tests.cpp
-    tests/text/generator/decode_wavefront/lifecycle_tests.cpp
     tests/text/generator/initializer/lifecycle_tests.cpp
     tests/text/generator/prefill/lifecycle_tests.cpp
     tests/diarization/request/lifecycle_tests.cpp

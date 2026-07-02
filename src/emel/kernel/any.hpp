@@ -17,14 +17,6 @@ enum class kernel_kind : uint8_t {
   aarch64 = 1,
 };
 
-constexpr kernel_kind detect_host_kind() noexcept {
-#if defined(__aarch64__) || defined(_M_ARM64)
-  return kernel_kind::aarch64;
-#else
-  return kernel_kind::x86_64;
-#endif
-}
-
 class any {
  public:
   any() = default;

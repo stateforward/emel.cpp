@@ -140,14 +140,6 @@ struct request_contract_flash_materialized_chunk8_q8_k {
   }
 };
 
-struct request_contract_flash_materialized_parallel_chunk8_q8_k {
-  void operator()(const event::run & ev, context & ctx) const noexcept {
-    detail::request_compute_contract<
-        emel::text::generator::prefill_compute_contract::flash_materialized_chunk8_q8_k,
-        emel::text::generator::detail::run_kernel_flash_prefill_parallel_chunk8_q8_k>(ev, ctx);
-  }
-};
-
 struct request_contract_flash_materialized_chunk4_packed_q8_0 {
   void operator()(const event::run & ev, context & ctx) const noexcept {
     detail::request_compute_contract<
@@ -156,28 +148,11 @@ struct request_contract_flash_materialized_chunk4_packed_q8_0 {
   }
 };
 
-struct request_contract_flash_materialized_parallel_chunk4_packed_q8_0 {
-  void operator()(const event::run & ev, context & ctx) const noexcept {
-    detail::request_compute_contract<
-        emel::text::generator::prefill_compute_contract::flash_materialized_chunk4_packed_q8_0,
-        emel::text::generator::detail::run_kernel_flash_prefill_parallel_chunk4_packed_q8_0>(
-        ev, ctx);
-  }
-};
-
 struct request_contract_flash_materialized_chunk4_q8_k {
   void operator()(const event::run & ev, context & ctx) const noexcept {
     detail::request_compute_contract<
         emel::text::generator::prefill_compute_contract::flash_materialized_chunk4_q8_k,
         emel::text::generator::detail::run_kernel_flash_prefill_chunk4_q8_k>(ev, ctx);
-  }
-};
-
-struct request_contract_flash_materialized_parallel_chunk4_q8_k {
-  void operator()(const event::run & ev, context & ctx) const noexcept {
-    detail::request_compute_contract<
-        emel::text::generator::prefill_compute_contract::flash_materialized_chunk4_q8_k,
-        emel::text::generator::detail::run_kernel_flash_prefill_parallel_chunk4_q8_k>(ev, ctx);
   }
 };
 
@@ -228,16 +203,6 @@ struct request_contract_flash_preselected_chunk8_q8_k {
   }
 };
 
-struct request_contract_flash_preselected_parallel_chunk8_q8_k {
-  void operator()(const event::run & ev, context & ctx) const noexcept {
-    detail::request_compute_contract_preselected_argmax<
-        emel::text::generator::prefill_compute_contract::flash_preselected_chunk8_q8_k,
-        emel::text::generator::detail::
-            run_kernel_flash_prefill_parallel_chunk8_preselected_argmax_q8_k>(
-        ev, ctx);
-  }
-};
-
 struct request_contract_flash_preselected_chunk4_packed_q8_0 {
   void operator()(const event::run & ev, context & ctx) const noexcept {
     detail::request_compute_contract_preselected_argmax<
@@ -247,31 +212,11 @@ struct request_contract_flash_preselected_chunk4_packed_q8_0 {
   }
 };
 
-struct request_contract_flash_preselected_parallel_chunk4_packed_q8_0 {
-  void operator()(const event::run & ev, context & ctx) const noexcept {
-    detail::request_compute_contract_preselected_argmax<
-        emel::text::generator::prefill_compute_contract::flash_preselected_chunk4_packed_q8_0,
-        emel::text::generator::detail::
-            run_kernel_flash_prefill_parallel_chunk4_preselected_argmax_packed_q8_0>(
-        ev, ctx);
-  }
-};
-
 struct request_contract_flash_preselected_chunk4_q8_k {
   void operator()(const event::run & ev, context & ctx) const noexcept {
     detail::request_compute_contract_preselected_argmax<
         emel::text::generator::prefill_compute_contract::flash_preselected_chunk4_q8_k,
         emel::text::generator::detail::run_kernel_flash_prefill_chunk4_preselected_argmax_q8_k>(
-        ev, ctx);
-  }
-};
-
-struct request_contract_flash_preselected_parallel_chunk4_q8_k {
-  void operator()(const event::run & ev, context & ctx) const noexcept {
-    detail::request_compute_contract_preselected_argmax<
-        emel::text::generator::prefill_compute_contract::flash_preselected_chunk4_q8_k,
-        emel::text::generator::detail::
-            run_kernel_flash_prefill_parallel_chunk4_preselected_argmax_q8_k>(
         ev, ctx);
   }
 };
@@ -421,16 +366,10 @@ inline constexpr request_contract_flash_materialized_scalar_kernel
     request_contract_flash_materialized_scalar_kernel{};
 inline constexpr request_contract_flash_materialized_chunk8_q8_k
     request_contract_flash_materialized_chunk8_q8_k{};
-inline constexpr request_contract_flash_materialized_parallel_chunk8_q8_k
-    request_contract_flash_materialized_parallel_chunk8_q8_k{};
 inline constexpr request_contract_flash_materialized_chunk4_packed_q8_0
     request_contract_flash_materialized_chunk4_packed_q8_0{};
-inline constexpr request_contract_flash_materialized_parallel_chunk4_packed_q8_0
-    request_contract_flash_materialized_parallel_chunk4_packed_q8_0{};
 inline constexpr request_contract_flash_materialized_chunk4_q8_k
     request_contract_flash_materialized_chunk4_q8_k{};
-inline constexpr request_contract_flash_materialized_parallel_chunk4_q8_k
-    request_contract_flash_materialized_parallel_chunk4_q8_k{};
 inline constexpr request_contract_flash_preselected_scalar_q8_k
     request_contract_flash_preselected_scalar_q8_k{};
 inline constexpr request_contract_flash_preselected_scalar_native_quantized_q8_k
@@ -441,16 +380,10 @@ inline constexpr request_contract_flash_preselected_scalar_kernel
     request_contract_flash_preselected_scalar_kernel{};
 inline constexpr request_contract_flash_preselected_chunk8_q8_k
     request_contract_flash_preselected_chunk8_q8_k{};
-inline constexpr request_contract_flash_preselected_parallel_chunk8_q8_k
-    request_contract_flash_preselected_parallel_chunk8_q8_k{};
 inline constexpr request_contract_flash_preselected_chunk4_packed_q8_0
     request_contract_flash_preselected_chunk4_packed_q8_0{};
-inline constexpr request_contract_flash_preselected_parallel_chunk4_packed_q8_0
-    request_contract_flash_preselected_parallel_chunk4_packed_q8_0{};
 inline constexpr request_contract_flash_preselected_chunk4_q8_k
     request_contract_flash_preselected_chunk4_q8_k{};
-inline constexpr request_contract_flash_preselected_parallel_chunk4_q8_k
-    request_contract_flash_preselected_parallel_chunk4_q8_k{};
 inline constexpr request_contract_nonflash_materialized_scalar_packed_q8_0
     request_contract_nonflash_materialized_scalar_packed_q8_0{};
 inline constexpr request_contract_nonflash_materialized_scalar_q8_k

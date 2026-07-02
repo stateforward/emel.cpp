@@ -119,45 +119,6 @@ struct model {
                  / action::reject_invalid_compute_without_output
 
       //------------------------------------------------------------------------------//
-      // Reserved compute request validation. This path is for callers that already
-      // proved graph reservation compatibility and only need execution.
-      , sml::state<executing> <= sml::state<reserved> + sml::event<event::compute_reserved_graph>
-                 [ guard::guard_valid_compute_reserved{} ]
-                 / action::effect_begin_reserved_compute
-
-      , sml::state<reserved> <= sml::state<reserved> + sml::event<event::compute_reserved_graph>
-                 [ guard::guard_invalid_compute_reserved_with_dispatchable_output{} ]
-                 / action::effect_reject_invalid_reserved_compute_with_dispatch
-
-      , sml::state<reserved> <= sml::state<reserved> + sml::event<event::compute_reserved_graph>
-                 [ guard::guard_invalid_compute_reserved_with_output_only{} ]
-                 / action::effect_reject_invalid_reserved_compute_with_output_only
-
-      , sml::state<reserved> <= sml::state<reserved> + sml::event<event::compute_reserved_graph>
-                 [ guard::guard_invalid_compute_reserved_without_output{} ]
-                 / action::effect_reject_invalid_reserved_compute_without_output
-
-      , sml::state<uninitialized> <= sml::state<uninitialized>
-                 + sml::event<event::compute_reserved_graph>
-                 [ guard::guard_valid_compute_reserved{} ]
-                 / action::effect_reject_invalid_reserved_compute_with_dispatch
-
-      , sml::state<uninitialized> <= sml::state<uninitialized>
-                 + sml::event<event::compute_reserved_graph>
-                 [ guard::guard_invalid_compute_reserved_with_dispatchable_output{} ]
-                 / action::effect_reject_invalid_reserved_compute_with_dispatch
-
-      , sml::state<uninitialized> <= sml::state<uninitialized>
-                 + sml::event<event::compute_reserved_graph>
-                 [ guard::guard_invalid_compute_reserved_with_output_only{} ]
-                 / action::effect_reject_invalid_reserved_compute_with_output_only
-
-      , sml::state<uninitialized> <= sml::state<uninitialized>
-                 + sml::event<event::compute_reserved_graph>
-                 [ guard::guard_invalid_compute_reserved_without_output{} ]
-                 / action::effect_reject_invalid_reserved_compute_without_output
-
-      //------------------------------------------------------------------------------//
       // Assemble phase.
       , sml::state<assemble_decision> <= sml::state<assembling> + sml::completion<event::compute_graph>
                  / action::request_assemble
@@ -178,18 +139,6 @@ struct model {
 
       , sml::state<compute_decision> <= sml::state<execute_decision> + sml::completion<event::compute_graph>
                  [ guard::execute_failed{} ]
-
-      , sml::state<execute_decision> <= sml::state<executing>
-                 + sml::completion<event::compute_reserved_graph>
-                 / action::effect_request_reserved_execute
-
-      , sml::state<compute_decision> <= sml::state<execute_decision>
-                 + sml::completion<event::compute_reserved_graph>
-                 [ guard::guard_reserved_execute_done{} ]
-
-      , sml::state<compute_decision> <= sml::state<execute_decision>
-                 + sml::completion<event::compute_reserved_graph>
-                 [ guard::guard_reserved_execute_failed{} ]
 
       //------------------------------------------------------------------------------//
       // Compute finalization.
@@ -224,46 +173,6 @@ struct model {
       , sml::state<reserved> <= sml::state<compute_decision> + sml::completion<event::compute_graph>
                  [ guard::compute_error_unknown{} ]
                  / action::dispatch_compute_error
-
-      , sml::state<reserved> <= sml::state<compute_decision>
-                 + sml::completion<event::compute_reserved_graph>
-                 [ guard::guard_reserved_compute_error_none{} ]
-                 / action::effect_dispatch_reserved_compute_done
-
-      , sml::state<reserved> <= sml::state<compute_decision>
-                 + sml::completion<event::compute_reserved_graph>
-                 [ guard::guard_reserved_compute_error_invalid_request{} ]
-                 / action::effect_dispatch_reserved_compute_error
-
-      , sml::state<reserved> <= sml::state<compute_decision>
-                 + sml::completion<event::compute_reserved_graph>
-                 [ guard::guard_reserved_compute_error_assembler_failed{} ]
-                 / action::effect_dispatch_reserved_compute_error
-
-      , sml::state<reserved> <= sml::state<compute_decision>
-                 + sml::completion<event::compute_reserved_graph>
-                 [ guard::guard_reserved_compute_error_processor_failed{} ]
-                 / action::effect_dispatch_reserved_compute_error
-
-      , sml::state<reserved> <= sml::state<compute_decision>
-                 + sml::completion<event::compute_reserved_graph>
-                 [ guard::guard_reserved_compute_error_busy{} ]
-                 / action::effect_dispatch_reserved_compute_error
-
-      , sml::state<reserved> <= sml::state<compute_decision>
-                 + sml::completion<event::compute_reserved_graph>
-                 [ guard::guard_reserved_compute_error_internal_error{} ]
-                 / action::effect_dispatch_reserved_compute_error
-
-      , sml::state<reserved> <= sml::state<compute_decision>
-                 + sml::completion<event::compute_reserved_graph>
-                 [ guard::guard_reserved_compute_error_untracked{} ]
-                 / action::effect_dispatch_reserved_compute_error
-
-      , sml::state<reserved> <= sml::state<compute_decision>
-                 + sml::completion<event::compute_reserved_graph>
-                 [ guard::guard_reserved_compute_error_unknown{} ]
-                 / action::effect_dispatch_reserved_compute_error
 
       //------------------------------------------------------------------------------//
       // Unexpected events.
@@ -308,13 +217,6 @@ struct sm : public emel::sm<model, action::context> {
   bool process_event(const event::compute & ev) {
     event::compute_ctx ctx{};
     event::compute_graph evt{ev, ctx};
-    const bool accepted = base_type::process_event(evt);
-    return accepted && ctx.err == emel::error::cast(error::none);
-  }
-
-  bool process_event(const event::compute_reserved & ev) {
-    event::compute_ctx ctx{};
-    event::compute_reserved_graph evt{ev.request, ctx};
     const bool accepted = base_type::process_event(evt);
     return accepted && ctx.err == emel::error::cast(error::none);
   }

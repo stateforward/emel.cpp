@@ -361,7 +361,7 @@ bench_suite_supported_for_host() {
     kernel_aarch64)
       [[ "$host_arch" == "aarch64" || "$host_arch" == "arm64" ]]
       ;;
-    sm_any|sm_scheduler)
+    sm_any)
       [[ -n "${EMEL_BENCH_INTERNAL:-}" && "${EMEL_BENCH_INTERNAL:-}" != "0" ]]
       ;;
     *)
@@ -995,17 +995,6 @@ run_benchmark_gates() {
         bench_warmup_iters="${EMEL_QUALITY_GATES_DIARIZATION_BENCH_WARMUP_ITERS:-1}"
         bench_warmup_runs="${EMEL_QUALITY_GATES_DIARIZATION_BENCH_WARMUP_RUNS:-1}"
         bench_tolerance="${EMEL_QUALITY_GATES_DIARIZATION_BENCH_TOLERANCE:-0.30}"
-        ;;
-      parallel_matmul)
-        # Thread-pool fork/join cases need amortized measurement windows or
-        # post-build CPU contention dominates the short default runs.
-        bench_iters="${EMEL_QUALITY_GATES_PARALLEL_MATMUL_BENCH_ITERS:-2000}"
-        bench_runs="${EMEL_QUALITY_GATES_PARALLEL_MATMUL_BENCH_RUNS:-5}"
-        bench_warmup_iters="${EMEL_QUALITY_GATES_PARALLEL_MATMUL_BENCH_WARMUP_ITERS:-200}"
-        bench_warmup_runs="${EMEL_QUALITY_GATES_PARALLEL_MATMUL_BENCH_WARMUP_RUNS:-1}"
-        ;;
-      sm_any|sm_scheduler)
-        bench_extra_env+=(EMEL_BENCH_INTERNAL=1)
         ;;
       whisper_compare)
         if run_step_allow_fail "bench_snapshot_${suite}" \

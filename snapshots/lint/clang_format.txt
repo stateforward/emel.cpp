@@ -448,12 +448,6 @@ src/emel/text/formatter/guards.hpp
 src/emel/text/formatter/sm.hpp
 src/emel/text/generator/actions.hpp
 src/emel/text/generator/context.hpp
-src/emel/text/generator/decode_wavefront/actions.hpp
-src/emel/text/generator/decode_wavefront/context.hpp
-src/emel/text/generator/decode_wavefront/errors.hpp
-src/emel/text/generator/decode_wavefront/events.hpp
-src/emel/text/generator/decode_wavefront/guards.hpp
-src/emel/text/generator/decode_wavefront/sm.hpp
 src/emel/text/generator/detail.hpp
 src/emel/text/generator/errors.hpp
 src/emel/text/generator/events.hpp
@@ -616,7 +610,6 @@ tests/text/encoders/test_support.hpp
 tests/text/encoders/ugm_tests.cpp
 tests/text/encoders/wpm_tests.cpp
 tests/text/generator/action_guard_tests.cpp
-tests/text/generator/decode_wavefront/lifecycle_tests.cpp
 tests/text/generator/detail_tests.cpp
 tests/text/generator/initializer/lifecycle_tests.cpp
 tests/text/generator/legacy_compatibility_tests.cpp

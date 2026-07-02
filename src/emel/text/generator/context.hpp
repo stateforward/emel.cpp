@@ -116,7 +116,7 @@ struct context {
   session_limits limits = {};
   session_buffers buffers = {};
   session_state state = {};
-  emel::text::generator::action::renderer_session renderer_session = {};
+  renderer_session renderer_session = {};
 };
 
 }  // namespace emel::text::generator::action

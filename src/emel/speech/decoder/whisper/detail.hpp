@@ -12,7 +12,7 @@
 #include <arm_neon.h>
 #endif
 
-#include "emel/kernel/sm.hpp"
+#include "emel/kernel/aarch64/actions.hpp"
 #include "emel/model/data.hpp"
 #include "emel/speech/decoder/whisper/errors.hpp"
 
@@ -286,14 +286,14 @@ inline float dot_linear_row(const emel::model::data::tensor_record &weight,
 template <uint64_t In, uint64_t Out, bool HasBias,
           aux_weight_variant Aux = aux_weight_variant::q8_0>
 inline void
-linear_q8_0_quantized_input(::emel::kernel::sm &kernel,
-                            const emel::model::data::tensor_record &weight,
+linear_q8_0_quantized_input(const emel::model::data::tensor_record &weight,
                             const emel::model::data::tensor_record *bias,
                             const float *input, float *output) noexcept {
   const uint64_t row_bytes =
       ::emel::kernel::detail::quantized_row_storage_bytes(
           ::emel::kernel::detail::dtype_q8_0, In);
-  const ::emel::kernel::event::op_mul_mat request{
+#if defined(__aarch64__) || defined(__ARM_NEON)
+  ::emel::kernel::event::op_mul_mat request{
       .src0 =
           {
               .data = weight.data,
@@ -327,8 +327,27 @@ linear_q8_0_quantized_input(::emel::kernel::sm &kernel,
                       sizeof(float) * Out,
                   },
           },
+      .nth = 1u,
   };
-  (void) kernel.process_event(request);
+  ::emel::kernel::aarch64::detail::execute_neon_mul_mat_q8_0_vector_unchecked(
+      request);
+#else
+  constexpr uint64_t block_count = In / ::emel::kernel::detail::quant::QK8_0;
+  std::array<::emel::kernel::detail::quant::block_q8_0,
+             static_cast<size_t>(block_count)>
+      input_blocks = {};
+  ::emel::kernel::detail::quant::quantize_row_q8_0_strided(
+      input, 1u, input_blocks.data(), static_cast<int64_t>(In));
+  for (uint64_t row = 0; row < Out; ++row) {
+    const auto *row_base =
+        static_cast<const uint8_t *>(weight.data) + row * row_bytes;
+    const auto *weight_blocks =
+        reinterpret_cast<const ::emel::kernel::detail::quant::block_q8_0 *>(
+            row_base);
+    output[row] = ::emel::kernel::detail::dot_q8_0_q8_0_row_scalar(
+        weight_blocks, input_blocks.data(), block_count);
+  }
+#endif
   if constexpr (HasBias) {
     for (uint64_t row = 0; row < Out; ++row) {
       output[row] += read_aux_vector<Aux>(*bias, row);
@@ -373,15 +392,13 @@ inline void layer_norm_frame(const float *input,
 
 template <linear_weight_variant Variant, uint64_t In, uint64_t Out,
           aux_weight_variant Aux = aux_weight_variant::q8_0>
-inline void linear(::emel::kernel::sm &kernel,
-                   const emel::model::data::tensor_record &weight,
+inline void linear(const emel::model::data::tensor_record &weight,
                    const emel::model::data::tensor_record &bias,
                    const float *input, float *output) noexcept {
   if constexpr (Variant == linear_weight_variant::q8_0) {
-    linear_q8_0_quantized_input<In, Out, true, Aux>(kernel, weight, &bias,
-                                                    input, output);
+    linear_q8_0_quantized_input<In, Out, true, Aux>(weight, &bias, input,
+                                                    output);
   } else {
-    (void) kernel;
     for (uint64_t row = 0; row < Out; ++row) {
       output[row] = dot_linear_row<Variant>(weight, row, input, In) +
                     read_aux_vector<Aux>(bias, row);
@@ -390,14 +407,11 @@ inline void linear(::emel::kernel::sm &kernel,
 }
 
 template <linear_weight_variant Variant, uint64_t In, uint64_t Out>
-inline void linear_no_bias(::emel::kernel::sm &kernel,
-                           const emel::model::data::tensor_record &weight,
+inline void linear_no_bias(const emel::model::data::tensor_record &weight,
                            const float *input, float *output) noexcept {
   if constexpr (Variant == linear_weight_variant::q8_0) {
-    linear_q8_0_quantized_input<In, Out, false>(kernel, weight, nullptr, input,
-                                                output);
+    linear_q8_0_quantized_input<In, Out, false>(weight, nullptr, input, output);
   } else {
-    (void) kernel;
     for (uint64_t row = 0; row < Out; ++row) {
       output[row] = dot_linear_row<Variant>(weight, row, input, In);
     }
@@ -441,8 +455,7 @@ inline uint64_t write_layer_tensor_name(char *output, const char *prefix,
 }
 
 template <linear_weight_variant Variant, aux_weight_variant Aux>
-inline void compute_decoder_cross_cache(::emel::kernel::sm &kernel,
-                                        const emel::model::data &model,
+inline void compute_decoder_cross_cache(const emel::model::data &model,
                                         const float *encoder_state,
                                         const uint64_t encoder_frames,
                                         float *cross_k_cache,
@@ -466,18 +479,16 @@ inline void compute_decoder_cross_cache(::emel::kernel::sm &kernel,
     for (uint64_t frame = 0; frame < encoder_frames; ++frame) {
       const float *frame_in = encoder_state + frame * width;
       linear_no_bias<Variant, k_embedding_length, k_embedding_length>(
-          kernel, cross_k_w, frame_in, layer_cross_k + frame * width);
+          cross_k_w, frame_in, layer_cross_k + frame * width);
       linear<Variant, k_embedding_length, k_embedding_length, Aux>(
-          kernel, cross_v_w, cross_v_b, frame_in,
-          layer_cross_v + frame * width);
+          cross_v_w, cross_v_b, frame_in, layer_cross_v + frame * width);
     }
   }
 }
 
 template <linear_weight_variant Variant, aux_weight_variant Aux>
 inline void
-run_decoder_layer_sequence(::emel::kernel::sm &kernel,
-                           const emel::model::data &model, const uint64_t layer,
+run_decoder_layer_sequence(const emel::model::data &model, const uint64_t layer,
                            const uint64_t encoder_frames,
                            const uint64_t token_count, const float *cross_k,
                            const float *cross_v, float *hidden, float *next,
@@ -517,11 +528,11 @@ run_decoder_layer_sequence(::emel::kernel::sm &kernel,
   for (uint64_t token = 0; token < token_count; ++token) {
     layer_norm_frame<Aux>(hidden + token * width, self_ln_w, self_ln_b, norm);
     linear<Variant, k_embedding_length, k_embedding_length, Aux>(
-        kernel, self_q_w, self_q_b, norm, q + token * width);
+        self_q_w, self_q_b, norm, q + token * width);
     linear_no_bias<Variant, k_embedding_length, k_embedding_length>(
-        kernel, self_k_w, norm, k + token * width);
+        self_k_w, norm, k + token * width);
     linear<Variant, k_embedding_length, k_embedding_length, Aux>(
-        kernel, self_v_w, self_v_b, norm, v + token * width);
+        self_v_w, self_v_b, norm, v + token * width);
   }
 
   const float scale =
@@ -552,7 +563,7 @@ run_decoder_layer_sequence(::emel::kernel::sm &kernel,
       }
     }
     linear<Variant, k_embedding_length, k_embedding_length, Aux>(
-        kernel, self_o_w, self_o_b, attn + token * width, norm);
+        self_o_w, self_o_b, attn + token * width, norm);
     for (uint64_t dim = 0; dim < width; ++dim) {
       next[token * width + dim] = hidden[token * width + dim] + norm[dim];
     }
@@ -561,7 +572,7 @@ run_decoder_layer_sequence(::emel::kernel::sm &kernel,
   for (uint64_t token = 0; token < token_count; ++token) {
     layer_norm_frame<Aux>(next + token * width, cross_ln_w, cross_ln_b, norm);
     linear<Variant, k_embedding_length, k_embedding_length, Aux>(
-        kernel, cross_q_w, cross_q_b, norm, q + token * width);
+        cross_q_w, cross_q_b, norm, q + token * width);
     std::fill_n(attn + token * width, static_cast<size_t>(width), 0.0f);
     for (uint64_t head = 0;
          head < static_cast<uint64_t>(k_attention_head_count); ++head) {
@@ -591,7 +602,7 @@ run_decoder_layer_sequence(::emel::kernel::sm &kernel,
       }
     }
     linear<Variant, k_embedding_length, k_embedding_length, Aux>(
-        kernel, cross_o_w, cross_o_b, attn + token * width, norm);
+        cross_o_w, cross_o_b, attn + token * width, norm);
     for (uint64_t dim = 0; dim < width; ++dim) {
       hidden[token * width + dim] = next[token * width + dim] + norm[dim];
     }
@@ -600,13 +611,13 @@ run_decoder_layer_sequence(::emel::kernel::sm &kernel,
   for (uint64_t token = 0; token < token_count; ++token) {
     layer_norm_frame<Aux>(hidden + token * width, final_ln_w, final_ln_b, norm);
     linear<Variant, k_embedding_length, k_feed_forward_length, Aux>(
-        kernel, fc1_w, fc1_b, norm, ff);
+        fc1_w, fc1_b, norm, ff);
     for (uint64_t dim = 0; dim < static_cast<uint64_t>(k_feed_forward_length);
          ++dim) {
       ff[dim] = gelu(ff[dim]);
     }
     linear<Variant, k_feed_forward_length, k_embedding_length, Aux>(
-        kernel, fc2_w, fc2_b, ff, norm);
+        fc2_w, fc2_b, ff, norm);
     for (uint64_t dim = 0; dim < width; ++dim) {
       hidden[token * width + dim] += norm[dim];
     }
@@ -627,7 +638,6 @@ inline uint64_t digest_f32(const float *values, const uint64_t count) noexcept {
 template <linear_weight_variant Variant,
           aux_weight_variant Aux = aux_weight_variant::q8_0>
 inline void compute_decoder_logits_for_tokens(
-    ::emel::kernel::sm &kernel,
     const emel::model::data &model, const uint64_t encoder_frames,
     const float *cross_k_cache, const float *cross_v_cache,
     const int32_t *tokens, const uint64_t token_count, float *workspace,
@@ -668,9 +678,9 @@ inline void compute_decoder_logits_for_tokens(
     const uint64_t layer_offset =
         layer * encoder_frames * static_cast<uint64_t>(k_embedding_length);
     run_decoder_layer_sequence<Variant, Aux>(
-        kernel, model, layer, encoder_frames, token_count,
-        cross_k_cache + layer_offset, cross_v_cache + layer_offset, hidden,
-        next, q, k, v, attn, norm, ff, scores);
+        model, layer, encoder_frames, token_count, cross_k_cache + layer_offset,
+        cross_v_cache + layer_offset, hidden, next, q, k, v, attn, norm, ff,
+        scores);
   }
 
   const auto &final_w = *find_tensor(
@@ -683,8 +693,8 @@ inline void compute_decoder_logits_for_tokens(
                         final_w, final_b, norm);
 
   if constexpr (Variant == linear_weight_variant::q8_0) {
-    linear_no_bias<Variant, k_embedding_length, k_vocab_size>(
-        kernel, token_embedding, norm, logits);
+    linear_no_bias<Variant, k_embedding_length, k_vocab_size>(token_embedding,
+                                                              norm, logits);
   } else {
     for (uint64_t token = 0; token < static_cast<uint64_t>(k_vocab_size);
          ++token) {
@@ -791,7 +801,6 @@ inline int32_t select_greedy_timestamp_aware_token(
 template <linear_weight_variant Variant,
           aux_weight_variant Aux = aux_weight_variant::q8_0>
 inline uint64_t run_decoder_sequence(
-    ::emel::kernel::sm &kernel,
     const emel::model::data &model, const float *encoder_state,
     const uint64_t encoder_frames, const decode_policy_runtime &policy,
     const int32_t *prompt_tokens, const uint64_t prompt_token_count,
@@ -815,16 +824,14 @@ inline uint64_t run_decoder_sequence(
   float *cross_v_cache = cross_k_cache + cross_cache_count;
   float *step_workspace = cross_v_cache + cross_cache_count;
   compute_decoder_cross_cache<Variant, Aux>(
-      kernel, model, encoder_state, encoder_frames, cross_k_cache,
-      cross_v_cache);
+      model, encoder_state, encoder_frames, cross_k_cache, cross_v_cache);
   uint64_t token_count = prompt_token_count;
   uint64_t digest = 0u;
   generated_token_count_out = 0u;
   for (uint64_t step = 0; step < generation_limit; ++step) {
     float raw_confidence = 0.0f;
     compute_decoder_logits_for_tokens<Variant, Aux>(
-        kernel, model, encoder_frames, cross_k_cache, cross_v_cache,
-        tokens.data(),
+        model, encoder_frames, cross_k_cache, cross_v_cache, tokens.data(),
         token_count, step_workspace, logits, raw_confidence, digest);
     const int32_t next_token = select_greedy_timestamp_aware_token(
         policy, logits, generated_tokens, step, step == 0u, confidence_out);
