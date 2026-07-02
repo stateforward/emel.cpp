@@ -154,6 +154,29 @@ const float *prepare_matrix_raw(arena_cursor &cursor,
   return out;
 }
 
+// Copies raw q8_0 row blocks verbatim into the arena. Returns nullptr when
+// the source is not q8_0 or capacity is exceeded.
+const uint8_t *prepare_raw_q8_0(arena_cursor &cursor,
+                                const emel::model::data::tensor_record *tensor,
+                                const uint64_t expected_elements) noexcept {
+  constexpr uint8_t k_dtype_q8_0 = 8u;
+  if (tensor == nullptr || static_cast<uint8_t>(tensor->type) != k_dtype_q8_0 ||
+      tensor_elements(*tensor) != expected_elements ||
+      expected_elements % emel::kernel::detail::quant::QK8_0 != 0u ||
+      tensor->data == nullptr) {
+    return nullptr;
+  }
+  const uint64_t bytes = expected_elements /
+                         emel::kernel::detail::quant::QK8_0 *
+                         sizeof(emel::kernel::detail::quant::block_q8_0);
+  float *slot = cursor.take((bytes + sizeof(float) - 1u) / sizeof(float));
+  if (slot == nullptr) {
+    return nullptr;
+  }
+  std::memcpy(slot, tensor->data, bytes);
+  return reinterpret_cast<const uint8_t *>(slot);
+}
+
 // Prepares a conv kernel stored [taps, in, out] as the column-major GEMM
 // operand [out, in*taps]: prepared[out + (in*taps + tap) * out_count].
 // Copies raw f16 halfs verbatim into the arena (ggml reshape layout is the
@@ -284,6 +307,33 @@ kev::tensor_view_mut make_view_mut(float *data, const uint64_t ne0,
   view.nb[2] = view.nb[1] * ne1;
   view.nb[3] = view.nb[2] * ne2;
   return view;
+}
+
+// q8_0 weight view [k, rows]: row-blocked storage consumed by the kernel
+// machines' quantized mul_mat rows (matvec: src1 = f32 [1, k]).
+kev::tensor_view make_q8_view(const uint8_t *data, const uint64_t k,
+                              const uint64_t rows) {
+  kev::tensor_view view{};
+  view.data = data;
+  view.type = static_cast<kev::dtype>(8);
+  view.ne = {k, rows, 1, 1};
+  view.nb[0] = 1u;
+  view.nb[1] = emel::kernel::detail::quantized_row_storage_bytes(8u, k);
+  view.nb[2] = view.nb[1] * rows;
+  view.nb[3] = view.nb[2];
+  return view;
+}
+
+// Pre-quantized projection mat-vec: y[1, rows] = W_q8[k, rows] . x[1, k].
+bool dispatch_q8_matvec(codec_runtime &runtime, const uint8_t *weight_q8,
+                        const int64_t k, const int64_t rows, const float *x,
+                        float *y) {
+  kev::op_mul_mat ev{};
+  ev.src0 = make_q8_view(weight_q8, static_cast<uint64_t>(k),
+                         static_cast<uint64_t>(rows));
+  ev.src1 = make_view(x, 1u, static_cast<uint64_t>(k));
+  ev.dst = make_view_mut(y, 1u, static_cast<uint64_t>(rows));
+  return runtime.kernel.process_event(ev);
 }
 
 kev::tensor_view_mut make_strided_view_mut(float *data, const uint64_t ne0,
@@ -790,6 +840,7 @@ bool compute_seanet_stack(codec_runtime &runtime,
   return true;
 }
 
+template <bool proj_q8>
 bool compute_transformer(codec_runtime &runtime,
                          const transformer_weights &weights,
                          codec_streaming_state &state, int64_t &positions,
@@ -867,8 +918,15 @@ bool compute_transformer(codec_runtime &runtime,
         normed[d] = normed[d] * layer.norm1_weight[d] + 0.0f;
         normed[d] = normed[d] + layer.norm1_bias[d];
       }
-      for (int64_t o = 0; o < 3 * dim; ++o) {
-        qkv[o] = kd::vec_dot_f32_ggml(dim, layer.in_proj + o * dim, normed);
+      if constexpr (proj_q8) {
+        if (!dispatch_q8_matvec(runtime, layer.in_proj_q8, dim, 3 * dim, normed,
+                                qkv)) {
+          return false;
+        }
+      } else {
+        for (int64_t o = 0; o < 3 * dim; ++o) {
+          qkv[o] = kd::vec_dot_f32_ggml(dim, layer.in_proj + o * dim, normed);
+        }
       }
 
       // reference rope: timestep-embedding angles, adjacent-pair rotation,
@@ -937,8 +995,15 @@ bool compute_transformer(codec_runtime &runtime,
       }
 
       // out proj, layer scale, residual
-      for (int64_t o = 0; o < dim; ++o) {
-        proj[o] = kd::vec_dot_f32_ggml(dim, layer.out_proj + o * dim, attn);
+      if constexpr (proj_q8) {
+        if (!dispatch_q8_matvec(runtime, layer.out_proj_q8, dim, dim, attn,
+                                proj)) {
+          return false;
+        }
+      } else {
+        for (int64_t o = 0; o < dim; ++o) {
+          proj[o] = kd::vec_dot_f32_ggml(dim, layer.out_proj + o * dim, attn);
+        }
       }
       for (int64_t d = 0; d < dim; ++d) {
         x[d] = x[d] + proj[d] * layer.layer_scale_1[d];
@@ -951,17 +1016,31 @@ bool compute_transformer(codec_runtime &runtime,
         normed[d] = normed[d] * layer.norm2_weight[d];
         normed[d] = normed[d] + layer.norm2_bias[d];
       }
-      for (int64_t o = 0; o < mlp_dim; ++o) {
-        mlp[o] = kd::vec_dot_f32_ggml(dim, layer.linear1 + o * dim, normed);
+      if constexpr (proj_q8) {
+        if (!dispatch_q8_matvec(runtime, layer.linear1_q8, dim, mlp_dim, normed,
+                                mlp)) {
+          return false;
+        }
+      } else {
+        for (int64_t o = 0; o < mlp_dim; ++o) {
+          mlp[o] = kd::vec_dot_f32_ggml(dim, layer.linear1 + o * dim, normed);
+        }
       }
       if (!dispatch_unary(runtime, kev::unary_subop::gelu,
                           make_view(mlp, static_cast<uint64_t>(mlp_dim)),
                           make_view_mut(mlp, static_cast<uint64_t>(mlp_dim)))) {
         return false;
       }
-      for (int64_t o = 0; o < dim; ++o) {
-        proj[o] =
-            kd::vec_dot_f32_ggml(mlp_dim, layer.linear2 + o * mlp_dim, mlp);
+      if constexpr (proj_q8) {
+        if (!dispatch_q8_matvec(runtime, layer.linear2_q8, mlp_dim, dim, mlp,
+                                proj)) {
+          return false;
+        }
+      } else {
+        for (int64_t o = 0; o < dim; ++o) {
+          proj[o] =
+              kd::vec_dot_f32_ggml(mlp_dim, layer.linear2 + o * mlp_dim, mlp);
+        }
       }
       for (int64_t d = 0; d < dim; ++d) {
         x[d] = x[d] + proj[d] * layer.layer_scale_2[d];
@@ -973,7 +1052,7 @@ bool compute_transformer(codec_runtime &runtime,
   return true;
 }
 
-template <bool conv_f16>
+template <bool conv_f16, bool proj_q8>
 bool compute_rvq_encode(codec_runtime &runtime, const frame_buffer &latent,
                         std::span<int32_t> codes_out,
                         std::span<float> workspace) noexcept {
@@ -1010,7 +1089,10 @@ bool compute_rvq_encode(codec_runtime &runtime, const frame_buffer &latent,
       }
       // project into codebook space; append the bias-fold constant
       bool projected_in = false;
-      if constexpr (conv_f16) {
+      if constexpr (proj_q8) {
+        projected_in = dispatch_q8_matvec(runtime, split->input_proj_q8, dim,
+                                          codebook_dim, x, residual);
+      } else if constexpr (conv_f16) {
         // reference conv1x1 path: x rounds to f16 (ggml im2col k=1), then
         // the ggml-exact f16 matmul against the raw f16 projection
         for (int64_t d = 0; d < dim; ++d) {
@@ -1080,7 +1162,7 @@ bool compute_rvq_encode(codec_runtime &runtime, const frame_buffer &latent,
   return true;
 }
 
-template <bool conv_f16>
+template <bool conv_f16, bool proj_q8>
 bool compute_rvq_decode(codec_runtime &runtime, std::span<const int32_t> codes,
                         int32_t frames, frame_buffer &latent_out,
                         std::span<float> workspace) noexcept {
@@ -1141,7 +1223,11 @@ bool compute_rvq_decode(codec_runtime &runtime, std::span<const int32_t> codes,
         }
       }
       bool projected_out = false;
-      if constexpr (conv_f16) {
+      if constexpr (proj_q8) {
+        projected_out =
+            dispatch_q8_matvec(runtime, split->output_proj_q8, codebook_dim,
+                               dim, summed, projected);
+      } else if constexpr (conv_f16) {
         // reference conv1x1 path: summed residual rounds to f16, then the
         // ggml-exact f16 matmul against the raw f16 output projection
         for (int64_t c = 0; c < codebook_dim; ++c) {
@@ -1226,6 +1312,8 @@ struct codec_plan {
   int64_t encoder_tokens = 0;
   int64_t decoder_tokens = 0;
   bool conv_f16 = false;
+  bool proj_q8 = false;
+  bool rvq_q8 = false;
   bool valid = false;
 };
 
@@ -1425,6 +1513,19 @@ bool plan_codec(const emel::model::data &model_data,
   plan_out.conv_f16 =
       first_conv != nullptr &&
       static_cast<uint8_t>(first_conv->type) == emel::kernel::detail::dtype_f16;
+  // projection operand class: q8_0 when the converter quantized the
+  // transformer/RVQ projections (probed on the first in_proj; bind
+  // cross-checks every projection via prepare_raw_q8_0 failures)
+  const auto *first_proj = find_tensor(
+      model_data,
+      "mimi.encoder_transformer.transformer.layers.0.self_attn.in_projs.0."
+      "weight");
+  plan_out.proj_q8 =
+      first_proj != nullptr && static_cast<uint8_t>(first_proj->type) == 8u;
+  const auto *first_rvq_proj =
+      find_tensor(model_data, "mimi.quantizer.rvq_first.input_proj.weight");
+  plan_out.rvq_q8 = first_rvq_proj != nullptr &&
+                    static_cast<uint8_t>(first_rvq_proj->type) == 8u;
 
   int64_t length = plan_out.frame_samples;
   int64_t channels = 1;
@@ -1619,6 +1720,7 @@ bool bind_conv(arena_cursor &cursor, uint64_t &state_cursor,
 bool bind_transformer(arena_cursor &cursor, uint64_t &state_cursor,
                       const emel::model::data &model_data, const char *family,
                       const transformer_plan &plan, const int32_t frame_tokens,
+                      const bool proj_q8,
                       transformer_weights &weights_out) noexcept {
   const auto &mimi = model_data.mimi;
   const int64_t dim = mimi.dim;
@@ -1646,16 +1748,29 @@ bool bind_transformer(arena_cursor &cursor, uint64_t &state_cursor,
     layer.norm1_bias = prepare_vector(
         cursor, find_layer_tensor(model_data, format, index, "norm1.bias"),
         dim);
-    layer.in_proj =
-        prepare_matrix_raw(cursor,
-                           find_layer_tensor(model_data, format, index,
-                                             "self_attn.in_projs.0.weight"),
-                           dim, 3 * dim);
-    layer.out_proj =
-        prepare_matrix_raw(cursor,
-                           find_layer_tensor(model_data, format, index,
-                                             "self_attn.out_projs.0.weight"),
-                           dim, dim);
+    if (proj_q8) {
+      layer.in_proj_q8 = prepare_raw_q8_0(
+          cursor,
+          find_layer_tensor(model_data, format, index,
+                            "self_attn.in_projs.0.weight"),
+          static_cast<uint64_t>(dim) * 3u * static_cast<uint64_t>(dim));
+      layer.out_proj_q8 = prepare_raw_q8_0(
+          cursor,
+          find_layer_tensor(model_data, format, index,
+                            "self_attn.out_projs.0.weight"),
+          static_cast<uint64_t>(dim) * static_cast<uint64_t>(dim));
+    } else {
+      layer.in_proj =
+          prepare_matrix_raw(cursor,
+                             find_layer_tensor(model_data, format, index,
+                                               "self_attn.in_projs.0.weight"),
+                             dim, 3 * dim);
+      layer.out_proj =
+          prepare_matrix_raw(cursor,
+                             find_layer_tensor(model_data, format, index,
+                                               "self_attn.out_projs.0.weight"),
+                             dim, dim);
+    }
     layer.layer_scale_1 = prepare_vector(
         cursor,
         find_layer_tensor(model_data, format, index, "layer_scale_1.scale"),
@@ -1666,21 +1781,39 @@ bool bind_transformer(arena_cursor &cursor, uint64_t &state_cursor,
     layer.norm2_bias = prepare_vector(
         cursor, find_layer_tensor(model_data, format, index, "norm2.bias"),
         dim);
-    layer.linear1 = prepare_matrix_raw(
-        cursor, find_layer_tensor(model_data, format, index, "linear1.weight"),
-        dim, plan.mlp_dim);
-    layer.linear2 = prepare_matrix_raw(
-        cursor, find_layer_tensor(model_data, format, index, "linear2.weight"),
-        plan.mlp_dim, dim);
+    if (proj_q8) {
+      layer.linear1_q8 = prepare_raw_q8_0(
+          cursor,
+          find_layer_tensor(model_data, format, index, "linear1.weight"),
+          static_cast<uint64_t>(dim) * static_cast<uint64_t>(plan.mlp_dim));
+      layer.linear2_q8 = prepare_raw_q8_0(
+          cursor,
+          find_layer_tensor(model_data, format, index, "linear2.weight"),
+          static_cast<uint64_t>(plan.mlp_dim) * static_cast<uint64_t>(dim));
+    } else {
+      layer.linear1 = prepare_matrix_raw(
+          cursor,
+          find_layer_tensor(model_data, format, index, "linear1.weight"), dim,
+          plan.mlp_dim);
+      layer.linear2 = prepare_matrix_raw(
+          cursor,
+          find_layer_tensor(model_data, format, index, "linear2.weight"),
+          plan.mlp_dim, dim);
+    }
     layer.layer_scale_2 = prepare_vector(
         cursor,
         find_layer_tensor(model_data, format, index, "layer_scale_2.scale"),
         dim);
+    const bool projections_bound =
+        proj_q8
+            ? (layer.in_proj_q8 != nullptr && layer.out_proj_q8 != nullptr &&
+               layer.linear1_q8 != nullptr && layer.linear2_q8 != nullptr)
+            : (layer.in_proj != nullptr && layer.out_proj != nullptr &&
+               layer.linear1 != nullptr && layer.linear2 != nullptr);
     if (layer.norm1_weight == nullptr || layer.norm1_bias == nullptr ||
-        layer.in_proj == nullptr || layer.out_proj == nullptr ||
-        layer.layer_scale_1 == nullptr || layer.norm2_weight == nullptr ||
-        layer.norm2_bias == nullptr || layer.linear1 == nullptr ||
-        layer.linear2 == nullptr || layer.layer_scale_2 == nullptr) {
+        !projections_bound || layer.layer_scale_1 == nullptr ||
+        layer.norm2_weight == nullptr || layer.norm2_bias == nullptr ||
+        layer.layer_scale_2 == nullptr) {
       return false;
     }
   }
@@ -1689,7 +1822,7 @@ bool bind_transformer(arena_cursor &cursor, uint64_t &state_cursor,
 
 bool bind_rvq_split(arena_cursor &cursor, const emel::model::data &model_data,
                     const char *split, const int32_t level_count,
-                    const bool with_f16,
+                    const bool with_f16, const bool with_q8,
                     rvq_split_weights &split_out) noexcept {
   const auto &mimi = model_data.mimi;
   const int64_t dim = mimi.dim;
@@ -1697,18 +1830,35 @@ bool bind_rvq_split(arena_cursor &cursor, const emel::model::data &model_data,
   const int64_t entries = mimi.card;
   char name[96] = {};
 
-  std::snprintf(name, sizeof(name), "mimi.quantizer.%s.input_proj.weight",
-                split);
-  split_out.input_proj =
-      prepare_linear(cursor, find_tensor(model_data, name), dim, cb_dim);
-  std::snprintf(name, sizeof(name), "mimi.quantizer.%s.output_proj.weight",
-                split);
-  split_out.output_proj =
-      prepare_linear(cursor, find_tensor(model_data, name), cb_dim, dim);
-  if (split_out.input_proj == nullptr || split_out.output_proj == nullptr) {
-    return false;
+  if (with_q8) {
+    std::snprintf(name, sizeof(name), "mimi.quantizer.%s.input_proj.weight",
+                  split);
+    split_out.input_proj_q8 = prepare_raw_q8_0(
+        cursor, find_tensor(model_data, name),
+        static_cast<uint64_t>(dim) * static_cast<uint64_t>(cb_dim));
+    std::snprintf(name, sizeof(name), "mimi.quantizer.%s.output_proj.weight",
+                  split);
+    split_out.output_proj_q8 = prepare_raw_q8_0(
+        cursor, find_tensor(model_data, name),
+        static_cast<uint64_t>(cb_dim) * static_cast<uint64_t>(dim));
+    if (split_out.input_proj_q8 == nullptr ||
+        split_out.output_proj_q8 == nullptr) {
+      return false;
+    }
+  } else {
+    std::snprintf(name, sizeof(name), "mimi.quantizer.%s.input_proj.weight",
+                  split);
+    split_out.input_proj =
+        prepare_linear(cursor, find_tensor(model_data, name), dim, cb_dim);
+    std::snprintf(name, sizeof(name), "mimi.quantizer.%s.output_proj.weight",
+                  split);
+    split_out.output_proj =
+        prepare_linear(cursor, find_tensor(model_data, name), cb_dim, dim);
+    if (split_out.input_proj == nullptr || split_out.output_proj == nullptr) {
+      return false;
+    }
   }
-  if (with_f16) {
+  if (with_f16 && !with_q8) {
     // reference operand class keeps the raw f16 conv1x1 projections
     std::snprintf(name, sizeof(name), "mimi.quantizer.%s.input_proj.weight",
                   split);
@@ -1858,7 +2008,7 @@ bool bind_codec_runtime(const emel::model::data &model_data,
                    runtime_out.encoder_layers) ||
       !bind_transformer(cursor, state_cursor, model_data, "encoder_transformer",
                         plan.encoder_transformer,
-                        static_cast<int32_t>(plan.encoder_tokens),
+                        static_cast<int32_t>(plan.encoder_tokens), plan.proj_q8,
                         runtime_out.encoder_transformer)) {
     return false;
   }
@@ -1869,10 +2019,13 @@ bool bind_codec_runtime(const emel::model::data &model_data,
   }
 
   runtime_out.conv_f16 = plan.conv_f16;
+  runtime_out.proj_q8 = plan.proj_q8;
+  runtime_out.rvq_q8 = plan.rvq_q8;
   if (!bind_rvq_split(cursor, model_data, "rvq_first", mimi.semantic_n_q,
-                      plan.conv_f16, runtime_out.quantizer.semantic) ||
+                      plan.conv_f16, plan.rvq_q8,
+                      runtime_out.quantizer.semantic) ||
       !bind_rvq_split(cursor, model_data, "rvq_rest",
-                      mimi.n_q - mimi.semantic_n_q, plan.conv_f16,
+                      mimi.n_q - mimi.semantic_n_q, plan.conv_f16, plan.rvq_q8,
                       runtime_out.quantizer.acoustic)) {
     return false;
   }
@@ -1904,7 +2057,7 @@ bool bind_codec_runtime(const emel::model::data &model_data,
 
   if (!bind_transformer(cursor, state_cursor, model_data, "decoder_transformer",
                         plan.decoder_transformer,
-                        static_cast<int32_t>(plan.decoder_tokens),
+                        static_cast<int32_t>(plan.decoder_tokens), plan.proj_q8,
                         runtime_out.decoder_transformer) ||
       !bind_seanet(cursor, state_cursor, plan.decoder, plan.conv_f16,
                    runtime_out.decoder_layers)) {
@@ -1937,20 +2090,40 @@ template bool compute_streaming_conv<true>(codec_runtime &,
                                            codec_streaming_state &,
                                            frame_buffer &,
                                            std::span<float>) noexcept;
-template bool compute_rvq_encode<false>(codec_runtime &, const frame_buffer &,
-                                        std::span<int32_t>,
-                                        std::span<float>) noexcept;
-template bool compute_rvq_encode<true>(codec_runtime &, const frame_buffer &,
-                                       std::span<int32_t>,
-                                       std::span<float>) noexcept;
-template bool compute_rvq_decode<false>(codec_runtime &,
-                                        std::span<const int32_t>, int32_t,
+template bool compute_rvq_encode<false, false>(codec_runtime &,
+                                               const frame_buffer &,
+                                               std::span<int32_t>,
+                                               std::span<float>) noexcept;
+template bool compute_rvq_encode<true, false>(codec_runtime &,
+                                              const frame_buffer &,
+                                              std::span<int32_t>,
+                                              std::span<float>) noexcept;
+template bool compute_rvq_encode<true, true>(codec_runtime &,
+                                             const frame_buffer &,
+                                             std::span<int32_t>,
+                                             std::span<float>) noexcept;
+template bool compute_rvq_decode<false, false>(codec_runtime &,
+                                               std::span<const int32_t>,
+                                               int32_t, frame_buffer &,
+                                               std::span<float>) noexcept;
+template bool compute_rvq_decode<true, false>(codec_runtime &,
+                                              std::span<const int32_t>, int32_t,
+                                              frame_buffer &,
+                                              std::span<float>) noexcept;
+template bool compute_rvq_decode<true, true>(codec_runtime &,
+                                             std::span<const int32_t>, int32_t,
+                                             frame_buffer &,
+                                             std::span<float>) noexcept;
+template bool compute_transformer<false>(codec_runtime &,
+                                         const transformer_weights &,
+                                         codec_streaming_state &, int64_t &,
+                                         frame_buffer &,
+                                         std::span<float>) noexcept;
+template bool compute_transformer<true>(codec_runtime &,
+                                        const transformer_weights &,
+                                        codec_streaming_state &, int64_t &,
                                         frame_buffer &,
                                         std::span<float>) noexcept;
-template bool compute_rvq_decode<true>(codec_runtime &,
-                                       std::span<const int32_t>, int32_t,
-                                       frame_buffer &,
-                                       std::span<float>) noexcept;
 
 void reset_streaming_state(const codec_runtime &runtime,
                            codec_streaming_state &state) noexcept {

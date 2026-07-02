@@ -74,6 +74,20 @@ struct guard_conv_f32 {
   }
 };
 
+struct guard_proj_q8 {
+  bool operator()(const event::decode_run &runtime_ev,
+                  const action::context &) const noexcept {
+    return runtime_ev.request.runtime.proj_q8;
+  }
+};
+
+struct guard_proj_f32 {
+  bool operator()(const event::decode_run &runtime_ev,
+                  const action::context &) const noexcept {
+    return !runtime_ev.request.runtime.proj_q8;
+  }
+};
+
 struct guard_stage_ok {
   bool operator()(const event::decode_run &runtime_ev,
                   const action::context &) const noexcept {

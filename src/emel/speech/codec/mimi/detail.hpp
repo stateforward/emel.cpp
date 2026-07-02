@@ -127,6 +127,11 @@ struct transformer_layer_weights {
   const float *norm1_bias = nullptr;
   const float *in_proj = nullptr;  // [dim, 3*dim] fused qkv
   const float *out_proj = nullptr; // [dim, dim]
+  // raw q8_0 row blocks when the model carries quantized projections
+  const uint8_t *in_proj_q8 = nullptr;
+  const uint8_t *out_proj_q8 = nullptr;
+  const uint8_t *linear1_q8 = nullptr;
+  const uint8_t *linear2_q8 = nullptr;
   const float *layer_scale_1 = nullptr;
   const float *norm2_weight = nullptr;
   const float *norm2_bias = nullptr;
@@ -158,6 +163,9 @@ struct rvq_split_weights {
   // Raw f16 projections (ggml layout) when the model stores f16 weights.
   const uint16_t *input_proj_f16 = nullptr;
   const uint16_t *output_proj_f16 = nullptr;
+  // raw q8_0 row blocks when the model carries quantized projections
+  const uint8_t *input_proj_q8 = nullptr;
+  const uint8_t *output_proj_q8 = nullptr;
   // per level: prepared search table [codebook_dim + 1, entries] and raw
   // codebook rows [codebook_dim, entries]
   std::array<const float *, k_max_quantizer_levels> search_tables = {};
@@ -180,10 +188,13 @@ struct codec_runtime {
   const emel::model::data *model = nullptr;
   emel::kernel::sm kernel = {};
   emel::kernel::kernel_kind kernel_kind = emel::kernel::kernel_kind::x86_64;
-  // Bound model property: true when conv / quantizer-projection weights are
-  // stored f16 (the reference operand class for such models). Guards on the
-  // owning actors read this to select the f16 compute rows.
+  // Bound model properties: conv_f16 selects the reference f16 conv operand
+  // class; proj_q8 selects the emel-owned q8_0 projection operand class
+  // (transformer + RVQ projections quantized by the converter). Guards on
+  // the owning actors read these to select the matching compute rows.
   bool conv_f16 = false;
+  bool proj_q8 = false;
+  bool rvq_q8 = false;
 
   std::array<seanet_layer_weights, k_max_seanet_layers> encoder_layers = {};
   conv_weights downsample = {};
@@ -281,19 +292,20 @@ bool compute_streaming_conv_transpose_depthwise(
     codec_streaming_state &state, frame_buffer &io,
     std::span<float> workspace) noexcept;
 
+template <bool proj_q8>
 bool compute_transformer(codec_runtime &runtime,
                          const transformer_weights &weights,
                          codec_streaming_state &state, int64_t &positions,
                          frame_buffer &io, std::span<float> workspace) noexcept;
 
 // latent [dim, frames] -> codes [n_q, frames]
-template <bool conv_f16>
+template <bool conv_f16, bool proj_q8 = false>
 bool compute_rvq_encode(codec_runtime &runtime, const frame_buffer &latent,
                         std::span<int32_t> codes_out,
                         std::span<float> workspace) noexcept;
 
 // codes [n_q, frames] -> latent [dim, frames]
-template <bool conv_f16>
+template <bool conv_f16, bool proj_q8 = false>
 bool compute_rvq_decode(codec_runtime &runtime, std::span<const int32_t> codes,
                         int32_t frames, frame_buffer &latent_out,
                         std::span<float> workspace) noexcept;

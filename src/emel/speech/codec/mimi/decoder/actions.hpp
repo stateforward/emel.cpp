@@ -73,11 +73,13 @@ struct effect_mark_upsample_failed {
   }
 };
 
-struct effect_run_transformer {
+// The projection operand class (raw f32 vs pre-quantized q8_0) is selected
+// by the transition rows via guard_proj_q8 / guard_proj_f32.
+template <bool proj_q8> struct effect_run_transformer {
   void operator()(const event::decode_run &runtime_ev,
                   context &) const noexcept {
     const auto &request = runtime_ev.request;
-    runtime_ev.ctx.stage_ok = mimi::detail::compute_transformer(
+    runtime_ev.ctx.stage_ok = mimi::detail::compute_transformer<proj_q8>(
         request.runtime, request.runtime.decoder_transformer, request.streaming,
         request.streaming.decoder_positions, runtime_ev.ctx.io,
         request.workspace);

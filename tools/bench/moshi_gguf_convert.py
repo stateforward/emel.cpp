@@ -41,6 +41,33 @@ GGUF_TYPE_BOOL = 7
 GGUF_TYPE_STRING = 8
 GGUF_TYPE_ARRAY = 9
 
+# tensor dtype codes (ggml enumeration)
+GGML_DTYPE_F32 = 0
+GGML_DTYPE_F16 = 1
+GGML_DTYPE_Q8_0 = 8
+Q8_0_BLOCK = 32
+Q8_0_BLOCK_BYTES = 34  # fp16 scale + 32 int8
+
+# weight classes safe to quantize in a mimi component: the transformer and
+# RVQ projections (uniform row length, k % 32 == 0, consumed as mat-vecs by
+# the emel quantized kernels). Convs, norms, biases, scales, and codebooks
+# stay in their float dtypes.
+MIMI_QUANTIZABLE_SUFFIXES = (
+    "self_attn.in_projs.0.weight",
+    "self_attn.out_projs.0.weight",
+    "linear1.weight",
+    "linear2.weight",
+)
+# Measured on the real model: quantizing the RVQ projections costs no
+# additional code-match quality (the flips come from transformer-latent
+# perturbation), so they quantize along with the transformer projections.
+MIMI_QUANTIZABLE_NAMES = (
+    "mimi.quantizer.rvq_first.input_proj.weight",
+    "mimi.quantizer.rvq_first.output_proj.weight",
+    "mimi.quantizer.rvq_rest.input_proj.weight",
+    "mimi.quantizer.rvq_rest.output_proj.weight",
+)
+
 # moshi.cpp mangles tensor names >= GGML_MAX_NAME when caching GGUFs.
 GGML_MAX_NAME = 64
 
@@ -544,6 +571,109 @@ def append_mimi_kv(kv: KvWriter, mimi: dict) -> None:
          mimi["transformer_max_period"])
 
 
+def tensor_data_bytes(info: TensorInfo) -> int:
+  elements = 1
+  for dim in info.dims:
+    elements *= dim
+  if info.dtype == GGML_DTYPE_F32:
+    return elements * 4
+  if info.dtype == GGML_DTYPE_F16:
+    return elements * 2
+  if info.dtype == GGML_DTYPE_Q8_0:
+    return elements // Q8_0_BLOCK * Q8_0_BLOCK_BYTES
+  raise ValueError(f"unsupported dtype {info.dtype} for {info.name}")
+
+
+def is_mimi_quantizable(info: TensorInfo) -> bool:
+  # effective row length: conv1x1 projections store [1, in, out], linear
+  # projections store [in, out]; blocks must not straddle rows. 1-D tensors
+  # (biases hit by the suffix match on other models) are never quantized.
+  if len(info.dims) < 2:
+    return False
+  row = info.dims[0] if info.dims[0] > 1 else info.dims[1]
+  return (info.name in MIMI_QUANTIZABLE_NAMES or
+          info.name.endswith(MIMI_QUANTIZABLE_SUFFIXES)) and \
+      row % Q8_0_BLOCK == 0 and \
+      info.dtype in (GGML_DTYPE_F32, GGML_DTYPE_F16)
+
+
+def quantize_q8_0(values) -> bytes:
+  """Row-blocked q8_0 exactly matching the emel/ggml reference encoder:
+  per 32-value block, d = amax / 127 (stored fp16), q = clamp(round-half-
+  away(x / d), -127, 127)."""
+  import numpy as np
+  blocks = values.astype(np.float32).reshape(-1, Q8_0_BLOCK)
+  amax = np.abs(blocks).max(axis=1)
+  d = amax / 127.0
+  inv_d = np.where(d != 0.0, 1.0 / np.where(d == 0.0, 1.0, d), 0.0)
+  scaled = blocks * inv_d[:, None]
+  quants = np.clip(
+      np.floor(np.abs(scaled) + 0.5) * np.sign(scaled), -127, 127
+  ).astype(np.int8)
+  out = np.zeros((blocks.shape[0], Q8_0_BLOCK_BYTES), dtype=np.uint8)
+  out[:, 0:2] = d.astype(np.float16)[:, None].view(np.uint8)
+  out[:, 2:] = quants.view(np.uint8)
+  return out.tobytes()
+
+
+def quantize_mimi_tensors(
+    source: Path, infos: list[TensorInfo], data_start: int,
+    quantize: str) -> tuple[list[TensorInfo], list[bytes], int]:
+  """Returns (new infos with rebuilt offsets, per-tensor payloads, count)."""
+  if quantize != "q8_0":
+    raise ValueError(f"unsupported --quantize type: {quantize}")
+  import numpy as np
+  data = source.read_bytes()
+  payloads: list[bytes] = []
+  new_infos: list[TensorInfo] = []
+  offset = 0
+  quantized = 0
+  for info in infos:
+    raw = data[data_start + info.offset:
+               data_start + info.offset + tensor_data_bytes(info)]
+    dims = info.dims
+    if is_mimi_quantizable(info):
+      dt = np.float32 if info.dtype == GGML_DTYPE_F32 else np.float16
+      payload = quantize_q8_0(np.frombuffer(raw, dtype=dt))
+      dtype = GGML_DTYPE_Q8_0
+      quantized += 1
+      if dims[0] == 1:
+        # conv1x1 projections store [1, in, out]; drop the leading unit dim
+        # so the quantized row length (ne0) is the real contraction length
+        dims = dims[1:]
+    else:
+      payload = raw
+      dtype = info.dtype
+    payloads.append(payload)
+    new_infos.append(
+        TensorInfo(name=info.name, dims=dims, dtype=dtype, offset=offset))
+    offset += len(payload)
+    pad = (-offset) % GGUF_ALIGNMENT
+    offset += pad
+    payloads.append(b"\0" * pad)
+  return new_infos, payloads, quantized
+
+
+def write_rewritten(output: Path, infos: list[TensorInfo],
+                    payloads: list[bytes], kv: KvWriter) -> None:
+  out = bytearray()
+  out.extend(GGUF_MAGIC)
+  out.extend(struct.pack("<IQQ", GGUF_VERSION, len(infos), kv.count))
+  out.extend(kv.buffer)
+  for info in infos:
+    write_string(out, info.name)
+    out.extend(struct.pack("<I", len(info.dims)))
+    for dim in info.dims:
+      out.extend(struct.pack("<Q", dim))
+    out.extend(struct.pack("<IQ", info.dtype, info.offset))
+  out.extend(b"\0" * ((-len(out)) % GGUF_ALIGNMENT))
+  output.parent.mkdir(parents=True, exist_ok=True)
+  with output.open("wb") as dst:
+    dst.write(out)
+    for payload in payloads:
+      dst.write(payload)
+
+
 def write_enriched(source: Path, output: Path, infos: list[TensorInfo],
                    data_start: int, kv: KvWriter) -> None:
   out = bytearray()
@@ -568,9 +698,12 @@ def write_enriched(source: Path, output: Path, infos: list[TensorInfo],
 
 def convert(source: Path, output: Path, config_path: Path | None,
             tokenizer_path: Path | None,
-            mimi_preset_path: Path | None = None) -> dict:
+            mimi_preset_path: Path | None = None,
+            quantize: str | None = None) -> dict:
   infos, data_start = read_raw_gguf(source)
   component = detect_component(infos)
+  if quantize is not None and component != "mimi":
+    raise ValueError("--quantize currently supports mimi components only")
 
   kv = KvWriter()
   kv.string("general.architecture", "moshi")
@@ -606,13 +739,21 @@ def convert(source: Path, output: Path, config_path: Path | None,
         "mimi.decoder_transformer.transformer.", layers, 1)
     infos = unmangle_names(infos, candidates)
     append_mimi_kv(kv, cross_check_mimi(infos, n_q, preset))
+    if quantize is not None:
+      kv.string("moshi.mimi.quantization", quantize)
   else:
     infos = unmangle_names(infos, [])
     cross_check_voice(infos)
     kv.string("moshi.voice.format", VOICE_FORMAT)
 
-  write_enriched(source, output, infos, data_start, kv)
-  return {
+  quantized_count = 0
+  if quantize is not None:
+    infos, payloads, quantized_count = quantize_mimi_tensors(
+        source, infos, data_start, quantize)
+    write_rewritten(output, infos, payloads, kv)
+  else:
+    write_enriched(source, output, infos, data_start, kv)
+  manifest = {
       "component": component,
       "source_model": str(source),
       "source_sha256": sha256_file(source),
@@ -620,6 +761,10 @@ def convert(source: Path, output: Path, config_path: Path | None,
       "enriched_sha256": sha256_file(output),
       "converter": "tools/bench/moshi_gguf_convert.py",
   }
+  if quantize is not None:
+    manifest["quantization"] = quantize
+    manifest["quantized_tensors"] = quantized_count
+  return manifest
 
 
 def parse_args() -> argparse.Namespace:
@@ -639,13 +784,17 @@ def parse_args() -> argparse.Namespace:
                            "preset (used by tiny test fixtures)")
   parser.add_argument("--manifest", type=Path, default=None,
                       help="optional provenance manifest JSON to write")
+  parser.add_argument("--quantize", choices=("q8_0",), default=None,
+                      help="quantize the mimi projection weight classes "
+                           "(transformer + RVQ projections) to the given "
+                           "block format; requires numpy")
   return parser.parse_args()
 
 
 def main() -> int:
   args = parse_args()
   manifest = convert(args.source, args.output, args.config, args.tokenizer,
-                     args.mimi_preset)
+                     args.mimi_preset, args.quantize)
   if args.manifest is not None:
     args.manifest.parent.mkdir(parents=True, exist_ok=True)
     args.manifest.write_text(json.dumps(manifest, indent=2) + "\n",

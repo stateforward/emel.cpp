@@ -56,11 +56,14 @@ struct model {
       , sml::state<state_encode_variant_decision> <= sml::state<state_encode_shape_decision>
           + sml::completion<encode_run> [ guard::guard_encode_shape_valid{} ]
       , sml::state<state_encode_running> <= sml::state<state_encode_variant_decision>
-          + sml::completion<encode_run> [ guard::guard_conv_f32<encode_run>{} ]
-          / action::effect_run_quantize<false>{}
+          + sml::completion<encode_run> [ guard::guard_class_f32<encode_run>{} ]
+          / action::effect_run_quantize<false, false>{}
       , sml::state<state_encode_running> <= sml::state<state_encode_variant_decision>
-          + sml::completion<encode_run> [ guard::guard_conv_f16<encode_run>{} ]
-          / action::effect_run_quantize<true>{}
+          + sml::completion<encode_run> [ guard::guard_class_f16<encode_run>{} ]
+          / action::effect_run_quantize<true, false>{}
+      , sml::state<state_encode_running> <= sml::state<state_encode_variant_decision>
+          + sml::completion<encode_run> [ guard::guard_class_q8<encode_run>{} ]
+          / action::effect_run_quantize<true, true>{}
       , sml::state<state_encode_error_error_out_decision> <= sml::state<state_encode_shape_decision>
           + sml::completion<encode_run> [ guard::guard_encode_shape_invalid{} ]
           / action::effect_mark_request_shape_invalid<encode_run>{}
@@ -107,11 +110,14 @@ struct model {
       , sml::state<state_decode_variant_decision> <= sml::state<state_decode_shape_decision>
           + sml::completion<decode_run> [ guard::guard_decode_shape_valid{} ]
       , sml::state<state_decode_running> <= sml::state<state_decode_variant_decision>
-          + sml::completion<decode_run> [ guard::guard_conv_f32<decode_run>{} ]
-          / action::effect_run_dequantize<false>{}
+          + sml::completion<decode_run> [ guard::guard_class_f32<decode_run>{} ]
+          / action::effect_run_dequantize<false, false>{}
       , sml::state<state_decode_running> <= sml::state<state_decode_variant_decision>
-          + sml::completion<decode_run> [ guard::guard_conv_f16<decode_run>{} ]
-          / action::effect_run_dequantize<true>{}
+          + sml::completion<decode_run> [ guard::guard_class_f16<decode_run>{} ]
+          / action::effect_run_dequantize<true, false>{}
+      , sml::state<state_decode_running> <= sml::state<state_decode_variant_decision>
+          + sml::completion<decode_run> [ guard::guard_class_q8<decode_run>{} ]
+          / action::effect_run_dequantize<true, true>{}
       , sml::state<state_decode_error_error_out_decision> <= sml::state<state_decode_shape_decision>
           + sml::completion<decode_run> [ guard::guard_decode_shape_invalid{} ]
           / action::effect_mark_request_shape_invalid<decode_run>{}

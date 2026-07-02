@@ -188,7 +188,7 @@ bool encode_frame(bound_codec &codec_state, std::span<const float> pcm,
       io.length != runtime.encoder_transformer.frame_tokens) {
     return false;
   }
-  if (!codec::compute_transformer(
+  if (!codec::compute_transformer<false>(
           runtime, runtime.encoder_transformer, codec_state.streaming,
           codec_state.streaming.encoder_positions, io, workspace)) {
     return false;
@@ -200,7 +200,8 @@ bool encode_frame(bound_codec &codec_state, std::span<const float> pcm,
   if (io.length != 1 || io.channels != runtime.dim) {
     return false;
   }
-  return codec::compute_rvq_encode<false>(runtime, io, codes_out, workspace);
+  return codec::compute_rvq_encode<false, false>(runtime, io, codes_out,
+                                                 workspace);
 }
 
 // Runs the full decode chain for one frame of codes.
@@ -209,14 +210,15 @@ bool decode_frame(bound_codec &codec_state, std::span<const int32_t> codes,
   auto &runtime = codec_state.runtime;
   codec::frame_buffer io{codec_state.frame.data(), runtime.dim, 1};
   const std::span<float> workspace{codec_state.workspace};
-  if (!codec::compute_rvq_decode<false>(runtime, codes, 1, io, workspace)) {
+  if (!codec::compute_rvq_decode<false, false>(runtime, codes, 1, io,
+                                               workspace)) {
     return false;
   }
   if (!codec::compute_streaming_conv_transpose_depthwise(
           runtime, runtime.upsample, codec_state.streaming, io, workspace)) {
     return false;
   }
-  if (!codec::compute_transformer(
+  if (!codec::compute_transformer<false>(
           runtime, runtime.decoder_transformer, codec_state.streaming,
           codec_state.streaming.decoder_positions, io, workspace)) {
     return false;
@@ -294,7 +296,7 @@ TEST_CASE("mimi codec decodes codes back to a full frame of audio") {
   std::vector<int32_t> bad_codes = codes;
   bad_codes[0] = codec_state.runtime.quantizer.codebook_entries;
   codec::frame_buffer io{codec_state.frame.data(), codec_state.runtime.dim, 1};
-  CHECK_FALSE(codec::compute_rvq_decode<false>(
+  CHECK_FALSE(codec::compute_rvq_decode<false, false>(
       codec_state.runtime, std::span<const int32_t>{bad_codes}, 1, io,
       std::span<float>{codec_state.workspace}));
 }

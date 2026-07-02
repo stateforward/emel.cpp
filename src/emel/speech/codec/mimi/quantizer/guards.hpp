@@ -88,6 +88,32 @@ template <class runtime_event_type> struct guard_conv_f32 {
   }
 };
 
+// Three projection operand classes, mutually exclusive by construction:
+// f32 raw, reference f16, and pre-quantized q8_0 (which wins regardless of
+// the conv class).
+template <class runtime_event_type> struct guard_class_f32 {
+  bool operator()(const runtime_event_type &runtime_ev,
+                  const action::context &) const noexcept {
+    return !runtime_ev.request.runtime.conv_f16 &&
+           !runtime_ev.request.runtime.rvq_q8;
+  }
+};
+
+template <class runtime_event_type> struct guard_class_f16 {
+  bool operator()(const runtime_event_type &runtime_ev,
+                  const action::context &) const noexcept {
+    return runtime_ev.request.runtime.conv_f16 &&
+           !runtime_ev.request.runtime.rvq_q8;
+  }
+};
+
+template <class runtime_event_type> struct guard_class_q8 {
+  bool operator()(const runtime_event_type &runtime_ev,
+                  const action::context &) const noexcept {
+    return runtime_ev.request.runtime.rvq_q8;
+  }
+};
+
 template <class runtime_event_type> struct guard_stage_ok {
   bool operator()(const runtime_event_type &runtime_ev,
                   const action::context &) const noexcept {
