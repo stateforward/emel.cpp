@@ -10,6 +10,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 include(CheckCXXCompilerFlag)
+include(CheckCXXSourceRuns)
 
 if(MSVC)
   add_compile_options(/W4 /WX)
@@ -77,7 +78,28 @@ if(EMEL_ENABLE_X86_64_HOST_FEATURES AND NOT CMAKE_CROSSCOMPILING AND NOT MSVC)
     check_cxx_compiler_flag("-mavx2" EMEL_HAS_X86_64_AVX2_FLAG)
     check_cxx_compiler_flag("-mfma" EMEL_HAS_X86_64_FMA_FLAG)
     check_cxx_compiler_flag("-mf16c" EMEL_HAS_X86_64_F16C_FLAG)
-    if(EMEL_HAS_X86_64_AVX2_FLAG AND EMEL_HAS_X86_64_FMA_FLAG AND EMEL_HAS_X86_64_F16C_FLAG)
+    # Compiler acceptance alone is not enough: these flags let the compiler
+    # emit AVX2 in every consumer TU, bypassing the runtime CPUID guards in
+    # kernel/x86_64. Probe the build host CPU (compiled without the flags) so
+    # host-tuned codegen is only enabled where it can actually execute.
+    check_cxx_source_runs("
+      #include <cpuid.h>
+      #include <cstdint>
+      int main() {
+        unsigned int eax = 0, ebx = 0, ecx = 0, edx = 0;
+        if (!__get_cpuid(1, &eax, &ebx, &ecx, &edx)) { return 1; }
+        const bool fma = (ecx & (1u << 12)) != 0u;
+        const bool f16c = (ecx & (1u << 29)) != 0u;
+        const bool osxsave = (ecx & (1u << 27)) != 0u;
+        if (!fma || !f16c || !osxsave) { return 1; }
+        std::uint32_t xcr0_lo = 0, xcr0_hi = 0;
+        __asm__ volatile(\"xgetbv\" : \"=a\"(xcr0_lo), \"=d\"(xcr0_hi) : \"c\"(0));
+        if ((xcr0_lo & 0x6u) != 0x6u) { return 1; }
+        if (!__get_cpuid_count(7, 0, &eax, &ebx, &ecx, &edx)) { return 1; }
+        return ((ebx & (1u << 5)) != 0u) ? 0 : 1;
+      }" EMEL_X86_64_HOST_RUNS_AVX2_FMA_F16C)
+    if(EMEL_HAS_X86_64_AVX2_FLAG AND EMEL_HAS_X86_64_FMA_FLAG AND
+       EMEL_HAS_X86_64_F16C_FLAG AND EMEL_X86_64_HOST_RUNS_AVX2_FMA_F16C)
       list(APPEND EMEL_X86_64_HOST_CXX_FLAGS "-mavx2" "-mfma" "-mf16c")
     endif()
   endif()

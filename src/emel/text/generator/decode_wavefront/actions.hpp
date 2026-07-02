@@ -59,13 +59,21 @@ struct effect_dispatch_parallel_lanes {
     lane_scheduler::join_group group{};
     for (auto & lane : ev.lanes) {
       auto * lane_ptr = &lane;
-      (void)scheduler.try_submit(group, [lane_ptr]() noexcept {
+      const auto run_lane = [lane_ptr]() noexcept {
         auto & current_lane = *lane_ptr;
         const emel::graph::event::compute_reserved reserved_compute{
             current_lane.compute};
         current_lane.accepted =
             current_lane.graph.process_event(reserved_compute);
-      });
+      };
+      const bool submitted = scheduler.try_submit(group, run_lane);
+      // Bounded backpressure handling: a rejected submit (queue full, or the
+      // caller is already a pool worker) runs the same lane inline. The
+      // algorithm and output are identical either way; only placement
+      // differs.
+      if (!submitted) {
+        run_lane();
+      }
     }
     (void)group.wait();
     ev.out.dispatched_lanes = static_cast<int32_t>(ev.lanes.size());
