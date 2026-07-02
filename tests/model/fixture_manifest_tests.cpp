@@ -104,9 +104,11 @@ TEST_CASE("maintained Whisper tiny q80 fixture is documented in tests/models "
   check_contains(content, "not proof that EMEL Whisper ASR runtime");
   check_contains(content, "whisper.cpp/whisper-tiny-q4_k.gguf");
   check_contains(content, "lmgg");
-  // Phase 95 narrowing: only q8_0/q4_0/q4_1 belong to the maintained v1.16 family.
-  check_contains(content, "narrowed to the three upstream EMEL-loadable Candle-style "
-                          "GGUFs");
+  // Phase 95 narrowing: only q8_0/q4_0/q4_1 belong to the maintained v1.16
+  // family.
+  check_contains(content,
+                 "narrowed to the three upstream EMEL-loadable Candle-style "
+                 "GGUFs");
   check_contains(content, "deferred to a future approved EMEL-owned");
 }
 
@@ -127,7 +129,8 @@ TEST_CASE("maintained Whisper tiny q4_0 fixture is documented in tests/models "
   check_contains(
       content,
       "b2be6457e86d2c917d0c0eecef8e041ed03c60f64fc5744e6720adfb5141c21b");
-  check_contains(content, "loader/model-contract validation only for the `q4_0`");
+  check_contains(content,
+                 "loader/model-contract validation only for the `q4_0`");
 }
 
 TEST_CASE("maintained Whisper tiny q4_1 fixture is documented in tests/models "
@@ -147,7 +150,8 @@ TEST_CASE("maintained Whisper tiny q4_1 fixture is documented in tests/models "
   check_contains(
       content,
       "7d40a062a67abeb53784edd326610035089164c9c261cbcfa628e017a07e7a3a");
-  check_contains(content, "loader/model-contract validation only for the `q4_1`");
+  check_contains(content,
+                 "loader/model-contract validation only for the `q4_1`");
 }
 
 TEST_CASE("TE proof corpus is defined with narrow pairwise anchors") {
@@ -286,10 +290,52 @@ TEST_CASE("EMEL Whisper sources reference no whisper.cpp or ggml headers") {
 
   // The Whisper loader/contract test surface must also stay isolated from any
   // whisper.cpp/ggml header so the parity lane cannot leak into EMEL state.
-  check_no_forbidden_includes(
-      repo_root() / "tests" / "model" / "loader" / "lifecycle_tests.cpp",
-      forbidden);
-  check_no_forbidden_includes(
-      repo_root() / "tests" / "model" / "fixture_manifest_tests.cpp",
-      forbidden);
+  check_no_forbidden_includes(repo_root() / "tests" / "model" / "loader" /
+                                  "lifecycle_tests.cpp",
+                              forbidden);
+  check_no_forbidden_includes(repo_root() / "tests" / "model" /
+                                  "fixture_manifest_tests.cpp",
+                              forbidden);
+}
+
+TEST_CASE("moshi tiny synthetic fixtures are documented in tests/models "
+          "README") {
+  const auto readme_path = repo_root() / "tests" / "models" / "README.md";
+  REQUIRE(std::filesystem::exists(readme_path));
+
+  const std::string content = read_text_file(readme_path);
+  check_contains(content, "## moshi tiny synthetic fixtures");
+  check_contains(content, "tools/bench/moshi_make_tiny_fixture.py");
+  check_contains(content, "tools/bench/moshi_gguf_convert.py");
+  for (const std::string_view fixture :
+       {"moshi-tiny-lm.gguf", "moshi-tiny-lm-raw.gguf", "mimi-tiny.gguf",
+        "moshi-tiny-voice.gguf", "moshi-tiny-config.json",
+        "moshi-tokenizer-tiny.model"}) {
+    check_contains(content, std::string(fixture));
+    CHECK_MESSAGE(
+        std::filesystem::exists(repo_root() / "tests" / "models" / fixture),
+        "missing committed moshi fixture: " << fixture);
+  }
+}
+
+TEST_CASE("EMEL moshi model binding references no moshi.cpp or ggml headers") {
+  // Concatenate the forbidden include substrings so this source file does not
+  // self-trip the scanner above (same convention as the Whisper case).
+  const std::string moshi_h = std::string{"moshi/"} + "moshi" + ".h";
+  const std::string gg_h = std::string{"<"} + "ggml" + ".h>";
+  const std::string gg_q = std::string{"\""} + "ggml" + ".h\"";
+  const std::string ggu_h = std::string{"<"} + "gguf" + ".h>";
+  const std::string sp = std::string{"sentence"} + "piece";
+  const std::initializer_list<std::string_view> forbidden = {
+      moshi_h, gg_h, gg_q, ggu_h, sp,
+  };
+  check_no_forbidden_includes(repo_root() / "src" / "emel" / "model" / "moshi" /
+                                  "detail.hpp",
+                              forbidden);
+  check_no_forbidden_includes(repo_root() / "src" / "emel" / "model" / "moshi" /
+                                  "detail.cpp",
+                              forbidden);
+  check_no_forbidden_includes(repo_root() / "tests" / "model" / "moshi" /
+                                  "binding_tests.cpp",
+                              forbidden);
 }

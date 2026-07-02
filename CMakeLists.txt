@@ -106,6 +106,7 @@ add_library(emel STATIC
   src/emel/model/omniembed/detail.cpp
   src/emel/model/sortformer/detail.cpp
   src/emel/model/whisper/detail.cpp
+  src/emel/model/moshi/detail.cpp
   src/emel/speech/recognizer_routes/whisper/detail.cpp
   src/emel/diarization/sortformer/detail.cpp
   src/emel/diarization/sortformer/encoder/feature_extractor/detail.cpp
@@ -134,6 +135,7 @@ if(EMEL_ENABLE_TESTS)
     tests/doctest_main.cpp
     tests/model/fixture_manifest_tests.cpp
     tests/model/loader/lifecycle_tests.cpp
+    tests/model/moshi/binding_tests.cpp
     tests/gbnf/lexer_tests.cpp
     tests/gbnf/parser_tests.cpp
     tests/gbnf/sampler_tests.cpp

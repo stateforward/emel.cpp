@@ -134,6 +134,54 @@ if(EMEL_BENCH_NEEDS_LLAMA)
   emel_patch_reference_metadata_logging("${reference_impl_SOURCE_DIR}")
 endif()
 
+# moshi.cpp reference (Moshi/PersonaPlex parity lanes). Source-only populate,
+# pinned via moshi_reference_ref.txt; the reference driver targets that consume
+# it land with the mimi codec parity milestone and flip this gate through their
+# suite filters below.
+set(MOSHI_REF_REPOSITORY "https://github.com/Codes4Fun/moshi.cpp.git" CACHE STRING "")
+set(MOSHI_REF_REF "" CACHE STRING "")
+set(EMEL_BENCH_NEEDS_MOSHI OFF)
+if(EMEL_BENCH_SUITE_FILTER STREQUAL "speech_codec_mimi" OR
+   EMEL_BENCH_SUITE_FILTER STREQUAL "speech_lm_moshi" OR
+   EMEL_BENCH_SUITE_FILTER STREQUAL "speech_dialogue_moshi")
+  set(EMEL_BENCH_NEEDS_MOSHI ON)
+endif()
+
+set(BENCH_MOSHI_REFERENCE_REF_VALUE "not_used")
+if(EMEL_BENCH_NEEDS_MOSHI)
+  if(MOSHI_REF_REF STREQUAL "")
+    set(MOSHI_REF_REF_FILE "${CMAKE_CURRENT_SOURCE_DIR}/moshi_reference_ref.txt")
+    if(NOT EXISTS "${MOSHI_REF_REF_FILE}")
+      message(FATAL_ERROR "Missing moshi.cpp reference pin at ${MOSHI_REF_REF_FILE}")
+    endif()
+    file(READ "${MOSHI_REF_REF_FILE}" MOSHI_REF_REF_CONTENT)
+    string(STRIP "${MOSHI_REF_REF_CONTENT}" MOSHI_REF_REF_CONTENT)
+    set(MOSHI_REF_REF "${MOSHI_REF_REF_CONTENT}" CACHE STRING "" FORCE)
+  endif()
+
+  include(FetchContent)
+  FetchContent_Declare(
+    moshi_reference_impl
+    GIT_REPOSITORY ${MOSHI_REF_REPOSITORY}
+    GIT_TAG ${MOSHI_REF_REF}
+  )
+  FetchContent_GetProperties(moshi_reference_impl)
+  if(NOT moshi_reference_impl_POPULATED)
+    FetchContent_Populate(moshi_reference_impl)
+  endif()
+  execute_process(
+    COMMAND git -C "${moshi_reference_impl_SOURCE_DIR}" rev-parse HEAD
+    OUTPUT_VARIABLE BENCH_MOSHI_REFERENCE_REF_VALUE
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    ERROR_QUIET
+  )
+  if(NOT BENCH_MOSHI_REFERENCE_REF_VALUE STREQUAL "${MOSHI_REF_REF}")
+    message(FATAL_ERROR
+      "moshi.cpp reference resolved to '${BENCH_MOSHI_REFERENCE_REF_VALUE}', "
+      "expected pinned '${MOSHI_REF_REF}'")
+  endif()
+endif()
+
 set(EMEL_ENABLE_TESTS OFF CACHE BOOL "" FORCE)
 add_subdirectory(${EMEL_ROOT} emel)
 

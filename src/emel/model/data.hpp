@@ -239,6 +239,58 @@ struct data {
     std::array<int32_t, k_max_matryoshka_dims> matryoshka_dimensions = {};
   };
 
+  enum class moshi_component : uint8_t {
+    none = 0,
+    lm = 1,
+    mimi = 2,
+    voice = 3,
+  };
+
+  struct moshi_lm_hparams {
+    static constexpr int32_t k_max_delays = 64;
+
+    int32_t card = 0;
+    int32_t n_q = 0;
+    int32_t dep_q = 0;
+    int32_t text_card = 0;
+    int32_t text_padding_id = -1;
+    int32_t dim = 0;
+    int32_t num_layers = 0;
+    int32_t num_heads = 0;
+    int32_t context = 0;
+    int32_t max_period = 0;
+    int32_t dim_feedforward = 0;
+    int32_t depformer_dim = 0;
+    int32_t depformer_num_heads = 0;
+    int32_t depformer_num_layers = 0;
+    int32_t depformer_dim_feedforward = 0;
+    int32_t depformer_context = 0;
+    int32_t depformer_max_period = 0;
+    int32_t depformer_low_rank_embeddings = 0;
+    int32_t extra_heads_num_heads = 0;
+    uint32_t delay_count = 0;
+    std::array<int32_t, k_max_delays> delays = {};
+    bool causal = false;
+    bool cross_attention = false;
+    bool demux_second_stream = false;
+    bool depformer_multi_linear = false;
+    bool depformer_weights_per_step = false;
+  };
+
+  struct mimi_hparams {
+    int32_t sample_rate = 0;
+    float frame_rate = 0.0f;
+    int32_t n_q = 0;
+    int32_t card = 0;
+    int32_t dim = 0;
+    int32_t semantic_n_q = 0;
+    int32_t codebook_dim = 0;
+    int32_t transformer_num_layers = 0;
+    int32_t transformer_num_heads = 0;
+    int32_t transformer_context = 0;
+    int32_t transformer_max_period = 0;
+  };
+
   struct vocab_entry {
     uint32_t text_offset = 0;
     uint32_t text_length = 0;
@@ -522,6 +574,9 @@ struct data {
   hparams params = {};
   vocab vocab_data = {};
   metadata meta = {};
+  moshi_component moshi_component_id = moshi_component::none;
+  moshi_lm_hparams moshi_lm = {};
+  mimi_hparams mimi = {};
 };
 
 std::string_view tensor_name_view(const data &model_data,
@@ -539,6 +594,7 @@ bool is_gemma4_execution_architecture(std::string_view architecture) noexcept;
 bool is_omniembed_execution_architecture(
     std::string_view architecture) noexcept;
 bool is_whisper_execution_architecture(std::string_view architecture) noexcept;
+bool is_moshi_execution_architecture(std::string_view architecture) noexcept;
 emel::error::type validate_execution_contract(const data &model_data) noexcept;
 
 } // namespace emel::model

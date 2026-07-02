@@ -594,7 +594,6 @@ tests/logits/validator/validator_tests.cpp
 tests/memory/hybrid/lifecycle_tests.cpp
 tests/memory/kv/lifecycle_tests.cpp
 tests/memory/recurrent/lifecycle_tests.cpp
-tests/model/fixture_manifest_tests.cpp
 tests/model/loader/lifecycle_tests.cpp
 tests/model/tensor/lifecycle_tests.cpp
 tests/sm/callback_tests.cpp
