@@ -301,6 +301,22 @@ inline bool can_use_avx2_fma_f32_mul_mat(
 #else
   return host_features.fma_available &&
          avx2_fma_intrinsics_compiled &&
+         request.src1.ne[0] != 1u &&
+         can_use_avx2(request, host_features.avx2_available);
+#endif
+}
+
+inline bool can_use_avx2_fma_f32_vector_mul_mat(
+    const event::op_mul_mat &request,
+    const host_feature_contract &host_features) noexcept {
+#if !(defined(__x86_64__) || defined(_M_X64))
+  (void)request;
+  (void)host_features;
+  return false;
+#else
+  return host_features.fma_available &&
+         avx2_fma_intrinsics_compiled &&
+         request.src1.ne[0] == 1u &&
          can_use_avx2(request, host_features.avx2_available);
 #endif
 }
@@ -2111,6 +2127,60 @@ execute_avx2_fma_mul_mat(const event::op_mul_mat &request) noexcept {
 #endif
 }
 
+EMEL_KERNEL_X86_AVX2_FMA_TARGET
+inline void execute_avx2_fma_mul_mat_f32_vector_unchecked(
+    const event::op_mul_mat &request) noexcept {
+#if defined(__x86_64__) || defined(_M_X64)
+#if (defined(__AVX2__) && defined(__FMA__)) || defined(__GNUC__) ||            \
+    defined(__clang__)
+  const uint64_t k = request.src0.ne[0];
+  const uint64_t m = request.src0.ne[1];
+  const float *a = static_cast<const float *>(request.src0.data);
+  const float *b = static_cast<const float *>(request.src1.data);
+  float *c = static_cast<float *>(request.dst.data);
+
+  const uint64_t vec_depth = (k / 32u) * 32u;
+  for (uint64_t i = 0; i < m; ++i) {
+    const float *row = a + i * k;
+    __m256 acc0 = _mm256_setzero_ps();
+    __m256 acc1 = _mm256_setzero_ps();
+    __m256 acc2 = _mm256_setzero_ps();
+    __m256 acc3 = _mm256_setzero_ps();
+    for (uint64_t kk = 0; kk < vec_depth; kk += 32u) {
+      acc0 = _mm256_fmadd_ps(_mm256_loadu_ps(row + kk),
+                             _mm256_loadu_ps(b + kk), acc0);
+      acc1 = _mm256_fmadd_ps(_mm256_loadu_ps(row + kk + 8u),
+                             _mm256_loadu_ps(b + kk + 8u), acc1);
+      acc2 = _mm256_fmadd_ps(_mm256_loadu_ps(row + kk + 16u),
+                             _mm256_loadu_ps(b + kk + 16u), acc2);
+      acc3 = _mm256_fmadd_ps(_mm256_loadu_ps(row + kk + 24u),
+                             _mm256_loadu_ps(b + kk + 24u), acc3);
+    }
+    uint64_t kk = vec_depth;
+    for (; kk + 8u <= k; kk += 8u) {
+      acc0 = _mm256_fmadd_ps(_mm256_loadu_ps(row + kk),
+                             _mm256_loadu_ps(b + kk), acc0);
+    }
+    const __m256 acc01 = _mm256_add_ps(acc0, acc1);
+    const __m256 acc23 = _mm256_add_ps(acc2, acc3);
+    const __m256 acc = _mm256_add_ps(acc01, acc23);
+    const __m128 low = _mm256_castps256_ps128(acc);
+    const __m128 high = _mm256_extractf128_ps(acc, 1);
+    __m128 sum = _mm_add_ps(low, high);
+    sum = _mm_hadd_ps(sum, sum);
+    sum = _mm_hadd_ps(sum, sum);
+    float total = _mm_cvtss_f32(sum);
+    for (; kk < k; ++kk) {
+      total += row[kk] * b[kk];
+    }
+    c[i] = total;
+  }
+  return;
+#endif
+#endif
+  (void)request;
+}
+
 EMEL_KERNEL_X86_AVX2_TARGET
 inline void
 execute_avx2_unary_abs_request(const event::op_unary &request) noexcept {
@@ -2357,6 +2427,16 @@ struct effect_exec_simd_q3_k_q8_k_op_mul_mat {
   }
 };
 
+struct effect_exec_simd_f32_fma_vector_op_mul_mat {
+  void operator()(const ::emel::kernel::x86_64::event::dispatch_op_mul_mat &ev,
+                  context &ctx) const noexcept {
+    ::emel::kernel::x86_64::detail::
+        execute_avx2_fma_mul_mat_f32_vector_unchecked(ev.request);
+    ++ctx.optimized_f32_fma_vector_dispatch_count;
+    detail::mark_done(ev, ctx);
+  }
+};
+
 struct effect_exec_simd_f32_fma_op_mul_mat {
   void operator()(const ::emel::kernel::x86_64::event::dispatch_op_mul_mat &ev,
                   context &ctx) const noexcept {
@@ -2488,6 +2568,8 @@ using effect_exec_simd_op_mul_mat_q2_k_q8_k_t =
     detail::effect_exec_simd_q2_k_q8_k_op_mul_mat;
 using effect_exec_simd_op_mul_mat_q3_k_q8_k_t =
     detail::effect_exec_simd_q3_k_q8_k_op_mul_mat;
+using effect_exec_simd_op_mul_mat_f32_fma_vector_t =
+    detail::effect_exec_simd_f32_fma_vector_op_mul_mat;
 using effect_exec_simd_op_mul_mat_f32_fma_t =
     detail::effect_exec_simd_f32_fma_op_mul_mat;
 using effect_exec_simd_op_mul_mat_q4_k_q8_k_t =
@@ -2553,6 +2635,8 @@ inline constexpr effect_exec_simd_op_mul_mat_q2_k_q8_k_t
     effect_exec_simd_op_mul_mat_q2_k_q8_k{};
 inline constexpr effect_exec_simd_op_mul_mat_q3_k_q8_k_t
     effect_exec_simd_op_mul_mat_q3_k_q8_k{};
+inline constexpr effect_exec_simd_op_mul_mat_f32_fma_vector_t
+    effect_exec_simd_op_mul_mat_f32_fma_vector{};
 inline constexpr effect_exec_simd_op_mul_mat_f32_fma_t
     effect_exec_simd_op_mul_mat_f32_fma{};
 inline constexpr effect_exec_simd_op_mul_mat_q4_k_q8_k_t

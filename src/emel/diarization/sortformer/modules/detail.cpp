@@ -94,11 +94,13 @@ bool bind_contract(const emel::model::data & model_data,
   return true;
 }
 
-bool compute_encoder_projection(std::span<const float, k_encoder_dim> encoder_frame,
+bool compute_encoder_projection(emel::kernel::sm & kernel,
+                                std::span<const float, k_encoder_dim> encoder_frame,
                                 std::span<const float, k_hidden_dim * k_encoder_dim> weights,
                                 std::span<const float, k_hidden_dim> bias,
                                 std::span<float, k_hidden_dim> hidden_out) noexcept {
-  return emel::diarization::sortformer::detail::compute_dense(encoder_frame,
+  return emel::diarization::sortformer::detail::compute_dense(kernel,
+                                                              encoder_frame,
                                                               weights,
                                                               bias,
                                                               hidden_out);
@@ -115,6 +117,7 @@ bool prepare_encoder_projection_weight_cache(
 }
 
 bool compute_encoder_projection_batch(
+    emel::kernel::sm & kernel,
     std::span<const float> encoder_frames,
     const size_t frame_count,
     std::span<const float, k_hidden_dim * k_encoder_dim> weights,
@@ -124,6 +127,7 @@ bool compute_encoder_projection_batch(
     std::span<float> transposed_output,
     std::span<float> hidden_out) noexcept {
   return emel::diarization::sortformer::detail::compute_dense_batch_prepared(
+      kernel,
       encoder_frames,
       frame_count,
       static_cast<size_t>(k_encoder_dim),

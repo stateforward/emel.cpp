@@ -6,6 +6,7 @@
 #include <string_view>
 
 #include "emel/diarization/sortformer/modules/detail.hpp"
+#include "emel/kernel/sm.hpp"
 
 namespace emel::diarization::sortformer::output::detail {
 
@@ -27,6 +28,7 @@ struct segment_record {
 };
 
 bool compute_speaker_probabilities(
+    emel::kernel::sm & kernel,
     std::span<const float> hidden_frames,
     const emel::diarization::sortformer::modules::detail::contract & modules_contract,
     std::span<float> probabilities_out) noexcept;

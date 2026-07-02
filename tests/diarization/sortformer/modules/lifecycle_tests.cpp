@@ -16,6 +16,11 @@ namespace {
 namespace cache_detail = emel::diarization::sortformer::cache::detail;
 namespace modules_detail = emel::diarization::sortformer::modules::detail;
 
+emel::kernel::sm & test_kernel() {
+  static emel::kernel::sm kernel{emel::kernel::detect_host_kind()};
+  return kernel;
+}
+
 struct tensor_spec {
   std::string_view name = {};
   int32_t n_dims = 0;
@@ -132,7 +137,7 @@ TEST_CASE("sortformer modules compute projection and speaker logits") {
   weights[1] = 0.25f;
   bias[0] = 0.125f;
 
-  REQUIRE(modules_detail::compute_encoder_projection(encoder_frame, weights, bias, hidden));
+  REQUIRE(modules_detail::compute_encoder_projection(test_kernel(), encoder_frame, weights, bias, hidden));
   CHECK(hidden[0] == doctest::Approx(0.875f));
 
   std::array<float, modules_detail::k_hidden_dim> cached_hidden = {};
