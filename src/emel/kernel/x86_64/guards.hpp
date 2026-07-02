@@ -311,6 +311,18 @@ using valid_op_get_rows_q8_0 =
 using valid_op_get_rows_q4_k =
     valid_op_get_rows_src<::emel::kernel::detail::dtype_q4_k>;
 
+template <class dispatch_event_type> struct mul_mat_f16_is {
+  bool operator()(const dispatch_event_type &ev,
+                  const action::context &) const noexcept {
+    return ::emel::kernel::detail::can_run_mul_mat_f16(ev.request);
+  }
+};
+
+using valid_op_mul_mat_f16 = ::emel::kernel::detail::valid_variant_guard<
+    ::emel::kernel::x86_64::event::dispatch_op_mul_mat, action::context,
+    valid_op<::emel::kernel::x86_64::event::dispatch_op_mul_mat>,
+    mul_mat_f16_is<::emel::kernel::x86_64::event::dispatch_op_mul_mat>>;
+
 using valid_op_rope_norm = ::emel::kernel::detail::valid_variant_guard<
     ::emel::kernel::x86_64::event::dispatch_op_rope, action::context,
     valid_op<::emel::kernel::x86_64::event::dispatch_op_rope>,

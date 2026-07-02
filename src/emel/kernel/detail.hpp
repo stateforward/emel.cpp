@@ -13,6 +13,10 @@
 #include <arm_neon.h>
 #endif
 
+#if defined(__AVX2__) && defined(__F16C__) && defined(__FMA__)
+#include <immintrin.h>
+#endif
+
 // Keep this list aligned with `tmp/llama.cpp/ggml/include/ggml.h` (`enum
 // ggml_op`), excluding sentinel entries (`NONE`, `COUNT`).
 #define EMEL_KERNEL_OP_EVENT_LIST(X)                                           \
@@ -3699,6 +3703,85 @@ inline bool can_run_mul_mat(const request_type &request) noexcept {
   return !has_empty_dim && valid_shape && (f32_path || quantized_path);
 }
 
+// ggml-layout f16 matmul (token-parity path for f16 conv/proj weights):
+// src0 f16 [k, m] k-fastest, src1 f16 [k, n] k-fastest, dst f32 [m, n]
+// m-fastest. Replicates ggml_vec_dot_f16 accumulation order exactly.
+template <class request_type>
+inline bool can_run_mul_mat_f16(const request_type &request) noexcept {
+  const uint64_t k = request.src0.ne[0];
+  const uint64_t m = request.src0.ne[1];
+  const uint64_t n = request.src1.ne[1];
+  const bool has_empty_dim = k == 0 || m == 0 || n == 0;
+  const bool valid_shape = request.src1.ne[0] == k && request.dst.ne[0] == m &&
+                           request.dst.ne[1] == n && request.src0.ne[2] == 1 &&
+                           request.src0.ne[3] == 1 && request.src1.ne[2] == 1 &&
+                           request.src1.ne[3] == 1 && request.dst.ne[2] == 1 &&
+                           request.dst.ne[3] == 1;
+  return !has_empty_dim && valid_shape &&
+         dtype_code(request.src0.type) == dtype_f16 &&
+         dtype_code(request.src1.type) == dtype_f16 &&
+         dtype_code(request.dst.type) == dtype_f32 &&
+         is_dense_contiguous(request.src0) &&
+         is_dense_contiguous(request.src1) && is_dense_contiguous(request.dst);
+}
+
+// Exact port of the pinned ggml_vec_dot_f16 x86 AVX2+F16C+FMA path (4-way
+// __m256 accumulators over 32-element steps, pairwise reduce, double-precision
+// scalar tail). The scalar fallback matches ggml's no-SIMD path.
+inline float vec_dot_f16_ggml(const int64_t count, const uint16_t *x,
+                              const uint16_t *y) noexcept {
+  double sumf = 0.0;
+#if defined(__AVX2__) && defined(__F16C__) && defined(__FMA__)
+  const int64_t np = count & ~static_cast<int64_t>(31);
+  __m256 sum[4] = {_mm256_setzero_ps(), _mm256_setzero_ps(),
+                   _mm256_setzero_ps(), _mm256_setzero_ps()};
+  for (int64_t i = 0; i < np; i += 32) {
+    for (int j = 0; j < 4; ++j) {
+      const __m256 ax = _mm256_cvtph_ps(
+          _mm_loadu_si128(reinterpret_cast<const __m128i *>(x + i + j * 8)));
+      const __m256 ay = _mm256_cvtph_ps(
+          _mm_loadu_si128(reinterpret_cast<const __m128i *>(y + i + j * 8)));
+      sum[j] = _mm256_fmadd_ps(ax, ay, sum[j]);
+    }
+  }
+  sum[0] = _mm256_add_ps(sum[0], sum[2]);
+  sum[1] = _mm256_add_ps(sum[1], sum[3]);
+  sum[0] = _mm256_add_ps(sum[0], sum[1]);
+  const __m128 t0 = _mm_add_ps(_mm256_castps256_ps128(sum[0]),
+                               _mm256_extractf128_ps(sum[0], 1));
+  const __m128 t1 = _mm_hadd_ps(t0, t0);
+  sumf = static_cast<double>(_mm_cvtss_f32(_mm_hadd_ps(t1, t1)));
+  for (int64_t i = np; i < count; ++i) {
+    sumf += static_cast<double>(quant::fp16_to_fp32(x[i]) *
+                                quant::fp16_to_fp32(y[i]));
+  }
+#else
+  for (int64_t i = 0; i < count; ++i) {
+    sumf += static_cast<double>(quant::fp16_to_fp32(x[i]) *
+                                quant::fp16_to_fp32(y[i]));
+  }
+#endif
+  return static_cast<float>(sumf);
+}
+
+template <class request_type>
+inline bool run_mul_mat_f16(const request_type &request) noexcept {
+  const uint64_t k = request.src0.ne[0];
+  const uint64_t m = request.src0.ne[1];
+  const uint64_t n = request.src1.ne[1];
+  const auto *src0 = static_cast<const uint16_t *>(request.src0.data);
+  const auto *src1 = static_cast<const uint16_t *>(request.src1.data);
+  auto *dst = static_cast<float *>(request.dst.data);
+  for (uint64_t col = 0; col < n; ++col) {
+    const uint16_t *y = src1 + col * k;
+    for (uint64_t row = 0; row < m; ++row) {
+      dst[row + col * m] =
+          vec_dot_f16_ggml(static_cast<int64_t>(k), src0 + row * k, y);
+    }
+  }
+  return true;
+}
+
 template <class request_type>
 inline bool can_run_soft_max(const request_type &request) noexcept {
   const uint64_t width = request.src0.ne[0];
@@ -4454,6 +4537,15 @@ struct exec_scalar_get_rows_op {
   }
 };
 
+template <class dispatch_event_type, class context_type, class mark_done_type>
+struct exec_scalar_mul_mat_f16_op {
+  void operator()(const dispatch_event_type &ev,
+                  context_type &ctx) const noexcept {
+    (void)run_mul_mat_f16(ev.request);
+    mark_done_type{}(ev, ctx);
+  }
+};
+
 template <class dispatch_event_type, class context_type, class mark_done_type,
           bool neox_mode>
 struct exec_scalar_rope_op {
@@ -4678,6 +4770,8 @@ inline bool can_run_backend_request(const request_type &request) noexcept {
   } else if constexpr (std::is_same_v<request_type, event::op_add> ||
                        std::is_same_v<request_type, event::op_mul>) {
     return can_run_binary(request) || can_run_binary_broadcast_row(request);
+  } else if constexpr (std::is_same_v<request_type, event::op_mul_mat>) {
+    return can_run_mul_mat(request) || can_run_mul_mat_f16(request);
   }
   return can_execute_scalar(request);
 }

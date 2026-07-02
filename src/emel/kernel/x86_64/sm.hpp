@@ -404,6 +404,11 @@ struct model {
 
       , sml::state<ready> <= sml::state<ready> +
                sml::event<::emel::kernel::x86_64::event::dispatch_op_mul_mat>
+                 [ guard::valid_op_mul_mat_f16{} ]
+                 / action::exec_scalar_op_mul_mat_f16
+
+      , sml::state<ready> <= sml::state<ready> +
+               sml::event<::emel::kernel::x86_64::event::dispatch_op_mul_mat>
                  [ guard::valid_op_mul_mat{} ]
                  / action::exec_op_mul_mat
 

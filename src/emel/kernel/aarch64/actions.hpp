@@ -8213,6 +8213,11 @@ using exec_scalar_op_unary_silu_t =
         ::emel::kernel::aarch64::event::dispatch_op_unary, context,
         detail::mark_done_op, ::emel::kernel::event::unary_subop::silu>;
 
+using exec_scalar_op_mul_mat_f16_t =
+    ::emel::kernel::detail::exec_scalar_mul_mat_f16_op<
+        ::emel::kernel::aarch64::event::dispatch_op_mul_mat, context,
+        detail::mark_done_op>;
+
 template <uint8_t src_dtype_code>
 using exec_scalar_op_get_rows_src_t =
     ::emel::kernel::detail::exec_scalar_get_rows_op<
@@ -8351,6 +8356,7 @@ inline constexpr exec_scalar_op_unary_tanh_t exec_scalar_op_unary_tanh{};
 inline constexpr exec_scalar_op_unary_elu_t exec_scalar_op_unary_elu{};
 inline constexpr exec_scalar_op_unary_gelu_t exec_scalar_op_unary_gelu{};
 inline constexpr exec_scalar_op_unary_silu_t exec_scalar_op_unary_silu{};
+inline constexpr exec_scalar_op_mul_mat_f16_t exec_scalar_op_mul_mat_f16{};
 inline constexpr exec_scalar_op_get_rows_f32_t exec_scalar_op_get_rows_f32{};
 inline constexpr exec_scalar_op_get_rows_f16_t exec_scalar_op_get_rows_f16{};
 inline constexpr exec_scalar_op_get_rows_bf16_t exec_scalar_op_get_rows_bf16{};
