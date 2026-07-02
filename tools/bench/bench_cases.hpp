@@ -63,6 +63,8 @@ void append_emel_sortformer_diarization_cases(std::vector<result> & results, con
 void append_reference_sortformer_diarization_cases(std::vector<result> & results,
                                                    const config & cfg);
 void append_emel_flash_attention_cases(std::vector<result> & results, const config & cfg);
+void append_emel_speech_codec_mimi_cases(std::vector<result> & results, const config & cfg);
+void append_reference_speech_codec_mimi_cases(std::vector<result> & results, const config & cfg);
 void append_reference_flash_attention_cases(std::vector<result> & results, const config & cfg);
 void append_emel_logits_validator_cases(std::vector<result> & results, const config & cfg);
 void append_reference_logits_validator_cases(std::vector<result> & results, const config & cfg);

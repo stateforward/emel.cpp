@@ -27,7 +27,10 @@ if(EMEL_BENCH_SUITE_FILTER STREQUAL "batch_planner" OR
    EMEL_BENCH_SUITE_FILTER STREQUAL "kernel_x86_64" OR
    EMEL_BENCH_SUITE_FILTER STREQUAL "kernel_aarch64" OR
    EMEL_BENCH_SUITE_FILTER STREQUAL "decode_wavefront" OR
-   EMEL_BENCH_SUITE_FILTER STREQUAL "parallel_matmul")
+   EMEL_BENCH_SUITE_FILTER STREQUAL "parallel_matmul" OR
+   # speech_codec_mimi needs the llama.cpp checkout only for its ggml
+   # subtree, which the moshi reference driver links against.
+   EMEL_BENCH_SUITE_FILTER STREQUAL "speech_codec_mimi")
   set(EMEL_BENCH_NEEDS_LLAMA ON)
 endif()
 
@@ -180,6 +183,17 @@ if(EMEL_BENCH_NEEDS_MOSHI)
       "moshi.cpp reference resolved to '${BENCH_MOSHI_REFERENCE_REF_VALUE}', "
       "expected pinned '${MOSHI_REF_REF}'")
   endif()
+
+  # SentencePiece is required by moshi.cpp's public header (reference lane
+  # only; the EMEL lane never links it).
+  set(SPM_ENABLE_SHARED OFF CACHE BOOL "" FORCE)
+  set(SPM_ENABLE_TCMALLOC OFF CACHE BOOL "" FORCE)
+  FetchContent_Declare(
+    sentencepiece_impl
+    GIT_REPOSITORY https://github.com/google/sentencepiece.git
+    GIT_TAG v0.2.0
+  )
+  FetchContent_MakeAvailable(sentencepiece_impl)
 endif()
 
 set(EMEL_ENABLE_TESTS OFF CACHE BOOL "" FORCE)
@@ -372,6 +386,8 @@ add_bench_runner_suite(jinja_formatter text/jinja/formatter_bench.cpp
 add_bench_runner_suite(gbnf_rule_parser gbnf/rule_parser_bench.cpp
                        EMEL_BENCH_ENABLE_GBNF_RULE_PARSER)
 add_bench_runner_suite(generation generation_bench.cpp EMEL_BENCH_ENABLE_GENERATION)
+add_bench_runner_suite(speech_codec_mimi speech/codec_mimi_bench.cpp
+                       EMEL_BENCH_ENABLE_SPEECH_CODEC_MIMI)
 add_bench_runner_suite(diarization_sortformer diarization/sortformer_bench.cpp
                        EMEL_BENCH_ENABLE_DIARIZATION_SORTFORMER)
 add_bench_runner_suite(flash_attention kernel/flash_attention_bench.cpp
@@ -452,6 +468,38 @@ target_include_directories(mimi_emel_parity_runner
     ${EMEL_ROOT}/src
     ${EMEL_ROOT}/include
 )
+
+# Reference-lane Mimi driver: moshi.cpp lib sources + ggml + SentencePiece.
+# Never linked into bench_runner or the EMEL lane; invoked as a subprocess
+# via reference_backends/moshi_cpp_mimi.json (two-lane isolation).
+if(EMEL_BENCH_NEEDS_MOSHI AND EMEL_BENCH_NEEDS_LLAMA)
+  add_executable(moshi_reference_driver
+    ${CMAKE_CURRENT_SOURCE_DIR}/speech/moshi_reference_driver.cpp
+    ${moshi_reference_impl_SOURCE_DIR}/src/moshi.cpp
+    ${moshi_reference_impl_SOURCE_DIR}/src/json.cpp
+    ${moshi_reference_impl_SOURCE_DIR}/src/safetensor.cpp
+  )
+
+  set_target_properties(moshi_reference_driver PROPERTIES
+    CXX_STANDARD 20
+    CXX_STANDARD_REQUIRED ON
+  )
+
+  target_include_directories(moshi_reference_driver
+    PRIVATE
+      ${moshi_reference_impl_SOURCE_DIR}/include
+      ${moshi_reference_impl_SOURCE_DIR}
+      ${reference_impl_SOURCE_DIR}/ggml/include
+      ${sentencepiece_impl_SOURCE_DIR}/src
+      ${sentencepiece_impl_BINARY_DIR}/src
+  )
+
+  target_link_libraries(moshi_reference_driver
+    PRIVATE
+      ggml
+      sentencepiece-static
+  )
+endif()
 
 target_link_libraries(whisper_emel_parity_runner
   PRIVATE

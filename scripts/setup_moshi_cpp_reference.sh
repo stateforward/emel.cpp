@@ -69,9 +69,10 @@ for tool in git python3 shasum curl; do
 done
 
 if $BUILD_ONLY; then
-  echo "note: the moshi.cpp reference driver build step activates with" \
-       "milestone 2 (mimi codec parity); nothing to build yet"
-  exit 0
+  # M2: the reference driver builds through the speech_codec_mimi bench
+  # configure (moshi.cpp + ggml + SentencePiece); delegate to the compare
+  # wrapper so there is exactly one build recipe.
+  exec "$ROOT_DIR/scripts/bench_mimi_compare.sh" --build-only
 fi
 
 mkdir -p "$ARTIFACT_DIR/voices" "$(dirname "$REFERENCE_DIR")"

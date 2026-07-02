@@ -86,3 +86,11 @@ record runner=encoder_fallback kind=source path=tools/bench/text/encoders/bench_
 record runner=tokenizer kind=source path=tools/bench/text/tokenizer/tokenizer_bench.cpp reason=suite_source
 record runner=tokenizer kind=fixture path=tests/models/tokenizer-tiny.json reason=fixture
 record runner=tokenizer kind=model path=tests/models reason=tokenizer_model_inputs
+record runner=speech_codec_mimi kind=source path=tools/bench/speech/codec_mimi_bench.cpp reason=suite_source
+record runner=speech_codec_mimi kind=source path=tools/bench/speech/mimi_emel_parity_runner.cpp reason=emel_lane_runner
+record runner=speech_codec_mimi kind=source path=tools/bench/speech/moshi_reference_driver.cpp reason=reference_lane_driver
+record runner=speech_codec_mimi kind=fixture path=tests/models/mimi-tiny.gguf reason=fixture
+record runner=speech_codec_mimi kind=script path=tools/bench/mimi_compare.py reason=operator_compare
+record runner=speech_codec_mimi kind=script path=scripts/bench_mimi_compare.sh reason=compare_wrapper
+record runner=speech_codec_mimi kind=script path=tools/bench/moshi_gguf_convert.py reason=emel_lane_converter
+record runner=speech_codec_mimi kind=config path=tools/bench/moshi_reference_ref.txt reason=reference_pin
