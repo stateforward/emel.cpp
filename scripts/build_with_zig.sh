@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# shellcheck source=scripts/build_jobs.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/build_jobs.sh"
+
 if ! command -v zig >/dev/null 2>&1; then
   echo "error: zig not found" >&2
   exit 1
@@ -24,4 +27,4 @@ cmake -S . -B build/zig -G Ninja \
   -DCMAKE_CXX_COMPILER="$zig_bin" \
   -DCMAKE_CXX_COMPILER_ARG1=c++ \
   -DEMEL_TEST_SHARDS="$test_shards"
-cmake --build build/zig --parallel
+cmake --build build/zig --parallel "$EMEL_BUILD_JOBS"

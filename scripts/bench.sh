@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# shellcheck source=scripts/build_jobs.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/build_jobs.sh"
+
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TOOLS_DIR="$ROOT_DIR/tools/bench"
 
@@ -239,7 +242,7 @@ configure_bench_build() {
   fi
 
   cmake "${cmake_args[@]}" >&2
-  cmake --build "$build_dir" --parallel --target bench_runner >&2
+  cmake --build "$build_dir" --parallel "$EMEL_BUILD_JOBS" --target bench_runner >&2
 }
 
 update_snapshot_baseline() {
@@ -332,7 +335,7 @@ if $TEST_TOOLS; then
 
   build_dir="${BENCH_TOOLS_TEST_BUILD_DIR:-$ROOT_DIR/build/bench_tools_ninja}"
   configure_bench_build "$build_dir"
-  cmake --build "$build_dir" --parallel --target bench_runner_tests quality_gates_tests >&2
+  cmake --build "$build_dir" --parallel "$EMEL_BUILD_JOBS" --target bench_runner_tests quality_gates_tests >&2
   ctest --test-dir "$build_dir" -R 'quality_gates_tests|bench_runner_tests' --output-on-failure
   exit 0
 fi
@@ -631,7 +634,7 @@ if $SNAPSHOT; then
 
   cmake "${cmake_args[@]}"
 
-  cmake --build "$build_dir" --parallel --target bench_runner
+  cmake --build "$build_dir" --parallel "$EMEL_BUILD_JOBS" --target bench_runner
 
   run_bench_runner "$build_dir" --mode=emel > "$CURRENT"
 
@@ -799,7 +802,7 @@ if $COMPARE; then
   fi
 
   cmake "${cmake_args[@]}" >&2
-  cmake --build "$compare_build_dir" --parallel --target bench_runner >&2
+  cmake --build "$compare_build_dir" --parallel "$EMEL_BUILD_JOBS" --target bench_runner >&2
   if $COMPARE_UPDATE; then
     compare_baseline="$ROOT_DIR/snapshots/bench/benchmarks_compare.txt"
     {
@@ -857,7 +860,7 @@ if $RUN_ONLY; then
   fi
 
   cmake "${cmake_args[@]}" >&2
-  cmake --build "$run_only_build_dir" --parallel 8 --target bench_runner >&2
+  cmake --build "$run_only_build_dir" --parallel "$EMEL_BUILD_JOBS" --target bench_runner >&2
   if [[ -n "$MEMORY_MAX_BYTES" ]]; then
     # Capped runs measure the EMEL lanes only: the llama.cpp baseline comes
     # from the unwrapped --memory-max=none run (its 385MiB compute buffer would
