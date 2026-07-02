@@ -770,6 +770,37 @@ TEST_CASE("embeddings generator numeric helpers handle valid and invalid inputs"
   embedding_detail::apply_gelu(normalize_values);
 }
 
+TEST_CASE("embeddings generator dense matrix matmul routes multi-column input through kernel") {
+  using emel::kernel::detail::dtype_f32;
+
+  // Weights are 2 rows x 3 cols: {1 2 3} and {4 5 6}.
+  std::array<float, 6> f32_weights = {{1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f}};
+  embedding_action::matrix_view f32_matrix = {
+    .data = f32_weights.data(),
+    .dtype = dtype_f32,
+    .rows = 2,
+    .cols = 3,
+    .row_bytes = 3u * sizeof(float),
+  };
+
+  // Two input columns packed k-major: column 0 = (1, 1, 1), column 1 = (0, 1, 2).
+  constexpr int32_t input_cols = 2;
+  std::array<float, 6> input = {{1.0f, 0.0f, 1.0f, 1.0f, 1.0f, 2.0f}};
+  std::array<float, 4> output = {};
+  emel::kernel::sm matmul_kernel{emel::kernel::detect_host_kind()};
+  CHECK(embedding_detail::matmul_f32_matrix(
+      matmul_kernel, f32_matrix, input.data(), input_cols, output.data()));
+  CHECK(output[0] == doctest::Approx(6.0f));
+  CHECK(output[1] == doctest::Approx(8.0f));
+  CHECK(output[2] == doctest::Approx(15.0f));
+  CHECK(output[3] == doctest::Approx(17.0f));
+
+  CHECK_FALSE(embedding_detail::matmul_f32_matrix(
+      matmul_kernel, f32_matrix, nullptr, input_cols, output.data()));
+  CHECK_FALSE(embedding_detail::matmul_f32_matrix(
+      matmul_kernel, f32_matrix, input.data(), 0, output.data()));
+}
+
 TEST_CASE("embeddings generator state machine covers callback and prepare error branches when fixture present") {
   if (!te_assets_present()) {
     MESSAGE("skipping embedding state-machine coverage test because maintained assets are not present");
