@@ -113,7 +113,10 @@ struct guard_valid_compute_reserved {
            ctx.reservation.node_count != 0u &&
            ctx.reservation.tensor_count != 0u &&
            ctx.reservation.required_buffer_bytes != 0u &&
-           ctx.reservation.lifecycle != nullptr;
+           ctx.reservation.lifecycle != nullptr &&
+           ctx.reservation.lifecycle->tensors == ev.request.lifecycle->tensors &&
+           ctx.reservation.lifecycle->tensor_count ==
+               ev.request.lifecycle->tensor_count;
   }
 };
 
