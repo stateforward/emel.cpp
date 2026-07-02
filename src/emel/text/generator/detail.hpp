@@ -22,6 +22,7 @@
 #include "emel/model/data.hpp"
 #include "emel/model/llama/detail.hpp"
 #include "emel/model/loader/errors.hpp"
+#include "emel/model/tensor/window/sm.hpp"
 
 namespace emel::text::generator::detail {
 
@@ -96,6 +97,42 @@ enum class matmul_lane_mode : uint8_t {
   parallel = 1,
 };
 
+// Weight residency mode for the layer loop: resident consumes blocks[] views
+// as prepared; streamed acquires each layer's slot from the tensor window
+// actor and rebases the block's matmul weight views into the slot before use.
+enum class window_mode : uint8_t {
+  resident = 0,
+  streamed = 1,
+};
+
+// Canonical per-layer stream role order shared by extent builders (tests,
+// bench fixtures) and the rebase walk below. Absent roles are skipped; both
+// sides must walk this exact order for positional extents to line up.
+inline constexpr size_t k_stream_role_attention_q = 0;
+inline constexpr size_t k_stream_role_attention_k = 1;
+inline constexpr size_t k_stream_role_attention_v = 2;
+inline constexpr size_t k_stream_role_attention_output = 3;
+inline constexpr size_t k_stream_role_feed_forward_gate = 4;
+inline constexpr size_t k_stream_role_feed_forward_down = 5;
+inline constexpr size_t k_stream_role_feed_forward_up = 6;
+inline constexpr size_t k_stream_role_shortconv_in_proj = 7;
+inline constexpr size_t k_stream_role_shortconv_out_proj = 8;
+inline constexpr size_t k_stream_role_count = 9;
+
+// Streamed-weight binding: injected window actor plus the per-role record
+// clones the layer loop rebases blocks[] onto. One clone set suffices because
+// single-lane decode consumes exactly one layer at a time. pristine holds the
+// prepare()-time record pointers per layer so every rebase clones from the
+// original model contract (blocks[] pointers move onto the clones after the
+// first streamed pass).
+struct stream_binding {
+  emel::model::tensor::window::sm * window = nullptr;
+  bool active = false;
+  std::array<emel::model::data::tensor_record, k_stream_role_count> records = {};
+  std::vector<std::array<const emel::model::data::tensor_record *, k_stream_role_count>>
+      pristine = {};
+};
+
 struct native_backend {
   const emel::model::data * model = nullptr;
   emel::model::llama::detail::execution_view execution = {};
@@ -135,6 +172,7 @@ struct native_backend {
   std::vector<uint8_t> packed_q8_0_chunk4_input_storage = {};
   emel::model::llama::detail::quantized_path_audit quantized_audit = {};
   std::vector<block_weights> blocks = {};
+  stream_binding stream = {};
 
   int32_t n_vocab = 0;
   int32_t n_embd = 0;
@@ -3642,12 +3680,112 @@ inline bool run_shortconv_block_chunk4(native_backend & backend,
   return true;
 }
 
+// Records the prepare()-time matmul weight record pointers per layer in the
+// canonical stream role order. One-time engage bookkeeping (runs inside the
+// initialize pipeline alongside prepare()'s own setup allocation).
+inline void scan_stream_pristine_records(native_backend & backend) noexcept {
+  backend.stream.pristine.assign(backend.blocks.size(), {});
+  for (size_t layer = 0; layer < backend.blocks.size(); ++layer) {
+    const block_weights & block = backend.blocks[layer];
+    auto & roles = backend.stream.pristine[layer];
+    roles[k_stream_role_attention_q] = block.attention_q.tensor;
+    roles[k_stream_role_attention_k] = block.attention_k.tensor;
+    roles[k_stream_role_attention_v] = block.attention_v.tensor;
+    roles[k_stream_role_attention_output] = block.attention_output.tensor;
+    roles[k_stream_role_feed_forward_gate] = block.feed_forward_gate.tensor;
+    roles[k_stream_role_feed_forward_down] = block.feed_forward_down.tensor;
+    roles[k_stream_role_feed_forward_up] = block.feed_forward_up.tensor;
+    roles[k_stream_role_shortconv_in_proj] = block.shortconv_in_proj.tensor;
+    roles[k_stream_role_shortconv_out_proj] = block.shortconv_out_proj.tensor;
+  }
+}
+
+// Rebases the layer's matmul weight views onto the acquired window slot:
+// clones the pristine record per present role (canonical order matching the
+// extent builder) with data repointed into the slot. Pure pointer bookkeeping
+// on the already-chosen streamed route; absent-role skipping is data-plane
+// presence filtering, and a count mismatch propagates as data-plane failure.
+inline bool bind_streamed_block_views(
+    native_backend & backend,
+    const int32_t layer_index,
+    const uint8_t * slot_base,
+    const emel::model::tensor::window::detail::layer_descriptor & layout) noexcept {
+  block_weights & block = backend.blocks[static_cast<size_t>(layer_index)];
+  stream_binding & stream = backend.stream;
+  const auto & pristine = stream.pristine[static_cast<size_t>(layer_index)];
+  uint32_t extent_index = 0u;
+  const auto rebind = [&](tensor_matrix & matrix, const size_t role) noexcept -> bool {
+    if (pristine[role] == nullptr) {
+      return true;
+    }
+    if (extent_index >= layout.weight_count) {
+      return false;
+    }
+    stream.records[role] = *pristine[role];
+    stream.records[role].data = slot_base + layout.weights[extent_index].slot_offset;
+    matrix.tensor = &stream.records[role];
+    extent_index += 1u;
+    return true;
+  };
+  return rebind(block.attention_q, k_stream_role_attention_q) &&
+         rebind(block.attention_k, k_stream_role_attention_k) &&
+         rebind(block.attention_v, k_stream_role_attention_v) &&
+         rebind(block.attention_output, k_stream_role_attention_output) &&
+         rebind(block.feed_forward_gate, k_stream_role_feed_forward_gate) &&
+         rebind(block.feed_forward_down, k_stream_role_feed_forward_down) &&
+         rebind(block.feed_forward_up, k_stream_role_feed_forward_up) &&
+         rebind(block.shortconv_in_proj, k_stream_role_shortconv_in_proj) &&
+         rebind(block.shortconv_out_proj, k_stream_role_shortconv_out_proj) &&
+         extent_index == layout.weight_count;
+}
+
+struct stream_acquire_capture {
+  bool done = false;
+  const uint8_t * slot_base = nullptr;
+  const emel::model::tensor::window::detail::layer_descriptor * layout = nullptr;
+
+  static void on_done(
+      void * object,
+      const emel::model::tensor::window::events::acquire_layer_window_done & ev) noexcept {
+    auto * capture = static_cast<stream_acquire_capture *>(object);
+    capture->done = true;
+    capture->slot_base = ev.slot_base;
+    capture->layout = &ev.layout;
+  }
+
+  static void on_error(
+      void *,
+      const emel::model::tensor::window::events::acquire_layer_window_error &) noexcept {}
+};
+
+// Streamed layer residency: acquires the layer's window slot (suspending on
+// the in-flight load when needed) and rebases the block's weight views into
+// it. Failure propagates through the layer loop's bool data-plane error path.
+inline bool acquire_streamed_layer(native_backend & backend,
+                                   const int32_t layer_index) noexcept {
+  stream_acquire_capture capture{};
+  emel::model::tensor::window::event::acquire_layer_window acquire{layer_index};
+  acquire.on_done = {&capture, &stream_acquire_capture::on_done};
+  acquire.on_error = {&capture, &stream_acquire_capture::on_error};
+  if (!backend.stream.window->process_event(acquire) || !capture.done) {
+    return false;
+  }
+  return bind_streamed_block_views(backend, layer_index, capture.slot_base,
+                                   *capture.layout);
+}
+
 template <emel::text::generator::attention_mode mode,
           scalar_matmul_route route,
-          matmul_lane_mode lanes = matmul_lane_mode::serial>
+          matmul_lane_mode lanes = matmul_lane_mode::serial,
+          window_mode wmode = window_mode::resident>
 inline bool run_layer(native_backend & backend,
                       const int32_t layer_index,
                       const int32_t position) noexcept {
+  if constexpr (wmode == window_mode::streamed) {
+    if (!acquire_streamed_layer(backend, layer_index)) {
+      return false;
+    }
+  }
   auto & block = backend.blocks[static_cast<size_t>(layer_index)];
   if (!rms_norm(backend.hidden, block.attention_norm, backend.rms_epsilon, backend.norm)) {
     return false;
@@ -4617,7 +4755,8 @@ inline bool run_prefill_chunk8_preselected_argmax_q8_k(native_backend & backend,
 
 template <emel::text::generator::attention_mode mode,
           scalar_matmul_route route,
-          matmul_lane_mode lanes = matmul_lane_mode::serial>
+          matmul_lane_mode lanes = matmul_lane_mode::serial,
+          window_mode wmode = window_mode::resident>
 inline bool run_decode(native_backend & backend,
                        const emel::graph::processor::event::execute & request) noexcept {
   if (backend.bound_token_count != 1 ||
@@ -4641,7 +4780,7 @@ inline bool run_decode(native_backend & backend,
   }
 
   for (int32_t layer = 0; layer < backend.n_layer; ++layer) {
-    if (!run_layer<mode, route, lanes>(backend, layer, position)) {
+    if (!run_layer<mode, route, lanes, wmode>(backend, layer, position)) {
       return false;
     }
   }
@@ -4652,7 +4791,8 @@ inline bool run_decode(native_backend & backend,
 template <emel::text::generator::attention_mode mode,
           scalar_matmul_route route,
           scalar_argmax_route argmax_route,
-          matmul_lane_mode lanes = matmul_lane_mode::serial>
+          matmul_lane_mode lanes = matmul_lane_mode::serial,
+          window_mode wmode = window_mode::resident>
 inline bool run_decode_preselected_argmax(native_backend & backend,
                                           const emel::graph::processor::event::execute & request,
                                           int32_t & selected_index,
@@ -4678,7 +4818,7 @@ inline bool run_decode_preselected_argmax(native_backend & backend,
   }
 
   for (int32_t layer = 0; layer < backend.n_layer; ++layer) {
-    if (!run_layer<mode, route, lanes>(backend, layer, position)) {
+    if (!run_layer<mode, route, lanes, wmode>(backend, layer, position)) {
       return false;
     }
   }
@@ -5093,7 +5233,8 @@ inline bool bind_guarded_inputs(const emel::graph::processor::event::execute & r
 template <emel::text::generator::attention_mode mode,
           scalar_matmul_route route,
           step_kind expected_kind,
-          matmul_lane_mode lanes = matmul_lane_mode::serial>
+          matmul_lane_mode lanes = matmul_lane_mode::serial,
+          window_mode wmode = window_mode::resident>
 inline bool run_kernel_scalar_mode(const emel::graph::processor::event::execute & request,
                                    int32_t * err_out) noexcept {
   (void)err_out;
@@ -5101,7 +5242,7 @@ inline bool run_kernel_scalar_mode(const emel::graph::processor::event::execute 
   if constexpr (expected_kind == step_kind::prefill) {
     return run_prefill<mode, route>(backend);
   } else {
-    return run_decode<mode, route, lanes>(backend, request);
+    return run_decode<mode, route, lanes, wmode>(backend, request);
   }
 }
 
@@ -5258,6 +5399,30 @@ inline bool run_kernel_flash_decode_kernel(
       emel::text::generator::attention_mode::flash,
       scalar_matmul_route::kernel,
       step_kind::decode>(request, err_out);
+}
+
+// Streamed siblings of the flash scalar decode routes: identical arithmetic,
+// weights acquired per layer from the tensor window actor.
+inline bool run_kernel_flash_decode_kernel_streamed(
+    const emel::graph::processor::event::execute & request,
+    int32_t * err_out) noexcept {
+  return run_kernel_scalar_mode<
+      emel::text::generator::attention_mode::flash,
+      scalar_matmul_route::kernel,
+      step_kind::decode,
+      matmul_lane_mode::serial,
+      window_mode::streamed>(request, err_out);
+}
+
+inline bool run_kernel_flash_decode_native_quantized_streamed(
+    const emel::graph::processor::event::execute & request,
+    int32_t * err_out) noexcept {
+  return run_kernel_scalar_mode<
+      emel::text::generator::attention_mode::flash,
+      scalar_matmul_route::native_quantized,
+      step_kind::decode,
+      matmul_lane_mode::serial,
+      window_mode::streamed>(request, err_out);
 }
 
 inline bool run_kernel_flash_decode_parallel_packed_q8_0(

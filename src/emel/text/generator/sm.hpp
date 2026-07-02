@@ -529,6 +529,11 @@ struct model {
 
       , sml::state<decode_compute_flash_decision> <= sml::state<decode_compute_flash>
                  + sml::completion<event::generate_run>
+                 [ guard::guard_decode_materialized_streamed_scalar_native_quantized_ready{} ]
+                 / action::request_decode_compute_flash_native_quantized_streamed
+
+      , sml::state<decode_compute_flash_decision> <= sml::state<decode_compute_flash>
+                 + sml::completion<event::generate_run>
                  [ guard::guard_decode_materialized_parallel_scalar_native_quantized_kernel_ready{} ]
                  / action::request_decode_compute_flash_parallel_native_quantized
 
@@ -536,6 +541,11 @@ struct model {
                  + sml::completion<event::generate_run>
                  [ guard::guard_decode_materialized_scalar_native_quantized_kernel_ready{} ]
                  / action::request_decode_compute_flash_native_quantized
+
+      , sml::state<decode_compute_flash_decision> <= sml::state<decode_compute_flash>
+                 + sml::completion<event::generate_run>
+                 [ guard::guard_decode_materialized_streamed_scalar_kernel_ready{} ]
+                 / action::request_decode_compute_flash_kernel_streamed
 
       , sml::state<decode_compute_flash_decision> <= sml::state<decode_compute_flash>
                  + sml::completion<event::generate_run>
@@ -1001,6 +1011,20 @@ struct sm : public emel::sm<model, action::context> {
     this->context_.format_prompt = format_prompt;
     // Session scratch is sized once from the injected loaded model before the initialize pipeline.
     detail::reserve_session_buffers(this->context_, model_ref);
+  }
+
+  // Streaming variant: the owner bound the tensor window first and reports
+  // whether streaming engaged (bind_window_done.streaming_active).
+  sm(const emel::model::data & model_ref,
+     emel::text::conditioner::sm & conditioner_ref,
+     emel::model::tensor::window::sm & stream_window_ref,
+     const bool stream_active,
+     void * formatter_ctx = nullptr,
+     emel::text::formatter::format_fn format_prompt =
+         emel::text::formatter::format_raw)
+      : sm(model_ref, conditioner_ref, formatter_ctx, format_prompt) {
+    this->context_.stream_window = &stream_window_ref;
+    this->context_.stream_active = stream_active;
   }
 
   sm(const sm &) = delete;
