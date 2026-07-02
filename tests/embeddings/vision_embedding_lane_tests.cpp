@@ -314,6 +314,32 @@ TEST_CASE("embeddings vision helper paths cover image request callbacks and vali
   CHECK(probe.request == &request);
 }
 
+TEST_CASE("embeddings vision pointwise direct path rejects missing lane buffers") {
+  // The direct pointwise path needs its platform lane buffer bound by
+  // bind_pointwise_f16 (packed rhs on aarch64, the scalar transpose
+  // elsewhere); an otherwise valid view without one must be rejected
+  // before any lane memory is read.
+  emel::embeddings::generator::action::matrix_view matrix = {};
+  matrix.dtype = static_cast<uint8_t>(emel::kernel::detail::dtype_f32);
+  matrix.rows = 4;
+  matrix.cols = 4;
+
+  std::array<float, 4> input = {};
+  std::array<float, 4> output = {};
+  CHECK_FALSE(embedding_detail::pointwise_conv_hwc_direct_f32(
+      matrix, input.data(), 1, output.data()));
+  CHECK_FALSE(embedding_detail::pointwise_conv_hwc_direct_f32(
+      matrix, nullptr, 1, output.data()));
+
+  // The lane-buffer check fires before any batch-norm validation, so the
+  // fused variants must reject the same view in every instantiation.
+  emel::embeddings::generator::action::batch_norm_view batch_norm = {};
+  CHECK_FALSE(embedding_detail::pointwise_conv_hwc_direct_f32_bn<false>(
+      matrix, input.data(), 1, batch_norm, output.data()));
+  CHECK_FALSE(embedding_detail::pointwise_conv_hwc_direct_f32_bn<true>(
+      matrix, input.data(), 1, batch_norm, output.data()));
+}
+
 TEST_CASE("embeddings vision pointwise direct path matches scalar pointwise reference") {
 #if !(defined(__aarch64__) || defined(__ARM_NEON))
   return;

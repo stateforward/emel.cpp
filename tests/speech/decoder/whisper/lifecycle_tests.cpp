@@ -181,6 +181,46 @@ void mark_decoder_aux_tensors_f32(emel::model::data & model) {
   }
 }
 
+void mark_decoder_linear_weights(emel::model::data & model,
+                                 const int32_t dtype) {
+  for (uint32_t index = 0; index < model.n_tensors; ++index) {
+    auto & tensor = model.tensors[index];
+    const auto name = emel::model::tensor_name_view(model, tensor);
+    if (name.starts_with("model.decoder.layers.") && tensor.n_dims == 2 &&
+        name.ends_with(".weight")) {
+      tensor.type = dtype;
+    }
+  }
+}
+
+// Rebinds every decoder aux tensor (biases, layer norms, positions) onto a
+// shared zero-filled f32 arena so a q8_0+f32-aux decode can run end to end
+// with in-bounds aux reads. The caller must keep the returned arena alive
+// for the lifetime of the mutated model.
+std::vector<float> repoint_decoder_aux_tensors_to_f32(emel::model::data & model) {
+  namespace whisper = emel::speech::decoder::whisper::detail;
+  std::vector<float> arena(
+      static_cast<size_t>(whisper::k_embedding_length) *
+          static_cast<size_t>(whisper::k_decoder_sequence_token_count),
+      0.0f);
+  for (uint32_t index = 0; index < model.n_tensors; ++index) {
+    auto & tensor = model.tensors[index];
+    const auto name = emel::model::tensor_name_view(model, tensor);
+    if (name.starts_with("model.decoder.") &&
+        (tensor.n_dims == 1 || name == "model.decoder.embed_positions.weight")) {
+      uint64_t count = 1u;
+      for (int32_t dim = 0; dim < tensor.n_dims; ++dim) {
+        count *= static_cast<uint64_t>(tensor.dims[static_cast<size_t>(dim)]);
+      }
+      REQUIRE(count <= arena.size());
+      tensor.type = static_cast<int32_t>(emel::kernel::detail::dtype_f32);
+      tensor.data = arena.data();
+      tensor.data_size = count * sizeof(float);
+    }
+  }
+  return arena;
+}
+
 loaded_whisper_fixture load_fixture_or_skip() {
   const auto fixture_path = whisper_fixture_path();
   if (!std::filesystem::exists(fixture_path)) {
@@ -1023,6 +1063,144 @@ TEST_CASE("whisper_decoder_runs_first_q8_token_from_public_event") {
   CHECK(stop_generated_token_count == 2u);
   CHECK(stop_generated_tokens[1] >= stop_policy.timestamp_begin);
   CHECK(stop_digest != 0u);
+}
+
+TEST_CASE("whisper_decoder_runs_q4_0_variant_from_public_event") {
+  auto loaded = load_fixture_or_skip();
+  if (loaded.model == nullptr) {
+    return;
+  }
+
+  mark_decoder_linear_weights(
+      *loaded.model, static_cast<int32_t>(emel::kernel::detail::dtype_q4_0));
+  std::vector<float> encoder_state(
+      static_cast<size_t>(decoder::detail::k_embedding_length), 0.0f);
+  std::vector<float> workspace(static_cast<size_t>(
+      decoder::detail::required_decoder_workspace_floats(1u)));
+  std::vector<float> logits(static_cast<size_t>(decoder::detail::k_vocab_size));
+  const auto &policy =
+      emel::speech::tokenizer::whisper::tiny_asr_decode_policy();
+  std::array<int32_t, 1> generated_tokens = {};
+  int32_t generated_token_count = 0;
+  int32_t token = 0;
+  float confidence = 0.0f;
+  uint64_t digest = 0;
+  emel::error::type err = emel::error::cast(decoder::error::none);
+  decoder::sm machine{};
+
+  decoder::event::decode request{loaded.decoder_contract,
+                                 encoder_state,
+                                 1,
+                                 policy,
+                                 generated_tokens,
+                                 generated_token_count,
+                                 workspace,
+                                 logits,
+                                 token,
+                                 confidence,
+                                 digest};
+  request.error_out = &err;
+  CHECK(machine.process_event(request));
+  CHECK(err == emel::error::cast(decoder::error::none));
+  CHECK(generated_token_count == 1);
+  CHECK(token >= 0);
+  CHECK(token < decoder::detail::k_vocab_size);
+  CHECK(generated_tokens[0] == token);
+  CHECK(machine.q4_0_dispatch_count() == 1u);
+  CHECK(machine.q8_0_dispatch_count() == 0u);
+  CHECK(machine.q4_1_dispatch_count() == 0u);
+}
+
+TEST_CASE("whisper_decoder_runs_q4_1_variant_from_public_event") {
+  auto loaded = load_fixture_or_skip();
+  if (loaded.model == nullptr) {
+    return;
+  }
+
+  mark_decoder_linear_weights(
+      *loaded.model, static_cast<int32_t>(emel::kernel::detail::dtype_q4_1));
+  std::vector<float> encoder_state(
+      static_cast<size_t>(decoder::detail::k_embedding_length), 0.0f);
+  std::vector<float> workspace(static_cast<size_t>(
+      decoder::detail::required_decoder_workspace_floats(1u)));
+  std::vector<float> logits(static_cast<size_t>(decoder::detail::k_vocab_size));
+  const auto &policy =
+      emel::speech::tokenizer::whisper::tiny_asr_decode_policy();
+  std::array<int32_t, 1> generated_tokens = {};
+  int32_t generated_token_count = 0;
+  int32_t token = 0;
+  float confidence = 0.0f;
+  uint64_t digest = 0;
+  emel::error::type err = emel::error::cast(decoder::error::none);
+  decoder::sm machine{};
+
+  decoder::event::decode request{loaded.decoder_contract,
+                                 encoder_state,
+                                 1,
+                                 policy,
+                                 generated_tokens,
+                                 generated_token_count,
+                                 workspace,
+                                 logits,
+                                 token,
+                                 confidence,
+                                 digest};
+  request.error_out = &err;
+  CHECK(machine.process_event(request));
+  CHECK(err == emel::error::cast(decoder::error::none));
+  CHECK(generated_token_count == 1);
+  CHECK(token >= 0);
+  CHECK(token < decoder::detail::k_vocab_size);
+  CHECK(generated_tokens[0] == token);
+  CHECK(machine.q4_1_dispatch_count() == 1u);
+  CHECK(machine.q8_0_dispatch_count() == 0u);
+  CHECK(machine.q4_0_dispatch_count() == 0u);
+}
+
+TEST_CASE("whisper_decoder_runs_q8_f32_aux_variant_from_public_event") {
+  auto loaded = load_fixture_or_skip();
+  if (loaded.model == nullptr) {
+    return;
+  }
+
+  const std::vector<float> aux_arena =
+      repoint_decoder_aux_tensors_to_f32(*loaded.model);
+  std::vector<float> encoder_state(
+      static_cast<size_t>(decoder::detail::k_embedding_length), 0.0f);
+  std::vector<float> workspace(static_cast<size_t>(
+      decoder::detail::required_decoder_workspace_floats(1u)));
+  std::vector<float> logits(static_cast<size_t>(decoder::detail::k_vocab_size));
+  const auto &policy =
+      emel::speech::tokenizer::whisper::tiny_asr_decode_policy();
+  std::array<int32_t, 1> generated_tokens = {};
+  int32_t generated_token_count = 0;
+  int32_t token = 0;
+  float confidence = 0.0f;
+  uint64_t digest = 0;
+  emel::error::type err = emel::error::cast(decoder::error::none);
+  decoder::sm machine{};
+
+  decoder::event::decode request{loaded.decoder_contract,
+                                 encoder_state,
+                                 1,
+                                 policy,
+                                 generated_tokens,
+                                 generated_token_count,
+                                 workspace,
+                                 logits,
+                                 token,
+                                 confidence,
+                                 digest};
+  request.error_out = &err;
+  CHECK(machine.process_event(request));
+  CHECK(err == emel::error::cast(decoder::error::none));
+  CHECK(generated_token_count == 1);
+  CHECK(token >= 0);
+  CHECK(token < decoder::detail::k_vocab_size);
+  CHECK(generated_tokens[0] == token);
+  CHECK(machine.q8_0_dispatch_count() == 1u);
+  CHECK(machine.q4_0_dispatch_count() == 0u);
+  CHECK(machine.q4_1_dispatch_count() == 0u);
 }
 
 TEST_CASE("whisper_decoder_routes_q8_linear_f32_aux_variant") {
