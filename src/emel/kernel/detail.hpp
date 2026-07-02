@@ -1731,8 +1731,12 @@ inline constexpr bool requires_src1_v =
 
 template <class request_type>
 inline bool has_required_src0(const request_type &request) noexcept {
+  // op_get_rows shares the native-quantized row-layout contract below; the
+  // generic fallback's per-element layout check cannot express sub-byte
+  // quantized rows (their per-element size truncates to zero).
   if constexpr (std::is_same_v<request_type, event::op_mul_mat> ||
-                std::is_same_v<request_type, event::op_mul_mat_argmax>) {
+                std::is_same_v<request_type, event::op_mul_mat_argmax> ||
+                std::is_same_v<request_type, event::op_get_rows>) {
     const uint8_t src0_type = dtype_code(request.src0.type);
     if (is_packed_q8_0_vector_dtype(src0_type)) {
       const uint64_t cols = request.src0.ne[0];
@@ -4358,8 +4362,13 @@ inline bool run_conv_transpose_1d_as(const request_type &request) noexcept {
 
   for (int64_t in_channel = 0; in_channel < in_channels; ++in_channel) {
     for (int64_t in = 0; in < length; ++in) {
-      const float input = read_f32_at(request.src1, static_cast<uint64_t>(in),
-                                      static_cast<uint64_t>(in_channel));
+      float input = read_f32_at(request.src1, static_cast<uint64_t>(in),
+                                static_cast<uint64_t>(in_channel));
+      if constexpr (f16_weights) {
+        // The reference f16 kernel path rounds the input samples through fp16
+        // before the tap multiplies; match that operand pipeline exactly.
+        input = quant::fp16_to_fp32(quant::fp32_to_fp16(input));
+      }
       for (int64_t out_channel = 0; out_channel < out_channels; ++out_channel) {
         float *dst_row = dst + out_channel * out_length;
         const char *weight_row = weight_base +
