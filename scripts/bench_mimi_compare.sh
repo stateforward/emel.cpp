@@ -6,9 +6,9 @@
 # SentencePiece) via the speech_codec_mimi bench-tools configure, fetches
 # the pinned real Mimi artifacts, and runs tools/bench/mimi_compare.py.
 #
-# Honest label: the reference executes ggml's f16 conv pipeline while the
-# EMEL lane computes in f32, so this reports code-match similarity + decode
-# PSNR without claiming kernel parity (see mimi_compare.py --help).
+# The EMEL lane consumes the same effective operand pipeline as the
+# reference (f16 convs, bf16 KV attention, exact ggml numerics), so encode
+# comparison is gated TOKEN-EXACT.
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -88,6 +88,7 @@ python3 "$ROOT_DIR/tools/bench/mimi_compare.py" \
   --reference-model "$REFERENCE_MODEL" \
   --audio "$AUDIO" \
   --compare-decode \
+  --require-token-exact \
   --json-out "$OUTPUT_DIR/mimi_compare.json"
 
 echo "report: $OUTPUT_DIR/mimi_compare.json"

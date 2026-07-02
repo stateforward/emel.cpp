@@ -304,8 +304,7 @@ inline bool can_use_avx2_fma_f32_mul_mat(
   (void)host_features;
   return false;
 #else
-  return host_features.fma_available &&
-         avx2_fma_intrinsics_compiled &&
+  return host_features.fma_available && avx2_fma_intrinsics_compiled &&
          request.src1.ne[0] != 1u &&
          can_use_avx2(request, host_features.avx2_available);
 #endif
@@ -319,8 +318,7 @@ inline bool can_use_avx2_fma_f32_vector_mul_mat(
   (void)host_features;
   return false;
 #else
-  return host_features.fma_available &&
-         avx2_fma_intrinsics_compiled &&
+  return host_features.fma_available && avx2_fma_intrinsics_compiled &&
          request.src1.ne[0] == 1u &&
          can_use_avx2(request, host_features.avx2_available);
 #endif
@@ -2135,8 +2133,8 @@ inline void execute_avx2_fma_mul_mat_f32_vector_unchecked(
     __m256 acc2 = _mm256_setzero_ps();
     __m256 acc3 = _mm256_setzero_ps();
     for (uint64_t kk = 0; kk < vec_depth; kk += 32u) {
-      acc0 = _mm256_fmadd_ps(_mm256_loadu_ps(row + kk),
-                             _mm256_loadu_ps(b + kk), acc0);
+      acc0 = _mm256_fmadd_ps(_mm256_loadu_ps(row + kk), _mm256_loadu_ps(b + kk),
+                             acc0);
       acc1 = _mm256_fmadd_ps(_mm256_loadu_ps(row + kk + 8u),
                              _mm256_loadu_ps(b + kk + 8u), acc1);
       acc2 = _mm256_fmadd_ps(_mm256_loadu_ps(row + kk + 16u),
@@ -2146,8 +2144,8 @@ inline void execute_avx2_fma_mul_mat_f32_vector_unchecked(
     }
     uint64_t kk = vec_depth;
     for (; kk + 8u <= k; kk += 8u) {
-      acc0 = _mm256_fmadd_ps(_mm256_loadu_ps(row + kk),
-                             _mm256_loadu_ps(b + kk), acc0);
+      acc0 = _mm256_fmadd_ps(_mm256_loadu_ps(row + kk), _mm256_loadu_ps(b + kk),
+                             acc0);
     }
     const __m256 acc01 = _mm256_add_ps(acc0, acc1);
     const __m256 acc23 = _mm256_add_ps(acc2, acc3);

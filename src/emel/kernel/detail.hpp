@@ -3143,10 +3143,23 @@ execute_scalar_unary_subop_unchecked(const request_type &request) noexcept {
   } else if constexpr (subop_code == unary_subop_relu) {
     (void)run_unary(request, [](const float v) { return std::max(0.0f, v); });
   } else if constexpr (subop_code == unary_subop_gelu) {
+    // Exact ggml GGML_GELU_FP16 semantics: input and output round through
+    // fp16 around the tanh approximation, with the +-10 saturation guards
+    // (equivalent to ggml's fp16 lookup table entry for the rounded input).
     (void)run_unary(request, [](const float v) {
-      return 0.5f * v *
-             (1.0f + std::tanh(k_gelu_sqrt_2_over_pi *
-                               (v + k_gelu_coef_a * v * v * v)));
+      if (v <= -10.0f) {
+        return 0.0f;
+      }
+      if (v >= 10.0f) {
+        return v;
+      }
+      const float quantized = quant::fp16_to_fp32(quant::fp32_to_fp16(v));
+      const float approx =
+          0.5f * quantized *
+          (1.0f + std::tanh(k_gelu_sqrt_2_over_pi *
+                            (quantized + k_gelu_coef_a * quantized * quantized *
+                                             quantized)));
+      return quant::fp16_to_fp32(quant::fp32_to_fp16(approx));
     });
   } else if constexpr (subop_code == unary_subop_silu) {
     (void)run_unary(request,
@@ -3764,6 +3777,224 @@ inline float vec_dot_f16_ggml(const int64_t count, const uint16_t *x,
   return static_cast<float>(sumf);
 }
 
+inline float bf16_to_fp32(const uint16_t bits16) noexcept {
+  const uint32_t bits32 = static_cast<uint32_t>(bits16) << 16u;
+  float out = 0.0f;
+  std::memcpy(&out, &bits32, sizeof(out));
+  return out;
+}
+
+// Exact port of ggml_compute_fp32_to_bf16 (round-to-nearest-even with the
+// NaN quieting ggml applies).
+inline uint16_t fp32_to_bf16(const float value) noexcept {
+  uint32_t bits32 = 0;
+  std::memcpy(&bits32, &value, sizeof(bits32));
+  if ((bits32 & 0x7fffffffu) > 0x7f800000u) {
+    return static_cast<uint16_t>((bits32 >> 16u) | 64u);
+  }
+  return static_cast<uint16_t>((bits32 + (0x7fffu + ((bits32 >> 16u) & 1u))) >>
+                               16u);
+}
+
+// Exact port of the pinned ggml_vec_dot_bf16 x86 AVX2 path (no AVX512 on
+// the supported hosts): four 8-lane accumulators over 32-element steps using
+// separate mul+add (not fmadd), (c1+c3)+(c2+c4) combine, movehl/movehdup
+// reduce, and a double-precision scalar tail. Scalar fallback matches
+// ggml's no-SIMD path.
+inline float vec_dot_bf16_ggml(const int64_t count, const uint16_t *x,
+                               const uint16_t *y) noexcept {
+  double sumf = 0.0;
+  int64_t i = 0;
+#if defined(__AVX2__) && defined(__F16C__) && defined(__FMA__)
+  const auto load_bf16 = [](const uint16_t *p) noexcept {
+    return _mm256_castsi256_ps(
+        _mm256_slli_epi32(_mm256_cvtepu16_epi32(_mm_loadu_si128(
+                              reinterpret_cast<const __m128i *>(p))),
+                          16));
+  };
+  __m256 c1 = _mm256_setzero_ps();
+  __m256 c2 = _mm256_setzero_ps();
+  __m256 c3 = _mm256_setzero_ps();
+  __m256 c4 = _mm256_setzero_ps();
+  for (; i + 32 <= count; i += 32) {
+    c1 = _mm256_add_ps(_mm256_mul_ps(load_bf16(x + i), load_bf16(y + i)), c1);
+    c2 = _mm256_add_ps(
+        _mm256_mul_ps(load_bf16(x + i + 8), load_bf16(y + i + 8)), c2);
+    c3 = _mm256_add_ps(
+        _mm256_mul_ps(load_bf16(x + i + 16), load_bf16(y + i + 16)), c3);
+    c4 = _mm256_add_ps(
+        _mm256_mul_ps(load_bf16(x + i + 24), load_bf16(y + i + 24)), c4);
+  }
+  c1 = _mm256_add_ps(_mm256_add_ps(c1, c3), _mm256_add_ps(c2, c4));
+  __m128 g =
+      _mm_add_ps(_mm256_extractf128_ps(c1, 1), _mm256_castps256_ps128(c1));
+  g = _mm_add_ps(g, _mm_movehl_ps(g, g));
+  g = _mm_add_ss(g, _mm_movehdup_ps(g));
+  sumf += static_cast<double>(_mm_cvtss_f32(g));
+#endif
+  for (; i < count; ++i) {
+    sumf += static_cast<double>(bf16_to_fp32(x[i]) * bf16_to_fp32(y[i]));
+  }
+  return static_cast<float>(sumf);
+}
+
+// Exact port of the pinned ggml_vec_dot_f32 x86 AVX2+FMA path: four 8-lane
+// fmadd accumulators over 32-element steps, pairwise reduce, FLOAT scalar
+// tail (ggml keeps the f32 SIMD path's leftovers in float).
+inline float vec_dot_f32_ggml(const int64_t count, const float *x,
+                              const float *y) noexcept {
+#if defined(__AVX2__) && defined(__F16C__) && defined(__FMA__)
+  float sumf = 0.0f;
+  const int64_t np = count & ~static_cast<int64_t>(31);
+  __m256 sum[4] = {_mm256_setzero_ps(), _mm256_setzero_ps(),
+                   _mm256_setzero_ps(), _mm256_setzero_ps()};
+  for (int64_t i = 0; i < np; i += 32) {
+    for (int j = 0; j < 4; ++j) {
+      sum[j] = _mm256_fmadd_ps(_mm256_loadu_ps(x + i + j * 8),
+                               _mm256_loadu_ps(y + i + j * 8), sum[j]);
+    }
+  }
+  sum[0] = _mm256_add_ps(sum[0], sum[2]);
+  sum[1] = _mm256_add_ps(sum[1], sum[3]);
+  sum[0] = _mm256_add_ps(sum[0], sum[1]);
+  const __m128 t0 = _mm_add_ps(_mm256_castps256_ps128(sum[0]),
+                               _mm256_extractf128_ps(sum[0], 1));
+  const __m128 t1 = _mm_hadd_ps(t0, t0);
+  sumf = _mm_cvtss_f32(_mm_hadd_ps(t1, t1));
+  for (int64_t i = np; i < count; ++i) {
+    sumf += x[i] * y[i];
+  }
+  return sumf;
+#else
+  double sumf = 0.0;
+  for (int64_t i = 0; i < count; ++i) {
+    sumf += static_cast<double>(x[i] * y[i]);
+  }
+  return static_cast<float>(sumf);
+#endif
+}
+
+#if defined(__AVX2__) && defined(__F16C__) && defined(__FMA__)
+// Exact port of ggml_v_expf (ARM optimized-routines polynomial as vendored
+// by the pinned ggml).
+inline __m256 v_expf_ggml(__m256 x) noexcept {
+  const __m256 r = _mm256_set1_ps(0x1.8p23f);
+  const __m256 z = _mm256_fmadd_ps(x, _mm256_set1_ps(0x1.715476p+0f), r);
+  const __m256 n = _mm256_sub_ps(z, r);
+  const __m256 b =
+      _mm256_fnmadd_ps(n, _mm256_set1_ps(0x1.7f7d1cp-20f),
+                       _mm256_fnmadd_ps(n, _mm256_set1_ps(0x1.62e4p-1f), x));
+  const __m256i e = _mm256_slli_epi32(_mm256_castps_si256(z), 23);
+  const __m256 k = _mm256_castsi256_ps(
+      _mm256_add_epi32(e, _mm256_castps_si256(_mm256_set1_ps(1))));
+  const __m256i c = _mm256_castps_si256(
+      _mm256_cmp_ps(_mm256_andnot_ps(_mm256_set1_ps(-0.f), n),
+                    _mm256_set1_ps(126), _CMP_GT_OQ));
+  const __m256 u = _mm256_mul_ps(b, b);
+  const __m256 j = _mm256_fmadd_ps(
+      _mm256_fmadd_ps(_mm256_fmadd_ps(_mm256_set1_ps(0x1.0e4020p-7f), b,
+                                      _mm256_set1_ps(0x1.573e2ep-5f)),
+                      u,
+                      _mm256_fmadd_ps(_mm256_set1_ps(0x1.555e66p-3f), b,
+                                      _mm256_set1_ps(0x1.fffdb6p-2f))),
+      u, _mm256_mul_ps(_mm256_set1_ps(0x1.ffffecp-1f), b));
+  if (!_mm256_movemask_ps(_mm256_castsi256_ps(c))) {
+    return _mm256_fmadd_ps(j, k, k);
+  }
+  const __m256i g = _mm256_and_si256(
+      _mm256_castps_si256(_mm256_cmp_ps(n, _mm256_setzero_ps(), _CMP_LE_OQ)),
+      _mm256_set1_epi32(static_cast<int32_t>(0x82000000u)));
+  const __m256 s1 =
+      _mm256_castsi256_ps(_mm256_add_epi32(g, _mm256_set1_epi32(0x7f000000)));
+  const __m256 s2 = _mm256_castsi256_ps(_mm256_sub_epi32(e, g));
+  const __m256i d = _mm256_castps_si256(
+      _mm256_cmp_ps(_mm256_andnot_ps(_mm256_set1_ps(-0.f), n),
+                    _mm256_set1_ps(192), _CMP_GT_OQ));
+  return _mm256_or_ps(
+      _mm256_and_ps(_mm256_castsi256_ps(d), _mm256_mul_ps(s1, s1)),
+      _mm256_andnot_ps(
+          _mm256_castsi256_ps(d),
+          _mm256_or_ps(
+              _mm256_and_ps(_mm256_castsi256_ps(c),
+                            _mm256_mul_ps(_mm256_fmadd_ps(s2, j, s2), s1)),
+              _mm256_andnot_ps(_mm256_castsi256_ps(c),
+                               _mm256_fmadd_ps(k, j, k)))));
+}
+#endif
+
+// Exact port of ggml's soft_max row kernel over a pre-scaled, pre-masked
+// row: max (order independent), 8-lane v_expf blocks with per-block
+// horizontal reduce into a double sum, libm expf scalar tail, then a
+// per-element multiply by (float)(1.0 / sum).
+inline void soft_max_row_ggml(const int64_t count, float *data) noexcept {
+  float max_value = -std::numeric_limits<float>::infinity();
+  for (int64_t i = 0; i < count; ++i) {
+    max_value = std::max(max_value, data[i]);
+  }
+  double sum = 0.0;
+  int64_t i = 0;
+#if defined(__AVX2__) && defined(__F16C__) && defined(__FMA__)
+  for (; i + 7 < count; i += 8) {
+    const __m256 val = v_expf_ggml(
+        _mm256_sub_ps(_mm256_loadu_ps(data + i), _mm256_set1_ps(max_value)));
+    _mm256_storeu_ps(data + i, val);
+    __m128 val2 =
+        _mm_add_ps(_mm256_extractf128_ps(val, 1), _mm256_castps256_ps128(val));
+    val2 = _mm_add_ps(val2, _mm_movehl_ps(val2, val2));
+    val2 = _mm_add_ss(val2, _mm_movehdup_ps(val2));
+    sum += static_cast<double>(_mm_cvtss_f32(val2));
+  }
+#endif
+  for (; i < count; ++i) {
+    const float val = std::exp(data[i] - max_value);
+    sum += static_cast<double>(val);
+    data[i] = val;
+  }
+  const float inv_sum = static_cast<float>(1.0 / sum);
+  for (int64_t j = 0; j < count; ++j) {
+    data[j] *= inv_sum;
+  }
+}
+
+// Exact port of ggml_compute_forward_norm's row math: float mean from the
+// double-accumulated sum, AVX2 centered-variance blocks with per-block
+// horizontal reduce into a double sum, float scalar tail, then the
+// 1/sqrt(var+eps) per-element scale. Writes the normalized row to dst.
+inline void norm_row_ggml(const int64_t count, float *dst, const float *x,
+                          const float eps) noexcept {
+  double sum = 0.0;
+  for (int64_t i = 0; i < count; ++i) {
+    sum += static_cast<double>(x[i]);
+  }
+  const float mean = static_cast<float>(sum) / static_cast<float>(count);
+  double variance_sum = 0.0;
+  int64_t i = 0;
+#if defined(__AVX2__) && defined(__F16C__) && defined(__FMA__)
+  for (; i + 7 < count; i += 8) {
+    const __m256 val =
+        _mm256_sub_ps(_mm256_loadu_ps(x + i), _mm256_set1_ps(mean));
+    _mm256_storeu_ps(dst + i, val);
+    const __m256 sq = _mm256_mul_ps(val, val);
+    __m128 val2 =
+        _mm_add_ps(_mm256_extractf128_ps(sq, 1), _mm256_castps256_ps128(sq));
+    val2 = _mm_add_ps(val2, _mm_movehl_ps(val2, val2));
+    val2 = _mm_add_ss(val2, _mm_movehdup_ps(val2));
+    variance_sum += static_cast<double>(_mm_cvtss_f32(val2));
+  }
+#endif
+  for (; i < count; ++i) {
+    const float val = x[i] - mean;
+    dst[i] = val;
+    variance_sum += static_cast<double>(val * val);
+  }
+  const float variance =
+      static_cast<float>(variance_sum / static_cast<double>(count));
+  const float scale = 1.0f / std::sqrt(variance + eps);
+  for (int64_t j = 0; j < count; ++j) {
+    dst[j] *= scale;
+  }
+}
+
 template <class request_type>
 inline bool run_mul_mat_f16(const request_type &request) noexcept {
   const uint64_t k = request.src0.ne[0];
@@ -3955,25 +4186,6 @@ inline bool can_run_flash_attn_ext(const request_type &request) noexcept {
 // Semantics mirror the ggml reference operand contracts so the paritychecker
 // kernel engine can compare against ggml directly.
 //------------------------------------------------------------------------------//
-
-inline float bf16_to_fp32(const uint16_t bits16) noexcept {
-  const uint32_t bits32 = static_cast<uint32_t>(bits16) << 16u;
-  float out = 0.0f;
-  std::memcpy(&out, &bits32, sizeof(out));
-  return out;
-}
-
-// Exact port of ggml_compute_fp32_to_bf16 (round-to-nearest-even with the
-// NaN quieting ggml applies).
-inline uint16_t fp32_to_bf16(const float value) noexcept {
-  uint32_t bits32 = 0;
-  std::memcpy(&bits32, &value, sizeof(bits32));
-  if ((bits32 & 0x7fffffffu) > 0x7f800000u) {
-    return static_cast<uint16_t>((bits32 >> 16u) | 64u);
-  }
-  return static_cast<uint16_t>((bits32 + (0x7fffu + ((bits32 >> 16u) & 1u))) >>
-                               16u);
-}
 
 template <class tensor_type>
 inline int32_t read_i32_at(const tensor_type &tensor, const uint64_t i0,

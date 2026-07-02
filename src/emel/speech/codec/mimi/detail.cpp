@@ -132,6 +132,28 @@ const float *prepare_linear(arena_cursor &cursor,
   return out;
 }
 
+// Copies a linear weight verbatim (row-major [in, out]: each of the `out`
+// rows is `in` contiguous floats), the layout ggml's per-row dot consumes.
+const float *prepare_matrix_raw(arena_cursor &cursor,
+                                const emel::model::data::tensor_record *tensor,
+                                const int64_t in_count,
+                                const int64_t out_count) noexcept {
+  if (tensor == nullptr || !tensor_is_float(*tensor) ||
+      tensor_elements(*tensor) !=
+          static_cast<uint64_t>(in_count) * static_cast<uint64_t>(out_count)) {
+    return nullptr;
+  }
+  float *out = cursor.take(static_cast<uint64_t>(in_count) *
+                           static_cast<uint64_t>(out_count));
+  if (out == nullptr) {
+    return nullptr;
+  }
+  for (int64_t index = 0; index < in_count * out_count; ++index) {
+    out[index] = source_value(*tensor, static_cast<uint64_t>(index));
+  }
+  return out;
+}
+
 // Prepares a conv kernel stored [taps, in, out] as the column-major GEMM
 // operand [out, in*taps]: prepared[out + (in*taps + tap) * out_count].
 // Copies raw f16 halfs verbatim into the arena (ggml reshape layout is the
@@ -294,16 +316,6 @@ bool dispatch_add(codec_runtime &runtime, const kev::tensor_view &lhs,
   return runtime.kernel.process_event(ev);
 }
 
-bool dispatch_mul(codec_runtime &runtime, const kev::tensor_view &lhs,
-                  const kev::tensor_view &rhs,
-                  const kev::tensor_view_mut &dst) noexcept {
-  kev::op_mul ev{};
-  ev.src0 = lhs;
-  ev.src1 = rhs;
-  ev.dst = dst;
-  return runtime.kernel.process_event(ev);
-}
-
 bool dispatch_sub(codec_runtime &runtime, const kev::tensor_view &lhs,
                   const kev::tensor_view &rhs,
                   const kev::tensor_view_mut &dst) noexcept {
@@ -350,20 +362,6 @@ void set_param_f32(event_type &ev, const uint32_t slot,
               sizeof(value));
   const uint32_t needed = (slot + 1u) * sizeof(float);
   ev.op_params_size = ev.op_params_size < needed ? needed : ev.op_params_size;
-}
-
-bool dispatch_layer_norm(codec_runtime &runtime, const float *weight,
-                         const float *bias, float *data, const uint64_t dim,
-                         const uint64_t rows) noexcept {
-  kev::op_norm norm_ev{};
-  norm_ev.src0 = make_view(data, dim, rows);
-  norm_ev.dst = make_view_mut(data, dim, rows);
-  set_param_f32(norm_ev, 0u, k_layer_norm_eps);
-  return runtime.kernel.process_event(norm_ev) &&
-         dispatch_mul(runtime, make_view(data, dim, rows),
-                      make_view(weight, dim), make_view_mut(data, dim, rows)) &&
-         dispatch_add(runtime, make_view(data, dim, rows), make_view(bias, dim),
-                      make_view_mut(data, dim, rows));
 }
 
 // Workspace partition for one frame. All slices point into the caller-owned
@@ -824,22 +822,35 @@ bool compute_transformer(codec_runtime &runtime,
                          codec_streaming_state &state, int64_t &positions,
                          frame_buffer &io,
                          std::span<float> workspace) noexcept {
+  // Exact reference numerics: every stage reproduces the pinned ggml CPU
+  // path bit for bit (vec_dot accumulation orders, v_expf softmax, fp16
+  // GELU, timestep-embedding rope with half-split output, bf16 K/V cache
+  // with bf16-rounded q and attention weights).
+  namespace kd = ::emel::kernel::detail;
   runtime.kernel.set_kind(runtime.kernel_kind);
   const int64_t dim = weights.dim;
   const int64_t heads = weights.head_count;
   const int64_t head_dim = dim / heads;
+  const int64_t half = head_dim / 2;
   const int64_t context = weights.context;
   const int64_t tokens = io.length;
   if (io.channels != dim || tokens <= 0 || heads <= 0 ||
-      head_dim * heads != dim) {
+      head_dim * heads != dim || half * 2 != head_dim) {
     return false;
   }
 
-  // workspace: normed | qkv | scores | attn | mlp | position staging
+  // workspace: normed | qkv | scores | attn | proj | mlp | rot | q_bf16 |
+  // weights_bf16 | v_t (bf16 transposed value cache for one head)
+  const int64_t mlp_dim = weights.layers[0].mlp_dim;
   const uint64_t need =
       static_cast<uint64_t>(dim) + 3u * static_cast<uint64_t>(dim) +
       static_cast<uint64_t>(context) + 2u * static_cast<uint64_t>(dim) +
-      static_cast<uint64_t>(weights.layers[0].mlp_dim) + 4u;
+      static_cast<uint64_t>(mlp_dim) + static_cast<uint64_t>(head_dim) +
+      (static_cast<uint64_t>(head_dim) + 1u) / 2u +
+      (static_cast<uint64_t>(context) + 1u) / 2u +
+      (static_cast<uint64_t>(context) * static_cast<uint64_t>(head_dim) + 1u) /
+          2u +
+      8u;
   if (workspace.size() < need) {
     return false;
   }
@@ -849,198 +860,138 @@ bool compute_transformer(codec_runtime &runtime,
   float *attn = scores + context;
   float *proj = attn + dim;
   float *mlp = proj + dim;
-  float *position_staging = mlp + weights.layers[0].mlp_dim;
+  float *rot = mlp + mlp_dim;
+  auto *q_bf16 = reinterpret_cast<uint16_t *>(rot + head_dim);
+  auto *weights_bf16 = q_bf16 + head_dim + (head_dim & 1);
+  auto *v_transposed = weights_bf16 + context + (context & 1);
 
   const float attn_scale = 1.0f / std::sqrt(static_cast<float>(head_dim));
+  const float neg_log_period =
+      -std::log(static_cast<float>(weights.max_period));
 
   for (int64_t token = 0; token < tokens; ++token) {
     float *x = io.data + token * dim;
     const int64_t position = positions + token;
     const int64_t slot = position % context;
-    const int64_t window = (position + 1) < context ? (position + 1) : context;
+    const float position_f = static_cast<float>(position);
 
     for (int32_t layer_index = 0; layer_index < weights.layer_count;
          ++layer_index) {
       const auto &layer = weights.layers[static_cast<size_t>(layer_index)];
-      float *k_ring = state.arena.data() + weights.state_offset +
-                      static_cast<uint64_t>(layer_index) * 2u *
-                          static_cast<uint64_t>(context) *
-                          static_cast<uint64_t>(dim);
-      float *v_ring =
+      // K/V rings hold raw bf16 halfs exactly like the reference's
+      // CACHE_BF16 tensors (the float arena slice is reinterpreted; only
+      // half its capacity is used)
+      auto *k_ring = reinterpret_cast<uint16_t *>(
+          state.arena.data() + weights.state_offset +
+          static_cast<uint64_t>(layer_index) * 2u *
+              static_cast<uint64_t>(context) * static_cast<uint64_t>(dim));
+      auto *v_ring =
           k_ring + static_cast<uint64_t>(context) * static_cast<uint64_t>(dim);
 
-      // norm1 -> fused qkv
-      const bool normed_ok =
-          dispatch_copy(runtime, make_view(x, static_cast<uint64_t>(dim)),
-                        make_view_mut(normed, static_cast<uint64_t>(dim))) &&
-          dispatch_layer_norm(runtime, layer.norm1_weight, layer.norm1_bias,
-                              normed, static_cast<uint64_t>(dim), 1u) &&
-          dispatch_mul_mat(
-              runtime, make_view(normed, static_cast<uint64_t>(dim), 1u),
-              make_view(layer.in_proj, 3u * static_cast<uint64_t>(dim),
-                        static_cast<uint64_t>(dim)),
-              make_view_mut(qkv, 3u * static_cast<uint64_t>(dim), 1u));
-      if (!normed_ok) {
-        return false;
+      // norm1 (ggml row math) -> per-element weight/bias -> fused qkv rows
+      kd::norm_row_ggml(dim, normed, x, k_layer_norm_eps);
+      for (int64_t d = 0; d < dim; ++d) {
+        normed[d] = normed[d] * layer.norm1_weight[d] + 0.0f;
+        normed[d] = normed[d] + layer.norm1_bias[d];
+      }
+      for (int64_t o = 0; o < 3 * dim; ++o) {
+        qkv[o] = kd::vec_dot_f32_ggml(dim, layer.in_proj + o * dim, normed);
       }
 
-      // rope on q and k (neox pairing is not used by the codec transformers:
-      // the reference applies interleaved-pair rope)
-      int32_t position_i32 = static_cast<int32_t>(position);
-      std::memcpy(position_staging, &position_i32, sizeof(position_i32));
-      for (int32_t half = 0; half < 2; ++half) {
-        kev::op_rope rope_ev{};
-        rope_ev.src0 =
-            make_view(qkv + half * dim, static_cast<uint64_t>(head_dim),
-                      static_cast<uint64_t>(heads), 1u);
-        rope_ev.src1 = make_view(position_staging, 1u);
-        rope_ev.src1.type = kev::dtype::i32;
-        rope_ev.dst =
-            make_view_mut(qkv + half * dim, static_cast<uint64_t>(head_dim),
-                          static_cast<uint64_t>(heads), 1u);
-        set_param_i32(rope_ev, 1u, static_cast<int32_t>(head_dim));
-        set_param_i32(rope_ev, 2u, 0);
-        set_param_f32(rope_ev, 5u, static_cast<float>(weights.max_period));
-        set_param_f32(rope_ev, 6u, 1.0f);
-        set_param_f32(rope_ev, 7u, 0.0f);
-        set_param_f32(rope_ev, 8u, 1.0f);
-        set_param_f32(rope_ev, 9u, 32.0f);
-        set_param_f32(rope_ev, 10u, 1.0f);
-        if (!runtime.kernel.process_event(rope_ev)) {
-          return false;
+      // reference rope: timestep-embedding angles, adjacent-pair rotation,
+      // half-split output layout (matches moshi_apply_rope's concat)
+      for (int32_t part = 0; part < 2; ++part) {
+        float *data = qkv + part * dim;
+        for (int64_t head = 0; head < heads; ++head) {
+          float *head_data = data + head * head_dim;
+          for (int64_t j = 0; j < half; ++j) {
+            const float freq = std::exp(neg_log_period * static_cast<float>(j) /
+                                        static_cast<float>(half));
+            const float arg = position_f * freq;
+            const float rotr = std::cos(arg);
+            const float roti = std::sin(arg);
+            const float real = head_data[2 * j];
+            const float imag = head_data[2 * j + 1];
+            rot[j] = real * rotr - imag * roti;
+            rot[half + j] = real * roti + imag * rotr;
+          }
+          std::memcpy(head_data, rot,
+                      static_cast<size_t>(head_dim) * sizeof(float));
         }
       }
 
-      // append k, v at the ring slot, rounded through bf16 exactly as the
-      // reference caches them (moshi casts K and V to BF16 in the cache)
+      // cache K, V at the ring slot as bf16 (ggml_set_rows RNE rounding)
       for (int64_t d = 0; d < dim; ++d) {
-        k_ring[slot * dim + d] = emel::kernel::detail::bf16_to_fp32(
-            emel::kernel::detail::fp32_to_bf16(qkv[dim + d]));
-        v_ring[slot * dim + d] = emel::kernel::detail::bf16_to_fp32(
-            emel::kernel::detail::fp32_to_bf16(qkv[2 * dim + d]));
+        k_ring[slot * dim + d] = kd::fp32_to_bf16(qkv[dim + d]);
+        v_ring[slot * dim + d] = kd::fp32_to_bf16(qkv[2 * dim + d]);
       }
 
-      // windowed attention per head; the ring window is at most two
-      // contiguous segments
-      const int64_t seg1_start = (position + 1 - window) % context;
-      const int64_t seg1_len =
-          seg1_start + window <= context ? window : context - seg1_start;
-      const int64_t seg2_len = window - seg1_len;
+      // reference attention: q rounds to bf16 (ggml converts src1 to the
+      // cache's vec_dot type), scores run over the FULL ring in physical
+      // slot order with -inf outside the valid window, the softmax is the
+      // exact ggml row kernel, and the softmaxed weights round to bf16 for
+      // the transposed-V pass
+      const bool ring_full = position + 1 >= context;
       for (int64_t head = 0; head < heads; ++head) {
         const float *q_head = qkv + head * head_dim;
-        const uint64_t head_offset =
-            static_cast<uint64_t>(head) * static_cast<uint64_t>(head_dim);
-        const bool scored =
-            dispatch_mul_mat(
-                runtime,
-                make_strided_view(k_ring + seg1_start * dim + head_offset,
-                                  static_cast<uint64_t>(head_dim),
-                                  static_cast<uint64_t>(seg1_len),
-                                  sizeof(float),
-                                  static_cast<uint64_t>(dim) * sizeof(float)),
-                make_view(q_head, 1u, static_cast<uint64_t>(head_dim)),
-                make_view_mut(scores, 1u, static_cast<uint64_t>(seg1_len))) &&
-            (seg2_len == 0 ||
-             dispatch_mul_mat(
-                 runtime,
-                 make_strided_view(
-                     k_ring + head_offset, static_cast<uint64_t>(head_dim),
-                     static_cast<uint64_t>(seg2_len), sizeof(float),
-                     static_cast<uint64_t>(dim) * sizeof(float)),
-                 make_view(q_head, 1u, static_cast<uint64_t>(head_dim)),
-                 make_view_mut(scores + seg1_len, 1u,
-                               static_cast<uint64_t>(seg2_len))));
-        if (!scored) {
-          return false;
+        const int64_t head_offset = head * head_dim;
+        for (int64_t d = 0; d < head_dim; ++d) {
+          q_bf16[d] = kd::fp32_to_bf16(q_head[d]);
         }
-
-        kev::op_soft_max softmax_ev{};
-        softmax_ev.src0 = make_view(scores, static_cast<uint64_t>(window), 1u);
-        softmax_ev.dst =
-            make_view_mut(scores, static_cast<uint64_t>(window), 1u);
-        set_param_f32(softmax_ev, 0u, attn_scale);
-        if (!runtime.kernel.process_event(softmax_ev)) {
-          return false;
+        for (int64_t s = 0; s < context; ++s) {
+          const bool valid = ring_full || s <= position;
+          scores[s] =
+              valid ? kd::vec_dot_bf16_ggml(
+                          head_dim, k_ring + s * dim + head_offset, q_bf16) *
+                          attn_scale
+                    : -std::numeric_limits<float>::infinity();
         }
-
+        kd::soft_max_row_ggml(context, scores);
+        for (int64_t s = 0; s < context; ++s) {
+          weights_bf16[s] = kd::fp32_to_bf16(scores[s]);
+        }
+        // ggml materializes cont(transpose(V)) before the weighted sum
+        for (int64_t d = 0; d < head_dim; ++d) {
+          for (int64_t s = 0; s < context; ++s) {
+            v_transposed[d * context + s] = v_ring[s * dim + head_offset + d];
+          }
+        }
         float *attn_head = attn + head * head_dim;
-        const bool attended =
-            dispatch_mul_mat(
-                runtime, make_view(scores, static_cast<uint64_t>(seg1_len), 1u),
-                make_strided_view(v_ring + seg1_start * dim + head_offset,
-                                  static_cast<uint64_t>(head_dim),
-                                  static_cast<uint64_t>(seg1_len),
-                                  sizeof(float),
-                                  static_cast<uint64_t>(dim) * sizeof(float)),
-                make_view_mut(attn_head, static_cast<uint64_t>(head_dim),
-                              1u)) &&
-            (seg2_len == 0 ||
-             (dispatch_mul_mat(
-                  runtime,
-                  make_view(scores + seg1_len, static_cast<uint64_t>(seg2_len),
-                            1u),
-                  make_strided_view(
-                      v_ring + head_offset, static_cast<uint64_t>(head_dim),
-                      static_cast<uint64_t>(seg2_len), sizeof(float),
-                      static_cast<uint64_t>(dim) * sizeof(float)),
-                  make_view_mut(proj, static_cast<uint64_t>(head_dim), 1u)) &&
-              dispatch_add(
-                  runtime,
-                  make_view(attn_head, static_cast<uint64_t>(head_dim)),
-                  make_view(proj, static_cast<uint64_t>(head_dim)),
-                  make_view_mut(attn_head, static_cast<uint64_t>(head_dim)))));
-        if (!attended) {
-          return false;
+        for (int64_t d = 0; d < head_dim; ++d) {
+          attn_head[d] = kd::vec_dot_bf16_ggml(
+              context, v_transposed + d * context, weights_bf16);
         }
       }
 
       // out proj, layer scale, residual
-      const bool projected =
-          dispatch_mul_mat(
-              runtime, make_view(attn, static_cast<uint64_t>(dim), 1u),
-              make_view(layer.out_proj, static_cast<uint64_t>(dim),
-                        static_cast<uint64_t>(dim)),
-              make_view_mut(proj, static_cast<uint64_t>(dim), 1u)) &&
-          dispatch_mul(
-              runtime, make_view(proj, static_cast<uint64_t>(dim), 1u),
-              make_view(layer.layer_scale_1, static_cast<uint64_t>(dim)),
-              make_view_mut(proj, static_cast<uint64_t>(dim), 1u)) &&
-          dispatch_add(runtime, make_view(x, static_cast<uint64_t>(dim)),
-                       make_view(proj, static_cast<uint64_t>(dim)),
-                       make_view_mut(x, static_cast<uint64_t>(dim)));
-      if (!projected) {
-        return false;
+      for (int64_t o = 0; o < dim; ++o) {
+        proj[o] = kd::vec_dot_f32_ggml(dim, layer.out_proj + o * dim, attn);
+      }
+      for (int64_t d = 0; d < dim; ++d) {
+        x[d] = x[d] + proj[d] * layer.layer_scale_1[d];
       }
 
-      // norm2 -> linear1 -> gelu -> linear2 -> layer scale -> residual
-      const int64_t mlp_dim = layer.mlp_dim;
-      const bool updated =
-          dispatch_copy(runtime, make_view(x, static_cast<uint64_t>(dim)),
-                        make_view_mut(normed, static_cast<uint64_t>(dim))) &&
-          dispatch_layer_norm(runtime, layer.norm2_weight, layer.norm2_bias,
-                              normed, static_cast<uint64_t>(dim), 1u) &&
-          dispatch_mul_mat(
-              runtime, make_view(normed, static_cast<uint64_t>(dim), 1u),
-              make_view(layer.linear1, static_cast<uint64_t>(mlp_dim),
-                        static_cast<uint64_t>(dim)),
-              make_view_mut(mlp, static_cast<uint64_t>(mlp_dim), 1u)) &&
-          dispatch_unary(runtime, kev::unary_subop::gelu,
-                         make_view(mlp, static_cast<uint64_t>(mlp_dim)),
-                         make_view_mut(mlp, static_cast<uint64_t>(mlp_dim))) &&
-          dispatch_mul_mat(
-              runtime, make_view(mlp, static_cast<uint64_t>(mlp_dim), 1u),
-              make_view(layer.linear2, static_cast<uint64_t>(dim),
-                        static_cast<uint64_t>(mlp_dim)),
-              make_view_mut(proj, static_cast<uint64_t>(dim), 1u)) &&
-          dispatch_mul(
-              runtime, make_view(proj, static_cast<uint64_t>(dim), 1u),
-              make_view(layer.layer_scale_2, static_cast<uint64_t>(dim)),
-              make_view_mut(proj, static_cast<uint64_t>(dim), 1u)) &&
-          dispatch_add(runtime, make_view(x, static_cast<uint64_t>(dim)),
-                       make_view(proj, static_cast<uint64_t>(dim)),
-                       make_view_mut(x, static_cast<uint64_t>(dim)));
-      if (!updated) {
+      // norm2 -> linear1 -> gelu (exact ggml fp16 table) -> linear2 ->
+      // layer scale -> residual
+      kd::norm_row_ggml(dim, normed, x, k_layer_norm_eps);
+      for (int64_t d = 0; d < dim; ++d) {
+        normed[d] = normed[d] * layer.norm2_weight[d];
+        normed[d] = normed[d] + layer.norm2_bias[d];
+      }
+      for (int64_t o = 0; o < mlp_dim; ++o) {
+        mlp[o] = kd::vec_dot_f32_ggml(dim, layer.linear1 + o * dim, normed);
+      }
+      if (!dispatch_unary(runtime, kev::unary_subop::gelu,
+                          make_view(mlp, static_cast<uint64_t>(mlp_dim)),
+                          make_view_mut(mlp, static_cast<uint64_t>(mlp_dim)))) {
         return false;
+      }
+      for (int64_t o = 0; o < dim; ++o) {
+        proj[o] =
+            kd::vec_dot_f32_ggml(mlp_dim, layer.linear2 + o * mlp_dim, mlp);
+      }
+      for (int64_t d = 0; d < dim; ++d) {
+        x[d] = x[d] + proj[d] * layer.layer_scale_2[d];
       }
     }
   }
@@ -1604,9 +1555,17 @@ bool plan_codec(const emel::model::data &model_data,
 uint64_t transformer_workspace_floats(const emel::model::data &model_data,
                                       const int32_t mlp_dim) noexcept {
   const auto &mimi = model_data.mimi;
-  return static_cast<uint64_t>(mimi.dim) * 6u +
-         static_cast<uint64_t>(mimi.transformer_context) +
-         static_cast<uint64_t>(mlp_dim) + 8u;
+  const uint64_t head_dim =
+      mimi.transformer_num_heads > 0
+          ? static_cast<uint64_t>(mimi.dim) /
+                static_cast<uint64_t>(mimi.transformer_num_heads)
+          : 0u;
+  const uint64_t context = static_cast<uint64_t>(mimi.transformer_context);
+  // normed + qkv + attn + proj + rot + scores + mlp + bf16 staging (q row,
+  // weights row, transposed value cache for one head)
+  return static_cast<uint64_t>(mimi.dim) * 6u + head_dim + context +
+         static_cast<uint64_t>(mlp_dim) + (head_dim + 1u) / 2u +
+         (context + 1u) / 2u + (context * head_dim + 1u) / 2u + 16u;
 }
 
 uint64_t workspace_floats_from_plan(const emel::model::data &model_data,
@@ -1715,15 +1674,15 @@ bool bind_transformer(arena_cursor &cursor, uint64_t &state_cursor,
         cursor, find_layer_tensor(model_data, format, index, "norm1.bias"),
         dim);
     layer.in_proj =
-        prepare_linear(cursor,
-                       find_layer_tensor(model_data, format, index,
-                                         "self_attn.in_projs.0.weight"),
-                       dim, 3 * dim);
+        prepare_matrix_raw(cursor,
+                           find_layer_tensor(model_data, format, index,
+                                             "self_attn.in_projs.0.weight"),
+                           dim, 3 * dim);
     layer.out_proj =
-        prepare_linear(cursor,
-                       find_layer_tensor(model_data, format, index,
-                                         "self_attn.out_projs.0.weight"),
-                       dim, dim);
+        prepare_matrix_raw(cursor,
+                           find_layer_tensor(model_data, format, index,
+                                             "self_attn.out_projs.0.weight"),
+                           dim, dim);
     layer.layer_scale_1 = prepare_vector(
         cursor,
         find_layer_tensor(model_data, format, index, "layer_scale_1.scale"),
@@ -1734,10 +1693,10 @@ bool bind_transformer(arena_cursor &cursor, uint64_t &state_cursor,
     layer.norm2_bias = prepare_vector(
         cursor, find_layer_tensor(model_data, format, index, "norm2.bias"),
         dim);
-    layer.linear1 = prepare_linear(
+    layer.linear1 = prepare_matrix_raw(
         cursor, find_layer_tensor(model_data, format, index, "linear1.weight"),
         dim, plan.mlp_dim);
-    layer.linear2 = prepare_linear(
+    layer.linear2 = prepare_matrix_raw(
         cursor, find_layer_tensor(model_data, format, index, "linear2.weight"),
         plan.mlp_dim, dim);
     layer.layer_scale_2 = prepare_vector(

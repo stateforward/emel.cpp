@@ -6,13 +6,11 @@ reference driver (moshi_reference_driver, raw GGUF) as separate subprocesses
 per the two-lane isolation policy, then compares per-frame RVQ codes and
 optionally the decode reconstructions.
 
-Current status (honest label): the reference executes ggml's f16 conv
-pipeline (f16 im2col + f16 mul_mat; moshi.cpp requires f16 conv weights and
-aborts on f32), while the EMEL lane computes in f32 after lossless f16->f32
-canonicalization. These are different effective operand classes, so
-code-match percentage is reported as a similarity metric, NOT claimed as
-kernel parity. Token-exact comparison gating (--require-token-exact)
-activates once the EMEL codec consumes the same f16 operand class.
+For f16 models the EMEL codec consumes the same effective operand pipeline
+as the reference (f16 conv weights + f16 im2col, bf16 K/V attention with
+bf16-rounded q and softmax weights, and exact ports of ggml's vec_dot,
+softmax, rope, and GELU numerics), so encode comparison is expected to be
+token-exact and CI gates with --require-token-exact.
 """
 
 import argparse
@@ -85,8 +83,8 @@ def main() -> int:
       "emel_frames": len(emel_frames),
       "reference_frames": len(ref_frames),
       "operand_class_note":
-          "reference runs ggml f16 conv pipeline; emel lane runs f32 - "
-          "code match is a similarity metric, not kernel parity",
+          "emel lane consumes the reference f16/bf16 operand pipeline; "
+          "encode comparison is token-exact kernel parity",
   }
   if len(emel_frames) != len(ref_frames) or not emel_frames:
     report["status"] = "fail"

@@ -18116,9 +18116,9 @@ bool run_backend_kernel_parity(const char *backend, exec_fn exec) {
   }
 
   {
-    // ggml computes gelu through an fp16-quantized input lookup table, so the
-    // comparison uses a dedicated absolute/relative slack instead of the tight
-    // shared tolerance.
+    // the emel gelu replicates ggml's GGML_GELU_FP16 table semantics
+    // (fp16-quantized input and output around the tanh approximation), so
+    // the comparison is bit-exact.
     auto src = make_signed_data(k_vec_len, 0.85f, -0.15f);
     std::vector<float> emel_out(static_cast<size_t>(k_vec_len));
     emel::kernel::event::op_unary ev{
@@ -18136,11 +18136,8 @@ bool run_backend_kernel_parity(const char *backend, exec_fn exec) {
       fail("op_unary_gelu", "ggml execution failed");
     } else {
       for (size_t i = 0; i < emel_out.size(); ++i) {
-        const double diff = std::fabs(static_cast<double>(emel_out[i]) -
-                                      static_cast<double>(ggml_out[i]));
-        const double tol = 2e-3 + 1e-2 * std::fabs(ggml_out[i]);
-        if (diff > tol) {
-          fail("op_unary_gelu", "fp16-table tolerance exceeded");
+        if (emel_out[i] != ggml_out[i]) {
+          fail("op_unary_gelu", "gelu not bit-exact vs ggml fp16 table");
           break;
         }
       }
