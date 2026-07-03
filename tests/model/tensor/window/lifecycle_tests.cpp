@@ -217,6 +217,13 @@ TEST_CASE("tensor window failure guards and effects route their errors") {
   CHECK_FALSE(
       window::guard::guard_acquire_layer_unscheduled{}(acquire_runtime, ctx));
 
+  // Out-of-range layers reject through the shared range check.
+  const window::event::acquire_layer_window out_of_range{99};
+  window::detail::acquire_attempt_status range_status{};
+  window::detail::acquire_runtime range_runtime{out_of_range, range_status,
+                                                scheduler};
+  CHECK_FALSE(window::guard::guard_acquire_layer_failed{}(range_runtime, ctx));
+
   // The failed-release exits return to the mode the window is still in.
   const window::event::unbind_window unbind_request{};
   window::detail::unbind_attempt_status unbind_status{};
@@ -238,6 +245,23 @@ TEST_CASE("tensor window failure guards and effects route their errors") {
       unbind_runtime, ctx));
   CHECK_FALSE(window::guard::guard_unbind_error_callback_present_passthrough{}(
       unbind_runtime, ctx));
+
+  // With an error callback present the present-mode composes select instead.
+  unbind_capture unbind_owner{};
+  window::event::unbind_window unbind_with_callback{};
+  unbind_with_callback.on_error = {&unbind_owner, on_unbind_error};
+  window::detail::unbind_attempt_status callback_status{};
+  const window::detail::unbind_finish_runtime callback_runtime{
+      unbind_with_callback, callback_status};
+  CHECK(window::guard::guard_unbind_error_callback_present_passthrough{}(
+      callback_runtime, ctx));
+  CHECK_FALSE(window::guard::guard_unbind_error_callback_absent_passthrough{}(
+      callback_runtime, ctx));
+  ctx.window.streaming_active = true;
+  CHECK(window::guard::guard_unbind_error_callback_present_streaming{}(
+      callback_runtime, ctx));
+  CHECK_FALSE(window::guard::guard_unbind_error_callback_absent_streaming{}(
+      callback_runtime, ctx));
 
   // Reset the crafted slot state so the context destructor sees no storage.
   ctx.window = {};
