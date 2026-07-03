@@ -141,18 +141,29 @@ struct model {
           / action::effect_release_and_mark_streaming_config_invalid
 
       //------------------------------------------------------------------------------//
-      // bind error publication.
+      // bind error publication. Exits route on the rejection-release outcome:
+      // a retained (failed-release) mapping lands passthrough-bound so
+      // unbind_window can retry the release.
       , sml::state<state_bind_error_callback> <= sml::state<state_bind_error_ready>
           + sml::completion<detail::bind_window_runtime>
           [ guard::guard_bind_error_callback_present{} ]
           / action::effect_publish_bind_error
       , sml::state<state_unbound> <= sml::state<state_bind_error_ready>
           + sml::completion<detail::bind_window_runtime>
-          [ guard::guard_bind_error_callback_absent{} ]
-          / action::effect_record_bind_error
+          [ guard::guard_bind_error_callback_absent_unbound{} ]
+          / action::effect_reset_rejected_window
+      , sml::state<state_passthrough_ready> <= sml::state<state_bind_error_ready>
+          + sml::completion<detail::bind_window_runtime>
+          [ guard::guard_bind_error_callback_absent_retained{} ]
+          / action::effect_retain_source_for_release_retry
       , sml::state<state_unbound> <= sml::state<state_bind_error_callback>
           + sml::completion<detail::bind_window_runtime>
-          / action::effect_record_bind_error
+          [ guard::guard_bind_error_exit_unbound{} ]
+          / action::effect_reset_rejected_window
+      , sml::state<state_passthrough_ready> <= sml::state<state_bind_error_callback>
+          + sml::completion<detail::bind_window_runtime>
+          [ guard::guard_bind_error_exit_retained{} ]
+          / action::effect_retain_source_for_release_retry
 
       //------------------------------------------------------------------------------//
       // bind while already bound: explicit error, state unchanged; the
