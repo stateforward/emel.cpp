@@ -36,6 +36,7 @@
 #include "emel/io/staged_read/sm.hpp"
 #include "emel/kernel/aarch64/detail.hpp"
 #include "emel/kernel/aarch64/sm.hpp"
+#include "emel/kernel/any.hpp"
 #include "emel/kernel/events.hpp"
 #include "emel/kernel/x86_64/sm.hpp"
 #include "emel/logits/sampler/events.hpp"
@@ -18408,7 +18409,19 @@ bool run_backend_kernel_parity(const char *backend, exec_fn exec) {
     }
   }
 
-  {
+  // f16 mul_mat accumulation order is ISA-class-specific (x86 lane: AVX2
+  // f32 accumulators; aarch64 lane: NEON fp16 accumulators), and the live
+  // ggml oracle always computes the HOST's numerics. Bit-exactness is
+  // therefore only a meaningful contract for the lane matching the host;
+  // the foreign lane's case is skipped with an explicit notice, never
+  // compared and never silently dropped.
+  if (std::strcmp(backend,
+                  kernel_kind_name(emel::kernel::detect_host_kind())) != 0) {
+    std::fprintf(stdout,
+                 "[%s] op_mul_mat_f16 skipped: live ggml reference computes "
+                 "%s numerics\n",
+                 backend, kernel_kind_name(emel::kernel::detect_host_kind()));
+  } else {
     // f16 x f16 mul_mat (ggml layout: src0 [k,m], src1 [k,n], dst f32 [m,n]).
     // The emel kernel replicates ggml_vec_dot_f16's accumulation order, so
     // this must match bit-exactly on the same host.
