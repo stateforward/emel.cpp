@@ -43,7 +43,7 @@ stateDiagram-v2
   state_decode_callback_decision --> state_session_ready : completion_decode_frame_run_ [decode_frame_run__] / none
   state_decode_failed_callback_decision --> state_session_ready : completion_decode_frame_run_ [decode_frame_run__] / effect_emit_decode_error_
   state_decode_failed_callback_decision --> state_session_ready : completion_decode_frame_run_ [decode_frame_run__] / none
-  state_session_ready --> state_session_ready : reset_stream [always] / effect_reset_stream_
+  state_session_ready --> state_session_ready : reset_stream_run [always] / effect_reset_stream_
   state_uninitialized --> state_uninit_encode_error_out_decision : encode_frame_run [always] / encode_frame_run__
   state_uninit_encode_error_out_decision --> state_uninit_encode_callback_decision : completion_encode_frame_run_ [encode_frame_run__] / encode_frame_run__
   state_uninit_encode_error_out_decision --> state_uninit_encode_callback_decision : completion_encode_frame_run_ [encode_frame_run__] / none
