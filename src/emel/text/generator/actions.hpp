@@ -521,7 +521,7 @@ struct request_decode_compute_flash_native_quantized_streamed {
 };
 
 struct request_decode_compute_flash_preselected_argmax_q8_k_streamed {
-  void operator()(const event::generate_run & ev, context & ctx) const noexcept {
+  void operator()(const event::generate_run &ev, context &ctx) const noexcept {
     request_phase_compute<
         emel::text::generator::detail::step_kind::decode,
         emel::text::generator::detail::
@@ -529,8 +529,9 @@ struct request_decode_compute_flash_preselected_argmax_q8_k_streamed {
   }
 };
 
-struct request_decode_compute_flash_preselected_argmax_native_quantized_q8_k_streamed {
-  void operator()(const event::generate_run & ev, context & ctx) const noexcept {
+struct
+    request_decode_compute_flash_preselected_argmax_native_quantized_q8_k_streamed {
+  void operator()(const event::generate_run &ev, context &ctx) const noexcept {
     request_phase_compute<
         emel::text::generator::detail::step_kind::decode,
         emel::text::generator::detail::
@@ -539,8 +540,9 @@ struct request_decode_compute_flash_preselected_argmax_native_quantized_q8_k_str
   }
 };
 
-struct request_decode_compute_flash_preselected_argmax_native_quantized_kernel_streamed {
-  void operator()(const event::generate_run & ev, context & ctx) const noexcept {
+struct
+    request_decode_compute_flash_preselected_argmax_native_quantized_kernel_streamed {
+  void operator()(const event::generate_run &ev, context &ctx) const noexcept {
     request_phase_compute<
         emel::text::generator::detail::step_kind::decode,
         emel::text::generator::detail::
@@ -550,11 +552,12 @@ struct request_decode_compute_flash_preselected_argmax_native_quantized_kernel_s
 };
 
 struct request_decode_compute_flash_preselected_argmax_kernel_streamed {
-  void operator()(const event::generate_run & ev, context & ctx) const noexcept {
+  void operator()(const event::generate_run &ev, context &ctx) const noexcept {
     request_phase_compute<
         emel::text::generator::detail::step_kind::decode,
         emel::text::generator::detail::
-            run_kernel_flash_decode_preselected_argmax_kernel_streamed>(ev, ctx);
+            run_kernel_flash_decode_preselected_argmax_kernel_streamed>(ev,
+                                                                        ctx);
   }
 };
 

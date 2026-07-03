@@ -190,12 +190,12 @@ TEST_CASE("tensor window failure guards and effects route their errors") {
   CHECK_FALSE(window::guard::guard_bind_slots_alloc_ok_callback_absent{}(
       bind_runtime, ctx));
   window::action::effect_release_and_mark_alloc_failed(bind_runtime, ctx);
-  CHECK(bind_status.err ==
-        emel::error::cast(window::error::slot_alloc_failed));
+  CHECK(bind_status.err == emel::error::cast(window::error::slot_alloc_failed));
   CHECK_FALSE(bind_status.ok);
 
   bind_status.slots_alloc_ok = true;
-  CHECK_FALSE(window::guard::guard_bind_slots_alloc_failed{}(bind_runtime, ctx));
+  CHECK_FALSE(
+      window::guard::guard_bind_slots_alloc_failed{}(bind_runtime, ctx));
   CHECK(window::guard::guard_bind_slots_alloc_ok_callback_absent{}(bind_runtime,
                                                                    ctx));
 
@@ -210,8 +210,10 @@ TEST_CASE("tensor window failure guards and effects route their errors") {
   window::detail::acquire_runtime acquire_runtime{acquire, acquire_status,
                                                   scheduler};
   CHECK(window::guard::guard_acquire_layer_failed{}(acquire_runtime, ctx));
-  CHECK_FALSE(window::guard::guard_acquire_layer_resident{}(acquire_runtime, ctx));
-  CHECK_FALSE(window::guard::guard_acquire_layer_loading{}(acquire_runtime, ctx));
+  CHECK_FALSE(
+      window::guard::guard_acquire_layer_resident{}(acquire_runtime, ctx));
+  CHECK_FALSE(
+      window::guard::guard_acquire_layer_loading{}(acquire_runtime, ctx));
   CHECK_FALSE(
       window::guard::guard_acquire_layer_unscheduled{}(acquire_runtime, ctx));
 

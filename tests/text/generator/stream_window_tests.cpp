@@ -320,12 +320,12 @@ struct generation_run {
   }
 };
 
-generation_run run_generation(
-    emel::text::generator::sm & generator,
-    emel::text::tokenizer::sm & tokenizer,
-    std::span<emel::logits::sampler::fn> samplers,
-    const emel::text::generator::selection_mode mode =
-        emel::text::generator::selection_mode::sample_logits) {
+generation_run
+run_generation(emel::text::generator::sm &generator,
+               emel::text::tokenizer::sm &tokenizer,
+               std::span<emel::logits::sampler::fn> samplers,
+               const emel::text::generator::selection_mode mode =
+                   emel::text::generator::selection_mode::sample_logits) {
   generation_run run{};
   callback_tracker tracker{};
 
@@ -458,21 +458,22 @@ TEST_CASE("generator streamed decode consumes slot bytes not resident records") 
   CHECK(mixed_run.text() != run_a.text());
 }
 
-TEST_CASE("generator preselected streamed decode consumes slot bytes not resident records") {
+TEST_CASE("generator preselected streamed decode consumes slot bytes not "
+          "resident records") {
   constexpr auto k_preselected =
       emel::text::generator::selection_mode::preselected_argmax;
   const std::span<emel::logits::sampler::fn> no_samplers{};
 
   auto rig_a = std::make_unique<generator_rig>(+1.0f);
-  auto resident_a = std::make_unique<emel::text::generator::sm>(rig_a->prepared.data,
-                                                                rig_a->conditioner);
+  auto resident_a = std::make_unique<emel::text::generator::sm>(
+      rig_a->prepared.data, rig_a->conditioner);
   const generation_run run_a =
       run_generation(*resident_a, rig_a->tokenizer, no_samplers, k_preselected);
   REQUIRE(run_a.ok);
 
   auto rig_b = std::make_unique<generator_rig>(-1.0f);
-  auto resident_b = std::make_unique<emel::text::generator::sm>(rig_b->prepared.data,
-                                                                rig_b->conditioner);
+  auto resident_b = std::make_unique<emel::text::generator::sm>(
+      rig_b->prepared.data, rig_b->conditioner);
   const generation_run run_b =
       run_generation(*resident_b, rig_b->tokenizer, no_samplers, k_preselected);
   REQUIRE(run_b.ok);
@@ -488,12 +489,11 @@ TEST_CASE("generator preselected streamed decode consumes slot bytes not residen
   REQUIRE(window_rig->streaming_active);
 
   auto rig_mixed = std::make_unique<generator_rig>(+1.0f);
-  auto streamed = std::make_unique<emel::text::generator::sm>(rig_mixed->prepared.data,
-                                                              rig_mixed->conditioner,
-                                                              window_rig->machine,
-                                                              window_rig->streaming_active);
-  const generation_run mixed_run =
-      run_generation(*streamed, rig_mixed->tokenizer, no_samplers, k_preselected);
+  auto streamed = std::make_unique<emel::text::generator::sm>(
+      rig_mixed->prepared.data, rig_mixed->conditioner, window_rig->machine,
+      window_rig->streaming_active);
+  const generation_run mixed_run = run_generation(
+      *streamed, rig_mixed->tokenizer, no_samplers, k_preselected);
   REQUIRE(mixed_run.ok);
 
   REQUIRE(run_a.text() == "hellohello");

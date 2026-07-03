@@ -1128,28 +1128,34 @@ struct guard_decode_preselected_argmax_kernel_ready {
 // resident/parallel siblings (the streamed decode is serial by construction,
 // one layer slot at a time).
 struct guard_decode_preselected_argmax_q8_k_streamed_ready {
-  bool operator()(const event::generate_run & ev, const action::context & ctx) const noexcept {
+  bool operator()(const event::generate_run &ev,
+                  const action::context &ctx) const noexcept {
     return guard_decode_stream_window_ready{}(ev, ctx) &&
            guard_decode_preselected_argmax_q8_k_ready{}(ev, ctx);
   }
 };
 
 struct guard_decode_preselected_argmax_native_quantized_q8_k_streamed_ready {
-  bool operator()(const event::generate_run & ev, const action::context & ctx) const noexcept {
+  bool operator()(const event::generate_run &ev,
+                  const action::context &ctx) const noexcept {
     return guard_decode_stream_window_ready{}(ev, ctx) &&
-           guard_decode_preselected_argmax_native_quantized_q8_k_ready{}(ev, ctx);
+           guard_decode_preselected_argmax_native_quantized_q8_k_ready{}(ev,
+                                                                         ctx);
   }
 };
 
 struct guard_decode_preselected_argmax_native_quantized_kernel_streamed_ready {
-  bool operator()(const event::generate_run & ev, const action::context & ctx) const noexcept {
+  bool operator()(const event::generate_run &ev,
+                  const action::context &ctx) const noexcept {
     return guard_decode_stream_window_ready{}(ev, ctx) &&
-           guard_decode_preselected_argmax_native_quantized_kernel_ready{}(ev, ctx);
+           guard_decode_preselected_argmax_native_quantized_kernel_ready{}(ev,
+                                                                           ctx);
   }
 };
 
 struct guard_decode_preselected_argmax_kernel_streamed_ready {
-  bool operator()(const event::generate_run & ev, const action::context & ctx) const noexcept {
+  bool operator()(const event::generate_run &ev,
+                  const action::context &ctx) const noexcept {
     return guard_decode_stream_window_ready{}(ev, ctx) &&
            guard_decode_preselected_argmax_kernel_ready{}(ev, ctx);
   }
