@@ -30,8 +30,10 @@ if(EMEL_BENCH_SUITE_FILTER STREQUAL "batch_planner" OR
    EMEL_BENCH_SUITE_FILTER STREQUAL "parallel_matmul" OR
    EMEL_BENCH_SUITE_FILTER STREQUAL "weight_streaming" OR
    # speech_codec_mimi needs the llama.cpp checkout only for its ggml
-   # subtree, which the moshi reference driver links against.
-   EMEL_BENCH_SUITE_FILTER STREQUAL "speech_codec_mimi")
+   # subtree, which the moshi reference driver links against; an MLX-only
+   # compare (EMEL_BENCH_SKIP_MOSHI_REFERENCE) builds no such driver.
+   (EMEL_BENCH_SUITE_FILTER STREQUAL "speech_codec_mimi" AND
+    NOT EMEL_BENCH_SKIP_MOSHI_REFERENCE))
   set(EMEL_BENCH_NEEDS_LLAMA ON)
 endif()
 
