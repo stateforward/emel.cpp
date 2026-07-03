@@ -431,6 +431,54 @@ TEST_CASE("mimi codec initialize rejects out-of-contract model metadata") {
     }
     expect_bind_failed(*loaded.model);
   }
+
+  SUBCASE("zero transformer context") {
+    // compute_transformer takes position % context; a zero context would
+    // divide by zero on the first frame instead of failing at bind.
+    loaded.model->mimi.transformer_context = 0;
+    expect_bind_failed(*loaded.model);
+  }
+
+  SUBCASE("empty rvq codebook dimensions") {
+    loaded.model->mimi.codebook_dim = 0;
+    expect_bind_failed(*loaded.model);
+  }
+
+  SUBCASE("empty rvq codebook entries") {
+    loaded.model->mimi.card = 0;
+    expect_bind_failed(*loaded.model);
+  }
+
+  SUBCASE("seanet streaming conv kernel shorter than its stride") {
+    // Normal (non-transposed) streaming convs carry taps - stride samples of
+    // state; a strided encoder conv with a one-tap kernel would wrap that
+    // span negative in the sizing accounting.
+    for (uint32_t index = 0u; index < loaded.model->n_tensors; ++index) {
+      auto &tensor = loaded.model->tensors[index];
+      const std::string_view name{
+          loaded.model->name_storage.data() + tensor.name_offset,
+          tensor.name_length};
+      if (name.find("encoder.model.") != std::string_view::npos &&
+          name.find(".conv.conv.weight") != std::string_view::npos &&
+          name.find(".block.") == std::string_view::npos) {
+        tensor.dims[0] = 1;
+      }
+    }
+    expect_bind_failed(*loaded.model);
+  }
+
+  SUBCASE("downsample conv kernel shorter than its stride") {
+    for (uint32_t index = 0u; index < loaded.model->n_tensors; ++index) {
+      auto &tensor = loaded.model->tensors[index];
+      const std::string_view name{
+          loaded.model->name_storage.data() + tensor.name_offset,
+          tensor.name_length};
+      if (name == "mimi.downsample.conv.conv.conv.weight") {
+        tensor.dims[0] = 1;
+      }
+    }
+    expect_bind_failed(*loaded.model);
+  }
 }
 
 TEST_CASE("mimi codec facade reports unexpected event ordering as errors") {

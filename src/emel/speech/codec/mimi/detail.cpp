@@ -1542,7 +1542,10 @@ bool plan_seanet(
           conv_prepared_floats(layer.taps, channels, layer.out_channels);
       length = length * spec.stride;
     } else {
-      if (length % spec.stride != 0) {
+      // Streaming convs carry taps - stride samples of state; a kernel
+      // shorter than its stride would wrap that span negative in the sizing
+      // and state accounting.
+      if (length % spec.stride != 0 || layer.taps < spec.stride) {
         return false;
       }
       account_conv(extents, channels, layer.out_channels, layer.taps,
@@ -1564,11 +1567,14 @@ bool plan_transformer(const emel::model::data &model_data, const char *family,
                       codec_extents &extents) noexcept {
   const auto &mimi = model_data.mimi;
   const int64_t dim = mimi.dim;
-  // The runtime layer array is k_max_transformer_layers wide and the rotary
-  // kernel halves head_dim, so oversized layer counts and odd head sizes are
-  // out of contract and must be rejected here, not at compute time.
+  // The runtime layer array is k_max_transformer_layers wide, the rotary
+  // kernel halves head_dim, and compute_transformer takes position modulo the
+  // context, so oversized layer counts, odd head sizes, and a non-positive
+  // context are out of contract and must be rejected here, not at compute
+  // time.
   if (mimi.transformer_num_layers <= 0 ||
-      mimi.transformer_num_layers > k_max_transformer_layers) {
+      mimi.transformer_num_layers > k_max_transformer_layers ||
+      mimi.transformer_context <= 0) {
     return false;
   }
   const int64_t heads = mimi.transformer_num_heads;
@@ -1616,9 +1622,14 @@ bool plan_transformer(const emel::model::data &model_data, const char *family,
 bool plan_codec(const emel::model::data &model_data,
                 codec_plan &plan_out) noexcept {
   const auto &mimi = model_data.mimi;
+  // codebook_dim and card size the RVQ projection/codebook tables; zero or
+  // negative values would pass the tensor metadata cross-checks with
+  // zero-width tensors and leave the quantizer child unbound after a
+  // "successful" initialize.
   if (model_data.moshi_component_id !=
           emel::model::data::moshi_component::mimi ||
-      mimi.dim <= 0 || mimi.n_q <= 0 || mimi.frame_rate <= 0.0f) {
+      mimi.dim <= 0 || mimi.n_q <= 0 || mimi.frame_rate <= 0.0f ||
+      mimi.codebook_dim <= 0 || mimi.card <= 0) {
     return false;
   }
   plan_out.frame_samples = static_cast<int32_t>(
@@ -1673,7 +1684,8 @@ bool plan_codec(const emel::model::data &model_data,
   if (!resolve_conv_geometry(plan_out.downsample.weight, channels,
                              plan_out.downsample.taps,
                              plan_out.downsample.out_channels) ||
-      plan_out.downsample.out_channels != mimi.dim || length % 2 != 0) {
+      plan_out.downsample.out_channels != mimi.dim || length % 2 != 0 ||
+      plan_out.downsample.taps < plan_out.downsample.stride) {
     return false;
   }
   account_conv(plan_out.extents, channels, plan_out.downsample.out_channels,
