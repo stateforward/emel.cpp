@@ -1150,6 +1150,23 @@ inline bool can_use_neon_mul_mat_q8_0_packed_bl8_full_groups(
              0u;
 }
 
+// Batch-major f32 dst contract shared by the multi-RHS packed matmul kernels.
+// nb[0] is the column stride between per-RHS result rows and nb[1] the dense
+// element stride. Accepts the dense full-output view (nb[2] spans all RHS
+// rows) and the group-aligned row-slice lane view emitted by the parallel
+// matmul slicer, whose slice is embedded in a wider output (nb[0] covers the
+// full output row while ne[1]/nb[2] describe only the slice rows).
+inline bool is_batch_major_dst_view(const event::tensor_view_mut &dst,
+                                    const uint64_t m,
+                                    const uint64_t rhs_rows) noexcept {
+  const size_t slice_row_bytes = sizeof(float) * m;
+  const bool full_view = dst.nb[2] == dst.nb[0] * rhs_rows;
+  const bool row_slice_view = dst.nb[2] == slice_row_bytes;
+  return dst.nb[1] == sizeof(float) && (dst.nb[0] % sizeof(float)) == 0u &&
+         dst.nb[0] >= slice_row_bytes && dst.nb[3] == dst.nb[2] &&
+         (full_view || row_slice_view);
+}
+
 inline bool can_use_neon_mul_mat_q8_0_packed_bl8_matrix_x4(
     const event::op_mul_mat &request, const bool neon_available) noexcept {
   const uint64_t k = request.src0.ne[0];
@@ -1161,7 +1178,6 @@ inline bool can_use_neon_mul_mat_q8_0_packed_bl8_matrix_x4(
       ::emel::kernel::detail::quant::packed_q8_0_x4_group_count(rhs_rows);
   const size_t group_bytes =
       ::emel::kernel::detail::quant::packed_q8_0_x4_group_storage_bytes(k);
-  const size_t dst_row_bytes = sizeof(float) * m;
   return neon_available && neon_q8_0_packed_bl8_supported() && k != 0u &&
          m != 0u && rhs_rows == ::emel::kernel::detail::quant::Q8_0_X4_ROWS &&
          request.src1.ne[1] == k && request.dst.ne[0] == rhs_rows &&
@@ -1183,10 +1199,7 @@ inline bool can_use_neon_mul_mat_q8_0_packed_bl8_matrix_x4(
          request.src1.nb[1] == group_bytes &&
          request.src1.nb[2] == group_bytes * rhs_group_count &&
          request.src1.nb[3] == request.src1.nb[2] &&
-         request.dst.nb[0] == dst_row_bytes &&
-         request.dst.nb[1] == sizeof(float) &&
-         request.dst.nb[2] == dst_row_bytes * rhs_rows &&
-         request.dst.nb[3] == request.dst.nb[2];
+         is_batch_major_dst_view(request.dst, m, rhs_rows);
 }
 
 inline bool can_use_neon_mul_mat_q8_0_packed_bl8_tail_safe(
@@ -1297,7 +1310,6 @@ inline bool can_run_neon_mul_mat_q4_vector_packed_q8_rhs_matrix_x4_request(
   const size_t rhs_row_bytes =
       ::emel::kernel::detail::quantized_row_storage_bytes(
           ::emel::kernel::detail::dtype_q8_k, k);
-  const size_t dst_row_bytes = sizeof(float) * m;
   return k != 0u && m != 0u &&
          rhs_rows == ::emel::kernel::detail::quant::Q8_0_X4_ROWS &&
          request.src1.ne[1] == k && request.dst.ne[0] == rhs_rows &&
@@ -1318,10 +1330,7 @@ inline bool can_run_neon_mul_mat_q4_vector_packed_q8_rhs_matrix_x4_request(
          rhs_row_bytes != 0u && request.src1.nb[1] == rhs_row_bytes &&
          request.src1.nb[2] == rhs_row_bytes * rhs_rows &&
          request.src1.nb[3] == request.src1.nb[2] &&
-         request.dst.nb[0] == dst_row_bytes &&
-         request.dst.nb[1] == sizeof(float) &&
-         request.dst.nb[2] == dst_row_bytes * rhs_rows &&
-         request.dst.nb[3] == request.dst.nb[2];
+         is_batch_major_dst_view(request.dst, m, rhs_rows);
 }
 
 inline bool can_run_neon_mul_mat_q6_vector_packed_q8_rhs_request(
@@ -1368,7 +1377,6 @@ inline bool can_run_neon_mul_mat_q6_vector_packed_q8_rhs_matrix_x4_request(
   const size_t rhs_row_bytes =
       ::emel::kernel::detail::quantized_row_storage_bytes(
           ::emel::kernel::detail::dtype_q8_k, k);
-  const size_t dst_row_bytes = sizeof(float) * m;
   return k != 0u && m != 0u &&
          rhs_rows == ::emel::kernel::detail::quant::Q8_0_X4_ROWS &&
          request.src1.ne[1] == k && request.dst.ne[0] == rhs_rows &&
@@ -1389,10 +1397,7 @@ inline bool can_run_neon_mul_mat_q6_vector_packed_q8_rhs_matrix_x4_request(
          rhs_row_bytes != 0u && request.src1.nb[1] == rhs_row_bytes &&
          request.src1.nb[2] == rhs_row_bytes * rhs_rows &&
          request.src1.nb[3] == request.src1.nb[2] &&
-         request.dst.nb[0] == dst_row_bytes &&
-         request.dst.nb[1] == sizeof(float) &&
-         request.dst.nb[2] == dst_row_bytes * rhs_rows &&
-         request.dst.nb[3] == request.dst.nb[2];
+         is_batch_major_dst_view(request.dst, m, rhs_rows);
 }
 
 inline bool can_run_neon_mul_mat_q6_vector_prepared_q8_rhs_request(

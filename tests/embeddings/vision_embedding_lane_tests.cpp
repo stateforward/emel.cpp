@@ -385,8 +385,9 @@ TEST_CASE("embeddings vision pointwise direct path matches scalar pointwise refe
 
   REQUIRE(embedding_detail::pointwise_conv_hwc_direct_f32(
       matrix, input.data(), pixel_count, output_direct.data()));
+  emel::kernel::sm matmul_kernel{emel::kernel::detect_host_kind()};
   REQUIRE(embedding_detail::pointwise_conv_hwc(
-      matrix, input.data(), pixel_count, output_scalar.data()));
+      matmul_kernel, matrix, input.data(), pixel_count, output_scalar.data()));
 
   for (size_t idx = 0; idx < output_direct.size(); ++idx) {
     CHECK(output_direct[idx] == doctest::Approx(output_scalar[idx]).epsilon(1.0e-5f));
@@ -439,8 +440,9 @@ TEST_CASE("embeddings vision pointwise direct path matches scalar reference acro
 
   REQUIRE(embedding_detail::pointwise_conv_hwc_direct_f32(
       matrix, input.data(), pixel_count, output_direct.data()));
+  emel::kernel::sm matmul_kernel{emel::kernel::detect_host_kind()};
   REQUIRE(embedding_detail::pointwise_conv_hwc(
-      matrix, input.data(), pixel_count, output_scalar.data()));
+      matmul_kernel, matrix, input.data(), pixel_count, output_scalar.data()));
 
   for (size_t idx = 0; idx < output_direct.size(); ++idx) {
     CHECK(output_direct[idx] == doctest::Approx(output_scalar[idx]).epsilon(1.0e-5f));
@@ -784,7 +786,9 @@ TEST_CASE("embeddings vision standard conv direct path matches patch reference")
                                               patch_buffer.size(),
                                               output_direct.data(),
                                               output_direct_spatial));
-  REQUIRE(embedding_detail::standard_conv_hwc_rect(conv,
+  emel::kernel::sm matmul_kernel{emel::kernel::detect_host_kind()};
+  REQUIRE(embedding_detail::standard_conv_hwc_rect(matmul_kernel,
+                                                   conv,
                                                    input.data(),
                                                    input_spatial,
                                                    input_spatial,
@@ -869,7 +873,9 @@ TEST_CASE("embeddings vision standard conv direct path matches patch reference a
                                               patch_buffer.size(),
                                               output_direct.data(),
                                               direct_spatial));
-  REQUIRE(embedding_detail::standard_conv_hwc_rect(conv,
+  emel::kernel::sm matmul_kernel{emel::kernel::detect_host_kind()};
+  REQUIRE(embedding_detail::standard_conv_hwc_rect(matmul_kernel,
+                                                   conv,
                                                    input.data(),
                                                    input_spatial,
                                                    input_spatial,

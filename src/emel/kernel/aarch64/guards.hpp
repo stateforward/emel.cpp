@@ -21,7 +21,6 @@ inline bool can_run_neon_mul_mat_q4_vector_packed_q8_rhs_matrix_x8_request(
   const size_t rhs_row_bytes =
       ::emel::kernel::detail::quantized_row_storage_bytes(
           ::emel::kernel::detail::dtype_q8_k, k);
-  const size_t dst_row_bytes = sizeof(float) * m;
   return k != 0u &&
       m != 0u &&
       rhs_rows == ::emel::kernel::detail::quant::Q4_K_X8_ROWS &&
@@ -49,10 +48,7 @@ inline bool can_run_neon_mul_mat_q4_vector_packed_q8_rhs_matrix_x8_request(
       request.src1.nb[1] == rhs_row_bytes &&
       request.src1.nb[2] == rhs_row_bytes * rhs_rows &&
       request.src1.nb[3] == request.src1.nb[2] &&
-      request.dst.nb[0] == dst_row_bytes &&
-      request.dst.nb[1] == sizeof(float) &&
-      request.dst.nb[2] == dst_row_bytes * rhs_rows &&
-      request.dst.nb[3] == request.dst.nb[2];
+      ::emel::kernel::aarch64::detail::is_batch_major_dst_view(request.dst, m, rhs_rows);
 }
 
 inline bool can_run_neon_mul_mat_q6_vector_prepared_q8_rhs_i8mm_matrix_x8_request(
@@ -66,7 +62,6 @@ inline bool can_run_neon_mul_mat_q6_vector_prepared_q8_rhs_i8mm_matrix_x8_reques
   const size_t rhs_row_bytes =
       ::emel::kernel::detail::quantized_row_storage_bytes(
           ::emel::kernel::detail::dtype_q8_k, k);
-  const size_t dst_row_bytes = sizeof(float) * m;
   return k != 0u &&
       m != 0u &&
       rhs_rows == ::emel::kernel::detail::quant::Q6_K_X8_ROWS &&
@@ -95,10 +90,7 @@ inline bool can_run_neon_mul_mat_q6_vector_prepared_q8_rhs_i8mm_matrix_x8_reques
       request.src1.nb[1] == rhs_row_bytes &&
       request.src1.nb[2] == rhs_row_bytes * rhs_rows &&
       request.src1.nb[3] == request.src1.nb[2] &&
-      request.dst.nb[0] == dst_row_bytes &&
-      request.dst.nb[1] == sizeof(float) &&
-      request.dst.nb[2] == dst_row_bytes * rhs_rows &&
-      request.dst.nb[3] == request.dst.nb[2];
+      ::emel::kernel::aarch64::detail::is_batch_major_dst_view(request.dst, m, rhs_rows);
 }
 
 inline bool can_use_neon_mul_mat_q4_vector_packed_q8_rhs_bl8_matrix_x8(

@@ -494,6 +494,9 @@ bench_dependency_manifest_apply_changed_files() {
         add_all_benchmark_suites_from_manifest
         return
       fi
+      if ! bench_suite_supported_for_host "$runner"; then
+        continue
+      fi
       add_bench_suite "$runner" "manifest path=$path"
     done < "$BENCH_DEPENDENCY_MANIFEST_BASELINE"
 
