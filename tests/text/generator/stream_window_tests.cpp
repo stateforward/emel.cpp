@@ -207,6 +207,23 @@ void build_model(prepared_model & prepared, const float gate_sign) {
   data.weights_size = 1u;
 }
 
+// Shrinks every layer's k/v projection width so the flash shape probe rejects
+// the decode and guard::decode_nonflash_runtime_required routes the nonflash
+// block. The toy's outputs are unchanged: attention weights are zero, so the
+// ffn gate still carries the decision.
+void apply_flash_kv_width_mismatch(prepared_model & prepared) {
+  for (uint32_t idx = 0; idx < prepared.data.n_tensors; ++idx) {
+    auto & tensor = prepared.data.tensors[idx];
+    const std::string_view name(
+        prepared.data.name_storage.data() + tensor.name_offset, tensor.name_length);
+    if (name.find("attn_k.weight") != std::string_view::npos ||
+        name.find("attn_v.weight") != std::string_view::npos) {
+      tensor.dims[1] = 2;
+      tensor.data_size = static_cast<uint64_t>(2 * k_n_embd * sizeof(float));
+    }
+  }
+}
+
 emel::model::data::tensor_record * find_named_tensor(prepared_model & prepared,
                                                      const std::string_view name) {
   for (uint32_t idx = 0; idx < prepared.data.n_tensors; ++idx) {
@@ -402,7 +419,12 @@ struct generator_rig {
       emel::logits::sampler::fn::from<sampler_select_argmax>(),
   };
 
-  explicit generator_rig(const float gate_sign) { build_model(prepared, gate_sign); }
+  explicit generator_rig(const float gate_sign, const bool kv_width_mismatch = false) {
+    build_model(prepared, gate_sign);
+    if (kv_width_mismatch) {
+      apply_flash_kv_width_mismatch(prepared);
+    }
+  }
 };
 
 }  // namespace
@@ -513,6 +535,70 @@ TEST_CASE("generator streamed decode restores resident weight views between runs
   CHECK(second_run.text() == "helloworld");
 }
 
+TEST_CASE("generator streamed decode engages the window on the nonflash decode route") {
+  // The kv-width mismatch forces decode_nonflash_runtime_required; the
+  // nonflash decode block must route the streamed variants while a window is
+  // active instead of falling through to the resident rows and bypassing the
+  // bound window.
+  auto rig_a = std::make_unique<generator_rig>(+1.0f, /*kv_width_mismatch=*/true);
+  auto resident_a = std::make_unique<emel::text::generator::sm>(rig_a->prepared.data,
+                                                                rig_a->conditioner);
+  const generation_run run_a = run_generation(*resident_a, rig_a->tokenizer, rig_a->samplers);
+  REQUIRE(run_a.ok);
+  REQUIRE(run_a.text() == "hellohello");
+
+  auto rig_b = std::make_unique<generator_rig>(-1.0f, /*kv_width_mismatch=*/true);
+  auto resident_b = std::make_unique<emel::text::generator::sm>(rig_b->prepared.data,
+                                                                rig_b->conditioner);
+  const generation_run run_b = run_generation(*resident_b, rig_b->tokenizer, rig_b->samplers);
+  REQUIRE(run_b.ok);
+  REQUIRE(run_b.text() == "worldworld");
+
+  auto rig_b_file = std::make_unique<generator_rig>(-1.0f, /*kv_width_mismatch=*/true);
+  stream_weight_file file_b{rig_b_file->prepared, "nonflash_engagement"};
+  auto window_rig = std::make_unique<bound_window>();
+  REQUIRE(window_rig->bind(file_b, k_streaming_budget));
+  REQUIRE(window_rig->streaming_active);
+
+  auto rig_mixed = std::make_unique<generator_rig>(+1.0f, /*kv_width_mismatch=*/true);
+  auto streamed = std::make_unique<emel::text::generator::sm>(
+      rig_mixed->prepared.data, rig_mixed->conditioner, window_rig->machine,
+      window_rig->streaming_active);
+  const generation_run mixed_run =
+      run_generation(*streamed, rig_mixed->tokenizer, rig_mixed->samplers);
+  REQUIRE(mixed_run.ok);
+  CHECK(mixed_run.text() == "helloworld");
+}
+
+TEST_CASE("generator preselected streamed decode engages the window on the "
+          "nonflash decode route") {
+  constexpr auto k_preselected = emel::text::generator::selection_mode::preselected_argmax;
+  const std::span<emel::logits::sampler::fn> no_samplers{};
+
+  auto rig_a = std::make_unique<generator_rig>(+1.0f, /*kv_width_mismatch=*/true);
+  auto resident_a = std::make_unique<emel::text::generator::sm>(rig_a->prepared.data,
+                                                                rig_a->conditioner);
+  const generation_run run_a =
+      run_generation(*resident_a, rig_a->tokenizer, no_samplers, k_preselected);
+  REQUIRE(run_a.ok);
+  REQUIRE(run_a.text() == "hellohello");
+
+  auto rig_b_file = std::make_unique<generator_rig>(-1.0f, /*kv_width_mismatch=*/true);
+  stream_weight_file file_b{rig_b_file->prepared, "nonflash_preselected_engagement"};
+  auto window_rig = std::make_unique<bound_window>();
+  REQUIRE(window_rig->bind(file_b, k_streaming_budget));
+  REQUIRE(window_rig->streaming_active);
+
+  auto rig_mixed = std::make_unique<generator_rig>(+1.0f, /*kv_width_mismatch=*/true);
+  auto streamed = std::make_unique<emel::text::generator::sm>(
+      rig_mixed->prepared.data, rig_mixed->conditioner, window_rig->machine,
+      window_rig->streaming_active);
+  const generation_run mixed_run =
+      run_generation(*streamed, rig_mixed->tokenizer, no_samplers, k_preselected);
+  REQUIRE(mixed_run.ok);
+  CHECK(mixed_run.text() == "helloworld");
+}
+
 TEST_CASE("generator preselected streamed decode consumes slot bytes not "
           "resident records") {
   constexpr auto k_preselected =
@@ -578,7 +664,10 @@ TEST_CASE("generator preselected streamed decode fails cleanly when the window "
           "cannot serve") {
   // Preselected twin of the case above: the per-layer acquire failure must
   // route the same typed compute-error path (and restore the resident weight
-  // views) on the preselected-argmax streamed decode driver.
+  // views) on the preselected-argmax streamed decode driver. No samplers:
+  // passing samplers with preselected mode is an invalid request and would
+  // fail before reaching the streamed decode wrapper.
+  const std::span<emel::logits::sampler::fn> no_samplers{};
   auto rig = std::make_unique<generator_rig>(+1.0f);
   auto window_rig = std::make_unique<bound_window>(); // never bound
 
@@ -586,7 +675,7 @@ TEST_CASE("generator preselected streamed decode fails cleanly when the window "
       rig->prepared.data, rig->conditioner, window_rig->machine,
       /*stream_active=*/true);
   const generation_run run =
-      run_generation(*streamed, rig->tokenizer, rig->samplers,
+      run_generation(*streamed, rig->tokenizer, no_samplers,
                      emel::text::generator::selection_mode::preselected_argmax);
   CHECK_FALSE(run.ok);
 }

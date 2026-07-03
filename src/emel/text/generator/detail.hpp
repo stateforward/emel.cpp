@@ -5299,16 +5299,19 @@ template <emel::text::generator::attention_mode mode, scalar_matmul_route route,
 inline bool run_kernel_scalar_preselected_argmax_mode(
     const emel::graph::processor::event::execute &request,
     int32_t * err_out) noexcept {
-  (void)err_out;
   auto & io = bind_compute_io(request);
   auto & backend = bind_native_backend(request);
   if constexpr (expected_kind == step_kind::prefill) {
     return run_prefill_preselected_argmax<mode, route, argmax_route>(
         backend, *io.selected_token_out, *io.selected_score_out);
   } else {
+    // The decode branch forwards the graph processor's err pointer: streamed
+    // instantiations report acquire failures through it (run_layer writes
+    // unconditionally under the always-valid-pointer contract).
     return run_decode_preselected_argmax<mode, route, argmax_route, lanes,
                                          wmode>(
-        backend, request, *io.selected_token_out, *io.selected_score_out);
+        backend, request, *io.selected_token_out, *io.selected_score_out,
+        err_out);
   }
 }
 
