@@ -1091,17 +1091,6 @@ inline bool neon_f16_vector_supported() noexcept {
 #endif
 }
 
-// f16 x f16 mul_mat NEON variant: same request contract as the shared
-// ggml-layout f16 path (can_run_mul_mat_f16); additionally requires fp16
-// vector arithmetic because the kernel accumulates in fp16 lanes, matching
-// what the reference computes on fp16-capable aarch64 hosts.
-inline bool
-can_use_neon_mul_mat_f16_vector(const event::op_mul_mat &request,
-                                const bool neon_available) noexcept {
-  return neon_available && neon_f16_vector_supported() &&
-         ::emel::kernel::detail::can_run_mul_mat_f16(request);
-}
-
 inline bool neon_q8_0_packed_bl4_supported() noexcept {
 #if defined(__aarch64__) && defined(__ARM_NEON) &&                             \
     defined(__ARM_FEATURE_DOTPROD)
@@ -6416,17 +6405,6 @@ inline void execute_neon_conv_transpose_1d_f32_unchecked(
     }
   }
 #endif
-}
-
-inline bool
-can_use_neon_conv_transpose_1d_f32(const event::op_conv_transpose_1d &request,
-                                   const bool neon_available) noexcept {
-  return neon_available &&
-         ::emel::kernel::detail::can_run_conv_transpose_1d(request) &&
-         ::emel::kernel::detail::dtype_code(request.src0.type) ==
-             ::emel::kernel::detail::dtype_f32 &&
-         ::emel::kernel::detail::tensor_stride_bytes(request.src0, 0) ==
-             sizeof(float);
 }
 
 inline void execute_neon_mul_mat_q5_0_vector_unchecked(

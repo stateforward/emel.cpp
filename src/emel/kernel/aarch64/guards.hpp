@@ -108,6 +108,29 @@ inline bool can_use_neon_mul_mat_q6_vector_prepared_q8_rhs_i8mm_matrix_x8(
              request);
 }
 
+// f16 x f16 mul_mat NEON variant: same request contract as the shared
+// ggml-layout f16 path (can_run_mul_mat_f16); additionally requires fp16
+// vector arithmetic because the kernel accumulates in fp16 lanes, matching
+// what the reference computes on fp16-capable aarch64 hosts.
+inline bool can_use_neon_mul_mat_f16_vector(
+    const ::emel::kernel::event::op_mul_mat &request,
+    const bool neon_available) noexcept {
+  return neon_available &&
+         ::emel::kernel::aarch64::detail::neon_f16_vector_supported() &&
+         ::emel::kernel::detail::can_run_mul_mat_f16(request);
+}
+
+inline bool can_use_neon_conv_transpose_1d_f32(
+    const ::emel::kernel::event::op_conv_transpose_1d &request,
+    const bool neon_available) noexcept {
+  return neon_available &&
+         ::emel::kernel::detail::can_run_conv_transpose_1d(request) &&
+         ::emel::kernel::detail::dtype_code(request.src0.type) ==
+             ::emel::kernel::detail::dtype_f32 &&
+         ::emel::kernel::detail::tensor_stride_bytes(request.src0, 0) ==
+             sizeof(float);
+}
+
 } // namespace detail
 
 template <class dispatch_event_type> struct simd_op {
@@ -182,8 +205,8 @@ struct simd_op_mul_mat_f16_vector {
     if (!::emel::kernel::detail::validate_dispatch_request(ev.request)) {
       return false;
     }
-    return ::emel::kernel::aarch64::detail::can_use_neon_mul_mat_f16_vector(
-        ev.request, ctx.neon_available);
+    return detail::can_use_neon_mul_mat_f16_vector(ev.request,
+                                                   ctx.neon_available);
   }
 };
 
@@ -194,8 +217,8 @@ struct simd_op_conv_transpose_1d_f32 {
     if (!::emel::kernel::detail::validate_dispatch_request(ev.request)) {
       return false;
     }
-    return ::emel::kernel::aarch64::detail::can_use_neon_conv_transpose_1d_f32(
-        ev.request, ctx.neon_available);
+    return detail::can_use_neon_conv_transpose_1d_f32(ev.request,
+                                                      ctx.neon_available);
   }
 };
 

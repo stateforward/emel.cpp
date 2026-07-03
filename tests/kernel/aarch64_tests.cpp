@@ -1662,13 +1662,18 @@ TEST_CASE("kernel_aarch64_sm_reports_f16_vectorized_dispatch_at_kernel_seam") {
   CHECK(machine.optimized_f16_vector_dispatch_count() == 0u);
 #endif
 
+  // The shared-route reference is driven through the machine as well: a
+  // no-NEON context forces the scalar f16 row of the same transition table.
   std::vector<float> expected(out.size(), 0.0f);
   const emel::kernel::event::op_mul_mat shared_ev{
       .src0 = make_src(a_f16.data(), dtype::f16, k_depth, k_rows),
       .src1 = make_src(b_f16.data(), dtype::f16, k_depth, k_cols),
       .dst = make_dst(expected.data(), dtype::f32, k_rows, k_cols),
   };
-  CHECK(emel::kernel::detail::run_mul_mat_f16(shared_ev));
+  aarch64_sm shared_machine{
+      emel::kernel::aarch64::action::context{false, {}, 0}};
+  CHECK(shared_machine.process_event(shared_ev));
+  CHECK(shared_machine.optimized_f16_vector_dispatch_count() == 0u);
   for (size_t idx = 0; idx < out.size(); ++idx) {
     CHECK(out[idx] == expected[idx]);
   }
@@ -1745,7 +1750,10 @@ TEST_CASE("kernel_aarch64_f16_vector_route_is_explicit_and_numeric_match") {
       .src1 = make_src(b_f16.data(), dtype::f16, k_depth, k_cols),
       .dst = make_dst(shared_out.data(), dtype::f32, k_rows, k_cols),
   };
-  CHECK(emel::kernel::detail::run_mul_mat_f16(shared_ev));
+  aarch64_sm shared_machine{
+      emel::kernel::aarch64::action::context{false, {}, 0}};
+  CHECK(shared_machine.process_event(shared_ev));
+  CHECK(shared_machine.optimized_f16_vector_dispatch_count() == 0u);
   for (size_t idx = 0; idx < out.size(); ++idx) {
     CHECK(out[idx] == doctest::Approx(shared_out[idx]).epsilon(0.01));
   }
@@ -1776,15 +1784,18 @@ TEST_CASE("kernel_aarch64_f16_mul_mat_without_neon_takes_shared_route") {
   CHECK(machine.process_event(ev));
   CHECK(machine.optimized_f16_vector_dispatch_count() == 0u);
 
-  // With NEON unavailable the dispatch runs the shared route, so the output
-  // must equal run_mul_mat_f16 exactly (identical code path).
+  // With NEON unavailable the dispatch runs the shared scalar row; a second
+  // no-NEON machine dispatch must reproduce it exactly (identical route).
   std::vector<float> expected(out.size(), 0.0f);
   const emel::kernel::event::op_mul_mat shared_ev{
       .src0 = make_src(a_f16.data(), dtype::f16, k_depth, k_rows),
       .src1 = make_src(b_f16.data(), dtype::f16, k_depth, 1u),
       .dst = make_dst(expected.data(), dtype::f32, k_rows, 1u),
   };
-  CHECK(emel::kernel::detail::run_mul_mat_f16(shared_ev));
+  aarch64_sm shared_machine{
+      emel::kernel::aarch64::action::context{false, {}, 0}};
+  CHECK(shared_machine.process_event(shared_ev));
+  CHECK(shared_machine.optimized_f16_vector_dispatch_count() == 0u);
   for (size_t idx = 0; idx < out.size(); ++idx) {
     CHECK(out[idx] == expected[idx]);
   }
