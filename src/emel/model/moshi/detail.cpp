@@ -518,15 +518,23 @@ emel::error::type validate_mimi_contract(const emel::model::data &model_data,
 
   const int64_t codebook_dim = mimi.codebook_dim;
   const int64_t card = mimi.card;
-  const bool quantizer_ok =
+  // bind_rvq_split consumes every acoustic level 0..level_count-1, so the
+  // contract must probe each rvq_rest codebook, not just the last index: a
+  // model missing an intermediate level would otherwise validate here and
+  // fail initialization later.
+  bool quantizer_ok =
+      mimi.n_q > mimi.semantic_n_q &&
       require_tensor_shape(
           model_data,
           "mimi.quantizer.rvq_first.vq.layers.0._codebook.embedding",
-          {codebook_dim, card}) &&
-      has_indexed_tensor(model_data,
-                         "mimi.quantizer.rvq_rest.vq.layers.%d._codebook."
-                         "embedding",
-                         mimi.n_q - mimi.semantic_n_q - 1);
+          {codebook_dim, card});
+  for (int32_t level = 0;
+       quantizer_ok && level < mimi.n_q - mimi.semantic_n_q; ++level) {
+    quantizer_ok = has_indexed_tensor(model_data,
+                                      "mimi.quantizer.rvq_rest.vq.layers.%d."
+                                      "_codebook.embedding",
+                                      level);
+  }
   if (!quantizer_ok) {
     return emel::error::cast(emel::model::loader::error::model_invalid);
   }

@@ -511,3 +511,29 @@ TEST_CASE("moshi contract validation rejects inconsistent models") {
     CHECK(moshi::validate_execution_contract(*loaded.model) != k_none);
   }
 }
+
+TEST_CASE("mimi contract validation requires every acoustic rvq codebook") {
+  auto loaded = load_fixture_or_skip("mimi-tiny.gguf");
+  if (loaded.model == nullptr) {
+    return;
+  }
+
+  // bind_rvq_split consumes every acoustic level 0..n_q-semantic_n_q-1; hide
+  // the intermediate one (level 1 of 0..2 in the tiny fixture) by bumping its
+  // layer index digit, so the tensor stays inside the quantizer family and a
+  // last-index-only probe would still pass while initialization fails.
+  auto &model = *loaded.model;
+  bool renamed = false;
+  for (uint32_t idx = 0; idx < model.n_tensors; ++idx) {
+    const auto &tensor = model.tensors[idx];
+    const std::string_view name{model.name_storage.data() + tensor.name_offset,
+                                tensor.name_length};
+    if (name == "mimi.quantizer.rvq_rest.vq.layers.1._codebook.embedding") {
+      const size_t digit = name.find("layers.1") + 7u;
+      model.name_storage[tensor.name_offset + digit] = '9';
+      renamed = true;
+    }
+  }
+  REQUIRE(renamed);
+  CHECK(moshi::validate_execution_contract(model) != k_none);
+}
