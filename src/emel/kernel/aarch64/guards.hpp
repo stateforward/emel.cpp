@@ -176,6 +176,29 @@ struct simd_op_mul_mat_q8_0_vector {
   }
 };
 
+struct simd_op_mul_mat_f16_vector {
+  bool operator()(const ::emel::kernel::aarch64::event::dispatch_op_mul_mat &ev,
+                  const action::context &ctx) const noexcept {
+    if (!::emel::kernel::detail::validate_dispatch_request(ev.request)) {
+      return false;
+    }
+    return ::emel::kernel::aarch64::detail::can_use_neon_mul_mat_f16_vector(
+        ev.request, ctx.neon_available);
+  }
+};
+
+struct simd_op_conv_transpose_1d_f32 {
+  bool operator()(
+      const ::emel::kernel::aarch64::event::dispatch_op_conv_transpose_1d &ev,
+      const action::context &ctx) const noexcept {
+    if (!::emel::kernel::detail::validate_dispatch_request(ev.request)) {
+      return false;
+    }
+    return ::emel::kernel::aarch64::detail::can_use_neon_conv_transpose_1d_f32(
+        ev.request, ctx.neon_available);
+  }
+};
+
 struct simd_op_mul_mat_q8_0_packed_bl8 {
   bool operator()(const ::emel::kernel::aarch64::event::dispatch_op_mul_mat &ev,
                   const action::context &ctx) const noexcept {
@@ -595,10 +618,21 @@ template <class dispatch_event_type> struct mul_mat_f16_is {
   }
 };
 
-using valid_op_mul_mat_f16 = ::emel::kernel::detail::valid_variant_guard<
+using valid_op_mul_mat_f16_base = ::emel::kernel::detail::valid_variant_guard<
     ::emel::kernel::aarch64::event::dispatch_op_mul_mat, action::context,
     valid_op<::emel::kernel::aarch64::event::dispatch_op_mul_mat>,
     mul_mat_f16_is<::emel::kernel::aarch64::event::dispatch_op_mul_mat>>;
+
+// Shared-path f16 row guard: mutually exclusive with the NEON f16 variant so
+// the f16 route is decided entirely by guards (capability + request shape),
+// never by transition-row ordering.
+struct valid_op_mul_mat_f16 {
+  bool operator()(const ::emel::kernel::aarch64::event::dispatch_op_mul_mat &ev,
+                  const action::context &ctx) const noexcept {
+    return valid_op_mul_mat_f16_base{}(ev, ctx) &&
+           !simd_op_mul_mat_f16_vector{}(ev, ctx);
+  }
+};
 
 using valid_op_rope_norm = ::emel::kernel::detail::valid_variant_guard<
     ::emel::kernel::aarch64::event::dispatch_op_rope, action::context,
@@ -618,12 +652,24 @@ using valid_op_im2col_f16 = ::emel::kernel::detail::valid_variant_guard<
     valid_op<::emel::kernel::aarch64::event::dispatch_op_im2col>,
     im2col_dst_dtype_is<true>>;
 
-using valid_op_conv_transpose_1d_f32 =
+using valid_op_conv_transpose_1d_f32_base =
     ::emel::kernel::detail::valid_variant_guard<
         ::emel::kernel::aarch64::event::dispatch_op_conv_transpose_1d,
         action::context,
         valid_op<::emel::kernel::aarch64::event::dispatch_op_conv_transpose_1d>,
         conv_transpose_1d_weight_dtype_is<false>>;
+
+// Shared-path f32 row guard: mutually exclusive with the NEON f32 variant so
+// the conv_transpose route is decided entirely by guards, never by
+// transition-row ordering.
+struct valid_op_conv_transpose_1d_f32 {
+  bool operator()(
+      const ::emel::kernel::aarch64::event::dispatch_op_conv_transpose_1d &ev,
+      const action::context &ctx) const noexcept {
+    return valid_op_conv_transpose_1d_f32_base{}(ev, ctx) &&
+           !simd_op_conv_transpose_1d_f32{}(ev, ctx);
+  }
+};
 using valid_op_conv_transpose_1d_f16 =
     ::emel::kernel::detail::valid_variant_guard<
         ::emel::kernel::aarch64::event::dispatch_op_conv_transpose_1d,
