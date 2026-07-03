@@ -48,6 +48,13 @@ bool tensor_is_float(const emel::model::data::tensor_record &tensor) noexcept {
 
 uint64_t
 tensor_elements(const emel::model::data::tensor_record &tensor) noexcept {
+  // tensor_record stores four extents; a malformed rank must count as zero
+  // elements (every validation caller requires a positive expected count)
+  // instead of scanning past the dims array.
+  constexpr int32_t k_max_tensor_dims = 4;
+  if (tensor.n_dims < 1 || tensor.n_dims > k_max_tensor_dims) {
+    return 0u;
+  }
   uint64_t count = 1;
   for (int32_t dim = 0; dim < tensor.n_dims; ++dim) {
     count *= static_cast<uint64_t>(tensor.dims[static_cast<size_t>(dim)]);

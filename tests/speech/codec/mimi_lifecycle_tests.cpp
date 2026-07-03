@@ -499,6 +499,15 @@ TEST_CASE("mimi codec initialize rejects out-of-contract model metadata") {
     expect_bind_failed(*loaded.model);
   }
 
+  SUBCASE("tensor rank beyond the stored dimensions") {
+    // tensor_record carries four extents; a larger declared rank must reject
+    // instead of scanning past the dims array in the element count.
+    for (uint32_t index = 0u; index < loaded.model->n_tensors; ++index) {
+      loaded.model->tensors[index].n_dims = 8;
+    }
+    expect_bind_failed(*loaded.model);
+  }
+
   SUBCASE("tensor storage smaller than its metadata") {
     // The prepare copies read the full dtype payload; a one-byte buffer with
     // matching element metadata must fail validation instead of reading past
