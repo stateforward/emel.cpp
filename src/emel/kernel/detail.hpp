@@ -1807,6 +1807,17 @@ inline bool has_required_src0(const request_type &request) noexcept {
              request.src0.nb[2] == row_bytes * rows &&
              request.src0.nb[3] == request.src0.nb[2];
     }
+    if constexpr (std::is_same_v<request_type, event::op_get_rows>) {
+      // get_rows converts bf16 source rows to f32 through its explicit bf16
+      // transition row; the generic supported-dtype fallback below predates
+      // that row and omits bf16, which would reject the request as invalid
+      // before the row could match.
+      if (src0_type == dtype_bf16) {
+        return request.src0.data != nullptr &&
+               has_valid_tensor_layout(request.src0) &&
+               tensor_element_count(request.src0) > 0;
+      }
+    }
   }
   return request.src0.data != nullptr &&
          is_supported_dtype(dtype_code(request.src0.type)) &&

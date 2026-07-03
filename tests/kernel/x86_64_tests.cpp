@@ -1929,6 +1929,27 @@ TEST_CASE("kernel_x86_64_get_rows_gathers_f32_and_q8_0_rows") {
   for (int64_t i = 0; i < k_cols; ++i) {
     CHECK(quant_out[i] == doctest::Approx(expected[i]));
   }
+
+  // bf16 sources must reach the explicit bf16 conversion row: the generic
+  // src0 dtype fallback previously rejected them before the row could match.
+  uint16_t bf16_table[12] = {};
+  for (int64_t i = 0; i < 12; ++i) {
+    uint32_t bits = 0;
+    std::memcpy(&bits, &table[i], sizeof(bits));
+    bf16_table[i] = static_cast<uint16_t>(bits >> 16);
+  }
+  int32_t bf16_indices[2] = {2, 0};
+  float bf16_out[8] = {};
+  emel::kernel::event::op_get_rows bf16_ev{
+      .src0 = make_src(bf16_table, dtype::bf16, 4, 3),
+      .src1 = make_src(bf16_indices, dtype::i32, 2),
+      .dst = make_dst(bf16_out, dtype::f32, 4, 2),
+  };
+  CHECK(machine.process_event(bf16_ev));
+  CHECK(bf16_out[0] == doctest::Approx(20.0f));
+  CHECK(bf16_out[3] == doctest::Approx(23.0f));
+  CHECK(bf16_out[4] == doctest::Approx(0.0f));
+  CHECK(bf16_out[7] == doctest::Approx(3.0f));
 }
 
 TEST_CASE("kernel_x86_64_rms_norm_and_norm_rows") {
