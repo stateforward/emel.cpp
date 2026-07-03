@@ -3745,9 +3745,10 @@ inline bool bind_streamed_block_views(
 // acquired slot's clone). Pure pointer bookkeeping on the already-completed
 // streamed route; used by both streamed decode drivers.
 inline void reset_stream_block_views(native_backend & backend) noexcept {
-  const size_t layer_count = backend.stream.pristine.size() < backend.blocks.size()
-                                 ? backend.stream.pristine.size()
-                                 : backend.blocks.size();
+  // pristine is either empty (scan never ran) or exactly blocks.size()
+  // (assigned in one shot by scan_stream_pristine_records), so its size
+  // bounds the block indexing.
+  const size_t layer_count = backend.stream.pristine.size();
   for (size_t layer = 0; layer < layer_count; ++layer) {
     block_weights & block = backend.blocks[layer];
     const auto & roles = backend.stream.pristine[layer];

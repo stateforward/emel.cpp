@@ -574,6 +574,23 @@ TEST_CASE(
   CHECK_FALSE(run.ok);
 }
 
+TEST_CASE("generator preselected streamed decode fails cleanly when the window "
+          "cannot serve") {
+  // Preselected twin of the case above: the per-layer acquire failure must
+  // route the same typed compute-error path (and restore the resident weight
+  // views) on the preselected-argmax streamed decode driver.
+  auto rig = std::make_unique<generator_rig>(+1.0f);
+  auto window_rig = std::make_unique<bound_window>(); // never bound
+
+  auto streamed = std::make_unique<emel::text::generator::sm>(
+      rig->prepared.data, rig->conditioner, window_rig->machine,
+      /*stream_active=*/true);
+  const generation_run run =
+      run_generation(*streamed, rig->tokenizer, rig->samplers,
+                     emel::text::generator::selection_mode::preselected_argmax);
+  CHECK_FALSE(run.ok);
+}
+
 TEST_CASE("generator passthrough window keeps the resident route engaged") {
   auto rig = std::make_unique<generator_rig>(+1.0f);
   stream_weight_file file{rig->prepared, "passthrough"};
