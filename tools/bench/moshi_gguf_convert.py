@@ -171,8 +171,20 @@ def transformer_layer_candidates(base: str, num_layers: int,
 
 def unmangle_names(infos: list[TensorInfo],
                    candidates: list[str]) -> list[TensorInfo]:
-  reverse = {mangle_name(name): name for name in candidates
-             if len(name) >= GGML_MAX_NAME}
+  # The moshi.cpp mangling keeps only four CRC nibbles, so collisions in the
+  # candidate table are plausible and would silently restore a tensor to the
+  # wrong canonical name while still passing shape checks. Fail loudly.
+  reverse: dict[str, str] = {}
+  for candidate in candidates:
+    if len(candidate) < GGML_MAX_NAME:
+      continue
+    key = mangle_name(candidate)
+    if key in reverse and reverse[key] != candidate:
+      raise ValueError(
+          f"CRC-mangled tensor name collision: {reverse[key]!r} and "
+          f"{candidate!r} both mangle to {key!r}; the candidate table must "
+          "disambiguate them before conversion can proceed")
+    reverse[key] = candidate
   restored: list[TensorInfo] = []
   for info in infos:
     name = info.name

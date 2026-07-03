@@ -34,17 +34,21 @@ struct guard_bind_request_valid {
     if (extent_total != request.extents.size()) {
       return false;
     }
-    if (request.stage_chunk_bytes < detail::k_min_stream_chunk_bytes ||
-        request.stage_chunk_bytes > detail::k_max_stream_chunk_bytes) {
-      return false;
+    // Every extent must lie inside the mapped source: load_ticket forms
+    // source_base + file_offset for the staged copy, so an extent past
+    // file_size_bytes (or one that overflows) would read beyond the mmap.
+    for (const detail::weight_extent &extent : request.extents) {
+      if (extent.byte_size == 0u ||
+          extent.byte_size > request.file_size_bytes ||
+          extent.file_offset > request.file_size_bytes - extent.byte_size) {
+        return false;
+      }
     }
-    if (request.window_slots < 2u ||
-        request.window_slots > detail::k_max_window_slots ||
-        request.prefetch_depth == 0u ||
-        request.prefetch_depth >= request.window_slots) {
-      return false;
-    }
-    return ctx.io_staged.size() >= request.window_slots;
+    // Slot/prefetch sizing is a streaming-branch contract; passthrough binds
+    // (zero budget or a fitting model) never allocate or use slots, so it is
+    // validated by guard_bind_streaming_config_valid at the budget decision.
+    return request.stage_chunk_bytes >= detail::k_min_stream_chunk_bytes &&
+           request.stage_chunk_bytes <= detail::k_max_stream_chunk_bytes;
   }
 };
 
@@ -77,10 +81,33 @@ struct guard_bind_fits_budget {
   }
 };
 
+// Slot/prefetch sizing only binds the streaming branch: passthrough requests
+// may leave the slot fields at their zero defaults.
+struct guard_bind_streaming_config_valid {
+  bool operator()(const detail::bind_window_runtime &ev,
+                  const action::context &ctx) const noexcept {
+    const event::bind_window_request &request = ev.request.request;
+    return request.window_slots >= 2u &&
+           request.window_slots <= detail::k_max_window_slots &&
+           request.prefetch_depth > 0u &&
+           request.prefetch_depth < request.window_slots &&
+           ctx.io_staged.size() >= request.window_slots;
+  }
+};
+
+struct guard_bind_streaming_config_invalid {
+  bool operator()(const detail::bind_window_runtime &ev,
+                  const action::context &ctx) const noexcept {
+    return !guard_bind_fits_budget{}(ev, ctx) &&
+           !guard_bind_streaming_config_valid{}(ev, ctx);
+  }
+};
+
 struct guard_bind_requires_streaming {
   bool operator()(const detail::bind_window_runtime &ev,
                   const action::context &ctx) const noexcept {
-    if (guard_bind_fits_budget{}(ev, ctx)) {
+    if (guard_bind_fits_budget{}(ev, ctx) ||
+        !guard_bind_streaming_config_valid{}(ev, ctx)) {
       return false;
     }
     const uint64_t slot_bytes = static_cast<uint64_t>(ev.request.request.window_slots) *
@@ -93,6 +120,7 @@ struct guard_bind_budget_too_small {
   bool operator()(const detail::bind_window_runtime &ev,
                   const action::context &ctx) const noexcept {
     return !guard_bind_fits_budget{}(ev, ctx) &&
+           guard_bind_streaming_config_valid{}(ev, ctx) &&
            !guard_bind_requires_streaming{}(ev, ctx);
   }
 };
@@ -118,6 +146,48 @@ struct guard_bind_error_callback_present {
 struct guard_bind_error_callback_absent {
   bool operator()(const detail::bind_window_runtime &ev) const noexcept {
     return !guard_bind_error_callback_present{}(ev);
+  }
+};
+
+// Budget-decision routes composed with the optional done callback so the
+// publish effects never invoke an empty emel::callback.
+struct guard_bind_fits_budget_callback_present {
+  bool operator()(const detail::bind_window_runtime &ev,
+                  const action::context &ctx) const noexcept {
+    return guard_bind_fits_budget{}(ev, ctx) &&
+           guard_bind_done_callback_present{}(ev);
+  }
+};
+
+struct guard_bind_fits_budget_callback_absent {
+  bool operator()(const detail::bind_window_runtime &ev,
+                  const action::context &ctx) const noexcept {
+    return guard_bind_fits_budget{}(ev, ctx) &&
+           guard_bind_done_callback_absent{}(ev);
+  }
+};
+
+// Slot-allocation decision routes (streaming branch): the allocation attempt
+// records its outcome in the runtime status; these guards select the
+// activate-or-fail transition.
+struct guard_bind_slots_alloc_ok_callback_present {
+  bool operator()(const detail::bind_window_runtime &ev,
+                  const action::context &) const noexcept {
+    return ev.status.slots_alloc_ok && guard_bind_done_callback_present{}(ev);
+  }
+};
+
+struct guard_bind_slots_alloc_ok_callback_absent {
+  bool operator()(const detail::bind_window_runtime &ev,
+                  const action::context &) const noexcept {
+    return ev.status.slots_alloc_ok && guard_bind_done_callback_absent{}(ev);
+  }
+};
+
+struct guard_bind_slots_alloc_failed {
+  bool operator()(const detail::bind_window_runtime &ev,
+                  const action::context &) const noexcept {
+    return !ev.status.slots_alloc_ok;
   }
 };
 
@@ -215,6 +285,23 @@ struct guard_acquire_layer_unscheduled {
     const detail::window_slot &slot =
         ctx.window.slots[detail::compute_slot_for_layer(ctx.window, ev.request.layer_index)];
     return slot.layer != ev.request.layer_index;
+  }
+};
+
+// A background prefetch committed this layer's slot as failed: resubmit the
+// load once (the retry is this transition; a second failure routes
+// slot_copy_failed at publish), so the acquire never strands the actor.
+struct guard_acquire_layer_failed {
+  bool operator()(const detail::acquire_runtime &ev,
+                  const action::context &ctx) const noexcept {
+    if (!guard_acquire_layer_in_range{}(ev, ctx)) {
+      return false;
+    }
+    const detail::window_slot &slot =
+        ctx.window.slots[detail::compute_slot_for_layer(
+            ctx.window, ev.request.layer_index)];
+    return slot.layer == ev.request.layer_index &&
+           slot.lifecycle == detail::slot_lifecycle::failed;
   }
 };
 
@@ -341,6 +428,55 @@ struct guard_unbind_error_callback_present {
 struct guard_unbind_error_callback_absent {
   bool operator()(const detail::unbind_finish_runtime &ev) const noexcept {
     return !guard_unbind_error_callback_present{}(ev);
+  }
+};
+
+// After a failed release the window stays bound (the mmap actor keeps the
+// handle reserved for retry), so the error exits return to the mode the
+// window is still in rather than to unbound.
+struct guard_unbind_window_streaming {
+  bool operator()(const detail::unbind_finish_runtime &,
+                  const action::context &ctx) const noexcept {
+    return ctx.window.streaming_active;
+  }
+};
+
+struct guard_unbind_window_passthrough {
+  bool operator()(const detail::unbind_finish_runtime &,
+                  const action::context &ctx) const noexcept {
+    return !ctx.window.streaming_active;
+  }
+};
+
+struct guard_unbind_error_callback_present_streaming {
+  bool operator()(const detail::unbind_finish_runtime &ev,
+                  const action::context &ctx) const noexcept {
+    return guard_unbind_error_callback_present{}(ev) &&
+           guard_unbind_window_streaming{}(ev, ctx);
+  }
+};
+
+struct guard_unbind_error_callback_present_passthrough {
+  bool operator()(const detail::unbind_finish_runtime &ev,
+                  const action::context &ctx) const noexcept {
+    return guard_unbind_error_callback_present{}(ev) &&
+           guard_unbind_window_passthrough{}(ev, ctx);
+  }
+};
+
+struct guard_unbind_error_callback_absent_streaming {
+  bool operator()(const detail::unbind_finish_runtime &ev,
+                  const action::context &ctx) const noexcept {
+    return guard_unbind_error_callback_absent{}(ev) &&
+           guard_unbind_window_streaming{}(ev, ctx);
+  }
+};
+
+struct guard_unbind_error_callback_absent_passthrough {
+  bool operator()(const detail::unbind_finish_runtime &ev,
+                  const action::context &ctx) const noexcept {
+    return guard_unbind_error_callback_absent{}(ev) &&
+           guard_unbind_window_passthrough{}(ev, ctx);
   }
 };
 

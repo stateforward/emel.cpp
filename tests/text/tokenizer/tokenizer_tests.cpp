@@ -49,7 +49,7 @@ emel::model::data::vocab & make_bpe_vocab() {
 }  // namespace
 
 TEST_CASE("tokenizer_bind_and_tokenize_bpe") {
-  auto & vocab = make_bpe_vocab();;
+  auto & vocab = make_bpe_vocab();
   emel::text::tokenizer::sm machine{};
 
   int32_t bind_err = emel::text::tokenizer::error_code(emel::text::tokenizer::error::none);
@@ -85,7 +85,7 @@ TEST_CASE("tokenizer_bind_and_tokenize_bpe") {
 }
 
 TEST_CASE("tokenizer_tokenize_requires_bind") {
-  auto & vocab = make_bpe_vocab();;
+  auto & vocab = make_bpe_vocab();
   emel::text::tokenizer::sm machine{};
 
   std::array<int32_t, 4> tokens = {};
@@ -107,7 +107,7 @@ TEST_CASE("tokenizer_tokenize_requires_bind") {
 }
 
 TEST_CASE("tokenizer_tokenize_rejects_mismatched_vocab") {
-  auto & vocab = make_bpe_vocab();;
+  auto & vocab = make_bpe_vocab();
   static emel::model::data::vocab other_vocab = {};
   other_vocab = {};
   emel::text::tokenizer::sm machine{};

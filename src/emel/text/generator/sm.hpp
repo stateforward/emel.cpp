@@ -609,6 +609,34 @@ struct model {
                  [ guard::guard_decode_compute_backend_unavailable{} ]
                  / action::mark_backend_error
 
+      // Streamed rows sit above their resident/parallel siblings: an active
+      // tensor window routes the serial slot-consuming variants.
+      , sml::state<decode_compute_flash_preselected_argmax_decision> <=
+               sml::state<decode_compute_flash_preselected_argmax>
+                 + sml::completion<event::generate_run>
+                 [ guard::guard_decode_preselected_argmax_q8_k_streamed_ready{} ]
+                 / action::request_decode_compute_flash_preselected_argmax_q8_k_streamed
+
+      , sml::state<decode_compute_flash_preselected_argmax_decision> <=
+               sml::state<decode_compute_flash_preselected_argmax>
+                 + sml::completion<event::generate_run>
+                 [ guard::guard_decode_preselected_argmax_native_quantized_q8_k_streamed_ready{} ]
+                 / action::
+                       request_decode_compute_flash_preselected_argmax_native_quantized_q8_k_streamed
+
+      , sml::state<decode_compute_flash_preselected_argmax_decision> <=
+               sml::state<decode_compute_flash_preselected_argmax>
+                 + sml::completion<event::generate_run>
+                 [ guard::guard_decode_preselected_argmax_native_quantized_kernel_streamed_ready{} ]
+                 / action::
+                       request_decode_compute_flash_preselected_argmax_native_quantized_kernel_streamed
+
+      , sml::state<decode_compute_flash_preselected_argmax_decision> <=
+               sml::state<decode_compute_flash_preselected_argmax>
+                 + sml::completion<event::generate_run>
+                 [ guard::guard_decode_preselected_argmax_kernel_streamed_ready{} ]
+                 / action::request_decode_compute_flash_preselected_argmax_kernel_streamed
+
       , sml::state<decode_compute_flash_preselected_argmax_decision> <=
                sml::state<decode_compute_flash_preselected_argmax>
                  + sml::completion<event::generate_run>

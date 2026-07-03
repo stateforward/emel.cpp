@@ -281,6 +281,14 @@ struct effect_mark_advise_unsupported_platform {
   }
 };
 
+struct effect_mark_advise_invalid_kind {
+  void operator()(const detail::advise_mapping_runtime &ev,
+                  context &) const noexcept {
+    ev.status.err = emel::error::cast(error::invalid_advise_kind);
+    ev.status.ok = false;
+  }
+};
+
 struct effect_attempt_advise_sequential {
   void operator()(const detail::advise_mapping_runtime &ev,
                   context &ctx) const noexcept;
@@ -403,6 +411,8 @@ inline constexpr effect_mark_advise_invalid_range
     effect_mark_advise_invalid_range{};
 inline constexpr effect_mark_advise_unsupported_platform
     effect_mark_advise_unsupported_platform{};
+inline constexpr effect_mark_advise_invalid_kind
+    effect_mark_advise_invalid_kind{};
 inline constexpr effect_attempt_advise_sequential
     effect_attempt_advise_sequential{};
 inline constexpr effect_attempt_advise_willneed

@@ -16,6 +16,10 @@ enum class error : emel::error::type {
   request_shape = 4,
   // a decode code addresses no codebook entry
   code_range = 5,
+  // the event is not modeled in the current state (caller ordering error,
+  // for example initialize while a session is ready or reset_stream before
+  // initialization)
+  unexpected_event = 6,
 };
 
 } // namespace emel::speech::codec::mimi

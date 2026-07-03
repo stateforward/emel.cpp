@@ -17,6 +17,7 @@ enum class error : emel::error::type {
   slot_copy_failed = (1u << 6),
   not_streaming = (1u << 7),
   internal_error = (1u << 8),
+  slot_alloc_failed = (1u << 9),
 };
 
 } // namespace emel::model::tensor::window

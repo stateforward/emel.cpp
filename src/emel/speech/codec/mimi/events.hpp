@@ -90,6 +90,10 @@ struct decode_frame_ctx {
   emel::error::type err = emel::error::cast(error::none);
 };
 
+struct reset_stream_ctx {
+  emel::error::type err = emel::error::cast(error::none);
+};
+
 struct initialize_run {
   const initialize &request;
   initialize_ctx &ctx;
@@ -103,6 +107,11 @@ struct encode_frame_run {
 struct decode_frame_run {
   const decode_frame &request;
   decode_frame_ctx &ctx;
+};
+
+struct reset_stream_run {
+  const reset_stream &request;
+  reset_stream_ctx &ctx;
 };
 
 } // namespace emel::speech::codec::mimi::event

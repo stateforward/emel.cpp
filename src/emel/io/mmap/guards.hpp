@@ -373,6 +373,17 @@ struct guard_advise_kind_dontneed {
   }
 };
 
+// Catch-all for advice values outside the modeled kinds (for example a cast
+// from a C ABI boundary): the kind decision must always take a transition.
+struct guard_advise_kind_invalid {
+  bool operator()(const detail::advise_mapping_runtime &ev,
+                  const action::context &ctx) const noexcept {
+    return !guard_advise_kind_sequential{}(ev, ctx) &&
+           !guard_advise_kind_willneed{}(ev, ctx) &&
+           !guard_advise_kind_dontneed{}(ev, ctx);
+  }
+};
+
 struct guard_advise_succeeded {
   bool operator()(const detail::advise_mapping_runtime &ev,
                   const action::context &) const noexcept {

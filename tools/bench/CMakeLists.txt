@@ -144,10 +144,16 @@ endif()
 # suite filters below.
 set(MOSHI_REF_REPOSITORY "https://github.com/Codes4Fun/moshi.cpp.git" CACHE STRING "")
 set(MOSHI_REF_REF "" CACHE STRING "")
+# Lanes that compare against a non-moshi reference (for example the
+# personaplex-mlx Python driver) opt out of the moshi.cpp/SentencePiece fetch
+# even when the suite filter matches.
+option(EMEL_BENCH_SKIP_MOSHI_REFERENCE
+       "Skip fetching the moshi.cpp reference driver" OFF)
 set(EMEL_BENCH_NEEDS_MOSHI OFF)
-if(EMEL_BENCH_SUITE_FILTER STREQUAL "speech_codec_mimi" OR
-   EMEL_BENCH_SUITE_FILTER STREQUAL "speech_lm_moshi" OR
-   EMEL_BENCH_SUITE_FILTER STREQUAL "speech_dialogue_moshi")
+if(NOT EMEL_BENCH_SKIP_MOSHI_REFERENCE AND
+   (EMEL_BENCH_SUITE_FILTER STREQUAL "speech_codec_mimi" OR
+    EMEL_BENCH_SUITE_FILTER STREQUAL "speech_lm_moshi" OR
+    EMEL_BENCH_SUITE_FILTER STREQUAL "speech_dialogue_moshi"))
   set(EMEL_BENCH_NEEDS_MOSHI ON)
 endif()
 

@@ -22,8 +22,14 @@ struct context {
   detail::window_state window = {};
 
   context() noexcept = default;
-  context(const context &) = default;
-  context &operator=(const context &) = default;
+  // Slot storage ownership is unique: the sanctioned copy happens exactly
+  // once at machine construction (before bind, all storage null), so copies
+  // carry the collaborators and start with a fresh window instead of
+  // shallow-sharing owned pointers that both destructors would free.
+  context(const context &other) noexcept
+      : io_mmap(other.io_mmap), io_staged(other.io_staged),
+        io_pool(other.io_pool) {}
+  context &operator=(const context &) = delete;
 
   ~context() noexcept { detail::reset_window(window); }
 };

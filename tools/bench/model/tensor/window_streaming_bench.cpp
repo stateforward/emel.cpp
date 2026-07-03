@@ -746,6 +746,9 @@ bool initialize_session(emel_session &session, const int32_t max_tokens) {
   request.encoder_variant = session_encoder_variant(session.model_data);
   request.add_special = false;
   request.parse_special = false;
+  // The window lane streams via the preselected-argmax streamed decode rows:
+  // an active tensor window routes the serial slot-consuming variants, so
+  // this mode is valid for both the mmap-resident and the window lane.
   request.selection_mode =
       emel::text::generator::selection_mode::preselected_argmax;
   request.max_prompt_tokens = prompt_capacity;

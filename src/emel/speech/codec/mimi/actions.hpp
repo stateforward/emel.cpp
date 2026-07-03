@@ -130,7 +130,8 @@ struct effect_run_backend_child {
 };
 
 struct effect_reset_stream {
-  void operator()(const event::reset_stream &, context &ctx) const noexcept {
+  void operator()(const event::reset_stream_run &,
+                  context &ctx) const noexcept {
     detail::reset_streaming_state(ctx.runtime, ctx.streaming);
   }
 };
@@ -201,9 +202,33 @@ struct effect_emit_decode_error {
   }
 };
 
-struct effect_on_unexpected {
+// An external event in a state that does not model it is a caller ordering
+// error (for example initialize while session_ready or reset_stream while
+// uninitialized): record it so the dispatch reports failure instead of
+// silently succeeding. The error-out channel choice is made by the guarded
+// unexpected-event rows (guard_unexpected_error_out_present/absent), so both
+// effects are straight-line.
+struct effect_mark_unexpected {
   template <class unexpected_event_type>
-  void operator()(const unexpected_event_type &, context &) const noexcept {}
+  void operator()(const unexpected_event_type &ev, context &) const noexcept {
+    if constexpr (requires { ev.ctx.err; }) {
+      ev.ctx.err = detail_ns::to_error(error::unexpected_event);
+    }
+  }
+};
+
+struct effect_mark_unexpected_and_store {
+  template <class unexpected_event_type>
+  void operator()(const unexpected_event_type &ev,
+                  context &ctx) const noexcept {
+    effect_mark_unexpected{}(ev, ctx);
+    if constexpr (requires {
+                    ev.ctx.err;
+                    ev.request.error_out;
+                  }) {
+      *ev.request.error_out = ev.ctx.err;
+    }
+  }
 };
 
 } // namespace emel::speech::codec::mimi::action

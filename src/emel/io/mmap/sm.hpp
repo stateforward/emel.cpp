@@ -51,6 +51,7 @@ struct state_advise_invalid_handle_error_decision {};
 struct state_advise_invalid_range_error_decision {};
 struct state_advise_unsupported_platform_error_decision {};
 struct state_advise_failed_error_decision {};
+struct state_advise_invalid_kind_error_decision {};
 struct state_advise_error_callback {};
 
 struct model {
@@ -410,6 +411,11 @@ struct model {
           + sml::completion<detail::advise_mapping_runtime>
           [ guard::guard_advise_kind_dontneed{} ]
           / action::effect_attempt_advise_dontneed
+      , sml::state<state_advise_invalid_kind_error_decision> <=
+          sml::state<state_advise_kind_decision>
+          + sml::completion<detail::advise_mapping_runtime>
+          [ guard::guard_advise_kind_invalid{} ]
+          / action::effect_mark_advise_invalid_kind
       , sml::state<state_advise_publish_done_decision> <=
           sml::state<state_advise_attempt_decision>
           + sml::completion<detail::advise_mapping_runtime>
@@ -476,6 +482,16 @@ struct model {
           / action::effect_publish_advise_mapping_error
       , sml::state<state_ready> <=
           sml::state<state_advise_failed_error_decision>
+          + sml::completion<detail::advise_mapping_runtime>
+          [ guard::guard_advise_error_callback_absent{} ]
+          / action::effect_record_advise_mapping_error
+      , sml::state<state_advise_error_callback> <=
+          sml::state<state_advise_invalid_kind_error_decision>
+          + sml::completion<detail::advise_mapping_runtime>
+          [ guard::guard_advise_error_callback_present{} ]
+          / action::effect_publish_advise_mapping_error
+      , sml::state<state_ready> <=
+          sml::state<state_advise_invalid_kind_error_decision>
           + sml::completion<detail::advise_mapping_runtime>
           [ guard::guard_advise_error_callback_absent{} ]
           / action::effect_record_advise_mapping_error
@@ -571,6 +587,9 @@ struct model {
           + sml::unexpected_event<sml::_> / action::effect_on_unexpected
       , sml::state<state_ready> <=
           sml::state<state_advise_invalid_range_error_decision>
+          + sml::unexpected_event<sml::_> / action::effect_on_unexpected
+      , sml::state<state_ready> <=
+          sml::state<state_advise_invalid_kind_error_decision>
           + sml::unexpected_event<sml::_> / action::effect_on_unexpected
       , sml::state<state_ready> <=
           sml::state<state_advise_unsupported_platform_error_decision>
