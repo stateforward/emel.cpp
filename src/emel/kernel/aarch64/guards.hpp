@@ -124,6 +124,7 @@ inline bool can_use_neon_conv_transpose_1d_f32(
     const ::emel::kernel::event::op_conv_transpose_1d &request,
     const bool neon_available) noexcept {
   return neon_available &&
+         ::emel::kernel::aarch64::detail::neon_conv_transpose_f32_supported() &&
          ::emel::kernel::detail::can_run_conv_transpose_1d(request) &&
          ::emel::kernel::detail::dtype_code(request.src0.type) ==
              ::emel::kernel::detail::dtype_f32 &&

@@ -1082,9 +1082,21 @@ can_use_neon_mul_mat_q8_0_vector(const event::op_mul_mat &request,
   return neon_available && can_run_neon_mul_mat_q8_0_vector_request(request);
 }
 
+// SVE-capable builds are excluded: the pinned ggml_vec_dot_f16 selects its
+// SVE branch ahead of the NEON fp16 branch there, so this NEON port would
+// not match the reference's accumulation order on such hosts.
 inline bool neon_f16_vector_supported() noexcept {
 #if defined(__aarch64__) && defined(__ARM_NEON) &&                             \
-    defined(__ARM_FEATURE_FP16_VECTOR_ARITHMETIC)
+    defined(__ARM_FEATURE_FP16_VECTOR_ARITHMETIC) &&                           \
+    !defined(__ARM_FEATURE_SVE)
+  return true;
+#else
+  return false;
+#endif
+}
+
+inline bool neon_conv_transpose_f32_supported() noexcept {
+#if defined(__aarch64__) || defined(__ARM_NEON)
   return true;
 #else
   return false;
