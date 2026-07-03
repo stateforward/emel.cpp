@@ -192,6 +192,25 @@ TEST_CASE("io mmap advise rejects window outside the mapped span") {
         emel::error::cast(emel::io::mmap::error::invalid_advise_range));
 }
 
+TEST_CASE("io mmap advise rejects unknown advice kinds explicitly") {
+  mapped_fixture fixture{"bad_kind"};
+
+  advise_owner_state owner{};
+  CHECK_FALSE(dispatch_advise(fixture, owner, fixture.map_owner.handle, 0u,
+                              4096u,
+                              static_cast<emel::io::mmap::event::advice>(99)));
+  CHECK(owner.error);
+  CHECK(owner.err ==
+        emel::error::cast(emel::io::mmap::error::invalid_advise_kind));
+
+  // The malformed dispatch must finish its RTC chain: the actor stays ready
+  // and a following well-formed advise succeeds.
+  advise_owner_state retry_owner{};
+  CHECK(dispatch_advise(fixture, retry_owner, fixture.map_owner.handle, 0u,
+                        4096u, emel::io::mmap::event::advice::k_willneed));
+  CHECK(retry_owner.done);
+}
+
 TEST_CASE("io mmap advise reports status without callbacks") {
   mapped_fixture fixture{"no_callbacks"};
 
