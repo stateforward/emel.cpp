@@ -508,6 +508,23 @@ TEST_CASE("generator preselected streamed decode consumes slot bytes not "
   CHECK(mixed_run.text() != run_a.text());
 }
 
+TEST_CASE(
+    "generator streamed decode fails cleanly when the window cannot serve") {
+  // An owner wiring stream_active against a window that is not bound routes
+  // the streamed decode rows, whose per-layer acquire fails with the typed
+  // stream-acquire code through the modeled compute-error path: generation
+  // reports failure instead of decoding from resident records or crashing.
+  auto rig = std::make_unique<generator_rig>(+1.0f);
+  auto window_rig = std::make_unique<bound_window>(); // never bound
+
+  auto streamed = std::make_unique<emel::text::generator::sm>(
+      rig->prepared.data, rig->conditioner, window_rig->machine,
+      /*stream_active=*/true);
+  const generation_run run =
+      run_generation(*streamed, rig->tokenizer, rig->samplers);
+  CHECK_FALSE(run.ok);
+}
+
 TEST_CASE("generator passthrough window keeps the resident route engaged") {
   auto rig = std::make_unique<generator_rig>(+1.0f);
   stream_weight_file file{rig->prepared, "passthrough"};
