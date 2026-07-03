@@ -298,6 +298,10 @@ using step_plan = emel::model::llama::detail::step_plan;
 
 constexpr int32_t k_error_ok = 0;
 constexpr int32_t k_error_invalid = 1;
+// A streamed decode could not acquire its layer window slot: distinct from
+// generic compute failure so the outcome is externally attributable to the
+// tensor-window collaborator.
+constexpr int32_t k_error_stream_acquire = 2;
 constexpr int32_t k_prefill_q8_chunk_rows = 4;
 constexpr int32_t k_prefill_q8_chunk8_rows = 8;
 // Minimum prompt size before the parallel matmul lanes are worth the fork
@@ -3770,15 +3774,18 @@ inline bool acquire_streamed_layer(native_backend & backend,
                                    *capture.layout);
 }
 
-template <emel::text::generator::attention_mode mode,
-          scalar_matmul_route route,
+template <emel::text::generator::attention_mode mode, scalar_matmul_route route,
           matmul_lane_mode lanes = matmul_lane_mode::serial,
           window_mode wmode = window_mode::resident>
-inline bool run_layer(native_backend & backend,
-                      const int32_t layer_index,
-                      const int32_t position) noexcept {
+inline bool run_layer(native_backend &backend, const int32_t layer_index,
+                      const int32_t position,
+                      int32_t * err_out = nullptr) noexcept {
   if constexpr (wmode == window_mode::streamed) {
+    // Streamed instantiations are reached only from the decode wrappers,
+    // which receive the graph processor's always-valid err pointer
+    // (kernel_step run_callback passes &callback_err unconditionally).
     if (!acquire_streamed_layer(backend, layer_index)) {
+      *err_out = k_error_stream_acquire;
       return false;
     }
   }
@@ -4749,12 +4756,12 @@ inline bool run_prefill_chunk8_preselected_argmax_q8_k(native_backend & backend,
       backend, selected_index, selected_score);
 }
 
-template <emel::text::generator::attention_mode mode,
-          scalar_matmul_route route,
+template <emel::text::generator::attention_mode mode, scalar_matmul_route route,
           matmul_lane_mode lanes = matmul_lane_mode::serial,
           window_mode wmode = window_mode::resident>
-inline bool run_decode(native_backend & backend,
-                       const emel::graph::processor::event::execute & request) noexcept {
+inline bool run_decode(native_backend &backend,
+                       const emel::graph::processor::event::execute &request,
+                       int32_t * err_out = nullptr) noexcept {
   if (backend.bound_token_count != 1 ||
       backend.bound_position_count != 1 ||
       request.kv_tokens < 0 ||
@@ -4776,7 +4783,8 @@ inline bool run_decode(native_backend & backend,
   }
 
   for (int32_t layer = 0; layer < backend.n_layer; ++layer) {
-    if (!run_layer<mode, route, lanes, wmode>(backend, layer, position)) {
+    if (!run_layer<mode, route, lanes, wmode>(backend, layer, position,
+                                              err_out)) {
       return false;
     }
   }
@@ -4784,15 +4792,15 @@ inline bool run_decode(native_backend & backend,
   return compute_logits<route, lanes>(backend);
 }
 
-template <emel::text::generator::attention_mode mode,
-          scalar_matmul_route route,
+template <emel::text::generator::attention_mode mode, scalar_matmul_route route,
           scalar_argmax_route argmax_route,
           matmul_lane_mode lanes = matmul_lane_mode::serial,
           window_mode wmode = window_mode::resident>
-inline bool run_decode_preselected_argmax(native_backend & backend,
-                                          const emel::graph::processor::event::execute & request,
-                                          int32_t & selected_index,
-                                          float & selected_score) noexcept {
+inline bool run_decode_preselected_argmax(
+    native_backend &backend,
+    const emel::graph::processor::event::execute &request,
+    int32_t &selected_index, float &selected_score,
+    int32_t * err_out = nullptr) noexcept {
   if (backend.bound_token_count != 1 ||
       backend.bound_position_count != 1 ||
       request.kv_tokens < 0 ||
@@ -4814,7 +4822,8 @@ inline bool run_decode_preselected_argmax(native_backend & backend,
   }
 
   for (int32_t layer = 0; layer < backend.n_layer; ++layer) {
-    if (!run_layer<mode, route, lanes, wmode>(backend, layer, position)) {
+    if (!run_layer<mode, route, lanes, wmode>(backend, layer, position,
+                                              err_out)) {
       return false;
     }
   }
@@ -5226,19 +5235,18 @@ inline bool bind_guarded_inputs(const emel::graph::processor::event::execute & r
   return true;
 }
 
-template <emel::text::generator::attention_mode mode,
-          scalar_matmul_route route,
+template <emel::text::generator::attention_mode mode, scalar_matmul_route route,
           step_kind expected_kind,
           matmul_lane_mode lanes = matmul_lane_mode::serial,
           window_mode wmode = window_mode::resident>
 inline bool run_kernel_scalar_mode(const emel::graph::processor::event::execute & request,
                                    int32_t * err_out) noexcept {
-  (void)err_out;
   auto & backend = bind_native_backend(request);
   if constexpr (expected_kind == step_kind::prefill) {
+    (void)err_out;
     return run_prefill<mode, route>(backend);
   } else {
-    return run_decode<mode, route, lanes, wmode>(backend, request);
+    return run_decode<mode, route, lanes, wmode>(backend, request, err_out);
   }
 }
 

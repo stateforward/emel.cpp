@@ -26,9 +26,11 @@ inline void on_source_map_done(
 
 // Shared by prime, acquire-miss, and ring-advance effects (all in this file):
 // arms the slot's completion source, hints the OS ahead of the copy, stages
-// the load ticket, and hands it to the I/O pool. A rejected submit runs the
-// ticket inline on the caller (bounded backpressure, mirroring the sliced
-// matmul fallback) and fires the source so drain semantics stay uniform.
+// the load ticket, and hands it to the I/O pool. The submitted load is not
+// hidden deferred work: its in-flight state is explicit machine state (slot
+// lifecycle loading) and its completion re-enters as the modeled
+// emel::event::completion, drained before any dispatch that requires it
+// returns (see the RTC interpretation note in sm.hpp).
 inline void bind_and_submit_layer_load(context &ctx,
                                        detail::stream_scheduler &scheduler,
                                        const int32_t layer) noexcept {
@@ -59,8 +61,14 @@ inline void bind_and_submit_layer_load(context &ctx,
   const bool submitted = ctx.io_pool->try_submit_with_completion(
       [ticket_ptr = &ticket]() noexcept { detail::load_ticket::run_task(ticket_ptr); },
       &scheduler.source(slot_index), &emel::policy::completion_source::fire);
+  // Rejection cannot occur within the machine's own invariants (at most
+  // slot_count <= 8 loads in flight against the pool's 128-entry queue), but
+  // a shared or misconfigured pool must not strand the drain: the un-run
+  // ticket (ok=false) fires immediately and commits its slot as failed
+  // through the normal completion route, where the acquire chain's
+  // failed-slot resubmit and slot_copy_failed rows make the outcome
+  // explicit. No alternate execution path is chosen here.
   if (!submitted) {
-    ticket.run();
     emel::policy::completion_source::fire(&scheduler.source(slot_index));
   }
 }
@@ -164,25 +172,20 @@ struct effect_activate_passthrough {
   }
 };
 
-// One-time setup allocation: window slots are the streaming feature's working
-// memory, sized at bind before any hot-path dispatch, freed at unbind/context
-// destruction. This is the sanctioned construction-time heap use. The
-// allocation is an attempt whose outcome the alloc-decision guards route on:
-// nothrow new, all-or-nothing recorded in status.slots_alloc_ok.
-struct effect_allocate_slots {
+// Partitions the caller-provided arena into window slots: pure pointer
+// bookkeeping (the machine never allocates during dispatch), validated by
+// guard_bind_slot_storage_sufficient before this route is selected.
+struct effect_partition_slot_storage {
   void operator()(const detail::bind_window_runtime &ev,
                   context &ctx) const noexcept {
     ctx.window.slot_count = ev.request.request.window_slots;
-    bool all_ok = true;
+    uint8_t *base = ev.request.request.slot_storage.data();
     for (uint32_t index = 0; index < ctx.window.slot_count; ++index) {
-      ctx.window.slots[index].storage = static_cast<uint8_t *>(::operator new(
-          ctx.window.slot_capacity_bytes,
-          std::align_val_t{detail::k_slot_alignment_bytes}, std::nothrow));
+      ctx.window.slots[index].storage =
+          base + static_cast<uint64_t>(index) * ctx.window.slot_capacity_bytes;
       ctx.window.slots[index].layer = -1;
       ctx.window.slots[index].lifecycle = detail::slot_lifecycle::vacant;
-      all_ok = all_ok && ctx.window.slots[index].storage != nullptr;
     }
-    ev.status.slots_alloc_ok = all_ok;
   }
 };
 
@@ -515,30 +518,31 @@ struct effect_activate_passthrough_and_publish {
   }
 };
 
-struct effect_finish_streaming_and_publish {
+struct effect_activate_streaming_and_publish {
   void operator()(const detail::bind_window_runtime &ev,
                   context &ctx) const noexcept {
+    effect_partition_slot_storage{}(ev, ctx);
     effect_finish_streaming{}(ev, ctx);
     effect_prime_window{}(ev, ctx);
     effect_publish_bind_done{}(ev, ctx);
   }
 };
 
-struct effect_finish_streaming_and_record {
+struct effect_activate_streaming_and_record {
   void operator()(const detail::bind_window_runtime &ev,
                   context &ctx) const noexcept {
+    effect_partition_slot_storage{}(ev, ctx);
     effect_finish_streaming{}(ev, ctx);
     effect_prime_window{}(ev, ctx);
     effect_record_bind_done{}(ev, ctx);
   }
 };
 
-struct effect_release_and_mark_alloc_failed {
+struct effect_release_and_mark_slot_storage_too_small {
   void operator()(const detail::bind_window_runtime &ev,
                   context &ctx) const noexcept {
-    // reset_window frees whatever slots the attempt did allocate.
     effect_release_rejected_source{}(ev, ctx);
-    ev.status.err = emel::error::cast(error::slot_alloc_failed);
+    ev.status.err = emel::error::cast(error::slot_storage_too_small);
     ev.status.ok = false;
   }
 };
@@ -601,7 +605,7 @@ inline constexpr effect_mark_source_map_failed effect_mark_source_map_failed{};
 inline constexpr effect_scan_layer_plan effect_scan_layer_plan{};
 inline constexpr effect_mark_budget_too_small effect_mark_budget_too_small{};
 inline constexpr effect_activate_passthrough effect_activate_passthrough{};
-inline constexpr effect_allocate_slots effect_allocate_slots{};
+inline constexpr effect_partition_slot_storage effect_partition_slot_storage{};
 inline constexpr effect_finish_streaming effect_finish_streaming{};
 inline constexpr effect_release_rejected_source
     effect_release_rejected_source{};
@@ -641,12 +645,12 @@ inline constexpr effect_activate_passthrough_and_publish
     effect_activate_passthrough_and_publish{};
 inline constexpr effect_activate_passthrough_and_record
     effect_activate_passthrough_and_record{};
-inline constexpr effect_finish_streaming_and_publish
-    effect_finish_streaming_and_publish{};
-inline constexpr effect_finish_streaming_and_record
-    effect_finish_streaming_and_record{};
-inline constexpr effect_release_and_mark_alloc_failed
-    effect_release_and_mark_alloc_failed{};
+inline constexpr effect_activate_streaming_and_publish
+    effect_activate_streaming_and_publish{};
+inline constexpr effect_activate_streaming_and_record
+    effect_activate_streaming_and_record{};
+inline constexpr effect_release_and_mark_slot_storage_too_small
+    effect_release_and_mark_slot_storage_too_small{};
 inline constexpr effect_release_and_mark_budget_too_small
     effect_release_and_mark_budget_too_small{};
 inline constexpr effect_release_and_mark_streaming_config_invalid

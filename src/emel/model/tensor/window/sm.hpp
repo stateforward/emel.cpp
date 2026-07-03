@@ -48,7 +48,6 @@ struct state_unbound {};
 struct state_bind_request_decision {};
 struct state_bind_source_decision {};
 struct state_bind_budget_decision {};
-struct state_bind_alloc_decision {};
 struct state_bind_done_callback {};
 struct state_bind_error_ready {};
 struct state_bind_error_callback {};
@@ -117,11 +116,14 @@ struct model {
           + sml::completion<detail::bind_window_runtime>
           [ guard::guard_bind_fits_budget_callback_absent{} ]
           / action::effect_activate_passthrough_and_record
-      , sml::state<state_bind_alloc_decision> <=
-          sml::state<state_bind_budget_decision>
+      , sml::state<state_ready> <= sml::state<state_bind_budget_decision>
           + sml::completion<detail::bind_window_runtime>
-          [ guard::guard_bind_requires_streaming{} ]
-          / action::effect_allocate_slots
+          [ guard::guard_bind_requires_streaming_callback_present{} ]
+          / action::effect_activate_streaming_and_publish
+      , sml::state<state_ready> <= sml::state<state_bind_budget_decision>
+          + sml::completion<detail::bind_window_runtime>
+          [ guard::guard_bind_requires_streaming_callback_absent{} ]
+          / action::effect_activate_streaming_and_record
       , sml::state<state_bind_error_ready> <=
           sml::state<state_bind_budget_decision>
           + sml::completion<detail::bind_window_runtime>
@@ -130,25 +132,13 @@ struct model {
       , sml::state<state_bind_error_ready> <=
           sml::state<state_bind_budget_decision>
           + sml::completion<detail::bind_window_runtime>
+          [ guard::guard_bind_slot_storage_too_small{} ]
+          / action::effect_release_and_mark_slot_storage_too_small
+      , sml::state<state_bind_error_ready> <=
+          sml::state<state_bind_budget_decision>
+          + sml::completion<detail::bind_window_runtime>
           [ guard::guard_bind_streaming_config_invalid{} ]
           / action::effect_release_and_mark_streaming_config_invalid
-
-      //------------------------------------------------------------------------------//
-      // streaming slot allocation: the attempt's recorded outcome routes
-      // activation or the released-and-failed error.
-      , sml::state<state_ready> <= sml::state<state_bind_alloc_decision>
-          + sml::completion<detail::bind_window_runtime>
-          [ guard::guard_bind_slots_alloc_ok_callback_present{} ]
-          / action::effect_finish_streaming_and_publish
-      , sml::state<state_ready> <= sml::state<state_bind_alloc_decision>
-          + sml::completion<detail::bind_window_runtime>
-          [ guard::guard_bind_slots_alloc_ok_callback_absent{} ]
-          / action::effect_finish_streaming_and_record
-      , sml::state<state_bind_error_ready> <=
-          sml::state<state_bind_alloc_decision>
-          + sml::completion<detail::bind_window_runtime>
-          [ guard::guard_bind_slots_alloc_failed{} ]
-          / action::effect_release_and_mark_alloc_failed
 
       //------------------------------------------------------------------------------//
       // bind error publication.

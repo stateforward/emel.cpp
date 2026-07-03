@@ -283,6 +283,11 @@ struct bound_window {
     return ctx;
   }
 
+  // Owner-provided slot arena: two slots at the toy model's aligned layer
+  // span, alive for the rig's lifetime.
+  alignas(window::detail::k_slot_alignment_bytes)
+      std::array<uint8_t, 2u * 7u * 64u> slot_arena{};
+
   bool bind(const stream_weight_file & file, const uint64_t budget_bytes) {
     const window::event::bind_window_request request{
         .file_path = file.path_str,
@@ -290,6 +295,7 @@ struct bound_window {
         .extents = file.extents,
         .layer_weight_counts = file.layer_weight_counts,
         .budget_bytes = budget_bytes,
+        .slot_storage = std::span<uint8_t>{slot_arena},
         .window_slots = 2u,
         .prefetch_depth = 1u,
         .stage_chunk_bytes = window::detail::k_default_stream_chunk_bytes,
@@ -500,6 +506,23 @@ TEST_CASE("generator preselected streamed decode consumes slot bytes not "
   REQUIRE(run_b.text() == "worldworld");
   CHECK(mixed_run.text() == "helloworld");
   CHECK(mixed_run.text() != run_a.text());
+}
+
+TEST_CASE(
+    "generator streamed decode fails cleanly when the window cannot serve") {
+  // An owner wiring stream_active against a window that is not bound routes
+  // the streamed decode rows, whose per-layer acquire fails with the typed
+  // stream-acquire code through the modeled compute-error path: generation
+  // reports failure instead of decoding from resident records or crashing.
+  auto rig = std::make_unique<generator_rig>(+1.0f);
+  auto window_rig = std::make_unique<bound_window>(); // never bound
+
+  auto streamed = std::make_unique<emel::text::generator::sm>(
+      rig->prepared.data, rig->conditioner, window_rig->machine,
+      /*stream_active=*/true);
+  const generation_run run =
+      run_generation(*streamed, rig->tokenizer, rig->samplers);
+  CHECK_FALSE(run.ok);
 }
 
 TEST_CASE("generator passthrough window keeps the resident route engaged") {

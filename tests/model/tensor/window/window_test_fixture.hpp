@@ -148,15 +148,24 @@ struct window_fixture {
 
   window_fixture() : machine{make_context()} {}
 
+  // Owner-provided slot arena: sized for the fixture's largest layer across
+  // the maximum slot count, alive for the fixture's lifetime.
+  alignas(window::detail::k_slot_alignment_bytes) std::array<
+      uint8_t, window::detail::k_max_window_slots * 2u * 8192u> slot_arena{};
+
   bool bind(const stream_file &file, bind_capture &capture,
             const uint64_t budget_bytes, const uint32_t slots = 4u,
-            const uint32_t prefetch_depth = 2u) {
+            const uint32_t prefetch_depth = 2u,
+            std::span<uint8_t> storage_override = {},
+            const bool use_override = false) {
     const window::event::bind_window_request request{
         .file_path = file.path_str,
         .file_size_bytes = file.file_size,
         .extents = file.extents,
         .layer_weight_counts = file.layer_weight_counts,
         .budget_bytes = budget_bytes,
+        .slot_storage =
+            use_override ? storage_override : std::span<uint8_t>{slot_arena},
         .window_slots = slots,
         .prefetch_depth = prefetch_depth,
         .stage_chunk_bytes = window::detail::k_default_stream_chunk_bytes,

@@ -24,9 +24,14 @@ namespace emel::model::tensor::window::event {
 
 // Establishes the streaming window over a model file: maps the whole file as
 // the copy source, records the caller-built per-layer weight extents, and —
-// when the streamed weight bytes exceed budget_bytes — allocates window slots,
-// starts prefetch, and reports streaming_active. A zero budget or a fitting
-// model resolves to the passthrough mode with no slots and no overhead.
+// when the streamed weight bytes exceed budget_bytes — partitions the
+// caller-provided slot_storage into window slots, starts prefetch, and
+// reports streaming_active. A zero budget or a fitting model resolves to the
+// passthrough mode with no slots and no overhead. Slot storage is owned by
+// the caller for the lifetime of the bind (the machine never allocates
+// during dispatch): it must be k_slot_alignment_bytes-aligned and hold
+// window_slots * (largest aligned layer span) bytes; unbind (or the machine
+// destructor's drain) joins in-flight loads before the caller may free it.
 struct bind_window_request {
   std::string_view file_path = {};
   uint64_t file_size_bytes = 0u;
@@ -36,6 +41,7 @@ struct bind_window_request {
   std::span<const detail::weight_extent> extents = {};
   std::span<const uint16_t> layer_weight_counts = {};
   uint64_t budget_bytes = 0u;
+  std::span<uint8_t> slot_storage = {};
   uint32_t window_slots = 0u;
   uint32_t prefetch_depth = 0u;
   uint64_t stage_chunk_bytes = detail::k_default_stream_chunk_bytes;

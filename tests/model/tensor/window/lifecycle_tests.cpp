@@ -136,6 +136,7 @@ TEST_CASE("tensor window handles absent optional callbacks without crashing") {
         .extents = file.extents,
         .layer_weight_counts = file.layer_weight_counts,
         .budget_bytes = streaming_budget(),
+        .slot_storage = std::span<uint8_t>{fixture.slot_arena},
         .window_slots = 4u,
         .prefetch_depth = 2u,
         .stage_chunk_bytes = window::detail::k_default_stream_chunk_bytes,
@@ -171,33 +172,12 @@ TEST_CASE("tensor window rejects invalid streaming slot configuration") {
 
 TEST_CASE("tensor window failure guards and effects route their errors") {
   // Direct functor checks for the routes that need runtime states the fixture
-  // cannot force (allocation failure, a prefetch-failed slot, the failed
-  // release return modes).
+  // cannot force with real collaborators (a prefetch-failed slot, the
+  // failed-release return modes).
   window_fixture fixture{};
   window::action::context ctx = fixture.make_context();
 
-  const window::event::bind_window_request request{};
-  const window::event::bind_window bind_request{request};
-  window::detail::bind_attempt_status bind_status{};
   window::detail::stream_scheduler scheduler{};
-  window::detail::bind_window_runtime bind_runtime{bind_request, bind_status,
-                                                   scheduler};
-
-  bind_status.slots_alloc_ok = false;
-  CHECK(window::guard::guard_bind_slots_alloc_failed{}(bind_runtime, ctx));
-  CHECK_FALSE(window::guard::guard_bind_slots_alloc_ok_callback_present{}(
-      bind_runtime, ctx));
-  CHECK_FALSE(window::guard::guard_bind_slots_alloc_ok_callback_absent{}(
-      bind_runtime, ctx));
-  window::action::effect_release_and_mark_alloc_failed(bind_runtime, ctx);
-  CHECK(bind_status.err == emel::error::cast(window::error::slot_alloc_failed));
-  CHECK_FALSE(bind_status.ok);
-
-  bind_status.slots_alloc_ok = true;
-  CHECK_FALSE(
-      window::guard::guard_bind_slots_alloc_failed{}(bind_runtime, ctx));
-  CHECK(window::guard::guard_bind_slots_alloc_ok_callback_absent{}(bind_runtime,
-                                                                   ctx));
 
   // A slot committed as failed for the requested layer routes the resubmit
   // guard, and only that guard.
@@ -265,6 +245,32 @@ TEST_CASE("tensor window failure guards and effects route their errors") {
 
   // Reset the crafted slot state so the context destructor sees no storage.
   ctx.window = {};
+}
+
+TEST_CASE("tensor window rejects undersized slot storage explicitly") {
+  stream_file file{"small_arena"};
+  window_fixture fixture{};
+  bind_capture capture{};
+
+  // A valid streaming config whose caller arena cannot hold the slots must
+  // report slot_storage_too_small (and release the mapping, proven by the
+  // follow-up bind).
+  alignas(
+      window::detail::k_slot_alignment_bytes) static std::array<uint8_t, 64u>
+      tiny_arena{};
+  CHECK_FALSE(fixture.bind(file, capture, streaming_budget(), 4u, 2u,
+                           std::span<uint8_t>{tiny_arena},
+                           /*use_override=*/true));
+  CHECK(capture.error);
+  CHECK(capture.err ==
+        emel::error::cast(window::error::slot_storage_too_small));
+  CHECK(fixture.machine.is(stateforward::sml::state<window::state_unbound>));
+
+  bind_capture retry{};
+  CHECK(fixture.bind(file, retry, streaming_budget()));
+  CHECK(retry.done);
+  unbind_capture unbind{};
+  CHECK(fixture.unbind(unbind));
 }
 
 TEST_CASE("tensor window releases the source mapping on rejected binds") {

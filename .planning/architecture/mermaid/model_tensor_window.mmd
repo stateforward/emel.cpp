@@ -8,12 +8,11 @@ stateDiagram-v2
   state_bind_source_decision --> state_bind_error_ready : completion_bind_window_runtime_ [guard_source_map_failed_] / effect_mark_source_map_failed_
   state_bind_budget_decision --> state_passthrough_ready : completion_bind_window_runtime_ [guard_bind_fits_budget_callback_present_] / effect_activate_passthrough_and_publish_
   state_bind_budget_decision --> state_passthrough_ready : completion_bind_window_runtime_ [guard_bind_fits_budget_callback_absent_] / effect_activate_passthrough_and_record_
-  state_bind_budget_decision --> state_bind_alloc_decision : completion_bind_window_runtime_ [guard_bind_requires_streaming_] / effect_allocate_slots_
+  state_bind_budget_decision --> state_ready : completion_bind_window_runtime_ [guard_bind_requires_streaming_callback_present_] / effect_activate_streaming_and_publish_
+  state_bind_budget_decision --> state_ready : completion_bind_window_runtime_ [guard_bind_requires_streaming_callback_absent_] / effect_activate_streaming_and_record_
   state_bind_budget_decision --> state_bind_error_ready : completion_bind_window_runtime_ [guard_bind_budget_too_small_] / effect_release_and_mark_budget_too_small_
+  state_bind_budget_decision --> state_bind_error_ready : completion_bind_window_runtime_ [guard_bind_slot_storage_too_small_] / effect_release_and_mark_slot_storage_too_small_
   state_bind_budget_decision --> state_bind_error_ready : completion_bind_window_runtime_ [guard_bind_streaming_config_invalid_] / effect_release_and_mark_streaming_config_invalid_
-  state_bind_alloc_decision --> state_ready : completion_bind_window_runtime_ [guard_bind_slots_alloc_ok_callback_present_] / effect_finish_streaming_and_publish_
-  state_bind_alloc_decision --> state_ready : completion_bind_window_runtime_ [guard_bind_slots_alloc_ok_callback_absent_] / effect_finish_streaming_and_record_
-  state_bind_alloc_decision --> state_bind_error_ready : completion_bind_window_runtime_ [guard_bind_slots_alloc_failed_] / effect_release_and_mark_alloc_failed_
   state_bind_error_ready --> state_bind_error_callback : completion_bind_window_runtime_ [guard_bind_error_callback_present_] / effect_publish_bind_error_
   state_bind_error_ready --> state_unbound : completion_bind_window_runtime_ [guard_bind_error_callback_absent_] / effect_record_bind_error_
   state_bind_error_callback --> state_unbound : completion_bind_window_runtime_ [always] / effect_record_bind_error_
