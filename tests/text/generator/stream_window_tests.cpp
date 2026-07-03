@@ -326,6 +326,35 @@ struct generation_run {
   }
 };
 
+// Dispatches one generate on an already-initialized generator so tests can
+// run repeated generations on the same machine.
+generation_run dispatch_generate(emel::text::generator::sm &generator) {
+  generation_run run{};
+  callback_tracker tracker{};
+
+  static constexpr std::array<emel::text::formatter::chat_message, 1> k_messages = {
+      emel::text::formatter::chat_message{.role = "user", .content = "hello"},
+  };
+  emel::text::generator::event::generate generate{
+      std::span<const emel::text::formatter::chat_message>{k_messages},
+      2,
+      std::span<char>{run.output.data(), run.output.size()},
+      run.output_length,
+  };
+  generate.add_generation_prompt = false;
+  generate.enable_thinking = false;
+  generate.on_done =
+      emel::callback<void(const emel::text::generator::events::generation_done &)>(
+          &tracker, on_generate_done);
+  generate.on_error =
+      emel::callback<void(const emel::text::generator::events::generation_error &)>(
+          &tracker, on_generate_error);
+  run.ok = generator.process_event(generate) && tracker.generate_done_called;
+  run.tokens_generated = tracker.tokens_generated;
+  run.output_length = tracker.output_length;
+  return run;
+}
+
 generation_run
 run_generation(emel::text::generator::sm &generator,
                emel::text::tokenizer::sm &tokenizer,
@@ -362,27 +391,7 @@ run_generation(emel::text::generator::sm &generator,
     return run;
   }
 
-  static constexpr std::array<emel::text::formatter::chat_message, 1> k_messages = {
-      emel::text::formatter::chat_message{.role = "user", .content = "hello"},
-  };
-  emel::text::generator::event::generate generate{
-      std::span<const emel::text::formatter::chat_message>{k_messages},
-      2,
-      std::span<char>{run.output.data(), run.output.size()},
-      run.output_length,
-  };
-  generate.add_generation_prompt = false;
-  generate.enable_thinking = false;
-  generate.on_done =
-      emel::callback<void(const emel::text::generator::events::generation_done &)>(
-          &tracker, on_generate_done);
-  generate.on_error =
-      emel::callback<void(const emel::text::generator::events::generation_error &)>(
-          &tracker, on_generate_error);
-  run.ok = generator.process_event(generate) && tracker.generate_done_called;
-  run.tokens_generated = tracker.tokens_generated;
-  run.output_length = tracker.output_length;
-  return run;
+  return dispatch_generate(generator);
 }
 
 struct generator_rig {
@@ -462,6 +471,46 @@ TEST_CASE("generator streamed decode consumes slot bytes not resident records") 
   REQUIRE(run_b.text() == "worldworld");
   CHECK(mixed_run.text() == "helloworld");
   CHECK(mixed_run.text() != run_a.text());
+}
+
+TEST_CASE("generator streamed decode restores resident weight views between runs") {
+  // Control: repeated generations on a resident machine are deterministic, so
+  // any second-run divergence below is attributable to streamed-state leakage.
+  auto rig_a = std::make_unique<generator_rig>(+1.0f);
+  auto resident_a = std::make_unique<emel::text::generator::sm>(rig_a->prepared.data,
+                                                                rig_a->conditioner);
+  const generation_run resident_first =
+      run_generation(*resident_a, rig_a->tokenizer, rig_a->samplers);
+  REQUIRE(resident_first.ok);
+  const generation_run resident_second = dispatch_generate(*resident_a);
+  REQUIRE(resident_second.ok);
+  REQUIRE(resident_second.text() == resident_first.text());
+
+  // Mixed rig: model A resident records, model B streamed bytes. Each run's
+  // prefill is resident (model A -> "hello") and its decode is streamed
+  // (model B -> "world"). If the streamed decode left the block weight views
+  // pointing at the shared per-role stream records instead of restoring the
+  // pristine per-layer tensors, the second run's resident prefill reads the
+  // last acquired slot's clone and diverges.
+  auto rig_b_file = std::make_unique<generator_rig>(-1.0f);
+  stream_weight_file file_b{rig_b_file->prepared, "restore"};
+  auto window_rig = std::make_unique<bound_window>();
+  REQUIRE(window_rig->bind(file_b, k_streaming_budget));
+  REQUIRE(window_rig->streaming_active);
+
+  auto rig_mixed = std::make_unique<generator_rig>(+1.0f);
+  auto streamed = std::make_unique<emel::text::generator::sm>(rig_mixed->prepared.data,
+                                     rig_mixed->conditioner,
+                                     window_rig->machine,
+                                     window_rig->streaming_active);
+  const generation_run first_run =
+      run_generation(*streamed, rig_mixed->tokenizer, rig_mixed->samplers);
+  REQUIRE(first_run.ok);
+  REQUIRE(first_run.text() == "helloworld");
+
+  const generation_run second_run = dispatch_generate(*streamed);
+  REQUIRE(second_run.ok);
+  CHECK(second_run.text() == "helloworld");
 }
 
 TEST_CASE("generator preselected streamed decode consumes slot bytes not "

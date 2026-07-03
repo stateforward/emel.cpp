@@ -3739,6 +3739,35 @@ inline bool bind_streamed_block_views(
          extent_index == layout.weight_count;
 }
 
+// Restores every block's matmul weight views to the prepare()-time records
+// after a streamed step, so a later resident step reads the per-layer
+// tensors instead of the shared per-role stream records (which hold the last
+// acquired slot's clone). Pure pointer bookkeeping on the already-completed
+// streamed route; used by both streamed decode drivers.
+inline void reset_stream_block_views(native_backend & backend) noexcept {
+  const size_t layer_count = backend.stream.pristine.size() < backend.blocks.size()
+                                 ? backend.stream.pristine.size()
+                                 : backend.blocks.size();
+  for (size_t layer = 0; layer < layer_count; ++layer) {
+    block_weights & block = backend.blocks[layer];
+    const auto & roles = backend.stream.pristine[layer];
+    const auto restore = [&](tensor_matrix & matrix, const size_t role) noexcept {
+      if (roles[role] != nullptr) {
+        matrix.tensor = roles[role];
+      }
+    };
+    restore(block.attention_q, k_stream_role_attention_q);
+    restore(block.attention_k, k_stream_role_attention_k);
+    restore(block.attention_v, k_stream_role_attention_v);
+    restore(block.attention_output, k_stream_role_attention_output);
+    restore(block.feed_forward_gate, k_stream_role_feed_forward_gate);
+    restore(block.feed_forward_down, k_stream_role_feed_forward_down);
+    restore(block.feed_forward_up, k_stream_role_feed_forward_up);
+    restore(block.shortconv_in_proj, k_stream_role_shortconv_in_proj);
+    restore(block.shortconv_out_proj, k_stream_role_shortconv_out_proj);
+  }
+}
+
 struct stream_acquire_capture {
   bool done = false;
   const uint8_t * slot_base = nullptr;
@@ -4785,8 +4814,14 @@ inline bool run_decode(native_backend &backend,
   for (int32_t layer = 0; layer < backend.n_layer; ++layer) {
     if (!run_layer<mode, route, lanes, wmode>(backend, layer, position,
                                               err_out)) {
+      if constexpr (wmode == window_mode::streamed) {
+        reset_stream_block_views(backend);
+      }
       return false;
     }
+  }
+  if constexpr (wmode == window_mode::streamed) {
+    reset_stream_block_views(backend);
   }
   backend.kv_cache_tokens = position + 1;
   return compute_logits<route, lanes>(backend);
@@ -4824,8 +4859,14 @@ inline bool run_decode_preselected_argmax(
   for (int32_t layer = 0; layer < backend.n_layer; ++layer) {
     if (!run_layer<mode, route, lanes, wmode>(backend, layer, position,
                                               err_out)) {
+      if constexpr (wmode == window_mode::streamed) {
+        reset_stream_block_views(backend);
+      }
       return false;
     }
+  }
+  if constexpr (wmode == window_mode::streamed) {
+    reset_stream_block_views(backend);
   }
   backend.kv_cache_tokens = position + 1;
   return compute_logits_preselected_argmax<argmax_route>(
