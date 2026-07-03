@@ -4,6 +4,8 @@
 #include <cstring>
 #include <string_view>
 
+#include <memory>
+
 #include <doctest/doctest.h>
 
 #include "emel/model/data.hpp"
@@ -37,7 +39,8 @@ int32_t add_token(emel::model::data::vocab &vocab, const char *text,
 
 emel::model::data::vocab &make_bpe_vocab() {
   static emel::model::data::vocab vocab = {};
-  vocab = {};
+  std::destroy_at(&vocab);
+  std::construct_at(&vocab);
   vocab.tokenizer_model_id = emel::model::data::tokenizer_model::BPE;
   vocab.tokenizer_pre_id = emel::model::data::tokenizer_pre::GPT2;
   vocab.ignore_merges = true;

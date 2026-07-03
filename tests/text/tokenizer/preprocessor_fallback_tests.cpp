@@ -4,6 +4,8 @@
 #include <span>
 #include <string_view>
 
+#include <memory>
+
 #include <doctest/doctest.h>
 
 #include "emel/emel.h"
@@ -17,7 +19,8 @@ namespace {
 // Reference: ggml-org/llama.cpp @ 35715657cb2fa6eb302a2c1933ed10dbd0d8bc75
 emel::model::data::vocab & make_vocab_with_specials() {
   static emel::model::data::vocab vocab = {};
-  vocab = {};
+  std::destroy_at(&vocab);
+  std::construct_at(&vocab);
   vocab.n_tokens = 2;
   vocab.entries[0].text_offset = 0;
   vocab.entries[0].text_length = 1;
@@ -34,7 +37,8 @@ emel::model::data::vocab & make_vocab_with_specials() {
 
 emel::model::data::vocab & make_bpe_vocab() {
   static emel::model::data::vocab vocab = {};
-  vocab = {};
+  std::destroy_at(&vocab);
+  std::construct_at(&vocab);
   vocab.n_tokens = 0;
   vocab.tokenizer_model_id = emel::model::data::tokenizer_model::BPE;
   vocab.tokenizer_pre_id = emel::model::data::tokenizer_pre::GPT2;
@@ -125,7 +129,8 @@ TEST_CASE("tokenizer_preprocessor_fallback_phase_result_guards") {
   using emel::text::tokenizer::preprocessor::event::preprocess_runtime;
 
   static emel::model::data::vocab vocab = {};
-  vocab = {};
+  std::destroy_at(&vocab);
+  std::construct_at(&vocab);
   vocab.tokenizer_model_id = emel::model::data::tokenizer_model::NONE;
 
   std::array<emel::text::tokenizer::preprocessor::fragment, 1> fragments = {};

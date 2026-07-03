@@ -1,5 +1,7 @@
 #pragma once
 
+#include <memory>
+
 #include <array>
 #include <queue>
 #include <cstdint>
@@ -119,9 +121,12 @@ struct vocab_builder {
   emel::model::data::vocab * vocab = nullptr;
 
   vocab_builder() : vocab(&vocab_storage()) {
-    // Value-initialize in place: vocab is non-trivial, so memset is UB and
-    // g++ rejects it under -Werror=class-memaccess.
-    *vocab = emel::model::data::vocab{};
+    // Re-initialize in place: vocab is non-trivial (memset is UB and g++
+    // rejects it under -Werror=class-memaccess), and assignment from a
+    // temporary would materialize the multi-MB struct on the stack, which
+    // overflows under -O0 coverage builds.
+    std::destroy_at(vocab);
+    std::construct_at(vocab);
   }
 
   void set_model(const char * value) {

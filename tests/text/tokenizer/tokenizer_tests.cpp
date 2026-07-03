@@ -2,6 +2,8 @@
 #include <cstddef>
 #include <cstring>
 
+#include <memory>
+
 #include <doctest/doctest.h>
 
 #include "emel/emel.h"
@@ -27,7 +29,8 @@ int32_t add_token(emel::model::data::vocab & vocab, const char * text,
 
 emel::model::data::vocab & make_bpe_vocab() {
   static emel::model::data::vocab vocab = {};
-  vocab = {};
+  std::destroy_at(&vocab);
+  std::construct_at(&vocab);
   vocab.tokenizer_model_id = emel::model::data::tokenizer_model::BPE;
   vocab.tokenizer_pre_id = emel::model::data::tokenizer_pre::GPT2;
   vocab.ignore_merges = true;
@@ -109,7 +112,8 @@ TEST_CASE("tokenizer_tokenize_requires_bind") {
 TEST_CASE("tokenizer_tokenize_rejects_mismatched_vocab") {
   auto & vocab = make_bpe_vocab();;
   static emel::model::data::vocab other_vocab = {};
-  other_vocab = {};
+  std::destroy_at(&other_vocab);
+  std::construct_at(&other_vocab);
   emel::text::tokenizer::sm machine{};
 
   int32_t bind_err = emel::text::tokenizer::error_code(emel::text::tokenizer::error::none);

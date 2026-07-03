@@ -1,6 +1,8 @@
 #include <array>
 #include <cstring>
 
+#include <memory>
+
 #include <doctest/doctest.h>
 
 #include "emel/model/data.hpp"
@@ -8,7 +10,8 @@
 
 TEST_CASE("tokenizer_bpe_regex_for_vocab") {
   static emel::model::data::vocab vocab = {};
-  vocab = {};
+  std::destroy_at(&vocab);
+  std::construct_at(&vocab);
   vocab.tokenizer_pre_id = emel::model::data::tokenizer_pre::GPT2;
 
   const auto from_vocab = emel::text::tokenizer::bpe::detail::regex_for(vocab);

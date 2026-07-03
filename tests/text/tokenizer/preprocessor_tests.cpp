@@ -5,6 +5,8 @@
 #include <string>
 #include <string_view>
 
+#include <memory>
+
 #include <doctest/doctest.h>
 
 #include "emel/emel.h"
@@ -20,7 +22,8 @@ namespace {
 
 emel::model::data::vocab & make_vocab_with_specials() {
   static emel::model::data::vocab vocab = {};
-  vocab = {};
+  std::destroy_at(&vocab);
+  std::construct_at(&vocab);
   vocab.n_tokens = 2;
   vocab.entries[0].text_offset = 0;
   vocab.entries[0].text_length = 1;
@@ -39,7 +42,8 @@ emel::model::data::vocab & make_vocab_with_specials() {
 
 emel::model::data::vocab & make_bpe_vocab() {
   static emel::model::data::vocab vocab = {};
-  vocab = {};
+  std::destroy_at(&vocab);
+  std::construct_at(&vocab);
   vocab.n_tokens = 0;
   vocab.tokenizer_model_id = emel::model::data::tokenizer_model::BPE;
   vocab.tokenizer_pre_id = emel::model::data::tokenizer_pre::GPT2;
@@ -48,7 +52,8 @@ emel::model::data::vocab & make_bpe_vocab() {
 
 emel::model::data::vocab & make_bpe_vocab_with_specials() {
   static emel::model::data::vocab vocab = {};
-  vocab = {};
+  std::destroy_at(&vocab);
+  std::construct_at(&vocab);
   vocab.n_tokens = 2;
   vocab.tokenizer_model_id = emel::model::data::tokenizer_model::BPE;
   vocab.tokenizer_pre_id = emel::model::data::tokenizer_pre::GPT2;
@@ -67,7 +72,8 @@ emel::model::data::vocab & make_bpe_vocab_with_specials() {
 
 TEST_CASE("tokenizer_preprocessor_any_valid_request") {
   static emel::model::data::vocab vocab = {};
-  vocab = {};
+  std::destroy_at(&vocab);
+  std::construct_at(&vocab);
   vocab.n_tokens = 0;
 
   std::array<emel::text::tokenizer::preprocessor::fragment,
@@ -93,7 +99,8 @@ TEST_CASE("tokenizer_preprocessor_any_valid_request") {
 
 TEST_CASE("tokenizer_preprocessor_any_invalid_request") {
   static emel::model::data::vocab vocab = {};
-  vocab = {};
+  std::destroy_at(&vocab);
+  std::construct_at(&vocab);
   vocab.n_tokens = 0;
 
   std::array<emel::text::tokenizer::preprocessor::fragment,
@@ -139,7 +146,8 @@ TEST_CASE("tokenizer_preprocessor_build_special_tokens_reuse_empty") {
 
 TEST_CASE("tokenizer_preprocessor_build_special_tokens_skips_non_special") {
   static emel::model::data::vocab vocab = {};
-  vocab = {};
+  std::destroy_at(&vocab);
+  std::construct_at(&vocab);
   vocab.n_tokens = 1;
   vocab.entries[0].text_offset = 0;
   vocab.entries[0].text_length = 1;
@@ -154,7 +162,8 @@ TEST_CASE("tokenizer_preprocessor_build_special_tokens_skips_non_special") {
 
 TEST_CASE("tokenizer_preprocessor_build_special_tokens_empty_text") {
   static emel::model::data::vocab vocab = {};
-  vocab = {};
+  std::destroy_at(&vocab);
+  std::construct_at(&vocab);
   vocab.n_tokens = 1;
   vocab.entries[0].text_offset = 0;
   vocab.entries[0].text_length = 0;
@@ -168,7 +177,8 @@ TEST_CASE("tokenizer_preprocessor_build_special_tokens_empty_text") {
 
 TEST_CASE("tokenizer_preprocessor_build_special_tokens_overflow") {
   static emel::model::data::vocab vocab = {};
-  vocab = {};
+  std::destroy_at(&vocab);
+  std::construct_at(&vocab);
   vocab.n_tokens = emel::text::tokenizer::preprocessor::k_max_special_tokens + 1;
   for (uint32_t i = 0; i < vocab.n_tokens; ++i) {
     vocab.entries[i].text_offset = 0;
@@ -184,7 +194,8 @@ TEST_CASE("tokenizer_preprocessor_build_special_tokens_overflow") {
 
 TEST_CASE("tokenizer_preprocessor_build_special_tokens_accepts_liquid_scale_special_set") {
   static emel::model::data::vocab vocab = {};
-  vocab = {};
+  std::destroy_at(&vocab);
+  std::construct_at(&vocab);
   constexpr uint32_t k_liquid_special_count = 509;
   vocab.n_tokens = k_liquid_special_count;
   for (uint32_t i = 0; i < vocab.n_tokens; ++i) {
@@ -262,7 +273,8 @@ TEST_CASE("tokenizer_preprocessor_detail_push_helpers") {
 
 TEST_CASE("tokenizer_preprocessor_detail_flag_set_out_of_range") {
   static emel::model::data::vocab vocab = {};
-  vocab = {};
+  std::destroy_at(&vocab);
+  std::construct_at(&vocab);
   vocab.n_tokens = 0;
   CHECK_FALSE(emel::text::tokenizer::preprocessor::detail::has_lstrip(vocab, 1));
   CHECK_FALSE(emel::text::tokenizer::preprocessor::detail::is_special_type(vocab, 1));
@@ -530,7 +542,8 @@ TEST_CASE("tokenizer_preprocessor_bpe_regex_split") {
 
 TEST_CASE("tokenizer_preprocessor_bpe_machine_does_not_branch_on_model_metadata") {
   static emel::model::data::vocab vocab = {};
-  vocab = {};
+  std::destroy_at(&vocab);
+  std::construct_at(&vocab);
   vocab.n_tokens = 0;
   vocab.tokenizer_model_id = emel::model::data::tokenizer_model::SPM;
   vocab.tokenizer_pre_id = emel::model::data::tokenizer_pre::GPT2;
@@ -631,7 +644,8 @@ TEST_CASE("tokenizer_preprocessor_on_unexpected_sets_error") {
 TEST_CASE("tokenizer_preprocessor_build_specials_invalid_vocab") {
   emel::text::tokenizer::preprocessor::action::context ctx = {};
   static emel::model::data::vocab vocab = {};
-  vocab = {};
+  std::destroy_at(&vocab);
+  std::construct_at(&vocab);
   vocab.n_tokens = emel::text::tokenizer::preprocessor::k_max_special_tokens + 1;
   for (uint32_t i = 0; i < vocab.n_tokens; ++i) {
     vocab.entries[i].text_offset = 0;
@@ -680,7 +694,8 @@ TEST_CASE("tokenizer_preprocessor_partition_invalid_request") {
 
 TEST_CASE("tokenizer_preprocessor_partition_non_bpe_failure") {
   static emel::model::data::vocab vocab = {};
-  vocab = {};
+  std::destroy_at(&vocab);
+  std::construct_at(&vocab);
   vocab.tokenizer_model_id = emel::model::data::tokenizer_model::SPM;
   std::array<emel::text::tokenizer::preprocessor::fragment,
              emel::text::tokenizer::preprocessor::k_max_fragments>

@@ -5,6 +5,8 @@
 #include <type_traits>
 #include <utility>
 
+#include <memory>
+
 #include <doctest/doctest.h>
 
 #include "emel/emel.h"
@@ -35,7 +37,8 @@ int32_t add_token(emel::model::data::vocab & vocab,
 
 emel::model::data::vocab & make_vocab() {
   static emel::model::data::vocab vocab = {};
-  vocab = {};
+  std::destroy_at(&vocab);
+  std::construct_at(&vocab);
   vocab.tokenizer_model_id = emel::model::data::tokenizer_model::PLAMO2;
   vocab.tokenizer_pre_id = emel::model::data::tokenizer_pre::DEFAULT;
   return vocab;

@@ -502,6 +502,9 @@ TEST_CASE("encoder_encode_impl_variants") {
     builder.add_token("\xE2\x96\x81hello", 0.5f, 1);
     builder.add_token("world", 0.4f, 1);
     builder.set_charsmap_a_to_b();
+    // UGM requires a declared unknown token; the memset-era reset left
+    // unk_id zeroed, which this test silently relied on.
+    builder.vocab->unk_id = 0;
   });
 
   run_variant("rwkv", nullptr, "r", [] (vocab_builder & builder) {
@@ -602,6 +605,8 @@ TEST_CASE("encoder_detail_encode_direct_calls") {
     builder.set_model("t5");
     builder.add_token("\xE2\x96\x81hello", 0.5f, 1);
     builder.add_token("world", 0.4f, 1);
+    // UGM requires a declared unknown token (see guard on vocab->unk_id).
+    builder.vocab->unk_id = 0;
     emel::text::encoders::ugm::sm machine{};
     emel::text::encoders::event::encode ev_ugm{
       .vocab = *builder.vocab,

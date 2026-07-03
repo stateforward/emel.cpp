@@ -3,6 +3,8 @@
 #include <string>
 #include <vector>
 
+#include <memory>
+
 #include <doctest/doctest.h>
 
 #include "emel/model/data.hpp"
@@ -13,7 +15,8 @@ namespace {
 emel::model::data::vocab & make_vocab(
     const emel::model::data::tokenizer_pre pre) {
   static emel::model::data::vocab vocab = {};
-  vocab = {};
+  std::destroy_at(&vocab);
+  std::construct_at(&vocab);
   vocab.tokenizer_pre_id = pre;
   return vocab;
 }

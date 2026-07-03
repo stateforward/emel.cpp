@@ -4,6 +4,8 @@
 #include <span>
 #include <string_view>
 
+#include <memory>
+
 #include <doctest/doctest.h>
 
 #include "emel/emel.h"
@@ -15,7 +17,8 @@ namespace {
 
 emel::model::data::vocab & make_rwkv_vocab_with_specials() {
   static emel::model::data::vocab vocab = {};
-  vocab = {};
+  std::destroy_at(&vocab);
+  std::construct_at(&vocab);
   vocab.n_tokens = 2;
   vocab.tokenizer_model_id = emel::model::data::tokenizer_model::RWKV;
   vocab.entries[0].text_offset = 0;
@@ -35,7 +38,8 @@ emel::model::data::vocab & make_rwkv_vocab_with_specials() {
 
 TEST_CASE("tokenizer_preprocessor_rwkv_valid_request") {
   static emel::model::data::vocab vocab = {};
-  vocab = {};
+  std::destroy_at(&vocab);
+  std::construct_at(&vocab);
   vocab.n_tokens = 0;
   vocab.tokenizer_model_id = emel::model::data::tokenizer_model::RWKV;
 
