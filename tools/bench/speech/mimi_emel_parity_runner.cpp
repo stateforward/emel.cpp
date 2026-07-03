@@ -10,6 +10,7 @@
 // This runner is EMEL-owned end to end; the reference lane
 // (moshi_reference_driver) is a separate executable per the reference
 // policy. Comparison happens in tools/bench/mimi_compare.py.
+#include <chrono>
 #include <cinttypes>
 #include <cstdint>
 #include <cstdio>
@@ -53,6 +54,7 @@ struct options {
   std::filesystem::path model = {};
   std::filesystem::path audio = {};
   std::filesystem::path decode_out = {};
+  bool timing = false;
 };
 
 bool parse_options(const int argc, char **argv, options &opts) {
@@ -65,6 +67,8 @@ bool parse_options(const int argc, char **argv, options &opts) {
       opts.audio = argv[++index];
     } else if (arg == "--decode-out" && has_value) {
       opts.decode_out = argv[++index];
+    } else if (arg == "--timing") {
+      opts.timing = true;
     } else {
       std::fprintf(stderr, "unknown or incomplete argument: %.*s\n",
                    static_cast<int>(arg.size()), arg.data());
@@ -284,6 +288,7 @@ int main(int argc, char **argv) {
   std::vector<int32_t> codes(n_q, -1);
   std::vector<std::vector<int32_t>> all_codes = {};
   all_codes.reserve(frames);
+  const auto encode_started = std::chrono::steady_clock::now();
   for (size_t index = 0; index < frames; ++index) {
     const mimi::event::encode_frame encode_ev = [&] {
       mimi::event::encode_frame ev{
@@ -305,6 +310,15 @@ int main(int argc, char **argv) {
     std::printf("\n");
     all_codes.push_back(codes);
   }
+  if (opts.timing) {
+    const auto encode_elapsed =
+        std::chrono::duration_cast<std::chrono::nanoseconds>(
+            std::chrono::steady_clock::now() - encode_started)
+            .count();
+    std::printf("# emel_encode_ns_per_frame=%" PRId64 "\n",
+                static_cast<int64_t>(encode_elapsed) /
+                    static_cast<int64_t>(frames));
+  }
 
   if (!opts.decode_out.empty()) {
     if (!codec.process_event(mimi::event::reset_stream{})) {
@@ -318,6 +332,7 @@ int main(int argc, char **argv) {
                    opts.decode_out.string().c_str());
       return 1;
     }
+    const auto decode_started = std::chrono::steady_clock::now();
     for (size_t index = 0; index < all_codes.size(); ++index) {
       const mimi::event::decode_frame decode_ev = [&] {
         mimi::event::decode_frame ev{std::span<const int32_t>{all_codes[index]},
@@ -332,6 +347,15 @@ int main(int argc, char **argv) {
       }
       out.write(reinterpret_cast<const char *>(decoded.data()),
                 static_cast<std::streamsize>(decoded.size() * sizeof(float)));
+    }
+    if (opts.timing) {
+      const auto decode_elapsed =
+          std::chrono::duration_cast<std::chrono::nanoseconds>(
+              std::chrono::steady_clock::now() - decode_started)
+              .count();
+      std::printf("# emel_decode_ns_per_frame=%" PRId64 "\n",
+                  static_cast<int64_t>(decode_elapsed) /
+                      static_cast<int64_t>(all_codes.size()));
     }
   }
 

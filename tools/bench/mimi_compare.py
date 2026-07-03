@@ -46,6 +46,26 @@ def run_lane(cmd: list[str]) -> str:
   return result.stdout
 
 
+def run_lane_capture(cmd: list[str]) -> tuple[str, str]:
+  result = subprocess.run(cmd, capture_output=True, text=True, check=False)
+  if result.returncode != 0:
+    sys.exit(f"lane failed ({' '.join(cmd)}):\n{result.stderr}")
+  return result.stdout, result.stderr
+
+
+def parse_metric(text: str, key: str) -> float | None:
+  needle = f"{key}="
+  for line in text.splitlines():
+    if needle not in line:
+      continue
+    token = line.split(needle, 1)[1].split()[0]
+    try:
+      return float(token)
+    except ValueError:
+      return None
+  return None
+
+
 def main() -> int:
   parser = argparse.ArgumentParser(description=__doc__)
   parser.add_argument("--emel-runner", required=True)
@@ -71,6 +91,12 @@ def main() -> int:
                       "float implementations while deep-layer codes cascade")
   parser.add_argument("--min-prefix-match", type=float, default=0.0,
                       help="minimum match fraction over --prefix-streams")
+  parser.add_argument("--timing-audio", default=None,
+                      help="24 kHz mono s16 WAV used for a measurement-only "
+                      "per-frame timing pass in both lanes (each lane "
+                      "self-reports its steady-state loop time)")
+  parser.add_argument("--reference-label", default="reference",
+                      help="reference lane display name for timing rows")
   parser.add_argument("--json-out", default=None)
   args = parser.parse_args()
 
@@ -149,6 +175,52 @@ def main() -> int:
         peak = max(abs(x) for x in ref_pcm[:n]) or 1.0
         report["decode_psnr_db"] = (10.0 * math.log10(peak * peak / err)
                                     if err > 0 else float("inf"))
+
+  if args.timing_audio:
+    # Measurement-only pass: each lane self-reports its steady-state
+    # per-frame loop time on a longer signal, excluding model load.
+    with tempfile.TemporaryDirectory() as tmp:
+      tmp_path = Path(tmp)
+      emel_timing_out = run_lane([
+          args.emel_runner, "--model", args.emel_model,
+          "--audio", args.timing_audio, "--timing",
+          "--decode-out", str(tmp_path / "emel_timing.f32")
+      ])
+      ref_codes_out, ref_encode_err = run_lane_capture([
+          args.reference_driver, "encode", "--mimi", args.reference_model,
+          "--audio", args.timing_audio, "--n-q", str(args.n_q)
+      ])
+      ref_timing_codes = tmp_path / "ref_timing_codes.txt"
+      ref_timing_codes.write_text(ref_codes_out)
+      _, ref_decode_err = run_lane_capture([
+          args.reference_driver, "decode", "--mimi", args.reference_model,
+          "--codes", str(ref_timing_codes),
+          "--out", str(tmp_path / "ref_timing.f32"), "--n-q", str(args.n_q)
+      ])
+    timing = {
+        "emel_encode_ns_per_frame":
+            parse_metric(emel_timing_out, "emel_encode_ns_per_frame"),
+        "emel_decode_ns_per_frame":
+            parse_metric(emel_timing_out, "emel_decode_ns_per_frame"),
+        "reference_encode_ns_per_frame": None,
+        "reference_decode_ns_per_frame": None,
+    }
+    ref_encode_ms = parse_metric(ref_encode_err, "encode_ms_per_frame")
+    ref_decode_ms = parse_metric(ref_decode_err, "decode_ms_per_frame")
+    if ref_encode_ms is not None:
+      timing["reference_encode_ns_per_frame"] = ref_encode_ms * 1.0e6
+    if ref_decode_ms is not None:
+      timing["reference_decode_ns_per_frame"] = ref_decode_ms * 1.0e6
+    report["timing"] = timing
+    for stage in ("encode", "decode"):
+      emel_ns = timing[f"emel_{stage}_ns_per_frame"]
+      ref_ns = timing[f"reference_{stage}_ns_per_frame"]
+      if emel_ns is None or ref_ns is None or emel_ns <= 0:
+        continue
+      print(f"speech_codec_mimi/{stage}_frame_timing "
+            f"emel.cpp {emel_ns:.0f} ns/op, "
+            f"{args.reference_label} {ref_ns:.0f} ns/op, "
+            f"ratio={ref_ns / emel_ns:.3f}x")
 
   passed = True
   if args.require_token_exact and not report["token_exact"]:

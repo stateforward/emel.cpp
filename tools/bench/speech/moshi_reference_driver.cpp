@@ -11,6 +11,7 @@
 //   encode --mimi <raw mimi gguf> --audio <24 kHz mono s16 wav> [--n-q N]
 //   decode --mimi <raw mimi gguf> --codes <codes txt> --out <raw f32 pcm>
 //          [--n-q N]
+#include <chrono>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -206,6 +207,7 @@ int main(int argc, char **argv) {
     }
     mimi_encode_context_t *encode_ctx = mimi_encode_alloc_context(codec);
     std::vector<int16_t> tokens(static_cast<size_t>(opts.n_q), -1);
+    const auto encode_started = std::chrono::steady_clock::now();
     for (size_t index = 0; index < frames; ++index) {
       mimi_encode_send(encode_ctx,
                        pcm.data() + index * static_cast<size_t>(frame_size));
@@ -217,8 +219,15 @@ int main(int argc, char **argv) {
       }
       std::printf("\n");
     }
-    std::fprintf(stderr, "encoded %zu frames (frame_size=%d)\n", frames,
-                 frame_size);
+    const auto encode_elapsed_ms =
+        std::chrono::duration_cast<std::chrono::duration<double, std::milli>>(
+            std::chrono::steady_clock::now() - encode_started)
+            .count();
+    std::fprintf(stderr,
+                 "encoded %zu frames (frame_size=%d) "
+                 "encode_ms_per_frame=%.3f\n",
+                 frames, frame_size,
+                 encode_elapsed_ms / static_cast<double>(frames));
     unref(encode_ctx);
   } else {
     std::vector<std::vector<int16_t>> frames = {};
@@ -235,14 +244,22 @@ int main(int argc, char **argv) {
       return 1;
     }
     std::vector<float> frame(static_cast<size_t>(frame_size), 0.0f);
+    const auto decode_started = std::chrono::steady_clock::now();
     for (auto &tokens : frames) {
       mimi_decode_send(decode_ctx, tokens.data());
       mimi_decode_receive(decode_ctx, frame.data());
       out.write(reinterpret_cast<const char *>(frame.data()),
                 static_cast<std::streamsize>(frame.size() * sizeof(float)));
     }
-    std::fprintf(stderr, "decoded %zu frames (frame_size=%d)\n", frames.size(),
-                 frame_size);
+    const auto decode_elapsed_ms =
+        std::chrono::duration_cast<std::chrono::duration<double, std::milli>>(
+            std::chrono::steady_clock::now() - decode_started)
+            .count();
+    std::fprintf(stderr,
+                 "decoded %zu frames (frame_size=%d) "
+                 "decode_ms_per_frame=%.3f\n",
+                 frames.size(), frame_size,
+                 decode_elapsed_ms / static_cast<double>(frames.size()));
     unref(decode_ctx);
   }
 

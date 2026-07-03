@@ -111,6 +111,19 @@ if [[ "$REFERENCE_BACKEND" == "personaplex_mlx" ]]; then
   # 0.52 full-code match while Kyutai's own rustymimi vs MLX is 0.66).
   # Gate the numerically stable early streams hard and keep a sanity floor
   # on the full match; token exactness remains the moshi_cpp lane's gate.
+  # The timing pass is measurement-only: each lane self-reports steady-state
+  # per-frame loop time over a 10 s signal, excluding model load.
+  TIMING_AUDIO="$OUTPUT_DIR/tone_440_24k_10s.wav"
+  python3 - "$TIMING_AUDIO" <<'PY'
+import math, struct, sys, wave
+with wave.open(sys.argv[1], "wb") as wav:
+    wav.setnchannels(1)
+    wav.setsampwidth(2)
+    wav.setframerate(24000)
+    for index in range(240000):
+        value = 0.15 * math.sin(2.0 * math.pi * 440.0 * (index / 24000))
+        wav.writeframesraw(struct.pack("<h", int(value * 32767)))
+PY
   REPORT="$OUTPUT_DIR/mimi_compare_personaplex_mlx.json"
   python3 "$ROOT_DIR/tools/bench/mimi_compare.py" \
     --emel-runner "$EMEL_RUNNER" \
@@ -122,6 +135,8 @@ if [[ "$REFERENCE_BACKEND" == "personaplex_mlx" ]]; then
     --prefix-streams "${EMEL_MIMI_MLX_PREFIX_STREAMS:-4}" \
     --min-prefix-match "${EMEL_MIMI_MLX_MIN_PREFIX_MATCH:-0.90}" \
     --min-code-match "${EMEL_MIMI_MLX_MIN_CODE_MATCH:-0.40}" \
+    --timing-audio "$TIMING_AUDIO" \
+    --reference-label "personaplex-mlx" \
     --json-out "$REPORT"
 else
   REPORT="$OUTPUT_DIR/mimi_compare.json"
