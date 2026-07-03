@@ -467,8 +467,18 @@ struct sm : public emel::co_sm<
   // Destroying a bound window must not free slot storage while pool workers
   // are still copying into it: run the modeled unbind drain (requires every
   // loading slot, joins them, releases the source) before members destruct.
-  // On an unbound machine this is the modeled not_bound no-op.
-  ~sm() { (void)process_event(event::unbind_window{}); }
+  // A failed release keeps the machine on the modeled retained-bound row, so
+  // the second dispatch retries once through that row, converting a transient
+  // unmap failure into a clean release. On an unbound machine (first unbind
+  // succeeded, or never bound) the extra dispatch is the modeled not_bound
+  // no-op. If the retry also fails, the mmap actor keeps the slot quarantined
+  // (in_use, never pushed back to free_stack — see
+  // effect_mark_unmap_failed_and_release_slot), so destruction cannot hand a
+  // live OS mapping's slot to a later map_tensor.
+  ~sm() {
+    (void)process_event(event::unbind_window{});
+    (void)process_event(event::unbind_window{});
+  }
 
   bool process_event(const event::bind_window &ev) {
     detail::bind_attempt_status status{};
