@@ -56,6 +56,13 @@ record runner=kernel_aarch64 kind=source path=tools/bench/kernel/aarch64_bench.c
 record runner=kernel_aarch64 kind=source path=tools/bench/kernel/bench_common.hpp reason=common
 record runner=kernel_aarch64 kind=source path=src/emel/kernel reason=kernel_inputs
 record runner=sm_any kind=source path=tools/bench/sm_any_bench.cpp reason=suite_source
+record runner=sm_scheduler kind=source path=tools/bench/sm_scheduler_bench.cpp reason=suite_source
+record runner=sm_scheduler kind=source path=src/emel/sm.hpp reason=scheduler_policy
+record runner=graph_processor kind=source path=tools/bench/graph/processor_bench.cpp reason=suite_source
+record runner=decode_wavefront kind=source path=tools/bench/text/generator/decode_wavefront_bench.cpp reason=suite_source
+record runner=decode_wavefront kind=source path=src/emel/text/generator/decode_wavefront reason=wavefront_actor
+record runner=parallel_matmul kind=source path=tools/bench/text/generator/parallel_matmul_bench.cpp reason=suite_source
+record runner=parallel_matmul kind=source path=src/emel/text/generator/detail.hpp reason=parallel_matmul_lanes
 record runner=tokenizer_preprocessor_bpe kind=source path=tools/bench/text/tokenizer/preprocessor/bpe_bench.cpp reason=suite_source
 record runner=tokenizer_preprocessor_spm kind=source path=tools/bench/text/tokenizer/preprocessor/spm_bench.cpp reason=suite_source
 record runner=tokenizer_preprocessor_ugm kind=source path=tools/bench/text/tokenizer/preprocessor/ugm_bench.cpp reason=suite_source

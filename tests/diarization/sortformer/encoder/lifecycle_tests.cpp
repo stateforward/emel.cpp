@@ -19,6 +19,7 @@
 #include "emel/kernel/aarch64/actions.hpp"
 #include "emel/model/data.hpp"
 #include "emel/model/sortformer/detail.hpp"
+#include "../../../kernel/test_helpers.hpp"
 
 namespace {
 
@@ -28,6 +29,11 @@ namespace executor_detail = emel::diarization::sortformer::executor::detail;
 namespace modules_detail = emel::diarization::sortformer::modules::detail;
 namespace sortformer_detail = emel::diarization::sortformer::detail;
 namespace transformer_detail = emel::diarization::sortformer::transformer::detail;
+
+emel::kernel::sm & test_kernel() {
+  static emel::kernel::sm kernel{emel::kernel::detect_host_kind()};
+  return kernel;
+}
 
 struct tensor_spec {
   std::string_view name = {};
@@ -154,7 +160,7 @@ size_t tensor_value_count(const tensor_spec & spec) noexcept {
 void build_encoder_model(emel::model::data & model,
                          const bool include_all_tensors,
                          const bool valid_shapes) {
-  std::memset(&model, 0, sizeof(model));
+  emel::tests::reset_model_data(model);
 
   for (const auto & spec : k_pre_specs) {
     append_tensor(model, spec);
@@ -203,7 +209,7 @@ struct pre_encoder_fixture {
   std::vector<std::vector<float>> layer_storage = {};
 
   pre_encoder_fixture() {
-    std::memset(&model, 0, sizeof(model));
+    emel::tests::reset_model_data(model);
     layer_storage.reserve(static_cast<size_t>(encoder_detail::k_layer_count *
                                               encoder_detail::k_layer_tensor_count));
 
@@ -326,7 +332,7 @@ TEST_CASE("sortformer encoder kernels are deterministic") {
   const std::array<float, 2> dense_bias{0.25f, -0.75f};
   std::array<float, 2> dense_output{};
 
-  REQUIRE(sortformer_detail::compute_dense(dense_input, weights, dense_bias, dense_output));
+  REQUIRE(sortformer_detail::compute_dense(test_kernel(), dense_input, weights, dense_bias, dense_output));
   CHECK(dense_output[0] == doctest::Approx(-1.25f));
   CHECK(dense_output[1] == doctest::Approx(-2.0f));
 }
@@ -337,7 +343,7 @@ TEST_CASE("sortformer encoder dense kernel rejects invalid shapes") {
   const std::array<float, 2> bias{0.0f, 0.0f};
   std::array<float, 2> output{};
 
-  CHECK_FALSE(sortformer_detail::compute_dense(input, weights, bias, output));
+  CHECK_FALSE(sortformer_detail::compute_dense(test_kernel(), input, weights, bias, output));
 }
 
 TEST_CASE("sortformer dense batch helpers cover transposed prepared residual paths") {
@@ -372,7 +378,7 @@ TEST_CASE("sortformer dense batch helpers cover transposed prepared residual pat
 
   REQUIRE(sortformer_detail::prepare_dense_weight_cache(weights, input_dim, output_dim, cache));
   CHECK(sortformer_detail::prepare_dense_weight_cache(weights, input_dim, output_dim, cache));
-  REQUIRE(sortformer_detail::compute_dense_batch_prepared(input_rows,
+  REQUIRE(sortformer_detail::compute_dense_batch_prepared(test_kernel(), input_rows,
                                                           row_count,
                                                           input_dim,
                                                           weights,
@@ -382,7 +388,7 @@ TEST_CASE("sortformer dense batch helpers cover transposed prepared residual pat
                                                           transposed_input,
                                                           transposed_output,
                                                           prepared_output));
-  REQUIRE(sortformer_detail::compute_dense_batch_residual_prepared(input_rows,
+  REQUIRE(sortformer_detail::compute_dense_batch_residual_prepared(test_kernel(), input_rows,
                                                                    row_count,
                                                                    input_dim,
                                                                    weights,
@@ -401,7 +407,7 @@ TEST_CASE("sortformer dense batch helpers cover transposed prepared residual pat
                                                    row_count,
                                                    input_dim,
                                                    transposed_input));
-  REQUIRE(sortformer_detail::compute_dense_batch_from_transposed_scaled_residual_prepared(
+  REQUIRE(sortformer_detail::compute_dense_batch_from_transposed_scaled_residual_prepared(test_kernel(), 
       transposed_input,
       row_count,
       input_dim,
@@ -422,7 +428,7 @@ TEST_CASE("sortformer dense batch helpers cover transposed prepared residual pat
       0u,
       output_dim,
       cache));
-  CHECK_FALSE(sortformer_detail::compute_dense_batch_from_transposed_scaled_residual_prepared(
+  CHECK_FALSE(sortformer_detail::compute_dense_batch_from_transposed_scaled_residual_prepared(test_kernel(), 
       transposed_input,
       row_count,
       input_dim,
@@ -472,7 +478,7 @@ TEST_CASE("sortformer dense batch helpers cover unprepared transposed variants")
   }
 
   REQUIRE(sortformer_detail::prepare_dense_weight_cache(weights, input_dim, output_dim, cache));
-  REQUIRE(sortformer_detail::compute_dense_batch(input_rows,
+  REQUIRE(sortformer_detail::compute_dense_batch(test_kernel(), input_rows,
                                                  row_count,
                                                  input_dim,
                                                  weights,
@@ -485,7 +491,7 @@ TEST_CASE("sortformer dense batch helpers cover unprepared transposed variants")
                                                    row_count,
                                                    input_dim,
                                                    transposed_input));
-  REQUIRE(sortformer_detail::compute_dense_batch_to_transposed(input_rows,
+  REQUIRE(sortformer_detail::compute_dense_batch_to_transposed(test_kernel(), input_rows,
                                                                row_count,
                                                                input_dim,
                                                                weights,
@@ -493,7 +499,7 @@ TEST_CASE("sortformer dense batch helpers cover unprepared transposed variants")
                                                                output_dim,
                                                                transposed_input,
                                                                transposed_output));
-  REQUIRE(sortformer_detail::compute_dense_batch_to_transposed_prepared(input_rows,
+  REQUIRE(sortformer_detail::compute_dense_batch_to_transposed_prepared(test_kernel(), input_rows,
                                                                         row_count,
                                                                         input_dim,
                                                                         weights,
@@ -502,7 +508,7 @@ TEST_CASE("sortformer dense batch helpers cover unprepared transposed variants")
                                                                         output_dim,
                                                                         transposed_input,
                                                                         prepared_transposed_output));
-  REQUIRE(sortformer_detail::compute_dense_batch_from_transposed(transposed_input,
+  REQUIRE(sortformer_detail::compute_dense_batch_from_transposed(test_kernel(), transposed_input,
                                                                  row_count,
                                                                  input_dim,
                                                                  weights,
@@ -510,7 +516,7 @@ TEST_CASE("sortformer dense batch helpers cover unprepared transposed variants")
                                                                  output_dim,
                                                                  from_transposed_scratch,
                                                                  from_transposed_output));
-  REQUIRE(sortformer_detail::compute_dense_batch_from_transposed_prepared(
+  REQUIRE(sortformer_detail::compute_dense_batch_from_transposed_prepared(test_kernel(), 
       transposed_input,
       row_count,
       input_dim,
@@ -520,7 +526,7 @@ TEST_CASE("sortformer dense batch helpers cover unprepared transposed variants")
       output_dim,
       prepared_from_transposed_scratch,
       prepared_from_transposed_output));
-  REQUIRE(sortformer_detail::compute_dense_batch_without_bias(input_rows,
+  REQUIRE(sortformer_detail::compute_dense_batch_without_bias(test_kernel(), input_rows,
                                                              row_count,
                                                              input_dim,
                                                              weights,
@@ -528,7 +534,7 @@ TEST_CASE("sortformer dense batch helpers cover unprepared transposed variants")
                                                              transposed_input,
                                                              without_bias_scratch,
                                                              without_bias_output));
-  REQUIRE(sortformer_detail::compute_dense_batch_without_bias_prepared(input_rows,
+  REQUIRE(sortformer_detail::compute_dense_batch_without_bias_prepared(test_kernel(), input_rows,
                                                                       row_count,
                                                                       input_dim,
                                                                       weights,
@@ -537,7 +543,7 @@ TEST_CASE("sortformer dense batch helpers cover unprepared transposed variants")
                                                                       transposed_input,
                                                                       without_bias_prepared_scratch,
                                                                       without_bias_prepared_output));
-  REQUIRE(sortformer_detail::compute_dense_without_bias(
+  REQUIRE(sortformer_detail::compute_dense_without_bias(test_kernel(), 
       std::span<const float>{input_rows.data(), input_dim},
       weights,
       first_row_without_bias));
@@ -563,11 +569,11 @@ TEST_CASE("sortformer dense batch helpers cover unprepared transposed variants")
                                                        0u,
                                                        input_dim,
                                                        transposed_input));
-  CHECK_FALSE(sortformer_detail::compute_dense_without_bias(
+  CHECK_FALSE(sortformer_detail::compute_dense_without_bias(test_kernel(), 
       std::span<const float>{},
       weights,
       first_row_without_bias));
-  CHECK_FALSE(sortformer_detail::compute_dense_batch_without_bias(input_rows,
+  CHECK_FALSE(sortformer_detail::compute_dense_batch_without_bias(test_kernel(), input_rows,
                                                                  row_count,
                                                                  input_dim,
                                                                  weights,
@@ -577,7 +583,7 @@ TEST_CASE("sortformer dense batch helpers cover unprepared transposed variants")
                                                                  std::span<float>{
                                                                      without_bias_output.data(),
                                                                      without_bias_output.size() - 1u}));
-  CHECK_FALSE(sortformer_detail::compute_dense_batch_to_transposed(input_rows,
+  CHECK_FALSE(sortformer_detail::compute_dense_batch_to_transposed(test_kernel(), input_rows,
                                                                   row_count,
                                                                   input_dim,
                                                                   weights,
@@ -587,7 +593,7 @@ TEST_CASE("sortformer dense batch helpers cover unprepared transposed variants")
                                                                   std::span<float>{
                                                                       transposed_output.data(),
                                                                       transposed_output.size() - 1u}));
-  CHECK_FALSE(sortformer_detail::compute_dense_batch_from_transposed(transposed_input,
+  CHECK_FALSE(sortformer_detail::compute_dense_batch_from_transposed(test_kernel(), transposed_input,
                                                                     row_count,
                                                                     input_dim,
                                                                     weights,

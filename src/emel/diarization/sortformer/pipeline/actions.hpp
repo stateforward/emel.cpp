@@ -133,7 +133,8 @@ struct effect_compute_probabilities {
         static_cast<size_t>(detail::k_required_probability_value_count));
     const bool probability_ok =
         emel::diarization::sortformer::output::detail::compute_speaker_probabilities(
-            ctx.hidden, ctx.modules, probability_output);
+            ctx.encoder_workspace.kernel, ctx.hidden, ctx.modules,
+            probability_output);
     effect_store_kernel_result(runtime_ev.ctx, probability_ok);
     runtime_ev.request.probability_count_out =
         detail::k_required_probability_value_count *

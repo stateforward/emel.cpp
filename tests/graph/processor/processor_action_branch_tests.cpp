@@ -470,6 +470,26 @@ TEST_CASE("graph_processor_releases_publish_targets_after_extract_failure") {
   CHECK(second_output.outputs_produced == 2);
 }
 
+TEST_CASE("graph_processor_process_event_async_execute_completes_in_rtc") {
+  namespace event = emel::graph::processor::event;
+
+  lifecycle_fixture lifecycle{};
+  emel::graph::processor::sm machine{};
+
+  dispatch_state dispatch{};
+  event::execution_output output{};
+  const auto request = make_valid_execute(&output, &dispatch, lifecycle);
+
+  emel::bool_task task = machine.process_event_async(request);
+
+  CHECK(task.result());
+  CHECK(dispatch.done_called);
+  CHECK_FALSE(dispatch.error_called);
+  CHECK(output.outputs_produced == 2);
+  CHECK(output.graph_reused == 1u);
+  CHECK(output.lifecycle == &lifecycle.manifest);
+}
+
 TEST_CASE("graph_processor_step_action_and_guard_branches") {
   namespace event = emel::graph::processor::event;
 

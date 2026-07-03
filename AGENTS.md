@@ -9,6 +9,11 @@ ALWAYS follow the RTC actor model and no-queue invariant from `docs/rules/sml.ru
 NEVER use `sml::process_queue`, `sml::defer_queue`, or any mailbox/post-for-later
 mechanism.
 ALWAYS keep dispatch run-to-completion and single-writer per actor.
+ALWAYS treat coroutine or `async`-named dispatch APIs semantically: async is not
+deferred by definition, and `process_event_async` MAY be RTC when completion is
+driven and observed before the top-level dispatch returns.
+NEVER let coroutine continuations, incomplete tasks, scheduler work items, or
+callbacks escape the RTC boundary as hidden deferred work.
 NEVER call an actor's own `process_event` from guards/actions/entry/exit.
 ALWAYS model internal multi-step flows with `sml::completion<TEvent>`,
 anonymous transitions, and/or entry actions.
@@ -23,7 +28,10 @@ ALWAYS implement bulk numeric iteration in allocation-free action/detail kernels
 within a single transition per phase.
 NEVER copy event payload into context just to bridge internal phases.
 ALWAYS keep guards pure predicates of `(event, context)` with no side effects.
-ALWAYS keep actions bounded and non-blocking during dispatch.
+ALWAYS keep actions bounded during dispatch.
+ONLY allow an action-level scheduler fork/join wait when it joins already
+submitted child actor dispatches before the action returns, preserves RTC,
+does not re-enter the same actor, and leaves no hidden deferred work.
 ALWAYS keep hot-path actions allocation-free.
 ALWAYS keep any allowed one-time construction or initialization heap
 allocation before any `process_event(...)` dispatch.

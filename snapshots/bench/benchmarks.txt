@@ -1,5 +1,5 @@
 # ref=c5a3bc39b1b0fe56954c6adb99e89b25d5e7b9cb
-# toolchain=/opt/homebrew/bin/zig
+# toolchain=/shared/zig/zig
 # benchmark_config: iterations=100 runs=3 sample_policy=median warmup_iterations=10 warmup_runs=1 generation_iterations=1 generation_runs=3 generation_warmup_iterations=0 generation_warmup_runs=0
 batch/planner_equal ns_per_op=1467.910 iter=100 runs=3
 batch/planner_seq ns_per_op=1736.250 iter=100 runs=3
@@ -84,3 +84,32 @@ tokenizer/preprocessor_ugm_long ns_per_op=4188.750 iter=100 runs=3
 tokenizer/preprocessor_ugm_short ns_per_op=2497.080 iter=100 runs=3
 tokenizer/preprocessor_wpm_long ns_per_op=4037.500 iter=100 runs=3
 tokenizer/preprocessor_wpm_short ns_per_op=2505.840 iter=100 runs=3
+kernel/x86_64/op_add ns_per_op=122.000 iter=100 runs=3
+kernel/x86_64/op_cos ns_per_op=1926.490 iter=100 runs=3
+kernel/x86_64/op_div ns_per_op=118.500 iter=100 runs=3
+kernel/x86_64/op_dup ns_per_op=79.100 iter=100 runs=3
+kernel/x86_64/op_log ns_per_op=3055.990 iter=100 runs=3
+kernel/x86_64/op_mul ns_per_op=123.000 iter=100 runs=3
+kernel/x86_64/op_mul_mat ns_per_op=2485.590 iter=100 runs=3
+kernel/x86_64/op_sin ns_per_op=1619.190 iter=100 runs=3
+kernel/x86_64/op_soft_max ns_per_op=4899.380 iter=100 runs=3
+kernel/x86_64/op_sqr ns_per_op=82.100 iter=100 runs=3
+kernel/x86_64/op_sqrt ns_per_op=151.400 iter=100 runs=3
+kernel/x86_64/op_sub ns_per_op=100.500 iter=100 runs=3
+kernel/x86_64/op_unary_exp ns_per_op=3729.890 iter=100 runs=3
+kernel/x86_64/op_unary_neg ns_per_op=81.300 iter=100 runs=3
+kernel/x86_64/op_unary_relu ns_per_op=113.300 iter=100 runs=3
+kernel/x86_64/op_flash_attn_ext_decode_like ns_per_op=172.200 iter=100 runs=3
+kernel/x86_64/op_mul_mat_q2_k_q8_k ns_per_op=1351.800 iter=100 runs=3
+kernel/x86_64/op_mul_mat_q3_k_q8_k ns_per_op=1419.290 iter=100 runs=3
+kernel/x86_64/op_mul_mat_q6_k_q8_k ns_per_op=1345.190 iter=100 runs=3
+parallel_matmul/gemm8_f32 ns_per_op=168915.442 iter=2000 runs=5
+parallel_matmul/gemv_f32 ns_per_op=298427.410 iter=2000 runs=5
+parallel_matmul/gemv_q4_k ns_per_op=69830.877 iter=2000 runs=5
+parallel_matmul/gemv_q6_k ns_per_op=49344.404 iter=2000 runs=5
+parallel_matmul/gemv_q8_0 ns_per_op=55436.694 iter=2000 runs=5
+parallel_matmul/ggml_gemm8_f32 ns_per_op=169618.054 iter=2000 runs=5
+parallel_matmul/ggml_gemv_f32 ns_per_op=288998.998 iter=2000 runs=5
+parallel_matmul/ggml_gemv_q4_k ns_per_op=68885.360 iter=2000 runs=5
+parallel_matmul/ggml_gemv_q6_k ns_per_op=51010.082 iter=2000 runs=5
+parallel_matmul/ggml_gemv_q8_0 ns_per_op=55113.300 iter=2000 runs=5
