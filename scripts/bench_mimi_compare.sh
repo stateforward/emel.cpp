@@ -47,12 +47,29 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-for tool in cmake ninja python3 git; do
+for tool in cmake ninja git; do
   if ! command -v "$tool" >/dev/null 2>&1; then
     echo "error: required tool missing: $tool" >&2
     exit 1
   fi
 done
+
+# Discover the interpreter the same way the MLX setup script does, so hosts
+# that ship python3.12/python3.13 without a python3 shim (the environment the
+# setup path supports) can run the WAV generation and comparison steps too.
+PYTHON_BIN="${PYTHON_BIN:-}"
+if [[ -z "$PYTHON_BIN" ]]; then
+  for candidate in python3 python3.13 python3.12; do
+    if command -v "$candidate" >/dev/null 2>&1; then
+      PYTHON_BIN="$(command -v "$candidate")"
+      break
+    fi
+  done
+fi
+if [[ -z "$PYTHON_BIN" ]]; then
+  echo "error: required tool missing: python3 (or python3.12/python3.13)" >&2
+  exit 1
+fi
 
 if ! $RUN_ONLY; then
   # full mode: fetch + sha256 verify + run the emel converter (no build)
@@ -103,7 +120,7 @@ done
 
 mkdir -p "$OUTPUT_DIR"
 AUDIO="$OUTPUT_DIR/tone_440_24k.wav"
-python3 - "$AUDIO" <<'PY'
+"$PYTHON_BIN" - "$AUDIO" <<'PY'
 import math, struct, sys, wave
 with wave.open(sys.argv[1], "wb") as wav:
     wav.setnchannels(1)
@@ -124,7 +141,7 @@ if [[ "$REFERENCE_BACKEND" == "personaplex_mlx" ]]; then
   # The timing pass is measurement-only: each lane self-reports steady-state
   # per-frame loop time over a 10 s signal, excluding model load.
   TIMING_AUDIO="$OUTPUT_DIR/tone_440_24k_10s.wav"
-  python3 - "$TIMING_AUDIO" <<'PY'
+  "$PYTHON_BIN" - "$TIMING_AUDIO" <<'PY'
 import math, struct, sys, wave
 with wave.open(sys.argv[1], "wb") as wav:
     wav.setnchannels(1)
@@ -135,7 +152,7 @@ with wave.open(sys.argv[1], "wb") as wav:
         wav.writeframesraw(struct.pack("<h", int(value * 32767)))
 PY
   REPORT="$OUTPUT_DIR/mimi_compare_personaplex_mlx.json"
-  python3 "$ROOT_DIR/tools/bench/mimi_compare.py" \
+  "$PYTHON_BIN" "$ROOT_DIR/tools/bench/mimi_compare.py" \
     --emel-runner "$EMEL_RUNNER" \
     --reference-driver "$REFERENCE_DRIVER" \
     --emel-model "$EMEL_MODEL" \
@@ -150,7 +167,7 @@ PY
     --json-out "$REPORT"
 else
   REPORT="$OUTPUT_DIR/mimi_compare.json"
-  python3 "$ROOT_DIR/tools/bench/mimi_compare.py" \
+  "$PYTHON_BIN" "$ROOT_DIR/tools/bench/mimi_compare.py" \
     --emel-runner "$EMEL_RUNNER" \
     --reference-driver "$REFERENCE_DRIVER" \
     --emel-model "$EMEL_MODEL" \
