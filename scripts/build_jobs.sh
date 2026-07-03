@@ -23,8 +23,11 @@ emel_compute_build_jobs() {
   fi
   mem_jobs=$((mem_kb / (budget_gb * 1024 * 1024)))
   jobs=$((cores < mem_jobs ? cores : mem_jobs))
-  if ((jobs < 2)); then
-    jobs=2
+  # Floor at one job: when the memory/core calculation says only one job is
+  # safe, forcing two would defeat the clamp on exactly the constrained hosts
+  # it protects.
+  if ((jobs < 1)); then
+    jobs=1
   fi
   printf '%s\n' "$jobs"
 }

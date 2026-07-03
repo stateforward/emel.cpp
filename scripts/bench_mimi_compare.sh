@@ -12,6 +12,8 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=scripts/build_jobs.sh
+source "$ROOT_DIR/scripts/build_jobs.sh"
 BUILD_DIR="${EMEL_MIMI_COMPARE_BUILD_DIR:-$ROOT_DIR/build/mimi_compare_tools}"
 OUTPUT_DIR="${EMEL_MIMI_COMPARE_OUTPUT_DIR:-$ROOT_DIR/build/mimi_compare}"
 ARTIFACT_DIR="${EMEL_MOSHI_REFERENCE_ARTIFACT_DIR:-$ROOT_DIR/build/moshi_reference}"
@@ -65,7 +67,7 @@ if ! $RUN_ONLY; then
   cmake -S "$ROOT_DIR/tools/bench" -B "$BUILD_DIR" -G Ninja \
     -DCMAKE_BUILD_TYPE=Release \
     -DEMEL_BENCH_SUITE_FILTER=speech_codec_mimi
-  cmake --build "$BUILD_DIR" --parallel \
+  cmake --build "$BUILD_DIR" --parallel "$EMEL_BUILD_JOBS" \
     --target mimi_emel_parity_runner bench_runner \
     ${reference_targets[@]+"${reference_targets[@]}"}
 fi

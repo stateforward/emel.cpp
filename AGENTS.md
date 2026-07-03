@@ -331,9 +331,11 @@ ALWAYS use zig toolchain (zig cc and zig c++) for default development and
 production builds.
 ALWAYS bound build parallelism through `scripts/build_jobs.sh` (sourced by the
 build, bench, coverage, and gate scripts): jobs = min(cores, MemAvailable /
-4GB), overridable via `EMEL_BUILD_JOBS`. The SML template TUs cost 2-4GB of
-compiler RSS each, so unbounded `--parallel` oversubscribes memory long
-before CPU.
+per-job budget), where the budget defaults to 6GB (coverage builds pass 8GB)
+and is overridable via `EMEL_BUILD_JOB_MEM_GB`; the job count itself is
+overridable via `EMEL_BUILD_JOBS`. The SML template TUs cost ~3-4GB of
+compiler RSS each under zig c++ -O3 and ~7-8GB under g++ -O0 --coverage, so
+unbounded `--parallel` oversubscribes memory long before CPU.
 NEVER run more than one build, gate, or benchmark job concurrently on a
 shared host; gates and benches launch their own inner builds and fixture
 processes, so stacking them multiplies compiler fleets and context-sized

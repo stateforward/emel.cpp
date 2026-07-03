@@ -122,7 +122,9 @@ fetch_pinned "$MOSHI_COMMON_BASE/mimi-e351c8d8-125.gguf" "$MIMI_MODEL" "$MIMI_MO
 fetch_pinned "$PERSONAPLEX_BASE/personaplex-config.json" "$MOSHI_CONFIG" "$MOSHI_CONFIG_SHA256"
 
 if [[ ! -f "$MIMI_MODEL_EMEL" || "$MIMI_MODEL" -nt "$MIMI_MODEL_EMEL" ]]; then
-  python3 "$ROOT_DIR/tools/bench/moshi_gguf_convert.py" \
+  # Use the interpreter discovered by the version check above: hosts that only
+  # ship python3.12/python3.13 (no python3 shim) must convert with it too.
+  "$PYTHON_BIN" "$ROOT_DIR/tools/bench/moshi_gguf_convert.py" \
     --source "$MIMI_MODEL" --output "$MIMI_MODEL_EMEL" \
     --manifest "${MIMI_MODEL_EMEL%.gguf}.manifest.json" \
     --config "$MOSHI_CONFIG"
