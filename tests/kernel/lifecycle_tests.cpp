@@ -757,6 +757,15 @@ TEST_CASE("kernel_flash_attn_ext_requires_canonical_execution_path") {
 
   CHECK_FALSE(x86_64_machine.process_event(invalid));
   CHECK_FALSE(aarch64_machine.process_event(invalid));
+
+  // Zero KV heads must reject without evaluating head_count % 0 in the
+  // validation guard.
+  flash_attn_ext_fixture zero_kv_fixture{};
+  auto zero_kv = make_flash_attn_ext_event(zero_kv_fixture);
+  zero_kv.src1.ne[2] = 0;
+  zero_kv.src2.ne[2] = 0;
+  CHECK_FALSE(x86_64_machine.process_event(zero_kv));
+  CHECK_FALSE(aarch64_machine.process_event(zero_kv));
 }
 
 TEST_CASE("kernel_flash_attn_ext_matches_online_softmax_f16_reference_small") {

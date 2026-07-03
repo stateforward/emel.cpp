@@ -152,14 +152,31 @@ struct effect_mark_budget_too_small {
 };
 
 // Bind rejections after the source was mapped must give the mapping back to
-// the shared io_mmap pool, or repeated failing binds exhaust its fixed slots.
-struct effect_release_rejected_source {
-  void operator()(const detail::bind_window_runtime &,
+// the shared io_mmap pool, or repeated failing binds exhaust its fixed
+// slots. Attempt only: the recorded outcome routes the exit - a successful
+// release resets the window to unbound, a failed release retains the handle
+// in a passthrough-like bound state so unbind_window can retry it.
+struct effect_attempt_release_rejected_source {
+  void operator()(const detail::bind_window_runtime &ev,
                   context &ctx) const noexcept {
     const emel::io::mmap::event::release_mapping release{
         detail::k_stream_source_tensor_id, ctx.window.source_handle};
-    (void)ctx.io_mmap->process_event(release);
+    ev.status.release_ok = ctx.io_mmap->process_event(release);
+  }
+};
+
+struct effect_reset_rejected_window {
+  void operator()(const detail::bind_window_runtime &,
+                  context &ctx) const noexcept {
     detail::reset_window(ctx.window);
+  }
+};
+
+struct effect_retain_source_for_release_retry {
+  void operator()(const detail::bind_window_runtime &,
+                  context &ctx) const noexcept {
+    ctx.window.streaming_active = false;
+    ctx.window.bound = true;
   }
 };
 
@@ -541,7 +558,7 @@ struct effect_activate_streaming_and_record {
 struct effect_release_and_mark_slot_storage_too_small {
   void operator()(const detail::bind_window_runtime &ev,
                   context &ctx) const noexcept {
-    effect_release_rejected_source{}(ev, ctx);
+    effect_attempt_release_rejected_source{}(ev, ctx);
     ev.status.err = emel::error::cast(error::slot_storage_too_small);
     ev.status.ok = false;
   }
@@ -550,7 +567,7 @@ struct effect_release_and_mark_slot_storage_too_small {
 struct effect_release_and_mark_budget_too_small {
   void operator()(const detail::bind_window_runtime &ev,
                   context &ctx) const noexcept {
-    effect_release_rejected_source{}(ev, ctx);
+    effect_attempt_release_rejected_source{}(ev, ctx);
     effect_mark_budget_too_small{}(ev, ctx);
   }
 };
@@ -558,7 +575,7 @@ struct effect_release_and_mark_budget_too_small {
 struct effect_release_and_mark_streaming_config_invalid {
   void operator()(const detail::bind_window_runtime &ev,
                   context &ctx) const noexcept {
-    effect_release_rejected_source{}(ev, ctx);
+    effect_attempt_release_rejected_source{}(ev, ctx);
     effect_mark_bind_invalid{}(ev, ctx);
   }
 };
@@ -607,8 +624,11 @@ inline constexpr effect_mark_budget_too_small effect_mark_budget_too_small{};
 inline constexpr effect_activate_passthrough effect_activate_passthrough{};
 inline constexpr effect_partition_slot_storage effect_partition_slot_storage{};
 inline constexpr effect_finish_streaming effect_finish_streaming{};
-inline constexpr effect_release_rejected_source
-    effect_release_rejected_source{};
+inline constexpr effect_attempt_release_rejected_source
+    effect_attempt_release_rejected_source{};
+inline constexpr effect_reset_rejected_window effect_reset_rejected_window{};
+inline constexpr effect_retain_source_for_release_retry
+    effect_retain_source_for_release_retry{};
 inline constexpr effect_prime_window effect_prime_window{};
 inline constexpr effect_publish_bind_done effect_publish_bind_done{};
 inline constexpr effect_record_bind_done effect_record_bind_done{};

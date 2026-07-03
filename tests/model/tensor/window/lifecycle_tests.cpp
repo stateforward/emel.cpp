@@ -247,6 +247,34 @@ TEST_CASE("tensor window failure guards and effects route their errors") {
   ctx.window = {};
 }
 
+TEST_CASE("tensor window rejection without callbacks reports via return value") {
+  stream_file file{"reject_no_callbacks"};
+  window_fixture fixture{};
+
+  // A post-map rejection with no callbacks takes the absent exit routes
+  // (release outcome composed) and reports failure via the return value.
+  const window::event::bind_window_request request{
+      .file_path = file.path_str,
+      .file_size_bytes = file.file_size,
+      .extents = file.extents,
+      .layer_weight_counts = file.layer_weight_counts,
+      .budget_bytes = 2u * k_weight_bytes,  // forces streaming, too small
+      .slot_storage = std::span<uint8_t>{fixture.slot_arena},
+      .window_slots = 4u,
+      .prefetch_depth = 2u,
+      .stage_chunk_bytes = window::detail::k_default_stream_chunk_bytes,
+  };
+  window::event::bind_window bind_request{request};
+  CHECK_FALSE(fixture.machine.process_event(bind_request));
+  CHECK(fixture.machine.is(stateforward::sml::state<window::state_unbound>));
+
+  bind_capture retry{};
+  CHECK(fixture.bind(file, retry, streaming_budget()));
+  CHECK(retry.done);
+  unbind_capture unbind{};
+  CHECK(fixture.unbind(unbind));
+}
+
 TEST_CASE("tensor window rejects undersized slot storage explicitly") {
   stream_file file{"small_arena"};
   window_fixture fixture{};

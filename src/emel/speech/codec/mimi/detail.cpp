@@ -1530,6 +1530,12 @@ bool plan_seanet(
       return false;
     }
     if (transposed) {
+      // The decode overlap-add carries taps - stride samples of state; a
+      // transposed kernel shorter than its stride would make that span
+      // negative and index outside the state slice.
+      if (layer.taps < spec.stride) {
+        return false;
+      }
       account_conv(extents, channels, layer.out_channels, layer.taps,
                    spec.stride, length, true);
       prepared +=
@@ -1716,6 +1722,9 @@ bool plan_codec(const emel::model::data &model_data,
     return false;
   }
   plan_out.upsample.taps = plan_out.upsample.weight->dims[0];
+  if (plan_out.upsample.taps < plan_out.upsample.stride) {
+    return false;
+  }
   account_conv(plan_out.extents, decode_channels, decode_channels,
                plan_out.upsample.taps, 2, decode_length, true);
   plan_out.prepared_floats += static_cast<uint64_t>(plan_out.upsample.taps) *

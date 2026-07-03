@@ -180,6 +180,39 @@ struct guard_bind_error_callback_absent {
   }
 };
 
+// Exit routes for the bind error chain composed with the rejection-release
+// outcome: a failed release retains the mapping in a passthrough-like bound
+// state so unbind_window can retry it (mirroring the unbind failure exits).
+struct guard_bind_error_exit_unbound {
+  bool operator()(const detail::bind_window_runtime &ev,
+                  const action::context &) const noexcept {
+    return ev.status.release_ok;
+  }
+};
+
+struct guard_bind_error_exit_retained {
+  bool operator()(const detail::bind_window_runtime &ev,
+                  const action::context &) const noexcept {
+    return !ev.status.release_ok;
+  }
+};
+
+struct guard_bind_error_callback_absent_unbound {
+  bool operator()(const detail::bind_window_runtime &ev,
+                  const action::context &ctx) const noexcept {
+    return guard_bind_error_callback_absent{}(ev) &&
+           guard_bind_error_exit_unbound{}(ev, ctx);
+  }
+};
+
+struct guard_bind_error_callback_absent_retained {
+  bool operator()(const detail::bind_window_runtime &ev,
+                  const action::context &ctx) const noexcept {
+    return guard_bind_error_callback_absent{}(ev) &&
+           guard_bind_error_exit_retained{}(ev, ctx);
+  }
+};
+
 // Budget-decision routes composed with the optional done callback so the
 // publish effects never invoke an empty emel::callback.
 struct guard_bind_fits_budget_callback_present {
