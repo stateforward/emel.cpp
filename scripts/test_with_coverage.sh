@@ -16,6 +16,9 @@ COVERAGE_TEST_REGEX="${EMEL_COVERAGE_TEST_REGEX:-}"
 COVERAGE_GCOV_JOBS="${EMEL_COVERAGE_GCOV_JOBS:-}"
 COVERAGE_TEST_EXTRA_ARG="${EMEL_COVERAGE_TEST_EXTRA_ARG:-}"
 COVERAGE_TEST_SHARDS="${EMEL_COVERAGE_TEST_SHARDS:-}"
+# ctest's built-in default test timeout is 1500s; O0 coverage-instrumented
+# shards can exceed it on slower hosts, so make it overridable.
+COVERAGE_CTEST_TIMEOUT="${EMEL_COVERAGE_CTEST_TIMEOUT:-1500}"
 
 if [[ -z "$COVERAGE_TEST_EXTRA_ARG" && "$COVERAGE_CHANGED_ONLY" == "1" ]]; then
   COVERAGE_TEST_EXTRA_ARG="--test-case-exclude=*sortformer pipeline runs maintained pcm to probabilities and segments*"
@@ -551,7 +554,8 @@ if [[ -z "$COVERAGE_TEST_REGEX" ]]; then
 fi
 
 echo "running coverage test regex: ${COVERAGE_TEST_REGEX}"
-ctest --test-dir "$COVERAGE_BUILD_DIR" --output-on-failure -R "$COVERAGE_TEST_REGEX" -j "$ctest_jobs"
+ctest --test-dir "$COVERAGE_BUILD_DIR" --output-on-failure -R "$COVERAGE_TEST_REGEX" \
+  -j "$ctest_jobs" --timeout "$COVERAGE_CTEST_TIMEOUT"
 
 if [[ "$COVERAGE_CHANGED_ONLY" == "1" &&
       "$unknown_changed_src" == "0" &&
