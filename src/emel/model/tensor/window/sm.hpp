@@ -165,13 +165,24 @@ struct model {
           / action::effect_record_bind_error
 
       //------------------------------------------------------------------------------//
-      // bind while already bound: explicit error, state unchanged.
+      // bind while already bound: explicit error, state unchanged; the
+      // optional error callback selects publish vs record.
       , sml::state<state_ready> <= sml::state<state_ready>
           + sml::event<detail::bind_window_runtime>
+          [ guard::guard_bind_error_callback_present{} ]
+          / action::effect_mark_already_bound_and_publish
+      , sml::state<state_ready> <= sml::state<state_ready>
+          + sml::event<detail::bind_window_runtime>
+          [ guard::guard_bind_error_callback_absent{} ]
+          / action::effect_mark_bind_already_bound
+      , sml::state<state_passthrough_ready> <= sml::state<state_passthrough_ready>
+          + sml::event<detail::bind_window_runtime>
+          [ guard::guard_bind_error_callback_present{} ]
           / action::effect_mark_already_bound_and_publish
       , sml::state<state_passthrough_ready> <= sml::state<state_passthrough_ready>
           + sml::event<detail::bind_window_runtime>
-          / action::effect_mark_already_bound_and_publish
+          [ guard::guard_bind_error_callback_absent{} ]
+          / action::effect_mark_bind_already_bound
 
       //------------------------------------------------------------------------------//
       // acquire resolve (first dispatch): join a slot still mid-load for a
