@@ -1989,6 +1989,15 @@ TEST_CASE("kernel_x86_64_rope_rotates_norm_and_neox_pairs") {
   set_op_param_f32(rope_ev, 8u, 1.0f);     // attn_factor
   set_op_param_f32(rope_ev, 9u, 32.0f);    // beta_fast
   set_op_param_f32(rope_ev, 10u, 1.0f);    // beta_slow
+
+  // Metadata-only positions reject in the guard instead of dereferencing
+  // null inside the exec.
+  auto null_positions_ev = rope_ev;
+  auto null_positions = make_src(positions, dtype::i32, 2);
+  null_positions.data = nullptr;
+  null_positions_ev.src1 = null_positions;
+  CHECK_FALSE(machine.process_event(null_positions_ev));
+
   CHECK(machine.process_event(rope_ev));
 
   // position 0 is the identity rotation
@@ -2068,6 +2077,18 @@ TEST_CASE("kernel_x86_64_im2col_and_conv_transpose_1d") {
   CHECK(up_out[1] == doctest::Approx(5.0f));
   CHECK(up_out[2] == doctest::Approx(6.0f));
   CHECK(up_out[3] == doctest::Approx(10.0f));
+
+  // Metadata-only inputs reject in the guard instead of dereferencing null
+  // inside the exec.
+  auto null_conv_input = make_src(up_input, dtype::f32, 2, 1);
+  null_conv_input.data = nullptr;
+  convtr_ev.src1 = null_conv_input;
+  CHECK_FALSE(machine.process_event(convtr_ev));
+
+  auto null_im2col_input = make_src(input, dtype::f32, 4, 1);
+  null_im2col_input.data = nullptr;
+  im2col_ev.src1 = null_im2col_input;
+  CHECK_FALSE(machine.process_event(im2col_ev));
 }
 
 TEST_CASE("kernel_x86_64_add_and_mul_broadcast_row_variants") {

@@ -4476,6 +4476,7 @@ inline bool can_run_rope(const request_type &request) noexcept {
                           request.src0.ne[2] == request.dst.ne[2] &&
                           request.src0.ne[3] == request.dst.ne[3];
   return read_rope_params(request, params) && same_shape &&
+         request.src0.data != nullptr && request.src1.data != nullptr &&
          request.src0.ne[0] > 0 && dtype_code(request.src0.type) == dtype_f32 &&
          dtype_code(request.dst.type) == dtype_f32 &&
          dtype_code(request.src1.type) == dtype_i32 &&
@@ -4590,7 +4591,8 @@ inline bool can_run_im2col(const request_type &request) noexcept {
   const int64_t out_length =
       conv_output_length(length, kernel, params.s0, params.p0, params.d0);
   const uint8_t src0_type = dtype_code(request.src0.type);
-  return kernel > 0 && channels > 0 && length > 0 && out_length > 0 &&
+  return request.src1.data != nullptr && kernel > 0 && channels > 0 &&
+         length > 0 && out_length > 0 &&
          (src0_type == dtype_f32 || src0_type == dtype_f16) &&
          dtype_code(request.src1.type) == dtype_f32 &&
          (dst_type == dtype_f32 || dst_type == dtype_f16) &&
@@ -4673,7 +4675,10 @@ inline bool can_run_conv_transpose_1d(const request_type &request) noexcept {
   const int64_t in_channels = static_cast<int64_t>(request.src0.ne[2]);
   const int64_t length = static_cast<int64_t>(request.src1.ne[0]);
   const int64_t out_length = (length - 1) * s0 + kernel;
-  return kernel > 0 && out_channels > 0 && in_channels > 0 && length > 0 &&
+  // The exec reads through both operands; metadata-only tensors must reject
+  // here instead of dereferencing null inside the action.
+  return request.src0.data != nullptr && request.src1.data != nullptr &&
+         kernel > 0 && out_channels > 0 && in_channels > 0 && length > 0 &&
          (src0_type == dtype_f32 || src0_type == dtype_f16) &&
          dtype_code(request.src1.type) == dtype_f32 &&
          dtype_code(request.dst.type) == dtype_f32 && request.src0.ne[3] == 1 &&
