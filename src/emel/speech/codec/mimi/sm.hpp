@@ -211,61 +211,229 @@ struct model {
       //------------------------------------------------------------------------------//
       // Unexpected events.
       , sml::state<state_uninitialized> <= sml::state<state_uninitialized>
-          + sml::unexpected_event<sml::_> / action::effect_on_unexpected{}
+          + sml::unexpected_event<sml::_>
+              [ guard::guard_unexpected_error_out_present{} ]
+              / action::effect_mark_unexpected_and_store{}
+      , sml::state<state_uninitialized> <= sml::state<state_uninitialized>
+          + sml::unexpected_event<sml::_>
+              [ guard::guard_unexpected_error_out_absent{} ]
+              / action::effect_mark_unexpected{}
       , sml::state<state_session_ready> <= sml::state<state_session_ready>
-          + sml::unexpected_event<sml::_> / action::effect_on_unexpected{}
+          + sml::unexpected_event<sml::_>
+              [ guard::guard_unexpected_error_out_present{} ]
+              / action::effect_mark_unexpected_and_store{}
+      , sml::state<state_session_ready> <= sml::state<state_session_ready>
+          + sml::unexpected_event<sml::_>
+              [ guard::guard_unexpected_error_out_absent{} ]
+              / action::effect_mark_unexpected{}
       , sml::state<state_session_ready> <= sml::state<state_encode_request_decision>
-          + sml::unexpected_event<sml::_> / action::effect_on_unexpected{}
+          + sml::unexpected_event<sml::_>
+              [ guard::guard_unexpected_error_out_present{} ]
+              / action::effect_mark_unexpected_and_store{}
+      , sml::state<state_session_ready> <= sml::state<state_encode_request_decision>
+          + sml::unexpected_event<sml::_>
+              [ guard::guard_unexpected_error_out_absent{} ]
+              / action::effect_mark_unexpected{}
       , sml::state<state_session_ready> <= sml::state<state_decode_request_decision>
-          + sml::unexpected_event<sml::_> / action::effect_on_unexpected{}
+          + sml::unexpected_event<sml::_>
+              [ guard::guard_unexpected_error_out_present{} ]
+              / action::effect_mark_unexpected_and_store{}
+      , sml::state<state_session_ready> <= sml::state<state_decode_request_decision>
+          + sml::unexpected_event<sml::_>
+              [ guard::guard_unexpected_error_out_absent{} ]
+              / action::effect_mark_unexpected{}
       , sml::state<state_session_ready> <= sml::state<state_decode_codes_decision>
-          + sml::unexpected_event<sml::_> / action::effect_on_unexpected{}
+          + sml::unexpected_event<sml::_>
+              [ guard::guard_unexpected_error_out_present{} ]
+              / action::effect_mark_unexpected_and_store{}
+      , sml::state<state_session_ready> <= sml::state<state_decode_codes_decision>
+          + sml::unexpected_event<sml::_>
+              [ guard::guard_unexpected_error_out_absent{} ]
+              / action::effect_mark_unexpected{}
       , sml::state<state_session_ready> <= sml::state<state_encoding>
-          + sml::unexpected_event<sml::_> / action::effect_on_unexpected{}
+          + sml::unexpected_event<sml::_>
+              [ guard::guard_unexpected_error_out_present{} ]
+              / action::effect_mark_unexpected_and_store{}
+      , sml::state<state_session_ready> <= sml::state<state_encoding>
+          + sml::unexpected_event<sml::_>
+              [ guard::guard_unexpected_error_out_absent{} ]
+              / action::effect_mark_unexpected{}
       , sml::state<state_session_ready> <= sml::state<state_quantizing>
-          + sml::unexpected_event<sml::_> / action::effect_on_unexpected{}
+          + sml::unexpected_event<sml::_>
+              [ guard::guard_unexpected_error_out_present{} ]
+              / action::effect_mark_unexpected_and_store{}
+      , sml::state<state_session_ready> <= sml::state<state_quantizing>
+          + sml::unexpected_event<sml::_>
+              [ guard::guard_unexpected_error_out_absent{} ]
+              / action::effect_mark_unexpected{}
       , sml::state<state_session_ready> <= sml::state<state_dequantizing>
-          + sml::unexpected_event<sml::_> / action::effect_on_unexpected{}
+          + sml::unexpected_event<sml::_>
+              [ guard::guard_unexpected_error_out_present{} ]
+              / action::effect_mark_unexpected_and_store{}
+      , sml::state<state_session_ready> <= sml::state<state_dequantizing>
+          + sml::unexpected_event<sml::_>
+              [ guard::guard_unexpected_error_out_absent{} ]
+              / action::effect_mark_unexpected{}
       , sml::state<state_session_ready> <= sml::state<state_decoding>
-          + sml::unexpected_event<sml::_> / action::effect_on_unexpected{}
+          + sml::unexpected_event<sml::_>
+              [ guard::guard_unexpected_error_out_present{} ]
+              / action::effect_mark_unexpected_and_store{}
+      , sml::state<state_session_ready> <= sml::state<state_decoding>
+          + sml::unexpected_event<sml::_>
+              [ guard::guard_unexpected_error_out_absent{} ]
+              / action::effect_mark_unexpected{}
       , sml::state<state_session_ready> <= sml::state<state_encode_error_out_decision>
-          + sml::unexpected_event<sml::_> / action::effect_on_unexpected{}
+          + sml::unexpected_event<sml::_>
+              [ guard::guard_unexpected_error_out_present{} ]
+              / action::effect_mark_unexpected_and_store{}
+      , sml::state<state_session_ready> <= sml::state<state_encode_error_out_decision>
+          + sml::unexpected_event<sml::_>
+              [ guard::guard_unexpected_error_out_absent{} ]
+              / action::effect_mark_unexpected{}
       , sml::state<state_session_ready> <= sml::state<state_encode_callback_decision>
-          + sml::unexpected_event<sml::_> / action::effect_on_unexpected{}
+          + sml::unexpected_event<sml::_>
+              [ guard::guard_unexpected_error_out_present{} ]
+              / action::effect_mark_unexpected_and_store{}
+      , sml::state<state_session_ready> <= sml::state<state_encode_callback_decision>
+          + sml::unexpected_event<sml::_>
+              [ guard::guard_unexpected_error_out_absent{} ]
+              / action::effect_mark_unexpected{}
       , sml::state<state_session_ready> <= sml::state<state_encode_failed_error_out_decision>
-          + sml::unexpected_event<sml::_> / action::effect_on_unexpected{}
+          + sml::unexpected_event<sml::_>
+              [ guard::guard_unexpected_error_out_present{} ]
+              / action::effect_mark_unexpected_and_store{}
+      , sml::state<state_session_ready> <= sml::state<state_encode_failed_error_out_decision>
+          + sml::unexpected_event<sml::_>
+              [ guard::guard_unexpected_error_out_absent{} ]
+              / action::effect_mark_unexpected{}
       , sml::state<state_session_ready> <= sml::state<state_encode_failed_callback_decision>
-          + sml::unexpected_event<sml::_> / action::effect_on_unexpected{}
+          + sml::unexpected_event<sml::_>
+              [ guard::guard_unexpected_error_out_present{} ]
+              / action::effect_mark_unexpected_and_store{}
+      , sml::state<state_session_ready> <= sml::state<state_encode_failed_callback_decision>
+          + sml::unexpected_event<sml::_>
+              [ guard::guard_unexpected_error_out_absent{} ]
+              / action::effect_mark_unexpected{}
       , sml::state<state_session_ready> <= sml::state<state_decode_error_out_decision>
-          + sml::unexpected_event<sml::_> / action::effect_on_unexpected{}
+          + sml::unexpected_event<sml::_>
+              [ guard::guard_unexpected_error_out_present{} ]
+              / action::effect_mark_unexpected_and_store{}
+      , sml::state<state_session_ready> <= sml::state<state_decode_error_out_decision>
+          + sml::unexpected_event<sml::_>
+              [ guard::guard_unexpected_error_out_absent{} ]
+              / action::effect_mark_unexpected{}
       , sml::state<state_session_ready> <= sml::state<state_decode_callback_decision>
-          + sml::unexpected_event<sml::_> / action::effect_on_unexpected{}
+          + sml::unexpected_event<sml::_>
+              [ guard::guard_unexpected_error_out_present{} ]
+              / action::effect_mark_unexpected_and_store{}
+      , sml::state<state_session_ready> <= sml::state<state_decode_callback_decision>
+          + sml::unexpected_event<sml::_>
+              [ guard::guard_unexpected_error_out_absent{} ]
+              / action::effect_mark_unexpected{}
       , sml::state<state_session_ready> <= sml::state<state_decode_failed_error_out_decision>
-          + sml::unexpected_event<sml::_> / action::effect_on_unexpected{}
+          + sml::unexpected_event<sml::_>
+              [ guard::guard_unexpected_error_out_present{} ]
+              / action::effect_mark_unexpected_and_store{}
+      , sml::state<state_session_ready> <= sml::state<state_decode_failed_error_out_decision>
+          + sml::unexpected_event<sml::_>
+              [ guard::guard_unexpected_error_out_absent{} ]
+              / action::effect_mark_unexpected{}
       , sml::state<state_session_ready> <= sml::state<state_decode_failed_callback_decision>
-          + sml::unexpected_event<sml::_> / action::effect_on_unexpected{}
+          + sml::unexpected_event<sml::_>
+              [ guard::guard_unexpected_error_out_present{} ]
+              / action::effect_mark_unexpected_and_store{}
+      , sml::state<state_session_ready> <= sml::state<state_decode_failed_callback_decision>
+          + sml::unexpected_event<sml::_>
+              [ guard::guard_unexpected_error_out_absent{} ]
+              / action::effect_mark_unexpected{}
       , sml::state<state_uninitialized> <= sml::state<state_bind_contract_decision>
-          + sml::unexpected_event<sml::_> / action::effect_on_unexpected{}
+          + sml::unexpected_event<sml::_>
+              [ guard::guard_unexpected_error_out_present{} ]
+              / action::effect_mark_unexpected_and_store{}
+      , sml::state<state_uninitialized> <= sml::state<state_bind_contract_decision>
+          + sml::unexpected_event<sml::_>
+              [ guard::guard_unexpected_error_out_absent{} ]
+              / action::effect_mark_unexpected{}
       , sml::state<state_uninitialized> <= sml::state<state_bind_capacity_decision>
-          + sml::unexpected_event<sml::_> / action::effect_on_unexpected{}
+          + sml::unexpected_event<sml::_>
+              [ guard::guard_unexpected_error_out_present{} ]
+              / action::effect_mark_unexpected_and_store{}
+      , sml::state<state_uninitialized> <= sml::state<state_bind_capacity_decision>
+          + sml::unexpected_event<sml::_>
+              [ guard::guard_unexpected_error_out_absent{} ]
+              / action::effect_mark_unexpected{}
       , sml::state<state_uninitialized> <= sml::state<state_binding>
-          + sml::unexpected_event<sml::_> / action::effect_on_unexpected{}
+          + sml::unexpected_event<sml::_>
+              [ guard::guard_unexpected_error_out_present{} ]
+              / action::effect_mark_unexpected_and_store{}
+      , sml::state<state_uninitialized> <= sml::state<state_binding>
+          + sml::unexpected_event<sml::_>
+              [ guard::guard_unexpected_error_out_absent{} ]
+              / action::effect_mark_unexpected{}
       , sml::state<state_uninitialized> <= sml::state<state_init_error_out_decision>
-          + sml::unexpected_event<sml::_> / action::effect_on_unexpected{}
+          + sml::unexpected_event<sml::_>
+              [ guard::guard_unexpected_error_out_present{} ]
+              / action::effect_mark_unexpected_and_store{}
+      , sml::state<state_uninitialized> <= sml::state<state_init_error_out_decision>
+          + sml::unexpected_event<sml::_>
+              [ guard::guard_unexpected_error_out_absent{} ]
+              / action::effect_mark_unexpected{}
       , sml::state<state_uninitialized> <= sml::state<state_init_callback_decision>
-          + sml::unexpected_event<sml::_> / action::effect_on_unexpected{}
+          + sml::unexpected_event<sml::_>
+              [ guard::guard_unexpected_error_out_present{} ]
+              / action::effect_mark_unexpected_and_store{}
+      , sml::state<state_uninitialized> <= sml::state<state_init_callback_decision>
+          + sml::unexpected_event<sml::_>
+              [ guard::guard_unexpected_error_out_absent{} ]
+              / action::effect_mark_unexpected{}
       , sml::state<state_uninitialized> <= sml::state<state_init_failed_error_out_decision>
-          + sml::unexpected_event<sml::_> / action::effect_on_unexpected{}
+          + sml::unexpected_event<sml::_>
+              [ guard::guard_unexpected_error_out_present{} ]
+              / action::effect_mark_unexpected_and_store{}
+      , sml::state<state_uninitialized> <= sml::state<state_init_failed_error_out_decision>
+          + sml::unexpected_event<sml::_>
+              [ guard::guard_unexpected_error_out_absent{} ]
+              / action::effect_mark_unexpected{}
       , sml::state<state_uninitialized> <= sml::state<state_init_failed_callback_decision>
-          + sml::unexpected_event<sml::_> / action::effect_on_unexpected{}
+          + sml::unexpected_event<sml::_>
+              [ guard::guard_unexpected_error_out_present{} ]
+              / action::effect_mark_unexpected_and_store{}
+      , sml::state<state_uninitialized> <= sml::state<state_init_failed_callback_decision>
+          + sml::unexpected_event<sml::_>
+              [ guard::guard_unexpected_error_out_absent{} ]
+              / action::effect_mark_unexpected{}
       , sml::state<state_uninitialized> <= sml::state<state_uninit_encode_error_out_decision>
-          + sml::unexpected_event<sml::_> / action::effect_on_unexpected{}
+          + sml::unexpected_event<sml::_>
+              [ guard::guard_unexpected_error_out_present{} ]
+              / action::effect_mark_unexpected_and_store{}
+      , sml::state<state_uninitialized> <= sml::state<state_uninit_encode_error_out_decision>
+          + sml::unexpected_event<sml::_>
+              [ guard::guard_unexpected_error_out_absent{} ]
+              / action::effect_mark_unexpected{}
       , sml::state<state_uninitialized> <= sml::state<state_uninit_encode_callback_decision>
-          + sml::unexpected_event<sml::_> / action::effect_on_unexpected{}
+          + sml::unexpected_event<sml::_>
+              [ guard::guard_unexpected_error_out_present{} ]
+              / action::effect_mark_unexpected_and_store{}
+      , sml::state<state_uninitialized> <= sml::state<state_uninit_encode_callback_decision>
+          + sml::unexpected_event<sml::_>
+              [ guard::guard_unexpected_error_out_absent{} ]
+              / action::effect_mark_unexpected{}
       , sml::state<state_uninitialized> <= sml::state<state_uninit_decode_error_out_decision>
-          + sml::unexpected_event<sml::_> / action::effect_on_unexpected{}
+          + sml::unexpected_event<sml::_>
+              [ guard::guard_unexpected_error_out_present{} ]
+              / action::effect_mark_unexpected_and_store{}
+      , sml::state<state_uninitialized> <= sml::state<state_uninit_decode_error_out_decision>
+          + sml::unexpected_event<sml::_>
+              [ guard::guard_unexpected_error_out_absent{} ]
+              / action::effect_mark_unexpected{}
       , sml::state<state_uninitialized> <= sml::state<state_uninit_decode_callback_decision>
-          + sml::unexpected_event<sml::_> / action::effect_on_unexpected{}
+          + sml::unexpected_event<sml::_>
+              [ guard::guard_unexpected_error_out_present{} ]
+              / action::effect_mark_unexpected_and_store{}
+      , sml::state<state_uninitialized> <= sml::state<state_uninit_decode_callback_decision>
+          + sml::unexpected_event<sml::_>
+              [ guard::guard_unexpected_error_out_absent{} ]
+              / action::effect_mark_unexpected{}
     );
     // clang-format on
   }

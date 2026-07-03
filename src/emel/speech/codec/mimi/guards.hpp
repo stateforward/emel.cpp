@@ -110,6 +110,33 @@ template <class runtime_event_type> struct guard_no_error_out {
   }
 };
 
+// Unexpected external events: the error-out channel choice is a guarded
+// transition, mirroring guard_has_error_out on the modeled routes. Events
+// without a runtime ctx or without an error_out channel take the absent
+// route.
+struct guard_unexpected_error_out_present {
+  template <class event_type>
+  bool operator()(const event_type &ev,
+                  const action::context &) const noexcept {
+    if constexpr (requires {
+                    ev.ctx.err;
+                    ev.request.error_out;
+                  }) {
+      return ev.request.error_out != nullptr;
+    } else {
+      return false;
+    }
+  }
+};
+
+struct guard_unexpected_error_out_absent {
+  template <class event_type>
+  bool operator()(const event_type &ev,
+                  const action::context &ctx) const noexcept {
+    return !guard_unexpected_error_out_present{}(ev, ctx);
+  }
+};
+
 template <class runtime_event_type> struct guard_has_done_callback {
   bool operator()(const runtime_event_type &runtime_ev,
                   const action::context &) const noexcept {
