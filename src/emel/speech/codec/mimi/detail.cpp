@@ -55,20 +55,33 @@ tensor_elements(const emel::model::data::tensor_record &tensor) noexcept {
   return count;
 }
 
-// Arena cursor for one-time prepare copies.
-struct arena_cursor {
+// Arena cursor for one-time prepare copies. The dry_run instantiation backs
+// the pure guard-side contract validator: it tracks usage without requiring
+// (or touching) the caller arena, so one walk both validates and binds and
+// the two can never drift. The dry-run sentinel is never dereferenced -
+// dry-run prepare helpers skip every copy; capacity is validated separately
+// through the required_* sizing contract.
+template <bool dry_run> struct arena_cursor_t {
   std::span<float> arena = {};
   uint64_t used = 0;
 
   float *take(const uint64_t floats) noexcept {
-    if (used + floats > arena.size()) {
-      return nullptr;
+    if constexpr (dry_run) {
+      used += floats;
+      static float sentinel = 0.0f;
+      return &sentinel;
+    } else {
+      if (used + floats > arena.size()) {
+        return nullptr;
+      }
+      float *out = arena.data() + used;
+      used += floats;
+      return out;
     }
-    float *out = arena.data() + used;
-    used += floats;
-    return out;
   }
 };
+
+using arena_cursor = arena_cursor_t<false>;
 
 // Reads one element of an f32/f16 source tensor as f32.
 float source_value(const emel::model::data::tensor_record &tensor,
@@ -89,7 +102,8 @@ float source_value(const emel::model::data::tensor_record &tensor,
 }
 
 // Copies a [dim] vector (norm weights, biases, scales) into the arena.
-const float *prepare_vector(arena_cursor &cursor,
+template <bool dry_run>
+const float *prepare_vector(arena_cursor_t<dry_run> &cursor,
                             const emel::model::data::tensor_record *tensor,
                             const int64_t expected) noexcept {
   if (tensor == nullptr || !tensor_is_float(*tensor) ||
@@ -100,8 +114,10 @@ const float *prepare_vector(arena_cursor &cursor,
   if (out == nullptr) {
     return nullptr;
   }
-  for (int64_t index = 0; index < expected; ++index) {
-    out[index] = source_value(*tensor, static_cast<uint64_t>(index));
+  if constexpr (!dry_run) {
+    for (int64_t index = 0; index < expected; ++index) {
+      out[index] = source_value(*tensor, static_cast<uint64_t>(index));
+    }
   }
   return out;
 }
@@ -109,7 +125,8 @@ const float *prepare_vector(arena_cursor &cursor,
 // Prepares a linear weight stored [in, out] (in fastest) as its transpose
 // [out, in] (out fastest) so mul_mat consumes it as src1 without runtime
 // transposes: prepared[out + in * out_count].
-const float *prepare_linear(arena_cursor &cursor,
+template <bool dry_run>
+const float *prepare_linear(arena_cursor_t<dry_run> &cursor,
                             const emel::model::data::tensor_record *tensor,
                             const int64_t in_count,
                             const int64_t out_count) noexcept {
@@ -123,10 +140,12 @@ const float *prepare_linear(arena_cursor &cursor,
   if (out == nullptr) {
     return nullptr;
   }
-  for (int64_t o = 0; o < out_count; ++o) {
-    for (int64_t i = 0; i < in_count; ++i) {
-      out[o + i * out_count] =
-          source_value(*tensor, static_cast<uint64_t>(i + o * in_count));
+  if constexpr (!dry_run) {
+    for (int64_t o = 0; o < out_count; ++o) {
+      for (int64_t i = 0; i < in_count; ++i) {
+        out[o + i * out_count] =
+            source_value(*tensor, static_cast<uint64_t>(i + o * in_count));
+      }
     }
   }
   return out;
@@ -134,7 +153,8 @@ const float *prepare_linear(arena_cursor &cursor,
 
 // Copies a linear weight verbatim (row-major [in, out]: each of the `out`
 // rows is `in` contiguous floats), the layout ggml's per-row dot consumes.
-const float *prepare_matrix_raw(arena_cursor &cursor,
+template <bool dry_run>
+const float *prepare_matrix_raw(arena_cursor_t<dry_run> &cursor,
                                 const emel::model::data::tensor_record *tensor,
                                 const int64_t in_count,
                                 const int64_t out_count) noexcept {
@@ -148,15 +168,18 @@ const float *prepare_matrix_raw(arena_cursor &cursor,
   if (out == nullptr) {
     return nullptr;
   }
-  for (int64_t index = 0; index < in_count * out_count; ++index) {
-    out[index] = source_value(*tensor, static_cast<uint64_t>(index));
+  if constexpr (!dry_run) {
+    for (int64_t index = 0; index < in_count * out_count; ++index) {
+      out[index] = source_value(*tensor, static_cast<uint64_t>(index));
+    }
   }
   return out;
 }
 
 // Copies raw q8_0 row blocks verbatim into the arena. Returns nullptr when
 // the source is not q8_0 or capacity is exceeded.
-const uint8_t *prepare_raw_q8_0(arena_cursor &cursor,
+template <bool dry_run>
+const uint8_t *prepare_raw_q8_0(arena_cursor_t<dry_run> &cursor,
                                 const emel::model::data::tensor_record *tensor,
                                 const uint64_t expected_elements) noexcept {
   constexpr uint8_t k_dtype_q8_0 = 8u;
@@ -173,7 +196,9 @@ const uint8_t *prepare_raw_q8_0(arena_cursor &cursor,
   if (slot == nullptr) {
     return nullptr;
   }
-  std::memcpy(slot, tensor->data, bytes);
+  if constexpr (!dry_run) {
+    std::memcpy(slot, tensor->data, bytes);
+  }
   return reinterpret_cast<const uint8_t *>(slot);
 }
 
@@ -182,7 +207,8 @@ const uint8_t *prepare_raw_q8_0(arena_cursor &cursor,
 // Copies raw f16 halfs verbatim into the arena (ggml reshape layout is the
 // source layout, so no repacking). Returns nullptr when the source is not
 // f16 or capacity is exceeded.
-const uint16_t *prepare_raw_f16(arena_cursor &cursor,
+template <bool dry_run>
+const uint16_t *prepare_raw_f16(arena_cursor_t<dry_run> &cursor,
                                 const emel::model::data::tensor_record *tensor,
                                 const uint64_t expected_halfs) noexcept {
   if (tensor == nullptr ||
@@ -194,11 +220,14 @@ const uint16_t *prepare_raw_f16(arena_cursor &cursor,
   if (slot == nullptr) {
     return nullptr;
   }
-  std::memcpy(slot, tensor->data, expected_halfs * sizeof(uint16_t));
+  if constexpr (!dry_run) {
+    std::memcpy(slot, tensor->data, expected_halfs * sizeof(uint16_t));
+  }
   return reinterpret_cast<const uint16_t *>(slot);
 }
 
-const float *prepare_conv_gemm(arena_cursor &cursor,
+template <bool dry_run>
+const float *prepare_conv_gemm(arena_cursor_t<dry_run> &cursor,
                                const emel::model::data::tensor_record *tensor,
                                const int64_t taps, const int64_t in_count,
                                const int64_t out_count) noexcept {
@@ -214,11 +243,14 @@ const float *prepare_conv_gemm(arena_cursor &cursor,
   if (out == nullptr) {
     return nullptr;
   }
-  for (int64_t o = 0; o < out_count; ++o) {
-    for (int64_t i = 0; i < in_count; ++i) {
-      for (int64_t t = 0; t < taps; ++t) {
-        out[o + (i * taps + t) * out_count] = source_value(
-            *tensor, static_cast<uint64_t>(t + i * taps + o * taps * in_count));
+  if constexpr (!dry_run) {
+    for (int64_t o = 0; o < out_count; ++o) {
+      for (int64_t i = 0; i < in_count; ++i) {
+        for (int64_t t = 0; t < taps; ++t) {
+          out[o + (i * taps + t) * out_count] =
+              source_value(*tensor, static_cast<uint64_t>(t + i * taps +
+                                                          o * taps * in_count));
+        }
       }
     }
   }
@@ -227,8 +259,9 @@ const float *prepare_conv_gemm(arena_cursor &cursor,
 
 // Prepares a transposed-conv kernel stored [taps, out, in] verbatim as f32
 // (the op_conv_transpose_1d kernel consumes the reference layout directly).
+template <bool dry_run>
 const float *
-prepare_conv_transpose(arena_cursor &cursor,
+prepare_conv_transpose(arena_cursor_t<dry_run> &cursor,
                        const emel::model::data::tensor_record *tensor,
                        const uint64_t elements) noexcept {
   if (tensor == nullptr || !tensor_is_float(*tensor) ||
@@ -239,8 +272,10 @@ prepare_conv_transpose(arena_cursor &cursor,
   if (out == nullptr) {
     return nullptr;
   }
-  for (uint64_t index = 0; index < elements; ++index) {
-    out[index] = source_value(*tensor, index);
+  if constexpr (!dry_run) {
+    for (uint64_t index = 0; index < elements; ++index) {
+      out[index] = source_value(*tensor, index);
+    }
   }
   return out;
 }
@@ -865,26 +900,45 @@ bool compute_seanet_stack_for(codec_runtime &runtime,
       io, workspace.subspan(0, half), workspace.subspan(half));
 }
 
+// Public compute entries: non-failing by contract (the owning machines'
+// guards validate bind contract, capacities, and request shapes first), so
+// the internal data-plane short-circuit results are consumed here and never
+// route machine behavior.
 template <bool conv_f16>
-bool compute_seanet_encoder(codec_runtime &runtime,
+void compute_seanet_encoder(codec_runtime &runtime,
                             codec_streaming_state &state, frame_buffer &io,
                             std::span<float> workspace) noexcept {
-  return compute_seanet_stack_for<conv_f16, k_encoder_topology>(
+  (void)compute_seanet_stack_for<conv_f16, k_encoder_topology>(
       runtime, std::span<const seanet_layer_weights>{runtime.encoder_layers},
       state, io, workspace);
 }
 
 template <bool conv_f16>
-bool compute_seanet_decoder(codec_runtime &runtime,
+void compute_seanet_decoder(codec_runtime &runtime,
                             codec_streaming_state &state, frame_buffer &io,
                             std::span<float> workspace) noexcept {
-  return compute_seanet_stack_for<conv_f16, k_decoder_topology>(
+  (void)compute_seanet_stack_for<conv_f16, k_decoder_topology>(
       runtime, std::span<const seanet_layer_weights>{runtime.decoder_layers},
       state, io, workspace);
 }
 
+template <bool conv_f16>
+void compute_encoder_downsample(codec_runtime &runtime,
+                                codec_streaming_state &state, frame_buffer &io,
+                                std::span<float> workspace) noexcept {
+  (void)compute_streaming_conv<conv_f16>(runtime, runtime.downsample, state, io,
+                                         workspace);
+}
+
+void compute_decoder_upsample(codec_runtime &runtime,
+                              codec_streaming_state &state, frame_buffer &io,
+                              std::span<float> workspace) noexcept {
+  (void)compute_streaming_conv_transpose_depthwise(runtime, runtime.upsample,
+                                                   state, io, workspace);
+}
+
 template <bool proj_q8>
-bool compute_transformer(codec_runtime &runtime,
+void compute_transformer(codec_runtime &runtime,
                          const transformer_weights &weights,
                          codec_streaming_state &state, int64_t &positions,
                          frame_buffer &io,
@@ -902,7 +956,7 @@ bool compute_transformer(codec_runtime &runtime,
   const int64_t tokens = io.length;
   if (io.channels != dim || tokens <= 0 || heads <= 0 ||
       head_dim * heads != dim || half * 2 != head_dim) {
-    return false;
+    return;
   }
 
   // workspace: normed | qkv | scores | attn | proj | mlp | rot | q_bf16 |
@@ -918,7 +972,7 @@ bool compute_transformer(codec_runtime &runtime,
           2u +
       8u;
   if (workspace.size() < need) {
-    return false;
+    return;
   }
   float *normed = workspace.data();
   float *qkv = normed + dim;
@@ -963,7 +1017,7 @@ bool compute_transformer(codec_runtime &runtime,
       if constexpr (proj_q8) {
         if (!dispatch_q8_matvec(runtime, layer.in_proj_q8, dim, 3 * dim, normed,
                                 qkv)) {
-          return false;
+          return;
         }
       } else {
         for (int64_t o = 0; o < 3 * dim; ++o) {
@@ -1040,7 +1094,7 @@ bool compute_transformer(codec_runtime &runtime,
       if constexpr (proj_q8) {
         if (!dispatch_q8_matvec(runtime, layer.out_proj_q8, dim, dim, attn,
                                 proj)) {
-          return false;
+          return;
         }
       } else {
         for (int64_t o = 0; o < dim; ++o) {
@@ -1061,7 +1115,7 @@ bool compute_transformer(codec_runtime &runtime,
       if constexpr (proj_q8) {
         if (!dispatch_q8_matvec(runtime, layer.linear1_q8, dim, mlp_dim, normed,
                                 mlp)) {
-          return false;
+          return;
         }
       } else {
         for (int64_t o = 0; o < mlp_dim; ++o) {
@@ -1071,12 +1125,12 @@ bool compute_transformer(codec_runtime &runtime,
       if (!dispatch_unary(runtime, kev::unary_subop::gelu,
                           make_view(mlp, static_cast<uint64_t>(mlp_dim)),
                           make_view_mut(mlp, static_cast<uint64_t>(mlp_dim)))) {
-        return false;
+        return;
       }
       if constexpr (proj_q8) {
         if (!dispatch_q8_matvec(runtime, layer.linear2_q8, mlp_dim, dim, mlp,
                                 proj)) {
-          return false;
+          return;
         }
       } else {
         for (int64_t o = 0; o < dim; ++o) {
@@ -1091,11 +1145,11 @@ bool compute_transformer(codec_runtime &runtime,
   }
 
   positions += tokens;
-  return true;
+  return;
 }
 
 template <bool conv_f16, bool proj_q8>
-bool compute_rvq_encode(codec_runtime &runtime, const frame_buffer &latent,
+void compute_rvq_encode(codec_runtime &runtime, const frame_buffer &latent,
                         std::span<int32_t> codes_out,
                         std::span<float> workspace) noexcept {
   const auto &quantizer = runtime.quantizer;
@@ -1107,12 +1161,12 @@ bool compute_rvq_encode(codec_runtime &runtime, const frame_buffer &latent,
   if (latent.channels != dim || frames <= 0 ||
       codes_out.size() <
           static_cast<size_t>(n_q) * static_cast<size_t>(frames)) {
-    return false;
+    return;
   }
   const uint64_t need = 2u * static_cast<uint64_t>(codebook_dim) + 2u +
                         (static_cast<uint64_t>(dim) + 1u) / 2u + 1u;
   if (workspace.size() < need) {
-    return false;
+    return;
   }
   float *residual = workspace.data(); // [codebook_dim + 1] with trailing 1
   float *chosen = residual + codebook_dim + 1;
@@ -1153,7 +1207,7 @@ bool compute_rvq_encode(codec_runtime &runtime, const frame_buffer &latent,
             make_view_mut(residual, static_cast<uint64_t>(codebook_dim), 1u));
       }
       if (!projected_in) {
-        return false;
+        return;
       }
       residual[codebook_dim] = 1.0f;
 
@@ -1170,7 +1224,7 @@ bool compute_rvq_encode(codec_runtime &runtime, const frame_buffer &latent,
         argmax_ev.dst = make_view_mut(&score, 1u, 1u);
         argmax_ev.index_out = &index;
         if (!runtime.kernel.process_event(argmax_ev) || index < 0) {
-          return false;
+          return;
         }
         codes_out[static_cast<size_t>(code_row * frames + frame)] = index;
         ++code_row;
@@ -1191,20 +1245,20 @@ bool compute_rvq_encode(codec_runtime &runtime, const frame_buffer &latent,
                   make_view(chosen, static_cast<uint64_t>(codebook_dim)),
                   make_view_mut(residual,
                                 static_cast<uint64_t>(codebook_dim)))) {
-            return false;
+            return;
           }
         }
       }
     }
     if (code_row != n_q) {
-      return false;
+      return;
     }
   }
-  return true;
+  return;
 }
 
 template <bool conv_f16, bool proj_q8>
-bool compute_rvq_decode(codec_runtime &runtime, std::span<const int32_t> codes,
+void compute_rvq_decode(codec_runtime &runtime, std::span<const int32_t> codes,
                         int32_t frames, frame_buffer &latent_out,
                         std::span<float> workspace) noexcept {
   const auto &quantizer = runtime.quantizer;
@@ -1214,13 +1268,13 @@ bool compute_rvq_decode(codec_runtime &runtime, std::span<const int32_t> codes,
   const int64_t n_q = runtime.n_q;
   if (frames <= 0 ||
       codes.size() < static_cast<size_t>(n_q) * static_cast<size_t>(frames)) {
-    return false;
+    return;
   }
   const uint64_t need = 2u * static_cast<uint64_t>(codebook_dim) +
                         static_cast<uint64_t>(dim) + 2u +
                         (static_cast<uint64_t>(codebook_dim) + 1u) / 2u + 1u;
   if (workspace.size() < need) {
-    return false;
+    return;
   }
   float *summed = workspace.data();
   float *chosen = summed + codebook_dim;
@@ -1244,7 +1298,7 @@ bool compute_rvq_decode(codec_runtime &runtime, std::span<const int32_t> codes,
             codes[static_cast<size_t>(code_row * frames + frame)];
         ++code_row;
         if (index < 0 || index >= entries) {
-          return false;
+          return;
         }
         kev::op_get_rows rows_ev{};
         rows_ev.src0 = make_view(split->codebooks[static_cast<size_t>(level)],
@@ -1259,7 +1313,7 @@ bool compute_rvq_decode(codec_runtime &runtime, std::span<const int32_t> codes,
                 runtime, make_view(summed, static_cast<uint64_t>(codebook_dim)),
                 make_view(chosen, static_cast<uint64_t>(codebook_dim)),
                 make_view_mut(summed, static_cast<uint64_t>(codebook_dim)))) {
-          return false;
+          return;
         }
       }
       bool projected_out = false;
@@ -1294,17 +1348,17 @@ bool compute_rvq_decode(codec_runtime &runtime, std::span<const int32_t> codes,
                        make_view(projected, static_cast<uint64_t>(dim)),
                        make_view_mut(out, static_cast<uint64_t>(dim)));
       if (!projected_ok) {
-        return false;
+        return;
       }
     }
     if (code_row != n_q) {
-      return false;
+      return;
     }
   }
 
   latent_out.channels = static_cast<int32_t>(dim);
   latent_out.length = frames;
-  return true;
+  return;
 }
 
 //------------------------------------------------------------------------------//
@@ -1700,7 +1754,8 @@ uint64_t workspace_floats_from_plan(const emel::model::data &model_data,
 
 // Binds one conv from its plan-resolved geometry (taps / in / out already
 // derived from the chain walk, so collapsed GGUF dims are irrelevant here).
-bool bind_conv(arena_cursor &cursor, uint64_t &state_cursor,
+template <bool dry_run>
+bool bind_conv(arena_cursor_t<dry_run> &cursor, uint64_t &state_cursor,
                const seanet_plan_layer &plan_layer, const bool transposed,
                const bool with_f16, conv_weights &conv_out) noexcept {
   const int64_t taps = plan_layer.taps;
@@ -1757,7 +1812,8 @@ bool bind_conv(arena_cursor &cursor, uint64_t &state_cursor,
   return true;
 }
 
-bool bind_transformer(arena_cursor &cursor, uint64_t &state_cursor,
+template <bool dry_run>
+bool bind_transformer(arena_cursor_t<dry_run> &cursor, uint64_t &state_cursor,
                       const emel::model::data &model_data, const char *family,
                       const transformer_plan &plan, const int32_t frame_tokens,
                       const bool proj_q8,
@@ -1860,7 +1916,9 @@ bool bind_transformer(arena_cursor &cursor, uint64_t &state_cursor,
   return true;
 }
 
-bool bind_rvq_split(arena_cursor &cursor, const emel::model::data &model_data,
+template <bool dry_run>
+bool bind_rvq_split(arena_cursor_t<dry_run> &cursor,
+                    const emel::model::data &model_data,
                     const char *split, const int32_t level_count,
                     const bool with_f16, const bool with_q8,
                     rvq_split_weights &split_out) noexcept {
@@ -1934,16 +1992,18 @@ bool bind_rvq_split(arena_cursor &cursor, const emel::model::data &model_data,
     if (codebook == nullptr || table == nullptr) {
       return false;
     }
-    for (int64_t entry = 0; entry < entries; ++entry) {
-      float norm2 = 0.0f;
-      for (int64_t component = 0; component < cb_dim; ++component) {
-        const float value = source_value(
-            *embedding, static_cast<uint64_t>(component + entry * cb_dim));
-        codebook[component + entry * cb_dim] = value;
-        table[component + entry * (cb_dim + 1)] = value;
-        norm2 += value * value;
+    if constexpr (!dry_run) {
+      for (int64_t entry = 0; entry < entries; ++entry) {
+        float norm2 = 0.0f;
+        for (int64_t component = 0; component < cb_dim; ++component) {
+          const float value = source_value(
+              *embedding, static_cast<uint64_t>(component + entry * cb_dim));
+          codebook[component + entry * cb_dim] = value;
+          table[component + entry * (cb_dim + 1)] = value;
+          norm2 += value * value;
+        }
+        table[cb_dim + entry * (cb_dim + 1)] = -0.5f * norm2;
       }
-      table[cb_dim + entry * (cb_dim + 1)] = -0.5f * norm2;
     }
     split_out.codebooks[static_cast<size_t>(level)] = codebook;
     split_out.search_tables[static_cast<size_t>(level)] = table;
@@ -1951,8 +2011,9 @@ bool bind_rvq_split(arena_cursor &cursor, const emel::model::data &model_data,
   return true;
 }
 
+template <bool dry_run>
 bool bind_seanet(
-    arena_cursor &cursor, uint64_t &state_cursor,
+    arena_cursor_t<dry_run> &cursor, uint64_t &state_cursor,
     const std::array<seanet_plan_layer, k_max_seanet_layers> &plan_layers,
     const bool with_f16,
     std::array<seanet_layer_weights, k_max_seanet_layers>
@@ -2021,14 +2082,25 @@ uint64_t required_frame_floats(const emel::model::data &model_data) noexcept {
   return plan_codec(model_data, plan) ? plan.extents.frame + 64u : 0u;
 }
 
-bool bind_codec_runtime(const emel::model::data &model_data,
-                        std::span<float> prepared, std::span<float> state,
-                        codec_runtime &runtime_out,
-                        codec_streaming_state &state_out) noexcept {
+// Shared contract walk. The dry_run instantiation is the pure guard-side
+// validator (same tensor presence / dtype / element checks, no writes to any
+// caller memory - it only fills the caller-local scratch runtime); the live
+// instantiation canonicalizes into the arenas. One walk, two modes, so the
+// validator can never drift from the bind it authorizes.
+template <bool dry_run>
+bool run_codec_bind_walk(const emel::model::data &model_data,
+                         std::span<float> prepared, std::span<float> state,
+                         codec_runtime &runtime_out,
+                         codec_streaming_state &state_out) noexcept {
   codec_plan plan{};
-  if (!plan_codec(model_data, plan) || prepared.size() < plan.prepared_floats ||
-      state.size() < plan.extents.state) {
+  if (!plan_codec(model_data, plan)) {
     return false;
+  }
+  if constexpr (!dry_run) {
+    if (prepared.size() < plan.prepared_floats ||
+        state.size() < plan.extents.state) {
+      return false;
+    }
   }
 
   const auto &mimi = model_data.mimi;
@@ -2040,8 +2112,10 @@ bool bind_codec_runtime(const emel::model::data &model_data,
   runtime_out.prepared_arena = prepared;
   runtime_out.quantizer.codebook_entries = mimi.card;
   runtime_out.quantizer.codebook_dim = mimi.codebook_dim;
+  runtime_out.workspace_floats = workspace_floats_from_plan(model_data, plan);
+  runtime_out.frame_floats = plan.extents.frame + 64u;
 
-  arena_cursor cursor{prepared, 0};
+  arena_cursor_t<dry_run> cursor{prepared, 0};
   uint64_t state_cursor = 0;
 
   if (!bind_seanet(cursor, state_cursor, plan.encoder, plan.conv_f16,
@@ -2061,7 +2135,9 @@ bool bind_codec_runtime(const emel::model::data &model_data,
   runtime_out.conv_f16 = plan.conv_f16;
   runtime_out.proj_q8 = plan.proj_q8;
   runtime_out.rvq_q8 = plan.rvq_q8;
-  runtime_out.kernel.set_kind(runtime_out.kernel_kind);
+  if constexpr (!dry_run) {
+    runtime_out.kernel.set_kind(runtime_out.kernel_kind);
+  }
   if (!bind_rvq_split(cursor, model_data, "rvq_first", mimi.semantic_n_q,
                       plan.conv_f16, plan.rvq_q8,
                       runtime_out.quantizer.semantic) ||
@@ -2106,67 +2182,106 @@ bool bind_codec_runtime(const emel::model::data &model_data,
   }
 
   runtime_out.prepared_floats_used = cursor.used;
-  state_out.arena = state;
-  reset_streaming_state(runtime_out, state_out);
-  return state_cursor <= state.size();
+  if constexpr (!dry_run) {
+    state_out.arena = state;
+    reset_streaming_state(runtime_out, state_out);
+    return state_cursor <= state.size();
+  } else {
+    (void)state_out;
+    return true;
+  }
 }
 
-template bool compute_seanet_encoder<false>(codec_runtime &,
+bool validate_codec_contract(const emel::model::data &model_data) noexcept {
+  // Caller-local scratch: the dry-run walk writes only here, never to any
+  // caller arena, so this is a pure predicate suitable for guards. One-time
+  // initialization path only, never per-frame.
+  codec_runtime scratch_runtime{};
+  codec_streaming_state scratch_state{};
+  return run_codec_bind_walk<true>(model_data, {}, {}, scratch_runtime,
+                                   scratch_state);
+}
+
+bool validate_codes_in_range(const codec_runtime &runtime,
+                             std::span<const int32_t> codes) noexcept {
+  const int32_t entries = runtime.quantizer.codebook_entries;
+  const size_t count = static_cast<size_t>(runtime.n_q);
+  if (codes.size() < count) {
+    return false;
+  }
+  for (size_t index = 0; index < count; ++index) {
+    if (codes[index] < 0 || codes[index] >= entries) {
+      return false;
+    }
+  }
+  return true;
+}
+
+void bind_codec_runtime(const emel::model::data &model_data,
+                        std::span<float> prepared, std::span<float> state,
+                        codec_runtime &runtime_out,
+                        codec_streaming_state &state_out) noexcept {
+  // Non-failing by contract: the owning machine's guards route on
+  // validate_codec_contract and the required_* capacities before this action
+  // runs, so the walk's data-plane short-circuit cannot trigger here.
+  (void)run_codec_bind_walk<false>(model_data, prepared, state, runtime_out,
+                                   state_out);
+}
+
+template void compute_seanet_encoder<false>(codec_runtime &,
                                             codec_streaming_state &,
                                             frame_buffer &,
                                             std::span<float>) noexcept;
-template bool compute_seanet_encoder<true>(codec_runtime &,
+template void compute_seanet_encoder<true>(codec_runtime &,
                                            codec_streaming_state &,
                                            frame_buffer &,
                                            std::span<float>) noexcept;
-template bool compute_seanet_decoder<false>(codec_runtime &,
+template void compute_seanet_decoder<false>(codec_runtime &,
                                             codec_streaming_state &,
                                             frame_buffer &,
                                             std::span<float>) noexcept;
-template bool compute_seanet_decoder<true>(codec_runtime &,
+template void compute_seanet_decoder<true>(codec_runtime &,
                                            codec_streaming_state &,
                                            frame_buffer &,
                                            std::span<float>) noexcept;
-template bool compute_streaming_conv<false>(codec_runtime &,
-                                            const conv_weights &,
-                                            codec_streaming_state &,
-                                            frame_buffer &,
-                                            std::span<float>) noexcept;
-template bool compute_streaming_conv<true>(codec_runtime &,
-                                           const conv_weights &,
-                                           codec_streaming_state &,
-                                           frame_buffer &,
-                                           std::span<float>) noexcept;
-template bool compute_rvq_encode<false, false>(codec_runtime &,
+template void compute_encoder_downsample<false>(codec_runtime &,
+                                                codec_streaming_state &,
+                                                frame_buffer &,
+                                                std::span<float>) noexcept;
+template void compute_encoder_downsample<true>(codec_runtime &,
+                                               codec_streaming_state &,
+                                               frame_buffer &,
+                                               std::span<float>) noexcept;
+template void compute_rvq_encode<false, false>(codec_runtime &,
                                                const frame_buffer &,
                                                std::span<int32_t>,
                                                std::span<float>) noexcept;
-template bool compute_rvq_encode<true, false>(codec_runtime &,
+template void compute_rvq_encode<true, false>(codec_runtime &,
                                               const frame_buffer &,
                                               std::span<int32_t>,
                                               std::span<float>) noexcept;
-template bool compute_rvq_encode<true, true>(codec_runtime &,
+template void compute_rvq_encode<true, true>(codec_runtime &,
                                              const frame_buffer &,
                                              std::span<int32_t>,
                                              std::span<float>) noexcept;
-template bool compute_rvq_decode<false, false>(codec_runtime &,
+template void compute_rvq_decode<false, false>(codec_runtime &,
                                                std::span<const int32_t>,
                                                int32_t, frame_buffer &,
                                                std::span<float>) noexcept;
-template bool compute_rvq_decode<true, false>(codec_runtime &,
+template void compute_rvq_decode<true, false>(codec_runtime &,
                                               std::span<const int32_t>, int32_t,
                                               frame_buffer &,
                                               std::span<float>) noexcept;
-template bool compute_rvq_decode<true, true>(codec_runtime &,
+template void compute_rvq_decode<true, true>(codec_runtime &,
                                              std::span<const int32_t>, int32_t,
                                              frame_buffer &,
                                              std::span<float>) noexcept;
-template bool compute_transformer<false>(codec_runtime &,
+template void compute_transformer<false>(codec_runtime &,
                                          const transformer_weights &,
                                          codec_streaming_state &, int64_t &,
                                          frame_buffer &,
                                          std::span<float>) noexcept;
-template bool compute_transformer<true>(codec_runtime &,
+template void compute_transformer<true>(codec_runtime &,
                                         const transformer_weights &,
                                         codec_streaming_state &, int64_t &,
                                         frame_buffer &,

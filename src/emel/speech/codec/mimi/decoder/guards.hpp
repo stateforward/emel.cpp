@@ -43,13 +43,12 @@ struct guard_request_shape_invalid {
 struct guard_buffer_capacity_valid {
   bool operator()(const event::decode_run &runtime_ev,
                   const action::context &) const noexcept {
+    // O(1) against the sizing contract bound into the runtime at bind time
+    // (never re-plans the model on the per-frame path).
     const auto &request = runtime_ev.request;
-    const auto *model = request.runtime.model;
-    return model != nullptr &&
-           request.frame.size() >=
-               mimi::detail::required_frame_floats(*model) &&
-           request.workspace.size() >=
-               mimi::detail::required_workspace_floats(*model);
+    return request.runtime.frame_floats > 0u &&
+           request.frame.size() >= request.runtime.frame_floats &&
+           request.workspace.size() >= request.runtime.workspace_floats;
   }
 };
 
@@ -85,20 +84,6 @@ struct guard_proj_f32 {
   bool operator()(const event::decode_run &runtime_ev,
                   const action::context &) const noexcept {
     return !runtime_ev.request.runtime.proj_q8;
-  }
-};
-
-struct guard_stage_ok {
-  bool operator()(const event::decode_run &runtime_ev,
-                  const action::context &) const noexcept {
-    return runtime_ev.ctx.stage_ok;
-  }
-};
-
-struct guard_stage_failed {
-  bool operator()(const event::decode_run &runtime_ev,
-                  const action::context &) const noexcept {
-    return !runtime_ev.ctx.stage_ok;
   }
 };
 

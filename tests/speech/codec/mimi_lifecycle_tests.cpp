@@ -40,6 +40,18 @@ void on_encode_frame_done(const mimi::events::encode_frame_done &) {
 void on_decode_frame_done(const mimi::events::decode_frame_done &) {
   ++g_decode_done_count;
 }
+emel::error::type g_init_error = 0;
+uint32_t g_encode_error_count = 0;
+uint32_t g_decode_error_count = 0;
+void on_initialize_error(const mimi::events::initialize_error &error_ev) {
+  g_init_error = error_ev.err;
+}
+void on_encode_frame_error(const mimi::events::encode_frame_error &) {
+  ++g_encode_error_count;
+}
+void on_decode_frame_error(const mimi::events::decode_frame_error &) {
+  ++g_decode_error_count;
+}
 
 void noop_probe_done(const emel::gguf::loader::events::probe_done &) {}
 void noop_probe_error(const emel::gguf::loader::events::probe_error &) {}
@@ -76,8 +88,9 @@ struct loaded_mimi_fixture {
   std::unique_ptr<emel::model::data> model = {};
 };
 
-loaded_mimi_fixture load_mimi_fixture_or_skip() {
-  const auto fixture_path = repo_root() / "tests" / "models" / "mimi-tiny.gguf";
+loaded_mimi_fixture
+load_mimi_fixture_or_skip(const char *fixture_name = "mimi-tiny.gguf") {
+  const auto fixture_path = repo_root() / "tests" / "models" / fixture_name;
   if (!std::filesystem::exists(fixture_path)) {
     MESSAGE("skipping mimi codec lifecycle test because fixture is missing: "
             << fixture_path.string());
@@ -150,10 +163,10 @@ struct codec_arenas {
 };
 
 void size_arenas(const emel::model::data &model, codec_arenas &arenas) {
-  arenas.prepared.resize(mimi::detail::required_prepared_floats(model));
-  arenas.state.resize(mimi::detail::required_state_floats(model));
-  arenas.workspace.resize(mimi::detail::required_workspace_floats(model));
-  arenas.frame.resize(mimi::detail::required_frame_floats(model));
+  arenas.prepared.resize(mimi::prepared_arena_floats(model));
+  arenas.state.resize(mimi::state_arena_floats(model));
+  arenas.workspace.resize(mimi::workspace_arena_floats(model));
+  arenas.frame.resize(mimi::frame_arena_floats(model));
 }
 
 std::vector<float> deterministic_pcm(const int32_t samples) {
@@ -299,7 +312,188 @@ TEST_CASE("mimi codec facade reports bind failures explicitly") {
                                std::span<float>{arenas.workspace},
                                std::span<float>{arenas.frame}};
   init.error_out = &err;
+  g_init_error = emel::error::cast(mimi::error::none);
+  init.on_error = emel::callback<void(
+      const mimi::events::initialize_error &)>::from<&on_initialize_error>();
   CHECK_FALSE(machine.process_event(init));
-  CHECK(err == emel::error::cast(mimi::error::bind_failed));
+  CHECK(err == emel::error::cast(mimi::error::arena_capacity));
+  CHECK(g_init_error == emel::error::cast(mimi::error::arena_capacity));
   CHECK(machine.is(sml::state<mimi::state_uninitialized>));
+
+  // A model that does not satisfy the mimi contract (wrong component) routes
+  // the distinct bind_failed error through the contract guard.
+  auto lm_loaded = load_mimi_fixture_or_skip("moshi-tiny-lm.gguf");
+  if (lm_loaded.model != nullptr) {
+    codec_arenas lm_arenas{};
+    lm_arenas.prepared.resize(64);
+    lm_arenas.state.resize(64);
+    lm_arenas.workspace.resize(64);
+    lm_arenas.frame.resize(64);
+    mimi::sm lm_machine{};
+    err = emel::error::cast(mimi::error::none);
+    g_init_error = emel::error::cast(mimi::error::none);
+    mimi::event::initialize lm_init{*lm_loaded.model,
+                                    std::span<float>{lm_arenas.prepared},
+                                    std::span<float>{lm_arenas.state},
+                                    std::span<float>{lm_arenas.workspace},
+                                    std::span<float>{lm_arenas.frame}};
+    lm_init.error_out = &err;
+    lm_init.on_error = emel::callback<void(
+        const mimi::events::initialize_error &)>::from<&on_initialize_error>();
+    CHECK_FALSE(lm_machine.process_event(lm_init));
+    CHECK(err == emel::error::cast(mimi::error::bind_failed));
+    CHECK(g_init_error == emel::error::cast(mimi::error::bind_failed));
+    CHECK(lm_machine.is(sml::state<mimi::state_uninitialized>));
+  }
+}
+
+TEST_CASE("mimi codec facade rejects malformed frame requests explicitly") {
+  auto loaded = load_mimi_fixture_or_skip();
+  if (loaded.model == nullptr) {
+    return;
+  }
+
+  codec_arenas arenas{};
+  size_arenas(*loaded.model, arenas);
+
+  mimi::sm machine{};
+  namespace sml = stateforward::sml;
+  emel::error::type err = emel::error::cast(mimi::error::none);
+  g_frame_samples = 0;
+  g_n_q = 0;
+  mimi::event::initialize init{*loaded.model, std::span<float>{arenas.prepared},
+                               std::span<float>{arenas.state},
+                               std::span<float>{arenas.workspace},
+                               std::span<float>{arenas.frame}};
+  init.error_out = &err;
+  init.on_done = emel::callback<void(
+      const mimi::events::initialize_done &)>::from<&on_initialize_done>();
+  REQUIRE(machine.process_event(init));
+  REQUIRE(g_frame_samples > 0);
+  REQUIRE(g_n_q > 0);
+
+  // encode: wrong PCM length routes the explicit request_shape error
+  std::vector<float> short_pcm(static_cast<size_t>(g_frame_samples) - 1u, 0.0f);
+  std::vector<int32_t> codes(static_cast<size_t>(g_n_q), -1);
+  mimi::event::encode_frame bad_encode{std::span<const float>{short_pcm},
+                                       std::span<int32_t>{codes}};
+  bad_encode.error_out = &err;
+  g_encode_error_count = 0;
+  bad_encode.on_error = emel::callback<void(
+      const mimi::events::encode_frame_error &)>::from<&on_encode_frame_error>();
+  CHECK_FALSE(machine.process_event(bad_encode));
+  CHECK(g_encode_error_count == 1u);
+  CHECK(err == emel::error::cast(mimi::error::request_shape));
+  CHECK(machine.is(sml::state<mimi::state_session_ready>));
+
+  // decode: undersized output routes request_shape
+  std::vector<int32_t> valid_codes(static_cast<size_t>(g_n_q), 0);
+  std::vector<float> short_pcm_out(static_cast<size_t>(g_frame_samples) - 1u);
+  mimi::event::decode_frame bad_decode{std::span<const int32_t>{valid_codes},
+                                       std::span<float>{short_pcm_out}};
+  bad_decode.error_out = &err;
+  g_decode_error_count = 0;
+  bad_decode.on_error = emel::callback<void(
+      const mimi::events::decode_frame_error &)>::from<&on_decode_frame_error>();
+  CHECK_FALSE(machine.process_event(bad_decode));
+  CHECK(g_decode_error_count == 1u);
+  CHECK(err == emel::error::cast(mimi::error::request_shape));
+  CHECK(machine.is(sml::state<mimi::state_session_ready>));
+
+  // decode: an out-of-range code routes the explicit code_range error
+  std::vector<int32_t> bad_codes(static_cast<size_t>(g_n_q), 0);
+  bad_codes[0] = 1 << 20;
+  std::vector<float> pcm_out(static_cast<size_t>(g_frame_samples), 0.0f);
+  mimi::event::decode_frame range_decode{std::span<const int32_t>{bad_codes},
+                                         std::span<float>{pcm_out}};
+  range_decode.error_out = &err;
+  CHECK_FALSE(machine.process_event(range_decode));
+  CHECK(err == emel::error::cast(mimi::error::code_range));
+  CHECK(machine.is(sml::state<mimi::state_session_ready>));
+
+  // the session stays usable after rejected requests
+  const auto pcm = deterministic_pcm(g_frame_samples);
+  mimi::event::encode_frame good_encode{std::span<const float>{pcm},
+                                        std::span<int32_t>{codes}};
+  good_encode.error_out = &err;
+  CHECK(machine.process_event(good_encode));
+  CHECK(err == emel::error::cast(mimi::error::none));
+}
+
+TEST_CASE("mimi codec facade streams the f16 and q8 operand-class fixtures") {
+  // One committed fixture per bound operand class: mimi-tiny-f16.gguf stores
+  // conv/projection weights f16 (guard_conv_f16 rows, f16 im2col + mul_mat
+  // paths, raw-f16 RVQ projections); mimi-tiny-q8.gguf carries q8_0
+  // transformer/RVQ projections (guard_proj_q8 / guard_class_q8 rows, q8
+  // matvec paths). The streaming contract is identical across classes:
+  // deterministic codes, exact replay after reset_stream.
+  for (const char *fixture_name : {"mimi-tiny-f16.gguf", "mimi-tiny-q8.gguf"}) {
+    CAPTURE(fixture_name);
+    auto loaded = load_mimi_fixture_or_skip(fixture_name);
+    if (loaded.model == nullptr) {
+      continue;
+    }
+
+    codec_arenas arenas{};
+    size_arenas(*loaded.model, arenas);
+
+    mimi::sm machine{};
+    namespace sml = stateforward::sml;
+    emel::error::type err = emel::error::cast(mimi::error::none);
+    g_frame_samples = 0;
+    g_n_q = 0;
+    mimi::event::initialize init{*loaded.model,
+                                 std::span<float>{arenas.prepared},
+                                 std::span<float>{arenas.state},
+                                 std::span<float>{arenas.workspace},
+                                 std::span<float>{arenas.frame}};
+    init.error_out = &err;
+    init.on_done = emel::callback<void(
+        const mimi::events::initialize_done &)>::from<&on_initialize_done>();
+    REQUIRE(machine.process_event(init));
+    REQUIRE(err == emel::error::cast(mimi::error::none));
+    REQUIRE(g_frame_samples > 0);
+    REQUIRE(g_n_q > 0);
+
+    const auto pcm = deterministic_pcm(g_frame_samples);
+    std::vector<int32_t> codes(static_cast<size_t>(g_n_q), -1);
+    mimi::event::encode_frame encode{std::span<const float>{pcm},
+                                     std::span<int32_t>{codes}};
+    encode.error_out = &err;
+    REQUIRE(machine.process_event(encode));
+    CHECK(err == emel::error::cast(mimi::error::none));
+    for (const int32_t code : codes) {
+      CHECK(code >= 0);
+    }
+
+    // second frame advances streaming state
+    std::vector<int32_t> second(codes.size(), -1);
+    mimi::event::encode_frame encode_second{std::span<const float>{pcm},
+                                            std::span<int32_t>{second}};
+    encode_second.error_out = &err;
+    REQUIRE(machine.process_event(encode_second));
+
+    std::vector<float> decoded(static_cast<size_t>(g_frame_samples), 0.0f);
+    mimi::event::decode_frame decode{std::span<const int32_t>{codes},
+                                     std::span<float>{decoded}};
+    decode.error_out = &err;
+    REQUIRE(machine.process_event(decode));
+    CHECK(err == emel::error::cast(mimi::error::none));
+    bool all_finite = true;
+    for (const float sample : decoded) {
+      all_finite = all_finite && std::isfinite(sample);
+    }
+    CHECK(all_finite);
+
+    // reset replays the first frame exactly
+    std::vector<int32_t> replay(codes.size(), -1);
+    REQUIRE(machine.process_event(mimi::event::reset_stream{}));
+    mimi::event::encode_frame encode_replay{std::span<const float>{pcm},
+                                            std::span<int32_t>{replay}};
+    encode_replay.error_out = &err;
+    REQUIRE(machine.process_event(encode_replay));
+    for (size_t index = 0; index < codes.size(); ++index) {
+      CHECK(codes[index] == replay[index]);
+    }
+  }
 }

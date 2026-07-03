@@ -40,9 +40,11 @@ struct encode {
   emel::callback<void(const events::encode_error &)> on_error = {};
 };
 
+// Per-dispatch runtime ctx: `err` is written only on already-selected error
+// transitions (guards never read it); `io` is the frame cursor the
+// non-failing compute stages advance.
 struct encode_ctx {
   emel::error::type err = emel::error::cast(error::none);
-  bool stage_ok = true;
   mimi::detail::frame_buffer io = {};
 };
 

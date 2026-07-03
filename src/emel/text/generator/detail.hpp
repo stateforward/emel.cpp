@@ -2286,16 +2286,12 @@ inline bool compute_mul_mat_sliced_parallel(
     lane_kernel.set_kind(backend.kernel_kind);
     const auto & lane_ev = lane_events[lane];
     auto & ok_flag = lane_ok[lane];
-    const bool submitted =
-        scheduler.try_submit(group, [&lane_kernel, &lane_ev, &ok_flag]() noexcept {
-          ok_flag = lane_kernel.process_event(lane_ev);
-        });
-    // Bounded backpressure handling: a rejected submit (queue full, or the
-    // caller is already a pool worker) runs the same slice inline. The
-    // algorithm and output are identical either way; only placement differs.
-    if (!submitted) {
+    // Total fork: submit_or_run executes the slice exactly once inside the
+    // join window (worker or calling thread - the scheduler's internal
+    // capacity handling, never a behavior choice).
+    scheduler.submit_or_run(group, [&lane_kernel, &lane_ev, &ok_flag]() noexcept {
       ok_flag = lane_kernel.process_event(lane_ev);
-    }
+    });
   }
   lane_events[0] = compute_sliced_mul_mat_event(ev, group_rows, slices[0]);
   backend.lane_kernels[0].set_kind(backend.kernel_kind);

@@ -55,14 +55,15 @@ struct decode {
   emel::callback<void(const events::decode_error &)> on_error = {};
 };
 
+// Per-dispatch runtime ctx: `err` is written only on already-selected error
+// transitions (guards never read it); the compute stages are non-failing by
+// contract.
 struct encode_ctx {
   emel::error::type err = emel::error::cast(error::none);
-  bool stage_ok = true;
 };
 
 struct decode_ctx {
   emel::error::type err = emel::error::cast(error::none);
-  bool stage_ok = true;
 };
 
 struct encode_run {

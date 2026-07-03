@@ -211,6 +211,11 @@ struct codec_runtime {
   int32_t n_q = 0;
   int32_t dim = 0;
 
+  // Bound sizing contract (copied from the plan at bind) so per-frame
+  // capacity guards are O(1) reads instead of model re-plans.
+  uint64_t workspace_floats = 0;
+  uint64_t frame_floats = 0;
+
   std::span<float> prepared_arena = {};
   uint64_t prepared_floats_used = 0;
 };
@@ -245,9 +250,23 @@ uint64_t required_frame_floats(const emel::model::data &model_data) noexcept;
 // Binding (one-time, non-hot-path).
 //------------------------------------------------------------------------------//
 
+// Pure contract validator: a compile-time dry-run instantiation of the same
+// walk bind_codec_runtime executes (identical tensor presence / dtype /
+// element checks, no arena writes), so the guard-side predicate can never
+// drift from the bind it authorizes. Capacity is validated separately via
+// the required_* sizing contract.
+bool validate_codec_contract(const emel::model::data &model_data) noexcept;
+
+// Pure per-request validator for decode codes: every code addresses a valid
+// codebook entry. Bounded scan over n_q codes; guards route on this before
+// the decode action runs.
+bool validate_codes_in_range(const codec_runtime &runtime,
+                             std::span<const int32_t> codes) noexcept;
+
 // Canonicalizes weights into `prepared`, carves `state`, fills `runtime_out`.
-// Returns false when the model contract and the fixed topology disagree.
-bool bind_codec_runtime(const emel::model::data &model_data,
+// Non-failing by contract: the owning machine's guards route on
+// validate_codec_contract and the required_* capacities before this runs.
+void bind_codec_runtime(const emel::model::data &model_data,
                         std::span<float> prepared, std::span<float> state,
                         codec_runtime &runtime_out,
                         codec_streaming_state &state_out) noexcept;
@@ -256,8 +275,11 @@ void reset_streaming_state(const codec_runtime &runtime,
                            codec_streaming_state &state) noexcept;
 
 //------------------------------------------------------------------------------//
-// Compute (data-plane only; each helper executes one already-chosen stage as
-// bounded kernel op dispatches and reports dispatch success).
+// Compute (data-plane only; each helper executes one already-chosen,
+// already-validated stage as bounded kernel op dispatches). Every entry is
+// non-failing by contract - the owning machines' guards validate the bind
+// contract, arena capacities, and request shapes before any compute action
+// runs - so no helper output routes machine behavior.
 //------------------------------------------------------------------------------//
 
 struct frame_buffer {
@@ -272,49 +294,43 @@ struct frame_buffer {
 // Each stack is unrolled at compile time from its constexpr topology table,
 // so no runtime block-kind selection exists in the compute layer.
 template <bool conv_f16>
-bool compute_seanet_encoder(codec_runtime &runtime,
+void compute_seanet_encoder(codec_runtime &runtime,
                             codec_streaming_state &state, frame_buffer &io,
                             std::span<float> workspace) noexcept;
 
 template <bool conv_f16>
-bool compute_seanet_decoder(codec_runtime &runtime,
+void compute_seanet_decoder(codec_runtime &runtime,
                             codec_streaming_state &state, frame_buffer &io,
                             std::span<float> workspace) noexcept;
 
+// Downsample conv (25 Hz -> 12.5 Hz), the encode chain's final conv stage.
 template <bool conv_f16>
-bool compute_streaming_conv(codec_runtime &runtime, const conv_weights &conv,
-                            codec_streaming_state &state, frame_buffer &io,
-                            std::span<float> workspace) noexcept;
+void compute_encoder_downsample(codec_runtime &runtime,
+                                codec_streaming_state &state, frame_buffer &io,
+                                std::span<float> workspace) noexcept;
 
-bool compute_streaming_conv_transpose(codec_runtime &runtime,
-                                      const conv_weights &conv,
-                                      codec_streaming_state &state,
-                                      frame_buffer &io,
-                                      std::span<float> workspace) noexcept;
-
-// Grouped (groups == channels) variant used only by the decoder upsample
-// stage; the owning actor selects it through its own transition, never by
-// sniffing weight shapes here.
-bool compute_streaming_conv_transpose_depthwise(
-    codec_runtime &runtime, const conv_weights &conv,
-    codec_streaming_state &state, frame_buffer &io,
-    std::span<float> workspace) noexcept;
+// Depthwise transposed-conv upsample (12.5 Hz -> 25 Hz), the decode chain's
+// first stage; the owning actor selects it through its own transition, never
+// by sniffing weight shapes here.
+void compute_decoder_upsample(codec_runtime &runtime,
+                              codec_streaming_state &state, frame_buffer &io,
+                              std::span<float> workspace) noexcept;
 
 template <bool proj_q8>
-bool compute_transformer(codec_runtime &runtime,
+void compute_transformer(codec_runtime &runtime,
                          const transformer_weights &weights,
                          codec_streaming_state &state, int64_t &positions,
                          frame_buffer &io, std::span<float> workspace) noexcept;
 
 // latent [dim, frames] -> codes [n_q, frames]
 template <bool conv_f16, bool proj_q8 = false>
-bool compute_rvq_encode(codec_runtime &runtime, const frame_buffer &latent,
+void compute_rvq_encode(codec_runtime &runtime, const frame_buffer &latent,
                         std::span<int32_t> codes_out,
                         std::span<float> workspace) noexcept;
 
 // codes [n_q, frames] -> latent [dim, frames]
 template <bool conv_f16, bool proj_q8 = false>
-bool compute_rvq_decode(codec_runtime &runtime, std::span<const int32_t> codes,
+void compute_rvq_decode(codec_runtime &runtime, std::span<const int32_t> codes,
                         int32_t frames, frame_buffer &latent_out,
                         std::span<float> workspace) noexcept;
 

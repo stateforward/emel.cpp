@@ -1,4 +1,5 @@
 #pragma once
+// benchmark: designed
 
 #include <stateforward/sml.hpp>
 
@@ -9,8 +10,9 @@
 #include "emel/speech/codec/mimi/quantizer/guards.hpp"
 
 // Mimi split-RVQ actor: latent column <-> n_q codebook indexes. The encode
-// and decode flows are separate explicit state chains; stage outcomes are
-// routed by guards over the per-dispatch runtime ctx.
+// and decode flows are separate explicit state chains; every error route is
+// decided by pure validation guards BEFORE the compute action runs, so the
+// compute stages are non-failing and chain unconditionally.
 namespace emel::speech::codec::mimi::quantizer {
 
 struct state_ready {};
@@ -26,6 +28,7 @@ struct state_encode_done {};
 struct state_encode_errored {};
 struct state_decode_runtime_decision {};
 struct state_decode_shape_decision {};
+struct state_decode_codes_decision {};
 struct state_decode_variant_decision {};
 struct state_decode_running {};
 struct state_decode_success_error_out_decision {};
@@ -47,7 +50,6 @@ struct model {
       // Encode flow.
         sml::state<state_encode_runtime_decision> <= *sml::state<state_ready>
           + sml::event<encode_run>
-          / action::effect_begin<encode_run>{}
       , sml::state<state_encode_shape_decision> <= sml::state<state_encode_runtime_decision>
           + sml::completion<encode_run> [ guard::guard_runtime_bound<encode_run>{} ]
       , sml::state<state_encode_error_error_out_decision> <= sml::state<state_encode_runtime_decision>
@@ -68,10 +70,7 @@ struct model {
           + sml::completion<encode_run> [ guard::guard_encode_shape_invalid{} ]
           / action::effect_mark_request_shape_invalid<encode_run>{}
       , sml::state<state_encode_success_error_out_decision> <= sml::state<state_encode_running>
-          + sml::completion<encode_run> [ guard::guard_stage_ok<encode_run>{} ]
-      , sml::state<state_encode_error_error_out_decision> <= sml::state<state_encode_running>
-          + sml::completion<encode_run> [ guard::guard_stage_failed<encode_run>{} ]
-          / action::effect_mark_quantize_failed{}
+          + sml::completion<encode_run>
       , sml::state<state_encode_success_callback_decision> <= sml::state<state_encode_success_error_out_decision>
           + sml::completion<encode_run> [ guard::guard_has_error_out<encode_run>{} ]
           / action::effect_store_error_out<encode_run>{}
@@ -101,14 +100,18 @@ struct model {
       // Decode flow.
       , sml::state<state_decode_runtime_decision> <= sml::state<state_ready>
           + sml::event<decode_run>
-          / action::effect_begin<decode_run>{}
       , sml::state<state_decode_shape_decision> <= sml::state<state_decode_runtime_decision>
           + sml::completion<decode_run> [ guard::guard_runtime_bound<decode_run>{} ]
       , sml::state<state_decode_error_error_out_decision> <= sml::state<state_decode_runtime_decision>
           + sml::completion<decode_run> [ guard::guard_runtime_unbound<decode_run>{} ]
           / action::effect_mark_runtime_unbound<decode_run>{}
-      , sml::state<state_decode_variant_decision> <= sml::state<state_decode_shape_decision>
+      , sml::state<state_decode_codes_decision> <= sml::state<state_decode_shape_decision>
           + sml::completion<decode_run> [ guard::guard_decode_shape_valid{} ]
+      , sml::state<state_decode_variant_decision> <= sml::state<state_decode_codes_decision>
+          + sml::completion<decode_run> [ guard::guard_decode_codes_valid{} ]
+      , sml::state<state_decode_error_error_out_decision> <= sml::state<state_decode_codes_decision>
+          + sml::completion<decode_run> [ guard::guard_decode_codes_invalid{} ]
+          / action::effect_mark_code_range_invalid{}
       , sml::state<state_decode_running> <= sml::state<state_decode_variant_decision>
           + sml::completion<decode_run> [ guard::guard_class_f32<decode_run>{} ]
           / action::effect_run_dequantize<false, false>{}
@@ -122,10 +125,7 @@ struct model {
           + sml::completion<decode_run> [ guard::guard_decode_shape_invalid{} ]
           / action::effect_mark_request_shape_invalid<decode_run>{}
       , sml::state<state_decode_success_error_out_decision> <= sml::state<state_decode_running>
-          + sml::completion<decode_run> [ guard::guard_stage_ok<decode_run>{} ]
-      , sml::state<state_decode_error_error_out_decision> <= sml::state<state_decode_running>
-          + sml::completion<decode_run> [ guard::guard_stage_failed<decode_run>{} ]
-          / action::effect_mark_dequantize_failed{}
+          + sml::completion<decode_run>
       , sml::state<state_decode_success_callback_decision> <= sml::state<state_decode_success_error_out_decision>
           + sml::completion<decode_run> [ guard::guard_has_error_out<decode_run>{} ]
           / action::effect_store_error_out<decode_run>{}
@@ -178,6 +178,8 @@ struct model {
       , sml::state<state_ready> <= sml::state<state_decode_runtime_decision>
           + sml::unexpected_event<sml::_> / action::effect_on_unexpected{}
       , sml::state<state_ready> <= sml::state<state_decode_shape_decision>
+          + sml::unexpected_event<sml::_> / action::effect_on_unexpected{}
+      , sml::state<state_ready> <= sml::state<state_decode_codes_decision>
           + sml::unexpected_event<sml::_> / action::effect_on_unexpected{}
       , sml::state<state_ready> <= sml::state<state_decode_variant_decision>
           + sml::unexpected_event<sml::_> / action::effect_on_unexpected{}

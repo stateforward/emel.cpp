@@ -15,14 +15,6 @@ inline emel::error::type to_error(const error value) noexcept {
 
 } // namespace detail
 
-template <class runtime_event_type> struct effect_begin {
-  void operator()(const runtime_event_type &runtime_ev,
-                  context &) const noexcept {
-    runtime_ev.ctx.err = detail::to_error(error::none);
-    runtime_ev.ctx.stage_ok = true;
-  }
-};
-
 template <class runtime_event_type> struct effect_mark_runtime_unbound {
   void operator()(const runtime_event_type &runtime_ev,
                   context &) const noexcept {
@@ -37,24 +29,25 @@ template <class runtime_event_type> struct effect_mark_request_shape_invalid {
   }
 };
 
-// The projection operand class (f32 canonical vs reference f16 conv1x1) is
-// selected by the transition rows via guard_conv_f16 / guard_conv_f32.
+struct effect_mark_code_range_invalid {
+  void operator()(const event::decode_run &runtime_ev,
+                  context &) const noexcept {
+    runtime_ev.ctx.err = detail::to_error(error::code_range);
+  }
+};
+
+// The projection operand class (f32 canonical vs reference f16 conv1x1 vs
+// pre-quantized q8_0) is selected by the transition rows via the
+// guard_class_* guards; the compute is non-failing by contract (validation
+// guards ran first).
 template <bool conv_f16, bool proj_q8> struct effect_run_quantize {
   void operator()(const event::encode_run &runtime_ev,
                   context &) const noexcept {
     const auto &request = runtime_ev.request;
     const mimi::detail::frame_buffer latent{request.latent.data(),
                                             request.runtime.dim, 1};
-    runtime_ev.ctx.stage_ok =
-        mimi::detail::compute_rvq_encode<conv_f16, proj_q8>(
-            request.runtime, latent, request.codes_out, request.workspace);
-  }
-};
-
-struct effect_mark_quantize_failed {
-  void operator()(const event::encode_run &runtime_ev,
-                  context &) const noexcept {
-    runtime_ev.ctx.err = detail::to_error(error::quantize_failed);
+    mimi::detail::compute_rvq_encode<conv_f16, proj_q8>(
+        request.runtime, latent, request.codes_out, request.workspace);
   }
 };
 
@@ -64,16 +57,8 @@ template <bool conv_f16, bool proj_q8> struct effect_run_dequantize {
     const auto &request = runtime_ev.request;
     mimi::detail::frame_buffer latent{request.latent_out.data(),
                                       request.runtime.dim, 1};
-    runtime_ev.ctx.stage_ok =
-        mimi::detail::compute_rvq_decode<conv_f16, proj_q8>(
-            request.runtime, request.codes, 1, latent, request.workspace);
-  }
-};
-
-struct effect_mark_dequantize_failed {
-  void operator()(const event::decode_run &runtime_ev,
-                  context &) const noexcept {
-    runtime_ev.ctx.err = detail::to_error(error::dequantize_failed);
+    mimi::detail::compute_rvq_decode<conv_f16, proj_q8>(
+        request.runtime, request.codes, 1, latent, request.workspace);
   }
 };
 

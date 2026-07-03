@@ -132,11 +132,11 @@ bool load_fixture(codec_fixture &fixture) {
   }
 
   fixture.prepared.resize(
-      mimi::detail::required_prepared_floats(*fixture.model));
-  fixture.state.resize(mimi::detail::required_state_floats(*fixture.model));
+      mimi::prepared_arena_floats(*fixture.model));
+  fixture.state.resize(mimi::state_arena_floats(*fixture.model));
   fixture.workspace.resize(
-      mimi::detail::required_workspace_floats(*fixture.model));
-  fixture.frame.resize(mimi::detail::required_frame_floats(*fixture.model));
+      mimi::workspace_arena_floats(*fixture.model));
+  fixture.frame.resize(mimi::frame_arena_floats(*fixture.model));
   fixture.codec = std::make_unique<mimi::sm>();
   mimi::event::initialize init{
       *fixture.model, std::span<float>{fixture.prepared},
@@ -209,10 +209,21 @@ void append_emel_speech_codec_mimi_cases(std::vector<result> &results,
 
 void append_reference_speech_codec_mimi_cases(std::vector<result> &results,
                                               const config &cfg) {
-  // The moshi.cpp reference lane runs as a separate executable
-  // (moshi_reference_driver) via reference_backends/moshi_cpp_mimi.json.
-  (void)results;
-  (void)cfg;
+  // The true moshi.cpp reference lane runs as a separate executable
+  // (moshi_reference_driver via reference_backends/moshi_cpp_mimi.json and
+  // scripts/bench_mimi_compare.sh) to preserve two-lane isolation. The
+  // in-process reference column records paired placeholder entries so the
+  // compare table stays one-to-one with the EMEL lane (the sortformer
+  // recorded-baseline pattern); their timings are not a measurement of
+  // moshi.cpp and the snapshot gate reads only the EMEL column.
+  for (const char *name :
+       {"speech_codec_mimi/encode_frame_tiny",
+        "speech_codec_mimi/decode_frame_tiny",
+        "speech_codec_mimi/roundtrip_frame_tiny"}) {
+    auto record = measure_case(name, cfg, []() {});
+    record.ns_per_op = 0.0;
+    results.push_back(std::move(record));
+  }
 }
 
 } // namespace emel::bench

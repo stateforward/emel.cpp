@@ -18,8 +18,8 @@ constexpr test_case make_test_case(const append_case_fn emel_fn,
   };
 }
 
-const std::array<test_case, 34> & all_runner_cases() {
-  static const std::array<test_case, 34> cases = {{
+const std::array<test_case, 35> & all_runner_cases() {
+  static const std::array<test_case, 35> cases = {{
     make_test_case(append_emel_batch_planner_cases,
                    append_reference_batch_planner_cases,
                    "batch_planner"),

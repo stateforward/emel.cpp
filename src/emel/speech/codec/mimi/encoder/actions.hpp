@@ -17,14 +17,6 @@ inline emel::error::type to_error(const error value) noexcept {
 
 } // namespace detail
 
-struct effect_begin_encode {
-  void operator()(const event::encode_run &runtime_ev,
-                  context &) const noexcept {
-    runtime_ev.ctx.err = detail::to_error(error::none);
-    runtime_ev.ctx.stage_ok = true;
-  }
-};
-
 struct effect_mark_runtime_unbound {
   void operator()(const event::encode_run &runtime_ev,
                   context &) const noexcept {
@@ -48,7 +40,8 @@ struct effect_mark_buffer_capacity_invalid {
 
 // Stage the PCM frame into the io buffer and run the SEANet frontend
 // (24 kHz -> 25 Hz). The operand class (f32 canonical vs reference f16) is
-// selected by the transition rows via guard_conv_f16 / guard_conv_f32.
+// selected by the transition rows via guard_conv_f16 / guard_conv_f32; the
+// compute is non-failing by contract (validation guards ran first).
 template <bool conv_f16> struct effect_run_frontend {
   void operator()(const event::encode_run &runtime_ev,
                   context &) const noexcept {
@@ -57,15 +50,8 @@ template <bool conv_f16> struct effect_run_frontend {
     std::copy(request.pcm.begin(), request.pcm.end(), request.frame.begin());
     io = mimi::detail::frame_buffer{request.frame.data(), 1,
                                     request.runtime.frame_samples};
-    runtime_ev.ctx.stage_ok = mimi::detail::compute_seanet_encoder<conv_f16>(
+    mimi::detail::compute_seanet_encoder<conv_f16>(
         request.runtime, request.streaming, io, request.workspace);
-  }
-};
-
-struct effect_mark_frontend_failed {
-  void operator()(const event::encode_run &runtime_ev,
-                  context &) const noexcept {
-    runtime_ev.ctx.err = detail::to_error(error::frontend_failed);
   }
 };
 
@@ -75,41 +61,25 @@ template <bool proj_q8> struct effect_run_transformer {
   void operator()(const event::encode_run &runtime_ev,
                   context &) const noexcept {
     const auto &request = runtime_ev.request;
-    runtime_ev.ctx.stage_ok = mimi::detail::compute_transformer<proj_q8>(
+    mimi::detail::compute_transformer<proj_q8>(
         request.runtime, request.runtime.encoder_transformer, request.streaming,
         request.streaming.encoder_positions, runtime_ev.ctx.io,
         request.workspace);
   }
 };
 
-struct effect_mark_transformer_failed {
-  void operator()(const event::encode_run &runtime_ev,
-                  context &) const noexcept {
-    runtime_ev.ctx.err = detail::to_error(error::transformer_failed);
-  }
-};
-
-// 25 Hz -> 12.5 Hz, then publish the latent column.
+// 25 Hz -> 12.5 Hz, then publish the latent column (one column of dim
+// floats, guaranteed by the bind-validated topology).
 template <bool conv_f16> struct effect_run_downsample {
   void operator()(const event::encode_run &runtime_ev,
                   context &) const noexcept {
     const auto &request = runtime_ev.request;
-    runtime_ev.ctx.stage_ok =
-        mimi::detail::compute_streaming_conv<conv_f16>(
-            request.runtime, request.runtime.downsample, request.streaming,
-            runtime_ev.ctx.io, request.workspace) &&
-        runtime_ev.ctx.io.length == 1 &&
-        runtime_ev.ctx.io.channels == request.runtime.dim;
-    const size_t dim = static_cast<size_t>(request.runtime.dim);
-    const size_t copied = runtime_ev.ctx.stage_ok ? dim : 0u;
-    std::copy_n(runtime_ev.ctx.io.data, copied, request.latent_out.begin());
-  }
-};
-
-struct effect_mark_downsample_failed {
-  void operator()(const event::encode_run &runtime_ev,
-                  context &) const noexcept {
-    runtime_ev.ctx.err = detail::to_error(error::downsample_failed);
+    mimi::detail::compute_encoder_downsample<conv_f16>(
+        request.runtime, request.streaming, runtime_ev.ctx.io,
+        request.workspace);
+    std::copy_n(runtime_ev.ctx.io.data,
+                static_cast<size_t>(request.runtime.dim),
+                request.latent_out.begin());
   }
 };
 

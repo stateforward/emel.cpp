@@ -1,4 +1,5 @@
 #pragma once
+// benchmark: designed
 
 #include <stateforward/sml.hpp>
 
@@ -11,8 +12,9 @@
 // Mimi encode actor: one 80 ms PCM frame -> one 12.5 Hz latent column.
 //
 // States model the request validation phases and the three compute stages
-// (SEANet frontend, codec transformer, downsample); stage outcomes are routed
-// by guards over the per-dispatch runtime ctx, never decided inside actions.
+// (SEANet frontend, codec transformer, downsample). Every error route is
+// decided by pure validation guards BEFORE any compute action runs; the
+// compute stages are non-failing by contract and chain unconditionally.
 namespace emel::speech::codec::mimi::encoder {
 
 struct state_ready {};
@@ -42,7 +44,6 @@ struct model {
       // Request validation.
         sml::state<state_runtime_decision> <= *sml::state<state_ready>
           + sml::event<event::encode_run>
-          / action::effect_begin_encode{}
       , sml::state<state_shape_decision> <= sml::state<state_runtime_decision>
           + sml::completion<event::encode_run> [ guard::guard_runtime_bound{} ]
       , sml::state<state_error_error_out_decision> <= sml::state<state_runtime_decision>
@@ -68,36 +69,25 @@ struct model {
           / action::effect_mark_buffer_capacity_invalid{}
 
       //------------------------------------------------------------------------------//
-      // Compute stages.
+      // Compute stages (non-failing; validated above).
       , sml::state<state_transformer_variant_decision> <= sml::state<state_frontend_running>
-          + sml::completion<event::encode_run> [ guard::guard_stage_ok{} ]
+          + sml::completion<event::encode_run>
       , sml::state<state_transformer_running> <= sml::state<state_transformer_variant_decision>
           + sml::completion<event::encode_run> [ guard::guard_proj_f32{} ]
           / action::effect_run_transformer<false>{}
       , sml::state<state_transformer_running> <= sml::state<state_transformer_variant_decision>
           + sml::completion<event::encode_run> [ guard::guard_proj_q8{} ]
           / action::effect_run_transformer<true>{}
-      , sml::state<state_error_error_out_decision> <= sml::state<state_frontend_running>
-          + sml::completion<event::encode_run> [ guard::guard_stage_failed{} ]
-          / action::effect_mark_frontend_failed{}
-
       , sml::state<state_downsample_variant_decision> <= sml::state<state_transformer_running>
-          + sml::completion<event::encode_run> [ guard::guard_stage_ok{} ]
+          + sml::completion<event::encode_run>
       , sml::state<state_downsample_running> <= sml::state<state_downsample_variant_decision>
           + sml::completion<event::encode_run> [ guard::guard_conv_f32{} ]
           / action::effect_run_downsample<false>{}
       , sml::state<state_downsample_running> <= sml::state<state_downsample_variant_decision>
           + sml::completion<event::encode_run> [ guard::guard_conv_f16{} ]
           / action::effect_run_downsample<true>{}
-      , sml::state<state_error_error_out_decision> <= sml::state<state_transformer_running>
-          + sml::completion<event::encode_run> [ guard::guard_stage_failed{} ]
-          / action::effect_mark_transformer_failed{}
-
       , sml::state<state_success_error_out_decision> <= sml::state<state_downsample_running>
-          + sml::completion<event::encode_run> [ guard::guard_stage_ok{} ]
-      , sml::state<state_error_error_out_decision> <= sml::state<state_downsample_running>
-          + sml::completion<event::encode_run> [ guard::guard_stage_failed{} ]
-          / action::effect_mark_downsample_failed{}
+          + sml::completion<event::encode_run>
 
       //------------------------------------------------------------------------------//
       // Publish.

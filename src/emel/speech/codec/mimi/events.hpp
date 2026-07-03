@@ -21,9 +21,9 @@ struct decode_frame_error;
 
 namespace emel::speech::codec::mimi::event {
 
-// One-time bind. The caller owns all four arenas (sized via the detail
-// required_* functions) and must keep them alive for the codec's lifetime;
-// the actor performs no allocation.
+// One-time bind. The caller owns all four arenas (sized via the public
+// arena-sizing contract in any.hpp) and must keep them alive for the codec's
+// lifetime; the actor performs no allocation.
 struct initialize {
   initialize(const emel::model::data &model_ref,
              const std::span<float> prepared_ref,
@@ -72,24 +72,22 @@ struct decode_frame {
 // Rewind both streaming directions to the first frame.
 struct reset_stream {};
 
-// Per-dispatch runtime ctx: the typed outcome channel of one top-level
-// dispatch, following the gguf loader / whisper encoder pattern (actions
-// record outcomes here from already-executed work; guards - pure predicates
-// of the runtime event - route the explicit success/error transitions).
-// Never stored in machine context; never outlives the dispatch.
+// Per-dispatch runtime ctx: carries the typed error of one top-level
+// dispatch. Guards never read it - every success/error route is decided by
+// pure validation guards over the request and the bound runtime BEFORE the
+// corresponding action runs - so `err` is written only on already-selected
+// error transitions and consumed by the publish effects. Never stored in
+// machine context; never outlives the dispatch.
 struct initialize_ctx {
   emel::error::type err = emel::error::cast(error::none);
-  bool stage_ok = true;
 };
 
 struct encode_frame_ctx {
   emel::error::type err = emel::error::cast(error::none);
-  bool stage_ok = true;
 };
 
 struct decode_frame_ctx {
   emel::error::type err = emel::error::cast(error::none);
-  bool stage_ok = true;
 };
 
 struct initialize_run {

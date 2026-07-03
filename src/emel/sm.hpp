@@ -588,6 +588,28 @@ class thread_pool_scheduler_ref {
     return true;
   }
 
+  // Total fork primitive: every call executes the task exactly once within
+  // the group's fork/join window - on a pool worker when a queue slot is
+  // available, otherwise on the calling thread before returning. Placement
+  // is the scheduler's internal capacity handling, not a caller-visible
+  // behavior choice: the task, its ordering guarantees, and its outputs are
+  // identical either way, so RTC actions may fork with this without carrying
+  // a fallback path of their own.
+  template <class fn>
+  void submit_or_run(join_group & group, fn && fn_in) noexcept(noexcept(fn_in())) {
+    if (scheduler_->is_current_thread_worker()) {
+      fn_in();
+      return;
+    }
+    group.start_one();
+    const bool submitted = scheduler_->try_submit_with_completion(
+        fn_in, &group, join_group::complete_one);
+    if (!submitted) {
+      group.complete_one();
+      fn_in();
+    }
+  }
+
   template <class fn>
   void schedule(fn && fn_in) noexcept(noexcept(std::forward<fn>(fn_in)())) {
     if (!scheduler_->run_or_schedule_and_wait(std::forward<fn>(fn_in))) {

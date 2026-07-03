@@ -26,26 +26,6 @@ template <class runtime_event_type> struct effect_mark_not_initialized {
   }
 };
 
-// One-time bind of the caller arenas into the codec runtime. The latent
-// staging column caps the supported model width; the bind is rejected when
-// the model needs more.
-struct effect_bind {
-  void operator()(const event::initialize_run &runtime_ev,
-                  context &ctx) const noexcept {
-    const auto &request = runtime_ev.request;
-    ctx.workspace = request.workspace;
-    ctx.frame = request.frame;
-    runtime_ev.ctx.stage_ok =
-        detail::bind_codec_runtime(request.model, request.prepared,
-                                   request.state_arena, ctx.runtime,
-                                   ctx.streaming) &&
-        ctx.runtime.dim <= k_max_latent_floats &&
-        request.workspace.size() >=
-            detail::required_workspace_floats(request.model) &&
-        request.frame.size() >= detail::required_frame_floats(request.model);
-  }
-};
-
 struct effect_mark_bind_failed {
   void operator()(const event::initialize_run &runtime_ev,
                   context &) const noexcept {
@@ -53,7 +33,45 @@ struct effect_mark_bind_failed {
   }
 };
 
-// Frame encode phase 1: PCM -> latent through the frontend child actor.
+struct effect_mark_arena_capacity_invalid {
+  void operator()(const event::initialize_run &runtime_ev,
+                  context &) const noexcept {
+    runtime_ev.ctx.err = detail_ns::to_error(error::arena_capacity);
+  }
+};
+
+template <class runtime_event_type> struct effect_mark_request_shape_invalid {
+  void operator()(const runtime_event_type &runtime_ev,
+                  context &) const noexcept {
+    runtime_ev.ctx.err = detail_ns::to_error(error::request_shape);
+  }
+};
+
+struct effect_mark_code_range_invalid {
+  void operator()(const event::decode_frame_run &runtime_ev,
+                  context &) const noexcept {
+    runtime_ev.ctx.err = detail_ns::to_error(error::code_range);
+  }
+};
+
+// One-time bind of the caller arenas into the codec runtime. Non-failing by
+// contract: the transition rows reach this only after guard_bind_contract_valid
+// (pure dry-run of the same walk) and guard_arena_capacity_valid passed.
+struct effect_bind {
+  void operator()(const event::initialize_run &runtime_ev,
+                  context &ctx) const noexcept {
+    const auto &request = runtime_ev.request;
+    ctx.workspace = request.workspace;
+    ctx.frame = request.frame;
+    detail::bind_codec_runtime(request.model, request.prepared,
+                               request.state_arena, ctx.runtime, ctx.streaming);
+  }
+};
+
+// Frame encode phase 1: PCM -> latent through the frontend child actor. The
+// child dispatch cannot fail: guard_encode_request_valid checked the request
+// against the bound runtime, and the child's own validation guards accept
+// exactly that contract, so its return value routes nothing.
 struct effect_run_frontend_child {
   void operator()(const event::encode_frame_run &runtime_ev,
                   context &ctx) const noexcept {
@@ -65,14 +83,7 @@ struct effect_run_frontend_child {
         ctx.workspace,
         std::span<float>{ctx.latent.data(),
                          static_cast<size_t>(ctx.runtime.dim)}};
-    runtime_ev.ctx.stage_ok = ctx.frontend.process_event(child_ev);
-  }
-};
-
-struct effect_mark_encode_failed {
-  void operator()(const event::encode_frame_run &runtime_ev,
-                  context &) const noexcept {
-    runtime_ev.ctx.err = detail_ns::to_error(error::encode_failed);
+    (void)ctx.frontend.process_event(child_ev);
   }
 };
 
@@ -85,14 +96,7 @@ struct effect_run_quantize_child {
         std::span<float>{ctx.latent.data(),
                          static_cast<size_t>(ctx.runtime.dim)},
         runtime_ev.request.codes_out, ctx.workspace};
-    runtime_ev.ctx.stage_ok = ctx.quantizer_machine.process_event(child_ev);
-  }
-};
-
-struct effect_mark_quantize_failed {
-  void operator()(const event::encode_frame_run &runtime_ev,
-                  context &) const noexcept {
-    runtime_ev.ctx.err = detail_ns::to_error(error::quantize_failed);
+    (void)ctx.quantizer_machine.process_event(child_ev);
   }
 };
 
@@ -105,14 +109,7 @@ struct effect_run_dequantize_child {
         std::span<float>{ctx.latent.data(),
                          static_cast<size_t>(ctx.runtime.dim)},
         ctx.workspace};
-    runtime_ev.ctx.stage_ok = ctx.quantizer_machine.process_event(child_ev);
-  }
-};
-
-struct effect_mark_dequantize_failed {
-  void operator()(const event::decode_frame_run &runtime_ev,
-                  context &) const noexcept {
-    runtime_ev.ctx.err = detail_ns::to_error(error::dequantize_failed);
+    (void)ctx.quantizer_machine.process_event(child_ev);
   }
 };
 
@@ -128,14 +125,7 @@ struct effect_run_backend_child {
         ctx.frame,
         ctx.workspace,
         runtime_ev.request.pcm_out};
-    runtime_ev.ctx.stage_ok = ctx.backend.process_event(child_ev);
-  }
-};
-
-struct effect_mark_decode_failed {
-  void operator()(const event::decode_frame_run &runtime_ev,
-                  context &) const noexcept {
-    runtime_ev.ctx.err = detail_ns::to_error(error::decode_failed);
+    (void)ctx.backend.process_event(child_ev);
   }
 };
 

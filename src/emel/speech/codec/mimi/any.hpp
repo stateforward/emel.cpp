@@ -9,4 +9,26 @@ namespace emel::speech::codec::mimi {
 
 using MimiCodec = sm;
 
+// Public arena-sizing contract for event::initialize: the caller owns the
+// four arenas, sizes them here before dispatching initialize, and keeps them
+// alive for the codec's lifetime (the machine never allocates). A result of
+// zero means the model does not satisfy the mimi contract; initialize would
+// answer with error::bind_failed. External callers (benchmarks, parity
+// harnesses, integrators) use these - never the component detail helpers.
+inline uint64_t prepared_arena_floats(const emel::model::data &model) noexcept {
+  return detail::required_prepared_floats(model);
+}
+
+inline uint64_t state_arena_floats(const emel::model::data &model) noexcept {
+  return detail::required_state_floats(model);
+}
+
+inline uint64_t workspace_arena_floats(const emel::model::data &model) noexcept {
+  return detail::required_workspace_floats(model);
+}
+
+inline uint64_t frame_arena_floats(const emel::model::data &model) noexcept {
+  return detail::required_frame_floats(model);
+}
+
 } // namespace emel::speech::codec::mimi

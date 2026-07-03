@@ -588,6 +588,12 @@ void print_compare(const std::vector<bench::result> & emel_results,
     std::fprintf(stderr, "error: case count mismatch emel=%zu reference=%zu\n",
                  emel_sorted.size(),
                  ref_sorted.size());
+    for (const auto & entry : emel_sorted) {
+      std::fprintf(stderr, "  emel case: %s\n", entry.name.c_str());
+    }
+    for (const auto & entry : ref_sorted) {
+      std::fprintf(stderr, "  reference case: %s\n", entry.name.c_str());
+    }
     std::exit(1);
   }
 

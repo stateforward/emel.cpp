@@ -74,6 +74,23 @@ struct guard_decode_shape_invalid {
   }
 };
 
+// Every decode code must address a valid codebook entry (bounded n_q scan,
+// pure); the dequantize action selected behind this guard cannot fail.
+struct guard_decode_codes_valid {
+  bool operator()(const event::decode_run &runtime_ev,
+                  const action::context &) const noexcept {
+    return mimi::detail::validate_codes_in_range(runtime_ev.request.runtime,
+                                                 runtime_ev.request.codes);
+  }
+};
+
+struct guard_decode_codes_invalid {
+  bool operator()(const event::decode_run &runtime_ev,
+                  const action::context &ctx) const noexcept {
+    return !guard_decode_codes_valid{}(runtime_ev, ctx);
+  }
+};
+
 template <class runtime_event_type> struct guard_conv_f16 {
   bool operator()(const runtime_event_type &runtime_ev,
                   const action::context &) const noexcept {
@@ -111,20 +128,6 @@ template <class runtime_event_type> struct guard_class_q8 {
   bool operator()(const runtime_event_type &runtime_ev,
                   const action::context &) const noexcept {
     return runtime_ev.request.runtime.rvq_q8;
-  }
-};
-
-template <class runtime_event_type> struct guard_stage_ok {
-  bool operator()(const runtime_event_type &runtime_ev,
-                  const action::context &) const noexcept {
-    return runtime_ev.ctx.stage_ok;
-  }
-};
-
-template <class runtime_event_type> struct guard_stage_failed {
-  bool operator()(const runtime_event_type &runtime_ev,
-                  const action::context &) const noexcept {
-    return !runtime_ev.ctx.stage_ok;
   }
 };
 

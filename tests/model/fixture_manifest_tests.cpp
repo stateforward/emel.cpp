@@ -309,6 +309,7 @@ TEST_CASE("moshi tiny synthetic fixtures are documented in tests/models "
   check_contains(content, "tools/bench/moshi_gguf_convert.py");
   for (const std::string_view fixture :
        {"moshi-tiny-lm.gguf", "moshi-tiny-lm-raw.gguf", "mimi-tiny.gguf",
+        "mimi-tiny-f16.gguf", "mimi-tiny-q8.gguf",
         "moshi-tiny-voice.gguf", "moshi-tiny-config.json",
         "moshi-tokenizer-tiny.model"}) {
     check_contains(content, std::string(fixture));

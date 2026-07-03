@@ -17,14 +17,6 @@ inline emel::error::type to_error(const error value) noexcept {
 
 } // namespace detail
 
-struct effect_begin_decode {
-  void operator()(const event::decode_run &runtime_ev,
-                  context &) const noexcept {
-    runtime_ev.ctx.err = detail::to_error(error::none);
-    runtime_ev.ctx.stage_ok = true;
-  }
-};
-
 struct effect_mark_runtime_unbound {
   void operator()(const event::decode_run &runtime_ev,
                   context &) const noexcept {
@@ -48,7 +40,8 @@ struct effect_mark_buffer_capacity_invalid {
 
 // Stage the latent column into the io buffer and upsample 12.5 Hz -> 25 Hz
 // (depthwise transposed conv; the depthwise variant is this stage's fixed
-// algorithm, selected here by the transition, not by shape sniffing).
+// algorithm, selected here by the transition, not by shape sniffing). The
+// compute is non-failing by contract (validation guards ran first).
 struct effect_run_upsample {
   void operator()(const event::decode_run &runtime_ev,
                   context &) const noexcept {
@@ -59,17 +52,8 @@ struct effect_run_upsample {
               request.frame.begin());
     io = mimi::detail::frame_buffer{request.frame.data(), request.runtime.dim,
                                     1};
-    runtime_ev.ctx.stage_ok =
-        mimi::detail::compute_streaming_conv_transpose_depthwise(
-            request.runtime, request.runtime.upsample, request.streaming, io,
-            request.workspace);
-  }
-};
-
-struct effect_mark_upsample_failed {
-  void operator()(const event::decode_run &runtime_ev,
-                  context &) const noexcept {
-    runtime_ev.ctx.err = detail::to_error(error::upsample_failed);
+    mimi::detail::compute_decoder_upsample(request.runtime, request.streaming,
+                                           io, request.workspace);
   }
 };
 
@@ -79,21 +63,15 @@ template <bool proj_q8> struct effect_run_transformer {
   void operator()(const event::decode_run &runtime_ev,
                   context &) const noexcept {
     const auto &request = runtime_ev.request;
-    runtime_ev.ctx.stage_ok = mimi::detail::compute_transformer<proj_q8>(
+    mimi::detail::compute_transformer<proj_q8>(
         request.runtime, request.runtime.decoder_transformer, request.streaming,
         request.streaming.decoder_positions, runtime_ev.ctx.io,
         request.workspace);
   }
 };
 
-struct effect_mark_transformer_failed {
-  void operator()(const event::decode_run &runtime_ev,
-                  context &) const noexcept {
-    runtime_ev.ctx.err = detail::to_error(error::transformer_failed);
-  }
-};
-
-// SEANet decoder back to 24 kHz mono, then publish the PCM frame. The
+// SEANet decoder back to 24 kHz mono, then publish the PCM frame (one frame
+// of frame_samples floats, guaranteed by the bind-validated topology). The
 // operand class is selected by the transition rows via guard_conv_f16 /
 // guard_conv_f32.
 template <bool conv_f16> struct effect_run_backend {
@@ -101,22 +79,10 @@ template <bool conv_f16> struct effect_run_backend {
                   context &) const noexcept {
     const auto &request = runtime_ev.request;
     auto &io = runtime_ev.ctx.io;
-    runtime_ev.ctx.stage_ok =
-        mimi::detail::compute_seanet_decoder<conv_f16>(
-            request.runtime, request.streaming, io, request.workspace) &&
-        io.channels == 1 && io.length == request.runtime.frame_samples;
-    const size_t copied =
-        runtime_ev.ctx.stage_ok
-            ? static_cast<size_t>(request.runtime.frame_samples)
-            : 0u;
-    std::copy_n(io.data, copied, request.pcm_out.begin());
-  }
-};
-
-struct effect_mark_backend_failed {
-  void operator()(const event::decode_run &runtime_ev,
-                  context &) const noexcept {
-    runtime_ev.ctx.err = detail::to_error(error::backend_failed);
+    mimi::detail::compute_seanet_decoder<conv_f16>(
+        request.runtime, request.streaming, io, request.workspace);
+    std::copy_n(io.data, static_cast<size_t>(request.runtime.frame_samples),
+                request.pcm_out.begin());
   }
 };
 

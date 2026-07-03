@@ -28,6 +28,7 @@ from pathlib import Path
 import moshi_gguf_convert as converter
 
 GGUF_TYPE_F32 = 0
+GGUF_TYPE_F16 = 1
 GGUF_TYPE_I32 = 26
 
 TINY_CONFIG = {
@@ -76,6 +77,23 @@ TINY_MIMI_PRESET = {
 
 TINY_MIMI_CODEBOOK_DIM = 8
 
+# q8_0 needs every quantized row to be a multiple of the 32-wide block, so the
+# q8 fixture variant widens dim / codebook_dim to 32 (the converter quantizes
+# the transformer and RVQ projections; convs stay f32 like the base fixture).
+TINY_MIMI_Q8_PRESET = {
+    "sample_rate": 24000,
+    "frame_rate": 12.5,
+    "card": 32,
+    "dim": 32,
+    "semantic_n_q": 1,
+    "transformer_num_layers": 2,
+    "transformer_num_heads": 2,
+    "transformer_context": 8,
+    "transformer_max_period": 10000,
+}
+
+TINY_MIMI_Q8_CODEBOOK_DIM = 32
+
 
 class Lcg:
   def __init__(self, seed: int) -> None:
@@ -92,6 +110,14 @@ def f32_data(rng: Lcg, dims: tuple[int, ...]) -> bytes:
   for dim in dims:
     count *= dim
   return struct.pack(f"<{count}f",
+                     *(rng.next_float() * 0.1 for _ in range(count)))
+
+
+def f16_data(rng: Lcg, dims: tuple[int, ...]) -> bytes:
+  count = 1
+  for dim in dims:
+    count *= dim
+  return struct.pack(f"<{count}e",
                      *(rng.next_float() * 0.1 for _ in range(count)))
 
 
@@ -180,25 +206,35 @@ def lm_tensors(rng: Lcg) -> list[tuple[str, tuple[int, ...], int, bytes]]:
   return tensors
 
 
-def mimi_tensors(rng: Lcg) -> list[tuple[str, tuple[int, ...], int, bytes]]:
-  preset = TINY_MIMI_PRESET
+def mimi_tensors(rng: Lcg, preset=TINY_MIMI_PRESET,
+                 cb_dim=TINY_MIMI_CODEBOOK_DIM,
+                 conv_f16: bool = False) -> list[
+                     tuple[str, tuple[int, ...], int, bytes]]:
   dim = preset["dim"]
   card = preset["card"]
-  cb_dim = TINY_MIMI_CODEBOOK_DIM
   n_q = TINY_CONFIG["n_q"]
 
   def t(name, *dims):
     dims = tuple(dims)
     return (name, dims, GGUF_TYPE_F32, f32_data(rng, dims))
 
+  def tw(name, *dims):
+    # Conv/projection weight: stored f16 for the f16 operand-class variant
+    # (matching the real model, which keeps all SEANet conv weights, the
+    # downsample conv, and the RVQ projections in f16).
+    dims = tuple(dims)
+    if conv_f16:
+      return (name, dims, GGUF_TYPE_F16, f16_data(rng, dims))
+    return (name, dims, GGUF_TYPE_F32, f32_data(rng, dims))
+
   tensors = [
-      t("mimi.quantizer.rvq_first.input_proj.weight", 1, dim, cb_dim),
-      t("mimi.quantizer.rvq_first.output_proj.weight", 1, cb_dim, dim),
+      tw("mimi.quantizer.rvq_first.input_proj.weight", 1, dim, cb_dim),
+      tw("mimi.quantizer.rvq_first.output_proj.weight", 1, cb_dim, dim),
       t("mimi.quantizer.rvq_first.vq.layers.0._codebook.embedding", cb_dim,
         card),
-      t("mimi.quantizer.rvq_rest.input_proj.weight", 1, dim, cb_dim),
-      t("mimi.quantizer.rvq_rest.output_proj.weight", 1, cb_dim, dim),
-      t("mimi.downsample.conv.conv.conv.weight", 4, dim, dim),
+      tw("mimi.quantizer.rvq_rest.input_proj.weight", 1, dim, cb_dim),
+      tw("mimi.quantizer.rvq_rest.output_proj.weight", 1, cb_dim, dim),
+      tw("mimi.downsample.conv.conv.conv.weight", 4, dim, dim),
       # depthwise (groups == channels): stored [taps, 1, channels]
       t("mimi.upsample.convtr.convtr.convtr.weight", 4, 1, dim),
   ]
@@ -209,18 +245,18 @@ def mimi_tensors(rng: Lcg) -> list[tuple[str, tuple[int, ...], int, bytes]]:
   def resnet(family, index, channels):
     half = channels // 2
     return [
-        t(f"mimi.{family}.model.{index}.block.1.conv.conv.weight", 3, channels,
-          half),
+        tw(f"mimi.{family}.model.{index}.block.1.conv.conv.weight", 3, channels,
+           half),
         t(f"mimi.{family}.model.{index}.block.1.conv.conv.bias", half),
-        t(f"mimi.{family}.model.{index}.block.3.conv.conv.weight", 1, half,
-          channels),
+        tw(f"mimi.{family}.model.{index}.block.3.conv.conv.weight", 1, half,
+           channels),
         t(f"mimi.{family}.model.{index}.block.3.conv.conv.bias", channels),
     ]
 
   def conv(family, index, taps, in_channels, out_channels):
     return [
-        t(f"mimi.{family}.model.{index}.conv.conv.weight", taps, in_channels,
-          out_channels),
+        tw(f"mimi.{family}.model.{index}.conv.conv.weight", taps, in_channels,
+           out_channels),
         t(f"mimi.{family}.model.{index}.conv.conv.bias", out_channels),
     ]
 
@@ -379,13 +415,35 @@ def main() -> int:
     converter.convert(mimi_raw, out_dir / "mimi-tiny.gguf", config_path, None,
                       mimi_preset_path)
 
+    # f16 operand-class variant: same topology, conv/projection weights f16,
+    # so the machines' guard_conv_f16 rows and the f16 compute paths run
+    # against a committed fixture.
+    mimi_f16_raw = tmp_dir / "mimi-tiny-f16-raw.gguf"
+    write_raw_gguf(mimi_f16_raw, mimi_tensors(Lcg(0x4D463136), conv_f16=True))
+    converter.convert(mimi_f16_raw, out_dir / "mimi-tiny-f16.gguf",
+                      config_path, None, mimi_preset_path)
+
+    # q8_0 operand-class variant: dim widened to one q8 block so the
+    # converter quantizes the transformer and RVQ projections; exercises the
+    # guard_proj_q8 / guard_class_q8 rows and the q8 matvec paths.
+    mimi_q8_preset_path = tmp_dir / "mimi-tiny-q8-preset.json"
+    mimi_q8_preset_path.write_text(json.dumps(TINY_MIMI_Q8_PRESET) + "\n",
+                                   encoding="utf-8")
+    mimi_q8_raw = tmp_dir / "mimi-tiny-q8-raw.gguf"
+    write_raw_gguf(mimi_q8_raw,
+                   mimi_tensors(Lcg(0x4D513830), preset=TINY_MIMI_Q8_PRESET,
+                                cb_dim=TINY_MIMI_Q8_CODEBOOK_DIM))
+    converter.convert(mimi_q8_raw, out_dir / "mimi-tiny-q8.gguf", config_path,
+                      None, mimi_q8_preset_path, quantize="q8_0")
+
     voice_raw = tmp_dir / "moshi-tiny-voice-raw.gguf"
     write_raw_gguf(voice_raw, voice_tensors(Lcg(0x564F4943)))
     converter.convert(voice_raw, out_dir / "moshi-tiny-voice.gguf", None, None)
 
   for name in ("moshi-tiny-config.json", "moshi-tokenizer-tiny.model",
                "moshi-tiny-lm-raw.gguf", "moshi-tiny-lm.gguf",
-               "mimi-tiny.gguf", "moshi-tiny-voice.gguf"):
+               "mimi-tiny.gguf", "mimi-tiny-f16.gguf", "mimi-tiny-q8.gguf",
+               "moshi-tiny-voice.gguf"):
     path = out_dir / name
     print(f"{converter.sha256_file(path)}  {path}")
   return 0

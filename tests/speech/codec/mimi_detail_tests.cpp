@@ -134,6 +134,9 @@ struct bound_codec {
 };
 
 bool bind_or_fail(const emel::model::data &model, bound_codec &out) {
+  if (!codec::validate_codec_contract(model)) {
+    return false;
+  }
   const uint64_t prepared_floats = codec::required_prepared_floats(model);
   const uint64_t state_floats = codec::required_state_floats(model);
   const uint64_t workspace_floats = codec::required_workspace_floats(model);
@@ -146,9 +149,10 @@ bool bind_or_fail(const emel::model::data &model, bound_codec &out) {
   out.state.resize(state_floats);
   out.workspace.resize(workspace_floats);
   out.frame.resize(frame_floats);
-  return codec::bind_codec_runtime(model, std::span<float>{out.prepared},
-                                   std::span<float>{out.state}, out.runtime,
-                                   out.streaming);
+  codec::bind_codec_runtime(model, std::span<float>{out.prepared},
+                            std::span<float>{out.state}, out.runtime,
+                            out.streaming);
+  return out.runtime.model != nullptr;
 }
 
 std::vector<float> deterministic_pcm(const int32_t samples) {
@@ -178,28 +182,22 @@ bool encode_frame(bound_codec &codec_state, std::span<const float> pcm,
   codec::frame_buffer io{codec_state.frame.data(), 1, runtime.frame_samples};
   std::copy(pcm.begin(), pcm.end(), codec_state.frame.begin());
   const std::span<float> workspace{codec_state.workspace};
-  if (!codec::compute_seanet_encoder<false>(runtime, codec_state.streaming, io,
-                                            workspace)) {
-    return false;
-  }
+  codec::compute_seanet_encoder<false>(runtime, codec_state.streaming, io,
+                                       workspace);
   if (io.channels != runtime.dim ||
       io.length != runtime.encoder_transformer.frame_tokens) {
     return false;
   }
-  if (!codec::compute_transformer<false>(
-          runtime, runtime.encoder_transformer, codec_state.streaming,
-          codec_state.streaming.encoder_positions, io, workspace)) {
-    return false;
-  }
-  if (!codec::compute_streaming_conv<false>(
-          runtime, runtime.downsample, codec_state.streaming, io, workspace)) {
-    return false;
-  }
+  codec::compute_transformer<false>(
+      runtime, runtime.encoder_transformer, codec_state.streaming,
+      codec_state.streaming.encoder_positions, io, workspace);
+  codec::compute_encoder_downsample<false>(runtime, codec_state.streaming, io,
+                                           workspace);
   if (io.length != 1 || io.channels != runtime.dim) {
     return false;
   }
-  return codec::compute_rvq_encode<false, false>(runtime, io, codes_out,
-                                                 workspace);
+  codec::compute_rvq_encode<false, false>(runtime, io, codes_out, workspace);
+  return true;
 }
 
 // Runs the full decode chain for one frame of codes.
@@ -208,23 +206,14 @@ bool decode_frame(bound_codec &codec_state, std::span<const int32_t> codes,
   auto &runtime = codec_state.runtime;
   codec::frame_buffer io{codec_state.frame.data(), runtime.dim, 1};
   const std::span<float> workspace{codec_state.workspace};
-  if (!codec::compute_rvq_decode<false, false>(runtime, codes, 1, io,
-                                               workspace)) {
-    return false;
-  }
-  if (!codec::compute_streaming_conv_transpose_depthwise(
-          runtime, runtime.upsample, codec_state.streaming, io, workspace)) {
-    return false;
-  }
-  if (!codec::compute_transformer<false>(
-          runtime, runtime.decoder_transformer, codec_state.streaming,
-          codec_state.streaming.decoder_positions, io, workspace)) {
-    return false;
-  }
-  if (!codec::compute_seanet_decoder<false>(runtime, codec_state.streaming, io,
-                                            workspace)) {
-    return false;
-  }
+  codec::compute_rvq_decode<false, false>(runtime, codes, 1, io, workspace);
+  codec::compute_decoder_upsample(runtime, codec_state.streaming, io,
+                                  workspace);
+  codec::compute_transformer<false>(
+      runtime, runtime.decoder_transformer, codec_state.streaming,
+      codec_state.streaming.decoder_positions, io, workspace);
+  codec::compute_seanet_decoder<false>(runtime, codec_state.streaming, io,
+                                       workspace);
   if (io.channels != 1 || io.length != runtime.frame_samples) {
     return false;
   }
@@ -288,11 +277,12 @@ TEST_CASE("mimi codec decodes codes back to a full frame of audio") {
                        std::span<float>{pcm}));
   CHECK(all_finite(pcm.data(), pcm.size()));
 
-  // out-of-range codes are rejected explicitly
+  // out-of-range codes are rejected by the pure request validator the
+  // quantizer/facade guards route on (the compute path never sees them)
   std::vector<int32_t> bad_codes = codes;
   bad_codes[0] = codec_state.runtime.quantizer.codebook_entries;
-  codec::frame_buffer io{codec_state.frame.data(), codec_state.runtime.dim, 1};
-  CHECK_FALSE(codec::compute_rvq_decode<false, false>(
-      codec_state.runtime, std::span<const int32_t>{bad_codes}, 1, io,
-      std::span<float>{codec_state.workspace}));
+  CHECK_FALSE(codec::validate_codes_in_range(
+      codec_state.runtime, std::span<const int32_t>{bad_codes}));
+  CHECK(codec::validate_codes_in_range(codec_state.runtime,
+                                       std::span<const int32_t>{codes}));
 }

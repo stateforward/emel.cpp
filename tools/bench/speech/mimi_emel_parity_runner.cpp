@@ -249,11 +249,11 @@ int main(int argc, char **argv) {
   }
 
   std::vector<float> prepared(
-      mimi::detail::required_prepared_floats(*loaded.model));
-  std::vector<float> state(mimi::detail::required_state_floats(*loaded.model));
+      mimi::prepared_arena_floats(*loaded.model));
+  std::vector<float> state(mimi::state_arena_floats(*loaded.model));
   std::vector<float> workspace(
-      mimi::detail::required_workspace_floats(*loaded.model));
-  std::vector<float> frame(mimi::detail::required_frame_floats(*loaded.model));
+      mimi::workspace_arena_floats(*loaded.model));
+  std::vector<float> frame(mimi::frame_arena_floats(*loaded.model));
   if (prepared.empty() || state.empty() || workspace.empty() || frame.empty()) {
     std::fprintf(stderr, "model does not describe a mimi codec component\n");
     return 1;

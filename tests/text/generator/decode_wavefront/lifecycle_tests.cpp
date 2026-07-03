@@ -357,6 +357,40 @@ TEST_CASE("decode wavefront routes duplicate graph actors through serial path") 
   CHECK(fixtures[0].kernel_calls == 2);
 }
 
+TEST_CASE("decode wavefront routes lanes sharing an outcome slot through serial path") {
+  int model_tag = 1;
+  int backend_tag = 2;
+  std::array<graph_lane_fixture, 2> fixtures{};
+  prepare_lane(fixtures[0]);
+  prepare_lane(fixtures[1], run_kernel_rejected);
+
+  const auto key = make_key(&model_tag, &backend_tag);
+  // Distinct graph actors but ONE caller-owned outcome slot: parallel workers
+  // would race on the shared bool and misreport the failed lane (or hide it),
+  // so the machine must select the serial path, which routes each lane's
+  // outcome before the next lane writes.
+  bool shared_accepted = false;
+  std::array<wavefront::event::lane, 2> lanes{{
+      {fixtures[0].graph, fixtures[0].compute_request, key, shared_accepted},
+      {fixtures[1].graph, fixtures[1].compute_request, key, shared_accepted},
+  }};
+  wavefront::event::dispatch_summary summary{};
+  wavefront::event::run request{std::span<wavefront::event::lane>{lanes},
+                                summary};
+  wavefront::action::lane_pool pool{};
+  wavefront::sm machine{pool};
+
+  CHECK_FALSE(machine.process_event(request));
+  CHECK(machine.is(stateforward::sml::state<wavefront::state_idle>));
+  CHECK(summary.err == emel::error::cast(wavefront::error::lane_rejected));
+  CHECK(summary.grouped);
+  CHECK(summary.dispatched_lanes == 2);
+  CHECK(summary.failed_lane == 1);
+  CHECK(pool.scheduled_run_count() == 0u);
+  CHECK(fixtures[0].kernel_calls == 1);
+  CHECK(fixtures[1].kernel_calls == 1);
+}
+
 TEST_CASE("decode wavefront lane pool dispatches compatible lanes concurrently") {
   int model_tag = 1;
   int backend_tag = 2;

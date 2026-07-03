@@ -9,8 +9,8 @@ enum class error : emel::error::type {
   runtime_unbound = 1,
   request_shape = 2,
   buffer_capacity = 3,
-  quantize_failed = 4,
-  dequantize_failed = 5,
+  // a decode code addresses no codebook entry
+  code_range = 4,
 };
 
 } // namespace emel::speech::codec::mimi::quantizer

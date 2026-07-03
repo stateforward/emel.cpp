@@ -1,5 +1,5 @@
 # quality_gates timing (seconds)
-domain_boundaries 1
+domain_boundaries 0
 legacy_sml_surface 0
-build_with_zig 0
-total 2
+build_with_zig 1
+total 1
