@@ -1,5 +1,6 @@
 #include "doctest/doctest.h"
 
+#include <array>
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
@@ -495,5 +496,167 @@ TEST_CASE("mimi codec facade streams the f16 and q8 operand-class fixtures") {
     for (size_t index = 0; index < codes.size(); ++index) {
       CHECK(codes[index] == replay[index]);
     }
+  }
+}
+
+TEST_CASE("mimi child actors report validation errors when driven directly") {
+  // The facade pre-validates every child request, so these explicit error
+  // routes only execute when the child machines are driven directly (they
+  // are independently usable actors): unbound runtime, request-shape, and
+  // buffer-capacity guards each select their own marked error transition.
+  namespace encoder = mimi::encoder;
+  namespace decoder = mimi::decoder;
+  namespace quantizer = mimi::quantizer;
+
+  mimi::detail::codec_runtime unbound_runtime{};
+  mimi::detail::codec_streaming_state unbound_streaming{};
+  std::array<float, 8> tiny_buf{};
+  std::array<int32_t, 8> tiny_codes{};
+
+  // unbound runtime -> runtime_unbound on all three actors
+  {
+    encoder::sm machine{};
+    emel::error::type err = emel::error::cast(encoder::error::none);
+    encoder::event::encode ev{unbound_runtime,
+                              unbound_streaming,
+                              std::span<const float>{tiny_buf},
+                              std::span<float>{tiny_buf},
+                              std::span<float>{tiny_buf},
+                              std::span<float>{tiny_buf}};
+    ev.error_out = &err;
+    CHECK_FALSE(machine.process_event(ev));
+    CHECK(err == emel::error::cast(encoder::error::runtime_unbound));
+  }
+  {
+    decoder::sm machine{};
+    emel::error::type err = emel::error::cast(decoder::error::none);
+    decoder::event::decode ev{unbound_runtime,
+                              unbound_streaming,
+                              std::span<const float>{tiny_buf},
+                              std::span<float>{tiny_buf},
+                              std::span<float>{tiny_buf},
+                              std::span<float>{tiny_buf}};
+    ev.error_out = &err;
+    CHECK_FALSE(machine.process_event(ev));
+    CHECK(err == emel::error::cast(decoder::error::runtime_unbound));
+  }
+  {
+    quantizer::sm machine{};
+    emel::error::type err = emel::error::cast(quantizer::error::none);
+    quantizer::event::encode ev{unbound_runtime,
+                                std::span<float>{tiny_buf},
+                                std::span<int32_t>{tiny_codes},
+                                std::span<float>{tiny_buf}};
+    ev.error_out = &err;
+    CHECK_FALSE(machine.process_event(ev));
+    CHECK(err == emel::error::cast(quantizer::error::runtime_unbound));
+
+    err = emel::error::cast(quantizer::error::none);
+    quantizer::event::decode dev{unbound_runtime,
+                                 std::span<const int32_t>{tiny_codes},
+                                 std::span<float>{tiny_buf},
+                                 std::span<float>{tiny_buf}};
+    dev.error_out = &err;
+    CHECK_FALSE(machine.process_event(dev));
+    CHECK(err == emel::error::cast(quantizer::error::runtime_unbound));
+  }
+
+  // bound runtime: shape and capacity violations route their own errors
+  auto loaded = load_mimi_fixture_or_skip();
+  if (loaded.model == nullptr) {
+    return;
+  }
+  std::vector<float> prepared(mimi::prepared_arena_floats(*loaded.model));
+  std::vector<float> state(mimi::state_arena_floats(*loaded.model));
+  std::vector<float> workspace(mimi::workspace_arena_floats(*loaded.model));
+  std::vector<float> frame(mimi::frame_arena_floats(*loaded.model));
+  mimi::detail::codec_runtime runtime{};
+  mimi::detail::codec_streaming_state streaming{};
+  REQUIRE(mimi::detail::validate_codec_contract(*loaded.model));
+  mimi::detail::bind_codec_runtime(*loaded.model, std::span<float>{prepared},
+                                   std::span<float>{state}, runtime, streaming);
+  REQUIRE(runtime.model != nullptr);
+
+  std::vector<float> pcm(static_cast<size_t>(runtime.frame_samples), 0.0f);
+  std::vector<float> latent(static_cast<size_t>(runtime.dim), 0.0f);
+  std::vector<int32_t> codes(static_cast<size_t>(runtime.n_q), 0);
+
+  {
+    // pcm shorter than one frame -> request_shape
+    encoder::sm machine{};
+    emel::error::type err = emel::error::cast(encoder::error::none);
+    encoder::event::encode ev{runtime,
+                              streaming,
+                              std::span<const float>{pcm.data(), pcm.size() - 1u},
+                              std::span<float>{frame},
+                              std::span<float>{workspace},
+                              std::span<float>{latent}};
+    ev.error_out = &err;
+    CHECK_FALSE(machine.process_event(ev));
+    CHECK(err == emel::error::cast(encoder::error::request_shape));
+
+    // undersized workspace -> buffer_capacity
+    err = emel::error::cast(encoder::error::none);
+    encoder::event::encode cap_ev{runtime,
+                                  streaming,
+                                  std::span<const float>{pcm},
+                                  std::span<float>{frame},
+                                  std::span<float>{tiny_buf},
+                                  std::span<float>{latent}};
+    cap_ev.error_out = &err;
+    CHECK_FALSE(machine.process_event(cap_ev));
+    CHECK(err == emel::error::cast(encoder::error::buffer_capacity));
+  }
+  {
+    // latent narrower than dim -> request_shape
+    decoder::sm machine{};
+    emel::error::type err = emel::error::cast(decoder::error::none);
+    decoder::event::decode ev{runtime,
+                              streaming,
+                              std::span<const float>{latent.data(),
+                                                     latent.size() - 1u},
+                              std::span<float>{frame},
+                              std::span<float>{workspace},
+                              std::span<float>{pcm}};
+    ev.error_out = &err;
+    CHECK_FALSE(machine.process_event(ev));
+    CHECK(err == emel::error::cast(decoder::error::request_shape));
+
+    // undersized frame staging -> buffer_capacity
+    err = emel::error::cast(decoder::error::none);
+    decoder::event::decode cap_ev{runtime,
+                                  streaming,
+                                  std::span<const float>{latent},
+                                  std::span<float>{tiny_buf},
+                                  std::span<float>{workspace},
+                                  std::span<float>{pcm}};
+    cap_ev.error_out = &err;
+    CHECK_FALSE(machine.process_event(cap_ev));
+    CHECK(err == emel::error::cast(decoder::error::buffer_capacity));
+  }
+  {
+    // latent narrower than dim -> request_shape; out-of-range decode code ->
+    // code_range
+    quantizer::sm machine{};
+    emel::error::type err = emel::error::cast(quantizer::error::none);
+    quantizer::event::encode ev{runtime,
+                                std::span<float>{latent.data(),
+                                                 latent.size() - 1u},
+                                std::span<int32_t>{codes},
+                                std::span<float>{workspace}};
+    ev.error_out = &err;
+    CHECK_FALSE(machine.process_event(ev));
+    CHECK(err == emel::error::cast(quantizer::error::request_shape));
+
+    err = emel::error::cast(quantizer::error::none);
+    std::vector<int32_t> bad_codes(codes.size(), 0);
+    bad_codes[0] = runtime.quantizer.codebook_entries;
+    quantizer::event::decode dev{runtime,
+                                 std::span<const int32_t>{bad_codes},
+                                 std::span<float>{latent},
+                                 std::span<float>{workspace}};
+    dev.error_out = &err;
+    CHECK_FALSE(machine.process_event(dev));
+    CHECK(err == emel::error::cast(quantizer::error::code_range));
   }
 }
