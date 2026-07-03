@@ -5599,6 +5599,65 @@ inline bool run_kernel_nonflash_decode_kernel(
       step_kind::decode>(request, err_out);
 }
 
+// Streamed variants of the serial nonflash decode routes: identical compute
+// with window_mode::streamed threading through run_layer's per-layer slot
+// acquire, so an active tensor window streams on the nonflash decode path
+// exactly as it does on the flash path.
+inline bool run_kernel_nonflash_decode_packed_q8_0_streamed(
+    const emel::graph::processor::event::execute & request,
+    int32_t * err_out) noexcept {
+  return run_kernel_scalar_mode<
+      emel::text::generator::attention_mode::nonflash,
+      scalar_matmul_route::packed_q8_0,
+      step_kind::decode,
+      matmul_lane_mode::serial,
+      window_mode::streamed>(request, err_out);
+}
+
+inline bool run_kernel_nonflash_decode_q8_k_streamed(
+    const emel::graph::processor::event::execute & request,
+    int32_t * err_out) noexcept {
+  return run_kernel_scalar_mode<
+      emel::text::generator::attention_mode::nonflash,
+      scalar_matmul_route::q8_k,
+      step_kind::decode,
+      matmul_lane_mode::serial,
+      window_mode::streamed>(request, err_out);
+}
+
+inline bool run_kernel_nonflash_decode_native_quantized_streamed(
+    const emel::graph::processor::event::execute & request,
+    int32_t * err_out) noexcept {
+  return run_kernel_scalar_mode<
+      emel::text::generator::attention_mode::nonflash,
+      scalar_matmul_route::native_quantized,
+      step_kind::decode,
+      matmul_lane_mode::serial,
+      window_mode::streamed>(request, err_out);
+}
+
+inline bool run_kernel_nonflash_decode_native_quantized_q8_k_logits_streamed(
+    const emel::graph::processor::event::execute & request,
+    int32_t * err_out) noexcept {
+  return run_kernel_scalar_mode<
+      emel::text::generator::attention_mode::nonflash,
+      scalar_matmul_route::native_quantized_q8_k_logits,
+      step_kind::decode,
+      matmul_lane_mode::serial,
+      window_mode::streamed>(request, err_out);
+}
+
+inline bool run_kernel_nonflash_decode_kernel_streamed(
+    const emel::graph::processor::event::execute & request,
+    int32_t * err_out) noexcept {
+  return run_kernel_scalar_mode<
+      emel::text::generator::attention_mode::nonflash,
+      scalar_matmul_route::kernel,
+      step_kind::decode,
+      matmul_lane_mode::serial,
+      window_mode::streamed>(request, err_out);
+}
+
 template <emel::text::generator::attention_mode mode,
           matmul_lane_mode lanes = matmul_lane_mode::serial>
 inline bool run_kernel_prefill_chunk8_q8_k_mode(
@@ -5942,6 +6001,58 @@ inline bool run_kernel_nonflash_decode_preselected_argmax_kernel(
       scalar_matmul_route::kernel,
       scalar_argmax_route::kernel,
       step_kind::decode>(request, err_out);
+}
+
+// Streamed variants of the serial nonflash preselected routes (see the
+// nonflash decode streamed wrappers above).
+inline bool run_kernel_nonflash_decode_preselected_argmax_q8_k_streamed(
+    const emel::graph::processor::event::execute & request,
+    int32_t * err_out) noexcept {
+  return run_kernel_scalar_preselected_argmax_mode<
+      emel::text::generator::attention_mode::nonflash,
+      scalar_matmul_route::q8_k,
+      scalar_argmax_route::q8_k,
+      step_kind::decode,
+      matmul_lane_mode::serial,
+      window_mode::streamed>(request, err_out);
+}
+
+inline bool
+run_kernel_nonflash_decode_preselected_argmax_native_quantized_q8_k_streamed(
+    const emel::graph::processor::event::execute & request,
+    int32_t * err_out) noexcept {
+  return run_kernel_scalar_preselected_argmax_mode<
+      emel::text::generator::attention_mode::nonflash,
+      scalar_matmul_route::native_quantized,
+      scalar_argmax_route::q8_k,
+      step_kind::decode,
+      matmul_lane_mode::serial,
+      window_mode::streamed>(request, err_out);
+}
+
+inline bool
+run_kernel_nonflash_decode_preselected_argmax_native_quantized_kernel_streamed(
+    const emel::graph::processor::event::execute & request,
+    int32_t * err_out) noexcept {
+  return run_kernel_scalar_preselected_argmax_mode<
+      emel::text::generator::attention_mode::nonflash,
+      scalar_matmul_route::native_quantized,
+      scalar_argmax_route::kernel,
+      step_kind::decode,
+      matmul_lane_mode::serial,
+      window_mode::streamed>(request, err_out);
+}
+
+inline bool run_kernel_nonflash_decode_preselected_argmax_kernel_streamed(
+    const emel::graph::processor::event::execute & request,
+    int32_t * err_out) noexcept {
+  return run_kernel_scalar_preselected_argmax_mode<
+      emel::text::generator::attention_mode::nonflash,
+      scalar_matmul_route::kernel,
+      scalar_argmax_route::kernel,
+      step_kind::decode,
+      matmul_lane_mode::serial,
+      window_mode::streamed>(request, err_out);
 }
 
 template <emel::text::generator::attention_mode mode,
