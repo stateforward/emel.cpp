@@ -4169,7 +4169,8 @@ inline bool can_run_flash_attn_ext(const request_type &request) noexcept {
       request.dst.ne[0] == head_dim && request.dst.ne[1] == query_count &&
       request.dst.ne[2] == head_count && request.src0.ne[3] == 1u &&
       request.src1.ne[3] == 1u && request.src2.ne[3] == 1u &&
-      request.dst.ne[3] == 1u && (head_count % kv_head_count) == 0u;
+      request.dst.ne[3] == 1u && kv_head_count != 0u &&
+      (head_count % kv_head_count) == 0u;
   const bool layout_supported = is_dense_contiguous(request.src0) &&
                                 has_valid_tensor_layout(request.src1) &&
                                 has_valid_tensor_layout(request.src2) &&
