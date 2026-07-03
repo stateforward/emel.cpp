@@ -176,7 +176,7 @@ struct model {
       //------------------------------------------------------------------------------//
       // Stream rewind.
       , sml::state<state_session_ready> <= sml::state<state_session_ready>
-          + sml::event<event::reset_stream>
+          + sml::event<event::reset_stream_run>
           / action::effect_reset_stream{}
 
       //------------------------------------------------------------------------------//
@@ -300,7 +300,10 @@ struct sm : public emel::sm<model, action::context> {
   }
 
   bool process_event(const event::reset_stream &ev) {
-    return base_type::process_event(ev);
+    event::reset_stream_ctx ctx{};
+    event::reset_stream_run runtime_ev{ev, ctx};
+    const bool accepted = base_type::process_event(runtime_ev);
+    return accepted && ctx.err == action::detail_ns::to_error(error::none);
   }
 };
 

@@ -348,6 +348,105 @@ TEST_CASE("mimi codec facade reports bind failures explicitly") {
   }
 }
 
+TEST_CASE("mimi codec initialize rejects out-of-contract model metadata") {
+  auto loaded = load_mimi_fixture_or_skip();
+  if (loaded.model == nullptr) {
+    return;
+  }
+
+  codec_arenas arenas{};
+  size_arenas(*loaded.model, arenas);
+
+  namespace sml = stateforward::sml;
+  const auto expect_bind_failed = [&](emel::model::data &model) {
+    mimi::sm machine{};
+    emel::error::type err = emel::error::cast(mimi::error::none);
+    g_init_error = emel::error::cast(mimi::error::none);
+    mimi::event::initialize init{model, std::span<float>{arenas.prepared},
+                                 std::span<float>{arenas.state},
+                                 std::span<float>{arenas.workspace},
+                                 std::span<float>{arenas.frame}};
+    init.error_out = &err;
+    init.on_error = emel::callback<void(
+        const mimi::events::initialize_error &)>::from<&on_initialize_error>();
+    CHECK_FALSE(machine.process_event(init));
+    CHECK(err == emel::error::cast(mimi::error::bind_failed));
+    CHECK(g_init_error == emel::error::cast(mimi::error::bind_failed));
+    CHECK(machine.is(sml::state<mimi::state_uninitialized>));
+  };
+
+  SUBCASE("transformer layer count beyond the fixed runtime array") {
+    loaded.model->mimi.transformer_num_layers = 17;
+    expect_bind_failed(*loaded.model);
+  }
+
+  SUBCASE("rvq split beyond the fixed level arrays") {
+    loaded.model->mimi.n_q = 40;
+    loaded.model->mimi.semantic_n_q = 33;
+    expect_bind_failed(*loaded.model);
+  }
+
+  SUBCASE("odd attention head size") {
+    // heads == dim makes head_dim 1, which the fp16 rotary halving cannot
+    // serve; validation must reject it instead of silently skipping the
+    // transformer at compute time.
+    loaded.model->mimi.transformer_num_heads =
+        static_cast<int32_t>(loaded.model->mimi.dim);
+    expect_bind_failed(*loaded.model);
+  }
+
+  SUBCASE("tensor metadata without bound weight storage") {
+    for (uint32_t index = 0u; index < loaded.model->n_tensors; ++index) {
+      loaded.model->tensors[index].data = nullptr;
+      loaded.model->tensors[index].data_size = 0u;
+    }
+    expect_bind_failed(*loaded.model);
+  }
+}
+
+TEST_CASE("mimi codec facade reports unexpected event ordering as errors") {
+  auto loaded = load_mimi_fixture_or_skip();
+  if (loaded.model == nullptr) {
+    return;
+  }
+
+  codec_arenas arenas{};
+  size_arenas(*loaded.model, arenas);
+
+  namespace sml = stateforward::sml;
+  mimi::sm machine{};
+
+  // reset_stream before initialization is a caller ordering error, not a
+  // silent success.
+  CHECK_FALSE(machine.process_event(mimi::event::reset_stream{}));
+  CHECK(machine.is(sml::state<mimi::state_uninitialized>));
+
+  emel::error::type err = emel::error::cast(mimi::error::none);
+  mimi::event::initialize init{*loaded.model, std::span<float>{arenas.prepared},
+                               std::span<float>{arenas.state},
+                               std::span<float>{arenas.workspace},
+                               std::span<float>{arenas.frame}};
+  init.error_out = &err;
+  REQUIRE(machine.process_event(init));
+  check_session_ready(machine);
+
+  // initialize while a session is ready is equally out of order; the
+  // dispatch must fail and surface the explicit unexpected_event error.
+  emel::error::type second_err = emel::error::cast(mimi::error::none);
+  mimi::event::initialize second{
+      *loaded.model, std::span<float>{arenas.prepared},
+      std::span<float>{arenas.state}, std::span<float>{arenas.workspace},
+      std::span<float>{arenas.frame}};
+  second.error_out = &second_err;
+  CHECK_FALSE(machine.process_event(second));
+  CHECK(second_err == emel::error::cast(mimi::error::unexpected_event));
+  check_session_ready(machine);
+
+  // A well-formed reset after initialization still succeeds.
+  CHECK(machine.process_event(mimi::event::reset_stream{}));
+  check_session_ready(machine);
+}
+
 TEST_CASE("mimi codec facade rejects malformed frame requests explicitly") {
   auto loaded = load_mimi_fixture_or_skip();
   if (loaded.model == nullptr) {

@@ -46,6 +46,13 @@ bool tensor_is_float(const emel::model::data::tensor_record &tensor) noexcept {
          code == emel::kernel::detail::dtype_f16;
 }
 
+// Metadata alone is not bindable: the live walk reads through tensor.data,
+// so the dry-run contract must require bound storage as well.
+bool tensor_has_storage(
+    const emel::model::data::tensor_record &tensor) noexcept {
+  return tensor.data != nullptr && tensor.data_size > 0u;
+}
+
 uint64_t
 tensor_elements(const emel::model::data::tensor_record &tensor) noexcept {
   uint64_t count = 1;
@@ -107,6 +114,7 @@ const float *prepare_vector(arena_cursor_t<dry_run> &cursor,
                             const emel::model::data::tensor_record *tensor,
                             const int64_t expected) noexcept {
   if (tensor == nullptr || !tensor_is_float(*tensor) ||
+      !tensor_has_storage(*tensor) ||
       tensor_elements(*tensor) != static_cast<uint64_t>(expected)) {
     return nullptr;
   }
@@ -131,6 +139,7 @@ const float *prepare_linear(arena_cursor_t<dry_run> &cursor,
                             const int64_t in_count,
                             const int64_t out_count) noexcept {
   if (tensor == nullptr || !tensor_is_float(*tensor) ||
+      !tensor_has_storage(*tensor) ||
       tensor_elements(*tensor) !=
           static_cast<uint64_t>(in_count) * static_cast<uint64_t>(out_count)) {
     return nullptr;
@@ -159,6 +168,7 @@ const float *prepare_matrix_raw(arena_cursor_t<dry_run> &cursor,
                                 const int64_t in_count,
                                 const int64_t out_count) noexcept {
   if (tensor == nullptr || !tensor_is_float(*tensor) ||
+      !tensor_has_storage(*tensor) ||
       tensor_elements(*tensor) !=
           static_cast<uint64_t>(in_count) * static_cast<uint64_t>(out_count)) {
     return nullptr;
@@ -232,6 +242,7 @@ const float *prepare_conv_gemm(arena_cursor_t<dry_run> &cursor,
                                const int64_t taps, const int64_t in_count,
                                const int64_t out_count) noexcept {
   if (tensor == nullptr || !tensor_is_float(*tensor) ||
+      !tensor_has_storage(*tensor) ||
       tensor_elements(*tensor) != static_cast<uint64_t>(taps) *
                                       static_cast<uint64_t>(in_count) *
                                       static_cast<uint64_t>(out_count)) {
@@ -265,7 +276,7 @@ prepare_conv_transpose(arena_cursor_t<dry_run> &cursor,
                        const emel::model::data::tensor_record *tensor,
                        const uint64_t elements) noexcept {
   if (tensor == nullptr || !tensor_is_float(*tensor) ||
-      tensor_elements(*tensor) != elements) {
+      !tensor_has_storage(*tensor) || tensor_elements(*tensor) != elements) {
     return nullptr;
   }
   float *out = cursor.take(elements);
@@ -1547,6 +1558,17 @@ bool plan_transformer(const emel::model::data &model_data, const char *family,
                       codec_extents &extents) noexcept {
   const auto &mimi = model_data.mimi;
   const int64_t dim = mimi.dim;
+  // The runtime layer array is k_max_transformer_layers wide and the rotary
+  // kernel halves head_dim, so oversized layer counts and odd head sizes are
+  // out of contract and must be rejected here, not at compute time.
+  if (mimi.transformer_num_layers <= 0 ||
+      mimi.transformer_num_layers > k_max_transformer_layers) {
+    return false;
+  }
+  const int64_t heads = mimi.transformer_num_heads;
+  if (heads <= 0 || dim % heads != 0 || ((dim / heads) % 2) != 0) {
+    return false;
+  }
   char format[96] = {};
   std::snprintf(format, sizeof(format), "mimi.%s.transformer.layers.%%d.%%s",
                 family);
@@ -1922,6 +1944,12 @@ bool bind_rvq_split(arena_cursor_t<dry_run> &cursor,
                     const char *split, const int32_t level_count,
                     const bool with_f16, const bool with_q8,
                     rvq_split_weights &split_out) noexcept {
+  // The per-level codebook/search-table arrays are k_max_quantizer_levels
+  // wide; a split larger than that is out of contract regardless of which
+  // tensors the model carries.
+  if (level_count <= 0 || level_count > k_max_quantizer_levels) {
+    return false;
+  }
   const auto &mimi = model_data.mimi;
   const int64_t dim = mimi.dim;
   const int64_t cb_dim = mimi.codebook_dim;
@@ -1981,8 +2009,8 @@ bool bind_rvq_split(arena_cursor_t<dry_run> &cursor,
                   level);
     const auto *embedding = find_tensor(model_data, name);
     if (embedding == nullptr || !tensor_is_float(*embedding) ||
-        embedding->n_dims != 2 || embedding->dims[0] != cb_dim ||
-        embedding->dims[1] != entries) {
+        !tensor_has_storage(*embedding) || embedding->n_dims != 2 ||
+        embedding->dims[0] != cb_dim || embedding->dims[1] != entries) {
       return false;
     }
     float *codebook = cursor.take(static_cast<uint64_t>(cb_dim) *
