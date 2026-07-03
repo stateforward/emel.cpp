@@ -18414,13 +18414,26 @@ bool run_backend_kernel_parity(const char *backend, exec_fn exec) {
   // ggml oracle always computes the HOST's numerics. Bit-exactness is
   // therefore only a meaningful contract for the lane matching the host;
   // the foreign lane's case is skipped with an explicit notice, never
-  // compared and never silently dropped.
-  if (std::strcmp(backend,
-                  kernel_kind_name(emel::kernel::detect_host_kind())) != 0) {
+  // compared and never silently dropped. On SVE-capable aarch64 builds the
+  // NEON f16 route is intentionally disabled (ggml selects its SVE branch
+  // there, which EMEL does not port yet), so the aarch64 case is skipped on
+  // such builds via the same route probe the production guard uses.
+  const bool host_backend =
+      std::strcmp(backend,
+                  kernel_kind_name(emel::kernel::detect_host_kind())) == 0;
+  const bool route_active =
+      std::strcmp(backend, "aarch64") != 0 ||
+      emel::kernel::aarch64::detail::neon_f16_vector_supported();
+  if (!host_backend) {
     std::fprintf(stdout,
                  "[%s] op_mul_mat_f16 skipped: live ggml reference computes "
                  "%s numerics\n",
                  backend, kernel_kind_name(emel::kernel::detect_host_kind()));
+  } else if (!route_active) {
+    std::fprintf(stdout,
+                 "[%s] op_mul_mat_f16 skipped: NEON f16 route disabled on "
+                 "this build (SVE or missing fp16 vector arithmetic)\n",
+                 backend);
   } else {
     // f16 x f16 mul_mat (ggml layout: src0 [k,m], src1 [k,n], dst f32 [m,n]).
     // The emel kernel replicates ggml_vec_dot_f16's accumulation order, so

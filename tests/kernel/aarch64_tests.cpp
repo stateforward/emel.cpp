@@ -1656,7 +1656,8 @@ TEST_CASE("kernel_aarch64_sm_reports_f16_vectorized_dispatch_at_kernel_seam") {
   CHECK(allocations.allocations() == 0u);
 
 #if defined(__aarch64__) && defined(__ARM_NEON) &&                             \
-    defined(__ARM_FEATURE_FP16_VECTOR_ARITHMETIC)
+    defined(__ARM_FEATURE_FP16_VECTOR_ARITHMETIC) &&                           \
+    !defined(__ARM_FEATURE_SVE)
   CHECK(machine.optimized_f16_vector_dispatch_count() == 1u);
 #else
   CHECK(machine.optimized_f16_vector_dispatch_count() == 0u);
@@ -1681,7 +1682,8 @@ TEST_CASE("kernel_aarch64_sm_reports_f16_vectorized_dispatch_at_kernel_seam") {
   emel::kernel::any aarch64_any{emel::kernel::kernel_kind::aarch64};
   CHECK(aarch64_any.process_event(ev));
 #if defined(__aarch64__) && defined(__ARM_NEON) &&                             \
-    defined(__ARM_FEATURE_FP16_VECTOR_ARITHMETIC)
+    defined(__ARM_FEATURE_FP16_VECTOR_ARITHMETIC) &&                           \
+    !defined(__ARM_FEATURE_SVE)
   CHECK(aarch64_any.optimized_f16_vector_dispatch_count() == 1u);
 #else
   CHECK(aarch64_any.optimized_f16_vector_dispatch_count() == 0u);
@@ -1725,7 +1727,8 @@ TEST_CASE("kernel_aarch64_f16_vector_route_is_explicit_and_numeric_match") {
   // The NEON f16 guard and the shared f16 guard are mutually exclusive by
   // construction: exactly one of them accepts any valid f16 request.
 #if defined(__aarch64__) && defined(__ARM_NEON) &&                             \
-    defined(__ARM_FEATURE_FP16_VECTOR_ARITHMETIC)
+    defined(__ARM_FEATURE_FP16_VECTOR_ARITHMETIC) &&                           \
+    !defined(__ARM_FEATURE_SVE)
   CHECK(emel::kernel::aarch64::guard::simd_op_mul_mat_f16_vector{}(dispatch_ev,
                                                                    neon_ctx));
   CHECK_FALSE(emel::kernel::aarch64::guard::valid_op_mul_mat_f16{}(dispatch_ev,
