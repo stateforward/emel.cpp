@@ -497,6 +497,18 @@ struct model {
                  + sml::completion<event::generate_run>
                  [ guard::guard_decode_preselected_direct_ready{} ]
 
+      // Streamed rows sit above their resident/parallel siblings: an active
+      // tensor window routes the serial slot-consuming variants.
+      , sml::state<decode_compute_flash_decision> <= sml::state<decode_compute_flash>
+                 + sml::completion<event::generate_run>
+                 [ guard::guard_decode_materialized_streamed_scalar_packed_q8_0_ready{} ]
+                 / action::request_decode_compute_flash_packed_q8_0_streamed
+
+      , sml::state<decode_compute_flash_decision> <= sml::state<decode_compute_flash>
+                 + sml::completion<event::generate_run>
+                 [ guard::guard_decode_materialized_streamed_scalar_q8_k_ready{} ]
+                 / action::request_decode_compute_flash_q8_k_streamed
+
       , sml::state<decode_compute_flash_decision> <= sml::state<decode_compute_flash>
                  + sml::completion<event::generate_run>
                  [ guard::guard_decode_materialized_parallel_scalar_packed_q8_0_ready{} ]

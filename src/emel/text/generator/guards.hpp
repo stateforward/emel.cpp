@@ -1089,6 +1089,20 @@ struct guard_decode_materialized_streamed_scalar_native_quantized_ready {
   }
 };
 
+struct guard_decode_materialized_streamed_scalar_packed_q8_0_ready {
+  bool operator()(const event::generate_run & ev, const action::context & ctx) const noexcept {
+    return guard_decode_stream_window_ready{}(ev, ctx) &&
+           guard_decode_materialized_scalar_packed_q8_0_ready{}(ev, ctx);
+  }
+};
+
+struct guard_decode_materialized_streamed_scalar_q8_k_ready {
+  bool operator()(const event::generate_run & ev, const action::context & ctx) const noexcept {
+    return guard_decode_stream_window_ready{}(ev, ctx) &&
+           guard_decode_materialized_scalar_q8_k_ready{}(ev, ctx);
+  }
+};
+
 struct guard_decode_materialized_streamed_scalar_native_quantized_q8_k_ready {
   bool operator()(const event::generate_run & ev, const action::context & ctx) const noexcept {
     return guard_decode_stream_window_ready{}(ev, ctx) &&

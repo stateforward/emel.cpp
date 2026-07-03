@@ -5378,6 +5378,28 @@ inline bool run_kernel_flash_decode_q8_k(
       step_kind::decode>(request, err_out);
 }
 
+inline bool run_kernel_flash_decode_packed_q8_0_streamed(
+    const emel::graph::processor::event::execute & request,
+    int32_t * err_out) noexcept {
+  return run_kernel_scalar_mode<
+      emel::text::generator::attention_mode::flash,
+      scalar_matmul_route::packed_q8_0,
+      step_kind::decode,
+      matmul_lane_mode::serial,
+      window_mode::streamed>(request, err_out);
+}
+
+inline bool run_kernel_flash_decode_q8_k_streamed(
+    const emel::graph::processor::event::execute & request,
+    int32_t * err_out) noexcept {
+  return run_kernel_scalar_mode<
+      emel::text::generator::attention_mode::flash,
+      scalar_matmul_route::q8_k,
+      step_kind::decode,
+      matmul_lane_mode::serial,
+      window_mode::streamed>(request, err_out);
+}
+
 inline bool run_kernel_flash_decode_native_quantized(
     const emel::graph::processor::event::execute & request,
     int32_t * err_out) noexcept {
