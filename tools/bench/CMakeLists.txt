@@ -189,12 +189,16 @@ if(EMEL_BENCH_NEEDS_MOSHI)
   # only; the EMEL lane never links it).
   set(SPM_ENABLE_SHARED OFF CACHE BOOL "" FORCE)
   set(SPM_ENABLE_TCMALLOC OFF CACHE BOOL "" FORCE)
+  # sentencepiece v0.2.0 declares cmake_minimum_required(<3.5); CMake 4
+  # removed that compatibility, so pin the policy floor for this subproject.
+  set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
   FetchContent_Declare(
     sentencepiece_impl
     GIT_REPOSITORY https://github.com/google/sentencepiece.git
     GIT_TAG v0.2.0
   )
   FetchContent_MakeAvailable(sentencepiece_impl)
+  unset(CMAKE_POLICY_VERSION_MINIMUM)
 endif()
 
 set(EMEL_ENABLE_TESTS OFF CACHE BOOL "" FORCE)
