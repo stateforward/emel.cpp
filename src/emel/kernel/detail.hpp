@@ -4270,7 +4270,10 @@ inline bool can_run_get_rows(const request_type &request) noexcept {
   const bool types_ok = src1_type == dtype_i32 && dst_type == dtype_f32;
   const bool layouts_ok =
       has_valid_tensor_layout(request.src1) && is_dense_contiguous(request.dst);
-  if (!(shapes_ok && types_ok && (float_src || quant_src) && layouts_ok)) {
+  // The index scan below reads through src1.data, so the guard must require
+  // bound index storage before deciding validity.
+  if (!(shapes_ok && types_ok && (float_src || quant_src) && layouts_ok &&
+        request.src1.data != nullptr)) {
     return false;
   }
 

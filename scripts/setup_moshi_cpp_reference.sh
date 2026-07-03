@@ -136,7 +136,20 @@ convert_if_needed() {
   local source="$1"
   local output="$2"
   shift 2
+  # The converter embeds its side inputs (--config/--tokenizer files) as
+  # hparams/tokenizer metadata, so any of them being newer than the enriched
+  # output must force a reconvert, not just the raw GGUF.
+  local stale=0
   if [[ ! -f "$output" || "$source" -nt "$output" ]]; then
+    stale=1
+  fi
+  local arg
+  for arg in "$@"; do
+    if [[ -f "$arg" && "$arg" -nt "$output" ]]; then
+      stale=1
+    fi
+  done
+  if ((stale)); then
     python3 "$ROOT_DIR/tools/bench/moshi_gguf_convert.py" \
       --source "$source" --output "$output" \
       --manifest "${output%.gguf}.manifest.json" "$@"

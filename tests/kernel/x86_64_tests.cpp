@@ -1896,6 +1896,13 @@ TEST_CASE("kernel_x86_64_get_rows_gathers_f32_and_q8_0_rows") {
   gather_ev.src1 = make_src(bad_indices, dtype::i32, 2);
   CHECK_FALSE(machine.process_event(gather_ev));
 
+  // Index metadata without bound storage rejects instead of dereferencing a
+  // null tensor inside the validation scan.
+  auto null_indices = make_src(bad_indices, dtype::i32, 2);
+  null_indices.data = nullptr;
+  gather_ev.src1 = null_indices;
+  CHECK_FALSE(machine.process_event(gather_ev));
+
   constexpr int64_t k_cols = 32;
   float source_rows[2 * k_cols] = {};
   for (int64_t i = 0; i < 2 * k_cols; ++i) {

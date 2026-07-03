@@ -59,13 +59,19 @@ if ! $RUN_ONLY; then
   if [[ "$REFERENCE_BACKEND" == "personaplex_mlx" ]]; then
     "$ROOT_DIR/scripts/setup_personaplex_mlx_reference.sh"
     reference_targets=()
+    # The MLX lane drives its reference through the Python shim only; do not
+    # fetch moshi.cpp/SentencePiece for it. Passed explicitly in both modes
+    # so the cached value never leaks between reference selections.
+    skip_moshi=ON
   else
     "$ROOT_DIR/scripts/setup_moshi_cpp_reference.sh"
     reference_targets=(moshi_reference_driver)
+    skip_moshi=OFF
   fi
 
   cmake -S "$ROOT_DIR/tools/bench" -B "$BUILD_DIR" -G Ninja \
     -DCMAKE_BUILD_TYPE=Release \
+    -DEMEL_BENCH_SKIP_MOSHI_REFERENCE="$skip_moshi" \
     -DEMEL_BENCH_SUITE_FILTER=speech_codec_mimi
   cmake --build "$BUILD_DIR" --parallel "$EMEL_BUILD_JOBS" \
     --target mimi_emel_parity_runner bench_runner \

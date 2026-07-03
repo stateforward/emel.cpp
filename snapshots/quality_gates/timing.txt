@@ -2,8 +2,8 @@
 domain_boundaries 1
 legacy_sml_surface 0
 build_with_zig 1
-bench_snapshot 172
-test_with_coverage 34
-paritychecker 75
+bench_snapshot 92
+test_with_coverage 363
+paritychecker 104
 fuzz_smoke 0
-total 174
+total 365
