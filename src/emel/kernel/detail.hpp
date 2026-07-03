@@ -4175,10 +4175,17 @@ inline bool can_run_flash_attn_ext(const request_type &request) noexcept {
                                 has_valid_tensor_layout(request.src1) &&
                                 has_valid_tensor_layout(request.src2) &&
                                 is_dense_contiguous(request.dst);
+  // The exec reads Q and scans K rows directly (V storage is covered by
+  // has_required_src2); metadata-only operands must reject here instead of
+  // dereferencing null inside the action.
+  const bool storage_bound = request.src0.data != nullptr &&
+                             request.src1.data != nullptr &&
+                             request.dst.data != nullptr;
   const float scale = flash_attn_scale(request);
 
   return explicit_operand_contract && dims_present && src2_valid &&
-         shape_match && layout_supported && masked_total_tokens >= kv_tokens &&
+         shape_match && layout_supported && storage_bound &&
+         masked_total_tokens >= kv_tokens &&
          std::isfinite(scale) && scale > 0.0f;
 }
 
@@ -4488,7 +4495,8 @@ inline bool can_run_rope(const request_type &request) noexcept {
          (params.n_dims % 2) == 0 &&
          static_cast<uint64_t>(params.n_dims) <= request.src0.ne[0] &&
          (params.mode == rope_mode_norm || params.mode == rope_mode_neox) &&
-         params.ext_factor == 0.0f && params.freq_base > 0.0f &&
+         params.ext_factor == 0.0f && std::isfinite(params.freq_base) &&
+         params.freq_base > 0.0f && std::isfinite(params.freq_scale) &&
          params.freq_scale > 0.0f && std::isfinite(params.attn_factor);
 }
 

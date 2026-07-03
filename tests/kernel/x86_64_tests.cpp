@@ -1998,6 +1998,16 @@ TEST_CASE("kernel_x86_64_rope_rotates_norm_and_neox_pairs") {
   null_positions_ev.src1 = null_positions;
   CHECK_FALSE(machine.process_event(null_positions_ev));
 
+  // Non-finite frequency parameters pass a bare positivity check and would
+  // propagate NaNs through sin/cos while the kernel reports success.
+  auto inf_freq_scale_ev = rope_ev;
+  set_op_param_f32(inf_freq_scale_ev, 6u, std::numeric_limits<float>::infinity());
+  CHECK_FALSE(machine.process_event(inf_freq_scale_ev));
+
+  auto inf_freq_base_ev = rope_ev;
+  set_op_param_f32(inf_freq_base_ev, 5u, std::numeric_limits<float>::infinity());
+  CHECK_FALSE(machine.process_event(inf_freq_base_ev));
+
   CHECK(machine.process_event(rope_ev));
 
   // position 0 is the identity rotation
