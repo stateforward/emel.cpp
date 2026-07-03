@@ -54,6 +54,32 @@ stateDiagram-v2
   state_unmap_failed_error_decision --> state_release_error_callback : completion_release_mapping_runtime_ [release_error_callback_present_] / effect_publish_release_mapping_error_
   state_unmap_failed_error_decision --> state_ready : completion_release_mapping_runtime_ [release_error_callback_absent_] / effect_record_release_mapping_error_
   state_release_error_callback --> state_ready : completion_release_mapping_runtime_ [always] / effect_record_release_mapping_error_
+  state_ready --> state_advise_decision : advise_mapping_runtime [always] / effect_begin_advise_
+  state_advise_decision --> state_advise_owned_decision : completion_advise_mapping_runtime_ [guard_advise_handle_in_range_] / none
+  state_advise_decision --> state_advise_invalid_handle_error_decision : completion_advise_mapping_runtime_ [guard_advise_handle_out_of_range_] / effect_mark_advise_invalid_handle_
+  state_advise_owned_decision --> state_advise_range_decision : completion_advise_mapping_runtime_ [guard_advise_slot_in_use_owned_by_tensor_] / none
+  state_advise_owned_decision --> state_advise_invalid_handle_error_decision : completion_advise_mapping_runtime_ [guard_advise_slot_unavailable_] / effect_mark_advise_invalid_handle_
+  state_advise_range_decision --> state_advise_platform_decision : completion_advise_mapping_runtime_ [guard_advise_range_within_mapping_] / none
+  state_advise_range_decision --> state_advise_invalid_range_error_decision : completion_advise_mapping_runtime_ [guard_advise_range_outside_mapping_] / effect_mark_advise_invalid_range_
+  state_advise_platform_decision --> state_advise_kind_decision : completion_advise_mapping_runtime_ [guard_platform_advise_supported_] / none
+  state_advise_platform_decision --> state_advise_unsupported_platform_error_decision : completion_advise_mapping_runtime_ [guard_platform_advise_unsupported_] / effect_mark_advise_unsupported_platform_
+  state_advise_kind_decision --> state_advise_attempt_decision : completion_advise_mapping_runtime_ [guard_advise_kind_sequential_] / effect_attempt_advise_sequential_
+  state_advise_kind_decision --> state_advise_attempt_decision : completion_advise_mapping_runtime_ [guard_advise_kind_willneed_] / effect_attempt_advise_willneed_
+  state_advise_kind_decision --> state_advise_attempt_decision : completion_advise_mapping_runtime_ [guard_advise_kind_dontneed_] / effect_attempt_advise_dontneed_
+  state_advise_attempt_decision --> state_advise_publish_done_decision : completion_advise_mapping_runtime_ [guard_advise_succeeded_] / effect_commit_advise_
+  state_advise_attempt_decision --> state_advise_failed_error_decision : completion_advise_mapping_runtime_ [guard_advise_failed_] / effect_mark_advise_failed_
+  state_advise_publish_done_decision --> state_advise_done_callback : completion_advise_mapping_runtime_ [guard_advise_done_callback_present_] / effect_publish_advise_mapping_done_
+  state_advise_publish_done_decision --> state_ready : completion_advise_mapping_runtime_ [guard_advise_done_callback_absent_] / effect_record_advise_mapping_done_
+  state_advise_done_callback --> state_ready : completion_advise_mapping_runtime_ [always] / effect_record_advise_mapping_done_
+  state_advise_invalid_handle_error_decision --> state_advise_error_callback : completion_advise_mapping_runtime_ [guard_advise_error_callback_present_] / effect_publish_advise_mapping_error_
+  state_advise_invalid_handle_error_decision --> state_ready : completion_advise_mapping_runtime_ [guard_advise_error_callback_absent_] / effect_record_advise_mapping_error_
+  state_advise_invalid_range_error_decision --> state_advise_error_callback : completion_advise_mapping_runtime_ [guard_advise_error_callback_present_] / effect_publish_advise_mapping_error_
+  state_advise_invalid_range_error_decision --> state_ready : completion_advise_mapping_runtime_ [guard_advise_error_callback_absent_] / effect_record_advise_mapping_error_
+  state_advise_unsupported_platform_error_decision --> state_advise_error_callback : completion_advise_mapping_runtime_ [guard_advise_error_callback_present_] / effect_publish_advise_mapping_error_
+  state_advise_unsupported_platform_error_decision --> state_ready : completion_advise_mapping_runtime_ [guard_advise_error_callback_absent_] / effect_record_advise_mapping_error_
+  state_advise_failed_error_decision --> state_advise_error_callback : completion_advise_mapping_runtime_ [guard_advise_error_callback_present_] / effect_publish_advise_mapping_error_
+  state_advise_failed_error_decision --> state_ready : completion_advise_mapping_runtime_ [guard_advise_error_callback_absent_] / effect_record_advise_mapping_error_
+  state_advise_error_callback --> state_ready : completion_advise_mapping_runtime_ [always] / effect_record_advise_mapping_error_
   state_ready --> state_ready : _ [always] / effect_on_unexpected_
   state_request_decision --> state_ready : _ [always] / effect_on_unexpected_
   state_file_path_decision --> state_ready : _ [always] / effect_on_unexpected_
@@ -82,3 +108,16 @@ stateDiagram-v2
   state_release_invalid_handle_error_decision --> state_ready : _ [always] / effect_on_unexpected_
   state_unmap_failed_error_decision --> state_ready : _ [always] / effect_on_unexpected_
   state_release_error_callback --> state_ready : _ [always] / effect_on_unexpected_
+  state_advise_decision --> state_ready : _ [always] / effect_on_unexpected_
+  state_advise_owned_decision --> state_ready : _ [always] / effect_on_unexpected_
+  state_advise_range_decision --> state_ready : _ [always] / effect_on_unexpected_
+  state_advise_platform_decision --> state_ready : _ [always] / effect_on_unexpected_
+  state_advise_kind_decision --> state_ready : _ [always] / effect_on_unexpected_
+  state_advise_attempt_decision --> state_ready : _ [always] / effect_on_unexpected_
+  state_advise_publish_done_decision --> state_ready : _ [always] / effect_on_unexpected_
+  state_advise_done_callback --> state_ready : _ [always] / effect_on_unexpected_
+  state_advise_invalid_handle_error_decision --> state_ready : _ [always] / effect_on_unexpected_
+  state_advise_invalid_range_error_decision --> state_ready : _ [always] / effect_on_unexpected_
+  state_advise_unsupported_platform_error_decision --> state_ready : _ [always] / effect_on_unexpected_
+  state_advise_failed_error_decision --> state_ready : _ [always] / effect_on_unexpected_
+  state_advise_error_callback --> state_ready : _ [always] / effect_on_unexpected_
