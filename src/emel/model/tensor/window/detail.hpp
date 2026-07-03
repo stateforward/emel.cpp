@@ -104,15 +104,15 @@ struct load_ticket {
 };
 
 struct window_slot {
-  uint8_t *storage = nullptr;  // owned; aligned to k_slot_alignment_bytes
+  uint8_t *storage = nullptr; // view into the caller-provided bind arena
   int32_t layer = -1;
   slot_lifecycle lifecycle = slot_lifecycle::vacant;
 };
 
-// Actor-owned residency state. Slot storage is allocated once at bind (the
-// documented one-time setup allocation) and freed by reset_window/unbind or
-// the owning context destructor; the context is copied exactly once at machine
-// construction while all storage pointers are still null.
+// Actor-owned residency state. Slot storage is a partition of the
+// caller-provided bind arena (the machine never allocates during dispatch);
+// unbind and the machine destructor join in-flight loads before the caller
+// may release that arena.
 struct window_state {
   std::array<layer_descriptor, k_max_stream_layers> plan = {};
   uint32_t layer_count = 0u;
@@ -201,7 +201,6 @@ struct bind_attempt_status {
   emel::error::type err = emel::error::cast(error::none);
   bool ok = false;
   bool source_map_ok = false;
-  bool slots_alloc_ok = false;
   const void *source_base = nullptr;
   uint64_t source_bytes = 0u;
   uint32_t source_handle = emel::io::mmap::k_invalid_mapping_handle;
@@ -267,9 +266,6 @@ struct unbind_finish_runtime {
 
 inline void reset_window(window_state &window) noexcept {
   for (window_slot &slot : window.slots) {
-    if (slot.storage != nullptr) {
-      ::operator delete(slot.storage, std::align_val_t{k_slot_alignment_bytes});
-    }
     slot.storage = nullptr;
     slot.layer = -1;
     slot.lifecycle = slot_lifecycle::vacant;

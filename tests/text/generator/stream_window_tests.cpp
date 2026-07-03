@@ -283,6 +283,11 @@ struct bound_window {
     return ctx;
   }
 
+  // Owner-provided slot arena: two slots at the toy model's aligned layer
+  // span, alive for the rig's lifetime.
+  alignas(window::detail::k_slot_alignment_bytes)
+      std::array<uint8_t, 2u * 7u * 64u> slot_arena{};
+
   bool bind(const stream_weight_file & file, const uint64_t budget_bytes) {
     const window::event::bind_window_request request{
         .file_path = file.path_str,
@@ -290,6 +295,7 @@ struct bound_window {
         .extents = file.extents,
         .layer_weight_counts = file.layer_weight_counts,
         .budget_bytes = budget_bytes,
+        .slot_storage = std::span<uint8_t>{slot_arena},
         .window_slots = 2u,
         .prefetch_depth = 1u,
         .stage_chunk_bytes = window::detail::k_default_stream_chunk_bytes,

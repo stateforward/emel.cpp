@@ -590,14 +590,39 @@ struct window_rig {
     rig.source_bytes = ev.source_bytes;
   }
 
+  // Owner-side slot arena, allocated here before any machine dispatch (the
+  // machine never allocates): four slots at the largest aligned layer span.
+  std::vector<uint8_t> slot_arena = {};
+
   bool bind(const std::string &file_path, const uint64_t file_size,
             const stream_extents &extents, const uint64_t budget_bytes) {
+    constexpr uint64_t k_align = window::detail::k_slot_alignment_bytes;
+    uint64_t max_layer_bytes = 0u;
+    size_t cursor = 0u;
+    for (const uint16_t count : extents.layer_weight_counts) {
+      uint64_t layer_bytes = 0u;
+      for (uint16_t index = 0; index < count; ++index) {
+        layer_bytes += (extents.extents[cursor].byte_size + (k_align - 1u)) &
+                       ~(k_align - 1u);
+        ++cursor;
+      }
+      max_layer_bytes = std::max(max_layer_bytes, layer_bytes);
+    }
+    slot_arena.assign(4u * max_layer_bytes + k_align, 0u);
+    const auto raw = reinterpret_cast<uintptr_t>(slot_arena.data());
+    const uintptr_t aligned =
+        (raw + (k_align - 1u)) & ~static_cast<uintptr_t>(k_align - 1u);
+    const std::span<uint8_t> storage{reinterpret_cast<uint8_t *>(aligned),
+                                     slot_arena.size() -
+                                         static_cast<size_t>(aligned - raw)};
+
     const window::event::bind_window_request request{
         .file_path = file_path,
         .file_size_bytes = file_size,
         .extents = extents.extents,
         .layer_weight_counts = extents.layer_weight_counts,
         .budget_bytes = budget_bytes,
+        .slot_storage = storage,
         .window_slots = 4u,
         .prefetch_depth = 2u,
         .stage_chunk_bytes = window::detail::k_default_stream_chunk_bytes,

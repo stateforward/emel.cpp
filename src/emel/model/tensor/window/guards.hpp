@@ -103,16 +103,37 @@ struct guard_bind_streaming_config_invalid {
   }
 };
 
-struct guard_bind_requires_streaming {
+struct guard_bind_slots_fit_budget {
   bool operator()(const detail::bind_window_runtime &ev,
                   const action::context &ctx) const noexcept {
-    if (guard_bind_fits_budget{}(ev, ctx) ||
-        !guard_bind_streaming_config_valid{}(ev, ctx)) {
-      return false;
-    }
     const uint64_t slot_bytes = static_cast<uint64_t>(ev.request.request.window_slots) *
                                 ctx.window.slot_capacity_bytes;
     return slot_bytes <= ev.request.request.budget_bytes;
+  }
+};
+
+// The caller-provided arena must be aligned and hold every slot at the
+// scanned per-layer capacity; the machine never allocates during dispatch.
+struct guard_bind_slot_storage_sufficient {
+  bool operator()(const detail::bind_window_runtime &ev,
+                  const action::context &ctx) const noexcept {
+    const std::span<uint8_t> storage = ev.request.request.slot_storage;
+    const uint64_t needed =
+        static_cast<uint64_t>(ev.request.request.window_slots) *
+        ctx.window.slot_capacity_bytes;
+    return storage.size() >= needed &&
+           (reinterpret_cast<uintptr_t>(storage.data()) %
+            detail::k_slot_alignment_bytes) == 0u;
+  }
+};
+
+struct guard_bind_requires_streaming {
+  bool operator()(const detail::bind_window_runtime &ev,
+                  const action::context &ctx) const noexcept {
+    return !guard_bind_fits_budget{}(ev, ctx) &&
+           guard_bind_streaming_config_valid{}(ev, ctx) &&
+           guard_bind_slots_fit_budget{}(ev, ctx) &&
+           guard_bind_slot_storage_sufficient{}(ev, ctx);
   }
 };
 
@@ -121,7 +142,17 @@ struct guard_bind_budget_too_small {
                   const action::context &ctx) const noexcept {
     return !guard_bind_fits_budget{}(ev, ctx) &&
            guard_bind_streaming_config_valid{}(ev, ctx) &&
-           !guard_bind_requires_streaming{}(ev, ctx);
+           !guard_bind_slots_fit_budget{}(ev, ctx);
+  }
+};
+
+struct guard_bind_slot_storage_too_small {
+  bool operator()(const detail::bind_window_runtime &ev,
+                  const action::context &ctx) const noexcept {
+    return !guard_bind_fits_budget{}(ev, ctx) &&
+           guard_bind_streaming_config_valid{}(ev, ctx) &&
+           guard_bind_slots_fit_budget{}(ev, ctx) &&
+           !guard_bind_slot_storage_sufficient{}(ev, ctx);
   }
 };
 
@@ -167,27 +198,22 @@ struct guard_bind_fits_budget_callback_absent {
   }
 };
 
-// Slot-allocation decision routes (streaming branch): the allocation attempt
-// records its outcome in the runtime status; these guards select the
-// activate-or-fail transition.
-struct guard_bind_slots_alloc_ok_callback_present {
+// Streaming activation routes composed with the optional done callback (the
+// slot partition is pure pointer bookkeeping over the caller arena, so the
+// budget decision activates streaming directly).
+struct guard_bind_requires_streaming_callback_present {
   bool operator()(const detail::bind_window_runtime &ev,
-                  const action::context &) const noexcept {
-    return ev.status.slots_alloc_ok && guard_bind_done_callback_present{}(ev);
+                  const action::context &ctx) const noexcept {
+    return guard_bind_requires_streaming{}(ev, ctx) &&
+           guard_bind_done_callback_present{}(ev);
   }
 };
 
-struct guard_bind_slots_alloc_ok_callback_absent {
+struct guard_bind_requires_streaming_callback_absent {
   bool operator()(const detail::bind_window_runtime &ev,
-                  const action::context &) const noexcept {
-    return ev.status.slots_alloc_ok && guard_bind_done_callback_absent{}(ev);
-  }
-};
-
-struct guard_bind_slots_alloc_failed {
-  bool operator()(const detail::bind_window_runtime &ev,
-                  const action::context &) const noexcept {
-    return !ev.status.slots_alloc_ok;
+                  const action::context &ctx) const noexcept {
+    return guard_bind_requires_streaming{}(ev, ctx) &&
+           guard_bind_done_callback_absent{}(ev);
   }
 };
 
