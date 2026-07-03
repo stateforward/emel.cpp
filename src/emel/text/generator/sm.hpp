@@ -519,6 +519,11 @@ struct model {
 
       , sml::state<decode_compute_flash_decision> <= sml::state<decode_compute_flash>
                  + sml::completion<event::generate_run>
+                 [ guard::guard_decode_materialized_streamed_scalar_native_quantized_q8_k_ready{} ]
+                 / action::request_decode_compute_flash_native_quantized_q8_k_logits_streamed
+
+      , sml::state<decode_compute_flash_decision> <= sml::state<decode_compute_flash>
+                 + sml::completion<event::generate_run>
                  [ guard::guard_decode_materialized_parallel_scalar_native_quantized_q8_k_ready{} ]
                  / action::request_decode_compute_flash_parallel_native_quantized_q8_k_logits
 

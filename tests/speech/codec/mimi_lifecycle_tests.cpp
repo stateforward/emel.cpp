@@ -402,6 +402,21 @@ TEST_CASE("mimi codec initialize rejects out-of-contract model metadata") {
     }
     expect_bind_failed(*loaded.model);
   }
+
+  SUBCASE("transposed conv kernel shorter than its stride") {
+    // The decode overlap-add carries taps - stride samples of state; a
+    // one-tap upsample kernel against stride 2 would index outside it.
+    for (uint32_t index = 0u; index < loaded.model->n_tensors; ++index) {
+      auto &tensor = loaded.model->tensors[index];
+      const std::string_view name{
+          loaded.model->name_storage.data() + tensor.name_offset,
+          tensor.name_length};
+      if (name == "mimi.upsample.convtr.convtr.convtr.weight") {
+        tensor.dims[0] = 1;
+      }
+    }
+    expect_bind_failed(*loaded.model);
+  }
 }
 
 TEST_CASE("mimi codec facade reports unexpected event ordering as errors") {
