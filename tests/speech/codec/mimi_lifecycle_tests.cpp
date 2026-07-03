@@ -7,6 +7,7 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <memory>
 #include <span>
 #include <string>
@@ -476,6 +477,34 @@ TEST_CASE("mimi codec initialize rejects out-of-contract model metadata") {
       if (name == "mimi.downsample.conv.conv.conv.weight") {
         tensor.dims[0] = 1;
       }
+    }
+    expect_bind_failed(*loaded.model);
+  }
+
+  SUBCASE("non-finite frame rate") {
+    // frame_samples is computed as sample_rate / frame_rate and cast to
+    // int32_t; the cast is undefined for NaN.
+    loaded.model->mimi.frame_rate = std::numeric_limits<float>::quiet_NaN();
+    expect_bind_failed(*loaded.model);
+  }
+
+  SUBCASE("tiny frame rate overflowing the frame sample cast") {
+    loaded.model->mimi.frame_rate = 1.0e-30f;
+    expect_bind_failed(*loaded.model);
+  }
+
+  SUBCASE("non-positive rotary max period") {
+    // compute_transformer evaluates log(max_period).
+    loaded.model->mimi.transformer_max_period = 0;
+    expect_bind_failed(*loaded.model);
+  }
+
+  SUBCASE("tensor storage smaller than its metadata") {
+    // The prepare copies read the full dtype payload; a one-byte buffer with
+    // matching element metadata must fail validation instead of reading past
+    // its storage.
+    for (uint32_t index = 0u; index < loaded.model->n_tensors; ++index) {
+      loaded.model->tensors[index].data_size = 1u;
     }
     expect_bind_failed(*loaded.model);
   }

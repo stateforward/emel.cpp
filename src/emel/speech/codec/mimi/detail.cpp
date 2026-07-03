@@ -46,13 +46,6 @@ bool tensor_is_float(const emel::model::data::tensor_record &tensor) noexcept {
          code == emel::kernel::detail::dtype_f16;
 }
 
-// Metadata alone is not bindable: the live walk reads through tensor.data,
-// so the dry-run contract must require bound storage as well.
-bool tensor_has_storage(
-    const emel::model::data::tensor_record &tensor) noexcept {
-  return tensor.data != nullptr && tensor.data_size > 0u;
-}
-
 uint64_t
 tensor_elements(const emel::model::data::tensor_record &tensor) noexcept {
   uint64_t count = 1;
@@ -60,6 +53,21 @@ tensor_elements(const emel::model::data::tensor_record &tensor) noexcept {
     count *= static_cast<uint64_t>(tensor.dims[static_cast<size_t>(dim)]);
   }
   return count;
+}
+
+// Metadata alone is not bindable: the live walk reads the full dtype payload
+// through tensor.data, so the dry-run contract must require enough bound
+// bytes for the declared shape, not merely a non-empty buffer. Every caller
+// pairs this with tensor_is_float, so f16 is the only sub-float width.
+bool tensor_has_storage(
+    const emel::model::data::tensor_record &tensor) noexcept {
+  const uint64_t elements = tensor_elements(tensor);
+  const uint64_t element_bytes =
+      static_cast<uint8_t>(tensor.type) == emel::kernel::detail::dtype_f16
+          ? sizeof(uint16_t)
+          : sizeof(float);
+  return tensor.data != nullptr && elements > 0u &&
+         tensor.data_size >= elements * element_bytes;
 }
 
 // Arena cursor for one-time prepare copies. The dry_run instantiation backs
@@ -193,15 +201,15 @@ const uint8_t *prepare_raw_q8_0(arena_cursor_t<dry_run> &cursor,
                                 const emel::model::data::tensor_record *tensor,
                                 const uint64_t expected_elements) noexcept {
   constexpr uint8_t k_dtype_q8_0 = 8u;
-  if (tensor == nullptr || static_cast<uint8_t>(tensor->type) != k_dtype_q8_0 ||
-      tensor_elements(*tensor) != expected_elements ||
-      expected_elements % emel::kernel::detail::quant::QK8_0 != 0u ||
-      tensor->data == nullptr) {
-    return nullptr;
-  }
   const uint64_t bytes = expected_elements /
                          emel::kernel::detail::quant::QK8_0 *
                          sizeof(emel::kernel::detail::quant::block_q8_0);
+  if (tensor == nullptr || static_cast<uint8_t>(tensor->type) != k_dtype_q8_0 ||
+      tensor_elements(*tensor) != expected_elements ||
+      expected_elements % emel::kernel::detail::quant::QK8_0 != 0u ||
+      tensor->data == nullptr || tensor->data_size < bytes) {
+    return nullptr;
+  }
   float *slot = cursor.take((bytes + sizeof(float) - 1u) / sizeof(float));
   if (slot == nullptr) {
     return nullptr;
@@ -223,7 +231,8 @@ const uint16_t *prepare_raw_f16(arena_cursor_t<dry_run> &cursor,
                                 const uint64_t expected_halfs) noexcept {
   if (tensor == nullptr ||
       static_cast<uint8_t>(tensor->type) != emel::kernel::detail::dtype_f16 ||
-      tensor_elements(*tensor) != expected_halfs || tensor->data == nullptr) {
+      tensor_elements(*tensor) != expected_halfs || tensor->data == nullptr ||
+      tensor->data_size < expected_halfs * sizeof(uint16_t)) {
     return nullptr;
   }
   float *slot = cursor.take((expected_halfs + 1u) / 2u);
@@ -1568,13 +1577,13 @@ bool plan_transformer(const emel::model::data &model_data, const char *family,
   const auto &mimi = model_data.mimi;
   const int64_t dim = mimi.dim;
   // The runtime layer array is k_max_transformer_layers wide, the rotary
-  // kernel halves head_dim, and compute_transformer takes position modulo the
-  // context, so oversized layer counts, odd head sizes, and a non-positive
-  // context are out of contract and must be rejected here, not at compute
-  // time.
+  // kernel halves head_dim, compute_transformer takes position modulo the
+  // context and log() of the rotary max period, so oversized layer counts,
+  // odd head sizes, a non-positive context, and a non-positive max period
+  // are out of contract and must be rejected here, not at compute time.
   if (mimi.transformer_num_layers <= 0 ||
       mimi.transformer_num_layers > k_max_transformer_layers ||
-      mimi.transformer_context <= 0) {
+      mimi.transformer_context <= 0 || mimi.transformer_max_period <= 0) {
     return false;
   }
   const int64_t heads = mimi.transformer_num_heads;
@@ -1628,15 +1637,21 @@ bool plan_codec(const emel::model::data &model_data,
   // "successful" initialize.
   if (model_data.moshi_component_id !=
           emel::model::data::moshi_component::mimi ||
-      mimi.dim <= 0 || mimi.n_q <= 0 || mimi.frame_rate <= 0.0f ||
-      mimi.codebook_dim <= 0 || mimi.card <= 0) {
+      mimi.dim <= 0 || mimi.n_q <= 0 || !std::isfinite(mimi.frame_rate) ||
+      mimi.frame_rate <= 0.0f || mimi.codebook_dim <= 0 || mimi.card <= 0) {
     return false;
   }
-  plan_out.frame_samples = static_cast<int32_t>(
-      static_cast<float>(mimi.sample_rate) / mimi.frame_rate);
-  if (plan_out.frame_samples <= 0) {
+  // The int32_t cast below is undefined for NaN or out-of-range ratios, so a
+  // non-finite frame_rate (rejected above) or a tiny positive one must fail
+  // here instead of casting; k_max_frame_samples bounds every downstream
+  // per-frame buffer computation.
+  constexpr float k_max_frame_samples = 1.0e8f;
+  const float frame_ratio =
+      static_cast<float>(mimi.sample_rate) / mimi.frame_rate;
+  if (!(frame_ratio >= 1.0f) || frame_ratio > k_max_frame_samples) {
     return false;
   }
+  plan_out.frame_samples = static_cast<int32_t>(frame_ratio);
 
   // Bound operand class: models storing f16 conv weights run the reference
   // f16 pipeline (detected on the first encoder conv; bind cross-checks the
