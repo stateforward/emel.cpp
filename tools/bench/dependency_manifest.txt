@@ -8,6 +8,8 @@ record runner=all kind=source path=tools/bench/bench_runner_contract.hpp reason=
 record runner=all kind=source path=tools/bench/bench_cases.hpp reason=case_contract
 record runner=all kind=source path=tools/bench/bench_common.hpp reason=result_contract
 record runner=all kind=source path=tools/bench/bench_disabled_cases.cpp reason=filtered_suite_stubs
+record runner=all kind=source path=tools/bench/bench_dependency_manifest.cpp reason=manifest_registry
+record runner=all kind=source path=tools/bench/bench_dependency_manifest.hpp reason=manifest_registry
 record runner=all kind=config path=tools/bench/reference_ref.txt reason=reference_revision
 record runner=all kind=script path=scripts/quality_gates.sh reason=benchmark_gate_entrypoint
 record runner=batch_planner kind=source path=tools/bench/batch/planner_bench.cpp reason=suite_source
@@ -97,3 +99,7 @@ record runner=speech_codec_mimi kind=script path=tools/bench/mimi_compare.py rea
 record runner=speech_codec_mimi kind=script path=scripts/bench_mimi_compare.sh reason=compare_wrapper
 record runner=speech_codec_mimi kind=script path=tools/bench/moshi_gguf_convert.py reason=emel_lane_converter
 record runner=speech_codec_mimi kind=config path=tools/bench/moshi_reference_ref.txt reason=reference_pin
+record runner=speech_codec_mimi kind=config path=tools/bench/reference_backends/moshi_cpp_mimi.json reason=reference_backend_descriptor
+record runner=speech_codec_mimi kind=script path=tools/bench/speech/personaplex_mlx_mimi_driver.py reason=reference_lane_driver
+record runner=speech_codec_mimi kind=config path=tools/bench/personaplex_mlx_ref.txt reason=reference_pin
+record runner=speech_codec_mimi kind=config path=tools/bench/reference_backends/personaplex_mlx_mimi.json reason=reference_backend_descriptor

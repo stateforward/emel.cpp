@@ -65,6 +65,12 @@ def main() -> int:
                       "the EMEL lane consumes the f16 operand class)")
   parser.add_argument("--min-code-match", type=float, default=0.0,
                       help="minimum code match fraction to pass [0..1]")
+  parser.add_argument("--prefix-streams", type=int, default=0,
+                      help="also gate the first N RVQ streams separately; "
+                      "early residual layers are numerically stable across "
+                      "float implementations while deep-layer codes cascade")
+  parser.add_argument("--min-prefix-match", type=float, default=0.0,
+                      help="minimum match fraction over --prefix-streams")
   parser.add_argument("--json-out", default=None)
   args = parser.parse_args()
 
@@ -93,6 +99,7 @@ def main() -> int:
     return 1
 
   total = matched = 0
+  prefix_total = prefix_matched = 0
   per_frame = []
   for emel_codes, ref_codes in zip(emel_frames, ref_frames):
     if len(emel_codes) != len(ref_codes):
@@ -104,9 +111,17 @@ def main() -> int:
     per_frame.append(frame_match / len(emel_codes))
     matched += frame_match
     total += len(emel_codes)
+    if args.prefix_streams > 0:
+      prefix = min(args.prefix_streams, len(emel_codes))
+      prefix_matched += sum(
+          1 for a, b in zip(emel_codes[:prefix], ref_codes[:prefix]) if a == b)
+      prefix_total += prefix
   report["code_match_fraction"] = matched / total
   report["per_frame_match"] = per_frame
   report["token_exact"] = matched == total
+  if prefix_total > 0:
+    report["prefix_streams"] = args.prefix_streams
+    report["prefix_match_fraction"] = prefix_matched / prefix_total
 
   if args.compare_decode:
     with tempfile.TemporaryDirectory() as tmp:
@@ -143,6 +158,12 @@ def main() -> int:
     passed = False
     report["reason"] = (f"code match {report['code_match_fraction']:.3f} "
                         f"below threshold {args.min_code_match}")
+  if prefix_total > 0 and report["prefix_match_fraction"] < args.min_prefix_match:
+    passed = False
+    report["reason"] = (
+        f"prefix match {report['prefix_match_fraction']:.3f} over first "
+        f"{args.prefix_streams} streams below threshold "
+        f"{args.min_prefix_match}")
   report["status"] = "pass" if passed else "fail"
 
   output = json.dumps(report, indent=2)
