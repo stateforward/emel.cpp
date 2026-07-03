@@ -208,3 +208,35 @@ TEST_CASE("io mmap advise reports status without callbacks") {
   CHECK(fixture.strategy.is(
       stateforward::sml::state<emel::io::mmap::state_ready>));
 }
+
+TEST_CASE("io mmap advise failure guards and effects mark their errors") {
+  // The unsupported-platform row sits after the supported row in the
+  // transition table, so on supported platforms it is unreachable through
+  // dispatch; the attempt-failed route needs a platform madvise rejection,
+  // which macOS does not produce for any in-mapping window. Exercise the pure
+  // predicates and the effect contracts directly.
+  const emel::io::mmap::event::advise_mapping request{
+      71, 0u, 0u, 4096u, emel::io::mmap::event::advice::k_sequential};
+  emel::io::mmap::detail::advise_attempt_status status{};
+  const emel::io::mmap::detail::advise_mapping_runtime runtime{request, status};
+  emel::io::mmap::action::context ctx{};
+
+  CHECK(emel::io::mmap::guard::guard_platform_advise_supported{}(runtime, ctx) ==
+        (EMEL_IO_MMAP_PLATFORM_SUPPORTED != 0));
+  CHECK(emel::io::mmap::guard::guard_platform_advise_unsupported{}(runtime, ctx) ==
+        (EMEL_IO_MMAP_PLATFORM_SUPPORTED == 0));
+
+  status.advise_ok = false;
+  CHECK_FALSE(emel::io::mmap::guard::guard_advise_succeeded{}(runtime, ctx));
+  CHECK(emel::io::mmap::guard::guard_advise_failed{}(runtime, ctx));
+
+  emel::io::mmap::action::effect_mark_advise_failed(runtime, ctx);
+  CHECK_FALSE(status.ok);
+  CHECK(status.err ==
+        emel::error::cast(emel::io::mmap::error::advise_failed));
+
+  emel::io::mmap::action::effect_mark_advise_unsupported_platform(runtime, ctx);
+  CHECK_FALSE(status.ok);
+  CHECK(status.err ==
+        emel::error::cast(emel::io::mmap::error::unsupported_platform));
+}
