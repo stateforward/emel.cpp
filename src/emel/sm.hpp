@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <chrono>
 #include <concepts>
 #include <coroutine>
 #include <cstddef>
@@ -453,7 +454,17 @@ class thread_pool_scheduler {
         cpu_relax();
       }
       if (!claimed) {
-        ready_.acquire();
+        // Bounded idle wait instead of a bare acquire: a missed semaphore
+        // wakeup (observed on Apple libc++ under gcov-instrumented builds:
+        // stop permits released and seven of eight workers exited, while the
+        // last slept in __ulock_wait forever) must not strand shutdown. The
+        // 1ms recheck touches only a genuinely idle worker, never the warm
+        // spin-claim path above.
+        while (!ready_.try_acquire_for(std::chrono::milliseconds(1))) {
+          if (stopping_.load(std::memory_order_acquire)) {
+            return;
+          }
+        }
       }
       // The claimed permit promises a published task or a stop signal. The task
       // may not be visible at dequeue_pos for a few cycles, so retry rather than
