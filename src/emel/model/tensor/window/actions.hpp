@@ -143,6 +143,18 @@ struct effect_mark_budget_too_small {
   }
 };
 
+// Bind rejections after the source was mapped must give the mapping back to
+// the shared io_mmap pool, or repeated failing binds exhaust its fixed slots.
+struct effect_release_rejected_source {
+  void operator()(const detail::bind_window_runtime &,
+                  context &ctx) const noexcept {
+    const emel::io::mmap::event::release_mapping release{
+        detail::k_stream_source_tensor_id, ctx.window.source_handle};
+    (void)ctx.io_mmap->process_event(release);
+    detail::reset_window(ctx.window);
+  }
+};
+
 struct effect_activate_passthrough {
   void operator()(const detail::bind_window_runtime &ev,
                   context &ctx) const noexcept {
@@ -154,18 +166,29 @@ struct effect_activate_passthrough {
 
 // One-time setup allocation: window slots are the streaming feature's working
 // memory, sized at bind before any hot-path dispatch, freed at unbind/context
-// destruction. This is the sanctioned construction-time heap use.
-struct effect_activate_streaming {
+// destruction. This is the sanctioned construction-time heap use. The
+// allocation is an attempt whose outcome the alloc-decision guards route on:
+// nothrow new, all-or-nothing recorded in status.slots_alloc_ok.
+struct effect_allocate_slots {
   void operator()(const detail::bind_window_runtime &ev,
                   context &ctx) const noexcept {
     ctx.window.slot_count = ev.request.request.window_slots;
+    bool all_ok = true;
     for (uint32_t index = 0; index < ctx.window.slot_count; ++index) {
       ctx.window.slots[index].storage = static_cast<uint8_t *>(::operator new(
           ctx.window.slot_capacity_bytes,
-          std::align_val_t{detail::k_slot_alignment_bytes}));
+          std::align_val_t{detail::k_slot_alignment_bytes}, std::nothrow));
       ctx.window.slots[index].layer = -1;
       ctx.window.slots[index].lifecycle = detail::slot_lifecycle::vacant;
+      all_ok = all_ok && ctx.window.slots[index].storage != nullptr;
     }
+    ev.status.slots_alloc_ok = all_ok;
+  }
+};
+
+struct effect_finish_streaming {
+  void operator()(const detail::bind_window_runtime &ev,
+                  context &ctx) const noexcept {
     ctx.window.streaming_active = true;
     ctx.window.bound = true;
     ev.status.ok = true;
@@ -412,12 +435,22 @@ struct effect_begin_unbind {
   }
 };
 
-struct effect_release_source_and_reset {
+// Attempt only: the release outcome routes the finish decision. The window
+// is reset by effect_reset_window_after_release on the success path; a
+// failed release keeps the handle and slot state intact so the caller can
+// retry unbind (the mmap actor keeps the slot reserved on failure).
+struct effect_attempt_release_source {
   void operator()(const detail::unbind_finish_runtime &ev,
                   context &ctx) const noexcept {
     emel::io::mmap::event::release_mapping release{
         detail::k_stream_source_tensor_id, ctx.window.source_handle};
     ev.status.ok = ctx.io_mmap->process_event(release);
+  }
+};
+
+struct effect_reset_window_after_release {
+  void operator()(const detail::unbind_finish_runtime &,
+                  context &ctx) const noexcept {
     detail::reset_window(ctx.window);
   }
 };
@@ -482,12 +515,55 @@ struct effect_activate_passthrough_and_publish {
   }
 };
 
-struct effect_activate_streaming_and_publish {
+struct effect_finish_streaming_and_publish {
   void operator()(const detail::bind_window_runtime &ev,
                   context &ctx) const noexcept {
-    effect_activate_streaming{}(ev, ctx);
+    effect_finish_streaming{}(ev, ctx);
     effect_prime_window{}(ev, ctx);
     effect_publish_bind_done{}(ev, ctx);
+  }
+};
+
+struct effect_finish_streaming_and_record {
+  void operator()(const detail::bind_window_runtime &ev,
+                  context &ctx) const noexcept {
+    effect_finish_streaming{}(ev, ctx);
+    effect_prime_window{}(ev, ctx);
+    effect_record_bind_done{}(ev, ctx);
+  }
+};
+
+struct effect_release_and_mark_alloc_failed {
+  void operator()(const detail::bind_window_runtime &ev,
+                  context &ctx) const noexcept {
+    // reset_window frees whatever slots the attempt did allocate.
+    effect_release_rejected_source{}(ev, ctx);
+    ev.status.err = emel::error::cast(error::slot_alloc_failed);
+    ev.status.ok = false;
+  }
+};
+
+struct effect_release_and_mark_budget_too_small {
+  void operator()(const detail::bind_window_runtime &ev,
+                  context &ctx) const noexcept {
+    effect_release_rejected_source{}(ev, ctx);
+    effect_mark_budget_too_small{}(ev, ctx);
+  }
+};
+
+struct effect_release_and_mark_streaming_config_invalid {
+  void operator()(const detail::bind_window_runtime &ev,
+                  context &ctx) const noexcept {
+    effect_release_rejected_source{}(ev, ctx);
+    effect_mark_bind_invalid{}(ev, ctx);
+  }
+};
+
+struct effect_activate_passthrough_and_record {
+  void operator()(const detail::bind_window_runtime &ev,
+                  context &ctx) const noexcept {
+    effect_activate_passthrough{}(ev, ctx);
+    effect_record_bind_done{}(ev, ctx);
   }
 };
 
@@ -525,7 +601,10 @@ inline constexpr effect_mark_source_map_failed effect_mark_source_map_failed{};
 inline constexpr effect_scan_layer_plan effect_scan_layer_plan{};
 inline constexpr effect_mark_budget_too_small effect_mark_budget_too_small{};
 inline constexpr effect_activate_passthrough effect_activate_passthrough{};
-inline constexpr effect_activate_streaming effect_activate_streaming{};
+inline constexpr effect_allocate_slots effect_allocate_slots{};
+inline constexpr effect_finish_streaming effect_finish_streaming{};
+inline constexpr effect_release_rejected_source
+    effect_release_rejected_source{};
 inline constexpr effect_prime_window effect_prime_window{};
 inline constexpr effect_publish_bind_done effect_publish_bind_done{};
 inline constexpr effect_record_bind_done effect_record_bind_done{};
@@ -548,7 +627,9 @@ inline constexpr effect_record_acquire_done effect_record_acquire_done{};
 inline constexpr effect_publish_acquire_error effect_publish_acquire_error{};
 inline constexpr effect_record_acquire_error effect_record_acquire_error{};
 inline constexpr effect_begin_unbind effect_begin_unbind{};
-inline constexpr effect_release_source_and_reset effect_release_source_and_reset{};
+inline constexpr effect_attempt_release_source effect_attempt_release_source{};
+inline constexpr effect_reset_window_after_release
+    effect_reset_window_after_release{};
 inline constexpr effect_publish_unbind_done effect_publish_unbind_done{};
 inline constexpr effect_record_unbind_done effect_record_unbind_done{};
 inline constexpr effect_mark_unbind_not_bound effect_mark_unbind_not_bound{};
@@ -558,8 +639,18 @@ inline constexpr effect_record_unbind_error effect_record_unbind_error{};
 inline constexpr effect_record_stray_completion effect_record_stray_completion{};
 inline constexpr effect_activate_passthrough_and_publish
     effect_activate_passthrough_and_publish{};
-inline constexpr effect_activate_streaming_and_publish
-    effect_activate_streaming_and_publish{};
+inline constexpr effect_activate_passthrough_and_record
+    effect_activate_passthrough_and_record{};
+inline constexpr effect_finish_streaming_and_publish
+    effect_finish_streaming_and_publish{};
+inline constexpr effect_finish_streaming_and_record
+    effect_finish_streaming_and_record{};
+inline constexpr effect_release_and_mark_alloc_failed
+    effect_release_and_mark_alloc_failed{};
+inline constexpr effect_release_and_mark_budget_too_small
+    effect_release_and_mark_budget_too_small{};
+inline constexpr effect_release_and_mark_streaming_config_invalid
+    effect_release_and_mark_streaming_config_invalid{};
 inline constexpr effect_mark_already_bound_and_publish
     effect_mark_already_bound_and_publish{};
 inline constexpr effect_submit_and_require_layer effect_submit_and_require_layer{};

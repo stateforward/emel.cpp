@@ -48,6 +48,7 @@ struct state_unbound {};
 struct state_bind_request_decision {};
 struct state_bind_source_decision {};
 struct state_bind_budget_decision {};
+struct state_bind_alloc_decision {};
 struct state_bind_done_callback {};
 struct state_bind_error_ready {};
 struct state_bind_error_callback {};
@@ -109,17 +110,45 @@ struct model {
       , sml::state<state_passthrough_ready> <=
           sml::state<state_bind_budget_decision>
           + sml::completion<detail::bind_window_runtime>
-          [ guard::guard_bind_fits_budget{} ]
+          [ guard::guard_bind_fits_budget_callback_present{} ]
           / action::effect_activate_passthrough_and_publish
-      , sml::state<state_ready> <= sml::state<state_bind_budget_decision>
+      , sml::state<state_passthrough_ready> <=
+          sml::state<state_bind_budget_decision>
+          + sml::completion<detail::bind_window_runtime>
+          [ guard::guard_bind_fits_budget_callback_absent{} ]
+          / action::effect_activate_passthrough_and_record
+      , sml::state<state_bind_alloc_decision> <=
+          sml::state<state_bind_budget_decision>
           + sml::completion<detail::bind_window_runtime>
           [ guard::guard_bind_requires_streaming{} ]
-          / action::effect_activate_streaming_and_publish
+          / action::effect_allocate_slots
       , sml::state<state_bind_error_ready> <=
           sml::state<state_bind_budget_decision>
           + sml::completion<detail::bind_window_runtime>
           [ guard::guard_bind_budget_too_small{} ]
-          / action::effect_mark_budget_too_small
+          / action::effect_release_and_mark_budget_too_small
+      , sml::state<state_bind_error_ready> <=
+          sml::state<state_bind_budget_decision>
+          + sml::completion<detail::bind_window_runtime>
+          [ guard::guard_bind_streaming_config_invalid{} ]
+          / action::effect_release_and_mark_streaming_config_invalid
+
+      //------------------------------------------------------------------------------//
+      // streaming slot allocation: the attempt's recorded outcome routes
+      // activation or the released-and-failed error.
+      , sml::state<state_ready> <= sml::state<state_bind_alloc_decision>
+          + sml::completion<detail::bind_window_runtime>
+          [ guard::guard_bind_slots_alloc_ok_callback_present{} ]
+          / action::effect_finish_streaming_and_publish
+      , sml::state<state_ready> <= sml::state<state_bind_alloc_decision>
+          + sml::completion<detail::bind_window_runtime>
+          [ guard::guard_bind_slots_alloc_ok_callback_absent{} ]
+          / action::effect_finish_streaming_and_record
+      , sml::state<state_bind_error_ready> <=
+          sml::state<state_bind_alloc_decision>
+          + sml::completion<detail::bind_window_runtime>
+          [ guard::guard_bind_slots_alloc_failed{} ]
+          / action::effect_release_and_mark_alloc_failed
 
       //------------------------------------------------------------------------------//
       // bind error publication.
@@ -189,6 +218,10 @@ struct model {
       , sml::state<state_acquire_pending> <= sml::state<state_acquire_decision>
           + sml::completion<detail::acquire_runtime>
           [ guard::guard_acquire_layer_unscheduled{} ]
+          / action::effect_submit_and_require_layer
+      , sml::state<state_acquire_pending> <= sml::state<state_acquire_decision>
+          + sml::completion<detail::acquire_runtime>
+          [ guard::guard_acquire_layer_failed{} ]
           / action::effect_submit_and_require_layer
 
       //------------------------------------------------------------------------------//
@@ -278,7 +311,12 @@ struct model {
           + sml::event<detail::acquire_runtime>
       , sml::state<state_unbound> <= sml::state<state_unbound>
           + sml::event<detail::acquire_publish_runtime>
+          [ guard::guard_acquire_error_callback_present{} ]
           / action::effect_publish_acquire_error
+      , sml::state<state_unbound> <= sml::state<state_unbound>
+          + sml::event<detail::acquire_publish_runtime>
+          [ guard::guard_acquire_error_callback_absent{} ]
+          / action::effect_record_acquire_error
 
       //------------------------------------------------------------------------------//
       // completion commit: required slot loads delivered by the drain while an
@@ -311,11 +349,12 @@ struct model {
           / action::effect_begin_unbind
       , sml::state<state_unbind_finish_decision> <= sml::state<state_unbind_pending>
           + sml::event<detail::unbind_finish_runtime>
-          / action::effect_release_source_and_reset
+          / action::effect_attempt_release_source
       , sml::state<state_unbind_publish_ready> <=
           sml::state<state_unbind_finish_decision>
           + sml::completion<detail::unbind_finish_runtime>
           [ guard::guard_unbind_release_succeeded{} ]
+          / action::effect_reset_window_after_release
       , sml::state<state_unbind_error_ready> <=
           sml::state<state_unbind_finish_decision>
           + sml::completion<detail::unbind_finish_runtime>
@@ -333,24 +372,42 @@ struct model {
       , sml::state<state_unbound> <= sml::state<state_unbind_done_callback>
           + sml::completion<detail::unbind_finish_runtime>
           / action::effect_record_unbind_done
+      // The failed-release exits return to the mode the window is still in
+      // (the handle stays reserved for an unbind retry), never to unbound.
       , sml::state<state_unbind_error_callback> <=
           sml::state<state_unbind_error_ready>
           + sml::completion<detail::unbind_finish_runtime>
           [ guard::guard_unbind_error_callback_present{} ]
           / action::effect_publish_unbind_error
-      , sml::state<state_unbound> <= sml::state<state_unbind_error_ready>
+      , sml::state<state_ready> <= sml::state<state_unbind_error_ready>
           + sml::completion<detail::unbind_finish_runtime>
-          [ guard::guard_unbind_error_callback_absent{} ]
+          [ guard::guard_unbind_error_callback_absent_streaming{} ]
           / action::effect_record_unbind_error
-      , sml::state<state_unbound> <= sml::state<state_unbind_error_callback>
+      , sml::state<state_passthrough_ready> <=
+          sml::state<state_unbind_error_ready>
           + sml::completion<detail::unbind_finish_runtime>
+          [ guard::guard_unbind_error_callback_absent_passthrough{} ]
+          / action::effect_record_unbind_error
+      , sml::state<state_ready> <= sml::state<state_unbind_error_callback>
+          + sml::completion<detail::unbind_finish_runtime>
+          [ guard::guard_unbind_window_streaming{} ]
+          / action::effect_record_unbind_error
+      , sml::state<state_passthrough_ready> <=
+          sml::state<state_unbind_error_callback>
+          + sml::completion<detail::unbind_finish_runtime>
+          [ guard::guard_unbind_window_passthrough{} ]
           / action::effect_record_unbind_error
       , sml::state<state_unbound> <= sml::state<state_unbound>
           + sml::event<detail::unbind_runtime>
           / action::effect_mark_unbind_not_bound
       , sml::state<state_unbound> <= sml::state<state_unbound>
           + sml::event<detail::unbind_finish_runtime>
+          [ guard::guard_unbind_error_callback_present{} ]
           / action::effect_publish_unbind_error
+      , sml::state<state_unbound> <= sml::state<state_unbound>
+          + sml::event<detail::unbind_finish_runtime>
+          [ guard::guard_unbind_error_callback_absent{} ]
+          / action::effect_record_unbind_error
 
       //------------------------------------------------------------------------------//
       // Unexpected event handling: hold position, mark internal error.
@@ -394,6 +451,12 @@ struct sm : public emel::co_sm<
   using base_type::is;
   using base_type::process_event;
   using base_type::visit_current_states;
+
+  // Destroying a bound window must not free slot storage while pool workers
+  // are still copying into it: run the modeled unbind drain (requires every
+  // loading slot, joins them, releases the source) before members destruct.
+  // On an unbound machine this is the modeled not_bound no-op.
+  ~sm() { (void)process_event(event::unbind_window{}); }
 
   bool process_event(const event::bind_window &ev) {
     detail::bind_attempt_status status{};

@@ -201,6 +201,7 @@ struct bind_attempt_status {
   emel::error::type err = emel::error::cast(error::none);
   bool ok = false;
   bool source_map_ok = false;
+  bool slots_alloc_ok = false;
   const void *source_base = nullptr;
   uint64_t source_bytes = 0u;
   uint32_t source_handle = emel::io::mmap::k_invalid_mapping_handle;
