@@ -284,6 +284,15 @@ def require_dims(infos: list[TensorInfo], name: str,
         "the config JSON does not match the weights")
 
 
+def require_float_dtype(info: TensorInfo) -> None:
+  # The codec bind consumes vectors, codebooks, and conv taps through prepare
+  # helpers that accept only f32/f16.
+  if info.dtype not in (GGML_DTYPE_F32, GGML_DTYPE_F16):
+    raise ValueError(
+        f"tensor {info.name!r} has dtype {info.dtype}; the runtime bind "
+        "consumes only f32/f16 here")
+
+
 def require_elements(infos: list[TensorInfo], name: str,
                      elements: int) -> None:
   # The runtime bind's prepare helpers accept any dims layout with the
@@ -505,6 +514,7 @@ def resolve_conv_geometry(info: TensorInfo, in_channels: int) -> tuple[int, int]
   # from the element count against the running channel chain.
   if not 1 <= len(info.dims) <= 3:
     raise ValueError(f"conv tensor {info.name!r} has rank {len(info.dims)}")
+  require_float_dtype(info)
   taps = info.dims[0]
   total = math.prod(info.dims)
   divisor = taps * in_channels
@@ -559,18 +569,16 @@ def cross_check_mimi(infos: list[TensorInfo], n_q: int, preset: dict) -> dict:
   # The C++ contract and bind consume every semantic level 0..semantic_n_q-1
   # with the full codebook shape, mirroring the acoustic loop below.
   for level in range(preset["semantic_n_q"]):
-    require_dims(
-        infos,
-        f"mimi.quantizer.rvq_first.vq.layers.{level}._codebook.embedding",
-        (first.dims[0], preset["card"]))
+    name = f"mimi.quantizer.rvq_first.vq.layers.{level}._codebook.embedding"
+    require_dims(infos, name, (first.dims[0], preset["card"]))
+    require_float_dtype(find_info(infos, name))
   # The C++ contract requires every acoustic level with the full codebook
   # shape; probe each expected level instead of counting, so a missing
   # intermediate or wrong-shaped codebook fails conversion.
   for level in range(n_q - preset["semantic_n_q"]):
-    require_dims(
-        infos,
-        f"mimi.quantizer.rvq_rest.vq.layers.{level}._codebook.embedding",
-        (first.dims[0], preset["card"]))
+    name = f"mimi.quantizer.rvq_rest.vq.layers.{level}._codebook.embedding"
+    require_dims(infos, name, (first.dims[0], preset["card"]))
+    require_float_dtype(find_info(infos, name))
   for family in ("mimi.encoder.", "mimi.encoder_transformer.",
                  "mimi.downsample.", "mimi.upsample.",
                  "mimi.decoder_transformer.", "mimi.decoder."):
@@ -583,6 +591,7 @@ def cross_check_mimi(infos: list[TensorInfo], n_q: int, preset: dict) -> dict:
   # tensor fails conversion instead of failing codec bind at runtime.
   dim = preset["dim"]
   for family in ("mimi.encoder_transformer.", "mimi.decoder_transformer."):
+    family_mlp = 0
     for layer in range(preset["transformer_num_layers"]):
       base = f"{family}transformer.layers.{layer}."
       require_dims(infos, base + "self_attn.in_projs.0.weight", (dim, 3 * dim))
@@ -593,6 +602,15 @@ def cross_check_mimi(infos: list[TensorInfo], n_q: int, preset: dict) -> dict:
             f"tensor {linear1.name!r} has dims {linear1.dims}, expected "
             f"({dim}, mlp_dim); the preset does not match the weights")
       mlp_dim = linear1.dims[1]
+      # The codec stores one MLP width per transformer family and binds
+      # every layer against it, so mixed widths must reject here.
+      if layer == 0:
+        family_mlp = mlp_dim
+      elif mlp_dim != family_mlp:
+        raise ValueError(
+            f"tensor {linear1.name!r} has MLP width {mlp_dim} but the "
+            f"family's first layer uses {family_mlp}; the codec binds one "
+            "width per family")
       require_elements(infos, base + "self_attn.out_projs.0.weight",
                        dim * dim)
       require_elements(infos, base + "linear2.weight", mlp_dim * dim)
@@ -600,6 +618,9 @@ def cross_check_mimi(infos: list[TensorInfo], n_q: int, preset: dict) -> dict:
                      "norm2.bias", "layer_scale_1.scale",
                      "layer_scale_2.scale"):
         require_elements(infos, base + vector, dim)
+        # norms, biases, and layer scales bind through prepare_vector
+        # (f32/f16 only).
+        require_float_dtype(find_info(infos, base + vector))
   # bind_rvq_split consumes the input/output 1x1 projections for both splits
   # before any encode or decode can run; require them (by element count,
   # matching prepare_linear/prepare_raw_q8_0) alongside the codebooks.
@@ -669,6 +690,7 @@ def cross_check_mimi(infos: list[TensorInfo], n_q: int, preset: dict) -> dict:
         f"downsample conv dims {down.dims} do not resolve to a stride-2 "
         f"dim->dim conv")
   up = find_info(infos, "mimi.upsample.convtr.convtr.convtr.weight")
+  require_float_dtype(up)
   if (len(up.dims) < 1 or up.dims[0] < 2 or
       math.prod(up.dims) != up.dims[0] * dim):
     raise ValueError(
