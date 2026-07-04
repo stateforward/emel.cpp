@@ -406,17 +406,25 @@ bool has_tensor_with_elements(const emel::model::data &model_data,
 
 // The codec plan selects the q8 bind path from the first projection of a
 // family and the bind then requires every projection in that family to share
-// the class, so projection probes compare element count and q8-vs-float
-// class together.
+// the class, so projection probes compare element count and dtype class
+// together. The float class must be one of the dtypes the binder actually
+// consumes (prepare_matrix_raw/prepare_linear accept f32/f16 only), not
+// merely any non-q8 payload of sufficient size.
 bool has_projection_tensor(const emel::model::data &model_data,
                            const std::string_view name,
                            const uint64_t expected_elements,
                            const bool q8_class) noexcept {
+  constexpr int32_t k_dtype_f32 = 0;
+  constexpr int32_t k_dtype_f16 = 1;
   constexpr int32_t k_dtype_q8_0 = 8;
   const auto *tensor = find_tensor(model_data, name);
-  return tensor != nullptr &&
-         has_tensor_with_elements(model_data, name, expected_elements) &&
-         ((tensor->type == k_dtype_q8_0) == q8_class);
+  if (tensor == nullptr ||
+      !has_tensor_with_elements(model_data, name, expected_elements)) {
+    return false;
+  }
+  return q8_class ? tensor->type == k_dtype_q8_0
+                  : tensor->type == k_dtype_f32 ||
+                        tensor->type == k_dtype_f16;
 }
 
 bool require_tensor_shape(const emel::model::data &model_data,
@@ -602,7 +610,13 @@ emel::error::type validate_mimi_contract(const emel::model::data &model_data,
   // each rvq_rest codebook and its shape, not just existence of the last
   // index: a model missing an intermediate level or carrying a wrong-shaped
   // codebook would otherwise validate here and fail initialization later.
-  bool quantizer_ok = mimi.n_q > mimi.semantic_n_q;
+  // bind_rvq_split stores each split's levels in fixed arrays of 32
+  // (k_max_quantizer_levels in the codec), so per-split counts past the cap
+  // must reject here even when every declared codebook tensor exists.
+  constexpr int32_t k_max_rvq_split_levels = 32;
+  bool quantizer_ok = mimi.n_q > mimi.semantic_n_q &&
+                      mimi.semantic_n_q <= k_max_rvq_split_levels &&
+                      mimi.n_q - mimi.semantic_n_q <= k_max_rvq_split_levels;
   // bind_rvq_split consumes rvq_first levels 0..semantic_n_q-1 the same way
   // it consumes the acoustic levels, so every semantic codebook needs the
   // full shape probe too (a split past the codec's fixed level arrays also
@@ -655,7 +669,12 @@ emel::error::type validate_mimi_contract(const emel::model::data &model_data,
       first_proj != nullptr && first_proj->type == k_dtype_q8_0;
   static constexpr const char *k_transformer_families[2] = {
       "encoder_transformer", "decoder_transformer"};
-  bool transformers_ok = true;
+  // plan_transformer stores layers in fixed arrays of 16
+  // (k_max_transformer_layers in the codec), so a larger configured count
+  // must reject here even when every declared layer's tensors exist.
+  constexpr int32_t k_max_mimi_transformer_layers = 16;
+  bool transformers_ok =
+      mimi.transformer_num_layers <= k_max_mimi_transformer_layers;
   for (size_t family = 0; transformers_ok && family < 2u; ++family) {
     for (int32_t layer = 0;
          transformers_ok && layer < mimi.transformer_num_layers; ++layer) {
@@ -688,6 +707,8 @@ emel::error::type validate_mimi_contract(const emel::model::data &model_data,
       const uint64_t mlp_elements =
           static_cast<uint64_t>(linear1_tensor->dims[1]);
       transformers_ok =
+          has_projection_tensor(model_data, layer_name("linear1.weight", name),
+                                dim_elements * mlp_elements, proj_q8) &&
           require_tensor_shape(model_data,
                                layer_name("self_attn.in_projs.0.weight", name),
                                {dim, 3 * dim}) &&
@@ -797,29 +818,52 @@ emel::error::type validate_mimi_contract(const emel::model::data &model_data,
       "model.12.block.3.conv.conv.weight",
       "model.14.conv.conv.weight",
   };
+  // plan_codec selects the f16 conv operand class from the first encoder
+  // conv and bind_conv then requires every non-transposed SEANet/downsample
+  // conv to carry raw f16 taps; a mixed artifact must reject here instead of
+  // failing codec initialization. Transposed convs (decoder convtr entries
+  // and the upsample) stay outside the f16 class.
+  constexpr int32_t k_dtype_f16 = 1;
+  const auto *first_conv =
+      find_tensor(model_data, "mimi.encoder.model.0.conv.conv.weight");
+  const bool conv_f16 =
+      first_conv != nullptr && first_conv->type == k_dtype_f16;
+  const auto has_conv_tensor = [&model_data, conv_f16](
+                                   const std::string_view name,
+                                   const bool transposed) noexcept {
+    const auto *tensor = find_tensor(model_data, name);
+    return tensor != nullptr && tensor_has_storage(*tensor) &&
+           (transposed || !conv_f16 || tensor->type == k_dtype_f16);
+  };
   bool seanet_ok = true;
   for (const char *suffix : k_encoder_seanet_tensors) {
     char name[96] = {};
     const int written =
         std::snprintf(name, sizeof(name), "mimi.encoder.%s", suffix);
-    seanet_ok = seanet_ok && written > 0 &&
-                static_cast<size_t>(written) < sizeof(name) &&
-                has_tensor(model_data,
-                           std::string_view{name, static_cast<size_t>(written)});
+    seanet_ok =
+        seanet_ok && written > 0 &&
+        static_cast<size_t>(written) < sizeof(name) &&
+        has_conv_tensor(std::string_view{name, static_cast<size_t>(written)},
+                        /*transposed=*/false);
   }
   for (const char *suffix : k_decoder_seanet_tensors) {
     char name[96] = {};
     const int written =
         std::snprintf(name, sizeof(name), "mimi.decoder.%s", suffix);
-    seanet_ok = seanet_ok && written > 0 &&
-                static_cast<size_t>(written) < sizeof(name) &&
-                has_tensor(model_data,
-                           std::string_view{name, static_cast<size_t>(written)});
+    const bool transposed =
+        std::string_view{suffix}.find("convtr") != std::string_view::npos;
+    seanet_ok =
+        seanet_ok && written > 0 &&
+        static_cast<size_t>(written) < sizeof(name) &&
+        has_conv_tensor(std::string_view{name, static_cast<size_t>(written)},
+                        transposed);
   }
-  seanet_ok = seanet_ok &&
-              has_tensor(model_data, "mimi.downsample.conv.conv.conv.weight") &&
-              has_tensor(model_data,
-                         "mimi.upsample.convtr.convtr.convtr.weight");
+  seanet_ok =
+      seanet_ok &&
+      has_conv_tensor("mimi.downsample.conv.conv.conv.weight",
+                      /*transposed=*/false) &&
+      has_conv_tensor("mimi.upsample.convtr.convtr.convtr.weight",
+                      /*transposed=*/true);
   if (!seanet_ok) {
     return emel::error::cast(emel::model::loader::error::model_invalid);
   }

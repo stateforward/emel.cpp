@@ -686,6 +686,157 @@ TEST_CASE("mimi contract validation requires every transformer layer") {
   CHECK(moshi::validate_execution_contract(model) != k_none);
 }
 
+namespace {
+
+// Appends a clone of an existing tensor record under a new name (sharing the
+// original's storage), so contract tests can declare configurations larger
+// than the tiny fixture actually carries.
+bool append_cloned_tensor(emel::model::data &model,
+                          const std::string_view source_name,
+                          const std::string &clone_name) {
+  for (uint32_t idx = 0; idx < model.n_tensors; ++idx) {
+    const auto &tensor = model.tensors[idx];
+    const std::string_view name{model.name_storage.data() + tensor.name_offset,
+                                tensor.name_length};
+    if (name != source_name) {
+      continue;
+    }
+    auto &clone = model.tensors[model.n_tensors];
+    clone = tensor;
+    clone.name_offset = model.name_bytes_used;
+    clone.name_length = static_cast<uint32_t>(clone_name.size());
+    std::memcpy(model.name_storage.data() + model.name_bytes_used,
+                clone_name.data(), clone_name.size());
+    model.name_bytes_used += static_cast<uint32_t>(clone_name.size());
+    model.n_tensors += 1;
+    return true;
+  }
+  return false;
+}
+
+}  // namespace
+
+TEST_CASE("mimi contract validation rejects rvq split counts past the codec cap") {
+  auto loaded = load_fixture_or_skip("mimi-tiny.gguf");
+  if (loaded.model == nullptr) {
+    return;
+  }
+
+  // bind_rvq_split stores each split's levels in fixed 32-entry arrays; a
+  // GGUF declaring more levels with a codebook tensor for every one of them
+  // validated pre-cap and then failed quantizer bind. Clone the semantic
+  // level-0 codebook into levels 1..39 so every probed tensor exists.
+  auto &model = *loaded.model;
+  for (int level = 1; level < 40; ++level) {
+    REQUIRE(append_cloned_tensor(
+        model, "mimi.quantizer.rvq_first.vq.layers.0._codebook.embedding",
+        "mimi.quantizer.rvq_first.vq.layers." + std::to_string(level) +
+            "._codebook.embedding"));
+  }
+  model.mimi.semantic_n_q = 40;
+  model.mimi.n_q = 43;
+  CHECK(moshi::validate_execution_contract(model) != k_none);
+}
+
+TEST_CASE("mimi contract validation rejects transformer layers past the codec cap") {
+  auto loaded = load_fixture_or_skip("mimi-tiny.gguf");
+  if (loaded.model == nullptr) {
+    return;
+  }
+
+  // plan_transformer stores layers in fixed 16-entry arrays; a GGUF
+  // declaring more layers with tensors for every one of them validated
+  // pre-cap and then failed codec bind. Clone layer 1's full tensor set into
+  // layers 2..16 for both families so every probed tensor exists.
+  auto &model = *loaded.model;
+  static constexpr const char *k_layer_tensors[] = {
+      "norm1.weight",  "norm1.bias",
+      "norm2.weight",  "norm2.bias",
+      "layer_scale_1.scale", "layer_scale_2.scale",
+      "self_attn.in_projs.0.weight", "self_attn.out_projs.0.weight",
+      "linear1.weight", "linear2.weight",
+  };
+  for (const char *family : {"encoder_transformer", "decoder_transformer"}) {
+    for (int layer = 2; layer <= 16; ++layer) {
+      for (const char *suffix : k_layer_tensors) {
+        const std::string source = std::string("mimi.") + family +
+                                   ".transformer.layers.1." + suffix;
+        const std::string clone = std::string("mimi.") + family +
+                                  ".transformer.layers." +
+                                  std::to_string(layer) + "." + suffix;
+        REQUIRE(append_cloned_tensor(model, source, clone));
+      }
+    }
+  }
+  model.mimi.transformer_num_layers = 17;
+  CHECK(moshi::validate_execution_contract(model) != k_none);
+}
+
+TEST_CASE("mimi contract validation rejects non-float non-q8 projections") {
+  auto loaded = load_fixture_or_skip("mimi-tiny.gguf");
+  if (loaded.model == nullptr) {
+    return;
+  }
+
+  // The binder's float path accepts only f32/f16 (prepare_matrix_raw /
+  // prepare_linear); a bf16 projection with enough bytes validated as
+  // "non-q8" and then failed codec initialization.
+  auto &model = *loaded.model;
+  constexpr int32_t k_dtype_bf16 = 30;
+  bool corrupted = false;
+  for (uint32_t idx = 0; idx < model.n_tensors; ++idx) {
+    auto &tensor = model.tensors[idx];
+    const std::string_view name{model.name_storage.data() + tensor.name_offset,
+                                tensor.name_length};
+    if (name != "mimi.decoder_transformer.transformer.layers.1.self_attn."
+                "out_projs.0.weight" &&
+        name != "mimi.quantizer.rvq_rest.input_proj.weight") {
+      continue;
+    }
+    SUBCASE("bf16 transformer projection") {
+      if (name.ends_with("out_projs.0.weight")) {
+        tensor.type = k_dtype_bf16;
+        corrupted = true;
+      }
+    }
+    SUBCASE("bf16 rvq projection") {
+      if (name.ends_with("input_proj.weight")) {
+        tensor.type = k_dtype_bf16;
+        corrupted = true;
+      }
+    }
+  }
+  REQUIRE(corrupted);
+  CHECK(moshi::validate_execution_contract(model) != k_none);
+}
+
+TEST_CASE("mimi contract validation rejects a mixed f16 conv class") {
+  auto loaded = load_fixture_or_skip("mimi-tiny.gguf");
+  if (loaded.model == nullptr) {
+    return;
+  }
+
+  // plan_codec selects the f16 conv operand class from the first encoder
+  // conv and bind_conv then requires raw f16 taps for every non-transposed
+  // SEANet/downsample conv; flipping only the first conv to f16 produced a
+  // mixed artifact that validated and then failed codec initialization.
+  auto &model = *loaded.model;
+  constexpr int32_t k_dtype_f16 = 1;
+  bool corrupted = false;
+  for (uint32_t idx = 0; idx < model.n_tensors; ++idx) {
+    auto &tensor = model.tensors[idx];
+    const std::string_view name{model.name_storage.data() + tensor.name_offset,
+                                tensor.name_length};
+    if (name != "mimi.encoder.model.0.conv.conv.weight") {
+      continue;
+    }
+    tensor.type = k_dtype_f16;
+    corrupted = true;
+  }
+  REQUIRE(corrupted);
+  CHECK(moshi::validate_execution_contract(model) != k_none);
+}
+
 TEST_CASE("mimi contract validation requires the fixed seanet topology") {
   auto loaded = load_fixture_or_skip("mimi-tiny.gguf");
   if (loaded.model == nullptr) {
