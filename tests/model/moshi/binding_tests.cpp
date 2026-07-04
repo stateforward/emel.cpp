@@ -510,6 +510,15 @@ TEST_CASE("moshi contract validation rejects inconsistent models") {
     loaded.model->architecture_name[0] = 'x';
     CHECK(moshi::validate_execution_contract(*loaded.model) != k_none);
   }
+
+  SUBCASE("tensor storage smaller than its dtype payload is invalid") {
+    // Runtime binding reads the full dtype-sized payload; exact-shape
+    // metadata over a one-byte buffer must fail the contract.
+    for (uint32_t index = 0u; index < loaded.model->n_tensors; ++index) {
+      loaded.model->tensors[index].data_size = 1u;
+    }
+    CHECK(moshi::validate_execution_contract(*loaded.model) != k_none);
+  }
 }
 
 TEST_CASE("mimi contract validation requires every acoustic rvq codebook") {

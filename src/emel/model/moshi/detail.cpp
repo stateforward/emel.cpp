@@ -283,19 +283,45 @@ bool load_voice_hparams(const emel::model::detail::hparam_loader &loader,
 
 bool tensor_has_storage(
     const emel::model::data::tensor_record &tensor) noexcept {
-  if (tensor.data == nullptr || tensor.data_size == 0u || tensor.n_dims <= 0) {
+  if (tensor.data == nullptr || tensor.data_size == 0u || tensor.n_dims <= 0 ||
+      tensor.n_dims > static_cast<int32_t>(tensor.dims.size())) {
     return false;
   }
 
-  for (int32_t dim = 0;
-       dim < tensor.n_dims && dim < static_cast<int32_t>(tensor.dims.size());
-       ++dim) {
+  uint64_t elements = 1u;
+  for (int32_t dim = 0; dim < tensor.n_dims; ++dim) {
     if (tensor.dims[static_cast<size_t>(dim)] <= 0) {
       return false;
     }
+    elements *= static_cast<uint64_t>(tensor.dims[static_cast<size_t>(dim)]);
   }
 
-  return true;
+  // Runtime binding and kernel reads consume the full dtype payload, so the
+  // contract must require the dtype-sized byte count, not merely a non-empty
+  // buffer. Codes are the GGUF/ggml tensor type ids the loader stores.
+  constexpr int32_t k_dtype_f32 = 0;
+  constexpr int32_t k_dtype_f16 = 1;
+  constexpr int32_t k_dtype_q8_0 = 8;
+  constexpr int32_t k_dtype_bf16 = 30;
+  constexpr uint64_t k_q8_0_block_elements = 32u;
+  constexpr uint64_t k_q8_0_block_bytes = 34u;
+  uint64_t required_bytes = 0u;
+  if (tensor.type == k_dtype_f32) {
+    required_bytes = elements * sizeof(float);
+  } else if (tensor.type == k_dtype_f16 || tensor.type == k_dtype_bf16) {
+    required_bytes = elements * sizeof(uint16_t);
+  } else if (tensor.type == k_dtype_q8_0) {
+    if (elements % k_q8_0_block_elements != 0u) {
+      return false;
+    }
+    required_bytes = elements / k_q8_0_block_elements * k_q8_0_block_bytes;
+  } else {
+    // Conservative floor for dtypes the Moshi families never carry: at least
+    // one byte per element.
+    required_bytes = elements;
+  }
+
+  return tensor.data_size >= required_bytes;
 }
 
 bool assign_family_view(const emel::model::data &model_data,
