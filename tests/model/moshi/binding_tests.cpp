@@ -590,6 +590,87 @@ TEST_CASE("moshi contract validation rejects inconsistent models") {
   }
 }
 
+TEST_CASE("moshi contract rejects tensor element products that overflow") {
+  auto loaded = load_fixture_or_skip("moshi-tiny-lm.gguf");
+  if (loaded.model == nullptr) {
+    return;
+  }
+
+  // Malformed positive dimensions can wrap the unchecked element product (or
+  // the dtype byte count computed from it) to a small value: the storage
+  // probe then marked a tiny payload as fully backed and later consumers
+  // would read far past it. The checked products must reject the tensor (and
+  // with it the contract) instead.
+  auto &model = *loaded.model;
+  bool corrupted = false;
+  for (uint32_t idx = 0; idx < model.n_tensors; ++idx) {
+    auto &tensor = model.tensors[idx];
+    const std::string_view name{model.name_storage.data() + tensor.name_offset,
+                                tensor.name_length};
+    if (name != "lm.out_norm.alpha") {
+      continue;
+    }
+    SUBCASE("element product wraps") {
+      // Four 65536 extents multiply to exactly 2^64 -> zero elements.
+      tensor.n_dims = 4;
+      tensor.dims = {65536, 65536, 65536, 65536};
+    }
+    SUBCASE("dtype byte count wraps") {
+      // 2^62 elements are representable but the f32 byte count is 2^64.
+      tensor.n_dims = 2;
+      tensor.dims = {int64_t{1} << 31, int64_t{1} << 31, 1, 1};
+    }
+    corrupted = true;
+  }
+  REQUIRE(corrupted);
+  CHECK(moshi::validate_execution_contract(model) != k_none);
+}
+
+TEST_CASE("mimi contract validation requires every transformer layer") {
+  auto loaded = load_fixture_or_skip("mimi-tiny.gguf");
+  if (loaded.model == nullptr) {
+    return;
+  }
+
+  // plan_transformer consumes every configured layer's norm1/in_proj/linear1
+  // with dim-consistent shapes during codec bind, so a family-non-empty probe
+  // alone let a truncated or wrong-shaped transformer family validate here
+  // and then fail the codec planner.
+  auto &model = *loaded.model;
+  const auto corrupt_named = [&model](const std::string_view target,
+                                      const bool bump_layer_digit) {
+    for (uint32_t idx = 0; idx < model.n_tensors; ++idx) {
+      auto &tensor = model.tensors[idx];
+      const std::string_view name{
+          model.name_storage.data() + tensor.name_offset, tensor.name_length};
+      if (name != target) {
+        continue;
+      }
+      if (bump_layer_digit) {
+        // Bump the layer index digit so the tensor stays inside the family
+        // but configured layer 1 no longer resolves.
+        const size_t digit = name.find("layers.1") + 7u;
+        model.name_storage[tensor.name_offset + digit] = '9';
+      } else {
+        tensor.dims[1] += 1;
+      }
+      return true;
+    }
+    return false;
+  };
+
+  SUBCASE("missing intermediate layer") {
+    REQUIRE(corrupt_named(
+        "mimi.encoder_transformer.transformer.layers.1.norm1.weight", true));
+  }
+  SUBCASE("wrong attention projection shape") {
+    REQUIRE(corrupt_named("mimi.decoder_transformer.transformer.layers.1."
+                          "self_attn.in_projs.0.weight",
+                          false));
+  }
+  CHECK(moshi::validate_execution_contract(model) != k_none);
+}
+
 TEST_CASE("mimi contract validation requires every semantic rvq codebook") {
   auto loaded = load_fixture_or_skip("mimi-tiny.gguf");
   if (loaded.model == nullptr) {

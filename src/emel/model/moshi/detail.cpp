@@ -300,7 +300,14 @@ bool tensor_has_storage(
     if (tensor.dims[static_cast<size_t>(dim)] <= 0) {
       return false;
     }
-    elements *= static_cast<uint64_t>(tensor.dims[static_cast<size_t>(dim)]);
+    const uint64_t extent =
+        static_cast<uint64_t>(tensor.dims[static_cast<size_t>(dim)]);
+    // Malformed dimensions can wrap the element product to a small count and
+    // mark a tiny payload as fully backed; reject unrepresentable products.
+    if (extent > UINT64_MAX / elements) {
+      return false;
+    }
+    elements *= extent;
   }
 
   // Runtime binding and kernel reads consume the full dtype payload, so the
@@ -314,11 +321,18 @@ bool tensor_has_storage(
   constexpr uint64_t k_q8_0_block_bytes = 34u;
   uint64_t required_bytes = 0u;
   if (tensor.type == k_dtype_f32) {
+    if (elements > UINT64_MAX / sizeof(float)) {
+      return false;
+    }
     required_bytes = elements * sizeof(float);
   } else if (tensor.type == k_dtype_f16 || tensor.type == k_dtype_bf16) {
+    if (elements > UINT64_MAX / sizeof(uint16_t)) {
+      return false;
+    }
     required_bytes = elements * sizeof(uint16_t);
   } else if (tensor.type == k_dtype_q8_0) {
-    if (elements % k_q8_0_block_elements != 0u) {
+    if (elements % k_q8_0_block_elements != 0u ||
+        elements / k_q8_0_block_elements > UINT64_MAX / k_q8_0_block_bytes) {
       return false;
     }
     required_bytes = elements / k_q8_0_block_elements * k_q8_0_block_bytes;
@@ -587,6 +601,59 @@ emel::error::type validate_mimi_contract(const emel::model::data &model_data,
                        {codebook_dim, card});
   }
   if (!quantizer_ok) {
+    return emel::error::cast(emel::model::loader::error::model_invalid);
+  }
+
+  // plan_transformer consumes every configured layer's norm1/in_proj/linear1
+  // with dim-consistent shapes during codec bind, so the contract must probe
+  // each layer of both transformer families: a truncated or wrong-shaped
+  // family otherwise validates here and fails the codec planner later.
+  const int64_t dim = mimi.dim;
+  static constexpr const char *k_transformer_families[2] = {
+      "encoder_transformer", "decoder_transformer"};
+  bool transformers_ok = true;
+  for (size_t family = 0; transformers_ok && family < 2u; ++family) {
+    for (int32_t layer = 0;
+         transformers_ok && layer < mimi.transformer_num_layers; ++layer) {
+      char norm1[112] = {};
+      char in_proj[112] = {};
+      char linear1[112] = {};
+      const int norm1_len = std::snprintf(
+          norm1, sizeof(norm1), "mimi.%s.transformer.layers.%d.norm1.weight",
+          k_transformer_families[family], layer);
+      const int in_proj_len = std::snprintf(
+          in_proj, sizeof(in_proj),
+          "mimi.%s.transformer.layers.%d.self_attn.in_projs.0.weight",
+          k_transformer_families[family], layer);
+      const int linear1_len = std::snprintf(
+          linear1, sizeof(linear1),
+          "mimi.%s.transformer.layers.%d.linear1.weight",
+          k_transformer_families[family], layer);
+      if (norm1_len <= 0 || static_cast<size_t>(norm1_len) >= sizeof(norm1) ||
+          in_proj_len <= 0 ||
+          static_cast<size_t>(in_proj_len) >= sizeof(in_proj) ||
+          linear1_len <= 0 ||
+          static_cast<size_t>(linear1_len) >= sizeof(linear1)) {
+        transformers_ok = false;
+        break;
+      }
+      const auto *linear1_tensor = find_tensor(
+          model_data,
+          std::string_view{linear1, static_cast<size_t>(linear1_len)});
+      transformers_ok =
+          has_tensor(model_data,
+                     std::string_view{norm1,
+                                      static_cast<size_t>(norm1_len)}) &&
+          require_tensor_shape(
+              model_data,
+              std::string_view{in_proj, static_cast<size_t>(in_proj_len)},
+              {dim, 3 * dim}) &&
+          linear1_tensor != nullptr && tensor_has_storage(*linear1_tensor) &&
+          linear1_tensor->n_dims == 2 && linear1_tensor->dims[0] == dim &&
+          linear1_tensor->dims[1] > 0;
+    }
+  }
+  if (!transformers_ok) {
     return emel::error::cast(emel::model::loader::error::model_invalid);
   }
 
