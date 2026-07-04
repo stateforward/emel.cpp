@@ -404,6 +404,32 @@ TEST_CASE("mimi codec initialize rejects out-of-contract model metadata") {
     expect_bind_failed(*loaded.model);
   }
 
+  SUBCASE("tensor extents that wrap the element product") {
+    // (2^61 + 32) * 8 wraps uint64 to exactly 256 = dim * dim, so the
+    // unchecked element product accepted this metadata against the real
+    // 256-float buffer while the declared extents describe 2^64 elements.
+    for (uint32_t index = 0u; index < loaded.model->n_tensors; ++index) {
+      auto &tensor = loaded.model->tensors[index];
+      const std::string_view name{
+          loaded.model->name_storage.data() + tensor.name_offset,
+          tensor.name_length};
+      if (name == "mimi.encoder_transformer.transformer.layers.0.self_attn."
+                  "out_projs.0.weight") {
+        tensor.n_dims = 2;
+        tensor.dims = {(int64_t{1} << 61) + 32, 8, 0, 0};
+      }
+    }
+    expect_bind_failed(*loaded.model);
+  }
+
+  SUBCASE("quantizer extents past the sizing caps") {
+    // Extents this large can wrap the prepared-arena sizing products; the
+    // plan must reject them before any capacity comparison.
+    loaded.model->mimi.card = int32_t{1} << 30;
+    loaded.model->mimi.codebook_dim = int32_t{1} << 30;
+    expect_bind_failed(*loaded.model);
+  }
+
   SUBCASE("transposed conv kernel shorter than its stride") {
     // The decode overlap-add carries taps - stride samples of state; a
     // one-tap upsample kernel against stride 2 would index outside it.

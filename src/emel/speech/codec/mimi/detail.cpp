@@ -50,14 +50,22 @@ uint64_t
 tensor_elements(const emel::model::data::tensor_record &tensor) noexcept {
   // tensor_record stores four extents; a malformed rank must count as zero
   // elements (every validation caller requires a positive expected count)
-  // instead of scanning past the dims array.
+  // instead of scanning past the dims array. Non-positive extents and
+  // wrapped products also count as zero: a product that overflows to the
+  // expected element count would let tensor_has_storage accept a tiny
+  // payload the live prepare loops then read past.
   constexpr int32_t k_max_tensor_dims = 4;
   if (tensor.n_dims < 1 || tensor.n_dims > k_max_tensor_dims) {
     return 0u;
   }
   uint64_t count = 1;
   for (int32_t dim = 0; dim < tensor.n_dims; ++dim) {
-    count *= static_cast<uint64_t>(tensor.dims[static_cast<size_t>(dim)]);
+    const int64_t extent = tensor.dims[static_cast<size_t>(dim)];
+    if (extent <= 0 ||
+        static_cast<uint64_t>(extent) > UINT64_MAX / count) {
+      return 0u;
+    }
+    count *= static_cast<uint64_t>(extent);
   }
   return count;
 }
@@ -74,6 +82,7 @@ bool tensor_has_storage(
           ? sizeof(uint16_t)
           : sizeof(float);
   return tensor.data != nullptr && elements > 0u &&
+         elements <= UINT64_MAX / element_bytes &&
          tensor.data_size >= elements * element_bytes;
 }
 
@@ -1440,6 +1449,12 @@ struct codec_plan {
 
 // Resolves conv geometry given the input channel count known from the chain
 // walk: taps from dim 0, out channels from the element count.
+// Bounds every conv extent fed into the prepared-arena and workspace sizing:
+// with taps/channels below 2^16 (and the hparam extents capped the same way
+// in plan_codec), no sizing product can wrap uint64, so the capacity guards
+// compare real totals. Real Mimi extents sit far below the cap.
+inline constexpr int64_t k_max_conv_geometry_extent = int64_t{1} << 16;
+
 bool resolve_conv_geometry(const emel::model::data::tensor_record *weight,
                            const int64_t in_channels, int64_t &taps_out,
                            int64_t &out_channels_out) noexcept {
@@ -1448,17 +1463,17 @@ bool resolve_conv_geometry(const emel::model::data::tensor_record *weight,
     return false;
   }
   taps_out = weight->dims[0];
-  if (taps_out <= 0) {
+  if (taps_out <= 0 || taps_out > k_max_conv_geometry_extent) {
     return false;
   }
   const uint64_t total = tensor_elements(*weight);
   const uint64_t divisor =
       static_cast<uint64_t>(taps_out) * static_cast<uint64_t>(in_channels);
-  if (divisor == 0u || total % divisor != 0u) {
+  if (divisor == 0u || total == 0u || total % divisor != 0u) {
     return false;
   }
   out_channels_out = static_cast<int64_t>(total / divisor);
-  return out_channels_out > 0;
+  return out_channels_out > 0 && out_channels_out <= k_max_conv_geometry_extent;
 }
 
 uint64_t conv_prepared_floats(const int64_t taps, const int64_t in_channels,
@@ -1648,6 +1663,17 @@ bool plan_codec(const emel::model::data &model_data,
       mimi.frame_rate <= 0.0f || mimi.codebook_dim <= 0 || mimi.card <= 0) {
     return false;
   }
+  // Bounds every hparam extent fed into the prepared/state/workspace sizing:
+  // with dim/codebook_dim/card below 2^16 and n_q within the two fixed RVQ
+  // splits, no sizing product can wrap uint64, so guard_arena_capacity_valid
+  // compares real totals instead of a wrapped one that would let the live
+  // bind walk overrun its cursor. Real Mimi hparams sit far below the caps.
+  if (mimi.dim > k_max_conv_geometry_extent ||
+      mimi.codebook_dim > k_max_conv_geometry_extent ||
+      mimi.card > k_max_conv_geometry_extent ||
+      mimi.n_q > 2 * k_max_quantizer_levels) {
+    return false;
+  }
   // The int32_t cast below is undefined for NaN or out-of-range ratios, so a
   // non-finite frame_rate (rejected above) or a tiny positive one must fail
   // here instead of casting; k_max_frame_samples bounds every downstream
@@ -1750,6 +1776,7 @@ bool plan_codec(const emel::model::data &model_data,
   // depthwise: stored [taps, 1, channels] with elements == taps * channels
   if (plan_out.upsample.weight == nullptr ||
       plan_out.upsample.weight->dims[0] <= 0 ||
+      plan_out.upsample.weight->dims[0] > k_max_conv_geometry_extent ||
       tensor_elements(*plan_out.upsample.weight) !=
           static_cast<uint64_t>(plan_out.upsample.weight->dims[0]) *
               static_cast<uint64_t>(decode_channels)) {
