@@ -479,6 +479,11 @@ struct model {
 
       , sml::state<ready> <= sml::state<ready> +
                sml::event<::emel::kernel::aarch64::event::dispatch_op_mul_mat>
+                 [ guard::simd_op_mul_mat_f16_vector{} ]
+                 / action::exec_simd_op_mul_mat_f16_vector
+
+      , sml::state<ready> <= sml::state<ready> +
+               sml::event<::emel::kernel::aarch64::event::dispatch_op_mul_mat>
                  [ guard::valid_op_mul_mat_f16{} ]
                  / action::exec_scalar_op_mul_mat_f16
 
@@ -741,6 +746,11 @@ struct model {
                sml::event<::emel::kernel::aarch64::event::dispatch_op_clamp>
                  [ guard::invalid_op_clamp{} ]
                  / action::reject_invalid_op_clamp
+
+      , sml::state<ready> <= sml::state<ready> +
+               sml::event<::emel::kernel::aarch64::event::dispatch_op_conv_transpose_1d>
+                 [ guard::simd_op_conv_transpose_1d_f32{} ]
+                 / action::exec_simd_op_conv_transpose_1d_f32
 
       , sml::state<ready> <= sml::state<ready> +
                sml::event<::emel::kernel::aarch64::event::dispatch_op_conv_transpose_1d>
@@ -1309,6 +1319,14 @@ struct sm : public emel::sm<model, action::context> {
 
   uint64_t optimized_q8_0_vector_dispatch_count() const noexcept {
     return this->context_.optimized_q8_0_vector_dispatch_count;
+  }
+
+  uint64_t optimized_f16_vector_dispatch_count() const noexcept {
+    return this->context_.optimized_f16_vector_dispatch_count;
+  }
+
+  uint64_t optimized_conv_transpose_f32_dispatch_count() const noexcept {
+    return this->context_.optimized_conv_transpose_f32_dispatch_count;
   }
 
   uint64_t optimized_q8_0_packed_dispatch_count() const noexcept {

@@ -14,6 +14,7 @@
 #include "emel/kernel/aarch64/detail.hpp"
 #include "emel/kernel/aarch64/events.hpp"
 #include "emel/kernel/aarch64/sm.hpp"
+#include "emel/kernel/any.hpp"
 #include "test_helpers.hpp"
 
 namespace {
@@ -1643,6 +1644,271 @@ TEST_CASE("kernel_aarch64_sm_reports_q8_0_vectorized_dispatch_at_kernel_seam") {
   CHECK(machine.optimized_q8_0_vector_dispatch_count() == 0u);
   CHECK(machine.shared_q8_0_dispatch_count() == 1u);
 #endif
+}
+
+TEST_CASE("kernel_aarch64_sm_reports_f16_vectorized_dispatch_at_kernel_seam") {
+  // k covers two 32-wide fp16 steps plus a 6-element tail; n > 1 covers the
+  // column loop. Integer-valued inputs keep every fp16 product and partial
+  // sum exactly representable, so the fp16-lane route and the shared
+  // double-accumulation route must agree bit-for-bit.
+  constexpr uint64_t k_depth = 70;
+  constexpr uint64_t k_rows = 3;
+  constexpr uint64_t k_cols = 2;
+  std::vector<float> a_f32(k_depth * k_rows);
+  std::vector<float> b_f32(k_depth * k_cols);
+  for (size_t idx = 0; idx < a_f32.size(); ++idx) {
+    a_f32[idx] = static_cast<float>(static_cast<int32_t>(idx % 7u) - 3);
+  }
+  for (size_t idx = 0; idx < b_f32.size(); ++idx) {
+    b_f32[idx] = static_cast<float>(static_cast<int32_t>(idx % 5u) - 2);
+  }
+  const auto a_f16 = to_fp16_storage(a_f32);
+  const auto b_f16 = to_fp16_storage(b_f32);
+
+  std::vector<float> out(k_rows * k_cols, 0.0f);
+  const emel::kernel::event::op_mul_mat ev{
+      .src0 = make_src(a_f16.data(), dtype::f16, k_depth, k_rows),
+      .src1 = make_src(b_f16.data(), dtype::f16, k_depth, k_cols),
+      .dst = make_dst(out.data(), dtype::f32, k_rows, k_cols),
+  };
+
+  aarch64_sm machine{};
+  allocation_scope allocations{};
+  CHECK(machine.process_event(ev));
+  CHECK(allocations.allocations() == 0u);
+
+#if defined(__aarch64__) && defined(__ARM_NEON) &&                             \
+    defined(__ARM_FEATURE_FP16_VECTOR_ARITHMETIC) &&                           \
+    !defined(__ARM_FEATURE_SVE)
+  CHECK(machine.optimized_f16_vector_dispatch_count() == 1u);
+#else
+  CHECK(machine.optimized_f16_vector_dispatch_count() == 0u);
+#endif
+
+  // The shared-route reference is driven through the machine as well: a
+  // no-NEON context forces the scalar f16 row of the same transition table.
+  std::vector<float> expected(out.size(), 0.0f);
+  const emel::kernel::event::op_mul_mat shared_ev{
+      .src0 = make_src(a_f16.data(), dtype::f16, k_depth, k_rows),
+      .src1 = make_src(b_f16.data(), dtype::f16, k_depth, k_cols),
+      .dst = make_dst(expected.data(), dtype::f32, k_rows, k_cols),
+  };
+  aarch64_sm shared_machine{
+      emel::kernel::aarch64::action::context{false, {}, 0}};
+  CHECK(shared_machine.process_event(shared_ev));
+  CHECK(shared_machine.optimized_f16_vector_dispatch_count() == 0u);
+  for (size_t idx = 0; idx < out.size(); ++idx) {
+    CHECK(out[idx] == expected[idx]);
+  }
+
+  emel::kernel::any aarch64_any{emel::kernel::kernel_kind::aarch64};
+  CHECK(aarch64_any.process_event(ev));
+#if defined(__aarch64__) && defined(__ARM_NEON) &&                             \
+    defined(__ARM_FEATURE_FP16_VECTOR_ARITHMETIC) &&                           \
+    !defined(__ARM_FEATURE_SVE)
+  CHECK(aarch64_any.optimized_f16_vector_dispatch_count() == 1u);
+#else
+  CHECK(aarch64_any.optimized_f16_vector_dispatch_count() == 0u);
+#endif
+
+  emel::kernel::any x86_any{emel::kernel::kernel_kind::x86_64};
+  CHECK(x86_any.process_event(ev));
+  CHECK(x86_any.optimized_f16_vector_dispatch_count() == 0u);
+}
+
+TEST_CASE("kernel_aarch64_f16_vector_route_is_explicit_and_numeric_match") {
+  // Strictly positive operands keep the dot products away from zero so the
+  // fp16-lane accumulation tolerance below is meaningful as a relative bound.
+  constexpr uint64_t k_depth = 100;
+  constexpr uint64_t k_rows = 4;
+  constexpr uint64_t k_cols = 3;
+  std::vector<float> a_f32(k_depth * k_rows);
+  std::vector<float> b_f32(k_depth * k_cols);
+  for (size_t idx = 0; idx < a_f32.size(); ++idx) {
+    a_f32[idx] = 0.1f + static_cast<float>(idx % 17u) * 0.045f;
+  }
+  for (size_t idx = 0; idx < b_f32.size(); ++idx) {
+    b_f32[idx] = 0.05f + static_cast<float>(idx % 13u) * 0.05f;
+  }
+  const auto a_f16 = to_fp16_storage(a_f32);
+  const auto b_f16 = to_fp16_storage(b_f32);
+
+  std::vector<float> out(k_rows * k_cols, 0.0f);
+  const emel::kernel::event::op_mul_mat ev{
+      .src0 = make_src(a_f16.data(), dtype::f16, k_depth, k_rows),
+      .src1 = make_src(b_f16.data(), dtype::f16, k_depth, k_cols),
+      .dst = make_dst(out.data(), dtype::f32, k_rows, k_cols),
+  };
+
+  emel::kernel::aarch64::event::dispatch_ctx dispatch_ctx{};
+  const emel::kernel::aarch64::event::dispatch_op_mul_mat dispatch_ev{
+      ev, dispatch_ctx};
+  const emel::kernel::aarch64::action::context neon_ctx{true, {}, 0};
+  const emel::kernel::aarch64::action::context no_neon_ctx{false, {}, 0};
+
+  // The NEON f16 guard and the shared f16 guard are mutually exclusive by
+  // construction: exactly one of them accepts any valid f16 request.
+#if defined(__aarch64__) && defined(__ARM_NEON) &&                             \
+    defined(__ARM_FEATURE_FP16_VECTOR_ARITHMETIC) &&                           \
+    !defined(__ARM_FEATURE_SVE)
+  CHECK(emel::kernel::aarch64::guard::simd_op_mul_mat_f16_vector{}(dispatch_ev,
+                                                                   neon_ctx));
+  CHECK_FALSE(emel::kernel::aarch64::guard::valid_op_mul_mat_f16{}(dispatch_ev,
+                                                                   neon_ctx));
+#else
+  CHECK_FALSE(emel::kernel::aarch64::guard::simd_op_mul_mat_f16_vector{}(
+      dispatch_ev, neon_ctx));
+  CHECK(emel::kernel::aarch64::guard::valid_op_mul_mat_f16{}(dispatch_ev,
+                                                             neon_ctx));
+#endif
+  CHECK_FALSE(emel::kernel::aarch64::guard::simd_op_mul_mat_f16_vector{}(
+      dispatch_ev, no_neon_ctx));
+  CHECK(emel::kernel::aarch64::guard::valid_op_mul_mat_f16{}(dispatch_ev,
+                                                             no_neon_ctx));
+
+  aarch64_sm machine{};
+  CHECK(machine.process_event(ev));
+
+  std::vector<float> shared_out(out.size(), 0.0f);
+  const emel::kernel::event::op_mul_mat shared_ev{
+      .src0 = make_src(a_f16.data(), dtype::f16, k_depth, k_rows),
+      .src1 = make_src(b_f16.data(), dtype::f16, k_depth, k_cols),
+      .dst = make_dst(shared_out.data(), dtype::f32, k_rows, k_cols),
+  };
+  aarch64_sm shared_machine{
+      emel::kernel::aarch64::action::context{false, {}, 0}};
+  CHECK(shared_machine.process_event(shared_ev));
+  CHECK(shared_machine.optimized_f16_vector_dispatch_count() == 0u);
+  for (size_t idx = 0; idx < out.size(); ++idx) {
+    CHECK(out[idx] == doctest::Approx(shared_out[idx]).epsilon(0.01));
+  }
+}
+
+TEST_CASE("kernel_aarch64_f16_mul_mat_without_neon_takes_shared_route") {
+  constexpr uint64_t k_depth = 40;
+  constexpr uint64_t k_rows = 2;
+  std::vector<float> a_f32(k_depth * k_rows);
+  std::vector<float> b_f32(k_depth);
+  for (size_t idx = 0; idx < a_f32.size(); ++idx) {
+    a_f32[idx] = 0.2f + static_cast<float>(idx % 11u) * 0.06f;
+  }
+  for (size_t idx = 0; idx < b_f32.size(); ++idx) {
+    b_f32[idx] = 0.1f + static_cast<float>(idx % 9u) * 0.08f;
+  }
+  const auto a_f16 = to_fp16_storage(a_f32);
+  const auto b_f16 = to_fp16_storage(b_f32);
+
+  std::vector<float> out(k_rows, 0.0f);
+  const emel::kernel::event::op_mul_mat ev{
+      .src0 = make_src(a_f16.data(), dtype::f16, k_depth, k_rows),
+      .src1 = make_src(b_f16.data(), dtype::f16, k_depth, 1u),
+      .dst = make_dst(out.data(), dtype::f32, k_rows, 1u),
+  };
+
+  aarch64_sm machine{emel::kernel::aarch64::action::context{false, {}, 0}};
+  CHECK(machine.process_event(ev));
+  CHECK(machine.optimized_f16_vector_dispatch_count() == 0u);
+
+  // With NEON unavailable the dispatch runs the shared scalar row; a second
+  // no-NEON machine dispatch must reproduce it exactly (identical route).
+  std::vector<float> expected(out.size(), 0.0f);
+  const emel::kernel::event::op_mul_mat shared_ev{
+      .src0 = make_src(a_f16.data(), dtype::f16, k_depth, k_rows),
+      .src1 = make_src(b_f16.data(), dtype::f16, k_depth, 1u),
+      .dst = make_dst(expected.data(), dtype::f32, k_rows, 1u),
+  };
+  aarch64_sm shared_machine{
+      emel::kernel::aarch64::action::context{false, {}, 0}};
+  CHECK(shared_machine.process_event(shared_ev));
+  CHECK(shared_machine.optimized_f16_vector_dispatch_count() == 0u);
+  for (size_t idx = 0; idx < out.size(); ++idx) {
+    CHECK(out[idx] == expected[idx]);
+  }
+}
+
+TEST_CASE("kernel_aarch64_conv_transpose_1d_f32_route_is_explicit_and_bit_"
+          "identical") {
+  // taps=6 exercises the 4-wide NEON run plus a 2-tap tail; the NEON variant
+  // contract is bit-identical output to the shared scalar route (same
+  // per-element accumulation order and rounding sequence).
+  constexpr int64_t k_taps = 6;
+  constexpr int64_t k_out_channels = 3;
+  constexpr int64_t k_in_channels = 2;
+  constexpr int64_t k_length = 5;
+  constexpr int32_t k_stride = 2;
+  constexpr int64_t k_out_length = (k_length - 1) * k_stride + k_taps;
+
+  std::vector<float> weights(
+      static_cast<size_t>(k_taps * k_out_channels * k_in_channels));
+  std::vector<float> input(static_cast<size_t>(k_length * k_in_channels));
+  for (size_t idx = 0; idx < weights.size(); ++idx) {
+    weights[idx] = 0.05f + static_cast<float>(idx % 19u) * 0.03f -
+                   static_cast<float>(idx % 5u) * 0.11f;
+  }
+  for (size_t idx = 0; idx < input.size(); ++idx) {
+    input[idx] = -0.4f + static_cast<float>(idx % 13u) * 0.07f;
+  }
+
+  const auto set_conv_params =
+      [](emel::kernel::event::op_conv_transpose_1d &ev) {
+        const int32_t params[3] = {k_stride, 0, 1};
+        std::memcpy(ev.op_params.data(), params, sizeof(params));
+        ev.op_params_size = sizeof(params);
+      };
+
+  std::vector<float> neon_out(
+      static_cast<size_t>(k_out_length * k_out_channels), -1.0f);
+  emel::kernel::event::op_conv_transpose_1d ev{
+      .src0 = make_src(weights.data(), dtype::f32, k_taps, k_out_channels,
+                       k_in_channels),
+      .src1 = make_src(input.data(), dtype::f32, k_length, k_in_channels),
+      .dst =
+          make_dst(neon_out.data(), dtype::f32, k_out_length, k_out_channels),
+  };
+  set_conv_params(ev);
+
+  aarch64_sm machine{};
+  allocation_scope allocations{};
+  CHECK(machine.process_event(ev));
+  CHECK(allocations.allocations() == 0u);
+#if defined(__aarch64__) || defined(__ARM_NEON)
+  CHECK(machine.optimized_conv_transpose_f32_dispatch_count() == 1u);
+#else
+  CHECK(machine.optimized_conv_transpose_f32_dispatch_count() == 0u);
+#endif
+
+  std::vector<float> scalar_out(neon_out.size(), -1.0f);
+  emel::kernel::event::op_conv_transpose_1d scalar_ev{
+      .src0 = make_src(weights.data(), dtype::f32, k_taps, k_out_channels,
+                       k_in_channels),
+      .src1 = make_src(input.data(), dtype::f32, k_length, k_in_channels),
+      .dst =
+          make_dst(scalar_out.data(), dtype::f32, k_out_length, k_out_channels),
+  };
+  set_conv_params(scalar_ev);
+
+  aarch64_sm no_neon{emel::kernel::aarch64::action::context{false, {}, 0}};
+  CHECK(no_neon.process_event(scalar_ev));
+  CHECK(no_neon.optimized_conv_transpose_f32_dispatch_count() == 0u);
+
+  for (size_t idx = 0; idx < neon_out.size(); ++idx) {
+    CHECK(neon_out[idx] == scalar_out[idx]);
+  }
+
+  // The f16-weight variant keeps its own scalar route: the f32 NEON guard
+  // must not claim it.
+  const auto weights_f16 = to_fp16_storage(weights);
+  std::vector<float> f16_out(neon_out.size(), -1.0f);
+  emel::kernel::event::op_conv_transpose_1d f16_ev{
+      .src0 = make_src(weights_f16.data(), dtype::f16, k_taps, k_out_channels,
+                       k_in_channels),
+      .src1 = make_src(input.data(), dtype::f32, k_length, k_in_channels),
+      .dst = make_dst(f16_out.data(), dtype::f32, k_out_length, k_out_channels),
+  };
+  set_conv_params(f16_ev);
+  aarch64_sm f16_machine{};
+  CHECK(f16_machine.process_event(f16_ev));
+  CHECK(f16_machine.optimized_conv_transpose_f32_dispatch_count() == 0u);
 }
 
 TEST_CASE("kernel_aarch64_q4_k_uses_neon_dispatch_when_dotprod_is_available") {
