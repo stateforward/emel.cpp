@@ -100,6 +100,10 @@ record runner=speech_codec_mimi kind=script path=scripts/bench_mimi_compare.sh r
 record runner=speech_codec_mimi kind=script path=tools/bench/moshi_gguf_convert.py reason=emel_lane_converter
 record runner=speech_codec_mimi kind=config path=tools/bench/moshi_reference_ref.txt reason=reference_pin
 record runner=speech_codec_mimi kind=config path=tools/bench/reference_backends/moshi_cpp_mimi.json reason=reference_backend_descriptor
+record runner=speech_codec_mimi kind=script path=scripts/setup_moshi_cpp_reference.sh reason=reference_setup
+record runner=speech_codec_mimi_mlx kind=script path=tools/bench/mimi_compare.py reason=operator_compare
+record runner=speech_codec_mimi_mlx kind=script path=scripts/bench_mimi_compare.sh reason=compare_wrapper
+record runner=speech_codec_mimi_mlx kind=script path=scripts/setup_personaplex_mlx_reference.sh reason=reference_setup
 record runner=speech_codec_mimi_mlx kind=script path=tools/bench/speech/personaplex_mlx_mimi_driver.py reason=reference_lane_driver
 record runner=speech_codec_mimi_mlx kind=config path=tools/bench/personaplex_mlx_ref.txt reason=reference_pin
 record runner=speech_codec_mimi_mlx kind=config path=tools/bench/reference_backends/personaplex_mlx_mimi.json reason=reference_backend_descriptor
