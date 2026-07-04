@@ -1808,6 +1808,23 @@ bool plan_codec(const emel::model::data &model_data,
     return false;
   }
 
+  // The q8 matvec kernels require every projection row's contraction width
+  // to be block-aligned (k % QK8_0 == 0); an aggregate-aligned but
+  // row-misaligned q8 projection would bind here and then fail inside the
+  // compute loops, which have no error channel back to the frame publisher.
+  constexpr int64_t k_q8_block =
+      static_cast<int64_t>(emel::kernel::detail::quant::QK8_0);
+  if (plan_out.proj_q8 &&
+      (mimi.dim % k_q8_block != 0 ||
+       plan_out.encoder_transformer.mlp_dim % k_q8_block != 0 ||
+       plan_out.decoder_transformer.mlp_dim % k_q8_block != 0)) {
+    return false;
+  }
+  if (plan_out.rvq_q8 &&
+      (mimi.dim % k_q8_block != 0 || mimi.codebook_dim % k_q8_block != 0)) {
+    return false;
+  }
+
   plan_out.valid = true;
   return true;
 }

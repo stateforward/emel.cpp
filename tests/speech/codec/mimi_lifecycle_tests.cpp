@@ -422,6 +422,28 @@ TEST_CASE("mimi codec initialize rejects out-of-contract model metadata") {
     expect_bind_failed(*loaded.model);
   }
 
+  SUBCASE("q8 projections with a block-misaligned contraction width") {
+    // Aggregate element counts stay 32-aligned (16 x 48 etc.), but the row
+    // width k = dim = 16 is not: the q8 matvecs would reject at compute
+    // time with no error channel, so the plan must reject the q8 class.
+    for (uint32_t index = 0u; index < loaded.model->n_tensors; ++index) {
+      auto &tensor = loaded.model->tensors[index];
+      const std::string_view name{
+          loaded.model->name_storage.data() + tensor.name_offset,
+          tensor.name_length};
+      const bool projection =
+          name.find("self_attn.in_projs.0.weight") != std::string_view::npos ||
+          name.find("self_attn.out_projs.0.weight") != std::string_view::npos ||
+          name.find("linear1.weight") != std::string_view::npos ||
+          name.find("linear2.weight") != std::string_view::npos ||
+          name.find("_proj.weight") != std::string_view::npos;
+      if (projection && name.starts_with("mimi.")) {
+        tensor.type = 8;  // q8_0
+      }
+    }
+    expect_bind_failed(*loaded.model);
+  }
+
   SUBCASE("quantizer extents past the sizing caps") {
     // Extents this large can wrap the prepared-arena sizing products; the
     // plan must reject them before any capacity comparison.
