@@ -1031,6 +1031,18 @@ run_benchmark_gates() {
           continue
         fi
         ;;
+      speech_codec_mimi)
+        # The generic bench path runs codec_mimi_bench with placeholder
+        # reference rows only; the token-exact Moshi comparison lives in the
+        # compare script, so Mimi runtime/converter changes must route there.
+        if run_step_allow_fail "bench_snapshot_${suite}" \
+          "$ROOT_DIR/scripts/bench_mimi_compare.sh" --reference=moshi_cpp; then
+          continue
+        else
+          status=$?
+          continue
+        fi
+        ;;
       speech_codec_mimi_mlx)
         if run_step_allow_fail "bench_snapshot_${suite}" \
           "$ROOT_DIR/scripts/bench_mimi_compare.sh" --reference=personaplex-mlx; then
