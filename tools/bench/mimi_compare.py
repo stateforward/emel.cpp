@@ -89,6 +89,9 @@ def main() -> int:
                       help="also gate the first N RVQ streams separately; "
                       "early residual layers are numerically stable across "
                       "float implementations while deep-layer codes cascade")
+  parser.add_argument("--min-decode-psnr-db", type=float, default=0.0,
+                      help="fail when --compare-decode measures a decode "
+                           "PSNR below this floor (0 disables the gate)")
   parser.add_argument("--min-prefix-match", type=float, default=0.0,
                       help="minimum match fraction over --prefix-streams")
   parser.add_argument("--timing-audio", default=None,
@@ -243,6 +246,15 @@ def main() -> int:
         f"prefix match {report['prefix_match_fraction']:.3f} over first "
         f"{args.prefix_streams} streams below threshold "
         f"{args.min_prefix_match}")
+  if args.compare_decode and args.min_decode_psnr_db > 0.0:
+    # A decoder returning silence or wrong PCM with the right length would
+    # otherwise pass on the encode gates alone.
+    psnr = report.get("decode_psnr_db")
+    if psnr is None or psnr < args.min_decode_psnr_db:
+      passed = False
+      report["reason"] = (
+          f"decode psnr {psnr} dB below threshold "
+          f"{args.min_decode_psnr_db} dB")
   report["status"] = "pass" if passed else "fail"
 
   output = json.dumps(report, indent=2)

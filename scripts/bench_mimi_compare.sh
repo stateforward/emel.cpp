@@ -162,6 +162,7 @@ PY
     --prefix-streams "${EMEL_MIMI_MLX_PREFIX_STREAMS:-4}" \
     --min-prefix-match "${EMEL_MIMI_MLX_MIN_PREFIX_MATCH:-0.90}" \
     --min-code-match "${EMEL_MIMI_MLX_MIN_CODE_MATCH:-0.40}" \
+    --min-decode-psnr-db "${EMEL_MIMI_MLX_MIN_DECODE_PSNR_DB:-10}" \
     --timing-audio "$TIMING_AUDIO" \
     --reference-label "personaplex-mlx" \
     --json-out "$REPORT"
@@ -174,6 +175,7 @@ else
     --reference-model "$REFERENCE_MODEL" \
     --audio "$AUDIO" \
     --compare-decode \
+    --min-decode-psnr-db "${EMEL_MIMI_MIN_DECODE_PSNR_DB:-30}" \
     --require-token-exact \
     --json-out "$REPORT"
 fi
