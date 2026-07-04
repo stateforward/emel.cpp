@@ -88,6 +88,24 @@ MIMI_PRESET = {
 # stores n_q + 1 delay slots in a fixed array, so n_q must stay below it.
 MAX_DELAY_SLOTS = 64
 
+# Mirrors the codec's fixed array caps (k_max_transformer_layers and
+# k_max_quantizer_levels in src/emel/speech/codec/mimi/detail.hpp).
+MIMI_MAX_TRANSFORMER_LAYERS = 16
+MIMI_MAX_RVQ_SPLIT_LEVELS = 32
+
+# Fixed mimi_v0_1 SEANet module topology (module index, kind, stride),
+# mirroring k_encoder_topology/k_decoder_topology in the codec.
+MIMI_SEANET_ENCODER = (
+    (0, "conv", 1), (1, "resnet", 1), (3, "conv", 4), (4, "resnet", 1),
+    (6, "conv", 5), (7, "resnet", 1), (9, "conv", 6), (10, "resnet", 1),
+    (12, "conv", 8), (14, "conv", 1),
+)
+MIMI_SEANET_DECODER = (
+    (0, "conv", 1), (2, "convtr", 8), (3, "resnet", 1), (5, "convtr", 6),
+    (6, "resnet", 1), (8, "convtr", 5), (9, "resnet", 1), (11, "convtr", 4),
+    (12, "resnet", 1), (14, "conv", 1),
+)
+
 SUPPORTED_LM_VALUES = {
     "gating": "silu",
     "norm": "rms_norm_f32",
@@ -439,9 +457,10 @@ def cross_check_lm(infos: list[TensorInfo], config: dict) -> None:
 
 
 def check_mimi_hparams(n_q: int, preset: dict) -> None:
-  # Mirrors the C++ load_mimi_hparams gate (src/emel/model/moshi/detail.cpp)
-  # so a preset or config override the maintained loader rejects fails
-  # conversion instead of publishing an unusable enriched artifact.
+  # Mirrors the C++ load_mimi_hparams gate and the runtime contract caps
+  # (src/emel/model/moshi/detail.cpp) so a preset or config override the
+  # maintained loader rejects fails conversion instead of publishing an
+  # unusable enriched artifact.
   for key in ("sample_rate", "card", "dim", "semantic_n_q",
               "transformer_num_layers", "transformer_num_heads",
               "transformer_context", "transformer_max_period"):
@@ -450,6 +469,20 @@ def check_mimi_hparams(n_q: int, preset: dict) -> None:
           f"mimi preset {key} must be positive, got {preset[key]}")
   if n_q <= 0:
     raise ValueError(f"mimi n_q must be positive, got {n_q}")
+  # The codec stores transformer layers in fixed 16-entry arrays and each RVQ
+  # split in fixed 32-level arrays; larger declared counts cannot initialize.
+  if preset["transformer_num_layers"] > MIMI_MAX_TRANSFORMER_LAYERS:
+    raise ValueError(
+        f"mimi preset transformer_num_layers={preset['transformer_num_layers']} "
+        f"exceeds the codec cap of {MIMI_MAX_TRANSFORMER_LAYERS}")
+  if preset["semantic_n_q"] > MIMI_MAX_RVQ_SPLIT_LEVELS:
+    raise ValueError(
+        f"mimi preset semantic_n_q={preset['semantic_n_q']} exceeds the "
+        f"per-split codec cap of {MIMI_MAX_RVQ_SPLIT_LEVELS}")
+  if n_q - preset["semantic_n_q"] > MIMI_MAX_RVQ_SPLIT_LEVELS:
+    raise ValueError(
+        f"mimi acoustic level count {n_q - preset['semantic_n_q']} exceeds "
+        f"the per-split codec cap of {MIMI_MAX_RVQ_SPLIT_LEVELS}")
   frame_rate = float(preset["frame_rate"])
   if not math.isfinite(frame_rate) or frame_rate <= 0.0:
     raise ValueError(
@@ -467,6 +500,50 @@ def check_mimi_hparams(n_q: int, preset: dict) -> None:
         f"num_heads={heads} (the codec rotary kernel halves head_dim)")
 
 
+def resolve_conv_geometry(info: TensorInfo, in_channels: int) -> tuple[int, int]:
+  # Mirrors the codec's resolve_conv_geometry: taps from dim 0, out channels
+  # from the element count against the running channel chain.
+  if not 1 <= len(info.dims) <= 3:
+    raise ValueError(f"conv tensor {info.name!r} has rank {len(info.dims)}")
+  taps = info.dims[0]
+  total = math.prod(info.dims)
+  divisor = taps * in_channels
+  if taps <= 0 or divisor <= 0 or total % divisor != 0 or total // divisor <= 0:
+    raise ValueError(
+        f"conv tensor {info.name!r} dims {info.dims} do not resolve against "
+        f"{in_channels} input channels")
+  return taps, total // divisor
+
+
+def check_seanet_geometry(infos: list[TensorInfo], family: str,
+                          topology: tuple, in_channels: int) -> int:
+  # Mirrors plan_seanet's channel-chain walk: every module's weight must
+  # resolve against the running channel count, resnet blocks must return to
+  # their input width through a k1 conv, and strided kernels must span their
+  # stride, or the codec bind rejects the converted artifact.
+  channels = in_channels
+  for index, kind, stride in topology:
+    base = f"mimi.{family}.model.{index}."
+    if kind == "resnet":
+      taps1, half = resolve_conv_geometry(
+          find_info(infos, base + "block.1.conv.conv.weight"), channels)
+      taps3, out = resolve_conv_geometry(
+          find_info(infos, base + "block.3.conv.conv.weight"), half)
+      if taps3 != 1 or out != channels:
+        raise ValueError(
+            f"resnet block {base!r} does not return to {channels} channels "
+            f"through a k1 conv (taps={taps3}, out={out})")
+      continue
+    name = base + ("convtr.convtr.weight" if kind == "convtr"
+                   else "conv.conv.weight")
+    taps, out = resolve_conv_geometry(find_info(infos, name), channels)
+    if taps < stride:
+      raise ValueError(
+          f"conv tensor {name!r} has {taps} taps, below its stride {stride}")
+    channels = out
+  return channels
+
+
 def cross_check_mimi(infos: list[TensorInfo], n_q: int, preset: dict) -> dict:
   check_mimi_hparams(n_q, preset)
   first = find_info(
@@ -475,6 +552,10 @@ def cross_check_mimi(infos: list[TensorInfo], n_q: int, preset: dict) -> dict:
     raise ValueError(
         f"semantic codebook dims {first.dims} do not match preset card "
         f"{preset['card']}")
+  if first.dims[0] <= 0:
+    raise ValueError(
+        f"semantic codebook dims {first.dims} derive a non-positive "
+        "codebook_dim; the maintained loader requires it positive")
   # The C++ contract and bind consume every semantic level 0..semantic_n_q-1
   # with the full codebook shape, mirroring the acoustic loop below.
   for level in range(preset["semantic_n_q"]):
@@ -541,64 +622,78 @@ def cross_check_mimi(infos: list[TensorInfo], n_q: int, preset: dict) -> dict:
                    "self_attn.out_projs.0.weight", "linear1.weight",
                    "linear2.weight"):
         info = find_info(infos, base + proj)
-        if (info.dtype == GGML_DTYPE_Q8_0) != proj_q8:
+        if proj_q8:
+          if info.dtype != GGML_DTYPE_Q8_0:
+            raise ValueError(
+                f"tensor {info.name!r} has dtype {info.dtype} but the "
+                "transformer projection class is q8_0; the runtime bind "
+                "requires one uniform class")
+        elif info.dtype not in (GGML_DTYPE_F32, GGML_DTYPE_F16):
           raise ValueError(
-              f"tensor {info.name!r} has dtype {info.dtype} but the "
-              f"transformer projection class is {'q8_0' if proj_q8 else 'float'}; "
-              "the runtime bind requires one uniform class")
+              f"tensor {info.name!r} has dtype {info.dtype}; the runtime "
+              "bind consumes only f32/f16 (or q8_0) projections")
   rvq_q8 = (find_info(infos, "mimi.quantizer.rvq_first.input_proj.weight")
             .dtype == GGML_DTYPE_Q8_0)
   for split in ("rvq_first", "rvq_rest"):
     for proj in ("input_proj", "output_proj"):
       info = find_info(infos, f"mimi.quantizer.{split}.{proj}.weight")
-      if (info.dtype == GGML_DTYPE_Q8_0) != rvq_q8:
+      if rvq_q8:
+        if info.dtype != GGML_DTYPE_Q8_0:
+          raise ValueError(
+              f"tensor {info.name!r} has dtype {info.dtype} but the RVQ "
+              "projection class is q8_0; the runtime bind requires one "
+              "uniform class")
+      elif info.dtype not in (GGML_DTYPE_F32, GGML_DTYPE_F16):
         raise ValueError(
-            f"tensor {info.name!r} has dtype {info.dtype} but the RVQ "
-            f"projection class is {'q8_0' if rvq_q8 else 'float'}; the "
-            "runtime bind requires one uniform class")
-  # The codec planner walks the fixed mimi_v0_1 SEANet module topology by
-  # exact tensor name (plan_seanet plus the downsample/upsample bridge
-  # convs); require every fixed-topology weight so a raw GGUF missing one
-  # fails conversion instead of failing codec initialization after
-  # publishing.
-  encoder_seanet = (
-      "model.0.conv.conv.weight",
-      "model.1.block.1.conv.conv.weight",
-      "model.1.block.3.conv.conv.weight",
-      "model.3.conv.conv.weight",
-      "model.4.block.1.conv.conv.weight",
-      "model.4.block.3.conv.conv.weight",
-      "model.6.conv.conv.weight",
-      "model.7.block.1.conv.conv.weight",
-      "model.7.block.3.conv.conv.weight",
-      "model.9.conv.conv.weight",
-      "model.10.block.1.conv.conv.weight",
-      "model.10.block.3.conv.conv.weight",
-      "model.12.conv.conv.weight",
-      "model.14.conv.conv.weight",
-  )
-  decoder_seanet = (
-      "model.0.conv.conv.weight",
-      "model.2.convtr.convtr.weight",
-      "model.3.block.1.conv.conv.weight",
-      "model.3.block.3.conv.conv.weight",
-      "model.5.convtr.convtr.weight",
-      "model.6.block.1.conv.conv.weight",
-      "model.6.block.3.conv.conv.weight",
-      "model.8.convtr.convtr.weight",
-      "model.9.block.1.conv.conv.weight",
-      "model.9.block.3.conv.conv.weight",
-      "model.11.convtr.convtr.weight",
-      "model.12.block.1.conv.conv.weight",
-      "model.12.block.3.conv.conv.weight",
-      "model.14.conv.conv.weight",
-  )
-  for suffix in encoder_seanet:
-    find_info(infos, "mimi.encoder." + suffix)
-  for suffix in decoder_seanet:
-    find_info(infos, "mimi.decoder." + suffix)
-  find_info(infos, "mimi.downsample.conv.conv.conv.weight")
-  find_info(infos, "mimi.upsample.convtr.convtr.convtr.weight")
+            f"tensor {info.name!r} has dtype {info.dtype}; the runtime bind "
+            "consumes only f32/f16 (or q8_0) projections")
+  # The codec planner walks the fixed mimi_v0_1 SEANet module topology and
+  # resolves every weight against the running channel/stride chain
+  # (plan_seanet / resolve_conv_geometry / bind_conv); mirror the geometry so
+  # a raw GGUF with every listed name but a malformed shape fails conversion
+  # instead of failing codec initialization. plan_codec also selects the f16
+  # conv operand class from the first encoder conv and bind_conv requires
+  # every non-transposed SEANet/downsample conv to carry raw f16 taps.
+  channels = check_seanet_geometry(infos, "encoder", MIMI_SEANET_ENCODER, 1)
+  if channels != dim:
+    raise ValueError(
+        f"encoder SEANet chain ends at {channels} channels, expected dim={dim}")
+  channels = check_seanet_geometry(infos, "decoder", MIMI_SEANET_DECODER, dim)
+  if channels != 1:
+    raise ValueError(
+        f"decoder SEANet chain ends at {channels} channels, expected 1")
+  down = find_info(infos, "mimi.downsample.conv.conv.conv.weight")
+  down_taps, down_out = resolve_conv_geometry(down, dim)
+  if down_out != dim or down_taps < 2:
+    raise ValueError(
+        f"downsample conv dims {down.dims} do not resolve to a stride-2 "
+        f"dim->dim conv")
+  up = find_info(infos, "mimi.upsample.convtr.convtr.convtr.weight")
+  if (len(up.dims) < 1 or up.dims[0] < 2 or
+      math.prod(up.dims) != up.dims[0] * dim):
+    raise ValueError(
+        f"upsample convtr dims {up.dims} do not resolve to a depthwise "
+        f"stride-2 conv over dim={dim}")
+  conv_f16 = (find_info(infos, "mimi.encoder.model.0.conv.conv.weight").dtype
+              == GGML_DTYPE_F16)
+  if conv_f16:
+    non_transposed = ["mimi.downsample.conv.conv.conv.weight"]
+    for family, topology in (("encoder", MIMI_SEANET_ENCODER),
+                             ("decoder", MIMI_SEANET_DECODER)):
+      for index, kind, _stride in topology:
+        base = f"mimi.{family}.model.{index}."
+        if kind == "resnet":
+          non_transposed.append(base + "block.1.conv.conv.weight")
+          non_transposed.append(base + "block.3.conv.conv.weight")
+        elif kind == "conv":
+          non_transposed.append(base + "conv.conv.weight")
+    for name in non_transposed:
+      info = find_info(infos, name)
+      if info.dtype != GGML_DTYPE_F16:
+        raise ValueError(
+            f"tensor {name!r} has dtype {info.dtype} but the first encoder "
+            "conv selected the f16 conv class; the runtime bind requires "
+            "raw f16 taps on every non-transposed conv")
   return dict(preset, n_q=n_q, codebook_dim=codebook_dim)
 
 
