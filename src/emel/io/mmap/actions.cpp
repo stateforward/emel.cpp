@@ -158,6 +158,44 @@ void platform_close(intptr_t os_resource) noexcept {
 
 // One platform helper per advice kind: the kind is routed by explicit guards
 // in the transition table, never branched on here.
+// POSIX advisory calls require page-aligned addresses; the mapped base is
+// page-aligned but callers advise arbitrary file extents. Read hints
+// (sequential/willneed) expand outward to page boundaries - prefetching a
+// little extra is harmless - while the cache-release hint shrinks inward so
+// only fully covered pages are dropped and neighbours in use never fault.
+#if !defined(_WIN32)
+struct advise_window {
+  unsigned char *address = nullptr;
+  size_t length = 0u;
+};
+
+advise_window expand_to_pages(void *base, const uint64_t offset,
+                              const uint64_t length) noexcept {
+  const uint64_t page = platform_required_offset_alignment();
+  const uint64_t begin = offset - (offset % page);
+  const uint64_t end_raw = offset + length;
+  const uint64_t end = end_raw % page == 0u
+                           ? end_raw
+                           : end_raw + (page - end_raw % page);
+  return {static_cast<unsigned char *>(base) + begin,
+          static_cast<size_t>(end - begin)};
+}
+
+advise_window shrink_to_pages(void *base, const uint64_t offset,
+                              const uint64_t length) noexcept {
+  const uint64_t page = platform_required_offset_alignment();
+  const uint64_t begin = offset % page == 0u
+                             ? offset
+                             : offset + (page - offset % page);
+  const uint64_t end = (offset + length) - ((offset + length) % page);
+  if (end <= begin) {
+    return {static_cast<unsigned char *>(base), 0u};
+  }
+  return {static_cast<unsigned char *>(base) + begin,
+          static_cast<size_t>(end - begin)};
+}
+#endif
+
 bool platform_advise_sequential(void *base, uint64_t offset,
                                 uint64_t length) noexcept {
 #if defined(_WIN32)
@@ -168,22 +206,22 @@ bool platform_advise_sequential(void *base, uint64_t offset,
   (void)length;
   return true;
 #else
-  unsigned char *window = static_cast<unsigned char *>(base) + offset;
-  return ::posix_madvise(window, static_cast<size_t>(length),
+  const advise_window window = expand_to_pages(base, offset, length);
+  return ::posix_madvise(window.address, window.length,
                          POSIX_MADV_SEQUENTIAL) == 0;
 #endif
 }
 
 bool platform_advise_willneed(void *base, uint64_t offset,
                               uint64_t length) noexcept {
-  unsigned char *window = static_cast<unsigned char *>(base) + offset;
 #if defined(_WIN32)
   WIN32_MEMORY_RANGE_ENTRY range{};
-  range.VirtualAddress = window;
+  range.VirtualAddress = static_cast<unsigned char *>(base) + offset;
   range.NumberOfBytes = static_cast<SIZE_T>(length);
   return ::PrefetchVirtualMemory(::GetCurrentProcess(), 1u, &range, 0) != 0;
 #else
-  return ::posix_madvise(window, static_cast<size_t>(length),
+  const advise_window window = expand_to_pages(base, offset, length);
+  return ::posix_madvise(window.address, window.length,
                          POSIX_MADV_WILLNEED) == 0;
 #endif
 }
@@ -198,8 +236,13 @@ bool platform_advise_dontneed(void *base, uint64_t offset,
   (void)length;
   return true;
 #else
-  unsigned char *window = static_cast<unsigned char *>(base) + offset;
-  return ::posix_madvise(window, static_cast<size_t>(length),
+  const advise_window window = shrink_to_pages(base, offset, length);
+  if (window.length == 0u) {
+    // No fully covered page to drop: the hint degrades to a successful
+    // no-op rather than faulting neighbours still in use.
+    return true;
+  }
+  return ::posix_madvise(window.address, window.length,
                          POSIX_MADV_DONTNEED) == 0;
 #endif
 }

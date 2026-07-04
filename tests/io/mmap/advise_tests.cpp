@@ -134,6 +134,36 @@ TEST_CASE("io mmap advise applies each hint kind to a live mapping") {
       stateforward::sml::state<emel::io::mmap::state_ready>));
 }
 
+TEST_CASE("io mmap advise applies hints to non-page-aligned extents") {
+  // Streaming windows advise arbitrary weight extents; the platform advisory
+  // calls require page-aligned addresses, so the boundary must expand read
+  // hints (and shrink the cache-release hint) to page boundaries instead of
+  // silently failing on every unaligned extent.
+  mapped_fixture fixture{"unaligned"};
+
+  advise_owner_state sequential_owner{};
+  CHECK(dispatch_advise(fixture, sequential_owner, fixture.map_owner.handle,
+                        24u, 1000u,
+                        emel::io::mmap::event::advice::k_sequential));
+  CHECK(sequential_owner.done);
+  CHECK_FALSE(sequential_owner.error);
+
+  advise_owner_state willneed_owner{};
+  CHECK(dispatch_advise(fixture, willneed_owner, fixture.map_owner.handle,
+                        24u, 1000u, emel::io::mmap::event::advice::k_willneed));
+  CHECK(willneed_owner.done);
+  CHECK_FALSE(willneed_owner.error);
+
+  advise_owner_state dontneed_owner{};
+  CHECK(dispatch_advise(fixture, dontneed_owner, fixture.map_owner.handle,
+                        24u, 1000u, emel::io::mmap::event::advice::k_dontneed));
+  CHECK(dontneed_owner.done);
+  CHECK_FALSE(dontneed_owner.error);
+
+  CHECK(fixture.strategy.is(
+      stateforward::sml::state<emel::io::mmap::state_ready>));
+}
+
 TEST_CASE("io mmap advise rejects out-of-range handle") {
   mapped_fixture fixture{"bad_handle"};
   advise_owner_state owner{};
