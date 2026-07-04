@@ -102,12 +102,8 @@ struct guard_stg_target_window_invalid {
 
 struct guard_platform_staged_read_supported {
   bool operator()(const detail::staged_window_runtime &,
-                  const action::context &) const noexcept {
-    if constexpr (EMEL_IO_STAGED_READ_PLATFORM_SUPPORTED != 0) {
-      return true;
-    } else {
-      return false;
-    }
+                  const action::context &ctx) const noexcept {
+    return ctx.platform_supported;
   }
 };
 
@@ -223,12 +219,8 @@ struct guard_stg_batch_requests_invalid {
 
 struct guard_platform_staged_read_batch_supported {
   bool operator()(const detail::staged_window_batch_runtime &,
-                  const action::context &) const noexcept {
-    if constexpr (EMEL_IO_STAGED_READ_PLATFORM_SUPPORTED != 0) {
-      return true;
-    } else {
-      return false;
-    }
+                  const action::context &ctx) const noexcept {
+    return ctx.platform_supported;
   }
 };
 

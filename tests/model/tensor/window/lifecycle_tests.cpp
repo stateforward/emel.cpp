@@ -170,81 +170,130 @@ TEST_CASE("tensor window rejects invalid streaming slot configuration") {
   CHECK(fixture.unbind(unbind));
 }
 
-TEST_CASE("tensor window failure guards and effects route their errors") {
-  // Direct functor checks for the routes that need runtime states the fixture
-  // cannot force with real collaborators (a prefetch-failed slot, the
-  // failed-release return modes).
-  window_fixture fixture{};
-  window::action::context ctx = fixture.make_context();
+namespace {
 
-  window::detail::stream_scheduler scheduler{};
+// Test-owned platform boundary: production ops with unmap overridden to fail
+// the next g_failing_unmaps_remaining calls (all release modes withheld) and
+// count every attempt. Injected at construction through the io_mmap context.
+int g_failing_unmaps_remaining = 0;
+int g_unmap_calls = 0;
 
-  // A slot committed as failed for the requested layer routes the resubmit
-  // guard, and only that guard.
-  ctx.window.layer_count = 4u;
-  ctx.window.slot_count = 2u;
-  ctx.window.slots[0].layer = 0;
-  ctx.window.slots[0].lifecycle = window::detail::slot_lifecycle::failed;
-  const window::event::acquire_layer_window acquire{0};
-  window::detail::acquire_attempt_status acquire_status{};
-  window::detail::acquire_runtime acquire_runtime{acquire, acquire_status,
-                                                  scheduler};
-  CHECK(window::guard::guard_acquire_layer_failed{}(acquire_runtime, ctx));
-  CHECK_FALSE(
-      window::guard::guard_acquire_layer_resident{}(acquire_runtime, ctx));
-  CHECK_FALSE(
-      window::guard::guard_acquire_layer_loading{}(acquire_runtime, ctx));
-  CHECK_FALSE(
-      window::guard::guard_acquire_layer_unscheduled{}(acquire_runtime, ctx));
+emel::io::mmap::action::unmap_result
+counting_unmap(intptr_t os_resource, void *base, uint64_t mapped_bytes) noexcept {
+  ++g_unmap_calls;
+  if (g_failing_unmaps_remaining > 0) {
+    --g_failing_unmaps_remaining;
+    return {};
+  }
+  return emel::io::mmap::action::default_platform_ops().unmap(os_resource, base,
+                                                              mapped_bytes);
+}
 
-  // Out-of-range layers reject through the shared range check.
-  const window::event::acquire_layer_window out_of_range{99};
-  window::detail::acquire_attempt_status range_status{};
-  window::detail::acquire_runtime range_runtime{out_of_range, range_status,
-                                                scheduler};
-  CHECK_FALSE(window::guard::guard_acquire_layer_failed{}(range_runtime, ctx));
+emel::io::mmap::action::platform_ops failing_unmap_ops() noexcept {
+  auto ops = emel::io::mmap::action::default_platform_ops();
+  ops.unmap = &counting_unmap;
+  return ops;
+}
 
-  // The failed-release exits return to the mode the window is still in.
-  const window::event::unbind_window unbind_request{};
-  window::detail::unbind_attempt_status unbind_status{};
-  const window::detail::unbind_finish_runtime unbind_runtime{unbind_request,
-                                                             unbind_status};
-  ctx.window.streaming_active = true;
-  CHECK(window::guard::guard_unbind_window_streaming{}(unbind_runtime, ctx));
-  CHECK_FALSE(
-      window::guard::guard_unbind_window_passthrough{}(unbind_runtime, ctx));
-  CHECK(window::guard::guard_unbind_error_callback_absent_streaming{}(
-      unbind_runtime, ctx));
-  CHECK_FALSE(window::guard::guard_unbind_error_callback_absent_passthrough{}(
-      unbind_runtime, ctx));
-  CHECK_FALSE(window::guard::guard_unbind_error_callback_present_streaming{}(
-      unbind_runtime, ctx));
-  ctx.window.streaming_active = false;
-  CHECK(window::guard::guard_unbind_window_passthrough{}(unbind_runtime, ctx));
-  CHECK(window::guard::guard_unbind_error_callback_absent_passthrough{}(
-      unbind_runtime, ctx));
-  CHECK_FALSE(window::guard::guard_unbind_error_callback_present_passthrough{}(
-      unbind_runtime, ctx));
+}  // namespace
 
-  // With an error callback present the present-mode composes select instead.
-  unbind_capture unbind_owner{};
-  window::event::unbind_window unbind_with_callback{};
-  unbind_with_callback.on_error = {&unbind_owner, on_unbind_error};
-  window::detail::unbind_attempt_status callback_status{};
-  const window::detail::unbind_finish_runtime callback_runtime{
-      unbind_with_callback, callback_status};
-  CHECK(window::guard::guard_unbind_error_callback_present_passthrough{}(
-      callback_runtime, ctx));
-  CHECK_FALSE(window::guard::guard_unbind_error_callback_absent_passthrough{}(
-      callback_runtime, ctx));
-  ctx.window.streaming_active = true;
-  CHECK(window::guard::guard_unbind_error_callback_present_streaming{}(
-      callback_runtime, ctx));
-  CHECK_FALSE(window::guard::guard_unbind_error_callback_absent_streaming{}(
-      callback_runtime, ctx));
+TEST_CASE("tensor window failed release retains the streaming bind for retry") {
+  stream_file file{"retained_streaming"};
+  window_fixture fixture{failing_unmap_ops()};
+  g_failing_unmaps_remaining = 1;
+  g_unmap_calls = 0;
 
-  // Reset the crafted slot state so the context destructor sees no storage.
-  ctx.window = {};
+  bind_capture capture{};
+  REQUIRE(fixture.bind(file, capture, streaming_budget()));
+  REQUIRE(capture.done);
+  REQUIRE(capture.streaming_active);
+
+  // The failed release reports internal_error and returns to the streaming
+  // mode the window is still in: the bind stays usable for acquire.
+  unbind_capture failed{};
+  CHECK_FALSE(fixture.unbind(failed));
+  CHECK(failed.error);
+  CHECK(fixture.machine.is(stateforward::sml::state<window::state_ready>));
+
+  acquire_capture still_bound{};
+  CHECK(fixture.acquire(0, still_bound));
+  CHECK(still_bound.done);
+  CHECK(slot_content_matches(still_bound, 0u));
+
+  // The retained handle makes the caller retry succeed once the platform
+  // releases the mapping.
+  unbind_capture retry{};
+  CHECK(fixture.unbind(retry));
+  CHECK(retry.done);
+  CHECK(fixture.machine.is(stateforward::sml::state<window::state_unbound>));
+}
+
+TEST_CASE("tensor window failed release retains the passthrough bind for retry") {
+  stream_file file{"retained_passthrough"};
+  window_fixture fixture{failing_unmap_ops()};
+  g_failing_unmaps_remaining = 1;
+  g_unmap_calls = 0;
+
+  // A budget covering the whole file binds passthrough (no slots).
+  bind_capture capture{};
+  REQUIRE(fixture.bind(file, capture, /*budget=*/file.file_size * 2u,
+                       /*slots=*/0u, /*prefetch_depth=*/0u));
+  REQUIRE(capture.done);
+  REQUIRE_FALSE(capture.streaming_active);
+
+  unbind_capture failed{};
+  CHECK_FALSE(fixture.unbind(failed));
+  CHECK(failed.error);
+  CHECK(fixture.machine.is(
+      stateforward::sml::state<window::state_passthrough_ready>));
+
+  unbind_capture retry{};
+  CHECK(fixture.unbind(retry));
+  CHECK(retry.done);
+  CHECK(fixture.machine.is(stateforward::sml::state<window::state_unbound>));
+}
+
+TEST_CASE("tensor window destructor drain retries a transient release failure") {
+  stream_file file{"destructor_retry"};
+  g_failing_unmaps_remaining = 1;
+  g_unmap_calls = 0;
+  {
+    window_fixture fixture{failing_unmap_ops()};
+    bind_capture capture{};
+    REQUIRE(fixture.bind(file, capture, streaming_budget()));
+    REQUIRE(capture.done);
+    // Destruction runs the modeled drain: the first unbind's release fails
+    // (retained-bound row), the second dispatch retries through that row and
+    // releases the mapping.
+  }
+  CHECK(g_failing_unmaps_remaining == 0);
+  CHECK(g_unmap_calls == 2);
+}
+
+TEST_CASE("tensor window resubmits a failed slot load and reports "
+          "slot_copy_failed") {
+  stream_file file{"failed_slot"};
+  window_fixture fixture{window_fixture::unsupported_staged_tag{}};
+
+  // Every staged actor reports the modeled platform-unsupported error, so the
+  // prefetched slot commits as failed. The acquire routes the failed-slot
+  // resubmit row (the only path from a failed slot to publish), the resubmit
+  // fails the same way, and the publish reports slot_copy_failed.
+  bind_capture capture{};
+  REQUIRE(fixture.bind(file, capture, streaming_budget()));
+  REQUIRE(capture.done);
+  REQUIRE(capture.streaming_active);
+
+  acquire_capture failed{};
+  CHECK_FALSE(fixture.acquire(0, failed));
+  CHECK(failed.error);
+  CHECK(failed.err == emel::error::cast(window::error::slot_copy_failed));
+
+  // The failure is not terminal for the actor: unbind still drains cleanly.
+  unbind_capture unbind{};
+  CHECK(fixture.unbind(unbind));
+  CHECK(unbind.done);
+  CHECK(fixture.machine.is(stateforward::sml::state<window::state_unbound>));
 }
 
 TEST_CASE("tensor window rejection without callbacks reports via return value") {
@@ -323,6 +372,33 @@ TEST_CASE("tensor window rejects null slot storage explicitly") {
   CHECK(retry.done);
   unbind_capture unbind{};
   CHECK(fixture.unbind(unbind));
+}
+
+TEST_CASE("tensor window rejects null plan spans explicitly") {
+  window_fixture fixture{};
+  bind_capture capture{};
+
+  // Sized plan spans without storage must reject as invalid_request before
+  // the validation scans read through them.
+  const window::event::bind_window_request request{
+      .file_path = "unused",
+      .file_size_bytes = 4096u,
+      .extents = std::span<const window::detail::weight_extent>{
+          static_cast<const window::detail::weight_extent *>(nullptr), 2u},
+      .layer_weight_counts = std::span<const uint16_t>{
+          static_cast<const uint16_t *>(nullptr), 1u},
+      .budget_bytes = 1u,
+      .slot_storage = {},
+      .window_slots = 0u,
+      .prefetch_depth = 0u,
+      .stage_chunk_bytes = window::detail::k_default_stream_chunk_bytes,
+  };
+  window::event::bind_window bind_request{request};
+  bind_request.on_error = {&capture, on_bind_error};
+  CHECK_FALSE(fixture.machine.process_event(bind_request));
+  CHECK(capture.error);
+  CHECK(capture.err == emel::error::cast(window::error::invalid_request));
+  CHECK(fixture.machine.is(stateforward::sml::state<window::state_unbound>));
 }
 
 TEST_CASE("tensor window releases the source mapping on rejected binds") {

@@ -19,12 +19,6 @@ namespace emel::io::mmap::action {
 
 namespace {
 
-struct platform_unmap_result {
-  bool unmap_base_released = false;
-  bool os_resource_released = false;
-  bool ok = false;
-};
-
 uint64_t platform_required_offset_alignment() noexcept {
 #if defined(_WIN32)
   SYSTEM_INFO info{};
@@ -133,9 +127,9 @@ bool platform_file_size(intptr_t os_resource,
 #endif
 }
 
-platform_unmap_result platform_unmap(intptr_t os_resource, void *base,
+unmap_result platform_unmap(intptr_t os_resource, void *base,
                                      uint64_t mapped_bytes) noexcept {
-  platform_unmap_result result{};
+  unmap_result result{};
   const bool mapping_absent = base == nullptr || mapped_bytes == 0u;
   const bool resource_absent = os_resource == -1;
 #if defined(_WIN32)
@@ -212,8 +206,24 @@ bool platform_advise_dontneed(void *base, uint64_t offset,
 
 } // namespace
 
-context::context() noexcept
-    : required_offset_alignment(platform_required_offset_alignment()) {
+platform_ops default_platform_ops() noexcept {
+  platform_ops ops{};
+  ops.open = &platform_open;
+  ops.file_size = &platform_file_size;
+  ops.map = &platform_map;
+  ops.unmap = &platform_unmap;
+  ops.close = &platform_close;
+  ops.advise_sequential = &platform_advise_sequential;
+  ops.advise_willneed = &platform_advise_willneed;
+  ops.advise_dontneed = &platform_advise_dontneed;
+  return ops;
+}
+
+context::context() noexcept : context(default_platform_ops()) {}
+
+context::context(const platform_ops &platform_in) noexcept
+    : required_offset_alignment(platform_required_offset_alignment()),
+      platform(platform_in) {
   for (uint32_t i = 0; i < k_max_mappings; ++i) {
     free_stack[i] = (k_max_mappings - 1u) - i;
   }
@@ -226,7 +236,7 @@ context::~context() noexcept {
       continue;
     }
 
-    (void)platform_unmap(slot_ref.os_resource, slot_ref.base,
+    (void)platform.unmap(slot_ref.os_resource, slot_ref.base,
                          slot_ref.mapped_bytes);
 
     slot_ref.in_use = false;
@@ -248,27 +258,28 @@ void effect_reserve_top_free_slot_then_attempt_open::operator()(
   ev.status.reserved_slot = slot_index;
 
   intptr_t os_resource = -1;
-  const bool open_ok = platform_open(ev.request.request.file_path, os_resource);
+  const bool open_ok =
+      ctx.platform.open(ev.request.request.file_path, os_resource);
   ev.status.os_resource = os_resource;
   ev.status.file_open_ok = open_ok;
 }
 
 void effect_measure_open_file_size::operator()(
-    const detail::map_tensor_runtime &ev, context &) const noexcept {
+    const detail::map_tensor_runtime &ev, context &ctx) const noexcept {
   uint64_t file_size_bytes = 0u;
   const bool size_ok =
-      platform_file_size(ev.status.os_resource, file_size_bytes);
+      ctx.platform.file_size(ev.status.os_resource, file_size_bytes);
   ev.status.file_size_bytes = file_size_bytes;
   ev.status.file_size_ok = size_ok;
 }
 
 void effect_attempt_mapping::operator()(const detail::map_tensor_runtime &ev,
-                                        context &) const noexcept {
+                                        context &ctx) const noexcept {
   void *base = nullptr;
   uint64_t mapped_bytes = 0u;
   const bool mapping_ok =
-      platform_map(ev.status.os_resource, ev.request.request.file_offset,
-                   ev.request.request.byte_size, base, mapped_bytes);
+      ctx.platform.map(ev.status.os_resource, ev.request.request.file_offset,
+                       ev.request.request.byte_size, base, mapped_bytes);
   ev.status.mapped_base = base;
   ev.status.mapped_bytes = mapped_bytes;
   ev.status.mapping_ok = mapping_ok;
@@ -276,7 +287,7 @@ void effect_attempt_mapping::operator()(const detail::map_tensor_runtime &ev,
 
 void effect_close_open_resource_and_release_slot_on_file_span_failure::
 operator()(const detail::map_tensor_runtime &ev, context &ctx) const noexcept {
-  platform_close(ev.status.os_resource);
+  ctx.platform.close(ev.status.os_resource);
   auto &slot_ref = ctx.slots[ev.status.reserved_slot];
   slot_ref.in_use = false;
   slot_ref.tensor_id = -1;
@@ -293,7 +304,7 @@ operator()(const detail::map_tensor_runtime &ev, context &ctx) const noexcept {
 
 void effect_close_open_resource_and_release_slot_on_mapping_failure::operator()(
     const detail::map_tensor_runtime &ev, context &ctx) const noexcept {
-  platform_close(ev.status.os_resource);
+  ctx.platform.close(ev.status.os_resource);
   auto &slot_ref = ctx.slots[ev.status.reserved_slot];
   slot_ref.in_use = false;
   slot_ref.tensor_id = -1;
@@ -314,11 +325,11 @@ void effect_attempt_unmap::operator()(const detail::release_mapping_runtime &ev,
   ev.status.unmap_base = slot_ref.base;
   ev.status.unmap_bytes = slot_ref.mapped_bytes;
   ev.status.os_resource = slot_ref.os_resource;
-  const platform_unmap_result unmap_result = platform_unmap(
+  const unmap_result result = ctx.platform.unmap(
       ev.status.os_resource, ev.status.unmap_base, ev.status.unmap_bytes);
-  ev.status.unmap_ok = unmap_result.ok;
-  ev.status.unmap_base_released = unmap_result.unmap_base_released;
-  ev.status.os_resource_released = unmap_result.os_resource_released;
+  ev.status.unmap_ok = result.ok;
+  ev.status.unmap_base_released = result.unmap_base_released;
+  ev.status.os_resource_released = result.os_resource_released;
 }
 
 void effect_mark_unmap_failed_and_release_slot::operator()(
@@ -341,21 +352,21 @@ void effect_mark_unmap_failed_and_release_slot::operator()(
 void effect_attempt_advise_sequential::operator()(
     const detail::advise_mapping_runtime &ev, context &ctx) const noexcept {
   const slot &slot_ref = ctx.slots[ev.request.handle];
-  ev.status.advise_ok = platform_advise_sequential(
+  ev.status.advise_ok = ctx.platform.advise_sequential(
       slot_ref.base, ev.request.offset, ev.request.length);
 }
 
 void effect_attempt_advise_willneed::operator()(
     const detail::advise_mapping_runtime &ev, context &ctx) const noexcept {
   const slot &slot_ref = ctx.slots[ev.request.handle];
-  ev.status.advise_ok = platform_advise_willneed(
+  ev.status.advise_ok = ctx.platform.advise_willneed(
       slot_ref.base, ev.request.offset, ev.request.length);
 }
 
 void effect_attempt_advise_dontneed::operator()(
     const detail::advise_mapping_runtime &ev, context &ctx) const noexcept {
   const slot &slot_ref = ctx.slots[ev.request.handle];
-  ev.status.advise_ok = platform_advise_dontneed(
+  ev.status.advise_ok = ctx.platform.advise_dontneed(
       slot_ref.base, ev.request.offset, ev.request.length);
 }
 

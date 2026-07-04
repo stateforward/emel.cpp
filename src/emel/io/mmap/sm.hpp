@@ -606,6 +606,7 @@ struct model {
 
 struct sm : public emel::sm<model, action::context> {
   using base_type = emel::sm<model, action::context>;
+  using base_type::base_type;
   using base_type::is;
   using base_type::process_event;
   using base_type::visit_current_states;

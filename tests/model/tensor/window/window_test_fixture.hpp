@@ -148,6 +148,30 @@ struct window_fixture {
 
   window_fixture() : machine{make_context()} {}
 
+  // Collaborator-injection constructors: the io actors are built with a
+  // custom platform boundary (failing unmap ops, an unsupported staged-copy
+  // platform) so the modeled failure routes are drivable end to end through
+  // process_event with no functor-level access.
+  explicit window_fixture(const emel::io::mmap::action::platform_ops &mmap_ops)
+      : io_mmap{emel::io::mmap::action::context{mmap_ops}},
+        machine{make_context()} {}
+
+  struct unsupported_staged_tag {};
+  explicit window_fixture(unsupported_staged_tag)
+      : io_staged{
+            emel::io::staged_read::sm{emel::io::staged_read::action::context{false}},
+            emel::io::staged_read::sm{emel::io::staged_read::action::context{false}},
+            emel::io::staged_read::sm{emel::io::staged_read::action::context{false}},
+            emel::io::staged_read::sm{emel::io::staged_read::action::context{false}},
+            emel::io::staged_read::sm{emel::io::staged_read::action::context{false}},
+            emel::io::staged_read::sm{emel::io::staged_read::action::context{false}},
+            emel::io::staged_read::sm{emel::io::staged_read::action::context{false}},
+            emel::io::staged_read::sm{emel::io::staged_read::action::context{false}}},
+        machine{make_context()} {
+    static_assert(window::detail::k_max_window_slots == 8u,
+                  "unsupported_staged_tag initializer covers every slot actor");
+  }
+
   // Owner-provided slot arena: sized for the fixture's largest layer across
   // the maximum slot count, alive for the fixture's lifetime.
   alignas(window::detail::k_slot_alignment_bytes) std::array<
