@@ -208,7 +208,12 @@ struct model {
           [ guard::guard_resolve_slot_ready_for_target{} ]
       , sml::state<state_acquire_resolved> <= sml::state<state_acquire_resolved>
           + sml::event<emel::event::completion>
+          [ guard::guard_completion_slot_armed{} ]
           / action::effect_commit_slot_load
+      , sml::state<state_acquire_resolved> <= sml::state<state_acquire_resolved>
+          + sml::event<emel::event::completion>
+          [ guard::guard_completion_slot_stray{} ]
+          / action::effect_record_stray_completion
 
       //------------------------------------------------------------------------------//
       // acquire settle (second dispatch): decide resident / loading /
@@ -333,16 +338,32 @@ struct model {
       //------------------------------------------------------------------------------//
       // completion commit: required slot loads delivered by the drain while an
       // acquire is pending, and background prefetch fires swept at the start
-      // of any later dispatch.
+      // of any later dispatch. Only completions naming an armed active slot
+      // commit; anything else records as stray without touching slot state.
       , sml::state<state_ready> <= sml::state<state_ready>
           + sml::event<emel::event::completion>
+          [ guard::guard_completion_slot_armed{} ]
+          / action::effect_commit_slot_load
+      , sml::state<state_ready> <= sml::state<state_ready>
+          + sml::event<emel::event::completion>
+          [ guard::guard_completion_slot_stray{} ]
+          / action::effect_record_stray_completion
+      , sml::state<state_acquire_pending> <= sml::state<state_acquire_pending>
+          + sml::event<emel::event::completion>
+          [ guard::guard_completion_slot_armed{} ]
           / action::effect_commit_slot_load
       , sml::state<state_acquire_pending> <= sml::state<state_acquire_pending>
           + sml::event<emel::event::completion>
+          [ guard::guard_completion_slot_stray{} ]
+          / action::effect_record_stray_completion
+      , sml::state<state_unbind_pending> <= sml::state<state_unbind_pending>
+          + sml::event<emel::event::completion>
+          [ guard::guard_completion_slot_armed{} ]
           / action::effect_commit_slot_load
       , sml::state<state_unbind_pending> <= sml::state<state_unbind_pending>
           + sml::event<emel::event::completion>
-          / action::effect_commit_slot_load
+          [ guard::guard_completion_slot_stray{} ]
+          / action::effect_record_stray_completion
       , sml::state<state_passthrough_ready> <= sml::state<state_passthrough_ready>
           + sml::event<emel::event::completion>
           / action::effect_record_stray_completion

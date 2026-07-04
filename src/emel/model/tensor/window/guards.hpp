@@ -109,6 +109,11 @@ struct guard_bind_streaming_config_invalid {
   }
 };
 
+// The sizing product cannot wrap: window_slots <= k_max_window_slots (8) and
+// slot_capacity_bytes is the largest per-layer aligned extent total, bounded
+// by k_max_weights_per_layer extents inside a source the io_mmap actor
+// already capped at k_max_mapping_bytes (2^40) before this decision runs, so
+// slots * capacity stays far below 2^64 on every reachable path.
 struct guard_bind_slots_fit_budget {
   bool operator()(const detail::bind_window_runtime &ev,
                   const action::context &ctx) const noexcept {
@@ -162,6 +167,28 @@ struct guard_bind_slot_storage_too_small {
            guard_bind_streaming_config_valid{}(ev, ctx) &&
            guard_bind_slots_fit_budget{}(ev, ctx) &&
            !guard_bind_slot_storage_sufficient{}(ev, ctx);
+  }
+};
+
+// A completion is trustworthy only when its source names a slot this machine
+// armed: inside the active ring, mid-load, with a bound ticket layout. Any
+// other index (caller-fabricated or stale after a reset) must record as a
+// stray without touching slot state - the commit indexes the slot arrays and
+// reads through the ticket layout.
+struct guard_completion_slot_armed {
+  bool operator()(const emel::event::completion &ev,
+                  const action::context &ctx) const noexcept {
+    return ev.source_index < ctx.window.slot_count &&
+           ctx.window.slots[ev.source_index].lifecycle ==
+               detail::slot_lifecycle::loading &&
+           ctx.window.tickets[ev.source_index].layout != nullptr;
+  }
+};
+
+struct guard_completion_slot_stray {
+  bool operator()(const emel::event::completion &ev,
+                  const action::context &ctx) const noexcept {
+    return !guard_completion_slot_armed{}(ev, ctx);
   }
 };
 

@@ -296,6 +296,127 @@ TEST_CASE("tensor window resubmits a failed slot load and reports "
   CHECK(fixture.machine.is(stateforward::sml::state<window::state_unbound>));
 }
 
+namespace {
+
+// Test-owned platform boundary that fabricates an arbitrarily large source
+// mapping without touching the OS: the bind sizing guards must reject an
+// overflowing slot product before any slot load could read through the fake
+// base.
+constexpr uint64_t k_fake_source_bytes = uint64_t{1} << 62;
+alignas(64) uint8_t g_fake_source_page[64] = {};
+
+bool fake_open(std::string_view, intptr_t &os_resource_out) noexcept {
+  os_resource_out = 1;
+  return true;
+}
+
+bool fake_file_size(intptr_t, uint64_t &file_size_bytes_out) noexcept {
+  file_size_bytes_out = k_fake_source_bytes;
+  return true;
+}
+
+bool fake_map(intptr_t, uint64_t, uint64_t byte_size, void *&base_out,
+              uint64_t &mapped_bytes_out) noexcept {
+  base_out = g_fake_source_page;
+  mapped_bytes_out = byte_size;
+  return true;
+}
+
+emel::io::mmap::action::unmap_result fake_unmap(intptr_t, void *,
+                                                uint64_t) noexcept {
+  return {true, true, true};
+}
+
+void fake_close(intptr_t) noexcept {}
+
+bool fake_advise(void *, uint64_t, uint64_t) noexcept { return true; }
+
+emel::io::mmap::action::platform_ops fake_huge_source_ops() noexcept {
+  emel::io::mmap::action::platform_ops ops{};
+  ops.open = &fake_open;
+  ops.file_size = &fake_file_size;
+  ops.map = &fake_map;
+  ops.unmap = &fake_unmap;
+  ops.close = &fake_close;
+  ops.advise_sequential = &fake_advise;
+  ops.advise_willneed = &fake_advise;
+  ops.advise_dontneed = &fake_advise;
+  return ops;
+}
+
+}  // namespace
+
+TEST_CASE("tensor window rejects sources past the mapping cap before slot "
+          "sizing") {
+  window_fixture fixture{fake_huge_source_ops()};
+  bind_capture capture{};
+
+  // Two layers of one weight each, each spanning the whole fabricated 2^62
+  // source: if such a source could bind, slot_capacity_bytes would land at
+  // 2^62 and 8 slots * 2^62 would wrap the sizing product to zero against a
+  // tiny arena. The io_mmap guard rejects any source mapping past
+  // k_max_mapping_bytes before the budget decision, which is what keeps the
+  // slot sizing product representable (see guard_bind_slots_fit_budget).
+  const std::vector<window::detail::weight_extent> extents{
+      {.tensor_id = 0,
+       .file_offset = 0u,
+       .byte_size = k_fake_source_bytes,
+       .slot_offset = 0u},
+      {.tensor_id = 1,
+       .file_offset = 0u,
+       .byte_size = k_fake_source_bytes,
+       .slot_offset = 0u},
+  };
+  const std::vector<uint16_t> layer_weight_counts{1u, 1u};
+
+  const window::event::bind_window_request request{
+      .file_path = "emel-window-fake-huge-source",
+      .file_size_bytes = k_fake_source_bytes,
+      .extents = extents,
+      .layer_weight_counts = layer_weight_counts,
+      .budget_bytes = 64u * 1024u,
+      .slot_storage = std::span<uint8_t>{fixture.slot_arena},
+      .window_slots = 8u,
+      .prefetch_depth = 2u,
+      .stage_chunk_bytes = window::detail::k_default_stream_chunk_bytes,
+  };
+  window::event::bind_window bind_request{request};
+  bind_request.on_error = {&capture, on_bind_error};
+  CHECK_FALSE(fixture.machine.process_event(bind_request));
+  CHECK(capture.error);
+  CHECK(capture.err == emel::error::cast(window::error::source_map_failed));
+  CHECK(fixture.machine.is(stateforward::sml::state<window::state_unbound>));
+}
+
+TEST_CASE("tensor window records completions for unarmed slots as stray") {
+  stream_file file{"stray_completion"};
+  window_fixture fixture{};
+  bind_capture capture{};
+  REQUIRE(fixture.bind(file, capture, streaming_budget()));
+  REQUIRE(capture.done);
+  REQUIRE(capture.streaming_active);
+
+  // An index past the array, an index past the active ring, and an in-ring
+  // slot with no armed load ticket: all three must record as stray without
+  // touching slot state (the unguarded commit indexed the slot arrays with
+  // the raw source index and dereferenced a null ticket layout).
+  (void)fixture.machine.process_event(emel::event::completion{99u});
+  (void)fixture.machine.process_event(
+      emel::event::completion{window::detail::k_max_window_slots - 1u});
+  (void)fixture.machine.process_event(emel::event::completion{3u});
+  CHECK(fixture.machine.is(stateforward::sml::state<window::state_ready>));
+
+  acquire_capture acquired{};
+  CHECK(fixture.acquire(0, acquired));
+  CHECK(acquired.done);
+  CHECK(slot_content_matches(acquired, 0u));
+
+  unbind_capture unbind{};
+  CHECK(fixture.unbind(unbind));
+  CHECK(unbind.done);
+  CHECK(fixture.machine.is(stateforward::sml::state<window::state_unbound>));
+}
+
 TEST_CASE("tensor window rejection without callbacks reports via return value") {
   stream_file file{"reject_no_callbacks"};
   window_fixture fixture{};

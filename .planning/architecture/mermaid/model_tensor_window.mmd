@@ -26,7 +26,8 @@ stateDiagram-v2
   state_acquire_resolve_decision --> state_acquire_resolved : completion_acquire_resolve_runtime_ [guard_resolve_layer_out_of_range_] / effect_mark_resolve_out_of_range_
   state_acquire_resolve_decision --> state_acquire_resolved : completion_acquire_resolve_runtime_ [guard_resolve_slot_busy_other_layer_] / effect_require_busy_slot_
   state_acquire_resolve_decision --> state_acquire_resolved : completion_acquire_resolve_runtime_ [guard_resolve_slot_ready_for_target_] / none
-  state_acquire_resolved --> state_acquire_resolved : completion [always] / effect_commit_slot_load_
+  state_acquire_resolved --> state_acquire_resolved : completion [guard_completion_slot_armed_] / effect_commit_slot_load_
+  state_acquire_resolved --> state_acquire_resolved : completion [guard_completion_slot_stray_] / effect_record_stray_completion_
   state_acquire_resolved --> state_acquire_decision : acquire_runtime [always] / none
   state_acquire_decision --> state_acquire_pending : completion_acquire_runtime_ [guard_acquire_layer_out_of_range_] / effect_mark_acquire_out_of_range_
   state_acquire_decision --> state_acquire_pending : completion_acquire_runtime_ [guard_acquire_layer_resident_] / none
@@ -55,9 +56,12 @@ stateDiagram-v2
   state_unbound --> state_unbound : acquire_runtime [always] / none
   state_unbound --> state_unbound : acquire_publish_runtime [guard_acquire_error_callback_present_] / effect_publish_acquire_error_
   state_unbound --> state_unbound : acquire_publish_runtime [guard_acquire_error_callback_absent_] / effect_record_acquire_error_
-  state_ready --> state_ready : completion [always] / effect_commit_slot_load_
-  state_acquire_pending --> state_acquire_pending : completion [always] / effect_commit_slot_load_
-  state_unbind_pending --> state_unbind_pending : completion [always] / effect_commit_slot_load_
+  state_ready --> state_ready : completion [guard_completion_slot_armed_] / effect_commit_slot_load_
+  state_ready --> state_ready : completion [guard_completion_slot_stray_] / effect_record_stray_completion_
+  state_acquire_pending --> state_acquire_pending : completion [guard_completion_slot_armed_] / effect_commit_slot_load_
+  state_acquire_pending --> state_acquire_pending : completion [guard_completion_slot_stray_] / effect_record_stray_completion_
+  state_unbind_pending --> state_unbind_pending : completion [guard_completion_slot_armed_] / effect_commit_slot_load_
+  state_unbind_pending --> state_unbind_pending : completion [guard_completion_slot_stray_] / effect_record_stray_completion_
   state_passthrough_ready --> state_passthrough_ready : completion [always] / effect_record_stray_completion_
   state_unbound --> state_unbound : completion [always] / effect_record_stray_completion_
   state_ready --> state_unbind_pending : unbind_runtime [always] / effect_begin_unbind_
