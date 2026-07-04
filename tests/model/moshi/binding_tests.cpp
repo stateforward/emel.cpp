@@ -668,6 +668,54 @@ TEST_CASE("mimi contract validation requires every transformer layer") {
                           "self_attn.in_projs.0.weight",
                           false));
   }
+  SUBCASE("missing layer norm2 weight") {
+    // bind_transformer consumes both norms per layer, not just norm1.
+    REQUIRE(corrupt_named(
+        "mimi.encoder_transformer.transformer.layers.1.norm2.weight", true));
+  }
+  SUBCASE("missing attention out projection") {
+    REQUIRE(corrupt_named("mimi.decoder_transformer.transformer.layers.1."
+                          "self_attn.out_projs.0.weight",
+                          true));
+  }
+  SUBCASE("missing layer scale") {
+    REQUIRE(corrupt_named(
+        "mimi.encoder_transformer.transformer.layers.1.layer_scale_2.scale",
+        true));
+  }
+  CHECK(moshi::validate_execution_contract(model) != k_none);
+}
+
+TEST_CASE("mimi contract validation requires the rvq projections") {
+  auto loaded = load_fixture_or_skip("mimi-tiny.gguf");
+  if (loaded.model == nullptr) {
+    return;
+  }
+
+  // bind_rvq_split consumes the input/output 1x1 projections of both splits
+  // before any encode/decode; a codebooks-only probe let a component missing
+  // or mis-sizing a projection validate and then fail quantizer bind.
+  auto &model = *loaded.model;
+  bool corrupted = false;
+  for (uint32_t idx = 0; idx < model.n_tensors; ++idx) {
+    auto &tensor = model.tensors[idx];
+    const std::string_view name{model.name_storage.data() + tensor.name_offset,
+                                tensor.name_length};
+    if (name != "mimi.quantizer.rvq_rest.input_proj.weight") {
+      continue;
+    }
+    SUBCASE("missing projection") {
+      // Swap the underscore so the tensor stays inside the quantizer family
+      // but the projection name no longer resolves.
+      const size_t underscore = name.find("input_proj") + 5u;
+      model.name_storage[tensor.name_offset + underscore] = 'x';
+    }
+    SUBCASE("wrong projection element count") {
+      tensor.dims[0] += 1;
+    }
+    corrupted = true;
+  }
+  REQUIRE(corrupted);
   CHECK(moshi::validate_execution_contract(model) != k_none);
 }
 

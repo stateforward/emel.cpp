@@ -387,6 +387,23 @@ bool has_tensor(const emel::model::data &model_data,
   return tensor != nullptr && tensor_has_storage(*tensor);
 }
 
+// The codec bind's prepare_vector/prepare_matrix_raw/prepare_linear helpers
+// accept any dims layout with the expected total element count, so contract
+// probes for those tensors must compare element counts, not exact shapes.
+bool has_tensor_with_elements(const emel::model::data &model_data,
+                              const std::string_view name,
+                              const uint64_t expected_elements) noexcept {
+  const auto *tensor = find_tensor(model_data, name);
+  if (tensor == nullptr || !tensor_has_storage(*tensor)) {
+    return false;
+  }
+  uint64_t elements = 1u;
+  for (int32_t dim = 0; dim < tensor->n_dims; ++dim) {
+    elements *= static_cast<uint64_t>(tensor->dims[static_cast<size_t>(dim)]);
+  }
+  return elements == expected_elements;
+}
+
 bool require_tensor_shape(const emel::model::data &model_data,
                           const std::string_view name,
                           const std::initializer_list<int64_t> dims) noexcept {
@@ -604,56 +621,109 @@ emel::error::type validate_mimi_contract(const emel::model::data &model_data,
     return emel::error::cast(emel::model::loader::error::model_invalid);
   }
 
-  // plan_transformer consumes every configured layer's norm1/in_proj/linear1
-  // with dim-consistent shapes during codec bind, so the contract must probe
-  // each layer of both transformer families: a truncated or wrong-shaped
-  // family otherwise validates here and fails the codec planner later.
+  // bind_transformer consumes every configured layer's norms, layer scales,
+  // attention projections, and MLP linears (plan_transformer additionally
+  // pins the in_proj/linear1 shapes), so the contract must probe the full
+  // per-layer tensor set for both transformer families: a truncated family
+  // or a missing layer tensor otherwise validates here and fails the codec
+  // bind walk later.
   const int64_t dim = mimi.dim;
+  const uint64_t dim_elements = static_cast<uint64_t>(dim);
   static constexpr const char *k_transformer_families[2] = {
       "encoder_transformer", "decoder_transformer"};
   bool transformers_ok = true;
   for (size_t family = 0; transformers_ok && family < 2u; ++family) {
     for (int32_t layer = 0;
          transformers_ok && layer < mimi.transformer_num_layers; ++layer) {
-      char norm1[112] = {};
-      char in_proj[112] = {};
-      char linear1[112] = {};
-      const int norm1_len = std::snprintf(
-          norm1, sizeof(norm1), "mimi.%s.transformer.layers.%d.norm1.weight",
+      char base[96] = {};
+      const int base_len = std::snprintf(
+          base, sizeof(base), "mimi.%s.transformer.layers.%d.",
           k_transformer_families[family], layer);
-      const int in_proj_len = std::snprintf(
-          in_proj, sizeof(in_proj),
-          "mimi.%s.transformer.layers.%d.self_attn.in_projs.0.weight",
-          k_transformer_families[family], layer);
-      const int linear1_len = std::snprintf(
-          linear1, sizeof(linear1),
-          "mimi.%s.transformer.layers.%d.linear1.weight",
-          k_transformer_families[family], layer);
-      if (norm1_len <= 0 || static_cast<size_t>(norm1_len) >= sizeof(norm1) ||
-          in_proj_len <= 0 ||
-          static_cast<size_t>(in_proj_len) >= sizeof(in_proj) ||
-          linear1_len <= 0 ||
-          static_cast<size_t>(linear1_len) >= sizeof(linear1)) {
+      if (base_len <= 0 || static_cast<size_t>(base_len) >= sizeof(base)) {
         transformers_ok = false;
         break;
       }
-      const auto *linear1_tensor = find_tensor(
-          model_data,
-          std::string_view{linear1, static_cast<size_t>(linear1_len)});
+      const auto layer_name = [&base, base_len](const char *suffix,
+                                                char (&name_out)[144]) {
+        const int written = std::snprintf(name_out, sizeof(name_out), "%.*s%s",
+                                          base_len, base, suffix);
+        return written > 0 && static_cast<size_t>(written) < sizeof(name_out)
+                   ? std::string_view{name_out, static_cast<size_t>(written)}
+                   : std::string_view{};
+      };
+      char name[144] = {};
+      const auto *linear1_tensor =
+          find_tensor(model_data, layer_name("linear1.weight", name));
+      if (linear1_tensor == nullptr || !tensor_has_storage(*linear1_tensor) ||
+          linear1_tensor->n_dims != 2 || linear1_tensor->dims[0] != dim ||
+          linear1_tensor->dims[1] <= 0) {
+        transformers_ok = false;
+        break;
+      }
+      const uint64_t mlp_elements =
+          static_cast<uint64_t>(linear1_tensor->dims[1]);
       transformers_ok =
-          has_tensor(model_data,
-                     std::string_view{norm1,
-                                      static_cast<size_t>(norm1_len)}) &&
-          require_tensor_shape(
-              model_data,
-              std::string_view{in_proj, static_cast<size_t>(in_proj_len)},
-              {dim, 3 * dim}) &&
-          linear1_tensor != nullptr && tensor_has_storage(*linear1_tensor) &&
-          linear1_tensor->n_dims == 2 && linear1_tensor->dims[0] == dim &&
-          linear1_tensor->dims[1] > 0;
+          require_tensor_shape(model_data,
+                               layer_name("self_attn.in_projs.0.weight", name),
+                               {dim, 3 * dim}) &&
+          has_tensor_with_elements(model_data,
+                                   layer_name("self_attn.out_projs.0.weight",
+                                              name),
+                                   dim_elements * dim_elements) &&
+          has_tensor_with_elements(model_data,
+                                   layer_name("linear2.weight", name),
+                                   dim_elements * mlp_elements) &&
+          has_tensor_with_elements(model_data, layer_name("norm1.weight", name),
+                                   dim_elements) &&
+          has_tensor_with_elements(model_data, layer_name("norm1.bias", name),
+                                   dim_elements) &&
+          has_tensor_with_elements(model_data, layer_name("norm2.weight", name),
+                                   dim_elements) &&
+          has_tensor_with_elements(model_data, layer_name("norm2.bias", name),
+                                   dim_elements) &&
+          has_tensor_with_elements(model_data,
+                                   layer_name("layer_scale_1.scale", name),
+                                   dim_elements) &&
+          has_tensor_with_elements(model_data,
+                                   layer_name("layer_scale_2.scale", name),
+                                   dim_elements);
     }
   }
   if (!transformers_ok) {
+    return emel::error::cast(emel::model::loader::error::model_invalid);
+  }
+
+  // bind_rvq_split consumes the input/output 1x1 projections for both splits
+  // before any encode or decode can run; the contract must require them (by
+  // element count, matching prepare_linear/prepare_raw_q8_0) so a component
+  // missing a projection rejects at load instead of failing quantizer bind.
+  const uint64_t proj_elements =
+      static_cast<uint64_t>(mimi.dim) * static_cast<uint64_t>(mimi.codebook_dim);
+  static constexpr const char *k_rvq_splits[2] = {"rvq_first", "rvq_rest"};
+  bool projections_ok = true;
+  for (size_t split = 0; projections_ok && split < 2u; ++split) {
+    char name[96] = {};
+    const int in_len =
+        std::snprintf(name, sizeof(name),
+                      "mimi.quantizer.%s.input_proj.weight", k_rvq_splits[split]);
+    projections_ok =
+        in_len > 0 && static_cast<size_t>(in_len) < sizeof(name) &&
+        has_tensor_with_elements(
+            model_data, std::string_view{name, static_cast<size_t>(in_len)},
+            proj_elements);
+    if (!projections_ok) {
+      break;
+    }
+    const int out_len = std::snprintf(name, sizeof(name),
+                                      "mimi.quantizer.%s.output_proj.weight",
+                                      k_rvq_splits[split]);
+    projections_ok =
+        out_len > 0 && static_cast<size_t>(out_len) < sizeof(name) &&
+        has_tensor_with_elements(
+            model_data, std::string_view{name, static_cast<size_t>(out_len)},
+            proj_elements);
+  }
+  if (!projections_ok) {
     return emel::error::cast(emel::model::loader::error::model_invalid);
   }
 
