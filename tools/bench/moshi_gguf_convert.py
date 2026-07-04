@@ -527,6 +527,78 @@ def cross_check_mimi(infos: list[TensorInfo], n_q: int, preset: dict) -> dict:
     for proj in ("input_proj", "output_proj"):
       require_elements(infos, f"mimi.quantizer.{split}.{proj}.weight",
                        dim * codebook_dim)
+  # The codec plan selects the q8-vs-float class from the first transformer
+  # in_proj (and the first RVQ input projection) and the bind requires every
+  # projection in that family to match; a mixed-class artifact converts here
+  # and then fails codec bind, so enforce class uniformity.
+  proj_q8 = (find_info(
+      infos, "mimi.encoder_transformer.transformer.layers.0.self_attn."
+             "in_projs.0.weight").dtype == GGML_DTYPE_Q8_0)
+  for family in ("mimi.encoder_transformer.", "mimi.decoder_transformer."):
+    for layer in range(preset["transformer_num_layers"]):
+      base = f"{family}transformer.layers.{layer}."
+      for proj in ("self_attn.in_projs.0.weight",
+                   "self_attn.out_projs.0.weight", "linear1.weight",
+                   "linear2.weight"):
+        info = find_info(infos, base + proj)
+        if (info.dtype == GGML_DTYPE_Q8_0) != proj_q8:
+          raise ValueError(
+              f"tensor {info.name!r} has dtype {info.dtype} but the "
+              f"transformer projection class is {'q8_0' if proj_q8 else 'float'}; "
+              "the runtime bind requires one uniform class")
+  rvq_q8 = (find_info(infos, "mimi.quantizer.rvq_first.input_proj.weight")
+            .dtype == GGML_DTYPE_Q8_0)
+  for split in ("rvq_first", "rvq_rest"):
+    for proj in ("input_proj", "output_proj"):
+      info = find_info(infos, f"mimi.quantizer.{split}.{proj}.weight")
+      if (info.dtype == GGML_DTYPE_Q8_0) != rvq_q8:
+        raise ValueError(
+            f"tensor {info.name!r} has dtype {info.dtype} but the RVQ "
+            f"projection class is {'q8_0' if rvq_q8 else 'float'}; the "
+            "runtime bind requires one uniform class")
+  # The codec planner walks the fixed mimi_v0_1 SEANet module topology by
+  # exact tensor name (plan_seanet plus the downsample/upsample bridge
+  # convs); require every fixed-topology weight so a raw GGUF missing one
+  # fails conversion instead of failing codec initialization after
+  # publishing.
+  encoder_seanet = (
+      "model.0.conv.conv.weight",
+      "model.1.block.1.conv.conv.weight",
+      "model.1.block.3.conv.conv.weight",
+      "model.3.conv.conv.weight",
+      "model.4.block.1.conv.conv.weight",
+      "model.4.block.3.conv.conv.weight",
+      "model.6.conv.conv.weight",
+      "model.7.block.1.conv.conv.weight",
+      "model.7.block.3.conv.conv.weight",
+      "model.9.conv.conv.weight",
+      "model.10.block.1.conv.conv.weight",
+      "model.10.block.3.conv.conv.weight",
+      "model.12.conv.conv.weight",
+      "model.14.conv.conv.weight",
+  )
+  decoder_seanet = (
+      "model.0.conv.conv.weight",
+      "model.2.convtr.convtr.weight",
+      "model.3.block.1.conv.conv.weight",
+      "model.3.block.3.conv.conv.weight",
+      "model.5.convtr.convtr.weight",
+      "model.6.block.1.conv.conv.weight",
+      "model.6.block.3.conv.conv.weight",
+      "model.8.convtr.convtr.weight",
+      "model.9.block.1.conv.conv.weight",
+      "model.9.block.3.conv.conv.weight",
+      "model.11.convtr.convtr.weight",
+      "model.12.block.1.conv.conv.weight",
+      "model.12.block.3.conv.conv.weight",
+      "model.14.conv.conv.weight",
+  )
+  for suffix in encoder_seanet:
+    find_info(infos, "mimi.encoder." + suffix)
+  for suffix in decoder_seanet:
+    find_info(infos, "mimi.decoder." + suffix)
+  find_info(infos, "mimi.downsample.conv.conv.conv.weight")
+  find_info(infos, "mimi.upsample.convtr.convtr.convtr.weight")
   return dict(preset, n_q=n_q, codebook_dim=codebook_dim)
 
 
@@ -822,6 +894,17 @@ def quantize_mimi_tensors(
         # so the quantized row length (ne0) is the real contraction length
         dims = dims[1:]
     else:
+      if (len(info.dims) >= 2 and
+          (info.name in MIMI_QUANTIZABLE_NAMES or
+           info.name.endswith(MIMI_QUANTIZABLE_SUFFIXES))):
+        # The runtime selects the q8 bind path from the first converted
+        # projection and then requires every projection in the family to be
+        # q8_0; leaving one float would publish a mixed-class artifact the
+        # codec bind rejects.
+        raise ValueError(
+            f"tensor {info.name!r} matches the mimi q8_0 projection set but "
+            f"cannot be quantized (dims {info.dims}, dtype {info.dtype}); "
+            "refusing a partial q8_0 conversion")
       payload = raw
       dtype = info.dtype
     payloads.append(payload)
