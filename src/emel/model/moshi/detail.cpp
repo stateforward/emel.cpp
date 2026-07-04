@@ -404,6 +404,21 @@ bool has_tensor_with_elements(const emel::model::data &model_data,
   return elements == expected_elements;
 }
 
+// The codec bind consumes vectors, codebooks, and float-class matrices
+// through prepare helpers that accept only f32/f16 (tensor_is_float), so
+// contract probes for those tensors must require the float class, not merely
+// enough stored bytes.
+bool has_float_tensor_with_elements(const emel::model::data &model_data,
+                                    const std::string_view name,
+                                    const uint64_t expected_elements) noexcept {
+  constexpr int32_t k_dtype_f32 = 0;
+  constexpr int32_t k_dtype_f16 = 1;
+  const auto *tensor = find_tensor(model_data, name);
+  return tensor != nullptr &&
+         (tensor->type == k_dtype_f32 || tensor->type == k_dtype_f16) &&
+         has_tensor_with_elements(model_data, name, expected_elements);
+}
+
 // The codec plan selects the q8 bind path from the first projection of a
 // family and the bind then requires every projection in that family to share
 // the class, so projection probes compare element count and dtype class
@@ -631,7 +646,13 @@ emel::error::type validate_mimi_contract(const emel::model::data &model_data,
                    require_tensor_shape(
                        model_data,
                        std::string_view{name, static_cast<size_t>(written)},
-                       {codebook_dim, card});
+                       {codebook_dim, card}) &&
+                   // bind_rvq_split consumes codebooks via tensor_is_float
+                   has_float_tensor_with_elements(
+                       model_data,
+                       std::string_view{name, static_cast<size_t>(written)},
+                       static_cast<uint64_t>(codebook_dim) *
+                           static_cast<uint64_t>(card));
   }
   for (int32_t level = 0;
        quantizer_ok && level < mimi.n_q - mimi.semantic_n_q; ++level) {
@@ -644,7 +665,12 @@ emel::error::type validate_mimi_contract(const emel::model::data &model_data,
                    require_tensor_shape(
                        model_data,
                        std::string_view{name, static_cast<size_t>(written)},
-                       {codebook_dim, card});
+                       {codebook_dim, card}) &&
+                   has_float_tensor_with_elements(
+                       model_data,
+                       std::string_view{name, static_cast<size_t>(written)},
+                       static_cast<uint64_t>(codebook_dim) *
+                           static_cast<uint64_t>(card));
   }
   if (!quantizer_ok) {
     return emel::error::cast(emel::model::loader::error::model_invalid);
@@ -676,6 +702,7 @@ emel::error::type validate_mimi_contract(const emel::model::data &model_data,
   bool transformers_ok =
       mimi.transformer_num_layers <= k_max_mimi_transformer_layers;
   for (size_t family = 0; transformers_ok && family < 2u; ++family) {
+    int64_t family_mlp = 0;
     for (int32_t layer = 0;
          transformers_ok && layer < mimi.transformer_num_layers; ++layer) {
       char base[96] = {};
@@ -704,6 +731,14 @@ emel::error::type validate_mimi_contract(const emel::model::data &model_data,
         transformers_ok = false;
         break;
       }
+      // The planner stores one MLP width per family and the bind uses it for
+      // every layer's linear1/linear2, so mixed widths must reject here.
+      if (layer == 0) {
+        family_mlp = linear1_tensor->dims[1];
+      } else if (linear1_tensor->dims[1] != family_mlp) {
+        transformers_ok = false;
+        break;
+      }
       const uint64_t mlp_elements =
           static_cast<uint64_t>(linear1_tensor->dims[1]);
       transformers_ok =
@@ -721,20 +756,28 @@ emel::error::type validate_mimi_contract(const emel::model::data &model_data,
                                 dim_elements * dim_elements, proj_q8) &&
           has_projection_tensor(model_data, layer_name("linear2.weight", name),
                                 dim_elements * mlp_elements, proj_q8) &&
-          has_tensor_with_elements(model_data, layer_name("norm1.weight", name),
-                                   dim_elements) &&
-          has_tensor_with_elements(model_data, layer_name("norm1.bias", name),
-                                   dim_elements) &&
-          has_tensor_with_elements(model_data, layer_name("norm2.weight", name),
-                                   dim_elements) &&
-          has_tensor_with_elements(model_data, layer_name("norm2.bias", name),
-                                   dim_elements) &&
-          has_tensor_with_elements(model_data,
-                                   layer_name("layer_scale_1.scale", name),
-                                   dim_elements) &&
-          has_tensor_with_elements(model_data,
-                                   layer_name("layer_scale_2.scale", name),
-                                   dim_elements);
+          // norms, biases, and layer scales bind through prepare_vector,
+          // which accepts only f32/f16.
+          has_float_tensor_with_elements(model_data,
+                                         layer_name("norm1.weight", name),
+                                         dim_elements) &&
+          has_float_tensor_with_elements(model_data,
+                                         layer_name("norm1.bias", name),
+                                         dim_elements) &&
+          has_float_tensor_with_elements(model_data,
+                                         layer_name("norm2.weight", name),
+                                         dim_elements) &&
+          has_float_tensor_with_elements(model_data,
+                                         layer_name("norm2.bias", name),
+                                         dim_elements) &&
+          has_float_tensor_with_elements(model_data,
+                                         layer_name("layer_scale_1.scale",
+                                                    name),
+                                         dim_elements) &&
+          has_float_tensor_with_elements(model_data,
+                                         layer_name("layer_scale_2.scale",
+                                                    name),
+                                         dim_elements);
     }
   }
   if (!transformers_ok) {
@@ -801,8 +844,13 @@ emel::error::type validate_mimi_contract(const emel::model::data &model_data,
                                 const bool transposed, int64_t &taps_out,
                                 int64_t &out_channels_out) noexcept {
     const auto *weight = find_tensor(model_data, name);
+    constexpr int32_t k_dtype_f32 = 0;
     if (weight == nullptr || !tensor_has_storage(*weight) ||
         weight->n_dims < 1 || weight->n_dims > 3 || in_channels <= 0 ||
+        // prepare_conv_gemm/prepare_conv_transpose consume only f32/f16, and
+        // the f16 conv class additionally requires raw f16 taps on every
+        // non-transposed conv.
+        (weight->type != k_dtype_f32 && weight->type != k_dtype_f16) ||
         (!transposed && conv_f16 && weight->type != k_dtype_f16)) {
       return false;
     }
@@ -911,8 +959,10 @@ emel::error::type validate_mimi_contract(const emel::model::data &model_data,
       resolve_conv("mimi.downsample.conv.conv.conv.weight", dim, false,
                    down_taps, down_out) &&
       down_out == dim && down_taps >= 2 &&
-      // depthwise stride-2 upsample: elements == taps * dim, taps >= stride
+      // depthwise stride-2 upsample: elements == taps * dim, taps >= stride;
+      // prepare_conv_transpose consumes only f32/f16.
       upsample != nullptr && upsample->n_dims >= 1 && upsample->dims[0] >= 2 &&
+      (upsample->type == 0 || upsample->type == k_dtype_f16) &&
       upsample_elements ==
           static_cast<uint64_t>(upsample->dims[0]) * static_cast<uint64_t>(dim);
   if (!seanet_ok) {

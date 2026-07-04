@@ -837,6 +837,79 @@ TEST_CASE("mimi contract validation rejects a mixed f16 conv class") {
   CHECK(moshi::validate_execution_contract(model) != k_none);
 }
 
+TEST_CASE("mimi contract validation rejects non-float tensors the binder consumes") {
+  auto loaded = load_fixture_or_skip("mimi-tiny.gguf");
+  if (loaded.model == nullptr) {
+    return;
+  }
+
+  // prepare_vector, prepare_conv_gemm/prepare_conv_transpose, and the RVQ
+  // codebook bind all accept only f32/f16 (tensor_is_float); tensors with
+  // enough stored bytes in another dtype validated here and then failed
+  // codec initialization.
+  auto &model = *loaded.model;
+  constexpr int32_t k_dtype_bf16 = 30;
+  constexpr int32_t k_dtype_q8_0 = 8;
+  const auto flip_type = [&model](const std::string_view target,
+                                  const int32_t type) {
+    for (uint32_t idx = 0; idx < model.n_tensors; ++idx) {
+      auto &tensor = model.tensors[idx];
+      const std::string_view name{
+          model.name_storage.data() + tensor.name_offset, tensor.name_length};
+      if (name != target) {
+        continue;
+      }
+      tensor.type = type;
+      return true;
+    }
+    return false;
+  };
+
+  SUBCASE("bf16 transformer vector") {
+    REQUIRE(flip_type(
+        "mimi.encoder_transformer.transformer.layers.1.norm2.bias",
+        k_dtype_bf16));
+  }
+  SUBCASE("bf16 seanet conv in the f32 class") {
+    REQUIRE(flip_type("mimi.decoder.model.0.conv.conv.weight", k_dtype_bf16));
+  }
+  SUBCASE("q8_0 rvq codebook") {
+    REQUIRE(flip_type(
+        "mimi.quantizer.rvq_first.vq.layers.0._codebook.embedding",
+        k_dtype_q8_0));
+  }
+  CHECK(moshi::validate_execution_contract(model) != k_none);
+}
+
+TEST_CASE("mimi contract validation rejects mixed transformer mlp widths") {
+  auto loaded = load_fixture_or_skip("mimi-tiny.gguf");
+  if (loaded.model == nullptr) {
+    return;
+  }
+
+  // The codec planner stores one MLP width per transformer family and the
+  // bind uses it for every layer's linear1/linear2; per-layer-consistent but
+  // family-mixed widths validated here and failed codec initialization.
+  auto &model = *loaded.model;
+  bool narrowed = false;
+  for (uint32_t idx = 0; idx < model.n_tensors; ++idx) {
+    auto &tensor = model.tensors[idx];
+    const std::string_view name{model.name_storage.data() + tensor.name_offset,
+                                tensor.name_length};
+    if (name ==
+        "mimi.encoder_transformer.transformer.layers.1.linear1.weight") {
+      tensor.dims[1] = 1;  // storage stays over-sized, width shrinks
+      narrowed = true;
+    }
+    if (name ==
+        "mimi.encoder_transformer.transformer.layers.1.linear2.weight") {
+      tensor.dims[0] = 1;  // keep linear2 consistent with the narrowed layer
+    }
+  }
+  REQUIRE(narrowed);
+  CHECK(moshi::validate_execution_contract(model) != k_none);
+}
+
 TEST_CASE("mimi contract validation rejects malformed seanet geometry") {
   auto loaded = load_fixture_or_skip("mimi-tiny.gguf");
   if (loaded.model == nullptr) {
