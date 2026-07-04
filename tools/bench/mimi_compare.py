@@ -167,12 +167,19 @@ def main() -> int:
       ])
       emel_pcm = read_f32(emel_pcm_path)
       ref_pcm = read_f32(ref_pcm_path)
-      n = min(len(emel_pcm), len(ref_pcm))
+      # A truncated or extended stream from either lane must fail the run: a
+      # prefix-only comparison would hide decode regressions behind the
+      # encode-token gates.
+      if len(emel_pcm) != len(ref_pcm):
+        raise SystemExit(
+            f"decode pcm length mismatch: emel={len(emel_pcm)} "
+            f"reference={len(ref_pcm)}")
+      n = len(emel_pcm)
       if n == 0:
         report["decode_psnr_db"] = None
       else:
-        err = sum((a - b) ** 2 for a, b in zip(emel_pcm[:n], ref_pcm[:n])) / n
-        peak = max(abs(x) for x in ref_pcm[:n]) or 1.0
+        err = sum((a - b) ** 2 for a, b in zip(emel_pcm, ref_pcm)) / n
+        peak = max(abs(x) for x in ref_pcm) or 1.0
         report["decode_psnr_db"] = (10.0 * math.log10(peak * peak / err)
                                     if err > 0 else float("inf"))
 
