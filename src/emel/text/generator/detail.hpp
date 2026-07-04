@@ -48,6 +48,11 @@ inline constexpr rope_pairing neox_rope_pairing() noexcept {
 struct packed_matrix_binding {
   emel::model::data::tensor_record tensor = {};
   std::vector<uint8_t> storage = {};
+  // The raw model record the packed layout was prepared from. Streamed slots
+  // hold raw GGUF bytes, so the streamed rebase must clone this record (its
+  // dtype/extents describe the slot bytes) while resident restore keeps the
+  // packed record the layout swap bound.
+  const emel::model::data::tensor_record * source = nullptr;
 };
 
 struct block_weights {
@@ -129,8 +134,21 @@ struct stream_binding {
   emel::model::tensor::window::sm * window = nullptr;
   bool active = false;
   std::array<emel::model::data::tensor_record, k_stream_role_count> records = {};
+  // pristine holds the prepare()-time bound records (packed on aarch64) that
+  // resident steps restore to; raw holds the untouched model records whose
+  // dtype/extents describe the raw GGUF bytes the window streams into slots.
   std::vector<std::array<const emel::model::data::tensor_record *, k_stream_role_count>>
       pristine = {};
+  std::vector<std::array<const emel::model::data::tensor_record *, k_stream_role_count>>
+      raw = {};
+  // The logits/argmax output stage of a streamed step runs on the raw model
+  // record too (a packed resident output would need the packed input
+  // pipeline, which the raw-classified streamed route does not run); resident
+  // steps restore the prepare()-time views.
+  const emel::model::data::tensor_record * pristine_output = nullptr;
+  const emel::model::data::tensor_record * raw_output = nullptr;
+  const emel::model::data::tensor_record * pristine_output_argmax = nullptr;
+  const emel::model::data::tensor_record * raw_output_argmax = nullptr;
 };
 
 struct native_backend {
@@ -1271,6 +1289,7 @@ inline bool prepare_packed_q8_0_matrix_layout(tensor_matrix & matrix,
           *matrix.tensor, matrix.rows, matrix.cols, packed.tensor, packed.storage)) {
     return false;
   }
+  packed.source = matrix.tensor;
   matrix.tensor = &packed.tensor;
   return true;
 }
@@ -1333,6 +1352,7 @@ inline bool prepare_packed_q4_matrix_layout(tensor_matrix & matrix,
           *matrix.tensor, matrix.rows, matrix.cols, packed.tensor, packed.storage)) {
     return false;
   }
+  packed.source = matrix.tensor;
   matrix.tensor = &packed.tensor;
   return true;
 }
@@ -1397,6 +1417,7 @@ inline bool prepare_packed_q6_matrix_layout(tensor_matrix & matrix,
           *matrix.tensor, matrix.rows, matrix.cols, packed.tensor, packed.storage)) {
     return false;
   }
+  packed.source = matrix.tensor;
   matrix.tensor = &packed.tensor;
   return true;
 }
@@ -3681,30 +3702,61 @@ inline bool run_shortconv_block_chunk4(native_backend & backend,
 }
 
 // Records the prepare()-time matmul weight record pointers per layer in the
-// canonical stream role order. One-time engage bookkeeping (runs inside the
-// initialize pipeline alongside prepare()'s own setup allocation).
+// canonical stream role order: pristine holds the bound records resident
+// steps restore to (packed on aarch64), raw holds the untouched model
+// records the streamed rebase clones (their dtype/extents describe the raw
+// GGUF bytes the window copies into slots; a packed record would misread
+// them). One-time engage bookkeeping (runs inside the initialize pipeline
+// alongside prepare()'s own setup allocation).
 inline void scan_stream_pristine_records(native_backend & backend) noexcept {
   backend.stream.pristine.assign(backend.blocks.size(), {});
+  backend.stream.raw.assign(backend.blocks.size(), {});
+  backend.stream.pristine_output = backend.output.tensor;
+  backend.stream.raw_output = backend.output_native.tensor != nullptr
+                                  ? backend.output_native.tensor
+                                  : backend.output.tensor;
+  backend.stream.pristine_output_argmax = backend.output_argmax.tensor;
+  backend.stream.raw_output_argmax = backend.output_native.tensor != nullptr
+                                         ? backend.output_native.tensor
+                                         : backend.output_argmax.tensor;
   for (size_t layer = 0; layer < backend.blocks.size(); ++layer) {
     const block_weights & block = backend.blocks[layer];
     auto & roles = backend.stream.pristine[layer];
-    roles[k_stream_role_attention_q] = block.attention_q.tensor;
-    roles[k_stream_role_attention_k] = block.attention_k.tensor;
-    roles[k_stream_role_attention_v] = block.attention_v.tensor;
-    roles[k_stream_role_attention_output] = block.attention_output.tensor;
-    roles[k_stream_role_feed_forward_gate] = block.feed_forward_gate.tensor;
-    roles[k_stream_role_feed_forward_down] = block.feed_forward_down.tensor;
-    roles[k_stream_role_feed_forward_up] = block.feed_forward_up.tensor;
-    roles[k_stream_role_shortconv_in_proj] = block.shortconv_in_proj.tensor;
-    roles[k_stream_role_shortconv_out_proj] = block.shortconv_out_proj.tensor;
+    auto & raw = backend.stream.raw[layer];
+    const auto record = [&](const size_t role, const tensor_matrix & matrix,
+                            const packed_matrix_binding & packed) noexcept {
+      roles[role] = matrix.tensor;
+      raw[role] = packed.source != nullptr ? packed.source : matrix.tensor;
+    };
+    record(k_stream_role_attention_q, block.attention_q,
+           block.attention_q_packed);
+    record(k_stream_role_attention_k, block.attention_k,
+           block.attention_k_packed);
+    record(k_stream_role_attention_v, block.attention_v,
+           block.attention_v_packed);
+    record(k_stream_role_attention_output, block.attention_output,
+           block.attention_output_packed);
+    record(k_stream_role_feed_forward_gate, block.feed_forward_gate,
+           block.feed_forward_gate_packed);
+    record(k_stream_role_feed_forward_down, block.feed_forward_down,
+           block.feed_forward_down_packed);
+    record(k_stream_role_feed_forward_up, block.feed_forward_up,
+           block.feed_forward_up_packed);
+    record(k_stream_role_shortconv_in_proj, block.shortconv_in_proj,
+           block.shortconv_in_proj_packed);
+    record(k_stream_role_shortconv_out_proj, block.shortconv_out_proj,
+           block.shortconv_out_proj_packed);
   }
 }
 
 // Rebases the layer's matmul weight views onto the acquired window slot:
-// clones the pristine record per present role (canonical order matching the
-// extent builder) with data repointed into the slot. Pure pointer bookkeeping
-// on the already-chosen streamed route; absent-role skipping is data-plane
-// presence filtering, and a count mismatch propagates as data-plane failure.
+// clones the raw model record per present role (canonical order matching the
+// extent builder) with data repointed into the slot. The slot holds raw GGUF
+// bytes, so the clone's dtype/extents must describe them - the prepare()-time
+// record can be a packed repack on aarch64 and would misread the slot. Pure
+// pointer bookkeeping on the already-chosen streamed route; absent-role
+// skipping is data-plane presence filtering, and a count mismatch propagates
+// as data-plane failure.
 inline bool bind_streamed_block_views(
     native_backend & backend,
     const int32_t layer_index,
@@ -3712,16 +3764,16 @@ inline bool bind_streamed_block_views(
     const emel::model::tensor::window::detail::layer_descriptor & layout) noexcept {
   block_weights & block = backend.blocks[static_cast<size_t>(layer_index)];
   stream_binding & stream = backend.stream;
-  const auto & pristine = stream.pristine[static_cast<size_t>(layer_index)];
+  const auto & raw = stream.raw[static_cast<size_t>(layer_index)];
   uint32_t extent_index = 0u;
   const auto rebind = [&](tensor_matrix & matrix, const size_t role) noexcept -> bool {
-    if (pristine[role] == nullptr) {
+    if (raw[role] == nullptr) {
       return true;
     }
     if (extent_index >= layout.weight_count) {
       return false;
     }
-    stream.records[role] = *pristine[role];
+    stream.records[role] = *raw[role];
     stream.records[role].data = slot_base + layout.weights[extent_index].slot_offset;
     matrix.tensor = &stream.records[role];
     extent_index += 1u;
@@ -3739,12 +3791,32 @@ inline bool bind_streamed_block_views(
          extent_index == layout.weight_count;
 }
 
-// Restores every block's matmul weight views to the prepare()-time records
-// after a streamed step, so a later resident step reads the per-layer
-// tensors instead of the shared per-role stream records (which hold the last
-// acquired slot's clone). Pure pointer bookkeeping on the already-completed
-// streamed route; used by both streamed decode drivers.
+// Points the logits/argmax output views at the raw model records for a
+// streamed step: the streamed route is classified from raw records, so a
+// packed resident output would be misread by it. Pure pointer bookkeeping on
+// the already-chosen streamed route.
+inline void bind_streamed_output_views(native_backend & backend) noexcept {
+  if (backend.stream.raw_output != nullptr) {
+    backend.output.tensor = backend.stream.raw_output;
+  }
+  if (backend.stream.raw_output_argmax != nullptr) {
+    backend.output_argmax.tensor = backend.stream.raw_output_argmax;
+  }
+}
+
+// Restores every block's matmul weight views (and the output views) to the
+// prepare()-time records after a streamed step, so a later resident step
+// reads the per-layer tensors instead of the shared per-role stream records
+// (which hold the last acquired slot's clone). Pure pointer bookkeeping on
+// the already-completed streamed route; used by both streamed decode
+// drivers.
 inline void reset_stream_block_views(native_backend & backend) noexcept {
+  if (backend.stream.pristine_output != nullptr) {
+    backend.output.tensor = backend.stream.pristine_output;
+  }
+  if (backend.stream.pristine_output_argmax != nullptr) {
+    backend.output_argmax.tensor = backend.stream.pristine_output_argmax;
+  }
   // pristine is either empty (scan never ran) or exactly blocks.size()
   // (assigned in one shot by scan_stream_pristine_records), so its size
   // bounds the block indexing.
@@ -4812,6 +4884,9 @@ inline bool run_decode(native_backend &backend,
     return false;
   }
 
+  if constexpr (wmode == window_mode::streamed) {
+    bind_streamed_output_views(backend);
+  }
   for (int32_t layer = 0; layer < backend.n_layer; ++layer) {
     if (!run_layer<mode, route, lanes, wmode>(backend, layer, position,
                                               err_out)) {
@@ -4821,11 +4896,16 @@ inline bool run_decode(native_backend &backend,
       return false;
     }
   }
-  if constexpr (wmode == window_mode::streamed) {
-    reset_stream_block_views(backend);
-  }
   backend.kv_cache_tokens = position + 1;
-  return compute_logits<route, lanes>(backend);
+  if constexpr (wmode == window_mode::streamed) {
+    // Logits run on the raw output view the streamed route was classified
+    // for; the resident views are restored after.
+    const bool logits_ok = compute_logits<route, lanes>(backend);
+    reset_stream_block_views(backend);
+    return logits_ok;
+  } else {
+    return compute_logits<route, lanes>(backend);
+  }
 }
 
 template <emel::text::generator::attention_mode mode, scalar_matmul_route route,
@@ -4857,6 +4937,9 @@ inline bool run_decode_preselected_argmax(
     return false;
   }
 
+  if constexpr (wmode == window_mode::streamed) {
+    bind_streamed_output_views(backend);
+  }
   for (int32_t layer = 0; layer < backend.n_layer; ++layer) {
     if (!run_layer<mode, route, lanes, wmode>(backend, layer, position,
                                               err_out)) {
@@ -4866,12 +4949,18 @@ inline bool run_decode_preselected_argmax(
       return false;
     }
   }
-  if constexpr (wmode == window_mode::streamed) {
-    reset_stream_block_views(backend);
-  }
   backend.kv_cache_tokens = position + 1;
-  return compute_logits_preselected_argmax<argmax_route>(
-      backend, selected_index, selected_score);
+  if constexpr (wmode == window_mode::streamed) {
+    // The argmax output stage runs on the raw output view the streamed route
+    // was classified for; the resident views are restored after.
+    const bool argmax_ok = compute_logits_preselected_argmax<argmax_route>(
+        backend, selected_index, selected_score);
+    reset_stream_block_views(backend);
+    return argmax_ok;
+  } else {
+    return compute_logits_preselected_argmax<argmax_route>(
+        backend, selected_index, selected_score);
+  }
 }
 
 }  // namespace

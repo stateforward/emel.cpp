@@ -12,6 +12,7 @@
 
 #include "emel/io/mmap/sm.hpp"
 #include "emel/io/staged_read/sm.hpp"
+#include "emel/kernel/detail.hpp"
 #include "emel/logits/sampler/sm.hpp"
 #include "emel/model/tensor/window/sm.hpp"
 #include "emel/text/conditioner/sm.hpp"
@@ -119,6 +120,7 @@ emel::error::type sampler_select_argmax(int32_t & candidate_ids,
 struct prepared_model {
   emel::model::data data = {};
   std::vector<std::vector<float>> tensor_storage = {};
+  std::vector<std::vector<uint8_t>> byte_storage = {};
   int32_t hello_id = -1;
   int32_t world_id = -1;
 };
@@ -201,6 +203,132 @@ void build_model(prepared_model & prepared, const float gate_sign) {
     add_matrix(prefix + "ffn_gate.weight", k_ffn_dim, k_n_embd, gate);
     add_matrix(prefix + "ffn_down.weight", k_n_embd, k_ffn_dim, down);
     add_matrix(prefix + "ffn_up.weight", k_ffn_dim, k_n_embd, up);
+  }
+  data.n_tensors = tensor_index;
+  data.weights_data = data.tensors.data();
+  data.weights_size = 1u;
+}
+
+// A q8_0 variant of the toy: 32-wide so every matmul row is exactly one
+// q8_0 block, with the same one-hot/±10 structure (all values are exactly
+// representable after quantization, so the argmax decision is unchanged).
+// On aarch64 hosts prepare() repacks q8_0 matrices to the packed layout,
+// which is exactly the resident-vs-streamed operand split under test: the
+// window streams the raw q8_0 file bytes, never the packed repack.
+constexpr int32_t k_n_embd_q8 = 32;
+constexpr int32_t k_ffn_dim_q8 = 32;
+
+void build_model_q8(prepared_model & prepared, const float gate_sign) {
+  prepared.tensor_storage.reserve(16);
+  prepared.byte_storage.reserve(64);
+  auto & data = prepared.data;
+  data.vocab_data.tokenizer_model_id = emel::model::data::tokenizer_model::BPE;
+  data.vocab_data.tokenizer_pre_id = emel::model::data::tokenizer_pre::GPT2;
+  data.vocab_data.ignore_merges = true;
+  prepared.hello_id = add_token(data.vocab_data, "hello");
+  prepared.world_id = add_token(data.vocab_data, "world");
+  // Two filler tokens keep the q8_0 output matrix at four rows so the packed
+  // repack (which groups rows by four) accepts it on aarch64 hosts.
+  (void)add_token(data.vocab_data, "fill2");
+  (void)add_token(data.vocab_data, "fill3");
+  data.params.n_vocab = static_cast<int32_t>(data.vocab_data.n_tokens);
+  data.params.n_embd = k_n_embd_q8;
+  data.params.n_head = 1;
+  data.params.n_head_kv = 1;
+  data.params.n_ctx = 8;
+  data.params.n_rot = 2;
+  data.params.n_layer = k_n_layer;
+  data.n_layers = k_n_layer;
+  std::memcpy(data.architecture_name.data(), "llama", 5u);
+
+  uint32_t tensor_index = 0u;
+  const auto add_name = [&](emel::model::data::tensor_record & tensor,
+                            const std::string_view name) {
+    tensor.name_offset = data.name_bytes_used;
+    tensor.name_length = static_cast<uint32_t>(name.size());
+    std::memcpy(data.name_storage.data() + data.name_bytes_used, name.data(),
+                name.size());
+    data.name_bytes_used += static_cast<uint32_t>(name.size());
+  };
+  const auto add_vector = [&](const std::string_view name,
+                              const std::vector<float> & values) {
+    auto & tensor = data.tensors[tensor_index++];
+    add_name(tensor, name);
+    prepared.tensor_storage.push_back(values);
+    tensor.type = static_cast<int32_t>(emel::kernel::event::dtype::f32);
+    tensor.n_dims = 1;
+    tensor.dims[0] = static_cast<int64_t>(values.size());
+    tensor.data = prepared.tensor_storage.back().data();
+    tensor.data_size = static_cast<uint64_t>(values.size() * sizeof(float));
+  };
+  const auto add_matrix_f32 = [&](const std::string_view name, const int32_t rows,
+                                  const int32_t cols,
+                                  const std::vector<float> & values) {
+    auto & tensor = data.tensors[tensor_index++];
+    add_name(tensor, name);
+    prepared.tensor_storage.push_back(values);
+    tensor.type = static_cast<int32_t>(emel::kernel::event::dtype::f32);
+    tensor.n_dims = 2;
+    tensor.dims[0] = cols;
+    tensor.dims[1] = rows;
+    tensor.data = prepared.tensor_storage.back().data();
+    tensor.data_size = static_cast<uint64_t>(values.size() * sizeof(float));
+  };
+  const auto add_matrix_q8 = [&](const std::string_view name, const int32_t rows,
+                                 const int32_t cols,
+                                 const std::vector<float> & values) {
+    REQUIRE(cols == 32);
+    REQUIRE(static_cast<size_t>(rows) * static_cast<size_t>(cols) == values.size());
+    std::vector<uint8_t> bytes(
+        static_cast<size_t>(rows) * sizeof(emel::kernel::detail::quant::block_q8_0));
+    auto * blocks =
+        reinterpret_cast<emel::kernel::detail::quant::block_q8_0 *>(bytes.data());
+    for (int32_t row = 0; row < rows; ++row) {
+      emel::kernel::detail::quant::quantize_row_q8_0_strided(
+          values.data() + static_cast<size_t>(row) * 32u, 1u, &blocks[row], 32);
+    }
+    auto & tensor = data.tensors[tensor_index++];
+    add_name(tensor, name);
+    prepared.byte_storage.push_back(std::move(bytes));
+    tensor.type = static_cast<int32_t>(emel::kernel::event::dtype::q8_0);
+    tensor.n_dims = 2;
+    tensor.dims[0] = cols;
+    tensor.dims[1] = rows;
+    tensor.data = prepared.byte_storage.back().data();
+    tensor.data_size = static_cast<uint64_t>(prepared.byte_storage.back().size());
+  };
+
+  std::vector<float> embd(4u * k_n_embd_q8, 0.0f);
+  embd[0] = 1.0f;                                   // hello -> channel 0
+  embd[static_cast<size_t>(k_n_embd_q8) + 1u] = 1.0f;  // world -> channel 1
+  add_matrix_f32("token_embd.weight", 4, k_n_embd_q8, embd);
+  add_vector("output_norm.weight", std::vector<float>(k_n_embd_q8, 1.0f));
+  // q8_0 output so aarch64 hosts pack the logits matrix like a real q8_0
+  // model; the filler rows stay all-zero and never win the argmax.
+  std::vector<float> output(4u * k_n_embd_q8, 0.0f);
+  output[1] = 1.0f;                                    // hello scores channel 1
+  output[static_cast<size_t>(k_n_embd_q8)] = 1.0f;     // world scores channel 0
+  add_matrix_q8("output.weight", 4, k_n_embd_q8, output);
+
+  const std::vector<float> zeros(
+      static_cast<size_t>(k_n_embd_q8) * k_n_embd_q8, 0.0f);
+  std::vector<float> gate(static_cast<size_t>(k_ffn_dim_q8) * k_n_embd_q8, 0.0f);
+  gate[0] = gate_sign * 10.0f;  // gate row 0 reads hidden channel 0
+  std::vector<float> up(static_cast<size_t>(k_ffn_dim_q8) * k_n_embd_q8, 0.0f);
+  up[0] = 1.0f;  // up row 0 reads hidden channel 0
+  std::vector<float> down(static_cast<size_t>(k_n_embd_q8) * k_ffn_dim_q8, 0.0f);
+  down[static_cast<size_t>(k_ffn_dim_q8)] = 1.0f;  // down row 1 reads ffn lane 0
+  for (int32_t layer = 0; layer < k_n_layer; ++layer) {
+    const std::string prefix = "blk." + std::to_string(layer) + ".";
+    add_vector(prefix + "attn_norm.weight", std::vector<float>(k_n_embd_q8, 1.0f));
+    add_matrix_q8(prefix + "attn_q.weight", k_n_embd_q8, k_n_embd_q8, zeros);
+    add_matrix_q8(prefix + "attn_k.weight", k_n_embd_q8, k_n_embd_q8, zeros);
+    add_matrix_q8(prefix + "attn_v.weight", k_n_embd_q8, k_n_embd_q8, zeros);
+    add_matrix_q8(prefix + "attn_output.weight", k_n_embd_q8, k_n_embd_q8, zeros);
+    add_vector(prefix + "ffn_norm.weight", std::vector<float>(k_n_embd_q8, 1.0f));
+    add_matrix_q8(prefix + "ffn_gate.weight", k_ffn_dim_q8, k_n_embd_q8, gate);
+    add_matrix_q8(prefix + "ffn_down.weight", k_n_embd_q8, k_ffn_dim_q8, down);
+    add_matrix_q8(prefix + "ffn_up.weight", k_ffn_dim_q8, k_n_embd_q8, up);
   }
   data.n_tensors = tensor_index;
   data.weights_data = data.tensors.data();
@@ -300,10 +428,11 @@ struct bound_window {
     return ctx;
   }
 
-  // Owner-provided slot arena: two slots at the toy model's aligned layer
-  // span, alive for the rig's lifetime.
+  // Owner-provided slot arena: two slots sized for the larger q8_0 toy's
+  // aligned layer span (7 x 1088B; the f32 toy needs 7 x 64B), alive for the
+  // rig's lifetime.
   alignas(window::detail::k_slot_alignment_bytes)
-      std::array<uint8_t, 2u * 7u * 64u> slot_arena{};
+      std::array<uint8_t, 2u * 7u * 1088u> slot_arena{};
 
   bool bind(const stream_weight_file & file, const uint64_t budget_bytes) {
     const window::event::bind_window_request request{
@@ -331,6 +460,10 @@ struct bound_window {
 // Streaming budget for the toy file: total = 4 layers x 7 x 64B = 1792 aligned
 // bytes; two 448-byte slots fit in 1000 while the total does not.
 constexpr uint64_t k_streaming_budget = 1000u;
+
+// q8_0 toy: 4 layers x 7 x 1088B = 30464 total; two 7616B slots fit in 16000
+// while the total does not.
+constexpr uint64_t k_streaming_budget_q8 = 16000u;
 
 struct generation_run {
   std::array<char, 64> output = {};
@@ -427,6 +560,19 @@ struct generator_rig {
   }
 };
 
+struct generator_rig_q8 {
+  prepared_model prepared{};
+  emel::text::tokenizer::sm tokenizer{};
+  emel::text::conditioner::sm conditioner{};
+  std::array<emel::logits::sampler::fn, 1> samplers = {
+      emel::logits::sampler::fn::from<sampler_select_argmax>(),
+  };
+
+  explicit generator_rig_q8(const float gate_sign) {
+    build_model_q8(prepared, gate_sign);
+  }
+};
+
 }  // namespace
 
 TEST_CASE("generator streamed decode matches resident output token for token") {
@@ -491,6 +637,46 @@ TEST_CASE("generator streamed decode consumes slot bytes not resident records") 
   // must follow the window's file bytes (model B).
   REQUIRE(run_a.text() == "hellohello");
   REQUIRE(run_b.text() == "worldworld");
+  CHECK(mixed_run.text() == "helloworld");
+  CHECK(mixed_run.text() != run_a.text());
+}
+
+TEST_CASE("generator streamed q8_0 decode reads raw slot bytes not packed repacks") {
+  // Resident baselines must disagree so the mixed comparison is meaningful.
+  auto rig_a = std::make_unique<generator_rig_q8>(+1.0f);
+  auto resident_a = std::make_unique<emel::text::generator::sm>(rig_a->prepared.data,
+                                                                rig_a->conditioner);
+  const generation_run run_a = run_generation(*resident_a, rig_a->tokenizer, rig_a->samplers);
+  REQUIRE(run_a.ok);
+
+  auto rig_b = std::make_unique<generator_rig_q8>(-1.0f);
+  auto resident_b = std::make_unique<emel::text::generator::sm>(rig_b->prepared.data,
+                                                                rig_b->conditioner);
+  const generation_run run_b = run_generation(*resident_b, rig_b->tokenizer, rig_b->samplers);
+  REQUIRE(run_b.ok);
+  REQUIRE(run_a.text() != run_b.text());
+
+  // Stream the -1 file under a +1-weight generator. v1 streams the decode
+  // step only, so the first generated token comes from the resident prefill
+  // (+1 memory, "hello") and the second from the streamed decode, which must
+  // follow the window's raw q8_0 file bytes (-1, "world"). On aarch64 hosts
+  // prepare() repacked the resident q8_0 matrices, so this fails if the
+  // streamed rebase clones a packed record or the streamed route classifies
+  // from the packed resident class - the slots hold raw q8_0 file bytes.
+  auto rig_b_file = std::make_unique<generator_rig_q8>(-1.0f);
+  stream_weight_file file_b{rig_b_file->prepared, "q8_mixed"};
+  auto window_rig = std::make_unique<bound_window>();
+  REQUIRE(window_rig->bind(file_b, k_streaming_budget_q8));
+  REQUIRE(window_rig->streaming_active);
+
+  auto rig_mixed = std::make_unique<generator_rig_q8>(+1.0f);
+  auto streamed = std::make_unique<emel::text::generator::sm>(
+      rig_mixed->prepared.data, rig_mixed->conditioner, window_rig->machine,
+      window_rig->streaming_active);
+  const generation_run mixed_run =
+      run_generation(*streamed, rig_mixed->tokenizer, rig_mixed->samplers);
+  REQUIRE(mixed_run.ok);
+  REQUIRE(run_a.text() == "hellohello");
   CHECK(mixed_run.text() == "helloworld");
   CHECK(mixed_run.text() != run_a.text());
 }

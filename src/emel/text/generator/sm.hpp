@@ -497,8 +497,11 @@ struct model {
                  + sml::completion<event::generate_run>
                  [ guard::guard_decode_preselected_direct_ready{} ]
 
-      // Streamed rows sit above their resident/parallel siblings: an active
-      // tensor window routes the serial slot-consuming variants.
+      // Streamed rows sit above every resident/parallel sibling: an active
+      // tensor window routes the serial slot-consuming variants, and the
+      // streamed class (scanned from the raw stream records) can differ from
+      // the resident class (scanned from the packed prepare()-time records),
+      // so the whole streamed group must precede the whole resident group.
       , sml::state<decode_compute_flash_decision> <= sml::state<decode_compute_flash>
                  + sml::completion<event::generate_run>
                  [ guard::guard_decode_materialized_streamed_scalar_packed_q8_0_ready{} ]
@@ -508,6 +511,21 @@ struct model {
                  + sml::completion<event::generate_run>
                  [ guard::guard_decode_materialized_streamed_scalar_q8_k_ready{} ]
                  / action::request_decode_compute_flash_q8_k_streamed
+
+      , sml::state<decode_compute_flash_decision> <= sml::state<decode_compute_flash>
+                 + sml::completion<event::generate_run>
+                 [ guard::guard_decode_materialized_streamed_scalar_native_quantized_q8_k_ready{} ]
+                 / action::request_decode_compute_flash_native_quantized_q8_k_logits_streamed
+
+      , sml::state<decode_compute_flash_decision> <= sml::state<decode_compute_flash>
+                 + sml::completion<event::generate_run>
+                 [ guard::guard_decode_materialized_streamed_scalar_native_quantized_ready{} ]
+                 / action::request_decode_compute_flash_native_quantized_streamed
+
+      , sml::state<decode_compute_flash_decision> <= sml::state<decode_compute_flash>
+                 + sml::completion<event::generate_run>
+                 [ guard::guard_decode_materialized_streamed_scalar_kernel_ready{} ]
+                 / action::request_decode_compute_flash_kernel_streamed
 
       , sml::state<decode_compute_flash_decision> <= sml::state<decode_compute_flash>
                  + sml::completion<event::generate_run>
@@ -531,11 +549,6 @@ struct model {
 
       , sml::state<decode_compute_flash_decision> <= sml::state<decode_compute_flash>
                  + sml::completion<event::generate_run>
-                 [ guard::guard_decode_materialized_streamed_scalar_native_quantized_q8_k_ready{} ]
-                 / action::request_decode_compute_flash_native_quantized_q8_k_logits_streamed
-
-      , sml::state<decode_compute_flash_decision> <= sml::state<decode_compute_flash>
-                 + sml::completion<event::generate_run>
                  [ guard::guard_decode_materialized_parallel_scalar_native_quantized_q8_k_ready{} ]
                  / action::request_decode_compute_flash_parallel_native_quantized_q8_k_logits
 
@@ -546,11 +559,6 @@ struct model {
 
       , sml::state<decode_compute_flash_decision> <= sml::state<decode_compute_flash>
                  + sml::completion<event::generate_run>
-                 [ guard::guard_decode_materialized_streamed_scalar_native_quantized_ready{} ]
-                 / action::request_decode_compute_flash_native_quantized_streamed
-
-      , sml::state<decode_compute_flash_decision> <= sml::state<decode_compute_flash>
-                 + sml::completion<event::generate_run>
                  [ guard::guard_decode_materialized_parallel_scalar_native_quantized_kernel_ready{} ]
                  / action::request_decode_compute_flash_parallel_native_quantized
 
@@ -558,11 +566,6 @@ struct model {
                  + sml::completion<event::generate_run>
                  [ guard::guard_decode_materialized_scalar_native_quantized_kernel_ready{} ]
                  / action::request_decode_compute_flash_native_quantized
-
-      , sml::state<decode_compute_flash_decision> <= sml::state<decode_compute_flash>
-                 + sml::completion<event::generate_run>
-                 [ guard::guard_decode_materialized_streamed_scalar_kernel_ready{} ]
-                 / action::request_decode_compute_flash_kernel_streamed
 
       , sml::state<decode_compute_flash_decision> <= sml::state<decode_compute_flash>
                  + sml::completion<event::generate_run>
