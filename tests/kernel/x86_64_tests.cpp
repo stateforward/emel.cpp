@@ -1903,6 +1903,20 @@ TEST_CASE("kernel_x86_64_get_rows_gathers_f32_and_q8_0_rows") {
   gather_ev.src1 = null_indices;
   CHECK_FALSE(machine.process_event(gather_ev));
 
+  // A backed index tensor with a null gathered table or destination must
+  // also reject in the guard: the exec reads the table through src0.data and
+  // writes through dst.data immediately.
+  gather_ev.src1 = make_src(indices, dtype::i32, 2);
+  auto null_table = make_src(table, dtype::f32, 4, 3);
+  null_table.data = nullptr;
+  gather_ev.src0 = null_table;
+  CHECK_FALSE(machine.process_event(gather_ev));
+  gather_ev.src0 = make_src(table, dtype::f32, 4, 3);
+  auto null_out = make_dst(gathered, dtype::f32, 4, 2);
+  null_out.data = nullptr;
+  gather_ev.dst = null_out;
+  CHECK_FALSE(machine.process_event(gather_ev));
+
   constexpr int64_t k_cols = 32;
   float source_rows[2 * k_cols] = {};
   for (int64_t i = 0; i < 2 * k_cols; ++i) {
