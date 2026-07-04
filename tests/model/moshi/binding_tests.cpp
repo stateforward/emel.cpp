@@ -837,6 +837,35 @@ TEST_CASE("mimi contract validation rejects a mixed f16 conv class") {
   CHECK(moshi::validate_execution_contract(model) != k_none);
 }
 
+TEST_CASE("mimi contract validation rejects malformed seanet geometry") {
+  auto loaded = load_fixture_or_skip("mimi-tiny.gguf");
+  if (loaded.model == nullptr) {
+    return;
+  }
+
+  // plan_seanet resolves every conv against the running channel chain and
+  // requires resnet blocks to return to their input width through a k1
+  // conv; a name-presence probe let a geometrically broken conv (same
+  // element count, same storage) validate and then fail codec bind.
+  auto &model = *loaded.model;
+  bool corrupted = false;
+  for (uint32_t idx = 0; idx < model.n_tensors; ++idx) {
+    auto &tensor = model.tensors[idx];
+    const std::string_view name{model.name_storage.data() + tensor.name_offset,
+                                tensor.name_length};
+    if (name != "mimi.decoder.model.9.block.3.conv.conv.weight") {
+      continue;
+    }
+    // Swap taps and the second extent: the product (and storage) stay the
+    // same, but the k1 resnet output conv now declares multi-tap geometry.
+    REQUIRE(tensor.n_dims >= 2);
+    std::swap(tensor.dims[0], tensor.dims[1]);
+    corrupted = tensor.dims[0] != 1;
+  }
+  REQUIRE(corrupted);
+  CHECK(moshi::validate_execution_contract(model) != k_none);
+}
+
 TEST_CASE("mimi contract validation requires the fixed seanet topology") {
   auto loaded = load_fixture_or_skip("mimi-tiny.gguf");
   if (loaded.model == nullptr) {

@@ -781,92 +781,144 @@ emel::error::type validate_mimi_contract(const emel::model::data &model_data,
     return emel::error::cast(emel::model::loader::error::model_invalid);
   }
 
-  // The codec planner walks the fixed mimi_v0_1 SEANet module topology by
-  // exact tensor name (plan_seanet's conv/convtr/resnet indexes plus the
-  // downsample/upsample bridge convs), so the contract must require every
-  // fixed-topology weight: a component with each family merely non-empty
-  // otherwise validates and fails codec initialization later.
-  static constexpr const char *k_encoder_seanet_tensors[] = {
-      "model.0.conv.conv.weight",
-      "model.1.block.1.conv.conv.weight",
-      "model.1.block.3.conv.conv.weight",
-      "model.3.conv.conv.weight",
-      "model.4.block.1.conv.conv.weight",
-      "model.4.block.3.conv.conv.weight",
-      "model.6.conv.conv.weight",
-      "model.7.block.1.conv.conv.weight",
-      "model.7.block.3.conv.conv.weight",
-      "model.9.conv.conv.weight",
-      "model.10.block.1.conv.conv.weight",
-      "model.10.block.3.conv.conv.weight",
-      "model.12.conv.conv.weight",
-      "model.14.conv.conv.weight",
-  };
-  static constexpr const char *k_decoder_seanet_tensors[] = {
-      "model.0.conv.conv.weight",
-      "model.2.convtr.convtr.weight",
-      "model.3.block.1.conv.conv.weight",
-      "model.3.block.3.conv.conv.weight",
-      "model.5.convtr.convtr.weight",
-      "model.6.block.1.conv.conv.weight",
-      "model.6.block.3.conv.conv.weight",
-      "model.8.convtr.convtr.weight",
-      "model.9.block.1.conv.conv.weight",
-      "model.9.block.3.conv.conv.weight",
-      "model.11.convtr.convtr.weight",
-      "model.12.block.1.conv.conv.weight",
-      "model.12.block.3.conv.conv.weight",
-      "model.14.conv.conv.weight",
-  };
-  // plan_codec selects the f16 conv operand class from the first encoder
-  // conv and bind_conv then requires every non-transposed SEANet/downsample
-  // conv to carry raw f16 taps; a mixed artifact must reject here instead of
-  // failing codec initialization. Transposed convs (decoder convtr entries
-  // and the upsample) stay outside the f16 class.
+  // The codec planner walks the fixed mimi_v0_1 SEANet module topology and
+  // resolves every weight against the running channel/stride chain
+  // (plan_seanet / resolve_conv_geometry / bind_conv), so the contract must
+  // mirror the geometry, not merely the names: a named conv whose element
+  // count does not divide the chain, a resnet that does not return to its
+  // input width through a k1 conv, or a strided kernel shorter than its
+  // stride otherwise validates and fails codec initialization. plan_codec
+  // also selects the f16 conv operand class from the first encoder conv and
+  // bind_conv requires raw f16 taps on every non-transposed conv.
   constexpr int32_t k_dtype_f16 = 1;
   const auto *first_conv =
       find_tensor(model_data, "mimi.encoder.model.0.conv.conv.weight");
   const bool conv_f16 =
       first_conv != nullptr && first_conv->type == k_dtype_f16;
-  const auto has_conv_tensor = [&model_data, conv_f16](
-                                   const std::string_view name,
-                                   const bool transposed) noexcept {
-    const auto *tensor = find_tensor(model_data, name);
-    return tensor != nullptr && tensor_has_storage(*tensor) &&
-           (transposed || !conv_f16 || tensor->type == k_dtype_f16);
+  const auto resolve_conv = [&model_data, conv_f16](
+                                const std::string_view name,
+                                const int64_t in_channels,
+                                const bool transposed, int64_t &taps_out,
+                                int64_t &out_channels_out) noexcept {
+    const auto *weight = find_tensor(model_data, name);
+    if (weight == nullptr || !tensor_has_storage(*weight) ||
+        weight->n_dims < 1 || weight->n_dims > 3 || in_channels <= 0 ||
+        (!transposed && conv_f16 && weight->type != k_dtype_f16)) {
+      return false;
+    }
+    taps_out = weight->dims[0];
+    if (taps_out <= 0) {
+      return false;
+    }
+    uint64_t total = 1u;
+    for (int32_t dim = 0; dim < weight->n_dims; ++dim) {
+      total *= static_cast<uint64_t>(weight->dims[static_cast<size_t>(dim)]);
+    }
+    const uint64_t divisor =
+        static_cast<uint64_t>(taps_out) * static_cast<uint64_t>(in_channels);
+    if (divisor == 0u || total % divisor != 0u) {
+      return false;
+    }
+    out_channels_out = static_cast<int64_t>(total / divisor);
+    return out_channels_out > 0;
   };
-  bool seanet_ok = true;
-  for (const char *suffix : k_encoder_seanet_tensors) {
-    char name[96] = {};
-    const int written =
-        std::snprintf(name, sizeof(name), "mimi.encoder.%s", suffix);
-    seanet_ok =
-        seanet_ok && written > 0 &&
-        static_cast<size_t>(written) < sizeof(name) &&
-        has_conv_tensor(std::string_view{name, static_cast<size_t>(written)},
-                        /*transposed=*/false);
+  // Fixed mimi_v0_1 module topology (index, kind, stride) mirroring the
+  // codec's k_encoder_topology/k_decoder_topology; kind: 0 conv, 1 convtr,
+  // 2 resnet.
+  struct seanet_module {
+    int32_t index;
+    uint8_t kind;
+    int32_t stride;
+  };
+  static constexpr seanet_module k_encoder_modules[] = {
+      {0, 0, 1}, {1, 2, 1}, {3, 0, 4}, {4, 2, 1},  {6, 0, 5},
+      {7, 2, 1}, {9, 0, 6}, {10, 2, 1}, {12, 0, 8}, {14, 0, 1},
+  };
+  static constexpr seanet_module k_decoder_modules[] = {
+      {0, 0, 1}, {2, 1, 8}, {3, 2, 1}, {5, 1, 6},  {6, 2, 1},
+      {8, 1, 5}, {9, 2, 1}, {11, 1, 4}, {12, 2, 1}, {14, 0, 1},
+  };
+  const auto walk_seanet = [&resolve_conv](const char *family,
+                                           std::span<const seanet_module> modules,
+                                           int64_t channels,
+                                           int64_t &channels_out) noexcept {
+    for (const seanet_module &module : modules) {
+      char name[112] = {};
+      if (module.kind == 2u) {
+        int64_t taps1 = 0;
+        int64_t half = 0;
+        int64_t taps3 = 0;
+        int64_t res_out = 0;
+        int written = std::snprintf(name, sizeof(name),
+                                    "mimi.%s.model.%d.block.1.conv.conv.weight",
+                                    family, module.index);
+        if (written <= 0 || static_cast<size_t>(written) >= sizeof(name) ||
+            !resolve_conv(std::string_view{name, static_cast<size_t>(written)},
+                          channels, false, taps1, half)) {
+          return false;
+        }
+        written = std::snprintf(name, sizeof(name),
+                                "mimi.%s.model.%d.block.3.conv.conv.weight",
+                                family, module.index);
+        if (written <= 0 || static_cast<size_t>(written) >= sizeof(name) ||
+            !resolve_conv(std::string_view{name, static_cast<size_t>(written)},
+                          half, false, taps3, res_out) ||
+            taps3 != 1 || res_out != channels) {
+          return false;
+        }
+        continue;
+      }
+      const bool transposed = module.kind == 1u;
+      const int written = std::snprintf(
+          name, sizeof(name), "mimi.%s.model.%d.%s", family, module.index,
+          transposed ? "convtr.convtr.weight" : "conv.conv.weight");
+      int64_t taps = 0;
+      int64_t out_channels = 0;
+      if (written <= 0 || static_cast<size_t>(written) >= sizeof(name) ||
+          !resolve_conv(std::string_view{name, static_cast<size_t>(written)},
+                        channels, transposed, taps, out_channels) ||
+          taps < module.stride) {
+        return false;
+      }
+      channels = out_channels;
+    }
+    channels_out = channels;
+    return true;
+  };
+  int64_t encoder_channels = 0;
+  int64_t decoder_channels = 0;
+  int64_t down_taps = 0;
+  int64_t down_out = 0;
+  const auto *upsample = find_tensor(
+      model_data, "mimi.upsample.convtr.convtr.convtr.weight");
+  uint64_t upsample_elements = 0u;
+  if (upsample != nullptr && tensor_has_storage(*upsample)) {
+    upsample_elements = 1u;
+    for (int32_t dim = 0; dim < upsample->n_dims; ++dim) {
+      upsample_elements *=
+          static_cast<uint64_t>(upsample->dims[static_cast<size_t>(dim)]);
+    }
   }
-  for (const char *suffix : k_decoder_seanet_tensors) {
-    char name[96] = {};
-    const int written =
-        std::snprintf(name, sizeof(name), "mimi.decoder.%s", suffix);
-    const bool transposed =
-        std::string_view{suffix}.find("convtr") != std::string_view::npos;
-    seanet_ok =
-        seanet_ok && written > 0 &&
-        static_cast<size_t>(written) < sizeof(name) &&
-        has_conv_tensor(std::string_view{name, static_cast<size_t>(written)},
-                        transposed);
-  }
-  seanet_ok =
-      seanet_ok &&
-      has_conv_tensor("mimi.downsample.conv.conv.conv.weight",
-                      /*transposed=*/false) &&
-      has_conv_tensor("mimi.upsample.convtr.convtr.convtr.weight",
-                      /*transposed=*/true);
+  const bool seanet_ok =
+      walk_seanet("encoder",
+                  std::span<const seanet_module>{k_encoder_modules},
+                  1, encoder_channels) &&
+      encoder_channels == dim &&
+      walk_seanet("decoder",
+                  std::span<const seanet_module>{k_decoder_modules},
+                  dim, decoder_channels) &&
+      decoder_channels == 1 &&
+      resolve_conv("mimi.downsample.conv.conv.conv.weight", dim, false,
+                   down_taps, down_out) &&
+      down_out == dim && down_taps >= 2 &&
+      // depthwise stride-2 upsample: elements == taps * dim, taps >= stride
+      upsample != nullptr && upsample->n_dims >= 1 && upsample->dims[0] >= 2 &&
+      upsample_elements ==
+          static_cast<uint64_t>(upsample->dims[0]) * static_cast<uint64_t>(dim);
   if (!seanet_ok) {
     return emel::error::cast(emel::model::loader::error::model_invalid);
   }
+
 
   return emel::error::cast(emel::model::loader::error::none);
 }
