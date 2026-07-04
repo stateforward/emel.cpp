@@ -3,9 +3,11 @@
 #include <algorithm>
 #include <array>
 #include <cstdint>
+#include <climits>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <memory>
 #include <span>
 #include <string>
@@ -219,6 +221,15 @@ struct kv_store {
            std::span<const uint8_t>{encoded});
   }
 
+  void f32(const std::string_view key, const float value) {
+    std::vector<uint8_t> encoded = {};
+    uint32_t bits = 0u;
+    std::memcpy(&bits, &value, sizeof(bits));
+    append_scalar<uint32_t>(encoded, bits);
+    append(key, emel::gguf::loader::detail::constants::gguf_type_float32,
+           std::span<const uint8_t>{encoded});
+  }
+
   void i32_array(const std::string_view key,
                  const std::span<const int32_t> values) {
     std::vector<uint8_t> encoded = {};
@@ -238,6 +249,7 @@ struct lm_kv_options {
   std::string_view gating = "silu";
   int32_t dep_q = 4;
   uint32_t delay_count = 5u;
+  uint32_t n_q = 4u;
 };
 
 kv_store make_lm_kv(const lm_kv_options &options) {
@@ -261,7 +273,7 @@ kv_store make_lm_kv(const lm_kv_options &options) {
 
   put_string("moshi.component", "lm");
   put_u32("moshi.lm.card", 32u);
-  put_u32("moshi.lm.n_q", 4u);
+  put_u32("moshi.lm.n_q", options.n_q);
   put_u32("moshi.lm.dep_q", static_cast<uint32_t>(options.dep_q));
   put_u32("moshi.lm.text_card", 64u);
   put_u32("moshi.lm.existing_text_padding_id", 3u);
@@ -301,6 +313,27 @@ bool load_lm_hparams(const kv_store &store, emel::model::data &model) {
   const auto binding = store.binding();
   const emel::model::detail::hparam_loader loader{binding};
   return moshi::load_hparams(loader, model);
+}
+
+struct mimi_kv_options {
+  float frame_rate = 12.5f;
+};
+
+kv_store make_mimi_kv(const mimi_kv_options &options) {
+  kv_store store = {};
+  store.string("moshi.component", "mimi");
+  store.u32("moshi.mimi.sample_rate", 24000u);
+  store.f32("moshi.mimi.frame_rate", options.frame_rate);
+  store.u32("moshi.mimi.n_q", 4u);
+  store.u32("moshi.mimi.card", 32u);
+  store.u32("moshi.mimi.dim", 16u);
+  store.u32("moshi.mimi.semantic_n_q", 1u);
+  store.u32("moshi.mimi.codebook_dim", 8u);
+  store.u32("moshi.mimi.transformer.num_layers", 2u);
+  store.u32("moshi.mimi.transformer.num_heads", 2u);
+  store.u32("moshi.mimi.transformer.context", 8u);
+  store.u32("moshi.mimi.transformer.max_period", 10000u);
+  return store;
 }
 
 constexpr emel::error::type k_none =
@@ -483,6 +516,35 @@ TEST_CASE("moshi lm hparams require the full metadata contract") {
     CHECK_FALSE(load_lm_hparams(
         make_lm_kv({.skip_key = "moshi.lm.depformer.dim"}), *model));
   }
+
+  SUBCASE("n_q at the integer limit fails without overflowing the delay slot") {
+    // dep_q <= n_q passes first, so the delay-slot bound must reject the
+    // count without evaluating n_q + 1 in signed arithmetic.
+    CHECK_FALSE(load_lm_hparams(
+        make_lm_kv({.n_q = static_cast<uint32_t>(INT32_MAX)}), *model));
+  }
+}
+
+TEST_CASE("moshi mimi hparams require finite frame rates") {
+  auto model = std::make_unique<emel::model::data>();
+
+  SUBCASE("complete contract loads") {
+    CHECK(load_lm_hparams(make_mimi_kv({}), *model));
+    CHECK(model->moshi_component_id ==
+          emel::model::data::moshi_component::mimi);
+  }
+
+  SUBCASE("nan frame rate fails") {
+    CHECK_FALSE(load_lm_hparams(
+        make_mimi_kv({.frame_rate = std::numeric_limits<float>::quiet_NaN()}),
+        *model));
+  }
+
+  SUBCASE("infinite frame rate fails") {
+    CHECK_FALSE(load_lm_hparams(
+        make_mimi_kv({.frame_rate = std::numeric_limits<float>::infinity()}),
+        *model));
+  }
 }
 
 TEST_CASE("moshi contract validation rejects inconsistent models") {
@@ -519,6 +581,21 @@ TEST_CASE("moshi contract validation rejects inconsistent models") {
     }
     CHECK(moshi::validate_execution_contract(*loaded.model) != k_none);
   }
+}
+
+TEST_CASE("mimi contract validation requires every semantic rvq codebook") {
+  auto loaded = load_fixture_or_skip("mimi-tiny.gguf");
+  if (loaded.model == nullptr) {
+    return;
+  }
+
+  // Declare a second semantic level the fixture does not carry (and keep the
+  // acoustic count at the fixture's three): an existence probe of layers.0
+  // alone would still validate while bind_rvq_split later consumes semantic
+  // levels 0..semantic_n_q-1 and fails initialization.
+  loaded.model->mimi.semantic_n_q = 2;
+  loaded.model->mimi.n_q = 5;
+  CHECK(moshi::validate_execution_contract(*loaded.model) != k_none);
 }
 
 TEST_CASE("mimi contract validation requires every acoustic rvq codebook") {

@@ -1,6 +1,7 @@
 #include "emel/model/moshi/detail.hpp"
 
 #include <climits>
+#include <cmath>
 #include <cstddef>
 #include <cstdio>
 #include <initializer_list>
@@ -179,7 +180,9 @@ bool load_lm_hparams(const emel::model::detail::hparam_loader &loader,
 
   const bool consistent =
       lm.dep_q >= 0 && lm.dep_q <= lm.n_q &&
-      lm.n_q + 1 <= emel::model::data::moshi_lm_hparams::k_max_delays &&
+      // n_q < k_max_delays bounds the n_q + 1 delay slot without evaluating
+      // a signed addition that can overflow on a malformed n_q.
+      lm.n_q < emel::model::data::moshi_lm_hparams::k_max_delays &&
       lm.delay_count == static_cast<uint32_t>(lm.n_q) + 1u &&
       lm.dim % lm.num_heads == 0 && lm.text_padding_id >= 0 &&
       lm.text_padding_id < lm.text_card;
@@ -252,7 +255,8 @@ bool load_mimi_hparams(const emel::model::detail::hparam_loader &loader,
                             mimi.transformer_context) ||
       !require_positive_i32(binding, "moshi.mimi.transformer.max_period",
                             mimi.transformer_max_period) ||
-      mimi.frame_rate <= 0.0f || mimi.semantic_n_q >= mimi.n_q ||
+      !std::isfinite(mimi.frame_rate) || mimi.frame_rate <= 0.0f ||
+      mimi.semantic_n_q >= mimi.n_q ||
       mimi.dim % mimi.transformer_num_heads != 0) {
     return false;
   }
@@ -549,12 +553,23 @@ emel::error::type validate_mimi_contract(const emel::model::data &model_data,
   // each rvq_rest codebook and its shape, not just existence of the last
   // index: a model missing an intermediate level or carrying a wrong-shaped
   // codebook would otherwise validate here and fail initialization later.
-  bool quantizer_ok =
-      mimi.n_q > mimi.semantic_n_q &&
-      require_tensor_shape(
-          model_data,
-          "mimi.quantizer.rvq_first.vq.layers.0._codebook.embedding",
-          {codebook_dim, card});
+  bool quantizer_ok = mimi.n_q > mimi.semantic_n_q;
+  // bind_rvq_split consumes rvq_first levels 0..semantic_n_q-1 the same way
+  // it consumes the acoustic levels, so every semantic codebook needs the
+  // full shape probe too (a split past the codec's fixed level arrays also
+  // fails here: its codebooks cannot all be present).
+  for (int32_t level = 0; quantizer_ok && level < mimi.semantic_n_q; ++level) {
+    char name[96] = {};
+    const int written = std::snprintf(name, sizeof(name),
+                                      "mimi.quantizer.rvq_first.vq.layers.%d."
+                                      "_codebook.embedding",
+                                      level);
+    quantizer_ok = written > 0 && static_cast<size_t>(written) < sizeof(name) &&
+                   require_tensor_shape(
+                       model_data,
+                       std::string_view{name, static_cast<size_t>(written)},
+                       {codebook_dim, card});
+  }
   for (int32_t level = 0;
        quantizer_ok && level < mimi.n_q - mimi.semantic_n_q; ++level) {
     char name[96] = {};
