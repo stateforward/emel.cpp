@@ -627,11 +627,17 @@ emel::error::type validate_mimi_contract(const emel::model::data &model_data,
   // codebook would otherwise validate here and fail initialization later.
   // bind_rvq_split stores each split's levels in fixed arrays of 32
   // (k_max_quantizer_levels in the codec), so per-split counts past the cap
-  // must reject here even when every declared codebook tensor exists.
+  // must reject here even when every declared codebook tensor exists. The
+  // codec also caps codebook_dim/card at 2^16 (k_max_conv_geometry_extent)
+  // to keep prepared/search-table sizing representable, so oversized
+  // metadata must reject here too.
   constexpr int32_t k_max_rvq_split_levels = 32;
+  constexpr int64_t k_max_mimi_extent = int64_t{1} << 16;
   bool quantizer_ok = mimi.n_q > mimi.semantic_n_q &&
                       mimi.semantic_n_q <= k_max_rvq_split_levels &&
-                      mimi.n_q - mimi.semantic_n_q <= k_max_rvq_split_levels;
+                      mimi.n_q - mimi.semantic_n_q <= k_max_rvq_split_levels &&
+                      mimi.codebook_dim <= k_max_mimi_extent &&
+                      mimi.card <= k_max_mimi_extent;
   // bind_rvq_split consumes rvq_first levels 0..semantic_n_q-1 the same way
   // it consumes the acoustic levels, so every semantic codebook needs the
   // full shape probe too (a split past the codec's fixed level arrays also
@@ -855,7 +861,10 @@ emel::error::type validate_mimi_contract(const emel::model::data &model_data,
       return false;
     }
     taps_out = weight->dims[0];
-    if (taps_out <= 0) {
+    // The codec caps every conv geometry extent at 2^16
+    // (k_max_conv_geometry_extent) to keep its sizing representable.
+    constexpr int64_t k_max_conv_extent = int64_t{1} << 16;
+    if (taps_out <= 0 || taps_out > k_max_conv_extent) {
       return false;
     }
     uint64_t total = 1u;
@@ -868,7 +877,7 @@ emel::error::type validate_mimi_contract(const emel::model::data &model_data,
       return false;
     }
     out_channels_out = static_cast<int64_t>(total / divisor);
-    return out_channels_out > 0;
+    return out_channels_out > 0 && out_channels_out <= k_max_conv_extent;
   };
   // Fixed mimi_v0_1 module topology (index, kind, stride) mirroring the
   // codec's k_encoder_topology/k_decoder_topology; kind: 0 conv, 1 convtr,
@@ -960,12 +969,28 @@ emel::error::type validate_mimi_contract(const emel::model::data &model_data,
                    down_taps, down_out) &&
       down_out == dim && down_taps >= 2 &&
       // depthwise stride-2 upsample: elements == taps * dim, taps >= stride;
-      // prepare_conv_transpose consumes only f32/f16.
+      // prepare_conv_transpose consumes only f32/f16 and geometry extents
+      // stay under the codec's 2^16 cap.
       upsample != nullptr && upsample->n_dims >= 1 && upsample->dims[0] >= 2 &&
+      upsample->dims[0] <= (int64_t{1} << 16) &&
       (upsample->type == 0 || upsample->type == k_dtype_f16) &&
       upsample_elements ==
           static_cast<uint64_t>(upsample->dims[0]) * static_cast<uint64_t>(dim);
   if (!seanet_ok) {
+    return emel::error::cast(emel::model::loader::error::model_invalid);
+  }
+
+  // The fixed stride chain (encoder 4*5*6*8, downsample 2) must reduce one
+  // frame to exactly one token, so the codec accepts only a frame of 1920
+  // samples: plan_codec truncates sample_rate / frame_rate and plan_seanet
+  // rejects any length the strides cannot divide down to one. The hparam
+  // gate already guarantees a finite positive frame_rate.
+  constexpr float k_max_frame_samples = 1.0e8f;
+  constexpr int32_t k_mimi_frame_samples = 1920;
+  const float frame_ratio =
+      static_cast<float>(mimi.sample_rate) / mimi.frame_rate;
+  if (!(frame_ratio >= 1.0f) || frame_ratio > k_max_frame_samples ||
+      static_cast<int32_t>(frame_ratio) != k_mimi_frame_samples) {
     return emel::error::cast(emel::model::loader::error::model_invalid);
   }
 

@@ -837,6 +837,75 @@ TEST_CASE("mimi contract validation rejects a mixed f16 conv class") {
   CHECK(moshi::validate_execution_contract(model) != k_none);
 }
 
+TEST_CASE("mimi contract validation rejects oversized conv geometry extents") {
+  auto loaded = load_fixture_or_skip("mimi-tiny.gguf");
+  if (loaded.model == nullptr) {
+    return;
+  }
+
+  // The codec caps every resolved conv extent at 2^16 to keep its arena
+  // sizing representable; a dividing-but-huge geometry (declared via
+  // metadata, storage claim included) validated pre-cap and then failed
+  // codec initialization.
+  auto &model = *loaded.model;
+  bool corrupted = false;
+  for (uint32_t idx = 0; idx < model.n_tensors; ++idx) {
+    auto &tensor = model.tensors[idx];
+    const std::string_view name{model.name_storage.data() + tensor.name_offset,
+                                tensor.name_length};
+    if (name != "mimi.downsample.conv.conv.conv.weight") {
+      continue;
+    }
+    tensor.n_dims = 3;
+    tensor.dims = {int64_t{1} << 17, 16, 16, 0};
+    tensor.data_size = (uint64_t{1} << 17) * 16u * 16u * sizeof(float);
+    corrupted = true;
+  }
+  REQUIRE(corrupted);
+  CHECK(moshi::validate_execution_contract(model) != k_none);
+}
+
+TEST_CASE("mimi contract validation rejects a frame length off the stride chain") {
+  auto loaded = load_fixture_or_skip("mimi-tiny.gguf");
+  if (loaded.model == nullptr) {
+    return;
+  }
+
+  // The fixed encoder/downsample stride chain reduces exactly 1920 samples
+  // to one token; a positive finite frame rate producing any other frame
+  // length validated here and then failed plan_seanet/plan_codec.
+  loaded.model->mimi.frame_rate = 25.0f;  // 24000 / 25 = 960 samples
+  CHECK(moshi::validate_execution_contract(*loaded.model) != k_none);
+}
+
+TEST_CASE("mimi contract validation rejects codebook extents past the codec cap") {
+  auto loaded = load_fixture_or_skip("mimi-tiny.gguf");
+  if (loaded.model == nullptr) {
+    return;
+  }
+
+  // plan_codec caps codebook_dim/card at 2^16 to keep the prepared and
+  // search-table sizing representable; matching oversized codebook tensors
+  // (metadata claim included) validated pre-cap and then failed initialize.
+  auto &model = *loaded.model;
+  model.mimi.card = int32_t{1} << 17;
+  uint32_t corrupted = 0;
+  for (uint32_t idx = 0; idx < model.n_tensors; ++idx) {
+    auto &tensor = model.tensors[idx];
+    const std::string_view name{model.name_storage.data() + tensor.name_offset,
+                                tensor.name_length};
+    if (name.find("_codebook.embedding") == std::string_view::npos) {
+      continue;
+    }
+    tensor.dims[1] = int64_t{1} << 17;
+    tensor.data_size = static_cast<uint64_t>(tensor.dims[0]) *
+                       (uint64_t{1} << 17) * sizeof(float);
+    corrupted += 1;
+  }
+  REQUIRE(corrupted == 4u);
+  CHECK(moshi::validate_execution_contract(model) != k_none);
+}
+
 TEST_CASE("mimi contract validation rejects non-float tensors the binder consumes") {
   auto loaded = load_fixture_or_skip("mimi-tiny.gguf");
   if (loaded.model == nullptr) {
