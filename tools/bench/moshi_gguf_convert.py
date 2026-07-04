@@ -25,6 +25,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import struct
 import zlib
 from dataclasses import dataclass
@@ -420,7 +421,37 @@ def cross_check_lm(infos: list[TensorInfo], config: dict) -> None:
       require_block("lm.depformer", layer, with_gating=False)
 
 
+def check_mimi_hparams(n_q: int, preset: dict) -> None:
+  # Mirrors the C++ load_mimi_hparams gate (src/emel/model/moshi/detail.cpp)
+  # so a preset or config override the maintained loader rejects fails
+  # conversion instead of publishing an unusable enriched artifact.
+  for key in ("sample_rate", "card", "dim", "semantic_n_q",
+              "transformer_num_layers", "transformer_num_heads",
+              "transformer_context", "transformer_max_period"):
+    if preset[key] <= 0:
+      raise ValueError(
+          f"mimi preset {key} must be positive, got {preset[key]}")
+  if n_q <= 0:
+    raise ValueError(f"mimi n_q must be positive, got {n_q}")
+  frame_rate = float(preset["frame_rate"])
+  if not math.isfinite(frame_rate) or frame_rate <= 0.0:
+    raise ValueError(
+        f"mimi preset frame_rate must be finite and positive, got "
+        f"{preset['frame_rate']}")
+  if preset["semantic_n_q"] >= n_q:
+    raise ValueError(
+        f"mimi preset semantic_n_q={preset['semantic_n_q']} must be below "
+        f"n_q={n_q}")
+  dim = preset["dim"]
+  heads = preset["transformer_num_heads"]
+  if dim % heads != 0 or (dim // heads) % 2 != 0:
+    raise ValueError(
+        f"mimi preset dim={dim} must split into an even head size across "
+        f"num_heads={heads} (the codec rotary kernel halves head_dim)")
+
+
 def cross_check_mimi(infos: list[TensorInfo], n_q: int, preset: dict) -> dict:
+  check_mimi_hparams(n_q, preset)
   first = find_info(
       infos, "mimi.quantizer.rvq_first.vq.layers.0._codebook.embedding")
   if len(first.dims) != 2 or first.dims[1] != preset["card"]:
