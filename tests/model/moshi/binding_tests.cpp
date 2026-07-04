@@ -317,6 +317,7 @@ bool load_lm_hparams(const kv_store &store, emel::model::data &model) {
 
 struct mimi_kv_options {
   float frame_rate = 12.5f;
+  uint32_t dim = 16u;
 };
 
 kv_store make_mimi_kv(const mimi_kv_options &options) {
@@ -326,7 +327,7 @@ kv_store make_mimi_kv(const mimi_kv_options &options) {
   store.f32("moshi.mimi.frame_rate", options.frame_rate);
   store.u32("moshi.mimi.n_q", 4u);
   store.u32("moshi.mimi.card", 32u);
-  store.u32("moshi.mimi.dim", 16u);
+  store.u32("moshi.mimi.dim", options.dim);
   store.u32("moshi.mimi.semantic_n_q", 1u);
   store.u32("moshi.mimi.codebook_dim", 8u);
   store.u32("moshi.mimi.transformer.num_layers", 2u);
@@ -544,6 +545,12 @@ TEST_CASE("moshi mimi hparams require finite frame rates") {
     CHECK_FALSE(load_lm_hparams(
         make_mimi_kv({.frame_rate = std::numeric_limits<float>::infinity()}),
         *model));
+  }
+
+  SUBCASE("odd attention head size fails") {
+    // dim 6 over 2 heads divides evenly but leaves head_dim 3; the codec
+    // rotary kernel halves head_dim, so the hparam gate must reject it.
+    CHECK_FALSE(load_lm_hparams(make_mimi_kv({.dim = 6u}), *model));
   }
 }
 

@@ -257,7 +257,10 @@ bool load_mimi_hparams(const emel::model::detail::hparam_loader &loader,
                             mimi.transformer_max_period) ||
       !std::isfinite(mimi.frame_rate) || mimi.frame_rate <= 0.0f ||
       mimi.semantic_n_q >= mimi.n_q ||
-      mimi.dim % mimi.transformer_num_heads != 0) {
+      mimi.dim % mimi.transformer_num_heads != 0 ||
+      // The codec planner's rotary kernel halves head_dim, so an odd
+      // per-head size must reject at the hparam gate too.
+      ((mimi.dim / mimi.transformer_num_heads) % 2) != 0) {
     return false;
   }
 
