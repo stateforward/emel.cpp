@@ -10,6 +10,7 @@
 
 #include "emel/diarization/sortformer/transformer/detail.hpp"
 #include "emel/model/data.hpp"
+#include "../../../kernel/test_helpers.hpp"
 
 namespace {
 
@@ -80,7 +81,7 @@ void append_layer_tensor(emel::model::data & model,
 void build_transformer_model(emel::model::data & model,
                              const bool include_all_tensors,
                              const bool valid_shapes) {
-  std::memset(&model, 0, sizeof(model));
+  emel::tests::reset_model_data(model);
 
   for (int32_t layer = 0; layer < transformer_detail::k_layer_count; ++layer) {
     for (size_t index = 0u; index < k_layer_specs.size(); ++index) {

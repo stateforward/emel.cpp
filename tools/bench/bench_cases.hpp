@@ -63,6 +63,8 @@ void append_emel_sortformer_diarization_cases(std::vector<result> & results, con
 void append_reference_sortformer_diarization_cases(std::vector<result> & results,
                                                    const config & cfg);
 void append_emel_flash_attention_cases(std::vector<result> & results, const config & cfg);
+void append_emel_speech_codec_mimi_cases(std::vector<result> & results, const config & cfg);
+void append_reference_speech_codec_mimi_cases(std::vector<result> & results, const config & cfg);
 void append_reference_flash_attention_cases(std::vector<result> & results, const config & cfg);
 void append_emel_logits_validator_cases(std::vector<result> & results, const config & cfg);
 void append_reference_logits_validator_cases(std::vector<result> & results, const config & cfg);
@@ -74,6 +76,16 @@ void append_emel_kernel_aarch64_cases(std::vector<result> & results, const confi
 void append_reference_kernel_aarch64_cases(std::vector<result> & results, const config & cfg);
 void append_emel_sm_any_cases(std::vector<result> & results, const config & cfg);
 void append_reference_sm_any_cases(std::vector<result> & results, const config & cfg);
+void append_emel_sm_scheduler_cases(std::vector<result> & results, const config & cfg);
+void append_reference_sm_scheduler_cases(std::vector<result> & results, const config & cfg);
+void append_emel_graph_processor_cases(std::vector<result> & results, const config & cfg);
+void append_reference_graph_processor_cases(std::vector<result> & results, const config & cfg);
+void append_emel_decode_wavefront_cases(std::vector<result> & results, const config & cfg);
+void append_reference_decode_wavefront_cases(std::vector<result> & results, const config & cfg);
+void append_emel_parallel_matmul_cases(std::vector<result> & results, const config & cfg);
+void append_reference_parallel_matmul_cases(std::vector<result> & results, const config & cfg);
+void append_emel_weight_streaming_cases(std::vector<result> & results, const config & cfg);
+void append_reference_weight_streaming_cases(std::vector<result> & results, const config & cfg);
 void append_emel_tokenizer_preprocessor_bpe_cases(std::vector<result> & results,
                                                   const config & cfg);
 void append_reference_tokenizer_preprocessor_bpe_cases(std::vector<result> & results,

@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# shellcheck source=scripts/build_jobs.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/build_jobs.sh"
+
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TIMING_FILE="$ROOT_DIR/snapshots/quality_gates/timing.txt"
 QUALITY_GATES_TIMEOUT="${EMEL_QUALITY_GATES_TIMEOUT:-1800s}"
@@ -361,7 +364,12 @@ bench_suite_supported_for_host() {
     kernel_aarch64)
       [[ "$host_arch" == "aarch64" || "$host_arch" == "arm64" ]]
       ;;
-    sm_any)
+    speech_codec_mimi_mlx)
+      # personaplex-mlx reference lane needs MLX (Apple Silicon macOS).
+      [[ "$(uname -s)" == "Darwin" ]] &&
+        [[ "$host_arch" == "aarch64" || "$host_arch" == "arm64" ]]
+      ;;
+    sm_any|sm_scheduler)
       [[ -n "${EMEL_BENCH_INTERNAL:-}" && "${EMEL_BENCH_INTERNAL:-}" != "0" ]]
       ;;
     *)
@@ -493,6 +501,9 @@ bench_dependency_manifest_apply_changed_files() {
         bench_all_suites=true
         add_all_benchmark_suites_from_manifest
         return
+      fi
+      if ! bench_suite_supported_for_host "$runner"; then
+        continue
       fi
       add_bench_suite "$runner" "manifest path=$path"
     done < "$BENCH_DEPENDENCY_MANIFEST_BASELINE"
@@ -740,10 +751,14 @@ infer_quality_gate_scope() {
       src/emel/io/*|src/emel/io/**/*|tests/io/*|tests/io/**/*)
         ;;
       src/emel/kernel/aarch64/*|tests/kernel/aarch64*)
-        add_bench_suite kernel_aarch64 "scope path=$file"
+        if bench_suite_supported_for_host kernel_aarch64; then
+          add_bench_suite kernel_aarch64 "scope path=$file"
+        fi
         ;;
       src/emel/kernel/x86_64/*|tests/kernel/x86_64*)
-        add_bench_suite kernel_x86_64 "scope path=$file"
+        if bench_suite_supported_for_host kernel_x86_64; then
+          add_bench_suite kernel_x86_64 "scope path=$file"
+        fi
         ;;
       src/emel/kernel/*|src/emel/graph/*|src/emel/memory/*|src/emel/tensor/*|\
       tests/kernel/*|tests/graph/*|tests/memory/*|tests/tensor/*)
@@ -996,9 +1011,41 @@ run_benchmark_gates() {
         bench_warmup_runs="${EMEL_QUALITY_GATES_DIARIZATION_BENCH_WARMUP_RUNS:-1}"
         bench_tolerance="${EMEL_QUALITY_GATES_DIARIZATION_BENCH_TOLERANCE:-0.30}"
         ;;
+      parallel_matmul)
+        # Thread-pool fork/join cases need amortized measurement windows or
+        # post-build CPU contention dominates the short default runs.
+        bench_iters="${EMEL_QUALITY_GATES_PARALLEL_MATMUL_BENCH_ITERS:-2000}"
+        bench_runs="${EMEL_QUALITY_GATES_PARALLEL_MATMUL_BENCH_RUNS:-5}"
+        bench_warmup_iters="${EMEL_QUALITY_GATES_PARALLEL_MATMUL_BENCH_WARMUP_ITERS:-200}"
+        bench_warmup_runs="${EMEL_QUALITY_GATES_PARALLEL_MATMUL_BENCH_WARMUP_RUNS:-1}"
+        ;;
+      sm_any|sm_scheduler)
+        bench_extra_env+=(EMEL_BENCH_INTERNAL=1)
+        ;;
       whisper_compare)
         if run_step_allow_fail "bench_snapshot_${suite}" \
           "$ROOT_DIR/scripts/bench_whisper_compare.sh"; then
+          continue
+        else
+          status=$?
+          continue
+        fi
+        ;;
+      speech_codec_mimi)
+        # The generic bench path runs codec_mimi_bench with placeholder
+        # reference rows only; the token-exact Moshi comparison lives in the
+        # compare script, so Mimi runtime/converter changes must route there.
+        if run_step_allow_fail "bench_snapshot_${suite}" \
+          "$ROOT_DIR/scripts/bench_mimi_compare.sh" --reference=moshi_cpp; then
+          continue
+        else
+          status=$?
+          continue
+        fi
+        ;;
+      speech_codec_mimi_mlx)
+        if run_step_allow_fail "bench_snapshot_${suite}" \
+          "$ROOT_DIR/scripts/bench_mimi_compare.sh" --reference=personaplex-mlx; then
           continue
         else
           status=$?

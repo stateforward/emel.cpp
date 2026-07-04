@@ -230,7 +230,6 @@ emel::kernel::event::op_flash_attn_ext make_flash_attention_event(
       sizeof(uint16_t) * spec.head_dim,
       sizeof(uint16_t) * spec.kv_tokens * spec.head_dim);
   ev.dst = make_dst_view_3d(dst, spec.head_dim, 1u, spec.head_count);
-  ev.nth = 1;
   std::memcpy(ev.op_params.data(), &scale, sizeof(scale));
   std::memcpy(ev.op_params.data() + sizeof(scale),
               &masked_total_tokens,

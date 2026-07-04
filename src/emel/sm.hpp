@@ -1,23 +1,721 @@
 #pragma once
 
 #include <stateforward/sml.hpp>
+#include <stateforward/sml/utility/co_sm.hpp>
+#include <stateforward/sml/utility/external_completion.hpp>
 #include <algorithm>
 #include <array>
+#include <atomic>
+#include <chrono>
 #include <concepts>
 #include <coroutine>
 #include <cstddef>
+#include <cstdint>
 #include <cstdlib>
 #include <exception>
 #include <memory>
 #include <new>
+#include <semaphore>
 #include <stdexcept>
+#include <thread>
 #include <type_traits>
 #include <tuple>
 #include <utility>
 
 namespace emel {
 
+namespace policy {
+
+using inline_scheduler = stateforward::sml::utility::policy::inline_scheduler;
+
+template <std::size_t capacity = 1024, std::size_t inline_task_bytes = 64>
+using fifo_scheduler =
+    stateforward::sml::utility::policy::fifo_scheduler<capacity, inline_task_bytes>;
+
+template <class scheduler>
+using coroutine_scheduler =
+    stateforward::sml::utility::policy::coroutine_scheduler<scheduler>;
+
+template <class allocator>
+using coroutine_allocator =
+    stateforward::sml::utility::policy::coroutine_allocator<allocator>;
+
+template <std::size_t slot_size = 1024, std::size_t slot_count = 64>
+class fixed_coroutine_allocator {
+ public:
+  static_assert(slot_size > 0,
+                "fixed_coroutine_allocator slot size must be non-zero");
+  static_assert(slot_count > 0,
+                "fixed_coroutine_allocator slot count must be non-zero");
+
+  fixed_coroutine_allocator() noexcept { reset_freelist(); }
+
+  void * allocate(const std::size_t size, const std::size_t alignment) noexcept {
+    const bool fits = size <= slot_size && alignment <= alignof(pool_slot);
+    const bool available = free_head_ != invalid_index;
+    if (fits && available) {
+      const std::size_t slot_index = free_head_;
+      free_head_ = next_free_[slot_index];
+      return static_cast<void *>(slots_[slot_index].storage.data());
+    }
+    return nullptr;
+  }
+
+  void deallocate(void * ptr, const std::size_t size,
+                  const std::size_t alignment) noexcept {
+    const bool reusable = ptr != nullptr && size <= slot_size &&
+                          alignment <= alignof(pool_slot) &&
+                          is_pool_pointer(ptr);
+    if (reusable) {
+      const std::size_t slot_index = slot_index_for(ptr);
+      next_free_[slot_index] = free_head_;
+      free_head_ = slot_index;
+    }
+  }
+
+ private:
+  static constexpr std::size_t invalid_index = slot_count;
+
+  struct pool_slot {
+    alignas(std::max_align_t) std::array<unsigned char, slot_size> storage{};
+  };
+
+  bool is_pool_pointer(void * ptr) const noexcept {
+    const auto begin = reinterpret_cast<std::uintptr_t>(slots_.data());
+    const auto end = begin + sizeof(slots_);
+    const auto candidate = reinterpret_cast<std::uintptr_t>(ptr);
+    const bool in_range = candidate >= begin && candidate < end;
+    if (in_range) {
+      const std::size_t offset = static_cast<std::size_t>(candidate - begin);
+      return (offset % sizeof(pool_slot)) == 0;
+    }
+    return false;
+  }
+
+  std::size_t slot_index_for(void * ptr) const noexcept {
+    const auto begin = reinterpret_cast<std::uintptr_t>(slots_.data());
+    const auto candidate = reinterpret_cast<std::uintptr_t>(ptr);
+    const std::size_t offset = static_cast<std::size_t>(candidate - begin);
+    return offset / sizeof(pool_slot);
+  }
+
+  void reset_freelist() noexcept {
+    for (std::size_t i = 0; i + 1 < slot_count; ++i) {
+      next_free_[i] = i + 1;
+    }
+    next_free_[slot_count - 1] = invalid_index;
+    free_head_ = 0;
+  }
+
+  std::array<pool_slot, slot_count> slots_{};
+  std::array<std::size_t, slot_count> next_free_{};
+  std::size_t free_head_ = 0;
+};
+
+// Architecture-appropriate spin hint for short busy-waits (lock-free join /
+// queue retries). Reduces contention and power on hyperthreads without yielding
+// the scheduler.
+inline void cpu_relax() noexcept {
+#if defined(__x86_64__) || defined(_M_X64) || defined(__i386__)
+  __builtin_ia32_pause();
+#elif defined(__aarch64__) || defined(_M_ARM64)
+  __asm__ __volatile__("yield" ::: "memory");
+#else
+  std::atomic_signal_fence(std::memory_order_seq_cst);
+#endif
+}
+
+template <std::size_t worker_count = 2, std::size_t capacity = 1024,
+          std::size_t inline_task_bytes = 64>
+class thread_pool_scheduler {
+ public:
+  static_assert(worker_count > 0,
+                "thread_pool_scheduler worker count must be non-zero");
+  static_assert(capacity > 1,
+                "thread_pool_scheduler capacity must be greater than one");
+  static_assert((capacity & (capacity - 1)) == 0,
+                "thread_pool_scheduler capacity must be a power of two");
+  static_assert(inline_task_bytes > 0,
+                "thread_pool_scheduler inline storage must be non-zero");
+
+  static constexpr bool guarantees_fifo = false;
+  static constexpr bool single_consumer = false;
+  static constexpr bool multi_consumer = true;
+  static constexpr bool owns_workers = true;
+  static constexpr bool run_to_completion = false;
+  static constexpr std::size_t static_worker_count = worker_count;
+  static constexpr std::size_t static_capacity = capacity;
+
+  // std::thread may allocate OS/runtime resources here; dispatch uses only the
+  // fixed task ring below.
+  thread_pool_scheduler() { start_workers(); }
+
+  ~thread_pool_scheduler() { stop_workers(); }
+
+  thread_pool_scheduler(const thread_pool_scheduler &) = delete;
+  thread_pool_scheduler & operator=(const thread_pool_scheduler &) = delete;
+  thread_pool_scheduler(thread_pool_scheduler &&) = delete;
+  thread_pool_scheduler & operator=(thread_pool_scheduler &&) = delete;
+
+  template <class fn>
+  bool try_run_immediate(fn && fn_in) noexcept(noexcept(std::forward<fn>(fn_in)())) {
+    if (queued_or_running_.load(std::memory_order_acquire) != 0u) {
+      return false;
+    }
+
+    bool expected = false;
+    if (!inline_active_.compare_exchange_strong(
+            expected, true, std::memory_order_acq_rel,
+            std::memory_order_acquire)) {
+      return false;
+    }
+
+    struct reset_inline {
+      std::atomic<bool> & active;
+      ~reset_inline() noexcept { active.store(false, std::memory_order_release); }
+    } reset{inline_active_};
+
+    if (queued_or_running_.load(std::memory_order_acquire) != 0u) {
+      return false;
+    }
+
+    std::forward<fn>(fn_in)();
+    immediate_run_count_.fetch_add(1u, std::memory_order_relaxed);
+    return true;
+  }
+
+  template <class fn>
+  bool try_submit(fn && fn_in) noexcept {
+    return try_submit_with_completion(std::forward<fn>(fn_in), nullptr, nullptr);
+  }
+
+  // Detached hard-contract wrapper for call sites that have already proven
+  // scheduler lifetime and queue capacity. Actor-facing RTC paths must use
+  // thread_pool_scheduler_ref::schedule or run_or_schedule_and_wait.
+  template <class fn>
+  void submit(fn && fn_in) noexcept {
+    if (!try_submit(std::forward<fn>(fn_in))) {
+      std::terminate();
+    }
+  }
+
+  template <class fn>
+  bool run_or_schedule_and_wait(fn && fn_in) noexcept(noexcept(std::forward<fn>(fn_in)())) {
+    if (try_run_immediate(std::forward<fn>(fn_in))) {
+      return true;
+    }
+    if (running_on_this_worker()) {
+      return false;
+    }
+
+    // Spin-join on a local flag rather than blocking on a semaphore: the worker
+    // sets done last, so the waiter returns only after the worker's final write
+    // and can safely let the flag go out of scope (no destroy-during-notify
+    // fault). The wait is a bounded RTC join over one already-submitted task.
+    std::atomic<bool> done{false};
+    const bool scheduled = try_submit_and_signal(
+        [&fn_in]() noexcept(noexcept(fn_in())) { fn_in(); }, done);
+    if (!scheduled) {
+      return false;
+    }
+    while (!done.load(std::memory_order_acquire)) {
+      cpu_relax();
+    }
+    return true;
+  }
+
+  uint64_t immediate_run_count() const noexcept {
+    return immediate_run_count_.load(std::memory_order_relaxed);
+  }
+
+  uint64_t scheduled_run_count() const noexcept {
+    return scheduled_run_count_.load(std::memory_order_relaxed);
+  }
+
+  uint64_t worker_run_count() const noexcept {
+    return worker_run_count_.load(std::memory_order_relaxed);
+  }
+
+  bool is_current_thread_worker() const noexcept { return running_on_this_worker(); }
+
+  template <class fn>
+  bool try_submit_with_completion(
+      fn && fn_in,
+      void * completion_ctx,
+      void (*completion_fn)(void *) noexcept) noexcept {
+    if (stopping_.load(std::memory_order_acquire)) {
+      return false;
+    }
+
+    queued_or_running_.fetch_add(1u, std::memory_order_acq_rel);
+    const bool enqueued = enqueue(
+        std::forward<fn>(fn_in), completion_ctx, completion_fn);
+    if (!enqueued) {
+      queued_or_running_.fetch_sub(1u, std::memory_order_acq_rel);
+      return false;
+    }
+
+    scheduled_run_count_.fetch_add(1u, std::memory_order_relaxed);
+    ready_.release();
+    return true;
+  }
+
+ private:
+  struct task_slot {
+    using invoke_fn = void (*)(void *) noexcept;
+    using destroy_fn = void (*)(void *) noexcept;
+
+    alignas(std::max_align_t) std::array<unsigned char, inline_task_bytes> storage{};
+    std::atomic<std::size_t> sequence = 0u;
+    invoke_fn invoke = nullptr;
+    destroy_fn destroy = nullptr;
+    void * completion_ctx = nullptr;
+    void (*completion_fn)(void *) noexcept = nullptr;
+
+    template <class fn>
+    void set(fn && fn_in,
+             void * completion_ctx_in,
+             void (*completion_fn_in)(void *) noexcept) noexcept {
+      using fn_type = std::decay_t<fn>;
+      static_assert(sizeof(fn_type) <= inline_task_bytes,
+                    "scheduled task exceeds inline storage capacity");
+      static_assert(alignof(fn_type) <= alignof(std::max_align_t),
+                    "scheduled task alignment exceeds scheduler storage alignment");
+
+      new (storage.data()) fn_type(std::forward<fn>(fn_in));
+      invoke = [](void * ptr) noexcept { (*static_cast<fn_type *>(ptr))(); };
+      destroy = [](void * ptr) noexcept { static_cast<fn_type *>(ptr)->~fn_type(); };
+      completion_ctx = completion_ctx_in;
+      completion_fn = completion_fn_in;
+    }
+
+    void run() noexcept {
+      invoke(storage.data());
+      destroy(storage.data());
+      invoke = nullptr;
+      destroy = nullptr;
+    }
+
+    void reset() noexcept {
+      if (destroy != nullptr) {
+        destroy(storage.data());
+      }
+      invoke = nullptr;
+      destroy = nullptr;
+      completion_ctx = nullptr;
+      completion_fn = nullptr;
+    }
+  };
+
+  static constexpr std::size_t index_mask = capacity - 1u;
+
+  void start_workers() {
+    for (std::size_t i = 0; i < capacity; ++i) {
+      tasks_[i].sequence.store(i, std::memory_order_relaxed);
+    }
+    std::size_t started = 0u;
+    try {
+      for (; started < worker_count; ++started) {
+        workers_[started] = std::thread([this]() noexcept { worker_loop(); });
+      }
+    } catch (...) {
+      stopping_.store(true, std::memory_order_release);
+      for (std::size_t i = 0; i < started; ++i) {
+        ready_.release();
+      }
+      for (std::size_t i = 0; i < started; ++i) {
+        if (workers_[i].joinable()) {
+          workers_[i].join();
+        }
+      }
+      throw;
+    }
+  }
+
+  void stop_workers() noexcept {
+    const bool was_stopping = stopping_.exchange(true, std::memory_order_acq_rel);
+    if (was_stopping) {
+      return;
+    }
+
+    for (std::size_t i = 0; i < worker_count; ++i) {
+      ready_.release();
+    }
+
+    for (auto & worker : workers_) {
+      if (worker.joinable()) {
+        worker.join();
+      }
+    }
+
+    clear_unrun_tasks();
+  }
+
+  template <class fn>
+  bool try_submit_and_signal(fn && fn_in, std::atomic<bool> & done) noexcept {
+    return try_submit_with_completion(
+        std::forward<fn>(fn_in), &done, signal_done_flag);
+  }
+
+  template <class fn>
+  bool enqueue(fn && fn_in,
+               void * completion_ctx,
+               void (*completion_fn)(void *) noexcept) noexcept {
+    task_slot * slot = nullptr;
+    std::size_t pos = enqueue_pos_.load(std::memory_order_relaxed);
+    for (;;) {
+      slot = &tasks_[pos & index_mask];
+      const std::size_t seq = slot->sequence.load(std::memory_order_acquire);
+      const auto diff = static_cast<std::intptr_t>(seq) -
+                        static_cast<std::intptr_t>(pos);
+      if (diff == 0) {
+        if (enqueue_pos_.compare_exchange_weak(
+                pos, pos + 1u, std::memory_order_relaxed,
+                std::memory_order_relaxed)) {
+          break;
+        }
+      } else if (diff < 0) {
+        return false;
+      } else {
+        pos = enqueue_pos_.load(std::memory_order_relaxed);
+      }
+    }
+
+    slot->set(std::forward<fn>(fn_in), completion_ctx, completion_fn);
+    slot->sequence.store(pos + 1u, std::memory_order_release);
+    return true;
+  }
+
+  bool try_dequeue_and_run() noexcept {
+    task_slot * slot = nullptr;
+    std::size_t pos = dequeue_pos_.load(std::memory_order_relaxed);
+    for (;;) {
+      slot = &tasks_[pos & index_mask];
+      const std::size_t seq = slot->sequence.load(std::memory_order_acquire);
+      const auto diff = static_cast<std::intptr_t>(seq) -
+                        static_cast<std::intptr_t>(pos + 1u);
+      if (diff == 0) {
+        if (dequeue_pos_.compare_exchange_weak(
+                pos, pos + 1u, std::memory_order_relaxed,
+                std::memory_order_relaxed)) {
+          break;
+        }
+      } else if (diff < 0) {
+        return false;
+      } else {
+        pos = dequeue_pos_.load(std::memory_order_relaxed);
+      }
+    }
+
+    slot->run();
+    void * completion_ctx = slot->completion_ctx;
+    void (*completion_fn)(void *) noexcept = slot->completion_fn;
+    slot->completion_ctx = nullptr;
+    slot->completion_fn = nullptr;
+    worker_run_count_.fetch_add(1u, std::memory_order_relaxed);
+    queued_or_running_.fetch_sub(1u, std::memory_order_acq_rel);
+    slot->sequence.store(pos + capacity, std::memory_order_release);
+    if (completion_fn != nullptr) {
+      completion_fn(completion_ctx);
+    }
+    return true;
+  }
+
+  static void signal_done_flag(void * ctx) noexcept {
+    static_cast<std::atomic<bool> *>(ctx)->store(true, std::memory_order_release);
+  }
+
+  void worker_loop() noexcept {
+    struct worker_scope {
+      const thread_pool_scheduler * previous;
+      explicit worker_scope(const thread_pool_scheduler * current) noexcept
+          : previous(active_worker_scheduler_) {
+        active_worker_scheduler_ = current;
+      }
+      ~worker_scope() noexcept { active_worker_scheduler_ = previous; }
+    } scope{this};
+
+    for (;;) {
+      // Claim exactly one wake permit before dequeuing, preserving the
+      // permit-per-task invariant. Spin-claim first so back-to-back fork/joins
+      // (e.g. a decode burst) keep the worker warm and skip resleep/wakeup
+      // latency between rounds, the same warm-polling strategy optimized native
+      // threadpools use; fall back to a blocking acquire once genuinely idle so
+      // a quiescent pool does not burn a core.
+      bool claimed = false;
+      for (std::size_t spin = 0; spin < k_idle_spin_budget; ++spin) {
+        if (ready_.try_acquire()) {
+          claimed = true;
+          break;
+        }
+        if (stopping_.load(std::memory_order_acquire)) {
+          return;
+        }
+        cpu_relax();
+      }
+      if (!claimed) {
+        // Bounded idle wait instead of a bare acquire: a missed semaphore
+        // wakeup (observed on Apple libc++ under gcov-instrumented builds:
+        // stop permits released and seven of eight workers exited, while the
+        // last slept in __ulock_wait forever) must not strand shutdown. The
+        // 1ms recheck touches only a genuinely idle worker, never the warm
+        // spin-claim path above.
+        while (!ready_.try_acquire_for(std::chrono::milliseconds(1))) {
+          if (stopping_.load(std::memory_order_acquire)) {
+            return;
+          }
+        }
+      }
+      // The claimed permit promises a published task or a stop signal. The task
+      // may not be visible at dequeue_pos for a few cycles, so retry rather than
+      // drop the permit (which would strand the task); re-check stop to exit.
+      while (!try_dequeue_and_run()) {
+        if (stopping_.load(std::memory_order_acquire)) {
+          return;
+        }
+        cpu_relax();
+      }
+    }
+  }
+
+  static constexpr std::size_t k_idle_spin_budget = 2048;
+
+  bool running_on_this_worker() const noexcept {
+    return active_worker_scheduler_ == this;
+  }
+
+  void clear_unrun_tasks() noexcept {
+    while (try_dequeue_and_run()) {
+    }
+    for (auto & task : tasks_) {
+      task.reset();
+    }
+  }
+
+  std::array<task_slot, capacity> tasks_{};
+  std::array<std::thread, worker_count> workers_{};
+  std::counting_semaphore<> ready_{0};
+  std::atomic<std::size_t> enqueue_pos_ = 0u;
+  std::atomic<std::size_t> dequeue_pos_ = 0u;
+  std::atomic<std::size_t> queued_or_running_ = 0u;
+  std::atomic<bool> inline_active_ = false;
+  std::atomic<bool> stopping_ = false;
+  std::atomic<uint64_t> immediate_run_count_ = 0u;
+  std::atomic<uint64_t> scheduled_run_count_ = 0u;
+  std::atomic<uint64_t> worker_run_count_ = 0u;
+  inline static thread_local const thread_pool_scheduler *
+      active_worker_scheduler_ = nullptr;
+};
+
+template <class scheduler>
+class thread_pool_scheduler_ref {
+ public:
+  static constexpr bool guarantees_fifo = scheduler::guarantees_fifo;
+  static constexpr bool single_consumer = scheduler::single_consumer;
+  static constexpr bool multi_consumer = scheduler::multi_consumer;
+  static constexpr bool owns_workers = false;
+  static constexpr bool run_to_completion = true;
+  static constexpr std::size_t static_worker_count = scheduler::static_worker_count;
+  static constexpr std::size_t static_capacity = scheduler::static_capacity;
+
+  thread_pool_scheduler_ref() = delete;
+  explicit thread_pool_scheduler_ref(scheduler & scheduler_in) noexcept
+      : scheduler_(&scheduler_in) {}
+
+  class join_group {
+   public:
+    join_group() = default;
+    ~join_group() = default;
+
+    join_group(const join_group &) = delete;
+    join_group & operator=(const join_group &) = delete;
+    join_group(join_group &&) = delete;
+    join_group & operator=(join_group &&) = delete;
+
+    bool wait() noexcept {
+      // Spin-join on pending_ rather than blocking on a per-group semaphore.
+      // The group is caller-owned and typically stack-reused across fork/joins,
+      // so a notify-based wakeup is unsafe: the waiter could observe completion,
+      // return, and destroy the group before the last completer finishes its
+      // release()/notify, faulting on freed semaphore state. With a plain spin,
+      // a completer's final touch of the group is its pending_ decrement, and
+      // wait() returns only after observing pending_ == 0 (all decrements done),
+      // so nothing accesses the group after the caller may destroy it. The wait
+      // is a bounded RTC fork/join over already-submitted lanes, so the producer
+      // core would otherwise be idle; spinning gives the lowest join latency.
+      while (pending_.load(std::memory_order_acquire) != 0u) {
+        cpu_relax();
+      }
+      return accepted_.load(std::memory_order_acquire);
+    }
+
+   private:
+    friend class thread_pool_scheduler_ref;
+
+    void start_one() noexcept {
+      pending_.fetch_add(1u, std::memory_order_acq_rel);
+    }
+
+    void reject_one() noexcept {
+      accepted_.store(false, std::memory_order_release);
+      complete_one();
+    }
+
+    void reject() noexcept {
+      accepted_.store(false, std::memory_order_release);
+    }
+
+    void complete_one() noexcept {
+      pending_.fetch_sub(1u, std::memory_order_acq_rel);
+    }
+
+    static void complete_one(void * ctx) noexcept {
+      static_cast<join_group *>(ctx)->complete_one();
+    }
+
+    std::atomic<uint32_t> pending_ = 0u;
+    std::atomic<bool> accepted_ = true;
+  };
+
+  template <class fn>
+  bool try_run_immediate(fn && fn_in) noexcept(noexcept(std::forward<fn>(fn_in)())) {
+    return scheduler_->try_run_immediate(std::forward<fn>(fn_in));
+  }
+
+  template <class fn>
+  bool try_submit(join_group & group, fn && fn_in) noexcept {
+    if (scheduler_->is_current_thread_worker()) {
+      group.reject();
+      return false;
+    }
+
+    group.start_one();
+    const bool submitted = scheduler_->try_submit_with_completion(
+        std::forward<fn>(fn_in), &group, join_group::complete_one);
+    if (!submitted) {
+      group.reject_one();
+      return false;
+    }
+    return true;
+  }
+
+  // Total fork primitive: every call executes the task exactly once within
+  // the group's fork/join window - on a pool worker when a queue slot is
+  // available, otherwise on the calling thread before returning. Placement
+  // is the scheduler's internal capacity handling, not a caller-visible
+  // behavior choice: the task, its ordering guarantees, and its outputs are
+  // identical either way, so RTC actions may fork with this without carrying
+  // a fallback path of their own.
+  template <class fn>
+  void submit_or_run(join_group & group, fn && fn_in) noexcept(noexcept(fn_in())) {
+    if (scheduler_->is_current_thread_worker()) {
+      fn_in();
+      return;
+    }
+    group.start_one();
+    const bool submitted = scheduler_->try_submit_with_completion(
+        fn_in, &group, join_group::complete_one);
+    if (!submitted) {
+      group.complete_one();
+      fn_in();
+    }
+  }
+
+  template <class fn>
+  void schedule(fn && fn_in) noexcept(noexcept(std::forward<fn>(fn_in)())) {
+    if (!scheduler_->run_or_schedule_and_wait(std::forward<fn>(fn_in))) {
+      std::terminate();
+    }
+  }
+
+  template <class fn>
+  bool run_or_schedule_and_wait(fn && fn_in) noexcept(noexcept(std::forward<fn>(fn_in)())) {
+    return scheduler_->run_or_schedule_and_wait(std::forward<fn>(fn_in));
+  }
+
+  uint64_t immediate_run_count() const noexcept {
+    return scheduler_->immediate_run_count();
+  }
+
+  uint64_t scheduled_run_count() const noexcept {
+    return scheduler_->scheduled_run_count();
+  }
+
+  uint64_t worker_run_count() const noexcept {
+    return scheduler_->worker_run_count();
+  }
+
+ private:
+  scheduler * scheduler_ = nullptr;
+};
+
+using completion_source = stateforward::sml::utility::policy::completion_source;
+
+template <std::size_t source_count = 8>
+using external_completion_scheduler =
+    stateforward::sml::utility::policy::external_completion_scheduler<source_count>;
+
+template <class scheduler>
+concept external_completion_scheduler_contract =
+    stateforward::sml::utility::policy::external_completion_scheduler_contract<scheduler>;
+
+using default_coroutine_scheduler = coroutine_scheduler<inline_scheduler>;
+using default_coroutine_allocator =
+    coroutine_allocator<fixed_coroutine_allocator<>>;
+
+template <std::size_t source_count = 8>
+using external_completion_co_policy =
+    coroutine_scheduler<external_completion_scheduler<source_count>>;
+
+template <class scheduler>
+concept strict_ordering_scheduler_contract =
+    requires {
+      { scheduler::guarantees_fifo } -> std::convertible_to<bool>;
+      { scheduler::single_consumer } -> std::convertible_to<bool>;
+      { scheduler::run_to_completion } -> std::convertible_to<bool>;
+    } && static_cast<bool>(scheduler::guarantees_fifo) &&
+    static_cast<bool>(scheduler::single_consumer) &&
+    static_cast<bool>(scheduler::run_to_completion);
+
+}  // namespace policy
+
+using bool_task = stateforward::sml::utility::bool_task;
+
+namespace event {
+
+// Generic completion trigger delivered by an external-completion co_sm:
+// source_index names the policy::completion_source that fired; machines map it
+// onto domain state (for example a window slot) via their own guards/actions.
+using completion = stateforward::sml::utility::completion;
+
+}  // namespace event
+
 namespace detail {
+
+class dispatch_scope {
+ public:
+  explicit dispatch_scope(std::atomic<bool> & active) noexcept
+      : active_(&active) {
+    bool expected = false;
+    acquired_ = active_->compare_exchange_strong(
+        expected, true, std::memory_order_acq_rel, std::memory_order_acquire);
+  }
+
+  dispatch_scope(const dispatch_scope &) = delete;
+  dispatch_scope & operator=(const dispatch_scope &) = delete;
+
+  ~dispatch_scope() noexcept {
+    if (acquired_) {
+      active_->store(false, std::memory_order_release);
+    }
+  }
+
+  explicit operator bool() const noexcept { return acquired_; }
+
+ private:
+  std::atomic<bool> * active_ = nullptr;
+  bool acquired_ = false;
+};
 
 template <class event>
 constexpr bool normalize_event_result(const event & ev, const bool accepted) noexcept {
@@ -218,6 +916,12 @@ struct sm_any_visit<stateforward::sml::aux::type_list<types...>> {
 template <class model, class context = void, class... policies>
 class sm;
 
+template <class model, class context = void,
+          class scheduler_policy = policy::default_coroutine_scheduler,
+          class allocator_policy = policy::default_coroutine_allocator,
+          class... policies>
+class co_sm;
+
 template <class model, class... policies>
 class sm<model, void, policies...> {
  public:
@@ -257,7 +961,16 @@ class sm<model, void, policies...> {
   const state_machine_type & raw_sm() const { return state_machine_; }
 
  private:
+  // sml's policy-less back-end embeds aux::pool<> (a zero-size array); g++
+  // -Wpedantic flags members of such types at the declaration site.
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wpedantic"
+#endif
   state_machine_type state_machine_;
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic pop
+#endif
 };
 
 template <class model, class context, class... policies>
@@ -315,7 +1028,416 @@ class sm {
   const state_machine_type & raw_sm() const { return state_machine_; }
 
  private:
+  // sml's policy-less back-end embeds aux::pool<> (a zero-size array); g++
+  // -Wpedantic flags members of such types at the declaration site.
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wpedantic"
+#endif
   state_machine_type state_machine_;
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic pop
+#endif
+};
+
+namespace detail {
+
+template <class model, class scheduler_policy, class allocator_policy,
+          class... policies>
+class multi_consumer_co_sm_backend {
+ public:
+  using model_type = model;
+  using scheduler_policy_type = scheduler_policy;
+  using scheduler_type = typename scheduler_policy_type::scheduler_type;
+  using allocator_policy_type = allocator_policy;
+  using allocator_type = typename allocator_policy_type::allocator_type;
+  using state_machine_type = stateforward::sml::sm<model, policies...>;
+
+  static_assert(requires { scheduler_type::owns_workers; } &&
+                    !static_cast<bool>(scheduler_type::owns_workers),
+                "multi-consumer co_sm requires a non-owning scheduler reference; "
+                "construct a shared thread_pool_scheduler and pass "
+                "thread_pool_scheduler_ref<pool_type>");
+
+  multi_consumer_co_sm_backend()
+    requires std::default_initializable<scheduler_type>
+  = default;
+  ~multi_consumer_co_sm_backend() = default;
+
+  multi_consumer_co_sm_backend(const multi_consumer_co_sm_backend &) = delete;
+  multi_consumer_co_sm_backend &
+  operator=(const multi_consumer_co_sm_backend &) = delete;
+  multi_consumer_co_sm_backend(multi_consumer_co_sm_backend &&) = delete;
+  multi_consumer_co_sm_backend &
+  operator=(multi_consumer_co_sm_backend &&) = delete;
+
+  explicit multi_consumer_co_sm_backend(scheduler_type scheduler_in)
+      : scheduler_(scheduler_in) {}
+
+  template <class... args>
+  explicit multi_consumer_co_sm_backend(args &&... args_in)
+      : state_machine_(std::forward<args>(args_in)...) {}
+
+  template <class... args>
+  explicit multi_consumer_co_sm_backend(scheduler_type scheduler_in,
+                                        args &&... args_in)
+      : state_machine_(std::forward<args>(args_in)...),
+        scheduler_(scheduler_in) {}
+
+  template <class event>
+  bool process_event(const event & ev) {
+    // The shared pool may have many consumers, but one actor still has a single
+    // writer. Concurrent external dispatch is rejected instead of queued.
+    dispatch_scope dispatch{dispatch_active_};
+    if (!dispatch) {
+      return false;
+    }
+    return state_machine_.process_event(ev);
+  }
+
+  template <class event>
+  bool_task process_event_async(const event & ev) {
+    // This remains RTC: the returned task is ready only after inline or worker
+    // execution completes, and concurrent dispatch on the same actor is rejected.
+    dispatch_scope dispatch{dispatch_active_};
+    if (!dispatch) {
+      return bool_task::from_value(false);
+    }
+    bool accepted = false;
+    const bool completed = scheduler_.run_or_schedule_and_wait([this, &ev, &accepted]() {
+      accepted = state_machine_.process_event(ev);
+    });
+    return bool_task::from_value(completed && accepted);
+  }
+
+  template <class state>
+  bool is(state state_value = {}) const {
+    dispatch_scope dispatch{dispatch_active_};
+    if (!dispatch) {
+      return false;
+    }
+    return state_machine_.is(state_value);
+  }
+
+  template <class visitor>
+  void visit_current_states(visitor && visitor_fn) {
+    dispatch_scope dispatch{dispatch_active_};
+    if (!dispatch) {
+      return;
+    }
+    state_machine_.visit_current_states(std::forward<visitor>(visitor_fn));
+  }
+
+  scheduler_type & scheduler() noexcept { return scheduler_; }
+  const scheduler_type & scheduler() const noexcept { return scheduler_; }
+
+  allocator_type & allocator() noexcept { return allocator_; }
+  const allocator_type & allocator() const noexcept { return allocator_; }
+
+ protected:
+  state_machine_type & raw_sm() { return state_machine_; }
+  const state_machine_type & raw_sm() const { return state_machine_; }
+
+ private:
+  // sml's policy-less back-end embeds aux::pool<> (a zero-size array); g++
+  // -Wpedantic flags members of such types at the declaration site.
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wpedantic"
+#endif
+  state_machine_type state_machine_{};
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic pop
+#endif
+  scheduler_type scheduler_;
+  allocator_type allocator_{};
+  mutable std::atomic<bool> dispatch_active_ = false;
+};
+
+template <bool multi_consumer, class model, class scheduler_policy,
+          class allocator_policy, class... policies>
+struct co_sm_backend_selector;
+
+template <class model, class scheduler_policy, class allocator_policy,
+          class... policies>
+struct co_sm_backend_selector<false, model, scheduler_policy, allocator_policy,
+                              policies...> {
+  using type =
+      stateforward::sml::utility::co_sm<model, scheduler_policy,
+                                        allocator_policy, policies...>;
+};
+
+template <class model, class scheduler_policy, class allocator_policy,
+          class... policies>
+struct co_sm_backend_selector<true, model, scheduler_policy, allocator_policy,
+                              policies...> {
+  using type =
+      multi_consumer_co_sm_backend<model, scheduler_policy, allocator_policy,
+                                   policies...>;
+};
+
+template <class scheduler, class = void>
+struct is_multi_consumer_scheduler : std::false_type {};
+
+template <class scheduler>
+struct is_multi_consumer_scheduler<
+    scheduler, std::void_t<decltype(scheduler::multi_consumer)>>
+    : std::bool_constant<static_cast<bool>(scheduler::multi_consumer)> {};
+
+template <class scheduler>
+inline constexpr bool is_multi_consumer_scheduler_v =
+    is_multi_consumer_scheduler<scheduler>::value;
+
+template <class model, class scheduler_policy, class allocator_policy,
+          class... policies>
+using co_sm_backend_t = typename co_sm_backend_selector<
+    is_multi_consumer_scheduler_v<typename scheduler_policy::scheduler_type>,
+    model, scheduler_policy, allocator_policy, policies...>::type;
+
+}  // namespace detail
+
+template <class model, class scheduler_policy, class allocator_policy,
+          class... policies>
+class co_sm<model, void, scheduler_policy, allocator_policy, policies...> {
+ public:
+  using model_type = model;
+  using context_type = void;
+  using scheduler_policy_type = scheduler_policy;
+  using scheduler_type = typename scheduler_policy_type::scheduler_type;
+  using allocator_policy_type = allocator_policy;
+  using allocator_type = typename allocator_policy_type::allocator_type;
+  using state_machine_type =
+      detail::co_sm_backend_t<model, scheduler_policy, allocator_policy,
+                              policies...>;
+
+  co_sm() = default;
+  ~co_sm() = default;
+
+  co_sm(const co_sm &) = default;
+  co_sm(co_sm &&) = default;
+  co_sm & operator=(const co_sm &) = default;
+  co_sm & operator=(co_sm &&) = default;
+
+  template <class... args>
+  explicit co_sm(args &&... args_in)
+      : state_machine_(std::forward<args>(args_in)...) {}
+
+  explicit co_sm(scheduler_type scheduler_in)
+    requires detail::is_multi_consumer_scheduler_v<scheduler_type>
+      : state_machine_(scheduler_in) {}
+
+  template <class... args>
+  explicit co_sm(scheduler_type scheduler_in, args &&... args_in)
+    requires detail::is_multi_consumer_scheduler_v<scheduler_type>
+      : state_machine_(scheduler_in, std::forward<args>(args_in)...) {}
+
+  template <class event>
+  bool process_event(const event & ev) {
+    const bool accepted = state_machine_.process_event(ev);
+    return detail::normalize_event_result(ev, accepted);
+  }
+
+  template <class event>
+  bool_task process_event_async(const event & ev) {
+    if constexpr (std::is_same_v<scheduler_type, policy::inline_scheduler>) {
+      const bool accepted = state_machine_.process_event_async(ev).result();
+      return bool_task::from_value(detail::normalize_event_result(ev, accepted));
+    } else if constexpr (policy::external_completion_scheduler_contract<scheduler_type>) {
+      // The upstream backend drives suspension to completion on this thread
+      // before returning, so the task is always immediately ready.
+      const bool accepted = state_machine_.process_event(ev);
+      return bool_task::from_value(detail::normalize_event_result(ev, accepted));
+    } else if constexpr (detail::is_multi_consumer_scheduler_v<scheduler_type>) {
+      const bool accepted = state_machine_.process_event_async(ev).result();
+      return bool_task::from_value(detail::normalize_event_result(ev, accepted));
+    } else if constexpr (requires(scheduler_type & scheduler) {
+                           {
+                             scheduler.try_run_immediate([]() noexcept {})
+                           } -> std::same_as<bool>;
+                         }) {
+      bool accepted = false;
+      const bool completed = state_machine_.scheduler().try_run_immediate(
+          [this, &ev, &accepted]() {
+            accepted = state_machine_.process_event(ev);
+          });
+      return bool_task::from_value(
+          completed && detail::normalize_event_result(ev, accepted));
+    } else {
+      auto task = state_machine_.process_event_async(ev);
+      if (!task.await_ready()) {
+        std::terminate();
+      }
+      const bool accepted = task.result();
+      return bool_task::from_value(detail::normalize_event_result(ev, accepted));
+    }
+  }
+
+  template <class state>
+  bool is(state state_value = {}) const {
+    return state_machine_.is(state_value);
+  }
+
+  template <class visitor>
+  void visit_current_states(visitor && visitor_fn) {
+    state_machine_.visit_current_states(std::forward<visitor>(visitor_fn));
+  }
+
+  scheduler_type & scheduler() noexcept { return state_machine_.scheduler(); }
+  const scheduler_type & scheduler() const noexcept {
+    return state_machine_.scheduler();
+  }
+
+  allocator_type & allocator() noexcept { return state_machine_.allocator(); }
+  const allocator_type & allocator() const noexcept {
+    return state_machine_.allocator();
+  }
+
+ protected:
+  state_machine_type & raw_sm() { return state_machine_; }
+  const state_machine_type & raw_sm() const { return state_machine_; }
+
+ private:
+  // sml's policy-less back-end embeds aux::pool<> (a zero-size array); g++
+  // -Wpedantic flags members of such types at the declaration site.
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wpedantic"
+#endif
+  state_machine_type state_machine_;
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic pop
+#endif
+};
+
+template <class model, class context, class scheduler_policy,
+          class allocator_policy, class... policies>
+class co_sm {
+ public:
+  static_assert(!std::is_void_v<context>, "contextful co_sm requires a non-void context type");
+
+  using model_type = model;
+  using context_type = context;
+  using scheduler_policy_type = scheduler_policy;
+  using scheduler_type = typename scheduler_policy_type::scheduler_type;
+  using allocator_policy_type = allocator_policy;
+  using allocator_type = typename allocator_policy_type::allocator_type;
+  using state_machine_type =
+      detail::co_sm_backend_t<model, scheduler_policy, allocator_policy,
+                              policies...>;
+
+  co_sm() : state_machine_(context_) {}
+  explicit co_sm(const context_type & context_in)
+      : context_(context_in), state_machine_(context_) {}
+  explicit co_sm(context_type && context_in)
+      : context_(std::move(context_in)), state_machine_(context_) {}
+
+  explicit co_sm(scheduler_type scheduler_in)
+    requires detail::is_multi_consumer_scheduler_v<scheduler_type>
+      : state_machine_(scheduler_in, context_) {}
+
+  co_sm(scheduler_type scheduler_in, const context_type & context_in)
+    requires detail::is_multi_consumer_scheduler_v<scheduler_type>
+      : context_(context_in), state_machine_(scheduler_in, context_) {}
+
+  co_sm(scheduler_type scheduler_in, context_type && context_in)
+    requires detail::is_multi_consumer_scheduler_v<scheduler_type>
+      : context_(std::move(context_in)), state_machine_(scheduler_in, context_) {}
+
+  template <class... args>
+    requires (sizeof...(args) > 0)
+  explicit co_sm(const context_type & context_in, args &&... args_in)
+      : context_(context_in),
+        state_machine_(context_, std::forward<args>(args_in)...) {}
+
+  template <class... args>
+    requires (sizeof...(args) > 0)
+  explicit co_sm(context_type && context_in, args &&... args_in)
+      : context_(std::move(context_in)),
+        state_machine_(context_, std::forward<args>(args_in)...) {}
+
+  co_sm(const co_sm &) = default;
+  co_sm(co_sm &&) = default;
+  co_sm & operator=(const co_sm &) = default;
+  co_sm & operator=(co_sm &&) = default;
+  ~co_sm() = default;
+
+  template <class event>
+  bool process_event(const event & ev) {
+    const bool accepted = state_machine_.process_event(ev);
+    return detail::normalize_event_result(ev, accepted);
+  }
+
+  template <class event>
+  bool_task process_event_async(const event & ev) {
+    if constexpr (std::is_same_v<scheduler_type, policy::inline_scheduler>) {
+      const bool accepted = state_machine_.process_event_async(ev).result();
+      return bool_task::from_value(detail::normalize_event_result(ev, accepted));
+    } else if constexpr (policy::external_completion_scheduler_contract<scheduler_type>) {
+      // The upstream backend drives suspension to completion on this thread
+      // before returning, so the task is always immediately ready.
+      const bool accepted = state_machine_.process_event(ev);
+      return bool_task::from_value(detail::normalize_event_result(ev, accepted));
+    } else if constexpr (detail::is_multi_consumer_scheduler_v<scheduler_type>) {
+      const bool accepted = state_machine_.process_event_async(ev).result();
+      return bool_task::from_value(detail::normalize_event_result(ev, accepted));
+    } else if constexpr (requires(scheduler_type & scheduler) {
+                           {
+                             scheduler.try_run_immediate([]() noexcept {})
+                           } -> std::same_as<bool>;
+                         }) {
+      bool accepted = false;
+      const bool completed = state_machine_.scheduler().try_run_immediate(
+          [this, &ev, &accepted]() {
+            accepted = state_machine_.process_event(ev);
+          });
+      return bool_task::from_value(
+          completed && detail::normalize_event_result(ev, accepted));
+    } else {
+      auto task = state_machine_.process_event_async(ev);
+      if (!task.await_ready()) {
+        std::terminate();
+      }
+      const bool accepted = task.result();
+      return bool_task::from_value(detail::normalize_event_result(ev, accepted));
+    }
+  }
+
+  template <class state>
+  bool is(state state_value = {}) const {
+    return state_machine_.is(state_value);
+  }
+
+  template <class visitor>
+  void visit_current_states(visitor && visitor_fn) {
+    state_machine_.visit_current_states(std::forward<visitor>(visitor_fn));
+  }
+
+  scheduler_type & scheduler() noexcept { return state_machine_.scheduler(); }
+  const scheduler_type & scheduler() const noexcept {
+    return state_machine_.scheduler();
+  }
+
+  allocator_type & allocator() noexcept { return state_machine_.allocator(); }
+  const allocator_type & allocator() const noexcept {
+    return state_machine_.allocator();
+  }
+
+ protected:
+  context_type context_{};
+  state_machine_type & raw_sm() { return state_machine_; }
+  const state_machine_type & raw_sm() const { return state_machine_; }
+
+ private:
+  // sml's policy-less back-end embeds aux::pool<> (a zero-size array); g++
+  // -Wpedantic flags members of such types at the declaration site.
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wpedantic"
+#endif
+  state_machine_type state_machine_;
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic pop
+#endif
 };
 
 template <class kind_enum, class sm_list, class event_list>

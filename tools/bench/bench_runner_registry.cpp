@@ -18,8 +18,8 @@ constexpr test_case make_test_case(const append_case_fn emel_fn,
   };
 }
 
-const std::array<test_case, 29> & all_runner_cases() {
-  static const std::array<test_case, 29> cases = {{
+const std::array<test_case, 35> & all_runner_cases() {
+  static const std::array<test_case, 35> cases = {{
     make_test_case(append_emel_batch_planner_cases,
                    append_reference_batch_planner_cases,
                    "batch_planner"),
@@ -46,6 +46,9 @@ const std::array<test_case, 29> & all_runner_cases() {
     make_test_case(append_emel_flash_attention_cases,
                    append_reference_flash_attention_cases,
                    "flash_attention"),
+    make_test_case(append_emel_speech_codec_mimi_cases,
+                   append_reference_speech_codec_mimi_cases,
+                   "speech_codec_mimi"),
     make_test_case(append_emel_logits_validator_cases,
                    append_reference_logits_validator_cases,
                    "logits_validator"),
@@ -59,6 +62,21 @@ const std::array<test_case, 29> & all_runner_cases() {
                    append_reference_kernel_aarch64_cases,
                    "kernel_aarch64"),
     make_test_case(append_emel_sm_any_cases, append_reference_sm_any_cases, "sm_any"),
+    make_test_case(append_emel_sm_scheduler_cases,
+                   append_reference_sm_scheduler_cases,
+                   "sm_scheduler"),
+    make_test_case(append_emel_graph_processor_cases,
+                   append_reference_graph_processor_cases,
+                   "graph_processor"),
+    make_test_case(append_emel_decode_wavefront_cases,
+                   append_reference_decode_wavefront_cases,
+                   "decode_wavefront"),
+    make_test_case(append_emel_parallel_matmul_cases,
+                   append_reference_parallel_matmul_cases,
+                   "parallel_matmul"),
+    make_test_case(append_emel_weight_streaming_cases,
+                   append_reference_weight_streaming_cases,
+                   "weight_streaming"),
     make_test_case(append_emel_tokenizer_preprocessor_bpe_cases,
                    append_reference_tokenizer_preprocessor_bpe_cases,
                    "tokenizer_preprocessor_bpe"),

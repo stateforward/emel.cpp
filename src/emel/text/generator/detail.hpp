@@ -5,8 +5,10 @@
 #include <cmath>
 #include <cstdint>
 #include <cstring>
+#include <functional>
 #include <limits>
 #include <memory>
+#include <optional>
 #include <span>
 #include <vector>
 
@@ -20,6 +22,7 @@
 #include "emel/model/data.hpp"
 #include "emel/model/llama/detail.hpp"
 #include "emel/model/loader/errors.hpp"
+#include "emel/model/tensor/window/sm.hpp"
 
 namespace emel::text::generator::detail {
 
@@ -29,9 +32,27 @@ struct tensor_matrix {
   int32_t cols = 0;
 };
 
+struct rope_pairing {
+  int32_t x0_stride = 2;
+  int32_t x1_stride = 2;
+  int32_t x1_offset = 1;
+  int32_t x1_half_rot_offset = 0;
+};
+
+inline constexpr rope_pairing normal_rope_pairing() noexcept { return {}; }
+
+inline constexpr rope_pairing neox_rope_pairing() noexcept {
+  return rope_pairing{1, 1, 0, 1};
+}
+
 struct packed_matrix_binding {
   emel::model::data::tensor_record tensor = {};
   std::vector<uint8_t> storage = {};
+  // The raw model record the packed layout was prepared from. Streamed slots
+  // hold raw GGUF bytes, so the streamed rebase must clone this record (its
+  // dtype/extents describe the slot bytes) while resident restore keeps the
+  // packed record the layout swap bound.
+  const emel::model::data::tensor_record * source = nullptr;
 };
 
 struct block_weights {
@@ -42,6 +63,7 @@ struct block_weights {
   int32_t attention_head_dim_kv = 0;
   int32_t attention_rope_dim = 0;
   float attention_rope_freq_base = 10000.0f;
+  rope_pairing attention_rope_pairing = {};
   std::vector<float> attention_norm = {};
   tensor_matrix attention_q = {};
   packed_matrix_binding attention_q_packed = {};
@@ -67,6 +89,68 @@ struct block_weights {
   packed_matrix_binding feed_forward_up_packed = {};
 };
 
+// View-sliced parallel matmul lanes: one kernel actor per pool worker. A
+// parallel dispatch forks one logical matmul into per-lane row-slice events
+// and joins before the enclosing action returns, so no work escapes the RTC
+// boundary and no lane actor is entered concurrently.
+constexpr size_t k_matmul_lanes = 8;
+using matmul_lane_pool = emel::policy::thread_pool_scheduler<k_matmul_lanes, 16u, 128u>;
+using matmul_lane_scheduler = emel::policy::thread_pool_scheduler_ref<matmul_lane_pool>;
+
+enum class matmul_lane_mode : uint8_t {
+  serial = 0,
+  parallel = 1,
+};
+
+// Weight residency mode for the layer loop: resident consumes blocks[] views
+// as prepared; streamed acquires each layer's slot from the tensor window
+// actor and rebases the block's matmul weight views into the slot before use.
+enum class window_mode : uint8_t {
+  resident = 0,
+  streamed = 1,
+};
+
+// Canonical per-layer stream role order shared by extent builders (tests,
+// bench fixtures) and the rebase walk below. Absent roles are skipped; both
+// sides must walk this exact order for positional extents to line up.
+inline constexpr size_t k_stream_role_attention_q = 0;
+inline constexpr size_t k_stream_role_attention_k = 1;
+inline constexpr size_t k_stream_role_attention_v = 2;
+inline constexpr size_t k_stream_role_attention_output = 3;
+inline constexpr size_t k_stream_role_feed_forward_gate = 4;
+inline constexpr size_t k_stream_role_feed_forward_down = 5;
+inline constexpr size_t k_stream_role_feed_forward_up = 6;
+inline constexpr size_t k_stream_role_shortconv_in_proj = 7;
+inline constexpr size_t k_stream_role_shortconv_out_proj = 8;
+inline constexpr size_t k_stream_role_count = 9;
+
+// Streamed-weight binding: injected window actor plus the per-role record
+// clones the layer loop rebases blocks[] onto. One clone set suffices because
+// single-lane decode consumes exactly one layer at a time. pristine holds the
+// prepare()-time record pointers per layer so every rebase clones from the
+// original model contract (blocks[] pointers move onto the clones after the
+// first streamed pass).
+struct stream_binding {
+  emel::model::tensor::window::sm * window = nullptr;
+  bool active = false;
+  std::array<emel::model::data::tensor_record, k_stream_role_count> records = {};
+  // pristine holds the prepare()-time bound records (packed on aarch64) that
+  // resident steps restore to; raw holds the untouched model records whose
+  // dtype/extents describe the raw GGUF bytes the window streams into slots.
+  std::vector<std::array<const emel::model::data::tensor_record *, k_stream_role_count>>
+      pristine = {};
+  std::vector<std::array<const emel::model::data::tensor_record *, k_stream_role_count>>
+      raw = {};
+  // The logits/argmax output stage of a streamed step runs on the raw model
+  // record too (a packed resident output would need the packed input
+  // pipeline, which the raw-classified streamed route does not run); resident
+  // steps restore the prepare()-time views.
+  const emel::model::data::tensor_record * pristine_output = nullptr;
+  const emel::model::data::tensor_record * raw_output = nullptr;
+  const emel::model::data::tensor_record * pristine_output_argmax = nullptr;
+  const emel::model::data::tensor_record * raw_output_argmax = nullptr;
+};
+
 struct native_backend {
   const emel::model::data * model = nullptr;
   emel::model::llama::detail::execution_view execution = {};
@@ -74,6 +158,11 @@ struct native_backend {
   emel::model::llama::detail::step_plan prefill_plan = {};
   emel::model::llama::detail::step_plan decode_plan = {};
   emel::kernel::sm kernel = {};
+  // Parallel matmul lane actors and their pool. Worker threads are one-time
+  // prepare() construction (in-place, no heap); slice dispatch reuses these
+  // actors and allocates nothing.
+  std::array<emel::kernel::sm, k_matmul_lanes> lane_kernels = {};
+  std::optional<matmul_lane_pool> lane_pool = {};
   emel::kernel::kernel_kind kernel_kind = emel::kernel::kernel_kind::x86_64;
   uint64_t kernel_dispatch_calls = 0;
   uint64_t native_q8_0_dispatch_calls = 0;
@@ -101,6 +190,7 @@ struct native_backend {
   std::vector<uint8_t> packed_q8_0_chunk4_input_storage = {};
   emel::model::llama::detail::quantized_path_audit quantized_audit = {};
   std::vector<block_weights> blocks = {};
+  stream_binding stream = {};
 
   int32_t n_vocab = 0;
   int32_t n_embd = 0;
@@ -226,8 +316,18 @@ using step_plan = emel::model::llama::detail::step_plan;
 
 constexpr int32_t k_error_ok = 0;
 constexpr int32_t k_error_invalid = 1;
+// A streamed decode could not acquire its layer window slot: distinct from
+// generic compute failure so the outcome is externally attributable to the
+// tensor-window collaborator.
+constexpr int32_t k_error_stream_acquire = 2;
 constexpr int32_t k_prefill_q8_chunk_rows = 4;
 constexpr int32_t k_prefill_q8_chunk8_rows = 8;
+// Minimum prompt size before the parallel matmul lanes are worth the fork
+// overhead; route guards read this so the choice stays in transition rows.
+constexpr int32_t k_parallel_min_prefill_tokens = 8;
+// Decode GEMV lanes only pay off once per-matmul work dwarfs the fork
+// overhead; route guards require this minimum model width for parallel decode.
+constexpr int32_t k_parallel_min_gemv_dim = 1024;
 constexpr emel::kernel::kernel_kind detect_host_kernel_kind() noexcept {
 #if defined(__aarch64__) || defined(_M_ARM64)
   return emel::kernel::kernel_kind::aarch64;
@@ -1189,6 +1289,7 @@ inline bool prepare_packed_q8_0_matrix_layout(tensor_matrix & matrix,
           *matrix.tensor, matrix.rows, matrix.cols, packed.tensor, packed.storage)) {
     return false;
   }
+  packed.source = matrix.tensor;
   matrix.tensor = &packed.tensor;
   return true;
 }
@@ -1251,6 +1352,7 @@ inline bool prepare_packed_q4_matrix_layout(tensor_matrix & matrix,
           *matrix.tensor, matrix.rows, matrix.cols, packed.tensor, packed.storage)) {
     return false;
   }
+  packed.source = matrix.tensor;
   matrix.tensor = &packed.tensor;
   return true;
 }
@@ -1315,6 +1417,7 @@ inline bool prepare_packed_q6_matrix_layout(tensor_matrix & matrix,
           *matrix.tensor, matrix.rows, matrix.cols, packed.tensor, packed.storage)) {
     return false;
   }
+  packed.source = matrix.tensor;
   matrix.tensor = &packed.tensor;
   return true;
 }
@@ -1322,6 +1425,7 @@ inline bool prepare_packed_q6_matrix_layout(tensor_matrix & matrix,
 inline bool prepare_native_matrix_layout(native_backend & backend,
                                          tensor_matrix & matrix,
                                          packed_matrix_binding & packed) noexcept {
+  (void)packed;
   if (matrix.tensor == nullptr) {
     return false;
   }
@@ -2061,12 +2165,14 @@ inline const emel::graph::processor::event::lifecycle_manifest * decode_lifecycl
 inline bool prepare_packed_q8_0_input(native_backend & backend,
                                       std::span<const float> input) noexcept;
 
+template <matmul_lane_mode lanes = matmul_lane_mode::serial>
 inline bool matmul_vector_prepared_packed_q8_0_input(
     native_backend & backend,
     const tensor_matrix & matrix,
     const int32_t input_cols,
     std::span<float> output) noexcept;
 
+template <matmul_lane_mode lanes = matmul_lane_mode::serial>
 inline bool matmul_vector_q8_input(
     native_backend & backend,
     const tensor_matrix & matrix,
@@ -2078,6 +2184,7 @@ inline bool prepare_packed_q8_0_chunk4_input(native_backend & backend,
                                              std::span<const float> input,
                                              const int32_t input_cols) noexcept;
 
+template <matmul_lane_mode lanes = matmul_lane_mode::serial>
 inline bool matmul_chunk4_prepared_packed_q8_0_input(
     native_backend & backend,
     const tensor_matrix & matrix,
@@ -2088,6 +2195,7 @@ inline bool prepare_q8_chunk4_input(native_backend & backend,
                                     std::span<const float> input,
                                     const int32_t input_cols) noexcept;
 
+template <matmul_lane_mode lanes = matmul_lane_mode::serial>
 inline bool matmul_chunk4_q8_input(native_backend & backend,
                                    const tensor_matrix & matrix,
                                    const int32_t input_cols,
@@ -2106,6 +2214,148 @@ inline bool valid_matmul_vector_shape(const tensor_matrix & matrix,
       static_cast<size_t>(matrix.rows) == output.size();
 }
 
+struct matmul_row_slice {
+  int32_t row_begin = 0;
+  int32_t row_count = 0;
+};
+
+// Row-group granularity for view slicing: packed interleaved dtypes store
+// multiple logical rows per storage group, so slice boundaries must land on
+// group multiples; plain row-major dtypes slice on any row boundary.
+inline uint64_t matmul_slice_group_rows(const emel::kernel::event::dtype type) noexcept {
+  const uint8_t code = emel::kernel::detail::dtype_code(type);
+  const uint64_t x8_group =
+      static_cast<uint64_t>(code == emel::kernel::detail::dtype_q4_k_x8_bl4 ||
+                            code == emel::kernel::detail::dtype_q4_k_x8_bl8 ||
+                            code == emel::kernel::detail::dtype_q6_k_x8 ||
+                            code == emel::kernel::detail::dtype_q6_k_x8_q8_prepared ||
+                            code == emel::kernel::detail::dtype_q6_k_x8_q8_argmax_prepared) *
+      emel::kernel::detail::quant::Q4_K_X8_ROWS;
+  const uint64_t x4_group =
+      static_cast<uint64_t>(code == emel::kernel::detail::dtype_q8_0_x4_bl4 ||
+                            code == emel::kernel::detail::dtype_q8_0_x4_bl8) *
+      emel::kernel::detail::quant::Q8_0_X4_ROWS;
+  return std::max<uint64_t>(x8_group + x4_group, 1u);
+}
+
+// Partition weight rows into at most k_matmul_lanes contiguous group-aligned
+// slices. Pure bounded partition arithmetic; a ragged tail (rows not a group
+// multiple) lands in the final slice, matching the padded storage group the
+// packed formats already carry.
+inline size_t compute_matmul_row_slices(
+    const uint64_t rows,
+    const uint64_t group_rows,
+    std::array<matmul_row_slice, k_matmul_lanes> & slices) noexcept {
+  const uint64_t groups = (rows + group_rows - 1u) / group_rows;
+  const uint64_t lane_count = std::min<uint64_t>(k_matmul_lanes, std::max<uint64_t>(groups, 1u));
+  const uint64_t groups_per_lane = groups / lane_count;
+  const uint64_t extra_groups = groups % lane_count;
+  uint64_t begin_group = 0u;
+  for (uint64_t lane = 0u; lane < lane_count; ++lane) {
+    const uint64_t lane_groups = groups_per_lane + static_cast<uint64_t>(lane < extra_groups);
+    const uint64_t begin_row = begin_group * group_rows;
+    const uint64_t end_row = std::min(rows, (begin_group + lane_groups) * group_rows);
+    slices[lane].row_begin = static_cast<int32_t>(begin_row);
+    slices[lane].row_count = static_cast<int32_t>(end_row - begin_row);
+    begin_group += lane_groups;
+  }
+  return static_cast<size_t>(lane_count);
+}
+
+// Derive a slice event from a full mul_mat event: sliced src0/dst views over
+// a contiguous group-aligned row range, shared src1 input. The event remains
+// a complete work description; lane kernels never learn about slicing.
+inline emel::kernel::event::op_mul_mat compute_sliced_mul_mat_event(
+    const emel::kernel::event::op_mul_mat & ev,
+    const uint64_t group_rows,
+    const matmul_row_slice slice) noexcept {
+  emel::kernel::event::op_mul_mat sliced = ev;
+  const uint64_t begin = static_cast<uint64_t>(slice.row_begin);
+  const uint64_t count = static_cast<uint64_t>(slice.row_count);
+  const uint64_t slice_groups = (count + group_rows - 1u) / group_rows;
+  sliced.src0.data =
+      static_cast<const uint8_t *>(ev.src0.data) + (begin / group_rows) * ev.src0.nb[1];
+  sliced.src0.ne[1] = count;
+  sliced.src0.nb[2] = ev.src0.nb[1] * slice_groups;
+  sliced.src0.nb[3] = sliced.src0.nb[2];
+  sliced.dst.data = static_cast<uint8_t *>(ev.dst.data) + begin * ev.dst.nb[1];
+  sliced.dst.ne[1] = count;
+  sliced.dst.nb[2] = ev.dst.nb[1] * count;
+  sliced.dst.nb[3] = sliced.dst.nb[2];
+  return sliced;
+}
+
+// Fork/join slice dispatch across the lane kernel actors. The caller computes
+// the first slice while pool workers compute the rest; every slice joins
+// before this helper returns, so no work escapes the RTC boundary. Slices
+// write disjoint dst rows and reorder no reductions, so the output is
+// bit-identical to the serial dispatch.
+inline bool compute_mul_mat_sliced_parallel(
+    native_backend & backend,
+    const emel::kernel::event::op_mul_mat & ev) noexcept {
+  if (!backend.lane_pool.has_value() || ev.src0.ne[1] == 0u) {
+    return false;
+  }
+
+  std::array<matmul_row_slice, k_matmul_lanes> slices = {};
+  std::array<emel::kernel::event::op_mul_mat, k_matmul_lanes> lane_events = {};
+  std::array<bool, k_matmul_lanes> lane_ok = {};
+  const uint64_t group_rows = matmul_slice_group_rows(ev.src0.type);
+  const size_t lane_count = compute_matmul_row_slices(ev.src0.ne[1], group_rows, slices);
+
+  matmul_lane_scheduler scheduler{*backend.lane_pool};
+  matmul_lane_scheduler::join_group group{};
+  for (size_t lane = 1u; lane < lane_count; ++lane) {
+    lane_events[lane] = compute_sliced_mul_mat_event(ev, group_rows, slices[lane]);
+    auto & lane_kernel = backend.lane_kernels[lane];
+    lane_kernel.set_kind(backend.kernel_kind);
+    const auto & lane_ev = lane_events[lane];
+    auto & ok_flag = lane_ok[lane];
+    // Total fork: submit_or_run executes the slice exactly once inside the
+    // join window (worker or calling thread - the scheduler's internal
+    // capacity handling, never a behavior choice).
+    scheduler.submit_or_run(group, [&lane_kernel, &lane_ev, &ok_flag]() noexcept {
+      ok_flag = lane_kernel.process_event(lane_ev);
+    });
+  }
+  lane_events[0] = compute_sliced_mul_mat_event(ev, group_rows, slices[0]);
+  backend.lane_kernels[0].set_kind(backend.kernel_kind);
+  lane_ok[0] = backend.lane_kernels[0].process_event(lane_events[0]);
+  (void)group.wait();
+
+  bool all_ok = true;
+  for (size_t lane = 0u; lane < lane_count; ++lane) {
+    all_ok = all_ok && lane_ok[lane];
+  }
+  return all_ok;
+}
+
+// Compile-time lane-mode seam for mul_mat dispatch. Route guards choose the
+// lane mode; this helper only executes the already-chosen mode.
+template <matmul_lane_mode lanes = matmul_lane_mode::serial>
+inline bool compute_mul_mat(native_backend & backend,
+                            const emel::kernel::event::op_mul_mat & ev) noexcept {
+  if constexpr (lanes == matmul_lane_mode::parallel) {
+    return compute_mul_mat_sliced_parallel(backend, ev);
+  } else {
+    backend.kernel.set_kind(backend.kernel_kind);
+    return backend.kernel.process_event(ev);
+  }
+}
+
+// Evidence counters live per kernel actor; parallel slices accrue on lane
+// actors, so audit reads must sum the primary kernel and every lane.
+template <class counter_fn>
+inline uint64_t compute_kernel_counter_total(const native_backend & backend,
+                                             counter_fn && counter) noexcept {
+  uint64_t total = std::invoke(counter, backend.kernel);
+  for (const auto & lane_kernel : backend.lane_kernels) {
+    total += std::invoke(counter, lane_kernel);
+  }
+  return total;
+}
+
+template <matmul_lane_mode lanes = matmul_lane_mode::serial>
 inline bool matmul_vector_packed_q8_0(native_backend & backend,
                                       const tensor_matrix & matrix,
                                       std::span<const float> input,
@@ -2115,9 +2365,10 @@ inline bool matmul_vector_packed_q8_0(native_backend & backend,
   }
 
   return prepare_packed_q8_0_input(backend, input) &&
-      matmul_vector_prepared_packed_q8_0_input(backend, matrix, matrix.cols, output);
+      matmul_vector_prepared_packed_q8_0_input<lanes>(backend, matrix, matrix.cols, output);
 }
 
+template <matmul_lane_mode lanes = matmul_lane_mode::serial>
 inline bool matmul_vector_q8_k(native_backend & backend,
                                const tensor_matrix & matrix,
                                std::span<const float> input,
@@ -2134,21 +2385,24 @@ inline bool matmul_vector_q8_k(native_backend & backend,
   auto q8_input = std::span<emel::kernel::detail::quant::block_q8_k>(
       backend.q8_input_storage.data(), block_count);
   return quantize_vector_q8_k(input, q8_input) &&
-      matmul_vector_q8_input(backend, matrix, q8_input, matrix.cols, output);
+      matmul_vector_q8_input<lanes>(backend, matrix, q8_input, matrix.cols, output);
 }
 
+template <matmul_lane_mode lanes = matmul_lane_mode::serial>
 inline bool matmul_vector(native_backend & backend,
                           const tensor_matrix & matrix,
                           std::span<const float> input,
                           std::span<float> output) noexcept;
 
+template <matmul_lane_mode lanes = matmul_lane_mode::serial>
 inline bool matmul_vector_native_quantized(native_backend & backend,
                                            const tensor_matrix & matrix,
                                            std::span<const float> input,
                                            std::span<float> output) noexcept {
-  return matmul_vector(backend, matrix, input, output);
+  return matmul_vector<lanes>(backend, matrix, input, output);
 }
 
+template <matmul_lane_mode lanes>
 inline bool matmul_vector(native_backend & backend,
                           const tensor_matrix & matrix,
                           std::span<const float> input,
@@ -2169,10 +2423,8 @@ inline bool matmul_vector(native_backend & backend,
           static_cast<uint64_t>(input.size())),
       .dst = make_dst_view(
           output.data(), static_cast<uint64_t>(1u), static_cast<uint64_t>(output.size())),
-      .nth = 1,
   };
-  backend.kernel.set_kind(backend.kernel_kind);
-  const bool ok = backend.kernel.process_event(ev);
+  const bool ok = compute_mul_mat<lanes>(backend, ev);
   backend.kernel_dispatch_calls += 1;
   backend.native_q8_0_dispatch_calls += static_cast<uint64_t>(
       matrix.tensor != nullptr &&
@@ -2180,20 +2432,20 @@ inline bool matmul_vector(native_backend & backend,
   return ok;
 }
 
-template <scalar_matmul_route route>
+template <scalar_matmul_route route, matmul_lane_mode lanes = matmul_lane_mode::serial>
 inline bool matmul_vector_routed(native_backend & backend,
                                  const tensor_matrix & matrix,
                                  std::span<const float> input,
                                  std::span<float> output) noexcept {
   if constexpr (route == scalar_matmul_route::packed_q8_0) {
-    return matmul_vector_packed_q8_0(backend, matrix, input, output);
+    return matmul_vector_packed_q8_0<lanes>(backend, matrix, input, output);
   } else if constexpr (route == scalar_matmul_route::q8_k) {
-    return matmul_vector_q8_k(backend, matrix, input, output);
+    return matmul_vector_q8_k<lanes>(backend, matrix, input, output);
   } else if constexpr (route == scalar_matmul_route::native_quantized ||
                        route == scalar_matmul_route::native_quantized_q8_k_logits) {
-    return matmul_vector_native_quantized(backend, matrix, input, output);
+    return matmul_vector_native_quantized<lanes>(backend, matrix, input, output);
   } else {
-    return matmul_vector(backend, matrix, input, output);
+    return matmul_vector<lanes>(backend, matrix, input, output);
   }
 }
 
@@ -2216,7 +2468,6 @@ inline bool matmul_vector_argmax(native_backend & backend,
           static_cast<uint64_t>(1u),
           static_cast<uint64_t>(input.size())),
       .dst = make_dst_view(&selected_score, static_cast<uint64_t>(1u), static_cast<uint64_t>(1u)),
-      .nth = 1,
       .index_out = &selected_index,
   };
   backend.kernel.set_kind(backend.kernel_kind);
@@ -2260,6 +2511,7 @@ inline bool quantize_vector_q8_0(
   return true;
 }
 
+template <matmul_lane_mode lanes>
 inline bool matmul_vector_q8_input(
     native_backend & backend,
     const tensor_matrix & matrix,
@@ -2281,14 +2533,13 @@ inline bool matmul_vector_q8_input(
       .src1 = make_q8_k_vector_view(input.data(), static_cast<uint64_t>(input_cols)),
       .dst = make_dst_view(
           output.data(), static_cast<uint64_t>(1u), static_cast<uint64_t>(output.size())),
-      .nth = 1,
   };
-  backend.kernel.set_kind(backend.kernel_kind);
-  const bool ok = backend.kernel.process_event(ev);
+  const bool ok = compute_mul_mat<lanes>(backend, ev);
   backend.kernel_dispatch_calls += 1;
   return ok;
 }
 
+template <matmul_lane_mode lanes = matmul_lane_mode::serial>
 inline bool matmul_vector_q8_0_input(
     native_backend & backend,
     const tensor_matrix & matrix,
@@ -2310,10 +2561,8 @@ inline bool matmul_vector_q8_0_input(
       .src1 = make_q8_0_vector_view(input.data(), static_cast<uint64_t>(input_cols)),
       .dst = make_dst_view(
           output.data(), static_cast<uint64_t>(1u), static_cast<uint64_t>(output.size())),
-      .nth = 1,
   };
-  backend.kernel.set_kind(backend.kernel_kind);
-  const bool ok = backend.kernel.process_event(ev);
+  const bool ok = compute_mul_mat<lanes>(backend, ev);
   backend.kernel_dispatch_calls += 1;
   backend.packed_q8_0_dispatch_calls += static_cast<uint64_t>(
       matrix.tensor != nullptr &&
@@ -2451,6 +2700,7 @@ inline bool prepare_q8_chunk8_input(native_backend & backend,
   return true;
 }
 
+template <matmul_lane_mode lanes>
 inline bool matmul_vector_prepared_packed_q8_0_input(
     native_backend & backend,
     const tensor_matrix & matrix,
@@ -2468,7 +2718,7 @@ inline bool matmul_vector_prepared_packed_q8_0_input(
     return false;
   }
 
-  return matmul_vector_q8_0_input(
+  return matmul_vector_q8_0_input<lanes>(
       backend,
       matrix,
       std::span<const emel::kernel::detail::quant::block_q8_0>(
@@ -2477,6 +2727,7 @@ inline bool matmul_vector_prepared_packed_q8_0_input(
       output);
 }
 
+template <matmul_lane_mode lanes>
 inline bool matmul_chunk4_prepared_packed_q8_0_input(
     native_backend & backend,
     const tensor_matrix & matrix,
@@ -2500,15 +2751,14 @@ inline bool matmul_chunk4_prepared_packed_q8_0_input(
           output.data(),
           static_cast<uint64_t>(k_prefill_q8_chunk_rows),
           static_cast<uint64_t>(matrix.rows)),
-      .nth = 1,
   };
-  backend.kernel.set_kind(backend.kernel_kind);
-  const bool ok = backend.kernel.process_event(ev);
+  const bool ok = compute_mul_mat<lanes>(backend, ev);
   backend.kernel_dispatch_calls += 1;
   backend.packed_q8_0_dispatch_calls += static_cast<uint64_t>(ok);
   return ok;
 }
 
+template <matmul_lane_mode lanes>
 inline bool matmul_chunk4_q8_input(native_backend & backend,
                                    const tensor_matrix & matrix,
                                    const int32_t input_cols,
@@ -2537,14 +2787,13 @@ inline bool matmul_chunk4_q8_input(native_backend & backend,
           output.data(),
           static_cast<uint64_t>(k_prefill_q8_chunk_rows),
           static_cast<uint64_t>(matrix.rows)),
-      .nth = 1,
   };
-  backend.kernel.set_kind(backend.kernel_kind);
-  const bool ok = backend.kernel.process_event(ev);
+  const bool ok = compute_mul_mat<lanes>(backend, ev);
   backend.kernel_dispatch_calls += 1;
   return ok;
 }
 
+template <matmul_lane_mode lanes = matmul_lane_mode::serial>
 inline bool matmul_chunk8_q8_input(native_backend & backend,
                                    const tensor_matrix & matrix,
                                    const int32_t input_cols,
@@ -2573,10 +2822,8 @@ inline bool matmul_chunk8_q8_input(native_backend & backend,
           output.data(),
           static_cast<uint64_t>(k_prefill_q8_chunk8_rows),
           static_cast<uint64_t>(matrix.rows)),
-      .nth = 1,
   };
-  backend.kernel.set_kind(backend.kernel_kind);
-  const bool ok = backend.kernel.process_event(ev);
+  const bool ok = compute_mul_mat<lanes>(backend, ev);
   backend.kernel_dispatch_calls += 1;
   return ok;
 }
@@ -2592,15 +2839,15 @@ inline bool prepare_chunk4_rhs(native_backend & backend,
   }
 }
 
-template <chunk4_rhs_route route>
+template <chunk4_rhs_route route, matmul_lane_mode lanes = matmul_lane_mode::serial>
 inline bool matmul_chunk4_prepared(native_backend & backend,
                                    const tensor_matrix & matrix,
                                    const int32_t input_cols,
                                    std::span<float> output) noexcept {
   if constexpr (route == chunk4_rhs_route::packed_q8_0) {
-    return matmul_chunk4_prepared_packed_q8_0_input(backend, matrix, input_cols, output);
+    return matmul_chunk4_prepared_packed_q8_0_input<lanes>(backend, matrix, input_cols, output);
   } else {
-    return matmul_chunk4_q8_input(backend, matrix, input_cols, output);
+    return matmul_chunk4_q8_input<lanes>(backend, matrix, input_cols, output);
   }
 }
 
@@ -2652,7 +2899,6 @@ inline bool matmul_vector_q8_input_argmax(
       .src0 = make_src_view(matrix),
       .src1 = make_q8_k_vector_view(input.data(), static_cast<uint64_t>(input_cols)),
       .dst = make_dst_view(&selected_score, static_cast<uint64_t>(1u), static_cast<uint64_t>(1u)),
-      .nth = 1,
       .index_out = &selected_index,
   };
   backend.kernel.set_kind(backend.kernel_kind);
@@ -2838,32 +3084,69 @@ inline void round_q_for_nonflash(std::span<const float> q_source,
   }
 }
 
-inline void apply_rope(std::span<float> vector,
-                       const int32_t head_count,
-                       const int32_t head_dim,
-                       const int32_t n_rot,
-                       const int32_t position,
-                       const float rope_freq_base) noexcept {
+inline void apply_rope_pairing(std::span<float> vector,
+                               const rope_pairing pairing,
+                               const int32_t head_count,
+                               const int32_t head_dim,
+                               const int32_t n_rot,
+                               const int32_t position,
+                               const float rope_freq_base) noexcept {
   const int32_t rot_dim = std::min(n_rot, head_dim);
   if (head_count <= 0 || head_dim <= 1 || rot_dim <= 1) {
     return;
   }
 
   const float theta_scale = ::powf(rope_freq_base, -2.0f / static_cast<float>(rot_dim));
+  const int32_t pair_count = rot_dim / 2;
+  const int32_t x1_base =
+      pairing.x1_offset + pairing.x1_half_rot_offset * pair_count;
   for (int32_t head = 0; head < head_count; ++head) {
     float * head_ptr =
         vector.data() + (static_cast<size_t>(head) * static_cast<size_t>(head_dim));
     float theta = static_cast<float>(position);
-    for (int32_t dim = 0; dim + 1 < rot_dim; dim += 2) {
+    for (int32_t pair = 0; pair < pair_count; ++pair) {
       const float cos_theta = ::cosf(theta);
       const float sin_theta = ::sinf(theta);
-      const float x0 = head_ptr[dim];
-      const float x1 = head_ptr[dim + 1];
-      head_ptr[dim] = x0 * cos_theta - x1 * sin_theta;
-      head_ptr[dim + 1] = x0 * sin_theta + x1 * cos_theta;
+      const int32_t dim0 = pair * pairing.x0_stride;
+      const int32_t dim1 = pair * pairing.x1_stride + x1_base;
+      const float x0 = head_ptr[dim0];
+      const float x1 = head_ptr[dim1];
+      head_ptr[dim0] = x0 * cos_theta - x1 * sin_theta;
+      head_ptr[dim1] = x0 * sin_theta + x1 * cos_theta;
       theta *= theta_scale;
     }
   }
+}
+
+inline void apply_rope(std::span<float> vector,
+                       const int32_t head_count,
+                       const int32_t head_dim,
+                       const int32_t n_rot,
+                       const int32_t position,
+                       const float rope_freq_base) noexcept {
+  apply_rope_pairing(vector,
+                     normal_rope_pairing(),
+                     head_count,
+                     head_dim,
+                     n_rot,
+                     position,
+                     rope_freq_base);
+}
+
+inline void apply_attention_rope(std::span<float> vector,
+                                 const block_weights & block,
+                                 const int32_t head_count,
+                                 const int32_t head_dim,
+                                 const int32_t n_rot,
+                                 const int32_t position,
+                                 const float rope_freq_base) noexcept {
+  apply_rope_pairing(vector,
+                     block.attention_rope_pairing,
+                     head_count,
+                     head_dim,
+                     n_rot,
+                     position,
+                     rope_freq_base);
 }
 
 #if defined(__ARM_NEON) && defined(__aarch64__)
@@ -3151,7 +3434,6 @@ inline emel::kernel::event::op_flash_attn_ext make_flash_attn_request(
       sizeof(uint16_t) * static_cast<uint64_t>(backend.n_ctx) * kv_head_dim);
   request.dst = make_dst_view_3d(
       attn_ctx.data(), head_dim, 1u, head_count);
-  request.nth = 1;
   std::memcpy(request.op_params.data(), &scale, sizeof(scale));
   std::memcpy(request.op_params.data() + sizeof(scale),
               &masked_total_tokens,
@@ -3246,7 +3528,7 @@ inline bool run_attention(native_backend & backend,
           backend.q.data(), static_cast<size_t>(effective_attention_q_dim(backend, block))));
 }
 
-template <scalar_matmul_route route>
+template <scalar_matmul_route route, matmul_lane_mode lanes = matmul_lane_mode::serial>
 inline bool run_shortconv_block(native_backend & backend,
                                 const block_weights & block,
                                 const int32_t layer_index) noexcept {
@@ -3269,7 +3551,7 @@ inline bool run_shortconv_block(native_backend & backend,
     return false;
   }
 
-  if (!matmul_vector_routed<route>(
+  if (!matmul_vector_routed<route, lanes>(
           backend, block.shortconv_in_proj, backend.norm, backend.shortconv_bcx)) {
     return false;
   }
@@ -3316,7 +3598,7 @@ inline bool run_shortconv_block(native_backend & backend,
       backend.shortconv_bx.data(),
       static_cast<size_t>(backend.n_embd) * sizeof(float));
 
-  if (!matmul_vector_routed<route>(
+  if (!matmul_vector_routed<route, lanes>(
           backend, block.shortconv_out_proj, backend.shortconv_conv_out, backend.projected)) {
     return false;
   }
@@ -3419,10 +3701,196 @@ inline bool run_shortconv_block_chunk4(native_backend & backend,
   return true;
 }
 
-template <emel::text::generator::attention_mode mode, scalar_matmul_route route>
-inline bool run_layer(native_backend & backend,
-                      const int32_t layer_index,
-                      const int32_t position) noexcept {
+// Records the prepare()-time matmul weight record pointers per layer in the
+// canonical stream role order: pristine holds the bound records resident
+// steps restore to (packed on aarch64), raw holds the untouched model
+// records the streamed rebase clones (their dtype/extents describe the raw
+// GGUF bytes the window copies into slots; a packed record would misread
+// them). One-time engage bookkeeping (runs inside the initialize pipeline
+// alongside prepare()'s own setup allocation).
+inline void scan_stream_pristine_records(native_backend & backend) noexcept {
+  backend.stream.pristine.assign(backend.blocks.size(), {});
+  backend.stream.raw.assign(backend.blocks.size(), {});
+  backend.stream.pristine_output = backend.output.tensor;
+  backend.stream.raw_output = backend.output_native.tensor != nullptr
+                                  ? backend.output_native.tensor
+                                  : backend.output.tensor;
+  backend.stream.pristine_output_argmax = backend.output_argmax.tensor;
+  backend.stream.raw_output_argmax = backend.output_native.tensor != nullptr
+                                         ? backend.output_native.tensor
+                                         : backend.output_argmax.tensor;
+  for (size_t layer = 0; layer < backend.blocks.size(); ++layer) {
+    const block_weights & block = backend.blocks[layer];
+    auto & roles = backend.stream.pristine[layer];
+    auto & raw = backend.stream.raw[layer];
+    const auto record = [&](const size_t role, const tensor_matrix & matrix,
+                            const packed_matrix_binding & packed) noexcept {
+      roles[role] = matrix.tensor;
+      raw[role] = packed.source != nullptr ? packed.source : matrix.tensor;
+    };
+    record(k_stream_role_attention_q, block.attention_q,
+           block.attention_q_packed);
+    record(k_stream_role_attention_k, block.attention_k,
+           block.attention_k_packed);
+    record(k_stream_role_attention_v, block.attention_v,
+           block.attention_v_packed);
+    record(k_stream_role_attention_output, block.attention_output,
+           block.attention_output_packed);
+    record(k_stream_role_feed_forward_gate, block.feed_forward_gate,
+           block.feed_forward_gate_packed);
+    record(k_stream_role_feed_forward_down, block.feed_forward_down,
+           block.feed_forward_down_packed);
+    record(k_stream_role_feed_forward_up, block.feed_forward_up,
+           block.feed_forward_up_packed);
+    record(k_stream_role_shortconv_in_proj, block.shortconv_in_proj,
+           block.shortconv_in_proj_packed);
+    record(k_stream_role_shortconv_out_proj, block.shortconv_out_proj,
+           block.shortconv_out_proj_packed);
+  }
+}
+
+// Rebases the layer's matmul weight views onto the acquired window slot:
+// clones the raw model record per present role (canonical order matching the
+// extent builder) with data repointed into the slot. The slot holds raw GGUF
+// bytes, so the clone's dtype/extents must describe them - the prepare()-time
+// record can be a packed repack on aarch64 and would misread the slot. Pure
+// pointer bookkeeping on the already-chosen streamed route; absent-role
+// skipping is data-plane presence filtering, and a count mismatch propagates
+// as data-plane failure.
+inline bool bind_streamed_block_views(
+    native_backend & backend,
+    const int32_t layer_index,
+    const uint8_t * slot_base,
+    const emel::model::tensor::window::detail::layer_descriptor & layout) noexcept {
+  block_weights & block = backend.blocks[static_cast<size_t>(layer_index)];
+  stream_binding & stream = backend.stream;
+  const auto & raw = stream.raw[static_cast<size_t>(layer_index)];
+  uint32_t extent_index = 0u;
+  const auto rebind = [&](tensor_matrix & matrix, const size_t role) noexcept -> bool {
+    if (raw[role] == nullptr) {
+      return true;
+    }
+    if (extent_index >= layout.weight_count) {
+      return false;
+    }
+    stream.records[role] = *raw[role];
+    stream.records[role].data = slot_base + layout.weights[extent_index].slot_offset;
+    matrix.tensor = &stream.records[role];
+    extent_index += 1u;
+    return true;
+  };
+  return rebind(block.attention_q, k_stream_role_attention_q) &&
+         rebind(block.attention_k, k_stream_role_attention_k) &&
+         rebind(block.attention_v, k_stream_role_attention_v) &&
+         rebind(block.attention_output, k_stream_role_attention_output) &&
+         rebind(block.feed_forward_gate, k_stream_role_feed_forward_gate) &&
+         rebind(block.feed_forward_down, k_stream_role_feed_forward_down) &&
+         rebind(block.feed_forward_up, k_stream_role_feed_forward_up) &&
+         rebind(block.shortconv_in_proj, k_stream_role_shortconv_in_proj) &&
+         rebind(block.shortconv_out_proj, k_stream_role_shortconv_out_proj) &&
+         extent_index == layout.weight_count;
+}
+
+// Points the logits/argmax output views at the raw model records for a
+// streamed step: the streamed route is classified from raw records, so a
+// packed resident output would be misread by it. Pure pointer bookkeeping on
+// the already-chosen streamed route.
+inline void bind_streamed_output_views(native_backend & backend) noexcept {
+  if (backend.stream.raw_output != nullptr) {
+    backend.output.tensor = backend.stream.raw_output;
+  }
+  if (backend.stream.raw_output_argmax != nullptr) {
+    backend.output_argmax.tensor = backend.stream.raw_output_argmax;
+  }
+}
+
+// Restores every block's matmul weight views (and the output views) to the
+// prepare()-time records after a streamed step, so a later resident step
+// reads the per-layer tensors instead of the shared per-role stream records
+// (which hold the last acquired slot's clone). Pure pointer bookkeeping on
+// the already-completed streamed route; used by both streamed decode
+// drivers.
+inline void reset_stream_block_views(native_backend & backend) noexcept {
+  if (backend.stream.pristine_output != nullptr) {
+    backend.output.tensor = backend.stream.pristine_output;
+  }
+  if (backend.stream.pristine_output_argmax != nullptr) {
+    backend.output_argmax.tensor = backend.stream.pristine_output_argmax;
+  }
+  // pristine is either empty (scan never ran) or exactly blocks.size()
+  // (assigned in one shot by scan_stream_pristine_records), so its size
+  // bounds the block indexing.
+  const size_t layer_count = backend.stream.pristine.size();
+  for (size_t layer = 0; layer < layer_count; ++layer) {
+    block_weights & block = backend.blocks[layer];
+    const auto & roles = backend.stream.pristine[layer];
+    const auto restore = [&](tensor_matrix & matrix, const size_t role) noexcept {
+      if (roles[role] != nullptr) {
+        matrix.tensor = roles[role];
+      }
+    };
+    restore(block.attention_q, k_stream_role_attention_q);
+    restore(block.attention_k, k_stream_role_attention_k);
+    restore(block.attention_v, k_stream_role_attention_v);
+    restore(block.attention_output, k_stream_role_attention_output);
+    restore(block.feed_forward_gate, k_stream_role_feed_forward_gate);
+    restore(block.feed_forward_down, k_stream_role_feed_forward_down);
+    restore(block.feed_forward_up, k_stream_role_feed_forward_up);
+    restore(block.shortconv_in_proj, k_stream_role_shortconv_in_proj);
+    restore(block.shortconv_out_proj, k_stream_role_shortconv_out_proj);
+  }
+}
+
+struct stream_acquire_capture {
+  bool done = false;
+  const uint8_t * slot_base = nullptr;
+  const emel::model::tensor::window::detail::layer_descriptor * layout = nullptr;
+
+  static void on_done(
+      void * object,
+      const emel::model::tensor::window::events::acquire_layer_window_done & ev) noexcept {
+    auto * capture = static_cast<stream_acquire_capture *>(object);
+    capture->done = true;
+    capture->slot_base = ev.slot_base;
+    capture->layout = &ev.layout;
+  }
+
+  static void on_error(
+      void *,
+      const emel::model::tensor::window::events::acquire_layer_window_error &) noexcept {}
+};
+
+// Streamed layer residency: acquires the layer's window slot (suspending on
+// the in-flight load when needed) and rebases the block's weight views into
+// it. Failure propagates through the layer loop's bool data-plane error path.
+inline bool acquire_streamed_layer(native_backend & backend,
+                                   const int32_t layer_index) noexcept {
+  stream_acquire_capture capture{};
+  emel::model::tensor::window::event::acquire_layer_window acquire{layer_index};
+  acquire.on_done = {&capture, &stream_acquire_capture::on_done};
+  acquire.on_error = {&capture, &stream_acquire_capture::on_error};
+  if (!backend.stream.window->process_event(acquire) || !capture.done) {
+    return false;
+  }
+  return bind_streamed_block_views(backend, layer_index, capture.slot_base,
+                                   *capture.layout);
+}
+
+template <emel::text::generator::attention_mode mode, scalar_matmul_route route,
+          matmul_lane_mode lanes = matmul_lane_mode::serial,
+          window_mode wmode = window_mode::resident>
+inline bool run_layer(native_backend &backend, const int32_t layer_index,
+                      const int32_t position,
+                      int32_t * err_out = nullptr) noexcept {
+  if constexpr (wmode == window_mode::streamed) {
+    // Streamed instantiations are reached only from the decode wrappers,
+    // which receive the graph processor's always-valid err pointer
+    // (kernel_step run_callback passes &callback_err unconditionally).
+    if (!acquire_streamed_layer(backend, layer_index)) {
+      *err_out = k_error_stream_acquire;
+      return false;
+    }
+  }
   auto & block = backend.blocks[static_cast<size_t>(layer_index)];
   if (!rms_norm(backend.hidden, block.attention_norm, backend.rms_epsilon, backend.norm)) {
     return false;
@@ -3438,11 +3906,11 @@ inline bool run_layer(native_backend & backend,
         std::span<const float>(backend.attn_ctx.data(), static_cast<size_t>(q_dim));
     if constexpr (route == scalar_matmul_route::packed_q8_0) {
       if (!prepare_packed_q8_0_input(backend, backend.norm) ||
-          !matmul_vector_prepared_packed_q8_0_input(
+          !matmul_vector_prepared_packed_q8_0_input<lanes>(
               backend, block.attention_q, block.attention_q.cols, q) ||
-          !matmul_vector_prepared_packed_q8_0_input(
+          !matmul_vector_prepared_packed_q8_0_input<lanes>(
               backend, block.attention_k, block.attention_k.cols, k) ||
-          !matmul_vector_prepared_packed_q8_0_input(
+          !matmul_vector_prepared_packed_q8_0_input<lanes>(
               backend, block.attention_v, block.attention_v.cols, v)) {
         return false;
       }
@@ -3455,25 +3923,25 @@ inline bool run_layer(native_backend & backend,
       auto q8_input = std::span<emel::kernel::detail::quant::block_q8_k>(
           backend.q8_input_storage.data(), block_count);
       if (!quantize_vector_q8_k(backend.norm, q8_input) ||
-          !matmul_vector_q8_input(
+          !matmul_vector_q8_input<lanes>(
               backend, block.attention_q, q8_input, block.attention_q.cols, q) ||
-          !matmul_vector_q8_input(
+          !matmul_vector_q8_input<lanes>(
               backend, block.attention_k, q8_input, block.attention_k.cols, k) ||
-          !matmul_vector_q8_input(
+          !matmul_vector_q8_input<lanes>(
               backend, block.attention_v, q8_input, block.attention_v.cols, v)) {
         return false;
       }
     } else if constexpr (route == scalar_matmul_route::native_quantized ||
                          route == scalar_matmul_route::native_quantized_q8_k_logits) {
-      if (!matmul_vector_native_quantized(backend, block.attention_q, backend.norm, q) ||
-          !matmul_vector_native_quantized(backend, block.attention_k, backend.norm, k) ||
-          !matmul_vector_native_quantized(backend, block.attention_v, backend.norm, v)) {
+      if (!matmul_vector_native_quantized<lanes>(backend, block.attention_q, backend.norm, q) ||
+          !matmul_vector_native_quantized<lanes>(backend, block.attention_k, backend.norm, k) ||
+          !matmul_vector_native_quantized<lanes>(backend, block.attention_v, backend.norm, v)) {
         return false;
       }
     } else {
-      if (!matmul_vector(backend, block.attention_q, backend.norm, q) ||
-          !matmul_vector(backend, block.attention_k, backend.norm, k) ||
-          !matmul_vector(backend, block.attention_v, backend.norm, v)) {
+      if (!matmul_vector<lanes>(backend, block.attention_q, backend.norm, q) ||
+          !matmul_vector<lanes>(backend, block.attention_k, backend.norm, k) ||
+          !matmul_vector<lanes>(backend, block.attention_v, backend.norm, v)) {
         return false;
       }
     }
@@ -3487,18 +3955,20 @@ inline bool run_layer(native_backend & backend,
       return false;
     }
 
-    apply_rope(q,
-               backend.n_head,
-               effective_attention_head_dim(backend, block),
-               effective_attention_rope_dim(backend, block),
-               position,
-               effective_attention_rope_freq_base(backend, block));
-    apply_rope(k,
-               backend.n_head_kv,
-               effective_attention_head_dim_kv(backend, block),
-               effective_attention_rope_dim(backend, block),
-               position,
-               effective_attention_rope_freq_base(backend, block));
+    apply_attention_rope(q,
+                         block,
+                         backend.n_head,
+                         effective_attention_head_dim(backend, block),
+                         effective_attention_rope_dim(backend, block),
+                         position,
+                         effective_attention_rope_freq_base(backend, block));
+    apply_attention_rope(k,
+                         block,
+                         backend.n_head_kv,
+                         effective_attention_head_dim_kv(backend, block),
+                         effective_attention_rope_dim(backend, block),
+                         position,
+                         effective_attention_rope_freq_base(backend, block));
     if (!store_attention_kv_cache(
             backend,
             block,
@@ -3507,7 +3977,7 @@ inline bool run_layer(native_backend & backend,
             k,
             v) ||
         !run_attention<mode>(backend, block, layer_index, position) ||
-        !matmul_vector_routed<route>(
+        !matmul_vector_routed<route, lanes>(
             backend, block.attention_output, attn_ctx, backend.projected)) {
       return false;
     }
@@ -3515,7 +3985,7 @@ inline bool run_layer(native_backend & backend,
     for (int32_t idx = 0; idx < backend.n_embd; ++idx) {
       backend.hidden[static_cast<size_t>(idx)] += backend.projected[static_cast<size_t>(idx)];
     }
-  } else if (!run_shortconv_block<route>(backend, block, layer_index)) {
+  } else if (!run_shortconv_block<route, lanes>(backend, block, layer_index)) {
     return false;
   }
 
@@ -3529,9 +3999,9 @@ inline bool run_layer(native_backend & backend,
   auto ffn_hidden = std::span<float>(backend.ffn_hidden.data(), static_cast<size_t>(ffn_dim));
   if constexpr (route == scalar_matmul_route::packed_q8_0) {
     if (!prepare_packed_q8_0_input(backend, backend.norm) ||
-        !matmul_vector_prepared_packed_q8_0_input(
+        !matmul_vector_prepared_packed_q8_0_input<lanes>(
             backend, block.feed_forward_gate, block.feed_forward_gate.cols, gate) ||
-        !matmul_vector_prepared_packed_q8_0_input(
+        !matmul_vector_prepared_packed_q8_0_input<lanes>(
             backend, block.feed_forward_up, block.feed_forward_up.cols, up)) {
       return false;
     }
@@ -3544,13 +4014,13 @@ inline bool run_layer(native_backend & backend,
     auto q8_input = std::span<emel::kernel::detail::quant::block_q8_k>(
         backend.q8_input_storage.data(), block_count);
     if (!quantize_vector_q8_k(backend.norm, q8_input) ||
-        !matmul_vector_q8_input(
+        !matmul_vector_q8_input<lanes>(
             backend,
             block.feed_forward_gate,
             q8_input,
             block.feed_forward_gate.cols,
             gate) ||
-        !matmul_vector_q8_input(
+        !matmul_vector_q8_input<lanes>(
             backend,
             block.feed_forward_up,
             q8_input,
@@ -3560,13 +4030,13 @@ inline bool run_layer(native_backend & backend,
     }
   } else if constexpr (route == scalar_matmul_route::native_quantized ||
                        route == scalar_matmul_route::native_quantized_q8_k_logits) {
-    if (!matmul_vector_native_quantized(backend, block.feed_forward_gate, backend.norm, gate) ||
-        !matmul_vector_native_quantized(backend, block.feed_forward_up, backend.norm, up)) {
+    if (!matmul_vector_native_quantized<lanes>(backend, block.feed_forward_gate, backend.norm, gate) ||
+        !matmul_vector_native_quantized<lanes>(backend, block.feed_forward_up, backend.norm, up)) {
       return false;
     }
   } else {
-    if (!matmul_vector(backend, block.feed_forward_gate, backend.norm, gate) ||
-        !matmul_vector(backend, block.feed_forward_up, backend.norm, up)) {
+    if (!matmul_vector<lanes>(backend, block.feed_forward_gate, backend.norm, gate) ||
+        !matmul_vector<lanes>(backend, block.feed_forward_up, backend.norm, up)) {
       return false;
     }
   }
@@ -3575,7 +4045,7 @@ inline bool run_layer(native_backend & backend,
     ffn_hidden[idx] = silu(gate[idx]) * up[idx];
   }
 
-  if (!matmul_vector_routed<route>(
+  if (!matmul_vector_routed<route, lanes>(
           backend, block.feed_forward_down, ffn_hidden, backend.projected)) {
     return false;
   }
@@ -3601,7 +4071,7 @@ inline bool run_layer_nonflash(native_backend & backend,
       backend, layer_index, position);
 }
 
-template <scalar_matmul_route route>
+template <scalar_matmul_route route, matmul_lane_mode lanes = matmul_lane_mode::serial>
 inline bool compute_logits(native_backend & backend) noexcept {
   if (!rms_norm(backend.hidden, backend.output_norm, backend.rms_epsilon, backend.norm)) {
     return false;
@@ -3609,7 +4079,7 @@ inline bool compute_logits(native_backend & backend) noexcept {
 
   if constexpr (route == scalar_matmul_route::packed_q8_0) {
     return prepare_packed_q8_0_input(backend, backend.norm) &&
-        matmul_vector_prepared_packed_q8_0_input(
+        matmul_vector_prepared_packed_q8_0_input<lanes>(
                backend, backend.output, backend.n_embd, backend.bound_logits);
   } else if constexpr (route == scalar_matmul_route::q8_k) {
     const size_t block_count =
@@ -3617,14 +4087,14 @@ inline bool compute_logits(native_backend & backend) noexcept {
     auto q8_input = std::span<emel::kernel::detail::quant::block_q8_k>(
         backend.q8_input_storage.data(), block_count);
     return quantize_vector_q8_k(backend.norm, q8_input) &&
-        matmul_vector_q8_input(
+        matmul_vector_q8_input<lanes>(
                backend,
                backend.output,
                q8_input,
                backend.n_embd,
                backend.bound_logits);
   } else if constexpr (route == scalar_matmul_route::native_quantized) {
-    return matmul_vector_native_quantized(
+    return matmul_vector_native_quantized<lanes>(
         backend, backend.output, backend.norm, backend.bound_logits);
   } else if constexpr (route == scalar_matmul_route::native_quantized_q8_k_logits) {
     const size_t block_count =
@@ -3632,14 +4102,14 @@ inline bool compute_logits(native_backend & backend) noexcept {
     auto q8_input = std::span<emel::kernel::detail::quant::block_q8_k>(
         backend.q8_input_storage.data(), block_count);
     return quantize_vector_q8_k(backend.norm, q8_input) &&
-        matmul_vector_q8_input(
+        matmul_vector_q8_input<lanes>(
                backend,
                backend.output,
                q8_input,
                backend.n_embd,
                backend.bound_logits);
   } else {
-    return matmul_vector(backend, backend.output, backend.norm, backend.bound_logits);
+    return matmul_vector<lanes>(backend, backend.output, backend.norm, backend.bound_logits);
   }
 }
 
@@ -3701,7 +4171,7 @@ inline bool run_prefill_scalar_tokens(native_backend & backend,
   return true;
 }
 
-template <chunk4_rhs_route route>
+template <chunk4_rhs_route route, matmul_lane_mode lanes = matmul_lane_mode::serial>
 inline bool run_shortconv_block_chunk4(native_backend & backend,
                                        const block_weights & block,
                                        const int32_t layer_index) noexcept {
@@ -3727,7 +4197,7 @@ inline bool run_shortconv_block_chunk4(native_backend & backend,
   }
 
   if (!prepare_chunk4_rhs<route>(backend, backend.norm_chunk4, backend.n_embd) ||
-      !matmul_chunk4_prepared<route>(
+      !matmul_chunk4_prepared<route, lanes>(
           backend, block.shortconv_in_proj, backend.n_embd, backend.shortconv_bcx_chunk4)) {
     return false;
   }
@@ -3778,7 +4248,7 @@ inline bool run_shortconv_block_chunk4(native_backend & backend,
   }
 
   if (!prepare_chunk4_rhs<route>(backend, backend.shortconv_conv_out_chunk4, backend.n_embd) ||
-      !matmul_chunk4_prepared<route>(
+      !matmul_chunk4_prepared<route, lanes>(
           backend, block.shortconv_out_proj, backend.n_embd, backend.projected_chunk4) ||
       !add_chunk4_rows_in_place(backend.hidden_chunk4, backend.projected_chunk4, backend.n_embd)) {
     return false;
@@ -3787,6 +4257,7 @@ inline bool run_shortconv_block_chunk4(native_backend & backend,
   return true;
 }
 
+template <matmul_lane_mode lanes = matmul_lane_mode::serial>
 inline bool run_shortconv_block_chunk8_q8_k(native_backend & backend,
                                             const block_weights & block,
                                             const int32_t layer_index) noexcept {
@@ -3812,7 +4283,7 @@ inline bool run_shortconv_block_chunk8_q8_k(native_backend & backend,
   }
 
   if (!prepare_q8_chunk8_input(backend, backend.norm_chunk8, backend.n_embd) ||
-      !matmul_chunk8_q8_input(
+      !matmul_chunk8_q8_input<lanes>(
           backend, block.shortconv_in_proj, backend.n_embd, backend.shortconv_bcx_chunk8)) {
     return false;
   }
@@ -3863,7 +4334,7 @@ inline bool run_shortconv_block_chunk8_q8_k(native_backend & backend,
   }
 
   if (!prepare_q8_chunk8_input(backend, backend.shortconv_conv_out_chunk8, backend.n_embd) ||
-      !matmul_chunk8_q8_input(
+      !matmul_chunk8_q8_input<lanes>(
           backend, block.shortconv_out_proj, backend.n_embd, backend.projected_chunk8) ||
       !add_chunk8_rows_in_place(backend.hidden_chunk8, backend.projected_chunk8, backend.n_embd)) {
     return false;
@@ -3872,7 +4343,9 @@ inline bool run_shortconv_block_chunk8_q8_k(native_backend & backend,
   return true;
 }
 
-template <emel::text::generator::attention_mode mode, chunk4_rhs_route route>
+template <emel::text::generator::attention_mode mode,
+          chunk4_rhs_route route,
+          matmul_lane_mode lanes = matmul_lane_mode::serial>
 inline bool run_layer_chunk4(native_backend & backend,
                              const int32_t layer_index,
                              const size_t token_base) noexcept {
@@ -3904,11 +4377,11 @@ inline bool run_layer_chunk4(native_backend & backend,
 
   if (block.uses_attention) {
     if (!prepare_chunk4_rhs<route>(backend, backend.norm_chunk4, backend.n_embd) ||
-        !matmul_chunk4_prepared<route>(
+        !matmul_chunk4_prepared<route, lanes>(
             backend, block.attention_q, backend.n_embd, q_chunk) ||
-        !matmul_chunk4_prepared<route>(
+        !matmul_chunk4_prepared<route, lanes>(
             backend, block.attention_k, backend.n_embd, k_chunk) ||
-        !matmul_chunk4_prepared<route>(
+        !matmul_chunk4_prepared<route, lanes>(
             backend, block.attention_v, backend.n_embd, v_chunk)) {
       return false;
     }
@@ -3941,18 +4414,20 @@ inline bool run_layer_chunk4(native_backend & backend,
         return false;
       }
 
-      apply_rope(q_row,
-                 backend.n_head,
-                 effective_attention_head_dim(backend, block),
-                 effective_attention_rope_dim(backend, block),
-                 position,
-                 effective_attention_rope_freq_base(backend, block));
-      apply_rope(k_row,
-                 backend.n_head_kv,
-                 effective_attention_head_dim_kv(backend, block),
-                 effective_attention_rope_dim(backend, block),
-                 position,
-                 effective_attention_rope_freq_base(backend, block));
+      apply_attention_rope(q_row,
+                           block,
+                           backend.n_head,
+                           effective_attention_head_dim(backend, block),
+                           effective_attention_rope_dim(backend, block),
+                           position,
+                           effective_attention_rope_freq_base(backend, block));
+      apply_attention_rope(k_row,
+                           block,
+                           backend.n_head_kv,
+                           effective_attention_head_dim_kv(backend, block),
+                           effective_attention_rope_dim(backend, block),
+                           position,
+                           effective_attention_rope_freq_base(backend, block));
 
       if (!store_attention_kv_cache(backend, block, layer_index, position, k_row, v_row) ||
           !run_attention_for_q_vector<mode>(backend, block, layer_index, position, q_row)) {
@@ -3967,13 +4442,13 @@ inline bool run_layer_chunk4(native_backend & backend,
     }
 
     if (!prepare_chunk4_rhs<route>(backend, attn_ctx_chunk, q_dim) ||
-        !matmul_chunk4_prepared<route>(
+        !matmul_chunk4_prepared<route, lanes>(
             backend, block.attention_output, q_dim, backend.projected_chunk4) ||
         !add_chunk4_rows_in_place(
             backend.hidden_chunk4, backend.projected_chunk4, backend.n_embd)) {
       return false;
     }
-  } else if (!run_shortconv_block_chunk4<route>(backend, block, layer_index)) {
+  } else if (!run_shortconv_block_chunk4<route, lanes>(backend, block, layer_index)) {
     return false;
   }
 
@@ -3996,9 +4471,9 @@ inline bool run_layer_chunk4(native_backend & backend,
       std::span<float>(backend.ffn_hidden_chunk4.data(),
                        static_cast<size_t>(k_prefill_q8_chunk_rows) * static_cast<size_t>(ffn_dim));
   if (!prepare_chunk4_rhs<route>(backend, backend.norm_chunk4, backend.n_embd) ||
-      !matmul_chunk4_prepared<route>(
+      !matmul_chunk4_prepared<route, lanes>(
           backend, block.feed_forward_gate, backend.n_embd, gate_chunk) ||
-      !matmul_chunk4_prepared<route>(
+      !matmul_chunk4_prepared<route, lanes>(
           backend, block.feed_forward_up, backend.n_embd, up_chunk)) {
     return false;
   }
@@ -4006,7 +4481,7 @@ inline bool run_layer_chunk4(native_backend & backend,
   if (!apply_silu_mul_chunk4(
           gate_chunk, up_chunk, ffn_dim, ffn_hidden_chunk) ||
       !prepare_chunk4_rhs<route>(backend, ffn_hidden_chunk, ffn_dim) ||
-      !matmul_chunk4_prepared<route>(
+      !matmul_chunk4_prepared<route, lanes>(
           backend, block.feed_forward_down, ffn_dim, backend.projected_chunk4) ||
       !add_chunk4_rows_in_place(backend.hidden_chunk4, backend.projected_chunk4, backend.n_embd)) {
     return false;
@@ -4015,7 +4490,8 @@ inline bool run_layer_chunk4(native_backend & backend,
   return true;
 }
 
-template <emel::text::generator::attention_mode mode>
+template <emel::text::generator::attention_mode mode,
+          matmul_lane_mode lanes = matmul_lane_mode::serial>
 inline bool run_layer_chunk8_q8_k(native_backend & backend,
                                   const int32_t layer_index,
                                   const size_t token_base) noexcept {
@@ -4047,9 +4523,9 @@ inline bool run_layer_chunk8_q8_k(native_backend & backend,
 
   if (block.uses_attention) {
     if (!prepare_q8_chunk8_input(backend, backend.norm_chunk8, backend.n_embd) ||
-        !matmul_chunk8_q8_input(backend, block.attention_q, backend.n_embd, q_chunk) ||
-        !matmul_chunk8_q8_input(backend, block.attention_k, backend.n_embd, k_chunk) ||
-        !matmul_chunk8_q8_input(backend, block.attention_v, backend.n_embd, v_chunk)) {
+        !matmul_chunk8_q8_input<lanes>(backend, block.attention_q, backend.n_embd, q_chunk) ||
+        !matmul_chunk8_q8_input<lanes>(backend, block.attention_k, backend.n_embd, k_chunk) ||
+        !matmul_chunk8_q8_input<lanes>(backend, block.attention_v, backend.n_embd, v_chunk)) {
       return false;
     }
 
@@ -4081,18 +4557,20 @@ inline bool run_layer_chunk8_q8_k(native_backend & backend,
         return false;
       }
 
-      apply_rope(q_row,
-                 backend.n_head,
-                 effective_attention_head_dim(backend, block),
-                 effective_attention_rope_dim(backend, block),
-                 position,
-                 effective_attention_rope_freq_base(backend, block));
-      apply_rope(k_row,
-                 backend.n_head_kv,
-                 effective_attention_head_dim_kv(backend, block),
-                 effective_attention_rope_dim(backend, block),
-                 position,
-                 effective_attention_rope_freq_base(backend, block));
+      apply_attention_rope(q_row,
+                           block,
+                           backend.n_head,
+                           effective_attention_head_dim(backend, block),
+                           effective_attention_rope_dim(backend, block),
+                           position,
+                           effective_attention_rope_freq_base(backend, block));
+      apply_attention_rope(k_row,
+                           block,
+                           backend.n_head_kv,
+                           effective_attention_head_dim_kv(backend, block),
+                           effective_attention_rope_dim(backend, block),
+                           position,
+                           effective_attention_rope_freq_base(backend, block));
 
       if (!store_attention_kv_cache(backend, block, layer_index, position, k_row, v_row) ||
           !run_attention_for_q_vector<mode>(backend, block, layer_index, position, q_row)) {
@@ -4107,12 +4585,12 @@ inline bool run_layer_chunk8_q8_k(native_backend & backend,
     }
 
     if (!prepare_q8_chunk8_input(backend, attn_ctx_chunk, q_dim) ||
-        !matmul_chunk8_q8_input(
+        !matmul_chunk8_q8_input<lanes>(
             backend, block.attention_output, q_dim, backend.projected_chunk8) ||
         !add_chunk8_rows_in_place(backend.hidden_chunk8, backend.projected_chunk8, backend.n_embd)) {
       return false;
     }
-  } else if (!run_shortconv_block_chunk8_q8_k(backend, block, layer_index)) {
+  } else if (!run_shortconv_block_chunk8_q8_k<lanes>(backend, block, layer_index)) {
     return false;
   }
 
@@ -4154,7 +4632,9 @@ inline bool run_layer_chunk8_q8_k(native_backend & backend,
   return true;
 }
 
-template <emel::text::generator::attention_mode mode, chunk4_rhs_route route>
+template <emel::text::generator::attention_mode mode,
+          chunk4_rhs_route route,
+          matmul_lane_mode lanes = matmul_lane_mode::serial>
 inline bool run_prefill_chunk4_tokens(native_backend & backend,
                                       const size_t token_limit) noexcept {
   for (size_t token_base = 0; token_base < token_limit;
@@ -4177,7 +4657,7 @@ inline bool run_prefill_chunk4_tokens(native_backend & backend,
     }
 
     for (int32_t layer = 0; layer < backend.n_layer; ++layer) {
-      if (!run_layer_chunk4<mode, route>(backend, layer, token_base)) {
+      if (!run_layer_chunk4<mode, route, lanes>(backend, layer, token_base)) {
         return false;
       }
     }
@@ -4199,7 +4679,8 @@ inline bool run_prefill_chunk4_tokens(native_backend & backend,
   return true;
 }
 
-template <emel::text::generator::attention_mode mode>
+template <emel::text::generator::attention_mode mode,
+          matmul_lane_mode lanes = matmul_lane_mode::serial>
 inline bool run_prefill_chunk8_tokens_q8_k(native_backend & backend,
                                            const size_t token_limit) noexcept {
   for (size_t token_base = 0; token_base < token_limit;
@@ -4222,7 +4703,7 @@ inline bool run_prefill_chunk8_tokens_q8_k(native_backend & backend,
     }
 
     for (int32_t layer = 0; layer < backend.n_layer; ++layer) {
-      if (!run_layer_chunk8_q8_k<mode>(backend, layer, token_base)) {
+      if (!run_layer_chunk8_q8_k<mode, lanes>(backend, layer, token_base)) {
         return false;
       }
     }
@@ -4257,7 +4738,9 @@ inline bool run_prefill(native_backend & backend) noexcept {
   return compute_logits<route>(backend);
 }
 
-template <emel::text::generator::attention_mode mode, chunk4_rhs_route route>
+template <emel::text::generator::attention_mode mode,
+          chunk4_rhs_route route,
+          matmul_lane_mode lanes = matmul_lane_mode::serial>
 inline bool run_prefill_chunk4(native_backend & backend) noexcept {
   backend.kv_cache_tokens = 0;
   reset_shortconv_cache(backend);
@@ -4266,17 +4749,18 @@ inline bool run_prefill_chunk4(native_backend & backend) noexcept {
   const size_t chunk_limit =
       token_count - (token_count % static_cast<size_t>(k_prefill_q8_chunk_rows));
   if (chunk_limit == 0u ||
-      !run_prefill_chunk4_tokens<mode, route>(backend, chunk_limit) ||
+      !run_prefill_chunk4_tokens<mode, route, lanes>(backend, chunk_limit) ||
       !run_prefill_scalar_tokens<
           mode,
           static_cast<scalar_matmul_route>(route)>(backend, chunk_limit, token_count)) {
     return false;
   }
 
-  return compute_logits<static_cast<scalar_matmul_route>(route)>(backend);
+  return compute_logits<static_cast<scalar_matmul_route>(route), lanes>(backend);
 }
 
-template <emel::text::generator::attention_mode mode>
+template <emel::text::generator::attention_mode mode,
+          matmul_lane_mode lanes = matmul_lane_mode::serial>
 inline bool run_prefill_chunk8_q8_k(native_backend & backend) noexcept {
   backend.kv_cache_tokens = 0;
   reset_shortconv_cache(backend);
@@ -4285,13 +4769,13 @@ inline bool run_prefill_chunk8_q8_k(native_backend & backend) noexcept {
   const size_t chunk_limit =
       token_count - (token_count % static_cast<size_t>(k_prefill_q8_chunk8_rows));
   if (chunk_limit == 0u ||
-      !run_prefill_chunk8_tokens_q8_k<mode>(backend, chunk_limit) ||
+      !run_prefill_chunk8_tokens_q8_k<mode, lanes>(backend, chunk_limit) ||
       !run_prefill_scalar_tokens<mode, scalar_matmul_route::q8_k>(
           backend, chunk_limit, token_count)) {
     return false;
   }
 
-  return compute_logits<scalar_matmul_route::q8_k>(backend);
+  return compute_logits<scalar_matmul_route::q8_k, lanes>(backend);
 }
 
 inline bool run_prefill_flash(native_backend & backend) noexcept {
@@ -4323,7 +4807,9 @@ inline bool run_prefill_preselected_argmax(native_backend & backend,
       backend, selected_index, selected_score);
 }
 
-template <emel::text::generator::attention_mode mode, chunk4_rhs_route route>
+template <emel::text::generator::attention_mode mode,
+          chunk4_rhs_route route,
+          matmul_lane_mode lanes = matmul_lane_mode::serial>
 inline bool run_prefill_chunk4_preselected_argmax(native_backend & backend,
                                                   int32_t & selected_index,
                                                   float & selected_score) noexcept {
@@ -4334,7 +4820,7 @@ inline bool run_prefill_chunk4_preselected_argmax(native_backend & backend,
   const size_t chunk_limit =
       token_count - (token_count % static_cast<size_t>(k_prefill_q8_chunk_rows));
   if (chunk_limit == 0u ||
-      !run_prefill_chunk4_tokens<mode, route>(backend, chunk_limit) ||
+      !run_prefill_chunk4_tokens<mode, route, lanes>(backend, chunk_limit) ||
       !run_prefill_scalar_tokens<
           mode,
           static_cast<scalar_matmul_route>(route)>(backend, chunk_limit, token_count)) {
@@ -4350,7 +4836,8 @@ inline bool run_prefill_chunk4_preselected_argmax(native_backend & backend,
   }
 }
 
-template <emel::text::generator::attention_mode mode>
+template <emel::text::generator::attention_mode mode,
+          matmul_lane_mode lanes = matmul_lane_mode::serial>
 inline bool run_prefill_chunk8_preselected_argmax_q8_k(native_backend & backend,
                                                        int32_t & selected_index,
                                                        float & selected_score) noexcept {
@@ -4361,7 +4848,7 @@ inline bool run_prefill_chunk8_preselected_argmax_q8_k(native_backend & backend,
   const size_t chunk_limit =
       token_count - (token_count % static_cast<size_t>(k_prefill_q8_chunk8_rows));
   if (chunk_limit == 0u ||
-      !run_prefill_chunk8_tokens_q8_k<mode>(backend, chunk_limit) ||
+      !run_prefill_chunk8_tokens_q8_k<mode, lanes>(backend, chunk_limit) ||
       !run_prefill_scalar_tokens<mode, scalar_matmul_route::q8_k>(
           backend, chunk_limit, token_count)) {
     return false;
@@ -4371,9 +4858,12 @@ inline bool run_prefill_chunk8_preselected_argmax_q8_k(native_backend & backend,
       backend, selected_index, selected_score);
 }
 
-template <emel::text::generator::attention_mode mode, scalar_matmul_route route>
-inline bool run_decode(native_backend & backend,
-                       const emel::graph::processor::event::execute & request) noexcept {
+template <emel::text::generator::attention_mode mode, scalar_matmul_route route,
+          matmul_lane_mode lanes = matmul_lane_mode::serial,
+          window_mode wmode = window_mode::resident>
+inline bool run_decode(native_backend &backend,
+                       const emel::graph::processor::event::execute &request,
+                       int32_t * err_out = nullptr) noexcept {
   if (backend.bound_token_count != 1 ||
       backend.bound_position_count != 1 ||
       request.kv_tokens < 0 ||
@@ -4394,22 +4884,39 @@ inline bool run_decode(native_backend & backend,
     return false;
   }
 
+  if constexpr (wmode == window_mode::streamed) {
+    bind_streamed_output_views(backend);
+  }
   for (int32_t layer = 0; layer < backend.n_layer; ++layer) {
-    if (!run_layer<mode, route>(backend, layer, position)) {
+    if (!run_layer<mode, route, lanes, wmode>(backend, layer, position,
+                                              err_out)) {
+      if constexpr (wmode == window_mode::streamed) {
+        reset_stream_block_views(backend);
+      }
       return false;
     }
   }
   backend.kv_cache_tokens = position + 1;
-  return compute_logits<route>(backend);
+  if constexpr (wmode == window_mode::streamed) {
+    // Logits run on the raw output view the streamed route was classified
+    // for; the resident views are restored after.
+    const bool logits_ok = compute_logits<route, lanes>(backend);
+    reset_stream_block_views(backend);
+    return logits_ok;
+  } else {
+    return compute_logits<route, lanes>(backend);
+  }
 }
 
-template <emel::text::generator::attention_mode mode,
-          scalar_matmul_route route,
-          scalar_argmax_route argmax_route>
-inline bool run_decode_preselected_argmax(native_backend & backend,
-                                          const emel::graph::processor::event::execute & request,
-                                          int32_t & selected_index,
-                                          float & selected_score) noexcept {
+template <emel::text::generator::attention_mode mode, scalar_matmul_route route,
+          scalar_argmax_route argmax_route,
+          matmul_lane_mode lanes = matmul_lane_mode::serial,
+          window_mode wmode = window_mode::resident>
+inline bool run_decode_preselected_argmax(
+    native_backend &backend,
+    const emel::graph::processor::event::execute &request,
+    int32_t &selected_index, float &selected_score,
+    int32_t * err_out = nullptr) noexcept {
   if (backend.bound_token_count != 1 ||
       backend.bound_position_count != 1 ||
       request.kv_tokens < 0 ||
@@ -4430,14 +4937,30 @@ inline bool run_decode_preselected_argmax(native_backend & backend,
     return false;
   }
 
+  if constexpr (wmode == window_mode::streamed) {
+    bind_streamed_output_views(backend);
+  }
   for (int32_t layer = 0; layer < backend.n_layer; ++layer) {
-    if (!run_layer<mode, route>(backend, layer, position)) {
+    if (!run_layer<mode, route, lanes, wmode>(backend, layer, position,
+                                              err_out)) {
+      if constexpr (wmode == window_mode::streamed) {
+        reset_stream_block_views(backend);
+      }
       return false;
     }
   }
   backend.kv_cache_tokens = position + 1;
-  return compute_logits_preselected_argmax<argmax_route>(
-      backend, selected_index, selected_score);
+  if constexpr (wmode == window_mode::streamed) {
+    // The argmax output stage runs on the raw output view the streamed route
+    // was classified for; the resident views are restored after.
+    const bool argmax_ok = compute_logits_preselected_argmax<argmax_route>(
+        backend, selected_index, selected_score);
+    reset_stream_block_views(backend);
+    return argmax_ok;
+  } else {
+    return compute_logits_preselected_argmax<argmax_route>(
+        backend, selected_index, selected_score);
+  }
 }
 
 }  // namespace
@@ -4513,6 +5036,12 @@ inline emel::error::type prepare(native_backend & backend,
 
     auto & weights = backend.blocks[static_cast<size_t>(layer)];
     weights.uses_attention = block.uses_attention;
+    weights.attention_rope_pairing = {
+        model_data.params.rope_pair_x0_stride,
+        model_data.params.rope_pair_x1_stride,
+        model_data.params.rope_pair_x1_offset,
+        model_data.params.rope_pair_x1_half_rot_offset,
+    };
     const bool common_ok =
         dequantize_tensor_vector(*block.attention_norm.tensor, weights.attention_norm) &&
         dequantize_tensor_vector(*block.feed_forward_norm.tensor, weights.feed_forward_norm) &&
@@ -4759,6 +5288,13 @@ inline emel::error::type prepare(native_backend & backend,
   backend.ffn_hidden_chunk8.resize(backend.gate_chunk8.size());
   build_lifecycle(backend);
 
+  for (auto & lane_kernel : backend.lane_kernels) {
+    lane_kernel.set_kind(backend.kernel_kind);
+  }
+  // One-time worker-thread construction for the parallel matmul lanes; the
+  // pool is engaged here so no thread creation ever happens during dispatch.
+  backend.lane_pool.emplace();
+
   return emel::error::cast(emel::model::loader::error::none);
 }
 
@@ -4830,36 +5366,41 @@ inline bool bind_guarded_inputs(const emel::graph::processor::event::execute & r
   return true;
 }
 
-template <emel::text::generator::attention_mode mode,
-          scalar_matmul_route route,
-          step_kind expected_kind>
+template <emel::text::generator::attention_mode mode, scalar_matmul_route route,
+          step_kind expected_kind,
+          matmul_lane_mode lanes = matmul_lane_mode::serial,
+          window_mode wmode = window_mode::resident>
 inline bool run_kernel_scalar_mode(const emel::graph::processor::event::execute & request,
                                    int32_t * err_out) noexcept {
-  (void)err_out;
   auto & backend = bind_native_backend(request);
   if constexpr (expected_kind == step_kind::prefill) {
+    (void)err_out;
     return run_prefill<mode, route>(backend);
   } else {
-    return run_decode<mode, route>(backend, request);
+    return run_decode<mode, route, lanes, wmode>(backend, request, err_out);
   }
 }
 
-template <emel::text::generator::attention_mode mode,
-          scalar_matmul_route route,
-          scalar_argmax_route argmax_route,
-          step_kind expected_kind>
+template <emel::text::generator::attention_mode mode, scalar_matmul_route route,
+          scalar_argmax_route argmax_route, step_kind expected_kind,
+          matmul_lane_mode lanes = matmul_lane_mode::serial,
+          window_mode wmode = window_mode::resident>
 inline bool run_kernel_scalar_preselected_argmax_mode(
-    const emel::graph::processor::event::execute & request,
+    const emel::graph::processor::event::execute &request,
     int32_t * err_out) noexcept {
-  (void)err_out;
   auto & io = bind_compute_io(request);
   auto & backend = bind_native_backend(request);
   if constexpr (expected_kind == step_kind::prefill) {
     return run_prefill_preselected_argmax<mode, route, argmax_route>(
         backend, *io.selected_token_out, *io.selected_score_out);
   } else {
-    return run_decode_preselected_argmax<mode, route, argmax_route>(
-        backend, request, *io.selected_token_out, *io.selected_score_out);
+    // The decode branch forwards the graph processor's err pointer: streamed
+    // instantiations report acquire failures through it (run_layer writes
+    // unconditionally under the always-valid-pointer contract).
+    return run_decode_preselected_argmax<mode, route, argmax_route, lanes,
+                                         wmode>(
+        backend, request, *io.selected_token_out, *io.selected_score_out,
+        err_out);
   }
 }
 
@@ -4971,6 +5512,28 @@ inline bool run_kernel_flash_decode_q8_k(
       step_kind::decode>(request, err_out);
 }
 
+inline bool run_kernel_flash_decode_packed_q8_0_streamed(
+    const emel::graph::processor::event::execute & request,
+    int32_t * err_out) noexcept {
+  return run_kernel_scalar_mode<
+      emel::text::generator::attention_mode::flash,
+      scalar_matmul_route::packed_q8_0,
+      step_kind::decode,
+      matmul_lane_mode::serial,
+      window_mode::streamed>(request, err_out);
+}
+
+inline bool run_kernel_flash_decode_q8_k_streamed(
+    const emel::graph::processor::event::execute & request,
+    int32_t * err_out) noexcept {
+  return run_kernel_scalar_mode<
+      emel::text::generator::attention_mode::flash,
+      scalar_matmul_route::q8_k,
+      step_kind::decode,
+      matmul_lane_mode::serial,
+      window_mode::streamed>(request, err_out);
+}
+
 inline bool run_kernel_flash_decode_native_quantized(
     const emel::graph::processor::event::execute & request,
     int32_t * err_out) noexcept {
@@ -4989,6 +5552,17 @@ inline bool run_kernel_flash_decode_native_quantized_q8_k_logits(
       step_kind::decode>(request, err_out);
 }
 
+inline bool run_kernel_flash_decode_native_quantized_q8_k_logits_streamed(
+    const emel::graph::processor::event::execute & request,
+    int32_t * err_out) noexcept {
+  return run_kernel_scalar_mode<
+      emel::text::generator::attention_mode::flash,
+      scalar_matmul_route::native_quantized_q8_k_logits,
+      step_kind::decode,
+      matmul_lane_mode::serial,
+      window_mode::streamed>(request, err_out);
+}
+
 inline bool run_kernel_flash_decode_kernel(
     const emel::graph::processor::event::execute & request,
     int32_t * err_out) noexcept {
@@ -4996,6 +5570,80 @@ inline bool run_kernel_flash_decode_kernel(
       emel::text::generator::attention_mode::flash,
       scalar_matmul_route::kernel,
       step_kind::decode>(request, err_out);
+}
+
+// Streamed siblings of the flash scalar decode routes: identical arithmetic,
+// weights acquired per layer from the tensor window actor.
+inline bool run_kernel_flash_decode_kernel_streamed(
+    const emel::graph::processor::event::execute & request,
+    int32_t * err_out) noexcept {
+  return run_kernel_scalar_mode<
+      emel::text::generator::attention_mode::flash,
+      scalar_matmul_route::kernel,
+      step_kind::decode,
+      matmul_lane_mode::serial,
+      window_mode::streamed>(request, err_out);
+}
+
+inline bool run_kernel_flash_decode_native_quantized_streamed(
+    const emel::graph::processor::event::execute & request,
+    int32_t * err_out) noexcept {
+  return run_kernel_scalar_mode<
+      emel::text::generator::attention_mode::flash,
+      scalar_matmul_route::native_quantized,
+      step_kind::decode,
+      matmul_lane_mode::serial,
+      window_mode::streamed>(request, err_out);
+}
+
+inline bool run_kernel_flash_decode_parallel_packed_q8_0(
+    const emel::graph::processor::event::execute & request,
+    int32_t * err_out) noexcept {
+  return run_kernel_scalar_mode<
+      emel::text::generator::attention_mode::flash,
+      scalar_matmul_route::packed_q8_0,
+      step_kind::decode,
+      matmul_lane_mode::parallel>(request, err_out);
+}
+
+inline bool run_kernel_flash_decode_parallel_q8_k(
+    const emel::graph::processor::event::execute & request,
+    int32_t * err_out) noexcept {
+  return run_kernel_scalar_mode<
+      emel::text::generator::attention_mode::flash,
+      scalar_matmul_route::q8_k,
+      step_kind::decode,
+      matmul_lane_mode::parallel>(request, err_out);
+}
+
+inline bool run_kernel_flash_decode_parallel_native_quantized(
+    const emel::graph::processor::event::execute & request,
+    int32_t * err_out) noexcept {
+  return run_kernel_scalar_mode<
+      emel::text::generator::attention_mode::flash,
+      scalar_matmul_route::native_quantized,
+      step_kind::decode,
+      matmul_lane_mode::parallel>(request, err_out);
+}
+
+inline bool run_kernel_flash_decode_parallel_native_quantized_q8_k_logits(
+    const emel::graph::processor::event::execute & request,
+    int32_t * err_out) noexcept {
+  return run_kernel_scalar_mode<
+      emel::text::generator::attention_mode::flash,
+      scalar_matmul_route::native_quantized_q8_k_logits,
+      step_kind::decode,
+      matmul_lane_mode::parallel>(request, err_out);
+}
+
+inline bool run_kernel_flash_decode_parallel_kernel(
+    const emel::graph::processor::event::execute & request,
+    int32_t * err_out) noexcept {
+  return run_kernel_scalar_mode<
+      emel::text::generator::attention_mode::flash,
+      scalar_matmul_route::kernel,
+      step_kind::decode,
+      matmul_lane_mode::parallel>(request, err_out);
 }
 
 inline bool run_kernel_nonflash_decode_packed_q8_0(
@@ -5043,12 +5691,72 @@ inline bool run_kernel_nonflash_decode_kernel(
       step_kind::decode>(request, err_out);
 }
 
-template <emel::text::generator::attention_mode mode>
+// Streamed variants of the serial nonflash decode routes: identical compute
+// with window_mode::streamed threading through run_layer's per-layer slot
+// acquire, so an active tensor window streams on the nonflash decode path
+// exactly as it does on the flash path.
+inline bool run_kernel_nonflash_decode_packed_q8_0_streamed(
+    const emel::graph::processor::event::execute & request,
+    int32_t * err_out) noexcept {
+  return run_kernel_scalar_mode<
+      emel::text::generator::attention_mode::nonflash,
+      scalar_matmul_route::packed_q8_0,
+      step_kind::decode,
+      matmul_lane_mode::serial,
+      window_mode::streamed>(request, err_out);
+}
+
+inline bool run_kernel_nonflash_decode_q8_k_streamed(
+    const emel::graph::processor::event::execute & request,
+    int32_t * err_out) noexcept {
+  return run_kernel_scalar_mode<
+      emel::text::generator::attention_mode::nonflash,
+      scalar_matmul_route::q8_k,
+      step_kind::decode,
+      matmul_lane_mode::serial,
+      window_mode::streamed>(request, err_out);
+}
+
+inline bool run_kernel_nonflash_decode_native_quantized_streamed(
+    const emel::graph::processor::event::execute & request,
+    int32_t * err_out) noexcept {
+  return run_kernel_scalar_mode<
+      emel::text::generator::attention_mode::nonflash,
+      scalar_matmul_route::native_quantized,
+      step_kind::decode,
+      matmul_lane_mode::serial,
+      window_mode::streamed>(request, err_out);
+}
+
+inline bool run_kernel_nonflash_decode_native_quantized_q8_k_logits_streamed(
+    const emel::graph::processor::event::execute & request,
+    int32_t * err_out) noexcept {
+  return run_kernel_scalar_mode<
+      emel::text::generator::attention_mode::nonflash,
+      scalar_matmul_route::native_quantized_q8_k_logits,
+      step_kind::decode,
+      matmul_lane_mode::serial,
+      window_mode::streamed>(request, err_out);
+}
+
+inline bool run_kernel_nonflash_decode_kernel_streamed(
+    const emel::graph::processor::event::execute & request,
+    int32_t * err_out) noexcept {
+  return run_kernel_scalar_mode<
+      emel::text::generator::attention_mode::nonflash,
+      scalar_matmul_route::kernel,
+      step_kind::decode,
+      matmul_lane_mode::serial,
+      window_mode::streamed>(request, err_out);
+}
+
+template <emel::text::generator::attention_mode mode,
+          matmul_lane_mode lanes = matmul_lane_mode::serial>
 inline bool run_kernel_prefill_chunk8_q8_k_mode(
     const emel::graph::processor::event::execute & request,
     int32_t * err_out) noexcept {
   (void)err_out;
-  return run_prefill_chunk8_q8_k<mode>(bind_native_backend(request));
+  return run_prefill_chunk8_q8_k<mode, lanes>(bind_native_backend(request));
 }
 
 inline bool run_kernel_flash_prefill_chunk8_q8_k(
@@ -5065,12 +5773,14 @@ inline bool run_kernel_nonflash_prefill_chunk8_q8_k(
       request, err_out);
 }
 
-template <emel::text::generator::attention_mode mode, chunk4_rhs_route route>
+template <emel::text::generator::attention_mode mode,
+          chunk4_rhs_route route,
+          matmul_lane_mode lanes = matmul_lane_mode::serial>
 inline bool run_kernel_prefill_chunk4_mode(
     const emel::graph::processor::event::execute & request,
     int32_t * err_out) noexcept {
   (void)err_out;
-  return run_prefill_chunk4<mode, route>(bind_native_backend(request));
+  return run_prefill_chunk4<mode, route, lanes>(bind_native_backend(request));
 }
 
 inline bool run_kernel_flash_prefill_chunk4_packed_q8_0(
@@ -5106,6 +5816,35 @@ inline bool run_kernel_nonflash_prefill_chunk4_q8_k(
   return run_kernel_prefill_chunk4_mode<
       emel::text::generator::attention_mode::nonflash,
       chunk4_rhs_route::q8_k>(
+      request, err_out);
+}
+
+inline bool run_kernel_flash_prefill_parallel_chunk8_q8_k(
+    const emel::graph::processor::event::execute & request,
+    int32_t * err_out) noexcept {
+  return run_kernel_prefill_chunk8_q8_k_mode<
+      emel::text::generator::attention_mode::flash,
+      matmul_lane_mode::parallel>(
+      request, err_out);
+}
+
+inline bool run_kernel_flash_prefill_parallel_chunk4_packed_q8_0(
+    const emel::graph::processor::event::execute & request,
+    int32_t * err_out) noexcept {
+  return run_kernel_prefill_chunk4_mode<
+      emel::text::generator::attention_mode::flash,
+      chunk4_rhs_route::packed_q8_0,
+      matmul_lane_mode::parallel>(
+      request, err_out);
+}
+
+inline bool run_kernel_flash_prefill_parallel_chunk4_q8_k(
+    const emel::graph::processor::event::execute & request,
+    int32_t * err_out) noexcept {
+  return run_kernel_prefill_chunk4_mode<
+      emel::text::generator::attention_mode::flash,
+      chunk4_rhs_route::q8_k,
+      matmul_lane_mode::parallel>(
       request, err_out);
 }
 
@@ -5229,6 +5968,93 @@ inline bool run_kernel_flash_decode_preselected_argmax_kernel(
       step_kind::decode>(request, err_out);
 }
 
+// Streamed variants of the serial preselected routes: identical compute with
+// window_mode::streamed threading through run_layer's per-layer slot acquire,
+// so the tensor-window lane consumes slot bytes on the preselected family too.
+inline bool run_kernel_flash_decode_preselected_argmax_q8_k_streamed(
+    const emel::graph::processor::event::execute &request,
+    int32_t * err_out) noexcept {
+  return run_kernel_scalar_preselected_argmax_mode<
+      emel::text::generator::attention_mode::flash, scalar_matmul_route::q8_k,
+      scalar_argmax_route::q8_k, step_kind::decode, matmul_lane_mode::serial,
+      window_mode::streamed>(request, err_out);
+}
+
+inline bool
+run_kernel_flash_decode_preselected_argmax_native_quantized_q8_k_streamed(
+    const emel::graph::processor::event::execute &request,
+    int32_t * err_out) noexcept {
+  return run_kernel_scalar_preselected_argmax_mode<
+      emel::text::generator::attention_mode::flash,
+      scalar_matmul_route::native_quantized, scalar_argmax_route::q8_k,
+      step_kind::decode, matmul_lane_mode::serial, window_mode::streamed>(
+      request, err_out);
+}
+
+inline bool
+run_kernel_flash_decode_preselected_argmax_native_quantized_kernel_streamed(
+    const emel::graph::processor::event::execute &request,
+    int32_t * err_out) noexcept {
+  return run_kernel_scalar_preselected_argmax_mode<
+      emel::text::generator::attention_mode::flash,
+      scalar_matmul_route::native_quantized, scalar_argmax_route::kernel,
+      step_kind::decode, matmul_lane_mode::serial, window_mode::streamed>(
+      request, err_out);
+}
+
+inline bool run_kernel_flash_decode_preselected_argmax_kernel_streamed(
+    const emel::graph::processor::event::execute &request,
+    int32_t * err_out) noexcept {
+  return run_kernel_scalar_preselected_argmax_mode<
+      emel::text::generator::attention_mode::flash, scalar_matmul_route::kernel,
+      scalar_argmax_route::kernel, step_kind::decode, matmul_lane_mode::serial,
+      window_mode::streamed>(request, err_out);
+}
+
+inline bool run_kernel_flash_decode_parallel_preselected_argmax_q8_k(
+    const emel::graph::processor::event::execute & request,
+    int32_t * err_out) noexcept {
+  return run_kernel_scalar_preselected_argmax_mode<
+      emel::text::generator::attention_mode::flash,
+      scalar_matmul_route::q8_k,
+      scalar_argmax_route::q8_k,
+      step_kind::decode,
+      matmul_lane_mode::parallel>(request, err_out);
+}
+
+inline bool run_kernel_flash_decode_parallel_preselected_argmax_native_quantized_q8_k(
+    const emel::graph::processor::event::execute & request,
+    int32_t * err_out) noexcept {
+  return run_kernel_scalar_preselected_argmax_mode<
+      emel::text::generator::attention_mode::flash,
+      scalar_matmul_route::native_quantized,
+      scalar_argmax_route::q8_k,
+      step_kind::decode,
+      matmul_lane_mode::parallel>(request, err_out);
+}
+
+inline bool run_kernel_flash_decode_parallel_preselected_argmax_native_quantized_kernel(
+    const emel::graph::processor::event::execute & request,
+    int32_t * err_out) noexcept {
+  return run_kernel_scalar_preselected_argmax_mode<
+      emel::text::generator::attention_mode::flash,
+      scalar_matmul_route::native_quantized,
+      scalar_argmax_route::kernel,
+      step_kind::decode,
+      matmul_lane_mode::parallel>(request, err_out);
+}
+
+inline bool run_kernel_flash_decode_parallel_preselected_argmax_kernel(
+    const emel::graph::processor::event::execute & request,
+    int32_t * err_out) noexcept {
+  return run_kernel_scalar_preselected_argmax_mode<
+      emel::text::generator::attention_mode::flash,
+      scalar_matmul_route::kernel,
+      scalar_argmax_route::kernel,
+      step_kind::decode,
+      matmul_lane_mode::parallel>(request, err_out);
+}
+
 inline bool run_kernel_nonflash_decode_preselected_argmax_q8_k(
     const emel::graph::processor::event::execute & request,
     int32_t * err_out) noexcept {
@@ -5269,23 +6095,78 @@ inline bool run_kernel_nonflash_decode_preselected_argmax_kernel(
       step_kind::decode>(request, err_out);
 }
 
-template <emel::text::generator::attention_mode mode, chunk4_rhs_route route>
+// Streamed variants of the serial nonflash preselected routes (see the
+// nonflash decode streamed wrappers above).
+inline bool run_kernel_nonflash_decode_preselected_argmax_q8_k_streamed(
+    const emel::graph::processor::event::execute & request,
+    int32_t * err_out) noexcept {
+  return run_kernel_scalar_preselected_argmax_mode<
+      emel::text::generator::attention_mode::nonflash,
+      scalar_matmul_route::q8_k,
+      scalar_argmax_route::q8_k,
+      step_kind::decode,
+      matmul_lane_mode::serial,
+      window_mode::streamed>(request, err_out);
+}
+
+inline bool
+run_kernel_nonflash_decode_preselected_argmax_native_quantized_q8_k_streamed(
+    const emel::graph::processor::event::execute & request,
+    int32_t * err_out) noexcept {
+  return run_kernel_scalar_preselected_argmax_mode<
+      emel::text::generator::attention_mode::nonflash,
+      scalar_matmul_route::native_quantized,
+      scalar_argmax_route::q8_k,
+      step_kind::decode,
+      matmul_lane_mode::serial,
+      window_mode::streamed>(request, err_out);
+}
+
+inline bool
+run_kernel_nonflash_decode_preselected_argmax_native_quantized_kernel_streamed(
+    const emel::graph::processor::event::execute & request,
+    int32_t * err_out) noexcept {
+  return run_kernel_scalar_preselected_argmax_mode<
+      emel::text::generator::attention_mode::nonflash,
+      scalar_matmul_route::native_quantized,
+      scalar_argmax_route::kernel,
+      step_kind::decode,
+      matmul_lane_mode::serial,
+      window_mode::streamed>(request, err_out);
+}
+
+inline bool run_kernel_nonflash_decode_preselected_argmax_kernel_streamed(
+    const emel::graph::processor::event::execute & request,
+    int32_t * err_out) noexcept {
+  return run_kernel_scalar_preselected_argmax_mode<
+      emel::text::generator::attention_mode::nonflash,
+      scalar_matmul_route::kernel,
+      scalar_argmax_route::kernel,
+      step_kind::decode,
+      matmul_lane_mode::serial,
+      window_mode::streamed>(request, err_out);
+}
+
+template <emel::text::generator::attention_mode mode,
+          chunk4_rhs_route route,
+          matmul_lane_mode lanes = matmul_lane_mode::serial>
 inline bool run_kernel_prefill_chunk4_preselected_argmax_mode(
     const emel::graph::processor::event::execute & request,
     int32_t * err_out) noexcept {
   (void)err_out;
   auto & io = bind_compute_io(request);
-  return run_prefill_chunk4_preselected_argmax<mode, route>(
+  return run_prefill_chunk4_preselected_argmax<mode, route, lanes>(
       bind_native_backend(request), *io.selected_token_out, *io.selected_score_out);
 }
 
-template <emel::text::generator::attention_mode mode>
+template <emel::text::generator::attention_mode mode,
+          matmul_lane_mode lanes = matmul_lane_mode::serial>
 inline bool run_kernel_prefill_chunk8_preselected_argmax_q8_k_mode(
     const emel::graph::processor::event::execute & request,
     int32_t * err_out) noexcept {
   (void)err_out;
   auto & io = bind_compute_io(request);
-  return run_prefill_chunk8_preselected_argmax_q8_k<mode>(
+  return run_prefill_chunk8_preselected_argmax_q8_k<mode, lanes>(
       bind_native_backend(request), *io.selected_token_out, *io.selected_score_out);
 }
 
@@ -5333,6 +6214,32 @@ inline bool run_kernel_nonflash_prefill_chunk4_preselected_argmax_q8_k(
   return run_kernel_prefill_chunk4_preselected_argmax_mode<
       emel::text::generator::attention_mode::nonflash,
       chunk4_rhs_route::q8_k>(request, err_out);
+}
+
+inline bool run_kernel_flash_prefill_parallel_chunk8_preselected_argmax_q8_k(
+    const emel::graph::processor::event::execute & request,
+    int32_t * err_out) noexcept {
+  return run_kernel_prefill_chunk8_preselected_argmax_q8_k_mode<
+      emel::text::generator::attention_mode::flash,
+      matmul_lane_mode::parallel>(request, err_out);
+}
+
+inline bool run_kernel_flash_prefill_parallel_chunk4_preselected_argmax_packed_q8_0(
+    const emel::graph::processor::event::execute & request,
+    int32_t * err_out) noexcept {
+  return run_kernel_prefill_chunk4_preselected_argmax_mode<
+      emel::text::generator::attention_mode::flash,
+      chunk4_rhs_route::packed_q8_0,
+      matmul_lane_mode::parallel>(request, err_out);
+}
+
+inline bool run_kernel_flash_prefill_parallel_chunk4_preselected_argmax_q8_k(
+    const emel::graph::processor::event::execute & request,
+    int32_t * err_out) noexcept {
+  return run_kernel_prefill_chunk4_preselected_argmax_mode<
+      emel::text::generator::attention_mode::flash,
+      chunk4_rhs_route::q8_k,
+      matmul_lane_mode::parallel>(request, err_out);
 }
 
 inline bool extract_guarded_outputs(const emel::graph::processor::event::execute & request,

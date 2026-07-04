@@ -17,6 +17,14 @@ enum class kernel_kind : uint8_t {
   aarch64 = 1,
 };
 
+constexpr kernel_kind detect_host_kind() noexcept {
+#if defined(__aarch64__) || defined(_M_ARM64)
+  return kernel_kind::aarch64;
+#else
+  return kernel_kind::x86_64;
+#endif
+}
+
 class any {
  public:
   any() = default;
@@ -58,6 +66,30 @@ class any {
     core_.visit([&](const auto & sm) {
       if constexpr (requires { sm.shared_flash_dispatch_count(); }) {
         count = sm.shared_flash_dispatch_count();
+      } else {
+        count = 0u;
+      }
+    });
+    return count;
+  }
+
+  uint64_t optimized_f16_vector_dispatch_count() const noexcept {
+    uint64_t count = 0u;
+    core_.visit([&](const auto & sm) {
+      if constexpr (requires { sm.optimized_f16_vector_dispatch_count(); }) {
+        count = sm.optimized_f16_vector_dispatch_count();
+      } else {
+        count = 0u;
+      }
+    });
+    return count;
+  }
+
+  uint64_t optimized_conv_transpose_f32_dispatch_count() const noexcept {
+    uint64_t count = 0u;
+    core_.visit([&](const auto & sm) {
+      if constexpr (requires { sm.optimized_conv_transpose_f32_dispatch_count(); }) {
+        count = sm.optimized_conv_transpose_f32_dispatch_count();
       } else {
         count = 0u;
       }

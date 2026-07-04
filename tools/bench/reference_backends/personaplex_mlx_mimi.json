@@ -1,0 +1,17 @@
+{
+  "id": "personaplex_mlx_mimi",
+  "surface": "mimi_compare/v1",
+  "display_name": "PersonaPlex-MLX Mimi codec reference lane",
+  "language": "python-mlx",
+  "description": "Pinned personaplex-mlx (tools/bench/personaplex_mlx_ref.txt) MLX Mimi codec driver compared against the EMEL-owned mimi codec runner on Apple Silicon. Two-lane isolation: the reference driver runs in its own venv subprocess (tools/bench/speech/personaplex_mlx_mimi_driver.py); the EMEL lane links only emel. Both lanes load weights from the same Kyutai e351c8d8-checkpoint125 provenance (safetensors for MLX, converted GGUF for EMEL). MLX computes in Metal float pipelines that are not bit-identical to the ggml numerics the EMEL codec ports, and deep RVQ layers quantize near-zero residuals whose codes cascade apart between any two float implementations: measured on the 440 Hz tone surface, EMEL vs MLX full-code match is 0.52 with decode PSNR 21.8 dB, while Kyutai's own rustymimi vs MLX is 0.66 — the divergence is inherent to the layer depth, not the port. The gate therefore requires the numerically stable early streams to agree (first 4 streams >= 0.90, measured 0.96) with a 0.40 sanity floor on the full match; token exactness remains the moshi_cpp_mimi lane's gate.",
+  "build_command": [
+    "scripts/bench_mimi_compare.sh",
+    "--reference=personaplex-mlx",
+    "--build-only"
+  ],
+  "run_command": [
+    "scripts/bench_mimi_compare.sh",
+    "--reference=personaplex-mlx",
+    "--run-only"
+  ]
+}

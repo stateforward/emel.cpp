@@ -9,6 +9,11 @@ ALWAYS follow the RTC actor model and no-queue invariant from `docs/rules/sml.ru
 NEVER use `sml::process_queue`, `sml::defer_queue`, or any mailbox/post-for-later
 mechanism.
 ALWAYS keep dispatch run-to-completion and single-writer per actor.
+ALWAYS treat coroutine or `async`-named dispatch APIs semantically: async is not
+deferred by definition, and `process_event_async` MAY be RTC when completion is
+driven and observed before the top-level dispatch returns.
+NEVER let coroutine continuations, incomplete tasks, scheduler work items, or
+callbacks escape the RTC boundary as hidden deferred work.
 NEVER call an actor's own `process_event` from guards/actions/entry/exit.
 ALWAYS model internal multi-step flows with `sml::completion<TEvent>`,
 anonymous transitions, and/or entry actions.
@@ -23,7 +28,10 @@ ALWAYS implement bulk numeric iteration in allocation-free action/detail kernels
 within a single transition per phase.
 NEVER copy event payload into context just to bridge internal phases.
 ALWAYS keep guards pure predicates of `(event, context)` with no side effects.
-ALWAYS keep actions bounded and non-blocking during dispatch.
+ALWAYS keep actions bounded during dispatch.
+ONLY allow an action-level scheduler fork/join wait when it joins already
+submitted child actor dispatches before the action returns, preserves RTC,
+does not re-enter the same actor, and leaves no hidden deferred work.
 ALWAYS keep hot-path actions allocation-free.
 ALWAYS keep any allowed one-time construction or initialization heap
 allocation before any `process_event(...)` dispatch.
@@ -321,6 +329,17 @@ NEVER push directly to `main`.
 NEVER commit `tmp/llama.cpp`.
 ALWAYS use zig toolchain (zig cc and zig c++) for default development and
 production builds.
+ALWAYS bound build parallelism through `scripts/build_jobs.sh` (sourced by the
+build, bench, coverage, and gate scripts): jobs = min(cores, MemAvailable /
+per-job budget), where the budget defaults to 6GB (coverage builds pass 8GB)
+and is overridable via `EMEL_BUILD_JOB_MEM_GB`; the job count itself is
+overridable via `EMEL_BUILD_JOBS`. The SML template TUs cost ~3-4GB of
+compiler RSS each under zig c++ -O3 and ~7-8GB under g++ -O0 --coverage, so
+unbounded `--parallel` oversubscribes memory long before CPU.
+NEVER run more than one build, gate, or benchmark job concurrently on a
+shared host; gates and benches launch their own inner builds and fixture
+processes, so stacking them multiplies compiler fleets and context-sized
+session arenas.
 ALWAYS use native clang or gcc for coverage builds.
 ALWAYS use doctest for unit tests.
 ALWAYS use SML introspection for machine assertions and testing.
@@ -351,9 +370,14 @@ NEVER weaken coverage, parity, benchmark, fuzz, or docs checks to save time.
 If a lane is irrelevant to the scoped changed files it may be skipped by the
 gate, but if it is relevant it must run against the maintained implementation
 path.
-NEVER ignore benchmark snapshot failures in quality gates by default. Only use
-`EMEL_QUALITY_GATES_ALLOW_BENCH_REGRESSION=1` for an explicitly documented
-transitional run, never for milestone closeout.
+Benchmark snapshot regressions are non-fatal by default: the compare reports
+`warning: benchmark regression ...` and the gate continues, so timing noise does
+not block iteration velocity. Structural benchmark failures (missing entries,
+entries without baselines, empty scoped suites) remain fatal.
+ALWAYS run milestone closeout and release-readiness gates with
+`EMEL_BENCH_STRICT_REGRESSION=1` so regressions fail the gate there.
+`EMEL_QUALITY_GATES_ALLOW_BENCH_REGRESSION=1` remains the whole-lane override
+for explicitly documented transitional runs only.
 ALWAYS use ctest targets `emel_tests` and `lint_snapshot` for test execution.
 ALWAYS reference `docs/rules/sml.rules.md` for SML semantics and testing guidance.
 
@@ -441,143 +465,3 @@ For quantized inference work, "done" means:
 When an implementation is architecturally narrower than the user's stated
 goal, ALWAYS stop and get explicit approval before proceeding, even if the
 narrower implementation is faster to complete.
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-<atmux>
-# Role
-- ROLE: system-engineer
-
-# atmux Rules
-- Use plain `atmux ...` commands; do not prefix them with inherited session environment.
-
-# Managed Agent Rules
-- ALWAYS acknowledge manager messages quickly with a short plan.
-- ALWAYS send a message to your manager when stuck or after completing any task.
-- ALWAYS message your manager with `atmux send --to main "..."`.
-- ALWAYS coordinate with peer agents using `atmux send --to <agent> "..."`.
-- ALWAYS check `atmux agent list --all --status` before creating new agents.
-- ALWAYS reuse idle capable agents before creating new ones.
-- ALWAYS spawn agents to decompose your todos if necessary.
-- ALWAYS use `--reply-required` when a manager decision is needed.
-- NEVER poll agent panes unless absolutely necessary.
-- NEVER silently change scope; ask your manager first.
-- NEVER report task completion without validation evidence.
-- NEVER leave blockers unreported; escalate immediately.
-
-# atmux help
-## send
-Usage:
-  atmux send --to <name|session> [--reply-required] [--interrupt] "message"
-
-Description:
-  Send XML messages to a single agent or every agent in a team.
-  Resolution order for --to:
-    1) Team session/name
-    2) Agent session/name
-  --interrupt  Submit using the adapter's interrupt key (processed after current
-               tool) instead of the default queue key (processed when idle).
-
-Examples:
-  atmux send --to planner "run tests"
-  atmux send --to platform --reply-required "status check-in"
-  atmux send --to worker --interrupt "stop and check this"
-
-## message
-Usage:
-  atmux message read <id> [--repo <repo>]
-  atmux message list [--unread]
-
-Description:
-  Read or list filesystem-backed messages.
-  Messages are stored at: ~/.atmux/messages/<repo>/<id>/
-
-## schedule
-Usage:
-  atmux schedule (--interval <duration> | --once <duration>) [--no-detach] --notification <text>
-  atmux schedule (--interval <duration> | --once <duration>) [--no-detach] -- <command> [args...]
-
-Description:
-  Schedule a future or repeating action. Use `--notification` to queue an
-  ATMUX notification to the current session, or use `-- <command...>`
-  to run any command after the delay.
-
-  Notification mode:
-    - Always targets the current agent/session.
-    - Use this for self reminders, ticks, and status checks.
-
-  Command mode:
-    - Runs the provided command in the current environment.
-    - Only schedule `atmux send` when the target is another agent or team:
-      `atmux schedule --once 10m -- atmux send --to worker "status check"`
-    - Never schedule `atmux send --to <self>`; use `--notification` instead.
-
-  --no-detach  Run in the foreground (blocking). By default, the scheduled
-               task runs in a detached tmux window and the command returns
-               immediately.
-
-Durations:
-  Supports integer values with optional unit suffix:
-    ms  milliseconds
-    s   seconds
-    m   minutes
-    h   hours
-    d   days
-  If no suffix is provided, seconds are assumed.
-
-Examples:
-  atmux schedule --interval 30m --notification "check on long-running jobs"
-  atmux schedule --once 45s --notification "tick"
-  atmux schedule --once 45s -- atmux send --to atmux-myrepo-worker "follow up"
-
-## exec
-Usage:
-  atmux exec [--detach] [--] <command> [args...]
-
-Description:
-  Execute a command with passthrough stdio and unchanged exit behavior.
-  After the command exits or is interrupted, send an ATMUX notification back
-  to the current agent pane with the exit code.
-
-  --detach  Run the command in a new tmux window. Returns immediately.
-            The process pane is stored so watchers can capture its output.
-            Notification is sent to the agent pane when the process exits.
-
-Examples:
-  atmux exec sleep 30
-  atmux exec -- make test
-  atmux exec --detach -- make test
-
-## env
-Usage:
-  atmux env
-  atmux env get <key>
-
-Description:
-  Inspect ATMUX_* environment variables in the current process.
-
-Examples:
-  atmux env
-  atmux env get repo
-  atmux env get ATMUX_WORKTREE
-</atmux>

@@ -25,7 +25,15 @@ if(EMEL_BENCH_SUITE_FILTER STREQUAL "batch_planner" OR
    EMEL_BENCH_SUITE_FILTER STREQUAL "gbnf_rule_parser" OR
    EMEL_BENCH_SUITE_FILTER STREQUAL "flash_attention" OR
    EMEL_BENCH_SUITE_FILTER STREQUAL "kernel_x86_64" OR
-   EMEL_BENCH_SUITE_FILTER STREQUAL "kernel_aarch64")
+   EMEL_BENCH_SUITE_FILTER STREQUAL "kernel_aarch64" OR
+   EMEL_BENCH_SUITE_FILTER STREQUAL "decode_wavefront" OR
+   EMEL_BENCH_SUITE_FILTER STREQUAL "parallel_matmul" OR
+   EMEL_BENCH_SUITE_FILTER STREQUAL "weight_streaming" OR
+   # speech_codec_mimi needs the llama.cpp checkout only for its ggml
+   # subtree, which the moshi reference driver links against; an MLX-only
+   # compare (EMEL_BENCH_SKIP_MOSHI_REFERENCE) builds no such driver.
+   (EMEL_BENCH_SUITE_FILTER STREQUAL "speech_codec_mimi" AND
+    NOT EMEL_BENCH_SKIP_MOSHI_REFERENCE))
   set(EMEL_BENCH_NEEDS_LLAMA ON)
 endif()
 
@@ -84,12 +92,131 @@ if(EMEL_BENCH_NEEDS_LLAMA)
   if(BENCH_REFERENCE_REF_VALUE STREQUAL "")
     set(BENCH_REFERENCE_REF_VALUE "${REF_IMPL_REF}")
   endif()
+
+  function(emel_patch_reference_metadata_logging reference_source_dir)
+    set(loader_path "${reference_source_dir}/src/llama-model-loader.cpp")
+    if(NOT EXISTS "${loader_path}")
+      message(FATAL_ERROR "Missing reference loader source at ${loader_path}")
+    endif()
+    file(READ "${loader_path}" loader_source)
+    set(patched_marker "            std::string value          = type == GGUF_TYPE_ARRAY")
+    string(FIND "${loader_source}" "${patched_marker}" patch_pos)
+    if(patch_pos EQUAL -1)
+      set(original_line "            std::string value          = gguf_kv_to_str(meta.get(), i);\n            const size_t MAX_VALUE_LEN = 40;")
+      set(patched_line "            std::string value          = type == GGUF_TYPE_ARRAY\n                ? \"<array>\"\n                : gguf_kv_to_str(meta.get(), i);\n            const size_t MAX_VALUE_LEN = 40;")
+      string(FIND "${loader_source}" "${original_line}" original_pos)
+      if(original_pos EQUAL -1)
+        set(original_line "            std::string value          = gguf_kv_to_str(metadata, i);\n            const size_t MAX_VALUE_LEN = 40;")
+        set(patched_line "            std::string value          = type == GGUF_TYPE_ARRAY\n                ? \"<array>\"\n                : gguf_kv_to_str(metadata, i);\n            const size_t MAX_VALUE_LEN = 40;")
+        string(FIND "${loader_source}" "${original_line}" original_pos)
+        if(original_pos EQUAL -1)
+          message(FATAL_ERROR
+            "Unable to patch reference loader metadata logging in ${loader_path}")
+        endif()
+      endif()
+      string(REPLACE "${original_line}" "${patched_line}" loader_source "${loader_source}")
+      file(WRITE "${loader_path}" "${loader_source}")
+    endif()
+
+    set(llama_path "${reference_source_dir}/src/llama.cpp")
+    if(NOT EXISTS "${llama_path}")
+      message(FATAL_ERROR "Missing reference llama source at ${llama_path}")
+    endif()
+    file(READ "${llama_path}" llama_source)
+    set(original_print "        model.load_stats(ml);\n        model.print_info();")
+    set(patched_print "        model.load_stats(ml);\n        // EMEL bench disables reference metadata-only logging here; decode remains unchanged.")
+    string(FIND "${llama_source}" "${patched_print}" print_patch_pos)
+    if(print_patch_pos EQUAL -1)
+      string(FIND "${llama_source}" "${original_print}" print_original_pos)
+      if(print_original_pos EQUAL -1)
+        message(FATAL_ERROR
+          "Unable to patch reference model info logging in ${llama_path}")
+      endif()
+      string(REPLACE "${original_print}" "${patched_print}" llama_source "${llama_source}")
+      file(WRITE "${llama_path}" "${llama_source}")
+    endif()
+  endfunction()
+
+  emel_patch_reference_metadata_logging("${reference_impl_SOURCE_DIR}")
+endif()
+
+# moshi.cpp reference (Moshi/PersonaPlex parity lanes). Source-only populate,
+# pinned via moshi_reference_ref.txt; the reference driver targets that consume
+# it land with the mimi codec parity milestone and flip this gate through their
+# suite filters below.
+set(MOSHI_REF_REPOSITORY "https://github.com/Codes4Fun/moshi.cpp.git" CACHE STRING "")
+set(MOSHI_REF_REF "" CACHE STRING "")
+# Lanes that compare against a non-moshi reference (for example the
+# personaplex-mlx Python driver) opt out of the moshi.cpp/SentencePiece fetch
+# even when the suite filter matches.
+option(EMEL_BENCH_SKIP_MOSHI_REFERENCE
+       "Skip fetching the moshi.cpp reference driver" OFF)
+set(EMEL_BENCH_NEEDS_MOSHI OFF)
+if(NOT EMEL_BENCH_SKIP_MOSHI_REFERENCE AND
+   (EMEL_BENCH_SUITE_FILTER STREQUAL "speech_codec_mimi" OR
+    EMEL_BENCH_SUITE_FILTER STREQUAL "speech_lm_moshi" OR
+    EMEL_BENCH_SUITE_FILTER STREQUAL "speech_dialogue_moshi"))
+  set(EMEL_BENCH_NEEDS_MOSHI ON)
+endif()
+
+set(BENCH_MOSHI_REFERENCE_REF_VALUE "not_used")
+if(EMEL_BENCH_NEEDS_MOSHI)
+  if(MOSHI_REF_REF STREQUAL "")
+    set(MOSHI_REF_REF_FILE "${CMAKE_CURRENT_SOURCE_DIR}/moshi_reference_ref.txt")
+    if(NOT EXISTS "${MOSHI_REF_REF_FILE}")
+      message(FATAL_ERROR "Missing moshi.cpp reference pin at ${MOSHI_REF_REF_FILE}")
+    endif()
+    file(READ "${MOSHI_REF_REF_FILE}" MOSHI_REF_REF_CONTENT)
+    string(STRIP "${MOSHI_REF_REF_CONTENT}" MOSHI_REF_REF_CONTENT)
+    set(MOSHI_REF_REF "${MOSHI_REF_REF_CONTENT}" CACHE STRING "" FORCE)
+  endif()
+
+  include(FetchContent)
+  FetchContent_Declare(
+    moshi_reference_impl
+    GIT_REPOSITORY ${MOSHI_REF_REPOSITORY}
+    GIT_TAG ${MOSHI_REF_REF}
+  )
+  FetchContent_GetProperties(moshi_reference_impl)
+  if(NOT moshi_reference_impl_POPULATED)
+    FetchContent_Populate(moshi_reference_impl)
+  endif()
+  execute_process(
+    COMMAND git -C "${moshi_reference_impl_SOURCE_DIR}" rev-parse HEAD
+    OUTPUT_VARIABLE BENCH_MOSHI_REFERENCE_REF_VALUE
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    ERROR_QUIET
+  )
+  if(NOT BENCH_MOSHI_REFERENCE_REF_VALUE STREQUAL "${MOSHI_REF_REF}")
+    message(FATAL_ERROR
+      "moshi.cpp reference resolved to '${BENCH_MOSHI_REFERENCE_REF_VALUE}', "
+      "expected pinned '${MOSHI_REF_REF}'")
+  endif()
+
+  # SentencePiece is required by moshi.cpp's public header (reference lane
+  # only; the EMEL lane never links it).
+  set(SPM_ENABLE_SHARED OFF CACHE BOOL "" FORCE)
+  set(SPM_ENABLE_TCMALLOC OFF CACHE BOOL "" FORCE)
+  # sentencepiece v0.2.0 declares cmake_minimum_required(<3.5); CMake 4
+  # removed that compatibility, so pin the policy floor for this subproject.
+  set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
+  FetchContent_Declare(
+    sentencepiece_impl
+    GIT_REPOSITORY https://github.com/google/sentencepiece.git
+    GIT_TAG v0.2.0
+  )
+  FetchContent_MakeAvailable(sentencepiece_impl)
+  unset(CMAKE_POLICY_VERSION_MINIMUM)
 endif()
 
 set(EMEL_ENABLE_TESTS OFF CACHE BOOL "" FORCE)
 add_subdirectory(${EMEL_ROOT} emel)
 
 find_path(NLOHMANN_JSON_INCLUDE_DIR nlohmann/json.hpp)
+if(NOT NLOHMANN_JSON_INCLUDE_DIR AND EMEL_BENCH_NEEDS_LLAMA AND
+   EXISTS "${reference_impl_SOURCE_DIR}/vendor/nlohmann/json.hpp")
+  set(NLOHMANN_JSON_INCLUDE_DIR "${reference_impl_SOURCE_DIR}/vendor")
+endif()
 
 if(EMEL_BENCH_NEEDS_LLAMA)
   set(LLAMA_ALL_WARNINGS OFF CACHE BOOL "" FORCE)
@@ -202,8 +329,13 @@ function(configure_bench_runner_common_target target_name)
       ${CMAKE_CURRENT_SOURCE_DIR}
       ${EMEL_ROOT}/src
       ${EMEL_ROOT}/include
-      ${NLOHMANN_JSON_INCLUDE_DIR}
   )
+  if(NLOHMANN_JSON_INCLUDE_DIR)
+    target_include_directories(${target_name}
+      PRIVATE
+        ${NLOHMANN_JSON_INCLUDE_DIR}
+    )
+  endif()
   if(EMEL_BENCH_NEEDS_LLAMA)
     target_include_directories(${target_name}
       PRIVATE
@@ -211,6 +343,7 @@ function(configure_bench_runner_common_target target_name)
         ${reference_impl_SOURCE_DIR}/src
         ${reference_impl_SOURCE_DIR}/ggml/include
         ${reference_impl_SOURCE_DIR}/include
+        ${reference_impl_SOURCE_DIR}/vendor
     )
   endif()
 endfunction()
@@ -266,6 +399,8 @@ add_bench_runner_suite(jinja_formatter text/jinja/formatter_bench.cpp
 add_bench_runner_suite(gbnf_rule_parser gbnf/rule_parser_bench.cpp
                        EMEL_BENCH_ENABLE_GBNF_RULE_PARSER)
 add_bench_runner_suite(generation generation_bench.cpp EMEL_BENCH_ENABLE_GENERATION)
+add_bench_runner_suite(speech_codec_mimi speech/codec_mimi_bench.cpp
+                       EMEL_BENCH_ENABLE_SPEECH_CODEC_MIMI)
 add_bench_runner_suite(diarization_sortformer diarization/sortformer_bench.cpp
                        EMEL_BENCH_ENABLE_DIARIZATION_SORTFORMER)
 add_bench_runner_suite(flash_attention kernel/flash_attention_bench.cpp
@@ -276,6 +411,15 @@ add_bench_runner_suite(logits_sampler logits/sampler_bench.cpp EMEL_BENCH_ENABLE
 add_bench_runner_suite(kernel_x86_64 kernel/x86_64_bench.cpp EMEL_BENCH_ENABLE_KERNEL_X86_64)
 add_bench_runner_suite(kernel_aarch64 kernel/aarch64_bench.cpp EMEL_BENCH_ENABLE_KERNEL_AARCH64)
 add_bench_runner_suite(sm_any sm_any_bench.cpp EMEL_BENCH_ENABLE_SM_ANY)
+add_bench_runner_suite(sm_scheduler sm_scheduler_bench.cpp EMEL_BENCH_ENABLE_SM_SCHEDULER)
+add_bench_runner_suite(graph_processor graph/processor_bench.cpp
+                       EMEL_BENCH_ENABLE_GRAPH_PROCESSOR)
+add_bench_runner_suite(decode_wavefront text/generator/decode_wavefront_bench.cpp
+                       EMEL_BENCH_ENABLE_DECODE_WAVEFRONT)
+add_bench_runner_suite(parallel_matmul text/generator/parallel_matmul_bench.cpp
+                       EMEL_BENCH_ENABLE_PARALLEL_MATMUL)
+add_bench_runner_suite(weight_streaming model/tensor/window_streaming_bench.cpp
+                       EMEL_BENCH_ENABLE_WEIGHT_STREAMING)
 add_bench_runner_suite(tokenizer_preprocessor_bpe text/tokenizer/preprocessor/bpe_bench.cpp
                        EMEL_BENCH_ENABLE_TOKENIZER_PREPROCESSOR_BPE)
 add_bench_runner_suite(tokenizer_preprocessor_spm text/tokenizer/preprocessor/spm_bench.cpp
@@ -321,6 +465,56 @@ endif()
 add_executable(whisper_emel_parity_runner
   ${CMAKE_CURRENT_SOURCE_DIR}/whisper_emel_parity_runner.cpp
 )
+
+add_executable(mimi_emel_parity_runner
+  ${CMAKE_CURRENT_SOURCE_DIR}/speech/mimi_emel_parity_runner.cpp
+)
+
+target_link_libraries(mimi_emel_parity_runner
+  PRIVATE
+    emel_core
+    emel
+)
+
+target_include_directories(mimi_emel_parity_runner
+  PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${EMEL_ROOT}
+    ${EMEL_ROOT}/src
+    ${EMEL_ROOT}/include
+)
+
+# Reference-lane Mimi driver: moshi.cpp lib sources + ggml + SentencePiece.
+# Never linked into bench_runner or the EMEL lane; invoked as a subprocess
+# via reference_backends/moshi_cpp_mimi.json (two-lane isolation).
+if(EMEL_BENCH_NEEDS_MOSHI AND EMEL_BENCH_NEEDS_LLAMA)
+  add_executable(moshi_reference_driver
+    ${CMAKE_CURRENT_SOURCE_DIR}/speech/moshi_reference_driver.cpp
+    ${moshi_reference_impl_SOURCE_DIR}/src/moshi.cpp
+    ${moshi_reference_impl_SOURCE_DIR}/src/json.cpp
+    ${moshi_reference_impl_SOURCE_DIR}/src/safetensor.cpp
+  )
+
+  set_target_properties(moshi_reference_driver PROPERTIES
+    CXX_STANDARD 20
+    CXX_STANDARD_REQUIRED ON
+  )
+
+  target_include_directories(moshi_reference_driver
+    PRIVATE
+      ${moshi_reference_impl_SOURCE_DIR}/include
+      ${moshi_reference_impl_SOURCE_DIR}
+      ${reference_impl_SOURCE_DIR}/ggml/include
+      ${sentencepiece_impl_SOURCE_DIR}/src
+      ${sentencepiece_impl_BINARY_DIR}/src
+  )
+
+  target_link_libraries(moshi_reference_driver
+    PRIVATE
+      ggml
+      sentencepiece-static
+  )
+endif()
 
 target_link_libraries(whisper_emel_parity_runner
   PRIVATE

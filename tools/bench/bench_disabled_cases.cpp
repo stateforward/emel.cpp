@@ -165,6 +165,11 @@ void append_emel_flash_attention_cases(std::vector<result> &, const config &) {}
 void append_reference_flash_attention_cases(std::vector<result> &, const config &) {}
 #endif
 
+#ifndef EMEL_BENCH_ENABLE_SPEECH_CODEC_MIMI
+void append_emel_speech_codec_mimi_cases(std::vector<result> &, const config &) {}
+void append_reference_speech_codec_mimi_cases(std::vector<result> &, const config &) {}
+#endif
+
 #ifndef EMEL_BENCH_ENABLE_LOGITS_VALIDATOR
 void append_emel_logits_validator_cases(std::vector<result> &, const config &) {}
 void append_reference_logits_validator_cases(std::vector<result> &, const config &) {}
@@ -188,6 +193,31 @@ void append_reference_kernel_aarch64_cases(std::vector<result> &, const config &
 #ifndef EMEL_BENCH_ENABLE_SM_ANY
 void append_emel_sm_any_cases(std::vector<result> &, const config &) {}
 void append_reference_sm_any_cases(std::vector<result> &, const config &) {}
+#endif
+
+#ifndef EMEL_BENCH_ENABLE_SM_SCHEDULER
+void append_emel_sm_scheduler_cases(std::vector<result> &, const config &) {}
+void append_reference_sm_scheduler_cases(std::vector<result> &, const config &) {}
+#endif
+
+#ifndef EMEL_BENCH_ENABLE_GRAPH_PROCESSOR
+void append_emel_graph_processor_cases(std::vector<result> &, const config &) {}
+void append_reference_graph_processor_cases(std::vector<result> &, const config &) {}
+#endif
+
+#ifndef EMEL_BENCH_ENABLE_DECODE_WAVEFRONT
+void append_emel_decode_wavefront_cases(std::vector<result> &, const config &) {}
+void append_reference_decode_wavefront_cases(std::vector<result> &, const config &) {}
+#endif
+
+#ifndef EMEL_BENCH_ENABLE_PARALLEL_MATMUL
+void append_emel_parallel_matmul_cases(std::vector<result> &, const config &) {}
+void append_reference_parallel_matmul_cases(std::vector<result> &, const config &) {}
+#endif
+
+#ifndef EMEL_BENCH_ENABLE_WEIGHT_STREAMING
+void append_emel_weight_streaming_cases(std::vector<result> &, const config &) {}
+void append_reference_weight_streaming_cases(std::vector<result> &, const config &) {}
 #endif
 
 #ifndef EMEL_BENCH_ENABLE_TOKENIZER_PREPROCESSOR_BPE

@@ -10,6 +10,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 include(CheckCXXCompilerFlag)
+include(CheckCXXSourceRuns)
 
 if(MSVC)
   add_compile_options(/W4 /WX)
@@ -21,6 +22,9 @@ option(EMEL_ENABLE_TESTS "Build tests" ON)
 option(EMEL_ENABLE_FUZZ "Build fuzz targets" OFF)
 option(EMEL_ENABLE_AARCH64_HOST_FEATURES
   "Enable host-tuned AArch64 compile flags for EMEL-owned C++ code"
+  ON)
+option(EMEL_ENABLE_X86_64_HOST_FEATURES
+  "Enable host-tuned x86_64 AVX2/FMA/F16C compile flags for EMEL-owned C++ code"
   ON)
 
 include(FetchContent)
@@ -38,6 +42,11 @@ target_include_directories(emel_core
   INTERFACE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
     ${CMAKE_CURRENT_SOURCE_DIR}/src
+)
+# Third-party dependency headers are SYSTEM so -Wpedantic coverage builds do
+# not fail on upstream template internals (sml aux::pool zero-size array).
+target_include_directories(emel_core SYSTEM
+  INTERFACE
     ${stateforward_sml_SOURCE_DIR}/include
 )
 
@@ -67,6 +76,50 @@ if(NOT EMEL_AARCH64_HOST_CXX_FLAG STREQUAL "")
   )
 endif()
 
+set(EMEL_X86_64_HOST_CXX_FLAGS "")
+if(EMEL_ENABLE_X86_64_HOST_FEATURES AND NOT CMAKE_CROSSCOMPILING AND NOT MSVC)
+  string(TOLOWER "${CMAKE_SYSTEM_PROCESSOR}" EMEL_SYSTEM_PROCESSOR_LOWER)
+  if(EMEL_SYSTEM_PROCESSOR_LOWER MATCHES "^(x86_64|amd64)$")
+    check_cxx_compiler_flag("-mavx2" EMEL_HAS_X86_64_AVX2_FLAG)
+    check_cxx_compiler_flag("-mfma" EMEL_HAS_X86_64_FMA_FLAG)
+    check_cxx_compiler_flag("-mf16c" EMEL_HAS_X86_64_F16C_FLAG)
+    # Compiler acceptance alone is not enough: these flags let the compiler
+    # emit AVX2 in every consumer TU, bypassing the runtime CPUID guards in
+    # kernel/x86_64. Probe the build host CPU (compiled without the flags) so
+    # host-tuned codegen is only enabled where it can actually execute.
+    check_cxx_source_runs("
+      #include <cpuid.h>
+      #include <cstdint>
+      int main() {
+        unsigned int eax = 0, ebx = 0, ecx = 0, edx = 0;
+        if (!__get_cpuid(1, &eax, &ebx, &ecx, &edx)) { return 1; }
+        const bool fma = (ecx & (1u << 12)) != 0u;
+        const bool f16c = (ecx & (1u << 29)) != 0u;
+        const bool osxsave = (ecx & (1u << 27)) != 0u;
+        if (!fma || !f16c || !osxsave) { return 1; }
+        std::uint32_t xcr0_lo = 0, xcr0_hi = 0;
+        __asm__ volatile(\"xgetbv\" : \"=a\"(xcr0_lo), \"=d\"(xcr0_hi) : \"c\"(0));
+        if ((xcr0_lo & 0x6u) != 0x6u) { return 1; }
+        if (!__get_cpuid_count(7, 0, &eax, &ebx, &ecx, &edx)) { return 1; }
+        return ((ebx & (1u << 5)) != 0u) ? 0 : 1;
+      }" EMEL_X86_64_HOST_RUNS_AVX2_FMA_F16C)
+    if(EMEL_HAS_X86_64_AVX2_FLAG AND EMEL_HAS_X86_64_FMA_FLAG AND
+       EMEL_HAS_X86_64_F16C_FLAG AND EMEL_X86_64_HOST_RUNS_AVX2_FMA_F16C)
+      list(APPEND EMEL_X86_64_HOST_CXX_FLAGS "-mavx2" "-mfma" "-mf16c")
+    endif()
+  endif()
+endif()
+
+if(EMEL_X86_64_HOST_CXX_FLAGS)
+  message(STATUS "EMEL enabling x86_64 host compile flags: ${EMEL_X86_64_HOST_CXX_FLAGS}")
+  foreach(EMEL_X86_64_HOST_CXX_FLAG IN LISTS EMEL_X86_64_HOST_CXX_FLAGS)
+    target_compile_options(emel_core
+      INTERFACE
+        "$<$<COMPILE_LANGUAGE:CXX>:${EMEL_X86_64_HOST_CXX_FLAG}>"
+    )
+  endforeach()
+endif()
+
 add_library(emel STATIC
   src/emel/io/mmap/actions.cpp
   src/emel/model/architecture/detail.cpp
@@ -80,6 +133,8 @@ add_library(emel STATIC
   src/emel/model/omniembed/detail.cpp
   src/emel/model/sortformer/detail.cpp
   src/emel/model/whisper/detail.cpp
+  src/emel/model/moshi/detail.cpp
+  src/emel/speech/codec/mimi/detail.cpp
   src/emel/speech/recognizer_routes/whisper/detail.cpp
   src/emel/diarization/sortformer/detail.cpp
   src/emel/diarization/sortformer/encoder/feature_extractor/detail.cpp
@@ -108,6 +163,7 @@ if(EMEL_ENABLE_TESTS)
     tests/doctest_main.cpp
     tests/model/fixture_manifest_tests.cpp
     tests/model/loader/lifecycle_tests.cpp
+    tests/model/moshi/binding_tests.cpp
     tests/gbnf/lexer_tests.cpp
     tests/gbnf/parser_tests.cpp
     tests/gbnf/sampler_tests.cpp
@@ -115,6 +171,9 @@ if(EMEL_ENABLE_TESTS)
     tests/text/generator/lifecycle_tests.cpp
     tests/text/generator/action_guard_tests.cpp
     tests/text/generator/detail_tests.cpp
+    tests/text/generator/parallel_matmul_tests.cpp
+    tests/text/generator/stream_window_tests.cpp
+    tests/text/generator/decode_wavefront/lifecycle_tests.cpp
     tests/text/generator/initializer/lifecycle_tests.cpp
     tests/text/generator/prefill/lifecycle_tests.cpp
     tests/diarization/request/lifecycle_tests.cpp
@@ -125,6 +184,8 @@ if(EMEL_ENABLE_TESTS)
     tests/diarization/sortformer/pipeline/lifecycle_tests.cpp
     tests/diarization/sortformer/parity/lifecycle_tests.cpp
     tests/diarization/sortformer/transformer/lifecycle_tests.cpp
+    tests/speech/codec/mimi_detail_tests.cpp
+    tests/speech/codec/mimi_lifecycle_tests.cpp
     tests/speech/encoder/whisper/lifecycle_tests.cpp
     tests/speech/decoder/whisper/lifecycle_tests.cpp
     tests/speech/encoder/whisper/detail_tests.cpp
@@ -140,6 +201,7 @@ if(EMEL_ENABLE_TESTS)
     tests/logits/sampler/pipeline_tests.cpp
     tests/sm/callback_tests.cpp
     tests/sm/sm_policy_tests.cpp
+    tests/sm/sm_external_completion_tests.cpp
     tests/sm/sm_any_tests.cpp
     tests/graph/wrapper_visibility_tests.cpp
     tests/graph/allocator/allocator_tests.cpp
@@ -170,12 +232,15 @@ if(EMEL_ENABLE_TESTS)
     tests/memory/hybrid/lifecycle_tests.cpp
     tests/graph/tensor/lifecycle_tests.cpp
     tests/model/tensor/lifecycle_tests.cpp
+    tests/model/tensor/window/lifecycle_tests.cpp
+    tests/model/tensor/window/streaming_tests.cpp
     tests/tensor/view/lifecycle_tests.cpp
   )
 
   list(APPEND EMEL_TEST_SOURCES
     tests/gguf/loader/lifecycle_tests.cpp
     tests/io/loader/lifecycle_tests.cpp
+    tests/io/mmap/advise_tests.cpp
     tests/io/mmap/lifecycle_tests.cpp
     tests/io/read/lifecycle_tests.cpp
     tests/io/staged_read/lifecycle_tests.cpp
@@ -279,8 +344,11 @@ if(EMEL_ENABLE_TESTS)
       ${CMAKE_CURRENT_SOURCE_DIR}/src
       ${CMAKE_CURRENT_SOURCE_DIR}/include
       ${CMAKE_CURRENT_SOURCE_DIR}/tools/bench
-      ${stateforward_sml_SOURCE_DIR}/include
       ${DOCTEST_INCLUDE_DIR}
+  )
+  target_include_directories(emel_tests_bin SYSTEM
+    PRIVATE
+      ${stateforward_sml_SOURCE_DIR}/include
   )
 
   target_compile_definitions(emel_tests_bin

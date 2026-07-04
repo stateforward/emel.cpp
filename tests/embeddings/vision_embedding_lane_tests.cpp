@@ -92,7 +92,10 @@ TEST_CASE("embeddings vision lane returns normalized TE embeddings when fixture 
     red_dimension,
   };
   red_request.error_out = &red_error;
-  REQUIRE(embedding_generator.process_event(red_request));
+  const bool red_accepted = embedding_generator.process_event(red_request);
+  CAPTURE(static_cast<int>(red_error));
+  CAPTURE(red_dimension);
+  REQUIRE(red_accepted);
   CHECK(red_error == emel::error::cast(emel::embeddings::generator::error::none));
   CHECK(red_dimension == 1280);
   CHECK(l2_norm(std::span<const float>{
@@ -311,6 +314,32 @@ TEST_CASE("embeddings vision helper paths cover image request callbacks and vali
   CHECK(probe.request == &request);
 }
 
+TEST_CASE("embeddings vision pointwise direct path rejects missing lane buffers") {
+  // The direct pointwise path needs its platform lane buffer bound by
+  // bind_pointwise_f16 (packed rhs on aarch64, the scalar transpose
+  // elsewhere); an otherwise valid view without one must be rejected
+  // before any lane memory is read.
+  emel::embeddings::generator::action::matrix_view matrix = {};
+  matrix.dtype = static_cast<uint8_t>(emel::kernel::detail::dtype_f32);
+  matrix.rows = 4;
+  matrix.cols = 4;
+
+  std::array<float, 4> input = {};
+  std::array<float, 4> output = {};
+  CHECK_FALSE(embedding_detail::pointwise_conv_hwc_direct_f32(
+      matrix, input.data(), 1, output.data()));
+  CHECK_FALSE(embedding_detail::pointwise_conv_hwc_direct_f32(
+      matrix, nullptr, 1, output.data()));
+
+  // The lane-buffer check fires before any batch-norm validation, so the
+  // fused variants must reject the same view in every instantiation.
+  emel::embeddings::generator::action::batch_norm_view batch_norm = {};
+  CHECK_FALSE(embedding_detail::pointwise_conv_hwc_direct_f32_bn<false>(
+      matrix, input.data(), 1, batch_norm, output.data()));
+  CHECK_FALSE(embedding_detail::pointwise_conv_hwc_direct_f32_bn<true>(
+      matrix, input.data(), 1, batch_norm, output.data()));
+}
+
 TEST_CASE("embeddings vision pointwise direct path matches scalar pointwise reference") {
 #if !(defined(__aarch64__) || defined(__ARM_NEON))
   return;
@@ -349,6 +378,7 @@ TEST_CASE("embeddings vision pointwise direct path matches scalar pointwise refe
     input[idx] = static_cast<float>(centered) * 0.0625f;
   }
 
+  emel::kernel::sm matmul_kernel{emel::kernel::detect_host_kind()};
   std::array<float, static_cast<size_t>(pixel_count) * static_cast<size_t>(output_channels)>
       output_direct = {};
   std::array<float, static_cast<size_t>(pixel_count) * static_cast<size_t>(output_channels)>
@@ -357,7 +387,7 @@ TEST_CASE("embeddings vision pointwise direct path matches scalar pointwise refe
   REQUIRE(embedding_detail::pointwise_conv_hwc_direct_f32(
       matrix, input.data(), pixel_count, output_direct.data()));
   REQUIRE(embedding_detail::pointwise_conv_hwc(
-      matrix, input.data(), pixel_count, output_scalar.data()));
+      matmul_kernel, matrix, input.data(), pixel_count, output_scalar.data()));
 
   for (size_t idx = 0; idx < output_direct.size(); ++idx) {
     CHECK(output_direct[idx] == doctest::Approx(output_scalar[idx]).epsilon(1.0e-5f));
@@ -403,6 +433,7 @@ TEST_CASE("embeddings vision pointwise direct path matches scalar reference acro
     input[idx] = static_cast<float>(centered) * 0.0625f;
   }
 
+  emel::kernel::sm matmul_kernel{emel::kernel::detect_host_kind()};
   std::array<float, static_cast<size_t>(pixel_count) * static_cast<size_t>(output_channels)>
       output_direct = {};
   std::array<float, static_cast<size_t>(pixel_count) * static_cast<size_t>(output_channels)>
@@ -411,7 +442,7 @@ TEST_CASE("embeddings vision pointwise direct path matches scalar reference acro
   REQUIRE(embedding_detail::pointwise_conv_hwc_direct_f32(
       matrix, input.data(), pixel_count, output_direct.data()));
   REQUIRE(embedding_detail::pointwise_conv_hwc(
-      matrix, input.data(), pixel_count, output_scalar.data()));
+      matmul_kernel, matrix, input.data(), pixel_count, output_scalar.data()));
 
   for (size_t idx = 0; idx < output_direct.size(); ++idx) {
     CHECK(output_direct[idx] == doctest::Approx(output_scalar[idx]).epsilon(1.0e-5f));
@@ -755,7 +786,9 @@ TEST_CASE("embeddings vision standard conv direct path matches patch reference")
                                               patch_buffer.size(),
                                               output_direct.data(),
                                               output_direct_spatial));
-  REQUIRE(embedding_detail::standard_conv_hwc_rect(conv,
+  emel::kernel::sm matmul_kernel{emel::kernel::detect_host_kind()};
+  REQUIRE(embedding_detail::standard_conv_hwc_rect(matmul_kernel,
+                                                   conv,
                                                    input.data(),
                                                    input_spatial,
                                                    input_spatial,
@@ -840,7 +873,9 @@ TEST_CASE("embeddings vision standard conv direct path matches patch reference a
                                               patch_buffer.size(),
                                               output_direct.data(),
                                               direct_spatial));
-  REQUIRE(embedding_detail::standard_conv_hwc_rect(conv,
+  emel::kernel::sm matmul_kernel{emel::kernel::detect_host_kind()};
+  REQUIRE(embedding_detail::standard_conv_hwc_rect(matmul_kernel,
+                                                   conv,
                                                    input.data(),
                                                    input_spatial,
                                                    input_spatial,

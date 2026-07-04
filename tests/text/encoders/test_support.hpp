@@ -119,7 +119,31 @@ struct vocab_builder {
   emel::model::data::vocab * vocab = nullptr;
 
   vocab_builder() : vocab(&vocab_storage()) {
-    std::memset(vocab, 0, sizeof(*vocab));
+    // The toy vocabs below are built against an all-zero vocab (the builder
+    // historically memset the storage): special-token ids resolve to token 0
+    // and no whitespace escaping applies. Reproduce that state explicitly on
+    // top of value-initialization, since several vocab defaults are non-zero
+    // (ids default to -1, escape_whitespaces to true).
+    *vocab = emel::model::data::vocab{};
+    vocab->bos_id = 0;
+    vocab->eos_id = 0;
+    vocab->eot_id = 0;
+    vocab->eom_id = 0;
+    vocab->unk_id = 0;
+    vocab->sep_id = 0;
+    vocab->pad_id = 0;
+    vocab->cls_id = 0;
+    vocab->mask_id = 0;
+    vocab->prefix_id = 0;
+    vocab->suffix_id = 0;
+    vocab->middle_id = 0;
+    vocab->fim_pre_id = 0;
+    vocab->fim_suf_id = 0;
+    vocab->fim_mid_id = 0;
+    vocab->fim_pad_id = 0;
+    vocab->fim_rep_id = 0;
+    vocab->fim_sep_id = 0;
+    vocab->escape_whitespaces = false;
   }
 
   void set_model(const char * value) {

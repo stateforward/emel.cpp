@@ -6,7 +6,8 @@ stateDiagram-v2
   ready --> ready : dispatch_op_dup [dispatch_op_dup__] / dispatch_op_dup__
   ready --> ready : dispatch_op_dup [dispatch_op_dup__] / dispatch_op_dup__
   ready --> ready : dispatch_op_add [dispatch_op_add__] / dispatch_op_add__
-  ready --> ready : dispatch_op_add [dispatch_op_add__] / dispatch_op_add__
+  ready --> ready : dispatch_op_add [dispatch_op_add___] / dispatch_op_add__
+  ready --> ready : dispatch_op_add [dispatch_op_add___] / mark_done_op__false__
   ready --> ready : dispatch_op_add [dispatch_op_add__] / dispatch_op_add__
   ready --> ready : dispatch_op_add_id [dispatch_op_add_id__] / dispatch_op_add_id__
   ready --> ready : dispatch_op_add_id [dispatch_op_add_id__] / dispatch_op_add_id__
@@ -18,7 +19,8 @@ stateDiagram-v2
   ready --> ready : dispatch_op_sub [dispatch_op_sub__] / dispatch_op_sub__
   ready --> ready : dispatch_op_sub [dispatch_op_sub__] / dispatch_op_sub__
   ready --> ready : dispatch_op_mul [dispatch_op_mul__] / dispatch_op_mul__
-  ready --> ready : dispatch_op_mul [dispatch_op_mul__] / dispatch_op_mul__
+  ready --> ready : dispatch_op_mul [dispatch_op_mul___] / dispatch_op_mul__
+  ready --> ready : dispatch_op_mul [dispatch_op_mul___] / mark_done_op__true__
   ready --> ready : dispatch_op_mul [dispatch_op_mul__] / dispatch_op_mul__
   ready --> ready : dispatch_op_div [dispatch_op_div__] / dispatch_op_div__
   ready --> ready : dispatch_op_div [dispatch_op_div__] / dispatch_op_div__
@@ -90,6 +92,8 @@ stateDiagram-v2
   ready --> ready : dispatch_op_mul_mat [simd_op_mul_mat_q6_vector_packed_] / exec_simd_q6_vector_packed_op_mul_mat_
   ready --> ready : dispatch_op_mul_mat [simd_op_mul_mat_q6_vector_] / exec_simd_q6_vector_op_mul_mat_
   ready --> ready : dispatch_op_mul_mat [simd_op_mul_mat_generic_] / dispatch_op_mul_mat__
+  ready --> ready : dispatch_op_mul_mat [simd_op_mul_mat_f16_vector_] / exec_simd_f16_vector_op_mul_mat_
+  ready --> ready : dispatch_op_mul_mat [valid_op_mul_mat_f16_] / mark_done_op__
   ready --> ready : dispatch_op_mul_mat [dispatch_op_mul_mat__] / dispatch_op_mul_mat__
   ready --> ready : dispatch_op_mul_mat [dispatch_op_mul_mat__] / dispatch_op_mul_mat__
   ready --> ready : dispatch_op_mul_mat_argmax [dispatch_op_mul_mat_argmax__] / dispatch_op_mul_mat_argmax__
@@ -114,7 +118,12 @@ stateDiagram-v2
   ready --> ready : dispatch_op_permute [dispatch_op_permute__] / dispatch_op_permute__
   ready --> ready : dispatch_op_transpose [dispatch_op_transpose__] / dispatch_op_transpose__
   ready --> ready : dispatch_op_transpose [dispatch_op_transpose__] / dispatch_op_transpose__
-  ready --> ready : dispatch_op_get_rows [dispatch_op_get_rows__] / dispatch_op_get_rows__
+  ready --> ready : dispatch_op_get_rows [get_rows_src_dtype_is___x00____] / mark_done_op____x00___
+  ready --> ready : dispatch_op_get_rows [get_rows_src_dtype_is___x01____] / mark_done_op____x01___
+  ready --> ready : dispatch_op_get_rows [get_rows_src_dtype_is___x1e____] / mark_done_op____x1e___
+  ready --> ready : dispatch_op_get_rows [get_rows_src_dtype_is___x02____] / mark_done_op____x02___
+  ready --> ready : dispatch_op_get_rows [get_rows_src_dtype_is___b____] / mark_done_op____b___
+  ready --> ready : dispatch_op_get_rows [get_rows_src_dtype_is___f____] / mark_done_op____f___
   ready --> ready : dispatch_op_get_rows [dispatch_op_get_rows__] / dispatch_op_get_rows__
   ready --> ready : dispatch_op_get_rows_back [dispatch_op_get_rows_back__] / dispatch_op_get_rows_back__
   ready --> ready : dispatch_op_get_rows_back [dispatch_op_get_rows_back__] / dispatch_op_get_rows_back__
@@ -130,15 +139,19 @@ stateDiagram-v2
   ready --> ready : dispatch_op_soft_max [dispatch_op_soft_max__] / dispatch_op_soft_max__
   ready --> ready : dispatch_op_soft_max_back [dispatch_op_soft_max_back__] / dispatch_op_soft_max_back__
   ready --> ready : dispatch_op_soft_max_back [dispatch_op_soft_max_back__] / dispatch_op_soft_max_back__
-  ready --> ready : dispatch_op_rope [dispatch_op_rope__] / dispatch_op_rope__
+  ready --> ready : dispatch_op_rope [rope_mode_is_false___] / mark_done_op__false__
+  ready --> ready : dispatch_op_rope [rope_mode_is_true___] / mark_done_op__true__
   ready --> ready : dispatch_op_rope [dispatch_op_rope__] / dispatch_op_rope__
   ready --> ready : dispatch_op_rope_back [dispatch_op_rope_back__] / dispatch_op_rope_back__
   ready --> ready : dispatch_op_rope_back [dispatch_op_rope_back__] / dispatch_op_rope_back__
   ready --> ready : dispatch_op_clamp [dispatch_op_clamp__] / dispatch_op_clamp__
   ready --> ready : dispatch_op_clamp [dispatch_op_clamp__] / dispatch_op_clamp__
+  ready --> ready : dispatch_op_conv_transpose_1d [simd_op_conv_transpose_1d_f32_] / exec_simd_f32_op_conv_transpose_1d_
+  ready --> ready : dispatch_op_conv_transpose_1d [valid_op_conv_transpose_1d_f32_] / mark_done_op__false__
+  ready --> ready : dispatch_op_conv_transpose_1d [conv_transpose_1d_weight_dtype_is_true___] / mark_done_op__true__
   ready --> ready : dispatch_op_conv_transpose_1d [dispatch_op_conv_transpose_1d__] / dispatch_op_conv_transpose_1d__
-  ready --> ready : dispatch_op_conv_transpose_1d [dispatch_op_conv_transpose_1d__] / dispatch_op_conv_transpose_1d__
-  ready --> ready : dispatch_op_im2col [dispatch_op_im2col__] / dispatch_op_im2col__
+  ready --> ready : dispatch_op_im2col [im2col_dst_dtype_is_false___] / mark_done_op__false__
+  ready --> ready : dispatch_op_im2col [im2col_dst_dtype_is_true___] / mark_done_op__true__
   ready --> ready : dispatch_op_im2col [dispatch_op_im2col__] / dispatch_op_im2col__
   ready --> ready : dispatch_op_im2col_back [dispatch_op_im2col_back__] / dispatch_op_im2col_back__
   ready --> ready : dispatch_op_im2col_back [dispatch_op_im2col_back__] / dispatch_op_im2col_back__
@@ -212,6 +225,10 @@ stateDiagram-v2
   ready --> ready : dispatch_op_unary [neg___] / neg__
   ready --> ready : dispatch_op_unary [relu___] / relu__
   ready --> ready : dispatch_op_unary [exp___] / exp__
+  ready --> ready : dispatch_op_unary [tanh___] / tanh__
+  ready --> ready : dispatch_op_unary [elu___] / elu__
+  ready --> ready : dispatch_op_unary [gelu___] / gelu__
+  ready --> ready : dispatch_op_unary [silu___] / silu__
   ready --> ready : dispatch_op_unary [dispatch_op_unary__] / dispatch_op_unary__
   ready --> ready : dispatch_op_map_custom1 [dispatch_op_map_custom1__] / dispatch_op_map_custom1__
   ready --> ready : dispatch_op_map_custom1 [dispatch_op_map_custom1__] / dispatch_op_map_custom1__

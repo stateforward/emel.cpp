@@ -323,6 +323,7 @@ bool compute_transformer_layer(
           static_cast<size_t>(k_hidden_dim),
           qkv_transposed) ||
       !emel::diarization::sortformer::detail::compute_dense_batch_from_transposed_prepared(
+          workspace.kernel,
           qkv_transposed,
           static_cast<size_t>(frame_count),
           static_cast<size_t>(k_hidden_dim),
@@ -333,6 +334,7 @@ bool compute_transformer_layer(
           workspace.dense_transposed_output,
           std::span<float>{workspace.query.data(), frame_value_count}) ||
       !emel::diarization::sortformer::detail::compute_dense_batch_from_transposed_prepared(
+          workspace.kernel,
           qkv_transposed,
           static_cast<size_t>(frame_count),
           static_cast<size_t>(k_hidden_dim),
@@ -343,6 +345,7 @@ bool compute_transformer_layer(
           workspace.dense_transposed_output,
           std::span<float>{workspace.key.data(), frame_value_count}) ||
       !emel::diarization::sortformer::detail::compute_dense_batch_from_transposed_prepared(
+          workspace.kernel,
           qkv_transposed,
           static_cast<size_t>(frame_count),
           static_cast<size_t>(k_hidden_dim),
@@ -375,6 +378,7 @@ bool compute_transformer_layer(
   }
 
   if (!emel::diarization::sortformer::detail::compute_dense_batch_residual_prepared(
+          workspace.kernel,
           std::span<const float>{workspace.first_norm.data(), frame_value_count},
           static_cast<size_t>(frame_count),
           static_cast<size_t>(k_hidden_dim),
@@ -404,6 +408,7 @@ bool compute_transformer_layer(
   }
 
   if (!emel::diarization::sortformer::detail::compute_dense_batch_prepared(
+          workspace.kernel,
           std::span<const float>{workspace.first_norm.data(), frame_value_count},
           static_cast<size_t>(frame_count),
           static_cast<size_t>(k_hidden_dim),
@@ -426,6 +431,7 @@ bool compute_transformer_layer(
   }
 
   if (!emel::diarization::sortformer::detail::compute_dense_batch_residual_prepared(
+          workspace.kernel,
           std::span<const float>{workspace.feed_forward_rows.data(), feed_forward_value_count},
           static_cast<size_t>(frame_count),
           static_cast<size_t>(k_inner_dim),

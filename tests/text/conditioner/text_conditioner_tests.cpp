@@ -37,7 +37,7 @@ int32_t add_token(emel::model::data::vocab &vocab, const char *text,
 
 emel::model::data::vocab &make_bpe_vocab() {
   static emel::model::data::vocab vocab = {};
-  std::memset(&vocab, 0, sizeof(vocab));
+  vocab = {};
   vocab.tokenizer_model_id = emel::model::data::tokenizer_model::BPE;
   vocab.tokenizer_pre_id = emel::model::data::tokenizer_pre::GPT2;
   vocab.ignore_merges = true;

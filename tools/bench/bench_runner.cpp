@@ -191,6 +191,22 @@ bool is_diarization_sortformer_case_name(const std::string & name) {
   return name.rfind("diarization/sortformer/", 0u) == 0u;
 }
 
+bool is_graph_processor_case_name(const std::string & name) {
+  return name.rfind("graph/processor_", 0u) == 0u;
+}
+
+bool is_decode_wavefront_case_name(const std::string & name) {
+  return name.rfind("decode_wavefront/", 0u) == 0u;
+}
+
+bool is_parallel_matmul_case_name(const std::string & name) {
+  return name.rfind("parallel_matmul/", 0u) == 0u;
+}
+
+bool is_sm_scheduler_case_name(const std::string & name) {
+  return name.rfind("sm_scheduler/", 0u) == 0u;
+}
+
 bool case_supported_on_host(const bench::test_case & tc) {
   if (tc.append_emel == bench::append_emel_kernel_x86_64_cases ||
       tc.append_reference == bench::append_reference_kernel_x86_64_cases) {
@@ -327,6 +343,13 @@ std::vector<bench::result> run_benchmarks(const bench::config & cfg,
   if (filter_by_suite && !suite_seen) {
     std::fprintf(stderr,
                  "error: unknown benchmark suite '%.*s'\n",
+                 static_cast<int>(selected_suite.size()),
+                 selected_suite.data());
+    std::exit(1);
+  }
+  if (filter_by_suite && results.empty()) {
+    std::fprintf(stderr,
+                 "error: no benchmark entries matched selected suite '%.*s'\n",
                  static_cast<int>(selected_suite.size()),
                  selected_suite.data());
     std::exit(1);
@@ -528,7 +551,16 @@ void print_compare(const std::vector<bench::result> & emel_results,
   }
   const bool generation_present = generation_emel != emel_sorted.end() ||
       generation_ref != ref_sorted.end();
-  if ((any_generation_emel || any_generation_ref) && !generation_present) {
+  // A workload-scoped diagnostic run (EMEL_GENERATION_WORKLOAD_ID naming a
+  // non-maintained workload) legitimately omits the maintained publication
+  // case; unfiltered and maintained-workload runs must still carry it.
+  const char * workload_selector = std::getenv("EMEL_GENERATION_WORKLOAD_ID");
+  const bool maintained_case_expected = workload_selector == nullptr ||
+      workload_selector[0] == '\0' ||
+      std::string_view{workload_selector} == "lfm2_single_user_hello_max_tokens_1_v1" ||
+      std::string_view{workload_selector} == bench::k_generation_case_name;
+  if ((any_generation_emel || any_generation_ref) && !generation_present &&
+      maintained_case_expected) {
     std::fprintf(stderr,
                  "error: missing current maintained generation case %.*s\n",
                  static_cast<int>(bench::k_generation_case_name.size()),
@@ -556,6 +588,12 @@ void print_compare(const std::vector<bench::result> & emel_results,
     std::fprintf(stderr, "error: case count mismatch emel=%zu reference=%zu\n",
                  emel_sorted.size(),
                  ref_sorted.size());
+    for (const auto & entry : emel_sorted) {
+      std::fprintf(stderr, "  emel case: %s\n", entry.name.c_str());
+    }
+    for (const auto & entry : ref_sorted) {
+      std::fprintf(stderr, "  reference case: %s\n", entry.name.c_str());
+    }
     std::exit(1);
   }
 
@@ -652,36 +690,40 @@ void print_compare(const std::vector<bench::result> & emel_results,
                    shared_flash_dispatch_calls);
       std::exit(1);
     }
-    if (k_host_is_aarch64 && flash_dispatch_calls == 0) {
+    const bool host_uses_optimized_flash = k_host_is_aarch64 || k_host_is_x86_64;
+    if (host_uses_optimized_flash && flash_dispatch_calls == 0) {
       std::fprintf(stderr,
-                   "error: missing ARM flash attribution flash_dispatch_calls=%" PRIu64 "\n",
+                   "error: missing optimized flash attribution flash_dispatch_calls=%" PRIu64 "\n",
                    flash_dispatch_calls);
       std::exit(1);
     }
-    if (flash_dispatch_calls != 0 && k_host_is_aarch64 &&
+    if (flash_dispatch_calls != 0 && host_uses_optimized_flash &&
         (optimized_flash_dispatch_calls == 0 || shared_flash_dispatch_calls != 0)) {
       std::fprintf(stderr,
-                   "error: invalid ARM flash attribution optimized_flash_dispatch_calls=%" PRIu64
+                   "error: invalid optimized flash attribution "
+                   "optimized_flash_dispatch_calls=%" PRIu64
                    " shared_flash_dispatch_calls=%" PRIu64 "\n",
                    optimized_flash_dispatch_calls,
                    shared_flash_dispatch_calls);
       std::exit(1);
     }
-    if (flash_dispatch_calls != 0 && !k_host_is_aarch64 &&
+    if (flash_dispatch_calls != 0 && !host_uses_optimized_flash &&
         (optimized_flash_dispatch_calls != 0 || shared_flash_dispatch_calls != 0)) {
       std::fprintf(stderr,
-                   "error: invalid non-ARM flash attribution optimized_flash_dispatch_calls=%" PRIu64
+                   "error: invalid non-optimized flash attribution "
+                   "optimized_flash_dispatch_calls=%" PRIu64
                    " shared_flash_dispatch_calls=%" PRIu64 "\n",
                    optimized_flash_dispatch_calls,
                    shared_flash_dispatch_calls);
       std::exit(1);
     }
-    const bool invalid_lfm2_quantized_evidence =
+    const bool invalid_lfm2_quantized_common =
         native_q8_0_dispatch_calls != 0 || packed_q8_0_dispatch_calls != 0 ||
         optimized_q2_dispatch_calls != 0 || shared_q2_dispatch_calls != 0 ||
         optimized_q3_dispatch_calls != 0 || shared_q3_dispatch_calls != 0 ||
         optimized_q4_dispatch_calls == 0 || shared_q4_dispatch_calls != 0 ||
         optimized_q6_dispatch_calls == 0 || shared_q6_dispatch_calls != 0;
+    const bool invalid_lfm2_quantized_evidence = invalid_lfm2_quantized_common;
     const bool invalid_default_quantized_evidence =
         (native_q8_0_dispatch_calls + packed_q8_0_dispatch_calls) == 0 ||
         optimized_q2_dispatch_calls != 0 || shared_q2_dispatch_calls != 0 ||
@@ -890,6 +932,49 @@ void print_compare(const std::vector<bench::result> & emel_results,
                   emel_entry.ns_per_op,
                   ref_entry.ns_per_op,
                   emel_entry.comparable ? "baseline_matched" : "measurement_only");
+      continue;
+    }
+    if (is_graph_processor_case_name(emel_entry.name)) {
+      std::printf("%s emel.cpp %.3f ns/op, reference-baseline %.3f ns/op, "
+                  "ratio=%.3fx\n",
+                  emel_entry.name.c_str(),
+                  emel_entry.ns_per_op,
+                  ref_entry.ns_per_op,
+                  emel_entry.ns_per_op / ref_entry.ns_per_op);
+      continue;
+    }
+    if (is_parallel_matmul_case_name(emel_entry.name)) {
+      const char * baseline_label =
+          emel_entry.name.find("ggml") != std::string::npos ? "llama.cpp"
+                                                            : "reference-baseline";
+      std::printf("%s emel.cpp %.3f ns/op, %s %.3f ns/op, ratio=%.3fx\n",
+                  emel_entry.name.c_str(),
+                  emel_entry.ns_per_op,
+                  baseline_label,
+                  ref_entry.ns_per_op,
+                  emel_entry.ns_per_op / ref_entry.ns_per_op);
+      continue;
+    }
+    if (is_decode_wavefront_case_name(emel_entry.name)) {
+      const char * baseline_label =
+          emel_entry.name.find("ggml") != std::string::npos
+              ? "llama.cpp"
+              : "reserved-scalar-baseline";
+      std::printf("%s emel.cpp %.3f ns/op, %s %.3f ns/op, ratio=%.3fx\n",
+                  emel_entry.name.c_str(),
+                  emel_entry.ns_per_op,
+                  baseline_label,
+                  ref_entry.ns_per_op,
+                  emel_entry.ns_per_op / ref_entry.ns_per_op);
+      continue;
+    }
+    if (is_sm_scheduler_case_name(emel_entry.name)) {
+      std::printf("%s thread_pool %.3f ns/op, inline_co_sm %.3f ns/op, "
+                  "ratio=%.3fx\n",
+                  emel_entry.name.c_str(),
+                  emel_entry.ns_per_op,
+                  ref_entry.ns_per_op,
+                  emel_entry.ns_per_op / ref_entry.ns_per_op);
       continue;
     }
     const double ratio = emel_entry.ns_per_op / ref_entry.ns_per_op;

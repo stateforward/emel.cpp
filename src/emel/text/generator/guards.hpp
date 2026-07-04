@@ -318,6 +318,93 @@ inline bool scalar_matmul_native_quantized_supported(
   return scalar_matmul_route_supported<scalar_matmul_matrix_native_quantized_supported>(backend);
 }
 
+// Streamed decode executes the per-layer matmuls on raw GGUF bytes copied
+// into window slots, so streamed route classification must scan the raw
+// stream records captured at engage - the resident records can be packed
+// repacks on aarch64 whose layout the slots never carry. The logits stage
+// keeps reading the resident output matrix, so the output probe stays on
+// the bound record.
+template <auto matrix_supported_fn>
+inline bool scalar_matmul_stream_route_supported(
+    const emel::text::generator::detail::native_backend & backend) noexcept {
+  if (backend.blocks.empty() || backend.n_layer <= 0 ||
+      backend.stream.raw.size() != backend.blocks.size()) {
+    return false;
+  }
+  for (size_t layer = 0; layer < backend.blocks.size(); ++layer) {
+    const auto & block = backend.blocks[layer];
+    const auto & raw = backend.stream.raw[layer];
+    const auto probe_ok = [&](const emel::text::generator::detail::tensor_matrix & bound,
+                              const size_t role) noexcept {
+      emel::text::generator::detail::tensor_matrix probe = bound;
+      if (raw[role] != nullptr) {
+        probe.tensor = raw[role];
+      }
+      return matrix_supported_fn(backend, probe);
+    };
+    namespace gd = emel::text::generator::detail;
+    const bool residual_ok = block.uses_attention
+        ? probe_ok(block.attention_q, gd::k_stream_role_attention_q) &&
+              probe_ok(block.attention_k, gd::k_stream_role_attention_k) &&
+              probe_ok(block.attention_v, gd::k_stream_role_attention_v) &&
+              probe_ok(block.attention_output, gd::k_stream_role_attention_output)
+        : backend.shortconv_kernel_size > 1 &&
+              probe_ok(block.shortconv_in_proj, gd::k_stream_role_shortconv_in_proj) &&
+              probe_ok(block.shortconv_out_proj, gd::k_stream_role_shortconv_out_proj) &&
+              !block.shortconv_conv.empty();
+    if (!residual_ok ||
+        !probe_ok(block.feed_forward_gate, gd::k_stream_role_feed_forward_gate) ||
+        !probe_ok(block.feed_forward_up, gd::k_stream_role_feed_forward_up) ||
+        !probe_ok(block.feed_forward_down, gd::k_stream_role_feed_forward_down)) {
+      return false;
+    }
+  }
+  emel::text::generator::detail::tensor_matrix output_probe = backend.output;
+  if (backend.stream.raw_output != nullptr) {
+    output_probe.tensor = backend.stream.raw_output;
+  }
+  return matrix_supported_fn(backend, output_probe);
+}
+
+// Streamed logits/argmax output-stage probes: the streamed drivers bind the
+// raw output records for the whole step, so the q8-output split for streamed
+// rows classifies the raw record, not the packed/prepared resident one.
+inline bool stream_materialized_output_q8_k_supported(
+    const emel::text::generator::detail::native_backend & backend) noexcept {
+  emel::text::generator::detail::tensor_matrix probe = backend.output;
+  if (backend.stream.raw_output != nullptr) {
+    probe.tensor = backend.stream.raw_output;
+  }
+  return q8_input_path_supported(backend, probe);
+}
+
+inline bool stream_preselected_argmax_output_q8_k_supported(
+    const emel::text::generator::detail::native_backend & backend) noexcept {
+  emel::text::generator::detail::tensor_matrix probe =
+      backend.output_argmax.tensor != nullptr ? backend.output_argmax : backend.output;
+  if (backend.stream.raw_output_argmax != nullptr) {
+    probe.tensor = backend.stream.raw_output_argmax;
+  }
+  return q8_input_argmax_path_supported(backend, probe);
+}
+
+inline bool scalar_matmul_stream_packed_q8_0_supported(
+    const emel::text::generator::detail::native_backend & backend) noexcept {
+  return scalar_matmul_stream_route_supported<scalar_matmul_matrix_packed_q8_0_supported>(
+      backend);
+}
+
+inline bool scalar_matmul_stream_q8_k_supported(
+    const emel::text::generator::detail::native_backend & backend) noexcept {
+  return scalar_matmul_stream_route_supported<scalar_matmul_matrix_q8_k_supported>(backend);
+}
+
+inline bool scalar_matmul_stream_native_quantized_supported(
+    const emel::text::generator::detail::native_backend & backend) noexcept {
+  return scalar_matmul_stream_route_supported<scalar_matmul_matrix_native_quantized_supported>(
+      backend);
+}
+
 inline bool scalar_preselected_argmax_q8_k_supported(
     const emel::text::generator::detail::native_backend & backend) noexcept {
   const auto & output_matrix =
@@ -986,10 +1073,25 @@ struct guard_decode_compute_backend_unavailable {
   }
 };
 
+struct guard_decode_parallel_lanes_ready {
+  bool operator()(const event::generate_run &, const action::context & ctx) const noexcept {
+    return ctx.compute.backend.lane_pool.has_value() &&
+           ctx.compute.backend.n_embd >=
+               emel::text::generator::detail::k_parallel_min_gemv_dim;
+  }
+};
+
 struct guard_decode_materialized_scalar_packed_q8_0_ready {
   bool operator()(const event::generate_run & ev, const action::context & ctx) const noexcept {
     return detail::guard_decode_materialized_compute_ready(ev.ctx, ctx) &&
            compute_materialized_scalar_packed_q8_0_supported{}(ev, ctx);
+  }
+};
+
+struct guard_decode_materialized_parallel_scalar_packed_q8_0_ready {
+  bool operator()(const event::generate_run & ev, const action::context & ctx) const noexcept {
+    return guard_decode_parallel_lanes_ready{}(ev, ctx) &&
+           guard_decode_materialized_scalar_packed_q8_0_ready{}(ev, ctx);
   }
 };
 
@@ -1000,10 +1102,24 @@ struct guard_decode_materialized_scalar_q8_k_ready {
   }
 };
 
+struct guard_decode_materialized_parallel_scalar_q8_k_ready {
+  bool operator()(const event::generate_run & ev, const action::context & ctx) const noexcept {
+    return guard_decode_parallel_lanes_ready{}(ev, ctx) &&
+           guard_decode_materialized_scalar_q8_k_ready{}(ev, ctx);
+  }
+};
+
 struct guard_decode_materialized_scalar_native_quantized_q8_k_ready {
   bool operator()(const event::generate_run & ev, const action::context & ctx) const noexcept {
     return detail::guard_decode_materialized_compute_ready(ev.ctx, ctx) &&
            compute_materialized_scalar_native_quantized_q8_k_supported{}(ev, ctx);
+  }
+};
+
+struct guard_decode_materialized_parallel_scalar_native_quantized_q8_k_ready {
+  bool operator()(const event::generate_run & ev, const action::context & ctx) const noexcept {
+    return guard_decode_parallel_lanes_ready{}(ev, ctx) &&
+           guard_decode_materialized_scalar_native_quantized_q8_k_ready{}(ev, ctx);
   }
 };
 
@@ -1014,10 +1130,114 @@ struct guard_decode_materialized_scalar_native_quantized_kernel_ready {
   }
 };
 
+struct guard_decode_materialized_parallel_scalar_native_quantized_kernel_ready {
+  bool operator()(const event::generate_run & ev, const action::context & ctx) const noexcept {
+    return guard_decode_parallel_lanes_ready{}(ev, ctx) &&
+           guard_decode_materialized_scalar_native_quantized_kernel_ready{}(ev, ctx);
+  }
+};
+
 struct guard_decode_materialized_scalar_kernel_ready {
   bool operator()(const event::generate_run & ev, const action::context & ctx) const noexcept {
     return detail::guard_decode_materialized_compute_ready(ev.ctx, ctx) &&
            compute_materialized_scalar_kernel_required{}(ev, ctx);
+  }
+};
+
+struct guard_decode_materialized_parallel_scalar_kernel_ready {
+  bool operator()(const event::generate_run & ev, const action::context & ctx) const noexcept {
+    return guard_decode_parallel_lanes_ready{}(ev, ctx) &&
+           guard_decode_materialized_scalar_kernel_ready{}(ev, ctx);
+  }
+};
+
+// Streaming window engagement: the owner injected a bound tensor window actor
+// that reported streaming_active at bind. Mirrors the lane-pool capability
+// gate; composed with route readiness below so the streamed route row sits
+// above its resident siblings only when the window is live.
+struct guard_decode_stream_window_ready {
+  bool operator()(const event::generate_run &, const action::context & ctx) const noexcept {
+    return ctx.compute.backend.stream.window != nullptr &&
+           ctx.compute.backend.stream.active;
+  }
+};
+
+// Streamed route classes scan the raw stream records instead of the bound
+// (possibly packed) resident records: the acquired slots hold raw GGUF
+// bytes, so a route selected from the resident class would misread them.
+struct compute_stream_scalar_packed_q8_0_supported {
+  bool operator()(const event::generate_run &, const action::context & ctx) const noexcept {
+    return detail::scalar_matmul_stream_packed_q8_0_supported(ctx.compute.backend);
+  }
+};
+
+struct compute_stream_scalar_q8_k_supported {
+  bool operator()(const event::generate_run & ev, const action::context & ctx) const noexcept {
+    return !compute_stream_scalar_packed_q8_0_supported{}(ev, ctx) &&
+           detail::scalar_matmul_stream_q8_k_supported(ctx.compute.backend);
+  }
+};
+
+struct compute_stream_scalar_native_quantized_supported {
+  bool operator()(const event::generate_run & ev, const action::context & ctx) const noexcept {
+    return !compute_stream_scalar_packed_q8_0_supported{}(ev, ctx) &&
+           !detail::scalar_matmul_stream_q8_k_supported(ctx.compute.backend) &&
+           detail::scalar_matmul_stream_native_quantized_supported(ctx.compute.backend);
+  }
+};
+
+struct compute_stream_scalar_kernel_required {
+  bool operator()(const event::generate_run &, const action::context & ctx) const noexcept {
+    return !detail::scalar_matmul_stream_packed_q8_0_supported(ctx.compute.backend) &&
+           !detail::scalar_matmul_stream_q8_k_supported(ctx.compute.backend) &&
+           !detail::scalar_matmul_stream_native_quantized_supported(ctx.compute.backend);
+  }
+};
+
+struct guard_decode_materialized_streamed_scalar_kernel_ready {
+  bool operator()(const event::generate_run & ev, const action::context & ctx) const noexcept {
+    return guard_decode_stream_window_ready{}(ev, ctx) &&
+           detail::guard_decode_materialized_compute_ready(ev.ctx, ctx) &&
+           compute_uses_materialized_logits{}(ev, ctx) &&
+           compute_stream_scalar_kernel_required{}(ev, ctx);
+  }
+};
+
+struct guard_decode_materialized_streamed_scalar_native_quantized_ready {
+  bool operator()(const event::generate_run & ev, const action::context & ctx) const noexcept {
+    return guard_decode_stream_window_ready{}(ev, ctx) &&
+           detail::guard_decode_materialized_compute_ready(ev.ctx, ctx) &&
+           compute_uses_materialized_logits{}(ev, ctx) &&
+           compute_stream_scalar_native_quantized_supported{}(ev, ctx) &&
+           !detail::stream_materialized_output_q8_k_supported(ctx.compute.backend);
+  }
+};
+
+struct guard_decode_materialized_streamed_scalar_packed_q8_0_ready {
+  bool operator()(const event::generate_run & ev, const action::context & ctx) const noexcept {
+    return guard_decode_stream_window_ready{}(ev, ctx) &&
+           detail::guard_decode_materialized_compute_ready(ev.ctx, ctx) &&
+           compute_uses_materialized_logits{}(ev, ctx) &&
+           compute_stream_scalar_packed_q8_0_supported{}(ev, ctx);
+  }
+};
+
+struct guard_decode_materialized_streamed_scalar_q8_k_ready {
+  bool operator()(const event::generate_run & ev, const action::context & ctx) const noexcept {
+    return guard_decode_stream_window_ready{}(ev, ctx) &&
+           detail::guard_decode_materialized_compute_ready(ev.ctx, ctx) &&
+           compute_uses_materialized_logits{}(ev, ctx) &&
+           compute_stream_scalar_q8_k_supported{}(ev, ctx);
+  }
+};
+
+struct guard_decode_materialized_streamed_scalar_native_quantized_q8_k_ready {
+  bool operator()(const event::generate_run & ev, const action::context & ctx) const noexcept {
+    return guard_decode_stream_window_ready{}(ev, ctx) &&
+           detail::guard_decode_materialized_compute_ready(ev.ctx, ctx) &&
+           compute_uses_materialized_logits{}(ev, ctx) &&
+           compute_stream_scalar_native_quantized_supported{}(ev, ctx) &&
+           detail::stream_materialized_output_q8_k_supported(ctx.compute.backend);
   }
 };
 
@@ -1053,6 +1273,84 @@ struct guard_decode_preselected_argmax_kernel_ready {
   bool operator()(const event::generate_run & ev, const action::context & ctx) const noexcept {
     return detail::guard_decode_preselected_compute_ready(ev.ctx, ctx) &&
            compute_preselected_argmax_kernel_required{}(ev, ctx);
+  }
+};
+
+// Streamed preselected routes: an active tensor window overrides the
+// resident/parallel siblings (the streamed decode is serial by construction,
+// one layer slot at a time). Like the sample-mode streamed rows, the block
+// route class scans the raw stream records; the argmax output stage stays
+// resident-classified.
+struct guard_decode_preselected_argmax_q8_k_streamed_ready {
+  bool operator()(const event::generate_run &ev,
+                  const action::context &ctx) const noexcept {
+    return guard_decode_stream_window_ready{}(ev, ctx) &&
+           detail::guard_decode_preselected_compute_ready(ev.ctx, ctx) &&
+           compute_stream_scalar_q8_k_supported{}(ev, ctx) &&
+           detail::stream_preselected_argmax_output_q8_k_supported(
+               ctx.compute.backend);
+  }
+};
+
+struct guard_decode_preselected_argmax_native_quantized_q8_k_streamed_ready {
+  bool operator()(const event::generate_run &ev,
+                  const action::context &ctx) const noexcept {
+    return guard_decode_stream_window_ready{}(ev, ctx) &&
+           detail::guard_decode_preselected_compute_ready(ev.ctx, ctx) &&
+           compute_stream_scalar_native_quantized_supported{}(ev, ctx) &&
+           detail::stream_preselected_argmax_output_q8_k_supported(
+               ctx.compute.backend);
+  }
+};
+
+struct guard_decode_preselected_argmax_native_quantized_kernel_streamed_ready {
+  bool operator()(const event::generate_run &ev,
+                  const action::context &ctx) const noexcept {
+    return guard_decode_stream_window_ready{}(ev, ctx) &&
+           detail::guard_decode_preselected_compute_ready(ev.ctx, ctx) &&
+           compute_stream_scalar_native_quantized_supported{}(ev, ctx) &&
+           !detail::stream_preselected_argmax_output_q8_k_supported(
+               ctx.compute.backend);
+  }
+};
+
+struct guard_decode_preselected_argmax_kernel_streamed_ready {
+  bool operator()(const event::generate_run &ev,
+                  const action::context &ctx) const noexcept {
+    return guard_decode_stream_window_ready{}(ev, ctx) &&
+           detail::guard_decode_preselected_compute_ready(ev.ctx, ctx) &&
+           !(compute_stream_scalar_q8_k_supported{}(ev, ctx) &&
+             detail::stream_preselected_argmax_output_q8_k_supported(
+                 ctx.compute.backend)) &&
+           !compute_stream_scalar_native_quantized_supported{}(ev, ctx);
+  }
+};
+
+struct guard_decode_preselected_parallel_argmax_q8_k_ready {
+  bool operator()(const event::generate_run & ev, const action::context & ctx) const noexcept {
+    return guard_decode_parallel_lanes_ready{}(ev, ctx) &&
+           guard_decode_preselected_argmax_q8_k_ready{}(ev, ctx);
+  }
+};
+
+struct guard_decode_preselected_parallel_argmax_native_quantized_q8_k_ready {
+  bool operator()(const event::generate_run & ev, const action::context & ctx) const noexcept {
+    return guard_decode_parallel_lanes_ready{}(ev, ctx) &&
+           guard_decode_preselected_argmax_native_quantized_q8_k_ready{}(ev, ctx);
+  }
+};
+
+struct guard_decode_preselected_parallel_argmax_native_quantized_kernel_ready {
+  bool operator()(const event::generate_run & ev, const action::context & ctx) const noexcept {
+    return guard_decode_parallel_lanes_ready{}(ev, ctx) &&
+           guard_decode_preselected_argmax_native_quantized_kernel_ready{}(ev, ctx);
+  }
+};
+
+struct guard_decode_preselected_parallel_argmax_kernel_ready {
+  bool operator()(const event::generate_run & ev, const action::context & ctx) const noexcept {
+    return guard_decode_parallel_lanes_ready{}(ev, ctx) &&
+           guard_decode_preselected_argmax_kernel_ready{}(ev, ctx);
   }
 };
 

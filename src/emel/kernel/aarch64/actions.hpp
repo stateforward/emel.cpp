@@ -867,6 +867,15 @@ inline bool can_use_neon(const request_type &request,
                          ::emel::kernel::detail::dtype_f32 &&
                      is_dense_contiguous(request.src1);
   }
+  // Row-broadcast add/mul variants execute through their own scalar rows;
+  // the elementwise SIMD kernels require equally sized operands.
+  if constexpr (std::is_same_v<request_type, event::op_add> ||
+                std::is_same_v<request_type, event::op_mul>) {
+    src1_supported =
+        src1_supported &&
+        ::emel::kernel::detail::tensor_element_count(request.src1) ==
+            ::emel::kernel::detail::tensor_element_count(request.dst);
+  }
 
   bool unary_supported = true;
   if constexpr (std::is_same_v<request_type, event::op_unary>) {
@@ -1073,6 +1082,27 @@ can_use_neon_mul_mat_q8_0_vector(const event::op_mul_mat &request,
   return neon_available && can_run_neon_mul_mat_q8_0_vector_request(request);
 }
 
+// SVE-capable builds are excluded: the pinned ggml_vec_dot_f16 selects its
+// SVE branch ahead of the NEON fp16 branch there, so this NEON port would
+// not match the reference's accumulation order on such hosts.
+inline bool neon_f16_vector_supported() noexcept {
+#if defined(__aarch64__) && defined(__ARM_NEON) &&                             \
+    defined(__ARM_FEATURE_FP16_VECTOR_ARITHMETIC) &&                           \
+    !defined(__ARM_FEATURE_SVE)
+  return true;
+#else
+  return false;
+#endif
+}
+
+inline bool neon_conv_transpose_f32_supported() noexcept {
+#if defined(__aarch64__) || defined(__ARM_NEON)
+  return true;
+#else
+  return false;
+#endif
+}
+
 inline bool neon_q8_0_packed_bl4_supported() noexcept {
 #if defined(__aarch64__) && defined(__ARM_NEON) &&                             \
     defined(__ARM_FEATURE_DOTPROD)
@@ -1150,44 +1180,7 @@ inline bool can_use_neon_mul_mat_q8_0_packed_bl8_full_groups(
              0u;
 }
 
-inline bool can_use_neon_mul_mat_q8_0_packed_bl8_matrix_x4(
-    const event::op_mul_mat &request, const bool neon_available) noexcept {
-  const uint64_t k = request.src0.ne[0];
-  const uint64_t m = request.src0.ne[1];
-  const uint64_t rhs_rows = request.src1.ne[0];
-  const uint64_t lhs_group_count =
-      ::emel::kernel::detail::quant::packed_q8_0_x4_group_count(m);
-  const uint64_t rhs_group_count =
-      ::emel::kernel::detail::quant::packed_q8_0_x4_group_count(rhs_rows);
-  const size_t group_bytes =
-      ::emel::kernel::detail::quant::packed_q8_0_x4_group_storage_bytes(k);
-  const size_t dst_row_bytes = sizeof(float) * m;
-  return neon_available && neon_q8_0_packed_bl8_supported() && k != 0u &&
-         m != 0u && rhs_rows == ::emel::kernel::detail::quant::Q8_0_X4_ROWS &&
-         request.src1.ne[1] == k && request.dst.ne[0] == rhs_rows &&
-         request.dst.ne[1] == m && request.src0.ne[2] == 1u &&
-         request.src0.ne[3] == 1u && request.src1.ne[2] == 1u &&
-         request.src1.ne[3] == 1u && request.dst.ne[2] == 1u &&
-         request.dst.ne[3] == 1u &&
-         (m % ::emel::kernel::detail::quant::Q8_0_X4_ROWS) == 0u &&
-         ::emel::kernel::detail::dtype_code(request.src0.type) ==
-             ::emel::kernel::detail::dtype_q8_0_x4_bl8 &&
-         ::emel::kernel::detail::dtype_code(request.src1.type) ==
-             ::emel::kernel::detail::dtype_q8_0_x4_bl8 &&
-         ::emel::kernel::detail::dtype_code(request.dst.type) ==
-             ::emel::kernel::detail::dtype_f32 &&
-         group_bytes != 0u && request.src0.nb[0] == 1u &&
-         request.src0.nb[1] == group_bytes &&
-         request.src0.nb[2] == group_bytes * lhs_group_count &&
-         request.src0.nb[3] == request.src0.nb[2] && request.src1.nb[0] == 1u &&
-         request.src1.nb[1] == group_bytes &&
-         request.src1.nb[2] == group_bytes * rhs_group_count &&
-         request.src1.nb[3] == request.src1.nb[2] &&
-         request.dst.nb[0] == dst_row_bytes &&
-         request.dst.nb[1] == sizeof(float) &&
-         request.dst.nb[2] == dst_row_bytes * rhs_rows &&
-         request.dst.nb[3] == request.dst.nb[2];
-}
+
 
 inline bool can_use_neon_mul_mat_q8_0_packed_bl8_tail_safe(
     const event::op_mul_mat &request, const bool neon_available) noexcept {
@@ -1285,44 +1278,6 @@ inline bool can_run_neon_mul_mat_q4_vector_packed_q8_rhs_request(
          is_dense_contiguous(request.dst);
 }
 
-inline bool can_run_neon_mul_mat_q4_vector_packed_q8_rhs_matrix_x4_request(
-    const event::op_mul_mat &request, const uint8_t packed_dtype) noexcept {
-  const uint64_t k = request.src0.ne[0];
-  const uint64_t m = request.src0.ne[1];
-  const uint64_t rhs_rows = request.src1.ne[0];
-  const uint64_t group_count =
-      ::emel::kernel::detail::quant::packed_q4_k_x8_group_count(m);
-  const size_t group_bytes =
-      ::emel::kernel::detail::quant::packed_q4_k_x8_group_storage_bytes(k);
-  const size_t rhs_row_bytes =
-      ::emel::kernel::detail::quantized_row_storage_bytes(
-          ::emel::kernel::detail::dtype_q8_k, k);
-  const size_t dst_row_bytes = sizeof(float) * m;
-  return k != 0u && m != 0u &&
-         rhs_rows == ::emel::kernel::detail::quant::Q8_0_X4_ROWS &&
-         request.src1.ne[1] == k && request.dst.ne[0] == rhs_rows &&
-         request.dst.ne[1] == m && request.src0.ne[2] == 1u &&
-         request.src0.ne[3] == 1u && request.src1.ne[2] == 1u &&
-         request.src1.ne[3] == 1u && request.dst.ne[2] == 1u &&
-         request.dst.ne[3] == 1u &&
-         ::emel::kernel::detail::dtype_code(request.src0.type) ==
-             packed_dtype &&
-         ::emel::kernel::detail::dtype_code(request.src1.type) ==
-             ::emel::kernel::detail::dtype_q8_k_x4 &&
-         ::emel::kernel::detail::dtype_code(request.dst.type) ==
-             ::emel::kernel::detail::dtype_f32 &&
-         request.src0.nb[0] == 1u && group_bytes != 0u &&
-         request.src0.nb[1] == group_bytes &&
-         request.src0.nb[2] == group_bytes * group_count &&
-         request.src0.nb[3] == request.src0.nb[2] && request.src1.nb[0] == 1u &&
-         rhs_row_bytes != 0u && request.src1.nb[1] == rhs_row_bytes &&
-         request.src1.nb[2] == rhs_row_bytes * rhs_rows &&
-         request.src1.nb[3] == request.src1.nb[2] &&
-         request.dst.nb[0] == dst_row_bytes &&
-         request.dst.nb[1] == sizeof(float) &&
-         request.dst.nb[2] == dst_row_bytes * rhs_rows &&
-         request.dst.nb[3] == request.dst.nb[2];
-}
 
 inline bool can_run_neon_mul_mat_q6_vector_packed_q8_rhs_request(
     const event::op_mul_mat &request) noexcept {
@@ -1357,43 +1312,6 @@ inline bool can_run_neon_mul_mat_q6_vector_packed_q8_rhs_request(
          is_dense_contiguous(request.dst);
 }
 
-inline bool can_run_neon_mul_mat_q6_vector_packed_q8_rhs_matrix_x4_request(
-    const event::op_mul_mat &request, const uint8_t packed_dtype,
-    const size_t group_bytes) noexcept {
-  const uint64_t k = request.src0.ne[0];
-  const uint64_t m = request.src0.ne[1];
-  const uint64_t rhs_rows = request.src1.ne[0];
-  const uint64_t group_count =
-      ::emel::kernel::detail::quant::packed_q6_k_x8_group_count(m);
-  const size_t rhs_row_bytes =
-      ::emel::kernel::detail::quantized_row_storage_bytes(
-          ::emel::kernel::detail::dtype_q8_k, k);
-  const size_t dst_row_bytes = sizeof(float) * m;
-  return k != 0u && m != 0u &&
-         rhs_rows == ::emel::kernel::detail::quant::Q8_0_X4_ROWS &&
-         request.src1.ne[1] == k && request.dst.ne[0] == rhs_rows &&
-         request.dst.ne[1] == m && request.src0.ne[2] == 1u &&
-         request.src0.ne[3] == 1u && request.src1.ne[2] == 1u &&
-         request.src1.ne[3] == 1u && request.dst.ne[2] == 1u &&
-         request.dst.ne[3] == 1u &&
-         ::emel::kernel::detail::dtype_code(request.src0.type) ==
-             packed_dtype &&
-         ::emel::kernel::detail::dtype_code(request.src1.type) ==
-             ::emel::kernel::detail::dtype_q8_k_x4 &&
-         ::emel::kernel::detail::dtype_code(request.dst.type) ==
-             ::emel::kernel::detail::dtype_f32 &&
-         request.src0.nb[0] == 1u && group_bytes != 0u &&
-         request.src0.nb[1] == group_bytes &&
-         request.src0.nb[2] == group_bytes * group_count &&
-         request.src0.nb[3] == request.src0.nb[2] && request.src1.nb[0] == 1u &&
-         rhs_row_bytes != 0u && request.src1.nb[1] == rhs_row_bytes &&
-         request.src1.nb[2] == rhs_row_bytes * rhs_rows &&
-         request.src1.nb[3] == request.src1.nb[2] &&
-         request.dst.nb[0] == dst_row_bytes &&
-         request.dst.nb[1] == sizeof(float) &&
-         request.dst.nb[2] == dst_row_bytes * rhs_rows &&
-         request.dst.nb[3] == request.dst.nb[2];
-}
 
 inline bool can_run_neon_mul_mat_q6_vector_prepared_q8_rhs_request(
     const event::op_mul_mat &request) noexcept {
@@ -1449,19 +1367,7 @@ inline bool can_use_neon_mul_mat_q4_vector_packed_q8_rhs_bl8(
              request, ::emel::kernel::detail::dtype_q4_k_x8_bl8);
 }
 
-inline bool can_use_neon_mul_mat_q4_vector_packed_q8_rhs_bl4_matrix_x4(
-    const event::op_mul_mat &request, const bool neon_available) noexcept {
-  return neon_available && neon_q4_vector_packed_supported() &&
-         can_run_neon_mul_mat_q4_vector_packed_q8_rhs_matrix_x4_request(
-             request, ::emel::kernel::detail::dtype_q4_k_x8_bl4);
-}
 
-inline bool can_use_neon_mul_mat_q4_vector_packed_q8_rhs_bl8_matrix_x4(
-    const event::op_mul_mat &request, const bool neon_available) noexcept {
-  return neon_available && neon_q4_vector_packed_supported() &&
-         can_run_neon_mul_mat_q4_vector_packed_q8_rhs_matrix_x4_request(
-             request, ::emel::kernel::detail::dtype_q4_k_x8_bl8);
-}
 
 inline bool can_use_neon_mul_mat_q6_vector_packed_q8_rhs(
     const event::op_mul_mat &request, const bool neon_available) noexcept {
@@ -1469,14 +1375,6 @@ inline bool can_use_neon_mul_mat_q6_vector_packed_q8_rhs(
          can_run_neon_mul_mat_q6_vector_packed_q8_rhs_request(request);
 }
 
-inline bool can_use_neon_mul_mat_q6_vector_packed_q8_rhs_matrix_x4(
-    const event::op_mul_mat &request, const bool neon_available) noexcept {
-  return neon_available && neon_q6_vector_packed_supported() &&
-         can_run_neon_mul_mat_q6_vector_packed_q8_rhs_matrix_x4_request(
-             request, ::emel::kernel::detail::dtype_q6_k_x8,
-             ::emel::kernel::detail::quant::packed_q6_k_x8_group_storage_bytes(
-                 request.src0.ne[0]));
-}
 
 inline bool can_use_neon_mul_mat_q6_vector_prepared_q8_rhs(
     const event::op_mul_mat &request, const bool neon_available) noexcept {
@@ -1496,14 +1394,6 @@ inline bool can_use_neon_mul_mat_q6_vector_prepared_q8_rhs_i8mm(
          can_run_neon_mul_mat_q6_vector_prepared_q8_rhs_request(request);
 }
 
-inline bool can_use_neon_mul_mat_q6_vector_prepared_q8_rhs_i8mm_matrix_x4(
-    const event::op_mul_mat &request, const bool neon_available) noexcept {
-  return neon_available && neon_q6_vector_prepared_q8_rhs_i8mm_supported() &&
-         can_run_neon_mul_mat_q6_vector_packed_q8_rhs_matrix_x4_request(
-             request, ::emel::kernel::detail::dtype_q6_k_x8_q8_prepared,
-             ::emel::kernel::detail::quant::
-                 prepared_q6_k_x8_q8_group_storage_bytes(request.src0.ne[0]));
-}
 
 inline bool can_run_neon_mul_mat_argmax_q6_vector_prepared_q8_rhs_request(
     const event::op_mul_mat_argmax &request) noexcept {
@@ -2189,6 +2079,7 @@ inline bool execute_neon_sqrt(const event::op_sqrt &request) noexcept {
 #endif
 }
 
+#if defined(__aarch64__) || defined(__ARM_NEON)
 inline uint8x16x2_t load_u8x16x2(const uint8_t *ptr) noexcept {
   uint8x16x2_t out{};
   out.val[0] = vld1q_u8(ptr);
@@ -2204,6 +2095,7 @@ inline int8x16x4_t load_s8x16x4(const int8_t *ptr) noexcept {
   out.val[3] = vld1q_s8(ptr + 48);
   return out;
 }
+#endif
 
 inline float dot_q2_k_q8_k_block_neon(
     const ::emel::kernel::detail::quant::block_q2_k &lhs,
@@ -2566,6 +2458,7 @@ decode_q4_k_scales_words(const ::emel::kernel::detail::quant::block_q4_k &lhs,
   decoded_words[0] &= kmask1;
 }
 
+#if defined(__aarch64__) || defined(__ARM_NEON)
 inline int32_t q4_k_min_sum_neon(const uint8_t *mins,
                                  const int16x8_t q8_pair_sums) noexcept {
   const int16x8_t mins_s16 = vreinterpretq_s16_u16(vmovl_u8(vld1_u8(mins)));
@@ -2574,6 +2467,7 @@ inline int32_t q4_k_min_sum_neon(const uint8_t *mins,
       vmull_s16(vget_high_s16(q8_pair_sums), vget_high_s16(mins_s16)));
   return vaddvq_s32(min_prod);
 }
+#endif
 
 inline float dot_q4_k_q8_k_block_neon(
     const ::emel::kernel::detail::quant::block_q4_k &lhs,
@@ -3569,6 +3463,7 @@ dot_q6_k_q8_k_row_neon(const ::emel::kernel::detail::quant::block_q6_k *lhs,
   return sum;
 }
 
+#if defined(__aarch64__) || defined(__ARM_NEON)
 inline int32_t horizontal_sum_s32_neon(const int32x4_t value) noexcept {
 #if defined(__aarch64__)
   return vaddvq_s32(value);
@@ -3604,6 +3499,7 @@ inline int32_t dot_q8_0_q8_0_block_sum_neon(
 #endif
   return horizontal_sum_s32_neon(acc);
 }
+#endif
 
 inline constexpr std::array<std::array<uint8_t, 8>, 256>
 make_q5_0_high_bit_lookup() noexcept {
@@ -3618,6 +3514,7 @@ make_q5_0_high_bit_lookup() noexcept {
 
 inline constexpr auto k_q5_0_high_bit_lookup = make_q5_0_high_bit_lookup();
 
+#if defined(__aarch64__) || defined(__ARM_NEON)
 inline uint8x8_t load_q5_0_high_bit_mask_u8(const uint8_t bits) noexcept {
   return vld1_u8(k_q5_0_high_bit_lookup[bits].data());
 }
@@ -3640,6 +3537,7 @@ decode_q5_0_block_neon(const ::emel::kernel::detail::quant::block_q5_0 &block,
   high_out =
       vsubq_s8(vreinterpretq_s8_u8(vorrq_u8(high_nibbles, high_mask)), bias);
 }
+#endif
 
 inline float
 dot_q5_0_q8_0_row_neon(const ::emel::kernel::detail::quant::block_q5_0 *lhs,
@@ -3918,8 +3816,9 @@ dot_q4_0_q8_0_4rows_neon(const ::emel::kernel::detail::quant::block_q4_0 *row0,
 #endif
 }
 
+#if defined(__aarch64__) || defined(__ARM_NEON)
 inline int32_t horizontal_sum_s8_neon(const int8x16_t value) noexcept {
-#if defined(__aarch64__) && defined(__ARM_NEON)
+#if defined(__aarch64__)
   const int16x8_t widened =
       vaddq_s16(vmovl_s8(vget_low_s8(value)), vmovl_s8(vget_high_s8(value)));
   const int32x4_t pair = vpaddlq_s16(widened);
@@ -3929,6 +3828,7 @@ inline int32_t horizontal_sum_s8_neon(const int8x16_t value) noexcept {
   return 0;
 #endif
 }
+#endif
 
 inline float
 dot_q4_1_q8_0_row_neon(const ::emel::kernel::detail::quant::block_q4_1 *lhs,
@@ -4094,6 +3994,10 @@ inline float
 dot_q8_0_q8_0_row_neon(const ::emel::kernel::detail::quant::block_q8_0 *lhs,
                        const ::emel::kernel::detail::quant::block_q8_0 *rhs,
                        const uint64_t block_count) noexcept {
+#if !(defined(__aarch64__) || defined(__ARM_NEON))
+  return ::emel::kernel::detail::dot_q8_0_q8_0_row_scalar(lhs, rhs,
+                                                          block_count);
+#else
   float sum = 0.0f;
   for (uint64_t block = 0; block < block_count; ++block) {
     const int32_t sumi = dot_q8_0_q8_0_block_sum_neon(lhs[block], rhs[block]);
@@ -4102,8 +4006,10 @@ dot_q8_0_q8_0_row_neon(const ::emel::kernel::detail::quant::block_q8_0 *lhs,
             ::emel::kernel::detail::quant::fp16_to_fp32(rhs[block].d));
   }
   return sum;
+#endif
 }
 
+#if defined(__aarch64__) || defined(__ARM_NEON)
 inline float32x4_t
 dot_q8_0_q8_0_4row_neon(const ::emel::kernel::detail::quant::block_q8_0 *row0,
                         const ::emel::kernel::detail::quant::block_q8_0 *row1,
@@ -4346,6 +4252,7 @@ inline int32x4_t q6_k_upper_half_dot_accumulate_neon(
   return next;
 #endif
 }
+#endif
 
 inline void
 dot_q6_k_q8_k_4rows_neon(const ::emel::kernel::detail::quant::block_q6_k *lhs0,
@@ -6250,6 +6157,128 @@ inline void execute_neon_mul_mat_q8_0_vector_unchecked(
 #endif
 }
 
+// Exact port of the pinned ggml_vec_dot_f16 aarch64 NEON fp16-arithmetic
+// path (GGML_F16_STEP=32): four float16x8_t accumulators advanced with
+// vfmaq_f16, pairwise vaddq_f16 reduce, f32 convert + horizontal add, and an
+// f32-product tail widened into the double running sum. Accumulation happens
+// in fp16 lanes, which is what live ggml computes on hosts with
+// __ARM_FEATURE_FP16_VECTOR_ARITHMETIC (the x86 port in
+// emel/kernel/detail.hpp accumulates in f32/double instead).
+inline float dot_f16_f16_row_neon(const int64_t count, const uint16_t *x,
+                                  const uint16_t *y) noexcept {
+#if !(defined(__aarch64__) && defined(__ARM_NEON) &&                           \
+      defined(__ARM_FEATURE_FP16_VECTOR_ARITHMETIC))
+  (void)count;
+  (void)x;
+  (void)y;
+  return 0.0f;
+#else
+  const int64_t np = count & ~static_cast<int64_t>(31);
+  float16x8_t sum[4] = {vdupq_n_f16(0.0f), vdupq_n_f16(0.0f), vdupq_n_f16(0.0f),
+                        vdupq_n_f16(0.0f)};
+  for (int64_t i = 0; i < np; i += 32) {
+    for (int64_t j = 0; j < 4; ++j) {
+      const float16x8_t ax =
+          vld1q_f16(reinterpret_cast<const float16_t *>(x + i + j * 8));
+      const float16x8_t ay =
+          vld1q_f16(reinterpret_cast<const float16_t *>(y + i + j * 8));
+      sum[j] = vfmaq_f16(sum[j], ax, ay);
+    }
+  }
+  sum[0] = vaddq_f16(sum[0], sum[2]);
+  sum[1] = vaddq_f16(sum[1], sum[3]);
+  sum[0] = vaddq_f16(sum[0], sum[1]);
+  const float32x4_t lo = vcvt_f32_f16(vget_low_f16(sum[0]));
+  const float32x4_t hi = vcvt_f32_f16(vget_high_f16(sum[0]));
+  double sumf = static_cast<double>(vaddvq_f32(vaddq_f32(lo, hi)));
+  for (int64_t i = np; i < count; ++i) {
+    sumf +=
+        static_cast<double>(::emel::kernel::detail::quant::fp16_to_fp32(x[i]) *
+                            ::emel::kernel::detail::quant::fp16_to_fp32(y[i]));
+  }
+  return static_cast<float>(sumf);
+#endif
+}
+
+inline void execute_neon_mul_mat_f16_vector_unchecked(
+    const event::op_mul_mat &request) noexcept {
+#if !(defined(__aarch64__) && defined(__ARM_NEON) &&                           \
+      defined(__ARM_FEATURE_FP16_VECTOR_ARITHMETIC))
+  (void)request;
+#else
+  const uint64_t k = request.src0.ne[0];
+  const uint64_t m = request.src0.ne[1];
+  const uint64_t n = request.src1.ne[1];
+  const auto *src0 = static_cast<const uint16_t *>(request.src0.data);
+  const auto *src1 = static_cast<const uint16_t *>(request.src1.data);
+  auto *dst = static_cast<float *>(request.dst.data);
+  for (uint64_t col = 0; col < n; ++col) {
+    const uint16_t *y = src1 + col * k;
+    for (uint64_t row = 0; row < m; ++row) {
+      dst[row + col * m] =
+          dot_f16_f16_row_neon(static_cast<int64_t>(k), src0 + row * k, y);
+    }
+  }
+#endif
+}
+
+// NEON acceleration of the emel-owned conv_transpose_1d f32 scatter kernel
+// (kernel/detail.hpp run_conv_transpose_1d_as<false>). Every dst element
+// accumulates the same contributions in the same order as the shared scalar
+// route, and the tap loop uses fused multiply-add (vfmaq_f32) because the
+// pinned aarch64 toolchains contract the scalar route's `dst += input *
+// weight` into fma (-ffp-contract=on): the outputs are bit-identical to the
+// scalar route as compiled, only faster. The route test asserts that
+// bit-identity, so any toolchain contraction drift fails loudly.
+inline void execute_neon_conv_transpose_1d_f32_unchecked(
+    const event::op_conv_transpose_1d &request) noexcept {
+#if !(defined(__aarch64__) || defined(__ARM_NEON))
+  (void)request;
+#else
+  int32_t s0 = 0;
+  (void)::emel::kernel::detail::read_op_param_i32(
+      request.op_params.data(), request.op_params_size, 0u, s0);
+  const int64_t kernel = static_cast<int64_t>(request.src0.ne[0]);
+  const int64_t out_channels = static_cast<int64_t>(request.src0.ne[1]);
+  const int64_t in_channels = static_cast<int64_t>(request.src0.ne[2]);
+  const int64_t length = static_cast<int64_t>(request.src1.ne[0]);
+  const int64_t out_length = static_cast<int64_t>(request.dst.ne[0]);
+
+  float *dst = static_cast<float *>(request.dst.data);
+  std::fill_n(dst, static_cast<size_t>(out_length * out_channels), 0.0f);
+
+  const char *weight_base = static_cast<const char *>(request.src0.data);
+  const uint64_t w_nb1 =
+      ::emel::kernel::detail::tensor_stride_bytes(request.src0, 1);
+  const uint64_t w_nb2 =
+      ::emel::kernel::detail::tensor_stride_bytes(request.src0, 2);
+
+  for (int64_t in_channel = 0; in_channel < in_channels; ++in_channel) {
+    for (int64_t in = 0; in < length; ++in) {
+      const float input = ::emel::kernel::detail::read_f32_at(
+          request.src1, static_cast<uint64_t>(in),
+          static_cast<uint64_t>(in_channel));
+      const float32x4_t input_v = vdupq_n_f32(input);
+      for (int64_t out_channel = 0; out_channel < out_channels; ++out_channel) {
+        float *dst_run = dst + out_channel * out_length + in * s0;
+        const float *weights = reinterpret_cast<const float *>(
+            weight_base + static_cast<uint64_t>(out_channel) * w_nb1 +
+            static_cast<uint64_t>(in_channel) * w_nb2);
+        int64_t tap = 0;
+        for (; tap + 4 <= kernel; tap += 4) {
+          const float32x4_t acc = vld1q_f32(dst_run + tap);
+          const float32x4_t w = vld1q_f32(weights + tap);
+          vst1q_f32(dst_run + tap, vfmaq_f32(acc, input_v, w));
+        }
+        for (; tap < kernel; ++tap) {
+          dst_run[tap] += input * weights[tap];
+        }
+      }
+    }
+  }
+#endif
+}
+
 inline void execute_neon_mul_mat_q5_0_vector_unchecked(
     const event::op_mul_mat &request) noexcept {
 #if !(defined(__aarch64__) || defined(__ARM_NEON))
@@ -6963,6 +6992,7 @@ prepare_neon_mul_mat_f32_lhs_4row(const float *src, const uint64_t k,
   return true;
 }
 
+#if defined(__aarch64__) || defined(__ARM_NEON)
 template <int Lane>
 inline float32x4_t neon_fma_lane_f32(const float32x4_t acc,
                                      const float32x4_t rhs,
@@ -6973,6 +7003,7 @@ inline float32x4_t neon_fma_lane_f32(const float32x4_t acc,
   return vmlaq_n_f32(acc, rhs, vgetq_lane_f32(lhs, Lane));
 #endif
 }
+#endif
 
 inline bool execute_neon_mul_mat_prepared_f32_lhs_4row(
     const event::op_mul_mat &request, const float *prepared_lhs,
@@ -7816,6 +7847,27 @@ struct exec_simd_q8_0_vector_op_mul_mat {
   }
 };
 
+struct exec_simd_f16_vector_op_mul_mat {
+  void operator()(const ::emel::kernel::aarch64::event::dispatch_op_mul_mat &ev,
+                  context &ctx) const noexcept {
+    ::emel::kernel::aarch64::detail::execute_neon_mul_mat_f16_vector_unchecked(
+        ev.request);
+    ++ctx.optimized_f16_vector_dispatch_count;
+    detail::mark_done(ev, ctx);
+  }
+};
+
+struct exec_simd_f32_op_conv_transpose_1d {
+  void operator()(
+      const ::emel::kernel::aarch64::event::dispatch_op_conv_transpose_1d &ev,
+      context &ctx) const noexcept {
+    ::emel::kernel::aarch64::detail::
+        execute_neon_conv_transpose_1d_f32_unchecked(ev.request);
+    ++ctx.optimized_conv_transpose_f32_dispatch_count;
+    detail::mark_done(ev, ctx);
+  }
+};
+
 struct exec_simd_q5_0_vector_op_mul_mat {
   void operator()(const ::emel::kernel::aarch64::event::dispatch_op_mul_mat &ev,
                   context &ctx) const noexcept {
@@ -8125,6 +8177,10 @@ using exec_simd_op_mul_mat_q8_0_packed_bl8_t =
     detail::exec_simd_q8_0_packed_bl8_op_mul_mat;
 using exec_simd_op_mul_mat_q8_0_vector_t =
     detail::exec_simd_q8_0_vector_op_mul_mat;
+using exec_simd_op_mul_mat_f16_vector_t =
+    detail::exec_simd_f16_vector_op_mul_mat;
+using exec_simd_op_conv_transpose_1d_f32_t =
+    detail::exec_simd_f32_op_conv_transpose_1d;
 using exec_simd_op_mul_mat_q6_vector_packed_t =
     detail::exec_simd_q6_vector_packed_op_mul_mat;
 using exec_simd_op_mul_mat_q6_vector_packed_q8_rhs_matrix_x4_t =
@@ -8169,6 +8225,75 @@ using exec_scalar_op_unary_relu_t =
 using exec_scalar_op_unary_exp_t = ::emel::kernel::detail::exec_scalar_unary_op<
     ::emel::kernel::aarch64::event::dispatch_op_unary, context,
     detail::mark_done_op, ::emel::kernel::event::unary_subop::exp>;
+using exec_scalar_op_unary_tanh_t =
+    ::emel::kernel::detail::exec_scalar_unary_op<
+        ::emel::kernel::aarch64::event::dispatch_op_unary, context,
+        detail::mark_done_op, ::emel::kernel::event::unary_subop::tanh>;
+using exec_scalar_op_unary_elu_t = ::emel::kernel::detail::exec_scalar_unary_op<
+    ::emel::kernel::aarch64::event::dispatch_op_unary, context,
+    detail::mark_done_op, ::emel::kernel::event::unary_subop::elu>;
+using exec_scalar_op_unary_gelu_t =
+    ::emel::kernel::detail::exec_scalar_unary_op<
+        ::emel::kernel::aarch64::event::dispatch_op_unary, context,
+        detail::mark_done_op, ::emel::kernel::event::unary_subop::gelu>;
+using exec_scalar_op_unary_silu_t =
+    ::emel::kernel::detail::exec_scalar_unary_op<
+        ::emel::kernel::aarch64::event::dispatch_op_unary, context,
+        detail::mark_done_op, ::emel::kernel::event::unary_subop::silu>;
+
+using exec_scalar_op_mul_mat_f16_t =
+    ::emel::kernel::detail::exec_scalar_mul_mat_f16_op<
+        ::emel::kernel::aarch64::event::dispatch_op_mul_mat, context,
+        detail::mark_done_op>;
+
+template <uint8_t src_dtype_code>
+using exec_scalar_op_get_rows_src_t =
+    ::emel::kernel::detail::exec_scalar_get_rows_op<
+        ::emel::kernel::aarch64::event::dispatch_op_get_rows, context,
+        detail::mark_done_op, src_dtype_code>;
+using exec_scalar_op_get_rows_f32_t =
+    exec_scalar_op_get_rows_src_t<::emel::kernel::detail::dtype_f32>;
+using exec_scalar_op_get_rows_f16_t =
+    exec_scalar_op_get_rows_src_t<::emel::kernel::detail::dtype_f16>;
+using exec_scalar_op_get_rows_bf16_t =
+    exec_scalar_op_get_rows_src_t<::emel::kernel::detail::dtype_bf16>;
+using exec_scalar_op_get_rows_q4_0_t =
+    exec_scalar_op_get_rows_src_t<::emel::kernel::detail::dtype_q4_0>;
+using exec_scalar_op_get_rows_q8_0_t =
+    exec_scalar_op_get_rows_src_t<::emel::kernel::detail::dtype_q8_0>;
+using exec_scalar_op_get_rows_q4_k_t =
+    exec_scalar_op_get_rows_src_t<::emel::kernel::detail::dtype_q4_k>;
+using exec_scalar_op_rope_norm_t = ::emel::kernel::detail::exec_scalar_rope_op<
+    ::emel::kernel::aarch64::event::dispatch_op_rope, context,
+    detail::mark_done_op, false>;
+using exec_scalar_op_rope_neox_t = ::emel::kernel::detail::exec_scalar_rope_op<
+    ::emel::kernel::aarch64::event::dispatch_op_rope, context,
+    detail::mark_done_op, true>;
+using exec_scalar_op_im2col_f32_t =
+    ::emel::kernel::detail::exec_scalar_im2col_op<
+        ::emel::kernel::aarch64::event::dispatch_op_im2col, context,
+        detail::mark_done_op, false>;
+using exec_scalar_op_im2col_f16_t =
+    ::emel::kernel::detail::exec_scalar_im2col_op<
+        ::emel::kernel::aarch64::event::dispatch_op_im2col, context,
+        detail::mark_done_op, true>;
+using exec_scalar_op_conv_transpose_1d_f32_t =
+    ::emel::kernel::detail::exec_scalar_conv_transpose_1d_op<
+        ::emel::kernel::aarch64::event::dispatch_op_conv_transpose_1d, context,
+        detail::mark_done_op, false>;
+using exec_scalar_op_conv_transpose_1d_f16_t =
+    ::emel::kernel::detail::exec_scalar_conv_transpose_1d_op<
+        ::emel::kernel::aarch64::event::dispatch_op_conv_transpose_1d, context,
+        detail::mark_done_op, true>;
+
+using exec_scalar_op_add_broadcast_row_t =
+    ::emel::kernel::detail::exec_scalar_binary_broadcast_row_op<
+        ::emel::kernel::aarch64::event::dispatch_op_add, context,
+        detail::mark_done_op, false>;
+using exec_scalar_op_mul_broadcast_row_t =
+    ::emel::kernel::detail::exec_scalar_binary_broadcast_row_op<
+        ::emel::kernel::aarch64::event::dispatch_op_mul, context,
+        detail::mark_done_op, true>;
 
 #define EMEL_KERNEL_DECLARE_REJECT_TYPE(op_name)                               \
   using reject_invalid_##op_name##_t =                                         \
@@ -8223,6 +8348,10 @@ inline constexpr exec_simd_op_mul_mat_q8_0_packed_bl8_t
     exec_simd_op_mul_mat_q8_0_packed_bl8{};
 inline constexpr exec_simd_op_mul_mat_q8_0_vector_t
     exec_simd_op_mul_mat_q8_0_vector{};
+inline constexpr exec_simd_op_mul_mat_f16_vector_t
+    exec_simd_op_mul_mat_f16_vector{};
+inline constexpr exec_simd_op_conv_transpose_1d_f32_t
+    exec_simd_op_conv_transpose_1d_f32{};
 inline constexpr exec_simd_op_mul_mat_q6_vector_packed_t
     exec_simd_op_mul_mat_q6_vector_packed{};
 inline constexpr exec_simd_op_mul_mat_q6_vector_packed_q8_rhs_matrix_x4_t
@@ -8255,6 +8384,29 @@ inline constexpr exec_scalar_op_unary_abs_t exec_scalar_op_unary_abs{};
 inline constexpr exec_scalar_op_unary_neg_t exec_scalar_op_unary_neg{};
 inline constexpr exec_scalar_op_unary_relu_t exec_scalar_op_unary_relu{};
 inline constexpr exec_scalar_op_unary_exp_t exec_scalar_op_unary_exp{};
+inline constexpr exec_scalar_op_unary_tanh_t exec_scalar_op_unary_tanh{};
+inline constexpr exec_scalar_op_unary_elu_t exec_scalar_op_unary_elu{};
+inline constexpr exec_scalar_op_unary_gelu_t exec_scalar_op_unary_gelu{};
+inline constexpr exec_scalar_op_unary_silu_t exec_scalar_op_unary_silu{};
+inline constexpr exec_scalar_op_mul_mat_f16_t exec_scalar_op_mul_mat_f16{};
+inline constexpr exec_scalar_op_get_rows_f32_t exec_scalar_op_get_rows_f32{};
+inline constexpr exec_scalar_op_get_rows_f16_t exec_scalar_op_get_rows_f16{};
+inline constexpr exec_scalar_op_get_rows_bf16_t exec_scalar_op_get_rows_bf16{};
+inline constexpr exec_scalar_op_get_rows_q4_0_t exec_scalar_op_get_rows_q4_0{};
+inline constexpr exec_scalar_op_get_rows_q8_0_t exec_scalar_op_get_rows_q8_0{};
+inline constexpr exec_scalar_op_get_rows_q4_k_t exec_scalar_op_get_rows_q4_k{};
+inline constexpr exec_scalar_op_rope_norm_t exec_scalar_op_rope_norm{};
+inline constexpr exec_scalar_op_rope_neox_t exec_scalar_op_rope_neox{};
+inline constexpr exec_scalar_op_im2col_f32_t exec_scalar_op_im2col_f32{};
+inline constexpr exec_scalar_op_im2col_f16_t exec_scalar_op_im2col_f16{};
+inline constexpr exec_scalar_op_conv_transpose_1d_f32_t
+    exec_scalar_op_conv_transpose_1d_f32{};
+inline constexpr exec_scalar_op_conv_transpose_1d_f16_t
+    exec_scalar_op_conv_transpose_1d_f16{};
+inline constexpr exec_scalar_op_add_broadcast_row_t
+    exec_scalar_op_add_broadcast_row{};
+inline constexpr exec_scalar_op_mul_broadcast_row_t
+    exec_scalar_op_mul_broadcast_row{};
 
 #define EMEL_KERNEL_DEFINE_RUN_ACTION(op_name)                                 \
   inline constexpr exec_##op_name##_t exec_##op_name{};

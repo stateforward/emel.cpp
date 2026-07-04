@@ -86,6 +86,7 @@ struct effect_run_decoder_variant {
         .space = tokens.space,
     };
     const uint64_t digest = kdetail::run_decoder_sequence<Variant, Aux>(
+        ctx.kernel,
         *runtime_ev.request.contract.model,
         runtime_ev.request.encoder_state.data(),
         static_cast<uint64_t>(runtime_ev.request.encoder_frame_count),
