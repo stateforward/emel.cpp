@@ -61,12 +61,29 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-for tool in git python3 shasum curl; do
+for tool in git shasum curl; do
   if ! command -v "$tool" >/dev/null 2>&1; then
     echo "error: required tool missing: $tool" >&2
     exit 1
   fi
 done
+
+# Discover the interpreter the same way the compare wrapper does, so hosts
+# that ship python3.12/python3.13 without a python3 shim can run the WAV
+# generation and the converter too.
+PYTHON_BIN="${PYTHON_BIN:-}"
+if [[ -z "$PYTHON_BIN" ]]; then
+  for candidate in python3 python3.13 python3.12; do
+    if command -v "$candidate" >/dev/null 2>&1; then
+      PYTHON_BIN="$(command -v "$candidate")"
+      break
+    fi
+  done
+fi
+if [[ -z "$PYTHON_BIN" ]]; then
+  echo "error: required tool missing: python3 (or python3.12/python3.13)" >&2
+  exit 1
+fi
 
 if $BUILD_ONLY; then
   # M2: the reference driver builds through the speech_codec_mimi bench
@@ -110,7 +127,7 @@ fetch_pinned "$MOSHI_COMMON_BASE/mimi-e351c8d8-125.gguf" "$MIMI_MODEL" "$MIMI_MO
 fetch_pinned "$MOSHI_COMMON_BASE/tokenizer_spm_32k_3.model" "$TOKENIZER_MODEL" "$TOKENIZER_MODEL_SHA256"
 
 if [[ ! -f "$REFERENCE_AUDIO" ]]; then
-  python3 - "$REFERENCE_AUDIO" <<'PY'
+  "$PYTHON_BIN" - "$REFERENCE_AUDIO" <<'PY'
 import math
 import struct
 import sys
@@ -143,6 +160,11 @@ convert_if_needed() {
   if [[ ! -f "$output" || "$source" -nt "$output" ]]; then
     stale=1
   fi
+  # The converter itself is a freshness input: a converter-only patch must
+  # force reconversion or the scoped gate can pass without running it.
+  if [[ "$ROOT_DIR/tools/bench/moshi_gguf_convert.py" -nt "$output" ]]; then
+    stale=1
+  fi
   local arg
   for arg in "$@"; do
     if [[ -f "$arg" && "$arg" -nt "$output" ]]; then
@@ -150,7 +172,7 @@ convert_if_needed() {
     fi
   done
   if ((stale)); then
-    python3 "$ROOT_DIR/tools/bench/moshi_gguf_convert.py" \
+    "$PYTHON_BIN" "$ROOT_DIR/tools/bench/moshi_gguf_convert.py" \
       --source "$source" --output "$output" \
       --manifest "${output%.gguf}.manifest.json" "$@"
   fi
