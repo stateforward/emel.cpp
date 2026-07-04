@@ -122,9 +122,13 @@ fetch_pinned "$MOSHI_COMMON_BASE/mimi-e351c8d8-125.gguf" "$MIMI_MODEL" "$MIMI_MO
 fetch_pinned "$PERSONAPLEX_BASE/personaplex-config.json" "$MOSHI_CONFIG" "$MOSHI_CONFIG_SHA256"
 
 # The converter embeds the config as hparams metadata, so a refreshed config
-# must force a reconvert as well.
+# must force a reconvert, and a converter-only patch must too: the scoped
+# speech_codec_mimi_mlx gate otherwise compares against a stale enriched
+# artifact and can pass without exercising the changed converter.
+CONVERTER="$ROOT_DIR/tools/bench/moshi_gguf_convert.py"
 if [[ ! -f "$MIMI_MODEL_EMEL" || "$MIMI_MODEL" -nt "$MIMI_MODEL_EMEL" ||
-      "$MOSHI_CONFIG" -nt "$MIMI_MODEL_EMEL" ]]; then
+      "$MOSHI_CONFIG" -nt "$MIMI_MODEL_EMEL" ||
+      "$CONVERTER" -nt "$MIMI_MODEL_EMEL" ]]; then
   # Use the interpreter discovered by the version check above: hosts that only
   # ship python3.12/python3.13 (no python3 shim) must convert with it too.
   "$PYTHON_BIN" "$ROOT_DIR/tools/bench/moshi_gguf_convert.py" \

@@ -385,6 +385,13 @@ constexpr std::array k_records{
                       kind::script,
                       "scripts/setup_personaplex_mlx_reference.sh",
                       "reference_setup"},
+    // The MLX setup script also runs this converter to build the enriched
+    // EMEL artifact for the comparison, so converter-only patches must gate
+    // the MLX lane too, not just the moshi.cpp lane.
+    dependency_record{"speech_codec_mimi_mlx",
+                      kind::script,
+                      "tools/bench/moshi_gguf_convert.py",
+                      "emel_lane_converter"},
     dependency_record{"speech_codec_mimi_mlx",
                       kind::script,
                       "tools/bench/speech/personaplex_mlx_mimi_driver.py",

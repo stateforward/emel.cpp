@@ -83,6 +83,10 @@ MIMI_PRESET = {
     "transformer_max_period": 10000,
 }
 
+# Mirrors emel::model::data::moshi_lm_hparams::k_max_delays: the runtime
+# stores n_q + 1 delay slots in a fixed array, so n_q must stay below it.
+MAX_DELAY_SLOTS = 64
+
 SUPPORTED_LM_VALUES = {
     "gating": "silu",
     "norm": "rms_norm_f32",
@@ -305,6 +309,40 @@ def load_lm_config(path: Path) -> dict:
     raise ValueError(
         f"{path}: delays has {len(delays)} entries, expected n_q+1 = "
         f"{config['n_q'] + 1}")
+
+  # The C++ hparam loader rejects inconsistent LM metadata before any tensor
+  # work (load_lm_hparams in src/emel/model/moshi/detail.cpp); mirror those
+  # consistency gates so a malformed config fails conversion instead of
+  # emitting an enriched artifact the maintained loader immediately rejects.
+  for key in ("card", "n_q", "text_card", "dim", "num_heads", "num_layers"):
+    if config[key] <= 0:
+      raise ValueError(f"{path}: {key} must be positive, got {config[key]}")
+  if not 0 <= config["dep_q"] <= config["n_q"]:
+    raise ValueError(
+        f"{path}: dep_q={config['dep_q']} must be within [0, n_q="
+        f"{config['n_q']}]")
+  if config["n_q"] >= MAX_DELAY_SLOTS:
+    raise ValueError(
+        f"{path}: n_q={config['n_q']} exceeds the runtime delay-slot bound "
+        f"of {MAX_DELAY_SLOTS - 1}")
+  if config["dim"] % config["num_heads"] != 0:
+    raise ValueError(
+        f"{path}: dim={config['dim']} is not divisible by num_heads="
+        f"{config['num_heads']}")
+  if not 0 <= config["existing_text_padding_id"] < config["text_card"]:
+    raise ValueError(
+        f"{path}: existing_text_padding_id="
+        f"{config['existing_text_padding_id']} must be within [0, text_card="
+        f"{config['text_card']})")
+  if config["dep_q"] > 0:
+    for key in ("depformer_dim", "depformer_num_heads",
+                "depformer_num_layers"):
+      if config[key] <= 0:
+        raise ValueError(f"{path}: {key} must be positive, got {config[key]}")
+    if config["depformer_dim"] % config["depformer_num_heads"] != 0:
+      raise ValueError(
+          f"{path}: depformer_dim={config['depformer_dim']} is not divisible "
+          f"by depformer_num_heads={config['depformer_num_heads']}")
   return config
 
 
@@ -359,6 +397,21 @@ def cross_check_lm(infos: list[TensorInfo], config: dict) -> None:
       raise ValueError("lm.depformer_in.* count does not match config dep_q")
     if count_prefixed(infos, "lm.linears.") != config["dep_q"]:
       raise ValueError("lm.linears.* count does not match config dep_q")
+    # The C++ contract also requires the depformer text-embedding family for
+    # any dep_q > 0 and at least dep_q - 1 audio-embedding tensors past the
+    # first step (validate_lm_contract); a raw LM missing them converted
+    # successfully and was then rejected at runtime.
+    if count_prefixed(infos, "lm.depformer_text_emb.") == 0:
+      raise ValueError(
+          "weights are missing the lm.depformer_text_emb.* family required "
+          "when dep_q > 0")
+    if config["dep_q"] > 1:
+      depformer_emb_count = count_prefixed(infos, "lm.depformer_emb.")
+      if depformer_emb_count < config["dep_q"] - 1:
+        raise ValueError(
+            f"weights carry {depformer_emb_count} lm.depformer_emb.* "
+            f"tensors, the runtime contract needs at least dep_q-1 = "
+            f"{config['dep_q'] - 1}")
     for layer in range(config["depformer_num_layers"]):
       if count_prefixed(infos, f"lm.depformer.layers.{layer}.") == 0:
         raise ValueError(
@@ -394,6 +447,22 @@ def cross_check_mimi(infos: list[TensorInfo], n_q: int, preset: dict) -> dict:
                  "mimi.decoder_transformer.", "mimi.decoder."):
     if count_prefixed(infos, family) == 0:
       raise ValueError(f"weights are missing the {family}* family")
+  # The C++ codec planner consumes every configured transformer layer's
+  # norm1/in_proj/linear1 with dim-consistent shapes (plan_transformer);
+  # probe each expected layer here so a truncated family or a wrong-shaped
+  # layer tensor fails conversion instead of failing codec bind at runtime.
+  dim = preset["dim"]
+  for family in ("mimi.encoder_transformer.", "mimi.decoder_transformer."):
+    for layer in range(preset["transformer_num_layers"]):
+      base = f"{family}transformer.layers.{layer}."
+      find_info(infos, base + "norm1.weight")
+      require_dims(infos, base + "self_attn.in_projs.0.weight", (dim, 3 * dim))
+      linear1 = find_info(infos, base + "linear1.weight")
+      if (len(linear1.dims) != 2 or linear1.dims[0] != dim or
+          linear1.dims[1] <= 0):
+        raise ValueError(
+            f"tensor {linear1.name!r} has dims {linear1.dims}, expected "
+            f"({dim}, mlp_dim); the preset does not match the weights")
   return dict(preset, n_q=n_q, codebook_dim=first.dims[0])
 
 
