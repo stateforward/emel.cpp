@@ -699,6 +699,13 @@ emel::error::type validate_mimi_contract(const emel::model::data &model_data,
       "weight");
   const bool proj_q8 =
       first_proj != nullptr && first_proj->type == k_dtype_q8_0;
+  // The q8 matvec kernels require block-aligned contraction widths
+  // (k % 32 == 0); a q8 class with a misaligned dim would bind and then
+  // fail silently inside the codec compute loops.
+  constexpr int64_t k_q8_row_block = 32;
+  if (proj_q8 && mimi.dim % k_q8_row_block != 0) {
+    return emel::error::cast(emel::model::loader::error::model_invalid);
+  }
   static constexpr const char *k_transformer_families[2] = {
       "encoder_transformer", "decoder_transformer"};
   // plan_transformer stores layers in fixed arrays of 16
@@ -742,6 +749,10 @@ emel::error::type validate_mimi_contract(const emel::model::data &model_data,
       if (layer == 0) {
         family_mlp = linear1_tensor->dims[1];
       } else if (linear1_tensor->dims[1] != family_mlp) {
+        transformers_ok = false;
+        break;
+      }
+      if (proj_q8 && family_mlp % k_q8_row_block != 0) {
         transformers_ok = false;
         break;
       }
@@ -810,6 +821,10 @@ emel::error::type validate_mimi_contract(const emel::model::data &model_data,
       find_tensor(model_data, "mimi.quantizer.rvq_first.input_proj.weight");
   const bool rvq_q8 =
       first_rvq_proj != nullptr && first_rvq_proj->type == k_dtype_q8_0;
+  if (rvq_q8 && (mimi.dim % k_q8_row_block != 0 ||
+                 mimi.codebook_dim % k_q8_row_block != 0)) {
+    return emel::error::cast(emel::model::loader::error::model_invalid);
+  }
   static constexpr const char *k_rvq_splits[2] = {"rvq_first", "rvq_rest"};
   const auto rvq_projection_ok =
       [&model_data, proj_elements, rvq_q8,

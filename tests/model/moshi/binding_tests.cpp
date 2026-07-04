@@ -1082,6 +1082,36 @@ TEST_CASE("mimi contract validation requires the fixed seanet topology") {
   CHECK(moshi::validate_execution_contract(model) != k_none);
 }
 
+TEST_CASE("mimi contract validation rejects q8 classes with misaligned widths") {
+  auto loaded = load_fixture_or_skip("mimi-tiny.gguf");
+  if (loaded.model == nullptr) {
+    return;
+  }
+
+  // The q8 matvec kernels need block-aligned contraction widths (k % 32);
+  // the tiny fixture's dim = 16 is aggregate-aligned but row-misaligned, so
+  // a uniform q8 projection class must reject at the contract.
+  auto &model = *loaded.model;
+  uint32_t flipped = 0;
+  for (uint32_t idx = 0; idx < model.n_tensors; ++idx) {
+    auto &tensor = model.tensors[idx];
+    const std::string_view name{model.name_storage.data() + tensor.name_offset,
+                                tensor.name_length};
+    const bool projection =
+        name.find("self_attn.in_projs.0.weight") != std::string_view::npos ||
+        name.find("self_attn.out_projs.0.weight") != std::string_view::npos ||
+        name.find("linear1.weight") != std::string_view::npos ||
+        name.find("linear2.weight") != std::string_view::npos ||
+        name.find("_proj.weight") != std::string_view::npos;
+    if (projection && name.starts_with("mimi.")) {
+      tensor.type = 8;  // q8_0
+      flipped += 1;
+    }
+  }
+  REQUIRE(flipped >= 20u);
+  CHECK(moshi::validate_execution_contract(model) != k_none);
+}
+
 TEST_CASE("mimi contract validation rejects mixed projection dtype classes") {
   auto loaded = load_fixture_or_skip("mimi-tiny.gguf");
   if (loaded.model == nullptr) {
