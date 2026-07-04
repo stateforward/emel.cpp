@@ -93,6 +93,11 @@ bool load_fixture(codec_fixture &fixture) {
   if (!loader.process_event(probe)) {
     return false;
   }
+  // The bind span wraps the fixed tensor array; an oversized probe count
+  // would let the loader write past it.
+  if (requirements.tensor_count > fixture.model->tensors.size()) {
+    return false;
+  }
   fixture.kv_arena.resize(static_cast<size_t>(
       emel::gguf::loader::detail::required_kv_arena_bytes(requirements)));
   fixture.kv_entries.resize(requirements.kv_count);
