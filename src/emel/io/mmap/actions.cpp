@@ -224,6 +224,34 @@ context::context() noexcept : context(default_platform_ops()) {}
 context::context(const platform_ops &platform_in) noexcept
     : required_offset_alignment(platform_required_offset_alignment()),
       platform(platform_in) {
+  // An injector overriding a single op keeps the production behavior for the
+  // rest: null fields seed from the defaults so no effect ever calls through
+  // a null platform pointer.
+  const platform_ops defaults = default_platform_ops();
+  if (platform.open == nullptr) {
+    platform.open = defaults.open;
+  }
+  if (platform.file_size == nullptr) {
+    platform.file_size = defaults.file_size;
+  }
+  if (platform.map == nullptr) {
+    platform.map = defaults.map;
+  }
+  if (platform.unmap == nullptr) {
+    platform.unmap = defaults.unmap;
+  }
+  if (platform.close == nullptr) {
+    platform.close = defaults.close;
+  }
+  if (platform.advise_sequential == nullptr) {
+    platform.advise_sequential = defaults.advise_sequential;
+  }
+  if (platform.advise_willneed == nullptr) {
+    platform.advise_willneed = defaults.advise_willneed;
+  }
+  if (platform.advise_dontneed == nullptr) {
+    platform.advise_dontneed = defaults.advise_dontneed;
+  }
   for (uint32_t i = 0; i < k_max_mappings; ++i) {
     free_stack[i] = (k_max_mappings - 1u) - i;
   }

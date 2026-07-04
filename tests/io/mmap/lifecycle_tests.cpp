@@ -881,6 +881,32 @@ TEST_CASE("io mmap handles unexpected events deterministically") {
         emel::error::cast(emel::io::mmap::error::file_open_failed));
 }
 
+namespace {
+
+emel::io::mmap::action::unmap_result
+noop_test_unmap(intptr_t, void *, uint64_t) noexcept {
+  return {};
+}
+
+}  // namespace
+
+TEST_CASE("io mmap context seeds missing platform ops from the defaults") {
+  // An injector overriding a single op must keep production behavior for the
+  // rest: null fields seed from default_platform_ops() at construction so no
+  // effect ever calls through a null platform pointer.
+  emel::io::mmap::action::platform_ops partial{};
+  partial.unmap = &noop_test_unmap;
+  const emel::io::mmap::action::context ctx{partial};
+  CHECK(ctx.platform.unmap == &noop_test_unmap);
+  CHECK(ctx.platform.open != nullptr);
+  CHECK(ctx.platform.file_size != nullptr);
+  CHECK(ctx.platform.map != nullptr);
+  CHECK(ctx.platform.close != nullptr);
+  CHECK(ctx.platform.advise_sequential != nullptr);
+  CHECK(ctx.platform.advise_willneed != nullptr);
+  CHECK(ctx.platform.advise_dontneed != nullptr);
+}
+
 TEST_CASE("io mmap boundary keeps platform calls inside actions.cpp") {
   const std::string actions_hpp_source = read_text_file(
       repo_root() / "src" / "emel" / "io" / "mmap" / "actions.hpp");
