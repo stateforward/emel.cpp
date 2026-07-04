@@ -518,10 +518,11 @@ emel::error::type validate_mimi_contract(const emel::model::data &model_data,
 
   const int64_t codebook_dim = mimi.codebook_dim;
   const int64_t card = mimi.card;
-  // bind_rvq_split consumes every acoustic level 0..level_count-1, so the
-  // contract must probe each rvq_rest codebook, not just the last index: a
-  // model missing an intermediate level would otherwise validate here and
-  // fail initialization later.
+  // bind_rvq_split consumes every acoustic level 0..level_count-1 with the
+  // full {codebook_dim, card} embedding shape, so the contract must probe
+  // each rvq_rest codebook and its shape, not just existence of the last
+  // index: a model missing an intermediate level or carrying a wrong-shaped
+  // codebook would otherwise validate here and fail initialization later.
   bool quantizer_ok =
       mimi.n_q > mimi.semantic_n_q &&
       require_tensor_shape(
@@ -530,10 +531,16 @@ emel::error::type validate_mimi_contract(const emel::model::data &model_data,
           {codebook_dim, card});
   for (int32_t level = 0;
        quantizer_ok && level < mimi.n_q - mimi.semantic_n_q; ++level) {
-    quantizer_ok = has_indexed_tensor(model_data,
+    char name[96] = {};
+    const int written = std::snprintf(name, sizeof(name),
                                       "mimi.quantizer.rvq_rest.vq.layers.%d."
                                       "_codebook.embedding",
                                       level);
+    quantizer_ok = written > 0 && static_cast<size_t>(written) < sizeof(name) &&
+                   require_tensor_shape(
+                       model_data,
+                       std::string_view{name, static_cast<size_t>(written)},
+                       {codebook_dim, card});
   }
   if (!quantizer_ok) {
     return emel::error::cast(emel::model::loader::error::model_invalid);

@@ -518,22 +518,30 @@ TEST_CASE("mimi contract validation requires every acoustic rvq codebook") {
     return;
   }
 
-  // bind_rvq_split consumes every acoustic level 0..n_q-semantic_n_q-1; hide
-  // the intermediate one (level 1 of 0..2 in the tiny fixture) by bumping its
-  // layer index digit, so the tensor stays inside the quantizer family and a
-  // last-index-only probe would still pass while initialization fails.
+  // bind_rvq_split consumes every acoustic level 0..n_q-semantic_n_q-1 with
+  // the full {codebook_dim, card} shape; corrupt the intermediate one (level
+  // 1 of 0..2 in the tiny fixture) so a last-index-only or existence-only
+  // probe would still pass while initialization fails.
   auto &model = *loaded.model;
-  bool renamed = false;
+  bool corrupted = false;
   for (uint32_t idx = 0; idx < model.n_tensors; ++idx) {
-    const auto &tensor = model.tensors[idx];
+    auto &tensor = model.tensors[idx];
     const std::string_view name{model.name_storage.data() + tensor.name_offset,
                                 tensor.name_length};
-    if (name == "mimi.quantizer.rvq_rest.vq.layers.1._codebook.embedding") {
+    if (name != "mimi.quantizer.rvq_rest.vq.layers.1._codebook.embedding") {
+      continue;
+    }
+    SUBCASE("missing intermediate level") {
+      // Bump the layer index digit so the tensor stays inside the quantizer
+      // family but level 1 no longer resolves.
       const size_t digit = name.find("layers.1") + 7u;
       model.name_storage[tensor.name_offset + digit] = '9';
-      renamed = true;
     }
+    SUBCASE("wrong intermediate codebook shape") {
+      tensor.dims[1] += 1;
+    }
+    corrupted = true;
   }
-  REQUIRE(renamed);
+  REQUIRE(corrupted);
   CHECK(moshi::validate_execution_contract(model) != k_none);
 }
