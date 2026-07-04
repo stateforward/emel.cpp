@@ -301,6 +301,30 @@ TEST_CASE("tensor window rejects undersized slot storage explicitly") {
   CHECK(fixture.unbind(unbind));
 }
 
+TEST_CASE("tensor window rejects null slot storage explicitly") {
+  stream_file file{"null_arena"};
+  window_fixture fixture{};
+  bind_capture capture{};
+
+  // A null base is 64-byte aligned and can carry any span length, so the
+  // storage guard must reject it before the slot partition derives worker
+  // destinations from address zero.
+  CHECK_FALSE(fixture.bind(file, capture, streaming_budget(), 4u, 2u,
+                           std::span<uint8_t>{static_cast<uint8_t *>(nullptr),
+                                              size_t{1} << 20},
+                           /*use_override=*/true));
+  CHECK(capture.error);
+  CHECK(capture.err ==
+        emel::error::cast(window::error::slot_storage_too_small));
+  CHECK(fixture.machine.is(stateforward::sml::state<window::state_unbound>));
+
+  bind_capture retry{};
+  CHECK(fixture.bind(file, retry, streaming_budget()));
+  CHECK(retry.done);
+  unbind_capture unbind{};
+  CHECK(fixture.unbind(unbind));
+}
+
 TEST_CASE("tensor window releases the source mapping on rejected binds") {
   stream_file file{"budget_reject"};
   window_fixture fixture{};

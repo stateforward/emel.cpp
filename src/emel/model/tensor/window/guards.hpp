@@ -121,7 +121,10 @@ struct guard_bind_slot_storage_sufficient {
     const uint64_t needed =
         static_cast<uint64_t>(ev.request.request.window_slots) *
         ctx.window.slot_capacity_bytes;
-    return storage.size() >= needed &&
+    // A null base is 64-byte aligned, so it must reject explicitly: the slot
+    // partition would otherwise hand the staged-read workers addresses
+    // derived from zero.
+    return storage.data() != nullptr && storage.size() >= needed &&
            (reinterpret_cast<uintptr_t>(storage.data()) %
             detail::k_slot_alignment_bytes) == 0u;
   }
