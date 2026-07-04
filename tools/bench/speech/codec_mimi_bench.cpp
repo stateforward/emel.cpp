@@ -129,6 +129,12 @@ bool load_fixture(codec_fixture &fixture) {
   fixture.model->name_bytes_used = 0u;
   for (uint32_t index = 0u; index < fixture.model->n_tensors; ++index) {
     auto &tensor = fixture.model->tensors[index];
+    // The name arena is fixed-size; an oversized aggregate name length from a
+    // regenerated fixture must fail setup instead of writing past it.
+    if (fixture.model->name_bytes_used + tensor.name_length >
+        fixture.model->name_storage.size()) {
+      return false;
+    }
     std::memcpy(
         fixture.model->name_storage.data() + fixture.model->name_bytes_used,
         fixture.file_bytes.data() + tensor.name_offset, tensor.name_length);
