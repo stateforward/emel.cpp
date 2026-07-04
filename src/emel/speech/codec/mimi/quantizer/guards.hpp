@@ -40,7 +40,12 @@ struct guard_encode_shape_valid {
   bool operator()(const event::encode_run &runtime_ev,
                   const action::context &) const noexcept {
     const auto &request = runtime_ev.request;
-    return request.latent.size() >= static_cast<size_t>(request.runtime.dim) &&
+    // Directly driven children read latent and write codes_out/workspace;
+    // sized spans without storage must reject here.
+    return request.latent.data() != nullptr &&
+           request.codes_out.data() != nullptr &&
+           request.workspace.data() != nullptr &&
+           request.latent.size() >= static_cast<size_t>(request.runtime.dim) &&
            request.codes_out.size() >=
                static_cast<size_t>(request.runtime.n_q) &&
            request.workspace.size() >=
@@ -59,7 +64,10 @@ struct guard_decode_shape_valid {
   bool operator()(const event::decode_run &runtime_ev,
                   const action::context &) const noexcept {
     const auto &request = runtime_ev.request;
-    return request.codes.size() >= static_cast<size_t>(request.runtime.n_q) &&
+    return request.codes.data() != nullptr &&
+           request.latent_out.data() != nullptr &&
+           request.workspace.data() != nullptr &&
+           request.codes.size() >= static_cast<size_t>(request.runtime.n_q) &&
            request.latent_out.size() >=
                static_cast<size_t>(request.runtime.dim) &&
            request.workspace.size() >=

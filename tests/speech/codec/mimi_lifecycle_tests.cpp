@@ -866,6 +866,20 @@ TEST_CASE("mimi child actors report validation errors when driven directly") {
     cap_ev.error_out = &err;
     CHECK_FALSE(machine.process_event(cap_ev));
     CHECK(err == emel::error::cast(encoder::error::buffer_capacity));
+
+    // sized pcm without storage -> request_shape (directly driven children
+    // must reject null spans before the frontend reads them)
+    err = emel::error::cast(encoder::error::none);
+    encoder::event::encode null_ev{
+        runtime,
+        streaming,
+        std::span<const float>{static_cast<const float *>(nullptr), pcm.size()},
+        std::span<float>{frame},
+        std::span<float>{workspace},
+        std::span<float>{latent}};
+    null_ev.error_out = &err;
+    CHECK_FALSE(machine.process_event(null_ev));
+    CHECK(err == emel::error::cast(encoder::error::request_shape));
   }
   {
     // latent narrower than dim -> request_shape
@@ -893,6 +907,19 @@ TEST_CASE("mimi child actors report validation errors when driven directly") {
     cap_ev.error_out = &err;
     CHECK_FALSE(machine.process_event(cap_ev));
     CHECK(err == emel::error::cast(decoder::error::buffer_capacity));
+
+    // sized pcm output without storage -> request_shape
+    err = emel::error::cast(decoder::error::none);
+    decoder::event::decode null_ev{
+        runtime,
+        streaming,
+        std::span<const float>{latent},
+        std::span<float>{frame},
+        std::span<float>{workspace},
+        std::span<float>{static_cast<float *>(nullptr), pcm.size()}};
+    null_ev.error_out = &err;
+    CHECK_FALSE(machine.process_event(null_ev));
+    CHECK(err == emel::error::cast(decoder::error::request_shape));
   }
   {
     // latent narrower than dim -> request_shape; out-of-range decode code ->

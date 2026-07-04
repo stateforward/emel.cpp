@@ -27,7 +27,11 @@ struct guard_request_shape_valid {
   bool operator()(const event::encode_run &runtime_ev,
                   const action::context &) const noexcept {
     const auto &request = runtime_ev.request;
-    return request.pcm.size() ==
+    // Directly driven children read pcm and write latent_out; sized spans
+    // without storage must reject here.
+    return request.pcm.data() != nullptr &&
+           request.latent_out.data() != nullptr &&
+           request.pcm.size() ==
                static_cast<size_t>(request.runtime.frame_samples) &&
            request.latent_out.size() >=
                static_cast<size_t>(request.runtime.dim);
@@ -47,7 +51,9 @@ struct guard_buffer_capacity_valid {
     // O(1) against the sizing contract bound into the runtime at bind time
     // (never re-plans the model on the per-frame path).
     const auto &request = runtime_ev.request;
-    return request.runtime.frame_floats > 0u &&
+    return request.frame.data() != nullptr &&
+           request.workspace.data() != nullptr &&
+           request.runtime.frame_floats > 0u &&
            request.frame.size() >= request.runtime.frame_floats &&
            request.workspace.size() >= request.runtime.workspace_floats;
   }
