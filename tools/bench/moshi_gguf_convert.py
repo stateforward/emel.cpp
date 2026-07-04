@@ -322,21 +322,24 @@ def cross_check_lm(infos: list[TensorInfo], config: dict) -> None:
     raise ValueError(
         f"weights carry {emb_count} lm.emb.* tensors, config n_q={config['n_q']}")
   layer_count = count_prefixed(infos, "lm.transformer.layers.")
-  if count_prefixed(infos, f"lm.transformer.layers.{config['num_layers'] - 1}.") == 0:
-    raise ValueError(
-        f"weights are missing lm.transformer.layers.{config['num_layers'] - 1}.* "
-        f"(config num_layers={config['num_layers']}, "
-        f"{layer_count} layer tensors present)")
+  # The C++ contract iterates every configured block; a missing intermediate
+  # layer must fail conversion instead of emitting an unusable artifact.
+  for layer in range(config["num_layers"]):
+    if count_prefixed(infos, f"lm.transformer.layers.{layer}.") == 0:
+      raise ValueError(
+          f"weights are missing lm.transformer.layers.{layer}.* "
+          f"(config num_layers={config['num_layers']}, "
+          f"{layer_count} layer tensors present)")
   if config["dep_q"] > 0:
     if count_prefixed(infos, "lm.depformer_in.") != config["dep_q"]:
       raise ValueError("lm.depformer_in.* count does not match config dep_q")
     if count_prefixed(infos, "lm.linears.") != config["dep_q"]:
       raise ValueError("lm.linears.* count does not match config dep_q")
-    depformer_last = config["depformer_num_layers"] - 1
-    if count_prefixed(infos, f"lm.depformer.layers.{depformer_last}.") == 0:
-      raise ValueError(
-          "weights are missing the last depformer layer per config "
-          f"depformer_num_layers={config['depformer_num_layers']}")
+    for layer in range(config["depformer_num_layers"]):
+      if count_prefixed(infos, f"lm.depformer.layers.{layer}.") == 0:
+        raise ValueError(
+            f"weights are missing lm.depformer.layers.{layer}.* per config "
+            f"depformer_num_layers={config['depformer_num_layers']}")
 
 
 def cross_check_mimi(infos: list[TensorInfo], n_q: int, preset: dict) -> dict:
@@ -346,14 +349,14 @@ def cross_check_mimi(infos: list[TensorInfo], n_q: int, preset: dict) -> dict:
     raise ValueError(
         f"semantic codebook dims {first.dims} do not match preset card "
         f"{preset['card']}")
-  rest_count = sum(
-      1 for info in infos
-      if info.name.startswith("mimi.quantizer.rvq_rest.vq.layers.") and
-      info.name.endswith("._codebook.embedding"))
-  if rest_count < n_q - preset["semantic_n_q"]:
-    raise ValueError(
-        f"weights carry {rest_count} acoustic codebooks, need at least "
-        f"{n_q - preset['semantic_n_q']} for n_q={n_q}")
+  # The C++ contract requires every acoustic level with the full codebook
+  # shape; probe each expected level instead of counting, so a missing
+  # intermediate or wrong-shaped codebook fails conversion.
+  for level in range(n_q - preset["semantic_n_q"]):
+    require_dims(
+        infos,
+        f"mimi.quantizer.rvq_rest.vq.layers.{level}._codebook.embedding",
+        (first.dims[0], preset["card"]))
   for family in ("mimi.encoder.", "mimi.encoder_transformer.",
                  "mimi.downsample.", "mimi.upsample.",
                  "mimi.decoder_transformer.", "mimi.decoder."):
