@@ -4627,6 +4627,24 @@ inline bool can_run_im2col(const request_type &request) noexcept {
   const int64_t length = static_cast<int64_t>(request.src1.ne[0]);
   const int64_t out_length =
       conv_output_length(length, kernel, params.s0, params.p0, params.d0);
+  // A large nonnegative padding scales out_length past the per-extent caps,
+  // and the exec's dst_row arithmetic multiplies it by the row width and the
+  // batch count: bound every factor and the total output elements so the
+  // column-buffer indexing cannot overflow with a matching dst shape.
+  const int64_t batches = static_cast<int64_t>(request.src1.ne[2]);
+  const int64_t row_width = channels * kernel;
+  constexpr int64_t k_guard_cap = static_cast<int64_t>(k_max_conv_guard_extent);
+  // Each bound keeps the next product under 2^62, so the chain evaluates
+  // without signed overflow: factors first, then rows, then the batch total.
+  if (request.src1.ne[2] > k_max_conv_guard_extent || out_length > k_guard_cap ||
+      row_width > k_guard_cap) {
+    return false;
+  }
+  if (out_length > 0 && batches > 0 &&
+      (out_length * row_width > k_guard_cap ||
+       out_length * row_width * batches > k_guard_cap)) {
+    return false;
+  }
   const uint8_t src0_type = dtype_code(request.src0.type);
   return request.src1.data != nullptr && kernel > 0 && channels > 0 &&
          length > 0 && out_length > 0 &&

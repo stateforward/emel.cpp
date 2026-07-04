@@ -2123,6 +2123,25 @@ TEST_CASE("kernel_x86_64_im2col_and_conv_transpose_1d") {
   huge_convtr.src1 = huge_convtr_input;
   CHECK_FALSE(machine.process_event(huge_convtr));
 
+  // A small kernel with a huge nonnegative padding scales the im2col
+  // out_length past any real destination: with a matching dst shape the exec
+  // would write ~2^31 column elements into a 12-float buffer, so the
+  // total-output bound must reject before dispatch.
+  float pad_out[12] = {};
+  emel::kernel::event::op_im2col padded_im2col_ev{
+      .src0 = make_src(kernel_shape_only, dtype::f32, 3, 1),
+      .src1 = make_src(input, dtype::f32, 4, 1),
+      .dst = make_dst(pad_out, dtype::f32, 3, 720000002u),
+  };
+  set_op_param_i32(padded_im2col_ev, 0u, 1);         // s0
+  set_op_param_i32(padded_im2col_ev, 1u, 0);         // s1
+  set_op_param_i32(padded_im2col_ev, 2u, 360000000); // p0 -> out_length ~7.2e8
+  set_op_param_i32(padded_im2col_ev, 3u, 0);         // p1
+  set_op_param_i32(padded_im2col_ev, 4u, 1);         // d0
+  set_op_param_i32(padded_im2col_ev, 5u, 0);         // d1
+  set_op_param_i32(padded_im2col_ev, 6u, 0);         // is_2D
+  CHECK_FALSE(machine.process_event(padded_im2col_ev));
+
   // Per-extent caps alone still admit an s0-scaled out_length whose product
   // with out_channels exceeds the guard cap: with a matching destination
   // shape the exec would fill far past the destination allocation, so the
