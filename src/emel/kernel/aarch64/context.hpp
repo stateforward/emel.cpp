@@ -58,6 +58,8 @@ struct context {
   uint64_t optimized_q6_vector_prepared_q8_rhs_argmax_i8mm_dispatch_count = 0;
   uint64_t optimized_q6_vector_q8_argmax_prepared_i8mm_dispatch_count = 0;
   uint64_t shared_q6_dispatch_count = 0;
+  uint64_t optimized_f16_vector_dispatch_count = 0;
+  uint64_t optimized_conv_transpose_f32_dispatch_count = 0;
   uint64_t optimized_flash_dispatch_count = 0;
   uint64_t shared_flash_dispatch_count = 0;
 };
