@@ -364,15 +364,19 @@ constexpr std::array k_records{
                       kind::config,
                       "tools/bench/reference_backends/moshi_cpp_mimi.json",
                       "reference_backend_descriptor"},
-    dependency_record{"speech_codec_mimi",
+    // MLX-only inputs map to the MLX suite: quality_gates.sh runs the
+    // personaplex-mlx compare lane only for speech_codec_mimi_mlx, so routing
+    // these through the generic mimi suite would gate MLX regressions with
+    // the moshi.cpp lane instead.
+    dependency_record{"speech_codec_mimi_mlx",
                       kind::script,
                       "tools/bench/speech/personaplex_mlx_mimi_driver.py",
                       "reference_lane_driver"},
-    dependency_record{"speech_codec_mimi",
+    dependency_record{"speech_codec_mimi_mlx",
                       kind::config,
                       "tools/bench/personaplex_mlx_ref.txt",
                       "reference_pin"},
-    dependency_record{"speech_codec_mimi",
+    dependency_record{"speech_codec_mimi_mlx",
                       kind::config,
                       "tools/bench/reference_backends/personaplex_mlx_mimi.json",
                       "reference_backend_descriptor"},
