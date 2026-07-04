@@ -2109,6 +2109,20 @@ TEST_CASE("kernel_x86_64_im2col_and_conv_transpose_1d") {
   CHECK(up_out[2] == doctest::Approx(6.0f));
   CHECK(up_out[3] == doctest::Approx(10.0f));
 
+  // Extents past the signed-arithmetic cap reject before the output-length
+  // formulas can overflow.
+  auto huge_im2col = im2col_ev;
+  auto huge_im2col_input = im2col_ev.src1;
+  huge_im2col_input.ne[0] = uint64_t{1} << 62;
+  huge_im2col.src1 = huge_im2col_input;
+  CHECK_FALSE(machine.process_event(huge_im2col));
+
+  auto huge_convtr = convtr_ev;
+  auto huge_convtr_input = convtr_ev.src1;
+  huge_convtr_input.ne[0] = uint64_t{1} << 62;
+  huge_convtr.src1 = huge_convtr_input;
+  CHECK_FALSE(machine.process_event(huge_convtr));
+
   // Metadata-only inputs reject in the guard instead of dereferencing null
   // inside the exec.
   auto null_conv_input = make_src(up_input, dtype::f32, 2, 1);

@@ -4595,6 +4595,20 @@ inline int64_t conv_output_length(const int64_t length, const int64_t kernel,
   return (length + 2 * padding - dilation * (kernel - 1) - 1) / stride + 1;
 }
 
+// Caps the extents fed into the signed convolution-length arithmetic: with
+// every operand below 2^31 (and int32 op params), the largest intermediate
+// magnitude stays under 2^63, so the guards can evaluate the length formulas
+// without signed-overflow UB. Real convolution shapes sit far below the cap.
+inline constexpr uint64_t k_max_conv_guard_extent = uint64_t{1} << 31;
+
+inline bool conv_guard_extents_bounded(const uint64_t kernel,
+                                       const uint64_t channels,
+                                       const uint64_t length) noexcept {
+  return kernel <= k_max_conv_guard_extent &&
+         channels <= k_max_conv_guard_extent &&
+         length <= k_max_conv_guard_extent;
+}
+
 template <class request_type>
 inline bool can_run_im2col(const request_type &request) noexcept {
   im2col_op_params params = {};
@@ -4603,6 +4617,10 @@ inline bool can_run_im2col(const request_type &request) noexcept {
     return false;
   }
 
+  if (!conv_guard_extents_bounded(request.src0.ne[0], request.src0.ne[1],
+                                  request.src1.ne[0])) {
+    return false;
+  }
   const uint8_t dst_type = dtype_code(request.dst.type);
   const int64_t kernel = static_cast<int64_t>(request.src0.ne[0]);
   const int64_t channels = static_cast<int64_t>(request.src0.ne[1]);
@@ -4689,6 +4707,11 @@ inline bool can_run_conv_transpose_1d(const request_type &request) noexcept {
     return false;
   }
 
+  if (!conv_guard_extents_bounded(request.src0.ne[0], request.src0.ne[1],
+                                  request.src1.ne[0]) ||
+      request.src0.ne[2] > k_max_conv_guard_extent) {
+    return false;
+  }
   const int64_t kernel = static_cast<int64_t>(request.src0.ne[0]);
   const int64_t out_channels = static_cast<int64_t>(request.src0.ne[1]);
   const int64_t in_channels = static_cast<int64_t>(request.src0.ne[2]);
