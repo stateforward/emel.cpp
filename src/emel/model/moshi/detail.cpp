@@ -404,6 +404,21 @@ bool has_tensor_with_elements(const emel::model::data &model_data,
   return elements == expected_elements;
 }
 
+// The codec plan selects the q8 bind path from the first projection of a
+// family and the bind then requires every projection in that family to share
+// the class, so projection probes compare element count and q8-vs-float
+// class together.
+bool has_projection_tensor(const emel::model::data &model_data,
+                           const std::string_view name,
+                           const uint64_t expected_elements,
+                           const bool q8_class) noexcept {
+  constexpr int32_t k_dtype_q8_0 = 8;
+  const auto *tensor = find_tensor(model_data, name);
+  return tensor != nullptr &&
+         has_tensor_with_elements(model_data, name, expected_elements) &&
+         ((tensor->type == k_dtype_q8_0) == q8_class);
+}
+
 bool require_tensor_shape(const emel::model::data &model_data,
                           const std::string_view name,
                           const std::initializer_list<int64_t> dims) noexcept {
@@ -626,9 +641,18 @@ emel::error::type validate_mimi_contract(const emel::model::data &model_data,
   // pins the in_proj/linear1 shapes), so the contract must probe the full
   // per-layer tensor set for both transformer families: a truncated family
   // or a missing layer tensor otherwise validates here and fails the codec
-  // bind walk later.
+  // bind walk later. The codec plan selects the q8-vs-float projection class
+  // from the first encoder in_proj and the bind requires every projection to
+  // match it, so mixed-class projections must reject here too.
   const int64_t dim = mimi.dim;
   const uint64_t dim_elements = static_cast<uint64_t>(dim);
+  constexpr int32_t k_dtype_q8_0 = 8;
+  const auto *first_proj = find_tensor(
+      model_data,
+      "mimi.encoder_transformer.transformer.layers.0.self_attn.in_projs.0."
+      "weight");
+  const bool proj_q8 =
+      first_proj != nullptr && first_proj->type == k_dtype_q8_0;
   static constexpr const char *k_transformer_families[2] = {
       "encoder_transformer", "decoder_transformer"};
   bool transformers_ok = true;
@@ -656,7 +680,8 @@ emel::error::type validate_mimi_contract(const emel::model::data &model_data,
           find_tensor(model_data, layer_name("linear1.weight", name));
       if (linear1_tensor == nullptr || !tensor_has_storage(*linear1_tensor) ||
           linear1_tensor->n_dims != 2 || linear1_tensor->dims[0] != dim ||
-          linear1_tensor->dims[1] <= 0) {
+          linear1_tensor->dims[1] <= 0 ||
+          (linear1_tensor->type == k_dtype_q8_0) != proj_q8) {
         transformers_ok = false;
         break;
       }
@@ -666,13 +691,15 @@ emel::error::type validate_mimi_contract(const emel::model::data &model_data,
           require_tensor_shape(model_data,
                                layer_name("self_attn.in_projs.0.weight", name),
                                {dim, 3 * dim}) &&
-          has_tensor_with_elements(model_data,
-                                   layer_name("self_attn.out_projs.0.weight",
-                                              name),
-                                   dim_elements * dim_elements) &&
-          has_tensor_with_elements(model_data,
-                                   layer_name("linear2.weight", name),
-                                   dim_elements * mlp_elements) &&
+          has_projection_tensor(model_data,
+                                layer_name("self_attn.in_projs.0.weight", name),
+                                dim_elements * 3u * dim_elements, proj_q8) &&
+          has_projection_tensor(model_data,
+                                layer_name("self_attn.out_projs.0.weight",
+                                           name),
+                                dim_elements * dim_elements, proj_q8) &&
+          has_projection_tensor(model_data, layer_name("linear2.weight", name),
+                                dim_elements * mlp_elements, proj_q8) &&
           has_tensor_with_elements(model_data, layer_name("norm1.weight", name),
                                    dim_elements) &&
           has_tensor_with_elements(model_data, layer_name("norm1.bias", name),
@@ -697,8 +724,14 @@ emel::error::type validate_mimi_contract(const emel::model::data &model_data,
   // before any encode or decode can run; the contract must require them (by
   // element count, matching prepare_linear/prepare_raw_q8_0) so a component
   // missing a projection rejects at load instead of failing quantizer bind.
+  // The RVQ q8-vs-float class is probed from the first split's input
+  // projection, mirroring plan_codec.
   const uint64_t proj_elements =
       static_cast<uint64_t>(mimi.dim) * static_cast<uint64_t>(mimi.codebook_dim);
+  const auto *first_rvq_proj =
+      find_tensor(model_data, "mimi.quantizer.rvq_first.input_proj.weight");
+  const bool rvq_q8 =
+      first_rvq_proj != nullptr && first_rvq_proj->type == k_dtype_q8_0;
   static constexpr const char *k_rvq_splits[2] = {"rvq_first", "rvq_rest"};
   bool projections_ok = true;
   for (size_t split = 0; projections_ok && split < 2u; ++split) {
@@ -708,9 +741,9 @@ emel::error::type validate_mimi_contract(const emel::model::data &model_data,
                       "mimi.quantizer.%s.input_proj.weight", k_rvq_splits[split]);
     projections_ok =
         in_len > 0 && static_cast<size_t>(in_len) < sizeof(name) &&
-        has_tensor_with_elements(
+        has_projection_tensor(
             model_data, std::string_view{name, static_cast<size_t>(in_len)},
-            proj_elements);
+            proj_elements, rvq_q8);
     if (!projections_ok) {
       break;
     }
@@ -719,11 +752,75 @@ emel::error::type validate_mimi_contract(const emel::model::data &model_data,
                                       k_rvq_splits[split]);
     projections_ok =
         out_len > 0 && static_cast<size_t>(out_len) < sizeof(name) &&
-        has_tensor_with_elements(
+        has_projection_tensor(
             model_data, std::string_view{name, static_cast<size_t>(out_len)},
-            proj_elements);
+            proj_elements, rvq_q8);
   }
   if (!projections_ok) {
+    return emel::error::cast(emel::model::loader::error::model_invalid);
+  }
+
+  // The codec planner walks the fixed mimi_v0_1 SEANet module topology by
+  // exact tensor name (plan_seanet's conv/convtr/resnet indexes plus the
+  // downsample/upsample bridge convs), so the contract must require every
+  // fixed-topology weight: a component with each family merely non-empty
+  // otherwise validates and fails codec initialization later.
+  static constexpr const char *k_encoder_seanet_tensors[] = {
+      "model.0.conv.conv.weight",
+      "model.1.block.1.conv.conv.weight",
+      "model.1.block.3.conv.conv.weight",
+      "model.3.conv.conv.weight",
+      "model.4.block.1.conv.conv.weight",
+      "model.4.block.3.conv.conv.weight",
+      "model.6.conv.conv.weight",
+      "model.7.block.1.conv.conv.weight",
+      "model.7.block.3.conv.conv.weight",
+      "model.9.conv.conv.weight",
+      "model.10.block.1.conv.conv.weight",
+      "model.10.block.3.conv.conv.weight",
+      "model.12.conv.conv.weight",
+      "model.14.conv.conv.weight",
+  };
+  static constexpr const char *k_decoder_seanet_tensors[] = {
+      "model.0.conv.conv.weight",
+      "model.2.convtr.convtr.weight",
+      "model.3.block.1.conv.conv.weight",
+      "model.3.block.3.conv.conv.weight",
+      "model.5.convtr.convtr.weight",
+      "model.6.block.1.conv.conv.weight",
+      "model.6.block.3.conv.conv.weight",
+      "model.8.convtr.convtr.weight",
+      "model.9.block.1.conv.conv.weight",
+      "model.9.block.3.conv.conv.weight",
+      "model.11.convtr.convtr.weight",
+      "model.12.block.1.conv.conv.weight",
+      "model.12.block.3.conv.conv.weight",
+      "model.14.conv.conv.weight",
+  };
+  bool seanet_ok = true;
+  for (const char *suffix : k_encoder_seanet_tensors) {
+    char name[96] = {};
+    const int written =
+        std::snprintf(name, sizeof(name), "mimi.encoder.%s", suffix);
+    seanet_ok = seanet_ok && written > 0 &&
+                static_cast<size_t>(written) < sizeof(name) &&
+                has_tensor(model_data,
+                           std::string_view{name, static_cast<size_t>(written)});
+  }
+  for (const char *suffix : k_decoder_seanet_tensors) {
+    char name[96] = {};
+    const int written =
+        std::snprintf(name, sizeof(name), "mimi.decoder.%s", suffix);
+    seanet_ok = seanet_ok && written > 0 &&
+                static_cast<size_t>(written) < sizeof(name) &&
+                has_tensor(model_data,
+                           std::string_view{name, static_cast<size_t>(written)});
+  }
+  seanet_ok = seanet_ok &&
+              has_tensor(model_data, "mimi.downsample.conv.conv.conv.weight") &&
+              has_tensor(model_data,
+                         "mimi.upsample.convtr.convtr.convtr.weight");
+  if (!seanet_ok) {
     return emel::error::cast(emel::model::loader::error::model_invalid);
   }
 

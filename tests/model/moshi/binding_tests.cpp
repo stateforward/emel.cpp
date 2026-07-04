@@ -686,6 +686,83 @@ TEST_CASE("mimi contract validation requires every transformer layer") {
   CHECK(moshi::validate_execution_contract(model) != k_none);
 }
 
+TEST_CASE("mimi contract validation requires the fixed seanet topology") {
+  auto loaded = load_fixture_or_skip("mimi-tiny.gguf");
+  if (loaded.model == nullptr) {
+    return;
+  }
+
+  // plan_seanet walks the fixed mimi_v0_1 module topology by exact tensor
+  // name; a family-non-empty probe let a component missing a fixed-topology
+  // conv validate and then fail codec initialization.
+  auto &model = *loaded.model;
+  const auto corrupt_named = [&model](const std::string_view target,
+                                      const size_t digit_offset) {
+    for (uint32_t idx = 0; idx < model.n_tensors; ++idx) {
+      auto &tensor = model.tensors[idx];
+      const std::string_view name{
+          model.name_storage.data() + tensor.name_offset, tensor.name_length};
+      if (name != target) {
+        continue;
+      }
+      model.name_storage[tensor.name_offset + digit_offset] = 'x';
+      return true;
+    }
+    return false;
+  };
+
+  SUBCASE("missing encoder seanet conv") {
+    const std::string_view name = "mimi.encoder.model.12.conv.conv.weight";
+    REQUIRE(corrupt_named(name, name.find("conv")));
+  }
+  SUBCASE("missing decoder resnet conv") {
+    const std::string_view name =
+        "mimi.decoder.model.9.block.3.conv.conv.weight";
+    REQUIRE(corrupt_named(name, name.find("block")));
+  }
+  SUBCASE("missing downsample conv") {
+    const std::string_view name = "mimi.downsample.conv.conv.conv.weight";
+    REQUIRE(corrupt_named(name, name.find("weight")));
+  }
+  CHECK(moshi::validate_execution_contract(model) != k_none);
+}
+
+TEST_CASE("mimi contract validation rejects mixed projection dtype classes") {
+  auto loaded = load_fixture_or_skip("mimi-tiny.gguf");
+  if (loaded.model == nullptr) {
+    return;
+  }
+
+  // plan_codec selects the q8-vs-float bind path from the first projection
+  // of each family and the bind then requires every projection to match; a
+  // single projection in the other class validated here and failed codec
+  // initialization.
+  auto &model = *loaded.model;
+  constexpr int32_t k_dtype_q8_0 = 8;
+  const auto flip_to_q8 = [&model](const std::string_view target) {
+    for (uint32_t idx = 0; idx < model.n_tensors; ++idx) {
+      auto &tensor = model.tensors[idx];
+      const std::string_view name{
+          model.name_storage.data() + tensor.name_offset, tensor.name_length};
+      if (name != target) {
+        continue;
+      }
+      tensor.type = k_dtype_q8_0;
+      return true;
+    }
+    return false;
+  };
+
+  SUBCASE("mixed transformer projection class") {
+    REQUIRE(flip_to_q8(
+        "mimi.decoder_transformer.transformer.layers.1.linear2.weight"));
+  }
+  SUBCASE("mixed rvq projection class") {
+    REQUIRE(flip_to_q8("mimi.quantizer.rvq_rest.output_proj.weight"));
+  }
+  CHECK(moshi::validate_execution_contract(model) != k_none);
+}
+
 TEST_CASE("mimi contract validation requires the rvq projections") {
   auto loaded = load_fixture_or_skip("mimi-tiny.gguf");
   if (loaded.model == nullptr) {
