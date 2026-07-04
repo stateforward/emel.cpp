@@ -266,6 +266,17 @@ def require_dims(infos: list[TensorInfo], name: str,
         "the config JSON does not match the weights")
 
 
+def require_elements(infos: list[TensorInfo], name: str,
+                     elements: int) -> None:
+  # The runtime bind's prepare helpers accept any dims layout with the
+  # expected total element count, so these probes compare element counts.
+  info = find_info(infos, name)
+  if math.prod(info.dims) != elements:
+    raise ValueError(
+        f"tensor {name!r} has dims {info.dims} ({math.prod(info.dims)} "
+        f"elements), the runtime bind consumes {elements}")
+
+
 def load_lm_config(path: Path) -> dict:
   config = json.loads(path.read_text(encoding="utf-8"))
   required = [
@@ -315,9 +326,14 @@ def load_lm_config(path: Path) -> dict:
   # work (load_lm_hparams in src/emel/model/moshi/detail.cpp); mirror those
   # consistency gates so a malformed config fails conversion instead of
   # emitting an enriched artifact the maintained loader immediately rejects.
-  for key in ("card", "n_q", "text_card", "dim", "num_heads", "num_layers"):
+  for key in ("card", "n_q", "text_card", "dim", "num_heads", "num_layers",
+              "context", "max_period"):
     if config[key] <= 0:
       raise ValueError(f"{path}: {key} must be positive, got {config[key]}")
+  if round(config["hidden_scale"] * config["dim"]) <= 0:
+    raise ValueError(
+        f"{path}: hidden_scale={config['hidden_scale']} yields a non-positive "
+        f"dim_feedforward for dim={config['dim']}")
   if not 0 <= config["dep_q"] <= config["n_q"]:
     raise ValueError(
         f"{path}: dep_q={config['dep_q']} must be within [0, n_q="
@@ -337,7 +353,8 @@ def load_lm_config(path: Path) -> dict:
         f"{config['text_card']})")
   if config["dep_q"] > 0:
     for key in ("depformer_dim", "depformer_num_heads",
-                "depformer_num_layers"):
+                "depformer_num_layers", "depformer_dim_feedforward",
+                "depformer_context", "depformer_max_period"):
       if config[key] <= 0:
         raise ValueError(f"{path}: {key} must be positive, got {config[key]}")
     if config["depformer_dim"] % config["depformer_num_heads"] != 0:
@@ -478,15 +495,15 @@ def cross_check_mimi(infos: list[TensorInfo], n_q: int, preset: dict) -> dict:
                  "mimi.decoder_transformer.", "mimi.decoder."):
     if count_prefixed(infos, family) == 0:
       raise ValueError(f"weights are missing the {family}* family")
-  # The C++ codec planner consumes every configured transformer layer's
-  # norm1/in_proj/linear1 with dim-consistent shapes (plan_transformer);
-  # probe each expected layer here so a truncated family or a wrong-shaped
-  # layer tensor fails conversion instead of failing codec bind at runtime.
+  # The C++ codec bind consumes every configured transformer layer's norms,
+  # layer scales, attention projections, and MLP linears (bind_transformer;
+  # plan_transformer additionally pins the in_proj/linear1 shapes). Probe the
+  # full per-layer tensor set here so a truncated family or a missing layer
+  # tensor fails conversion instead of failing codec bind at runtime.
   dim = preset["dim"]
   for family in ("mimi.encoder_transformer.", "mimi.decoder_transformer."):
     for layer in range(preset["transformer_num_layers"]):
       base = f"{family}transformer.layers.{layer}."
-      find_info(infos, base + "norm1.weight")
       require_dims(infos, base + "self_attn.in_projs.0.weight", (dim, 3 * dim))
       linear1 = find_info(infos, base + "linear1.weight")
       if (len(linear1.dims) != 2 or linear1.dims[0] != dim or
@@ -494,7 +511,23 @@ def cross_check_mimi(infos: list[TensorInfo], n_q: int, preset: dict) -> dict:
         raise ValueError(
             f"tensor {linear1.name!r} has dims {linear1.dims}, expected "
             f"({dim}, mlp_dim); the preset does not match the weights")
-  return dict(preset, n_q=n_q, codebook_dim=first.dims[0])
+      mlp_dim = linear1.dims[1]
+      require_elements(infos, base + "self_attn.out_projs.0.weight",
+                       dim * dim)
+      require_elements(infos, base + "linear2.weight", mlp_dim * dim)
+      for vector in ("norm1.weight", "norm1.bias", "norm2.weight",
+                     "norm2.bias", "layer_scale_1.scale",
+                     "layer_scale_2.scale"):
+        require_elements(infos, base + vector, dim)
+  # bind_rvq_split consumes the input/output 1x1 projections for both splits
+  # before any encode or decode can run; require them (by element count,
+  # matching prepare_linear/prepare_raw_q8_0) alongside the codebooks.
+  codebook_dim = first.dims[0]
+  for split in ("rvq_first", "rvq_rest"):
+    for proj in ("input_proj", "output_proj"):
+      require_elements(infos, f"mimi.quantizer.{split}.{proj}.weight",
+                       dim * codebook_dim)
+  return dict(preset, n_q=n_q, codebook_dim=codebook_dim)
 
 
 def cross_check_voice(infos: list[TensorInfo]) -> None:
