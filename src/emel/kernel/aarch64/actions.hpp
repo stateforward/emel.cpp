@@ -1150,57 +1150,7 @@ inline bool can_use_neon_mul_mat_q8_0_packed_bl8_full_groups(
              0u;
 }
 
-// Batch-major f32 dst contract shared by the multi-RHS packed matmul kernels.
-// nb[0] is the column stride between per-RHS result rows and nb[1] the dense
-// element stride. Accepts the dense full-output view (nb[2] spans all RHS
-// rows) and the group-aligned row-slice lane view emitted by the parallel
-// matmul slicer, whose slice is embedded in a wider output (nb[0] covers the
-// full output row while ne[1]/nb[2] describe only the slice rows).
-inline bool is_batch_major_dst_view(const event::tensor_view_mut &dst,
-                                    const uint64_t m,
-                                    const uint64_t rhs_rows) noexcept {
-  const size_t slice_row_bytes = sizeof(float) * m;
-  const bool full_view = dst.nb[2] == dst.nb[0] * rhs_rows;
-  const bool row_slice_view = dst.nb[2] == slice_row_bytes;
-  return dst.nb[1] == sizeof(float) && (dst.nb[0] % sizeof(float)) == 0u &&
-         dst.nb[0] >= slice_row_bytes && dst.nb[3] == dst.nb[2] &&
-         (full_view || row_slice_view);
-}
 
-inline bool can_use_neon_mul_mat_q8_0_packed_bl8_matrix_x4(
-    const event::op_mul_mat &request, const bool neon_available) noexcept {
-  const uint64_t k = request.src0.ne[0];
-  const uint64_t m = request.src0.ne[1];
-  const uint64_t rhs_rows = request.src1.ne[0];
-  const uint64_t lhs_group_count =
-      ::emel::kernel::detail::quant::packed_q8_0_x4_group_count(m);
-  const uint64_t rhs_group_count =
-      ::emel::kernel::detail::quant::packed_q8_0_x4_group_count(rhs_rows);
-  const size_t group_bytes =
-      ::emel::kernel::detail::quant::packed_q8_0_x4_group_storage_bytes(k);
-  return neon_available && neon_q8_0_packed_bl8_supported() && k != 0u &&
-         m != 0u && rhs_rows == ::emel::kernel::detail::quant::Q8_0_X4_ROWS &&
-         request.src1.ne[1] == k && request.dst.ne[0] == rhs_rows &&
-         request.dst.ne[1] == m && request.src0.ne[2] == 1u &&
-         request.src0.ne[3] == 1u && request.src1.ne[2] == 1u &&
-         request.src1.ne[3] == 1u && request.dst.ne[2] == 1u &&
-         request.dst.ne[3] == 1u &&
-         (m % ::emel::kernel::detail::quant::Q8_0_X4_ROWS) == 0u &&
-         ::emel::kernel::detail::dtype_code(request.src0.type) ==
-             ::emel::kernel::detail::dtype_q8_0_x4_bl8 &&
-         ::emel::kernel::detail::dtype_code(request.src1.type) ==
-             ::emel::kernel::detail::dtype_q8_0_x4_bl8 &&
-         ::emel::kernel::detail::dtype_code(request.dst.type) ==
-             ::emel::kernel::detail::dtype_f32 &&
-         group_bytes != 0u && request.src0.nb[0] == 1u &&
-         request.src0.nb[1] == group_bytes &&
-         request.src0.nb[2] == group_bytes * lhs_group_count &&
-         request.src0.nb[3] == request.src0.nb[2] && request.src1.nb[0] == 1u &&
-         request.src1.nb[1] == group_bytes &&
-         request.src1.nb[2] == group_bytes * rhs_group_count &&
-         request.src1.nb[3] == request.src1.nb[2] &&
-         is_batch_major_dst_view(request.dst, m, rhs_rows);
-}
 
 inline bool can_use_neon_mul_mat_q8_0_packed_bl8_tail_safe(
     const event::op_mul_mat &request, const bool neon_available) noexcept {
@@ -1298,40 +1248,6 @@ inline bool can_run_neon_mul_mat_q4_vector_packed_q8_rhs_request(
          is_dense_contiguous(request.dst);
 }
 
-inline bool can_run_neon_mul_mat_q4_vector_packed_q8_rhs_matrix_x4_request(
-    const event::op_mul_mat &request, const uint8_t packed_dtype) noexcept {
-  const uint64_t k = request.src0.ne[0];
-  const uint64_t m = request.src0.ne[1];
-  const uint64_t rhs_rows = request.src1.ne[0];
-  const uint64_t group_count =
-      ::emel::kernel::detail::quant::packed_q4_k_x8_group_count(m);
-  const size_t group_bytes =
-      ::emel::kernel::detail::quant::packed_q4_k_x8_group_storage_bytes(k);
-  const size_t rhs_row_bytes =
-      ::emel::kernel::detail::quantized_row_storage_bytes(
-          ::emel::kernel::detail::dtype_q8_k, k);
-  return k != 0u && m != 0u &&
-         rhs_rows == ::emel::kernel::detail::quant::Q8_0_X4_ROWS &&
-         request.src1.ne[1] == k && request.dst.ne[0] == rhs_rows &&
-         request.dst.ne[1] == m && request.src0.ne[2] == 1u &&
-         request.src0.ne[3] == 1u && request.src1.ne[2] == 1u &&
-         request.src1.ne[3] == 1u && request.dst.ne[2] == 1u &&
-         request.dst.ne[3] == 1u &&
-         ::emel::kernel::detail::dtype_code(request.src0.type) ==
-             packed_dtype &&
-         ::emel::kernel::detail::dtype_code(request.src1.type) ==
-             ::emel::kernel::detail::dtype_q8_k_x4 &&
-         ::emel::kernel::detail::dtype_code(request.dst.type) ==
-             ::emel::kernel::detail::dtype_f32 &&
-         request.src0.nb[0] == 1u && group_bytes != 0u &&
-         request.src0.nb[1] == group_bytes &&
-         request.src0.nb[2] == group_bytes * group_count &&
-         request.src0.nb[3] == request.src0.nb[2] && request.src1.nb[0] == 1u &&
-         rhs_row_bytes != 0u && request.src1.nb[1] == rhs_row_bytes &&
-         request.src1.nb[2] == rhs_row_bytes * rhs_rows &&
-         request.src1.nb[3] == request.src1.nb[2] &&
-         is_batch_major_dst_view(request.dst, m, rhs_rows);
-}
 
 inline bool can_run_neon_mul_mat_q6_vector_packed_q8_rhs_request(
     const event::op_mul_mat &request) noexcept {
@@ -1366,39 +1282,6 @@ inline bool can_run_neon_mul_mat_q6_vector_packed_q8_rhs_request(
          is_dense_contiguous(request.dst);
 }
 
-inline bool can_run_neon_mul_mat_q6_vector_packed_q8_rhs_matrix_x4_request(
-    const event::op_mul_mat &request, const uint8_t packed_dtype,
-    const size_t group_bytes) noexcept {
-  const uint64_t k = request.src0.ne[0];
-  const uint64_t m = request.src0.ne[1];
-  const uint64_t rhs_rows = request.src1.ne[0];
-  const uint64_t group_count =
-      ::emel::kernel::detail::quant::packed_q6_k_x8_group_count(m);
-  const size_t rhs_row_bytes =
-      ::emel::kernel::detail::quantized_row_storage_bytes(
-          ::emel::kernel::detail::dtype_q8_k, k);
-  return k != 0u && m != 0u &&
-         rhs_rows == ::emel::kernel::detail::quant::Q8_0_X4_ROWS &&
-         request.src1.ne[1] == k && request.dst.ne[0] == rhs_rows &&
-         request.dst.ne[1] == m && request.src0.ne[2] == 1u &&
-         request.src0.ne[3] == 1u && request.src1.ne[2] == 1u &&
-         request.src1.ne[3] == 1u && request.dst.ne[2] == 1u &&
-         request.dst.ne[3] == 1u &&
-         ::emel::kernel::detail::dtype_code(request.src0.type) ==
-             packed_dtype &&
-         ::emel::kernel::detail::dtype_code(request.src1.type) ==
-             ::emel::kernel::detail::dtype_q8_k_x4 &&
-         ::emel::kernel::detail::dtype_code(request.dst.type) ==
-             ::emel::kernel::detail::dtype_f32 &&
-         request.src0.nb[0] == 1u && group_bytes != 0u &&
-         request.src0.nb[1] == group_bytes &&
-         request.src0.nb[2] == group_bytes * group_count &&
-         request.src0.nb[3] == request.src0.nb[2] && request.src1.nb[0] == 1u &&
-         rhs_row_bytes != 0u && request.src1.nb[1] == rhs_row_bytes &&
-         request.src1.nb[2] == rhs_row_bytes * rhs_rows &&
-         request.src1.nb[3] == request.src1.nb[2] &&
-         is_batch_major_dst_view(request.dst, m, rhs_rows);
-}
 
 inline bool can_run_neon_mul_mat_q6_vector_prepared_q8_rhs_request(
     const event::op_mul_mat &request) noexcept {
@@ -1454,19 +1337,7 @@ inline bool can_use_neon_mul_mat_q4_vector_packed_q8_rhs_bl8(
              request, ::emel::kernel::detail::dtype_q4_k_x8_bl8);
 }
 
-inline bool can_use_neon_mul_mat_q4_vector_packed_q8_rhs_bl4_matrix_x4(
-    const event::op_mul_mat &request, const bool neon_available) noexcept {
-  return neon_available && neon_q4_vector_packed_supported() &&
-         can_run_neon_mul_mat_q4_vector_packed_q8_rhs_matrix_x4_request(
-             request, ::emel::kernel::detail::dtype_q4_k_x8_bl4);
-}
 
-inline bool can_use_neon_mul_mat_q4_vector_packed_q8_rhs_bl8_matrix_x4(
-    const event::op_mul_mat &request, const bool neon_available) noexcept {
-  return neon_available && neon_q4_vector_packed_supported() &&
-         can_run_neon_mul_mat_q4_vector_packed_q8_rhs_matrix_x4_request(
-             request, ::emel::kernel::detail::dtype_q4_k_x8_bl8);
-}
 
 inline bool can_use_neon_mul_mat_q6_vector_packed_q8_rhs(
     const event::op_mul_mat &request, const bool neon_available) noexcept {
@@ -1474,14 +1345,6 @@ inline bool can_use_neon_mul_mat_q6_vector_packed_q8_rhs(
          can_run_neon_mul_mat_q6_vector_packed_q8_rhs_request(request);
 }
 
-inline bool can_use_neon_mul_mat_q6_vector_packed_q8_rhs_matrix_x4(
-    const event::op_mul_mat &request, const bool neon_available) noexcept {
-  return neon_available && neon_q6_vector_packed_supported() &&
-         can_run_neon_mul_mat_q6_vector_packed_q8_rhs_matrix_x4_request(
-             request, ::emel::kernel::detail::dtype_q6_k_x8,
-             ::emel::kernel::detail::quant::packed_q6_k_x8_group_storage_bytes(
-                 request.src0.ne[0]));
-}
 
 inline bool can_use_neon_mul_mat_q6_vector_prepared_q8_rhs(
     const event::op_mul_mat &request, const bool neon_available) noexcept {
@@ -1501,14 +1364,6 @@ inline bool can_use_neon_mul_mat_q6_vector_prepared_q8_rhs_i8mm(
          can_run_neon_mul_mat_q6_vector_prepared_q8_rhs_request(request);
 }
 
-inline bool can_use_neon_mul_mat_q6_vector_prepared_q8_rhs_i8mm_matrix_x4(
-    const event::op_mul_mat &request, const bool neon_available) noexcept {
-  return neon_available && neon_q6_vector_prepared_q8_rhs_i8mm_supported() &&
-         can_run_neon_mul_mat_q6_vector_packed_q8_rhs_matrix_x4_request(
-             request, ::emel::kernel::detail::dtype_q6_k_x8_q8_prepared,
-             ::emel::kernel::detail::quant::
-                 prepared_q6_k_x8_q8_group_storage_bytes(request.src0.ne[0]));
-}
 
 inline bool can_run_neon_mul_mat_argmax_q6_vector_prepared_q8_rhs_request(
     const event::op_mul_mat_argmax &request) noexcept {
