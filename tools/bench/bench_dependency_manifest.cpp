@@ -348,6 +348,13 @@ constexpr std::array k_records{
                       kind::source,
                       "src/emel/speech/codec/mimi",
                       "maintained_runtime"},
+    // The parity runner loads the enriched artifact through the Moshi model
+    // binding (hparams + execution contract) before codec initialization, so
+    // contract changes must gate the compare lanes too.
+    dependency_record{"speech_codec_mimi",
+                      kind::source,
+                      "src/emel/model/moshi",
+                      "model_binding"},
     dependency_record{"speech_codec_mimi",
                       kind::source,
                       "tools/bench/speech/mimi_emel_parity_runner.cpp",
@@ -412,6 +419,10 @@ constexpr std::array k_records{
                       kind::source,
                       "src/emel/speech/codec/mimi",
                       "maintained_runtime"},
+    dependency_record{"speech_codec_mimi_mlx",
+                      kind::source,
+                      "src/emel/model/moshi",
+                      "model_binding"},
     dependency_record{"speech_codec_mimi_mlx",
                       kind::source,
                       "tools/bench/speech/mimi_emel_parity_runner.cpp",

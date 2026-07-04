@@ -94,6 +94,7 @@ record runner=tokenizer kind=fixture path=tests/models/tokenizer-tiny.json reaso
 record runner=tokenizer kind=model path=tests/models reason=tokenizer_model_inputs
 record runner=speech_codec_mimi kind=source path=tools/bench/speech/codec_mimi_bench.cpp reason=suite_source
 record runner=speech_codec_mimi kind=source path=src/emel/speech/codec/mimi reason=maintained_runtime
+record runner=speech_codec_mimi kind=source path=src/emel/model/moshi reason=model_binding
 record runner=speech_codec_mimi kind=source path=tools/bench/speech/mimi_emel_parity_runner.cpp reason=emel_lane_runner
 record runner=speech_codec_mimi kind=source path=tools/bench/speech/moshi_reference_driver.cpp reason=reference_lane_driver
 record runner=speech_codec_mimi kind=fixture path=tests/models/mimi-tiny.gguf reason=fixture
@@ -108,6 +109,7 @@ record runner=speech_codec_mimi_mlx kind=script path=scripts/bench_mimi_compare.
 record runner=speech_codec_mimi_mlx kind=script path=scripts/setup_personaplex_mlx_reference.sh reason=reference_setup
 record runner=speech_codec_mimi_mlx kind=script path=tools/bench/moshi_gguf_convert.py reason=emel_lane_converter
 record runner=speech_codec_mimi_mlx kind=source path=src/emel/speech/codec/mimi reason=maintained_runtime
+record runner=speech_codec_mimi_mlx kind=source path=src/emel/model/moshi reason=model_binding
 record runner=speech_codec_mimi_mlx kind=source path=tools/bench/speech/mimi_emel_parity_runner.cpp reason=emel_lane_runner
 record runner=speech_codec_mimi_mlx kind=script path=tools/bench/speech/personaplex_mlx_mimi_driver.py reason=reference_lane_driver
 record runner=speech_codec_mimi_mlx kind=config path=tools/bench/personaplex_mlx_ref.txt reason=reference_pin
