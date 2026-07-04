@@ -582,7 +582,8 @@ def check_seanet_geometry(infos: list[TensorInfo], family: str,
   return channels
 
 
-def cross_check_mimi(infos: list[TensorInfo], n_q: int, preset: dict) -> dict:
+def cross_check_mimi(infos: list[TensorInfo], n_q: int, preset: dict,
+                     quantize_projections: bool = False) -> dict:
   check_mimi_hparams(n_q, preset)
   first = find_info(
       infos, "mimi.quantizer.rvq_first.vq.layers.0._codebook.embedding")
@@ -730,10 +731,13 @@ def cross_check_mimi(infos: list[TensorInfo], n_q: int, preset: dict) -> dict:
         f"stride-2 conv over dim={dim}")
   conv_f16 = (find_info(infos, "mimi.encoder.model.0.conv.conv.weight").dtype
               == GGML_DTYPE_F16)
-  if conv_f16 and not rvq_q8:
+  if conv_f16 and not rvq_q8 and not quantize_projections:
     # bind_rvq_split prepares raw f16 projection copies whenever the f16 conv
     # class is selected and the split is not q8, so f32 RVQ projections in an
-    # f16-class artifact fail initialization.
+    # f16-class artifact fail initialization. A pending --quantize q8_0 run
+    # converts these projections to q8_0 (bind accepts that class without
+    # the raw-f16 copies), so the source-side f16 requirement only applies
+    # to the non-quantized path.
     for split in ("rvq_first", "rvq_rest"):
       for proj in ("input_proj", "output_proj"):
         info = find_info(infos, f"mimi.quantizer.{split}.{proj}.weight")
@@ -1161,7 +1165,9 @@ def convert(source: Path, output: Path, config_path: Path | None,
     candidates += transformer_layer_candidates(
         "mimi.decoder_transformer.transformer.", layers, 1)
     infos = unmangle_names(infos, candidates)
-    append_mimi_kv(kv, cross_check_mimi(infos, n_q, preset))
+    append_mimi_kv(kv, cross_check_mimi(infos, n_q, preset,
+                                        quantize_projections=quantize
+                                        is not None))
     if quantize is not None:
       kv.string("moshi.mimi.quantization", quantize)
   else:
