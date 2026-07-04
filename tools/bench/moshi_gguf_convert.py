@@ -730,6 +730,17 @@ def cross_check_mimi(infos: list[TensorInfo], n_q: int, preset: dict) -> dict:
         f"stride-2 conv over dim={dim}")
   conv_f16 = (find_info(infos, "mimi.encoder.model.0.conv.conv.weight").dtype
               == GGML_DTYPE_F16)
+  if conv_f16 and not rvq_q8:
+    # bind_rvq_split prepares raw f16 projection copies whenever the f16 conv
+    # class is selected and the split is not q8, so f32 RVQ projections in an
+    # f16-class artifact fail initialization.
+    for split in ("rvq_first", "rvq_rest"):
+      for proj in ("input_proj", "output_proj"):
+        info = find_info(infos, f"mimi.quantizer.{split}.{proj}.weight")
+        if info.dtype != GGML_DTYPE_F16:
+          raise ValueError(
+              f"tensor {info.name!r} has dtype {info.dtype} but the f16 conv "
+              "class requires raw f16 RVQ projections")
   if conv_f16:
     non_transposed = ["mimi.downsample.conv.conv.conv.weight"]
     for family, topology in (("encoder", MIMI_SEANET_ENCODER),
