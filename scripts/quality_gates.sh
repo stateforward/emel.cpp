@@ -743,10 +743,14 @@ infer_quality_gate_scope() {
       src/emel/io/*|src/emel/io/**/*|tests/io/*|tests/io/**/*)
         ;;
       src/emel/kernel/aarch64/*|tests/kernel/aarch64*)
-        add_bench_suite kernel_aarch64 "scope path=$file"
+        if bench_suite_supported_for_host kernel_aarch64; then
+          add_bench_suite kernel_aarch64 "scope path=$file"
+        fi
         ;;
       src/emel/kernel/x86_64/*|tests/kernel/x86_64*)
-        add_bench_suite kernel_x86_64 "scope path=$file"
+        if bench_suite_supported_for_host kernel_x86_64; then
+          add_bench_suite kernel_x86_64 "scope path=$file"
+        fi
         ;;
       src/emel/kernel/*|src/emel/graph/*|src/emel/memory/*|src/emel/tensor/*|\
       tests/kernel/*|tests/graph/*|tests/memory/*|tests/tensor/*)
