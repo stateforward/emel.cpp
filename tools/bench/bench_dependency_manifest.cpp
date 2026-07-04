@@ -237,6 +237,13 @@ constexpr std::array k_records{
                       kind::source,
                       "src/emel/model/tensor/window",
                       "window_actor"},
+    // The bench constructs emel::io::mmap::sm directly for the emel_mmap
+    // baseline and the streaming lane, so mmap regressions must gate this
+    // suite.
+    dependency_record{"weight_streaming",
+                      kind::source,
+                      "src/emel/io/mmap",
+                      "mmap_actor"},
     dependency_record{"weight_streaming",
                       kind::source,
                       "scripts/bench.sh",
@@ -398,6 +405,17 @@ constexpr std::array k_records{
                       kind::script,
                       "tools/bench/moshi_gguf_convert.py",
                       "emel_lane_converter"},
+    // The MLX comparison exercises the same maintained codec runtime through
+    // the EMEL parity runner, so codec-only changes must gate this suite on
+    // Apple Silicon too.
+    dependency_record{"speech_codec_mimi_mlx",
+                      kind::source,
+                      "src/emel/speech/codec/mimi",
+                      "maintained_runtime"},
+    dependency_record{"speech_codec_mimi_mlx",
+                      kind::source,
+                      "tools/bench/speech/mimi_emel_parity_runner.cpp",
+                      "emel_lane_runner"},
     dependency_record{"speech_codec_mimi_mlx",
                       kind::script,
                       "tools/bench/speech/personaplex_mlx_mimi_driver.py",

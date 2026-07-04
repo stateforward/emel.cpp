@@ -67,6 +67,7 @@ record runner=parallel_matmul kind=source path=tools/bench/text/generator/parall
 record runner=parallel_matmul kind=source path=src/emel/text/generator/detail.hpp reason=parallel_matmul_lanes
 record runner=weight_streaming kind=source path=tools/bench/model/tensor/window_streaming_bench.cpp reason=suite_source
 record runner=weight_streaming kind=source path=src/emel/model/tensor/window reason=window_actor
+record runner=weight_streaming kind=source path=src/emel/io/mmap reason=mmap_actor
 record runner=weight_streaming kind=source path=scripts/bench.sh reason=memory_max_wrapper
 record runner=tokenizer_preprocessor_bpe kind=source path=tools/bench/text/tokenizer/preprocessor/bpe_bench.cpp reason=suite_source
 record runner=tokenizer_preprocessor_spm kind=source path=tools/bench/text/tokenizer/preprocessor/spm_bench.cpp reason=suite_source
@@ -106,6 +107,8 @@ record runner=speech_codec_mimi_mlx kind=script path=tools/bench/mimi_compare.py
 record runner=speech_codec_mimi_mlx kind=script path=scripts/bench_mimi_compare.sh reason=compare_wrapper
 record runner=speech_codec_mimi_mlx kind=script path=scripts/setup_personaplex_mlx_reference.sh reason=reference_setup
 record runner=speech_codec_mimi_mlx kind=script path=tools/bench/moshi_gguf_convert.py reason=emel_lane_converter
+record runner=speech_codec_mimi_mlx kind=source path=src/emel/speech/codec/mimi reason=maintained_runtime
+record runner=speech_codec_mimi_mlx kind=source path=tools/bench/speech/mimi_emel_parity_runner.cpp reason=emel_lane_runner
 record runner=speech_codec_mimi_mlx kind=script path=tools/bench/speech/personaplex_mlx_mimi_driver.py reason=reference_lane_driver
 record runner=speech_codec_mimi_mlx kind=config path=tools/bench/personaplex_mlx_ref.txt reason=reference_pin
 record runner=speech_codec_mimi_mlx kind=config path=tools/bench/reference_backends/personaplex_mlx_mimi.json reason=reference_backend_descriptor
