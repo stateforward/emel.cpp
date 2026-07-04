@@ -4717,6 +4717,15 @@ inline bool can_run_conv_transpose_1d(const request_type &request) noexcept {
   const int64_t in_channels = static_cast<int64_t>(request.src0.ne[2]);
   const int64_t length = static_cast<int64_t>(request.src1.ne[0]);
   const int64_t out_length = (length - 1) * s0 + kernel;
+  // The per-extent caps above bound length/kernel/out_channels but out_length
+  // scales by s0 past them, and the exec zero-fills out_length * out_channels
+  // destination elements: both must stay under the guard cap so the fill
+  // size and dst stores cannot overflow even with a matching dst shape.
+  if (out_length > static_cast<int64_t>(k_max_conv_guard_extent) ||
+      out_length * out_channels >
+          static_cast<int64_t>(k_max_conv_guard_extent)) {
+    return false;
+  }
   // The exec reads through both operands; metadata-only tensors must reject
   // here instead of dereferencing null inside the action.
   return request.src0.data != nullptr && request.src1.data != nullptr &&

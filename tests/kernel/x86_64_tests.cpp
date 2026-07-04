@@ -2123,6 +2123,23 @@ TEST_CASE("kernel_x86_64_im2col_and_conv_transpose_1d") {
   huge_convtr.src1 = huge_convtr_input;
   CHECK_FALSE(machine.process_event(huge_convtr));
 
+  // Per-extent caps alone still admit an s0-scaled out_length whose product
+  // with out_channels exceeds the guard cap: with a matching destination
+  // shape the exec would fill far past the destination allocation, so the
+  // total-output bound must reject before dispatch.
+  float wide_kernel[2 * 16] = {};
+  float wide_input[8] = {};
+  float wide_out[16] = {};
+  emel::kernel::event::op_conv_transpose_1d wide_convtr_ev{
+      .src0 = make_src(wide_kernel, dtype::f32, 2, 16, 1),
+      .src1 = make_src(wide_input, dtype::f32, 65536, 1),
+      .dst = make_dst(wide_out, dtype::f32, 536862722u, 16),
+  };
+  set_op_param_i32(wide_convtr_ev, 0u, 8192); // s0 -> out_length ~2^29
+  set_op_param_i32(wide_convtr_ev, 1u, 0);    // p0
+  set_op_param_i32(wide_convtr_ev, 2u, 1);    // d0
+  CHECK_FALSE(machine.process_event(wide_convtr_ev));
+
   // Metadata-only inputs reject in the guard instead of dereferencing null
   // inside the exec.
   auto null_conv_input = make_src(up_input, dtype::f32, 2, 1);
