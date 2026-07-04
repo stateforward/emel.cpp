@@ -549,7 +549,7 @@ struct request_decode_compute_flash_native_quantized_q8_k_logits_streamed {
 
 struct request_decode_compute_flash_preselected_argmax_q8_k_streamed {
   void operator()(const event::generate_run &ev, context &ctx) const noexcept {
-    request_phase_compute<
+    request_phase_compute_preselected_argmax<
         emel::text::generator::detail::step_kind::decode,
         emel::text::generator::detail::
             run_kernel_flash_decode_preselected_argmax_q8_k_streamed>(ev, ctx);
@@ -559,7 +559,7 @@ struct request_decode_compute_flash_preselected_argmax_q8_k_streamed {
 struct
     request_decode_compute_flash_preselected_argmax_native_quantized_q8_k_streamed {
   void operator()(const event::generate_run &ev, context &ctx) const noexcept {
-    request_phase_compute<
+    request_phase_compute_preselected_argmax<
         emel::text::generator::detail::step_kind::decode,
         emel::text::generator::detail::
             run_kernel_flash_decode_preselected_argmax_native_quantized_q8_k_streamed>(
@@ -570,7 +570,7 @@ struct
 struct
     request_decode_compute_flash_preselected_argmax_native_quantized_kernel_streamed {
   void operator()(const event::generate_run &ev, context &ctx) const noexcept {
-    request_phase_compute<
+    request_phase_compute_preselected_argmax<
         emel::text::generator::detail::step_kind::decode,
         emel::text::generator::detail::
             run_kernel_flash_decode_preselected_argmax_native_quantized_kernel_streamed>(
@@ -580,7 +580,7 @@ struct
 
 struct request_decode_compute_flash_preselected_argmax_kernel_streamed {
   void operator()(const event::generate_run &ev, context &ctx) const noexcept {
-    request_phase_compute<
+    request_phase_compute_preselected_argmax<
         emel::text::generator::detail::step_kind::decode,
         emel::text::generator::detail::
             run_kernel_flash_decode_preselected_argmax_kernel_streamed>(ev,
