@@ -58,6 +58,11 @@ milestone section explicitly names them as maintained evidence.
 | `memory/hybrid_full` | 444.458 | llama.cpp | 34307.000 | 0.013x |
 | `memory/kv_full` | 131.833 | llama.cpp | 33199.750 | 0.004x |
 | `memory/recurrent_full` | 148.625 | llama.cpp | 4460.167 | 0.033x |
+| `parallel_matmul/ggml_gemm8_f32` | 170008.552 | llama.cpp | 201689.476 | 0.843x |
+| `parallel_matmul/ggml_gemv_f32` | 284070.253 | llama.cpp | 29684.396 | 9.570x |
+| `parallel_matmul/ggml_gemv_q4_k` | 68174.144 | llama.cpp | 16335.825 | 4.173x |
+| `parallel_matmul/ggml_gemv_q6_k` | 44451.588 | llama.cpp | 17805.679 | 2.496x |
+| `parallel_matmul/ggml_gemv_q8_0` | 55579.414 | llama.cpp | 20757.682 | 2.678x |
 | `text/encoders/bpe_long` | 65.417 | llama.cpp | 66.333 | 0.986x |
 | `text/encoders/bpe_short` | 58.416 | llama.cpp | 57.000 | 1.025x |
 | `text/encoders/fallback_long` | 2432.500 | llama.cpp | 2504.917 | 0.971x |

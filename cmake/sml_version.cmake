@@ -1,2 +1,3 @@
 set(EMEL_SML_GIT_REPOSITORY "https://github.com/stateforward/sml.cpp")
-set(EMEL_SML_GIT_TAG "4a7109b5dd4aae40e78304e3ac03440ccc35031e")
+# main: external-completion scheduler (PR #16 merge).
+set(EMEL_SML_GIT_TAG "8114aef8f51f2a9a84f8725321e5f1c55bf20b73")

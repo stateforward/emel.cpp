@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# shellcheck source=scripts/build_jobs.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/build_jobs.sh"
+
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TIMING_FILE="$ROOT_DIR/snapshots/quality_gates/timing.txt"
 QUALITY_GATES_TIMEOUT="${EMEL_QUALITY_GATES_TIMEOUT:-1800s}"
@@ -360,6 +363,11 @@ bench_suite_supported_for_host() {
       ;;
     kernel_aarch64)
       [[ "$host_arch" == "aarch64" || "$host_arch" == "arm64" ]]
+      ;;
+    speech_codec_mimi_mlx)
+      # personaplex-mlx reference lane needs MLX (Apple Silicon macOS).
+      [[ "$(uname -s)" == "Darwin" ]] &&
+        [[ "$host_arch" == "aarch64" || "$host_arch" == "arm64" ]]
       ;;
     sm_any|sm_scheduler)
       [[ -n "${EMEL_BENCH_INTERNAL:-}" && "${EMEL_BENCH_INTERNAL:-}" != "0" ]]
@@ -1017,6 +1025,27 @@ run_benchmark_gates() {
       whisper_compare)
         if run_step_allow_fail "bench_snapshot_${suite}" \
           "$ROOT_DIR/scripts/bench_whisper_compare.sh"; then
+          continue
+        else
+          status=$?
+          continue
+        fi
+        ;;
+      speech_codec_mimi)
+        # The generic bench path runs codec_mimi_bench with placeholder
+        # reference rows only; the token-exact Moshi comparison lives in the
+        # compare script, so Mimi runtime/converter changes must route there.
+        if run_step_allow_fail "bench_snapshot_${suite}" \
+          "$ROOT_DIR/scripts/bench_mimi_compare.sh" --reference=moshi_cpp; then
+          continue
+        else
+          status=$?
+          continue
+        fi
+        ;;
+      speech_codec_mimi_mlx)
+        if run_step_allow_fail "bench_snapshot_${suite}" \
+          "$ROOT_DIR/scripts/bench_mimi_compare.sh" --reference=personaplex-mlx; then
           continue
         else
           status=$?

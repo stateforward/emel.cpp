@@ -32,10 +32,11 @@
 #include "emel/gguf/loader/sm.hpp"
 #include "emel/io/events.hpp"
 #include "emel/io/read/sm.hpp"
-#include "emel/io/staged_read/sm.hpp"
 #include "emel/io/source/any.hpp"
+#include "emel/io/staged_read/sm.hpp"
 #include "emel/kernel/aarch64/detail.hpp"
 #include "emel/kernel/aarch64/sm.hpp"
+#include "emel/kernel/any.hpp"
 #include "emel/kernel/events.hpp"
 #include "emel/kernel/x86_64/sm.hpp"
 #include "emel/logits/sampler/events.hpp"
@@ -1929,9 +1930,9 @@ bool emel_token_is_stop(const emel::model::data::vocab &vocab,
 uint32_t reference_context_capacity(const size_t prompt_token_count,
                                     const int32_t max_tokens) noexcept {
   constexpr uint32_t k_min_reference_context_tokens = 512u;
-  const uint64_t requested =
-      static_cast<uint64_t>(prompt_token_count) +
-      static_cast<uint64_t>(std::max(0, max_tokens)) + 1u;
+  const uint64_t requested = static_cast<uint64_t>(prompt_token_count) +
+                             static_cast<uint64_t>(std::max(0, max_tokens)) +
+                             1u;
   const uint64_t bounded =
       std::min<uint64_t>(requested, std::numeric_limits<uint32_t>::max());
   return std::max<uint32_t>(k_min_reference_context_tokens,
@@ -16906,6 +16907,186 @@ bool run_ggml_mul_mat(const std::vector<float> &matrix_a,
   return true;
 }
 
+template <class build_fn>
+bool run_ggml_rows_2d(const std::vector<float> &src, const int64_t width,
+                      const int64_t rows, std::vector<float> &out,
+                      build_fn build) {
+  ggml_case_context c{};
+  ggml_tensor *a = ggml_new_tensor_2d(c.ctx, GGML_TYPE_F32, width, rows);
+  set_tensor_f32(a, src);
+  ggml_tensor *out_tensor = build(c.ctx, a);
+  if (!compute_graph(c, out_tensor)) {
+    return false;
+  }
+  const float *out_data = ggml_get_data_f32(out_tensor);
+  out.assign(out_data, out_data + src.size());
+  return true;
+}
+
+bool run_ggml_get_rows_case(const void *table_data, const ggml_type table_type,
+                            const int64_t cols, const int64_t table_rows,
+                            const std::vector<int32_t> &indices,
+                            std::vector<float> &out) {
+  ggml_case_context c{};
+  ggml_tensor *a = ggml_new_tensor_2d(c.ctx, table_type, cols, table_rows);
+  std::memcpy(ggml_get_data(a), table_data, ggml_nbytes(a));
+  ggml_tensor *b = ggml_new_tensor_1d(c.ctx, GGML_TYPE_I32,
+                                      static_cast<int64_t>(indices.size()));
+  std::memcpy(ggml_get_data(b), indices.data(),
+              indices.size() * sizeof(int32_t));
+  ggml_tensor *out_tensor = ggml_get_rows(c.ctx, a, b);
+  if (!compute_graph(c, out_tensor)) {
+    return false;
+  }
+  const float *out_data = ggml_get_data_f32(out_tensor);
+  out.assign(out_data, out_data + static_cast<size_t>(cols) * indices.size());
+  return true;
+}
+
+bool run_ggml_rope_case(const std::vector<float> &src,
+                        const std::vector<int32_t> &positions,
+                        const int64_t head_dim, const int64_t head_count,
+                        const int64_t tokens, const int32_t n_dims,
+                        const int32_t mode, const float freq_base,
+                        std::vector<float> &out) {
+  ggml_case_context c{};
+  ggml_tensor *a =
+      ggml_new_tensor_3d(c.ctx, GGML_TYPE_F32, head_dim, head_count, tokens);
+  set_tensor_f32(a, src);
+  ggml_tensor *b = ggml_new_tensor_1d(c.ctx, GGML_TYPE_I32, tokens);
+  std::memcpy(ggml_get_data(b), positions.data(),
+              positions.size() * sizeof(int32_t));
+  ggml_tensor *out_tensor =
+      ggml_rope_ext(c.ctx, a, b, nullptr, n_dims, mode, 0, freq_base, 1.0f,
+                    0.0f, 1.0f, 32.0f, 1.0f);
+  if (!compute_graph(c, out_tensor)) {
+    return false;
+  }
+  const float *out_data = ggml_get_data_f32(out_tensor);
+  out.assign(out_data, out_data + src.size());
+  return true;
+}
+
+bool run_ggml_im2col_1d_case(const std::vector<float> &input,
+                             const int64_t length, const int64_t channels,
+                             const int64_t kernel_taps, const int32_t s0,
+                             const int32_t p0, const int32_t d0,
+                             std::vector<float> &out) {
+  ggml_case_context c{};
+  ggml_tensor *a =
+      ggml_new_tensor_3d(c.ctx, GGML_TYPE_F16, kernel_taps, channels, 1);
+  ggml_tensor *b =
+      ggml_new_tensor_3d(c.ctx, GGML_TYPE_F32, length, channels, 1);
+  set_tensor_f32(b, input);
+  ggml_tensor *out_tensor =
+      ggml_im2col(c.ctx, a, b, s0, 0, p0, 0, d0, 0, false, GGML_TYPE_F32);
+  if (!compute_graph(c, out_tensor)) {
+    return false;
+  }
+  const float *out_data = ggml_get_data_f32(out_tensor);
+  out.assign(out_data,
+             out_data + static_cast<size_t>(ggml_nelements(out_tensor)));
+  return true;
+}
+
+bool run_ggml_conv_transpose_1d_case(const std::vector<uint16_t> &kernel_f16,
+                                     const int64_t taps,
+                                     const int64_t out_channels,
+                                     const int64_t in_channels,
+                                     const std::vector<float> &input,
+                                     const int64_t length, const int32_t s0,
+                                     std::vector<float> &out) {
+  ggml_case_context c{};
+  ggml_tensor *a =
+      ggml_new_tensor_3d(c.ctx, GGML_TYPE_F16, taps, out_channels, in_channels);
+  std::memcpy(ggml_get_data(a), kernel_f16.data(),
+              kernel_f16.size() * sizeof(uint16_t));
+  ggml_tensor *b =
+      ggml_new_tensor_2d(c.ctx, GGML_TYPE_F32, length, in_channels);
+  set_tensor_f32(b, input);
+  ggml_tensor *out_tensor = ggml_conv_transpose_1d(c.ctx, a, b, s0, 0, 1);
+  if (!compute_graph(c, out_tensor)) {
+    return false;
+  }
+  const float *out_data = ggml_get_data_f32(out_tensor);
+  out.assign(out_data,
+             out_data + static_cast<size_t>(ggml_nelements(out_tensor)));
+  return true;
+}
+
+emel::kernel::event::tensor_view make_i32_src_view(const int32_t *data,
+                                                   const uint64_t ne0) {
+  emel::kernel::event::tensor_view tensor{};
+  tensor.data = data;
+  tensor.type = emel::kernel::event::dtype::i32;
+  tensor.ne = {ne0, 1, 1, 1};
+  fill_default_nb(tensor);
+  return tensor;
+}
+
+emel::kernel::event::tensor_view make_f16_src_view(const uint16_t *data,
+                                                   const uint64_t ne0,
+                                                   const uint64_t ne1 = 1,
+                                                   const uint64_t ne2 = 1) {
+  emel::kernel::event::tensor_view tensor{};
+  tensor.data = data;
+  tensor.type = emel::kernel::event::dtype::f16;
+  tensor.ne = {ne0, ne1, ne2, 1};
+  tensor.nb[0] = sizeof(uint16_t);
+  tensor.nb[1] = tensor.nb[0] * ne0;
+  tensor.nb[2] = tensor.nb[1] * ne1;
+  tensor.nb[3] = tensor.nb[2] * ne2;
+  return tensor;
+}
+
+emel::kernel::event::tensor_view
+make_quantized_table_view(const void *data,
+                          const emel::kernel::event::dtype type,
+                          const uint64_t cols, const uint64_t rows) {
+  emel::kernel::event::tensor_view tensor{};
+  const size_t row_bytes = emel::kernel::detail::quantized_row_storage_bytes(
+      emel::kernel::detail::dtype_code(type), cols);
+  tensor.data = data;
+  tensor.type = type;
+  tensor.ne = {cols, rows, 1, 1};
+  tensor.nb[0] = 1;
+  tensor.nb[1] = row_bytes;
+  tensor.nb[2] = row_bytes * rows;
+  tensor.nb[3] = tensor.nb[2];
+  return tensor;
+}
+
+template <class event_type>
+void set_case_param_i32(event_type &ev, const uint32_t slot,
+                        const int32_t value) {
+  std::memcpy(ev.op_params.data() + slot * sizeof(int32_t), &value,
+              sizeof(value));
+  ev.op_params_size =
+      std::max<uint32_t>(ev.op_params_size, (slot + 1u) * sizeof(int32_t));
+}
+
+template <class event_type>
+void set_case_param_f32(event_type &ev, const uint32_t slot,
+                        const float value) {
+  std::memcpy(ev.op_params.data() + slot * sizeof(float), &value,
+              sizeof(value));
+  ev.op_params_size =
+      std::max<uint32_t>(ev.op_params_size, (slot + 1u) * sizeof(float));
+}
+
+template <class event_type>
+void set_rope_case_params(event_type &ev, const int32_t n_dims,
+                          const int32_t mode, const float freq_base) {
+  set_case_param_i32(ev, 1u, n_dims);
+  set_case_param_i32(ev, 2u, mode);
+  set_case_param_f32(ev, 5u, freq_base);
+  set_case_param_f32(ev, 6u, 1.0f);  // freq_scale
+  set_case_param_f32(ev, 7u, 0.0f);  // ext_factor
+  set_case_param_f32(ev, 8u, 1.0f);  // attn_factor
+  set_case_param_f32(ev, 9u, 32.0f); // beta_fast
+  set_case_param_f32(ev, 10u, 1.0f); // beta_slow
+}
+
 #if 0
 bool compute_attention_with_ggml_nonflash_exact_scores_prod_value(
     generator_diag::native_backend & backend,
@@ -17902,6 +18083,488 @@ bool run_backend_kernel_parity(const char *backend, exec_fn exec) {
   }
 
   {
+    const struct {
+      const char *name;
+      emel::kernel::event::unary_subop subop;
+      ggml_tensor *(*build)(ggml_context *, ggml_tensor *);
+    } unary_cases[] = {
+        {"op_unary_tanh", emel::kernel::event::unary_subop::tanh,
+         [](ggml_context *ctx, ggml_tensor *a) { return ggml_tanh(ctx, a); }},
+        {"op_unary_elu", emel::kernel::event::unary_subop::elu,
+         [](ggml_context *ctx, ggml_tensor *a) { return ggml_elu(ctx, a); }},
+        {"op_unary_silu", emel::kernel::event::unary_subop::silu,
+         [](ggml_context *ctx, ggml_tensor *a) { return ggml_silu(ctx, a); }},
+    };
+    for (const auto &unary_case : unary_cases) {
+      auto src = make_signed_data(k_vec_len, 0.85f, -0.15f);
+      std::vector<float> emel_out(static_cast<size_t>(k_vec_len));
+      emel::kernel::event::op_unary ev{
+          .src0 = make_src_view(src.data(), static_cast<uint64_t>(k_vec_len)),
+          .dst =
+              make_dst_view(emel_out.data(), static_cast<uint64_t>(k_vec_len)),
+          .subop = unary_case.subop,
+      };
+      std::vector<float> ggml_out;
+      if (!exec(ev)) {
+        fail(unary_case.name, "emel rejected request");
+      } else if (!run_ggml_unary(src, ggml_out, unary_case.build)) {
+        fail(unary_case.name, "ggml execution failed");
+      } else if (!compare_f32_vectors(backend, unary_case.name, emel_out,
+                                      ggml_out)) {
+        ok = false;
+      }
+    }
+  }
+
+  {
+    // the emel gelu replicates ggml's GGML_GELU_FP16 table semantics
+    // (fp16-quantized input and output around the tanh approximation), so
+    // the comparison is bit-exact.
+    auto src = make_signed_data(k_vec_len, 0.85f, -0.15f);
+    std::vector<float> emel_out(static_cast<size_t>(k_vec_len));
+    emel::kernel::event::op_unary ev{
+        .src0 = make_src_view(src.data(), static_cast<uint64_t>(k_vec_len)),
+        .dst = make_dst_view(emel_out.data(), static_cast<uint64_t>(k_vec_len)),
+        .subop = emel::kernel::event::unary_subop::gelu,
+    };
+    std::vector<float> ggml_out;
+    if (!exec(ev)) {
+      fail("op_unary_gelu", "emel rejected request");
+    } else if (!run_ggml_unary(src, ggml_out,
+                               [](ggml_context *ctx, ggml_tensor *a) {
+                                 return ggml_gelu(ctx, a);
+                               })) {
+      fail("op_unary_gelu", "ggml execution failed");
+    } else {
+      for (size_t i = 0; i < emel_out.size(); ++i) {
+        if (emel_out[i] != ggml_out[i]) {
+          fail("op_unary_gelu", "gelu not bit-exact vs ggml fp16 table");
+          break;
+        }
+      }
+    }
+  }
+
+  {
+    constexpr float k_norm_eps = 1e-5f;
+    auto src = make_signed_data(k_softmax_width * k_softmax_rows, 0.6f, 0.2f);
+    std::vector<float> emel_out(
+        static_cast<size_t>(k_softmax_width * k_softmax_rows));
+    emel::kernel::event::op_rms_norm ev{
+        .src0 =
+            make_src_view(src.data(), static_cast<uint64_t>(k_softmax_width),
+                          static_cast<uint64_t>(k_softmax_rows)),
+        .dst = make_dst_view(emel_out.data(),
+                             static_cast<uint64_t>(k_softmax_width),
+                             static_cast<uint64_t>(k_softmax_rows)),
+    };
+    set_case_param_f32(ev, 0u, k_norm_eps);
+    std::vector<float> ggml_out;
+    if (!exec(ev)) {
+      fail("op_rms_norm", "emel rejected request");
+    } else if (!run_ggml_rows_2d(src, k_softmax_width, k_softmax_rows, ggml_out,
+                                 [](ggml_context *ctx, ggml_tensor *a) {
+                                   return ggml_rms_norm(ctx, a, k_norm_eps);
+                                 })) {
+      fail("op_rms_norm", "ggml execution failed");
+    } else if (!compare_f32_vectors(backend, "op_rms_norm", emel_out,
+                                    ggml_out)) {
+      ok = false;
+    }
+  }
+
+  {
+    constexpr float k_norm_eps = 1e-5f;
+    auto src = make_signed_data(k_softmax_width * k_softmax_rows, 0.5f, -0.3f);
+    std::vector<float> emel_out(
+        static_cast<size_t>(k_softmax_width * k_softmax_rows));
+    emel::kernel::event::op_norm ev{
+        .src0 =
+            make_src_view(src.data(), static_cast<uint64_t>(k_softmax_width),
+                          static_cast<uint64_t>(k_softmax_rows)),
+        .dst = make_dst_view(emel_out.data(),
+                             static_cast<uint64_t>(k_softmax_width),
+                             static_cast<uint64_t>(k_softmax_rows)),
+    };
+    set_case_param_f32(ev, 0u, k_norm_eps);
+    std::vector<float> ggml_out;
+    if (!exec(ev)) {
+      fail("op_norm", "emel rejected request");
+    } else if (!run_ggml_rows_2d(src, k_softmax_width, k_softmax_rows, ggml_out,
+                                 [](ggml_context *ctx, ggml_tensor *a) {
+                                   return ggml_norm(ctx, a, k_norm_eps);
+                                 })) {
+      fail("op_norm", "ggml execution failed");
+    } else if (!compare_f32_vectors(backend, "op_norm", emel_out, ggml_out)) {
+      ok = false;
+    }
+  }
+
+  {
+    constexpr int64_t k_table_cols = 32;
+    constexpr int64_t k_table_rows = 16;
+    auto table = make_signed_data(k_table_cols * k_table_rows, 0.7f, 0.05f);
+    const std::vector<int32_t> indices{3, 0, 15, 7};
+    std::vector<float> emel_out(static_cast<size_t>(k_table_cols) *
+                                indices.size());
+    emel::kernel::event::op_get_rows ev{
+        .src0 = make_src_view(table.data(), static_cast<uint64_t>(k_table_cols),
+                              static_cast<uint64_t>(k_table_rows)),
+        .src1 = make_i32_src_view(indices.data(), indices.size()),
+        .dst =
+            make_dst_view(emel_out.data(), static_cast<uint64_t>(k_table_cols),
+                          static_cast<uint64_t>(indices.size())),
+    };
+    std::vector<float> ggml_out;
+    if (!exec(ev)) {
+      fail("op_get_rows_f32", "emel rejected request");
+    } else if (!run_ggml_get_rows_case(table.data(), GGML_TYPE_F32,
+                                       k_table_cols, k_table_rows, indices,
+                                       ggml_out)) {
+      fail("op_get_rows_f32", "ggml execution failed");
+    } else if (!compare_f32_vectors(backend, "op_get_rows_f32", emel_out,
+                                    ggml_out)) {
+      ok = false;
+    }
+  }
+
+  {
+    // Quantize the table with ggml itself and gather from the identical block
+    // bytes in both lanes, per supported quantized get_rows variant.
+    constexpr int64_t k_table_cols = 256;
+    constexpr int64_t k_table_rows = 8;
+    const struct {
+      const char *name;
+      ggml_type ggml_dtype;
+      emel::kernel::event::dtype emel_dtype;
+    } quant_cases[] = {
+        {"op_get_rows_q8_0", GGML_TYPE_Q8_0, emel::kernel::event::dtype::q8_0},
+        {"op_get_rows_q4_0", GGML_TYPE_Q4_0, emel::kernel::event::dtype::q4_0},
+        {"op_get_rows_q4_k", GGML_TYPE_Q4_K, emel::kernel::event::dtype::q4_k},
+    };
+    for (const auto &quant_case : quant_cases) {
+      auto table = make_signed_data(k_table_cols * k_table_rows, 0.9f, 0.1f);
+      std::vector<uint8_t> blocks(
+          ggml_row_size(quant_case.ggml_dtype, k_table_cols) * k_table_rows);
+      ggml_quantize_chunk(quant_case.ggml_dtype, table.data(), blocks.data(), 0,
+                          k_table_rows, k_table_cols, nullptr);
+      const std::vector<int32_t> indices{5, 2, 7, 0};
+      std::vector<float> emel_out(static_cast<size_t>(k_table_cols) *
+                                  indices.size());
+      emel::kernel::event::op_get_rows ev{
+          .src0 =
+              make_quantized_table_view(blocks.data(), quant_case.emel_dtype,
+                                        static_cast<uint64_t>(k_table_cols),
+                                        static_cast<uint64_t>(k_table_rows)),
+          .src1 = make_i32_src_view(indices.data(), indices.size()),
+          .dst = make_dst_view(emel_out.data(),
+                               static_cast<uint64_t>(k_table_cols),
+                               static_cast<uint64_t>(indices.size())),
+      };
+      std::vector<float> ggml_out;
+      if (!exec(ev)) {
+        fail(quant_case.name, "emel rejected request");
+      } else if (!run_ggml_get_rows_case(blocks.data(), quant_case.ggml_dtype,
+                                         k_table_cols, k_table_rows, indices,
+                                         ggml_out)) {
+        fail(quant_case.name, "ggml execution failed");
+      } else if (!compare_f32_vectors(backend, quant_case.name, emel_out,
+                                      ggml_out)) {
+        ok = false;
+      }
+    }
+  }
+
+  {
+    constexpr int64_t k_rope_head_dim = 8;
+    constexpr int64_t k_rope_heads = 2;
+    constexpr int64_t k_rope_tokens = 4;
+    const std::vector<int32_t> positions{0, 1, 2, 5};
+    const struct {
+      const char *name;
+      int32_t mode;
+    } rope_cases[] = {
+        {"op_rope_norm", 0},
+        {"op_rope_neox", GGML_ROPE_TYPE_NEOX},
+    };
+    for (const auto &rope_case : rope_cases) {
+      auto src = make_signed_data(
+          k_rope_head_dim * k_rope_heads * k_rope_tokens, 0.65f, 0.2f);
+      std::vector<float> emel_out(src.size());
+      emel::kernel::event::op_rope ev{
+          .src0 =
+              make_src_view(src.data(), static_cast<uint64_t>(k_rope_head_dim),
+                            static_cast<uint64_t>(k_rope_heads),
+                            static_cast<uint64_t>(k_rope_tokens)),
+          .src1 = make_i32_src_view(positions.data(), positions.size()),
+          .dst = make_dst_view(emel_out.data(),
+                               static_cast<uint64_t>(k_rope_head_dim),
+                               static_cast<uint64_t>(k_rope_heads),
+                               static_cast<uint64_t>(k_rope_tokens)),
+      };
+      set_rope_case_params(ev, static_cast<int32_t>(k_rope_head_dim),
+                           rope_case.mode, 10000.0f);
+      std::vector<float> ggml_out;
+      if (!exec(ev)) {
+        fail(rope_case.name, "emel rejected request");
+      } else if (!run_ggml_rope_case(src, positions, k_rope_head_dim,
+                                     k_rope_heads, k_rope_tokens,
+                                     static_cast<int32_t>(k_rope_head_dim),
+                                     rope_case.mode, 10000.0f, ggml_out)) {
+        fail(rope_case.name, "ggml execution failed");
+      } else if (!compare_f32_vectors(backend, rope_case.name, emel_out,
+                                      ggml_out)) {
+        ok = false;
+      }
+    }
+  }
+
+  {
+    constexpr int64_t k_conv_length = 16;
+    constexpr int64_t k_conv_channels = 3;
+    constexpr int64_t k_conv_taps = 5;
+    constexpr int32_t k_conv_stride = 2;
+    constexpr int32_t k_conv_pad = 2;
+    constexpr int64_t k_conv_out_length =
+        (k_conv_length + 2 * k_conv_pad - (k_conv_taps - 1) - 1) /
+            k_conv_stride +
+        1;
+    auto input = make_signed_data(k_conv_length * k_conv_channels, 0.8f, 0.1f);
+    std::vector<float> kernel_shape(
+        static_cast<size_t>(k_conv_taps * k_conv_channels));
+    std::vector<float> emel_out(
+        static_cast<size_t>(k_conv_channels * k_conv_taps * k_conv_out_length));
+    emel::kernel::event::op_im2col ev{
+        .src0 = make_src_view(kernel_shape.data(),
+                              static_cast<uint64_t>(k_conv_taps),
+                              static_cast<uint64_t>(k_conv_channels)),
+        .src1 =
+            make_src_view(input.data(), static_cast<uint64_t>(k_conv_length),
+                          static_cast<uint64_t>(k_conv_channels)),
+        .dst =
+            make_dst_view(emel_out.data(),
+                          static_cast<uint64_t>(k_conv_channels * k_conv_taps),
+                          static_cast<uint64_t>(k_conv_out_length)),
+    };
+    set_case_param_i32(ev, 0u, k_conv_stride);
+    set_case_param_i32(ev, 1u, 0);
+    set_case_param_i32(ev, 2u, k_conv_pad);
+    set_case_param_i32(ev, 3u, 0);
+    set_case_param_i32(ev, 4u, 1);
+    set_case_param_i32(ev, 5u, 0);
+    set_case_param_i32(ev, 6u, 0);
+    std::vector<float> ggml_out;
+    if (!exec(ev)) {
+      fail("op_im2col", "emel rejected request");
+    } else if (!run_ggml_im2col_1d_case(input, k_conv_length, k_conv_channels,
+                                        k_conv_taps, k_conv_stride, k_conv_pad,
+                                        1, ggml_out)) {
+      fail("op_im2col", "ggml execution failed");
+    } else if (!compare_f32_vectors(backend, "op_im2col", emel_out, ggml_out)) {
+      ok = false;
+    }
+  }
+
+  {
+    constexpr int64_t k_up_taps = 4;
+    constexpr int64_t k_up_out_channels = 3;
+    constexpr int64_t k_up_in_channels = 2;
+    constexpr int64_t k_up_length = 6;
+    constexpr int32_t k_up_stride = 2;
+    constexpr int64_t k_up_out_length =
+        (k_up_length - 1) * k_up_stride + k_up_taps;
+    auto kernel_f32 = make_signed_data(
+        k_up_taps * k_up_out_channels * k_up_in_channels, 0.75f, -0.05f);
+    std::vector<uint16_t> kernel_f16(kernel_f32.size());
+    for (size_t i = 0; i < kernel_f32.size(); ++i) {
+      kernel_f16[i] = ggml_fp32_to_fp16(kernel_f32[i]);
+    }
+    auto input = make_signed_data(k_up_length * k_up_in_channels, 0.55f, 0.2f);
+    std::vector<float> emel_out(
+        static_cast<size_t>(k_up_out_length * k_up_out_channels));
+    emel::kernel::event::op_conv_transpose_1d ev{
+        .src0 = make_f16_src_view(kernel_f16.data(),
+                                  static_cast<uint64_t>(k_up_taps),
+                                  static_cast<uint64_t>(k_up_out_channels),
+                                  static_cast<uint64_t>(k_up_in_channels)),
+        .src1 = make_src_view(input.data(), static_cast<uint64_t>(k_up_length),
+                              static_cast<uint64_t>(k_up_in_channels)),
+        .dst = make_dst_view(emel_out.data(),
+                             static_cast<uint64_t>(k_up_out_length),
+                             static_cast<uint64_t>(k_up_out_channels)),
+    };
+    set_case_param_i32(ev, 0u, k_up_stride);
+    set_case_param_i32(ev, 1u, 0);
+    set_case_param_i32(ev, 2u, 1);
+    std::vector<float> ggml_out;
+    if (!exec(ev)) {
+      fail("op_conv_transpose_1d", "emel rejected request");
+    } else if (!run_ggml_conv_transpose_1d_case(
+                   kernel_f16, k_up_taps, k_up_out_channels, k_up_in_channels,
+                   input, k_up_length, k_up_stride, ggml_out)) {
+      fail("op_conv_transpose_1d", "ggml execution failed");
+    } else if (!compare_f32_vectors(backend, "op_conv_transpose_1d", emel_out,
+                                    ggml_out)) {
+      ok = false;
+    }
+  }
+
+  // f16 mul_mat accumulation order is ISA-class-specific (x86 lane: AVX2
+  // f32 accumulators; aarch64 lane: NEON fp16 accumulators), and the live
+  // ggml oracle always computes the HOST's numerics. Bit-exactness is
+  // therefore only a meaningful contract for the lane matching the host;
+  // the foreign lane's case is skipped with an explicit notice, never
+  // compared and never silently dropped. On SVE-capable aarch64 builds the
+  // NEON f16 route is intentionally disabled (ggml selects its SVE branch
+  // there, which EMEL does not port yet), so the aarch64 case is skipped on
+  // such builds via the same route probe the production guard uses.
+  const bool host_backend =
+      std::strcmp(backend,
+                  kernel_kind_name(emel::kernel::detect_host_kind())) == 0;
+  const bool route_active =
+      std::strcmp(backend, "aarch64") != 0 ||
+      emel::kernel::aarch64::detail::neon_f16_vector_supported();
+  if (!host_backend) {
+    std::fprintf(stdout,
+                 "[%s] op_mul_mat_f16 skipped: live ggml reference computes "
+                 "%s numerics\n",
+                 backend, kernel_kind_name(emel::kernel::detect_host_kind()));
+  } else if (!route_active) {
+    std::fprintf(stdout,
+                 "[%s] op_mul_mat_f16 skipped: NEON f16 route disabled on "
+                 "this build (SVE or missing fp16 vector arithmetic)\n",
+                 backend);
+  } else {
+    // f16 x f16 mul_mat (ggml layout: src0 [k,m], src1 [k,n], dst f32 [m,n]).
+    // The emel kernel replicates ggml_vec_dot_f16's accumulation order, so
+    // this must match bit-exactly on the same host.
+    constexpr int64_t k_f16_k = 70; // exercises the 32-wide loop + tail
+    constexpr int64_t k_f16_m = 5;
+    constexpr int64_t k_f16_n = 3;
+    auto a_f32 = make_signed_data(k_f16_k * k_f16_m, 0.9f, 0.05f);
+    auto b_f32 = make_signed_data(k_f16_k * k_f16_n, 0.8f, -0.1f);
+    std::vector<uint16_t> a_f16(a_f32.size());
+    std::vector<uint16_t> b_f16(b_f32.size());
+    for (size_t i = 0; i < a_f32.size(); ++i) {
+      a_f16[i] = emel::kernel::detail::quant::fp32_to_fp16(a_f32[i]);
+    }
+    for (size_t i = 0; i < b_f32.size(); ++i) {
+      b_f16[i] = emel::kernel::detail::quant::fp32_to_fp16(b_f32[i]);
+    }
+    std::vector<float> emel_out(static_cast<size_t>(k_f16_m * k_f16_n));
+    emel::kernel::event::op_mul_mat ev{
+        .src0 = make_f16_src_view(a_f16.data(), static_cast<uint64_t>(k_f16_k),
+                                  static_cast<uint64_t>(k_f16_m)),
+        .src1 = make_f16_src_view(b_f16.data(), static_cast<uint64_t>(k_f16_k),
+                                  static_cast<uint64_t>(k_f16_n)),
+        .dst = make_dst_view(emel_out.data(), static_cast<uint64_t>(k_f16_m),
+                             static_cast<uint64_t>(k_f16_n)),
+    };
+    const bool emel_ok = exec(ev);
+    std::vector<float> ggml_out;
+    const bool ggml_ok = [&] {
+      ggml_case_context c{};
+      ggml_tensor *a =
+          ggml_new_tensor_2d(c.ctx, GGML_TYPE_F16, k_f16_k, k_f16_m);
+      ggml_tensor *b =
+          ggml_new_tensor_2d(c.ctx, GGML_TYPE_F16, k_f16_k, k_f16_n);
+      std::memcpy(a->data, a_f16.data(), a_f16.size() * sizeof(uint16_t));
+      std::memcpy(b->data, b_f16.data(), b_f16.size() * sizeof(uint16_t));
+      ggml_tensor *out_tensor = ggml_mul_mat(c.ctx, a, b);
+      if (!compute_graph(c, out_tensor)) {
+        return false;
+      }
+      const float *out_data = ggml_get_data_f32(out_tensor);
+      ggml_out.assign(out_data, out_data + emel_out.size());
+      return true;
+    }();
+    if (!emel_ok) {
+      fail("op_mul_mat_f16", "emel rejected request");
+    } else if (!ggml_ok) {
+      fail("op_mul_mat_f16", "ggml execution failed");
+    } else {
+      bool exact = true;
+      for (size_t i = 0; i < emel_out.size(); ++i) {
+        exact = exact && emel_out[i] == ggml_out[i];
+      }
+      if (!exact) {
+        fail("op_mul_mat_f16", "f16 mul_mat not bit-exact vs ggml");
+      }
+    }
+  }
+
+  {
+    // row-broadcast add/mul: src1 is one dst row (ggml repeat-broadcast
+    // semantics with src1 ne = {ne0, 1})
+    constexpr int64_t k_bcast_cols = 24;
+    constexpr int64_t k_bcast_rows = 6;
+    auto rows_data = make_signed_data(k_bcast_cols * k_bcast_rows, 0.7f, 0.15f);
+    auto row_operand = make_signed_data(k_bcast_cols, 0.4f, -0.2f);
+    const struct {
+      const char *name;
+      bool multiply;
+    } bcast_cases[] = {
+        {"op_add_broadcast_row", false},
+        {"op_mul_broadcast_row", true},
+    };
+    for (const auto &bcast_case : bcast_cases) {
+      std::vector<float> emel_out(rows_data.size());
+      std::vector<float> ggml_out;
+      bool emel_ok = false;
+      if (bcast_case.multiply) {
+        emel::kernel::event::op_mul ev{
+            .src0 = make_src_view(rows_data.data(),
+                                  static_cast<uint64_t>(k_bcast_cols),
+                                  static_cast<uint64_t>(k_bcast_rows)),
+            .src1 = make_src_view(row_operand.data(),
+                                  static_cast<uint64_t>(k_bcast_cols), 1u),
+            .dst = make_dst_view(emel_out.data(),
+                                 static_cast<uint64_t>(k_bcast_cols),
+                                 static_cast<uint64_t>(k_bcast_rows)),
+        };
+        emel_ok = exec(ev);
+      } else {
+        emel::kernel::event::op_add ev{
+            .src0 = make_src_view(rows_data.data(),
+                                  static_cast<uint64_t>(k_bcast_cols),
+                                  static_cast<uint64_t>(k_bcast_rows)),
+            .src1 = make_src_view(row_operand.data(),
+                                  static_cast<uint64_t>(k_bcast_cols), 1u),
+            .dst = make_dst_view(emel_out.data(),
+                                 static_cast<uint64_t>(k_bcast_cols),
+                                 static_cast<uint64_t>(k_bcast_rows)),
+        };
+        emel_ok = exec(ev);
+      }
+      const bool ggml_ok = [&] {
+        ggml_case_context c{};
+        ggml_tensor *a = ggml_new_tensor_2d(c.ctx, GGML_TYPE_F32, k_bcast_cols,
+                                            k_bcast_rows);
+        ggml_tensor *b =
+            ggml_new_tensor_2d(c.ctx, GGML_TYPE_F32, k_bcast_cols, 1);
+        set_tensor_f32(a, rows_data);
+        set_tensor_f32(b, row_operand);
+        ggml_tensor *out_tensor =
+            bcast_case.multiply ? ggml_mul(c.ctx, a, b) : ggml_add(c.ctx, a, b);
+        if (!compute_graph(c, out_tensor)) {
+          return false;
+        }
+        const float *out_data = ggml_get_data_f32(out_tensor);
+        ggml_out.assign(out_data, out_data + rows_data.size());
+        return true;
+      }();
+      if (!emel_ok) {
+        fail(bcast_case.name, "emel rejected request");
+      } else if (!ggml_ok) {
+        fail(bcast_case.name, "ggml execution failed");
+      } else if (!compare_f32_vectors(backend, bcast_case.name, emel_out,
+                                      ggml_out)) {
+        ok = false;
+      }
+    }
+  }
+
+  {
     auto src = make_signed_data(k_vec_len, 0.75f, 0.0f);
     std::vector<float> emel_out(static_cast<size_t>(k_vec_len));
     emel::kernel::event::op_sum ev{
@@ -18328,37 +18991,34 @@ int run_generation_harness_contract(
   const bool audit_available =
       build_execution_audit(*state.model_data, audit_view);
   const bool native_q2_k =
-      audit_available &&
-      audit_has_native_quantized_tensor_type(
-          audit_view, emel::kernel::event::dtype::q2_k);
+      audit_available && audit_has_native_quantized_tensor_type(
+                             audit_view, emel::kernel::event::dtype::q2_k);
   const bool native_q3_k =
-      audit_available &&
-      audit_has_native_quantized_tensor_type(
-          audit_view, emel::kernel::event::dtype::q3_k);
+      audit_available && audit_has_native_quantized_tensor_type(
+                             audit_view, emel::kernel::event::dtype::q3_k);
   const bool native_q6_k =
-      audit_available &&
-      audit_has_native_quantized_tensor_type(
-          audit_view, emel::kernel::event::dtype::q6_k);
+      audit_available && audit_has_native_quantized_tensor_type(
+                             audit_view, emel::kernel::event::dtype::q6_k);
   const bool optimized_flash_kernel =
       generation_kernel_kind == emel::kernel::kernel_kind::aarch64 ||
       generation_kernel_kind == emel::kernel::kernel_kind::x86_64;
   if (optimized_flash_kernel &&
       (flash_dispatch_calls == 0u || optimized_flash_dispatch_calls == 0u ||
        shared_flash_dispatch_calls != 0u)) {
-    std::fprintf(stderr,
-                 "generation optimized flash proof failed (fixture=%s kernel_kind=%s "
-                 "flash_dispatch_calls=%" PRIu64
-                 " optimized_flash_dispatch_calls=%" PRIu64
-                 " shared_flash_dispatch_calls=%" PRIu64 ")\n",
-                 fixture->name.data(), kernel_kind_name(generation_kernel_kind),
-                 flash_dispatch_calls, optimized_flash_dispatch_calls,
-                 shared_flash_dispatch_calls);
+    std::fprintf(
+        stderr,
+        "generation optimized flash proof failed (fixture=%s kernel_kind=%s "
+        "flash_dispatch_calls=%" PRIu64
+        " optimized_flash_dispatch_calls=%" PRIu64
+        " shared_flash_dispatch_calls=%" PRIu64 ")\n",
+        fixture->name.data(), kernel_kind_name(generation_kernel_kind),
+        flash_dispatch_calls, optimized_flash_dispatch_calls,
+        shared_flash_dispatch_calls);
     dump_generation_failure_surface(state, &emel_result, nullptr, opts);
     return 1;
   }
-  if (!optimized_flash_kernel &&
-      (optimized_flash_dispatch_calls != 0u ||
-       shared_flash_dispatch_calls != 0u)) {
+  if (!optimized_flash_kernel && (optimized_flash_dispatch_calls != 0u ||
+                                  shared_flash_dispatch_calls != 0u)) {
     std::fprintf(stderr,
                  "generation non-arm flash attribution failed (fixture=%s "
                  "kernel_kind=%s "

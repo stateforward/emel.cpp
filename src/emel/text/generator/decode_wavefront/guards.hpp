@@ -56,6 +56,23 @@ inline bool all_lane_graphs_distinct(const event::run & ev) noexcept {
   return true;
 }
 
+// Parallel dispatch also requires one caller-owned outcome slot per lane:
+// concurrent workers writing a shared `accepted` bool would race and make
+// the post-join guards misreport (or hide) the failed lane. Aliased slots
+// stay on the serial path, where each lane's outcome is routed before the
+// next lane writes.
+inline bool all_lane_outcomes_distinct(const event::run & ev) noexcept {
+  const size_t lane_count = ev.lanes.size();
+  for (size_t i = 0u; i < lane_count; ++i) {
+    for (size_t j = i + 1u; j < lane_count; ++j) {
+      if (&ev.lanes[i].accepted == &ev.lanes[j].accepted) {
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
 }  // namespace detail
 
 struct guard_valid_request {
@@ -85,14 +102,16 @@ struct guard_multi_lane_compatible {
 struct guard_serial_dispatch {
   bool operator()(const event::run & ev, const action::context & ctx) const noexcept {
     return ctx.pool == nullptr || ev.lanes.size() == 1u ||
-           !detail::all_lane_graphs_distinct(ev);
+           !detail::all_lane_graphs_distinct(ev) ||
+           !detail::all_lane_outcomes_distinct(ev);
   }
 };
 
 struct guard_parallel_dispatch {
   bool operator()(const event::run & ev, const action::context & ctx) const noexcept {
     return ctx.pool != nullptr && ev.lanes.size() > 1u &&
-           detail::all_lane_graphs_distinct(ev);
+           detail::all_lane_graphs_distinct(ev) &&
+           detail::all_lane_outcomes_distinct(ev);
   }
 };
 

@@ -10,6 +10,7 @@
 #include "emel/model/lfm2/detail.hpp"
 #include "emel/model/llama/detail.hpp"
 #include "emel/model/loader/errors.hpp"
+#include "emel/model/moshi/detail.hpp"
 #include "emel/model/omniembed/detail.hpp"
 #include "emel/model/whisper/detail.hpp"
 
@@ -389,6 +390,11 @@ bool is_omniembed_execution_architecture(
 bool is_whisper_execution_architecture(
     const std::string_view architecture) noexcept {
   return emel::model::whisper::detail::is_execution_architecture(architecture);
+}
+
+bool is_moshi_execution_architecture(
+    const std::string_view architecture) noexcept {
+  return emel::model::moshi::detail::is_execution_architecture(architecture);
 }
 
 emel::error::type validate_execution_contract(const data &model_data) noexcept {

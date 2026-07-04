@@ -1,0 +1,15 @@
+{
+  "id": "moshi_cpp_mimi",
+  "surface": "mimi_compare/v1",
+  "display_name": "moshi.cpp Mimi codec reference lane",
+  "language": "cpp",
+  "description": "Pinned moshi.cpp (tools/bench/moshi_reference_ref.txt) mimi encode/decode reference driver compared against the EMEL-owned mimi codec runner. Two-lane isolation: the reference driver is a separate executable; the EMEL lane links only emel. The EMEL codec consumes the same effective operand pipeline as the reference (f16 convs, bf16 KV attention, exact ggml numeric ports), so encode comparison is gated token-exact.",
+  "build_command": [
+    "scripts/bench_mimi_compare.sh",
+    "--build-only"
+  ],
+  "run_command": [
+    "scripts/bench_mimi_compare.sh",
+    "--run-only"
+  ]
+}

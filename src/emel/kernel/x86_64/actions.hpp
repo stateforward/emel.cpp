@@ -38,7 +38,7 @@
 
 namespace emel::kernel::x86_64::detail {
 
-namespace event= ::emel::kernel::event;
+namespace event = ::emel::kernel::event;
 
 inline constexpr bool avx2_intrinsics_compiled =
 #if defined(__x86_64__) || defined(_M_X64)
@@ -203,6 +203,15 @@ inline bool can_use_avx2(const request_type &request,
                          ::emel::kernel::detail::dtype_f32 &&
                      is_dense_contiguous(request.src1);
   }
+  // Row-broadcast add/mul variants execute through their own scalar rows;
+  // the elementwise SIMD kernels require equally sized operands.
+  if constexpr (std::is_same_v<request_type, event::op_add> ||
+                std::is_same_v<request_type, event::op_mul>) {
+    src1_supported =
+        src1_supported &&
+        ::emel::kernel::detail::tensor_element_count(request.src1) ==
+            ::emel::kernel::detail::tensor_element_count(request.dst);
+  }
 
   bool unary_supported = true;
   if constexpr (std::is_same_v<request_type, event::op_unary>) {
@@ -249,8 +258,7 @@ inline bool can_use_avx2_fma_q2_k_q8_k_mul_mat(
 #else
   const uint64_t k = request.src0.ne[0];
   const uint64_t block_count = k / ::emel::kernel::detail::quant::QK_K;
-  return host_features.avx2_available &&
-         host_features.fma_available &&
+  return host_features.avx2_available && host_features.fma_available &&
          avx2_fma_intrinsics_compiled &&
          ::emel::kernel::detail::can_run_backend_request(request) &&
          ::emel::kernel::detail::dtype_code(request.src0.type) ==
@@ -259,8 +267,7 @@ inline bool can_use_avx2_fma_q2_k_q8_k_mul_mat(
              ::emel::kernel::detail::dtype_f32 &&
          ::emel::kernel::detail::dtype_code(request.dst.type) ==
              ::emel::kernel::detail::dtype_f32 &&
-         k != 0u &&
-         (k % ::emel::kernel::detail::quant::QK_K) == 0u &&
+         k != 0u && (k % ::emel::kernel::detail::quant::QK_K) == 0u &&
          block_count <= ::emel::kernel::detail::quant::MAX_Q8_K_BLOCKS;
 #endif
 }
@@ -275,8 +282,7 @@ inline bool can_use_avx2_fma_q3_k_q8_k_mul_mat(
 #else
   const uint64_t k = request.src0.ne[0];
   const uint64_t block_count = k / ::emel::kernel::detail::quant::QK_K;
-  return host_features.avx2_available &&
-         host_features.fma_available &&
+  return host_features.avx2_available && host_features.fma_available &&
          avx2_fma_intrinsics_compiled &&
          ::emel::kernel::detail::can_run_backend_request(request) &&
          ::emel::kernel::detail::dtype_code(request.src0.type) ==
@@ -285,8 +291,7 @@ inline bool can_use_avx2_fma_q3_k_q8_k_mul_mat(
              ::emel::kernel::detail::dtype_f32 &&
          ::emel::kernel::detail::dtype_code(request.dst.type) ==
              ::emel::kernel::detail::dtype_f32 &&
-         k != 0u &&
-         (k % ::emel::kernel::detail::quant::QK_K) == 0u &&
+         k != 0u && (k % ::emel::kernel::detail::quant::QK_K) == 0u &&
          block_count <= ::emel::kernel::detail::quant::MAX_Q8_K_BLOCKS;
 #endif
 }
@@ -299,8 +304,7 @@ inline bool can_use_avx2_fma_f32_mul_mat(
   (void)host_features;
   return false;
 #else
-  return host_features.fma_available &&
-         avx2_fma_intrinsics_compiled &&
+  return host_features.fma_available && avx2_fma_intrinsics_compiled &&
          request.src1.ne[0] != 1u &&
          can_use_avx2(request, host_features.avx2_available);
 #endif
@@ -314,8 +318,7 @@ inline bool can_use_avx2_fma_f32_vector_mul_mat(
   (void)host_features;
   return false;
 #else
-  return host_features.fma_available &&
-         avx2_fma_intrinsics_compiled &&
+  return host_features.fma_available && avx2_fma_intrinsics_compiled &&
          request.src1.ne[0] == 1u &&
          can_use_avx2(request, host_features.avx2_available);
 #endif
@@ -331,8 +334,7 @@ inline bool can_use_avx2_fma_q4_k_q8_k_mul_mat(
 #else
   const uint64_t k = request.src0.ne[0];
   const uint64_t block_count = k / ::emel::kernel::detail::quant::QK_K;
-  return host_features.avx2_available &&
-         host_features.fma_available &&
+  return host_features.avx2_available && host_features.fma_available &&
          avx2_fma_intrinsics_compiled &&
          ::emel::kernel::detail::can_run_backend_request(request) &&
          ::emel::kernel::detail::dtype_code(request.src0.type) ==
@@ -341,8 +343,7 @@ inline bool can_use_avx2_fma_q4_k_q8_k_mul_mat(
              ::emel::kernel::detail::dtype_f32 &&
          ::emel::kernel::detail::dtype_code(request.dst.type) ==
              ::emel::kernel::detail::dtype_f32 &&
-         k != 0u &&
-         (k % ::emel::kernel::detail::quant::QK_K) == 0u &&
+         k != 0u && (k % ::emel::kernel::detail::quant::QK_K) == 0u &&
          block_count <= ::emel::kernel::detail::quant::MAX_Q8_K_BLOCKS;
 #endif
 }
@@ -357,8 +358,7 @@ inline bool can_use_avx2_fma_q6_k_q8_k_mul_mat(
 #else
   const uint64_t k = request.src0.ne[0];
   const uint64_t block_count = k / ::emel::kernel::detail::quant::QK_K;
-  return host_features.avx2_available &&
-         host_features.fma_available &&
+  return host_features.avx2_available && host_features.fma_available &&
          avx2_fma_intrinsics_compiled &&
          ::emel::kernel::detail::can_run_backend_request(request) &&
          ::emel::kernel::detail::dtype_code(request.src0.type) ==
@@ -367,8 +367,7 @@ inline bool can_use_avx2_fma_q6_k_q8_k_mul_mat(
              ::emel::kernel::detail::dtype_f32 &&
          ::emel::kernel::detail::dtype_code(request.dst.type) ==
              ::emel::kernel::detail::dtype_f32 &&
-         k != 0u &&
-         (k % ::emel::kernel::detail::quant::QK_K) == 0u &&
+         k != 0u && (k % ::emel::kernel::detail::quant::QK_K) == 0u &&
          block_count <= ::emel::kernel::detail::quant::MAX_Q8_K_BLOCKS;
 #endif
 }
@@ -384,8 +383,7 @@ inline bool can_use_avx2_fma_q8_0_rhs_mul_mat(
 #else
   const uint64_t k = request.src0.ne[0];
   const uint64_t block_count = k / quant_block_size;
-  return host_features.avx2_available &&
-         host_features.fma_available &&
+  return host_features.avx2_available && host_features.fma_available &&
          avx2_fma_intrinsics_compiled &&
          ::emel::kernel::detail::can_run_backend_request(request) &&
          ::emel::kernel::detail::dtype_code(request.src0.type) ==
@@ -394,8 +392,7 @@ inline bool can_use_avx2_fma_q8_0_rhs_mul_mat(
              ::emel::kernel::detail::dtype_f32 &&
          ::emel::kernel::detail::dtype_code(request.dst.type) ==
              ::emel::kernel::detail::dtype_f32 &&
-         k != 0u &&
-         (k % quant_block_size) == 0u &&
+         k != 0u && (k % quant_block_size) == 0u &&
          block_count <= ::emel::kernel::detail::quant::MAX_Q8_0_BLOCKS;
 #endif
 }
@@ -404,32 +401,32 @@ inline bool can_use_avx2_fma_q4_0_q8_0_mul_mat(
     const event::op_mul_mat &request,
     const host_feature_contract &host_features) noexcept {
   return can_use_avx2_fma_q8_0_rhs_mul_mat<
-      ::emel::kernel::detail::dtype_q4_0,
-      ::emel::kernel::detail::quant::QK4_0>(request, host_features);
+      ::emel::kernel::detail::dtype_q4_0, ::emel::kernel::detail::quant::QK4_0>(
+      request, host_features);
 }
 
 inline bool can_use_avx2_fma_q4_1_q8_0_mul_mat(
     const event::op_mul_mat &request,
     const host_feature_contract &host_features) noexcept {
   return can_use_avx2_fma_q8_0_rhs_mul_mat<
-      ::emel::kernel::detail::dtype_q4_1,
-      ::emel::kernel::detail::quant::QK4_1>(request, host_features);
+      ::emel::kernel::detail::dtype_q4_1, ::emel::kernel::detail::quant::QK4_1>(
+      request, host_features);
 }
 
 inline bool can_use_avx2_fma_q5_0_q8_0_mul_mat(
     const event::op_mul_mat &request,
     const host_feature_contract &host_features) noexcept {
   return can_use_avx2_fma_q8_0_rhs_mul_mat<
-      ::emel::kernel::detail::dtype_q5_0,
-      ::emel::kernel::detail::quant::QK5_0>(request, host_features);
+      ::emel::kernel::detail::dtype_q5_0, ::emel::kernel::detail::quant::QK5_0>(
+      request, host_features);
 }
 
 inline bool can_use_avx2_fma_q8_0_q8_0_mul_mat(
     const event::op_mul_mat &request,
     const host_feature_contract &host_features) noexcept {
   return can_use_avx2_fma_q8_0_rhs_mul_mat<
-      ::emel::kernel::detail::dtype_q8_0,
-      ::emel::kernel::detail::quant::QK8_0>(request, host_features);
+      ::emel::kernel::detail::dtype_q8_0, ::emel::kernel::detail::quant::QK8_0>(
+      request, host_features);
 }
 
 #if defined(__x86_64__) || defined(_M_X64)
@@ -455,8 +452,7 @@ inline int32_t horizontal_sum_i32x8_avx2(const __m256i values) noexcept {
 }
 
 EMEL_KERNEL_X86_AVX2_FMA_TARGET
-inline int32_t dot_u2_s8_16_avx2(const uint8_t *q2,
-                                 const int8_t *q8,
+inline int32_t dot_u2_s8_16_avx2(const uint8_t *q2, const int8_t *q8,
                                  const int shift) noexcept {
 #if defined(__x86_64__) || defined(_M_X64)
 #if (defined(__AVX2__) && defined(__FMA__)) || defined(__GNUC__) ||            \
@@ -465,9 +461,9 @@ inline int32_t dot_u2_s8_16_avx2(const uint8_t *q2,
       _mm_loadu_si128(reinterpret_cast<const __m128i *>(q2));
   const __m128i q8_bytes =
       _mm_loadu_si128(reinterpret_cast<const __m128i *>(q8));
-  const __m256i q2_u16 = _mm256_and_si256(
-      _mm256_srli_epi16(_mm256_cvtepu8_epi16(q2_bytes), shift),
-      _mm256_set1_epi16(0x03));
+  const __m256i q2_u16 =
+      _mm256_and_si256(_mm256_srli_epi16(_mm256_cvtepu8_epi16(q2_bytes), shift),
+                       _mm256_set1_epi16(0x03));
   const __m256i q8_i16 = _mm256_cvtepi8_epi16(q8_bytes);
   return horizontal_sum_i32x8_avx2(_mm256_madd_epi16(q2_u16, q8_i16));
 #else
@@ -485,10 +481,8 @@ inline int32_t dot_u2_s8_16_avx2(const uint8_t *q2,
 }
 
 EMEL_KERNEL_X86_AVX2_FMA_TARGET
-inline int32_t dot_q3_s8_16_avx2(const uint8_t *q3,
-                                 const uint8_t *hmask,
-                                 const int8_t *q8,
-                                 const int shift,
+inline int32_t dot_q3_s8_16_avx2(const uint8_t *q3, const uint8_t *hmask,
+                                 const int8_t *q8, const int shift,
                                  const uint8_t mask) noexcept {
 #if defined(__x86_64__) || defined(_M_X64)
 #if (defined(__AVX2__) && defined(__FMA__)) || defined(__GNUC__) ||            \
@@ -500,17 +494,15 @@ inline int32_t dot_q3_s8_16_avx2(const uint8_t *q3,
   const __m128i q8_bytes =
       _mm_loadu_si128(reinterpret_cast<const __m128i *>(q8));
 
-  const __m256i q3_u16 = _mm256_and_si256(
-      _mm256_srli_epi16(_mm256_cvtepu8_epi16(q3_bytes), shift),
-      _mm256_set1_epi16(0x03));
+  const __m256i q3_u16 =
+      _mm256_and_si256(_mm256_srli_epi16(_mm256_cvtepu8_epi16(q3_bytes), shift),
+                       _mm256_set1_epi16(0x03));
   const __m256i hmask_u16 = _mm256_cvtepu8_epi16(hmask_bytes);
-  const __m256i missing_high_bit = _mm256_cmpeq_epi16(
-      _mm256_and_si256(hmask_u16, _mm256_set1_epi16(mask)),
-      _mm256_setzero_si256());
-  const __m256i q3_i16 =
-      _mm256_sub_epi16(q3_u16,
-                       _mm256_and_si256(missing_high_bit,
-                                        _mm256_set1_epi16(4)));
+  const __m256i missing_high_bit =
+      _mm256_cmpeq_epi16(_mm256_and_si256(hmask_u16, _mm256_set1_epi16(mask)),
+                         _mm256_setzero_si256());
+  const __m256i q3_i16 = _mm256_sub_epi16(
+      q3_u16, _mm256_and_si256(missing_high_bit, _mm256_set1_epi16(4)));
   const __m256i q8_i16 = _mm256_cvtepi8_epi16(q8_bytes);
   return horizontal_sum_i32x8_avx2(_mm256_madd_epi16(q3_i16, q8_i16));
 #else
@@ -532,10 +524,8 @@ inline int32_t dot_q3_s8_16_avx2(const uint8_t *q3,
 }
 
 EMEL_KERNEL_X86_AVX2_FMA_TARGET
-inline int32_t dot_u6_s8_16_avx2(const uint8_t *ql,
-                                 const uint8_t *qh,
-                                 const int8_t *q8,
-                                 const int low_shift,
+inline int32_t dot_u6_s8_16_avx2(const uint8_t *ql, const uint8_t *qh,
+                                 const int8_t *q8, const int low_shift,
                                  const int high_shift) noexcept {
 #if defined(__x86_64__) || defined(_M_X64)
 #if (defined(__AVX2__) && defined(__FMA__)) || defined(__GNUC__) ||            \
@@ -581,8 +571,8 @@ EMEL_KERNEL_X86_AVX2_FMA_TARGET
 inline __m256i unpack_nibbles_32_avx2(const uint8_t *src) noexcept {
   const __m128i packed =
       _mm_loadu_si128(reinterpret_cast<const __m128i *>(src));
-  const __m256i bytes = _mm256_insertf128_si256(
-      _mm256_castsi128_si256(packed), _mm_srli_epi16(packed, 4), 1);
+  const __m256i bytes = _mm256_insertf128_si256(_mm256_castsi128_si256(packed),
+                                                _mm_srli_epi16(packed, 4), 1);
   return _mm256_and_si256(bytes, _mm256_set1_epi8(0x0f));
 }
 
@@ -630,17 +620,17 @@ inline float dot_q2_k_q8_k_block_avx2_fma(
 
   const __m128i scales_bytes =
       _mm_loadu_si128(reinterpret_cast<const __m128i *>(scales));
-  const __m256i mins_i16 = _mm256_srli_epi16(
-      _mm256_cvtepu8_epi16(scales_bytes), 4);
-  const __m256i bsums_i16 = _mm256_loadu_si256(
-      reinterpret_cast<const __m256i *>(rhs.bsums.data()));
+  const __m256i mins_i16 =
+      _mm256_srli_epi16(_mm256_cvtepu8_epi16(scales_bytes), 4);
+  const __m256i bsums_i16 =
+      _mm256_loadu_si256(reinterpret_cast<const __m256i *>(rhs.bsums.data()));
   const int32_t sum_mins =
       horizontal_sum_i32x8_avx2(_mm256_madd_epi16(mins_i16, bsums_i16));
 
   int32_t sum = 0;
   int scale_index = 0;
-  for (uint64_t block = 0;
-       block < (::emel::kernel::detail::quant::QK_K / 128u); ++block) {
+  for (uint64_t block = 0; block < (::emel::kernel::detail::quant::QK_K / 128u);
+       ++block) {
     for (int shift = 0; shift < 8; shift += 2) {
       sum += static_cast<int32_t>(scales[scale_index++] & 0x0fu) *
              dot_u2_s8_16_avx2(q2, q8, shift);
@@ -655,9 +645,9 @@ inline float dot_q2_k_q8_k_block_avx2_fma(
       rhs.d * ::emel::kernel::detail::quant::fp16_to_fp32(lhs.d);
   const float d_min =
       rhs.d * ::emel::kernel::detail::quant::fp16_to_fp32(lhs.dmin);
-  const __m128 block_sum = _mm_fmadd_ss(
-      _mm_set_ss(d_all), _mm_set_ss(static_cast<float>(sum)),
-      _mm_set_ss(-d_min * static_cast<float>(sum_mins)));
+  const __m128 block_sum =
+      _mm_fmadd_ss(_mm_set_ss(d_all), _mm_set_ss(static_cast<float>(sum)),
+                   _mm_set_ss(-d_min * static_cast<float>(sum_mins)));
   return _mm_cvtss_f32(block_sum);
 #else
   return ::emel::kernel::detail::dot_q2_k_q8_k_block_scalar(lhs, rhs);
@@ -668,10 +658,10 @@ inline float dot_q2_k_q8_k_block_avx2_fma(
 }
 
 EMEL_KERNEL_X86_AVX2_FMA_TARGET
-inline float dot_q2_k_q8_k_row_avx2_fma(
-    const ::emel::kernel::detail::quant::block_q2_k *lhs,
-    const ::emel::kernel::detail::quant::block_q8_k *rhs,
-    const uint64_t block_count) noexcept {
+inline float
+dot_q2_k_q8_k_row_avx2_fma(const ::emel::kernel::detail::quant::block_q2_k *lhs,
+                           const ::emel::kernel::detail::quant::block_q8_k *rhs,
+                           const uint64_t block_count) noexcept {
 #if defined(__x86_64__) || defined(_M_X64)
 #if (defined(__AVX2__) && defined(__FMA__)) || defined(__GNUC__) ||            \
     defined(__clang__)
@@ -707,10 +697,8 @@ inline float dot_q3_k_q8_k_block_avx2_fma(
       ((scale_words[1] >> 4u) & kmask2) | (((tmp >> 6u) & kmask1) << 4u);
   scale_words[2] =
       ((scale_words[0] >> 4u) & kmask2) | (((tmp >> 4u) & kmask1) << 4u);
-  scale_words[1] =
-      (scale_words[1] & kmask2) | (((tmp >> 2u) & kmask1) << 4u);
-  scale_words[0] =
-      (scale_words[0] & kmask2) | (((tmp >> 0u) & kmask1) << 4u);
+  scale_words[1] = (scale_words[1] & kmask2) | (((tmp >> 2u) & kmask1) << 4u);
+  scale_words[0] = (scale_words[0] & kmask2) | (((tmp >> 0u) & kmask1) << 4u);
 
   auto *scale = reinterpret_cast<int8_t *>(scale_words);
   for (uint64_t idx = 0; idx < 16u; ++idx) {
@@ -723,8 +711,8 @@ inline float dot_q3_k_q8_k_block_avx2_fma(
   int32_t isum = 0;
   uint8_t mask = 1u;
   int scale_index = 0;
-  for (uint64_t block = 0;
-       block < (::emel::kernel::detail::quant::QK_K / 128u); ++block) {
+  for (uint64_t block = 0; block < (::emel::kernel::detail::quant::QK_K / 128u);
+       ++block) {
     for (int shift = 0; shift < 8; shift += 2) {
       isum += static_cast<int32_t>(scale[scale_index++]) *
               dot_q3_s8_16_avx2(q3, hmask, q8, shift, mask);
@@ -736,8 +724,7 @@ inline float dot_q3_k_q8_k_block_avx2_fma(
     q3 += 32;
   }
 
-  const float d =
-      rhs.d * ::emel::kernel::detail::quant::fp16_to_fp32(lhs.d);
+  const float d = rhs.d * ::emel::kernel::detail::quant::fp16_to_fp32(lhs.d);
   const __m128 block_sum =
       _mm_mul_ss(_mm_set_ss(d), _mm_set_ss(static_cast<float>(isum)));
   return _mm_cvtss_f32(block_sum);
@@ -750,10 +737,10 @@ inline float dot_q3_k_q8_k_block_avx2_fma(
 }
 
 EMEL_KERNEL_X86_AVX2_FMA_TARGET
-inline float dot_q3_k_q8_k_row_avx2_fma(
-    const ::emel::kernel::detail::quant::block_q3_k *lhs,
-    const ::emel::kernel::detail::quant::block_q8_k *rhs,
-    const uint64_t block_count) noexcept {
+inline float
+dot_q3_k_q8_k_row_avx2_fma(const ::emel::kernel::detail::quant::block_q3_k *lhs,
+                           const ::emel::kernel::detail::quant::block_q8_k *rhs,
+                           const uint64_t block_count) noexcept {
 #if defined(__x86_64__) || defined(_M_X64)
 #if (defined(__AVX2__) && defined(__FMA__)) || defined(__GNUC__) ||            \
     defined(__clang__)
@@ -783,22 +770,21 @@ inline float dot_q4_k_q8_k_block_avx2_fma(
   constexpr uint32_t kmask2 = 0x0f0f0f0fu;
   constexpr uint32_t kmask3 = 0x03030303u;
   alignas(32) static constexpr uint8_t SCALE_PAIR_SHUFFLE[256] = {
-      0,  1,  0,  1,  0,  1,  0,  1,  0,  1,  0,  1,  0,  1,  0,  1,
-      0,  1,  0,  1,  0,  1,  0,  1,  0,  1,  0,  1,  0,  1,  0,  1,
-      2,  3,  2,  3,  2,  3,  2,  3,  2,  3,  2,  3,  2,  3,  2,  3,
-      2,  3,  2,  3,  2,  3,  2,  3,  2,  3,  2,  3,  2,  3,  2,  3,
-      4,  5,  4,  5,  4,  5,  4,  5,  4,  5,  4,  5,  4,  5,  4,  5,
-      4,  5,  4,  5,  4,  5,  4,  5,  4,  5,  4,  5,  4,  5,  4,  5,
-      6,  7,  6,  7,  6,  7,  6,  7,  6,  7,  6,  7,  6,  7,  6,  7,
-      6,  7,  6,  7,  6,  7,  6,  7,  6,  7,  6,  7,  6,  7,  6,  7,
-      8,  9,  8,  9,  8,  9,  8,  9,  8,  9,  8,  9,  8,  9,  8,  9,
-      8,  9,  8,  9,  8,  9,  8,  9,  8,  9,  8,  9,  8,  9,  8,  9,
-      10, 11, 10, 11, 10, 11, 10, 11, 10, 11, 10, 11, 10, 11, 10, 11,
-      10, 11, 10, 11, 10, 11, 10, 11, 10, 11, 10, 11, 10, 11, 10, 11,
-      12, 13, 12, 13, 12, 13, 12, 13, 12, 13, 12, 13, 12, 13, 12, 13,
-      12, 13, 12, 13, 12, 13, 12, 13, 12, 13, 12, 13, 12, 13, 12, 13,
-      14, 15, 14, 15, 14, 15, 14, 15, 14, 15, 14, 15, 14, 15, 14, 15,
-      14, 15, 14, 15, 14, 15, 14, 15, 14, 15, 14, 15, 14, 15, 14, 15,
+      0,  1,  0,  1,  0,  1,  0,  1,  0,  1,  0,  1,  0,  1,  0,  1,  0,  1,
+      0,  1,  0,  1,  0,  1,  0,  1,  0,  1,  0,  1,  0,  1,  2,  3,  2,  3,
+      2,  3,  2,  3,  2,  3,  2,  3,  2,  3,  2,  3,  2,  3,  2,  3,  2,  3,
+      2,  3,  2,  3,  2,  3,  2,  3,  2,  3,  4,  5,  4,  5,  4,  5,  4,  5,
+      4,  5,  4,  5,  4,  5,  4,  5,  4,  5,  4,  5,  4,  5,  4,  5,  4,  5,
+      4,  5,  4,  5,  4,  5,  6,  7,  6,  7,  6,  7,  6,  7,  6,  7,  6,  7,
+      6,  7,  6,  7,  6,  7,  6,  7,  6,  7,  6,  7,  6,  7,  6,  7,  6,  7,
+      6,  7,  8,  9,  8,  9,  8,  9,  8,  9,  8,  9,  8,  9,  8,  9,  8,  9,
+      8,  9,  8,  9,  8,  9,  8,  9,  8,  9,  8,  9,  8,  9,  8,  9,  10, 11,
+      10, 11, 10, 11, 10, 11, 10, 11, 10, 11, 10, 11, 10, 11, 10, 11, 10, 11,
+      10, 11, 10, 11, 10, 11, 10, 11, 10, 11, 10, 11, 12, 13, 12, 13, 12, 13,
+      12, 13, 12, 13, 12, 13, 12, 13, 12, 13, 12, 13, 12, 13, 12, 13, 12, 13,
+      12, 13, 12, 13, 12, 13, 12, 13, 14, 15, 14, 15, 14, 15, 14, 15, 14, 15,
+      14, 15, 14, 15, 14, 15, 14, 15, 14, 15, 14, 15, 14, 15, 14, 15, 14, 15,
+      14, 15, 14, 15,
   };
 
   uint32_t scale_words[4] = {};
@@ -806,24 +792,24 @@ inline float dot_q4_k_q8_k_block_avx2_fma(
   scale_words[3] = ((scale_words[2] >> 4u) & kmask2) |
                    (((scale_words[1] >> 6u) & kmask3) << 4u);
   const uint32_t scale_high = scale_words[1] & kmask1;
-  scale_words[1] = (scale_words[2] & kmask2) |
-                   (((scale_words[0] >> 6u) & kmask3) << 4u);
+  scale_words[1] =
+      (scale_words[2] & kmask2) | (((scale_words[0] >> 6u) & kmask3) << 4u);
   scale_words[2] = scale_high;
   scale_words[0] &= kmask1;
 
-  const __m256i mins_and_scales = _mm256_cvtepu8_epi16(
-      _mm_set_epi32(static_cast<int32_t>(scale_words[3]),
-                    static_cast<int32_t>(scale_words[2]),
-                    static_cast<int32_t>(scale_words[1]),
-                    static_cast<int32_t>(scale_words[0])));
+  const __m256i mins_and_scales =
+      _mm256_cvtepu8_epi16(_mm_set_epi32(static_cast<int32_t>(scale_words[3]),
+                                         static_cast<int32_t>(scale_words[2]),
+                                         static_cast<int32_t>(scale_words[1]),
+                                         static_cast<int32_t>(scale_words[0])));
 
-  const __m256i bsums_i16 = _mm256_loadu_si256(
-      reinterpret_cast<const __m256i *>(rhs.bsums.data()));
+  const __m256i bsums_i16 =
+      _mm256_loadu_si256(reinterpret_cast<const __m256i *>(rhs.bsums.data()));
   const __m128i bsum_pairs =
       _mm_hadd_epi16(_mm256_castsi256_si128(bsums_i16),
                      _mm256_extracti128_si256(bsums_i16, 1));
-  const __m128i min_products = _mm_madd_epi16(
-      _mm256_extracti128_si256(mins_and_scales, 1), bsum_pairs);
+  const __m128i min_products =
+      _mm_madd_epi16(_mm256_extracti128_si256(mins_and_scales, 1), bsum_pairs);
   __m128i min_sum = _mm_hadd_epi32(min_products, min_products);
   min_sum = _mm_hadd_epi32(min_sum, min_sum);
   const int32_t sum_mins = _mm_cvtsi128_si32(min_sum);
@@ -835,18 +821,16 @@ inline float dot_q4_k_q8_k_block_avx2_fma(
   const int8_t *q8 = rhs.qs.data();
   __m256i sum_i32 = _mm256_setzero_si256();
 
-  for (uint64_t pair = 0;
-       pair < (::emel::kernel::detail::quant::QK_K / 64u); ++pair) {
+  for (uint64_t pair = 0; pair < (::emel::kernel::detail::quant::QK_K / 64u);
+       ++pair) {
     const __m256i scale_low = _mm256_shuffle_epi8(
-        scales_vec,
-        _mm256_load_si256(
-            reinterpret_cast<const __m256i *>(SCALE_PAIR_SHUFFLE) +
-            (2u * pair)));
+        scales_vec, _mm256_load_si256(
+                        reinterpret_cast<const __m256i *>(SCALE_PAIR_SHUFFLE) +
+                        (2u * pair)));
     const __m256i scale_high_vec = _mm256_shuffle_epi8(
-        scales_vec,
-        _mm256_load_si256(
-            reinterpret_cast<const __m256i *>(SCALE_PAIR_SHUFFLE) +
-            (2u * pair + 1u)));
+        scales_vec, _mm256_load_si256(
+                        reinterpret_cast<const __m256i *>(SCALE_PAIR_SHUFFLE) +
+                        (2u * pair + 1u)));
 
     const __m256i q4_bits =
         _mm256_loadu_si256(reinterpret_cast<const __m256i *>(q4));
@@ -858,8 +842,8 @@ inline float dot_q4_k_q8_k_block_avx2_fma(
     const __m256i q8_low =
         _mm256_loadu_si256(reinterpret_cast<const __m256i *>(q8));
     q8 += 32;
-    const __m256i products_low = _mm256_madd_epi16(
-        scale_low, _mm256_maddubs_epi16(q4_low, q8_low));
+    const __m256i products_low =
+        _mm256_madd_epi16(scale_low, _mm256_maddubs_epi16(q4_low, q8_low));
 
     const __m256i q8_high =
         _mm256_loadu_si256(reinterpret_cast<const __m256i *>(q8));
@@ -867,8 +851,8 @@ inline float dot_q4_k_q8_k_block_avx2_fma(
     const __m256i products_high = _mm256_madd_epi16(
         scale_high_vec, _mm256_maddubs_epi16(q4_high, q8_high));
 
-    sum_i32 = _mm256_add_epi32(
-        sum_i32, _mm256_add_epi32(products_low, products_high));
+    sum_i32 = _mm256_add_epi32(sum_i32,
+                               _mm256_add_epi32(products_low, products_high));
   }
 
   const int32_t sum = horizontal_sum_i32x8_avx2(sum_i32);
@@ -876,9 +860,9 @@ inline float dot_q4_k_q8_k_block_avx2_fma(
       rhs.d * ::emel::kernel::detail::quant::fp16_to_fp32(lhs.d);
   const float d_min =
       rhs.d * ::emel::kernel::detail::quant::fp16_to_fp32(lhs.dmin);
-  const __m128 block_sum = _mm_fmadd_ss(
-      _mm_set_ss(d_all), _mm_set_ss(static_cast<float>(sum)),
-      _mm_set_ss(-d_min * static_cast<float>(sum_mins)));
+  const __m128 block_sum =
+      _mm_fmadd_ss(_mm_set_ss(d_all), _mm_set_ss(static_cast<float>(sum)),
+                   _mm_set_ss(-d_min * static_cast<float>(sum_mins)));
   return _mm_cvtss_f32(block_sum);
 #else
   return ::emel::kernel::detail::dot_q4_k_q8_k_block_scalar(lhs, rhs);
@@ -889,10 +873,10 @@ inline float dot_q4_k_q8_k_block_avx2_fma(
 }
 
 EMEL_KERNEL_X86_AVX2_FMA_TARGET
-inline float dot_q4_k_q8_k_row_avx2_fma(
-    const ::emel::kernel::detail::quant::block_q4_k *lhs,
-    const ::emel::kernel::detail::quant::block_q8_k *rhs,
-    const uint64_t block_count) noexcept {
+inline float
+dot_q4_k_q8_k_row_avx2_fma(const ::emel::kernel::detail::quant::block_q4_k *lhs,
+                           const ::emel::kernel::detail::quant::block_q8_k *rhs,
+                           const uint64_t block_count) noexcept {
 #if defined(__x86_64__) || defined(_M_X64)
 #if (defined(__AVX2__) && defined(__FMA__)) || defined(__GNUC__) ||            \
     defined(__clang__)
@@ -912,10 +896,10 @@ inline float dot_q4_k_q8_k_row_avx2_fma(
 }
 
 EMEL_KERNEL_X86_AVX2_FMA_TARGET
-inline float dot_q4_0_q8_0_row_avx2_fma(
-    const ::emel::kernel::detail::quant::block_q4_0 *lhs,
-    const ::emel::kernel::detail::quant::block_q8_0 *rhs,
-    const uint64_t block_count) noexcept {
+inline float
+dot_q4_0_q8_0_row_avx2_fma(const ::emel::kernel::detail::quant::block_q4_0 *lhs,
+                           const ::emel::kernel::detail::quant::block_q8_0 *rhs,
+                           const uint64_t block_count) noexcept {
 #if defined(__x86_64__) || defined(_M_X64)
 #if (defined(__AVX2__) && defined(__FMA__)) || defined(__GNUC__) ||            \
     defined(__clang__)
@@ -943,10 +927,10 @@ inline float dot_q4_0_q8_0_row_avx2_fma(
 }
 
 EMEL_KERNEL_X86_AVX2_FMA_TARGET
-inline float dot_q4_1_q8_0_row_avx2_fma(
-    const ::emel::kernel::detail::quant::block_q4_1 *lhs,
-    const ::emel::kernel::detail::quant::block_q8_0 *rhs,
-    const uint64_t block_count) noexcept {
+inline float
+dot_q4_1_q8_0_row_avx2_fma(const ::emel::kernel::detail::quant::block_q4_1 *lhs,
+                           const ::emel::kernel::detail::quant::block_q8_0 *rhs,
+                           const uint64_t block_count) noexcept {
 #if defined(__x86_64__) || defined(_M_X64)
 #if (defined(__AVX2__) && defined(__FMA__)) || defined(__GNUC__) ||            \
     defined(__clang__)
@@ -958,15 +942,13 @@ inline float dot_q4_1_q8_0_row_avx2_fma(
     const int32_t sumi = horizontal_sum_i32x8_avx2(_mm256_madd_epi16(
         _mm256_set1_epi16(1), _mm256_maddubs_epi16(nibbles, y)));
     const int32_t rhs_sum = horizontal_sum_i32x8_avx2(_mm256_madd_epi16(
-        _mm256_set1_epi16(1),
-        _mm256_maddubs_epi16(_mm256_set1_epi8(1), y)));
+        _mm256_set1_epi16(1), _mm256_maddubs_epi16(_mm256_set1_epi8(1), y)));
     const float rhs_d =
         ::emel::kernel::detail::quant::fp16_to_fp32(rhs[block].d);
-    sum += rhs_d *
-           (::emel::kernel::detail::quant::fp16_to_fp32(lhs[block].d) *
-                static_cast<float>(sumi) +
-            ::emel::kernel::detail::quant::fp16_to_fp32(lhs[block].m) *
-                static_cast<float>(rhs_sum));
+    sum += rhs_d * (::emel::kernel::detail::quant::fp16_to_fp32(lhs[block].d) *
+                        static_cast<float>(sumi) +
+                    ::emel::kernel::detail::quant::fp16_to_fp32(lhs[block].m) *
+                        static_cast<float>(rhs_sum));
   }
   return sum;
 #else
@@ -980,10 +962,10 @@ inline float dot_q4_1_q8_0_row_avx2_fma(
 }
 
 EMEL_KERNEL_X86_AVX2_FMA_TARGET
-inline float dot_q5_0_q8_0_row_avx2_fma(
-    const ::emel::kernel::detail::quant::block_q5_0 *lhs,
-    const ::emel::kernel::detail::quant::block_q8_0 *rhs,
-    const uint64_t block_count) noexcept {
+inline float
+dot_q5_0_q8_0_row_avx2_fma(const ::emel::kernel::detail::quant::block_q5_0 *lhs,
+                           const ::emel::kernel::detail::quant::block_q8_0 *rhs,
+                           const uint64_t block_count) noexcept {
 #if defined(__x86_64__) || defined(_M_X64)
 #if (defined(__AVX2__) && defined(__FMA__)) || defined(__GNUC__) ||            \
     defined(__clang__)
@@ -1014,10 +996,10 @@ inline float dot_q5_0_q8_0_row_avx2_fma(
 }
 
 EMEL_KERNEL_X86_AVX2_FMA_TARGET
-inline float dot_q8_0_q8_0_row_avx2_fma(
-    const ::emel::kernel::detail::quant::block_q8_0 *lhs,
-    const ::emel::kernel::detail::quant::block_q8_0 *rhs,
-    const uint64_t block_count) noexcept {
+inline float
+dot_q8_0_q8_0_row_avx2_fma(const ::emel::kernel::detail::quant::block_q8_0 *lhs,
+                           const ::emel::kernel::detail::quant::block_q8_0 *rhs,
+                           const uint64_t block_count) noexcept {
 #if defined(__x86_64__) || defined(_M_X64)
 #if (defined(__AVX2__) && defined(__FMA__)) || defined(__GNUC__) ||            \
     defined(__clang__)
@@ -1054,8 +1036,8 @@ inline float dot_q6_k_q8_k_block_avx2_fma(
   const __m128i scales_bytes =
       _mm_loadu_si128(reinterpret_cast<const __m128i *>(lhs.scales.data()));
   const __m256i scales_i16 = _mm256_cvtepi8_epi16(scales_bytes);
-  const __m256i bsums_i16 = _mm256_loadu_si256(
-      reinterpret_cast<const __m256i *>(rhs.bsums.data()));
+  const __m256i bsums_i16 =
+      _mm256_loadu_si256(reinterpret_cast<const __m256i *>(rhs.bsums.data()));
   const int32_t sum_mins =
       horizontal_sum_i32x8_avx2(_mm256_madd_epi16(scales_i16, bsums_i16));
 
@@ -1065,8 +1047,8 @@ inline float dot_q6_k_q8_k_block_avx2_fma(
   const int8_t *scale = lhs.scales.data();
   int32_t isum = 0;
   int scale_index = 0;
-  for (uint64_t block = 0;
-       block < (::emel::kernel::detail::quant::QK_K / 128u); ++block) {
+  for (uint64_t block = 0; block < (::emel::kernel::detail::quant::QK_K / 128u);
+       ++block) {
     isum += static_cast<int32_t>(scale[scale_index++]) *
             dot_u6_s8_16_avx2(ql + 0, qh + 0, q8 + 0, 0, 0);
     isum += static_cast<int32_t>(scale[scale_index++]) *
@@ -1089,8 +1071,7 @@ inline float dot_q6_k_q8_k_block_avx2_fma(
   }
 
   const int32_t adjusted = isum - (32 * sum_mins);
-  const float d =
-      rhs.d * ::emel::kernel::detail::quant::fp16_to_fp32(lhs.d);
+  const float d = rhs.d * ::emel::kernel::detail::quant::fp16_to_fp32(lhs.d);
   const __m128 block_sum =
       _mm_mul_ss(_mm_set_ss(d), _mm_set_ss(static_cast<float>(adjusted)));
   return _mm_cvtss_f32(block_sum);
@@ -1103,10 +1084,10 @@ inline float dot_q6_k_q8_k_block_avx2_fma(
 }
 
 EMEL_KERNEL_X86_AVX2_FMA_TARGET
-inline float dot_q6_k_q8_k_row_avx2_fma(
-    const ::emel::kernel::detail::quant::block_q6_k *lhs,
-    const ::emel::kernel::detail::quant::block_q8_k *rhs,
-    const uint64_t block_count) noexcept {
+inline float
+dot_q6_k_q8_k_row_avx2_fma(const ::emel::kernel::detail::quant::block_q6_k *lhs,
+                           const ::emel::kernel::detail::quant::block_q8_k *rhs,
+                           const uint64_t block_count) noexcept {
 #if defined(__x86_64__) || defined(_M_X64)
 #if (defined(__AVX2__) && defined(__FMA__)) || defined(__GNUC__) ||            \
     defined(__clang__)
@@ -1150,9 +1131,9 @@ inline void execute_avx2_fma_mul_mat_q2_k_q8_k_unchecked(
           &q8_blocks[block], ::emel::kernel::detail::quant::QK_K);
     }
     for (uint64_t i = 0; i < m; ++i) {
-      const auto *row = reinterpret_cast<
-          const ::emel::kernel::detail::quant::block_q2_k *>(
-          a + i * row_bytes);
+      const auto *row =
+          reinterpret_cast<const ::emel::kernel::detail::quant::block_q2_k *>(
+              a + i * row_bytes);
       c[i * n + j] =
           dot_q2_k_q8_k_row_avx2_fma(row, q8_blocks.data(), block_count);
     }
@@ -1188,9 +1169,9 @@ inline void execute_avx2_fma_mul_mat_q3_k_q8_k_unchecked(
           &q8_blocks[block], ::emel::kernel::detail::quant::QK_K);
     }
     for (uint64_t i = 0; i < m; ++i) {
-      const auto *row = reinterpret_cast<
-          const ::emel::kernel::detail::quant::block_q3_k *>(
-          a + i * row_bytes);
+      const auto *row =
+          reinterpret_cast<const ::emel::kernel::detail::quant::block_q3_k *>(
+              a + i * row_bytes);
       c[i * n + j] =
           dot_q3_k_q8_k_row_avx2_fma(row, q8_blocks.data(), block_count);
     }
@@ -1226,9 +1207,9 @@ inline void execute_avx2_fma_mul_mat_q4_k_q8_k_unchecked(
           &q8_blocks[block], ::emel::kernel::detail::quant::QK_K);
     }
     for (uint64_t i = 0; i < m; ++i) {
-      const auto *row = reinterpret_cast<
-          const ::emel::kernel::detail::quant::block_q4_k *>(
-          a + i * row_bytes);
+      const auto *row =
+          reinterpret_cast<const ::emel::kernel::detail::quant::block_q4_k *>(
+              a + i * row_bytes);
       c[i * n + j] =
           dot_q4_k_q8_k_row_avx2_fma(row, q8_blocks.data(), block_count);
     }
@@ -1264,8 +1245,7 @@ inline void execute_avx2_fma_mul_mat_q8_0_rhs_unchecked(
     ::emel::kernel::detail::quant::quantize_row_q8_0_strided(
         b + j, n, q8_blocks.data(), static_cast<int64_t>(k));
     for (uint64_t i = 0; i < m; ++i) {
-      const auto *row =
-          reinterpret_cast<const block_type *>(a + i * row_bytes);
+      const auto *row = reinterpret_cast<const block_type *>(a + i * row_bytes);
       c[i * n + j] = row_dot(row, q8_blocks.data(), block_count);
     }
   }
@@ -1279,32 +1259,32 @@ inline void execute_avx2_fma_mul_mat_q4_0_q8_0_unchecked(
     const event::op_mul_mat &request) noexcept {
   execute_avx2_fma_mul_mat_q8_0_rhs_unchecked<
       ::emel::kernel::detail::quant::block_q4_0,
-      ::emel::kernel::detail::quant::QK4_0,
-      &dot_q4_0_q8_0_row_avx2_fma>(request);
+      ::emel::kernel::detail::quant::QK4_0, &dot_q4_0_q8_0_row_avx2_fma>(
+      request);
 }
 
 inline void execute_avx2_fma_mul_mat_q4_1_q8_0_unchecked(
     const event::op_mul_mat &request) noexcept {
   execute_avx2_fma_mul_mat_q8_0_rhs_unchecked<
       ::emel::kernel::detail::quant::block_q4_1,
-      ::emel::kernel::detail::quant::QK4_1,
-      &dot_q4_1_q8_0_row_avx2_fma>(request);
+      ::emel::kernel::detail::quant::QK4_1, &dot_q4_1_q8_0_row_avx2_fma>(
+      request);
 }
 
 inline void execute_avx2_fma_mul_mat_q5_0_q8_0_unchecked(
     const event::op_mul_mat &request) noexcept {
   execute_avx2_fma_mul_mat_q8_0_rhs_unchecked<
       ::emel::kernel::detail::quant::block_q5_0,
-      ::emel::kernel::detail::quant::QK5_0,
-      &dot_q5_0_q8_0_row_avx2_fma>(request);
+      ::emel::kernel::detail::quant::QK5_0, &dot_q5_0_q8_0_row_avx2_fma>(
+      request);
 }
 
 inline void execute_avx2_fma_mul_mat_q8_0_q8_0_unchecked(
     const event::op_mul_mat &request) noexcept {
   execute_avx2_fma_mul_mat_q8_0_rhs_unchecked<
       ::emel::kernel::detail::quant::block_q8_0,
-      ::emel::kernel::detail::quant::QK8_0,
-      &dot_q8_0_q8_0_row_avx2_fma>(request);
+      ::emel::kernel::detail::quant::QK8_0, &dot_q8_0_q8_0_row_avx2_fma>(
+      request);
 }
 
 EMEL_KERNEL_X86_AVX2_FMA_TARGET
@@ -1332,9 +1312,9 @@ inline void execute_avx2_fma_mul_mat_q6_k_q8_k_unchecked(
           &q8_blocks[block], ::emel::kernel::detail::quant::QK_K);
     }
     for (uint64_t i = 0; i < m; ++i) {
-      const auto *row = reinterpret_cast<
-          const ::emel::kernel::detail::quant::block_q6_k *>(
-          a + i * row_bytes);
+      const auto *row =
+          reinterpret_cast<const ::emel::kernel::detail::quant::block_q6_k *>(
+              a + i * row_bytes);
       c[i * n + j] =
           dot_q6_k_q8_k_row_avx2_fma(row, q8_blocks.data(), block_count);
     }
@@ -2076,14 +2056,14 @@ execute_avx2_fma_mul_mat(const event::op_mul_mat &request) noexcept {
           for (uint64_t kk = 0; kk < depth; ++kk) {
             const __m256 bv =
                 _mm256_loadu_ps(packed_b + kk * vec_cols + j_offset);
-            acc0 = _mm256_fmadd_ps(_mm256_set1_ps(a[(i + 0) * k + pb + kk]),
-                                   bv, acc0);
-            acc1 = _mm256_fmadd_ps(_mm256_set1_ps(a[(i + 1) * k + pb + kk]),
-                                   bv, acc1);
-            acc2 = _mm256_fmadd_ps(_mm256_set1_ps(a[(i + 2) * k + pb + kk]),
-                                   bv, acc2);
-            acc3 = _mm256_fmadd_ps(_mm256_set1_ps(a[(i + 3) * k + pb + kk]),
-                                   bv, acc3);
+            acc0 = _mm256_fmadd_ps(_mm256_set1_ps(a[(i + 0) * k + pb + kk]), bv,
+                                   acc0);
+            acc1 = _mm256_fmadd_ps(_mm256_set1_ps(a[(i + 1) * k + pb + kk]), bv,
+                                   acc1);
+            acc2 = _mm256_fmadd_ps(_mm256_set1_ps(a[(i + 2) * k + pb + kk]), bv,
+                                   acc2);
+            acc3 = _mm256_fmadd_ps(_mm256_set1_ps(a[(i + 3) * k + pb + kk]), bv,
+                                   acc3);
           }
 
           _mm256_storeu_ps(c + (i + 0) * n + j, acc0);
@@ -2153,8 +2133,8 @@ inline void execute_avx2_fma_mul_mat_f32_vector_unchecked(
     __m256 acc2 = _mm256_setzero_ps();
     __m256 acc3 = _mm256_setzero_ps();
     for (uint64_t kk = 0; kk < vec_depth; kk += 32u) {
-      acc0 = _mm256_fmadd_ps(_mm256_loadu_ps(row + kk),
-                             _mm256_loadu_ps(b + kk), acc0);
+      acc0 = _mm256_fmadd_ps(_mm256_loadu_ps(row + kk), _mm256_loadu_ps(b + kk),
+                             acc0);
       acc1 = _mm256_fmadd_ps(_mm256_loadu_ps(row + kk + 8u),
                              _mm256_loadu_ps(b + kk + 8u), acc1);
       acc2 = _mm256_fmadd_ps(_mm256_loadu_ps(row + kk + 16u),
@@ -2164,8 +2144,8 @@ inline void execute_avx2_fma_mul_mat_f32_vector_unchecked(
     }
     uint64_t kk = vec_depth;
     for (; kk + 8u <= k; kk += 8u) {
-      acc0 = _mm256_fmadd_ps(_mm256_loadu_ps(row + kk),
-                             _mm256_loadu_ps(b + kk), acc0);
+      acc0 = _mm256_fmadd_ps(_mm256_loadu_ps(row + kk), _mm256_loadu_ps(b + kk),
+                             acc0);
     }
     const __m256 acc01 = _mm256_add_ps(acc0, acc1);
     const __m256 acc23 = _mm256_add_ps(acc2, acc3);
@@ -2603,6 +2583,75 @@ using exec_scalar_op_unary_relu_t =
 using exec_scalar_op_unary_exp_t = ::emel::kernel::detail::exec_scalar_unary_op<
     ::emel::kernel::x86_64::event::dispatch_op_unary, context,
     detail::mark_done_op, ::emel::kernel::event::unary_subop::exp>;
+using exec_scalar_op_unary_tanh_t =
+    ::emel::kernel::detail::exec_scalar_unary_op<
+        ::emel::kernel::x86_64::event::dispatch_op_unary, context,
+        detail::mark_done_op, ::emel::kernel::event::unary_subop::tanh>;
+using exec_scalar_op_unary_elu_t = ::emel::kernel::detail::exec_scalar_unary_op<
+    ::emel::kernel::x86_64::event::dispatch_op_unary, context,
+    detail::mark_done_op, ::emel::kernel::event::unary_subop::elu>;
+using exec_scalar_op_unary_gelu_t =
+    ::emel::kernel::detail::exec_scalar_unary_op<
+        ::emel::kernel::x86_64::event::dispatch_op_unary, context,
+        detail::mark_done_op, ::emel::kernel::event::unary_subop::gelu>;
+using exec_scalar_op_unary_silu_t =
+    ::emel::kernel::detail::exec_scalar_unary_op<
+        ::emel::kernel::x86_64::event::dispatch_op_unary, context,
+        detail::mark_done_op, ::emel::kernel::event::unary_subop::silu>;
+
+using exec_scalar_op_mul_mat_f16_t =
+    ::emel::kernel::detail::exec_scalar_mul_mat_f16_op<
+        ::emel::kernel::x86_64::event::dispatch_op_mul_mat, context,
+        detail::mark_done_op>;
+
+template <uint8_t src_dtype_code>
+using exec_scalar_op_get_rows_src_t =
+    ::emel::kernel::detail::exec_scalar_get_rows_op<
+        ::emel::kernel::x86_64::event::dispatch_op_get_rows, context,
+        detail::mark_done_op, src_dtype_code>;
+using exec_scalar_op_get_rows_f32_t =
+    exec_scalar_op_get_rows_src_t<::emel::kernel::detail::dtype_f32>;
+using exec_scalar_op_get_rows_f16_t =
+    exec_scalar_op_get_rows_src_t<::emel::kernel::detail::dtype_f16>;
+using exec_scalar_op_get_rows_bf16_t =
+    exec_scalar_op_get_rows_src_t<::emel::kernel::detail::dtype_bf16>;
+using exec_scalar_op_get_rows_q4_0_t =
+    exec_scalar_op_get_rows_src_t<::emel::kernel::detail::dtype_q4_0>;
+using exec_scalar_op_get_rows_q8_0_t =
+    exec_scalar_op_get_rows_src_t<::emel::kernel::detail::dtype_q8_0>;
+using exec_scalar_op_get_rows_q4_k_t =
+    exec_scalar_op_get_rows_src_t<::emel::kernel::detail::dtype_q4_k>;
+using exec_scalar_op_rope_norm_t = ::emel::kernel::detail::exec_scalar_rope_op<
+    ::emel::kernel::x86_64::event::dispatch_op_rope, context,
+    detail::mark_done_op, false>;
+using exec_scalar_op_rope_neox_t = ::emel::kernel::detail::exec_scalar_rope_op<
+    ::emel::kernel::x86_64::event::dispatch_op_rope, context,
+    detail::mark_done_op, true>;
+using exec_scalar_op_im2col_f32_t =
+    ::emel::kernel::detail::exec_scalar_im2col_op<
+        ::emel::kernel::x86_64::event::dispatch_op_im2col, context,
+        detail::mark_done_op, false>;
+using exec_scalar_op_im2col_f16_t =
+    ::emel::kernel::detail::exec_scalar_im2col_op<
+        ::emel::kernel::x86_64::event::dispatch_op_im2col, context,
+        detail::mark_done_op, true>;
+using exec_scalar_op_conv_transpose_1d_f32_t =
+    ::emel::kernel::detail::exec_scalar_conv_transpose_1d_op<
+        ::emel::kernel::x86_64::event::dispatch_op_conv_transpose_1d, context,
+        detail::mark_done_op, false>;
+using exec_scalar_op_conv_transpose_1d_f16_t =
+    ::emel::kernel::detail::exec_scalar_conv_transpose_1d_op<
+        ::emel::kernel::x86_64::event::dispatch_op_conv_transpose_1d, context,
+        detail::mark_done_op, true>;
+
+using exec_scalar_op_add_broadcast_row_t =
+    ::emel::kernel::detail::exec_scalar_binary_broadcast_row_op<
+        ::emel::kernel::x86_64::event::dispatch_op_add, context,
+        detail::mark_done_op, false>;
+using exec_scalar_op_mul_broadcast_row_t =
+    ::emel::kernel::detail::exec_scalar_binary_broadcast_row_op<
+        ::emel::kernel::x86_64::event::dispatch_op_mul, context,
+        detail::mark_done_op, true>;
 
 #define EMEL_KERNEL_DECLARE_REJECT_TYPE(op_name)                               \
   using reject_invalid_##op_name##_t =                                         \
@@ -2661,6 +2710,29 @@ inline constexpr exec_scalar_op_unary_abs_t exec_scalar_op_unary_abs{};
 inline constexpr exec_scalar_op_unary_neg_t exec_scalar_op_unary_neg{};
 inline constexpr exec_scalar_op_unary_relu_t exec_scalar_op_unary_relu{};
 inline constexpr exec_scalar_op_unary_exp_t exec_scalar_op_unary_exp{};
+inline constexpr exec_scalar_op_unary_tanh_t exec_scalar_op_unary_tanh{};
+inline constexpr exec_scalar_op_unary_elu_t exec_scalar_op_unary_elu{};
+inline constexpr exec_scalar_op_unary_gelu_t exec_scalar_op_unary_gelu{};
+inline constexpr exec_scalar_op_unary_silu_t exec_scalar_op_unary_silu{};
+inline constexpr exec_scalar_op_mul_mat_f16_t exec_scalar_op_mul_mat_f16{};
+inline constexpr exec_scalar_op_get_rows_f32_t exec_scalar_op_get_rows_f32{};
+inline constexpr exec_scalar_op_get_rows_f16_t exec_scalar_op_get_rows_f16{};
+inline constexpr exec_scalar_op_get_rows_bf16_t exec_scalar_op_get_rows_bf16{};
+inline constexpr exec_scalar_op_get_rows_q4_0_t exec_scalar_op_get_rows_q4_0{};
+inline constexpr exec_scalar_op_get_rows_q8_0_t exec_scalar_op_get_rows_q8_0{};
+inline constexpr exec_scalar_op_get_rows_q4_k_t exec_scalar_op_get_rows_q4_k{};
+inline constexpr exec_scalar_op_rope_norm_t exec_scalar_op_rope_norm{};
+inline constexpr exec_scalar_op_rope_neox_t exec_scalar_op_rope_neox{};
+inline constexpr exec_scalar_op_im2col_f32_t exec_scalar_op_im2col_f32{};
+inline constexpr exec_scalar_op_im2col_f16_t exec_scalar_op_im2col_f16{};
+inline constexpr exec_scalar_op_conv_transpose_1d_f32_t
+    exec_scalar_op_conv_transpose_1d_f32{};
+inline constexpr exec_scalar_op_conv_transpose_1d_f16_t
+    exec_scalar_op_conv_transpose_1d_f16{};
+inline constexpr exec_scalar_op_add_broadcast_row_t
+    exec_scalar_op_add_broadcast_row{};
+inline constexpr exec_scalar_op_mul_broadcast_row_t
+    exec_scalar_op_mul_broadcast_row{};
 
 #define EMEL_KERNEL_DEFINE_RUN_ACTION(op_name)                                 \
   inline constexpr exec_##op_name##_t exec_##op_name{};

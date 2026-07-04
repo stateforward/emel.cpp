@@ -33,6 +33,12 @@ struct release_attempt_status {
   bool os_resource_released = false;
 };
 
+struct advise_attempt_status {
+  emel::error::type err = emel::error::cast(error::none);
+  bool ok = false;
+  bool advise_ok = false;
+};
+
 struct map_tensor_runtime {
   const event::map_tensor &request;
   map_attempt_status &status;
@@ -41,6 +47,11 @@ struct map_tensor_runtime {
 struct release_mapping_runtime {
   const event::release_mapping &request;
   release_attempt_status &status;
+};
+
+struct advise_mapping_runtime {
+  const event::advise_mapping &request;
+  advise_attempt_status &status;
 };
 
 } // namespace emel::io::mmap::detail

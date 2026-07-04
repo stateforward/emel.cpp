@@ -42,6 +42,11 @@ target_include_directories(emel_core
   INTERFACE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
     ${CMAKE_CURRENT_SOURCE_DIR}/src
+)
+# Third-party dependency headers are SYSTEM so -Wpedantic coverage builds do
+# not fail on upstream template internals (sml aux::pool zero-size array).
+target_include_directories(emel_core SYSTEM
+  INTERFACE
     ${stateforward_sml_SOURCE_DIR}/include
 )
 
@@ -128,6 +133,8 @@ add_library(emel STATIC
   src/emel/model/omniembed/detail.cpp
   src/emel/model/sortformer/detail.cpp
   src/emel/model/whisper/detail.cpp
+  src/emel/model/moshi/detail.cpp
+  src/emel/speech/codec/mimi/detail.cpp
   src/emel/speech/recognizer_routes/whisper/detail.cpp
   src/emel/diarization/sortformer/detail.cpp
   src/emel/diarization/sortformer/encoder/feature_extractor/detail.cpp
@@ -156,6 +163,7 @@ if(EMEL_ENABLE_TESTS)
     tests/doctest_main.cpp
     tests/model/fixture_manifest_tests.cpp
     tests/model/loader/lifecycle_tests.cpp
+    tests/model/moshi/binding_tests.cpp
     tests/gbnf/lexer_tests.cpp
     tests/gbnf/parser_tests.cpp
     tests/gbnf/sampler_tests.cpp
@@ -164,6 +172,7 @@ if(EMEL_ENABLE_TESTS)
     tests/text/generator/action_guard_tests.cpp
     tests/text/generator/detail_tests.cpp
     tests/text/generator/parallel_matmul_tests.cpp
+    tests/text/generator/stream_window_tests.cpp
     tests/text/generator/decode_wavefront/lifecycle_tests.cpp
     tests/text/generator/initializer/lifecycle_tests.cpp
     tests/text/generator/prefill/lifecycle_tests.cpp
@@ -175,6 +184,8 @@ if(EMEL_ENABLE_TESTS)
     tests/diarization/sortformer/pipeline/lifecycle_tests.cpp
     tests/diarization/sortformer/parity/lifecycle_tests.cpp
     tests/diarization/sortformer/transformer/lifecycle_tests.cpp
+    tests/speech/codec/mimi_detail_tests.cpp
+    tests/speech/codec/mimi_lifecycle_tests.cpp
     tests/speech/encoder/whisper/lifecycle_tests.cpp
     tests/speech/decoder/whisper/lifecycle_tests.cpp
     tests/speech/encoder/whisper/detail_tests.cpp
@@ -190,6 +201,7 @@ if(EMEL_ENABLE_TESTS)
     tests/logits/sampler/pipeline_tests.cpp
     tests/sm/callback_tests.cpp
     tests/sm/sm_policy_tests.cpp
+    tests/sm/sm_external_completion_tests.cpp
     tests/sm/sm_any_tests.cpp
     tests/graph/wrapper_visibility_tests.cpp
     tests/graph/allocator/allocator_tests.cpp
@@ -220,12 +232,15 @@ if(EMEL_ENABLE_TESTS)
     tests/memory/hybrid/lifecycle_tests.cpp
     tests/graph/tensor/lifecycle_tests.cpp
     tests/model/tensor/lifecycle_tests.cpp
+    tests/model/tensor/window/lifecycle_tests.cpp
+    tests/model/tensor/window/streaming_tests.cpp
     tests/tensor/view/lifecycle_tests.cpp
   )
 
   list(APPEND EMEL_TEST_SOURCES
     tests/gguf/loader/lifecycle_tests.cpp
     tests/io/loader/lifecycle_tests.cpp
+    tests/io/mmap/advise_tests.cpp
     tests/io/mmap/lifecycle_tests.cpp
     tests/io/read/lifecycle_tests.cpp
     tests/io/staged_read/lifecycle_tests.cpp
@@ -329,8 +344,11 @@ if(EMEL_ENABLE_TESTS)
       ${CMAKE_CURRENT_SOURCE_DIR}/src
       ${CMAKE_CURRENT_SOURCE_DIR}/include
       ${CMAKE_CURRENT_SOURCE_DIR}/tools/bench
-      ${stateforward_sml_SOURCE_DIR}/include
       ${DOCTEST_INCLUDE_DIR}
+  )
+  target_include_directories(emel_tests_bin SYSTEM
+    PRIVATE
+      ${stateforward_sml_SOURCE_DIR}/include
   )
 
   target_compile_definitions(emel_tests_bin

@@ -8,7 +8,7 @@
 
 TEST_CASE("tokenizer_bpe_regex_for_vocab") {
   static emel::model::data::vocab vocab = {};
-  std::memset(&vocab, 0, sizeof(vocab));
+  vocab = {};
   vocab.tokenizer_pre_id = emel::model::data::tokenizer_pre::GPT2;
 
   const auto from_vocab = emel::text::tokenizer::bpe::detail::regex_for(vocab);

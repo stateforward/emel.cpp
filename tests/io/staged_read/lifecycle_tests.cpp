@@ -103,8 +103,13 @@ struct unrelated_event {};
 
 } // namespace
 
-static_assert(std::is_empty_v<emel::io::staged_read::action::context>,
-              "staged_read::context must remain empty (STG-07)");
+// STG-07: context retains no dispatch-local request payload. The only member
+// is the construction-time platform capability (persistent actor state), so
+// the context stays trivially copyable and pointer-free at one flag wide.
+static_assert(
+    std::is_trivially_copyable_v<emel::io::staged_read::action::context> &&
+        sizeof(emel::io::staged_read::action::context) == sizeof(bool),
+    "staged_read::context must hold only the platform capability (STG-07)");
 
 TEST_CASE("io staged_read default construction exposes state_ready") {
   emel::IoStagedRead machine{};

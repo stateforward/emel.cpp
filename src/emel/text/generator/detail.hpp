@@ -22,6 +22,7 @@
 #include "emel/model/data.hpp"
 #include "emel/model/llama/detail.hpp"
 #include "emel/model/loader/errors.hpp"
+#include "emel/model/tensor/window/sm.hpp"
 
 namespace emel::text::generator::detail {
 
@@ -47,6 +48,11 @@ inline constexpr rope_pairing neox_rope_pairing() noexcept {
 struct packed_matrix_binding {
   emel::model::data::tensor_record tensor = {};
   std::vector<uint8_t> storage = {};
+  // The raw model record the packed layout was prepared from. Streamed slots
+  // hold raw GGUF bytes, so the streamed rebase must clone this record (its
+  // dtype/extents describe the slot bytes) while resident restore keeps the
+  // packed record the layout swap bound.
+  const emel::model::data::tensor_record * source = nullptr;
 };
 
 struct block_weights {
@@ -96,6 +102,55 @@ enum class matmul_lane_mode : uint8_t {
   parallel = 1,
 };
 
+// Weight residency mode for the layer loop: resident consumes blocks[] views
+// as prepared; streamed acquires each layer's slot from the tensor window
+// actor and rebases the block's matmul weight views into the slot before use.
+enum class window_mode : uint8_t {
+  resident = 0,
+  streamed = 1,
+};
+
+// Canonical per-layer stream role order shared by extent builders (tests,
+// bench fixtures) and the rebase walk below. Absent roles are skipped; both
+// sides must walk this exact order for positional extents to line up.
+inline constexpr size_t k_stream_role_attention_q = 0;
+inline constexpr size_t k_stream_role_attention_k = 1;
+inline constexpr size_t k_stream_role_attention_v = 2;
+inline constexpr size_t k_stream_role_attention_output = 3;
+inline constexpr size_t k_stream_role_feed_forward_gate = 4;
+inline constexpr size_t k_stream_role_feed_forward_down = 5;
+inline constexpr size_t k_stream_role_feed_forward_up = 6;
+inline constexpr size_t k_stream_role_shortconv_in_proj = 7;
+inline constexpr size_t k_stream_role_shortconv_out_proj = 8;
+inline constexpr size_t k_stream_role_count = 9;
+
+// Streamed-weight binding: injected window actor plus the per-role record
+// clones the layer loop rebases blocks[] onto. One clone set suffices because
+// single-lane decode consumes exactly one layer at a time. pristine holds the
+// prepare()-time record pointers per layer so every rebase clones from the
+// original model contract (blocks[] pointers move onto the clones after the
+// first streamed pass).
+struct stream_binding {
+  emel::model::tensor::window::sm * window = nullptr;
+  bool active = false;
+  std::array<emel::model::data::tensor_record, k_stream_role_count> records = {};
+  // pristine holds the prepare()-time bound records (packed on aarch64) that
+  // resident steps restore to; raw holds the untouched model records whose
+  // dtype/extents describe the raw GGUF bytes the window streams into slots.
+  std::vector<std::array<const emel::model::data::tensor_record *, k_stream_role_count>>
+      pristine = {};
+  std::vector<std::array<const emel::model::data::tensor_record *, k_stream_role_count>>
+      raw = {};
+  // The logits/argmax output stage of a streamed step runs on the raw model
+  // record too (a packed resident output would need the packed input
+  // pipeline, which the raw-classified streamed route does not run); resident
+  // steps restore the prepare()-time views.
+  const emel::model::data::tensor_record * pristine_output = nullptr;
+  const emel::model::data::tensor_record * raw_output = nullptr;
+  const emel::model::data::tensor_record * pristine_output_argmax = nullptr;
+  const emel::model::data::tensor_record * raw_output_argmax = nullptr;
+};
+
 struct native_backend {
   const emel::model::data * model = nullptr;
   emel::model::llama::detail::execution_view execution = {};
@@ -135,6 +190,7 @@ struct native_backend {
   std::vector<uint8_t> packed_q8_0_chunk4_input_storage = {};
   emel::model::llama::detail::quantized_path_audit quantized_audit = {};
   std::vector<block_weights> blocks = {};
+  stream_binding stream = {};
 
   int32_t n_vocab = 0;
   int32_t n_embd = 0;
@@ -260,6 +316,10 @@ using step_plan = emel::model::llama::detail::step_plan;
 
 constexpr int32_t k_error_ok = 0;
 constexpr int32_t k_error_invalid = 1;
+// A streamed decode could not acquire its layer window slot: distinct from
+// generic compute failure so the outcome is externally attributable to the
+// tensor-window collaborator.
+constexpr int32_t k_error_stream_acquire = 2;
 constexpr int32_t k_prefill_q8_chunk_rows = 4;
 constexpr int32_t k_prefill_q8_chunk8_rows = 8;
 // Minimum prompt size before the parallel matmul lanes are worth the fork
@@ -1229,6 +1289,7 @@ inline bool prepare_packed_q8_0_matrix_layout(tensor_matrix & matrix,
           *matrix.tensor, matrix.rows, matrix.cols, packed.tensor, packed.storage)) {
     return false;
   }
+  packed.source = matrix.tensor;
   matrix.tensor = &packed.tensor;
   return true;
 }
@@ -1291,6 +1352,7 @@ inline bool prepare_packed_q4_matrix_layout(tensor_matrix & matrix,
           *matrix.tensor, matrix.rows, matrix.cols, packed.tensor, packed.storage)) {
     return false;
   }
+  packed.source = matrix.tensor;
   matrix.tensor = &packed.tensor;
   return true;
 }
@@ -1355,6 +1417,7 @@ inline bool prepare_packed_q6_matrix_layout(tensor_matrix & matrix,
           *matrix.tensor, matrix.rows, matrix.cols, packed.tensor, packed.storage)) {
     return false;
   }
+  packed.source = matrix.tensor;
   matrix.tensor = &packed.tensor;
   return true;
 }
@@ -2248,16 +2311,12 @@ inline bool compute_mul_mat_sliced_parallel(
     lane_kernel.set_kind(backend.kernel_kind);
     const auto & lane_ev = lane_events[lane];
     auto & ok_flag = lane_ok[lane];
-    const bool submitted =
-        scheduler.try_submit(group, [&lane_kernel, &lane_ev, &ok_flag]() noexcept {
-          ok_flag = lane_kernel.process_event(lane_ev);
-        });
-    // Bounded backpressure handling: a rejected submit (queue full, or the
-    // caller is already a pool worker) runs the same slice inline. The
-    // algorithm and output are identical either way; only placement differs.
-    if (!submitted) {
+    // Total fork: submit_or_run executes the slice exactly once inside the
+    // join window (worker or calling thread - the scheduler's internal
+    // capacity handling, never a behavior choice).
+    scheduler.submit_or_run(group, [&lane_kernel, &lane_ev, &ok_flag]() noexcept {
       ok_flag = lane_kernel.process_event(lane_ev);
-    }
+    });
   }
   lane_events[0] = compute_sliced_mul_mat_event(ev, group_rows, slices[0]);
   backend.lane_kernels[0].set_kind(backend.kernel_kind);
@@ -3642,12 +3701,196 @@ inline bool run_shortconv_block_chunk4(native_backend & backend,
   return true;
 }
 
-template <emel::text::generator::attention_mode mode,
-          scalar_matmul_route route,
-          matmul_lane_mode lanes = matmul_lane_mode::serial>
-inline bool run_layer(native_backend & backend,
-                      const int32_t layer_index,
-                      const int32_t position) noexcept {
+// Records the prepare()-time matmul weight record pointers per layer in the
+// canonical stream role order: pristine holds the bound records resident
+// steps restore to (packed on aarch64), raw holds the untouched model
+// records the streamed rebase clones (their dtype/extents describe the raw
+// GGUF bytes the window copies into slots; a packed record would misread
+// them). One-time engage bookkeeping (runs inside the initialize pipeline
+// alongside prepare()'s own setup allocation).
+inline void scan_stream_pristine_records(native_backend & backend) noexcept {
+  backend.stream.pristine.assign(backend.blocks.size(), {});
+  backend.stream.raw.assign(backend.blocks.size(), {});
+  backend.stream.pristine_output = backend.output.tensor;
+  backend.stream.raw_output = backend.output_native.tensor != nullptr
+                                  ? backend.output_native.tensor
+                                  : backend.output.tensor;
+  backend.stream.pristine_output_argmax = backend.output_argmax.tensor;
+  backend.stream.raw_output_argmax = backend.output_native.tensor != nullptr
+                                         ? backend.output_native.tensor
+                                         : backend.output_argmax.tensor;
+  for (size_t layer = 0; layer < backend.blocks.size(); ++layer) {
+    const block_weights & block = backend.blocks[layer];
+    auto & roles = backend.stream.pristine[layer];
+    auto & raw = backend.stream.raw[layer];
+    const auto record = [&](const size_t role, const tensor_matrix & matrix,
+                            const packed_matrix_binding & packed) noexcept {
+      roles[role] = matrix.tensor;
+      raw[role] = packed.source != nullptr ? packed.source : matrix.tensor;
+    };
+    record(k_stream_role_attention_q, block.attention_q,
+           block.attention_q_packed);
+    record(k_stream_role_attention_k, block.attention_k,
+           block.attention_k_packed);
+    record(k_stream_role_attention_v, block.attention_v,
+           block.attention_v_packed);
+    record(k_stream_role_attention_output, block.attention_output,
+           block.attention_output_packed);
+    record(k_stream_role_feed_forward_gate, block.feed_forward_gate,
+           block.feed_forward_gate_packed);
+    record(k_stream_role_feed_forward_down, block.feed_forward_down,
+           block.feed_forward_down_packed);
+    record(k_stream_role_feed_forward_up, block.feed_forward_up,
+           block.feed_forward_up_packed);
+    record(k_stream_role_shortconv_in_proj, block.shortconv_in_proj,
+           block.shortconv_in_proj_packed);
+    record(k_stream_role_shortconv_out_proj, block.shortconv_out_proj,
+           block.shortconv_out_proj_packed);
+  }
+}
+
+// Rebases the layer's matmul weight views onto the acquired window slot:
+// clones the raw model record per present role (canonical order matching the
+// extent builder) with data repointed into the slot. The slot holds raw GGUF
+// bytes, so the clone's dtype/extents must describe them - the prepare()-time
+// record can be a packed repack on aarch64 and would misread the slot. Pure
+// pointer bookkeeping on the already-chosen streamed route; absent-role
+// skipping is data-plane presence filtering, and a count mismatch propagates
+// as data-plane failure.
+inline bool bind_streamed_block_views(
+    native_backend & backend,
+    const int32_t layer_index,
+    const uint8_t * slot_base,
+    const emel::model::tensor::window::detail::layer_descriptor & layout) noexcept {
+  block_weights & block = backend.blocks[static_cast<size_t>(layer_index)];
+  stream_binding & stream = backend.stream;
+  const auto & raw = stream.raw[static_cast<size_t>(layer_index)];
+  uint32_t extent_index = 0u;
+  const auto rebind = [&](tensor_matrix & matrix, const size_t role) noexcept -> bool {
+    if (raw[role] == nullptr) {
+      return true;
+    }
+    if (extent_index >= layout.weight_count) {
+      return false;
+    }
+    stream.records[role] = *raw[role];
+    stream.records[role].data = slot_base + layout.weights[extent_index].slot_offset;
+    matrix.tensor = &stream.records[role];
+    extent_index += 1u;
+    return true;
+  };
+  return rebind(block.attention_q, k_stream_role_attention_q) &&
+         rebind(block.attention_k, k_stream_role_attention_k) &&
+         rebind(block.attention_v, k_stream_role_attention_v) &&
+         rebind(block.attention_output, k_stream_role_attention_output) &&
+         rebind(block.feed_forward_gate, k_stream_role_feed_forward_gate) &&
+         rebind(block.feed_forward_down, k_stream_role_feed_forward_down) &&
+         rebind(block.feed_forward_up, k_stream_role_feed_forward_up) &&
+         rebind(block.shortconv_in_proj, k_stream_role_shortconv_in_proj) &&
+         rebind(block.shortconv_out_proj, k_stream_role_shortconv_out_proj) &&
+         extent_index == layout.weight_count;
+}
+
+// Points the logits/argmax output views at the raw model records for a
+// streamed step: the streamed route is classified from raw records, so a
+// packed resident output would be misread by it. Pure pointer bookkeeping on
+// the already-chosen streamed route.
+inline void bind_streamed_output_views(native_backend & backend) noexcept {
+  if (backend.stream.raw_output != nullptr) {
+    backend.output.tensor = backend.stream.raw_output;
+  }
+  if (backend.stream.raw_output_argmax != nullptr) {
+    backend.output_argmax.tensor = backend.stream.raw_output_argmax;
+  }
+}
+
+// Restores every block's matmul weight views (and the output views) to the
+// prepare()-time records after a streamed step, so a later resident step
+// reads the per-layer tensors instead of the shared per-role stream records
+// (which hold the last acquired slot's clone). Pure pointer bookkeeping on
+// the already-completed streamed route; used by both streamed decode
+// drivers.
+inline void reset_stream_block_views(native_backend & backend) noexcept {
+  if (backend.stream.pristine_output != nullptr) {
+    backend.output.tensor = backend.stream.pristine_output;
+  }
+  if (backend.stream.pristine_output_argmax != nullptr) {
+    backend.output_argmax.tensor = backend.stream.pristine_output_argmax;
+  }
+  // pristine is either empty (scan never ran) or exactly blocks.size()
+  // (assigned in one shot by scan_stream_pristine_records), so its size
+  // bounds the block indexing.
+  const size_t layer_count = backend.stream.pristine.size();
+  for (size_t layer = 0; layer < layer_count; ++layer) {
+    block_weights & block = backend.blocks[layer];
+    const auto & roles = backend.stream.pristine[layer];
+    const auto restore = [&](tensor_matrix & matrix, const size_t role) noexcept {
+      if (roles[role] != nullptr) {
+        matrix.tensor = roles[role];
+      }
+    };
+    restore(block.attention_q, k_stream_role_attention_q);
+    restore(block.attention_k, k_stream_role_attention_k);
+    restore(block.attention_v, k_stream_role_attention_v);
+    restore(block.attention_output, k_stream_role_attention_output);
+    restore(block.feed_forward_gate, k_stream_role_feed_forward_gate);
+    restore(block.feed_forward_down, k_stream_role_feed_forward_down);
+    restore(block.feed_forward_up, k_stream_role_feed_forward_up);
+    restore(block.shortconv_in_proj, k_stream_role_shortconv_in_proj);
+    restore(block.shortconv_out_proj, k_stream_role_shortconv_out_proj);
+  }
+}
+
+struct stream_acquire_capture {
+  bool done = false;
+  const uint8_t * slot_base = nullptr;
+  const emel::model::tensor::window::detail::layer_descriptor * layout = nullptr;
+
+  static void on_done(
+      void * object,
+      const emel::model::tensor::window::events::acquire_layer_window_done & ev) noexcept {
+    auto * capture = static_cast<stream_acquire_capture *>(object);
+    capture->done = true;
+    capture->slot_base = ev.slot_base;
+    capture->layout = &ev.layout;
+  }
+
+  static void on_error(
+      void *,
+      const emel::model::tensor::window::events::acquire_layer_window_error &) noexcept {}
+};
+
+// Streamed layer residency: acquires the layer's window slot (suspending on
+// the in-flight load when needed) and rebases the block's weight views into
+// it. Failure propagates through the layer loop's bool data-plane error path.
+inline bool acquire_streamed_layer(native_backend & backend,
+                                   const int32_t layer_index) noexcept {
+  stream_acquire_capture capture{};
+  emel::model::tensor::window::event::acquire_layer_window acquire{layer_index};
+  acquire.on_done = {&capture, &stream_acquire_capture::on_done};
+  acquire.on_error = {&capture, &stream_acquire_capture::on_error};
+  if (!backend.stream.window->process_event(acquire) || !capture.done) {
+    return false;
+  }
+  return bind_streamed_block_views(backend, layer_index, capture.slot_base,
+                                   *capture.layout);
+}
+
+template <emel::text::generator::attention_mode mode, scalar_matmul_route route,
+          matmul_lane_mode lanes = matmul_lane_mode::serial,
+          window_mode wmode = window_mode::resident>
+inline bool run_layer(native_backend &backend, const int32_t layer_index,
+                      const int32_t position,
+                      int32_t * err_out = nullptr) noexcept {
+  if constexpr (wmode == window_mode::streamed) {
+    // Streamed instantiations are reached only from the decode wrappers,
+    // which receive the graph processor's always-valid err pointer
+    // (kernel_step run_callback passes &callback_err unconditionally).
+    if (!acquire_streamed_layer(backend, layer_index)) {
+      *err_out = k_error_stream_acquire;
+      return false;
+    }
+  }
   auto & block = backend.blocks[static_cast<size_t>(layer_index)];
   if (!rms_norm(backend.hidden, block.attention_norm, backend.rms_epsilon, backend.norm)) {
     return false;
@@ -4615,11 +4858,12 @@ inline bool run_prefill_chunk8_preselected_argmax_q8_k(native_backend & backend,
       backend, selected_index, selected_score);
 }
 
-template <emel::text::generator::attention_mode mode,
-          scalar_matmul_route route,
-          matmul_lane_mode lanes = matmul_lane_mode::serial>
-inline bool run_decode(native_backend & backend,
-                       const emel::graph::processor::event::execute & request) noexcept {
+template <emel::text::generator::attention_mode mode, scalar_matmul_route route,
+          matmul_lane_mode lanes = matmul_lane_mode::serial,
+          window_mode wmode = window_mode::resident>
+inline bool run_decode(native_backend &backend,
+                       const emel::graph::processor::event::execute &request,
+                       int32_t * err_out = nullptr) noexcept {
   if (backend.bound_token_count != 1 ||
       backend.bound_position_count != 1 ||
       request.kv_tokens < 0 ||
@@ -4640,23 +4884,39 @@ inline bool run_decode(native_backend & backend,
     return false;
   }
 
+  if constexpr (wmode == window_mode::streamed) {
+    bind_streamed_output_views(backend);
+  }
   for (int32_t layer = 0; layer < backend.n_layer; ++layer) {
-    if (!run_layer<mode, route, lanes>(backend, layer, position)) {
+    if (!run_layer<mode, route, lanes, wmode>(backend, layer, position,
+                                              err_out)) {
+      if constexpr (wmode == window_mode::streamed) {
+        reset_stream_block_views(backend);
+      }
       return false;
     }
   }
   backend.kv_cache_tokens = position + 1;
-  return compute_logits<route, lanes>(backend);
+  if constexpr (wmode == window_mode::streamed) {
+    // Logits run on the raw output view the streamed route was classified
+    // for; the resident views are restored after.
+    const bool logits_ok = compute_logits<route, lanes>(backend);
+    reset_stream_block_views(backend);
+    return logits_ok;
+  } else {
+    return compute_logits<route, lanes>(backend);
+  }
 }
 
-template <emel::text::generator::attention_mode mode,
-          scalar_matmul_route route,
+template <emel::text::generator::attention_mode mode, scalar_matmul_route route,
           scalar_argmax_route argmax_route,
-          matmul_lane_mode lanes = matmul_lane_mode::serial>
-inline bool run_decode_preselected_argmax(native_backend & backend,
-                                          const emel::graph::processor::event::execute & request,
-                                          int32_t & selected_index,
-                                          float & selected_score) noexcept {
+          matmul_lane_mode lanes = matmul_lane_mode::serial,
+          window_mode wmode = window_mode::resident>
+inline bool run_decode_preselected_argmax(
+    native_backend &backend,
+    const emel::graph::processor::event::execute &request,
+    int32_t &selected_index, float &selected_score,
+    int32_t * err_out = nullptr) noexcept {
   if (backend.bound_token_count != 1 ||
       backend.bound_position_count != 1 ||
       request.kv_tokens < 0 ||
@@ -4677,14 +4937,30 @@ inline bool run_decode_preselected_argmax(native_backend & backend,
     return false;
   }
 
+  if constexpr (wmode == window_mode::streamed) {
+    bind_streamed_output_views(backend);
+  }
   for (int32_t layer = 0; layer < backend.n_layer; ++layer) {
-    if (!run_layer<mode, route, lanes>(backend, layer, position)) {
+    if (!run_layer<mode, route, lanes, wmode>(backend, layer, position,
+                                              err_out)) {
+      if constexpr (wmode == window_mode::streamed) {
+        reset_stream_block_views(backend);
+      }
       return false;
     }
   }
   backend.kv_cache_tokens = position + 1;
-  return compute_logits_preselected_argmax<argmax_route>(
-      backend, selected_index, selected_score);
+  if constexpr (wmode == window_mode::streamed) {
+    // The argmax output stage runs on the raw output view the streamed route
+    // was classified for; the resident views are restored after.
+    const bool argmax_ok = compute_logits_preselected_argmax<argmax_route>(
+        backend, selected_index, selected_score);
+    reset_stream_block_views(backend);
+    return argmax_ok;
+  } else {
+    return compute_logits_preselected_argmax<argmax_route>(
+        backend, selected_index, selected_score);
+  }
 }
 
 }  // namespace
@@ -5090,38 +5366,41 @@ inline bool bind_guarded_inputs(const emel::graph::processor::event::execute & r
   return true;
 }
 
-template <emel::text::generator::attention_mode mode,
-          scalar_matmul_route route,
+template <emel::text::generator::attention_mode mode, scalar_matmul_route route,
           step_kind expected_kind,
-          matmul_lane_mode lanes = matmul_lane_mode::serial>
+          matmul_lane_mode lanes = matmul_lane_mode::serial,
+          window_mode wmode = window_mode::resident>
 inline bool run_kernel_scalar_mode(const emel::graph::processor::event::execute & request,
                                    int32_t * err_out) noexcept {
-  (void)err_out;
   auto & backend = bind_native_backend(request);
   if constexpr (expected_kind == step_kind::prefill) {
+    (void)err_out;
     return run_prefill<mode, route>(backend);
   } else {
-    return run_decode<mode, route, lanes>(backend, request);
+    return run_decode<mode, route, lanes, wmode>(backend, request, err_out);
   }
 }
 
-template <emel::text::generator::attention_mode mode,
-          scalar_matmul_route route,
-          scalar_argmax_route argmax_route,
-          step_kind expected_kind,
-          matmul_lane_mode lanes = matmul_lane_mode::serial>
+template <emel::text::generator::attention_mode mode, scalar_matmul_route route,
+          scalar_argmax_route argmax_route, step_kind expected_kind,
+          matmul_lane_mode lanes = matmul_lane_mode::serial,
+          window_mode wmode = window_mode::resident>
 inline bool run_kernel_scalar_preselected_argmax_mode(
-    const emel::graph::processor::event::execute & request,
+    const emel::graph::processor::event::execute &request,
     int32_t * err_out) noexcept {
-  (void)err_out;
   auto & io = bind_compute_io(request);
   auto & backend = bind_native_backend(request);
   if constexpr (expected_kind == step_kind::prefill) {
     return run_prefill_preselected_argmax<mode, route, argmax_route>(
         backend, *io.selected_token_out, *io.selected_score_out);
   } else {
-    return run_decode_preselected_argmax<mode, route, argmax_route, lanes>(
-        backend, request, *io.selected_token_out, *io.selected_score_out);
+    // The decode branch forwards the graph processor's err pointer: streamed
+    // instantiations report acquire failures through it (run_layer writes
+    // unconditionally under the always-valid-pointer contract).
+    return run_decode_preselected_argmax<mode, route, argmax_route, lanes,
+                                         wmode>(
+        backend, request, *io.selected_token_out, *io.selected_score_out,
+        err_out);
   }
 }
 
@@ -5233,6 +5512,28 @@ inline bool run_kernel_flash_decode_q8_k(
       step_kind::decode>(request, err_out);
 }
 
+inline bool run_kernel_flash_decode_packed_q8_0_streamed(
+    const emel::graph::processor::event::execute & request,
+    int32_t * err_out) noexcept {
+  return run_kernel_scalar_mode<
+      emel::text::generator::attention_mode::flash,
+      scalar_matmul_route::packed_q8_0,
+      step_kind::decode,
+      matmul_lane_mode::serial,
+      window_mode::streamed>(request, err_out);
+}
+
+inline bool run_kernel_flash_decode_q8_k_streamed(
+    const emel::graph::processor::event::execute & request,
+    int32_t * err_out) noexcept {
+  return run_kernel_scalar_mode<
+      emel::text::generator::attention_mode::flash,
+      scalar_matmul_route::q8_k,
+      step_kind::decode,
+      matmul_lane_mode::serial,
+      window_mode::streamed>(request, err_out);
+}
+
 inline bool run_kernel_flash_decode_native_quantized(
     const emel::graph::processor::event::execute & request,
     int32_t * err_out) noexcept {
@@ -5251,6 +5552,17 @@ inline bool run_kernel_flash_decode_native_quantized_q8_k_logits(
       step_kind::decode>(request, err_out);
 }
 
+inline bool run_kernel_flash_decode_native_quantized_q8_k_logits_streamed(
+    const emel::graph::processor::event::execute & request,
+    int32_t * err_out) noexcept {
+  return run_kernel_scalar_mode<
+      emel::text::generator::attention_mode::flash,
+      scalar_matmul_route::native_quantized_q8_k_logits,
+      step_kind::decode,
+      matmul_lane_mode::serial,
+      window_mode::streamed>(request, err_out);
+}
+
 inline bool run_kernel_flash_decode_kernel(
     const emel::graph::processor::event::execute & request,
     int32_t * err_out) noexcept {
@@ -5258,6 +5570,30 @@ inline bool run_kernel_flash_decode_kernel(
       emel::text::generator::attention_mode::flash,
       scalar_matmul_route::kernel,
       step_kind::decode>(request, err_out);
+}
+
+// Streamed siblings of the flash scalar decode routes: identical arithmetic,
+// weights acquired per layer from the tensor window actor.
+inline bool run_kernel_flash_decode_kernel_streamed(
+    const emel::graph::processor::event::execute & request,
+    int32_t * err_out) noexcept {
+  return run_kernel_scalar_mode<
+      emel::text::generator::attention_mode::flash,
+      scalar_matmul_route::kernel,
+      step_kind::decode,
+      matmul_lane_mode::serial,
+      window_mode::streamed>(request, err_out);
+}
+
+inline bool run_kernel_flash_decode_native_quantized_streamed(
+    const emel::graph::processor::event::execute & request,
+    int32_t * err_out) noexcept {
+  return run_kernel_scalar_mode<
+      emel::text::generator::attention_mode::flash,
+      scalar_matmul_route::native_quantized,
+      step_kind::decode,
+      matmul_lane_mode::serial,
+      window_mode::streamed>(request, err_out);
 }
 
 inline bool run_kernel_flash_decode_parallel_packed_q8_0(
@@ -5353,6 +5689,65 @@ inline bool run_kernel_nonflash_decode_kernel(
       emel::text::generator::attention_mode::nonflash,
       scalar_matmul_route::kernel,
       step_kind::decode>(request, err_out);
+}
+
+// Streamed variants of the serial nonflash decode routes: identical compute
+// with window_mode::streamed threading through run_layer's per-layer slot
+// acquire, so an active tensor window streams on the nonflash decode path
+// exactly as it does on the flash path.
+inline bool run_kernel_nonflash_decode_packed_q8_0_streamed(
+    const emel::graph::processor::event::execute & request,
+    int32_t * err_out) noexcept {
+  return run_kernel_scalar_mode<
+      emel::text::generator::attention_mode::nonflash,
+      scalar_matmul_route::packed_q8_0,
+      step_kind::decode,
+      matmul_lane_mode::serial,
+      window_mode::streamed>(request, err_out);
+}
+
+inline bool run_kernel_nonflash_decode_q8_k_streamed(
+    const emel::graph::processor::event::execute & request,
+    int32_t * err_out) noexcept {
+  return run_kernel_scalar_mode<
+      emel::text::generator::attention_mode::nonflash,
+      scalar_matmul_route::q8_k,
+      step_kind::decode,
+      matmul_lane_mode::serial,
+      window_mode::streamed>(request, err_out);
+}
+
+inline bool run_kernel_nonflash_decode_native_quantized_streamed(
+    const emel::graph::processor::event::execute & request,
+    int32_t * err_out) noexcept {
+  return run_kernel_scalar_mode<
+      emel::text::generator::attention_mode::nonflash,
+      scalar_matmul_route::native_quantized,
+      step_kind::decode,
+      matmul_lane_mode::serial,
+      window_mode::streamed>(request, err_out);
+}
+
+inline bool run_kernel_nonflash_decode_native_quantized_q8_k_logits_streamed(
+    const emel::graph::processor::event::execute & request,
+    int32_t * err_out) noexcept {
+  return run_kernel_scalar_mode<
+      emel::text::generator::attention_mode::nonflash,
+      scalar_matmul_route::native_quantized_q8_k_logits,
+      step_kind::decode,
+      matmul_lane_mode::serial,
+      window_mode::streamed>(request, err_out);
+}
+
+inline bool run_kernel_nonflash_decode_kernel_streamed(
+    const emel::graph::processor::event::execute & request,
+    int32_t * err_out) noexcept {
+  return run_kernel_scalar_mode<
+      emel::text::generator::attention_mode::nonflash,
+      scalar_matmul_route::kernel,
+      step_kind::decode,
+      matmul_lane_mode::serial,
+      window_mode::streamed>(request, err_out);
 }
 
 template <emel::text::generator::attention_mode mode,
@@ -5573,6 +5968,49 @@ inline bool run_kernel_flash_decode_preselected_argmax_kernel(
       step_kind::decode>(request, err_out);
 }
 
+// Streamed variants of the serial preselected routes: identical compute with
+// window_mode::streamed threading through run_layer's per-layer slot acquire,
+// so the tensor-window lane consumes slot bytes on the preselected family too.
+inline bool run_kernel_flash_decode_preselected_argmax_q8_k_streamed(
+    const emel::graph::processor::event::execute &request,
+    int32_t * err_out) noexcept {
+  return run_kernel_scalar_preselected_argmax_mode<
+      emel::text::generator::attention_mode::flash, scalar_matmul_route::q8_k,
+      scalar_argmax_route::q8_k, step_kind::decode, matmul_lane_mode::serial,
+      window_mode::streamed>(request, err_out);
+}
+
+inline bool
+run_kernel_flash_decode_preselected_argmax_native_quantized_q8_k_streamed(
+    const emel::graph::processor::event::execute &request,
+    int32_t * err_out) noexcept {
+  return run_kernel_scalar_preselected_argmax_mode<
+      emel::text::generator::attention_mode::flash,
+      scalar_matmul_route::native_quantized, scalar_argmax_route::q8_k,
+      step_kind::decode, matmul_lane_mode::serial, window_mode::streamed>(
+      request, err_out);
+}
+
+inline bool
+run_kernel_flash_decode_preselected_argmax_native_quantized_kernel_streamed(
+    const emel::graph::processor::event::execute &request,
+    int32_t * err_out) noexcept {
+  return run_kernel_scalar_preselected_argmax_mode<
+      emel::text::generator::attention_mode::flash,
+      scalar_matmul_route::native_quantized, scalar_argmax_route::kernel,
+      step_kind::decode, matmul_lane_mode::serial, window_mode::streamed>(
+      request, err_out);
+}
+
+inline bool run_kernel_flash_decode_preselected_argmax_kernel_streamed(
+    const emel::graph::processor::event::execute &request,
+    int32_t * err_out) noexcept {
+  return run_kernel_scalar_preselected_argmax_mode<
+      emel::text::generator::attention_mode::flash, scalar_matmul_route::kernel,
+      scalar_argmax_route::kernel, step_kind::decode, matmul_lane_mode::serial,
+      window_mode::streamed>(request, err_out);
+}
+
 inline bool run_kernel_flash_decode_parallel_preselected_argmax_q8_k(
     const emel::graph::processor::event::execute & request,
     int32_t * err_out) noexcept {
@@ -5655,6 +6093,58 @@ inline bool run_kernel_nonflash_decode_preselected_argmax_kernel(
       scalar_matmul_route::kernel,
       scalar_argmax_route::kernel,
       step_kind::decode>(request, err_out);
+}
+
+// Streamed variants of the serial nonflash preselected routes (see the
+// nonflash decode streamed wrappers above).
+inline bool run_kernel_nonflash_decode_preselected_argmax_q8_k_streamed(
+    const emel::graph::processor::event::execute & request,
+    int32_t * err_out) noexcept {
+  return run_kernel_scalar_preselected_argmax_mode<
+      emel::text::generator::attention_mode::nonflash,
+      scalar_matmul_route::q8_k,
+      scalar_argmax_route::q8_k,
+      step_kind::decode,
+      matmul_lane_mode::serial,
+      window_mode::streamed>(request, err_out);
+}
+
+inline bool
+run_kernel_nonflash_decode_preselected_argmax_native_quantized_q8_k_streamed(
+    const emel::graph::processor::event::execute & request,
+    int32_t * err_out) noexcept {
+  return run_kernel_scalar_preselected_argmax_mode<
+      emel::text::generator::attention_mode::nonflash,
+      scalar_matmul_route::native_quantized,
+      scalar_argmax_route::q8_k,
+      step_kind::decode,
+      matmul_lane_mode::serial,
+      window_mode::streamed>(request, err_out);
+}
+
+inline bool
+run_kernel_nonflash_decode_preselected_argmax_native_quantized_kernel_streamed(
+    const emel::graph::processor::event::execute & request,
+    int32_t * err_out) noexcept {
+  return run_kernel_scalar_preselected_argmax_mode<
+      emel::text::generator::attention_mode::nonflash,
+      scalar_matmul_route::native_quantized,
+      scalar_argmax_route::kernel,
+      step_kind::decode,
+      matmul_lane_mode::serial,
+      window_mode::streamed>(request, err_out);
+}
+
+inline bool run_kernel_nonflash_decode_preselected_argmax_kernel_streamed(
+    const emel::graph::processor::event::execute & request,
+    int32_t * err_out) noexcept {
+  return run_kernel_scalar_preselected_argmax_mode<
+      emel::text::generator::attention_mode::nonflash,
+      scalar_matmul_route::kernel,
+      scalar_argmax_route::kernel,
+      step_kind::decode,
+      matmul_lane_mode::serial,
+      window_mode::streamed>(request, err_out);
 }
 
 template <emel::text::generator::attention_mode mode,

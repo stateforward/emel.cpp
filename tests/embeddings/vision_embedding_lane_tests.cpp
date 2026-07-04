@@ -378,6 +378,7 @@ TEST_CASE("embeddings vision pointwise direct path matches scalar pointwise refe
     input[idx] = static_cast<float>(centered) * 0.0625f;
   }
 
+  emel::kernel::sm matmul_kernel{emel::kernel::detect_host_kind()};
   std::array<float, static_cast<size_t>(pixel_count) * static_cast<size_t>(output_channels)>
       output_direct = {};
   std::array<float, static_cast<size_t>(pixel_count) * static_cast<size_t>(output_channels)>
@@ -385,7 +386,6 @@ TEST_CASE("embeddings vision pointwise direct path matches scalar pointwise refe
 
   REQUIRE(embedding_detail::pointwise_conv_hwc_direct_f32(
       matrix, input.data(), pixel_count, output_direct.data()));
-  emel::kernel::sm matmul_kernel{emel::kernel::detect_host_kind()};
   REQUIRE(embedding_detail::pointwise_conv_hwc(
       matmul_kernel, matrix, input.data(), pixel_count, output_scalar.data()));
 
@@ -433,6 +433,7 @@ TEST_CASE("embeddings vision pointwise direct path matches scalar reference acro
     input[idx] = static_cast<float>(centered) * 0.0625f;
   }
 
+  emel::kernel::sm matmul_kernel{emel::kernel::detect_host_kind()};
   std::array<float, static_cast<size_t>(pixel_count) * static_cast<size_t>(output_channels)>
       output_direct = {};
   std::array<float, static_cast<size_t>(pixel_count) * static_cast<size_t>(output_channels)>
@@ -440,7 +441,6 @@ TEST_CASE("embeddings vision pointwise direct path matches scalar reference acro
 
   REQUIRE(embedding_detail::pointwise_conv_hwc_direct_f32(
       matrix, input.data(), pixel_count, output_direct.data()));
-  emel::kernel::sm matmul_kernel{emel::kernel::detect_host_kind()};
   REQUIRE(embedding_detail::pointwise_conv_hwc(
       matmul_kernel, matrix, input.data(), pixel_count, output_scalar.data()));
 

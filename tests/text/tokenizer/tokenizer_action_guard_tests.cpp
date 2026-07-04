@@ -11,7 +11,7 @@ namespace {
 
 emel::model::data::vocab &make_vocab_for_specials() {
   static emel::model::data::vocab vocab = {};
-  std::memset(&vocab, 0, sizeof(vocab));
+  vocab = {};
   vocab.add_bos = true;
   vocab.add_eos = true;
   vocab.add_sep = true;
@@ -103,7 +103,7 @@ TEST_CASE("tokenizer_guard_bind_phase_error_classification") {
 TEST_CASE("tokenizer_guard_can_tokenize") {
   auto &vocab = make_vocab_for_specials();
   static emel::model::data::vocab other_vocab = {};
-  std::memset(&other_vocab, 0, sizeof(other_vocab));
+  other_vocab = {};
 
   emel::text::tokenizer::action::context ctx{};
   ctx.vocab = &vocab;

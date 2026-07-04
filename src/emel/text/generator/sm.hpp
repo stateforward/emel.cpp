@@ -497,6 +497,36 @@ struct model {
                  + sml::completion<event::generate_run>
                  [ guard::guard_decode_preselected_direct_ready{} ]
 
+      // Streamed rows sit above every resident/parallel sibling: an active
+      // tensor window routes the serial slot-consuming variants, and the
+      // streamed class (scanned from the raw stream records) can differ from
+      // the resident class (scanned from the packed prepare()-time records),
+      // so the whole streamed group must precede the whole resident group.
+      , sml::state<decode_compute_flash_decision> <= sml::state<decode_compute_flash>
+                 + sml::completion<event::generate_run>
+                 [ guard::guard_decode_materialized_streamed_scalar_packed_q8_0_ready{} ]
+                 / action::request_decode_compute_flash_packed_q8_0_streamed
+
+      , sml::state<decode_compute_flash_decision> <= sml::state<decode_compute_flash>
+                 + sml::completion<event::generate_run>
+                 [ guard::guard_decode_materialized_streamed_scalar_q8_k_ready{} ]
+                 / action::request_decode_compute_flash_q8_k_streamed
+
+      , sml::state<decode_compute_flash_decision> <= sml::state<decode_compute_flash>
+                 + sml::completion<event::generate_run>
+                 [ guard::guard_decode_materialized_streamed_scalar_native_quantized_q8_k_ready{} ]
+                 / action::request_decode_compute_flash_native_quantized_q8_k_logits_streamed
+
+      , sml::state<decode_compute_flash_decision> <= sml::state<decode_compute_flash>
+                 + sml::completion<event::generate_run>
+                 [ guard::guard_decode_materialized_streamed_scalar_native_quantized_ready{} ]
+                 / action::request_decode_compute_flash_native_quantized_streamed
+
+      , sml::state<decode_compute_flash_decision> <= sml::state<decode_compute_flash>
+                 + sml::completion<event::generate_run>
+                 [ guard::guard_decode_materialized_streamed_scalar_kernel_ready{} ]
+                 / action::request_decode_compute_flash_kernel_streamed
+
       , sml::state<decode_compute_flash_decision> <= sml::state<decode_compute_flash>
                  + sml::completion<event::generate_run>
                  [ guard::guard_decode_materialized_parallel_scalar_packed_q8_0_ready{} ]
@@ -562,6 +592,34 @@ struct model {
                  + sml::completion<event::generate_run>
                  [ guard::guard_decode_preselected_direct_ready{} ]
 
+      // Streamed rows sit above their resident siblings: an active tensor
+      // window routes the serial slot-consuming variants on the nonflash
+      // decode path exactly as on the flash path.
+      , sml::state<decode_compute_nonflash_decision> <= sml::state<decode_compute_nonflash>
+                 + sml::completion<event::generate_run>
+                 [ guard::guard_decode_materialized_streamed_scalar_packed_q8_0_ready{} ]
+                 / action::request_decode_compute_nonflash_packed_q8_0_streamed
+
+      , sml::state<decode_compute_nonflash_decision> <= sml::state<decode_compute_nonflash>
+                 + sml::completion<event::generate_run>
+                 [ guard::guard_decode_materialized_streamed_scalar_q8_k_ready{} ]
+                 / action::request_decode_compute_nonflash_q8_k_streamed
+
+      , sml::state<decode_compute_nonflash_decision> <= sml::state<decode_compute_nonflash>
+                 + sml::completion<event::generate_run>
+                 [ guard::guard_decode_materialized_streamed_scalar_native_quantized_q8_k_ready{} ]
+                 / action::request_decode_compute_nonflash_native_quantized_q8_k_logits_streamed
+
+      , sml::state<decode_compute_nonflash_decision> <= sml::state<decode_compute_nonflash>
+                 + sml::completion<event::generate_run>
+                 [ guard::guard_decode_materialized_streamed_scalar_native_quantized_ready{} ]
+                 / action::request_decode_compute_nonflash_native_quantized_streamed
+
+      , sml::state<decode_compute_nonflash_decision> <= sml::state<decode_compute_nonflash>
+                 + sml::completion<event::generate_run>
+                 [ guard::guard_decode_materialized_streamed_scalar_kernel_ready{} ]
+                 / action::request_decode_compute_nonflash_kernel_streamed
+
       , sml::state<decode_compute_nonflash_decision> <= sml::state<decode_compute_nonflash>
                  + sml::completion<event::generate_run>
                  [ guard::guard_decode_materialized_scalar_packed_q8_0_ready{} ]
@@ -598,6 +656,34 @@ struct model {
                  + sml::completion<event::generate_run>
                  [ guard::guard_decode_compute_backend_unavailable{} ]
                  / action::mark_backend_error
+
+      // Streamed rows sit above their resident/parallel siblings: an active
+      // tensor window routes the serial slot-consuming variants.
+      , sml::state<decode_compute_flash_preselected_argmax_decision> <=
+               sml::state<decode_compute_flash_preselected_argmax>
+                 + sml::completion<event::generate_run>
+                 [ guard::guard_decode_preselected_argmax_q8_k_streamed_ready{} ]
+                 / action::request_decode_compute_flash_preselected_argmax_q8_k_streamed
+
+      , sml::state<decode_compute_flash_preselected_argmax_decision> <=
+               sml::state<decode_compute_flash_preselected_argmax>
+                 + sml::completion<event::generate_run>
+                 [ guard::guard_decode_preselected_argmax_native_quantized_q8_k_streamed_ready{} ]
+                 / action::
+                       request_decode_compute_flash_preselected_argmax_native_quantized_q8_k_streamed
+
+      , sml::state<decode_compute_flash_preselected_argmax_decision> <=
+               sml::state<decode_compute_flash_preselected_argmax>
+                 + sml::completion<event::generate_run>
+                 [ guard::guard_decode_preselected_argmax_native_quantized_kernel_streamed_ready{} ]
+                 / action::
+                       request_decode_compute_flash_preselected_argmax_native_quantized_kernel_streamed
+
+      , sml::state<decode_compute_flash_preselected_argmax_decision> <=
+               sml::state<decode_compute_flash_preselected_argmax>
+                 + sml::completion<event::generate_run>
+                 [ guard::guard_decode_preselected_argmax_kernel_streamed_ready{} ]
+                 / action::request_decode_compute_flash_preselected_argmax_kernel_streamed
 
       , sml::state<decode_compute_flash_preselected_argmax_decision> <=
                sml::state<decode_compute_flash_preselected_argmax>
@@ -660,6 +746,32 @@ struct model {
                  + sml::completion<event::generate_run>
                  [ guard::guard_decode_compute_backend_unavailable{} ]
                  / action::mark_backend_error
+
+      // Streamed rows sit above their resident siblings (see the nonflash
+      // decode block above).
+      , sml::state<decode_compute_nonflash_preselected_argmax_decision> <=
+               sml::state<decode_compute_nonflash_preselected_argmax>
+                 + sml::completion<event::generate_run>
+                 [ guard::guard_decode_preselected_argmax_q8_k_streamed_ready{} ]
+                 / action::request_decode_compute_nonflash_preselected_argmax_q8_k_streamed
+
+      , sml::state<decode_compute_nonflash_preselected_argmax_decision> <=
+               sml::state<decode_compute_nonflash_preselected_argmax>
+                 + sml::completion<event::generate_run>
+                 [ guard::guard_decode_preselected_argmax_native_quantized_q8_k_streamed_ready{} ]
+                 / action::request_decode_compute_nonflash_preselected_argmax_native_quantized_q8_k_streamed
+
+      , sml::state<decode_compute_nonflash_preselected_argmax_decision> <=
+               sml::state<decode_compute_nonflash_preselected_argmax>
+                 + sml::completion<event::generate_run>
+                 [ guard::guard_decode_preselected_argmax_native_quantized_kernel_streamed_ready{} ]
+                 / action::request_decode_compute_nonflash_preselected_argmax_native_quantized_kernel_streamed
+
+      , sml::state<decode_compute_nonflash_preselected_argmax_decision> <=
+               sml::state<decode_compute_nonflash_preselected_argmax>
+                 + sml::completion<event::generate_run>
+                 [ guard::guard_decode_preselected_argmax_kernel_streamed_ready{} ]
+                 / action::request_decode_compute_nonflash_preselected_argmax_kernel_streamed
 
       , sml::state<decode_compute_nonflash_preselected_argmax_decision> <=
                sml::state<decode_compute_nonflash_preselected_argmax>
@@ -1001,6 +1113,20 @@ struct sm : public emel::sm<model, action::context> {
     this->context_.format_prompt = format_prompt;
     // Session scratch is sized once from the injected loaded model before the initialize pipeline.
     detail::reserve_session_buffers(this->context_, model_ref);
+  }
+
+  // Streaming variant: the owner bound the tensor window first and reports
+  // whether streaming engaged (bind_window_done.streaming_active).
+  sm(const emel::model::data & model_ref,
+     emel::text::conditioner::sm & conditioner_ref,
+     emel::model::tensor::window::sm & stream_window_ref,
+     const bool stream_active,
+     void * formatter_ctx = nullptr,
+     emel::text::formatter::format_fn format_prompt =
+         emel::text::formatter::format_raw)
+      : sm(model_ref, conditioner_ref, formatter_ctx, format_prompt) {
+    this->context_.stream_window = &stream_window_ref;
+    this->context_.stream_active = stream_active;
   }
 
   sm(const sm &) = delete;

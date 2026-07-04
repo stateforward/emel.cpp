@@ -49,8 +49,13 @@ struct model {
 
       , sml::state<ready> <= sml::state<ready> +
                sml::event<::emel::kernel::x86_64::event::dispatch_op_add>
-                 [ guard::valid_op_add{} ]
+                 [ guard::valid_op_add_equal{} ]
                  / action::exec_op_add
+
+      , sml::state<ready> <= sml::state<ready> +
+               sml::event<::emel::kernel::x86_64::event::dispatch_op_add>
+                 [ guard::valid_op_add_broadcast_row{} ]
+                 / action::exec_scalar_op_add_broadcast_row
 
       , sml::state<ready> <= sml::state<ready> +
                sml::event<::emel::kernel::x86_64::event::dispatch_op_add>
@@ -109,8 +114,13 @@ struct model {
 
       , sml::state<ready> <= sml::state<ready> +
                sml::event<::emel::kernel::x86_64::event::dispatch_op_mul>
-                 [ guard::valid_op_mul{} ]
+                 [ guard::valid_op_mul_equal{} ]
                  / action::exec_op_mul
+
+      , sml::state<ready> <= sml::state<ready> +
+               sml::event<::emel::kernel::x86_64::event::dispatch_op_mul>
+                 [ guard::valid_op_mul_broadcast_row{} ]
+                 / action::exec_scalar_op_mul_broadcast_row
 
       , sml::state<ready> <= sml::state<ready> +
                sml::event<::emel::kernel::x86_64::event::dispatch_op_mul>
@@ -399,6 +409,11 @@ struct model {
 
       , sml::state<ready> <= sml::state<ready> +
                sml::event<::emel::kernel::x86_64::event::dispatch_op_mul_mat>
+                 [ guard::valid_op_mul_mat_f16{} ]
+                 / action::exec_scalar_op_mul_mat_f16
+
+      , sml::state<ready> <= sml::state<ready> +
+               sml::event<::emel::kernel::x86_64::event::dispatch_op_mul_mat>
                  [ guard::valid_op_mul_mat{} ]
                  / action::exec_op_mul_mat
 
@@ -519,8 +534,33 @@ struct model {
 
       , sml::state<ready> <= sml::state<ready> +
                sml::event<::emel::kernel::x86_64::event::dispatch_op_get_rows>
-                 [ guard::valid_op_get_rows{} ]
-                 / action::exec_op_get_rows
+                 [ guard::valid_op_get_rows_f32{} ]
+                 / action::exec_scalar_op_get_rows_f32
+
+      , sml::state<ready> <= sml::state<ready> +
+               sml::event<::emel::kernel::x86_64::event::dispatch_op_get_rows>
+                 [ guard::valid_op_get_rows_f16{} ]
+                 / action::exec_scalar_op_get_rows_f16
+
+      , sml::state<ready> <= sml::state<ready> +
+               sml::event<::emel::kernel::x86_64::event::dispatch_op_get_rows>
+                 [ guard::valid_op_get_rows_bf16{} ]
+                 / action::exec_scalar_op_get_rows_bf16
+
+      , sml::state<ready> <= sml::state<ready> +
+               sml::event<::emel::kernel::x86_64::event::dispatch_op_get_rows>
+                 [ guard::valid_op_get_rows_q4_0{} ]
+                 / action::exec_scalar_op_get_rows_q4_0
+
+      , sml::state<ready> <= sml::state<ready> +
+               sml::event<::emel::kernel::x86_64::event::dispatch_op_get_rows>
+                 [ guard::valid_op_get_rows_q8_0{} ]
+                 / action::exec_scalar_op_get_rows_q8_0
+
+      , sml::state<ready> <= sml::state<ready> +
+               sml::event<::emel::kernel::x86_64::event::dispatch_op_get_rows>
+                 [ guard::valid_op_get_rows_q4_k{} ]
+                 / action::exec_scalar_op_get_rows_q4_k
 
       , sml::state<ready> <= sml::state<ready> +
                sml::event<::emel::kernel::x86_64::event::dispatch_op_get_rows>
@@ -599,8 +639,13 @@ struct model {
 
       , sml::state<ready> <= sml::state<ready> +
                sml::event<::emel::kernel::x86_64::event::dispatch_op_rope>
-                 [ guard::valid_op_rope{} ]
-                 / action::exec_op_rope
+                 [ guard::valid_op_rope_norm{} ]
+                 / action::exec_scalar_op_rope_norm
+
+      , sml::state<ready> <= sml::state<ready> +
+               sml::event<::emel::kernel::x86_64::event::dispatch_op_rope>
+                 [ guard::valid_op_rope_neox{} ]
+                 / action::exec_scalar_op_rope_neox
 
       , sml::state<ready> <= sml::state<ready> +
                sml::event<::emel::kernel::x86_64::event::dispatch_op_rope>
@@ -629,8 +674,13 @@ struct model {
 
       , sml::state<ready> <= sml::state<ready> +
                sml::event<::emel::kernel::x86_64::event::dispatch_op_conv_transpose_1d>
-                 [ guard::valid_op_conv_transpose_1d{} ]
-                 / action::exec_op_conv_transpose_1d
+                 [ guard::valid_op_conv_transpose_1d_f32{} ]
+                 / action::exec_scalar_op_conv_transpose_1d_f32
+
+      , sml::state<ready> <= sml::state<ready> +
+               sml::event<::emel::kernel::x86_64::event::dispatch_op_conv_transpose_1d>
+                 [ guard::valid_op_conv_transpose_1d_f16{} ]
+                 / action::exec_scalar_op_conv_transpose_1d_f16
 
       , sml::state<ready> <= sml::state<ready> +
                sml::event<::emel::kernel::x86_64::event::dispatch_op_conv_transpose_1d>
@@ -639,8 +689,13 @@ struct model {
 
       , sml::state<ready> <= sml::state<ready> +
                sml::event<::emel::kernel::x86_64::event::dispatch_op_im2col>
-                 [ guard::valid_op_im2col{} ]
-                 / action::exec_op_im2col
+                 [ guard::valid_op_im2col_f32{} ]
+                 / action::exec_scalar_op_im2col_f32
+
+      , sml::state<ready> <= sml::state<ready> +
+               sml::event<::emel::kernel::x86_64::event::dispatch_op_im2col>
+                 [ guard::valid_op_im2col_f16{} ]
+                 / action::exec_scalar_op_im2col_f16
 
       , sml::state<ready> <= sml::state<ready> +
                sml::event<::emel::kernel::x86_64::event::dispatch_op_im2col>
@@ -1006,6 +1061,26 @@ struct model {
                sml::event<::emel::kernel::x86_64::event::dispatch_op_unary>
                  [ guard::valid_op_unary_exp{} ]
                  / action::exec_scalar_op_unary_exp
+
+      , sml::state<ready> <= sml::state<ready> +
+               sml::event<::emel::kernel::x86_64::event::dispatch_op_unary>
+                 [ guard::valid_op_unary_tanh{} ]
+                 / action::exec_scalar_op_unary_tanh
+
+      , sml::state<ready> <= sml::state<ready> +
+               sml::event<::emel::kernel::x86_64::event::dispatch_op_unary>
+                 [ guard::valid_op_unary_elu{} ]
+                 / action::exec_scalar_op_unary_elu
+
+      , sml::state<ready> <= sml::state<ready> +
+               sml::event<::emel::kernel::x86_64::event::dispatch_op_unary>
+                 [ guard::valid_op_unary_gelu{} ]
+                 / action::exec_scalar_op_unary_gelu
+
+      , sml::state<ready> <= sml::state<ready> +
+               sml::event<::emel::kernel::x86_64::event::dispatch_op_unary>
+                 [ guard::valid_op_unary_silu{} ]
+                 / action::exec_scalar_op_unary_silu
 
       , sml::state<ready> <= sml::state<ready> +
                sml::event<::emel::kernel::x86_64::event::dispatch_op_unary>

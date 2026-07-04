@@ -504,6 +504,90 @@ struct request_decode_compute_flash_kernel {
   }
 };
 
+struct request_decode_compute_flash_kernel_streamed {
+  void operator()(const event::generate_run & ev, context & ctx) const noexcept {
+    request_phase_compute<emel::text::generator::detail::step_kind::decode,
+                          emel::text::generator::detail::
+                              run_kernel_flash_decode_kernel_streamed>(ev, ctx);
+  }
+};
+
+struct request_decode_compute_flash_native_quantized_streamed {
+  void operator()(const event::generate_run & ev, context & ctx) const noexcept {
+    request_phase_compute<emel::text::generator::detail::step_kind::decode,
+                          emel::text::generator::detail::
+                              run_kernel_flash_decode_native_quantized_streamed>(ev, ctx);
+  }
+};
+
+struct request_decode_compute_flash_packed_q8_0_streamed {
+  void operator()(const event::generate_run & ev, context & ctx) const noexcept {
+    request_phase_compute<
+        emel::text::generator::detail::step_kind::decode,
+        emel::text::generator::detail::run_kernel_flash_decode_packed_q8_0_streamed>(
+        ev, ctx);
+  }
+};
+
+struct request_decode_compute_flash_q8_k_streamed {
+  void operator()(const event::generate_run & ev, context & ctx) const noexcept {
+    request_phase_compute<
+        emel::text::generator::detail::step_kind::decode,
+        emel::text::generator::detail::run_kernel_flash_decode_q8_k_streamed>(ev,
+                                                                              ctx);
+  }
+};
+
+struct request_decode_compute_flash_native_quantized_q8_k_logits_streamed {
+  void operator()(const event::generate_run & ev, context & ctx) const noexcept {
+    request_phase_compute<
+        emel::text::generator::detail::step_kind::decode,
+        emel::text::generator::detail::
+            run_kernel_flash_decode_native_quantized_q8_k_logits_streamed>(ev, ctx);
+  }
+};
+
+struct request_decode_compute_flash_preselected_argmax_q8_k_streamed {
+  void operator()(const event::generate_run &ev, context &ctx) const noexcept {
+    request_phase_compute_preselected_argmax<
+        emel::text::generator::detail::step_kind::decode,
+        emel::text::generator::detail::
+            run_kernel_flash_decode_preselected_argmax_q8_k_streamed>(ev, ctx);
+  }
+};
+
+struct
+    request_decode_compute_flash_preselected_argmax_native_quantized_q8_k_streamed {
+  void operator()(const event::generate_run &ev, context &ctx) const noexcept {
+    request_phase_compute_preselected_argmax<
+        emel::text::generator::detail::step_kind::decode,
+        emel::text::generator::detail::
+            run_kernel_flash_decode_preselected_argmax_native_quantized_q8_k_streamed>(
+        ev, ctx);
+  }
+};
+
+struct
+    request_decode_compute_flash_preselected_argmax_native_quantized_kernel_streamed {
+  void operator()(const event::generate_run &ev, context &ctx) const noexcept {
+    request_phase_compute_preselected_argmax<
+        emel::text::generator::detail::step_kind::decode,
+        emel::text::generator::detail::
+            run_kernel_flash_decode_preselected_argmax_native_quantized_kernel_streamed>(
+        ev, ctx);
+  }
+};
+
+struct request_decode_compute_flash_preselected_argmax_kernel_streamed {
+  void operator()(const event::generate_run &ev, context &ctx) const noexcept {
+    request_phase_compute_preselected_argmax<
+        emel::text::generator::detail::step_kind::decode,
+        emel::text::generator::detail::
+            run_kernel_flash_decode_preselected_argmax_kernel_streamed>(ev,
+                                                                        ctx);
+  }
+};
+
 struct request_decode_compute_flash_parallel_packed_q8_0 {
   void operator()(const event::generate_run & ev, context & ctx) const noexcept {
     request_phase_compute<emel::text::generator::detail::step_kind::decode,
@@ -584,6 +668,47 @@ struct request_decode_compute_nonflash_kernel {
     request_phase_compute<emel::text::generator::detail::step_kind::decode,
                           emel::text::generator::detail::run_kernel_nonflash_decode_kernel>(
         ev, ctx);
+  }
+};
+
+struct request_decode_compute_nonflash_packed_q8_0_streamed {
+  void operator()(const event::generate_run & ev, context & ctx) const noexcept {
+    request_phase_compute<emel::text::generator::detail::step_kind::decode,
+                          emel::text::generator::detail::
+                              run_kernel_nonflash_decode_packed_q8_0_streamed>(ev, ctx);
+  }
+};
+
+struct request_decode_compute_nonflash_q8_k_streamed {
+  void operator()(const event::generate_run & ev, context & ctx) const noexcept {
+    request_phase_compute<
+        emel::text::generator::detail::step_kind::decode,
+        emel::text::generator::detail::run_kernel_nonflash_decode_q8_k_streamed>(ev, ctx);
+  }
+};
+
+struct request_decode_compute_nonflash_native_quantized_streamed {
+  void operator()(const event::generate_run & ev, context & ctx) const noexcept {
+    request_phase_compute<emel::text::generator::detail::step_kind::decode,
+                          emel::text::generator::detail::
+                              run_kernel_nonflash_decode_native_quantized_streamed>(ev, ctx);
+  }
+};
+
+struct request_decode_compute_nonflash_native_quantized_q8_k_logits_streamed {
+  void operator()(const event::generate_run & ev, context & ctx) const noexcept {
+    request_phase_compute<
+        emel::text::generator::detail::step_kind::decode,
+        emel::text::generator::detail::
+            run_kernel_nonflash_decode_native_quantized_q8_k_logits_streamed>(ev, ctx);
+  }
+};
+
+struct request_decode_compute_nonflash_kernel_streamed {
+  void operator()(const event::generate_run & ev, context & ctx) const noexcept {
+    request_phase_compute<
+        emel::text::generator::detail::step_kind::decode,
+        emel::text::generator::detail::run_kernel_nonflash_decode_kernel_streamed>(ev, ctx);
   }
 };
 
@@ -700,6 +825,44 @@ struct request_decode_compute_nonflash_preselected_argmax_kernel {
         emel::text::generator::detail::step_kind::decode,
         emel::text::generator::detail::run_kernel_nonflash_decode_preselected_argmax_kernel>(
         ev, ctx);
+  }
+};
+
+struct request_decode_compute_nonflash_preselected_argmax_q8_k_streamed {
+  void operator()(const event::generate_run & ev, context & ctx) const noexcept {
+    request_phase_compute_preselected_argmax<
+        emel::text::generator::detail::step_kind::decode,
+        emel::text::generator::detail::
+            run_kernel_nonflash_decode_preselected_argmax_q8_k_streamed>(ev, ctx);
+  }
+};
+
+struct request_decode_compute_nonflash_preselected_argmax_native_quantized_q8_k_streamed {
+  void operator()(const event::generate_run & ev, context & ctx) const noexcept {
+    request_phase_compute_preselected_argmax<
+        emel::text::generator::detail::step_kind::decode,
+        emel::text::generator::detail::
+            run_kernel_nonflash_decode_preselected_argmax_native_quantized_q8_k_streamed>(
+        ev, ctx);
+  }
+};
+
+struct request_decode_compute_nonflash_preselected_argmax_native_quantized_kernel_streamed {
+  void operator()(const event::generate_run & ev, context & ctx) const noexcept {
+    request_phase_compute_preselected_argmax<
+        emel::text::generator::detail::step_kind::decode,
+        emel::text::generator::detail::
+            run_kernel_nonflash_decode_preselected_argmax_native_quantized_kernel_streamed>(
+        ev, ctx);
+  }
+};
+
+struct request_decode_compute_nonflash_preselected_argmax_kernel_streamed {
+  void operator()(const event::generate_run & ev, context & ctx) const noexcept {
+    request_phase_compute_preselected_argmax<
+        emel::text::generator::detail::step_kind::decode,
+        emel::text::generator::detail::
+            run_kernel_nonflash_decode_preselected_argmax_kernel_streamed>(ev, ctx);
   }
 };
 
@@ -1080,6 +1243,24 @@ inline constexpr request_decode_compute_flash_native_quantized
 inline constexpr request_decode_compute_flash_native_quantized_q8_k_logits
     request_decode_compute_flash_native_quantized_q8_k_logits{};
 inline constexpr request_decode_compute_flash_kernel request_decode_compute_flash_kernel{};
+inline constexpr request_decode_compute_flash_kernel_streamed
+    request_decode_compute_flash_kernel_streamed{};
+inline constexpr request_decode_compute_flash_native_quantized_streamed
+    request_decode_compute_flash_native_quantized_streamed{};
+inline constexpr request_decode_compute_flash_packed_q8_0_streamed
+    request_decode_compute_flash_packed_q8_0_streamed{};
+inline constexpr request_decode_compute_flash_q8_k_streamed
+    request_decode_compute_flash_q8_k_streamed{};
+inline constexpr request_decode_compute_flash_native_quantized_q8_k_logits_streamed
+    request_decode_compute_flash_native_quantized_q8_k_logits_streamed{};
+inline constexpr request_decode_compute_flash_preselected_argmax_q8_k_streamed
+    request_decode_compute_flash_preselected_argmax_q8_k_streamed{};
+inline constexpr request_decode_compute_flash_preselected_argmax_native_quantized_q8_k_streamed
+    request_decode_compute_flash_preselected_argmax_native_quantized_q8_k_streamed{};
+inline constexpr request_decode_compute_flash_preselected_argmax_native_quantized_kernel_streamed
+    request_decode_compute_flash_preselected_argmax_native_quantized_kernel_streamed{};
+inline constexpr request_decode_compute_flash_preselected_argmax_kernel_streamed
+    request_decode_compute_flash_preselected_argmax_kernel_streamed{};
 inline constexpr request_decode_compute_flash_parallel_packed_q8_0
     request_decode_compute_flash_parallel_packed_q8_0{};
 inline constexpr request_decode_compute_flash_parallel_q8_k
@@ -1098,6 +1279,16 @@ inline constexpr request_decode_compute_nonflash_native_quantized
 inline constexpr request_decode_compute_nonflash_native_quantized_q8_k_logits
     request_decode_compute_nonflash_native_quantized_q8_k_logits{};
 inline constexpr request_decode_compute_nonflash_kernel request_decode_compute_nonflash_kernel{};
+inline constexpr request_decode_compute_nonflash_packed_q8_0_streamed
+    request_decode_compute_nonflash_packed_q8_0_streamed{};
+inline constexpr request_decode_compute_nonflash_q8_k_streamed
+    request_decode_compute_nonflash_q8_k_streamed{};
+inline constexpr request_decode_compute_nonflash_native_quantized_streamed
+    request_decode_compute_nonflash_native_quantized_streamed{};
+inline constexpr request_decode_compute_nonflash_native_quantized_q8_k_logits_streamed
+    request_decode_compute_nonflash_native_quantized_q8_k_logits_streamed{};
+inline constexpr request_decode_compute_nonflash_kernel_streamed
+    request_decode_compute_nonflash_kernel_streamed{};
 inline constexpr request_decode_compute_flash_preselected_argmax_q8_k
     request_decode_compute_flash_preselected_argmax_q8_k{};
 inline constexpr request_decode_compute_flash_preselected_argmax_native_quantized_q8_k
@@ -1122,6 +1313,14 @@ inline constexpr request_decode_compute_nonflash_preselected_argmax_native_quant
     request_decode_compute_nonflash_preselected_argmax_native_quantized_kernel{};
 inline constexpr request_decode_compute_nonflash_preselected_argmax_kernel
     request_decode_compute_nonflash_preselected_argmax_kernel{};
+inline constexpr request_decode_compute_nonflash_preselected_argmax_q8_k_streamed
+    request_decode_compute_nonflash_preselected_argmax_q8_k_streamed{};
+inline constexpr request_decode_compute_nonflash_preselected_argmax_native_quantized_q8_k_streamed
+    request_decode_compute_nonflash_preselected_argmax_native_quantized_q8_k_streamed{};
+inline constexpr request_decode_compute_nonflash_preselected_argmax_native_quantized_kernel_streamed
+    request_decode_compute_nonflash_preselected_argmax_native_quantized_kernel_streamed{};
+inline constexpr request_decode_compute_nonflash_preselected_argmax_kernel_streamed
+    request_decode_compute_nonflash_preselected_argmax_kernel_streamed{};
 inline constexpr request_decode_sample request_decode_sample{};
 inline constexpr request_decode_select_argmax request_decode_select_argmax{};
 inline constexpr request_decode_sample_preselected request_decode_sample_preselected{};

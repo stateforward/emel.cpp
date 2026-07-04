@@ -3,6 +3,7 @@
 #include "emel/model/gemma4/detail.hpp"
 #include "emel/model/lfm2/detail.hpp"
 #include "emel/model/llama/detail.hpp"
+#include "emel/model/moshi/detail.hpp"
 #include "emel/model/omniembed/detail.hpp"
 #include "emel/model/qwen3/detail.hpp"
 #include "emel/model/sortformer/detail.hpp"
@@ -12,7 +13,7 @@ namespace emel::model {
 
 namespace {
 
-const std::array<architecture, 7> default_architectures = {{
+const std::array<architecture, 8> default_architectures = {{
     {
         .name = "llama",
         .load_hparams = &emel::model::llama::detail::load_hparams,
@@ -52,6 +53,12 @@ const std::array<architecture, 7> default_architectures = {{
         .load_hparams = &emel::model::whisper::detail::load_hparams,
         .validate_data =
             &emel::model::whisper::detail::validate_execution_contract,
+    },
+    {
+        .name = "moshi",
+        .load_hparams = &emel::model::moshi::detail::load_hparams,
+        .validate_data =
+            &emel::model::moshi::detail::validate_execution_contract,
     },
 }};
 
