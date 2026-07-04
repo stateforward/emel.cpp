@@ -4648,7 +4648,8 @@ inline bool can_run_im2col(const request_type &request) noexcept {
     return false;
   }
   const uint8_t src0_type = dtype_code(request.src0.type);
-  return request.src1.data != nullptr && kernel > 0 && channels > 0 &&
+  return request.src1.data != nullptr && request.dst.data != nullptr &&
+         kernel > 0 && channels > 0 &&
          length > 0 && out_length > 0 &&
          (src0_type == dtype_f32 || src0_type == dtype_f16) &&
          dtype_code(request.src1.type) == dtype_f32 &&
@@ -4746,9 +4747,11 @@ inline bool can_run_conv_transpose_1d(const request_type &request) noexcept {
           static_cast<int64_t>(k_max_conv_guard_extent)) {
     return false;
   }
-  // The exec reads through both operands; metadata-only tensors must reject
-  // here instead of dereferencing null inside the action.
+  // The exec reads through both operands and zero-fills/stores through the
+  // destination; metadata-only tensors must reject here instead of
+  // dereferencing null inside the action.
   return request.src0.data != nullptr && request.src1.data != nullptr &&
+         request.dst.data != nullptr &&
          kernel > 0 && out_channels > 0 && in_channels > 0 && length > 0 &&
          (src0_type == dtype_f32 || src0_type == dtype_f16) &&
          dtype_code(request.src1.type) == dtype_f32 &&

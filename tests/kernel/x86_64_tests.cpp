@@ -2184,6 +2184,34 @@ TEST_CASE("kernel_x86_64_im2col_and_conv_transpose_1d") {
   null_im2col_input.data = nullptr;
   im2col_ev.src1 = null_im2col_input;
   CHECK_FALSE(machine.process_event(im2col_ev));
+
+  // Metadata-only destinations must reject too: the execs zero-fill and
+  // store through dst.data immediately.
+  emel::kernel::event::op_conv_transpose_1d null_dst_convtr{
+      .src0 = make_src(up_kernel, dtype::f32, 2, 1, 1),
+      .src1 = make_src(up_input, dtype::f32, 2, 1),
+      .dst = make_dst(up_out, dtype::f32, 4, 1),
+  };
+  set_op_param_i32(null_dst_convtr, 0u, 2); // s0
+  set_op_param_i32(null_dst_convtr, 1u, 0); // p0
+  set_op_param_i32(null_dst_convtr, 2u, 1); // d0
+  null_dst_convtr.dst.data = nullptr;
+  CHECK_FALSE(machine.process_event(null_dst_convtr));
+
+  emel::kernel::event::op_im2col null_dst_im2col{
+      .src0 = make_src(kernel_shape_only, dtype::f32, 3, 1),
+      .src1 = make_src(input, dtype::f32, 4, 1),
+      .dst = make_dst(columns, dtype::f32, 3, 4),
+  };
+  set_op_param_i32(null_dst_im2col, 0u, 1); // s0
+  set_op_param_i32(null_dst_im2col, 1u, 0); // s1
+  set_op_param_i32(null_dst_im2col, 2u, 1); // p0
+  set_op_param_i32(null_dst_im2col, 3u, 0); // p1
+  set_op_param_i32(null_dst_im2col, 4u, 1); // d0
+  set_op_param_i32(null_dst_im2col, 5u, 0); // d1
+  set_op_param_i32(null_dst_im2col, 6u, 0); // is_2D
+  null_dst_im2col.dst.data = nullptr;
+  CHECK_FALSE(machine.process_event(null_dst_im2col));
 }
 
 TEST_CASE("kernel_x86_64_add_and_mul_broadcast_row_variants") {
