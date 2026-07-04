@@ -335,6 +335,12 @@ constexpr std::array k_records{
                       kind::source,
                       "tools/bench/speech/codec_mimi_bench.cpp",
                       "suite_source"},
+    // The maintained Mimi codec runtime is what the parity lane exercises:
+    // codec-only changes must select this suite, not skip it.
+    dependency_record{"speech_codec_mimi",
+                      kind::source,
+                      "src/emel/speech/codec/mimi",
+                      "maintained_runtime"},
     dependency_record{"speech_codec_mimi",
                       kind::source,
                       "tools/bench/speech/mimi_emel_parity_runner.cpp",

@@ -92,6 +92,7 @@ record runner=tokenizer kind=source path=tools/bench/text/tokenizer/tokenizer_be
 record runner=tokenizer kind=fixture path=tests/models/tokenizer-tiny.json reason=fixture
 record runner=tokenizer kind=model path=tests/models reason=tokenizer_model_inputs
 record runner=speech_codec_mimi kind=source path=tools/bench/speech/codec_mimi_bench.cpp reason=suite_source
+record runner=speech_codec_mimi kind=source path=src/emel/speech/codec/mimi reason=maintained_runtime
 record runner=speech_codec_mimi kind=source path=tools/bench/speech/mimi_emel_parity_runner.cpp reason=emel_lane_runner
 record runner=speech_codec_mimi kind=source path=tools/bench/speech/moshi_reference_driver.cpp reason=reference_lane_driver
 record runner=speech_codec_mimi kind=fixture path=tests/models/mimi-tiny.gguf reason=fixture
