@@ -29,7 +29,13 @@ struct guard_arena_capacity_valid {
                   const action::context &) const noexcept {
     const auto &request = runtime_ev.request;
     const auto &model = request.model;
+    // The bind walk and reset_streaming_state write through every arena, so
+    // a sized span without storage must reject here, not crash in the bind.
     return model.mimi.dim <= action::k_max_latent_floats &&
+           request.prepared.data() != nullptr &&
+           request.state_arena.data() != nullptr &&
+           request.workspace.data() != nullptr &&
+           request.frame.data() != nullptr &&
            request.prepared.size() >= detail::required_prepared_floats(model) &&
            request.state_arena.size() >= detail::required_state_floats(model) &&
            request.workspace.size() >= detail::required_workspace_floats(model) &&
@@ -51,7 +57,11 @@ struct guard_encode_request_valid {
   bool operator()(const event::encode_frame_run &runtime_ev,
                   const action::context &ctx) const noexcept {
     const auto &request = runtime_ev.request;
-    return request.pcm.size() ==
+    // The compute actions read pcm and write codes_out; sized spans without
+    // storage must reject here.
+    return request.pcm.data() != nullptr &&
+           request.codes_out.data() != nullptr &&
+           request.pcm.size() ==
                static_cast<size_t>(ctx.runtime.frame_samples) &&
            request.codes_out.size() >= static_cast<size_t>(ctx.runtime.n_q);
   }
@@ -68,7 +78,10 @@ struct guard_decode_request_valid {
   bool operator()(const event::decode_frame_run &runtime_ev,
                   const action::context &ctx) const noexcept {
     const auto &request = runtime_ev.request;
-    return request.codes.size() >= static_cast<size_t>(ctx.runtime.n_q) &&
+    // Mirror of the encode guard: codes are read and pcm_out is written.
+    return request.codes.data() != nullptr &&
+           request.pcm_out.data() != nullptr &&
+           request.codes.size() >= static_cast<size_t>(ctx.runtime.n_q) &&
            request.pcm_out.size() >=
                static_cast<size_t>(ctx.runtime.frame_samples);
   }

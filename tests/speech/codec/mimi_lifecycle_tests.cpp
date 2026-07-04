@@ -519,6 +519,31 @@ TEST_CASE("mimi codec initialize rejects out-of-contract model metadata") {
   }
 }
 
+TEST_CASE("mimi codec initialize rejects null arena storage") {
+  auto loaded = load_mimi_fixture_or_skip();
+  if (loaded.model == nullptr) {
+    return;
+  }
+
+  codec_arenas arenas{};
+  size_arenas(*loaded.model, arenas);
+
+  namespace sml = stateforward::sml;
+  mimi::sm machine{};
+  emel::error::type err = emel::error::cast(mimi::error::none);
+  // A sized span without storage must reject at the arena guard: the bind
+  // walk and reset_streaming_state write through every arena.
+  mimi::event::initialize init{
+      *loaded.model,
+      std::span<float>{static_cast<float *>(nullptr), arenas.prepared.size()},
+      std::span<float>{arenas.state}, std::span<float>{arenas.workspace},
+      std::span<float>{arenas.frame}};
+  init.error_out = &err;
+  CHECK_FALSE(machine.process_event(init));
+  CHECK(err == emel::error::cast(mimi::error::arena_capacity));
+  CHECK(machine.is(sml::state<mimi::state_uninitialized>));
+}
+
 TEST_CASE("mimi codec facade reports unexpected event ordering as errors") {
   auto loaded = load_mimi_fixture_or_skip();
   if (loaded.model == nullptr) {
@@ -612,6 +637,27 @@ TEST_CASE("mimi codec facade rejects malformed frame requests explicitly") {
       const mimi::events::decode_frame_error &)>::from<&on_decode_frame_error>();
   CHECK_FALSE(machine.process_event(bad_decode));
   CHECK(g_decode_error_count == 1u);
+  CHECK(err == emel::error::cast(mimi::error::request_shape));
+  CHECK(machine.is(sml::state<mimi::state_session_ready>));
+
+  // encode/decode: sized spans without storage route request_shape instead
+  // of dereferencing null inside the compute actions
+  mimi::event::encode_frame null_pcm_encode{
+      std::span<const float>{static_cast<const float *>(nullptr),
+                             static_cast<size_t>(g_frame_samples)},
+      std::span<int32_t>{codes}};
+  null_pcm_encode.error_out = &err;
+  CHECK_FALSE(machine.process_event(null_pcm_encode));
+  CHECK(err == emel::error::cast(mimi::error::request_shape));
+  CHECK(machine.is(sml::state<mimi::state_session_ready>));
+
+  std::vector<int32_t> ok_codes(static_cast<size_t>(g_n_q), 0);
+  mimi::event::decode_frame null_out_decode{
+      std::span<const int32_t>{ok_codes},
+      std::span<float>{static_cast<float *>(nullptr),
+                       static_cast<size_t>(g_frame_samples)}};
+  null_out_decode.error_out = &err;
+  CHECK_FALSE(machine.process_event(null_out_decode));
   CHECK(err == emel::error::cast(mimi::error::request_shape));
   CHECK(machine.is(sml::state<mimi::state_session_ready>));
 
