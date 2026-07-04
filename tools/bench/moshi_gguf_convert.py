@@ -92,6 +92,11 @@ MAX_DELAY_SLOTS = 64
 # k_max_quantizer_levels in src/emel/speech/codec/mimi/detail.hpp).
 MIMI_MAX_TRANSFORMER_LAYERS = 16
 MIMI_MAX_RVQ_SPLIT_LEVELS = 32
+# Mirrors the codec's 2^16 geometry/hparam extent cap
+# (k_max_conv_geometry_extent) and the fixed 1920-sample frame the stride
+# chain (4*5*6*8 encoder, 2 downsample) reduces to one token.
+MIMI_MAX_EXTENT = 1 << 16
+MIMI_FRAME_SAMPLES = 1920
 
 # Fixed mimi_v0_1 SEANet module topology (module index, kind, stride),
 # mirroring k_encoder_topology/k_decoder_topology in the codec.
@@ -492,6 +497,22 @@ def check_mimi_hparams(n_q: int, preset: dict) -> None:
     raise ValueError(
         f"mimi acoustic level count {n_q - preset['semantic_n_q']} exceeds "
         f"the per-split codec cap of {MIMI_MAX_RVQ_SPLIT_LEVELS}")
+  # The codec caps hparam extents at 2^16 to keep its arena sizing
+  # representable.
+  for key in ("card", "dim"):
+    if preset[key] > MIMI_MAX_EXTENT:
+      raise ValueError(
+          f"mimi preset {key}={preset[key]} exceeds the codec extent cap of "
+          f"{MIMI_MAX_EXTENT}")
+  # The fixed stride chain (encoder 4*5*6*8, downsample 2) reduces one frame
+  # to one token only for exactly 1920 samples; the codec truncates
+  # sample_rate / frame_rate and rejects any other frame length.
+  if int(preset["sample_rate"] / preset["frame_rate"]) != MIMI_FRAME_SAMPLES:
+    raise ValueError(
+        f"mimi preset sample_rate/frame_rate = "
+        f"{preset['sample_rate']}/{preset['frame_rate']} does not truncate to "
+        f"the fixed {MIMI_FRAME_SAMPLES}-sample frame the stride chain "
+        "requires")
   frame_rate = float(preset["frame_rate"])
   if not math.isfinite(frame_rate) or frame_rate <= 0.0:
     raise ValueError(
@@ -522,7 +543,14 @@ def resolve_conv_geometry(info: TensorInfo, in_channels: int) -> tuple[int, int]
     raise ValueError(
         f"conv tensor {info.name!r} dims {info.dims} do not resolve against "
         f"{in_channels} input channels")
-  return taps, total // divisor
+  out_channels = total // divisor
+  # The codec caps every conv geometry extent at 2^16.
+  if taps > MIMI_MAX_EXTENT or out_channels > MIMI_MAX_EXTENT:
+    raise ValueError(
+        f"conv tensor {info.name!r} resolves to taps={taps}, "
+        f"out_channels={out_channels}, past the codec extent cap of "
+        f"{MIMI_MAX_EXTENT}")
+  return taps, out_channels
 
 
 def check_seanet_geometry(infos: list[TensorInfo], family: str,
@@ -566,6 +594,10 @@ def cross_check_mimi(infos: list[TensorInfo], n_q: int, preset: dict) -> dict:
     raise ValueError(
         f"semantic codebook dims {first.dims} derive a non-positive "
         "codebook_dim; the maintained loader requires it positive")
+  if first.dims[0] > MIMI_MAX_EXTENT:
+    raise ValueError(
+        f"semantic codebook dims {first.dims} derive codebook_dim past the "
+        f"codec extent cap of {MIMI_MAX_EXTENT}")
   # The C++ contract and bind consume every semantic level 0..semantic_n_q-1
   # with the full codebook shape, mirroring the acoustic loop below.
   for level in range(preset["semantic_n_q"]):
@@ -691,7 +723,7 @@ def cross_check_mimi(infos: list[TensorInfo], n_q: int, preset: dict) -> dict:
         f"dim->dim conv")
   up = find_info(infos, "mimi.upsample.convtr.convtr.convtr.weight")
   require_float_dtype(up)
-  if (len(up.dims) < 1 or up.dims[0] < 2 or
+  if (len(up.dims) < 1 or up.dims[0] < 2 or up.dims[0] > MIMI_MAX_EXTENT or
       math.prod(up.dims) != up.dims[0] * dim):
     raise ValueError(
         f"upsample convtr dims {up.dims} do not resolve to a depthwise "
