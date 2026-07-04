@@ -93,10 +93,14 @@ struct guard_bind_streaming_config_valid {
   bool operator()(const detail::bind_window_runtime &ev,
                   const action::context &ctx) const noexcept {
     const event::bind_window_request &request = ev.request.request;
+    // A sized-but-null staged span is an owner misconfiguration: the prime
+    // would index a null child actor from an I/O worker, so it must reject
+    // here as a modeled bind failure instead.
     return request.window_slots >= 2u &&
            request.window_slots <= detail::k_max_window_slots &&
            request.prefetch_depth > 0u &&
            request.prefetch_depth < request.window_slots &&
+           ctx.io_staged.data() != nullptr &&
            ctx.io_staged.size() >= request.window_slots;
   }
 };

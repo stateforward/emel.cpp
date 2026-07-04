@@ -346,6 +346,44 @@ emel::io::mmap::action::platform_ops fake_huge_source_ops() noexcept {
 
 }  // namespace
 
+TEST_CASE("tensor window rejects a null staged actor span explicitly") {
+  stream_file file{"null_staged_span"};
+  emel::io::mmap::sm io_mmap{};
+  window::detail::stream_io_pool io_pool{};
+  window::action::context ctx{};
+  ctx.io_mmap = &io_mmap;
+  ctx.io_pool = &io_pool;
+  // A sized-but-null staged span is an owner misconfiguration: the prime
+  // would index a null child actor from an I/O worker, so the streaming
+  // config guard must reject it as a modeled bind failure.
+  ctx.io_staged = std::span<emel::io::staged_read::sm>{
+      static_cast<emel::io::staged_read::sm *>(nullptr),
+      window::detail::k_max_window_slots};
+  window::sm machine{ctx};
+
+  alignas(window::detail::k_slot_alignment_bytes) static std::array<
+      uint8_t, window::detail::k_max_window_slots * 2u * 8192u>
+      arena{};
+  bind_capture capture{};
+  const window::event::bind_window_request request{
+      .file_path = file.path_str,
+      .file_size_bytes = file.file_size,
+      .extents = file.extents,
+      .layer_weight_counts = file.layer_weight_counts,
+      .budget_bytes = streaming_budget(),
+      .slot_storage = std::span<uint8_t>{arena},
+      .window_slots = 4u,
+      .prefetch_depth = 2u,
+      .stage_chunk_bytes = window::detail::k_default_stream_chunk_bytes,
+  };
+  window::event::bind_window bind_request{request};
+  bind_request.on_error = {&capture, on_bind_error};
+  CHECK_FALSE(machine.process_event(bind_request));
+  CHECK(capture.error);
+  CHECK(capture.err == emel::error::cast(window::error::invalid_request));
+  CHECK(machine.is(stateforward::sml::state<window::state_unbound>));
+}
+
 TEST_CASE("tensor window rejects sources past the mapping cap before slot "
           "sizing") {
   window_fixture fixture{fake_huge_source_ops()};
