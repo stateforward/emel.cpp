@@ -7,5 +7,5 @@ tokens_generated=1
 output_length=1
 trace_token_count=1
 token_ids=537
-top_score_gaps=0.946845055
+top_score_gaps=0.9995718
 output_hex=3c
