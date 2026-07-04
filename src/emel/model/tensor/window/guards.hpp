@@ -24,6 +24,12 @@ struct guard_bind_request_valid {
     if (layer_count == 0u || layer_count > detail::k_max_stream_layers) {
       return false;
     }
+    // The scans below read through both plan spans, so sized spans without
+    // storage must reject here instead of dereferencing null mid-validation.
+    if (request.layer_weight_counts.data() == nullptr ||
+        request.extents.data() == nullptr) {
+      return false;
+    }
     size_t extent_total = 0u;
     for (const uint16_t count : request.layer_weight_counts) {
       if (count == 0u || count > detail::k_max_weights_per_layer) {
