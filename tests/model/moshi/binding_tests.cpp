@@ -837,6 +837,39 @@ TEST_CASE("mimi contract validation rejects a mixed f16 conv class") {
   CHECK(moshi::validate_execution_contract(model) != k_none);
 }
 
+TEST_CASE("mimi contract validation requires f16 rvq projections in the f16 class") {
+  auto loaded = load_fixture_or_skip("mimi-tiny.gguf");
+  if (loaded.model == nullptr) {
+    return;
+  }
+
+  // bind_rvq_split prepares raw f16 projection copies whenever the f16 conv
+  // operand class is selected and the split is not q8; an f16-class model
+  // with f32 RVQ projections validated here and then failed initialization.
+  // Flip every non-transposed conv (and the downsample) to f16 so the class
+  // selection and the per-conv f16 rule both hold; the f32 projections stay.
+  auto &model = *loaded.model;
+  constexpr int32_t k_dtype_f16 = 1;
+  uint32_t flipped = 0;
+  for (uint32_t idx = 0; idx < model.n_tensors; ++idx) {
+    auto &tensor = model.tensors[idx];
+    const std::string_view name{model.name_storage.data() + tensor.name_offset,
+                                tensor.name_length};
+    const bool non_transposed_conv =
+        (name.starts_with("mimi.encoder.") || name.starts_with("mimi.decoder.") ||
+         name.starts_with("mimi.downsample.")) &&
+        name.ends_with("conv.conv.weight") &&
+        name.find("convtr") == std::string_view::npos;
+    if (!non_transposed_conv) {
+      continue;
+    }
+    tensor.type = k_dtype_f16;
+    flipped += 1;
+  }
+  REQUIRE(flipped >= 25u);  // 14 encoder + 10 decoder + downsample
+  CHECK(moshi::validate_execution_contract(model) != k_none);
+}
+
 TEST_CASE("mimi contract validation rejects oversized conv geometry extents") {
   auto loaded = load_fixture_or_skip("mimi-tiny.gguf");
   if (loaded.model == nullptr) {

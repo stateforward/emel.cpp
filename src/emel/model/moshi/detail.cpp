@@ -795,7 +795,15 @@ emel::error::type validate_mimi_contract(const emel::model::data &model_data,
   // element count, matching prepare_linear/prepare_raw_q8_0) so a component
   // missing a projection rejects at load instead of failing quantizer bind.
   // The RVQ q8-vs-float class is probed from the first split's input
-  // projection, mirroring plan_codec.
+  // projection, mirroring plan_codec, and in the f16 conv operand class the
+  // non-q8 projections must themselves be f16: bind_rvq_split prepares raw
+  // f16 copies (prepare_raw_f16) whenever conv_f16 is selected and the
+  // split is not q8.
+  constexpr int32_t k_dtype_f16 = 1;
+  const auto *first_conv =
+      find_tensor(model_data, "mimi.encoder.model.0.conv.conv.weight");
+  const bool conv_f16 =
+      first_conv != nullptr && first_conv->type == k_dtype_f16;
   const uint64_t proj_elements =
       static_cast<uint64_t>(mimi.dim) * static_cast<uint64_t>(mimi.codebook_dim);
   const auto *first_rvq_proj =
@@ -803,6 +811,19 @@ emel::error::type validate_mimi_contract(const emel::model::data &model_data,
   const bool rvq_q8 =
       first_rvq_proj != nullptr && first_rvq_proj->type == k_dtype_q8_0;
   static constexpr const char *k_rvq_splits[2] = {"rvq_first", "rvq_rest"};
+  const auto rvq_projection_ok =
+      [&model_data, proj_elements, rvq_q8,
+       conv_f16](const std::string_view name_view) noexcept {
+        if (!has_projection_tensor(model_data, name_view, proj_elements,
+                                   rvq_q8)) {
+          return false;
+        }
+        if (rvq_q8 || !conv_f16) {
+          return true;
+        }
+        const auto *tensor = find_tensor(model_data, name_view);
+        return tensor != nullptr && tensor->type == k_dtype_f16;
+      };
   bool projections_ok = true;
   for (size_t split = 0; projections_ok && split < 2u; ++split) {
     char name[96] = {};
@@ -811,9 +832,8 @@ emel::error::type validate_mimi_contract(const emel::model::data &model_data,
                       "mimi.quantizer.%s.input_proj.weight", k_rvq_splits[split]);
     projections_ok =
         in_len > 0 && static_cast<size_t>(in_len) < sizeof(name) &&
-        has_projection_tensor(
-            model_data, std::string_view{name, static_cast<size_t>(in_len)},
-            proj_elements, rvq_q8);
+        rvq_projection_ok(
+            std::string_view{name, static_cast<size_t>(in_len)});
     if (!projections_ok) {
       break;
     }
@@ -822,9 +842,8 @@ emel::error::type validate_mimi_contract(const emel::model::data &model_data,
                                       k_rvq_splits[split]);
     projections_ok =
         out_len > 0 && static_cast<size_t>(out_len) < sizeof(name) &&
-        has_projection_tensor(
-            model_data, std::string_view{name, static_cast<size_t>(out_len)},
-            proj_elements, rvq_q8);
+        rvq_projection_ok(
+            std::string_view{name, static_cast<size_t>(out_len)});
   }
   if (!projections_ok) {
     return emel::error::cast(emel::model::loader::error::model_invalid);
@@ -839,11 +858,6 @@ emel::error::type validate_mimi_contract(const emel::model::data &model_data,
   // stride otherwise validates and fails codec initialization. plan_codec
   // also selects the f16 conv operand class from the first encoder conv and
   // bind_conv requires raw f16 taps on every non-transposed conv.
-  constexpr int32_t k_dtype_f16 = 1;
-  const auto *first_conv =
-      find_tensor(model_data, "mimi.encoder.model.0.conv.conv.weight");
-  const bool conv_f16 =
-      first_conv != nullptr && first_conv->type == k_dtype_f16;
   const auto resolve_conv = [&model_data, conv_f16](
                                 const std::string_view name,
                                 const int64_t in_channels,
