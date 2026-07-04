@@ -1056,11 +1056,28 @@ void append_reference_lane_cases(std::vector<result> &results,
     return;
   }
 
-  std::array<llama_token, 64> prompt_tokens = {};
+  // The EMEL lanes format the chat prompt through the fixture's template
+  // contract (with an assistant generation prompt), so the reference lane
+  // must tokenize the same formatted stream - raw k_prompt would put a
+  // different token workload in the same compare group. Mirrors the
+  // maintained generation bench's reference prompt path exactly, including
+  // tokenizing with add_special/parse_special disabled.
+  const auto reference_formatter = emel::tools::generation_formatter_contract::
+      resolve_reference_formatter_info(model.get());
+  std::string formatted_prompt = {};
+  if (!emel::tools::generation_formatter_contract::
+          format_reference_single_user_prompt(reference_formatter, k_prompt,
+                                              formatted_prompt)) {
+    std::fprintf(stderr,
+                 "warning: weight_streaming reference formatter unsupported\n");
+    return;
+  }
+  std::array<llama_token, 256> prompt_tokens = {};
   const int32_t prompt_count = llama_tokenize(
-      vocab, k_prompt.data(), static_cast<int32_t>(k_prompt.size()),
-      prompt_tokens.data(), static_cast<int32_t>(prompt_tokens.size()),
-      /*add_special=*/true, /*parse_special=*/false);
+      vocab, formatted_prompt.data(),
+      static_cast<int32_t>(formatted_prompt.size()), prompt_tokens.data(),
+      static_cast<int32_t>(prompt_tokens.size()),
+      /*add_special=*/false, /*parse_special=*/false);
   if (prompt_count <= 0) {
     return;
   }
