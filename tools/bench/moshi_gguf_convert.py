@@ -321,15 +321,39 @@ def cross_check_lm(infos: list[TensorInfo], config: dict) -> None:
   if emb_count != config["n_q"]:
     raise ValueError(
         f"weights carry {emb_count} lm.emb.* tensors, config n_q={config['n_q']}")
+  names = {info.name for info in infos}
+
+  def require_block(prefix: str, layer: int, with_gating: bool) -> None:
+    # Mirrors the C++ has_lm_transformer_block/has_depformer_block contract:
+    # both norms, a fused or pre-split attention input projection, and (for
+    # the main transformer) a fused or per-step gating input weight.
+    base = f"{prefix}.layers.{layer}."
+    missing = []
+    for required in ("norm1.alpha", "norm2.alpha"):
+      if base + required not in names:
+        missing.append(required)
+    if (base + "self_attn.in_proj_weight" not in names and
+        base + "self_attn.in_projs.0.weight" not in names):
+      missing.append("self_attn.in_proj_weight|self_attn.in_projs.0.weight")
+    if with_gating and (base + "gating.linear_in.weight" not in names and
+                        base + "gating.0.linear_in.weight" not in names):
+      missing.append("gating.linear_in.weight|gating.0.linear_in.weight")
+    if missing:
+      raise ValueError(
+          f"weights are missing {base}{{{', '.join(missing)}}} required by "
+          "the runtime block contract")
+
   layer_count = count_prefixed(infos, "lm.transformer.layers.")
-  # The C++ contract iterates every configured block; a missing intermediate
-  # layer must fail conversion instead of emitting an unusable artifact.
+  # The C++ contract iterates every configured block and its required block
+  # tensors; a missing intermediate layer or block tensor must fail
+  # conversion instead of emitting an unusable artifact.
   for layer in range(config["num_layers"]):
     if count_prefixed(infos, f"lm.transformer.layers.{layer}.") == 0:
       raise ValueError(
           f"weights are missing lm.transformer.layers.{layer}.* "
           f"(config num_layers={config['num_layers']}, "
           f"{layer_count} layer tensors present)")
+    require_block("lm.transformer", layer, with_gating=True)
   if config["dep_q"] > 0:
     if count_prefixed(infos, "lm.depformer_in.") != config["dep_q"]:
       raise ValueError("lm.depformer_in.* count does not match config dep_q")
@@ -340,6 +364,7 @@ def cross_check_lm(infos: list[TensorInfo], config: dict) -> None:
         raise ValueError(
             f"weights are missing lm.depformer.layers.{layer}.* per config "
             f"depformer_num_layers={config['depformer_num_layers']}")
+      require_block("lm.depformer", layer, with_gating=False)
 
 
 def cross_check_mimi(infos: list[TensorInfo], n_q: int, preset: dict) -> dict:
@@ -349,6 +374,13 @@ def cross_check_mimi(infos: list[TensorInfo], n_q: int, preset: dict) -> dict:
     raise ValueError(
         f"semantic codebook dims {first.dims} do not match preset card "
         f"{preset['card']}")
+  # The C++ contract and bind consume every semantic level 0..semantic_n_q-1
+  # with the full codebook shape, mirroring the acoustic loop below.
+  for level in range(preset["semantic_n_q"]):
+    require_dims(
+        infos,
+        f"mimi.quantizer.rvq_first.vq.layers.{level}._codebook.embedding",
+        (first.dims[0], preset["card"]))
   # The C++ contract requires every acoustic level with the full codebook
   # shape; probe each expected level instead of counting, so a missing
   # intermediate or wrong-shaped codebook fails conversion.
