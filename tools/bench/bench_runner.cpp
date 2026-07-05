@@ -79,6 +79,17 @@ constexpr bool k_host_is_aarch64 =
   false;
 #endif
 
+// Normalized host architecture token, matching the "/<arch>/" path segment used
+// in arch-gated benchmark case names (kernel/<arch>/..., flash_attention/<arch>/...).
+constexpr std::string_view k_host_arch =
+#if defined(__x86_64__) || defined(_M_X64)
+  "x86_64";
+#elif defined(__aarch64__) || defined(_M_ARM64)
+  "aarch64";
+#else
+  "host";
+#endif
+
 constexpr std::string_view k_bench_reference_source =
 #ifdef BENCH_REFERENCE_SOURCE
   BENCH_REFERENCE_SOURCE;
@@ -602,6 +613,12 @@ void print_compare(const std::vector<bench::result> & emel_results,
               k_bench_reference_source.data(),
               static_cast<int>(k_bench_reference_ref.size()),
               k_bench_reference_ref.data());
+  // The compare gate (scripts/bench_compare_gate.awk) uses this marker to know
+  // which arch-gated baseline rows the runner can produce on this host; rows
+  // skipped by case_supported_on_host for a foreign arch are expected-absent.
+  std::printf("# bench_host_arch: %.*s\n",
+              static_cast<int>(k_host_arch.size()),
+              k_host_arch.data());
   print_benchmark_config(cfg);
   print_binary_size_compare_metadata();
   if (generation_present) {
