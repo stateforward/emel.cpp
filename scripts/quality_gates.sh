@@ -26,6 +26,16 @@ QUALITY_GATES_ALLOW_BENCH_REGRESSION="${EMEL_QUALITY_GATES_ALLOW_BENCH_REGRESSIO
 QUALITY_GATES_PARITY="${EMEL_QUALITY_GATES_PARITY:-auto}"
 QUALITY_GATES_FUZZ="${EMEL_QUALITY_GATES_FUZZ:-auto}"
 QUALITY_GATES_PARALLEL="${EMEL_QUALITY_GATES_PARALLEL:-auto}"
+# Per-lane wall-clock budget for the parallel quality group. This is an
+# EVIDENCE GUARANTEE, not a work cap: each lane gets everything that remains
+# of the global timeout minus a flush margin, so a wedged or starved lane is
+# killed and reported as a FAILED lane (status 124, log flushed) moments
+# before the global wrapper would otherwise kill the whole run silently.
+# Lanes are never given less verification time than the global budget already
+# allows — raise EMEL_QUALITY_GATES_TIMEOUT for legitimately longer runs.
+# The explicit override exists for hang triage only; it can make the gate
+# fail faster, never pass with less verification.
+QUALITY_GATES_LANE_TIMEOUT="${EMEL_QUALITY_GATES_LANE_TIMEOUT:-}"
 PARITY_DEPENDENCY_MANIFEST_BASELINE="${EMEL_PARITY_DEPENDENCY_MANIFEST_BASELINE:-}"
 PARITY_DEPENDENCY_MANIFEST_CURRENT="${EMEL_PARITY_DEPENDENCY_MANIFEST_CURRENT:-}"
 PARITYCHECKER_BINARY="${EMEL_PARITYCHECKER_BINARY:-$ROOT_DIR/build/paritychecker_zig/paritychecker}"
@@ -136,6 +146,36 @@ record_skipped_step() {
     timing_lines+=("$name 0")
     write_timing_snapshot
   fi
+}
+
+lane_timeout_tool() {
+  if command -v timeout >/dev/null 2>&1; then
+    echo "timeout"
+  elif command -v gtimeout >/dev/null 2>&1; then
+    echo "gtimeout"
+  fi
+}
+
+lane_timeout_for() {
+  if [[ -n "$QUALITY_GATES_LANE_TIMEOUT" ]]; then
+    echo "$QUALITY_GATES_LANE_TIMEOUT"
+    return
+  fi
+  local global_seconds="${QUALITY_GATES_TIMEOUT%s}"
+  if ! [[ "$global_seconds" =~ ^[0-9]+$ ]]; then
+    global_seconds=1800
+  fi
+  # Remaining global budget minus a margin for flushing lane logs and running
+  # the trailing lint/docs steps. Never reduces verification below what the
+  # global timeout already allows; only converts a silent global kill into a
+  # reported per-lane failure with its log intact.
+  local elapsed="$(( $(date +%s) - total_start ))"
+  local flush_margin=180
+  local budget="$(( global_seconds - elapsed - flush_margin ))"
+  if (( budget < 60 )); then
+    budget=60
+  fi
+  echo "$budget"
 }
 
 run_domain_boundary_gate() {
@@ -1123,15 +1163,32 @@ start_parallel_step() {
   local log_file="$parallel_dir/${name}.log"
   local status_file="$parallel_dir/${name}.status"
   local duration_file="$parallel_dir/${name}.duration"
+  local budget
+  budget="$(lane_timeout_for)"
+  local tool
+  tool="$(lane_timeout_tool)"
+  local -a lane_cmd=("$@")
+  if [[ -n "$tool" ]]; then
+    # Re-exec this script for the lane so timeout(1) can signal the whole lane
+    # process group; direct shell functions cannot be timed out or killed
+    # cleanly with their cmake/ctest/bench children.
+    lane_cmd=("$tool" -k 30 "$budget" env \
+      EMEL_QUALITY_GATES_LANE="$name" \
+      "$ROOT_DIR/scripts/quality_gates.sh")
+  fi
+  echo "quality_gates: lane start name=$name budget=${budget}s" >"$log_file"
 
   (
     export EMEL_QUALITY_GATES_PARALLEL_CHILD=1
     start="$(date +%s)"
     set +e
-    "$@" >"$log_file" 2>&1
+    "${lane_cmd[@]}" >>"$log_file" 2>&1
     status="$?"
     set -e
     end="$(date +%s)"
+    if [[ "$status" -eq 124 || "$status" -eq 137 ]]; then
+      echo "quality_gates: lane timeout name=$name budget=${budget}s status=$status" >>"$log_file"
+    fi
     printf '%s\n' "$status" >"$status_file"
     printf '%s\n' "$(( end - start ))" >"$duration_file"
     exit 0
@@ -1233,6 +1290,33 @@ if [[ -z "$test_shard_list" &&
       "$unknown_test_shard_src" == "false" &&
       ${#test_shards[@]} -gt 0 ]]; then
   test_shard_list="$(IFS=,; echo "${test_shards[*]}")"
+fi
+
+# Single-lane dispatch used by the per-lane timeout wrapper: shell functions
+# cannot be run under timeout(1), so the parallel group re-execs this script
+# with EMEL_QUALITY_GATES_LANE set and the timeout tool signals the whole lane
+# process group. All lane-relevant state above derives deterministically from
+# the environment and git state, so the child computes the same selections.
+if [[ -n "${EMEL_QUALITY_GATES_LANE:-}" ]]; then
+  case "$EMEL_QUALITY_GATES_LANE" in
+    bench_snapshot)
+      run_benchmark_gates
+      ;;
+    test_with_coverage)
+      run_coverage_gate
+      ;;
+    paritychecker)
+      run_parity_gate
+      ;;
+    fuzz_smoke)
+      run_fuzz_gate
+      ;;
+    *)
+      echo "error: unknown EMEL_QUALITY_GATES_LANE value '$EMEL_QUALITY_GATES_LANE'" >&2
+      exit 1
+      ;;
+  esac
+  exit 0
 fi
 
 run_step domain_boundaries run_domain_boundary_gate
