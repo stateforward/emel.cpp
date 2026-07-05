@@ -14,6 +14,7 @@
 
 #include "../../kernel/test_helpers.hpp"
 #include "emel/memory/events.hpp"
+#include "emel/graph/processor/guards.hpp"
 #include "emel/memory/hybrid/sm.hpp"
 #include "emel/model/llama/detail.hpp"
 #include "emel/text/generator/detail.hpp"
@@ -115,7 +116,21 @@ struct runtime_request_fixture {
   emel::text::generator::compute_io io = {};
   emel::memory::view::snapshot memory_snapshot = {};
   std::array<int32_t, 1> seq_primary_ids = {0};
+  emel::graph::processor::event::execution_output output = {};
+  emel::graph::processor::event::lifecycle_tensor_binding lifecycle_tensor = {};
+  emel::graph::processor::event::lifecycle_phase lifecycle_phase = {};
+  emel::graph::processor::event::lifecycle_manifest lifecycle = {};
   emel::graph::processor::event::execute request = {};
+
+  static bool on_execution_done(
+      void *, const emel::graph::processor::events::execution_done &) noexcept {
+    return true;
+  }
+
+  static bool on_execution_error(
+      void *, const emel::graph::processor::events::execution_error &) noexcept {
+    return true;
+  }
 
   explicit runtime_request_fixture(
       const emel::model::llama::detail::step_kind kind =
@@ -157,8 +172,22 @@ struct runtime_request_fixture {
     memory_snapshot.sequence_length_values[0] = 1;
     memory_snapshot.sequence_kv_block_count[0] = 1;
     memory_snapshot.sequence_kv_blocks[0][0] = 0;
+    lifecycle_tensor.tensor_id = 0;
+    lifecycle_tensor.buffer = logits.data();
+    lifecycle_tensor.buffer_bytes = sizeof(float) * logits.size();
+    lifecycle_tensor.consumer_refs = 1;
+    lifecycle_tensor.is_leaf = true;
+    lifecycle.tensors = &lifecycle_tensor;
+    lifecycle.tensor_count = 1;
+    lifecycle.phase = &lifecycle_phase;
 
     request.step_plan = &plan;
+    request.output_out = &output;
+    request.lifecycle = &lifecycle;
+    request.tensor_machine =
+        reinterpret_cast<emel::graph::tensor::sm *>(this);
+    request.step_index = 0;
+    request.step_size = 1;
     request.expected_outputs = plan.expected_outputs;
     request.compute_ctx = &io;
     request.positions = positions.data();
@@ -167,6 +196,8 @@ struct runtime_request_fixture {
     request.memory_view = &memory_snapshot;
     request.seq_primary_ids = seq_primary_ids.data();
     request.seq_primary_ids_count = static_cast<int32_t>(seq_primary_ids.size());
+    request.dispatch_done = {this, on_execution_done};
+    request.dispatch_error = {this, on_execution_error};
   }
 };
 
@@ -2198,6 +2229,11 @@ TEST_CASE("generator_detail_kv_physical_map_binds_snapshot_block_order") {
     CHECK(emel::text::generator::detail::physical_kv_position(identity_kv, position) ==
           static_cast<size_t>(position));
   }
+  const int32_t high_identity_position =
+      emel::memory::view::MAX_BLOCKS_PER_SEQUENCE + 904;
+  CHECK(emel::text::generator::detail::physical_kv_position(
+            identity_kv, high_identity_position) ==
+        static_cast<size_t>(high_identity_position));
 
   // A reversed two-block mapping relocates logical block 0 to physical block 1
   // and vice versa; the offset helpers must follow the snapshot, not the
@@ -3102,6 +3138,38 @@ TEST_CASE("generator_detail_graph_callbacks_accept_guarded_requests_without_erro
       fixture->request, &err));
   CHECK(err == -1);
   fixture->io.selected_score_out = &fixture->selected_score;
+
+  emel::graph::processor::event::execute_ctx execute_ctx{};
+  emel::graph::processor::action::context processor_context{};
+  const auto execute_is_valid = [&]() {
+    const emel::graph::processor::event::execute_step execute_step{
+      fixture->request,
+      execute_ctx,
+    };
+    return emel::graph::processor::guard::valid_execute{}(
+        execute_step, processor_context);
+  };
+  CHECK(execute_is_valid());
+  const auto expect_kv_contract_rejected = [&]() { CHECK_FALSE(execute_is_valid()); };
+
+  const auto * saved_memory_view = fixture->request.memory_view;
+  fixture->request.memory_view = nullptr;
+  expect_kv_contract_rejected();
+  fixture->request.memory_view = saved_memory_view;
+
+  const int32_t * saved_seq_primary_ids = fixture->request.seq_primary_ids;
+  fixture->request.seq_primary_ids = nullptr;
+  expect_kv_contract_rejected();
+  fixture->request.seq_primary_ids = saved_seq_primary_ids;
+
+  fixture->request.seq_primary_ids_count = 0;
+  expect_kv_contract_rejected();
+  fixture->request.seq_primary_ids_count =
+      static_cast<int32_t>(fixture->seq_primary_ids.size());
+
+  fixture->memory_snapshot.sequence_active[0] = 0;
+  expect_kv_contract_rejected();
+  fixture->memory_snapshot.sequence_active[0] = 1;
 
   err = -1;
   CHECK(emel::text::generator::detail::validate_guarded_compute(

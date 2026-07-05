@@ -835,19 +835,32 @@ inline bool guard_snapshot_covers_tokens(const action::context & ctx,
       snapshot.sequence_length(action::k_sequence_id) != token_count) {
     return false;
   }
-  for (int32_t position = 0; position < token_count; ++position) {
-    const int32_t block_id = snapshot.lookup_kv_block(action::k_sequence_id, position);
+  const int32_t block_count =
+      emel::memory::view::blocks_for_tokens(snapshot.block_tokens, token_count);
+  if (block_count <= 0 ||
+      block_count > emel::memory::view::MAX_BLOCKS_PER_SEQUENCE ||
+      snapshot.sequence_kv_block_count[static_cast<size_t>(action::k_sequence_id)] <
+          block_count) {
+    return false;
+  }
+  for (int32_t block = 0; block < block_count; ++block) {
+    const uint16_t block_id =
+        snapshot.sequence_kv_blocks[static_cast<size_t>(action::k_sequence_id)]
+                                   [static_cast<size_t>(block)];
+    const int32_t block_last_position =
+        ((block + 1) * snapshot.block_tokens) - 1;
+    const int32_t position =
+        block_last_position < token_count ? block_last_position : token_count - 1;
     const int64_t physical_position =
         static_cast<int64_t>(block_id) * static_cast<int64_t>(snapshot.block_tokens) +
         static_cast<int64_t>(position % snapshot.block_tokens);
-    if (block_id < 0 ||
+    if (block_id == emel::memory::view::INVALID_KV_BLOCK ||
         physical_position < 0 ||
         physical_position >= static_cast<int64_t>(backend.kv_positions_capacity)) {
       return false;
     }
   }
-  return token_count > 0 &&
-         snapshot.lookup_kv_block(action::k_sequence_id, token_count - 1) >= 0;
+  return true;
 }
 
 // Flash kernels consume contiguous strided views rooted at each layer's cache

@@ -1117,21 +1117,12 @@ struct kv_addressing_view {
   int32_t recurrent_slot = 0;
 };
 
-inline constexpr std::array<uint16_t, emel::memory::view::MAX_BLOCKS_PER_SEQUENCE>
-make_identity_kv_blocks() noexcept {
-  std::array<uint16_t, emel::memory::view::MAX_BLOCKS_PER_SEQUENCE> blocks = {};
-  for (size_t idx = 0; idx < blocks.size(); ++idx) {
-    blocks[idx] = static_cast<uint16_t>(idx);
-  }
-  return blocks;
-}
-
-inline constexpr auto k_identity_kv_blocks = make_identity_kv_blocks();
+inline constexpr uint16_t k_identity_kv_block = 0;
 
 inline kv_addressing_view identity_kv_addressing() noexcept {
   return kv_addressing_view{
-    .blocks = k_identity_kv_blocks.data(),
-    .block_tokens = 1,
+    .blocks = &k_identity_kv_block,
+    .block_tokens = std::numeric_limits<int32_t>::max(),
     .recurrent_slot = 0,
   };
 }
