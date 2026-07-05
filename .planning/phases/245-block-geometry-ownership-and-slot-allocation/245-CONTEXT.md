@@ -37,8 +37,9 @@ Gaps this phase closes:
   `kv_positions_capacity` (= blocks_for_tokens(block_tokens, n_ctx) * block_tokens);
   cache extents/strides switch from `n_ctx` to `kv_positions_capacity`. For
   n_ctx % block_tokens == 0 (all maintained fixtures) this is bit-identical.
-- Defaults resolve branch-free in `begin_initialize` (mirrors kv `exec_reserve`
-  precedent) so `limits` always holds the effective geometry.
+- Public initialize validation rejects non-positive or context-oversized block
+  geometry before `begin_initialize`; `begin_initialize` stores the explicit
+  validated geometry that the backend and reserve dispatch consume.
 - Coverage validation is a pure initializer guard on the `reserving_memory` decision:
   `blocks_for_tokens(block_tokens, n_ctx) <= block_capacity` else invalid_request.
   No validation branching inside prepare beyond its pre-existing pattern.

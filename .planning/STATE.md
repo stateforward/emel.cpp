@@ -4,8 +4,8 @@ milestone: v1.28
 milestone_name: Memory-Owned KV Block Addressing Cutover
 status: active
 stopped_at: "Phases 245-249 complete + KVP-01; v1.28 closeout blocked on bench-lane repair (chip task_48a05fc3)"
-last_updated: "2026-07-04T00:00:00.000Z"
-last_activity: 2026-07-04
+last_updated: "2026-07-05T00:00:00.000Z"
+last_activity: 2026-07-05
 progress:
   total_phases: 6
   completed_phases: 5
@@ -37,10 +37,13 @@ closeout blocked on the bench-lane repair (reference ggml SIGBUS + missing PR #8
 baselines, chip task_48a05fc3). Full suite 14/14 (1816 cases) on the unsharded
 zig build.
 Phase: 250 closeout pending upstream bench repair and consent decisions.
-Last activity: 2026-07-04 — see phase VALIDATION docs under
-.planning/phases/24{5,6,7,50}-*/ for gate evidence and dispositions. A final
-all-files union gate run timed out at 30 minutes under host contention (a second
-agent session was running); per-phase committed-state evidence stands.
+Last activity: 2026-07-05 — PR #94 takeover fixed review-loop findings around
+KV reuse order, graph execute KV-addressing validation, identity addressing,
+snapshot-coverage guard cost, and unapproved lint-snapshot churn. See phase
+VALIDATION docs under .planning/phases/24{5,6,7,50}-*/ for earlier gate evidence
+and dispositions. A final all-files union gate run timed out at 30 minutes under
+host contention (a second agent session was running); per-phase committed-state
+evidence stands.
 
 Progress: [########--] 83%
 
@@ -59,10 +62,12 @@ Progress: [########--] 83%
 - Flash kernels consume strided 3D views that assume position-contiguity per head —
   flash eligibility under block mapping must be an explicit guard.
 
-**Next implementation step:** Phase 245 — memory-owned block-geometry contract and
-generate-path `allocate_slots` growth.
+**Next implementation step:** no further v1.28 implementation is queued in this
+PR. KVE-01/KVD-01 closeout waits on bench-lane repair and explicit snapshot
+baseline consent.
 
-**Closeout gate:** open (0/6 phases).
+**Closeout gate:** open (5/6 phases complete). KVP-01 landed; KVE-01/KVD-01 stay
+blocked by the bench lane.
 
 ## Accumulated Context
 
@@ -139,6 +144,7 @@ Items acknowledged at v1.25 milestone close on 2026-05-06 (unchanged):
 
 ## Session Continuity
 
-Last session: 2026-07-04 (v1.28 definition)
-Stopped at: v1.28 defined; Phase 245 implementation starting.
+Last session: 2026-07-05 (PR #94 takeover)
+Stopped at: Phases 245-249 complete plus KVP-01; KVE-01/KVD-01 intentionally
+blocked on the bench-lane repair and snapshot consent.
 Resume file: None
