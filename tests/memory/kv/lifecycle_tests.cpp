@@ -4,6 +4,7 @@
 
 #include "emel/emel.h"
 #include "emel/memory/events.hpp"
+#include "emel/memory/kv/actions.hpp"
 #include "emel/memory/kv/sm.hpp"
 #include "emel/memory/view.hpp"
 
@@ -352,6 +353,49 @@ TEST_CASE("memory_kv_lifecycle_splits_shared_partial_tail_before_append") {
   CHECK(machine.view().lookup_kv_block(0, 0) == parent_tail_block);
   CHECK(machine.view().lookup_kv_block(1, 0) != parent_tail_block);
   CHECK(machine.view().lookup_kv_block(1, 2) == machine.view().lookup_kv_block(1, 0));
+}
+
+TEST_CASE("memory_kv_allocate_slots_failed_tail_split_keeps_map_and_free_stack") {
+  emel::memory::kv::action::context ctx{};
+  ctx.max_sequences = 2;
+  ctx.max_blocks = 2;
+  ctx.block_tokens = 4;
+  emel::memory::kv::action::detail::reset_runtime(ctx);
+
+  ctx.sequence_active[0] = true;
+  ctx.sequence_length[0] = 2;
+  ctx.sequence_block_count[0] = 1;
+  ctx.seq_to_blocks[0][0] = 0;
+  ctx.free_count = 1;
+  ctx.free_stack[0] = 1;
+  ctx.block_refs.storage().refs[0] = 0;
+  ctx.block_refs.storage().refs[1] = 0;
+
+  const event::allocate_slots request{
+    .seq_id = 0,
+    .token_count = 1,
+  };
+  event::allocate_slots_ctx op_ctx{};
+  int32_t block_count_out = -1;
+  int32_t err = static_cast<int32_t>(emel::error::cast(emel::memory::kv::error::none));
+  const event::allocate_slots_runtime runtime{
+    request,
+    op_ctx,
+    block_count_out,
+    err,
+  };
+
+  emel::memory::kv::action::detail::effect_allocate_slots_impl<true>(runtime, ctx);
+
+  CHECK_FALSE(op_ctx.accepted);
+  CHECK(op_ctx.linked_count == 0);
+  CHECK(op_ctx.unlinked_count == 0);
+  CHECK(op_ctx.block_count == 0);
+  CHECK(ctx.seq_to_blocks[0][0] == 0);
+  CHECK(ctx.free_count == 1);
+  CHECK(ctx.sequence_length[0] == 2);
+  CHECK(ctx.sequence_block_count[0] == 1);
+  CHECK(ctx.block_refs.storage().refs[1] == 0);
 }
 
 TEST_CASE("memory_kv_lifecycle_append_and_rollback_use_partial_tail_capacity") {

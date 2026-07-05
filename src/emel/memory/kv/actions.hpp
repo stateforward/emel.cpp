@@ -199,6 +199,20 @@ inline void shared_tail_blocks(const event::allocate_slots_runtime & ev,
   new_block = ctx.free_stack[static_cast<size_t>(ctx.free_count - 1)];
 }
 
+inline int32_t block_ref_linkable(const kv::detail::block_storage & storage,
+                                  const uint16_t block_id) noexcept {
+  const size_t block_index = static_cast<size_t>(block_id);
+  return static_cast<int32_t>(block_index < storage.refs.size() &&
+                              storage.refs[block_index] < UINT16_MAX);
+}
+
+inline int32_t block_ref_unlinkable(const kv::detail::block_storage & storage,
+                                    const uint16_t block_id) noexcept {
+  const size_t block_index = static_cast<size_t>(block_id);
+  return static_cast<int32_t>(block_index < storage.refs.size() &&
+                              storage.refs[block_index] > 0);
+}
+
 }  // namespace detail
 
 struct effect_copy_shared_tail_block {
@@ -244,30 +258,79 @@ inline void effect_allocate_slots_impl(const event::allocate_slots_runtime & ev,
   ev.ctx.linked_count = 0;
   ev.ctx.unlinked_count = 0;
 
+  const int32_t original_free_count = ctx.free_count;
+  int32_t tail_block_index = 0;
+  uint16_t old_tail_block = 0;
+  uint16_t new_tail_block = 0;
+  int32_t linkable_count = 0;
+  int32_t unlinkable_count = 0;
+  const auto & ref_storage = ctx.block_refs.storage();
+
   if constexpr (split_shared_tail) {
-    int32_t tail_block_index = 0;
-    uint16_t old_block = 0;
-    uint16_t new_block = 0;
-    detail::shared_tail_blocks(ev, ctx, tail_block_index, old_block, new_block);
-    ctx.seq_to_blocks[seq_index][static_cast<size_t>(tail_block_index)] = new_block;
-    ev.ctx.linked_count += static_cast<int32_t>(
-        ctx.block_refs.process_indexed<kv::detail::block_link>(static_cast<size_t>(new_block)));
-    ev.ctx.unlinked_count += static_cast<int32_t>(
-        ctx.block_refs.process_indexed<kv::detail::block_unlink>(static_cast<size_t>(old_block)));
+    detail::shared_tail_blocks(ev, ctx, tail_block_index, old_tail_block, new_tail_block);
+    linkable_count += detail::block_ref_linkable(ref_storage, new_tail_block);
+    unlinkable_count += detail::block_ref_unlinkable(ref_storage, old_tail_block);
   }
 
   for (int32_t i = 0; i < ev.ctx.blocks_needed; ++i) {
-    const int32_t stack_index = ctx.free_count - 1 - ev.ctx.tail_split_needed - i;
+    const int32_t stack_index = original_free_count - 1 - ev.ctx.tail_split_needed - i;
     const uint16_t block_id = ctx.free_stack[static_cast<size_t>(stack_index)];
-    ctx.seq_to_blocks[seq_index][static_cast<size_t>(ev.ctx.existing_block_count + i)] = block_id;
-    ev.ctx.linked_count += static_cast<int32_t>(
-        ctx.block_refs.process_indexed<kv::detail::block_link>(static_cast<size_t>(block_id)));
+    linkable_count += detail::block_ref_linkable(ref_storage, block_id);
   }
-  ctx.free_count -= ev.ctx.physical_blocks_needed;
+
+  const int32_t refs_can_update =
+      static_cast<int32_t>(linkable_count == ev.ctx.physical_blocks_needed &&
+                           unlinkable_count == ev.ctx.tail_split_needed);
+  const int32_t invalid_ref_index = kv::detail::max_blocks;
+
+  if constexpr (split_shared_tail) {
+    const int32_t guarded_new_block =
+        refs_can_update * static_cast<int32_t>(new_tail_block) +
+        (1 - refs_can_update) * invalid_ref_index;
+    const int32_t guarded_old_block =
+        refs_can_update * static_cast<int32_t>(old_tail_block) +
+        (1 - refs_can_update) * invalid_ref_index;
+    ev.ctx.linked_count += static_cast<int32_t>(
+        ctx.block_refs.process_indexed<kv::detail::block_link>(
+            static_cast<size_t>(guarded_new_block)));
+    ev.ctx.unlinked_count += static_cast<int32_t>(
+        ctx.block_refs.process_indexed<kv::detail::block_unlink>(
+            static_cast<size_t>(guarded_old_block)));
+  }
+
+  for (int32_t i = 0; i < ev.ctx.blocks_needed; ++i) {
+    const int32_t stack_index = original_free_count - 1 - ev.ctx.tail_split_needed - i;
+    const uint16_t block_id = ctx.free_stack[static_cast<size_t>(stack_index)];
+    const int32_t guarded_block_id =
+        refs_can_update * static_cast<int32_t>(block_id) +
+        (1 - refs_can_update) * invalid_ref_index;
+    ev.ctx.linked_count += static_cast<int32_t>(
+        ctx.block_refs.process_indexed<kv::detail::block_link>(
+            static_cast<size_t>(guarded_block_id)));
+  }
 
   const int32_t linked_all =
       static_cast<int32_t>(ev.ctx.linked_count == ev.ctx.physical_blocks_needed &&
                            ev.ctx.unlinked_count == ev.ctx.tail_split_needed);
+  if constexpr (split_shared_tail) {
+    ctx.seq_to_blocks[seq_index][static_cast<size_t>(tail_block_index)] =
+        static_cast<uint16_t>(
+            linked_all * static_cast<int32_t>(new_tail_block) +
+            (1 - linked_all) * static_cast<int32_t>(old_tail_block));
+  }
+  for (int32_t i = 0; i < ev.ctx.blocks_needed; ++i) {
+    const size_t block_index = static_cast<size_t>(ev.ctx.existing_block_count + i);
+    const int32_t stack_index = original_free_count - 1 - ev.ctx.tail_split_needed - i;
+    const uint16_t block_id = ctx.free_stack[static_cast<size_t>(stack_index)];
+    const uint16_t old_block = ctx.seq_to_blocks[seq_index][block_index];
+    ctx.seq_to_blocks[seq_index][block_index] =
+        static_cast<uint16_t>(
+            linked_all * static_cast<int32_t>(block_id) +
+            (1 - linked_all) * static_cast<int32_t>(old_block));
+  }
+  ctx.free_count =
+      linked_all * (original_free_count - ev.ctx.physical_blocks_needed) +
+      (1 - linked_all) * original_free_count;
   ctx.sequence_block_count[seq_index] =
       linked_all * ev.ctx.new_blocks + (1 - linked_all) * ctx.sequence_block_count[seq_index];
   ctx.sequence_length[seq_index] =

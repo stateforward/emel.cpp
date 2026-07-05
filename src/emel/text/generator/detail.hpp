@@ -5607,12 +5607,42 @@ inline emel::text::generator::compute_io & bind_compute_io(
     const emel::graph::processor::event::execute & request) noexcept;
 inline native_backend & bind_native_backend(
     const emel::graph::processor::event::execute & request) noexcept;
+inline bool run_kernel_uses_flash_attention(
+    const emel::graph::processor::event::execute & request) noexcept;
 
 inline void mark_invalid_graph_request(int32_t * err_out) noexcept {
   if (err_out != nullptr) {
     *err_out = static_cast<int32_t>(
         emel::error::cast(emel::graph::processor::error::invalid_request));
   }
+}
+
+inline bool valid_kv_physical_position(
+    const emel::memory::view::snapshot & snapshot,
+    const native_backend & backend,
+    const int32_t seq_id,
+    const int32_t position) noexcept {
+  const int32_t block_id = snapshot.lookup_kv_block(seq_id, position);
+  const int64_t physical_position =
+      static_cast<int64_t>(block_id) * static_cast<int64_t>(snapshot.block_tokens) +
+      static_cast<int64_t>(position % snapshot.block_tokens);
+  return block_id >= 0 &&
+         physical_position >= 0 &&
+         physical_position < static_cast<int64_t>(backend.kv_positions_capacity);
+}
+
+inline bool valid_identity_kv_prefix(
+    const emel::memory::view::snapshot & snapshot,
+    const int32_t seq_id,
+    const int32_t max_position) noexcept {
+  const int32_t max_logical_block = max_position / snapshot.block_tokens;
+  for (int32_t logical_block = 0; logical_block <= max_logical_block; ++logical_block) {
+    const int32_t position = logical_block * snapshot.block_tokens;
+    if (snapshot.lookup_kv_block(seq_id, position) != logical_block) {
+      return false;
+    }
+  }
+  return true;
 }
 
 inline bool valid_single_sequence_kv_request(
@@ -5636,6 +5666,11 @@ inline bool valid_single_sequence_kv_request(
   }
 
   const auto & backend = bind_native_backend(request);
+  if (backend.kv_block_tokens <= 0 || snapshot.block_tokens != backend.kv_block_tokens) {
+    mark_invalid_graph_request(err_out);
+    return false;
+  }
+
   const int32_t recurrent_slot = snapshot.lookup_recurrent_slot(seq_id);
   const int32_t recurrent_needed = static_cast<int32_t>(backend.shortconv_state_size > 0);
   const int32_t recurrent_ready = static_cast<int32_t>(recurrent_slot == 0);
@@ -5644,18 +5679,27 @@ inline bool valid_single_sequence_kv_request(
     return false;
   }
 
+  int32_t max_requested_position = -1;
   for (int32_t pos_idx = 0; pos_idx < request.positions_count; ++pos_idx) {
     const int32_t position = request.positions[static_cast<size_t>(pos_idx)];
-    const int32_t block_id = snapshot.lookup_kv_block(seq_id, position);
-    const int64_t physical_position =
-        static_cast<int64_t>(block_id) * static_cast<int64_t>(snapshot.block_tokens) +
-        static_cast<int64_t>(position % snapshot.block_tokens);
-    if (block_id < 0 ||
-        physical_position < 0 ||
-        physical_position >= static_cast<int64_t>(backend.kv_positions_capacity)) {
+    if (position < 0) {
       mark_invalid_graph_request(err_out);
       return false;
     }
+    max_requested_position = std::max(max_requested_position, position);
+  }
+
+  for (int32_t position = 0; position <= max_requested_position; ++position) {
+    if (!valid_kv_physical_position(snapshot, backend, seq_id, position)) {
+      mark_invalid_graph_request(err_out);
+      return false;
+    }
+  }
+
+  if (run_kernel_uses_flash_attention(request) &&
+      !valid_identity_kv_prefix(snapshot, seq_id, max_requested_position)) {
+    mark_invalid_graph_request(err_out);
+    return false;
   }
 
   return true;
@@ -6595,6 +6639,66 @@ inline bool run_kernel_flash_prefill_parallel_chunk4_preselected_argmax_q8_k(
       emel::text::generator::attention_mode::flash,
       chunk4_rhs_route::q8_k,
       matmul_lane_mode::parallel>(request, err_out);
+}
+
+inline bool run_kernel_uses_flash_attention(
+    const emel::graph::processor::event::execute & request) noexcept {
+  const auto run_kernel = request.run_kernel;
+  return run_kernel == run_kernel_flash_prefill_scalar_packed_q8_0 ||
+         run_kernel == run_kernel_flash_prefill_scalar_q8_k ||
+         run_kernel == run_kernel_flash_prefill_scalar_native_quantized ||
+         run_kernel == run_kernel_flash_prefill_scalar_native_quantized_q8_k_logits ||
+         run_kernel == run_kernel_flash_prefill_scalar_kernel ||
+         run_kernel == run_kernel_flash_decode_packed_q8_0 ||
+         run_kernel == run_kernel_flash_decode_q8_k ||
+         run_kernel == run_kernel_flash_decode_packed_q8_0_streamed ||
+         run_kernel == run_kernel_flash_decode_q8_k_streamed ||
+         run_kernel == run_kernel_flash_decode_native_quantized ||
+         run_kernel == run_kernel_flash_decode_native_quantized_q8_k_logits ||
+         run_kernel == run_kernel_flash_decode_native_quantized_q8_k_logits_streamed ||
+         run_kernel == run_kernel_flash_decode_kernel ||
+         run_kernel == run_kernel_flash_decode_kernel_streamed ||
+         run_kernel == run_kernel_flash_decode_native_quantized_streamed ||
+         run_kernel == run_kernel_flash_decode_parallel_packed_q8_0 ||
+         run_kernel == run_kernel_flash_decode_parallel_q8_k ||
+         run_kernel == run_kernel_flash_decode_parallel_native_quantized ||
+         run_kernel == run_kernel_flash_decode_parallel_native_quantized_q8_k_logits ||
+         run_kernel == run_kernel_flash_decode_parallel_kernel ||
+         run_kernel == run_kernel_flash_prefill_chunk8_q8_k ||
+         run_kernel == run_kernel_flash_prefill_chunk4_packed_q8_0 ||
+         run_kernel == run_kernel_flash_prefill_chunk4_q8_k ||
+         run_kernel == run_kernel_flash_prefill_parallel_chunk8_q8_k ||
+         run_kernel == run_kernel_flash_prefill_parallel_chunk4_packed_q8_0 ||
+         run_kernel == run_kernel_flash_prefill_parallel_chunk4_q8_k ||
+         run_kernel == run_kernel_flash_prefill_scalar_preselected_argmax_q8_k ||
+         run_kernel ==
+             run_kernel_flash_prefill_scalar_preselected_argmax_native_quantized_q8_k ||
+         run_kernel ==
+             run_kernel_flash_prefill_scalar_preselected_argmax_native_quantized_kernel ||
+         run_kernel == run_kernel_flash_prefill_scalar_preselected_argmax_kernel ||
+         run_kernel == run_kernel_flash_decode_preselected_argmax_q8_k ||
+         run_kernel == run_kernel_flash_decode_preselected_argmax_native_quantized_q8_k ||
+         run_kernel == run_kernel_flash_decode_preselected_argmax_native_quantized_kernel ||
+         run_kernel == run_kernel_flash_decode_preselected_argmax_kernel ||
+         run_kernel == run_kernel_flash_decode_preselected_argmax_q8_k_streamed ||
+         run_kernel ==
+             run_kernel_flash_decode_preselected_argmax_native_quantized_q8_k_streamed ||
+         run_kernel ==
+             run_kernel_flash_decode_preselected_argmax_native_quantized_kernel_streamed ||
+         run_kernel == run_kernel_flash_decode_preselected_argmax_kernel_streamed ||
+         run_kernel == run_kernel_flash_decode_parallel_preselected_argmax_q8_k ||
+         run_kernel ==
+             run_kernel_flash_decode_parallel_preselected_argmax_native_quantized_q8_k ||
+         run_kernel ==
+             run_kernel_flash_decode_parallel_preselected_argmax_native_quantized_kernel ||
+         run_kernel == run_kernel_flash_decode_parallel_preselected_argmax_kernel ||
+         run_kernel == run_kernel_flash_prefill_chunk8_preselected_argmax_q8_k ||
+         run_kernel == run_kernel_flash_prefill_chunk4_preselected_argmax_packed_q8_0 ||
+         run_kernel == run_kernel_flash_prefill_chunk4_preselected_argmax_q8_k ||
+         run_kernel == run_kernel_flash_prefill_parallel_chunk8_preselected_argmax_q8_k ||
+         run_kernel ==
+             run_kernel_flash_prefill_parallel_chunk4_preselected_argmax_packed_q8_0 ||
+         run_kernel == run_kernel_flash_prefill_parallel_chunk4_preselected_argmax_q8_k;
 }
 
 inline bool extract_guarded_outputs(const emel::graph::processor::event::execute & request,

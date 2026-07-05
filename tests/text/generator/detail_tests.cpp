@@ -3213,6 +3213,62 @@ TEST_CASE("generator_detail_graph_callbacks_accept_guarded_requests_without_erro
   CHECK(err == emel::text::generator::detail::k_error_ok);
 }
 
+TEST_CASE("generator_detail_graph_callbacks_reject_incoherent_kv_snapshots") {
+  namespace gen_detail = emel::text::generator::detail;
+
+  const int32_t invalid_request =
+      static_cast<int32_t>(
+          emel::error::cast(emel::graph::processor::error::invalid_request));
+
+  {
+    auto fixture = std::make_unique<runtime_request_fixture>();
+    fixture->memory_snapshot.block_tokens = 4;
+
+    int32_t err = -1;
+    CHECK_FALSE(gen_detail::validate_guarded_compute(fixture->request, &err));
+    CHECK(err == invalid_request);
+  }
+
+  {
+    auto fixture = std::make_unique<runtime_request_fixture>();
+    std::array<int32_t, 1> decode_positions = {3};
+    fixture->backend.kv_block_tokens = 2;
+    fixture->backend.kv_positions_capacity = 8;
+    fixture->memory_snapshot.block_tokens = 2;
+    fixture->memory_snapshot.sequence_length_values[0] = 4;
+    fixture->memory_snapshot.sequence_kv_block_count[0] = 2;
+    fixture->memory_snapshot.sequence_kv_blocks[0][0] =
+        emel::memory::view::INVALID_KV_BLOCK;
+    fixture->memory_snapshot.sequence_kv_blocks[0][1] = 0;
+    fixture->request.positions = decode_positions.data();
+
+    int32_t err = -1;
+    CHECK_FALSE(gen_detail::validate_guarded_compute(fixture->request, &err));
+    CHECK(err == invalid_request);
+  }
+
+  {
+    auto fixture = std::make_unique<runtime_request_fixture>();
+    std::array<int32_t, 1> decode_positions = {8};
+    fixture->backend.kv_positions_capacity = 32;
+    fixture->memory_snapshot.sequence_length_values[0] = 9;
+    fixture->memory_snapshot.sequence_kv_block_count[0] = 2;
+    fixture->memory_snapshot.sequence_kv_blocks[0][0] = 0;
+    fixture->memory_snapshot.sequence_kv_blocks[0][1] = 2;
+    fixture->request.positions = decode_positions.data();
+
+    fixture->request.run_kernel = gen_detail::run_kernel_nonflash_decode_packed_q8_0;
+    int32_t err = -1;
+    CHECK(gen_detail::validate_guarded_compute(fixture->request, &err));
+    CHECK(err == -1);
+
+    fixture->request.run_kernel = gen_detail::run_kernel_flash_decode_packed_q8_0;
+    err = -1;
+    CHECK_FALSE(gen_detail::validate_guarded_compute(fixture->request, &err));
+    CHECK(err == invalid_request);
+  }
+}
+
 TEST_CASE("generator_detail_runtime_callbacks_bind_run_and_extract_guarded_data") {
   auto fixture = std::make_unique<runtime_request_fixture>();
   int32_t err = -1;
