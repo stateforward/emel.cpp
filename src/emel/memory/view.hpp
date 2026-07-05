@@ -3,6 +3,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 
 namespace emel::memory::view {
 
@@ -28,19 +29,31 @@ constexpr int32_t resolved_or_default(const int32_t value, const int32_t fallbac
 // non-positive inputs (returns 0) so guards can evaluate raw request fields.
 constexpr int32_t blocks_for_tokens(const int32_t block_tokens,
                                     const int32_t token_count) noexcept {
-  const int32_t positive_tokens = static_cast<int32_t>(token_count > 0);
-  const int32_t positive_block_tokens = static_cast<int32_t>(block_tokens > 0);
-  const int32_t safe_block_tokens = block_tokens + static_cast<int32_t>(block_tokens <= 0);
-  const int32_t effective_tokens = positive_tokens * positive_block_tokens * token_count;
-  const int32_t rounded = (effective_tokens + safe_block_tokens - 1) / safe_block_tokens;
-  return rounded * positive_block_tokens;
+  const int64_t positive_tokens = static_cast<int64_t>(token_count > 0);
+  const int64_t positive_block_tokens = static_cast<int64_t>(block_tokens > 0);
+  const int64_t safe_block_tokens =
+      (positive_block_tokens * static_cast<int64_t>(block_tokens)) +
+      (1 - positive_block_tokens);
+  const int64_t effective_tokens = positive_tokens * positive_block_tokens *
+                                   static_cast<int64_t>(token_count);
+  const int64_t rounded =
+      (effective_tokens + safe_block_tokens - 1) / safe_block_tokens;
+  return static_cast<int32_t>(rounded * positive_block_tokens);
 }
 
 // Physical position capacity (tokens, block-padded) required to hold
 // token_count tokens: blocks_for_tokens rounded back up to whole blocks.
+// Returns -1 when the padded capacity cannot fit in int32_t.
 constexpr int32_t positions_capacity_for(const int32_t block_tokens,
                                          const int32_t token_count) noexcept {
-  return blocks_for_tokens(block_tokens, token_count) * block_tokens;
+  const int64_t positive_block_tokens = static_cast<int64_t>(block_tokens > 0);
+  const int64_t capacity =
+      static_cast<int64_t>(blocks_for_tokens(block_tokens, token_count)) *
+      static_cast<int64_t>(block_tokens);
+  const int64_t overflow =
+      static_cast<int64_t>(capacity > std::numeric_limits<int32_t>::max());
+  const int64_t selected = (capacity * (1 - overflow)) + (-1 * overflow);
+  return static_cast<int32_t>(selected * positive_block_tokens);
 }
 
 struct snapshot {

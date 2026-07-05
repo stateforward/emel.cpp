@@ -5,6 +5,7 @@
 #include "emel/emel.h"
 #include "emel/memory/events.hpp"
 #include "emel/memory/kv/sm.hpp"
+#include "emel/memory/view.hpp"
 
 namespace {
 
@@ -12,6 +13,19 @@ using kv_sm = emel::memory::kv::sm;
 using namespace emel::memory::kv;
 
 }  // namespace
+
+TEST_CASE("memory_kv_view_geometry_helpers_reject_non_positive_block_tokens") {
+  CHECK(emel::memory::view::blocks_for_tokens(4, 0) == 0);
+  CHECK(emel::memory::view::blocks_for_tokens(4, 1) == 1);
+  CHECK(emel::memory::view::blocks_for_tokens(4, 5) == 2);
+
+  CHECK(emel::memory::view::blocks_for_tokens(0, 5) == 0);
+  CHECK(emel::memory::view::blocks_for_tokens(-1, 5) == 0);
+  CHECK(emel::memory::view::blocks_for_tokens(-16, 5) == 0);
+  CHECK(emel::memory::view::positions_capacity_for(0, 5) == 0);
+  CHECK(emel::memory::view::positions_capacity_for(-1, 5) == 0);
+  CHECK(emel::memory::view::positions_capacity_for(INT32_MAX - 1, INT32_MAX) == -1);
+}
 
 TEST_CASE("memory_kv_lifecycle_reserve_success_and_failure") {
   kv_sm machine{};
