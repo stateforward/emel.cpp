@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.28
 milestone_name: Memory-Owned KV Block Addressing Cutover
 status: active
-stopped_at: "v1.28 defined; Phase 245 implementation starting"
+stopped_at: "Phases 245-249 complete + KVP-01; v1.28 closeout blocked on bench-lane repair (chip task_48a05fc3)"
 last_updated: "2026-07-04T00:00:00.000Z"
 last_activity: 2026-07-04
 progress:
   total_phases: 6
-  completed_phases: 0
+  completed_phases: 5
   total_plans: 6
-  completed_plans: 0
-  percent: 0
+  completed_plans: 5
+  percent: 83
 ---
 
 # Project State
@@ -30,13 +30,19 @@ parity and component-level multi-sequence proof.
 ## Current Position
 
 Milestone: v1.28 Memory-Owned KV Block Addressing Cutover
-Status: Defined 2026-07-04 from a source-backed audit; phases 245-250 planned.
-Phase: 245 (Block Geometry Ownership and Slot Allocation) — starting.
-Last activity: 2026-07-04 — synced branch with origin/main post-v1.27; regenerated
-the stale clang-format lint baseline (add-only, PR #89/#90/#92 files) with user
-consent; audited KV-cache ownership and defined v1.28.
+Status: Phases 245-249 complete and committed with per-phase committed-state gate
+evidence (coverage + parity lanes pass; bench lane blocked by pre-existing main
+breakage). Phase 250: KVP-01 multi-sequence component proof landed; KVE-01/KVD-01
+closeout blocked on the bench-lane repair (reference ggml SIGBUS + missing PR #89
+baselines, chip task_48a05fc3). Full suite 14/14 (1816 cases) on the unsharded
+zig build.
+Phase: 250 closeout pending upstream bench repair and consent decisions.
+Last activity: 2026-07-04 — see phase VALIDATION docs under
+.planning/phases/24{5,6,7,50}-*/ for gate evidence and dispositions. A final
+all-files union gate run timed out at 30 minutes under host contention (a second
+agent session was running); per-phase committed-state evidence stands.
 
-Progress: [----------] 0%
+Progress: [########--] 83%
 
 **Audit findings driving this milestone:**
 
