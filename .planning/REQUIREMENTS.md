@@ -42,11 +42,11 @@ not change quantization or kernel arithmetic.
 
 ### Physical addressing cutover
 
-- [ ] **KVW-01**: The K/V write path (`store_attention_kv_cache`, both linear and
+- [x] **KVW-01**: The K/V write path (`store_attention_kv_cache`, both linear and
   flash layouts) stores at snapshot-mapped physical block positions, bit-exact with
   the pre-cutover layout for the maintained contiguous single-sequence workload.
 
-- [ ] **KVR-01**: The non-flash attention read path walks snapshot-mapped physical
+- [x] **KVR-01**: The non-flash attention read path walks snapshot-mapped physical
   spans with bounded, monotonic, allocation-free data-plane iteration, and maintained
   generation parity is unchanged.
 
@@ -103,4 +103,4 @@ not change quantization or kernel arithmetic.
 | KVE-01 | Phase 250 |
 | KVD-01 | Phase 250 |
 
-Mapped: 10/10 v1.28 requirements; satisfied 3, pending 7.
+Mapped: 10/10 v1.28 requirements; satisfied 5, pending 5.
