@@ -187,6 +187,9 @@ TEST_CASE("quality gates preserve fractional and disabled timeout budgets") {
   CHECK(lane_body.find("print \"0\"") != std::string::npos);
   CHECK(lane_body.find("budget = global_seconds - elapsed - flush_margin") !=
         std::string::npos);
+  CHECK(script.find("lane_timeout_enabled()") != std::string::npos);
+  CHECK(script.find("lane_timeout_enabled \"$budget\"") != std::string::npos);
+  CHECK(script.find("exit !(budget > 0)") != std::string::npos);
 }
 
 TEST_CASE("quality gate script changes keep mandatory lanes conservative") {

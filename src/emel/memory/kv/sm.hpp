@@ -318,6 +318,10 @@ struct model {
           + sml::unexpected_event<sml::_> / action::on_unexpected
       , sml::state<ready> <= sml::state<state_allocate_slots_tail_decision>
           + sml::unexpected_event<sml::_> / action::on_unexpected
+      , sml::state<ready> <= sml::state<state_allocate_slots_tail_copy_exec>
+          + sml::unexpected_event<sml::_> / action::on_unexpected
+      , sml::state<ready> <= sml::state<state_allocate_slots_tail_copy_result_decision>
+          + sml::unexpected_event<sml::_> / action::on_unexpected
       , sml::state<ready> <= sml::state<state_allocate_slots_direct_exec>
           + sml::unexpected_event<sml::_> / action::on_unexpected
       , sml::state<ready> <= sml::state<state_allocate_slots_tail_split_exec>

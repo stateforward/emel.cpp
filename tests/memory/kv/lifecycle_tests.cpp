@@ -460,6 +460,22 @@ TEST_CASE("memory_kv_lifecycle_validation_and_unexpected_event_paths") {
   CHECK(err == static_cast<int32_t>(emel::error::cast(emel::memory::kv::error::none)));
 }
 
+TEST_CASE("memory_kv_tail_copy_states_route_unexpected_events_to_ready") {
+  namespace sml = stateforward::sml;
+
+  emel::memory::kv::action::context ctx{};
+  stateforward::sml::sm<emel::memory::kv::model, stateforward::sml::testing> machine{ctx};
+
+  machine.set_current_states(sml::state<emel::memory::kv::state_allocate_slots_tail_copy_exec>);
+  CHECK(machine.process_event(emel::memory::events::free_sequence_done{}));
+  CHECK(machine.is(sml::state<emel::memory::kv::ready>));
+
+  machine.set_current_states(
+      sml::state<emel::memory::kv::state_allocate_slots_tail_copy_result_decision>);
+  CHECK(machine.process_event(emel::memory::events::free_sequence_done{}));
+  CHECK(machine.is(sml::state<emel::memory::kv::ready>));
+}
+
 TEST_CASE("memory_kv_view_snapshot_tracks_state") {
   kv_sm machine{};
   int32_t err = static_cast<int32_t>(emel::error::cast(emel::memory::kv::error::none));

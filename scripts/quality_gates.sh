@@ -217,6 +217,11 @@ lane_timeout_for() {
     }'
 }
 
+lane_timeout_enabled() {
+  local budget="$1"
+  awk -v budget="$budget" 'BEGIN { exit !(budget > 0) }'
+}
+
 run_domain_boundary_gate() {
   "$ROOT_DIR/scripts/check_domain_boundaries.sh"
 }
@@ -1207,7 +1212,7 @@ start_parallel_step() {
   local tool
   tool="$(lane_timeout_tool)"
   local -a lane_cmd=("$@")
-  if [[ -n "$tool" ]]; then
+  if [[ -n "$tool" ]] && lane_timeout_enabled "$budget"; then
     # Re-exec this script for the lane so timeout(1) can signal the whole lane
     # process group; direct shell functions cannot be timed out or killed
     # cleanly with their cmake/ctest/bench children.
