@@ -156,15 +156,39 @@ lane_timeout_tool() {
   fi
 }
 
+timeout_seconds() {
+  local value="$1"
+  if [[ "$value" =~ ^([0-9]+)$ ]]; then
+    echo "${BASH_REMATCH[1]}"
+    return 0
+  fi
+  if [[ "$value" =~ ^([0-9]+)s$ ]]; then
+    echo "${BASH_REMATCH[1]}"
+    return 0
+  fi
+  if [[ "$value" =~ ^([0-9]+)m$ ]]; then
+    echo "$(( BASH_REMATCH[1] * 60 ))"
+    return 0
+  fi
+  if [[ "$value" =~ ^([0-9]+)h$ ]]; then
+    echo "$(( BASH_REMATCH[1] * 3600 ))"
+    return 0
+  fi
+  if [[ "$value" =~ ^([0-9]+)d$ ]]; then
+    echo "$(( BASH_REMATCH[1] * 86400 ))"
+    return 0
+  fi
+  echo "error: unsupported EMEL_QUALITY_GATES_TIMEOUT value '${value}'" >&2
+  return 1
+}
+
 lane_timeout_for() {
   if [[ -n "$QUALITY_GATES_LANE_TIMEOUT" ]]; then
     echo "$QUALITY_GATES_LANE_TIMEOUT"
     return
   fi
-  local global_seconds="${QUALITY_GATES_TIMEOUT%s}"
-  if ! [[ "$global_seconds" =~ ^[0-9]+$ ]]; then
-    global_seconds=1800
-  fi
+  local global_seconds
+  global_seconds="$(timeout_seconds "$QUALITY_GATES_TIMEOUT")"
   # Remaining global budget minus a margin for flushing lane logs and running
   # the trailing lint/docs steps. Never reduces verification below what the
   # global timeout already allows; only converts a silent global kill into a

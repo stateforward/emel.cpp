@@ -2191,11 +2191,11 @@ TEST_CASE("generator_detail_kv_physical_map_binds_snapshot_block_order") {
   REQUIRE(emel::text::generator::detail::prepare(*backend, model_fixture->model, 4) ==
           emel::error::cast(emel::model::loader::error::none));
   REQUIRE(backend->kv_positions_capacity == 8);
-  REQUIRE(backend->kv_physical_positions.size() == 8u);
 
   // prepare leaves the identity map: logical == physical.
+  const auto identity_kv = emel::text::generator::detail::identity_kv_addressing();
   for (int32_t position = 0; position < 8; ++position) {
-    CHECK(emel::text::generator::detail::physical_kv_position(*backend, position) ==
+    CHECK(emel::text::generator::detail::physical_kv_position(identity_kv, position) ==
           static_cast<size_t>(position));
   }
 
@@ -2210,12 +2210,16 @@ TEST_CASE("generator_detail_kv_physical_map_binds_snapshot_block_order") {
   snapshot.sequence_kv_block_count[0] = 2;
   snapshot.sequence_kv_blocks[0][0] = 1;
   snapshot.sequence_kv_blocks[0][1] = 0;
-  emel::text::generator::detail::bind_kv_physical_positions(*backend, snapshot, 0);
+  auto kv = emel::text::generator::detail::kv_addressing_view{
+    .snapshot = &snapshot,
+    .seq_id = 0,
+    .recurrent_slot = snapshot.lookup_recurrent_slot(0),
+  };
 
   for (int32_t position = 0; position < 4; ++position) {
-    CHECK(emel::text::generator::detail::physical_kv_position(*backend, position) ==
+    CHECK(emel::text::generator::detail::physical_kv_position(kv, position) ==
           static_cast<size_t>(position + 4));
-    CHECK(emel::text::generator::detail::physical_kv_position(*backend, position + 4) ==
+    CHECK(emel::text::generator::detail::physical_kv_position(kv, position + 4) ==
           static_cast<size_t>(position));
   }
 
@@ -2226,10 +2230,10 @@ TEST_CASE("generator_detail_kv_physical_map_binds_snapshot_block_order") {
   std::vector<float> k_row(static_cast<size_t>(kv_dim), 1.5f);
   std::vector<float> v_row(static_cast<size_t>(kv_dim), -2.0f);
   REQUIRE(emel::text::generator::detail::store_attention_kv_cache(
-      *backend, block, 0, 0, k_row, v_row));
+      *backend, kv, block, 0, 0, k_row, v_row));
 
   const size_t mapped_offset =
-      emel::text::generator::detail::layer_cache_offset(*backend, block, 0, 0);
+      emel::text::generator::detail::layer_cache_offset(*backend, kv, block, 0, 0);
   const size_t physical_row_offset =
       static_cast<size_t>(4) * static_cast<size_t>(kv_dim);
   CHECK(mapped_offset == physical_row_offset);
@@ -2240,36 +2244,32 @@ TEST_CASE("generator_detail_kv_physical_map_binds_snapshot_block_order") {
   // Over-length snapshots bind only up to the prepared capacity, and an
   // inactive sequence binds nothing (zero-iteration fill).
   snapshot.sequence_length_values[0] = 99;
-  emel::text::generator::detail::bind_kv_physical_positions(*backend, snapshot, 0);
-  CHECK(emel::text::generator::detail::physical_kv_position(*backend, 7) < 8u);
+  CHECK(emel::text::generator::detail::physical_kv_position(kv, 7) < 8u);
   snapshot.sequence_length_values[0] = 8;
 
   snapshot.sequence_active[0] = 0;
-  emel::text::generator::detail::bind_kv_physical_positions(*backend, snapshot, 0);
+  CHECK(emel::text::generator::detail::physical_kv_position(identity_kv, 7) == 7u);
   snapshot.sequence_active[0] = 1;
 
   // The snapshot-resolved recurrent slot shifts shortconv state addressing;
   // slot 0 preserves the flat layout.
-  CHECK(backend->kv_recurrent_slot == 0);
   const size_t flat_shortconv =
-      emel::text::generator::detail::shortconv_state_layer_offset(*backend, 0);
+      emel::text::generator::detail::shortconv_state_layer_offset(*backend, identity_kv, 0);
   CHECK(flat_shortconv == 0u);
   snapshot.sequence_recurrent_slot[0] = 3;
-  emel::text::generator::detail::bind_kv_physical_positions(*backend, snapshot, 0);
-  backend->kv_recurrent_slot = snapshot.lookup_recurrent_slot(0);
-  CHECK(backend->kv_recurrent_slot == 3);
-  CHECK(emel::text::generator::detail::shortconv_state_layer_offset(*backend, 0) ==
+  kv.recurrent_slot = snapshot.lookup_recurrent_slot(0);
+  CHECK(kv.recurrent_slot == 3);
+  CHECK(emel::text::generator::detail::shortconv_state_layer_offset(*backend, kv, 0) ==
         static_cast<size_t>(3) * static_cast<size_t>(backend->n_layer) *
             static_cast<size_t>(backend->shortconv_state_size) *
             static_cast<size_t>(backend->n_embd));
-  backend->kv_recurrent_slot = 0;
   snapshot.sequence_recurrent_slot[0] = 0;
+  kv.recurrent_slot = snapshot.lookup_recurrent_slot(0);
 
   // Rebinding a contiguous snapshot restores the flat layout addressing.
   snapshot.sequence_kv_blocks[0][0] = 0;
   snapshot.sequence_kv_blocks[0][1] = 1;
-  emel::text::generator::detail::bind_kv_physical_positions(*backend, snapshot, 0);
-  CHECK(emel::text::generator::detail::layer_cache_offset(*backend, block, 0, 0) ==
+  CHECK(emel::text::generator::detail::layer_cache_offset(*backend, kv, block, 0, 0) ==
         flat_row_offset);
 }
 
@@ -2301,15 +2301,20 @@ TEST_CASE("generator_detail_kv_physical_map_isolates_interleaved_sequences") {
 
   std::array<int32_t, 4> seq0_physical = {};
   std::array<int32_t, 4> seq1_physical = {};
-  emel::text::generator::detail::bind_kv_physical_positions(*backend, view, 0);
+  auto kv = emel::text::generator::detail::kv_addressing_view{
+    .snapshot = &view,
+    .seq_id = 0,
+    .recurrent_slot = view.lookup_recurrent_slot(0),
+  };
   for (int32_t position = 0; position < 4; ++position) {
     seq0_physical[static_cast<size_t>(position)] = static_cast<int32_t>(
-        emel::text::generator::detail::physical_kv_position(*backend, position));
+        emel::text::generator::detail::physical_kv_position(kv, position));
   }
-  emel::text::generator::detail::bind_kv_physical_positions(*backend, view, 1);
+  kv.seq_id = 1;
+  kv.recurrent_slot = view.lookup_recurrent_slot(1);
   for (int32_t position = 0; position < 4; ++position) {
     seq1_physical[static_cast<size_t>(position)] = static_cast<int32_t>(
-        emel::text::generator::detail::physical_kv_position(*backend, position));
+        emel::text::generator::detail::physical_kv_position(kv, position));
   }
   for (const int32_t lhs : seq0_physical) {
     for (const int32_t rhs : seq1_physical) {
@@ -2327,12 +2332,14 @@ TEST_CASE("generator_detail_kv_physical_map_isolates_interleaved_sequences") {
     .seq_id = 2, .token_count = 4, .error_out = &err}));
   REQUIRE(memory.try_view(view, view_err));
 
-  emel::text::generator::detail::bind_kv_physical_positions(*backend, view, 2);
+  kv.snapshot = &view;
+  kv.seq_id = 2;
+  kv.recurrent_slot = view.lookup_recurrent_slot(2);
   std::array<int32_t, 4> seq2_physical = {};
   bool identity = true;
   for (int32_t position = 0; position < 4; ++position) {
     seq2_physical[static_cast<size_t>(position)] = static_cast<int32_t>(
-        emel::text::generator::detail::physical_kv_position(*backend, position));
+        emel::text::generator::detail::physical_kv_position(kv, position));
     identity = identity &&
                seq2_physical[static_cast<size_t>(position)] == position;
   }
@@ -3145,6 +3152,27 @@ TEST_CASE("generator_detail_graph_callbacks_accept_guarded_requests_without_erro
   fixture->memory_snapshot.sequence_recurrent_slot[0] = -1;
   expect_map_rejected();
   fixture->memory_snapshot.sequence_recurrent_slot[0] = 0;
+
+  const int32_t * saved_positions = fixture->request.positions;
+  fixture->request.positions = nullptr;
+  expect_map_rejected();
+  fixture->request.positions = saved_positions;
+
+  fixture->request.positions_count = 0;
+  expect_map_rejected();
+  fixture->request.positions_count = static_cast<int32_t>(fixture->positions.size());
+
+  fixture->memory_snapshot.sequence_length_values[0] = 0;
+  expect_map_rejected();
+  fixture->memory_snapshot.sequence_length_values[0] = 1;
+
+  fixture->memory_snapshot.sequence_kv_blocks[0][0] = emel::memory::view::INVALID_KV_BLOCK;
+  expect_map_rejected();
+  fixture->memory_snapshot.sequence_kv_blocks[0][0] = 0;
+
+  fixture->memory_snapshot.sequence_kv_blocks[0][0] = 1;
+  expect_map_rejected();
+  fixture->memory_snapshot.sequence_kv_blocks[0][0] = 0;
 
   err = -1;
   CHECK(emel::text::generator::detail::validate_guarded_compute(

@@ -1101,6 +1101,22 @@ TEST_CASE("generator_initialize_requires_explicit_block_geometry") {
   CHECK(error == emel::error::cast(emel::text::generator::error::invalid_request));
 }
 
+TEST_CASE("generator_initialize_rejects_block_tokens_larger_than_context") {
+  auto fixture = std::make_unique<generator_fixture>();
+  callback_tracker tracker{};
+  emel::error::type error = emel::error::cast(emel::text::generator::error::none);
+  auto request = fixture->make_initialize(tracker, &error);
+  request.max_blocks = 1;
+  request.block_tokens = INT32_MAX;
+
+  CHECK_FALSE(fixture->generator->process_event(request));
+  CHECK(fixture->generator->is(stateforward::sml::state<emel::text::generator::uninitialized>));
+  CHECK_FALSE(tracker.initialize_done_called);
+  CHECK(tracker.initialize_error_called);
+  CHECK(error == emel::error::cast(emel::text::generator::error::invalid_request));
+  CHECK(tracker.err == emel::error::cast(emel::text::generator::error::invalid_request));
+}
+
 TEST_CASE("generator_initialize_rejects_missing_injected_dependencies_through_sml") {
   auto generator = std::make_unique<emel::text::generator::sm>();
   emel::text::tokenizer::sm tokenizer{};

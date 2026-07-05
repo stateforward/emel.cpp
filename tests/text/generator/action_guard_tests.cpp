@@ -89,6 +89,7 @@ constexpr std::array<emel::text::formatter::chat_message, 1>
 emel::model::data &test_model() {
   static auto *model = []() {
     auto *created = new emel::model::data{};
+    created->params.n_ctx = 8;
     created->vocab_data.eos_id = 7;
     created->vocab_data.eot_id = 8;
     return created;

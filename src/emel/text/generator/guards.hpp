@@ -966,6 +966,10 @@ struct valid_initialize {
     const bool sampler_contract_valid =
         (sample_logits && !ev.request.sampler_fns.empty()) ||
         (preselected_argmax && ev.request.sampler_fns.empty());
+    const bool block_geometry_valid =
+        ev.request.block_tokens > 0 &&
+        ctx.model != nullptr &&
+        ev.request.block_tokens <= ctx.model->params.n_ctx;
     return ctx.model != nullptr &&
            ctx.conditioner != nullptr &&
            ctx.format_prompt != nullptr &&
@@ -976,7 +980,7 @@ struct valid_initialize {
            ev.request.max_generated_tokens > 0 &&
            ev.request.max_generated_tokens <= action::MAX_GENERATION_STEPS &&
            ev.request.max_blocks > 0 &&
-           ev.request.block_tokens > 0;
+           block_geometry_valid;
   }
 };
 

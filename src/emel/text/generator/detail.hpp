@@ -224,14 +224,6 @@ struct native_backend {
   // block map and the physical layout agree on extents.
   int32_t kv_block_tokens = 0;
   int32_t kv_positions_capacity = 0;
-  // Snapshot-derived logical->physical position map, rebound per compute
-  // dispatch from the captured memory::view::snapshot. Identity after prepare;
-  // an unbound (empty) map also reads as identity so hand-built backends keep
-  // the flat layout.
-  std::vector<int32_t> kv_physical_positions = {};
-  // Snapshot-resolved recurrent state slot for the primary sequence, rebound
-  // per compute dispatch; slot 0 is the flat single-sequence layout.
-  int32_t kv_recurrent_slot = 0;
 
   std::vector<emel::graph::processor::event::lifecycle_tensor_binding> lifecycle_tensors = {};
   std::vector<int32_t> prefill_required_ids = {};
@@ -1119,16 +1111,44 @@ inline const block_weights * first_attention_block(const native_backend & backen
   return nullptr;
 }
 
+struct kv_addressing_view {
+  const emel::memory::view::snapshot * snapshot = nullptr;
+  int32_t seq_id = 0;
+  int32_t recurrent_slot = 0;
+};
+
+inline kv_addressing_view identity_kv_addressing() noexcept {
+  return {};
+}
+
+inline kv_addressing_view kv_addressing_from_request(
+    const emel::graph::processor::event::execute & request) noexcept {
+  const int32_t seq_id = request.seq_primary_ids[0];
+  return kv_addressing_view{
+    .snapshot = request.memory_view,
+    .seq_id = seq_id,
+    .recurrent_slot = request.memory_view->lookup_recurrent_slot(seq_id),
+  };
+}
+
 inline size_t shortconv_state_layer_offset(const native_backend & backend,
+                                           const kv_addressing_view & kv,
                                            const int32_t layer_index) noexcept {
   // Recurrent state is addressed through the snapshot-resolved slot bound at
   // compute dispatch; the cache holds max_sequences (currently 1) slots, so
   // slot 0 preserves the flat pre-cutover layout bit-exactly.
-  return (static_cast<size_t>(backend.kv_recurrent_slot) *
+  const int32_t recurrent_slot =
+      static_cast<int32_t>(kv.snapshot != nullptr) * kv.recurrent_slot;
+  return (static_cast<size_t>(recurrent_slot) *
               static_cast<size_t>(backend.n_layer) +
           static_cast<size_t>(layer_index)) *
          static_cast<size_t>(backend.shortconv_state_size) *
          static_cast<size_t>(backend.n_embd);
+}
+
+inline size_t shortconv_state_layer_offset(const native_backend & backend,
+                                           const int32_t layer_index) noexcept {
+  return shortconv_state_layer_offset(backend, identity_kv_addressing(), layer_index);
 }
 
 inline void reset_shortconv_cache(native_backend & backend) noexcept {
@@ -3187,38 +3207,23 @@ inline float silu(const float value) noexcept {
 #endif
 }
 
-// Logical->physical KV position through the snapshot-bound map. Positions
-// beyond the bound map read as identity — the same defensive fallback the
-// per-layer offset tables use below for hand-built backends.
-inline size_t physical_kv_position(const native_backend & backend,
+// Logical->physical KV position through the dispatch-local snapshot view.
+inline size_t physical_kv_position(const kv_addressing_view & kv,
                                    const int32_t position) noexcept {
-  const size_t index = static_cast<size_t>(position);
-  if (index < backend.kv_physical_positions.size()) {
-    return static_cast<size_t>(backend.kv_physical_positions[index]);
+  if (kv.snapshot == nullptr) {
+    return static_cast<size_t>(position);
   }
-  return index;
-}
-
-// Rebind the logical->physical map from a captured snapshot. Pure data-plane
-// fill: monotonic, bounded by the prepared capacity, allocation-free.
-inline void bind_kv_physical_positions(native_backend & backend,
-                                       const emel::memory::view::snapshot & snapshot,
-                                       const int32_t seq_id) noexcept {
-  const int32_t mapped_tokens = std::min(
-      snapshot.sequence_length(seq_id),
-      static_cast<int32_t>(backend.kv_physical_positions.size()));
-  for (int32_t position = 0; position < mapped_tokens; ++position) {
-    const int32_t block_id = snapshot.lookup_kv_block(seq_id, position);
-    backend.kv_physical_positions[static_cast<size_t>(position)] =
-        block_id * snapshot.block_tokens + (position % snapshot.block_tokens);
-  }
+  const int32_t block_id = kv.snapshot->lookup_kv_block(kv.seq_id, position);
+  return static_cast<size_t>(block_id * kv.snapshot->block_tokens +
+                             (position % kv.snapshot->block_tokens));
 }
 
 inline size_t layer_cache_offset(const native_backend & backend,
+                                 const kv_addressing_view & kv,
                                  const block_weights & block,
                                  const int32_t layer,
                                  const int32_t position) noexcept {
-  const size_t physical_position = physical_kv_position(backend, position);
+  const size_t physical_position = physical_kv_position(kv, position);
   if (backend.layer_cache_offsets.size() != static_cast<size_t>(backend.n_layer)) {
     return ((static_cast<size_t>(layer) * static_cast<size_t>(backend.kv_positions_capacity)) +
             physical_position) *
@@ -3227,6 +3232,13 @@ inline size_t layer_cache_offset(const native_backend & backend,
   return backend.layer_cache_offsets[static_cast<size_t>(layer)] +
          (physical_position *
           static_cast<size_t>(effective_attention_kv_dim(backend, block)));
+}
+
+inline size_t layer_cache_offset(const native_backend & backend,
+                                 const block_weights & block,
+                                 const int32_t layer,
+                                 const int32_t position) noexcept {
+  return layer_cache_offset(backend, identity_kv_addressing(), block, layer, position);
 }
 
 inline size_t flash_layer_cache_layer_offset(const native_backend & backend,
@@ -3251,13 +3263,23 @@ inline size_t flash_layer_cache_head_offset(const native_backend & backend,
 }
 
 inline size_t flash_layer_cache_head_position_offset(const native_backend & backend,
+                                                     const kv_addressing_view & kv,
                                                      const block_weights & block,
                                                      const int32_t layer,
                                                      const int32_t kv_head,
                                                      const int32_t position) noexcept {
   return flash_layer_cache_head_offset(backend, block, layer, kv_head) +
-      physical_kv_position(backend, position) *
+      physical_kv_position(kv, position) *
       static_cast<size_t>(effective_attention_head_dim_kv(backend, block));
+}
+
+inline size_t flash_layer_cache_head_position_offset(const native_backend & backend,
+                                                     const block_weights & block,
+                                                     const int32_t layer,
+                                                     const int32_t kv_head,
+                                                     const int32_t position) noexcept {
+  return flash_layer_cache_head_position_offset(
+      backend, identity_kv_addressing(), block, layer, kv_head, position);
 }
 
 inline void store_fp16_rounded_cache(std::span<const float> src, uint16_t * dst) noexcept {
@@ -3363,6 +3385,7 @@ inline void fill_masked_softmax_probs_ggml(std::span<const float> scores,
 }
 
 inline bool compute_attention(native_backend & backend,
+                              const kv_addressing_view & kv,
                               const block_weights & block,
                               const int32_t layer_index,
                               const int32_t position_limit,
@@ -3392,7 +3415,7 @@ inline bool compute_attention(native_backend & backend,
 
     for (int32_t position = 0; position < position_limit; ++position) {
       const size_t cache_offset =
-          layer_cache_offset(backend, block, layer_index, position) + kv_offset;
+          layer_cache_offset(backend, kv, block, layer_index, position) + kv_offset;
       const float score = emel::kernel::detail::dot_product_f32_f16_scores(
           q_vector.data() + static_cast<std::ptrdiff_t>(q_offset),
           backend.key_cache.data() + static_cast<std::ptrdiff_t>(cache_offset),
@@ -3414,7 +3437,7 @@ inline bool compute_attention(native_backend & backend,
       const size_t cache_offset = q_offset + static_cast<size_t>(dim);
       for (int32_t position = 0; position < position_limit; ++position) {
         const size_t value_offset =
-            layer_cache_offset(backend, block, layer_index, position) + kv_offset;
+            layer_cache_offset(backend, kv, block, layer_index, position) + kv_offset;
         backend.attn_value_column[static_cast<size_t>(position)] =
             quant::fp16_to_fp32(
                 backend.value_cache[value_offset + static_cast<size_t>(dim)]);
@@ -3502,6 +3525,7 @@ inline bool dispatch_flash_attention(native_backend & backend,
 }
 
 inline bool store_attention_kv_cache(native_backend & backend,
+                                     const kv_addressing_view & kv,
                                      const block_weights & block,
                                      const int32_t layer_index,
                                      const int32_t position,
@@ -3515,7 +3539,7 @@ inline bool store_attention_kv_cache(native_backend & backend,
     return false;
   }
 
-  const size_t cache_offset = layer_cache_offset(backend, block, layer_index, position);
+  const size_t cache_offset = layer_cache_offset(backend, kv, block, layer_index, position);
   store_fp16_rounded_cache(k_vector, backend.key_cache.data() + cache_offset);
   store_fp16_rounded_cache(v_vector, backend.value_cache.data() + cache_offset);
 
@@ -3524,7 +3548,7 @@ inline bool store_attention_kv_cache(native_backend & backend,
         static_cast<size_t>(kv_head) *
         static_cast<size_t>(effective_attention_head_dim_kv(backend, block));
     const size_t flash_cache_offset = flash_layer_cache_head_position_offset(
-        backend, block, layer_index, kv_head, position);
+        backend, kv, block, layer_index, kv_head, position);
     store_fp16_rounded_cache(
         k_vector.subspan(
             src_offset, static_cast<size_t>(effective_attention_head_dim_kv(backend, block))),
@@ -3540,6 +3564,7 @@ inline bool store_attention_kv_cache(native_backend & backend,
 
 template <emel::text::generator::attention_mode mode>
 inline bool run_attention_for_q_vector(native_backend & backend,
+                                       const kv_addressing_view & kv,
                                        const block_weights & block,
                                        const int32_t layer_index,
                                        const int32_t position,
@@ -3557,17 +3582,19 @@ inline bool run_attention_for_q_vector(native_backend & backend,
       return false;
     }
     round_q_for_nonflash(q_vector, q_attn);
-    return compute_attention(backend, block, layer_index, position + 1, q_attn);
+    return compute_attention(backend, kv, block, layer_index, position + 1, q_attn);
   }
 }
 
 template <emel::text::generator::attention_mode mode>
 inline bool run_attention(native_backend & backend,
+                          const kv_addressing_view & kv,
                           const block_weights & block,
                           const int32_t layer_index,
                           const int32_t position) noexcept {
   return run_attention_for_q_vector<mode>(
       backend,
+      kv,
       block,
       layer_index,
       position,
@@ -3577,6 +3604,7 @@ inline bool run_attention(native_backend & backend,
 
 template <scalar_matmul_route route, matmul_lane_mode lanes = matmul_lane_mode::serial>
 inline bool run_shortconv_block(native_backend & backend,
+                                const kv_addressing_view & kv,
                                 const block_weights & block,
                                 const int32_t layer_index) noexcept {
   if (backend.shortconv_kernel_size <= 0 ||
@@ -3612,7 +3640,7 @@ inline bool run_shortconv_block(native_backend & backend,
       backend.shortconv_bcx.data() + static_cast<size_t>(2 * backend.n_embd),
       static_cast<size_t>(backend.n_embd));
 
-  const size_t layer_offset = shortconv_state_layer_offset(backend, layer_index);
+  const size_t layer_offset = shortconv_state_layer_offset(backend, kv, layer_index);
   float * state = backend.recurrent_shortconv_cache.data() + layer_offset;
   for (int32_t idx = 0; idx < backend.n_embd; ++idx) {
     const size_t dim = static_cast<size_t>(idx);
@@ -3657,7 +3685,16 @@ inline bool run_shortconv_block(native_backend & backend,
   return true;
 }
 
+template <scalar_matmul_route route, matmul_lane_mode lanes = matmul_lane_mode::serial>
+inline bool run_shortconv_block(native_backend & backend,
+                                const block_weights & block,
+                                const int32_t layer_index) noexcept {
+  return run_shortconv_block<route, lanes>(
+      backend, identity_kv_addressing(), block, layer_index);
+}
+
 inline bool run_shortconv_block_chunk4(native_backend & backend,
+                                       const kv_addressing_view & kv,
                                        const block_weights & block,
                                        const int32_t layer_index) noexcept {
   if (backend.shortconv_kernel_size <= 0 ||
@@ -3690,7 +3727,7 @@ inline bool run_shortconv_block_chunk4(native_backend & backend,
     return false;
   }
 
-  const size_t layer_offset = shortconv_state_layer_offset(backend, layer_index);
+  const size_t layer_offset = shortconv_state_layer_offset(backend, kv, layer_index);
   float * state = backend.recurrent_shortconv_cache.data() + layer_offset;
   for (int32_t row = 0; row < k_prefill_q8_chunk_rows; ++row) {
     const auto bcx_row = chunk4_row_span<const float>(
@@ -3746,6 +3783,12 @@ inline bool run_shortconv_block_chunk4(native_backend & backend,
   }
 
   return true;
+}
+
+inline bool run_shortconv_block_chunk4(native_backend & backend,
+                                       const block_weights & block,
+                                       const int32_t layer_index) noexcept {
+  return run_shortconv_block_chunk4(backend, identity_kv_addressing(), block, layer_index);
 }
 
 // Records the prepare()-time matmul weight record pointers per layer in the
@@ -3927,6 +3970,7 @@ template <emel::text::generator::attention_mode mode, scalar_matmul_route route,
           matmul_lane_mode lanes = matmul_lane_mode::serial,
           window_mode wmode = window_mode::resident>
 inline bool run_layer(native_backend &backend, const int32_t layer_index,
+                      const kv_addressing_view & kv,
                       const int32_t position,
                       int32_t * err_out = nullptr) noexcept {
   if constexpr (wmode == window_mode::streamed) {
@@ -4018,12 +4062,13 @@ inline bool run_layer(native_backend &backend, const int32_t layer_index,
                          effective_attention_rope_freq_base(backend, block));
     if (!store_attention_kv_cache(
             backend,
+            kv,
             block,
             layer_index,
             position,
             k,
             v) ||
-        !run_attention<mode>(backend, block, layer_index, position) ||
+        !run_attention<mode>(backend, kv, block, layer_index, position) ||
         !matmul_vector_routed<route, lanes>(
             backend, block.attention_output, attn_ctx, backend.projected)) {
       return false;
@@ -4032,7 +4077,7 @@ inline bool run_layer(native_backend &backend, const int32_t layer_index,
     for (int32_t idx = 0; idx < backend.n_embd; ++idx) {
       backend.hidden[static_cast<size_t>(idx)] += backend.projected[static_cast<size_t>(idx)];
     }
-  } else if (!run_shortconv_block<route, lanes>(backend, block, layer_index)) {
+  } else if (!run_shortconv_block<route, lanes>(backend, kv, block, layer_index)) {
     return false;
   }
 
@@ -4104,18 +4149,29 @@ inline bool run_layer(native_backend &backend, const int32_t layer_index,
   return true;
 }
 
+template <emel::text::generator::attention_mode mode, scalar_matmul_route route,
+          matmul_lane_mode lanes = matmul_lane_mode::serial,
+          window_mode wmode = window_mode::resident>
+inline bool run_layer(native_backend &backend,
+                      const int32_t layer_index,
+                      const int32_t position,
+                      int32_t * err_out = nullptr) noexcept {
+  return run_layer<mode, route, lanes, wmode>(
+      backend, layer_index, identity_kv_addressing(), position, err_out);
+}
+
 inline bool run_layer_flash(native_backend & backend,
                             const int32_t layer_index,
                             const int32_t position) noexcept {
   return run_layer<emel::text::generator::attention_mode::flash, scalar_matmul_route::kernel>(
-      backend, layer_index, position);
+      backend, layer_index, identity_kv_addressing(), position);
 }
 
 inline bool run_layer_nonflash(native_backend & backend,
                                const int32_t layer_index,
                                const int32_t position) noexcept {
   return run_layer<emel::text::generator::attention_mode::nonflash, scalar_matmul_route::kernel>(
-      backend, layer_index, position);
+      backend, layer_index, identity_kv_addressing(), position);
 }
 
 template <scalar_matmul_route route, matmul_lane_mode lanes = matmul_lane_mode::serial>
@@ -4191,6 +4247,7 @@ inline bool compute_logits_preselected_argmax(native_backend & backend,
 
 template <emel::text::generator::attention_mode mode, scalar_matmul_route route>
 inline bool run_prefill_scalar_tokens(native_backend & backend,
+                                      const kv_addressing_view & kv,
                                       const size_t token_begin,
                                       const size_t token_end) noexcept {
   for (size_t token_index = token_begin; token_index < token_end; ++token_index) {
@@ -4208,7 +4265,7 @@ inline bool run_prefill_scalar_tokens(native_backend & backend,
     }
 
     for (int32_t layer = 0; layer < backend.n_layer; ++layer) {
-      if (!run_layer<mode, route>(backend, layer, position)) {
+      if (!run_layer<mode, route>(backend, layer, kv, position)) {
         return false;
       }
     }
@@ -4218,8 +4275,17 @@ inline bool run_prefill_scalar_tokens(native_backend & backend,
   return true;
 }
 
+template <emel::text::generator::attention_mode mode, scalar_matmul_route route>
+inline bool run_prefill_scalar_tokens(native_backend & backend,
+                                      const size_t token_begin,
+                                      const size_t token_end) noexcept {
+  return run_prefill_scalar_tokens<mode, route>(
+      backend, identity_kv_addressing(), token_begin, token_end);
+}
+
 template <chunk4_rhs_route route, matmul_lane_mode lanes = matmul_lane_mode::serial>
 inline bool run_shortconv_block_chunk4(native_backend & backend,
+                                       const kv_addressing_view & kv,
                                        const block_weights & block,
                                        const int32_t layer_index) noexcept {
   if (backend.shortconv_kernel_size <= 0 ||
@@ -4249,7 +4315,7 @@ inline bool run_shortconv_block_chunk4(native_backend & backend,
     return false;
   }
 
-  const size_t layer_offset = shortconv_state_layer_offset(backend, layer_index);
+  const size_t layer_offset = shortconv_state_layer_offset(backend, kv, layer_index);
   float * state = backend.recurrent_shortconv_cache.data() + layer_offset;
   for (int32_t row = 0; row < k_prefill_q8_chunk_rows; ++row) {
     const auto bcx_row = chunk4_row_span<const float>(
@@ -4306,6 +4372,7 @@ inline bool run_shortconv_block_chunk4(native_backend & backend,
 
 template <matmul_lane_mode lanes = matmul_lane_mode::serial>
 inline bool run_shortconv_block_chunk8_q8_k(native_backend & backend,
+                                            const kv_addressing_view & kv,
                                             const block_weights & block,
                                             const int32_t layer_index) noexcept {
   if (backend.shortconv_kernel_size <= 0 ||
@@ -4335,7 +4402,7 @@ inline bool run_shortconv_block_chunk8_q8_k(native_backend & backend,
     return false;
   }
 
-  const size_t layer_offset = shortconv_state_layer_offset(backend, layer_index);
+  const size_t layer_offset = shortconv_state_layer_offset(backend, kv, layer_index);
   float * state = backend.recurrent_shortconv_cache.data() + layer_offset;
   for (int32_t row = 0; row < k_prefill_q8_chunk8_rows; ++row) {
     const auto bcx_row = chunk8_row_span<const float>(
@@ -4394,6 +4461,7 @@ template <emel::text::generator::attention_mode mode,
           chunk4_rhs_route route,
           matmul_lane_mode lanes = matmul_lane_mode::serial>
 inline bool run_layer_chunk4(native_backend & backend,
+                             const kv_addressing_view & kv,
                              const int32_t layer_index,
                              const size_t token_base) noexcept {
   auto & block = backend.blocks[static_cast<size_t>(layer_index)];
@@ -4476,8 +4544,8 @@ inline bool run_layer_chunk4(native_backend & backend,
                            position,
                            effective_attention_rope_freq_base(backend, block));
 
-      if (!store_attention_kv_cache(backend, block, layer_index, position, k_row, v_row) ||
-          !run_attention_for_q_vector<mode>(backend, block, layer_index, position, q_row)) {
+      if (!store_attention_kv_cache(backend, kv, block, layer_index, position, k_row, v_row) ||
+          !run_attention_for_q_vector<mode>(backend, kv, block, layer_index, position, q_row)) {
         return false;
       }
 
@@ -4495,7 +4563,7 @@ inline bool run_layer_chunk4(native_backend & backend,
             backend.hidden_chunk4, backend.projected_chunk4, backend.n_embd)) {
       return false;
     }
-  } else if (!run_shortconv_block_chunk4<route, lanes>(backend, block, layer_index)) {
+  } else if (!run_shortconv_block_chunk4<route, lanes>(backend, kv, block, layer_index)) {
     return false;
   }
 
@@ -4540,6 +4608,7 @@ inline bool run_layer_chunk4(native_backend & backend,
 template <emel::text::generator::attention_mode mode,
           matmul_lane_mode lanes = matmul_lane_mode::serial>
 inline bool run_layer_chunk8_q8_k(native_backend & backend,
+                                  const kv_addressing_view & kv,
                                   const int32_t layer_index,
                                   const size_t token_base) noexcept {
   auto & block = backend.blocks[static_cast<size_t>(layer_index)];
@@ -4619,8 +4688,8 @@ inline bool run_layer_chunk8_q8_k(native_backend & backend,
                            position,
                            effective_attention_rope_freq_base(backend, block));
 
-      if (!store_attention_kv_cache(backend, block, layer_index, position, k_row, v_row) ||
-          !run_attention_for_q_vector<mode>(backend, block, layer_index, position, q_row)) {
+      if (!store_attention_kv_cache(backend, kv, block, layer_index, position, k_row, v_row) ||
+          !run_attention_for_q_vector<mode>(backend, kv, block, layer_index, position, q_row)) {
         return false;
       }
 
@@ -4637,7 +4706,7 @@ inline bool run_layer_chunk8_q8_k(native_backend & backend,
         !add_chunk8_rows_in_place(backend.hidden_chunk8, backend.projected_chunk8, backend.n_embd)) {
       return false;
     }
-  } else if (!run_shortconv_block_chunk8_q8_k<lanes>(backend, block, layer_index)) {
+  } else if (!run_shortconv_block_chunk8_q8_k<lanes>(backend, kv, block, layer_index)) {
     return false;
   }
 
@@ -4683,6 +4752,7 @@ template <emel::text::generator::attention_mode mode,
           chunk4_rhs_route route,
           matmul_lane_mode lanes = matmul_lane_mode::serial>
 inline bool run_prefill_chunk4_tokens(native_backend & backend,
+                                      const kv_addressing_view & kv,
                                       const size_t token_limit) noexcept {
   for (size_t token_base = 0; token_base < token_limit;
        token_base += static_cast<size_t>(k_prefill_q8_chunk_rows)) {
@@ -4704,7 +4774,7 @@ inline bool run_prefill_chunk4_tokens(native_backend & backend,
     }
 
     for (int32_t layer = 0; layer < backend.n_layer; ++layer) {
-      if (!run_layer_chunk4<mode, route, lanes>(backend, layer, token_base)) {
+      if (!run_layer_chunk4<mode, route, lanes>(backend, kv, layer, token_base)) {
         return false;
       }
     }
@@ -4729,6 +4799,7 @@ inline bool run_prefill_chunk4_tokens(native_backend & backend,
 template <emel::text::generator::attention_mode mode,
           matmul_lane_mode lanes = matmul_lane_mode::serial>
 inline bool run_prefill_chunk8_tokens_q8_k(native_backend & backend,
+                                           const kv_addressing_view & kv,
                                            const size_t token_limit) noexcept {
   for (size_t token_base = 0; token_base < token_limit;
        token_base += static_cast<size_t>(k_prefill_q8_chunk8_rows)) {
@@ -4750,7 +4821,7 @@ inline bool run_prefill_chunk8_tokens_q8_k(native_backend & backend,
     }
 
     for (int32_t layer = 0; layer < backend.n_layer; ++layer) {
-      if (!run_layer_chunk8_q8_k<mode, lanes>(backend, layer, token_base)) {
+      if (!run_layer_chunk8_q8_k<mode, lanes>(backend, kv, layer, token_base)) {
         return false;
       }
     }
@@ -4773,22 +4844,27 @@ inline bool run_prefill_chunk8_tokens_q8_k(native_backend & backend,
 }
 
 template <emel::text::generator::attention_mode mode, scalar_matmul_route route>
-inline bool run_prefill(native_backend & backend) noexcept {
+inline bool run_prefill(native_backend & backend, const kv_addressing_view & kv) noexcept {
   backend.kv_cache_tokens = 0;
   reset_shortconv_cache(backend);
 
   const size_t token_count = static_cast<size_t>(backend.bound_token_count);
-  if (!run_prefill_scalar_tokens<mode, route>(backend, 0u, token_count)) {
+  if (!run_prefill_scalar_tokens<mode, route>(backend, kv, 0u, token_count)) {
     return false;
   }
 
   return compute_logits<route>(backend);
 }
 
+template <emel::text::generator::attention_mode mode, scalar_matmul_route route>
+inline bool run_prefill(native_backend & backend) noexcept {
+  return run_prefill<mode, route>(backend, identity_kv_addressing());
+}
+
 template <emel::text::generator::attention_mode mode,
           chunk4_rhs_route route,
           matmul_lane_mode lanes = matmul_lane_mode::serial>
-inline bool run_prefill_chunk4(native_backend & backend) noexcept {
+inline bool run_prefill_chunk4(native_backend & backend, const kv_addressing_view & kv) noexcept {
   backend.kv_cache_tokens = 0;
   reset_shortconv_cache(backend);
 
@@ -4796,10 +4872,10 @@ inline bool run_prefill_chunk4(native_backend & backend) noexcept {
   const size_t chunk_limit =
       token_count - (token_count % static_cast<size_t>(k_prefill_q8_chunk_rows));
   if (chunk_limit == 0u ||
-      !run_prefill_chunk4_tokens<mode, route, lanes>(backend, chunk_limit) ||
+      !run_prefill_chunk4_tokens<mode, route, lanes>(backend, kv, chunk_limit) ||
       !run_prefill_scalar_tokens<
           mode,
-          static_cast<scalar_matmul_route>(route)>(backend, chunk_limit, token_count)) {
+          static_cast<scalar_matmul_route>(route)>(backend, kv, chunk_limit, token_count)) {
     return false;
   }
 
@@ -4807,8 +4883,16 @@ inline bool run_prefill_chunk4(native_backend & backend) noexcept {
 }
 
 template <emel::text::generator::attention_mode mode,
+          chunk4_rhs_route route,
           matmul_lane_mode lanes = matmul_lane_mode::serial>
-inline bool run_prefill_chunk8_q8_k(native_backend & backend) noexcept {
+inline bool run_prefill_chunk4(native_backend & backend) noexcept {
+  return run_prefill_chunk4<mode, route, lanes>(backend, identity_kv_addressing());
+}
+
+template <emel::text::generator::attention_mode mode,
+          matmul_lane_mode lanes = matmul_lane_mode::serial>
+inline bool run_prefill_chunk8_q8_k(native_backend & backend,
+                                    const kv_addressing_view & kv) noexcept {
   backend.kv_cache_tokens = 0;
   reset_shortconv_cache(backend);
 
@@ -4816,37 +4900,44 @@ inline bool run_prefill_chunk8_q8_k(native_backend & backend) noexcept {
   const size_t chunk_limit =
       token_count - (token_count % static_cast<size_t>(k_prefill_q8_chunk8_rows));
   if (chunk_limit == 0u ||
-      !run_prefill_chunk8_tokens_q8_k<mode, lanes>(backend, chunk_limit) ||
+      !run_prefill_chunk8_tokens_q8_k<mode, lanes>(backend, kv, chunk_limit) ||
       !run_prefill_scalar_tokens<mode, scalar_matmul_route::q8_k>(
-          backend, chunk_limit, token_count)) {
+          backend, kv, chunk_limit, token_count)) {
     return false;
   }
 
   return compute_logits<scalar_matmul_route::q8_k, lanes>(backend);
 }
 
+template <emel::text::generator::attention_mode mode,
+          matmul_lane_mode lanes = matmul_lane_mode::serial>
+inline bool run_prefill_chunk8_q8_k(native_backend & backend) noexcept {
+  return run_prefill_chunk8_q8_k<mode, lanes>(backend, identity_kv_addressing());
+}
+
 inline bool run_prefill_flash(native_backend & backend) noexcept {
   return run_prefill<
       emel::text::generator::attention_mode::flash,
-      scalar_matmul_route::kernel>(backend);
+      scalar_matmul_route::kernel>(backend, identity_kv_addressing());
 }
 
 inline bool run_prefill_nonflash(native_backend & backend) noexcept {
   return run_prefill<
       emel::text::generator::attention_mode::nonflash,
-      scalar_matmul_route::kernel>(backend);
+      scalar_matmul_route::kernel>(backend, identity_kv_addressing());
 }
 
 template <emel::text::generator::attention_mode mode,
           scalar_matmul_route route,
           scalar_argmax_route argmax_route>
 inline bool run_prefill_preselected_argmax(native_backend & backend,
+                                           const kv_addressing_view & kv,
                                            int32_t & selected_index,
                                            float & selected_score) noexcept {
   backend.kv_cache_tokens = 0;
   reset_shortconv_cache(backend);
   if (!run_prefill_scalar_tokens<mode, route>(
-          backend, 0u, static_cast<size_t>(backend.bound_token_count))) {
+          backend, kv, 0u, static_cast<size_t>(backend.bound_token_count))) {
     return false;
   }
 
@@ -4855,9 +4946,20 @@ inline bool run_prefill_preselected_argmax(native_backend & backend,
 }
 
 template <emel::text::generator::attention_mode mode,
+          scalar_matmul_route route,
+          scalar_argmax_route argmax_route>
+inline bool run_prefill_preselected_argmax(native_backend & backend,
+                                           int32_t & selected_index,
+                                           float & selected_score) noexcept {
+  return run_prefill_preselected_argmax<mode, route, argmax_route>(
+      backend, identity_kv_addressing(), selected_index, selected_score);
+}
+
+template <emel::text::generator::attention_mode mode,
           chunk4_rhs_route route,
           matmul_lane_mode lanes = matmul_lane_mode::serial>
 inline bool run_prefill_chunk4_preselected_argmax(native_backend & backend,
+                                                  const kv_addressing_view & kv,
                                                   int32_t & selected_index,
                                                   float & selected_score) noexcept {
   backend.kv_cache_tokens = 0;
@@ -4867,10 +4969,10 @@ inline bool run_prefill_chunk4_preselected_argmax(native_backend & backend,
   const size_t chunk_limit =
       token_count - (token_count % static_cast<size_t>(k_prefill_q8_chunk_rows));
   if (chunk_limit == 0u ||
-      !run_prefill_chunk4_tokens<mode, route, lanes>(backend, chunk_limit) ||
+      !run_prefill_chunk4_tokens<mode, route, lanes>(backend, kv, chunk_limit) ||
       !run_prefill_scalar_tokens<
           mode,
-          static_cast<scalar_matmul_route>(route)>(backend, chunk_limit, token_count)) {
+          static_cast<scalar_matmul_route>(route)>(backend, kv, chunk_limit, token_count)) {
     return false;
   }
 
@@ -4884,8 +4986,19 @@ inline bool run_prefill_chunk4_preselected_argmax(native_backend & backend,
 }
 
 template <emel::text::generator::attention_mode mode,
+          chunk4_rhs_route route,
+          matmul_lane_mode lanes = matmul_lane_mode::serial>
+inline bool run_prefill_chunk4_preselected_argmax(native_backend & backend,
+                                                  int32_t & selected_index,
+                                                  float & selected_score) noexcept {
+  return run_prefill_chunk4_preselected_argmax<mode, route, lanes>(
+      backend, identity_kv_addressing(), selected_index, selected_score);
+}
+
+template <emel::text::generator::attention_mode mode,
           matmul_lane_mode lanes = matmul_lane_mode::serial>
 inline bool run_prefill_chunk8_preselected_argmax_q8_k(native_backend & backend,
+                                                       const kv_addressing_view & kv,
                                                        int32_t & selected_index,
                                                        float & selected_score) noexcept {
   backend.kv_cache_tokens = 0;
@@ -4895,9 +5008,9 @@ inline bool run_prefill_chunk8_preselected_argmax_q8_k(native_backend & backend,
   const size_t chunk_limit =
       token_count - (token_count % static_cast<size_t>(k_prefill_q8_chunk8_rows));
   if (chunk_limit == 0u ||
-      !run_prefill_chunk8_tokens_q8_k<mode, lanes>(backend, chunk_limit) ||
+      !run_prefill_chunk8_tokens_q8_k<mode, lanes>(backend, kv, chunk_limit) ||
       !run_prefill_scalar_tokens<mode, scalar_matmul_route::q8_k>(
-          backend, chunk_limit, token_count)) {
+          backend, kv, chunk_limit, token_count)) {
     return false;
   }
 
@@ -4905,11 +5018,21 @@ inline bool run_prefill_chunk8_preselected_argmax_q8_k(native_backend & backend,
       backend, selected_index, selected_score);
 }
 
+template <emel::text::generator::attention_mode mode,
+          matmul_lane_mode lanes = matmul_lane_mode::serial>
+inline bool run_prefill_chunk8_preselected_argmax_q8_k(native_backend & backend,
+                                                       int32_t & selected_index,
+                                                       float & selected_score) noexcept {
+  return run_prefill_chunk8_preselected_argmax_q8_k<mode, lanes>(
+      backend, identity_kv_addressing(), selected_index, selected_score);
+}
+
 template <emel::text::generator::attention_mode mode, scalar_matmul_route route,
           matmul_lane_mode lanes = matmul_lane_mode::serial,
           window_mode wmode = window_mode::resident>
 inline bool run_decode(native_backend &backend,
                        const emel::graph::processor::event::execute &request,
+                       const kv_addressing_view & kv,
                        int32_t * err_out = nullptr) noexcept {
   if (backend.bound_token_count != 1 ||
       backend.bound_position_count != 1 ||
@@ -4935,7 +5058,7 @@ inline bool run_decode(native_backend &backend,
     bind_streamed_output_views(backend);
   }
   for (int32_t layer = 0; layer < backend.n_layer; ++layer) {
-    if (!run_layer<mode, route, lanes, wmode>(backend, layer, position,
+    if (!run_layer<mode, route, lanes, wmode>(backend, layer, kv, position,
                                               err_out)) {
       if constexpr (wmode == window_mode::streamed) {
         reset_stream_block_views(backend);
@@ -4956,12 +5079,23 @@ inline bool run_decode(native_backend &backend,
 }
 
 template <emel::text::generator::attention_mode mode, scalar_matmul_route route,
+          matmul_lane_mode lanes = matmul_lane_mode::serial,
+          window_mode wmode = window_mode::resident>
+inline bool run_decode(native_backend &backend,
+                       const emel::graph::processor::event::execute &request,
+                       int32_t * err_out = nullptr) noexcept {
+  return run_decode<mode, route, lanes, wmode>(
+      backend, request, identity_kv_addressing(), err_out);
+}
+
+template <emel::text::generator::attention_mode mode, scalar_matmul_route route,
           scalar_argmax_route argmax_route,
           matmul_lane_mode lanes = matmul_lane_mode::serial,
           window_mode wmode = window_mode::resident>
 inline bool run_decode_preselected_argmax(
     native_backend &backend,
     const emel::graph::processor::event::execute &request,
+    const kv_addressing_view & kv,
     int32_t &selected_index, float &selected_score,
     int32_t * err_out = nullptr) noexcept {
   if (backend.bound_token_count != 1 ||
@@ -4988,7 +5122,7 @@ inline bool run_decode_preselected_argmax(
     bind_streamed_output_views(backend);
   }
   for (int32_t layer = 0; layer < backend.n_layer; ++layer) {
-    if (!run_layer<mode, route, lanes, wmode>(backend, layer, position,
+    if (!run_layer<mode, route, lanes, wmode>(backend, layer, kv, position,
                                               err_out)) {
       if constexpr (wmode == window_mode::streamed) {
         reset_stream_block_views(backend);
@@ -5008,6 +5142,19 @@ inline bool run_decode_preselected_argmax(
     return compute_logits_preselected_argmax<argmax_route>(
         backend, selected_index, selected_score);
   }
+}
+
+template <emel::text::generator::attention_mode mode, scalar_matmul_route route,
+          scalar_argmax_route argmax_route,
+          matmul_lane_mode lanes = matmul_lane_mode::serial,
+          window_mode wmode = window_mode::resident>
+inline bool run_decode_preselected_argmax(
+    native_backend &backend,
+    const emel::graph::processor::event::execute &request,
+    int32_t &selected_index, float &selected_score,
+    int32_t * err_out = nullptr) noexcept {
+  return run_decode_preselected_argmax<mode, route, argmax_route, lanes, wmode>(
+      backend, request, identity_kv_addressing(), selected_index, selected_score, err_out);
 }
 
 }  // namespace
@@ -5274,10 +5421,6 @@ inline emel::error::type prepare(
   backend.value_cache.resize(cache_offset);
   backend.flash_key_cache.resize(flash_cache_offset);
   backend.flash_value_cache.resize(flash_cache_offset);
-  backend.kv_physical_positions.resize(static_cast<size_t>(backend.kv_positions_capacity));
-  for (int32_t position = 0; position < backend.kv_positions_capacity; ++position) {
-    backend.kv_physical_positions[static_cast<size_t>(position)] = position;
-  }
   backend.recurrent_shortconv_cache.resize(
       static_cast<size_t>(backend.n_layer) *
       static_cast<size_t>(backend.shortconv_state_size) *
@@ -5378,14 +5521,50 @@ inline native_backend & bind_native_backend(
 // validate-failed transitions.
 inline bool validate_kv_map_contract(const emel::graph::processor::event::execute & request,
                                      int32_t * err_out) noexcept {
-  const auto & backend = bind_native_backend(request);
-  const bool map_ready =
+  const auto * io =
+      static_cast<const emel::text::generator::compute_io *>(request.compute_ctx);
+  const auto * backend =
+      io == nullptr ? nullptr : static_cast<const native_backend *>(io->backend_ctx);
+  bool map_ready =
+      io != nullptr &&
+      backend != nullptr &&
       request.memory_view != nullptr &&
+      request.positions != nullptr &&
+      request.positions_count > 0 &&
+      request.positions_count == io->token_count &&
+      request.positions_count <= backend->n_ctx &&
       request.seq_primary_ids != nullptr &&
       request.seq_primary_ids_count > 0 &&
-      request.memory_view->block_tokens == backend.kv_block_tokens &&
-      request.memory_view->is_sequence_active(request.seq_primary_ids[0]) &&
-      request.memory_view->lookup_recurrent_slot(request.seq_primary_ids[0]) >= 0;
+      request.memory_view->block_tokens > 0 &&
+      request.memory_view->block_tokens == backend->kv_block_tokens &&
+      backend->kv_positions_capacity >= backend->n_ctx;
+  int32_t max_position = -1;
+  if (map_ready) {
+    for (int32_t idx = 0; idx < request.positions_count; ++idx) {
+      const int32_t position = request.positions[static_cast<size_t>(idx)];
+      map_ready = map_ready && position >= 0 && position < backend->n_ctx;
+      max_position = std::max(max_position, position);
+    }
+  }
+  const int32_t seq_id =
+      map_ready ? request.seq_primary_ids[0] : 0;
+  map_ready = map_ready &&
+              request.memory_view->is_sequence_active(seq_id) &&
+              request.memory_view->lookup_recurrent_slot(seq_id) >= 0 &&
+              request.memory_view->sequence_length(seq_id) > max_position;
+  if (map_ready) {
+    for (int32_t position = 0; position <= max_position; ++position) {
+      const int32_t block_id = request.memory_view->lookup_kv_block(seq_id, position);
+      const int64_t physical_position =
+          (static_cast<int64_t>(block_id) *
+           static_cast<int64_t>(request.memory_view->block_tokens)) +
+          static_cast<int64_t>(position % request.memory_view->block_tokens);
+      map_ready = map_ready &&
+                  block_id >= 0 &&
+                  physical_position >= 0 &&
+                  physical_position < static_cast<int64_t>(backend->kv_positions_capacity);
+    }
+  }
   if (!map_ready) {
     if (err_out != nullptr) {
       *err_out = k_error_invalid;
@@ -5445,12 +5624,6 @@ inline bool bind_guarded_inputs(const emel::graph::processor::event::execute & r
   std::copy_n(request.positions, request.positions_count, backend.bound_positions.begin());
   backend.bound_token_count = io.token_count;
   backend.bound_position_count = request.positions_count;
-  // validate_kv_map_contract admitted this request, so the snapshot and the
-  // primary sequence id are present and coherent; rebind the physical map and
-  // the recurrent slot.
-  bind_kv_physical_positions(backend, *request.memory_view, request.seq_primary_ids[0]);
-  backend.kv_recurrent_slot =
-      request.memory_view->lookup_recurrent_slot(request.seq_primary_ids[0]);
   backend.bound_ready = true;
   return true;
 }
@@ -5462,11 +5635,12 @@ template <emel::text::generator::attention_mode mode, scalar_matmul_route route,
 inline bool run_kernel_scalar_mode(const emel::graph::processor::event::execute & request,
                                    int32_t * err_out) noexcept {
   auto & backend = bind_native_backend(request);
+  const auto kv = kv_addressing_from_request(request);
   if constexpr (expected_kind == step_kind::prefill) {
     (void)err_out;
-    return run_prefill<mode, route>(backend);
+    return run_prefill<mode, route>(backend, kv);
   } else {
-    return run_decode<mode, route, lanes, wmode>(backend, request, err_out);
+    return run_decode<mode, route, lanes, wmode>(backend, request, kv, err_out);
   }
 }
 
@@ -5479,16 +5653,17 @@ inline bool run_kernel_scalar_preselected_argmax_mode(
     int32_t * err_out) noexcept {
   auto & io = bind_compute_io(request);
   auto & backend = bind_native_backend(request);
+  const auto kv = kv_addressing_from_request(request);
   if constexpr (expected_kind == step_kind::prefill) {
     return run_prefill_preselected_argmax<mode, route, argmax_route>(
-        backend, *io.selected_token_out, *io.selected_score_out);
+        backend, kv, *io.selected_token_out, *io.selected_score_out);
   } else {
     // The decode branch forwards the graph processor's err pointer: streamed
     // instantiations report acquire failures through it (run_layer writes
     // unconditionally under the always-valid-pointer contract).
     return run_decode_preselected_argmax<mode, route, argmax_route, lanes,
                                          wmode>(
-        backend, request, *io.selected_token_out, *io.selected_score_out,
+        backend, request, kv, *io.selected_token_out, *io.selected_score_out,
         err_out);
   }
 }
@@ -5845,7 +6020,8 @@ inline bool run_kernel_prefill_chunk8_q8_k_mode(
     const emel::graph::processor::event::execute & request,
     int32_t * err_out) noexcept {
   (void)err_out;
-  return run_prefill_chunk8_q8_k<mode, lanes>(bind_native_backend(request));
+  return run_prefill_chunk8_q8_k<mode, lanes>(
+      bind_native_backend(request), kv_addressing_from_request(request));
 }
 
 inline bool run_kernel_flash_prefill_chunk8_q8_k(
@@ -5869,7 +6045,8 @@ inline bool run_kernel_prefill_chunk4_mode(
     const emel::graph::processor::event::execute & request,
     int32_t * err_out) noexcept {
   (void)err_out;
-  return run_prefill_chunk4<mode, route, lanes>(bind_native_backend(request));
+  return run_prefill_chunk4<mode, route, lanes>(
+      bind_native_backend(request), kv_addressing_from_request(request));
 }
 
 inline bool run_kernel_flash_prefill_chunk4_packed_q8_0(
@@ -6245,7 +6422,8 @@ inline bool run_kernel_prefill_chunk4_preselected_argmax_mode(
   (void)err_out;
   auto & io = bind_compute_io(request);
   return run_prefill_chunk4_preselected_argmax<mode, route, lanes>(
-      bind_native_backend(request), *io.selected_token_out, *io.selected_score_out);
+      bind_native_backend(request), kv_addressing_from_request(request),
+      *io.selected_token_out, *io.selected_score_out);
 }
 
 template <emel::text::generator::attention_mode mode,
@@ -6256,7 +6434,8 @@ inline bool run_kernel_prefill_chunk8_preselected_argmax_q8_k_mode(
   (void)err_out;
   auto & io = bind_compute_io(request);
   return run_prefill_chunk8_preselected_argmax_q8_k<mode, lanes>(
-      bind_native_backend(request), *io.selected_token_out, *io.selected_score_out);
+      bind_native_backend(request), kv_addressing_from_request(request),
+      *io.selected_token_out, *io.selected_score_out);
 }
 
 inline bool run_kernel_flash_prefill_chunk8_preselected_argmax_q8_k(
