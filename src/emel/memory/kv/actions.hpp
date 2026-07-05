@@ -13,17 +13,11 @@ namespace emel::memory::kv::action {
 namespace detail {
 
 inline int32_t resolve_positive_or_default(const int32_t value, const int32_t fallback) noexcept {
-  const int32_t use_value = static_cast<int32_t>(value > 0);
-  return use_value * value + (1 - use_value) * fallback;
+  return view::resolved_or_default(value, fallback);
 }
 
 inline int32_t blocks_for_length(const int32_t block_tokens, const int32_t token_count) noexcept {
-  const int32_t positive_tokens = static_cast<int32_t>(token_count > 0);
-  const int32_t positive_block_tokens = static_cast<int32_t>(block_tokens > 0);
-  const int32_t safe_block_tokens = block_tokens + static_cast<int32_t>(block_tokens <= 0);
-  const int32_t effective_tokens = positive_tokens * positive_block_tokens * token_count;
-  const int32_t rounded = (effective_tokens + safe_block_tokens - 1) / safe_block_tokens;
-  return rounded * positive_block_tokens;
+  return view::blocks_for_tokens(block_tokens, token_count);
 }
 
 inline void reset_runtime(context & ctx) noexcept {
@@ -36,8 +30,11 @@ inline void reset_runtime(context & ctx) noexcept {
 
   ctx.block_refs.reset();
   ctx.free_count = ctx.max_blocks;
+  // Stack top holds block 0 so fresh allocations pop ascending contiguous ids;
+  // contiguous logical growth then maps to contiguous physical spans, which the
+  // flash-attention contiguity guard depends on.
   for (int32_t i = 0; i < ctx.max_blocks; ++i) {
-    ctx.free_stack[static_cast<size_t>(i)] = static_cast<uint16_t>(i);
+    ctx.free_stack[static_cast<size_t>(i)] = static_cast<uint16_t>(ctx.max_blocks - 1 - i);
   }
 }
 

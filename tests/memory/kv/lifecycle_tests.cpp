@@ -190,8 +190,19 @@ TEST_CASE("memory_kv_lifecycle_mapping_order_is_deterministic") {
     .error_out = &err,
   }));
 
-  CHECK(machine.view().lookup_kv_block(0, 0) == 5);
-  CHECK(machine.view().lookup_kv_block(1, 0) == 4);
+  // Fresh allocations pop ascending contiguous block ids so contiguous logical
+  // growth maps to contiguous physical spans (flash-contiguity contract).
+  CHECK(machine.view().lookup_kv_block(0, 0) == 0);
+  CHECK(machine.view().lookup_kv_block(1, 0) == 1);
+
+  REQUIRE(machine.process_event(event::allocate_slots{
+    .seq_id = 0,
+    .token_count = 3,
+    .error_out = &err,
+  }));
+  CHECK(machine.view().lookup_kv_block(0, 1) == 2);
+  CHECK(machine.view().lookup_kv_block(0, 2) == 3);
+  CHECK(machine.view().lookup_kv_block(0, 3) == 4);
 }
 
 TEST_CASE("memory_kv_lifecycle_append_and_rollback_use_partial_tail_capacity") {

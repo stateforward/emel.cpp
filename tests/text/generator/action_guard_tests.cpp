@@ -254,6 +254,8 @@ struct compute_guard_fixture {
     backend.n_layer = 1;
     backend.n_vocab = 4;
     backend.n_ctx = 8;
+    backend.kv_block_tokens = 8;
+    backend.kv_positions_capacity = 8;
     backend.head_dim = 4;
     backend.head_dim_kv = 4;
     backend.blocks.resize(1u);
@@ -326,7 +328,7 @@ emel::text::generator::event::initialize make_initialize_request(
   request.selection_mode = selection_mode;
   request.max_prompt_tokens = 8;
   request.max_generated_tokens = 4;
-  request.max_blocks = 8;
+  request.max_blocks = 2;
   request.block_tokens = 4;
   request.error_out = error_out;
   request.on_done =
@@ -1804,6 +1806,8 @@ TEST_CASE("generator runtime guards model explicit flash and nonflash compute "
   backend.head_dim = 2;
   backend.head_dim_kv = 2;
   backend.n_ctx = 4;
+  backend.kv_block_tokens = 4;
+  backend.kv_positions_capacity = 4;
   backend.q_attn.resize(4, 0.0f);
   backend.key_cache.resize(16, 0.0f);
   backend.value_cache.resize(16, 0.0f);
@@ -1849,6 +1853,8 @@ TEST_CASE("generator prefill runtime guards model explicit flash and compute "
   backend.head_dim = 2;
   backend.head_dim_kv = 2;
   backend.n_ctx = 4;
+  backend.kv_block_tokens = 4;
+  backend.kv_positions_capacity = 4;
   backend.q_attn.resize(4, 0.0f);
   backend.key_cache.resize(16, 0.0f);
   backend.value_cache.resize(16, 0.0f);

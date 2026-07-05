@@ -128,6 +128,8 @@ struct runtime_request_fixture {
     backend.n_layer = 1;
     backend.n_vocab = 4;
     backend.n_ctx = 8;
+    backend.kv_block_tokens = 8;
+    backend.kv_positions_capacity = 8;
     backend.head_dim = 4;
     backend.head_dim_kv = 4;
     backend.blocks.resize(1u);
@@ -432,6 +434,8 @@ struct chunk4_prefill_runtime_fixture {
     backend.n_head_kv = 1;
     backend.n_layer = 1;
     backend.n_ctx = k_ctx;
+    backend.kv_block_tokens = k_ctx;
+    backend.kv_positions_capacity = k_ctx;
     backend.n_rot = k_embd;
     backend.head_dim = k_embd;
     backend.head_dim_kv = k_embd;
@@ -623,6 +627,8 @@ template <int32_t prompt_tokens> struct hybrid_chunked_q8_runtime_fixture {
     backend.n_head_kv = 1;
     backend.n_layer = 2;
     backend.n_ctx = k_ctx;
+    backend.kv_block_tokens = k_ctx;
+    backend.kv_positions_capacity = k_ctx;
     backend.n_rot = k_embd;
     backend.head_dim = k_embd;
     backend.head_dim_kv = k_embd;
@@ -1004,6 +1010,8 @@ TEST_CASE("generator_detail_lfm2_attention_uses_neox_rope_layout") {
   backend->n_head_kv = 1;
   backend->n_layer = 1;
   backend->n_ctx = 8;
+  backend->kv_block_tokens = 8;
+  backend->kv_positions_capacity = 8;
   backend->n_rot = k_embd;
   backend->head_dim = k_embd;
   backend->head_dim_kv = k_embd;
@@ -1614,6 +1622,8 @@ TEST_CASE("generator_detail_decode_preconditions_reject_malformed_requests") {
 
   gen_detail::native_backend backend{};
   backend.n_ctx = 8;
+  backend.kv_block_tokens = 8;
+  backend.kv_positions_capacity = 8;
   backend.token_embedding.rows = 4;
   backend.bound_tokens.resize(1u);
   backend.bound_positions.resize(1u);
@@ -1715,6 +1725,8 @@ TEST_CASE("generator_detail_route_templates_reject_unprepared_inputs") {
   backend.n_layer = 1;
   backend.n_vocab = 4;
   backend.n_ctx = 4;
+  backend.kv_block_tokens = 4;
+  backend.kv_positions_capacity = 4;
   backend.head_dim = 4;
   backend.head_dim_kv = 4;
   backend.blocks.resize(1u);
@@ -2097,6 +2109,35 @@ TEST_CASE("generator_detail_scalar_routes_run_prepared_qwen3_paths") {
                                        selected_index, selected_score));
     CHECK(selected_index >= 0);
   }
+}
+
+TEST_CASE("generator_detail_prepare_derives_kv_geometry_from_memory_contract") {
+  auto model_fixture = std::make_unique<qwen3_runtime_fixture>();
+  auto backend = std::make_unique<emel::text::generator::detail::native_backend>();
+
+  // Default geometry: n_ctx=8 pads up to one 16-token block.
+  REQUIRE(emel::text::generator::detail::prepare(*backend, model_fixture->model) ==
+          emel::error::cast(emel::model::loader::error::none));
+  CHECK(backend->kv_block_tokens == emel::memory::view::DEFAULT_BLOCK_TOKENS);
+  CHECK(backend->kv_positions_capacity == emel::memory::view::DEFAULT_BLOCK_TOKENS);
+  CHECK(backend->kv_positions_capacity >= backend->n_ctx);
+  const size_t default_flash_extent = backend->flash_key_cache.size();
+
+  // Divisible geometry: capacity equals n_ctx exactly (pre-cutover layout).
+  REQUIRE(emel::text::generator::detail::prepare(*backend, model_fixture->model, 4) ==
+          emel::error::cast(emel::model::loader::error::none));
+  CHECK(backend->kv_block_tokens == 4);
+  CHECK(backend->kv_positions_capacity == backend->n_ctx);
+  const size_t divisible_flash_extent = backend->flash_key_cache.size();
+
+  // Non-divisible geometry: capacity rounds up to whole blocks.
+  REQUIRE(emel::text::generator::detail::prepare(*backend, model_fixture->model, 3) ==
+          emel::error::cast(emel::model::loader::error::none));
+  CHECK(backend->kv_block_tokens == 3);
+  CHECK(backend->kv_positions_capacity == 9);
+
+  // Cache extents follow the padded capacity, not raw n_ctx.
+  CHECK(default_flash_extent > divisible_flash_extent);
 }
 
 TEST_CASE("generator_detail_prepare_block_native_matrices_supports_shortconv_"
@@ -2708,6 +2749,8 @@ TEST_CASE("generator_detail_request_and_backend_validators_reject_invalid_"
   backend.n_layer = 1;
   backend.n_vocab = 8;
   backend.n_ctx = 4;
+  backend.kv_block_tokens = 4;
+  backend.kv_positions_capacity = 4;
   backend.head_dim = 4;
   backend.head_dim_kv = 4;
   CHECK_FALSE(emel::text::generator::detail::check_backend(&backend, &err));
@@ -2906,6 +2949,8 @@ TEST_CASE("generator_detail_builds_flash_request_over_head_major_kv_cache") {
   backend.head_dim = 2;
   backend.head_dim_kv = 2;
   backend.n_ctx = 2;
+  backend.kv_block_tokens = 2;
+  backend.kv_positions_capacity = 2;
   backend.blocks.resize(1u);
   backend.blocks.front().attention_q_dim = 4;
   backend.blocks.front().attention_kv_dim = 4;
@@ -2961,6 +3006,8 @@ TEST_CASE("generator_detail_flash_dispatch_matches_online_softmax_reference_on_"
   backend.head_dim = 64;
   backend.head_dim_kv = 64;
   backend.n_ctx = 256;
+  backend.kv_block_tokens = 256;
+  backend.kv_positions_capacity = 256;
   backend.kernel_kind = emel::kernel::kernel_kind::aarch64;
   backend.blocks.resize(1u);
   backend.blocks.front().attention_q_dim = 768;
@@ -3037,6 +3084,8 @@ TEST_CASE("generator_detail_flash_dispatch_matches_online_softmax_reference_"
   backend.head_dim = 64;
   backend.head_dim_kv = 64;
   backend.n_ctx = 1024;
+  backend.kv_block_tokens = 1024;
+  backend.kv_positions_capacity = 1024;
   backend.kernel_kind = emel::kernel::kernel_kind::aarch64;
   backend.blocks.resize(1u);
   backend.blocks.front().attention_q_dim = 768;

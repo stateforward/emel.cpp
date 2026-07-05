@@ -24,6 +24,7 @@
 #include <utility>
 #include <vector>
 
+#include "emel/memory/view.hpp"
 #include "emel/gbnf/rule_parser/events.hpp"
 #include "emel/gbnf/rule_parser/sm.hpp"
 #include "emel/gguf/loader/any.hpp"
@@ -1581,8 +1582,13 @@ run_emel_initialize_generator(generation_load_state &state,
   const int32_t prompt_capacity =
       std::max<int32_t>(32, static_cast<int32_t>(formatted_prompt.size()) + 8);
   const int32_t decode_capacity = std::max<int32_t>(4, opts.max_tokens);
-  const int32_t block_capacity =
-      std::max<int32_t>(8, prompt_capacity + decode_capacity);
+  // Reserve whole 16-token blocks for the session budget, capped at the model
+  // context window: the generator rejects pools larger than physical KV
+  // capacity (emel::memory::view geometry contract).
+  const int32_t session_tokens = std::min<int32_t>(
+      prompt_capacity + decode_capacity, state.model_data->params.n_ctx);
+  const int32_t block_capacity = std::max<int32_t>(
+      1, emel::memory::view::blocks_for_tokens(16, session_tokens));
 
   state.generator = std::make_unique<emel::text::generator::sm>(
       *state.model_data, state.conditioner,

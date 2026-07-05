@@ -99,7 +99,13 @@ struct model {
 
       , sml::state<reserving_memory_decision> <= sml::state<reserving_memory>
                  + sml::completion<event::run>
+                 [ guard::guard_memory_geometry_fits_backend{} ]
                  / action::request_memory_reserve
+
+      , sml::state<idle> <= sml::state<reserving_memory>
+                 + sml::completion<event::run>
+                 [ guard::guard_memory_geometry_gap{} ]
+                 / action::mark_invalid_request
 
       , sml::state<configuring_sampling_mode_decision> <= sml::state<reserving_memory_decision>
                  + sml::completion<event::run>

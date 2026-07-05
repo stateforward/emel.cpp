@@ -528,7 +528,7 @@ run_generation(emel::text::generator::sm &generator,
   initialize.selection_mode = mode;
   initialize.max_prompt_tokens = 8;
   initialize.max_generated_tokens = 4;
-  initialize.max_blocks = 8;
+  initialize.max_blocks = 2;
   initialize.block_tokens = 4;
   initialize.strip_leading_space = false;
   initialize.on_done =

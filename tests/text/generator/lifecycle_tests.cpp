@@ -940,7 +940,7 @@ struct generator_fixture {
     request.selection_mode = selection_mode;
     request.max_prompt_tokens = 8;
     request.max_generated_tokens = 4;
-    request.max_blocks = 8;
+    request.max_blocks = 2;
     request.block_tokens = 4;
     request.strip_leading_space = false;
     request.error_out = error_out;
@@ -1065,6 +1065,42 @@ TEST_CASE("generator_rejects_invalid_initialize_request") {
   CHECK(tracker.err == emel::error::cast(emel::text::generator::error::invalid_request));
 }
 
+TEST_CASE("generator_initialize_rejects_block_pool_exceeding_physical_capacity") {
+  auto fixture = std::make_unique<generator_fixture>();
+  callback_tracker tracker{};
+  emel::error::type error = emel::error::cast(emel::text::generator::error::none);
+  auto request = fixture->make_initialize(tracker, &error);
+  // Fixture model n_ctx is 8 (physical capacity 8 with 4-token blocks); a
+  // 3-block pool could hand out ids beyond physical storage, so the geometry
+  // guard must route to invalid_request before reserve.
+  request.max_blocks = 3;
+  request.block_tokens = 4;
+
+  CHECK_FALSE(fixture->generator->process_event(request));
+  CHECK(fixture->generator->is(stateforward::sml::state<emel::text::generator::uninitialized>));
+  CHECK_FALSE(tracker.initialize_done_called);
+  CHECK(tracker.initialize_error_called);
+  CHECK(error == emel::error::cast(emel::text::generator::error::invalid_request));
+  CHECK(tracker.err == emel::error::cast(emel::text::generator::error::invalid_request));
+}
+
+TEST_CASE("generator_initialize_requires_explicit_block_geometry") {
+  auto fixture = std::make_unique<generator_fixture>();
+  callback_tracker tracker{};
+  emel::error::type error = emel::error::cast(emel::text::generator::error::none);
+  auto request = fixture->make_initialize(tracker, &error);
+  // The public contract requires explicit positive geometry; zero fields are
+  // rejected by valid_initialize before any backend or memory dispatch.
+  request.max_blocks = 0;
+  request.block_tokens = 0;
+
+  CHECK_FALSE(fixture->generator->process_event(request));
+  CHECK(fixture->generator->is(stateforward::sml::state<emel::text::generator::uninitialized>));
+  CHECK_FALSE(tracker.initialize_done_called);
+  CHECK(tracker.initialize_error_called);
+  CHECK(error == emel::error::cast(emel::text::generator::error::invalid_request));
+}
+
 TEST_CASE("generator_initialize_rejects_missing_injected_dependencies_through_sml") {
   auto generator = std::make_unique<emel::text::generator::sm>();
   emel::text::tokenizer::sm tokenizer{};
@@ -1081,7 +1117,7 @@ TEST_CASE("generator_initialize_rejects_missing_injected_dependencies_through_sm
   };
   request.max_prompt_tokens = 8;
   request.max_generated_tokens = 4;
-  request.max_blocks = 8;
+  request.max_blocks = 2;
   request.block_tokens = 4;
   request.error_out = &error;
   request.on_error =
@@ -1569,7 +1605,7 @@ TEST_CASE("generator_generate_quantized_contract_fixture_supports_explicit_prese
       emel::text::generator::selection_mode::preselected_argmax);
   auto long_initialize_request = initialize_request;
   long_initialize_request.max_generated_tokens = 16;
-  long_initialize_request.max_blocks = 32;
+  long_initialize_request.max_blocks = 2;
 
   REQUIRE(fixture->generator->process_event(long_initialize_request));
   REQUIRE(initialize_error == emel::error::cast(emel::text::generator::error::none));

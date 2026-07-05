@@ -19,6 +19,7 @@
 #include "emel/text/generator/events.hpp"
 #include "emel/kernel/events.hpp"
 #include "emel/kernel/sm.hpp"
+#include "emel/memory/view.hpp"
 #include "emel/model/data.hpp"
 #include "emel/model/llama/detail.hpp"
 #include "emel/model/loader/errors.hpp"
@@ -218,6 +219,11 @@ struct native_backend {
   std::vector<size_t> flash_layer_cache_offsets = {};
   std::vector<float> recurrent_shortconv_cache = {};
   int32_t kv_cache_tokens = 0;
+  // Physical KV geometry from the memory-domain contract (emel::memory::view):
+  // per-layer position capacity is n_ctx rounded up to whole blocks so the
+  // block map and the physical layout agree on extents.
+  int32_t kv_block_tokens = 0;
+  int32_t kv_positions_capacity = 0;
 
   std::vector<emel::graph::processor::event::lifecycle_tensor_binding> lifecycle_tensors = {};
   std::vector<int32_t> prefill_required_ids = {};
@@ -3173,7 +3179,7 @@ inline size_t layer_cache_offset(const native_backend & backend,
                                  const int32_t layer,
                                  const int32_t position) noexcept {
   if (backend.layer_cache_offsets.size() != static_cast<size_t>(backend.n_layer)) {
-    return ((static_cast<size_t>(layer) * static_cast<size_t>(backend.n_ctx)) +
+    return ((static_cast<size_t>(layer) * static_cast<size_t>(backend.kv_positions_capacity)) +
             static_cast<size_t>(position)) *
         static_cast<size_t>(effective_attention_kv_dim(backend, block));
   }
@@ -3187,7 +3193,7 @@ inline size_t flash_layer_cache_layer_offset(const native_backend & backend,
   if (backend.flash_layer_cache_offsets.size() != static_cast<size_t>(backend.n_layer)) {
     return static_cast<size_t>(layer) *
         static_cast<size_t>(backend.n_head_kv) *
-        static_cast<size_t>(backend.n_ctx) *
+        static_cast<size_t>(backend.kv_positions_capacity) *
         static_cast<size_t>(backend.head_dim_kv);
   }
   return backend.flash_layer_cache_offsets[static_cast<size_t>(layer)];
@@ -3199,7 +3205,7 @@ inline size_t flash_layer_cache_head_offset(const native_backend & backend,
                                             const int32_t kv_head) noexcept {
   return flash_layer_cache_layer_offset(backend, layer) +
       static_cast<size_t>(kv_head) *
-      static_cast<size_t>(backend.n_ctx) *
+      static_cast<size_t>(backend.kv_positions_capacity) *
       static_cast<size_t>(effective_attention_head_dim_kv(backend, block));
 }
 
@@ -3423,7 +3429,7 @@ inline emel::kernel::event::op_flash_attn_ext make_flash_attn_request(
       kv_tokens,
       kv_head_count,
       sizeof(uint16_t) * kv_head_dim,
-      sizeof(uint16_t) * static_cast<uint64_t>(backend.n_ctx) * kv_head_dim);
+      sizeof(uint16_t) * static_cast<uint64_t>(backend.kv_positions_capacity) * kv_head_dim);
   request.src2 = make_src_view_strided_3d(
       const_cast<uint16_t *>(backend.flash_value_cache.data() + layer_offset),
       emel::kernel::event::dtype::f16,
@@ -3431,7 +3437,7 @@ inline emel::kernel::event::op_flash_attn_ext make_flash_attn_request(
       kv_tokens,
       kv_head_count,
       sizeof(uint16_t) * kv_head_dim,
-      sizeof(uint16_t) * static_cast<uint64_t>(backend.n_ctx) * kv_head_dim);
+      sizeof(uint16_t) * static_cast<uint64_t>(backend.kv_positions_capacity) * kv_head_dim);
   request.dst = make_dst_view_3d(
       attn_ctx.data(), head_dim, 1u, head_count);
   std::memcpy(request.op_params.data(), &scale, sizeof(scale));
@@ -4965,8 +4971,10 @@ inline bool run_decode_preselected_argmax(
 
 }  // namespace
 
-inline emel::error::type prepare(native_backend & backend,
-                                 const emel::model::data & model_data) noexcept {
+inline emel::error::type prepare(
+    native_backend & backend,
+    const emel::model::data & model_data,
+    const int32_t kv_block_tokens = emel::memory::view::DEFAULT_BLOCK_TOKENS) noexcept {
   std::destroy_at(std::addressof(backend));
   std::construct_at(std::addressof(backend));
   backend.kernel_kind = detect_host_kernel_kind();
@@ -5010,6 +5018,12 @@ inline emel::error::type prepare(native_backend & backend,
   }
 
   backend.head_dim = backend.n_embd / backend.n_head;
+  backend.kv_block_tokens = kv_block_tokens;
+  backend.kv_positions_capacity =
+      emel::memory::view::positions_capacity_for(kv_block_tokens, backend.n_ctx);
+  if (backend.kv_positions_capacity < backend.n_ctx) {
+    return emel::error::cast(emel::model::loader::error::model_invalid);
+  }
   if (!bind_tensor_rows(*backend.execution.token_embedding.tensor, backend.token_embedding) ||
       !dequantize_tensor_vector(*backend.execution.output_norm.tensor, backend.output_norm) ||
       !bind_output_projection(backend) ||
@@ -5185,11 +5199,11 @@ inline emel::error::type prepare(native_backend & backend,
       backend.max_q_dim = std::max(backend.max_q_dim, block.attention_q_dim);
       backend.max_kv_dim = std::max(backend.max_kv_dim, block.attention_kv_dim);
       backend.layer_cache_offsets[static_cast<size_t>(layer)] = cache_offset;
-      cache_offset += static_cast<size_t>(backend.n_ctx) *
+      cache_offset += static_cast<size_t>(backend.kv_positions_capacity) *
                       static_cast<size_t>(block.attention_kv_dim);
       backend.flash_layer_cache_offsets[static_cast<size_t>(layer)] = flash_cache_offset;
       flash_cache_offset += static_cast<size_t>(backend.n_head_kv) *
-                            static_cast<size_t>(backend.n_ctx) *
+                            static_cast<size_t>(backend.kv_positions_capacity) *
                             static_cast<size_t>(block.attention_head_dim_kv);
       continue;
     }

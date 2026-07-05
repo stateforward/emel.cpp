@@ -22,12 +22,12 @@ not change quantization or kernel arithmetic.
 
 ### Block geometry and slot allocation
 
-- [ ] **KVM-01**: KV cache physical geometry (block size in tokens, per-layer block
+- [x] **KVM-01**: KV cache physical geometry (block size in tokens, per-layer block
   capacity) is derived from one shared block-geometry contract owned by the memory
   domain, consumed by the generator backend at prepare/initialize time, with no
   dispatch-time allocation introduced.
 
-- [ ] **KVM-02**: The maintained generate path dispatches `allocate_slots` into
+- [x] **KVM-02**: The maintained generate path dispatches `allocate_slots` into
   `memory::hybrid` so the block map tracks real token growth for prefill and decode,
   with block-exhaustion and invalid-request outcomes modeled as explicit `_error`
   events and guard-selected transitions (no silent clamping, no helper-selected
@@ -103,4 +103,4 @@ not change quantization or kernel arithmetic.
 | KVE-01 | Phase 250 |
 | KVD-01 | Phase 250 |
 
-Mapped: 10/10 v1.28 requirements; satisfied 0, pending 10.
+Mapped: 10/10 v1.28 requirements; satisfied 2, pending 8.

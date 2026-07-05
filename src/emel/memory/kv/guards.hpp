@@ -13,12 +13,7 @@ namespace emel::memory::kv::guard {
 namespace detail {
 
 inline int32_t blocks_for_length(const int32_t block_tokens, const int32_t token_count) noexcept {
-  const int32_t positive_tokens = static_cast<int32_t>(token_count > 0);
-  const int32_t positive_block_tokens = static_cast<int32_t>(block_tokens > 0);
-  const int32_t safe_block_tokens = block_tokens + static_cast<int32_t>(block_tokens <= 0);
-  const int32_t effective_tokens = positive_tokens * positive_block_tokens * token_count;
-  const int32_t rounded = (effective_tokens + safe_block_tokens - 1) / safe_block_tokens;
-  return rounded * positive_block_tokens;
+  return view::blocks_for_tokens(block_tokens, token_count);
 }
 
 }  // namespace detail

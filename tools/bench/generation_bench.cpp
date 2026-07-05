@@ -22,6 +22,7 @@
 #include <utility>
 #include <vector>
 
+#include "emel/memory/view.hpp"
 #include "emel/error/error.hpp"
 #include "emel/gguf/loader/any.hpp"
 #include "emel/gguf/loader/errors.hpp"
@@ -1676,8 +1677,13 @@ bool initialize_emel_session(emel_session &session,
   const int32_t prompt_capacity =
       std::max<int32_t>(32, static_cast<int32_t>(formatted_prompt.size()) + 8);
   const int32_t decode_capacity = std::max<int32_t>(4, spec.max_tokens);
-  const int32_t block_capacity =
-      std::max<int32_t>(8, prompt_capacity + decode_capacity);
+  // Reserve whole 16-token blocks for the session budget, capped at the model
+  // context window: the generator rejects pools larger than physical KV
+  // capacity (emel::memory::view geometry contract).
+  const int32_t session_tokens = std::min<int32_t>(
+      prompt_capacity + decode_capacity, session.model_data.params.n_ctx);
+  const int32_t block_capacity = std::max<int32_t>(
+      1, emel::memory::view::blocks_for_tokens(16, session_tokens));
 
   reset_initialize_capture(session);
   emel::error::type error_out =

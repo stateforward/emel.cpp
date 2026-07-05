@@ -10,6 +10,39 @@ inline constexpr int32_t MAX_SEQUENCES = 256;
 inline constexpr int32_t MAX_BLOCKS_PER_SEQUENCE = 4096;
 inline constexpr uint16_t INVALID_KV_BLOCK = UINT16_MAX;
 
+// Shared KV block-geometry contract. The memory domain owns these values; the
+// kv machine resolves reserve requests against them and cache owners (for
+// example the text generator backend) size physical storage from them so the
+// block map and the physical layout can never disagree on geometry.
+inline constexpr int32_t DEFAULT_BLOCK_TOKENS = 16;
+inline constexpr int32_t MAX_BLOCKS = 32768;
+
+// Branch-free default resolution for geometry request fields: non-positive
+// requests resolve to the contract default.
+constexpr int32_t resolved_or_default(const int32_t value, const int32_t fallback) noexcept {
+  const int32_t use_value = static_cast<int32_t>(value > 0);
+  return use_value * value + (1 - use_value) * fallback;
+}
+
+// Number of whole blocks needed to hold token_count tokens. Safe for
+// non-positive inputs (returns 0) so guards can evaluate raw request fields.
+constexpr int32_t blocks_for_tokens(const int32_t block_tokens,
+                                    const int32_t token_count) noexcept {
+  const int32_t positive_tokens = static_cast<int32_t>(token_count > 0);
+  const int32_t positive_block_tokens = static_cast<int32_t>(block_tokens > 0);
+  const int32_t safe_block_tokens = block_tokens + static_cast<int32_t>(block_tokens <= 0);
+  const int32_t effective_tokens = positive_tokens * positive_block_tokens * token_count;
+  const int32_t rounded = (effective_tokens + safe_block_tokens - 1) / safe_block_tokens;
+  return rounded * positive_block_tokens;
+}
+
+// Physical position capacity (tokens, block-padded) required to hold
+// token_count tokens: blocks_for_tokens rounded back up to whole blocks.
+constexpr int32_t positions_capacity_for(const int32_t block_tokens,
+                                         const int32_t token_count) noexcept {
+  return blocks_for_tokens(block_tokens, token_count) * block_tokens;
+}
+
 struct snapshot {
   int32_t max_sequences = 0;
   int32_t block_tokens = 16;
