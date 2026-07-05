@@ -2246,6 +2246,23 @@ TEST_CASE("generator_detail_kv_physical_map_binds_snapshot_block_order") {
   emel::text::generator::detail::bind_kv_physical_positions(*backend, snapshot, 0);
   snapshot.sequence_active[0] = 1;
 
+  // The snapshot-resolved recurrent slot shifts shortconv state addressing;
+  // slot 0 preserves the flat layout.
+  CHECK(backend->kv_recurrent_slot == 0);
+  const size_t flat_shortconv =
+      emel::text::generator::detail::shortconv_state_layer_offset(*backend, 0);
+  CHECK(flat_shortconv == 0u);
+  snapshot.sequence_recurrent_slot[0] = 3;
+  emel::text::generator::detail::bind_kv_physical_positions(*backend, snapshot, 0);
+  backend->kv_recurrent_slot = snapshot.lookup_recurrent_slot(0);
+  CHECK(backend->kv_recurrent_slot == 3);
+  CHECK(emel::text::generator::detail::shortconv_state_layer_offset(*backend, 0) ==
+        static_cast<size_t>(3) * static_cast<size_t>(backend->n_layer) *
+            static_cast<size_t>(backend->shortconv_state_size) *
+            static_cast<size_t>(backend->n_embd));
+  backend->kv_recurrent_slot = 0;
+  snapshot.sequence_recurrent_slot[0] = 0;
+
   // Rebinding a contiguous snapshot restores the flat layout addressing.
   snapshot.sequence_kv_blocks[0][0] = 0;
   snapshot.sequence_kv_blocks[0][1] = 1;
@@ -3051,6 +3068,10 @@ TEST_CASE("generator_detail_graph_callbacks_accept_guarded_requests_without_erro
   fixture->memory_snapshot.sequence_active[0] = 0;
   expect_map_rejected();
   fixture->memory_snapshot.sequence_active[0] = 1;
+
+  fixture->memory_snapshot.sequence_recurrent_slot[0] = -1;
+  expect_map_rejected();
+  fixture->memory_snapshot.sequence_recurrent_slot[0] = 0;
 
   err = -1;
   CHECK(emel::text::generator::detail::validate_guarded_compute(

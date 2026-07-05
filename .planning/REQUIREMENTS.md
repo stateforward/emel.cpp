@@ -58,7 +58,7 @@ not change quantization or kernel arithmetic.
 
 ### Recurrent state ownership
 
-- [ ] **KVS-01**: Recurrent (shortconv) state is addressed through the snapshot's
+- [x] **KVS-01**: Recurrent (shortconv) state is addressed through the snapshot's
   `sequence_recurrent_slot` mapping instead of an implicit flat layer-only offset,
   bit-exact for the maintained single-slot workload.
 
@@ -103,4 +103,4 @@ not change quantization or kernel arithmetic.
 | KVE-01 | Phase 250 |
 | KVD-01 | Phase 250 |
 
-Mapped: 10/10 v1.28 requirements; satisfied 6, pending 4.
+Mapped: 10/10 v1.28 requirements; satisfied 7, pending 3.

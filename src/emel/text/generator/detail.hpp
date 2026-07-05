@@ -229,6 +229,9 @@ struct native_backend {
   // an unbound (empty) map also reads as identity so hand-built backends keep
   // the flat layout.
   std::vector<int32_t> kv_physical_positions = {};
+  // Snapshot-resolved recurrent state slot for the primary sequence, rebound
+  // per compute dispatch; slot 0 is the flat single-sequence layout.
+  int32_t kv_recurrent_slot = 0;
 
   std::vector<emel::graph::processor::event::lifecycle_tensor_binding> lifecycle_tensors = {};
   std::vector<int32_t> prefill_required_ids = {};
@@ -1118,7 +1121,12 @@ inline const block_weights * first_attention_block(const native_backend & backen
 
 inline size_t shortconv_state_layer_offset(const native_backend & backend,
                                            const int32_t layer_index) noexcept {
-  return static_cast<size_t>(layer_index) *
+  // Recurrent state is addressed through the snapshot-resolved slot bound at
+  // compute dispatch; the cache holds max_sequences (currently 1) slots, so
+  // slot 0 preserves the flat pre-cutover layout bit-exactly.
+  return (static_cast<size_t>(backend.kv_recurrent_slot) *
+              static_cast<size_t>(backend.n_layer) +
+          static_cast<size_t>(layer_index)) *
          static_cast<size_t>(backend.shortconv_state_size) *
          static_cast<size_t>(backend.n_embd);
 }
@@ -5376,7 +5384,8 @@ inline bool validate_kv_map_contract(const emel::graph::processor::event::execut
       request.seq_primary_ids != nullptr &&
       request.seq_primary_ids_count > 0 &&
       request.memory_view->block_tokens == backend.kv_block_tokens &&
-      request.memory_view->is_sequence_active(request.seq_primary_ids[0]);
+      request.memory_view->is_sequence_active(request.seq_primary_ids[0]) &&
+      request.memory_view->lookup_recurrent_slot(request.seq_primary_ids[0]) >= 0;
   if (!map_ready) {
     if (err_out != nullptr) {
       *err_out = k_error_invalid;
@@ -5437,8 +5446,11 @@ inline bool bind_guarded_inputs(const emel::graph::processor::event::execute & r
   backend.bound_token_count = io.token_count;
   backend.bound_position_count = request.positions_count;
   // validate_kv_map_contract admitted this request, so the snapshot and the
-  // primary sequence id are present and coherent; rebind the physical map.
+  // primary sequence id are present and coherent; rebind the physical map and
+  // the recurrent slot.
   bind_kv_physical_positions(backend, *request.memory_view, request.seq_primary_ids[0]);
+  backend.kv_recurrent_slot =
+      request.memory_view->lookup_recurrent_slot(request.seq_primary_ids[0]);
   backend.bound_ready = true;
   return true;
 }
