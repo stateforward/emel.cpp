@@ -1677,13 +1677,14 @@ bool initialize_emel_session(emel_session &session,
   const int32_t prompt_capacity =
       std::max<int32_t>(32, static_cast<int32_t>(formatted_prompt.size()) + 8);
   const int32_t decode_capacity = std::max<int32_t>(4, spec.max_tokens);
-  // Reserve whole 16-token blocks for the session budget, capped at the model
-  // context window: the generator rejects pools larger than physical KV
+  // Reserve whole memory-contract blocks for the session budget, capped at the
+  // model context window: the generator rejects pools larger than physical KV
   // capacity (emel::memory::view geometry contract).
   const int32_t session_tokens = std::min<int32_t>(
       prompt_capacity + decode_capacity, session.model_data.params.n_ctx);
   const int32_t block_capacity = std::max<int32_t>(
-      1, emel::memory::view::blocks_for_tokens(16, session_tokens));
+      1, emel::memory::view::blocks_for_tokens(
+             emel::memory::view::DEFAULT_BLOCK_TOKENS, session_tokens));
 
   reset_initialize_capture(session);
   emel::error::type error_out =
@@ -1704,7 +1705,7 @@ bool initialize_emel_session(emel_session &session,
   request.max_prompt_tokens = prompt_capacity;
   request.max_generated_tokens = decode_capacity;
   request.max_blocks = block_capacity;
-  request.block_tokens = 16;
+  request.block_tokens = emel::memory::view::DEFAULT_BLOCK_TOKENS;
   request.strip_leading_space = false;
   request.error_out = &error_out;
   request.on_done = {&session, on_initialize_done};

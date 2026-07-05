@@ -19,10 +19,18 @@ struct allocate_sequence {
 };
 
 struct allocate_slots {
+  using copy_block_fn = bool (*)(int32_t src_block,
+                                 int32_t dst_block,
+                                 int32_t block_tokens,
+                                 void * user_data,
+                                 int32_t * error_out);
+
   int32_t seq_id = 0;
   int32_t token_count = 0;
   int32_t * block_count_out = nullptr;
   int32_t * error_out = nullptr;
+  copy_block_fn copy_block = nullptr;
+  void * copy_block_user_data = nullptr;
 };
 
 struct branch_sequence {

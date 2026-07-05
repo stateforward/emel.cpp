@@ -158,24 +158,26 @@ lane_timeout_tool() {
 
 timeout_seconds() {
   local value="$1"
-  if [[ "$value" =~ ^([0-9]+)$ ]]; then
-    echo "${BASH_REMATCH[1]}"
-    return 0
-  fi
-  if [[ "$value" =~ ^([0-9]+)s$ ]]; then
-    echo "${BASH_REMATCH[1]}"
-    return 0
-  fi
-  if [[ "$value" =~ ^([0-9]+)m$ ]]; then
-    echo "$(( BASH_REMATCH[1] * 60 ))"
-    return 0
-  fi
-  if [[ "$value" =~ ^([0-9]+)h$ ]]; then
-    echo "$(( BASH_REMATCH[1] * 3600 ))"
-    return 0
-  fi
-  if [[ "$value" =~ ^([0-9]+)d$ ]]; then
-    echo "$(( BASH_REMATCH[1] * 86400 ))"
+  if [[ "$value" =~ ^([0-9]+([.][0-9]+)?)([smhd]?)$ ]]; then
+    local number="${BASH_REMATCH[1]}"
+    local suffix="${BASH_REMATCH[3]}"
+    awk -v number="$number" -v suffix="$suffix" '
+      BEGIN {
+        multiplier = 1
+        if (suffix == "m") {
+          multiplier = 60
+        } else if (suffix == "h") {
+          multiplier = 3600
+        } else if (suffix == "d") {
+          multiplier = 86400
+        }
+        seconds = number * multiplier
+        if (seconds == int(seconds)) {
+          printf "%d\n", seconds
+        } else {
+          printf "%.3f\n", seconds
+        }
+      }'
     return 0
   fi
   echo "error: unsupported EMEL_QUALITY_GATES_TIMEOUT value '${value}'" >&2
@@ -195,11 +197,24 @@ lane_timeout_for() {
   # reported per-lane failure with its log intact.
   local elapsed="$(( $(date +%s) - total_start ))"
   local flush_margin=180
-  local budget="$(( global_seconds - elapsed - flush_margin ))"
-  if (( budget < 60 )); then
-    budget=60
-  fi
-  echo "$budget"
+  awk -v global_seconds="$global_seconds" \
+      -v elapsed="$elapsed" \
+      -v flush_margin="$flush_margin" '
+    BEGIN {
+      if (global_seconds <= 0) {
+        print "0"
+        exit
+      }
+      budget = global_seconds - elapsed - flush_margin
+      if (budget < 60) {
+        budget = 60
+      }
+      if (budget == int(budget)) {
+        printf "%d\n", budget
+      } else {
+        printf "%.3f\n", budget
+      }
+    }'
 }
 
 run_domain_boundary_gate() {

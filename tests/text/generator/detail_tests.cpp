@@ -3154,6 +3154,11 @@ TEST_CASE("generator_detail_graph_callbacks_accept_guarded_requests_without_erro
 
   const auto * saved_memory_view = fixture->request.memory_view;
   fixture->request.memory_view = nullptr;
+  err = -1;
+  CHECK_FALSE(emel::text::generator::detail::validate_guarded_compute(
+      fixture->request, &err));
+  CHECK(err == static_cast<int32_t>(
+                   emel::error::cast(emel::graph::processor::error::invalid_request)));
   expect_kv_contract_rejected();
   fixture->request.memory_view = saved_memory_view;
 
@@ -3166,6 +3171,29 @@ TEST_CASE("generator_detail_graph_callbacks_accept_guarded_requests_without_erro
   expect_kv_contract_rejected();
   fixture->request.seq_primary_ids_count =
       static_cast<int32_t>(fixture->seq_primary_ids.size());
+
+  std::array<int32_t, 2> multi_seq_ids = {0, 0};
+  fixture->request.seq_primary_ids = multi_seq_ids.data();
+  fixture->request.seq_primary_ids_count =
+      static_cast<int32_t>(multi_seq_ids.size());
+  err = -1;
+  CHECK_FALSE(emel::text::generator::detail::validate_guarded_compute(
+      fixture->request, &err));
+  CHECK(err == static_cast<int32_t>(
+                   emel::error::cast(emel::graph::processor::error::invalid_request)));
+  fixture->request.seq_primary_ids = saved_seq_primary_ids;
+  fixture->request.seq_primary_ids_count =
+      static_cast<int32_t>(fixture->seq_primary_ids.size());
+
+  fixture->backend.shortconv_state_size = 1;
+  fixture->memory_snapshot.sequence_recurrent_slot[0] = 1;
+  err = -1;
+  CHECK_FALSE(emel::text::generator::detail::validate_guarded_compute(
+      fixture->request, &err));
+  CHECK(err == static_cast<int32_t>(
+                   emel::error::cast(emel::graph::processor::error::invalid_request)));
+  fixture->memory_snapshot.sequence_recurrent_slot[0] = 0;
+  fixture->backend.shortconv_state_size = 0;
 
   fixture->memory_snapshot.sequence_active[0] = 0;
   expect_kv_contract_rejected();

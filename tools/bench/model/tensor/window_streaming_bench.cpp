@@ -779,13 +779,14 @@ bool initialize_session(emel_session &session, const int32_t max_tokens) {
       emel::text::generator::selection_mode::preselected_argmax;
   request.max_prompt_tokens = prompt_capacity;
   request.max_generated_tokens = decode_capacity;
-  // Whole 16-token blocks for the session budget, capped at the model context
-  // window per the emel::memory::view geometry contract.
+  // Whole memory-contract blocks for the session budget, capped at the model
+  // context window per the emel::memory::view geometry contract.
   request.max_blocks = std::max<int32_t>(
       1, emel::memory::view::blocks_for_tokens(
-             16, std::min<int32_t>(prompt_capacity + decode_capacity,
-                                   session.model_data.params.n_ctx)));
-  request.block_tokens = 16;
+             emel::memory::view::DEFAULT_BLOCK_TOKENS,
+             std::min<int32_t>(prompt_capacity + decode_capacity,
+                               session.model_data.params.n_ctx)));
+  request.block_tokens = emel::memory::view::DEFAULT_BLOCK_TOKENS;
   request.strip_leading_space = false;
   request.on_done = {&session, on_initialize_done};
   request.on_error = {&session, on_initialize_error};

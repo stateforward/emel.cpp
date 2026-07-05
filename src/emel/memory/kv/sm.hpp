@@ -28,7 +28,11 @@ struct allocate_slots_request_shape_decision {};
 struct allocate_slots_request_length_decision {};
 struct allocate_slots_request_block_layout_decision {};
 struct allocate_slots_request_capacity_decision {};
-struct allocate_slots_exec {};
+struct state_allocate_slots_tail_decision {};
+struct state_allocate_slots_tail_copy_exec {};
+struct state_allocate_slots_tail_copy_result_decision {};
+struct state_allocate_slots_direct_exec {};
+struct state_allocate_slots_tail_split_exec {};
 struct allocate_slots_result_decision {};
 
 struct branch_sequence_request_decision {};
@@ -129,15 +133,45 @@ struct model {
           [ guard::allocate_slots_request_block_layout_invalid{} ]
           / action::mark_backend_error
 
-      , sml::state<allocate_slots_exec> <= sml::state<allocate_slots_request_capacity_decision>
+      , sml::state<state_allocate_slots_tail_decision> <=
+            sml::state<allocate_slots_request_capacity_decision>
           + sml::completion<event::allocate_slots_runtime>
           [ guard::allocate_slots_request_capacity_valid{} ]
       , sml::state<errored> <= sml::state<allocate_slots_request_capacity_decision>
           + sml::completion<event::allocate_slots_runtime>
           [ guard::allocate_slots_request_capacity_invalid{} ]
           / action::mark_out_of_memory
-      , sml::state<allocate_slots_result_decision> <= sml::state<allocate_slots_exec>
-          + sml::completion<event::allocate_slots_runtime> / action::exec_allocate_slots
+      , sml::state<state_allocate_slots_tail_copy_exec> <=
+            sml::state<state_allocate_slots_tail_decision>
+          + sml::completion<event::allocate_slots_runtime>
+          [ guard::guard_allocate_slots_shared_tail_copy_ready{} ]
+      , sml::state<errored> <= sml::state<state_allocate_slots_tail_decision>
+          + sml::completion<event::allocate_slots_runtime>
+          [ guard::guard_allocate_slots_shared_tail_copy_missing{} ]
+          / action::mark_invalid_request
+      , sml::state<state_allocate_slots_direct_exec> <= sml::state<state_allocate_slots_tail_decision>
+          + sml::completion<event::allocate_slots_runtime>
+          [ guard::guard_allocate_slots_shared_tail_split_not_required{} ]
+      , sml::state<state_allocate_slots_tail_copy_result_decision> <=
+            sml::state<state_allocate_slots_tail_copy_exec>
+          + sml::completion<event::allocate_slots_runtime>
+          / action::effect_copy_shared_tail_block
+      , sml::state<state_allocate_slots_tail_split_exec> <=
+            sml::state<state_allocate_slots_tail_copy_result_decision>
+          + sml::completion<event::allocate_slots_runtime> [ guard::operation_succeeded{} ]
+      , sml::state<errored> <= sml::state<state_allocate_slots_tail_copy_result_decision>
+          + sml::completion<event::allocate_slots_runtime> [ guard::operation_failed_with_error{} ]
+          / action::mark_error_from_operation
+      , sml::state<errored> <= sml::state<state_allocate_slots_tail_copy_result_decision>
+          + sml::completion<event::allocate_slots_runtime> [ guard::operation_failed_without_error{} ]
+          / action::mark_backend_error
+      , sml::state<allocate_slots_result_decision> <=
+            sml::state<state_allocate_slots_tail_split_exec>
+          + sml::completion<event::allocate_slots_runtime>
+          / action::effect_allocate_slots_with_tail_split
+      , sml::state<allocate_slots_result_decision> <= sml::state<state_allocate_slots_direct_exec>
+          + sml::completion<event::allocate_slots_runtime>
+          / action::effect_allocate_slots_without_tail_split
       , sml::state<done> <= sml::state<allocate_slots_result_decision>
           + sml::completion<event::allocate_slots_runtime> [ guard::operation_succeeded{} ]
       , sml::state<errored> <= sml::state<allocate_slots_result_decision>
@@ -282,8 +316,12 @@ struct model {
           + sml::unexpected_event<sml::_> / action::on_unexpected
       , sml::state<ready> <= sml::state<allocate_slots_request_capacity_decision>
           + sml::unexpected_event<sml::_> / action::on_unexpected
-      , sml::state<ready> <= sml::state<allocate_slots_exec> + sml::unexpected_event<sml::_>
-          / action::on_unexpected
+      , sml::state<ready> <= sml::state<state_allocate_slots_tail_decision>
+          + sml::unexpected_event<sml::_> / action::on_unexpected
+      , sml::state<ready> <= sml::state<state_allocate_slots_direct_exec>
+          + sml::unexpected_event<sml::_> / action::on_unexpected
+      , sml::state<ready> <= sml::state<state_allocate_slots_tail_split_exec>
+          + sml::unexpected_event<sml::_> / action::on_unexpected
       , sml::state<ready> <= sml::state<allocate_slots_result_decision>
           + sml::unexpected_event<sml::_> / action::on_unexpected
       , sml::state<ready> <= sml::state<branch_sequence_request_decision>

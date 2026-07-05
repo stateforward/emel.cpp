@@ -33,6 +33,22 @@ inline constexpr int32_t MAX_GENERATION_STEPS = 4096;
 inline constexpr int32_t k_sequence_id = 0;
 inline constexpr int32_t k_sequence_mask_words = 1;
 
+inline bool copy_kv_cache_block(const int32_t src_block,
+                                const int32_t dst_block,
+                                const int32_t block_tokens,
+                                void * user_data,
+                                int32_t * error_out) noexcept {
+  auto * backend = static_cast<emel::text::generator::detail::native_backend *>(user_data);
+  if (backend == nullptr) {
+    if (error_out != nullptr) {
+      *error_out = emel::text::generator::detail::k_error_invalid;
+    }
+    return false;
+  }
+  return emel::text::generator::detail::copy_attention_kv_block(
+      *backend, src_block, dst_block, block_tokens, error_out);
+}
+
 struct tokenizer_binding {
   void * actor = nullptr;
   bool (*dispatch_bind)(void * tokenizer_sm,

@@ -311,6 +311,48 @@ TEST_CASE("graph_processor_action_and_guard_branches") {
   CHECK(guard::valid_execute{}(ev, machine_ctx));
   CHECK_FALSE(guard::invalid_execute{}(ev, machine_ctx));
 
+  std::array<int32_t, 2> positions = {{0, 1}};
+  request.positions = positions.data();
+  request.positions_count = 1;
+  request.seq_primary_ids = nullptr;
+  request.seq_primary_ids_count = 0;
+  request.memory_view = nullptr;
+  CHECK(guard::invalid_execute{}(ev, machine_ctx));
+  request = make_valid_execute(&output, &state, lifecycle);
+
+  emel::memory::view::snapshot kv_only_snapshot{};
+  kv_only_snapshot.max_sequences = 2;
+  kv_only_snapshot.block_tokens = 4;
+  kv_only_snapshot.sequence_active[0] = 1;
+  kv_only_snapshot.sequence_active[1] = 1;
+  kv_only_snapshot.sequence_length_values[0] = 2;
+  kv_only_snapshot.sequence_length_values[1] = 2;
+  kv_only_snapshot.sequence_kv_block_count[0] = 1;
+  kv_only_snapshot.sequence_kv_block_count[1] = 1;
+  kv_only_snapshot.sequence_kv_blocks[0][0] = 0;
+  kv_only_snapshot.sequence_kv_blocks[1][0] = 1;
+  kv_only_snapshot.sequence_recurrent_slot[0] = -1;
+  kv_only_snapshot.sequence_recurrent_slot[1] = -1;
+  std::array<int32_t, 1> single_seq = {{0}};
+  request.memory_view = &kv_only_snapshot;
+  request.positions = positions.data();
+  request.positions_count = static_cast<int32_t>(positions.size());
+  request.seq_primary_ids = single_seq.data();
+  request.seq_primary_ids_count = static_cast<int32_t>(single_seq.size());
+  CHECK(guard::valid_execute{}(ev, machine_ctx));
+
+  std::array<int32_t, 2> per_token_seq = {{0, 1}};
+  request.seq_primary_ids = per_token_seq.data();
+  request.seq_primary_ids_count = static_cast<int32_t>(per_token_seq.size());
+  CHECK(guard::valid_execute{}(ev, machine_ctx));
+
+  request.positions_count = 1;
+  CHECK(guard::invalid_execute{}(ev, machine_ctx));
+  request.positions_count = static_cast<int32_t>(positions.size());
+  kv_only_snapshot.sequence_kv_block_count[1] = 0;
+  CHECK(guard::invalid_execute{}(ev, machine_ctx));
+  request = make_valid_execute(&output, &state, lifecycle);
+
   request.step_size = 0;
   CHECK(guard::invalid_execute{}(ev, machine_ctx));
   CHECK(guard::invalid_execute_with_dispatchable_output{}(ev, machine_ctx));

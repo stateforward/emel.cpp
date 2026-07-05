@@ -17,6 +17,7 @@
 #endif
 
 #include "emel/text/generator/events.hpp"
+#include "emel/graph/processor/errors.hpp"
 #include "emel/kernel/events.hpp"
 #include "emel/kernel/sm.hpp"
 #include "emel/memory/view.hpp"
@@ -3566,6 +3567,94 @@ inline bool store_attention_kv_cache(native_backend & backend,
   return true;
 }
 
+inline bool copy_attention_kv_block(native_backend & backend,
+                                    const int32_t src_block,
+                                    const int32_t dst_block,
+                                    const int32_t block_tokens,
+                                    int32_t * err_out) noexcept {
+  if (err_out != nullptr) {
+    *err_out = k_error_ok;
+  }
+  const int64_t src_start = static_cast<int64_t>(src_block) * block_tokens;
+  const int64_t dst_start = static_cast<int64_t>(dst_block) * block_tokens;
+  const int64_t src_end = src_start + block_tokens;
+  const int64_t dst_end = dst_start + block_tokens;
+  if (block_tokens <= 0 ||
+      block_tokens != backend.kv_block_tokens ||
+      src_start < 0 ||
+      dst_start < 0 ||
+      src_end > backend.kv_positions_capacity ||
+      dst_end > backend.kv_positions_capacity ||
+      backend.layer_cache_offsets.size() != static_cast<size_t>(backend.n_layer) ||
+      backend.flash_layer_cache_offsets.size() != static_cast<size_t>(backend.n_layer) ||
+      backend.blocks.size() != static_cast<size_t>(backend.n_layer)) {
+    if (err_out != nullptr) {
+      *err_out = k_error_invalid;
+    }
+    return false;
+  }
+
+  for (int32_t layer = 0; layer < backend.n_layer; ++layer) {
+    const auto & block = backend.blocks[static_cast<size_t>(layer)];
+    const size_t kv_dim = static_cast<size_t>(effective_attention_kv_dim(backend, block));
+    const size_t row_count = static_cast<size_t>(block_tokens);
+    const size_t src_offset =
+        backend.layer_cache_offsets[static_cast<size_t>(layer)] +
+        static_cast<size_t>(src_start) * kv_dim;
+    const size_t dst_offset =
+        backend.layer_cache_offsets[static_cast<size_t>(layer)] +
+        static_cast<size_t>(dst_start) * kv_dim;
+    const size_t row_width = row_count * kv_dim;
+    if (src_offset + row_width > backend.key_cache.size() ||
+        dst_offset + row_width > backend.key_cache.size() ||
+        src_offset + row_width > backend.value_cache.size() ||
+        dst_offset + row_width > backend.value_cache.size()) {
+      if (err_out != nullptr) {
+        *err_out = k_error_invalid;
+      }
+      return false;
+    }
+    std::copy_n(
+        backend.key_cache.data() + src_offset,
+        row_width,
+        backend.key_cache.data() + dst_offset);
+    std::copy_n(
+        backend.value_cache.data() + src_offset,
+        row_width,
+        backend.value_cache.data() + dst_offset);
+
+    const size_t kv_head_dim =
+        static_cast<size_t>(effective_attention_head_dim_kv(backend, block));
+    for (int32_t kv_head = 0; kv_head < backend.n_head_kv; ++kv_head) {
+      const size_t flash_src_offset =
+          flash_layer_cache_head_offset(backend, block, layer, kv_head) +
+          static_cast<size_t>(src_start) * kv_head_dim;
+      const size_t flash_dst_offset =
+          flash_layer_cache_head_offset(backend, block, layer, kv_head) +
+          static_cast<size_t>(dst_start) * kv_head_dim;
+      const size_t flash_row_width = row_count * kv_head_dim;
+      if (flash_src_offset + flash_row_width > backend.flash_key_cache.size() ||
+          flash_dst_offset + flash_row_width > backend.flash_key_cache.size() ||
+          flash_src_offset + flash_row_width > backend.flash_value_cache.size() ||
+          flash_dst_offset + flash_row_width > backend.flash_value_cache.size()) {
+        if (err_out != nullptr) {
+          *err_out = k_error_invalid;
+        }
+        return false;
+      }
+      std::copy_n(
+          backend.flash_key_cache.data() + flash_src_offset,
+          flash_row_width,
+          backend.flash_key_cache.data() + flash_dst_offset);
+      std::copy_n(
+          backend.flash_value_cache.data() + flash_src_offset,
+          flash_row_width,
+          backend.flash_value_cache.data() + flash_dst_offset);
+    }
+  }
+  return true;
+}
+
 template <emel::text::generator::attention_mode mode>
 inline bool run_attention_for_q_vector(native_backend & backend,
                                        const kv_addressing_view & kv,
@@ -5519,19 +5608,68 @@ inline emel::text::generator::compute_io & bind_compute_io(
 inline native_backend & bind_native_backend(
     const emel::graph::processor::event::execute & request) noexcept;
 
+inline void mark_invalid_graph_request(int32_t * err_out) noexcept {
+  if (err_out != nullptr) {
+    *err_out = static_cast<int32_t>(
+        emel::error::cast(emel::graph::processor::error::invalid_request));
+  }
+}
+
+inline bool valid_single_sequence_kv_request(
+    const emel::graph::processor::event::execute & request,
+    int32_t * err_out) noexcept {
+  if (request.compute_ctx == nullptr ||
+      request.memory_view == nullptr ||
+      request.seq_primary_ids == nullptr ||
+      request.seq_primary_ids_count != 1 ||
+      request.positions == nullptr ||
+      request.positions_count <= 0) {
+    mark_invalid_graph_request(err_out);
+    return false;
+  }
+
+  const auto & snapshot = *request.memory_view;
+  const int32_t seq_id = request.seq_primary_ids[0];
+  if (snapshot.block_tokens <= 0 || !snapshot.is_sequence_active(seq_id)) {
+    mark_invalid_graph_request(err_out);
+    return false;
+  }
+
+  const auto & backend = bind_native_backend(request);
+  const int32_t recurrent_slot = snapshot.lookup_recurrent_slot(seq_id);
+  const int32_t recurrent_needed = static_cast<int32_t>(backend.shortconv_state_size > 0);
+  const int32_t recurrent_ready = static_cast<int32_t>(recurrent_slot == 0);
+  if (recurrent_needed * (1 - recurrent_ready) != 0) {
+    mark_invalid_graph_request(err_out);
+    return false;
+  }
+
+  for (int32_t pos_idx = 0; pos_idx < request.positions_count; ++pos_idx) {
+    const int32_t position = request.positions[static_cast<size_t>(pos_idx)];
+    const int32_t block_id = snapshot.lookup_kv_block(seq_id, position);
+    const int64_t physical_position =
+        static_cast<int64_t>(block_id) * static_cast<int64_t>(snapshot.block_tokens) +
+        static_cast<int64_t>(position % snapshot.block_tokens);
+    if (block_id < 0 ||
+        physical_position < 0 ||
+        physical_position >= static_cast<int64_t>(backend.kv_positions_capacity)) {
+      mark_invalid_graph_request(err_out);
+      return false;
+    }
+  }
+
+  return true;
+}
+
 inline bool validate_guarded_compute(const emel::graph::processor::event::execute & request,
                                      int32_t * err_out) noexcept {
-  (void)request;
-  (void)err_out;
-  return true;
+  return valid_single_sequence_kv_request(request, err_out);
 }
 
 inline bool validate_guarded_preselected_argmax(
     const emel::graph::processor::event::execute & request,
     int32_t * err_out) noexcept {
-  (void)request;
-  (void)err_out;
-  return true;
+  return valid_single_sequence_kv_request(request, err_out);
 }
 
 inline bool prepare_graph(const emel::graph::processor::event::execute &,

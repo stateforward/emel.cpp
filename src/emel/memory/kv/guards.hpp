@@ -16,6 +16,19 @@ inline int32_t blocks_for_length(const int32_t block_tokens, const int32_t token
   return view::blocks_for_tokens(block_tokens, token_count);
 }
 
+inline int32_t guard_shared_partial_tail_split_needed(const action::context & ctx,
+                                                      const size_t seq_index,
+                                                      const int32_t old_length,
+                                                      const int32_t old_blocks) noexcept {
+  const int32_t has_partial_tail =
+      static_cast<int32_t>(old_length > 0 && (old_length % ctx.block_tokens) != 0 &&
+                           old_blocks > 0);
+  const size_t tail_index = static_cast<size_t>((old_blocks - 1) * has_partial_tail);
+  const uint16_t tail_block = ctx.seq_to_blocks[seq_index][tail_index];
+  const auto & refs = ctx.block_refs.storage().refs;
+  return has_partial_tail * static_cast<int32_t>(refs[static_cast<size_t>(tail_block)] > 1);
+}
+
 }  // namespace detail
 
 struct reserve_request_valid {
@@ -123,9 +136,12 @@ struct allocate_slots_request_capacity_valid {
     const int32_t old_blocks = detail::blocks_for_length(ctx.block_tokens, old_length);
     const int32_t new_blocks = detail::blocks_for_length(ctx.block_tokens, new_length);
     const int32_t blocks_needed = new_blocks - old_blocks;
+    const int32_t tail_split_needed =
+        detail::guard_shared_partial_tail_split_needed(ctx, seq_index, old_length, old_blocks);
+    const int32_t physical_blocks_needed = blocks_needed + tail_split_needed;
     const bool within_sequence_capacity =
         existing_block_count + blocks_needed <= kv::detail::max_blocks_per_sequence;
-    const bool enough_free_blocks = ctx.free_count >= blocks_needed;
+    const bool enough_free_blocks = ctx.free_count >= physical_blocks_needed;
     return block_layout_valid && within_sequence_capacity && enough_free_blocks;
   }
 };
@@ -134,6 +150,43 @@ struct allocate_slots_request_capacity_invalid {
   bool operator()(const event::allocate_slots_runtime & ev,
                   const action::context & ctx) const noexcept {
     return !allocate_slots_request_capacity_valid{}(ev, ctx);
+  }
+};
+
+struct guard_allocate_slots_shared_tail_split_required {
+  bool operator()(const event::allocate_slots_runtime & ev,
+                  const action::context & ctx) const noexcept {
+    const bool capacity_valid = allocate_slots_request_capacity_valid{}(ev, ctx);
+    const int32_t safe_seq_id = static_cast<int32_t>(capacity_valid) * ev.request.seq_id;
+    const size_t seq_index = static_cast<size_t>(safe_seq_id);
+    const int32_t old_length = ctx.sequence_length[seq_index];
+    const int32_t old_blocks = detail::blocks_for_length(ctx.block_tokens, old_length);
+    return capacity_valid &&
+           detail::guard_shared_partial_tail_split_needed(ctx, seq_index, old_length, old_blocks) !=
+               0;
+  }
+};
+
+struct guard_allocate_slots_shared_tail_copy_ready {
+  bool operator()(const event::allocate_slots_runtime & ev,
+                  const action::context & ctx) const noexcept {
+    return guard_allocate_slots_shared_tail_split_required{}(ev, ctx) &&
+           ev.request.copy_block != nullptr;
+  }
+};
+
+struct guard_allocate_slots_shared_tail_copy_missing {
+  bool operator()(const event::allocate_slots_runtime & ev,
+                  const action::context & ctx) const noexcept {
+    return guard_allocate_slots_shared_tail_split_required{}(ev, ctx) &&
+           ev.request.copy_block == nullptr;
+  }
+};
+
+struct guard_allocate_slots_shared_tail_split_not_required {
+  bool operator()(const event::allocate_slots_runtime & ev,
+                  const action::context & ctx) const noexcept {
+    return !guard_allocate_slots_shared_tail_split_required{}(ev, ctx);
   }
 };
 
