@@ -22,6 +22,7 @@
 #include "emel/io/staged_read/sm.hpp"
 #include "emel/io/source/any.hpp"
 #include "emel/logits/sampler/events.hpp"
+#include "emel/memory/view.hpp"
 #include "emel/model/data.hpp"
 #include "emel/model/detail.hpp"
 #include "emel/model/loader/errors.hpp"
@@ -1140,8 +1141,11 @@ bool initialize_emel_session(emel_session &session) {
   const int32_t prompt_capacity =
       std::max<int32_t>(32, static_cast<int32_t>(formatted_prompt.size()) + 8);
   const int32_t decode_capacity = std::max<int32_t>(4, k_max_tokens);
-  const int32_t block_capacity =
-      std::max<int32_t>(8, prompt_capacity + decode_capacity);
+  const int32_t session_tokens = std::min<int32_t>(
+      prompt_capacity + decode_capacity, session.model_data->params.n_ctx);
+  const int32_t block_capacity = std::max<int32_t>(
+      1, emel::memory::view::blocks_for_tokens(
+             emel::memory::view::DEFAULT_BLOCK_TOKENS, session_tokens));
 
   reset_initialize_capture(session);
   emel::error::type error_out =
@@ -1162,7 +1166,7 @@ bool initialize_emel_session(emel_session &session) {
   request.max_prompt_tokens = prompt_capacity;
   request.max_generated_tokens = decode_capacity;
   request.max_blocks = block_capacity;
-  request.block_tokens = 16;
+  request.block_tokens = emel::memory::view::DEFAULT_BLOCK_TOKENS;
   request.strip_leading_space = false;
   request.error_out = &error_out;
   request.on_done = {&session, on_initialize_done};

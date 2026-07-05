@@ -13,17 +13,11 @@ namespace emel::memory::kv::action {
 namespace detail {
 
 inline int32_t resolve_positive_or_default(const int32_t value, const int32_t fallback) noexcept {
-  const int32_t use_value = static_cast<int32_t>(value > 0);
-  return use_value * value + (1 - use_value) * fallback;
+  return view::resolved_or_default(value, fallback);
 }
 
 inline int32_t blocks_for_length(const int32_t block_tokens, const int32_t token_count) noexcept {
-  const int32_t positive_tokens = static_cast<int32_t>(token_count > 0);
-  const int32_t positive_block_tokens = static_cast<int32_t>(block_tokens > 0);
-  const int32_t safe_block_tokens = block_tokens + static_cast<int32_t>(block_tokens <= 0);
-  const int32_t effective_tokens = positive_tokens * positive_block_tokens * token_count;
-  const int32_t rounded = (effective_tokens + safe_block_tokens - 1) / safe_block_tokens;
-  return rounded * positive_block_tokens;
+  return view::blocks_for_tokens(block_tokens, token_count);
 }
 
 inline void reset_runtime(context & ctx) noexcept {
@@ -36,8 +30,11 @@ inline void reset_runtime(context & ctx) noexcept {
 
   ctx.block_refs.reset();
   ctx.free_count = ctx.max_blocks;
+  // Stack top holds block 0 so fresh allocations pop ascending contiguous ids;
+  // contiguous logical growth then maps to contiguous physical spans, which the
+  // flash-attention contiguity guard depends on.
   for (int32_t i = 0; i < ctx.max_blocks; ++i) {
-    ctx.free_stack[static_cast<size_t>(i)] = static_cast<uint16_t>(i);
+    ctx.free_stack[static_cast<size_t>(i)] = static_cast<uint16_t>(ctx.max_blocks - 1 - i);
   }
 }
 
@@ -96,7 +93,12 @@ struct begin_allocate_slots {
     ev.ctx.new_blocks = 0;
     ev.ctx.existing_block_count = 0;
     ev.ctx.blocks_needed = 0;
+    ev.ctx.tail_split_needed = 0;
+    ev.ctx.physical_blocks_needed = 0;
+    ev.ctx.copy_accepted = false;
+    ev.ctx.copy_error = static_cast<int32_t>(emel::error::cast(error::none));
     ev.ctx.linked_count = 0;
+    ev.ctx.unlinked_count = 0;
     ev.block_count_out = 0;
     ev.error_code_out = static_cast<int32_t>(emel::error::cast(error::none));
   }
@@ -182,34 +184,173 @@ struct exec_allocate_sequence {
   }
 };
 
-struct exec_allocate_slots {
+namespace detail {
+
+inline void shared_tail_blocks(const event::allocate_slots_runtime & ev,
+                               const context & ctx,
+                               int32_t & tail_block_index,
+                               uint16_t & old_block,
+                               uint16_t & new_block) noexcept {
+  const size_t seq_index = static_cast<size_t>(ev.request.seq_id);
+  const int32_t old_length = ctx.sequence_length[seq_index];
+  const int32_t old_blocks = detail::blocks_for_length(ctx.block_tokens, old_length);
+  tail_block_index = old_blocks - 1;
+  old_block = ctx.seq_to_blocks[seq_index][static_cast<size_t>(tail_block_index)];
+  new_block = ctx.free_stack[static_cast<size_t>(ctx.free_count - 1)];
+}
+
+inline int32_t block_ref_linkable(const kv::detail::block_storage & storage,
+                                  const uint16_t block_id) noexcept {
+  const size_t block_index = static_cast<size_t>(block_id);
+  return static_cast<int32_t>(block_index < storage.refs.size() &&
+                              storage.refs[block_index] < UINT16_MAX);
+}
+
+inline int32_t block_ref_unlinkable(const kv::detail::block_storage & storage,
+                                    const uint16_t block_id) noexcept {
+  const size_t block_index = static_cast<size_t>(block_id);
+  return static_cast<int32_t>(block_index < storage.refs.size() &&
+                              storage.refs[block_index] > 0);
+}
+
+}  // namespace detail
+
+struct effect_copy_shared_tail_block {
   void operator()(const event::allocate_slots_runtime & ev, context & ctx) const noexcept {
-    const size_t seq_index = static_cast<size_t>(ev.request.seq_id);
-    ev.ctx.old_length = ctx.sequence_length[seq_index];
-    ev.ctx.new_length = ev.ctx.old_length + ev.request.token_count;
-    ev.ctx.existing_block_count = ctx.sequence_block_count[seq_index];
-    ev.ctx.old_blocks = detail::blocks_for_length(ctx.block_tokens, ev.ctx.old_length);
-    ev.ctx.new_blocks = detail::blocks_for_length(ctx.block_tokens, ev.ctx.new_length);
-    ev.ctx.blocks_needed = ev.ctx.new_blocks - ev.ctx.old_blocks;
-    ev.ctx.linked_count = 0;
+    int32_t tail_block_index = 0;
+    uint16_t old_block = 0;
+    uint16_t new_block = 0;
+    detail::shared_tail_blocks(ev, ctx, tail_block_index, old_block, new_block);
+    (void)tail_block_index;
 
-    for (int32_t i = 0; i < ev.ctx.blocks_needed; ++i) {
-      const int32_t stack_index = ctx.free_count - 1 - i;
-      const uint16_t block_id = ctx.free_stack[static_cast<size_t>(stack_index)];
-      ctx.seq_to_blocks[seq_index][static_cast<size_t>(ev.ctx.existing_block_count + i)] = block_id;
-      ev.ctx.linked_count += static_cast<int32_t>(
-          ctx.block_refs.process_indexed<kv::detail::block_link>(static_cast<size_t>(block_id)));
-    }
-    ctx.free_count -= ev.ctx.blocks_needed;
+    ev.ctx.copy_error = static_cast<int32_t>(emel::error::cast(error::none));
+    ev.ctx.copy_accepted = ev.request.copy_block(
+        static_cast<int32_t>(old_block),
+        static_cast<int32_t>(new_block),
+        ctx.block_tokens,
+        ev.request.copy_block_user_data,
+        &ev.ctx.copy_error);
 
-    const int32_t linked_all = static_cast<int32_t>(ev.ctx.linked_count == ev.ctx.blocks_needed);
-    ctx.sequence_block_count[seq_index] =
-        linked_all * ev.ctx.new_blocks + (1 - linked_all) * ctx.sequence_block_count[seq_index];
-    ctx.sequence_length[seq_index] =
-        linked_all * ev.ctx.new_length + (1 - linked_all) * ctx.sequence_length[seq_index];
-    ev.ctx.block_count = linked_all * ev.ctx.blocks_needed;
-    ev.ctx.accepted = linked_all != 0;
-    ev.ctx.operation_error = emel::error::cast(error::none);
+    const int32_t copy_error_is_none = static_cast<int32_t>(
+        ev.ctx.copy_error == static_cast<int32_t>(emel::error::cast(error::none)));
+    const int32_t copy_success = static_cast<int32_t>(ev.ctx.copy_accepted) * copy_error_is_none;
+    const int32_t copy_failed_with_error = (1 - copy_success) * (1 - copy_error_is_none);
+    ev.ctx.accepted = copy_success != 0;
+    ev.ctx.operation_error = static_cast<emel::error::type>(
+        copy_failed_with_error * ev.ctx.copy_error);
+  }
+};
+
+namespace detail {
+
+template <bool split_shared_tail>
+inline void effect_allocate_slots_impl(const event::allocate_slots_runtime & ev,
+                                       context & ctx) noexcept {
+  const size_t seq_index = static_cast<size_t>(ev.request.seq_id);
+  ev.ctx.old_length = ctx.sequence_length[seq_index];
+  ev.ctx.new_length = ev.ctx.old_length + ev.request.token_count;
+  ev.ctx.existing_block_count = ctx.sequence_block_count[seq_index];
+  ev.ctx.old_blocks = detail::blocks_for_length(ctx.block_tokens, ev.ctx.old_length);
+  ev.ctx.new_blocks = detail::blocks_for_length(ctx.block_tokens, ev.ctx.new_length);
+  ev.ctx.blocks_needed = ev.ctx.new_blocks - ev.ctx.old_blocks;
+  ev.ctx.tail_split_needed = static_cast<int32_t>(split_shared_tail);
+  ev.ctx.physical_blocks_needed = ev.ctx.blocks_needed + ev.ctx.tail_split_needed;
+  ev.ctx.linked_count = 0;
+  ev.ctx.unlinked_count = 0;
+
+  const int32_t original_free_count = ctx.free_count;
+  int32_t tail_block_index = 0;
+  uint16_t old_tail_block = 0;
+  uint16_t new_tail_block = 0;
+  int32_t linkable_count = 0;
+  int32_t unlinkable_count = 0;
+  const auto & ref_storage = ctx.block_refs.storage();
+
+  if constexpr (split_shared_tail) {
+    detail::shared_tail_blocks(ev, ctx, tail_block_index, old_tail_block, new_tail_block);
+    linkable_count += detail::block_ref_linkable(ref_storage, new_tail_block);
+    unlinkable_count += detail::block_ref_unlinkable(ref_storage, old_tail_block);
+  }
+
+  for (int32_t i = 0; i < ev.ctx.blocks_needed; ++i) {
+    const int32_t stack_index = original_free_count - 1 - ev.ctx.tail_split_needed - i;
+    const uint16_t block_id = ctx.free_stack[static_cast<size_t>(stack_index)];
+    linkable_count += detail::block_ref_linkable(ref_storage, block_id);
+  }
+
+  const int32_t refs_can_update =
+      static_cast<int32_t>(linkable_count == ev.ctx.physical_blocks_needed &&
+                           unlinkable_count == ev.ctx.tail_split_needed);
+  const int32_t invalid_ref_index = kv::detail::max_blocks;
+
+  if constexpr (split_shared_tail) {
+    const int32_t guarded_new_block =
+        refs_can_update * static_cast<int32_t>(new_tail_block) +
+        (1 - refs_can_update) * invalid_ref_index;
+    const int32_t guarded_old_block =
+        refs_can_update * static_cast<int32_t>(old_tail_block) +
+        (1 - refs_can_update) * invalid_ref_index;
+    ev.ctx.linked_count += static_cast<int32_t>(
+        ctx.block_refs.process_indexed<kv::detail::block_link>(
+            static_cast<size_t>(guarded_new_block)));
+    ev.ctx.unlinked_count += static_cast<int32_t>(
+        ctx.block_refs.process_indexed<kv::detail::block_unlink>(
+            static_cast<size_t>(guarded_old_block)));
+  }
+
+  for (int32_t i = 0; i < ev.ctx.blocks_needed; ++i) {
+    const int32_t stack_index = original_free_count - 1 - ev.ctx.tail_split_needed - i;
+    const uint16_t block_id = ctx.free_stack[static_cast<size_t>(stack_index)];
+    const int32_t guarded_block_id =
+        refs_can_update * static_cast<int32_t>(block_id) +
+        (1 - refs_can_update) * invalid_ref_index;
+    ev.ctx.linked_count += static_cast<int32_t>(
+        ctx.block_refs.process_indexed<kv::detail::block_link>(
+            static_cast<size_t>(guarded_block_id)));
+  }
+
+  const int32_t linked_all =
+      static_cast<int32_t>(ev.ctx.linked_count == ev.ctx.physical_blocks_needed &&
+                           ev.ctx.unlinked_count == ev.ctx.tail_split_needed);
+  if constexpr (split_shared_tail) {
+    ctx.seq_to_blocks[seq_index][static_cast<size_t>(tail_block_index)] =
+        static_cast<uint16_t>(
+            linked_all * static_cast<int32_t>(new_tail_block) +
+            (1 - linked_all) * static_cast<int32_t>(old_tail_block));
+  }
+  for (int32_t i = 0; i < ev.ctx.blocks_needed; ++i) {
+    const size_t block_index = static_cast<size_t>(ev.ctx.existing_block_count + i);
+    const int32_t stack_index = original_free_count - 1 - ev.ctx.tail_split_needed - i;
+    const uint16_t block_id = ctx.free_stack[static_cast<size_t>(stack_index)];
+    const uint16_t old_block = ctx.seq_to_blocks[seq_index][block_index];
+    ctx.seq_to_blocks[seq_index][block_index] =
+        static_cast<uint16_t>(
+            linked_all * static_cast<int32_t>(block_id) +
+            (1 - linked_all) * static_cast<int32_t>(old_block));
+  }
+  ctx.free_count =
+      linked_all * (original_free_count - ev.ctx.physical_blocks_needed) +
+      (1 - linked_all) * original_free_count;
+  ctx.sequence_block_count[seq_index] =
+      linked_all * ev.ctx.new_blocks + (1 - linked_all) * ctx.sequence_block_count[seq_index];
+  ctx.sequence_length[seq_index] =
+      linked_all * ev.ctx.new_length + (1 - linked_all) * ctx.sequence_length[seq_index];
+  ev.ctx.block_count = linked_all * ev.ctx.physical_blocks_needed;
+  ev.ctx.accepted = linked_all != 0;
+  ev.ctx.operation_error = emel::error::cast(error::none);
+}
+
+}  // namespace detail
+
+struct effect_allocate_slots_without_tail_split {
+  void operator()(const event::allocate_slots_runtime & ev, context & ctx) const noexcept {
+    detail::effect_allocate_slots_impl<false>(ev, ctx);
+  }
+};
+
+struct effect_allocate_slots_with_tail_split {
+  void operator()(const event::allocate_slots_runtime & ev, context & ctx) const noexcept {
+    detail::effect_allocate_slots_impl<true>(ev, ctx);
   }
 };
 
@@ -257,7 +398,9 @@ struct exec_free_sequence {
     const auto & refs = ctx.block_refs.storage().refs;
     int32_t free_write = ctx.free_count;
     for (int32_t i = 0; i < ev.ctx.block_count; ++i) {
-      const uint16_t block_id = ctx.seq_to_blocks[seq_index][static_cast<size_t>(i)];
+      const int32_t block_index = ev.ctx.block_count - 1 - i;
+      const uint16_t block_id =
+          ctx.seq_to_blocks[seq_index][static_cast<size_t>(block_index)];
       const int32_t should_recycle =
           allow_recycle * static_cast<int32_t>(refs[static_cast<size_t>(block_id)] == 0);
       ctx.free_stack[static_cast<size_t>(free_write)] = block_id;
@@ -409,7 +552,10 @@ inline constexpr begin_rollback_slots begin_rollback_slots{};
 inline constexpr begin_capture_view begin_capture_view{};
 inline constexpr exec_reserve exec_reserve{};
 inline constexpr exec_allocate_sequence exec_allocate_sequence{};
-inline constexpr exec_allocate_slots exec_allocate_slots{};
+inline constexpr effect_copy_shared_tail_block effect_copy_shared_tail_block{};
+inline constexpr effect_allocate_slots_without_tail_split
+    effect_allocate_slots_without_tail_split{};
+inline constexpr effect_allocate_slots_with_tail_split effect_allocate_slots_with_tail_split{};
 inline constexpr exec_branch_sequence exec_branch_sequence{};
 inline constexpr exec_free_sequence exec_free_sequence{};
 inline constexpr exec_rollback_slots exec_rollback_slots{};

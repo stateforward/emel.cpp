@@ -188,6 +188,8 @@ struct exec_allocate_slots_kv {
       .token_count = ev.request.token_count,
       .block_count_out = &ev.ctx.kv_block_count,
       .error_out = &ev.ctx.kv_error,
+      .copy_block = ev.request.copy_block,
+      .copy_block_user_data = ev.request.copy_block_user_data,
     });
   }
 };

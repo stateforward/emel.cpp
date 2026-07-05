@@ -461,6 +461,8 @@ struct request_decode_slots {
       .token_count = 1,
       .block_count_out = nullptr,
       .error_out = &ev.ctx.phase_code,
+      .copy_block = copy_kv_cache_block,
+      .copy_block_user_data = &ctx.compute.backend,
     };
     ev.ctx.phase_accepted = ctx.memory.process_event(allocate_ev);
   }

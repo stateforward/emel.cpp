@@ -12,6 +12,44 @@ inline bool valid_phase_ids(const int32_t count, const int32_t * ids) noexcept {
   return count >= 0 && (count == 0 || ids != nullptr);
 }
 
+inline bool valid_sequence_position(const emel::memory::view::snapshot & snapshot,
+                                    const int32_t seq_id,
+                                    const int32_t position) noexcept {
+  return snapshot.is_sequence_active(seq_id) &&
+         snapshot.lookup_kv_block(seq_id, position) >= 0;
+}
+
+inline bool valid_sequence_memory_contract(const event::execute & request) noexcept {
+  if (request.seq_primary_ids_count == 0) {
+    return request.positions_count == 0;
+  }
+  if (request.seq_primary_ids == nullptr ||
+      request.memory_view == nullptr ||
+      request.positions == nullptr ||
+      request.positions_count <= 0 ||
+      request.seq_primary_ids_count > emel::memory::view::MAX_SEQUENCES) {
+    return false;
+  }
+  const auto & snapshot = *request.memory_view;
+  if (snapshot.block_tokens <= 0) {
+    return false;
+  }
+  if (request.seq_primary_ids_count != 1 &&
+      request.seq_primary_ids_count != request.positions_count) {
+    return false;
+  }
+  for (int32_t pos_idx = 0; pos_idx < request.positions_count; ++pos_idx) {
+    const int32_t seq_idx =
+        pos_idx * static_cast<int32_t>(request.seq_primary_ids_count != 1);
+    const int32_t seq_id = request.seq_primary_ids[static_cast<size_t>(seq_idx)];
+    if (!valid_sequence_position(
+            snapshot, seq_id, request.positions[static_cast<size_t>(pos_idx)])) {
+      return false;
+    }
+  }
+  return true;
+}
+
 }  // namespace detail
 
 inline emel::error::type runtime_error(const event::execute_step & ev) noexcept {
@@ -45,9 +83,11 @@ struct valid_execute {
            ev.request.kv_tokens >= 0 &&
            ev.request.expected_outputs >= 0 &&
            ev.request.positions_count >= 0 &&
+           (ev.request.positions_count == 0 || ev.request.positions != nullptr) &&
            ev.request.seq_mask_words > 0 &&
            ev.request.seq_masks_count >= 0 &&
            ev.request.seq_primary_ids_count >= 0 &&
+           detail::valid_sequence_memory_contract(ev.request) &&
            detail::valid_phase_ids(
                ev.request.lifecycle->phase->required_filled_count,
                ev.request.lifecycle->phase->required_filled_ids) &&

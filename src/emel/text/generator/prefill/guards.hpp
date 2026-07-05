@@ -202,7 +202,9 @@ struct flash_runtime_supported {
   bool operator()(const event::run & ev, const action::context & ctx) const noexcept {
     return ev.ctx.prompt_token_count > 0 &&
            emel::text::generator::guard::detail::guard_flash_attention_supported(
-               ctx.generator.compute.backend, ev.ctx.prompt_token_count - 1);
+               ctx.generator.compute.backend, ev.ctx.prompt_token_count - 1) &&
+           emel::text::generator::guard::detail::guard_flash_kv_map_identity(
+               ctx.generator, ev.ctx.prompt_token_count);
   }
 };
 

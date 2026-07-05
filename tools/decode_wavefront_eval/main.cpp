@@ -37,6 +37,7 @@
 #include "emel/io/staged_read/sm.hpp"
 #include "emel/io/source/any.hpp"
 #include "emel/logits/sampler/events.hpp"
+#include "emel/memory/view.hpp"
 #include "emel/model/data.hpp"
 #include "emel/model/detail.hpp"
 #include "emel/model/loader/errors.hpp"
@@ -501,8 +502,11 @@ bool prepare_emel_fixture(emel_fixture &fixture, const std::string &model_path) 
 bool initialize_lane(lane_session &s, const emel::model::data &model,
                      int32_t prompt_capacity, int32_t tokens) {
   const int32_t decode_capacity = std::max<int32_t>(4, tokens);
-  const int32_t block_capacity =
-      std::max<int32_t>(8, prompt_capacity + decode_capacity + 4);
+  const int32_t session_tokens =
+      std::min<int32_t>(prompt_capacity + decode_capacity, model.params.n_ctx);
+  const int32_t block_capacity = std::max<int32_t>(
+      1, emel::memory::view::blocks_for_tokens(
+             emel::memory::view::DEFAULT_BLOCK_TOKENS, session_tokens));
   s.initialize = {};
   emel::error::type error_out =
       emel::error::cast(emel::text::generator::error::none);
@@ -518,7 +522,7 @@ bool initialize_lane(lane_session &s, const emel::model::data &model,
   request.max_prompt_tokens = prompt_capacity;
   request.max_generated_tokens = decode_capacity;
   request.max_blocks = block_capacity;
-  request.block_tokens = 16;
+  request.block_tokens = emel::memory::view::DEFAULT_BLOCK_TOKENS;
   request.strip_leading_space = false;
   request.error_out = &error_out;
   request.on_done = {&s, on_initialize_done};

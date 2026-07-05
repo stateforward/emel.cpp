@@ -5,6 +5,7 @@
 #include "emel/text/generator/initializer/detail.hpp"
 #include "emel/graph/errors.hpp"
 #include "emel/memory/hybrid/errors.hpp"
+#include "emel/memory/view.hpp"
 #include "emel/model/loader/errors.hpp"
 #include "emel/text/conditioner/errors.hpp"
 #include "emel/text/renderer/errors.hpp"
@@ -102,7 +103,12 @@ inline bool graph_backend_code(const int32_t code) noexcept {
 
 struct backend_already_ready {
   bool operator()(const event::run &, const action::context & ctx) const noexcept {
-    return ctx.generator.compute.backend_ready;
+    const auto & backend = ctx.generator.compute.backend;
+    const auto & limits = ctx.generator.limits;
+    return ctx.generator.compute.backend_ready &&
+           limits.block_tokens > 0 &&
+           backend.kv_block_tokens == limits.block_tokens &&
+           backend.kv_positions_capacity >= backend.n_ctx;
   }
 };
 
@@ -181,6 +187,29 @@ struct renderer_initialize_backend_error {
 struct memory_reserve_ok {
   bool operator()(const event::run & ev, const action::context &) const noexcept {
     return detail::has_phase_success(ev);
+  }
+};
+
+// Every block id the reserved pool can hand out must map inside the prepared
+// physical cache: pool capacity (in tokens) must not exceed the block-padded
+// physical position capacity. Under-provisioned pools are valid — outgrowing
+// one surfaces as the modeled allocate_slots out_of_memory route.
+struct guard_memory_geometry_fits_backend {
+  bool operator()(const event::run &, const action::context & ctx) const noexcept {
+    const auto & limits = ctx.generator.limits;
+    const auto & backend = ctx.generator.compute.backend;
+    const int64_t pool_tokens =
+        static_cast<int64_t>(limits.block_capacity) * static_cast<int64_t>(limits.block_tokens);
+    return limits.block_tokens > 0 &&
+           backend.kv_block_tokens == limits.block_tokens &&
+           backend.kv_positions_capacity >= backend.n_ctx &&
+           pool_tokens <= static_cast<int64_t>(backend.kv_positions_capacity);
+  }
+};
+
+struct guard_memory_geometry_gap {
+  bool operator()(const event::run & ev, const action::context & ctx) const noexcept {
+    return !guard_memory_geometry_fits_backend{}(ev, ctx);
   }
 };
 

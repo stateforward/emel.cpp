@@ -25,6 +25,9 @@ struct begin_initialize {
 
     generator.limits.prompt_capacity = ev.request.max_prompt_tokens;
     generator.limits.decode_capacity = ev.request.max_generated_tokens;
+    // valid_initialize enforces positive geometry at the public boundary, so
+    // limits holds the explicit block geometry the backend sizes physical
+    // storage from and the reserve dispatch uses.
     generator.limits.block_capacity = ev.request.max_blocks;
     generator.limits.block_tokens = ev.request.block_tokens;
     generator.state.selection_mode = ev.request.selection_mode;
@@ -43,8 +46,8 @@ struct request_backend_prepare {
   void operator()(const event::run & ev, context & ctx) const noexcept {
     auto & generator = ctx.generator;
     generator.compute.backend_ready = false;
-    ev.ctx.phase_code = static_cast<int32_t>(
-        emel::text::generator::detail::prepare(generator.compute.backend, *generator.model));
+    ev.ctx.phase_code = static_cast<int32_t>(emel::text::generator::detail::prepare(
+        generator.compute.backend, *generator.model, generator.limits.block_tokens));
     ev.ctx.phase_accepted =
         ev.ctx.phase_code ==
         static_cast<int32_t>(emel::error::cast(emel::model::loader::error::none));

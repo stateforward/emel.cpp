@@ -9,13 +9,17 @@
 
 #include "emel/emel.h"
 #include "emel/error/error.hpp"
+#include "emel/memory/view.hpp"
 
 namespace emel::memory::kv::detail {
 
-inline constexpr int32_t default_block_tokens = 16;
-inline constexpr int32_t max_sequences = 256;
-inline constexpr int32_t max_blocks = 32768;
-inline constexpr int32_t max_blocks_per_sequence = 4096;
+// Single-source geometry: the kv machine's bounds are the shared memory-domain
+// contract in emel::memory::view so cache owners size physical storage from the
+// same values the block map enforces.
+inline constexpr int32_t default_block_tokens = view::DEFAULT_BLOCK_TOKENS;
+inline constexpr int32_t max_sequences = view::MAX_SEQUENCES;
+inline constexpr int32_t max_blocks = view::MAX_BLOCKS;
+inline constexpr int32_t max_blocks_per_sequence = view::MAX_BLOCKS_PER_SEQUENCE;
 inline constexpr int32_t invalid_index = -1;
 
 template <class runtime_event_type>

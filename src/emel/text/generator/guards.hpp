@@ -811,6 +811,76 @@ inline bool guard_bound_request_capacity_ready(const action::context & ctx,
          static_cast<size_t>(token_count) <= ctx.buffers.positions.size();
 }
 
+// Snapshot addressing truth: the per-step captured memory::view::snapshot must
+// agree with the prepared backend geometry and account for exactly the tokens
+// the compute phase is about to address. Incoherent snapshots fail the ready
+// predicates below and route through the existing explicit invalid transitions.
+inline bool guard_snapshot_geometry_coherent(const action::context & ctx) noexcept {
+  const auto & snapshot = ctx.state.memory_snapshot;
+  const auto & backend = ctx.compute.backend;
+  return snapshot.block_tokens > 0 &&
+         snapshot.block_tokens == backend.kv_block_tokens &&
+         backend.kv_positions_capacity >= backend.n_ctx &&
+         snapshot.is_sequence_active(action::k_sequence_id) &&
+         snapshot.lookup_recurrent_slot(action::k_sequence_id) >= 0;
+}
+
+inline bool guard_snapshot_covers_tokens(const action::context & ctx,
+                                         const int32_t token_count) noexcept {
+  const auto & snapshot = ctx.state.memory_snapshot;
+  const auto & backend = ctx.compute.backend;
+  if (token_count <= 0 ||
+      snapshot.block_tokens <= 0 ||
+      token_count > backend.n_ctx ||
+      snapshot.sequence_length(action::k_sequence_id) != token_count) {
+    return false;
+  }
+  const int32_t block_count =
+      emel::memory::view::blocks_for_tokens(snapshot.block_tokens, token_count);
+  if (block_count <= 0 ||
+      block_count > emel::memory::view::MAX_BLOCKS_PER_SEQUENCE ||
+      snapshot.sequence_kv_block_count[static_cast<size_t>(action::k_sequence_id)] <
+          block_count) {
+    return false;
+  }
+  for (int32_t block = 0; block < block_count; ++block) {
+    const uint16_t block_id =
+        snapshot.sequence_kv_blocks[static_cast<size_t>(action::k_sequence_id)]
+                                   [static_cast<size_t>(block)];
+    const int32_t block_last_position =
+        ((block + 1) * snapshot.block_tokens) - 1;
+    const int32_t position =
+        block_last_position < token_count ? block_last_position : token_count - 1;
+    const int64_t physical_position =
+        static_cast<int64_t>(block_id) * static_cast<int64_t>(snapshot.block_tokens) +
+        static_cast<int64_t>(position % snapshot.block_tokens);
+    if (block_id == emel::memory::view::INVALID_KV_BLOCK ||
+        physical_position < 0 ||
+        physical_position >= static_cast<int64_t>(backend.kv_positions_capacity)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+// Flash kernels consume contiguous strided views rooted at each layer's cache
+// base, so the flash route additionally requires the snapshot block map to be
+// the identity over the tokens it reads. Permuted or offset mappings take the
+// scalar span-walking route through the existing non-flash transitions.
+inline bool guard_flash_kv_map_identity(const action::context & ctx,
+                                        const int32_t token_count) noexcept {
+  const auto & snapshot = ctx.state.memory_snapshot;
+  const int32_t block_count =
+      emel::memory::view::blocks_for_tokens(snapshot.block_tokens, token_count);
+  for (int32_t block = 0; block < block_count; ++block) {
+    if (snapshot.lookup_kv_block(action::k_sequence_id, block * snapshot.block_tokens) !=
+        block) {
+      return false;
+    }
+  }
+  return true;
+}
+
 inline bool guard_prefill_request_ready(const event::generate_ctx & runtime,
                                         const action::context & ctx) noexcept {
   return guard_step_plan_ready(
@@ -821,7 +891,9 @@ inline bool guard_prefill_request_ready(const event::generate_ctx & runtime,
          runtime.prefill_step_size <= ctx.compute.backend.prefill_plan.max_step_tokens &&
          runtime.prompt_token_count > 0 &&
          runtime.prompt_token_count <= ctx.limits.prompt_capacity &&
-         guard_bound_request_capacity_ready(ctx, runtime.prompt_token_count);
+         guard_bound_request_capacity_ready(ctx, runtime.prompt_token_count) &&
+         guard_snapshot_geometry_coherent(ctx) &&
+         guard_snapshot_covers_tokens(ctx, runtime.prompt_token_count);
 }
 
 inline bool guard_decode_request_ready(const event::generate_ctx & runtime,
@@ -835,7 +907,9 @@ inline bool guard_decode_request_ready(const event::generate_ctx & runtime,
          runtime.selected_token < ctx.compute.backend.token_embedding.rows &&
          runtime.kv_tokens >= 0 &&
          runtime.kv_tokens < ctx.compute.backend.n_ctx &&
-         ctx.compute.backend.kv_cache_tokens == runtime.kv_tokens;
+         ctx.compute.backend.kv_cache_tokens == runtime.kv_tokens &&
+         guard_snapshot_geometry_coherent(ctx) &&
+         guard_snapshot_covers_tokens(ctx, runtime.kv_tokens + 1);
 }
 
 inline bool guard_prefill_materialized_compute_ready(const event::generate_ctx & runtime,
@@ -927,6 +1001,10 @@ struct valid_initialize {
     const bool sampler_contract_valid =
         (sample_logits && !ev.request.sampler_fns.empty()) ||
         (preselected_argmax && ev.request.sampler_fns.empty());
+    const bool block_geometry_valid =
+        ev.request.block_tokens > 0 &&
+        ctx.model != nullptr &&
+        ev.request.block_tokens <= ctx.model->params.n_ctx;
     return ctx.model != nullptr &&
            ctx.conditioner != nullptr &&
            ctx.format_prompt != nullptr &&
@@ -937,7 +1015,7 @@ struct valid_initialize {
            ev.request.max_generated_tokens > 0 &&
            ev.request.max_generated_tokens <= action::MAX_GENERATION_STEPS &&
            ev.request.max_blocks > 0 &&
-           ev.request.block_tokens > 0;
+           block_geometry_valid;
   }
 };
 
@@ -1641,8 +1719,9 @@ struct graph_lifecycle_runtime_tensor_unavailable {
 
 struct decode_flash_runtime_supported {
   bool operator()(const event::generate_run & ev, const action::context & ctx) const noexcept {
-    return ev.ctx.kv_tokens >= 0 && detail::guard_flash_attention_supported(
-                                        ctx.compute.backend, ev.ctx.kv_tokens);
+    return ev.ctx.kv_tokens >= 0 &&
+           detail::guard_flash_attention_supported(ctx.compute.backend, ev.ctx.kv_tokens) &&
+           detail::guard_flash_kv_map_identity(ctx, ev.ctx.kv_tokens + 1);
   }
 };
 

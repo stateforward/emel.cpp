@@ -43,7 +43,12 @@ struct allocate_slots_ctx {
   int32_t new_blocks = 0;
   int32_t existing_block_count = 0;
   int32_t blocks_needed = 0;
+  int32_t tail_split_needed = 0;
+  int32_t physical_blocks_needed = 0;
+  bool copy_accepted = false;
+  int32_t copy_error = 0;
   int32_t linked_count = 0;
+  int32_t unlinked_count = 0;
 };
 
 struct branch_sequence_ctx {

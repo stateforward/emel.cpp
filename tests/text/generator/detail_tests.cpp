@@ -13,6 +13,9 @@
 // kernel-owned surface.
 
 #include "../../kernel/test_helpers.hpp"
+#include "emel/memory/events.hpp"
+#include "emel/graph/processor/guards.hpp"
+#include "emel/memory/hybrid/sm.hpp"
 #include "emel/model/llama/detail.hpp"
 #include "emel/text/generator/detail.hpp"
 #include "emel/text/generator/guards.hpp"
@@ -111,7 +114,23 @@ struct runtime_request_fixture {
   int32_t selected_token = -1;
   float selected_score = 0.0f;
   emel::text::generator::compute_io io = {};
+  emel::memory::view::snapshot memory_snapshot = {};
+  std::array<int32_t, 1> seq_primary_ids = {0};
+  emel::graph::processor::event::execution_output output = {};
+  emel::graph::processor::event::lifecycle_tensor_binding lifecycle_tensor = {};
+  emel::graph::processor::event::lifecycle_phase lifecycle_phase = {};
+  emel::graph::processor::event::lifecycle_manifest lifecycle = {};
   emel::graph::processor::event::execute request = {};
+
+  static bool on_execution_done(
+      void *, const emel::graph::processor::events::execution_done &) noexcept {
+    return true;
+  }
+
+  static bool on_execution_error(
+      void *, const emel::graph::processor::events::execution_error &) noexcept {
+    return true;
+  }
 
   explicit runtime_request_fixture(
       const emel::model::llama::detail::step_kind kind =
@@ -128,6 +147,8 @@ struct runtime_request_fixture {
     backend.n_layer = 1;
     backend.n_vocab = 4;
     backend.n_ctx = 8;
+    backend.kv_block_tokens = 8;
+    backend.kv_positions_capacity = 8;
     backend.head_dim = 4;
     backend.head_dim_kv = 4;
     backend.blocks.resize(1u);
@@ -143,12 +164,40 @@ struct runtime_request_fixture {
     io.selected_token_out = &selected_token;
     io.selected_score_out = &selected_score;
 
+    // Coherent captured snapshot for the request contract: one 8-token block
+    // covering the single-token workloads these fixtures drive.
+    memory_snapshot.max_sequences = 1;
+    memory_snapshot.block_tokens = 8;
+    memory_snapshot.sequence_active[0] = 1;
+    memory_snapshot.sequence_length_values[0] = 1;
+    memory_snapshot.sequence_kv_block_count[0] = 1;
+    memory_snapshot.sequence_kv_blocks[0][0] = 0;
+    lifecycle_tensor.tensor_id = 0;
+    lifecycle_tensor.buffer = logits.data();
+    lifecycle_tensor.buffer_bytes = sizeof(float) * logits.size();
+    lifecycle_tensor.consumer_refs = 1;
+    lifecycle_tensor.is_leaf = true;
+    lifecycle.tensors = &lifecycle_tensor;
+    lifecycle.tensor_count = 1;
+    lifecycle.phase = &lifecycle_phase;
+
     request.step_plan = &plan;
+    request.output_out = &output;
+    request.lifecycle = &lifecycle;
+    request.tensor_machine =
+        reinterpret_cast<emel::graph::tensor::sm *>(this);
+    request.step_index = 0;
+    request.step_size = 1;
     request.expected_outputs = plan.expected_outputs;
     request.compute_ctx = &io;
     request.positions = positions.data();
     request.positions_count = static_cast<int32_t>(positions.size());
     request.kv_tokens = 0;
+    request.memory_view = &memory_snapshot;
+    request.seq_primary_ids = seq_primary_ids.data();
+    request.seq_primary_ids_count = static_cast<int32_t>(seq_primary_ids.size());
+    request.dispatch_done = {this, on_execution_done};
+    request.dispatch_error = {this, on_execution_error};
   }
 };
 
@@ -389,6 +438,8 @@ struct chunk4_prefill_runtime_fixture {
   int32_t selected_token = -1;
   float selected_score = -1.0f;
   emel::text::generator::compute_io io = {};
+  emel::memory::view::snapshot memory_snapshot = {};
+  std::array<int32_t, 1> seq_primary_ids = {0};
   emel::graph::processor::event::execute request = {};
   bool ready = false;
 
@@ -432,6 +483,8 @@ struct chunk4_prefill_runtime_fixture {
     backend.n_head_kv = 1;
     backend.n_layer = 1;
     backend.n_ctx = k_ctx;
+    backend.kv_block_tokens = k_ctx;
+    backend.kv_positions_capacity = k_ctx;
     backend.n_rot = k_embd;
     backend.head_dim = k_embd;
     backend.head_dim_kv = k_embd;
@@ -510,12 +563,22 @@ struct chunk4_prefill_runtime_fixture {
     io.logits_capacity = k_vocab;
     io.selected_token_out = &selected_token;
     io.selected_score_out = &selected_score;
+    memory_snapshot.max_sequences = 1;
+    memory_snapshot.block_tokens = k_ctx;
+    memory_snapshot.sequence_active[0] = 1;
+    memory_snapshot.sequence_length_values[0] = k_prompt_tokens;
+    memory_snapshot.sequence_kv_block_count[0] = 1;
+    memory_snapshot.sequence_kv_blocks[0][0] = 0;
+
     request.step_plan = &plan;
     request.expected_outputs = plan.expected_outputs;
     request.compute_ctx = &io;
     request.positions = positions.data();
     request.positions_count = k_prompt_tokens;
     request.kv_tokens = 0;
+    request.memory_view = &memory_snapshot;
+    request.seq_primary_ids = seq_primary_ids.data();
+    request.seq_primary_ids_count = static_cast<int32_t>(seq_primary_ids.size());
 
     ready = emel::kernel::detail::quant::pack_q8_0_rows_x4_bl8(
                 zero_rows.data(), static_cast<uint64_t>(k_embd),
@@ -560,6 +623,8 @@ template <int32_t prompt_tokens> struct hybrid_chunked_q8_runtime_fixture {
   std::array<int32_t, k_prompt_tokens> positions = {};
   std::vector<float> logits = {};
   emel::text::generator::compute_io io = {};
+  emel::memory::view::snapshot memory_snapshot = {};
+  std::array<int32_t, 1> seq_primary_ids = {0};
   emel::graph::processor::event::execute request = {};
   bool ready = false;
 
@@ -623,6 +688,8 @@ template <int32_t prompt_tokens> struct hybrid_chunked_q8_runtime_fixture {
     backend.n_head_kv = 1;
     backend.n_layer = 2;
     backend.n_ctx = k_ctx;
+    backend.kv_block_tokens = k_ctx;
+    backend.kv_positions_capacity = k_ctx;
     backend.n_rot = k_embd;
     backend.head_dim = k_embd;
     backend.head_dim_kv = k_embd;
@@ -752,12 +819,22 @@ template <int32_t prompt_tokens> struct hybrid_chunked_q8_runtime_fixture {
     io.token_count = k_prompt_tokens;
     io.logits = logits.data();
     io.logits_capacity = k_vocab;
+    memory_snapshot.max_sequences = 1;
+    memory_snapshot.block_tokens = k_ctx;
+    memory_snapshot.sequence_active[0] = 1;
+    memory_snapshot.sequence_length_values[0] = k_prompt_tokens;
+    memory_snapshot.sequence_kv_block_count[0] = 1;
+    memory_snapshot.sequence_kv_blocks[0][0] = 0;
+
     request.step_plan = &plan;
     request.expected_outputs = plan.expected_outputs;
     request.compute_ctx = &io;
     request.positions = positions.data();
     request.positions_count = k_prompt_tokens;
     request.kv_tokens = 0;
+    request.memory_view = &memory_snapshot;
+    request.seq_primary_ids = seq_primary_ids.data();
+    request.seq_primary_ids_count = static_cast<int32_t>(seq_primary_ids.size());
 
     ready =
         emel::kernel::detail::quant::pack_q4_k_rows_x8_bl8(
@@ -1004,6 +1081,8 @@ TEST_CASE("generator_detail_lfm2_attention_uses_neox_rope_layout") {
   backend->n_head_kv = 1;
   backend->n_layer = 1;
   backend->n_ctx = 8;
+  backend->kv_block_tokens = 8;
+  backend->kv_positions_capacity = 8;
   backend->n_rot = k_embd;
   backend->head_dim = k_embd;
   backend->head_dim_kv = k_embd;
@@ -1614,6 +1693,8 @@ TEST_CASE("generator_detail_decode_preconditions_reject_malformed_requests") {
 
   gen_detail::native_backend backend{};
   backend.n_ctx = 8;
+  backend.kv_block_tokens = 8;
+  backend.kv_positions_capacity = 8;
   backend.token_embedding.rows = 4;
   backend.bound_tokens.resize(1u);
   backend.bound_positions.resize(1u);
@@ -1715,6 +1796,8 @@ TEST_CASE("generator_detail_route_templates_reject_unprepared_inputs") {
   backend.n_layer = 1;
   backend.n_vocab = 4;
   backend.n_ctx = 4;
+  backend.kv_block_tokens = 4;
+  backend.kv_positions_capacity = 4;
   backend.head_dim = 4;
   backend.head_dim_kv = 4;
   backend.blocks.resize(1u);
@@ -2096,6 +2179,200 @@ TEST_CASE("generator_detail_scalar_routes_run_prepared_qwen3_paths") {
           scalar_argmax_route::kernel>(fixture->backend, fixture->request,
                                        selected_index, selected_score));
     CHECK(selected_index >= 0);
+  }
+}
+
+TEST_CASE("generator_detail_prepare_derives_kv_geometry_from_memory_contract") {
+  auto model_fixture = std::make_unique<qwen3_runtime_fixture>();
+  auto backend = std::make_unique<emel::text::generator::detail::native_backend>();
+
+  // Default geometry: n_ctx=8 pads up to one 16-token block.
+  REQUIRE(emel::text::generator::detail::prepare(*backend, model_fixture->model) ==
+          emel::error::cast(emel::model::loader::error::none));
+  CHECK(backend->kv_block_tokens == emel::memory::view::DEFAULT_BLOCK_TOKENS);
+  CHECK(backend->kv_positions_capacity == emel::memory::view::DEFAULT_BLOCK_TOKENS);
+  CHECK(backend->kv_positions_capacity >= backend->n_ctx);
+  const size_t default_flash_extent = backend->flash_key_cache.size();
+
+  // Divisible geometry: capacity equals n_ctx exactly (pre-cutover layout).
+  REQUIRE(emel::text::generator::detail::prepare(*backend, model_fixture->model, 4) ==
+          emel::error::cast(emel::model::loader::error::none));
+  CHECK(backend->kv_block_tokens == 4);
+  CHECK(backend->kv_positions_capacity == backend->n_ctx);
+  const size_t divisible_flash_extent = backend->flash_key_cache.size();
+
+  // Non-positive block tokens cannot cover the context window and are
+  // rejected through prepare's existing model_invalid validation path.
+  REQUIRE(emel::text::generator::detail::prepare(*backend, model_fixture->model, 0) ==
+          emel::error::cast(emel::model::loader::error::model_invalid));
+
+  // Non-divisible geometry: capacity rounds up to whole blocks.
+  REQUIRE(emel::text::generator::detail::prepare(*backend, model_fixture->model, 3) ==
+          emel::error::cast(emel::model::loader::error::none));
+  CHECK(backend->kv_block_tokens == 3);
+  CHECK(backend->kv_positions_capacity == 9);
+
+  // Cache extents follow the padded capacity, not raw n_ctx.
+  CHECK(default_flash_extent > divisible_flash_extent);
+}
+
+TEST_CASE("generator_detail_kv_physical_map_binds_snapshot_block_order") {
+  auto model_fixture = std::make_unique<qwen3_runtime_fixture>();
+  auto backend = std::make_unique<emel::text::generator::detail::native_backend>();
+  REQUIRE(emel::text::generator::detail::prepare(*backend, model_fixture->model, 4) ==
+          emel::error::cast(emel::model::loader::error::none));
+  REQUIRE(backend->kv_positions_capacity == 8);
+
+  // prepare leaves the identity map: logical == physical.
+  const auto identity_kv = emel::text::generator::detail::identity_kv_addressing();
+  for (int32_t position = 0; position < 8; ++position) {
+    CHECK(emel::text::generator::detail::physical_kv_position(identity_kv, position) ==
+          static_cast<size_t>(position));
+  }
+  const int32_t high_identity_position =
+      emel::memory::view::MAX_BLOCKS_PER_SEQUENCE + 904;
+  CHECK(emel::text::generator::detail::physical_kv_position(
+            identity_kv, high_identity_position) ==
+        static_cast<size_t>(high_identity_position));
+
+  // A reversed two-block mapping relocates logical block 0 to physical block 1
+  // and vice versa; the offset helpers must follow the snapshot, not the
+  // logical position.
+  emel::memory::view::snapshot snapshot{};
+  snapshot.max_sequences = 1;
+  snapshot.block_tokens = 4;
+  snapshot.sequence_active[0] = 1;
+  snapshot.sequence_length_values[0] = 8;
+  snapshot.sequence_kv_block_count[0] = 2;
+  snapshot.sequence_kv_blocks[0][0] = 1;
+  snapshot.sequence_kv_blocks[0][1] = 0;
+  auto kv = emel::text::generator::detail::kv_addressing_from_snapshot(snapshot, 0);
+
+  for (int32_t position = 0; position < 4; ++position) {
+    CHECK(emel::text::generator::detail::physical_kv_position(kv, position) ==
+          static_cast<size_t>(position + 4));
+    CHECK(emel::text::generator::detail::physical_kv_position(kv, position + 4) ==
+          static_cast<size_t>(position));
+  }
+
+  // Stores land at the mapped physical slot in both layouts.
+  const auto & block = backend->blocks.front();
+  const int32_t kv_dim =
+      emel::text::generator::detail::effective_attention_kv_dim(*backend, block);
+  std::vector<float> k_row(static_cast<size_t>(kv_dim), 1.5f);
+  std::vector<float> v_row(static_cast<size_t>(kv_dim), -2.0f);
+  REQUIRE(emel::text::generator::detail::store_attention_kv_cache(
+      *backend, kv, block, 0, 0, k_row, v_row));
+
+  const size_t mapped_offset =
+      emel::text::generator::detail::layer_cache_offset(*backend, kv, block, 0, 0);
+  const size_t physical_row_offset =
+      static_cast<size_t>(4) * static_cast<size_t>(kv_dim);
+  CHECK(mapped_offset == physical_row_offset);
+  CHECK(backend->key_cache[physical_row_offset] != 0u);
+  const size_t flat_row_offset = 0u;
+  CHECK(backend->key_cache[flat_row_offset] == 0u);
+
+  // Over-length snapshots bind only up to the prepared capacity, and an
+  // inactive sequence binds nothing (zero-iteration fill).
+  snapshot.sequence_length_values[0] = 99;
+  CHECK(emel::text::generator::detail::physical_kv_position(kv, 7) < 8u);
+  snapshot.sequence_length_values[0] = 8;
+
+  snapshot.sequence_active[0] = 0;
+  CHECK(emel::text::generator::detail::physical_kv_position(identity_kv, 7) == 7u);
+  snapshot.sequence_active[0] = 1;
+
+  // The snapshot-resolved recurrent slot shifts shortconv state addressing;
+  // slot 0 preserves the flat layout.
+  const size_t flat_shortconv =
+      emel::text::generator::detail::shortconv_state_layer_offset(*backend, identity_kv, 0);
+  CHECK(flat_shortconv == 0u);
+  snapshot.sequence_recurrent_slot[0] = 3;
+  kv.recurrent_slot = snapshot.lookup_recurrent_slot(0);
+  CHECK(kv.recurrent_slot == 3);
+  CHECK(emel::text::generator::detail::shortconv_state_layer_offset(*backend, kv, 0) ==
+        static_cast<size_t>(3) * static_cast<size_t>(backend->n_layer) *
+            static_cast<size_t>(backend->shortconv_state_size) *
+            static_cast<size_t>(backend->n_embd));
+  snapshot.sequence_recurrent_slot[0] = 0;
+  kv.recurrent_slot = snapshot.lookup_recurrent_slot(0);
+
+  // Rebinding a contiguous snapshot restores the flat layout addressing.
+  snapshot.sequence_kv_blocks[0][0] = 0;
+  snapshot.sequence_kv_blocks[0][1] = 1;
+  CHECK(emel::text::generator::detail::layer_cache_offset(*backend, kv, block, 0, 0) ==
+        flat_row_offset);
+}
+
+TEST_CASE("generator_detail_kv_physical_map_isolates_interleaved_sequences") {
+  auto model_fixture = std::make_unique<qwen3_runtime_fixture>();
+  auto backend = std::make_unique<emel::text::generator::detail::native_backend>();
+  REQUIRE(emel::text::generator::detail::prepare(*backend, model_fixture->model, 2) ==
+          emel::error::cast(emel::model::loader::error::none));
+  REQUIRE(backend->kv_positions_capacity == 8);
+
+  // Two sequences share one snapshot: their bound physical positions must be
+  // disjoint, and a freed-then-reused mapping preserves logical order.
+  emel::memory::hybrid::sm memory{};
+  int32_t err = 0;
+  REQUIRE(memory.process_event(emel::memory::event::reserve{
+    .max_sequences = 3, .max_blocks = 4, .block_tokens = 2, .error_out = &err}));
+  REQUIRE(memory.process_event(emel::memory::event::allocate_sequence{
+    .seq_id = 0, .error_out = &err}));
+  REQUIRE(memory.process_event(emel::memory::event::allocate_sequence{
+    .seq_id = 1, .error_out = &err}));
+  REQUIRE(memory.process_event(emel::memory::event::allocate_slots{
+    .seq_id = 0, .token_count = 4, .error_out = &err}));
+  REQUIRE(memory.process_event(emel::memory::event::allocate_slots{
+    .seq_id = 1, .token_count = 4, .error_out = &err}));
+
+  emel::memory::view::snapshot view{};
+  emel::error::type view_err = emel::error::cast(emel::memory::hybrid::error::none);
+  REQUIRE(memory.try_view(view, view_err));
+
+  std::array<int32_t, 4> seq0_physical = {};
+  std::array<int32_t, 4> seq1_physical = {};
+  auto kv = emel::text::generator::detail::kv_addressing_from_snapshot(view, 0);
+  for (int32_t position = 0; position < 4; ++position) {
+    seq0_physical[static_cast<size_t>(position)] = static_cast<int32_t>(
+        emel::text::generator::detail::physical_kv_position(kv, position));
+  }
+  kv = emel::text::generator::detail::kv_addressing_from_snapshot(view, 1);
+  for (int32_t position = 0; position < 4; ++position) {
+    seq1_physical[static_cast<size_t>(position)] = static_cast<int32_t>(
+        emel::text::generator::detail::physical_kv_position(kv, position));
+  }
+  for (const int32_t lhs : seq0_physical) {
+    for (const int32_t rhs : seq1_physical) {
+      CHECK(lhs != rhs);
+    }
+  }
+
+  // Free seq 0 and re-allocate: the same physical slots return in logical
+  // order without touching seq 1.
+  REQUIRE(memory.process_event(emel::memory::event::free_sequence{
+    .seq_id = 0, .error_out = &err}));
+  REQUIRE(memory.process_event(emel::memory::event::allocate_sequence{
+    .seq_id = 2, .error_out = &err}));
+  REQUIRE(memory.process_event(emel::memory::event::allocate_slots{
+    .seq_id = 2, .token_count = 4, .error_out = &err}));
+  REQUIRE(memory.try_view(view, view_err));
+
+  kv = emel::text::generator::detail::kv_addressing_from_snapshot(view, 2);
+  std::array<int32_t, 4> seq2_physical = {};
+  bool identity = true;
+  for (int32_t position = 0; position < 4; ++position) {
+    seq2_physical[static_cast<size_t>(position)] = static_cast<int32_t>(
+        emel::text::generator::detail::physical_kv_position(kv, position));
+    identity = identity &&
+               seq2_physical[static_cast<size_t>(position)] == position;
+  }
+  CHECK(identity);
+  for (const int32_t lhs : seq2_physical) {
+    for (const int32_t rhs : seq1_physical) {
+      CHECK(lhs != rhs);
+    }
   }
 }
 
@@ -2708,6 +2985,8 @@ TEST_CASE("generator_detail_request_and_backend_validators_reject_invalid_"
   backend.n_layer = 1;
   backend.n_vocab = 8;
   backend.n_ctx = 4;
+  backend.kv_block_tokens = 4;
+  backend.kv_positions_capacity = 4;
   backend.head_dim = 4;
   backend.head_dim_kv = 4;
   CHECK_FALSE(emel::text::generator::detail::check_backend(&backend, &err));
@@ -2860,6 +3139,71 @@ TEST_CASE("generator_detail_graph_callbacks_accept_guarded_requests_without_erro
   CHECK(err == -1);
   fixture->io.selected_score_out = &fixture->selected_score;
 
+  emel::graph::processor::event::execute_ctx execute_ctx{};
+  emel::graph::processor::action::context processor_context{};
+  const auto execute_is_valid = [&]() {
+    const emel::graph::processor::event::execute_step execute_step{
+      fixture->request,
+      execute_ctx,
+    };
+    return emel::graph::processor::guard::valid_execute{}(
+        execute_step, processor_context);
+  };
+  CHECK(execute_is_valid());
+  const auto expect_kv_contract_rejected = [&]() { CHECK_FALSE(execute_is_valid()); };
+
+  const auto * saved_memory_view = fixture->request.memory_view;
+  fixture->request.memory_view = nullptr;
+  err = -1;
+  CHECK_FALSE(emel::text::generator::detail::validate_guarded_compute(
+      fixture->request, &err));
+  CHECK(err == static_cast<int32_t>(
+                   emel::error::cast(emel::graph::processor::error::invalid_request)));
+  expect_kv_contract_rejected();
+  fixture->request.memory_view = saved_memory_view;
+
+  const int32_t * saved_seq_primary_ids = fixture->request.seq_primary_ids;
+  fixture->request.seq_primary_ids = nullptr;
+  expect_kv_contract_rejected();
+  fixture->request.seq_primary_ids = saved_seq_primary_ids;
+
+  fixture->request.seq_primary_ids_count = 0;
+  expect_kv_contract_rejected();
+  fixture->request.seq_primary_ids_count =
+      static_cast<int32_t>(fixture->seq_primary_ids.size());
+
+  std::array<int32_t, 2> multi_seq_ids = {0, 0};
+  fixture->request.seq_primary_ids = multi_seq_ids.data();
+  fixture->request.seq_primary_ids_count =
+      static_cast<int32_t>(multi_seq_ids.size());
+  err = -1;
+  CHECK_FALSE(emel::text::generator::detail::validate_guarded_compute(
+      fixture->request, &err));
+  CHECK(err == static_cast<int32_t>(
+                   emel::error::cast(emel::graph::processor::error::invalid_request)));
+  fixture->request.seq_primary_ids = saved_seq_primary_ids;
+  fixture->request.seq_primary_ids_count =
+      static_cast<int32_t>(fixture->seq_primary_ids.size());
+
+  fixture->backend.shortconv_state_size = 1;
+  fixture->memory_snapshot.sequence_recurrent_slot[0] = 1;
+  err = -1;
+  CHECK_FALSE(emel::text::generator::detail::validate_guarded_compute(
+      fixture->request, &err));
+  CHECK(err == static_cast<int32_t>(
+                   emel::error::cast(emel::graph::processor::error::invalid_request)));
+  fixture->memory_snapshot.sequence_recurrent_slot[0] = 0;
+  fixture->backend.shortconv_state_size = 0;
+
+  fixture->memory_snapshot.sequence_active[0] = 0;
+  expect_kv_contract_rejected();
+  fixture->memory_snapshot.sequence_active[0] = 1;
+
+  err = -1;
+  CHECK(emel::text::generator::detail::validate_guarded_compute(
+      fixture->request, &err));
+  CHECK(err == -1);
+
   CHECK(emel::text::generator::detail::prepare_graph(fixture->request, &reused,
                                                      &err));
   CHECK_FALSE(reused);
@@ -2867,6 +3211,62 @@ TEST_CASE("generator_detail_graph_callbacks_accept_guarded_requests_without_erro
 
   CHECK(emel::text::generator::detail::alloc_graph(fixture->request, &err));
   CHECK(err == emel::text::generator::detail::k_error_ok);
+}
+
+TEST_CASE("generator_detail_graph_callbacks_reject_incoherent_kv_snapshots") {
+  namespace gen_detail = emel::text::generator::detail;
+
+  const int32_t invalid_request =
+      static_cast<int32_t>(
+          emel::error::cast(emel::graph::processor::error::invalid_request));
+
+  {
+    auto fixture = std::make_unique<runtime_request_fixture>();
+    fixture->memory_snapshot.block_tokens = 4;
+
+    int32_t err = -1;
+    CHECK_FALSE(gen_detail::validate_guarded_compute(fixture->request, &err));
+    CHECK(err == invalid_request);
+  }
+
+  {
+    auto fixture = std::make_unique<runtime_request_fixture>();
+    std::array<int32_t, 1> decode_positions = {3};
+    fixture->backend.kv_block_tokens = 2;
+    fixture->backend.kv_positions_capacity = 8;
+    fixture->memory_snapshot.block_tokens = 2;
+    fixture->memory_snapshot.sequence_length_values[0] = 4;
+    fixture->memory_snapshot.sequence_kv_block_count[0] = 2;
+    fixture->memory_snapshot.sequence_kv_blocks[0][0] =
+        emel::memory::view::INVALID_KV_BLOCK;
+    fixture->memory_snapshot.sequence_kv_blocks[0][1] = 0;
+    fixture->request.positions = decode_positions.data();
+
+    int32_t err = -1;
+    CHECK_FALSE(gen_detail::validate_guarded_compute(fixture->request, &err));
+    CHECK(err == invalid_request);
+  }
+
+  {
+    auto fixture = std::make_unique<runtime_request_fixture>();
+    std::array<int32_t, 1> decode_positions = {8};
+    fixture->backend.kv_positions_capacity = 32;
+    fixture->memory_snapshot.sequence_length_values[0] = 9;
+    fixture->memory_snapshot.sequence_kv_block_count[0] = 2;
+    fixture->memory_snapshot.sequence_kv_blocks[0][0] = 0;
+    fixture->memory_snapshot.sequence_kv_blocks[0][1] = 2;
+    fixture->request.positions = decode_positions.data();
+
+    fixture->request.run_kernel = gen_detail::run_kernel_nonflash_decode_packed_q8_0;
+    int32_t err = -1;
+    CHECK(gen_detail::validate_guarded_compute(fixture->request, &err));
+    CHECK(err == -1);
+
+    fixture->request.run_kernel = gen_detail::run_kernel_flash_decode_packed_q8_0;
+    err = -1;
+    CHECK_FALSE(gen_detail::validate_guarded_compute(fixture->request, &err));
+    CHECK(err == invalid_request);
+  }
 }
 
 TEST_CASE("generator_detail_runtime_callbacks_bind_run_and_extract_guarded_data") {
@@ -2906,6 +3306,8 @@ TEST_CASE("generator_detail_builds_flash_request_over_head_major_kv_cache") {
   backend.head_dim = 2;
   backend.head_dim_kv = 2;
   backend.n_ctx = 2;
+  backend.kv_block_tokens = 2;
+  backend.kv_positions_capacity = 2;
   backend.blocks.resize(1u);
   backend.blocks.front().attention_q_dim = 4;
   backend.blocks.front().attention_kv_dim = 4;
@@ -2961,6 +3363,8 @@ TEST_CASE("generator_detail_flash_dispatch_matches_online_softmax_reference_on_"
   backend.head_dim = 64;
   backend.head_dim_kv = 64;
   backend.n_ctx = 256;
+  backend.kv_block_tokens = 256;
+  backend.kv_positions_capacity = 256;
   backend.kernel_kind = emel::kernel::kernel_kind::aarch64;
   backend.blocks.resize(1u);
   backend.blocks.front().attention_q_dim = 768;
@@ -3037,6 +3441,8 @@ TEST_CASE("generator_detail_flash_dispatch_matches_online_softmax_reference_"
   backend.head_dim = 64;
   backend.head_dim_kv = 64;
   backend.n_ctx = 1024;
+  backend.kv_block_tokens = 1024;
+  backend.kv_positions_capacity = 1024;
   backend.kernel_kind = emel::kernel::kernel_kind::aarch64;
   backend.blocks.resize(1u);
   backend.blocks.front().attention_q_dim = 768;

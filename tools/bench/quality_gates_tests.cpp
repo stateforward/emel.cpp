@@ -158,8 +158,38 @@ TEST_CASE("quality gates can run independent heavy lanes in ordered parallel gro
   CHECK(script.find("quality_gates: log begin name=$name") != std::string::npos);
   CHECK(script.find("quality_gates: log end name=$name status=$status") != std::string::npos);
   CHECK(script.find("EMEL_QUALITY_GATES_PARALLEL_CHILD=1") != std::string::npos);
-  CHECK(script.find("set +e\n    \"$@\" >\"$log_file\" 2>&1") != std::string::npos);
+  CHECK(script.find("set +e\n    \"${lane_cmd[@]}\" >>\"$log_file\" 2>&1") !=
+        std::string::npos);
   CHECK(script.find("printf '%s\\n' \"$status\" >\"$status_file\"") != std::string::npos);
+}
+
+TEST_CASE("quality gates preserve fractional and disabled timeout budgets") {
+  const std::string script = read_file(repo_root() / "scripts" / "quality_gates.sh");
+  const std::size_t helper_start = script.find("timeout_seconds()");
+  REQUIRE(helper_start != std::string::npos);
+
+  const std::size_t helper_end = script.find("lane_timeout_for()", helper_start);
+  REQUIRE(helper_end != std::string::npos);
+
+  const std::string timeout_body = script.substr(helper_start, helper_end - helper_start);
+  CHECK(timeout_body.find("([.][0-9]+)?") != std::string::npos);
+  CHECK(timeout_body.find("suffix == \"m\"") != std::string::npos);
+  CHECK(timeout_body.find("printf \"%.3f\\n\"") != std::string::npos);
+
+  const std::size_t lane_start = script.find("lane_timeout_for()");
+  REQUIRE(lane_start != std::string::npos);
+
+  const std::size_t lane_end = script.find("run_domain_boundary_gate()", lane_start);
+  REQUIRE(lane_end != std::string::npos);
+
+  const std::string lane_body = script.substr(lane_start, lane_end - lane_start);
+  CHECK(lane_body.find("global_seconds <= 0") != std::string::npos);
+  CHECK(lane_body.find("print \"0\"") != std::string::npos);
+  CHECK(lane_body.find("budget = global_seconds - elapsed - flush_margin") !=
+        std::string::npos);
+  CHECK(script.find("lane_timeout_enabled()") != std::string::npos);
+  CHECK(script.find("lane_timeout_enabled \"$budget\"") != std::string::npos);
+  CHECK(script.find("exit !(budget > 0)") != std::string::npos);
 }
 
 TEST_CASE("quality gate script changes keep mandatory lanes conservative") {

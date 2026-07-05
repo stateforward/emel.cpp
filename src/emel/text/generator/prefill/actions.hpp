@@ -18,6 +18,8 @@ struct request_slots {
       .token_count = ev.ctx.prompt_token_count,
       .block_count_out = nullptr,
       .error_out = &ev.ctx.phase_code,
+      .copy_block = emel::text::generator::action::copy_kv_cache_block,
+      .copy_block_user_data = &ctx.generator.compute.backend,
     };
     ev.ctx.phase_accepted = ctx.generator.memory.process_event(allocate_ev);
   }

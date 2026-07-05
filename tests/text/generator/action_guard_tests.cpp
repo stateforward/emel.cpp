@@ -89,6 +89,7 @@ constexpr std::array<emel::text::formatter::chat_message, 1>
 emel::model::data &test_model() {
   static auto *model = []() {
     auto *created = new emel::model::data{};
+    created->params.n_ctx = 8;
     created->vocab_data.eos_id = 7;
     created->vocab_data.eot_id = 8;
     return created;
@@ -254,8 +255,18 @@ struct compute_guard_fixture {
     backend.n_layer = 1;
     backend.n_vocab = 4;
     backend.n_ctx = 8;
+    backend.kv_block_tokens = 8;
+    backend.kv_positions_capacity = 8;
     backend.head_dim = 4;
     backend.head_dim_kv = 4;
+    // Coherent captured snapshot for the single maintained sequence: one
+    // 8-token block covering the 1-token workload the guard tests drive.
+    context.state.memory_snapshot.max_sequences = 1;
+    context.state.memory_snapshot.block_tokens = 8;
+    context.state.memory_snapshot.sequence_active[0] = 1;
+    context.state.memory_snapshot.sequence_length_values[0] = 1;
+    context.state.memory_snapshot.sequence_kv_block_count[0] = 1;
+    context.state.memory_snapshot.sequence_kv_blocks[0][0] = 0;
     backend.blocks.resize(1u);
     backend.bound_tokens.resize(4u);
     backend.bound_positions.resize(4u);
@@ -326,7 +337,7 @@ emel::text::generator::event::initialize make_initialize_request(
   request.selection_mode = selection_mode;
   request.max_prompt_tokens = 8;
   request.max_generated_tokens = 4;
-  request.max_blocks = 8;
+  request.max_blocks = 2;
   request.block_tokens = 4;
   request.error_out = error_out;
   request.on_done =
@@ -1151,6 +1162,66 @@ TEST_CASE("generator guard detail predicates cover negative branch cases") {
   backend.kv_cache_tokens = 1;
   CHECK_FALSE(guard_detail::guard_decode_request_ready(
       runtime, fixture->context));
+  backend.kv_cache_tokens = 0;
+
+  // Snapshot addressing coherence (KVM-03): geometry drift, inactive
+  // sequence, length drift, and missing block mapping each fail the ready
+  // predicates and route through the explicit invalid transitions.
+  auto & snapshot = fixture->context.state.memory_snapshot;
+  CHECK(guard_detail::guard_snapshot_geometry_coherent(fixture->context));
+  CHECK(guard_detail::guard_snapshot_covers_tokens(fixture->context, 1));
+  CHECK_FALSE(guard_detail::guard_snapshot_covers_tokens(fixture->context, 0));
+  CHECK_FALSE(guard_detail::guard_snapshot_covers_tokens(fixture->context, 2));
+
+  snapshot.block_tokens = 4;
+  CHECK_FALSE(guard_detail::guard_snapshot_geometry_coherent(fixture->context));
+  CHECK_FALSE(guard_detail::guard_decode_request_ready(runtime, fixture->context));
+  CHECK_FALSE(guard_detail::guard_prefill_request_ready(runtime, fixture->context));
+  snapshot.block_tokens = 8;
+
+  snapshot.sequence_active[0] = 0;
+  CHECK_FALSE(guard_detail::guard_snapshot_geometry_coherent(fixture->context));
+  CHECK_FALSE(guard_detail::guard_decode_request_ready(runtime, fixture->context));
+  snapshot.sequence_active[0] = 1;
+
+  snapshot.sequence_recurrent_slot[0] = -1;
+  CHECK_FALSE(guard_detail::guard_snapshot_geometry_coherent(fixture->context));
+  CHECK_FALSE(guard_detail::guard_decode_request_ready(runtime, fixture->context));
+  snapshot.sequence_recurrent_slot[0] = 0;
+
+  snapshot.sequence_length_values[0] = 3;
+  CHECK_FALSE(guard_detail::guard_snapshot_covers_tokens(fixture->context, 1));
+  CHECK_FALSE(guard_detail::guard_decode_request_ready(runtime, fixture->context));
+  snapshot.sequence_length_values[0] = 1;
+
+  snapshot.sequence_kv_block_count[0] = 0;
+  CHECK_FALSE(guard_detail::guard_snapshot_covers_tokens(fixture->context, 1));
+  snapshot.sequence_kv_block_count[0] = 1;
+
+  snapshot.sequence_kv_blocks[0][0] = 1;
+  CHECK_FALSE(guard_detail::guard_snapshot_covers_tokens(fixture->context, 1));
+  CHECK_FALSE(guard_detail::guard_decode_request_ready(runtime, fixture->context));
+  snapshot.sequence_kv_blocks[0][0] = 0;
+
+  CHECK(guard_detail::guard_decode_request_ready(runtime, fixture->context));
+  CHECK(guard_detail::guard_prefill_request_ready(runtime, fixture->context));
+
+  // Flash route identity requirement (KVR-02): the identity map keeps flash
+  // eligible; a permuted block map routes to the scalar path.
+  CHECK(guard_detail::guard_flash_kv_map_identity(fixture->context, 1));
+  snapshot.block_tokens = 4;
+  snapshot.sequence_length_values[0] = 8;
+  snapshot.sequence_kv_block_count[0] = 2;
+  snapshot.sequence_kv_blocks[0][0] = 1;
+  snapshot.sequence_kv_blocks[0][1] = 0;
+  CHECK_FALSE(guard_detail::guard_flash_kv_map_identity(fixture->context, 8));
+  snapshot.sequence_kv_blocks[0][0] = 0;
+  snapshot.sequence_kv_blocks[0][1] = 1;
+  CHECK(guard_detail::guard_flash_kv_map_identity(fixture->context, 8));
+  snapshot.block_tokens = 8;
+  snapshot.sequence_length_values[0] = 1;
+  snapshot.sequence_kv_block_count[0] = 1;
+  snapshot.sequence_kv_blocks[0][1] = 0;
 }
 
 TEST_CASE("generator compute readiness guards classify request and backend gaps") {
@@ -1804,6 +1875,14 @@ TEST_CASE("generator runtime guards model explicit flash and nonflash compute "
   backend.head_dim = 2;
   backend.head_dim_kv = 2;
   backend.n_ctx = 4;
+  backend.kv_block_tokens = 4;
+  backend.kv_positions_capacity = 4;
+  context.state.memory_snapshot.max_sequences = 1;
+  context.state.memory_snapshot.block_tokens = 4;
+  context.state.memory_snapshot.sequence_active[0] = 1;
+  context.state.memory_snapshot.sequence_length_values[0] = 2;
+  context.state.memory_snapshot.sequence_kv_block_count[0] = 1;
+  context.state.memory_snapshot.sequence_kv_blocks[0][0] = 0;
   backend.q_attn.resize(4, 0.0f);
   backend.key_cache.resize(16, 0.0f);
   backend.value_cache.resize(16, 0.0f);
@@ -1849,6 +1928,14 @@ TEST_CASE("generator prefill runtime guards model explicit flash and compute "
   backend.head_dim = 2;
   backend.head_dim_kv = 2;
   backend.n_ctx = 4;
+  backend.kv_block_tokens = 4;
+  backend.kv_positions_capacity = 4;
+  generator_context.state.memory_snapshot.max_sequences = 1;
+  generator_context.state.memory_snapshot.block_tokens = 4;
+  generator_context.state.memory_snapshot.sequence_active[0] = 1;
+  generator_context.state.memory_snapshot.sequence_length_values[0] = 2;
+  generator_context.state.memory_snapshot.sequence_kv_block_count[0] = 1;
+  generator_context.state.memory_snapshot.sequence_kv_blocks[0][0] = 0;
   backend.q_attn.resize(4, 0.0f);
   backend.key_cache.resize(16, 0.0f);
   backend.value_cache.resize(16, 0.0f);
@@ -2326,8 +2413,16 @@ TEST_CASE(
   CHECK(emel::text::generator::initializer::guard::backend_prepare_needed{}(
       initializer_run, initializer_context));
   generator_context.compute.backend_ready = true;
+  generator_context.limits.block_tokens = initialize.block_tokens;
+  generator_context.compute.backend.n_ctx = 8;
+  generator_context.compute.backend.kv_block_tokens = initialize.block_tokens;
+  generator_context.compute.backend.kv_positions_capacity = 8;
   CHECK(emel::text::generator::initializer::guard::backend_already_ready{}(
       initializer_run, initializer_context));
+  generator_context.compute.backend.kv_block_tokens = initialize.block_tokens + 1;
+  CHECK(emel::text::generator::initializer::guard::backend_prepare_needed{}(
+      initializer_run, initializer_context));
+  generator_context.compute.backend.kv_block_tokens = initialize.block_tokens;
 
   initialize_ctx.phase_accepted = true;
   initialize_ctx.phase_code = 0;
