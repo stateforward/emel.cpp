@@ -72,7 +72,9 @@ not change quantization or kernel arithmetic.
 - [ ] **KVE-01**: Maintained generation benchmarks (LFM2 10/100/1000-token baselines
   and the kernel suites) show no regression beyond accepted thresholds after the
   cutover, dispatch remains allocation-free, and benchmark evidence is captured from
-  maintained commands without snapshot updates unless explicitly approved.
+  maintained commands. Snapshot updates require explicit approval; PR #94 benchmark
+  snapshots were refreshed after explicit 2026-07-05 consent for visibility, but
+  KVE-01 remains open until the full bench lane is repaired and passes end to end.
 
 - [ ] **KVD-01**: Architecture docs and mermaid diagrams reflect memory-owned KV
   addressing, domain-boundary checks pass, and the full-scope quality gate passes at
@@ -103,4 +105,4 @@ not change quantization or kernel arithmetic.
 | KVE-01 | Phase 250 |
 | KVD-01 | Phase 250 |
 
-Mapped: 10/10 v1.28 requirements; satisfied 8, pending 2 (KVE-01, KVD-01 blocked on pre-existing bench-lane breakage; chip task_48a05fc3).
+Mapped: 10/10 v1.28 requirements; satisfied 8, pending 2 (KVE-01, KVD-01 blocked on full bench-lane repair; chip task_48a05fc3).

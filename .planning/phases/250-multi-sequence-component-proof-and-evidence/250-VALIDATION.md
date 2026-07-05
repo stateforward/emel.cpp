@@ -1,8 +1,9 @@
 # Phase 250 Validation
 
 **Date:** 2026-07-04
-**Status:** KVP-01 satisfied; KVE-01 and KVD-01 closeout BLOCKED on pre-existing
-main-branch bench breakage (see below).
+**Status:** KVP-01 satisfied; KVE-01 and KVD-01 closeout BLOCKED on full
+bench-lane repair (see below). PR #94 benchmark snapshots were refreshed after
+explicit 2026-07-05 consent for performance visibility only.
 
 ## KVP-01 — multi-sequence component proof (DONE)
 
@@ -20,13 +21,20 @@ main-branch bench breakage (see below).
 
 ## KVE-01 — benchmark evidence (BLOCKED, upstream)
 
-The bench_snapshot lane cannot run to completion on this host: the reference
-comparison lane SIGBUSes inside the pinned ggml (`ggml_is_quantized`) on
-pristine origin/main, and the PR #89 suites have no baselines. Both are
-tracked (chip task_48a05fc3) and need owner action (reference-pin fix;
-consented baseline addition). Runtime-only generation benches run clean and
-the parity lane passes on the block-mapped path, but honest KVE-01 closure
-requires the maintained bench commands end to end.
+The full bench_snapshot lane still is not a closeout-proof command on this host
+and remains tracked under chip task_48a05fc3. With explicit consent on
+2026-07-05, PR #94 refreshed:
+
+- `snapshots/bench/benchmarks.txt` via suite-scoped EMEL snapshot updates so
+  arm64-supported suites moved without deleting the committed x86_64 rows.
+- `snapshots/bench/benchmarks_compare.txt` via compare update with
+  `EMEL_GENERATION_WORKLOAD_ID=all` so available Liquid LFM2 scaling rows are
+  visible.
+
+This gives performance visibility for review, including the new graph processor
+and decode wavefront rows, but honest KVE-01 closure still requires the
+maintained bench commands to pass end to end. Locally absent Qwen/Gemma
+generation fixtures are not re-created by the snapshot refresh.
 
 ## KVD-01 — docs and full-scope gate (PARTIAL)
 
@@ -34,4 +42,4 @@ requires the maintained bench commands end to end.
 generated-doc drift; the transition-table shape is unchanged, only guards were
 strengthened). Milestone documentation lives in .planning (ROADMAP, phase
 docs) and code comments. The full-scope quality gate at closeout is blocked by
-the same bench lane breakage as KVE-01.
+the same full bench-lane issue as KVE-01.

@@ -3,7 +3,7 @@ gsd_state_version: 1.0
 milestone: v1.28
 milestone_name: Memory-Owned KV Block Addressing Cutover
 status: active
-stopped_at: "Phases 245-249 complete + KVP-01; v1.28 closeout blocked on bench-lane repair (chip task_48a05fc3)"
+stopped_at: "Phases 245-249 complete + KVP-01; v1.28 closeout blocked on full bench-lane repair (chip task_48a05fc3)"
 last_updated: "2026-07-05T00:00:00.000Z"
 last_activity: 2026-07-05
 progress:
@@ -33,17 +33,21 @@ Milestone: v1.28 Memory-Owned KV Block Addressing Cutover
 Status: Phases 245-249 complete and committed with per-phase committed-state gate
 evidence (coverage + parity lanes pass; bench lane blocked by pre-existing main
 breakage). Phase 250: KVP-01 multi-sequence component proof landed; KVE-01/KVD-01
-closeout blocked on the bench-lane repair (reference ggml SIGBUS + missing PR #89
-baselines, chip task_48a05fc3). Full suite 14/14 (1816 cases) on the unsharded
-zig build.
-Phase: 250 closeout pending upstream bench repair and consent decisions.
+closeout blocked on the full bench-lane repair (chip task_48a05fc3). Benchmark
+snapshots were refreshed with explicit consent on 2026-07-05 for performance
+visibility, but that does not close the full bench gate. Full suite 14/14
+(1816 cases) on the unsharded zig build.
+Phase: 250 closeout pending upstream bench repair.
 Last activity: 2026-07-05 — PR #94 takeover fixed review-loop findings around
 KV reuse order, graph execute KV-addressing validation, identity addressing,
-snapshot-coverage guard cost, and unapproved lint-snapshot churn. See phase
-VALIDATION docs under .planning/phases/24{5,6,7,50}-*/ for earlier gate evidence
-and dispositions. A final all-files union gate run timed out at 30 minutes under
-host contention (a second agent session was running); per-phase committed-state
-evidence stands.
+snapshot-coverage guard cost, and unapproved lint-snapshot churn; benchmark
+snapshots were then refreshed after explicit consent. See phase VALIDATION docs
+under .planning/phases/245-*/, 246-*/, 247-*/, and 250-* for recorded gate
+evidence and dispositions; Phase 248/249 implementation evidence is tracked in
+the roadmap/requirements plus the source/test diff, not standalone phase
+directories. A final all-files union gate run timed out at 30 minutes under host
+contention (a second agent session was running); committed-state evidence stands
+with the full bench lane honestly blocked as described above.
 
 Progress: [########--] 83%
 
@@ -63,11 +67,12 @@ Progress: [########--] 83%
   flash eligibility under block mapping must be an explicit guard.
 
 **Next implementation step:** no further v1.28 implementation is queued in this
-PR. KVE-01/KVD-01 closeout waits on bench-lane repair and explicit snapshot
-baseline consent.
+PR. KVE-01/KVD-01 closeout waits on full bench-lane repair; the PR #94
+benchmark snapshots were refreshed after explicit 2026-07-05 consent for
+performance visibility only.
 
 **Closeout gate:** open (5/6 phases complete). KVP-01 landed; KVE-01/KVD-01 stay
-blocked by the bench lane.
+blocked by the full bench lane.
 
 ## Accumulated Context
 
@@ -146,5 +151,6 @@ Items acknowledged at v1.25 milestone close on 2026-05-06 (unchanged):
 
 Last session: 2026-07-05 (PR #94 takeover)
 Stopped at: Phases 245-249 complete plus KVP-01; KVE-01/KVD-01 intentionally
-blocked on the bench-lane repair and snapshot consent.
+blocked on the full bench-lane repair after the consented PR #94 benchmark
+snapshot refresh.
 Resume file: None

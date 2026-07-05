@@ -74,6 +74,11 @@ Execution order: 245, 246, 247, 248, 249, 250.
 - [x] Phase 249: Recurrent Slot Wiring (KVS-01)
 - [ ] Phase 250: Multi-Sequence Component Proof and Evidence (KVP-01, KVE-01, KVD-01)
 
+Note: Phase 248 and Phase 249 were implemented as roadmap slices inside this PR
+without separate `.planning/phases/248-*` or `249-*` directories. Their evidence is
+the source/test diff plus the checked KVR-02/KVS-01 requirements; recorded phase
+validation files exist for 245, 246, 247, and 250 only.
+
 ## Phase Details
 
 ### Phase 245: Block Geometry Ownership and Slot Allocation
@@ -185,8 +190,8 @@ close the milestone with truthful evidence.
 | 245. Block Geometry Ownership and Slot Allocation | v1.28 | 1/1 | Complete | 2026-07-04 |
 | 246. Snapshot Addressing Contract and Coherence Guards | v1.28 | 1/1 | Complete | 2026-07-04 |
 | 247. Write and Scalar Read Block-Mapped Cutover | v1.28 | 1/1 | Complete | 2026-07-04 |
-| 248. Flash Route Contiguity Guards | v1.28 | 1/1 | Complete | 2026-07-04 |
-| 249. Recurrent Slot Wiring | v1.28 | 1/1 | Complete | 2026-07-04 |
+| 248. Flash Route Contiguity Guards | v1.28 | roadmap slice | Complete; source/test evidence, no standalone phase dir | 2026-07-04 |
+| 249. Recurrent Slot Wiring | v1.28 | roadmap slice | Complete; source/test evidence, no standalone phase dir | 2026-07-04 |
 | 250. Multi-Sequence Component Proof and Evidence | v1.28 | 0/1 | KVP-01 done; KVE/KVD blocked on bench lane | — |
 
 ## Recently Shipped
