@@ -828,6 +828,24 @@ inline bool guard_snapshot_covers_tokens(const action::context & ctx,
          snapshot.lookup_kv_block(action::k_sequence_id, token_count - 1) >= 0;
 }
 
+// Flash kernels consume contiguous strided views rooted at each layer's cache
+// base, so the flash route additionally requires the snapshot block map to be
+// the identity over the tokens it reads. Permuted or offset mappings take the
+// scalar span-walking route through the existing non-flash transitions.
+inline bool guard_flash_kv_map_identity(const action::context & ctx,
+                                        const int32_t token_count) noexcept {
+  const auto & snapshot = ctx.state.memory_snapshot;
+  const int32_t block_count =
+      emel::memory::view::blocks_for_tokens(snapshot.block_tokens, token_count);
+  for (int32_t block = 0; block < block_count; ++block) {
+    if (snapshot.lookup_kv_block(action::k_sequence_id, block * snapshot.block_tokens) !=
+        block) {
+      return false;
+    }
+  }
+  return true;
+}
+
 inline bool guard_prefill_request_ready(const event::generate_ctx & runtime,
                                         const action::context & ctx) noexcept {
   return guard_step_plan_ready(
@@ -1662,8 +1680,9 @@ struct graph_lifecycle_runtime_tensor_unavailable {
 
 struct decode_flash_runtime_supported {
   bool operator()(const event::generate_run & ev, const action::context & ctx) const noexcept {
-    return ev.ctx.kv_tokens >= 0 && detail::guard_flash_attention_supported(
-                                        ctx.compute.backend, ev.ctx.kv_tokens);
+    return ev.ctx.kv_tokens >= 0 &&
+           detail::guard_flash_attention_supported(ctx.compute.backend, ev.ctx.kv_tokens) &&
+           detail::guard_flash_kv_map_identity(ctx, ev.ctx.kv_tokens + 1);
   }
 };
 

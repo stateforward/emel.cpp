@@ -50,7 +50,7 @@ not change quantization or kernel arithmetic.
   spans with bounded, monotonic, allocation-free data-plane iteration, and maintained
   generation parity is unchanged.
 
-- [ ] **KVR-02**: The flash attention route is guarded by an explicit
+- [x] **KVR-02**: The flash attention route is guarded by an explicit
   contiguous-mapped-span predicate: contiguous mappings execute the existing optimized
   flash kernels bit-identically; non-contiguous mappings route via explicit
   transitions to the span-walking path (behavior selection in guards/transitions
@@ -103,4 +103,4 @@ not change quantization or kernel arithmetic.
 | KVE-01 | Phase 250 |
 | KVD-01 | Phase 250 |
 
-Mapped: 10/10 v1.28 requirements; satisfied 5, pending 5.
+Mapped: 10/10 v1.28 requirements; satisfied 6, pending 4.

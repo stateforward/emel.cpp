@@ -1194,6 +1194,23 @@ TEST_CASE("generator guard detail predicates cover negative branch cases") {
 
   CHECK(guard_detail::guard_decode_request_ready(runtime, fixture->context));
   CHECK(guard_detail::guard_prefill_request_ready(runtime, fixture->context));
+
+  // Flash route identity requirement (KVR-02): the identity map keeps flash
+  // eligible; a permuted block map routes to the scalar path.
+  CHECK(guard_detail::guard_flash_kv_map_identity(fixture->context, 1));
+  snapshot.block_tokens = 4;
+  snapshot.sequence_length_values[0] = 8;
+  snapshot.sequence_kv_block_count[0] = 2;
+  snapshot.sequence_kv_blocks[0][0] = 1;
+  snapshot.sequence_kv_blocks[0][1] = 0;
+  CHECK_FALSE(guard_detail::guard_flash_kv_map_identity(fixture->context, 8));
+  snapshot.sequence_kv_blocks[0][0] = 0;
+  snapshot.sequence_kv_blocks[0][1] = 1;
+  CHECK(guard_detail::guard_flash_kv_map_identity(fixture->context, 8));
+  snapshot.block_tokens = 8;
+  snapshot.sequence_length_values[0] = 1;
+  snapshot.sequence_kv_block_count[0] = 1;
+  snapshot.sequence_kv_blocks[0][1] = 0;
 }
 
 TEST_CASE("generator compute readiness guards classify request and backend gaps") {
@@ -1849,6 +1866,12 @@ TEST_CASE("generator runtime guards model explicit flash and nonflash compute "
   backend.n_ctx = 4;
   backend.kv_block_tokens = 4;
   backend.kv_positions_capacity = 4;
+  context.state.memory_snapshot.max_sequences = 1;
+  context.state.memory_snapshot.block_tokens = 4;
+  context.state.memory_snapshot.sequence_active[0] = 1;
+  context.state.memory_snapshot.sequence_length_values[0] = 2;
+  context.state.memory_snapshot.sequence_kv_block_count[0] = 1;
+  context.state.memory_snapshot.sequence_kv_blocks[0][0] = 0;
   backend.q_attn.resize(4, 0.0f);
   backend.key_cache.resize(16, 0.0f);
   backend.value_cache.resize(16, 0.0f);
@@ -1896,6 +1919,12 @@ TEST_CASE("generator prefill runtime guards model explicit flash and compute "
   backend.n_ctx = 4;
   backend.kv_block_tokens = 4;
   backend.kv_positions_capacity = 4;
+  generator_context.state.memory_snapshot.max_sequences = 1;
+  generator_context.state.memory_snapshot.block_tokens = 4;
+  generator_context.state.memory_snapshot.sequence_active[0] = 1;
+  generator_context.state.memory_snapshot.sequence_length_values[0] = 2;
+  generator_context.state.memory_snapshot.sequence_kv_block_count[0] = 1;
+  generator_context.state.memory_snapshot.sequence_kv_blocks[0][0] = 0;
   backend.q_attn.resize(4, 0.0f);
   backend.key_cache.resize(16, 0.0f);
   backend.value_cache.resize(16, 0.0f);
