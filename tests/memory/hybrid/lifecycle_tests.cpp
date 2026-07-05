@@ -246,8 +246,8 @@ TEST_CASE("memory_hybrid_interleaved_sequences_isolate_and_recycle_blocks") {
   CHECK(view.lookup_recurrent_slot(0) != view.lookup_recurrent_slot(1));
 
   // Freeing seq 0 recycles its blocks without disturbing seq 1; a new
-  // sequence reuses the reclaimed ids (LIFO, so the mapping is permuted and
-  // the flash identity predicate must reject it downstream).
+  // sequence reuses the reclaimed ids in logical order so repeated runs keep
+  // the maintained flash-identity contract when no other sequence intervenes.
   REQUIRE(machine.process_event(event::free_sequence{.seq_id = 0, .error_out = &err}));
   REQUIRE(machine.process_event(event::allocate_sequence{.seq_id = 2, .error_out = &err}));
   REQUIRE(machine.process_event(event::allocate_slots{
@@ -262,7 +262,6 @@ TEST_CASE("memory_hybrid_interleaved_sequences_isolate_and_recycle_blocks") {
   CHECK(seq2_block0 != seq1_block0);
   CHECK(seq2_block1 != seq1_block0);
   CHECK(seq2_block0 != seq2_block1);
-  // Reclaimed ids come back most-recently-freed first.
-  CHECK(seq2_block0 == 1);
-  CHECK(seq2_block1 == 0);
+  CHECK(seq2_block0 == 0);
+  CHECK(seq2_block1 == 1);
 }

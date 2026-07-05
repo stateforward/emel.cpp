@@ -1036,6 +1036,30 @@ TEST_CASE("generator_initialize_succeeds_and_enters_ready") {
   CHECK(error == emel::error::cast(emel::text::generator::error::none));
 }
 
+TEST_CASE("generator_reinitialize_reprepares_backend_when_block_geometry_changes") {
+  auto fixture = std::make_unique<generator_fixture>();
+  callback_tracker first_tracker{};
+  emel::error::type first_error =
+      emel::error::cast(emel::text::generator::error::backend);
+  const auto first_request = fixture->make_initialize(first_tracker, &first_error);
+  REQUIRE(fixture->generator->process_event(first_request));
+  REQUIRE(fixture->generator->is(stateforward::sml::state<emel::text::generator::ready>));
+  REQUIRE(first_error == emel::error::cast(emel::text::generator::error::none));
+
+  callback_tracker second_tracker{};
+  emel::error::type second_error =
+      emel::error::cast(emel::text::generator::error::backend);
+  auto second_request = fixture->make_initialize(second_tracker, &second_error);
+  second_request.max_blocks = 4;
+  second_request.block_tokens = 2;
+
+  CHECK(fixture->generator->process_event(second_request));
+  CHECK(fixture->generator->is(stateforward::sml::state<emel::text::generator::ready>));
+  CHECK(second_tracker.initialize_done_called);
+  CHECK_FALSE(second_tracker.initialize_error_called);
+  CHECK(second_error == emel::error::cast(emel::text::generator::error::none));
+}
+
 TEST_CASE("generator_initialize_accepts_explicit_preselected_argmax_mode_without_sampler_chain") {
   auto fixture = std::make_unique<generator_fixture>();
   callback_tracker tracker{};

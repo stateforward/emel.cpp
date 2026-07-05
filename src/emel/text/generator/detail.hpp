@@ -1112,23 +1112,42 @@ inline const block_weights * first_attention_block(const native_backend & backen
 }
 
 struct kv_addressing_view {
-  const emel::memory::view::snapshot * snapshot = nullptr;
-  int32_t seq_id = 0;
+  const uint16_t * blocks = nullptr;
+  int32_t block_tokens = 1;
   int32_t recurrent_slot = 0;
 };
 
+inline constexpr std::array<uint16_t, emel::memory::view::MAX_BLOCKS_PER_SEQUENCE>
+make_identity_kv_blocks() noexcept {
+  std::array<uint16_t, emel::memory::view::MAX_BLOCKS_PER_SEQUENCE> blocks = {};
+  for (size_t idx = 0; idx < blocks.size(); ++idx) {
+    blocks[idx] = static_cast<uint16_t>(idx);
+  }
+  return blocks;
+}
+
+inline constexpr auto k_identity_kv_blocks = make_identity_kv_blocks();
+
 inline kv_addressing_view identity_kv_addressing() noexcept {
-  return {};
+  return kv_addressing_view{
+    .blocks = k_identity_kv_blocks.data(),
+    .block_tokens = 1,
+    .recurrent_slot = 0,
+  };
+}
+
+inline kv_addressing_view kv_addressing_from_snapshot(
+    const emel::memory::view::snapshot & snapshot, const int32_t seq_id) noexcept {
+  return kv_addressing_view{
+    .blocks = snapshot.sequence_kv_blocks[static_cast<size_t>(seq_id)].data(),
+    .block_tokens = snapshot.block_tokens,
+    .recurrent_slot = snapshot.lookup_recurrent_slot(seq_id),
+  };
 }
 
 inline kv_addressing_view kv_addressing_from_request(
     const emel::graph::processor::event::execute & request) noexcept {
-  const int32_t seq_id = request.seq_primary_ids[0];
-  return kv_addressing_view{
-    .snapshot = request.memory_view,
-    .seq_id = seq_id,
-    .recurrent_slot = request.memory_view->lookup_recurrent_slot(seq_id),
-  };
+  return kv_addressing_from_snapshot(*request.memory_view, request.seq_primary_ids[0]);
 }
 
 inline size_t shortconv_state_layer_offset(const native_backend & backend,
@@ -1137,9 +1156,7 @@ inline size_t shortconv_state_layer_offset(const native_backend & backend,
   // Recurrent state is addressed through the snapshot-resolved slot bound at
   // compute dispatch; the cache holds max_sequences (currently 1) slots, so
   // slot 0 preserves the flat pre-cutover layout bit-exactly.
-  const int32_t recurrent_slot =
-      static_cast<int32_t>(kv.snapshot != nullptr) * kv.recurrent_slot;
-  return (static_cast<size_t>(recurrent_slot) *
+  return (static_cast<size_t>(kv.recurrent_slot) *
               static_cast<size_t>(backend.n_layer) +
           static_cast<size_t>(layer_index)) *
          static_cast<size_t>(backend.shortconv_state_size) *
@@ -3207,15 +3224,11 @@ inline float silu(const float value) noexcept {
 #endif
 }
 
-// Logical->physical KV position through the dispatch-local snapshot view.
+// Logical->physical KV position through the dispatch-local block table.
 inline size_t physical_kv_position(const kv_addressing_view & kv,
                                    const int32_t position) noexcept {
-  if (kv.snapshot == nullptr) {
-    return static_cast<size_t>(position);
-  }
-  const int32_t block_id = kv.snapshot->lookup_kv_block(kv.seq_id, position);
-  return static_cast<size_t>(block_id * kv.snapshot->block_tokens +
-                             (position % kv.snapshot->block_tokens));
+  const int32_t block_id = kv.blocks[static_cast<size_t>(position / kv.block_tokens)];
+  return static_cast<size_t>(block_id * kv.block_tokens + (position % kv.block_tokens));
 }
 
 inline size_t layer_cache_offset(const native_backend & backend,
@@ -5515,74 +5528,19 @@ inline emel::text::generator::compute_io & bind_compute_io(
 inline native_backend & bind_native_backend(
     const emel::graph::processor::event::execute & request) noexcept;
 
-// The compute contract requires the captured snapshot as addressing truth:
-// present, geometry-coherent with the prepared backend, and covering the
-// primary sequence. The result routes through the processor's modeled
-// validate-failed transitions.
-inline bool validate_kv_map_contract(const emel::graph::processor::event::execute & request,
-                                     int32_t * err_out) noexcept {
-  const auto * io =
-      static_cast<const emel::text::generator::compute_io *>(request.compute_ctx);
-  const auto * backend =
-      io == nullptr ? nullptr : static_cast<const native_backend *>(io->backend_ctx);
-  bool map_ready =
-      io != nullptr &&
-      backend != nullptr &&
-      request.memory_view != nullptr &&
-      request.positions != nullptr &&
-      request.positions_count > 0 &&
-      request.positions_count == io->token_count &&
-      request.positions_count <= backend->n_ctx &&
-      request.seq_primary_ids != nullptr &&
-      request.seq_primary_ids_count > 0 &&
-      request.memory_view->block_tokens > 0 &&
-      request.memory_view->block_tokens == backend->kv_block_tokens &&
-      backend->kv_positions_capacity >= backend->n_ctx;
-  int32_t max_position = -1;
-  if (map_ready) {
-    for (int32_t idx = 0; idx < request.positions_count; ++idx) {
-      const int32_t position = request.positions[static_cast<size_t>(idx)];
-      map_ready = map_ready && position >= 0 && position < backend->n_ctx;
-      max_position = std::max(max_position, position);
-    }
-  }
-  const int32_t seq_id =
-      map_ready ? request.seq_primary_ids[0] : 0;
-  map_ready = map_ready &&
-              request.memory_view->is_sequence_active(seq_id) &&
-              request.memory_view->lookup_recurrent_slot(seq_id) >= 0 &&
-              request.memory_view->sequence_length(seq_id) > max_position;
-  if (map_ready) {
-    for (int32_t position = 0; position <= max_position; ++position) {
-      const int32_t block_id = request.memory_view->lookup_kv_block(seq_id, position);
-      const int64_t physical_position =
-          (static_cast<int64_t>(block_id) *
-           static_cast<int64_t>(request.memory_view->block_tokens)) +
-          static_cast<int64_t>(position % request.memory_view->block_tokens);
-      map_ready = map_ready &&
-                  block_id >= 0 &&
-                  physical_position >= 0 &&
-                  physical_position < static_cast<int64_t>(backend->kv_positions_capacity);
-    }
-  }
-  if (!map_ready) {
-    if (err_out != nullptr) {
-      *err_out = k_error_invalid;
-    }
-    return false;
-  }
-  return true;
-}
-
 inline bool validate_guarded_compute(const emel::graph::processor::event::execute & request,
                                      int32_t * err_out) noexcept {
-  return validate_kv_map_contract(request, err_out);
+  (void)request;
+  (void)err_out;
+  return true;
 }
 
 inline bool validate_guarded_preselected_argmax(
     const emel::graph::processor::event::execute & request,
     int32_t * err_out) noexcept {
-  return validate_kv_map_contract(request, err_out);
+  (void)request;
+  (void)err_out;
+  return true;
 }
 
 inline bool prepare_graph(const emel::graph::processor::event::execute &,

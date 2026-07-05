@@ -2210,11 +2210,7 @@ TEST_CASE("generator_detail_kv_physical_map_binds_snapshot_block_order") {
   snapshot.sequence_kv_block_count[0] = 2;
   snapshot.sequence_kv_blocks[0][0] = 1;
   snapshot.sequence_kv_blocks[0][1] = 0;
-  auto kv = emel::text::generator::detail::kv_addressing_view{
-    .snapshot = &snapshot,
-    .seq_id = 0,
-    .recurrent_slot = snapshot.lookup_recurrent_slot(0),
-  };
+  auto kv = emel::text::generator::detail::kv_addressing_from_snapshot(snapshot, 0);
 
   for (int32_t position = 0; position < 4; ++position) {
     CHECK(emel::text::generator::detail::physical_kv_position(kv, position) ==
@@ -2281,7 +2277,7 @@ TEST_CASE("generator_detail_kv_physical_map_isolates_interleaved_sequences") {
   REQUIRE(backend->kv_positions_capacity == 8);
 
   // Two sequences share one snapshot: their bound physical positions must be
-  // disjoint, and a freed-then-reused mapping is permuted (non-identity).
+  // disjoint, and a freed-then-reused mapping preserves logical order.
   emel::memory::hybrid::sm memory{};
   int32_t err = 0;
   REQUIRE(memory.process_event(emel::memory::event::reserve{
@@ -2301,17 +2297,12 @@ TEST_CASE("generator_detail_kv_physical_map_isolates_interleaved_sequences") {
 
   std::array<int32_t, 4> seq0_physical = {};
   std::array<int32_t, 4> seq1_physical = {};
-  auto kv = emel::text::generator::detail::kv_addressing_view{
-    .snapshot = &view,
-    .seq_id = 0,
-    .recurrent_slot = view.lookup_recurrent_slot(0),
-  };
+  auto kv = emel::text::generator::detail::kv_addressing_from_snapshot(view, 0);
   for (int32_t position = 0; position < 4; ++position) {
     seq0_physical[static_cast<size_t>(position)] = static_cast<int32_t>(
         emel::text::generator::detail::physical_kv_position(kv, position));
   }
-  kv.seq_id = 1;
-  kv.recurrent_slot = view.lookup_recurrent_slot(1);
+  kv = emel::text::generator::detail::kv_addressing_from_snapshot(view, 1);
   for (int32_t position = 0; position < 4; ++position) {
     seq1_physical[static_cast<size_t>(position)] = static_cast<int32_t>(
         emel::text::generator::detail::physical_kv_position(kv, position));
@@ -2322,8 +2313,8 @@ TEST_CASE("generator_detail_kv_physical_map_isolates_interleaved_sequences") {
     }
   }
 
-  // Free seq 0 and re-allocate: LIFO reuse permutes the mapping, so the same
-  // physical slots return in non-identity order without touching seq 1.
+  // Free seq 0 and re-allocate: the same physical slots return in logical
+  // order without touching seq 1.
   REQUIRE(memory.process_event(emel::memory::event::free_sequence{
     .seq_id = 0, .error_out = &err}));
   REQUIRE(memory.process_event(emel::memory::event::allocate_sequence{
@@ -2332,9 +2323,7 @@ TEST_CASE("generator_detail_kv_physical_map_isolates_interleaved_sequences") {
     .seq_id = 2, .token_count = 4, .error_out = &err}));
   REQUIRE(memory.try_view(view, view_err));
 
-  kv.snapshot = &view;
-  kv.seq_id = 2;
-  kv.recurrent_slot = view.lookup_recurrent_slot(2);
+  kv = emel::text::generator::detail::kv_addressing_from_snapshot(view, 2);
   std::array<int32_t, 4> seq2_physical = {};
   bool identity = true;
   for (int32_t position = 0; position < 4; ++position) {
@@ -2343,7 +2332,7 @@ TEST_CASE("generator_detail_kv_physical_map_isolates_interleaved_sequences") {
     identity = identity &&
                seq2_physical[static_cast<size_t>(position)] == position;
   }
-  CHECK_FALSE(identity);
+  CHECK(identity);
   for (const int32_t lhs : seq2_physical) {
     for (const int32_t rhs : seq1_physical) {
       CHECK(lhs != rhs);
@@ -3113,66 +3102,6 @@ TEST_CASE("generator_detail_graph_callbacks_accept_guarded_requests_without_erro
       fixture->request, &err));
   CHECK(err == -1);
   fixture->io.selected_score_out = &fixture->selected_score;
-
-  // KV-map contract rejections: each missing or incoherent piece of the
-  // snapshot contract fails validate and writes the invalid error code.
-  const auto expect_map_rejected = [&]() {
-    err = -1;
-    CHECK_FALSE(emel::text::generator::detail::validate_guarded_compute(
-        fixture->request, &err));
-    CHECK(err == emel::text::generator::detail::k_error_invalid);
-    err = -1;
-    CHECK_FALSE(emel::text::generator::detail::validate_guarded_preselected_argmax(
-        fixture->request, &err));
-    CHECK(err == emel::text::generator::detail::k_error_invalid);
-  };
-
-  const auto * saved_view = fixture->request.memory_view;
-  fixture->request.memory_view = nullptr;
-  expect_map_rejected();
-  fixture->request.memory_view = saved_view;
-
-  const int32_t * saved_ids = fixture->request.seq_primary_ids;
-  fixture->request.seq_primary_ids = nullptr;
-  expect_map_rejected();
-  fixture->request.seq_primary_ids = saved_ids;
-
-  fixture->request.seq_primary_ids_count = 0;
-  expect_map_rejected();
-  fixture->request.seq_primary_ids_count = 1;
-
-  fixture->memory_snapshot.block_tokens = 4;
-  expect_map_rejected();
-  fixture->memory_snapshot.block_tokens = 8;
-
-  fixture->memory_snapshot.sequence_active[0] = 0;
-  expect_map_rejected();
-  fixture->memory_snapshot.sequence_active[0] = 1;
-
-  fixture->memory_snapshot.sequence_recurrent_slot[0] = -1;
-  expect_map_rejected();
-  fixture->memory_snapshot.sequence_recurrent_slot[0] = 0;
-
-  const int32_t * saved_positions = fixture->request.positions;
-  fixture->request.positions = nullptr;
-  expect_map_rejected();
-  fixture->request.positions = saved_positions;
-
-  fixture->request.positions_count = 0;
-  expect_map_rejected();
-  fixture->request.positions_count = static_cast<int32_t>(fixture->positions.size());
-
-  fixture->memory_snapshot.sequence_length_values[0] = 0;
-  expect_map_rejected();
-  fixture->memory_snapshot.sequence_length_values[0] = 1;
-
-  fixture->memory_snapshot.sequence_kv_blocks[0][0] = emel::memory::view::INVALID_KV_BLOCK;
-  expect_map_rejected();
-  fixture->memory_snapshot.sequence_kv_blocks[0][0] = 0;
-
-  fixture->memory_snapshot.sequence_kv_blocks[0][0] = 1;
-  expect_map_rejected();
-  fixture->memory_snapshot.sequence_kv_blocks[0][0] = 0;
 
   err = -1;
   CHECK(emel::text::generator::detail::validate_guarded_compute(

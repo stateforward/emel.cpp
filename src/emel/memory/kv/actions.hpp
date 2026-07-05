@@ -254,7 +254,9 @@ struct exec_free_sequence {
     const auto & refs = ctx.block_refs.storage().refs;
     int32_t free_write = ctx.free_count;
     for (int32_t i = 0; i < ev.ctx.block_count; ++i) {
-      const uint16_t block_id = ctx.seq_to_blocks[seq_index][static_cast<size_t>(i)];
+      const int32_t block_index = ev.ctx.block_count - 1 - i;
+      const uint16_t block_id =
+          ctx.seq_to_blocks[seq_index][static_cast<size_t>(block_index)];
       const int32_t should_recycle =
           allow_recycle * static_cast<int32_t>(refs[static_cast<size_t>(block_id)] == 0);
       ctx.free_stack[static_cast<size_t>(free_write)] = block_id;

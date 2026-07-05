@@ -219,6 +219,46 @@ TEST_CASE("memory_kv_lifecycle_mapping_order_is_deterministic") {
   CHECK(machine.view().lookup_kv_block(0, 3) == 4);
 }
 
+TEST_CASE("memory_kv_lifecycle_recycles_multiblock_sequence_in_logical_order") {
+  kv_sm machine{};
+  int32_t err = static_cast<int32_t>(emel::error::cast(emel::memory::kv::error::none));
+
+  REQUIRE(machine.process_event(event::reserve{
+    .max_sequences = 2,
+    .max_blocks = 4,
+    .block_tokens = 2,
+    .error_out = &err,
+  }));
+  REQUIRE(machine.process_event(event::allocate_sequence{
+    .seq_id = 0,
+    .error_out = &err,
+  }));
+  REQUIRE(machine.process_event(event::allocate_slots{
+    .seq_id = 0,
+    .token_count = 4,
+    .error_out = &err,
+  }));
+  CHECK(machine.view().lookup_kv_block(0, 0) == 0);
+  CHECK(machine.view().lookup_kv_block(0, 2) == 1);
+
+  REQUIRE(machine.process_event(event::free_sequence{
+    .seq_id = 0,
+    .error_out = &err,
+  }));
+  REQUIRE(machine.process_event(event::allocate_sequence{
+    .seq_id = 1,
+    .error_out = &err,
+  }));
+  REQUIRE(machine.process_event(event::allocate_slots{
+    .seq_id = 1,
+    .token_count = 4,
+    .error_out = &err,
+  }));
+
+  CHECK(machine.view().lookup_kv_block(1, 0) == 0);
+  CHECK(machine.view().lookup_kv_block(1, 2) == 1);
+}
+
 TEST_CASE("memory_kv_lifecycle_append_and_rollback_use_partial_tail_capacity") {
   kv_sm machine{};
   int32_t err = static_cast<int32_t>(emel::error::cast(emel::memory::kv::error::none));

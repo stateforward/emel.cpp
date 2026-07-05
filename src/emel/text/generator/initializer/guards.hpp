@@ -103,7 +103,12 @@ inline bool graph_backend_code(const int32_t code) noexcept {
 
 struct backend_already_ready {
   bool operator()(const event::run &, const action::context & ctx) const noexcept {
-    return ctx.generator.compute.backend_ready;
+    const auto & backend = ctx.generator.compute.backend;
+    const auto & limits = ctx.generator.limits;
+    return ctx.generator.compute.backend_ready &&
+           limits.block_tokens > 0 &&
+           backend.kv_block_tokens == limits.block_tokens &&
+           backend.kv_positions_capacity >= backend.n_ctx;
   }
 };
 

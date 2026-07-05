@@ -816,15 +816,37 @@ inline bool guard_bound_request_capacity_ready(const action::context & ctx,
 // the compute phase is about to address. Incoherent snapshots fail the ready
 // predicates below and route through the existing explicit invalid transitions.
 inline bool guard_snapshot_geometry_coherent(const action::context & ctx) noexcept {
-  return ctx.state.memory_snapshot.block_tokens == ctx.compute.backend.kv_block_tokens &&
-         ctx.state.memory_snapshot.is_sequence_active(action::k_sequence_id);
+  const auto & snapshot = ctx.state.memory_snapshot;
+  const auto & backend = ctx.compute.backend;
+  return snapshot.block_tokens > 0 &&
+         snapshot.block_tokens == backend.kv_block_tokens &&
+         backend.kv_positions_capacity >= backend.n_ctx &&
+         snapshot.is_sequence_active(action::k_sequence_id) &&
+         snapshot.lookup_recurrent_slot(action::k_sequence_id) >= 0;
 }
 
 inline bool guard_snapshot_covers_tokens(const action::context & ctx,
                                          const int32_t token_count) noexcept {
   const auto & snapshot = ctx.state.memory_snapshot;
+  const auto & backend = ctx.compute.backend;
+  if (token_count <= 0 ||
+      snapshot.block_tokens <= 0 ||
+      token_count > backend.n_ctx ||
+      snapshot.sequence_length(action::k_sequence_id) != token_count) {
+    return false;
+  }
+  for (int32_t position = 0; position < token_count; ++position) {
+    const int32_t block_id = snapshot.lookup_kv_block(action::k_sequence_id, position);
+    const int64_t physical_position =
+        static_cast<int64_t>(block_id) * static_cast<int64_t>(snapshot.block_tokens) +
+        static_cast<int64_t>(position % snapshot.block_tokens);
+    if (block_id < 0 ||
+        physical_position < 0 ||
+        physical_position >= static_cast<int64_t>(backend.kv_positions_capacity)) {
+      return false;
+    }
+  }
   return token_count > 0 &&
-         snapshot.sequence_length(action::k_sequence_id) == token_count &&
          snapshot.lookup_kv_block(action::k_sequence_id, token_count - 1) >= 0;
 }
 

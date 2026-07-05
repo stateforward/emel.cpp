@@ -1184,6 +1184,11 @@ TEST_CASE("generator guard detail predicates cover negative branch cases") {
   CHECK_FALSE(guard_detail::guard_decode_request_ready(runtime, fixture->context));
   snapshot.sequence_active[0] = 1;
 
+  snapshot.sequence_recurrent_slot[0] = -1;
+  CHECK_FALSE(guard_detail::guard_snapshot_geometry_coherent(fixture->context));
+  CHECK_FALSE(guard_detail::guard_decode_request_ready(runtime, fixture->context));
+  snapshot.sequence_recurrent_slot[0] = 0;
+
   snapshot.sequence_length_values[0] = 3;
   CHECK_FALSE(guard_detail::guard_snapshot_covers_tokens(fixture->context, 1));
   CHECK_FALSE(guard_detail::guard_decode_request_ready(runtime, fixture->context));
@@ -1192,6 +1197,11 @@ TEST_CASE("generator guard detail predicates cover negative branch cases") {
   snapshot.sequence_kv_block_count[0] = 0;
   CHECK_FALSE(guard_detail::guard_snapshot_covers_tokens(fixture->context, 1));
   snapshot.sequence_kv_block_count[0] = 1;
+
+  snapshot.sequence_kv_blocks[0][0] = 1;
+  CHECK_FALSE(guard_detail::guard_snapshot_covers_tokens(fixture->context, 1));
+  CHECK_FALSE(guard_detail::guard_decode_request_ready(runtime, fixture->context));
+  snapshot.sequence_kv_blocks[0][0] = 0;
 
   CHECK(guard_detail::guard_decode_request_ready(runtime, fixture->context));
   CHECK(guard_detail::guard_prefill_request_ready(runtime, fixture->context));
@@ -2403,8 +2413,16 @@ TEST_CASE(
   CHECK(emel::text::generator::initializer::guard::backend_prepare_needed{}(
       initializer_run, initializer_context));
   generator_context.compute.backend_ready = true;
+  generator_context.limits.block_tokens = initialize.block_tokens;
+  generator_context.compute.backend.n_ctx = 8;
+  generator_context.compute.backend.kv_block_tokens = initialize.block_tokens;
+  generator_context.compute.backend.kv_positions_capacity = 8;
   CHECK(emel::text::generator::initializer::guard::backend_already_ready{}(
       initializer_run, initializer_context));
+  generator_context.compute.backend.kv_block_tokens = initialize.block_tokens + 1;
+  CHECK(emel::text::generator::initializer::guard::backend_prepare_needed{}(
+      initializer_run, initializer_context));
+  generator_context.compute.backend.kv_block_tokens = initialize.block_tokens;
 
   initialize_ctx.phase_accepted = true;
   initialize_ctx.phase_code = 0;
