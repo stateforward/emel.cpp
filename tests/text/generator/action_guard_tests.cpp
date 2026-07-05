@@ -258,6 +258,14 @@ struct compute_guard_fixture {
     backend.kv_positions_capacity = 8;
     backend.head_dim = 4;
     backend.head_dim_kv = 4;
+    // Coherent captured snapshot for the single maintained sequence: one
+    // 8-token block covering the 1-token workload the guard tests drive.
+    context.state.memory_snapshot.max_sequences = 1;
+    context.state.memory_snapshot.block_tokens = 8;
+    context.state.memory_snapshot.sequence_active[0] = 1;
+    context.state.memory_snapshot.sequence_length_values[0] = 1;
+    context.state.memory_snapshot.sequence_kv_block_count[0] = 1;
+    context.state.memory_snapshot.sequence_kv_blocks[0][0] = 0;
     backend.blocks.resize(1u);
     backend.bound_tokens.resize(4u);
     backend.bound_positions.resize(4u);
@@ -1153,6 +1161,39 @@ TEST_CASE("generator guard detail predicates cover negative branch cases") {
   backend.kv_cache_tokens = 1;
   CHECK_FALSE(guard_detail::guard_decode_request_ready(
       runtime, fixture->context));
+  backend.kv_cache_tokens = 0;
+
+  // Snapshot addressing coherence (KVM-03): geometry drift, inactive
+  // sequence, length drift, and missing block mapping each fail the ready
+  // predicates and route through the explicit invalid transitions.
+  auto & snapshot = fixture->context.state.memory_snapshot;
+  CHECK(guard_detail::guard_snapshot_geometry_coherent(fixture->context));
+  CHECK(guard_detail::guard_snapshot_covers_tokens(fixture->context, 1));
+  CHECK_FALSE(guard_detail::guard_snapshot_covers_tokens(fixture->context, 0));
+  CHECK_FALSE(guard_detail::guard_snapshot_covers_tokens(fixture->context, 2));
+
+  snapshot.block_tokens = 4;
+  CHECK_FALSE(guard_detail::guard_snapshot_geometry_coherent(fixture->context));
+  CHECK_FALSE(guard_detail::guard_decode_request_ready(runtime, fixture->context));
+  CHECK_FALSE(guard_detail::guard_prefill_request_ready(runtime, fixture->context));
+  snapshot.block_tokens = 8;
+
+  snapshot.sequence_active[0] = 0;
+  CHECK_FALSE(guard_detail::guard_snapshot_geometry_coherent(fixture->context));
+  CHECK_FALSE(guard_detail::guard_decode_request_ready(runtime, fixture->context));
+  snapshot.sequence_active[0] = 1;
+
+  snapshot.sequence_length_values[0] = 3;
+  CHECK_FALSE(guard_detail::guard_snapshot_covers_tokens(fixture->context, 1));
+  CHECK_FALSE(guard_detail::guard_decode_request_ready(runtime, fixture->context));
+  snapshot.sequence_length_values[0] = 1;
+
+  snapshot.sequence_kv_block_count[0] = 0;
+  CHECK_FALSE(guard_detail::guard_snapshot_covers_tokens(fixture->context, 1));
+  snapshot.sequence_kv_block_count[0] = 1;
+
+  CHECK(guard_detail::guard_decode_request_ready(runtime, fixture->context));
+  CHECK(guard_detail::guard_prefill_request_ready(runtime, fixture->context));
 }
 
 TEST_CASE("generator compute readiness guards classify request and backend gaps") {

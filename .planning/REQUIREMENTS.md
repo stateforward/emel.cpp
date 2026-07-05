@@ -35,7 +35,7 @@ not change quantization or kernel arithmetic.
 
 ### Snapshot addressing contract
 
-- [ ] **KVM-03**: The per-step captured `memory::view::snapshot` is the single
+- [x] **KVM-03**: The per-step captured `memory::view::snapshot` is the single
   addressing truth for the compute path: guards validate snapshot/sequence coherence
   before compute phases, stale or incoherent snapshots route to explicit error
   transitions, and no parallel token accounting is mirrored into machine context.
@@ -103,4 +103,4 @@ not change quantization or kernel arithmetic.
 | KVE-01 | Phase 250 |
 | KVD-01 | Phase 250 |
 
-Mapped: 10/10 v1.28 requirements; satisfied 2, pending 8.
+Mapped: 10/10 v1.28 requirements; satisfied 3, pending 7.

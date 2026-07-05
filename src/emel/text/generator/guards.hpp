@@ -811,6 +811,23 @@ inline bool guard_bound_request_capacity_ready(const action::context & ctx,
          static_cast<size_t>(token_count) <= ctx.buffers.positions.size();
 }
 
+// Snapshot addressing truth: the per-step captured memory::view::snapshot must
+// agree with the prepared backend geometry and account for exactly the tokens
+// the compute phase is about to address. Incoherent snapshots fail the ready
+// predicates below and route through the existing explicit invalid transitions.
+inline bool guard_snapshot_geometry_coherent(const action::context & ctx) noexcept {
+  return ctx.state.memory_snapshot.block_tokens == ctx.compute.backend.kv_block_tokens &&
+         ctx.state.memory_snapshot.is_sequence_active(action::k_sequence_id);
+}
+
+inline bool guard_snapshot_covers_tokens(const action::context & ctx,
+                                         const int32_t token_count) noexcept {
+  const auto & snapshot = ctx.state.memory_snapshot;
+  return token_count > 0 &&
+         snapshot.sequence_length(action::k_sequence_id) == token_count &&
+         snapshot.lookup_kv_block(action::k_sequence_id, token_count - 1) >= 0;
+}
+
 inline bool guard_prefill_request_ready(const event::generate_ctx & runtime,
                                         const action::context & ctx) noexcept {
   return guard_step_plan_ready(
@@ -821,7 +838,9 @@ inline bool guard_prefill_request_ready(const event::generate_ctx & runtime,
          runtime.prefill_step_size <= ctx.compute.backend.prefill_plan.max_step_tokens &&
          runtime.prompt_token_count > 0 &&
          runtime.prompt_token_count <= ctx.limits.prompt_capacity &&
-         guard_bound_request_capacity_ready(ctx, runtime.prompt_token_count);
+         guard_bound_request_capacity_ready(ctx, runtime.prompt_token_count) &&
+         guard_snapshot_geometry_coherent(ctx) &&
+         guard_snapshot_covers_tokens(ctx, runtime.prompt_token_count);
 }
 
 inline bool guard_decode_request_ready(const event::generate_ctx & runtime,
@@ -835,7 +854,9 @@ inline bool guard_decode_request_ready(const event::generate_ctx & runtime,
          runtime.selected_token < ctx.compute.backend.token_embedding.rows &&
          runtime.kv_tokens >= 0 &&
          runtime.kv_tokens < ctx.compute.backend.n_ctx &&
-         ctx.compute.backend.kv_cache_tokens == runtime.kv_tokens;
+         ctx.compute.backend.kv_cache_tokens == runtime.kv_tokens &&
+         guard_snapshot_geometry_coherent(ctx) &&
+         guard_snapshot_covers_tokens(ctx, runtime.kv_tokens + 1);
 }
 
 inline bool guard_prefill_materialized_compute_ready(const event::generate_ctx & runtime,

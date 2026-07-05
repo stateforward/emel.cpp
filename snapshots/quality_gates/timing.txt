@@ -1,11 +1,11 @@
 # quality_gates timing (seconds)
 domain_boundaries 0
-legacy_sml_surface 0
+legacy_sml_surface 1
 build_with_zig 0
-bench_snapshot 1196
-test_with_coverage 335
-paritychecker 93
+bench_snapshot 73
+test_with_coverage 293
+paritychecker 81
 fuzz_smoke 0
-lint_snapshot 10
-generate_docs 38
-total 1246
+lint_snapshot 11
+generate_docs 0
+total 305

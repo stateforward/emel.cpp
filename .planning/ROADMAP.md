@@ -65,10 +65,10 @@ captured snapshot is threaded into graph/processor events and never dereferenced
 
 Execution order: 245, 246, 247, 248, 249, 250.
 
-**Milestone progress (v1.28):** **1 / 6** phases complete.
+**Milestone progress (v1.28):** **2 / 6** phases complete.
 
 - [x] Phase 245: Block Geometry Ownership and Slot Allocation (KVM-01, KVM-02)
-- [ ] Phase 246: Snapshot Addressing Contract and Coherence Guards (KVM-03)
+- [x] Phase 246: Snapshot Addressing Contract and Coherence Guards (KVM-03)
 - [ ] Phase 247: Write and Scalar Read Block-Mapped Cutover (KVW-01, KVR-01)
 - [ ] Phase 248: Flash Route Contiguity Guards (KVR-02)
 - [ ] Phase 249: Recurrent Slot Wiring (KVS-01)
@@ -183,7 +183,7 @@ close the milestone with truthful evidence.
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
 | 245. Block Geometry Ownership and Slot Allocation | v1.28 | 1/1 | Complete | 2026-07-04 |
-| 246. Snapshot Addressing Contract and Coherence Guards | v1.28 | 0/1 | Planned | — |
+| 246. Snapshot Addressing Contract and Coherence Guards | v1.28 | 1/1 | Complete | 2026-07-04 |
 | 247. Write and Scalar Read Block-Mapped Cutover | v1.28 | 0/1 | Planned | — |
 | 248. Flash Route Contiguity Guards | v1.28 | 0/1 | Planned | — |
 | 249. Recurrent Slot Wiring | v1.28 | 0/1 | Planned | — |
