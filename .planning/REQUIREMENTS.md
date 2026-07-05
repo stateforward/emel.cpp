@@ -64,7 +64,7 @@ not change quantization or kernel arithmetic.
 
 ### Proof, performance, and publication
 
-- [ ] **KVP-01**: Component-level tests prove block-map addressing isolation with at
+- [x] **KVP-01**: Component-level tests prove block-map addressing isolation with at
   least two interleaved sequences (allocate, grow across block boundaries, free,
   reallocate) through the owning machines' `process_event` interfaces and the
   addressing helpers, including reclaimed-block reuse without cross-sequence bleed.
@@ -103,4 +103,4 @@ not change quantization or kernel arithmetic.
 | KVE-01 | Phase 250 |
 | KVD-01 | Phase 250 |
 
-Mapped: 10/10 v1.28 requirements; satisfied 7, pending 3.
+Mapped: 10/10 v1.28 requirements; satisfied 8, pending 2 (KVE-01, KVD-01 blocked on pre-existing bench-lane breakage; chip task_48a05fc3).

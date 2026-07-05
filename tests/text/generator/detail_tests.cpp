@@ -13,6 +13,8 @@
 // kernel-owned surface.
 
 #include "../../kernel/test_helpers.hpp"
+#include "emel/memory/events.hpp"
+#include "emel/memory/hybrid/sm.hpp"
 #include "emel/model/llama/detail.hpp"
 #include "emel/text/generator/detail.hpp"
 #include "emel/text/generator/guards.hpp"
@@ -2269,6 +2271,77 @@ TEST_CASE("generator_detail_kv_physical_map_binds_snapshot_block_order") {
   emel::text::generator::detail::bind_kv_physical_positions(*backend, snapshot, 0);
   CHECK(emel::text::generator::detail::layer_cache_offset(*backend, block, 0, 0) ==
         flat_row_offset);
+}
+
+TEST_CASE("generator_detail_kv_physical_map_isolates_interleaved_sequences") {
+  auto model_fixture = std::make_unique<qwen3_runtime_fixture>();
+  auto backend = std::make_unique<emel::text::generator::detail::native_backend>();
+  REQUIRE(emel::text::generator::detail::prepare(*backend, model_fixture->model, 2) ==
+          emel::error::cast(emel::model::loader::error::none));
+  REQUIRE(backend->kv_positions_capacity == 8);
+
+  // Two sequences share one snapshot: their bound physical positions must be
+  // disjoint, and a freed-then-reused mapping is permuted (non-identity).
+  emel::memory::hybrid::sm memory{};
+  int32_t err = 0;
+  REQUIRE(memory.process_event(emel::memory::event::reserve{
+    .max_sequences = 3, .max_blocks = 4, .block_tokens = 2, .error_out = &err}));
+  REQUIRE(memory.process_event(emel::memory::event::allocate_sequence{
+    .seq_id = 0, .error_out = &err}));
+  REQUIRE(memory.process_event(emel::memory::event::allocate_sequence{
+    .seq_id = 1, .error_out = &err}));
+  REQUIRE(memory.process_event(emel::memory::event::allocate_slots{
+    .seq_id = 0, .token_count = 4, .error_out = &err}));
+  REQUIRE(memory.process_event(emel::memory::event::allocate_slots{
+    .seq_id = 1, .token_count = 4, .error_out = &err}));
+
+  emel::memory::view::snapshot view{};
+  emel::error::type view_err = emel::error::cast(emel::memory::hybrid::error::none);
+  REQUIRE(memory.try_view(view, view_err));
+
+  std::array<int32_t, 4> seq0_physical = {};
+  std::array<int32_t, 4> seq1_physical = {};
+  emel::text::generator::detail::bind_kv_physical_positions(*backend, view, 0);
+  for (int32_t position = 0; position < 4; ++position) {
+    seq0_physical[static_cast<size_t>(position)] = static_cast<int32_t>(
+        emel::text::generator::detail::physical_kv_position(*backend, position));
+  }
+  emel::text::generator::detail::bind_kv_physical_positions(*backend, view, 1);
+  for (int32_t position = 0; position < 4; ++position) {
+    seq1_physical[static_cast<size_t>(position)] = static_cast<int32_t>(
+        emel::text::generator::detail::physical_kv_position(*backend, position));
+  }
+  for (const int32_t lhs : seq0_physical) {
+    for (const int32_t rhs : seq1_physical) {
+      CHECK(lhs != rhs);
+    }
+  }
+
+  // Free seq 0 and re-allocate: LIFO reuse permutes the mapping, so the same
+  // physical slots return in non-identity order without touching seq 1.
+  REQUIRE(memory.process_event(emel::memory::event::free_sequence{
+    .seq_id = 0, .error_out = &err}));
+  REQUIRE(memory.process_event(emel::memory::event::allocate_sequence{
+    .seq_id = 2, .error_out = &err}));
+  REQUIRE(memory.process_event(emel::memory::event::allocate_slots{
+    .seq_id = 2, .token_count = 4, .error_out = &err}));
+  REQUIRE(memory.try_view(view, view_err));
+
+  emel::text::generator::detail::bind_kv_physical_positions(*backend, view, 2);
+  std::array<int32_t, 4> seq2_physical = {};
+  bool identity = true;
+  for (int32_t position = 0; position < 4; ++position) {
+    seq2_physical[static_cast<size_t>(position)] = static_cast<int32_t>(
+        emel::text::generator::detail::physical_kv_position(*backend, position));
+    identity = identity &&
+               seq2_physical[static_cast<size_t>(position)] == position;
+  }
+  CHECK_FALSE(identity);
+  for (const int32_t lhs : seq2_physical) {
+    for (const int32_t rhs : seq1_physical) {
+      CHECK(lhs != rhs);
+    }
+  }
 }
 
 TEST_CASE("generator_detail_prepare_block_native_matrices_supports_shortconv_"

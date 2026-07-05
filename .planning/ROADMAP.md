@@ -187,7 +187,7 @@ close the milestone with truthful evidence.
 | 247. Write and Scalar Read Block-Mapped Cutover | v1.28 | 1/1 | Complete | 2026-07-04 |
 | 248. Flash Route Contiguity Guards | v1.28 | 1/1 | Complete | 2026-07-04 |
 | 249. Recurrent Slot Wiring | v1.28 | 1/1 | Complete | 2026-07-04 |
-| 250. Multi-Sequence Component Proof and Evidence | v1.28 | 0/1 | Planned | — |
+| 250. Multi-Sequence Component Proof and Evidence | v1.28 | 0/1 | KVP-01 done; KVE/KVD blocked on bench lane | — |
 
 ## Recently Shipped
 
