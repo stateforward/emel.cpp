@@ -80,6 +80,7 @@ struct benchmark_snapshot {
   std::vector<benchmark_generation_stage_probe> generation_stage_probes;
   std::vector<benchmark_diarization_record> diarization_records;
   std::vector<benchmark_diarization_compare_row> diarization_compare_rows;
+  std::vector<std::string> preservation_notes;
   std::string reference_source;
   std::string reference_ref;
   std::string benchmark_config;
@@ -651,6 +652,49 @@ std::optional<benchmark_snapshot> parse_benchmarks_snapshot(const doc_paths & pa
       parsed.diarization_records.push_back(*diarization_record);
       continue;
     }
+    if (const auto metadata = parse_inline_key_value_fields(line, "# preserved_compare_reference: ");
+        metadata.has_value()) {
+      for (const char * field : {"suite", "source", "reason"}) {
+        if (!metadata->contains(field)) {
+          std::fprintf(stderr,
+                       "error: invalid # preserved_compare_reference metadata in %s\n",
+                       paths.benchmarks_snapshot.string().c_str());
+          return std::nullopt;
+        }
+      }
+      std::string note = "`";
+      note += metadata->at("suite");
+      note += "` compare rows: `source=";
+      note += metadata->at("source");
+      note += "`, `reason=";
+      note += metadata->at("reason");
+      note += "`.";
+      parsed.preservation_notes.push_back(std::move(note));
+      continue;
+    }
+    if (const auto metadata =
+            parse_inline_key_value_fields(line, "# preserved_generation_fixture_rows: ");
+        metadata.has_value()) {
+      for (const char * field : {"suite", "fixture", "source", "reason"}) {
+        if (!metadata->contains(field)) {
+          std::fprintf(stderr,
+                       "error: invalid # preserved_generation_fixture_rows metadata in %s\n",
+                       paths.benchmarks_snapshot.string().c_str());
+          return std::nullopt;
+        }
+      }
+      std::string note = "`";
+      note += metadata->at("suite");
+      note += "` fixture `";
+      note += metadata->at("fixture");
+      note += "` rows: `source=";
+      note += metadata->at("source");
+      note += "`, `reason=";
+      note += metadata->at("reason");
+      note += "`.";
+      parsed.preservation_notes.push_back(std::move(note));
+      continue;
+    }
     if (const auto diarization_compare = parse_diarization_compare_row(line);
         diarization_compare.has_value()) {
       parsed.diarization_compare_rows.push_back(*diarization_compare);
@@ -797,6 +841,24 @@ std::optional<std::string> build_benchmarks_table(const benchmark_snapshot & sna
     table += " |\n";
   }
   return table;
+}
+
+std::string build_benchmark_preservation_notes(const benchmark_snapshot & snapshot) {
+  if (snapshot.preservation_notes.empty()) {
+    return {};
+  }
+
+  std::string notes;
+  notes += "## Preserved Rows\n\n";
+  notes += "Some published rows were intentionally preserved from earlier snapshots because "
+           "this refresh host could not regenerate that lane:\n\n";
+  for (const auto & note : snapshot.preservation_notes) {
+    notes += "- ";
+    notes += note;
+    notes += "\n";
+  }
+  notes += "\n";
+  return notes;
 }
 
 std::optional<embedded_size_snapshot> parse_embedded_size_snapshot(const doc_paths & paths) {
@@ -1173,7 +1235,9 @@ int main(int argc, char ** argv) {
   const auto benchmarks_doc = render_template(
       paths.benchmarks_template,
       {template_var{"sortformer_publication_section", *sortformer_publication_section},
-       template_var{"benchmarks_table", *benchmarks_table}});
+       template_var{"benchmarks_table", *benchmarks_table},
+       template_var{"benchmark_preservation_notes",
+                    build_benchmark_preservation_notes(*benchmarks_snapshot)}});
   if (!benchmarks_doc.has_value()) {
     return 1;
   }

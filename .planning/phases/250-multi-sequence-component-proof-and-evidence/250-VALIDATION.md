@@ -26,10 +26,14 @@ and remains tracked under chip task_48a05fc3. With explicit consent on
 2026-07-05, PR #94 refreshed:
 
 - `snapshots/bench/benchmarks.txt` via suite-scoped EMEL snapshot updates so
-  arm64-supported suites moved without deleting the committed x86_64 rows.
+  arm64-supported suites moved without deleting the committed x86_64 rows;
+  the preserved x86_64 block is marked with its previous `/shared/zig/zig`
+  provenance because this arm64 host cannot rerun those rows.
 - `snapshots/bench/benchmarks_compare.txt` via compare update with
   `EMEL_GENERATION_WORKLOAD_ID=all` so available Liquid LFM2 scaling rows are
-  visible.
+  visible. Qwen rows from the previous compare snapshot are preserved with a
+  fixture-absence note; generated zero-reference Sortformer/Mimi placeholders
+  are not accepted as comparison evidence.
 
 This gives performance visibility for review, including the new graph processor
 and decode wavefront rows, but honest KVE-01 closure still requires the
