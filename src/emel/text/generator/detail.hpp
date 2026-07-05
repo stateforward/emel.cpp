@@ -224,6 +224,11 @@ struct native_backend {
   // block map and the physical layout agree on extents.
   int32_t kv_block_tokens = 0;
   int32_t kv_positions_capacity = 0;
+  // Snapshot-derived logical->physical position map, rebound per compute
+  // dispatch from the captured memory::view::snapshot. Identity after prepare;
+  // an unbound (empty) map also reads as identity so hand-built backends keep
+  // the flat layout.
+  std::vector<int32_t> kv_physical_positions = {};
 
   std::vector<emel::graph::processor::event::lifecycle_tensor_binding> lifecycle_tensors = {};
   std::vector<int32_t> prefill_required_ids = {};
@@ -3174,17 +3179,45 @@ inline float silu(const float value) noexcept {
 #endif
 }
 
+// Logical->physical KV position through the snapshot-bound map. Positions
+// beyond the bound map read as identity — the same defensive fallback the
+// per-layer offset tables use below for hand-built backends.
+inline size_t physical_kv_position(const native_backend & backend,
+                                   const int32_t position) noexcept {
+  const size_t index = static_cast<size_t>(position);
+  if (index < backend.kv_physical_positions.size()) {
+    return static_cast<size_t>(backend.kv_physical_positions[index]);
+  }
+  return index;
+}
+
+// Rebind the logical->physical map from a captured snapshot. Pure data-plane
+// fill: monotonic, bounded by the prepared capacity, allocation-free.
+inline void bind_kv_physical_positions(native_backend & backend,
+                                       const emel::memory::view::snapshot & snapshot,
+                                       const int32_t seq_id) noexcept {
+  const int32_t mapped_tokens = std::min(
+      snapshot.sequence_length(seq_id),
+      static_cast<int32_t>(backend.kv_physical_positions.size()));
+  for (int32_t position = 0; position < mapped_tokens; ++position) {
+    const int32_t block_id = snapshot.lookup_kv_block(seq_id, position);
+    backend.kv_physical_positions[static_cast<size_t>(position)] =
+        block_id * snapshot.block_tokens + (position % snapshot.block_tokens);
+  }
+}
+
 inline size_t layer_cache_offset(const native_backend & backend,
                                  const block_weights & block,
                                  const int32_t layer,
                                  const int32_t position) noexcept {
+  const size_t physical_position = physical_kv_position(backend, position);
   if (backend.layer_cache_offsets.size() != static_cast<size_t>(backend.n_layer)) {
     return ((static_cast<size_t>(layer) * static_cast<size_t>(backend.kv_positions_capacity)) +
-            static_cast<size_t>(position)) *
+            physical_position) *
         static_cast<size_t>(effective_attention_kv_dim(backend, block));
   }
   return backend.layer_cache_offsets[static_cast<size_t>(layer)] +
-         (static_cast<size_t>(position) *
+         (physical_position *
           static_cast<size_t>(effective_attention_kv_dim(backend, block)));
 }
 
@@ -3215,7 +3248,7 @@ inline size_t flash_layer_cache_head_position_offset(const native_backend & back
                                                      const int32_t kv_head,
                                                      const int32_t position) noexcept {
   return flash_layer_cache_head_offset(backend, block, layer, kv_head) +
-      static_cast<size_t>(position) *
+      physical_kv_position(backend, position) *
       static_cast<size_t>(effective_attention_head_dim_kv(backend, block));
 }
 
@@ -5233,6 +5266,10 @@ inline emel::error::type prepare(
   backend.value_cache.resize(cache_offset);
   backend.flash_key_cache.resize(flash_cache_offset);
   backend.flash_value_cache.resize(flash_cache_offset);
+  backend.kv_physical_positions.resize(static_cast<size_t>(backend.kv_positions_capacity));
+  for (int32_t position = 0; position < backend.kv_positions_capacity; ++position) {
+    backend.kv_physical_positions[static_cast<size_t>(position)] = position;
+  }
   backend.recurrent_shortconv_cache.resize(
       static_cast<size_t>(backend.n_layer) *
       static_cast<size_t>(backend.shortconv_state_size) *
@@ -5322,19 +5359,42 @@ inline uint32_t quantized_contract_stage_count(
   return count;
 }
 
+inline emel::text::generator::compute_io & bind_compute_io(
+    const emel::graph::processor::event::execute & request) noexcept;
+inline native_backend & bind_native_backend(
+    const emel::graph::processor::event::execute & request) noexcept;
+
+// The compute contract requires the captured snapshot as addressing truth:
+// present, geometry-coherent with the prepared backend, and covering the
+// primary sequence. The result routes through the processor's modeled
+// validate-failed transitions.
+inline bool validate_kv_map_contract(const emel::graph::processor::event::execute & request,
+                                     int32_t * err_out) noexcept {
+  const auto & backend = bind_native_backend(request);
+  const bool map_ready =
+      request.memory_view != nullptr &&
+      request.seq_primary_ids != nullptr &&
+      request.seq_primary_ids_count > 0 &&
+      request.memory_view->block_tokens == backend.kv_block_tokens &&
+      request.memory_view->is_sequence_active(request.seq_primary_ids[0]);
+  if (!map_ready) {
+    if (err_out != nullptr) {
+      *err_out = k_error_invalid;
+    }
+    return false;
+  }
+  return true;
+}
+
 inline bool validate_guarded_compute(const emel::graph::processor::event::execute & request,
                                      int32_t * err_out) noexcept {
-  (void)request;
-  (void)err_out;
-  return true;
+  return validate_kv_map_contract(request, err_out);
 }
 
 inline bool validate_guarded_preselected_argmax(
     const emel::graph::processor::event::execute & request,
     int32_t * err_out) noexcept {
-  (void)request;
-  (void)err_out;
-  return true;
+  return validate_kv_map_contract(request, err_out);
 }
 
 inline bool prepare_graph(const emel::graph::processor::event::execute &,
@@ -5376,6 +5436,9 @@ inline bool bind_guarded_inputs(const emel::graph::processor::event::execute & r
   std::copy_n(request.positions, request.positions_count, backend.bound_positions.begin());
   backend.bound_token_count = io.token_count;
   backend.bound_position_count = request.positions_count;
+  // validate_kv_map_contract admitted this request, so the snapshot and the
+  // primary sequence id are present and coherent; rebind the physical map.
+  bind_kv_physical_positions(backend, *request.memory_view, request.seq_primary_ids[0]);
   backend.bound_ready = true;
   return true;
 }
