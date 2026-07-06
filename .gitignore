@@ -8,3 +8,8 @@ tmp/llama.cpp/
 tmp/profiles/
 .gemini/
 gha-creds-*.json
+
+# Large scale-class generation fixtures are NOT committed to git. They are fetched
+# on demand from the provenance recorded in tests/models/README.md (source URL, pinned
+# repo commit, size, SHA256). See the Qwen3-4B-Q4_K_M.gguf README section.
+tests/models/Qwen3-4B-Q4_K_M.gguf
