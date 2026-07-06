@@ -79,6 +79,20 @@ constexpr emel::tools::generation_fixture_registry::maintained_fixture
         .current_publication = false,
 };
 
+// 4B-class scale fixture: q4_K_M Qwen3, same architecture family as the 0.6B qwen3
+// fixture. Used to exercise memory-bandwidth / lane-scaling / KV pressure at scale.
+// Bench-only (like gemma4 above): defined locally rather than in the shared parity
+// registry so it is NOT subject to the maintained append-only parity baseline / drift
+// contract. Not a publication baseline; the binary is not committed (see
+// tests/models/.gitignore and tests/models/README.md provenance).
+constexpr emel::tools::generation_fixture_registry::maintained_fixture
+    k_qwen3_4b_emel_generation_fixture = {
+        .name = "Qwen3-4B-Q4_K_M.gguf",
+        .slug = "qwen3_4b_q4_k_m",
+        .fixture_rel = "tests/models/Qwen3-4B-Q4_K_M.gguf",
+        .current_publication = false,
+};
+
 constexpr generation_fixture_spec k_qwen3_generation_fixture = {
     .fixture =
         &emel::tools::generation_fixture_registry::k_qwen3_generation_fixture,
@@ -98,18 +112,24 @@ constexpr generation_fixture_spec k_lfm2_230m_generation_fixture = {
         k_lfm2_230m_generation_fixture,
 };
 
-constexpr std::array<generation_fixture_spec, 3> k_compare_generation_fixtures =
+constexpr generation_fixture_spec k_qwen3_4b_generation_fixture = {
+    .fixture = &k_qwen3_4b_emel_generation_fixture,
+};
+
+constexpr std::array<generation_fixture_spec, 4> k_compare_generation_fixtures =
     {
         k_qwen3_generation_fixture,
         k_lfm2_generation_fixture,
         k_lfm2_230m_generation_fixture,
+        k_qwen3_4b_generation_fixture,
 };
 
-constexpr std::array<generation_fixture_spec, 4> k_emel_generation_fixtures = {
+constexpr std::array<generation_fixture_spec, 5> k_emel_generation_fixtures = {
     k_qwen3_generation_fixture,
     k_lfm2_generation_fixture,
     k_gemma4_generation_fixture,
     k_lfm2_230m_generation_fixture,
+    k_qwen3_4b_generation_fixture,
 };
 
 using llama_model_ptr =
