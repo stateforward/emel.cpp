@@ -1,5 +1,6 @@
 #define DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN
 
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <string>
@@ -20,6 +21,46 @@ std::string read_file(const std::filesystem::path & path) {
   std::ifstream input(path, std::ios::binary);
   REQUIRE(input.good());
   return std::string(std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>());
+}
+
+void write_file(const std::filesystem::path & path, const std::string & text) {
+  std::ofstream output(path, std::ios::binary | std::ios::trunc);
+  REQUIRE(output.good());
+  output << text;
+  REQUIRE(output.good());
+}
+
+// Run the extracted compare gate (scripts/bench_compare_gate.awk) against the
+// given baseline and current snapshots, returning the process exit status
+// (0 => gate passed, non-zero => gate failed).
+int run_compare_gate(const std::string & baseline,
+                     const std::string & current,
+                     const std::string & host_arch) {
+  static int fixture_counter = 0;
+  const std::filesystem::path dir =
+      std::filesystem::temp_directory_path() /
+      ("bench_gate_test_" + std::to_string(++fixture_counter) + "_" +
+       std::to_string(std::rand()));
+  std::filesystem::create_directories(dir);
+  const std::filesystem::path baseline_path = dir / "baseline.txt";
+  const std::filesystem::path current_path = dir / "current.txt";
+  write_file(baseline_path, baseline);
+  write_file(current_path, current);
+
+  const std::filesystem::path gate =
+      repo_root() / "scripts" / "bench_compare_gate.awk";
+  const std::string command =
+      "awk -v tol=0.30 -v abs_tol=5000 -v strict_regression=0 -v scoped=0 "
+      "-v host_arch=" + host_arch + " -f '" + gate.string() + "' '" +
+      baseline_path.string() + "' '" + current_path.string() +
+      "' >/dev/null 2>&1";
+  const int raw = std::system(command.c_str());
+  std::error_code ec;
+  std::filesystem::remove_all(dir, ec);
+  // Collapse to a portable pass/fail: 0 => gate passed, anything else => failed.
+  // The exact non-zero encoding differs by platform/shell, so callers only
+  // distinguish pass from fail.
+  return raw == 0 ? 0 : 1;
 }
 
 }  // namespace
@@ -279,7 +320,10 @@ TEST_CASE("bench script bounds default generation workload") {
   CHECK(script.find("TOLERANCE=\"${BENCH_TOLERANCE:-0.30}\"") != std::string::npos);
   CHECK(script.find("ABS_TOLERANCE_NS=\"${BENCH_ABS_TOLERANCE_NS:-5000}\"") !=
         std::string::npos);
-  CHECK(script.find("curr[name] > relative_limit && curr[name] > absolute_limit") !=
+  // The regression-comparison logic lives in the extracted compare gate.
+  const std::string compare_gate =
+      read_file(repo_root() / "scripts" / "bench_compare_gate.awk");
+  CHECK(compare_gate.find("curr[name] > relative_limit && curr[name] > absolute_limit") !=
         std::string::npos);
   CHECK(generation_bench.find("filter.empty() || filter == \"all\"") !=
         std::string::npos);
@@ -445,4 +489,59 @@ TEST_CASE("bench runner generation tests use a bounded workload filter") {
   CHECK(tests.find("lfm2_single_user_hello_max_tokens_1_v1") !=
         std::string::npos);
   CHECK(tests.find("EMEL_GENERATION_WORKLOAD_ID=") != std::string::npos);
+}
+
+// A baseline that carries both aarch64 and x86_64 arch-gated rows, mirroring the
+// committed snapshots/bench/benchmarks.txt shape. The runner only emits the rows
+// for the host arch (case_supported_on_host), so a full unscoped compare on a
+// single-arch host must not demand the foreign-arch rows.
+const std::string k_dual_arch_baseline =
+    "# ref=test\n"
+    "batch/planner_simple ns_per_op=650.000 iter=100 runs=3\n"
+    "kernel/aarch64/op_add ns_per_op=127.000 iter=100 runs=3\n"
+    "kernel/x86_64/op_add ns_per_op=122.000 iter=100 runs=3\n";
+
+TEST_CASE("compare gate exempts foreign-arch baseline rows the host runner skips") {
+  // Current snapshot as an arm64 runner would emit it: no x86_64 rows.
+  const std::string arm64_current =
+      "# bench_host_arch: aarch64\n"
+      "batch/planner_simple ns_per_op=655.000\n"
+      "kernel/aarch64/op_add ns_per_op=128.000\n";
+  CHECK(run_compare_gate(k_dual_arch_baseline, arm64_current, "aarch64") == 0);
+
+  // Symmetric case: an x86_64 host omits the aarch64 rows and still passes.
+  const std::string x86_current =
+      "# bench_host_arch: x86_64\n"
+      "batch/planner_simple ns_per_op=655.000\n"
+      "kernel/x86_64/op_add ns_per_op=123.000\n";
+  CHECK(run_compare_gate(k_dual_arch_baseline, x86_current, "x86_64") == 0);
+}
+
+TEST_CASE("compare gate still fails when a host-native baseline row is missing") {
+  // The gate must not be weakened: a missing row for the host's own arch, or a
+  // missing arch-agnostic row, is a genuine failure.
+  const std::string arm64_missing_native =
+      "# bench_host_arch: aarch64\n"
+      "batch/planner_simple ns_per_op=655.000\n";
+  CHECK(run_compare_gate(k_dual_arch_baseline, arm64_missing_native, "aarch64") != 0);
+
+  const std::string arm64_missing_shared =
+      "# bench_host_arch: aarch64\n"
+      "kernel/aarch64/op_add ns_per_op=128.000\n";
+  CHECK(run_compare_gate(k_dual_arch_baseline, arm64_missing_shared, "aarch64") != 0);
+}
+
+TEST_CASE("bench runner emits a host-arch marker the compare gate consumes") {
+  const std::string bench_runner =
+      read_file(repo_root() / "tools" / "bench" / "bench_runner.cpp");
+  CHECK(bench_runner.find("constexpr std::string_view k_host_arch =") !=
+        std::string::npos);
+  CHECK(bench_runner.find("# bench_host_arch: %.*s\\n") != std::string::npos);
+
+  const std::string script = read_file(repo_root() / "scripts" / "bench.sh");
+  CHECK(script.find("resolve_bench_host_arch") != std::string::npos);
+  CHECK(script.find("bench_compare_gate.awk") != std::string::npos);
+  // The gate must be sourced from the shared file, not re-inlined, so the
+  // host-arch exemption logic has a single home.
+  CHECK(script.find("-v host_arch=\"$host_arch\"") != std::string::npos);
 }

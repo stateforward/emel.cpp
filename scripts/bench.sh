@@ -104,6 +104,28 @@ bench_suite_build_dir() {
   printf "%s\n" "$ROOT_DIR/build/bench_tools_ninja_${safe_suite}"
 }
 
+# Normalized host architecture the bench runner is built for. The compare gate
+# uses it to exempt foreign-arch baseline rows the runner cannot emit on this
+# host (case_supported_on_host in tools/bench/bench_runner.cpp). Prefer the
+# runner-emitted "# bench_host_arch:" marker in the snapshot file; fall back to
+# a normalized uname -m so an older runner still gates correctly.
+resolve_bench_host_arch() {
+  local snapshot_file="$1"
+  local arch=""
+  if [[ -n "$snapshot_file" && -f "$snapshot_file" ]]; then
+    arch="$(awk -F': ' '/^# bench_host_arch: / { print $2; exit }' "$snapshot_file" \
+      | tr -d '[:space:]')"
+  fi
+  if [[ -z "$arch" ]]; then
+    case "$(uname -m)" in
+      x86_64|amd64) arch="x86_64" ;;
+      arm64|aarch64) arch="aarch64" ;;
+      *) arch="host" ;;
+    esac
+  fi
+  printf "%s\n" "$arch"
+}
+
 if [[ -n "$MEMORY_MAX_RAW" && "$SUITE_FILTER" != "weight_streaming" ]]; then
   echo "error: --memory-max requires --suite=weight_streaming" >&2
   exit 1
@@ -403,6 +425,7 @@ if $COMBINED; then
   TOLERANCE="${BENCH_TOLERANCE:-0.30}"
   ABS_TOLERANCE_NS="${BENCH_ABS_TOLERANCE_NS:-5000}"
   BASELINE="$ROOT_DIR/snapshots/bench/benchmarks.txt"
+  host_arch="$(resolve_bench_host_arch "$compare_output")"
 
   new_sms=()
   base_ref="${BENCH_BASE_REF:-origin/main}"
@@ -453,98 +476,10 @@ if $COMBINED; then
 
     awk -v tol="$TOLERANCE" -v abs_tol="$ABS_TOLERANCE_NS" \
       -v strict_regression="${EMEL_BENCH_STRICT_REGRESSION:-0}" \
-      -v scoped="$([[ -n "$SUITE_FILTER" ]] && echo 1 || echo 0)" '
-    function parse_base(line,    n, fields, name, ns, i, pair) {
-      n = split(line, fields, " ");
-      name = fields[1];
-      for (i = 2; i <= n; ++i) {
-        if (fields[i] ~ /^ns_per_op=/) {
-          split(fields[i], pair, "=");
-          ns = pair[2];
-          break;
-        }
-      }
-      if (name == "" || ns == "") {
-        return;
-      }
-      base[name] = ns;
-    }
-    function parse_curr(line,    n, fields, name, ns, i, pair) {
-      n = split(line, fields, " ");
-      name = fields[1];
-      for (i = 2; i <= n; ++i) {
-        if (fields[i] ~ /^ns_per_op=/) {
-          split(fields[i], pair, "=");
-          ns = pair[2];
-          break;
-        }
-      }
-      if (name == "" || ns == "") {
-        return;
-      }
-      curr[name] = ns;
-    }
-    FNR == NR {
-      if ($0 ~ /^#/) {
-        skip_base = ($0 ~ /proof_status=measurement_only/);
-        next;
-      }
-      if (skip_base) {
-        skip_base = 0;
-        next;
-      }
-      parse_base($0);
-      next;
-    }
-    {
-      if ($0 ~ /^#/) {
-        skip_curr = ($0 ~ /proof_status=measurement_only/);
-        next;
-      }
-      if (skip_curr) {
-        skip_curr = 0;
-        next;
-      }
-      parse_curr($0);
-      next;
-    }
-    END {
-      fail = 0;
-      compared = 0;
-      for (name in curr) {
-        if (!(name in base)) {
-          print "error: new benchmark entry without baseline: " name > "/dev/stderr";
-          fail = 1;
-          continue;
-        }
-        compared += 1;
-        relative_limit = base[name] * (1 + tol);
-        absolute_limit = base[name] + abs_tol;
-        if (curr[name] > relative_limit && curr[name] > absolute_limit) {
-          limit = relative_limit > absolute_limit ? relative_limit : absolute_limit;
-          if (strict_regression == 1) {
-            printf("error: benchmark regression %s (%.3f > %.3f)\n", name, curr[name], limit) > "/dev/stderr";
-            fail = 1;
-          } else {
-            printf("warning: benchmark regression %s (%.3f > %.3f)\n", name, curr[name], limit) > "/dev/stderr";
-          }
-        }
-      }
-      if (scoped && compared == 0) {
-        print "error: no benchmark entries matched selected suite" > "/dev/stderr";
-        fail = 1;
-      }
-      if (!scoped) {
-        for (name in base) {
-          if (!(name in curr)) {
-            print "error: missing benchmark entry for " name > "/dev/stderr";
-            fail = 1;
-          }
-        }
-      }
-      exit fail;
-    }
-    ' "$BASELINE" "$current_snapshot"
+      -v scoped="$([[ -n "$SUITE_FILTER" ]] && echo 1 || echo 0)" \
+      -v host_arch="$host_arch" \
+      -f "$ROOT_DIR/scripts/bench_compare_gate.awk" \
+      "$BASELINE" "$current_snapshot"
   fi
 
   if $COMPARE_UPDATE; then
@@ -672,100 +607,13 @@ if $SNAPSHOT; then
       exit 1
     fi
 
+    host_arch="$(resolve_bench_host_arch "$CURRENT")"
     awk -v tol="$TOLERANCE" -v abs_tol="$ABS_TOLERANCE_NS" \
       -v strict_regression="${EMEL_BENCH_STRICT_REGRESSION:-0}" \
-      -v scoped="$([[ -n "$SUITE_FILTER" ]] && echo 1 || echo 0)" '
-    function parse_base(line,    n, fields, name, ns, i, pair) {
-      n = split(line, fields, " ");
-      name = fields[1];
-      for (i = 2; i <= n; ++i) {
-        if (fields[i] ~ /^ns_per_op=/) {
-          split(fields[i], pair, "=");
-          ns = pair[2];
-          break;
-        }
-      }
-      if (name == "" || ns == "") {
-        return;
-      }
-      base[name] = ns;
-    }
-    function parse_curr(line,    n, fields, name, ns, i, pair) {
-      n = split(line, fields, " ");
-      name = fields[1];
-      for (i = 2; i <= n; ++i) {
-        if (fields[i] ~ /^ns_per_op=/) {
-          split(fields[i], pair, "=");
-          ns = pair[2];
-          break;
-        }
-      }
-      if (name == "" || ns == "") {
-        return;
-      }
-      curr[name] = ns;
-    }
-    FNR == NR {
-      if ($0 ~ /^#/) {
-        skip_base = ($0 ~ /proof_status=measurement_only/);
-        next;
-      }
-      if (skip_base) {
-        skip_base = 0;
-        next;
-      }
-      parse_base($0);
-      next;
-    }
-    {
-      if ($0 ~ /^#/) {
-        skip_curr = ($0 ~ /proof_status=measurement_only/);
-        next;
-      }
-      if (skip_curr) {
-        skip_curr = 0;
-        next;
-      }
-      parse_curr($0);
-      next;
-    }
-    END {
-      fail = 0;
-      compared = 0;
-      for (name in curr) {
-        if (!(name in base)) {
-          print "error: new benchmark entry without baseline: " name > "/dev/stderr";
-          fail = 1;
-          continue;
-        }
-        compared += 1;
-        relative_limit = base[name] * (1 + tol);
-        absolute_limit = base[name] + abs_tol;
-        if (curr[name] > relative_limit && curr[name] > absolute_limit) {
-          limit = relative_limit > absolute_limit ? relative_limit : absolute_limit;
-          if (strict_regression == 1) {
-            printf("error: benchmark regression %s (%.3f > %.3f)\n", name, curr[name], limit) > "/dev/stderr";
-            fail = 1;
-          } else {
-            printf("warning: benchmark regression %s (%.3f > %.3f)\n", name, curr[name], limit) > "/dev/stderr";
-          }
-        }
-      }
-      if (scoped && compared == 0) {
-        print "error: no benchmark entries matched selected suite" > "/dev/stderr";
-        fail = 1;
-      }
-      if (!scoped) {
-        for (name in base) {
-          if (!(name in curr)) {
-            print "error: missing benchmark entry for " name > "/dev/stderr";
-            fail = 1;
-          }
-        }
-      }
-      exit fail;
-    }
-    ' "$BASELINE" "$CURRENT"
+      -v scoped="$([[ -n "$SUITE_FILTER" ]] && echo 1 || echo 0)" \
+      -v host_arch="$host_arch" \
+      -f "$ROOT_DIR/scripts/bench_compare_gate.awk" \
+      "$BASELINE" "$CURRENT"
   fi
 fi
 
