@@ -43,6 +43,10 @@ function register_benchmark_alias(current_name, baseline_name) {
   benchmark_alias[current_name] = baseline_name;
 }
 
+function register_host_required_counterpart(foreign_name, arch, current_name) {
+  host_required_counterpart[foreign_name, arch] = current_name;
+}
+
 function parse_entry(line, dest,    n, fields, name, ns, i, pair) {
   n = split(line, fields, " ");
   name = fields[1];
@@ -67,9 +71,11 @@ BEGIN {
   # Historical bench-suite rename carried by snapshots/bench/benchmarks.txt.
   # Keep this explicit so unrelated new rows cannot borrow same-suffix baselines
   # and suppress the original baseline as matched.
+  flash_arm_baseline = "flash_attention/aarch64/op_flash_attn_ext_decode_like";
   flash_x86_current = "flash_attention/x86_64/op_flash_attn_ext_decode_like";
   flash_x86_baseline = "kernel/x86_64/op_flash_attn_ext_decode_like";
   register_benchmark_alias(flash_x86_current, flash_x86_baseline);
+  register_host_required_counterpart(flash_arm_baseline, "x86_64", flash_x86_current);
 }
 
 FNR == NR {
@@ -106,7 +112,6 @@ END {
       if (alias_name != "" && alias_name in base &&
           named_arch(alias_name) == host_arch) {
         baseline_name = alias_name;
-        matched_alias_base[baseline_name] = 1;
       } else {
         print "error: new benchmark entry without baseline: " name > "/dev/stderr";
         fail = 1;
@@ -135,11 +140,14 @@ END {
       if (name in curr) {
         continue;
       }
-      if (name in matched_alias_base) {
-        continue;
-      }
       arch = named_arch(name);
       if (arch != "" && arch != host_arch) {
+        required_current = host_required_counterpart[name, host_arch];
+        if (required_current != "" && !(required_current in curr)) {
+          print "error: missing benchmark entry for " required_current > "/dev/stderr";
+          fail = 1;
+          continue;
+        }
         # Foreign-arch row: the runner does not emit it on this host, so its
         # absence is expected, not a gate failure. Every host-producible row
         # remains required by the branch above.
