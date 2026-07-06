@@ -1082,6 +1082,39 @@ can_use_neon_mul_mat_q8_0_vector(const event::op_mul_mat &request,
   return neon_available && can_run_neon_mul_mat_q8_0_vector_request(request);
 }
 
+// f32 x f32 single-RHS (GEMV) contract: row-contiguous f32 weights against a
+// dense contiguous f32 vector into a dense contiguous f32 output. The
+// row-slice lane views emitted by the parallel matmul slicer satisfy this
+// contract because their nb[2]/nb[3] describe only the slice rows.
+inline bool can_run_neon_mul_mat_f32_vector_request(
+    const event::op_mul_mat &request) noexcept {
+  const uint64_t k = request.src0.ne[0];
+  const uint64_t m = request.src0.ne[1];
+  return k != 0u && m != 0u && request.src1.ne[0] == 1u &&
+         request.src1.ne[1] == k && request.dst.ne[0] == 1u &&
+         request.dst.ne[1] == m && request.src0.ne[2] == 1u &&
+         request.src0.ne[3] == 1u && request.src1.ne[2] == 1u &&
+         request.src1.ne[3] == 1u && request.dst.ne[2] == 1u &&
+         request.dst.ne[3] == 1u &&
+         ::emel::kernel::detail::dtype_code(request.src0.type) ==
+             ::emel::kernel::detail::dtype_f32 &&
+         ::emel::kernel::detail::dtype_code(request.src1.type) ==
+             ::emel::kernel::detail::dtype_f32 &&
+         ::emel::kernel::detail::dtype_code(request.dst.type) ==
+             ::emel::kernel::detail::dtype_f32 &&
+         request.src0.nb[0] == sizeof(float) &&
+         request.src0.nb[1] == sizeof(float) * k &&
+         request.src0.nb[2] == request.src0.nb[1] * m &&
+         request.src0.nb[3] == request.src0.nb[2] &&
+         is_dense_contiguous(request.src1) && is_dense_contiguous(request.dst);
+}
+
+inline bool
+can_use_neon_mul_mat_f32_vector(const event::op_mul_mat &request,
+                                const bool neon_available) noexcept {
+  return neon_available && can_run_neon_mul_mat_f32_vector_request(request);
+}
+
 // SVE-capable builds are excluded: the pinned ggml_vec_dot_f16 selects its
 // SVE branch ahead of the NEON fp16 branch there, so this NEON port would
 // not match the reference's accumulation order on such hosts.
@@ -6496,6 +6529,59 @@ inline float dot_f16_f16_row_neon(const int64_t count, const uint16_t *x,
 #endif
 }
 
+// Port of the pinned ggml_vec_dot_f32 NEON branch (tmp/llama.cpp
+// ggml/src/ggml-cpu/vec.cpp): four float32x4 accumulators advance
+// GGML_F32_STEP = 16 lanes per iteration with vfmaq_f32, reduce pairwise
+// (sum0+=sum2, sum1+=sum3, sum0+=sum1) into vaddvq_f32, then accumulate the
+// scalar leftovers in float — the same instruction behavior and accumulation
+// order as the reference vec_dot.
+inline float dot_f32_f32_row_neon(const int64_t count, const float *x,
+                                  const float *y) noexcept {
+#if !(defined(__aarch64__) || defined(__ARM_NEON))
+  (void)count;
+  (void)x;
+  (void)y;
+  return 0.0f;
+#else
+  const int64_t np = count & ~static_cast<int64_t>(15);
+  float32x4_t sum[4] = {vdupq_n_f32(0.0f), vdupq_n_f32(0.0f),
+                        vdupq_n_f32(0.0f), vdupq_n_f32(0.0f)};
+  for (int64_t i = 0; i < np; i += 16) {
+    for (int64_t j = 0; j < 4; ++j) {
+      const float32x4_t ax = vld1q_f32(x + i + j * 4);
+      const float32x4_t ay = vld1q_f32(y + i + j * 4);
+      sum[j] = vfmaq_f32(sum[j], ax, ay);
+    }
+  }
+  sum[0] = vaddq_f32(sum[0], sum[2]);
+  sum[1] = vaddq_f32(sum[1], sum[3]);
+  sum[0] = vaddq_f32(sum[0], sum[1]);
+  float sumf = vaddvq_f32(sum[0]);
+  for (int64_t i = np; i < count; ++i) {
+    sumf += x[i] * y[i];
+  }
+  return sumf;
+#endif
+}
+
+// f32 GEMV: one reference-order vec_dot per output row, mirroring how the
+// reference mul_mat walks src0 rows for a single RHS column.
+inline void execute_neon_mul_mat_f32_vector_unchecked(
+    const event::op_mul_mat &request) noexcept {
+#if !(defined(__aarch64__) || defined(__ARM_NEON))
+  (void)request;
+#else
+  const uint64_t k = request.src0.ne[0];
+  const uint64_t m = request.src0.ne[1];
+  const float *a = static_cast<const float *>(request.src0.data);
+  const float *y = static_cast<const float *>(request.src1.data);
+  float *dst = static_cast<float *>(request.dst.data);
+  for (uint64_t row = 0; row < m; ++row) {
+    dst[row] = dot_f32_f32_row_neon(static_cast<int64_t>(k), a + row * k, y);
+  }
+#endif
+}
+
 inline void execute_neon_mul_mat_f16_vector_unchecked(
     const event::op_mul_mat &request) noexcept {
 #if !(defined(__aarch64__) && defined(__ARM_NEON) &&                           \
@@ -8153,6 +8239,16 @@ struct exec_simd_f16_vector_op_mul_mat {
   }
 };
 
+struct exec_simd_f32_vector_op_mul_mat {
+  void operator()(const ::emel::kernel::aarch64::event::dispatch_op_mul_mat &ev,
+                  context &ctx) const noexcept {
+    ::emel::kernel::aarch64::detail::execute_neon_mul_mat_f32_vector_unchecked(
+        ev.request);
+    ++ctx.optimized_f32_vector_dispatch_count;
+    detail::mark_done(ev, ctx);
+  }
+};
+
 struct exec_simd_f32_op_conv_transpose_1d {
   void operator()(
       const ::emel::kernel::aarch64::event::dispatch_op_conv_transpose_1d &ev,
@@ -8475,6 +8571,8 @@ using exec_simd_op_mul_mat_q8_0_vector_t =
     detail::exec_simd_q8_0_vector_op_mul_mat;
 using exec_simd_op_mul_mat_f16_vector_t =
     detail::exec_simd_f16_vector_op_mul_mat;
+using exec_simd_op_mul_mat_f32_vector_t =
+    detail::exec_simd_f32_vector_op_mul_mat;
 using exec_simd_op_conv_transpose_1d_f32_t =
     detail::exec_simd_f32_op_conv_transpose_1d;
 using exec_simd_op_mul_mat_q6_vector_packed_t =
@@ -8646,6 +8744,8 @@ inline constexpr exec_simd_op_mul_mat_q8_0_vector_t
     exec_simd_op_mul_mat_q8_0_vector{};
 inline constexpr exec_simd_op_mul_mat_f16_vector_t
     exec_simd_op_mul_mat_f16_vector{};
+inline constexpr exec_simd_op_mul_mat_f32_vector_t
+    exec_simd_op_mul_mat_f32_vector{};
 inline constexpr exec_simd_op_conv_transpose_1d_f32_t
     exec_simd_op_conv_transpose_1d_f32{};
 inline constexpr exec_simd_op_mul_mat_q6_vector_packed_t

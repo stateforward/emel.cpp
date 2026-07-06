@@ -85,6 +85,18 @@ class any {
     return count;
   }
 
+  uint64_t optimized_f32_vector_dispatch_count() const noexcept {
+    uint64_t count = 0u;
+    core_.visit([&](const auto & sm) {
+      if constexpr (requires { sm.optimized_f32_vector_dispatch_count(); }) {
+        count = sm.optimized_f32_vector_dispatch_count();
+      } else {
+        count = 0u;
+      }
+    });
+    return count;
+  }
+
   uint64_t optimized_conv_transpose_f32_dispatch_count() const noexcept {
     uint64_t count = 0u;
     core_.visit([&](const auto & sm) {
