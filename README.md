@@ -1,6 +1,7 @@
 # EMEL
 
-ARM-first deterministic C++ inference engine built around Stateforward.SML orchestration.
+CPU-first C++ inference engine for deterministic, high-performance inference built around
+Stateforward.SML orchestration.
 
 ## Status: WIP
 
@@ -10,17 +11,18 @@ allocator, and execution pipelines stabilize.
 
 This inference engine is being implemented by AI under human engineering and architecture direction.
 
-## ARM-first scope
+## CPU-first scope
 
-EMEL is an ARM-first inference engine. Maintained runtime claims are made only for source-backed
-ARM/AArch64 slices with EMEL-owned kernels, lane-isolated parity proof, and benchmark evidence.
-Non-ARM backend namespaces may exist as historical scaffolding, generated architecture inventory,
-or future backend placeholders, but they are not supported runtime claims unless a milestone
-explicitly backs them with maintained tests, parity, and benchmark evidence.
+EMEL is a CPU-first inference engine. The goal is deterministic behavior with high-performance
+execution on maintained CPU paths. Runtime claims are made only for source-backed CPU slices with
+EMEL-owned kernels, lane-isolated parity proof, and benchmark evidence. Backend namespaces may
+exist as historical scaffolding, generated architecture inventory, or future device placeholders,
+but they are not supported runtime claims unless a milestone explicitly backs them with maintained
+tests, parity, and benchmark evidence.
 
 ## Implementation priorities
 
-1. Keep the maintained end-to-end path ARM/AArch64 first.
+1. Keep the maintained end-to-end path CPU-first, deterministic, and benchmark-backed.
 2. Architect first, then scaffold cleanly.
 3. Port math, instructions, and behavior without mirroring reference control flow.
 4. Prove parity against isolated reference lanes.
@@ -35,7 +37,7 @@ That enables:
 
 1. Clear operational semantics and failure modes.
 2. Deterministic, reproducible inference paths.
-3. High-performance, C-compatible boundaries without dynamic dispatch in hot paths.
+3. High-performance CPU execution and C-compatible boundaries without dynamic dispatch in hot paths.
 4. Auditable parity work against reference implementations without copying their control flow.
 
 ### Why state machines everywhere
@@ -51,10 +53,8 @@ That's the trade I'm making.
 End-to-end performance will be inferior to llama.cpp and other engines initially — that's
 expected and accepted, even though many individual machines will perform comparably or better in
 isolation. Having explicit actions and states makes it straightforward to find hotspots, and if
-profiling shows a state machine itself is the bottleneck, it gets removed. Concurrency is
-intentionally deferred until single-threaded behavior is verified. That doesn't mean there's no
-plan for it — the actor model makes adding concurrency easier than it looks, and it will be
-introduced only where measurement says it's necessary.
+profiling shows a state machine itself is the bottleneck, it gets removed. Parallelism is introduced
+only where deterministic behavior is preserved and measurement says it is necessary.
 
 ## I/O and tensor ownership
 
@@ -114,7 +114,7 @@ environments, while Zig remains the default for day-to-day builds.
 ## Documentation
 
 - [Architecture](.planning/architecture/) (generated state-machine docs + Mermaid diagrams)
-- [ARM-first Inventory](docs/arm-first-inventory.md) (non-ARM surface inventory and removal notes)
+- [CPU/backend Inventory](docs/arm-first-inventory.md) (backend surface inventory and removal notes)
 - [Benchmarks](docs/benchmarks.md) (generated benchmark snapshot table)
 - [SML Conventions](docs/third_party/sml.md) (Stateforward.SML conventions and usage)
 
@@ -195,6 +195,7 @@ environments, while Zig remains the default for day-to-day builds.
 - [`.planning/architecture/text_formatter.md`](.planning/architecture/text_formatter.md)
 - [`.planning/architecture/text_generator_decode_wavefront.md`](.planning/architecture/text_generator_decode_wavefront.md)
 - [`.planning/architecture/text_generator_initializer.md`](.planning/architecture/text_generator_initializer.md)
+- [`.planning/architecture/text_generator_matmul.md`](.planning/architecture/text_generator_matmul.md)
 - [`.planning/architecture/text_generator_prefill.md`](.planning/architecture/text_generator_prefill.md)
 - [`.planning/architecture/text_generator.md`](.planning/architecture/text_generator.md)
 - [`.planning/architecture/text_jinja_formatter.md`](.planning/architecture/text_jinja_formatter.md)

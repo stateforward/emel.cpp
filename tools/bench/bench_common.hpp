@@ -26,9 +26,12 @@ struct config {
 struct result {
   std::string name;
   std::string compare_group = {};
+  std::string benchmark_lane = {};
   std::string lane = {};
   std::string backend_id = {};
   std::string backend_language = {};
+  std::int32_t thread_count = 0;
+  std::string thread_contract = {};
   std::string workload_id = {};
   std::string workload_manifest_path = {};
   std::string comparison_mode = {};
@@ -51,6 +54,7 @@ struct result {
   double prepare_ns_per_op = 0.0;
   double encode_ns_per_op = 0.0;
   double publish_ns_per_op = 0.0;
+  double tokens_per_second = 0.0;
   std::uint64_t output_tokens = 0;
   std::uint64_t output_bytes = 0;
   std::uint64_t output_dim = 0;
@@ -109,6 +113,14 @@ generation_lane_mode generation_lane_mode_current() noexcept;
 inline double
 select_reported_ns_per_op(const std::vector<double> &sorted_samples) noexcept {
   return sorted_samples[sorted_samples.size() / 2u];
+}
+
+inline double compute_tokens_per_second(const std::uint64_t output_tokens,
+                                        const double ns_per_op) noexcept {
+  if (output_tokens == 0u || !(ns_per_op > 0.0)) {
+    return 0.0;
+  }
+  return (static_cast<double>(output_tokens) * 1000000000.0) / ns_per_op;
 }
 
 template <class fn_type>

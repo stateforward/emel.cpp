@@ -163,6 +163,10 @@ stateDiagram-v2
   generate_uninitialized_error_channel_decision --> uninitialized : completion_generate_run_ [generate_no_error_callback_without_error_out_] / dispatch_generate_error_without_channels_
   uninitialized --> uninitialized : capture_diagnostics [always] / capture_diagnostics_
   ready --> ready : capture_diagnostics [always] / capture_diagnostics_
+  uninitialized --> uninitialized : configure_benchmark_lane [guard_benchmark_lane_single_] / effect_disable_parallel_benchmark_lanes_
+  uninitialized --> uninitialized : configure_benchmark_lane [guard_benchmark_lane_multithreaded_] / effect_enable_parallel_benchmark_lanes_
+  ready --> ready : configure_benchmark_lane [guard_benchmark_lane_single_] / effect_disable_parallel_benchmark_lanes_
+  ready --> ready : configure_benchmark_lane [guard_benchmark_lane_multithreaded_] / effect_enable_parallel_benchmark_lanes_
   uninitialized --> uninitialized : capture_graph_lifecycle [graph_lifecycle_runtime_tensor_unavailable_] / capture_graph_lifecycle_without_runtime_tensor_
   uninitialized --> uninitialized : capture_graph_lifecycle [graph_lifecycle_runtime_tensor_available_] / capture_graph_lifecycle_with_runtime_tensor_
   ready --> ready : capture_graph_lifecycle [graph_lifecycle_runtime_tensor_unavailable_] / capture_graph_lifecycle_without_runtime_tensor_

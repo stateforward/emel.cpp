@@ -49,7 +49,31 @@ inline bool dispatch_prefill_run(void * actor,
   return static_cast<emel::text::generator::prefill::sm *>(actor)->process_event(ev);
 }
 
+inline void bind_matmul_actor(
+    action::context & ctx,
+    std::optional<emel::text::generator::matmul::sm> & actor,
+    emel::text::generator::matmul::lane_pool & parallel_matmul_lanes) {
+  actor.emplace(parallel_matmul_lanes);
+  ctx.matmul_actor = &actor.value();
+}
+
+inline void bind_pipeline_actors(
+    action::context & ctx,
+    std::optional<emel::text::generator::initializer::sm> & initializer_actor,
+    std::optional<emel::text::generator::prefill::sm> & prefill_actor) {
+  initializer_actor.emplace(emel::text::generator::initializer::action::context{ctx});
+  ctx.initializer_actor = &initializer_actor.value();
+  ctx.dispatch_initializer = detail::dispatch_initializer_run;
+  prefill_actor.emplace(emel::text::generator::prefill::action::context{ctx});
+  ctx.prefill_actor = &prefill_actor.value();
+  ctx.dispatch_prefill = detail::dispatch_prefill_run;
+}
+
 }  // namespace detail
+
+struct parallel_matmul_lanes_binding {
+  emel::text::generator::matmul::lane_pool & parallel_matmul_lanes;
+};
 
 struct uninitialized {};
 struct initializing {};
@@ -955,6 +979,26 @@ struct model {
                  / action::capture_diagnostics
 
       , sml::state<uninitialized> <= sml::state<uninitialized>
+                 + sml::event<event::configure_benchmark_lane>
+                 [ guard::guard_benchmark_lane_single{} ]
+                 / action::effect_disable_parallel_benchmark_lanes
+
+      , sml::state<uninitialized> <= sml::state<uninitialized>
+                 + sml::event<event::configure_benchmark_lane>
+                 [ guard::guard_benchmark_lane_multithreaded{} ]
+                 / action::effect_enable_parallel_benchmark_lanes
+
+      , sml::state<ready> <= sml::state<ready>
+                 + sml::event<event::configure_benchmark_lane>
+                 [ guard::guard_benchmark_lane_single{} ]
+                 / action::effect_disable_parallel_benchmark_lanes
+
+      , sml::state<ready> <= sml::state<ready>
+                 + sml::event<event::configure_benchmark_lane>
+                 [ guard::guard_benchmark_lane_multithreaded{} ]
+                 / action::effect_enable_parallel_benchmark_lanes
+
+      , sml::state<uninitialized> <= sml::state<uninitialized>
                  + sml::event<event::capture_graph_lifecycle>
                  [ guard::graph_lifecycle_runtime_tensor_unavailable{} ]
                  / action::capture_graph_lifecycle_without_runtime_tensor
@@ -1087,12 +1131,17 @@ struct sm : public emel::sm<model, action::context> {
   using base_type::visit_current_states;
 
   sm() : base_type() {
-    initializer_actor_.emplace(emel::text::generator::initializer::action::context{this->context_});
-    this->context_.initializer_actor = &initializer_actor_.value();
-    this->context_.dispatch_initializer = detail::dispatch_initializer_run;
-    prefill_actor_.emplace(emel::text::generator::prefill::action::context{this->context_});
-    this->context_.prefill_actor = &prefill_actor_.value();
-    this->context_.dispatch_prefill = detail::dispatch_prefill_run;
+    owned_parallel_matmul_lanes_.emplace();
+    detail::bind_matmul_actor(
+        this->context_, matmul_actor_, owned_parallel_matmul_lanes_.value());
+    detail::bind_pipeline_actors(this->context_, initializer_actor_, prefill_actor_);
+  }
+
+  explicit sm(parallel_matmul_lanes_binding parallel_matmul_lanes)
+      : base_type() {
+    detail::bind_matmul_actor(
+        this->context_, matmul_actor_, parallel_matmul_lanes.parallel_matmul_lanes);
+    detail::bind_pipeline_actors(this->context_, initializer_actor_, prefill_actor_);
   }
 
   sm(const emel::model::data & model_ref,
@@ -1101,12 +1150,28 @@ struct sm : public emel::sm<model, action::context> {
      emel::text::formatter::format_fn format_prompt =
          emel::text::formatter::format_raw)
       : base_type() {
-    initializer_actor_.emplace(emel::text::generator::initializer::action::context{this->context_});
-    this->context_.initializer_actor = &initializer_actor_.value();
-    this->context_.dispatch_initializer = detail::dispatch_initializer_run;
-    prefill_actor_.emplace(emel::text::generator::prefill::action::context{this->context_});
-    this->context_.prefill_actor = &prefill_actor_.value();
-    this->context_.dispatch_prefill = detail::dispatch_prefill_run;
+    owned_parallel_matmul_lanes_.emplace();
+    detail::bind_matmul_actor(
+        this->context_, matmul_actor_, owned_parallel_matmul_lanes_.value());
+    detail::bind_pipeline_actors(this->context_, initializer_actor_, prefill_actor_);
+    this->context_.model = &model_ref;
+    this->context_.conditioner = &conditioner_ref;
+    this->context_.formatter_ctx = formatter_ctx;
+    this->context_.format_prompt = format_prompt;
+    // Session scratch is sized once from the injected loaded model before the initialize pipeline.
+    detail::reserve_session_buffers(this->context_, model_ref);
+  }
+
+  sm(const emel::model::data & model_ref,
+     emel::text::conditioner::sm & conditioner_ref,
+     parallel_matmul_lanes_binding parallel_matmul_lanes,
+     void * formatter_ctx = nullptr,
+     emel::text::formatter::format_fn format_prompt =
+         emel::text::formatter::format_raw)
+      : base_type() {
+    detail::bind_matmul_actor(
+        this->context_, matmul_actor_, parallel_matmul_lanes.parallel_matmul_lanes);
+    detail::bind_pipeline_actors(this->context_, initializer_actor_, prefill_actor_);
     this->context_.model = &model_ref;
     this->context_.conditioner = &conditioner_ref;
     this->context_.formatter_ctx = formatter_ctx;
@@ -1125,6 +1190,19 @@ struct sm : public emel::sm<model, action::context> {
      emel::text::formatter::format_fn format_prompt =
          emel::text::formatter::format_raw)
       : sm(model_ref, conditioner_ref, formatter_ctx, format_prompt) {
+    this->context_.stream_window = &stream_window_ref;
+    this->context_.stream_active = stream_active;
+  }
+
+  sm(const emel::model::data & model_ref,
+     emel::text::conditioner::sm & conditioner_ref,
+     emel::model::tensor::window::sm & stream_window_ref,
+     const bool stream_active,
+     parallel_matmul_lanes_binding parallel_matmul_lanes,
+     void * formatter_ctx = nullptr,
+     emel::text::formatter::format_fn format_prompt =
+         emel::text::formatter::format_raw)
+      : sm(model_ref, conditioner_ref, parallel_matmul_lanes, formatter_ctx, format_prompt) {
     this->context_.stream_window = &stream_window_ref;
     this->context_.stream_active = stream_active;
   }
@@ -1152,11 +1230,17 @@ struct sm : public emel::sm<model, action::context> {
     return base_type::process_event(ev);
   }
 
+  bool process_event(const event::configure_benchmark_lane & ev) {
+    return base_type::process_event(ev);
+  }
+
   bool process_event(const event::capture_graph_lifecycle & ev) {
     return base_type::process_event(ev);
   }
 
  private:
+  std::optional<emel::text::generator::matmul::lane_pool> owned_parallel_matmul_lanes_ = {};
+  std::optional<emel::text::generator::matmul::sm> matmul_actor_ = {};
   std::optional<emel::text::generator::initializer::sm> initializer_actor_ = {};
   std::optional<emel::text::generator::prefill::sm> prefill_actor_ = {};
 };

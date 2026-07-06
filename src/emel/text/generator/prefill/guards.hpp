@@ -59,7 +59,9 @@ inline bool uses_preselected_argmax_direct(const action::context & ctx) noexcept
 
 inline bool uses_parallel_matmul_lanes(const event::run & ev,
                                        const action::context & ctx) noexcept {
-  return ctx.generator.compute.backend.lane_pool.has_value() &&
+  return ctx.generator.compute.backend.parallel_lanes_enabled &&
+         ctx.generator.compute.backend.matmul_actor != nullptr &&
+         ctx.generator.compute.backend.matmul_actor->parallel_lanes_available() &&
          ev.ctx.prompt_token_count >=
              emel::text::generator::detail::k_parallel_min_prefill_tokens;
 }

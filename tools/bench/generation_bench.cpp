@@ -19,10 +19,10 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <utility>
 #include <vector>
 
-#include "emel/memory/view.hpp"
 #include "emel/error/error.hpp"
 #include "emel/gguf/loader/any.hpp"
 #include "emel/gguf/loader/errors.hpp"
@@ -30,9 +30,10 @@
 #include "emel/gguf/loader/sm.hpp"
 #include "emel/io/events.hpp"
 #include "emel/io/read/sm.hpp"
-#include "emel/io/staged_read/sm.hpp"
 #include "emel/io/source/any.hpp"
+#include "emel/io/staged_read/sm.hpp"
 #include "emel/logits/sampler/events.hpp"
+#include "emel/memory/view.hpp"
 #include "emel/model/data.hpp"
 #include "emel/model/detail.hpp"
 #include "emel/model/loader/errors.hpp"
@@ -79,12 +80,13 @@ constexpr emel::tools::generation_fixture_registry::maintained_fixture
         .current_publication = false,
 };
 
-// 4B-class scale fixture: q4_K_M Qwen3, same architecture family as the 0.6B qwen3
-// fixture. Used to exercise memory-bandwidth / lane-scaling / KV pressure at scale.
-// Bench-only (like gemma4 above): defined locally rather than in the shared parity
-// registry so it is NOT subject to the maintained append-only parity baseline / drift
-// contract. Not a publication baseline; the binary is not committed (see
-// tests/models/.gitignore and tests/models/README.md provenance).
+// 4B-class scale fixture: q4_K_M Qwen3, same architecture family as the 0.6B
+// qwen3 fixture. Used to exercise memory-bandwidth / lane-scaling / KV pressure
+// at scale. Bench-only (like gemma4 above): defined locally rather than in the
+// shared parity registry so it is NOT subject to the maintained append-only
+// parity baseline / drift contract. Not a publication baseline; the binary is
+// not committed (see tests/models/.gitignore and tests/models/README.md
+// provenance).
 constexpr emel::tools::generation_fixture_registry::maintained_fixture
     k_qwen3_4b_emel_generation_fixture = {
         .name = "Qwen3-4B-Q4_K_M.gguf",
@@ -109,7 +111,7 @@ constexpr generation_fixture_spec k_gemma4_generation_fixture = {
 
 constexpr generation_fixture_spec k_lfm2_230m_generation_fixture = {
     .fixture = &emel::tools::generation_fixture_registry::
-        k_lfm2_230m_generation_fixture,
+                   k_lfm2_230m_generation_fixture,
 };
 
 constexpr generation_fixture_spec k_qwen3_4b_generation_fixture = {
@@ -125,10 +127,8 @@ constexpr std::array<generation_fixture_spec, 4> k_compare_generation_fixtures =
 };
 
 constexpr std::array<generation_fixture_spec, 5> k_emel_generation_fixtures = {
-    k_qwen3_generation_fixture,
-    k_lfm2_generation_fixture,
-    k_gemma4_generation_fixture,
-    k_lfm2_230m_generation_fixture,
+    k_qwen3_generation_fixture,    k_lfm2_generation_fixture,
+    k_gemma4_generation_fixture,   k_lfm2_230m_generation_fixture,
     k_qwen3_4b_generation_fixture,
 };
 
@@ -138,6 +138,175 @@ using llama_context_ptr = std::unique_ptr<llama_context, decltype(&llama_free)>;
 
 constexpr llama_flash_attn_type k_reference_flash_attn_type =
     LLAMA_FLASH_ATTN_TYPE_ENABLED;
+constexpr int32_t k_generation_multithreaded_thread_count = 8;
+constexpr int32_t k_generation_single_thread_count = 1;
+constexpr char k_generation_benchmark_lane_env[] = "EMEL_BENCH_GENERATION_LANE";
+constexpr char k_generation_benchmark_lanes_env[] =
+    "EMEL_BENCH_GENERATION_LANES";
+constexpr char k_generation_reference_threads_env[] =
+    "EMEL_BENCH_GENERATION_REFERENCE_THREADS";
+constexpr char k_legacy_generation_reference_threads_env[] =
+    "EMEL_BENCH_REFERENCE_THREADS";
+constexpr std::string_view k_generation_benchmark_lane_single = "single";
+constexpr std::string_view k_generation_benchmark_lane_multithreaded =
+    "multithreaded";
+constexpr std::string_view k_generation_multithreaded_thread_contract =
+    "emel_parallel_matmul_lanes=8";
+constexpr std::string_view k_generation_single_thread_contract =
+    "emel_serial_matmul_lanes=1";
+
+enum class generation_benchmark_lane : uint8_t {
+  single,
+  multithreaded,
+};
+
+struct generation_benchmark_lane_selection {
+  std::array<generation_benchmark_lane, 2> lanes = {
+      generation_benchmark_lane::single,
+      generation_benchmark_lane::multithreaded,
+  };
+  size_t count = 2u;
+};
+
+generation_benchmark_lane g_generation_benchmark_lane_override =
+    generation_benchmark_lane::multithreaded;
+bool g_generation_benchmark_lane_override_set = false;
+
+generation_benchmark_lane
+parse_generation_benchmark_lane(std::string_view value, const char *name) {
+  if (value == k_generation_benchmark_lane_single) {
+    return generation_benchmark_lane::single;
+  }
+  if (value == k_generation_benchmark_lane_multithreaded) {
+    return generation_benchmark_lane::multithreaded;
+  }
+  std::fprintf(stderr, "error: %s must be 'single' or 'multithreaded'\n", name);
+  std::exit(1);
+}
+
+generation_benchmark_lane current_generation_benchmark_lane() {
+  if (g_generation_benchmark_lane_override_set) {
+    return g_generation_benchmark_lane_override;
+  }
+  const char *value = std::getenv(k_generation_benchmark_lane_env);
+  if (value == nullptr || value[0] == '\0') {
+    return generation_benchmark_lane::multithreaded;
+  }
+  return parse_generation_benchmark_lane(value,
+                                         k_generation_benchmark_lane_env);
+}
+
+generation_benchmark_lane_selection selected_generation_benchmark_lanes() {
+  const char *lane_value = std::getenv(k_generation_benchmark_lane_env);
+  if (lane_value != nullptr && lane_value[0] != '\0') {
+    return generation_benchmark_lane_selection{
+        {parse_generation_benchmark_lane(lane_value,
+                                         k_generation_benchmark_lane_env),
+         generation_benchmark_lane::multithreaded},
+        1u};
+  }
+
+  const char *lanes_value = std::getenv(k_generation_benchmark_lanes_env);
+  if (lanes_value == nullptr || lanes_value[0] == '\0') {
+    return {};
+  }
+  const std::string_view parsed{lanes_value};
+  if (parsed == "both" || parsed == "single,multithreaded" ||
+      parsed == "multithreaded,single") {
+    return {};
+  }
+  return generation_benchmark_lane_selection{
+      {parse_generation_benchmark_lane(parsed,
+                                       k_generation_benchmark_lanes_env),
+       generation_benchmark_lane::multithreaded},
+      1u};
+}
+
+struct scoped_generation_benchmark_lane {
+  explicit scoped_generation_benchmark_lane(
+      generation_benchmark_lane lane) noexcept
+      : previous(g_generation_benchmark_lane_override),
+        previous_set(g_generation_benchmark_lane_override_set) {
+    g_generation_benchmark_lane_override = lane;
+    g_generation_benchmark_lane_override_set = true;
+  }
+
+  ~scoped_generation_benchmark_lane() {
+    g_generation_benchmark_lane_override = previous;
+    g_generation_benchmark_lane_override_set = previous_set;
+  }
+
+  generation_benchmark_lane previous;
+  bool previous_set;
+};
+
+std::string_view generation_benchmark_lane_name() {
+  return current_generation_benchmark_lane() ==
+                 generation_benchmark_lane::single
+             ? k_generation_benchmark_lane_single
+             : k_generation_benchmark_lane_multithreaded;
+}
+
+emel::text::generator::benchmark_lane generator_benchmark_lane_event_value() {
+  return current_generation_benchmark_lane() ==
+                 generation_benchmark_lane::single
+             ? emel::text::generator::benchmark_lane::single
+             : emel::text::generator::benchmark_lane::multithreaded;
+}
+
+int32_t generation_emel_thread_count() {
+  return current_generation_benchmark_lane() ==
+                 generation_benchmark_lane::single
+             ? k_generation_single_thread_count
+             : k_generation_multithreaded_thread_count;
+}
+
+std::string_view generation_emel_thread_contract() {
+  return current_generation_benchmark_lane() ==
+                 generation_benchmark_lane::single
+             ? k_generation_single_thread_contract
+             : k_generation_multithreaded_thread_contract;
+}
+
+std::string generation_benchmark_case_name(std::string_view case_name) {
+  std::string out{case_name};
+  out += "/";
+  out += generation_benchmark_lane_name();
+  return out;
+}
+
+int32_t read_env_i32_positive(const char *name, const int32_t fallback) {
+  const char *value = std::getenv(name);
+  if (value == nullptr || value[0] == '\0') {
+    return fallback;
+  }
+
+  char *end = nullptr;
+  const long parsed = std::strtol(value, &end, 10);
+  if (end == value || *end != '\0' || parsed <= 0L ||
+      parsed > static_cast<long>(std::numeric_limits<int32_t>::max())) {
+    return fallback;
+  }
+  return static_cast<int32_t>(parsed);
+}
+
+int32_t generation_reference_thread_count() {
+  if (current_generation_benchmark_lane() ==
+      generation_benchmark_lane::single) {
+    return k_generation_single_thread_count;
+  }
+  const int32_t fallback = k_generation_multithreaded_thread_count;
+  if (std::getenv(k_generation_reference_threads_env) != nullptr) {
+    return read_env_i32_positive(k_generation_reference_threads_env, fallback);
+  }
+  return read_env_i32_positive(k_legacy_generation_reference_threads_env,
+                               fallback);
+}
+
+std::string generation_reference_thread_contract(const int32_t threads) {
+  return "llama.cpp_n_threads=" + std::to_string(threads) +
+         ",n_threads_batch=" + std::to_string(threads);
+}
 
 std::uint64_t read_env_u64(const char *name, const std::uint64_t fallback) {
   const char *value = std::getenv(name);
@@ -466,6 +635,22 @@ struct generation_result {
   size_t output_length = 0u;
 };
 
+void capture_generation_output_metrics(emel::bench::result &record,
+                                       const generation_result &generated) {
+  const auto output_tokens =
+      generated.tokens_generated > 0
+          ? static_cast<std::uint64_t>(generated.tokens_generated)
+          : 0u;
+  record.output_tokens = output_tokens;
+  record.tokens_per_second =
+      emel::bench::compute_tokens_per_second(output_tokens, record.ns_per_op);
+  record.output_bytes = static_cast<std::uint64_t>(generated.output_length);
+  record.output_checksum = emel::bench::checksum_bytes(
+      reinterpret_cast<const std::uint8_t *>(generated.output.data()),
+      generated.output_length);
+  record.output_text.assign(generated.output.data(), generated.output_length);
+}
+
 struct prefill_probe_breakdown {
   std::uint64_t linear_ns = 0u;
   std::uint64_t attention_ns = 0u;
@@ -680,6 +865,15 @@ bool capture_generator_diagnostics(
   }
   return session.generator->process_event(
       emel::text::generator::event::capture_diagnostics{diagnostics_out});
+}
+
+bool configure_generator_benchmark_lane(emel_session &session) {
+  if (session.generator == nullptr) {
+    return false;
+  }
+  emel::text::generator::event::configure_benchmark_lane ev{};
+  ev.lane = generator_benchmark_lane_event_value();
+  return session.generator->process_event(ev);
 }
 
 template <class fixture_type>
@@ -1653,13 +1847,7 @@ make_reference_context(llama_model *model,
   params.n_batch = 512;
   params.n_ubatch = 512;
   params.n_seq_max = 1;
-  // Matched-core comparisons set EMEL_BENCH_REFERENCE_THREADS to EMEL's lane
-  // count; the maintained publication rows stay at the 1-thread default.
-  int32_t reference_threads = 1;
-  if (const char * threads_env = std::getenv("EMEL_BENCH_REFERENCE_THREADS");
-      threads_env != nullptr && threads_env[0] != '\0') {
-    reference_threads = std::max<int32_t>(1, std::atoi(threads_env));
-  }
+  const int32_t reference_threads = generation_reference_thread_count();
   params.n_threads = reference_threads;
   params.n_threads_batch = reference_threads;
   params.embeddings = false;
@@ -2551,8 +2739,8 @@ generation_stage_probe_at(const std::size_t index) noexcept {
              : generation_stage_probe{};
 }
 
-void append_emel_generation_cases(std::vector<result> &results,
-                                  const config &cfg) {
+void append_emel_generation_cases_for_current_benchmark_lane(
+    std::vector<result> &results, const config &cfg) {
   const bool compare_lane =
       generation_lane_mode_current() == generation_lane_mode::compare;
   const config case_cfg = generation_case_config(cfg);
@@ -2596,6 +2784,10 @@ void append_emel_generation_cases(std::vector<result> &results,
         prepare_emel_session(fixture, *session);
         if (!initialize_emel_session(*session, generation_case)) {
           fail_bench_setup("initialize_emel_session",
+                           generation_case.name.data());
+        }
+        if (!configure_generator_benchmark_lane(*session)) {
+          fail_bench_setup("configure_generator_benchmark_lane",
                            generation_case.name.data());
         }
         validate_generation_formatter_contract(
@@ -2656,13 +2848,19 @@ void append_emel_generation_cases(std::vector<result> &results,
           sink ^= generated.output_length;
         };
 
-        results.push_back(
-            measure_case(generation_case.name.data(), case_cfg, fn));
+        const std::string case_name =
+            generation_benchmark_case_name(generation_case.name);
+        results.push_back(measure_case(case_name.c_str(), case_cfg, fn));
         result &compare_record = results.back();
         compare_record.compare_group = generation_case.manifest.compare_group;
+        compare_record.benchmark_lane =
+            std::string{generation_benchmark_lane_name()};
         compare_record.lane = "emel";
         compare_record.backend_id = "emel.generator";
         compare_record.backend_language = "cpp";
+        compare_record.thread_count = generation_emel_thread_count();
+        compare_record.thread_contract =
+            std::string{generation_emel_thread_contract()};
         compare_record.workload_id = generation_case.manifest.id;
         compare_record.workload_manifest_path =
             generation_case.manifest.workload_manifest_path;
@@ -2684,16 +2882,7 @@ void append_emel_generation_cases(std::vector<result> &results,
         compare_record.max_output_tokens =
             generation_case.manifest.max_output_tokens;
         compare_record.comparable = generation_case.manifest.comparable;
-        compare_record.output_tokens =
-            static_cast<std::uint64_t>(latest_generated.tokens_generated);
-        compare_record.output_bytes =
-            static_cast<std::uint64_t>(latest_generated.output_length);
-        compare_record.output_checksum =
-            checksum_bytes(reinterpret_cast<const std::uint8_t *>(
-                               latest_generated.output.data()),
-                           latest_generated.output_length);
-        compare_record.output_text.assign(latest_generated.output.data(),
-                                          latest_generated.output_length);
+        capture_generation_output_metrics(compare_record, latest_generated);
         compare_record.note = emel::tools::append_model_load_io_strategy_note(
             generation_case.manifest.comparability_note,
             prepared_fixture.emel.load.used_io_strategy);
@@ -2791,6 +2980,10 @@ void append_emel_generation_cases(std::vector<result> &results,
         fail_bench_setup("initialize_emel_session",
                          generation_case.name.data());
       }
+      if (!configure_generator_benchmark_lane(*session)) {
+        fail_bench_setup("configure_generator_benchmark_lane",
+                         generation_case.name.data());
+      }
       validate_generation_formatter_contract(
           generation_case, session->formatter_binding.contract);
 
@@ -2847,13 +3040,19 @@ void append_emel_generation_cases(std::vector<result> &results,
         sink ^= generated.output_length;
       };
 
-      results.push_back(
-          measure_case(generation_case.name.data(), case_cfg, fn));
+      const std::string case_name =
+          generation_benchmark_case_name(generation_case.name);
+      results.push_back(measure_case(case_name.c_str(), case_cfg, fn));
       result &compare_record = results.back();
       compare_record.compare_group = generation_case.manifest.compare_group;
+      compare_record.benchmark_lane =
+          std::string{generation_benchmark_lane_name()};
       compare_record.lane = "emel";
       compare_record.backend_id = "emel.generator";
       compare_record.backend_language = "cpp";
+      compare_record.thread_count = generation_emel_thread_count();
+      compare_record.thread_contract =
+          std::string{generation_emel_thread_contract()};
       compare_record.workload_id = generation_case.manifest.id;
       compare_record.workload_manifest_path =
           generation_case.manifest.workload_manifest_path;
@@ -2874,16 +3073,7 @@ void append_emel_generation_cases(std::vector<result> &results,
       compare_record.max_output_tokens =
           generation_case.manifest.max_output_tokens;
       compare_record.comparable = generation_case.manifest.comparable;
-      compare_record.output_tokens =
-          static_cast<std::uint64_t>(latest_generated.tokens_generated);
-      compare_record.output_bytes =
-          static_cast<std::uint64_t>(latest_generated.output_length);
-      compare_record.output_checksum =
-          checksum_bytes(reinterpret_cast<const std::uint8_t *>(
-                             latest_generated.output.data()),
-                         latest_generated.output_length);
-      compare_record.output_text.assign(latest_generated.output.data(),
-                                        latest_generated.output_length);
+      capture_generation_output_metrics(compare_record, latest_generated);
       compare_record.note = emel::tools::append_model_load_io_strategy_note(
           generation_case.manifest.comparability_note,
           prepared_fixture.emel.load.used_io_strategy);
@@ -2938,8 +3128,8 @@ void append_emel_generation_cases(std::vector<result> &results,
   }
 }
 
-void append_reference_generation_cases(std::vector<result> &results,
-                                       const config &cfg) {
+void append_reference_generation_cases_for_current_benchmark_lane(
+    std::vector<result> &results, const config &cfg) {
   const bool compare_lane =
       generation_lane_mode_current() == generation_lane_mode::compare;
   const config case_cfg = generation_case_config(cfg);
@@ -2975,13 +3165,19 @@ void append_reference_generation_cases(std::vector<result> &results,
           sink ^= generated.output_length;
         };
 
-        results.push_back(
-            measure_case(generation_case.name.data(), case_cfg, fn));
+        const std::string case_name =
+            generation_benchmark_case_name(generation_case.name);
+        results.push_back(measure_case(case_name.c_str(), case_cfg, fn));
         result &compare_record = results.back();
         compare_record.compare_group = generation_case.manifest.compare_group;
+        compare_record.benchmark_lane =
+            std::string{generation_benchmark_lane_name()};
         compare_record.lane = "reference";
         compare_record.backend_id = "cpp.reference.llama_cpp";
         compare_record.backend_language = "cpp";
+        compare_record.thread_count = generation_reference_thread_count();
+        compare_record.thread_contract =
+            generation_reference_thread_contract(compare_record.thread_count);
         compare_record.workload_id = generation_case.manifest.id;
         compare_record.workload_manifest_path =
             generation_case.manifest.workload_manifest_path;
@@ -3003,16 +3199,7 @@ void append_reference_generation_cases(std::vector<result> &results,
         compare_record.max_output_tokens =
             generation_case.manifest.max_output_tokens;
         compare_record.comparable = generation_case.manifest.comparable;
-        compare_record.output_tokens =
-            static_cast<std::uint64_t>(latest_generated.tokens_generated);
-        compare_record.output_bytes =
-            static_cast<std::uint64_t>(latest_generated.output_length);
-        compare_record.output_checksum =
-            checksum_bytes(reinterpret_cast<const std::uint8_t *>(
-                               latest_generated.output.data()),
-                           latest_generated.output_length);
-        compare_record.output_text.assign(latest_generated.output.data(),
-                                          latest_generated.output_length);
+        capture_generation_output_metrics(compare_record, latest_generated);
         compare_record.note = generation_case.manifest.comparability_note;
         if (generation_seam_audit_enabled()) {
           print_generation_seam_audit("reference", seam);
@@ -3053,13 +3240,19 @@ void append_reference_generation_cases(std::vector<result> &results,
         sink ^= generated.output_length;
       };
 
-      results.push_back(
-          measure_case(generation_case.name.data(), case_cfg, fn));
+      const std::string case_name =
+          generation_benchmark_case_name(generation_case.name);
+      results.push_back(measure_case(case_name.c_str(), case_cfg, fn));
       result &compare_record = results.back();
       compare_record.compare_group = generation_case.manifest.compare_group;
+      compare_record.benchmark_lane =
+          std::string{generation_benchmark_lane_name()};
       compare_record.lane = "reference";
       compare_record.backend_id = "cpp.reference.llama_cpp";
       compare_record.backend_language = "cpp";
+      compare_record.thread_count = generation_reference_thread_count();
+      compare_record.thread_contract =
+          generation_reference_thread_contract(compare_record.thread_count);
       compare_record.workload_id = generation_case.manifest.id;
       compare_record.workload_manifest_path =
           generation_case.manifest.workload_manifest_path;
@@ -3080,16 +3273,7 @@ void append_reference_generation_cases(std::vector<result> &results,
       compare_record.max_output_tokens =
           generation_case.manifest.max_output_tokens;
       compare_record.comparable = generation_case.manifest.comparable;
-      compare_record.output_tokens =
-          static_cast<std::uint64_t>(latest_generated.tokens_generated);
-      compare_record.output_bytes =
-          static_cast<std::uint64_t>(latest_generated.output_length);
-      compare_record.output_checksum =
-          checksum_bytes(reinterpret_cast<const std::uint8_t *>(
-                             latest_generated.output.data()),
-                         latest_generated.output_length);
-      compare_record.output_text.assign(latest_generated.output.data(),
-                                        latest_generated.output_length);
+      capture_generation_output_metrics(compare_record, latest_generated);
       compare_record.note = generation_case.manifest.comparability_note;
       if (generation_seam_audit_enabled()) {
         print_generation_seam_audit("reference", seam);
@@ -3097,6 +3281,26 @@ void append_reference_generation_cases(std::vector<result> &results,
       }
       static_cast<void>(sink);
     }
+  }
+}
+
+void append_emel_generation_cases(std::vector<result> &results,
+                                  const config &cfg) {
+  const generation_benchmark_lane_selection selection =
+      selected_generation_benchmark_lanes();
+  for (size_t index = 0u; index < selection.count; ++index) {
+    const scoped_generation_benchmark_lane lane_scope{selection.lanes[index]};
+    append_emel_generation_cases_for_current_benchmark_lane(results, cfg);
+  }
+}
+
+void append_reference_generation_cases(std::vector<result> &results,
+                                       const config &cfg) {
+  const generation_benchmark_lane_selection selection =
+      selected_generation_benchmark_lanes();
+  for (size_t index = 0u; index < selection.count; ++index) {
+    const scoped_generation_benchmark_lane lane_scope{selection.lanes[index]};
+    append_reference_generation_cases_for_current_benchmark_lane(results, cfg);
   }
 }
 

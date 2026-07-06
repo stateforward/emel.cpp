@@ -416,7 +416,17 @@ if $COMBINED; then
       name = $1;
       emel = $3;
       if (name != "" && emel != "") {
-        printf("%s ns_per_op=%s\n", name, emel);
+        tokens_per_second = "";
+        if ($4 == "ns/op" && $5 ~ /^\([0-9.]+$/ && $6 == "tokens/s),") {
+          tokens_per_second = $5;
+          sub(/^\(/, "", tokens_per_second);
+        }
+        if (tokens_per_second != "") {
+          printf("%s ns_per_op=%s tokens_per_second=%s\n",
+                 name, emel, tokens_per_second);
+        } else {
+          printf("%s ns_per_op=%s\n", name, emel);
+        }
       }
       skip_next = 0;
     }

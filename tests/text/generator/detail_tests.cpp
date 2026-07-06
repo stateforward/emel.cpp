@@ -35,6 +35,19 @@ using emel::text::generator::detail::quant::Q6_K_X8_ROWS;
 using emel::text::generator::detail::quant::QK8_0;
 using emel::text::generator::detail::quant::QK_K;
 
+struct matmul_actor_fixture {
+  emel::text::generator::matmul::lane_pool parallel_matmul_lanes = {};
+  emel::text::generator::matmul::sm actor{parallel_matmul_lanes};
+};
+
+void bind_test_matmul_actor(
+    emel::text::generator::detail::native_backend & backend,
+    matmul_actor_fixture & matmul) {
+  backend.matmul_actor = &matmul.actor;
+  matmul.actor.process_event(
+      emel::text::generator::matmul::event::configure_kernel_kind{backend.kernel_kind});
+}
+
 uint16_t fp16_bits(const float value) {
   return emel::text::generator::detail::quant::fp32_to_fp16(value);
 }
@@ -298,13 +311,14 @@ struct qwen3_runtime_fixture {
 
 struct prepared_qwen3_backend_fixture {
   qwen3_runtime_fixture model_fixture = {};
+  matmul_actor_fixture matmul = {};
   emel::text::generator::detail::native_backend backend = {};
   emel::graph::processor::event::execute request = {};
   bool ready = false;
 
   prepared_qwen3_backend_fixture() {
     ready =
-        emel::text::generator::detail::prepare(backend, model_fixture.model) ==
+        emel::text::generator::detail::prepare(backend, model_fixture.model, matmul.actor) ==
         emel::error::cast(emel::model::loader::error::none);
     backend.bound_tokens = {0};
     backend.bound_positions = {0};
@@ -417,6 +431,7 @@ struct chunk4_prefill_runtime_fixture {
   static constexpr int32_t k_prompt_tokens = 4;
 
   emel::model::data model = {};
+  matmul_actor_fixture matmul = {};
   emel::text::generator::detail::native_backend backend = {};
   std::vector<float> token_embedding_storage = {};
   std::vector<float> output_argmax_storage = {};
@@ -476,6 +491,9 @@ struct chunk4_prefill_runtime_fixture {
                            emel::kernel::detail::dtype_f32, k_embd, k_vocab);
 
     backend.kernel_kind = emel::kernel::kernel_kind::aarch64;
+    backend.matmul_actor = &matmul.actor;
+    matmul.actor.process_event(
+        emel::text::generator::matmul::event::configure_kernel_kind{backend.kernel_kind});
     backend.model = &model;
     backend.n_vocab = k_vocab;
     backend.n_embd = k_embd;
@@ -604,6 +622,7 @@ struct hybrid_chunked_q8_runtime_fixture {
   static constexpr int32_t k_chunk8_rows = 8;
 
   emel::model::data model = {};
+  matmul_actor_fixture matmul = {};
   emel::text::generator::detail::native_backend backend = {};
   std::vector<float> token_embedding_storage = {};
   std::vector<float> output_argmax_storage = {};
@@ -687,6 +706,9 @@ struct hybrid_chunked_q8_runtime_fixture {
                            emel::kernel::detail::dtype_f32, k_embd, k_vocab);
 
     backend.kernel_kind = emel::kernel::kernel_kind::aarch64;
+    backend.matmul_actor = &matmul.actor;
+    matmul.actor.process_event(
+        emel::text::generator::matmul::event::configure_kernel_kind{backend.kernel_kind});
     backend.model = &model;
     backend.n_vocab = k_vocab;
     backend.n_embd = k_embd;
@@ -1080,8 +1102,10 @@ TEST_CASE("generator_detail_lfm2_attention_uses_neox_rope_layout") {
 
   auto backend =
       std::make_unique<emel::text::generator::detail::native_backend>();
+  matmul_actor_fixture matmul = {};
   backend->model = model.get();
   backend->kernel_kind = emel::kernel::kernel_kind::x86_64;
+  bind_test_matmul_actor(*backend, matmul);
   backend->n_embd = k_embd;
   backend->n_head = 1;
   backend->n_head_kv = 1;
@@ -1252,7 +1276,9 @@ TEST_CASE(
       q6_rows.data(), emel::kernel::detail::dtype_q6_k,
       static_cast<int32_t>(QK_K), static_cast<int32_t>(Q6_K_X8_ROWS));
   emel::text::generator::detail::native_backend backend{};
+  matmul_actor_fixture matmul = {};
   backend.kernel_kind = emel::kernel::kernel_kind::aarch64;
+  bind_test_matmul_actor(backend, matmul);
   backend.n_embd = static_cast<int32_t>(QK_K);
   backend.output_native.tensor = &q6_tensor;
   backend.output_native.cols = static_cast<int32_t>(QK_K);
@@ -1393,7 +1419,9 @@ TEST_CASE("generator_detail_routes_static_q6_block_matrices_through_generic_q8_"
       emel::text::generator::detail::bind_tensor_rows(q6_tensor, q6_matrix));
 
   emel::text::generator::detail::native_backend backend{};
+  matmul_actor_fixture matmul = {};
   backend.kernel_kind = emel::kernel::kernel_kind::aarch64;
+  bind_test_matmul_actor(backend, matmul);
   backend.blocks.resize(1u);
   auto &block = backend.blocks.front();
   block.uses_attention = true;
@@ -1424,7 +1452,9 @@ TEST_CASE("generator_detail_routes_static_q6_block_matrices_through_generic_q8_"
   }
 
   emel::text::generator::detail::native_backend reference_backend{};
+  matmul_actor_fixture reference_matmul = {};
   reference_backend.kernel_kind = emel::kernel::kernel_kind::aarch64;
+  bind_test_matmul_actor(reference_backend, reference_matmul);
   std::vector<float> reference(Q6_K_X8_ROWS, 0.0f);
   REQUIRE(emel::text::generator::detail::matmul_vector(
       reference_backend, q6_matrix,
@@ -1467,7 +1497,9 @@ TEST_CASE("generator_detail_routes_static_q4_block_matrices_through_generic_q8_"
       emel::text::generator::detail::bind_tensor_rows(q4_tensor, q4_matrix));
 
   emel::text::generator::detail::native_backend backend{};
+  matmul_actor_fixture matmul = {};
   backend.kernel_kind = emel::kernel::kernel_kind::aarch64;
+  bind_test_matmul_actor(backend, matmul);
   backend.blocks.resize(1u);
   auto &block = backend.blocks.front();
   block.uses_attention = true;
@@ -1499,7 +1531,9 @@ TEST_CASE("generator_detail_routes_static_q4_block_matrices_through_generic_q8_"
   }
 
   emel::text::generator::detail::native_backend reference_backend{};
+  matmul_actor_fixture reference_matmul = {};
   reference_backend.kernel_kind = emel::kernel::kernel_kind::aarch64;
+  bind_test_matmul_actor(reference_backend, reference_matmul);
   std::vector<float> reference(Q4_K_X8_ROWS, 0.0f);
   REQUIRE(emel::text::generator::detail::matmul_vector(
       reference_backend, q4_matrix,
@@ -1540,7 +1574,9 @@ TEST_CASE("generator_detail_q6_logits_paths_slice_oversized_q8_workspace") {
       static_cast<int32_t>(QK_K), static_cast<int32_t>(Q6_K_X8_ROWS));
 
   emel::text::generator::detail::native_backend backend{};
+  matmul_actor_fixture matmul = {};
   backend.kernel_kind = emel::kernel::kernel_kind::aarch64;
+  bind_test_matmul_actor(backend, matmul);
   backend.n_embd = static_cast<int32_t>(QK_K);
   backend.output_native.tensor = &q6_tensor;
   backend.output_native.cols = static_cast<int32_t>(QK_K);
@@ -1796,6 +1832,8 @@ TEST_CASE("generator_detail_route_templates_reject_unprepared_inputs") {
   using emel::text::generator::detail::scalar_matmul_route;
 
   emel::text::generator::detail::native_backend backend{};
+  matmul_actor_fixture matmul = {};
+  bind_test_matmul_actor(backend, matmul);
   backend.n_embd = 4;
   backend.n_head = 1;
   backend.n_head_kv = 1;
@@ -2191,9 +2229,11 @@ TEST_CASE("generator_detail_scalar_routes_run_prepared_qwen3_paths") {
 TEST_CASE("generator_detail_prepare_derives_kv_geometry_from_memory_contract") {
   auto model_fixture = std::make_unique<qwen3_runtime_fixture>();
   auto backend = std::make_unique<emel::text::generator::detail::native_backend>();
+  matmul_actor_fixture matmul = {};
 
   // Default geometry: n_ctx=8 pads up to one 16-token block.
-  REQUIRE(emel::text::generator::detail::prepare(*backend, model_fixture->model) ==
+  REQUIRE(emel::text::generator::detail::prepare(
+              *backend, model_fixture->model, matmul.actor) ==
           emel::error::cast(emel::model::loader::error::none));
   CHECK(backend->kv_block_tokens == emel::memory::view::DEFAULT_BLOCK_TOKENS);
   CHECK(backend->kv_positions_capacity == emel::memory::view::DEFAULT_BLOCK_TOKENS);
@@ -2201,7 +2241,8 @@ TEST_CASE("generator_detail_prepare_derives_kv_geometry_from_memory_contract") {
   const size_t default_flash_extent = backend->flash_key_cache.size();
 
   // Divisible geometry: capacity equals n_ctx exactly (pre-cutover layout).
-  REQUIRE(emel::text::generator::detail::prepare(*backend, model_fixture->model, 4) ==
+  REQUIRE(emel::text::generator::detail::prepare(
+              *backend, model_fixture->model, matmul.actor, 4) ==
           emel::error::cast(emel::model::loader::error::none));
   CHECK(backend->kv_block_tokens == 4);
   CHECK(backend->kv_positions_capacity == backend->n_ctx);
@@ -2209,11 +2250,13 @@ TEST_CASE("generator_detail_prepare_derives_kv_geometry_from_memory_contract") {
 
   // Non-positive block tokens cannot cover the context window and are
   // rejected through prepare's existing model_invalid validation path.
-  REQUIRE(emel::text::generator::detail::prepare(*backend, model_fixture->model, 0) ==
+  REQUIRE(emel::text::generator::detail::prepare(
+              *backend, model_fixture->model, matmul.actor, 0) ==
           emel::error::cast(emel::model::loader::error::model_invalid));
 
   // Non-divisible geometry: capacity rounds up to whole blocks.
-  REQUIRE(emel::text::generator::detail::prepare(*backend, model_fixture->model, 3) ==
+  REQUIRE(emel::text::generator::detail::prepare(
+              *backend, model_fixture->model, matmul.actor, 3) ==
           emel::error::cast(emel::model::loader::error::none));
   CHECK(backend->kv_block_tokens == 3);
   CHECK(backend->kv_positions_capacity == 9);
@@ -2225,7 +2268,9 @@ TEST_CASE("generator_detail_prepare_derives_kv_geometry_from_memory_contract") {
 TEST_CASE("generator_detail_kv_physical_map_binds_snapshot_block_order") {
   auto model_fixture = std::make_unique<qwen3_runtime_fixture>();
   auto backend = std::make_unique<emel::text::generator::detail::native_backend>();
-  REQUIRE(emel::text::generator::detail::prepare(*backend, model_fixture->model, 4) ==
+  matmul_actor_fixture matmul = {};
+  REQUIRE(emel::text::generator::detail::prepare(
+              *backend, model_fixture->model, matmul.actor, 4) ==
           emel::error::cast(emel::model::loader::error::none));
   REQUIRE(backend->kv_positions_capacity == 8);
 
@@ -2314,7 +2359,9 @@ TEST_CASE("generator_detail_kv_physical_map_binds_snapshot_block_order") {
 TEST_CASE("generator_detail_kv_physical_map_isolates_interleaved_sequences") {
   auto model_fixture = std::make_unique<qwen3_runtime_fixture>();
   auto backend = std::make_unique<emel::text::generator::detail::native_backend>();
-  REQUIRE(emel::text::generator::detail::prepare(*backend, model_fixture->model, 2) ==
+  matmul_actor_fixture matmul = {};
+  REQUIRE(emel::text::generator::detail::prepare(
+              *backend, model_fixture->model, matmul.actor, 2) ==
           emel::error::cast(emel::model::loader::error::none));
   REQUIRE(backend->kv_positions_capacity == 8);
 
@@ -2845,7 +2892,9 @@ TEST_CASE("generator_detail_chunk4_packed_q8_0_helpers_are_explicit_and_"
   packed_matrix.cols = col_count;
 
   emel::text::generator::detail::native_backend backend{};
+  matmul_actor_fixture matmul = {};
   backend.kernel_kind = emel::kernel::kernel_kind::aarch64;
+  bind_test_matmul_actor(backend, matmul);
   backend.output = packed_matrix;
   REQUIRE(
       emel::text::generator::detail::prepare_packed_q8_0_chunk4_input_workspace(
@@ -3539,7 +3588,9 @@ TEST_CASE(
   auto fixture = std::make_unique<qwen3_runtime_fixture>();
   auto backend =
       std::make_unique<emel::text::generator::detail::native_backend>();
-  REQUIRE(emel::text::generator::detail::prepare(*backend, fixture->model) ==
+  matmul_actor_fixture matmul = {};
+  REQUIRE(emel::text::generator::detail::prepare(
+              *backend, fixture->model, matmul.actor) ==
           emel::error::cast(emel::model::loader::error::none));
   REQUIRE(emel::text::generator::detail::copy_tensor_row(
       *backend->token_embedding.tensor, 0, backend->hidden));
@@ -3579,7 +3630,9 @@ TEST_CASE(
   auto fixture = std::make_unique<gemma4_runtime_fixture>();
   auto backend =
       std::make_unique<emel::text::generator::detail::native_backend>();
-  REQUIRE(emel::text::generator::detail::prepare(*backend, fixture->model) ==
+  matmul_actor_fixture matmul = {};
+  REQUIRE(emel::text::generator::detail::prepare(
+              *backend, fixture->model, matmul.actor) ==
           emel::error::cast(emel::model::loader::error::none));
   REQUIRE(emel::text::generator::detail::copy_tensor_row(
       *backend->token_embedding.tensor, 0, backend->hidden));
@@ -3622,7 +3675,9 @@ TEST_CASE("generator_detail_gemma4_shared_kv_layer_rms_norms_value_branch_"
   auto fixture = std::make_unique<gemma4_runtime_fixture>();
   auto backend =
       std::make_unique<emel::text::generator::detail::native_backend>();
-  REQUIRE(emel::text::generator::detail::prepare(*backend, fixture->model) ==
+  matmul_actor_fixture matmul = {};
+  REQUIRE(emel::text::generator::detail::prepare(
+              *backend, fixture->model, matmul.actor) ==
           emel::error::cast(emel::model::loader::error::none));
 
   backend->n_layer = 16;
@@ -3864,7 +3919,6 @@ TEST_CASE("generator_detail_run_kernel_flash_prefill_parallel_chunk8_keeps_"
 
   auto parallel_fixture = std::make_unique<parallel_fixture_type>();
   REQUIRE(parallel_fixture->ready);
-  parallel_fixture->backend.lane_pool.emplace();
   err = -1;
   REQUIRE(emel::text::generator::detail::bind_guarded_inputs(
       parallel_fixture->request, &err));
@@ -3874,11 +3928,14 @@ TEST_CASE("generator_detail_run_kernel_flash_prefill_parallel_chunk8_keeps_"
                   parallel_fixture->request, &err));
   CHECK(err == emel::text::generator::detail::k_error_ok);
 
-  // The parallel route must keep every prefill matmul on the lane kernel
-  // actors; the primary kernel actor stays untouched.
+  // The parallel route must keep every prefill matmul on the matmul lane
+  // actors; the matmul actor's serial kernel stays untouched.
   CHECK(parallel_fixture->backend.kernel.optimized_q4_dispatch_count() == 0u);
+  CHECK(parallel_fixture->matmul.actor.serial_kernel()
+            .optimized_q4_dispatch_count() == 0u);
   uint64_t lane_q4_dispatches = 0u;
-  for (const auto &lane_kernel : parallel_fixture->backend.lane_kernels) {
+  for (const auto &lane_kernel :
+       parallel_fixture->matmul.actor.parallel_lane_kernels()) {
     lane_q4_dispatches += lane_kernel.optimized_q4_dispatch_count();
   }
   CHECK(lane_q4_dispatches > 0u);

@@ -55,23 +55,25 @@ struct effect_dispatch_parallel_lanes {
       lane.accepted = false;
     }
 
-    // Total fork/join over the already-selected lane group: submit_or_run
-    // executes every lane exactly once inside the join window (worker or
-    // calling thread - the scheduler's internal capacity handling, never a
-    // behavior choice), and the join completes before the action returns,
-    // preserving RTC.
-    lane_scheduler scheduler{*ctx.pool};
-    lane_scheduler::join_group group{};
+    // Fork/join over the already-selected lane group. Submission failure leaves
+    // the lane rejected; the explicit post-join guards route that outcome.
+    lane_pool::join_group group{};
+    emel::policy::fork_join_start_gate gate{};
+    size_t submitted_lanes = 0u;
     for (auto & lane : ev.lanes) {
       auto * lane_ptr = &lane;
-      scheduler.submit_or_run(group, [lane_ptr]() noexcept {
+      const bool submitted =
+          ctx.pool->try_submit(group, [lane_ptr, &gate]() noexcept {
+        gate.arrive_and_wait();
         auto & current_lane = *lane_ptr;
         const emel::graph::event::compute_reserved reserved_compute{
             current_lane.compute};
         current_lane.accepted =
             current_lane.graph.process_event(reserved_compute);
       });
+      submitted_lanes += submitted ? 1u : 0u;
     }
+    gate.open_after_arrivals(submitted_lanes);
     (void)group.wait();
     ev.out.dispatched_lanes = static_cast<int32_t>(ev.lanes.size());
   }

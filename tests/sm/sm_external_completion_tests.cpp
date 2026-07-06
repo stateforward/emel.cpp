@@ -256,11 +256,11 @@ TEST_CASE("co_sm_external_completion_async_wrapper_completes_inline") {
   CHECK(fixture.probe.log_count == 2u);
 }
 
-TEST_CASE("co_sm_external_completion_normalizes_error_out") {
+TEST_CASE("co_sm_external_completion_reports_acceptance_and_leaves_error_data_in_event") {
   stream_fixture fixture{};
   int32_t error_value = 0;
 
-  CHECK_FALSE(fixture.machine.process_event(event_error_probe{.error_out = &error_value}));
+  CHECK(fixture.machine.process_event(event_error_probe{.error_out = &error_value}));
   CHECK(error_value == 7);
 }
 

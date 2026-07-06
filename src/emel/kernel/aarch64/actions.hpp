@@ -920,6 +920,45 @@ inline bool can_use_neon_mul_mat_q6_vector(const event::op_mul_mat &request,
   return neon_available && can_run_neon_mul_mat_q6_vector_request(request);
 }
 
+inline bool can_run_neon_mul_mat_q6_vector_q8_rhs_request(
+    const event::op_mul_mat &request) noexcept {
+  const uint64_t k = request.src0.ne[0];
+  const uint64_t m = request.src0.ne[1];
+  const uint64_t block_count = k / ::emel::kernel::detail::quant::QK_K;
+  const size_t row_bytes = ::emel::kernel::detail::quantized_row_storage_bytes(
+      ::emel::kernel::detail::dtype_q6_k, k);
+  const size_t rhs_row_bytes =
+      ::emel::kernel::detail::quantized_row_storage_bytes(
+          ::emel::kernel::detail::dtype_q8_k, k);
+  return k != 0u && m != 0u && block_count != 0u &&
+         block_count <= ::emel::kernel::detail::quant::MAX_Q8_K_BLOCKS &&
+         request.src1.ne[0] == 1u && request.src1.ne[1] == k &&
+         request.dst.ne[0] == 1u && request.dst.ne[1] == m &&
+         request.src0.ne[2] == 1u && request.src0.ne[3] == 1u &&
+         request.src1.ne[2] == 1u && request.src1.ne[3] == 1u &&
+         request.dst.ne[2] == 1u && request.dst.ne[3] == 1u &&
+         ::emel::kernel::detail::dtype_code(request.src0.type) ==
+             ::emel::kernel::detail::dtype_q6_k &&
+         ::emel::kernel::detail::dtype_code(request.src1.type) ==
+             ::emel::kernel::detail::dtype_q8_k &&
+         ::emel::kernel::detail::dtype_code(request.dst.type) ==
+             ::emel::kernel::detail::dtype_f32 &&
+         request.src0.nb[0] == 1u && row_bytes != 0u &&
+         request.src0.nb[1] == row_bytes &&
+         request.src0.nb[2] == row_bytes * m &&
+         request.src0.nb[3] == request.src0.nb[2] &&
+         request.src1.nb[0] == 1u && rhs_row_bytes != 0u &&
+         request.src1.nb[1] == rhs_row_bytes &&
+         request.src1.nb[2] == rhs_row_bytes &&
+         request.src1.nb[3] == rhs_row_bytes &&
+         is_dense_contiguous(request.dst);
+}
+
+inline bool can_use_neon_mul_mat_q6_vector_q8_rhs(
+    const event::op_mul_mat &request, const bool neon_available) noexcept {
+  return neon_available && can_run_neon_mul_mat_q6_vector_q8_rhs_request(request);
+}
+
 inline bool neon_q5_0_vector_supported() noexcept {
 #if defined(__aarch64__) && defined(__ARM_NEON) &&                             \
     defined(__ARM_FEATURE_DOTPROD)
@@ -1082,6 +1121,46 @@ can_use_neon_mul_mat_q8_0_vector(const event::op_mul_mat &request,
   return neon_available && can_run_neon_mul_mat_q8_0_vector_request(request);
 }
 
+inline bool can_run_neon_mul_mat_q8_0_vector_q8_rhs_request(
+    const event::op_mul_mat &request) noexcept {
+  const uint64_t k = request.src0.ne[0];
+  const uint64_t m = request.src0.ne[1];
+  const uint64_t block_count = k / ::emel::kernel::detail::quant::QK8_0;
+  const size_t row_bytes = ::emel::kernel::detail::quantized_row_storage_bytes(
+      ::emel::kernel::detail::dtype_q8_0, k);
+  const size_t rhs_row_bytes =
+      ::emel::kernel::detail::quantized_row_storage_bytes(
+          ::emel::kernel::detail::dtype_q8_0, k);
+  return k != 0u && m != 0u && block_count != 0u &&
+         block_count <= ::emel::kernel::detail::quant::MAX_Q8_0_BLOCKS &&
+         request.src1.ne[0] == 1u && request.src1.ne[1] == k &&
+         request.dst.ne[0] == 1u && request.dst.ne[1] == m &&
+         request.src0.ne[2] == 1u && request.src0.ne[3] == 1u &&
+         request.src1.ne[2] == 1u && request.src1.ne[3] == 1u &&
+         request.dst.ne[2] == 1u && request.dst.ne[3] == 1u &&
+         ::emel::kernel::detail::dtype_code(request.src0.type) ==
+             ::emel::kernel::detail::dtype_q8_0 &&
+         ::emel::kernel::detail::dtype_code(request.src1.type) ==
+             ::emel::kernel::detail::dtype_q8_0 &&
+         ::emel::kernel::detail::dtype_code(request.dst.type) ==
+             ::emel::kernel::detail::dtype_f32 &&
+         request.src0.nb[0] == 1u && row_bytes != 0u &&
+         request.src0.nb[1] == row_bytes &&
+         request.src0.nb[2] == row_bytes * m &&
+         request.src0.nb[3] == request.src0.nb[2] &&
+         request.src1.nb[0] == 1u && rhs_row_bytes != 0u &&
+         request.src1.nb[1] == rhs_row_bytes &&
+         request.src1.nb[2] == rhs_row_bytes &&
+         request.src1.nb[3] == rhs_row_bytes &&
+         is_dense_contiguous(request.dst);
+}
+
+inline bool can_use_neon_mul_mat_q8_0_vector_q8_rhs(
+    const event::op_mul_mat &request, const bool neon_available) noexcept {
+  return neon_available &&
+         can_run_neon_mul_mat_q8_0_vector_q8_rhs_request(request);
+}
+
 // f32 x f32 single-RHS (GEMV) contract: row-contiguous f32 weights against a
 // dense contiguous f32 vector into a dense contiguous f32 output. The
 // row-slice lane views emitted by the parallel matmul slicer satisfy this
@@ -1240,6 +1319,15 @@ inline bool neon_q4_vector_packed_supported() noexcept {
 #endif
 }
 
+inline bool neon_q4_vector_q8_rhs_supported() noexcept {
+#if defined(__aarch64__) && defined(__ARM_NEON) &&                             \
+    defined(__ARM_FEATURE_DOTPROD)
+  return true;
+#else
+  return false;
+#endif
+}
+
 inline bool neon_q6_vector_prepared_q8_rhs_i8mm_supported() noexcept {
 #if defined(__aarch64__) && defined(__ARM_NEON) &&                             \
     defined(__ARM_FEATURE_MATMUL_INT8)
@@ -1306,6 +1394,40 @@ inline bool can_run_neon_mul_mat_q4_vector_packed_q8_rhs_request(
          request.src0.nb[2] == group_bytes * group_count &&
          request.src0.nb[3] == request.src0.nb[2] && request.src1.nb[0] == 1u &&
          rhs_row_bytes != 0u && request.src1.nb[1] == rhs_row_bytes &&
+         request.src1.nb[2] == rhs_row_bytes &&
+         request.src1.nb[3] == rhs_row_bytes &&
+         is_dense_contiguous(request.dst);
+}
+
+inline bool can_run_neon_mul_mat_q4_vector_q8_rhs_request(
+    const event::op_mul_mat &request) noexcept {
+  const uint64_t k = request.src0.ne[0];
+  const uint64_t m = request.src0.ne[1];
+  const uint64_t block_count = k / ::emel::kernel::detail::quant::QK_K;
+  const size_t row_bytes = ::emel::kernel::detail::quantized_row_storage_bytes(
+      ::emel::kernel::detail::dtype_q4_k, k);
+  const size_t rhs_row_bytes =
+      ::emel::kernel::detail::quantized_row_storage_bytes(
+          ::emel::kernel::detail::dtype_q8_k, k);
+  return k != 0u && m != 0u && block_count != 0u &&
+         block_count <= ::emel::kernel::detail::quant::MAX_Q8_K_BLOCKS &&
+         request.src1.ne[0] == 1u && request.src1.ne[1] == k &&
+         request.dst.ne[0] == 1u && request.dst.ne[1] == m &&
+         request.src0.ne[2] == 1u && request.src0.ne[3] == 1u &&
+         request.src1.ne[2] == 1u && request.src1.ne[3] == 1u &&
+         request.dst.ne[2] == 1u && request.dst.ne[3] == 1u &&
+         ::emel::kernel::detail::dtype_code(request.src0.type) ==
+             ::emel::kernel::detail::dtype_q4_k &&
+         ::emel::kernel::detail::dtype_code(request.src1.type) ==
+             ::emel::kernel::detail::dtype_q8_k &&
+         ::emel::kernel::detail::dtype_code(request.dst.type) ==
+             ::emel::kernel::detail::dtype_f32 &&
+         request.src0.nb[0] == 1u && row_bytes != 0u &&
+         request.src0.nb[1] == row_bytes &&
+         request.src0.nb[2] == row_bytes * m &&
+         request.src0.nb[3] == request.src0.nb[2] &&
+         request.src1.nb[0] == 1u && rhs_row_bytes != 0u &&
+         request.src1.nb[1] == rhs_row_bytes &&
          request.src1.nb[2] == rhs_row_bytes &&
          request.src1.nb[3] == rhs_row_bytes &&
          is_dense_contiguous(request.dst);
@@ -1398,6 +1520,12 @@ inline bool can_use_neon_mul_mat_q4_vector_packed_q8_rhs_bl8(
   return neon_available && neon_q4_vector_packed_supported() &&
          can_run_neon_mul_mat_q4_vector_packed_q8_rhs_request(
              request, ::emel::kernel::detail::dtype_q4_k_x8_bl8);
+}
+
+inline bool can_use_neon_mul_mat_q4_vector_q8_rhs(
+    const event::op_mul_mat &request, const bool neon_available) noexcept {
+  return neon_available && neon_q4_vector_q8_rhs_supported() &&
+         can_run_neon_mul_mat_q4_vector_q8_rhs_request(request);
 }
 
 
@@ -2684,6 +2812,193 @@ dot_q4_k_q8_k_2rows_neon(const ::emel::kernel::detail::quant::block_q4_k *lhs0,
 
   out[0] = sum0;
   out[1] = sum1;
+#endif
+}
+
+inline void
+dot_q4_k_q8_k_4rows_neon(const ::emel::kernel::detail::quant::block_q4_k *lhs0,
+                         const ::emel::kernel::detail::quant::block_q4_k *lhs1,
+                         const ::emel::kernel::detail::quant::block_q4_k *lhs2,
+                         const ::emel::kernel::detail::quant::block_q4_k *lhs3,
+                         const ::emel::kernel::detail::quant::block_q8_k *rhs,
+                         const uint64_t block_count, float *out) noexcept {
+#if !defined(__ARM_FEATURE_DOTPROD)
+  out[0] = dot_q4_k_q8_k_row_neon(lhs0, rhs, block_count);
+  out[1] = dot_q4_k_q8_k_row_neon(lhs1, rhs, block_count);
+  out[2] = dot_q4_k_q8_k_row_neon(lhs2, rhs, block_count);
+  out[3] = dot_q4_k_q8_k_row_neon(lhs3, rhs, block_count);
+#else
+  const uint8x16_t m4b = vdupq_n_u8(0x0fu);
+  const int32x4_t zero = vdupq_n_s32(0);
+  float sum0 = 0.0f;
+  float sum1 = 0.0f;
+  float sum2 = 0.0f;
+  float sum3 = 0.0f;
+
+  for (uint64_t block = 0; block < block_count; ++block) {
+    const auto &lhs_block0 = lhs0[block];
+    const auto &lhs_block1 = lhs1[block];
+    const auto &lhs_block2 = lhs2[block];
+    const auto &lhs_block3 = lhs3[block];
+    uint32_t decoded_words0[4] = {};
+    uint32_t decoded_words1[4] = {};
+    uint32_t decoded_words2[4] = {};
+    uint32_t decoded_words3[4] = {};
+    decode_q4_k_scales_words(lhs_block0, decoded_words0);
+    decode_q4_k_scales_words(lhs_block1, decoded_words1);
+    decode_q4_k_scales_words(lhs_block2, decoded_words2);
+    decode_q4_k_scales_words(lhs_block3, decoded_words3);
+
+    const auto *scales0 = reinterpret_cast<const uint8_t *>(decoded_words0);
+    const auto *scales1 = reinterpret_cast<const uint8_t *>(decoded_words1);
+    const auto *scales2 = reinterpret_cast<const uint8_t *>(decoded_words2);
+    const auto *scales3 = reinterpret_cast<const uint8_t *>(decoded_words3);
+    const auto *mins0 = reinterpret_cast<const uint8_t *>(decoded_words0 + 2);
+    const auto *mins1 = reinterpret_cast<const uint8_t *>(decoded_words1 + 2);
+    const auto *mins2 = reinterpret_cast<const uint8_t *>(decoded_words2 + 2);
+    const auto *mins3 = reinterpret_cast<const uint8_t *>(decoded_words3 + 2);
+    const int16x8_t q8_pair_sums =
+        vpaddq_s16(vld1q_s16(rhs[block].bsums.data()),
+                   vld1q_s16(rhs[block].bsums.data() + 8));
+    const int32_t min_sum0 = q4_k_min_sum_neon(mins0, q8_pair_sums);
+    const int32_t min_sum1 = q4_k_min_sum_neon(mins1, q8_pair_sums);
+    const int32_t min_sum2 = q4_k_min_sum_neon(mins2, q8_pair_sums);
+    const int32_t min_sum3 = q4_k_min_sum_neon(mins3, q8_pair_sums);
+
+    const uint8_t *q40 = lhs_block0.qs.data();
+    const uint8_t *q41 = lhs_block1.qs.data();
+    const uint8_t *q42 = lhs_block2.qs.data();
+    const uint8_t *q43 = lhs_block3.qs.data();
+    const int8_t *q8 = rhs[block].qs.data();
+    int32x4_t low_acc0 = vdupq_n_s32(0);
+    int32x4_t high_acc0 = vdupq_n_s32(0);
+    int32x4_t low_acc1 = vdupq_n_s32(0);
+    int32x4_t high_acc1 = vdupq_n_s32(0);
+    int32x4_t low_acc2 = vdupq_n_s32(0);
+    int32x4_t high_acc2 = vdupq_n_s32(0);
+    int32x4_t low_acc3 = vdupq_n_s32(0);
+    int32x4_t high_acc3 = vdupq_n_s32(0);
+
+    for (uint64_t group = 0;
+         group < (::emel::kernel::detail::quant::QK_K / 64u); ++group) {
+      const uint8x16_t q4bits00 = vld1q_u8(q40 + 0u);
+      const uint8x16_t q4bits01 = vld1q_u8(q40 + 16u);
+      const uint8x16_t q4bits10 = vld1q_u8(q41 + 0u);
+      const uint8x16_t q4bits11 = vld1q_u8(q41 + 16u);
+      const uint8x16_t q4bits20 = vld1q_u8(q42 + 0u);
+      const uint8x16_t q4bits21 = vld1q_u8(q42 + 16u);
+      const uint8x16_t q4bits30 = vld1q_u8(q43 + 0u);
+      const uint8x16_t q4bits31 = vld1q_u8(q43 + 16u);
+      const int8x16_t q8bytes0 = vld1q_s8(q8 + 0u);
+      const int8x16_t q8bytes1 = vld1q_s8(q8 + 16u);
+      const int8x16_t q8bytes2 = vld1q_s8(q8 + 32u);
+      const int8x16_t q8bytes3 = vld1q_s8(q8 + 48u);
+
+      const int8x16_t q4low00 = vreinterpretq_s8_u8(vandq_u8(q4bits00, m4b));
+      const int8x16_t q4low01 = vreinterpretq_s8_u8(vandq_u8(q4bits01, m4b));
+      const int8x16_t q4high00 = vreinterpretq_s8_u8(vshrq_n_u8(q4bits00, 4));
+      const int8x16_t q4high01 = vreinterpretq_s8_u8(vshrq_n_u8(q4bits01, 4));
+      const int8x16_t q4low10 = vreinterpretq_s8_u8(vandq_u8(q4bits10, m4b));
+      const int8x16_t q4low11 = vreinterpretq_s8_u8(vandq_u8(q4bits11, m4b));
+      const int8x16_t q4high10 = vreinterpretq_s8_u8(vshrq_n_u8(q4bits10, 4));
+      const int8x16_t q4high11 = vreinterpretq_s8_u8(vshrq_n_u8(q4bits11, 4));
+      const int8x16_t q4low20 = vreinterpretq_s8_u8(vandq_u8(q4bits20, m4b));
+      const int8x16_t q4low21 = vreinterpretq_s8_u8(vandq_u8(q4bits21, m4b));
+      const int8x16_t q4high20 = vreinterpretq_s8_u8(vshrq_n_u8(q4bits20, 4));
+      const int8x16_t q4high21 = vreinterpretq_s8_u8(vshrq_n_u8(q4bits21, 4));
+      const int8x16_t q4low30 = vreinterpretq_s8_u8(vandq_u8(q4bits30, m4b));
+      const int8x16_t q4low31 = vreinterpretq_s8_u8(vandq_u8(q4bits31, m4b));
+      const int8x16_t q4high30 = vreinterpretq_s8_u8(vshrq_n_u8(q4bits30, 4));
+      const int8x16_t q4high31 = vreinterpretq_s8_u8(vshrq_n_u8(q4bits31, 4));
+
+      const int32_t low_scale0 = static_cast<int32_t>(scales0[group * 2u + 0u]);
+      const int32_t high_scale0 =
+          static_cast<int32_t>(scales0[group * 2u + 1u]);
+      const int32_t low_scale1 = static_cast<int32_t>(scales1[group * 2u + 0u]);
+      const int32_t high_scale1 =
+          static_cast<int32_t>(scales1[group * 2u + 1u]);
+      const int32_t low_scale2 = static_cast<int32_t>(scales2[group * 2u + 0u]);
+      const int32_t high_scale2 =
+          static_cast<int32_t>(scales2[group * 2u + 1u]);
+      const int32_t low_scale3 = static_cast<int32_t>(scales3[group * 2u + 0u]);
+      const int32_t high_scale3 =
+          static_cast<int32_t>(scales3[group * 2u + 1u]);
+
+      low_acc0 =
+          vmlaq_n_s32(low_acc0, vdotq_s32(zero, q4low00, q8bytes0), low_scale0);
+      low_acc0 =
+          vmlaq_n_s32(low_acc0, vdotq_s32(zero, q4low01, q8bytes1), low_scale0);
+      high_acc0 = vmlaq_n_s32(high_acc0, vdotq_s32(zero, q4high00, q8bytes2),
+                              high_scale0);
+      high_acc0 = vmlaq_n_s32(high_acc0, vdotq_s32(zero, q4high01, q8bytes3),
+                              high_scale0);
+      low_acc1 =
+          vmlaq_n_s32(low_acc1, vdotq_s32(zero, q4low10, q8bytes0), low_scale1);
+      low_acc1 =
+          vmlaq_n_s32(low_acc1, vdotq_s32(zero, q4low11, q8bytes1), low_scale1);
+      high_acc1 = vmlaq_n_s32(high_acc1, vdotq_s32(zero, q4high10, q8bytes2),
+                              high_scale1);
+      high_acc1 = vmlaq_n_s32(high_acc1, vdotq_s32(zero, q4high11, q8bytes3),
+                              high_scale1);
+      low_acc2 =
+          vmlaq_n_s32(low_acc2, vdotq_s32(zero, q4low20, q8bytes0), low_scale2);
+      low_acc2 =
+          vmlaq_n_s32(low_acc2, vdotq_s32(zero, q4low21, q8bytes1), low_scale2);
+      high_acc2 = vmlaq_n_s32(high_acc2, vdotq_s32(zero, q4high20, q8bytes2),
+                              high_scale2);
+      high_acc2 = vmlaq_n_s32(high_acc2, vdotq_s32(zero, q4high21, q8bytes3),
+                              high_scale2);
+      low_acc3 =
+          vmlaq_n_s32(low_acc3, vdotq_s32(zero, q4low30, q8bytes0), low_scale3);
+      low_acc3 =
+          vmlaq_n_s32(low_acc3, vdotq_s32(zero, q4low31, q8bytes1), low_scale3);
+      high_acc3 = vmlaq_n_s32(high_acc3, vdotq_s32(zero, q4high30, q8bytes2),
+                              high_scale3);
+      high_acc3 = vmlaq_n_s32(high_acc3, vdotq_s32(zero, q4high31, q8bytes3),
+                              high_scale3);
+
+      q40 += 32u;
+      q41 += 32u;
+      q42 += 32u;
+      q43 += 32u;
+      q8 += 64u;
+    }
+
+    const int32_t isum0 = vaddvq_s32(vaddq_s32(low_acc0, high_acc0));
+    const int32_t isum1 = vaddvq_s32(vaddq_s32(low_acc1, high_acc1));
+    const int32_t isum2 = vaddvq_s32(vaddq_s32(low_acc2, high_acc2));
+    const int32_t isum3 = vaddvq_s32(vaddq_s32(low_acc3, high_acc3));
+    const float rhs_d = rhs[block].d;
+    const float d0 =
+        ::emel::kernel::detail::quant::fp16_to_fp32(lhs_block0.d) * rhs_d;
+    const float d1 =
+        ::emel::kernel::detail::quant::fp16_to_fp32(lhs_block1.d) * rhs_d;
+    const float d2 =
+        ::emel::kernel::detail::quant::fp16_to_fp32(lhs_block2.d) * rhs_d;
+    const float d3 =
+        ::emel::kernel::detail::quant::fp16_to_fp32(lhs_block3.d) * rhs_d;
+    const float dmin0 =
+        ::emel::kernel::detail::quant::fp16_to_fp32(lhs_block0.dmin) * rhs_d;
+    const float dmin1 =
+        ::emel::kernel::detail::quant::fp16_to_fp32(lhs_block1.dmin) * rhs_d;
+    const float dmin2 =
+        ::emel::kernel::detail::quant::fp16_to_fp32(lhs_block2.dmin) * rhs_d;
+    const float dmin3 =
+        ::emel::kernel::detail::quant::fp16_to_fp32(lhs_block3.dmin) * rhs_d;
+    sum0 +=
+        d0 * static_cast<float>(isum0) - dmin0 * static_cast<float>(min_sum0);
+    sum1 +=
+        d1 * static_cast<float>(isum1) - dmin1 * static_cast<float>(min_sum1);
+    sum2 +=
+        d2 * static_cast<float>(isum2) - dmin2 * static_cast<float>(min_sum2);
+    sum3 +=
+        d3 * static_cast<float>(isum3) - dmin3 * static_cast<float>(min_sum3);
+  }
+
+  out[0] = sum0;
+  out[1] = sum1;
+  out[2] = sum2;
+  out[3] = sum3;
 #endif
 }
 
@@ -4320,19 +4635,23 @@ dot_q8_0_q8_0_4row_neon(const ::emel::kernel::detail::quant::block_q8_0 *row0,
                   vdotq_s32(zero, vld1q_s8(row3[block].qs.data() + 16u), rhs1));
     const float rhs_d =
         ::emel::kernel::detail::quant::fp16_to_fp32(rhs[block].d);
-    const float lanes[4] = {
-        static_cast<float>(horizontal_sum_s32_neon(acc0)),
-        static_cast<float>(horizontal_sum_s32_neon(acc1)),
-        static_cast<float>(horizontal_sum_s32_neon(acc2)),
-        static_cast<float>(horizontal_sum_s32_neon(acc3)),
-    };
-    const float scales[4] = {
+    const int32x4_t pair01 = vpaddq_s32(acc0, acc1);
+    const int32x4_t pair23 = vpaddq_s32(acc2, acc3);
+    const int32x4_t lane_sums = vpaddq_s32(pair01, pair23);
+    float32x4_t scales = vdupq_n_f32(0.0f);
+    scales = vsetq_lane_f32(
         ::emel::kernel::detail::quant::fp16_to_fp32(row0[block].d) * rhs_d,
+        scales, 0);
+    scales = vsetq_lane_f32(
         ::emel::kernel::detail::quant::fp16_to_fp32(row1[block].d) * rhs_d,
+        scales, 1);
+    scales = vsetq_lane_f32(
         ::emel::kernel::detail::quant::fp16_to_fp32(row2[block].d) * rhs_d,
+        scales, 2);
+    scales = vsetq_lane_f32(
         ::emel::kernel::detail::quant::fp16_to_fp32(row3[block].d) * rhs_d,
-    };
-    sum = vmlaq_f32(sum, vld1q_f32(lanes), vld1q_f32(scales));
+        scales, 3);
+    sum = vmlaq_f32(sum, vcvtq_f32_s32(lane_sums), scales);
   }
   return sum;
 #else
@@ -6187,6 +6506,53 @@ inline void execute_neon_mul_mat_q6_vector_unchecked(
 #endif
 }
 
+inline void execute_neon_mul_mat_q6_vector_q8_rhs_unchecked(
+    const event::op_mul_mat &request) noexcept {
+#if !(defined(__aarch64__) || defined(__ARM_NEON))
+  (void)request;
+#else
+  const uint64_t k = request.src0.ne[0];
+  const uint64_t m = request.src0.ne[1];
+  const uint64_t block_count = k / ::emel::kernel::detail::quant::QK_K;
+  const auto *q8_blocks =
+      static_cast<const ::emel::kernel::detail::quant::block_q8_k *>(
+          request.src1.data);
+  const uint8_t *a = static_cast<const uint8_t *>(request.src0.data);
+  const size_t row_bytes = request.src0.nb[1];
+  float *c = static_cast<float *>(request.dst.data);
+
+  uint64_t row = 0u;
+  for (; row + 4u <= m; row += 4u) {
+    const auto *row0 =
+        reinterpret_cast<const ::emel::kernel::detail::quant::block_q6_k *>(
+            a + (row + 0u) * row_bytes);
+    const auto *row1 =
+        reinterpret_cast<const ::emel::kernel::detail::quant::block_q6_k *>(
+            a + (row + 1u) * row_bytes);
+    const auto *row2 =
+        reinterpret_cast<const ::emel::kernel::detail::quant::block_q6_k *>(
+            a + (row + 2u) * row_bytes);
+    const auto *row3 =
+        reinterpret_cast<const ::emel::kernel::detail::quant::block_q6_k *>(
+            a + (row + 3u) * row_bytes);
+    float out[4] = {};
+    dot_q6_k_q8_k_4rows_neon(row0, row1, row2, row3, q8_blocks, block_count,
+                             out);
+    c[row + 0u] = out[0];
+    c[row + 1u] = out[1];
+    c[row + 2u] = out[2];
+    c[row + 3u] = out[3];
+  }
+
+  for (; row < m; ++row) {
+    const auto *row_ptr =
+        reinterpret_cast<const ::emel::kernel::detail::quant::block_q6_k *>(
+            a + row * row_bytes);
+    c[row] = dot_q6_k_q8_k_row_neon(row_ptr, q8_blocks, block_count);
+  }
+#endif
+}
+
 inline void execute_neon_mul_mat_q8_0_packed_bl4_unchecked(
     const event::op_mul_mat &request) noexcept {
 #if !(defined(__aarch64__) && defined(__ARM_NEON) &&                           \
@@ -6486,6 +6852,107 @@ inline void execute_neon_mul_mat_q8_0_vector_unchecked(
 #endif
 }
 
+inline void execute_neon_mul_mat_q8_0_vector_q8_rhs_unchecked(
+    const event::op_mul_mat &request) noexcept {
+#if !(defined(__aarch64__) || defined(__ARM_NEON))
+  (void)request;
+#else
+  const uint64_t k = request.src0.ne[0];
+  const uint64_t m = request.src0.ne[1];
+  const uint64_t block_count = k / ::emel::kernel::detail::quant::QK8_0;
+  const auto *q8_blocks =
+      static_cast<const ::emel::kernel::detail::quant::block_q8_0 *>(
+          request.src1.data);
+  const uint8_t *a = static_cast<const uint8_t *>(request.src0.data);
+  const size_t row_bytes = request.src0.nb[1];
+  float *c = static_cast<float *>(request.dst.data);
+  uint64_t row = 0u;
+  for (; row + 4u <= m; row += 4u) {
+    const auto *row0 =
+        reinterpret_cast<const ::emel::kernel::detail::quant::block_q8_0 *>(
+            a + (row + 0u) * row_bytes);
+    const auto *row1 =
+        reinterpret_cast<const ::emel::kernel::detail::quant::block_q8_0 *>(
+            a + (row + 1u) * row_bytes);
+    const auto *row2 =
+        reinterpret_cast<const ::emel::kernel::detail::quant::block_q8_0 *>(
+            a + (row + 2u) * row_bytes);
+    const auto *row3 =
+        reinterpret_cast<const ::emel::kernel::detail::quant::block_q8_0 *>(
+            a + (row + 3u) * row_bytes);
+    vst1q_f32(c + row, dot_q8_0_q8_0_4row_neon(row0, row1, row2, row3,
+                                               q8_blocks, block_count));
+  }
+
+  for (; row < m; ++row) {
+    const auto *row_ptr =
+        reinterpret_cast<const ::emel::kernel::detail::quant::block_q8_0 *>(
+            a + row * row_bytes);
+    c[row] = dot_q8_0_q8_0_row_neon(row_ptr, q8_blocks, block_count);
+  }
+#endif
+}
+
+inline void execute_neon_mul_mat_q4_vector_q8_rhs_unchecked(
+    const event::op_mul_mat &request) noexcept {
+#if !(defined(__aarch64__) || defined(__ARM_NEON))
+  (void)request;
+#else
+  const uint64_t k = request.src0.ne[0];
+  const uint64_t m = request.src0.ne[1];
+  const uint64_t block_count = k / ::emel::kernel::detail::quant::QK_K;
+  const auto *q8_blocks =
+      static_cast<const ::emel::kernel::detail::quant::block_q8_k *>(
+          request.src1.data);
+  const uint8_t *a = static_cast<const uint8_t *>(request.src0.data);
+  const size_t row_bytes = request.src0.nb[1];
+  float *c = static_cast<float *>(request.dst.data);
+
+  uint64_t row = 0u;
+  for (; row + 4u <= m; row += 4u) {
+    const auto *row0 =
+        reinterpret_cast<const ::emel::kernel::detail::quant::block_q4_k *>(
+            a + (row + 0u) * row_bytes);
+    const auto *row1 =
+        reinterpret_cast<const ::emel::kernel::detail::quant::block_q4_k *>(
+            a + (row + 1u) * row_bytes);
+    const auto *row2 =
+        reinterpret_cast<const ::emel::kernel::detail::quant::block_q4_k *>(
+            a + (row + 2u) * row_bytes);
+    const auto *row3 =
+        reinterpret_cast<const ::emel::kernel::detail::quant::block_q4_k *>(
+            a + (row + 3u) * row_bytes);
+    float out[4] = {};
+    dot_q4_k_q8_k_4rows_neon(row0, row1, row2, row3, q8_blocks, block_count,
+                             out);
+    c[row + 0u] = out[0];
+    c[row + 1u] = out[1];
+    c[row + 2u] = out[2];
+    c[row + 3u] = out[3];
+  }
+
+  for (; row + 2u <= m; row += 2u) {
+    const auto *row0 =
+        reinterpret_cast<const ::emel::kernel::detail::quant::block_q4_k *>(
+            a + (row + 0u) * row_bytes);
+    const auto *row1 =
+        reinterpret_cast<const ::emel::kernel::detail::quant::block_q4_k *>(
+            a + (row + 1u) * row_bytes);
+    float out[2] = {};
+    dot_q4_k_q8_k_2rows_neon(row0, row1, q8_blocks, block_count, out);
+    c[row + 0u] = out[0];
+    c[row + 1u] = out[1];
+  }
+
+  for (; row < m; ++row) {
+    const auto *row_ptr =
+        reinterpret_cast<const ::emel::kernel::detail::quant::block_q4_k *>(
+            a + row * row_bytes);
+    c[row] = dot_q4_k_q8_k_row_neon(row_ptr, q8_blocks, block_count);
+  }
+#endif
+}
+
 // Exact port of the pinned ggml_vec_dot_f16 aarch64 NEON fp16-arithmetic
 // path (GGML_F16_STEP=32): four float16x8_t accumulators advanced with
 // vfmaq_f16, pairwise vaddq_f16 reduce, f32 convert + horizontal add, and an
@@ -6564,6 +7031,72 @@ inline float dot_f32_f32_row_neon(const int64_t count, const float *x,
 #endif
 }
 
+inline void dot_f32_f32_4rows_neon(const int64_t count,
+                                   const float *row0,
+                                   const float *row1,
+                                   const float *row2,
+                                   const float *row3,
+                                   const float *y,
+                                   float &out0,
+                                   float &out1,
+                                   float &out2,
+                                   float &out3) noexcept {
+#if !(defined(__aarch64__) || defined(__ARM_NEON))
+  (void)count;
+  (void)row0;
+  (void)row1;
+  (void)row2;
+  (void)row3;
+  (void)y;
+  out0 = 0.0f;
+  out1 = 0.0f;
+  out2 = 0.0f;
+  out3 = 0.0f;
+#else
+  const int64_t np = count & ~static_cast<int64_t>(15);
+  float32x4_t sum0[4] = {vdupq_n_f32(0.0f), vdupq_n_f32(0.0f),
+                         vdupq_n_f32(0.0f), vdupq_n_f32(0.0f)};
+  float32x4_t sum1[4] = {vdupq_n_f32(0.0f), vdupq_n_f32(0.0f),
+                         vdupq_n_f32(0.0f), vdupq_n_f32(0.0f)};
+  float32x4_t sum2[4] = {vdupq_n_f32(0.0f), vdupq_n_f32(0.0f),
+                         vdupq_n_f32(0.0f), vdupq_n_f32(0.0f)};
+  float32x4_t sum3[4] = {vdupq_n_f32(0.0f), vdupq_n_f32(0.0f),
+                         vdupq_n_f32(0.0f), vdupq_n_f32(0.0f)};
+  for (int64_t i = 0; i < np; i += 16) {
+    for (int64_t j = 0; j < 4; ++j) {
+      const int64_t offset = i + j * 4;
+      const float32x4_t ay = vld1q_f32(y + offset);
+      sum0[j] = vfmaq_f32(sum0[j], vld1q_f32(row0 + offset), ay);
+      sum1[j] = vfmaq_f32(sum1[j], vld1q_f32(row1 + offset), ay);
+      sum2[j] = vfmaq_f32(sum2[j], vld1q_f32(row2 + offset), ay);
+      sum3[j] = vfmaq_f32(sum3[j], vld1q_f32(row3 + offset), ay);
+    }
+  }
+  sum0[0] = vaddq_f32(sum0[0], sum0[2]);
+  sum0[1] = vaddq_f32(sum0[1], sum0[3]);
+  sum0[0] = vaddq_f32(sum0[0], sum0[1]);
+  sum1[0] = vaddq_f32(sum1[0], sum1[2]);
+  sum1[1] = vaddq_f32(sum1[1], sum1[3]);
+  sum1[0] = vaddq_f32(sum1[0], sum1[1]);
+  sum2[0] = vaddq_f32(sum2[0], sum2[2]);
+  sum2[1] = vaddq_f32(sum2[1], sum2[3]);
+  sum2[0] = vaddq_f32(sum2[0], sum2[1]);
+  sum3[0] = vaddq_f32(sum3[0], sum3[2]);
+  sum3[1] = vaddq_f32(sum3[1], sum3[3]);
+  sum3[0] = vaddq_f32(sum3[0], sum3[1]);
+  out0 = vaddvq_f32(sum0[0]);
+  out1 = vaddvq_f32(sum1[0]);
+  out2 = vaddvq_f32(sum2[0]);
+  out3 = vaddvq_f32(sum3[0]);
+  for (int64_t i = np; i < count; ++i) {
+    out0 += row0[i] * y[i];
+    out1 += row1[i] * y[i];
+    out2 += row2[i] * y[i];
+    out3 += row3[i] * y[i];
+  }
+#endif
+}
+
 // f32 GEMV: one reference-order vec_dot per output row, mirroring how the
 // reference mul_mat walks src0 rows for a single RHS column.
 inline void execute_neon_mul_mat_f32_vector_unchecked(
@@ -6576,7 +7109,20 @@ inline void execute_neon_mul_mat_f32_vector_unchecked(
   const float *a = static_cast<const float *>(request.src0.data);
   const float *y = static_cast<const float *>(request.src1.data);
   float *dst = static_cast<float *>(request.dst.data);
-  for (uint64_t row = 0; row < m; ++row) {
+  uint64_t row = 0u;
+  for (; row + 4u <= m; row += 4u) {
+    dot_f32_f32_4rows_neon(static_cast<int64_t>(k),
+                           a + (row + 0u) * k,
+                           a + (row + 1u) * k,
+                           a + (row + 2u) * k,
+                           a + (row + 3u) * k,
+                           y,
+                           dst[row + 0u],
+                           dst[row + 1u],
+                           dst[row + 2u],
+                           dst[row + 3u]);
+  }
+  for (; row < m; ++row) {
     dst[row] = dot_f32_f32_row_neon(static_cast<int64_t>(k), a + row * k, y);
   }
 #endif
@@ -6879,6 +7425,27 @@ inline bool execute_neon_mul_mat(const event::op_mul_mat &request) noexcept {
       }
       if (src0_type == ::emel::kernel::detail::dtype_q4_k) {
         uint64_t i = 0u;
+        for (; i + 4u <= m; i += 4u) {
+          const auto *row0 = reinterpret_cast<
+              const ::emel::kernel::detail::quant::block_q4_k *>(
+              a + (i + 0u) * row_bytes);
+          const auto *row1 = reinterpret_cast<
+              const ::emel::kernel::detail::quant::block_q4_k *>(
+              a + (i + 1u) * row_bytes);
+          const auto *row2 = reinterpret_cast<
+              const ::emel::kernel::detail::quant::block_q4_k *>(
+              a + (i + 2u) * row_bytes);
+          const auto *row3 = reinterpret_cast<
+              const ::emel::kernel::detail::quant::block_q4_k *>(
+              a + (i + 3u) * row_bytes);
+          float out[4] = {};
+          dot_q4_k_q8_k_4rows_neon(row0, row1, row2, row3, q8_blocks.data(),
+                                   block_count, out);
+          c[(i + 0u) * n + j] = out[0];
+          c[(i + 1u) * n + j] = out[1];
+          c[(i + 2u) * n + j] = out[2];
+          c[(i + 3u) * n + j] = out[3];
+        }
         for (; i + 2u <= m; i += 2u) {
           const auto *row0 = reinterpret_cast<
               const ::emel::kernel::detail::quant::block_q4_k *>(
@@ -8218,11 +8785,33 @@ struct exec_simd_q4_vector_packed_q8_rhs_bl8_matrix_x8_op_mul_mat {
   }
 };
 
+struct exec_simd_q4_vector_q8_rhs_op_mul_mat {
+  void operator()(const ::emel::kernel::aarch64::event::dispatch_op_mul_mat &ev,
+                  context &ctx) const noexcept {
+    ::emel::kernel::aarch64::detail::
+        execute_neon_mul_mat_q4_vector_q8_rhs_unchecked(ev.request);
+    ++ctx.optimized_q4_dispatch_count;
+    ++ctx.optimized_q4_vector_dispatch_count;
+    detail::mark_done(ev, ctx);
+  }
+};
+
 struct exec_simd_q8_0_vector_op_mul_mat {
   void operator()(const ::emel::kernel::aarch64::event::dispatch_op_mul_mat &ev,
                   context &ctx) const noexcept {
     ::emel::kernel::aarch64::detail::execute_neon_mul_mat_q8_0_vector_unchecked(
         ev.request);
+    ++ctx.optimized_q8_0_dispatch_count;
+    ++ctx.optimized_q8_0_vector_dispatch_count;
+    detail::mark_done(ev, ctx);
+  }
+};
+
+struct exec_simd_q8_0_vector_q8_rhs_op_mul_mat {
+  void operator()(const ::emel::kernel::aarch64::event::dispatch_op_mul_mat &ev,
+                  context &ctx) const noexcept {
+    ::emel::kernel::aarch64::detail::
+        execute_neon_mul_mat_q8_0_vector_q8_rhs_unchecked(ev.request);
     ++ctx.optimized_q8_0_dispatch_count;
     ++ctx.optimized_q8_0_vector_dispatch_count;
     detail::mark_done(ev, ctx);
@@ -8351,6 +8940,17 @@ struct exec_simd_q6_vector_packed_op_mul_mat {
     ++ctx.optimized_q6_dispatch_count;
     ++ctx.optimized_q6_vector_dispatch_count;
     ++ctx.optimized_q6_vector_packed_dispatch_count;
+    detail::mark_done(ev, ctx);
+  }
+};
+
+struct exec_simd_q6_vector_q8_rhs_op_mul_mat {
+  void operator()(const ::emel::kernel::aarch64::event::dispatch_op_mul_mat &ev,
+                  context &ctx) const noexcept {
+    ::emel::kernel::aarch64::detail::
+        execute_neon_mul_mat_q6_vector_q8_rhs_unchecked(ev.request);
+    ++ctx.optimized_q6_dispatch_count;
+    ++ctx.optimized_q6_vector_dispatch_count;
     detail::mark_done(ev, ctx);
   }
 };
@@ -8553,6 +9153,8 @@ using exec_simd_op_mul_mat_q4_vector_packed_q8_rhs_bl8_matrix_x8_t =
     detail::exec_simd_q4_vector_packed_q8_rhs_bl8_matrix_x8_op_mul_mat;
 using exec_simd_op_mul_mat_q4_vector_packed_q8_rhs_bl8_matrix_x4_t =
     detail::exec_simd_q4_vector_packed_q8_rhs_bl8_matrix_x4_op_mul_mat;
+using exec_simd_op_mul_mat_q4_vector_q8_rhs_t =
+    detail::exec_simd_q4_vector_q8_rhs_op_mul_mat;
 using exec_simd_op_mul_mat_q5_0_vector_t =
     detail::exec_simd_q5_0_vector_op_mul_mat;
 using exec_simd_op_mul_mat_q4_0_vector_t =
@@ -8569,6 +9171,8 @@ using exec_simd_op_mul_mat_q8_0_packed_bl8_t =
     detail::exec_simd_q8_0_packed_bl8_op_mul_mat;
 using exec_simd_op_mul_mat_q8_0_vector_t =
     detail::exec_simd_q8_0_vector_op_mul_mat;
+using exec_simd_op_mul_mat_q8_0_vector_q8_rhs_t =
+    detail::exec_simd_q8_0_vector_q8_rhs_op_mul_mat;
 using exec_simd_op_mul_mat_f16_vector_t =
     detail::exec_simd_f16_vector_op_mul_mat;
 using exec_simd_op_mul_mat_f32_vector_t =
@@ -8577,6 +9181,8 @@ using exec_simd_op_conv_transpose_1d_f32_t =
     detail::exec_simd_f32_op_conv_transpose_1d;
 using exec_simd_op_mul_mat_q6_vector_packed_t =
     detail::exec_simd_q6_vector_packed_op_mul_mat;
+using exec_simd_op_mul_mat_q6_vector_q8_rhs_t =
+    detail::exec_simd_q6_vector_q8_rhs_op_mul_mat;
 using exec_simd_op_mul_mat_q6_vector_packed_q8_rhs_matrix_x4_t =
     detail::exec_simd_q6_vector_packed_q8_rhs_matrix_x4_op_mul_mat;
 using exec_simd_op_mul_mat_q6_vector_prepared_q8_rhs_i8mm_t =
@@ -8726,6 +9332,8 @@ inline constexpr exec_simd_op_mul_mat_q4_vector_packed_q8_rhs_bl8_matrix_x8_t
     exec_simd_op_mul_mat_q4_vector_packed_q8_rhs_bl8_matrix_x8{};
 inline constexpr exec_simd_op_mul_mat_q4_vector_packed_q8_rhs_bl8_matrix_x4_t
     exec_simd_op_mul_mat_q4_vector_packed_q8_rhs_bl8_matrix_x4{};
+inline constexpr exec_simd_op_mul_mat_q4_vector_q8_rhs_t
+    exec_simd_op_mul_mat_q4_vector_q8_rhs{};
 inline constexpr exec_simd_op_mul_mat_q5_0_vector_t
     exec_simd_op_mul_mat_q5_0_vector{};
 inline constexpr exec_simd_op_mul_mat_q4_0_vector_t
@@ -8742,6 +9350,8 @@ inline constexpr exec_simd_op_mul_mat_q8_0_packed_bl8_t
     exec_simd_op_mul_mat_q8_0_packed_bl8{};
 inline constexpr exec_simd_op_mul_mat_q8_0_vector_t
     exec_simd_op_mul_mat_q8_0_vector{};
+inline constexpr exec_simd_op_mul_mat_q8_0_vector_q8_rhs_t
+    exec_simd_op_mul_mat_q8_0_vector_q8_rhs{};
 inline constexpr exec_simd_op_mul_mat_f16_vector_t
     exec_simd_op_mul_mat_f16_vector{};
 inline constexpr exec_simd_op_mul_mat_f32_vector_t
@@ -8750,6 +9360,8 @@ inline constexpr exec_simd_op_conv_transpose_1d_f32_t
     exec_simd_op_conv_transpose_1d_f32{};
 inline constexpr exec_simd_op_mul_mat_q6_vector_packed_t
     exec_simd_op_mul_mat_q6_vector_packed{};
+inline constexpr exec_simd_op_mul_mat_q6_vector_q8_rhs_t
+    exec_simd_op_mul_mat_q6_vector_q8_rhs{};
 inline constexpr exec_simd_op_mul_mat_q6_vector_packed_q8_rhs_matrix_x4_t
     exec_simd_op_mul_mat_q6_vector_packed_q8_rhs_matrix_x4{};
 inline constexpr exec_simd_op_mul_mat_q6_vector_prepared_q8_rhs_i8mm_t

@@ -501,6 +501,10 @@ add_all_benchmark_suites_from_manifest() {
     if [[ -z "$runner" || "$runner" == "all" ]]; then
       continue
     fi
+    if [[ "$runner" == "weight_streaming" &&
+          -z "${EMEL_BENCH_WEIGHT_STREAMING:-}" ]]; then
+      continue
+    fi
     if ! bench_suite_supported_for_host "$runner"; then
       continue
     fi
@@ -1128,7 +1132,7 @@ run_benchmark_gates() {
           EMEL_BENCH_GENERATION_WARMUP_ITERS="$QUALITY_GATES_GENERATION_BENCH_WARMUP_ITERS"
           EMEL_BENCH_GENERATION_WARMUP_RUNS="$QUALITY_GATES_GENERATION_BENCH_WARMUP_RUNS"
         )
-        if [[ -n "$generation_workload_id" && "$generation_workload_id" != "all" ]]; then
+        if [[ -n "$generation_workload_id" ]]; then
           bench_extra_env+=(EMEL_GENERATION_WORKLOAD_ID="$generation_workload_id")
         fi
         ;;

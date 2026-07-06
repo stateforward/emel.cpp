@@ -1,0 +1,119 @@
+#pragma once
+
+#include <array>
+#include <cstddef>
+#include <functional>
+
+#include "emel/text/generator/matmul/context.hpp"
+#include "emel/text/generator/matmul/events.hpp"
+
+namespace emel::text::generator::matmul::action {
+
+struct effect_configure_kernel_kind {
+  void operator()(const event::configure_kernel_kind & ev, context & ctx) const noexcept {
+    ctx.kernel_kind = ev.kind;
+    ctx.kernel.set_kind(ctx.kernel_kind);
+    for (auto & lane_kernel : ctx.lane_kernels) {
+      lane_kernel.set_kind(ctx.kernel_kind);
+    }
+  }
+};
+
+struct effect_execute_serial {
+  void operator()(const event::execute_serial & ev, context & ctx) const noexcept {
+    ev.result = {};
+    ev.result.lane_count = 1u;
+    ev.result.all_submitted = true;
+    ev.result.joined = true;
+    ctx.kernel.set_kind(ctx.kernel_kind);
+    ev.result.lane_accepted[0] = ctx.kernel.process_event(ev.request);
+  }
+};
+
+struct effect_execute_parallel {
+  void operator()(const event::execute_parallel & ev, context & ctx) const noexcept {
+    ev.result = {};
+    std::array<detail::matmul_row_slice, k_matmul_lanes> slices = {};
+    std::array<emel::kernel::event::op_mul_mat, k_matmul_lanes> lane_events = {};
+    const uint64_t group_rows = detail::matmul_slice_group_rows(ev.request.src0.type);
+    const size_t lane_count =
+        detail::compute_matmul_row_slices(ev.request.src0.ne[1], group_rows, slices);
+    ev.result.lane_count = lane_count;
+
+    lane_pool::join_group group{};
+    bool all_submitted = true;
+    for (size_t lane = 1u; lane < lane_count; ++lane) {
+      lane_events[lane] =
+          detail::compute_sliced_mul_mat_event(ev.request, group_rows, slices[lane]);
+      auto & lane_kernel = ctx.lane_kernels[lane];
+      lane_kernel.set_kind(ctx.kernel_kind);
+      const auto & lane_ev = lane_events[lane];
+      auto & ok_flag = ev.result.lane_accepted[lane];
+      const bool submitted = ctx.parallel_matmul_lanes->try_submit(
+          group, [&lane_kernel, &lane_ev, &ok_flag]() noexcept {
+        ok_flag = lane_kernel.process_event(lane_ev);
+      });
+      all_submitted = all_submitted && submitted;
+    }
+
+    lane_events[0] =
+        detail::compute_sliced_mul_mat_event(ev.request, group_rows, slices[0]);
+    ctx.lane_kernels[0].set_kind(ctx.kernel_kind);
+    ev.result.lane_accepted[0] = ctx.lane_kernels[0].process_event(lane_events[0]);
+    ev.result.all_submitted = all_submitted;
+    ev.result.joined = group.wait();
+  }
+};
+
+struct effect_accept_serial_execution {
+  void operator()(const event::execute_serial & ev, context &) const noexcept {
+    ev.accepted = true;
+  }
+};
+
+struct effect_accept_parallel_execution {
+  void operator()(const event::execute_parallel & ev, context &) const noexcept {
+    ev.accepted = true;
+  }
+};
+
+struct effect_reject_serial_execution {
+  void operator()(const event::execute_serial & ev, context &) const noexcept {
+    ev.accepted = false;
+  }
+};
+
+struct effect_reject_parallel_execution {
+  void operator()(const event::execute_parallel & ev, context &) const noexcept {
+    ev.accepted = false;
+  }
+};
+
+struct effect_on_unexpected {
+  template <class event_type>
+  void operator()(const event_type & ev, context &) const noexcept {
+    if constexpr (requires { ev.accepted; }) {
+      ev.accepted = false;
+    }
+  }
+};
+
+template <class counter_fn>
+uint64_t compute_kernel_counter_total(const context & ctx, counter_fn && counter) noexcept {
+  uint64_t total = std::invoke(counter, ctx.kernel);
+  for (const auto & lane_kernel : ctx.lane_kernels) {
+    total += std::invoke(counter, lane_kernel);
+  }
+  return total;
+}
+
+inline constexpr effect_configure_kernel_kind effect_configure_kernel_kind{};
+inline constexpr effect_execute_serial effect_execute_serial{};
+inline constexpr effect_execute_parallel effect_execute_parallel{};
+inline constexpr effect_accept_serial_execution effect_accept_serial_execution{};
+inline constexpr effect_accept_parallel_execution effect_accept_parallel_execution{};
+inline constexpr effect_reject_serial_execution effect_reject_serial_execution{};
+inline constexpr effect_reject_parallel_execution effect_reject_parallel_execution{};
+inline constexpr effect_on_unexpected effect_on_unexpected{};
+
+}  // namespace emel::text::generator::matmul::action

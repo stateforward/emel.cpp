@@ -39,6 +39,11 @@ enum class selection_mode : uint8_t {
   preselected_argmax,
 };
 
+enum class benchmark_lane : uint8_t {
+  single,
+  multithreaded,
+};
+
 enum class prefill_compute_contract : uint8_t {
   none = 0,
   flash_materialized_scalar = 1,
@@ -222,6 +227,11 @@ struct capture_diagnostics {
     : out(out_ref) {}
 
   emel::text::generator::diagnostics & out;
+};
+
+struct configure_benchmark_lane {
+  emel::text::generator::benchmark_lane lane =
+      emel::text::generator::benchmark_lane::multithreaded;
 };
 
 struct capture_graph_lifecycle {

@@ -120,7 +120,7 @@ TEST_CASE("graph_processor_rejects_invalid_payload") {
   emel::graph::processor::sm machine{};
   int32_t error = static_cast<int32_t>(emel::error::cast(emel::graph::processor::error::none));
 
-  CHECK_FALSE(machine.process_event(emel::graph::processor::event::execute{
+  CHECK(machine.process_event(emel::graph::processor::event::execute{
     .step_index = -1,
     .step_size = 1,
     .kv_tokens = 0,
@@ -172,7 +172,7 @@ TEST_CASE("graph_processor_propagates_backend_failure") {
   emel::graph::processor::sm machine{};
   int32_t error = static_cast<int32_t>(emel::error::cast(emel::graph::processor::error::none));
 
-  CHECK_FALSE(machine.process_event(emel::graph::processor::event::execute{
+  CHECK(machine.process_event(emel::graph::processor::event::execute{
     .step_index = 0,
     .step_size = 1,
     .kv_tokens = 1,

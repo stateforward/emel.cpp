@@ -5,6 +5,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstring>
+#include <exception>
 #include <functional>
 #include <limits>
 #include <memory>
@@ -25,6 +26,7 @@
 #include "emel/model/llama/detail.hpp"
 #include "emel/model/loader/errors.hpp"
 #include "emel/model/tensor/window/sm.hpp"
+#include "emel/text/generator/matmul/sm.hpp"
 
 namespace emel::text::generator::detail {
 
@@ -91,18 +93,16 @@ struct block_weights {
   packed_matrix_binding feed_forward_up_packed = {};
 };
 
-// View-sliced parallel matmul lanes: one kernel actor per pool worker. A
-// parallel dispatch forks one logical matmul into per-lane row-slice events
-// and joins before the enclosing action returns, so no work escapes the RTC
-// boundary and no lane actor is entered concurrently.
-constexpr size_t k_matmul_lanes = 8;
-using matmul_lane_pool = emel::policy::thread_pool_scheduler<k_matmul_lanes, 16u, 128u>;
-using matmul_lane_scheduler = emel::policy::thread_pool_scheduler_ref<matmul_lane_pool>;
-
-enum class matmul_lane_mode : uint8_t {
-  serial = 0,
-  parallel = 1,
-};
+inline constexpr size_t k_matmul_lanes =
+    emel::text::generator::matmul::k_matmul_lanes;
+inline constexpr size_t k_matmul_worker_lanes =
+    emel::text::generator::matmul::k_matmul_worker_lanes;
+using matmul_lane_pool = emel::text::generator::matmul::lane_pool;
+using matmul_lane_mode = emel::text::generator::matmul::lane_mode;
+using matmul_row_slice = emel::text::generator::matmul::detail::matmul_row_slice;
+using emel::text::generator::matmul::detail::compute_matmul_row_slices;
+using emel::text::generator::matmul::detail::compute_sliced_mul_mat_event;
+using emel::text::generator::matmul::detail::matmul_slice_group_rows;
 
 // Weight residency mode for the layer loop: resident consumes blocks[] views
 // as prepared; streamed acquires each layer's slot from the tensor window
@@ -160,11 +160,8 @@ struct native_backend {
   emel::model::llama::detail::step_plan prefill_plan = {};
   emel::model::llama::detail::step_plan decode_plan = {};
   emel::kernel::sm kernel = {};
-  // Parallel matmul lane actors and their pool. Worker threads are one-time
-  // prepare() construction (in-place, no heap); slice dispatch reuses these
-  // actors and allocates nothing.
-  std::array<emel::kernel::sm, k_matmul_lanes> lane_kernels = {};
-  std::optional<matmul_lane_pool> lane_pool = {};
+  emel::text::generator::matmul::sm * matmul_actor = nullptr;
+  bool parallel_lanes_enabled = true;
   emel::kernel::kernel_kind kernel_kind = emel::kernel::kernel_kind::x86_64;
   uint64_t kernel_dispatch_calls = 0;
   uint64_t native_q8_0_dispatch_calls = 0;
@@ -2262,120 +2259,14 @@ inline bool valid_matmul_vector_shape(const tensor_matrix & matrix,
       static_cast<size_t>(matrix.rows) == output.size();
 }
 
-struct matmul_row_slice {
-  int32_t row_begin = 0;
-  int32_t row_count = 0;
-};
-
-// Row-group granularity for view slicing: packed interleaved dtypes store
-// multiple logical rows per storage group, so slice boundaries must land on
-// group multiples; plain row-major dtypes slice on any row boundary.
-inline uint64_t matmul_slice_group_rows(const emel::kernel::event::dtype type) noexcept {
-  const uint8_t code = emel::kernel::detail::dtype_code(type);
-  const uint64_t x8_group =
-      static_cast<uint64_t>(code == emel::kernel::detail::dtype_q4_k_x8_bl4 ||
-                            code == emel::kernel::detail::dtype_q4_k_x8_bl8 ||
-                            code == emel::kernel::detail::dtype_q6_k_x8 ||
-                            code == emel::kernel::detail::dtype_q6_k_x8_q8_prepared ||
-                            code == emel::kernel::detail::dtype_q6_k_x8_q8_argmax_prepared) *
-      emel::kernel::detail::quant::Q4_K_X8_ROWS;
-  const uint64_t x4_group =
-      static_cast<uint64_t>(code == emel::kernel::detail::dtype_q8_0_x4_bl4 ||
-                            code == emel::kernel::detail::dtype_q8_0_x4_bl8) *
-      emel::kernel::detail::quant::Q8_0_X4_ROWS;
-  return std::max<uint64_t>(x8_group + x4_group, 1u);
-}
-
-// Partition weight rows into at most k_matmul_lanes contiguous group-aligned
-// slices. Pure bounded partition arithmetic; a ragged tail (rows not a group
-// multiple) lands in the final slice, matching the padded storage group the
-// packed formats already carry.
-inline size_t compute_matmul_row_slices(
-    const uint64_t rows,
-    const uint64_t group_rows,
-    std::array<matmul_row_slice, k_matmul_lanes> & slices) noexcept {
-  const uint64_t groups = (rows + group_rows - 1u) / group_rows;
-  const uint64_t lane_count = std::min<uint64_t>(k_matmul_lanes, std::max<uint64_t>(groups, 1u));
-  const uint64_t groups_per_lane = groups / lane_count;
-  const uint64_t extra_groups = groups % lane_count;
-  uint64_t begin_group = 0u;
-  for (uint64_t lane = 0u; lane < lane_count; ++lane) {
-    const uint64_t lane_groups = groups_per_lane + static_cast<uint64_t>(lane < extra_groups);
-    const uint64_t begin_row = begin_group * group_rows;
-    const uint64_t end_row = std::min(rows, (begin_group + lane_groups) * group_rows);
-    slices[lane].row_begin = static_cast<int32_t>(begin_row);
-    slices[lane].row_count = static_cast<int32_t>(end_row - begin_row);
-    begin_group += lane_groups;
-  }
-  return static_cast<size_t>(lane_count);
-}
-
-// Derive a slice event from a full mul_mat event: sliced src0/dst views over
-// a contiguous group-aligned row range, shared src1 input. The event remains
-// a complete work description; lane kernels never learn about slicing.
-inline emel::kernel::event::op_mul_mat compute_sliced_mul_mat_event(
-    const emel::kernel::event::op_mul_mat & ev,
-    const uint64_t group_rows,
-    const matmul_row_slice slice) noexcept {
-  emel::kernel::event::op_mul_mat sliced = ev;
-  const uint64_t begin = static_cast<uint64_t>(slice.row_begin);
-  const uint64_t count = static_cast<uint64_t>(slice.row_count);
-  const uint64_t slice_groups = (count + group_rows - 1u) / group_rows;
-  sliced.src0.data =
-      static_cast<const uint8_t *>(ev.src0.data) + (begin / group_rows) * ev.src0.nb[1];
-  sliced.src0.ne[1] = count;
-  sliced.src0.nb[2] = ev.src0.nb[1] * slice_groups;
-  sliced.src0.nb[3] = sliced.src0.nb[2];
-  sliced.dst.data = static_cast<uint8_t *>(ev.dst.data) + begin * ev.dst.nb[1];
-  sliced.dst.ne[1] = count;
-  sliced.dst.nb[2] = ev.dst.nb[1] * count;
-  sliced.dst.nb[3] = sliced.dst.nb[2];
-  return sliced;
-}
-
-// Fork/join slice dispatch across the lane kernel actors. The caller computes
-// the first slice while pool workers compute the rest; every slice joins
-// before this helper returns, so no work escapes the RTC boundary. Slices
-// write disjoint dst rows and reorder no reductions, so the output is
-// bit-identical to the serial dispatch.
 inline bool compute_mul_mat_sliced_parallel(
     native_backend & backend,
     const emel::kernel::event::op_mul_mat & ev) noexcept {
-  if (!backend.lane_pool.has_value() || ev.src0.ne[1] == 0u) {
-    return false;
-  }
-
-  std::array<matmul_row_slice, k_matmul_lanes> slices = {};
-  std::array<emel::kernel::event::op_mul_mat, k_matmul_lanes> lane_events = {};
-  std::array<bool, k_matmul_lanes> lane_ok = {};
-  const uint64_t group_rows = matmul_slice_group_rows(ev.src0.type);
-  const size_t lane_count = compute_matmul_row_slices(ev.src0.ne[1], group_rows, slices);
-
-  matmul_lane_scheduler scheduler{*backend.lane_pool};
-  matmul_lane_scheduler::join_group group{};
-  for (size_t lane = 1u; lane < lane_count; ++lane) {
-    lane_events[lane] = compute_sliced_mul_mat_event(ev, group_rows, slices[lane]);
-    auto & lane_kernel = backend.lane_kernels[lane];
-    lane_kernel.set_kind(backend.kernel_kind);
-    const auto & lane_ev = lane_events[lane];
-    auto & ok_flag = lane_ok[lane];
-    // Total fork: submit_or_run executes the slice exactly once inside the
-    // join window (worker or calling thread - the scheduler's internal
-    // capacity handling, never a behavior choice).
-    scheduler.submit_or_run(group, [&lane_kernel, &lane_ev, &ok_flag]() noexcept {
-      ok_flag = lane_kernel.process_event(lane_ev);
-    });
-  }
-  lane_events[0] = compute_sliced_mul_mat_event(ev, group_rows, slices[0]);
-  backend.lane_kernels[0].set_kind(backend.kernel_kind);
-  lane_ok[0] = backend.lane_kernels[0].process_event(lane_events[0]);
-  (void)group.wait();
-
-  bool all_ok = true;
-  for (size_t lane = 0u; lane < lane_count; ++lane) {
-    all_ok = all_ok && lane_ok[lane];
-  }
-  return all_ok;
+  bool accepted = false;
+  emel::text::generator::matmul::event::dispatch_result result = {};
+  const emel::text::generator::matmul::event::execute_parallel run{ev, result, accepted};
+  const bool dispatched = backend.matmul_actor->process_event(run);
+  return dispatched && accepted;
 }
 
 // Compile-time lane-mode seam for mul_mat dispatch. Route guards choose the
@@ -2386,8 +2277,11 @@ inline bool compute_mul_mat(native_backend & backend,
   if constexpr (lanes == matmul_lane_mode::parallel) {
     return compute_mul_mat_sliced_parallel(backend, ev);
   } else {
-    backend.kernel.set_kind(backend.kernel_kind);
-    return backend.kernel.process_event(ev);
+    bool accepted = false;
+    emel::text::generator::matmul::event::dispatch_result result = {};
+    const emel::text::generator::matmul::event::execute_serial run{ev, result, accepted};
+    const bool dispatched = backend.matmul_actor->process_event(run);
+    return dispatched && accepted;
   }
 }
 
@@ -2397,8 +2291,8 @@ template <class counter_fn>
 inline uint64_t compute_kernel_counter_total(const native_backend & backend,
                                              counter_fn && counter) noexcept {
   uint64_t total = std::invoke(counter, backend.kernel);
-  for (const auto & lane_kernel : backend.lane_kernels) {
-    total += std::invoke(counter, lane_kernel);
+  if (backend.matmul_actor != nullptr) {
+    total += backend.matmul_actor->kernel_counter_total(counter);
   }
   return total;
 }
@@ -5259,11 +5153,15 @@ inline bool run_decode_preselected_argmax(
 inline emel::error::type prepare(
     native_backend & backend,
     const emel::model::data & model_data,
+    emel::text::generator::matmul::sm & matmul_actor,
     const int32_t kv_block_tokens = emel::memory::view::DEFAULT_BLOCK_TOKENS) noexcept {
   std::destroy_at(std::addressof(backend));
   std::construct_at(std::addressof(backend));
+  backend.matmul_actor = &matmul_actor;
   backend.kernel_kind = detect_host_kernel_kind();
   backend.kernel.set_kind(backend.kernel_kind);
+  backend.matmul_actor->process_event(
+      emel::text::generator::matmul::event::configure_kernel_kind{backend.kernel_kind});
 
   if (emel::model::llama::detail::build_execution_view(model_data, backend.execution) !=
           emel::error::cast(emel::model::loader::error::none) ||
@@ -5586,13 +5484,6 @@ inline emel::error::type prepare(
   backend.ffn_hidden_chunk4.resize(backend.gate_chunk4.size());
   backend.ffn_hidden_chunk8.resize(backend.gate_chunk8.size());
   build_lifecycle(backend);
-
-  for (auto & lane_kernel : backend.lane_kernels) {
-    lane_kernel.set_kind(backend.kernel_kind);
-  }
-  // One-time worker-thread construction for the parallel matmul lanes; the
-  // pool is engaged here so no thread creation ever happens during dispatch.
-  backend.lane_pool.emplace();
 
   return emel::error::cast(emel::model::loader::error::none);
 }

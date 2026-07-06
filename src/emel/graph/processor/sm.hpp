@@ -241,15 +241,13 @@ struct sm : public emel::co_sm<model, action::context, inline_co_policy> {
   using base_type::base_type;
 
   bool process_event(const event::execute & ev) {
-    return process_event_async(ev).result();
+    event::execute_ctx ctx{};
+    event::execute_step evt{ev, ctx};
+    return base_type::process_event(evt);
   }
 
   emel::bool_task process_event_async(const event::execute & ev) {
-    event::execute_ctx ctx{};
-    event::execute_step evt{ev, ctx};
-    const bool accepted = base_type::process_event_async(evt).result();
-    return emel::bool_task::from_value(
-        accepted && ctx.err == emel::error::cast(error::none));
+    return emel::bool_task::from_value(process_event(ev));
   }
 };
 

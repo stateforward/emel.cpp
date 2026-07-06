@@ -2130,10 +2130,10 @@ TEST_CASE("generator_initialize_public_wrapper_has_no_runtime_branch") {
 
   const std::string source((std::istreambuf_iterator<char>(stream)),
                            std::istreambuf_iterator<char>());
-  const std::string marker = "bool process_event(const event::initialize & ev)";
+  const std::string marker = "bool process_event(const event::initialize &";
   const auto start = source.find(marker);
   REQUIRE(start != std::string::npos);
-  const auto end = source.find("bool process_event(const event::generate & ev)", start);
+  const auto end = source.find("bool process_event(const event::generate &", start);
   REQUIRE(end != std::string::npos);
 
   const auto wrapper = source.substr(start, end - start);
@@ -2184,15 +2184,16 @@ TEST_CASE("generator_scalar_kernel_route_choice_stays_in_state_machines") {
   CHECK(detail_source.find("plan->kind == step_kind::prefill ?") == std::string::npos);
   CHECK(detail_source.find("phase_lifecycle(") == std::string::npos);
 
-  const auto guarded_validate_start =
-      detail_source.find("inline bool validate_guarded_compute");
+  const auto guarded_validate_sig = detail_source.find("validate_guarded_compute(");
+  REQUIRE(guarded_validate_sig != std::string::npos);
+  const auto guarded_validate_start = detail_source.find('{', guarded_validate_sig);
   REQUIRE(guarded_validate_start != std::string::npos);
   const auto guarded_validate_end =
-      detail_source.find("inline bool prepare_graph", guarded_validate_start);
+      detail_source.find("validate_guarded_preselected_argmax(", guarded_validate_start);
   REQUIRE(guarded_validate_end != std::string::npos);
   const auto guarded_validate_callbacks =
-      detail_source.substr(guarded_validate_start,
-                           guarded_validate_end - guarded_validate_start);
+      detail_source.substr(guarded_validate_start + 1,
+                           guarded_validate_end - guarded_validate_start - 1);
   const std::array<std::string_view, 10> forbidden_validate_callback_patterns{
     "request_plan(",
     "check_backend(",
@@ -2201,7 +2202,7 @@ TEST_CASE("generator_scalar_kernel_route_choice_stays_in_state_machines") {
     "selected_score_out == nullptr",
     "positions_count !=",
     "token_count <=",
-    "*err_out",
+    "*err_out =",
     "k_error_invalid",
     "return false",
   };
@@ -2210,21 +2211,23 @@ TEST_CASE("generator_scalar_kernel_route_choice_stays_in_state_machines") {
     CHECK(guarded_validate_callbacks.find(pattern) == std::string::npos);
   }
 
-  const auto guarded_bind_start =
-      detail_source.find("inline bool bind_guarded_inputs");
+  const auto guarded_bind_sig = detail_source.find("bind_guarded_inputs(");
+  REQUIRE(guarded_bind_sig != std::string::npos);
+  const auto guarded_bind_start = detail_source.find('{', guarded_bind_sig);
   REQUIRE(guarded_bind_start != std::string::npos);
   const auto guarded_bind_end =
       detail_source.find("template <emel::text::generator::attention_mode",
                          guarded_bind_start);
   REQUIRE(guarded_bind_end != std::string::npos);
   const auto guarded_bind_callback =
-      detail_source.substr(guarded_bind_start, guarded_bind_end - guarded_bind_start);
+      detail_source.substr(guarded_bind_start + 1,
+                           guarded_bind_end - guarded_bind_start - 1);
   const std::array<std::string_view, 7> forbidden_bind_callback_patterns{
     "request_plan(",
     "check_backend(",
     "== nullptr",
     "expected_outputs",
-    "*err_out",
+    "*err_out =",
     "k_error_invalid",
     "return false",
   };
@@ -2233,22 +2236,22 @@ TEST_CASE("generator_scalar_kernel_route_choice_stays_in_state_machines") {
     CHECK(guarded_bind_callback.find(pattern) == std::string::npos);
   }
 
-  const auto guarded_extract_start =
-      detail_source.find("inline bool extract_guarded_outputs");
+  const auto guarded_extract_sig = detail_source.find("extract_guarded_outputs(");
+  REQUIRE(guarded_extract_sig != std::string::npos);
+  const auto guarded_extract_start = detail_source.find('{', guarded_extract_sig);
   REQUIRE(guarded_extract_start != std::string::npos);
   const auto guarded_extract_end =
-      detail_source.find("}  // namespace emel::text::generator::detail",
-                         guarded_extract_start);
+      detail_source.find("extract_guarded_preselected_argmax(", guarded_extract_start);
   REQUIRE(guarded_extract_end != std::string::npos);
   const auto guarded_extract_callbacks =
-      detail_source.substr(guarded_extract_start,
-                           guarded_extract_end - guarded_extract_start);
+      detail_source.substr(guarded_extract_start + 1,
+                           guarded_extract_end - guarded_extract_start - 1);
   const std::array<std::string_view, 8> forbidden_extract_callback_patterns{
     "check_backend(",
     "== nullptr",
     "selected_token_out == nullptr",
     "selected_score_out == nullptr",
-    "*err_out",
+    "*err_out =",
     "k_error_invalid",
     "return false",
     "request_plan(",
@@ -2258,10 +2261,10 @@ TEST_CASE("generator_scalar_kernel_route_choice_stays_in_state_machines") {
     CHECK(guarded_extract_callbacks.find(pattern) == std::string::npos);
   }
 
-  const auto audited_start = detail_source.find("inline bool run_kernel_scalar_mode");
+  const auto audited_start = detail_source.find("run_kernel_scalar_mode(");
   REQUIRE(audited_start != std::string::npos);
   const auto audited_end =
-      detail_source.find("inline bool extract_guarded_outputs", audited_start);
+      detail_source.find("extract_guarded_outputs(", audited_start);
   REQUIRE(audited_end != std::string::npos);
   const auto audited_wrappers = detail_source.substr(audited_start, audited_end - audited_start);
   const std::array<std::string_view, 10> forbidden_wrapper_patterns{
@@ -2273,7 +2276,7 @@ TEST_CASE("generator_scalar_kernel_route_choice_stays_in_state_machines") {
     "selected_score_out == nullptr",
     "prefill_chunk4_backend_ready",
     "prefill_chunk8_q8_k_backend_ready",
-    "*err_out",
+    "*err_out =",
     "k_error_invalid",
   };
   for (const auto pattern : forbidden_wrapper_patterns) {

@@ -192,10 +192,14 @@ TEST_CASE("determinism: row-sliced matmul bitwise invariant across slice "
 TEST_CASE("determinism: parallel fork/join dispatch bitwise repeatable and "
           "serial-identical") {
   const matmul_case fixture(dtype::q8_0, 64, 61, 1);
+  emel::text::generator::matmul::lane_pool parallel_matmul_lanes = {};
+  emel::text::generator::matmul::sm matmul_actor{parallel_matmul_lanes};
   gen_detail::native_backend backend = {};
   backend.kernel_kind = gen_detail::detect_host_kernel_kind();
   backend.kernel.set_kind(backend.kernel_kind);
-  backend.lane_pool.emplace();
+  backend.matmul_actor = &matmul_actor;
+  matmul_actor.process_event(
+      emel::text::generator::matmul::event::configure_kernel_kind{backend.kernel_kind});
 
   std::vector<float> serial_output = {};
   const auto serial_ev = fixture.event_for(serial_output);

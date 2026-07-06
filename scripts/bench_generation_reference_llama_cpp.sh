@@ -6,6 +6,8 @@ TOOLS_DIR="$ROOT_DIR/tools/bench"
 BUILD_DIR="${EMEL_GENERATION_REFERENCE_BUILD_DIR:-$ROOT_DIR/build/bench_tools_ninja}"
 BUILD_ONLY=false
 RUN_ONLY=false
+REFERENCE_THREADS=""
+BENCHMARK_LANE_SELECTOR="${EMEL_BENCH_GENERATION_LANE:-${EMEL_BENCH_GENERATION_LANES:-both}}"
 USE_ZIG=true
 case "${EMEL_GENERATION_REFERENCE_COMPILER_MODE:-}" in
   "")
@@ -24,7 +26,7 @@ esac
 
 usage() {
   cat <<'USAGE'
-usage: scripts/bench_generation_reference_llama_cpp.sh [--build-only] [--run-only] [--zig|--system]
+usage: scripts/bench_generation_reference_llama_cpp.sh [--build-only] [--run-only] [--reference-threads N] [--benchmark-lane single|multithreaded|both] [--zig|--system]
 
 Configures the maintained bench build and runs the built-in llama.cpp reference
 generation lane through `bench_runner --mode=reference`.
@@ -32,20 +34,53 @@ generation lane through `bench_runner --mode=reference`.
 Environment:
   EMEL_GENERATION_REFERENCE_BUILD_DIR  override build directory
   EMEL_GENERATION_REFERENCE_COMPILER_MODE zig or system default compiler mode
+  EMEL_BENCH_GENERATION_LANES          single, multithreaded, or both (default both)
+  EMEL_BENCH_GENERATION_REFERENCE_THREADS multithreaded llama.cpp generation threads
   BENCH_REF_OVERRIDE                   override fetched llama.cpp ref
   EMEL_BENCH_SUITE                     defaults to generation for this wrapper
 USAGE
 }
 
-for arg in "$@"; do
-  case "$arg" in
-    --build-only) BUILD_ONLY=true ;;
-    --run-only) RUN_ONLY=true ;;
-    --zig) USE_ZIG=true ;;
-    --system) USE_ZIG=false ;;
-    -h|--help) usage; exit 0 ;;
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --build-only)
+      BUILD_ONLY=true
+      shift
+      ;;
+    --run-only)
+      RUN_ONLY=true
+      shift
+      ;;
+    --reference-threads)
+      REFERENCE_THREADS="${2:-}"
+      shift 2
+      ;;
+    --benchmark-lane)
+      BENCHMARK_LANE_SELECTOR="${2:-}"
+      shift 2
+      ;;
+    --single-only)
+      BENCHMARK_LANE_SELECTOR="single"
+      shift
+      ;;
+    --multithreaded-only)
+      BENCHMARK_LANE_SELECTOR="multithreaded"
+      shift
+      ;;
+    --zig)
+      USE_ZIG=true
+      shift
+      ;;
+    --system)
+      USE_ZIG=false
+      shift
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
     *)
-      echo "error: unknown argument '$arg'" >&2
+      echo "error: unknown argument '$1'" >&2
       usage
       exit 1
       ;;
@@ -56,6 +91,30 @@ if $BUILD_ONLY && $RUN_ONLY; then
   echo "error: --build-only and --run-only are mutually exclusive" >&2
   exit 1
 fi
+
+if [[ -n "$REFERENCE_THREADS" ]]; then
+  if [[ ! "$REFERENCE_THREADS" =~ ^[1-9][0-9]*$ ]]; then
+    echo "error: --reference-threads must be a positive integer" >&2
+    exit 1
+  fi
+fi
+
+selected_lanes=()
+case "$BENCHMARK_LANE_SELECTOR" in
+  both|single,multithreaded|multithreaded,single)
+    selected_lanes=(single multithreaded)
+    ;;
+  single)
+    selected_lanes=(single)
+    ;;
+  multithreaded)
+    selected_lanes=(multithreaded)
+    ;;
+  *)
+    echo "error: --benchmark-lane/EMEL_BENCH_GENERATION_LANES must be single, multithreaded, or both" >&2
+    exit 1
+    ;;
+esac
 
 if ! $RUN_ONLY; then
   for tool in cmake ninja git; do
@@ -134,4 +193,15 @@ if $BUILD_ONLY; then
 fi
 
 export EMEL_BENCH_SUITE="${EMEL_BENCH_SUITE:-generation}"
-"$BUILD_DIR/bench_runner" --mode=reference
+for benchmark_lane in "${selected_lanes[@]}"; do
+  lane_reference_threads="$REFERENCE_THREADS"
+  if [[ "$benchmark_lane" == "single" ]]; then
+    lane_reference_threads="1"
+  elif [[ -z "$lane_reference_threads" ]]; then
+    lane_reference_threads="${EMEL_BENCH_GENERATION_REFERENCE_THREADS:-${EMEL_BENCH_REFERENCE_THREADS:-8}}"
+  fi
+
+  EMEL_BENCH_GENERATION_LANE="$benchmark_lane" \
+    EMEL_BENCH_GENERATION_REFERENCE_THREADS="$lane_reference_threads" \
+    "$BUILD_DIR/bench_runner" --mode=reference
+done

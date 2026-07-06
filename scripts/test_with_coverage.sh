@@ -472,6 +472,8 @@ for path in sorted(changed):
         record = records.get(line_number)
         if record is None:
             continue
+        if record.get("gcovr/excluded"):
+            continue
         line_total += 1
         if int(record.get("count", 0)) > 0:
             line_covered += 1

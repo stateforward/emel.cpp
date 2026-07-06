@@ -1,7 +1,7 @@
 # ref=c5a3bc39b1b0fe56954c6adb99e89b25d5e7b9cb
 # toolchain=/opt/homebrew/bin/zig
-# benchmark_config: iterations=100 runs=3 sample_policy=median warmup_iterations=10 warmup_runs=1 generation_iterations=1 generation_runs=3 generation_warmup_iterations=0 generation_warmup_runs=0
-# snapshot_provenance: suite-scoped arm64 refresh; preserved rows carry local comments.
+# benchmark_config: iterations=100 runs=3 sample_policy=median warmup_iterations=10 warmup_runs=1 generation_iterations=1 generation_runs=1 generation_warmup_iterations=0 generation_warmup_runs=0
+# snapshot_provenance: suite-scoped threaded CPU refresh; preserved rows carry local comments.
 batch/planner_equal ns_per_op=1657.920 iter=100 runs=3
 batch/planner_seq ns_per_op=1930.410 iter=100 runs=3
 batch/planner_simple ns_per_op=653.330 iter=100 runs=3
@@ -15,7 +15,7 @@ speech_codec_mimi/encode_frame_tiny ns_per_op=1504101.670 iter=100 runs=3
 speech_codec_mimi/roundtrip_frame_tiny ns_per_op=3127676.660 iter=100 runs=3
 gbnf/rule_parser_basic ns_per_op=549.580 iter=100 runs=3
 gbnf/rule_parser_complex ns_per_op=3755.000 iter=100 runs=3
-generation/preloaded_request/lfm2_5_1_2b_thinking_q4_k_m_prompt_hello_max_tokens_1 ns_per_op=383241417.000 iter=1 runs=3
+generation/preloaded_request/lfm2_5_1_2b_thinking_q4_k_m_prompt_hello_max_tokens_1 ns_per_op=386856000.000 iter=1 runs=1
 kernel/aarch64/op_add ns_per_op=127.090 iter=100 runs=3
 kernel/aarch64/op_cos ns_per_op=1932.500 iter=100 runs=3
 kernel/aarch64/op_div ns_per_op=126.250 iter=100 runs=3
@@ -88,7 +88,7 @@ tokenizer/preprocessor_ugm_long ns_per_op=4700.410 iter=100 runs=3
 tokenizer/preprocessor_ugm_short ns_per_op=2579.590 iter=100 runs=3
 tokenizer/preprocessor_wpm_long ns_per_op=5065.410 iter=100 runs=3
 tokenizer/preprocessor_wpm_short ns_per_op=3259.590 iter=100 runs=3
-# preserved_x86_64: source=previous_snapshot reason=arm64_refresh_cannot_rerun_x86_64 host=x86_64 toolchain=/shared/zig/zig
+# preserved_x86_64: source=previous_snapshot reason=current_host_cannot_rerun_x86_64 host=x86_64 toolchain=/shared/zig/zig
 kernel/x86_64/op_add ns_per_op=122.000 iter=100 runs=3
 kernel/x86_64/op_cos ns_per_op=1926.490 iter=100 runs=3
 kernel/x86_64/op_div ns_per_op=118.500 iter=100 runs=3
@@ -130,9 +130,13 @@ decode_wavefront/gemv_batch8 ns_per_op=10245.420 iter=100 runs=3
 decode_wavefront/ggml_batch1 ns_per_op=4695.840 iter=100 runs=3
 decode_wavefront/ggml_batch4 ns_per_op=7364.160 iter=100 runs=3
 decode_wavefront/ggml_batch8 ns_per_op=9325.000 iter=100 runs=3
-generation/preloaded_request/lfm2_5_1_2b_thinking_q4_k_m_prompt_hello_max_tokens_10 ns_per_op=445808834.000 iter=1 runs=3
-generation/preloaded_request/lfm2_5_1_2b_thinking_q4_k_m_prompt_hello_max_tokens_100 ns_per_op=1354401208.000 iter=1 runs=3
-generation/preloaded_request/lfm2_5_1_2b_thinking_q4_k_m_prompt_hello_max_tokens_1000 ns_per_op=11891108333.000 iter=1 runs=3
-generation/preloaded_request/lfm2_5_1_2b_thinking_q4_k_m_prompt_hello_max_tokens_1_single_lane ns_per_op=384225542.000 iter=1 runs=3
-generation/preloaded_request/lfm2_5_230m_q8_0_prompt_hello_max_tokens_1 ns_per_op=21242625.000 iter=1 runs=3
-generation/preloaded_request/lfm2_5_230m_q8_0_prompt_hello_max_tokens_100 ns_per_op=281314875.000 iter=1 runs=3
+generation/preloaded_request/lfm2_5_1_2b_thinking_q4_k_m_prompt_hello_max_tokens_10 ns_per_op=478452000.000 iter=1 runs=1
+generation/preloaded_request/lfm2_5_1_2b_thinking_q4_k_m_prompt_hello_max_tokens_100 ns_per_op=1334829458.000 iter=1 runs=1
+generation/preloaded_request/lfm2_5_1_2b_thinking_q4_k_m_prompt_hello_max_tokens_1000 ns_per_op=11878951250.000 iter=1 runs=1
+generation/preloaded_request/lfm2_5_1_2b_thinking_q4_k_m_prompt_hello_max_tokens_1_single_lane ns_per_op=344979125.000 iter=1 runs=1
+generation/preloaded_request/lfm2_5_230m_q8_0_prompt_hello_max_tokens_1 ns_per_op=24875666.000 iter=1 runs=1
+generation/preloaded_request/lfm2_5_230m_q8_0_prompt_hello_max_tokens_100 ns_per_op=288408292.000 iter=1 runs=1
+sm_scheduler/busy_worker_async ns_per_op=355.000
+sm_scheduler/idle_async ns_per_op=387.080
+generation/preloaded_request/lfm2_5_1_2b_thinking_q4_k_m_prompt_hello_max_tokens_1/multithreaded ns_per_op=87893208.000
+generation/preloaded_request/lfm2_5_1_2b_thinking_q4_k_m_prompt_hello_max_tokens_1/single ns_per_op=347058500.000

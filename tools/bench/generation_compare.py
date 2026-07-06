@@ -124,6 +124,7 @@ def error_record(*,
     "status": "error",
     "case_name": f"{lane}/{backend_id}",
     "compare_group": "backend",
+    "benchmark_lane": os.environ.get("EMEL_BENCH_GENERATION_LANE", ""),
     "lane": lane,
     "backend_id": backend_id,
     "backend_language": backend_language,
@@ -142,6 +143,8 @@ def error_record(*,
     "seed": 0,
     "comparable": False,
     "max_output_tokens": 0,
+    "thread_count": 0,
+    "thread_contract": "",
     "ns_per_op": 0.0,
     "ns_min_per_op": 0.0,
     "ns_mean_per_op": 0.0,
@@ -149,6 +152,7 @@ def error_record(*,
     "prepare_ns_per_op": 0.0,
     "encode_ns_per_op": 0.0,
     "publish_ns_per_op": 0.0,
+    "tokens_per_second": 0.0,
     "output_tokens": 0,
     "output_bytes": 0,
     "output_checksum": 0,
@@ -261,6 +265,15 @@ def copy_summary_metadata(summary: dict[str, object], record: dict[str, object] 
     summary[field] = record.get(field, "")
 
 
+def record_tokens_per_second(record: dict[str, object] | None) -> float:
+  if record is None:
+    return 0.0
+  try:
+    return float(record.get("tokens_per_second", 0.0))
+  except (TypeError, ValueError):
+    return 0.0
+
+
 def mismatch_reason(emel_record: dict[str, object], reference_record: dict[str, object]) -> str:
   for field in SUMMARY_METADATA_FIELDS:
     if str(emel_record.get(field, "")) != str(reference_record.get(field, "")):
@@ -287,11 +300,17 @@ def select_records(records: list[dict[str, object]], *, lane: str) -> list[dict[
   return selected
 
 
-def summarize_group(compare_group: str,
+def record_group_key(record: dict[str, object]) -> tuple[str, str]:
+  return (str(record.get("benchmark_lane", "")), str(record.get("compare_group", "")))
+
+
+def summarize_group(benchmark_lane: str,
+                    compare_group: str,
                     emel_record: dict[str, object] | None,
                     reference_record: dict[str, object] | None) -> dict[str, object]:
   summary: dict[str, object] = {
     "compare_group": compare_group,
+    "benchmark_lane": benchmark_lane,
     "comparison_status": "missing",
     "reason": "",
     "workload_id": "",
@@ -404,20 +423,22 @@ def build_summary(emel_records: list[dict[str, object]],
   emel_records = select_records(emel_records, lane="emel")
   reference_records = select_records(reference_records, lane="reference")
   compare_groups = {
-    str(record.get("compare_group", ""))
+    record_group_key(record)
     for record in emel_records + reference_records
     if record.get("compare_group")
   }
   groups = []
   failed = not compare_groups
-  emel_by_group = {str(record.get("compare_group", "")): record for record in emel_records}
+  emel_by_group = {record_group_key(record): record for record in emel_records}
   reference_by_group = {
-    str(record.get("compare_group", "")): record for record in reference_records
+    record_group_key(record): record for record in reference_records
   }
-  for compare_group in sorted(compare_groups):
-    group_summary = summarize_group(compare_group,
-                                    emel_by_group.get(compare_group),
-                                    reference_by_group.get(compare_group))
+  for benchmark_lane, compare_group in sorted(compare_groups):
+    group_key = (benchmark_lane, compare_group)
+    group_summary = summarize_group(benchmark_lane,
+                                    compare_group,
+                                    emel_by_group.get(group_key),
+                                    reference_by_group.get(group_key))
     if group_summary["comparison_status"] in ("error", "missing"):
       failed = True
     groups.append(group_summary)
@@ -435,8 +456,16 @@ def print_text_summary(summary: dict[str, object]) -> None:
   backend_id = backend.get("id", "<input-only>")
   print(f"# reference_backend: {backend_id}")
   for group in summary["groups"]:
-    line = f"{group['compare_group']} status={group['comparison_status']} reason={group['reason']}"
+    lane_prefix = ""
+    if group.get("benchmark_lane"):
+      lane_prefix = f" benchmark_lane={group['benchmark_lane']}"
+    line = (
+      f"{group['compare_group']}{lane_prefix} "
+      f"status={group['comparison_status']} reason={group['reason']}"
+    )
     if group["comparison_status"] in ("exact_match", "bounded_drift"):
+      emel_tokens_per_second = record_tokens_per_second(group.get("emel"))
+      reference_tokens_per_second = record_tokens_per_second(group.get("reference"))
       line += (
         f" exact_output_match={str(group['exact_output_match']).lower()}"
         f" exact_checksum_match={str(group['exact_checksum_match']).lower()}"
@@ -444,6 +473,8 @@ def print_text_summary(summary: dict[str, object]) -> None:
         f" prefix_fraction={group['shared_prefix_fraction']:.6f}"
         f" output_tokens_delta={group['output_tokens_delta']}"
         f" output_bytes_delta={group['output_bytes_delta']}"
+        f" emel_tokens_per_second={emel_tokens_per_second:.3f}"
+        f" reference_tokens_per_second={reference_tokens_per_second:.3f}"
       )
     print(line)
 

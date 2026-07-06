@@ -762,7 +762,9 @@ inline bool guard_compute_backend_shape_ready(
 }
 
 inline bool guard_compute_backend_ready(const action::context & ctx) noexcept {
-  return ctx.compute.backend_ready && guard_compute_backend_shape_ready(ctx.compute.backend);
+  return ctx.compute.backend_ready &&
+         ctx.compute.backend.matmul_actor != nullptr &&
+         guard_compute_backend_shape_ready(ctx.compute.backend);
 }
 
 inline bool guard_graph_reservation_ready(const action::context & ctx) noexcept {
@@ -1153,9 +1155,25 @@ struct guard_decode_compute_backend_unavailable {
 
 struct guard_decode_parallel_lanes_ready {
   bool operator()(const event::generate_run &, const action::context & ctx) const noexcept {
-    return ctx.compute.backend.lane_pool.has_value() &&
+    return ctx.compute.backend.parallel_lanes_enabled &&
+           ctx.compute.backend.matmul_actor != nullptr &&
+           ctx.compute.backend.matmul_actor->parallel_lanes_available() &&
            ctx.compute.backend.n_embd >=
                emel::text::generator::detail::k_parallel_min_gemv_dim;
+  }
+};
+
+struct guard_benchmark_lane_single {
+  bool operator()(const event::configure_benchmark_lane & ev,
+                  const action::context &) const noexcept {
+    return ev.lane == emel::text::generator::benchmark_lane::single;
+  }
+};
+
+struct guard_benchmark_lane_multithreaded {
+  bool operator()(const event::configure_benchmark_lane & ev,
+                  const action::context &) const noexcept {
+    return ev.lane == emel::text::generator::benchmark_lane::multithreaded;
   }
 };
 

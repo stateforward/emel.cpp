@@ -142,10 +142,8 @@ using co_static_policy =
     emel::policy::coroutine_scheduler<emel::policy::fifo_scheduler<8u, 64u>>;
 using co_thread_pool_pool =
     emel::policy::thread_pool_scheduler<2u, 8u, 128u>;
-using co_thread_pool_scheduler =
-    emel::policy::thread_pool_scheduler_ref<co_thread_pool_pool>;
 using co_thread_pool_policy =
-    emel::policy::coroutine_scheduler<co_thread_pool_scheduler>;
+    emel::policy::coroutine_scheduler<co_thread_pool_pool>;
 using allocation_scope = emel::test::allocation::allocation_scope;
 
 struct event_co_mark {
@@ -249,20 +247,14 @@ concept has_schedule_method = requires(scheduler & scheduler_in) {
   scheduler_in.schedule([]() noexcept {});
 };
 
-}  // namespace
-
-TEST_CASE("sm_normalize_event_result_handles_error_out") {
-  int32_t err = 0;
-  dummy_event ok{.error_out = &err};
-  CHECK_FALSE(emel::detail::normalize_event_result(ok, false));
-  CHECK(emel::detail::normalize_event_result(ok, true));
-
-  err = (1 << 1);
-  CHECK_FALSE(emel::detail::normalize_event_result(ok, true));
-
-  struct no_error_event {};
-  CHECK(emel::detail::normalize_event_result(no_error_event{}, true));
+bool await_result(emel::bool_task & task) {
+  require_eventually("async task did not complete", [&]() {
+    return task.await_ready();
+  });
+  return task.result();
 }
+
+}  // namespace
 
 TEST_CASE("sm_process_support_dispatches_events") {
   using process_t = stateforward::sml::back::process<dummy_event>;
@@ -349,27 +341,27 @@ TEST_CASE("co_sm_process_event_async_inline_completes_immediately") {
   CHECK(machine.is(sml::state<state_co_done>));
 }
 
-TEST_CASE("co_sm_normalizes_error_out_for_sync_and_inline_async") {
+TEST_CASE("co_sm_reports_acceptance_and_leaves_error_data_in_event") {
   emel::co_sm<co_surface_model, void, co_inline_policy> sync_machine{};
   int32_t sync_err = 0;
-  CHECK_FALSE(sync_machine.process_event(event_co_error{.error_out = &sync_err}));
+  CHECK(sync_machine.process_event(event_co_error{.error_out = &sync_err}));
   CHECK(sync_err == 3);
 
   emel::co_sm<co_surface_model, void, co_inline_policy> async_machine{};
   int32_t async_err = 0;
   emel::bool_task task =
       async_machine.process_event_async(event_co_error{.error_out = &async_err});
-  CHECK_FALSE(task.result());
+  CHECK(task.result());
   CHECK(async_err == 3);
 }
 
-TEST_CASE("co_sm_normalizes_error_out_for_static_scheduler_immediate_async") {
+TEST_CASE("co_sm_static_scheduler_reports_acceptance_and_leaves_error_data_in_event") {
   emel::co_sm<co_surface_model, void, co_static_policy> machine{};
   int32_t err = 0;
   emel::bool_task task = machine.process_event_async(event_co_error{.error_out = &err});
 
   CHECK(task.await_ready());
-  CHECK_FALSE(task.result());
+  CHECK(task.result());
   CHECK(err == 3);
 }
 
@@ -398,130 +390,72 @@ TEST_CASE("thread_pool_scheduler_policy_is_static_multi_consumer") {
   using scheduler_type = co_thread_pool_policy::scheduler_type;
   static_assert(scheduler_type::multi_consumer);
   static_assert(!scheduler_type::single_consumer);
-  static_assert(!scheduler_type::owns_workers);
-  static_assert(scheduler_type::run_to_completion);
+  static_assert(scheduler_type::owns_workers);
+  static_assert(!scheduler_type::run_to_completion);
   static_assert(scheduler_type::static_worker_count == 2u);
   static_assert(scheduler_type::static_capacity == 8u);
-  static_assert(std::is_copy_constructible_v<scheduler_type>);
-  static_assert(!co_thread_pool_pool::run_to_completion);
-  static_assert(!has_schedule_method<co_thread_pool_pool>);
+  static_assert(!std::is_copy_constructible_v<scheduler_type>);
+  static_assert(has_schedule_method<co_thread_pool_pool>);
   static_assert(
-      !stateforward::sml::utility::policy::valid_coroutine_scheduler<
+      stateforward::sml::utility::policy::valid_coroutine_scheduler<
           co_thread_pool_pool>);
 
-  co_thread_pool_pool pool{};
-  emel::co_sm<co_surface_model, void, co_thread_pool_policy> machine{
-      co_thread_pool_scheduler{pool}};
-  CHECK(machine.scheduler().immediate_run_count() == 0u);
-  CHECK(machine.scheduler().scheduled_run_count() == 0u);
-  CHECK(machine.scheduler().worker_run_count() == 0u);
+  emel::co_sm<co_surface_model, void, co_thread_pool_policy> machine{};
+  CHECK_FALSE(machine.scheduler().is_current_thread_worker());
 }
 
-TEST_CASE("co_sm_thread_pool_scheduler_runs_inline_when_idle") {
+TEST_CASE("co_sm_thread_pool_scheduler_starts_now_and_awaits_later") {
   namespace sml = stateforward::sml;
-  co_thread_pool_pool pool{};
-  emel::co_sm<co_surface_model, void, co_thread_pool_policy> machine{
-      co_thread_pool_scheduler{pool}};
+  using single_pool = emel::policy::thread_pool_scheduler<1u, 8u, 128u>;
+  using single_policy = emel::policy::coroutine_scheduler<single_pool>;
+  emel::co_sm<co_surface_model, void, single_policy> machine{};
+  std::atomic<bool> worker_entered{false};
+  std::atomic<bool> release_worker{false};
+  machine.scheduler().schedule([&]() noexcept {
+    worker_entered.store(true, std::memory_order_release);
+    while (!release_worker.load(std::memory_order_acquire)) {
+      emel::policy::cpu_relax();
+    }
+  });
+  require_eventually("worker lane did not park", [&]() {
+    return worker_entered.load(std::memory_order_acquire);
+  });
 
   int32_t marker = 0;
   emel::bool_task task =
       machine.process_event_async(event_co_mark{.marker = marker});
 
-  CHECK(task.await_ready());
-  CHECK(task.result());
+  CHECK_FALSE(task.await_ready());
+  CHECK(marker == 0);
+
+  release_worker.store(true, std::memory_order_release);
+  CHECK(await_result(task));
   CHECK(marker == 11);
   CHECK(machine.is(sml::state<state_co_done>));
-  CHECK(machine.scheduler().immediate_run_count() == 1u);
-  CHECK(machine.scheduler().scheduled_run_count() == 0u);
-  CHECK(machine.scheduler().worker_run_count() == 0u);
 }
 
-TEST_CASE("co_sm_thread_pool_scheduler_uses_worker_when_inline_busy") {
+TEST_CASE("co_sm_thread_pool_scheduler_completes_on_worker") {
   namespace sml = stateforward::sml;
-  co_thread_pool_pool pool{};
-  emel::co_sm<co_surface_model, void, co_thread_pool_policy> machine{
-      co_thread_pool_scheduler{pool}};
+  emel::co_sm<co_surface_model, void, co_thread_pool_policy> machine{};
 
   int32_t marker = 0;
-  bool task_ready = false;
-  bool task_result = false;
-  const bool outer_completed = pool.try_run_immediate([&]() {
-    emel::bool_task task =
-        machine.process_event_async(event_co_mark{.marker = marker});
-    task_ready = task.await_ready();
-    task_result = task.result();
-  });
+  emel::bool_task task =
+      machine.process_event_async(event_co_mark{.marker = marker});
 
-  CHECK(outer_completed);
-  CHECK(task_ready);
-  CHECK(task_result);
+  CHECK(await_result(task));
   CHECK(marker == 11);
   CHECK(machine.is(sml::state<state_co_done>));
-  CHECK(machine.scheduler().immediate_run_count() == 1u);
-  CHECK(machine.scheduler().scheduled_run_count() == 1u);
-  CHECK(machine.scheduler().worker_run_count() == 1u);
-}
-
-TEST_CASE("co_sm_thread_pool_scheduler_worker_result_waits_for_scheduler_quiescence") {
-  co_thread_pool_pool pool{};
-  emel::co_sm<co_surface_model, void, co_thread_pool_policy> first{
-      co_thread_pool_scheduler{pool}};
-  emel::co_sm<co_surface_model, void, co_thread_pool_policy> second{
-      co_thread_pool_scheduler{pool}};
-  std::binary_semaphore inline_lane_held{0};
-  std::binary_semaphore release_inline_lane{0};
-  std::atomic<bool> holder_result{false};
-  std::thread inline_lane_holder{[&]() {
-    const bool held = pool.try_run_immediate([&]() noexcept {
-      holder_result.store(true, std::memory_order_release);
-      inline_lane_held.release();
-      release_inline_lane.acquire();
-    });
-    if (!held) {
-      inline_lane_held.release();
-    }
-  }};
-  inline_lane_held.acquire();
-  CHECK(holder_result.load(std::memory_order_acquire));
-
-  int32_t first_marker = 0;
-  emel::bool_task first_task =
-      first.process_event_async(event_co_mark{.marker = first_marker});
-  CHECK(first_task.result());
-  CHECK(first_marker == 11);
-  CHECK(pool.worker_run_count() == 1u);
-  CHECK(pool.scheduled_run_count() == 1u);
-
-  release_inline_lane.release();
-  inline_lane_holder.join();
-
-  const uint64_t immediate_before_second = pool.immediate_run_count();
-  const uint64_t scheduled_before_second = pool.scheduled_run_count();
-  int32_t second_marker = 0;
-  emel::bool_task second_task =
-      second.process_event_async(event_co_mark{.marker = second_marker});
-  CHECK(second_task.result());
-  CHECK(second_marker == 11);
-  CHECK(pool.immediate_run_count() == immediate_before_second + 1u);
-  CHECK(pool.scheduled_run_count() == scheduled_before_second);
 }
 
 TEST_CASE("co_sm_thread_pool_scheduler_rejects_concurrent_actor_dispatch") {
-  co_thread_pool_pool pool{};
-  emel::co_sm<co_surface_model, void, co_thread_pool_policy> machine{
-      co_thread_pool_scheduler{pool}};
+  emel::co_sm<co_surface_model, void, co_thread_pool_policy> machine{};
   std::atomic<bool> release{false};
   std::atomic<int32_t> entered{0};
-  bool first_result = false;
-
-  std::thread first_dispatch([&]() {
-    first_result = machine
-                       .process_event_async(event_co_wait{
-                           .release = release,
-                           .entered = entered,
-                       })
-                       .result();
-  });
+  emel::bool_task first_task =
+      machine.process_event_async(event_co_wait{
+          .release = release,
+          .entered = entered,
+      });
 
   require_eventually("first dispatch did not enter action", [&]() {
     return entered.load(std::memory_order_acquire) == 1;
@@ -535,62 +469,26 @@ TEST_CASE("co_sm_thread_pool_scheduler_rejects_concurrent_actor_dispatch") {
   CHECK(marker == 0);
 
   release.store(true, std::memory_order_release);
-  first_dispatch.join();
-  CHECK(first_result);
-}
-
-TEST_CASE("co_sm_thread_pool_scheduler_rejects_concurrent_state_inspection") {
-  namespace sml = stateforward::sml;
-  co_thread_pool_pool pool{};
-  emel::co_sm<co_surface_model, void, co_thread_pool_policy> machine{
-      co_thread_pool_scheduler{pool}};
-  std::atomic<bool> release{false};
-  std::atomic<int32_t> entered{0};
-  bool first_result = false;
-  bool visited = false;
-
-  std::thread first_dispatch([&]() {
-    first_result = machine
-                       .process_event_async(event_co_wait{
-                           .release = release,
-                           .entered = entered,
-                       })
-                       .result();
-  });
-
-  require_eventually("first dispatch did not enter action", [&]() {
-    return entered.load(std::memory_order_acquire) == 1;
-  });
-
-  CHECK_FALSE(machine.is(sml::state<state_co_done>));
-  machine.visit_current_states([&](const auto &) { visited = true; });
-  CHECK_FALSE(visited);
-
-  release.store(true, std::memory_order_release);
-  first_dispatch.join();
-  CHECK(first_result);
+  CHECK(await_result(first_task));
 }
 
 TEST_CASE("co_sm_thread_pool_scheduler_allows_concurrent_different_actors") {
-  co_thread_pool_pool pool{};
-  emel::co_sm<co_surface_model, void, co_thread_pool_policy> first{
-      co_thread_pool_scheduler{pool}};
-  emel::co_sm<co_surface_model, void, co_thread_pool_policy> second{
-      co_thread_pool_scheduler{pool}};
+  emel::co_sm<co_surface_model, void, co_thread_pool_policy> first{};
+  emel::co_sm<co_surface_model, void, co_thread_pool_policy> second{};
   int32_t first_marker = 0;
   int32_t second_marker = 0;
   bool first_result = false;
   bool second_result = false;
 
   std::thread first_thread([&]() {
-    first_result = first.process_event_async(
-                            event_co_mark{.marker = first_marker})
-                       .result();
+    emel::bool_task task =
+        first.process_event_async(event_co_mark{.marker = first_marker});
+    first_result = await_result(task);
   });
   std::thread second_thread([&]() {
-    second_result = second.process_event_async(
-                              event_co_mark{.marker = second_marker})
-                        .result();
+    emel::bool_task task =
+        second.process_event_async(event_co_mark{.marker = second_marker});
+    second_result = await_result(task);
   });
 
   first_thread.join();
@@ -629,24 +527,22 @@ TEST_CASE("thread_pool_scheduler_rejects_same_pool_nested_wait") {
   CHECK_FALSE(nested_ran.load(std::memory_order_acquire));
 }
 
-TEST_CASE("thread_pool_scheduler_ref_fork_join_runs_submitted_tasks_before_wait_returns") {
+TEST_CASE("thread_pool_scheduler_fork_join_runs_submitted_tasks_before_wait_returns") {
   using scheduler_type = emel::policy::thread_pool_scheduler<2u, 8u, 128u>;
-  using scheduler_ref = emel::policy::thread_pool_scheduler_ref<scheduler_type>;
   scheduler_type scheduler{};
-  scheduler_ref ref{scheduler};
-  scheduler_ref::join_group group{};
+  scheduler_type::join_group group{};
   std::atomic<int32_t> entered{0};
   std::atomic<int32_t> finished{0};
   std::atomic<bool> release{false};
 
-  CHECK(ref.try_submit(group, [&]() noexcept {
+  CHECK(scheduler.try_submit(group, [&]() noexcept {
     entered.fetch_add(1, std::memory_order_release);
     while (!release.load(std::memory_order_acquire)) {
       std::this_thread::yield();
     }
     finished.fetch_add(1, std::memory_order_release);
   }));
-  CHECK(ref.try_submit(group, [&]() noexcept {
+  CHECK(scheduler.try_submit(group, [&]() noexcept {
     entered.fetch_add(1, std::memory_order_release);
     while (!release.load(std::memory_order_acquire)) {
       std::this_thread::yield();
@@ -661,29 +557,26 @@ TEST_CASE("thread_pool_scheduler_ref_fork_join_runs_submitted_tasks_before_wait_
   release.store(true, std::memory_order_release);
   CHECK(group.wait());
   CHECK(finished.load(std::memory_order_acquire) == 2);
-  CHECK(scheduler.worker_run_count() == 2u);
 }
 
-TEST_CASE("thread_pool_scheduler_ref_fork_join_ignores_pre_wait_completion_tokens") {
+TEST_CASE("thread_pool_scheduler_fork_join_ignores_pre_wait_completion_tokens") {
   using scheduler_type = emel::policy::thread_pool_scheduler<1u, 8u, 128u>;
-  using scheduler_ref = emel::policy::thread_pool_scheduler_ref<scheduler_type>;
   scheduler_type scheduler{};
-  scheduler_ref ref{scheduler};
-  scheduler_ref::join_group group{};
+  scheduler_type::join_group group{};
   std::atomic<bool> fast_done{false};
   std::atomic<bool> blocking_entered{false};
   std::atomic<bool> release_blocking{false};
   std::atomic<bool> wait_returned{false};
   bool wait_result = false;
 
-  CHECK(ref.try_submit(group, [&]() noexcept {
+  CHECK(scheduler.try_submit(group, [&]() noexcept {
     fast_done.store(true, std::memory_order_release);
   }));
   require_eventually("fast fork/join task did not finish", [&]() {
     return fast_done.load(std::memory_order_acquire);
   });
 
-  CHECK(ref.try_submit(group, [&]() noexcept {
+  CHECK(scheduler.try_submit(group, [&]() noexcept {
     blocking_entered.store(true, std::memory_order_release);
     while (!release_blocking.load(std::memory_order_acquire)) {
       std::this_thread::yield();
@@ -712,19 +605,17 @@ TEST_CASE("thread_pool_scheduler_ref_fork_join_ignores_pre_wait_completion_token
   CHECK(wait_returned.load(std::memory_order_acquire));
 }
 
-TEST_CASE("thread_pool_scheduler_ref_fork_join_rejects_same_pool_worker_submit") {
+TEST_CASE("thread_pool_scheduler_fork_join_rejects_same_pool_worker_submit") {
   using scheduler_type = emel::policy::thread_pool_scheduler<1u, 8u, 128u>;
-  using scheduler_ref = emel::policy::thread_pool_scheduler_ref<scheduler_type>;
   scheduler_type scheduler{};
-  scheduler_ref ref{scheduler};
   std::atomic<bool> nested_submitted{true};
   std::atomic<bool> nested_joined{true};
   std::atomic<bool> done{false};
 
   scheduler.submit([&]() noexcept {
-    scheduler_ref::join_group group{};
+    scheduler_type::join_group group{};
     nested_submitted.store(
-        ref.try_submit(group, []() noexcept {}), std::memory_order_release);
+        scheduler.try_submit(group, []() noexcept {}), std::memory_order_release);
     nested_joined.store(group.wait(), std::memory_order_release);
     done.store(true, std::memory_order_release);
   });
@@ -790,11 +681,9 @@ TEST_CASE("thread_pool_scheduler_accepts_multiple_producers") {
     return completed.load(std::memory_order_acquire) == 16;
   });
 
-  CHECK(scheduler.scheduled_run_count() == 16u);
-  CHECK(scheduler.worker_run_count() == 16u);
 }
 
-TEST_CASE("thread_pool_scheduler_ref_fork_join_survives_rapid_repeated_rounds") {
+TEST_CASE("thread_pool_scheduler_fork_join_survives_rapid_repeated_rounds") {
   // Regression: the join latch previously used a closed_/pending_ handshake plus
   // a per-group binary_semaphore. The handshake had a Dekker-style StoreLoad
   // race (wait() could miss the final completion while the last completer missed
@@ -804,7 +693,6 @@ TEST_CASE("thread_pool_scheduler_ref_fork_join_survives_rapid_repeated_rounds") 
   // the lane count equals the worker count. Drive enough rounds that a
   // reintroduced race surfaces (a regression makes wait() hang here).
   using scheduler_type = emel::policy::thread_pool_scheduler<8u, 64u, 128u>;
-  using scheduler_ref = emel::policy::thread_pool_scheduler_ref<scheduler_type>;
   scheduler_type scheduler{};
   constexpr int32_t k_rounds = 20000;
   constexpr int32_t k_lanes = 8;
@@ -813,10 +701,9 @@ TEST_CASE("thread_pool_scheduler_ref_fork_join_survives_rapid_repeated_rounds") 
   bool all_joined = true;
 
   for (int32_t round = 0; round < k_rounds; ++round) {
-    scheduler_ref ref{scheduler};
-    scheduler_ref::join_group group{};
+    scheduler_type::join_group group{};
     for (int32_t lane = 0; lane < k_lanes; ++lane) {
-      all_submitted &= ref.try_submit(group, [&ran]() noexcept {
+      all_submitted &= scheduler.try_submit(group, [&ran]() noexcept {
         ran.fetch_add(1, std::memory_order_relaxed);
       });
     }
@@ -827,8 +714,27 @@ TEST_CASE("thread_pool_scheduler_ref_fork_join_survives_rapid_repeated_rounds") 
   CHECK(all_joined);
   CHECK(ran.load(std::memory_order_acquire) ==
         static_cast<int64_t>(k_rounds) * k_lanes);
-  CHECK(scheduler.worker_run_count() ==
-        static_cast<uint64_t>(k_rounds) * k_lanes);
+}
+
+TEST_CASE("fork_join_lane_pool_wait_returns_after_worker_slot_reusable") {
+  using pool_type = emel::policy::fork_join_lane_pool<1u, 128u, 64u>;
+  pool_type pool{};
+  constexpr int32_t k_rounds = 20000;
+  std::atomic<int64_t> ran{0};
+  bool all_submitted = true;
+  bool all_joined = true;
+
+  for (int32_t round = 0; round < k_rounds; ++round) {
+    pool_type::join_group group{};
+    all_submitted &= pool.try_submit(group, [&ran]() noexcept {
+      ran.fetch_add(1, std::memory_order_relaxed);
+    });
+    all_joined &= group.wait();
+  }
+
+  CHECK(all_submitted);
+  CHECK(all_joined);
+  CHECK(ran.load(std::memory_order_acquire) == k_rounds);
 }
 
 TEST_CASE("co_sm_contextful_wrapper_injects_context") {
@@ -856,29 +762,25 @@ TEST_CASE("fixed_coroutine_allocator_has_no_heap_fallback") {
 
 TEST_CASE("co_sm_thread_pool_scheduler_async_dispatch_does_not_allocate") {
   {
-    co_thread_pool_pool pool{};
-    emel::co_sm<co_surface_model, void, co_thread_pool_policy> machine{
-        co_thread_pool_scheduler{pool}};
+    emel::co_sm<co_surface_model, void, co_thread_pool_policy> machine{};
     int32_t marker = 0;
     allocation_scope allocations{};
 
     emel::bool_task task =
         machine.process_event_async(event_co_mark{.marker = marker});
 
-    CHECK(task.result());
+    CHECK(await_result(task));
     CHECK(marker == 11);
     CHECK(allocations.allocations() == 0u);
   }
 
   {
-    co_thread_pool_pool pool{};
-    emel::co_sm<co_surface_model, void, co_thread_pool_policy> machine{
-        co_thread_pool_scheduler{pool}};
+    emel::co_sm<co_surface_model, void, co_thread_pool_policy> machine{};
     std::binary_semaphore inline_lane_held{0};
     std::binary_semaphore release_inline_lane{0};
     std::atomic<bool> holder_result{false};
     std::thread inline_lane_holder{[&]() {
-      const bool held = pool.try_run_immediate([&]() noexcept {
+      const bool held = machine.scheduler().try_run_immediate([&]() noexcept {
         holder_result.store(true, std::memory_order_release);
         inline_lane_held.release();
         release_inline_lane.acquire();
@@ -896,7 +798,7 @@ TEST_CASE("co_sm_thread_pool_scheduler_async_dispatch_does_not_allocate") {
       emel::bool_task task =
           machine.process_event_async(event_co_mark{.marker = marker});
 
-      CHECK(task.result());
+      CHECK(await_result(task));
       CHECK(marker == 11);
       CHECK(allocations.allocations() == 0u);
     }

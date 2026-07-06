@@ -389,6 +389,11 @@ struct model {
 
       , sml::state<ready> <= sml::state<ready> +
                sml::event<::emel::kernel::aarch64::event::dispatch_op_mul_mat>
+                 [ guard::simd_op_mul_mat_q8_0_vector_q8_rhs{} ]
+                 / action::exec_simd_op_mul_mat_q8_0_vector_q8_rhs
+
+      , sml::state<ready> <= sml::state<ready> +
+               sml::event<::emel::kernel::aarch64::event::dispatch_op_mul_mat>
                  [ guard::simd_op_mul_mat_q8_0_vector{} ]
                  / action::exec_simd_op_mul_mat_q8_0_vector
 
@@ -416,6 +421,11 @@ struct model {
                sml::event<::emel::kernel::aarch64::event::dispatch_op_mul_mat>
                  [ guard::simd_op_mul_mat_q4_vector_packed_q8_rhs_bl4{} ]
                  / action::exec_simd_op_mul_mat_q4_vector_packed_q8_rhs_bl4
+
+      , sml::state<ready> <= sml::state<ready> +
+               sml::event<::emel::kernel::aarch64::event::dispatch_op_mul_mat>
+                 [ guard::simd_op_mul_mat_q4_vector_q8_rhs{} ]
+                 / action::exec_simd_op_mul_mat_q4_vector_q8_rhs
 
       , sml::state<ready> <= sml::state<ready> +
                sml::event<::emel::kernel::aarch64::event::dispatch_op_mul_mat>
@@ -466,6 +476,11 @@ struct model {
                sml::event<::emel::kernel::aarch64::event::dispatch_op_mul_mat>
                  [ guard::simd_op_mul_mat_q6_vector_packed{} ]
                  / action::exec_simd_op_mul_mat_q6_vector_packed
+
+      , sml::state<ready> <= sml::state<ready> +
+               sml::event<::emel::kernel::aarch64::event::dispatch_op_mul_mat>
+                 [ guard::simd_op_mul_mat_q6_vector_q8_rhs{} ]
+                 / action::exec_simd_op_mul_mat_q6_vector_q8_rhs
 
       , sml::state<ready> <= sml::state<ready> +
                sml::event<::emel::kernel::aarch64::event::dispatch_op_mul_mat>

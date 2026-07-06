@@ -59,7 +59,6 @@ namespace {
 // The wavefront's lane pool (same type as
 // src/emel/text/generator/decode_wavefront/context.hpp).
 using lane_pool = emel::policy::thread_pool_scheduler<8u, 16u, 128u>;
-using lane_scheduler = emel::policy::thread_pool_scheduler_ref<lane_pool>;
 
 constexpr size_t k_output_capacity = 8192u;
 
@@ -568,15 +567,19 @@ void run_sequential(const std::span<std::unique_ptr<lane_session>> active,
 void run_parallel(lane_pool &pool,
                   const std::span<std::unique_ptr<lane_session>> active,
                   const std::string_view prompt, int32_t tokens) {
-  lane_scheduler scheduler{pool};
-  lane_scheduler::join_group group{};
+  lane_pool::join_group group{};
+  emel::policy::fork_join_start_gate gate{};
+  size_t submitted_lanes = 0u;
   for (auto &s : active) {
     lane_session *lane = s.get();
-    (void)scheduler.try_submit(
-        group, [lane, prompt, tokens]() noexcept {
+    const bool submitted = pool.try_submit(
+        group, [lane, prompt, tokens, &gate]() noexcept {
+          gate.arrive_and_wait();
           run_generate(*lane, prompt, tokens);
         });
+    submitted_lanes += submitted ? 1u : 0u;
   }
+  gate.open_after_arrivals(submitted_lanes);
   (void)group.wait();
 }
 

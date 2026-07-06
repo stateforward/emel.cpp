@@ -11,7 +11,8 @@ mechanism.
 ALWAYS keep dispatch run-to-completion and single-writer per actor.
 ALWAYS treat coroutine or `async`-named dispatch APIs semantically: async is not
 deferred by definition, and `process_event_async` MAY be RTC when completion is
-driven and observed before the top-level dispatch returns.
+driven and observed by the actor or orchestrator that owns that dispatch's RTC
+boundary.
 NEVER let coroutine continuations, incomplete tasks, scheduler work items, or
 callbacks escape the RTC boundary as hidden deferred work.
 NEVER call an actor's own `process_event` from guards/actions/entry/exit.

@@ -47,7 +47,10 @@ struct request_backend_prepare {
     auto & generator = ctx.generator;
     generator.compute.backend_ready = false;
     ev.ctx.phase_code = static_cast<int32_t>(emel::text::generator::detail::prepare(
-        generator.compute.backend, *generator.model, generator.limits.block_tokens));
+        generator.compute.backend,
+        *generator.model,
+        *generator.matmul_actor,
+        generator.limits.block_tokens));
     ev.ctx.phase_accepted =
         ev.ctx.phase_code ==
         static_cast<int32_t>(emel::error::cast(emel::model::loader::error::none));

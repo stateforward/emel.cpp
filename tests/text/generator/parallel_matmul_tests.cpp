@@ -10,7 +10,11 @@
 // proof against maintained model fixtures lives in the generator lifecycle
 // tests; this file covers the slicing and fork/join detail surface.
 
+#include "emel/text/generator/actions.hpp"
 #include "emel/text/generator/detail.hpp"
+#include "emel/text/generator/guards.hpp"
+#include "emel/text/generator/matmul/actions.hpp"
+#include "emel/text/generator/matmul/guards.hpp"
 
 namespace {
 
@@ -118,13 +122,94 @@ TEST_CASE("parallel matmul sliced event offsets views by storage groups") {
   CHECK(sliced.src1.data == ev.src1.data);
 }
 
+TEST_CASE("matmul actor guards and actions expose explicit rejection paths") {
+  namespace matmul = emel::text::generator::matmul;
+
+  matmul::action::context ctx = {};
+  emel::kernel::event::op_mul_mat request = {};
+  request.src0.ne[1] = 0u;
+  matmul::event::dispatch_result serial_result = {};
+  matmul::event::dispatch_result parallel_result = {};
+  bool serial_accepted = true;
+  bool parallel_accepted = true;
+  const matmul::event::execute_serial serial_event{request, serial_result,
+                                                   serial_accepted};
+  const matmul::event::execute_parallel parallel_event{request, parallel_result,
+                                                       parallel_accepted};
+
+  CHECK(matmul::guard::guard_parallel_unavailable{}(parallel_event, ctx));
+  CHECK_FALSE(matmul::guard::guard_parallel_ready{}(parallel_event, ctx));
+  request.src0.ne[1] = 4u;
+  CHECK(matmul::guard::guard_parallel_unavailable{}(parallel_event, ctx));
+
+  matmul::lane_pool parallel_lanes = {};
+  ctx.parallel_matmul_lanes = &parallel_lanes;
+  CHECK(matmul::guard::guard_parallel_ready{}(parallel_event, ctx));
+  CHECK_FALSE(matmul::guard::guard_parallel_unavailable{}(parallel_event, ctx));
+
+  serial_result.lane_accepted[0] = false;
+  CHECK(matmul::guard::guard_serial_rejected{}(serial_event, ctx));
+  CHECK_FALSE(matmul::guard::guard_serial_accepted{}(serial_event, ctx));
+  matmul::action::effect_reject_serial_execution(serial_event, ctx);
+  CHECK_FALSE(serial_accepted);
+
+  parallel_result.all_submitted = false;
+  parallel_result.joined = true;
+  CHECK(matmul::guard::guard_parallel_submission_failed{}(parallel_event, ctx));
+  CHECK_FALSE(matmul::guard::guard_parallel_join_failed{}(parallel_event, ctx));
+
+  parallel_result.all_submitted = true;
+  parallel_result.joined = false;
+  CHECK(matmul::guard::guard_parallel_join_failed{}(parallel_event, ctx));
+  CHECK_FALSE(
+      matmul::guard::guard_parallel_all_lanes_accepted{}(parallel_event, ctx));
+
+  parallel_result.joined = true;
+  parallel_result.lane_count = 0u;
+  CHECK_FALSE(
+      matmul::guard::guard_parallel_lane_rejected<0>{}(parallel_event, ctx));
+
+  parallel_result.lane_count = 2u;
+  parallel_result.lane_accepted[0] = false;
+  parallel_result.lane_accepted[1] = false;
+  CHECK_FALSE(
+      matmul::guard::guard_parallel_lane_rejected<1>{}(parallel_event, ctx));
+
+  parallel_result.lane_accepted[0] = true;
+  CHECK(matmul::guard::guard_parallel_lane_rejected<1>{}(parallel_event, ctx));
+  CHECK_FALSE(
+      matmul::guard::guard_parallel_all_lanes_accepted{}(parallel_event, ctx));
+
+  parallel_result.lane_accepted[1] = true;
+  CHECK(
+      matmul::guard::guard_parallel_all_lanes_accepted{}(parallel_event, ctx));
+  matmul::action::effect_reject_parallel_execution(parallel_event, ctx);
+  CHECK_FALSE(parallel_accepted);
+
+  struct event_with_accepted {
+    bool &accepted;
+  };
+  bool unexpected_accepted = true;
+  const event_with_accepted unexpected{unexpected_accepted};
+  matmul::action::effect_on_unexpected(unexpected, ctx);
+  CHECK_FALSE(unexpected_accepted);
+
+  struct event_without_accepted {};
+  matmul::action::effect_on_unexpected(event_without_accepted{}, ctx);
+}
+
 struct parallel_backend_fixture {
+  emel::text::generator::matmul::lane_pool parallel_matmul_lanes = {};
+  emel::text::generator::matmul::sm matmul_actor{parallel_matmul_lanes};
   gen_detail::native_backend backend = {};
 
   parallel_backend_fixture() {
     backend.kernel_kind = gen_detail::detect_host_kernel_kind();
     backend.kernel.set_kind(backend.kernel_kind);
-    backend.lane_pool.emplace();
+    backend.matmul_actor = &matmul_actor;
+    matmul_actor.process_event(
+        emel::text::generator::matmul::event::configure_kernel_kind{
+            backend.kernel_kind});
   }
 };
 
@@ -219,27 +304,62 @@ TEST_CASE("parallel matmul q8_0 gemv matches serial dispatch bit exact") {
                     out_serial.size() * sizeof(float)) == 0);
 }
 
-TEST_CASE("parallel matmul rejects disengaged lane pool") {
-  gen_detail::native_backend backend = {};
-  backend.kernel_kind = gen_detail::detect_host_kernel_kind();
+TEST_CASE("parallel matmul route guard rejects disengaged lane pool") {
+  emel::text::generator::action::context ctx = {};
+  ctx.compute.backend.n_embd = gen_detail::k_parallel_min_gemv_dim;
+  emel::text::generator::event::generate_ctx run_ctx = {};
+  std::array<emel::text::formatter::chat_message, 1> messages = {};
+  std::array<char, 8> output = {};
+  size_t output_length = 0u;
+  const emel::text::generator::event::generate request{
+      std::span<const emel::text::formatter::chat_message>(messages), 1,
+      std::span<char>(output), output_length};
+  const emel::text::generator::event::generate_run run{request, run_ctx};
 
-  std::array<float, 8> weights = {1.0f, 2.0f, 3.0f, 4.0f,
-                                  5.0f, 6.0f, 7.0f, 8.0f};
-  std::array<float, 4> input = {1.0f, 1.0f, 1.0f, 1.0f};
-  std::array<float, 2> output = {};
-  auto record =
-      make_tensor_record(weights.data(), emel::kernel::detail::dtype_f32, 4, 2);
-  gen_detail::tensor_matrix matrix{&record, 2, 4};
+  CHECK_FALSE(emel::text::generator::guard::guard_decode_parallel_lanes_ready{}(
+      run, ctx));
 
-  const emel::kernel::event::op_mul_mat ev{
-      .src0 = gen_detail::make_src_view(matrix),
-      .src1 = gen_detail::make_src_view(input.data(), static_cast<uint64_t>(1u),
-                                        static_cast<uint64_t>(input.size())),
-      .dst = gen_detail::make_dst_view(output.data(), static_cast<uint64_t>(1u),
-                                       static_cast<uint64_t>(output.size())),
-  };
+  emel::text::generator::matmul::sm serial_matmul_actor = {};
+  ctx.compute.backend.matmul_actor = &serial_matmul_actor;
+  CHECK_FALSE(emel::text::generator::guard::guard_decode_parallel_lanes_ready{}(
+      run, ctx));
+
+  emel::text::generator::matmul::lane_pool parallel_matmul_lanes = {};
+  emel::text::generator::matmul::sm parallel_matmul_actor{
+      parallel_matmul_lanes};
+  ctx.compute.backend.matmul_actor = &parallel_matmul_actor;
+  CHECK(emel::text::generator::guard::guard_decode_parallel_lanes_ready{}(run,
+                                                                          ctx));
+  ctx.compute.backend.parallel_lanes_enabled = false;
+  CHECK_FALSE(emel::text::generator::guard::guard_decode_parallel_lanes_ready{}(
+      run, ctx));
+}
+
+TEST_CASE(
+    "benchmark lane configuration guards and actions toggle parallel lanes") {
+  emel::text::generator::action::context ctx = {};
+  const emel::text::generator::event::configure_benchmark_lane single{
+      emel::text::generator::benchmark_lane::single};
+  const emel::text::generator::event::configure_benchmark_lane multithreaded{
+      emel::text::generator::benchmark_lane::multithreaded};
+
+  CHECK(
+      emel::text::generator::guard::guard_benchmark_lane_single{}(single, ctx));
+  CHECK_FALSE(emel::text::generator::guard::guard_benchmark_lane_single{}(
+      multithreaded, ctx));
+  CHECK(emel::text::generator::guard::guard_benchmark_lane_multithreaded{}(
+      multithreaded, ctx));
   CHECK_FALSE(
-      gen_detail::compute_mul_mat<matmul_lane_mode::parallel>(backend, ev));
+      emel::text::generator::guard::guard_benchmark_lane_multithreaded{}(single,
+                                                                         ctx));
+
+  ctx.compute.backend.parallel_lanes_enabled = true;
+  emel::text::generator::action::effect_disable_parallel_benchmark_lanes(single,
+                                                                         ctx);
+  CHECK_FALSE(ctx.compute.backend.parallel_lanes_enabled);
+  emel::text::generator::action::effect_enable_parallel_benchmark_lanes(
+      multithreaded, ctx);
+  CHECK(ctx.compute.backend.parallel_lanes_enabled);
 }
 
 } // namespace

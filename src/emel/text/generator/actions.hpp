@@ -1222,6 +1222,18 @@ struct capture_graph_lifecycle_with_runtime_tensor {
   }
 };
 
+struct effect_disable_parallel_benchmark_lanes {
+  void operator()(const event::configure_benchmark_lane &, context & ctx) const noexcept {
+    ctx.compute.backend.parallel_lanes_enabled = false;
+  }
+};
+
+struct effect_enable_parallel_benchmark_lanes {
+  void operator()(const event::configure_benchmark_lane &, context & ctx) const noexcept {
+    ctx.compute.backend.parallel_lanes_enabled = true;
+  }
+};
+
 inline constexpr reject_initialize reject_initialize{};
 inline constexpr begin_generate begin_generate{};
 inline constexpr reject_invalid_generate reject_invalid_generate{};
@@ -1369,6 +1381,10 @@ inline constexpr dispatch_generate_error_without_channels
     dispatch_generate_error_without_channels{};
 inline constexpr on_unexpected on_unexpected{};
 inline constexpr capture_diagnostics capture_diagnostics{};
+inline constexpr effect_disable_parallel_benchmark_lanes
+    effect_disable_parallel_benchmark_lanes{};
+inline constexpr effect_enable_parallel_benchmark_lanes
+    effect_enable_parallel_benchmark_lanes{};
 inline constexpr capture_graph_lifecycle_without_runtime_tensor
     capture_graph_lifecycle_without_runtime_tensor{};
 inline constexpr capture_graph_lifecycle_with_runtime_tensor
