@@ -590,12 +590,18 @@ struct chunk4_prefill_runtime_fixture {
   }
 };
 
-template <int32_t prompt_tokens> struct hybrid_chunked_q8_runtime_fixture {
+template <int32_t prompt_tokens, int32_t ctx_tokens = 8>
+struct hybrid_chunked_q8_runtime_fixture {
   static constexpr int32_t k_vocab = static_cast<int32_t>(QK_K);
   static constexpr int32_t k_embd = static_cast<int32_t>(QK_K);
-  static constexpr int32_t k_ctx = 8;
+  static constexpr int32_t k_ctx = ctx_tokens;
   static constexpr int32_t k_prompt_tokens = prompt_tokens;
   static constexpr int32_t k_shortconv_kernel_size = 3;
+  // Chunk work buffers are sized per gemm chunk (as prepare() does), not per
+  // prompt: the chunked prepare/matmul helpers require the exact chunk-row
+  // extent, and prompts longer than one chunk reuse the same buffers.
+  static constexpr int32_t k_chunk4_rows = 4;
+  static constexpr int32_t k_chunk8_rows = 8;
 
   emel::model::data model = {};
   emel::text::generator::detail::native_backend backend = {};
@@ -754,9 +760,9 @@ template <int32_t prompt_tokens> struct hybrid_chunked_q8_runtime_fixture {
     backend.shortconv_bx.resize(static_cast<size_t>(k_embd), 0.0f);
     backend.shortconv_conv_out.resize(static_cast<size_t>(k_embd), 0.0f);
     backend.shortconv_bcx_chunk4.resize(
-        static_cast<size_t>(k_prompt_tokens * 3 * k_embd), 0.0f);
+        static_cast<size_t>(k_chunk4_rows * 3 * k_embd), 0.0f);
     backend.shortconv_conv_out_chunk4.resize(
-        static_cast<size_t>(k_prompt_tokens * k_embd), 0.0f);
+        static_cast<size_t>(k_chunk4_rows * k_embd), 0.0f);
     backend.q.resize(static_cast<size_t>(k_embd), 0.0f);
     backend.q_attn.resize(static_cast<size_t>(k_embd), 0.0f);
     backend.k.resize(static_cast<size_t>(k_embd), 0.0f);
@@ -782,9 +788,9 @@ template <int32_t prompt_tokens> struct hybrid_chunked_q8_runtime_fixture {
         static_cast<size_t>(backend.n_layer * backend.shortconv_state_size *
                             k_embd),
         0.0f);
-    backend.hidden_chunk4.resize(static_cast<size_t>(k_prompt_tokens * k_embd),
+    backend.hidden_chunk4.resize(static_cast<size_t>(k_chunk4_rows * k_embd),
                                  0.0f);
-    backend.hidden_chunk8.resize(static_cast<size_t>(k_prompt_tokens * k_embd),
+    backend.hidden_chunk8.resize(static_cast<size_t>(k_chunk8_rows * k_embd),
                                  0.0f);
     backend.norm_chunk4.resize(backend.hidden_chunk4.size(), 0.0f);
     backend.norm_chunk8.resize(backend.hidden_chunk8.size(), 0.0f);
@@ -805,9 +811,9 @@ template <int32_t prompt_tokens> struct hybrid_chunked_q8_runtime_fixture {
     backend.ffn_hidden_chunk4.resize(backend.hidden_chunk4.size(), 0.0f);
     backend.ffn_hidden_chunk8.resize(backend.hidden_chunk8.size(), 0.0f);
     backend.shortconv_bcx_chunk8.resize(
-        static_cast<size_t>(k_prompt_tokens * 3 * k_embd), 0.0f);
+        static_cast<size_t>(k_chunk8_rows * 3 * k_embd), 0.0f);
     backend.shortconv_conv_out_chunk8.resize(
-        static_cast<size_t>(k_prompt_tokens * k_embd), 0.0f);
+        static_cast<size_t>(k_chunk8_rows * k_embd), 0.0f);
 
     logits.resize(static_cast<size_t>(k_vocab), -1.0f);
     topology.execution = &execution;
@@ -3834,6 +3840,58 @@ TEST_CASE("generator_detail_run_kernel_flash_prefill_chunk8_batches_hybrid_q8_"
   CHECK_FALSE(
       emel::text::generator::detail::run_kernel_flash_prefill_chunk8_q8_k(
           fixture->request, &err));
+#endif
+}
+
+TEST_CASE("generator_detail_run_kernel_flash_prefill_parallel_chunk8_keeps_"
+          "matmuls_on_lane_kernels_and_matches_serial") {
+#if defined(__aarch64__) && defined(__ARM_NEON) &&                             \
+    defined(__ARM_FEATURE_MATMUL_INT8)
+  // 12 prompt tokens: one full chunk8 batch plus a 4-token scalar remainder,
+  // so the assertion covers the chunk gemm matmuls (q/k/v, attention output,
+  // shortconv projections, ffn gate/up/down), the scalar remainder layers,
+  // and the logits matmul.
+  using parallel_fixture_type = hybrid_chunked_q8_runtime_fixture<12, 16>;
+  auto serial_fixture = std::make_unique<parallel_fixture_type>();
+  REQUIRE(serial_fixture->ready);
+  int32_t err = -1;
+  REQUIRE(emel::text::generator::detail::bind_guarded_inputs(
+      serial_fixture->request, &err));
+  err = emel::text::generator::detail::k_error_ok;
+  REQUIRE(emel::text::generator::detail::run_kernel_flash_prefill_chunk8_q8_k(
+      serial_fixture->request, &err));
+  CHECK(err == emel::text::generator::detail::k_error_ok);
+
+  auto parallel_fixture = std::make_unique<parallel_fixture_type>();
+  REQUIRE(parallel_fixture->ready);
+  parallel_fixture->backend.lane_pool.emplace();
+  err = -1;
+  REQUIRE(emel::text::generator::detail::bind_guarded_inputs(
+      parallel_fixture->request, &err));
+  err = emel::text::generator::detail::k_error_ok;
+  REQUIRE(emel::text::generator::detail::
+              run_kernel_flash_prefill_parallel_chunk8_q8_k(
+                  parallel_fixture->request, &err));
+  CHECK(err == emel::text::generator::detail::k_error_ok);
+
+  // The parallel route must keep every prefill matmul on the lane kernel
+  // actors; the primary kernel actor stays untouched.
+  CHECK(parallel_fixture->backend.kernel.optimized_q4_dispatch_count() == 0u);
+  uint64_t lane_q4_dispatches = 0u;
+  for (const auto &lane_kernel : parallel_fixture->backend.lane_kernels) {
+    lane_q4_dispatches += lane_kernel.optimized_q4_dispatch_count();
+  }
+  CHECK(lane_q4_dispatches > 0u);
+
+  // Row-sliced lanes write disjoint dst rows and reorder no reductions, so
+  // the parallel output is bit-identical to the serial dispatch.
+  REQUIRE(parallel_fixture->backend.bound_logits.size() ==
+          serial_fixture->backend.bound_logits.size());
+  for (size_t idx = 0; idx < serial_fixture->backend.bound_logits.size();
+       ++idx) {
+    CHECK(parallel_fixture->backend.bound_logits[idx] ==
+          serial_fixture->backend.bound_logits[idx]);
+  }
 #endif
 }
 
