@@ -478,7 +478,16 @@ class thread_pool_scheduler {
     }
   }
 
-  static constexpr std::size_t k_idle_spin_budget = 2048;
+  // Sized so a worker stays in the warm spin-claim above for roughly one full
+  // fork/join round of a bandwidth-bound lane (~100us of `yield` on current
+  // aarch64 cores) instead of the previous ~4us. With the short budget, any
+  // lane straggler put the other workers to sleep mid-burst, and each
+  // semaphore re-wake invited the OS to re-place workers onto efficiency
+  // cores, creating more stragglers: the parallel matmul f32 GEMV fork/join
+  // measured 3x slower than the same lanes on never-sleeping spin threads.
+  // The budget only lengthens the pre-sleep spin window; a genuinely idle
+  // pool still parks on the semaphore below.
+  static constexpr std::size_t k_idle_spin_budget = 65536;
 
   bool running_on_this_worker() const noexcept {
     return active_worker_scheduler_ == this;
