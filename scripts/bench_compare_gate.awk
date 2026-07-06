@@ -39,7 +39,21 @@ function named_arch(name,    a) {
   return "";
 }
 
-function parse_entry(line, dest,    n, fields, name, ns, i, pair) {
+# Return an architecture-normalized key for paired host-specific benchmark names.
+# Exact baseline names always win; this key is only a fallback for a host row
+# whose exact baseline is absent but whose paired foreign-arch baseline exists.
+function normalized_arch_name(name,    a, marker, pos) {
+  for (a in known_arch) {
+    marker = "/" a "/";
+    pos = index(name, marker);
+    if (pos > 0) {
+      return substr(name, 1, pos) "{arch}" substr(name, pos + length(marker) - 1);
+    }
+  }
+  return name;
+}
+
+function parse_entry(line, dest, is_base,    n, fields, name, ns, i, pair, normalized) {
   n = split(line, fields, " ");
   name = fields[1];
   for (i = 2; i <= n; ++i) {
@@ -53,6 +67,14 @@ function parse_entry(line, dest,    n, fields, name, ns, i, pair) {
     return;
   }
   dest[name] = ns;
+  if (is_base) {
+    normalized = normalized_arch_name(name);
+    if (!(normalized in normalized_base)) {
+      normalized_base[normalized] = ns;
+      normalized_base_name[normalized] = name;
+    }
+    normalized_base_count[normalized] += 1;
+  }
 }
 
 BEGIN {
@@ -70,7 +92,7 @@ FNR == NR {
     skip_base = 0;
     next;
   }
-  parse_entry($0, base);
+  parse_entry($0, base, 1);
   next;
 }
 {
@@ -82,21 +104,30 @@ FNR == NR {
     skip_curr = 0;
     next;
   }
-  parse_entry($0, curr);
+  parse_entry($0, curr, 0);
   next;
 }
 END {
   fail = 0;
   compared = 0;
   for (name in curr) {
+    baseline_name = name;
     if (!(name in base)) {
-      print "error: new benchmark entry without baseline: " name > "/dev/stderr";
-      fail = 1;
-      continue;
+      arch = named_arch(name);
+      normalized = normalized_arch_name(name);
+      if (arch == host_arch && normalized in normalized_base &&
+          normalized_base_count[normalized] == 1) {
+        baseline_name = normalized_base_name[normalized];
+        matched_normalized_base[baseline_name] = 1;
+      } else {
+        print "error: new benchmark entry without baseline: " name > "/dev/stderr";
+        fail = 1;
+        continue;
+      }
     }
     compared += 1;
-    relative_limit = base[name] * (1 + tol);
-    absolute_limit = base[name] + abs_tol;
+    relative_limit = base[baseline_name] * (1 + tol);
+    absolute_limit = base[baseline_name] + abs_tol;
     if (curr[name] > relative_limit && curr[name] > absolute_limit) {
       limit = relative_limit > absolute_limit ? relative_limit : absolute_limit;
       if (strict_regression == 1) {
@@ -114,6 +145,9 @@ END {
   if (!scoped) {
     for (name in base) {
       if (name in curr) {
+        continue;
+      }
+      if (name in matched_normalized_base) {
         continue;
       }
       arch = named_arch(name);

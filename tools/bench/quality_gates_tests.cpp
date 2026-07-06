@@ -23,6 +23,7 @@ std::string read_file(const std::filesystem::path & path) {
   return std::string(std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>());
 }
 
+#if !defined(_WIN32)
 void write_file(const std::filesystem::path & path, const std::string & text) {
   std::ofstream output(path, std::ios::binary | std::ios::trunc);
   REQUIRE(output.good());
@@ -62,6 +63,7 @@ int run_compare_gate(const std::string & baseline,
   // distinguish pass from fail.
   return raw == 0 ? 0 : 1;
 }
+#endif
 
 }  // namespace
 
@@ -491,13 +493,16 @@ TEST_CASE("bench runner generation tests use a bounded workload filter") {
   CHECK(tests.find("EMEL_GENERATION_WORKLOAD_ID=") != std::string::npos);
 }
 
-// A baseline that carries both aarch64 and x86_64 arch-gated rows, mirroring the
-// committed snapshots/bench/benchmarks.txt shape. The runner only emits the rows
-// for the host arch (case_supported_on_host), so a full unscoped compare on a
-// single-arch host must not demand the foreign-arch rows.
+#if !defined(_WIN32)
+// A baseline that carries both paired and host-renamed arch rows, mirroring the
+// committed snapshots/bench/benchmarks.txt shape. The runner only emits rows for
+// the host arch (case_supported_on_host), so a full unscoped compare on a
+// single-arch host must not demand foreign-arch rows or reject the host-renamed
+// counterpart of a foreign baseline row.
 const std::string k_dual_arch_baseline =
     "# ref=test\n"
     "batch/planner_simple ns_per_op=650.000 iter=100 runs=3\n"
+    "flash_attention/aarch64/op_flash_attn_ext_decode_like ns_per_op=17892.000 iter=100 runs=3\n"
     "kernel/aarch64/op_add ns_per_op=127.000 iter=100 runs=3\n"
     "kernel/x86_64/op_add ns_per_op=122.000 iter=100 runs=3\n";
 
@@ -506,6 +511,7 @@ TEST_CASE("compare gate exempts foreign-arch baseline rows the host runner skips
   const std::string arm64_current =
       "# bench_host_arch: aarch64\n"
       "batch/planner_simple ns_per_op=655.000\n"
+      "flash_attention/aarch64/op_flash_attn_ext_decode_like ns_per_op=17895.000\n"
       "kernel/aarch64/op_add ns_per_op=128.000\n";
   CHECK(run_compare_gate(k_dual_arch_baseline, arm64_current, "aarch64") == 0);
 
@@ -513,6 +519,7 @@ TEST_CASE("compare gate exempts foreign-arch baseline rows the host runner skips
   const std::string x86_current =
       "# bench_host_arch: x86_64\n"
       "batch/planner_simple ns_per_op=655.000\n"
+      "flash_attention/x86_64/op_flash_attn_ext_decode_like ns_per_op=170.000\n"
       "kernel/x86_64/op_add ns_per_op=123.000\n";
   CHECK(run_compare_gate(k_dual_arch_baseline, x86_current, "x86_64") == 0);
 }
@@ -530,6 +537,16 @@ TEST_CASE("compare gate still fails when a host-native baseline row is missing")
       "kernel/aarch64/op_add ns_per_op=128.000\n";
   CHECK(run_compare_gate(k_dual_arch_baseline, arm64_missing_shared, "aarch64") != 0);
 }
+
+TEST_CASE("compare gate still fails when a host-renamed row has no paired baseline") {
+  const std::string x86_current =
+      "# bench_host_arch: x86_64\n"
+      "batch/planner_simple ns_per_op=655.000\n"
+      "flash_attention/x86_64/untracked_case ns_per_op=170.000\n"
+      "kernel/x86_64/op_add ns_per_op=123.000\n";
+  CHECK(run_compare_gate(k_dual_arch_baseline, x86_current, "x86_64") != 0);
+}
+#endif
 
 TEST_CASE("bench runner emits a host-arch marker the compare gate consumes") {
   const std::string bench_runner =
