@@ -4338,7 +4338,8 @@ inline bool compute_logits_preselected_argmax(native_backend & backend,
   }
 }
 
-template <emel::text::generator::attention_mode mode, scalar_matmul_route route>
+template <emel::text::generator::attention_mode mode, scalar_matmul_route route,
+          matmul_lane_mode lanes = matmul_lane_mode::serial>
 inline bool run_prefill_scalar_tokens(native_backend & backend,
                                       const kv_addressing_view & kv,
                                       const size_t token_begin,
@@ -4358,7 +4359,7 @@ inline bool run_prefill_scalar_tokens(native_backend & backend,
     }
 
     for (int32_t layer = 0; layer < backend.n_layer; ++layer) {
-      if (!run_layer<mode, route>(backend, layer, kv, position)) {
+      if (!run_layer<mode, route, lanes>(backend, layer, kv, position)) {
         return false;
       }
     }
@@ -4368,11 +4369,12 @@ inline bool run_prefill_scalar_tokens(native_backend & backend,
   return true;
 }
 
-template <emel::text::generator::attention_mode mode, scalar_matmul_route route>
+template <emel::text::generator::attention_mode mode, scalar_matmul_route route,
+          matmul_lane_mode lanes = matmul_lane_mode::serial>
 inline bool run_prefill_scalar_tokens(native_backend & backend,
                                       const size_t token_begin,
                                       const size_t token_end) noexcept {
-  return run_prefill_scalar_tokens<mode, route>(
+  return run_prefill_scalar_tokens<mode, route, lanes>(
       backend, identity_kv_addressing(), token_begin, token_end);
 }
 
@@ -4822,9 +4824,9 @@ inline bool run_layer_chunk8_q8_k(native_backend & backend,
       std::span<float>(backend.ffn_hidden_chunk8.data(),
                        static_cast<size_t>(k_prefill_q8_chunk8_rows) * static_cast<size_t>(ffn_dim));
   if (!prepare_q8_chunk8_input(backend, backend.norm_chunk8, backend.n_embd) ||
-      !matmul_chunk8_q8_input(
+      !matmul_chunk8_q8_input<lanes>(
           backend, block.feed_forward_gate, backend.n_embd, gate_chunk) ||
-      !matmul_chunk8_q8_input(
+      !matmul_chunk8_q8_input<lanes>(
           backend, block.feed_forward_up, backend.n_embd, up_chunk)) {
     return false;
   }
@@ -4832,7 +4834,7 @@ inline bool run_layer_chunk8_q8_k(native_backend & backend,
   if (!apply_silu_mul_chunk8(
           gate_chunk, up_chunk, ffn_dim, ffn_hidden_chunk) ||
       !prepare_q8_chunk8_input(backend, ffn_hidden_chunk, ffn_dim) ||
-      !matmul_chunk8_q8_input(
+      !matmul_chunk8_q8_input<lanes>(
           backend, block.feed_forward_down, ffn_dim, backend.projected_chunk8) ||
       !add_chunk8_rows_in_place(backend.hidden_chunk8, backend.projected_chunk8, backend.n_embd)) {
     return false;
@@ -4968,7 +4970,8 @@ inline bool run_prefill_chunk4(native_backend & backend, const kv_addressing_vie
       !run_prefill_chunk4_tokens<mode, route, lanes>(backend, kv, chunk_limit) ||
       !run_prefill_scalar_tokens<
           mode,
-          static_cast<scalar_matmul_route>(route)>(backend, kv, chunk_limit, token_count)) {
+          static_cast<scalar_matmul_route>(route),
+          lanes>(backend, kv, chunk_limit, token_count)) {
     return false;
   }
 
@@ -4994,7 +4997,7 @@ inline bool run_prefill_chunk8_q8_k(native_backend & backend,
       token_count - (token_count % static_cast<size_t>(k_prefill_q8_chunk8_rows));
   if (chunk_limit == 0u ||
       !run_prefill_chunk8_tokens_q8_k<mode, lanes>(backend, kv, chunk_limit) ||
-      !run_prefill_scalar_tokens<mode, scalar_matmul_route::q8_k>(
+      !run_prefill_scalar_tokens<mode, scalar_matmul_route::q8_k, lanes>(
           backend, kv, chunk_limit, token_count)) {
     return false;
   }
@@ -5065,7 +5068,8 @@ inline bool run_prefill_chunk4_preselected_argmax(native_backend & backend,
       !run_prefill_chunk4_tokens<mode, route, lanes>(backend, kv, chunk_limit) ||
       !run_prefill_scalar_tokens<
           mode,
-          static_cast<scalar_matmul_route>(route)>(backend, kv, chunk_limit, token_count)) {
+          static_cast<scalar_matmul_route>(route),
+          lanes>(backend, kv, chunk_limit, token_count)) {
     return false;
   }
 
@@ -5102,7 +5106,7 @@ inline bool run_prefill_chunk8_preselected_argmax_q8_k(native_backend & backend,
       token_count - (token_count % static_cast<size_t>(k_prefill_q8_chunk8_rows));
   if (chunk_limit == 0u ||
       !run_prefill_chunk8_tokens_q8_k<mode, lanes>(backend, kv, chunk_limit) ||
-      !run_prefill_scalar_tokens<mode, scalar_matmul_route::q8_k>(
+      !run_prefill_scalar_tokens<mode, scalar_matmul_route::q8_k, lanes>(
           backend, kv, chunk_limit, token_count)) {
     return false;
   }
