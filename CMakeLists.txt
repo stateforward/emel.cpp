@@ -172,6 +172,7 @@ if(EMEL_ENABLE_TESTS)
     tests/text/generator/action_guard_tests.cpp
     tests/text/generator/detail_tests.cpp
     tests/text/generator/parallel_matmul_tests.cpp
+    tests/text/generator/determinism_tests.cpp
     tests/text/generator/stream_window_tests.cpp
     tests/text/generator/decode_wavefront/lifecycle_tests.cpp
     tests/text/generator/initializer/lifecycle_tests.cpp
