@@ -212,10 +212,16 @@ endif()
 set(EMEL_ENABLE_TESTS OFF CACHE BOOL "" FORCE)
 add_subdirectory(${EMEL_ROOT} emel)
 
-find_path(NLOHMANN_JSON_INCLUDE_DIR nlohmann/json.hpp)
-if(NOT NLOHMANN_JSON_INCLUDE_DIR AND EMEL_BENCH_NEEDS_LLAMA AND
+# Prefer the reference checkout's vendored nlohmann/json.hpp over a system
+# prefix. find_path can resolve to a prefix like /opt/homebrew/include that
+# also carries an installed llama.cpp (llama.h/ggml.h); injecting that prefix
+# ahead of the pinned reference headers silently compiles the bench against a
+# mismatched llama ABI and crashes (SIGBUS) inside llama_init_from_model.
+if(EMEL_BENCH_NEEDS_LLAMA AND
    EXISTS "${reference_impl_SOURCE_DIR}/vendor/nlohmann/json.hpp")
   set(NLOHMANN_JSON_INCLUDE_DIR "${reference_impl_SOURCE_DIR}/vendor")
+else()
+  find_path(NLOHMANN_JSON_INCLUDE_DIR nlohmann/json.hpp)
 endif()
 
 if(EMEL_BENCH_NEEDS_LLAMA)
@@ -330,12 +336,9 @@ function(configure_bench_runner_common_target target_name)
       ${EMEL_ROOT}/src
       ${EMEL_ROOT}/include
   )
-  if(NLOHMANN_JSON_INCLUDE_DIR)
-    target_include_directories(${target_name}
-      PRIVATE
-        ${NLOHMANN_JSON_INCLUDE_DIR}
-    )
-  endif()
+  # Reference includes are added before any externally discovered include dir
+  # so the pinned reference llama.h/ggml.h always win over same-named headers
+  # from a system prefix.
   if(EMEL_BENCH_NEEDS_LLAMA)
     target_include_directories(${target_name}
       PRIVATE
@@ -344,6 +347,12 @@ function(configure_bench_runner_common_target target_name)
         ${reference_impl_SOURCE_DIR}/ggml/include
         ${reference_impl_SOURCE_DIR}/include
         ${reference_impl_SOURCE_DIR}/vendor
+    )
+  endif()
+  if(NLOHMANN_JSON_INCLUDE_DIR)
+    target_include_directories(${target_name}
+      PRIVATE
+        ${NLOHMANN_JSON_INCLUDE_DIR}
     )
   endif()
 endfunction()
