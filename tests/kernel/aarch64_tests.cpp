@@ -1826,6 +1826,151 @@ TEST_CASE("kernel_aarch64_f16_mul_mat_without_neon_takes_shared_route") {
   }
 }
 
+TEST_CASE("kernel_aarch64_f32_vector_gemv_route_is_explicit_and_bit_identical") {
+  // k covers four 16-wide f32 steps plus a 6-element scalar tail so the
+  // vfmaq body and the leftover loop of the ported ggml_vec_dot_f32 both
+  // execute. Integer-valued inputs keep every product and partial sum
+  // exactly representable, so the NEON vec_dot route and the shared scalar
+  // route must agree bit-for-bit regardless of accumulation order.
+  constexpr uint64_t k_depth = 70;
+  constexpr uint64_t k_rows = 5;
+  std::vector<float> a_f32(k_depth * k_rows);
+  std::vector<float> b_f32(k_depth);
+  for (size_t idx = 0; idx < a_f32.size(); ++idx) {
+    a_f32[idx] = static_cast<float>(static_cast<int32_t>(idx % 7u) - 3);
+  }
+  for (size_t idx = 0; idx < b_f32.size(); ++idx) {
+    b_f32[idx] = static_cast<float>(static_cast<int32_t>(idx % 5u) - 2);
+  }
+
+  std::vector<float> out(k_rows, 0.0f);
+  const emel::kernel::event::op_mul_mat ev{
+      .src0 = make_src(a_f32.data(), dtype::f32, k_depth, k_rows),
+      .src1 = make_src(b_f32.data(), dtype::f32, 1u, k_depth),
+      .dst = make_dst(out.data(), dtype::f32, 1u, k_rows),
+  };
+
+  emel::kernel::aarch64::event::dispatch_ctx dispatch_ctx{};
+  const emel::kernel::aarch64::event::dispatch_op_mul_mat dispatch_ev{
+      ev, dispatch_ctx};
+  const emel::kernel::aarch64::action::context neon_ctx{true, {}, 0};
+  const emel::kernel::aarch64::action::context no_neon_ctx{false, {}, 0};
+
+  // The f32 GEMV guard and the generic NEON matmul guard are mutually
+  // exclusive by construction: the GEMV shape must not fall back to the
+  // generic route that scalarizes single-column outputs.
+#if defined(__aarch64__) || defined(__ARM_NEON)
+  CHECK(emel::kernel::aarch64::guard::simd_op_mul_mat_f32_vector{}(dispatch_ev,
+                                                                   neon_ctx));
+  CHECK_FALSE(emel::kernel::aarch64::guard::simd_op_mul_mat_generic{}(
+      dispatch_ev, neon_ctx));
+#else
+  CHECK_FALSE(emel::kernel::aarch64::guard::simd_op_mul_mat_f32_vector{}(
+      dispatch_ev, neon_ctx));
+#endif
+  CHECK_FALSE(emel::kernel::aarch64::guard::simd_op_mul_mat_f32_vector{}(
+      dispatch_ev, no_neon_ctx));
+  CHECK(emel::kernel::aarch64::guard::valid_op_mul_mat{}(dispatch_ev,
+                                                         no_neon_ctx));
+
+  // Multi-column f32 requests stay on the generic NEON route.
+  std::vector<float> gemm_b(k_depth * 2u, 1.0f);
+  std::vector<float> gemm_out(k_rows * 2u, 0.0f);
+  const emel::kernel::event::op_mul_mat gemm_ev{
+      .src0 = make_src(a_f32.data(), dtype::f32, k_depth, k_rows),
+      .src1 = make_src(gemm_b.data(), dtype::f32, 2u, k_depth),
+      .dst = make_dst(gemm_out.data(), dtype::f32, 2u, k_rows),
+  };
+  const emel::kernel::aarch64::event::dispatch_op_mul_mat gemm_dispatch_ev{
+      gemm_ev, dispatch_ctx};
+  CHECK_FALSE(emel::kernel::aarch64::guard::simd_op_mul_mat_f32_vector{}(
+      gemm_dispatch_ev, neon_ctx));
+#if defined(__aarch64__) || defined(__ARM_NEON)
+  CHECK(emel::kernel::aarch64::guard::simd_op_mul_mat_generic{}(
+      gemm_dispatch_ev, neon_ctx));
+#endif
+
+  aarch64_sm machine{};
+  allocation_scope allocations{};
+  CHECK(machine.process_event(ev));
+  CHECK(allocations.allocations() == 0u);
+
+#if defined(__aarch64__) || defined(__ARM_NEON)
+  CHECK(machine.optimized_f32_vector_dispatch_count() == 1u);
+#else
+  CHECK(machine.optimized_f32_vector_dispatch_count() == 0u);
+#endif
+
+  // The shared-route reference is driven through the machine as well: a
+  // no-NEON context forces the scalar f32 row of the same transition table.
+  std::vector<float> expected(out.size(), 0.0f);
+  const emel::kernel::event::op_mul_mat shared_ev{
+      .src0 = make_src(a_f32.data(), dtype::f32, k_depth, k_rows),
+      .src1 = make_src(b_f32.data(), dtype::f32, 1u, k_depth),
+      .dst = make_dst(expected.data(), dtype::f32, 1u, k_rows),
+  };
+  aarch64_sm shared_machine{
+      emel::kernel::aarch64::action::context{false, {}, 0}};
+  CHECK(shared_machine.process_event(shared_ev));
+  CHECK(shared_machine.optimized_f32_vector_dispatch_count() == 0u);
+  for (size_t idx = 0; idx < out.size(); ++idx) {
+    CHECK(out[idx] == expected[idx]);
+  }
+
+  emel::kernel::any aarch64_any{emel::kernel::kernel_kind::aarch64};
+  CHECK(aarch64_any.process_event(ev));
+#if defined(__aarch64__) || defined(__ARM_NEON)
+  CHECK(aarch64_any.optimized_f32_vector_dispatch_count() == 1u);
+#else
+  CHECK(aarch64_any.optimized_f32_vector_dispatch_count() == 0u);
+#endif
+}
+
+TEST_CASE("kernel_aarch64_f32_vector_gemv_accepts_row_sliced_lane_views") {
+  // Mirrors the parallel matmul lane slicing from the generator/bench: the
+  // logical GEMV splits into contiguous row slices sharing src1, and every
+  // lane must route to the f32 vector kernel and reproduce the full result.
+  constexpr uint64_t k_depth = 64;
+  constexpr uint64_t k_rows = 8;
+  constexpr uint64_t k_lanes = 2;
+  std::vector<float> a_f32(k_depth * k_rows);
+  std::vector<float> b_f32(k_depth);
+  for (size_t idx = 0; idx < a_f32.size(); ++idx) {
+    a_f32[idx] = static_cast<float>(static_cast<int32_t>(idx % 9u) - 4);
+  }
+  for (size_t idx = 0; idx < b_f32.size(); ++idx) {
+    b_f32[idx] = static_cast<float>(static_cast<int32_t>(idx % 6u) - 2);
+  }
+
+  std::vector<float> full_out(k_rows, 0.0f);
+  const emel::kernel::event::op_mul_mat full_ev{
+      .src0 = make_src(a_f32.data(), dtype::f32, k_depth, k_rows),
+      .src1 = make_src(b_f32.data(), dtype::f32, 1u, k_depth),
+      .dst = make_dst(full_out.data(), dtype::f32, 1u, k_rows),
+  };
+  aarch64_sm full_machine{};
+  CHECK(full_machine.process_event(full_ev));
+
+  std::vector<float> lane_out(k_rows, 0.0f);
+  emel::kernel::event::op_mul_mat lane_base = full_ev;
+  lane_base.dst.data = lane_out.data();
+  constexpr uint64_t rows_per_lane = k_rows / k_lanes;
+  aarch64_sm lane_machine{};
+  for (uint64_t lane = 0; lane < k_lanes; ++lane) {
+    const auto lane_ev = make_row_sliced_lane_event(
+        lane_base, 1u, lane * rows_per_lane, rows_per_lane);
+    CHECK(lane_machine.process_event(lane_ev));
+  }
+#if defined(__aarch64__) || defined(__ARM_NEON)
+  CHECK(lane_machine.optimized_f32_vector_dispatch_count() == k_lanes);
+#else
+  CHECK(lane_machine.optimized_f32_vector_dispatch_count() == 0u);
+#endif
+  for (size_t idx = 0; idx < full_out.size(); ++idx) {
+    CHECK(lane_out[idx] == full_out[idx]);
+  }
+}
+
 TEST_CASE("kernel_aarch64_conv_transpose_1d_f32_route_is_explicit_and_bit_"
           "identical") {
   // taps=6 exercises the 4-wide NEON run plus a 2-tap tail; the NEON variant
