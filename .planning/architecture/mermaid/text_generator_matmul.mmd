@@ -9,14 +9,7 @@ stateDiagram-v2
   state_ready --> state_ready : execute_parallel [guard_parallel_unavailable_] / effect_reject_parallel_execution_
   state_parallel_result_decision --> state_ready : completion_execute_parallel_ [guard_parallel_submission_failed_] / effect_reject_parallel_execution_
   state_parallel_result_decision --> state_ready : completion_execute_parallel_ [guard_parallel_join_failed_] / effect_reject_parallel_execution_
-  state_parallel_result_decision --> state_ready : completion_execute_parallel_ [guard_parallel_lane_rejected_0__] / effect_reject_parallel_execution_
-  state_parallel_result_decision --> state_ready : completion_execute_parallel_ [guard_parallel_lane_rejected_1__] / effect_reject_parallel_execution_
-  state_parallel_result_decision --> state_ready : completion_execute_parallel_ [guard_parallel_lane_rejected_2__] / effect_reject_parallel_execution_
-  state_parallel_result_decision --> state_ready : completion_execute_parallel_ [guard_parallel_lane_rejected_3__] / effect_reject_parallel_execution_
-  state_parallel_result_decision --> state_ready : completion_execute_parallel_ [guard_parallel_lane_rejected_4__] / effect_reject_parallel_execution_
-  state_parallel_result_decision --> state_ready : completion_execute_parallel_ [guard_parallel_lane_rejected_5__] / effect_reject_parallel_execution_
-  state_parallel_result_decision --> state_ready : completion_execute_parallel_ [guard_parallel_lane_rejected_6__] / effect_reject_parallel_execution_
-  state_parallel_result_decision --> state_ready : completion_execute_parallel_ [guard_parallel_lane_rejected_7__] / effect_reject_parallel_execution_
+  state_parallel_result_decision --> state_ready : completion_execute_parallel_ [guard_parallel_lane_rejected_] / effect_reject_parallel_execution_
   state_parallel_result_decision --> state_ready : completion_execute_parallel_ [guard_parallel_all_lanes_accepted_] / effect_accept_parallel_execution_
   state_ready --> state_ready : _ [always] / effect_on_unexpected_
   state_serial_result_decision --> state_ready : _ [always] / effect_on_unexpected_

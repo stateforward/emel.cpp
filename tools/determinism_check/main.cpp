@@ -35,6 +35,7 @@
 #include <vector>
 
 #include "../bench/model_load_strategy.hpp"
+#include "../generation_route_policy.hpp"
 #include "emel/error/error.hpp"
 #include "emel/gguf/loader/any.hpp"
 #include "emel/gguf/loader/errors.hpp"
@@ -42,8 +43,8 @@
 #include "emel/gguf/loader/sm.hpp"
 #include "emel/io/events.hpp"
 #include "emel/io/read/sm.hpp"
-#include "emel/io/staged_read/sm.hpp"
 #include "emel/io/source/any.hpp"
+#include "emel/io/staged_read/sm.hpp"
 #include "emel/logits/sampler/events.hpp"
 #include "emel/memory/view.hpp"
 #include "emel/model/data.hpp"
@@ -149,8 +150,7 @@ struct logits_probe {
   }
 };
 
-emel::error::type probe_argmax_sampler(void *owner,
-                                       int32_t &candidate_ids,
+emel::error::type probe_argmax_sampler(void *owner, int32_t &candidate_ids,
                                        float &candidate_scores,
                                        int32_t &candidate_count,
                                        int32_t &selected_token_out) {
@@ -166,9 +166,9 @@ emel::error::type probe_argmax_sampler(void *owner,
     }
   }
   selected_token_out = ids[best_index];
-  probe.logits_hash = fnv1a_bytes(
-      probe.logits_hash, scores,
-      static_cast<size_t>(candidate_count) * sizeof(float));
+  probe.logits_hash =
+      fnv1a_bytes(probe.logits_hash, scores,
+                  static_cast<size_t>(candidate_count) * sizeof(float));
   probe.token_hash = fnv1a_bytes(probe.token_hash, &selected_token_out,
                                  sizeof(selected_token_out));
   probe.steps += 1;
@@ -180,6 +180,7 @@ emel::error::type probe_argmax_sampler(void *owner,
 struct session {
   emel::text::tokenizer::sm tokenizer = {};
   emel::text::conditioner::sm conditioner = {};
+  emel::text::generator::matmul::lane_pool<7u> parallel_matmul_lanes = {};
   std::unique_ptr<emel::text::generator::sm> generator = {};
   std::array<emel::logits::sampler::fn, 1> samplers = {};
   logits_probe probe = {};
@@ -234,7 +235,8 @@ void on_bind_error(void *owner,
   f.gguf.bind_error = true;
   f.gguf.err = ev.err;
 }
-void on_parse_done(void *owner, const emel::gguf::loader::events::parse_done &) {
+void on_parse_done(void *owner,
+                   const emel::gguf::loader::events::parse_done &) {
   auto &f = *static_cast<emel_fixture *>(owner);
   f.gguf.parse_done = true;
   f.gguf.parse_error = false;
@@ -245,8 +247,7 @@ void on_parse_error(void *owner,
   f.gguf.parse_error = true;
   f.gguf.err = ev.err;
 }
-void on_load_done(void *owner,
-                  const emel::model::loader::events::load_done &) {
+void on_load_done(void *owner, const emel::model::loader::events::load_done &) {
   auto &f = *static_cast<emel_fixture *>(owner);
   f.load.done = true;
   f.load.error = false;
@@ -259,8 +260,8 @@ void on_load_error(void *owner,
   f.load.err = ev.err;
 }
 
-void on_initialize_done(void *owner,
-                        const emel::text::generator::events::initialize_done &) {
+void on_initialize_done(
+    void *owner, const emel::text::generator::events::initialize_done &) {
   auto &s = *static_cast<session *>(owner);
   s.initialize.done = true;
   s.initialize.error = false;
@@ -343,13 +344,14 @@ bool copy_tensor_names(const std::span<const uint8_t> file_image,
   return true;
 }
 
-emel::model::detail::kv_binding kv_binding_from_fixture(
-    const emel_fixture &fixture) {
+emel::model::detail::kv_binding
+kv_binding_from_fixture(const emel_fixture &fixture) {
   return emel::model::detail::kv_binding{
       .arena = std::span<const uint8_t>{fixture.kv_arena.data(),
                                         fixture.kv_arena.size()},
-      .entries = std::span<const emel::gguf::loader::kv_entry>{
-          fixture.kv_entries.data(), fixture.kv_entries.size()},
+      .entries =
+          std::span<const emel::gguf::loader::kv_entry>{
+              fixture.kv_entries.data(), fixture.kv_entries.size()},
   };
 }
 
@@ -374,12 +376,12 @@ emel::error::type prebind_emel_gguf_storage(emel_fixture &fixture) {
   emel::gguf::loader::requirements requirements = {};
   const emel::gguf::loader::event::probe_done_fn probe_done_cb{&fixture,
                                                                on_probe_done};
-  const emel::gguf::loader::event::probe_error_fn probe_error_cb{&fixture,
-                                                                 on_probe_error};
-  const emel::gguf::loader::event::probe probe_ev{file_image, requirements,
-                                                  probe_done_cb, probe_error_cb};
-  if (!fixture.gguf_loader.process_event(probe_ev) || !fixture.gguf.probe_done ||
-      fixture.gguf.probe_error) {
+  const emel::gguf::loader::event::probe_error_fn probe_error_cb{
+      &fixture, on_probe_error};
+  const emel::gguf::loader::event::probe probe_ev{
+      file_image, requirements, probe_done_cb, probe_error_cb};
+  if (!fixture.gguf_loader.process_event(probe_ev) ||
+      !fixture.gguf.probe_done || fixture.gguf.probe_error) {
     return map_gguf_error(fixture.gguf.err);
   }
   if (requirements.tensor_count >
@@ -398,8 +400,8 @@ emel::error::type prebind_emel_gguf_storage(emel_fixture &fixture) {
   return emel::error::cast(emel::model::loader::error::none);
 }
 
-emel::error::type run_emel_parse_model(void *owner,
-                                       const emel::model::loader::event::load &req) {
+emel::error::type
+run_emel_parse_model(void *owner, const emel::model::loader::event::load &req) {
   auto &fixture = *static_cast<emel_fixture *>(owner);
   if (req.file_image == nullptr || req.file_size == 0u) {
     return emel::error::cast(emel::model::loader::error::invalid_request);
@@ -427,12 +429,12 @@ emel::error::type run_emel_parse_model(void *owner,
   fixture.gguf = {};
   const emel::gguf::loader::event::parse_done_fn parse_done_cb{&fixture,
                                                                on_parse_done};
-  const emel::gguf::loader::event::parse_error_fn parse_error_cb{&fixture,
-                                                                 on_parse_error};
+  const emel::gguf::loader::event::parse_error_fn parse_error_cb{
+      &fixture, on_parse_error};
   const emel::gguf::loader::event::parse parse_ev{file_image, parse_done_cb,
                                                   parse_error_cb};
-  if (!fixture.gguf_loader.process_event(parse_ev) || !fixture.gguf.parse_done ||
-      fixture.gguf.parse_error) {
+  if (!fixture.gguf_loader.process_event(parse_ev) ||
+      !fixture.gguf.parse_done || fixture.gguf.parse_error) {
     return map_gguf_error(fixture.gguf.err);
   }
 
@@ -443,8 +445,8 @@ emel::error::type run_emel_parse_model(void *owner,
   return populate_model_metadata(fixture, req.model_data);
 }
 
-emel::error::type run_emel_map_layers(void *,
-                                      const emel::model::loader::event::load &req) {
+emel::error::type
+run_emel_map_layers(void *, const emel::model::loader::event::load &req) {
   int32_t max_block_index = -1;
   for (uint32_t index = 0u; index < req.model_data.n_tensors; ++index) {
     int32_t block_index = -1;
@@ -467,8 +469,9 @@ emel::error::type run_emel_map_layers(void *,
   return emel::error::cast(emel::model::loader::error::model_invalid);
 }
 
-emel::error::type run_emel_validate_structure(
-    void *, const emel::model::loader::event::load &req) {
+emel::error::type
+run_emel_validate_structure(void *,
+                            const emel::model::loader::event::load &req) {
   if (req.model_data.n_tensors == 0u || req.model_data.n_layers <= 0 ||
       req.model_data.weights_data == nullptr ||
       req.model_data.weights_size == 0u) {
@@ -477,8 +480,9 @@ emel::error::type run_emel_validate_structure(
   return emel::error::cast(emel::model::loader::error::none);
 }
 
-emel::error::type run_emel_validate_architecture(
-    void *, const emel::model::loader::event::load &req) {
+emel::error::type
+run_emel_validate_architecture(void *,
+                               const emel::model::loader::event::load &req) {
   return emel::model::validate_execution_contract(req.model_data);
 }
 
@@ -526,7 +530,8 @@ generation_encoder_variant(const emel::model::data &model_data) {
   }
 }
 
-bool prepare_emel_fixture(emel_fixture &fixture, const std::string &model_path) {
+bool prepare_emel_fixture(emel_fixture &fixture,
+                          const std::string &model_path) {
   if (emel::io::source::load_file_bytes(model_path, fixture.file_bytes) !=
       emel::error::cast(emel::io::read::error::none)) {
     std::fprintf(stderr, "load: source file load failed (%s)\n",
@@ -554,7 +559,8 @@ bool prepare_emel_fixture(emel_fixture &fixture, const std::string &model_path) 
   load_ev.io_load_spans = std::span<emel::io::event::tensor_load_span>{
       fixture.io_load_spans.data(), fixture.io_load_spans.size()};
   emel::tools::bind_model_load_io_strategy(load_ev, fixture.io_loader);
-  if (load_ev.io_strategy == emel::io::loader::event::strategy_kind::read_copy ||
+  if (load_ev.io_strategy ==
+          emel::io::loader::event::strategy_kind::read_copy ||
       load_ev.io_strategy ==
           emel::io::loader::event::strategy_kind::staged_read) {
     fixture.read_copy_storage.resize(
@@ -563,7 +569,8 @@ bool prepare_emel_fixture(emel_fixture &fixture, const std::string &model_path) 
   }
   load_ev.map_layers = {nullptr, run_emel_map_layers};
   load_ev.validate_structure = {nullptr, run_emel_validate_structure};
-  load_ev.validate_architecture_impl = {nullptr, run_emel_validate_architecture};
+  load_ev.validate_architecture_impl = {nullptr,
+                                        run_emel_validate_architecture};
   load_ev.on_done = {&fixture, on_load_done};
   load_ev.on_error = {&fixture, on_load_error};
   if (!fixture.model_loader.process_event(load_ev) || !fixture.load.done ||
@@ -632,28 +639,32 @@ bool run_generate(session &s, const std::string_view prompt, int32_t tokens,
   request.on_done = {&s, on_generation_done};
   request.on_error = {&s, on_generation_error};
   const bool accepted = s.generator->process_event(request);
-  const bool ok = accepted && s.generation.done && !s.generation.error &&
-                  error_out ==
-                      emel::error::cast(emel::text::generator::error::none);
+  const bool ok =
+      accepted && s.generation.done && !s.generation.error &&
+      error_out == emel::error::cast(emel::text::generator::error::none);
   if (!ok) {
     return false;
   }
   evidence_out.tokens_generated = s.generation.tokens_generated;
   evidence_out.output_text.assign(s.output.data(), s.generation.output_length);
-  evidence_out.output_fnv = fnv1a_bytes(k_fnv_offset, s.output.data(),
-                                        s.generation.output_length);
+  evidence_out.output_fnv =
+      fnv1a_bytes(k_fnv_offset, s.output.data(), s.generation.output_length);
   evidence_out.logits_fnv = s.probe.logits_hash;
   evidence_out.token_fnv = s.probe.token_hash;
   evidence_out.sampler_steps = s.probe.steps;
   return true;
 }
 
-std::unique_ptr<session> make_session(const emel::model::data &model,
-                                      const emel::text::generator::selection_mode mode,
-                                      int32_t prompt_capacity, int32_t tokens) {
+std::unique_ptr<session>
+make_session(const emel::model::data &model,
+             const emel::text::generator::selection_mode mode,
+             int32_t prompt_capacity, int32_t tokens) {
   auto s = std::make_unique<session>();
   s->generator = std::make_unique<emel::text::generator::sm>(
-      model, s->conditioner, nullptr, emel::text::formatter::format_raw);
+      emel::text::generator::make_auto_dependencies(
+          model, s->conditioner, s->parallel_matmul_lanes,
+          emel::tools::generation_route::make_current_runtime_policy(model),
+          nullptr, emel::text::formatter::format_raw));
   if (!initialize_session(*s, model, mode, prompt_capacity, tokens)) {
     return nullptr;
   }
@@ -746,7 +757,7 @@ bool check_mode(const emel::model::data &model,
   return deterministic;
 }
 
-}  // namespace
+} // namespace
 
 int main(int argc, char **argv) {
   if (argc < 2) {
@@ -757,11 +768,12 @@ int main(int argc, char **argv) {
   }
   const std::string model_path = argv[1];
   const int32_t repeats =
-      argc > 2 ? std::clamp(static_cast<int32_t>(std::atoi(argv[2])), 2, 64) : 3;
+      argc > 2 ? std::clamp(static_cast<int32_t>(std::atoi(argv[2])), 2, 64)
+               : 3;
   const int32_t tokens = argc > 3 ? std::max(1, std::atoi(argv[3])) : 16;
-  // >= 8 prompt tokens so the parallel prefill lane route engages
-  // (k_parallel_min_prefill_tokens); on models with n_embd >= 1024 the
-  // parallel decode GEMV lanes engage as well.
+  // Keep enough prompt tokens for the tool route policy to engage parallel
+  // prefill; on models with n_embd >= 1024, parallel decode GEMV lanes engage
+  // as well.
   const std::string_view prompt =
       argc > 4 ? std::string_view{argv[4]}
                : std::string_view{"The history of artificial intelligence "
@@ -783,14 +795,13 @@ int main(int argc, char **argv) {
       static_cast<int32_t>(fixture->model_data->vocab_data.n_tokens);
 
   const emel::model::data &model = *fixture->model_data;
-  std::printf("# model=%s arch=%.*s n_layer=%d n_embd=%d n_vocab=%d "
-              "repeats=%d tokens=%d\n",
-              model_path.c_str(),
-              static_cast<int>(emel::model::architecture_name_view(model)
-                                   .size()),
-              emel::model::architecture_name_view(model).data(),
-              model.params.n_layer, model.params.n_embd, model.params.n_vocab,
-              repeats, tokens);
+  std::printf(
+      "# model=%s arch=%.*s n_layer=%d n_embd=%d n_vocab=%d "
+      "repeats=%d tokens=%d\n",
+      model_path.c_str(),
+      static_cast<int>(emel::model::architecture_name_view(model).size()),
+      emel::model::architecture_name_view(model).data(), model.params.n_layer,
+      model.params.n_embd, model.params.n_vocab, repeats, tokens);
 
   bool all_deterministic = true;
   run_evidence argmax_reference = {};
@@ -798,8 +809,8 @@ int main(int argc, char **argv) {
   all_deterministic =
       check_mode(model,
                  emel::text::generator::selection_mode::preselected_argmax,
-                 "preselected_argmax", prompt, prompt_capacity, tokens,
-                 repeats, argmax_reference) &&
+                 "preselected_argmax", prompt, prompt_capacity, tokens, repeats,
+                 argmax_reference) &&
       all_deterministic;
   all_deterministic =
       check_mode(model, emel::text::generator::selection_mode::sample_logits,

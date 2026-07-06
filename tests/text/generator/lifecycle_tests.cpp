@@ -28,6 +28,7 @@
 #include "emel/graph/tensor/events.hpp"
 #include "emel/text/formatter/format.hpp"
 #include "emel/text/tokenizer/sm.hpp"
+#include "generator_test_policies.hpp"
 
 namespace {
 
@@ -875,6 +876,7 @@ struct generator_fixture {
   prepared_model prepared = {};
   emel::text::tokenizer::sm tokenizer{};
   emel::text::conditioner::sm conditioner{};
+  emel::text::generator::matmul::lane_pool<7u> parallel_matmul_lanes = {};
   std::unique_ptr<emel::text::generator::sm> generator = {};
   std::array<emel::logits::sampler::fn, 1> samplers = {
       emel::logits::sampler::fn::from<sampler_select_argmax>(),
@@ -912,8 +914,12 @@ struct generator_fixture {
     if (variant == model_variant::flash_kv_width_mismatch) {
       apply_flash_kv_width_mismatch(prepared);
     }
+    const emel::model::data & model = stabilize_model(prepared);
     generator = std::make_unique<emel::text::generator::sm>(
-        stabilize_model(prepared), conditioner, formatter_ctx, format_prompt);
+        emel::text::generator::make_auto_dependencies(
+            model, conditioner, parallel_matmul_lanes,
+            emel::text::generator::test::make_auto_runtime_policy(model),
+            formatter_ctx, format_prompt));
     hello_id = prepared.hello_id;
     world_id = prepared.world_id;
   }
@@ -1141,36 +1147,8 @@ TEST_CASE("generator_initialize_rejects_block_tokens_larger_than_context") {
   CHECK(tracker.err == emel::error::cast(emel::text::generator::error::invalid_request));
 }
 
-TEST_CASE("generator_initialize_rejects_missing_injected_dependencies_through_sml") {
-  auto generator = std::make_unique<emel::text::generator::sm>();
-  emel::text::tokenizer::sm tokenizer{};
-  std::array<emel::logits::sampler::fn, 1> samplers = {
-      emel::logits::sampler::fn::from<sampler_select_argmax>(),
-  };
-  callback_tracker tracker{};
-  emel::error::type error = emel::error::cast(emel::text::generator::error::none);
-  emel::text::generator::event::initialize request{
-    &tokenizer,
-    tokenizer_bind_dispatch,
-    tokenizer_tokenize_dispatch,
-    std::span<emel::logits::sampler::fn>{samplers},
-  };
-  request.max_prompt_tokens = 8;
-  request.max_generated_tokens = 4;
-  request.max_blocks = 2;
-  request.block_tokens = 4;
-  request.error_out = &error;
-  request.on_error =
-      emel::callback<void(const emel::text::generator::events::initialize_error &)>(
-          &tracker,
-          on_initialize_error);
-
-  CHECK_FALSE(generator->process_event(request));
-  CHECK(generator->is(stateforward::sml::state<emel::text::generator::uninitialized>));
-  CHECK_FALSE(tracker.initialize_done_called);
-  CHECK(tracker.initialize_error_called);
-  CHECK(error == emel::error::cast(emel::text::generator::error::invalid_request));
-  CHECK(tracker.err == emel::error::cast(emel::text::generator::error::invalid_request));
+TEST_CASE("generator_requires_construction_time_dependencies") {
+  CHECK_FALSE(std::is_default_constructible_v<emel::text::generator::sm>);
 }
 
 TEST_CASE("generator_initialize_reports_original_request_without_generation_callbacks") {

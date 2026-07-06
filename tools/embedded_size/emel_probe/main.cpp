@@ -12,6 +12,7 @@
 #include <vector>
 
 #include "../../bench/model_load_strategy.hpp"
+#include "../../generation_route_policy.hpp"
 #include "emel/error/error.hpp"
 #include "emel/gguf/loader/any.hpp"
 #include "emel/gguf/loader/errors.hpp"
@@ -19,8 +20,8 @@
 #include "emel/gguf/loader/sm.hpp"
 #include "emel/io/events.hpp"
 #include "emel/io/read/sm.hpp"
-#include "emel/io/staged_read/sm.hpp"
 #include "emel/io/source/any.hpp"
+#include "emel/io/staged_read/sm.hpp"
 #include "emel/logits/sampler/events.hpp"
 #include "emel/memory/view.hpp"
 #include "emel/model/data.hpp"
@@ -142,6 +143,7 @@ struct emel_session {
       std::make_unique<emel::model::data>();
   emel::text::tokenizer::sm tokenizer = {};
   emel::text::conditioner::sm conditioner = {};
+  emel::text::generator::matmul::lane_pool<7u> parallel_matmul_lanes = {};
   std::unique_ptr<emel::text::generator::sm> generator = {};
   formatter_binding formatter = {};
   initialize_capture initialize = {};
@@ -1256,8 +1258,12 @@ int main(int argc, char **argv) {
   session->model_data = std::move(fixture->model_data);
   session->formatter = fixture->formatter;
   session->generator = std::make_unique<emel::text::generator::sm>(
-      *session->model_data, session->conditioner,
-      session->formatter.formatter_ctx, session->formatter.format_prompt);
+      emel::text::generator::make_auto_dependencies(
+          *session->model_data, session->conditioner,
+          session->parallel_matmul_lanes,
+          emel::tools::generation_route::make_current_runtime_policy(
+              *session->model_data),
+          session->formatter.formatter_ctx, session->formatter.format_prompt));
 
   if (!initialize_emel_session(*session)) {
 #ifndef NDEBUG

@@ -529,12 +529,18 @@ TEST_CASE(
         std::string::npos);
   CHECK(capture.stdout_text.find("# generation_formatter_contract:") !=
         std::string::npos);
-  CHECK(
-      capture.stdout_text.find("# generation_threading: "
-                               "applies_to=generated_generation_rows "
-                               "benchmark_lane=multithreaded "
-                               "emel_thread_count=8 reference_thread_count=") !=
-      std::string::npos);
+  CHECK(capture.stdout_text.find(
+            "# generation_threading: applies_to=generated_generation_row "
+            "case=" +
+            std::string{k_bounded_generation_case_name} +
+            "/single benchmark_lane=single emel_thread_count=1 "
+            "reference_thread_count=1") != std::string::npos);
+  CHECK(capture.stdout_text.find(
+            "# generation_threading: applies_to=generated_generation_row "
+            "case=" +
+            std::string{k_bounded_generation_case_name} +
+            "/multithreaded benchmark_lane=multithreaded emel_thread_count=8 "
+            "reference_thread_count=") != std::string::npos);
   CHECK(capture.stdout_text.find("# generation_stage_probe: case=" +
                                  std::string{k_bounded_generation_case_name}) !=
         std::string::npos);
@@ -1359,6 +1365,25 @@ TEST_CASE("generation_stage_probe_emel_path_does_not_bypass_generator_actor") {
   CHECK(probe_source.find("emel::text::generator::action::context") ==
         std::string::npos);
   CHECK(probe_source.find("emel::text::generator::prefill::action::context") ==
+        std::string::npos);
+}
+
+TEST_CASE("generation_stage_probe_selector_is_explicit") {
+  const std::string generation_source =
+      read_file(repo_root() / "tools" / "bench" / "generation_bench.cpp");
+  const std::string runner_source =
+      read_file(repo_root() / "tools" / "bench" / "bench_runner.cpp");
+  REQUIRE_FALSE(generation_source.empty());
+  REQUIRE_FALSE(runner_source.empty());
+
+  CHECK(generation_source.find("EMEL_GENERATION_STAGE_PROBE") !=
+        std::string::npos);
+  CHECK(generation_source.find("generation_stage_probe_selection::selected") !=
+        std::string::npos);
+  CHECK(generation_source.find(
+            "should_capture_generation_stage_probe(*spec, generation_case)") !=
+        std::string::npos);
+  CHECK(runner_source.find("print_generation_stage_probes();") !=
         std::string::npos);
 }
 

@@ -13,6 +13,7 @@
 #include "emel/graph/events.hpp"
 #include "emel/graph/tensor/events.hpp"
 #include "emel/logits/sampler/events.hpp"
+#include "emel/model/data.hpp"
 #include "emel/text/conditioner/errors.hpp"
 #include "emel/text/formatter/format.hpp"
 #include "emel/text/renderer/events.hpp"
@@ -43,6 +44,30 @@ enum class benchmark_lane : uint8_t {
   single,
   multithreaded,
 };
+
+struct route_policy {
+  int32_t parallel_min_prefill_tokens = 0;
+  int32_t parallel_min_gemv_dim = 0;
+  int32_t prefill_chunk4_min_tokens = 0;
+  int32_t prefill_chunk8_min_tokens = 0;
+};
+
+struct runtime_policy {
+  emel::kernel::kernel_kind kernel_kind = emel::kernel::kernel_kind::x86_64;
+  route_policy routes = {};
+};
+
+inline constexpr int32_t k_prefill_q8_chunk_rows = 4;
+inline constexpr int32_t k_prefill_q8_chunk8_rows = 8;
+
+inline runtime_policy
+make_auto_runtime_policy(const emel::model::data &,
+                         const route_policy routes) noexcept {
+  return runtime_policy{
+      .kernel_kind = emel::kernel::detect_host_kind(),
+      .routes = routes,
+  };
+}
 
 enum class prefill_compute_contract : uint8_t {
   none = 0,

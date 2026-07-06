@@ -17,7 +17,7 @@ struct dispatch_result {
   size_t lane_count = 0u;
   bool all_submitted = false;
   bool joined = false;
-  std::array<bool, emel::text::generator::matmul::k_matmul_lanes> lane_accepted = {};
+  bool all_lanes_accepted = false;
 };
 
 struct execute_serial {

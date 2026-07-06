@@ -8,28 +8,36 @@ namespace emel::text::generator::matmul::guard {
 struct guard_parallel_ready {
   bool operator()(const event::execute_parallel & ev,
                   const action::context & ctx) const noexcept {
-    return ctx.parallel_matmul_lanes != nullptr && ev.request.src0.ne[1] > 0u;
+    return ctx.parallel_matmul_lanes.valid() && ctx.active_lanes > 1u &&
+           ctx.active_lanes <= ctx.lane_capacity &&
+           ctx.active_lanes <= emel::text::generator::matmul::k_max_matmul_lanes &&
+           ctx.lane_capacity <= emel::text::generator::matmul::k_max_matmul_lanes &&
+           ev.request.src0.ne[1] > 0u;
   }
 };
 
 struct guard_parallel_unavailable {
   bool operator()(const event::execute_parallel & ev,
                   const action::context & ctx) const noexcept {
-    return ctx.parallel_matmul_lanes == nullptr || ev.request.src0.ne[1] == 0u;
+    return !ctx.parallel_matmul_lanes.valid() || ctx.active_lanes <= 1u ||
+           ctx.active_lanes > ctx.lane_capacity ||
+           ctx.active_lanes > emel::text::generator::matmul::k_max_matmul_lanes ||
+           ctx.lane_capacity > emel::text::generator::matmul::k_max_matmul_lanes ||
+           ev.request.src0.ne[1] == 0u;
   }
 };
 
 struct guard_serial_accepted {
   bool operator()(const event::execute_serial & ev,
                   const action::context &) const noexcept {
-    return ev.result.lane_accepted[0];
+    return ev.result.all_lanes_accepted;
   }
 };
 
 struct guard_serial_rejected {
   bool operator()(const event::execute_serial & ev,
                   const action::context &) const noexcept {
-    return !ev.result.lane_accepted[0];
+    return !ev.result.all_lanes_accepted;
   }
 };
 
@@ -47,35 +55,19 @@ struct guard_parallel_join_failed {
   }
 };
 
-template <size_t lane_index>
 struct guard_parallel_lane_rejected {
   bool operator()(const event::execute_parallel & ev,
                   const action::context &) const noexcept {
-    if (ev.result.lane_count <= lane_index) {
-      return false;
-    }
-    for (size_t index = 0u; index < lane_index; ++index) {
-      if (!ev.result.lane_accepted[index]) {
-        return false;
-      }
-    }
     return ev.result.all_submitted && ev.result.joined &&
-           !ev.result.lane_accepted[lane_index];
+           !ev.result.all_lanes_accepted;
   }
 };
 
 struct guard_parallel_all_lanes_accepted {
   bool operator()(const event::execute_parallel & ev,
                   const action::context &) const noexcept {
-    if (!ev.result.all_submitted || !ev.result.joined) {
-      return false;
-    }
-    for (size_t lane = 0u; lane < ev.result.lane_count; ++lane) {
-      if (!ev.result.lane_accepted[lane]) {
-        return false;
-      }
-    }
-    return true;
+    return ev.result.all_submitted && ev.result.joined &&
+           ev.result.all_lanes_accepted;
   }
 };
 

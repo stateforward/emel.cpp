@@ -26,42 +26,48 @@ struct effect_execute_serial {
     ev.result.all_submitted = true;
     ev.result.joined = true;
     ctx.kernel.set_kind(ctx.kernel_kind);
-    ev.result.lane_accepted[0] = ctx.kernel.process_event(ev.request);
+    ev.result.all_lanes_accepted = ctx.kernel.process_event(ev.request);
   }
 };
 
 struct effect_execute_parallel {
   void operator()(const event::execute_parallel & ev, context & ctx) const noexcept {
     ev.result = {};
-    std::array<detail::matmul_row_slice, k_matmul_lanes> slices = {};
-    std::array<emel::kernel::event::op_mul_mat, k_matmul_lanes> lane_events = {};
     const uint64_t group_rows = detail::matmul_slice_group_rows(ev.request.src0.type);
     const size_t lane_count =
-        detail::compute_matmul_row_slices(ev.request.src0.ne[1], group_rows, slices);
+        detail::compute_matmul_row_slices(ev.request.src0.ne[1], group_rows,
+                                          ctx.active_lanes, ctx.row_slices);
     ev.result.lane_count = lane_count;
 
-    lane_pool::join_group group{};
+    lane_join_group group{};
     bool all_submitted = true;
     for (size_t lane = 1u; lane < lane_count; ++lane) {
-      lane_events[lane] =
-          detail::compute_sliced_mul_mat_event(ev.request, group_rows, slices[lane]);
+      ctx.lane_events[lane] =
+          detail::compute_sliced_mul_mat_event(ev.request, group_rows, ctx.row_slices[lane]);
       auto & lane_kernel = ctx.lane_kernels[lane];
       lane_kernel.set_kind(ctx.kernel_kind);
-      const auto & lane_ev = lane_events[lane];
-      auto & ok_flag = ev.result.lane_accepted[lane];
-      const bool submitted = ctx.parallel_matmul_lanes->try_submit(
-          group, [&lane_kernel, &lane_ev, &ok_flag]() noexcept {
-        ok_flag = lane_kernel.process_event(lane_ev);
-      });
+      ctx.lane_dispatches[lane] = detail::lane_dispatch{
+          .kernel = &lane_kernel,
+          .request = &ctx.lane_events[lane],
+      };
+      const bool submitted = ctx.parallel_matmul_lanes.try_submit(
+          group, lane_task{
+                     .run = detail::run_lane_dispatch,
+                     .ctx = &ctx.lane_dispatches[lane],
+                 });
       all_submitted = all_submitted && submitted;
     }
 
-    lane_events[0] =
-        detail::compute_sliced_mul_mat_event(ev.request, group_rows, slices[0]);
+    ctx.lane_events[0] =
+        detail::compute_sliced_mul_mat_event(ev.request, group_rows, ctx.row_slices[0]);
     ctx.lane_kernels[0].set_kind(ctx.kernel_kind);
-    ev.result.lane_accepted[0] = ctx.lane_kernels[0].process_event(lane_events[0]);
+    bool all_accepted = ctx.lane_kernels[0].process_event(ctx.lane_events[0]);
     ev.result.all_submitted = all_submitted;
     ev.result.joined = group.wait();
+    for (size_t lane = 1u; lane < lane_count; ++lane) {
+      all_accepted = all_accepted && ctx.lane_dispatches[lane].accepted;
+    }
+    ev.result.all_lanes_accepted = all_accepted;
   }
 };
 

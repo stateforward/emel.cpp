@@ -1,5 +1,6 @@
 #include "../generation_fixture_registry.hpp"
 #include "../generation_formatter_contract.hpp"
+#include "../generation_route_policy.hpp"
 #include "bench_cases.hpp"
 #include "embedding_generator_bench_helpers.hpp"
 #include "generation_compare_contract.hpp"
@@ -147,6 +148,7 @@ constexpr char k_generation_reference_threads_env[] =
     "EMEL_BENCH_GENERATION_REFERENCE_THREADS";
 constexpr char k_legacy_generation_reference_threads_env[] =
     "EMEL_BENCH_REFERENCE_THREADS";
+constexpr char k_generation_stage_probe_env[] = "EMEL_GENERATION_STAGE_PROBE";
 constexpr std::string_view k_generation_benchmark_lane_single = "single";
 constexpr std::string_view k_generation_benchmark_lane_multithreaded =
     "multithreaded";
@@ -158,6 +160,12 @@ constexpr std::string_view k_generation_single_thread_contract =
 enum class generation_benchmark_lane : uint8_t {
   single,
   multithreaded,
+};
+
+enum class generation_stage_probe_selection : uint8_t {
+  off,
+  publication,
+  selected,
 };
 
 struct generation_benchmark_lane_selection {
@@ -347,6 +355,42 @@ bool generation_workload_selected(const generation_case_spec &spec) {
   }
   return spec.manifest.id == filter || spec.name == filter ||
          spec.manifest.compare_group == filter;
+}
+
+generation_stage_probe_selection generation_stage_probe_mode() {
+  const char *value = std::getenv(k_generation_stage_probe_env);
+  if (value == nullptr || value[0] == '\0') {
+    return generation_stage_probe_selection::publication;
+  }
+  const std::string_view parsed{value};
+  if (parsed == "off" || parsed == "0") {
+    return generation_stage_probe_selection::off;
+  }
+  if (parsed == "publication") {
+    return generation_stage_probe_selection::publication;
+  }
+  if (parsed == "selected") {
+    return generation_stage_probe_selection::selected;
+  }
+  std::fprintf(stderr,
+               "error: %s must be 'publication', 'selected', or 'off'\n",
+               k_generation_stage_probe_env);
+  std::exit(1);
+}
+
+bool should_capture_generation_stage_probe(
+    const generation_fixture_spec &fixture_spec,
+    const generation_case_spec &generation_case) {
+  switch (generation_stage_probe_mode()) {
+  case generation_stage_probe_selection::off:
+    return false;
+  case generation_stage_probe_selection::publication:
+    return fixture_spec.fixture->current_publication &&
+           generation_case.name == emel::bench::k_generation_case_name;
+  case generation_stage_probe_selection::selected:
+    return generation_workload_selected(generation_case);
+  }
+  return false;
 }
 
 std::filesystem::path bench_root_path() {
@@ -743,6 +787,7 @@ struct emel_session {
   emel::model::data model_data = {};
   emel::text::tokenizer::sm tokenizer = {};
   emel::text::conditioner::sm conditioner = {};
+  emel::text::generator::matmul::lane_pool<7u> parallel_matmul_lanes = {};
   std::unique_ptr<emel::text::generator::sm> generator = {};
   std::array<emel::logits::sampler::fn, 1> samplers = {};
   emel::tools::generation_formatter_contract::formatter_binding
@@ -1865,9 +1910,13 @@ void prepare_emel_session(const emel_fixture &fixture, emel_session &session) {
   session.model_data = fixture.model_data;
   session.formatter_binding = fixture.formatter_binding;
   session.generator = std::make_unique<emel::text::generator::sm>(
-      session.model_data, session.conditioner,
-      session.formatter_binding.formatter_ctx,
-      session.formatter_binding.format_prompt);
+      emel::text::generator::make_auto_dependencies(
+          session.model_data, session.conditioner,
+          session.parallel_matmul_lanes,
+          emel::tools::generation_route::make_current_runtime_policy(
+              session.model_data),
+          session.formatter_binding.formatter_ctx,
+          session.formatter_binding.format_prompt));
 }
 
 bool initialize_emel_session(emel_session &session,
@@ -2414,6 +2463,7 @@ bool capture_generation_stage_probe(emel_session &session,
                                     const generation_case_spec &spec) {
   emel::bench::generation_stage_probe probe = {};
   probe.name = std::string(spec.name);
+  probe.benchmark_lane = std::string{generation_benchmark_lane_name()};
   return measure_emel_stage_probe(session, spec, probe) &&
          measure_reference_stage_probe(fixture, spec, probe) &&
          (g_generation_stage_probes.push_back(std::move(probe)), true);
@@ -2745,7 +2795,6 @@ void append_emel_generation_cases_for_current_benchmark_lane(
       generation_lane_mode_current() == generation_lane_mode::compare;
   const config case_cfg = generation_case_config(cfg);
 
-  reset_generation_flash_evidence();
   if (compare_lane) {
     const auto &fixtures = maintained_compare_generation_fixtures();
     for (size_t fixture_index = 0u; fixture_index < fixtures.size();
@@ -2933,7 +2982,7 @@ void append_emel_generation_cases_for_current_benchmark_lane(
           print_generation_seam_audit("emel", seam);
           verify_emel_generation_seam(seam);
         }
-        if (spec->fixture->current_publication &&
+        if (should_capture_generation_stage_probe(*spec, generation_case) &&
             !capture_generation_stage_probe(
                 *session, prepared_fixture.reference, generation_case)) {
           fail_bench_setup("capture_generation_stage_probe",
@@ -3288,6 +3337,7 @@ void append_emel_generation_cases(std::vector<result> &results,
                                   const config &cfg) {
   const generation_benchmark_lane_selection selection =
       selected_generation_benchmark_lanes();
+  reset_generation_flash_evidence();
   for (size_t index = 0u; index < selection.count; ++index) {
     const scoped_generation_benchmark_lane lane_scope{selection.lanes[index]};
     append_emel_generation_cases_for_current_benchmark_lane(results, cfg);

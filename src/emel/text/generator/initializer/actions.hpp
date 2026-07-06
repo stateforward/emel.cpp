@@ -50,6 +50,7 @@ struct request_backend_prepare {
         generator.compute.backend,
         *generator.model,
         *generator.matmul_actor,
+        generator.runtime_policy,
         generator.limits.block_tokens));
     ev.ctx.phase_accepted =
         ev.ctx.phase_code ==

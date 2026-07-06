@@ -61,6 +61,8 @@ struct packed_matrix_binding {
 
 struct block_weights {
   bool uses_attention = true;
+  bool requires_attention_qk_norm = false;
+  bool requires_attention_v_norm = false;
   int32_t attention_q_dim = 0;
   int32_t attention_kv_dim = 0;
   int32_t attention_head_dim = 0;
@@ -93,11 +95,6 @@ struct block_weights {
   packed_matrix_binding feed_forward_up_packed = {};
 };
 
-inline constexpr size_t k_matmul_lanes =
-    emel::text::generator::matmul::k_matmul_lanes;
-inline constexpr size_t k_matmul_worker_lanes =
-    emel::text::generator::matmul::k_matmul_worker_lanes;
-using matmul_lane_pool = emel::text::generator::matmul::lane_pool;
 using matmul_lane_mode = emel::text::generator::matmul::lane_mode;
 using matmul_row_slice = emel::text::generator::matmul::detail::matmul_row_slice;
 using emel::text::generator::matmul::detail::compute_matmul_row_slices;
@@ -161,6 +158,7 @@ struct native_backend {
   emel::model::llama::detail::step_plan decode_plan = {};
   emel::kernel::sm kernel = {};
   emel::text::generator::matmul::sm * matmul_actor = nullptr;
+  route_policy routes = {};
   bool parallel_lanes_enabled = true;
   emel::kernel::kernel_kind kernel_kind = emel::kernel::kernel_kind::x86_64;
   uint64_t kernel_dispatch_calls = 0;
@@ -324,23 +322,10 @@ constexpr int32_t k_error_invalid = 1;
 // generic compute failure so the outcome is externally attributable to the
 // tensor-window collaborator.
 constexpr int32_t k_error_stream_acquire = 2;
-constexpr int32_t k_prefill_q8_chunk_rows = 4;
-constexpr int32_t k_prefill_q8_chunk8_rows = 8;
-// Minimum prompt size before the parallel matmul lanes are worth the fork
-// overhead; route guards read this so the choice stays in transition rows.
-constexpr int32_t k_parallel_min_prefill_tokens = 8;
-// Decode GEMV lanes only pay off once per-matmul work dwarfs the fork
-// overhead; route guards require this minimum model width for parallel decode.
-constexpr int32_t k_parallel_min_gemv_dim = 1024;
-constexpr emel::kernel::kernel_kind detect_host_kernel_kind() noexcept {
-#if defined(__aarch64__) || defined(_M_ARM64)
-  return emel::kernel::kernel_kind::aarch64;
-#elif defined(__x86_64__) || defined(_M_X64)
-  return emel::kernel::kernel_kind::x86_64;
-#else
-  return emel::kernel::kernel_kind::x86_64;
-#endif
-}
+inline constexpr int32_t k_prefill_q8_chunk_rows =
+    emel::text::generator::k_prefill_q8_chunk_rows;
+inline constexpr int32_t k_prefill_q8_chunk8_rows =
+    emel::text::generator::k_prefill_q8_chunk8_rows;
 
 template <class tensor_type>
 void fill_default_nb(tensor_type & tensor) noexcept {
@@ -619,7 +604,6 @@ inline bool packed_q8_0_chunk4_input_path_supported(const native_backend & backe
 #endif
 }
 
-inline bool is_lfm2_runtime(const native_backend & backend) noexcept;
 inline bool q8_input_path_supported(const native_backend & backend,
                                     const tensor_matrix & matrix) noexcept;
 
@@ -987,42 +971,20 @@ inline bool dequantize_tensor_vector(const tensor_record & tensor,
   return copy_tensor_row(tensor, 0, out);
 }
 
-inline bool is_qwen3_runtime(const native_backend & backend) noexcept {
-  return backend.model != nullptr && emel::model::architecture_name_view(*backend.model) == "qwen3";
+inline bool requires_attention_qk_norm(const native_backend & backend,
+                                       const block_weights & block) noexcept {
+  (void) backend;
+  return block.uses_attention && block.requires_attention_qk_norm;
 }
 
-inline bool is_gemma4_runtime(const native_backend & backend) noexcept {
-  return backend.model != nullptr && emel::model::architecture_name_view(*backend.model) == "gemma4";
-}
-
-inline bool is_gemma4_sliding_attention_layer(const native_backend & backend,
-                                              const int32_t layer_index) noexcept {
-  return is_gemma4_runtime(backend) &&
-         layer_index >= 0 &&
+inline bool is_sliding_attention_layer(const native_backend & backend,
+                                       const int32_t layer_index) noexcept {
+  return layer_index >= 0 &&
+         backend.model != nullptr &&
          static_cast<uint32_t>(layer_index) <
              backend.model->params.attention_sliding_window_pattern_count &&
          backend.model->params.attention_sliding_window_pattern_flags[
              static_cast<size_t>(layer_index)] != 0u;
-}
-
-inline bool is_gemma4_shared_kv_layer(const native_backend & backend,
-                                      const int32_t layer_index) noexcept {
-  return is_gemma4_runtime(backend) &&
-      layer_index >= 0 &&
-      backend.model != nullptr &&
-      backend.model->params.attention_shared_kv_layers > 0 &&
-      layer_index >= (backend.n_layer - backend.model->params.attention_shared_kv_layers) &&
-      layer_index < backend.n_layer;
-}
-
-inline bool is_lfm2_runtime(const native_backend & backend) noexcept {
-  return backend.model != nullptr && emel::model::architecture_name_view(*backend.model) == "lfm2";
-}
-
-inline bool requires_attention_qk_norm(const native_backend & backend,
-                                       const block_weights & block) noexcept {
-  return block.uses_attention &&
-      (is_qwen3_runtime(backend) || is_gemma4_runtime(backend) || is_lfm2_runtime(backend));
 }
 
 inline int32_t effective_attention_q_dim(const native_backend & backend,
@@ -1252,15 +1214,17 @@ inline bool apply_attention_qk_norm(native_backend & backend,
              backend.rms_epsilon);
 }
 
-inline bool apply_qwen3_attention_qk_norm(native_backend & backend,
-                                          const block_weights & block) noexcept {
+inline bool apply_attention_qk_norm_contract(native_backend & backend,
+                                             const block_weights & block) noexcept {
   return apply_attention_qk_norm(backend, block);
 }
 
 inline bool requires_attention_v_norm(const native_backend & backend,
                                       const int32_t layer_index,
                                       const block_weights & block) noexcept {
-  return block.uses_attention && is_gemma4_shared_kv_layer(backend, layer_index);
+  (void) backend;
+  (void) layer_index;
+  return block.uses_attention && block.requires_attention_v_norm;
 }
 
 inline void reset_output_logits(native_backend & backend) noexcept {
@@ -5154,11 +5118,13 @@ inline emel::error::type prepare(
     native_backend & backend,
     const emel::model::data & model_data,
     emel::text::generator::matmul::sm & matmul_actor,
+    const runtime_policy & policy,
     const int32_t kv_block_tokens = emel::memory::view::DEFAULT_BLOCK_TOKENS) noexcept {
   std::destroy_at(std::addressof(backend));
   std::construct_at(std::addressof(backend));
   backend.matmul_actor = &matmul_actor;
-  backend.kernel_kind = detect_host_kernel_kind();
+  backend.routes = policy.routes;
+  backend.kernel_kind = policy.kernel_kind;
   backend.kernel.set_kind(backend.kernel_kind);
   backend.matmul_actor->process_event(
       emel::text::generator::matmul::event::configure_kernel_kind{backend.kernel_kind});
@@ -5223,7 +5189,6 @@ inline emel::error::type prepare(
   }
 
   backend.blocks.resize(static_cast<size_t>(backend.n_layer));
-  const bool lfm2_runtime = is_lfm2_runtime(backend);
   for (int32_t layer = 0; layer < backend.n_layer; ++layer) {
     emel::model::llama::detail::block_view block = {};
     if (emel::model::llama::detail::lookup_block_view(backend.execution, layer, block) !=
@@ -5233,6 +5198,15 @@ inline emel::error::type prepare(
 
     auto & weights = backend.blocks[static_cast<size_t>(layer)];
     weights.uses_attention = block.uses_attention;
+    weights.requires_attention_qk_norm =
+        block.uses_attention &&
+        block.attention_q_norm.tensor != nullptr &&
+        block.attention_k_norm.tensor != nullptr;
+    weights.requires_attention_v_norm =
+        block.uses_attention &&
+        model_data.params.attention_shared_kv_layers > 0 &&
+        layer >= (backend.n_layer - model_data.params.attention_shared_kv_layers) &&
+        layer < backend.n_layer;
     weights.attention_rope_pairing = {
         model_data.params.rope_pair_x0_stride,
         model_data.params.rope_pair_x1_stride,
@@ -5265,8 +5239,7 @@ inline emel::error::type prepare(
       continue;
     }
 
-    if (!lfm2_runtime ||
-        !bind_tensor_rows(*block.shortconv_in_proj.tensor, weights.shortconv_in_proj) ||
+    if (!bind_tensor_rows(*block.shortconv_in_proj.tensor, weights.shortconv_in_proj) ||
         !bind_tensor_rows(*block.shortconv_out_proj.tensor, weights.shortconv_out_proj) ||
         block.shortconv_conv.tensor == nullptr ||
         static_cast<uint8_t>(block.shortconv_conv.tensor->type) !=
@@ -5351,20 +5324,20 @@ inline emel::error::type prepare(
 
       block.attention_head_dim = block.attention_q.rows / backend.n_head;
       block.attention_head_dim_kv = block.attention_k.rows / backend.n_head_kv;
-      const bool gemma4_sliding_attention = is_gemma4_sliding_attention_layer(backend, layer);
+      const bool sliding_attention = is_sliding_attention_layer(backend, layer);
       const int32_t expected_key_length =
-          gemma4_sliding_attention && declared_key_length_swa > 0 ? declared_key_length_swa
-                                                                  : declared_key_length;
+          sliding_attention && declared_key_length_swa > 0 ? declared_key_length_swa
+                                                           : declared_key_length;
       const int32_t expected_value_length =
-          gemma4_sliding_attention && declared_value_length_swa > 0 ? declared_value_length_swa
-                                                                    : declared_value_length;
+          sliding_attention && declared_value_length_swa > 0 ? declared_value_length_swa
+                                                             : declared_value_length;
       const int32_t expected_rope_dim =
-          gemma4_sliding_attention && model_data.params.n_rot_swa > 0 ? model_data.params.n_rot_swa
-                                                                      : model_data.params.n_rot;
+          sliding_attention && model_data.params.n_rot_swa > 0 ? model_data.params.n_rot_swa
+                                                               : model_data.params.n_rot;
       block.attention_rope_dim =
           expected_rope_dim > 0 ? expected_rope_dim : block.attention_head_dim;
       block.attention_rope_freq_base =
-          gemma4_sliding_attention && model_data.params.rope_freq_base_swa > 0.0f
+          sliding_attention && model_data.params.rope_freq_base_swa > 0.0f
               ? model_data.params.rope_freq_base_swa
               : backend.rope_freq_base;
       const bool qk_norm_required = requires_attention_qk_norm(backend, block);
@@ -5391,8 +5364,7 @@ inline emel::error::type prepare(
       continue;
     }
 
-    if (!lfm2_runtime ||
-        backend.shortconv_kernel_size <= 1 ||
+    if (backend.shortconv_kernel_size <= 1 ||
         block.shortconv_in_proj.cols != backend.n_embd ||
         block.shortconv_in_proj.rows != 3 * backend.n_embd ||
         block.shortconv_out_proj.cols != backend.n_embd ||

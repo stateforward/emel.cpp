@@ -20,9 +20,10 @@ namespace {
 
 namespace gen_detail = emel::text::generator::detail;
 using emel::kernel::event::dtype;
-using gen_detail::k_matmul_lanes;
 using gen_detail::matmul_lane_mode;
 using gen_detail::matmul_row_slice;
+
+inline constexpr size_t k_test_matmul_lanes = 8u;
 
 emel::model::data::tensor_record make_tensor_record(void *data,
                                                     const int32_t type,
@@ -42,10 +43,11 @@ emel::model::data::tensor_record make_tensor_record(void *data,
 // Contiguous group-aligned partition of `rows` into exactly `slice_count`
 // slices: the same shape the production compute_matmul_row_slices emits,
 // parameterized over the slice count so the tests can sweep every effective
-// lane count instead of only the compile-time k_matmul_lanes cap.
-size_t partition_rows(const uint64_t rows, const uint64_t group_rows,
-                      const uint64_t slice_count,
-                      std::array<matmul_row_slice, k_matmul_lanes> &slices) {
+// lane count instead of only one fixed topology.
+size_t
+partition_rows(const uint64_t rows, const uint64_t group_rows,
+               const uint64_t slice_count,
+               std::array<matmul_row_slice, k_test_matmul_lanes> &slices) {
   const uint64_t groups = (rows + group_rows - 1u) / group_rows;
   const uint64_t lanes = std::min(slice_count, std::max<uint64_t>(groups, 1u));
   const uint64_t groups_per_lane = groups / lanes;
@@ -130,7 +132,7 @@ bool run_row_sliced(emel::kernel::sm &kernel, const matmul_case &fixture,
   const auto full = fixture.event_for(output);
   const uint64_t group_rows =
       gen_detail::matmul_slice_group_rows(full.src0.type);
-  std::array<matmul_row_slice, k_matmul_lanes> slices = {};
+  std::array<matmul_row_slice, k_test_matmul_lanes> slices = {};
   const size_t lanes = partition_rows(static_cast<uint64_t>(fixture.rows),
                                       group_rows, slice_count, slices);
   bool all_ok = true;
@@ -149,7 +151,7 @@ void check_slice_count_invariance(const dtype type, const int32_t cols,
   CAPTURE(tokens);
   const matmul_case fixture(type, cols, rows, tokens);
   emel::kernel::sm kernel;
-  kernel.set_kind(gen_detail::detect_host_kernel_kind());
+  kernel.set_kind(emel::kernel::detect_host_kind());
 
   std::vector<float> serial_output = {};
   const auto serial_ev = fixture.event_for(serial_output);
@@ -192,10 +194,12 @@ TEST_CASE("determinism: row-sliced matmul bitwise invariant across slice "
 TEST_CASE("determinism: parallel fork/join dispatch bitwise repeatable and "
           "serial-identical") {
   const matmul_case fixture(dtype::q8_0, 64, 61, 1);
-  emel::text::generator::matmul::lane_pool parallel_matmul_lanes = {};
-  emel::text::generator::matmul::sm matmul_actor{parallel_matmul_lanes};
+  emel::text::generator::matmul::lane_pool<7u> parallel_matmul_lanes = {};
+  auto policy = emel::text::generator::matmul::make_auto_execution_policy(
+      parallel_matmul_lanes);
+  emel::text::generator::matmul::sm matmul_actor{policy};
   gen_detail::native_backend backend = {};
-  backend.kernel_kind = gen_detail::detect_host_kernel_kind();
+  backend.kernel_kind = policy.kernel_kind;
   backend.kernel.set_kind(backend.kernel_kind);
   backend.matmul_actor = &matmul_actor;
   matmul_actor.process_event(

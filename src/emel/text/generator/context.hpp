@@ -113,6 +113,7 @@ struct renderer_session {
 struct context {
   const emel::model::data * model = nullptr;
   emel::text::conditioner::sm * conditioner = nullptr;
+  emel::text::generator::runtime_policy runtime_policy = {};
   void * formatter_ctx = nullptr;
   emel::text::formatter::format_fn format_prompt =
       emel::text::formatter::format_raw;

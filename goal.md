@@ -162,12 +162,28 @@ path beats `llama.cpp` on this CPU.
   llama.cpp reference to eight threads unless overridden. The public generator
   event keeps the benchmark toggle in the actor transition graph instead of
   reaching into internals.
-- Local correction in progress: the native generator backend no longer owns the
-  lane pool or lane kernels directly. `sm.hpp` owns or accepts an injected
-  `parallel_matmul_lanes` pool, constructs a `matmul::sm` actor, and wires the
-  backend to that actor. Serial and parallel matmul requests are explicit
-  actor events; final accept/reject is chosen by typed completion guards, not by
-  hidden detail-helper control flow.
+- Local DI correction applied: `emel::text::generator::sm` now has a
+  single public constructor that accepts an explicit `dependencies` aggregate.
+  The generator no longer default-constructs or owns a hidden lane pool. Owners
+  must provide the model, conditioner, `matmul::execution_policy`, and generator
+  `runtime_policy`. `make_auto_dependencies(...)` still builds the matmul auto
+  policy from the injected lane pool, but route thresholds now come from the
+  caller-supplied runtime policy instead of a generator-owned default.
+- Local matmul correction applied: `matmul::sm` no longer has a
+  default constructor or `lane_pool&` constructor that auto-detects host kernel
+  kind. The actor is constructed from `matmul::execution_policy`, which carries
+  the injected lane pool, kernel kind, and active lane count. Lane topology is
+  now caller-owned through the `lane_pool<worker_lanes, ...>` alias and
+  type-erased `lane_pool_ref`; the production actor allocates per-lane child
+  actor scratch once at construction.
+- Local route-policy correction applied: generator prefill/decode
+  route thresholds now live in injected `runtime_policy.routes`; the numeric
+  chunk sizes remain compile-time kernel shape constants. Generic generation no
+  longer asks whether the model family is Qwen/Gemma/LFM; it derives q/k norm,
+  value norm, shortconv, and sliding-attention behavior from the loaded model
+  contract and bound block facts. Tool binaries explicitly use
+  `tools/generation_route_policy.hpp`; generator tests explicitly use
+  `tests/text/generator/generator_test_policies.hpp`.
 - Local fixtures added for the all-generation comparison:
   `tests/models/Qwen3-0.6B-Q8_0.gguf` and
   `tests/models/Qwen3-4B-Q4_K_M.gguf`.
@@ -232,6 +248,108 @@ path beats `llama.cpp` on this CPU.
   `0.909 tokens/s` vs llama.cpp `1211642500 ns/op` / `0.825 tokens/s`;
   multithreaded EMEL was slower at `317726833 ns/op` / `3.147 tokens/s` vs
   llama.cpp `197450917 ns/op` / `5.065 tokens/s`.
+- Current DI-correction verification: `EMEL_BUILD_JOBS=4 scripts/build_with_zig.sh`
+  passed. Focused tests passed for `parallel matmul*`,
+  `generator_requires_construction_time_dependencies`, streamed generation,
+  `generator_detail_prepare_derives_kv_geometry_from_memory_contract`, Qwen3
+  and Gemma4 q/k norm detail coverage, and the full
+  `tests/text/generator/action_guard_tests.cpp` source-file slice. Bench runner
+  and bench-runner test builds passed, and
+  `./build/bench_tools_ninja_tests/bench_runner_tests --test-case='generation_stage_probe*' --no-skip`
+  passed. The first scoped quality-gate rerun exposed one direct-fixture test
+  that still relied on implicit route defaults; that fixture now injects
+  `emel::text::generator::test::k_generation_route_policy`, and the failure is
+  fixed under both zig and coverage binaries.
+- Current DI-correction gate verification passed with:
+  `EMEL_BUILD_JOBS=4 EMEL_QUALITY_GATES_PARALLEL=never
+  EMEL_QUALITY_GATES_BENCH_SUITE=generation,parallel_matmul
+  EMEL_QUALITY_GATES_CHANGED_FILES="$changed_files" scripts/quality_gates.sh`.
+  The scoped benchmark snapshot, changed-line coverage, paritychecker, fuzz
+  smoke, determinism check, lint snapshot, and docs generation all completed
+  successfully. Changed-line coverage was `200/204 (98.0%)`; changed-branch
+  coverage was `114/202 (56.4%)`. The scoped generation lane reported LFM2
+  one-token `multithreaded` EMEL `93091500 ns/op` / `10.742 tokens/s` vs
+  llama.cpp `306978375 ns/op` / `3.258 tokens/s`, and `single` EMEL
+  `383651292 ns/op` / `2.607 tokens/s` vs llama.cpp `305508333 ns/op` /
+  `3.273 tokens/s`. The scoped `parallel_matmul` suite emitted non-fatal
+  regression warnings for `ggml_gemm8_f32` and `ggml_gemv_q6_k`, but the gate
+  completed successfully.
+- Current broad full-gate blocker is still not generation: the broad benchmark
+  gate expands into `speech_codec_mimi`, and `scripts/bench_mimi_compare.sh
+  --reference=moshi_cpp` fails token-exact parity with `code_match_fraction =
+  0.953125`. The `speech_codec_mimi_mlx` lane passes. Do not claim a full
+  unscoped green gate until the Moshi/Mimi token-exact lane is fixed or
+  explicitly scoped out.
+- Fresh DI-branch 1000-token Qwen compare was rerun with both lanes, one measured
+  run, no warmup, and an 8-thread llama.cpp multithreaded reference. Qwen3 0.6B
+  single lane: EMEL `15527198209 ns/op` / `64.403 tokens/s` vs llama.cpp
+  `19422845209 ns/op` / `51.486 tokens/s` (EMEL faster). Qwen3 0.6B
+  multithreaded lane: EMEL `11987232125 ns/op` / `83.422 tokens/s` vs llama.cpp
+  `11011163916 ns/op` / `90.817 tokens/s` (EMEL slower). Qwen3 4B single lane:
+  EMEL `83996730375 ns/op` / `11.905 tokens/s` vs llama.cpp `74950374459 ns/op`
+  / `9.900 tokens/s`; llama.cpp stopped at 742 output tokens, so tokens/s is the
+  fairer throughput comparison and EMEL is ahead there despite higher total
+  wall time. A current rerun of the Qwen3 4B multithreaded pluggable compare
+  after the stage-probe selector change shows EMEL losing: `53387228333 ns/op` /
+  `18.731 tokens/s` vs llama.cpp `34270789667 ns/op` / `29.179 tokens/s`. All
+  Qwen runs are `bounded_drift`, not exact output matches.
+- Fresh Qwen compare records include total generation latency and generated-token
+  throughput. Qwen prefill reporting was made explicit through
+  `EMEL_GENERATION_STAGE_PROBE=selected` instead of being hidden behind
+  `current_publication`. The selected stage probe can now print Qwen rows, but
+  EMEL still reports public `generate` time as `actor_public_generate` with
+  `emel_prefill_ns=0` and the work in `emel_unattributed_ns`; separate EMEL
+  prefill/decode breakdown needs a new explicit public probe contract. The
+  latest Qwen3 0.6B single-lane selected probe reported EMEL
+  `17607694959 ns/op` / `56.793 tokens/s` vs llama.cpp `19231584542 ns/op` /
+  `51.998 tokens/s`, with reference `prefill_ns=126055084`. The latest Qwen3 4B
+  multithreaded selected probe reported EMEL `44856931042 ns/op` /
+  `22.293 tokens/s` vs llama.cpp `35004383333 ns/op` / `28.568 tokens/s`, with
+  reference `prefill_ns=161160458`.
+- Stage-probe selector verification passed:
+  `./build/bench_tools_ninja_tests/bench_runner_tests --test-case='generation_stage_probe*' --no-skip`.
+- Current generation DI audit:
+  - Now dependency-injected: `emel::text::generator::sm` requires a
+    `dependencies` aggregate; the generator no longer owns or constructs a
+    hidden matmul lane pool. `matmul::sm` requires an explicit
+    `matmul::execution_policy` containing the injected lane pool, kernel kind,
+    and active lane count. Generator route thresholds and host kernel kind flow
+    through `runtime_policy`, with tool and test defaults held in
+    `tools/generation_route_policy.hpp` and
+    `tests/text/generator/generator_test_policies.hpp` instead of private
+    generator detail.
+  - Acceptable constants, not DI knobs: `k_prefill_q8_chunk_rows`,
+    `k_prefill_q8_chunk8_rows`, and `matmul::k_max_matmul_lanes` are fixed
+    kernel/actor shape limits. They should stay source constants unless the
+    kernel shape itself becomes configurable.
+  - Remaining hardcoded/default convenience: `make_auto_runtime_policy(...)`
+    still chooses default route thresholds and detected host kernel kind for
+    callers that explicitly ask for the auto policy. That is acceptable only as
+    a caller-visible convenience; maintained benchmarks and tools must continue
+    to pass explicit policies.
+  - Remaining rule blocker: `detail::prepare(...)` no longer checks model-family
+    strings for Qwen/Gemma/LFM, but it still derives
+    `requires_attention_qk_norm`, `requires_attention_v_norm`, shortconv, and
+    sliding-attention behavior from loaded block/model facts inside
+    `detail.hpp`, then later compute helpers branch on those flags. That is
+    better than family hardcoding, but it is still hidden behavior selection
+    under the no-hidden-control-flow rule. The follow-up should move those
+    choices into explicit guarded states/routes or a public variant contract,
+    not leave them as detail-local booleans.
+- Latest scoped DI/generation gate passed with:
+  `EMEL_BUILD_JOBS=4 EMEL_QUALITY_GATES_PARALLEL=never
+  EMEL_QUALITY_GATES_BENCH_SUITE=generation,parallel_matmul
+  EMEL_QUALITY_GATES_CHANGED_FILES="$CHANGED_FILES" scripts/quality_gates.sh`.
+  The gate completed domain boundaries, legacy SML surface scan, zig build,
+  benchmark snapshot, changed-file coverage, paritychecker, fuzz smoke skip,
+  determinism, lint snapshot, and docs generation. Coverage was
+  `204/210 (97.1%)` changed lines and `130/260 (50.0%)` changed branches.
+  The final LFM2 one-token generation compare reported multithreaded EMEL
+  `87424875 ns/op` / `11.438 tokens/s` vs llama.cpp `310638833 ns/op` /
+  `3.219 tokens/s`; single-lane EMEL remained slower at `367750459 ns/op` /
+  `2.719 tokens/s` vs llama.cpp `310440209 ns/op` / `3.221 tokens/s`.
+  `parallel_matmul` still emitted non-fatal f32 GEMM regression warnings, but
+  every listed EMEL matmul compare row beat its reference row in that run.
 
 ## Completion Bar
 

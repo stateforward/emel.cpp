@@ -70,6 +70,7 @@ struct result {
 
 struct generation_stage_probe {
   std::string name = {};
+  std::string benchmark_lane = {};
   std::string emel_prefill_contract = {};
   int32_t emel_prompt_tokens = 0;
   int32_t emel_prefill_step_size = 0;

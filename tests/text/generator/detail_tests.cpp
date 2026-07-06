@@ -19,6 +19,7 @@
 #include "emel/model/llama/detail.hpp"
 #include "emel/text/generator/detail.hpp"
 #include "emel/text/generator/guards.hpp"
+#include "generator_test_policies.hpp"
 
 namespace {
 
@@ -36,8 +37,11 @@ using emel::text::generator::detail::quant::QK8_0;
 using emel::text::generator::detail::quant::QK_K;
 
 struct matmul_actor_fixture {
-  emel::text::generator::matmul::lane_pool parallel_matmul_lanes = {};
-  emel::text::generator::matmul::sm actor{parallel_matmul_lanes};
+  emel::text::generator::matmul::lane_pool<7u> parallel_matmul_lanes = {};
+  emel::text::generator::matmul::execution_policy policy =
+      emel::text::generator::matmul::make_auto_execution_policy(
+          parallel_matmul_lanes);
+  emel::text::generator::matmul::sm actor{policy};
 };
 
 void bind_test_matmul_actor(
@@ -53,8 +57,7 @@ uint16_t fp16_bits(const float value) {
 }
 
 TEST_CASE("generator detects only maintained host kernel kinds") {
-  const emel::kernel::kernel_kind kind =
-      emel::text::generator::detail::detect_host_kernel_kind();
+  const emel::kernel::kernel_kind kind = emel::kernel::detect_host_kind();
 #if defined(__aarch64__) || defined(_M_ARM64)
   CHECK(kind == emel::kernel::kernel_kind::aarch64);
 #else
@@ -317,8 +320,12 @@ struct prepared_qwen3_backend_fixture {
   bool ready = false;
 
   prepared_qwen3_backend_fixture() {
+    const auto runtime_policy =
+        emel::text::generator::test::make_auto_runtime_policy(
+            model_fixture.model);
     ready =
-        emel::text::generator::detail::prepare(backend, model_fixture.model, matmul.actor) ==
+        emel::text::generator::detail::prepare(
+            backend, model_fixture.model, matmul.actor, runtime_policy) ==
         emel::error::cast(emel::model::loader::error::none);
     backend.bound_tokens = {0};
     backend.bound_positions = {0};
@@ -2230,10 +2237,13 @@ TEST_CASE("generator_detail_prepare_derives_kv_geometry_from_memory_contract") {
   auto model_fixture = std::make_unique<qwen3_runtime_fixture>();
   auto backend = std::make_unique<emel::text::generator::detail::native_backend>();
   matmul_actor_fixture matmul = {};
+  const auto runtime_policy =
+      emel::text::generator::test::make_auto_runtime_policy(
+          model_fixture->model);
 
   // Default geometry: n_ctx=8 pads up to one 16-token block.
   REQUIRE(emel::text::generator::detail::prepare(
-              *backend, model_fixture->model, matmul.actor) ==
+              *backend, model_fixture->model, matmul.actor, runtime_policy) ==
           emel::error::cast(emel::model::loader::error::none));
   CHECK(backend->kv_block_tokens == emel::memory::view::DEFAULT_BLOCK_TOKENS);
   CHECK(backend->kv_positions_capacity == emel::memory::view::DEFAULT_BLOCK_TOKENS);
@@ -2242,7 +2252,7 @@ TEST_CASE("generator_detail_prepare_derives_kv_geometry_from_memory_contract") {
 
   // Divisible geometry: capacity equals n_ctx exactly (pre-cutover layout).
   REQUIRE(emel::text::generator::detail::prepare(
-              *backend, model_fixture->model, matmul.actor, 4) ==
+              *backend, model_fixture->model, matmul.actor, runtime_policy, 4) ==
           emel::error::cast(emel::model::loader::error::none));
   CHECK(backend->kv_block_tokens == 4);
   CHECK(backend->kv_positions_capacity == backend->n_ctx);
@@ -2251,12 +2261,12 @@ TEST_CASE("generator_detail_prepare_derives_kv_geometry_from_memory_contract") {
   // Non-positive block tokens cannot cover the context window and are
   // rejected through prepare's existing model_invalid validation path.
   REQUIRE(emel::text::generator::detail::prepare(
-              *backend, model_fixture->model, matmul.actor, 0) ==
+              *backend, model_fixture->model, matmul.actor, runtime_policy, 0) ==
           emel::error::cast(emel::model::loader::error::model_invalid));
 
   // Non-divisible geometry: capacity rounds up to whole blocks.
   REQUIRE(emel::text::generator::detail::prepare(
-              *backend, model_fixture->model, matmul.actor, 3) ==
+              *backend, model_fixture->model, matmul.actor, runtime_policy, 3) ==
           emel::error::cast(emel::model::loader::error::none));
   CHECK(backend->kv_block_tokens == 3);
   CHECK(backend->kv_positions_capacity == 9);
@@ -2269,8 +2279,11 @@ TEST_CASE("generator_detail_kv_physical_map_binds_snapshot_block_order") {
   auto model_fixture = std::make_unique<qwen3_runtime_fixture>();
   auto backend = std::make_unique<emel::text::generator::detail::native_backend>();
   matmul_actor_fixture matmul = {};
+  const auto runtime_policy =
+      emel::text::generator::test::make_auto_runtime_policy(
+          model_fixture->model);
   REQUIRE(emel::text::generator::detail::prepare(
-              *backend, model_fixture->model, matmul.actor, 4) ==
+              *backend, model_fixture->model, matmul.actor, runtime_policy, 4) ==
           emel::error::cast(emel::model::loader::error::none));
   REQUIRE(backend->kv_positions_capacity == 8);
 
@@ -2360,8 +2373,11 @@ TEST_CASE("generator_detail_kv_physical_map_isolates_interleaved_sequences") {
   auto model_fixture = std::make_unique<qwen3_runtime_fixture>();
   auto backend = std::make_unique<emel::text::generator::detail::native_backend>();
   matmul_actor_fixture matmul = {};
+  const auto runtime_policy =
+      emel::text::generator::test::make_auto_runtime_policy(
+          model_fixture->model);
   REQUIRE(emel::text::generator::detail::prepare(
-              *backend, model_fixture->model, matmul.actor, 2) ==
+              *backend, model_fixture->model, matmul.actor, runtime_policy, 2) ==
           emel::error::cast(emel::model::loader::error::none));
   REQUIRE(backend->kv_positions_capacity == 8);
 
@@ -3589,8 +3605,10 @@ TEST_CASE(
   auto backend =
       std::make_unique<emel::text::generator::detail::native_backend>();
   matmul_actor_fixture matmul = {};
+  const auto runtime_policy =
+      emel::text::generator::test::make_auto_runtime_policy(fixture->model);
   REQUIRE(emel::text::generator::detail::prepare(
-              *backend, fixture->model, matmul.actor) ==
+              *backend, fixture->model, matmul.actor, runtime_policy) ==
           emel::error::cast(emel::model::loader::error::none));
   REQUIRE(emel::text::generator::detail::copy_tensor_row(
       *backend->token_embedding.tensor, 0, backend->hidden));
@@ -3631,8 +3649,10 @@ TEST_CASE(
   auto backend =
       std::make_unique<emel::text::generator::detail::native_backend>();
   matmul_actor_fixture matmul = {};
+  const auto runtime_policy =
+      emel::text::generator::test::make_auto_runtime_policy(fixture->model);
   REQUIRE(emel::text::generator::detail::prepare(
-              *backend, fixture->model, matmul.actor) ==
+              *backend, fixture->model, matmul.actor, runtime_policy) ==
           emel::error::cast(emel::model::loader::error::none));
   REQUIRE(emel::text::generator::detail::copy_tensor_row(
       *backend->token_embedding.tensor, 0, backend->hidden));
@@ -3676,8 +3696,10 @@ TEST_CASE("generator_detail_gemma4_shared_kv_layer_rms_norms_value_branch_"
   auto backend =
       std::make_unique<emel::text::generator::detail::native_backend>();
   matmul_actor_fixture matmul = {};
+  const auto runtime_policy =
+      emel::text::generator::test::make_auto_runtime_policy(fixture->model);
   REQUIRE(emel::text::generator::detail::prepare(
-              *backend, fixture->model, matmul.actor) ==
+              *backend, fixture->model, matmul.actor, runtime_policy) ==
           emel::error::cast(emel::model::loader::error::none));
 
   backend->n_layer = 16;

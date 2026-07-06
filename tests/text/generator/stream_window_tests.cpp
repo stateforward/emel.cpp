@@ -18,6 +18,7 @@
 #include "emel/text/conditioner/sm.hpp"
 #include "emel/text/generator/sm.hpp"
 #include "emel/text/tokenizer/sm.hpp"
+#include "generator_test_policies.hpp"
 
 // Streamed decode route coverage: the generator with an owner-bound streaming
 // window must (a) produce token-for-token identical output to the resident
@@ -548,6 +549,7 @@ struct generator_rig {
   prepared_model prepared{};
   emel::text::tokenizer::sm tokenizer{};
   emel::text::conditioner::sm conditioner{};
+  emel::text::generator::matmul::lane_pool<7u> parallel_matmul_lanes = {};
   std::array<emel::logits::sampler::fn, 1> samplers = {
       emel::logits::sampler::fn::from<sampler_select_argmax>(),
   };
@@ -564,6 +566,7 @@ struct generator_rig_q8 {
   prepared_model prepared{};
   emel::text::tokenizer::sm tokenizer{};
   emel::text::conditioner::sm conditioner{};
+  emel::text::generator::matmul::lane_pool<7u> parallel_matmul_lanes = {};
   std::array<emel::logits::sampler::fn, 1> samplers = {
       emel::logits::sampler::fn::from<sampler_select_argmax>(),
   };
@@ -573,13 +576,27 @@ struct generator_rig_q8 {
   }
 };
 
+template <class rig_type>
+std::unique_ptr<emel::text::generator::sm>
+make_generator(rig_type & rig,
+               emel::model::tensor::window::sm * stream_window = nullptr,
+               const bool stream_active = false) {
+  return std::make_unique<emel::text::generator::sm>(
+      emel::text::generator::make_auto_dependencies(
+          rig.prepared.data, rig.conditioner, rig.parallel_matmul_lanes,
+          emel::text::generator::test::make_auto_runtime_policy(
+              rig.prepared.data),
+          nullptr, emel::text::formatter::format_raw, stream_window,
+          stream_active));
+}
+
 }  // namespace
 
 TEST_CASE("generator streamed decode matches resident output token for token") {
   auto rig = std::make_unique<generator_rig>(+1.0f);
   stream_weight_file file{rig->prepared, "parity"};
 
-  auto resident = std::make_unique<emel::text::generator::sm>(rig->prepared.data, rig->conditioner);
+  auto resident = make_generator(*rig);
   const generation_run resident_run =
       run_generation(*resident, rig->tokenizer, rig->samplers);
   REQUIRE(resident_run.ok);
@@ -589,10 +606,9 @@ TEST_CASE("generator streamed decode matches resident output token for token") {
   REQUIRE(window_rig->streaming_active);
 
   auto rig_streamed = std::make_unique<generator_rig>(+1.0f);
-  auto streamed = std::make_unique<emel::text::generator::sm>(rig_streamed->prepared.data,
-                                     rig_streamed->conditioner,
-                                     window_rig->machine,
-                                     window_rig->streaming_active);
+  auto streamed =
+      make_generator(*rig_streamed, &window_rig->machine,
+                     window_rig->streaming_active);
   const generation_run streamed_run =
       run_generation(*streamed, rig_streamed->tokenizer, rig_streamed->samplers);
   REQUIRE(streamed_run.ok);
@@ -605,12 +621,12 @@ TEST_CASE("generator streamed decode consumes slot bytes not resident records") 
   // Resident baselines for both weight variants must disagree, or the
   // engagement proof below would be vacuous.
   auto rig_a = std::make_unique<generator_rig>(+1.0f);
-  auto resident_a = std::make_unique<emel::text::generator::sm>(rig_a->prepared.data, rig_a->conditioner);
+  auto resident_a = make_generator(*rig_a);
   const generation_run run_a = run_generation(*resident_a, rig_a->tokenizer, rig_a->samplers);
   REQUIRE(run_a.ok);
 
   auto rig_b = std::make_unique<generator_rig>(-1.0f);
-  auto resident_b = std::make_unique<emel::text::generator::sm>(rig_b->prepared.data, rig_b->conditioner);
+  auto resident_b = make_generator(*rig_b);
   const generation_run run_b = run_generation(*resident_b, rig_b->tokenizer, rig_b->samplers);
   REQUIRE(run_b.ok);
   REQUIRE(run_a.text() != run_b.text());
@@ -624,10 +640,9 @@ TEST_CASE("generator streamed decode consumes slot bytes not resident records") 
   REQUIRE(window_rig->streaming_active);
 
   auto rig_mixed = std::make_unique<generator_rig>(+1.0f);
-  auto streamed = std::make_unique<emel::text::generator::sm>(rig_mixed->prepared.data,
-                                     rig_mixed->conditioner,
-                                     window_rig->machine,
-                                     window_rig->streaming_active);
+  auto streamed =
+      make_generator(*rig_mixed, &window_rig->machine,
+                     window_rig->streaming_active);
   const generation_run mixed_run =
       run_generation(*streamed, rig_mixed->tokenizer, rig_mixed->samplers);
   REQUIRE(mixed_run.ok);
@@ -644,14 +659,12 @@ TEST_CASE("generator streamed decode consumes slot bytes not resident records") 
 TEST_CASE("generator streamed q8_0 decode reads raw slot bytes not packed repacks") {
   // Resident baselines must disagree so the mixed comparison is meaningful.
   auto rig_a = std::make_unique<generator_rig_q8>(+1.0f);
-  auto resident_a = std::make_unique<emel::text::generator::sm>(rig_a->prepared.data,
-                                                                rig_a->conditioner);
+  auto resident_a = make_generator(*rig_a);
   const generation_run run_a = run_generation(*resident_a, rig_a->tokenizer, rig_a->samplers);
   REQUIRE(run_a.ok);
 
   auto rig_b = std::make_unique<generator_rig_q8>(-1.0f);
-  auto resident_b = std::make_unique<emel::text::generator::sm>(rig_b->prepared.data,
-                                                                rig_b->conditioner);
+  auto resident_b = make_generator(*rig_b);
   const generation_run run_b = run_generation(*resident_b, rig_b->tokenizer, rig_b->samplers);
   REQUIRE(run_b.ok);
   REQUIRE(run_a.text() != run_b.text());
@@ -670,9 +683,9 @@ TEST_CASE("generator streamed q8_0 decode reads raw slot bytes not packed repack
   REQUIRE(window_rig->streaming_active);
 
   auto rig_mixed = std::make_unique<generator_rig_q8>(+1.0f);
-  auto streamed = std::make_unique<emel::text::generator::sm>(
-      rig_mixed->prepared.data, rig_mixed->conditioner, window_rig->machine,
-      window_rig->streaming_active);
+  auto streamed =
+      make_generator(*rig_mixed, &window_rig->machine,
+                     window_rig->streaming_active);
   const generation_run mixed_run =
       run_generation(*streamed, rig_mixed->tokenizer, rig_mixed->samplers);
   REQUIRE(mixed_run.ok);
@@ -685,8 +698,7 @@ TEST_CASE("generator streamed decode restores resident weight views between runs
   // Control: repeated generations on a resident machine are deterministic, so
   // any second-run divergence below is attributable to streamed-state leakage.
   auto rig_a = std::make_unique<generator_rig>(+1.0f);
-  auto resident_a = std::make_unique<emel::text::generator::sm>(rig_a->prepared.data,
-                                                                rig_a->conditioner);
+  auto resident_a = make_generator(*rig_a);
   const generation_run resident_first =
       run_generation(*resident_a, rig_a->tokenizer, rig_a->samplers);
   REQUIRE(resident_first.ok);
@@ -707,10 +719,9 @@ TEST_CASE("generator streamed decode restores resident weight views between runs
   REQUIRE(window_rig->streaming_active);
 
   auto rig_mixed = std::make_unique<generator_rig>(+1.0f);
-  auto streamed = std::make_unique<emel::text::generator::sm>(rig_mixed->prepared.data,
-                                     rig_mixed->conditioner,
-                                     window_rig->machine,
-                                     window_rig->streaming_active);
+  auto streamed =
+      make_generator(*rig_mixed, &window_rig->machine,
+                     window_rig->streaming_active);
   const generation_run first_run =
       run_generation(*streamed, rig_mixed->tokenizer, rig_mixed->samplers);
   REQUIRE(first_run.ok);
@@ -727,15 +738,13 @@ TEST_CASE("generator streamed decode engages the window on the nonflash decode r
   // active instead of falling through to the resident rows and bypassing the
   // bound window.
   auto rig_a = std::make_unique<generator_rig>(+1.0f, /*kv_width_mismatch=*/true);
-  auto resident_a = std::make_unique<emel::text::generator::sm>(rig_a->prepared.data,
-                                                                rig_a->conditioner);
+  auto resident_a = make_generator(*rig_a);
   const generation_run run_a = run_generation(*resident_a, rig_a->tokenizer, rig_a->samplers);
   REQUIRE(run_a.ok);
   REQUIRE(run_a.text() == "hellohello");
 
   auto rig_b = std::make_unique<generator_rig>(-1.0f, /*kv_width_mismatch=*/true);
-  auto resident_b = std::make_unique<emel::text::generator::sm>(rig_b->prepared.data,
-                                                                rig_b->conditioner);
+  auto resident_b = make_generator(*rig_b);
   const generation_run run_b = run_generation(*resident_b, rig_b->tokenizer, rig_b->samplers);
   REQUIRE(run_b.ok);
   REQUIRE(run_b.text() == "worldworld");
@@ -747,9 +756,9 @@ TEST_CASE("generator streamed decode engages the window on the nonflash decode r
   REQUIRE(window_rig->streaming_active);
 
   auto rig_mixed = std::make_unique<generator_rig>(+1.0f, /*kv_width_mismatch=*/true);
-  auto streamed = std::make_unique<emel::text::generator::sm>(
-      rig_mixed->prepared.data, rig_mixed->conditioner, window_rig->machine,
-      window_rig->streaming_active);
+  auto streamed =
+      make_generator(*rig_mixed, &window_rig->machine,
+                     window_rig->streaming_active);
   const generation_run mixed_run =
       run_generation(*streamed, rig_mixed->tokenizer, rig_mixed->samplers);
   REQUIRE(mixed_run.ok);
@@ -762,8 +771,7 @@ TEST_CASE("generator preselected streamed decode engages the window on the "
   const std::span<emel::logits::sampler::fn> no_samplers{};
 
   auto rig_a = std::make_unique<generator_rig>(+1.0f, /*kv_width_mismatch=*/true);
-  auto resident_a = std::make_unique<emel::text::generator::sm>(rig_a->prepared.data,
-                                                                rig_a->conditioner);
+  auto resident_a = make_generator(*rig_a);
   const generation_run run_a =
       run_generation(*resident_a, rig_a->tokenizer, no_samplers, k_preselected);
   REQUIRE(run_a.ok);
@@ -776,9 +784,9 @@ TEST_CASE("generator preselected streamed decode engages the window on the "
   REQUIRE(window_rig->streaming_active);
 
   auto rig_mixed = std::make_unique<generator_rig>(+1.0f, /*kv_width_mismatch=*/true);
-  auto streamed = std::make_unique<emel::text::generator::sm>(
-      rig_mixed->prepared.data, rig_mixed->conditioner, window_rig->machine,
-      window_rig->streaming_active);
+  auto streamed =
+      make_generator(*rig_mixed, &window_rig->machine,
+                     window_rig->streaming_active);
   const generation_run mixed_run =
       run_generation(*streamed, rig_mixed->tokenizer, no_samplers, k_preselected);
   REQUIRE(mixed_run.ok);
@@ -792,15 +800,13 @@ TEST_CASE("generator preselected streamed decode consumes slot bytes not "
   const std::span<emel::logits::sampler::fn> no_samplers{};
 
   auto rig_a = std::make_unique<generator_rig>(+1.0f);
-  auto resident_a = std::make_unique<emel::text::generator::sm>(
-      rig_a->prepared.data, rig_a->conditioner);
+  auto resident_a = make_generator(*rig_a);
   const generation_run run_a =
       run_generation(*resident_a, rig_a->tokenizer, no_samplers, k_preselected);
   REQUIRE(run_a.ok);
 
   auto rig_b = std::make_unique<generator_rig>(-1.0f);
-  auto resident_b = std::make_unique<emel::text::generator::sm>(
-      rig_b->prepared.data, rig_b->conditioner);
+  auto resident_b = make_generator(*rig_b);
   const generation_run run_b =
       run_generation(*resident_b, rig_b->tokenizer, no_samplers, k_preselected);
   REQUIRE(run_b.ok);
@@ -816,9 +822,9 @@ TEST_CASE("generator preselected streamed decode consumes slot bytes not "
   REQUIRE(window_rig->streaming_active);
 
   auto rig_mixed = std::make_unique<generator_rig>(+1.0f);
-  auto streamed = std::make_unique<emel::text::generator::sm>(
-      rig_mixed->prepared.data, rig_mixed->conditioner, window_rig->machine,
-      window_rig->streaming_active);
+  auto streamed =
+      make_generator(*rig_mixed, &window_rig->machine,
+                     window_rig->streaming_active);
   const generation_run mixed_run = run_generation(
       *streamed, rig_mixed->tokenizer, no_samplers, k_preselected);
   REQUIRE(mixed_run.ok);
@@ -838,9 +844,8 @@ TEST_CASE(
   auto rig = std::make_unique<generator_rig>(+1.0f);
   auto window_rig = std::make_unique<bound_window>(); // never bound
 
-  auto streamed = std::make_unique<emel::text::generator::sm>(
-      rig->prepared.data, rig->conditioner, window_rig->machine,
-      /*stream_active=*/true);
+  auto streamed =
+      make_generator(*rig, &window_rig->machine, /*stream_active=*/true);
   const generation_run run =
       run_generation(*streamed, rig->tokenizer, rig->samplers);
   CHECK_FALSE(run.ok);
@@ -857,9 +862,8 @@ TEST_CASE("generator preselected streamed decode fails cleanly when the window "
   auto rig = std::make_unique<generator_rig>(+1.0f);
   auto window_rig = std::make_unique<bound_window>(); // never bound
 
-  auto streamed = std::make_unique<emel::text::generator::sm>(
-      rig->prepared.data, rig->conditioner, window_rig->machine,
-      /*stream_active=*/true);
+  auto streamed =
+      make_generator(*rig, &window_rig->machine, /*stream_active=*/true);
   const generation_run run =
       run_generation(*streamed, rig->tokenizer, no_samplers,
                      emel::text::generator::selection_mode::preselected_argmax);
@@ -874,16 +878,15 @@ TEST_CASE("generator passthrough window keeps the resident route engaged") {
   REQUIRE(window_rig->bind(file, /*budget=*/0u));
   REQUIRE_FALSE(window_rig->streaming_active);
 
-  auto resident = std::make_unique<emel::text::generator::sm>(rig->prepared.data, rig->conditioner);
+  auto resident = make_generator(*rig);
   const generation_run resident_run =
       run_generation(*resident, rig->tokenizer, rig->samplers);
   REQUIRE(resident_run.ok);
 
   auto rig_pt = std::make_unique<generator_rig>(+1.0f);
-  auto passthrough = std::make_unique<emel::text::generator::sm>(rig_pt->prepared.data,
-                                        rig_pt->conditioner,
-                                        window_rig->machine,
-                                        window_rig->streaming_active);
+  auto passthrough =
+      make_generator(*rig_pt, &window_rig->machine,
+                     window_rig->streaming_active);
   const generation_run passthrough_run =
       run_generation(*passthrough, rig_pt->tokenizer, rig_pt->samplers);
   REQUIRE(passthrough_run.ok);

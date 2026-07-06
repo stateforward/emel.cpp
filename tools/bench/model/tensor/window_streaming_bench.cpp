@@ -33,7 +33,6 @@
 #include <string_view>
 #include <vector>
 
-#include "emel/memory/view.hpp"
 #include "emel/gguf/loader/any.hpp"
 #include "emel/gguf/loader/sm.hpp"
 #include "emel/io/loader/sm.hpp"
@@ -41,6 +40,7 @@
 #include "emel/io/read/sm.hpp"
 #include "emel/io/source/any.hpp"
 #include "emel/io/staged_read/sm.hpp"
+#include "emel/memory/view.hpp"
 #include "emel/model/detail.hpp"
 #include "emel/model/loader/sm.hpp"
 #include "emel/model/tensor/sm.hpp"
@@ -50,6 +50,7 @@
 #include "emel/text/tokenizer/sm.hpp"
 
 #include "../../../generation_formatter_contract.hpp"
+#include "../../../generation_route_policy.hpp"
 
 // Reference lane only: llama.cpp drives the comparison result and never
 // touches the EMEL lanes, per the split-lane benchmark contract.
@@ -87,7 +88,9 @@ std::filesystem::path bench_root_path() {
 #endif
 }
 
-std::filesystem::path fixture_path() { return bench_root_path() / k_fixture_rel; }
+std::filesystem::path fixture_path() {
+  return bench_root_path() / k_fixture_rel;
+}
 
 void report_missing_fixture() {
   std::fprintf(stderr,
@@ -180,13 +183,15 @@ struct emel_fixture {
   load_capture load = {};
 };
 
-void on_probe_done(void *owner, const emel::gguf::loader::events::probe_done &ev) {
+void on_probe_done(void *owner,
+                   const emel::gguf::loader::events::probe_done &ev) {
   auto &fixture = *static_cast<emel_fixture *>(owner);
   fixture.gguf.probe_done = true;
   fixture.gguf.requirements = ev.requirements_out;
 }
 
-void on_probe_error(void *owner, const emel::gguf::loader::events::probe_error &ev) {
+void on_probe_error(void *owner,
+                    const emel::gguf::loader::events::probe_error &ev) {
   auto &fixture = *static_cast<emel_fixture *>(owner);
   fixture.gguf.probe_error = true;
   fixture.gguf.err = ev.err;
@@ -196,17 +201,20 @@ void on_bind_done(void *owner, const emel::gguf::loader::events::bind_done &) {
   static_cast<emel_fixture *>(owner)->gguf.bind_done = true;
 }
 
-void on_bind_error(void *owner, const emel::gguf::loader::events::bind_error &ev) {
+void on_bind_error(void *owner,
+                   const emel::gguf::loader::events::bind_error &ev) {
   auto &fixture = *static_cast<emel_fixture *>(owner);
   fixture.gguf.bind_error = true;
   fixture.gguf.err = ev.err;
 }
 
-void on_parse_done(void *owner, const emel::gguf::loader::events::parse_done &) {
+void on_parse_done(void *owner,
+                   const emel::gguf::loader::events::parse_done &) {
   static_cast<emel_fixture *>(owner)->gguf.parse_done = true;
 }
 
-void on_parse_error(void *owner, const emel::gguf::loader::events::parse_error &ev) {
+void on_parse_error(void *owner,
+                    const emel::gguf::loader::events::parse_error &ev) {
   auto &fixture = *static_cast<emel_fixture *>(owner);
   fixture.gguf.parse_error = true;
   fixture.gguf.err = ev.err;
@@ -216,7 +224,8 @@ void on_load_done(void *owner, const emel::model::loader::events::load_done &) {
   static_cast<emel_fixture *>(owner)->load.done = true;
 }
 
-void on_load_error(void *owner, const emel::model::loader::events::load_error &ev) {
+void on_load_error(void *owner,
+                   const emel::model::loader::events::load_error &ev) {
   auto &fixture = *static_cast<emel_fixture *>(owner);
   fixture.load.error = true;
   fixture.load.err = ev.err;
@@ -259,8 +268,8 @@ bool prebind_gguf_storage(emel_fixture &fixture,
       probe_done_cb,
       probe_error_cb,
   };
-  if (!fixture.gguf_loader.process_event(probe_ev) || !fixture.gguf.probe_done ||
-      fixture.gguf.probe_error) {
+  if (!fixture.gguf_loader.process_event(probe_ev) ||
+      !fixture.gguf.probe_done || fixture.gguf.probe_error) {
     return false;
   }
   if (requirements.tensor_count >
@@ -317,8 +326,8 @@ emel::error::type run_parse_model(void *owner,
       parse_done_cb,
       parse_error_cb,
   };
-  if (!fixture.gguf_loader.process_event(parse_ev) || !fixture.gguf.parse_done ||
-      fixture.gguf.parse_error) {
+  if (!fixture.gguf_loader.process_event(parse_ev) ||
+      !fixture.gguf.parse_done || fixture.gguf.parse_error) {
     return emel::error::cast(emel::model::loader::error::model_invalid);
   }
 
@@ -363,8 +372,8 @@ emel::error::type run_map_layers(void *,
   return emel::error::cast(emel::model::loader::error::model_invalid);
 }
 
-emel::error::type run_validate_structure(void *,
-                                         const emel::model::loader::event::load &req) {
+emel::error::type
+run_validate_structure(void *, const emel::model::loader::event::load &req) {
   if (req.model_data.n_tensors == 0u || req.model_data.n_layers <= 0 ||
       req.model_data.weights_data == nullptr ||
       req.model_data.weights_size == 0u) {
@@ -415,15 +424,14 @@ bool load_model_from_image(emel_fixture &fixture, const std::string &model_path,
           std::span<const emel::gguf::loader::kv_entry>{
               fixture.kv_entries.data(), fixture.kv_entries.size()},
   };
-  if (!emel::model::detail::load_vocab_from_gguf(binding,
-                                                 fixture.model_data.vocab_data)) {
+  if (!emel::model::detail::load_vocab_from_gguf(
+          binding, fixture.model_data.vocab_data)) {
     return false;
   }
   fixture.model_data.params.n_vocab =
       static_cast<int32_t>(fixture.model_data.vocab_data.n_tokens);
   return true;
 }
-
 
 //------------------------------------------------------------------------------//
 // Formatter binding: resolve the fixture's chat template contract so the
@@ -437,13 +445,15 @@ std::string_view kv_key_view(const emel_fixture &fixture,
     return {};
   }
   return std::string_view{
-      reinterpret_cast<const char *>(fixture.kv_arena.data() + entry.key_offset),
+      reinterpret_cast<const char *>(fixture.kv_arena.data() +
+                                     entry.key_offset),
       entry.key_length,
   };
 }
 
-std::span<const uint8_t> kv_value_view(const emel_fixture &fixture,
-                                       const emel::gguf::loader::kv_entry &entry) {
+std::span<const uint8_t>
+kv_value_view(const emel_fixture &fixture,
+              const emel::gguf::loader::kv_entry &entry) {
   if (static_cast<size_t>(entry.value_offset) +
           static_cast<size_t>(entry.value_length) >
       fixture.kv_arena.size()) {
@@ -506,10 +516,14 @@ resolve_formatter_binding(const emel_fixture &fixture) {
 // canonical role order the generator's streamed rebase walks.
 
 constexpr std::array<std::string_view, 9> k_stream_role_names = {
-    "attn_q.weight",           "attn_k.weight",
-    "attn_v.weight",           "attn_output.weight",
-    "ffn_gate.weight",         "ffn_down.weight",
-    "ffn_up.weight",           "shortconv.in_proj.weight",
+    "attn_q.weight",
+    "attn_k.weight",
+    "attn_v.weight",
+    "attn_output.weight",
+    "ffn_gate.weight",
+    "ffn_down.weight",
+    "ffn_up.weight",
+    "shortconv.in_proj.weight",
     "shortconv.out_proj.weight",
 };
 
@@ -583,8 +597,9 @@ struct window_rig {
     return ctx;
   }
 
-  static void on_bind_done(void *object,
-                           const window::events::bind_window_done &ev) noexcept {
+  static void
+  on_bind_done(void *object,
+               const window::events::bind_window_done &ev) noexcept {
     auto &rig = *static_cast<window_rig *>(object);
     rig.streaming_active = ev.streaming_active;
     rig.source_base = ev.source_base;
@@ -654,34 +669,36 @@ struct generation_capture {
 
 struct emel_session {
   emel::model::data model_data = {};
-  emel::tools::generation_formatter_contract::formatter_binding formatter_binding = {};
+  emel::tools::generation_formatter_contract::formatter_binding
+      formatter_binding = {};
   emel::text::tokenizer::sm tokenizer = {};
   emel::text::conditioner::sm conditioner = {};
+  emel::text::generator::matmul::lane_pool<7u> parallel_matmul_lanes = {};
   std::unique_ptr<emel::text::generator::sm> generator = {};
   initialize_capture initialize = {};
   generation_capture generation = {};
 };
 
-void on_initialize_done(void *owner,
-                        const emel::text::generator::events::initialize_done &) {
+void on_initialize_done(
+    void *owner, const emel::text::generator::events::initialize_done &) {
   static_cast<emel_session *>(owner)->initialize.done = true;
 }
 
-void on_initialize_error(void *owner,
-                         const emel::text::generator::events::initialize_error &) {
+void on_initialize_error(
+    void *owner, const emel::text::generator::events::initialize_error &) {
   static_cast<emel_session *>(owner)->initialize.error = true;
 }
 
-void on_generation_done(void *owner,
-                        const emel::text::generator::events::generation_done &ev) {
+void on_generation_done(
+    void *owner, const emel::text::generator::events::generation_done &ev) {
   auto &session = *static_cast<emel_session *>(owner);
   session.generation.done = true;
   session.generation.tokens_generated = ev.tokens_generated;
   session.generation.output_length = ev.output_length;
 }
 
-void on_generation_error(void *owner,
-                         const emel::text::generator::events::generation_error &ev) {
+void on_generation_error(
+    void *owner, const emel::text::generator::events::generation_error &ev) {
   auto &session = *static_cast<emel_session *>(owner);
   session.generation.error = true;
   session.generation.err = ev.err;
@@ -689,17 +706,20 @@ void on_generation_error(void *owner,
 
 bool tokenizer_bind_dispatch(void *tokenizer_sm,
                              const emel::text::tokenizer::event::bind &ev) {
-  return static_cast<emel::text::tokenizer::sm *>(tokenizer_sm)->process_event(ev);
+  return static_cast<emel::text::tokenizer::sm *>(tokenizer_sm)
+      ->process_event(ev);
 }
 
-bool tokenizer_tokenize_dispatch(void *tokenizer_sm,
-                                 const emel::text::tokenizer::event::tokenize &ev) {
-  return static_cast<emel::text::tokenizer::sm *>(tokenizer_sm)->process_event(ev);
+bool tokenizer_tokenize_dispatch(
+    void *tokenizer_sm, const emel::text::tokenizer::event::tokenize &ev) {
+  return static_cast<emel::text::tokenizer::sm *>(tokenizer_sm)
+      ->process_event(ev);
 }
 
 emel::text::tokenizer::preprocessor::preprocessor_kind
 session_preprocessor_variant(const emel::model::data &model_data) {
-  using preprocessor_kind = emel::text::tokenizer::preprocessor::preprocessor_kind;
+  using preprocessor_kind =
+      emel::text::tokenizer::preprocessor::preprocessor_kind;
   using tokenizer_model = emel::model::data::tokenizer_model;
   switch (model_data.vocab_data.tokenizer_model_id) {
   case tokenizer_model::SPM:
@@ -747,14 +767,23 @@ void prepare_session(const emel_fixture &fixture, emel_session &session,
   session.formatter_binding = resolve_formatter_binding(fixture);
   if (rig != nullptr) {
     session.generator = std::make_unique<emel::text::generator::sm>(
-        session.model_data, session.conditioner, rig->machine,
-        rig->streaming_active, session.formatter_binding.formatter_ctx,
-        session.formatter_binding.format_prompt);
+        emel::text::generator::make_auto_dependencies(
+            session.model_data, session.conditioner,
+            session.parallel_matmul_lanes,
+            emel::tools::generation_route::make_current_runtime_policy(
+                session.model_data),
+            session.formatter_binding.formatter_ctx,
+            session.formatter_binding.format_prompt, &rig->machine,
+            rig->streaming_active));
   } else {
     session.generator = std::make_unique<emel::text::generator::sm>(
-        session.model_data, session.conditioner,
-        session.formatter_binding.formatter_ctx,
-        session.formatter_binding.format_prompt);
+        emel::text::generator::make_auto_dependencies(
+            session.model_data, session.conditioner,
+            session.parallel_matmul_lanes,
+            emel::tools::generation_route::make_current_runtime_policy(
+                session.model_data),
+            session.formatter_binding.formatter_ctx,
+            session.formatter_binding.format_prompt));
   }
 }
 
@@ -768,7 +797,8 @@ bool initialize_session(emel_session &session, const int32_t max_tokens) {
       tokenizer_tokenize_dispatch,
       std::span<emel::logits::sampler::fn>{},
   };
-  request.preprocessor_variant = session_preprocessor_variant(session.model_data);
+  request.preprocessor_variant =
+      session_preprocessor_variant(session.model_data);
   request.encoder_variant = session_encoder_variant(session.model_data);
   request.add_special = false;
   request.parse_special = false;
@@ -835,8 +865,9 @@ struct metadata_mapping {
   const void *base = nullptr;
   uint64_t bytes = 0u;
 
-  static void on_done(void *object,
-                      const emel::io::mmap::events::map_tensor_done &ev) noexcept {
+  static void
+  on_done(void *object,
+          const emel::io::mmap::events::map_tensor_done &ev) noexcept {
     auto &self = *static_cast<metadata_mapping *>(object);
     self.handle = ev.handle;
     self.base = ev.buffer;
@@ -881,7 +912,8 @@ void prepare_emel_lane(emel_lane_setup &setup, const bool streamed) {
   emel_fixture &fixture = *setup.fixture;
 
   std::error_code size_error{};
-  const uint64_t file_size = std::filesystem::file_size(fixture_path(), size_error);
+  const uint64_t file_size =
+      std::filesystem::file_size(fixture_path(), size_error);
   if (size_error || file_size == 0u) {
     return;
   }
@@ -912,7 +944,7 @@ void prepare_emel_lane(emel_lane_setup &setup, const bool streamed) {
   const uint64_t requested = memory_max_bytes_from_env();
   setup.budget_bytes =
       streamed ? (requested != 0u ? requested : (setup.file_size * 35u) / 100u)
-               : 0u;  // passthrough: unlimited budget, no slots
+               : 0u; // passthrough: unlimited budget, no slots
 
   setup.rig = std::make_unique<window_rig>();
   if (!setup.rig->bind(model_path, setup.file_size, extents,
@@ -954,8 +986,7 @@ void append_emel_lane_cases(std::vector<result> &results, const config &cfg,
     prepare_session(*setup.fixture, *session,
                     streamed ? setup.rig.get() : nullptr);
     if (!initialize_session(*session, max_tokens)) {
-      std::fprintf(stderr,
-                   "warning: weight_streaming %s session init failed\n",
+      std::fprintf(stderr, "warning: weight_streaming %s session init failed\n",
                    lane_tag);
       return;
     }
@@ -969,10 +1000,11 @@ void append_emel_lane_cases(std::vector<result> &results, const config &cfg,
       const uint64_t faults_before = process_major_faults();
       generation_run run{};
       if (!run_generate(*session, max_tokens, run)) {
-        std::fprintf(stderr,
-                     "error: weight_streaming %s generate failed (err=%u done=%d)\n",
-                     lane_tag, session->generation.err,
-                     session->generation.done ? 1 : 0);
+        std::fprintf(
+            stderr,
+            "error: weight_streaming %s generate failed (err=%u done=%d)\n",
+            lane_tag, session->generation.err,
+            session->generation.done ? 1 : 0);
         std::exit(1);
       }
       bytes_read_delta = process_read_bytes() - read_before;
@@ -1002,18 +1034,19 @@ void append_emel_lane_cases(std::vector<result> &results, const config &cfg,
     record.comparable = true;
     record.output_tokens = static_cast<uint64_t>(latest.tokens_generated);
     record.output_bytes = static_cast<uint64_t>(latest.output_length);
-    record.note = "memory_max=" + std::to_string(setup.budget_bytes) +
-                  " streaming_active=" +
-                  (setup.rig->streaming_active ? "1" : "0") +
-                  " bytes_read=" + std::to_string(bytes_read_delta) +
-                  " major_faults=" + std::to_string(major_faults_delta);
+    record.note =
+        "memory_max=" + std::to_string(setup.budget_bytes) +
+        " streaming_active=" + (setup.rig->streaming_active ? "1" : "0") +
+        " bytes_read=" + std::to_string(bytes_read_delta) +
+        " major_faults=" + std::to_string(major_faults_delta);
   }
 }
 
 //------------------------------------------------------------------------------//
 // Reference lane (llama.cpp, mmap loading, 8 threads).
 
-using llama_model_ptr = std::unique_ptr<llama_model, decltype(&llama_model_free)>;
+using llama_model_ptr =
+    std::unique_ptr<llama_model, decltype(&llama_model_free)>;
 using llama_context_ptr = std::unique_ptr<llama_context, decltype(&llama_free)>;
 
 int32_t reference_threads() {
@@ -1152,7 +1185,8 @@ void append_reference_lane_cases(std::vector<result> &results,
     record.max_output_tokens = static_cast<uint64_t>(max_tokens);
     record.comparable = true;
     record.output_tokens = static_cast<uint64_t>(latest_tokens);
-    record.note = std::string("threads=") + std::to_string(reference_threads()) +
+    record.note = std::string("threads=") +
+                  std::to_string(reference_threads()) +
                   " use_mmap=1 bytes_read=" + std::to_string(bytes_read_delta) +
                   " major_faults=" + std::to_string(major_faults_delta);
     // The same reference measurement baselines both EMEL lanes.
@@ -1164,7 +1198,7 @@ void append_reference_lane_cases(std::vector<result> &results,
   }
 }
 
-}  // namespace
+} // namespace
 
 namespace emel::bench {
 
@@ -1185,4 +1219,4 @@ void append_reference_weight_streaming_cases(std::vector<result> &results,
   append_reference_lane_cases(results, cfg);
 }
 
-}  // namespace emel::bench
+} // namespace emel::bench

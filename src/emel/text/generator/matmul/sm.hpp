@@ -1,5 +1,7 @@
 #pragma once
+// benchmark: designed
 
+#include <span>
 #include <utility>
 
 #include "emel/sm.hpp"
@@ -7,8 +9,6 @@
 #include "emel/text/generator/matmul/guards.hpp"
 
 namespace emel::text::generator::matmul {
-
-using lane_pool = action::lane_pool;
 
 struct state_ready {};
 struct state_serial_result_decision {};
@@ -64,42 +64,7 @@ struct model {
 
       , sml::state<state_ready> <= sml::state<state_parallel_result_decision>
                  + sml::completion<event::execute_parallel>
-                 [ guard::guard_parallel_lane_rejected<0>{} ]
-                 / action::effect_reject_parallel_execution
-
-      , sml::state<state_ready> <= sml::state<state_parallel_result_decision>
-                 + sml::completion<event::execute_parallel>
-                 [ guard::guard_parallel_lane_rejected<1>{} ]
-                 / action::effect_reject_parallel_execution
-
-      , sml::state<state_ready> <= sml::state<state_parallel_result_decision>
-                 + sml::completion<event::execute_parallel>
-                 [ guard::guard_parallel_lane_rejected<2>{} ]
-                 / action::effect_reject_parallel_execution
-
-      , sml::state<state_ready> <= sml::state<state_parallel_result_decision>
-                 + sml::completion<event::execute_parallel>
-                 [ guard::guard_parallel_lane_rejected<3>{} ]
-                 / action::effect_reject_parallel_execution
-
-      , sml::state<state_ready> <= sml::state<state_parallel_result_decision>
-                 + sml::completion<event::execute_parallel>
-                 [ guard::guard_parallel_lane_rejected<4>{} ]
-                 / action::effect_reject_parallel_execution
-
-      , sml::state<state_ready> <= sml::state<state_parallel_result_decision>
-                 + sml::completion<event::execute_parallel>
-                 [ guard::guard_parallel_lane_rejected<5>{} ]
-                 / action::effect_reject_parallel_execution
-
-      , sml::state<state_ready> <= sml::state<state_parallel_result_decision>
-                 + sml::completion<event::execute_parallel>
-                 [ guard::guard_parallel_lane_rejected<6>{} ]
-                 / action::effect_reject_parallel_execution
-
-      , sml::state<state_ready> <= sml::state<state_parallel_result_decision>
-                 + sml::completion<event::execute_parallel>
-                 [ guard::guard_parallel_lane_rejected<7>{} ]
+                 [ guard::guard_parallel_lane_rejected{} ]
                  / action::effect_reject_parallel_execution
 
       , sml::state<state_ready> <= sml::state<state_parallel_result_decision>
@@ -127,13 +92,12 @@ struct sm : public emel::sm<model, action::context> {
   using base_type::is;
   using base_type::visit_current_states;
 
-  sm() : base_type() {
-    process_event(event::configure_kernel_kind{emel::kernel::detect_host_kind()});
-  }
-
-  explicit sm(lane_pool & parallel_matmul_lanes_ref) : base_type() {
-    this->context_.parallel_matmul_lanes = &parallel_matmul_lanes_ref;
-    process_event(event::configure_kernel_kind{emel::kernel::detect_host_kind()});
+  explicit sm(const execution_policy & policy) : base_type() {
+    this->context_.parallel_matmul_lanes = policy.parallel_matmul_lanes;
+    this->context_.kernel_kind = policy.kernel_kind;
+    this->context_.active_lanes = policy.active_lanes;
+    this->context_.lane_capacity = policy.parallel_matmul_lanes.lane_capacity;
+    process_event(event::configure_kernel_kind{policy.kernel_kind});
   }
 
   bool process_event(const event::configure_kernel_kind & ev) {
@@ -159,11 +123,19 @@ struct sm : public emel::sm<model, action::context> {
   }
 
   bool parallel_lanes_available() const noexcept {
-    return this->context_.parallel_matmul_lanes != nullptr;
+    return this->context_.parallel_matmul_lanes.valid() &&
+           this->context_.active_lanes > 1u &&
+           this->context_.active_lanes <= this->context_.lane_capacity &&
+           this->context_.active_lanes <= k_max_matmul_lanes &&
+           this->context_.lane_capacity <= k_max_matmul_lanes;
   }
 
-  const std::array<emel::kernel::sm, k_matmul_lanes> & parallel_lane_kernels() const noexcept {
-    return this->context_.lane_kernels;
+  size_t active_lane_count() const noexcept {
+    return this->context_.active_lanes;
+  }
+
+  std::span<const emel::kernel::sm> parallel_lane_kernels() const noexcept {
+    return {this->context_.lane_kernels.data(), k_max_matmul_lanes};
   }
 };
 

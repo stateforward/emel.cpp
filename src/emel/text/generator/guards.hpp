@@ -709,14 +709,14 @@ inline bool guard_flash_attention_supported(
 
 inline bool uses_prefill_chunk4_q8_gemm(const event::generate_run & ev,
                                         const action::context & ctx) noexcept {
-  return ev.ctx.prompt_token_count >= emel::text::generator::detail::k_prefill_q8_chunk_rows &&
-      prefill_chunk4_q8_gemm_supported(ctx.compute.backend);
+  return ev.ctx.prompt_token_count >= ctx.compute.backend.routes.prefill_chunk4_min_tokens &&
+         prefill_chunk4_q8_gemm_supported(ctx.compute.backend);
 }
 
 inline bool uses_prefill_chunk8_q8_gemm(const event::generate_run & ev,
                                         const action::context & ctx) noexcept {
-  return ev.ctx.prompt_token_count >= emel::text::generator::detail::k_prefill_q8_chunk8_rows &&
-      prefill_chunk8_q8_k_supported(ctx.compute.backend);
+  return ev.ctx.prompt_token_count >= ctx.compute.backend.routes.prefill_chunk8_min_tokens &&
+         prefill_chunk8_q8_k_supported(ctx.compute.backend);
 }
 
 inline bool prefill_contract_uses_materialized_logits(
@@ -1159,7 +1159,7 @@ struct guard_decode_parallel_lanes_ready {
            ctx.compute.backend.matmul_actor != nullptr &&
            ctx.compute.backend.matmul_actor->parallel_lanes_available() &&
            ctx.compute.backend.n_embd >=
-               emel::text::generator::detail::k_parallel_min_gemv_dim;
+               ctx.compute.backend.routes.parallel_min_gemv_dim;
   }
 };
 
