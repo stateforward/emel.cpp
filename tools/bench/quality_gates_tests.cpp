@@ -504,7 +504,8 @@ const std::string k_dual_arch_baseline =
     "batch/planner_simple ns_per_op=650.000 iter=100 runs=3\n"
     "flash_attention/aarch64/op_flash_attn_ext_decode_like ns_per_op=17892.000 iter=100 runs=3\n"
     "kernel/aarch64/op_add ns_per_op=127.000 iter=100 runs=3\n"
-    "kernel/x86_64/op_add ns_per_op=122.000 iter=100 runs=3\n";
+    "kernel/x86_64/op_add ns_per_op=122.000 iter=100 runs=3\n"
+    "kernel/x86_64/op_flash_attn_ext_decode_like ns_per_op=172.000 iter=100 runs=3\n";
 
 TEST_CASE("compare gate exempts foreign-arch baseline rows the host runner skips") {
   // Current snapshot as an arm64 runner would emit it: no x86_64 rows.
@@ -546,6 +547,18 @@ TEST_CASE("compare gate still fails when a host-renamed row has no paired baseli
       "kernel/x86_64/op_add ns_per_op=123.000\n";
   CHECK(run_compare_gate(k_dual_arch_baseline, x86_current, "x86_64") != 0);
 }
+
+TEST_CASE("compare gate does not borrow a foreign baseline for host-renamed rows") {
+  const std::string foreign_only_baseline =
+      "# ref=test\n"
+      "batch/planner_simple ns_per_op=650.000 iter=100 runs=3\n"
+      "flash_attention/aarch64/op_flash_attn_ext_decode_like ns_per_op=17892.000 iter=100 runs=3\n";
+  const std::string x86_current =
+      "# bench_host_arch: x86_64\n"
+      "batch/planner_simple ns_per_op=655.000\n"
+      "flash_attention/x86_64/op_flash_attn_ext_decode_like ns_per_op=170.000\n";
+  CHECK(run_compare_gate(foreign_only_baseline, x86_current, "x86_64") != 0);
+}
 #endif
 
 TEST_CASE("bench runner emits a host-arch marker the compare gate consumes") {
@@ -553,7 +566,16 @@ TEST_CASE("bench runner emits a host-arch marker the compare gate consumes") {
       read_file(repo_root() / "tools" / "bench" / "bench_runner.cpp");
   CHECK(bench_runner.find("constexpr std::string_view k_host_arch =") !=
         std::string::npos);
-  CHECK(bench_runner.find("# bench_host_arch: %.*s\\n") != std::string::npos);
+  CHECK(bench_runner.find("void print_bench_host_arch_marker()") !=
+        std::string::npos);
+  const std::size_t snapshot_start = bench_runner.find("void print_snapshot");
+  const std::size_t compare_start = bench_runner.find("void print_compare");
+  REQUIRE(snapshot_start != std::string::npos);
+  REQUIRE(compare_start != std::string::npos);
+  CHECK(bench_runner.find("print_bench_host_arch_marker();", snapshot_start) !=
+        std::string::npos);
+  CHECK(bench_runner.find("print_bench_host_arch_marker();", compare_start) !=
+        std::string::npos);
 
   const std::string script = read_file(repo_root() / "scripts" / "bench.sh");
   CHECK(script.find("resolve_bench_host_arch") != std::string::npos);

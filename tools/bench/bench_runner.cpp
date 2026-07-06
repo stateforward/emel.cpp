@@ -230,6 +230,15 @@ bool case_supported_on_host(const bench::test_case & tc) {
   return true;
 }
 
+void print_bench_host_arch_marker() {
+  // The compare gate (scripts/bench_compare_gate.awk) uses this marker to know
+  // which arch-gated baseline rows the runner can produce on this host; rows
+  // skipped by case_supported_on_host for a foreign arch are expected-absent.
+  std::printf("# bench_host_arch: %.*s\n",
+              static_cast<int>(k_host_arch.size()),
+              k_host_arch.data());
+}
+
 std::uint64_t read_env_u64(const char * name, std::uint64_t fallback) {
   const char * value = std::getenv(name);
   if (value == nullptr || value[0] == '\0') {
@@ -374,6 +383,7 @@ void print_snapshot(const std::vector<bench::result> & results, const bench::con
     return a.name < b.name;
   });
 
+  print_bench_host_arch_marker();
   print_benchmark_config(cfg);
   for (const auto & entry : sorted) {
     if (is_diarization_sortformer_case_name(entry.name)) {
@@ -613,12 +623,7 @@ void print_compare(const std::vector<bench::result> & emel_results,
               k_bench_reference_source.data(),
               static_cast<int>(k_bench_reference_ref.size()),
               k_bench_reference_ref.data());
-  // The compare gate (scripts/bench_compare_gate.awk) uses this marker to know
-  // which arch-gated baseline rows the runner can produce on this host; rows
-  // skipped by case_supported_on_host for a foreign arch are expected-absent.
-  std::printf("# bench_host_arch: %.*s\n",
-              static_cast<int>(k_host_arch.size()),
-              k_host_arch.data());
+  print_bench_host_arch_marker();
   print_benchmark_config(cfg);
   print_binary_size_compare_metadata();
   if (generation_present) {

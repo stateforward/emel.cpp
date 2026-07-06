@@ -39,21 +39,22 @@ function named_arch(name,    a) {
   return "";
 }
 
-# Return an architecture-normalized key for paired host-specific benchmark names.
-# Exact baseline names always win; this key is only a fallback for a host row
-# whose exact baseline is absent but whose paired foreign-arch baseline exists.
-function normalized_arch_name(name,    a, marker, pos) {
+# Return a same-host suffix key for paired host-specific benchmark names. Exact
+# baseline names always win; this key is only a fallback for a host row whose
+# exact baseline is absent but whose same-host counterpart exists in one other
+# benchmark family.
+function host_suffix_name(name,    a, marker, pos) {
   for (a in known_arch) {
     marker = "/" a "/";
     pos = index(name, marker);
     if (pos > 0) {
-      return substr(name, 1, pos) "{arch}" substr(name, pos + length(marker) - 1);
+      return a "/" substr(name, pos + length(marker));
     }
   }
   return name;
 }
 
-function parse_entry(line, dest, is_base,    n, fields, name, ns, i, pair, normalized) {
+function parse_entry(line, dest, is_base,    n, fields, name, ns, i, pair, arch, suffix) {
   n = split(line, fields, " ");
   name = fields[1];
   for (i = 2; i <= n; ++i) {
@@ -68,12 +69,15 @@ function parse_entry(line, dest, is_base,    n, fields, name, ns, i, pair, norma
   }
   dest[name] = ns;
   if (is_base) {
-    normalized = normalized_arch_name(name);
-    if (!(normalized in normalized_base)) {
-      normalized_base[normalized] = ns;
-      normalized_base_name[normalized] = name;
+    arch = named_arch(name);
+    suffix = host_suffix_name(name);
+    if (arch != "" && arch == host_arch) {
+      if (!(suffix in host_suffix_base)) {
+        host_suffix_base[suffix] = ns;
+        host_suffix_base_name[suffix] = name;
+      }
+      host_suffix_base_count[suffix] += 1;
     }
-    normalized_base_count[normalized] += 1;
   }
 }
 
@@ -114,11 +118,11 @@ END {
     baseline_name = name;
     if (!(name in base)) {
       arch = named_arch(name);
-      normalized = normalized_arch_name(name);
-      if (arch == host_arch && normalized in normalized_base &&
-          normalized_base_count[normalized] == 1) {
-        baseline_name = normalized_base_name[normalized];
-        matched_normalized_base[baseline_name] = 1;
+      suffix = host_suffix_name(name);
+      if (arch == host_arch && suffix in host_suffix_base &&
+          host_suffix_base_count[suffix] == 1) {
+        baseline_name = host_suffix_base_name[suffix];
+        matched_host_suffix_base[baseline_name] = 1;
       } else {
         print "error: new benchmark entry without baseline: " name > "/dev/stderr";
         fail = 1;
@@ -147,7 +151,7 @@ END {
       if (name in curr) {
         continue;
       }
-      if (name in matched_normalized_base) {
+      if (name in matched_host_suffix_base) {
         continue;
       }
       arch = named_arch(name);
