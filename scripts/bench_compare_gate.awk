@@ -39,22 +39,11 @@ function named_arch(name,    a) {
   return "";
 }
 
-# Return a same-host suffix key for paired host-specific benchmark names. Exact
-# baseline names always win; this key is only a fallback for a host row whose
-# exact baseline is absent but whose same-host counterpart exists in one other
-# benchmark family.
-function host_suffix_name(name,    a, marker, pos) {
-  for (a in known_arch) {
-    marker = "/" a "/";
-    pos = index(name, marker);
-    if (pos > 0) {
-      return a "/" substr(name, pos + length(marker));
-    }
-  }
-  return name;
+function register_benchmark_alias(current_name, baseline_name) {
+  benchmark_alias[current_name] = baseline_name;
 }
 
-function parse_entry(line, dest, is_base,    n, fields, name, ns, i, pair, arch, suffix) {
+function parse_entry(line, dest,    n, fields, name, ns, i, pair) {
   n = split(line, fields, " ");
   name = fields[1];
   for (i = 2; i <= n; ++i) {
@@ -68,23 +57,19 @@ function parse_entry(line, dest, is_base,    n, fields, name, ns, i, pair, arch,
     return;
   }
   dest[name] = ns;
-  if (is_base) {
-    arch = named_arch(name);
-    suffix = host_suffix_name(name);
-    if (arch != "" && arch == host_arch) {
-      if (!(suffix in host_suffix_base)) {
-        host_suffix_base[suffix] = ns;
-        host_suffix_base_name[suffix] = name;
-      }
-      host_suffix_base_count[suffix] += 1;
-    }
-  }
 }
 
 BEGIN {
   # Architectures the bench runner gates on the host at build/run time.
   register_known_arch("x86_64");
   register_known_arch("aarch64");
+
+  # Historical bench-suite rename carried by snapshots/bench/benchmarks.txt.
+  # Keep this explicit so unrelated new rows cannot borrow same-suffix baselines
+  # and suppress the original baseline as matched.
+  flash_x86_current = "flash_attention/x86_64/op_flash_attn_ext_decode_like";
+  flash_x86_baseline = "kernel/x86_64/op_flash_attn_ext_decode_like";
+  register_benchmark_alias(flash_x86_current, flash_x86_baseline);
 }
 
 FNR == NR {
@@ -96,7 +81,7 @@ FNR == NR {
     skip_base = 0;
     next;
   }
-  parse_entry($0, base, 1);
+  parse_entry($0, base);
   next;
 }
 {
@@ -108,7 +93,7 @@ FNR == NR {
     skip_curr = 0;
     next;
   }
-  parse_entry($0, curr, 0);
+  parse_entry($0, curr);
   next;
 }
 END {
@@ -117,12 +102,11 @@ END {
   for (name in curr) {
     baseline_name = name;
     if (!(name in base)) {
-      arch = named_arch(name);
-      suffix = host_suffix_name(name);
-      if (arch == host_arch && suffix in host_suffix_base &&
-          host_suffix_base_count[suffix] == 1) {
-        baseline_name = host_suffix_base_name[suffix];
-        matched_host_suffix_base[baseline_name] = 1;
+      alias_name = benchmark_alias[name];
+      if (alias_name != "" && alias_name in base &&
+          named_arch(alias_name) == host_arch) {
+        baseline_name = alias_name;
+        matched_alias_base[baseline_name] = 1;
       } else {
         print "error: new benchmark entry without baseline: " name > "/dev/stderr";
         fail = 1;
@@ -151,7 +135,7 @@ END {
       if (name in curr) {
         continue;
       }
-      if (name in matched_host_suffix_base) {
+      if (name in matched_alias_base) {
         continue;
       }
       arch = named_arch(name);

@@ -559,6 +559,14 @@ TEST_CASE("compare gate does not borrow a foreign baseline for host-renamed rows
       "flash_attention/x86_64/op_flash_attn_ext_decode_like ns_per_op=170.000\n";
   CHECK(run_compare_gate(foreign_only_baseline, x86_current, "x86_64") != 0);
 }
+
+TEST_CASE("compare gate requires explicit aliases for renamed benchmark rows") {
+  const std::string unrelated_rename_current =
+      "# bench_host_arch: x86_64\n"
+      "batch/planner_simple ns_per_op=655.000\n"
+      "some_suite/x86_64/op_add ns_per_op=123.000\n";
+  CHECK(run_compare_gate(k_dual_arch_baseline, unrelated_rename_current, "x86_64") != 0);
+}
 #endif
 
 TEST_CASE("bench runner emits a host-arch marker the compare gate consumes") {
