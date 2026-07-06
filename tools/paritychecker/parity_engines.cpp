@@ -1000,7 +1000,7 @@ struct generation_load_state {
   emel::model::loader::sm model_loader = {};
   emel::text::tokenizer::sm tokenizer = {};
   emel::text::conditioner::sm conditioner = {};
-  emel::text::generator::matmul::lane_pool<7u> parallel_matmul_lanes = {};
+  emel::text::generator::matmul::lane_pool<7u, 128u, 1048576u> parallel_matmul_lanes = {};
   std::unique_ptr<emel::text::generator::sm> generator = {};
   reference_backend reference = {};
   generation_trace *emel_trace = nullptr;
@@ -1593,13 +1593,20 @@ run_emel_initialize_generator(generation_load_state &state,
       1, emel::memory::view::blocks_for_tokens(
              emel::memory::view::DEFAULT_BLOCK_TOKENS, session_tokens));
 
+  const auto matmul_policy =
+      emel::text::generator::matmul::make_auto_execution_policy(
+          state.parallel_matmul_lanes);
   state.generator = std::make_unique<emel::text::generator::sm>(
-      emel::text::generator::make_auto_dependencies(
-          *state.model_data, state.conditioner, state.parallel_matmul_lanes,
-          emel::tools::generation_route::make_current_runtime_policy(
-              *state.model_data),
-          state.formatter_binding.formatter_ctx,
-          state.formatter_binding.format_prompt));
+      emel::text::generator::dependencies{
+          .model = *state.model_data,
+          .conditioner = state.conditioner,
+          .matmul_policy = matmul_policy,
+          .runtime_policy =
+              emel::tools::generation_route::make_current_runtime_policy(
+                  *state.model_data),
+          .formatter_ctx = state.formatter_binding.formatter_ctx,
+          .format_prompt = state.formatter_binding.format_prompt,
+      });
 
   reset_initialize_capture(state);
   emel::error::type error_out =

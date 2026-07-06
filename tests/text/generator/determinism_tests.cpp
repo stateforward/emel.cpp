@@ -194,7 +194,7 @@ TEST_CASE("determinism: row-sliced matmul bitwise invariant across slice "
 TEST_CASE("determinism: parallel fork/join dispatch bitwise repeatable and "
           "serial-identical") {
   const matmul_case fixture(dtype::q8_0, 64, 61, 1);
-  emel::text::generator::matmul::lane_pool<7u> parallel_matmul_lanes = {};
+  emel::text::generator::matmul::lane_pool<7u, 128u, 1048576u> parallel_matmul_lanes = {};
   auto policy = emel::text::generator::matmul::make_auto_execution_policy(
       parallel_matmul_lanes);
   emel::text::generator::matmul::sm matmul_actor{policy};

@@ -96,7 +96,8 @@ struct sm : public emel::sm<model, action::context> {
     this->context_.parallel_matmul_lanes = policy.parallel_matmul_lanes;
     this->context_.kernel_kind = policy.kernel_kind;
     this->context_.active_lanes = policy.active_lanes;
-    this->context_.lane_capacity = policy.parallel_matmul_lanes.lane_capacity;
+    (void) action::reserve_lane_storage(
+        this->context_, policy.parallel_matmul_lanes.lane_capacity);
     process_event(event::configure_kernel_kind{policy.kernel_kind});
   }
 
@@ -124,10 +125,7 @@ struct sm : public emel::sm<model, action::context> {
 
   bool parallel_lanes_available() const noexcept {
     return this->context_.parallel_matmul_lanes.valid() &&
-           this->context_.active_lanes > 1u &&
-           this->context_.active_lanes <= this->context_.lane_capacity &&
-           this->context_.active_lanes <= k_max_matmul_lanes &&
-           this->context_.lane_capacity <= k_max_matmul_lanes;
+           action::lane_storage_ready(this->context_);
   }
 
   size_t active_lane_count() const noexcept {
@@ -135,7 +133,10 @@ struct sm : public emel::sm<model, action::context> {
   }
 
   std::span<const emel::kernel::sm> parallel_lane_kernels() const noexcept {
-    return {this->context_.lane_kernels.data(), k_max_matmul_lanes};
+    if (this->context_.lane_kernels == nullptr) {
+      return {};
+    }
+    return {this->context_.lane_kernels.get(), this->context_.lane_capacity};
   }
 };
 

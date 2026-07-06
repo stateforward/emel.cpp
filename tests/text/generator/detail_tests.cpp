@@ -37,7 +37,7 @@ using emel::text::generator::detail::quant::QK8_0;
 using emel::text::generator::detail::quant::QK_K;
 
 struct matmul_actor_fixture {
-  emel::text::generator::matmul::lane_pool<7u> parallel_matmul_lanes = {};
+  emel::text::generator::matmul::lane_pool<7u, 128u, 1048576u> parallel_matmul_lanes = {};
   emel::text::generator::matmul::execution_policy policy =
       emel::text::generator::matmul::make_auto_execution_policy(
           parallel_matmul_lanes);
@@ -3705,6 +3705,8 @@ TEST_CASE("generator_detail_gemma4_shared_kv_layer_rms_norms_value_branch_"
   backend->n_layer = 16;
   backend->blocks.resize(16u, backend->blocks.front());
   backend->blocks[15].attention_v = backend->blocks[15].attention_k;
+  backend->blocks[15].uses_shared_kv_value = true;
+  backend->blocks[15].requires_attention_v_norm = true;
   backend->layer_cache_offsets.resize(16u, 0u);
   backend->flash_layer_cache_offsets.resize(16u, 0u);
 

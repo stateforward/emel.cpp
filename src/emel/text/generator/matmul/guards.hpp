@@ -8,22 +8,16 @@ namespace emel::text::generator::matmul::guard {
 struct guard_parallel_ready {
   bool operator()(const event::execute_parallel & ev,
                   const action::context & ctx) const noexcept {
-    return ctx.parallel_matmul_lanes.valid() && ctx.active_lanes > 1u &&
-           ctx.active_lanes <= ctx.lane_capacity &&
-           ctx.active_lanes <= emel::text::generator::matmul::k_max_matmul_lanes &&
-           ctx.lane_capacity <= emel::text::generator::matmul::k_max_matmul_lanes &&
-           ev.request.src0.ne[1] > 0u;
+    return ctx.parallel_matmul_lanes.valid() &&
+           action::lane_storage_ready(ctx) && ev.request.src0.ne[1] > 0u;
   }
 };
 
 struct guard_parallel_unavailable {
   bool operator()(const event::execute_parallel & ev,
                   const action::context & ctx) const noexcept {
-    return !ctx.parallel_matmul_lanes.valid() || ctx.active_lanes <= 1u ||
-           ctx.active_lanes > ctx.lane_capacity ||
-           ctx.active_lanes > emel::text::generator::matmul::k_max_matmul_lanes ||
-           ctx.lane_capacity > emel::text::generator::matmul::k_max_matmul_lanes ||
-           ev.request.src0.ne[1] == 0u;
+    return !ctx.parallel_matmul_lanes.valid() ||
+           !action::lane_storage_ready(ctx) || ev.request.src0.ne[1] == 0u;
   }
 };
 

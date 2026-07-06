@@ -1,8 +1,8 @@
 #pragma once
 
-#include <array>
 #include <cstddef>
 #include <functional>
+#include <span>
 
 #include "emel/text/generator/matmul/context.hpp"
 #include "emel/text/generator/matmul/events.hpp"
@@ -13,8 +13,9 @@ struct effect_configure_kernel_kind {
   void operator()(const event::configure_kernel_kind & ev, context & ctx) const noexcept {
     ctx.kernel_kind = ev.kind;
     ctx.kernel.set_kind(ctx.kernel_kind);
-    for (auto & lane_kernel : ctx.lane_kernels) {
-      lane_kernel.set_kind(ctx.kernel_kind);
+    for (size_t lane = 0u;
+         lane < ctx.lane_capacity && ctx.lane_kernels != nullptr; ++lane) {
+      ctx.lane_kernels[lane].set_kind(ctx.kernel_kind);
     }
   }
 };
@@ -34,9 +35,9 @@ struct effect_execute_parallel {
   void operator()(const event::execute_parallel & ev, context & ctx) const noexcept {
     ev.result = {};
     const uint64_t group_rows = detail::matmul_slice_group_rows(ev.request.src0.type);
-    const size_t lane_count =
-        detail::compute_matmul_row_slices(ev.request.src0.ne[1], group_rows,
-                                          ctx.active_lanes, ctx.row_slices);
+    const size_t lane_count = detail::compute_matmul_row_slices(
+        ev.request.src0.ne[1], group_rows, ctx.active_lanes,
+        std::span<detail::matmul_row_slice>{ctx.row_slices.get(), ctx.lane_capacity});
     ev.result.lane_count = lane_count;
 
     lane_join_group group{};
@@ -107,8 +108,9 @@ struct effect_on_unexpected {
 template <class counter_fn>
 uint64_t compute_kernel_counter_total(const context & ctx, counter_fn && counter) noexcept {
   uint64_t total = std::invoke(counter, ctx.kernel);
-  for (const auto & lane_kernel : ctx.lane_kernels) {
-    total += std::invoke(counter, lane_kernel);
+  for (size_t lane = 0u;
+       lane < ctx.lane_capacity && ctx.lane_kernels != nullptr; ++lane) {
+    total += std::invoke(counter, ctx.lane_kernels[lane]);
   }
   return total;
 }

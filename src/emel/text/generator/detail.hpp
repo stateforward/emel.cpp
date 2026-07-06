@@ -61,8 +61,13 @@ struct packed_matrix_binding {
 
 struct block_weights {
   bool uses_attention = true;
+  bool uses_shortconv = false;
   bool requires_attention_qk_norm = false;
+  bool uses_shared_kv_value = false;
   bool requires_attention_v_norm = false;
+  bool uses_sliding_attention = false;
+  int32_t expected_attention_key_length = 0;
+  int32_t expected_attention_value_length = 0;
   int32_t attention_q_dim = 0;
   int32_t attention_kv_dim = 0;
   int32_t attention_head_dim = 0;
@@ -153,6 +158,7 @@ struct stream_binding {
 struct native_backend {
   const emel::model::data * model = nullptr;
   emel::model::llama::detail::execution_view execution = {};
+  emel::model::llama::detail::generation_execution_descriptor generation_execution = {};
   emel::model::llama::detail::topology topology = {};
   emel::model::llama::detail::step_plan prefill_plan = {};
   emel::model::llama::detail::step_plan decode_plan = {};
@@ -975,16 +981,6 @@ inline bool requires_attention_qk_norm(const native_backend & backend,
                                        const block_weights & block) noexcept {
   (void) backend;
   return block.uses_attention && block.requires_attention_qk_norm;
-}
-
-inline bool is_sliding_attention_layer(const native_backend & backend,
-                                       const int32_t layer_index) noexcept {
-  return layer_index >= 0 &&
-         backend.model != nullptr &&
-         static_cast<uint32_t>(layer_index) <
-             backend.model->params.attention_sliding_window_pattern_count &&
-         backend.model->params.attention_sliding_window_pattern_flags[
-             static_cast<size_t>(layer_index)] != 0u;
 }
 
 inline int32_t effective_attention_q_dim(const native_backend & backend,
@@ -5131,6 +5127,9 @@ inline emel::error::type prepare(
 
   if (emel::model::llama::detail::build_execution_view(model_data, backend.execution) !=
           emel::error::cast(emel::model::loader::error::none) ||
+      emel::model::llama::detail::build_generation_execution_descriptor(
+          backend.execution, backend.generation_execution) !=
+          emel::error::cast(emel::model::loader::error::none) ||
       emel::model::llama::detail::build_topology(backend.execution, backend.topology) !=
           emel::error::cast(emel::model::loader::error::none) ||
       emel::model::llama::detail::build_step_plans(
@@ -5196,17 +5195,19 @@ inline emel::error::type prepare(
       return emel::error::cast(emel::model::loader::error::model_invalid);
     }
 
+    const auto & layer_execution =
+        backend.generation_execution.layers[static_cast<size_t>(layer)];
     auto & weights = backend.blocks[static_cast<size_t>(layer)];
-    weights.uses_attention = block.uses_attention;
-    weights.requires_attention_qk_norm =
-        block.uses_attention &&
-        block.attention_q_norm.tensor != nullptr &&
-        block.attention_k_norm.tensor != nullptr;
-    weights.requires_attention_v_norm =
-        block.uses_attention &&
-        model_data.params.attention_shared_kv_layers > 0 &&
-        layer >= (backend.n_layer - model_data.params.attention_shared_kv_layers) &&
-        layer < backend.n_layer;
+    weights.uses_attention = layer_execution.uses_attention;
+    weights.uses_shortconv = layer_execution.uses_shortconv;
+    weights.requires_attention_qk_norm = layer_execution.requires_attention_qk_norm;
+    weights.uses_shared_kv_value = layer_execution.uses_shared_kv_value;
+    weights.requires_attention_v_norm = layer_execution.requires_attention_v_norm;
+    weights.uses_sliding_attention = layer_execution.uses_sliding_attention;
+    weights.expected_attention_key_length = layer_execution.attention_key_length;
+    weights.expected_attention_value_length = layer_execution.attention_value_length;
+    weights.attention_rope_dim = layer_execution.attention_rope_dim;
+    weights.attention_rope_freq_base = layer_execution.attention_rope_freq_base;
     weights.attention_rope_pairing = {
         model_data.params.rope_pair_x0_stride,
         model_data.params.rope_pair_x1_stride,
@@ -5271,10 +5272,6 @@ inline emel::error::type prepare(
     return emel::error::cast(emel::model::loader::error::model_invalid);
   }
 
-  const int32_t declared_key_length = model_data.params.attention_key_length;
-  const int32_t declared_key_length_swa = model_data.params.attention_key_length_swa;
-  const int32_t declared_value_length = model_data.params.attention_value_length;
-  const int32_t declared_value_length_swa = model_data.params.attention_value_length_swa;
   const block_weights * attention_block = first_attention_block(backend);
   if (attention_block == nullptr) {
     return emel::error::cast(emel::model::loader::error::model_invalid);
@@ -5324,27 +5321,19 @@ inline emel::error::type prepare(
 
       block.attention_head_dim = block.attention_q.rows / backend.n_head;
       block.attention_head_dim_kv = block.attention_k.rows / backend.n_head_kv;
-      const bool sliding_attention = is_sliding_attention_layer(backend, layer);
-      const int32_t expected_key_length =
-          sliding_attention && declared_key_length_swa > 0 ? declared_key_length_swa
-                                                           : declared_key_length;
-      const int32_t expected_value_length =
-          sliding_attention && declared_value_length_swa > 0 ? declared_value_length_swa
-                                                             : declared_value_length;
-      const int32_t expected_rope_dim =
-          sliding_attention && model_data.params.n_rot_swa > 0 ? model_data.params.n_rot_swa
-                                                               : model_data.params.n_rot;
-      block.attention_rope_dim =
-          expected_rope_dim > 0 ? expected_rope_dim : block.attention_head_dim;
-      block.attention_rope_freq_base =
-          sliding_attention && model_data.params.rope_freq_base_swa > 0.0f
-              ? model_data.params.rope_freq_base_swa
-              : backend.rope_freq_base;
+      if (block.attention_rope_dim <= 0) {
+        block.attention_rope_dim = block.attention_head_dim;
+      }
+      if (block.attention_rope_freq_base <= 0.0f) {
+        block.attention_rope_freq_base = backend.rope_freq_base;
+      }
       const bool qk_norm_required = requires_attention_qk_norm(backend, block);
       if (block.attention_head_dim <= 0 ||
           block.attention_head_dim_kv <= 0 ||
-          (expected_key_length > 0 && block.attention_head_dim != expected_key_length) ||
-          (expected_value_length > 0 && block.attention_head_dim_kv != expected_value_length) ||
+          (block.expected_attention_key_length > 0 &&
+           block.attention_head_dim != block.expected_attention_key_length) ||
+          (block.expected_attention_value_length > 0 &&
+           block.attention_head_dim_kv != block.expected_attention_value_length) ||
           (qk_norm_required &&
            static_cast<int32_t>(block.attention_q_norm.size()) != block.attention_head_dim) ||
           (qk_norm_required &&

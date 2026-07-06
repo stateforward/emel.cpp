@@ -549,7 +549,7 @@ struct generator_rig {
   prepared_model prepared{};
   emel::text::tokenizer::sm tokenizer{};
   emel::text::conditioner::sm conditioner{};
-  emel::text::generator::matmul::lane_pool<7u> parallel_matmul_lanes = {};
+  emel::text::generator::matmul::lane_pool<7u, 128u, 1048576u> parallel_matmul_lanes = {};
   std::array<emel::logits::sampler::fn, 1> samplers = {
       emel::logits::sampler::fn::from<sampler_select_argmax>(),
   };
@@ -566,7 +566,7 @@ struct generator_rig_q8 {
   prepared_model prepared{};
   emel::text::tokenizer::sm tokenizer{};
   emel::text::conditioner::sm conditioner{};
-  emel::text::generator::matmul::lane_pool<7u> parallel_matmul_lanes = {};
+  emel::text::generator::matmul::lane_pool<7u, 128u, 1048576u> parallel_matmul_lanes = {};
   std::array<emel::logits::sampler::fn, 1> samplers = {
       emel::logits::sampler::fn::from<sampler_select_argmax>(),
   };
@@ -581,13 +581,22 @@ std::unique_ptr<emel::text::generator::sm>
 make_generator(rig_type & rig,
                emel::model::tensor::window::sm * stream_window = nullptr,
                const bool stream_active = false) {
+  const auto matmul_policy =
+      emel::text::generator::matmul::make_auto_execution_policy(
+          rig.parallel_matmul_lanes);
   return std::make_unique<emel::text::generator::sm>(
-      emel::text::generator::make_auto_dependencies(
-          rig.prepared.data, rig.conditioner, rig.parallel_matmul_lanes,
-          emel::text::generator::test::make_auto_runtime_policy(
-              rig.prepared.data),
-          nullptr, emel::text::formatter::format_raw, stream_window,
-          stream_active));
+      emel::text::generator::dependencies{
+          .model = rig.prepared.data,
+          .conditioner = rig.conditioner,
+          .matmul_policy = matmul_policy,
+          .runtime_policy =
+              emel::text::generator::test::make_auto_runtime_policy(
+                  rig.prepared.data),
+          .formatter_ctx = nullptr,
+          .format_prompt = emel::text::formatter::format_raw,
+          .stream_window = stream_window,
+          .stream_active = stream_active,
+      });
 }
 
 }  // namespace

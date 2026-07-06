@@ -143,7 +143,7 @@ struct emel_session {
       std::make_unique<emel::model::data>();
   emel::text::tokenizer::sm tokenizer = {};
   emel::text::conditioner::sm conditioner = {};
-  emel::text::generator::matmul::lane_pool<7u> parallel_matmul_lanes = {};
+  emel::text::generator::matmul::lane_pool<7u, 128u, 1048576u> parallel_matmul_lanes = {};
   std::unique_ptr<emel::text::generator::sm> generator = {};
   formatter_binding formatter = {};
   initialize_capture initialize = {};
@@ -1257,13 +1257,20 @@ int main(int argc, char **argv) {
   auto session = std::make_unique<emel_session>();
   session->model_data = std::move(fixture->model_data);
   session->formatter = fixture->formatter;
+  const auto matmul_policy =
+      emel::text::generator::matmul::make_auto_execution_policy(
+          session->parallel_matmul_lanes);
   session->generator = std::make_unique<emel::text::generator::sm>(
-      emel::text::generator::make_auto_dependencies(
-          *session->model_data, session->conditioner,
-          session->parallel_matmul_lanes,
-          emel::tools::generation_route::make_current_runtime_policy(
-              *session->model_data),
-          session->formatter.formatter_ctx, session->formatter.format_prompt));
+      emel::text::generator::dependencies{
+          .model = *session->model_data,
+          .conditioner = session->conditioner,
+          .matmul_policy = matmul_policy,
+          .runtime_policy =
+              emel::tools::generation_route::make_current_runtime_policy(
+                  *session->model_data),
+          .formatter_ctx = session->formatter.formatter_ctx,
+          .format_prompt = session->formatter.format_prompt,
+      });
 
   if (!initialize_emel_session(*session)) {
 #ifndef NDEBUG

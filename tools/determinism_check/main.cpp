@@ -180,7 +180,7 @@ emel::error::type probe_argmax_sampler(void *owner, int32_t &candidate_ids,
 struct session {
   emel::text::tokenizer::sm tokenizer = {};
   emel::text::conditioner::sm conditioner = {};
-  emel::text::generator::matmul::lane_pool<7u> parallel_matmul_lanes = {};
+  emel::text::generator::matmul::lane_pool<7u, 128u, 1048576u> parallel_matmul_lanes = {};
   std::unique_ptr<emel::text::generator::sm> generator = {};
   std::array<emel::logits::sampler::fn, 1> samplers = {};
   logits_probe probe = {};
@@ -660,11 +660,19 @@ make_session(const emel::model::data &model,
              const emel::text::generator::selection_mode mode,
              int32_t prompt_capacity, int32_t tokens) {
   auto s = std::make_unique<session>();
+  const auto matmul_policy =
+      emel::text::generator::matmul::make_auto_execution_policy(
+          s->parallel_matmul_lanes);
   s->generator = std::make_unique<emel::text::generator::sm>(
-      emel::text::generator::make_auto_dependencies(
-          model, s->conditioner, s->parallel_matmul_lanes,
-          emel::tools::generation_route::make_current_runtime_policy(model),
-          nullptr, emel::text::formatter::format_raw));
+      emel::text::generator::dependencies{
+          .model = model,
+          .conditioner = s->conditioner,
+          .matmul_policy = matmul_policy,
+          .runtime_policy =
+              emel::tools::generation_route::make_current_runtime_policy(model),
+          .formatter_ctx = nullptr,
+          .format_prompt = emel::text::formatter::format_raw,
+      });
   if (!initialize_session(*s, model, mode, prompt_capacity, tokens)) {
     return nullptr;
   }

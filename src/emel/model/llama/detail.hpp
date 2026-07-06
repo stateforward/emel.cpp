@@ -49,6 +49,28 @@ struct execution_view {
   int32_t block_count = 0;
 };
 
+struct generation_layer_execution {
+  bool uses_attention = true;
+  bool uses_shortconv = false;
+  bool requires_attention_qk_norm = false;
+  bool uses_shared_kv_value = false;
+  bool requires_attention_v_norm = false;
+  bool uses_sliding_attention = false;
+  int32_t attention_key_length = 0;
+  int32_t attention_value_length = 0;
+  int32_t attention_rope_dim = 0;
+  float attention_rope_freq_base = 0.0f;
+};
+
+struct generation_execution_descriptor {
+  static constexpr uint32_t k_max_layers =
+      static_cast<uint32_t>(emel::model::data::k_max_metadata_arrays);
+
+  const execution_view * execution = nullptr;
+  uint32_t layer_count = 0u;
+  std::array<generation_layer_execution, k_max_layers> layers = {};
+};
+
 struct topology {
   const execution_view * execution = nullptr;
   uint32_t node_count = 0u;
@@ -125,6 +147,9 @@ emel::error::type build_execution_view(const emel::model::data & model_data,
 emel::error::type lookup_block_view(const execution_view & execution,
                                     int32_t block_index,
                                     block_view & block_out) noexcept;
+emel::error::type build_generation_execution_descriptor(
+    const execution_view & execution,
+    generation_execution_descriptor & descriptor_out) noexcept;
 emel::error::type build_topology(const execution_view & execution,
                                  topology & topology_out) noexcept;
 emel::error::type build_step_plans(const topology & topology_in,

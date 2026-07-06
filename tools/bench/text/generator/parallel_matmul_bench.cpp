@@ -47,7 +47,7 @@ constexpr size_t k_worker_lanes = k_lanes - 1u;
 constexpr int32_t k_dim = 2048;
 constexpr int32_t k_gemm_tokens = 8;
 
-using lane_pool = emel::policy::fork_join_lane_pool<k_worker_lanes, 128u>;
+using lane_pool = emel::policy::fork_join_lane_pool<k_worker_lanes, 128u, 1048576u>;
 
 uint64_t weight_group_rows(const dtype type) noexcept {
   const uint8_t code = emel::kernel::detail::dtype_code(type);

@@ -876,7 +876,7 @@ struct generator_fixture {
   prepared_model prepared = {};
   emel::text::tokenizer::sm tokenizer{};
   emel::text::conditioner::sm conditioner{};
-  emel::text::generator::matmul::lane_pool<7u> parallel_matmul_lanes = {};
+  emel::text::generator::matmul::lane_pool<7u, 128u, 1048576u> parallel_matmul_lanes = {};
   std::unique_ptr<emel::text::generator::sm> generator = {};
   std::array<emel::logits::sampler::fn, 1> samplers = {
       emel::logits::sampler::fn::from<sampler_select_argmax>(),
@@ -915,11 +915,19 @@ struct generator_fixture {
       apply_flash_kv_width_mismatch(prepared);
     }
     const emel::model::data & model = stabilize_model(prepared);
+    const auto matmul_policy =
+        emel::text::generator::matmul::make_auto_execution_policy(
+            parallel_matmul_lanes);
     generator = std::make_unique<emel::text::generator::sm>(
-        emel::text::generator::make_auto_dependencies(
-            model, conditioner, parallel_matmul_lanes,
-            emel::text::generator::test::make_auto_runtime_policy(model),
-            formatter_ctx, format_prompt));
+        emel::text::generator::dependencies{
+            .model = model,
+            .conditioner = conditioner,
+            .matmul_policy = matmul_policy,
+            .runtime_policy =
+                emel::text::generator::test::make_auto_runtime_policy(model),
+            .formatter_ctx = formatter_ctx,
+            .format_prompt = format_prompt,
+        });
     hello_id = prepared.hello_id;
     world_id = prepared.world_id;
   }

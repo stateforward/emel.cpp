@@ -83,31 +83,6 @@ struct dependencies {
   bool stream_active = false;
 };
 
-template <class lane_pool_type>
-inline dependencies make_auto_dependencies(
-    const emel::model::data & model,
-    emel::text::conditioner::sm & conditioner,
-    lane_pool_type & parallel_matmul_lanes,
-    const emel::text::generator::runtime_policy runtime_policy,
-    void * formatter_ctx = nullptr,
-    emel::text::formatter::format_fn format_prompt =
-        emel::text::formatter::format_raw,
-    emel::model::tensor::window::sm * stream_window = nullptr,
-    const bool stream_active = false) noexcept {
-  return dependencies{
-      .model = model,
-      .conditioner = conditioner,
-      .matmul_policy =
-          emel::text::generator::matmul::make_auto_execution_policy(
-              parallel_matmul_lanes),
-      .runtime_policy = runtime_policy,
-      .formatter_ctx = formatter_ctx,
-      .format_prompt = format_prompt,
-      .stream_window = stream_window,
-      .stream_active = stream_active,
-  };
-}
-
 struct uninitialized {};
 struct initializing {};
 struct initializer_result_decision {};

@@ -145,23 +145,24 @@ TEST_CASE("matmul actor guards and actions expose explicit rejection paths") {
   request.src0.ne[1] = 4u;
   CHECK(matmul::guard::guard_parallel_unavailable{}(parallel_event, ctx));
 
-  matmul::lane_pool<7u> parallel_lanes = {};
+  matmul::lane_pool<7u, 128u, 1048576u> parallel_lanes = {};
   ctx.parallel_matmul_lanes = matmul::make_lane_pool_ref(parallel_lanes);
-  ctx.lane_capacity = ctx.parallel_matmul_lanes.lane_capacity;
+  REQUIRE(matmul::action::reserve_lane_storage(
+      ctx, ctx.parallel_matmul_lanes.lane_capacity));
   ctx.active_lanes = ctx.lane_capacity;
   CHECK(matmul::guard::guard_parallel_ready{}(parallel_event, ctx));
   CHECK_FALSE(matmul::guard::guard_parallel_unavailable{}(parallel_event, ctx));
 
-  matmul::lane_pool<8u> over_cap_lanes = {};
+  matmul::lane_pool<8u, 128u, 1048576u> over_cap_lanes = {};
   matmul::action::context over_cap_ctx = {};
   over_cap_ctx.parallel_matmul_lanes =
       matmul::make_lane_pool_ref(over_cap_lanes);
-  over_cap_ctx.lane_capacity = over_cap_ctx.parallel_matmul_lanes.lane_capacity;
+  REQUIRE(matmul::action::reserve_lane_storage(
+      over_cap_ctx, over_cap_ctx.parallel_matmul_lanes.lane_capacity));
   over_cap_ctx.active_lanes = over_cap_ctx.lane_capacity;
-  CHECK(matmul::guard::guard_parallel_unavailable{}(parallel_event,
-                                                    over_cap_ctx));
-  CHECK_FALSE(
-      matmul::guard::guard_parallel_ready{}(parallel_event, over_cap_ctx));
+  CHECK(matmul::guard::guard_parallel_ready{}(parallel_event, over_cap_ctx));
+  CHECK_FALSE(matmul::guard::guard_parallel_unavailable{}(parallel_event,
+                                                          over_cap_ctx));
 
   serial_result.all_lanes_accepted = false;
   CHECK(matmul::guard::guard_serial_rejected{}(serial_event, ctx));
@@ -219,7 +220,7 @@ TEST_CASE(
   CHECK(empty_group.wait());
   empty_group.reset();
 
-  using join_group = typename matmul::lane_pool<1u>::join_group;
+  using join_group = typename matmul::lane_pool<1u, 128u, 1048576u>::join_group;
   auto &typed_group = empty_group.get<join_group>();
   auto &same_group = empty_group.get<join_group>();
   CHECK(&same_group == &typed_group);
@@ -231,7 +232,7 @@ TEST_CASE(
   CHECK_FALSE(missing_pool.valid());
   CHECK_FALSE(missing_pool.try_submit(empty_group, matmul::lane_task{}));
 
-  matmul::lane_pool<1u> one_worker_pool = {};
+  matmul::lane_pool<1u, 128u, 1048576u> one_worker_pool = {};
   auto ref = matmul::make_lane_pool_ref(one_worker_pool);
   CHECK(ref.valid());
 
@@ -270,7 +271,8 @@ TEST_CASE("parallel matmul lane dispatch rejects missing request pieces") {
 }
 
 struct parallel_backend_fixture {
-  emel::text::generator::matmul::lane_pool<7u> parallel_matmul_lanes = {};
+  emel::text::generator::matmul::lane_pool<7u, 128u, 1048576u>
+      parallel_matmul_lanes = {};
   emel::text::generator::matmul::execution_policy policy =
       emel::text::generator::matmul::make_auto_execution_policy(
           parallel_matmul_lanes);
@@ -396,7 +398,8 @@ TEST_CASE("parallel matmul route guard rejects disengaged lane pool") {
   CHECK_FALSE(emel::text::generator::guard::guard_decode_parallel_lanes_ready{}(
       run, ctx));
 
-  emel::text::generator::matmul::lane_pool<7u> serial_matmul_lanes = {};
+  emel::text::generator::matmul::lane_pool<7u, 128u, 1048576u>
+      serial_matmul_lanes = {};
   emel::text::generator::matmul::execution_policy serial_policy{
       .parallel_matmul_lanes =
           emel::text::generator::matmul::make_lane_pool_ref(
@@ -409,7 +412,8 @@ TEST_CASE("parallel matmul route guard rejects disengaged lane pool") {
   CHECK_FALSE(emel::text::generator::guard::guard_decode_parallel_lanes_ready{}(
       run, ctx));
 
-  emel::text::generator::matmul::lane_pool<7u> parallel_matmul_lanes = {};
+  emel::text::generator::matmul::lane_pool<7u, 128u, 1048576u>
+      parallel_matmul_lanes = {};
   auto parallel_policy =
       emel::text::generator::matmul::make_auto_execution_policy(
           parallel_matmul_lanes);

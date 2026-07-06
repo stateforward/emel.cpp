@@ -13,11 +13,7 @@
 
 namespace emel::text::generator::matmul {
 
-inline constexpr size_t k_max_matmul_lanes = 8u;
-
-template <size_t worker_lanes,
-          size_t inline_task_bytes = 128u,
-          size_t idle_spin_budget = 1048576u>
+template <size_t worker_lanes, size_t inline_task_bytes, size_t idle_spin_budget>
 using lane_pool =
     emel::policy::fork_join_lane_pool<worker_lanes, inline_task_bytes, idle_spin_budget>;
 

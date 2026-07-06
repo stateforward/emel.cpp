@@ -584,6 +584,78 @@ emel::error::type lookup_block_view(const execution_view &execution,
   return emel::error::cast(emel::model::loader::error::none);
 }
 
+emel::error::type build_generation_execution_descriptor(
+    const execution_view &execution,
+    generation_execution_descriptor &descriptor_out) noexcept {
+  descriptor_out = {};
+
+  if (execution.model == nullptr || execution.block_count <= 0) {
+    return emel::error::cast(emel::model::loader::error::invalid_request);
+  }
+  if (static_cast<uint32_t>(execution.block_count) >
+      generation_execution_descriptor::k_max_layers) {
+    return emel::error::cast(emel::model::loader::error::model_invalid);
+  }
+
+  descriptor_out.execution = &execution;
+  descriptor_out.layer_count = static_cast<uint32_t>(execution.block_count);
+  const auto &model_data = *execution.model;
+
+  for (int32_t block_index = 0; block_index < execution.block_count;
+       ++block_index) {
+    block_view block = {};
+    const auto err = lookup_block_view(execution, block_index, block);
+    if (err != emel::error::cast(emel::model::loader::error::none)) {
+      descriptor_out = {};
+      return err;
+    }
+
+    const bool sliding_attention =
+        block.uses_attention &&
+        static_cast<uint32_t>(block_index) <
+            model_data.params.attention_sliding_window_pattern_count &&
+        model_data.params
+                .attention_sliding_window_pattern_flags[static_cast<size_t>(
+                    block_index)] != 0u;
+    const bool shared_kv_contract =
+        block.uses_attention &&
+        model_data.params.attention_shared_kv_layers > 0 &&
+        block_index >= (execution.block_count -
+                        model_data.params.attention_shared_kv_layers);
+    const bool shared_kv_value =
+        shared_kv_contract ||
+        (block.uses_attention &&
+         block.attention_v.tensor == block.attention_k.tensor);
+    auto &layer = descriptor_out.layers[static_cast<size_t>(block_index)];
+    layer.uses_attention = block.uses_attention;
+    layer.uses_shortconv = !block.uses_attention;
+    layer.requires_attention_qk_norm =
+        block.uses_attention && block.attention_q_norm.tensor != nullptr &&
+        block.attention_k_norm.tensor != nullptr;
+    layer.uses_shared_kv_value = shared_kv_value;
+    layer.requires_attention_v_norm = shared_kv_value;
+    layer.uses_sliding_attention = sliding_attention;
+    layer.attention_key_length =
+        sliding_attention && model_data.params.attention_key_length_swa > 0
+            ? model_data.params.attention_key_length_swa
+            : model_data.params.attention_key_length;
+    layer.attention_value_length =
+        sliding_attention && model_data.params.attention_value_length_swa > 0
+            ? model_data.params.attention_value_length_swa
+            : model_data.params.attention_value_length;
+    layer.attention_rope_dim =
+        sliding_attention && model_data.params.n_rot_swa > 0
+            ? model_data.params.n_rot_swa
+            : model_data.params.n_rot;
+    layer.attention_rope_freq_base =
+        sliding_attention && model_data.params.rope_freq_base_swa > 0.0f
+            ? model_data.params.rope_freq_base_swa
+            : model_data.params.rope_freq_base;
+  }
+
+  return emel::error::cast(emel::model::loader::error::none);
+}
+
 emel::error::type build_execution_view(const emel::model::data &model_data,
                                        execution_view &view_out) noexcept {
   view_out = {};

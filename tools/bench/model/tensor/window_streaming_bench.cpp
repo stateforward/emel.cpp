@@ -673,7 +673,7 @@ struct emel_session {
       formatter_binding = {};
   emel::text::tokenizer::sm tokenizer = {};
   emel::text::conditioner::sm conditioner = {};
-  emel::text::generator::matmul::lane_pool<7u> parallel_matmul_lanes = {};
+  emel::text::generator::matmul::lane_pool<7u, 128u, 1048576u> parallel_matmul_lanes = {};
   std::unique_ptr<emel::text::generator::sm> generator = {};
   initialize_capture initialize = {};
   generation_capture generation = {};
@@ -765,25 +765,35 @@ void prepare_session(const emel_fixture &fixture, emel_session &session,
                      window_rig *rig) {
   session.model_data = fixture.model_data;
   session.formatter_binding = resolve_formatter_binding(fixture);
+  const auto matmul_policy =
+      emel::text::generator::matmul::make_auto_execution_policy(
+          session.parallel_matmul_lanes);
   if (rig != nullptr) {
     session.generator = std::make_unique<emel::text::generator::sm>(
-        emel::text::generator::make_auto_dependencies(
-            session.model_data, session.conditioner,
-            session.parallel_matmul_lanes,
-            emel::tools::generation_route::make_current_runtime_policy(
-                session.model_data),
-            session.formatter_binding.formatter_ctx,
-            session.formatter_binding.format_prompt, &rig->machine,
-            rig->streaming_active));
+        emel::text::generator::dependencies{
+            .model = session.model_data,
+            .conditioner = session.conditioner,
+            .matmul_policy = matmul_policy,
+            .runtime_policy =
+                emel::tools::generation_route::make_current_runtime_policy(
+                    session.model_data),
+            .formatter_ctx = session.formatter_binding.formatter_ctx,
+            .format_prompt = session.formatter_binding.format_prompt,
+            .stream_window = &rig->machine,
+            .stream_active = rig->streaming_active,
+        });
   } else {
     session.generator = std::make_unique<emel::text::generator::sm>(
-        emel::text::generator::make_auto_dependencies(
-            session.model_data, session.conditioner,
-            session.parallel_matmul_lanes,
-            emel::tools::generation_route::make_current_runtime_policy(
-                session.model_data),
-            session.formatter_binding.formatter_ctx,
-            session.formatter_binding.format_prompt));
+        emel::text::generator::dependencies{
+            .model = session.model_data,
+            .conditioner = session.conditioner,
+            .matmul_policy = matmul_policy,
+            .runtime_policy =
+                emel::tools::generation_route::make_current_runtime_policy(
+                    session.model_data),
+            .formatter_ctx = session.formatter_binding.formatter_ctx,
+            .format_prompt = session.formatter_binding.format_prompt,
+        });
   }
 }
 
