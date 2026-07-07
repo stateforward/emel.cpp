@@ -55,10 +55,26 @@ struct generation_compare_record {
   std::uint64_t output_tokens = 0u;
   std::uint64_t output_bytes = 0u;
   std::uint64_t output_checksum = 0u;
+  std::uint64_t kernel_dispatch_calls = 0u;
+  std::uint64_t flash_attention_dispatch_calls = 0u;
+  std::uint64_t optimized_flash_dispatch_calls = 0u;
+  std::uint64_t shared_flash_dispatch_calls = 0u;
+  std::uint64_t native_q8_0_dispatch_calls = 0u;
+  std::uint64_t packed_q8_0_dispatch_calls = 0u;
+  std::uint64_t optimized_q4_dispatch_calls = 0u;
+  std::uint64_t shared_q4_dispatch_calls = 0u;
+  std::uint64_t optimized_q6_dispatch_calls = 0u;
+  std::uint64_t shared_q6_dispatch_calls = 0u;
+  std::uint32_t native_quantized_stage_count = 0u;
+  std::uint32_t approved_dense_f32_stage_count = 0u;
+  std::uint32_t disallowed_fallback_stage_count = 0u;
+  std::uint32_t explicit_no_claim_stage_count = 0u;
   std::uint64_t iterations = 0u;
   std::size_t runs = 0u;
   std::string output_text = {};
   std::string output_path = {};
+  std::string output_token_ids_text = {};
+  std::string output_token_ids_path = {};
   std::string note = {};
   std::string error_kind = {};
   std::string error_message = {};
@@ -115,7 +131,7 @@ generation_compare_sanitize_case_name(std::string_view input) {
 inline void maybe_dump_generation_output(generation_compare_record &record) {
   const char *output_dir = std::getenv(k_generation_compare_result_dir_env);
   if (output_dir == nullptr || output_dir[0] == '\0' ||
-      record.output_text.empty()) {
+      (record.output_text.empty() && record.output_token_ids_text.empty())) {
     return;
   }
 
@@ -134,26 +150,50 @@ inline void maybe_dump_generation_output(generation_compare_record &record) {
       generation_compare_sanitize_case_name(record.backend_id);
   const std::string case_name =
       generation_compare_sanitize_case_name(record.case_name);
-  const std::filesystem::path output_path =
-      root / (backend + "__" + case_name + ".txt");
-  std::ofstream output(output_path, std::ios::binary);
-  if (!output.good()) {
-    std::fprintf(stderr,
-                 "warning: failed to open generation compare output file %s\n",
-                 output_path.string().c_str());
-    return;
+  const std::string base_name = backend + "__" + case_name;
+  if (!record.output_text.empty()) {
+    const std::filesystem::path output_path = root / (base_name + ".txt");
+    std::ofstream output(output_path, std::ios::binary);
+    if (!output.good()) {
+      std::fprintf(stderr,
+                   "warning: failed to open generation compare output file %s\n",
+                   output_path.string().c_str());
+      return;
+    }
+
+    output.write(record.output_text.data(),
+                 static_cast<std::streamsize>(record.output_text.size()));
+    if (!output.good()) {
+      std::fprintf(stderr,
+                   "warning: failed to write generation compare output file %s\n",
+                   output_path.string().c_str());
+      return;
+    }
+
+    record.output_path = output_path.string();
   }
 
-  output.write(record.output_text.data(),
-               static_cast<std::streamsize>(record.output_text.size()));
-  if (!output.good()) {
-    std::fprintf(stderr,
-                 "warning: failed to write generation compare output file %s\n",
-                 output_path.string().c_str());
-    return;
-  }
+  if (!record.output_token_ids_text.empty()) {
+    const std::filesystem::path token_path = root / (base_name + ".tokens.txt");
+    std::ofstream output(token_path, std::ios::binary);
+    if (!output.good()) {
+      std::fprintf(stderr,
+                   "warning: failed to open generation token trace file %s\n",
+                   token_path.string().c_str());
+      return;
+    }
 
-  record.output_path = output_path.string();
+    output.write(record.output_token_ids_text.data(),
+                 static_cast<std::streamsize>(record.output_token_ids_text.size()));
+    if (!output.good()) {
+      std::fprintf(stderr,
+                   "warning: failed to write generation token trace file %s\n",
+                   token_path.string().c_str());
+      return;
+    }
+
+    record.output_token_ids_path = token_path.string();
+  }
 }
 
 inline void
@@ -178,8 +218,24 @@ print_generation_compare_record_jsonl(const generation_compare_record &record) {
       "\"prepare_ns_per_op\":%.6f,\"encode_ns_per_op\":%.6f,\"publish_ns_per_"
       "op\":%.6f,"
       "\"output_tokens\":%" PRIu64 ",\"output_bytes\":%" PRIu64 ","
-      "\"output_checksum\":%" PRIu64 ",\"iterations\":%" PRIu64 ",\"runs\":%zu,"
-      "\"output_path\":\"%s\",\"note\":\"%s\",\"error_kind\":\"%s\","
+      "\"output_checksum\":%" PRIu64 ","
+      "\"kernel_dispatch_calls\":%" PRIu64 ","
+      "\"flash_attention_dispatch_calls\":%" PRIu64 ","
+      "\"optimized_flash_dispatch_calls\":%" PRIu64 ","
+      "\"shared_flash_dispatch_calls\":%" PRIu64 ","
+      "\"native_q8_0_dispatch_calls\":%" PRIu64 ","
+      "\"packed_q8_0_dispatch_calls\":%" PRIu64 ","
+      "\"optimized_q4_dispatch_calls\":%" PRIu64 ","
+      "\"shared_q4_dispatch_calls\":%" PRIu64 ","
+      "\"optimized_q6_dispatch_calls\":%" PRIu64 ","
+      "\"shared_q6_dispatch_calls\":%" PRIu64 ","
+      "\"native_quantized_stage_count\":%" PRIu32 ","
+      "\"approved_dense_f32_stage_count\":%" PRIu32 ","
+      "\"disallowed_fallback_stage_count\":%" PRIu32 ","
+      "\"explicit_no_claim_stage_count\":%" PRIu32 ","
+      "\"iterations\":%" PRIu64 ",\"runs\":%zu,"
+      "\"output_path\":\"%s\",\"output_token_ids_path\":\"%s\","
+      "\"note\":\"%s\",\"error_kind\":\"%s\","
       "\"error_message\":\"%s\"}\n",
       k_generation_compare_schema,
       generation_compare_json_escape(record.record_type).c_str(),
@@ -208,8 +264,18 @@ print_generation_compare_record_jsonl(const generation_compare_record &record) {
       record.ns_per_op, record.tokens_per_second, record.ns_min_per_op,
       record.ns_mean_per_op, record.ns_max_per_op, record.prepare_ns_per_op,
       record.encode_ns_per_op, record.publish_ns_per_op, record.output_tokens,
-      record.output_bytes, record.output_checksum, record.iterations,
+      record.output_bytes, record.output_checksum, record.kernel_dispatch_calls,
+      record.flash_attention_dispatch_calls,
+      record.optimized_flash_dispatch_calls,
+      record.shared_flash_dispatch_calls, record.native_q8_0_dispatch_calls,
+      record.packed_q8_0_dispatch_calls, record.optimized_q4_dispatch_calls,
+      record.shared_q4_dispatch_calls, record.optimized_q6_dispatch_calls,
+      record.shared_q6_dispatch_calls, record.native_quantized_stage_count,
+      record.approved_dense_f32_stage_count,
+      record.disallowed_fallback_stage_count,
+      record.explicit_no_claim_stage_count, record.iterations,
       record.runs, generation_compare_json_escape(record.output_path).c_str(),
+      generation_compare_json_escape(record.output_token_ids_path).c_str(),
       generation_compare_json_escape(record.note).c_str(),
       generation_compare_json_escape(record.error_kind).c_str(),
       generation_compare_json_escape(record.error_message).c_str());

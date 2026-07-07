@@ -327,15 +327,17 @@ path beats `llama.cpp` on this CPU.
     callers that explicitly ask for the auto policy. That is acceptable only as
     a caller-visible convenience; maintained benchmarks and tools must continue
     to pass explicit policies.
-  - Remaining rule blocker: `detail::prepare(...)` no longer checks model-family
-    strings for Qwen/Gemma/LFM, but it still derives
-    `requires_attention_qk_norm`, `requires_attention_v_norm`, shortconv, and
-    sliding-attention behavior from loaded block/model facts inside
-    `detail.hpp`, then later compute helpers branch on those flags. That is
-    better than family hardcoding, but it is still hidden behavior selection
-    under the no-hidden-control-flow rule. The follow-up should move those
-    choices into explicit guarded states/routes or a public variant contract,
-    not leave them as detail-local booleans.
+  - Remaining architectural cleanup: `detail::prepare(...)` no longer checks
+    model-family strings for Qwen/Gemma/LFM, and the first follow-up moved
+    residual, q/k-norm, value, v-norm, and attention-window behavior into
+    explicit `emel::model::llama::detail::generation_*_route` fields on the
+    model generation execution descriptor. The generator now copies those route
+    fields into `block_weights` instead of carrying generator-local booleans.
+    The compute layer loop no longer branches helper-locally on
+    `block_uses_attention(...)`, `requires_attention_qk_norm(...)`, or
+    `requires_attention_v_norm(...)`; scalar, chunk4, and chunk8 residual
+    selection is now made by explicit SML route tables in the canonical
+    `text/generator/layer` component.
 - Latest scoped DI/generation gate passed with:
   `EMEL_BUILD_JOBS=4 EMEL_QUALITY_GATES_PARALLEL=never
   EMEL_QUALITY_GATES_BENCH_SUITE=generation,parallel_matmul
@@ -350,6 +352,277 @@ path beats `llama.cpp` on this CPU.
   `2.719 tokens/s` vs llama.cpp `310440209 ns/op` / `3.221 tokens/s`.
   `parallel_matmul` still emitted non-fatal f32 GEMM regression warnings, but
   every listed EMEL matmul compare row beat its reference row in that run.
+- Qwen3 4B discrepancy investigation update: the output mismatch traced to the
+  q4 packed chunk-prefill route selecting the experimental q4 x q8 i8mm
+  multi-RHS tile for `matrix_x4` / `matrix_x8`. That route was not scalar
+  parity-safe over multi-block q4 rows. The fix keeps q6 prepared-q8/i8mm
+  enabled, but prevents q4 BL8 prepared chunk routes from selecting the i8mm
+  tile; q4 now uses the parity-safe dotprod tile for chunk prefill.
+- Control-flow cleanup from the same investigation: graph KV validation no
+  longer infers flash vs nonflash by comparing the request's function pointer.
+  The selected attention mode is carried explicitly in `compute_io` by the
+  action templates, so validation reads event/request state instead of doing
+  hidden behavior selection from `request.run_kernel`.
+- Regression coverage added for the 4B issue: nonzero q4 hybrid fixture tests
+  compare nonflash chunk4 and chunk8 prefill against the scalar q8_k path, q4
+  BL8 multi-block matrix-x4 compares against the scalar row reference, and q6
+  prepared-q8/i8mm multi-block vector and matrix-x4 compare against scalar to
+  prove the kept i8mm path.
+- Focused verification after the minimal-diff rebuild passed:
+  `build/zig-generator-detail/emel_tests_bin --no-breaks
+  --test-case="*nonzero_hybrid_fixture*"`,
+  `build/zig-generator-detail/emel_tests_bin --no-breaks
+  --test-case="generator_detail_graph_callbacks_reject_incoherent_kv_snapshots"`,
+  `build/zig-generator-detail/emel_tests_bin --no-breaks
+  --test-case="*prefill*"`, `build/zig/emel_tests_bin --no-breaks
+  --test-case="*q4_k_packed_bl8*"`, and `build/zig/emel_tests_bin
+  --no-breaks --test-case="*q6_k_prepared_q8_rhs_i8mm*"`.
+- Coverage follow-up verification also passed for the explicit action and
+  kernel guard coverage added to satisfy the changed-branch gate:
+  `build/zig-generator-detail/emel_tests_bin --no-breaks
+  --test-case="*generator core actions cover reset*"`,
+  `build/zig-generator-detail/emel_tests_bin --no-breaks
+  --test-case="*generator prefill actions publish*"`,
+  `build/zig/emel_tests_bin --no-breaks
+  --test-case="kernel_aarch64_detail_branch_paths"`, and
+  `build/zig/emel_tests_bin --no-breaks
+  --test-case="kernel_aarch64_q4_k_vector_q8_rhs_tail_rows_match_scalar"`.
+- Final scoped 4B-discrepancy gate passed with:
+  `EMEL_BUILD_JOBS=4 EMEL_QUALITY_GATES_PARALLEL=never
+  EMEL_QUALITY_GATES_SCOPE=changed
+  EMEL_QUALITY_GATES_CHANGED_FILES="$changed_files"
+  EMEL_QUALITY_GATES_BENCH_SUITE=generation,kernel_aarch64,parallel_matmul
+  EMEL_QUALITY_GATES_TIMEOUT=7200s scripts/quality_gates.sh`. The selected
+  benchmark lanes, changed-file coverage, paritychecker, fuzz smoke skip,
+  determinism check, and docs skip completed successfully. Changed coverage was
+  `777/783 (99.2%)` lines and `328/554 (59.2%)` branches. The final gate's
+  selected benchmark rows showed LFM2 multithreaded generation EMEL
+  `89887291 ns/op` / `11.125 tokens/s` vs llama.cpp `293679583 ns/op` /
+  `3.405 tokens/s`; LFM2 single-lane EMEL still lost at `379691416 ns/op` /
+  `2.634 tokens/s` vs llama.cpp `294916209 ns/op` / `3.391 tokens/s`.
+  `kernel_aarch64` and `parallel_matmul` EMEL rows beat their listed reference
+  rows in that final gate run.
+- Current Qwen3 4B 100-token compare after the q4 chunk fix exact-matches both
+  lanes. Single lane: EMEL `8631446417 ns/op` / `11.586 tokens/s` vs llama.cpp
+  `10038588000 ns/op` / `9.962 tokens/s`. Multithreaded lane: EMEL
+  `3640301375 ns/op` / `27.470 tokens/s` vs llama.cpp `3204083792 ns/op` /
+  `31.210 tokens/s`.
+- Current Qwen3 4B 1000-token evidence after the q4 chunk fix: multithreaded
+  exact-matches and EMEL remains slower (`45085521917 ns/op` /
+  `22.180 tokens/s` vs llama.cpp `34547428625 ns/op` / `28.946 tokens/s`).
+  Single lane is `bounded_drift`, not a current EMEL-vs-llama exact mismatch:
+  EMEL generated 1000 tokens at `11.821 tokens/s`, while llama.cpp one-thread
+  stopped at 742 tokens at `10.067 tokens/s`, sharing 61.66% of bytes.
+- Route-contract cleanup update: model-layer generation descriptors now publish
+  explicit `generation_residual_route`, `generation_attention_qk_norm_route`,
+  `generation_attention_value_route`, `generation_attention_v_norm_route`, and
+  `generation_attention_window_route` values. `generator::detail::block_weights`
+  consumes those route fields directly; the old generator-local
+  `uses_attention`, `uses_shortconv`, `requires_attention_qk_norm`,
+  `uses_shared_kv_value`, `requires_attention_v_norm`, and
+  `uses_sliding_attention` booleans were removed. Generator guard support scans
+  and tests now use the explicit residual/value/norm routes. Verification
+  passed with a new focused shard build:
+  `cmake -S . -B build/zig-model-route -G Ninja ... -DEMEL_TEST_SHARDS=model_and_batch,generator_and_runtime`,
+  `cmake --build build/zig-model-route --target emel_tests_bin`, and focused
+  doctest filters `model_llama_detail_describes_*`,
+  `generator_detail_routes_static_*`,
+  `generator_detail_gemma4_shared_kv_layer_rms_norms_value_branch_before_cache`,
+  `*generator core actions cover reset*`, and
+  `*generator prefill actions publish*`.
+- Layer route actor update: scalar/chunk4/chunk8 layer residual selection now
+  runs through explicit SML route tables over residual route plus q/k and value
+  norm route combinations. The numeric work is split into route-specialized
+  residual bodies, so q/k norm and v-norm decisions are compile-time inside the
+  selected action instead of runtime booleans inside the compute loop. The
+  temporary header-local `layer_route_actor` has now been extracted to the
+  canonical `src/emel/text/generator/layer/{events,guards,actions,sm}.hpp`
+  component. Its event surface consumes model-generic
+  `emel::model::generation_*_route` types; `model::llama::detail` aliases those
+  types for its descriptor, so generic generator events no longer depend on
+  llama-specific route enum names. Focused verification passed with
+  `cmake --build build/zig-model-route --target emel_tests_bin`,
+  `model_llama_detail_describes_*`, `generator_detail_*qk_norm*`,
+  `generator_detail_gemma4_shared_kv_layer_rms_norms_value_branch_before_cache`,
+  `generator_detail_routes_static_*`,
+  `generator_detail_route_templates_reject_unprepared_inputs`, `*prefill*`, and
+  `scripts/lint_snapshot.sh`. Bounded Qwen3 4B compare was rerun before the
+  canonical extraction after rebuilding `bench_runner` with the repo job limit:
+  100-token output exact-matches both lanes (single EMEL `11.884 tokens/s` vs
+  llama.cpp `10.074`; multithreaded EMEL `28.005 tokens/s` vs llama.cpp
+  `31.860`), and 1000-token output remains single-lane `bounded_drift` (EMEL
+  `12.284 tokens/s` vs llama.cpp `10.208`, 61.66% prefix) while multithreaded
+  exact-matches (EMEL `22.814 tokens/s` vs llama.cpp `27.904`).
+- Fresh current-tree Qwen3 4B discrepancy rerun after canonical layer extraction
+  used `scripts/bench_generation_compare.sh --reference-backend
+  llama_cpp_generation --reference-threads 8` with one measured run, no warmup,
+  and output directories `build/generation_compare_current_qwen3_4b_tokens_100_fresh`
+  and `build/generation_compare_current_qwen3_4b_tokens_1000_fresh`. The
+  100-token run exact-matches both lanes: single EMEL `8342912167 ns/op` /
+  `11.986 tokens/s` vs llama.cpp `10471132792 ns/op` / `9.550 tokens/s`;
+  multithreaded EMEL `4033642333 ns/op` / `24.791 tokens/s` vs llama.cpp
+  `3184509041 ns/op` / `31.402 tokens/s`. The 1000-token run keeps the same
+  shape as the saved evidence: multithreaded exact-matches but loses throughput
+  (EMEL `43777061458 ns/op` / `22.843 tokens/s` vs llama.cpp `34769558416 ns/op`
+  / `28.761 tokens/s`), while single lane is bounded drift rather than the
+  original q4 chunk mismatch (EMEL 1000 tokens at `87819843166 ns/op` /
+  `11.387 tokens/s`, llama.cpp 742 tokens at `77420592666 ns/op` /
+  `9.584 tokens/s`, shared prefix 61.66%).
+- Follow-up no-hidden-control-flow cleanup: residual-route guard predicates no
+  longer call `emel::text::generator::detail::block_uses_attention(...)`.
+  The predicate now lives in `src/emel/text/generator/guards.hpp`, and the
+  stale chunk prefill backend-readiness helpers were removed from
+  `src/emel/text/generator/detail.hpp` so route support decisions cannot
+  regress back into detail helpers. `detail.hpp` now uses direct route-field
+  checks only in construction/setup code that binds model-owned block data.
+  Structural coverage was tightened in
+  `tests/text/generator/lifecycle_tests.cpp`: it now fails if guard files call
+  the detail residual helper, if `detail.hpp` reintroduces the removed
+  backend-readiness helpers, or if the canonical layer route actor hides
+  residual choice in actions or llama-specific event contracts. Verification
+  passed with `cmake --build build/zig-model-route --target emel_tests_bin`,
+  focused doctest cases
+  `generator_route_guards_do_not_delegate_behavior_selection_to_detail_helpers`,
+  `generator_scalar_kernel_route_choice_stays_in_state_machines`,
+  `generator_layer_route_actor_keeps_residual_choice_explicit`,
+  `generator_detail_route_templates_reject_unprepared_inputs`,
+  `generator_detail_scalar_routes_run_prepared_qwen3_paths`, and
+  `scripts/lint_snapshot.sh`.
+- 4B q4 BL8 discrepancy guardrail: the dead
+  `dot_q4_k_x8_q8_k_group_bl8_i8mm_x4` helper was removed from
+  `src/emel/kernel/aarch64/actions.hpp` so the Qwen3 4B q4 BL8 generation path
+  cannot silently re-enter the known parity-unsafe i8mm fold. The q4 BL8
+  `matrix_x8` kernel regression now uses `col_count = QK_K * 10u`, matching the
+  multi-block shape that the previous single-block test missed, and compares
+  the packed route against scalar q4/q8 arithmetic. Verification used a fresh
+  kernel-scoped zig build configured with `EMEL_TEST_SHARDS=kernel_and_graph`;
+  CMake reported `-mcpu=native+dotprod+i8mm`. Focused doctest cases passed:
+  `*multi_block_matrix_x8*` (`1` case, `71` assertions) and `*bad_i8mm*` (`1`
+  case, `2` assertions).
+- Layer actor completion cleanup: scalar/chunk4/chunk8 layer route actors no
+  longer compose residual plus feed-forward work with action-local `&&`, and
+  the local wrapper no longer passes a by-reference `ok` latch through
+  `layer::event::*_run`. Each route now transitions to `state_residual_done`,
+  uses `sml::completion<event::*_run>` plus explicit residual outcome guards to
+  either run feed-forward or mark failure, then uses feed-forward outcome guards
+  to mark success or failure before returning to idle. Generator detail calls
+  the layer-owned `process_scalar`, `process_chunk4`, and `process_chunk8`
+  wrappers instead of constructing raw `*_sm` instances and returning
+  `actor.process_event(ev) && ok`. Verification passed with
+  `cmake --build build/zig-model-route --target emel_tests_bin`, the focused TU
+  compile for `tests/text/generator/lifecycle_tests.cpp.o`, and doctest cases
+  `generator_layer_route_actor_keeps_residual_choice_explicit`,
+  `generator_detail_route_templates_reject_unprepared_inputs`, and
+  `generator_detail_scalar_routes_run_prepared_qwen3_paths`.
+- Fresh post-layer-fix Qwen3 4B 1000-token compare used
+  `qwen3_4b_single_user_hello_max_tokens_1000_v1`
+  (`Qwen3-4B-Q4_K_M.gguf`) with one measured run and no warmup, output in
+  `build/generation_compare_current_qwen3_4b_tokens_1000_after_layer_fix`.
+  Single lane remains `bounded_drift` with the same prefix shape:
+  EMEL generated `1000` tokens at `12.128 tokens/s`, llama.cpp generated `742`
+  tokens at `10.358 tokens/s`, shared prefix `1486` bytes / `61.66%`. The
+  multithreaded lane exact-matches: EMEL `1000` tokens at `22.598 tokens/s`
+  (`44251277959 ns/op`) vs llama.cpp `1000` tokens at `19.224 tokens/s`
+  (`52018009209 ns/op`). Treat this apparent multithreaded win as unstable
+  until repeated: the previous current-tree run had EMEL in the same band
+  (`22.843 tokens/s`) but llama.cpp much faster (`28.761 tokens/s`), so the
+  difference is likely reference-run variance or host state, not a proven EMEL
+  improvement. The benchmark still reports `prepare_ns_per_op`,
+  `encode_ns_per_op`, and `publish_ns_per_op` as `0` for both lanes because this
+  workload is a `generation/preloaded_request` case; prefill/phase throughput
+  needs separate instrumentation or a non-preloaded workload.
+- Fresh scoped gate after canonical layer extraction and generic route type
+  ownership cleanup passed with:
+  `EMEL_BUILD_JOBS="$EMEL_BUILD_JOBS" EMEL_QUALITY_GATES_PARALLEL=never
+  EMEL_QUALITY_GATES_SCOPE=changed
+  EMEL_QUALITY_GATES_CHANGED_FILES="$changed_files"
+  EMEL_QUALITY_GATES_BENCH_SUITE=generation,kernel_aarch64,parallel_matmul
+  EMEL_BENCH_GENERATION_LANES=both EMEL_QUALITY_GATES_TIMEOUT=7200s
+  scripts/quality_gates.sh`. Selected lanes completed: legacy SML scan, scoped
+  zig build, generation benchmark, kernel_aarch64 benchmark, parallel_matmul
+  benchmark, changed-source coverage, paritychecker, determinism, lint
+  snapshot, and docs generation. Fuzz smoke was skipped as irrelevant to the
+  changed files. Changed coverage was `2227/2349 (94.8%)` lines and
+  `741/1434 (51.7%)` branches. The gate's generation rows were LFM2
+  multithreaded EMEL `99750458 ns/op` / `10.025 tokens/s` vs llama.cpp
+  `303990333 ns/op` / `3.290 tokens/s`, and LFM2 single-lane EMEL
+  `398612625 ns/op` / `2.509 tokens/s` vs llama.cpp `306376083 ns/op` /
+  `3.264 tokens/s`. `kernel_aarch64` and `parallel_matmul` EMEL rows beat
+  their listed reference rows.
+- Fresh scoped gate after the 4B q4 BL8 guardrail and layer completion cleanup
+  also passed with the same serialized command shape:
+  `EMEL_BUILD_JOBS="$EMEL_BUILD_JOBS" EMEL_QUALITY_GATES_PARALLEL=never
+  EMEL_QUALITY_GATES_SCOPE=changed
+  EMEL_QUALITY_GATES_CHANGED_FILES="$changed_files"
+  EMEL_QUALITY_GATES_BENCH_SUITE=generation,kernel_aarch64,parallel_matmul
+  EMEL_BENCH_GENERATION_LANES=both EMEL_QUALITY_GATES_TIMEOUT=7200s
+  scripts/quality_gates.sh`. Selected lanes completed: legacy SML scan, scoped
+  zig build, generation benchmark with both single and multithreaded lanes,
+  kernel_aarch64 benchmark, parallel_matmul benchmark, changed-source coverage,
+  parity dependency/test checks, determinism, lint snapshot, and docs
+  generation. Fuzz smoke was skipped because no fuzz-affecting files changed.
+  Changed coverage was `2381/2574 (92.5%)` lines and `791/1540 (51.4%)`
+  branches. The gate's generation rows were LFM2 multithreaded EMEL
+  `96148000 ns/op` / `10.401 tokens/s` vs llama.cpp `309455667 ns/op` /
+  `3.231 tokens/s`, and LFM2 single-lane EMEL `402073834 ns/op` /
+  `2.487 tokens/s` vs llama.cpp `296805042 ns/op` / `3.369 tokens/s`.
+  `kernel_aarch64`, `parallel_matmul`, `paritychecker_tests`, and the
+  cross-process determinism check all passed.
+- Single-thread Qwen3 4B parity investigation update: the temporary
+  flash-attention route toggle was removed because forcing EMEL single through
+  the shared flash implementation did not change output and only slowed the
+  lane. The cleaned current runner again reports
+  `thread_contract="emel_serial_matmul_lanes=1"`, with `36792` optimized flash
+  dispatches and `0` shared flash dispatches for the 1000-token Qwen3 4B run.
+  Focused verification passed with
+  `./build/bench_tools_ninja_tests/bench_runner_tests --test-case='bench_runner generation jsonl emits manifest-driven workload metadata and explicit comparability' --no-skip`
+  and focused aarch64 flash doctests after rebuilding `build/zig/emel_tests_bin`.
+- Current cleaned single-lane compare for
+  `qwen3_4b_single_user_hello_max_tokens_1000_v1` is in
+  `build/generation_compare_qwen3_4b_single_after_no_route`. It remains
+  `bounded_drift`: EMEL generated `1000` tokens / `2410` bytes at
+  `12.262 tokens/s` with checksum `11222026555239503021`; llama.cpp
+  `n_threads=1,n_threads_batch=1` generated `742` tokens / `2159` bytes at
+  `10.274 tokens/s` with checksum `7218963136212605388`. Shared prefix is
+  `1486` bytes (`61.6598%`), `output_tokens_delta=258`, and
+  `output_bytes_delta=251`.
+- Current cleaned multithreaded-lane compare for the same workload is in
+  `build/generation_compare_qwen3_4b_multithreaded_after_no_route` and remains
+  exact-match: both lanes generated `1000` tokens / `2410` bytes with matching
+  checksum, EMEL at `22.643 tokens/s` and llama.cpp at `30.383 tokens/s`.
+- Reference-only decode-thread sweep for the same Qwen3 4B 1000-token workload
+  shows the reference output itself is thread-sensitive: llama.cpp
+  `n_threads=1,n_threads_batch=1` produced `742` tokens / checksum
+  `7218963136212605388`; `n_threads=2` and `n_threads=4` both produced
+  `1000` tokens / checksum `9696415458321741055`; `n_threads=8` produced
+  `1000` tokens / checksum `11222026555239503021`, matching EMEL's current
+  single-lane checksum. Batch-thread changes alone did not explain the drift;
+  decode `n_threads` controls it.
+- Token-trace diagnostics were added to generation benchmark JSONL artifacts as
+  paired `.tokens.txt` sidecars. The traced single-lane compare in
+  `build/generation_compare_qwen3_4b_single_token_trace` reproduced the same
+  `bounded_drift` shape: EMEL `1000` tokens at `11.873 tokens/s`, llama.cpp
+  `n_threads=1,n_threads_batch=1` `742` tokens at `9.514 tokens/s`, shared
+  prefix `1486` bytes. The selected-token streams are identical through token
+  index `617`, then diverge at index `618`: EMEL selects token `4906`, while
+  llama.cpp one-thread selects token `91`. Text-wise this is where EMEL
+  continues the repeated `<|im_start|>` loop and llama.cpp emits `<|im|>`
+  followed by normal prose. This proves the single-lane mismatch starts at
+  selected-token/logit argmax, not detokenization.
+- A traced reference-only run with `n_threads=8,n_threads_batch=1` in
+  `build/reference_jsonl_qwen3_4b_decode_8_trace` exactly matches EMEL's
+  selected-token stream end to end: both traces have `1000` tokens and checksum
+  `11222026555239503021`. The older `decode1_batch8` output has the same
+  SHA-256 as default one-thread reference output, so prefill/batch threading is
+  not the driver. Current next parity target is the decode flash-attention /
+  argmax numeric path around token index `618`: either EMEL single must emulate
+  llama.cpp's one-decode-thread chunking/reduction numerics, or the benchmark
+  contract must intentionally split thread-sensitive reference outputs instead
+  of treating one-thread and multithreaded llama.cpp as the same oracle.
+- Tested and rejected one simple arithmetic hypothesis: changing EMEL flash
+  online-softmax updates from `std::exp` to `::expf` produced an identical EMEL
+  token stream, checksum, and divergence point (`618`). That experiment was
+  reverted; do not treat `expf` alone as the remaining single-thread parity fix.
 
 ## Completion Bar
 

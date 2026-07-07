@@ -2140,13 +2140,14 @@ TEST_CASE("generator_route_guards_do_not_delegate_behavior_selection_to_detail_h
       read_source(repo_root() / "src" / "emel" / "text" / "generator" / "guards.hpp");
   const std::string prefill_guards =
       read_source(repo_root() / "src" / "emel" / "text" / "generator" / "prefill" / "guards.hpp");
-  const std::array<std::string_view, 6> forbidden_parent_patterns{
+  const std::array<std::string_view, 7> forbidden_parent_patterns{
     "emel::text::generator::detail::preselected_argmax_direct_supported(",
     "emel::text::generator::detail::prefill_chunk4_q8_gemm_backend_ready(",
     "emel::text::generator::detail::prefill_chunk8_q8_k_backend_ready(",
     "emel::text::generator::detail::prefill_chunk4_backend_ready<",
     "emel::text::generator::detail::prefill_chunk8_backend_ready<",
     "emel::text::generator::detail::flash_attention_supported(",
+    "emel::text::generator::detail::block_uses_attention(",
   };
   for (const auto pattern : forbidden_parent_patterns) {
     CAPTURE(pattern);
@@ -2165,6 +2166,13 @@ TEST_CASE("generator_scalar_kernel_route_choice_stays_in_state_machines") {
 
   const std::string detail_source =
       read_source(repo_root() / "src" / "emel" / "text" / "generator" / "detail.hpp");
+  CHECK(detail_source.find("block_uses_attention(") == std::string::npos);
+  CHECK(detail_source.find("prefill_chunk4_q8_gemm_backend_ready(") ==
+        std::string::npos);
+  CHECK(detail_source.find("prefill_chunk8_q8_k_backend_ready(") ==
+        std::string::npos);
+  CHECK(detail_source.find("prefill_chunk4_backend_ready<") == std::string::npos);
+  CHECK(detail_source.find("chunk4_matmul_backend_ready(") == std::string::npos);
   CHECK(detail_source.find("run_kernel_mode(") == std::string::npos);
   CHECK(detail_source.find("run_kernel_mode_preselected_argmax(") == std::string::npos);
   CHECK(detail_source.find("plan->kind == step_kind::prefill ?") == std::string::npos);
@@ -2348,6 +2356,69 @@ TEST_CASE("generator_scalar_kernel_route_choice_stays_in_state_machines") {
         std::string::npos);
   CHECK(prefill_sm.find("guard::guard_preselected_argmax_with_scalar_kernel_ready{}") !=
         std::string::npos);
+}
+
+TEST_CASE("generator_layer_route_actor_keeps_residual_choice_explicit") {
+  const auto read_source = [](const std::filesystem::path & path) {
+    std::ifstream stream(path);
+    REQUIRE(stream.good());
+    return std::string(
+        (std::istreambuf_iterator<char>(stream)), std::istreambuf_iterator<char>());
+  };
+
+  const auto layer_root =
+      repo_root() / "src" / "emel" / "text" / "generator" / "layer";
+  const std::string layer_sm = read_source(layer_root / "sm.hpp");
+  const std::string layer_actions = read_source(layer_root / "actions.hpp");
+  const std::string layer_events = read_source(layer_root / "events.hpp");
+  const std::string detail_source =
+      read_source(repo_root() / "src" / "emel" / "text" / "generator" /
+                  "detail.hpp");
+
+  CHECK(layer_sm.find("guard::guard_scalar_attention_route<") != std::string::npos);
+  CHECK(layer_sm.find("guard::guard_scalar_shortconv_route{}") != std::string::npos);
+  CHECK(layer_sm.find("guard::guard_chunk4_attention_route<") != std::string::npos);
+  CHECK(layer_sm.find("guard::guard_chunk4_shortconv_route{}") != std::string::npos);
+  CHECK(layer_sm.find("guard::guard_chunk8_attention_route<") != std::string::npos);
+  CHECK(layer_sm.find("guard::guard_chunk8_shortconv_route{}") != std::string::npos);
+  CHECK(layer_sm.find("sml::state<state_residual_done> <= *sml::state<state_idle>") !=
+        std::string::npos);
+  CHECK(layer_sm.find("+ sml::event<event::scalar_run>") != std::string::npos);
+  CHECK(layer_sm.find("+ sml::event<event::chunk4_run>") != std::string::npos);
+  CHECK(layer_sm.find("+ sml::event<event::chunk8_run>") != std::string::npos);
+  CHECK(layer_sm.find("sml::completion<event::scalar_run>") != std::string::npos);
+  CHECK(layer_sm.find("sml::completion<event::chunk4_run>") != std::string::npos);
+  CHECK(layer_sm.find("sml::completion<event::chunk8_run>") != std::string::npos);
+  CHECK(layer_sm.find("guard::guard_residual_ok{}") != std::string::npos);
+  CHECK(layer_sm.find("guard::guard_residual_failed{}") != std::string::npos);
+  CHECK(layer_sm.find("guard::guard_feed_forward_ok{}") != std::string::npos);
+  CHECK(layer_sm.find("guard::guard_feed_forward_failed{}") !=
+        std::string::npos);
+  CHECK(layer_sm.find("action::effect_mark_succeeded") != std::string::npos);
+  CHECK(layer_sm.find("action::effect_mark_failed") != std::string::npos);
+
+  CHECK(layer_actions.find(" if (") == std::string::npos);
+  CHECK(layer_actions.find(" switch") == std::string::npos);
+  CHECK(layer_actions.find(" ? ") == std::string::npos);
+  CHECK(layer_actions.find("&&") == std::string::npos);
+  CHECK(layer_actions.find("ev.ok") == std::string::npos);
+  CHECK(layer_actions.find("detail::block_uses_attention") == std::string::npos);
+
+  CHECK(layer_events.find("emel::model::generation_residual_route") !=
+        std::string::npos);
+  CHECK(layer_events.find("emel::model::llama") == std::string::npos);
+  CHECK(layer_events.find("bool &ok") == std::string::npos);
+  CHECK(layer_events.find("mutable bool residual_ok") != std::string::npos);
+  CHECK(layer_events.find("mutable bool feed_forward_ok") != std::string::npos);
+  CHECK(layer_events.find("mutable bool succeeded") != std::string::npos);
+
+  CHECK(detail_source.find("actor.process_event(ev) &&") == std::string::npos);
+  CHECK(detail_source.find("layer::scalar_sm<") == std::string::npos);
+  CHECK(detail_source.find("layer::chunk4_sm<") == std::string::npos);
+  CHECK(detail_source.find("layer::chunk8_sm<") == std::string::npos);
+  CHECK(detail_source.find("layer::process_scalar<") != std::string::npos);
+  CHECK(detail_source.find("layer::process_chunk4<") != std::string::npos);
+  CHECK(detail_source.find("layer::process_chunk8<") != std::string::npos);
 }
 
 TEST_CASE("docs_detail_shortens_lambda_type_names_for_mermaid") {

@@ -4,9 +4,13 @@
 #include <array>
 #include <cmath>
 #include <cstdint>
+#include <filesystem>
+#include <fstream>
+#include <iterator>
 #include <limits>
 #include <random>
 #include <span>
+#include <string>
 #include <vector>
 
 #include "../allocation_tracker.hpp"
@@ -46,6 +50,22 @@ using emel::kernel::test::make_quantized_src;
 using emel::kernel::test::make_src;
 using emel::kernel::test::to_fp16_storage;
 using emel::kernel::test::within_flash_online_f16_tolerance;
+
+std::filesystem::path repo_root() {
+#ifdef EMEL_TEST_REPO_ROOT
+  return std::filesystem::path{EMEL_TEST_REPO_ROOT};
+#else
+  return std::filesystem::path{__FILE__}.parent_path().parent_path()
+      .parent_path();
+#endif
+}
+
+std::string read_text_file(const std::filesystem::path &path) {
+  std::ifstream stream(path);
+  REQUIRE(stream.good());
+  return std::string(std::istreambuf_iterator<char>(stream),
+                     std::istreambuf_iterator<char>());
+}
 
 // Mirrors the generator's parallel matmul lane slicing: a group-aligned row
 // slice of src0/dst embedded in the full batch-major output, sharing src1.
@@ -3231,30 +3251,38 @@ TEST_CASE("kernel_aarch64_q4_k_packed_bl8_matrix_x4_route_is_explicit_and_"
 #endif
 }
 
-TEST_CASE("kernel_aarch64_q4_k_packed_bl8_matrix_x8_route_is_explicit_and_"
-          "numeric_match") {
+TEST_CASE("kernel_aarch64_q4_k_packed_bl8_multi_block_matrix_x4_route_matches_"
+          "scalar") {
   using emel::kernel::detail::quant::block_q4_k;
   using emel::kernel::detail::quant::block_q8_k;
   using emel::kernel::detail::quant::Q4_K_X8_ROWS;
+  using emel::kernel::detail::quant::Q8_0_X4_ROWS;
   using emel::kernel::detail::quant::QK_K;
 
-  constexpr uint64_t row_count = 8u;
-  constexpr uint64_t rhs_rows = Q4_K_X8_ROWS;
-  constexpr uint64_t col_count = QK_K;
+  constexpr uint64_t row_count = Q4_K_X8_ROWS * 2u;
+  constexpr uint64_t rhs_rows = Q8_0_X4_ROWS;
+  constexpr uint64_t col_count = QK_K * 10u;
   constexpr uint64_t block_count = col_count / QK_K;
 
   std::vector<block_q4_k> native_rows(
       static_cast<size_t>(row_count * block_count));
   for (size_t row = 0; row < static_cast<size_t>(row_count); ++row) {
-    auto &q4 = native_rows[row];
-    q4.d = 0x3c00u;
-    q4.dmin = static_cast<uint16_t>(0x3600u + row * 0x0020u);
-    for (size_t idx = 0; idx < q4.scales.size(); ++idx) {
-      q4.scales[idx] =
-          static_cast<uint8_t>((idx * (13u + row)) ^ (0x66u - row));
-    }
-    for (size_t idx = 0; idx < q4.qs.size(); ++idx) {
-      q4.qs[idx] = static_cast<uint8_t>((idx * (7u + row)) ^ (0xa5u + row));
+    for (size_t block = 0; block < static_cast<size_t>(block_count); ++block) {
+      auto &q4 = native_rows[row * static_cast<size_t>(block_count) + block];
+      q4.d = emel::kernel::detail::quant::fp32_to_fp16(
+          0.0009765625f *
+          static_cast<float>(((row + 5u) * (block + 3u)) % 53u + 1u));
+      q4.dmin = emel::kernel::detail::quant::fp32_to_fp16(
+          0.00048828125f *
+          static_cast<float>(((row + 11u) * (block + 7u)) % 47u + 1u));
+      for (size_t idx = 0; idx < q4.scales.size(); ++idx) {
+        q4.scales[idx] = static_cast<uint8_t>(
+            ((idx * (13u + row)) + block * 17u + 0x5au) & 0xffu);
+      }
+      for (size_t idx = 0; idx < q4.qs.size(); ++idx) {
+        q4.qs[idx] = static_cast<uint8_t>(
+            ((idx * (9u + row)) + block * 31u + 0x96u) & 0xffu);
+      }
     }
   }
 
@@ -3262,9 +3290,119 @@ TEST_CASE("kernel_aarch64_q4_k_packed_bl8_matrix_x8_route_is_explicit_and_"
   for (size_t row = 0; row < static_cast<size_t>(rhs_rows); ++row) {
     for (size_t col = 0; col < static_cast<size_t>(col_count); ++col) {
       const int32_t centered =
-          static_cast<int32_t>(((row + 3u) * 17u + col * 5u) % 67u) - 33;
+          static_cast<int32_t>(
+              ((row + 5u) * 19u + (col + 3u) * 7u + (col / QK_K) * 23u) %
+              127u) -
+          63;
       rhs_dense[row * static_cast<size_t>(col_count) + col] =
-          static_cast<float>(centered) * 0.015625f;
+          static_cast<float>(centered) * 0.0078125f;
+    }
+  }
+
+  std::vector<block_q8_k> rhs_q8(static_cast<size_t>(rhs_rows * block_count));
+  for (size_t row = 0; row < static_cast<size_t>(rhs_rows); ++row) {
+    emel::kernel::detail::quant::quantize_row_q8_k_strided(
+        rhs_dense.data() + row * static_cast<size_t>(col_count), 1u,
+        rhs_q8.data() + row * static_cast<size_t>(block_count),
+        static_cast<int64_t>(col_count));
+  }
+
+  std::vector<float> reference(static_cast<size_t>(rhs_rows * row_count), 0.0f);
+  for (size_t rhs_row = 0; rhs_row < static_cast<size_t>(rhs_rows); ++rhs_row) {
+    for (size_t row = 0; row < static_cast<size_t>(row_count); ++row) {
+      reference[rhs_row * static_cast<size_t>(row_count) + row] =
+          emel::kernel::detail::dot_q4_k_q8_k_row_scalar(
+              native_rows.data() + row * static_cast<size_t>(block_count),
+              rhs_q8.data() + rhs_row * static_cast<size_t>(block_count),
+              block_count);
+    }
+  }
+
+  std::vector<uint8_t> packed_bl8(
+      sizeof(emel::kernel::detail::quant::block_q4_kx8) *
+      emel::kernel::detail::quant::packed_q4_k_x8_group_count(row_count) *
+      block_count);
+  REQUIRE(emel::kernel::detail::quant::pack_q4_k_rows_x8_bl8(
+      native_rows.data(), row_count, col_count, packed_bl8.data()));
+
+  std::vector<float> packed_out(static_cast<size_t>(rhs_rows * row_count),
+                                0.0f);
+  aarch64_sm machine{};
+
+#if defined(__aarch64__) && defined(__ARM_NEON) &&                             \
+    defined(__ARM_FEATURE_DOTPROD)
+  const emel::kernel::event::op_mul_mat ev{
+      .src0 =
+          make_packed_q4_k_x8_bl8_src(packed_bl8.data(), col_count, row_count),
+      .src1 = make_q8_k_x4_rhs_src(rhs_q8.data(), rhs_rows, col_count),
+      .dst = make_batch_major_dst(packed_out.data(), dtype::f32, rhs_rows,
+                                  row_count),
+  };
+  CHECK(machine.process_event(ev));
+  float max_abs_delta = 0.0f;
+  for (size_t idx = 0; idx < packed_out.size(); ++idx) {
+    max_abs_delta =
+        std::max(max_abs_delta, std::fabs(packed_out[idx] - reference[idx]));
+    CHECK(packed_out[idx] == doctest::Approx(reference[idx]).epsilon(1.0e-4f));
+  }
+  CHECK(max_abs_delta <= 1.0e-3f);
+  CHECK(machine.optimized_q4_vector_packed_q8_rhs_dispatch_count() == 1u);
+#else
+  const emel::kernel::event::op_mul_mat ev{
+      .src0 =
+          make_packed_q4_k_x8_bl8_src(packed_bl8.data(), col_count, row_count),
+      .src1 = make_q8_k_x4_rhs_src(rhs_q8.data(), rhs_rows, col_count),
+      .dst = make_batch_major_dst(packed_out.data(), dtype::f32, rhs_rows,
+                                  row_count),
+  };
+  CHECK_FALSE(machine.process_event(ev));
+#endif
+}
+
+TEST_CASE("kernel_aarch64_q4_k_packed_bl8_multi_block_matrix_x8_route_matches_"
+          "scalar") {
+  using emel::kernel::detail::quant::block_q4_k;
+  using emel::kernel::detail::quant::block_q8_k;
+  using emel::kernel::detail::quant::Q4_K_X8_ROWS;
+  using emel::kernel::detail::quant::QK_K;
+
+  constexpr uint64_t row_count = 8u;
+  constexpr uint64_t rhs_rows = Q4_K_X8_ROWS;
+  constexpr uint64_t col_count = QK_K * 10u;
+  constexpr uint64_t block_count = col_count / QK_K;
+
+  std::vector<block_q4_k> native_rows(
+      static_cast<size_t>(row_count * block_count));
+  for (size_t row = 0; row < static_cast<size_t>(row_count); ++row) {
+    for (size_t block = 0; block < static_cast<size_t>(block_count); ++block) {
+      auto &q4 = native_rows[row * static_cast<size_t>(block_count) + block];
+      q4.d = emel::kernel::detail::quant::fp32_to_fp16(
+          0.0009765625f *
+          static_cast<float>(((row + 5u) * (block + 3u)) % 53u + 1u));
+      q4.dmin = emel::kernel::detail::quant::fp32_to_fp16(
+          0.00048828125f *
+          static_cast<float>(((row + 11u) * (block + 7u)) % 47u + 1u));
+      for (size_t idx = 0; idx < q4.scales.size(); ++idx) {
+        q4.scales[idx] = static_cast<uint8_t>(
+            ((idx * (13u + row)) + block * 17u + 0x5au) & 0xffu);
+      }
+      for (size_t idx = 0; idx < q4.qs.size(); ++idx) {
+        q4.qs[idx] = static_cast<uint8_t>(
+            ((idx * (9u + row)) + block * 31u + 0x96u) & 0xffu);
+      }
+    }
+  }
+
+  std::vector<float> rhs_dense(static_cast<size_t>(rhs_rows * col_count), 0.0f);
+  for (size_t row = 0; row < static_cast<size_t>(rhs_rows); ++row) {
+    for (size_t col = 0; col < static_cast<size_t>(col_count); ++col) {
+      const int32_t centered =
+          static_cast<int32_t>(
+              ((row + 5u) * 19u + (col + 3u) * 7u + (col / QK_K) * 23u) %
+              127u) -
+          63;
+      rhs_dense[row * static_cast<size_t>(col_count) + col] =
+          static_cast<float>(centered) * 0.0078125f;
     }
   }
 
@@ -3309,9 +3447,13 @@ TEST_CASE("kernel_aarch64_q4_k_packed_bl8_matrix_x8_route_is_explicit_and_"
                                   row_count),
   };
   CHECK(machine.process_event(ev));
+  float max_abs_delta = 0.0f;
   for (size_t idx = 0; idx < packed_out.size(); ++idx) {
+    max_abs_delta =
+        std::max(max_abs_delta, std::fabs(packed_out[idx] - reference[idx]));
     CHECK(packed_out[idx] == doctest::Approx(reference[idx]).epsilon(1.0e-4f));
   }
+  CHECK(max_abs_delta <= 1.0e-3f);
   CHECK(machine.optimized_q4_dispatch_count() == 1u);
   CHECK(machine.optimized_q4_vector_dispatch_count() == 1u);
   CHECK(machine.optimized_q4_vector_packed_dispatch_count() == 1u);
@@ -3326,6 +3468,14 @@ TEST_CASE("kernel_aarch64_q4_k_packed_bl8_matrix_x8_route_is_explicit_and_"
   };
   CHECK_FALSE(machine.process_event(ev));
 #endif
+}
+
+TEST_CASE("kernel_aarch64_q4_k_packed_bl8_routes_do_not_compile_bad_i8mm_tile") {
+  const std::string actions_source =
+      read_text_file(repo_root() / "src" / "emel" / "kernel" / "aarch64" /
+                     "actions.hpp");
+  CHECK(actions_source.find("dot_q4_k_x8_q8_k_group_bl8_i8mm_x4") ==
+        std::string::npos);
 }
 
 TEST_CASE("kernel_aarch64_q6_k_prepared_q8_rhs_i8mm_matrix_x4_route_is_"
@@ -3529,6 +3679,216 @@ TEST_CASE("kernel_aarch64_q6_k_prepared_q8_rhs_i8mm_matrix_x8_route_is_"
       .src0 = make_prepared_q6_k_x8_q8_src(prepared_storage.data(), col_count,
                                            row_count),
       .src1 = make_q8_k_x8_rhs_src(rhs_q8.data(), rhs_rows, col_count),
+      .dst = make_batch_major_dst(prepared_out.data(), dtype::f32, rhs_rows,
+                                  row_count),
+  };
+  CHECK_FALSE(machine.process_event(ev));
+#endif
+}
+
+TEST_CASE("kernel_aarch64_q6_k_prepared_q8_rhs_i8mm_multi_block_vector_route_"
+          "matches_scalar") {
+  using emel::kernel::detail::quant::block_q6_k;
+  using emel::kernel::detail::quant::block_q8_k;
+  using emel::kernel::detail::quant::Q6_K_X8_ROWS;
+  using emel::kernel::detail::quant::QK_K;
+
+  constexpr uint64_t row_count = Q6_K_X8_ROWS * 2u;
+  constexpr uint64_t col_count = QK_K * 10u;
+  constexpr uint64_t block_count = col_count / QK_K;
+
+  std::vector<block_q6_k> native_rows(
+      static_cast<size_t>(row_count * block_count));
+  for (size_t row = 0; row < static_cast<size_t>(row_count); ++row) {
+    for (size_t block = 0; block < static_cast<size_t>(block_count); ++block) {
+      auto &q6 = native_rows[row * static_cast<size_t>(block_count) + block];
+      q6.d = emel::kernel::detail::quant::fp32_to_fp16(
+          0.0009765625f *
+          static_cast<float>(((row + 13u) * (block + 7u)) % 61u + 1u));
+      for (size_t idx = 0; idx < q6.scales.size(); ++idx) {
+        const int32_t scale_value =
+            static_cast<int32_t>(
+                ((idx + 5u) * (row + 3u) + (block + 11u) * 17u) % 33u) -
+            16;
+        q6.scales[idx] = static_cast<int8_t>(scale_value);
+      }
+      for (size_t idx = 0; idx < q6.ql.size(); ++idx) {
+        q6.ql[idx] = static_cast<uint8_t>(
+            ((idx * (19u + row)) + (block * 37u) + 0x5du) & 0xffu);
+      }
+      for (size_t idx = 0; idx < q6.qh.size(); ++idx) {
+        q6.qh[idx] = static_cast<uint8_t>(
+            ((idx * (23u + block)) + (row * 29u) + 0xa3u) & 0xffu);
+      }
+    }
+  }
+
+  std::vector<float> rhs_dense(static_cast<size_t>(col_count), 0.0f);
+  for (size_t col = 0; col < static_cast<size_t>(col_count); ++col) {
+    const int32_t centered =
+        static_cast<int32_t>(((col + 17u) * 41u + (col / QK_K) * 19u) % 251u) -
+        125;
+    rhs_dense[col] = static_cast<float>(centered) * 0.00390625f;
+  }
+
+  std::vector<block_q8_k> rhs_q8(static_cast<size_t>(block_count));
+  emel::kernel::detail::quant::quantize_row_q8_k_strided(
+      rhs_dense.data(), 1u, rhs_q8.data(), static_cast<int64_t>(col_count));
+
+  std::vector<float> reference(static_cast<size_t>(row_count), 0.0f);
+  for (size_t row = 0; row < static_cast<size_t>(row_count); ++row) {
+    reference[row] = emel::kernel::detail::dot_q6_k_q8_k_row_scalar(
+        native_rows.data() + row * static_cast<size_t>(block_count),
+        rhs_q8.data(), block_count);
+  }
+
+  std::vector<uint8_t> prepared_storage(
+      emel::kernel::detail::quant::prepared_q6_k_x8_q8_group_storage_bytes(
+          col_count) *
+      emel::kernel::detail::quant::packed_q6_k_x8_group_count(row_count));
+  REQUIRE(emel::kernel::detail::quant::pack_q6_k_rows_x8_q8_prepared(
+      native_rows.data(), row_count, col_count, prepared_storage.data()));
+
+  std::vector<float> prepared_out(static_cast<size_t>(row_count), 0.0f);
+  aarch64_sm machine{};
+
+#if defined(__aarch64__) && defined(__ARM_NEON) &&                             \
+    defined(__ARM_FEATURE_MATMUL_INT8)
+  const emel::kernel::event::op_mul_mat ev{
+      .src0 = make_prepared_q6_k_x8_q8_src(prepared_storage.data(), col_count,
+                                           row_count),
+      .src1 = make_q8_k_vector_src(rhs_q8.data(), col_count),
+      .dst = make_dst(prepared_out.data(), dtype::f32, 1u, row_count),
+  };
+  CHECK(machine.process_event(ev));
+  float max_abs_delta = 0.0f;
+  for (size_t idx = 0; idx < prepared_out.size(); ++idx) {
+    max_abs_delta =
+        std::max(max_abs_delta, std::fabs(prepared_out[idx] - reference[idx]));
+    CHECK(prepared_out[idx] ==
+          doctest::Approx(reference[idx]).epsilon(1.0e-5f));
+  }
+  CHECK(max_abs_delta <= 1.0e-4f);
+  CHECK(machine.optimized_q6_vector_prepared_q8_rhs_i8mm_dispatch_count() ==
+        1u);
+#else
+  const emel::kernel::event::op_mul_mat ev{
+      .src0 = make_prepared_q6_k_x8_q8_src(prepared_storage.data(), col_count,
+                                           row_count),
+      .src1 = make_q8_k_vector_src(rhs_q8.data(), col_count),
+      .dst = make_dst(prepared_out.data(), dtype::f32, 1u, row_count),
+  };
+  CHECK_FALSE(machine.process_event(ev));
+#endif
+}
+
+TEST_CASE("kernel_aarch64_q6_k_prepared_q8_rhs_i8mm_multi_block_matrix_x4_"
+          "matches_scalar") {
+  using emel::kernel::detail::quant::block_q6_k;
+  using emel::kernel::detail::quant::block_q8_k;
+  using emel::kernel::detail::quant::Q6_K_X8_ROWS;
+  using emel::kernel::detail::quant::Q8_0_X4_ROWS;
+  using emel::kernel::detail::quant::QK_K;
+
+  constexpr uint64_t row_count = Q6_K_X8_ROWS * 2u;
+  constexpr uint64_t rhs_rows = Q8_0_X4_ROWS;
+  constexpr uint64_t col_count = QK_K * 10u;
+  constexpr uint64_t block_count = col_count / QK_K;
+
+  std::vector<block_q6_k> native_rows(
+      static_cast<size_t>(row_count * block_count));
+  for (size_t row = 0; row < static_cast<size_t>(row_count); ++row) {
+    for (size_t block = 0; block < static_cast<size_t>(block_count); ++block) {
+      auto &q6 = native_rows[row * static_cast<size_t>(block_count) + block];
+      q6.d = emel::kernel::detail::quant::fp32_to_fp16(
+          0.0009765625f *
+          static_cast<float>(((row + 13u) * (block + 7u)) % 61u + 1u));
+      for (size_t idx = 0; idx < q6.scales.size(); ++idx) {
+        const int32_t scale_value =
+            static_cast<int32_t>(
+                ((idx + 5u) * (row + 3u) + (block + 11u) * 17u) % 33u) -
+            16;
+        q6.scales[idx] = static_cast<int8_t>(scale_value);
+      }
+      for (size_t idx = 0; idx < q6.ql.size(); ++idx) {
+        q6.ql[idx] = static_cast<uint8_t>(
+            ((idx * (19u + row)) + (block * 37u) + 0x5du) & 0xffu);
+      }
+      for (size_t idx = 0; idx < q6.qh.size(); ++idx) {
+        q6.qh[idx] = static_cast<uint8_t>(
+            ((idx * (23u + block)) + (row * 29u) + 0xa3u) & 0xffu);
+      }
+    }
+  }
+
+  std::vector<float> rhs_dense(static_cast<size_t>(rhs_rows * col_count), 0.0f);
+  for (size_t row = 0; row < static_cast<size_t>(rhs_rows); ++row) {
+    for (size_t col = 0; col < static_cast<size_t>(col_count); ++col) {
+      const int32_t centered =
+          static_cast<int32_t>(
+              ((row + 19u) * 43u + (col + 17u) * 41u + (col / QK_K) * 19u) %
+              251u) -
+          125;
+      rhs_dense[row * static_cast<size_t>(col_count) + col] =
+          static_cast<float>(centered) * 0.00390625f;
+    }
+  }
+
+  std::vector<block_q8_k> rhs_q8(static_cast<size_t>(rhs_rows * block_count));
+  for (size_t row = 0; row < static_cast<size_t>(rhs_rows); ++row) {
+    emel::kernel::detail::quant::quantize_row_q8_k_strided(
+        rhs_dense.data() + row * static_cast<size_t>(col_count), 1u,
+        rhs_q8.data() + row * static_cast<size_t>(block_count),
+        static_cast<int64_t>(col_count));
+  }
+
+  std::vector<float> reference(static_cast<size_t>(rhs_rows * row_count), 0.0f);
+  for (size_t rhs_row = 0; rhs_row < static_cast<size_t>(rhs_rows); ++rhs_row) {
+    for (size_t row = 0; row < static_cast<size_t>(row_count); ++row) {
+      reference[rhs_row * static_cast<size_t>(row_count) + row] =
+          emel::kernel::detail::dot_q6_k_q8_k_row_scalar(
+              native_rows.data() + row * static_cast<size_t>(block_count),
+              rhs_q8.data() + rhs_row * static_cast<size_t>(block_count),
+              block_count);
+    }
+  }
+
+  std::vector<uint8_t> prepared_storage(
+      emel::kernel::detail::quant::prepared_q6_k_x8_q8_group_storage_bytes(
+          col_count) *
+      emel::kernel::detail::quant::packed_q6_k_x8_group_count(row_count));
+  REQUIRE(emel::kernel::detail::quant::pack_q6_k_rows_x8_q8_prepared(
+      native_rows.data(), row_count, col_count, prepared_storage.data()));
+
+  std::vector<float> prepared_out(static_cast<size_t>(rhs_rows * row_count),
+                                  0.0f);
+  aarch64_sm machine{};
+
+#if defined(__aarch64__) && defined(__ARM_NEON) &&                             \
+    defined(__ARM_FEATURE_MATMUL_INT8)
+  const emel::kernel::event::op_mul_mat ev{
+      .src0 = make_prepared_q6_k_x8_q8_src(prepared_storage.data(), col_count,
+                                           row_count),
+      .src1 = make_q8_k_x4_rhs_src(rhs_q8.data(), rhs_rows, col_count),
+      .dst = make_batch_major_dst(prepared_out.data(), dtype::f32, rhs_rows,
+                                  row_count),
+  };
+  CHECK(machine.process_event(ev));
+  float max_abs_delta = 0.0f;
+  for (size_t idx = 0; idx < prepared_out.size(); ++idx) {
+    max_abs_delta =
+        std::max(max_abs_delta, std::fabs(prepared_out[idx] - reference[idx]));
+    CHECK(prepared_out[idx] ==
+          doctest::Approx(reference[idx]).epsilon(1.0e-5f));
+  }
+  CHECK(max_abs_delta <= 1.0e-4f);
+  CHECK(machine.optimized_q6_vector_prepared_q8_rhs_i8mm_dispatch_count() ==
+        1u);
+#else
+  const emel::kernel::event::op_mul_mat ev{
+      .src0 = make_prepared_q6_k_x8_q8_src(prepared_storage.data(), col_count,
+                                           row_count),
+      .src1 = make_q8_k_x4_rhs_src(rhs_q8.data(), rhs_rows, col_count),
       .dst = make_batch_major_dst(prepared_out.data(), dtype::f32, rhs_rows,
                                   row_count),
   };
@@ -4248,6 +4608,208 @@ TEST_CASE("kernel_aarch64_detail_branch_paths") {
       emel::kernel::aarch64::detail::can_use_neon(quant_mul_mat_ev, true));
 #endif
 
+  using emel::kernel::detail::quant::block_q4_k;
+  using emel::kernel::detail::quant::block_q6_k;
+  using emel::kernel::detail::quant::block_q8_k;
+  using emel::kernel::detail::quant::block_q8_0;
+  using emel::kernel::detail::quant::QK8_0;
+  std::array<block_q4_k, 1> q4_k_rows = {};
+  std::array<block_q6_k, 1> q6_k_rows = {};
+  std::array<block_q8_k, 1> q8_k_rows = {};
+  std::array<block_q8_0, 1> q8_0_rows = {};
+  std::array<float, 1> vector_out = {};
+  const emel::kernel::event::op_mul_mat q4_q8_ev{
+      .src0 = make_quantized_src(q4_k_rows.data(), dtype::q4_k, QK_K, 1u),
+      .src1 = make_q8_k_vector_src(q8_k_rows.data(), QK_K),
+      .dst = make_dst(vector_out.data(), dtype::f32, 1u, 1u),
+  };
+  CHECK(emel::kernel::aarch64::detail::
+            can_run_neon_mul_mat_q4_vector_q8_rhs_request(q4_q8_ev));
+  {
+    auto bad = q4_q8_ev;
+    bad.src1.ne[0] = 2u;
+    CHECK_FALSE(emel::kernel::aarch64::detail::
+                    can_run_neon_mul_mat_q4_vector_q8_rhs_request(bad));
+  }
+  {
+    auto bad = q4_q8_ev;
+    bad.dst.ne[1] = 2u;
+    CHECK_FALSE(emel::kernel::aarch64::detail::
+                    can_run_neon_mul_mat_q4_vector_q8_rhs_request(bad));
+  }
+  {
+    auto bad = q4_q8_ev;
+    bad.src0.type = dtype::q6_k;
+    CHECK_FALSE(emel::kernel::aarch64::detail::
+                    can_run_neon_mul_mat_q4_vector_q8_rhs_request(bad));
+  }
+  {
+    auto bad = q4_q8_ev;
+    bad.src1.nb[1] = bad.src1.nb[1] + 1u;
+    CHECK_FALSE(emel::kernel::aarch64::detail::
+                    can_run_neon_mul_mat_q4_vector_q8_rhs_request(bad));
+  }
+  const auto reject_q4_q8 = [&](const auto mutate) {
+    auto bad = q4_q8_ev;
+    mutate(bad);
+    CHECK_FALSE(emel::kernel::aarch64::detail::
+                    can_run_neon_mul_mat_q4_vector_q8_rhs_request(bad));
+  };
+  reject_q4_q8([](auto &bad) { bad.src0.ne[0] = 0u; });
+  reject_q4_q8([](auto &bad) { bad.src0.ne[1] = 0u; });
+  reject_q4_q8([](auto &bad) { bad.dst.ne[0] = 2u; });
+  reject_q4_q8([](auto &bad) { bad.src0.ne[2] = 2u; });
+  reject_q4_q8([](auto &bad) { bad.src0.ne[3] = 2u; });
+  reject_q4_q8([](auto &bad) { bad.src1.ne[2] = 2u; });
+  reject_q4_q8([](auto &bad) { bad.src1.ne[3] = 2u; });
+  reject_q4_q8([](auto &bad) { bad.dst.ne[2] = 2u; });
+  reject_q4_q8([](auto &bad) { bad.dst.ne[3] = 2u; });
+  reject_q4_q8([](auto &bad) { bad.src1.type = dtype::f32; });
+  reject_q4_q8([](auto &bad) { bad.dst.type = dtype::q4_k; });
+  reject_q4_q8([](auto &bad) { bad.src0.nb[0] = 2u; });
+  reject_q4_q8([](auto &bad) { bad.src0.nb[1] = bad.src0.nb[1] + 1u; });
+  reject_q4_q8([](auto &bad) { bad.src0.nb[2] = bad.src0.nb[2] + 1u; });
+  reject_q4_q8([](auto &bad) { bad.src0.nb[3] = bad.src0.nb[3] + 1u; });
+  reject_q4_q8([](auto &bad) { bad.src1.nb[0] = 2u; });
+  reject_q4_q8([](auto &bad) { bad.src1.nb[2] = bad.src1.nb[2] + 1u; });
+  reject_q4_q8([](auto &bad) { bad.src1.nb[3] = bad.src1.nb[3] + 1u; });
+
+  const emel::kernel::event::op_mul_mat q6_q8_ev{
+      .src0 = make_quantized_src(q6_k_rows.data(), dtype::q6_k, QK_K, 1u),
+      .src1 = make_q8_k_vector_src(q8_k_rows.data(), QK_K),
+      .dst = make_dst(vector_out.data(), dtype::f32, 1u, 1u),
+  };
+  CHECK(emel::kernel::aarch64::detail::
+            can_run_neon_mul_mat_q6_vector_q8_rhs_request(q6_q8_ev));
+  {
+    auto bad = q6_q8_ev;
+    bad.src1.ne[1] = QK_K + 1u;
+    CHECK_FALSE(emel::kernel::aarch64::detail::
+                    can_run_neon_mul_mat_q6_vector_q8_rhs_request(bad));
+  }
+  const auto reject_q6_q8 = [&](const auto mutate) {
+    auto bad = q6_q8_ev;
+    mutate(bad);
+    CHECK_FALSE(emel::kernel::aarch64::detail::
+                    can_run_neon_mul_mat_q6_vector_q8_rhs_request(bad));
+  };
+  reject_q6_q8([](auto &bad) { bad.src0.ne[0] = 0u; });
+  reject_q6_q8([](auto &bad) { bad.src0.ne[1] = 0u; });
+  reject_q6_q8([](auto &bad) { bad.src1.ne[0] = 2u; });
+  reject_q6_q8([](auto &bad) { bad.dst.ne[0] = 2u; });
+  reject_q6_q8([](auto &bad) { bad.dst.ne[1] = 2u; });
+  reject_q6_q8([](auto &bad) { bad.src0.ne[2] = 2u; });
+  reject_q6_q8([](auto &bad) { bad.src0.ne[3] = 2u; });
+  reject_q6_q8([](auto &bad) { bad.src1.ne[2] = 2u; });
+  reject_q6_q8([](auto &bad) { bad.src1.ne[3] = 2u; });
+  reject_q6_q8([](auto &bad) { bad.dst.ne[2] = 2u; });
+  reject_q6_q8([](auto &bad) { bad.dst.ne[3] = 2u; });
+  reject_q6_q8([](auto &bad) { bad.src0.type = dtype::q4_k; });
+  reject_q6_q8([](auto &bad) { bad.src1.type = dtype::f32; });
+  reject_q6_q8([](auto &bad) { bad.dst.type = dtype::q6_k; });
+  reject_q6_q8([](auto &bad) { bad.src0.nb[0] = 2u; });
+  reject_q6_q8([](auto &bad) { bad.src0.nb[1] = bad.src0.nb[1] + 1u; });
+  reject_q6_q8([](auto &bad) { bad.src0.nb[3] = bad.src0.nb[3] + 1u; });
+  reject_q6_q8([](auto &bad) { bad.src1.nb[0] = 2u; });
+  reject_q6_q8([](auto &bad) { bad.src1.nb[2] = bad.src1.nb[2] + 1u; });
+  reject_q6_q8([](auto &bad) { bad.src1.nb[3] = bad.src1.nb[3] + 1u; });
+  {
+    auto bad = q6_q8_ev;
+    bad.src0.nb[2] = bad.src0.nb[2] + 1u;
+    CHECK_FALSE(emel::kernel::aarch64::detail::
+                    can_run_neon_mul_mat_q6_vector_q8_rhs_request(bad));
+  }
+
+  const emel::kernel::event::op_mul_mat q8_0_ev{
+      .src0 = make_quantized_src(q8_0_rows.data(), dtype::q8_0, QK8_0, 1u),
+      .src1 = make_q8_0_vector_src(q8_0_rows.data(), QK8_0),
+      .dst = make_dst(vector_out.data(), dtype::f32, 1u, 1u),
+  };
+  CHECK(emel::kernel::aarch64::detail::
+            can_run_neon_mul_mat_q8_0_vector_q8_rhs_request(q8_0_ev));
+  {
+    auto bad = q8_0_ev;
+    bad.src1.type = dtype::f32;
+    CHECK_FALSE(emel::kernel::aarch64::detail::
+                    can_run_neon_mul_mat_q8_0_vector_q8_rhs_request(bad));
+  }
+  {
+    auto bad = q8_0_ev;
+    bad.dst.nb[0] = sizeof(float) * 2u;
+    CHECK_FALSE(emel::kernel::aarch64::detail::
+                    can_run_neon_mul_mat_q8_0_vector_q8_rhs_request(bad));
+  }
+  const auto reject_q8_0 = [&](const auto mutate) {
+    auto bad = q8_0_ev;
+    mutate(bad);
+    CHECK_FALSE(emel::kernel::aarch64::detail::
+                    can_run_neon_mul_mat_q8_0_vector_q8_rhs_request(bad));
+  };
+  reject_q8_0([](auto &bad) { bad.src0.ne[0] = 0u; });
+  reject_q8_0([](auto &bad) { bad.src0.ne[1] = 0u; });
+  reject_q8_0([](auto &bad) { bad.src1.ne[0] = 2u; });
+  reject_q8_0([](auto &bad) { bad.src1.ne[1] = QK8_0 + 1u; });
+  reject_q8_0([](auto &bad) { bad.dst.ne[0] = 2u; });
+  reject_q8_0([](auto &bad) { bad.dst.ne[1] = 2u; });
+  reject_q8_0([](auto &bad) { bad.src0.ne[2] = 2u; });
+  reject_q8_0([](auto &bad) { bad.src1.ne[2] = 2u; });
+  reject_q8_0([](auto &bad) { bad.dst.ne[2] = 2u; });
+  reject_q8_0([](auto &bad) { bad.dst.ne[3] = 2u; });
+  reject_q8_0([](auto &bad) { bad.src0.type = dtype::q4_k; });
+  reject_q8_0([](auto &bad) { bad.dst.type = dtype::q8_0; });
+  reject_q8_0([](auto &bad) { bad.src0.nb[0] = 2u; });
+  reject_q8_0([](auto &bad) { bad.src0.nb[1] = bad.src0.nb[1] + 1u; });
+  reject_q8_0([](auto &bad) { bad.src0.nb[2] = bad.src0.nb[2] + 1u; });
+  reject_q8_0([](auto &bad) { bad.src0.nb[3] = bad.src0.nb[3] + 1u; });
+  reject_q8_0([](auto &bad) { bad.src1.nb[0] = 2u; });
+  reject_q8_0([](auto &bad) { bad.src1.nb[1] = bad.src1.nb[1] + 1u; });
+  reject_q8_0([](auto &bad) { bad.src1.nb[2] = bad.src1.nb[2] + 1u; });
+  reject_q8_0([](auto &bad) { bad.src1.nb[3] = bad.src1.nb[3] + 1u; });
+
+  std::array<float, 4> f32_matrix = {1.0f, 2.0f, 3.0f, 4.0f};
+  const emel::kernel::event::op_mul_mat f32_ev{
+      .src0 = make_src(f32_matrix.data(), dtype::f32, 4u, 1u),
+      .src1 = make_src(lhs, dtype::f32, 1u, 4u),
+      .dst = make_dst(vector_out.data(), dtype::f32, 1u, 1u),
+  };
+  CHECK(emel::kernel::aarch64::detail::
+            can_run_neon_mul_mat_f32_vector_request(f32_ev));
+  {
+    auto bad = f32_ev;
+    bad.src1.ne[0] = 2u;
+    CHECK_FALSE(emel::kernel::aarch64::detail::
+                    can_run_neon_mul_mat_f32_vector_request(bad));
+  }
+  {
+    auto bad = f32_ev;
+    bad.src0.nb[1] = bad.src0.nb[1] + sizeof(float);
+    CHECK_FALSE(emel::kernel::aarch64::detail::
+                    can_run_neon_mul_mat_f32_vector_request(bad));
+  }
+  const auto reject_f32 = [&](const auto mutate) {
+    auto bad = f32_ev;
+    mutate(bad);
+    CHECK_FALSE(emel::kernel::aarch64::detail::
+                    can_run_neon_mul_mat_f32_vector_request(bad));
+  };
+  reject_f32([](auto &bad) { bad.src0.ne[0] = 0u; });
+  reject_f32([](auto &bad) { bad.src0.ne[1] = 0u; });
+  reject_f32([](auto &bad) { bad.src1.ne[1] = 5u; });
+  reject_f32([](auto &bad) { bad.dst.ne[0] = 2u; });
+  reject_f32([](auto &bad) { bad.dst.ne[1] = 2u; });
+  reject_f32([](auto &bad) { bad.src0.ne[2] = 2u; });
+  reject_f32([](auto &bad) { bad.src0.ne[3] = 2u; });
+  reject_f32([](auto &bad) { bad.src1.ne[2] = 2u; });
+  reject_f32([](auto &bad) { bad.src1.ne[3] = 2u; });
+  reject_f32([](auto &bad) { bad.dst.ne[2] = 2u; });
+  reject_f32([](auto &bad) { bad.dst.ne[3] = 2u; });
+  reject_f32([](auto &bad) { bad.src0.type = dtype::q4_k; });
+  reject_f32([](auto &bad) { bad.src1.type = dtype::q4_k; });
+  reject_f32([](auto &bad) { bad.dst.type = dtype::q4_k; });
+  reject_f32([](auto &bad) { bad.src0.nb[0] = sizeof(float) * 2u; });
+  reject_f32([](auto &bad) { bad.src0.nb[2] = bad.src0.nb[2] + sizeof(float); });
+  reject_f32([](auto &bad) { bad.src0.nb[3] = bad.src0.nb[3] + sizeof(float); });
+
   emel::kernel::event::op_unary unary_ev{
       .src0 = make_src(lhs, dtype::f32, 4),
       .dst = make_dst(dst, dtype::f32, 4),
@@ -4260,6 +4822,66 @@ TEST_CASE("kernel_aarch64_detail_branch_paths") {
 #endif
   unary_ev.subop = emel::kernel::event::unary_subop::exp;
   CHECK_FALSE(emel::kernel::aarch64::detail::can_use_neon(unary_ev, true));
+}
+
+TEST_CASE("kernel_aarch64_q4_k_vector_q8_rhs_tail_rows_match_scalar") {
+  using emel::kernel::detail::quant::block_q4_k;
+  using emel::kernel::detail::quant::block_q8_k;
+  using emel::kernel::detail::quant::QK_K;
+
+  constexpr uint64_t row_count = 5u;
+  constexpr uint64_t block_count = 1u;
+
+  std::array<block_q4_k, row_count * block_count> native_rows = {};
+  for (size_t row = 0; row < native_rows.size(); ++row) {
+    auto &q4 = native_rows[row];
+    q4.d = emel::kernel::detail::quant::fp32_to_fp16(
+        0.0009765625f * static_cast<float>(row + 1u));
+    q4.dmin = emel::kernel::detail::quant::fp32_to_fp16(
+        0.000244140625f * static_cast<float>(row + 3u));
+    for (size_t idx = 0; idx < q4.scales.size(); ++idx) {
+      q4.scales[idx] = static_cast<uint8_t>((row * 11u + idx * 7u) & 0xffu);
+    }
+    for (size_t idx = 0; idx < q4.qs.size(); ++idx) {
+      q4.qs[idx] = static_cast<uint8_t>((row * 13u + idx * 5u) & 0xffu);
+    }
+  }
+
+  std::array<float, QK_K> rhs_dense = {};
+  for (size_t idx = 0; idx < rhs_dense.size(); ++idx) {
+    rhs_dense[idx] =
+        static_cast<float>(static_cast<int32_t>((idx * 17u) % 127u) - 63) *
+        0.0078125f;
+  }
+  std::array<block_q8_k, block_count> rhs_q8 = {};
+  emel::kernel::detail::quant::quantize_row_q8_k_strided(
+      rhs_dense.data(), 1u, rhs_q8.data(), static_cast<int64_t>(QK_K));
+
+  std::array<float, row_count> reference = {};
+  for (size_t row = 0; row < row_count; ++row) {
+    reference[row] = emel::kernel::detail::dot_q4_k_q8_k_row_scalar(
+        native_rows.data() + row, rhs_q8.data(), block_count);
+  }
+
+  std::array<float, row_count> out = {};
+  const emel::kernel::event::op_mul_mat ev{
+      .src0 = make_quantized_src(native_rows.data(), dtype::q4_k, QK_K,
+                                 row_count),
+      .src1 = make_q8_k_vector_src(rhs_q8.data(), QK_K),
+      .dst = make_dst(out.data(), dtype::f32, 1u, row_count),
+  };
+
+#if defined(__aarch64__) && defined(__ARM_NEON) &&                             \
+    defined(__ARM_FEATURE_DOTPROD)
+  aarch64_sm machine{};
+  REQUIRE(machine.process_event(ev));
+  for (size_t idx = 0; idx < out.size(); ++idx) {
+    CHECK(out[idx] == doctest::Approx(reference[idx]).epsilon(1.0e-4f));
+  }
+#else
+  aarch64_sm machine{};
+  CHECK_FALSE(machine.process_event(ev));
+#endif
 }
 
 TEST_CASE("kernel_aarch64_detail_helper_edge_paths") {
@@ -4541,6 +5163,7 @@ TEST_CASE("kernel_aarch64_flash_attn_ext_uses_optimized_backend_path") {
   CHECK(within_flash_online_f16_tolerance(fixture.dst[3], expected[3]));
 #endif
 }
+
 
 TEST_CASE(
     "kernel_aarch64_flash_attn_ext_matches_shared_workspace_on_long_kv_spans") {

@@ -60,6 +60,7 @@
 namespace {
 
 constexpr size_t k_generation_output_capacity = 65536u;
+constexpr size_t k_generation_token_trace_capacity = 4096u;
 
 struct generation_case_spec {
   std::string name = {};
@@ -146,6 +147,10 @@ constexpr char k_generation_benchmark_lanes_env[] =
     "EMEL_BENCH_GENERATION_LANES";
 constexpr char k_generation_reference_threads_env[] =
     "EMEL_BENCH_GENERATION_REFERENCE_THREADS";
+constexpr char k_generation_reference_decode_threads_env[] =
+    "EMEL_BENCH_GENERATION_REFERENCE_DECODE_THREADS";
+constexpr char k_generation_reference_batch_threads_env[] =
+    "EMEL_BENCH_GENERATION_REFERENCE_BATCH_THREADS";
 constexpr char k_legacy_generation_reference_threads_env[] =
     "EMEL_BENCH_REFERENCE_THREADS";
 constexpr char k_generation_stage_probe_env[] = "EMEL_GENERATION_STAGE_PROBE";
@@ -298,7 +303,7 @@ int32_t read_env_i32_positive(const char *name, const int32_t fallback) {
   return static_cast<int32_t>(parsed);
 }
 
-int32_t generation_reference_thread_count() {
+int32_t generation_reference_default_thread_count() {
   if (current_generation_benchmark_lane() ==
       generation_benchmark_lane::single) {
     return k_generation_single_thread_count;
@@ -311,9 +316,30 @@ int32_t generation_reference_thread_count() {
                                fallback);
 }
 
-std::string generation_reference_thread_contract(const int32_t threads) {
-  return "llama.cpp_n_threads=" + std::to_string(threads) +
-         ",n_threads_batch=" + std::to_string(threads);
+int32_t generation_reference_decode_thread_count() {
+  return read_env_i32_positive(k_generation_reference_decode_threads_env,
+                               generation_reference_default_thread_count());
+}
+
+int32_t generation_reference_batch_thread_count() {
+  return read_env_i32_positive(k_generation_reference_batch_threads_env,
+                               generation_reference_default_thread_count());
+}
+
+int32_t generation_reference_thread_count() {
+  return generation_reference_decode_thread_count();
+}
+
+std::string generation_reference_thread_contract(const int32_t decode_threads,
+                                                 const int32_t batch_threads) {
+  return "llama.cpp_n_threads=" + std::to_string(decode_threads) +
+         ",n_threads_batch=" + std::to_string(batch_threads);
+}
+
+std::string generation_reference_thread_contract() {
+  return generation_reference_thread_contract(
+      generation_reference_decode_thread_count(),
+      generation_reference_batch_thread_count());
 }
 
 std::uint64_t read_env_u64(const char *name, const std::uint64_t fallback) {
@@ -675,9 +701,22 @@ struct generation_capture {
 
 struct generation_result {
   std::array<char, k_generation_output_capacity> output = {};
+  std::array<int32_t, k_generation_token_trace_capacity> output_token_ids = {};
+  int32_t output_token_ids_count = 0;
   int32_t tokens_generated = 0;
   size_t output_length = 0u;
 };
+
+void append_generation_token_id(generation_result &result,
+                                const int32_t token_id) noexcept {
+  const size_t index = static_cast<size_t>(result.output_token_ids_count);
+  if (index >= result.output_token_ids.size()) {
+    return;
+  }
+
+  result.output_token_ids[index] = token_id;
+  result.output_token_ids_count += 1;
+}
 
 void capture_generation_output_metrics(emel::bench::result &record,
                                        const generation_result &generated) {
@@ -693,6 +732,13 @@ void capture_generation_output_metrics(emel::bench::result &record,
       reinterpret_cast<const std::uint8_t *>(generated.output.data()),
       generated.output_length);
   record.output_text.assign(generated.output.data(), generated.output_length);
+  record.output_token_ids_text.clear();
+  for (int32_t idx = 0; idx < generated.output_token_ids_count; ++idx) {
+    if (idx > 0) {
+      record.output_token_ids_text.push_back(' ');
+    }
+    record.output_token_ids_text += std::to_string(generated.output_token_ids[idx]);
+  }
 }
 
 struct prefill_probe_breakdown {
@@ -1892,9 +1938,8 @@ make_reference_context(llama_model *model,
   params.n_batch = 512;
   params.n_ubatch = 512;
   params.n_seq_max = 1;
-  const int32_t reference_threads = generation_reference_thread_count();
-  params.n_threads = reference_threads;
-  params.n_threads_batch = reference_threads;
+  params.n_threads = generation_reference_decode_thread_count();
+  params.n_threads_batch = generation_reference_batch_thread_count();
   params.embeddings = false;
   params.cb_eval = eval_callback;
   params.cb_eval_user_data = eval_user_data;
@@ -2017,6 +2062,8 @@ bool run_emel_generate(emel_session &session, const generation_case_spec &spec,
   };
   request.add_generation_prompt = true;
   request.enable_thinking = false;
+  request.generated_token_ids_out = std::span<int32_t>{
+      result_out.output_token_ids.data(), result_out.output_token_ids.size()};
   request.error_out = &error_out;
   request.on_done = {&session, on_generation_done};
   request.on_error = {&session, on_generation_error};
@@ -2044,6 +2091,9 @@ bool run_emel_generate(emel_session &session, const generation_case_spec &spec,
   }
 
   result_out.tokens_generated = session.generation.tokens_generated;
+  result_out.output_token_ids_count = std::min<int32_t>(
+      session.generation.tokens_generated,
+      static_cast<int32_t>(result_out.output_token_ids.size()));
   result_out.output_length = session.generation.output_length;
   return true;
 }
@@ -2188,6 +2238,7 @@ bool run_reference_generate_preloaded(
 
     const llama_token selected =
         select_argmax_token_from_logits(logits, fixture.vocab_size);
+    append_generation_token_id(result_out, static_cast<int32_t>(selected));
     result_out.tokens_generated += 1;
     if (!append_reference_piece(fixture, seam, selected, result_out)) {
       return false;
@@ -2435,6 +2486,7 @@ bool measure_reference_stage_probe(
 
     const llama_token selected =
         select_argmax_token_from_logits(logits, fixture.vocab_size);
+    append_generation_token_id(result_out, static_cast<int32_t>(selected));
     result_out.tokens_generated += 1;
     if (!append_reference_piece(fixture, seam, selected, result_out)) {
       return false;
@@ -2817,6 +2869,7 @@ void append_emel_generation_cases_for_current_benchmark_lane(
         }
         volatile std::size_t sink = 0u;
         generation_seam_audit seam = {};
+        std::uint64_t kernel_dispatch_calls = 0u;
         std::uint64_t flash_dispatch_calls = 0u;
         std::uint64_t optimized_flash_dispatch_calls = 0u;
         std::uint64_t shared_flash_dispatch_calls = 0u;
@@ -2873,6 +2926,8 @@ void append_emel_generation_cases_for_current_benchmark_lane(
                              generation_case.name.data());
           }
           seam = session->seam;
+          kernel_dispatch_calls = after.kernel_dispatch_calls -
+                                  before.kernel_dispatch_calls;
           flash_dispatch_calls = after.flash_attention_dispatch_calls -
                                  before.flash_attention_dispatch_calls;
           optimized_flash_dispatch_calls =
@@ -2938,6 +2993,29 @@ void append_emel_generation_cases_for_current_benchmark_lane(
             generation_case.manifest.max_output_tokens;
         compare_record.comparable = generation_case.manifest.comparable;
         capture_generation_output_metrics(compare_record, latest_generated);
+        compare_record.kernel_dispatch_calls = kernel_dispatch_calls;
+        compare_record.flash_attention_dispatch_calls = flash_dispatch_calls;
+        compare_record.optimized_flash_dispatch_calls =
+            optimized_flash_dispatch_calls;
+        compare_record.shared_flash_dispatch_calls =
+            shared_flash_dispatch_calls;
+        compare_record.native_q8_0_dispatch_calls = native_q8_0_dispatch_calls;
+        compare_record.packed_q8_0_dispatch_calls =
+            packed_q8_0_dispatch_calls;
+        compare_record.optimized_q4_dispatch_calls =
+            optimized_q4_dispatch_calls;
+        compare_record.shared_q4_dispatch_calls = shared_q4_dispatch_calls;
+        compare_record.optimized_q6_dispatch_calls =
+            optimized_q6_dispatch_calls;
+        compare_record.shared_q6_dispatch_calls = shared_q6_dispatch_calls;
+        compare_record.native_quantized_stage_count =
+            native_quantized_stage_count;
+        compare_record.approved_dense_f32_stage_count =
+            approved_dense_f32_stage_count;
+        compare_record.disallowed_fallback_stage_count =
+            disallowed_fallback_stage_count;
+        compare_record.explicit_no_claim_stage_count =
+            explicit_no_claim_stage_count;
         compare_record.note = emel::tools::append_model_load_io_strategy_note(
             generation_case.manifest.comparability_note,
             prepared_fixture.emel.load.used_io_strategy);
@@ -3011,6 +3089,7 @@ void append_emel_generation_cases_for_current_benchmark_lane(
       }
       volatile std::size_t sink = 0u;
       generation_seam_audit seam = {};
+      std::uint64_t kernel_dispatch_calls = 0u;
       std::uint64_t flash_dispatch_calls = 0u;
       std::uint64_t optimized_flash_dispatch_calls = 0u;
       std::uint64_t shared_flash_dispatch_calls = 0u;
@@ -3066,6 +3145,8 @@ void append_emel_generation_cases_for_current_benchmark_lane(
                            generation_case.name.data());
         }
         seam = session->seam;
+        kernel_dispatch_calls = after.kernel_dispatch_calls -
+                                before.kernel_dispatch_calls;
         flash_dispatch_calls = after.flash_attention_dispatch_calls -
                                before.flash_attention_dispatch_calls;
         optimized_flash_dispatch_calls = after.optimized_flash_dispatch_calls -
@@ -3129,6 +3210,25 @@ void append_emel_generation_cases_for_current_benchmark_lane(
           generation_case.manifest.max_output_tokens;
       compare_record.comparable = generation_case.manifest.comparable;
       capture_generation_output_metrics(compare_record, latest_generated);
+      compare_record.kernel_dispatch_calls = kernel_dispatch_calls;
+      compare_record.flash_attention_dispatch_calls = flash_dispatch_calls;
+      compare_record.optimized_flash_dispatch_calls =
+          optimized_flash_dispatch_calls;
+      compare_record.shared_flash_dispatch_calls = shared_flash_dispatch_calls;
+      compare_record.native_q8_0_dispatch_calls = native_q8_0_dispatch_calls;
+      compare_record.packed_q8_0_dispatch_calls = packed_q8_0_dispatch_calls;
+      compare_record.optimized_q4_dispatch_calls = optimized_q4_dispatch_calls;
+      compare_record.shared_q4_dispatch_calls = shared_q4_dispatch_calls;
+      compare_record.optimized_q6_dispatch_calls = optimized_q6_dispatch_calls;
+      compare_record.shared_q6_dispatch_calls = shared_q6_dispatch_calls;
+      compare_record.native_quantized_stage_count =
+          native_quantized_stage_count;
+      compare_record.approved_dense_f32_stage_count =
+          approved_dense_f32_stage_count;
+      compare_record.disallowed_fallback_stage_count =
+          disallowed_fallback_stage_count;
+      compare_record.explicit_no_claim_stage_count =
+          explicit_no_claim_stage_count;
       compare_record.note = emel::tools::append_model_load_io_strategy_note(
           generation_case.manifest.comparability_note,
           prepared_fixture.emel.load.used_io_strategy);
@@ -3231,8 +3331,7 @@ void append_reference_generation_cases_for_current_benchmark_lane(
         compare_record.backend_id = "cpp.reference.llama_cpp";
         compare_record.backend_language = "cpp";
         compare_record.thread_count = generation_reference_thread_count();
-        compare_record.thread_contract =
-            generation_reference_thread_contract(compare_record.thread_count);
+        compare_record.thread_contract = generation_reference_thread_contract();
         compare_record.workload_id = generation_case.manifest.id;
         compare_record.workload_manifest_path =
             generation_case.manifest.workload_manifest_path;
@@ -3306,8 +3405,7 @@ void append_reference_generation_cases_for_current_benchmark_lane(
       compare_record.backend_id = "cpp.reference.llama_cpp";
       compare_record.backend_language = "cpp";
       compare_record.thread_count = generation_reference_thread_count();
-      compare_record.thread_contract =
-          generation_reference_thread_contract(compare_record.thread_count);
+      compare_record.thread_contract = generation_reference_thread_contract();
       compare_record.workload_id = generation_case.manifest.id;
       compare_record.workload_manifest_path =
           generation_case.manifest.workload_manifest_path;

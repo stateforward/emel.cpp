@@ -49,13 +49,26 @@ struct execution_view {
   int32_t block_count = 0;
 };
 
+using generation_residual_route = emel::model::generation_residual_route;
+using generation_attention_qk_norm_route =
+    emel::model::generation_attention_qk_norm_route;
+using generation_attention_value_route =
+    emel::model::generation_attention_value_route;
+using generation_attention_v_norm_route =
+    emel::model::generation_attention_v_norm_route;
+using generation_attention_window_route =
+    emel::model::generation_attention_window_route;
+
 struct generation_layer_execution {
-  bool uses_attention = true;
-  bool uses_shortconv = false;
-  bool requires_attention_qk_norm = false;
-  bool uses_shared_kv_value = false;
-  bool requires_attention_v_norm = false;
-  bool uses_sliding_attention = false;
+  generation_residual_route residual_route = generation_residual_route::attention;
+  generation_attention_qk_norm_route qk_norm_route =
+      generation_attention_qk_norm_route::none;
+  generation_attention_value_route value_route =
+      generation_attention_value_route::dedicated_value;
+  generation_attention_v_norm_route v_norm_route =
+      generation_attention_v_norm_route::none;
+  generation_attention_window_route window_route =
+      generation_attention_window_route::full_context;
   int32_t attention_key_length = 0;
   int32_t attention_value_length = 0;
   int32_t attention_rope_dim = 0;

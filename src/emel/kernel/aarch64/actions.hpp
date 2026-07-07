@@ -3320,246 +3320,6 @@ inline void dot_q4_k_x8_q8_k_group_bl8_neon(
 #endif
 }
 
-// i8mm variant of the bl8 x4 multi-RHS dot: each smmla consumes a packed
-// column pair against a distinct RHS row pair, so the q4 nibble unpack is
-// amortized across all four RHS rows and every mmla lane carries a live
-// result. Ported from the reference ggml_gemm_q4_K_8x8_q8_K NEON i8mm
-// arithmetic (per-subblock 6-bit scales applied in int32, per-block float
-// fold, bsums*mins bias), adapted to EMEL operands: separate block_q8_k RHS
-// rows (pair operands are built with vcombine) and pre-decoded min/scale
-// bytes in block_q4_kx8 instead of in-kernel 6-bit decode.
-inline void dot_q4_k_x8_q8_k_group_bl8_i8mm_x4(
-    const ::emel::kernel::detail::quant::block_q4_kx8 *lhs,
-    const ::emel::kernel::detail::quant::block_q8_k *rhs0,
-    const ::emel::kernel::detail::quant::block_q8_k *rhs1,
-    const ::emel::kernel::detail::quant::block_q8_k *rhs2,
-    const ::emel::kernel::detail::quant::block_q8_k *rhs3,
-    const uint64_t block_count, float *out0, float *out1, float *out2,
-    float *out3) noexcept {
-#if !(defined(__aarch64__) && defined(__ARM_NEON) &&                           \
-      defined(__ARM_FEATURE_MATMUL_INT8))
-  (void)lhs;
-  (void)rhs0;
-  (void)rhs1;
-  (void)rhs2;
-  (void)rhs3;
-  (void)block_count;
-  std::fill(out0, out0 + ::emel::kernel::detail::quant::Q4_K_X8_ROWS, 0.0f);
-  std::fill(out1, out1 + ::emel::kernel::detail::quant::Q4_K_X8_ROWS, 0.0f);
-  std::fill(out2, out2 + ::emel::kernel::detail::quant::Q4_K_X8_ROWS, 0.0f);
-  std::fill(out3, out3 + ::emel::kernel::detail::quant::Q4_K_X8_ROWS, 0.0f);
-#else
-  constexpr uint64_t col_pairs =
-      ::emel::kernel::detail::quant::Q4_K_X8_ROWS / 2u;
-  constexpr uint64_t rhs_rows = 4u;
-  constexpr uint64_t rhs_pairs = rhs_rows / 2u;
-  const uint8x16_t m4b = vdupq_n_u8(0x0fu);
-  const int32x4_t zero = vdupq_n_s32(0);
-  const std::array<const ::emel::kernel::detail::quant::block_q8_k *, rhs_rows>
-      rhs_rows_ptrs{
-          rhs0,
-          rhs1,
-          rhs2,
-          rhs3,
-      };
-  std::array<
-      std::array<float32x4_t, ::emel::kernel::detail::quant::Q4_K_X8_ROWS / 4u>,
-      rhs_rows>
-      acc_f32 = {};
-  for (auto &row_acc : acc_f32) {
-    for (auto &acc : row_acc) {
-      acc = vdupq_n_f32(0.0f);
-    }
-  }
-
-  for (uint64_t block = 0; block < block_count; ++block) {
-    const auto &q4_block = lhs[block];
-    const float32x4_t q4_d_0 = vcvt_f32_f16(
-        vld1_f16(reinterpret_cast<const __fp16 *>(q4_block.d.data())));
-    const float32x4_t q4_d_1 = vcvt_f32_f16(
-        vld1_f16(reinterpret_cast<const __fp16 *>(q4_block.d.data() + 4u)));
-    const float32x4_t q4_dmin_0 = vcvt_f32_f16(
-        vld1_f16(reinterpret_cast<const __fp16 *>(q4_block.dmin.data())));
-    const float32x4_t q4_dmin_1 = vcvt_f32_f16(
-        vld1_f16(reinterpret_cast<const __fp16 *>(q4_block.dmin.data() + 4u)));
-
-    std::array<std::array<float32x4_t, 2u>, rhs_rows> sb_scale = {};
-    std::array<std::array<float32x4_t, 2u>, rhs_rows> sb_min = {};
-    std::array<std::array<int32x4_t, 2u>, rhs_rows> bias_acc = {};
-    alignas(16) std::array<std::array<int16_t, 8u>, rhs_rows> bsums_array = {};
-
-    for (uint64_t rhs_row = 0; rhs_row < rhs_rows; ++rhs_row) {
-      const auto &q8_block = rhs_rows_ptrs[rhs_row][block];
-      const float32x4_t q8_d = vdupq_n_f32(q8_block.d);
-      sb_scale[rhs_row][0] = vmulq_f32(q4_d_0, q8_d);
-      sb_scale[rhs_row][1] = vmulq_f32(q4_d_1, q8_d);
-      sb_min[rhs_row][0] = vmulq_f32(q4_dmin_0, q8_d);
-      sb_min[rhs_row][1] = vmulq_f32(q4_dmin_1, q8_d);
-      bias_acc[rhs_row][0] = vdupq_n_s32(0);
-      bias_acc[rhs_row][1] = vdupq_n_s32(0);
-      const int16x8_t bsums = vpaddq_s16(vld1q_s16(q8_block.bsums.data()),
-                                         vld1q_s16(q8_block.bsums.data() + 8u));
-      vst1q_s16(bsums_array[rhs_row].data(), bsums);
-    }
-
-    // mmla-layout int accumulators: acc_mm[cp][rp] lanes are
-    // {c(2cp)*rA, c(2cp)*rB, c(2cp+1)*rA, c(2cp+1)*rB} with the per-subblock
-    // 6-bit scales already applied in int32 (exact; bounded well below
-    // int32 range for QK_K blocks).
-    std::array<std::array<int32x4_t, rhs_pairs>, col_pairs> acc_mm = {};
-    for (auto &cp_acc : acc_mm) {
-      for (auto &acc : cp_acc) {
-        acc = zero;
-      }
-    }
-
-    for (uint64_t sb = 0; sb < (::emel::kernel::detail::quant::QK_K / 64u);
-         ++sb) {
-      std::array<int16x8_t, 2> q4sb_mins = {};
-      std::array<int16x8_t, 2> q4sb_scales = {};
-      for (uint64_t half = 0; half < 2u; ++half) {
-        const uint8_t *prepared =
-            q4_block.scales.data() +
-            ((sb * 2u + half) * ::emel::kernel::detail::quant::Q4_K_X8_ROWS *
-             2u);
-        q4sb_mins[half] = vreinterpretq_s16_u16(vmovl_u8(vld1_u8(prepared)));
-        q4sb_scales[half] = vreinterpretq_s16_u16(vmovl_u8(
-            vld1_u8(prepared + ::emel::kernel::detail::quant::Q4_K_X8_ROWS)));
-      }
-
-      // Per-column-pair int32 scale vectors {s(2cp), s(2cp), s(2cp+1),
-      // s(2cp+1)} for the low and high value halves of the subblock.
-      const int32x4_t s_lo_0 = vmovl_s16(vget_low_s16(q4sb_scales[0]));
-      const int32x4_t s_lo_1 = vmovl_s16(vget_high_s16(q4sb_scales[0]));
-      const int32x4_t s_hi_0 = vmovl_s16(vget_low_s16(q4sb_scales[1]));
-      const int32x4_t s_hi_1 = vmovl_s16(vget_high_s16(q4sb_scales[1]));
-      const std::array<int32x4_t, col_pairs> block_scale_lo{
-          vzip1q_s32(s_lo_0, s_lo_0),
-          vzip2q_s32(s_lo_0, s_lo_0),
-          vzip1q_s32(s_lo_1, s_lo_1),
-          vzip2q_s32(s_lo_1, s_lo_1),
-      };
-      const std::array<int32x4_t, col_pairs> block_scale_hi{
-          vzip1q_s32(s_hi_0, s_hi_0),
-          vzip2q_s32(s_hi_0, s_hi_0),
-          vzip1q_s32(s_hi_1, s_hi_1),
-          vzip2q_s32(s_hi_1, s_hi_1),
-      };
-
-      // RHS pair operands: [rowA 8 values | rowB 8 values] per 8-value
-      // K-segment, low half (values 0..31) and high half (values 32..63).
-      std::array<std::array<int8x16_t, 4u>, rhs_pairs> rhs_lo = {};
-      std::array<std::array<int8x16_t, 4u>, rhs_pairs> rhs_hi = {};
-      for (uint64_t rp = 0; rp < rhs_pairs; ++rp) {
-        const int8_t *qa = rhs_rows_ptrs[rp * 2u][block].qs.data() + sb * 64u;
-        const int8_t *qb =
-            rhs_rows_ptrs[rp * 2u + 1u][block].qs.data() + sb * 64u;
-        for (uint64_t t = 0; t < 2u; ++t) {
-          const int8x16_t qa_lo = vld1q_s8(qa + 16u * t);
-          const int8x16_t qb_lo = vld1q_s8(qb + 16u * t);
-          rhs_lo[rp][2u * t] =
-              vcombine_s8(vget_low_s8(qa_lo), vget_low_s8(qb_lo));
-          rhs_lo[rp][2u * t + 1u] =
-              vcombine_s8(vget_high_s8(qa_lo), vget_high_s8(qb_lo));
-          const int8x16_t qa_hi = vld1q_s8(qa + 32u + 16u * t);
-          const int8x16_t qb_hi = vld1q_s8(qb + 32u + 16u * t);
-          rhs_hi[rp][2u * t] =
-              vcombine_s8(vget_low_s8(qa_hi), vget_low_s8(qb_hi));
-          rhs_hi[rp][2u * t + 1u] =
-              vcombine_s8(vget_high_s8(qa_hi), vget_high_s8(qb_hi));
-        }
-      }
-
-      const uint8_t *q4_base =
-          q4_block.qs.data() + sb * ::emel::kernel::detail::quant::QK_K;
-      for (uint64_t cp = 0; cp < col_pairs; ++cp) {
-        const uint8x16_t q4_qs_0 = vld1q_u8(q4_base + 16u * cp);
-        const uint8x16_t q4_qs_1 = vld1q_u8(q4_base + 16u * cp + 64u);
-        const uint8x16_t q4_qs_2 = vld1q_u8(q4_base + 16u * cp + 128u);
-        const uint8x16_t q4_qs_3 = vld1q_u8(q4_base + 16u * cp + 192u);
-        const std::array<int8x16_t, 4u> lo_nib{
-            vreinterpretq_s8_u8(vandq_u8(q4_qs_0, m4b)),
-            vreinterpretq_s8_u8(vandq_u8(q4_qs_1, m4b)),
-            vreinterpretq_s8_u8(vandq_u8(q4_qs_2, m4b)),
-            vreinterpretq_s8_u8(vandq_u8(q4_qs_3, m4b)),
-        };
-        const std::array<int8x16_t, 4u> hi_nib{
-            vreinterpretq_s8_u8(vshrq_n_u8(q4_qs_0, 4)),
-            vreinterpretq_s8_u8(vshrq_n_u8(q4_qs_1, 4)),
-            vreinterpretq_s8_u8(vshrq_n_u8(q4_qs_2, 4)),
-            vreinterpretq_s8_u8(vshrq_n_u8(q4_qs_3, 4)),
-        };
-
-        for (uint64_t rp = 0; rp < rhs_pairs; ++rp) {
-          int32x4_t sb_acc_lo = vmmlaq_s32(zero, lo_nib[0], rhs_lo[rp][0]);
-          sb_acc_lo = vmmlaq_s32(sb_acc_lo, lo_nib[1], rhs_lo[rp][1]);
-          sb_acc_lo = vmmlaq_s32(sb_acc_lo, lo_nib[2], rhs_lo[rp][2]);
-          sb_acc_lo = vmmlaq_s32(sb_acc_lo, lo_nib[3], rhs_lo[rp][3]);
-          int32x4_t sb_acc_hi = vmmlaq_s32(zero, hi_nib[0], rhs_hi[rp][0]);
-          sb_acc_hi = vmmlaq_s32(sb_acc_hi, hi_nib[1], rhs_hi[rp][1]);
-          sb_acc_hi = vmmlaq_s32(sb_acc_hi, hi_nib[2], rhs_hi[rp][2]);
-          sb_acc_hi = vmmlaq_s32(sb_acc_hi, hi_nib[3], rhs_hi[rp][3]);
-          acc_mm[cp][rp] =
-              vmlaq_s32(acc_mm[cp][rp], sb_acc_lo, block_scale_lo[cp]);
-          acc_mm[cp][rp] =
-              vmlaq_s32(acc_mm[cp][rp], sb_acc_hi, block_scale_hi[cp]);
-        }
-      }
-
-      for (uint64_t rhs_row = 0; rhs_row < rhs_rows; ++rhs_row) {
-        const int16x4_t bsums_vec_lo =
-            vdup_n_s16(bsums_array[rhs_row][2u * sb + 0u]);
-        const int16x4_t bsums_vec_hi =
-            vdup_n_s16(bsums_array[rhs_row][2u * sb + 1u]);
-        bias_acc[rhs_row][0] = vmlal_s16(bias_acc[rhs_row][0], bsums_vec_lo,
-                                         vget_low_s16(q4sb_mins[0]));
-        bias_acc[rhs_row][0] = vmlal_s16(bias_acc[rhs_row][0], bsums_vec_hi,
-                                         vget_low_s16(q4sb_mins[1]));
-        bias_acc[rhs_row][1] = vmlal_s16(bias_acc[rhs_row][1], bsums_vec_lo,
-                                         vget_high_s16(q4sb_mins[0]));
-        bias_acc[rhs_row][1] = vmlal_s16(bias_acc[rhs_row][1], bsums_vec_hi,
-                                         vget_high_s16(q4sb_mins[1]));
-      }
-    }
-
-    for (uint64_t rp = 0; rp < rhs_pairs; ++rp) {
-      const uint64_t row_a = rp * 2u;
-      const uint64_t row_b = row_a + 1u;
-      const int32x4_t a_cols_0 = vuzp1q_s32(acc_mm[0][rp], acc_mm[1][rp]);
-      const int32x4_t a_cols_1 = vuzp1q_s32(acc_mm[2][rp], acc_mm[3][rp]);
-      const int32x4_t b_cols_0 = vuzp2q_s32(acc_mm[0][rp], acc_mm[1][rp]);
-      const int32x4_t b_cols_1 = vuzp2q_s32(acc_mm[2][rp], acc_mm[3][rp]);
-      acc_f32[row_a][0] = vfmaq_f32(acc_f32[row_a][0], vcvtq_f32_s32(a_cols_0),
-                                    sb_scale[row_a][0]);
-      acc_f32[row_a][1] = vfmaq_f32(acc_f32[row_a][1], vcvtq_f32_s32(a_cols_1),
-                                    sb_scale[row_a][1]);
-      acc_f32[row_b][0] = vfmaq_f32(acc_f32[row_b][0], vcvtq_f32_s32(b_cols_0),
-                                    sb_scale[row_b][0]);
-      acc_f32[row_b][1] = vfmaq_f32(acc_f32[row_b][1], vcvtq_f32_s32(b_cols_1),
-                                    sb_scale[row_b][1]);
-    }
-
-    for (uint64_t rhs_row = 0; rhs_row < rhs_rows; ++rhs_row) {
-      acc_f32[rhs_row][0] =
-          vmlsq_f32(acc_f32[rhs_row][0], vcvtq_f32_s32(bias_acc[rhs_row][0]),
-                    sb_min[rhs_row][0]);
-      acc_f32[rhs_row][1] =
-          vmlsq_f32(acc_f32[rhs_row][1], vcvtq_f32_s32(bias_acc[rhs_row][1]),
-                    sb_min[rhs_row][1]);
-    }
-  }
-
-  vst1q_f32(out0, acc_f32[0][0]);
-  vst1q_f32(out0 + 4u, acc_f32[0][1]);
-  vst1q_f32(out1, acc_f32[1][0]);
-  vst1q_f32(out1 + 4u, acc_f32[1][1]);
-  vst1q_f32(out2, acc_f32[2][0]);
-  vst1q_f32(out2 + 4u, acc_f32[2][1]);
-  vst1q_f32(out3, acc_f32[3][0]);
-  vst1q_f32(out3 + 4u, acc_f32[3][1]);
-#endif
-}
-
 inline void dot_q4_k_x8_q8_k_group_bl8_x4_neon(
     const ::emel::kernel::detail::quant::block_q4_kx8 *lhs,
     const ::emel::kernel::detail::quant::block_q8_k *rhs0,
@@ -3574,10 +3334,9 @@ inline void dot_q4_k_x8_q8_k_group_bl8_x4_neon(
   dot_q4_k_x8_q8_k_group_bl8_neon(lhs, rhs1, block_count, out1);
   dot_q4_k_x8_q8_k_group_bl8_neon(lhs, rhs2, block_count, out2);
   dot_q4_k_x8_q8_k_group_bl8_neon(lhs, rhs3, block_count, out3);
-#elif defined(__ARM_FEATURE_MATMUL_INT8)
-  dot_q4_k_x8_q8_k_group_bl8_i8mm_x4(lhs, rhs0, rhs1, rhs2, rhs3, block_count,
-                                     out0, out1, out2, out3);
 #else
+  // Keep q4 chunked generation on the dotprod tile even when i8mm is present:
+  // the fused q4 i8mm multi-RHS tile is not Qwen3-4B generation-parity safe.
   constexpr uint64_t col_pairs =
       ::emel::kernel::detail::quant::Q4_K_X8_ROWS / 2u;
   constexpr uint64_t rhs_rows = 4u;
@@ -3771,14 +3530,9 @@ inline void dot_q4_k_x8_q8_k_group_bl8_x8_neon(
   dot_q4_k_x8_q8_k_group_bl8_neon(lhs, rhs5, block_count, out5);
   dot_q4_k_x8_q8_k_group_bl8_neon(lhs, rhs6, block_count, out6);
   dot_q4_k_x8_q8_k_group_bl8_neon(lhs, rhs7, block_count, out7);
-#elif defined(__ARM_FEATURE_MATMUL_INT8)
-  // Two 4-RHS-row i8mm tiles: mirrors the reference gemm tiling (4 activation
-  // rows per pass) while keeping register pressure bounded.
-  dot_q4_k_x8_q8_k_group_bl8_i8mm_x4(lhs, rhs0, rhs1, rhs2, rhs3, block_count,
-                                     out0, out1, out2, out3);
-  dot_q4_k_x8_q8_k_group_bl8_i8mm_x4(lhs, rhs4, rhs5, rhs6, rhs7, block_count,
-                                     out4, out5, out6, out7);
 #else
+  // Keep q4 chunked generation on the dotprod tile even when i8mm is present:
+  // the fused q4 i8mm multi-RHS tile is not Qwen3-4B generation-parity safe.
   constexpr uint64_t col_pairs =
       ::emel::kernel::detail::quant::Q4_K_X8_ROWS / 2u;
   constexpr uint64_t rhs_rows = ::emel::kernel::detail::quant::Q4_K_X8_ROWS;
@@ -9245,7 +8999,6 @@ using exec_scalar_op_mul_mat_f16_t =
     ::emel::kernel::detail::exec_scalar_mul_mat_f16_op<
         ::emel::kernel::aarch64::event::dispatch_op_mul_mat, context,
         detail::mark_done_op>;
-
 template <uint8_t src_dtype_code>
 using exec_scalar_op_get_rows_src_t =
     ::emel::kernel::detail::exec_scalar_get_rows_op<

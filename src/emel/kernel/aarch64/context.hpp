@@ -3,6 +3,7 @@
 #include <cstdint>
 
 #include "emel/kernel/detail.hpp"
+#include "emel/kernel/events.hpp"
 
 namespace emel::kernel::aarch64::action {
 

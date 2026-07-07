@@ -1442,6 +1442,12 @@ TEST_CASE("bench_runner generation jsonl emits manifest-driven workload "
         std::string::npos);
   CHECK(emel_capture.stdout_text.find("\"tokens_per_second\":") !=
         std::string::npos);
+  CHECK(emel_capture.stdout_text.find("\"kernel_dispatch_calls\":") !=
+        std::string::npos);
+  CHECK(emel_capture.stdout_text.find(
+            "\"flash_attention_dispatch_calls\":") != std::string::npos);
+  CHECK(emel_capture.stdout_text.find(
+            "\"native_quantized_stage_count\":") != std::string::npos);
   const std::filesystem::path gemma4_fixture_path =
       repo_root() / "tests" / "models" / "gemma-4-e2b-it-Q8_0.gguf";
   if (std::filesystem::exists(gemma4_fixture_path)) {
@@ -1452,6 +1458,8 @@ TEST_CASE("bench_runner generation jsonl emits manifest-driven workload "
           std::string::npos);
   }
   CHECK(emel_capture.stdout_text.find("\"output_path\":\"") !=
+        std::string::npos);
+  CHECK(emel_capture.stdout_text.find("\"output_token_ids_path\":\"") !=
         std::string::npos);
   CHECK(emel_capture.stdout_text.find("ns/op,") == std::string::npos);
 
@@ -1494,11 +1502,15 @@ TEST_CASE("bench_runner generation jsonl emits manifest-driven workload "
         std::string::npos);
   CHECK(reference_capture.stdout_text.find("\"tokens_per_second\":") !=
         std::string::npos);
+  CHECK(reference_capture.stdout_text.find("\"kernel_dispatch_calls\":0") !=
+        std::string::npos);
   CHECK(reference_capture.stdout_text.find(
             "\"comparison_mode\":\"single_lane\"") == std::string::npos);
   CHECK(reference_capture.stdout_text.find("\"formatter_contract\":\"") !=
         std::string::npos);
   CHECK(reference_capture.stdout_text.find("\"output_path\":\"") !=
+        std::string::npos);
+  CHECK(reference_capture.stdout_text.find("\"output_token_ids_path\":\"") !=
         std::string::npos);
   CHECK(reference_capture.stdout_text.find("ns/op,") == std::string::npos);
 }

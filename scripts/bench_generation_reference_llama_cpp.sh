@@ -7,6 +7,8 @@ BUILD_DIR="${EMEL_GENERATION_REFERENCE_BUILD_DIR:-$ROOT_DIR/build/bench_tools_ni
 BUILD_ONLY=false
 RUN_ONLY=false
 REFERENCE_THREADS=""
+REFERENCE_DECODE_THREADS="${EMEL_BENCH_GENERATION_REFERENCE_DECODE_THREADS:-}"
+REFERENCE_BATCH_THREADS="${EMEL_BENCH_GENERATION_REFERENCE_BATCH_THREADS:-}"
 BENCHMARK_LANE_SELECTOR="${EMEL_BENCH_GENERATION_LANE:-${EMEL_BENCH_GENERATION_LANES:-both}}"
 USE_ZIG=true
 case "${EMEL_GENERATION_REFERENCE_COMPILER_MODE:-}" in
@@ -26,7 +28,7 @@ esac
 
 usage() {
   cat <<'USAGE'
-usage: scripts/bench_generation_reference_llama_cpp.sh [--build-only] [--run-only] [--reference-threads N] [--benchmark-lane single|multithreaded|both] [--zig|--system]
+usage: scripts/bench_generation_reference_llama_cpp.sh [--build-only] [--run-only] [--reference-threads N] [--reference-decode-threads N] [--reference-batch-threads N] [--benchmark-lane single|multithreaded|both] [--zig|--system]
 
 Configures the maintained bench build and runs the built-in llama.cpp reference
 generation lane through `bench_runner --mode=reference`.
@@ -35,10 +37,21 @@ Environment:
   EMEL_GENERATION_REFERENCE_BUILD_DIR  override build directory
   EMEL_GENERATION_REFERENCE_COMPILER_MODE zig or system default compiler mode
   EMEL_BENCH_GENERATION_LANES          single, multithreaded, or both (default both)
-  EMEL_BENCH_GENERATION_REFERENCE_THREADS multithreaded llama.cpp generation threads
+  EMEL_BENCH_GENERATION_REFERENCE_THREADS legacy default for llama.cpp decode and batch threads
+  EMEL_BENCH_GENERATION_REFERENCE_DECODE_THREADS llama.cpp n_threads override
+  EMEL_BENCH_GENERATION_REFERENCE_BATCH_THREADS llama.cpp n_threads_batch override
   BENCH_REF_OVERRIDE                   override fetched llama.cpp ref
   EMEL_BENCH_SUITE                     defaults to generation for this wrapper
 USAGE
+}
+
+validate_positive_integer() {
+  local name="$1"
+  local value="$2"
+  if [[ -n "$value" && ! "$value" =~ ^[1-9][0-9]*$ ]]; then
+    echo "error: $name must be a positive integer" >&2
+    exit 1
+  fi
 }
 
 while [[ $# -gt 0 ]]; do
@@ -53,6 +66,14 @@ while [[ $# -gt 0 ]]; do
       ;;
     --reference-threads)
       REFERENCE_THREADS="${2:-}"
+      shift 2
+      ;;
+    --reference-decode-threads)
+      REFERENCE_DECODE_THREADS="${2:-}"
+      shift 2
+      ;;
+    --reference-batch-threads)
+      REFERENCE_BATCH_THREADS="${2:-}"
       shift 2
       ;;
     --benchmark-lane)
@@ -92,12 +113,9 @@ if $BUILD_ONLY && $RUN_ONLY; then
   exit 1
 fi
 
-if [[ -n "$REFERENCE_THREADS" ]]; then
-  if [[ ! "$REFERENCE_THREADS" =~ ^[1-9][0-9]*$ ]]; then
-    echo "error: --reference-threads must be a positive integer" >&2
-    exit 1
-  fi
-fi
+validate_positive_integer "--reference-threads" "$REFERENCE_THREADS"
+validate_positive_integer "--reference-decode-threads" "$REFERENCE_DECODE_THREADS"
+validate_positive_integer "--reference-batch-threads" "$REFERENCE_BATCH_THREADS"
 
 selected_lanes=()
 case "$BENCHMARK_LANE_SELECTOR" in
@@ -200,8 +218,12 @@ for benchmark_lane in "${selected_lanes[@]}"; do
   elif [[ -z "$lane_reference_threads" ]]; then
     lane_reference_threads="${EMEL_BENCH_GENERATION_REFERENCE_THREADS:-${EMEL_BENCH_REFERENCE_THREADS:-8}}"
   fi
+  lane_reference_decode_threads="${REFERENCE_DECODE_THREADS:-$lane_reference_threads}"
+  lane_reference_batch_threads="${REFERENCE_BATCH_THREADS:-$lane_reference_threads}"
 
   EMEL_BENCH_GENERATION_LANE="$benchmark_lane" \
     EMEL_BENCH_GENERATION_REFERENCE_THREADS="$lane_reference_threads" \
+    EMEL_BENCH_GENERATION_REFERENCE_DECODE_THREADS="$lane_reference_decode_threads" \
+    EMEL_BENCH_GENERATION_REFERENCE_BATCH_THREADS="$lane_reference_batch_threads" \
     "$BUILD_DIR/bench_runner" --mode=reference
 done

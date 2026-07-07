@@ -96,6 +96,8 @@ using tokenizer_tokenize_dispatch_fn =
 
 struct compute_io {
   void * backend_ctx = nullptr;
+  emel::text::generator::attention_mode selected_attention_mode =
+      emel::text::generator::attention_mode::nonflash;
   const int32_t * token_ids = nullptr;
   int32_t token_count = 0;
   float * logits = nullptr;
@@ -212,6 +214,7 @@ struct generate {
   bool enable_thinking = false;
   int32_t max_tokens = 0;
   std::span<char> output = {};
+  std::span<int32_t> generated_token_ids_out = {};
   size_t & output_length_out;
   emel::error::type * error_out = nullptr;
   emel::callback<void(const events::generation_done &)> on_done = {};

@@ -99,9 +99,10 @@ includes both:
 - `generation/preloaded_request/lfm2_5_1_2b_thinking_q4_k_m_prompt_hello_max_tokens_1`
 
 Generated generation compare rows run two benchmark lanes by default: `single` and
-`multithreaded`. The `single` lane reports one EMEL serial matmul lane and one llama.cpp thread.
-The `multithreaded` lane reports EMEL's bounded parallel matmul lane pool (`thread_count=8`) and
-defaults the llama.cpp reference to `n_threads=8,n_threads_batch=8` unless explicitly overridden.
+`multithreaded`. The `single` lane reports one EMEL serial matmul lane and a llama.cpp
+`n_threads=1,n_threads_batch=1` reference by default. The `multithreaded` lane reports EMEL's
+bounded parallel matmul lane pool (`thread_count=8`) and defaults the llama.cpp reference to
+`n_threads=8,n_threads_batch=8` unless explicitly overridden.
 Preserved rows keep their previous snapshot provenance and are not covered by the current threading
 metadata. Use `EMEL_BENCH_GENERATION_LANE=single` or
 `EMEL_BENCH_GENERATION_LANE=multithreaded` when a run must explicitly opt out of one lane.
@@ -337,6 +338,10 @@ the canonical generation case has its own bounded local validation knobs:
 - `EMEL_BENCH_GENERATION_WARMUP_RUNS` overrides warmup run count for the generation case only.
 - `EMEL_BENCH_GENERATION_REFERENCE_THREADS` overrides the llama.cpp generation lane thread count
   for sensitivity runs. The default is half the host hardware thread count.
+- `EMEL_BENCH_GENERATION_REFERENCE_DECODE_THREADS` overrides only llama.cpp `n_threads` for
+  sensitivity runs.
+- `EMEL_BENCH_GENERATION_REFERENCE_BATCH_THREADS` overrides only llama.cpp `n_threads_batch` for
+  sensitivity runs.
 - `EMEL_BENCH_REFERENCE_THREADS` remains accepted as the legacy generation-reference override when
   the generation-specific variable is unset.
 

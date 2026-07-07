@@ -2470,11 +2470,14 @@ TEST_CASE("model_llama_detail_describes_qwen3_generation_norm_requirements") {
 
   CHECK(descriptor.execution == &view);
   CHECK(descriptor.layer_count == 1u);
-  CHECK(descriptor.layers[0].uses_attention);
-  CHECK_FALSE(descriptor.layers[0].uses_shortconv);
-  CHECK(descriptor.layers[0].requires_attention_qk_norm);
-  CHECK_FALSE(descriptor.layers[0].uses_shared_kv_value);
-  CHECK_FALSE(descriptor.layers[0].requires_attention_v_norm);
+  CHECK(descriptor.layers[0].residual_route ==
+        emel::model::llama::detail::generation_residual_route::attention);
+  CHECK(descriptor.layers[0].qk_norm_route ==
+        emel::model::llama::detail::generation_attention_qk_norm_route::headwise_rms);
+  CHECK(descriptor.layers[0].value_route ==
+        emel::model::llama::detail::generation_attention_value_route::dedicated_value);
+  CHECK(descriptor.layers[0].v_norm_route ==
+        emel::model::llama::detail::generation_attention_v_norm_route::none);
 }
 
 TEST_CASE("model_llama_detail_rejects_qwen3_execution_view_without_attention_q_"
@@ -2580,11 +2583,12 @@ TEST_CASE("model_llama_detail_describes_lfm2_hybrid_generation_layers") {
           emel::error::cast(emel::model::loader::error::none));
 
   CHECK(descriptor.layer_count == 16u);
-  CHECK_FALSE(descriptor.layers[0].uses_attention);
-  CHECK(descriptor.layers[0].uses_shortconv);
-  CHECK(descriptor.layers[2].uses_attention);
-  CHECK_FALSE(descriptor.layers[2].uses_shortconv);
-  CHECK(descriptor.layers[2].requires_attention_qk_norm);
+  CHECK(descriptor.layers[0].residual_route ==
+        emel::model::llama::detail::generation_residual_route::shortconv);
+  CHECK(descriptor.layers[2].residual_route ==
+        emel::model::llama::detail::generation_residual_route::attention);
+  CHECK(descriptor.layers[2].qk_norm_route ==
+        emel::model::llama::detail::generation_attention_qk_norm_route::headwise_rms);
 }
 
 TEST_CASE(
@@ -3564,20 +3568,26 @@ TEST_CASE("model_llama_detail_describes_gemma4_sliding_and_shared_kv_layers") {
           emel::error::cast(emel::model::loader::error::none));
 
   CHECK(descriptor.layer_count == 35u);
-  CHECK(descriptor.layers[0].uses_sliding_attention);
+  CHECK(descriptor.layers[0].window_route ==
+        emel::model::llama::detail::generation_attention_window_route::sliding_window);
   CHECK(descriptor.layers[0].attention_key_length == 256);
   CHECK(descriptor.layers[0].attention_value_length == 256);
   CHECK(descriptor.layers[0].attention_rope_dim == 256);
   CHECK(descriptor.layers[0].attention_rope_freq_base == doctest::Approx(10000.0f));
-  CHECK_FALSE(descriptor.layers[4].uses_sliding_attention);
+  CHECK(descriptor.layers[4].window_route ==
+        emel::model::llama::detail::generation_attention_window_route::full_context);
   CHECK(descriptor.layers[4].attention_key_length == 512);
   CHECK(descriptor.layers[4].attention_value_length == 512);
   CHECK(descriptor.layers[4].attention_rope_dim == 512);
   CHECK(descriptor.layers[4].attention_rope_freq_base == doctest::Approx(1000000.0f));
-  CHECK_FALSE(descriptor.layers[14].uses_shared_kv_value);
-  CHECK_FALSE(descriptor.layers[14].requires_attention_v_norm);
-  CHECK(descriptor.layers[15].uses_shared_kv_value);
-  CHECK(descriptor.layers[15].requires_attention_v_norm);
+  CHECK(descriptor.layers[14].value_route ==
+        emel::model::llama::detail::generation_attention_value_route::dedicated_value);
+  CHECK(descriptor.layers[14].v_norm_route ==
+        emel::model::llama::detail::generation_attention_v_norm_route::none);
+  CHECK(descriptor.layers[15].value_route ==
+        emel::model::llama::detail::generation_attention_value_route::shared_key_value);
+  CHECK(descriptor.layers[15].v_norm_route ==
+        emel::model::llama::detail::generation_attention_v_norm_route::rms);
 }
 
 TEST_CASE("model_llama_detail_builds_gemma4_topology_with_shared_kv_tail_"

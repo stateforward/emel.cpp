@@ -469,9 +469,30 @@ void print_generation_jsonl(const std::vector<bench::result> &results) {
     record.output_tokens = entry.output_tokens;
     record.output_bytes = entry.output_bytes;
     record.output_checksum = entry.output_checksum;
+    record.kernel_dispatch_calls = entry.kernel_dispatch_calls;
+    record.flash_attention_dispatch_calls =
+        entry.flash_attention_dispatch_calls;
+    record.optimized_flash_dispatch_calls =
+        entry.optimized_flash_dispatch_calls;
+    record.shared_flash_dispatch_calls = entry.shared_flash_dispatch_calls;
+    record.native_q8_0_dispatch_calls = entry.native_q8_0_dispatch_calls;
+    record.packed_q8_0_dispatch_calls = entry.packed_q8_0_dispatch_calls;
+    record.optimized_q4_dispatch_calls = entry.optimized_q4_dispatch_calls;
+    record.shared_q4_dispatch_calls = entry.shared_q4_dispatch_calls;
+    record.optimized_q6_dispatch_calls = entry.optimized_q6_dispatch_calls;
+    record.shared_q6_dispatch_calls = entry.shared_q6_dispatch_calls;
+    record.native_quantized_stage_count =
+        entry.native_quantized_stage_count;
+    record.approved_dense_f32_stage_count =
+        entry.approved_dense_f32_stage_count;
+    record.disallowed_fallback_stage_count =
+        entry.disallowed_fallback_stage_count;
+    record.explicit_no_claim_stage_count =
+        entry.explicit_no_claim_stage_count;
     record.iterations = entry.iterations;
     record.runs = entry.runs;
     record.output_text = entry.output_text;
+    record.output_token_ids_text = entry.output_token_ids_text;
     record.note = entry.note;
     record.error_kind = entry.error_kind;
     record.error_message = entry.error_message;

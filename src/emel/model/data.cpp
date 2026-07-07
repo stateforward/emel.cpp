@@ -627,14 +627,23 @@ emel::error::type build_generation_execution_descriptor(
         (block.uses_attention &&
          block.attention_v.tensor == block.attention_k.tensor);
     auto &layer = descriptor_out.layers[static_cast<size_t>(block_index)];
-    layer.uses_attention = block.uses_attention;
-    layer.uses_shortconv = !block.uses_attention;
-    layer.requires_attention_qk_norm =
-        block.uses_attention && block.attention_q_norm.tensor != nullptr &&
-        block.attention_k_norm.tensor != nullptr;
-    layer.uses_shared_kv_value = shared_kv_value;
-    layer.requires_attention_v_norm = shared_kv_value;
-    layer.uses_sliding_attention = sliding_attention;
+    layer.residual_route = block.uses_attention
+                               ? generation_residual_route::attention
+                               : generation_residual_route::shortconv;
+    layer.qk_norm_route = block.uses_attention &&
+                                  block.attention_q_norm.tensor != nullptr &&
+                                  block.attention_k_norm.tensor != nullptr
+                              ? generation_attention_qk_norm_route::headwise_rms
+                              : generation_attention_qk_norm_route::none;
+    layer.value_route = shared_kv_value
+                            ? generation_attention_value_route::shared_key_value
+                            : generation_attention_value_route::dedicated_value;
+    layer.v_norm_route = shared_kv_value
+                             ? generation_attention_v_norm_route::rms
+                             : generation_attention_v_norm_route::none;
+    layer.window_route = sliding_attention
+                             ? generation_attention_window_route::sliding_window
+                             : generation_attention_window_route::full_context;
     layer.attention_key_length =
         sliding_attention && model_data.params.attention_key_length_swa > 0
             ? model_data.params.attention_key_length_swa

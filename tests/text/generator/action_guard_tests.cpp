@@ -150,7 +150,8 @@ struct chunk4_planning_backend_fixture {
     matrix.dims[1] = 4;
 
     auto &block = backend.blocks.emplace_back();
-    block.uses_attention = true;
+    block.residual_route =
+        emel::model::llama::detail::generation_residual_route::attention;
     block.attention_q = {&matrix, 4, 4};
     block.attention_k = {&matrix, 4, 4};
     block.attention_v = {&matrix, 4, 4};
@@ -212,7 +213,8 @@ struct native_quantized_route_fixture {
     logits_tensor.dims[1] = backend.n_embd;
 
     auto &block = backend.blocks.emplace_back();
-    block.uses_attention = true;
+    block.residual_route =
+        emel::model::llama::detail::generation_residual_route::attention;
     block.attention_q = {&body_tensor, backend.n_embd, backend.n_embd};
     block.attention_k = {&body_tensor, backend.n_embd, backend.n_embd};
     block.attention_v = {&body_tensor, backend.n_embd, backend.n_embd};
@@ -1442,6 +1444,32 @@ TEST_CASE("generator core actions cover reset, decode, and fallback channels") {
   emel::text::generator::action::
       request_decode_compute_flash_native_quantized_q8_k_logits(generate_run,
                                                                 context);
+  emel::text::generator::action::request_decode_compute_flash_kernel_streamed(
+      generate_run, context);
+  emel::text::generator::action::
+      request_decode_compute_flash_packed_q8_0_streamed(generate_run, context);
+  emel::text::generator::action::request_decode_compute_flash_q8_k_streamed(
+      generate_run, context);
+  emel::text::generator::action::
+      request_decode_compute_flash_native_quantized_streamed(generate_run,
+                                                             context);
+  emel::text::generator::action::
+      request_decode_compute_flash_native_quantized_q8_k_logits_streamed(
+          generate_run, context);
+  emel::text::generator::action::
+      request_decode_compute_flash_parallel_kernel(generate_run, context);
+  emel::text::generator::action::
+      request_decode_compute_flash_parallel_packed_q8_0(generate_run, context);
+  emel::text::generator::action::request_decode_compute_flash_parallel_q8_k(
+      generate_run, context);
+  emel::text::generator::action::
+      request_decode_compute_flash_parallel_native_quantized(generate_run,
+                                                             context);
+  emel::text::generator::action::
+      request_decode_compute_flash_parallel_native_quantized_q8_k_logits(
+          generate_run, context);
+  CHECK(generate_ctx.io.selected_attention_mode ==
+        emel::text::generator::attention_mode::flash);
   emel::text::generator::action::request_decode_compute_nonflash_kernel(
       generate_run, context);
   emel::text::generator::action::request_decode_compute_nonflash_packed_q8_0(
@@ -1453,6 +1481,21 @@ TEST_CASE("generator core actions cover reset, decode, and fallback channels") {
   emel::text::generator::action::
       request_decode_compute_nonflash_native_quantized_q8_k_logits(generate_run,
                                                                    context);
+  emel::text::generator::action::request_decode_compute_nonflash_kernel_streamed(
+      generate_run, context);
+  emel::text::generator::action::
+      request_decode_compute_nonflash_packed_q8_0_streamed(generate_run,
+                                                           context);
+  emel::text::generator::action::request_decode_compute_nonflash_q8_k_streamed(
+      generate_run, context);
+  emel::text::generator::action::
+      request_decode_compute_nonflash_native_quantized_streamed(generate_run,
+                                                                context);
+  emel::text::generator::action::
+      request_decode_compute_nonflash_native_quantized_q8_k_logits_streamed(
+          generate_run, context);
+  CHECK(generate_ctx.io.selected_attention_mode ==
+        emel::text::generator::attention_mode::nonflash);
   emel::text::generator::action::
       request_decode_compute_flash_preselected_argmax_kernel(generate_run,
                                                              context);
@@ -1466,6 +1509,32 @@ TEST_CASE("generator core actions cover reset, decode, and fallback channels") {
       request_decode_compute_flash_preselected_argmax_native_quantized_kernel(
           generate_run, context);
   emel::text::generator::action::
+      request_decode_compute_flash_preselected_argmax_kernel_streamed(
+          generate_run, context);
+  emel::text::generator::action::
+      request_decode_compute_flash_preselected_argmax_q8_k_streamed(
+          generate_run, context);
+  emel::text::generator::action::
+      request_decode_compute_flash_preselected_argmax_native_quantized_q8_k_streamed(
+          generate_run, context);
+  emel::text::generator::action::
+      request_decode_compute_flash_preselected_argmax_native_quantized_kernel_streamed(
+          generate_run, context);
+  emel::text::generator::action::
+      request_decode_compute_flash_parallel_preselected_argmax_kernel(
+          generate_run, context);
+  emel::text::generator::action::
+      request_decode_compute_flash_parallel_preselected_argmax_q8_k(
+          generate_run, context);
+  emel::text::generator::action::
+      request_decode_compute_flash_parallel_preselected_argmax_native_quantized_q8_k(
+          generate_run, context);
+  emel::text::generator::action::
+      request_decode_compute_flash_parallel_preselected_argmax_native_quantized_kernel(
+          generate_run, context);
+  CHECK(generate_ctx.io.selected_attention_mode ==
+        emel::text::generator::attention_mode::flash);
+  emel::text::generator::action::
       request_decode_compute_nonflash_preselected_argmax_kernel(generate_run,
                                                                 context);
   emel::text::generator::action::
@@ -1477,6 +1546,20 @@ TEST_CASE("generator core actions cover reset, decode, and fallback channels") {
   emel::text::generator::action::
       request_decode_compute_nonflash_preselected_argmax_native_quantized_kernel(
           generate_run, context);
+  emel::text::generator::action::
+      request_decode_compute_nonflash_preselected_argmax_kernel_streamed(
+          generate_run, context);
+  emel::text::generator::action::
+      request_decode_compute_nonflash_preselected_argmax_q8_k_streamed(
+          generate_run, context);
+  emel::text::generator::action::
+      request_decode_compute_nonflash_preselected_argmax_native_quantized_q8_k_streamed(
+          generate_run, context);
+  emel::text::generator::action::
+      request_decode_compute_nonflash_preselected_argmax_native_quantized_kernel_streamed(
+          generate_run, context);
+  CHECK(generate_ctx.io.selected_attention_mode ==
+        emel::text::generator::attention_mode::nonflash);
 
   const std::array<int32_t, 1> step_sizes{3};
   emel::batch::planner::events::plan_done plan_done{};
@@ -2278,11 +2361,24 @@ TEST_CASE("generator prefill actions publish every explicit compute contract") {
                  emel::text::generator::prefill_compute_contract::
                      flash_materialized_chunk8_q8_k);
   check_contract(emel::text::generator::prefill::action::
+                     request_contract_flash_materialized_parallel_chunk8_q8_k,
+                 emel::text::generator::prefill_compute_contract::
+                     flash_materialized_chunk8_q8_k);
+  check_contract(emel::text::generator::prefill::action::
                      request_contract_flash_materialized_chunk4_packed_q8_0,
                  emel::text::generator::prefill_compute_contract::
                      flash_materialized_chunk4_packed_q8_0);
+  check_contract(
+      emel::text::generator::prefill::action::
+          request_contract_flash_materialized_parallel_chunk4_packed_q8_0,
+      emel::text::generator::prefill_compute_contract::
+          flash_materialized_chunk4_packed_q8_0);
   check_contract(emel::text::generator::prefill::action::
                      request_contract_flash_materialized_chunk4_q8_k,
+                 emel::text::generator::prefill_compute_contract::
+                     flash_materialized_chunk4_q8_k);
+  check_contract(emel::text::generator::prefill::action::
+                     request_contract_flash_materialized_parallel_chunk4_q8_k,
                  emel::text::generator::prefill_compute_contract::
                      flash_materialized_chunk4_q8_k);
   check_contract(emel::text::generator::prefill::action::
@@ -2308,11 +2404,24 @@ TEST_CASE("generator prefill actions publish every explicit compute contract") {
                  emel::text::generator::prefill_compute_contract::
                      flash_preselected_chunk8_q8_k);
   check_contract(emel::text::generator::prefill::action::
+                     request_contract_flash_preselected_parallel_chunk8_q8_k,
+                 emel::text::generator::prefill_compute_contract::
+                     flash_preselected_chunk8_q8_k);
+  check_contract(emel::text::generator::prefill::action::
                      request_contract_flash_preselected_chunk4_packed_q8_0,
                  emel::text::generator::prefill_compute_contract::
                      flash_preselected_chunk4_packed_q8_0);
+  check_contract(
+      emel::text::generator::prefill::action::
+          request_contract_flash_preselected_parallel_chunk4_packed_q8_0,
+      emel::text::generator::prefill_compute_contract::
+          flash_preselected_chunk4_packed_q8_0);
   check_contract(emel::text::generator::prefill::action::
                      request_contract_flash_preselected_chunk4_q8_k,
+                 emel::text::generator::prefill_compute_contract::
+                     flash_preselected_chunk4_q8_k);
+  check_contract(emel::text::generator::prefill::action::
+                     request_contract_flash_preselected_parallel_chunk4_q8_k,
                  emel::text::generator::prefill_compute_contract::
                      flash_preselected_chunk4_q8_k);
   check_contract(emel::text::generator::prefill::action::

@@ -13,8 +13,8 @@
 // kernel-owned surface.
 
 #include "../../kernel/test_helpers.hpp"
-#include "emel/memory/events.hpp"
 #include "emel/graph/processor/guards.hpp"
+#include "emel/memory/events.hpp"
 #include "emel/memory/hybrid/sm.hpp"
 #include "emel/model/llama/detail.hpp"
 #include "emel/text/generator/detail.hpp"
@@ -37,7 +37,8 @@ using emel::text::generator::detail::quant::QK8_0;
 using emel::text::generator::detail::quant::QK_K;
 
 struct matmul_actor_fixture {
-  emel::text::generator::matmul::lane_pool<7u, 128u, 1048576u> parallel_matmul_lanes = {};
+  emel::text::generator::matmul::lane_pool<7u, 128u, 1048576u>
+      parallel_matmul_lanes = {};
   emel::text::generator::matmul::execution_policy policy =
       emel::text::generator::matmul::make_auto_execution_policy(
           parallel_matmul_lanes);
@@ -45,11 +46,12 @@ struct matmul_actor_fixture {
 };
 
 void bind_test_matmul_actor(
-    emel::text::generator::detail::native_backend & backend,
-    matmul_actor_fixture & matmul) {
+    emel::text::generator::detail::native_backend &backend,
+    matmul_actor_fixture &matmul) {
   backend.matmul_actor = &matmul.actor;
   matmul.actor.process_event(
-      emel::text::generator::matmul::event::configure_kernel_kind{backend.kernel_kind});
+      emel::text::generator::matmul::event::configure_kernel_kind{
+          backend.kernel_kind});
 }
 
 uint16_t fp16_bits(const float value) {
@@ -144,7 +146,8 @@ struct runtime_request_fixture {
   }
 
   static bool on_execution_error(
-      void *, const emel::graph::processor::events::execution_error &) noexcept {
+      void *,
+      const emel::graph::processor::events::execution_error &) noexcept {
     return true;
   }
 
@@ -200,8 +203,7 @@ struct runtime_request_fixture {
     request.step_plan = &plan;
     request.output_out = &output;
     request.lifecycle = &lifecycle;
-    request.tensor_machine =
-        reinterpret_cast<emel::graph::tensor::sm *>(this);
+    request.tensor_machine = reinterpret_cast<emel::graph::tensor::sm *>(this);
     request.step_index = 0;
     request.step_size = 1;
     request.expected_outputs = plan.expected_outputs;
@@ -211,13 +213,14 @@ struct runtime_request_fixture {
     request.kv_tokens = 0;
     request.memory_view = &memory_snapshot;
     request.seq_primary_ids = seq_primary_ids.data();
-    request.seq_primary_ids_count = static_cast<int32_t>(seq_primary_ids.size());
+    request.seq_primary_ids_count =
+        static_cast<int32_t>(seq_primary_ids.size());
     request.dispatch_done = {this, on_execution_done};
     request.dispatch_error = {this, on_execution_error};
   }
 };
 
-void bind_neox_rope_pairing(emel::model::data & model) {
+void bind_neox_rope_pairing(emel::model::data &model) {
   model.params.rope_pair_x0_stride = 1;
   model.params.rope_pair_x1_stride = 1;
   model.params.rope_pair_x1_offset = 0;
@@ -323,10 +326,9 @@ struct prepared_qwen3_backend_fixture {
     const auto runtime_policy =
         emel::text::generator::test::make_auto_runtime_policy(
             model_fixture.model);
-    ready =
-        emel::text::generator::detail::prepare(
-            backend, model_fixture.model, matmul.actor, runtime_policy) ==
-        emel::error::cast(emel::model::loader::error::none);
+    ready = emel::text::generator::detail::prepare(
+                backend, model_fixture.model, matmul.actor, runtime_policy) ==
+            emel::error::cast(emel::model::loader::error::none);
     backend.bound_tokens = {0};
     backend.bound_positions = {0};
     backend.bound_token_count = 1;
@@ -500,7 +502,8 @@ struct chunk4_prefill_runtime_fixture {
     backend.kernel_kind = emel::kernel::kernel_kind::aarch64;
     backend.matmul_actor = &matmul.actor;
     matmul.actor.process_event(
-        emel::text::generator::matmul::event::configure_kernel_kind{backend.kernel_kind});
+        emel::text::generator::matmul::event::configure_kernel_kind{
+            backend.kernel_kind});
     backend.model = &model;
     backend.n_vocab = k_vocab;
     backend.n_embd = k_embd;
@@ -603,7 +606,8 @@ struct chunk4_prefill_runtime_fixture {
     request.kv_tokens = 0;
     request.memory_view = &memory_snapshot;
     request.seq_primary_ids = seq_primary_ids.data();
-    request.seq_primary_ids_count = static_cast<int32_t>(seq_primary_ids.size());
+    request.seq_primary_ids_count =
+        static_cast<int32_t>(seq_primary_ids.size());
 
     ready = emel::kernel::detail::quant::pack_q8_0_rows_x4_bl8(
                 zero_rows.data(), static_cast<uint64_t>(k_embd),
@@ -715,7 +719,8 @@ struct hybrid_chunked_q8_runtime_fixture {
     backend.kernel_kind = emel::kernel::kernel_kind::aarch64;
     backend.matmul_actor = &matmul.actor;
     matmul.actor.process_event(
-        emel::text::generator::matmul::event::configure_kernel_kind{backend.kernel_kind});
+        emel::text::generator::matmul::event::configure_kernel_kind{
+            backend.kernel_kind});
     backend.model = &model;
     backend.n_vocab = k_vocab;
     backend.n_embd = k_embd;
@@ -747,7 +752,8 @@ struct hybrid_chunked_q8_runtime_fixture {
 
     backend.blocks.resize(2u);
     auto &shortconv_block = backend.blocks[0];
-    shortconv_block.uses_attention = false;
+    shortconv_block.residual_route =
+        emel::model::llama::detail::generation_residual_route::shortconv;
     shortconv_block.attention_norm = attention_norm_storage;
     shortconv_block.shortconv_conv = shortconv_conv_storage;
     shortconv_block.shortconv_in_proj.tensor = &packed_shortconv_in_tensor;
@@ -869,7 +875,8 @@ struct hybrid_chunked_q8_runtime_fixture {
     request.kv_tokens = 0;
     request.memory_view = &memory_snapshot;
     request.seq_primary_ids = seq_primary_ids.data();
-    request.seq_primary_ids_count = static_cast<int32_t>(seq_primary_ids.size());
+    request.seq_primary_ids_count =
+        static_cast<int32_t>(seq_primary_ids.size());
 
     ready =
         emel::kernel::detail::quant::pack_q4_k_rows_x8_bl8(
@@ -889,6 +896,39 @@ struct hybrid_chunked_q8_runtime_fixture {
 
 using hybrid_chunk4_q8_runtime_fixture = hybrid_chunked_q8_runtime_fixture<4>;
 using hybrid_chunk8_q8_runtime_fixture = hybrid_chunked_q8_runtime_fixture<8>;
+
+void fill_nonzero_q4_rows(std::span<block_q4_k> rows) {
+  for (size_t row = 0; row < rows.size(); ++row) {
+    auto &q4 = rows[row];
+    q4.d = emel::kernel::detail::quant::fp32_to_fp16(
+        0.0009765625f * static_cast<float>((row % 31u) + 1u));
+    q4.dmin = emel::kernel::detail::quant::fp32_to_fp16(
+        0.000244140625f * static_cast<float>(((row + 7u) % 17u) + 1u));
+    for (size_t idx = 0; idx < q4.scales.size(); ++idx) {
+      q4.scales[idx] =
+          static_cast<uint8_t>(((row + 3u) * 13u + idx * 19u + 0x35u) & 0xffu);
+    }
+    for (size_t idx = 0; idx < q4.qs.size(); ++idx) {
+      q4.qs[idx] =
+          static_cast<uint8_t>(((row + 11u) * 17u + idx * 7u + 0x91u) & 0xffu);
+    }
+  }
+}
+
+template <class fixture_type>
+bool seed_nonzero_hybrid_fixture_weights(fixture_type &fixture) {
+  fill_nonzero_q4_rows(std::span<block_q4_k>(fixture.square_rows));
+  fill_nonzero_q4_rows(std::span<block_q4_k>(fixture.shortconv_in_rows));
+  return emel::kernel::detail::quant::pack_q4_k_rows_x8_bl8(
+             fixture.square_rows.data(), static_cast<uint64_t>(fixture.k_embd),
+             static_cast<uint64_t>(fixture.k_embd),
+             fixture.packed_square_storage.data()) &&
+         emel::kernel::detail::quant::pack_q4_k_rows_x8_bl8(
+             fixture.shortconv_in_rows.data(),
+             static_cast<uint64_t>(3 * fixture.k_embd),
+             static_cast<uint64_t>(fixture.k_embd),
+             fixture.packed_shortconv_in_storage.data());
+}
 
 float round_fp16_value(const float value) {
   return emel::text::generator::detail::quant::fp16_to_fp32(
@@ -947,9 +987,8 @@ void apply_rope_reference(std::span<float> vector, const int32_t head_count,
 }
 
 void apply_rope_neox_reference(std::span<float> vector,
-                               const int32_t head_count,
-                               const int32_t head_dim, const int32_t n_rot,
-                               const int32_t position,
+                               const int32_t head_count, const int32_t head_dim,
+                               const int32_t n_rot, const int32_t position,
                                const float rope_freq_base) {
   const int32_t rot_dim = std::min(n_rot, head_dim);
   if (head_count <= 0 || head_dim <= 1 || rot_dim <= 1) {
@@ -1089,23 +1128,19 @@ TEST_CASE("generator_detail_lfm2_attention_uses_neox_rope_layout") {
   auto model = std::make_unique<emel::model::data>();
   std::memcpy(model->architecture_name.data(), "lfm2", 4u);
 
-  std::vector<float> identity(static_cast<size_t>(k_embd) *
-                                  static_cast<size_t>(k_embd),
-                              0.0f);
-  std::vector<float> zero_matrix(static_cast<size_t>(k_embd) *
-                                     static_cast<size_t>(k_embd),
-                                 0.0f);
+  std::vector<float> identity(
+      static_cast<size_t>(k_embd) * static_cast<size_t>(k_embd), 0.0f);
+  std::vector<float> zero_matrix(
+      static_cast<size_t>(k_embd) * static_cast<size_t>(k_embd), 0.0f);
   for (int32_t idx = 0; idx < k_embd; ++idx) {
     identity[static_cast<size_t>(idx) * static_cast<size_t>(k_embd) +
              static_cast<size_t>(idx)] = 1.0f;
   }
 
-  auto identity_tensor =
-      make_tensor_record(identity.data(), emel::kernel::detail::dtype_f32,
-                         k_embd, k_embd);
-  auto zero_tensor =
-      make_tensor_record(zero_matrix.data(), emel::kernel::detail::dtype_f32,
-                         k_embd, k_embd);
+  auto identity_tensor = make_tensor_record(
+      identity.data(), emel::kernel::detail::dtype_f32, k_embd, k_embd);
+  auto zero_tensor = make_tensor_record(
+      zero_matrix.data(), emel::kernel::detail::dtype_f32, k_embd, k_embd);
 
   auto backend =
       std::make_unique<emel::text::generator::detail::native_backend>();
@@ -1161,7 +1196,8 @@ TEST_CASE("generator_detail_lfm2_attention_uses_neox_rope_layout") {
   }
 
   auto &block = backend->blocks.front();
-  block.uses_attention = true;
+  block.residual_route =
+      emel::model::llama::detail::generation_residual_route::attention;
   block.attention_norm.assign(k_embd, 1.0f);
   block.attention_q.tensor = &identity_tensor;
   block.attention_q.rows = k_embd;
@@ -1195,8 +1231,8 @@ TEST_CASE("generator_detail_lfm2_attention_uses_neox_rope_layout") {
   apply_rope_neox_reference(expected_k, 1, k_embd, k_embd, k_position,
                             backend->rope_freq_base);
 
-  REQUIRE(emel::text::generator::detail::run_layer_nonflash(
-      *backend, 0, k_position));
+  REQUIRE(emel::text::generator::detail::run_layer_nonflash(*backend, 0,
+                                                            k_position));
   const size_t cache_offset = emel::text::generator::detail::layer_cache_offset(
       *backend, block, 0, k_position);
   for (size_t idx = 0; idx < expected_k.size(); ++idx) {
@@ -1431,7 +1467,8 @@ TEST_CASE("generator_detail_routes_static_q6_block_matrices_through_generic_q8_"
   bind_test_matmul_actor(backend, matmul);
   backend.blocks.resize(1u);
   auto &block = backend.blocks.front();
-  block.uses_attention = true;
+  block.residual_route =
+      emel::model::llama::detail::generation_residual_route::attention;
   block.attention_q = q6_matrix;
   block.attention_k = q6_matrix;
   block.attention_v = q6_matrix;
@@ -1509,7 +1546,8 @@ TEST_CASE("generator_detail_routes_static_q4_block_matrices_through_generic_q8_"
   bind_test_matmul_actor(backend, matmul);
   backend.blocks.resize(1u);
   auto &block = backend.blocks.front();
-  block.uses_attention = true;
+  block.residual_route =
+      emel::model::llama::detail::generation_residual_route::attention;
   block.attention_q = q4_matrix;
   block.attention_k = q4_matrix;
   block.attention_v = q4_matrix;
@@ -1653,7 +1691,8 @@ TEST_CASE("generator_detail_run_kernel_callbacks_do_not_write_error_channel") {
   expect_rejected_without_error_write(
       gen_detail::run_kernel_nonflash_prefill_scalar_native_quantized);
   expect_rejected_without_error_write(
-      gen_detail::run_kernel_nonflash_prefill_scalar_native_quantized_q8_k_logits);
+      gen_detail::
+          run_kernel_nonflash_prefill_scalar_native_quantized_q8_k_logits);
   expect_rejected_without_error_write(
       gen_detail::run_kernel_nonflash_prefill_scalar_kernel);
   expect_rejected_without_error_write(
@@ -1710,17 +1749,21 @@ TEST_CASE("generator_detail_run_kernel_callbacks_do_not_write_error_channel") {
   expect_rejected_without_error_write(
       gen_detail::run_kernel_flash_decode_preselected_argmax_q8_k);
   expect_rejected_without_error_write(
-      gen_detail::run_kernel_flash_decode_preselected_argmax_native_quantized_q8_k);
+      gen_detail::
+          run_kernel_flash_decode_preselected_argmax_native_quantized_q8_k);
   expect_rejected_without_error_write(
-      gen_detail::run_kernel_flash_decode_preselected_argmax_native_quantized_kernel);
+      gen_detail::
+          run_kernel_flash_decode_preselected_argmax_native_quantized_kernel);
   expect_rejected_without_error_write(
       gen_detail::run_kernel_flash_decode_preselected_argmax_kernel);
   expect_rejected_without_error_write(
       gen_detail::run_kernel_nonflash_decode_preselected_argmax_q8_k);
   expect_rejected_without_error_write(
-      gen_detail::run_kernel_nonflash_decode_preselected_argmax_native_quantized_q8_k);
+      gen_detail::
+          run_kernel_nonflash_decode_preselected_argmax_native_quantized_q8_k);
   expect_rejected_without_error_write(
-      gen_detail::run_kernel_nonflash_decode_preselected_argmax_native_quantized_kernel);
+      gen_detail::
+          run_kernel_nonflash_decode_preselected_argmax_native_quantized_kernel);
   expect_rejected_without_error_write(
       gen_detail::run_kernel_nonflash_decode_preselected_argmax_kernel);
   expect_rejected_without_error_write(
@@ -1728,9 +1771,11 @@ TEST_CASE("generator_detail_run_kernel_callbacks_do_not_write_error_channel") {
   expect_rejected_without_error_write(
       gen_detail::run_kernel_nonflash_prefill_chunk8_preselected_argmax_q8_k);
   expect_rejected_without_error_write(
-      gen_detail::run_kernel_flash_prefill_chunk4_preselected_argmax_packed_q8_0);
+      gen_detail::
+          run_kernel_flash_prefill_chunk4_preselected_argmax_packed_q8_0);
   expect_rejected_without_error_write(
-      gen_detail::run_kernel_nonflash_prefill_chunk4_preselected_argmax_packed_q8_0);
+      gen_detail::
+          run_kernel_nonflash_prefill_chunk4_preselected_argmax_packed_q8_0);
   expect_rejected_without_error_write(
       gen_detail::run_kernel_flash_prefill_chunk4_preselected_argmax_q8_k);
   expect_rejected_without_error_write(
@@ -1781,9 +1826,9 @@ TEST_CASE("generator_detail_decode_preconditions_reject_malformed_requests") {
   CHECK_FALSE(decode_rejected());
 
   const auto flash_decode_rejected = [&]() {
-    return gen_detail::run_decode<
-        emel::text::generator::attention_mode::flash,
-        gen_detail::scalar_matmul_route::kernel>(backend, request);
+    return gen_detail::run_decode<emel::text::generator::attention_mode::flash,
+                                  gen_detail::scalar_matmul_route::kernel>(
+        backend, request);
   };
   backend.bound_token_count = 0;
   CHECK_FALSE(flash_decode_rejected());
@@ -2233,9 +2278,73 @@ TEST_CASE("generator_detail_scalar_routes_run_prepared_qwen3_paths") {
   }
 }
 
+TEST_CASE("generator_detail_scalar_routes_run_packed_and_q8_success_paths") {
+  using emel::text::generator::attention_mode;
+  using emel::text::generator::detail::scalar_matmul_route;
+
+#if defined(__aarch64__) && defined(__ARM_NEON) &&                             \
+    defined(__ARM_FEATURE_MATMUL_INT8)
+  {
+    auto fixture = std::make_unique<chunk4_prefill_runtime_fixture>();
+    REQUIRE(fixture->ready);
+    int32_t err = -1;
+    REQUIRE(emel::text::generator::detail::bind_guarded_inputs(fixture->request,
+                                                               &err));
+    REQUIRE(emel::text::generator::detail::run_prefill<
+            attention_mode::nonflash, scalar_matmul_route::packed_q8_0>(
+        fixture->backend));
+    CHECK(fixture->backend.kv_cache_tokens ==
+          chunk4_prefill_runtime_fixture::k_prompt_tokens);
+  }
+  {
+    auto fixture = std::make_unique<chunk4_prefill_runtime_fixture>();
+    REQUIRE(fixture->ready);
+    int32_t err = -1;
+    REQUIRE(emel::text::generator::detail::bind_guarded_inputs(fixture->request,
+                                                               &err));
+    REQUIRE(emel::text::generator::detail::run_prefill<
+            attention_mode::flash, scalar_matmul_route::packed_q8_0>(
+        fixture->backend));
+    CHECK(fixture->backend.kv_cache_tokens ==
+          chunk4_prefill_runtime_fixture::k_prompt_tokens);
+  }
+#endif
+
+#if defined(__aarch64__) && defined(__ARM_NEON) &&                             \
+    defined(__ARM_FEATURE_DOTPROD)
+  {
+    auto fixture = std::make_unique<hybrid_chunk4_q8_runtime_fixture>();
+    REQUIRE(fixture->ready);
+    int32_t err = -1;
+    REQUIRE(emel::text::generator::detail::bind_guarded_inputs(fixture->request,
+                                                               &err));
+    REQUIRE(
+        emel::text::generator::detail::run_prefill<attention_mode::nonflash,
+                                                   scalar_matmul_route::q8_k>(
+            fixture->backend));
+    CHECK(fixture->backend.kv_cache_tokens ==
+          hybrid_chunk4_q8_runtime_fixture::k_prompt_tokens);
+  }
+  {
+    auto fixture = std::make_unique<hybrid_chunk4_q8_runtime_fixture>();
+    REQUIRE(fixture->ready);
+    int32_t err = -1;
+    REQUIRE(emel::text::generator::detail::bind_guarded_inputs(fixture->request,
+                                                               &err));
+    REQUIRE(
+        emel::text::generator::detail::run_prefill<attention_mode::flash,
+                                                   scalar_matmul_route::q8_k>(
+            fixture->backend));
+    CHECK(fixture->backend.kv_cache_tokens ==
+          hybrid_chunk4_q8_runtime_fixture::k_prompt_tokens);
+  }
+#endif
+}
+
 TEST_CASE("generator_detail_prepare_derives_kv_geometry_from_memory_contract") {
   auto model_fixture = std::make_unique<qwen3_runtime_fixture>();
-  auto backend = std::make_unique<emel::text::generator::detail::native_backend>();
+  auto backend =
+      std::make_unique<emel::text::generator::detail::native_backend>();
   matmul_actor_fixture matmul = {};
   const auto runtime_policy =
       emel::text::generator::test::make_auto_runtime_policy(
@@ -2246,28 +2355,30 @@ TEST_CASE("generator_detail_prepare_derives_kv_geometry_from_memory_contract") {
               *backend, model_fixture->model, matmul.actor, runtime_policy) ==
           emel::error::cast(emel::model::loader::error::none));
   CHECK(backend->kv_block_tokens == emel::memory::view::DEFAULT_BLOCK_TOKENS);
-  CHECK(backend->kv_positions_capacity == emel::memory::view::DEFAULT_BLOCK_TOKENS);
+  CHECK(backend->kv_positions_capacity ==
+        emel::memory::view::DEFAULT_BLOCK_TOKENS);
   CHECK(backend->kv_positions_capacity >= backend->n_ctx);
   const size_t default_flash_extent = backend->flash_key_cache.size();
 
   // Divisible geometry: capacity equals n_ctx exactly (pre-cutover layout).
   REQUIRE(emel::text::generator::detail::prepare(
-              *backend, model_fixture->model, matmul.actor, runtime_policy, 4) ==
-          emel::error::cast(emel::model::loader::error::none));
+              *backend, model_fixture->model, matmul.actor, runtime_policy,
+              4) == emel::error::cast(emel::model::loader::error::none));
   CHECK(backend->kv_block_tokens == 4);
   CHECK(backend->kv_positions_capacity == backend->n_ctx);
   const size_t divisible_flash_extent = backend->flash_key_cache.size();
 
   // Non-positive block tokens cannot cover the context window and are
   // rejected through prepare's existing model_invalid validation path.
-  REQUIRE(emel::text::generator::detail::prepare(
-              *backend, model_fixture->model, matmul.actor, runtime_policy, 0) ==
+  REQUIRE(emel::text::generator::detail::prepare(*backend, model_fixture->model,
+                                                 matmul.actor, runtime_policy,
+                                                 0) ==
           emel::error::cast(emel::model::loader::error::model_invalid));
 
   // Non-divisible geometry: capacity rounds up to whole blocks.
   REQUIRE(emel::text::generator::detail::prepare(
-              *backend, model_fixture->model, matmul.actor, runtime_policy, 3) ==
-          emel::error::cast(emel::model::loader::error::none));
+              *backend, model_fixture->model, matmul.actor, runtime_policy,
+              3) == emel::error::cast(emel::model::loader::error::none));
   CHECK(backend->kv_block_tokens == 3);
   CHECK(backend->kv_positions_capacity == 9);
 
@@ -2277,21 +2388,23 @@ TEST_CASE("generator_detail_prepare_derives_kv_geometry_from_memory_contract") {
 
 TEST_CASE("generator_detail_kv_physical_map_binds_snapshot_block_order") {
   auto model_fixture = std::make_unique<qwen3_runtime_fixture>();
-  auto backend = std::make_unique<emel::text::generator::detail::native_backend>();
+  auto backend =
+      std::make_unique<emel::text::generator::detail::native_backend>();
   matmul_actor_fixture matmul = {};
   const auto runtime_policy =
       emel::text::generator::test::make_auto_runtime_policy(
           model_fixture->model);
   REQUIRE(emel::text::generator::detail::prepare(
-              *backend, model_fixture->model, matmul.actor, runtime_policy, 4) ==
-          emel::error::cast(emel::model::loader::error::none));
+              *backend, model_fixture->model, matmul.actor, runtime_policy,
+              4) == emel::error::cast(emel::model::loader::error::none));
   REQUIRE(backend->kv_positions_capacity == 8);
 
   // prepare leaves the identity map: logical == physical.
-  const auto identity_kv = emel::text::generator::detail::identity_kv_addressing();
+  const auto identity_kv =
+      emel::text::generator::detail::identity_kv_addressing();
   for (int32_t position = 0; position < 8; ++position) {
-    CHECK(emel::text::generator::detail::physical_kv_position(identity_kv, position) ==
-          static_cast<size_t>(position));
+    CHECK(emel::text::generator::detail::physical_kv_position(
+              identity_kv, position) == static_cast<size_t>(position));
   }
   const int32_t high_identity_position =
       emel::memory::view::MAX_BLOCKS_PER_SEQUENCE + 904;
@@ -2310,26 +2423,29 @@ TEST_CASE("generator_detail_kv_physical_map_binds_snapshot_block_order") {
   snapshot.sequence_kv_block_count[0] = 2;
   snapshot.sequence_kv_blocks[0][0] = 1;
   snapshot.sequence_kv_blocks[0][1] = 0;
-  auto kv = emel::text::generator::detail::kv_addressing_from_snapshot(snapshot, 0);
+  auto kv =
+      emel::text::generator::detail::kv_addressing_from_snapshot(snapshot, 0);
 
   for (int32_t position = 0; position < 4; ++position) {
     CHECK(emel::text::generator::detail::physical_kv_position(kv, position) ==
           static_cast<size_t>(position + 4));
-    CHECK(emel::text::generator::detail::physical_kv_position(kv, position + 4) ==
-          static_cast<size_t>(position));
+    CHECK(emel::text::generator::detail::physical_kv_position(
+              kv, position + 4) == static_cast<size_t>(position));
   }
 
   // Stores land at the mapped physical slot in both layouts.
-  const auto & block = backend->blocks.front();
+  const auto &block = backend->blocks.front();
   const int32_t kv_dim =
-      emel::text::generator::detail::effective_attention_kv_dim(*backend, block);
+      emel::text::generator::detail::effective_attention_kv_dim(*backend,
+                                                                block);
   std::vector<float> k_row(static_cast<size_t>(kv_dim), 1.5f);
   std::vector<float> v_row(static_cast<size_t>(kv_dim), -2.0f);
   REQUIRE(emel::text::generator::detail::store_attention_kv_cache(
       *backend, kv, block, 0, 0, k_row, v_row));
 
   const size_t mapped_offset =
-      emel::text::generator::detail::layer_cache_offset(*backend, kv, block, 0, 0);
+      emel::text::generator::detail::layer_cache_offset(*backend, kv, block, 0,
+                                                        0);
   const size_t physical_row_offset =
       static_cast<size_t>(4) * static_cast<size_t>(kv_dim);
   CHECK(mapped_offset == physical_row_offset);
@@ -2344,18 +2460,21 @@ TEST_CASE("generator_detail_kv_physical_map_binds_snapshot_block_order") {
   snapshot.sequence_length_values[0] = 8;
 
   snapshot.sequence_active[0] = 0;
-  CHECK(emel::text::generator::detail::physical_kv_position(identity_kv, 7) == 7u);
+  CHECK(emel::text::generator::detail::physical_kv_position(identity_kv, 7) ==
+        7u);
   snapshot.sequence_active[0] = 1;
 
   // The snapshot-resolved recurrent slot shifts shortconv state addressing;
   // slot 0 preserves the flat layout.
   const size_t flat_shortconv =
-      emel::text::generator::detail::shortconv_state_layer_offset(*backend, identity_kv, 0);
+      emel::text::generator::detail::shortconv_state_layer_offset(
+          *backend, identity_kv, 0);
   CHECK(flat_shortconv == 0u);
   snapshot.sequence_recurrent_slot[0] = 3;
   kv.recurrent_slot = snapshot.lookup_recurrent_slot(0);
   CHECK(kv.recurrent_slot == 3);
-  CHECK(emel::text::generator::detail::shortconv_state_layer_offset(*backend, kv, 0) ==
+  CHECK(emel::text::generator::detail::shortconv_state_layer_offset(*backend,
+                                                                    kv, 0) ==
         static_cast<size_t>(3) * static_cast<size_t>(backend->n_layer) *
             static_cast<size_t>(backend->shortconv_state_size) *
             static_cast<size_t>(backend->n_embd));
@@ -2365,39 +2484,44 @@ TEST_CASE("generator_detail_kv_physical_map_binds_snapshot_block_order") {
   // Rebinding a contiguous snapshot restores the flat layout addressing.
   snapshot.sequence_kv_blocks[0][0] = 0;
   snapshot.sequence_kv_blocks[0][1] = 1;
-  CHECK(emel::text::generator::detail::layer_cache_offset(*backend, kv, block, 0, 0) ==
-        flat_row_offset);
+  CHECK(emel::text::generator::detail::layer_cache_offset(
+            *backend, kv, block, 0, 0) == flat_row_offset);
 }
 
 TEST_CASE("generator_detail_kv_physical_map_isolates_interleaved_sequences") {
   auto model_fixture = std::make_unique<qwen3_runtime_fixture>();
-  auto backend = std::make_unique<emel::text::generator::detail::native_backend>();
+  auto backend =
+      std::make_unique<emel::text::generator::detail::native_backend>();
   matmul_actor_fixture matmul = {};
   const auto runtime_policy =
       emel::text::generator::test::make_auto_runtime_policy(
           model_fixture->model);
   REQUIRE(emel::text::generator::detail::prepare(
-              *backend, model_fixture->model, matmul.actor, runtime_policy, 2) ==
-          emel::error::cast(emel::model::loader::error::none));
+              *backend, model_fixture->model, matmul.actor, runtime_policy,
+              2) == emel::error::cast(emel::model::loader::error::none));
   REQUIRE(backend->kv_positions_capacity == 8);
 
   // Two sequences share one snapshot: their bound physical positions must be
   // disjoint, and a freed-then-reused mapping preserves logical order.
   emel::memory::hybrid::sm memory{};
   int32_t err = 0;
-  REQUIRE(memory.process_event(emel::memory::event::reserve{
-    .max_sequences = 3, .max_blocks = 4, .block_tokens = 2, .error_out = &err}));
-  REQUIRE(memory.process_event(emel::memory::event::allocate_sequence{
-    .seq_id = 0, .error_out = &err}));
-  REQUIRE(memory.process_event(emel::memory::event::allocate_sequence{
-    .seq_id = 1, .error_out = &err}));
+  REQUIRE(
+      memory.process_event(emel::memory::event::reserve{.max_sequences = 3,
+                                                        .max_blocks = 4,
+                                                        .block_tokens = 2,
+                                                        .error_out = &err}));
+  REQUIRE(memory.process_event(
+      emel::memory::event::allocate_sequence{.seq_id = 0, .error_out = &err}));
+  REQUIRE(memory.process_event(
+      emel::memory::event::allocate_sequence{.seq_id = 1, .error_out = &err}));
   REQUIRE(memory.process_event(emel::memory::event::allocate_slots{
-    .seq_id = 0, .token_count = 4, .error_out = &err}));
+      .seq_id = 0, .token_count = 4, .error_out = &err}));
   REQUIRE(memory.process_event(emel::memory::event::allocate_slots{
-    .seq_id = 1, .token_count = 4, .error_out = &err}));
+      .seq_id = 1, .token_count = 4, .error_out = &err}));
 
   emel::memory::view::snapshot view{};
-  emel::error::type view_err = emel::error::cast(emel::memory::hybrid::error::none);
+  emel::error::type view_err =
+      emel::error::cast(emel::memory::hybrid::error::none);
   REQUIRE(memory.try_view(view, view_err));
 
   std::array<int32_t, 4> seq0_physical = {};
@@ -2420,12 +2544,12 @@ TEST_CASE("generator_detail_kv_physical_map_isolates_interleaved_sequences") {
 
   // Free seq 0 and re-allocate: the same physical slots return in logical
   // order without touching seq 1.
-  REQUIRE(memory.process_event(emel::memory::event::free_sequence{
-    .seq_id = 0, .error_out = &err}));
-  REQUIRE(memory.process_event(emel::memory::event::allocate_sequence{
-    .seq_id = 2, .error_out = &err}));
+  REQUIRE(memory.process_event(
+      emel::memory::event::free_sequence{.seq_id = 0, .error_out = &err}));
+  REQUIRE(memory.process_event(
+      emel::memory::event::allocate_sequence{.seq_id = 2, .error_out = &err}));
   REQUIRE(memory.process_event(emel::memory::event::allocate_slots{
-    .seq_id = 2, .token_count = 4, .error_out = &err}));
+      .seq_id = 2, .token_count = 4, .error_out = &err}));
   REQUIRE(memory.try_view(view, view_err));
 
   kv = emel::text::generator::detail::kv_addressing_from_snapshot(view, 2);
@@ -2434,8 +2558,8 @@ TEST_CASE("generator_detail_kv_physical_map_isolates_interleaved_sequences") {
   for (int32_t position = 0; position < 4; ++position) {
     seq2_physical[static_cast<size_t>(position)] = static_cast<int32_t>(
         emel::text::generator::detail::physical_kv_position(kv, position));
-    identity = identity &&
-               seq2_physical[static_cast<size_t>(position)] == position;
+    identity =
+        identity && seq2_physical[static_cast<size_t>(position)] == position;
   }
   CHECK(identity);
   for (const int32_t lhs : seq2_physical) {
@@ -2460,7 +2584,8 @@ TEST_CASE("generator_detail_prepare_block_native_matrices_supports_shortconv_"
   backend.kernel_kind = emel::kernel::kernel_kind::aarch64;
   backend.blocks.resize(1u);
   auto &block = backend.blocks.front();
-  block.uses_attention = false;
+  block.residual_route =
+      emel::model::llama::detail::generation_residual_route::shortconv;
   block.shortconv_in_proj = q6_matrix;
   block.shortconv_out_proj = q6_matrix;
   block.feed_forward_gate = q6_matrix;
@@ -3118,8 +3243,10 @@ TEST_CASE("generator_detail_effective_dimension_helpers_cover_fallbacks") {
                     [](const float value) { return value == 0.0f; }));
 
   backend.blocks.resize(2u);
-  backend.blocks[0].uses_attention = false;
-  backend.blocks[1].uses_attention = true;
+  backend.blocks[0].residual_route =
+      emel::model::llama::detail::generation_residual_route::shortconv;
+  backend.blocks[1].residual_route =
+      emel::model::llama::detail::generation_residual_route::attention;
   backend.blocks[1].feed_forward_gate.rows = 32;
   CHECK(emel::text::generator::detail::first_attention_block(backend) ==
         &backend.blocks[1]);
@@ -3185,7 +3312,8 @@ TEST_CASE(
                                                    packed_tensor, storage));
 }
 
-TEST_CASE("generator_detail_graph_callbacks_accept_guarded_requests_without_error_channel") {
+TEST_CASE("generator_detail_graph_callbacks_accept_guarded_requests_without_"
+          "error_channel") {
   auto fixture = std::make_unique<runtime_request_fixture>();
   int32_t err = -1;
   bool reused = true;
@@ -3214,26 +3342,28 @@ TEST_CASE("generator_detail_graph_callbacks_accept_guarded_requests_without_erro
   emel::graph::processor::action::context processor_context{};
   const auto execute_is_valid = [&]() {
     const emel::graph::processor::event::execute_step execute_step{
-      fixture->request,
-      execute_ctx,
+        fixture->request,
+        execute_ctx,
     };
-    return emel::graph::processor::guard::valid_execute{}(
-        execute_step, processor_context);
+    return emel::graph::processor::guard::valid_execute{}(execute_step,
+                                                          processor_context);
   };
   CHECK(execute_is_valid());
-  const auto expect_kv_contract_rejected = [&]() { CHECK_FALSE(execute_is_valid()); };
+  const auto expect_kv_contract_rejected = [&]() {
+    CHECK_FALSE(execute_is_valid());
+  };
 
-  const auto * saved_memory_view = fixture->request.memory_view;
+  const auto *saved_memory_view = fixture->request.memory_view;
   fixture->request.memory_view = nullptr;
   err = -1;
   CHECK_FALSE(emel::text::generator::detail::validate_guarded_compute(
       fixture->request, &err));
-  CHECK(err == static_cast<int32_t>(
-                   emel::error::cast(emel::graph::processor::error::invalid_request)));
+  CHECK(err == static_cast<int32_t>(emel::error::cast(
+                   emel::graph::processor::error::invalid_request)));
   expect_kv_contract_rejected();
   fixture->request.memory_view = saved_memory_view;
 
-  const int32_t * saved_seq_primary_ids = fixture->request.seq_primary_ids;
+  const int32_t *saved_seq_primary_ids = fixture->request.seq_primary_ids;
   fixture->request.seq_primary_ids = nullptr;
   expect_kv_contract_rejected();
   fixture->request.seq_primary_ids = saved_seq_primary_ids;
@@ -3250,8 +3380,8 @@ TEST_CASE("generator_detail_graph_callbacks_accept_guarded_requests_without_erro
   err = -1;
   CHECK_FALSE(emel::text::generator::detail::validate_guarded_compute(
       fixture->request, &err));
-  CHECK(err == static_cast<int32_t>(
-                   emel::error::cast(emel::graph::processor::error::invalid_request)));
+  CHECK(err == static_cast<int32_t>(emel::error::cast(
+                   emel::graph::processor::error::invalid_request)));
   fixture->request.seq_primary_ids = saved_seq_primary_ids;
   fixture->request.seq_primary_ids_count =
       static_cast<int32_t>(fixture->seq_primary_ids.size());
@@ -3261,8 +3391,8 @@ TEST_CASE("generator_detail_graph_callbacks_accept_guarded_requests_without_erro
   err = -1;
   CHECK_FALSE(emel::text::generator::detail::validate_guarded_compute(
       fixture->request, &err));
-  CHECK(err == static_cast<int32_t>(
-                   emel::error::cast(emel::graph::processor::error::invalid_request)));
+  CHECK(err == static_cast<int32_t>(emel::error::cast(
+                   emel::graph::processor::error::invalid_request)));
   fixture->memory_snapshot.sequence_recurrent_slot[0] = 0;
   fixture->backend.shortconv_state_size = 0;
 
@@ -3287,9 +3417,8 @@ TEST_CASE("generator_detail_graph_callbacks_accept_guarded_requests_without_erro
 TEST_CASE("generator_detail_graph_callbacks_reject_incoherent_kv_snapshots") {
   namespace gen_detail = emel::text::generator::detail;
 
-  const int32_t invalid_request =
-      static_cast<int32_t>(
-          emel::error::cast(emel::graph::processor::error::invalid_request));
+  const int32_t invalid_request = static_cast<int32_t>(
+      emel::error::cast(emel::graph::processor::error::invalid_request));
 
   {
     auto fixture = std::make_unique<runtime_request_fixture>();
@@ -3328,32 +3457,35 @@ TEST_CASE("generator_detail_graph_callbacks_reject_incoherent_kv_snapshots") {
     fixture->memory_snapshot.sequence_kv_blocks[0][1] = 2;
     fixture->request.positions = decode_positions.data();
 
-    fixture->request.run_kernel = gen_detail::run_kernel_nonflash_decode_packed_q8_0;
+    fixture->io.selected_attention_mode =
+        emel::text::generator::attention_mode::nonflash;
     int32_t err = -1;
     CHECK(gen_detail::validate_guarded_compute(fixture->request, &err));
     CHECK(err == -1);
 
-    fixture->request.run_kernel = gen_detail::run_kernel_flash_decode_packed_q8_0;
+    fixture->io.selected_attention_mode =
+        emel::text::generator::attention_mode::flash;
     err = -1;
     CHECK_FALSE(gen_detail::validate_guarded_compute(fixture->request, &err));
     CHECK(err == invalid_request);
   }
 }
 
-TEST_CASE("generator_detail_runtime_callbacks_bind_run_and_extract_guarded_data") {
+TEST_CASE(
+    "generator_detail_runtime_callbacks_bind_run_and_extract_guarded_data") {
   auto fixture = std::make_unique<runtime_request_fixture>();
   int32_t err = -1;
   int32_t outputs = 0;
 
-  CHECK(emel::text::generator::detail::bind_guarded_inputs(
-      fixture->request, &err));
+  CHECK(emel::text::generator::detail::bind_guarded_inputs(fixture->request,
+                                                           &err));
   CHECK(err == -1);
   CHECK(fixture->backend.bound_ready);
   CHECK(fixture->backend.bound_token_count == 1);
   CHECK(fixture->backend.bound_position_count == 1);
 
-  CHECK(emel::text::generator::detail::extract_guarded_outputs(
-      fixture->request, &outputs, &err));
+  CHECK(emel::text::generator::detail::extract_guarded_outputs(fixture->request,
+                                                               &outputs, &err));
   CHECK(outputs == 1);
   CHECK(err == -1);
   CHECK(fixture->logits[0] == doctest::Approx(0.25f));
@@ -3705,8 +3837,10 @@ TEST_CASE("generator_detail_gemma4_shared_kv_layer_rms_norms_value_branch_"
   backend->n_layer = 16;
   backend->blocks.resize(16u, backend->blocks.front());
   backend->blocks[15].attention_v = backend->blocks[15].attention_k;
-  backend->blocks[15].uses_shared_kv_value = true;
-  backend->blocks[15].requires_attention_v_norm = true;
+  backend->blocks[15].value_route = emel::model::llama::detail::
+      generation_attention_value_route::shared_key_value;
+  backend->blocks[15].v_norm_route =
+      emel::model::llama::detail::generation_attention_v_norm_route::rms;
   backend->layer_cache_offsets.resize(16u, 0u);
   backend->flash_layer_cache_offsets.resize(16u, 0u);
 
@@ -3747,8 +3881,8 @@ TEST_CASE("generator_detail_run_kernel_nonflash_prefill_chunk4_batches_"
 #if defined(__aarch64__) && defined(__ARM_NEON) &&                             \
     defined(__ARM_FEATURE_MATMUL_INT8)
   int32_t err = -1;
-  REQUIRE(emel::text::generator::detail::bind_guarded_inputs(
-      fixture->request, &err));
+  REQUIRE(emel::text::generator::detail::bind_guarded_inputs(fixture->request,
+                                                             &err));
   err = emel::text::generator::detail::k_error_ok;
   REQUIRE(emel::text::generator::detail::
               run_kernel_nonflash_prefill_chunk4_packed_q8_0(fixture->request,
@@ -3777,8 +3911,8 @@ TEST_CASE("generator_detail_run_kernel_nonflash_prefill_chunk4_preselected_"
 #if defined(__aarch64__) && defined(__ARM_NEON) &&                             \
     defined(__ARM_FEATURE_MATMUL_INT8)
   int32_t err = -1;
-  REQUIRE(emel::text::generator::detail::bind_guarded_inputs(
-      fixture->request, &err));
+  REQUIRE(emel::text::generator::detail::bind_guarded_inputs(fixture->request,
+                                                             &err));
   err = emel::text::generator::detail::k_error_ok;
   REQUIRE(emel::text::generator::detail::
               run_kernel_nonflash_prefill_chunk4_preselected_argmax_packed_q8_0(
@@ -3807,8 +3941,8 @@ TEST_CASE("generator_detail_run_kernel_flash_prefill_chunk4_batches_explicit_"
 #if defined(__aarch64__) && defined(__ARM_NEON) &&                             \
     defined(__ARM_FEATURE_MATMUL_INT8)
   int32_t err = -1;
-  REQUIRE(emel::text::generator::detail::bind_guarded_inputs(
-      fixture->request, &err));
+  REQUIRE(emel::text::generator::detail::bind_guarded_inputs(fixture->request,
+                                                             &err));
   err = emel::text::generator::detail::k_error_ok;
   REQUIRE(
       emel::text::generator::detail::
@@ -3839,8 +3973,8 @@ TEST_CASE("generator_detail_run_kernel_nonflash_prefill_chunk4_batches_hybrid_"
 #if defined(__aarch64__) && defined(__ARM_NEON) &&                             \
     defined(__ARM_FEATURE_DOTPROD)
   int32_t err = -1;
-  REQUIRE(emel::text::generator::detail::bind_guarded_inputs(
-      fixture->request, &err));
+  REQUIRE(emel::text::generator::detail::bind_guarded_inputs(fixture->request,
+                                                             &err));
   err = emel::text::generator::detail::k_error_ok;
   REQUIRE(
       emel::text::generator::detail::run_kernel_nonflash_prefill_chunk4_q8_k(
@@ -3861,6 +3995,49 @@ TEST_CASE("generator_detail_run_kernel_nonflash_prefill_chunk4_batches_hybrid_"
 #endif
 }
 
+TEST_CASE("generator_detail_nonflash_chunk4_prefill_matches_scalar_q8_k_on_"
+          "nonzero_hybrid_fixture") {
+#if defined(__aarch64__) && defined(__ARM_NEON) &&                             \
+    defined(__ARM_FEATURE_DOTPROD)
+  using fixture_type = hybrid_chunk4_q8_runtime_fixture;
+  auto scalar_fixture = std::make_unique<fixture_type>();
+  REQUIRE(scalar_fixture->ready);
+  REQUIRE(seed_nonzero_hybrid_fixture_weights(*scalar_fixture));
+  int32_t err = -1;
+  REQUIRE(emel::text::generator::detail::bind_guarded_inputs(
+      scalar_fixture->request, &err));
+  REQUIRE(emel::text::generator::detail::run_prefill<
+          emel::text::generator::attention_mode::nonflash,
+          emel::text::generator::detail::scalar_matmul_route::q8_k>(
+      scalar_fixture->backend));
+
+  auto chunk_fixture = std::make_unique<fixture_type>();
+  REQUIRE(chunk_fixture->ready);
+  REQUIRE(seed_nonzero_hybrid_fixture_weights(*chunk_fixture));
+  err = -1;
+  REQUIRE(emel::text::generator::detail::bind_guarded_inputs(
+      chunk_fixture->request, &err));
+  REQUIRE(emel::text::generator::detail::run_prefill_chunk4<
+          emel::text::generator::attention_mode::nonflash,
+          emel::text::generator::detail::chunk4_rhs_route::q8_k>(
+      chunk_fixture->backend));
+
+  REQUIRE(chunk_fixture->backend.bound_logits.size() ==
+          scalar_fixture->backend.bound_logits.size());
+  float max_delta = 0.0f;
+  for (size_t idx = 0; idx < scalar_fixture->backend.bound_logits.size();
+       ++idx) {
+    max_delta = std::max(max_delta,
+                         std::fabs(chunk_fixture->backend.bound_logits[idx] -
+                                   scalar_fixture->backend.bound_logits[idx]));
+    CHECK(chunk_fixture->backend.bound_logits[idx] ==
+          doctest::Approx(scalar_fixture->backend.bound_logits[idx])
+              .epsilon(1.0e-5f));
+  }
+  CHECK(max_delta <= 1.0e-4f);
+#endif
+}
+
 TEST_CASE("generator_detail_run_kernel_nonflash_prefill_chunk8_batches_hybrid_"
           "q8_k_x8_gemm") {
   auto fixture = std::make_unique<hybrid_chunk8_q8_runtime_fixture>();
@@ -3869,8 +4046,8 @@ TEST_CASE("generator_detail_run_kernel_nonflash_prefill_chunk8_batches_hybrid_"
 #if defined(__aarch64__) && defined(__ARM_NEON) &&                             \
     defined(__ARM_FEATURE_MATMUL_INT8)
   int32_t err = -1;
-  REQUIRE(emel::text::generator::detail::bind_guarded_inputs(
-      fixture->request, &err));
+  REQUIRE(emel::text::generator::detail::bind_guarded_inputs(fixture->request,
+                                                             &err));
   err = emel::text::generator::detail::k_error_ok;
   REQUIRE(
       emel::text::generator::detail::run_kernel_nonflash_prefill_chunk8_q8_k(
@@ -3891,6 +4068,48 @@ TEST_CASE("generator_detail_run_kernel_nonflash_prefill_chunk8_batches_hybrid_"
 #endif
 }
 
+TEST_CASE("generator_detail_nonflash_chunk8_prefill_matches_scalar_q8_k_on_"
+          "nonzero_hybrid_fixture") {
+#if defined(__aarch64__) && defined(__ARM_NEON) &&                             \
+    defined(__ARM_FEATURE_MATMUL_INT8)
+  using fixture_type = hybrid_chunk8_q8_runtime_fixture;
+  auto scalar_fixture = std::make_unique<fixture_type>();
+  REQUIRE(scalar_fixture->ready);
+  REQUIRE(seed_nonzero_hybrid_fixture_weights(*scalar_fixture));
+  int32_t err = -1;
+  REQUIRE(emel::text::generator::detail::bind_guarded_inputs(
+      scalar_fixture->request, &err));
+  REQUIRE(emel::text::generator::detail::run_prefill<
+          emel::text::generator::attention_mode::nonflash,
+          emel::text::generator::detail::scalar_matmul_route::q8_k>(
+      scalar_fixture->backend));
+
+  auto chunk_fixture = std::make_unique<fixture_type>();
+  REQUIRE(chunk_fixture->ready);
+  REQUIRE(seed_nonzero_hybrid_fixture_weights(*chunk_fixture));
+  err = -1;
+  REQUIRE(emel::text::generator::detail::bind_guarded_inputs(
+      chunk_fixture->request, &err));
+  REQUIRE(emel::text::generator::detail::run_prefill_chunk8_q8_k<
+          emel::text::generator::attention_mode::nonflash>(
+      chunk_fixture->backend));
+
+  REQUIRE(chunk_fixture->backend.bound_logits.size() ==
+          scalar_fixture->backend.bound_logits.size());
+  float max_delta = 0.0f;
+  for (size_t idx = 0; idx < scalar_fixture->backend.bound_logits.size();
+       ++idx) {
+    max_delta = std::max(max_delta,
+                         std::fabs(chunk_fixture->backend.bound_logits[idx] -
+                                   scalar_fixture->backend.bound_logits[idx]));
+    CHECK(chunk_fixture->backend.bound_logits[idx] ==
+          doctest::Approx(scalar_fixture->backend.bound_logits[idx])
+              .epsilon(1.0e-5f));
+  }
+  CHECK(max_delta <= 1.0e-4f);
+#endif
+}
+
 TEST_CASE("generator_detail_run_kernel_flash_prefill_chunk8_batches_hybrid_q8_"
           "k_x8_gemm") {
   auto fixture = std::make_unique<hybrid_chunk8_q8_runtime_fixture>();
@@ -3899,8 +4118,8 @@ TEST_CASE("generator_detail_run_kernel_flash_prefill_chunk8_batches_hybrid_q8_"
 #if defined(__aarch64__) && defined(__ARM_NEON) &&                             \
     defined(__ARM_FEATURE_MATMUL_INT8)
   int32_t err = -1;
-  REQUIRE(emel::text::generator::detail::bind_guarded_inputs(
-      fixture->request, &err));
+  REQUIRE(emel::text::generator::detail::bind_guarded_inputs(fixture->request,
+                                                             &err));
   err = emel::text::generator::detail::k_error_ok;
   REQUIRE(emel::text::generator::detail::run_kernel_flash_prefill_chunk8_q8_k(
       fixture->request, &err));
