@@ -3759,10 +3759,10 @@ inline bool acquire_streamed_layer(native_backend &backend,
 template <emel::text::generator::attention_mode mode, scalar_matmul_route route,
           attention_qk_norm_route qk_route, attention_v_norm_route v_route,
           matmul_lane_mode lanes = matmul_lane_mode::serial>
-inline bool run_layer_attention_residual(native_backend &backend,
-                                         const int32_t layer_index,
-                                         const kv_addressing_view &kv,
-                                         const int32_t position) noexcept {
+inline bool compute_layer_attention_residual(native_backend &backend,
+                                             const int32_t layer_index,
+                                             const kv_addressing_view &kv,
+                                             const int32_t position) noexcept {
   auto &block = backend.blocks[static_cast<size_t>(layer_index)];
   const int32_t q_dim = effective_attention_q_dim(backend, block);
   const int32_t kv_dim = effective_attention_kv_dim(backend, block);
@@ -3855,16 +3855,17 @@ inline bool run_layer_attention_residual(native_backend &backend,
 template <scalar_matmul_route route,
           matmul_lane_mode lanes = matmul_lane_mode::serial>
 inline bool
-run_layer_shortconv_residual(native_backend &backend, const int32_t layer_index,
-                             const kv_addressing_view &kv) noexcept {
+compute_layer_shortconv_residual(native_backend &backend,
+                                 const int32_t layer_index,
+                                 const kv_addressing_view &kv) noexcept {
   auto &block = backend.blocks[static_cast<size_t>(layer_index)];
   return run_shortconv_block<route, lanes>(backend, kv, block, layer_index);
 }
 
 template <scalar_matmul_route route,
           matmul_lane_mode lanes = matmul_lane_mode::serial>
-inline bool run_layer_feed_forward(native_backend &backend,
-                                   const int32_t layer_index) noexcept {
+inline bool compute_layer_feed_forward(native_backend &backend,
+                                       const int32_t layer_index) noexcept {
   auto &block = backend.blocks[static_cast<size_t>(layer_index)];
   if (!rms_norm(backend.hidden, block.feed_forward_norm, backend.rms_epsilon,
                 backend.norm)) {
@@ -4293,7 +4294,7 @@ inline bool run_shortconv_block_chunk8_q8_k(
 template <emel::text::generator::attention_mode mode, chunk4_rhs_route route,
           attention_qk_norm_route qk_route, attention_v_norm_route v_route,
           matmul_lane_mode lanes = matmul_lane_mode::serial>
-inline bool run_layer_chunk4_attention_residual(
+inline bool compute_layer_chunk4_attention_residual(
     native_backend &backend, const kv_addressing_view &kv,
     const int32_t layer_index, const size_t token_base) noexcept {
   auto &block = backend.blocks[static_cast<size_t>(layer_index)];
@@ -4384,9 +4385,9 @@ inline bool run_layer_chunk4_attention_residual(
 template <chunk4_rhs_route route,
           matmul_lane_mode lanes = matmul_lane_mode::serial>
 inline bool
-run_layer_chunk4_shortconv_residual(native_backend &backend,
-                                    const kv_addressing_view &kv,
-                                    const int32_t layer_index) noexcept {
+compute_layer_chunk4_shortconv_residual(native_backend &backend,
+                                        const kv_addressing_view &kv,
+                                        const int32_t layer_index) noexcept {
   auto &block = backend.blocks[static_cast<size_t>(layer_index)];
   return run_shortconv_block_chunk4<route, lanes>(backend, kv, block,
                                                   layer_index);
@@ -4394,8 +4395,9 @@ run_layer_chunk4_shortconv_residual(native_backend &backend,
 
 template <chunk4_rhs_route route,
           matmul_lane_mode lanes = matmul_lane_mode::serial>
-inline bool run_layer_chunk4_feed_forward(native_backend &backend,
-                                          const int32_t layer_index) noexcept {
+inline bool
+compute_layer_chunk4_feed_forward(native_backend &backend,
+                                  const int32_t layer_index) noexcept {
   auto &block = backend.blocks[static_cast<size_t>(layer_index)];
   const int32_t ffn_dim = block.feed_forward_gate.rows;
   if (!rms_norm_chunk4(backend.hidden_chunk4, backend.n_embd,
@@ -4439,7 +4441,7 @@ inline bool run_layer_chunk4_feed_forward(native_backend &backend,
 template <emel::text::generator::attention_mode mode,
           attention_qk_norm_route qk_route, attention_v_norm_route v_route,
           matmul_lane_mode lanes = matmul_lane_mode::serial>
-inline bool run_layer_chunk8_q8_k_attention_residual(
+inline bool compute_layer_chunk8_q8_k_attention_residual(
     native_backend &backend, const kv_addressing_view &kv,
     const int32_t layer_index, const size_t token_base) noexcept {
   auto &block = backend.blocks[static_cast<size_t>(layer_index)];
@@ -4527,10 +4529,9 @@ inline bool run_layer_chunk8_q8_k_attention_residual(
 }
 
 template <matmul_lane_mode lanes = matmul_lane_mode::serial>
-inline bool
-run_layer_chunk8_q8_k_shortconv_residual(native_backend &backend,
-                                         const kv_addressing_view &kv,
-                                         const int32_t layer_index) noexcept {
+inline bool compute_layer_chunk8_q8_k_shortconv_residual(
+    native_backend &backend, const kv_addressing_view &kv,
+    const int32_t layer_index) noexcept {
   auto &block = backend.blocks[static_cast<size_t>(layer_index)];
   return run_shortconv_block_chunk8_q8_k<lanes>(backend, kv, block,
                                                 layer_index);
@@ -4538,8 +4539,8 @@ run_layer_chunk8_q8_k_shortconv_residual(native_backend &backend,
 
 template <matmul_lane_mode lanes = matmul_lane_mode::serial>
 inline bool
-run_layer_chunk8_q8_k_feed_forward(native_backend &backend,
-                                   const int32_t layer_index) noexcept {
+compute_layer_chunk8_q8_k_feed_forward(native_backend &backend,
+                                       const int32_t layer_index) noexcept {
   auto &block = backend.blocks[static_cast<size_t>(layer_index)];
   const int32_t ffn_dim = block.feed_forward_gate.rows;
   if (!rms_norm_chunk8(backend.hidden_chunk8, backend.n_embd,
@@ -4581,9 +4582,10 @@ run_layer_chunk8_q8_k_feed_forward(native_backend &backend,
 
 template <emel::text::generator::attention_mode mode, chunk4_rhs_route route,
           matmul_lane_mode lanes = matmul_lane_mode::serial>
-inline bool
-run_layer_chunk4(native_backend &backend, const kv_addressing_view &kv,
-                 const int32_t layer_index, const size_t token_base) noexcept {
+inline bool compute_layer_chunk4(native_backend &backend,
+                                 const kv_addressing_view &kv,
+                                 const int32_t layer_index,
+                                 const size_t token_base) noexcept {
   auto &block = backend.blocks[static_cast<size_t>(layer_index)];
   if (!rms_norm_chunk4(backend.hidden_chunk4, backend.n_embd,
                        block.attention_norm, backend.rms_epsilon,
@@ -4604,10 +4606,10 @@ run_layer_chunk4(native_backend &backend, const kv_addressing_view &kv,
 
 template <emel::text::generator::attention_mode mode,
           matmul_lane_mode lanes = matmul_lane_mode::serial>
-inline bool run_layer_chunk8_q8_k(native_backend &backend,
-                                  const kv_addressing_view &kv,
-                                  const int32_t layer_index,
-                                  const size_t token_base) noexcept {
+inline bool compute_layer_chunk8_q8_k(native_backend &backend,
+                                      const kv_addressing_view &kv,
+                                      const int32_t layer_index,
+                                      const size_t token_base) noexcept {
   auto &block = backend.blocks[static_cast<size_t>(layer_index)];
   if (!rms_norm_chunk8(backend.hidden_chunk8, backend.n_embd,
                        block.attention_norm, backend.rms_epsilon,
@@ -4651,8 +4653,9 @@ inline bool run_prefill_chunk4_tokens(native_backend &backend,
     }
 
     for (int32_t layer = 0; layer < backend.n_layer; ++layer) {
-      if (!run_layer_chunk4<mode, route, lanes>(backend, kv, layer,
-                                                token_base)) {
+      if (!emel::text::generator::layer::action::run_layer_chunk4<mode, route,
+                                                                  lanes>(
+              backend, kv, layer, token_base)) {
         return false;
       }
     }
@@ -4693,7 +4696,9 @@ inline bool run_prefill_chunk8_tokens_q8_k(native_backend &backend,
     }
 
     for (int32_t layer = 0; layer < backend.n_layer; ++layer) {
-      if (!run_layer_chunk8_q8_k<mode, lanes>(backend, kv, layer, token_base)) {
+      if (!emel::text::generator::layer::action::run_layer_chunk8_q8_k<mode,
+                                                                       lanes>(
+              backend, kv, layer, token_base)) {
         return false;
       }
     }

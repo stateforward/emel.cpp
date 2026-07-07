@@ -16,61 +16,197 @@ template <emel::text::generator::attention_mode mode, scalar_matmul_route route,
           emel::text::generator::layer::event::attention_qk_norm_route qk_route,
           emel::text::generator::layer::event::attention_v_norm_route v_route,
           emel::text::generator::matmul::lane_mode lanes>
-bool run_layer_attention_residual(native_backend &backend, int32_t layer_index,
-                                  const kv_addressing_view &kv,
-                                  int32_t position) noexcept;
+bool compute_layer_attention_residual(native_backend &backend,
+                                      int32_t layer_index,
+                                      const kv_addressing_view &kv,
+                                      int32_t position) noexcept;
 
 template <scalar_matmul_route route,
           emel::text::generator::matmul::lane_mode lanes>
-bool run_layer_shortconv_residual(native_backend &backend, int32_t layer_index,
-                                  const kv_addressing_view &kv) noexcept;
+bool compute_layer_shortconv_residual(native_backend &backend,
+                                      int32_t layer_index,
+                                      const kv_addressing_view &kv) noexcept;
 
 template <scalar_matmul_route route,
           emel::text::generator::matmul::lane_mode lanes>
-bool run_layer_feed_forward(native_backend &backend,
-                            int32_t layer_index) noexcept;
+bool compute_layer_feed_forward(native_backend &backend,
+                                int32_t layer_index) noexcept;
 
 template <emel::text::generator::attention_mode mode, chunk4_rhs_route route,
           emel::text::generator::layer::event::attention_qk_norm_route qk_route,
           emel::text::generator::layer::event::attention_v_norm_route v_route,
           emel::text::generator::matmul::lane_mode lanes>
-bool run_layer_chunk4_attention_residual(native_backend &backend,
-                                         const kv_addressing_view &kv,
-                                         int32_t layer_index,
-                                         size_t token_base) noexcept;
+bool compute_layer_chunk4_attention_residual(native_backend &backend,
+                                             const kv_addressing_view &kv,
+                                             int32_t layer_index,
+                                             size_t token_base) noexcept;
 
 template <chunk4_rhs_route route,
           emel::text::generator::matmul::lane_mode lanes>
-bool run_layer_chunk4_shortconv_residual(native_backend &backend,
-                                         const kv_addressing_view &kv,
-                                         int32_t layer_index) noexcept;
+bool compute_layer_chunk4_shortconv_residual(native_backend &backend,
+                                             const kv_addressing_view &kv,
+                                             int32_t layer_index) noexcept;
 
 template <chunk4_rhs_route route,
           emel::text::generator::matmul::lane_mode lanes>
-bool run_layer_chunk4_feed_forward(native_backend &backend,
-                                   int32_t layer_index) noexcept;
+bool compute_layer_chunk4_feed_forward(native_backend &backend,
+                                       int32_t layer_index) noexcept;
 
 template <emel::text::generator::attention_mode mode,
           emel::text::generator::layer::event::attention_qk_norm_route qk_route,
           emel::text::generator::layer::event::attention_v_norm_route v_route,
           emel::text::generator::matmul::lane_mode lanes>
-bool run_layer_chunk8_q8_k_attention_residual(native_backend &backend,
-                                              const kv_addressing_view &kv,
-                                              int32_t layer_index,
-                                              size_t token_base) noexcept;
+bool compute_layer_chunk8_q8_k_attention_residual(native_backend &backend,
+                                                  const kv_addressing_view &kv,
+                                                  int32_t layer_index,
+                                                  size_t token_base) noexcept;
 
 template <emel::text::generator::matmul::lane_mode lanes>
-bool run_layer_chunk8_q8_k_shortconv_residual(native_backend &backend,
-                                              const kv_addressing_view &kv,
-                                              int32_t layer_index) noexcept;
+bool compute_layer_chunk8_q8_k_shortconv_residual(native_backend &backend,
+                                                  const kv_addressing_view &kv,
+                                                  int32_t layer_index) noexcept;
 
 template <emel::text::generator::matmul::lane_mode lanes>
-bool run_layer_chunk8_q8_k_feed_forward(native_backend &backend,
-                                        int32_t layer_index) noexcept;
+bool compute_layer_chunk8_q8_k_feed_forward(native_backend &backend,
+                                            int32_t layer_index) noexcept;
+
+template <emel::text::generator::attention_mode mode, chunk4_rhs_route route,
+          emel::text::generator::matmul::lane_mode lanes>
+bool compute_layer_chunk4(native_backend &backend, const kv_addressing_view &kv,
+                          int32_t layer_index, size_t token_base) noexcept;
+
+template <emel::text::generator::attention_mode mode,
+          emel::text::generator::matmul::lane_mode lanes>
+bool compute_layer_chunk8_q8_k(native_backend &backend,
+                               const kv_addressing_view &kv,
+                               int32_t layer_index, size_t token_base) noexcept;
 
 } // namespace emel::text::generator::detail
 
 namespace emel::text::generator::layer::action {
+
+template <emel::text::generator::attention_mode mode,
+          emel::text::generator::detail::scalar_matmul_route route,
+          event::attention_qk_norm_route qk_route,
+          event::attention_v_norm_route v_route,
+          emel::text::generator::matmul::lane_mode lanes>
+bool run_layer_attention_residual(
+    emel::text::generator::detail::native_backend &backend,
+    const int32_t layer_index,
+    const emel::text::generator::detail::kv_addressing_view &kv,
+    const int32_t position) noexcept {
+  return emel::text::generator::detail::compute_layer_attention_residual<
+      mode, route, qk_route, v_route, lanes>(backend, layer_index, kv,
+                                             position);
+}
+
+template <emel::text::generator::detail::scalar_matmul_route route,
+          emel::text::generator::matmul::lane_mode lanes>
+bool run_layer_shortconv_residual(
+    emel::text::generator::detail::native_backend &backend,
+    const int32_t layer_index,
+    const emel::text::generator::detail::kv_addressing_view &kv) noexcept {
+  return emel::text::generator::detail::compute_layer_shortconv_residual<route,
+                                                                         lanes>(
+      backend, layer_index, kv);
+}
+
+template <emel::text::generator::detail::scalar_matmul_route route,
+          emel::text::generator::matmul::lane_mode lanes>
+bool run_layer_feed_forward(
+    emel::text::generator::detail::native_backend &backend,
+    const int32_t layer_index) noexcept {
+  return emel::text::generator::detail::compute_layer_feed_forward<route,
+                                                                   lanes>(
+      backend, layer_index);
+}
+
+template <emel::text::generator::attention_mode mode,
+          emel::text::generator::detail::chunk4_rhs_route route,
+          event::attention_qk_norm_route qk_route,
+          event::attention_v_norm_route v_route,
+          emel::text::generator::matmul::lane_mode lanes>
+bool run_layer_chunk4_attention_residual(
+    emel::text::generator::detail::native_backend &backend,
+    const emel::text::generator::detail::kv_addressing_view &kv,
+    const int32_t layer_index, const size_t token_base) noexcept {
+  return emel::text::generator::detail::compute_layer_chunk4_attention_residual<
+      mode, route, qk_route, v_route, lanes>(backend, kv, layer_index,
+                                             token_base);
+}
+
+template <emel::text::generator::detail::chunk4_rhs_route route,
+          emel::text::generator::matmul::lane_mode lanes>
+bool run_layer_chunk4_shortconv_residual(
+    emel::text::generator::detail::native_backend &backend,
+    const emel::text::generator::detail::kv_addressing_view &kv,
+    const int32_t layer_index) noexcept {
+  return emel::text::generator::detail::compute_layer_chunk4_shortconv_residual<
+      route, lanes>(backend, kv, layer_index);
+}
+
+template <emel::text::generator::detail::chunk4_rhs_route route,
+          emel::text::generator::matmul::lane_mode lanes>
+bool run_layer_chunk4_feed_forward(
+    emel::text::generator::detail::native_backend &backend,
+    const int32_t layer_index) noexcept {
+  return emel::text::generator::detail::compute_layer_chunk4_feed_forward<
+      route, lanes>(backend, layer_index);
+}
+
+template <emel::text::generator::attention_mode mode,
+          event::attention_qk_norm_route qk_route,
+          event::attention_v_norm_route v_route,
+          emel::text::generator::matmul::lane_mode lanes>
+bool run_layer_chunk8_q8_k_attention_residual(
+    emel::text::generator::detail::native_backend &backend,
+    const emel::text::generator::detail::kv_addressing_view &kv,
+    const int32_t layer_index, const size_t token_base) noexcept {
+  return emel::text::generator::detail::
+      compute_layer_chunk8_q8_k_attention_residual<mode, qk_route, v_route,
+                                                   lanes>(
+          backend, kv, layer_index, token_base);
+}
+
+template <emel::text::generator::matmul::lane_mode lanes>
+bool run_layer_chunk8_q8_k_shortconv_residual(
+    emel::text::generator::detail::native_backend &backend,
+    const emel::text::generator::detail::kv_addressing_view &kv,
+    const int32_t layer_index) noexcept {
+  return emel::text::generator::detail::
+      compute_layer_chunk8_q8_k_shortconv_residual<lanes>(backend, kv,
+                                                          layer_index);
+}
+
+template <emel::text::generator::matmul::lane_mode lanes>
+bool run_layer_chunk8_q8_k_feed_forward(
+    emel::text::generator::detail::native_backend &backend,
+    const int32_t layer_index) noexcept {
+  return emel::text::generator::detail::compute_layer_chunk8_q8_k_feed_forward<
+      lanes>(backend, layer_index);
+}
+
+template <emel::text::generator::attention_mode mode,
+          emel::text::generator::detail::chunk4_rhs_route route,
+          emel::text::generator::matmul::lane_mode lanes>
+bool run_layer_chunk4(
+    emel::text::generator::detail::native_backend &backend,
+    const emel::text::generator::detail::kv_addressing_view &kv,
+    const int32_t layer_index, const size_t token_base) noexcept {
+  return emel::text::generator::detail::compute_layer_chunk4<mode, route,
+                                                             lanes>(
+      backend, kv, layer_index, token_base);
+}
+
+template <emel::text::generator::attention_mode mode,
+          emel::text::generator::matmul::lane_mode lanes>
+bool run_layer_chunk8_q8_k(
+    emel::text::generator::detail::native_backend &backend,
+    const emel::text::generator::detail::kv_addressing_view &kv,
+    const int32_t layer_index, const size_t token_base) noexcept {
+  return emel::text::generator::detail::compute_layer_chunk8_q8_k<mode, lanes>(
+      backend, kv, layer_index, token_base);
+}
 
 // Branch-only coverage exclusion: these action wrappers compose already-chosen
 // route bodies. The transition guards remain branch-covered in guards.hpp,
@@ -84,9 +220,8 @@ template <emel::text::generator::attention_mode mode,
 struct effect_run_scalar_attention {
   void operator()(const event::scalar_run &ev) const noexcept {
     ev.residual_ok =
-        emel::text::generator::detail::run_layer_attention_residual<
-            mode, route, qk_route, v_route, lanes>(ev.backend, ev.layer_index,
-                                                   ev.kv, ev.position);
+        run_layer_attention_residual<mode, route, qk_route, v_route, lanes>(
+            ev.backend, ev.layer_index, ev.kv, ev.position);
   }
 };
 
@@ -94,10 +229,8 @@ template <emel::text::generator::detail::scalar_matmul_route route,
           emel::text::generator::matmul::lane_mode lanes>
 struct effect_run_scalar_shortconv {
   void operator()(const event::scalar_run &ev) const noexcept {
-    ev.residual_ok =
-        emel::text::generator::detail::run_layer_shortconv_residual<route,
-                                                                    lanes>(
-            ev.backend, ev.layer_index, ev.kv);
+    ev.residual_ok = run_layer_shortconv_residual<route, lanes>(
+        ev.backend, ev.layer_index, ev.kv);
   }
 };
 
@@ -106,8 +239,7 @@ template <emel::text::generator::detail::scalar_matmul_route route,
 struct effect_run_scalar_feed_forward {
   void operator()(const event::scalar_run &ev) const noexcept {
     ev.feed_forward_ok =
-        emel::text::generator::detail::run_layer_feed_forward<route, lanes>(
-            ev.backend, ev.layer_index);
+        run_layer_feed_forward<route, lanes>(ev.backend, ev.layer_index);
   }
 };
 
@@ -118,10 +250,9 @@ template <emel::text::generator::attention_mode mode,
           emel::text::generator::matmul::lane_mode lanes>
 struct effect_run_chunk4_attention {
   void operator()(const event::chunk4_run &ev) const noexcept {
-    ev.residual_ok =
-        emel::text::generator::detail::run_layer_chunk4_attention_residual<
-            mode, route, qk_route, v_route, lanes>(
-            ev.backend, ev.kv, ev.layer_index, ev.token_base);
+    ev.residual_ok = run_layer_chunk4_attention_residual<mode, route, qk_route,
+                                                         v_route, lanes>(
+        ev.backend, ev.kv, ev.layer_index, ev.token_base);
   }
 };
 
@@ -129,9 +260,8 @@ template <emel::text::generator::detail::chunk4_rhs_route route,
           emel::text::generator::matmul::lane_mode lanes>
 struct effect_run_chunk4_shortconv {
   void operator()(const event::chunk4_run &ev) const noexcept {
-    ev.residual_ok =
-        emel::text::generator::detail::run_layer_chunk4_shortconv_residual<
-            route, lanes>(ev.backend, ev.kv, ev.layer_index);
+    ev.residual_ok = run_layer_chunk4_shortconv_residual<route, lanes>(
+        ev.backend, ev.kv, ev.layer_index);
   }
 };
 
@@ -140,9 +270,7 @@ template <emel::text::generator::detail::chunk4_rhs_route route,
 struct effect_run_chunk4_feed_forward {
   void operator()(const event::chunk4_run &ev) const noexcept {
     ev.feed_forward_ok =
-        emel::text::generator::detail::run_layer_chunk4_feed_forward<route,
-                                                                     lanes>(
-            ev.backend, ev.layer_index);
+        run_layer_chunk4_feed_forward<route, lanes>(ev.backend, ev.layer_index);
   }
 };
 
@@ -152,19 +280,17 @@ template <emel::text::generator::attention_mode mode,
           emel::text::generator::matmul::lane_mode lanes>
 struct effect_run_chunk8_attention {
   void operator()(const event::chunk8_run &ev) const noexcept {
-    ev.residual_ok =
-        emel::text::generator::detail::run_layer_chunk8_q8_k_attention_residual<
-            mode, qk_route, v_route, lanes>(ev.backend, ev.kv, ev.layer_index,
-                                            ev.token_base);
+    ev.residual_ok = run_layer_chunk8_q8_k_attention_residual<mode, qk_route,
+                                                              v_route, lanes>(
+        ev.backend, ev.kv, ev.layer_index, ev.token_base);
   }
 };
 
 template <emel::text::generator::matmul::lane_mode lanes>
 struct effect_run_chunk8_shortconv {
   void operator()(const event::chunk8_run &ev) const noexcept {
-    ev.residual_ok =
-        emel::text::generator::detail::run_layer_chunk8_q8_k_shortconv_residual<
-            lanes>(ev.backend, ev.kv, ev.layer_index);
+    ev.residual_ok = run_layer_chunk8_q8_k_shortconv_residual<lanes>(
+        ev.backend, ev.kv, ev.layer_index);
   }
 };
 
@@ -172,8 +298,7 @@ template <emel::text::generator::matmul::lane_mode lanes>
 struct effect_run_chunk8_feed_forward {
   void operator()(const event::chunk8_run &ev) const noexcept {
     ev.feed_forward_ok =
-        emel::text::generator::detail::run_layer_chunk8_q8_k_feed_forward<
-            lanes>(ev.backend, ev.layer_index);
+        run_layer_chunk8_q8_k_feed_forward<lanes>(ev.backend, ev.layer_index);
   }
 };
 
