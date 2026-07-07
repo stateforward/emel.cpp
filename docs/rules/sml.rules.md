@@ -8,9 +8,9 @@ remaining synchronous run-to-completion (RTC) and using no message queue.
 these rules apply to:
 - stateforward.SML state machines (`stateforward::sml::sm<...>`) and their composition (composite state machines, orthogonal regions).
 - synchronous RTC semantics only (no background workers, no mailboxes, no deferred buffering).
-- coroutine or `async`-named APIs when the caller observes quiescence before
-  the top-level dispatch returns. `async` is not deferred by definition; hidden
-  retention of work for later is what violates RTC/no-queue semantics.
+- coroutine or `async`-named APIs when completion is explicitly observed by the
+  owning orchestrator. `async` is not deferred by definition; hidden retention
+  of work for later is what violates RTC/no-queue semantics.
 
 the rules assume the project-pinned stateforward.SML semantics as implemented in the
 local header and utility dispatch table, including typed completion propagation
@@ -29,9 +29,11 @@ primary sources consulted (non-exhaustive)
   exposed MAY carry mutable fields when needed for synchronous RTC handoff.
 - RTC chain: the complete, synchronous computation triggered by one top-level dispatch call, including SML internal anonymous transitions.
 - RTC async/coroutine dispatch: a coroutine-backed dispatch whose completion is
-  driven and observed within the same RTC chain. such a call may expose a task
-  object internally, but no incomplete task or continuation may escape the RTC
-  boundary unless the later completion is modeled as an explicit external event.
+  driven and observed by the actor or orchestrator that owns that dispatch's
+  RTC boundary. such a call may expose a task object as the explicit completion
+  handle, but no hidden continuation, scheduler work item, or actor-owned
+  mutation may escape that boundary without being modeled as an explicit
+  external event.
 - quiescence: a stable configuration where no further internal (anonymous) transitions are enabled.
 - orchestrator: the external driver that calls `process_event` on actors and provides time and ordering.
 - no message queue: no SML `process_queue`, no SML `defer_queue`, no user mailbox, and no “post for later” mechanism.
@@ -44,10 +46,12 @@ primary sources consulted (non-exhaustive)
 5. allocation invariant: no dynamic allocation (heap) MUST occur during dispatch (guards/actions/entry/exit/anonymous progress).
 6. bounded-work invariant: each top-level dispatch MUST have a provable upper bound on executed transitions and on total work.
 7. coroutine invariant: `process_event_async` or other coroutine-backed dispatch
-   surfaces MAY be used only when their completion is immediate or driven to
-   quiescence before the caller returns from the enclosing RTC dispatch. a
-   scheduler may sequence continuations inside that chain, but MUST NOT retain
-   work as hidden deferred state.
+   surfaces MAY return an awaitable task when the dispatched actor owns the RTC
+   boundary and the task is the explicit completion handle. any caller that
+   depends on the result, output payload, or actor-owned state MUST await that
+   handle before observing those effects or before returning from an enclosing
+   RTC dispatch that requires them. a scheduler may sequence continuations
+   inside that boundary, but MUST NOT retain work as hidden deferred state.
 
 ## 4. event model
 1. event types SHOULD be small, trivially copyable, and contain only immutable payload.

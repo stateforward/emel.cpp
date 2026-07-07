@@ -189,6 +189,44 @@
 - SHA256: `9465e63a22add5354d9bb4b99e90117043c7124007664907259bd16d043bb031`
 - Download URL: `https://huggingface.co/Qwen/Qwen3-0.6B-GGUF/resolve/main/Qwen3-0.6B-Q8_0.gguf`
 
+## Qwen3-4B-Q4_K_M.gguf
+- Source: `https://huggingface.co/Qwen/Qwen3-4B-GGUF`
+- File: `Qwen3-4B-Q4_K_M.gguf`
+- Stable maintained path: `tests/models/Qwen3-4B-Q4_K_M.gguf`
+- License: Apache-2.0
+- Repository commit: `bc640142c66e1fdd12af0bd68f40445458f3869b`
+- Size: `2497280256` bytes (`2.4G`)
+- SHA256: `7485fe6f11af29433bc51cab58009521f205840f5b4ae3a32fa7f92e8534fdf5`
+- Xet hash: `9375c1fd02b321abc3f51b69ff7fcdd187af17f0d694c5b05000b54664292e17`
+- Download URL:
+  `https://huggingface.co/Qwen/Qwen3-4B-GGUF/resolve/bc640142c66e1fdd12af0bd68f40445458f3869b/Qwen3-4B-Q4_K_M.gguf`
+- Acquisition method (NOT committed to git; over 2 GB): download from the pinned
+  commit above and verify the SHA256 before use. This binary is listed in the repo
+  root `.gitignore` (`tests/models/Qwen3-4B-Q4_K_M.gguf`) and MUST NOT be committed.
+  ```sh
+  curl -L \
+    "https://huggingface.co/Qwen/Qwen3-4B-GGUF/resolve/bc640142c66e1fdd12af0bd68f40445458f3869b/Qwen3-4B-Q4_K_M.gguf" \
+    -o tests/models/Qwen3-4B-Q4_K_M.gguf
+  shasum -a 256 tests/models/Qwen3-4B-Q4_K_M.gguf
+  # expect: 7485fe6f11af29433bc51cab58009521f205840f5b4ae3a32fa7f92e8534fdf5
+  ```
+- Executable metadata truth: verified by direct GGUF header parse of the fetched file:
+  `GGUF` magic, version `3`, `398` tensors, `28` metadata KV pairs,
+  `general.architecture=qwen3`, `general.name=Qwen3 4B Instruct Awq`,
+  `qwen3.block_count=36`, `qwen3.context_length=40960`, `qwen3.embedding_length=2560`,
+  `qwen3.feed_forward_length=9728`, `qwen3.attention.head_count=32`,
+  `qwen3.attention.head_count_kv=8` (grouped-query attention), and
+  `tokenizer.ggml.model=gpt2` (BPE), matching the maintained `qwen3` loader in
+  `src/emel/model/qwen3/detail.cpp`.
+- Purpose: 4B-class scale generation benchmark fixture. All prior maintained generation
+  fixtures are 1.2B parameters or smaller; this fixture exercises the regime where
+  memory bandwidth, GQA KV pressure, and lane scaling dominate. It shares the maintained
+  `qwen3` architecture family with the existing `Qwen3-0.6B-Q8_0.gguf` fixture.
+- Loader/runtime boundary note: provenance and GGUF header truth are proven here.
+  End-to-end EMEL generation and llama.cpp parity are exercised by the
+  `generation/preloaded_request/qwen3_4b_q4_k_m_prompt_hello_max_tokens_{1,10,100,1000}`
+  benchmark cases; see the PR that introduces this fixture for the compare evidence.
+
 ## LFM2.5-1.2B-Thinking-Q4_K_M.gguf
 - Source: `https://huggingface.co/LiquidAI/LFM2.5-1.2B-Thinking-GGUF`
 - File: `LFM2.5-1.2B-Thinking-Q4_K_M.gguf`

@@ -100,8 +100,7 @@ struct baseline_processor_sm : public emel::sm<processor::model, processor_conte
   bool process_event(const emel::graph::processor::event::execute & ev) {
     emel::graph::processor::event::execute_ctx ctx{};
     emel::graph::processor::event::execute_step evt{ev, ctx};
-    const bool accepted = base_type::process_event(evt);
-    return accepted && ctx.err == emel::error::cast(emel::graph::processor::error::none);
+    return base_type::process_event(evt);
   }
 };
 
@@ -256,7 +255,7 @@ bench_fixture<machine_type> make_invalid_fixture() {
   fixture.request =
       make_execute(fixture.output, fixture.dispatch, fixture.lifecycle, prepare_reused);
   fixture.request.step_size = 0;
-  if (fixture.machine.process_event(fixture.request) ||
+  if (!fixture.machine.process_event(fixture.request) ||
       !fixture.dispatch.error_called ||
       fixture.dispatch.error_code !=
           static_cast<int32_t>(emel::error::cast(processor_error::invalid_request))) {
@@ -301,7 +300,7 @@ void append_invalid_case(std::vector<emel::bench::result> & results,
     fixture.dispatch.reset();
     fixture.output = {};
     const bool ok = fixture.machine.process_event(fixture.request);
-    fixture.sink += ok ? 1 : fixture.dispatch.error_code;
+    fixture.sink += ok ? fixture.dispatch.error_code : -1;
   };
   results.push_back(emel::bench::measure_case("graph/processor_invalid", cfg, fn));
 }

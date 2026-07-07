@@ -60,6 +60,7 @@ EMEL_BENCH_ITERS=1 \
 EMEL_BENCH_RUNS=1 \
 EMEL_BENCH_WARMUP_ITERS=0 \
 EMEL_BENCH_WARMUP_RUNS=0 \
+EMEL_BENCH_GENERATION_REFERENCE_THREADS=8 \
 scripts/bench.sh --compare
 ```
 
@@ -74,6 +75,7 @@ EMEL_BENCH_ITERS=1 \
 EMEL_BENCH_RUNS=1 \
 EMEL_BENCH_WARMUP_ITERS=0 \
 EMEL_BENCH_WARMUP_RUNS=0 \
+EMEL_BENCH_GENERATION_REFERENCE_THREADS=8 \
 scripts/bench.sh --compare | \
 rg '^generation/preloaded_request/lfm2_5_1_2b_thinking_q4_k_m_prompt_hello_max_tokens_1 .* ratio='
 ```
@@ -96,6 +98,15 @@ includes both:
 - `generation/preloaded_request/qwen3_0_6b_q8_0_prompt_hello_max_tokens_1`
 - `generation/preloaded_request/lfm2_5_1_2b_thinking_q4_k_m_prompt_hello_max_tokens_1`
 
+Generated generation compare rows run two benchmark lanes by default: `single` and
+`multithreaded`. The `single` lane reports one EMEL serial matmul lane and a llama.cpp
+`n_threads=1,n_threads_batch=1` reference by default. The `multithreaded` lane reports EMEL's
+bounded parallel matmul lane pool (`thread_count=8`) and defaults the llama.cpp reference to
+`n_threads=8,n_threads_batch=8` unless explicitly overridden.
+Preserved rows keep their previous snapshot provenance and are not covered by the current threading
+metadata. Use `EMEL_BENCH_GENERATION_LANE=single` or
+`EMEL_BENCH_GENERATION_LANE=multithreaded` when a run must explicitly opt out of one lane.
+
 ## operator-facing generation compare workflow
 
 for reproducible compare artifacts instead of the benchmark ratio row, use:
@@ -107,15 +118,18 @@ EMEL_BENCH_GENERATION_WARMUP_ITERS=0 \
 EMEL_BENCH_GENERATION_WARMUP_RUNS=0 \
 scripts/bench_generation_compare.sh \
   --reference-backend llama_cpp_generation \
+  --reference-threads 8 \
   --workload-id lfm2_single_user_hello_max_tokens_1_v1
 ```
 
 the wrapper publishes:
 
-- `raw/emel.jsonl`
-- `raw/reference.jsonl`
-- `compare_summary.json`
-- dumped generation outputs under `outputs/emel/` and `outputs/reference/`
+- `single/raw/emel.jsonl` and `multithreaded/raw/emel.jsonl`
+- `single/raw/reference.jsonl` and `multithreaded/raw/reference.jsonl`
+- per-lane `compare_summary.json`
+- dumped generation outputs under each lane's `outputs/emel/` and `outputs/reference/`
+
+pass `--benchmark-lane single` or `--benchmark-lane multithreaded` to intentionally run one lane.
 
 use `--workload-id` when you want to pin the workflow to one manifest-selected compare workload for
 fast local validation or CI proof.
@@ -200,11 +214,12 @@ as permission to refresh checked-in snapshot or generated benchmark evidence fil
 compare mode prints one row per matched case:
 
 ```text
-generation/preloaded_request/lfm2_5_1_2b_thinking_q4_k_m_prompt_hello_max_tokens_1 emel.cpp 550019417.000 ns/op, llama.cpp 481248875.000 ns/op, ratio=1.143x
+generation/preloaded_request/lfm2_5_1_2b_thinking_q4_k_m_prompt_hello_max_tokens_1 emel.cpp 383847833.000 ns/op (2.605 tokens/s), llama.cpp 53832541.000 ns/op (18.576 tokens/s), ratio=7.130x
 ```
 
 - `emel.cpp` is the measured EMEL-side time for the canonical generation case.
 - `llama.cpp` is the direct reference time for the same named case.
+- `tokens/s` reports generated-token throughput for the same measured request.
 - `ratio` is `emel.cpp / llama.cpp`.
 - `ratio > 1.0x` means EMEL is slower for that workload; `ratio < 1.0x` means EMEL is faster.
 
@@ -214,6 +229,9 @@ in JSONL mode, each `generation_compare/v1` record also includes:
 - `prompt_fixture_id` and `prompt_fixture_path`
 - `formatter_mode` and `formatter_contract`
 - `sampling_id`, `stop_id`, `seed`, and `max_output_tokens`
+- `benchmark_lane` (`single` or `multithreaded`)
+- `thread_count` and per-lane `thread_contract`
+- `tokens_per_second` derived from `output_tokens` and the measured `ns_per_op`
 - `comparable`
 
 single-lane workloads are marked with `comparison_mode="single_lane"` and a comparability note
@@ -318,6 +336,14 @@ the canonical generation case has its own bounded local validation knobs:
 - `EMEL_BENCH_GENERATION_RUNS` overrides run count for the generation case only.
 - `EMEL_BENCH_GENERATION_WARMUP_ITERS` overrides warmup iterations for the generation case only.
 - `EMEL_BENCH_GENERATION_WARMUP_RUNS` overrides warmup run count for the generation case only.
+- `EMEL_BENCH_GENERATION_REFERENCE_THREADS` overrides the llama.cpp generation lane thread count
+  for sensitivity runs. The default is half the host hardware thread count.
+- `EMEL_BENCH_GENERATION_REFERENCE_DECODE_THREADS` overrides only llama.cpp `n_threads` for
+  sensitivity runs.
+- `EMEL_BENCH_GENERATION_REFERENCE_BATCH_THREADS` overrides only llama.cpp `n_threads_batch` for
+  sensitivity runs.
+- `EMEL_BENCH_REFERENCE_THREADS` remains accepted as the legacy generation-reference override when
+  the generation-specific variable is unset.
 
 for narrow local debugging, you can also isolate a single case with `EMEL_BENCH_CASE_INDEX`. if
 you need seam-audit output for the generation case, set `EMEL_BENCH_AUDIT_GENERATION_SEAMS=1`;

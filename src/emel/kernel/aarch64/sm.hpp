@@ -389,6 +389,11 @@ struct model {
 
       , sml::state<ready> <= sml::state<ready> +
                sml::event<::emel::kernel::aarch64::event::dispatch_op_mul_mat>
+                 [ guard::simd_op_mul_mat_q8_0_vector_q8_rhs{} ]
+                 / action::exec_simd_op_mul_mat_q8_0_vector_q8_rhs
+
+      , sml::state<ready> <= sml::state<ready> +
+               sml::event<::emel::kernel::aarch64::event::dispatch_op_mul_mat>
                  [ guard::simd_op_mul_mat_q8_0_vector{} ]
                  / action::exec_simd_op_mul_mat_q8_0_vector
 
@@ -416,6 +421,11 @@ struct model {
                sml::event<::emel::kernel::aarch64::event::dispatch_op_mul_mat>
                  [ guard::simd_op_mul_mat_q4_vector_packed_q8_rhs_bl4{} ]
                  / action::exec_simd_op_mul_mat_q4_vector_packed_q8_rhs_bl4
+
+      , sml::state<ready> <= sml::state<ready> +
+               sml::event<::emel::kernel::aarch64::event::dispatch_op_mul_mat>
+                 [ guard::simd_op_mul_mat_q4_vector_q8_rhs{} ]
+                 / action::exec_simd_op_mul_mat_q4_vector_q8_rhs
 
       , sml::state<ready> <= sml::state<ready> +
                sml::event<::emel::kernel::aarch64::event::dispatch_op_mul_mat>
@@ -469,8 +479,18 @@ struct model {
 
       , sml::state<ready> <= sml::state<ready> +
                sml::event<::emel::kernel::aarch64::event::dispatch_op_mul_mat>
+                 [ guard::simd_op_mul_mat_q6_vector_q8_rhs{} ]
+                 / action::exec_simd_op_mul_mat_q6_vector_q8_rhs
+
+      , sml::state<ready> <= sml::state<ready> +
+               sml::event<::emel::kernel::aarch64::event::dispatch_op_mul_mat>
                  [ guard::simd_op_mul_mat_q6_vector{} ]
                  / action::exec_simd_op_mul_mat_q6_vector
+
+      , sml::state<ready> <= sml::state<ready> +
+               sml::event<::emel::kernel::aarch64::event::dispatch_op_mul_mat>
+                 [ guard::simd_op_mul_mat_f32_vector{} ]
+                 / action::exec_simd_op_mul_mat_f32_vector
 
       , sml::state<ready> <= sml::state<ready> +
                sml::event<::emel::kernel::aarch64::event::dispatch_op_mul_mat>
@@ -1323,6 +1343,10 @@ struct sm : public emel::sm<model, action::context> {
 
   uint64_t optimized_f16_vector_dispatch_count() const noexcept {
     return this->context_.optimized_f16_vector_dispatch_count;
+  }
+
+  uint64_t optimized_f32_vector_dispatch_count() const noexcept {
+    return this->context_.optimized_f32_vector_dispatch_count;
   }
 
   uint64_t optimized_conv_transpose_f32_dispatch_count() const noexcept {

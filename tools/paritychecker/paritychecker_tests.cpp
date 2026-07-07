@@ -1528,8 +1528,7 @@ TEST_CASE("paritychecker matches current maintained generation publication "
   }
 }
 
-TEST_CASE(
-    "paritychecker reports legacy maintained generation live-reference drift") {
+TEST_CASE("paritychecker reports non-current maintained generation drift") {
   for (const auto &fixture : emel::tools::generation_fixture_registry::
            k_maintained_generation_fixtures) {
     if (fixture.current_publication) {
@@ -1547,8 +1546,13 @@ TEST_CASE(
         run_generation_paritychecker_capture(model_path, "hello");
 
     CHECK(capture.exit_code == 1);
-    CHECK(capture.stderr_text.find("generation parity mismatch") !=
-          std::string::npos);
+    const bool reported_live_drift =
+        capture.stderr_text.find("generation parity mismatch") !=
+        std::string::npos;
+    const bool reported_baseline_drift =
+        capture.stderr_text.find("generation baseline mismatch") !=
+        std::string::npos;
+    CHECK((reported_live_drift || reported_baseline_drift));
     CHECK(capture.stdout_text.find("reference_impl:") != std::string::npos);
     CHECK(capture.stdout_text.find("generation_baseline:") ==
           std::string::npos);

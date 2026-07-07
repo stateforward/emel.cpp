@@ -1,6 +1,7 @@
 #include <algorithm>
 #include <array>
 #include <doctest/doctest.h>
+#include <memory>
 #include <span>
 #include <vector>
 
@@ -15,8 +16,10 @@
 #include "emel/text/generator/actions.hpp"
 #include "emel/text/generator/guards.hpp"
 #include "emel/text/generator/initializer/guards.hpp"
+#include "emel/text/generator/matmul/sm.hpp"
 #include "emel/text/generator/prefill/actions.hpp"
 #include "emel/text/generator/prefill/guards.hpp"
+#include "generator_test_policies.hpp"
 
 namespace {
 
@@ -132,6 +135,7 @@ struct chunk4_planning_backend_fixture {
   chunk4_planning_backend_fixture() {
     auto &backend = context.compute.backend;
     backend.kernel_kind = emel::kernel::kernel_kind::aarch64;
+    backend.routes = emel::text::generator::test::k_generation_route_policy;
     backend.n_layer = 1;
     backend.n_embd = 4;
     backend.n_head = 1;
@@ -146,7 +150,8 @@ struct chunk4_planning_backend_fixture {
     matrix.dims[1] = 4;
 
     auto &block = backend.blocks.emplace_back();
-    block.uses_attention = true;
+    block.residual_route =
+        emel::model::llama::detail::generation_residual_route::attention;
     block.attention_q = {&matrix, 4, 4};
     block.attention_k = {&matrix, 4, 4};
     block.attention_v = {&matrix, 4, 4};
@@ -189,6 +194,7 @@ struct native_quantized_route_fixture {
   native_quantized_route_fixture() {
     auto &backend = context.compute.backend;
     backend.kernel_kind = emel::kernel::kernel_kind::aarch64;
+    backend.routes = emel::text::generator::test::k_generation_route_policy;
     backend.n_layer = 1;
     backend.n_embd = static_cast<int32_t>(emel::kernel::detail::quant::QK_K);
     backend.n_head = 1;
@@ -207,7 +213,8 @@ struct native_quantized_route_fixture {
     logits_tensor.dims[1] = backend.n_embd;
 
     auto &block = backend.blocks.emplace_back();
-    block.uses_attention = true;
+    block.residual_route =
+        emel::model::llama::detail::generation_residual_route::attention;
     block.attention_q = {&body_tensor, backend.n_embd, backend.n_embd};
     block.attention_k = {&body_tensor, backend.n_embd, backend.n_embd};
     block.attention_v = {&body_tensor, backend.n_embd, backend.n_embd};
@@ -222,6 +229,11 @@ struct native_quantized_route_fixture {
 
 struct compute_guard_fixture {
   emel::text::generator::action::context context = {};
+  emel::text::generator::matmul::lane_pool<7u, 128u, 1048576u> parallel_matmul_lanes = {};
+  emel::text::generator::matmul::execution_policy matmul_policy =
+      emel::text::generator::matmul::make_auto_execution_policy(
+          parallel_matmul_lanes);
+  emel::text::generator::matmul::sm matmul_actor{matmul_policy};
   emel::model::data model = {};
   std::array<emel::graph::processor::event::lifecycle_tensor_binding, 1>
       reserve_tensors = {};
@@ -242,12 +254,14 @@ struct compute_guard_fixture {
     context.buffers.logits = std::make_unique<float[]>(4);
 
     reserve_lifecycle.tensors = reserve_tensors.data();
-    reserve_lifecycle.tensor_count = static_cast<int32_t>(reserve_tensors.size());
+    reserve_lifecycle.tensor_count =
+        static_cast<int32_t>(reserve_tensors.size());
     context.state.graph_reservation.lifecycle = &reserve_lifecycle;
     context.state.graph_reservation.node_count = 1u;
     context.state.graph_reservation.tensor_count = 1u;
 
-    auto & backend = context.compute.backend;
+    auto &backend = context.compute.backend;
+    backend.matmul_actor = &matmul_actor;
     backend.model = &model;
     backend.n_embd = 4;
     backend.n_head = 1;
@@ -274,7 +288,8 @@ struct compute_guard_fixture {
     backend.token_embedding.rows = 4;
     backend.topology.execution = &backend.execution;
     backend.prefill_plan.graph = &backend.topology;
-    backend.prefill_plan.kind = emel::text::generator::detail::step_kind::prefill;
+    backend.prefill_plan.kind =
+        emel::text::generator::detail::step_kind::prefill;
     backend.prefill_plan.expected_outputs = 1;
     backend.prefill_plan.max_step_tokens = 4;
     backend.decode_plan.graph = &backend.topology;
@@ -291,9 +306,9 @@ struct compute_guard_fixture {
     backend.decode_lifecycle.phase = &decode_phase;
   }
 
-  emel::text::generator::event::generate_run make_generate_run(
-      emel::text::generator::event::generate & request,
-      emel::text::generator::event::generate_ctx & runtime) {
+  emel::text::generator::event::generate_run
+  make_generate_run(emel::text::generator::event::generate &request,
+                    emel::text::generator::event::generate_ctx &runtime) {
     runtime.prompt_token_count = 1;
     runtime.prefill_step_size = 1;
     runtime.plan_outputs = 1;
@@ -565,6 +580,33 @@ TEST_CASE("generator planning guards select explicit chunk4 prefill routing") {
     CHECK(emel::text::generator::guard::planning_uses_scalar_prefill{}(
         generate_run, fixture.context));
   }
+}
+
+TEST_CASE("generator planning guards keep sub-chunk prompts on scalar route") {
+  chunk4_planning_backend_fixture fixture{};
+  auto &backend = fixture.context.compute.backend;
+  backend.routes.prefill_chunk4_min_tokens = 0;
+  backend.routes.prefill_chunk8_min_tokens = 0;
+
+  callback_tracker tracker{};
+  emel::error::type error_out =
+      emel::error::cast(emel::text::generator::error::backend);
+  size_t output_length_out = 0;
+
+  auto generate =
+      make_generate_request(&tracker, &error_out, output_length_out);
+  emel::text::generator::event::generate_ctx generate_ctx{};
+  generate_ctx.prompt_token_count =
+      emel::text::generator::detail::k_prefill_q8_chunk_rows - 1;
+  emel::text::generator::event::generate_run generate_run{generate,
+                                                          generate_ctx};
+
+  CHECK_FALSE(emel::text::generator::guard::planning_uses_chunk8_prefill{}(
+      generate_run, fixture.context));
+  CHECK_FALSE(emel::text::generator::guard::planning_uses_chunk4_prefill{}(
+      generate_run, fixture.context));
+  CHECK(emel::text::generator::guard::planning_uses_scalar_prefill{}(
+      generate_run, fixture.context));
 }
 
 TEST_CASE("generator planning guards select explicit chunk8 prefill routing") {
@@ -989,45 +1031,45 @@ TEST_CASE("generator guard detail predicates cover negative branch cases") {
   CHECK(guard_detail::conditioner_backend_code(guard_detail::conditioner_code(
       emel::text::conditioner::error::untracked)));
   CHECK_FALSE(guard_detail::conditioner_backend_code(-77));
-  CHECK(guard_detail::renderer_invalid_code(guard_detail::renderer_code(
-      emel::text::renderer::error::model_invalid)));
+  CHECK(guard_detail::renderer_invalid_code(
+      guard_detail::renderer_code(emel::text::renderer::error::model_invalid)));
   CHECK_FALSE(guard_detail::renderer_invalid_code(-77));
   CHECK(guard_detail::renderer_backend_code(guard_detail::renderer_code(
       emel::text::renderer::error::internal_error)));
-  CHECK(guard_detail::renderer_backend_code(guard_detail::renderer_code(
-      emel::text::renderer::error::untracked)));
+  CHECK(guard_detail::renderer_backend_code(
+      guard_detail::renderer_code(emel::text::renderer::error::untracked)));
   CHECK_FALSE(guard_detail::renderer_backend_code(-77));
-  CHECK(guard_detail::memory_backend_code(guard_detail::memory_code(
-      emel::memory::hybrid::error::internal_error)));
-  CHECK(guard_detail::memory_backend_code(guard_detail::memory_code(
-      emel::memory::hybrid::error::out_of_memory)));
-  CHECK(guard_detail::memory_backend_code(guard_detail::memory_code(
-      emel::memory::hybrid::error::untracked)));
+  CHECK(guard_detail::memory_backend_code(
+      guard_detail::memory_code(emel::memory::hybrid::error::internal_error)));
+  CHECK(guard_detail::memory_backend_code(
+      guard_detail::memory_code(emel::memory::hybrid::error::out_of_memory)));
+  CHECK(guard_detail::memory_backend_code(
+      guard_detail::memory_code(emel::memory::hybrid::error::untracked)));
   CHECK_FALSE(guard_detail::memory_backend_code(-77));
-  CHECK(guard_detail::graph_backend_code(guard_detail::graph_code(
-      emel::graph::error::busy)));
-  CHECK(guard_detail::graph_backend_code(guard_detail::graph_code(
-      emel::graph::error::internal_error)));
-  CHECK(guard_detail::graph_backend_code(guard_detail::graph_code(
-      emel::graph::error::untracked)));
+  CHECK(guard_detail::graph_backend_code(
+      guard_detail::graph_code(emel::graph::error::busy)));
+  CHECK(guard_detail::graph_backend_code(
+      guard_detail::graph_code(emel::graph::error::internal_error)));
+  CHECK(guard_detail::graph_backend_code(
+      guard_detail::graph_code(emel::graph::error::untracked)));
   CHECK_FALSE(guard_detail::graph_backend_code(-77));
   CHECK(guard_detail::sampler_backend_code(guard_detail::sampler_code(
       emel::logits::sampler::error::internal_error)));
-  CHECK(guard_detail::sampler_backend_code(guard_detail::sampler_code(
-      emel::logits::sampler::error::untracked)));
+  CHECK(guard_detail::sampler_backend_code(
+      guard_detail::sampler_code(emel::logits::sampler::error::untracked)));
   CHECK_FALSE(guard_detail::sampler_backend_code(-77));
 
-  CHECK(guard_detail::planner_invalid_code(static_cast<int32_t>(
-      emel::batch::planner::error::invalid_token_data)));
-  CHECK(guard_detail::planner_invalid_code(static_cast<int32_t>(
-      emel::batch::planner::error::missing_mode)));
-  CHECK(guard_detail::planner_invalid_code(static_cast<int32_t>(
-      emel::batch::planner::error::unsupported_layout)));
+  CHECK(guard_detail::planner_invalid_code(
+      static_cast<int32_t>(emel::batch::planner::error::invalid_token_data)));
+  CHECK(guard_detail::planner_invalid_code(
+      static_cast<int32_t>(emel::batch::planner::error::missing_mode)));
+  CHECK(guard_detail::planner_invalid_code(
+      static_cast<int32_t>(emel::batch::planner::error::unsupported_layout)));
   CHECK_FALSE(guard_detail::planner_invalid_code(0));
-  CHECK(guard_detail::planner_backend_code(static_cast<int32_t>(
-      emel::batch::planner::error::algorithm_failed)));
-  CHECK(guard_detail::planner_backend_code(static_cast<int32_t>(
-      emel::batch::planner::error::untracked)));
+  CHECK(guard_detail::planner_backend_code(
+      static_cast<int32_t>(emel::batch::planner::error::algorithm_failed)));
+  CHECK(guard_detail::planner_backend_code(
+      static_cast<int32_t>(emel::batch::planner::error::untracked)));
   CHECK_FALSE(guard_detail::planner_backend_code(0));
 
   CHECK(guard_detail::prefill_contract_uses_materialized_logits(
@@ -1064,7 +1106,7 @@ TEST_CASE("generator guard detail predicates cover negative branch cases") {
       prefill_contract::flash_materialized_scalar));
 
   auto fixture = std::make_unique<compute_guard_fixture>();
-  auto & backend = fixture->context.compute.backend;
+  auto &backend = fixture->context.compute.backend;
   CHECK(guard_detail::guard_compute_backend_shape_ready(backend));
   backend.n_embd = 0;
   CHECK_FALSE(guard_detail::guard_compute_backend_shape_ready(backend));
@@ -1079,6 +1121,14 @@ TEST_CASE("generator guard detail predicates cover negative branch cases") {
   CHECK_FALSE(guard_detail::guard_compute_backend_shape_ready(backend));
   backend.blocks.resize(1u);
   CHECK(guard_detail::guard_compute_backend_shape_ready(backend));
+  CHECK(guard_detail::guard_compute_backend_ready(fixture->context));
+  fixture->context.compute.backend_ready = false;
+  CHECK_FALSE(guard_detail::guard_compute_backend_ready(fixture->context));
+  fixture->context.compute.backend_ready = true;
+  auto *matmul_actor = backend.matmul_actor;
+  backend.matmul_actor = nullptr;
+  CHECK_FALSE(guard_detail::guard_compute_backend_ready(fixture->context));
+  backend.matmul_actor = matmul_actor;
 
   CHECK(guard_detail::guard_graph_reservation_ready(fixture->context));
   fixture->context.state.graph_reservation.tensor_count = 0u;
@@ -1086,8 +1136,8 @@ TEST_CASE("generator guard detail predicates cover negative branch cases") {
   fixture->context.state.graph_reservation.tensor_count = 1u;
   CHECK(guard_detail::guard_compute_lifecycle_ready(backend.prefill_lifecycle));
   backend.prefill_lifecycle.tensor_count = 0;
-  CHECK_FALSE(guard_detail::guard_compute_lifecycle_ready(
-      backend.prefill_lifecycle));
+  CHECK_FALSE(
+      guard_detail::guard_compute_lifecycle_ready(backend.prefill_lifecycle));
   backend.prefill_lifecycle.tensor_count = 1;
 
   CHECK(guard_detail::guard_step_plan_ready(
@@ -1106,15 +1156,15 @@ TEST_CASE("generator guard detail predicates cover negative branch cases") {
   backend.bound_logits.resize(4u);
 
   CHECK(guard_detail::guard_bound_request_capacity_ready(fixture->context, 1));
-  CHECK_FALSE(guard_detail::guard_bound_request_capacity_ready(
-      fixture->context, 0));
+  CHECK_FALSE(
+      guard_detail::guard_bound_request_capacity_ready(fixture->context, 0));
   backend.bound_tokens.clear();
-  CHECK_FALSE(guard_detail::guard_bound_request_capacity_ready(
-      fixture->context, 1));
+  CHECK_FALSE(
+      guard_detail::guard_bound_request_capacity_ready(fixture->context, 1));
   backend.bound_tokens.resize(4u);
   backend.bound_positions.clear();
-  CHECK_FALSE(guard_detail::guard_bound_request_capacity_ready(
-      fixture->context, 1));
+  CHECK_FALSE(
+      guard_detail::guard_bound_request_capacity_ready(fixture->context, 1));
   backend.bound_positions.resize(4u);
 
   emel::text::generator::event::generate_ctx runtime{};
@@ -1126,48 +1176,48 @@ TEST_CASE("generator guard detail predicates cover negative branch cases") {
   backend.kv_cache_tokens = 0;
   CHECK(guard_detail::guard_prefill_request_ready(runtime, fixture->context));
   runtime.plan_outputs = 2;
-  CHECK_FALSE(guard_detail::guard_prefill_request_ready(
-      runtime, fixture->context));
+  CHECK_FALSE(
+      guard_detail::guard_prefill_request_ready(runtime, fixture->context));
   runtime.plan_outputs = 1;
   runtime.prefill_step_size = 0;
-  CHECK_FALSE(guard_detail::guard_prefill_request_ready(
-      runtime, fixture->context));
+  CHECK_FALSE(
+      guard_detail::guard_prefill_request_ready(runtime, fixture->context));
   runtime.prefill_step_size = 5;
-  CHECK_FALSE(guard_detail::guard_prefill_request_ready(
-      runtime, fixture->context));
+  CHECK_FALSE(
+      guard_detail::guard_prefill_request_ready(runtime, fixture->context));
   runtime.prefill_step_size = 1;
   runtime.prompt_token_count = 0;
-  CHECK_FALSE(guard_detail::guard_prefill_request_ready(
-      runtime, fixture->context));
+  CHECK_FALSE(
+      guard_detail::guard_prefill_request_ready(runtime, fixture->context));
   runtime.prompt_token_count = 5;
-  CHECK_FALSE(guard_detail::guard_prefill_request_ready(
-      runtime, fixture->context));
+  CHECK_FALSE(
+      guard_detail::guard_prefill_request_ready(runtime, fixture->context));
   runtime.prompt_token_count = 1;
 
   CHECK(guard_detail::guard_decode_request_ready(runtime, fixture->context));
   runtime.selected_token = -1;
-  CHECK_FALSE(guard_detail::guard_decode_request_ready(
-      runtime, fixture->context));
+  CHECK_FALSE(
+      guard_detail::guard_decode_request_ready(runtime, fixture->context));
   runtime.selected_token = backend.token_embedding.rows;
-  CHECK_FALSE(guard_detail::guard_decode_request_ready(
-      runtime, fixture->context));
+  CHECK_FALSE(
+      guard_detail::guard_decode_request_ready(runtime, fixture->context));
   runtime.selected_token = 0;
   runtime.kv_tokens = -1;
-  CHECK_FALSE(guard_detail::guard_decode_request_ready(
-      runtime, fixture->context));
+  CHECK_FALSE(
+      guard_detail::guard_decode_request_ready(runtime, fixture->context));
   runtime.kv_tokens = backend.n_ctx;
-  CHECK_FALSE(guard_detail::guard_decode_request_ready(
-      runtime, fixture->context));
+  CHECK_FALSE(
+      guard_detail::guard_decode_request_ready(runtime, fixture->context));
   runtime.kv_tokens = 0;
   backend.kv_cache_tokens = 1;
-  CHECK_FALSE(guard_detail::guard_decode_request_ready(
-      runtime, fixture->context));
+  CHECK_FALSE(
+      guard_detail::guard_decode_request_ready(runtime, fixture->context));
   backend.kv_cache_tokens = 0;
 
   // Snapshot addressing coherence (KVM-03): geometry drift, inactive
   // sequence, length drift, and missing block mapping each fail the ready
   // predicates and route through the explicit invalid transitions.
-  auto & snapshot = fixture->context.state.memory_snapshot;
+  auto &snapshot = fixture->context.state.memory_snapshot;
   CHECK(guard_detail::guard_snapshot_geometry_coherent(fixture->context));
   CHECK(guard_detail::guard_snapshot_covers_tokens(fixture->context, 1));
   CHECK_FALSE(guard_detail::guard_snapshot_covers_tokens(fixture->context, 0));
@@ -1175,23 +1225,28 @@ TEST_CASE("generator guard detail predicates cover negative branch cases") {
 
   snapshot.block_tokens = 4;
   CHECK_FALSE(guard_detail::guard_snapshot_geometry_coherent(fixture->context));
-  CHECK_FALSE(guard_detail::guard_decode_request_ready(runtime, fixture->context));
-  CHECK_FALSE(guard_detail::guard_prefill_request_ready(runtime, fixture->context));
+  CHECK_FALSE(
+      guard_detail::guard_decode_request_ready(runtime, fixture->context));
+  CHECK_FALSE(
+      guard_detail::guard_prefill_request_ready(runtime, fixture->context));
   snapshot.block_tokens = 8;
 
   snapshot.sequence_active[0] = 0;
   CHECK_FALSE(guard_detail::guard_snapshot_geometry_coherent(fixture->context));
-  CHECK_FALSE(guard_detail::guard_decode_request_ready(runtime, fixture->context));
+  CHECK_FALSE(
+      guard_detail::guard_decode_request_ready(runtime, fixture->context));
   snapshot.sequence_active[0] = 1;
 
   snapshot.sequence_recurrent_slot[0] = -1;
   CHECK_FALSE(guard_detail::guard_snapshot_geometry_coherent(fixture->context));
-  CHECK_FALSE(guard_detail::guard_decode_request_ready(runtime, fixture->context));
+  CHECK_FALSE(
+      guard_detail::guard_decode_request_ready(runtime, fixture->context));
   snapshot.sequence_recurrent_slot[0] = 0;
 
   snapshot.sequence_length_values[0] = 3;
   CHECK_FALSE(guard_detail::guard_snapshot_covers_tokens(fixture->context, 1));
-  CHECK_FALSE(guard_detail::guard_decode_request_ready(runtime, fixture->context));
+  CHECK_FALSE(
+      guard_detail::guard_decode_request_ready(runtime, fixture->context));
   snapshot.sequence_length_values[0] = 1;
 
   snapshot.sequence_kv_block_count[0] = 0;
@@ -1200,7 +1255,8 @@ TEST_CASE("generator guard detail predicates cover negative branch cases") {
 
   snapshot.sequence_kv_blocks[0][0] = 1;
   CHECK_FALSE(guard_detail::guard_snapshot_covers_tokens(fixture->context, 1));
-  CHECK_FALSE(guard_detail::guard_decode_request_ready(runtime, fixture->context));
+  CHECK_FALSE(
+      guard_detail::guard_decode_request_ready(runtime, fixture->context));
   snapshot.sequence_kv_blocks[0][0] = 0;
 
   CHECK(guard_detail::guard_decode_request_ready(runtime, fixture->context));
@@ -1224,7 +1280,8 @@ TEST_CASE("generator guard detail predicates cover negative branch cases") {
   snapshot.sequence_kv_blocks[0][1] = 0;
 }
 
-TEST_CASE("generator compute readiness guards classify request and backend gaps") {
+TEST_CASE(
+    "generator compute readiness guards classify request and backend gaps") {
   auto fixture = std::make_unique<compute_guard_fixture>();
   callback_tracker tracker{};
   emel::error::type error_out =
@@ -1243,64 +1300,62 @@ TEST_CASE("generator compute readiness guards classify request and backend gaps"
   CHECK(emel::text::generator::guard::
             guard_decode_materialized_scalar_kernel_ready{}(generate_run,
                                                             fixture->context));
-  CHECK_FALSE(emel::text::generator::guard::
-                  guard_decode_compute_invalid_request{}(generate_run,
-                                                         fixture->context));
-  CHECK_FALSE(emel::text::generator::guard::
-                  guard_decode_compute_backend_unavailable{}(generate_run,
-                                                             fixture->context));
+  CHECK_FALSE(
+      emel::text::generator::guard::guard_decode_compute_invalid_request{}(
+          generate_run, fixture->context));
+  CHECK_FALSE(
+      emel::text::generator::guard::guard_decode_compute_backend_unavailable{}(
+          generate_run, fixture->context));
   CHECK(emel::text::generator::prefill::guard::
-            guard_materialized_logits_with_scalar_kernel_ready{}(prefill_run,
-                                                                 prefill_context));
-  CHECK_FALSE(emel::text::generator::prefill::guard::
-                  guard_compute_invalid_request{}(prefill_run,
-                                                  prefill_context));
-  CHECK_FALSE(emel::text::generator::prefill::guard::
-                  guard_compute_backend_unavailable{}(prefill_run,
-                                                      prefill_context));
+            guard_materialized_logits_with_scalar_kernel_ready{}(
+                prefill_run, prefill_context));
+  CHECK_FALSE(
+      emel::text::generator::prefill::guard::guard_compute_invalid_request{}(
+          prefill_run, prefill_context));
+  CHECK_FALSE(
+      emel::text::generator::prefill::guard::
+          guard_compute_backend_unavailable{}(prefill_run, prefill_context));
 
   runtime.selected_token =
       fixture->context.compute.backend.token_embedding.rows;
-  CHECK(emel::text::generator::guard::
-            guard_decode_compute_invalid_request{}(generate_run,
-                                                   fixture->context));
-  CHECK_FALSE(emel::text::generator::guard::
-                  guard_decode_compute_backend_unavailable{}(generate_run,
-                                                             fixture->context));
+  CHECK(emel::text::generator::guard::guard_decode_compute_invalid_request{}(
+      generate_run, fixture->context));
+  CHECK_FALSE(
+      emel::text::generator::guard::guard_decode_compute_backend_unavailable{}(
+          generate_run, fixture->context));
   runtime.selected_token = 0;
 
   runtime.prompt_token_count = 0;
-  CHECK(emel::text::generator::prefill::guard::
-            guard_compute_invalid_request{}(prefill_run, prefill_context));
-  CHECK_FALSE(emel::text::generator::prefill::guard::
-                  guard_compute_backend_unavailable{}(prefill_run,
-                                                      prefill_context));
+  CHECK(emel::text::generator::prefill::guard::guard_compute_invalid_request{}(
+      prefill_run, prefill_context));
+  CHECK_FALSE(
+      emel::text::generator::prefill::guard::
+          guard_compute_backend_unavailable{}(prefill_run, prefill_context));
   runtime.prompt_token_count = 1;
 
   fixture->context.compute.backend.bound_logits.clear();
-  CHECK(emel::text::generator::guard::
-            guard_decode_compute_invalid_request{}(generate_run,
-                                                   fixture->context));
-  CHECK(emel::text::generator::prefill::guard::
-            guard_compute_invalid_request{}(prefill_run, prefill_context));
+  CHECK(emel::text::generator::guard::guard_decode_compute_invalid_request{}(
+      generate_run, fixture->context));
+  CHECK(emel::text::generator::prefill::guard::guard_compute_invalid_request{}(
+      prefill_run, prefill_context));
   fixture->context.compute.backend.bound_logits.resize(4u);
 
   fixture->context.compute.backend.decode_lifecycle.phase = nullptr;
-  CHECK(emel::text::generator::guard::
-            guard_decode_compute_backend_unavailable{}(generate_run,
-                                                       fixture->context));
-  CHECK_FALSE(emel::text::generator::guard::
-                  guard_decode_compute_invalid_request{}(generate_run,
-                                                         fixture->context));
+  CHECK(
+      emel::text::generator::guard::guard_decode_compute_backend_unavailable{}(
+          generate_run, fixture->context));
+  CHECK_FALSE(
+      emel::text::generator::guard::guard_decode_compute_invalid_request{}(
+          generate_run, fixture->context));
   fixture->context.compute.backend.decode_lifecycle.phase =
       &fixture->decode_phase;
 
   fixture->context.compute.backend.prefill_lifecycle.phase = nullptr;
   CHECK(emel::text::generator::prefill::guard::
             guard_compute_backend_unavailable{}(prefill_run, prefill_context));
-  CHECK_FALSE(emel::text::generator::prefill::guard::
-                  guard_compute_invalid_request{}(prefill_run,
-                                                  prefill_context));
+  CHECK_FALSE(
+      emel::text::generator::prefill::guard::guard_compute_invalid_request{}(
+          prefill_run, prefill_context));
   fixture->context.compute.backend.prefill_lifecycle.phase =
       &fixture->prefill_phase;
 
@@ -1316,12 +1371,12 @@ TEST_CASE("generator compute readiness guards classify request and backend gaps"
   runtime.selected_token =
       fixture->context.compute.backend.token_embedding.rows;
   CHECK(emel::text::generator::guard::
-            guard_decode_preselected_compute_invalid_request{}(generate_run,
-                                                               fixture->context));
+            guard_decode_preselected_compute_invalid_request{}(
+                generate_run, fixture->context));
   runtime.selected_token = 0;
   CHECK(emel::text::generator::prefill::guard::
-            guard_preselected_argmax_with_scalar_kernel_ready{}(prefill_run,
-                                                                prefill_context));
+            guard_preselected_argmax_with_scalar_kernel_ready{}(
+                prefill_run, prefill_context));
 #endif
 }
 
@@ -1416,6 +1471,32 @@ TEST_CASE("generator core actions cover reset, decode, and fallback channels") {
   emel::text::generator::action::
       request_decode_compute_flash_native_quantized_q8_k_logits(generate_run,
                                                                 context);
+  emel::text::generator::action::request_decode_compute_flash_kernel_streamed(
+      generate_run, context);
+  emel::text::generator::action::
+      request_decode_compute_flash_packed_q8_0_streamed(generate_run, context);
+  emel::text::generator::action::request_decode_compute_flash_q8_k_streamed(
+      generate_run, context);
+  emel::text::generator::action::
+      request_decode_compute_flash_native_quantized_streamed(generate_run,
+                                                             context);
+  emel::text::generator::action::
+      request_decode_compute_flash_native_quantized_q8_k_logits_streamed(
+          generate_run, context);
+  emel::text::generator::action::
+      request_decode_compute_flash_parallel_kernel(generate_run, context);
+  emel::text::generator::action::
+      request_decode_compute_flash_parallel_packed_q8_0(generate_run, context);
+  emel::text::generator::action::request_decode_compute_flash_parallel_q8_k(
+      generate_run, context);
+  emel::text::generator::action::
+      request_decode_compute_flash_parallel_native_quantized(generate_run,
+                                                             context);
+  emel::text::generator::action::
+      request_decode_compute_flash_parallel_native_quantized_q8_k_logits(
+          generate_run, context);
+  CHECK(generate_ctx.io.selected_attention_mode ==
+        emel::text::generator::attention_mode::flash);
   emel::text::generator::action::request_decode_compute_nonflash_kernel(
       generate_run, context);
   emel::text::generator::action::request_decode_compute_nonflash_packed_q8_0(
@@ -1427,6 +1508,21 @@ TEST_CASE("generator core actions cover reset, decode, and fallback channels") {
   emel::text::generator::action::
       request_decode_compute_nonflash_native_quantized_q8_k_logits(generate_run,
                                                                    context);
+  emel::text::generator::action::request_decode_compute_nonflash_kernel_streamed(
+      generate_run, context);
+  emel::text::generator::action::
+      request_decode_compute_nonflash_packed_q8_0_streamed(generate_run,
+                                                           context);
+  emel::text::generator::action::request_decode_compute_nonflash_q8_k_streamed(
+      generate_run, context);
+  emel::text::generator::action::
+      request_decode_compute_nonflash_native_quantized_streamed(generate_run,
+                                                                context);
+  emel::text::generator::action::
+      request_decode_compute_nonflash_native_quantized_q8_k_logits_streamed(
+          generate_run, context);
+  CHECK(generate_ctx.io.selected_attention_mode ==
+        emel::text::generator::attention_mode::nonflash);
   emel::text::generator::action::
       request_decode_compute_flash_preselected_argmax_kernel(generate_run,
                                                              context);
@@ -1440,6 +1536,32 @@ TEST_CASE("generator core actions cover reset, decode, and fallback channels") {
       request_decode_compute_flash_preselected_argmax_native_quantized_kernel(
           generate_run, context);
   emel::text::generator::action::
+      request_decode_compute_flash_preselected_argmax_kernel_streamed(
+          generate_run, context);
+  emel::text::generator::action::
+      request_decode_compute_flash_preselected_argmax_q8_k_streamed(
+          generate_run, context);
+  emel::text::generator::action::
+      request_decode_compute_flash_preselected_argmax_native_quantized_q8_k_streamed(
+          generate_run, context);
+  emel::text::generator::action::
+      request_decode_compute_flash_preselected_argmax_native_quantized_kernel_streamed(
+          generate_run, context);
+  emel::text::generator::action::
+      request_decode_compute_flash_parallel_preselected_argmax_kernel(
+          generate_run, context);
+  emel::text::generator::action::
+      request_decode_compute_flash_parallel_preselected_argmax_q8_k(
+          generate_run, context);
+  emel::text::generator::action::
+      request_decode_compute_flash_parallel_preselected_argmax_native_quantized_q8_k(
+          generate_run, context);
+  emel::text::generator::action::
+      request_decode_compute_flash_parallel_preselected_argmax_native_quantized_kernel(
+          generate_run, context);
+  CHECK(generate_ctx.io.selected_attention_mode ==
+        emel::text::generator::attention_mode::flash);
+  emel::text::generator::action::
       request_decode_compute_nonflash_preselected_argmax_kernel(generate_run,
                                                                 context);
   emel::text::generator::action::
@@ -1451,6 +1573,20 @@ TEST_CASE("generator core actions cover reset, decode, and fallback channels") {
   emel::text::generator::action::
       request_decode_compute_nonflash_preselected_argmax_native_quantized_kernel(
           generate_run, context);
+  emel::text::generator::action::
+      request_decode_compute_nonflash_preselected_argmax_kernel_streamed(
+          generate_run, context);
+  emel::text::generator::action::
+      request_decode_compute_nonflash_preselected_argmax_q8_k_streamed(
+          generate_run, context);
+  emel::text::generator::action::
+      request_decode_compute_nonflash_preselected_argmax_native_quantized_q8_k_streamed(
+          generate_run, context);
+  emel::text::generator::action::
+      request_decode_compute_nonflash_preselected_argmax_native_quantized_kernel_streamed(
+          generate_run, context);
+  CHECK(generate_ctx.io.selected_attention_mode ==
+        emel::text::generator::attention_mode::nonflash);
 
   const std::array<int32_t, 1> step_sizes{3};
   emel::batch::planner::events::plan_done plan_done{};
@@ -1984,6 +2120,78 @@ TEST_CASE("generator prefill runtime guards model explicit flash and compute "
       prefill_run, prefill_context));
 }
 
+TEST_CASE("generator prefill parallel route guard exposes unavailable causes") {
+  auto fixture = std::make_unique<compute_guard_fixture>();
+  auto &backend = fixture->context.compute.backend;
+  backend.routes = emel::text::generator::test::k_generation_route_policy;
+
+  emel::text::generator::prefill::action::context prefill_context{
+      fixture->context};
+  callback_tracker tracker{};
+  emel::error::type error_out =
+      emel::error::cast(emel::text::generator::error::none);
+  size_t output_length_out = 0;
+  auto generate =
+      make_generate_request(&tracker, &error_out, output_length_out);
+  emel::text::generator::event::generate_ctx generate_ctx{};
+  generate_ctx.prompt_token_count = backend.routes.parallel_min_prefill_tokens;
+  emel::text::generator::prefill::event::run prefill_run{generate,
+                                                         generate_ctx};
+
+  CHECK(emel::text::generator::prefill::guard::detail::uses_parallel_matmul_lanes(prefill_run, prefill_context));
+
+  generate_ctx.prompt_token_count =
+      backend.routes.parallel_min_prefill_tokens - 1;
+  CHECK_FALSE(
+      emel::text::generator::prefill::guard::detail::uses_parallel_matmul_lanes(
+          prefill_run, prefill_context));
+  generate_ctx.prompt_token_count = backend.routes.parallel_min_prefill_tokens;
+
+  backend.parallel_lanes_enabled = false;
+  CHECK_FALSE(
+      emel::text::generator::prefill::guard::detail::uses_parallel_matmul_lanes(
+          prefill_run, prefill_context));
+  backend.parallel_lanes_enabled = true;
+
+  auto *matmul_actor = backend.matmul_actor;
+  backend.matmul_actor = nullptr;
+  CHECK_FALSE(
+      emel::text::generator::prefill::guard::detail::uses_parallel_matmul_lanes(
+          prefill_run, prefill_context));
+  backend.matmul_actor = matmul_actor;
+}
+
+TEST_CASE("generator prefill guards keep sub-chunk prompts on scalar route") {
+  chunk4_planning_backend_fixture fixture{};
+  auto &backend = fixture.context.compute.backend;
+  backend.routes.prefill_chunk4_min_tokens = 0;
+  backend.routes.prefill_chunk8_min_tokens = 0;
+
+  emel::text::generator::prefill::action::context prefill_context{
+      fixture.context};
+  callback_tracker tracker{};
+  emel::error::type error_out =
+      emel::error::cast(emel::text::generator::error::none);
+  size_t output_length_out = 0;
+  auto generate =
+      make_generate_request(&tracker, &error_out, output_length_out);
+  emel::text::generator::event::generate_ctx generate_ctx{};
+  generate_ctx.prompt_token_count =
+      emel::text::generator::detail::k_prefill_q8_chunk_rows - 1;
+  emel::text::generator::prefill::event::run prefill_run{generate,
+                                                         generate_ctx};
+
+  CHECK_FALSE(emel::text::generator::prefill::guard::
+                  uses_materialized_logits_with_chunk8_q8_k{}(
+                      prefill_run, prefill_context));
+  CHECK_FALSE(emel::text::generator::prefill::guard::
+                  uses_materialized_logits_with_chunk4_q8_k{}(
+                      prefill_run, prefill_context));
+  CHECK(emel::text::generator::prefill::guard::
+            uses_materialized_logits_with_scalar{}(prefill_run,
+                                                  prefill_context));
+}
+
 TEST_CASE(
     "generator prefill guards classify explicit chunk8 routes and contracts") {
   chunk4_planning_backend_fixture fixture{};
@@ -2211,11 +2419,24 @@ TEST_CASE("generator prefill actions publish every explicit compute contract") {
                  emel::text::generator::prefill_compute_contract::
                      flash_materialized_chunk8_q8_k);
   check_contract(emel::text::generator::prefill::action::
+                     request_contract_flash_materialized_parallel_chunk8_q8_k,
+                 emel::text::generator::prefill_compute_contract::
+                     flash_materialized_chunk8_q8_k);
+  check_contract(emel::text::generator::prefill::action::
                      request_contract_flash_materialized_chunk4_packed_q8_0,
                  emel::text::generator::prefill_compute_contract::
                      flash_materialized_chunk4_packed_q8_0);
+  check_contract(
+      emel::text::generator::prefill::action::
+          request_contract_flash_materialized_parallel_chunk4_packed_q8_0,
+      emel::text::generator::prefill_compute_contract::
+          flash_materialized_chunk4_packed_q8_0);
   check_contract(emel::text::generator::prefill::action::
                      request_contract_flash_materialized_chunk4_q8_k,
+                 emel::text::generator::prefill_compute_contract::
+                     flash_materialized_chunk4_q8_k);
+  check_contract(emel::text::generator::prefill::action::
+                     request_contract_flash_materialized_parallel_chunk4_q8_k,
                  emel::text::generator::prefill_compute_contract::
                      flash_materialized_chunk4_q8_k);
   check_contract(emel::text::generator::prefill::action::
@@ -2241,11 +2462,24 @@ TEST_CASE("generator prefill actions publish every explicit compute contract") {
                  emel::text::generator::prefill_compute_contract::
                      flash_preselected_chunk8_q8_k);
   check_contract(emel::text::generator::prefill::action::
+                     request_contract_flash_preselected_parallel_chunk8_q8_k,
+                 emel::text::generator::prefill_compute_contract::
+                     flash_preselected_chunk8_q8_k);
+  check_contract(emel::text::generator::prefill::action::
                      request_contract_flash_preselected_chunk4_packed_q8_0,
                  emel::text::generator::prefill_compute_contract::
                      flash_preselected_chunk4_packed_q8_0);
+  check_contract(
+      emel::text::generator::prefill::action::
+          request_contract_flash_preselected_parallel_chunk4_packed_q8_0,
+      emel::text::generator::prefill_compute_contract::
+          flash_preselected_chunk4_packed_q8_0);
   check_contract(emel::text::generator::prefill::action::
                      request_contract_flash_preselected_chunk4_q8_k,
+                 emel::text::generator::prefill_compute_contract::
+                     flash_preselected_chunk4_q8_k);
+  check_contract(emel::text::generator::prefill::action::
+                     request_contract_flash_preselected_parallel_chunk4_q8_k,
                  emel::text::generator::prefill_compute_contract::
                      flash_preselected_chunk4_q8_k);
   check_contract(emel::text::generator::prefill::action::
@@ -2419,7 +2653,8 @@ TEST_CASE(
   generator_context.compute.backend.kv_positions_capacity = 8;
   CHECK(emel::text::generator::initializer::guard::backend_already_ready{}(
       initializer_run, initializer_context));
-  generator_context.compute.backend.kv_block_tokens = initialize.block_tokens + 1;
+  generator_context.compute.backend.kv_block_tokens =
+      initialize.block_tokens + 1;
   CHECK(emel::text::generator::initializer::guard::backend_prepare_needed{}(
       initializer_run, initializer_context));
   generator_context.compute.backend.kv_block_tokens = initialize.block_tokens;

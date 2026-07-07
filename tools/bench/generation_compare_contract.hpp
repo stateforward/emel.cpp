@@ -12,8 +12,10 @@
 
 namespace emel::bench {
 
-inline constexpr char k_generation_compare_format_env[] = "EMEL_GENERATION_BENCH_FORMAT";
-inline constexpr char k_generation_compare_result_dir_env[] = "EMEL_GENERATION_RESULT_DIR";
+inline constexpr char k_generation_compare_format_env[] =
+    "EMEL_GENERATION_BENCH_FORMAT";
+inline constexpr char k_generation_compare_result_dir_env[] =
+    "EMEL_GENERATION_RESULT_DIR";
 inline constexpr char k_generation_compare_schema[] = "generation_compare/v1";
 
 struct generation_compare_record {
@@ -21,9 +23,12 @@ struct generation_compare_record {
   std::string status = "ok";
   std::string case_name = {};
   std::string compare_group = {};
+  std::string benchmark_lane = {};
   std::string lane = {};
   std::string backend_id = {};
   std::string backend_language = {};
+  std::int32_t thread_count = 0;
+  std::string thread_contract = {};
   std::string workload_id = {};
   std::string workload_manifest_path = {};
   std::string comparison_mode = {};
@@ -46,20 +51,37 @@ struct generation_compare_record {
   double prepare_ns_per_op = 0.0;
   double encode_ns_per_op = 0.0;
   double publish_ns_per_op = 0.0;
+  double tokens_per_second = 0.0;
   std::uint64_t output_tokens = 0u;
   std::uint64_t output_bytes = 0u;
   std::uint64_t output_checksum = 0u;
+  std::uint64_t kernel_dispatch_calls = 0u;
+  std::uint64_t flash_attention_dispatch_calls = 0u;
+  std::uint64_t optimized_flash_dispatch_calls = 0u;
+  std::uint64_t shared_flash_dispatch_calls = 0u;
+  std::uint64_t native_q8_0_dispatch_calls = 0u;
+  std::uint64_t packed_q8_0_dispatch_calls = 0u;
+  std::uint64_t optimized_q4_dispatch_calls = 0u;
+  std::uint64_t shared_q4_dispatch_calls = 0u;
+  std::uint64_t optimized_q6_dispatch_calls = 0u;
+  std::uint64_t shared_q6_dispatch_calls = 0u;
+  std::uint32_t native_quantized_stage_count = 0u;
+  std::uint32_t approved_dense_f32_stage_count = 0u;
+  std::uint32_t disallowed_fallback_stage_count = 0u;
+  std::uint32_t explicit_no_claim_stage_count = 0u;
   std::uint64_t iterations = 0u;
   std::size_t runs = 0u;
   std::string output_text = {};
   std::string output_path = {};
+  std::string output_token_ids_text = {};
+  std::string output_token_ids_path = {};
   std::string note = {};
   std::string error_kind = {};
   std::string error_message = {};
 };
 
 inline bool generation_compare_emit_jsonl() {
-  const char * format = std::getenv(k_generation_compare_format_env);
+  const char *format = std::getenv(k_generation_compare_format_env);
   return format != nullptr && std::string_view{format} == "jsonl";
 }
 
@@ -68,34 +90,36 @@ inline std::string generation_compare_json_escape(std::string_view input) {
   out.reserve(input.size() + 8u);
   for (const char ch : input) {
     switch (ch) {
-      case '\\':
-        out += "\\\\";
-        break;
-      case '"':
-        out += "\\\"";
-        break;
-      case '\n':
-        out += "\\n";
-        break;
-      case '\r':
-        out += "\\r";
-        break;
-      case '\t':
-        out += "\\t";
-        break;
-      default:
-        out.push_back(ch);
-        break;
+    case '\\':
+      out += "\\\\";
+      break;
+    case '"':
+      out += "\\\"";
+      break;
+    case '\n':
+      out += "\\n";
+      break;
+    case '\r':
+      out += "\\r";
+      break;
+    case '\t':
+      out += "\\t";
+      break;
+    default:
+      out.push_back(ch);
+      break;
     }
   }
   return out;
 }
 
-inline std::string generation_compare_sanitize_case_name(std::string_view input) {
+inline std::string
+generation_compare_sanitize_case_name(std::string_view input) {
   std::string out = {};
   out.reserve(input.size());
   for (const char ch : input) {
-    if ((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9')) {
+    if ((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') ||
+        (ch >= '0' && ch <= '9')) {
       out.push_back(ch);
       continue;
     }
@@ -104,9 +128,10 @@ inline std::string generation_compare_sanitize_case_name(std::string_view input)
   return out;
 }
 
-inline void maybe_dump_generation_output(generation_compare_record & record) {
-  const char * output_dir = std::getenv(k_generation_compare_result_dir_env);
-  if (output_dir == nullptr || output_dir[0] == '\0' || record.output_text.empty()) {
+inline void maybe_dump_generation_output(generation_compare_record &record) {
+  const char *output_dir = std::getenv(k_generation_compare_result_dir_env);
+  if (output_dir == nullptr || output_dir[0] == '\0' ||
+      (record.output_text.empty() && record.output_token_ids_text.empty())) {
     return;
   }
 
@@ -114,92 +139,146 @@ inline void maybe_dump_generation_output(generation_compare_record & record) {
   std::error_code ec = {};
   std::filesystem::create_directories(root, ec);
   if (ec) {
-    std::fprintf(stderr,
-                 "warning: failed to create generation compare output dir %s: %s\n",
-                 root.string().c_str(),
-                 ec.message().c_str());
+    std::fprintf(
+        stderr,
+        "warning: failed to create generation compare output dir %s: %s\n",
+        root.string().c_str(), ec.message().c_str());
     return;
   }
 
-  const std::string backend = generation_compare_sanitize_case_name(record.backend_id);
-  const std::string case_name = generation_compare_sanitize_case_name(record.case_name);
-  const std::filesystem::path output_path = root / (backend + "__" + case_name + ".txt");
-  std::ofstream output(output_path, std::ios::binary);
-  if (!output.good()) {
-    std::fprintf(stderr,
-                 "warning: failed to open generation compare output file %s\n",
-                 output_path.string().c_str());
-    return;
+  const std::string backend =
+      generation_compare_sanitize_case_name(record.backend_id);
+  const std::string case_name =
+      generation_compare_sanitize_case_name(record.case_name);
+  const std::string base_name = backend + "__" + case_name;
+  if (!record.output_text.empty()) {
+    const std::filesystem::path output_path = root / (base_name + ".txt");
+    std::ofstream output(output_path, std::ios::binary);
+    if (!output.good()) {
+      std::fprintf(stderr,
+                   "warning: failed to open generation compare output file %s\n",
+                   output_path.string().c_str());
+      return;
+    }
+
+    output.write(record.output_text.data(),
+                 static_cast<std::streamsize>(record.output_text.size()));
+    if (!output.good()) {
+      std::fprintf(stderr,
+                   "warning: failed to write generation compare output file %s\n",
+                   output_path.string().c_str());
+      return;
+    }
+
+    record.output_path = output_path.string();
   }
 
-  output.write(record.output_text.data(),
-               static_cast<std::streamsize>(record.output_text.size()));
-  if (!output.good()) {
-    std::fprintf(stderr,
-                 "warning: failed to write generation compare output file %s\n",
-                 output_path.string().c_str());
-    return;
-  }
+  if (!record.output_token_ids_text.empty()) {
+    const std::filesystem::path token_path = root / (base_name + ".tokens.txt");
+    std::ofstream output(token_path, std::ios::binary);
+    if (!output.good()) {
+      std::fprintf(stderr,
+                   "warning: failed to open generation token trace file %s\n",
+                   token_path.string().c_str());
+      return;
+    }
 
-  record.output_path = output_path.string();
+    output.write(record.output_token_ids_text.data(),
+                 static_cast<std::streamsize>(record.output_token_ids_text.size()));
+    if (!output.good()) {
+      std::fprintf(stderr,
+                   "warning: failed to write generation token trace file %s\n",
+                   token_path.string().c_str());
+      return;
+    }
+
+    record.output_token_ids_path = token_path.string();
+  }
 }
 
-inline void print_generation_compare_record_jsonl(const generation_compare_record & record) {
+inline void
+print_generation_compare_record_jsonl(const generation_compare_record &record) {
   std::printf(
-    "{\"schema\":\"%s\",\"record_type\":\"%s\",\"status\":\"%s\",\"case_name\":\"%s\","
-    "\"compare_group\":\"%s\",\"lane\":\"%s\",\"backend_id\":\"%s\","
-    "\"backend_language\":\"%s\",\"workload_id\":\"%s\",\"workload_manifest_path\":\"%s\","
-    "\"comparison_mode\":\"%s\",\"model_id\":\"%s\",\"fixture_id\":\"%s\","
-    "\"prompt_fixture_id\":\"%s\",\"prompt_fixture_path\":\"%s\",\"prompt_id\":\"%s\","
-    "\"formatter_mode\":\"%s\",\"formatter_contract\":\"%s\","
-    "\"sampling_id\":\"%s\",\"stop_id\":\"%s\",\"seed\":%" PRId64 ","
-    "\"comparable\":%s,"
-    "\"max_output_tokens\":%" PRIu64 ",\"ns_per_op\":%.6f,"
-    "\"ns_min_per_op\":%.6f,\"ns_mean_per_op\":%.6f,\"ns_max_per_op\":%.6f,"
-    "\"prepare_ns_per_op\":%.6f,\"encode_ns_per_op\":%.6f,\"publish_ns_per_op\":%.6f,"
-    "\"output_tokens\":%" PRIu64 ",\"output_bytes\":%" PRIu64 ","
-    "\"output_checksum\":%" PRIu64 ",\"iterations\":%" PRIu64 ",\"runs\":%zu,"
-    "\"output_path\":\"%s\",\"note\":\"%s\",\"error_kind\":\"%s\","
-    "\"error_message\":\"%s\"}\n",
-    k_generation_compare_schema,
-    generation_compare_json_escape(record.record_type).c_str(),
-    generation_compare_json_escape(record.status).c_str(),
-    generation_compare_json_escape(record.case_name).c_str(),
-    generation_compare_json_escape(record.compare_group).c_str(),
-    generation_compare_json_escape(record.lane).c_str(),
-    generation_compare_json_escape(record.backend_id).c_str(),
-    generation_compare_json_escape(record.backend_language).c_str(),
-    generation_compare_json_escape(record.workload_id).c_str(),
-    generation_compare_json_escape(record.workload_manifest_path).c_str(),
-    generation_compare_json_escape(record.comparison_mode).c_str(),
-    generation_compare_json_escape(record.model_id).c_str(),
-    generation_compare_json_escape(record.fixture_id).c_str(),
-    generation_compare_json_escape(record.prompt_fixture_id).c_str(),
-    generation_compare_json_escape(record.prompt_fixture_path).c_str(),
-    generation_compare_json_escape(record.prompt_id).c_str(),
-    generation_compare_json_escape(record.formatter_mode).c_str(),
-    generation_compare_json_escape(record.formatter_contract).c_str(),
-    generation_compare_json_escape(record.sampling_id).c_str(),
-    generation_compare_json_escape(record.stop_id).c_str(),
-    record.seed,
-    record.comparable ? "true" : "false",
-    record.max_output_tokens,
-    record.ns_per_op,
-    record.ns_min_per_op,
-    record.ns_mean_per_op,
-    record.ns_max_per_op,
-    record.prepare_ns_per_op,
-    record.encode_ns_per_op,
-    record.publish_ns_per_op,
-    record.output_tokens,
-    record.output_bytes,
-    record.output_checksum,
-    record.iterations,
-    record.runs,
-    generation_compare_json_escape(record.output_path).c_str(),
-    generation_compare_json_escape(record.note).c_str(),
-    generation_compare_json_escape(record.error_kind).c_str(),
-    generation_compare_json_escape(record.error_message).c_str());
+      "{\"schema\":\"%s\",\"record_type\":\"%s\",\"status\":\"%s\",\"case_"
+      "name\":\"%s\","
+      "\"compare_group\":\"%s\",\"benchmark_lane\":\"%s\",\"lane\":\"%s\","
+      "\"backend_id\":\"%s\","
+      "\"backend_language\":\"%s\",\"thread_count\":%" PRId32 ","
+      "\"thread_contract\":\"%s\",\"workload_id\":\"%s\",\"workload_manifest_"
+      "path\":\"%s\","
+      "\"comparison_mode\":\"%s\",\"model_id\":\"%s\",\"fixture_id\":\"%s\","
+      "\"prompt_fixture_id\":\"%s\",\"prompt_fixture_path\":\"%s\",\"prompt_"
+      "id\":\"%s\","
+      "\"formatter_mode\":\"%s\",\"formatter_contract\":\"%s\","
+      "\"sampling_id\":\"%s\",\"stop_id\":\"%s\",\"seed\":%" PRId64 ","
+      "\"comparable\":%s,"
+      "\"max_output_tokens\":%" PRIu64 ",\"ns_per_op\":%.6f,"
+      "\"tokens_per_second\":%.6f,"
+      "\"ns_min_per_op\":%.6f,\"ns_mean_per_op\":%.6f,\"ns_max_per_op\":%.6f,"
+      "\"prepare_ns_per_op\":%.6f,\"encode_ns_per_op\":%.6f,\"publish_ns_per_"
+      "op\":%.6f,"
+      "\"output_tokens\":%" PRIu64 ",\"output_bytes\":%" PRIu64 ","
+      "\"output_checksum\":%" PRIu64 ","
+      "\"kernel_dispatch_calls\":%" PRIu64 ","
+      "\"flash_attention_dispatch_calls\":%" PRIu64 ","
+      "\"optimized_flash_dispatch_calls\":%" PRIu64 ","
+      "\"shared_flash_dispatch_calls\":%" PRIu64 ","
+      "\"native_q8_0_dispatch_calls\":%" PRIu64 ","
+      "\"packed_q8_0_dispatch_calls\":%" PRIu64 ","
+      "\"optimized_q4_dispatch_calls\":%" PRIu64 ","
+      "\"shared_q4_dispatch_calls\":%" PRIu64 ","
+      "\"optimized_q6_dispatch_calls\":%" PRIu64 ","
+      "\"shared_q6_dispatch_calls\":%" PRIu64 ","
+      "\"native_quantized_stage_count\":%" PRIu32 ","
+      "\"approved_dense_f32_stage_count\":%" PRIu32 ","
+      "\"disallowed_fallback_stage_count\":%" PRIu32 ","
+      "\"explicit_no_claim_stage_count\":%" PRIu32 ","
+      "\"iterations\":%" PRIu64 ",\"runs\":%zu,"
+      "\"output_path\":\"%s\",\"output_token_ids_path\":\"%s\","
+      "\"note\":\"%s\",\"error_kind\":\"%s\","
+      "\"error_message\":\"%s\"}\n",
+      k_generation_compare_schema,
+      generation_compare_json_escape(record.record_type).c_str(),
+      generation_compare_json_escape(record.status).c_str(),
+      generation_compare_json_escape(record.case_name).c_str(),
+      generation_compare_json_escape(record.compare_group).c_str(),
+      generation_compare_json_escape(record.benchmark_lane).c_str(),
+      generation_compare_json_escape(record.lane).c_str(),
+      generation_compare_json_escape(record.backend_id).c_str(),
+      generation_compare_json_escape(record.backend_language).c_str(),
+      record.thread_count,
+      generation_compare_json_escape(record.thread_contract).c_str(),
+      generation_compare_json_escape(record.workload_id).c_str(),
+      generation_compare_json_escape(record.workload_manifest_path).c_str(),
+      generation_compare_json_escape(record.comparison_mode).c_str(),
+      generation_compare_json_escape(record.model_id).c_str(),
+      generation_compare_json_escape(record.fixture_id).c_str(),
+      generation_compare_json_escape(record.prompt_fixture_id).c_str(),
+      generation_compare_json_escape(record.prompt_fixture_path).c_str(),
+      generation_compare_json_escape(record.prompt_id).c_str(),
+      generation_compare_json_escape(record.formatter_mode).c_str(),
+      generation_compare_json_escape(record.formatter_contract).c_str(),
+      generation_compare_json_escape(record.sampling_id).c_str(),
+      generation_compare_json_escape(record.stop_id).c_str(), record.seed,
+      record.comparable ? "true" : "false", record.max_output_tokens,
+      record.ns_per_op, record.tokens_per_second, record.ns_min_per_op,
+      record.ns_mean_per_op, record.ns_max_per_op, record.prepare_ns_per_op,
+      record.encode_ns_per_op, record.publish_ns_per_op, record.output_tokens,
+      record.output_bytes, record.output_checksum, record.kernel_dispatch_calls,
+      record.flash_attention_dispatch_calls,
+      record.optimized_flash_dispatch_calls,
+      record.shared_flash_dispatch_calls, record.native_q8_0_dispatch_calls,
+      record.packed_q8_0_dispatch_calls, record.optimized_q4_dispatch_calls,
+      record.shared_q4_dispatch_calls, record.optimized_q6_dispatch_calls,
+      record.shared_q6_dispatch_calls, record.native_quantized_stage_count,
+      record.approved_dense_f32_stage_count,
+      record.disallowed_fallback_stage_count,
+      record.explicit_no_claim_stage_count, record.iterations,
+      record.runs, generation_compare_json_escape(record.output_path).c_str(),
+      generation_compare_json_escape(record.output_token_ids_path).c_str(),
+      generation_compare_json_escape(record.note).c_str(),
+      generation_compare_json_escape(record.error_kind).c_str(),
+      generation_compare_json_escape(record.error_message).c_str());
 }
 
-}  // namespace emel::bench
+} // namespace emel::bench

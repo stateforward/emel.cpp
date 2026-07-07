@@ -47,7 +47,11 @@ struct request_backend_prepare {
     auto & generator = ctx.generator;
     generator.compute.backend_ready = false;
     ev.ctx.phase_code = static_cast<int32_t>(emel::text::generator::detail::prepare(
-        generator.compute.backend, *generator.model, generator.limits.block_tokens));
+        generator.compute.backend,
+        *generator.model,
+        *generator.matmul_actor,
+        generator.runtime_policy,
+        generator.limits.block_tokens));
     ev.ctx.phase_accepted =
         ev.ctx.phase_code ==
         static_cast<int32_t>(emel::error::cast(emel::model::loader::error::none));
@@ -58,6 +62,7 @@ struct request_backend_prepare {
     generator.compute.backend.stream.window = generator.stream_window;
     generator.compute.backend.stream.active =
         generator.stream_active && (generator.stream_window != nullptr);
+    emel::text::generator::action::apply_benchmark_lane_policy(generator);
     emel::text::generator::detail::scan_stream_pristine_records(
         generator.compute.backend);
   }

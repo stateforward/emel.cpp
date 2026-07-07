@@ -68,7 +68,7 @@ check_no_matches_except "legacy text generator root" \
 
 check_no_matches "text generator actor internals in maintained generation parity/benchmark lanes" \
   'emel/text/generator/(detail|actions|guards)\.hpp|emel::text::generator::(detail|action|guard)::|emel::text::generator::prefill::guard::|generation_internal_diagnostics' \
-  tools/bench/generation_bench.cpp tools/paritychecker/parity_runner.cpp tools/paritychecker/parity_runner.hpp
+  tools/generation_route_policy.hpp tools/bench/generation_bench.cpp tools/paritychecker/parity_runner.cpp tools/paritychecker/parity_runner.hpp
 
 check_no_matches "IO loader concrete system I/O before strategy implementation" \
   "$concrete_io_api_pattern" \

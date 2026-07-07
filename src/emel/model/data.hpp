@@ -8,6 +8,31 @@
 
 namespace emel::model {
 
+enum class generation_residual_route : uint8_t {
+  attention = 0,
+  shortconv = 1,
+};
+
+enum class generation_attention_qk_norm_route : uint8_t {
+  none = 0,
+  headwise_rms = 1,
+};
+
+enum class generation_attention_value_route : uint8_t {
+  dedicated_value = 0,
+  shared_key_value = 1,
+};
+
+enum class generation_attention_v_norm_route : uint8_t {
+  none = 0,
+  rms = 1,
+};
+
+enum class generation_attention_window_route : uint8_t {
+  full_context = 0,
+  sliding_window = 1,
+};
+
 struct data {
   static constexpr int32_t k_max_tensors = 65536;
   static constexpr int32_t k_max_name_bytes = 4 * 1024 * 1024;

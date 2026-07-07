@@ -497,7 +497,7 @@ TEST_CASE("graph_processor_releases_publish_targets_after_extract_failure") {
   auto first_request = make_valid_execute(&first_output, &first_dispatch, lifecycle);
   first_request.extract_outputs = extract_fail_with_error;
 
-  CHECK_FALSE(machine.process_event(first_request));
+  CHECK(machine.process_event(first_request));
   CHECK(first_dispatch.error_called);
   CHECK(first_dispatch.error_code ==
         static_cast<int32_t>(emel::error::cast(processor_error::kernel_failed)));

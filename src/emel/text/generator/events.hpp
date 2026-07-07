@@ -13,6 +13,7 @@
 #include "emel/graph/events.hpp"
 #include "emel/graph/tensor/events.hpp"
 #include "emel/logits/sampler/events.hpp"
+#include "emel/model/data.hpp"
 #include "emel/text/conditioner/errors.hpp"
 #include "emel/text/formatter/format.hpp"
 #include "emel/text/renderer/events.hpp"
@@ -38,6 +39,35 @@ enum class selection_mode : uint8_t {
   sample_logits,
   preselected_argmax,
 };
+
+enum class benchmark_lane : uint8_t {
+  single,
+  multithreaded,
+};
+
+struct route_policy {
+  int32_t parallel_min_prefill_tokens = 0;
+  int32_t parallel_min_gemv_dim = 0;
+  int32_t prefill_chunk4_min_tokens = 0;
+  int32_t prefill_chunk8_min_tokens = 0;
+};
+
+struct runtime_policy {
+  emel::kernel::kernel_kind kernel_kind = emel::kernel::kernel_kind::x86_64;
+  route_policy routes = {};
+};
+
+inline constexpr int32_t k_prefill_q8_chunk_rows = 4;
+inline constexpr int32_t k_prefill_q8_chunk8_rows = 8;
+
+inline runtime_policy
+make_auto_runtime_policy(const emel::model::data &,
+                         const route_policy routes) noexcept {
+  return runtime_policy{
+      .kernel_kind = emel::kernel::detect_host_kind(),
+      .routes = routes,
+  };
+}
 
 enum class prefill_compute_contract : uint8_t {
   none = 0,
@@ -66,6 +96,8 @@ using tokenizer_tokenize_dispatch_fn =
 
 struct compute_io {
   void * backend_ctx = nullptr;
+  emel::text::generator::attention_mode selected_attention_mode =
+      emel::text::generator::attention_mode::nonflash;
   const int32_t * token_ids = nullptr;
   int32_t token_count = 0;
   float * logits = nullptr;
@@ -182,6 +214,7 @@ struct generate {
   bool enable_thinking = false;
   int32_t max_tokens = 0;
   std::span<char> output = {};
+  std::span<int32_t> generated_token_ids_out = {};
   size_t & output_length_out;
   emel::error::type * error_out = nullptr;
   emel::callback<void(const events::generation_done &)> on_done = {};
@@ -222,6 +255,11 @@ struct capture_diagnostics {
     : out(out_ref) {}
 
   emel::text::generator::diagnostics & out;
+};
+
+struct configure_benchmark_lane {
+  emel::text::generator::benchmark_lane lane =
+      emel::text::generator::benchmark_lane::multithreaded;
 };
 
 struct capture_graph_lifecycle {

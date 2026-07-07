@@ -2455,6 +2455,31 @@ TEST_CASE(
   CHECK(block.attention_k_norm.name == "blk.0.attn_k_norm.weight");
 }
 
+TEST_CASE("model_llama_detail_describes_qwen3_generation_norm_requirements") {
+  auto model = std::make_unique<emel::model::data>();
+  build_qwen3_model(*model, 1, true, true);
+
+  emel::model::llama::detail::execution_view view = {};
+  REQUIRE(emel::model::llama::detail::build_execution_view(*model, view) ==
+          emel::error::cast(emel::model::loader::error::none));
+
+  emel::model::llama::detail::generation_execution_descriptor descriptor = {};
+  REQUIRE(emel::model::llama::detail::build_generation_execution_descriptor(
+              view, descriptor) ==
+          emel::error::cast(emel::model::loader::error::none));
+
+  CHECK(descriptor.execution == &view);
+  CHECK(descriptor.layer_count == 1u);
+  CHECK(descriptor.layers[0].residual_route ==
+        emel::model::llama::detail::generation_residual_route::attention);
+  CHECK(descriptor.layers[0].qk_norm_route ==
+        emel::model::llama::detail::generation_attention_qk_norm_route::headwise_rms);
+  CHECK(descriptor.layers[0].value_route ==
+        emel::model::llama::detail::generation_attention_value_route::dedicated_value);
+  CHECK(descriptor.layers[0].v_norm_route ==
+        emel::model::llama::detail::generation_attention_v_norm_route::none);
+}
+
 TEST_CASE("model_llama_detail_rejects_qwen3_execution_view_without_attention_q_"
           "norm") {
   auto model = std::make_unique<emel::model::data>();
@@ -2542,6 +2567,28 @@ TEST_CASE("model_llama_detail_builds_lfm2_topology_with_hybrid_tensor_count") {
           emel::error::cast(emel::model::loader::error::none));
   CHECK(topology.tensor_count == 149u);
   CHECK(topology.node_count == 149u);
+}
+
+TEST_CASE("model_llama_detail_describes_lfm2_hybrid_generation_layers") {
+  auto model = std::make_unique<emel::model::data>();
+  build_lfm2_model(*model, true, false);
+
+  emel::model::llama::detail::execution_view view = {};
+  REQUIRE(emel::model::llama::detail::build_execution_view(*model, view) ==
+          emel::error::cast(emel::model::loader::error::none));
+
+  emel::model::llama::detail::generation_execution_descriptor descriptor = {};
+  REQUIRE(emel::model::llama::detail::build_generation_execution_descriptor(
+              view, descriptor) ==
+          emel::error::cast(emel::model::loader::error::none));
+
+  CHECK(descriptor.layer_count == 16u);
+  CHECK(descriptor.layers[0].residual_route ==
+        emel::model::llama::detail::generation_residual_route::shortconv);
+  CHECK(descriptor.layers[2].residual_route ==
+        emel::model::llama::detail::generation_residual_route::attention);
+  CHECK(descriptor.layers[2].qk_norm_route ==
+        emel::model::llama::detail::generation_attention_qk_norm_route::headwise_rms);
 }
 
 TEST_CASE(
@@ -3505,6 +3552,42 @@ TEST_CASE("model_llama_detail_builds_gemma4_execution_view_with_shared_kv_and_"
   REQUIRE(emel::model::llama::detail::lookup_block_view(view, 15, shared) ==
           emel::error::cast(emel::model::loader::error::none));
   CHECK(shared.attention_v.name == "blk.15.attn_k.weight");
+}
+
+TEST_CASE("model_llama_detail_describes_gemma4_sliding_and_shared_kv_layers") {
+  auto model = std::make_unique<emel::model::data>();
+  build_gemma4_model(*model, false);
+
+  emel::model::llama::detail::execution_view view = {};
+  REQUIRE(emel::model::llama::detail::build_execution_view(*model, view) ==
+          emel::error::cast(emel::model::loader::error::none));
+
+  emel::model::llama::detail::generation_execution_descriptor descriptor = {};
+  REQUIRE(emel::model::llama::detail::build_generation_execution_descriptor(
+              view, descriptor) ==
+          emel::error::cast(emel::model::loader::error::none));
+
+  CHECK(descriptor.layer_count == 35u);
+  CHECK(descriptor.layers[0].window_route ==
+        emel::model::llama::detail::generation_attention_window_route::sliding_window);
+  CHECK(descriptor.layers[0].attention_key_length == 256);
+  CHECK(descriptor.layers[0].attention_value_length == 256);
+  CHECK(descriptor.layers[0].attention_rope_dim == 256);
+  CHECK(descriptor.layers[0].attention_rope_freq_base == doctest::Approx(10000.0f));
+  CHECK(descriptor.layers[4].window_route ==
+        emel::model::llama::detail::generation_attention_window_route::full_context);
+  CHECK(descriptor.layers[4].attention_key_length == 512);
+  CHECK(descriptor.layers[4].attention_value_length == 512);
+  CHECK(descriptor.layers[4].attention_rope_dim == 512);
+  CHECK(descriptor.layers[4].attention_rope_freq_base == doctest::Approx(1000000.0f));
+  CHECK(descriptor.layers[14].value_route ==
+        emel::model::llama::detail::generation_attention_value_route::dedicated_value);
+  CHECK(descriptor.layers[14].v_norm_route ==
+        emel::model::llama::detail::generation_attention_v_norm_route::none);
+  CHECK(descriptor.layers[15].value_route ==
+        emel::model::llama::detail::generation_attention_value_route::shared_key_value);
+  CHECK(descriptor.layers[15].v_norm_route ==
+        emel::model::llama::detail::generation_attention_v_norm_route::rms);
 }
 
 TEST_CASE("model_llama_detail_builds_gemma4_topology_with_shared_kv_tail_"

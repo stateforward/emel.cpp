@@ -187,6 +187,16 @@ struct model {
 
       , sml::state<state_idle> <= sml::state<state_parallel_decision>
                  + sml::completion<event::run>
+                 [ guard::guard_parallel_submission_failed{} ]
+                 / action::effect_reject_parallel_scheduler
+
+      , sml::state<state_idle> <= sml::state<state_parallel_decision>
+                 + sml::completion<event::run>
+                 [ guard::guard_parallel_join_failed{} ]
+                 / action::effect_reject_parallel_scheduler
+
+      , sml::state<state_idle> <= sml::state<state_parallel_decision>
+                 + sml::completion<event::run>
                  [ guard::guard_parallel_lane_rejected<0>{} ]
                  / action::effect_mark_lane_rejected<0>{}
 
@@ -284,14 +294,11 @@ struct sm : public emel::co_sm<model, action::context, static_co_policy> {
   explicit sm(action::lane_pool & pool) : base_type(action::context{.pool = &pool}) {}
 
   bool process_event(const event::run & ev) {
-    const bool accepted = process_event_async(ev).result();
-    return accepted && ev.out.err == emel::error::cast(error::none);
+    return base_type::process_event(ev);
   }
 
   emel::bool_task process_event_async(const event::run & ev) {
-    const bool accepted = base_type::process_event_async(ev).result();
-    return emel::bool_task::from_value(
-        accepted && ev.out.err == emel::error::cast(error::none));
+    return base_type::process_event_async(ev);
   }
 };
 

@@ -23,9 +23,17 @@ stateDiagram-v2
   allocate_slots_request_length_decision --> errored : completion_allocate_slots_runtime_ [allocate_slots_request_length_invalid_] / mark_invalid_request_
   allocate_slots_request_block_layout_decision --> allocate_slots_request_capacity_decision : completion_allocate_slots_runtime_ [allocate_slots_request_block_layout_valid_] / none
   allocate_slots_request_block_layout_decision --> errored : completion_allocate_slots_runtime_ [allocate_slots_request_block_layout_invalid_] / mark_backend_error_
-  allocate_slots_request_capacity_decision --> allocate_slots_exec : completion_allocate_slots_runtime_ [allocate_slots_request_capacity_valid_] / none
+  allocate_slots_request_capacity_decision --> state_allocate_slots_tail_decision : completion_allocate_slots_runtime_ [allocate_slots_request_capacity_valid_] / none
   allocate_slots_request_capacity_decision --> errored : completion_allocate_slots_runtime_ [allocate_slots_request_capacity_invalid_] / mark_out_of_memory_
-  allocate_slots_exec --> allocate_slots_result_decision : completion_allocate_slots_runtime_ [always] / exec_allocate_slots_
+  state_allocate_slots_tail_decision --> state_allocate_slots_tail_copy_exec : completion_allocate_slots_runtime_ [guard_allocate_slots_shared_tail_copy_ready_] / none
+  state_allocate_slots_tail_decision --> errored : completion_allocate_slots_runtime_ [guard_allocate_slots_shared_tail_copy_missing_] / mark_invalid_request_
+  state_allocate_slots_tail_decision --> state_allocate_slots_direct_exec : completion_allocate_slots_runtime_ [guard_allocate_slots_shared_tail_split_not_required_] / none
+  state_allocate_slots_tail_copy_exec --> state_allocate_slots_tail_copy_result_decision : completion_allocate_slots_runtime_ [always] / effect_copy_shared_tail_block_
+  state_allocate_slots_tail_copy_result_decision --> state_allocate_slots_tail_split_exec : completion_allocate_slots_runtime_ [operation_succeeded_] / none
+  state_allocate_slots_tail_copy_result_decision --> errored : completion_allocate_slots_runtime_ [operation_failed_with_error_] / mark_error_from_operation_
+  state_allocate_slots_tail_copy_result_decision --> errored : completion_allocate_slots_runtime_ [operation_failed_without_error_] / mark_backend_error_
+  state_allocate_slots_tail_split_exec --> allocate_slots_result_decision : completion_allocate_slots_runtime_ [always] / effect_allocate_slots_with_tail_split_
+  state_allocate_slots_direct_exec --> allocate_slots_result_decision : completion_allocate_slots_runtime_ [always] / effect_allocate_slots_without_tail_split_
   allocate_slots_result_decision --> done : completion_allocate_slots_runtime_ [operation_succeeded_] / none
   allocate_slots_result_decision --> errored : completion_allocate_slots_runtime_ [operation_failed_with_error_] / mark_error_from_operation_
   allocate_slots_result_decision --> errored : completion_allocate_slots_runtime_ [operation_failed_without_error_] / mark_backend_error_
@@ -83,7 +91,11 @@ stateDiagram-v2
   allocate_slots_request_length_decision --> ready : _ [always] / on_unexpected_
   allocate_slots_request_block_layout_decision --> ready : _ [always] / on_unexpected_
   allocate_slots_request_capacity_decision --> ready : _ [always] / on_unexpected_
-  allocate_slots_exec --> ready : _ [always] / on_unexpected_
+  state_allocate_slots_tail_decision --> ready : _ [always] / on_unexpected_
+  state_allocate_slots_tail_copy_exec --> ready : _ [always] / on_unexpected_
+  state_allocate_slots_tail_copy_result_decision --> ready : _ [always] / on_unexpected_
+  state_allocate_slots_direct_exec --> ready : _ [always] / on_unexpected_
+  state_allocate_slots_tail_split_exec --> ready : _ [always] / on_unexpected_
   allocate_slots_result_decision --> ready : _ [always] / on_unexpected_
   branch_sequence_request_decision --> ready : _ [always] / on_unexpected_
   branch_sequence_exec --> ready : _ [always] / on_unexpected_

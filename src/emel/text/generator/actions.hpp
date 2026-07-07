@@ -8,6 +8,7 @@
 #include "emel/text/generator/errors.hpp"
 #include "emel/text/generator/events.hpp"
 #include "emel/text/generator/initializer/detail.hpp"
+#include "emel/text/generator/layer/sm.hpp"
 #include "emel/text/generator/prefill/detail.hpp"
 #include "emel/graph/events.hpp"
 #include "emel/logits/sampler/errors.hpp"
@@ -278,12 +279,14 @@ struct request_memory_snapshot {
   }
 };
 
-template <emel::text::generator::detail::step_kind kind,
+template <emel::text::generator::attention_mode mode,
+          emel::text::generator::detail::step_kind kind,
           auto run_kernel_fn>
 inline void request_phase_compute(const event::generate_run & ev, context & ctx) noexcept {
   ev.ctx.phase_code = static_cast<int32_t>(emel::error::cast(emel::graph::error::none));
   ev.ctx.graph_output = {};
   ev.ctx.io.backend_ctx = &ctx.compute.backend;
+  ev.ctx.io.selected_attention_mode = mode;
   ev.ctx.io.logits = ctx.buffers.logits.get();
   ev.ctx.io.logits_capacity = ctx.buffers.vocab_size;
   ev.ctx.io.selected_token_out = nullptr;
@@ -364,7 +367,8 @@ inline void request_phase_compute(const event::generate_run & ev, context & ctx)
   ev.ctx.phase_accepted = ctx.graph.process_event(compute_ev);
 }
 
-template <emel::text::generator::detail::step_kind kind,
+template <emel::text::generator::attention_mode mode,
+          emel::text::generator::detail::step_kind kind,
           auto run_kernel_fn>
 inline void request_phase_compute_preselected_argmax(const event::generate_run & ev,
                                                      context & ctx) noexcept {
@@ -372,6 +376,7 @@ inline void request_phase_compute_preselected_argmax(const event::generate_run &
   ev.ctx.graph_output = {};
   ev.ctx.selected_score = 0.0f;
   ev.ctx.io.backend_ctx = &ctx.compute.backend;
+  ev.ctx.io.selected_attention_mode = mode;
   ev.ctx.io.logits = nullptr;
   ev.ctx.io.logits_capacity = 0;
   ev.ctx.io.selected_token_out = &ev.ctx.selected_token;
@@ -470,7 +475,8 @@ struct request_decode_slots {
 
 struct request_decode_compute_flash_packed_q8_0 {
   void operator()(const event::generate_run & ev, context & ctx) const noexcept {
-    request_phase_compute<emel::text::generator::detail::step_kind::decode,
+    request_phase_compute<emel::text::generator::attention_mode::flash,
+                          emel::text::generator::detail::step_kind::decode,
                           emel::text::generator::detail::
                               run_kernel_flash_decode_packed_q8_0>(ev, ctx);
   }
@@ -478,14 +484,16 @@ struct request_decode_compute_flash_packed_q8_0 {
 
 struct request_decode_compute_flash_q8_k {
   void operator()(const event::generate_run & ev, context & ctx) const noexcept {
-    request_phase_compute<emel::text::generator::detail::step_kind::decode,
+    request_phase_compute<emel::text::generator::attention_mode::flash,
+                          emel::text::generator::detail::step_kind::decode,
                           emel::text::generator::detail::run_kernel_flash_decode_q8_k>(ev, ctx);
   }
 };
 
 struct request_decode_compute_flash_native_quantized {
   void operator()(const event::generate_run & ev, context & ctx) const noexcept {
-    request_phase_compute<emel::text::generator::detail::step_kind::decode,
+    request_phase_compute<emel::text::generator::attention_mode::flash,
+                          emel::text::generator::detail::step_kind::decode,
                           emel::text::generator::detail::
                               run_kernel_flash_decode_native_quantized>(ev, ctx);
   }
@@ -493,7 +501,8 @@ struct request_decode_compute_flash_native_quantized {
 
 struct request_decode_compute_flash_native_quantized_q8_k_logits {
   void operator()(const event::generate_run & ev, context & ctx) const noexcept {
-    request_phase_compute<emel::text::generator::detail::step_kind::decode,
+    request_phase_compute<emel::text::generator::attention_mode::flash,
+                          emel::text::generator::detail::step_kind::decode,
                           emel::text::generator::detail::
                               run_kernel_flash_decode_native_quantized_q8_k_logits>(ev, ctx);
   }
@@ -501,14 +510,16 @@ struct request_decode_compute_flash_native_quantized_q8_k_logits {
 
 struct request_decode_compute_flash_kernel {
   void operator()(const event::generate_run & ev, context & ctx) const noexcept {
-    request_phase_compute<emel::text::generator::detail::step_kind::decode,
+    request_phase_compute<emel::text::generator::attention_mode::flash,
+                          emel::text::generator::detail::step_kind::decode,
                           emel::text::generator::detail::run_kernel_flash_decode_kernel>(ev, ctx);
   }
 };
 
 struct request_decode_compute_flash_kernel_streamed {
   void operator()(const event::generate_run & ev, context & ctx) const noexcept {
-    request_phase_compute<emel::text::generator::detail::step_kind::decode,
+    request_phase_compute<emel::text::generator::attention_mode::flash,
+                          emel::text::generator::detail::step_kind::decode,
                           emel::text::generator::detail::
                               run_kernel_flash_decode_kernel_streamed>(ev, ctx);
   }
@@ -516,7 +527,8 @@ struct request_decode_compute_flash_kernel_streamed {
 
 struct request_decode_compute_flash_native_quantized_streamed {
   void operator()(const event::generate_run & ev, context & ctx) const noexcept {
-    request_phase_compute<emel::text::generator::detail::step_kind::decode,
+    request_phase_compute<emel::text::generator::attention_mode::flash,
+                          emel::text::generator::detail::step_kind::decode,
                           emel::text::generator::detail::
                               run_kernel_flash_decode_native_quantized_streamed>(ev, ctx);
   }
@@ -524,8 +536,8 @@ struct request_decode_compute_flash_native_quantized_streamed {
 
 struct request_decode_compute_flash_packed_q8_0_streamed {
   void operator()(const event::generate_run & ev, context & ctx) const noexcept {
-    request_phase_compute<
-        emel::text::generator::detail::step_kind::decode,
+    request_phase_compute<emel::text::generator::attention_mode::flash,
+                          emel::text::generator::detail::step_kind::decode,
         emel::text::generator::detail::run_kernel_flash_decode_packed_q8_0_streamed>(
         ev, ctx);
   }
@@ -533,8 +545,8 @@ struct request_decode_compute_flash_packed_q8_0_streamed {
 
 struct request_decode_compute_flash_q8_k_streamed {
   void operator()(const event::generate_run & ev, context & ctx) const noexcept {
-    request_phase_compute<
-        emel::text::generator::detail::step_kind::decode,
+    request_phase_compute<emel::text::generator::attention_mode::flash,
+                          emel::text::generator::detail::step_kind::decode,
         emel::text::generator::detail::run_kernel_flash_decode_q8_k_streamed>(ev,
                                                                               ctx);
   }
@@ -542,8 +554,8 @@ struct request_decode_compute_flash_q8_k_streamed {
 
 struct request_decode_compute_flash_native_quantized_q8_k_logits_streamed {
   void operator()(const event::generate_run & ev, context & ctx) const noexcept {
-    request_phase_compute<
-        emel::text::generator::detail::step_kind::decode,
+    request_phase_compute<emel::text::generator::attention_mode::flash,
+                          emel::text::generator::detail::step_kind::decode,
         emel::text::generator::detail::
             run_kernel_flash_decode_native_quantized_q8_k_logits_streamed>(ev, ctx);
   }
@@ -551,8 +563,8 @@ struct request_decode_compute_flash_native_quantized_q8_k_logits_streamed {
 
 struct request_decode_compute_flash_preselected_argmax_q8_k_streamed {
   void operator()(const event::generate_run &ev, context &ctx) const noexcept {
-    request_phase_compute_preselected_argmax<
-        emel::text::generator::detail::step_kind::decode,
+    request_phase_compute_preselected_argmax<emel::text::generator::attention_mode::flash,
+                          emel::text::generator::detail::step_kind::decode,
         emel::text::generator::detail::
             run_kernel_flash_decode_preselected_argmax_q8_k_streamed>(ev, ctx);
   }
@@ -561,8 +573,8 @@ struct request_decode_compute_flash_preselected_argmax_q8_k_streamed {
 struct
     request_decode_compute_flash_preselected_argmax_native_quantized_q8_k_streamed {
   void operator()(const event::generate_run &ev, context &ctx) const noexcept {
-    request_phase_compute_preselected_argmax<
-        emel::text::generator::detail::step_kind::decode,
+    request_phase_compute_preselected_argmax<emel::text::generator::attention_mode::flash,
+                          emel::text::generator::detail::step_kind::decode,
         emel::text::generator::detail::
             run_kernel_flash_decode_preselected_argmax_native_quantized_q8_k_streamed>(
         ev, ctx);
@@ -572,8 +584,8 @@ struct
 struct
     request_decode_compute_flash_preselected_argmax_native_quantized_kernel_streamed {
   void operator()(const event::generate_run &ev, context &ctx) const noexcept {
-    request_phase_compute_preselected_argmax<
-        emel::text::generator::detail::step_kind::decode,
+    request_phase_compute_preselected_argmax<emel::text::generator::attention_mode::flash,
+                          emel::text::generator::detail::step_kind::decode,
         emel::text::generator::detail::
             run_kernel_flash_decode_preselected_argmax_native_quantized_kernel_streamed>(
         ev, ctx);
@@ -582,8 +594,8 @@ struct
 
 struct request_decode_compute_flash_preselected_argmax_kernel_streamed {
   void operator()(const event::generate_run &ev, context &ctx) const noexcept {
-    request_phase_compute_preselected_argmax<
-        emel::text::generator::detail::step_kind::decode,
+    request_phase_compute_preselected_argmax<emel::text::generator::attention_mode::flash,
+                          emel::text::generator::detail::step_kind::decode,
         emel::text::generator::detail::
             run_kernel_flash_decode_preselected_argmax_kernel_streamed>(ev,
                                                                         ctx);
@@ -592,7 +604,8 @@ struct request_decode_compute_flash_preselected_argmax_kernel_streamed {
 
 struct request_decode_compute_flash_parallel_packed_q8_0 {
   void operator()(const event::generate_run & ev, context & ctx) const noexcept {
-    request_phase_compute<emel::text::generator::detail::step_kind::decode,
+    request_phase_compute<emel::text::generator::attention_mode::flash,
+                          emel::text::generator::detail::step_kind::decode,
                           emel::text::generator::detail::
                               run_kernel_flash_decode_parallel_packed_q8_0>(ev, ctx);
   }
@@ -600,7 +613,8 @@ struct request_decode_compute_flash_parallel_packed_q8_0 {
 
 struct request_decode_compute_flash_parallel_q8_k {
   void operator()(const event::generate_run & ev, context & ctx) const noexcept {
-    request_phase_compute<emel::text::generator::detail::step_kind::decode,
+    request_phase_compute<emel::text::generator::attention_mode::flash,
+                          emel::text::generator::detail::step_kind::decode,
                           emel::text::generator::detail::
                               run_kernel_flash_decode_parallel_q8_k>(ev, ctx);
   }
@@ -608,7 +622,8 @@ struct request_decode_compute_flash_parallel_q8_k {
 
 struct request_decode_compute_flash_parallel_native_quantized {
   void operator()(const event::generate_run & ev, context & ctx) const noexcept {
-    request_phase_compute<emel::text::generator::detail::step_kind::decode,
+    request_phase_compute<emel::text::generator::attention_mode::flash,
+                          emel::text::generator::detail::step_kind::decode,
                           emel::text::generator::detail::
                               run_kernel_flash_decode_parallel_native_quantized>(ev, ctx);
   }
@@ -616,7 +631,8 @@ struct request_decode_compute_flash_parallel_native_quantized {
 
 struct request_decode_compute_flash_parallel_native_quantized_q8_k_logits {
   void operator()(const event::generate_run & ev, context & ctx) const noexcept {
-    request_phase_compute<emel::text::generator::detail::step_kind::decode,
+    request_phase_compute<emel::text::generator::attention_mode::flash,
+                          emel::text::generator::detail::step_kind::decode,
                           emel::text::generator::detail::
                               run_kernel_flash_decode_parallel_native_quantized_q8_k_logits>(
         ev, ctx);
@@ -625,7 +641,8 @@ struct request_decode_compute_flash_parallel_native_quantized_q8_k_logits {
 
 struct request_decode_compute_flash_parallel_kernel {
   void operator()(const event::generate_run & ev, context & ctx) const noexcept {
-    request_phase_compute<emel::text::generator::detail::step_kind::decode,
+    request_phase_compute<emel::text::generator::attention_mode::flash,
+                          emel::text::generator::detail::step_kind::decode,
                           emel::text::generator::detail::
                               run_kernel_flash_decode_parallel_kernel>(ev, ctx);
   }
@@ -633,7 +650,8 @@ struct request_decode_compute_flash_parallel_kernel {
 
 struct request_decode_compute_nonflash_packed_q8_0 {
   void operator()(const event::generate_run & ev, context & ctx) const noexcept {
-    request_phase_compute<emel::text::generator::detail::step_kind::decode,
+    request_phase_compute<emel::text::generator::attention_mode::nonflash,
+                          emel::text::generator::detail::step_kind::decode,
                           emel::text::generator::detail::
                               run_kernel_nonflash_decode_packed_q8_0>(ev, ctx);
   }
@@ -641,7 +659,8 @@ struct request_decode_compute_nonflash_packed_q8_0 {
 
 struct request_decode_compute_nonflash_q8_k {
   void operator()(const event::generate_run & ev, context & ctx) const noexcept {
-    request_phase_compute<emel::text::generator::detail::step_kind::decode,
+    request_phase_compute<emel::text::generator::attention_mode::nonflash,
+                          emel::text::generator::detail::step_kind::decode,
                           emel::text::generator::detail::run_kernel_nonflash_decode_q8_k>(
         ev, ctx);
   }
@@ -649,7 +668,8 @@ struct request_decode_compute_nonflash_q8_k {
 
 struct request_decode_compute_nonflash_native_quantized {
   void operator()(const event::generate_run & ev, context & ctx) const noexcept {
-    request_phase_compute<emel::text::generator::detail::step_kind::decode,
+    request_phase_compute<emel::text::generator::attention_mode::nonflash,
+                          emel::text::generator::detail::step_kind::decode,
                           emel::text::generator::detail::
                               run_kernel_nonflash_decode_native_quantized>(
         ev, ctx);
@@ -658,7 +678,8 @@ struct request_decode_compute_nonflash_native_quantized {
 
 struct request_decode_compute_nonflash_native_quantized_q8_k_logits {
   void operator()(const event::generate_run & ev, context & ctx) const noexcept {
-    request_phase_compute<emel::text::generator::detail::step_kind::decode,
+    request_phase_compute<emel::text::generator::attention_mode::nonflash,
+                          emel::text::generator::detail::step_kind::decode,
                           emel::text::generator::detail::
                               run_kernel_nonflash_decode_native_quantized_q8_k_logits>(
         ev, ctx);
@@ -667,7 +688,8 @@ struct request_decode_compute_nonflash_native_quantized_q8_k_logits {
 
 struct request_decode_compute_nonflash_kernel {
   void operator()(const event::generate_run & ev, context & ctx) const noexcept {
-    request_phase_compute<emel::text::generator::detail::step_kind::decode,
+    request_phase_compute<emel::text::generator::attention_mode::nonflash,
+                          emel::text::generator::detail::step_kind::decode,
                           emel::text::generator::detail::run_kernel_nonflash_decode_kernel>(
         ev, ctx);
   }
@@ -675,7 +697,8 @@ struct request_decode_compute_nonflash_kernel {
 
 struct request_decode_compute_nonflash_packed_q8_0_streamed {
   void operator()(const event::generate_run & ev, context & ctx) const noexcept {
-    request_phase_compute<emel::text::generator::detail::step_kind::decode,
+    request_phase_compute<emel::text::generator::attention_mode::nonflash,
+                          emel::text::generator::detail::step_kind::decode,
                           emel::text::generator::detail::
                               run_kernel_nonflash_decode_packed_q8_0_streamed>(ev, ctx);
   }
@@ -683,15 +706,16 @@ struct request_decode_compute_nonflash_packed_q8_0_streamed {
 
 struct request_decode_compute_nonflash_q8_k_streamed {
   void operator()(const event::generate_run & ev, context & ctx) const noexcept {
-    request_phase_compute<
-        emel::text::generator::detail::step_kind::decode,
+    request_phase_compute<emel::text::generator::attention_mode::nonflash,
+                          emel::text::generator::detail::step_kind::decode,
         emel::text::generator::detail::run_kernel_nonflash_decode_q8_k_streamed>(ev, ctx);
   }
 };
 
 struct request_decode_compute_nonflash_native_quantized_streamed {
   void operator()(const event::generate_run & ev, context & ctx) const noexcept {
-    request_phase_compute<emel::text::generator::detail::step_kind::decode,
+    request_phase_compute<emel::text::generator::attention_mode::nonflash,
+                          emel::text::generator::detail::step_kind::decode,
                           emel::text::generator::detail::
                               run_kernel_nonflash_decode_native_quantized_streamed>(ev, ctx);
   }
@@ -699,8 +723,8 @@ struct request_decode_compute_nonflash_native_quantized_streamed {
 
 struct request_decode_compute_nonflash_native_quantized_q8_k_logits_streamed {
   void operator()(const event::generate_run & ev, context & ctx) const noexcept {
-    request_phase_compute<
-        emel::text::generator::detail::step_kind::decode,
+    request_phase_compute<emel::text::generator::attention_mode::nonflash,
+                          emel::text::generator::detail::step_kind::decode,
         emel::text::generator::detail::
             run_kernel_nonflash_decode_native_quantized_q8_k_logits_streamed>(ev, ctx);
   }
@@ -708,15 +732,16 @@ struct request_decode_compute_nonflash_native_quantized_q8_k_logits_streamed {
 
 struct request_decode_compute_nonflash_kernel_streamed {
   void operator()(const event::generate_run & ev, context & ctx) const noexcept {
-    request_phase_compute<
-        emel::text::generator::detail::step_kind::decode,
+    request_phase_compute<emel::text::generator::attention_mode::nonflash,
+                          emel::text::generator::detail::step_kind::decode,
         emel::text::generator::detail::run_kernel_nonflash_decode_kernel_streamed>(ev, ctx);
   }
 };
 
 struct request_decode_compute_flash_preselected_argmax_q8_k {
   void operator()(const event::generate_run & ev, context & ctx) const noexcept {
-    request_phase_compute_preselected_argmax<emel::text::generator::detail::step_kind::decode,
+    request_phase_compute_preselected_argmax<emel::text::generator::attention_mode::flash,
+                          emel::text::generator::detail::step_kind::decode,
                                              emel::text::generator::detail::
                                                  run_kernel_flash_decode_preselected_argmax_q8_k>(
         ev, ctx);
@@ -725,8 +750,8 @@ struct request_decode_compute_flash_preselected_argmax_q8_k {
 
 struct request_decode_compute_flash_preselected_argmax_native_quantized_q8_k {
   void operator()(const event::generate_run & ev, context & ctx) const noexcept {
-    request_phase_compute_preselected_argmax<
-        emel::text::generator::detail::step_kind::decode,
+    request_phase_compute_preselected_argmax<emel::text::generator::attention_mode::flash,
+                          emel::text::generator::detail::step_kind::decode,
         emel::text::generator::detail::
             run_kernel_flash_decode_preselected_argmax_native_quantized_q8_k>(
         ev, ctx);
@@ -735,8 +760,8 @@ struct request_decode_compute_flash_preselected_argmax_native_quantized_q8_k {
 
 struct request_decode_compute_flash_preselected_argmax_native_quantized_kernel {
   void operator()(const event::generate_run & ev, context & ctx) const noexcept {
-    request_phase_compute_preselected_argmax<
-        emel::text::generator::detail::step_kind::decode,
+    request_phase_compute_preselected_argmax<emel::text::generator::attention_mode::flash,
+                          emel::text::generator::detail::step_kind::decode,
         emel::text::generator::detail::
             run_kernel_flash_decode_preselected_argmax_native_quantized_kernel>(
         ev, ctx);
@@ -745,8 +770,8 @@ struct request_decode_compute_flash_preselected_argmax_native_quantized_kernel {
 
 struct request_decode_compute_flash_preselected_argmax_kernel {
   void operator()(const event::generate_run & ev, context & ctx) const noexcept {
-    request_phase_compute_preselected_argmax<
-        emel::text::generator::detail::step_kind::decode,
+    request_phase_compute_preselected_argmax<emel::text::generator::attention_mode::flash,
+                          emel::text::generator::detail::step_kind::decode,
         emel::text::generator::detail::run_kernel_flash_decode_preselected_argmax_kernel>(
         ev, ctx);
   }
@@ -754,8 +779,8 @@ struct request_decode_compute_flash_preselected_argmax_kernel {
 
 struct request_decode_compute_flash_parallel_preselected_argmax_q8_k {
   void operator()(const event::generate_run & ev, context & ctx) const noexcept {
-    request_phase_compute_preselected_argmax<
-        emel::text::generator::detail::step_kind::decode,
+    request_phase_compute_preselected_argmax<emel::text::generator::attention_mode::flash,
+                          emel::text::generator::detail::step_kind::decode,
         emel::text::generator::detail::
             run_kernel_flash_decode_parallel_preselected_argmax_q8_k>(
         ev, ctx);
@@ -764,8 +789,8 @@ struct request_decode_compute_flash_parallel_preselected_argmax_q8_k {
 
 struct request_decode_compute_flash_parallel_preselected_argmax_native_quantized_q8_k {
   void operator()(const event::generate_run & ev, context & ctx) const noexcept {
-    request_phase_compute_preselected_argmax<
-        emel::text::generator::detail::step_kind::decode,
+    request_phase_compute_preselected_argmax<emel::text::generator::attention_mode::flash,
+                          emel::text::generator::detail::step_kind::decode,
         emel::text::generator::detail::
             run_kernel_flash_decode_parallel_preselected_argmax_native_quantized_q8_k>(
         ev, ctx);
@@ -774,8 +799,8 @@ struct request_decode_compute_flash_parallel_preselected_argmax_native_quantized
 
 struct request_decode_compute_flash_parallel_preselected_argmax_native_quantized_kernel {
   void operator()(const event::generate_run & ev, context & ctx) const noexcept {
-    request_phase_compute_preselected_argmax<
-        emel::text::generator::detail::step_kind::decode,
+    request_phase_compute_preselected_argmax<emel::text::generator::attention_mode::flash,
+                          emel::text::generator::detail::step_kind::decode,
         emel::text::generator::detail::
             run_kernel_flash_decode_parallel_preselected_argmax_native_quantized_kernel>(
         ev, ctx);
@@ -784,8 +809,8 @@ struct request_decode_compute_flash_parallel_preselected_argmax_native_quantized
 
 struct request_decode_compute_flash_parallel_preselected_argmax_kernel {
   void operator()(const event::generate_run & ev, context & ctx) const noexcept {
-    request_phase_compute_preselected_argmax<
-        emel::text::generator::detail::step_kind::decode,
+    request_phase_compute_preselected_argmax<emel::text::generator::attention_mode::flash,
+                          emel::text::generator::detail::step_kind::decode,
         emel::text::generator::detail::
             run_kernel_flash_decode_parallel_preselected_argmax_kernel>(
         ev, ctx);
@@ -794,7 +819,8 @@ struct request_decode_compute_flash_parallel_preselected_argmax_kernel {
 
 struct request_decode_compute_nonflash_preselected_argmax_q8_k {
   void operator()(const event::generate_run & ev, context & ctx) const noexcept {
-    request_phase_compute_preselected_argmax<emel::text::generator::detail::step_kind::decode,
+    request_phase_compute_preselected_argmax<emel::text::generator::attention_mode::nonflash,
+                          emel::text::generator::detail::step_kind::decode,
                                              emel::text::generator::detail::
                                                  run_kernel_nonflash_decode_preselected_argmax_q8_k>(
         ev, ctx);
@@ -803,8 +829,8 @@ struct request_decode_compute_nonflash_preselected_argmax_q8_k {
 
 struct request_decode_compute_nonflash_preselected_argmax_native_quantized_q8_k {
   void operator()(const event::generate_run & ev, context & ctx) const noexcept {
-    request_phase_compute_preselected_argmax<
-        emel::text::generator::detail::step_kind::decode,
+    request_phase_compute_preselected_argmax<emel::text::generator::attention_mode::nonflash,
+                          emel::text::generator::detail::step_kind::decode,
         emel::text::generator::detail::
             run_kernel_nonflash_decode_preselected_argmax_native_quantized_q8_k>(
         ev, ctx);
@@ -813,8 +839,8 @@ struct request_decode_compute_nonflash_preselected_argmax_native_quantized_q8_k 
 
 struct request_decode_compute_nonflash_preselected_argmax_native_quantized_kernel {
   void operator()(const event::generate_run & ev, context & ctx) const noexcept {
-    request_phase_compute_preselected_argmax<
-        emel::text::generator::detail::step_kind::decode,
+    request_phase_compute_preselected_argmax<emel::text::generator::attention_mode::nonflash,
+                          emel::text::generator::detail::step_kind::decode,
         emel::text::generator::detail::
             run_kernel_nonflash_decode_preselected_argmax_native_quantized_kernel>(
         ev, ctx);
@@ -823,8 +849,8 @@ struct request_decode_compute_nonflash_preselected_argmax_native_quantized_kerne
 
 struct request_decode_compute_nonflash_preselected_argmax_kernel {
   void operator()(const event::generate_run & ev, context & ctx) const noexcept {
-    request_phase_compute_preselected_argmax<
-        emel::text::generator::detail::step_kind::decode,
+    request_phase_compute_preselected_argmax<emel::text::generator::attention_mode::nonflash,
+                          emel::text::generator::detail::step_kind::decode,
         emel::text::generator::detail::run_kernel_nonflash_decode_preselected_argmax_kernel>(
         ev, ctx);
   }
@@ -832,8 +858,8 @@ struct request_decode_compute_nonflash_preselected_argmax_kernel {
 
 struct request_decode_compute_nonflash_preselected_argmax_q8_k_streamed {
   void operator()(const event::generate_run & ev, context & ctx) const noexcept {
-    request_phase_compute_preselected_argmax<
-        emel::text::generator::detail::step_kind::decode,
+    request_phase_compute_preselected_argmax<emel::text::generator::attention_mode::nonflash,
+                          emel::text::generator::detail::step_kind::decode,
         emel::text::generator::detail::
             run_kernel_nonflash_decode_preselected_argmax_q8_k_streamed>(ev, ctx);
   }
@@ -841,8 +867,8 @@ struct request_decode_compute_nonflash_preselected_argmax_q8_k_streamed {
 
 struct request_decode_compute_nonflash_preselected_argmax_native_quantized_q8_k_streamed {
   void operator()(const event::generate_run & ev, context & ctx) const noexcept {
-    request_phase_compute_preselected_argmax<
-        emel::text::generator::detail::step_kind::decode,
+    request_phase_compute_preselected_argmax<emel::text::generator::attention_mode::nonflash,
+                          emel::text::generator::detail::step_kind::decode,
         emel::text::generator::detail::
             run_kernel_nonflash_decode_preselected_argmax_native_quantized_q8_k_streamed>(
         ev, ctx);
@@ -851,8 +877,8 @@ struct request_decode_compute_nonflash_preselected_argmax_native_quantized_q8_k_
 
 struct request_decode_compute_nonflash_preselected_argmax_native_quantized_kernel_streamed {
   void operator()(const event::generate_run & ev, context & ctx) const noexcept {
-    request_phase_compute_preselected_argmax<
-        emel::text::generator::detail::step_kind::decode,
+    request_phase_compute_preselected_argmax<emel::text::generator::attention_mode::nonflash,
+                          emel::text::generator::detail::step_kind::decode,
         emel::text::generator::detail::
             run_kernel_nonflash_decode_preselected_argmax_native_quantized_kernel_streamed>(
         ev, ctx);
@@ -861,8 +887,8 @@ struct request_decode_compute_nonflash_preselected_argmax_native_quantized_kerne
 
 struct request_decode_compute_nonflash_preselected_argmax_kernel_streamed {
   void operator()(const event::generate_run & ev, context & ctx) const noexcept {
-    request_phase_compute_preselected_argmax<
-        emel::text::generator::detail::step_kind::decode,
+    request_phase_compute_preselected_argmax<emel::text::generator::attention_mode::nonflash,
+                          emel::text::generator::detail::step_kind::decode,
         emel::text::generator::detail::
             run_kernel_nonflash_decode_preselected_argmax_kernel_streamed>(ev, ctx);
   }
@@ -988,6 +1014,12 @@ struct advance_kv_cache {
 
 struct commit_render_output {
   void operator()(const event::generate_run & ev, context &) const noexcept {
+    const int32_t token_index = ev.ctx.tokens_generated;
+    if (token_index >= 0 &&
+        static_cast<size_t>(token_index) < ev.request.generated_token_ids_out.size()) {
+      ev.request.generated_token_ids_out[static_cast<size_t>(token_index)] =
+          ev.ctx.selected_token;
+    }
     ev.ctx.output_length += ev.ctx.phase_output_length;
     ev.ctx.tokens_generated += 1;
     ev.request.output_length_out = ev.ctx.output_length;
@@ -1222,6 +1254,25 @@ struct capture_graph_lifecycle_with_runtime_tensor {
   }
 };
 
+inline void apply_benchmark_lane_policy(context & ctx) noexcept {
+  ctx.compute.backend.parallel_lanes_enabled =
+      ctx.benchmark_parallel_lanes_enabled;
+}
+
+struct effect_disable_parallel_benchmark_lanes {
+  void operator()(const event::configure_benchmark_lane &, context & ctx) const noexcept {
+    ctx.benchmark_parallel_lanes_enabled = false;
+    apply_benchmark_lane_policy(ctx);
+  }
+};
+
+struct effect_enable_parallel_benchmark_lanes {
+  void operator()(const event::configure_benchmark_lane &, context & ctx) const noexcept {
+    ctx.benchmark_parallel_lanes_enabled = true;
+    apply_benchmark_lane_policy(ctx);
+  }
+};
+
 inline constexpr reject_initialize reject_initialize{};
 inline constexpr begin_generate begin_generate{};
 inline constexpr reject_invalid_generate reject_invalid_generate{};
@@ -1369,6 +1420,10 @@ inline constexpr dispatch_generate_error_without_channels
     dispatch_generate_error_without_channels{};
 inline constexpr on_unexpected on_unexpected{};
 inline constexpr capture_diagnostics capture_diagnostics{};
+inline constexpr effect_disable_parallel_benchmark_lanes
+    effect_disable_parallel_benchmark_lanes{};
+inline constexpr effect_enable_parallel_benchmark_lanes
+    effect_enable_parallel_benchmark_lanes{};
 inline constexpr capture_graph_lifecycle_without_runtime_tensor
     capture_graph_lifecycle_without_runtime_tensor{};
 inline constexpr capture_graph_lifecycle_with_runtime_tensor

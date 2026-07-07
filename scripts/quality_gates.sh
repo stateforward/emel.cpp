@@ -25,6 +25,7 @@ QUALITY_GATES_DEFAULT_GENERATION_WORKLOAD_ID="${EMEL_QUALITY_GATES_DEFAULT_GENER
 QUALITY_GATES_ALLOW_BENCH_REGRESSION="${EMEL_QUALITY_GATES_ALLOW_BENCH_REGRESSION:-0}"
 QUALITY_GATES_PARITY="${EMEL_QUALITY_GATES_PARITY:-auto}"
 QUALITY_GATES_FUZZ="${EMEL_QUALITY_GATES_FUZZ:-auto}"
+QUALITY_GATES_DETERMINISM="${EMEL_QUALITY_GATES_DETERMINISM:-auto}"
 QUALITY_GATES_PARALLEL="${EMEL_QUALITY_GATES_PARALLEL:-auto}"
 # Per-lane wall-clock budget for the parallel quality group. This is an
 # EVIDENCE GUARANTEE, not a work cap: each lane gets everything that remains
@@ -256,6 +257,7 @@ coverage_all_required=false
 docs_needed=false
 parity_needed=false
 fuzz_needed=false
+determinism_needed=false
 unknown_test_shard_src=false
 
 add_changed_file() {
@@ -497,6 +499,10 @@ add_all_benchmark_suites_from_manifest() {
       esac
     done
     if [[ -z "$runner" || "$runner" == "all" ]]; then
+      continue
+    fi
+    if [[ "$runner" == "weight_streaming" &&
+          -z "${EMEL_BENCH_WEIGHT_STREAMING:-}" ]]; then
       continue
     fi
     if ! bench_suite_supported_for_host "$runner"; then
@@ -765,6 +771,7 @@ infer_quality_gate_scope() {
     docs_needed=true
     parity_needed=true
     fuzz_needed=true
+    determinism_needed=true
     return
   fi
 
@@ -782,6 +789,7 @@ infer_quality_gate_scope() {
         coverage_all_required=true
         docs_needed=true
         fuzz_needed=true
+        determinism_needed=true
         select_full_parity_gate "quality gate script changed path=$file"
         if [[ -z "$QUALITY_GATES_BENCH_SUITE" ]]; then
           bench_all_suites=true
@@ -811,6 +819,23 @@ infer_quality_gate_scope() {
       src/emel/text/jinja/*|src/emel/text/jinja/**/*|\
       src/emel/text/formatter/*|src/emel/text/formatter/**/*)
         fuzz_needed=true
+        ;;
+    esac
+
+    # Determinism gate (docs/determinism.md): any change on the maintained
+    # generation numeric path can alter the guaranteed bitwise contract.
+    case "$file" in
+      scripts/check_determinism.sh|docs/determinism.md|\
+      tools/determinism_check/*|tools/determinism_check/**/*|\
+      tests/text/generator/determinism_tests.cpp|\
+      src/emel/text/generator/*|src/emel/text/generator/**/*|\
+      src/emel/kernel/*|src/emel/kernel/**/*|\
+      src/emel/graph/*|src/emel/graph/**/*|\
+      src/emel/memory/*|src/emel/memory/**/*|\
+      src/emel/tensor/*|src/emel/tensor/**/*|\
+      src/emel/logits/*|src/emel/logits/**/*|\
+      src/emel/sm.hpp)
+        determinism_needed=true
         ;;
     esac
 
@@ -1024,6 +1049,29 @@ run_fuzz_gate() {
   esac
 }
 
+run_determinism_gate() {
+  case "$QUALITY_GATES_DETERMINISM" in
+    always)
+      run_step determinism_check "$ROOT_DIR/scripts/check_determinism.sh"
+      ;;
+    never)
+      record_skipped_step determinism_check \
+        "disabled by EMEL_QUALITY_GATES_DETERMINISM=never"
+      ;;
+    auto)
+      if $determinism_needed; then
+        run_step determinism_check "$ROOT_DIR/scripts/check_determinism.sh"
+      else
+        record_skipped_step determinism_check "no determinism-affecting changed files"
+      fi
+      ;;
+    *)
+      echo "error: unknown EMEL_QUALITY_GATES_DETERMINISM value '$QUALITY_GATES_DETERMINISM'" >&2
+      exit 1
+      ;;
+  esac
+}
+
 run_benchmark_gates() {
   local suite
   local status=0
@@ -1084,7 +1132,7 @@ run_benchmark_gates() {
           EMEL_BENCH_GENERATION_WARMUP_ITERS="$QUALITY_GATES_GENERATION_BENCH_WARMUP_ITERS"
           EMEL_BENCH_GENERATION_WARMUP_RUNS="$QUALITY_GATES_GENERATION_BENCH_WARMUP_RUNS"
         )
-        if [[ -n "$generation_workload_id" && "$generation_workload_id" != "all" ]]; then
+        if [[ -n "$generation_workload_id" ]]; then
           bench_extra_env+=(EMEL_GENERATION_WORKLOAD_ID="$generation_workload_id")
         fi
         ;;
@@ -1305,6 +1353,7 @@ run_parallel_quality_group() {
   start_parallel_step test_with_coverage run_coverage_gate
   start_parallel_step paritychecker run_parity_gate
   start_parallel_step fuzz_smoke run_fuzz_gate
+  start_parallel_step determinism_check run_determinism_gate
 
   if finish_parallel_steps; then
     parallel_group_status=0
@@ -1355,6 +1404,9 @@ if [[ -n "${EMEL_QUALITY_GATES_LANE:-}" ]]; then
     fuzz_smoke)
       run_fuzz_gate
       ;;
+    determinism_check)
+      run_determinism_gate
+      ;;
     *)
       echo "error: unknown EMEL_QUALITY_GATES_LANE value '$EMEL_QUALITY_GATES_LANE'" >&2
       exit 1
@@ -1384,6 +1436,7 @@ else
   run_coverage_gate
   run_parity_gate
   run_fuzz_gate
+  run_determinism_gate
 fi
 
 if [[ $parallel_group_status -ne 0 ]]; then

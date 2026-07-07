@@ -7,14 +7,14 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
-#include <regex>
 #include <optional>
+#include <regex>
+#include <sstream>
 #include <string>
 #include <string_view>
-#include <sstream>
+#include <type_traits>
 #include <unordered_map>
 #include <unordered_set>
-#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -27,7 +27,9 @@ namespace fs = std::filesystem;
 struct benchmark_row {
   std::string name;
   std::string emel_ns;
+  std::string emel_tokens_per_second;
   std::string llama_ns;
+  std::string llama_tokens_per_second;
   std::string ratio;
 };
 
@@ -86,6 +88,7 @@ struct benchmark_snapshot {
   std::string benchmark_config;
   std::string architecture_contract;
   std::string formatter_contract;
+  std::string generation_threading_contract;
   std::string flash_case;
   std::string flash_dispatch_calls;
   std::string optimized_flash_dispatch_calls;
@@ -142,7 +145,7 @@ struct options {
   bool check = false;
 };
 
-std::string read_file(const fs::path & path) {
+std::string read_file(const fs::path &path) {
   std::ifstream input(path, std::ios::binary);
   if (!input) {
     return {};
@@ -152,7 +155,7 @@ std::string read_file(const fs::path & path) {
   return buffer.str();
 }
 
-bool write_file(const fs::path & path, const std::string & content, bool check) {
+bool write_file(const fs::path &path, const std::string &content, bool check) {
   if (check) {
     std::string existing = read_file(path);
     if (existing != content) {
@@ -172,17 +175,17 @@ bool write_file(const fs::path & path, const std::string & content, bool check) 
   return static_cast<bool>(output);
 }
 
-bool prune_stale_generated_files(const fs::path & dir,
-                                 const std::string_view extension,
-                                 const std::unordered_set<std::string> & expected_stems,
-                                 bool check) {
+bool prune_stale_generated_files(
+    const fs::path &dir, const std::string_view extension,
+    const std::unordered_set<std::string> &expected_stems, bool check) {
   if (!fs::exists(dir)) {
     return true;
   }
 
-  // Generated architecture outputs are intentionally flat directories under .planning; this prune
-  // pass is non-recursive and only removes unexpected files directly under `dir`.
-  for (const auto & entry : fs::directory_iterator(dir)) {
+  // Generated architecture outputs are intentionally flat directories under
+  // .planning; this prune pass is non-recursive and only removes unexpected
+  // files directly under `dir`.
+  for (const auto &entry : fs::directory_iterator(dir)) {
     if (!entry.is_regular_file() || entry.path().extension() != extension) {
       continue;
     }
@@ -193,14 +196,16 @@ bool prune_stale_generated_files(const fs::path & dir,
     }
 
     if (check) {
-      std::fprintf(stderr, "error: stale generated file %s\n", entry.path().string().c_str());
+      std::fprintf(stderr, "error: stale generated file %s\n",
+                   entry.path().string().c_str());
       return false;
     }
 
     std::error_code ec;
     fs::remove(entry.path(), ec);
     if (ec) {
-      std::fprintf(stderr, "error: unable to remove %s\n", entry.path().string().c_str());
+      std::fprintf(stderr, "error: unable to remove %s\n",
+                   entry.path().string().c_str());
       return false;
     }
   }
@@ -208,7 +213,7 @@ bool prune_stale_generated_files(const fs::path & dir,
   return true;
 }
 
-std::string md_link(const std::string & label, const std::string & source_path) {
+std::string md_link(const std::string &label, const std::string &source_path) {
   std::string link = "https://github.com/stateforward/emel.cpp/blob/main/src/";
   link += source_path;
   std::string out = "[`";
@@ -219,10 +224,10 @@ std::string md_link(const std::string & label, const std::string & source_path) 
   return out;
 }
 
-std::string build_docs_toc(const std::vector<machine_spec> & machines) {
+std::string build_docs_toc(const std::vector<machine_spec> &machines) {
   std::string toc;
   toc += "- [`docs/benchmarks.md`](docs/benchmarks.md)\n";
-  for (const auto & spec : machines) {
+  for (const auto &spec : machines) {
     toc += "- [`.planning/architecture/";
     toc += spec.name;
     toc += ".md`](.planning/architecture/";
@@ -232,7 +237,7 @@ std::string build_docs_toc(const std::vector<machine_spec> & machines) {
   return toc;
 }
 
-bool parse_options(int argc, char ** argv, options & out) {
+bool parse_options(int argc, char **argv, options &out) {
   for (int i = 1; i < argc; ++i) {
     const std::string arg = argv[i];
     if (arg == "--check") {
@@ -269,8 +274,9 @@ bool parser_parse_error_sink(const emel::text::jinja::events::parsing_error &) {
   return true;
 }
 
-const std::string * find_template_var(const std::unordered_map<std::string, std::string> & vars,
-                                      const std::string_view key) {
+const std::string *
+find_template_var(const std::unordered_map<std::string, std::string> &vars,
+                  const std::string_view key) {
   const auto it = vars.find(std::string(key));
   if (it == vars.end()) {
     return nullptr;
@@ -278,28 +284,33 @@ const std::string * find_template_var(const std::unordered_map<std::string, std:
   return &it->second;
 }
 
-bool append_rendered_node(std::string & out,
-                          const emel::text::jinja::ast_node * const node,
-                          const std::unordered_map<std::string, std::string> & vars) {
-  if (const auto * text = dynamic_cast<const emel::text::jinja::string_literal *>(node);
+bool append_rendered_node(
+    std::string &out, const emel::text::jinja::ast_node *const node,
+    const std::unordered_map<std::string, std::string> &vars) {
+  if (const auto *text =
+          dynamic_cast<const emel::text::jinja::string_literal *>(node);
       text != nullptr) {
     out += text->value;
     return true;
   }
 
-  if (const auto * id = dynamic_cast<const emel::text::jinja::identifier *>(node);
+  if (const auto *id =
+          dynamic_cast<const emel::text::jinja::identifier *>(node);
       id != nullptr) {
-    const auto * value = find_template_var(vars, id->name);
+    const auto *value = find_template_var(vars, id->name);
     if (value == nullptr) {
-      std::fprintf(stderr, "error: template variable not provided: %s\n", id->name.c_str());
+      std::fprintf(stderr, "error: template variable not provided: %s\n",
+                   id->name.c_str());
       return false;
     }
     out += *value;
     return true;
   }
 
-  if (dynamic_cast<const emel::text::jinja::comment_statement *>(node) != nullptr ||
-      dynamic_cast<const emel::text::jinja::noop_statement *>(node) != nullptr) {
+  if (dynamic_cast<const emel::text::jinja::comment_statement *>(node) !=
+          nullptr ||
+      dynamic_cast<const emel::text::jinja::noop_statement *>(node) !=
+          nullptr) {
     return true;
   }
 
@@ -307,8 +318,9 @@ bool append_rendered_node(std::string & out,
   return false;
 }
 
-std::optional<std::string> render_template(const fs::path & template_path,
-                                           const std::vector<template_var> & vars) {
+std::optional<std::string>
+render_template(const fs::path &template_path,
+                const std::vector<template_var> &vars) {
   const std::string template_text = read_file(template_path);
   if (template_text.empty()) {
     std::fprintf(stderr, "error: unable to read %s\n",
@@ -317,21 +329,25 @@ std::optional<std::string> render_template(const fs::path & template_path,
   }
 
   emel::text::jinja::program program;
-  int32_t parse_err = static_cast<int32_t>(emel::text::jinja::parser::error::none);
+  int32_t parse_err =
+      static_cast<int32_t>(emel::text::jinja::parser::error::none);
   size_t parse_error_pos = 0;
   emel::text::jinja::parser::action::context parse_ctx;
   emel::text::jinja::parser::sm parser{parse_ctx};
   emel::text::jinja::event::parse parse_ev{
       template_text,
       program,
-      emel::text::jinja::event::parse::done_callback::from<&parser_parse_done_sink>(),
-      emel::text::jinja::event::parse::error_callback::from<&parser_parse_error_sink>(),
+      emel::text::jinja::event::parse::done_callback::from<
+          &parser_parse_done_sink>(),
+      emel::text::jinja::event::parse::error_callback::from<
+          &parser_parse_error_sink>(),
       parse_err,
       parse_error_pos,
   };
 
   parser.process_event(parse_ev);
-  if (parse_err != static_cast<int32_t>(emel::text::jinja::parser::error::none) ||
+  if (parse_err !=
+          static_cast<int32_t>(emel::text::jinja::parser::error::none) ||
       !parser.is(stateforward::sml::state<emel::text::jinja::parser::done>)) {
     std::fprintf(stderr, "error: jinja parse failed\n");
     return std::nullopt;
@@ -339,18 +355,18 @@ std::optional<std::string> render_template(const fs::path & template_path,
 
   std::unordered_map<std::string, std::string> template_vars;
   template_vars.reserve(vars.size());
-  for (const auto & var : vars) {
+  for (const auto &var : vars) {
     template_vars.insert_or_assign(var.key, var.value);
   }
 
   std::size_t estimate = template_text.size();
-  for (const auto & var : vars) {
+  for (const auto &var : vars) {
     estimate += var.value.size();
   }
 
   std::string rendered;
   rendered.reserve(estimate);
-  for (const auto & node : program.body) {
+  for (const auto &node : program.body) {
     if (!append_rendered_node(rendered, node.get(), template_vars)) {
       return std::nullopt;
     }
@@ -360,7 +376,7 @@ std::optional<std::string> render_template(const fs::path & template_path,
 }
 
 std::optional<std::unordered_map<std::string, std::string>>
-parse_inline_key_value_fields(const std::string & line, const char * prefix) {
+parse_inline_key_value_fields(const std::string &line, const char *prefix) {
   const std::string_view prefix_view{prefix};
   if (line.rfind(prefix_view.data(), 0u) != 0) {
     return std::nullopt;
@@ -370,7 +386,8 @@ parse_inline_key_value_fields(const std::string & line, const char * prefix) {
   std::istringstream input(line.substr(prefix_view.size()));
   for (std::string token; input >> token;) {
     const std::size_t separator = token.find('=');
-    if (separator == std::string::npos || separator == 0u || separator + 1u >= token.size()) {
+    if (separator == std::string::npos || separator == 0u ||
+        separator + 1u >= token.size()) {
       return std::nullopt;
     }
     fields.emplace(token.substr(0u, separator), token.substr(separator + 1u));
@@ -380,7 +397,7 @@ parse_inline_key_value_fields(const std::string & line, const char * prefix) {
 }
 
 std::optional<benchmark_diarization_record>
-parse_diarization_metadata_line(const std::string & line) {
+parse_diarization_metadata_line(const std::string &line) {
   constexpr std::string_view k_prefix = "# diarization_sortformer: ";
   if (line.rfind(k_prefix.data(), 0u) != 0u) {
     return std::nullopt;
@@ -388,14 +405,15 @@ parse_diarization_metadata_line(const std::string & line) {
 
   benchmark_diarization_record record;
   std::istringstream input(line.substr(k_prefix.size()));
-  for (const char * field :
-       {"lane", "case", "model_id", "fixture_id", "workload_id", "output_dim", "output_checksum"}) {
+  for (const char *field : {"lane", "case", "model_id", "fixture_id",
+                            "workload_id", "output_dim", "output_checksum"}) {
     std::string token;
     if (!(input >> token)) {
       return std::nullopt;
     }
     const std::size_t separator = token.find('=');
-    if (separator == std::string::npos || token.substr(0u, separator) != field) {
+    if (separator == std::string::npos ||
+        token.substr(0u, separator) != field) {
       return std::nullopt;
     }
     const std::string value = token.substr(separator + 1u);
@@ -426,7 +444,7 @@ parse_diarization_metadata_line(const std::string & line) {
 }
 
 std::optional<benchmark_diarization_compare_row>
-parse_diarization_compare_row(const std::string & line) {
+parse_diarization_compare_row(const std::string &line) {
   static const std::regex row_re(
       R"(^([^ ]+) emel\.cpp ([0-9.]+) ns/op, ([^ ]+) ([0-9.]+) ns/op, proof_status=([^ ]+)$)");
   std::smatch match;
@@ -443,7 +461,8 @@ parse_diarization_compare_row(const std::string & line) {
   };
 }
 
-std::optional<benchmark_snapshot> parse_benchmarks_snapshot(const doc_paths & paths) {
+std::optional<benchmark_snapshot>
+parse_benchmarks_snapshot(const doc_paths &paths) {
   const std::string snapshot = read_file(paths.benchmarks_snapshot);
   if (snapshot.empty()) {
     std::fprintf(stderr, "error: unable to read %s\n",
@@ -453,11 +472,14 @@ std::optional<benchmark_snapshot> parse_benchmarks_snapshot(const doc_paths & pa
 
   benchmark_snapshot parsed;
   const std::regex line_re(
-      R"(^([^ ]+) emel\.cpp ([0-9.]+) ns/op, llama\.cpp ([0-9.]+) ns/op, ratio=([0-9.]+)x$)");
+      R"(^([^ ]+) emel\.cpp ([0-9.]+) ns/op( \(([0-9.]+) tokens/s\))?, llama\.cpp ([0-9.]+) ns/op( \(([0-9.]+) tokens/s\))?, ratio=([0-9.]+)x$)");
   constexpr std::string_view k_benchmark_config_prefix = "# benchmark_config: ";
-  constexpr std::string_view k_generation_architecture_prefix = "# generation_architecture: ";
+  constexpr std::string_view k_generation_architecture_prefix =
+      "# generation_architecture: ";
   constexpr std::string_view k_generation_formatter_contract_prefix =
       "# generation_formatter_contract: ";
+  constexpr std::string_view k_generation_threading_prefix =
+      "# generation_threading: ";
 
   std::istringstream input(snapshot);
   for (std::string line; std::getline(input, line);) {
@@ -467,20 +489,27 @@ std::optional<benchmark_snapshot> parse_benchmarks_snapshot(const doc_paths & pa
       continue;
     }
     if (line.rfind(k_generation_architecture_prefix.data(), 0u) == 0u) {
-      parsed.architecture_contract = line.substr(k_generation_architecture_prefix.size());
+      parsed.architecture_contract =
+          line.substr(k_generation_architecture_prefix.size());
       continue;
     }
     if (line.rfind(k_generation_formatter_contract_prefix.data(), 0u) == 0u) {
-      parsed.formatter_contract = line.substr(k_generation_formatter_contract_prefix.size());
+      parsed.formatter_contract =
+          line.substr(k_generation_formatter_contract_prefix.size());
       continue;
     }
-    if (const auto metadata = parse_inline_key_value_fields(line, "# reference_impl: ");
+    if (line.rfind(k_generation_threading_prefix.data(), 0u) == 0u) {
+      parsed.generation_threading_contract =
+          line.substr(k_generation_threading_prefix.size());
+      continue;
+    }
+    if (const auto metadata =
+            parse_inline_key_value_fields(line, "# reference_impl: ");
         metadata.has_value()) {
       const auto source_it = metadata->find("source");
       const auto ref_it = metadata->find("ref");
       if (source_it == metadata->end() || ref_it == metadata->end()) {
-        std::fprintf(stderr,
-                     "error: invalid # reference_impl metadata in %s\n",
+        std::fprintf(stderr, "error: invalid # reference_impl metadata in %s\n",
                      paths.benchmarks_snapshot.string().c_str());
         return std::nullopt;
       }
@@ -488,18 +517,18 @@ std::optional<benchmark_snapshot> parse_benchmarks_snapshot(const doc_paths & pa
       parsed.reference_ref = ref_it->second;
       continue;
     }
-    if (const auto metadata = parse_inline_key_value_fields(line, "# generation_flash_evidence: ");
+    if (const auto metadata = parse_inline_key_value_fields(
+            line, "# generation_flash_evidence: ");
         metadata.has_value()) {
-      for (const char * field : {"case",
-                                 "flash_dispatch_calls",
-                                 "emel_decode_calls",
-                                 "emel_logits_calls",
-                                 "reference_decode_calls",
-                                 "reference_logits_calls"}) {
+      for (const char *field :
+           {"case", "flash_dispatch_calls", "emel_decode_calls",
+            "emel_logits_calls", "reference_decode_calls",
+            "reference_logits_calls"}) {
         if (!metadata->contains(field)) {
-          std::fprintf(stderr,
-                       "error: invalid # generation_flash_evidence metadata in %s\n",
-                       paths.benchmarks_snapshot.string().c_str());
+          std::fprintf(
+              stderr,
+              "error: invalid # generation_flash_evidence metadata in %s\n",
+              paths.benchmarks_snapshot.string().c_str());
           return std::nullopt;
         }
       }
@@ -519,21 +548,24 @@ std::optional<benchmark_snapshot> parse_benchmarks_snapshot(const doc_paths & pa
       parsed.reference_logits_calls = metadata->at("reference_logits_calls");
       continue;
     }
-    if (const auto metadata =
-            parse_inline_key_value_fields(line, "# generation_quantized_evidence: ");
+    if (const auto metadata = parse_inline_key_value_fields(
+            line, "# generation_quantized_evidence: ");
         metadata.has_value()) {
-      for (const char * field :
-           {"case", "native_q8_0_dispatch_calls", "packed_q8_0_dispatch_calls"}) {
+      for (const char *field : {"case", "native_q8_0_dispatch_calls",
+                                "packed_q8_0_dispatch_calls"}) {
         if (!metadata->contains(field)) {
-          std::fprintf(stderr,
-                       "error: invalid # generation_quantized_evidence metadata in %s\n",
-                       paths.benchmarks_snapshot.string().c_str());
+          std::fprintf(
+              stderr,
+              "error: invalid # generation_quantized_evidence metadata in %s\n",
+              paths.benchmarks_snapshot.string().c_str());
           return std::nullopt;
         }
       }
       parsed.quantized_case = metadata->at("case");
-      parsed.native_q8_0_dispatch_calls = metadata->at("native_q8_0_dispatch_calls");
-      parsed.packed_q8_0_dispatch_calls = metadata->at("packed_q8_0_dispatch_calls");
+      parsed.native_q8_0_dispatch_calls =
+          metadata->at("native_q8_0_dispatch_calls");
+      parsed.packed_q8_0_dispatch_calls =
+          metadata->at("packed_q8_0_dispatch_calls");
       parsed.optimized_q2_dispatch_calls =
           metadata->contains("optimized_q2_dispatch_calls")
               ? metadata->at("optimized_q2_dispatch_calls")
@@ -568,56 +600,59 @@ std::optional<benchmark_snapshot> parse_benchmarks_snapshot(const doc_paths & pa
               : "0";
       continue;
     }
-    if (const auto metadata =
-            parse_inline_key_value_fields(line, "# generation_runtime_contract: ");
+    if (const auto metadata = parse_inline_key_value_fields(
+            line, "# generation_runtime_contract: ");
         metadata.has_value()) {
-      for (const char * field : {"case",
-                                 "native_quantized",
-                                 "approved_dense_f32_by_contract",
-                                 "disallowed_fallback",
-                                 "explicit_no_claim"}) {
+      for (const char *field :
+           {"case", "native_quantized", "approved_dense_f32_by_contract",
+            "disallowed_fallback", "explicit_no_claim"}) {
         if (!metadata->contains(field)) {
-          std::fprintf(stderr,
-                       "error: invalid # generation_runtime_contract metadata in %s\n",
-                       paths.benchmarks_snapshot.string().c_str());
+          std::fprintf(
+              stderr,
+              "error: invalid # generation_runtime_contract metadata in %s\n",
+              paths.benchmarks_snapshot.string().c_str());
           return std::nullopt;
         }
       }
       parsed.runtime_contract_case = metadata->at("case");
       parsed.native_quantized_stage_count = metadata->at("native_quantized");
-      parsed.approved_dense_f32_stage_count = metadata->at("approved_dense_f32_by_contract");
-      parsed.disallowed_fallback_stage_count = metadata->at("disallowed_fallback");
+      parsed.approved_dense_f32_stage_count =
+          metadata->at("approved_dense_f32_by_contract");
+      parsed.disallowed_fallback_stage_count =
+          metadata->at("disallowed_fallback");
       parsed.explicit_no_claim_stage_count = metadata->at("explicit_no_claim");
       continue;
     }
-    if (const auto metadata = parse_inline_key_value_fields(line, "# generation_stage_probe: ");
+    if (const auto metadata =
+            parse_inline_key_value_fields(line, "# generation_stage_probe: ");
         metadata.has_value()) {
-      for (const char * field : {"case",
-                                 "emel_prefill_contract",
-                                 "emel_prompt_tokens",
-                                 "emel_prefill_step_size",
-                                 "emel_total_ns",
-                                 "emel_conditioning_ns",
-                                 "emel_prefill_ns",
-                                 "emel_first_decode_ns",
-                                 "emel_steady_decode_ns",
-                                 "emel_unattributed_ns",
-                                 "emel_prefill_linear_probe_ns",
-                                 "emel_prefill_attention_probe_ns",
-                                 "emel_prefill_misc_probe_ns",
-                                 "reference_total_ns",
-                                 "reference_conditioning_ns",
-                                 "reference_prefill_ns",
-                                 "reference_first_decode_ns",
-                                 "reference_steady_decode_ns",
-                                 "reference_unattributed_ns",
-                                 "reference_prefill_linear_probe_ns",
-                                 "reference_prefill_attention_probe_ns",
-                                 "reference_prefill_misc_probe_ns"}) {
+      for (const char *field : {"case",
+                                "emel_prefill_contract",
+                                "emel_prompt_tokens",
+                                "emel_prefill_step_size",
+                                "emel_total_ns",
+                                "emel_conditioning_ns",
+                                "emel_prefill_ns",
+                                "emel_first_decode_ns",
+                                "emel_steady_decode_ns",
+                                "emel_unattributed_ns",
+                                "emel_prefill_linear_probe_ns",
+                                "emel_prefill_attention_probe_ns",
+                                "emel_prefill_misc_probe_ns",
+                                "reference_total_ns",
+                                "reference_conditioning_ns",
+                                "reference_prefill_ns",
+                                "reference_first_decode_ns",
+                                "reference_steady_decode_ns",
+                                "reference_unattributed_ns",
+                                "reference_prefill_linear_probe_ns",
+                                "reference_prefill_attention_probe_ns",
+                                "reference_prefill_misc_probe_ns"}) {
         if (!metadata->contains(field)) {
-          std::fprintf(stderr,
-                       "error: invalid # generation_stage_probe metadata in %s\n",
-                       paths.benchmarks_snapshot.string().c_str());
+          std::fprintf(
+              stderr,
+              "error: invalid # generation_stage_probe metadata in %s\n",
+              paths.benchmarks_snapshot.string().c_str());
           return std::nullopt;
         }
       }
@@ -632,18 +667,28 @@ std::optional<benchmark_snapshot> parse_benchmarks_snapshot(const doc_paths & pa
           .emel_first_decode_ns = metadata->at("emel_first_decode_ns"),
           .emel_steady_decode_ns = metadata->at("emel_steady_decode_ns"),
           .emel_unattributed_ns = metadata->at("emel_unattributed_ns"),
-          .emel_prefill_linear_probe_ns = metadata->at("emel_prefill_linear_probe_ns"),
-          .emel_prefill_attention_probe_ns = metadata->at("emel_prefill_attention_probe_ns"),
-          .emel_prefill_misc_probe_ns = metadata->at("emel_prefill_misc_probe_ns"),
+          .emel_prefill_linear_probe_ns =
+              metadata->at("emel_prefill_linear_probe_ns"),
+          .emel_prefill_attention_probe_ns =
+              metadata->at("emel_prefill_attention_probe_ns"),
+          .emel_prefill_misc_probe_ns =
+              metadata->at("emel_prefill_misc_probe_ns"),
           .reference_total_ns = metadata->at("reference_total_ns"),
-          .reference_conditioning_ns = metadata->at("reference_conditioning_ns"),
+          .reference_conditioning_ns =
+              metadata->at("reference_conditioning_ns"),
           .reference_prefill_ns = metadata->at("reference_prefill_ns"),
-          .reference_first_decode_ns = metadata->at("reference_first_decode_ns"),
-          .reference_steady_decode_ns = metadata->at("reference_steady_decode_ns"),
-          .reference_unattributed_ns = metadata->at("reference_unattributed_ns"),
-          .reference_prefill_linear_probe_ns = metadata->at("reference_prefill_linear_probe_ns"),
-          .reference_prefill_attention_probe_ns = metadata->at("reference_prefill_attention_probe_ns"),
-          .reference_prefill_misc_probe_ns = metadata->at("reference_prefill_misc_probe_ns"),
+          .reference_first_decode_ns =
+              metadata->at("reference_first_decode_ns"),
+          .reference_steady_decode_ns =
+              metadata->at("reference_steady_decode_ns"),
+          .reference_unattributed_ns =
+              metadata->at("reference_unattributed_ns"),
+          .reference_prefill_linear_probe_ns =
+              metadata->at("reference_prefill_linear_probe_ns"),
+          .reference_prefill_attention_probe_ns =
+              metadata->at("reference_prefill_attention_probe_ns"),
+          .reference_prefill_misc_probe_ns =
+              metadata->at("reference_prefill_misc_probe_ns"),
       });
       continue;
     }
@@ -652,13 +697,15 @@ std::optional<benchmark_snapshot> parse_benchmarks_snapshot(const doc_paths & pa
       parsed.diarization_records.push_back(*diarization_record);
       continue;
     }
-    if (const auto metadata = parse_inline_key_value_fields(line, "# preserved_compare_reference: ");
+    if (const auto metadata = parse_inline_key_value_fields(
+            line, "# preserved_compare_reference: ");
         metadata.has_value()) {
-      for (const char * field : {"suite", "source", "reason"}) {
+      for (const char *field : {"suite", "source", "reason"}) {
         if (!metadata->contains(field)) {
-          std::fprintf(stderr,
-                       "error: invalid # preserved_compare_reference metadata in %s\n",
-                       paths.benchmarks_snapshot.string().c_str());
+          std::fprintf(
+              stderr,
+              "error: invalid # preserved_compare_reference metadata in %s\n",
+              paths.benchmarks_snapshot.string().c_str());
           return std::nullopt;
         }
       }
@@ -672,13 +719,14 @@ std::optional<benchmark_snapshot> parse_benchmarks_snapshot(const doc_paths & pa
       parsed.preservation_notes.push_back(std::move(note));
       continue;
     }
-    if (const auto metadata =
-            parse_inline_key_value_fields(line, "# preserved_generation_fixture_rows: ");
+    if (const auto metadata = parse_inline_key_value_fields(
+            line, "# preserved_generation_fixture_rows: ");
         metadata.has_value()) {
-      for (const char * field : {"suite", "fixture", "source", "reason"}) {
+      for (const char *field : {"suite", "fixture", "source", "reason"}) {
         if (!metadata->contains(field)) {
           std::fprintf(stderr,
-                       "error: invalid # preserved_generation_fixture_rows metadata in %s\n",
+                       "error: invalid # preserved_generation_fixture_rows "
+                       "metadata in %s\n",
                        paths.benchmarks_snapshot.string().c_str());
           return std::nullopt;
         }
@@ -709,27 +757,28 @@ std::optional<benchmark_snapshot> parse_benchmarks_snapshot(const doc_paths & pa
     parsed.rows.push_back(benchmark_row{
         .name = match[1].str(),
         .emel_ns = match[2].str(),
-        .llama_ns = match[3].str(),
-        .ratio = match[4].str(),
+        .emel_tokens_per_second = match[4].str(),
+        .llama_ns = match[5].str(),
+        .llama_tokens_per_second = match[7].str(),
+        .ratio = match[8].str(),
     });
   }
 
   if (parsed.reference_source.empty() || parsed.reference_ref.empty()) {
-    std::fprintf(stderr,
-                 "error: missing # reference_impl metadata in %s\n",
+    std::fprintf(stderr, "error: missing # reference_impl metadata in %s\n",
                  paths.benchmarks_snapshot.string().c_str());
     return std::nullopt;
   }
   if (parsed.benchmark_config.empty()) {
-    std::fprintf(stderr,
-                 "error: missing # benchmark_config metadata in %s\n",
+    std::fprintf(stderr, "error: missing # benchmark_config metadata in %s\n",
                  paths.benchmarks_snapshot.string().c_str());
     return std::nullopt;
   }
   if (parsed.formatter_contract.empty()) {
-    std::fprintf(stderr,
-                 "error: missing # generation_formatter_contract metadata in %s\n",
-                 paths.benchmarks_snapshot.string().c_str());
+    std::fprintf(
+        stderr,
+        "error: missing # generation_formatter_contract metadata in %s\n",
+        paths.benchmarks_snapshot.string().c_str());
     return std::nullopt;
   }
   if (parsed.flash_case.empty()) {
@@ -739,32 +788,36 @@ std::optional<benchmark_snapshot> parse_benchmarks_snapshot(const doc_paths & pa
     return std::nullopt;
   }
   if (parsed.quantized_case.empty()) {
-    std::fprintf(stderr,
-                 "error: missing # generation_quantized_evidence metadata in %s\n",
-                 paths.benchmarks_snapshot.string().c_str());
+    std::fprintf(
+        stderr,
+        "error: missing # generation_quantized_evidence metadata in %s\n",
+        paths.benchmarks_snapshot.string().c_str());
     return std::nullopt;
   }
   if (parsed.runtime_contract_case.empty()) {
-    std::fprintf(stderr,
-                 "error: missing # generation_runtime_contract metadata in %s\n",
-                 paths.benchmarks_snapshot.string().c_str());
+    std::fprintf(
+        stderr, "error: missing # generation_runtime_contract metadata in %s\n",
+        paths.benchmarks_snapshot.string().c_str());
     return std::nullopt;
   }
 
   return parsed;
 }
 
-std::optional<std::string> build_benchmarks_table(const benchmark_snapshot & snapshot) {
+std::optional<std::string>
+build_benchmarks_table(const benchmark_snapshot &snapshot) {
   struct table_row {
     std::string name;
     std::string emel_ns;
+    std::string emel_tokens_per_second;
     std::string reference;
     std::string reference_ns;
+    std::string reference_tokens_per_second;
     std::string comparison;
   };
 
-  const auto parse_ns = [](const std::string & raw) -> std::optional<double> {
-    char * end = nullptr;
+  const auto parse_ns = [](const std::string &raw) -> std::optional<double> {
+    char *end = nullptr;
     const double value = std::strtod(raw.c_str(), &end);
     if (end == raw.c_str() || *end != '\0') {
       return std::nullopt;
@@ -773,16 +826,19 @@ std::optional<std::string> build_benchmarks_table(const benchmark_snapshot & sna
   };
 
   const auto format_comparison =
-      [&](const benchmark_diarization_compare_row & row) -> std::optional<std::string> {
+      [&](const benchmark_diarization_compare_row &row)
+      -> std::optional<std::string> {
     const auto emel_ns = parse_ns(row.emel_ns);
     const auto reference_ns = parse_ns(row.reference_ns);
-    if (!emel_ns.has_value() || !reference_ns.has_value() || *reference_ns == 0.0) {
+    if (!emel_ns.has_value() || !reference_ns.has_value() ||
+        *reference_ns == 0.0) {
       return std::nullopt;
     }
 
     char timing[64];
     const double ratio = *emel_ns / *reference_ns;
-    const double delta_pct = ((*emel_ns - *reference_ns) / *reference_ns) * 100.0;
+    const double delta_pct =
+        ((*emel_ns - *reference_ns) / *reference_ns) * 100.0;
     std::snprintf(timing, sizeof(timing), "%.3fx (%+.1f%%)", ratio, delta_pct);
 
     std::string comparison = timing;
@@ -793,49 +849,61 @@ std::optional<std::string> build_benchmarks_table(const benchmark_snapshot & sna
 
   std::vector<table_row> rows;
   rows.reserve(snapshot.rows.size() + snapshot.diarization_compare_rows.size());
-  for (const auto & row : snapshot.rows) {
+  for (const auto &row : snapshot.rows) {
     rows.push_back(table_row{
         .name = row.name,
         .emel_ns = row.emel_ns,
+        .emel_tokens_per_second = row.emel_tokens_per_second,
         .reference = "llama.cpp",
         .reference_ns = row.llama_ns,
+        .reference_tokens_per_second = row.llama_tokens_per_second,
         .comparison = row.ratio + "x",
     });
   }
-  for (const auto & row : snapshot.diarization_compare_rows) {
+  for (const auto &row : snapshot.diarization_compare_rows) {
     if (row.reference_label == "reference-baseline") {
       continue;
     }
     const auto comparison = format_comparison(row);
     if (!comparison.has_value()) {
-      std::fprintf(stderr, "error: invalid diarization timing row for %s\n", row.name.c_str());
+      std::fprintf(stderr, "error: invalid diarization timing row for %s\n",
+                   row.name.c_str());
       return std::nullopt;
     }
     rows.push_back(table_row{
         .name = row.name,
         .emel_ns = row.emel_ns,
+        .emel_tokens_per_second = {},
         .reference = row.reference_label,
         .reference_ns = row.reference_ns,
+        .reference_tokens_per_second = {},
         .comparison = *comparison,
     });
   }
 
-  std::sort(rows.begin(), rows.end(), [](const table_row & lhs, const table_row & rhs) {
-    return lhs.name < rhs.name;
-  });
+  std::sort(rows.begin(), rows.end(),
+            [](const table_row &lhs, const table_row &rhs) {
+              return lhs.name < rhs.name;
+            });
 
   std::string table;
-  table += "| Benchmark | emel.cpp ns/op | Reference | Reference ns/op | Comparison |\n";
-  table += "| --- | ---: | --- | ---: | --- |\n";
-  for (const auto & row : rows) {
+  table += "| Benchmark | emel.cpp ns/op | emel.cpp tokens/s | Reference | "
+           "Reference "
+           "ns/op | Reference tokens/s | Comparison |\n";
+  table += "| --- | ---: | ---: | --- | ---: | ---: | --- |\n";
+  for (const auto &row : rows) {
     table += "| `";
     table += row.name;
     table += "` | ";
     table += row.emel_ns;
     table += " | ";
+    table += row.emel_tokens_per_second;
+    table += " | ";
     table += row.reference;
     table += " | ";
     table += row.reference_ns;
+    table += " | ";
+    table += row.reference_tokens_per_second;
     table += " | ";
     table += row.comparison;
     table += " |\n";
@@ -843,16 +911,35 @@ std::optional<std::string> build_benchmarks_table(const benchmark_snapshot & sna
   return table;
 }
 
-std::string build_benchmark_preservation_notes(const benchmark_snapshot & snapshot) {
+std::string
+build_benchmark_threading_notes(const benchmark_snapshot &snapshot) {
+  if (snapshot.generation_threading_contract.empty()) {
+    return {};
+  }
+
+  std::string notes;
+  notes += "## Generation Threading\n\n";
+  notes += "- Generated generation rows in this snapshot use `";
+  notes += snapshot.generation_threading_contract;
+  notes += "`.\n";
+  notes += "- Rows listed under Preserved Rows keep their previous snapshot "
+           "provenance and "
+           "are not covered by this generation threading line.\n\n";
+  return notes;
+}
+
+std::string
+build_benchmark_preservation_notes(const benchmark_snapshot &snapshot) {
   if (snapshot.preservation_notes.empty()) {
     return {};
   }
 
   std::string notes;
   notes += "## Preserved Rows\n\n";
-  notes += "Some published rows were intentionally preserved from earlier snapshots because "
+  notes += "Some published rows were intentionally preserved from earlier "
+           "snapshots because "
            "this refresh host could not regenerate that lane:\n\n";
-  for (const auto & note : snapshot.preservation_notes) {
+  for (const auto &note : snapshot.preservation_notes) {
     notes += "- ";
     notes += note;
     notes += "\n";
@@ -861,7 +948,8 @@ std::string build_benchmark_preservation_notes(const benchmark_snapshot & snapsh
   return notes;
 }
 
-std::optional<embedded_size_snapshot> parse_embedded_size_snapshot(const doc_paths & paths) {
+std::optional<embedded_size_snapshot>
+parse_embedded_size_snapshot(const doc_paths &paths) {
   const std::string snapshot = read_file(paths.embedded_size_snapshot);
   if (snapshot.empty()) {
     std::fprintf(stderr, "error: unable to read %s\n",
@@ -872,9 +960,11 @@ std::optional<embedded_size_snapshot> parse_embedded_size_snapshot(const doc_pat
   embedded_size_snapshot parsed;
   std::istringstream input(snapshot);
   for (std::string line; std::getline(input, line);) {
-    if (const auto metadata = parse_inline_key_value_fields(line, "# embedded_size_config: ");
+    if (const auto metadata =
+            parse_inline_key_value_fields(line, "# embedded_size_config: ");
         metadata.has_value()) {
-      for (const char * field : {"reference_ref", "toolchain", "build_type", "compile_flags"}) {
+      for (const char *field :
+           {"reference_ref", "toolchain", "build_type", "compile_flags"}) {
         if (!metadata->contains(field)) {
           std::fprintf(stderr,
                        "error: invalid # embedded_size_config metadata in %s\n",
@@ -888,22 +978,17 @@ std::optional<embedded_size_snapshot> parse_embedded_size_snapshot(const doc_pat
       parsed.compile_flags = metadata->at("compile_flags");
       continue;
     }
-    if (const auto metadata = parse_inline_key_value_fields(line, "# embedded_size_measurement: ");
+    if (const auto metadata = parse_inline_key_value_fields(
+            line, "# embedded_size_measurement: ");
         metadata.has_value()) {
-      for (const char * field :
-           {"mode",
-            "scope",
-            "workload",
-            "backend",
-            "link_flags",
-            "model_fixture",
-            "prompt",
-            "max_tokens",
-            "runtime_smoke"}) {
+      for (const char *field :
+           {"mode", "scope", "workload", "backend", "link_flags",
+            "model_fixture", "prompt", "max_tokens", "runtime_smoke"}) {
         if (!metadata->contains(field)) {
-          std::fprintf(stderr,
-                       "error: invalid # embedded_size_measurement metadata in %s\n",
-                       paths.embedded_size_snapshot.string().c_str());
+          std::fprintf(
+              stderr,
+              "error: invalid # embedded_size_measurement metadata in %s\n",
+              paths.embedded_size_snapshot.string().c_str());
           return std::nullopt;
         }
       }
@@ -918,9 +1003,11 @@ std::optional<embedded_size_snapshot> parse_embedded_size_snapshot(const doc_pat
       parsed.runtime_smoke = metadata->at("runtime_smoke");
       continue;
     }
-    if (const auto metadata = parse_inline_key_value_fields(line, "# embedded_size_emel: ");
+    if (const auto metadata =
+            parse_inline_key_value_fields(line, "# embedded_size_emel: ");
         metadata.has_value()) {
-      for (const char * field : {"raw_bytes", "stripped_bytes", "section_bytes"}) {
+      for (const char *field :
+           {"raw_bytes", "stripped_bytes", "section_bytes"}) {
         if (!metadata->contains(field)) {
           std::fprintf(stderr,
                        "error: invalid # embedded_size_emel metadata in %s\n",
@@ -933,13 +1020,16 @@ std::optional<embedded_size_snapshot> parse_embedded_size_snapshot(const doc_pat
       parsed.emel_section_bytes = metadata->at("section_bytes");
       continue;
     }
-    if (const auto metadata = parse_inline_key_value_fields(line, "# embedded_size_reference: ");
+    if (const auto metadata =
+            parse_inline_key_value_fields(line, "# embedded_size_reference: ");
         metadata.has_value()) {
-      for (const char * field : {"raw_bytes", "stripped_bytes", "section_bytes"}) {
+      for (const char *field :
+           {"raw_bytes", "stripped_bytes", "section_bytes"}) {
         if (!metadata->contains(field)) {
-          std::fprintf(stderr,
-                       "error: invalid # embedded_size_reference metadata in %s\n",
-                       paths.embedded_size_snapshot.string().c_str());
+          std::fprintf(
+              stderr,
+              "error: invalid # embedded_size_reference metadata in %s\n",
+              paths.embedded_size_snapshot.string().c_str());
           return std::nullopt;
         }
       }
@@ -948,9 +1038,10 @@ std::optional<embedded_size_snapshot> parse_embedded_size_snapshot(const doc_pat
       parsed.reference_section_bytes = metadata->at("section_bytes");
       continue;
     }
-    if (const auto metadata = parse_inline_key_value_fields(line, "# embedded_size_ratio: ");
+    if (const auto metadata =
+            parse_inline_key_value_fields(line, "# embedded_size_ratio: ");
         metadata.has_value()) {
-      for (const char * field : {"raw", "stripped", "section"}) {
+      for (const char *field : {"raw", "stripped", "section"}) {
         if (!metadata->contains(field)) {
           std::fprintf(stderr,
                        "error: invalid # embedded_size_ratio metadata in %s\n",
@@ -965,17 +1056,19 @@ std::optional<embedded_size_snapshot> parse_embedded_size_snapshot(const doc_pat
     }
   }
 
-  if (parsed.reference_ref.empty() || parsed.toolchain.empty() || parsed.build_type.empty() ||
-      parsed.compile_flags.empty() || parsed.measurement_mode.empty() ||
-      parsed.measurement_scope.empty() || parsed.workload.empty() || parsed.backend.empty() ||
-      parsed.link_flags.empty() || parsed.model_fixture.empty() || parsed.prompt.empty() ||
-      parsed.max_tokens.empty() || parsed.runtime_smoke.empty() || parsed.emel_raw_bytes.empty() ||
+  if (parsed.reference_ref.empty() || parsed.toolchain.empty() ||
+      parsed.build_type.empty() || parsed.compile_flags.empty() ||
+      parsed.measurement_mode.empty() || parsed.measurement_scope.empty() ||
+      parsed.workload.empty() || parsed.backend.empty() ||
+      parsed.link_flags.empty() || parsed.model_fixture.empty() ||
+      parsed.prompt.empty() || parsed.max_tokens.empty() ||
+      parsed.runtime_smoke.empty() || parsed.emel_raw_bytes.empty() ||
       parsed.emel_stripped_bytes.empty() || parsed.emel_section_bytes.empty() ||
-      parsed.reference_raw_bytes.empty() || parsed.reference_stripped_bytes.empty() ||
+      parsed.reference_raw_bytes.empty() ||
+      parsed.reference_stripped_bytes.empty() ||
       parsed.reference_section_bytes.empty() || parsed.ratio_raw.empty() ||
       parsed.ratio_stripped.empty() || parsed.ratio_section.empty()) {
-    std::fprintf(stderr,
-                 "error: incomplete embedded size snapshot in %s\n",
+    std::fprintf(stderr, "error: incomplete embedded size snapshot in %s\n",
                  paths.embedded_size_snapshot.string().c_str());
     return std::nullopt;
   }
@@ -983,10 +1076,12 @@ std::optional<embedded_size_snapshot> parse_embedded_size_snapshot(const doc_pat
   return parsed;
 }
 
-std::string build_embedded_size_section(const embedded_size_snapshot & snapshot) {
+std::string
+build_embedded_size_section(const embedded_size_snapshot &snapshot) {
   std::string section;
-  section += "Generated from `scripts/embedded_size.sh --snapshot-update` using final "
-             "dead-stripped Qwen3 E2E runner executables.\n\n";
+  section +=
+      "Generated from `scripts/embedded_size.sh --snapshot-update` using final "
+      "dead-stripped Qwen3 E2E runner executables.\n\n";
   section += "- Snapshot: `snapshots/embedded_size/summary.txt`\n";
   section += "- Mode: `";
   section += snapshot.measurement_mode;
@@ -1052,16 +1147,18 @@ std::string build_embedded_size_section(const embedded_size_snapshot & snapshot)
   section += "- Ratio (`emel / reference`) section: `";
   section += snapshot.ratio_section;
   section += "x`\n\n";
-  section += "This is a matched Qwen3-0.6B end-to-end runner size measurement for the "
-             "maintained `hello` -> first-token path, not a whole-product feature-parity "
-             "claim. Both binaries still include the platform runtime selected by the "
-             "toolchain.";
+  section +=
+      "This is a matched Qwen3-0.6B end-to-end runner size measurement for the "
+      "maintained `hello` -> first-token path, not a whole-product "
+      "feature-parity "
+      "claim. Both binaries still include the platform runtime selected by the "
+      "toolchain.";
   return section;
 }
 
-const benchmark_row * find_benchmark_row(const benchmark_snapshot & snapshot,
-                                         const std::string & name) {
-  for (const auto & row : snapshot.rows) {
+const benchmark_row *find_benchmark_row(const benchmark_snapshot &snapshot,
+                                        const std::string &name) {
+  for (const auto &row : snapshot.rows) {
     if (row.name == name) {
       return &row;
     }
@@ -1069,10 +1166,10 @@ const benchmark_row * find_benchmark_row(const benchmark_snapshot & snapshot,
   return nullptr;
 }
 
-const benchmark_diarization_record * find_diarization_record(const benchmark_snapshot & snapshot,
-                                                             const std::string & case_name,
-                                                             const std::string & lane) {
-  for (const auto & record : snapshot.diarization_records) {
+const benchmark_diarization_record *
+find_diarization_record(const benchmark_snapshot &snapshot,
+                        const std::string &case_name, const std::string &lane) {
+  for (const auto &record : snapshot.diarization_records) {
     if (record.case_name == case_name && record.lane == lane) {
       return &record;
     }
@@ -1080,10 +1177,10 @@ const benchmark_diarization_record * find_diarization_record(const benchmark_sna
   return nullptr;
 }
 
-const benchmark_diarization_compare_row * find_diarization_compare_row(
-    const benchmark_snapshot & snapshot,
-    const std::string & name) {
-  for (const auto & row : snapshot.diarization_compare_rows) {
+const benchmark_diarization_compare_row *
+find_diarization_compare_row(const benchmark_snapshot &snapshot,
+                             const std::string &name) {
+  for (const auto &row : snapshot.diarization_compare_rows) {
     if (row.name == name) {
       return &row;
     }
@@ -1091,16 +1188,21 @@ const benchmark_diarization_compare_row * find_diarization_compare_row(
   return nullptr;
 }
 
-std::optional<std::string> build_sortformer_publication_section(const doc_paths & paths,
-                                                                const benchmark_snapshot & snapshot) {
+std::optional<std::string>
+build_sortformer_publication_section(const doc_paths &paths,
+                                     const benchmark_snapshot &snapshot) {
   const std::string primary_case =
       "diarization/sortformer/ami_en2002b_mix_headset_137.00_152.04_16khz_mono";
 
-  const auto * primary_emel = find_diarization_record(snapshot, primary_case, "emel");
-  const auto * primary_reference = find_diarization_record(snapshot, primary_case, "reference");
-  const auto * primary_row = find_diarization_compare_row(snapshot, primary_case);
+  const auto *primary_emel =
+      find_diarization_record(snapshot, primary_case, "emel");
+  const auto *primary_reference =
+      find_diarization_record(snapshot, primary_case, "reference");
+  const auto *primary_row =
+      find_diarization_compare_row(snapshot, primary_case);
 
-  if (primary_emel == nullptr || primary_reference == nullptr || primary_row == nullptr) {
+  if (primary_emel == nullptr || primary_reference == nullptr ||
+      primary_row == nullptr) {
     std::fprintf(stderr,
                  "error: missing diarization publication metadata in %s\n",
                  paths.benchmarks_snapshot.string().c_str());
@@ -1111,7 +1213,8 @@ std::optional<std::string> build_sortformer_publication_section(const doc_paths 
   section += "## Sortformer Diarization Baseline\n\n";
   section += "- Source snapshot: `snapshots/bench/benchmarks_compare.txt`\n";
   section += "- Maintained benchmark suite: `diarization_sortformer`.\n";
-  section += "- Supported maintained model: `tests/models/diar_streaming_sortformer_4spk-v2.1.gguf` (`";
+  section += "- Supported maintained model: "
+             "`tests/models/diar_streaming_sortformer_4spk-v2.1.gguf` (`";
   section += primary_emel->model_id;
   section += "`).\n";
   section += "- Canonical proof fixture: `tests/fixtures/diarization/"
@@ -1121,61 +1224,88 @@ std::optional<std::string> build_sortformer_publication_section(const doc_paths 
   section += "- Maintained fixture provenance: `";
   section += primary_emel->note;
   section += "`\n";
-  section += "- Input contract: real `15.04` second mono `16 kHz` audio, maintained GGUF loader, "
-             "maintained request frontend (`1504 x 128` log-mel features), maintained pre-encode "
-             "stack (`188 x 512` encoder frames), then the maintained executor/probability/"
+  section += "- Input contract: real `15.04` second mono `16 kHz` audio, "
+             "maintained GGUF loader, "
+             "maintained request frontend (`1504 x 128` log-mel features), "
+             "maintained pre-encode "
+             "stack (`188 x 512` encoder frames), then the maintained "
+             "executor/probability/"
              "segment pipeline.\n";
-  const bool recorded_reference = primary_row->reference_label == "reference-baseline";
-  section += recorded_reference ? "- Self-recorded regression snapshot: `output_dim="
-                                : "- Current exact output: `output_dim=";
+  const bool recorded_reference =
+      primary_row->reference_label == "reference-baseline";
+  section += recorded_reference
+                 ? "- Self-recorded regression snapshot: `output_dim="
+                 : "- Current exact output: `output_dim=";
   section += primary_emel->output_dim;
   section += "` segments, `output_checksum=";
   section += primary_emel->output_checksum;
   section += "`.\n";
-  section += recorded_reference ? "- Recorded lane note: `" : "- Benchmark reference note: `";
+  section += recorded_reference ? "- Recorded lane note: `"
+                                : "- Benchmark reference note: `";
   section += primary_reference->note;
   section += "`\n";
   if (recorded_reference) {
-    section += "- Correctness caveat: the recorded lane was produced by EMEL and is not an "
+    section += "- Correctness caveat: the recorded lane was produced by EMEL "
+               "and is not an "
                "independent parity oracle.\n";
   } else {
-    section += "- Current publication caveat: the ONNX row is the CPU single-thread benchmark "
-               "reference. PyTorch/NeMo remains the independent parity reference, and the ONNX "
-               "row is only a closeout target after it exact-matches that parity lane.\n";
+    section += "- Current publication caveat: the ONNX row is the CPU "
+               "single-thread benchmark "
+               "reference. PyTorch/NeMo remains the independent parity "
+               "reference, and the ONNX "
+               "row is only a closeout target after it exact-matches that "
+               "parity lane.\n";
   }
-  section += "- Table row: the primary steady-state case is included in the benchmark table "
+  section += "- Table row: the primary steady-state case is included in the "
+             "benchmark table "
              "above with its real reference timing and proof status.\n";
-  section += "- Publication workflow: the deterministic compare artifacts now live under "
-             "`scripts/bench_diarization_compare.sh`, which writes `raw/emel.jsonl`, "
-             "`raw/reference.jsonl`, optional `raw/onnx_reference.jsonl`, and "
-             "`compare_summary.json` using "
-             "`diarization_compare/v1` / `diarization_compare_summary/v1`.\n";
-  section += "- PyTorch/NeMo parity reference lane: when supplied with "
-             "`--pytorch-reference-model`, the workflow emits a distinct "
-             "`pytorch.nemo.sortformer.v2_1` backend using the official model-card "
-             "`SortformerEncLabelModel.diarize(..., include_tensor_outputs=True)` path on the "
-             "maintained WAV fixture. The reproducible environment is synced with `uv` from "
-             "`tools/bench/diarization_pytorch_reference_requirements.txt` via "
-             "`scripts/setup_diarization_pytorch_ref_env.sh`. Timing excludes one-time model "
-             "load.\n";
-  section += "- ONNX benchmark reference lane: when supplied with `--onnx-reference-model`, the "
-             "workflow emits a distinct `onnx.sortformer.v2_1` backend using ONNX Runtime CPU "
-             "single-thread (`intra_op=1`, `inter_op=1`, `ORT_SEQUENTIAL`) and the maintained "
+  section +=
+      "- Publication workflow: the deterministic compare artifacts now live "
+      "under "
+      "`scripts/bench_diarization_compare.sh`, which writes `raw/emel.jsonl`, "
+      "`raw/reference.jsonl`, optional `raw/onnx_reference.jsonl`, and "
+      "`compare_summary.json` using "
+      "`diarization_compare/v1` / `diarization_compare_summary/v1`.\n";
+  section +=
+      "- PyTorch/NeMo parity reference lane: when supplied with "
+      "`--pytorch-reference-model`, the workflow emits a distinct "
+      "`pytorch.nemo.sortformer.v2_1` backend using the official model-card "
+      "`SortformerEncLabelModel.diarize(..., include_tensor_outputs=True)` "
+      "path on the "
+      "maintained WAV fixture. The reproducible environment is synced with "
+      "`uv` from "
+      "`tools/bench/diarization_pytorch_reference_requirements.txt` via "
+      "`scripts/setup_diarization_pytorch_ref_env.sh`. Timing excludes "
+      "one-time model "
+      "load.\n";
+  section += "- ONNX benchmark reference lane: when supplied with "
+             "`--onnx-reference-model`, the "
+             "workflow emits a distinct `onnx.sortformer.v2_1` backend using "
+             "ONNX Runtime CPU "
+             "single-thread (`intra_op=1`, `inter_op=1`, `ORT_SEQUENTIAL`) and "
+             "the maintained "
              "feature tensor from the same fixture. Generated records include "
-             "`actual_providers` from ONNX Runtime. Missing ONNX dependencies or artifacts are "
-             "hard failures, not recorded-baseline fallbacks. ONNX output must be cross-checked "
-             "against the PyTorch parity lane before it is treated as a correctness target.\n";
-  section += "- Optimization contract: one-time setup costs are secondary evidence. The primary "
-             "benchmark claim remains the steady-state maintained pipeline lane on exact hardware.\n";
+             "`actual_providers` from ONNX Runtime. Missing ONNX dependencies "
+             "or artifacts are "
+             "hard failures, not recorded-baseline fallbacks. ONNX output must "
+             "be cross-checked "
+             "against the PyTorch parity lane before it is treated as a "
+             "correctness target.\n";
+  section += "- Optimization contract: one-time setup costs are secondary "
+             "evidence. The primary "
+             "benchmark claim remains the steady-state maintained pipeline "
+             "lane on exact hardware.\n";
   section += "- Rejected or deferred candidates:\n";
-  section += "  - Tool-local synthetic contracts/PCM fixtures and reference-lane dependencies "
+  section += "  - Tool-local synthetic contracts/PCM fixtures and "
+             "reference-lane dependencies "
              "remain rejected.\n";
-  section += "  - Full transformer dense/matmul kernelization remains future kernel-contract "
+  section += "  - Full transformer dense/matmul kernelization remains future "
+             "kernel-contract "
              "work.\n";
   return section;
 }
 
-int main(int argc, char ** argv) {
+int main(int argc, char **argv) {
   options opts;
   if (!parse_options(argc, argv, opts)) {
     return 1;
@@ -1187,8 +1317,10 @@ int main(int argc, char ** argv) {
   paths.architecture_dir = paths.root / ".planning" / "architecture";
   paths.mermaid_dir = paths.architecture_dir / "mermaid";
   paths.benchmarks_md = paths.docs_dir / "benchmarks.md";
-  paths.benchmarks_snapshot = paths.root / "snapshots/bench/benchmarks_compare.txt";
-  paths.embedded_size_snapshot = paths.root / "snapshots/embedded_size/summary.txt";
+  paths.benchmarks_snapshot =
+      paths.root / "snapshots/bench/benchmarks_compare.txt";
+  paths.embedded_size_snapshot =
+      paths.root / "snapshots/embedded_size/summary.txt";
   paths.benchmarks_template = paths.docs_dir / "templates/benchmarks.md.j2";
   paths.readme_template = paths.docs_dir / "templates/README.md.j2";
   paths.readme_path = paths.root / "README.md";
@@ -1198,18 +1330,20 @@ int main(int argc, char ** argv) {
 
   std::unordered_set<std::string> machine_names;
   machine_names.reserve(machines.size());
-  for (const auto & spec : machines) {
+  for (const auto &spec : machines) {
     machine_names.insert(spec.name);
   }
 
-  if (!prune_stale_generated_files(paths.architecture_dir, ".md", machine_names, opts.check)) {
+  if (!prune_stale_generated_files(paths.architecture_dir, ".md", machine_names,
+                                   opts.check)) {
     return 1;
   }
-  if (!prune_stale_generated_files(paths.mermaid_dir, ".mmd", machine_names, opts.check)) {
+  if (!prune_stale_generated_files(paths.mermaid_dir, ".mmd", machine_names,
+                                   opts.check)) {
     return 1;
   }
 
-  for (const auto & spec : machines) {
+  for (const auto &spec : machines) {
     spec.emit(spec, paths, opts.check);
   }
 
@@ -1234,8 +1368,11 @@ int main(int argc, char ** argv) {
 
   const auto benchmarks_doc = render_template(
       paths.benchmarks_template,
-      {template_var{"sortformer_publication_section", *sortformer_publication_section},
+      {template_var{"sortformer_publication_section",
+                    *sortformer_publication_section},
        template_var{"benchmarks_table", *benchmarks_table},
+       template_var{"benchmark_threading_notes",
+                    build_benchmark_threading_notes(*benchmarks_snapshot)},
        template_var{"benchmark_preservation_notes",
                     build_benchmark_preservation_notes(*benchmarks_snapshot)}});
   if (!benchmarks_doc.has_value()) {

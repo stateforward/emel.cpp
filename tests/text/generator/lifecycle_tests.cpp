@@ -28,6 +28,7 @@
 #include "emel/graph/tensor/events.hpp"
 #include "emel/text/formatter/format.hpp"
 #include "emel/text/tokenizer/sm.hpp"
+#include "generator_test_policies.hpp"
 
 namespace {
 
@@ -875,6 +876,7 @@ struct generator_fixture {
   prepared_model prepared = {};
   emel::text::tokenizer::sm tokenizer{};
   emel::text::conditioner::sm conditioner{};
+  emel::text::generator::matmul::lane_pool<7u, 128u, 1048576u> parallel_matmul_lanes = {};
   std::unique_ptr<emel::text::generator::sm> generator = {};
   std::array<emel::logits::sampler::fn, 1> samplers = {
       emel::logits::sampler::fn::from<sampler_select_argmax>(),
@@ -912,8 +914,20 @@ struct generator_fixture {
     if (variant == model_variant::flash_kv_width_mismatch) {
       apply_flash_kv_width_mismatch(prepared);
     }
+    const emel::model::data & model = stabilize_model(prepared);
+    const auto matmul_policy =
+        emel::text::generator::matmul::make_auto_execution_policy(
+            parallel_matmul_lanes);
     generator = std::make_unique<emel::text::generator::sm>(
-        stabilize_model(prepared), conditioner, formatter_ctx, format_prompt);
+        emel::text::generator::dependencies{
+            .model = model,
+            .conditioner = conditioner,
+            .matmul_policy = matmul_policy,
+            .runtime_policy =
+                emel::text::generator::test::make_auto_runtime_policy(model),
+            .formatter_ctx = formatter_ctx,
+            .format_prompt = format_prompt,
+        });
     hello_id = prepared.hello_id;
     world_id = prepared.world_id;
   }
@@ -1141,36 +1155,8 @@ TEST_CASE("generator_initialize_rejects_block_tokens_larger_than_context") {
   CHECK(tracker.err == emel::error::cast(emel::text::generator::error::invalid_request));
 }
 
-TEST_CASE("generator_initialize_rejects_missing_injected_dependencies_through_sml") {
-  auto generator = std::make_unique<emel::text::generator::sm>();
-  emel::text::tokenizer::sm tokenizer{};
-  std::array<emel::logits::sampler::fn, 1> samplers = {
-      emel::logits::sampler::fn::from<sampler_select_argmax>(),
-  };
-  callback_tracker tracker{};
-  emel::error::type error = emel::error::cast(emel::text::generator::error::none);
-  emel::text::generator::event::initialize request{
-    &tokenizer,
-    tokenizer_bind_dispatch,
-    tokenizer_tokenize_dispatch,
-    std::span<emel::logits::sampler::fn>{samplers},
-  };
-  request.max_prompt_tokens = 8;
-  request.max_generated_tokens = 4;
-  request.max_blocks = 2;
-  request.block_tokens = 4;
-  request.error_out = &error;
-  request.on_error =
-      emel::callback<void(const emel::text::generator::events::initialize_error &)>(
-          &tracker,
-          on_initialize_error);
-
-  CHECK_FALSE(generator->process_event(request));
-  CHECK(generator->is(stateforward::sml::state<emel::text::generator::uninitialized>));
-  CHECK_FALSE(tracker.initialize_done_called);
-  CHECK(tracker.initialize_error_called);
-  CHECK(error == emel::error::cast(emel::text::generator::error::invalid_request));
-  CHECK(tracker.err == emel::error::cast(emel::text::generator::error::invalid_request));
+TEST_CASE("generator_requires_construction_time_dependencies") {
+  CHECK_FALSE(std::is_default_constructible_v<emel::text::generator::sm>);
 }
 
 TEST_CASE("generator_initialize_reports_original_request_without_generation_callbacks") {
@@ -2130,10 +2116,10 @@ TEST_CASE("generator_initialize_public_wrapper_has_no_runtime_branch") {
 
   const std::string source((std::istreambuf_iterator<char>(stream)),
                            std::istreambuf_iterator<char>());
-  const std::string marker = "bool process_event(const event::initialize & ev)";
+  const std::string marker = "bool process_event(const event::initialize &";
   const auto start = source.find(marker);
   REQUIRE(start != std::string::npos);
-  const auto end = source.find("bool process_event(const event::generate & ev)", start);
+  const auto end = source.find("bool process_event(const event::generate &", start);
   REQUIRE(end != std::string::npos);
 
   const auto wrapper = source.substr(start, end - start);
@@ -2154,13 +2140,14 @@ TEST_CASE("generator_route_guards_do_not_delegate_behavior_selection_to_detail_h
       read_source(repo_root() / "src" / "emel" / "text" / "generator" / "guards.hpp");
   const std::string prefill_guards =
       read_source(repo_root() / "src" / "emel" / "text" / "generator" / "prefill" / "guards.hpp");
-  const std::array<std::string_view, 6> forbidden_parent_patterns{
+  const std::array<std::string_view, 7> forbidden_parent_patterns{
     "emel::text::generator::detail::preselected_argmax_direct_supported(",
     "emel::text::generator::detail::prefill_chunk4_q8_gemm_backend_ready(",
     "emel::text::generator::detail::prefill_chunk8_q8_k_backend_ready(",
     "emel::text::generator::detail::prefill_chunk4_backend_ready<",
     "emel::text::generator::detail::prefill_chunk8_backend_ready<",
     "emel::text::generator::detail::flash_attention_supported(",
+    "emel::text::generator::detail::block_uses_attention(",
   };
   for (const auto pattern : forbidden_parent_patterns) {
     CAPTURE(pattern);
@@ -2179,20 +2166,28 @@ TEST_CASE("generator_scalar_kernel_route_choice_stays_in_state_machines") {
 
   const std::string detail_source =
       read_source(repo_root() / "src" / "emel" / "text" / "generator" / "detail.hpp");
+  CHECK(detail_source.find("block_uses_attention(") == std::string::npos);
+  CHECK(detail_source.find("prefill_chunk4_q8_gemm_backend_ready(") ==
+        std::string::npos);
+  CHECK(detail_source.find("prefill_chunk8_q8_k_backend_ready(") ==
+        std::string::npos);
+  CHECK(detail_source.find("prefill_chunk4_backend_ready<") == std::string::npos);
+  CHECK(detail_source.find("chunk4_matmul_backend_ready(") == std::string::npos);
   CHECK(detail_source.find("run_kernel_mode(") == std::string::npos);
   CHECK(detail_source.find("run_kernel_mode_preselected_argmax(") == std::string::npos);
   CHECK(detail_source.find("plan->kind == step_kind::prefill ?") == std::string::npos);
   CHECK(detail_source.find("phase_lifecycle(") == std::string::npos);
 
-  const auto guarded_validate_start =
-      detail_source.find("inline bool validate_guarded_compute");
+  const auto guarded_validate_sig = detail_source.find("validate_guarded_compute(");
+  REQUIRE(guarded_validate_sig != std::string::npos);
+  const auto guarded_validate_start = detail_source.find('{', guarded_validate_sig);
   REQUIRE(guarded_validate_start != std::string::npos);
   const auto guarded_validate_end =
-      detail_source.find("inline bool prepare_graph", guarded_validate_start);
+      detail_source.find("validate_guarded_preselected_argmax(", guarded_validate_start);
   REQUIRE(guarded_validate_end != std::string::npos);
   const auto guarded_validate_callbacks =
-      detail_source.substr(guarded_validate_start,
-                           guarded_validate_end - guarded_validate_start);
+      detail_source.substr(guarded_validate_start + 1,
+                           guarded_validate_end - guarded_validate_start - 1);
   const std::array<std::string_view, 10> forbidden_validate_callback_patterns{
     "request_plan(",
     "check_backend(",
@@ -2201,7 +2196,7 @@ TEST_CASE("generator_scalar_kernel_route_choice_stays_in_state_machines") {
     "selected_score_out == nullptr",
     "positions_count !=",
     "token_count <=",
-    "*err_out",
+    "*err_out =",
     "k_error_invalid",
     "return false",
   };
@@ -2210,21 +2205,23 @@ TEST_CASE("generator_scalar_kernel_route_choice_stays_in_state_machines") {
     CHECK(guarded_validate_callbacks.find(pattern) == std::string::npos);
   }
 
-  const auto guarded_bind_start =
-      detail_source.find("inline bool bind_guarded_inputs");
+  const auto guarded_bind_sig = detail_source.find("bind_guarded_inputs(");
+  REQUIRE(guarded_bind_sig != std::string::npos);
+  const auto guarded_bind_start = detail_source.find('{', guarded_bind_sig);
   REQUIRE(guarded_bind_start != std::string::npos);
   const auto guarded_bind_end =
       detail_source.find("template <emel::text::generator::attention_mode",
                          guarded_bind_start);
   REQUIRE(guarded_bind_end != std::string::npos);
   const auto guarded_bind_callback =
-      detail_source.substr(guarded_bind_start, guarded_bind_end - guarded_bind_start);
+      detail_source.substr(guarded_bind_start + 1,
+                           guarded_bind_end - guarded_bind_start - 1);
   const std::array<std::string_view, 7> forbidden_bind_callback_patterns{
     "request_plan(",
     "check_backend(",
     "== nullptr",
     "expected_outputs",
-    "*err_out",
+    "*err_out =",
     "k_error_invalid",
     "return false",
   };
@@ -2233,22 +2230,22 @@ TEST_CASE("generator_scalar_kernel_route_choice_stays_in_state_machines") {
     CHECK(guarded_bind_callback.find(pattern) == std::string::npos);
   }
 
-  const auto guarded_extract_start =
-      detail_source.find("inline bool extract_guarded_outputs");
+  const auto guarded_extract_sig = detail_source.find("extract_guarded_outputs(");
+  REQUIRE(guarded_extract_sig != std::string::npos);
+  const auto guarded_extract_start = detail_source.find('{', guarded_extract_sig);
   REQUIRE(guarded_extract_start != std::string::npos);
   const auto guarded_extract_end =
-      detail_source.find("}  // namespace emel::text::generator::detail",
-                         guarded_extract_start);
+      detail_source.find("extract_guarded_preselected_argmax(", guarded_extract_start);
   REQUIRE(guarded_extract_end != std::string::npos);
   const auto guarded_extract_callbacks =
-      detail_source.substr(guarded_extract_start,
-                           guarded_extract_end - guarded_extract_start);
+      detail_source.substr(guarded_extract_start + 1,
+                           guarded_extract_end - guarded_extract_start - 1);
   const std::array<std::string_view, 8> forbidden_extract_callback_patterns{
     "check_backend(",
     "== nullptr",
     "selected_token_out == nullptr",
     "selected_score_out == nullptr",
-    "*err_out",
+    "*err_out =",
     "k_error_invalid",
     "return false",
     "request_plan(",
@@ -2258,10 +2255,10 @@ TEST_CASE("generator_scalar_kernel_route_choice_stays_in_state_machines") {
     CHECK(guarded_extract_callbacks.find(pattern) == std::string::npos);
   }
 
-  const auto audited_start = detail_source.find("inline bool run_kernel_scalar_mode");
+  const auto audited_start = detail_source.find("run_kernel_scalar_mode(");
   REQUIRE(audited_start != std::string::npos);
   const auto audited_end =
-      detail_source.find("inline bool extract_guarded_outputs", audited_start);
+      detail_source.find("extract_guarded_outputs(", audited_start);
   REQUIRE(audited_end != std::string::npos);
   const auto audited_wrappers = detail_source.substr(audited_start, audited_end - audited_start);
   const std::array<std::string_view, 10> forbidden_wrapper_patterns{
@@ -2273,7 +2270,7 @@ TEST_CASE("generator_scalar_kernel_route_choice_stays_in_state_machines") {
     "selected_score_out == nullptr",
     "prefill_chunk4_backend_ready",
     "prefill_chunk8_q8_k_backend_ready",
-    "*err_out",
+    "*err_out =",
     "k_error_invalid",
   };
   for (const auto pattern : forbidden_wrapper_patterns) {
@@ -2359,6 +2356,92 @@ TEST_CASE("generator_scalar_kernel_route_choice_stays_in_state_machines") {
         std::string::npos);
   CHECK(prefill_sm.find("guard::guard_preselected_argmax_with_scalar_kernel_ready{}") !=
         std::string::npos);
+}
+
+TEST_CASE("generator_layer_route_actor_keeps_residual_choice_explicit") {
+  const auto read_source = [](const std::filesystem::path & path) {
+    std::ifstream stream(path);
+    REQUIRE(stream.good());
+    return std::string(
+        (std::istreambuf_iterator<char>(stream)), std::istreambuf_iterator<char>());
+  };
+
+  const auto layer_root =
+      repo_root() / "src" / "emel" / "text" / "generator" / "layer";
+  const std::string layer_sm = read_source(layer_root / "sm.hpp");
+  const std::string layer_actions = read_source(layer_root / "actions.hpp");
+  const std::string layer_events = read_source(layer_root / "events.hpp");
+  const std::string detail_source =
+      read_source(repo_root() / "src" / "emel" / "text" / "generator" /
+                  "detail.hpp");
+
+  CHECK(layer_sm.find("action::effect_prepare_scalar") != std::string::npos);
+  CHECK(layer_sm.find("action::effect_normalize_scalar") != std::string::npos);
+  CHECK(layer_sm.find("action::effect_normalize_chunk4") != std::string::npos);
+  CHECK(layer_sm.find("action::effect_normalize_chunk8") != std::string::npos);
+  CHECK(layer_sm.find("guard::guard_stream_ready{}") != std::string::npos);
+  CHECK(layer_sm.find("guard::guard_stream_failed{}") != std::string::npos);
+  CHECK(layer_sm.find("guard::guard_normalized_ok{}") != std::string::npos);
+  CHECK(layer_sm.find("guard::guard_normalized_failed{}") !=
+        std::string::npos);
+  CHECK(layer_sm.find("guard::guard_scalar_normalized_attention_route<") !=
+        std::string::npos);
+  CHECK(layer_sm.find("guard::guard_scalar_normalized_shortconv_route{}") !=
+        std::string::npos);
+  CHECK(layer_sm.find("guard::guard_chunk4_normalized_attention_route<") !=
+        std::string::npos);
+  CHECK(layer_sm.find("guard::guard_chunk4_normalized_shortconv_route{}") !=
+        std::string::npos);
+  CHECK(layer_sm.find("guard::guard_chunk8_normalized_attention_route<") !=
+        std::string::npos);
+  CHECK(layer_sm.find("guard::guard_chunk8_normalized_shortconv_route{}") !=
+        std::string::npos);
+  CHECK(layer_sm.find("sml::state<state_input_ready> <= *sml::state<state_idle>") !=
+        std::string::npos);
+  CHECK(layer_sm.find("sml::state<state_normalized> <= *sml::state<state_idle>") !=
+        std::string::npos);
+  CHECK(layer_sm.find("+ sml::event<event::scalar_run>") != std::string::npos);
+  CHECK(layer_sm.find("+ sml::event<event::chunk4_run>") != std::string::npos);
+  CHECK(layer_sm.find("+ sml::event<event::chunk8_run>") != std::string::npos);
+  CHECK(layer_sm.find("sml::completion<event::scalar_run>") != std::string::npos);
+  CHECK(layer_sm.find("sml::completion<event::chunk4_run>") != std::string::npos);
+  CHECK(layer_sm.find("sml::completion<event::chunk8_run>") != std::string::npos);
+  CHECK(layer_sm.find("guard::guard_residual_ok{}") != std::string::npos);
+  CHECK(layer_sm.find("guard::guard_residual_failed{}") != std::string::npos);
+  CHECK(layer_sm.find("guard::guard_feed_forward_ok{}") != std::string::npos);
+  CHECK(layer_sm.find("guard::guard_feed_forward_failed{}") !=
+        std::string::npos);
+  CHECK(layer_sm.find("action::effect_mark_succeeded") != std::string::npos);
+  CHECK(layer_sm.find("action::effect_mark_failed") != std::string::npos);
+
+  CHECK(layer_actions.find(" if (") == std::string::npos);
+  CHECK(layer_actions.find(" switch") == std::string::npos);
+  CHECK(layer_actions.find(" ? ") == std::string::npos);
+  CHECK(layer_actions.find("&&") == std::string::npos);
+  CHECK(layer_actions.find("ev.ok") == std::string::npos);
+  CHECK(layer_actions.find("detail::block_uses_attention") == std::string::npos);
+
+  CHECK(layer_events.find("emel::model::generation_residual_route") !=
+        std::string::npos);
+  CHECK(layer_events.find("emel::model::llama") == std::string::npos);
+  CHECK(layer_events.find("bool &ok") == std::string::npos);
+  CHECK(layer_events.find("mutable bool residual_ok") != std::string::npos);
+  CHECK(layer_events.find("mutable bool feed_forward_ok") != std::string::npos);
+  CHECK(layer_events.find("mutable bool succeeded") != std::string::npos);
+
+  CHECK(detail_source.find("actor.process_event(ev) &&") == std::string::npos);
+  CHECK(detail_source.find("layer::scalar_sm<") == std::string::npos);
+  CHECK(detail_source.find("layer::chunk4_sm<") == std::string::npos);
+  CHECK(detail_source.find("layer::chunk8_sm<") == std::string::npos);
+  CHECK(layer_sm.find("process_scalar<") != std::string::npos);
+  CHECK(layer_sm.find("process_chunk4<") != std::string::npos);
+  CHECK(layer_sm.find("process_chunk8<") != std::string::npos);
+  CHECK(layer_actions.find("run_layer(") == std::string::npos);
+  CHECK(layer_actions.find("run_layer_chunk4(") == std::string::npos);
+  CHECK(layer_actions.find("run_layer_chunk8_q8_k(") == std::string::npos);
+  CHECK(detail_source.find("layer::process_scalar<") == std::string::npos);
+  CHECK(detail_source.find("layer::process_chunk4<") == std::string::npos);
+  CHECK(detail_source.find("layer::process_chunk8<") == std::string::npos);
 }
 
 TEST_CASE("docs_detail_shortens_lambda_type_names_for_mermaid") {

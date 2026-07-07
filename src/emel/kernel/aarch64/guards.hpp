@@ -378,6 +378,17 @@ struct simd_op_mul_mat_f16_vector {
   }
 };
 
+struct simd_op_mul_mat_f32_vector {
+  bool operator()(const ::emel::kernel::aarch64::event::dispatch_op_mul_mat &ev,
+                  const action::context &ctx) const noexcept {
+    if (!::emel::kernel::detail::validate_dispatch_request(ev.request)) {
+      return false;
+    }
+    return ::emel::kernel::aarch64::detail::can_use_neon_mul_mat_f32_vector(
+        ev.request, ctx.neon_available);
+  }
+};
+
 struct simd_op_conv_transpose_1d_f32 {
   bool operator()(
       const ::emel::kernel::aarch64::event::dispatch_op_conv_transpose_1d &ev,
@@ -433,6 +444,18 @@ struct simd_op_mul_mat_q8_0_packed_bl4 {
     }
     return ::emel::kernel::aarch64::detail::
         can_use_neon_mul_mat_q8_0_packed_bl4(ev.request, ctx.neon_available);
+  }
+};
+
+struct simd_op_mul_mat_q8_0_vector_q8_rhs {
+  bool operator()(const ::emel::kernel::aarch64::event::dispatch_op_mul_mat &ev,
+                  const action::context &ctx) const noexcept {
+    if (!::emel::kernel::detail::validate_dispatch_request(ev.request)) {
+      return false;
+    }
+    return ::emel::kernel::aarch64::detail::
+        can_use_neon_mul_mat_q8_0_vector_q8_rhs(ev.request,
+                                                ctx.neon_available);
   }
 };
 
@@ -495,6 +518,18 @@ struct simd_op_mul_mat_q4_vector_packed_q8_rhs_bl8_matrix_x8 {
   }
 };
 
+struct simd_op_mul_mat_q4_vector_q8_rhs {
+  bool operator()(const ::emel::kernel::aarch64::event::dispatch_op_mul_mat &ev,
+                  const action::context &ctx) const noexcept {
+    if (!::emel::kernel::detail::validate_dispatch_request(ev.request)) {
+      return false;
+    }
+    return ::emel::kernel::aarch64::detail::
+        can_use_neon_mul_mat_q4_vector_q8_rhs(ev.request,
+                                              ctx.neon_available);
+  }
+};
+
 struct simd_op_mul_mat_q6_vector_packed {
   bool operator()(const ::emel::kernel::aarch64::event::dispatch_op_mul_mat &ev,
                   const action::context &ctx) const noexcept {
@@ -503,6 +538,18 @@ struct simd_op_mul_mat_q6_vector_packed {
     }
     return ::emel::kernel::aarch64::detail::
         can_use_neon_mul_mat_q6_vector_packed(ev.request, ctx.neon_available);
+  }
+};
+
+struct simd_op_mul_mat_q6_vector_q8_rhs {
+  bool operator()(const ::emel::kernel::aarch64::event::dispatch_op_mul_mat &ev,
+                  const action::context &ctx) const noexcept {
+    if (!::emel::kernel::detail::validate_dispatch_request(ev.request)) {
+      return false;
+    }
+    return ::emel::kernel::aarch64::detail::
+        can_use_neon_mul_mat_q6_vector_q8_rhs(ev.request,
+                                              ctx.neon_available);
   }
 };
 
@@ -622,6 +669,7 @@ struct simd_op_mul_mat_generic {
                   const action::context &ctx) const noexcept {
     return simd_op<::emel::kernel::aarch64::event::dispatch_op_mul_mat>{}(
                ev, ctx) &&
+           !simd_op_mul_mat_f32_vector{}(ev, ctx) &&
            !simd_op_mul_mat_q5_0_vector{}(ev, ctx) &&
            !simd_op_mul_mat_q4_0_vector{}(ev, ctx) &&
            !simd_op_mul_mat_q4_1_vector{}(ev, ctx) &&
@@ -629,12 +677,14 @@ struct simd_op_mul_mat_generic {
            !simd_op_mul_mat_q8_0_packed_bl8_full_groups{}(ev, ctx) &&
            !simd_op_mul_mat_q8_0_packed_bl8{}(ev, ctx) &&
            !simd_op_mul_mat_q8_0_packed_bl4{}(ev, ctx) &&
+           !simd_op_mul_mat_q8_0_vector_q8_rhs{}(ev, ctx) &&
            !simd_op_mul_mat_q8_0_vector{}(ev, ctx) &&
            !simd_op_mul_mat_q4_vector_packed_q8_rhs_bl8_matrix_x8{}(ev, ctx) &&
            !simd_op_mul_mat_q4_vector_packed_q8_rhs_bl8_matrix_x4{}(ev, ctx) &&
            !simd_op_mul_mat_q4_vector_packed_q8_rhs_bl8{}(ev, ctx) &&
            !simd_op_mul_mat_q4_vector_packed_q8_rhs_bl4_matrix_x4{}(ev, ctx) &&
            !simd_op_mul_mat_q4_vector_packed_q8_rhs_bl4{}(ev, ctx) &&
+           !simd_op_mul_mat_q4_vector_q8_rhs{}(ev, ctx) &&
            !simd_op_mul_mat_q6_vector_prepared_q8_rhs_i8mm_matrix_x8{}(ev,
                                                                        ctx) &&
            !simd_op_mul_mat_q6_vector_prepared_q8_rhs_i8mm_matrix_x4{}(ev,
@@ -644,6 +694,7 @@ struct simd_op_mul_mat_generic {
            !simd_op_mul_mat_q6_vector_packed_q8_rhs_matrix_x4{}(ev, ctx) &&
            !simd_op_mul_mat_q6_vector_packed_q8_rhs{}(ev, ctx) &&
            !simd_op_mul_mat_q6_vector_packed{}(ev, ctx) &&
+           !simd_op_mul_mat_q6_vector_q8_rhs{}(ev, ctx) &&
            !simd_op_mul_mat_q6_vector{}(ev, ctx);
   }
 };

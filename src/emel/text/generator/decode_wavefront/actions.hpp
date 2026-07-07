@@ -39,6 +39,13 @@ struct effect_reject_incompatible_lanes {
   }
 };
 
+struct effect_reject_parallel_scheduler {
+  void operator()(const event::run & ev, context &) const noexcept {
+    ev.out.err = emel::error::cast(error::backend);
+    ev.out.failed_lane = event::k_no_failed_lane;
+  }
+};
+
 template <size_t lane_index>
 struct effect_dispatch_lane {
   void operator()(const event::run & ev, context &) const noexcept {
@@ -55,24 +62,29 @@ struct effect_dispatch_parallel_lanes {
       lane.accepted = false;
     }
 
-    // Total fork/join over the already-selected lane group: submit_or_run
-    // executes every lane exactly once inside the join window (worker or
-    // calling thread - the scheduler's internal capacity handling, never a
-    // behavior choice), and the join completes before the action returns,
-    // preserving RTC.
-    lane_scheduler scheduler{*ctx.pool};
-    lane_scheduler::join_group group{};
+    // Fork/join over the already-selected lane group. Submission failure leaves
+    // the lane rejected; the explicit post-join guards route that outcome.
+    lane_pool::join_group group{};
+    emel::policy::fork_join_start_gate gate{};
+    size_t submitted_lanes = 0u;
+    bool all_submitted = true;
     for (auto & lane : ev.lanes) {
       auto * lane_ptr = &lane;
-      scheduler.submit_or_run(group, [lane_ptr]() noexcept {
+      const bool submitted =
+          ctx.pool->try_submit(group, [lane_ptr, &gate]() noexcept {
+        gate.arrive_and_wait();
         auto & current_lane = *lane_ptr;
         const emel::graph::event::compute_reserved reserved_compute{
             current_lane.compute};
         current_lane.accepted =
             current_lane.graph.process_event(reserved_compute);
       });
+      submitted_lanes += static_cast<size_t>(submitted);
+      all_submitted = all_submitted && submitted;
     }
-    (void)group.wait();
+    gate.open_after_arrivals(submitted_lanes);
+    ev.out.all_submitted = all_submitted;
+    ev.out.joined = group.wait();
     ev.out.dispatched_lanes = static_cast<int32_t>(ev.lanes.size());
   }
 };
@@ -106,6 +118,7 @@ inline constexpr effect_mark_single_lane effect_mark_single_lane{};
 inline constexpr effect_mark_grouped_lanes effect_mark_grouped_lanes{};
 inline constexpr effect_reject_invalid_request effect_reject_invalid_request{};
 inline constexpr effect_reject_incompatible_lanes effect_reject_incompatible_lanes{};
+inline constexpr effect_reject_parallel_scheduler effect_reject_parallel_scheduler{};
 inline constexpr effect_dispatch_parallel_lanes effect_dispatch_parallel_lanes{};
 inline constexpr effect_commit_done effect_commit_done{};
 inline constexpr effect_on_unexpected effect_on_unexpected{};

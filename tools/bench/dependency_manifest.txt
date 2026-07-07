@@ -30,6 +30,7 @@ record runner=generation kind=source path=tools/bench/generation_compare_contrac
 record runner=generation kind=source path=tools/bench/generation_workload_manifest.hpp reason=workload_manifest_parser
 record runner=generation kind=source path=tools/generation_fixture_registry.hpp reason=fixture_registry
 record runner=generation kind=source path=tools/generation_formatter_contract.hpp reason=formatter_contract
+record runner=generation kind=source path=tools/generation_route_policy.hpp reason=runtime_policy
 record runner=generation kind=config path=tools/bench/generation_variants reason=workload_manifests
 record runner=generation kind=config path=tools/bench/reference_backends/llama_cpp_generation.json reason=reference_backend
 record runner=generation kind=fixture path=tools/bench/generation_prompts reason=prompt_fixtures

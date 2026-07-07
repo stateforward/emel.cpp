@@ -49,7 +49,39 @@ inline bool dispatch_prefill_run(void * actor,
   return static_cast<emel::text::generator::prefill::sm *>(actor)->process_event(ev);
 }
 
+inline void bind_matmul_actor(
+    action::context & ctx,
+    std::optional<emel::text::generator::matmul::sm> & actor,
+    const emel::text::generator::matmul::execution_policy & policy) {
+  actor.emplace(policy);
+  ctx.matmul_actor = &actor.value();
+}
+
+inline void bind_pipeline_actors(
+    action::context & ctx,
+    std::optional<emel::text::generator::initializer::sm> & initializer_actor,
+    std::optional<emel::text::generator::prefill::sm> & prefill_actor) {
+  initializer_actor.emplace(emel::text::generator::initializer::action::context{ctx});
+  ctx.initializer_actor = &initializer_actor.value();
+  ctx.dispatch_initializer = detail::dispatch_initializer_run;
+  prefill_actor.emplace(emel::text::generator::prefill::action::context{ctx});
+  ctx.prefill_actor = &prefill_actor.value();
+  ctx.dispatch_prefill = detail::dispatch_prefill_run;
+}
+
 }  // namespace detail
+
+struct dependencies {
+  const emel::model::data & model;
+  emel::text::conditioner::sm & conditioner;
+  emel::text::generator::matmul::execution_policy matmul_policy;
+  emel::text::generator::runtime_policy runtime_policy;
+  void * formatter_ctx = nullptr;
+  emel::text::formatter::format_fn format_prompt =
+      emel::text::formatter::format_raw;
+  emel::model::tensor::window::sm * stream_window = nullptr;
+  bool stream_active = false;
+};
 
 struct uninitialized {};
 struct initializing {};
@@ -955,6 +987,26 @@ struct model {
                  / action::capture_diagnostics
 
       , sml::state<uninitialized> <= sml::state<uninitialized>
+                 + sml::event<event::configure_benchmark_lane>
+                 [ guard::guard_benchmark_lane_single{} ]
+                 / action::effect_disable_parallel_benchmark_lanes
+
+      , sml::state<uninitialized> <= sml::state<uninitialized>
+                 + sml::event<event::configure_benchmark_lane>
+                 [ guard::guard_benchmark_lane_multithreaded{} ]
+                 / action::effect_enable_parallel_benchmark_lanes
+
+      , sml::state<ready> <= sml::state<ready>
+                 + sml::event<event::configure_benchmark_lane>
+                 [ guard::guard_benchmark_lane_single{} ]
+                 / action::effect_disable_parallel_benchmark_lanes
+
+      , sml::state<ready> <= sml::state<ready>
+                 + sml::event<event::configure_benchmark_lane>
+                 [ guard::guard_benchmark_lane_multithreaded{} ]
+                 / action::effect_enable_parallel_benchmark_lanes
+
+      , sml::state<uninitialized> <= sml::state<uninitialized>
                  + sml::event<event::capture_graph_lifecycle>
                  [ guard::graph_lifecycle_runtime_tensor_unavailable{} ]
                  / action::capture_graph_lifecycle_without_runtime_tensor
@@ -1086,47 +1138,18 @@ struct sm : public emel::sm<model, action::context> {
   using base_type::is;
   using base_type::visit_current_states;
 
-  sm() : base_type() {
-    initializer_actor_.emplace(emel::text::generator::initializer::action::context{this->context_});
-    this->context_.initializer_actor = &initializer_actor_.value();
-    this->context_.dispatch_initializer = detail::dispatch_initializer_run;
-    prefill_actor_.emplace(emel::text::generator::prefill::action::context{this->context_});
-    this->context_.prefill_actor = &prefill_actor_.value();
-    this->context_.dispatch_prefill = detail::dispatch_prefill_run;
-  }
-
-  sm(const emel::model::data & model_ref,
-     emel::text::conditioner::sm & conditioner_ref,
-     void * formatter_ctx = nullptr,
-     emel::text::formatter::format_fn format_prompt =
-         emel::text::formatter::format_raw)
-      : base_type() {
-    initializer_actor_.emplace(emel::text::generator::initializer::action::context{this->context_});
-    this->context_.initializer_actor = &initializer_actor_.value();
-    this->context_.dispatch_initializer = detail::dispatch_initializer_run;
-    prefill_actor_.emplace(emel::text::generator::prefill::action::context{this->context_});
-    this->context_.prefill_actor = &prefill_actor_.value();
-    this->context_.dispatch_prefill = detail::dispatch_prefill_run;
-    this->context_.model = &model_ref;
-    this->context_.conditioner = &conditioner_ref;
-    this->context_.formatter_ctx = formatter_ctx;
-    this->context_.format_prompt = format_prompt;
+  explicit sm(const dependencies & deps) : base_type() {
+    detail::bind_matmul_actor(this->context_, matmul_actor_, deps.matmul_policy);
+    detail::bind_pipeline_actors(this->context_, initializer_actor_, prefill_actor_);
+    this->context_.model = &deps.model;
+    this->context_.conditioner = &deps.conditioner;
+    this->context_.runtime_policy = deps.runtime_policy;
+    this->context_.formatter_ctx = deps.formatter_ctx;
+    this->context_.format_prompt = deps.format_prompt;
+    this->context_.stream_window = deps.stream_window;
+    this->context_.stream_active = deps.stream_active;
     // Session scratch is sized once from the injected loaded model before the initialize pipeline.
-    detail::reserve_session_buffers(this->context_, model_ref);
-  }
-
-  // Streaming variant: the owner bound the tensor window first and reports
-  // whether streaming engaged (bind_window_done.streaming_active).
-  sm(const emel::model::data & model_ref,
-     emel::text::conditioner::sm & conditioner_ref,
-     emel::model::tensor::window::sm & stream_window_ref,
-     const bool stream_active,
-     void * formatter_ctx = nullptr,
-     emel::text::formatter::format_fn format_prompt =
-         emel::text::formatter::format_raw)
-      : sm(model_ref, conditioner_ref, formatter_ctx, format_prompt) {
-    this->context_.stream_window = &stream_window_ref;
-    this->context_.stream_active = stream_active;
+    detail::reserve_session_buffers(this->context_, deps.model);
   }
 
   sm(const sm &) = delete;
@@ -1152,11 +1175,16 @@ struct sm : public emel::sm<model, action::context> {
     return base_type::process_event(ev);
   }
 
+  bool process_event(const event::configure_benchmark_lane & ev) {
+    return base_type::process_event(ev);
+  }
+
   bool process_event(const event::capture_graph_lifecycle & ev) {
     return base_type::process_event(ev);
   }
 
  private:
+  std::optional<emel::text::generator::matmul::sm> matmul_actor_ = {};
   std::optional<emel::text::generator::initializer::sm> initializer_actor_ = {};
   std::optional<emel::text::generator::prefill::sm> prefill_actor_ = {};
 };

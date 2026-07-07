@@ -74,12 +74,14 @@ stateDiagram-v2
   ready --> ready : dispatch_op_mul_mat [simd_op_mul_mat_q8_0_packed_bl8_full_groups_] / exec_simd_q8_0_packed_bl8_full_groups_op_mul_mat_
   ready --> ready : dispatch_op_mul_mat [simd_op_mul_mat_q8_0_packed_bl8_] / exec_simd_q8_0_packed_bl8_op_mul_mat_
   ready --> ready : dispatch_op_mul_mat [simd_op_mul_mat_q8_0_packed_bl4_] / exec_simd_q8_0_packed_bl4_op_mul_mat_
+  ready --> ready : dispatch_op_mul_mat [simd_op_mul_mat_q8_0_vector_q8_rhs_] / exec_simd_q8_0_vector_q8_rhs_op_mul_mat_
   ready --> ready : dispatch_op_mul_mat [simd_op_mul_mat_q8_0_vector_] / exec_simd_q8_0_vector_op_mul_mat_
   ready --> ready : dispatch_op_mul_mat [simd_op_mul_mat_q4_vector_packed_q8_rhs_bl8_matrix_x8_] / exec_simd_q4_vector_packed_q8_rhs_bl8_matrix_x8_op_mul_mat_
   ready --> ready : dispatch_op_mul_mat [simd_op_mul_mat_q4_vector_packed_q8_rhs_bl8_matrix_x4_] / exec_simd_q4_vector_packed_q8_rhs_bl8_matrix_x4_op_mul_mat_
   ready --> ready : dispatch_op_mul_mat [simd_op_mul_mat_q4_vector_packed_q8_rhs_bl8_] / exec_simd_q4_vector_packed_q8_rhs_bl8_op_mul_mat_
   ready --> ready : dispatch_op_mul_mat [simd_op_mul_mat_q4_vector_packed_q8_rhs_bl4_matrix_x4_] / exec_simd_q4_vector_packed_q8_rhs_bl4_matrix_x4_op_mul_mat_
   ready --> ready : dispatch_op_mul_mat [simd_op_mul_mat_q4_vector_packed_q8_rhs_bl4_] / exec_simd_q4_vector_packed_q8_rhs_bl4_op_mul_mat_
+  ready --> ready : dispatch_op_mul_mat [simd_op_mul_mat_q4_vector_q8_rhs_] / exec_simd_q4_vector_q8_rhs_op_mul_mat_
   ready --> ready : dispatch_op_mul_mat [simd_op_mul_mat_q6_vector_prepared_q8_rhs_i8mm_matrix_x8_] / exec_simd_q6_vector_prepared_q8_rhs_i8mm_matrix_x8_op_mul_mat_
   ready --> ready : dispatch_op_mul_mat [simd_op_mul_mat_q6_vector_prepared_q8_rhs_i8mm_matrix_x4_] / exec_simd_q6_vector_prepared_q8_rhs_i8mm_matrix_x4_op_mul_mat_
   ready --> ready : dispatch_op_mul_mat [simd_op_mul_mat_q6_vector_prepared_q8_rhs_i8mm_] / exec_simd_q6_vector_prepared_q8_rhs_i8mm_op_mul_mat_
@@ -90,7 +92,9 @@ stateDiagram-v2
   ready --> ready : dispatch_op_mul_mat [simd_op_mul_mat_q6_vector_packed_q8_rhs_matrix_x4_] / exec_simd_q6_vector_packed_q8_rhs_matrix_x4_op_mul_mat_
   ready --> ready : dispatch_op_mul_mat [simd_op_mul_mat_q6_vector_packed_q8_rhs_] / exec_simd_q6_vector_packed_q8_rhs_op_mul_mat_
   ready --> ready : dispatch_op_mul_mat [simd_op_mul_mat_q6_vector_packed_] / exec_simd_q6_vector_packed_op_mul_mat_
+  ready --> ready : dispatch_op_mul_mat [simd_op_mul_mat_q6_vector_q8_rhs_] / exec_simd_q6_vector_q8_rhs_op_mul_mat_
   ready --> ready : dispatch_op_mul_mat [simd_op_mul_mat_q6_vector_] / exec_simd_q6_vector_op_mul_mat_
+  ready --> ready : dispatch_op_mul_mat [simd_op_mul_mat_f32_vector_] / exec_simd_f32_vector_op_mul_mat_
   ready --> ready : dispatch_op_mul_mat [simd_op_mul_mat_generic_] / dispatch_op_mul_mat__
   ready --> ready : dispatch_op_mul_mat [simd_op_mul_mat_f16_vector_] / exec_simd_f16_vector_op_mul_mat_
   ready --> ready : dispatch_op_mul_mat [valid_op_mul_mat_f16_] / mark_done_op__

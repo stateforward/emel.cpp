@@ -27,6 +27,7 @@
 #include <vector>
 
 #include "../bench/model_load_strategy.hpp"
+#include "../generation_route_policy.hpp"
 #include "emel/error/error.hpp"
 #include "emel/gguf/loader/any.hpp"
 #include "emel/gguf/loader/errors.hpp"
@@ -34,8 +35,8 @@
 #include "emel/gguf/loader/sm.hpp"
 #include "emel/io/events.hpp"
 #include "emel/io/read/sm.hpp"
-#include "emel/io/staged_read/sm.hpp"
 #include "emel/io/source/any.hpp"
+#include "emel/io/staged_read/sm.hpp"
 #include "emel/logits/sampler/events.hpp"
 #include "emel/memory/view.hpp"
 #include "emel/model/data.hpp"
@@ -59,7 +60,6 @@ namespace {
 // The wavefront's lane pool (same type as
 // src/emel/text/generator/decode_wavefront/context.hpp).
 using lane_pool = emel::policy::thread_pool_scheduler<8u, 16u, 128u>;
-using lane_scheduler = emel::policy::thread_pool_scheduler_ref<lane_pool>;
 
 constexpr size_t k_output_capacity = 8192u;
 
@@ -122,6 +122,7 @@ struct emel_fixture {
 struct lane_session {
   emel::text::tokenizer::sm tokenizer = {};
   emel::text::conditioner::sm conditioner = {};
+  emel::text::generator::matmul::lane_pool<7u, 128u, 1048576u> parallel_matmul_lanes = {};
   std::unique_ptr<emel::text::generator::sm> generator = {};
   initialize_capture initialize = {};
   generation_capture generation = {};
@@ -157,7 +158,8 @@ void on_bind_error(void *owner,
   f.gguf.bind_error = true;
   f.gguf.err = ev.err;
 }
-void on_parse_done(void *owner, const emel::gguf::loader::events::parse_done &) {
+void on_parse_done(void *owner,
+                   const emel::gguf::loader::events::parse_done &) {
   auto &f = *static_cast<emel_fixture *>(owner);
   f.gguf.parse_done = true;
   f.gguf.parse_error = false;
@@ -168,8 +170,7 @@ void on_parse_error(void *owner,
   f.gguf.parse_error = true;
   f.gguf.err = ev.err;
 }
-void on_load_done(void *owner,
-                  const emel::model::loader::events::load_done &) {
+void on_load_done(void *owner, const emel::model::loader::events::load_done &) {
   auto &f = *static_cast<emel_fixture *>(owner);
   f.load.done = true;
   f.load.error = false;
@@ -182,8 +183,8 @@ void on_load_error(void *owner,
   f.load.err = ev.err;
 }
 
-void on_initialize_done(void *owner,
-                        const emel::text::generator::events::initialize_done &) {
+void on_initialize_done(
+    void *owner, const emel::text::generator::events::initialize_done &) {
   auto &s = *static_cast<lane_session *>(owner);
   s.initialize.done = true;
   s.initialize.error = false;
@@ -266,13 +267,14 @@ bool copy_tensor_names(const std::span<const uint8_t> file_image,
   return true;
 }
 
-emel::model::detail::kv_binding kv_binding_from_fixture(
-    const emel_fixture &fixture) {
+emel::model::detail::kv_binding
+kv_binding_from_fixture(const emel_fixture &fixture) {
   return emel::model::detail::kv_binding{
       .arena = std::span<const uint8_t>{fixture.kv_arena.data(),
                                         fixture.kv_arena.size()},
-      .entries = std::span<const emel::gguf::loader::kv_entry>{
-          fixture.kv_entries.data(), fixture.kv_entries.size()},
+      .entries =
+          std::span<const emel::gguf::loader::kv_entry>{
+              fixture.kv_entries.data(), fixture.kv_entries.size()},
   };
 }
 
@@ -297,12 +299,12 @@ emel::error::type prebind_emel_gguf_storage(emel_fixture &fixture) {
   emel::gguf::loader::requirements requirements = {};
   const emel::gguf::loader::event::probe_done_fn probe_done_cb{&fixture,
                                                                on_probe_done};
-  const emel::gguf::loader::event::probe_error_fn probe_error_cb{&fixture,
-                                                                 on_probe_error};
-  const emel::gguf::loader::event::probe probe_ev{file_image, requirements,
-                                                  probe_done_cb, probe_error_cb};
-  if (!fixture.gguf_loader.process_event(probe_ev) || !fixture.gguf.probe_done ||
-      fixture.gguf.probe_error) {
+  const emel::gguf::loader::event::probe_error_fn probe_error_cb{
+      &fixture, on_probe_error};
+  const emel::gguf::loader::event::probe probe_ev{
+      file_image, requirements, probe_done_cb, probe_error_cb};
+  if (!fixture.gguf_loader.process_event(probe_ev) ||
+      !fixture.gguf.probe_done || fixture.gguf.probe_error) {
     return map_gguf_error(fixture.gguf.err);
   }
   if (requirements.tensor_count >
@@ -321,8 +323,8 @@ emel::error::type prebind_emel_gguf_storage(emel_fixture &fixture) {
   return emel::error::cast(emel::model::loader::error::none);
 }
 
-emel::error::type run_emel_parse_model(void *owner,
-                                       const emel::model::loader::event::load &req) {
+emel::error::type
+run_emel_parse_model(void *owner, const emel::model::loader::event::load &req) {
   auto &fixture = *static_cast<emel_fixture *>(owner);
   if (req.file_image == nullptr || req.file_size == 0u) {
     return emel::error::cast(emel::model::loader::error::invalid_request);
@@ -350,12 +352,12 @@ emel::error::type run_emel_parse_model(void *owner,
   fixture.gguf = {};
   const emel::gguf::loader::event::parse_done_fn parse_done_cb{&fixture,
                                                                on_parse_done};
-  const emel::gguf::loader::event::parse_error_fn parse_error_cb{&fixture,
-                                                                 on_parse_error};
+  const emel::gguf::loader::event::parse_error_fn parse_error_cb{
+      &fixture, on_parse_error};
   const emel::gguf::loader::event::parse parse_ev{file_image, parse_done_cb,
                                                   parse_error_cb};
-  if (!fixture.gguf_loader.process_event(parse_ev) || !fixture.gguf.parse_done ||
-      fixture.gguf.parse_error) {
+  if (!fixture.gguf_loader.process_event(parse_ev) ||
+      !fixture.gguf.parse_done || fixture.gguf.parse_error) {
     return map_gguf_error(fixture.gguf.err);
   }
 
@@ -366,8 +368,8 @@ emel::error::type run_emel_parse_model(void *owner,
   return populate_model_metadata(fixture, req.model_data);
 }
 
-emel::error::type run_emel_map_layers(void *,
-                                      const emel::model::loader::event::load &req) {
+emel::error::type
+run_emel_map_layers(void *, const emel::model::loader::event::load &req) {
   int32_t max_block_index = -1;
   for (uint32_t index = 0u; index < req.model_data.n_tensors; ++index) {
     int32_t block_index = -1;
@@ -390,8 +392,9 @@ emel::error::type run_emel_map_layers(void *,
   return emel::error::cast(emel::model::loader::error::model_invalid);
 }
 
-emel::error::type run_emel_validate_structure(
-    void *, const emel::model::loader::event::load &req) {
+emel::error::type
+run_emel_validate_structure(void *,
+                            const emel::model::loader::event::load &req) {
   if (req.model_data.n_tensors == 0u || req.model_data.n_layers <= 0 ||
       req.model_data.weights_data == nullptr ||
       req.model_data.weights_size == 0u) {
@@ -400,8 +403,9 @@ emel::error::type run_emel_validate_structure(
   return emel::error::cast(emel::model::loader::error::none);
 }
 
-emel::error::type run_emel_validate_architecture(
-    void *, const emel::model::loader::event::load &req) {
+emel::error::type
+run_emel_validate_architecture(void *,
+                               const emel::model::loader::event::load &req) {
   return emel::model::validate_execution_contract(req.model_data);
 }
 
@@ -449,7 +453,8 @@ generation_encoder_variant(const emel::model::data &model_data) {
   }
 }
 
-bool prepare_emel_fixture(emel_fixture &fixture, const std::string &model_path) {
+bool prepare_emel_fixture(emel_fixture &fixture,
+                          const std::string &model_path) {
   if (emel::io::source::load_file_bytes(model_path, fixture.file_bytes) !=
       emel::error::cast(emel::io::read::error::none)) {
     std::fprintf(stderr, "load: source file load failed (%s)\n",
@@ -477,7 +482,8 @@ bool prepare_emel_fixture(emel_fixture &fixture, const std::string &model_path) 
   load_ev.io_load_spans = std::span<emel::io::event::tensor_load_span>{
       fixture.io_load_spans.data(), fixture.io_load_spans.size()};
   emel::tools::bind_model_load_io_strategy(load_ev, fixture.io_loader);
-  if (load_ev.io_strategy == emel::io::loader::event::strategy_kind::read_copy ||
+  if (load_ev.io_strategy ==
+          emel::io::loader::event::strategy_kind::read_copy ||
       load_ev.io_strategy ==
           emel::io::loader::event::strategy_kind::staged_read) {
     fixture.read_copy_storage.resize(
@@ -486,7 +492,8 @@ bool prepare_emel_fixture(emel_fixture &fixture, const std::string &model_path) 
   }
   load_ev.map_layers = {nullptr, run_emel_map_layers};
   load_ev.validate_structure = {nullptr, run_emel_validate_structure};
-  load_ev.validate_architecture_impl = {nullptr, run_emel_validate_architecture};
+  load_ev.validate_architecture_impl = {nullptr,
+                                        run_emel_validate_architecture};
   load_ev.on_done = {&fixture, on_load_done};
   load_ev.on_error = {&fixture, on_load_error};
   if (!fixture.model_loader.process_event(load_ev) || !fixture.load.done ||
@@ -549,8 +556,9 @@ bool run_generate(lane_session &s, const std::string_view prompt,
   request.on_done = {&s, on_generation_done};
   request.on_error = {&s, on_generation_error};
   const bool accepted = s.generator->process_event(request);
-  s.last_ok = accepted && s.generation.done && !s.generation.error &&
-              error_out == emel::error::cast(emel::text::generator::error::none);
+  s.last_ok =
+      accepted && s.generation.done && !s.generation.error &&
+      error_out == emel::error::cast(emel::text::generator::error::none);
   return s.last_ok;
 }
 
@@ -568,15 +576,19 @@ void run_sequential(const std::span<std::unique_ptr<lane_session>> active,
 void run_parallel(lane_pool &pool,
                   const std::span<std::unique_ptr<lane_session>> active,
                   const std::string_view prompt, int32_t tokens) {
-  lane_scheduler scheduler{pool};
-  lane_scheduler::join_group group{};
+  lane_pool::join_group group{};
+  emel::policy::fork_join_start_gate gate{};
+  size_t submitted_lanes = 0u;
   for (auto &s : active) {
     lane_session *lane = s.get();
-    (void)scheduler.try_submit(
-        group, [lane, prompt, tokens]() noexcept {
+    const bool submitted =
+        pool.try_submit(group, [lane, prompt, tokens, &gate]() noexcept {
+          gate.arrive_and_wait();
           run_generate(*lane, prompt, tokens);
         });
+    submitted_lanes += submitted ? 1u : 0u;
   }
+  gate.open_after_arrivals(submitted_lanes);
   (void)group.wait();
 }
 
@@ -588,20 +600,19 @@ double ns_per_pass(const std::chrono::steady_clock::time_point t0,
   return ns / static_cast<double>(iters);
 }
 
-}  // namespace
+} // namespace
 
 int main(int argc, char **argv) {
   if (argc < 2) {
-    std::fprintf(stderr,
-                 "Usage: %s <model_path> [max_lanes=8] [tokens=32] [iters=20]\n",
-                 argc > 0 ? argv[0] : "emel_decode_wavefront_eval");
+    std::fprintf(
+        stderr, "Usage: %s <model_path> [max_lanes=8] [tokens=32] [iters=20]\n",
+        argc > 0 ? argv[0] : "emel_decode_wavefront_eval");
     return 1;
   }
   const std::string model_path = argv[1];
   const int32_t max_lanes =
       argc > 2 ? std::clamp(static_cast<int32_t>(std::atoi(argv[2])), 1, 8) : 8;
-  const int32_t tokens =
-      argc > 3 ? std::max(1, std::atoi(argv[3])) : 32;
+  const int32_t tokens = argc > 3 ? std::max(1, std::atoi(argv[3])) : 32;
   const int32_t iters = argc > 4 ? std::max(1, std::atoi(argv[4])) : 20;
   constexpr std::string_view k_prompt =
       "The history of artificial intelligence began";
@@ -624,8 +635,8 @@ int main(int argc, char **argv) {
   std::printf("# model=%s arch=%.*s n_layer=%d n_embd=%d n_head=%d "
               "n_head_kv=%d n_vocab=%d\n",
               model_path.c_str(),
-              static_cast<int>(emel::model::architecture_name_view(shared_model)
-                                   .size()),
+              static_cast<int>(
+                  emel::model::architecture_name_view(shared_model).size()),
               emel::model::architecture_name_view(shared_model).data(),
               shared_model.params.n_layer, shared_model.params.n_embd,
               shared_model.params.n_head, shared_model.params.n_head_kv,
@@ -636,9 +647,20 @@ int main(int argc, char **argv) {
   sessions.reserve(static_cast<size_t>(max_lanes));
   for (int32_t lane = 0; lane < max_lanes; ++lane) {
     auto s = std::make_unique<lane_session>();
+    const auto matmul_policy =
+        emel::text::generator::matmul::make_auto_execution_policy(
+            s->parallel_matmul_lanes);
     s->generator = std::make_unique<emel::text::generator::sm>(
-        shared_model, s->conditioner, nullptr,
-        emel::text::formatter::format_raw);
+        emel::text::generator::dependencies{
+            .model = shared_model,
+            .conditioner = s->conditioner,
+            .matmul_policy = matmul_policy,
+            .runtime_policy =
+                emel::tools::generation_route::make_current_runtime_policy(
+                    shared_model),
+            .formatter_ctx = nullptr,
+            .format_prompt = emel::text::formatter::format_raw,
+        });
     if (!initialize_lane(*s, shared_model, prompt_capacity, tokens)) {
       std::fprintf(stderr, "FAILED: initialize_lane lane=%d\n", lane);
       return 1;
@@ -668,8 +690,8 @@ int main(int argc, char **argv) {
     if (n > max_lanes) {
       continue;
     }
-    const std::span<std::unique_ptr<lane_session>> active{sessions.data(),
-                                                          static_cast<size_t>(n)};
+    const std::span<std::unique_ptr<lane_session>> active{
+        sessions.data(), static_cast<size_t>(n)};
     // Warmup.
     run_sequential(active, k_prompt, tokens);
     // Reference outputs (sequential).

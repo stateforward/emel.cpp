@@ -7,12 +7,14 @@ BUILD_DIR="${EMEL_BENCH_BUILD_DIR:-$ROOT_DIR/build/bench_tools_ninja}"
 OUTPUT_DIR="${EMEL_GENERATION_COMPARE_OUTPUT_DIR:-$ROOT_DIR/build/generation_compare}"
 REFERENCE_BACKEND=""
 WORKLOAD_ID=""
+REFERENCE_THREADS=""
+BENCHMARK_LANE_SELECTOR="${EMEL_BENCH_GENERATION_LANE:-${EMEL_BENCH_GENERATION_LANES:-both}}"
 SKIP_EMEL_BUILD=false
 USE_ZIG=true
 
 usage() {
   cat <<'USAGE'
-usage: scripts/bench_generation_compare.sh --reference-backend BACKEND [--workload-id ID] [--output-dir DIR] [--skip-emel-build] [--zig|--system]
+usage: scripts/bench_generation_compare.sh --reference-backend BACKEND [--workload-id ID] [--output-dir DIR] [--reference-threads N] [--benchmark-lane single|multithreaded|both] [--skip-emel-build] [--zig|--system]
 
 Builds the maintained EMEL generation benchmark runner, then runs the unified
 generation compare workflow against the selected pluggable reference backend manifest.
@@ -20,6 +22,8 @@ generation compare workflow against the selected pluggable reference backend man
 Environment:
   EMEL_BENCH_BUILD_DIR              override EMEL bench build directory
   EMEL_GENERATION_COMPARE_OUTPUT_DIR override compare output directory
+  EMEL_BENCH_GENERATION_LANES       single, multithreaded, or both (default both)
+  EMEL_BENCH_GENERATION_REFERENCE_THREADS override multithreaded llama.cpp generation threads
 USAGE
 }
 
@@ -36,6 +40,22 @@ while [[ $# -gt 0 ]]; do
     --output-dir)
       OUTPUT_DIR="${2:-}"
       shift 2
+      ;;
+    --reference-threads)
+      REFERENCE_THREADS="${2:-}"
+      shift 2
+      ;;
+    --benchmark-lane)
+      BENCHMARK_LANE_SELECTOR="${2:-}"
+      shift 2
+      ;;
+    --single-only)
+      BENCHMARK_LANE_SELECTOR="single"
+      shift
+      ;;
+    --multithreaded-only)
+      BENCHMARK_LANE_SELECTOR="multithreaded"
+      shift
       ;;
     --skip-emel-build)
       SKIP_EMEL_BUILD=true
@@ -67,12 +87,38 @@ if [[ -z "$REFERENCE_BACKEND" ]]; then
   exit 1
 fi
 
+if [[ -n "$REFERENCE_THREADS" ]]; then
+  if [[ ! "$REFERENCE_THREADS" =~ ^[1-9][0-9]*$ ]]; then
+    echo "error: --reference-threads must be a positive integer" >&2
+    exit 1
+  fi
+fi
+
+selected_lanes=()
+case "$BENCHMARK_LANE_SELECTOR" in
+  both|single,multithreaded|multithreaded,single)
+    selected_lanes=(single multithreaded)
+    ;;
+  single)
+    selected_lanes=(single)
+    ;;
+  multithreaded)
+    selected_lanes=(multithreaded)
+    ;;
+  *)
+    echo "error: --benchmark-lane/EMEL_BENCH_GENERATION_LANES must be single, multithreaded, or both" >&2
+    exit 1
+    ;;
+esac
+
 if ! command -v python3 >/dev/null 2>&1; then
   echo "error: required tool missing: python3" >&2
   exit 1
 fi
 
 if ! $SKIP_EMEL_BUILD; then
+  # shellcheck source=scripts/build_jobs.sh
+  source "$ROOT_DIR/scripts/build_jobs.sh"
   for tool in cmake ninja git; do
     if ! command -v "$tool" >/dev/null 2>&1; then
       echo "error: required tool missing: $tool" >&2
@@ -141,14 +187,13 @@ if ! $SKIP_EMEL_BUILD; then
   fi
 
   cmake "${cmake_args[@]}"
-  cmake --build "$BUILD_DIR" --parallel --target bench_runner
+  cmake --build "$BUILD_DIR" --parallel "$EMEL_BUILD_JOBS" --target bench_runner
 fi
 
 compare_args=(
   "$ROOT_DIR/tools/bench/generation_compare.py"
   --reference-backend "$REFERENCE_BACKEND"
   --emel-runner "$BUILD_DIR/bench_runner"
-  --output-dir "$OUTPUT_DIR"
 )
 if [[ -n "$WORKLOAD_ID" ]]; then
   compare_args+=(--workload-id "$WORKLOAD_ID")
@@ -160,4 +205,21 @@ else
   export EMEL_GENERATION_REFERENCE_COMPILER_MODE=system
 fi
 
-python3 "${compare_args[@]}"
+for benchmark_lane in "${selected_lanes[@]}"; do
+  lane_output_dir="$OUTPUT_DIR"
+  if [[ ${#selected_lanes[@]} -gt 1 ]]; then
+    lane_output_dir="$OUTPUT_DIR/$benchmark_lane"
+  fi
+
+  lane_reference_threads="$REFERENCE_THREADS"
+  if [[ "$benchmark_lane" == "single" ]]; then
+    lane_reference_threads="1"
+  elif [[ -z "$lane_reference_threads" ]]; then
+    lane_reference_threads="${EMEL_BENCH_GENERATION_REFERENCE_THREADS:-${EMEL_BENCH_REFERENCE_THREADS:-8}}"
+  fi
+
+  lane_compare_args=("${compare_args[@]}" --output-dir "$lane_output_dir")
+  EMEL_BENCH_GENERATION_LANE="$benchmark_lane" \
+    EMEL_BENCH_GENERATION_REFERENCE_THREADS="$lane_reference_threads" \
+    python3 "${lane_compare_args[@]}"
+done

@@ -18,6 +18,22 @@ bool has_phase_success(const runtime_event & ev) noexcept {
   return ev.ctx.phase_accepted && ev.ctx.phase_code == 0;
 }
 
+inline int32_t effective_prefill_chunk4_min_tokens(
+    const emel::text::generator::detail::native_backend & backend) noexcept {
+  const int32_t configured = backend.routes.prefill_chunk4_min_tokens;
+  return configured < emel::text::generator::detail::k_prefill_q8_chunk_rows
+             ? emel::text::generator::detail::k_prefill_q8_chunk_rows
+             : configured;
+}
+
+inline int32_t effective_prefill_chunk8_min_tokens(
+    const emel::text::generator::detail::native_backend & backend) noexcept {
+  const int32_t configured = backend.routes.prefill_chunk8_min_tokens;
+  return configured < emel::text::generator::detail::k_prefill_q8_chunk8_rows
+             ? emel::text::generator::detail::k_prefill_q8_chunk8_rows
+             : configured;
+}
+
 template <class runtime_event>
 bool phase_rejected_without_code(const runtime_event & ev) noexcept {
   return !ev.ctx.phase_accepted && ev.ctx.phase_code == 0;
@@ -174,6 +190,11 @@ bool sampled_stop_token(const runtime_event & ev, const action::context & ctx) n
   return ev.ctx.selected_token == vocab.eos_id || ev.ctx.selected_token == vocab.eot_id;
 }
 
+inline bool block_uses_attention(
+    const emel::text::generator::detail::block_weights & block) noexcept {
+  return block.residual_route == emel::model::generation_residual_route::attention;
+}
+
 inline bool packed_q8_0_input_path_supported(
     const emel::text::generator::detail::native_backend & backend,
     const emel::text::generator::detail::tensor_matrix & matrix) noexcept {
@@ -274,7 +295,7 @@ template <auto matrix_supported_fn>
 inline bool scalar_matmul_block_supported(
     const emel::text::generator::detail::native_backend & backend,
     const emel::text::generator::detail::block_weights & block) noexcept {
-  const bool residual_ok = block.uses_attention
+  const bool residual_ok = block_uses_attention(block)
       ? matrix_supported_fn(backend, block.attention_q) &&
             matrix_supported_fn(backend, block.attention_k) &&
             matrix_supported_fn(backend, block.attention_v) &&
@@ -343,7 +364,7 @@ inline bool scalar_matmul_stream_route_supported(
       return matrix_supported_fn(backend, probe);
     };
     namespace gd = emel::text::generator::detail;
-    const bool residual_ok = block.uses_attention
+    const bool residual_ok = block_uses_attention(block)
         ? probe_ok(block.attention_q, gd::k_stream_role_attention_q) &&
               probe_ok(block.attention_k, gd::k_stream_role_attention_k) &&
               probe_ok(block.attention_v, gd::k_stream_role_attention_v) &&
@@ -521,7 +542,7 @@ inline bool prefill_chunk4_backend_ready(
   }
 
   for (const auto & block : backend.blocks) {
-    const bool residual_ok = block.uses_attention
+    const bool residual_ok = block_uses_attention(block)
         ? chunk4_matmul_backend_ready<route>(backend, block.attention_q) &&
               chunk4_matmul_backend_ready<route>(backend, block.attention_k) &&
               chunk4_matmul_backend_ready<route>(backend, block.attention_v) &&
@@ -618,7 +639,7 @@ inline bool prefill_chunk8_q8_k_supported(
   }
 
   for (const auto & block : backend.blocks) {
-    const bool residual_ok = block.uses_attention
+    const bool residual_ok = block_uses_attention(block)
         ? q8_input_chunk8_path_supported(backend, block.attention_q) &&
               q8_input_chunk8_path_supported(backend, block.attention_k) &&
               q8_input_chunk8_path_supported(backend, block.attention_v) &&
@@ -676,7 +697,7 @@ inline bool prefill_chunk4_q8_k_supported(
 inline const emel::text::generator::detail::block_weights * guard_first_flash_attention_block(
     const emel::text::generator::detail::native_backend & backend) noexcept {
   for (const auto & block : backend.blocks) {
-    if (block.uses_attention) {
+    if (block_uses_attention(block)) {
       return &block;
     }
   }
@@ -694,7 +715,8 @@ inline bool guard_flash_attention_supported(
   emel::text::generator::detail::block_weights fallback_block{};
   const auto * attention_block = guard_first_flash_attention_block(backend);
   if (attention_block == nullptr) {
-    fallback_block.uses_attention = true;
+    fallback_block.residual_route =
+        emel::model::generation_residual_route::attention;
     fallback_block.attention_q_dim = backend.n_head * backend.head_dim;
     fallback_block.attention_kv_dim = backend.n_head_kv * backend.head_dim_kv;
     fallback_block.attention_head_dim = backend.head_dim;
@@ -709,14 +731,14 @@ inline bool guard_flash_attention_supported(
 
 inline bool uses_prefill_chunk4_q8_gemm(const event::generate_run & ev,
                                         const action::context & ctx) noexcept {
-  return ev.ctx.prompt_token_count >= emel::text::generator::detail::k_prefill_q8_chunk_rows &&
-      prefill_chunk4_q8_gemm_supported(ctx.compute.backend);
+  return ev.ctx.prompt_token_count >= effective_prefill_chunk4_min_tokens(ctx.compute.backend) &&
+         prefill_chunk4_q8_gemm_supported(ctx.compute.backend);
 }
 
 inline bool uses_prefill_chunk8_q8_gemm(const event::generate_run & ev,
                                         const action::context & ctx) noexcept {
-  return ev.ctx.prompt_token_count >= emel::text::generator::detail::k_prefill_q8_chunk8_rows &&
-      prefill_chunk8_q8_k_supported(ctx.compute.backend);
+  return ev.ctx.prompt_token_count >= effective_prefill_chunk8_min_tokens(ctx.compute.backend) &&
+         prefill_chunk8_q8_k_supported(ctx.compute.backend);
 }
 
 inline bool prefill_contract_uses_materialized_logits(
@@ -762,7 +784,9 @@ inline bool guard_compute_backend_shape_ready(
 }
 
 inline bool guard_compute_backend_ready(const action::context & ctx) noexcept {
-  return ctx.compute.backend_ready && guard_compute_backend_shape_ready(ctx.compute.backend);
+  return ctx.compute.backend_ready &&
+         ctx.compute.backend.matmul_actor != nullptr &&
+         guard_compute_backend_shape_ready(ctx.compute.backend);
 }
 
 inline bool guard_graph_reservation_ready(const action::context & ctx) noexcept {
@@ -1153,9 +1177,25 @@ struct guard_decode_compute_backend_unavailable {
 
 struct guard_decode_parallel_lanes_ready {
   bool operator()(const event::generate_run &, const action::context & ctx) const noexcept {
-    return ctx.compute.backend.lane_pool.has_value() &&
+    return ctx.compute.backend.parallel_lanes_enabled &&
+           ctx.compute.backend.matmul_actor != nullptr &&
+           ctx.compute.backend.matmul_actor->parallel_lanes_available() &&
            ctx.compute.backend.n_embd >=
-               emel::text::generator::detail::k_parallel_min_gemv_dim;
+               ctx.compute.backend.routes.parallel_min_gemv_dim;
+  }
+};
+
+struct guard_benchmark_lane_single {
+  bool operator()(const event::configure_benchmark_lane & ev,
+                  const action::context &) const noexcept {
+    return ev.lane == emel::text::generator::benchmark_lane::single;
+  }
+};
+
+struct guard_benchmark_lane_multithreaded {
+  bool operator()(const event::configure_benchmark_lane & ev,
+                  const action::context &) const noexcept {
+    return ev.lane == emel::text::generator::benchmark_lane::multithreaded;
   }
 };
 

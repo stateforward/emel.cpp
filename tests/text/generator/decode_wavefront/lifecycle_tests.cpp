@@ -351,7 +351,6 @@ TEST_CASE("decode wavefront routes duplicate graph actors through serial path") 
   CHECK(summary.grouped);
   CHECK(summary.dispatched_lanes == 2);
   CHECK(summary.failed_lane == wavefront::event::k_no_failed_lane);
-  CHECK(pool.scheduled_run_count() == 0u);
   CHECK(fixtures[0].lane_accepted);
   CHECK(fixtures[1].lane_accepted);
   CHECK(fixtures[0].kernel_calls == 2);
@@ -380,13 +379,12 @@ TEST_CASE("decode wavefront routes lanes sharing an outcome slot through serial 
   wavefront::action::lane_pool pool{};
   wavefront::sm machine{pool};
 
-  CHECK_FALSE(machine.process_event(request));
+  CHECK(machine.process_event(request));
   CHECK(machine.is(stateforward::sml::state<wavefront::state_idle>));
   CHECK(summary.err == emel::error::cast(wavefront::error::lane_rejected));
   CHECK(summary.grouped);
   CHECK(summary.dispatched_lanes == 2);
   CHECK(summary.failed_lane == 1);
-  CHECK(pool.scheduled_run_count() == 0u);
   CHECK(fixtures[0].kernel_calls == 1);
   CHECK(fixtures[1].kernel_calls == 1);
 }
@@ -430,10 +428,10 @@ TEST_CASE("decode wavefront lane pool dispatches compatible lanes concurrently")
   CHECK(accepted);
   CHECK(machine.is(stateforward::sml::state<wavefront::state_idle>));
   CHECK(summary.grouped);
+  CHECK(summary.all_submitted);
+  CHECK(summary.joined);
   CHECK(summary.dispatched_lanes == 2);
   CHECK(summary.failed_lane == wavefront::event::k_no_failed_lane);
-  CHECK(pool.scheduled_run_count() == 2u);
-  CHECK(pool.worker_run_count() == 2u);
   for (const auto & fixture : fixtures) {
     CHECK(fixture.lane_accepted);
     CHECK(fixture.compute_cb.done_called);
@@ -464,7 +462,7 @@ TEST_CASE("decode wavefront rejects incompatible multi-lane groups before dispat
                                 summary};
   wavefront::sm machine{};
 
-  CHECK_FALSE(machine.process_event(request));
+  CHECK(machine.process_event(request));
   CHECK(machine.is(stateforward::sml::state<wavefront::state_idle>));
   CHECK(summary.err == emel::error::cast(wavefront::error::incompatible_lanes));
   CHECK_FALSE(summary.grouped);
@@ -494,7 +492,7 @@ TEST_CASE("decode wavefront reports the first rejected lane and stops") {
                                 summary};
   wavefront::sm machine{};
 
-  CHECK_FALSE(machine.process_event(request));
+  CHECK(machine.process_event(request));
   CHECK(machine.is(stateforward::sml::state<wavefront::state_idle>));
   CHECK(summary.err == emel::error::cast(wavefront::error::lane_rejected));
   CHECK(summary.grouped);
@@ -528,10 +526,12 @@ TEST_CASE("decode wavefront parallel dispatch reports first rejected lane after 
   wavefront::action::lane_pool pool{};
   wavefront::sm machine{pool};
 
-  CHECK_FALSE(machine.process_event(request));
+  CHECK(machine.process_event(request));
   CHECK(machine.is(stateforward::sml::state<wavefront::state_idle>));
   CHECK(summary.err == emel::error::cast(wavefront::error::lane_rejected));
   CHECK(summary.grouped);
+  CHECK(summary.all_submitted);
+  CHECK(summary.joined);
   CHECK(summary.dispatched_lanes == 3);
   CHECK(summary.failed_lane == 1);
   CHECK(fixtures[0].lane_accepted);
@@ -565,7 +565,7 @@ TEST_CASE("decode wavefront rejects requests beyond the fixed lane bound") {
                                 summary};
   wavefront::sm machine{};
 
-  CHECK_FALSE(machine.process_event(request));
+  CHECK(machine.process_event(request));
   CHECK(machine.is(stateforward::sml::state<wavefront::state_idle>));
   CHECK(summary.err == emel::error::cast(wavefront::error::invalid_request));
   CHECK(summary.dispatched_lanes == 0);
@@ -597,14 +597,14 @@ TEST_CASE("decode wavefront async surface completes within the RTC call") {
   CHECK(fixture.kernel_calls == 1);
 }
 
-TEST_CASE("decode wavefront async surface normalizes invalid requests") {
+TEST_CASE("decode wavefront async surface leaves invalid-request error in event") {
   wavefront::event::dispatch_summary summary{};
   wavefront::event::run request{std::span<wavefront::event::lane>{}, summary};
   wavefront::sm machine{};
 
   emel::bool_task task = machine.process_event_async(request);
   CHECK(task.await_ready());
-  CHECK_FALSE(task.result());
+  CHECK(task.result());
   CHECK(machine.is(stateforward::sml::state<wavefront::state_idle>));
   CHECK(summary.err == emel::error::cast(wavefront::error::invalid_request));
   CHECK(summary.dispatched_lanes == 0);

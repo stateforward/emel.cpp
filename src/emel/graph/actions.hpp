@@ -297,7 +297,7 @@ struct request_execute {
     ev.ctx.err = emel::error::cast(error::processor_failed);
     const processor::event::execute request = detail::bind_execute_request(ev, ctx, capture);
 
-    (void)ctx.processor_actor.process_event_async(request).result();
+    (void)ctx.processor_actor.process_event(request);
   }
 };
 
@@ -307,7 +307,7 @@ struct effect_request_reserved_execute {
     ev.ctx.err = emel::error::cast(error::processor_failed);
     const processor::event::execute request = detail::bind_execute_request(ev, ctx, capture);
 
-    (void)ctx.processor_actor.process_event_async(request).result();
+    (void)ctx.processor_actor.process_event(request);
   }
 };
 

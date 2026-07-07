@@ -46,14 +46,19 @@ using inline_co_policy =
     emel::policy::coroutine_scheduler<emel::policy::inline_scheduler>;
 using thread_pool_pool =
     emel::policy::thread_pool_scheduler<2u, 1024u, 128u>;
-using thread_pool_scheduler =
-    emel::policy::thread_pool_scheduler_ref<thread_pool_pool>;
 using thread_pool_co_policy =
-    emel::policy::coroutine_scheduler<thread_pool_scheduler>;
+    emel::policy::coroutine_scheduler<thread_pool_pool>;
 
 using inline_machine = emel::co_sm<scheduler_model, void, inline_co_policy>;
 using thread_pool_machine =
     emel::co_sm<scheduler_model, void, thread_pool_co_policy>;
+
+bool await_result(emel::bool_task & task) {
+  while (!task.await_ready()) {
+    emel::policy::cpu_relax();
+  }
+  return task.result();
+}
 
 emel::bench::result annotate_result(emel::bench::result result,
                                     const char * lane,
@@ -71,9 +76,11 @@ void append_thread_pool_idle_case(std::vector<emel::bench::result> & results,
                                   const emel::bench::config & cfg) {
   volatile int32_t sink = 0;
   event_tick ev{sink};
-  thread_pool_pool pool{};
-  thread_pool_machine machine{thread_pool_scheduler{pool}};
-  auto fn = [&]() { (void)machine.process_event_async(ev).result(); };
+  thread_pool_machine machine{};
+  auto fn = [&]() {
+    emel::bool_task task = machine.process_event_async(ev);
+    (void)await_result(task);
+  };
   results.push_back(annotate_result(
       emel::bench::measure_case("sm_scheduler/idle_async", cfg, fn),
       "thread_pool_idle",
@@ -84,12 +91,11 @@ void append_thread_pool_busy_case(std::vector<emel::bench::result> & results,
                                   const emel::bench::config & cfg) {
   volatile int32_t sink = 0;
   event_tick ev{sink};
-  thread_pool_pool pool{};
-  thread_pool_machine machine{thread_pool_scheduler{pool}};
+  thread_pool_machine machine{};
   std::binary_semaphore inline_lane_held{0};
   std::binary_semaphore release_inline_lane{0};
   std::thread inline_lane_holder{[&]() noexcept {
-    const bool held = pool.try_run_immediate([&]() noexcept {
+    const bool held = machine.scheduler().try_run_immediate([&]() noexcept {
       inline_lane_held.release();
       release_inline_lane.acquire();
     });
@@ -102,7 +108,8 @@ void append_thread_pool_busy_case(std::vector<emel::bench::result> & results,
   inline_lane_held.acquire();
 
   auto fn = [&]() {
-    (void)machine.process_event_async(ev).result();
+    emel::bool_task task = machine.process_event_async(ev);
+    (void)await_result(task);
   };
   results.push_back(annotate_result(
       emel::bench::measure_case("sm_scheduler/busy_worker_async", cfg, fn),
@@ -119,7 +126,10 @@ void append_inline_idle_case(std::vector<emel::bench::result> & results,
   volatile int32_t sink = 0;
   event_tick ev{sink};
   inline_machine machine{};
-  auto fn = [&]() { (void)machine.process_event_async(ev).result(); };
+  auto fn = [&]() {
+    emel::bool_task task = machine.process_event_async(ev);
+    (void)await_result(task);
+  };
   results.push_back(annotate_result(
       emel::bench::measure_case(name, cfg, fn), lane, "emel_inline_scheduler"));
 }

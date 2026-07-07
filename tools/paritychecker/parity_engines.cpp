@@ -2,6 +2,7 @@
 #include "../bench/model_load_strategy.hpp"
 #include "../generation_fixture_registry.hpp"
 #include "../generation_formatter_contract.hpp"
+#include "../generation_route_policy.hpp"
 #include "parity_assets.hpp"
 #include "parity_runner.hpp"
 #include "tokenizer_parity.hpp"
@@ -24,7 +25,6 @@
 #include <utility>
 #include <vector>
 
-#include "emel/memory/view.hpp"
 #include "emel/gbnf/rule_parser/events.hpp"
 #include "emel/gbnf/rule_parser/sm.hpp"
 #include "emel/gguf/loader/any.hpp"
@@ -41,6 +41,7 @@
 #include "emel/kernel/events.hpp"
 #include "emel/kernel/x86_64/sm.hpp"
 #include "emel/logits/sampler/events.hpp"
+#include "emel/memory/view.hpp"
 #include "emel/model/any.hpp"
 #include "emel/model/data.hpp"
 #include "emel/model/llama/any.hpp"
@@ -54,6 +55,7 @@
 #include "emel/text/formatter/format.hpp"
 #include "emel/text/generator/errors.hpp"
 #include "emel/text/generator/events.hpp"
+#include "emel/text/generator/layer/sm.hpp"
 #include "emel/text/generator/sm.hpp"
 #include "emel/text/jinja/formatter/sm.hpp"
 #include "emel/text/jinja/parser/errors.hpp"
@@ -999,6 +1001,8 @@ struct generation_load_state {
   emel::model::loader::sm model_loader = {};
   emel::text::tokenizer::sm tokenizer = {};
   emel::text::conditioner::sm conditioner = {};
+  emel::text::generator::matmul::lane_pool<7u, 128u, 1048576u>
+      parallel_matmul_lanes = {};
   std::unique_ptr<emel::text::generator::sm> generator = {};
   reference_backend reference = {};
   generation_trace *emel_trace = nullptr;
@@ -1591,10 +1595,20 @@ run_emel_initialize_generator(generation_load_state &state,
       1, emel::memory::view::blocks_for_tokens(
              emel::memory::view::DEFAULT_BLOCK_TOKENS, session_tokens));
 
+  const auto matmul_policy =
+      emel::text::generator::matmul::make_auto_execution_policy(
+          state.parallel_matmul_lanes);
   state.generator = std::make_unique<emel::text::generator::sm>(
-      *state.model_data, state.conditioner,
-      state.formatter_binding.formatter_ctx,
-      state.formatter_binding.format_prompt);
+      emel::text::generator::dependencies{
+          .model = *state.model_data,
+          .conditioner = state.conditioner,
+          .matmul_policy = matmul_policy,
+          .runtime_policy =
+              emel::tools::generation_route::make_current_runtime_policy(
+                  *state.model_data),
+          .formatter_ctx = state.formatter_binding.formatter_ctx,
+          .format_prompt = state.formatter_binding.format_prompt,
+      });
 
   reset_initialize_capture(state);
   emel::error::type error_out =
@@ -2335,9 +2349,9 @@ bool run_layer_with_flash_attribution(generator_diag::native_backend & backend,
     return false;
   }
 
-  if (generator_diag::is_qwen3_runtime(backend) &&
+  if (generator_diag::requires_attention_qk_norm(backend, block) &&
       !time_bucket_bool(attribution.rms_norm, [&] {
-        return generator_diag::apply_qwen3_attention_qk_norm(backend, block);
+        return generator_diag::apply_attention_qk_norm_contract(backend, block);
       })) {
     return false;
   }
@@ -15694,8 +15708,10 @@ void dump_generation_live_backend_prefix_debug(const generation_load_state & sta
     for (int32_t layer = 0; layer < dispatch_backend.n_layer; ++layer) {
       const std::vector<float> dispatch_hidden_in = dispatch_backend.hidden;
       const std::vector<float> shared_hidden_in = shared_backend.hidden;
-      if (!generator_diag::run_layer_flash(dispatch_backend, layer, position) ||
-          !generator_diag::run_layer_flash(shared_backend, layer, position)) {
+      if (!emel::text::generator::layer::run_layer_flash(
+              dispatch_backend, layer, position) ||
+          !emel::text::generator::layer::run_layer_flash(
+              shared_backend, layer, position)) {
         std::fprintf(stdout, "generation_debug.live: layer replay failed\n");
         return;
       }

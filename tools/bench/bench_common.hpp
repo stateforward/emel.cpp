@@ -26,9 +26,12 @@ struct config {
 struct result {
   std::string name;
   std::string compare_group = {};
+  std::string benchmark_lane = {};
   std::string lane = {};
   std::string backend_id = {};
   std::string backend_language = {};
+  std::int32_t thread_count = 0;
+  std::string thread_contract = {};
   std::string workload_id = {};
   std::string workload_manifest_path = {};
   std::string comparison_mode = {};
@@ -51,14 +54,31 @@ struct result {
   double prepare_ns_per_op = 0.0;
   double encode_ns_per_op = 0.0;
   double publish_ns_per_op = 0.0;
+  double tokens_per_second = 0.0;
   std::uint64_t output_tokens = 0;
   std::uint64_t output_bytes = 0;
   std::uint64_t output_dim = 0;
   std::uint64_t output_checksum = 0;
+  std::uint64_t kernel_dispatch_calls = 0;
+  std::uint64_t flash_attention_dispatch_calls = 0;
+  std::uint64_t optimized_flash_dispatch_calls = 0;
+  std::uint64_t shared_flash_dispatch_calls = 0;
+  std::uint64_t native_q8_0_dispatch_calls = 0;
+  std::uint64_t packed_q8_0_dispatch_calls = 0;
+  std::uint64_t optimized_q4_dispatch_calls = 0;
+  std::uint64_t shared_q4_dispatch_calls = 0;
+  std::uint64_t optimized_q6_dispatch_calls = 0;
+  std::uint64_t shared_q6_dispatch_calls = 0;
+  std::uint32_t native_quantized_stage_count = 0;
+  std::uint32_t approved_dense_f32_stage_count = 0;
+  std::uint32_t disallowed_fallback_stage_count = 0;
+  std::uint32_t explicit_no_claim_stage_count = 0;
   std::uint64_t iterations = 0;
   std::size_t runs = 0;
   std::string output_text = {};
   std::string output_path = {};
+  std::string output_token_ids_text = {};
+  std::string output_token_ids_path = {};
   std::string note = {};
   std::string error_kind = {};
   std::string error_message = {};
@@ -66,6 +86,7 @@ struct result {
 
 struct generation_stage_probe {
   std::string name = {};
+  std::string benchmark_lane = {};
   std::string emel_prefill_contract = {};
   int32_t emel_prompt_tokens = 0;
   int32_t emel_prefill_step_size = 0;
@@ -109,6 +130,14 @@ generation_lane_mode generation_lane_mode_current() noexcept;
 inline double
 select_reported_ns_per_op(const std::vector<double> &sorted_samples) noexcept {
   return sorted_samples[sorted_samples.size() / 2u];
+}
+
+inline double compute_tokens_per_second(const std::uint64_t output_tokens,
+                                        const double ns_per_op) noexcept {
+  if (output_tokens == 0u || !(ns_per_op > 0.0)) {
+    return 0.0;
+  }
+  return (static_cast<double>(output_tokens) * 1000000000.0) / ns_per_op;
 }
 
 template <class fn_type>
