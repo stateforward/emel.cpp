@@ -172,7 +172,8 @@ std::string qwen_compare_record_json(
          "\"output_checksum\":" +
          std::to_string(output_checksum) +
          ",\"iterations\":1,\"runs\":1,\"output_path\":\"" + output_path +
-         "\",\"output_token_ids_path\":\"" + output_token_ids_path + "\","
+         "\",\"output_token_ids_path\":\"" + output_token_ids_path +
+         "\","
          "\"note\":\"\",\"error_kind\":\"\",\"error_message\":\"\"}\n";
 }
 
@@ -470,7 +471,8 @@ TEST_CASE("generation compare reports bounded drift without treating it as an "
       std::string::npos);
 }
 
-TEST_CASE("generation compare reports token trace drift even when text matches") {
+TEST_CASE(
+    "generation compare reports token trace drift even when text matches") {
   const std::filesystem::path tmp_dir = std::filesystem::temp_directory_path() /
                                         "emel-generation-compare-tests" /
                                         "token-trace-drift";
@@ -492,11 +494,11 @@ TEST_CASE("generation compare reports token trace drift even when text matches")
   write_text_file(reference_output, "hello");
   write_text_file(emel_tokens, "1 2 3");
   write_text_file(reference_tokens, "1 2 4");
-  write_text_file(emel_jsonl,
-                  qwen_compare_record_json(
-                      "emel", "chat_template_supported_qwen_v1", "argmax_v1",
-                      3, emel_output.string(), 3, 5, 123, 8,
-                      "multithreaded", emel_tokens.string()));
+  write_text_file(
+      emel_jsonl,
+      qwen_compare_record_json("emel", "chat_template_supported_qwen_v1",
+                               "argmax_v1", 3, emel_output.string(), 3, 5, 123,
+                               8, "multithreaded", emel_tokens.string()));
   write_text_file(reference_jsonl,
                   qwen_compare_record_json(
                       "reference", "chat_template_supported_qwen_v1",
@@ -521,8 +523,7 @@ TEST_CASE("generation compare reports token trace drift even when text matches")
   CHECK(summary.find("\"reason\": \"token_ids_mismatch\"") !=
         std::string::npos);
   CHECK(summary.find("\"exact_output_match\": true") != std::string::npos);
-  CHECK(summary.find("\"exact_token_ids_match\": false") !=
-        std::string::npos);
+  CHECK(summary.find("\"exact_token_ids_match\": false") != std::string::npos);
   CHECK(summary.find("\"shared_prefix_tokens\": 2") != std::string::npos);
   CHECK(summary.find("\"output_token_ids_count_delta\": 0") !=
         std::string::npos);
@@ -531,6 +532,115 @@ TEST_CASE("generation compare reports token trace drift even when text matches")
             "status=bounded_drift reason=token_ids_mismatch") !=
         std::string::npos);
   CHECK(capture.stdout_text.find("prefix_tokens=2") != std::string::npos);
+}
+
+TEST_CASE(
+    "generation compare reports output drift even when token traces match") {
+  const std::filesystem::path tmp_dir = std::filesystem::temp_directory_path() /
+                                        "emel-generation-compare-tests" /
+                                        "token-trace-match-output-drift";
+  const std::filesystem::path emel_output = tmp_dir / "emel.txt";
+  const std::filesystem::path reference_output = tmp_dir / "reference.txt";
+  const std::filesystem::path emel_tokens = tmp_dir / "emel.tokens.txt";
+  const std::filesystem::path reference_tokens =
+      tmp_dir / "reference.tokens.txt";
+  const std::filesystem::path emel_jsonl = tmp_dir / "emel.jsonl";
+  const std::filesystem::path reference_jsonl = tmp_dir / "reference.jsonl";
+  const std::filesystem::path output_dir = tmp_dir / "out";
+  const std::filesystem::path stdout_path = tmp_dir / "stdout.txt";
+  const std::filesystem::path stderr_path = tmp_dir / "stderr.txt";
+  std::error_code ec = {};
+  std::filesystem::remove_all(tmp_dir, ec);
+  std::filesystem::create_directories(tmp_dir);
+
+  write_text_file(emel_output, "hello");
+  write_text_file(reference_output, "hello!");
+  write_text_file(emel_tokens, "1 2 3");
+  write_text_file(reference_tokens, "1 2 3");
+  write_text_file(
+      emel_jsonl,
+      qwen_compare_record_json("emel", "chat_template_supported_qwen_v1",
+                               "argmax_v1", 3, emel_output.string(), 3, 5, 123,
+                               8, "multithreaded", emel_tokens.string()));
+  write_text_file(reference_jsonl,
+                  qwen_compare_record_json(
+                      "reference", "chat_template_supported_qwen_v1",
+                      "argmax_v1", 3, reference_output.string(), 3, 6, 456, 8,
+                      "multithreaded", reference_tokens.string()));
+
+  const std::string command =
+      "python3 " + quote_arg_posix(generation_compare_script_path().string()) +
+      " --emel-input " + quote_arg_posix(emel_jsonl.string()) +
+      " --reference-input " + quote_arg_posix(reference_jsonl.string()) +
+      " --output-dir " + quote_arg_posix(output_dir.string()) + " > " +
+      quote_arg_posix(stdout_path.string()) + " 2> " +
+      quote_arg_posix(stderr_path.string());
+  const process_capture capture =
+      run_command_capture(command, stdout_path, stderr_path);
+
+  CHECK(capture.exit_code == 0);
+  CHECK(capture.stderr_text.empty());
+  const std::string summary = read_file(output_dir / "compare_summary.json");
+  CHECK(summary.find("\"comparison_status\": \"bounded_drift\"") !=
+        std::string::npos);
+  CHECK(summary.find("\"reason\": \"output_mismatch\"") != std::string::npos);
+  CHECK(summary.find("\"exact_output_match\": false") != std::string::npos);
+  CHECK(summary.find("\"exact_token_ids_match\": true") != std::string::npos);
+  CHECK(summary.find("\"shared_prefix_tokens\": 3") != std::string::npos);
+  CHECK(summary.find("\"failed\": false") != std::string::npos);
+}
+
+TEST_CASE(
+    "generation compare reports missing advertised token trace artifacts") {
+  const std::filesystem::path tmp_dir = std::filesystem::temp_directory_path() /
+                                        "emel-generation-compare-tests" /
+                                        "missing-token-trace";
+  const std::filesystem::path emel_output = tmp_dir / "emel.txt";
+  const std::filesystem::path reference_output = tmp_dir / "reference.txt";
+  const std::filesystem::path reference_tokens =
+      tmp_dir / "reference.tokens.txt";
+  const std::filesystem::path missing_emel_tokens =
+      tmp_dir / "missing-emel.tokens.txt";
+  const std::filesystem::path emel_jsonl = tmp_dir / "emel.jsonl";
+  const std::filesystem::path reference_jsonl = tmp_dir / "reference.jsonl";
+  const std::filesystem::path output_dir = tmp_dir / "out";
+  const std::filesystem::path stdout_path = tmp_dir / "stdout.txt";
+  const std::filesystem::path stderr_path = tmp_dir / "stderr.txt";
+  std::error_code ec = {};
+  std::filesystem::remove_all(tmp_dir, ec);
+  std::filesystem::create_directories(tmp_dir);
+
+  write_text_file(emel_output, "hello");
+  write_text_file(reference_output, "hello");
+  write_text_file(reference_tokens, "1 2 3");
+  write_text_file(emel_jsonl,
+                  qwen_compare_record_json(
+                      "emel", "chat_template_supported_qwen_v1", "argmax_v1", 3,
+                      emel_output.string(), 3, 5, 123, 8, "multithreaded",
+                      missing_emel_tokens.string()));
+  write_text_file(reference_jsonl,
+                  qwen_compare_record_json(
+                      "reference", "chat_template_supported_qwen_v1",
+                      "argmax_v1", 3, reference_output.string(), 3, 5, 123, 8,
+                      "multithreaded", reference_tokens.string()));
+
+  const std::string command =
+      "python3 " + quote_arg_posix(generation_compare_script_path().string()) +
+      " --emel-input " + quote_arg_posix(emel_jsonl.string()) +
+      " --reference-input " + quote_arg_posix(reference_jsonl.string()) +
+      " --output-dir " + quote_arg_posix(output_dir.string()) + " > " +
+      quote_arg_posix(stdout_path.string()) + " 2> " +
+      quote_arg_posix(stderr_path.string());
+  const process_capture capture =
+      run_command_capture(command, stdout_path, stderr_path);
+
+  CHECK(capture.exit_code == 1);
+  CHECK(capture.stderr_text.empty());
+  const std::string summary = read_file(output_dir / "compare_summary.json");
+  CHECK(summary.find("\"comparison_status\": \"error\"") != std::string::npos);
+  CHECK(summary.find("\"reason\": \"token_trace_missing\"") !=
+        std::string::npos);
+  CHECK(summary.find("\"failed\": true") != std::string::npos);
 }
 
 TEST_CASE(

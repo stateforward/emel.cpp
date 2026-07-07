@@ -258,14 +258,14 @@ def read_generation_output_text(record: dict[str, object]) -> str:
     return ""
 
 
-def read_generation_token_ids(record: dict[str, object]) -> list[str]:
+def read_generation_token_ids(record: dict[str, object]) -> tuple[list[str], str]:
   output_path = str(record.get("output_token_ids_path", ""))
   if not output_path:
-    return []
+    return [], ""
   try:
-    return Path(output_path).read_text(encoding="utf-8").split()
+    return Path(output_path).read_text(encoding="utf-8").split(), ""
   except FileNotFoundError:
-    return []
+    return [], "token_trace_missing"
 
 
 def copy_summary_metadata(summary: dict[str, object], record: dict[str, object] | None) -> None:
@@ -403,8 +403,8 @@ def summarize_group(benchmark_lane: str,
 
   emel_text = read_generation_output_text(emel_record)
   reference_text = read_generation_output_text(reference_record)
-  emel_token_ids = read_generation_token_ids(emel_record)
-  reference_token_ids = read_generation_token_ids(reference_record)
+  emel_token_ids, emel_token_error = read_generation_token_ids(emel_record)
+  reference_token_ids, reference_token_error = read_generation_token_ids(reference_record)
   emel_output_bytes = int(emel_record.get("output_bytes", 0))
   reference_output_bytes = int(reference_record.get("output_bytes", 0))
   both_empty_outputs = emel_output_bytes == 0 and reference_output_bytes == 0
@@ -445,14 +445,24 @@ def summarize_group(benchmark_lane: str,
   summary["output_bytes_delta"] = abs(
     int(emel_record.get("output_bytes", 0)) - int(reference_record.get("output_bytes", 0)))
 
-  if exact_token_ids_match or (
-      not token_ids_present and (exact_output_match or exact_checksum_match)):
+  if emel_token_error or reference_token_error:
+    summary["comparison_status"] = "error"
+    summary["reason"] = emel_token_error or reference_token_error
+    return summary
+
+  output_exact = exact_output_match or exact_checksum_match
+  token_exact = not token_ids_present or exact_token_ids_match
+  if output_exact and token_exact:
     summary["comparison_status"] = "exact_match"
     summary["reason"] = "ok"
     return summary
 
   summary["comparison_status"] = "bounded_drift"
-  summary["reason"] = "token_ids_mismatch" if token_ids_present else "output_mismatch"
+  summary["reason"] = (
+    "token_ids_mismatch"
+    if token_ids_present and not exact_token_ids_match
+    else "output_mismatch"
+  )
   return summary
 
 
