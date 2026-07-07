@@ -3939,7 +3939,7 @@ inline bool compute_layer_feed_forward(native_backend &backend,
 
 } // namespace emel::text::generator::detail
 
-namespace emel::text::generator::layer::action {
+namespace emel::text::generator::layer {
 
 template <emel::text::generator::attention_mode mode,
           emel::text::generator::detail::scalar_matmul_route route,
@@ -4002,7 +4002,7 @@ bool run_layer_chunk8_q8_k(
     const emel::text::generator::detail::kv_addressing_view &kv,
     int32_t layer_index, size_t token_base) noexcept;
 
-} // namespace emel::text::generator::layer::action
+} // namespace emel::text::generator::layer
 
 namespace emel::text::generator::detail {
 
@@ -4092,7 +4092,7 @@ inline bool run_prefill_scalar_tokens(native_backend &backend,
     }
 
     for (int32_t layer = 0; layer < backend.n_layer; ++layer) {
-      if (!emel::text::generator::layer::action::run_layer<mode, route, lanes>(
+      if (!emel::text::generator::layer::run_layer<mode, route, lanes>(
               backend, layer, kv, position)) {
         return false;
       }
@@ -4618,8 +4618,7 @@ inline bool run_prefill_chunk4_tokens(native_backend &backend,
     }
 
     for (int32_t layer = 0; layer < backend.n_layer; ++layer) {
-      if (!emel::text::generator::layer::action::run_layer_chunk4<mode, route,
-                                                                  lanes>(
+      if (!emel::text::generator::layer::run_layer_chunk4<mode, route, lanes>(
               backend, kv, layer, token_base)) {
         return false;
       }
@@ -4661,8 +4660,7 @@ inline bool run_prefill_chunk8_tokens_q8_k(native_backend &backend,
     }
 
     for (int32_t layer = 0; layer < backend.n_layer; ++layer) {
-      if (!emel::text::generator::layer::action::run_layer_chunk8_q8_k<mode,
-                                                                       lanes>(
+      if (!emel::text::generator::layer::run_layer_chunk8_q8_k<mode, lanes>(
               backend, kv, layer, token_base)) {
         return false;
       }
@@ -4903,8 +4901,7 @@ inline bool run_decode(native_backend &backend,
   }
   for (int32_t layer = 0; layer < backend.n_layer; ++layer) {
     int32_t layer_error = k_error_ok;
-    if (!emel::text::generator::layer::action::run_layer<mode, route, lanes,
-                                                         wmode>(
+    if (!emel::text::generator::layer::run_layer<mode, route, lanes, wmode>(
             backend, layer, kv, position, layer_error)) {
       if (err_out != nullptr) {
         *err_out = layer_error;
@@ -4972,8 +4969,7 @@ inline bool run_decode_preselected_argmax(
   }
   for (int32_t layer = 0; layer < backend.n_layer; ++layer) {
     int32_t layer_error = k_error_ok;
-    if (!emel::text::generator::layer::action::run_layer<mode, route, lanes,
-                                                         wmode>(
+    if (!emel::text::generator::layer::run_layer<mode, route, lanes, wmode>(
             backend, layer, kv, position, layer_error)) {
       if (err_out != nullptr) {
         *err_out = layer_error;

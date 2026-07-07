@@ -2433,9 +2433,12 @@ TEST_CASE("generator_layer_route_actor_keeps_residual_choice_explicit") {
   CHECK(detail_source.find("layer::scalar_sm<") == std::string::npos);
   CHECK(detail_source.find("layer::chunk4_sm<") == std::string::npos);
   CHECK(detail_source.find("layer::chunk8_sm<") == std::string::npos);
-  CHECK(layer_actions.find("layer::process_scalar<") != std::string::npos);
-  CHECK(layer_actions.find("layer::process_chunk4<") != std::string::npos);
-  CHECK(layer_actions.find("layer::process_chunk8<") != std::string::npos);
+  CHECK(layer_sm.find("process_scalar<") != std::string::npos);
+  CHECK(layer_sm.find("process_chunk4<") != std::string::npos);
+  CHECK(layer_sm.find("process_chunk8<") != std::string::npos);
+  CHECK(layer_actions.find("run_layer(") == std::string::npos);
+  CHECK(layer_actions.find("run_layer_chunk4(") == std::string::npos);
+  CHECK(layer_actions.find("run_layer_chunk8_q8_k(") == std::string::npos);
   CHECK(detail_source.find("layer::process_scalar<") == std::string::npos);
   CHECK(detail_source.find("layer::process_chunk4<") == std::string::npos);
   CHECK(detail_source.find("layer::process_chunk8<") == std::string::npos);

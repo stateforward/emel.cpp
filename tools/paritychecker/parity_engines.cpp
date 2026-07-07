@@ -30,7 +30,6 @@
 #include "emel/gguf/loader/any.hpp"
 #include "emel/gguf/loader/errors.hpp"
 #include "emel/gguf/loader/events.hpp"
-#include "emel/text/generator/layer/sm.hpp"
 #include "emel/gguf/loader/sm.hpp"
 #include "emel/io/events.hpp"
 #include "emel/io/read/sm.hpp"
@@ -56,6 +55,7 @@
 #include "emel/text/formatter/format.hpp"
 #include "emel/text/generator/errors.hpp"
 #include "emel/text/generator/events.hpp"
+#include "emel/text/generator/layer/sm.hpp"
 #include "emel/text/generator/sm.hpp"
 #include "emel/text/jinja/formatter/sm.hpp"
 #include "emel/text/jinja/parser/errors.hpp"
@@ -1001,7 +1001,8 @@ struct generation_load_state {
   emel::model::loader::sm model_loader = {};
   emel::text::tokenizer::sm tokenizer = {};
   emel::text::conditioner::sm conditioner = {};
-  emel::text::generator::matmul::lane_pool<7u, 128u, 1048576u> parallel_matmul_lanes = {};
+  emel::text::generator::matmul::lane_pool<7u, 128u, 1048576u>
+      parallel_matmul_lanes = {};
   std::unique_ptr<emel::text::generator::sm> generator = {};
   reference_backend reference = {};
   generation_trace *emel_trace = nullptr;
@@ -15707,9 +15708,9 @@ void dump_generation_live_backend_prefix_debug(const generation_load_state & sta
     for (int32_t layer = 0; layer < dispatch_backend.n_layer; ++layer) {
       const std::vector<float> dispatch_hidden_in = dispatch_backend.hidden;
       const std::vector<float> shared_hidden_in = shared_backend.hidden;
-      if (!emel::text::generator::layer::action::run_layer_flash(
+      if (!emel::text::generator::layer::run_layer_flash(
               dispatch_backend, layer, position) ||
-          !emel::text::generator::layer::action::run_layer_flash(
+          !emel::text::generator::layer::run_layer_flash(
               shared_backend, layer, position)) {
         std::fprintf(stdout, "generation_debug.live: layer replay failed\n");
         return;

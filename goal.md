@@ -634,16 +634,23 @@ path beats `llama.cpp` on this CPU.
   source-scanned hidden-control-flow tokens (`if (`, `switch`, ternary, and
   `&&`), while `detail.hpp` no longer owns `layer::process_scalar`,
   `layer::process_chunk4`, or `layer::process_chunk8` calls.
+- Reviewer A follow-up correction: the layer dispatch facade no longer lives in
+  `layer/actions.hpp` or the `layer::action` namespace. Production generator
+  detail code, tests, and the paritychecker now call the public layer
+  state-machine interface in `layer/sm.hpp` (`layer::run_layer*`), and
+  `layer/actions.hpp` is limited to SML action bodies.
 - Latest PR `#100` verification after that correction passed:
   `cmake --build build/zig --parallel "$EMEL_BUILD_JOBS" --target emel_tests_bin`,
   `ctest --test-dir build/zig -R 'emel_tests_(text|generator_and_runtime|sm)$' --output-on-failure`,
   `scripts/lint_snapshot.sh`, and
-  `EMEL_QUALITY_GATES_CHANGED_FILES="src/emel/text/generator/actions.hpp src/emel/text/generator/detail.hpp src/emel/text/generator/layer/actions.hpp src/emel/text/generator/layer/events.hpp src/emel/text/generator/layer/guards.hpp src/emel/text/generator/layer/sm.hpp tests/text/generator/detail_tests.cpp tests/text/generator/lifecycle_tests.cpp tools/paritychecker/parity_engines.cpp" EMEL_QUALITY_GATES_BENCH_SUITE=generation scripts/quality_gates.sh`.
+  `EMEL_QUALITY_GATES_CHANGED_FILES="src/emel/text/generator/detail.hpp,src/emel/text/generator/layer/actions.hpp,src/emel/text/generator/layer/sm.hpp,tests/text/generator/detail_tests.cpp,tests/text/generator/lifecycle_tests.cpp,tools/paritychecker/parity_engines.cpp" EMEL_QUALITY_GATES_COVERAGE_CHANGED_FILES="src/emel/text/generator/layer/sm.hpp" EMEL_QUALITY_GATES_BENCH_SUITE=generation scripts/quality_gates.sh`.
   The scoped gate selected generation benchmarks and all parity; benchmark
-  snapshot, changed-line coverage, paritychecker, fuzz smoke, determinism, lint
-  snapshot, and docs lanes completed successfully. The generation benchmark
-  still reports LFM2 single-lane behind llama.cpp and multithreaded ahead, with
-  benchmark-regression warnings non-fatal under the scoped gate.
+  snapshot, paritychecker, fuzz smoke, determinism, lint snapshot, and docs
+  lanes completed successfully. Coverage ran with the current-fix facade file
+  override and reported no changed source lines under that override. The
+  generation benchmark still reports LFM2 single-lane behind llama.cpp and
+  multithreaded ahead, with benchmark-regression warnings non-fatal under the
+  scoped gate.
 
 ## Completion Bar
 
