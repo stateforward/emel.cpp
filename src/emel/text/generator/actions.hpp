@@ -1253,15 +1253,22 @@ struct capture_graph_lifecycle_with_runtime_tensor {
   }
 };
 
+inline void apply_benchmark_lane_policy(context & ctx) noexcept {
+  ctx.compute.backend.parallel_lanes_enabled =
+      ctx.benchmark_parallel_lanes_enabled;
+}
+
 struct effect_disable_parallel_benchmark_lanes {
   void operator()(const event::configure_benchmark_lane &, context & ctx) const noexcept {
-    ctx.compute.backend.parallel_lanes_enabled = false;
+    ctx.benchmark_parallel_lanes_enabled = false;
+    apply_benchmark_lane_policy(ctx);
   }
 };
 
 struct effect_enable_parallel_benchmark_lanes {
   void operator()(const event::configure_benchmark_lane &, context & ctx) const noexcept {
-    ctx.compute.backend.parallel_lanes_enabled = true;
+    ctx.benchmark_parallel_lanes_enabled = true;
+    apply_benchmark_lane_policy(ctx);
   }
 };
 

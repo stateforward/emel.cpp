@@ -18,6 +18,22 @@ bool has_phase_success(const runtime_event & ev) noexcept {
   return ev.ctx.phase_accepted && ev.ctx.phase_code == 0;
 }
 
+inline int32_t effective_prefill_chunk4_min_tokens(
+    const emel::text::generator::detail::native_backend & backend) noexcept {
+  const int32_t configured = backend.routes.prefill_chunk4_min_tokens;
+  return configured < emel::text::generator::detail::k_prefill_q8_chunk_rows
+             ? emel::text::generator::detail::k_prefill_q8_chunk_rows
+             : configured;
+}
+
+inline int32_t effective_prefill_chunk8_min_tokens(
+    const emel::text::generator::detail::native_backend & backend) noexcept {
+  const int32_t configured = backend.routes.prefill_chunk8_min_tokens;
+  return configured < emel::text::generator::detail::k_prefill_q8_chunk8_rows
+             ? emel::text::generator::detail::k_prefill_q8_chunk8_rows
+             : configured;
+}
+
 template <class runtime_event>
 bool phase_rejected_without_code(const runtime_event & ev) noexcept {
   return !ev.ctx.phase_accepted && ev.ctx.phase_code == 0;
@@ -715,13 +731,13 @@ inline bool guard_flash_attention_supported(
 
 inline bool uses_prefill_chunk4_q8_gemm(const event::generate_run & ev,
                                         const action::context & ctx) noexcept {
-  return ev.ctx.prompt_token_count >= ctx.compute.backend.routes.prefill_chunk4_min_tokens &&
+  return ev.ctx.prompt_token_count >= effective_prefill_chunk4_min_tokens(ctx.compute.backend) &&
          prefill_chunk4_q8_gemm_supported(ctx.compute.backend);
 }
 
 inline bool uses_prefill_chunk8_q8_gemm(const event::generate_run & ev,
                                         const action::context & ctx) noexcept {
-  return ev.ctx.prompt_token_count >= ctx.compute.backend.routes.prefill_chunk8_min_tokens &&
+  return ev.ctx.prompt_token_count >= effective_prefill_chunk8_min_tokens(ctx.compute.backend) &&
          prefill_chunk8_q8_k_supported(ctx.compute.backend);
 }
 

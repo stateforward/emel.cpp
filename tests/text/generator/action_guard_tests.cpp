@@ -582,6 +582,33 @@ TEST_CASE("generator planning guards select explicit chunk4 prefill routing") {
   }
 }
 
+TEST_CASE("generator planning guards keep sub-chunk prompts on scalar route") {
+  chunk4_planning_backend_fixture fixture{};
+  auto &backend = fixture.context.compute.backend;
+  backend.routes.prefill_chunk4_min_tokens = 0;
+  backend.routes.prefill_chunk8_min_tokens = 0;
+
+  callback_tracker tracker{};
+  emel::error::type error_out =
+      emel::error::cast(emel::text::generator::error::backend);
+  size_t output_length_out = 0;
+
+  auto generate =
+      make_generate_request(&tracker, &error_out, output_length_out);
+  emel::text::generator::event::generate_ctx generate_ctx{};
+  generate_ctx.prompt_token_count =
+      emel::text::generator::detail::k_prefill_q8_chunk_rows - 1;
+  emel::text::generator::event::generate_run generate_run{generate,
+                                                          generate_ctx};
+
+  CHECK_FALSE(emel::text::generator::guard::planning_uses_chunk8_prefill{}(
+      generate_run, fixture.context));
+  CHECK_FALSE(emel::text::generator::guard::planning_uses_chunk4_prefill{}(
+      generate_run, fixture.context));
+  CHECK(emel::text::generator::guard::planning_uses_scalar_prefill{}(
+      generate_run, fixture.context));
+}
+
 TEST_CASE("generator planning guards select explicit chunk8 prefill routing") {
   chunk4_planning_backend_fixture fixture{};
   callback_tracker tracker{};
@@ -2132,6 +2159,37 @@ TEST_CASE("generator prefill parallel route guard exposes unavailable causes") {
       emel::text::generator::prefill::guard::detail::uses_parallel_matmul_lanes(
           prefill_run, prefill_context));
   backend.matmul_actor = matmul_actor;
+}
+
+TEST_CASE("generator prefill guards keep sub-chunk prompts on scalar route") {
+  chunk4_planning_backend_fixture fixture{};
+  auto &backend = fixture.context.compute.backend;
+  backend.routes.prefill_chunk4_min_tokens = 0;
+  backend.routes.prefill_chunk8_min_tokens = 0;
+
+  emel::text::generator::prefill::action::context prefill_context{
+      fixture.context};
+  callback_tracker tracker{};
+  emel::error::type error_out =
+      emel::error::cast(emel::text::generator::error::none);
+  size_t output_length_out = 0;
+  auto generate =
+      make_generate_request(&tracker, &error_out, output_length_out);
+  emel::text::generator::event::generate_ctx generate_ctx{};
+  generate_ctx.prompt_token_count =
+      emel::text::generator::detail::k_prefill_q8_chunk_rows - 1;
+  emel::text::generator::prefill::event::run prefill_run{generate,
+                                                         generate_ctx};
+
+  CHECK_FALSE(emel::text::generator::prefill::guard::
+                  uses_materialized_logits_with_chunk8_q8_k{}(
+                      prefill_run, prefill_context));
+  CHECK_FALSE(emel::text::generator::prefill::guard::
+                  uses_materialized_logits_with_chunk4_q8_k{}(
+                      prefill_run, prefill_context));
+  CHECK(emel::text::generator::prefill::guard::
+            uses_materialized_logits_with_scalar{}(prefill_run,
+                                                  prefill_context));
 }
 
 TEST_CASE(

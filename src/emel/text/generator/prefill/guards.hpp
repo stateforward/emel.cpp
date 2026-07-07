@@ -69,7 +69,8 @@ inline bool uses_parallel_matmul_lanes(const event::run & ev,
 inline bool uses_prefill_chunk4_q8_gemm(const event::run & ev,
                                         const action::context & ctx) noexcept {
   return ev.ctx.prompt_token_count >=
-             ctx.generator.compute.backend.routes.prefill_chunk4_min_tokens &&
+             emel::text::generator::guard::detail::effective_prefill_chunk4_min_tokens(
+                 ctx.generator.compute.backend) &&
          emel::text::generator::guard::detail::prefill_chunk4_q8_gemm_supported(
              ctx.generator.compute.backend);
 }
@@ -77,7 +78,8 @@ inline bool uses_prefill_chunk4_q8_gemm(const event::run & ev,
 inline bool uses_prefill_chunk8_q8_k_gemm(const event::run & ev,
                                           const action::context & ctx) noexcept {
   return ev.ctx.prompt_token_count >=
-             ctx.generator.compute.backend.routes.prefill_chunk8_min_tokens &&
+             emel::text::generator::guard::detail::effective_prefill_chunk8_min_tokens(
+                 ctx.generator.compute.backend) &&
          emel::text::generator::guard::detail::prefill_chunk8_q8_k_supported(
              ctx.generator.compute.backend);
 }
@@ -85,7 +87,8 @@ inline bool uses_prefill_chunk8_q8_k_gemm(const event::run & ev,
 inline bool uses_prefill_chunk4_packed_q8_0_gemm(const event::run & ev,
                                                  const action::context & ctx) noexcept {
   return ev.ctx.prompt_token_count >=
-             ctx.generator.compute.backend.routes.prefill_chunk4_min_tokens &&
+             emel::text::generator::guard::detail::effective_prefill_chunk4_min_tokens(
+                 ctx.generator.compute.backend) &&
          emel::text::generator::guard::detail::prefill_chunk4_packed_q8_0_supported(
              ctx.generator.compute.backend);
 }
@@ -93,7 +96,8 @@ inline bool uses_prefill_chunk4_packed_q8_0_gemm(const event::run & ev,
 inline bool uses_prefill_chunk4_q8_k_gemm(const event::run & ev,
                                           const action::context & ctx) noexcept {
   return ev.ctx.prompt_token_count >=
-             ctx.generator.compute.backend.routes.prefill_chunk4_min_tokens &&
+             emel::text::generator::guard::detail::effective_prefill_chunk4_min_tokens(
+                 ctx.generator.compute.backend) &&
          emel::text::generator::guard::detail::prefill_chunk4_q8_k_supported(
              ctx.generator.compute.backend);
 }

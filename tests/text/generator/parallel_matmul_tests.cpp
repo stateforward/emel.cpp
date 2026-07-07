@@ -463,12 +463,18 @@ TEST_CASE(
                                                                          ctx));
 
   ctx.compute.backend.parallel_lanes_enabled = true;
+  ctx.benchmark_parallel_lanes_enabled = true;
   emel::text::generator::action::effect_disable_parallel_benchmark_lanes(single,
                                                                          ctx);
+  CHECK_FALSE(ctx.compute.backend.parallel_lanes_enabled);
+  CHECK_FALSE(ctx.benchmark_parallel_lanes_enabled);
+  ctx.compute.backend.parallel_lanes_enabled = true;
+  emel::text::generator::action::apply_benchmark_lane_policy(ctx);
   CHECK_FALSE(ctx.compute.backend.parallel_lanes_enabled);
   emel::text::generator::action::effect_enable_parallel_benchmark_lanes(
       multithreaded, ctx);
   CHECK(ctx.compute.backend.parallel_lanes_enabled);
+  CHECK(ctx.benchmark_parallel_lanes_enabled);
 }
 
 } // namespace
