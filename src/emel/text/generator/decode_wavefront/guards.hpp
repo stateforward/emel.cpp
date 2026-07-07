@@ -145,6 +145,9 @@ struct guard_lane_accepted_and_more {
 template <size_t lane_index>
 struct guard_parallel_lane_rejected {
   bool operator()(const event::run & ev, const action::context &) const noexcept {
+    if (!ev.out.all_submitted || !ev.out.joined) {
+      return false;
+    }
     if (ev.lanes.size() <= lane_index) {
       return false;
     }
@@ -157,8 +160,23 @@ struct guard_parallel_lane_rejected {
   }
 };
 
+struct guard_parallel_submission_failed {
+  bool operator()(const event::run & ev, const action::context &) const noexcept {
+    return !ev.out.all_submitted;
+  }
+};
+
+struct guard_parallel_join_failed {
+  bool operator()(const event::run & ev, const action::context &) const noexcept {
+    return ev.out.all_submitted && !ev.out.joined;
+  }
+};
+
 struct guard_parallel_all_lanes_accepted {
   bool operator()(const event::run & ev, const action::context &) const noexcept {
+    if (!ev.out.all_submitted || !ev.out.joined) {
+      return false;
+    }
     for (const auto & lane : ev.lanes) {
       if (!lane.accepted) {
         return false;

@@ -124,14 +124,24 @@ bool outputs_identical(const std::vector<float> &lhs,
          std::memcmp(lhs.data(), rhs.data(), lhs.size() * sizeof(float)) == 0;
 }
 
+uint64_t matmul_group_rows_for_test(const dtype type) noexcept {
+  namespace matmul = emel::text::generator::matmul;
+  if (matmul::guard::guard_uses_x8_row_groups(type)) {
+    return emel::kernel::detail::quant::Q4_K_X8_ROWS;
+  }
+  if (matmul::guard::guard_uses_x4_row_groups(type)) {
+    return emel::kernel::detail::quant::Q8_0_X4_ROWS;
+  }
+  return 1u;
+}
+
 // Dispatch the full matmul as `slice_count` contiguous row-slice events
 // through one kernel actor, exactly the event shape the parallel lane route
 // forks; slice count stands in for lane count.
 bool run_row_sliced(emel::kernel::sm &kernel, const matmul_case &fixture,
                     const uint64_t slice_count, std::vector<float> &output) {
   const auto full = fixture.event_for(output);
-  const uint64_t group_rows =
-      gen_detail::matmul_slice_group_rows(full.src0.type);
+  const uint64_t group_rows = matmul_group_rows_for_test(full.src0.type);
   std::array<matmul_row_slice, k_test_matmul_lanes> slices = {};
   const size_t lanes = partition_rows(static_cast<uint64_t>(fixture.rows),
                                       group_rows, slice_count, slices);

@@ -153,35 +153,6 @@ struct matmul_row_slice {
   int32_t row_count = 0;
 };
 
-struct lane_dispatch {
-  emel::kernel::sm * kernel = nullptr;
-  const emel::kernel::event::op_mul_mat * request = nullptr;
-  bool accepted = false;
-};
-
-inline void run_lane_dispatch(void * ctx) noexcept {
-  auto & dispatch = *static_cast<lane_dispatch *>(ctx);
-  dispatch.accepted =
-      dispatch.kernel != nullptr && dispatch.request != nullptr &&
-      dispatch.kernel->process_event(*dispatch.request);
-}
-
-inline uint64_t matmul_slice_group_rows(const emel::kernel::event::dtype type) noexcept {
-  const uint8_t code = emel::kernel::detail::dtype_code(type);
-  const uint64_t x8_group =
-      static_cast<uint64_t>(code == emel::kernel::detail::dtype_q4_k_x8_bl4 ||
-                            code == emel::kernel::detail::dtype_q4_k_x8_bl8 ||
-                            code == emel::kernel::detail::dtype_q6_k_x8 ||
-                            code == emel::kernel::detail::dtype_q6_k_x8_q8_prepared ||
-                            code == emel::kernel::detail::dtype_q6_k_x8_q8_argmax_prepared) *
-      emel::kernel::detail::quant::Q4_K_X8_ROWS;
-  const uint64_t x4_group =
-      static_cast<uint64_t>(code == emel::kernel::detail::dtype_q8_0_x4_bl4 ||
-                            code == emel::kernel::detail::dtype_q8_0_x4_bl8) *
-      emel::kernel::detail::quant::Q8_0_X4_ROWS;
-  return std::max<uint64_t>(x8_group + x4_group, 1u);
-}
-
 inline size_t compute_matmul_row_slices(
     const uint64_t rows,
     const uint64_t group_rows,

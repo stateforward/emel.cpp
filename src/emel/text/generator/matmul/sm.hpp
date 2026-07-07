@@ -1,6 +1,7 @@
 #pragma once
 // benchmark: designed
 
+#include <exception>
 #include <span>
 #include <utility>
 
@@ -44,8 +45,18 @@ struct model {
 
       , sml::state<state_parallel_result_decision> <= sml::state<state_ready>
                  + sml::event<event::execute_parallel>
-                 [ guard::guard_parallel_ready{} ]
-                 / action::effect_execute_parallel
+                 [ guard::guard_parallel_x8_ready{} ]
+                 / action::effect_execute_parallel_x8
+
+      , sml::state<state_parallel_result_decision> <= sml::state<state_ready>
+                 + sml::event<event::execute_parallel>
+                 [ guard::guard_parallel_x4_ready{} ]
+                 / action::effect_execute_parallel_x4
+
+      , sml::state<state_parallel_result_decision> <= sml::state<state_ready>
+                 + sml::event<event::execute_parallel>
+                 [ guard::guard_parallel_unit_ready{} ]
+                 / action::effect_execute_parallel_unit
 
       , sml::state<state_ready> <= sml::state<state_ready>
                  + sml::event<event::execute_parallel>
@@ -96,8 +107,10 @@ struct sm : public emel::sm<model, action::context> {
     this->context_.parallel_matmul_lanes = policy.parallel_matmul_lanes;
     this->context_.kernel_kind = policy.kernel_kind;
     this->context_.active_lanes = policy.active_lanes;
-    (void) action::reserve_lane_storage(
-        this->context_, policy.parallel_matmul_lanes.lane_capacity);
+    if (!action::reserve_lane_storage(
+            this->context_, policy.parallel_matmul_lanes.lane_capacity)) {
+      std::terminate();
+    }
     process_event(event::configure_kernel_kind{policy.kernel_kind});
   }
 

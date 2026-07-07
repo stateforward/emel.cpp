@@ -60,19 +60,37 @@ void check_slices_tile_rows(const uint64_t rows, const uint64_t group_rows) {
 }
 
 TEST_CASE("parallel matmul slice group rows match pack formats") {
-  CHECK(gen_detail::matmul_slice_group_rows(dtype::f32) == 1u);
-  CHECK(gen_detail::matmul_slice_group_rows(dtype::f16) == 1u);
-  CHECK(gen_detail::matmul_slice_group_rows(dtype::q8_0) == 1u);
-  CHECK(gen_detail::matmul_slice_group_rows(dtype::q4_k) == 1u);
-  CHECK(gen_detail::matmul_slice_group_rows(dtype::q6_k) == 1u);
-  CHECK(gen_detail::matmul_slice_group_rows(dtype::q8_0_x4_bl4) == 4u);
-  CHECK(gen_detail::matmul_slice_group_rows(dtype::q8_0_x4_bl8) == 4u);
-  CHECK(gen_detail::matmul_slice_group_rows(dtype::q4_k_x8_bl4) == 8u);
-  CHECK(gen_detail::matmul_slice_group_rows(dtype::q4_k_x8_bl8) == 8u);
-  CHECK(gen_detail::matmul_slice_group_rows(dtype::q6_k_x8) == 8u);
-  CHECK(gen_detail::matmul_slice_group_rows(dtype::q6_k_x8_q8_prepared) == 8u);
-  CHECK(gen_detail::matmul_slice_group_rows(
-            dtype::q6_k_x8_q8_argmax_prepared) == 8u);
+  namespace matmul = emel::text::generator::matmul;
+
+  CHECK_FALSE(matmul::guard::guard_uses_x8_row_groups(dtype::f32));
+  CHECK_FALSE(matmul::guard::guard_uses_x4_row_groups(dtype::f32));
+  CHECK_FALSE(matmul::guard::guard_uses_x8_row_groups(dtype::f16));
+  CHECK_FALSE(matmul::guard::guard_uses_x4_row_groups(dtype::f16));
+  CHECK_FALSE(matmul::guard::guard_uses_x8_row_groups(dtype::q8_0));
+  CHECK_FALSE(matmul::guard::guard_uses_x4_row_groups(dtype::q8_0));
+  CHECK_FALSE(matmul::guard::guard_uses_x8_row_groups(dtype::q4_k));
+  CHECK_FALSE(matmul::guard::guard_uses_x4_row_groups(dtype::q4_k));
+  CHECK_FALSE(matmul::guard::guard_uses_x8_row_groups(dtype::q6_k));
+  CHECK_FALSE(matmul::guard::guard_uses_x4_row_groups(dtype::q6_k));
+
+  CHECK_FALSE(matmul::guard::guard_uses_x8_row_groups(dtype::q8_0_x4_bl4));
+  CHECK(matmul::guard::guard_uses_x4_row_groups(dtype::q8_0_x4_bl4));
+  CHECK_FALSE(matmul::guard::guard_uses_x8_row_groups(dtype::q8_0_x4_bl8));
+  CHECK(matmul::guard::guard_uses_x4_row_groups(dtype::q8_0_x4_bl8));
+
+  CHECK(matmul::guard::guard_uses_x8_row_groups(dtype::q4_k_x8_bl4));
+  CHECK_FALSE(matmul::guard::guard_uses_x4_row_groups(dtype::q4_k_x8_bl4));
+  CHECK(matmul::guard::guard_uses_x8_row_groups(dtype::q4_k_x8_bl8));
+  CHECK_FALSE(matmul::guard::guard_uses_x4_row_groups(dtype::q4_k_x8_bl8));
+  CHECK(matmul::guard::guard_uses_x8_row_groups(dtype::q6_k_x8));
+  CHECK_FALSE(matmul::guard::guard_uses_x4_row_groups(dtype::q6_k_x8));
+  CHECK(matmul::guard::guard_uses_x8_row_groups(dtype::q6_k_x8_q8_prepared));
+  CHECK_FALSE(
+      matmul::guard::guard_uses_x4_row_groups(dtype::q6_k_x8_q8_prepared));
+  CHECK(matmul::guard::guard_uses_x8_row_groups(
+      dtype::q6_k_x8_q8_argmax_prepared));
+  CHECK_FALSE(matmul::guard::guard_uses_x4_row_groups(
+      dtype::q6_k_x8_q8_argmax_prepared));
 }
 
 TEST_CASE("parallel matmul slices tile rows contiguously and group aligned") {
@@ -254,19 +272,19 @@ TEST_CASE(
 TEST_CASE("parallel matmul lane dispatch rejects missing request pieces") {
   namespace matmul = emel::text::generator::matmul;
 
-  matmul::detail::lane_dispatch dispatch = {};
-  matmul::detail::run_lane_dispatch(&dispatch);
+  matmul::action::lane_dispatch dispatch = {};
+  matmul::action::run_lane_dispatch(&dispatch);
   CHECK_FALSE(dispatch.accepted);
 
   emel::kernel::sm kernel = {};
   dispatch.kernel = &kernel;
-  matmul::detail::run_lane_dispatch(&dispatch);
+  matmul::action::run_lane_dispatch(&dispatch);
   CHECK_FALSE(dispatch.accepted);
 
   emel::kernel::event::op_mul_mat request = {};
   dispatch.kernel = nullptr;
   dispatch.request = &request;
-  matmul::detail::run_lane_dispatch(&dispatch);
+  matmul::action::run_lane_dispatch(&dispatch);
   CHECK_FALSE(dispatch.accepted);
 }
 

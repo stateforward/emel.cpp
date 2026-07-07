@@ -140,7 +140,6 @@ using matmul_row_slice =
     emel::text::generator::matmul::detail::matmul_row_slice;
 using emel::text::generator::matmul::detail::compute_matmul_row_slices;
 using emel::text::generator::matmul::detail::compute_sliced_mul_mat_event;
-using emel::text::generator::matmul::detail::matmul_slice_group_rows;
 
 // Weight residency mode for the layer loop: resident consumes blocks[] views
 // as prepared; streamed acquires each layer's slot from the tensor window

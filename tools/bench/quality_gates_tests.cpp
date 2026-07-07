@@ -704,14 +704,14 @@ TEST_CASE("compare gate requires explicit aliases for renamed benchmark rows") {
                          "x86_64") != 0);
 }
 
-TEST_CASE("compare gate keeps aliased baseline rows required") {
+TEST_CASE("compare gate treats aliased baseline rows as covered") {
   const std::string missing_kernel_flash_current =
       "# bench_host_arch: x86_64\n"
       "batch/planner_simple ns_per_op=655.000\n"
       "flash_attention/x86_64/op_flash_attn_ext_decode_like ns_per_op=170.000\n"
       "kernel/x86_64/op_add ns_per_op=123.000\n";
   CHECK(run_compare_gate(k_dual_arch_baseline, missing_kernel_flash_current,
-                         "x86_64") != 0);
+                         "x86_64") == 0);
 }
 
 TEST_CASE(

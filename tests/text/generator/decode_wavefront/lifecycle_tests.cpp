@@ -428,6 +428,8 @@ TEST_CASE("decode wavefront lane pool dispatches compatible lanes concurrently")
   CHECK(accepted);
   CHECK(machine.is(stateforward::sml::state<wavefront::state_idle>));
   CHECK(summary.grouped);
+  CHECK(summary.all_submitted);
+  CHECK(summary.joined);
   CHECK(summary.dispatched_lanes == 2);
   CHECK(summary.failed_lane == wavefront::event::k_no_failed_lane);
   for (const auto & fixture : fixtures) {
@@ -528,6 +530,8 @@ TEST_CASE("decode wavefront parallel dispatch reports first rejected lane after 
   CHECK(machine.is(stateforward::sml::state<wavefront::state_idle>));
   CHECK(summary.err == emel::error::cast(wavefront::error::lane_rejected));
   CHECK(summary.grouped);
+  CHECK(summary.all_submitted);
+  CHECK(summary.joined);
   CHECK(summary.dispatched_lanes == 3);
   CHECK(summary.failed_lane == 1);
   CHECK(fixtures[0].lane_accepted);

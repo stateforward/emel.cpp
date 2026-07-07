@@ -49,6 +49,8 @@ struct compatibility_key {
 struct dispatch_summary {
   emel::error::type err = emel::error::cast(error::none);
   bool grouped = false;
+  bool all_submitted = false;
+  bool joined = false;
   int32_t dispatched_lanes = 0;
   int32_t failed_lane = k_no_failed_lane;
 };

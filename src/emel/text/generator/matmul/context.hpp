@@ -12,6 +12,19 @@ namespace emel::text::generator::matmul::action {
 
 using lane_pool_ref = emel::text::generator::matmul::lane_pool_ref;
 
+struct lane_dispatch {
+  emel::kernel::sm * kernel = nullptr;
+  const emel::kernel::event::op_mul_mat * request = nullptr;
+  bool accepted = false;
+};
+
+inline void run_lane_dispatch(void * ctx) noexcept {
+  auto & dispatch = *static_cast<lane_dispatch *>(ctx);
+  dispatch.accepted =
+      dispatch.kernel != nullptr && dispatch.request != nullptr &&
+      dispatch.kernel->process_event(*dispatch.request);
+}
+
 struct context {
   lane_pool_ref parallel_matmul_lanes = {};
   emel::kernel::kernel_kind kernel_kind = emel::kernel::kernel_kind::x86_64;
@@ -22,8 +35,7 @@ struct context {
   std::unique_ptr<emel::text::generator::matmul::detail::matmul_row_slice[]>
       row_slices = {};
   std::unique_ptr<emel::kernel::event::op_mul_mat[]> lane_events = {};
-  std::unique_ptr<emel::text::generator::matmul::detail::lane_dispatch[]>
-      lane_dispatches = {};
+  std::unique_ptr<lane_dispatch[]> lane_dispatches = {};
 };
 
 inline bool reserve_lane_storage(context & ctx,
@@ -45,10 +57,8 @@ inline bool reserve_lane_storage(context & ctx,
           emel::text::generator::matmul::detail::matmul_row_slice[lane_capacity]);
   auto lane_events = std::unique_ptr<emel::kernel::event::op_mul_mat[]>(
       new (std::nothrow) emel::kernel::event::op_mul_mat[lane_capacity]);
-  auto lane_dispatches = std::unique_ptr<
-      emel::text::generator::matmul::detail::lane_dispatch[]>(
-      new (std::nothrow)
-          emel::text::generator::matmul::detail::lane_dispatch[lane_capacity]);
+  auto lane_dispatches = std::unique_ptr<lane_dispatch[]>(
+      new (std::nothrow) lane_dispatch[lane_capacity]);
   if (lane_kernels == nullptr || row_slices == nullptr ||
       lane_events == nullptr || lane_dispatches == nullptr) {
     return false;

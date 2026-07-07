@@ -39,6 +39,13 @@ struct effect_reject_incompatible_lanes {
   }
 };
 
+struct effect_reject_parallel_scheduler {
+  void operator()(const event::run & ev, context &) const noexcept {
+    ev.out.err = emel::error::cast(error::backend);
+    ev.out.failed_lane = event::k_no_failed_lane;
+  }
+};
+
 template <size_t lane_index>
 struct effect_dispatch_lane {
   void operator()(const event::run & ev, context &) const noexcept {
@@ -60,6 +67,7 @@ struct effect_dispatch_parallel_lanes {
     lane_pool::join_group group{};
     emel::policy::fork_join_start_gate gate{};
     size_t submitted_lanes = 0u;
+    bool all_submitted = true;
     for (auto & lane : ev.lanes) {
       auto * lane_ptr = &lane;
       const bool submitted =
@@ -71,10 +79,12 @@ struct effect_dispatch_parallel_lanes {
         current_lane.accepted =
             current_lane.graph.process_event(reserved_compute);
       });
-      submitted_lanes += submitted ? 1u : 0u;
+      submitted_lanes += static_cast<size_t>(submitted);
+      all_submitted = all_submitted && submitted;
     }
     gate.open_after_arrivals(submitted_lanes);
-    (void)group.wait();
+    ev.out.all_submitted = all_submitted;
+    ev.out.joined = group.wait();
     ev.out.dispatched_lanes = static_cast<int32_t>(ev.lanes.size());
   }
 };
@@ -108,6 +118,7 @@ inline constexpr effect_mark_single_lane effect_mark_single_lane{};
 inline constexpr effect_mark_grouped_lanes effect_mark_grouped_lanes{};
 inline constexpr effect_reject_invalid_request effect_reject_invalid_request{};
 inline constexpr effect_reject_incompatible_lanes effect_reject_incompatible_lanes{};
+inline constexpr effect_reject_parallel_scheduler effect_reject_parallel_scheduler{};
 inline constexpr effect_dispatch_parallel_lanes effect_dispatch_parallel_lanes{};
 inline constexpr effect_commit_done effect_commit_done{};
 inline constexpr effect_on_unexpected effect_on_unexpected{};

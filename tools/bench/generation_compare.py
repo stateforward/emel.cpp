@@ -258,6 +258,16 @@ def read_generation_output_text(record: dict[str, object]) -> str:
     return ""
 
 
+def read_generation_token_ids(record: dict[str, object]) -> list[str]:
+  output_path = str(record.get("output_token_ids_path", ""))
+  if not output_path:
+    return []
+  try:
+    return Path(output_path).read_text(encoding="utf-8").split()
+  except FileNotFoundError:
+    return []
+
+
 def copy_summary_metadata(summary: dict[str, object], record: dict[str, object] | None) -> None:
   if record is None:
     return
@@ -287,6 +297,14 @@ def compare_prefix_bytes(lhs: str, rhs: str) -> int:
   prefix = 0
   limit = min(len(lhs_bytes), len(rhs_bytes))
   while prefix < limit and lhs_bytes[prefix] == rhs_bytes[prefix]:
+    prefix += 1
+  return prefix
+
+
+def compare_prefix_items(lhs: list[str], rhs: list[str]) -> int:
+  prefix = 0
+  limit = min(len(lhs), len(rhs))
+  while prefix < limit and lhs[prefix] == rhs[prefix]:
     prefix += 1
   return prefix
 
@@ -328,9 +346,13 @@ def summarize_group(benchmark_lane: str,
     "max_output_tokens": "",
     "exact_output_match": False,
     "exact_checksum_match": False,
+    "exact_token_ids_match": False,
     "shared_prefix_bytes": 0,
+    "shared_prefix_tokens": 0,
     "shared_prefix_fraction": 0.0,
+    "shared_token_prefix_fraction": 0.0,
     "output_tokens_delta": None,
+    "output_token_ids_count_delta": None,
     "output_bytes_delta": None,
     "emel": emel_record,
     "reference": reference_record,
@@ -381,6 +403,8 @@ def summarize_group(benchmark_lane: str,
 
   emel_text = read_generation_output_text(emel_record)
   reference_text = read_generation_output_text(reference_record)
+  emel_token_ids = read_generation_token_ids(emel_record)
+  reference_token_ids = read_generation_token_ids(reference_record)
   emel_output_bytes = int(emel_record.get("output_bytes", 0))
   reference_output_bytes = int(reference_record.get("output_bytes", 0))
   both_empty_outputs = emel_output_bytes == 0 and reference_output_bytes == 0
@@ -396,23 +420,39 @@ def summarize_group(benchmark_lane: str,
   shared_prefix_fraction = 0.0
   if longest_output > 0:
     shared_prefix_fraction = shared_prefix_bytes / longest_output
+  exact_token_ids_match = (
+    bool(emel_token_ids) or bool(reference_token_ids)) and (
+      emel_token_ids == reference_token_ids
+  )
+  token_ids_present = bool(emel_token_ids) or bool(reference_token_ids)
+  shared_prefix_tokens = compare_prefix_items(emel_token_ids, reference_token_ids)
+  longest_token_trace = max(len(emel_token_ids), len(reference_token_ids))
+  shared_token_prefix_fraction = 0.0
+  if longest_token_trace > 0:
+    shared_token_prefix_fraction = shared_prefix_tokens / longest_token_trace
 
   summary["exact_output_match"] = exact_output_match
   summary["exact_checksum_match"] = exact_checksum_match
+  summary["exact_token_ids_match"] = exact_token_ids_match
   summary["shared_prefix_bytes"] = shared_prefix_bytes
+  summary["shared_prefix_tokens"] = shared_prefix_tokens
   summary["shared_prefix_fraction"] = shared_prefix_fraction
+  summary["shared_token_prefix_fraction"] = shared_token_prefix_fraction
   summary["output_tokens_delta"] = abs(
     int(emel_record.get("output_tokens", 0)) - int(reference_record.get("output_tokens", 0)))
+  summary["output_token_ids_count_delta"] = abs(
+    len(emel_token_ids) - len(reference_token_ids))
   summary["output_bytes_delta"] = abs(
     int(emel_record.get("output_bytes", 0)) - int(reference_record.get("output_bytes", 0)))
 
-  if exact_output_match or exact_checksum_match:
+  if exact_token_ids_match or (
+      not token_ids_present and (exact_output_match or exact_checksum_match)):
     summary["comparison_status"] = "exact_match"
     summary["reason"] = "ok"
     return summary
 
   summary["comparison_status"] = "bounded_drift"
-  summary["reason"] = "output_mismatch"
+  summary["reason"] = "token_ids_mismatch" if token_ids_present else "output_mismatch"
   return summary
 
 
@@ -469,9 +509,13 @@ def print_text_summary(summary: dict[str, object]) -> None:
       line += (
         f" exact_output_match={str(group['exact_output_match']).lower()}"
         f" exact_checksum_match={str(group['exact_checksum_match']).lower()}"
+        f" exact_token_ids_match={str(group['exact_token_ids_match']).lower()}"
         f" prefix_bytes={group['shared_prefix_bytes']}"
+        f" prefix_tokens={group['shared_prefix_tokens']}"
         f" prefix_fraction={group['shared_prefix_fraction']:.6f}"
+        f" token_prefix_fraction={group['shared_token_prefix_fraction']:.6f}"
         f" output_tokens_delta={group['output_tokens_delta']}"
+        f" output_token_ids_count_delta={group['output_token_ids_count_delta']}"
         f" output_bytes_delta={group['output_bytes_delta']}"
         f" emel_tokens_per_second={emel_tokens_per_second:.3f}"
         f" reference_tokens_per_second={reference_tokens_per_second:.3f}"

@@ -112,6 +112,7 @@ END {
       if (alias_name != "" && alias_name in base &&
           named_arch(alias_name) == host_arch) {
         baseline_name = alias_name;
+        matched_base[baseline_name] = 1;
       } else {
         print "error: new benchmark entry without baseline: " name > "/dev/stderr";
         fail = 1;
@@ -137,7 +138,7 @@ END {
   }
   if (!scoped) {
     for (name in base) {
-      if (name in curr) {
+      if (name in curr || name in matched_base) {
         continue;
       }
       arch = named_arch(name);

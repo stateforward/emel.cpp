@@ -262,9 +262,14 @@ class fork_join_lane_pool {
   };
 
   void start_workers() {
-    for (std::size_t index = 0u; index < worker_count; ++index) {
-      workers_[index].thread =
-          std::thread([this, index]() noexcept { worker_loop(index); });
+    try {
+      for (std::size_t index = 0u; index < worker_count; ++index) {
+        workers_[index].thread =
+            std::thread([this, index]() noexcept { worker_loop(index); });
+      }
+    } catch (...) {
+      stop_workers();
+      throw;
     }
   }
 

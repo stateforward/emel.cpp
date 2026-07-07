@@ -2,6 +2,8 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=scripts/build_jobs.sh
+source "$ROOT_DIR/scripts/build_jobs.sh"
 TOOLS_DIR="$ROOT_DIR/tools/bench"
 BUILD_DIR="${EMEL_BENCH_BUILD_DIR:-$ROOT_DIR/build/bench_tools_ninja}"
 OUTPUT_DIR="${EMEL_GENERATION_COMPARE_OUTPUT_DIR:-$ROOT_DIR/build/generation_compare}"
@@ -185,7 +187,7 @@ if ! $SKIP_EMEL_BUILD; then
   fi
 
   cmake "${cmake_args[@]}"
-  cmake --build "$BUILD_DIR" --parallel --target bench_runner
+  cmake --build "$BUILD_DIR" --parallel "$EMEL_BUILD_JOBS" --target bench_runner
 fi
 
 compare_args=(

@@ -187,6 +187,16 @@ struct model {
 
       , sml::state<state_idle> <= sml::state<state_parallel_decision>
                  + sml::completion<event::run>
+                 [ guard::guard_parallel_submission_failed{} ]
+                 / action::effect_reject_parallel_scheduler
+
+      , sml::state<state_idle> <= sml::state<state_parallel_decision>
+                 + sml::completion<event::run>
+                 [ guard::guard_parallel_join_failed{} ]
+                 / action::effect_reject_parallel_scheduler
+
+      , sml::state<state_idle> <= sml::state<state_parallel_decision>
+                 + sml::completion<event::run>
                  [ guard::guard_parallel_lane_rejected<0>{} ]
                  / action::effect_mark_lane_rejected<0>{}
 
