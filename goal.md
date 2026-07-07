@@ -623,6 +623,27 @@ path beats `llama.cpp` on this CPU.
   online-softmax updates from `std::exp` to `::expf` produced an identical EMEL
   token stream, checksum, and divergence point (`618`). That experiment was
   reverted; do not treat `expf` alone as the remaining single-thread parity fix.
+- PR `#100` follow-up correction: generator layer dispatch outcomes have been
+  moved out of `text/generator/detail.hpp` and into the layer actor boundary.
+  Scalar layer execution now carries streamed-layer errors on the
+  `event::scalar_run` payload, prepares/acquires and normalizes through
+  explicit `layer::sm` states, and routes prepare/normalize/residual/feed-forward
+  success or failure through guards and completion transitions. Chunk4/chunk8
+  prefill layer execution likewise normalizes through explicit layer actor
+  phases before residual route selection. `layer/actions.hpp` stays free of the
+  source-scanned hidden-control-flow tokens (`if (`, `switch`, ternary, and
+  `&&`), while `detail.hpp` no longer owns `layer::process_scalar`,
+  `layer::process_chunk4`, or `layer::process_chunk8` calls.
+- Latest PR `#100` verification after that correction passed:
+  `cmake --build build/zig --parallel "$EMEL_BUILD_JOBS" --target emel_tests_bin`,
+  `ctest --test-dir build/zig -R 'emel_tests_(text|generator_and_runtime|sm)$' --output-on-failure`,
+  `scripts/lint_snapshot.sh`, and
+  `EMEL_QUALITY_GATES_CHANGED_FILES="src/emel/text/generator/actions.hpp src/emel/text/generator/detail.hpp src/emel/text/generator/layer/actions.hpp src/emel/text/generator/layer/events.hpp src/emel/text/generator/layer/guards.hpp src/emel/text/generator/layer/sm.hpp tests/text/generator/detail_tests.cpp tests/text/generator/lifecycle_tests.cpp tools/paritychecker/parity_engines.cpp" EMEL_QUALITY_GATES_BENCH_SUITE=generation scripts/quality_gates.sh`.
+  The scoped gate selected generation benchmarks and all parity; benchmark
+  snapshot, changed-line coverage, paritychecker, fuzz smoke, determinism, lint
+  snapshot, and docs lanes completed successfully. The generation benchmark
+  still reports LFM2 single-lane behind llama.cpp and multithreaded ahead, with
+  benchmark-regression warnings non-fatal under the scoped gate.
 
 ## Completion Bar
 

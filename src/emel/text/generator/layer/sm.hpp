@@ -8,12 +8,15 @@
 namespace emel::text::generator::layer {
 
 struct state_idle {};
+struct state_input_ready {};
+struct state_normalized {};
 struct state_residual_done {};
 struct state_feed_forward_done {};
 
 template <emel::text::generator::attention_mode mode,
           emel::text::generator::detail::scalar_matmul_route route,
-          emel::text::generator::matmul::lane_mode lanes>
+          emel::text::generator::matmul::lane_mode lanes,
+          emel::text::generator::detail::window_mode wmode>
 struct scalar_model {
   auto operator()() const {
     namespace sml = stateforward::sml;
@@ -21,10 +24,26 @@ struct scalar_model {
     // clang-format off
     return sml::make_transition_table(
       //------------------------------------------------------------------------------//
+      // Explicit scalar prepare and input normalization.
+        sml::state<state_input_ready> <= *sml::state<state_idle>
+                 + sml::event<event::scalar_run>
+                 / action::effect_prepare_scalar<wmode>{}
+
+      , sml::state<state_normalized> <= sml::state<state_input_ready>
+                 + sml::completion<event::scalar_run>
+                 [ guard::guard_stream_ready{} ]
+                 / action::effect_normalize_scalar{}
+
+      , sml::state<state_idle> <= sml::state<state_input_ready>
+                 + sml::completion<event::scalar_run>
+                 [ guard::guard_stream_failed{} ]
+                 / action::effect_mark_failed
+
+      //------------------------------------------------------------------------------//
       // Explicit scalar residual route selection.
-        sml::state<state_residual_done> <= *sml::state<state_idle>
-                 + sml::event<event::scalar_run>
-                 [ guard::guard_scalar_attention_route<
+      , sml::state<state_residual_done> <= sml::state<state_normalized>
+                 + sml::completion<event::scalar_run>
+                 [ guard::guard_scalar_normalized_attention_route<
                        event::attention_qk_norm_route::none,
                        event::attention_v_norm_route::none>{} ]
                  / action::effect_run_scalar_attention<
@@ -34,9 +53,9 @@ struct scalar_model {
                        event::attention_v_norm_route::none,
                        lanes>{}
 
-      , sml::state<state_residual_done> <= sml::state<state_idle>
-                 + sml::event<event::scalar_run>
-                 [ guard::guard_scalar_attention_route<
+      , sml::state<state_residual_done> <= sml::state<state_normalized>
+                 + sml::completion<event::scalar_run>
+                 [ guard::guard_scalar_normalized_attention_route<
                        event::attention_qk_norm_route::headwise_rms,
                        event::attention_v_norm_route::none>{} ]
                  / action::effect_run_scalar_attention<
@@ -46,9 +65,9 @@ struct scalar_model {
                        event::attention_v_norm_route::none,
                        lanes>{}
 
-      , sml::state<state_residual_done> <= sml::state<state_idle>
-                 + sml::event<event::scalar_run>
-                 [ guard::guard_scalar_attention_route<
+      , sml::state<state_residual_done> <= sml::state<state_normalized>
+                 + sml::completion<event::scalar_run>
+                 [ guard::guard_scalar_normalized_attention_route<
                        event::attention_qk_norm_route::none,
                        event::attention_v_norm_route::rms>{} ]
                  / action::effect_run_scalar_attention<
@@ -58,9 +77,9 @@ struct scalar_model {
                        event::attention_v_norm_route::rms,
                        lanes>{}
 
-      , sml::state<state_residual_done> <= sml::state<state_idle>
-                 + sml::event<event::scalar_run>
-                 [ guard::guard_scalar_attention_route<
+      , sml::state<state_residual_done> <= sml::state<state_normalized>
+                 + sml::completion<event::scalar_run>
+                 [ guard::guard_scalar_normalized_attention_route<
                        event::attention_qk_norm_route::headwise_rms,
                        event::attention_v_norm_route::rms>{} ]
                  / action::effect_run_scalar_attention<
@@ -70,14 +89,20 @@ struct scalar_model {
                        event::attention_v_norm_route::rms,
                        lanes>{}
 
-      , sml::state<state_residual_done> <= sml::state<state_idle>
-                 + sml::event<event::scalar_run>
-                 [ guard::guard_scalar_shortconv_route{} ]
+      , sml::state<state_residual_done> <= sml::state<state_normalized>
+                 + sml::completion<event::scalar_run>
+                 [ guard::guard_scalar_normalized_shortconv_route{} ]
                  / action::effect_run_scalar_shortconv<route, lanes>{}
 
-      , sml::state<state_idle> <= sml::state<state_idle>
-                 + sml::event<event::scalar_run>
+      , sml::state<state_idle> <= sml::state<state_normalized>
+                 + sml::completion<event::scalar_run>
+                 [ guard::guard_normalized_ok{} ]
                  / action::effect_reject_unsupported_route
+
+      , sml::state<state_idle> <= sml::state<state_normalized>
+                 + sml::completion<event::scalar_run>
+                 [ guard::guard_normalized_failed{} ]
+                 / action::effect_mark_failed
 
       //------------------------------------------------------------------------------//
       // Explicit scalar residual/feed-forward outcome progression.
@@ -120,10 +145,16 @@ struct chunk4_model {
     // clang-format off
     return sml::make_transition_table(
       //------------------------------------------------------------------------------//
+      // Explicit chunk4 input normalization.
+        sml::state<state_normalized> <= *sml::state<state_idle>
+                 + sml::event<event::chunk4_run>
+                 / action::effect_normalize_chunk4{}
+
+      //------------------------------------------------------------------------------//
       // Explicit chunk4 residual route selection.
-        sml::state<state_residual_done> <= *sml::state<state_idle>
-                 + sml::event<event::chunk4_run>
-                 [ guard::guard_chunk4_attention_route<
+      , sml::state<state_residual_done> <= sml::state<state_normalized>
+                 + sml::completion<event::chunk4_run>
+                 [ guard::guard_chunk4_normalized_attention_route<
                        event::attention_qk_norm_route::none,
                        event::attention_v_norm_route::none>{} ]
                  / action::effect_run_chunk4_attention<
@@ -133,9 +164,9 @@ struct chunk4_model {
                        event::attention_v_norm_route::none,
                        lanes>{}
 
-      , sml::state<state_residual_done> <= sml::state<state_idle>
-                 + sml::event<event::chunk4_run>
-                 [ guard::guard_chunk4_attention_route<
+      , sml::state<state_residual_done> <= sml::state<state_normalized>
+                 + sml::completion<event::chunk4_run>
+                 [ guard::guard_chunk4_normalized_attention_route<
                        event::attention_qk_norm_route::headwise_rms,
                        event::attention_v_norm_route::none>{} ]
                  / action::effect_run_chunk4_attention<
@@ -145,9 +176,9 @@ struct chunk4_model {
                        event::attention_v_norm_route::none,
                        lanes>{}
 
-      , sml::state<state_residual_done> <= sml::state<state_idle>
-                 + sml::event<event::chunk4_run>
-                 [ guard::guard_chunk4_attention_route<
+      , sml::state<state_residual_done> <= sml::state<state_normalized>
+                 + sml::completion<event::chunk4_run>
+                 [ guard::guard_chunk4_normalized_attention_route<
                        event::attention_qk_norm_route::none,
                        event::attention_v_norm_route::rms>{} ]
                  / action::effect_run_chunk4_attention<
@@ -157,9 +188,9 @@ struct chunk4_model {
                        event::attention_v_norm_route::rms,
                        lanes>{}
 
-      , sml::state<state_residual_done> <= sml::state<state_idle>
-                 + sml::event<event::chunk4_run>
-                 [ guard::guard_chunk4_attention_route<
+      , sml::state<state_residual_done> <= sml::state<state_normalized>
+                 + sml::completion<event::chunk4_run>
+                 [ guard::guard_chunk4_normalized_attention_route<
                        event::attention_qk_norm_route::headwise_rms,
                        event::attention_v_norm_route::rms>{} ]
                  / action::effect_run_chunk4_attention<
@@ -169,14 +200,20 @@ struct chunk4_model {
                        event::attention_v_norm_route::rms,
                        lanes>{}
 
-      , sml::state<state_residual_done> <= sml::state<state_idle>
-                 + sml::event<event::chunk4_run>
-                 [ guard::guard_chunk4_shortconv_route{} ]
+      , sml::state<state_residual_done> <= sml::state<state_normalized>
+                 + sml::completion<event::chunk4_run>
+                 [ guard::guard_chunk4_normalized_shortconv_route{} ]
                  / action::effect_run_chunk4_shortconv<route, lanes>{}
 
-      , sml::state<state_idle> <= sml::state<state_idle>
-                 + sml::event<event::chunk4_run>
+      , sml::state<state_idle> <= sml::state<state_normalized>
+                 + sml::completion<event::chunk4_run>
+                 [ guard::guard_normalized_ok{} ]
                  / action::effect_reject_unsupported_route
+
+      , sml::state<state_idle> <= sml::state<state_normalized>
+                 + sml::completion<event::chunk4_run>
+                 [ guard::guard_normalized_failed{} ]
+                 / action::effect_mark_failed
 
       //------------------------------------------------------------------------------//
       // Explicit chunk4 residual/feed-forward outcome progression.
@@ -218,10 +255,16 @@ struct chunk8_model {
     // clang-format off
     return sml::make_transition_table(
       //------------------------------------------------------------------------------//
+      // Explicit chunk8 input normalization.
+        sml::state<state_normalized> <= *sml::state<state_idle>
+                 + sml::event<event::chunk8_run>
+                 / action::effect_normalize_chunk8{}
+
+      //------------------------------------------------------------------------------//
       // Explicit chunk8 residual route selection.
-        sml::state<state_residual_done> <= *sml::state<state_idle>
-                 + sml::event<event::chunk8_run>
-                 [ guard::guard_chunk8_attention_route<
+      , sml::state<state_residual_done> <= sml::state<state_normalized>
+                 + sml::completion<event::chunk8_run>
+                 [ guard::guard_chunk8_normalized_attention_route<
                        event::attention_qk_norm_route::none,
                        event::attention_v_norm_route::none>{} ]
                  / action::effect_run_chunk8_attention<
@@ -230,9 +273,9 @@ struct chunk8_model {
                        event::attention_v_norm_route::none,
                        lanes>{}
 
-      , sml::state<state_residual_done> <= sml::state<state_idle>
-                 + sml::event<event::chunk8_run>
-                 [ guard::guard_chunk8_attention_route<
+      , sml::state<state_residual_done> <= sml::state<state_normalized>
+                 + sml::completion<event::chunk8_run>
+                 [ guard::guard_chunk8_normalized_attention_route<
                        event::attention_qk_norm_route::headwise_rms,
                        event::attention_v_norm_route::none>{} ]
                  / action::effect_run_chunk8_attention<
@@ -241,9 +284,9 @@ struct chunk8_model {
                        event::attention_v_norm_route::none,
                        lanes>{}
 
-      , sml::state<state_residual_done> <= sml::state<state_idle>
-                 + sml::event<event::chunk8_run>
-                 [ guard::guard_chunk8_attention_route<
+      , sml::state<state_residual_done> <= sml::state<state_normalized>
+                 + sml::completion<event::chunk8_run>
+                 [ guard::guard_chunk8_normalized_attention_route<
                        event::attention_qk_norm_route::none,
                        event::attention_v_norm_route::rms>{} ]
                  / action::effect_run_chunk8_attention<
@@ -252,9 +295,9 @@ struct chunk8_model {
                        event::attention_v_norm_route::rms,
                        lanes>{}
 
-      , sml::state<state_residual_done> <= sml::state<state_idle>
-                 + sml::event<event::chunk8_run>
-                 [ guard::guard_chunk8_attention_route<
+      , sml::state<state_residual_done> <= sml::state<state_normalized>
+                 + sml::completion<event::chunk8_run>
+                 [ guard::guard_chunk8_normalized_attention_route<
                        event::attention_qk_norm_route::headwise_rms,
                        event::attention_v_norm_route::rms>{} ]
                  / action::effect_run_chunk8_attention<
@@ -263,14 +306,20 @@ struct chunk8_model {
                        event::attention_v_norm_route::rms,
                        lanes>{}
 
-      , sml::state<state_residual_done> <= sml::state<state_idle>
-                 + sml::event<event::chunk8_run>
-                 [ guard::guard_chunk8_shortconv_route{} ]
+      , sml::state<state_residual_done> <= sml::state<state_normalized>
+                 + sml::completion<event::chunk8_run>
+                 [ guard::guard_chunk8_normalized_shortconv_route{} ]
                  / action::effect_run_chunk8_shortconv<lanes>{}
 
-      , sml::state<state_idle> <= sml::state<state_idle>
-                 + sml::event<event::chunk8_run>
+      , sml::state<state_idle> <= sml::state<state_normalized>
+                 + sml::completion<event::chunk8_run>
+                 [ guard::guard_normalized_ok{} ]
                  / action::effect_reject_unsupported_route
+
+      , sml::state<state_idle> <= sml::state<state_normalized>
+                 + sml::completion<event::chunk8_run>
+                 [ guard::guard_normalized_failed{} ]
+                 / action::effect_mark_failed
 
       //------------------------------------------------------------------------------//
       // Explicit chunk8 residual/feed-forward outcome progression.
@@ -305,8 +354,9 @@ struct chunk8_model {
 
 template <emel::text::generator::attention_mode mode,
           emel::text::generator::detail::scalar_matmul_route route,
-          emel::text::generator::matmul::lane_mode lanes>
-using scalar_sm = emel::sm<scalar_model<mode, route, lanes>>;
+          emel::text::generator::matmul::lane_mode lanes,
+          emel::text::generator::detail::window_mode wmode>
+using scalar_sm = emel::sm<scalar_model<mode, route, lanes, wmode>>;
 
 template <emel::text::generator::attention_mode mode,
           emel::text::generator::detail::chunk4_rhs_route route,
@@ -319,9 +369,10 @@ using chunk8_sm = emel::sm<chunk8_model<mode, lanes>>;
 
 template <emel::text::generator::attention_mode mode,
           emel::text::generator::detail::scalar_matmul_route route,
-          emel::text::generator::matmul::lane_mode lanes>
+          emel::text::generator::matmul::lane_mode lanes,
+          emel::text::generator::detail::window_mode wmode>
 struct scalar_actor {
-  scalar_sm<mode, route, lanes> machine{};
+  scalar_sm<mode, route, lanes, wmode> machine{};
 
   bool process_event(const event::scalar_run &ev) noexcept {
     return machine.process_event(ev);
@@ -351,9 +402,10 @@ struct chunk8_actor {
 
 template <emel::text::generator::attention_mode mode,
           emel::text::generator::detail::scalar_matmul_route route,
-          emel::text::generator::matmul::lane_mode lanes>
+          emel::text::generator::matmul::lane_mode lanes,
+          emel::text::generator::detail::window_mode wmode>
 inline void process_scalar(const event::scalar_run &ev) noexcept {
-  scalar_actor<mode, route, lanes> actor{};
+  scalar_actor<mode, route, lanes, wmode> actor{};
   (void)actor.process_event(ev);
 }
 

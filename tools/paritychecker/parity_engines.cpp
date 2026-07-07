@@ -30,6 +30,7 @@
 #include "emel/gguf/loader/any.hpp"
 #include "emel/gguf/loader/errors.hpp"
 #include "emel/gguf/loader/events.hpp"
+#include "emel/text/generator/layer/sm.hpp"
 #include "emel/gguf/loader/sm.hpp"
 #include "emel/io/events.hpp"
 #include "emel/io/read/sm.hpp"
@@ -15706,8 +15707,10 @@ void dump_generation_live_backend_prefix_debug(const generation_load_state & sta
     for (int32_t layer = 0; layer < dispatch_backend.n_layer; ++layer) {
       const std::vector<float> dispatch_hidden_in = dispatch_backend.hidden;
       const std::vector<float> shared_hidden_in = shared_backend.hidden;
-      if (!generator_diag::run_layer_flash(dispatch_backend, layer, position) ||
-          !generator_diag::run_layer_flash(shared_backend, layer, position)) {
+      if (!emel::text::generator::layer::action::run_layer_flash(
+              dispatch_backend, layer, position) ||
+          !emel::text::generator::layer::action::run_layer_flash(
+              shared_backend, layer, position)) {
         std::fprintf(stdout, "generation_debug.live: layer replay failed\n");
         return;
       }

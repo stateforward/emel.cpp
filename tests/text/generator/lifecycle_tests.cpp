@@ -2375,13 +2375,30 @@ TEST_CASE("generator_layer_route_actor_keeps_residual_choice_explicit") {
       read_source(repo_root() / "src" / "emel" / "text" / "generator" /
                   "detail.hpp");
 
-  CHECK(layer_sm.find("guard::guard_scalar_attention_route<") != std::string::npos);
-  CHECK(layer_sm.find("guard::guard_scalar_shortconv_route{}") != std::string::npos);
-  CHECK(layer_sm.find("guard::guard_chunk4_attention_route<") != std::string::npos);
-  CHECK(layer_sm.find("guard::guard_chunk4_shortconv_route{}") != std::string::npos);
-  CHECK(layer_sm.find("guard::guard_chunk8_attention_route<") != std::string::npos);
-  CHECK(layer_sm.find("guard::guard_chunk8_shortconv_route{}") != std::string::npos);
-  CHECK(layer_sm.find("sml::state<state_residual_done> <= *sml::state<state_idle>") !=
+  CHECK(layer_sm.find("action::effect_prepare_scalar") != std::string::npos);
+  CHECK(layer_sm.find("action::effect_normalize_scalar") != std::string::npos);
+  CHECK(layer_sm.find("action::effect_normalize_chunk4") != std::string::npos);
+  CHECK(layer_sm.find("action::effect_normalize_chunk8") != std::string::npos);
+  CHECK(layer_sm.find("guard::guard_stream_ready{}") != std::string::npos);
+  CHECK(layer_sm.find("guard::guard_stream_failed{}") != std::string::npos);
+  CHECK(layer_sm.find("guard::guard_normalized_ok{}") != std::string::npos);
+  CHECK(layer_sm.find("guard::guard_normalized_failed{}") !=
+        std::string::npos);
+  CHECK(layer_sm.find("guard::guard_scalar_normalized_attention_route<") !=
+        std::string::npos);
+  CHECK(layer_sm.find("guard::guard_scalar_normalized_shortconv_route{}") !=
+        std::string::npos);
+  CHECK(layer_sm.find("guard::guard_chunk4_normalized_attention_route<") !=
+        std::string::npos);
+  CHECK(layer_sm.find("guard::guard_chunk4_normalized_shortconv_route{}") !=
+        std::string::npos);
+  CHECK(layer_sm.find("guard::guard_chunk8_normalized_attention_route<") !=
+        std::string::npos);
+  CHECK(layer_sm.find("guard::guard_chunk8_normalized_shortconv_route{}") !=
+        std::string::npos);
+  CHECK(layer_sm.find("sml::state<state_input_ready> <= *sml::state<state_idle>") !=
+        std::string::npos);
+  CHECK(layer_sm.find("sml::state<state_normalized> <= *sml::state<state_idle>") !=
         std::string::npos);
   CHECK(layer_sm.find("+ sml::event<event::scalar_run>") != std::string::npos);
   CHECK(layer_sm.find("+ sml::event<event::chunk4_run>") != std::string::npos);
@@ -2416,9 +2433,12 @@ TEST_CASE("generator_layer_route_actor_keeps_residual_choice_explicit") {
   CHECK(detail_source.find("layer::scalar_sm<") == std::string::npos);
   CHECK(detail_source.find("layer::chunk4_sm<") == std::string::npos);
   CHECK(detail_source.find("layer::chunk8_sm<") == std::string::npos);
-  CHECK(detail_source.find("layer::process_scalar<") != std::string::npos);
-  CHECK(detail_source.find("layer::process_chunk4<") != std::string::npos);
-  CHECK(detail_source.find("layer::process_chunk8<") != std::string::npos);
+  CHECK(layer_actions.find("layer::process_scalar<") != std::string::npos);
+  CHECK(layer_actions.find("layer::process_chunk4<") != std::string::npos);
+  CHECK(layer_actions.find("layer::process_chunk8<") != std::string::npos);
+  CHECK(detail_source.find("layer::process_scalar<") == std::string::npos);
+  CHECK(detail_source.find("layer::process_chunk4<") == std::string::npos);
+  CHECK(detail_source.find("layer::process_chunk8<") == std::string::npos);
 }
 
 TEST_CASE("docs_detail_shortens_lambda_type_names_for_mermaid") {

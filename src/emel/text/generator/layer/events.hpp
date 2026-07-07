@@ -22,18 +22,22 @@ struct scalar_run {
              const int32_t layer_index_ref, const int32_t position_ref,
              const residual_route residual_ref,
              const attention_qk_norm_route qk_norm_ref,
-             const attention_v_norm_route v_norm_ref) noexcept
-      : backend(backend_ref), kv(kv_ref), layer_index(layer_index_ref),
-        position(position_ref), residual(residual_ref), qk_norm(qk_norm_ref),
-        v_norm(v_norm_ref) {}
+             const attention_v_norm_route v_norm_ref,
+             int32_t &error_ref) noexcept
+      : backend(backend_ref), kv(kv_ref), error(error_ref),
+        layer_index(layer_index_ref), position(position_ref),
+        residual(residual_ref), qk_norm(qk_norm_ref), v_norm(v_norm_ref) {}
 
   emel::text::generator::detail::native_backend &backend;
   const emel::text::generator::detail::kv_addressing_view &kv;
+  int32_t &error;
   int32_t layer_index = 0;
   int32_t position = 0;
   residual_route residual = residual_route::attention;
   attention_qk_norm_route qk_norm = attention_qk_norm_route::none;
   attention_v_norm_route v_norm = attention_v_norm_route::none;
+  mutable bool stream_ready = false;
+  mutable bool normalized_ok = false;
   mutable bool residual_ok = false;
   mutable bool feed_forward_ok = false;
   mutable bool succeeded = false;
@@ -58,6 +62,7 @@ struct chunk4_run {
   residual_route residual = residual_route::attention;
   attention_qk_norm_route qk_norm = attention_qk_norm_route::none;
   attention_v_norm_route v_norm = attention_v_norm_route::none;
+  mutable bool normalized_ok = false;
   mutable bool residual_ok = false;
   mutable bool feed_forward_ok = false;
   mutable bool succeeded = false;
@@ -82,6 +87,7 @@ struct chunk8_run {
   residual_route residual = residual_route::attention;
   attention_qk_norm_route qk_norm = attention_qk_norm_route::none;
   attention_v_norm_route v_norm = attention_v_norm_route::none;
+  mutable bool normalized_ok = false;
   mutable bool residual_ok = false;
   mutable bool feed_forward_ok = false;
   mutable bool succeeded = false;

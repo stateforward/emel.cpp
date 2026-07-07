@@ -8,6 +8,7 @@
 #include "emel/text/generator/errors.hpp"
 #include "emel/text/generator/events.hpp"
 #include "emel/text/generator/initializer/detail.hpp"
+#include "emel/text/generator/layer/sm.hpp"
 #include "emel/text/generator/prefill/detail.hpp"
 #include "emel/graph/events.hpp"
 #include "emel/logits/sampler/errors.hpp"

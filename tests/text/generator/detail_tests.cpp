@@ -19,6 +19,7 @@
 #include "emel/model/llama/detail.hpp"
 #include "emel/text/generator/detail.hpp"
 #include "emel/text/generator/guards.hpp"
+#include "emel/text/generator/layer/sm.hpp"
 #include "generator_test_policies.hpp"
 
 namespace {
@@ -1231,8 +1232,8 @@ TEST_CASE("generator_detail_lfm2_attention_uses_neox_rope_layout") {
   apply_rope_neox_reference(expected_k, 1, k_embd, k_embd, k_position,
                             backend->rope_freq_base);
 
-  REQUIRE(emel::text::generator::detail::run_layer_nonflash(*backend, 0,
-                                                            k_position));
+  REQUIRE(emel::text::generator::layer::action::run_layer_nonflash(*backend, 0,
+                                                                   k_position));
   const size_t cache_offset = emel::text::generator::detail::layer_cache_offset(
       *backend, block, 0, k_position);
   for (size_t idx = 0; idx < expected_k.size(); ++idx) {
@@ -1898,40 +1899,37 @@ TEST_CASE("generator_detail_route_templates_reject_unprepared_inputs") {
   backend.head_dim_kv = 4;
   backend.blocks.resize(1u);
 
-  CHECK_FALSE(emel::text::generator::detail::run_layer<
+  CHECK_FALSE(emel::text::generator::layer::action::run_layer<
               attention_mode::flash, scalar_matmul_route::packed_q8_0>(backend,
                                                                        0, 0));
-  CHECK_FALSE(emel::text::generator::detail::run_layer<
+  CHECK_FALSE(emel::text::generator::layer::action::run_layer<
               attention_mode::flash, scalar_matmul_route::q8_k>(backend, 0, 0));
-  CHECK_FALSE(emel::text::generator::detail::run_layer<
+  CHECK_FALSE(emel::text::generator::layer::action::run_layer<
               attention_mode::flash, scalar_matmul_route::native_quantized>(
       backend, 0, 0));
   CHECK_FALSE(
-      emel::text::generator::detail::run_layer<
+      emel::text::generator::layer::action::run_layer<
           attention_mode::flash,
           scalar_matmul_route::native_quantized_q8_k_logits>(backend, 0, 0));
   CHECK_FALSE(
-      emel::text::generator::detail::run_layer<attention_mode::flash,
-                                               scalar_matmul_route::kernel>(
-          backend, 0, 0));
-  CHECK_FALSE(emel::text::generator::detail::run_layer<
+      emel::text::generator::layer::action::run_layer<
+          attention_mode::flash, scalar_matmul_route::kernel>(backend, 0, 0));
+  CHECK_FALSE(emel::text::generator::layer::action::run_layer<
               attention_mode::nonflash, scalar_matmul_route::packed_q8_0>(
       backend, 0, 0));
   CHECK_FALSE(
-      emel::text::generator::detail::run_layer<attention_mode::nonflash,
-                                               scalar_matmul_route::q8_k>(
-          backend, 0, 0));
-  CHECK_FALSE(emel::text::generator::detail::run_layer<
+      emel::text::generator::layer::action::run_layer<
+          attention_mode::nonflash, scalar_matmul_route::q8_k>(backend, 0, 0));
+  CHECK_FALSE(emel::text::generator::layer::action::run_layer<
               attention_mode::nonflash, scalar_matmul_route::native_quantized>(
       backend, 0, 0));
   CHECK_FALSE(
-      emel::text::generator::detail::run_layer<
+      emel::text::generator::layer::action::run_layer<
           attention_mode::nonflash,
           scalar_matmul_route::native_quantized_q8_k_logits>(backend, 0, 0));
-  CHECK_FALSE(
-      emel::text::generator::detail::run_layer<attention_mode::nonflash,
-                                               scalar_matmul_route::kernel>(
-          backend, 0, 0));
+  CHECK_FALSE(emel::text::generator::layer::action::run_layer<
+              attention_mode::nonflash, scalar_matmul_route::kernel>(backend, 0,
+                                                                     0));
 
   CHECK_FALSE(emel::text::generator::detail::compute_logits<
               scalar_matmul_route::packed_q8_0>(backend));
@@ -3760,7 +3758,8 @@ TEST_CASE(
   apply_rope_reference(expected_q, 2, 2, 2, 1, backend->rope_freq_base);
   apply_rope_reference(expected_k, 2, 2, 2, 1, backend->rope_freq_base);
 
-  REQUIRE(emel::text::generator::detail::run_layer_nonflash(*backend, 0, 1));
+  REQUIRE(
+      emel::text::generator::layer::action::run_layer_nonflash(*backend, 0, 1));
   const size_t cache_offset = emel::text::generator::detail::layer_cache_offset(
       *backend, backend->blocks[0], 0, 1);
 
@@ -3805,7 +3804,8 @@ TEST_CASE(
   apply_rope_reference(expected_q, 2, 2, 2, 1, backend->rope_freq_base);
   apply_rope_reference(expected_k, 1, 2, 2, 1, backend->rope_freq_base);
 
-  REQUIRE(emel::text::generator::detail::run_layer_nonflash(*backend, 0, 1));
+  REQUIRE(
+      emel::text::generator::layer::action::run_layer_nonflash(*backend, 0, 1));
   const size_t cache_offset = emel::text::generator::detail::layer_cache_offset(
       *backend, backend->blocks[0], 0, 1);
 
@@ -3862,7 +3862,8 @@ TEST_CASE("generator_detail_gemma4_shared_kv_layer_rms_norms_value_branch_"
   expected_v[0] *= v_scale;
   expected_v[1] *= v_scale;
 
-  REQUIRE(emel::text::generator::detail::run_layer_nonflash(*backend, 15, 0));
+  REQUIRE(emel::text::generator::layer::action::run_layer_nonflash(*backend, 15,
+                                                                   0));
   const size_t cache_offset = emel::text::generator::detail::layer_cache_offset(
       *backend, backend->blocks[15], 15, 0);
 
