@@ -28,6 +28,8 @@
 #include "emel/graph/tensor/events.hpp"
 #include "emel/text/formatter/format.hpp"
 #include "emel/text/tokenizer/sm.hpp"
+#include "../../allocation_tracker.hpp"
+#include "../../memory/recording_kv_actor.hpp"
 #include "generator_test_policies.hpp"
 
 namespace {
@@ -897,7 +899,8 @@ struct generator_fixture {
       const model_variant variant = model_variant::canonical,
       void * formatter_ctx = nullptr,
       emel::text::formatter::format_fn format_prompt =
-          emel::text::formatter::format_raw)
+          emel::text::formatter::format_raw,
+      const emel::memory::hybrid::kv_binding & kv_cache = {})
       : prepared() {
     if (variant == model_variant::quantized_contract) {
       build_quantized_contract_prepared_model(prepared);
@@ -927,6 +930,7 @@ struct generator_fixture {
                 emel::text::generator::test::make_auto_runtime_policy(model),
             .formatter_ctx = formatter_ctx,
             .format_prompt = format_prompt,
+            .kv_cache = kv_cache,
         });
     hello_id = prepared.hello_id;
     world_id = prepared.world_id;
@@ -1018,6 +1022,40 @@ TEST_CASE("generator_initialize_reserves_lifecycle_managed_graph_tensors") {
   REQUIRE(graph_snapshot.runtime_tensor_captured);
   CHECK(graph_snapshot.runtime_tensor.lifecycle_state ==
         emel::graph::tensor::event::lifecycle::empty);
+}
+
+TEST_CASE("generator_dependencies_accept_custom_kv_actor") {
+  emel::memory::test::recording_kv_actor kv{};
+  auto fixture = std::make_unique<generator_fixture>(
+      generator_fixture::model_variant::canonical,
+      nullptr,
+      emel::text::formatter::format_raw,
+      emel::memory::hybrid::bind_kv_actor(kv));
+  callback_tracker tracker{};
+  emel::error::type error = emel::error::cast(emel::text::generator::error::backend);
+  const auto request = fixture->make_initialize(tracker, &error);
+
+  REQUIRE(fixture->generator->process_event(request));
+  REQUIRE(tracker.initialize_done_called);
+  REQUIRE_FALSE(tracker.initialize_error_called);
+  CHECK(error == emel::error::cast(emel::text::generator::error::none));
+  CHECK(kv.reserve_count == 1);
+
+  callback_tracker generate_tracker{};
+  std::array<char, 32> output = {};
+  size_t output_length = 99;
+  emel::error::type generate_error = emel::error::cast(emel::text::generator::error::backend);
+  const auto generate_request =
+      fixture->make_generate(generate_tracker, output.data(), output.size(), output_length,
+                             &generate_error);
+
+  REQUIRE(fixture->generator->process_event(generate_request));
+  REQUIRE(generate_tracker.generate_done_called);
+  REQUIRE_FALSE(generate_tracker.generate_error_called);
+  CHECK(generate_error == emel::error::cast(emel::text::generator::error::none));
+  CHECK(kv.allocate_sequence_count == 1);
+  CHECK(kv.allocate_slots_count == 1);
+  CHECK(kv.capture_view_count >= 1);
 }
 
 TEST_CASE("generator_rejects_generate_before_initialize") {

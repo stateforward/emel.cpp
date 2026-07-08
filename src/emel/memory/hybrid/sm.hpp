@@ -150,7 +150,11 @@ struct model {
       , sml::state<allocate_slots_kv> <= sml::state<ready>
           + sml::event<event::allocate_slots_runtime> / action::begin_allocate_slots
       , sml::state<allocate_slots_kv_decision> <= sml::state<allocate_slots_kv>
-          + sml::completion<event::allocate_slots_runtime> / action::exec_allocate_slots_kv
+          + sml::completion<event::allocate_slots_runtime> [ guard::guard_owned_kv_cache{} ]
+          / action::effect_allocate_slots_owned_kv
+      , sml::state<allocate_slots_kv_decision> <= sml::state<allocate_slots_kv>
+          + sml::completion<event::allocate_slots_runtime> [ guard::guard_bound_kv_cache{} ]
+          / action::effect_allocate_slots_bound_kv
       , sml::state<allocate_slots_recurrent> <= sml::state<allocate_slots_kv_decision>
           + sml::completion<event::allocate_slots_runtime> [ guard::kv_accepted{} ]
       , sml::state<out_of_memory> <= sml::state<allocate_slots_kv_decision>
@@ -310,7 +314,11 @@ struct model {
           / action::mark_invalid_request
 
       , sml::state<capture_kv_decision> <= sml::state<capture_kv>
-          + sml::completion<event::capture_view_runtime> / action::exec_capture_kv
+          + sml::completion<event::capture_view_runtime> [ guard::guard_owned_kv_cache{} ]
+          / action::effect_capture_owned_kv
+      , sml::state<capture_kv_decision> <= sml::state<capture_kv>
+          + sml::completion<event::capture_view_runtime> [ guard::guard_bound_kv_cache{} ]
+          / action::effect_capture_bound_kv
       , sml::state<capture_recurrent> <= sml::state<capture_kv_decision>
           + sml::completion<event::capture_view_runtime> [ guard::kv_accepted{} ]
       , sml::state<errored> <= sml::state<capture_kv_decision>
@@ -487,6 +495,17 @@ struct sm : public emel::sm<model, action::context> {
         kv_snapshot_(std::make_unique<view::snapshot>()),
         recurrent_snapshot_(std::make_unique<view::snapshot>()),
         snapshot_(std::make_unique<view::snapshot>()) {}
+
+  explicit sm(const kv_binding & kv_actor)
+      : base_type(std::in_place, kv_actor),
+        kv_snapshot_(std::make_unique<view::snapshot>()),
+        recurrent_snapshot_(std::make_unique<view::snapshot>()),
+        snapshot_(std::make_unique<view::snapshot>()) {}
+
+  sm(const sm &) = delete;
+  sm(sm &&) = delete;
+  sm & operator=(const sm &) = delete;
+  sm & operator=(sm &&) = delete;
 
   bool process_event(const event::reserve & ev) {
     int32_t error_sink = static_cast<int32_t>(emel::error::cast(error::none));

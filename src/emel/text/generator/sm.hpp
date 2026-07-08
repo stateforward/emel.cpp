@@ -81,6 +81,7 @@ struct dependencies {
       emel::text::formatter::format_raw;
   emel::model::tensor::window::sm * stream_window = nullptr;
   bool stream_active = false;
+  emel::memory::hybrid::kv_binding kv_cache = {};
 };
 
 struct uninitialized {};
@@ -1138,7 +1139,7 @@ struct sm : public emel::sm<model, action::context> {
   using base_type::is;
   using base_type::visit_current_states;
 
-  explicit sm(const dependencies & deps) : base_type() {
+  explicit sm(const dependencies & deps) : base_type(std::in_place, deps.kv_cache) {
     detail::bind_matmul_actor(this->context_, matmul_actor_, deps.matmul_policy);
     detail::bind_pipeline_actors(this->context_, initializer_actor_, prefill_actor_);
     this->context_.model = &deps.model;
