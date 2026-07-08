@@ -42,6 +42,7 @@
 #include "emel/io/staged_read/sm.hpp"
 #include "emel/memory/view.hpp"
 #include "emel/model/detail.hpp"
+#include "emel/model/generation/any.hpp"
 #include "emel/model/loader/sm.hpp"
 #include "emel/model/tensor/sm.hpp"
 #include "emel/model/tensor/window/sm.hpp"
@@ -669,6 +670,7 @@ struct generation_capture {
 
 struct emel_session {
   emel::model::data model_data = {};
+  emel::model::generation::contract generation_contract = {};
   emel::tools::generation_formatter_contract::formatter_binding
       formatter_binding = {};
   emel::text::tokenizer::sm tokenizer = {};
@@ -761,17 +763,22 @@ session_encoder_variant(const emel::model::data &model_data) {
   }
 }
 
-void prepare_session(const emel_fixture &fixture, emel_session &session,
+bool prepare_session(const emel_fixture &fixture, emel_session &session,
                      window_rig *rig) {
   session.model_data = fixture.model_data;
   session.formatter_binding = resolve_formatter_binding(fixture);
+  if (emel::model::generation::build_contract(session.model_data,
+                                              session.generation_contract) !=
+      emel::error::cast(emel::model::loader::error::none)) {
+    return false;
+  }
   const auto matmul_policy =
       emel::text::generator::matmul::make_auto_execution_policy(
           session.parallel_matmul_lanes);
   if (rig != nullptr) {
     session.generator = std::make_unique<emel::text::generator::sm>(
         emel::text::generator::dependencies{
-            .model = session.model_data,
+            .generation_contract = session.generation_contract,
             .conditioner = session.conditioner,
             .matmul_policy = matmul_policy,
             .runtime_policy =
@@ -785,7 +792,7 @@ void prepare_session(const emel_fixture &fixture, emel_session &session,
   } else {
     session.generator = std::make_unique<emel::text::generator::sm>(
         emel::text::generator::dependencies{
-            .model = session.model_data,
+            .generation_contract = session.generation_contract,
             .conditioner = session.conditioner,
             .matmul_policy = matmul_policy,
             .runtime_policy =
@@ -795,6 +802,7 @@ void prepare_session(const emel_fixture &fixture, emel_session &session,
             .format_prompt = session.formatter_binding.format_prompt,
         });
   }
+  return true;
 }
 
 bool initialize_session(emel_session &session, const int32_t max_tokens) {
@@ -993,8 +1001,12 @@ void append_emel_lane_cases(std::vector<result> &results, const config &cfg,
   const std::array<int32_t, 2> token_cases = {1, k_max_tokens};
   for (const int32_t max_tokens : token_cases) {
     auto session = std::make_unique<emel_session>();
-    prepare_session(*setup.fixture, *session,
-                    streamed ? setup.rig.get() : nullptr);
+    if (!prepare_session(*setup.fixture, *session,
+                         streamed ? setup.rig.get() : nullptr)) {
+      std::fprintf(stderr, "error: weight_streaming %s contract setup failed\n",
+                   lane_tag);
+      std::exit(1);
+    }
     if (!initialize_session(*session, max_tokens)) {
       std::fprintf(stderr, "warning: weight_streaming %s session init failed\n",
                    lane_tag);

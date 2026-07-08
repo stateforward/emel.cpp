@@ -44,6 +44,7 @@
 #include "emel/memory/view.hpp"
 #include "emel/model/any.hpp"
 #include "emel/model/data.hpp"
+#include "emel/model/generation/any.hpp"
 #include "emel/model/llama/any.hpp"
 #include "emel/model/loader/errors.hpp"
 #include "emel/model/loader/events.hpp"
@@ -260,66 +261,77 @@ bool on_jinja_render_error(void *owner,
 }
 
 quantized_contract_summary build_quantized_contract_summary(
-    const emel::model::llama::quantized_path_audit &audit) {
+    const emel::model::generation::quantized_path_audit &audit) {
   quantized_contract_summary summary{};
   for (const auto &stage : audit.stages) {
     summary.native_quantized += static_cast<uint32_t>(
         stage.contract ==
-        emel::model::llama::quantized_contract_kind::native_quantized);
+        emel::model::generation::quantized_contract_kind::native_quantized);
     summary.approved_dense_f32_by_contract += static_cast<uint32_t>(
-        stage.contract == emel::model::llama::quantized_contract_kind::
+        stage.contract == emel::model::generation::quantized_contract_kind::
                               approved_dense_f32_by_contract);
     summary.disallowed_fallback += static_cast<uint32_t>(
         stage.contract ==
-        emel::model::llama::quantized_contract_kind::disallowed_fallback);
+        emel::model::generation::quantized_contract_kind::disallowed_fallback);
     summary.explicit_no_claim += static_cast<uint32_t>(
         stage.contract ==
-        emel::model::llama::quantized_contract_kind::explicit_no_claim);
+        emel::model::generation::quantized_contract_kind::explicit_no_claim);
   }
   return summary;
 }
 
 bool build_execution_surface(
     const emel::model::data &model_data,
-    emel::model::llama::execution_view &execution_out) {
-  return emel::model::llama::build_execution_view(model_data, execution_out) ==
-         emel::error::cast(emel::model::loader::error::none);
-}
-
-bool build_execution_audit(
-    const emel::model::data &model_data,
-    emel::model::llama::quantized_path_audit &audit_out) {
-  emel::model::llama::execution_view execution{};
-  if (!build_execution_surface(model_data, execution)) {
+    emel::model::generation::execution_view &execution_out) {
+  emel::model::generation::contract contract{};
+  if (emel::model::generation::build_contract(model_data, contract) !=
+      emel::error::cast(emel::model::loader::error::none)) {
     return false;
   }
-
-  audit_out = emel::model::llama::build_quantized_path_audit(execution);
+  execution_out = contract.execution;
   return true;
 }
 
 bool build_execution_audit(
     const emel::model::data &model_data,
-    emel::model::llama::execution_view &execution_out,
-    emel::model::llama::quantized_path_audit &audit_out) {
-  if (!build_execution_surface(model_data, execution_out)) {
+    emel::model::generation::quantized_path_audit &audit_out) {
+  emel::model::generation::contract contract{};
+  if (emel::model::generation::build_contract(model_data, contract) !=
+      emel::error::cast(emel::model::loader::error::none)) {
     return false;
   }
 
-  audit_out = emel::model::llama::build_quantized_path_audit(execution_out);
+  audit_out = contract.quantized_audit;
+  return true;
+}
+
+bool build_execution_audit(
+    const emel::model::data &model_data,
+    emel::model::generation::execution_view &execution_out,
+    emel::model::generation::quantized_path_audit &audit_out) {
+  emel::model::generation::contract contract{};
+  if (emel::model::generation::build_contract(model_data, contract) !=
+      emel::error::cast(emel::model::loader::error::none)) {
+    return false;
+  }
+
+  execution_out = contract.execution;
+  audit_out = contract.quantized_audit;
   return true;
 }
 
 bool build_execution_surface_with_audit(
     const emel::model::data &model_data,
-    emel::model::llama::execution_view &execution_out,
-    emel::model::llama::quantized_path_audit &audit_out) {
-  if (emel::model::llama::build_execution_view(model_data, execution_out) !=
+    emel::model::generation::execution_view &execution_out,
+    emel::model::generation::quantized_path_audit &audit_out) {
+  emel::model::generation::contract contract{};
+  if (emel::model::generation::build_contract(model_data, contract) !=
       emel::error::cast(emel::model::loader::error::none)) {
     return false;
   }
 
-  audit_out = emel::model::llama::build_quantized_path_audit(execution_out);
+  execution_out = contract.execution;
+  audit_out = contract.quantized_audit;
   return true;
 }
 
@@ -1003,6 +1015,12 @@ struct generation_load_state {
   emel::text::conditioner::sm conditioner = {};
   emel::text::generator::matmul::lane_pool<7u, 128u, 1048576u>
       parallel_matmul_lanes = {};
+  emel::text::generator::matmul::execution_policy diagnostic_matmul_policy =
+      emel::text::generator::matmul::make_auto_execution_policy(
+          parallel_matmul_lanes);
+  mutable emel::text::generator::matmul::sm diagnostic_matmul_actor{
+      diagnostic_matmul_policy};
+  emel::model::generation::contract generation_contract = {};
   std::unique_ptr<emel::text::generator::sm> generator = {};
   reference_backend reference = {};
   generation_trace *emel_trace = nullptr;
@@ -1079,13 +1097,13 @@ bool quantized_contract_matches(const quantized_contract_summary &lhs,
 }
 
 bool audit_has_native_quantized_tensor_type(
-    const emel::model::llama::quantized_path_audit &audit,
+    const emel::model::generation::quantized_path_audit &audit,
     const emel::kernel::event::dtype dtype) {
   const int32_t tensor_type = static_cast<int32_t>(dtype);
   for (const auto &stage : audit.stages) {
     if (stage.tensor_type == tensor_type &&
         stage.contract ==
-            emel::model::llama::quantized_contract_kind::native_quantized) {
+            emel::model::generation::quantized_contract_kind::native_quantized) {
       return true;
     }
   }
@@ -1576,6 +1594,12 @@ run_emel_initialize_generator(generation_load_state &state,
   if (state.model_data == nullptr) {
     return emel::error::cast(emel::text::generator::error::invalid_request);
   }
+  const emel::error::type contract_err =
+      emel::model::generation::build_contract(*state.model_data,
+                                              state.generation_contract);
+  if (contract_err != emel::error::cast(emel::model::loader::error::none)) {
+    return contract_err;
+  }
 
   std::string formatted_prompt = {};
   if (!emel::tools::generation_formatter_contract::format_single_user_prompt(
@@ -1600,7 +1624,7 @@ run_emel_initialize_generator(generation_load_state &state,
           state.parallel_matmul_lanes);
   state.generator = std::make_unique<emel::text::generator::sm>(
       emel::text::generator::dependencies{
-          .model = *state.model_data,
+          .generation_contract = state.generation_contract,
           .conditioner = state.conditioner,
           .matmul_policy = matmul_policy,
           .runtime_policy =
@@ -2254,7 +2278,7 @@ emel::error::type run_custom_native_generate(
   }
 
   generator_diag::native_backend backend = {};
-  if (generator_diag::prepare(backend, *state.model_data) !=
+  if (prepare_generator_diag(backend, state) !=
       emel::error::cast(emel::model::loader::error::none)) {
     return emel::error::cast(emel::text::generator::error::backend);
   }
@@ -2473,7 +2497,7 @@ emel::error::type run_attributed_native_generate(generation_load_state & state,
   }
 
   generator_diag::native_backend backend = {};
-  if (generator_diag::prepare(backend, *state.model_data) !=
+  if (prepare_generator_diag(backend, state) !=
       emel::error::cast(emel::model::loader::error::none)) {
     return emel::error::cast(emel::text::generator::error::backend);
   }
@@ -7745,7 +7769,7 @@ void dump_prompt0_reference_attn_out_ffn_debug(
   }
 
   generator_diag::native_backend backend = {};
-  if (generator_diag::prepare(backend, *state.model_data) !=
+  if (prepare_generator_diag(backend, state) !=
       emel::error::cast(emel::model::loader::error::none)) {
     std::fprintf(stdout,
                  "generation_debug.reference_attn_out.prompt0.layer0: "
@@ -8099,7 +8123,7 @@ void dump_generation_selected_step_stage_debug(
       capture_reference_value_cache_rows(reference_ctx.get(), 1, reference_layer1_value_cache);
 
   generator_diag::native_backend backend = {};
-  if (generator_diag::prepare(backend, *state.model_data) !=
+  if (prepare_generator_diag(backend, state) !=
       emel::error::cast(emel::model::loader::error::none)) {
     std::fprintf(stdout, "generation_debug.gen_step: backend prepare failed\n");
     return;
@@ -8812,59 +8836,57 @@ void dump_scalar_attention_debug(const generation_load_state & state,
     };
     score_dot_probe_result score_dot_probe = {};
 
-    if (generator_diag::prepare(dispatch_backend, *state.model_data) !=
+    if (prepare_generator_diag(dispatch_backend, state) !=
             emel::error::cast(emel::model::loader::error::none) ||
-        generator_diag::prepare(runtime_flash_q_attn_backend, *state.model_data) !=
+        prepare_generator_diag(runtime_flash_q_attn_backend, state) !=
             emel::error::cast(emel::model::loader::error::none) ||
-        generator_diag::prepare(emel_prod_style_backend, *state.model_data) !=
+        prepare_generator_diag(emel_prod_style_backend, state) !=
             emel::error::cast(emel::model::loader::error::none) ||
-        generator_diag::prepare(emel_prod_style_float_value_backend, *state.model_data) !=
+        prepare_generator_diag(emel_prod_style_float_value_backend, state) !=
             emel::error::cast(emel::model::loader::error::none) ||
-        generator_diag::prepare(score_dot_probe_backend, *state.model_data) !=
+        prepare_generator_diag(score_dot_probe_backend, state) !=
             emel::error::cast(emel::model::loader::error::none) ||
-        generator_diag::prepare(full_q_backend, *state.model_data) !=
+        prepare_generator_diag(full_q_backend, state) !=
             emel::error::cast(emel::model::loader::error::none) ||
-        generator_diag::prepare(f32_attention_backend, *state.model_data) !=
+        prepare_generator_diag(f32_attention_backend, state) !=
             emel::error::cast(emel::model::loader::error::none) ||
-        generator_diag::prepare(rounded_weight_attention_backend, *state.model_data) !=
+        prepare_generator_diag(rounded_weight_attention_backend, state) !=
             emel::error::cast(emel::model::loader::error::none) ||
-        generator_diag::prepare(exact_backend, *state.model_data) !=
+        prepare_generator_diag(exact_backend, state) !=
             emel::error::cast(emel::model::loader::error::none) ||
-        generator_diag::prepare(attention_exact_backend, *state.model_data) !=
+        prepare_generator_diag(attention_exact_backend, state) !=
             emel::error::cast(emel::model::loader::error::none) ||
-        generator_diag::prepare(ffn_exact_backend, *state.model_data) !=
+        prepare_generator_diag(ffn_exact_backend, state) !=
             emel::error::cast(emel::model::loader::error::none) ||
-        generator_diag::prepare(output_exact_backend, *state.model_data) !=
+        prepare_generator_diag(output_exact_backend, state) !=
             emel::error::cast(emel::model::loader::error::none) ||
-        generator_diag::prepare(ggml_f16_value_backend, *state.model_data) !=
+        prepare_generator_diag(ggml_f16_value_backend, state) !=
             emel::error::cast(emel::model::loader::error::none) ||
-        generator_diag::prepare(ggml_online_f16_backend, *state.model_data) !=
+        prepare_generator_diag(ggml_online_f16_backend, state) !=
             emel::error::cast(emel::model::loader::error::none) ||
-        generator_diag::prepare(ggml_f16_scores_backend, *state.model_data) !=
+        prepare_generator_diag(ggml_f16_scores_backend, state) !=
             emel::error::cast(emel::model::loader::error::none) ||
-        generator_diag::prepare(
-            ggml_f16_scores_ggml_softmax_backend, *state.model_data) !=
+        prepare_generator_diag(ggml_f16_scores_ggml_softmax_backend, state) !=
             emel::error::cast(emel::model::loader::error::none) ||
-        generator_diag::prepare(ggml_nonflash_f16_backend, *state.model_data) !=
+        prepare_generator_diag(ggml_nonflash_f16_backend, state) !=
             emel::error::cast(emel::model::loader::error::none) ||
-        generator_diag::prepare(
-            ggml_nonflash_f16_ggml_softmax_backend, *state.model_data) !=
+        prepare_generator_diag(ggml_nonflash_f16_ggml_softmax_backend, state) !=
             emel::error::cast(emel::model::loader::error::none) ||
-        generator_diag::prepare(q2_exact_backend, *state.model_data) !=
+        prepare_generator_diag(q2_exact_backend, state) !=
             emel::error::cast(emel::model::loader::error::none) ||
-        generator_diag::prepare(q3_exact_backend, *state.model_data) !=
+        prepare_generator_diag(q3_exact_backend, state) !=
             emel::error::cast(emel::model::loader::error::none) ||
-        generator_diag::prepare(q6_exact_backend, *state.model_data) !=
+        prepare_generator_diag(q6_exact_backend, state) !=
             emel::error::cast(emel::model::loader::error::none) ||
-        generator_diag::prepare(q2_scalar_backend, *state.model_data) !=
+        prepare_generator_diag(q2_scalar_backend, state) !=
             emel::error::cast(emel::model::loader::error::none) ||
-        generator_diag::prepare(q3_scalar_backend, *state.model_data) !=
+        prepare_generator_diag(q3_scalar_backend, state) !=
             emel::error::cast(emel::model::loader::error::none) ||
-        generator_diag::prepare(q6_scalar_backend, *state.model_data) !=
+        prepare_generator_diag(q6_scalar_backend, state) !=
             emel::error::cast(emel::model::loader::error::none) ||
-        generator_diag::prepare(q2_reference_backend, *state.model_data) !=
+        prepare_generator_diag(q2_reference_backend, state) !=
             emel::error::cast(emel::model::loader::error::none) ||
-        generator_diag::prepare(q3_reference_backend, *state.model_data) !=
+        prepare_generator_diag(q3_reference_backend, state) !=
             emel::error::cast(emel::model::loader::error::none) ||
         !run_prefill_from_token_prefix(dispatch_backend, prefix_tokens) ||
         !run_prefill_with_flash_request_q_attn(runtime_flash_q_attn_backend, prefix_tokens) ||
@@ -9265,124 +9287,115 @@ void dump_scalar_attention_debug(const generation_load_state & state,
       .only_dtype = static_cast<uint8_t>(emel::kernel::event::dtype::q6_k),
       .use_reference_q8 = true,
   };
-  if (generator_diag::prepare(dispatch_backend, *state.model_data) !=
+  if (prepare_generator_diag(dispatch_backend, state) !=
           emel::error::cast(emel::model::loader::error::none) ||
-      generator_diag::prepare(scalar_backend, *state.model_data) !=
+      prepare_generator_diag(scalar_backend, state) !=
           emel::error::cast(emel::model::loader::error::none) ||
-      generator_diag::prepare(shared_backend, *state.model_data) !=
+      prepare_generator_diag(shared_backend, state) !=
           emel::error::cast(emel::model::loader::error::none) ||
-      generator_diag::prepare(f32_attention_backend, *state.model_data) !=
+      prepare_generator_diag(f32_attention_backend, state) !=
           emel::error::cast(emel::model::loader::error::none) ||
-      generator_diag::prepare(rounded_weight_attention_backend, *state.model_data) !=
+      prepare_generator_diag(rounded_weight_attention_backend, state) !=
           emel::error::cast(emel::model::loader::error::none) ||
-      generator_diag::prepare(ggml_f16_attention_backend, *state.model_data) !=
+      prepare_generator_diag(ggml_f16_attention_backend, state) !=
           emel::error::cast(emel::model::loader::error::none) ||
-      generator_diag::prepare(ggml_online_f16_attention_backend, *state.model_data) !=
+      prepare_generator_diag(ggml_online_f16_attention_backend, state) !=
           emel::error::cast(emel::model::loader::error::none) ||
-      generator_diag::prepare(ggml_nonflash_f16_attention_backend, *state.model_data) !=
+      prepare_generator_diag(ggml_nonflash_f16_attention_backend, state) !=
           emel::error::cast(emel::model::loader::error::none) ||
-      generator_diag::prepare(ggml_f16_scores_attention_backend, *state.model_data) !=
+      prepare_generator_diag(ggml_f16_scores_attention_backend, state) !=
           emel::error::cast(emel::model::loader::error::none) ||
-      generator_diag::prepare(
-          ggml_f16_scores_ggml_softmax_attention_backend, *state.model_data) !=
+      prepare_generator_diag(ggml_f16_scores_ggml_softmax_attention_backend, state) !=
           emel::error::cast(emel::model::loader::error::none) ||
-      generator_diag::prepare(
-          ggml_nonflash_f16_ggml_softmax_attention_backend, *state.model_data) !=
+      prepare_generator_diag(ggml_nonflash_f16_ggml_softmax_attention_backend, state) !=
           emel::error::cast(emel::model::loader::error::none) ||
-      generator_diag::prepare(double_softmax_sum_attention_backend, *state.model_data) !=
+      prepare_generator_diag(double_softmax_sum_attention_backend, state) !=
           emel::error::cast(emel::model::loader::error::none) ||
-      generator_diag::prepare(ggml_softmax_attention_backend, *state.model_data) !=
+      prepare_generator_diag(ggml_softmax_attention_backend, state) !=
           emel::error::cast(emel::model::loader::error::none) ||
-      generator_diag::prepare(full_q_attention_backend, *state.model_data) !=
+      prepare_generator_diag(full_q_attention_backend, state) !=
           emel::error::cast(emel::model::loader::error::none) ||
-      generator_diag::prepare(full_q_f32_attention_backend, *state.model_data) !=
+      prepare_generator_diag(full_q_f32_attention_backend, state) !=
           emel::error::cast(emel::model::loader::error::none) ||
-      generator_diag::prepare(full_q_rounded_weight_attention_backend, *state.model_data) !=
+      prepare_generator_diag(full_q_rounded_weight_attention_backend, state) !=
           emel::error::cast(emel::model::loader::error::none) ||
-      generator_diag::prepare(full_q_ggml_f16_attention_backend, *state.model_data) !=
+      prepare_generator_diag(full_q_ggml_f16_attention_backend, state) !=
           emel::error::cast(emel::model::loader::error::none) ||
-      generator_diag::prepare(exact_backend, *state.model_data) !=
+      prepare_generator_diag(exact_backend, state) !=
           emel::error::cast(emel::model::loader::error::none) ||
-      generator_diag::prepare(attention_exact_backend, *state.model_data) !=
+      prepare_generator_diag(attention_exact_backend, state) !=
           emel::error::cast(emel::model::loader::error::none) ||
-      generator_diag::prepare(ffn_exact_backend, *state.model_data) !=
+      prepare_generator_diag(ffn_exact_backend, state) !=
           emel::error::cast(emel::model::loader::error::none) ||
-      generator_diag::prepare(output_exact_backend, *state.model_data) !=
+      prepare_generator_diag(output_exact_backend, state) !=
           emel::error::cast(emel::model::loader::error::none) ||
-      generator_diag::prepare(q2_exact_backend, *state.model_data) !=
+      prepare_generator_diag(q2_exact_backend, state) !=
           emel::error::cast(emel::model::loader::error::none) ||
-      generator_diag::prepare(q3_exact_backend, *state.model_data) !=
+      prepare_generator_diag(q3_exact_backend, state) !=
           emel::error::cast(emel::model::loader::error::none) ||
-      generator_diag::prepare(q6_exact_backend, *state.model_data) !=
+      prepare_generator_diag(q6_exact_backend, state) !=
           emel::error::cast(emel::model::loader::error::none) ||
-      generator_diag::prepare(q2_scalar_quant_backend, *state.model_data) !=
+      prepare_generator_diag(q2_scalar_quant_backend, state) !=
           emel::error::cast(emel::model::loader::error::none) ||
-      generator_diag::prepare(q3_scalar_quant_backend, *state.model_data) !=
+      prepare_generator_diag(q3_scalar_quant_backend, state) !=
           emel::error::cast(emel::model::loader::error::none) ||
-      generator_diag::prepare(q23_scalar_quant_backend, *state.model_data) !=
+      prepare_generator_diag(q23_scalar_quant_backend, state) !=
           emel::error::cast(emel::model::loader::error::none) ||
-      generator_diag::prepare(q236_scalar_quant_backend, *state.model_data) !=
+      prepare_generator_diag(q236_scalar_quant_backend, state) !=
           emel::error::cast(emel::model::loader::error::none) ||
-      generator_diag::prepare(q6_scalar_quant_backend, *state.model_data) !=
+      prepare_generator_diag(q6_scalar_quant_backend, state) !=
           emel::error::cast(emel::model::loader::error::none) ||
-      generator_diag::prepare(q2_reference_backend, *state.model_data) !=
+      prepare_generator_diag(q2_reference_backend, state) !=
           emel::error::cast(emel::model::loader::error::none) ||
-      generator_diag::prepare(q3_reference_backend, *state.model_data) !=
+      prepare_generator_diag(q3_reference_backend, state) !=
           emel::error::cast(emel::model::loader::error::none) ||
-      generator_diag::prepare(q236_reference_backend, *state.model_data) !=
+      prepare_generator_diag(q236_reference_backend, state) !=
           emel::error::cast(emel::model::loader::error::none) ||
-      generator_diag::prepare(q6_reference_backend, *state.model_data) !=
+      prepare_generator_diag(q6_reference_backend, state) !=
           emel::error::cast(emel::model::loader::error::none) ||
-      generator_diag::prepare(reference_key_cache_backend, *state.model_data) !=
+      prepare_generator_diag(reference_key_cache_backend, state) !=
           emel::error::cast(emel::model::loader::error::none) ||
-      generator_diag::prepare(reference_value_cache_backend, *state.model_data) !=
+      prepare_generator_diag(reference_value_cache_backend, state) !=
           emel::error::cast(emel::model::loader::error::none) ||
-      generator_diag::prepare(reference_kv_cache_backend, *state.model_data) !=
+      prepare_generator_diag(reference_kv_cache_backend, state) !=
           emel::error::cast(emel::model::loader::error::none) ||
-      generator_diag::prepare(reference_layer0_kqv_out_backend, *state.model_data) !=
+      prepare_generator_diag(reference_layer0_kqv_out_backend, state) !=
           emel::error::cast(emel::model::loader::error::none) ||
-      generator_diag::prepare(
-          reference_layer0_kqv_out_exact_attention_backend, *state.model_data) !=
+      prepare_generator_diag(reference_layer0_kqv_out_exact_attention_backend, state) !=
           emel::error::cast(emel::model::loader::error::none) ||
-      generator_diag::prepare(
-          reference_layer0_kqv_out_reference_q8_backend, *state.model_data) !=
+      prepare_generator_diag(reference_layer0_kqv_out_reference_q8_backend, state) !=
           emel::error::cast(emel::model::loader::error::none) ||
-      generator_diag::prepare(reference_layer0_attn_out_backend, *state.model_data) !=
+      prepare_generator_diag(reference_layer0_attn_out_backend, state) !=
           emel::error::cast(emel::model::loader::error::none) ||
-      generator_diag::prepare(
-          reference_layer0_attn_out_q2_scalar_quant_backend, *state.model_data) !=
+      prepare_generator_diag(reference_layer0_attn_out_q2_scalar_quant_backend, state) !=
           emel::error::cast(emel::model::loader::error::none) ||
-      generator_diag::prepare(
-          reference_layer0_attn_out_q3_scalar_quant_backend, *state.model_data) !=
+      prepare_generator_diag(reference_layer0_attn_out_q3_scalar_quant_backend, state) !=
           emel::error::cast(emel::model::loader::error::none) ||
-      generator_diag::prepare(
-          reference_layer0_attn_out_q6_scalar_quant_backend, *state.model_data) !=
+      prepare_generator_diag(reference_layer0_attn_out_q6_scalar_quant_backend, state) !=
           emel::error::cast(emel::model::loader::error::none) ||
-      generator_diag::prepare(
-          reference_layer0_attn_out_q236_scalar_quant_backend, *state.model_data) !=
+      prepare_generator_diag(reference_layer0_attn_out_q236_scalar_quant_backend, state) !=
           emel::error::cast(emel::model::loader::error::none) ||
-      generator_diag::prepare(
-          reference_layer0_attn_out_q236_reference_backend, *state.model_data) !=
+      prepare_generator_diag(reference_layer0_attn_out_q236_reference_backend, state) !=
           emel::error::cast(emel::model::loader::error::none) ||
-      generator_diag::prepare(reference_layer0_ffn_norm_backend, *state.model_data) !=
+      prepare_generator_diag(reference_layer0_ffn_norm_backend, state) !=
           emel::error::cast(emel::model::loader::error::none) ||
-      generator_diag::prepare(reference_layer0_ffn_out_backend, *state.model_data) !=
+      prepare_generator_diag(reference_layer0_ffn_out_backend, state) !=
           emel::error::cast(emel::model::loader::error::none) ||
-      generator_diag::prepare(reference_layer0_l_out_backend, *state.model_data) !=
+      prepare_generator_diag(reference_layer0_l_out_backend, state) !=
           emel::error::cast(emel::model::loader::error::none) ||
-      generator_diag::prepare(reference_layer1_kqv_out_backend, *state.model_data) !=
+      prepare_generator_diag(reference_layer1_kqv_out_backend, state) !=
           emel::error::cast(emel::model::loader::error::none) ||
-      generator_diag::prepare(reference_layer1_attn_out_backend, *state.model_data) !=
+      prepare_generator_diag(reference_layer1_attn_out_backend, state) !=
           emel::error::cast(emel::model::loader::error::none) ||
-      generator_diag::prepare(reference_layer1_attn_norm_backend, *state.model_data) !=
+      prepare_generator_diag(reference_layer1_attn_norm_backend, state) !=
           emel::error::cast(emel::model::loader::error::none) ||
-      generator_diag::prepare(reference_layer1_ffn_inp_backend, *state.model_data) !=
+      prepare_generator_diag(reference_layer1_ffn_inp_backend, state) !=
           emel::error::cast(emel::model::loader::error::none) ||
-      generator_diag::prepare(reference_layer1_ffn_norm_backend, *state.model_data) !=
+      prepare_generator_diag(reference_layer1_ffn_norm_backend, state) !=
           emel::error::cast(emel::model::loader::error::none) ||
-      generator_diag::prepare(reference_layer1_ffn_out_backend, *state.model_data) !=
+      prepare_generator_diag(reference_layer1_ffn_out_backend, state) !=
           emel::error::cast(emel::model::loader::error::none) ||
-      generator_diag::prepare(reference_layer1_l_out_backend, *state.model_data) !=
+      prepare_generator_diag(reference_layer1_l_out_backend, state) !=
           emel::error::cast(emel::model::loader::error::none) ||
       !run_prefill_from_token_prefix(dispatch_backend, prefix_tokens) ||
       !run_prefill_with_scalar_attention(scalar_backend, prefix_tokens) ||
@@ -9572,7 +9585,7 @@ void dump_scalar_attention_debug(const generation_load_state & state,
     std::fprintf(stdout, "generation_debug.flash: unable to replay shared backend prefix\n");
     return;
   }
-  if (generator_diag::prepare(reference_layer0_attn_out_shared_backend, *state.model_data) !=
+  if (prepare_generator_diag(reference_layer0_attn_out_shared_backend, state) !=
           emel::error::cast(emel::model::loader::error::none)) {
     std::fprintf(stdout, "generation_debug.flash: unable to prepare shared attn_out replay\n");
     return;
@@ -11746,7 +11759,7 @@ void dump_generation_tensor_compare(generation_load_state & state,
                                     const emel::paritychecker::parity_options & opts) {
   generator_diag::native_backend backend = {};
   if (state.model_data == nullptr ||
-      generator_diag::prepare(backend, *state.model_data) !=
+      prepare_generator_diag(backend, state) !=
           emel::error::cast(emel::model::loader::error::none)) {
     std::fprintf(stdout, "tensor_compare: backend prepare failed\n");
     return;
@@ -11834,8 +11847,8 @@ void dump_generation_tensor_compare(generation_load_state & state,
       "tensor_compare.token_embedding",
       *backend.token_embedding.tensor,
       prompt_tokens.front());
-  emel::model::llama::block_view block_view = {};
-  if (emel::model::llama::lookup_block_view(backend.execution, 0, block_view) ==
+  emel::model::generation::block_view block_view = {};
+  if (emel::model::generation::lookup_block_view(backend.execution, 0, block_view) ==
       emel::error::cast(emel::model::loader::error::none)) {
     dump_vector_compare(
         "tensor_compare.layer0.attn_norm",
@@ -11846,7 +11859,7 @@ void dump_generation_tensor_compare(generation_load_state & state,
         *block_view.feed_forward_norm.tensor,
         backend.blocks[0].feed_forward_norm);
   }
-  if (emel::model::llama::lookup_block_view(backend.execution, 1, block_view) ==
+  if (emel::model::generation::lookup_block_view(backend.execution, 1, block_view) ==
       emel::error::cast(emel::model::loader::error::none)) {
     dump_vector_compare(
         "tensor_compare.layer1.attn_norm",
@@ -12105,9 +12118,9 @@ void dump_generation_prefix_state_debug(const generation_load_state & state,
   {
     generator_diag::native_backend runtime_backend = {};
     generator_diag::native_backend exact_nonflash_backend = {};
-    if (generator_diag::prepare(runtime_backend, *state.model_data) ==
+    if (prepare_generator_diag(runtime_backend, state) ==
             emel::error::cast(emel::model::loader::error::none) &&
-        generator_diag::prepare(exact_nonflash_backend, *state.model_data) ==
+        prepare_generator_diag(exact_nonflash_backend, state) ==
             emel::error::cast(emel::model::loader::error::none)) {
       const auto runtime_exact_max_abs_diff = [](std::span<const float> lhs,
                                                  std::span<const float> rhs) {
@@ -12237,9 +12250,9 @@ void dump_generation_prefix_state_debug(const generation_load_state & state,
   if (target_generated_index > 0) {
     generator_diag::native_backend scan_actor_backend = {};
     generator_diag::native_backend scan_q2_reference_backend = {};
-    if (generator_diag::prepare(scan_actor_backend, *state.model_data) ==
+    if (prepare_generator_diag(scan_actor_backend, state) ==
             emel::error::cast(emel::model::loader::error::none) &&
-        generator_diag::prepare(scan_q2_reference_backend, *state.model_data) ==
+        prepare_generator_diag(scan_q2_reference_backend, state) ==
             emel::error::cast(emel::model::loader::error::none)) {
       const size_t prompt_count = prompt_tokens.size();
       for (size_t token_index = 0; token_index < prefix_tokens.size(); ++token_index) {
@@ -12311,7 +12324,7 @@ void dump_generation_prefix_state_debug(const generation_load_state & state,
     }
 
     generator_diag::native_backend mode_backend = {};
-    if (generator_diag::prepare(mode_backend, *state.model_data) !=
+    if (prepare_generator_diag(mode_backend, state) !=
             emel::error::cast(emel::model::loader::error::none) ||
         !run_prefill(mode_backend, prefix_tokens)) {
       std::fprintf(stdout, "generation_debug.mode_summary.%s: replay failed\n", label);
@@ -12420,7 +12433,7 @@ void dump_generation_prefix_state_debug(const generation_load_state & state,
   }
 
   generator_diag::native_backend backend = {};
-  if (generator_diag::prepare(backend, *state.model_data) !=
+  if (prepare_generator_diag(backend, state) !=
       emel::error::cast(emel::model::loader::error::none)) {
     std::fprintf(stdout, "generation_debug.state: backend prepare failed\n");
     return;
@@ -13330,11 +13343,11 @@ void dump_generation_prefix_timeline_debug(const generation_load_state & state,
   generator_diag::native_backend backend = {};
   generator_diag::native_backend exact_q3_backend = {};
   generator_diag::native_backend reference_q3_backend = {};
-  if (generator_diag::prepare(backend, *state.model_data) !=
+  if (prepare_generator_diag(backend, state) !=
           emel::error::cast(emel::model::loader::error::none) ||
-      generator_diag::prepare(exact_q3_backend, *state.model_data) !=
+      prepare_generator_diag(exact_q3_backend, state) !=
           emel::error::cast(emel::model::loader::error::none) ||
-      generator_diag::prepare(reference_q3_backend, *state.model_data) !=
+      prepare_generator_diag(reference_q3_backend, state) !=
           emel::error::cast(emel::model::loader::error::none)) {
     std::fprintf(stdout, "generation_debug.timeline: backend prepare failed\n");
     return;
@@ -13719,9 +13732,9 @@ void dump_generation_q23_timeline_debug(const generation_load_state & state,
 
   generator_diag::native_backend actor_backend = {};
   generator_diag::native_backend q23_backend = {};
-  if (generator_diag::prepare(actor_backend, *state.model_data) !=
+  if (prepare_generator_diag(actor_backend, state) !=
           emel::error::cast(emel::model::loader::error::none) ||
-      generator_diag::prepare(q23_backend, *state.model_data) !=
+      prepare_generator_diag(q23_backend, state) !=
           emel::error::cast(emel::model::loader::error::none)) {
     std::fprintf(stdout, "generation_debug.q23_timeline: backend prepare failed\n");
     return;
@@ -13810,11 +13823,11 @@ void dump_generation_reference_q_timeline_debug(const generation_load_state & st
   generator_diag::native_backend actor_backend = {};
   generator_diag::native_backend q2_reference_backend = {};
   generator_diag::native_backend q3_reference_backend = {};
-  if (generator_diag::prepare(actor_backend, *state.model_data) !=
+  if (prepare_generator_diag(actor_backend, state) !=
           emel::error::cast(emel::model::loader::error::none) ||
-      generator_diag::prepare(q2_reference_backend, *state.model_data) !=
+      prepare_generator_diag(q2_reference_backend, state) !=
           emel::error::cast(emel::model::loader::error::none) ||
-      generator_diag::prepare(q3_reference_backend, *state.model_data) !=
+      prepare_generator_diag(q3_reference_backend, state) !=
           emel::error::cast(emel::model::loader::error::none)) {
     std::fprintf(stdout, "generation_debug.qref_timeline: backend prepare failed\n");
     return;
@@ -13968,11 +13981,11 @@ void dump_generation_q23_stage_debug(const generation_load_state & state,
   generator_diag::native_backend actor_backend = {};
   generator_diag::native_backend q23_backend = {};
   generator_diag::native_backend q3_reference_backend = {};
-  if (generator_diag::prepare(actor_backend, *state.model_data) !=
+  if (prepare_generator_diag(actor_backend, state) !=
           emel::error::cast(emel::model::loader::error::none) ||
-      generator_diag::prepare(q23_backend, *state.model_data) !=
+      prepare_generator_diag(q23_backend, state) !=
           emel::error::cast(emel::model::loader::error::none) ||
-      generator_diag::prepare(q3_reference_backend, *state.model_data) !=
+      prepare_generator_diag(q3_reference_backend, state) !=
           emel::error::cast(emel::model::loader::error::none)) {
     std::fprintf(stdout, "generation_debug.q23_stage: backend prepare failed\n");
     return;
@@ -14358,15 +14371,15 @@ void dump_generation_reference_q_stage_debug(const generation_load_state & state
   generator_diag::native_backend q2_reference_backend = {};
   generator_diag::native_backend q3_reference_backend = {};
   generator_diag::native_backend q3_scalar_backend = {};
-  if (generator_diag::prepare(actor_backend, *state.model_data) !=
+  if (prepare_generator_diag(actor_backend, state) !=
           emel::error::cast(emel::model::loader::error::none) ||
-      generator_diag::prepare(q2_exact_backend, *state.model_data) !=
+      prepare_generator_diag(q2_exact_backend, state) !=
           emel::error::cast(emel::model::loader::error::none) ||
-      generator_diag::prepare(q2_reference_backend, *state.model_data) !=
+      prepare_generator_diag(q2_reference_backend, state) !=
           emel::error::cast(emel::model::loader::error::none) ||
-      generator_diag::prepare(q3_reference_backend, *state.model_data) !=
+      prepare_generator_diag(q3_reference_backend, state) !=
           emel::error::cast(emel::model::loader::error::none) ||
-      generator_diag::prepare(q3_scalar_backend, *state.model_data) !=
+      prepare_generator_diag(q3_scalar_backend, state) !=
           emel::error::cast(emel::model::loader::error::none)) {
     std::fprintf(stdout, "generation_debug.qref_stage: backend prepare failed\n");
     return;
@@ -14406,11 +14419,11 @@ void dump_generation_reference_q_stage_debug(const generation_load_state & state
     generator_diag::native_backend scan_actor_backend = {};
     generator_diag::native_backend scan_q2_reference_backend = {};
     generator_diag::native_backend scan_q3_reference_backend = {};
-    if (generator_diag::prepare(scan_actor_backend, *state.model_data) ==
+    if (prepare_generator_diag(scan_actor_backend, state) ==
             emel::error::cast(emel::model::loader::error::none) &&
-        generator_diag::prepare(scan_q2_reference_backend, *state.model_data) ==
+        prepare_generator_diag(scan_q2_reference_backend, state) ==
             emel::error::cast(emel::model::loader::error::none) &&
-        generator_diag::prepare(scan_q3_reference_backend, *state.model_data) ==
+        prepare_generator_diag(scan_q3_reference_backend, state) ==
             emel::error::cast(emel::model::loader::error::none)) {
       const size_t prompt_count = prompt_tokens.size();
       for (size_t token_index = 0; token_index < prefix_tokens.size(); ++token_index) {
@@ -15131,7 +15144,7 @@ void dump_generation_gen0_attention_debug(const generation_load_state & state,
   }
 
   generator_diag::native_backend backend = {};
-  if (generator_diag::prepare(backend, *state.model_data) !=
+  if (prepare_generator_diag(backend, state) !=
       emel::error::cast(emel::model::loader::error::none)) {
     std::fprintf(stdout, "generation_debug.gen0: backend prepare failed\n");
     return;
@@ -15356,7 +15369,7 @@ void dump_generation_target_attention_debug(const generation_load_state & state,
     }
 
     generator_diag::native_backend backend = {};
-    if (generator_diag::prepare(backend, *state.model_data) !=
+    if (prepare_generator_diag(backend, state) !=
         emel::error::cast(emel::model::loader::error::none)) {
       std::fprintf(stdout, "generation_debug.target: backend prepare failed\n");
       return;
@@ -15525,7 +15538,7 @@ void dump_generation_residual_l2_debug(const generation_load_state & state,
   }
 
   generator_diag::native_backend backend = {};
-  if (generator_diag::prepare(backend, *state.model_data) !=
+  if (prepare_generator_diag(backend, state) !=
       emel::error::cast(emel::model::loader::error::none)) {
     std::fprintf(stdout, "generation_debug.residual_l2: backend prepare failed\n");
     return;
@@ -15678,9 +15691,9 @@ void dump_generation_live_backend_prefix_debug(const generation_load_state & sta
 
   generator_diag::native_backend dispatch_backend = {};
   generator_diag::native_backend shared_backend = {};
-  if (generator_diag::prepare(dispatch_backend, *state.model_data) !=
+  if (prepare_generator_diag(dispatch_backend, state) !=
           emel::error::cast(emel::model::loader::error::none) ||
-      generator_diag::prepare(shared_backend, *state.model_data) !=
+      prepare_generator_diag(shared_backend, state) !=
           emel::error::cast(emel::model::loader::error::none)) {
     std::fprintf(stdout, "generation_debug.live: backend prepare failed\n");
     return;
@@ -16001,7 +16014,7 @@ void dump_generation_live_backend_prefix_debug(const generation_load_state & sta
         {
           auto prepare_attention_scratch =
               [&](generator_diag::native_backend & scratch) {
-                return generator_diag::prepare(scratch, *state.model_data) ==
+                return prepare_generator_diag(scratch, state) ==
                            emel::error::cast(emel::model::loader::error::none) &&
                     ((scratch.kernel_kind = shared_backend.kernel_kind), true) &&
                     ((scratch.kernel.set_kind(scratch.kernel_kind)), true) &&
@@ -16178,7 +16191,7 @@ void dump_reference_decode_seam(generation_load_state &state) {
                runtime_contract.disallowed_fallback,
                runtime_contract.explicit_no_claim);
 
-  emel::model::llama::quantized_path_audit build_audit{};
+  emel::model::generation::quantized_path_audit build_audit{};
   if (build_execution_audit(*state.model_data, build_audit)) {
     const auto audit_contract = build_quantized_contract_summary(build_audit);
 
@@ -16192,14 +16205,14 @@ void dump_reference_decode_seam(generation_load_state &state) {
                  audit_contract.explicit_no_claim);
     for (const auto &stage : build_audit.stages) {
       const auto stage_name =
-          emel::model::llama::quantized_stage_family_name(stage.family);
+          emel::model::generation::quantized_stage_family_name(stage.family);
       const auto tensor_name =
-          emel::model::llama::tensor_type_name(stage.tensor_type);
+          emel::model::generation::tensor_type_name(stage.tensor_type);
       const auto contract_name =
-          emel::model::llama::quantized_contract_kind_name(stage.contract);
+          emel::model::generation::quantized_contract_kind_name(stage.contract);
       const uint32_t supported =
           stage.contract ==
-                  emel::model::llama::quantized_contract_kind::explicit_no_claim
+                  emel::model::generation::quantized_contract_kind::explicit_no_claim
               ? 0u
               : 1u;
       std::fprintf(
@@ -18918,12 +18931,12 @@ int run_generation_harness_contract(
         emel::model::architecture_name_view(*state.model_data).data(),
         state.model_data->n_layers, state.model_data->n_tensors,
         output_weight_count, q_norm_count, k_norm_count);
-    emel::model::llama::execution_view debug_execution{};
-    emel::model::llama::quantized_path_audit debug_audit{};
+    emel::model::generation::execution_view debug_execution{};
+    emel::model::generation::quantized_path_audit debug_audit{};
     if (build_execution_surface_with_audit(*state.model_data, debug_execution,
                                            debug_audit)) {
-      emel::model::llama::block_view debug_block{};
-      if (emel::model::llama::lookup_block_view(debug_execution, 0,
+      emel::model::generation::block_view debug_block{};
+      if (emel::model::generation::lookup_block_view(debug_execution, 0,
                                                 debug_block) ==
           emel::error::cast(emel::model::loader::error::none)) {
         const auto print_tensor_shape =
@@ -19010,7 +19023,7 @@ int run_generation_harness_contract(
       generation_diagnostics.shared_q6_dispatch_calls;
   const auto runtime_contract =
       runtime_quantized_contract_summary(generation_diagnostics);
-  emel::model::llama::quantized_path_audit audit_view{};
+  emel::model::generation::quantized_path_audit audit_view{};
   const bool audit_available =
       build_execution_audit(*state.model_data, audit_view);
   const bool native_q2_k =

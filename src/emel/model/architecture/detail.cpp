@@ -18,23 +18,31 @@ const std::array<architecture, 8> default_architectures = {{
         .name = "llama",
         .load_hparams = &emel::model::llama::detail::load_hparams,
         .validate_data = &emel::model::llama::detail::validate_data,
+        .build_generation_contract =
+            &emel::model::llama::detail::build_generation_contract,
     },
     {
         .name = "qwen3",
         .load_hparams = &emel::model::qwen3::detail::load_hparams,
         .validate_data = &emel::model::qwen3::detail::validate_data,
+        .build_generation_contract =
+            &emel::model::qwen3::detail::build_generation_contract,
     },
     {
         .name = "lfm2",
         .load_hparams = &emel::model::lfm2::detail::load_hparams,
         .validate_data =
             &emel::model::lfm2::detail::validate_execution_contract,
+        .build_generation_contract =
+            &emel::model::lfm2::detail::build_generation_contract,
     },
     {
         .name = "gemma4",
         .load_hparams = &emel::model::gemma4::detail::load_hparams,
         .validate_data =
             &emel::model::gemma4::detail::validate_execution_contract,
+        .build_generation_contract =
+            &emel::model::gemma4::detail::build_generation_contract,
     },
     {
         .name = "omniembed",

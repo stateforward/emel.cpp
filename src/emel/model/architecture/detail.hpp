@@ -8,11 +8,17 @@
 
 namespace emel::model {
 
+namespace generation {
+struct contract;
+}
+
 struct architecture {
   std::string_view name = {};
   bool (*load_hparams)(const emel::model::detail::hparam_loader &,
                        emel::model::data &) noexcept = nullptr;
   emel::error::type (*validate_data)(const emel::model::data &) noexcept = nullptr;
+  emel::error::type (*build_generation_contract)(
+      const emel::model::data &, emel::model::generation::contract &) noexcept = nullptr;
 };
 
 using architectures = std::span<const architecture>;

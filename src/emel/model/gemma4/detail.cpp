@@ -4,7 +4,6 @@
 #include <span>
 
 #include "emel/model/detail.hpp"
-#include "emel/model/llama/detail.hpp"
 #include "emel/model/loader/errors.hpp"
 
 namespace emel::model::gemma4::detail {
@@ -14,6 +13,9 @@ namespace {
 constexpr std::string_view k_architecture = "gemma4";
 constexpr std::string_view k_token_embedding_name = "token_embd.weight";
 constexpr std::string_view k_output_norm_name = "output_norm.weight";
+constexpr uint32_t k_global_tensor_count = 3u;
+constexpr uint32_t k_shared_kv_block_tensor_count = 9u;
+constexpr uint32_t k_dedicated_kv_block_tensor_count = 10u;
 constexpr int32_t k_block_count = 35;
 constexpr int32_t k_context_length = 131072;
 constexpr int32_t k_embedding_length = 1536;
@@ -46,6 +48,18 @@ constexpr std::array<uint8_t, 35> k_sliding_window_pattern = {
 
 bool is_shared_kv_layer(const int32_t block_index) noexcept {
   return block_index >= (k_block_count - k_shared_kv_layers) && block_index < k_block_count;
+}
+
+bool is_bound_shared_kv_layer(const emel::model::data & model_data,
+                              const int32_t block_index) noexcept {
+  const int32_t shared_kv_layers = model_data.params.attention_shared_kv_layers;
+  if (shared_kv_layers <= 0 || block_index < 0 ||
+      block_index >= model_data.n_layers) {
+    return false;
+  }
+
+  const int32_t first_shared = model_data.n_layers - shared_kv_layers;
+  return first_shared >= 0 && block_index >= first_shared;
 }
 
 }  // namespace
@@ -146,8 +160,8 @@ emel::error::type validate_contract(const emel::model::data & model_data,
             model_data.params.rope_freq_base > 0.0f &&
             model_data.params.tie_word_embeddings;
   if (!metadata_ok ||
-      !emel::model::llama::detail::has_tensor_named(model_data, k_token_embedding_name) ||
-      !emel::model::llama::detail::has_tensor_named(model_data, k_output_norm_name)) {
+      !emel::model::generation::has_tensor_named(model_data, k_token_embedding_name) ||
+      !emel::model::generation::has_tensor_named(model_data, k_output_norm_name)) {
     return emel::error::cast(emel::model::loader::error::model_invalid);
   }
 
@@ -162,32 +176,32 @@ emel::error::type validate_contract(const emel::model::data & model_data,
 
   for (int32_t block_index = 0; block_index < model_data.n_layers; ++block_index) {
     const bool common_ok =
-        emel::model::llama::detail::require_block_tensor(
+        emel::model::generation::require_block_tensor(
             model_data, block_index, "attn_norm.weight") &&
-        emel::model::llama::detail::require_block_tensor(
+        emel::model::generation::require_block_tensor(
             model_data, block_index, "attn_q.weight") &&
-        emel::model::llama::detail::require_block_tensor(
+        emel::model::generation::require_block_tensor(
             model_data, block_index, "attn_k.weight") &&
-        emel::model::llama::detail::require_block_tensor(
+        emel::model::generation::require_block_tensor(
             model_data, block_index, "attn_q_norm.weight") &&
-        emel::model::llama::detail::require_block_tensor(
+        emel::model::generation::require_block_tensor(
             model_data, block_index, "attn_k_norm.weight") &&
-        emel::model::llama::detail::require_block_tensor(
+        emel::model::generation::require_block_tensor(
             model_data, block_index, "attn_output.weight") &&
-        emel::model::llama::detail::require_block_tensor(
+        emel::model::generation::require_block_tensor(
             model_data, block_index, "ffn_norm.weight") &&
-        emel::model::llama::detail::require_block_tensor(
+        emel::model::generation::require_block_tensor(
             model_data, block_index, "ffn_gate.weight") &&
-        emel::model::llama::detail::require_block_tensor(
+        emel::model::generation::require_block_tensor(
             model_data, block_index, "ffn_down.weight") &&
-        emel::model::llama::detail::require_block_tensor(
+        emel::model::generation::require_block_tensor(
             model_data, block_index, "ffn_up.weight");
     if (!common_ok) {
       return emel::error::cast(emel::model::loader::error::model_invalid);
     }
 
     if (!is_shared_kv_layer(block_index) &&
-        !emel::model::llama::detail::require_block_tensor(
+        !emel::model::generation::require_block_tensor(
             model_data, block_index, "attn_v.weight")) {
       return emel::error::cast(emel::model::loader::error::model_invalid);
     }
@@ -208,6 +222,110 @@ emel::error::type validate_data(const emel::model::data & model_data) noexcept {
 
 emel::error::type validate_execution_contract(const emel::model::data & model_data) noexcept {
   return validate_contract(model_data, true);
+}
+
+emel::error::type build_generation_contract(
+    const emel::model::data & model_data,
+    emel::model::generation::contract & contract_out) noexcept {
+  contract_out.reset();
+  auto &execution = contract_out.execution;
+  auto &descriptor = contract_out.generation_execution;
+  auto &graph = contract_out.topology;
+
+  if (model_data.n_tensors == 0u || model_data.n_layers <= 0 ||
+      model_data.params.n_embd <= 0 || model_data.params.n_ctx <= 0 ||
+      static_cast<uint32_t>(model_data.n_layers) >
+          emel::model::generation::execution_view::k_max_blocks) {
+    return emel::error::cast(emel::model::loader::error::model_invalid);
+  }
+
+  execution.model = &model_data;
+  execution.block_count = model_data.n_layers;
+  if (!emel::model::generation::bind_tensor_view(
+          model_data, k_token_embedding_name, execution.token_embedding) ||
+      !emel::model::generation::bind_tensor_view(
+          model_data, k_output_norm_name, execution.output_norm) ||
+      !emel::model::generation::bind_output_view(
+          model_data, execution.token_embedding, true, execution.output)) {
+    contract_out.reset();
+    return emel::error::cast(emel::model::loader::error::model_invalid);
+  }
+
+  descriptor.execution = &execution;
+  descriptor.layer_count = static_cast<uint32_t>(execution.block_count);
+  uint32_t tensor_count = k_global_tensor_count;
+  for (int32_t block_index = 0; block_index < execution.block_count;
+       ++block_index) {
+    auto &block = execution.blocks[static_cast<size_t>(block_index)];
+    const bool shared_key_value =
+        is_bound_shared_kv_layer(model_data, block_index);
+    const auto block_err = emel::model::generation::bind_attention_block(
+        model_data, block_index, true, shared_key_value, block);
+    if (block_err != emel::error::cast(emel::model::loader::error::none)) {
+      contract_out.reset();
+      return block_err;
+    }
+    const bool sliding_attention =
+        static_cast<uint32_t>(block_index) <
+            model_data.params.attention_sliding_window_pattern_count &&
+        model_data.params
+                .attention_sliding_window_pattern_flags[static_cast<size_t>(
+                    block_index)] != 0u;
+    auto &layer = descriptor.layers[static_cast<size_t>(block_index)];
+    layer.residual_route =
+        emel::model::generation::generation_residual_route::attention;
+    layer.qk_norm_route = emel::model::generation::
+        generation_attention_qk_norm_route::headwise_rms;
+    layer.value_route =
+        shared_key_value ? emel::model::generation::
+                               generation_attention_value_route::shared_key_value
+                         : emel::model::generation::
+                               generation_attention_value_route::dedicated_value;
+    layer.v_norm_route =
+        shared_key_value
+            ? emel::model::generation::generation_attention_v_norm_route::rms
+            : emel::model::generation::generation_attention_v_norm_route::none;
+    layer.window_route =
+        sliding_attention
+            ? emel::model::generation::generation_attention_window_route::
+                  sliding_window
+            : emel::model::generation::generation_attention_window_route::
+                  full_context;
+    layer.attention_key_length =
+        sliding_attention && model_data.params.attention_key_length_swa > 0
+            ? model_data.params.attention_key_length_swa
+            : model_data.params.attention_key_length;
+    layer.attention_value_length =
+        sliding_attention && model_data.params.attention_value_length_swa > 0
+            ? model_data.params.attention_value_length_swa
+            : model_data.params.attention_value_length;
+    layer.attention_rope_dim =
+        sliding_attention && model_data.params.n_rot_swa > 0
+            ? model_data.params.n_rot_swa
+            : model_data.params.n_rot;
+    layer.attention_rope_freq_base =
+        sliding_attention && model_data.params.rope_freq_base_swa > 0.0f
+            ? model_data.params.rope_freq_base_swa
+            : model_data.params.rope_freq_base;
+    tensor_count += shared_key_value ? k_shared_kv_block_tensor_count
+                                     : k_dedicated_kv_block_tensor_count;
+  }
+
+  graph.execution = &execution;
+  graph.tensor_count = tensor_count;
+  graph.node_count = graph.tensor_count;
+  graph.bytes_per_tensor = sizeof(float);
+  graph.workspace_capacity_bytes =
+      static_cast<uint64_t>(graph.tensor_count) *
+      static_cast<uint64_t>(model_data.params.n_embd) * sizeof(float);
+
+  const auto complete_err = emel::model::generation::complete_contract(contract_out);
+  if (complete_err != emel::error::cast(emel::model::loader::error::none)) {
+    contract_out.reset();
+    return complete_err;
+  }
+
+  return emel::error::cast(emel::model::loader::error::none);
 }
 
 }  // namespace emel::model::gemma4::detail

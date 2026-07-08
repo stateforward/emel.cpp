@@ -118,6 +118,64 @@ struct backend_prepare_needed {
   }
 };
 
+struct guard_generation_contract_valid {
+  bool operator()(const event::run &, const action::context & ctx) const noexcept {
+    const auto *contract = ctx.generator.generation_contract;
+    if (contract == nullptr) {
+      return false;
+    }
+
+    const auto *model = contract->execution.model;
+    if (model == nullptr || ctx.generator.model != model) {
+      return false;
+    }
+
+    const int32_t n_head_kv =
+        model->params.n_head_kv > 0 ? model->params.n_head_kv : model->params.n_head;
+    const int32_t kv_positions_capacity =
+        emel::memory::view::positions_capacity_for(ctx.generator.limits.block_tokens,
+                                                   model->params.n_ctx);
+    return model->params.n_vocab > 0 &&
+           model->params.n_embd > 0 &&
+           model->params.n_head > 0 &&
+           n_head_kv > 0 &&
+           model->params.n_ctx > 0 &&
+           (model->params.n_embd % model->params.n_head) == 0 &&
+           contract->execution.block_count > 0 &&
+           contract->generation_execution.layer_count ==
+               static_cast<uint32_t>(contract->execution.block_count) &&
+           contract->generation_execution.execution == &contract->execution &&
+           contract->topology.execution == &contract->execution &&
+           contract->topology.node_count > 0u &&
+           contract->topology.tensor_count > 0u &&
+           contract->prefill_plan.graph == &contract->topology &&
+           contract->decode_plan.graph == &contract->topology &&
+           contract->prefill_plan.expected_outputs > 0 &&
+           contract->decode_plan.expected_outputs > 0 &&
+           kv_positions_capacity >= model->params.n_ctx;
+  }
+};
+
+struct guard_generation_contract_invalid {
+  bool operator()(const event::run & ev, const action::context & ctx) const noexcept {
+    return !guard_generation_contract_valid{}(ev, ctx);
+  }
+};
+
+struct guard_backend_reuse_allowed {
+  bool operator()(const event::run & ev, const action::context & ctx) const noexcept {
+    return backend_already_ready{}(ev, ctx) &&
+           guard_generation_contract_valid{}(ev, ctx);
+  }
+};
+
+struct guard_backend_prepare_allowed {
+  bool operator()(const event::run & ev, const action::context & ctx) const noexcept {
+    return backend_prepare_needed{}(ev, ctx) &&
+           guard_generation_contract_valid{}(ev, ctx);
+  }
+};
+
 struct backend_prepare_ok {
   bool operator()(const event::run & ev, const action::context &) const noexcept {
     return detail::has_phase_success(ev);

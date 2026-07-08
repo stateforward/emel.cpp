@@ -49,6 +49,7 @@
 #include "emel/memory/view.hpp"
 #include "emel/model/data.hpp"
 #include "emel/model/detail.hpp"
+#include "emel/model/generation/any.hpp"
 #include "emel/model/loader/errors.hpp"
 #include "emel/model/loader/events.hpp"
 #include "emel/model/loader/sm.hpp"
@@ -180,6 +181,7 @@ emel::error::type probe_argmax_sampler(void *owner, int32_t &candidate_ids,
 struct session {
   emel::text::tokenizer::sm tokenizer = {};
   emel::text::conditioner::sm conditioner = {};
+  emel::model::generation::contract generation_contract = {};
   emel::text::generator::matmul::lane_pool<7u, 128u, 1048576u> parallel_matmul_lanes = {};
   std::unique_ptr<emel::text::generator::sm> generator = {};
   std::array<emel::logits::sampler::fn, 1> samplers = {};
@@ -660,12 +662,16 @@ make_session(const emel::model::data &model,
              const emel::text::generator::selection_mode mode,
              int32_t prompt_capacity, int32_t tokens) {
   auto s = std::make_unique<session>();
+  if (emel::model::generation::build_contract(model, s->generation_contract) !=
+      emel::error::cast(emel::model::loader::error::none)) {
+    return nullptr;
+  }
   const auto matmul_policy =
       emel::text::generator::matmul::make_auto_execution_policy(
           s->parallel_matmul_lanes);
   s->generator = std::make_unique<emel::text::generator::sm>(
       emel::text::generator::dependencies{
-          .model = model,
+          .generation_contract = s->generation_contract,
           .conditioner = s->conditioner,
           .matmul_policy = matmul_policy,
           .runtime_policy =

@@ -115,6 +115,7 @@ struct context {
   explicit context(const emel::memory::hybrid::kv_binding & kv_cache) : memory(kv_cache) {}
 
   const emel::model::data * model = nullptr;
+  const emel::model::generation::contract * generation_contract = nullptr;
   emel::text::conditioner::sm * conditioner = nullptr;
   emel::text::generator::runtime_policy runtime_policy = {};
   bool benchmark_parallel_lanes_enabled = true;

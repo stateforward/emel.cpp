@@ -14,6 +14,7 @@
 #include "emel/io/staged_read/sm.hpp"
 #include "emel/kernel/detail.hpp"
 #include "emel/logits/sampler/sm.hpp"
+#include "emel/model/llama/detail.hpp"
 #include "emel/model/tensor/window/sm.hpp"
 #include "emel/text/conditioner/sm.hpp"
 #include "emel/text/generator/sm.hpp"
@@ -550,6 +551,7 @@ struct generator_rig {
   emel::text::tokenizer::sm tokenizer{};
   emel::text::conditioner::sm conditioner{};
   emel::text::generator::matmul::lane_pool<7u, 128u, 1048576u> parallel_matmul_lanes = {};
+  emel::model::generation::contract generation_contract = {};
   std::array<emel::logits::sampler::fn, 1> samplers = {
       emel::logits::sampler::fn::from<sampler_select_argmax>(),
   };
@@ -559,6 +561,8 @@ struct generator_rig {
     if (kv_width_mismatch) {
       apply_flash_kv_width_mismatch(prepared);
     }
+    (void)emel::model::llama::detail::build_generation_contract(
+        prepared.data, generation_contract);
   }
 };
 
@@ -567,12 +571,15 @@ struct generator_rig_q8 {
   emel::text::tokenizer::sm tokenizer{};
   emel::text::conditioner::sm conditioner{};
   emel::text::generator::matmul::lane_pool<7u, 128u, 1048576u> parallel_matmul_lanes = {};
+  emel::model::generation::contract generation_contract = {};
   std::array<emel::logits::sampler::fn, 1> samplers = {
       emel::logits::sampler::fn::from<sampler_select_argmax>(),
   };
 
   explicit generator_rig_q8(const float gate_sign) {
     build_model_q8(prepared, gate_sign);
+    (void)emel::model::llama::detail::build_generation_contract(
+        prepared.data, generation_contract);
   }
 };
 
@@ -586,7 +593,7 @@ make_generator(rig_type & rig,
           rig.parallel_matmul_lanes);
   return std::make_unique<emel::text::generator::sm>(
       emel::text::generator::dependencies{
-          .model = rig.prepared.data,
+          .generation_contract = rig.generation_contract,
           .conditioner = rig.conditioner,
           .matmul_policy = matmul_policy,
           .runtime_policy =

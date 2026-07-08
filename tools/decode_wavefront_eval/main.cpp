@@ -41,6 +41,7 @@
 #include "emel/memory/view.hpp"
 #include "emel/model/data.hpp"
 #include "emel/model/detail.hpp"
+#include "emel/model/generation/any.hpp"
 #include "emel/model/loader/errors.hpp"
 #include "emel/model/loader/events.hpp"
 #include "emel/model/loader/sm.hpp"
@@ -122,6 +123,7 @@ struct emel_fixture {
 struct lane_session {
   emel::text::tokenizer::sm tokenizer = {};
   emel::text::conditioner::sm conditioner = {};
+  emel::model::generation::contract generation_contract = {};
   emel::text::generator::matmul::lane_pool<7u, 128u, 1048576u> parallel_matmul_lanes = {};
   std::unique_ptr<emel::text::generator::sm> generator = {};
   initialize_capture initialize = {};
@@ -647,12 +649,18 @@ int main(int argc, char **argv) {
   sessions.reserve(static_cast<size_t>(max_lanes));
   for (int32_t lane = 0; lane < max_lanes; ++lane) {
     auto s = std::make_unique<lane_session>();
+    if (emel::model::generation::build_contract(shared_model,
+                                                s->generation_contract) !=
+        emel::error::cast(emel::model::loader::error::none)) {
+      std::fprintf(stderr, "FAILED: build_generation_contract lane=%d\n", lane);
+      return 1;
+    }
     const auto matmul_policy =
         emel::text::generator::matmul::make_auto_execution_policy(
             s->parallel_matmul_lanes);
     s->generator = std::make_unique<emel::text::generator::sm>(
         emel::text::generator::dependencies{
-            .model = shared_model,
+            .generation_contract = s->generation_contract,
             .conditioner = s->conditioner,
             .matmul_policy = matmul_policy,
             .runtime_policy =

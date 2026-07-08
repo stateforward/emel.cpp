@@ -1,176 +1,72 @@
 #pragma once
 
-#include <array>
-#include <cstdint>
-#include <string_view>
-
 #include "emel/error/error.hpp"
 #include "emel/model/data.hpp"
+#include "emel/model/generation/any.hpp"
 #include "emel/model/loader/detail.hpp"
 
 namespace emel::model::llama::detail {
 
-constexpr uint32_t k_global_tensor_count = 3u;
-constexpr uint32_t k_block_tensor_count = 8u;
-constexpr uint32_t k_qwen3_block_tensor_count = 10u;
-constexpr uint32_t k_gemma4_shared_kv_block_tensor_count = 9u;
-constexpr uint32_t k_gemma4_dedicated_kv_block_tensor_count = 10u;
-constexpr uint32_t k_quantized_stage_family_count = 14u;
+inline constexpr uint32_t k_global_tensor_count = 3u;
+inline constexpr uint32_t k_block_tensor_count = 8u;
+inline constexpr uint32_t k_quantized_stage_family_count =
+    emel::model::generation::k_quantized_stage_family_count;
 
-struct tensor_view {
-  const emel::model::data::tensor_record * tensor = nullptr;
-  std::string_view name = {};
-};
-
-struct block_view {
-  int32_t index = -1;
-  bool uses_attention = true;
-  tensor_view attention_norm = {};
-  tensor_view attention_q = {};
-  tensor_view attention_k = {};
-  tensor_view attention_v = {};
-  tensor_view attention_q_norm = {};
-  tensor_view attention_k_norm = {};
-  tensor_view attention_output = {};
-  tensor_view shortconv_conv = {};
-  tensor_view shortconv_in_proj = {};
-  tensor_view shortconv_out_proj = {};
-  tensor_view feed_forward_norm = {};
-  tensor_view feed_forward_gate = {};
-  tensor_view feed_forward_down = {};
-  tensor_view feed_forward_up = {};
-};
-
-struct execution_view {
-  const emel::model::data * model = nullptr;
-  tensor_view token_embedding = {};
-  tensor_view output_norm = {};
-  tensor_view output = {};
-  int32_t block_count = 0;
-};
-
-using generation_residual_route = emel::model::generation_residual_route;
+using block_view = emel::model::generation::block_view;
+using execution_view = emel::model::generation::execution_view;
 using generation_attention_qk_norm_route =
-    emel::model::generation_attention_qk_norm_route;
+    emel::model::generation::generation_attention_qk_norm_route;
 using generation_attention_value_route =
-    emel::model::generation_attention_value_route;
+    emel::model::generation::generation_attention_value_route;
 using generation_attention_v_norm_route =
-    emel::model::generation_attention_v_norm_route;
+    emel::model::generation::generation_attention_v_norm_route;
 using generation_attention_window_route =
-    emel::model::generation_attention_window_route;
-
-struct generation_layer_execution {
-  generation_residual_route residual_route = generation_residual_route::attention;
-  generation_attention_qk_norm_route qk_norm_route =
-      generation_attention_qk_norm_route::none;
-  generation_attention_value_route value_route =
-      generation_attention_value_route::dedicated_value;
-  generation_attention_v_norm_route v_norm_route =
-      generation_attention_v_norm_route::none;
-  generation_attention_window_route window_route =
-      generation_attention_window_route::full_context;
-  int32_t attention_key_length = 0;
-  int32_t attention_value_length = 0;
-  int32_t attention_rope_dim = 0;
-  float attention_rope_freq_base = 0.0f;
-};
-
-struct generation_execution_descriptor {
-  static constexpr uint32_t k_max_layers =
-      static_cast<uint32_t>(emel::model::data::k_max_metadata_arrays);
-
-  const execution_view * execution = nullptr;
-  uint32_t layer_count = 0u;
-  std::array<generation_layer_execution, k_max_layers> layers = {};
-};
-
-struct topology {
-  const execution_view * execution = nullptr;
-  uint32_t node_count = 0u;
-  uint32_t tensor_count = 0u;
-  uint64_t bytes_per_tensor = 0u;
-  uint64_t workspace_capacity_bytes = 0u;
-};
-
-enum class step_kind : uint8_t {
-  prefill = 0,
-  decode = 1,
-};
-
-struct step_plan {
-  const topology * graph = nullptr;
-  step_kind kind = step_kind::prefill;
-  uint32_t node_count = 0u;
-  uint32_t tensor_count = 0u;
-  int32_t expected_outputs = 0;
-  int32_t max_step_tokens = 0;
-};
-
-enum class quantized_stage_family : uint8_t {
-  token_embedding = 0,
-  output_norm,
-  output,
-  attention_norm,
-  attention_q,
-  attention_k,
-  attention_v,
-  attention_q_norm,
-  attention_k_norm,
-  attention_output,
-  feed_forward_norm,
-  feed_forward_gate,
-  feed_forward_down,
-  feed_forward_up,
-};
-
-enum class quantized_contract_kind : uint8_t {
-  native_quantized = 0,
-  approved_dense_f32_by_contract,
-  disallowed_fallback,
-  explicit_no_claim,
-  not_applicable,
-};
-
-struct quantized_stage_audit {
-  quantized_stage_family family = quantized_stage_family::token_embedding;
-  int32_t tensor_type = 0;
-  quantized_contract_kind contract = quantized_contract_kind::approved_dense_f32_by_contract;
-  bool consistent_across_layers = true;
-};
-
-struct quantized_path_audit {
-  std::array<quantized_stage_audit, k_quantized_stage_family_count> stages = {};
-};
+    emel::model::generation::generation_attention_window_route;
+using generation_execution_descriptor =
+    emel::model::generation::generation_execution_descriptor;
+using generation_layer_execution =
+    emel::model::generation::generation_layer_execution;
+using generation_residual_route =
+    emel::model::generation::generation_residual_route;
+using quantized_contract_kind =
+    emel::model::generation::quantized_contract_kind;
+using quantized_path_audit =
+    emel::model::generation::quantized_path_audit;
+using quantized_stage_audit =
+    emel::model::generation::quantized_stage_audit;
+using quantized_stage_family =
+    emel::model::generation::quantized_stage_family;
+using step_kind = emel::model::generation::step_kind;
+using step_plan = emel::model::generation::step_plan;
+using tensor_view = emel::model::generation::tensor_view;
+using topology = emel::model::generation::topology;
 
 bool load_hparams(const emel::model::detail::hparam_loader & loader,
                   emel::model::data & model_out) noexcept;
 
 emel::error::type validate_data(const emel::model::data & model_data) noexcept;
 
-bool has_tensor_named(const emel::model::data & model_data, std::string_view name) noexcept;
-bool require_block_tensor(const emel::model::data & model_data,
-                          int32_t block_index,
-                          std::string_view suffix) noexcept;
-bool reject_block_tensor(const emel::model::data & model_data,
-                         int32_t block_index,
-                         std::string_view suffix) noexcept;
-
+emel::error::type build_generation_contract(
+    const emel::model::data & model_data,
+    emel::model::generation::contract & contract_out) noexcept;
 emel::error::type build_execution_view(const emel::model::data & model_data,
                                        execution_view & view_out) noexcept;
-emel::error::type lookup_block_view(const execution_view & execution,
-                                    int32_t block_index,
-                                    block_view & block_out) noexcept;
 emel::error::type build_generation_execution_descriptor(
     const execution_view & execution,
     generation_execution_descriptor & descriptor_out) noexcept;
 emel::error::type build_topology(const execution_view & execution,
                                  topology & topology_out) noexcept;
-emel::error::type build_step_plans(const topology & topology_in,
-                                   step_plan & prefill_out,
-                                   step_plan & decode_out) noexcept;
-quantized_path_audit build_quantized_path_audit(const execution_view & execution) noexcept;
-std::string_view quantized_stage_family_name(quantized_stage_family family) noexcept;
-std::string_view quantized_contract_kind_name(quantized_contract_kind kind) noexcept;
-std::string_view tensor_type_name(int32_t tensor_type) noexcept;
+using emel::model::generation::build_quantized_path_audit;
+using emel::model::generation::build_step_plans;
+using emel::model::generation::bind_block_tensor_view;
+using emel::model::generation::bind_output_view;
+using emel::model::generation::bind_tensor_view;
+using emel::model::generation::has_tensor_named;
+using emel::model::generation::lookup_block_view;
+using emel::model::generation::quantized_contract_kind_name;
+using emel::model::generation::quantized_stage_family_name;
+using emel::model::generation::reject_block_tensor;
+using emel::model::generation::require_block_tensor;
+using emel::model::generation::tensor_type_name;
 
 }  // namespace emel::model::llama::detail

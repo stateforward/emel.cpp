@@ -37,6 +37,7 @@
 #include "emel/memory/view.hpp"
 #include "emel/model/data.hpp"
 #include "emel/model/detail.hpp"
+#include "emel/model/generation/any.hpp"
 #include "emel/model/loader/errors.hpp"
 #include "emel/model/loader/events.hpp"
 #include "emel/model/loader/sm.hpp"
@@ -831,6 +832,7 @@ struct generation_flash_evidence_state {
 
 struct emel_session {
   emel::model::data model_data = {};
+  emel::model::generation::contract generation_contract = {};
   emel::text::tokenizer::sm tokenizer = {};
   emel::text::conditioner::sm conditioner = {};
   emel::text::generator::matmul::lane_pool<7u, 128u, 1048576u> parallel_matmul_lanes = {};
@@ -1951,15 +1953,20 @@ make_reference_context(llama_model *model,
   return probe;
 }
 
-void prepare_emel_session(const emel_fixture &fixture, emel_session &session) {
+bool prepare_emel_session(const emel_fixture &fixture, emel_session &session) {
   session.model_data = fixture.model_data;
   session.formatter_binding = fixture.formatter_binding;
+  if (emel::model::generation::build_contract(session.model_data,
+                                              session.generation_contract) !=
+      emel::error::cast(emel::model::loader::error::none)) {
+    return false;
+  }
   const auto matmul_policy =
       emel::text::generator::matmul::make_auto_execution_policy(
           session.parallel_matmul_lanes);
   session.generator = std::make_unique<emel::text::generator::sm>(
       emel::text::generator::dependencies{
-          .model = session.model_data,
+          .generation_contract = session.generation_contract,
           .conditioner = session.conditioner,
           .matmul_policy = matmul_policy,
           .runtime_policy =
@@ -1968,6 +1975,7 @@ void prepare_emel_session(const emel_fixture &fixture, emel_session &session) {
           .formatter_ctx = session.formatter_binding.formatter_ctx,
           .format_prompt = session.formatter_binding.format_prompt,
       });
+  return true;
 }
 
 bool initialize_emel_session(emel_session &session,
@@ -2889,7 +2897,10 @@ void append_emel_generation_cases_for_current_benchmark_lane(
         std::uint64_t shared_q6_dispatch_calls = 0u;
         generation_result latest_generated = {};
         auto session = std::make_unique<emel_session>();
-        prepare_emel_session(fixture, *session);
+        if (!prepare_emel_session(fixture, *session)) {
+          fail_bench_setup("build_generation_contract",
+                           generation_case.name.data());
+        }
         if (!initialize_emel_session(*session, generation_case)) {
           fail_bench_setup("initialize_emel_session",
                            generation_case.name.data());
@@ -3109,7 +3120,10 @@ void append_emel_generation_cases_for_current_benchmark_lane(
       std::uint64_t shared_q6_dispatch_calls = 0u;
       generation_result latest_generated = {};
       auto session = std::make_unique<emel_session>();
-      prepare_emel_session(fixture, *session);
+      if (!prepare_emel_session(fixture, *session)) {
+        fail_bench_setup("build_generation_contract",
+                         generation_case.name.data());
+      }
       if (!initialize_emel_session(*session, generation_case)) {
         fail_bench_setup("initialize_emel_session",
                          generation_case.name.data());

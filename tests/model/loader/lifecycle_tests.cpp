@@ -23,11 +23,15 @@
 #include "emel/io/staged_read/sm.hpp"
 #include "emel/kernel/detail.hpp"
 #include "emel/kernel/events.hpp"
+#include "emel/model/gemma4/detail.hpp"
+#include "emel/model/generation/any.hpp"
 #include "emel/model/detail.hpp"
+#include "emel/model/lfm2/detail.hpp"
 #include "emel/model/llama/detail.hpp"
 #include "emel/model/loader/errors.hpp"
 #include "emel/model/loader/sm.hpp"
 #include "emel/model/omniembed/detail.hpp"
+#include "emel/model/qwen3/detail.hpp"
 #include "emel/model/sortformer/detail.hpp"
 #include "emel/model/tensor/sm.hpp"
 #include "emel/model/whisper/detail.hpp"
@@ -2435,78 +2439,76 @@ TEST_CASE("model_llama_detail_rejects_missing_required_tensor") {
 }
 
 TEST_CASE(
-    "model_llama_detail_builds_qwen3_execution_view_for_canonical_tensor_set") {
+    "model_qwen3_detail_builds_generation_contract_for_canonical_tensor_set") {
   auto model = std::make_unique<emel::model::data>();
   build_qwen3_model(*model, 1, true, true);
 
-  emel::model::llama::detail::execution_view view = {};
+  emel::model::generation::contract contract = {};
   const auto err =
-      emel::model::llama::detail::build_execution_view(*model, view);
+      emel::model::qwen3::detail::build_generation_contract(*model, contract);
+  const auto &view = contract.execution;
 
   CHECK(err == emel::error::cast(emel::model::loader::error::none));
   CHECK(view.model == model.get());
   CHECK(view.block_count == 1);
   CHECK(view.output.name == "output.weight");
 
-  emel::model::llama::detail::block_view block = {};
-  CHECK(emel::model::llama::detail::lookup_block_view(view, 0, block) ==
+  emel::model::generation::block_view block = {};
+  CHECK(emel::model::generation::lookup_block_view(view, 0, block) ==
         emel::error::cast(emel::model::loader::error::none));
   CHECK(block.attention_q_norm.name == "blk.0.attn_q_norm.weight");
   CHECK(block.attention_k_norm.name == "blk.0.attn_k_norm.weight");
 }
 
-TEST_CASE("model_llama_detail_describes_qwen3_generation_norm_requirements") {
+TEST_CASE("model_qwen3_detail_describes_generation_norm_requirements") {
   auto model = std::make_unique<emel::model::data>();
   build_qwen3_model(*model, 1, true, true);
 
-  emel::model::llama::detail::execution_view view = {};
-  REQUIRE(emel::model::llama::detail::build_execution_view(*model, view) ==
+  emel::model::generation::contract contract = {};
+  REQUIRE(emel::model::qwen3::detail::build_generation_contract(
+              *model, contract) ==
           emel::error::cast(emel::model::loader::error::none));
+  const auto &descriptor = contract.generation_execution;
 
-  emel::model::llama::detail::generation_execution_descriptor descriptor = {};
-  REQUIRE(emel::model::llama::detail::build_generation_execution_descriptor(
-              view, descriptor) ==
-          emel::error::cast(emel::model::loader::error::none));
-
-  CHECK(descriptor.execution == &view);
+  CHECK(descriptor.execution == &contract.execution);
   CHECK(descriptor.layer_count == 1u);
   CHECK(descriptor.layers[0].residual_route ==
-        emel::model::llama::detail::generation_residual_route::attention);
+        emel::model::generation::generation_residual_route::attention);
   CHECK(descriptor.layers[0].qk_norm_route ==
-        emel::model::llama::detail::generation_attention_qk_norm_route::headwise_rms);
+        emel::model::generation::generation_attention_qk_norm_route::headwise_rms);
   CHECK(descriptor.layers[0].value_route ==
-        emel::model::llama::detail::generation_attention_value_route::dedicated_value);
+        emel::model::generation::generation_attention_value_route::dedicated_value);
   CHECK(descriptor.layers[0].v_norm_route ==
-        emel::model::llama::detail::generation_attention_v_norm_route::none);
+        emel::model::generation::generation_attention_v_norm_route::none);
 }
 
-TEST_CASE("model_llama_detail_rejects_qwen3_execution_view_without_attention_q_"
+TEST_CASE("model_qwen3_detail_rejects_execution_view_without_attention_q_"
           "norm") {
   auto model = std::make_unique<emel::model::data>();
   build_qwen3_model(*model, 1, false, true);
 
-  emel::model::llama::detail::execution_view view = {};
+  emel::model::generation::contract contract = {};
   const auto err =
-      emel::model::llama::detail::build_execution_view(*model, view);
+      emel::model::qwen3::detail::build_generation_contract(*model, contract);
 
   CHECK(err == emel::error::cast(emel::model::loader::error::model_invalid));
-  CHECK(view.model == nullptr);
+  CHECK(contract.execution.model == nullptr);
 }
 
-TEST_CASE("model_llama_detail_rejects_qwen3_execution_view_without_attention_k_"
+TEST_CASE("model_qwen3_detail_rejects_execution_view_without_attention_k_"
           "norm") {
   auto model = std::make_unique<emel::model::data>();
   build_qwen3_model(*model, 1, true, false);
 
-  emel::model::llama::detail::execution_view view = {};
+  emel::model::generation::contract contract = {};
   const auto err =
-      emel::model::llama::detail::build_execution_view(*model, view);
+      emel::model::qwen3::detail::build_generation_contract(*model, contract);
 
   CHECK(err == emel::error::cast(emel::model::loader::error::model_invalid));
-  CHECK(view.model == nullptr);
+  CHECK(contract.execution.model == nullptr);
 }
 
-TEST_CASE("model_llama_detail_builds_qwen3_execution_view_with_tied_output_"
+TEST_CASE("model_qwen3_detail_builds_generation_contract_with_tied_output_"
           "fallback") {
   auto model = std::make_unique<emel::model::data>();
   build_qwen3_model(*model, 1, true, true);
@@ -2520,9 +2522,10 @@ TEST_CASE("model_llama_detail_builds_qwen3_execution_view_with_tied_output_"
     }
   }
 
-  emel::model::llama::detail::execution_view view = {};
+  emel::model::generation::contract contract = {};
   const auto err =
-      emel::model::llama::detail::build_execution_view(*model, view);
+      emel::model::qwen3::detail::build_generation_contract(*model, contract);
+  const auto &view = contract.execution;
 
   CHECK(err == emel::error::cast(emel::model::loader::error::none));
   CHECK(view.model == model.get());
@@ -2554,41 +2557,35 @@ TEST_CASE("model_execution_contract_accepts_canonical_lfm2_hybrid_contract") {
         emel::error::cast(emel::model::loader::error::none));
 }
 
-TEST_CASE("model_llama_detail_builds_lfm2_topology_with_hybrid_tensor_count") {
+TEST_CASE("model_lfm2_detail_builds_topology_with_hybrid_tensor_count") {
   auto model = std::make_unique<emel::model::data>();
   build_lfm2_model(*model, true, false);
 
-  emel::model::llama::detail::execution_view view = {};
-  REQUIRE(emel::model::llama::detail::build_execution_view(*model, view) ==
+  emel::model::generation::contract contract = {};
+  REQUIRE(emel::model::lfm2::detail::build_generation_contract(
+              *model, contract) ==
           emel::error::cast(emel::model::loader::error::none));
-
-  emel::model::llama::detail::topology topology = {};
-  REQUIRE(emel::model::llama::detail::build_topology(view, topology) ==
-          emel::error::cast(emel::model::loader::error::none));
-  CHECK(topology.tensor_count == 149u);
-  CHECK(topology.node_count == 149u);
+  CHECK(contract.topology.tensor_count == 149u);
+  CHECK(contract.topology.node_count == 149u);
 }
 
-TEST_CASE("model_llama_detail_describes_lfm2_hybrid_generation_layers") {
+TEST_CASE("model_lfm2_detail_describes_hybrid_generation_layers") {
   auto model = std::make_unique<emel::model::data>();
   build_lfm2_model(*model, true, false);
 
-  emel::model::llama::detail::execution_view view = {};
-  REQUIRE(emel::model::llama::detail::build_execution_view(*model, view) ==
+  emel::model::generation::contract contract = {};
+  REQUIRE(emel::model::lfm2::detail::build_generation_contract(
+              *model, contract) ==
           emel::error::cast(emel::model::loader::error::none));
-
-  emel::model::llama::detail::generation_execution_descriptor descriptor = {};
-  REQUIRE(emel::model::llama::detail::build_generation_execution_descriptor(
-              view, descriptor) ==
-          emel::error::cast(emel::model::loader::error::none));
+  const auto &descriptor = contract.generation_execution;
 
   CHECK(descriptor.layer_count == 16u);
   CHECK(descriptor.layers[0].residual_route ==
-        emel::model::llama::detail::generation_residual_route::shortconv);
+        emel::model::generation::generation_residual_route::shortconv);
   CHECK(descriptor.layers[2].residual_route ==
-        emel::model::llama::detail::generation_residual_route::attention);
+        emel::model::generation::generation_residual_route::attention);
   CHECK(descriptor.layers[2].qk_norm_route ==
-        emel::model::llama::detail::generation_attention_qk_norm_route::headwise_rms);
+        emel::model::generation::generation_attention_qk_norm_route::headwise_rms);
 }
 
 TEST_CASE(
@@ -2737,6 +2734,23 @@ TEST_CASE(
   CHECK_FALSE(emel::model::is_supported_execution_architecture("unknown-arch"));
   CHECK_FALSE(emel::model::is_lfm2_execution_architecture("unknown-arch"));
   CHECK_FALSE(emel::model::is_gemma4_execution_architecture("unknown-arch"));
+}
+
+TEST_CASE("model_generation_build_contract_resolves_current_architecture") {
+  auto model = std::make_unique<emel::model::data>();
+
+  build_qwen3_model(*model, 1, true, true);
+  emel::model::generation::contract contract = {};
+  REQUIRE(emel::model::generation::build_contract(*model, contract) ==
+          emel::error::cast(emel::model::loader::error::none));
+  CHECK(contract.execution.model == model.get());
+  CHECK(contract.generation_execution.layers[0].qk_norm_route ==
+        emel::model::generation::generation_attention_qk_norm_route::headwise_rms);
+
+  copy_name(model->architecture_name, "unsupported");
+  CHECK(emel::model::generation::build_contract(*model, contract) ==
+        emel::error::cast(emel::model::loader::error::model_invalid));
+  CHECK(contract.execution.model == nullptr);
 }
 
 TEST_CASE("model_detail_loads_llama_hparams_from_gguf_binding") {
@@ -3523,7 +3537,7 @@ TEST_CASE(
         emel::error::cast(emel::model::loader::error::none));
 }
 
-TEST_CASE("model_llama_detail_builds_gemma4_execution_view_with_shared_kv_and_"
+TEST_CASE("model_gemma4_detail_builds_generation_contract_with_shared_kv_and_"
           "tied_output_fallback") {
   auto model = std::make_unique<emel::model::data>();
   build_gemma4_model(*model, false);
@@ -3538,75 +3552,71 @@ TEST_CASE("model_llama_detail_builds_gemma4_execution_view_with_shared_kv_and_"
     }
   }
 
-  emel::model::llama::detail::execution_view view = {};
-  REQUIRE(emel::model::llama::detail::build_execution_view(*model, view) ==
+  emel::model::generation::contract contract = {};
+  REQUIRE(emel::model::gemma4::detail::build_generation_contract(
+              *model, contract) ==
           emel::error::cast(emel::model::loader::error::none));
+  const auto &view = contract.execution;
   CHECK(view.output.name == "token_embd.weight");
 
-  emel::model::llama::detail::block_view dedicated = {};
-  REQUIRE(emel::model::llama::detail::lookup_block_view(view, 0, dedicated) ==
+  emel::model::generation::block_view dedicated = {};
+  REQUIRE(emel::model::generation::lookup_block_view(view, 0, dedicated) ==
           emel::error::cast(emel::model::loader::error::none));
   CHECK(dedicated.attention_v.name == "blk.0.attn_v.weight");
 
-  emel::model::llama::detail::block_view shared = {};
-  REQUIRE(emel::model::llama::detail::lookup_block_view(view, 15, shared) ==
+  emel::model::generation::block_view shared = {};
+  REQUIRE(emel::model::generation::lookup_block_view(view, 15, shared) ==
           emel::error::cast(emel::model::loader::error::none));
   CHECK(shared.attention_v.name == "blk.15.attn_k.weight");
 }
 
-TEST_CASE("model_llama_detail_describes_gemma4_sliding_and_shared_kv_layers") {
+TEST_CASE("model_gemma4_detail_describes_sliding_and_shared_kv_layers") {
   auto model = std::make_unique<emel::model::data>();
   build_gemma4_model(*model, false);
 
-  emel::model::llama::detail::execution_view view = {};
-  REQUIRE(emel::model::llama::detail::build_execution_view(*model, view) ==
+  emel::model::generation::contract contract = {};
+  REQUIRE(emel::model::gemma4::detail::build_generation_contract(
+              *model, contract) ==
           emel::error::cast(emel::model::loader::error::none));
-
-  emel::model::llama::detail::generation_execution_descriptor descriptor = {};
-  REQUIRE(emel::model::llama::detail::build_generation_execution_descriptor(
-              view, descriptor) ==
-          emel::error::cast(emel::model::loader::error::none));
+  const auto &descriptor = contract.generation_execution;
 
   CHECK(descriptor.layer_count == 35u);
   CHECK(descriptor.layers[0].window_route ==
-        emel::model::llama::detail::generation_attention_window_route::sliding_window);
+        emel::model::generation::generation_attention_window_route::sliding_window);
   CHECK(descriptor.layers[0].attention_key_length == 256);
   CHECK(descriptor.layers[0].attention_value_length == 256);
   CHECK(descriptor.layers[0].attention_rope_dim == 256);
   CHECK(descriptor.layers[0].attention_rope_freq_base == doctest::Approx(10000.0f));
   CHECK(descriptor.layers[4].window_route ==
-        emel::model::llama::detail::generation_attention_window_route::full_context);
+        emel::model::generation::generation_attention_window_route::full_context);
   CHECK(descriptor.layers[4].attention_key_length == 512);
   CHECK(descriptor.layers[4].attention_value_length == 512);
   CHECK(descriptor.layers[4].attention_rope_dim == 512);
   CHECK(descriptor.layers[4].attention_rope_freq_base == doctest::Approx(1000000.0f));
   CHECK(descriptor.layers[14].value_route ==
-        emel::model::llama::detail::generation_attention_value_route::dedicated_value);
+        emel::model::generation::generation_attention_value_route::dedicated_value);
   CHECK(descriptor.layers[14].v_norm_route ==
-        emel::model::llama::detail::generation_attention_v_norm_route::none);
+        emel::model::generation::generation_attention_v_norm_route::none);
   CHECK(descriptor.layers[15].value_route ==
-        emel::model::llama::detail::generation_attention_value_route::shared_key_value);
+        emel::model::generation::generation_attention_value_route::shared_key_value);
   CHECK(descriptor.layers[15].v_norm_route ==
-        emel::model::llama::detail::generation_attention_v_norm_route::rms);
+        emel::model::generation::generation_attention_v_norm_route::rms);
 }
 
-TEST_CASE("model_llama_detail_builds_gemma4_topology_with_shared_kv_tail_"
+TEST_CASE("model_gemma4_detail_builds_topology_with_shared_kv_tail_"
           "tensor_count") {
   auto model = std::make_unique<emel::model::data>();
   build_gemma4_model(*model, false);
 
-  emel::model::llama::detail::execution_view view = {};
-  REQUIRE(emel::model::llama::detail::build_execution_view(*model, view) ==
+  emel::model::generation::contract contract = {};
+  REQUIRE(emel::model::gemma4::detail::build_generation_contract(
+              *model, contract) ==
           emel::error::cast(emel::model::loader::error::none));
-
-  emel::model::llama::detail::topology topology = {};
-  REQUIRE(emel::model::llama::detail::build_topology(view, topology) ==
-          emel::error::cast(emel::model::loader::error::none));
-  CHECK(topology.tensor_count == 333u);
-  CHECK(topology.node_count == 333u);
+  CHECK(contract.topology.tensor_count == 333u);
+  CHECK(contract.topology.node_count == 333u);
 }
 
-TEST_CASE("model_llama_detail_builds_gemma4_quantized_path_audit_with_shared_"
+TEST_CASE("model_gemma4_detail_builds_quantized_path_audit_with_shared_"
           "kv_fallback") {
   auto model = std::make_unique<emel::model::data>();
   build_gemma4_model(*model, false);
@@ -3623,15 +3633,15 @@ TEST_CASE("model_llama_detail_builds_gemma4_quantized_path_audit_with_shared_"
     }
   }
 
-  emel::model::llama::detail::execution_view view = {};
-  REQUIRE(emel::model::llama::detail::build_execution_view(*model, view) ==
+  emel::model::generation::contract contract = {};
+  REQUIRE(emel::model::gemma4::detail::build_generation_contract(
+              *model, contract) ==
           emel::error::cast(emel::model::loader::error::none));
 
-  const auto audit =
-      emel::model::llama::detail::build_quantized_path_audit(view);
+  const auto &audit = contract.quantized_audit;
   const auto find_stage =
-      [&](const emel::model::llama::detail::quantized_stage_family family)
-      -> const emel::model::llama::detail::quantized_stage_audit & {
+      [&](const emel::model::generation::quantized_stage_family family)
+      -> const emel::model::generation::quantized_stage_audit & {
     for (const auto &stage : audit.stages) {
       if (stage.family == family) {
         return stage;
@@ -3642,33 +3652,33 @@ TEST_CASE("model_llama_detail_builds_gemma4_quantized_path_audit_with_shared_"
   };
 
   const auto &token_embedding = find_stage(
-      emel::model::llama::detail::quantized_stage_family::token_embedding);
+      emel::model::generation::quantized_stage_family::token_embedding);
   const auto &output =
-      find_stage(emel::model::llama::detail::quantized_stage_family::output);
+      find_stage(emel::model::generation::quantized_stage_family::output);
   const auto &attention_v = find_stage(
-      emel::model::llama::detail::quantized_stage_family::attention_v);
+      emel::model::generation::quantized_stage_family::attention_v);
   const auto &attention_q_norm = find_stage(
-      emel::model::llama::detail::quantized_stage_family::attention_q_norm);
+      emel::model::generation::quantized_stage_family::attention_q_norm);
   const auto &attention_k_norm = find_stage(
-      emel::model::llama::detail::quantized_stage_family::attention_k_norm);
+      emel::model::generation::quantized_stage_family::attention_k_norm);
 
   CHECK(token_embedding.contract ==
-        emel::model::llama::detail::quantized_contract_kind::
+        emel::model::generation::quantized_contract_kind::
             approved_dense_f32_by_contract);
   CHECK(output.tensor_type ==
         static_cast<int32_t>(emel::kernel::event::dtype::q2_k));
   CHECK(output.contract ==
-        emel::model::llama::detail::quantized_contract_kind::native_quantized);
+        emel::model::generation::quantized_contract_kind::native_quantized);
   CHECK(attention_v.tensor_type ==
         static_cast<int32_t>(emel::kernel::event::dtype::q6_k));
   CHECK(attention_v.contract ==
-        emel::model::llama::detail::quantized_contract_kind::native_quantized);
+        emel::model::generation::quantized_contract_kind::native_quantized);
   CHECK(attention_v.consistent_across_layers);
   CHECK(attention_q_norm.contract ==
-        emel::model::llama::detail::quantized_contract_kind::
+        emel::model::generation::quantized_contract_kind::
             approved_dense_f32_by_contract);
   CHECK(attention_k_norm.contract ==
-        emel::model::llama::detail::quantized_contract_kind::
+        emel::model::generation::quantized_contract_kind::
             approved_dense_f32_by_contract);
 }
 
