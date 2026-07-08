@@ -114,11 +114,17 @@ std::filesystem::path personaplex_lm_model_path() {
   }
 
   const auto root = bench_root_path();
-  const auto workspace_root = root.parent_path().parent_path().parent_path();
   const std::array candidates{
       root / "build" / "moshi_reference" / "model-q4_k-emel.gguf",
-      workspace_root / "companion" / "zig-out" / "personaplex-emel-converted" /
-          "Codes4Fun" / "personaplex-7b-v1-q4_k-GGUF" / "model-q4_k.gguf",
+      root.parent_path() / "companion" / "zig-out" /
+          "personaplex-emel-converted" / "Codes4Fun" /
+          "personaplex-7b-v1-q4_k-GGUF" / "model-q4_k.gguf",
+      root.parent_path().parent_path() / "companion" / "zig-out" /
+          "personaplex-emel-converted" / "Codes4Fun" /
+          "personaplex-7b-v1-q4_k-GGUF" / "model-q4_k.gguf",
+      root.parent_path().parent_path().parent_path() / "companion" / "zig-out" /
+          "personaplex-emel-converted" / "Codes4Fun" /
+          "personaplex-7b-v1-q4_k-GGUF" / "model-q4_k.gguf",
   };
   return first_existing_path(std::span<const std::filesystem::path>{
       candidates.data(), candidates.size()});

@@ -1282,6 +1282,24 @@ TEST_CASE("moshi lm wrapper keeps build-only model-free") {
   CHECK(setup_call < tool_check);
   CHECK(tool_check < build_only_exit);
 }
+
+TEST_CASE("moshi lm wrapper and runner search common companion layouts") {
+  const std::string script = read_file(bench_moshi_lm_compare_wrapper_path());
+  CHECK(script.find("$ROOT_DIR/../companion/zig-out/"
+                    "personaplex-emel-converted") != std::string::npos);
+  CHECK(script.find("$ROOT_DIR/../../companion/zig-out/"
+                    "personaplex-emel-converted") != std::string::npos);
+  CHECK(script.find("$ROOT_DIR/../../../companion/zig-out/"
+                    "personaplex-emel-converted") != std::string::npos);
+
+  const std::string runner = read_file(repo_root() / "tools" / "bench" /
+                                       "speech" / "lm_moshi_bench.cpp");
+  CHECK(runner.find("root.parent_path() / \"companion\"") != std::string::npos);
+  CHECK(runner.find("root.parent_path().parent_path() / \"companion\"") !=
+        std::string::npos);
+  CHECK(runner.find("root.parent_path().parent_path().parent_path() / "
+                    "\"companion\"") != std::string::npos);
+}
 #endif
 
 TEST_CASE("bench_runner cli emits and checks dependency manifest freshness") {

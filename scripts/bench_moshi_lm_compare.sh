@@ -92,6 +92,8 @@ if ! $BUILD_ONLY; then
   if [[ -z "$MODEL_PATH" ]]; then
     for candidate in \
       "$ROOT_DIR/build/moshi_reference/model-q4_k-emel.gguf" \
+      "$ROOT_DIR/../companion/zig-out/personaplex-emel-converted/Codes4Fun/personaplex-7b-v1-q4_k-GGUF/model-q4_k.gguf" \
+      "$ROOT_DIR/../../companion/zig-out/personaplex-emel-converted/Codes4Fun/personaplex-7b-v1-q4_k-GGUF/model-q4_k.gguf" \
       "$ROOT_DIR/../../../companion/zig-out/personaplex-emel-converted/Codes4Fun/personaplex-7b-v1-q4_k-GGUF/model-q4_k.gguf"; do
       if [[ -f "$candidate" ]]; then
         MODEL_PATH="$candidate"
