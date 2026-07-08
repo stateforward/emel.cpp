@@ -123,19 +123,26 @@ struct guard_tensor_contract_invalid {
 struct guard_encoder_kernel_ready {
   bool operator()(const event::run_flow & runtime_ev,
                   const action::context & ctx) const noexcept {
-    if (runtime_ev.request.pcm.data() == nullptr || ctx.encoder_frames.data() == nullptr) {
+    (void)runtime_ev;
+    if (ctx.features.size() != static_cast<size_t>(detail::k_required_feature_count) ||
+        ctx.encoder_frames.size() !=
+        static_cast<size_t>(detail::k_required_encoder_value_count) ||
+        ctx.encoder_workspace.pre_encoder_rows.size() !=
+        static_cast<size_t>(
+            detail::k_frame_count *
+            emel::diarization::sortformer::encoder::detail::k_pre_expanded_dim)) {
       return false;
     }
 
     for (const auto & tensor : ctx.encoder.pre) {
-      if (tensor.tensor == nullptr) {
+      if (tensor.tensor == nullptr || tensor.tensor->data == nullptr) {
         return false;
       }
     }
 
     for (const auto & layer : ctx.encoder.layers) {
       for (const auto & tensor : layer) {
-        if (tensor.tensor == nullptr) {
+        if (tensor.tensor == nullptr || tensor.tensor->data == nullptr) {
           return false;
         }
       }
