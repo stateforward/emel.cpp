@@ -1013,13 +1013,6 @@ struct generation_load_state {
   emel::model::loader::sm model_loader = {};
   emel::text::tokenizer::sm tokenizer = {};
   emel::text::conditioner::sm conditioner = {};
-  emel::text::generator::matmul::lane_pool<7u, 128u, 1048576u>
-      parallel_matmul_lanes = {};
-  emel::text::generator::matmul::execution_policy diagnostic_matmul_policy =
-      emel::text::generator::matmul::make_auto_execution_policy(
-          parallel_matmul_lanes);
-  mutable emel::text::generator::matmul::sm diagnostic_matmul_actor{
-      diagnostic_matmul_policy};
   emel::model::generation::contract generation_contract = {};
   std::unique_ptr<emel::text::generator::sm> generator = {};
   reference_backend reference = {};

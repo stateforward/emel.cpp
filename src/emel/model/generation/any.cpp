@@ -41,6 +41,41 @@ bool tensor_has_storage(const data::tensor_record &tensor) noexcept {
   return true;
 }
 
+bool tensor_view_bound(const tensor_view &view) noexcept {
+  return view.tensor != nullptr && tensor_has_storage(*view.tensor);
+}
+
+bool block_has_common_tensors(const block_view &block) noexcept {
+  return tensor_view_bound(block.attention_norm) &&
+         tensor_view_bound(block.feed_forward_norm) &&
+         tensor_view_bound(block.feed_forward_gate) &&
+         tensor_view_bound(block.feed_forward_down) &&
+         tensor_view_bound(block.feed_forward_up);
+}
+
+bool block_has_required_tensors(const block_view &block) noexcept {
+  if (!block_has_common_tensors(block)) {
+    return false;
+  }
+
+  if (block.uses_attention) {
+    return tensor_view_bound(block.attention_q) &&
+           tensor_view_bound(block.attention_k) &&
+           tensor_view_bound(block.attention_v) &&
+           tensor_view_bound(block.attention_output);
+  }
+
+  return tensor_view_bound(block.shortconv_conv) &&
+         tensor_view_bound(block.shortconv_in_proj) &&
+         tensor_view_bound(block.shortconv_out_proj);
+}
+
+bool layer_requires_qk_norm(
+    const generation_layer_execution &layer) noexcept {
+  return layer.residual_route == generation_residual_route::attention &&
+         layer.qk_norm_route != generation_attention_qk_norm_route::none;
+}
+
 bool make_block_tensor_name(const int32_t block_index,
                             const std::string_view suffix,
                             std::array<char, 64> &buffer,
@@ -419,11 +454,17 @@ emel::error::type lookup_block_view(const execution_view &execution,
                                     block_view &block_out) noexcept {
   if (execution.model == nullptr || block_index < 0 ||
       block_index >= execution.block_count ||
-      static_cast<uint32_t>(block_index) >= execution_view::k_max_blocks) {
+      static_cast<uint32_t>(block_index) >= execution_view::k_max_blocks ||
+      static_cast<size_t>(block_index) >= execution.blocks.size()) {
     return emel::error::cast(emel::model::loader::error::invalid_request);
   }
 
   block_out = execution.blocks[static_cast<size_t>(block_index)];
+  if (!block_has_required_tensors(block_out)) {
+    block_out = {};
+    return emel::error::cast(emel::model::loader::error::model_invalid);
+  }
+
   return emel::error::cast(emel::model::loader::error::none);
 }
 
@@ -456,6 +497,58 @@ emel::error::type build_step_plans(const topology &topology_in,
   return emel::error::cast(emel::model::loader::error::none);
 }
 
+emel::error::type validate_contract(const contract &contract_in) noexcept {
+  const auto &execution = contract_in.execution;
+  const auto &descriptor = contract_in.generation_execution;
+  const auto &graph = contract_in.topology;
+  const auto &prefill = contract_in.prefill_plan;
+  const auto &decode = contract_in.decode_plan;
+
+  if (execution.model == nullptr || execution.block_count <= 0 ||
+      static_cast<uint32_t>(execution.block_count) >
+          execution_view::k_max_blocks ||
+      execution.blocks.size() != static_cast<size_t>(execution.block_count) ||
+      !tensor_view_bound(execution.token_embedding) ||
+      !tensor_view_bound(execution.output_norm) ||
+      !tensor_view_bound(execution.output)) {
+    return emel::error::cast(emel::model::loader::error::model_invalid);
+  }
+
+  if (descriptor.execution != &execution ||
+      descriptor.layer_count != static_cast<uint32_t>(execution.block_count) ||
+      graph.execution != &execution || graph.node_count == 0u ||
+      graph.tensor_count == 0u || prefill.graph != &graph ||
+      decode.graph != &graph || prefill.expected_outputs <= 0 ||
+      decode.expected_outputs <= 0) {
+    return emel::error::cast(emel::model::loader::error::model_invalid);
+  }
+
+  for (int32_t block_index = 0; block_index < execution.block_count;
+       ++block_index) {
+    const auto &block = execution.blocks[static_cast<size_t>(block_index)];
+    const auto &layer = descriptor.layers[static_cast<size_t>(block_index)];
+    if (block.index != block_index || !block_has_required_tensors(block)) {
+      return emel::error::cast(emel::model::loader::error::model_invalid);
+    }
+
+    if (layer.residual_route == generation_residual_route::attention) {
+      if (!block.uses_attention ||
+          (layer_requires_qk_norm(layer) &&
+           (!tensor_view_bound(block.attention_q_norm) ||
+            !tensor_view_bound(block.attention_k_norm)))) {
+        return emel::error::cast(emel::model::loader::error::model_invalid);
+      }
+      continue;
+    }
+
+    if (block.uses_attention) {
+      return emel::error::cast(emel::model::loader::error::model_invalid);
+    }
+  }
+
+  return emel::error::cast(emel::model::loader::error::none);
+}
+
 emel::error::type complete_contract(contract &contract_out) noexcept {
   if (contract_out.execution.model == nullptr ||
       contract_out.generation_execution.execution != &contract_out.execution ||
@@ -468,6 +561,11 @@ emel::error::type complete_contract(contract &contract_out) noexcept {
                                         contract_out.decode_plan);
   if (step_err != emel::error::cast(emel::model::loader::error::none)) {
     return step_err;
+  }
+
+  const auto validate_err = validate_contract(contract_out);
+  if (validate_err != emel::error::cast(emel::model::loader::error::none)) {
+    return validate_err;
   }
 
   contract_out.quantized_audit =

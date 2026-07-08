@@ -5022,6 +5022,12 @@ prepare(native_backend &backend,
         const runtime_policy &policy,
         const int32_t kv_block_tokens =
             emel::memory::view::DEFAULT_BLOCK_TOKENS) noexcept {
+  if (emel::model::generation::validate_contract(generation_contract) !=
+          emel::error::cast(emel::model::loader::error::none) ||
+      kv_block_tokens <= 0) {
+    return emel::error::cast(emel::model::loader::error::model_invalid);
+  }
+
   std::destroy_at(std::addressof(backend));
   std::construct_at(std::addressof(backend));
   backend.matmul_actor = &matmul_actor;

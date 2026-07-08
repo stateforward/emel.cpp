@@ -6,6 +6,7 @@
 #include "emel/graph/errors.hpp"
 #include "emel/memory/hybrid/errors.hpp"
 #include "emel/memory/view.hpp"
+#include "emel/model/generation/any.hpp"
 #include "emel/model/loader/errors.hpp"
 #include "emel/text/conditioner/errors.hpp"
 #include "emel/text/renderer/errors.hpp"
@@ -152,7 +153,9 @@ struct guard_generation_contract_valid {
            contract->decode_plan.graph == &contract->topology &&
            contract->prefill_plan.expected_outputs > 0 &&
            contract->decode_plan.expected_outputs > 0 &&
-           kv_positions_capacity >= model->params.n_ctx;
+           kv_positions_capacity >= model->params.n_ctx &&
+           emel::model::generation::validate_contract(*contract) ==
+               emel::error::cast(emel::model::loader::error::none);
   }
 };
 

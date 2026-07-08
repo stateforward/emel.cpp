@@ -2379,6 +2379,40 @@ TEST_CASE("generator_detail_scalar_routes_run_packed_and_q8_success_paths") {
 #endif
 }
 
+TEST_CASE("generator_detail_prepare_rejects_invalid_generation_contract") {
+  emel::text::generator::detail::native_backend backend = {};
+  matmul_actor_fixture matmul = {};
+  emel::model::generation::contract contract = {};
+  emel::text::generator::runtime_policy runtime_policy = {};
+
+  CHECK(emel::text::generator::detail::prepare(
+            backend, contract, matmul.actor, runtime_policy) ==
+        emel::error::cast(emel::model::loader::error::model_invalid));
+  CHECK(backend.model == nullptr);
+}
+
+TEST_CASE("model_generation_validate_contract_rejects_incomplete_blocks") {
+  auto model_fixture = std::make_unique<qwen3_runtime_fixture>();
+  REQUIRE(emel::model::generation::validate_contract(model_fixture->contract) ==
+          emel::error::cast(emel::model::loader::error::none));
+  REQUIRE_FALSE(model_fixture->contract.execution.blocks.empty());
+
+  model_fixture->contract.execution.blocks.front().attention_q.tensor = nullptr;
+
+  CHECK(emel::model::generation::validate_contract(model_fixture->contract) ==
+        emel::error::cast(emel::model::loader::error::model_invalid));
+
+  emel::text::generator::detail::native_backend backend = {};
+  matmul_actor_fixture matmul = {};
+  const auto runtime_policy =
+      emel::text::generator::test::make_auto_runtime_policy(
+          model_fixture->model);
+  CHECK(emel::text::generator::detail::prepare(
+            backend, model_fixture->contract, matmul.actor, runtime_policy) ==
+        emel::error::cast(emel::model::loader::error::model_invalid));
+  CHECK(backend.model == nullptr);
+}
+
 TEST_CASE("generator_detail_prepare_derives_kv_geometry_from_memory_contract") {
   auto model_fixture = std::make_unique<qwen3_runtime_fixture>();
   auto backend =

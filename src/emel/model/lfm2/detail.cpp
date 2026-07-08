@@ -217,6 +217,7 @@ emel::error::type build_generation_contract(
 
   execution.model = &model_data;
   execution.block_count = model_data.n_layers;
+  execution.blocks.resize(static_cast<size_t>(execution.block_count));
   if (!emel::model::generation::bind_tensor_view(
           model_data, k_token_embedding_name, execution.token_embedding) ||
       !emel::model::generation::bind_tensor_view(

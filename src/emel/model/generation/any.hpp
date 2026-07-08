@@ -3,6 +3,7 @@
 #include <array>
 #include <cstdint>
 #include <string_view>
+#include <vector>
 
 #include "emel/error/error.hpp"
 #include "emel/model/data.hpp"
@@ -44,7 +45,7 @@ struct execution_view {
   tensor_view output_norm = {};
   tensor_view output = {};
   int32_t block_count = 0;
-  std::array<block_view, k_max_blocks> blocks = {};
+  std::vector<block_view> blocks = {};
 };
 
 using generation_residual_route = emel::model::generation_residual_route;
@@ -202,6 +203,7 @@ emel::error::type lookup_block_view(const execution_view & execution,
 emel::error::type build_step_plans(const topology & topology_in,
                                    step_plan & prefill_out,
                                    step_plan & decode_out) noexcept;
+emel::error::type validate_contract(const contract & contract_in) noexcept;
 emel::error::type complete_contract(contract & contract_out) noexcept;
 quantized_path_audit
 build_quantized_path_audit(const execution_view & execution) noexcept;
