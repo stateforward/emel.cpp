@@ -31,6 +31,7 @@ using ComputeExecutor = emel::graph::processor::sm;
 using Conditioner = emel::text::conditioner::sm;
 using Detokenizer = emel::text::detokenizer::sm;
 using SortformerRequest = emel::diarization::sortformer::request::sm;
+using DiarizationRequest = SortformerRequest;
 using SortformerExecutor = emel::diarization::sortformer::executor::sm;
 using SortformerPipeline = emel::diarization::sortformer::pipeline::sm;
 using EmbeddingsGenerator = emel::embeddings::generator::sm;

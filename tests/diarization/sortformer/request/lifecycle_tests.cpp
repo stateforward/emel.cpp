@@ -5,6 +5,7 @@
 #include <cstring>
 #include <memory>
 #include <string_view>
+#include <type_traits>
 #include <vector>
 
 #include <stateforward/sml.hpp>
@@ -14,6 +15,7 @@
 #include "emel/diarization/sortformer/request/errors.hpp"
 #include "emel/diarization/sortformer/request/sm.hpp"
 #include "emel/error/error.hpp"
+#include "emel/machines.hpp"
 #include "emel/model/sortformer/any.hpp"
 #include "../../../kernel/test_helpers.hpp"
 
@@ -158,6 +160,10 @@ diarization_request::event::prepare make_request(
 }
 
 }  // namespace
+
+TEST_CASE("sortformer request keeps top-level compatibility alias") {
+  CHECK((std::is_same_v<emel::DiarizationRequest, emel::SortformerRequest>));
+}
 
 TEST_CASE("diarization request extracts deterministic Sortformer features") {
   auto model = std::make_unique<request_model_fixture>();

@@ -251,8 +251,6 @@ make_profile_emel_result(const fixture::model_fixture &model,
   const double pipeline_ns = measure_once_ns([&]() {
     g_stage_ok_sink = fixture::run_pipeline(*machine, model.contract, pcm.pcm,
                                             pcm.sample_rate, pipeline_result);
-    g_checksum_sink = fixture::compute_checksum(pipeline_result.segments,
-                                                pipeline_result.segment_count);
   });
 
   if (!g_stage_ok_sink ||
@@ -273,6 +271,7 @@ make_profile_emel_result(const fixture::model_fixture &model,
   out.output_dim = static_cast<std::uint64_t>(pipeline_result.segment_count);
   out.output_checksum = fixture::compute_checksum(
       pipeline_result.segments, pipeline_result.segment_count);
+  g_checksum_sink = out.output_checksum;
   out.output_text =
       format_segments(pipeline_result.segments, pipeline_result.segment_count);
   out.note += " end_to_end_ns=" +
@@ -297,8 +296,6 @@ make_stage_profile_result(const fixture::model_fixture &model,
   const double pipeline_ns = measure_once_ns([&]() {
     g_stage_ok_sink = fixture::run_pipeline(*machine, model.contract, pcm.pcm,
                                             pcm.sample_rate, pipeline_result);
-    g_checksum_sink = fixture::compute_checksum(pipeline_result.segments,
-                                                pipeline_result.segment_count);
   });
   if (!g_stage_ok_sink ||
       pipeline_result.err != emel::error::cast(pipeline::error::none) ||
@@ -323,6 +320,7 @@ make_stage_profile_result(const fixture::model_fixture &model,
   out.output_dim = static_cast<std::uint64_t>(pipeline_result.segment_count);
   out.output_checksum = fixture::compute_checksum(
       pipeline_result.segments, pipeline_result.segment_count);
+  g_checksum_sink = out.output_checksum;
   out.output_text =
       format_segments(pipeline_result.segments, pipeline_result.segment_count);
   out.note =
@@ -356,8 +354,6 @@ void append_emel_sortformer_diarization_cases(std::vector<result> &results,
   auto measured = measure_case(fixture::k_case_name, bench_cfg, [&]() {
     g_stage_ok_sink = fixture::run_pipeline(*machine, model->contract, pcm.pcm,
                                             pcm.sample_rate, pipeline_result);
-    g_checksum_sink = fixture::compute_checksum(pipeline_result.segments,
-                                                pipeline_result.segment_count);
   });
   if (!g_stage_ok_sink ||
       pipeline_result.err != emel::error::cast(pipeline::error::none) ||
@@ -368,6 +364,7 @@ void append_emel_sortformer_diarization_cases(std::vector<result> &results,
                          pipeline_result.probabilities);
   const std::uint64_t checksum = fixture::compute_checksum(
       pipeline_result.segments, pipeline_result.segment_count);
+  g_checksum_sink = checksum;
   auto record = with_sortformer_metadata(
       std::move(measured), "emel", k_emel_backend_id, "cpp", checksum,
       static_cast<std::uint64_t>(pipeline_result.segment_count),
