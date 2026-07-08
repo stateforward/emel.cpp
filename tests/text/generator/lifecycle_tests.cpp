@@ -68,6 +68,52 @@ struct callback_tracker {
   emel::error::type err = emel::error::cast(emel::text::generator::error::none);
 };
 
+struct recording_kv_actor {
+  emel::memory::kv::sm delegate = {};
+  int32_t reserve_count = 0;
+  int32_t allocate_sequence_count = 0;
+  int32_t allocate_slots_count = 0;
+  int32_t branch_sequence_count = 0;
+  int32_t free_sequence_count = 0;
+  int32_t rollback_slots_count = 0;
+  int32_t capture_view_count = 0;
+
+  bool process_event(const emel::memory::event::reserve & ev) {
+    ++reserve_count;
+    return delegate.process_event(ev);
+  }
+
+  bool process_event(const emel::memory::event::allocate_sequence & ev) {
+    ++allocate_sequence_count;
+    return delegate.process_event(ev);
+  }
+
+  bool process_event(const emel::memory::event::allocate_slots & ev) {
+    ++allocate_slots_count;
+    return delegate.process_event(ev);
+  }
+
+  bool process_event(const emel::memory::event::branch_sequence & ev) {
+    ++branch_sequence_count;
+    return delegate.process_event(ev);
+  }
+
+  bool process_event(const emel::memory::event::free_sequence & ev) {
+    ++free_sequence_count;
+    return delegate.process_event(ev);
+  }
+
+  bool process_event(const emel::memory::event::rollback_slots & ev) {
+    ++rollback_slots_count;
+    return delegate.process_event(ev);
+  }
+
+  bool process_event(const emel::memory::event::capture_view & ev) {
+    ++capture_view_count;
+    return delegate.process_event(ev);
+  }
+};
+
 void on_initialize_done(void * owner, const emel::text::generator::events::initialize_done & ev) {
   auto * tracker = static_cast<callback_tracker *>(owner);
   tracker->initialize_done_called = true;
@@ -897,7 +943,8 @@ struct generator_fixture {
       const model_variant variant = model_variant::canonical,
       void * formatter_ctx = nullptr,
       emel::text::formatter::format_fn format_prompt =
-          emel::text::formatter::format_raw)
+          emel::text::formatter::format_raw,
+      const emel::memory::hybrid::kv_binding & kv_cache = {})
       : prepared() {
     if (variant == model_variant::quantized_contract) {
       build_quantized_contract_prepared_model(prepared);
@@ -927,6 +974,7 @@ struct generator_fixture {
                 emel::text::generator::test::make_auto_runtime_policy(model),
             .formatter_ctx = formatter_ctx,
             .format_prompt = format_prompt,
+            .kv_cache = kv_cache,
         });
     hello_id = prepared.hello_id;
     world_id = prepared.world_id;
@@ -1018,6 +1066,24 @@ TEST_CASE("generator_initialize_reserves_lifecycle_managed_graph_tensors") {
   REQUIRE(graph_snapshot.runtime_tensor_captured);
   CHECK(graph_snapshot.runtime_tensor.lifecycle_state ==
         emel::graph::tensor::event::lifecycle::empty);
+}
+
+TEST_CASE("generator_dependencies_accept_custom_kv_actor") {
+  recording_kv_actor kv{};
+  auto fixture = std::make_unique<generator_fixture>(
+      generator_fixture::model_variant::canonical,
+      nullptr,
+      emel::text::formatter::format_raw,
+      emel::memory::hybrid::bind_kv_actor(kv));
+  callback_tracker tracker{};
+  emel::error::type error = emel::error::cast(emel::text::generator::error::backend);
+  const auto request = fixture->make_initialize(tracker, &error);
+
+  REQUIRE(fixture->generator->process_event(request));
+  REQUIRE(tracker.initialize_done_called);
+  REQUIRE_FALSE(tracker.initialize_error_called);
+  CHECK(error == emel::error::cast(emel::text::generator::error::none));
+  CHECK(kv.reserve_count == 1);
 }
 
 TEST_CASE("generator_rejects_generate_before_initialize") {

@@ -128,7 +128,7 @@ struct begin_capture_view {
 struct exec_reserve_kv {
   void operator()(const event::reserve_runtime & ev, context & ctx) const noexcept {
     ev.ctx.kv_error = static_cast<int32_t>(emel::error::cast(error::none));
-    ev.ctx.kv_accepted = ctx.kv.process_event(event::reserve{
+    ev.ctx.kv_accepted = ctx.kv_actor.dispatch_reserve(ctx.kv_actor.actor, event::reserve{
       .max_sequences = ev.request.max_sequences,
       .max_blocks = ev.request.max_blocks,
       .block_tokens = ev.request.block_tokens,
@@ -152,10 +152,11 @@ struct exec_reserve_recurrent {
 struct exec_allocate_sequence_kv {
   void operator()(const event::allocate_sequence_runtime & ev, context & ctx) const noexcept {
     ev.ctx.kv_error = static_cast<int32_t>(emel::error::cast(error::none));
-    ev.ctx.kv_accepted = ctx.kv.process_event(event::allocate_sequence{
-      .seq_id = ev.request.seq_id,
-      .error_out = &ev.ctx.kv_error,
-    });
+    ev.ctx.kv_accepted =
+        ctx.kv_actor.dispatch_allocate_sequence(ctx.kv_actor.actor, event::allocate_sequence{
+          .seq_id = ev.request.seq_id,
+          .error_out = &ev.ctx.kv_error,
+        });
   }
 };
 
@@ -172,10 +173,11 @@ struct exec_allocate_sequence_recurrent {
 struct exec_allocate_sequence_rollback_kv {
   void operator()(const event::allocate_sequence_runtime & ev, context & ctx) const noexcept {
     ev.ctx.rollback_error = static_cast<int32_t>(emel::error::cast(error::none));
-    ev.ctx.rollback_accepted = ctx.kv.process_event(event::free_sequence{
-      .seq_id = ev.request.seq_id,
-      .error_out = &ev.ctx.rollback_error,
-    });
+    ev.ctx.rollback_accepted =
+        ctx.kv_actor.dispatch_free_sequence(ctx.kv_actor.actor, event::free_sequence{
+          .seq_id = ev.request.seq_id,
+          .error_out = &ev.ctx.rollback_error,
+        });
   }
 };
 
@@ -183,14 +185,15 @@ struct exec_allocate_slots_kv {
   void operator()(const event::allocate_slots_runtime & ev, context & ctx) const noexcept {
     ev.ctx.kv_error = static_cast<int32_t>(emel::error::cast(error::none));
     ev.ctx.kv_block_count = 0;
-    ev.ctx.kv_accepted = ctx.kv.process_event(event::allocate_slots{
-      .seq_id = ev.request.seq_id,
-      .token_count = ev.request.token_count,
-      .block_count_out = &ev.ctx.kv_block_count,
-      .error_out = &ev.ctx.kv_error,
-      .copy_block = ev.request.copy_block,
-      .copy_block_user_data = ev.request.copy_block_user_data,
-    });
+    ev.ctx.kv_accepted =
+        ctx.kv_actor.dispatch_allocate_slots(ctx.kv_actor.actor, event::allocate_slots{
+          .seq_id = ev.request.seq_id,
+          .token_count = ev.request.token_count,
+          .block_count_out = &ev.ctx.kv_block_count,
+          .error_out = &ev.ctx.kv_error,
+          .copy_block = ev.request.copy_block,
+          .copy_block_user_data = ev.request.copy_block_user_data,
+        });
   }
 };
 
@@ -208,22 +211,24 @@ struct exec_allocate_slots_recurrent {
 struct exec_allocate_slots_rollback_kv {
   void operator()(const event::allocate_slots_runtime & ev, context & ctx) const noexcept {
     ev.ctx.rollback_error = static_cast<int32_t>(emel::error::cast(error::none));
-    ev.ctx.rollback_accepted = ctx.kv.process_event(event::rollback_slots{
-      .seq_id = ev.request.seq_id,
-      .token_count = ev.request.token_count,
-      .error_out = &ev.ctx.rollback_error,
-    });
+    ev.ctx.rollback_accepted =
+        ctx.kv_actor.dispatch_rollback_slots(ctx.kv_actor.actor, event::rollback_slots{
+          .seq_id = ev.request.seq_id,
+          .token_count = ev.request.token_count,
+          .error_out = &ev.ctx.rollback_error,
+        });
   }
 };
 
 struct exec_branch_sequence_kv {
   void operator()(const event::branch_sequence_runtime & ev, context & ctx) const noexcept {
     ev.ctx.kv_error = static_cast<int32_t>(emel::error::cast(error::none));
-    ev.ctx.kv_accepted = ctx.kv.process_event(event::branch_sequence{
-      .parent_seq_id = ev.request.parent_seq_id,
-      .child_seq_id = ev.request.child_seq_id,
-      .error_out = &ev.ctx.kv_error,
-    });
+    ev.ctx.kv_accepted =
+        ctx.kv_actor.dispatch_branch_sequence(ctx.kv_actor.actor, event::branch_sequence{
+          .parent_seq_id = ev.request.parent_seq_id,
+          .child_seq_id = ev.request.child_seq_id,
+          .error_out = &ev.ctx.kv_error,
+        });
   }
 };
 
@@ -243,20 +248,22 @@ struct exec_branch_sequence_recurrent {
 struct exec_branch_sequence_rollback_kv {
   void operator()(const event::branch_sequence_runtime & ev, context & ctx) const noexcept {
     ev.ctx.rollback_error = static_cast<int32_t>(emel::error::cast(error::none));
-    ev.ctx.rollback_accepted = ctx.kv.process_event(event::free_sequence{
-      .seq_id = ev.request.child_seq_id,
-      .error_out = &ev.ctx.rollback_error,
-    });
+    ev.ctx.rollback_accepted =
+        ctx.kv_actor.dispatch_free_sequence(ctx.kv_actor.actor, event::free_sequence{
+          .seq_id = ev.request.child_seq_id,
+          .error_out = &ev.ctx.rollback_error,
+        });
   }
 };
 
 struct exec_free_sequence_kv {
   void operator()(const event::free_sequence_runtime & ev, context & ctx) const noexcept {
     ev.ctx.kv_error = static_cast<int32_t>(emel::error::cast(error::none));
-    ev.ctx.kv_accepted = ctx.kv.process_event(event::free_sequence{
-      .seq_id = ev.request.seq_id,
-      .error_out = &ev.ctx.kv_error,
-    });
+    ev.ctx.kv_accepted =
+        ctx.kv_actor.dispatch_free_sequence(ctx.kv_actor.actor, event::free_sequence{
+          .seq_id = ev.request.seq_id,
+          .error_out = &ev.ctx.kv_error,
+        });
   }
 };
 
@@ -274,12 +281,13 @@ struct exec_rollback_slots_kv {
   void operator()(const event::rollback_slots_runtime & ev, context & ctx) const noexcept {
     ev.ctx.kv_error = static_cast<int32_t>(emel::error::cast(error::none));
     ev.ctx.kv_block_count = 0;
-    ev.ctx.kv_accepted = ctx.kv.process_event(event::rollback_slots{
-      .seq_id = ev.request.seq_id,
-      .token_count = ev.request.token_count,
-      .block_count_out = &ev.ctx.kv_block_count,
-      .error_out = &ev.ctx.kv_error,
-    });
+    ev.ctx.kv_accepted =
+        ctx.kv_actor.dispatch_rollback_slots(ctx.kv_actor.actor, event::rollback_slots{
+          .seq_id = ev.request.seq_id,
+          .token_count = ev.request.token_count,
+          .block_count_out = &ev.ctx.kv_block_count,
+          .error_out = &ev.ctx.kv_error,
+        });
   }
 };
 
@@ -297,10 +305,11 @@ struct exec_rollback_slots_recurrent {
 struct exec_capture_kv {
   void operator()(const event::capture_view_runtime & ev, context & ctx) const noexcept {
     ev.ctx.kv_error = static_cast<int32_t>(emel::error::cast(error::none));
-    ev.ctx.kv_accepted = ctx.kv.process_event(event::capture_view{
-      .snapshot_out = &ev.kv_snapshot,
-      .error_out = &ev.ctx.kv_error,
-    });
+    ev.ctx.kv_accepted =
+        ctx.kv_actor.dispatch_capture_view(ctx.kv_actor.actor, event::capture_view{
+          .snapshot_out = &ev.kv_snapshot,
+          .error_out = &ev.ctx.kv_error,
+        });
   }
 };
 
