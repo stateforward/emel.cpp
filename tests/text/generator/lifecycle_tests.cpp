@@ -929,7 +929,8 @@ struct generator_fixture {
       apply_flash_kv_width_mismatch(prepared);
     }
     const emel::model::data & model = stabilize_model(prepared);
-    (void)build_generation_contract(prepared, generation_contract);
+    REQUIRE(build_generation_contract(prepared, generation_contract) ==
+            emel::error::type{0});
     const auto matmul_policy =
         emel::text::generator::matmul::make_auto_execution_policy(
             parallel_matmul_lanes);

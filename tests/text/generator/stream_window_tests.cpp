@@ -561,8 +561,8 @@ struct generator_rig {
     if (kv_width_mismatch) {
       apply_flash_kv_width_mismatch(prepared);
     }
-    (void)emel::model::llama::detail::build_generation_contract(
-        prepared.data, generation_contract);
+    REQUIRE(emel::model::llama::detail::build_generation_contract(
+                prepared.data, generation_contract) == emel::error::type{0});
   }
 };
 
@@ -578,8 +578,8 @@ struct generator_rig_q8 {
 
   explicit generator_rig_q8(const float gate_sign) {
     build_model_q8(prepared, gate_sign);
-    (void)emel::model::llama::detail::build_generation_contract(
-        prepared.data, generation_contract);
+    REQUIRE(emel::model::llama::detail::build_generation_contract(
+                prepared.data, generation_contract) == emel::error::type{0});
   }
 };
 

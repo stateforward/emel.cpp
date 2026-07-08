@@ -319,7 +319,8 @@ struct qwen3_runtime_fixture {
     add_matrix("blk.0.ffn_down.weight", 4, 4, std::vector<float>(16, 0.0f));
     add_matrix("blk.0.ffn_up.weight", 4, 4, std::vector<float>(16, 0.0f));
     model.n_tensors = tensor_index;
-    (void)emel::model::qwen3::detail::build_generation_contract(model, contract);
+    REQUIRE(emel::model::qwen3::detail::build_generation_contract(model, contract) ==
+            emel::error::type{0});
   }
 };
 
@@ -440,7 +441,8 @@ struct gemma4_runtime_fixture {
     add_matrix("blk.0.ffn_down.weight", 4, 4, std::vector<float>(16, 0.0f));
     add_matrix("blk.0.ffn_up.weight", 4, 4, std::vector<float>(16, 0.0f));
     model.n_tensors = tensor_index;
-    (void)emel::model::gemma4::detail::build_generation_contract(model, contract);
+    REQUIRE(emel::model::gemma4::detail::build_generation_contract(model, contract) ==
+            emel::error::type{0});
   }
 };
 
