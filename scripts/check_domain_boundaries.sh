@@ -129,7 +129,7 @@ check_no_matches "Whisper leaked into generic speech recognizer" \
   src/emel/speech/recognizer tests/speech/recognizer
 
 check_no_matches "Whisper encoder detail leaked into recognizer route" \
-  'emel/speech/encoder/whisper/detail\.hpp|encoder::whisper::detail|::detail::' \
+  'emel/speech/encoder/whisper/detail\.hpp|encoder::whisper::detail|::detail([[:space:]]*(;|$)|::)' \
   src/emel/speech/recognizer_routes/whisper
 
 check_no_matches "Whisper model binding leaked into speech encoder/decoder runtime" \

@@ -381,6 +381,7 @@ src/emel/speech/encoder/whisper/errors.hpp
 src/emel/speech/encoder/whisper/guards.hpp
 src/emel/speech/recognizer/detail.hpp
 src/emel/speech/recognizer/errors.hpp
+src/emel/speech/recognizer_routes/whisper/detail.cpp
 src/emel/speech/tokenizer/whisper/detail.hpp
 src/emel/tensor/view/actions.hpp
 src/emel/tensor/view/context.hpp
