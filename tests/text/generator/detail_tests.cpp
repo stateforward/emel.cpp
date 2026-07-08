@@ -29,11 +29,13 @@ using emel::kernel::test::k_flash_online_f16_abs_tolerance;
 using emel::kernel::test::within_flash_online_f16_tolerance;
 using emel::text::generator::detail::quant::block_q2_k;
 using emel::text::generator::detail::quant::block_q3_k;
+using emel::text::generator::detail::quant::block_q4_0;
 using emel::text::generator::detail::quant::block_q4_k;
 using emel::text::generator::detail::quant::block_q6_k;
 using emel::text::generator::detail::quant::block_q8_0;
 using emel::text::generator::detail::quant::Q4_K_X8_ROWS;
 using emel::text::generator::detail::quant::Q6_K_X8_ROWS;
+using emel::text::generator::detail::quant::QK4_0;
 using emel::text::generator::detail::quant::QK8_0;
 using emel::text::generator::detail::quant::QK_K;
 
@@ -1311,6 +1313,29 @@ TEST_CASE("generator_detail_dequantizes_q8_0_blocks") {
   CHECK(out[1] == doctest::Approx(-1.0f));
   CHECK(out[2] == doctest::Approx(-0.5f));
   CHECK(out.back() == doctest::Approx(0.0f));
+}
+
+TEST_CASE("generator_detail_copies_q4_0_tensor_rows") {
+  std::array<block_q4_0, 2> rows = {};
+  rows[0].d = emel::text::generator::detail::quant::fp32_to_fp16(0.25f);
+  rows[1].d = emel::text::generator::detail::quant::fp32_to_fp16(0.5f);
+  for (size_t idx = 0; idx < rows[1].qs.size(); ++idx) {
+    rows[1].qs[idx] =
+        static_cast<uint8_t>((idx & 0x0fu) | (((idx + 1u) & 0x0fu) << 4u));
+  }
+
+  auto tensor =
+      make_tensor_record(rows.data(), emel::kernel::detail::dtype_q4_0,
+                         static_cast<int32_t>(QK4_0), 2);
+  std::array<float, QK4_0> expected = {};
+  std::array<float, QK4_0> copied = {};
+  emel::text::generator::detail::quant::dequantize_row_q4_0(
+      rows.data() + 1u, expected.data(), static_cast<int64_t>(expected.size()));
+
+  REQUIRE(emel::text::generator::detail::copy_tensor_row(tensor, 1, copied));
+  for (size_t idx = 0; idx < copied.size(); ++idx) {
+    CHECK(copied[idx] == doctest::Approx(expected[idx]));
+  }
 }
 
 TEST_CASE(

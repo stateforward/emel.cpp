@@ -41,6 +41,10 @@ std::filesystem::path bench_runner_binary_path() {
 #endif
 }
 
+std::filesystem::path bench_moshi_lm_compare_wrapper_path() {
+  return repo_root() / "scripts" / "bench_moshi_lm_compare.sh";
+}
+
 constexpr const char *k_bounded_generation_workload_id =
     "lfm2_single_user_hello_max_tokens_1_v1";
 constexpr const char *k_bounded_generation_case_name =
@@ -74,6 +78,15 @@ void write_file(const std::filesystem::path &path,
   REQUIRE(output);
   output.write(text.data(), static_cast<std::streamsize>(text.size()));
   REQUIRE(output);
+}
+
+void make_executable(const std::filesystem::path &path) {
+  std::filesystem::permissions(
+      path,
+      std::filesystem::perms::owner_read |
+          std::filesystem::perms::owner_write |
+          std::filesystem::perms::owner_exec,
+      std::filesystem::perm_options::add);
 }
 
 void replace_all(std::string &text, const std::string_view needle,
@@ -132,6 +145,28 @@ struct process_capture {
   std::string stdout_text = {};
   std::string stderr_text = {};
 };
+
+process_capture run_command_capture(const std::string &command,
+                                    const std::filesystem::path &stdout_path,
+                                    const std::filesystem::path &stderr_path) {
+  const int status = std::system(command.c_str());
+  process_capture capture{};
+  capture.stdout_text = read_file(stdout_path);
+  capture.stderr_text = read_file(stderr_path);
+
+  if (status == -1) {
+    return capture;
+  }
+#if defined(_WIN32)
+  capture.exit_code = status;
+#else
+  if (!WIFEXITED(status)) {
+    return capture;
+  }
+  capture.exit_code = WEXITSTATUS(status);
+#endif
+  return capture;
+}
 
 process_capture run_bench_runner_capture(const std::vector<std::string> &args,
                                          const std::string &tag) {
@@ -937,16 +972,21 @@ TEST_CASE(
   CHECK(emel::bench::find_registered_runner("generation") != nullptr);
   CHECK(emel::bench::find_registered_runner("diarization_sortformer") !=
         nullptr);
+  CHECK(emel::bench::find_registered_runner("speech_lm_moshi") != nullptr);
   CHECK(emel::bench::find_registered_runner("sm_scheduler") != nullptr);
   CHECK(emel::bench::find_registered_runner("tokenizer") != nullptr);
   CHECK(emel::bench::find_registered_runner("missing_suite") == nullptr);
 
   bool saw_generation = false;
+  bool saw_speech_lm_moshi = false;
   bool saw_sm_scheduler = false;
   bool saw_tokenizer = false;
   for (std::size_t i = 0; i < emel::bench::registered_runner_count(); ++i) {
     saw_generation = saw_generation || emel::bench::registered_runner_suite_at(
                                            i) == std::string_view{"generation"};
+    saw_speech_lm_moshi =
+        saw_speech_lm_moshi || emel::bench::registered_runner_suite_at(i) ==
+                                   std::string_view{"speech_lm_moshi"};
     saw_sm_scheduler =
         saw_sm_scheduler || emel::bench::registered_runner_suite_at(i) ==
                                 std::string_view{"sm_scheduler"};
@@ -954,6 +994,7 @@ TEST_CASE(
                                          i) == std::string_view{"tokenizer"};
   }
   CHECK(saw_generation);
+  CHECK(saw_speech_lm_moshi);
   CHECK(saw_sm_scheduler);
   CHECK(saw_tokenizer);
 }
@@ -998,6 +1039,8 @@ TEST_CASE("bench runner suites build through independent object targets") {
             "add_bench_runner_suite(generation generation_bench.cpp") !=
         std::string::npos);
   CHECK(cmake_source.find("add_bench_runner_suite(diarization_sortformer") !=
+        std::string::npos);
+  CHECK(cmake_source.find("add_bench_runner_suite(speech_lm_moshi") !=
         std::string::npos);
   CHECK(cmake_source.find("add_bench_runner_suite(sm_scheduler") !=
         std::string::npos);
@@ -1102,6 +1145,24 @@ TEST_CASE(
   CHECK(has_generation_config);
   CHECK(has_generation_model);
   CHECK(has_generation_script);
+
+  const auto speech_lm_records = manifest::records_for("speech_lm_moshi");
+  bool has_speech_lm_script = false;
+  bool has_speech_lm_setup = false;
+  bool has_speech_lm_moshi_binding = false;
+  for (const auto &record : speech_lm_records) {
+    has_speech_lm_script = has_speech_lm_script ||
+                           record.path == "scripts/bench_moshi_lm_compare.sh";
+    has_speech_lm_setup = has_speech_lm_setup ||
+                          record.path ==
+                              "scripts/setup_moshi_cpp_reference.sh";
+    has_speech_lm_moshi_binding =
+        has_speech_lm_moshi_binding ||
+        record.path == std::string_view{"src/emel/model/moshi"};
+  }
+  CHECK(has_speech_lm_script);
+  CHECK(has_speech_lm_setup);
+  CHECK(has_speech_lm_moshi_binding);
   CHECK(manifest::records_for("missing_runner").empty());
 }
 
@@ -1120,6 +1181,9 @@ TEST_CASE(
   CHECK(rendered.find("record runner=diarization_sortformer kind=source "
                       "path=tools/bench/diarization/sortformer_bench.cpp") !=
         std::string::npos);
+  CHECK(rendered.find("record runner=speech_lm_moshi kind=source "
+                      "path=tools/bench/speech/lm_moshi_bench.cpp") !=
+        std::string::npos);
 
   const std::filesystem::path manifest_path =
       std::filesystem::temp_directory_path() / "emel-bench-runner-tests" /
@@ -1137,6 +1201,88 @@ TEST_CASE(
   CHECK(docs.find(manifest::k_schema) != std::string::npos);
   CHECK(docs.find("full_gate_on=missing,stale,uncertain") != std::string::npos);
 }
+
+#if !defined(_WIN32)
+TEST_CASE("moshi lm wrapper gives --model priority over inherited env") {
+  const std::filesystem::path tmp_dir =
+      std::filesystem::temp_directory_path() / "emel-bench-runner-tests" /
+      "moshi-lm-model-priority";
+  const std::filesystem::path fake_bin_dir = tmp_dir / "bin";
+  const std::filesystem::path build_dir = tmp_dir / "build";
+  const std::filesystem::path fake_runner = build_dir / "bench_runner";
+  const std::filesystem::path cli_model = tmp_dir / "cli-model.gguf";
+  const std::filesystem::path stale_model = tmp_dir / "stale-model.gguf";
+  const std::filesystem::path invoked_path = tmp_dir / "runner-invoked.txt";
+  const std::filesystem::path stdout_path = tmp_dir / "stdout.txt";
+  const std::filesystem::path stderr_path = tmp_dir / "stderr.txt";
+  std::filesystem::create_directories(fake_bin_dir);
+  std::filesystem::create_directories(build_dir);
+  write_file(cli_model, "cli");
+  write_file(stale_model, "stale");
+
+  for (const char *tool : {"cmake", "ninja", "git"}) {
+    const std::filesystem::path tool_path = fake_bin_dir / tool;
+    write_file(tool_path, "#!/bin/sh\nexit 0\n");
+    make_executable(tool_path);
+  }
+  write_file(fake_runner,
+             "#!/bin/sh\n"
+             "printf 'personaplex=%s\\nmoshi=%s\\nbench=%s\\nargs=%s\\n' "
+             "\"$EMEL_PERSONAPLEX_LM_MODEL\" \"$EMEL_MOSHI_LM_MODEL\" "
+             "\"$EMEL_BENCH_SPEECH_LM_MOSHI_MODEL\" \"$*\" "
+             "> \"$EMEL_TEST_INVOKED_PATH\"\n"
+             "exit 0\n");
+  make_executable(fake_runner);
+
+  std::string command = "PATH=" + quote_arg_posix(fake_bin_dir.string()) +
+                        ":$PATH ";
+  command += "EMEL_TEST_INVOKED_PATH=" +
+             quote_arg_posix(invoked_path.string()) + " ";
+  command += "EMEL_MOSHI_LM_COMPARE_BUILD_DIR=" +
+             quote_arg_posix(build_dir.string()) + " ";
+  command += "EMEL_PERSONAPLEX_LM_MODEL=" +
+             quote_arg_posix(stale_model.string()) + " ";
+  command += quote_arg_posix("/bin/bash") + " " +
+             quote_arg_posix(bench_moshi_lm_compare_wrapper_path().string());
+  command += " --run-only --system --model " +
+             quote_arg_posix(cli_model.string());
+  command += " > " + quote_arg_posix(stdout_path.string());
+  command += " 2> " + quote_arg_posix(stderr_path.string());
+
+  const process_capture capture =
+      run_command_capture(command, stdout_path, stderr_path);
+
+  const std::string invoked = read_file(invoked_path);
+  CHECK_MESSAGE(!invoked.empty(), capture.stderr_text);
+  CHECK(invoked.find("personaplex=" + cli_model.string()) !=
+        std::string::npos);
+  CHECK(invoked.find("moshi=" + cli_model.string()) != std::string::npos);
+  CHECK(invoked.find("bench=" + cli_model.string()) != std::string::npos);
+  CHECK(invoked.find("personaplex=" + stale_model.string()) ==
+        std::string::npos);
+}
+
+TEST_CASE("moshi lm wrapper keeps build-only model-free") {
+  const std::string script = read_file(bench_moshi_lm_compare_wrapper_path());
+  const std::size_t mutual_exclusion =
+      script.find("if $BUILD_ONLY && $RUN_ONLY; then");
+  const std::size_t model_guard = script.find("if ! $BUILD_ONLY; then");
+  const std::size_t setup_call =
+      script.find("setup_output=\"$(\"$ROOT_DIR/scripts/setup_moshi_cpp_reference.sh\")\"");
+  const std::size_t tool_check = script.find("for tool in cmake ninja git");
+  const std::size_t build_only_exit = script.find("if $BUILD_ONLY; then");
+
+  REQUIRE(mutual_exclusion != std::string::npos);
+  REQUIRE(model_guard != std::string::npos);
+  REQUIRE(setup_call != std::string::npos);
+  REQUIRE(tool_check != std::string::npos);
+  REQUIRE(build_only_exit != std::string::npos);
+  CHECK(mutual_exclusion < model_guard);
+  CHECK(model_guard < setup_call);
+  CHECK(setup_call < tool_check);
+  CHECK(tool_check < build_only_exit);
+}
+#endif
 
 TEST_CASE("bench_runner cli emits and checks dependency manifest freshness") {
   namespace manifest = emel::bench::dependency_manifest;

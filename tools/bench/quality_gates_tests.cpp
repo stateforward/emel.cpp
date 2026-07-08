@@ -82,8 +82,13 @@ TEST_CASE("quality gates full benchmark branch preserves failure status") {
 
   CHECK(full_branch.find("run_step_allow_fail bench_snapshot") !=
         std::string::npos);
-  CHECK(full_branch.find("status=$?") != std::string::npos);
-  CHECK(full_branch.find("return \"$status\"") != std::string::npos);
+  CHECK(full_branch.find("full_status=$?") != std::string::npos);
+  CHECK(full_branch.find("run_full_benchmark_opt_in_suites") !=
+        std::string::npos);
+  CHECK(full_branch.find("if ! run_full_benchmark_opt_in_suites") ==
+        std::string::npos);
+  CHECK(full_branch.find("opt_in_status=$?") != std::string::npos);
+  CHECK(full_branch.find("return \"$opt_in_status\"") != std::string::npos);
   CHECK(full_branch.find("return $?") == std::string::npos);
 }
 
@@ -344,6 +349,21 @@ TEST_CASE("bench script exposes unfiltered bench tool validation command") {
   CHECK(script.find(ctest_contract) != std::string::npos);
 }
 
+TEST_CASE("bench script routes Moshi LM suite through the wrapper") {
+  const std::string script = read_file(repo_root() / "scripts" / "bench.sh");
+  const std::size_t route_start =
+      script.find("[[ \"$SUITE_FILTER\" == \"speech_lm_moshi\" ]]");
+  REQUIRE(route_start != std::string::npos);
+  const std::size_t route_end = script.find("prepare_toolchain()", route_start);
+  REQUIRE(route_end != std::string::npos);
+  const std::string route = script.substr(route_start, route_end - route_start);
+
+  CHECK(route.find("speech_lm_moshi has no reference lane") !=
+        std::string::npos);
+  CHECK(route.find("bash \"$ROOT_DIR/scripts/bench_moshi_lm_compare.sh\"") !=
+        std::string::npos);
+}
+
 TEST_CASE("benchmark defaults stay bounded for routine quality gates") {
   const std::string quality_gates =
       read_file(repo_root() / "scripts" / "quality_gates.sh");
@@ -566,6 +586,44 @@ TEST_CASE(
   CHECK(pre_full.find("bench_full=true") != std::string::npos);
   CHECK(pre_full.find("if ! $bench_full && $bench_all_suites") !=
         std::string::npos);
+}
+
+TEST_CASE(
+    "quality gates dispatch opt-in suites during full benchmark fallback") {
+  const std::string script =
+      read_file(repo_root() / "scripts" / "quality_gates.sh");
+  const std::size_t selector_start =
+      script.find("benchmark_suite_selected_for_full_dispatch()");
+  REQUIRE(selector_start != std::string::npos);
+  const std::size_t selector_end =
+      script.find("run_full_benchmark_opt_in_suites()", selector_start);
+  REQUIRE(selector_end != std::string::npos);
+  const std::string selector =
+      script.substr(selector_start, selector_end - selector_start);
+  CHECK(selector.find("if $bench_full; then") != std::string::npos);
+  CHECK(selector.find("return 0") != std::string::npos);
+
+  const std::size_t helper_start =
+      script.find("run_full_benchmark_opt_in_suites()");
+  REQUIRE(helper_start != std::string::npos);
+
+  const std::size_t helper_end = script.find("run_fuzz_gate()", helper_start);
+  REQUIRE(helper_end != std::string::npos);
+
+  const std::string helper =
+      script.substr(helper_start, helper_end - helper_start);
+  CHECK(helper.find("for suite in speech_lm_moshi") != std::string::npos);
+  CHECK(helper.find("benchmark_suite_selected_for_full_dispatch \"$suite\"") !=
+        std::string::npos);
+  CHECK(helper.find("\"bench_snapshot_${suite}\"") != std::string::npos);
+  CHECK(helper.find("--suite=\"$suite\"") != std::string::npos);
+
+  const std::size_t run_start = script.find("run_benchmark_gates()");
+  REQUIRE(run_start != std::string::npos);
+  const std::size_t run_end = script.find("run_coverage_gate()", run_start);
+  REQUIRE(run_end != std::string::npos);
+  const std::string run_body = script.substr(run_start, run_end - run_start);
+  CHECK(run_body.find("run_full_benchmark_opt_in_suites") != std::string::npos);
 }
 
 TEST_CASE("quality gates expand broad benchmark scope without monolithic "

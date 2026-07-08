@@ -18,8 +18,8 @@ constexpr test_case make_test_case(const append_case_fn emel_fn,
   };
 }
 
-const std::array<test_case, 35> & all_runner_cases() {
-  static const std::array<test_case, 35> cases = {{
+const std::array<test_case, 36> & all_runner_cases() {
+  static const std::array<test_case, 36> cases = {{
     make_test_case(append_emel_batch_planner_cases,
                    append_reference_batch_planner_cases,
                    "batch_planner"),
@@ -49,6 +49,9 @@ const std::array<test_case, 35> & all_runner_cases() {
     make_test_case(append_emel_speech_codec_mimi_cases,
                    append_reference_speech_codec_mimi_cases,
                    "speech_codec_mimi"),
+    make_test_case(append_emel_speech_lm_moshi_cases,
+                   append_reference_speech_lm_moshi_cases,
+                   "speech_lm_moshi"),
     make_test_case(append_emel_logits_validator_cases,
                    append_reference_logits_validator_cases,
                    "logits_validator"),

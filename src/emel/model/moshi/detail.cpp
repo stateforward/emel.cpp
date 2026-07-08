@@ -7,6 +7,7 @@
 #include <initializer_list>
 #include <limits>
 
+#include "emel/gguf/loader/detail.hpp"
 #include "emel/model/detail.hpp"
 #include "emel/model/loader/errors.hpp"
 
@@ -295,66 +296,83 @@ bool tensor_has_storage(
     return false;
   }
 
-  uint64_t elements = 1u;
+  uint64_t rows = 1u;
   for (int32_t dim = 0; dim < tensor.n_dims; ++dim) {
     if (tensor.dims[static_cast<size_t>(dim)] <= 0) {
       return false;
     }
     const uint64_t extent =
         static_cast<uint64_t>(tensor.dims[static_cast<size_t>(dim)]);
-    // Malformed dimensions can wrap the element product to a small count and
-    // mark a tiny payload as fully backed; reject unrepresentable products.
-    if (extent > UINT64_MAX / elements) {
-      return false;
+    if (dim > 0) {
+      if (extent > UINT64_MAX / rows) {
+        return false;
+      }
+      rows *= extent;
     }
-    elements *= extent;
   }
 
-  // Runtime binding and kernel reads consume the full dtype payload, so the
-  // contract must require the dtype-sized byte count, not merely a non-empty
-  // buffer. Codes are the GGUF/ggml tensor type ids the loader stores.
-  constexpr int32_t k_dtype_f32 = 0;
-  constexpr int32_t k_dtype_f16 = 1;
-  constexpr int32_t k_dtype_q8_0 = 8;
-  constexpr int32_t k_dtype_bf16 = 30;
-  constexpr uint64_t k_q8_0_block_elements = 32u;
-  constexpr uint64_t k_q8_0_block_bytes = 34u;
-  uint64_t required_bytes = 0u;
-  if (tensor.type == k_dtype_f32) {
-    if (elements > UINT64_MAX / sizeof(float)) {
-      return false;
-    }
-    required_bytes = elements * sizeof(float);
-  } else if (tensor.type == k_dtype_f16 || tensor.type == k_dtype_bf16) {
-    if (elements > UINT64_MAX / sizeof(uint16_t)) {
-      return false;
-    }
-    required_bytes = elements * sizeof(uint16_t);
-  } else if (tensor.type == k_dtype_q8_0) {
-    if (elements % k_q8_0_block_elements != 0u ||
-        elements / k_q8_0_block_elements > UINT64_MAX / k_q8_0_block_bytes) {
-      return false;
-    }
-    required_bytes = elements / k_q8_0_block_elements * k_q8_0_block_bytes;
-  } else {
-    // Conservative floor for dtypes the Moshi families never carry: at least
-    // one byte per element.
-    required_bytes = elements;
+  const auto layout =
+      emel::gguf::loader::detail::ggml_layout(
+          static_cast<uint32_t>(tensor.type));
+  if (layout.block_size == 0u || layout.type_size == 0u) {
+    return false;
   }
+
+  const uint64_t cols = static_cast<uint64_t>(tensor.dims[0]);
+  if (cols % layout.block_size != 0u) {
+    return false;
+  }
+  const uint64_t blocks_per_row = cols / layout.block_size;
+  if (blocks_per_row > UINT64_MAX / rows) {
+    return false;
+  }
+  const uint64_t blocks = blocks_per_row * rows;
+  if (blocks > UINT64_MAX / layout.type_size) {
+    return false;
+  }
+  const uint64_t required_bytes =
+      blocks * static_cast<uint64_t>(layout.type_size);
 
   return tensor.data_size >= required_bytes;
 }
 
+bool tensor_has_lm_execution_storage(
+    const emel::model::data::tensor_record &tensor) noexcept {
+  if (!tensor_has_storage(tensor)) {
+    return false;
+  }
+
+  // Keep this list aligned with the maintained generator row dequantization
+  // path in text/generator/detail.hpp. GGUF may define more layouts than the
+  // LM runtime can consume; storage-known is not execution-supported.
+  switch (tensor.type) {
+  case 0:  // F32
+  case 2:  // Q4_0
+  case 8:  // Q8_0
+  case 10: // Q2_K
+  case 11: // Q3_K
+  case 12: // Q4_K
+  case 14: // Q6_K
+    return true;
+  default:
+    return false;
+  }
+}
+
 bool assign_family_view(const emel::model::data &model_data,
                         const std::string_view prefix,
-                        family_view &family_out) noexcept {
+                        family_view &family_out,
+                        const bool require_lm_execution_storage = false) noexcept {
   family_out = {};
   family_out.prefix = prefix;
 
   for (uint32_t index = 0u; index < model_data.n_tensors; ++index) {
     const auto &tensor = model_data.tensors[index];
     const auto name = emel::model::tensor_name_view(model_data, tensor);
-    if (!name.starts_with(prefix) || !tensor_has_storage(tensor)) {
+    const bool has_storage = require_lm_execution_storage
+                                 ? tensor_has_lm_execution_storage(tensor)
+                                 : tensor_has_storage(tensor);
+    if (!name.starts_with(prefix) || !has_storage) {
       continue;
     }
 
@@ -510,10 +528,16 @@ bool has_depformer_block(const emel::model::data &model_data,
 }
 
 uint32_t
-count_tensors_with_storage(const emel::model::data &model_data) noexcept {
+count_tensors_with_storage(
+    const emel::model::data &model_data,
+    const bool require_lm_execution_storage = false) noexcept {
   uint32_t count = 0u;
   for (uint32_t index = 0u; index < model_data.n_tensors; ++index) {
-    if (tensor_has_storage(model_data.tensors[index])) {
+    const bool has_storage =
+        require_lm_execution_storage
+            ? tensor_has_lm_execution_storage(model_data.tensors[index])
+            : tensor_has_storage(model_data.tensors[index]);
+    if (has_storage) {
       ++count;
     }
   }
@@ -526,19 +550,19 @@ emel::error::type validate_lm_contract(const emel::model::data &model_data,
   const auto &lm = model_data.moshi_lm;
   family_view component = {};
   const bool families_ok =
-      assign_family_view(model_data, k_lm_prefix, component) &&
+      assign_family_view(model_data, k_lm_prefix, component, true) &&
       component.tensor_count == count_tensors_with_storage(model_data) &&
       assign_family_view(model_data, k_lm_text_emb_prefix,
-                         contract_out.text_emb) &&
+                         contract_out.text_emb, true) &&
       assign_family_view(model_data, k_lm_audio_emb_prefix,
-                         contract_out.audio_emb) &&
+                         contract_out.audio_emb, true) &&
       contract_out.audio_emb.tensor_count >= static_cast<uint32_t>(lm.n_q) &&
       assign_family_view(model_data, k_lm_transformer_prefix,
-                         contract_out.transformer) &&
+                         contract_out.transformer, true) &&
       assign_family_view(model_data, k_lm_out_norm_prefix,
-                         contract_out.out_norm) &&
+                         contract_out.out_norm, true) &&
       assign_family_view(model_data, k_lm_text_linear_prefix,
-                         contract_out.text_linear);
+                         contract_out.text_linear, true);
   if (!families_ok) {
     return emel::error::cast(emel::model::loader::error::model_invalid);
   }
@@ -566,17 +590,17 @@ emel::error::type validate_lm_contract(const emel::model::data &model_data,
   if (lm.dep_q > 0) {
     const bool depformer_ok =
         assign_family_view(model_data, k_lm_linears_prefix,
-                           contract_out.linears) &&
+                           contract_out.linears, true) &&
         contract_out.linears.tensor_count >= static_cast<uint32_t>(lm.dep_q) &&
         assign_family_view(model_data, k_lm_depformer_in_prefix,
-                           contract_out.depformer_in) &&
+                           contract_out.depformer_in, true) &&
         assign_family_view(model_data, k_lm_depformer_prefix,
-                           contract_out.depformer) &&
+                           contract_out.depformer, true) &&
         assign_family_view(model_data, k_lm_depformer_text_emb_prefix,
-                           contract_out.depformer_text_emb) &&
+                           contract_out.depformer_text_emb, true) &&
         (lm.dep_q < 2 ||
          (assign_family_view(model_data, k_lm_depformer_emb_prefix,
-                             contract_out.depformer_emb) &&
+                             contract_out.depformer_emb, true) &&
           contract_out.depformer_emb.tensor_count >=
               static_cast<uint32_t>(lm.dep_q) - 1u));
     if (!depformer_ok) {

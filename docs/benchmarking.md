@@ -328,6 +328,44 @@ the current deterministic exact-match criteria are:
 when those diverge, the summary reports `bounded_drift` rather than silently folding the result
 into prose. missing or explicit error records are hard failures in the summary.
 
+<!-- operator workflow for scripts/bench_moshi_lm_compare.sh and speech_lm_moshi suite -->
+## operator-facing Moshi LM contract benchmark workflow
+
+for the PersonaPlex Moshi LM load-contract regression guard, use:
+
+```bash
+scripts/bench_moshi_lm_compare.sh
+```
+
+the wrapper builds only the `speech_lm_moshi` bench runner, enables the opt-in
+`EMEL_BENCH_SPEECH_LM_MOSHI=1` lane, and runs the EMEL-owned loader contract against the converted
+PersonaPlex Q4_K GGUF. when no model path is supplied, it may use the existing Moshi setup script to
+fetch pinned artifacts and produce the EMEL-lane GGUF, but it does not build, link, or run a
+moshi.cpp reference lane. the guard is meant to fail if the maintained EMEL Moshi model contract
+rejects a valid converted LM GGUF.
+
+the default model discovery order is:
+
+- `--model`
+- `EMEL_PERSONAPLEX_LM_MODEL`
+- `EMEL_MOSHI_LM_MODEL`
+- `EMEL_BENCH_SPEECH_LM_MOSHI_MODEL`
+- `EMEL_MOSHI_REFERENCE_MODEL_EMEL`
+- when not using `--run-only`, the pinned Moshi setup script output at
+  `build/moshi_reference/model-q4_k-emel.gguf`
+- with `--run-only`, an existing `build/moshi_reference/model-q4_k-emel.gguf`
+  or the sibling companion conversion path under
+  `../companion/zig-out/personaplex-emel-converted/Codes4Fun/personaplex-7b-v1-q4_k-GGUF/`
+
+to pin a local converted model explicitly:
+
+```bash
+scripts/bench_moshi_lm_compare.sh \
+  --model /path/to/personaplex-7b-v1-q4_k-GGUF/model-q4_k.gguf
+```
+
+pass `--system` on macOS hosts where zig links against a newer SDK than the runtime OS can load.
+
 ## generation-specific local overrides
 
 the canonical generation case has its own bounded local validation knobs:

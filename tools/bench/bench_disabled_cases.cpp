@@ -170,6 +170,11 @@ void append_emel_speech_codec_mimi_cases(std::vector<result> &, const config &) 
 void append_reference_speech_codec_mimi_cases(std::vector<result> &, const config &) {}
 #endif
 
+#ifndef EMEL_BENCH_ENABLE_SPEECH_LM_MOSHI
+void append_emel_speech_lm_moshi_cases(std::vector<result> &, const config &) {}
+void append_reference_speech_lm_moshi_cases(std::vector<result> &, const config &) {}
+#endif
+
 #ifndef EMEL_BENCH_ENABLE_LOGITS_VALIDATOR
 void append_emel_logits_validator_cases(std::vector<result> &, const config &) {}
 void append_reference_logits_validator_cases(std::vector<result> &, const config &) {}

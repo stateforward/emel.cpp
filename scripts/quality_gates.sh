@@ -1027,6 +1027,46 @@ bench_dependency_manifest_requires_full_gate() {
   return 0
 }
 
+benchmark_suite_selected_for_full_dispatch() {
+  local target="$1"
+  local suite
+  if $bench_full; then
+    return 0
+  fi
+  if [[ "$QUALITY_GATES_SCOPE" == "full" ]] || $bench_all_suites; then
+    return 0
+  fi
+  for suite in ${bench_suites[@]+"${bench_suites[@]}"}; do
+    if [[ "$suite" == "$target" ]]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+run_full_benchmark_opt_in_suites() {
+  local status=0
+  local suite
+
+  for suite in speech_lm_moshi; do
+    if ! benchmark_suite_selected_for_full_dispatch "$suite"; then
+      continue
+    fi
+    if run_step_allow_fail "bench_snapshot_${suite}" env \
+      EMEL_BENCH_ITERS="$QUALITY_GATES_BENCH_ITERS" \
+      EMEL_BENCH_RUNS="$QUALITY_GATES_BENCH_RUNS" \
+      EMEL_BENCH_WARMUP_ITERS="$QUALITY_GATES_BENCH_WARMUP_ITERS" \
+      EMEL_BENCH_WARMUP_RUNS="$QUALITY_GATES_BENCH_WARMUP_RUNS" \
+      BENCH_TOLERANCE="$QUALITY_GATES_BENCH_TOLERANCE" \
+      "$ROOT_DIR/scripts/bench.sh" --snapshot --compare --suite="$suite"; then
+      continue
+    else
+      status=$?
+    fi
+  done
+  return "$status"
+}
+
 run_fuzz_gate() {
   case "$QUALITY_GATES_FUZZ" in
     always)
@@ -1094,6 +1134,8 @@ run_benchmark_gates() {
   fi
 
   if $bench_full; then
+    local full_status=0
+    local opt_in_status=0
     if run_step_allow_fail bench_snapshot env \
       EMEL_BENCH_ITERS="$QUALITY_GATES_BENCH_ITERS" \
       EMEL_BENCH_RUNS="$QUALITY_GATES_BENCH_RUNS" \
@@ -1101,11 +1143,16 @@ run_benchmark_gates() {
       EMEL_BENCH_WARMUP_RUNS="$QUALITY_GATES_BENCH_WARMUP_RUNS" \
       BENCH_TOLERANCE="$QUALITY_GATES_BENCH_TOLERANCE" \
       "$ROOT_DIR/scripts/bench.sh" --snapshot --compare; then
-      return 0
+      full_status=0
     else
-      status=$?
+      full_status=$?
     fi
-    return "$status"
+    run_full_benchmark_opt_in_suites
+    opt_in_status=$?
+    if [[ "$full_status" -ne 0 ]]; then
+      return "$full_status"
+    fi
+    return "$opt_in_status"
   fi
 
   if [[ ${#bench_suites[@]} -eq 0 ]]; then

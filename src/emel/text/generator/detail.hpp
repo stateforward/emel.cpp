@@ -845,6 +845,10 @@ inline bool copy_tensor_row(const tensor_record &tensor, const int32_t row,
   case emel::kernel::event::dtype::f32:
     std::memcpy(out.data(), src_row, static_cast<size_t>(cols) * sizeof(float));
     return true;
+  case emel::kernel::event::dtype::q4_0:
+    quant::dequantize_row_q4_0(
+        reinterpret_cast<const quant::block_q4_0 *>(src_row), out.data(), cols);
+    return true;
   case emel::kernel::event::dtype::q2_k:
     quant::dequantize_row_q2_k(
         reinterpret_cast<const quant::block_q2_k *>(src_row), out.data(), cols);
