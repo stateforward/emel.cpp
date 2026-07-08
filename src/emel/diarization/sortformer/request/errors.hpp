@@ -2,7 +2,7 @@
 
 #include <cstdint>
 
-namespace emel::diarization::request {
+namespace emel::diarization::sortformer::request {
 
 enum class error : uint32_t {
   none = 0u,
@@ -15,4 +15,4 @@ enum class error : uint32_t {
   unexpected = (1u << 6),
 };
 
-}  // namespace emel::diarization::request
+}  // namespace emel::diarization::sortformer::request

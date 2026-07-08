@@ -5,22 +5,24 @@
 #include <cstring>
 #include <memory>
 #include <string_view>
+#include <type_traits>
 #include <vector>
 
 #include <stateforward/sml.hpp>
 #include "doctest/doctest.h"
 
-#include "emel/diarization/request/detail.hpp"
-#include "emel/diarization/request/errors.hpp"
-#include "emel/diarization/request/sm.hpp"
+#include "emel/diarization/sortformer/request/detail.hpp"
+#include "emel/diarization/sortformer/request/errors.hpp"
+#include "emel/diarization/sortformer/request/sm.hpp"
 #include "emel/error/error.hpp"
-#include "emel/model/sortformer/detail.hpp"
-#include "../../kernel/test_helpers.hpp"
+#include "emel/machines.hpp"
+#include "emel/model/sortformer/any.hpp"
+#include "../../../kernel/test_helpers.hpp"
 
 namespace {
 
-namespace diarization_request = emel::diarization::request;
-namespace diarization_detail = emel::diarization::request::detail;
+namespace diarization_request = emel::diarization::sortformer::request;
+namespace diarization_detail = emel::diarization::sortformer::request::detail;
 namespace feature_extractor_detail =
     emel::diarization::sortformer::encoder::feature_extractor::detail;
 
@@ -109,9 +111,9 @@ struct request_model_fixture {
   }
 };
 
-emel::model::sortformer::detail::execution_contract make_contract(
+emel::model::sortformer::execution_contract make_contract(
     const emel::model::data & model) noexcept {
-  emel::model::sortformer::detail::execution_contract contract = {};
+  emel::model::sortformer::execution_contract contract = {};
   contract.model = &model;
   contract.sample_rate = diarization_detail::k_sample_rate;
   contract.speaker_count = diarization_detail::k_speaker_count;
@@ -136,7 +138,7 @@ std::vector<float> make_pcm() {
 }
 
 diarization_request::event::prepare make_request(
-    const emel::model::sortformer::detail::execution_contract & contract,
+    const emel::model::sortformer::execution_contract & contract,
     std::span<const float> pcm,
     const int32_t sample_rate,
     const int32_t channel_count,
@@ -158,6 +160,10 @@ diarization_request::event::prepare make_request(
 }
 
 }  // namespace
+
+TEST_CASE("sortformer request keeps top-level compatibility alias") {
+  CHECK((std::is_same_v<emel::DiarizationRequest, emel::SortformerRequest>));
+}
 
 TEST_CASE("diarization request extracts deterministic Sortformer features") {
   auto model = std::make_unique<request_model_fixture>();

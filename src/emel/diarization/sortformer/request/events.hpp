@@ -4,21 +4,21 @@
 #include <span>
 
 #include "emel/callback.hpp"
-#include "emel/diarization/request/errors.hpp"
+#include "emel/diarization/sortformer/request/errors.hpp"
 #include "emel/error/error.hpp"
-#include "emel/model/sortformer/detail.hpp"
+#include "emel/model/sortformer/any.hpp"
 
-namespace emel::diarization::request::events {
+namespace emel::diarization::sortformer::request::events {
 
 struct prepare_done;
 struct prepare_error;
 
-}  // namespace emel::diarization::request::events
+}  // namespace emel::diarization::sortformer::request::events
 
-namespace emel::diarization::request::event {
+namespace emel::diarization::sortformer::request::event {
 
 struct prepare {
-  prepare(const emel::model::sortformer::detail::execution_contract & contract_ref,
+  prepare(const emel::model::sortformer::execution_contract & contract_ref,
           std::span<const float> pcm_ref,
           const int32_t sample_rate_ref,
           const int32_t channel_count_ref,
@@ -33,7 +33,7 @@ struct prepare {
         frame_count_out(frame_count_out_ref),
         feature_bin_count_out(feature_bin_count_out_ref) {}
 
-  const emel::model::sortformer::detail::execution_contract & contract;
+  const emel::model::sortformer::execution_contract & contract;
   std::span<const float> pcm = {};
   int32_t sample_rate = 0;
   int32_t channel_count = 0;
@@ -54,9 +54,9 @@ struct prepare_run {
   prepare_ctx & ctx;
 };
 
-}  // namespace emel::diarization::request::event
+}  // namespace emel::diarization::sortformer::request::event
 
-namespace emel::diarization::request::events {
+namespace emel::diarization::sortformer::request::events {
 
 struct prepare_done {
   const event::prepare * request = nullptr;
@@ -69,4 +69,4 @@ struct prepare_error {
   emel::error::type err = emel::error::cast(error::none);
 };
 
-}  // namespace emel::diarization::request::events
+}  // namespace emel::diarization::sortformer::request::events

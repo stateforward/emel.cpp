@@ -14,7 +14,7 @@
 #include <string_view>
 #include <vector>
 
-#include "emel/embeddings/generator/detail.hpp"
+#include "emel/embeddings/generator/omniembed/detail.hpp"
 #include "emel/gguf/loader/detail.hpp"
 #include "emel/gguf/loader/events.hpp"
 #include "emel/gguf/loader/sm.hpp"
@@ -26,7 +26,7 @@
 
 namespace emel::tests::embeddings::te_fixture {
 
-namespace embedding_detail = emel::embeddings::generator::detail;
+namespace embedding_detail = emel::embeddings::generator::omniembed::detail;
 
 struct loaded_te_fixture {
   std::vector<uint8_t> file_bytes = {};

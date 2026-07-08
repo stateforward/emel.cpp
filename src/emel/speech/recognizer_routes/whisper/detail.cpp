@@ -26,9 +26,9 @@ uint64_t required_encoder_state_floats(const uint64_t sample_count) noexcept {
 uint64_t
 required_decoder_workspace_floats(const uint64_t sample_count) noexcept {
   const uint64_t mel_frames =
-      whisper_encoder::detail::mel_frame_count_for_samples(sample_count);
+      whisper_encoder::mel_frame_count_for_samples(sample_count);
   const uint64_t encoder_frames =
-      whisper_encoder::detail::encoder_frame_count_for_mel_frames(mel_frames);
+      whisper_encoder::encoder_frame_count_for_mel_frames(mel_frames);
   return whisper_decoder::required_workspace_floats(encoder_frames);
 }
 

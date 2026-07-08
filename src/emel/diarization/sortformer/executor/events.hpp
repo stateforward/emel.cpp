@@ -6,7 +6,7 @@
 #include "emel/callback.hpp"
 #include "emel/diarization/sortformer/executor/errors.hpp"
 #include "emel/error/error.hpp"
-#include "emel/model/sortformer/detail.hpp"
+#include "emel/model/sortformer/any.hpp"
 
 namespace emel::diarization::sortformer::executor::events {
 
@@ -18,7 +18,7 @@ struct execute_error;
 namespace emel::diarization::sortformer::executor::event {
 
 struct execute {
-  execute(const emel::model::sortformer::detail::execution_contract & contract_ref,
+  execute(const emel::model::sortformer::execution_contract & contract_ref,
           std::span<const float> encoder_frames_ref,
           std::span<float> hidden_out_ref,
           int32_t & frame_count_out_ref,
@@ -29,7 +29,7 @@ struct execute {
         frame_count_out(frame_count_out_ref),
         hidden_dim_out(hidden_dim_out_ref) {}
 
-  const emel::model::sortformer::detail::execution_contract & contract;
+  const emel::model::sortformer::execution_contract & contract;
   std::span<const float> encoder_frames = {};
   std::span<float> hidden_out = {};
   int32_t & frame_count_out;

@@ -11,7 +11,7 @@
 
 #include "emel/embeddings/generator/errors.hpp"
 #include "emel/embeddings/generator/events.hpp"
-#include "emel/embeddings/generator/sm.hpp"
+#include "emel/embeddings/generator/omniembed/sm.hpp"
 #include "emel/error/error.hpp"
 #include "emel/text/conditioner/sm.hpp"
 #include "emel/text/formatter/format.hpp"
@@ -69,7 +69,7 @@ bool embedding_variant_enabled(const embedding_variant_manifest & variant) {
 struct initialized_embedding_generator {
   emel::text::tokenizer::sm tokenizer{};
   emel::text::conditioner::sm conditioner{};
-  emel::embeddings::generator::sm generator;
+  emel::embeddings::generator::omniembed::sm generator;
 
   explicit initialized_embedding_generator(const emel::model::data & model)
       : generator(model, conditioner, nullptr, emel::text::formatter::format_raw) {

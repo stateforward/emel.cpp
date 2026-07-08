@@ -31,6 +31,8 @@ stateDiagram-v2
   state_lane6_decision --> state_lane7_decision : completion_run_ [guard_lane_accepted_and_more_6__] / effect_dispatch_lane_7__
   state_lane7_decision --> state_idle : completion_run_ [guard_lane_rejected_7__] / effect_mark_lane_rejected_7__
   state_lane7_decision --> state_idle : completion_run_ [guard_lane_accepted_and_last_7__] / effect_commit_done_
+  state_parallel_decision --> state_idle : completion_run_ [guard_parallel_submission_failed_] / effect_reject_parallel_scheduler_
+  state_parallel_decision --> state_idle : completion_run_ [guard_parallel_join_failed_] / effect_reject_parallel_scheduler_
   state_parallel_decision --> state_idle : completion_run_ [guard_parallel_lane_rejected_0__] / effect_mark_lane_rejected_0__
   state_parallel_decision --> state_idle : completion_run_ [guard_parallel_lane_rejected_1__] / effect_mark_lane_rejected_1__
   state_parallel_decision --> state_idle : completion_run_ [guard_parallel_lane_rejected_2__] / effect_mark_lane_rejected_2__

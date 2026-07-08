@@ -7,7 +7,7 @@
 
 #include "emel/docs/detail.hpp"
 #include "emel/embeddings/generator/errors.hpp"
-#include "emel/embeddings/generator/sm.hpp"
+#include "emel/embeddings/generator/omniembed/sm.hpp"
 #include "emel/error/error.hpp"
 #include "emel/sm.hpp"
 #include "emel/text/conditioner/sm.hpp"
@@ -137,7 +137,7 @@ inline void warm_generator_sm_introspection_paths() {
 inline void exercise_shared_truncation_contract(const emel::model::data & model) {
   emel::text::tokenizer::sm tokenizer{};
   emel::text::conditioner::sm conditioner{};
-  emel::embeddings::generator::sm embedding_generator{
+  emel::embeddings::generator::omniembed::sm embedding_generator{
     model,
     conditioner,
     nullptr,
@@ -217,7 +217,7 @@ inline void exercise_shared_truncation_contract(const emel::model::data & model)
 inline void exercise_audio_embedding_norm(const emel::model::data & model) {
   emel::text::tokenizer::sm tokenizer{};
   emel::text::conditioner::sm conditioner{};
-  emel::embeddings::generator::sm embedding_generator{
+  emel::embeddings::generator::omniembed::sm embedding_generator{
     model,
     conditioner,
     nullptr,
@@ -311,7 +311,7 @@ TEST_CASE("embeddings shared contract rejects unsupported truncation uniformly a
   const auto & fixture = cached_te_fixture();
   emel::text::tokenizer::sm tokenizer{};
   emel::text::conditioner::sm conditioner{};
-  emel::embeddings::generator::sm embedding_generator{
+  emel::embeddings::generator::omniembed::sm embedding_generator{
     *fixture.model,
     conditioner,
     nullptr,
@@ -404,7 +404,7 @@ TEST_CASE("embeddings initialize rejects omniembed fixtures missing a required m
 
   emel::text::tokenizer::sm tokenizer{};
   emel::text::conditioner::sm conditioner{};
-  emel::embeddings::generator::sm embedding_generator{
+  emel::embeddings::generator::omniembed::sm embedding_generator{
     *fixture.model,
     conditioner,
     nullptr,

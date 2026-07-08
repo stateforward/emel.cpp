@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+shopt -s nullglob
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
@@ -61,6 +62,18 @@ check_no_matches "forbidden model-family runtime roots" \
   'emel/whisper|namespace emel::whisper|kernel/whisper|kernel::whisper|model/whisper/(runtime|inference|encoder|decoder)|model::whisper::(runtime|inference|encoder|decoder)|speech/asr/whisper|speech::asr::whisper|speech/whisper|speech::whisper|recognizer/detail/whisper|recognizer::detail::whisper' \
   src tests tools CMakeLists.txt
 
+check_no_matches "qwen3 model code depends on sibling model-family detail" \
+  'emel/model/llama/(detail|any)\.hpp|emel/model/(gemma4|lfm2)/detail\.hpp|emel::model::llama::|emel::model::(gemma4|lfm2)::detail::' \
+  src/emel/model/qwen3
+
+check_no_matches "gemma4 model code depends on sibling model-family detail" \
+  'emel/model/llama/(detail|any)\.hpp|emel/model/(qwen3|lfm2)/detail\.hpp|emel::model::llama::|emel::model::(qwen3|lfm2)::detail::' \
+  src/emel/model/gemma4
+
+check_no_matches "lfm2 model code depends on sibling model-family detail" \
+  'emel/model/llama/(detail|any)\.hpp|emel/model/(qwen3|gemma4)/detail\.hpp|emel::model::llama::|emel::model::(qwen3|gemma4)::detail::' \
+  src/emel/model/lfm2
+
 check_no_matches_except "legacy text generator root" \
   'emel/generator|emel::generator|namespace emel::generator|src/emel/generator|tests/generator' \
   '^(src/emel/generator/|tests/text/generator/legacy_compatibility_tests\.cpp:[0-9]+:|scripts/(quality_gates|test_with_coverage)\.sh:[0-9]+:.*src/emel/generator)' \
@@ -77,6 +90,20 @@ check_no_matches "model-family detail contracts leaked into generic text generat
 check_no_matches "model-family names leaked into neutral generation contract" \
   'llama|qwen3|gemma4|lfm2|whisper|moshi' \
   src/emel/model/generation
+
+check_no_matches "OmniEmbed model-family detail leaked into generic embeddings generator surfaces" \
+  'omniembed|OmniEmbed|model/omniembed|model::omniembed' \
+  src/emel/embeddings/generator/*.hpp \
+  src/emel/embeddings/generator/*.cpp
+
+check_no_matches "model-family route names leaked into generic embeddings generator orchestration surfaces" \
+  'bert|Bert|BERT|mobilenet|MobileNet|MOBILENET|efficientat|EfficientAT|EFFICIENTAT|edge_residual|universal_inverted|audio_inverted|has_dw|has_expand|use_hardswish|k_max_blocks|matrix_view|conv2d_view|batch_norm' \
+  src/emel/embeddings/generator/context.hpp \
+  src/emel/embeddings/generator/detail.hpp \
+  src/emel/embeddings/generator/actions.hpp \
+  src/emel/embeddings/generator/guards.hpp \
+  src/emel/embeddings/generator/sm.hpp \
+  src/emel/embeddings/generator/*.cpp
 
 check_no_matches "IO loader concrete system I/O before strategy implementation" \
   "$concrete_io_api_pattern" \
@@ -124,6 +151,39 @@ check_no_matches "maintained benchmark/parity lanes reaching IO or tensor actor 
   'emel/(io/loader|model/tensor|model/loader)/(actions|detail|guards)\.hpp|emel::io::loader::(action|detail|guard)::|emel::model::tensor::(action|detail|guard)::|emel::model::loader::(action|detail|guard)::' \
   tools/bench tools/paritychecker tools/embedded_size
 
+sortformer_bench_actor_pattern=
+sortformer_bench_actor_pattern+='emel/diarization/'
+sortformer_bench_actor_pattern+='(request|sortformer/'
+sortformer_bench_actor_pattern+='(request|encoder(/feature_extractor)?|executor|modules|output|pipeline))'
+sortformer_bench_actor_pattern+='/(actions|detail|guards)\.hpp'
+sortformer_bench_actor_pattern+='|emel/model/sortformer/detail\.hpp'
+sortformer_bench_actor_pattern+='|emel::diarization::sortformer::request::'
+sortformer_bench_actor_pattern+='(action|detail|guard)::'
+sortformer_bench_actor_pattern+='|emel::diarization::sortformer::'
+sortformer_bench_actor_pattern+='(encoder::(action|guard|detail)'
+sortformer_bench_actor_pattern+='|encoder::feature_extractor::detail'
+sortformer_bench_actor_pattern+='|executor::(action|guard|detail)'
+sortformer_bench_actor_pattern+='|modules::detail'
+sortformer_bench_actor_pattern+='|output::(action|guard|detail)'
+sortformer_bench_actor_pattern+='|pipeline::(action|guard|detail))::'
+sortformer_bench_actor_pattern+='|emel::model::sortformer::detail::'
+check_no_matches "Sortformer diarization benchmark bypassing actor surfaces" \
+  "$sortformer_bench_actor_pattern" \
+  tools/bench/diarization/sortformer_bench.cpp \
+  tools/bench/diarization/sortformer_fixture.hpp
+
+check_no_matches "Sortformer public facade headers exposing detail internals" \
+  'emel/.*/detail\.hpp|::detail::' \
+  src/emel/model/sortformer/any.hpp \
+  src/emel/diarization/sortformer/request/events.hpp \
+  src/emel/diarization/sortformer/executor/events.hpp \
+  src/emel/diarization/sortformer/output/any.hpp \
+  src/emel/diarization/sortformer/pipeline/any.hpp
+
+check_absent_path "generic diarization request route hardcoding Sortformer" \
+  src/emel/diarization/request \
+  tests/diarization/request
+
 check_no_matches "forbidden moshi model-family runtime roots" \
   'emel/moshi|namespace emel::moshi|kernel/moshi|kernel::moshi|kernel/mimi|kernel::mimi|model/moshi/(runtime|inference|encoder|decoder|codec)|model::moshi::(runtime|inference|encoder|decoder|codec)|speech/asr/moshi|speech::asr::moshi|speech/moshi/|speech::moshi' \
   src tests tools CMakeLists.txt
@@ -132,13 +192,29 @@ check_no_matches "Moshi/Mimi leaked into generic speech recognizer" \
   'moshi|model/moshi|model::moshi|tokenizer::moshi|codec::mimi|speech/codec/mimi' \
   src/emel/speech/recognizer tests/speech/recognizer
 
+check_absent_path "retired generic diarization request owner path" \
+  src/emel/diarization/request \
+  tests/diarization/request \
+  docs/architecture/diarization_request.md \
+  docs/architecture/mermaid/diarization_request.mmd \
+  .planning/architecture/diarization_request.md \
+  .planning/architecture/mermaid/diarization_request.mmd
+
 check_no_matches "Whisper leaked into generic speech recognizer" \
   'whisper|model/whisper|speech/tokenizer/whisper|speech/encoder/whisper|speech/decoder/whisper|model::whisper|tokenizer::whisper|encoder::whisper|decoder::whisper' \
   src/emel/speech/recognizer tests/speech/recognizer
 
+check_no_matches "Whisper encoder detail leaked into recognizer route" \
+  'emel/speech/(encoder|decoder|tokenizer)/whisper/detail\.hpp|(encoder|decoder|tokenizer)::whisper::detail|using[[:space:]]+namespace[[:space:]]+[^;]*whisper|::detail([[:space:]]*(;|$)|::)|(^|[^[:alnum:]_:])detail::' \
+  src/emel/speech/recognizer_routes/whisper
+
 check_no_matches "Whisper model binding leaked into speech encoder/decoder runtime" \
   'emel/model/whisper|model::whisper' \
   src/emel/speech/encoder src/emel/speech/decoder
+
+check_no_matches "Moshi model detail leaked into Mimi codec" \
+  'emel/model/moshi|model::moshi' \
+  src/emel/speech/codec/mimi
 
 check_absent_path "retired model weight-loader owner path" \
   src/emel/model/weight_loader \

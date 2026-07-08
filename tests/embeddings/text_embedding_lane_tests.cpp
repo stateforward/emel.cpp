@@ -6,9 +6,9 @@
 #include <stateforward/sml.hpp>
 #include "doctest/doctest.h"
 
-#include "emel/embeddings/generator/detail.hpp"
 #include "emel/embeddings/generator/errors.hpp"
-#include "emel/embeddings/generator/sm.hpp"
+#include "emel/embeddings/generator/omniembed/detail.hpp"
+#include "emel/embeddings/generator/omniembed/sm.hpp"
 #include "emel/error/error.hpp"
 #include "emel/text/conditioner/detail.hpp"
 #include "emel/text/conditioner/sm.hpp"
@@ -19,8 +19,8 @@
 
 namespace {
 
-namespace embedding_action = emel::embeddings::generator::action;
-namespace embedding_detail = emel::embeddings::generator::detail;
+namespace embedding_action = emel::embeddings::generator::omniembed::action;
+namespace embedding_detail = emel::embeddings::generator::omniembed::detail;
 namespace te_fixture = emel::tests::embeddings::te_fixture;
 
 using te_fixture::cached_te_fixture;
@@ -219,7 +219,7 @@ TEST_CASE("embeddings text lane returns normalized TE embeddings when fixture pr
 
   emel::text::tokenizer::sm tokenizer{};
   emel::text::conditioner::sm conditioner{};
-  emel::embeddings::generator::sm embedding_generator{
+  emel::embeddings::generator::omniembed::sm embedding_generator{
     *fixture.model,
     conditioner,
     nullptr,
@@ -312,7 +312,7 @@ TEST_CASE("embeddings generator initializes with TE q5 fixture when present") {
 
   emel::text::tokenizer::sm tokenizer{};
   emel::text::conditioner::sm conditioner{};
-  emel::embeddings::generator::sm embedding_generator{
+  emel::embeddings::generator::omniembed::sm embedding_generator{
     *fixture.model,
     conditioner,
     nullptr,
@@ -362,7 +362,7 @@ TEST_CASE("embeddings text lane surfaces runtime encode failures as backend erro
       emel::error::cast(emel::embeddings::generator::error::none);
   initialize_embedding_generator(embedding_generator, initialize_error, tokenizer);
 
-  embedding_generator.context_ref().text.word_embeddings.rows = 0;
+  embedding_generator.runtime_ref().text.word_embeddings.rows = 0;
 
   std::array<float, 1280> output = {};
   int32_t output_dimension = -1;
@@ -400,7 +400,7 @@ TEST_CASE("embeddings text lane supports TE matryoshka truncation when fixture p
   const auto & fixture = cached_te_fixture();
   emel::text::tokenizer::sm tokenizer{};
   emel::text::conditioner::sm conditioner{};
-  emel::embeddings::generator::sm embedding_generator{
+  emel::embeddings::generator::omniembed::sm embedding_generator{
     *fixture.model,
     conditioner,
     nullptr,
@@ -518,6 +518,7 @@ TEST_CASE("embeddings generator helper paths cover tensor binding callbacks and 
   embedding_action::context context = {};
   context.model = fixture.model.get();
   REQUIRE(embedding_detail::reserve_scratch(context, *fixture.model));
+  auto & runtime = embedding_detail::runtime(context);
   CHECK(embedding_detail::is_valid_preprocessor(
       emel::text::tokenizer::preprocessor::preprocessor_kind::wpm));
   CHECK_FALSE(embedding_detail::is_valid_preprocessor(
@@ -526,17 +527,20 @@ TEST_CASE("embeddings generator helper paths cover tensor binding callbacks and 
   CHECK_FALSE(embedding_detail::is_valid_encoder(
       static_cast<emel::text::encoders::encoder_kind>(999)));
   CHECK(embedding_detail::is_supported_truncate_dimension(context, 768));
-  CHECK(embedding_detail::is_supported_truncate_dimension(context, context.text.shared_embedding_size));
+  CHECK(embedding_detail::is_supported_truncate_dimension(
+      context, runtime.text.shared_embedding_size));
   CHECK_FALSE(embedding_detail::is_supported_truncate_dimension(context, 640));
   CHECK_FALSE(embedding_detail::is_supported_truncate_dimension(context, -1));
 
-  for (int32_t index = 0; index < context.text.shared_embedding_size; ++index) {
-    context.scratch.full_embedding[static_cast<size_t>(index)] = static_cast<float>(index + 1);
+  for (int32_t index = 0; index < runtime.text.shared_embedding_size; ++index) {
+    runtime.scratch.full_embedding[static_cast<size_t>(index)] =
+        static_cast<float>(index + 1);
   }
 
   std::array<float, 1280> full_output = {};
   std::array<float, 768> truncated_output = {};
-  CHECK(embedding_detail::publish_embedding(context, context.text.shared_embedding_size, full_output));
+  CHECK(embedding_detail::publish_embedding(
+      context, runtime.text.shared_embedding_size, full_output));
   CHECK(full_output[0] == doctest::Approx(1.0f));
   CHECK(embedding_detail::publish_embedding(context, 768, truncated_output));
   CHECK(l2_norm(truncated_output) == doctest::Approx(1.0f).epsilon(1.0e-4f));
@@ -817,7 +821,7 @@ TEST_CASE("embeddings generator state machine covers callback and prepare error 
     REQUIRE(use_real_te_tokens(
         fake_tokenizer, fixture.model->vocab_data, "callback coverage"));
     emel::text::conditioner::sm conditioner{};
-    emel::embeddings::generator::sm embedding_generator{
+    emel::embeddings::generator::omniembed::sm embedding_generator{
       *fixture.model,
       conditioner,
       nullptr,
@@ -887,7 +891,7 @@ TEST_CASE("embeddings generator state machine covers callback and prepare error 
 
   SUBCASE("initialize invalid request uses error callback path") {
     emel::text::conditioner::sm conditioner{};
-    emel::embeddings::generator::sm embedding_generator{
+    emel::embeddings::generator::omniembed::sm embedding_generator{
       *fixture.model,
       conditioner,
       nullptr,
@@ -921,7 +925,7 @@ TEST_CASE("embeddings generator state machine covers callback and prepare error 
     REQUIRE(use_real_te_tokens(
         fake_tokenizer, fixture.model->vocab_data, "callback coverage"));
     emel::text::conditioner::sm conditioner{};
-    emel::embeddings::generator::sm embedding_generator{
+    emel::embeddings::generator::omniembed::sm embedding_generator{
       *fixture.model,
       conditioner,
       nullptr,
@@ -986,7 +990,7 @@ TEST_CASE("embeddings generator state machine covers callback and prepare error 
     model_invalid_tokenizer.bind_error =
         emel::text::tokenizer::error_code(emel::text::tokenizer::error::model_invalid);
     emel::text::conditioner::sm model_invalid_conditioner{};
-    emel::embeddings::generator::sm model_invalid_generator{
+    emel::embeddings::generator::omniembed::sm model_invalid_generator{
       *fixture.model,
       model_invalid_conditioner,
       nullptr,
@@ -1013,7 +1017,7 @@ TEST_CASE("embeddings generator state machine covers callback and prepare error 
     backend_tokenizer.bind_error =
         emel::text::tokenizer::error_code(emel::text::tokenizer::error::backend_error);
     emel::text::conditioner::sm backend_conditioner{};
-    emel::embeddings::generator::sm backend_generator{
+    emel::embeddings::generator::omniembed::sm backend_generator{
       *fixture.model,
       backend_conditioner,
       nullptr,
@@ -1039,7 +1043,7 @@ TEST_CASE("embeddings generator state machine covers callback and prepare error 
     auto make_initialized_generator = [&](fake_tokenizer_dispatch_state & tokenizer_state,
                                           fake_formatter_state * formatter_state,
                                           emel::text::conditioner::sm & conditioner,
-                                          emel::embeddings::generator::sm & generator) {
+                                          emel::embeddings::generator::omniembed::sm & generator) {
       emel::error::type initialize_error =
           emel::error::cast(emel::embeddings::generator::error::none);
       emel::embeddings::generator::event::initialize initialize{
@@ -1061,7 +1065,7 @@ TEST_CASE("embeddings generator state machine covers callback and prepare error 
     invalid_tokenizer.token_ids[0] = fixture.model->vocab_data.cls_id;
     invalid_tokenizer.token_count = 1;
     emel::text::conditioner::sm invalid_conditioner{};
-    emel::embeddings::generator::sm invalid_generator{
+    emel::embeddings::generator::omniembed::sm invalid_generator{
       *fixture.model,
       invalid_conditioner,
       nullptr,
@@ -1095,7 +1099,7 @@ TEST_CASE("embeddings generator state machine covers callback and prepare error 
     formatter_invalid_tokenizer.token_ids[0] = fixture.model->vocab_data.cls_id;
     fake_formatter_state formatter_invalid_state = {.mode = fake_formatter_mode::invalid_request};
     emel::text::conditioner::sm formatter_invalid_conditioner{};
-    emel::embeddings::generator::sm formatter_invalid_generator{
+    emel::embeddings::generator::omniembed::sm formatter_invalid_generator{
       *fixture.model,
       formatter_invalid_conditioner,
       &formatter_invalid_state,
@@ -1125,7 +1129,7 @@ TEST_CASE("embeddings generator state machine covers callback and prepare error 
     formatter_backend_tokenizer.token_ids[0] = fixture.model->vocab_data.cls_id;
     fake_formatter_state formatter_backend_state = {.mode = fake_formatter_mode::backend};
     emel::text::conditioner::sm formatter_backend_conditioner{};
-    emel::embeddings::generator::sm formatter_backend_generator{
+    emel::embeddings::generator::omniembed::sm formatter_backend_generator{
       *fixture.model,
       formatter_backend_conditioner,
       &formatter_backend_state,
@@ -1156,7 +1160,7 @@ TEST_CASE("embeddings generator state machine covers callback and prepare error 
     model_invalid_tokenizer.tokenize_error =
         emel::text::tokenizer::error_code(emel::text::tokenizer::error::model_invalid);
     emel::text::conditioner::sm model_invalid_conditioner{};
-    emel::embeddings::generator::sm model_invalid_generator{
+    emel::embeddings::generator::omniembed::sm model_invalid_generator{
       *fixture.model,
       model_invalid_conditioner,
       nullptr,

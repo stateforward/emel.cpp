@@ -5,9 +5,9 @@
 #include <stateforward/sml.hpp>
 #include "doctest/doctest.h"
 
-#include "emel/embeddings/generator/detail.hpp"
 #include "emel/embeddings/generator/errors.hpp"
-#include "emel/embeddings/generator/sm.hpp"
+#include "emel/embeddings/generator/omniembed/detail.hpp"
+#include "emel/embeddings/generator/omniembed/sm.hpp"
 #include "emel/error/error.hpp"
 #include "emel/text/conditioner/detail.hpp"
 #include "emel/text/conditioner/sm.hpp"
@@ -17,7 +17,7 @@
 
 namespace {
 
-namespace embedding_detail = emel::embeddings::generator::detail;
+namespace embedding_detail = emel::embeddings::generator::omniembed::detail;
 namespace te_fixture = emel::tests::embeddings::te_fixture;
 
 using te_fixture::cached_te_fixture;
@@ -61,7 +61,7 @@ TEST_CASE("embeddings vision lane returns normalized TE embeddings when fixture 
 
   emel::text::tokenizer::sm tokenizer{};
   emel::text::conditioner::sm conditioner{};
-  emel::embeddings::generator::sm embedding_generator{
+  emel::embeddings::generator::omniembed::sm embedding_generator{
     *fixture.model,
     conditioner,
     nullptr,
@@ -135,36 +135,42 @@ TEST_CASE("embeddings vision runtime sizes feature buffers for expansion tensors
 
   const auto & fixture = cached_te_fixture();
 
-  emel::embeddings::generator::action::context context = {};
+  emel::embeddings::generator::omniembed::action::context context = {};
   context.model = fixture.model.get();
   REQUIRE(embedding_detail::reserve_scratch(context, *fixture.model));
+  const auto & runtime = embedding_detail::runtime(context);
 
-  int32_t spatial = context.image.input_size / 4;
-  REQUIRE(context.image.feature_buffer_elements >= spatial * spatial * context.image.stage0.output_channels);
+  int32_t spatial = runtime.image.input_size / 4;
+  REQUIRE(runtime.image.feature_buffer_elements >=
+          spatial * spatial * runtime.image.stage0.output_channels);
 
-  for (int32_t index = 0; index < context.image.block_count; ++index) {
-    const auto & block = context.image.blocks[static_cast<size_t>(index)];
+  for (int32_t index = 0; index < runtime.image.block_count; ++index) {
+    const auto route_index = static_cast<size_t>(index);
+    const auto & block = runtime.image.blocks[route_index];
+    const auto & config = embedding_detail::k_image_ui_block_configs[route_index];
     int32_t expansion_spatial = spatial;
-    if (block.has_dw_start) {
-      const int32_t dw_start_stride = block.has_dw_mid ? 1 : block.stride;
+    if (config.has_dw_start) {
+      const int32_t dw_start_stride = config.has_dw_mid ? 1 : config.stride;
       expansion_spatial =
           embedding_detail::output_dim_same(spatial, block.dw_start.kernel_h, dw_start_stride);
     }
-    CHECK(context.image.feature_buffer_elements >=
+    CHECK(runtime.image.feature_buffer_elements >=
           expansion_spatial * expansion_spatial * block.expanded_channels);
 
     int32_t output_spatial = expansion_spatial;
-    if (block.has_dw_mid) {
+    if (config.has_dw_mid) {
       output_spatial =
-          embedding_detail::output_dim_same(expansion_spatial, block.dw_mid.kernel_h, block.stride);
+          embedding_detail::output_dim_same(expansion_spatial, block.dw_mid.kernel_h, config.stride);
     }
-    CHECK(context.image.feature_buffer_elements >=
+    CHECK(runtime.image.feature_buffer_elements >=
           output_spatial * output_spatial * block.output_channels);
     spatial = output_spatial;
   }
 
-  CHECK(context.image.feature_buffer_elements >= spatial * spatial * context.image.stage4.output_channels);
-  CHECK(context.image.feature_buffer_elements >= spatial * spatial * context.image.head.output_channels);
+  CHECK(runtime.image.feature_buffer_elements >=
+        spatial * spatial * runtime.image.stage4.output_channels);
+  CHECK(runtime.image.feature_buffer_elements >=
+        spatial * spatial * runtime.image.head.output_channels);
 }
 
 TEST_CASE("embeddings vision lane supports truncation and rejects malformed image payloads") {
@@ -176,7 +182,7 @@ TEST_CASE("embeddings vision lane supports truncation and rejects malformed imag
   const auto & fixture = cached_te_fixture();
   emel::text::tokenizer::sm tokenizer{};
   emel::text::conditioner::sm conditioner{};
-  emel::embeddings::generator::sm embedding_generator{
+  emel::embeddings::generator::omniembed::sm embedding_generator{
     *fixture.model,
     conditioner,
     nullptr,
@@ -250,7 +256,7 @@ TEST_CASE("embeddings vision lane surfaces runtime encode failures as backend er
       emel::error::cast(emel::embeddings::generator::error::none);
   initialize_embedding_generator(embedding_generator, initialize_error, tokenizer);
 
-  embedding_generator.context_ref().scratch.image_c.reset();
+  embedding_generator.runtime_ref().scratch.image_c.reset();
 
   std::array<float, 1280> output = {};
   int32_t output_dimension = -1;
@@ -319,7 +325,7 @@ TEST_CASE("embeddings vision pointwise direct path rejects missing lane buffers"
   // bind_pointwise_f16 (packed rhs on aarch64, the scalar transpose
   // elsewhere); an otherwise valid view without one must be rejected
   // before any lane memory is read.
-  emel::embeddings::generator::action::matrix_view matrix = {};
+  emel::embeddings::generator::omniembed::action::matrix_view matrix = {};
   matrix.dtype = static_cast<uint8_t>(emel::kernel::detail::dtype_f32);
   matrix.rows = 4;
   matrix.cols = 4;
@@ -333,7 +339,7 @@ TEST_CASE("embeddings vision pointwise direct path rejects missing lane buffers"
 
   // The lane-buffer check fires before any batch-norm validation, so the
   // fused variants must reject the same view in every instantiation.
-  emel::embeddings::generator::action::batch_norm_view batch_norm = {};
+  emel::embeddings::generator::omniembed::action::batch_norm_view batch_norm = {};
   CHECK_FALSE(embedding_detail::pointwise_conv_hwc_direct_f32_bn<false>(
       matrix, input.data(), 1, batch_norm, output.data()));
   CHECK_FALSE(embedding_detail::pointwise_conv_hwc_direct_f32_bn<true>(
@@ -367,7 +373,7 @@ TEST_CASE("embeddings vision pointwise direct path matches scalar pointwise refe
   weight_tensor.dims[2] = static_cast<uint64_t>(input_channels);
   weight_tensor.dims[3] = static_cast<uint64_t>(output_channels);
 
-  emel::embeddings::generator::action::matrix_view matrix = {};
+  emel::embeddings::generator::omniembed::action::matrix_view matrix = {};
   REQUIRE(embedding_detail::bind_pointwise_f16(
       weight_tensor, output_channels, input_channels, matrix));
   REQUIRE(matrix.packed_rhs_f32 != nullptr);
@@ -422,7 +428,7 @@ TEST_CASE("embeddings vision pointwise direct path matches scalar reference acro
   weight_tensor.dims[2] = static_cast<uint64_t>(input_channels);
   weight_tensor.dims[3] = static_cast<uint64_t>(output_channels);
 
-  emel::embeddings::generator::action::matrix_view matrix = {};
+  emel::embeddings::generator::omniembed::action::matrix_view matrix = {};
   REQUIRE(embedding_detail::bind_pointwise_f16(
       weight_tensor, output_channels, input_channels, matrix));
   REQUIRE(matrix.packed_rhs_f32 != nullptr);
@@ -480,7 +486,7 @@ TEST_CASE("embeddings vision batch norm precomputed affine matches scalar refere
     return tensor;
   };
 
-  emel::embeddings::generator::action::batch_norm_view batch_norm = {};
+  emel::embeddings::generator::omniembed::action::batch_norm_view batch_norm = {};
   REQUIRE(embedding_detail::bind_batch_norm(make_vector_tensor(weight.data(), channels),
                                             make_vector_tensor(bias.data(), channels),
                                             make_vector_tensor(running_mean.data(), channels),
@@ -547,7 +553,7 @@ TEST_CASE("embeddings vision fused pointwise batch norm matches unfused referenc
   weight_tensor.dims[2] = static_cast<uint64_t>(input_channels);
   weight_tensor.dims[3] = static_cast<uint64_t>(output_channels);
 
-  emel::embeddings::generator::action::matrix_view matrix = {};
+  emel::embeddings::generator::omniembed::action::matrix_view matrix = {};
   REQUIRE(embedding_detail::bind_pointwise_f16(
       weight_tensor, output_channels, input_channels, matrix));
 
@@ -576,7 +582,7 @@ TEST_CASE("embeddings vision fused pointwise batch norm matches unfused referenc
     return tensor;
   };
 
-  emel::embeddings::generator::action::batch_norm_view batch_norm = {};
+  emel::embeddings::generator::omniembed::action::batch_norm_view batch_norm = {};
   REQUIRE(embedding_detail::bind_batch_norm(make_vector_tensor(bn_weight.data(), output_channels),
                                             make_vector_tensor(bn_bias.data(), output_channels),
                                             make_vector_tensor(bn_mean.data(), output_channels),
@@ -637,7 +643,7 @@ TEST_CASE("embeddings vision fused standard conv batch norm matches unfused refe
   weight_tensor.dims[2] = static_cast<uint64_t>(input_channels);
   weight_tensor.dims[3] = static_cast<uint64_t>(output_channels);
 
-  emel::embeddings::generator::action::conv2d_view conv = {};
+  emel::embeddings::generator::omniembed::action::conv2d_view conv = {};
   REQUIRE(embedding_detail::bind_conv_f16_hwio(
       weight_tensor, kernel_h, kernel_w, input_channels, output_channels, conv));
 
@@ -666,7 +672,7 @@ TEST_CASE("embeddings vision fused standard conv batch norm matches unfused refe
     return tensor;
   };
 
-  emel::embeddings::generator::action::batch_norm_view batch_norm = {};
+  emel::embeddings::generator::omniembed::action::batch_norm_view batch_norm = {};
   REQUIRE(embedding_detail::bind_batch_norm(make_vector_tensor(bn_weight.data(), output_channels),
                                             make_vector_tensor(bn_bias.data(), output_channels),
                                             make_vector_tensor(bn_mean.data(), output_channels),
@@ -750,7 +756,7 @@ TEST_CASE("embeddings vision standard conv direct path matches patch reference")
   weight_tensor.dims[2] = static_cast<uint64_t>(input_channels);
   weight_tensor.dims[3] = static_cast<uint64_t>(output_channels);
 
-  emel::embeddings::generator::action::conv2d_view conv = {};
+  emel::embeddings::generator::omniembed::action::conv2d_view conv = {};
   REQUIRE(embedding_detail::bind_conv_f16_hwio(
       weight_tensor, kernel_h, kernel_w, input_channels, output_channels, conv));
   REQUIRE(conv.kernel_major_f32 != nullptr);
@@ -838,7 +844,7 @@ TEST_CASE("embeddings vision standard conv direct path matches patch reference a
   weight_tensor.dims[2] = static_cast<uint64_t>(input_channels);
   weight_tensor.dims[3] = static_cast<uint64_t>(output_channels);
 
-  emel::embeddings::generator::action::conv2d_view conv = {};
+  emel::embeddings::generator::omniembed::action::conv2d_view conv = {};
   REQUIRE(embedding_detail::bind_conv_f16_hwio(
       weight_tensor, kernel_h, kernel_w, input_channels, output_channels, conv));
   REQUIRE(conv.kernel_major_f32 != nullptr);
@@ -924,7 +930,7 @@ TEST_CASE("embeddings vision depthwise path matches rect reference") {
   weight_tensor.dims[2] = 1u;
   weight_tensor.dims[3] = static_cast<uint64_t>(channels);
 
-  emel::embeddings::generator::action::conv2d_view conv = {};
+  emel::embeddings::generator::omniembed::action::conv2d_view conv = {};
   REQUIRE(embedding_detail::bind_conv_f16_hwio(
       weight_tensor, kernel_h, kernel_w, 1, channels, conv));
   REQUIRE(conv.depthwise_kernel_major_f32 != nullptr);

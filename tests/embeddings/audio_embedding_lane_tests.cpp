@@ -6,9 +6,9 @@
 #include <stateforward/sml.hpp>
 #include "doctest/doctest.h"
 
-#include "emel/embeddings/generator/detail.hpp"
 #include "emel/embeddings/generator/errors.hpp"
-#include "emel/embeddings/generator/sm.hpp"
+#include "emel/embeddings/generator/omniembed/detail.hpp"
+#include "emel/embeddings/generator/omniembed/sm.hpp"
 #include "emel/error/error.hpp"
 #include "emel/text/conditioner/sm.hpp"
 #include "emel/text/formatter/format.hpp"
@@ -17,7 +17,7 @@
 
 namespace {
 
-namespace embedding_detail = emel::embeddings::generator::detail;
+namespace embedding_detail = emel::embeddings::generator::omniembed::detail;
 namespace te_fixture = emel::tests::embeddings::te_fixture;
 
 using te_fixture::cached_te_fixture;
@@ -66,7 +66,7 @@ TEST_CASE("embeddings audio lane returns normalized TE embeddings when fixture p
 
   emel::text::tokenizer::sm tokenizer{};
   emel::text::conditioner::sm conditioner{};
-  emel::embeddings::generator::sm embedding_generator{
+  emel::embeddings::generator::omniembed::sm embedding_generator{
     *fixture.model,
     conditioner,
     nullptr,
@@ -137,9 +137,10 @@ TEST_CASE("embeddings audio detail path keeps prepare and encode outputs finite"
   const auto & fixture = cached_te_fixture();
   const auto tone_440 = make_sine_wave(440.0f);
 
-  emel::embeddings::generator::action::context context = {};
+  emel::embeddings::generator::omniembed::action::context context = {};
   context.model = fixture.model.get();
   REQUIRE(embedding_detail::reserve_scratch(context, *fixture.model));
+  const auto & runtime = embedding_detail::runtime(context);
 
   const auto is_finite = [](std::span<const float> values) {
     return std::all_of(values.begin(), values.end(), [](const float value) {
@@ -149,21 +150,22 @@ TEST_CASE("embeddings audio detail path keeps prepare and encode outputs finite"
 
   REQUIRE(embedding_detail::prepare_audio_input(context, tone_440, k_audio_sample_rate));
   const auto prepared = std::span<const float>{
-    context.scratch.audio_input.get(),
-    static_cast<size_t>(context.audio.num_mel_bins) * static_cast<size_t>(context.audio.time_frames),
+    runtime.scratch.audio_input.get(),
+    static_cast<size_t>(runtime.audio.num_mel_bins) *
+        static_cast<size_t>(runtime.audio.time_frames),
   };
   CHECK(is_finite(prepared));
 
   REQUIRE(embedding_detail::run_audio_embedding(context) ==
           emel::error::cast(emel::embeddings::generator::error::none));
   const auto pooled = std::span<const float>{
-    context.scratch.audio_embedding.get(),
-    static_cast<size_t>(context.audio.embedding_size),
+    runtime.scratch.audio_embedding.get(),
+    static_cast<size_t>(runtime.audio.embedding_size),
   };
   CHECK(is_finite(pooled));
 
   const auto full_embedding = std::span<const float>{
-    context.scratch.full_embedding.get(),
+    runtime.scratch.full_embedding.get(),
     static_cast<size_t>(embedding_detail::shared_embedding_size(context)),
   };
   CHECK(is_finite(full_embedding));
@@ -178,27 +180,28 @@ TEST_CASE("embeddings audio runtime sizes feature buffers for pre-stride expand 
 
   const auto & fixture = cached_te_fixture();
 
-  emel::embeddings::generator::action::context context = {};
+  emel::embeddings::generator::omniembed::action::context context = {};
   context.model = fixture.model.get();
   REQUIRE(embedding_detail::reserve_scratch(context, *fixture.model));
+  const auto & runtime = embedding_detail::runtime(context);
 
-  int32_t height = context.audio.num_mel_bins;
-  int32_t width = context.audio.time_frames;
+  int32_t height = runtime.audio.num_mel_bins;
+  int32_t width = runtime.audio.time_frames;
   height = embedding_detail::output_dim_same(height, 3, 2);
   width = embedding_detail::output_dim_same(width, 3, 2);
-  REQUIRE(context.audio.feature_buffer_elements >=
-          height * width * context.audio.stem.output_channels);
+  REQUIRE(runtime.audio.feature_buffer_elements >=
+          height * width * runtime.audio.stem.output_channels);
 
-  for (int32_t index = 0; index < context.audio.block_count; ++index) {
-    const auto & block = context.audio.blocks[static_cast<size_t>(index)];
-    CHECK(context.audio.feature_buffer_elements >=
+  for (int32_t index = 0; index < runtime.audio.block_count; ++index) {
+    const auto & block = runtime.audio.blocks[static_cast<size_t>(index)];
+    CHECK(runtime.audio.feature_buffer_elements >=
           height * width * block.expanded_channels);
 
     const int32_t output_height =
         embedding_detail::output_dim_same(height, block.kernel_size, block.stride);
     const int32_t output_width =
         embedding_detail::output_dim_same(width, block.kernel_size, block.stride);
-    CHECK(context.audio.feature_buffer_elements >=
+    CHECK(runtime.audio.feature_buffer_elements >=
           output_height * output_width * block.output_channels);
     height = output_height;
     width = output_width;
@@ -206,7 +209,7 @@ TEST_CASE("embeddings audio runtime sizes feature buffers for pre-stride expand 
 
   const int32_t head_height = embedding_detail::output_dim_same(height, 1, 1);
   const int32_t head_width = embedding_detail::output_dim_same(width, 1, 1);
-  CHECK(context.audio.feature_buffer_elements >= head_height * head_width * 1920);
+  CHECK(runtime.audio.feature_buffer_elements >= head_height * head_width * 1920);
 }
 
 TEST_CASE("embeddings audio lane stays stable after an image request on the same generator") {
@@ -220,7 +223,7 @@ TEST_CASE("embeddings audio lane stays stable after an image request on the same
   const auto image = make_rgba_square(255u, 0u, 0u, 32, 32);
 
   auto make_generator = [&](emel::text::conditioner::sm & conditioner) {
-    return emel::embeddings::generator::sm{
+    return emel::embeddings::generator::omniembed::sm{
       *fixture.model,
       conditioner,
       nullptr,
@@ -322,7 +325,7 @@ TEST_CASE("embeddings audio lane surfaces runtime encode failures as backend err
       emel::error::cast(emel::embeddings::generator::error::none);
   initialize_embedding_generator(embedding_generator, initialize_error, tokenizer);
 
-  embedding_generator.context_ref().scratch.audio_embedding.reset();
+  embedding_generator.runtime_ref().scratch.audio_embedding.reset();
 
   std::array<float, 1280> output = {};
   int32_t output_dimension = -1;
@@ -360,7 +363,7 @@ TEST_CASE("embeddings audio lane stays stable after back-to-back text requests")
   const auto tone_440 = make_sine_wave(440.0f);
 
   auto make_generator = [&](emel::text::conditioner::sm & conditioner) {
-    return emel::embeddings::generator::sm{
+    return emel::embeddings::generator::omniembed::sm{
       *fixture.model,
       conditioner,
       nullptr,
@@ -472,7 +475,7 @@ TEST_CASE("embeddings audio lane stays stable after the canonical text-text-imag
   const auto tone_440 = make_sine_wave(440.0f);
 
   auto make_generator = [&](emel::text::conditioner::sm & conditioner) {
-    return emel::embeddings::generator::sm{
+    return emel::embeddings::generator::omniembed::sm{
       *fixture.model,
       conditioner,
       nullptr,
@@ -596,7 +599,7 @@ TEST_CASE("embeddings audio lane supports truncation and rejects malformed audio
   const auto & fixture = cached_te_fixture();
   emel::text::tokenizer::sm tokenizer{};
   emel::text::conditioner::sm conditioner{};
-  emel::embeddings::generator::sm embedding_generator{
+  emel::embeddings::generator::omniembed::sm embedding_generator{
     *fixture.model,
     conditioner,
     nullptr,

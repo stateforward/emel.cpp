@@ -33,6 +33,7 @@ struct state_embed_error_channel_decision {};
 struct state_done {};
 struct state_errored {};
 
+template <class Route>
 struct model {
   auto operator()() const {
     namespace sml = stateforward::sml;
@@ -41,112 +42,112 @@ struct model {
     return sml::make_transition_table(
       //------------------------------------------------------------------------------//
         sml::state<state_initializing> <= *sml::state<state_uninitialized>
-          + sml::event<event::initialize_run> [ guard::guard_valid_initialize{} ]
+          + sml::event<event::initialize_run> [ guard::guard_valid_initialize ]
           / action::effect_begin_initialize
       , sml::state<state_initialize_publish_error> <= sml::state<state_uninitialized>
-          + sml::event<event::initialize_run> [ guard::guard_invalid_initialize{} ]
+          + sml::event<event::initialize_run> [ guard::guard_invalid_initialize ]
           / action::effect_reject_initialize
 
       , sml::state<state_initializing> <= sml::state<state_idle>
-          + sml::event<event::initialize_run> [ guard::guard_valid_initialize{} ]
+          + sml::event<event::initialize_run> [ guard::guard_valid_initialize ]
           / action::effect_begin_initialize
       , sml::state<state_initialize_publish_error> <= sml::state<state_idle>
-          + sml::event<event::initialize_run> [ guard::guard_invalid_initialize{} ]
+          + sml::event<event::initialize_run> [ guard::guard_invalid_initialize ]
           / action::effect_reject_initialize
       , sml::state<state_conditioning> <= sml::state<state_idle>
-          + sml::event<event::embed_text_run> [ guard::guard_valid_embed_full{} ]
+          + sml::event<event::embed_text_run> [ guard::guard_valid_embed_full ]
           / action::effect_begin_embed_text
       , sml::state<state_conditioning> <= sml::state<state_idle>
-          + sml::event<event::embed_text_run> [ guard::guard_valid_embed_truncate{} ]
+          + sml::event<event::embed_text_run> [ guard::guard_valid_embed_truncate ]
           / action::effect_begin_embed_text
       , sml::state<state_embed_publish_error> <= sml::state<state_idle>
-          + sml::event<event::embed_text_run> [ guard::guard_invalid_embed{} ]
+          + sml::event<event::embed_text_run> [ guard::guard_invalid_embed ]
           / action::effect_reject_embed_text
       , sml::state<state_image_preparing> <= sml::state<state_idle>
-          + sml::event<event::embed_image_run> [ guard::guard_valid_embed_image_full{} ]
+          + sml::event<event::embed_image_run> [ guard::guard_valid_embed_image_full ]
           / action::effect_begin_embed_image
       , sml::state<state_image_preparing> <= sml::state<state_idle>
-          + sml::event<event::embed_image_run> [ guard::guard_valid_embed_image_truncate{} ]
+          + sml::event<event::embed_image_run> [ guard::guard_valid_embed_image_truncate ]
           / action::effect_begin_embed_image
       , sml::state<state_embed_publish_error> <= sml::state<state_idle>
-          + sml::event<event::embed_image_run> [ guard::guard_invalid_embed_image{} ]
+          + sml::event<event::embed_image_run> [ guard::guard_invalid_embed_image ]
           / action::effect_reject_embed_image
       , sml::state<state_audio_preparing> <= sml::state<state_idle>
-          + sml::event<event::embed_audio_run> [ guard::guard_valid_embed_audio_full{} ]
+          + sml::event<event::embed_audio_run> [ guard::guard_valid_embed_audio_full ]
           / action::effect_begin_embed_audio
       , sml::state<state_audio_preparing> <= sml::state<state_idle>
-          + sml::event<event::embed_audio_run> [ guard::guard_valid_embed_audio_truncate{} ]
+          + sml::event<event::embed_audio_run> [ guard::guard_valid_embed_audio_truncate ]
           / action::effect_begin_embed_audio
       , sml::state<state_embed_publish_error> <= sml::state<state_idle>
-          + sml::event<event::embed_audio_run> [ guard::guard_invalid_embed_audio{} ]
+          + sml::event<event::embed_audio_run> [ guard::guard_invalid_embed_audio ]
           / action::effect_reject_embed_audio
 
       , sml::state<state_initializing> <= sml::state<state_done>
-          + sml::event<event::initialize_run> [ guard::guard_valid_initialize{} ]
+          + sml::event<event::initialize_run> [ guard::guard_valid_initialize ]
           / action::effect_begin_initialize
       , sml::state<state_initialize_publish_error> <= sml::state<state_done>
-          + sml::event<event::initialize_run> [ guard::guard_invalid_initialize{} ]
+          + sml::event<event::initialize_run> [ guard::guard_invalid_initialize ]
           / action::effect_reject_initialize
       , sml::state<state_conditioning> <= sml::state<state_done>
-          + sml::event<event::embed_text_run> [ guard::guard_valid_embed_full{} ]
+          + sml::event<event::embed_text_run> [ guard::guard_valid_embed_full ]
           / action::effect_begin_embed_text
       , sml::state<state_conditioning> <= sml::state<state_done>
-          + sml::event<event::embed_text_run> [ guard::guard_valid_embed_truncate{} ]
+          + sml::event<event::embed_text_run> [ guard::guard_valid_embed_truncate ]
           / action::effect_begin_embed_text
       , sml::state<state_embed_publish_error> <= sml::state<state_done>
-          + sml::event<event::embed_text_run> [ guard::guard_invalid_embed{} ]
+          + sml::event<event::embed_text_run> [ guard::guard_invalid_embed ]
           / action::effect_reject_embed_text
       , sml::state<state_image_preparing> <= sml::state<state_done>
-          + sml::event<event::embed_image_run> [ guard::guard_valid_embed_image_full{} ]
+          + sml::event<event::embed_image_run> [ guard::guard_valid_embed_image_full ]
           / action::effect_begin_embed_image
       , sml::state<state_image_preparing> <= sml::state<state_done>
-          + sml::event<event::embed_image_run> [ guard::guard_valid_embed_image_truncate{} ]
+          + sml::event<event::embed_image_run> [ guard::guard_valid_embed_image_truncate ]
           / action::effect_begin_embed_image
       , sml::state<state_embed_publish_error> <= sml::state<state_done>
-          + sml::event<event::embed_image_run> [ guard::guard_invalid_embed_image{} ]
+          + sml::event<event::embed_image_run> [ guard::guard_invalid_embed_image ]
           / action::effect_reject_embed_image
       , sml::state<state_audio_preparing> <= sml::state<state_done>
-          + sml::event<event::embed_audio_run> [ guard::guard_valid_embed_audio_full{} ]
+          + sml::event<event::embed_audio_run> [ guard::guard_valid_embed_audio_full ]
           / action::effect_begin_embed_audio
       , sml::state<state_audio_preparing> <= sml::state<state_done>
-          + sml::event<event::embed_audio_run> [ guard::guard_valid_embed_audio_truncate{} ]
+          + sml::event<event::embed_audio_run> [ guard::guard_valid_embed_audio_truncate ]
           / action::effect_begin_embed_audio
       , sml::state<state_embed_publish_error> <= sml::state<state_done>
-          + sml::event<event::embed_audio_run> [ guard::guard_invalid_embed_audio{} ]
+          + sml::event<event::embed_audio_run> [ guard::guard_invalid_embed_audio ]
           / action::effect_reject_embed_audio
 
       , sml::state<state_initializing> <= sml::state<state_errored>
-          + sml::event<event::initialize_run> [ guard::guard_valid_initialize{} ]
+          + sml::event<event::initialize_run> [ guard::guard_valid_initialize ]
           / action::effect_begin_initialize
       , sml::state<state_initialize_publish_error> <= sml::state<state_errored>
-          + sml::event<event::initialize_run> [ guard::guard_invalid_initialize{} ]
+          + sml::event<event::initialize_run> [ guard::guard_invalid_initialize ]
           / action::effect_reject_initialize
       , sml::state<state_conditioning> <= sml::state<state_errored>
-          + sml::event<event::embed_text_run> [ guard::guard_valid_embed_full{} ]
+          + sml::event<event::embed_text_run> [ guard::guard_valid_embed_full ]
           / action::effect_begin_embed_text
       , sml::state<state_conditioning> <= sml::state<state_errored>
-          + sml::event<event::embed_text_run> [ guard::guard_valid_embed_truncate{} ]
+          + sml::event<event::embed_text_run> [ guard::guard_valid_embed_truncate ]
           / action::effect_begin_embed_text
       , sml::state<state_embed_publish_error> <= sml::state<state_errored>
-          + sml::event<event::embed_text_run> [ guard::guard_invalid_embed{} ]
+          + sml::event<event::embed_text_run> [ guard::guard_invalid_embed ]
           / action::effect_reject_embed_text
       , sml::state<state_image_preparing> <= sml::state<state_errored>
-          + sml::event<event::embed_image_run> [ guard::guard_valid_embed_image_full{} ]
+          + sml::event<event::embed_image_run> [ guard::guard_valid_embed_image_full ]
           / action::effect_begin_embed_image
       , sml::state<state_image_preparing> <= sml::state<state_errored>
-          + sml::event<event::embed_image_run> [ guard::guard_valid_embed_image_truncate{} ]
+          + sml::event<event::embed_image_run> [ guard::guard_valid_embed_image_truncate ]
           / action::effect_begin_embed_image
       , sml::state<state_embed_publish_error> <= sml::state<state_errored>
-          + sml::event<event::embed_image_run> [ guard::guard_invalid_embed_image{} ]
+          + sml::event<event::embed_image_run> [ guard::guard_invalid_embed_image ]
           / action::effect_reject_embed_image
       , sml::state<state_audio_preparing> <= sml::state<state_errored>
-          + sml::event<event::embed_audio_run> [ guard::guard_valid_embed_audio_full{} ]
+          + sml::event<event::embed_audio_run> [ guard::guard_valid_embed_audio_full ]
           / action::effect_begin_embed_audio
       , sml::state<state_audio_preparing> <= sml::state<state_errored>
-          + sml::event<event::embed_audio_run> [ guard::guard_valid_embed_audio_truncate{} ]
+          + sml::event<event::embed_audio_run> [ guard::guard_valid_embed_audio_truncate ]
           / action::effect_begin_embed_audio
       , sml::state<state_embed_publish_error> <= sml::state<state_errored>
-          + sml::event<event::embed_audio_run> [ guard::guard_invalid_embed_audio{} ]
+          + sml::event<event::embed_audio_run> [ guard::guard_invalid_embed_audio ]
           / action::effect_reject_embed_audio
 
       //------------------------------------------------------------------------------//
@@ -154,166 +155,166 @@ struct model {
           + sml::completion<event::initialize_run>
           / action::effect_dispatch_bind_conditioner
       , sml::state<state_initialize_publish_success> <= sml::state<state_initialize_decision>
-          + sml::completion<event::initialize_run> [ guard::guard_initialize_success{} ]
+          + sml::completion<event::initialize_run> [ guard::guard_initialize_success ]
           / action::effect_mark_initialized
       , sml::state<state_initialize_publish_error> <= sml::state<state_initialize_decision>
-          + sml::completion<event::initialize_run> [ guard::guard_initialize_model_invalid{} ]
+          + sml::completion<event::initialize_run> [ guard::guard_initialize_model_invalid ]
           / action::effect_set_initialize_model_invalid
       , sml::state<state_initialize_publish_error> <= sml::state<state_initialize_decision>
-          + sml::completion<event::initialize_run> [ guard::guard_initialize_backend_error{} ]
+          + sml::completion<event::initialize_run> [ guard::guard_initialize_backend_error ]
           / action::effect_set_initialize_backend_error
 
       , sml::state<state_idle> <= sml::state<state_initialize_publish_success>
-          + sml::completion<event::initialize_run> [ guard::guard_has_initialize_done_callback{} ]
+          + sml::completion<event::initialize_run> [ guard::guard_has_initialize_done_callback ]
           / action::effect_emit_initialize_done
       , sml::state<state_idle> <= sml::state<state_initialize_publish_success>
-          + sml::completion<event::initialize_run> [ guard::guard_no_initialize_done_callback{} ]
+          + sml::completion<event::initialize_run> [ guard::guard_no_initialize_done_callback ]
 
       , sml::state<state_initialize_error_channel_decision> <= sml::state<state_initialize_publish_error>
           + sml::completion<event::initialize_run>
           / action::effect_write_initialize_error_out
       , sml::state<state_errored> <= sml::state<state_initialize_error_channel_decision>
-          + sml::completion<event::initialize_run> [ guard::guard_has_initialize_error_callback{} ]
+          + sml::completion<event::initialize_run> [ guard::guard_has_initialize_error_callback ]
           / action::effect_emit_initialize_error
       , sml::state<state_errored> <= sml::state<state_initialize_error_channel_decision>
-          + sml::completion<event::initialize_run> [ guard::guard_no_initialize_error_callback{} ]
+          + sml::completion<event::initialize_run> [ guard::guard_no_initialize_error_callback ]
 
       //------------------------------------------------------------------------------//
       , sml::state<state_conditioning_decision> <= sml::state<state_conditioning>
           + sml::completion<event::embed_text_run>
           / action::effect_dispatch_condition_text
       , sml::state<state_embed_publish_error> <= sml::state<state_conditioning_decision>
-          + sml::completion<event::embed_text_run> [ guard::guard_prepare_invalid_request{} ]
+          + sml::completion<event::embed_text_run> [ guard::guard_prepare_invalid_request ]
           / action::effect_set_embed_invalid_request
       , sml::state<state_embed_publish_error> <= sml::state<state_conditioning_decision>
-          + sml::completion<event::embed_text_run> [ guard::guard_prepare_model_invalid{} ]
+          + sml::completion<event::embed_text_run> [ guard::guard_prepare_model_invalid ]
           / action::effect_set_embed_model_invalid
       , sml::state<state_embed_publish_error> <= sml::state<state_conditioning_decision>
-          + sml::completion<event::embed_text_run> [ guard::guard_prepare_backend_error{} ]
+          + sml::completion<event::embed_text_run> [ guard::guard_prepare_backend_error ]
           / action::effect_set_embed_backend_error
       , sml::state<state_encoding> <= sml::state<state_conditioning_decision>
-          + sml::completion<event::embed_text_run> [ guard::guard_prepare_success{} ]
+          + sml::completion<event::embed_text_run> [ guard::guard_prepare_success ]
 
       , sml::state<state_embed_publish_error> <= sml::state<state_encoding>
-          + sml::completion<event::embed_text_run> [ guard::guard_text_route_unsupported{} ]
+          + sml::completion<event::embed_text_run> [ guard::guard_text_route_unsupported ]
           / action::effect_set_embed_backend_error
       , sml::state<state_embed_publish_error> <= sml::state<state_encoding>
-          + sml::completion<event::embed_text_run> [ guard::guard_text_encode_bert_unready{} ]
+          + sml::completion<event::embed_text_run> [ guard::guard_text_encode_unready ]
           / action::effect_set_embed_backend_error
       , sml::state<state_embedding_decision> <= sml::state<state_encoding>
-          + sml::completion<event::embed_text_run> [ guard::guard_text_encode_bert_ready{} ]
-          / action::effect_run_text_embedding_bert
+          + sml::completion<event::embed_text_run> [ guard::guard_text_encode_ready ]
+          / typename Route::effect_run_text_embedding{}
       , sml::state<state_embed_publish_error> <= sml::state<state_embedding_decision>
-          + sml::completion<event::embed_text_run> [ guard::guard_embedding_failed{} ]
+          + sml::completion<event::embed_text_run> [ guard::guard_embedding_failed ]
       , sml::state<state_embed_publish_success> <= sml::state<state_embedding_decision>
-          + sml::completion<event::embed_text_run> [ guard::guard_embedding_succeeded_full{} ]
+          + sml::completion<event::embed_text_run> [ guard::guard_embedding_succeeded_full ]
           / action::effect_publish_full_embedding
       , sml::state<state_embed_publish_success> <= sml::state<state_embedding_decision>
-          + sml::completion<event::embed_text_run> [ guard::guard_embedding_succeeded_truncate{} ]
+          + sml::completion<event::embed_text_run> [ guard::guard_embedding_succeeded_truncate ]
           / action::effect_publish_truncated_embedding
 
       , sml::state<state_done> <= sml::state<state_embed_publish_success>
-          + sml::completion<event::embed_text_run> [ guard::guard_has_embed_done_callback{} ]
+          + sml::completion<event::embed_text_run> [ guard::guard_has_embed_done_callback ]
           / action::effect_emit_embed_done
       , sml::state<state_done> <= sml::state<state_embed_publish_success>
-          + sml::completion<event::embed_text_run> [ guard::guard_no_embed_done_callback{} ]
+          + sml::completion<event::embed_text_run> [ guard::guard_no_embed_done_callback ]
 
       , sml::state<state_embed_error_channel_decision> <= sml::state<state_embed_publish_error>
           + sml::completion<event::embed_text_run>
           / action::effect_write_embed_error_out
       , sml::state<state_errored> <= sml::state<state_embed_error_channel_decision>
-          + sml::completion<event::embed_text_run> [ guard::guard_has_embed_error_callback{} ]
+          + sml::completion<event::embed_text_run> [ guard::guard_has_embed_error_callback ]
           / action::effect_emit_embed_error
       , sml::state<state_errored> <= sml::state<state_embed_error_channel_decision>
-          + sml::completion<event::embed_text_run> [ guard::guard_no_embed_error_callback{} ]
+          + sml::completion<event::embed_text_run> [ guard::guard_no_embed_error_callback ]
 
       //------------------------------------------------------------------------------//
       , sml::state<state_embed_publish_error> <= sml::state<state_image_preparing>
-          + sml::completion<event::embed_image_run> [ guard::guard_image_route_unsupported{} ]
+          + sml::completion<event::embed_image_run> [ guard::guard_image_route_unsupported ]
           / action::effect_set_embed_backend_error
       , sml::state<state_embed_publish_error> <= sml::state<state_image_preparing>
-          + sml::completion<event::embed_image_run> [ guard::guard_image_prepare_mobilenetv4_unready{} ]
+          + sml::completion<event::embed_image_run> [ guard::guard_image_prepare_unready ]
           / action::effect_set_embed_backend_error
       , sml::state<state_image_encoding> <= sml::state<state_image_preparing>
-          + sml::completion<event::embed_image_run> [ guard::guard_image_prepare_mobilenetv4_ready{} ]
-          / action::effect_prepare_image_input_mobilenetv4
+          + sml::completion<event::embed_image_run> [ guard::guard_image_prepare_ready ]
+          / typename Route::effect_prepare_image_input{}
 
       , sml::state<state_embed_publish_error> <= sml::state<state_image_encoding>
-          + sml::completion<event::embed_image_run> [ guard::guard_image_route_unsupported{} ]
+          + sml::completion<event::embed_image_run> [ guard::guard_image_route_unsupported ]
           / action::effect_set_embed_backend_error
       , sml::state<state_embed_publish_error> <= sml::state<state_image_encoding>
-          + sml::completion<event::embed_image_run> [ guard::guard_image_encode_mobilenetv4_unready{} ]
+          + sml::completion<event::embed_image_run> [ guard::guard_image_encode_unready ]
           / action::effect_set_embed_backend_error
       , sml::state<state_embedding_decision> <= sml::state<state_image_encoding>
-          + sml::completion<event::embed_image_run> [ guard::guard_image_encode_mobilenetv4_ready{} ]
-          / action::effect_run_image_embedding_mobilenetv4
+          + sml::completion<event::embed_image_run> [ guard::guard_image_encode_ready ]
+          / typename Route::effect_run_image_embedding{}
       , sml::state<state_embed_publish_error> <= sml::state<state_embedding_decision>
-          + sml::completion<event::embed_image_run> [ guard::guard_embedding_failed{} ]
+          + sml::completion<event::embed_image_run> [ guard::guard_embedding_failed ]
       , sml::state<state_embed_publish_success> <= sml::state<state_embedding_decision>
-          + sml::completion<event::embed_image_run> [ guard::guard_embedding_succeeded_full{} ]
+          + sml::completion<event::embed_image_run> [ guard::guard_embedding_succeeded_full ]
           / action::effect_publish_full_embedding
       , sml::state<state_embed_publish_success> <= sml::state<state_embedding_decision>
-          + sml::completion<event::embed_image_run> [ guard::guard_embedding_succeeded_truncate{} ]
+          + sml::completion<event::embed_image_run> [ guard::guard_embedding_succeeded_truncate ]
           / action::effect_publish_truncated_embedding
 
       , sml::state<state_done> <= sml::state<state_embed_publish_success>
-          + sml::completion<event::embed_image_run> [ guard::guard_has_embed_done_callback{} ]
+          + sml::completion<event::embed_image_run> [ guard::guard_has_embed_done_callback ]
           / action::effect_emit_embed_done
       , sml::state<state_done> <= sml::state<state_embed_publish_success>
-          + sml::completion<event::embed_image_run> [ guard::guard_no_embed_done_callback{} ]
+          + sml::completion<event::embed_image_run> [ guard::guard_no_embed_done_callback ]
 
       , sml::state<state_embed_error_channel_decision> <= sml::state<state_embed_publish_error>
           + sml::completion<event::embed_image_run>
           / action::effect_write_embed_error_out
       , sml::state<state_errored> <= sml::state<state_embed_error_channel_decision>
-          + sml::completion<event::embed_image_run> [ guard::guard_has_embed_error_callback{} ]
+          + sml::completion<event::embed_image_run> [ guard::guard_has_embed_error_callback ]
           / action::effect_emit_embed_error
       , sml::state<state_errored> <= sml::state<state_embed_error_channel_decision>
-          + sml::completion<event::embed_image_run> [ guard::guard_no_embed_error_callback{} ]
+          + sml::completion<event::embed_image_run> [ guard::guard_no_embed_error_callback ]
 
       //------------------------------------------------------------------------------//
       , sml::state<state_embed_publish_error> <= sml::state<state_audio_preparing>
-          + sml::completion<event::embed_audio_run> [ guard::guard_audio_route_unsupported{} ]
+          + sml::completion<event::embed_audio_run> [ guard::guard_audio_route_unsupported ]
           / action::effect_set_embed_backend_error
       , sml::state<state_embed_publish_error> <= sml::state<state_audio_preparing>
-          + sml::completion<event::embed_audio_run> [ guard::guard_audio_prepare_efficientat_unready{} ]
+          + sml::completion<event::embed_audio_run> [ guard::guard_audio_prepare_unready ]
           / action::effect_set_embed_backend_error
       , sml::state<state_audio_encoding> <= sml::state<state_audio_preparing>
-          + sml::completion<event::embed_audio_run> [ guard::guard_audio_prepare_efficientat_ready{} ]
-          / action::effect_prepare_audio_input_efficientat
+          + sml::completion<event::embed_audio_run> [ guard::guard_audio_prepare_ready ]
+          / typename Route::effect_prepare_audio_input{}
 
       , sml::state<state_embed_publish_error> <= sml::state<state_audio_encoding>
-          + sml::completion<event::embed_audio_run> [ guard::guard_audio_route_unsupported{} ]
+          + sml::completion<event::embed_audio_run> [ guard::guard_audio_route_unsupported ]
           / action::effect_set_embed_backend_error
       , sml::state<state_embed_publish_error> <= sml::state<state_audio_encoding>
-          + sml::completion<event::embed_audio_run> [ guard::guard_audio_encode_efficientat_unready{} ]
+          + sml::completion<event::embed_audio_run> [ guard::guard_audio_encode_unready ]
           / action::effect_set_embed_backend_error
       , sml::state<state_embedding_decision> <= sml::state<state_audio_encoding>
-          + sml::completion<event::embed_audio_run> [ guard::guard_audio_encode_efficientat_ready{} ]
-          / action::effect_run_audio_embedding_efficientat
+          + sml::completion<event::embed_audio_run> [ guard::guard_audio_encode_ready ]
+          / typename Route::effect_run_audio_embedding{}
       , sml::state<state_embed_publish_error> <= sml::state<state_embedding_decision>
-          + sml::completion<event::embed_audio_run> [ guard::guard_embedding_failed{} ]
+          + sml::completion<event::embed_audio_run> [ guard::guard_embedding_failed ]
       , sml::state<state_embed_publish_success> <= sml::state<state_embedding_decision>
-          + sml::completion<event::embed_audio_run> [ guard::guard_embedding_succeeded_full{} ]
+          + sml::completion<event::embed_audio_run> [ guard::guard_embedding_succeeded_full ]
           / action::effect_publish_full_embedding
       , sml::state<state_embed_publish_success> <= sml::state<state_embedding_decision>
-          + sml::completion<event::embed_audio_run> [ guard::guard_embedding_succeeded_truncate{} ]
+          + sml::completion<event::embed_audio_run> [ guard::guard_embedding_succeeded_truncate ]
           / action::effect_publish_truncated_embedding
 
       , sml::state<state_done> <= sml::state<state_embed_publish_success>
-          + sml::completion<event::embed_audio_run> [ guard::guard_has_embed_done_callback{} ]
+          + sml::completion<event::embed_audio_run> [ guard::guard_has_embed_done_callback ]
           / action::effect_emit_embed_done
       , sml::state<state_done> <= sml::state<state_embed_publish_success>
-          + sml::completion<event::embed_audio_run> [ guard::guard_no_embed_done_callback{} ]
+          + sml::completion<event::embed_audio_run> [ guard::guard_no_embed_done_callback ]
 
       , sml::state<state_embed_error_channel_decision> <= sml::state<state_embed_publish_error>
           + sml::completion<event::embed_audio_run>
           / action::effect_write_embed_error_out
       , sml::state<state_errored> <= sml::state<state_embed_error_channel_decision>
-          + sml::completion<event::embed_audio_run> [ guard::guard_has_embed_error_callback{} ]
+          + sml::completion<event::embed_audio_run> [ guard::guard_has_embed_error_callback ]
           / action::effect_emit_embed_error
       , sml::state<state_errored> <= sml::state<state_embed_error_channel_decision>
-          + sml::completion<event::embed_audio_run> [ guard::guard_no_embed_error_callback{} ]
+          + sml::completion<event::embed_audio_run> [ guard::guard_no_embed_error_callback ]
 
       //------------------------------------------------------------------------------//
       , sml::state<state_uninitialized> <= sml::state<state_uninitialized> + sml::unexpected_event<sml::_>
@@ -362,30 +363,102 @@ struct model {
   }
 };
 
-struct sm : public emel::sm<model, action::context> {
-  using base_type = emel::sm<model, action::context>;
+namespace component_route {
+
+bool reserve_scratch(action::context & ctx,
+                     const emel::model::data & model) noexcept;
+void prepare_image_input(const event::embed_image_run & ev,
+                         action::context & ctx) noexcept;
+void prepare_audio_input(const event::embed_audio_run & ev,
+                         action::context & ctx) noexcept;
+void run_text_embedding(const event::embed_text_run & ev,
+                        action::context & ctx) noexcept;
+void run_image_embedding(const event::embed_image_run & ev,
+                         action::context & ctx) noexcept;
+void run_audio_embedding(const event::embed_audio_run & ev,
+                         action::context & ctx) noexcept;
+
+}  // namespace component_route
+
+struct route {
+  using context = emel::embeddings::generator::action::context;
+
+  static bool reserve_scratch(action::context & ctx,
+                              const emel::model::data & model) noexcept {
+    return component_route::reserve_scratch(ctx, model);
+  }
+
+  struct effect_prepare_image_input {
+    template <class runtime_event_type>
+    void operator()(const runtime_event_type & runtime_ev,
+                    action::context & ctx) const noexcept {
+      const auto & ev = detail::unwrap_runtime_event(runtime_ev);
+      component_route::prepare_image_input(ev, ctx);
+    }
+  };
+
+  struct effect_prepare_audio_input {
+    template <class runtime_event_type>
+    void operator()(const runtime_event_type & runtime_ev,
+                    action::context & ctx) const noexcept {
+      const auto & ev = detail::unwrap_runtime_event(runtime_ev);
+      component_route::prepare_audio_input(ev, ctx);
+    }
+  };
+
+  struct effect_run_text_embedding {
+    template <class runtime_event_type>
+    void operator()(const runtime_event_type & runtime_ev,
+                    action::context & ctx) const noexcept {
+      const auto & ev = detail::unwrap_runtime_event(runtime_ev);
+      component_route::run_text_embedding(ev, ctx);
+    }
+  };
+
+  struct effect_run_image_embedding {
+    template <class runtime_event_type>
+    void operator()(const runtime_event_type & runtime_ev,
+                    action::context & ctx) const noexcept {
+      const auto & ev = detail::unwrap_runtime_event(runtime_ev);
+      component_route::run_image_embedding(ev, ctx);
+    }
+  };
+
+  struct effect_run_audio_embedding {
+    template <class runtime_event_type>
+    void operator()(const runtime_event_type & runtime_ev,
+                    action::context & ctx) const noexcept {
+      const auto & ev = detail::unwrap_runtime_event(runtime_ev);
+      component_route::run_audio_embedding(ev, ctx);
+    }
+  };
+};
+
+template <class Route>
+struct basic_sm : public emel::sm<model<Route>, action::context> {
+  using base_type = emel::sm<model<Route>, action::context>;
   using base_type::is;
   using base_type::visit_current_states;
 
-  sm() : base_type() {}
+  basic_sm() : base_type() {}
 
-  sm(const emel::model::data & model_ref,
-     emel::text::conditioner::sm & conditioner_ref,
-     void * formatter_ctx = nullptr,
-     emel::text::formatter::format_fn format_prompt =
-         emel::text::formatter::format_raw)
+  basic_sm(const emel::model::data & model_ref,
+           emel::text::conditioner::sm & conditioner_ref,
+           void * formatter_ctx = nullptr,
+           emel::text::formatter::format_fn format_prompt =
+               emel::text::formatter::format_raw)
       : base_type() {
     this->context_.model = &model_ref;
     this->context_.conditioner = &conditioner_ref;
     this->context_.formatter_ctx = formatter_ctx;
     this->context_.format_prompt = format_prompt;
-    (void) detail::reserve_scratch(this->context_, model_ref);
+    (void) Route::reserve_scratch(this->context_, model_ref);
   }
 
-  sm(const sm &) = delete;
-  sm(sm &&) = delete;
-  sm & operator=(const sm &) = delete;
-  sm & operator=(sm &&) = delete;
+  basic_sm(const basic_sm &) = delete;
+  basic_sm(basic_sm &&) = delete;
+  basic_sm & operator=(const basic_sm &) = delete;
+  basic_sm & operator=(basic_sm &&) = delete;
 
   bool process_event(const event::initialize & ev) {
     event::initialize_ctx ctx{};
@@ -415,5 +488,7 @@ struct sm : public emel::sm<model, action::context> {
     return accepted && ctx.err == detail::to_error(error::none);
   }
 };
+
+using sm = basic_sm<route>;
 
 }  // namespace emel::embeddings::generator

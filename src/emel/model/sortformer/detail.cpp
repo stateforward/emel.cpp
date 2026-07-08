@@ -216,3 +216,12 @@ emel::error::type validate_execution_contract(const emel::model::data & model_da
 }
 
 }  // namespace emel::model::sortformer::detail
+
+namespace emel::model::sortformer {
+
+emel::error::type build_execution_contract(const emel::model::data & model_data,
+                                           execution_contract & contract_out) noexcept {
+  return detail::build_execution_contract(model_data, contract_out);
+}
+
+}  // namespace emel::model::sortformer

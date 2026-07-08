@@ -1,11 +1,11 @@
 #pragma once
 
-#include "emel/diarization/request/context.hpp"
-#include "emel/diarization/request/detail.hpp"
-#include "emel/diarization/request/events.hpp"
+#include "emel/diarization/sortformer/request/context.hpp"
+#include "emel/diarization/sortformer/request/detail.hpp"
+#include "emel/diarization/sortformer/request/events.hpp"
 #include "emel/diarization/sortformer/encoder/feature_extractor/detail.hpp"
 
-namespace emel::diarization::request::guard {
+namespace emel::diarization::sortformer::request::guard {
 
 struct guard_model_contract_valid {
   bool operator()(const event::prepare_run & runtime_ev,
@@ -136,4 +136,4 @@ struct guard_no_error_callback {
   }
 };
 
-}  // namespace emel::diarization::request::guard
+}  // namespace emel::diarization::sortformer::request::guard
