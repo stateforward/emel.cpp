@@ -11,7 +11,7 @@
 #include "doctest/doctest.h"
 
 #include "emel/embeddings/generator/errors.hpp"
-#include "emel/embeddings/generator/sm.hpp"
+#include "emel/embeddings/generator/omniembed/sm.hpp"
 #include "emel/error/error.hpp"
 #include "emel/text/conditioner/sm.hpp"
 #include "emel/text/formatter/format.hpp"
@@ -87,7 +87,7 @@ inline canonical_embeddings compute_canonical_embeddings_for_model(
     const emel::model::data & model) {
   emel::text::tokenizer::sm tokenizer{};
   emel::text::conditioner::sm conditioner{};
-  emel::embeddings::generator::sm embedding_generator{
+  emel::embeddings::generator::omniembed::sm embedding_generator{
     model,
     conditioner,
     nullptr,

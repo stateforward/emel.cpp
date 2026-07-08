@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+shopt -s nullglob
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
@@ -69,6 +70,20 @@ check_no_matches_except "legacy text generator root" \
 check_no_matches "text generator actor internals in maintained generation parity/benchmark lanes" \
   'emel/text/generator/(detail|actions|guards)\.hpp|emel::text::generator::(detail|action|guard)::|emel::text::generator::prefill::guard::|generation_internal_diagnostics' \
   tools/generation_route_policy.hpp tools/bench/generation_bench.cpp tools/paritychecker/parity_runner.cpp tools/paritychecker/parity_runner.hpp
+
+check_no_matches "OmniEmbed model-family detail leaked into generic embeddings generator surfaces" \
+  'omniembed|OmniEmbed|model/omniembed|model::omniembed' \
+  src/emel/embeddings/generator/*.hpp \
+  src/emel/embeddings/generator/*.cpp
+
+check_no_matches "model-family route names leaked into generic embeddings generator orchestration surfaces" \
+  'bert|Bert|BERT|mobilenet|MobileNet|MOBILENET|efficientat|EfficientAT|EFFICIENTAT|edge_residual|universal_inverted|audio_inverted|has_dw|has_expand|use_hardswish|k_max_blocks|matrix_view|conv2d_view|batch_norm' \
+  src/emel/embeddings/generator/context.hpp \
+  src/emel/embeddings/generator/detail.hpp \
+  src/emel/embeddings/generator/actions.hpp \
+  src/emel/embeddings/generator/guards.hpp \
+  src/emel/embeddings/generator/sm.hpp \
+  src/emel/embeddings/generator/*.cpp
 
 check_no_matches "IO loader concrete system I/O before strategy implementation" \
   "$concrete_io_api_pattern" \
