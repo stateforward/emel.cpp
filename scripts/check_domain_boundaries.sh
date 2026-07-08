@@ -128,9 +128,17 @@ check_no_matches "Whisper leaked into generic speech recognizer" \
   'whisper|model/whisper|speech/tokenizer/whisper|speech/encoder/whisper|speech/decoder/whisper|model::whisper|tokenizer::whisper|encoder::whisper|decoder::whisper' \
   src/emel/speech/recognizer tests/speech/recognizer
 
+check_no_matches "Whisper encoder detail leaked into recognizer route" \
+  'emel/speech/encoder/whisper/detail\.hpp|encoder::whisper::detail|::detail::' \
+  src/emel/speech/recognizer_routes/whisper
+
 check_no_matches "Whisper model binding leaked into speech encoder/decoder runtime" \
   'emel/model/whisper|model::whisper' \
   src/emel/speech/encoder src/emel/speech/decoder
+
+check_no_matches "Moshi model detail leaked into Mimi codec" \
+  'emel/model/moshi/detail\.hpp|model::moshi::detail' \
+  src/emel/speech/codec/mimi
 
 check_absent_path "retired model weight-loader owner path" \
   src/emel/model/weight_loader \
