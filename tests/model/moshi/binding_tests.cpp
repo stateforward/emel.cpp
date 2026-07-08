@@ -829,7 +829,6 @@ TEST_CASE("moshi lm contract rejects unsupported known gguf tensor layouts") {
       dtype_case{"f64", 28},     dtype_case{"iq1_m", 29},
       dtype_case{"bf16", 30},    dtype_case{"tq1_0", 34},
       dtype_case{"tq2_0", 35},   dtype_case{"mxfp4", 39},
-      dtype_case{"nvfp4", 40},
   };
 
   for (const auto &entry : cases) {
@@ -887,7 +886,6 @@ TEST_CASE("moshi lm contract rejects partial quantized tensor rows") {
                  sizeof(quant::block_q6_k)},
       dtype_case{"q8_k", emel::kernel::detail::dtype_q8_k, quant::QK_K,
                  sizeof(quant::block_q8_k)},
-      dtype_case{"nvfp4", 40, 64u, 36u},
   };
 
   for (const auto &entry : cases) {
@@ -909,14 +907,21 @@ TEST_CASE("moshi lm contract rejects unknown tensor dtypes") {
     return;
   }
 
-  auto model = std::make_unique<emel::model::data>(*loaded.model);
-  configure_q4_k_lm_contract(*model);
-  constexpr int32_t k_unknown_dtype = 999;
-  set_matrix_tensor(*model, "lm.text_emb.weight", k_unknown_dtype,
-                    model->moshi_lm.dim, model->moshi_lm.text_card + 1,
-                    dense_storage_bytes(model->moshi_lm.dim,
-                                        model->moshi_lm.text_card + 1, 1u));
-  CHECK(moshi::validate_execution_contract(*model) != k_none);
+  const std::array cases{
+      int32_t{40},
+      int32_t{999},
+  };
+
+  for (const int32_t dtype : cases) {
+    CAPTURE(dtype);
+    auto model = std::make_unique<emel::model::data>(*loaded.model);
+    configure_q4_k_lm_contract(*model);
+    set_matrix_tensor(*model, "lm.text_emb.weight", dtype, model->moshi_lm.dim,
+                      model->moshi_lm.text_card + 1,
+                      dense_storage_bytes(model->moshi_lm.dim,
+                                          model->moshi_lm.text_card + 1, 1u));
+    CHECK(moshi::validate_execution_contract(*model) != k_none);
+  }
 }
 
 TEST_CASE("mimi contract validation requires every transformer layer") {
