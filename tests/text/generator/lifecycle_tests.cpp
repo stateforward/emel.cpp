@@ -29,6 +29,7 @@
 #include "emel/text/formatter/format.hpp"
 #include "emel/text/tokenizer/sm.hpp"
 #include "../../allocation_tracker.hpp"
+#include "../../memory/recording_kv_actor.hpp"
 #include "generator_test_policies.hpp"
 
 namespace {

@@ -5,7 +5,7 @@
 #include "emel/emel.h"
 #include "emel/memory/events.hpp"
 #include "emel/memory/hybrid/sm.hpp"
-#include "../../allocation_tracker.hpp"
+#include "../recording_kv_actor.hpp"
 
 namespace {
 
