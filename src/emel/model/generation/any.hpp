@@ -3,16 +3,17 @@
 #include <array>
 #include <cstdint>
 #include <string_view>
+#include <vector>
 
 #include "emel/error/error.hpp"
 #include "emel/model/data.hpp"
 
-namespace emel::model::transformer {
+namespace emel::model::generation {
 
 constexpr uint32_t k_quantized_stage_family_count = 14u;
 
 struct tensor_view {
-  const emel::model::data::tensor_record *tensor = nullptr;
+  const emel::model::data::tensor_record * tensor = nullptr;
   std::string_view name = {};
 };
 
@@ -36,11 +37,15 @@ struct block_view {
 };
 
 struct execution_view {
-  const emel::model::data *model = nullptr;
+  static constexpr uint32_t k_max_blocks =
+      static_cast<uint32_t>(emel::model::data::k_max_metadata_arrays);
+
+  const emel::model::data * model = nullptr;
   tensor_view token_embedding = {};
   tensor_view output_norm = {};
   tensor_view output = {};
   int32_t block_count = 0;
+  std::vector<block_view> blocks = {};
 };
 
 using generation_residual_route = emel::model::generation_residual_route;
@@ -74,13 +79,13 @@ struct generation_execution_descriptor {
   static constexpr uint32_t k_max_layers =
       static_cast<uint32_t>(emel::model::data::k_max_metadata_arrays);
 
-  const execution_view *execution = nullptr;
+  const execution_view * execution = nullptr;
   uint32_t layer_count = 0u;
   std::array<generation_layer_execution, k_max_layers> layers = {};
 };
 
 struct topology {
-  const execution_view *execution = nullptr;
+  const execution_view * execution = nullptr;
   uint32_t node_count = 0u;
   uint32_t tensor_count = 0u;
   uint64_t bytes_per_tensor = 0u;
@@ -93,7 +98,7 @@ enum class step_kind : uint8_t {
 };
 
 struct step_plan {
-  const topology *graph = nullptr;
+  const topology * graph = nullptr;
   step_kind kind = step_kind::prefill;
   uint32_t node_count = 0u;
   uint32_t tensor_count = 0u;
@@ -138,33 +143,74 @@ struct quantized_path_audit {
   std::array<quantized_stage_audit, k_quantized_stage_family_count> stages = {};
 };
 
-bool has_tensor_named(const emel::model::data &model_data,
+struct contract {
+  contract() noexcept = default;
+  contract(const contract &) = delete;
+  contract & operator=(const contract &) = delete;
+  contract(contract &&) = delete;
+  contract & operator=(contract &&) = delete;
+  ~contract() = default;
+
+  void reset() noexcept {
+    execution = {};
+    generation_execution = {};
+    topology = {};
+    prefill_plan = {};
+    decode_plan = {};
+    quantized_audit = {};
+  }
+
+  execution_view execution = {};
+  generation_execution_descriptor generation_execution = {};
+  topology topology = {};
+  step_plan prefill_plan = {};
+  step_plan decode_plan = {};
+  quantized_path_audit quantized_audit = {};
+};
+
+emel::error::type build_contract(const emel::model::data & model_data,
+                                 contract & contract_out) noexcept;
+bool has_tensor_named(const emel::model::data & model_data,
                       std::string_view name) noexcept;
-bool require_block_tensor(const emel::model::data &model_data,
+bool bind_tensor_view(const emel::model::data & model_data,
+                      std::string_view name,
+                      tensor_view & view_out) noexcept;
+bool bind_output_view(const emel::model::data & model_data,
+                      const tensor_view & token_embedding,
+                      bool allow_tied_output,
+                      tensor_view & output_out) noexcept;
+bool bind_block_tensor_view(const emel::model::data & model_data,
+                            int32_t block_index,
+                            std::string_view suffix,
+                            tensor_view & view_out) noexcept;
+bool require_block_tensor(const emel::model::data & model_data,
                           int32_t block_index,
                           std::string_view suffix) noexcept;
-bool reject_block_tensor(const emel::model::data &model_data,
-                         int32_t block_index, std::string_view suffix) noexcept;
-
-emel::error::type build_execution_view(const emel::model::data &model_data,
-                                       execution_view &view_out) noexcept;
-emel::error::type lookup_block_view(const execution_view &execution,
+bool reject_block_tensor(const emel::model::data & model_data,
+                         int32_t block_index,
+                         std::string_view suffix) noexcept;
+emel::error::type bind_attention_block(const emel::model::data & model_data,
+                                       int32_t block_index,
+                                       bool require_qk_norm,
+                                       bool use_shared_key_value,
+                                       block_view & block_out) noexcept;
+emel::error::type bind_shortconv_block(const emel::model::data & model_data,
+                                       int32_t block_index,
+                                       block_view & block_out) noexcept;
+emel::error::type lookup_block_view(const execution_view & execution,
                                     int32_t block_index,
-                                    block_view &block_out) noexcept;
-emel::error::type build_generation_execution_descriptor(
-    const execution_view &execution,
-    generation_execution_descriptor &descriptor_out) noexcept;
-emel::error::type build_topology(const execution_view &execution,
-                                 topology &topology_out) noexcept;
-emel::error::type build_step_plans(const topology &topology_in,
-                                   step_plan &prefill_out,
-                                   step_plan &decode_out) noexcept;
+                                    block_view & block_out) noexcept;
+emel::error::type build_step_plans(const topology & topology_in,
+                                   step_plan & prefill_out,
+                                   step_plan & decode_out) noexcept;
+emel::error::type validate_contract(const contract & contract_in) noexcept;
+emel::error::type complete_contract(contract & contract_out) noexcept;
 quantized_path_audit
-build_quantized_path_audit(const execution_view &execution) noexcept;
+build_quantized_path_audit(const execution_view & execution) noexcept;
 std::string_view
 quantized_stage_family_name(quantized_stage_family family) noexcept;
 std::string_view
 quantized_contract_kind_name(quantized_contract_kind kind) noexcept;
 std::string_view tensor_type_name(int32_t tensor_type) noexcept;
 
-} // namespace emel::model::transformer
+}  // namespace emel::model::generation

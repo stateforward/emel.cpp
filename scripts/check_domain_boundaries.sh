@@ -74,10 +74,6 @@ check_no_matches "lfm2 model code depends on sibling model-family detail" \
   'emel/model/llama/(detail|any)\.hpp|emel/model/(qwen3|gemma4)/detail\.hpp|emel::model::llama::|emel::model::(qwen3|gemma4)::detail::' \
   src/emel/model/lfm2
 
-check_no_matches "shared transformer model code hardcodes model-family contracts" \
-  'qwen3|gemma4|lfm2|llama|emel/model/llama|emel::model::llama::' \
-  src/emel/model/transformer
-
 check_no_matches_except "legacy text generator root" \
   'emel/generator|emel::generator|namespace emel::generator|src/emel/generator|tests/generator' \
   '^(src/emel/generator/|tests/text/generator/legacy_compatibility_tests\.cpp:[0-9]+:|scripts/(quality_gates|test_with_coverage)\.sh:[0-9]+:.*src/emel/generator)' \
@@ -85,7 +81,15 @@ check_no_matches_except "legacy text generator root" \
 
 check_no_matches "text generator actor internals in maintained generation parity/benchmark lanes" \
   'emel/text/generator/(detail|actions|guards)\.hpp|emel::text::generator::(detail|action|guard)::|emel::text::generator::prefill::guard::|generation_internal_diagnostics' \
-  tools/generation_route_policy.hpp tools/bench/generation_bench.cpp tools/paritychecker/parity_runner.cpp tools/paritychecker/parity_runner.hpp
+  tools/generation_route_policy.hpp tools/bench/generation_bench.cpp tools/paritychecker/parity_engines.cpp tools/paritychecker/parity_runner.cpp tools/paritychecker/parity_runner.hpp
+
+check_no_matches "model-family detail contracts leaked into generic text generator headers" \
+  'emel/model/(generation|llama|qwen3|gemma4|lfm2)/detail|model::(generation|llama|qwen3|gemma4|lfm2)::detail' \
+  src/emel/text/generator
+
+check_no_matches "model-family names leaked into neutral generation contract" \
+  'llama|qwen3|gemma4|lfm2|whisper|moshi' \
+  src/emel/model/generation
 
 check_no_matches "OmniEmbed model-family detail leaked into generic embeddings generator surfaces" \
   'omniembed|OmniEmbed|model/omniembed|model::omniembed' \

@@ -22,9 +22,9 @@
 #include "emel/kernel/sm.hpp"
 #include "emel/memory/view.hpp"
 #include "emel/model/data.hpp"
+#include "emel/model/generation/any.hpp"
 #include "emel/model/loader/errors.hpp"
 #include "emel/model/tensor/window/sm.hpp"
-#include "emel/model/transformer/any.hpp"
 #include "emel/text/generator/events.hpp"
 #include "emel/text/generator/matmul/sm.hpp"
 
@@ -194,12 +194,12 @@ struct stream_binding {
 
 struct native_backend {
   const emel::model::data *model = nullptr;
-  emel::model::transformer::execution_view execution = {};
-  emel::model::transformer::generation_execution_descriptor
+  emel::model::generation::execution_view execution = {};
+  emel::model::generation::generation_execution_descriptor
       generation_execution = {};
-  emel::model::transformer::topology topology = {};
-  emel::model::transformer::step_plan prefill_plan = {};
-  emel::model::transformer::step_plan decode_plan = {};
+  emel::model::generation::topology topology = {};
+  emel::model::generation::step_plan prefill_plan = {};
+  emel::model::generation::step_plan decode_plan = {};
   emel::kernel::sm kernel = {};
   emel::text::generator::matmul::sm *matmul_actor = nullptr;
   route_policy routes = {};
@@ -233,7 +233,7 @@ struct native_backend {
   std::vector<emel::kernel::detail::quant::block_q8_0> packed_q8_0_chunk4_rows =
       {};
   std::vector<uint8_t> packed_q8_0_chunk4_input_storage = {};
-  emel::model::transformer::quantized_path_audit quantized_audit = {};
+  emel::model::generation::quantized_path_audit quantized_audit = {};
   std::vector<block_weights> blocks = {};
   stream_binding stream = {};
 
@@ -344,9 +344,9 @@ namespace quant = emel::kernel::detail::quant;
 namespace {
 
 using tensor_record = emel::model::data::tensor_record;
-using step_kind = emel::model::transformer::step_kind;
+using step_kind = emel::model::generation::step_kind;
 
-using step_plan = emel::model::transformer::step_plan;
+using step_plan = emel::model::generation::step_plan;
 
 constexpr int32_t k_error_ok = 0;
 constexpr int32_t k_error_invalid = 1;
@@ -1040,7 +1040,7 @@ inline void reset_shortconv_cache(native_backend &backend) noexcept {
 }
 
 inline const tensor_record *select_output_projection_tensor(
-    const emel::model::transformer::execution_view &execution) noexcept {
+    const emel::model::generation::execution_view &execution) noexcept {
   if (execution.output.tensor != nullptr) {
     return execution.output.tensor;
   }
@@ -5016,11 +5016,18 @@ inline bool run_decode_preselected_argmax(
 } // namespace
 
 inline emel::error::type
-prepare(native_backend &backend, const emel::model::data &model_data,
+prepare(native_backend &backend,
+        const emel::model::generation::contract &generation_contract,
         emel::text::generator::matmul::sm &matmul_actor,
         const runtime_policy &policy,
         const int32_t kv_block_tokens =
             emel::memory::view::DEFAULT_BLOCK_TOKENS) noexcept {
+  if (emel::model::generation::validate_contract(generation_contract) !=
+          emel::error::cast(emel::model::loader::error::none) ||
+      kv_block_tokens <= 0) {
+    return emel::error::cast(emel::model::loader::error::model_invalid);
+  }
+
   std::destroy_at(std::addressof(backend));
   std::construct_at(std::addressof(backend));
   backend.matmul_actor = &matmul_actor;
@@ -5031,23 +5038,17 @@ prepare(native_backend &backend, const emel::model::data &model_data,
       emel::text::generator::matmul::event::configure_kernel_kind{
           backend.kernel_kind});
 
-  if (emel::model::transformer::build_execution_view(model_data,
-                                                     backend.execution) !=
-          emel::error::cast(emel::model::loader::error::none) ||
-      emel::model::transformer::build_generation_execution_descriptor(
-          backend.execution, backend.generation_execution) !=
-          emel::error::cast(emel::model::loader::error::none) ||
-      emel::model::transformer::build_topology(backend.execution,
-                                               backend.topology) !=
-          emel::error::cast(emel::model::loader::error::none) ||
-      emel::model::transformer::build_step_plans(
-          backend.topology, backend.prefill_plan, backend.decode_plan) !=
-          emel::error::cast(emel::model::loader::error::none)) {
-    return emel::error::cast(emel::model::loader::error::model_invalid);
-  }
-
-  backend.quantized_audit =
-      emel::model::transformer::build_quantized_path_audit(backend.execution);
+  const auto &model_data = *generation_contract.execution.model;
+  backend.execution = generation_contract.execution;
+  backend.generation_execution = generation_contract.generation_execution;
+  backend.topology = generation_contract.topology;
+  backend.prefill_plan = generation_contract.prefill_plan;
+  backend.decode_plan = generation_contract.decode_plan;
+  backend.quantized_audit = generation_contract.quantized_audit;
+  backend.generation_execution.execution = &backend.execution;
+  backend.topology.execution = &backend.execution;
+  backend.prefill_plan.graph = &backend.topology;
+  backend.decode_plan.graph = &backend.topology;
   backend.model = &model_data;
   backend.n_vocab = model_data.params.n_vocab;
   backend.n_embd = model_data.params.n_embd;
@@ -5097,9 +5098,9 @@ prepare(native_backend &backend, const emel::model::data &model_data,
 
   backend.blocks.resize(static_cast<size_t>(backend.n_layer));
   for (int32_t layer = 0; layer < backend.n_layer; ++layer) {
-    emel::model::transformer::block_view block = {};
-    if (emel::model::transformer::lookup_block_view(backend.execution, layer,
-                                                    block) !=
+    emel::model::generation::block_view block = {};
+    if (emel::model::generation::lookup_block_view(backend.execution, layer,
+                                                   block) !=
         emel::error::cast(emel::model::loader::error::none)) {
       return emel::error::cast(emel::model::loader::error::model_invalid);
     }
@@ -5376,7 +5377,7 @@ prepare(native_backend &backend, const emel::model::data &model_data,
 
 inline uint32_t quantized_contract_stage_count(
     const native_backend &backend,
-    const emel::model::transformer::quantized_contract_kind kind) noexcept {
+    const emel::model::generation::quantized_contract_kind kind) noexcept {
   uint32_t count = 0u;
   for (const auto &stage : backend.quantized_audit.stages) {
     count += static_cast<uint32_t>(stage.contract == kind);

@@ -1,19 +1,14 @@
 #include "emel/model/data.hpp"
 
 #include "emel/model/architecture/detail.hpp"
+#include "emel/model/gemma4/detail.hpp"
+#include "emel/model/lfm2/detail.hpp"
 #include "emel/model/loader/errors.hpp"
 #include "emel/model/moshi/detail.hpp"
 #include "emel/model/omniembed/detail.hpp"
 #include "emel/model/whisper/detail.hpp"
 
 namespace emel::model {
-
-namespace {
-
-constexpr std::string_view k_lfm2_architecture = "lfm2";
-constexpr std::string_view k_gemma4_architecture = "gemma4";
-
-} // namespace
 
 std::string_view tensor_name_view(const data &model_data,
                                   const data::tensor_record &tensor) noexcept {
@@ -85,12 +80,12 @@ bool is_supported_execution_architecture(
 
 bool is_lfm2_execution_architecture(
     const std::string_view architecture) noexcept {
-  return architecture == k_lfm2_architecture;
+  return emel::model::lfm2::detail::is_execution_architecture(architecture);
 }
 
 bool is_gemma4_execution_architecture(
     const std::string_view architecture) noexcept {
-  return architecture == k_gemma4_architecture;
+  return emel::model::gemma4::detail::is_execution_architecture(architecture);
 }
 
 bool is_omniembed_execution_architecture(

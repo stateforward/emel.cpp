@@ -72,7 +72,7 @@ inline void bind_pipeline_actors(
 }  // namespace detail
 
 struct dependencies {
-  const emel::model::data & model;
+  const emel::model::generation::contract & generation_contract;
   emel::text::conditioner::sm & conditioner;
   emel::text::generator::matmul::execution_policy matmul_policy;
   emel::text::generator::runtime_policy runtime_policy;
@@ -1142,7 +1142,8 @@ struct sm : public emel::sm<model, action::context> {
   explicit sm(const dependencies & deps) : base_type(std::in_place, deps.kv_cache) {
     detail::bind_matmul_actor(this->context_, matmul_actor_, deps.matmul_policy);
     detail::bind_pipeline_actors(this->context_, initializer_actor_, prefill_actor_);
-    this->context_.model = &deps.model;
+    this->context_.generation_contract = &deps.generation_contract;
+    this->context_.model = deps.generation_contract.execution.model;
     this->context_.conditioner = &deps.conditioner;
     this->context_.runtime_policy = deps.runtime_policy;
     this->context_.formatter_ctx = deps.formatter_ctx;
@@ -1150,7 +1151,9 @@ struct sm : public emel::sm<model, action::context> {
     this->context_.stream_window = deps.stream_window;
     this->context_.stream_active = deps.stream_active;
     // Session scratch is sized once from the injected loaded model before the initialize pipeline.
-    detail::reserve_session_buffers(this->context_, deps.model);
+    if (this->context_.model != nullptr) {
+      detail::reserve_session_buffers(this->context_, *this->context_.model);
+    }
   }
 
   sm(const sm &) = delete;

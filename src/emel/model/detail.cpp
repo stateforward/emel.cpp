@@ -15,7 +15,7 @@ namespace emel::model::detail {
 
 bool load_hparams_from_gguf(const kv_binding & binding,
                             const emel::model::architectures available_architectures,
-                            emel::model::data & model_out) noexcept {
+  emel::model::data & model_out) noexcept {
   model_out.params = {};
 
   const auto * architecture_entry = find_kv_entry(binding, "general.architecture");

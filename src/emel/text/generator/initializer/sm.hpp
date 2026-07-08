@@ -35,15 +35,20 @@ struct model {
 
       , sml::state<binding_conditioner> <= sml::state<preparing_backend>
                  + sml::completion<event::run>
-                 [ guard::backend_already_ready{} ]
+                 [ guard::guard_backend_reuse_allowed{} ]
 
       , sml::state<binding_conditioner> <= sml::state<preparing_backend_decision>
                  + sml::completion<event::run>
                  [ guard::backend_already_ready{} ]
 
+      , sml::state<idle> <= sml::state<preparing_backend>
+                 + sml::completion<event::run>
+                 [ guard::guard_generation_contract_invalid{} ]
+                 / action::mark_invalid_request
+
       , sml::state<preparing_backend_decision> <= sml::state<preparing_backend>
                  + sml::completion<event::run>
-                 [ guard::backend_prepare_needed{} ]
+                 [ guard::guard_backend_prepare_allowed{} ]
                  / action::request_backend_prepare
 
       , sml::state<binding_conditioner> <= sml::state<preparing_backend_decision>

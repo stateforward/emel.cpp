@@ -151,7 +151,7 @@ struct chunk4_planning_backend_fixture {
 
     auto &block = backend.blocks.emplace_back();
     block.residual_route =
-        emel::model::transformer::generation_residual_route::attention;
+        emel::model::generation::generation_residual_route::attention;
     block.attention_q = {&matrix, 4, 4};
     block.attention_k = {&matrix, 4, 4};
     block.attention_v = {&matrix, 4, 4};
@@ -214,7 +214,7 @@ struct native_quantized_route_fixture {
 
     auto &block = backend.blocks.emplace_back();
     block.residual_route =
-        emel::model::transformer::generation_residual_route::attention;
+        emel::model::generation::generation_residual_route::attention;
     block.attention_q = {&body_tensor, backend.n_embd, backend.n_embd};
     block.attention_k = {&body_tensor, backend.n_embd, backend.n_embd};
     block.attention_v = {&body_tensor, backend.n_embd, backend.n_embd};
@@ -2646,6 +2646,15 @@ TEST_CASE(
 
   CHECK(emel::text::generator::initializer::guard::backend_prepare_needed{}(
       initializer_run, initializer_context));
+  CHECK_FALSE(emel::text::generator::initializer::guard::
+                  guard_generation_contract_valid{}(initializer_run,
+                                                    initializer_context));
+  CHECK(emel::text::generator::initializer::guard::
+            guard_generation_contract_invalid{}(initializer_run,
+                                                initializer_context));
+  CHECK_FALSE(emel::text::generator::initializer::guard::
+                  guard_backend_prepare_allowed{}(initializer_run,
+                                                  initializer_context));
   generator_context.compute.backend_ready = true;
   generator_context.limits.block_tokens = initialize.block_tokens;
   generator_context.compute.backend.n_ctx = 8;

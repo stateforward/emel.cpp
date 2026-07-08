@@ -1206,16 +1206,16 @@ struct capture_diagnostics {
     ev.out.shared_q6_dispatch_calls = total(&emel::kernel::sm::shared_q6_dispatch_count);
     ev.out.native_quantized_stage_count = detail::quantized_contract_stage_count(
         ctx.compute.backend,
-        emel::model::transformer::quantized_contract_kind::native_quantized);
+        emel::model::generation::quantized_contract_kind::native_quantized);
     ev.out.approved_dense_f32_stage_count = detail::quantized_contract_stage_count(
         ctx.compute.backend,
-        emel::model::transformer::quantized_contract_kind::approved_dense_f32_by_contract);
+        emel::model::generation::quantized_contract_kind::approved_dense_f32_by_contract);
     ev.out.disallowed_fallback_stage_count = detail::quantized_contract_stage_count(
         ctx.compute.backend,
-        emel::model::transformer::quantized_contract_kind::disallowed_fallback);
+        emel::model::generation::quantized_contract_kind::disallowed_fallback);
     ev.out.explicit_no_claim_stage_count = detail::quantized_contract_stage_count(
         ctx.compute.backend,
-        emel::model::transformer::quantized_contract_kind::explicit_no_claim);
+        emel::model::generation::quantized_contract_kind::explicit_no_claim);
   }
 };
 
