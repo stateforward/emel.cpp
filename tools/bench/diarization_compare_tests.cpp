@@ -527,12 +527,12 @@ TEST_CASE("diarization compare ONNX feature generation uses public Sortformer ac
         std::string::npos);
   CHECK(bench_source.find("request::sm feature_machine") != std::string::npos);
   CHECK(bench_source.find(
-            "if (env_value_requested(encoder_path) || "
-            "env_value_requested(hidden_path))") != std::string::npos);
-  CHECK(bench_source.find(
             "feature_err != emel::error::cast(request::error::none)") !=
         std::string::npos);
-  CHECK(bench_source.find(
-            "fail_sortformer_setup(\"stage_probe_requires_public_stage_actor\")") !=
+  CHECK(bench_source.find("EMEL_DIARIZATION_ONNX_ENCODER_PROBE_OUTPUT") ==
+        std::string::npos);
+  CHECK(bench_source.find("EMEL_DIARIZATION_HIDDEN_PROBE_OUTPUT") ==
+        std::string::npos);
+  CHECK(bench_source.find("stage_probe_requires_public_stage_actor") ==
         std::string::npos);
 }

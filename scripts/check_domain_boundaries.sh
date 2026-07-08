@@ -141,6 +141,7 @@ check_no_matches "Sortformer public facade headers exposing detail internals" \
   'emel/.*/detail\.hpp|::detail::' \
   src/emel/model/sortformer/any.hpp \
   src/emel/diarization/sortformer/request/events.hpp \
+  src/emel/diarization/sortformer/executor/events.hpp \
   src/emel/diarization/sortformer/output/any.hpp \
   src/emel/diarization/sortformer/pipeline/any.hpp
 

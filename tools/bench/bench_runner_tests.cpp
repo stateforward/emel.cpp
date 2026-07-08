@@ -1590,7 +1590,7 @@ TEST_CASE("sortformer_diarization_bench_uses_public_actor_surfaces") {
     }
   }
 
-  const std::array<std::filesystem::path, 4> public_facade_paths = {
+  const std::array<std::filesystem::path, 5> public_facade_paths = {
       repo_root() / "src" / "emel" / "model" / "sortformer" / "any.hpp",
       repo_root() / "src" / "emel" / "diarization" / "sortformer" /
           "request" / "events.hpp",
@@ -1598,6 +1598,8 @@ TEST_CASE("sortformer_diarization_bench_uses_public_actor_surfaces") {
           "output" / "any.hpp",
       repo_root() / "src" / "emel" / "diarization" / "sortformer" /
           "pipeline" / "any.hpp",
+      repo_root() / "src" / "emel" / "diarization" / "sortformer" /
+          "executor" / "events.hpp",
   };
   for (const auto &facade_path : public_facade_paths) {
     const std::string source = read_file(facade_path);
@@ -1612,6 +1614,12 @@ TEST_CASE("sortformer_diarization_bench_uses_public_actor_surfaces") {
                                       "diarization" / "request"));
   CHECK_FALSE(std::filesystem::exists(repo_root() / "tests" / "diarization" /
                                       "request"));
+  CHECK(source_paths[0].string().find("sortformer_bench.cpp") !=
+        std::string::npos);
+  const std::string bench_source = read_file(source_paths[0]);
+  CHECK(bench_source.find("EMEL_DIARIZATION_STAGE_PROFILE") ==
+        std::string::npos);
+  CHECK(bench_source.find("stage_profile_") == std::string::npos);
 }
 
 TEST_CASE("generation_stage_probe_selector_is_explicit") {

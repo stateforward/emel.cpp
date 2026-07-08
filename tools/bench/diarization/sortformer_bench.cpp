@@ -29,13 +29,8 @@ constexpr const char *k_emel_backend_id = "emel.diarization.sortformer";
 constexpr const char *k_reference_backend_id = "recorded.diarization.baseline";
 constexpr const char *k_onnx_feature_input_env =
     "EMEL_DIARIZATION_ONNX_FEATURE_INPUT";
-constexpr const char *k_onnx_encoder_probe_env =
-    "EMEL_DIARIZATION_ONNX_ENCODER_PROBE_OUTPUT";
-constexpr const char *k_hidden_probe_env =
-    "EMEL_DIARIZATION_HIDDEN_PROBE_OUTPUT";
 constexpr const char *k_probability_probe_env =
     "EMEL_DIARIZATION_PROBABILITY_PROBE_OUTPUT";
-constexpr const char *k_stage_profile_env = "EMEL_DIARIZATION_STAGE_PROFILE";
 constexpr const char *k_diarization_iters_env = "EMEL_BENCH_DIARIZATION_ITERS";
 constexpr const char *k_diarization_runs_env = "EMEL_BENCH_DIARIZATION_RUNS";
 volatile std::uint64_t g_checksum_sink = 0;
@@ -120,15 +115,8 @@ bool env_value_requested(const char *value) noexcept {
 void maybe_write_onnx_probe_inputs(const fixture::model_fixture &model,
                                    const fixture::pcm_fixture &pcm) {
   const char *feature_path = std::getenv(k_onnx_feature_input_env);
-  const char *encoder_path = std::getenv(k_onnx_encoder_probe_env);
-  const char *hidden_path = std::getenv(k_hidden_probe_env);
-  if (!env_value_requested(feature_path) &&
-      !env_value_requested(encoder_path) &&
-      !env_value_requested(hidden_path)) {
+  if (!env_value_requested(feature_path)) {
     return;
-  }
-  if (env_value_requested(encoder_path) || env_value_requested(hidden_path)) {
-    fail_sortformer_setup("stage_probe_requires_public_stage_actor");
   }
 
   std::vector<float> features(
@@ -286,54 +274,6 @@ make_profile_emel_result(const fixture::model_fixture &model,
   return out;
 }
 
-result
-make_stage_profile_result(const fixture::model_fixture &model,
-                          const fixture::pcm_fixture &pcm,
-                          const fixture::expected_output_baseline &baseline) {
-  fixture::run_result pipeline_result{};
-  auto machine = std::make_unique<pipeline::sm>();
-
-  const double pipeline_ns = measure_once_ns([&]() {
-    g_stage_ok_sink = fixture::run_pipeline(*machine, model.contract, pcm.pcm,
-                                            pcm.sample_rate, pipeline_result);
-  });
-  if (!g_stage_ok_sink ||
-      pipeline_result.err != emel::error::cast(pipeline::error::none) ||
-      pipeline_result.segment_count <= 0) {
-    fail_sortformer_setup("stage_profile_pipeline_run");
-  }
-
-  result out = make_profile_reference_result("emel", baseline);
-  out.name = "diarization/sortformer/"
-             "stage_profile_ami_en2002b_mix_headset_137.00_152.04_16khz_mono";
-  out.compare_group = out.name;
-  out.backend_id = k_emel_backend_id;
-  out.backend_language = "cpp";
-  out.comparison_mode = "measurement";
-  out.comparable = false;
-  out.workload_id = "diarization_sortformer_public_pipeline_profile_v1";
-  out.ns_per_op = pipeline_ns;
-  set_single_sample_stats(out);
-  out.prepare_ns_per_op = 0.0;
-  out.encode_ns_per_op = pipeline_ns;
-  out.publish_ns_per_op = 0.0;
-  out.output_dim = static_cast<std::uint64_t>(pipeline_result.segment_count);
-  out.output_checksum = fixture::compute_checksum(
-      pipeline_result.segments, pipeline_result.segment_count);
-  g_checksum_sink = out.output_checksum;
-  out.output_text =
-      format_segments(pipeline_result.segments, pipeline_result.segment_count);
-  out.note =
-      "profile=public_pipeline proof_status=maintained_loader_real_audio";
-  out.note += " load_strategy=";
-  out.note +=
-      emel::tools::model_load_io_strategy_name(model.load.used_io_strategy);
-  out.note += " pipeline_ns=" +
-              std::to_string(static_cast<std::uint64_t>(pipeline_ns));
-  out.note += " segment_checksum=" + std::to_string(out.output_checksum);
-  return out;
-}
-
 } // namespace
 
 void append_emel_sortformer_diarization_cases(std::vector<result> &results,
@@ -380,10 +320,6 @@ void append_emel_sortformer_diarization_cases(std::vector<result> &results,
   results.push_back(std::move(record));
   results.push_back(
       make_profile_emel_result(*model, pcm, baseline, prepare_ns));
-  const char *stage_profile = std::getenv(k_stage_profile_env);
-  if (stage_profile != nullptr && stage_profile[0] != '\0') {
-    results.push_back(make_stage_profile_result(*model, pcm, baseline));
-  }
 }
 
 void append_reference_sortformer_diarization_cases(std::vector<result> &results,
