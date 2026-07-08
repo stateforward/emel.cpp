@@ -124,6 +124,14 @@ check_no_matches "Moshi/Mimi leaked into generic speech recognizer" \
   'moshi|model/moshi|model::moshi|tokenizer::moshi|codec::mimi|speech/codec/mimi' \
   src/emel/speech/recognizer tests/speech/recognizer
 
+check_absent_path "retired generic diarization request owner path" \
+  src/emel/diarization/request \
+  tests/diarization/request \
+  docs/architecture/diarization_request.md \
+  docs/architecture/mermaid/diarization_request.mmd \
+  .planning/architecture/diarization_request.md \
+  .planning/architecture/mermaid/diarization_request.mmd
+
 check_no_matches "Whisper leaked into generic speech recognizer" \
   'whisper|model/whisper|speech/tokenizer/whisper|speech/encoder/whisper|speech/decoder/whisper|model::whisper|tokenizer::whisper|encoder::whisper|decoder::whisper' \
   src/emel/speech/recognizer tests/speech/recognizer

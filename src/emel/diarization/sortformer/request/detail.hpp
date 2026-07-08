@@ -2,11 +2,11 @@
 
 #include <cstdint>
 
-#include "emel/diarization/request/errors.hpp"
+#include "emel/diarization/sortformer/request/errors.hpp"
 #include "emel/diarization/sortformer/encoder/feature_extractor/detail.hpp"
 #include "emel/error/error.hpp"
 
-namespace emel::diarization::request::detail {
+namespace emel::diarization::sortformer::request::detail {
 
 inline constexpr int32_t k_sample_rate =
     emel::diarization::sortformer::encoder::feature_extractor::detail::k_sample_rate;
@@ -31,4 +31,4 @@ inline emel::error::type to_error(const error err) noexcept {
   return emel::error::cast(err);
 }
 
-}  // namespace emel::diarization::request::detail
+}  // namespace emel::diarization::sortformer::request::detail

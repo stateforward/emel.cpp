@@ -1,6 +1,6 @@
 #pragma once
 
-#include "emel/diarization/request/events.hpp"
+#include "emel/diarization/sortformer/request/events.hpp"
 #include "emel/diarization/sortformer/encoder/detail.hpp"
 #include "emel/diarization/sortformer/executor/events.hpp"
 #include "emel/diarization/sortformer/output/detail.hpp"
@@ -10,7 +10,8 @@
 
 namespace emel::diarization::sortformer::pipeline::action {
 
-inline void effect_store_kernel_result(event::run_ctx & runtime_ctx, const bool ok) noexcept {
+inline void effect_record_kernel_result(event::run_ctx & runtime_ctx,
+                                        const bool ok) noexcept {
   runtime_ctx.err = detail::to_error(error::kernel) *
       static_cast<emel::error::type>(!ok);
 }
@@ -67,11 +68,17 @@ struct effect_mark_tensor_contract_invalid {
   }
 };
 
+struct effect_mark_kernel_error {
+  void operator()(const event::run_flow & runtime_ev, context &) const noexcept {
+    runtime_ev.ctx.err = detail::to_error(error::kernel);
+  }
+};
+
 struct effect_prepare_features {
   void operator()(const event::run_flow & runtime_ev, context & ctx) const noexcept {
     int32_t frame_count = 0;
     int32_t feature_bin_count = 0;
-    emel::diarization::request::event::prepare request{
+    emel::diarization::sortformer::request::event::prepare request{
       runtime_ev.request.contract,
       runtime_ev.request.pcm,
       runtime_ev.request.sample_rate,
@@ -94,7 +101,7 @@ struct effect_bind_encoder {
 
 struct effect_compute_encoder_frames {
   void operator()(const event::run_flow & runtime_ev, context & ctx) const noexcept {
-    effect_store_kernel_result(
+    effect_record_kernel_result(
         runtime_ev.ctx,
         emel::diarization::sortformer::encoder::detail::compute_encoder_frames_from_features(
             ctx.features,
@@ -133,9 +140,11 @@ struct effect_compute_probabilities {
         static_cast<size_t>(detail::k_required_probability_value_count));
     const bool probability_ok =
         emel::diarization::sortformer::output::detail::compute_speaker_probabilities(
-            ctx.encoder_workspace.kernel, ctx.hidden, ctx.modules,
+            ctx.encoder_workspace.kernel,
+            ctx.hidden,
+            ctx.modules,
             probability_output);
-    effect_store_kernel_result(runtime_ev.ctx, probability_ok);
+    effect_record_kernel_result(runtime_ev.ctx, probability_ok);
     runtime_ev.request.probability_count_out =
         detail::k_required_probability_value_count *
         static_cast<int32_t>(probability_ok);
@@ -179,6 +188,7 @@ inline constexpr effect_mark_pcm_shape_invalid effect_mark_pcm_shape_invalid{};
 inline constexpr effect_mark_probability_capacity_invalid effect_mark_probability_capacity_invalid{};
 inline constexpr effect_mark_segment_capacity_invalid effect_mark_segment_capacity_invalid{};
 inline constexpr effect_mark_tensor_contract_invalid effect_mark_tensor_contract_invalid{};
+inline constexpr effect_mark_kernel_error effect_mark_kernel_error{};
 inline constexpr effect_prepare_features effect_prepare_features{};
 inline constexpr effect_bind_encoder effect_bind_encoder{};
 inline constexpr effect_compute_encoder_frames effect_compute_encoder_frames{};

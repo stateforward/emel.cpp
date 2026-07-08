@@ -120,6 +120,93 @@ struct guard_tensor_contract_invalid {
   }
 };
 
+struct guard_encoder_kernel_ready {
+  bool operator()(const event::run_flow & runtime_ev,
+                  const action::context & ctx) const noexcept {
+    (void)runtime_ev;
+    if (ctx.features.size() != static_cast<size_t>(detail::k_required_feature_count) ||
+        ctx.encoder_frames.size() !=
+        static_cast<size_t>(detail::k_required_encoder_value_count) ||
+        ctx.encoder_workspace.pre_encoder_rows.size() !=
+        static_cast<size_t>(
+            detail::k_frame_count *
+            emel::diarization::sortformer::encoder::detail::k_pre_expanded_dim)) {
+      return false;
+    }
+
+    for (const auto & tensor : ctx.encoder.pre) {
+      if (tensor.tensor == nullptr || tensor.tensor->data == nullptr) {
+        return false;
+      }
+    }
+
+    for (const auto & layer : ctx.encoder.layers) {
+      for (const auto & tensor : layer) {
+        if (tensor.tensor == nullptr || tensor.tensor->data == nullptr) {
+          return false;
+        }
+      }
+    }
+
+    return true;
+  }
+};
+
+struct guard_encoder_kernel_unavailable {
+  bool operator()(const event::run_flow & runtime_ev,
+                  const action::context & ctx) const noexcept {
+    return !guard_encoder_kernel_ready{}(runtime_ev, ctx);
+  }
+};
+
+struct guard_probability_kernel_ready {
+  bool operator()(const event::run_flow & runtime_ev,
+                  const action::context & ctx) const noexcept {
+    return runtime_ev.request.probabilities.data() != nullptr &&
+        runtime_ev.request.probabilities.size() >=
+        static_cast<size_t>(detail::k_required_probability_value_count) &&
+        ctx.modules.frame_hidden_weight.tensor != nullptr &&
+        ctx.modules.frame_hidden_bias.tensor != nullptr &&
+        ctx.modules.speaker_hidden_to_speaker_weight.tensor != nullptr &&
+        ctx.modules.speaker_hidden_to_speaker_bias.tensor != nullptr;
+  }
+};
+
+struct guard_probability_kernel_unavailable {
+  bool operator()(const event::run_flow & runtime_ev,
+                  const action::context & ctx) const noexcept {
+    return !guard_probability_kernel_ready{}(runtime_ev, ctx);
+  }
+};
+
+struct guard_encoder_compute_succeeded {
+  bool operator()(const event::run_flow & runtime_ev,
+                  const action::context &) const noexcept {
+    return runtime_ev.ctx.err == detail::to_error(error::none);
+  }
+};
+
+struct guard_encoder_compute_failed {
+  bool operator()(const event::run_flow & runtime_ev,
+                  const action::context & ctx) const noexcept {
+    return !guard_encoder_compute_succeeded{}(runtime_ev, ctx);
+  }
+};
+
+struct guard_probability_compute_succeeded {
+  bool operator()(const event::run_flow & runtime_ev,
+                  const action::context &) const noexcept {
+    return runtime_ev.ctx.err == detail::to_error(error::none);
+  }
+};
+
+struct guard_probability_compute_failed {
+  bool operator()(const event::run_flow & runtime_ev,
+                  const action::context & ctx) const noexcept {
+    return !guard_probability_compute_succeeded{}(runtime_ev, ctx);
+  }
+};
+
 struct guard_no_error {
   bool operator()(const event::run_flow & runtime_ev, const action::context &) const noexcept {
     return runtime_ev.ctx.err == detail::to_error(error::none);

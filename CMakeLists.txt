@@ -177,7 +177,7 @@ if(EMEL_ENABLE_TESTS)
     tests/text/generator/decode_wavefront/lifecycle_tests.cpp
     tests/text/generator/initializer/lifecycle_tests.cpp
     tests/text/generator/prefill/lifecycle_tests.cpp
-    tests/diarization/request/lifecycle_tests.cpp
+    tests/diarization/sortformer/request/lifecycle_tests.cpp
     tests/diarization/sortformer/encoder/lifecycle_tests.cpp
     tests/diarization/sortformer/executor/lifecycle_tests.cpp
     tests/diarization/sortformer/modules/lifecycle_tests.cpp
