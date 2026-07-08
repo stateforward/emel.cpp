@@ -134,6 +134,7 @@ add_library(emel STATIC
   src/emel/model/sortformer/detail.cpp
   src/emel/model/whisper/detail.cpp
   src/emel/model/moshi/detail.cpp
+  src/emel/embeddings/generator/omniembed/sm.cpp
   src/emel/speech/codec/mimi/detail.cpp
   src/emel/speech/recognizer_routes/whisper/detail.cpp
   src/emel/diarization/sortformer/detail.cpp

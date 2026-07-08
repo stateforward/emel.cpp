@@ -5,6 +5,7 @@
 #include "emel/diarization/sortformer/executor/sm.hpp"
 #include "emel/diarization/sortformer/pipeline/sm.hpp"
 #include "emel/embeddings/generator/sm.hpp"
+#include "emel/embeddings/generator/omniembed/sm.hpp"
 #include "emel/gguf/loader/sm.hpp"
 #include "emel/graph/processor/sm.hpp"
 #include "emel/io/mmap/sm.hpp"
@@ -34,6 +35,7 @@ using SortformerRequest = emel::diarization::sortformer::request::sm;
 using DiarizationRequest = SortformerRequest;
 using SortformerExecutor = emel::diarization::sortformer::executor::sm;
 using SortformerPipeline = emel::diarization::sortformer::pipeline::sm;
+using OmniEmbedEmbeddingsGenerator = emel::embeddings::generator::omniembed::sm;
 using EmbeddingsGenerator = emel::embeddings::generator::sm;
 using MimiCodec = emel::speech::codec::mimi::sm;
 using EncoderAny = emel::text::encoders::any;

@@ -71,6 +71,11 @@ src/emel/embeddings/generator/detail.hpp
 src/emel/embeddings/generator/errors.hpp
 src/emel/embeddings/generator/events.hpp
 src/emel/embeddings/generator/guards.hpp
+src/emel/embeddings/generator/omniembed/context.hpp
+src/emel/embeddings/generator/omniembed/detail.hpp
+src/emel/embeddings/generator/omniembed/route.hpp
+src/emel/embeddings/generator/omniembed/sm.cpp
+src/emel/embeddings/generator/omniembed/sm.hpp
 src/emel/embeddings/generator/sm.hpp
 src/emel/gbnf/detail.hpp
 src/emel/gbnf/rule_parser/actions.hpp

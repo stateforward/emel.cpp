@@ -4,22 +4,26 @@
 
 #include "emel/embeddings/generator/errors.hpp"
 #include "emel/embeddings/generator/events.hpp"
-#include "emel/embeddings/generator/sm.hpp"
+#include "emel/embeddings/generator/omniembed/sm.hpp"
 #include "emel/error/error.hpp"
 
 #include "te_fixture_data.hpp"
 
 namespace emel::tests::embeddings::te_fixture {
 
-struct inspectable_embedding_generator : emel::embeddings::generator::sm {
-  using emel::embeddings::generator::sm::sm;
+struct inspectable_embedding_generator : emel::embeddings::generator::omniembed::sm {
+  using emel::embeddings::generator::omniembed::sm::sm;
 
   emel::embeddings::generator::action::context & context_ref() noexcept {
     return this->context_;
   }
+
+  emel::embeddings::generator::omniembed::runtime_state & runtime_ref() noexcept {
+    return emel::embeddings::generator::omniembed::detail::runtime(this->context_);
+  }
 };
 
-inline void initialize_embedding_generator(emel::embeddings::generator::sm & embedding_generator,
+inline void initialize_embedding_generator(emel::embeddings::generator::omniembed::sm & embedding_generator,
                                            emel::error::type & initialize_error,
                                            emel::text::tokenizer::sm & tokenizer) {
   emel::embeddings::generator::event::initialize initialize{
