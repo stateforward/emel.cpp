@@ -5,6 +5,7 @@
 #include "emel/emel.h"
 #include "emel/memory/events.hpp"
 #include "emel/memory/hybrid/sm.hpp"
+#include "../../allocation_tracker.hpp"
 
 namespace {
 
@@ -14,52 +15,6 @@ using namespace emel::memory::hybrid;
 struct copy_probe {
   bool succeed = true;
   int32_t callback_error = static_cast<int32_t>(emel::error::cast(emel::memory::hybrid::error::none));
-};
-
-struct recording_kv_actor {
-  emel::memory::kv::sm delegate = {};
-  int32_t reserve_count = 0;
-  int32_t allocate_sequence_count = 0;
-  int32_t allocate_slots_count = 0;
-  int32_t branch_sequence_count = 0;
-  int32_t free_sequence_count = 0;
-  int32_t rollback_slots_count = 0;
-  int32_t capture_view_count = 0;
-
-  bool process_event(const emel::memory::event::reserve & ev) {
-    ++reserve_count;
-    return delegate.process_event(ev);
-  }
-
-  bool process_event(const emel::memory::event::allocate_sequence & ev) {
-    ++allocate_sequence_count;
-    return delegate.process_event(ev);
-  }
-
-  bool process_event(const emel::memory::event::allocate_slots & ev) {
-    ++allocate_slots_count;
-    return delegate.process_event(ev);
-  }
-
-  bool process_event(const emel::memory::event::branch_sequence & ev) {
-    ++branch_sequence_count;
-    return delegate.process_event(ev);
-  }
-
-  bool process_event(const emel::memory::event::free_sequence & ev) {
-    ++free_sequence_count;
-    return delegate.process_event(ev);
-  }
-
-  bool process_event(const emel::memory::event::rollback_slots & ev) {
-    ++rollback_slots_count;
-    return delegate.process_event(ev);
-  }
-
-  bool process_event(const emel::memory::event::capture_view & ev) {
-    ++capture_view_count;
-    return delegate.process_event(ev);
-  }
 };
 
 bool copy_state_cb(const int32_t, const int32_t, void * user_data, int32_t * error_out) {
@@ -73,7 +28,7 @@ bool copy_state_cb(const int32_t, const int32_t, void * user_data, int32_t * err
 }  // namespace
 
 TEST_CASE("memory_hybrid_uses_injected_kv_actor") {
-  recording_kv_actor kv{};
+  emel::memory::test::recording_kv_actor kv{};
   hybrid_sm machine{emel::memory::hybrid::bind_kv_actor(kv)};
   int32_t err = static_cast<int32_t>(emel::error::cast(emel::memory::hybrid::error::none));
 
@@ -103,6 +58,20 @@ TEST_CASE("memory_hybrid_uses_injected_kv_actor") {
   CHECK(kv.capture_view_count == 1);
   CHECK(view.is_sequence_active(0));
   CHECK(view.lookup_kv_block(0, 0) >= 0);
+}
+
+TEST_CASE("memory_hybrid_rejects_partial_kv_actor_binding") {
+  int actor = 0;
+  hybrid_sm machine{emel::memory::hybrid::kv_binding{.actor = &actor}};
+  int32_t err = static_cast<int32_t>(emel::error::cast(emel::memory::hybrid::error::none));
+
+  CHECK_FALSE(machine.process_event(event::reserve{
+    .max_sequences = 4,
+    .max_blocks = 4,
+    .block_tokens = 2,
+    .error_out = &err,
+  }));
+  CHECK(err == static_cast<int32_t>(emel::error::cast(emel::memory::hybrid::error::backend_error)));
 }
 
 TEST_CASE("memory_hybrid_lifecycle_allocate_rolls_back_on_recurrent_failure") {

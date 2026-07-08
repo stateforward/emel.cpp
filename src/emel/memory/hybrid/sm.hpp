@@ -488,12 +488,16 @@ struct sm : public emel::sm<model, action::context> {
         recurrent_snapshot_(std::make_unique<view::snapshot>()),
         snapshot_(std::make_unique<view::snapshot>()) {}
 
-  explicit sm(const kv_binding & kv_actor) : sm() { bind_kv_actor(kv_actor); }
+  explicit sm(const kv_binding & kv_actor)
+      : base_type(std::in_place, kv_actor),
+        kv_snapshot_(std::make_unique<view::snapshot>()),
+        recurrent_snapshot_(std::make_unique<view::snapshot>()),
+        snapshot_(std::make_unique<view::snapshot>()) {}
 
-  void bind_kv_actor(const kv_binding & kv_actor) noexcept {
-    this->context_.kv_actor =
-        emel::memory::hybrid::bind_or_default_kv_actor(kv_actor, this->context_.kv);
-  }
+  sm(const sm &) = delete;
+  sm(sm &&) = delete;
+  sm & operator=(const sm &) = delete;
+  sm & operator=(sm &&) = delete;
 
   bool process_event(const event::reserve & ev) {
     int32_t error_sink = static_cast<int32_t>(emel::error::cast(error::none));

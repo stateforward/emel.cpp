@@ -1139,8 +1139,7 @@ struct sm : public emel::sm<model, action::context> {
   using base_type::is;
   using base_type::visit_current_states;
 
-  explicit sm(const dependencies & deps) : base_type() {
-    this->context_.memory.bind_kv_actor(deps.kv_cache);
+  explicit sm(const dependencies & deps) : base_type(std::in_place, deps.kv_cache) {
     detail::bind_matmul_actor(this->context_, matmul_actor_, deps.matmul_policy);
     detail::bind_pipeline_actors(this->context_, initializer_actor_, prefill_actor_);
     this->context_.model = &deps.model;

@@ -712,6 +712,10 @@ class sm {
   using state_machine_type = stateforward::sml::sm<model, policies...>;
 
   sm() : state_machine_(context_) {}
+  template <class... context_args>
+  explicit sm(std::in_place_t, context_args &&... context_args_in)
+      : context_(std::forward<context_args>(context_args_in)...),
+        state_machine_(context_) {}
   explicit sm(const context_type & context_in)
       : context_(context_in), state_machine_(context_) {}
   explicit sm(context_type && context_in)

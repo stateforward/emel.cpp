@@ -111,6 +111,9 @@ struct renderer_session {
 };
 
 struct context {
+  context() = default;
+  explicit context(const emel::memory::hybrid::kv_binding & kv_cache) : memory(kv_cache) {}
+
   const emel::model::data * model = nullptr;
   emel::text::conditioner::sm * conditioner = nullptr;
   emel::text::generator::runtime_policy runtime_policy = {};

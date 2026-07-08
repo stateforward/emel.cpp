@@ -28,6 +28,7 @@
 #include "emel/graph/tensor/events.hpp"
 #include "emel/text/formatter/format.hpp"
 #include "emel/text/tokenizer/sm.hpp"
+#include "../../allocation_tracker.hpp"
 #include "generator_test_policies.hpp"
 
 namespace {
@@ -66,52 +67,6 @@ struct callback_tracker {
   int32_t tokens_generated = -1;
   size_t output_length = 0;
   emel::error::type err = emel::error::cast(emel::text::generator::error::none);
-};
-
-struct recording_kv_actor {
-  emel::memory::kv::sm delegate = {};
-  int32_t reserve_count = 0;
-  int32_t allocate_sequence_count = 0;
-  int32_t allocate_slots_count = 0;
-  int32_t branch_sequence_count = 0;
-  int32_t free_sequence_count = 0;
-  int32_t rollback_slots_count = 0;
-  int32_t capture_view_count = 0;
-
-  bool process_event(const emel::memory::event::reserve & ev) {
-    ++reserve_count;
-    return delegate.process_event(ev);
-  }
-
-  bool process_event(const emel::memory::event::allocate_sequence & ev) {
-    ++allocate_sequence_count;
-    return delegate.process_event(ev);
-  }
-
-  bool process_event(const emel::memory::event::allocate_slots & ev) {
-    ++allocate_slots_count;
-    return delegate.process_event(ev);
-  }
-
-  bool process_event(const emel::memory::event::branch_sequence & ev) {
-    ++branch_sequence_count;
-    return delegate.process_event(ev);
-  }
-
-  bool process_event(const emel::memory::event::free_sequence & ev) {
-    ++free_sequence_count;
-    return delegate.process_event(ev);
-  }
-
-  bool process_event(const emel::memory::event::rollback_slots & ev) {
-    ++rollback_slots_count;
-    return delegate.process_event(ev);
-  }
-
-  bool process_event(const emel::memory::event::capture_view & ev) {
-    ++capture_view_count;
-    return delegate.process_event(ev);
-  }
 };
 
 void on_initialize_done(void * owner, const emel::text::generator::events::initialize_done & ev) {
@@ -1069,7 +1024,7 @@ TEST_CASE("generator_initialize_reserves_lifecycle_managed_graph_tensors") {
 }
 
 TEST_CASE("generator_dependencies_accept_custom_kv_actor") {
-  recording_kv_actor kv{};
+  emel::memory::test::recording_kv_actor kv{};
   auto fixture = std::make_unique<generator_fixture>(
       generator_fixture::model_variant::canonical,
       nullptr,
@@ -1084,6 +1039,22 @@ TEST_CASE("generator_dependencies_accept_custom_kv_actor") {
   REQUIRE_FALSE(tracker.initialize_error_called);
   CHECK(error == emel::error::cast(emel::text::generator::error::none));
   CHECK(kv.reserve_count == 1);
+
+  callback_tracker generate_tracker{};
+  std::array<char, 32> output = {};
+  size_t output_length = 99;
+  emel::error::type generate_error = emel::error::cast(emel::text::generator::error::backend);
+  const auto generate_request =
+      fixture->make_generate(generate_tracker, output.data(), output.size(), output_length,
+                             &generate_error);
+
+  REQUIRE(fixture->generator->process_event(generate_request));
+  REQUIRE(generate_tracker.generate_done_called);
+  REQUIRE_FALSE(generate_tracker.generate_error_called);
+  CHECK(generate_error == emel::error::cast(emel::text::generator::error::none));
+  CHECK(kv.allocate_sequence_count == 1);
+  CHECK(kv.allocate_slots_count == 1);
+  CHECK(kv.capture_view_count >= 1);
 }
 
 TEST_CASE("generator_rejects_generate_before_initialize") {
