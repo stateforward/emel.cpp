@@ -508,6 +508,10 @@ void build_lfm2_230m_model(emel::model::data &model) {
   model.n_tensors = tensor_index;
 }
 
+bool is_gemma4_shared_kv_layer(const int32_t block_index) {
+  return block_index >= 15 && block_index < 35;
+}
+
 void build_gemma4_model(emel::model::data &model,
                         const bool include_output_weight) {
   emel::tests::reset_model_data(model);
@@ -566,7 +570,9 @@ void build_gemma4_model(emel::model::data &model,
     add_block(block, "attn_norm.weight");
     add_block(block, "attn_q.weight");
     add_block(block, "attn_k.weight");
-    add_block(block, "attn_v.weight");
+    if (!is_gemma4_shared_kv_layer(block)) {
+      add_block(block, "attn_v.weight");
+    }
     add_block(block, "attn_q_norm.weight");
     add_block(block, "attn_k_norm.weight");
     add_block(block, "attn_output.weight");
@@ -2429,7 +2435,7 @@ TEST_CASE("model transformer shared source stays family neutral") {
   }
 }
 
-TEST_CASE("model_transformer_detail_builds_execution_view_for_canonical_tensor_set") {
+TEST_CASE("model_transformer_builds_execution_view_for_canonical_tensor_set") {
   auto model = std::make_unique<emel::model::data>();
   build_canonical_model(*model, 2);
 
@@ -2452,7 +2458,7 @@ TEST_CASE("model_transformer_detail_builds_execution_view_for_canonical_tensor_s
   CHECK(block.feed_forward_up.name == "blk.1.ffn_up.weight");
 }
 
-TEST_CASE("model_transformer_detail_builds_execution_view_without_contiguous_weights_"
+TEST_CASE("model_transformer_builds_execution_view_without_contiguous_weights_"
           "blob") {
   auto model = std::make_unique<emel::model::data>();
   build_canonical_model(*model, 2);
@@ -2505,7 +2511,7 @@ TEST_CASE("model_data_try_parse_block_index_rejects_prefix_without_digits") {
       emel::model::try_parse_block_index("blk.12attn_q.weight", block_index));
 }
 
-TEST_CASE("model_transformer_detail_rejects_missing_required_tensor") {
+TEST_CASE("model_transformer_rejects_missing_required_tensor") {
   auto model = std::make_unique<emel::model::data>();
   build_canonical_model(*model, 1);
   model->tensors[3].data = nullptr;
@@ -2519,8 +2525,68 @@ TEST_CASE("model_transformer_detail_rejects_missing_required_tensor") {
   CHECK(view.model == nullptr);
 }
 
+TEST_CASE("model_transformer_rejects_block_with_dual_residual_contracts") {
+  auto model = std::make_unique<emel::model::data>();
+  build_canonical_model(*model, 1);
+  append_tensor_name(*model, model->tensors[model->n_tensors],
+                     "blk.0.shortconv.conv.weight");
+  ++model->n_tensors;
+  append_tensor_name(*model, model->tensors[model->n_tensors],
+                     "blk.0.shortconv.in_proj.weight");
+  ++model->n_tensors;
+  append_tensor_name(*model, model->tensors[model->n_tensors],
+                     "blk.0.shortconv.out_proj.weight");
+  ++model->n_tensors;
+
+  emel::model::transformer::execution_view view = {};
+  const auto err =
+      emel::model::transformer::build_execution_view(*model, view);
+
+  CHECK(err == emel::error::cast(emel::model::loader::error::model_invalid));
+  CHECK(view.model == nullptr);
+}
+
+TEST_CASE("model_transformer_infers_headwise_qk_norm_from_paired_tensors") {
+  auto model = std::make_unique<emel::model::data>();
+  build_canonical_model(*model, 1);
+  append_tensor_name(*model, model->tensors[model->n_tensors],
+                     "blk.0.attn_q_norm.weight");
+  ++model->n_tensors;
+  append_tensor_name(*model, model->tensors[model->n_tensors],
+                     "blk.0.attn_k_norm.weight");
+  ++model->n_tensors;
+
+  emel::model::transformer::execution_view view = {};
+  REQUIRE(emel::model::transformer::build_execution_view(*model, view) ==
+          emel::error::cast(emel::model::loader::error::none));
+
+  emel::model::transformer::generation_execution_descriptor descriptor = {};
+  REQUIRE(emel::model::transformer::build_generation_execution_descriptor(
+              view, descriptor) ==
+          emel::error::cast(emel::model::loader::error::none));
+
+  CHECK(descriptor.layers[0].qk_norm_route ==
+        emel::model::transformer::generation_attention_qk_norm_route::
+            headwise_rms);
+}
+
+TEST_CASE("model_transformer_rejects_asymmetric_attention_qk_norm_tensors") {
+  auto model = std::make_unique<emel::model::data>();
+  build_canonical_model(*model, 1);
+  append_tensor_name(*model, model->tensors[model->n_tensors],
+                     "blk.0.attn_q_norm.weight");
+  ++model->n_tensors;
+
+  emel::model::transformer::execution_view view = {};
+  const auto err =
+      emel::model::transformer::build_execution_view(*model, view);
+
+  CHECK(err == emel::error::cast(emel::model::loader::error::model_invalid));
+  CHECK(view.model == nullptr);
+}
+
 TEST_CASE(
-    "model_transformer_detail_builds_qwen3_execution_view_for_canonical_tensor_set") {
+    "model_transformer_builds_qwen3_execution_view_for_canonical_tensor_set") {
   auto model = std::make_unique<emel::model::data>();
   build_qwen3_model(*model, 1, true, true);
 
@@ -2540,7 +2606,7 @@ TEST_CASE(
   CHECK(block.attention_k_norm.name == "blk.0.attn_k_norm.weight");
 }
 
-TEST_CASE("model_transformer_detail_describes_qwen3_generation_norm_requirements") {
+TEST_CASE("model_transformer_describes_qwen3_generation_norm_requirements") {
   auto model = std::make_unique<emel::model::data>();
   build_qwen3_model(*model, 1, true, true);
 
@@ -2565,7 +2631,7 @@ TEST_CASE("model_transformer_detail_describes_qwen3_generation_norm_requirements
         emel::model::transformer::generation_attention_v_norm_route::none);
 }
 
-TEST_CASE("model_transformer_detail_rejects_qwen3_execution_view_without_attention_q_"
+TEST_CASE("model_transformer_rejects_qwen3_execution_view_without_attention_q_"
           "norm") {
   auto model = std::make_unique<emel::model::data>();
   build_qwen3_model(*model, 1, false, true);
@@ -2578,7 +2644,7 @@ TEST_CASE("model_transformer_detail_rejects_qwen3_execution_view_without_attenti
   CHECK(view.model == nullptr);
 }
 
-TEST_CASE("model_transformer_detail_rejects_qwen3_execution_view_without_attention_k_"
+TEST_CASE("model_transformer_rejects_qwen3_execution_view_without_attention_k_"
           "norm") {
   auto model = std::make_unique<emel::model::data>();
   build_qwen3_model(*model, 1, true, false);
@@ -2599,7 +2665,7 @@ TEST_CASE("model_execution_contract_rejects_qwen3_without_attention_qk_norms") {
         emel::error::cast(emel::model::loader::error::model_invalid));
 }
 
-TEST_CASE("model_transformer_detail_builds_qwen3_execution_view_with_tied_output_"
+TEST_CASE("model_transformer_builds_qwen3_execution_view_with_tied_output_"
           "fallback") {
   auto model = std::make_unique<emel::model::data>();
   build_qwen3_model(*model, 1, true, true);
@@ -2647,7 +2713,7 @@ TEST_CASE("model_execution_contract_accepts_canonical_lfm2_hybrid_contract") {
         emel::error::cast(emel::model::loader::error::none));
 }
 
-TEST_CASE("model_transformer_detail_builds_lfm2_topology_with_hybrid_tensor_count") {
+TEST_CASE("model_transformer_builds_lfm2_topology_with_hybrid_tensor_count") {
   auto model = std::make_unique<emel::model::data>();
   build_lfm2_model(*model, true, false);
 
@@ -2662,7 +2728,7 @@ TEST_CASE("model_transformer_detail_builds_lfm2_topology_with_hybrid_tensor_coun
   CHECK(topology.node_count == 149u);
 }
 
-TEST_CASE("model_transformer_detail_describes_lfm2_hybrid_generation_layers") {
+TEST_CASE("model_transformer_describes_lfm2_hybrid_generation_layers") {
   auto model = std::make_unique<emel::model::data>();
   build_lfm2_model(*model, true, false);
 
@@ -3616,7 +3682,7 @@ TEST_CASE(
         emel::error::cast(emel::model::loader::error::none));
 }
 
-TEST_CASE("model_transformer_detail_builds_gemma4_execution_view_with_shared_kv_and_"
+TEST_CASE("model_transformer_builds_gemma4_execution_view_with_shared_kv_and_"
           "tied_output_fallback") {
   auto model = std::make_unique<emel::model::data>();
   build_gemma4_model(*model, false);
@@ -3647,7 +3713,7 @@ TEST_CASE("model_transformer_detail_builds_gemma4_execution_view_with_shared_kv_
   CHECK(shared.attention_v.name == "blk.15.attn_k.weight");
 }
 
-TEST_CASE("model_transformer_detail_describes_gemma4_sliding_and_shared_kv_layers") {
+TEST_CASE("model_transformer_describes_gemma4_sliding_and_shared_kv_layers") {
   auto model = std::make_unique<emel::model::data>();
   build_gemma4_model(*model, false);
 
@@ -3683,7 +3749,7 @@ TEST_CASE("model_transformer_detail_describes_gemma4_sliding_and_shared_kv_layer
         emel::model::transformer::generation_attention_v_norm_route::rms);
 }
 
-TEST_CASE("model_transformer_detail_builds_gemma4_topology_with_shared_kv_tail_"
+TEST_CASE("model_transformer_builds_gemma4_topology_with_shared_kv_tail_"
           "tensor_count") {
   auto model = std::make_unique<emel::model::data>();
   build_gemma4_model(*model, false);
@@ -3695,11 +3761,11 @@ TEST_CASE("model_transformer_detail_builds_gemma4_topology_with_shared_kv_tail_"
   emel::model::transformer::topology topology = {};
   REQUIRE(emel::model::transformer::build_topology(view, topology) ==
           emel::error::cast(emel::model::loader::error::none));
-  CHECK(topology.tensor_count == 333u);
-  CHECK(topology.node_count == 333u);
+  CHECK(topology.tensor_count == 368u);
+  CHECK(topology.node_count == 368u);
 }
 
-TEST_CASE("model_transformer_detail_builds_gemma4_quantized_path_audit_with_shared_"
+TEST_CASE("model_transformer_builds_gemma4_quantized_path_audit_with_shared_"
           "kv_fallback") {
   auto model = std::make_unique<emel::model::data>();
   build_gemma4_model(*model, false);
@@ -3765,7 +3831,7 @@ TEST_CASE("model_transformer_detail_builds_gemma4_quantized_path_audit_with_shar
             approved_dense_f32_by_contract);
 }
 
-TEST_CASE("model_transformer_detail_quantized_audit_name_helpers_publish_supported_"
+TEST_CASE("model_transformer_quantized_audit_name_helpers_publish_supported_"
           "labels") {
   using quantized_contract_kind =
       emel::model::transformer::quantized_contract_kind;

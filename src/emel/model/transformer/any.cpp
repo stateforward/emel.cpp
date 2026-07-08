@@ -82,8 +82,7 @@ bool assign_output_norm_view(const emel::model::data &model_data,
     return true;
   }
 
-  return model_data.params.shortconv_l_cache > 0 &&
-         assign_tensor_view(model_data, k_token_embedding_norm_name,
+  return assign_tensor_view(model_data, k_token_embedding_norm_name,
                             output_norm_out);
 }
 
@@ -140,25 +139,35 @@ bool has_shared_value_tail(const emel::model::data &model_data,
   return first_shared >= 0 && block_index >= first_shared;
 }
 
-uint32_t count_logical_block_tensors(const emel::model::data &model_data,
-                                     const int32_t block_index,
-                                     const block_view &block) noexcept {
+uint32_t count_logical_block_tensors(const block_view &block) noexcept {
+  constexpr uint32_t k_present_tensor_view_count = 1u;
+  constexpr uint32_t k_absent_or_aliased_tensor_view_count = 0u;
+  const auto count_present = [](const tensor_view &view) noexcept {
+    return view.tensor != nullptr ? k_present_tensor_view_count
+                                  : k_absent_or_aliased_tensor_view_count;
+  };
+
+  uint32_t count = count_present(block.attention_norm) +
+                   count_present(block.feed_forward_norm) +
+                   count_present(block.feed_forward_gate) +
+                   count_present(block.feed_forward_down) +
+                   count_present(block.feed_forward_up);
+
   if (!block.uses_attention) {
-    return 8u;
+    count += count_present(block.shortconv_conv) +
+             count_present(block.shortconv_in_proj) +
+             count_present(block.shortconv_out_proj);
+    return count;
   }
 
-  if (model_data.params.shortconv_l_cache > 0) {
-    return 11u;
-  }
-
-  uint32_t count = 8u;
-  if (block.attention_q_norm.tensor != nullptr &&
-      block.attention_k_norm.tensor != nullptr) {
-    count += 2u;
-  }
-  if (has_shared_value_tail(model_data, block_index) && count > 0u) {
-    --count;
-  }
+  count += count_present(block.attention_q) + count_present(block.attention_k) +
+           count_present(block.attention_output) +
+           count_present(block.attention_q_norm) +
+           count_present(block.attention_k_norm);
+  count += block.attention_v.tensor != nullptr &&
+                   block.attention_v.tensor != block.attention_k.tensor
+               ? k_present_tensor_view_count
+               : k_absent_or_aliased_tensor_view_count;
   return count;
 }
 
@@ -621,8 +630,7 @@ emel::error::type build_topology(const execution_view &execution,
       topology_out = {};
       return err;
     }
-    tensor_count +=
-        count_logical_block_tensors(*execution.model, block_index, block);
+    tensor_count += count_logical_block_tensors(block);
   }
   topology_out.tensor_count = tensor_count;
 
