@@ -34,6 +34,7 @@ using DiarizationRequest = emel::diarization::request::sm;
 using SortformerExecutor = emel::diarization::sortformer::executor::sm;
 using SortformerPipeline = emel::diarization::sortformer::pipeline::sm;
 using OmniEmbedEmbeddingsGenerator = emel::embeddings::generator::omniembed::sm;
+using EmbeddingsGenerator = OmniEmbedEmbeddingsGenerator;
 using MimiCodec = emel::speech::codec::mimi::sm;
 using EncoderAny = emel::text::encoders::any;
 using EncoderBpe = emel::text::encoders::bpe::sm;

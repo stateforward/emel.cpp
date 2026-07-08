@@ -28,7 +28,8 @@ stateDiagram-v2
   allocate_sequence_recurrent_error_decision --> errored : completion_allocate_sequence_runtime_ [recurrent_rejected_non_backend_error_] / mark_error_from_recurrent_
   allocate_sequence_recurrent_error_decision --> errored : completion_allocate_sequence_runtime_ [always] / mark_internal_error_
   ready --> allocate_slots_kv : allocate_slots_runtime [always] / begin_allocate_slots_
-  allocate_slots_kv --> allocate_slots_kv_decision : completion_allocate_slots_runtime_ [always] / exec_allocate_slots_kv_
+  allocate_slots_kv --> allocate_slots_kv_decision : completion_allocate_slots_runtime_ [guard_owned_kv_cache_] / effect_allocate_slots_owned_kv_
+  allocate_slots_kv --> allocate_slots_kv_decision : completion_allocate_slots_runtime_ [guard_bound_kv_cache_] / effect_allocate_slots_bound_kv_
   allocate_slots_kv_decision --> allocate_slots_recurrent : completion_allocate_slots_runtime_ [kv_accepted_] / none
   allocate_slots_kv_decision --> out_of_memory : completion_allocate_slots_runtime_ [kv_rejected_out_of_memory_] / mark_out_of_memory_
   allocate_slots_kv_decision --> errored : completion_allocate_slots_runtime_ [kv_rejected_backend_or_none_] / mark_backend_error_
@@ -84,7 +85,8 @@ stateDiagram-v2
   ready --> capture_request_decision : capture_view_runtime [always] / begin_capture_view_
   capture_request_decision --> capture_kv : completion_capture_view_runtime_ [capture_request_valid_] / none
   capture_request_decision --> errored : completion_capture_view_runtime_ [capture_request_invalid_] / mark_invalid_request_
-  capture_kv --> capture_kv_decision : completion_capture_view_runtime_ [always] / exec_capture_kv_
+  capture_kv --> capture_kv_decision : completion_capture_view_runtime_ [guard_owned_kv_cache_] / effect_capture_owned_kv_
+  capture_kv --> capture_kv_decision : completion_capture_view_runtime_ [guard_bound_kv_cache_] / effect_capture_bound_kv_
   capture_kv_decision --> capture_recurrent : completion_capture_view_runtime_ [kv_accepted_] / none
   capture_kv_decision --> errored : completion_capture_view_runtime_ [kv_rejected_with_error_] / mark_error_from_kv_
   capture_kv_decision --> errored : completion_capture_view_runtime_ [kv_rejected_without_error_] / mark_backend_error_
