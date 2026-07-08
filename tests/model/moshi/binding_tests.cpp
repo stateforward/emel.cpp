@@ -19,6 +19,7 @@
 #include "emel/gguf/loader/detail.hpp"
 #include "emel/gguf/loader/events.hpp"
 #include "emel/gguf/loader/sm.hpp"
+#include "emel/kernel/detail.hpp"
 #include "emel/model/architecture/detail.hpp"
 #include "emel/model/data.hpp"
 #include "emel/model/detail.hpp"
@@ -340,6 +341,80 @@ kv_store make_mimi_kv(const mimi_kv_options &options) {
 constexpr emel::error::type k_none =
     emel::error::cast(emel::model::loader::error::none);
 
+emel::model::data::tensor_record *
+find_mutable_tensor(emel::model::data &model, const std::string_view target) {
+  for (uint32_t index = 0u; index < model.n_tensors; ++index) {
+    auto &tensor = model.tensors[index];
+    if (emel::model::tensor_name_view(model, tensor) == target) {
+      return &tensor;
+    }
+  }
+  return nullptr;
+}
+
+uint64_t q4_k_storage_bytes(const int64_t cols, const int64_t rows) noexcept {
+  const auto blocks = static_cast<uint64_t>(cols) /
+                      emel::kernel::detail::quant::QK_K *
+                      static_cast<uint64_t>(rows);
+  return blocks * sizeof(emel::kernel::detail::quant::block_q4_k);
+}
+
+uint64_t dense_storage_bytes(const int64_t cols, const int64_t rows,
+                             const uint64_t element_bytes) noexcept {
+  return static_cast<uint64_t>(cols) * static_cast<uint64_t>(rows) *
+         element_bytes;
+}
+
+uint64_t quant_storage_bytes(const int64_t cols, const int64_t rows,
+                             const uint64_t block_elements,
+                             const uint64_t block_bytes) noexcept {
+  const auto blocks = static_cast<uint64_t>(cols) / block_elements *
+                      static_cast<uint64_t>(rows);
+  return blocks * block_bytes;
+}
+
+void set_matrix_tensor(emel::model::data &model,
+                       const std::string_view name,
+                       const int32_t dtype,
+                       const int64_t cols,
+                       const int64_t rows,
+                       const uint64_t data_size) {
+  auto *tensor = find_mutable_tensor(model, name);
+  REQUIRE(tensor != nullptr);
+  REQUIRE(cols > 0);
+  REQUIRE(rows > 0);
+  tensor->type = dtype;
+  tensor->n_dims = 2;
+  tensor->dims = {cols, rows, 1, 1};
+  tensor->data_size = data_size;
+}
+
+void set_q4_k_matrix(emel::model::data &model,
+                     const std::string_view name,
+                     const int64_t cols,
+                     const int64_t rows) {
+  REQUIRE(cols % static_cast<int64_t>(emel::kernel::detail::quant::QK_K) ==
+          0);
+  set_matrix_tensor(model, name, emel::kernel::detail::dtype_q4_k, cols, rows,
+                    q4_k_storage_bytes(cols, rows));
+}
+
+void configure_q4_k_lm_contract(emel::model::data &model) {
+  constexpr int32_t k_dim = 256;
+  constexpr int32_t k_text_card = 255;
+  constexpr int32_t k_audio_card = 255;
+
+  model.moshi_lm.dim = k_dim;
+  model.moshi_lm.text_card = k_text_card;
+  model.moshi_lm.card = k_audio_card;
+  model.params.n_embd = k_dim;
+  model.params.n_embd_out = k_dim;
+  model.params.n_vocab = k_text_card;
+  set_q4_k_matrix(model, "lm.text_emb.weight", k_dim, k_text_card + 1);
+  set_q4_k_matrix(model, "lm.text_linear.weight", k_dim, k_text_card);
+  set_q4_k_matrix(model, "lm.emb.0.weight", k_dim, k_audio_card + 1);
+}
+
 } // namespace
 
 TEST_CASE("moshi architecture is registered") {
@@ -611,9 +686,10 @@ TEST_CASE("moshi contract rejects tensor element products that overflow") {
       continue;
     }
     SUBCASE("element product wraps") {
-      // Four 65536 extents multiply to exactly 2^64 -> zero elements.
+      // Row extents beyond dims[0] multiply past uint64_t capacity before
+      // dtype byte accounting can decide whether the payload is backed.
       tensor.n_dims = 4;
-      tensor.dims = {65536, 65536, 65536, 65536};
+      tensor.dims = {1u, uint64_t{1} << 32, uint64_t{1} << 32, 2u};
     }
     SUBCASE("dtype byte count wraps") {
       // 2^62 elements are representable but the f32 byte count is 2^64.
@@ -624,6 +700,228 @@ TEST_CASE("moshi contract rejects tensor element products that overflow") {
   }
   REQUIRE(corrupted);
   CHECK(moshi::validate_execution_contract(model) != k_none);
+}
+
+TEST_CASE("moshi lm contract accepts q4_k block-backed tensors") {
+  auto loaded = load_fixture_or_skip("moshi-tiny-lm.gguf");
+  if (loaded.model == nullptr) {
+    return;
+  }
+
+  auto &model = *loaded.model;
+  configure_q4_k_lm_contract(model);
+
+  SUBCASE("q4_k matrices with exact block storage are valid") {
+    CHECK(moshi::validate_execution_contract(model) == k_none);
+  }
+
+  SUBCASE("q4_k matrices one byte under their block storage are invalid") {
+    auto *tensor = find_mutable_tensor(model, "lm.text_emb.weight");
+    REQUIRE(tensor != nullptr);
+    REQUIRE(tensor->data_size > 0u);
+    tensor->data_size -= 1u;
+    CHECK(moshi::validate_execution_contract(model) != k_none);
+  }
+}
+
+TEST_CASE("moshi lm contract accounts for supported dense tensor byte widths") {
+  auto loaded = load_fixture_or_skip("moshi-tiny-lm.gguf");
+  if (loaded.model == nullptr) {
+    return;
+  }
+
+  struct dtype_case {
+    const char *name = "";
+    int32_t dtype = 0;
+    uint64_t element_bytes = 0u;
+  };
+  const std::array cases{
+      dtype_case{"f32", emel::kernel::detail::dtype_f32, sizeof(uint32_t)},
+  };
+
+  for (const auto &entry : cases) {
+    CAPTURE(entry.name);
+    auto model = std::make_unique<emel::model::data>(*loaded.model);
+    configure_q4_k_lm_contract(*model);
+    set_matrix_tensor(
+        *model, "lm.text_emb.weight", entry.dtype, model->moshi_lm.dim,
+        model->moshi_lm.text_card + 1,
+        dense_storage_bytes(model->moshi_lm.dim, model->moshi_lm.text_card + 1,
+                            entry.element_bytes));
+    CHECK(moshi::validate_execution_contract(*model) == k_none);
+
+    auto *tensor = find_mutable_tensor(*model, "lm.text_emb.weight");
+    REQUIRE(tensor != nullptr);
+    REQUIRE(tensor->data_size > 0u);
+    tensor->data_size -= 1u;
+    CHECK(moshi::validate_execution_contract(*model) != k_none);
+  }
+}
+
+TEST_CASE("moshi lm contract accepts supported gguf tensor layouts") {
+  auto loaded = load_fixture_or_skip("moshi-tiny-lm.gguf");
+  if (loaded.model == nullptr) {
+    return;
+  }
+
+  struct dtype_case {
+    const char *name = "";
+    int32_t dtype = 0;
+  };
+  const std::array cases{
+      dtype_case{"f32", 0},
+      dtype_case{"q4_0", 2},
+      dtype_case{"q8_0", 8},
+      dtype_case{"q2_k", 10},
+      dtype_case{"q3_k", 11},
+      dtype_case{"q4_k", 12},
+      dtype_case{"q6_k", 14},
+  };
+
+  for (const auto &entry : cases) {
+    CAPTURE(entry.name);
+    auto model = std::make_unique<emel::model::data>(*loaded.model);
+    configure_q4_k_lm_contract(*model);
+    const auto layout =
+        emel::gguf::loader::detail::ggml_layout(
+            static_cast<uint32_t>(entry.dtype));
+    REQUIRE(layout.block_size > 0u);
+    REQUIRE(layout.type_size > 0u);
+    REQUIRE(static_cast<uint64_t>(model->moshi_lm.dim) %
+                layout.block_size ==
+            0u);
+    set_matrix_tensor(
+        *model, "lm.text_emb.weight", entry.dtype, model->moshi_lm.dim,
+        model->moshi_lm.text_card + 1,
+        quant_storage_bytes(model->moshi_lm.dim, model->moshi_lm.text_card + 1,
+                            layout.block_size, layout.type_size));
+    CHECK(moshi::validate_execution_contract(*model) == k_none);
+
+    auto *tensor = find_mutable_tensor(*model, "lm.text_emb.weight");
+    REQUIRE(tensor != nullptr);
+    REQUIRE(tensor->data_size > 0u);
+    tensor->data_size -= 1u;
+    CHECK(moshi::validate_execution_contract(*model) != k_none);
+  }
+}
+
+TEST_CASE("moshi lm contract rejects unsupported known gguf tensor layouts") {
+  auto loaded = load_fixture_or_skip("moshi-tiny-lm.gguf");
+  if (loaded.model == nullptr) {
+    return;
+  }
+
+  struct dtype_case {
+    const char *name = "";
+    int32_t dtype = 0;
+  };
+  const std::array cases{
+      dtype_case{"f16", 1},      dtype_case{"q4_1", 3},
+      dtype_case{"q5_0", 6},
+      dtype_case{"q5_1", 7},     dtype_case{"q8_1", 9},
+      dtype_case{"q5_k", 13},    dtype_case{"q8_k", 15},
+      dtype_case{"iq2_xxs", 16}, dtype_case{"iq2_xs", 17},
+      dtype_case{"iq3_xxs", 18}, dtype_case{"iq1_s", 19},
+      dtype_case{"iq4_nl", 20},  dtype_case{"iq3_s", 21},
+      dtype_case{"iq2_s", 22},   dtype_case{"iq4_xs", 23},
+      dtype_case{"i8", 24},      dtype_case{"i16", 25},
+      dtype_case{"i32", 26},     dtype_case{"i64", 27},
+      dtype_case{"f64", 28},     dtype_case{"iq1_m", 29},
+      dtype_case{"bf16", 30},    dtype_case{"tq1_0", 34},
+      dtype_case{"tq2_0", 35},   dtype_case{"mxfp4", 39},
+  };
+
+  for (const auto &entry : cases) {
+    CAPTURE(entry.name);
+    auto model = std::make_unique<emel::model::data>(*loaded.model);
+    configure_q4_k_lm_contract(*model);
+    const auto layout =
+        emel::gguf::loader::detail::ggml_layout(
+            static_cast<uint32_t>(entry.dtype));
+    REQUIRE(layout.block_size > 0u);
+    REQUIRE(layout.type_size > 0u);
+    REQUIRE(static_cast<uint64_t>(model->moshi_lm.dim) %
+                layout.block_size ==
+            0u);
+    set_matrix_tensor(
+        *model, "lm.text_emb.weight", entry.dtype, model->moshi_lm.dim,
+        model->moshi_lm.text_card + 1,
+        quant_storage_bytes(model->moshi_lm.dim, model->moshi_lm.text_card + 1,
+                            layout.block_size, layout.type_size));
+    CHECK(moshi::validate_execution_contract(*model) != k_none);
+  }
+}
+
+TEST_CASE("moshi lm contract rejects partial quantized tensor rows") {
+  auto loaded = load_fixture_or_skip("moshi-tiny-lm.gguf");
+  if (loaded.model == nullptr) {
+    return;
+  }
+
+  namespace quant = emel::kernel::detail::quant;
+  struct dtype_case {
+    const char *name = "";
+    int32_t dtype = 0;
+    uint64_t block_elements = 0u;
+    uint64_t block_bytes = 0u;
+  };
+  const std::array cases{
+      dtype_case{"q4_0", emel::kernel::detail::dtype_q4_0, quant::QK4_0,
+                 sizeof(quant::block_q4_0)},
+      dtype_case{"q4_1", emel::kernel::detail::dtype_q4_1, quant::QK4_1,
+                 sizeof(quant::block_q4_1)},
+      dtype_case{"q5_0", emel::kernel::detail::dtype_q5_0, quant::QK5_0,
+                 sizeof(quant::block_q5_0)},
+      dtype_case{"q5_1", emel::kernel::detail::dtype_q5_1, quant::QK5_1,
+                 sizeof(quant::block_q5_1)},
+      dtype_case{"q8_0", emel::kernel::detail::dtype_q8_0, quant::QK8_0,
+                 sizeof(quant::block_q8_0)},
+      dtype_case{"q2_k", emel::kernel::detail::dtype_q2_k, quant::QK_K,
+                 sizeof(quant::block_q2_k)},
+      dtype_case{"q3_k", emel::kernel::detail::dtype_q3_k, quant::QK_K,
+                 sizeof(quant::block_q3_k)},
+      dtype_case{"q5_k", emel::kernel::detail::dtype_q5_k, quant::QK_K,
+                 sizeof(quant::block_q5_k)},
+      dtype_case{"q6_k", emel::kernel::detail::dtype_q6_k, quant::QK_K,
+                 sizeof(quant::block_q6_k)},
+      dtype_case{"q8_k", emel::kernel::detail::dtype_q8_k, quant::QK_K,
+                 sizeof(quant::block_q8_k)},
+  };
+
+  for (const auto &entry : cases) {
+    CAPTURE(entry.name);
+    auto model = std::make_unique<emel::model::data>(*loaded.model);
+    configure_q4_k_lm_contract(*model);
+    set_matrix_tensor(
+        *model, "lm.text_emb.weight", entry.dtype, model->moshi_lm.dim + 1,
+        model->moshi_lm.text_card + 1,
+        quant_storage_bytes(model->moshi_lm.dim, model->moshi_lm.text_card + 1,
+                            entry.block_elements, entry.block_bytes));
+    CHECK(moshi::validate_execution_contract(*model) != k_none);
+  }
+}
+
+TEST_CASE("moshi lm contract rejects unknown tensor dtypes") {
+  auto loaded = load_fixture_or_skip("moshi-tiny-lm.gguf");
+  if (loaded.model == nullptr) {
+    return;
+  }
+
+  const std::array cases{
+      int32_t{40},
+      int32_t{999},
+  };
+
+  for (const int32_t dtype : cases) {
+    CAPTURE(dtype);
+    auto model = std::make_unique<emel::model::data>(*loaded.model);
+    configure_q4_k_lm_contract(*model);
+    set_matrix_tensor(*model, "lm.text_emb.weight", dtype, model->moshi_lm.dim,
+                      model->moshi_lm.text_card + 1,
+                      dense_storage_bytes(model->moshi_lm.dim,
+                                          model->moshi_lm.text_card + 1, 1u));
+    CHECK(moshi::validate_execution_contract(*model) != k_none);
+  }
 }
 
 TEST_CASE("mimi contract validation requires every transformer layer") {

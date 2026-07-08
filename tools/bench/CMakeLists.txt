@@ -154,7 +154,6 @@ option(EMEL_BENCH_SKIP_MOSHI_REFERENCE
 set(EMEL_BENCH_NEEDS_MOSHI OFF)
 if(NOT EMEL_BENCH_SKIP_MOSHI_REFERENCE AND
    (EMEL_BENCH_SUITE_FILTER STREQUAL "speech_codec_mimi" OR
-    EMEL_BENCH_SUITE_FILTER STREQUAL "speech_lm_moshi" OR
     EMEL_BENCH_SUITE_FILTER STREQUAL "speech_dialogue_moshi"))
   set(EMEL_BENCH_NEEDS_MOSHI ON)
 endif()
@@ -410,6 +409,8 @@ add_bench_runner_suite(gbnf_rule_parser gbnf/rule_parser_bench.cpp
 add_bench_runner_suite(generation generation_bench.cpp EMEL_BENCH_ENABLE_GENERATION)
 add_bench_runner_suite(speech_codec_mimi speech/codec_mimi_bench.cpp
                        EMEL_BENCH_ENABLE_SPEECH_CODEC_MIMI)
+add_bench_runner_suite(speech_lm_moshi speech/lm_moshi_bench.cpp
+                       EMEL_BENCH_ENABLE_SPEECH_LM_MOSHI)
 add_bench_runner_suite(diarization_sortformer diarization/sortformer_bench.cpp
                        EMEL_BENCH_ENABLE_DIARIZATION_SORTFORMER)
 add_bench_runner_suite(flash_attention kernel/flash_attention_bench.cpp

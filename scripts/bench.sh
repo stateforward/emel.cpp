@@ -200,6 +200,28 @@ if $COMPARE_UPDATE && [[ -n "$SUITE_FILTER" ]]; then
   exit 1
 fi
 
+if [[ "$SUITE_FILTER" == "speech_lm_moshi" ]] && ! $TEST_TOOLS; then
+  if $UPDATE || $COMPARE_UPDATE; then
+    echo "error: speech_lm_moshi is an EMEL load-contract guard with no snapshot update path" >&2
+    exit 1
+  fi
+  if [[ "$MODE_FLAG" == "--mode=reference" ]]; then
+    echo "error: speech_lm_moshi has no reference lane" >&2
+    exit 1
+  fi
+  moshi_lm_args=()
+  if $RUN_ONLY; then
+    moshi_lm_args+=(--run-only)
+  fi
+  if $USE_ZIG; then
+    moshi_lm_args+=(--zig)
+  else
+    moshi_lm_args+=(--system)
+  fi
+  bash "$ROOT_DIR/scripts/bench_moshi_lm_compare.sh" "${moshi_lm_args[@]}"
+  exit $?
+fi
+
 prepare_toolchain() {
   bench_cc="${BENCH_CC:-cc}"
   bench_cxx="${BENCH_CXX:-c++}"
