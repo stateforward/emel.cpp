@@ -25,6 +25,11 @@ struct route_probe_sm : hybrid_sm {
     this->context_.kv_actor.dispatch_allocate_slots =
         &emel::memory::hybrid::reject_kv_allocate_slots;
   }
+
+  void reject_bound_capture_view() noexcept {
+    this->context_.kv_actor.dispatch_capture_view =
+        &emel::memory::hybrid::reject_kv_capture_view;
+  }
 };
 
 bool copy_state_cb(const int32_t, const int32_t, void * user_data, int32_t * error_out) {
@@ -102,6 +107,36 @@ TEST_CASE("memory_hybrid_owned_kv_allocate_slots_uses_direct_dispatch") {
   CHECK(err == static_cast<int32_t>(emel::error::cast(emel::memory::hybrid::error::none)));
   CHECK(block_count == 1);
   CHECK(machine.view().lookup_kv_block(0, 0) >= 0);
+}
+
+TEST_CASE("memory_hybrid_owned_kv_capture_view_uses_direct_dispatch") {
+  route_probe_sm machine{};
+  int32_t err = static_cast<int32_t>(emel::error::cast(emel::memory::hybrid::error::none));
+
+  REQUIRE(machine.process_event(event::reserve{
+    .max_sequences = 4,
+    .max_blocks = 4,
+    .block_tokens = 2,
+    .error_out = &err,
+  }));
+  REQUIRE(machine.process_event(event::allocate_sequence{
+    .seq_id = 0,
+    .error_out = &err,
+  }));
+  REQUIRE(machine.process_event(event::allocate_slots{
+    .seq_id = 0,
+    .token_count = 2,
+    .error_out = &err,
+  }));
+
+  machine.reject_bound_capture_view();
+
+  emel::memory::view::snapshot view{};
+  emel::error::type view_err = emel::error::cast(error::none);
+  REQUIRE(machine.try_view(view, view_err));
+
+  CHECK(view_err == emel::error::cast(emel::memory::hybrid::error::none));
+  CHECK(view.lookup_kv_block(0, 0) >= 0);
 }
 
 TEST_CASE("memory_hybrid_rejects_partial_kv_actor_binding") {

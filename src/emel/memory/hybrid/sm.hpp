@@ -314,7 +314,11 @@ struct model {
           / action::mark_invalid_request
 
       , sml::state<capture_kv_decision> <= sml::state<capture_kv>
-          + sml::completion<event::capture_view_runtime> / action::exec_capture_kv
+          + sml::completion<event::capture_view_runtime> [ guard::guard_owned_kv_cache{} ]
+          / action::effect_capture_owned_kv
+      , sml::state<capture_kv_decision> <= sml::state<capture_kv>
+          + sml::completion<event::capture_view_runtime> [ guard::guard_bound_kv_cache{} ]
+          / action::effect_capture_bound_kv
       , sml::state<capture_recurrent> <= sml::state<capture_kv_decision>
           + sml::completion<event::capture_view_runtime> [ guard::kv_accepted{} ]
       , sml::state<errored> <= sml::state<capture_kv_decision>

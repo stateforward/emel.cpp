@@ -317,7 +317,17 @@ struct exec_rollback_slots_recurrent {
   }
 };
 
-struct exec_capture_kv {
+struct effect_capture_owned_kv {
+  void operator()(const event::capture_view_runtime & ev, context & ctx) const noexcept {
+    ev.ctx.kv_error = static_cast<int32_t>(emel::error::cast(error::none));
+    ev.ctx.kv_accepted = ctx.kv.process_event(event::capture_view{
+      .snapshot_out = &ev.kv_snapshot,
+      .error_out = &ev.ctx.kv_error,
+    });
+  }
+};
+
+struct effect_capture_bound_kv {
   void operator()(const event::capture_view_runtime & ev, context & ctx) const noexcept {
     ev.ctx.kv_error = static_cast<int32_t>(emel::error::cast(error::none));
     ev.ctx.kv_accepted =
@@ -466,7 +476,8 @@ inline constexpr exec_free_sequence_kv exec_free_sequence_kv{};
 inline constexpr exec_free_sequence_recurrent exec_free_sequence_recurrent{};
 inline constexpr exec_rollback_slots_kv exec_rollback_slots_kv{};
 inline constexpr exec_rollback_slots_recurrent exec_rollback_slots_recurrent{};
-inline constexpr exec_capture_kv exec_capture_kv{};
+inline constexpr effect_capture_owned_kv effect_capture_owned_kv{};
+inline constexpr effect_capture_bound_kv effect_capture_bound_kv{};
 inline constexpr exec_capture_recurrent exec_capture_recurrent{};
 inline constexpr merge_capture_snapshots merge_capture_snapshots{};
 inline constexpr mark_invalid_request mark_invalid_request{};

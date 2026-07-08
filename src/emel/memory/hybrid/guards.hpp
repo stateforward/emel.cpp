@@ -8,14 +8,16 @@
 namespace emel::memory::hybrid::guard {
 
 struct guard_owned_kv_cache {
-  bool operator()(const event::allocate_slots_runtime &,
+  template <class runtime_event_type>
+  bool operator()(const runtime_event_type &,
                   const action::context & ctx) const noexcept {
     return ctx.kv_route == kv_cache_route::owned;
   }
 };
 
 struct guard_bound_kv_cache {
-  bool operator()(const event::allocate_slots_runtime & ev,
+  template <class runtime_event_type>
+  bool operator()(const runtime_event_type & ev,
                   const action::context & ctx) const noexcept {
     return !guard_owned_kv_cache{}(ev, ctx);
   }
