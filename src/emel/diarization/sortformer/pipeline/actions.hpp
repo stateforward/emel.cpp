@@ -1,6 +1,6 @@
 #pragma once
 
-#include "emel/diarization/request/events.hpp"
+#include "emel/diarization/sortformer/request/events.hpp"
 #include "emel/diarization/sortformer/encoder/detail.hpp"
 #include "emel/diarization/sortformer/executor/events.hpp"
 #include "emel/diarization/sortformer/output/detail.hpp"
@@ -71,7 +71,7 @@ struct effect_prepare_features {
   void operator()(const event::run_flow & runtime_ev, context & ctx) const noexcept {
     int32_t frame_count = 0;
     int32_t feature_bin_count = 0;
-    emel::diarization::request::event::prepare request{
+    emel::diarization::sortformer::request::event::prepare request{
       runtime_ev.request.contract,
       runtime_ev.request.pcm,
       runtime_ev.request.sample_rate,

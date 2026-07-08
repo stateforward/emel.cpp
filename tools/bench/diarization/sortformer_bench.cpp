@@ -13,10 +13,8 @@
 #include <vector>
 
 #include "diarization/sortformer_fixture.hpp"
-#include "emel/diarization/sortformer/encoder/feature_extractor/detail.hpp"
-#include "emel/diarization/sortformer/executor/sm.hpp"
-#include "emel/diarization/sortformer/output/detail.hpp"
-#include "emel/kernel/sm.hpp"
+#include "emel/diarization/sortformer/request/sm.hpp"
+#include "emel/diarization/sortformer/pipeline/any.hpp"
 
 namespace emel::bench {
 
@@ -24,7 +22,7 @@ namespace {
 
 namespace fixture = emel::bench::diarization::sortformer_fixture;
 namespace pipeline = emel::diarization::sortformer::pipeline;
-namespace output_detail = emel::diarization::sortformer::output::detail;
+namespace request = emel::diarization::sortformer::request;
 
 constexpr const char *k_proof_status = "maintained_loader_real_audio";
 constexpr const char *k_emel_backend_id = "emel.diarization.sortformer";
@@ -115,68 +113,48 @@ void write_float_probe_file(const char *output_path,
   }
 }
 
+bool env_value_requested(const char *value) noexcept {
+  return value != nullptr && value[0] != '\0';
+}
+
 void maybe_write_onnx_probe_inputs(const fixture::model_fixture &model,
                                    const fixture::pcm_fixture &pcm) {
   const char *feature_path = std::getenv(k_onnx_feature_input_env);
   const char *encoder_path = std::getenv(k_onnx_encoder_probe_env);
-  if ((feature_path == nullptr || feature_path[0] == '\0') &&
-      (encoder_path == nullptr || encoder_path[0] == '\0')) {
-    return;
-  }
-
-  namespace encoder_detail = emel::diarization::sortformer::encoder::detail;
-  namespace feature_detail =
-      emel::diarization::sortformer::encoder::feature_extractor::detail;
-  std::vector<float> features(
-      static_cast<size_t>(feature_detail::k_required_feature_count));
-  const auto feature_contract = feature_detail::make_contract(model.model);
-  if (!feature_detail::contract_valid(feature_contract)) {
-    fail_sortformer_setup("onnx_feature_contract");
-  }
-  feature_detail::compute(pcm.pcm, feature_contract, features);
-  write_float_probe_file(feature_path, features);
-
-  if (encoder_path == nullptr || encoder_path[0] == '\0') {
-    return;
-  }
-  encoder_detail::contract encoder_contract = {};
-  encoder_detail::pre_encoder_workspace workspace = {};
-  std::vector<float> encoder_frames(
-      static_cast<size_t>(encoder_detail::k_required_encoder_value_count));
-  if (!encoder_detail::bind_contract(model.model, encoder_contract)) {
-    fail_sortformer_setup("onnx_encoder_contract");
-  }
-  if (!encoder_detail::compute_encoder_frames_from_features(
-          features, encoder_contract, workspace, encoder_frames)) {
-    fail_sortformer_setup("onnx_encoder_compute");
-  }
-  write_float_probe_file(encoder_path, encoder_frames);
-
   const char *hidden_path = std::getenv(k_hidden_probe_env);
-  if (hidden_path == nullptr || hidden_path[0] == '\0') {
+  if (!env_value_requested(feature_path) &&
+      !env_value_requested(encoder_path) &&
+      !env_value_requested(hidden_path)) {
     return;
   }
-  std::vector<float> hidden_frames(
-      static_cast<size_t>(output_detail::k_required_hidden_value_count));
-  int32_t hidden_frame_count = 0;
-  int32_t hidden_dim = 0;
-  emel::error::type err =
-      emel::error::cast(emel::diarization::sortformer::executor::error::none);
-  auto executor =
-      std::make_unique<emel::diarization::sortformer::executor::sm>();
-  emel::diarization::sortformer::executor::event::execute request{
-      model.contract,     encoder_frames, hidden_frames,
-      hidden_frame_count, hidden_dim,
-  };
-  request.error_out = &err;
-  if (!executor->process_event(request) ||
-      err != emel::error::cast(
-                 emel::diarization::sortformer::executor::error::none) ||
-      hidden_frame_count != output_detail::k_frame_count ||
-      hidden_dim != output_detail::k_hidden_dim) {
-    fail_sortformer_setup("onnx_hidden_compute");
+  if (env_value_requested(encoder_path) || env_value_requested(hidden_path)) {
+    fail_sortformer_setup("stage_probe_requires_public_stage_actor");
   }
-  write_float_probe_file(hidden_path, hidden_frames);
+
+  std::vector<float> features(
+      static_cast<size_t>(pipeline::k_required_feature_count));
+  int32_t feature_frame_count = 0;
+  int32_t feature_bin_count = 0;
+  emel::error::type feature_err =
+      emel::error::cast(request::error::none);
+  request::sm feature_machine{};
+  request::event::prepare feature_ev{
+      model.contract,
+      pcm.pcm,
+      pcm.sample_rate,
+      pipeline::k_channel_count,
+      features,
+      feature_frame_count,
+      feature_bin_count,
+  };
+  feature_ev.error_out = &feature_err;
+  if (!feature_machine.process_event(feature_ev) ||
+      feature_err != emel::error::cast(request::error::none) ||
+      feature_frame_count != pipeline::k_feature_frame_count ||
+      feature_bin_count != pipeline::k_feature_bin_count) {
+    fail_sortformer_setup("onnx_feature_compute");
+  }
+  write_float_probe_file(feature_path, features);
 }
 
 config pipeline_benchmark_config(const config &cfg) noexcept {
@@ -209,7 +187,7 @@ result with_sortformer_metadata(result out, const char *lane,
 }
 
 std::string format_segments(
-    std::span<const fixture::output_detail::segment_record> segments,
+    std::span<const pipeline::segment_record> segments,
     const int32_t segment_count) {
   std::string out = {};
   for (int32_t i = 0; i < segment_count; ++i) {
@@ -313,83 +291,19 @@ result
 make_stage_profile_result(const fixture::model_fixture &model,
                           const fixture::pcm_fixture &pcm,
                           const fixture::expected_output_baseline &baseline) {
-  namespace encoder_detail = emel::diarization::sortformer::encoder::detail;
-  namespace feature_detail =
-      emel::diarization::sortformer::encoder::feature_extractor::detail;
+  fixture::run_result pipeline_result{};
+  auto machine = std::make_unique<pipeline::sm>();
 
-  std::vector<float> features(
-      static_cast<size_t>(feature_detail::k_required_feature_count));
-  std::vector<float> encoder_frames(
-      static_cast<size_t>(encoder_detail::k_required_encoder_value_count));
-  std::vector<float> hidden_frames(
-      static_cast<size_t>(output_detail::k_required_hidden_value_count));
-  std::vector<float> probabilities(
-      static_cast<size_t>(output_detail::k_required_probability_value_count));
-  std::array<output_detail::segment_record,
-             output_detail::k_frame_count * output_detail::k_speaker_count>
-      segments = {};
-
-  const auto feature_contract = feature_detail::make_contract(model.model);
-  encoder_detail::contract encoder_contract = {};
-  emel::diarization::sortformer::modules::detail::contract modules_contract =
-      {};
-  encoder_detail::pre_encoder_workspace encoder_workspace = {};
-  auto executor =
-      std::make_unique<emel::diarization::sortformer::executor::sm>();
-  int32_t hidden_frame_count = 0;
-  int32_t hidden_dim = 0;
-  int32_t segment_count = 0;
-  emel::error::type executor_err =
-      emel::error::cast(emel::diarization::sortformer::executor::error::none);
-
-  if (!feature_detail::contract_valid(feature_contract) ||
-      !encoder_detail::bind_contract(model.model, encoder_contract) ||
-      !emel::diarization::sortformer::modules::detail::bind_contract(
-          model.model, modules_contract)) {
-    fail_sortformer_setup("stage_profile_contract");
-  }
-
-  const double feature_ns = measure_once_ns(
-      [&]() { feature_detail::compute(pcm.pcm, feature_contract, features); });
-  const double encoder_ns = measure_once_ns([&]() {
-    g_stage_ok_sink = encoder_detail::compute_encoder_frames_from_features(
-        features, encoder_contract, encoder_workspace, encoder_frames);
-  });
-  if (!g_stage_ok_sink) {
-    fail_sortformer_setup("stage_profile_encoder");
-  }
-
-  const double executor_ns = measure_once_ns([&]() {
-    emel::diarization::sortformer::executor::event::execute request{
-        model.contract,     encoder_frames, hidden_frames,
-        hidden_frame_count, hidden_dim,
-    };
-    request.error_out = &executor_err;
-    g_stage_ok_sink = executor->process_event(request);
+  const double pipeline_ns = measure_once_ns([&]() {
+    g_stage_ok_sink = fixture::run_pipeline(*machine, model.contract, pcm.pcm,
+                                            pcm.sample_rate, pipeline_result);
+    g_checksum_sink = fixture::compute_checksum(pipeline_result.segments,
+                                                pipeline_result.segment_count);
   });
   if (!g_stage_ok_sink ||
-      executor_err !=
-          emel::error::cast(
-              emel::diarization::sortformer::executor::error::none)) {
-    fail_sortformer_setup("stage_profile_executor");
-  }
-
-  static emel::kernel::sm probabilities_kernel{emel::kernel::detect_host_kind()};
-  const double probabilities_ns = measure_once_ns([&]() {
-    g_stage_ok_sink = output_detail::compute_speaker_probabilities(
-        probabilities_kernel, hidden_frames, modules_contract, probabilities);
-  });
-  if (!g_stage_ok_sink) {
-    fail_sortformer_setup("stage_profile_probabilities");
-  }
-
-  const double decode_ns = measure_once_ns([&]() {
-    g_stage_ok_sink = output_detail::decode_segments(
-        probabilities, output_detail::k_default_activity_threshold, segments,
-        segment_count);
-  });
-  if (!g_stage_ok_sink || segment_count <= 0) {
-    fail_sortformer_setup("stage_profile_decode");
+      pipeline_result.err != emel::error::cast(pipeline::error::none) ||
+      pipeline_result.segment_count <= 0) {
+    fail_sortformer_setup("stage_profile_pipeline_run");
   }
 
   result out = make_profile_reference_result("emel", baseline);
@@ -400,31 +314,24 @@ make_stage_profile_result(const fixture::model_fixture &model,
   out.backend_language = "cpp";
   out.comparison_mode = "measurement";
   out.comparable = false;
-  out.workload_id = "diarization_sortformer_stage_profile_v1";
-  out.ns_per_op =
-      feature_ns + encoder_ns + executor_ns + probabilities_ns + decode_ns;
+  out.workload_id = "diarization_sortformer_public_pipeline_profile_v1";
+  out.ns_per_op = pipeline_ns;
   set_single_sample_stats(out);
-  out.prepare_ns_per_op = feature_ns;
-  out.encode_ns_per_op = encoder_ns + executor_ns;
-  out.publish_ns_per_op = probabilities_ns + decode_ns;
-  out.output_dim = static_cast<std::uint64_t>(segment_count);
-  out.output_checksum = fixture::compute_checksum(segments, segment_count);
-  out.output_text = format_segments(segments, segment_count);
+  out.prepare_ns_per_op = 0.0;
+  out.encode_ns_per_op = pipeline_ns;
+  out.publish_ns_per_op = 0.0;
+  out.output_dim = static_cast<std::uint64_t>(pipeline_result.segment_count);
+  out.output_checksum = fixture::compute_checksum(
+      pipeline_result.segments, pipeline_result.segment_count);
+  out.output_text =
+      format_segments(pipeline_result.segments, pipeline_result.segment_count);
   out.note =
-      "profile=stage_breakdown proof_status=maintained_loader_real_audio";
+      "profile=public_pipeline proof_status=maintained_loader_real_audio";
   out.note += " load_strategy=";
   out.note +=
       emel::tools::model_load_io_strategy_name(model.load.used_io_strategy);
-  out.note +=
-      " feature_ns=" + std::to_string(static_cast<std::uint64_t>(feature_ns));
-  out.note +=
-      " encoder_ns=" + std::to_string(static_cast<std::uint64_t>(encoder_ns));
-  out.note +=
-      " executor_ns=" + std::to_string(static_cast<std::uint64_t>(executor_ns));
-  out.note += " probabilities_ns=" +
-              std::to_string(static_cast<std::uint64_t>(probabilities_ns));
-  out.note +=
-      " decode_ns=" + std::to_string(static_cast<std::uint64_t>(decode_ns));
+  out.note += " pipeline_ns=" +
+              std::to_string(static_cast<std::uint64_t>(pipeline_ns));
   out.note += " segment_checksum=" + std::to_string(out.output_checksum);
   return out;
 }

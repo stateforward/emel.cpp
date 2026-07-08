@@ -3,12 +3,12 @@
 #include <algorithm>
 #include <cstddef>
 
-#include "emel/diarization/request/context.hpp"
-#include "emel/diarization/request/detail.hpp"
-#include "emel/diarization/request/events.hpp"
+#include "emel/diarization/sortformer/request/context.hpp"
+#include "emel/diarization/sortformer/request/detail.hpp"
+#include "emel/diarization/sortformer/request/events.hpp"
 #include "emel/diarization/sortformer/encoder/feature_extractor/detail.hpp"
 
-namespace emel::diarization::request::action {
+namespace emel::diarization::sortformer::request::action {
 
 struct effect_begin_prepare {
   void operator()(const event::prepare_run & runtime_ev, context &) const noexcept {
@@ -130,4 +130,4 @@ inline constexpr effect_emit_error effect_emit_error{};
 inline constexpr effect_publish_error_and_emit_error effect_publish_error_and_emit_error{};
 inline constexpr effect_on_unexpected effect_on_unexpected{};
 
-}  // namespace emel::diarization::request::action
+}  // namespace emel::diarization::sortformer::request::action

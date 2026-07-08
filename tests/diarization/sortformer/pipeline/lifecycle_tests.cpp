@@ -13,7 +13,7 @@ namespace {
 namespace fixture = emel::bench::diarization::sortformer_fixture;
 namespace pipeline = emel::diarization::sortformer::pipeline;
 namespace pipeline_detail = emel::diarization::sortformer::pipeline::detail;
-namespace request_detail = emel::diarization::request::detail;
+namespace request_detail = emel::diarization::sortformer::request::detail;
 
 }  // namespace
 
