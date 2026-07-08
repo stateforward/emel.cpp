@@ -1,5 +1,7 @@
 #pragma once
 
+#include <cstdint>
+
 #include "emel/memory/hybrid/errors.hpp"
 #include "emel/memory/kv/sm.hpp"
 #include "emel/memory/recurrent/sm.hpp"
@@ -25,6 +27,11 @@ struct kv_binding {
   kv_free_sequence_dispatch_fn * dispatch_free_sequence = nullptr;
   kv_rollback_slots_dispatch_fn * dispatch_rollback_slots = nullptr;
   kv_capture_view_dispatch_fn * dispatch_capture_view = nullptr;
+};
+
+enum class kv_cache_route : uint8_t {
+  owned,
+  bound,
 };
 
 template <class actor_type>
@@ -175,6 +182,10 @@ inline bool kv_binding_complete(const kv_binding & binding) noexcept {
          binding.dispatch_capture_view != nullptr;
 }
 
+inline kv_cache_route route_for_kv_binding(const kv_binding & binding) noexcept {
+  return kv_binding_empty(binding) ? kv_cache_route::owned : kv_cache_route::bound;
+}
+
 inline kv_binding bind_or_default_kv_actor(const kv_binding & binding,
                                            emel::memory::kv::sm & fallback) noexcept {
   return kv_binding_complete(binding)
@@ -187,10 +198,15 @@ inline kv_binding bind_or_default_kv_actor(const kv_binding & binding,
 namespace emel::memory::hybrid::action {
 
 struct context {
-  context() : kv(), recurrent(), kv_actor(emel::memory::hybrid::bind_kv_actor(kv)) {}
+  context()
+      : kv(),
+        recurrent(),
+        kv_route(emel::memory::hybrid::kv_cache_route::owned),
+        kv_actor(emel::memory::hybrid::bind_kv_actor(kv)) {}
   explicit context(const emel::memory::hybrid::kv_binding & binding)
       : kv(),
         recurrent(),
+        kv_route(emel::memory::hybrid::route_for_kv_binding(binding)),
         kv_actor(emel::memory::hybrid::bind_or_default_kv_actor(binding, kv)) {}
 
   context(const context &) = delete;
@@ -200,6 +216,8 @@ struct context {
 
   emel::memory::kv::sm kv = {};
   emel::memory::recurrent::sm recurrent = {};
+  emel::memory::hybrid::kv_cache_route kv_route =
+      emel::memory::hybrid::kv_cache_route::owned;
   emel::memory::hybrid::kv_binding kv_actor = {};
 };
 

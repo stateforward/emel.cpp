@@ -14,13 +14,27 @@ using namespace emel::memory::hybrid;
 
 struct copy_probe {
   bool succeed = true;
-  int32_t callback_error = static_cast<int32_t>(emel::error::cast(emel::memory::hybrid::error::none));
+  int32_t callback_error =
+      static_cast<int32_t>(emel::error::cast(emel::memory::hybrid::error::none));
+};
+
+struct route_probe_sm : hybrid_sm {
+  using hybrid_sm::hybrid_sm;
+
+  void reject_bound_allocate_slots() noexcept {
+    this->context_.kv_actor.dispatch_allocate_slots =
+        &emel::memory::hybrid::reject_kv_allocate_slots;
+  }
 };
 
 bool copy_state_cb(const int32_t, const int32_t, void * user_data, int32_t * error_out) {
   const auto * probe = static_cast<const copy_probe *>(user_data);
   if (error_out != nullptr) {
-    *error_out = probe != nullptr ? probe->callback_error : static_cast<int32_t>(emel::error::cast(emel::memory::hybrid::error::backend_error));
+    *error_out =
+        probe != nullptr
+            ? probe->callback_error
+            : static_cast<int32_t>(
+                  emel::error::cast(emel::memory::hybrid::error::backend_error));
   }
   return probe != nullptr && probe->succeed;
 }
@@ -58,6 +72,36 @@ TEST_CASE("memory_hybrid_uses_injected_kv_actor") {
   CHECK(kv.capture_view_count == 1);
   CHECK(view.is_sequence_active(0));
   CHECK(view.lookup_kv_block(0, 0) >= 0);
+}
+
+TEST_CASE("memory_hybrid_owned_kv_allocate_slots_uses_direct_dispatch") {
+  route_probe_sm machine{};
+  int32_t err = static_cast<int32_t>(emel::error::cast(emel::memory::hybrid::error::none));
+  int32_t block_count = 0;
+
+  REQUIRE(machine.process_event(event::reserve{
+    .max_sequences = 4,
+    .max_blocks = 4,
+    .block_tokens = 2,
+    .error_out = &err,
+  }));
+  REQUIRE(machine.process_event(event::allocate_sequence{
+    .seq_id = 0,
+    .error_out = &err,
+  }));
+
+  machine.reject_bound_allocate_slots();
+
+  REQUIRE(machine.process_event(event::allocate_slots{
+    .seq_id = 0,
+    .token_count = 2,
+    .block_count_out = &block_count,
+    .error_out = &err,
+  }));
+
+  CHECK(err == static_cast<int32_t>(emel::error::cast(emel::memory::hybrid::error::none)));
+  CHECK(block_count == 1);
+  CHECK(machine.view().lookup_kv_block(0, 0) >= 0);
 }
 
 TEST_CASE("memory_hybrid_rejects_partial_kv_actor_binding") {

@@ -150,7 +150,11 @@ struct model {
       , sml::state<allocate_slots_kv> <= sml::state<ready>
           + sml::event<event::allocate_slots_runtime> / action::begin_allocate_slots
       , sml::state<allocate_slots_kv_decision> <= sml::state<allocate_slots_kv>
-          + sml::completion<event::allocate_slots_runtime> / action::exec_allocate_slots_kv
+          + sml::completion<event::allocate_slots_runtime> [ guard::guard_owned_kv_cache{} ]
+          / action::effect_allocate_slots_owned_kv
+      , sml::state<allocate_slots_kv_decision> <= sml::state<allocate_slots_kv>
+          + sml::completion<event::allocate_slots_runtime> [ guard::guard_bound_kv_cache{} ]
+          / action::effect_allocate_slots_bound_kv
       , sml::state<allocate_slots_recurrent> <= sml::state<allocate_slots_kv_decision>
           + sml::completion<event::allocate_slots_runtime> [ guard::kv_accepted{} ]
       , sml::state<out_of_memory> <= sml::state<allocate_slots_kv_decision>

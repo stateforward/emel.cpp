@@ -1,10 +1,25 @@
 #pragma once
 
 #include "emel/emel.h"
+#include "emel/memory/hybrid/context.hpp"
 #include "emel/memory/hybrid/detail.hpp"
 #include "emel/memory/hybrid/events.hpp"
 
 namespace emel::memory::hybrid::guard {
+
+struct guard_owned_kv_cache {
+  bool operator()(const event::allocate_slots_runtime &,
+                  const action::context & ctx) const noexcept {
+    return ctx.kv_route == kv_cache_route::owned;
+  }
+};
+
+struct guard_bound_kv_cache {
+  bool operator()(const event::allocate_slots_runtime & ev,
+                  const action::context & ctx) const noexcept {
+    return !guard_owned_kv_cache{}(ev, ctx);
+  }
+};
 
 struct kv_accepted {
   template <class runtime_event_type>

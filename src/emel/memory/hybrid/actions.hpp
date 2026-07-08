@@ -181,7 +181,22 @@ struct exec_allocate_sequence_rollback_kv {
   }
 };
 
-struct exec_allocate_slots_kv {
+struct effect_allocate_slots_owned_kv {
+  void operator()(const event::allocate_slots_runtime & ev, context & ctx) const noexcept {
+    ev.ctx.kv_error = static_cast<int32_t>(emel::error::cast(error::none));
+    ev.ctx.kv_block_count = 0;
+    ev.ctx.kv_accepted = ctx.kv.process_event(event::allocate_slots{
+      .seq_id = ev.request.seq_id,
+      .token_count = ev.request.token_count,
+      .block_count_out = &ev.ctx.kv_block_count,
+      .error_out = &ev.ctx.kv_error,
+      .copy_block = ev.request.copy_block,
+      .copy_block_user_data = ev.request.copy_block_user_data,
+    });
+  }
+};
+
+struct effect_allocate_slots_bound_kv {
   void operator()(const event::allocate_slots_runtime & ev, context & ctx) const noexcept {
     ev.ctx.kv_error = static_cast<int32_t>(emel::error::cast(error::none));
     ev.ctx.kv_block_count = 0;
@@ -440,7 +455,8 @@ inline constexpr exec_reserve_recurrent exec_reserve_recurrent{};
 inline constexpr exec_allocate_sequence_kv exec_allocate_sequence_kv{};
 inline constexpr exec_allocate_sequence_recurrent exec_allocate_sequence_recurrent{};
 inline constexpr exec_allocate_sequence_rollback_kv exec_allocate_sequence_rollback_kv{};
-inline constexpr exec_allocate_slots_kv exec_allocate_slots_kv{};
+inline constexpr effect_allocate_slots_owned_kv effect_allocate_slots_owned_kv{};
+inline constexpr effect_allocate_slots_bound_kv effect_allocate_slots_bound_kv{};
 inline constexpr exec_allocate_slots_recurrent exec_allocate_slots_recurrent{};
 inline constexpr exec_allocate_slots_rollback_kv exec_allocate_slots_rollback_kv{};
 inline constexpr exec_branch_sequence_kv exec_branch_sequence_kv{};
