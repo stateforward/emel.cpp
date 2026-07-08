@@ -22,7 +22,7 @@
 #include "emel/kernel/events.hpp"
 #include "emel/model/data.hpp"
 #include "emel/model/detail.hpp"
-#include "emel/model/llama/detail.hpp"
+#include "emel/model/transformer/any.hpp"
 #include "emel/model/loader/errors.hpp"
 #include "emel/graph/tensor/errors.hpp"
 #include "emel/graph/tensor/events.hpp"
@@ -807,9 +807,9 @@ emel::model::data::tensor_record * find_tensor(prepared_model & prepared,
   return nullptr;
 }
 
-const emel::model::llama::detail::quantized_stage_audit & find_stage_audit(
-    const emel::model::llama::detail::quantized_path_audit & audit,
-    const emel::model::llama::detail::quantized_stage_family family) {
+const emel::model::transformer::quantized_stage_audit & find_stage_audit(
+    const emel::model::transformer::quantized_path_audit & audit,
+    const emel::model::transformer::quantized_stage_family family) {
   for (const auto & stage : audit.stages) {
     if (stage.family == family) {
       return stage;
@@ -1392,34 +1392,34 @@ TEST_CASE("generator_quantized_path_audit_classifies_canonical_stage_families") 
   find_tensor(*prepared, "blk.0.attn_q.weight")->type =
       static_cast<int32_t>(emel::kernel::event::dtype::q6_k);
 
-  emel::model::llama::detail::execution_view execution{};
-  REQUIRE(emel::model::llama::detail::build_execution_view(stabilize_model(*prepared), execution) ==
+  emel::model::transformer::execution_view execution{};
+  REQUIRE(emel::model::transformer::build_execution_view(stabilize_model(*prepared), execution) ==
           emel::error::cast(emel::model::loader::error::none));
 
-  const auto audit = emel::model::llama::detail::build_quantized_path_audit(execution);
+  const auto audit = emel::model::transformer::build_quantized_path_audit(execution);
   const auto & token_embedding = find_stage_audit(
-      audit, emel::model::llama::detail::quantized_stage_family::token_embedding);
+      audit, emel::model::transformer::quantized_stage_family::token_embedding);
   const auto & output_norm = find_stage_audit(
-      audit, emel::model::llama::detail::quantized_stage_family::output_norm);
+      audit, emel::model::transformer::quantized_stage_family::output_norm);
   const auto & output = find_stage_audit(
-      audit, emel::model::llama::detail::quantized_stage_family::output);
+      audit, emel::model::transformer::quantized_stage_family::output);
   const auto & attention_q = find_stage_audit(
-      audit, emel::model::llama::detail::quantized_stage_family::attention_q);
+      audit, emel::model::transformer::quantized_stage_family::attention_q);
   const auto & feed_forward_norm = find_stage_audit(
-      audit, emel::model::llama::detail::quantized_stage_family::feed_forward_norm);
+      audit, emel::model::transformer::quantized_stage_family::feed_forward_norm);
 
   CHECK(token_embedding.contract ==
-        emel::model::llama::detail::quantized_contract_kind::
+        emel::model::transformer::quantized_contract_kind::
             approved_dense_f32_by_contract);
   CHECK(output_norm.contract ==
-        emel::model::llama::detail::quantized_contract_kind::
+        emel::model::transformer::quantized_contract_kind::
             approved_dense_f32_by_contract);
   CHECK(output.contract ==
-        emel::model::llama::detail::quantized_contract_kind::native_quantized);
+        emel::model::transformer::quantized_contract_kind::native_quantized);
   CHECK(attention_q.contract ==
-        emel::model::llama::detail::quantized_contract_kind::native_quantized);
+        emel::model::transformer::quantized_contract_kind::native_quantized);
   CHECK(feed_forward_norm.contract ==
-        emel::model::llama::detail::quantized_contract_kind::
+        emel::model::transformer::quantized_contract_kind::
             approved_dense_f32_by_contract);
 }
 
@@ -1428,34 +1428,34 @@ TEST_CASE("generator_qwen3_quantized_path_audit_publishes_explicit_norm_stage_fa
   build_qwen3_quantized_contract_prepared_model(*prepared, true, true);
   apply_qwen3_quantized_contract_tensor_types(*prepared);
 
-  emel::model::llama::detail::execution_view execution{};
-  REQUIRE(emel::model::llama::detail::build_execution_view(stabilize_model(*prepared), execution) ==
+  emel::model::transformer::execution_view execution{};
+  REQUIRE(emel::model::transformer::build_execution_view(stabilize_model(*prepared), execution) ==
           emel::error::cast(emel::model::loader::error::none));
 
-  const auto audit = emel::model::llama::detail::build_quantized_path_audit(execution);
+  const auto audit = emel::model::transformer::build_quantized_path_audit(execution);
   const auto & attention_q_norm = find_stage_audit(
-      audit, emel::model::llama::detail::quantized_stage_family::attention_q_norm);
+      audit, emel::model::transformer::quantized_stage_family::attention_q_norm);
   const auto & attention_k_norm = find_stage_audit(
-      audit, emel::model::llama::detail::quantized_stage_family::attention_k_norm);
+      audit, emel::model::transformer::quantized_stage_family::attention_k_norm);
   const auto & attention_q = find_stage_audit(
-      audit, emel::model::llama::detail::quantized_stage_family::attention_q);
+      audit, emel::model::transformer::quantized_stage_family::attention_q);
 
   CHECK(attention_q_norm.contract ==
-        emel::model::llama::detail::quantized_contract_kind::
+        emel::model::transformer::quantized_contract_kind::
             approved_dense_f32_by_contract);
   CHECK(attention_k_norm.contract ==
-        emel::model::llama::detail::quantized_contract_kind::
+        emel::model::transformer::quantized_contract_kind::
             approved_dense_f32_by_contract);
   CHECK(attention_q.contract ==
-        emel::model::llama::detail::quantized_contract_kind::native_quantized);
+        emel::model::transformer::quantized_contract_kind::native_quantized);
 }
 
 TEST_CASE("generator_qwen3_quantized_path_audit_requires_attention_q_norm_tensor") {
   auto prepared = std::make_unique<prepared_model>();
   build_qwen3_quantized_contract_prepared_model(*prepared, false, true);
 
-  emel::model::llama::detail::execution_view execution{};
-  CHECK(emel::model::llama::detail::build_execution_view(stabilize_model(*prepared), execution) ==
+  emel::model::transformer::execution_view execution{};
+  CHECK(emel::model::transformer::build_execution_view(stabilize_model(*prepared), execution) ==
         emel::error::cast(emel::model::loader::error::model_invalid));
 }
 
@@ -1463,8 +1463,8 @@ TEST_CASE("generator_qwen3_quantized_path_audit_requires_attention_k_norm_tensor
   auto prepared = std::make_unique<prepared_model>();
   build_qwen3_quantized_contract_prepared_model(*prepared, true, false);
 
-  emel::model::llama::detail::execution_view execution{};
-  CHECK(emel::model::llama::detail::build_execution_view(stabilize_model(*prepared), execution) ==
+  emel::model::transformer::execution_view execution{};
+  CHECK(emel::model::transformer::build_execution_view(stabilize_model(*prepared), execution) ==
         emel::error::cast(emel::model::loader::error::model_invalid));
 }
 
@@ -1475,17 +1475,17 @@ TEST_CASE("generator_quantized_path_audit_marks_unsupported_quantized_stage_no_c
   REQUIRE(find_tensor(*prepared, "blk.0.attn_q.weight") != nullptr);
   find_tensor(*prepared, "blk.0.attn_q.weight")->type = emel::kernel::detail::dtype_q5_1;
 
-  emel::model::llama::detail::execution_view execution{};
-  REQUIRE(emel::model::llama::detail::build_execution_view(stabilize_model(*prepared), execution) ==
+  emel::model::transformer::execution_view execution{};
+  REQUIRE(emel::model::transformer::build_execution_view(stabilize_model(*prepared), execution) ==
           emel::error::cast(emel::model::loader::error::none));
 
-  const auto audit = emel::model::llama::detail::build_quantized_path_audit(execution);
+  const auto audit = emel::model::transformer::build_quantized_path_audit(execution);
   const auto & attention_q = find_stage_audit(
-      audit, emel::model::llama::detail::quantized_stage_family::attention_q);
+      audit, emel::model::transformer::quantized_stage_family::attention_q);
 
   CHECK(attention_q.tensor_type == emel::kernel::detail::dtype_q5_1);
   CHECK(attention_q.contract ==
-        emel::model::llama::detail::quantized_contract_kind::explicit_no_claim);
+        emel::model::transformer::quantized_contract_kind::explicit_no_claim);
   CHECK(attention_q.consistent_across_layers);
 }
 
@@ -1501,25 +1501,25 @@ TEST_CASE("generator_quantized_path_audit_marks_nonvector_f32_stage_disallowed_f
   find_tensor(*prepared, "output.weight")->type = emel::kernel::detail::dtype_f32;
   find_tensor(*prepared, "blk.0.attn_q.weight")->type = emel::kernel::detail::dtype_f32;
 
-  emel::model::llama::detail::execution_view execution{};
-  REQUIRE(emel::model::llama::detail::build_execution_view(stabilize_model(*prepared), execution) ==
+  emel::model::transformer::execution_view execution{};
+  REQUIRE(emel::model::transformer::build_execution_view(stabilize_model(*prepared), execution) ==
           emel::error::cast(emel::model::loader::error::none));
 
-  const auto audit = emel::model::llama::detail::build_quantized_path_audit(execution);
+  const auto audit = emel::model::transformer::build_quantized_path_audit(execution);
   const auto & token_embedding = find_stage_audit(
-      audit, emel::model::llama::detail::quantized_stage_family::token_embedding);
+      audit, emel::model::transformer::quantized_stage_family::token_embedding);
   const auto & output = find_stage_audit(
-      audit, emel::model::llama::detail::quantized_stage_family::output);
+      audit, emel::model::transformer::quantized_stage_family::output);
   const auto & attention_q = find_stage_audit(
-      audit, emel::model::llama::detail::quantized_stage_family::attention_q);
+      audit, emel::model::transformer::quantized_stage_family::attention_q);
 
   CHECK(token_embedding.contract ==
-        emel::model::llama::detail::quantized_contract_kind::
+        emel::model::transformer::quantized_contract_kind::
             approved_dense_f32_by_contract);
   CHECK(output.contract ==
-        emel::model::llama::detail::quantized_contract_kind::disallowed_fallback);
+        emel::model::transformer::quantized_contract_kind::disallowed_fallback);
   CHECK(attention_q.contract ==
-        emel::model::llama::detail::quantized_contract_kind::disallowed_fallback);
+        emel::model::transformer::quantized_contract_kind::disallowed_fallback);
 }
 
 TEST_CASE("generator_lfm2_quantized_path_audit_accepts_hybrid_native_quantized_mix") {
@@ -1555,31 +1555,31 @@ TEST_CASE("generator_lfm2_quantized_path_audit_accepts_hybrid_native_quantized_m
   find_tensor(*prepared, "blk.2.attn_output.weight")->type =
       static_cast<int32_t>(emel::kernel::event::dtype::q4_k);
 
-  emel::model::llama::detail::execution_view execution{};
-  REQUIRE(emel::model::llama::detail::build_execution_view(stabilize_model(*prepared), execution) ==
+  emel::model::transformer::execution_view execution{};
+  REQUIRE(emel::model::transformer::build_execution_view(stabilize_model(*prepared), execution) ==
           emel::error::cast(emel::model::loader::error::none));
 
-  const auto audit = emel::model::llama::detail::build_quantized_path_audit(execution);
+  const auto audit = emel::model::transformer::build_quantized_path_audit(execution);
   const auto & token_embedding = find_stage_audit(
-      audit, emel::model::llama::detail::quantized_stage_family::token_embedding);
+      audit, emel::model::transformer::quantized_stage_family::token_embedding);
   const auto & attention_q = find_stage_audit(
-      audit, emel::model::llama::detail::quantized_stage_family::attention_q);
+      audit, emel::model::transformer::quantized_stage_family::attention_q);
   const auto & attention_q_norm = find_stage_audit(
-      audit, emel::model::llama::detail::quantized_stage_family::attention_q_norm);
+      audit, emel::model::transformer::quantized_stage_family::attention_q_norm);
   const auto & feed_forward_down = find_stage_audit(
-      audit, emel::model::llama::detail::quantized_stage_family::feed_forward_down);
+      audit, emel::model::transformer::quantized_stage_family::feed_forward_down);
 
   CHECK(token_embedding.contract ==
-        emel::model::llama::detail::quantized_contract_kind::
+        emel::model::transformer::quantized_contract_kind::
             approved_dense_f32_by_contract);
   CHECK(attention_q.contract ==
-        emel::model::llama::detail::quantized_contract_kind::native_quantized);
+        emel::model::transformer::quantized_contract_kind::native_quantized);
   CHECK(attention_q.consistent_across_layers);
   CHECK(attention_q_norm.contract ==
-        emel::model::llama::detail::quantized_contract_kind::
+        emel::model::transformer::quantized_contract_kind::
             approved_dense_f32_by_contract);
   CHECK(feed_forward_down.contract ==
-        emel::model::llama::detail::quantized_contract_kind::native_quantized);
+        emel::model::transformer::quantized_contract_kind::native_quantized);
   CHECK_FALSE(feed_forward_down.consistent_across_layers);
 }
 

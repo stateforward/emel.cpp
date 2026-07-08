@@ -1,6 +1,7 @@
 #include "emel/model/qwen3/detail.hpp"
 
-#include "emel/model/llama/detail.hpp"
+#include "emel/model/loader/errors.hpp"
+#include "emel/model/transformer/any.hpp"
 
 namespace emel::model::qwen3::detail {
 
@@ -38,8 +39,22 @@ bool load_hparams(const emel::model::detail::hparam_loader & loader,
 }
 
 emel::error::type validate_data(const emel::model::data & model_data) noexcept {
-  emel::model::llama::detail::execution_view view = {};
-  return emel::model::llama::detail::build_execution_view(model_data, view);
+  emel::model::transformer::execution_view view = {};
+  const auto err = emel::model::transformer::build_execution_view(model_data, view);
+  if (err != emel::error::cast(emel::model::loader::error::none)) {
+    return err;
+  }
+
+  for (int32_t block_index = 0; block_index < view.block_count; ++block_index) {
+    if (!emel::model::transformer::require_block_tensor(
+            model_data, block_index, "attn_q_norm.weight") ||
+        !emel::model::transformer::require_block_tensor(
+            model_data, block_index, "attn_k_norm.weight")) {
+      return emel::error::cast(emel::model::loader::error::model_invalid);
+    }
+  }
+
+  return emel::error::cast(emel::model::loader::error::none);
 }
 
 }  // namespace emel::model::qwen3::detail

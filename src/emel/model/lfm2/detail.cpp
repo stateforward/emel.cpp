@@ -4,7 +4,7 @@
 #include <span>
 
 #include "emel/model/detail.hpp"
-#include "emel/model/llama/detail.hpp"
+#include "emel/model/transformer/any.hpp"
 #include "emel/model/loader/errors.hpp"
 
 namespace emel::model::lfm2::detail {
@@ -116,22 +116,22 @@ emel::error::type validate_contract(const emel::model::data & model_data,
             model_data.params.shortconv_l_cache > 0 &&
             model_data.params.rope_freq_base > 0.0f;
   if (!metadata_ok ||
-      !emel::model::llama::detail::has_tensor_named(model_data, k_token_embedding_name) ||
-      !emel::model::llama::detail::has_tensor_named(model_data, k_output_norm_name)) {
+      !emel::model::transformer::has_tensor_named(model_data, k_token_embedding_name) ||
+      !emel::model::transformer::has_tensor_named(model_data, k_output_norm_name)) {
     return emel::error::cast(emel::model::loader::error::model_invalid);
   }
 
   for (int32_t block_index = 0; block_index < model_data.n_layers; ++block_index) {
     const bool common_ok =
-        emel::model::llama::detail::require_block_tensor(
+        emel::model::transformer::require_block_tensor(
             model_data, block_index, "attn_norm.weight") &&
-        emel::model::llama::detail::require_block_tensor(
+        emel::model::transformer::require_block_tensor(
             model_data, block_index, "ffn_norm.weight") &&
-        emel::model::llama::detail::require_block_tensor(
+        emel::model::transformer::require_block_tensor(
             model_data, block_index, "ffn_gate.weight") &&
-        emel::model::llama::detail::require_block_tensor(
+        emel::model::transformer::require_block_tensor(
             model_data, block_index, "ffn_down.weight") &&
-        emel::model::llama::detail::require_block_tensor(
+        emel::model::transformer::require_block_tensor(
             model_data, block_index, "ffn_up.weight");
     if (!common_ok) {
       return emel::error::cast(emel::model::loader::error::model_invalid);
@@ -140,41 +140,41 @@ emel::error::type validate_contract(const emel::model::data & model_data,
     const bool attention_layer = is_attention_layer(model_data, block_index);
     const bool hybrid_ok =
         attention_layer
-            ? emel::model::llama::detail::require_block_tensor(
+            ? emel::model::transformer::require_block_tensor(
                   model_data, block_index, "attn_q.weight") &&
-                  emel::model::llama::detail::require_block_tensor(
+                  emel::model::transformer::require_block_tensor(
                       model_data, block_index, "attn_k.weight") &&
-                  emel::model::llama::detail::require_block_tensor(
+                  emel::model::transformer::require_block_tensor(
                       model_data, block_index, "attn_v.weight") &&
-                  emel::model::llama::detail::require_block_tensor(
+                  emel::model::transformer::require_block_tensor(
                       model_data, block_index, "attn_q_norm.weight") &&
-                  emel::model::llama::detail::require_block_tensor(
+                  emel::model::transformer::require_block_tensor(
                       model_data, block_index, "attn_k_norm.weight") &&
-                  emel::model::llama::detail::require_block_tensor(
+                  emel::model::transformer::require_block_tensor(
                       model_data, block_index, "attn_output.weight") &&
-                  emel::model::llama::detail::reject_block_tensor(
+                  emel::model::transformer::reject_block_tensor(
                       model_data, block_index, "shortconv.conv.weight") &&
-                  emel::model::llama::detail::reject_block_tensor(
+                  emel::model::transformer::reject_block_tensor(
                       model_data, block_index, "shortconv.in_proj.weight") &&
-                  emel::model::llama::detail::reject_block_tensor(
+                  emel::model::transformer::reject_block_tensor(
                       model_data, block_index, "shortconv.out_proj.weight")
-            : emel::model::llama::detail::require_block_tensor(
+            : emel::model::transformer::require_block_tensor(
                   model_data, block_index, "shortconv.conv.weight") &&
-                  emel::model::llama::detail::require_block_tensor(
+                  emel::model::transformer::require_block_tensor(
                       model_data, block_index, "shortconv.in_proj.weight") &&
-                  emel::model::llama::detail::require_block_tensor(
+                  emel::model::transformer::require_block_tensor(
                       model_data, block_index, "shortconv.out_proj.weight") &&
-                  emel::model::llama::detail::reject_block_tensor(
+                  emel::model::transformer::reject_block_tensor(
                       model_data, block_index, "attn_q.weight") &&
-                  emel::model::llama::detail::reject_block_tensor(
+                  emel::model::transformer::reject_block_tensor(
                       model_data, block_index, "attn_k.weight") &&
-                  emel::model::llama::detail::reject_block_tensor(
+                  emel::model::transformer::reject_block_tensor(
                       model_data, block_index, "attn_v.weight") &&
-                  emel::model::llama::detail::reject_block_tensor(
+                  emel::model::transformer::reject_block_tensor(
                       model_data, block_index, "attn_q_norm.weight") &&
-                  emel::model::llama::detail::reject_block_tensor(
+                  emel::model::transformer::reject_block_tensor(
                       model_data, block_index, "attn_k_norm.weight") &&
-                  emel::model::llama::detail::reject_block_tensor(
+                  emel::model::transformer::reject_block_tensor(
                       model_data, block_index, "attn_output.weight");
     if (!hybrid_ok) {
       return emel::error::cast(emel::model::loader::error::model_invalid);
