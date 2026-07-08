@@ -24,4 +24,14 @@ inline uint64_t required_encoder_output_floats(
   return detail::required_encoder_output_floats(sample_count);
 }
 
+inline uint64_t
+mel_frame_count_for_samples(const uint64_t sample_count) noexcept {
+  return detail::mel_frame_count_for_samples(sample_count);
+}
+
+inline uint64_t
+encoder_frame_count_for_mel_frames(const uint64_t mel_frames) noexcept {
+  return detail::encoder_frame_count_for_mel_frames(mel_frames);
+}
+
 } // namespace emel::speech::encoder::whisper

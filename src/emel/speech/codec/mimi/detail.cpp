@@ -5,7 +5,6 @@
 #include <cstring>
 
 #include "emel/kernel/detail.hpp"
-#include "emel/model/moshi/detail.hpp"
 
 namespace emel::speech::codec::mimi::detail {
 
