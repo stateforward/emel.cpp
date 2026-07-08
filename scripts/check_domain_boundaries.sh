@@ -137,7 +137,7 @@ check_no_matches "Whisper model binding leaked into speech encoder/decoder runti
   src/emel/speech/encoder src/emel/speech/decoder
 
 check_no_matches "Moshi model detail leaked into Mimi codec" \
-  'emel/model/moshi/detail\.hpp|model::moshi::detail' \
+  'emel/model/moshi/detail\.hpp|model::moshi([[:space:]]*(;|$)|::detail)' \
   src/emel/speech/codec/mimi
 
 check_absent_path "retired model weight-loader owner path" \
