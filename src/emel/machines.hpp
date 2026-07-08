@@ -1,9 +1,9 @@
 #pragma once
 
 #include "emel/batch/planner/sm.hpp"
-#include "emel/diarization/request/sm.hpp"
 #include "emel/diarization/sortformer/executor/sm.hpp"
 #include "emel/diarization/sortformer/pipeline/sm.hpp"
+#include "emel/diarization/sortformer/request/sm.hpp"
 #include "emel/embeddings/generator/sm.hpp"
 #include "emel/gguf/loader/sm.hpp"
 #include "emel/graph/processor/sm.hpp"
@@ -30,9 +30,9 @@ namespace emel {
 using ComputeExecutor = emel::graph::processor::sm;
 using Conditioner = emel::text::conditioner::sm;
 using Detokenizer = emel::text::detokenizer::sm;
-using DiarizationRequest = emel::diarization::request::sm;
 using SortformerExecutor = emel::diarization::sortformer::executor::sm;
 using SortformerPipeline = emel::diarization::sortformer::pipeline::sm;
+using SortformerRequest = emel::diarization::sortformer::request::sm;
 using EmbeddingsGenerator = emel::embeddings::generator::sm;
 using MimiCodec = emel::speech::codec::mimi::sm;
 using EncoderAny = emel::text::encoders::any;

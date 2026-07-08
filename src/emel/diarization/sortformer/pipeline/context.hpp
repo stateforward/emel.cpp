@@ -2,7 +2,7 @@
 
 #include <array>
 
-#include "emel/diarization/request/sm.hpp"
+#include "emel/diarization/sortformer/request/sm.hpp"
 #include "emel/diarization/sortformer/encoder/detail.hpp"
 #include "emel/diarization/sortformer/executor/sm.hpp"
 #include "emel/diarization/sortformer/modules/detail.hpp"
@@ -11,7 +11,7 @@
 namespace emel::diarization::sortformer::pipeline::action {
 
 struct context {
-  emel::diarization::request::sm request = {};
+  emel::diarization::sortformer::request::sm request = {};
   emel::diarization::sortformer::executor::sm executor = {};
   emel::diarization::sortformer::encoder::detail::contract encoder = {};
   emel::diarization::sortformer::modules::detail::contract modules = {};

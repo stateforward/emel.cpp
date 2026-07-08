@@ -13,7 +13,7 @@ namespace {
 namespace fixture = emel::bench::diarization::sortformer_fixture;
 namespace pipeline = emel::diarization::sortformer::pipeline;
 namespace pipeline_detail = emel::diarization::sortformer::pipeline::detail;
-namespace request_detail = emel::diarization::request::detail;
+namespace request_detail = emel::diarization::sortformer::request::detail;
 
 }  // namespace
 
@@ -97,14 +97,11 @@ TEST_CASE("sortformer pipeline rejects insufficient probability output capacity"
 }
 
 TEST_CASE("sortformer pipeline reports encoder kernel failures before executor") {
-  auto model = std::make_unique<fixture::model_fixture>();
   fixture::run_result result{};
   std::array<float, 1> pcm_stub = {};
+  emel::model::sortformer::detail::execution_contract contract = {};
 
-  REQUIRE(fixture::prepare(*model));
-  REQUIRE(model->ready);
-
-  auto request = fixture::make_run_event(model->contract,
+  auto request = fixture::make_run_event(contract,
                                          pcm_stub,
                                          request_detail::k_sample_rate,
                                          result.probabilities,
@@ -119,26 +116,22 @@ TEST_CASE("sortformer pipeline reports encoder kernel failures before executor")
 
   pipeline::action::effect_begin_run(runtime_ev, ctx);
   REQUIRE(runtime_ctx.err == pipeline_detail::to_error(pipeline::error::none));
-  pipeline::action::effect_bind_encoder(runtime_ev, ctx);
-  ctx.encoder.pre[0].tensor = nullptr;
   pipeline::action::effect_compute_encoder_frames(runtime_ev, ctx);
 
   CHECK(runtime_ctx.err == pipeline_detail::to_error(pipeline::error::kernel));
+  CHECK(pipeline::guard::guard_encoder_compute_failed{}(runtime_ev, ctx));
   CHECK(result.frame_count == 0);
   CHECK(result.probability_count == 0);
   CHECK(result.segment_count == 0);
 }
 
 TEST_CASE("sortformer pipeline reports probability kernel failures before decode") {
-  auto model = std::make_unique<fixture::model_fixture>();
   fixture::run_result result{};
   std::array<float, 1> pcm_stub = {};
+  emel::model::sortformer::detail::execution_contract contract = {};
   std::fill(result.probabilities.begin(), result.probabilities.end(), -3.0f);
 
-  REQUIRE(fixture::prepare(*model));
-  REQUIRE(model->ready);
-
-  auto request = fixture::make_run_event(model->contract,
+  auto request = fixture::make_run_event(contract,
                                          pcm_stub,
                                          request_detail::k_sample_rate,
                                          result.probabilities,
@@ -152,11 +145,10 @@ TEST_CASE("sortformer pipeline reports probability kernel failures before decode
   pipeline::action::context ctx = {};
 
   pipeline::action::effect_begin_run(runtime_ev, ctx);
-  pipeline::action::effect_bind_modules(runtime_ev, ctx);
-  ctx.modules.speaker_hidden_to_speaker_weight.tensor = nullptr;
   pipeline::action::effect_compute_probabilities(runtime_ev, ctx);
 
   CHECK(runtime_ctx.err == pipeline_detail::to_error(pipeline::error::kernel));
+  CHECK(pipeline::guard::guard_probability_compute_failed{}(runtime_ev, ctx));
   CHECK(result.frame_count == 0);
   CHECK(result.probability_count == 0);
   CHECK(result.segment_count == 0);

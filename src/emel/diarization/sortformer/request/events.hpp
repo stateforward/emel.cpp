@@ -4,18 +4,18 @@
 #include <span>
 
 #include "emel/callback.hpp"
-#include "emel/diarization/request/errors.hpp"
+#include "emel/diarization/sortformer/request/errors.hpp"
 #include "emel/error/error.hpp"
 #include "emel/model/sortformer/detail.hpp"
 
-namespace emel::diarization::request::events {
+namespace emel::diarization::sortformer::request::events {
 
 struct prepare_done;
 struct prepare_error;
 
-}  // namespace emel::diarization::request::events
+}  // namespace emel::diarization::sortformer::request::events
 
-namespace emel::diarization::request::event {
+namespace emel::diarization::sortformer::request::event {
 
 struct prepare {
   prepare(const emel::model::sortformer::detail::execution_contract & contract_ref,
@@ -54,9 +54,9 @@ struct prepare_run {
   prepare_ctx & ctx;
 };
 
-}  // namespace emel::diarization::request::event
+}  // namespace emel::diarization::sortformer::request::event
 
-namespace emel::diarization::request::events {
+namespace emel::diarization::sortformer::request::events {
 
 struct prepare_done {
   const event::prepare * request = nullptr;
@@ -69,4 +69,4 @@ struct prepare_error {
   emel::error::type err = emel::error::cast(error::none);
 };
 
-}  // namespace emel::diarization::request::events
+}  // namespace emel::diarization::sortformer::request::events

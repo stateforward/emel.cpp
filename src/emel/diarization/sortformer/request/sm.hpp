@@ -3,13 +3,13 @@
 
 #include <stateforward/sml.hpp>
 
-#include "emel/diarization/request/actions.hpp"
-#include "emel/diarization/request/context.hpp"
-#include "emel/diarization/request/events.hpp"
-#include "emel/diarization/request/guards.hpp"
+#include "emel/diarization/sortformer/request/actions.hpp"
+#include "emel/diarization/sortformer/request/context.hpp"
+#include "emel/diarization/sortformer/request/events.hpp"
+#include "emel/diarization/sortformer/request/guards.hpp"
 #include "emel/sm.hpp"
 
-namespace emel::diarization::request {
+namespace emel::diarization::sortformer::request {
 
 struct state_ready {};
 struct state_model_contract_decision {};
@@ -149,4 +149,4 @@ struct sm : public emel::sm<model, action::context> {
 
 using Request = sm;
 
-}  // namespace emel::diarization::request
+}  // namespace emel::diarization::sortformer::request
