@@ -62,6 +62,22 @@ check_no_matches "forbidden model-family runtime roots" \
   'emel/whisper|namespace emel::whisper|kernel/whisper|kernel::whisper|model/whisper/(runtime|inference|encoder|decoder)|model::whisper::(runtime|inference|encoder|decoder)|speech/asr/whisper|speech::asr::whisper|speech/whisper|speech::whisper|recognizer/detail/whisper|recognizer::detail::whisper' \
   src tests tools CMakeLists.txt
 
+check_no_matches "qwen3 model code depends on sibling model-family detail" \
+  'emel/model/llama/(detail|any)\.hpp|emel/model/(gemma4|lfm2)/detail\.hpp|emel::model::llama::|emel::model::(gemma4|lfm2)::detail::' \
+  src/emel/model/qwen3
+
+check_no_matches "gemma4 model code depends on sibling model-family detail" \
+  'emel/model/llama/(detail|any)\.hpp|emel/model/(qwen3|lfm2)/detail\.hpp|emel::model::llama::|emel::model::(qwen3|lfm2)::detail::' \
+  src/emel/model/gemma4
+
+check_no_matches "lfm2 model code depends on sibling model-family detail" \
+  'emel/model/llama/(detail|any)\.hpp|emel/model/(qwen3|gemma4)/detail\.hpp|emel::model::llama::|emel::model::(qwen3|gemma4)::detail::' \
+  src/emel/model/lfm2
+
+check_no_matches "shared transformer model code hardcodes model-family contracts" \
+  'qwen3|gemma4|lfm2|llama|emel/model/llama|emel::model::llama::' \
+  src/emel/model/transformer
+
 check_no_matches_except "legacy text generator root" \
   'emel/generator|emel::generator|namespace emel::generator|src/emel/generator|tests/generator' \
   '^(src/emel/generator/|tests/text/generator/legacy_compatibility_tests\.cpp:[0-9]+:|scripts/(quality_gates|test_with_coverage)\.sh:[0-9]+:.*src/emel/generator)' \

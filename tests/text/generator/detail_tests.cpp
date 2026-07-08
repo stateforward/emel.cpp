@@ -16,7 +16,7 @@
 #include "emel/graph/processor/guards.hpp"
 #include "emel/memory/events.hpp"
 #include "emel/memory/hybrid/sm.hpp"
-#include "emel/model/llama/detail.hpp"
+#include "emel/model/transformer/any.hpp"
 #include "emel/text/generator/detail.hpp"
 #include "emel/text/generator/guards.hpp"
 #include "emel/text/generator/layer/sm.hpp"
@@ -125,9 +125,9 @@ emel::model::data::tensor_record make_tensor_record(void *data,
 
 struct runtime_request_fixture {
   emel::model::data model = {};
-  emel::model::llama::detail::execution_view execution = {};
-  emel::model::llama::detail::topology topology = {};
-  emel::model::llama::detail::step_plan plan = {};
+  emel::model::transformer::execution_view execution = {};
+  emel::model::transformer::topology topology = {};
+  emel::model::transformer::step_plan plan = {};
   emel::text::generator::detail::native_backend backend = {};
   std::array<int32_t, 1> token_ids = {0};
   std::array<int32_t, 1> positions = {0};
@@ -155,8 +155,8 @@ struct runtime_request_fixture {
   }
 
   explicit runtime_request_fixture(
-      const emel::model::llama::detail::step_kind kind =
-          emel::model::llama::detail::step_kind::prefill) {
+      const emel::model::transformer::step_kind kind =
+          emel::model::transformer::step_kind::prefill) {
     topology.execution = &execution;
     plan.graph = &topology;
     plan.kind = kind;
@@ -456,9 +456,9 @@ struct chunk4_prefill_runtime_fixture {
   emel::model::data::tensor_record packed_tensor = {};
   emel::model::data::tensor_record output_argmax_tensor = {};
 
-  emel::model::llama::detail::execution_view execution = {};
-  emel::model::llama::detail::topology topology = {};
-  emel::model::llama::detail::step_plan plan = {};
+  emel::model::transformer::execution_view execution = {};
+  emel::model::transformer::topology topology = {};
+  emel::model::transformer::step_plan plan = {};
   std::array<int32_t, k_prompt_tokens> token_ids = {0, 1, 2, 3};
   std::array<int32_t, k_prompt_tokens> positions = {0, 1, 2, 3};
   std::vector<float> logits = {};
@@ -585,7 +585,7 @@ struct chunk4_prefill_runtime_fixture {
     logits.resize(static_cast<size_t>(k_vocab), -1.0f);
     topology.execution = &execution;
     plan.graph = &topology;
-    plan.kind = emel::model::llama::detail::step_kind::prefill;
+    plan.kind = emel::model::transformer::step_kind::prefill;
     plan.expected_outputs = 1;
     io.backend_ctx = &backend;
     io.token_ids = token_ids.data();
@@ -655,9 +655,9 @@ struct hybrid_chunked_q8_runtime_fixture {
   emel::model::data::tensor_record packed_shortconv_in_tensor = {};
   emel::model::data::tensor_record output_argmax_tensor = {};
 
-  emel::model::llama::detail::execution_view execution = {};
-  emel::model::llama::detail::topology topology = {};
-  emel::model::llama::detail::step_plan plan = {};
+  emel::model::transformer::execution_view execution = {};
+  emel::model::transformer::topology topology = {};
+  emel::model::transformer::step_plan plan = {};
   std::array<int32_t, k_prompt_tokens> token_ids = {};
   std::array<int32_t, k_prompt_tokens> positions = {};
   std::vector<float> logits = {};
@@ -756,7 +756,7 @@ struct hybrid_chunked_q8_runtime_fixture {
     backend.blocks.resize(2u);
     auto &shortconv_block = backend.blocks[0];
     shortconv_block.residual_route =
-        emel::model::llama::detail::generation_residual_route::shortconv;
+        emel::model::transformer::generation_residual_route::shortconv;
     shortconv_block.attention_norm = attention_norm_storage;
     shortconv_block.shortconv_conv = shortconv_conv_storage;
     shortconv_block.shortconv_in_proj.tensor = &packed_shortconv_in_tensor;
@@ -856,7 +856,7 @@ struct hybrid_chunked_q8_runtime_fixture {
     logits.resize(static_cast<size_t>(k_vocab), -1.0f);
     topology.execution = &execution;
     plan.graph = &topology;
-    plan.kind = emel::model::llama::detail::step_kind::prefill;
+    plan.kind = emel::model::transformer::step_kind::prefill;
     plan.expected_outputs = 1;
     io.backend_ctx = &backend;
     io.token_ids = token_ids.data();
@@ -1200,7 +1200,7 @@ TEST_CASE("generator_detail_lfm2_attention_uses_neox_rope_layout") {
 
   auto &block = backend->blocks.front();
   block.residual_route =
-      emel::model::llama::detail::generation_residual_route::attention;
+      emel::model::transformer::generation_residual_route::attention;
   block.attention_norm.assign(k_embd, 1.0f);
   block.attention_q.tensor = &identity_tensor;
   block.attention_q.rows = k_embd;
@@ -1494,7 +1494,7 @@ TEST_CASE("generator_detail_routes_static_q6_block_matrices_through_generic_q8_"
   backend.blocks.resize(1u);
   auto &block = backend.blocks.front();
   block.residual_route =
-      emel::model::llama::detail::generation_residual_route::attention;
+      emel::model::transformer::generation_residual_route::attention;
   block.attention_q = q6_matrix;
   block.attention_k = q6_matrix;
   block.attention_v = q6_matrix;
@@ -1573,7 +1573,7 @@ TEST_CASE("generator_detail_routes_static_q4_block_matrices_through_generic_q8_"
   backend.blocks.resize(1u);
   auto &block = backend.blocks.front();
   block.residual_route =
-      emel::model::llama::detail::generation_residual_route::attention;
+      emel::model::transformer::generation_residual_route::attention;
   block.attention_q = q4_matrix;
   block.attention_k = q4_matrix;
   block.attention_v = q4_matrix;
@@ -2613,7 +2613,7 @@ TEST_CASE("generator_detail_prepare_block_native_matrices_supports_shortconv_"
   backend.blocks.resize(1u);
   auto &block = backend.blocks.front();
   block.residual_route =
-      emel::model::llama::detail::generation_residual_route::shortconv;
+      emel::model::transformer::generation_residual_route::shortconv;
   block.shortconv_in_proj = q6_matrix;
   block.shortconv_out_proj = q6_matrix;
   block.feed_forward_gate = q6_matrix;
@@ -3272,9 +3272,9 @@ TEST_CASE("generator_detail_effective_dimension_helpers_cover_fallbacks") {
 
   backend.blocks.resize(2u);
   backend.blocks[0].residual_route =
-      emel::model::llama::detail::generation_residual_route::shortconv;
+      emel::model::transformer::generation_residual_route::shortconv;
   backend.blocks[1].residual_route =
-      emel::model::llama::detail::generation_residual_route::attention;
+      emel::model::transformer::generation_residual_route::attention;
   backend.blocks[1].feed_forward_gate.rows = 32;
   CHECK(emel::text::generator::detail::first_attention_block(backend) ==
         &backend.blocks[1]);
@@ -3282,7 +3282,7 @@ TEST_CASE("generator_detail_effective_dimension_helpers_cover_fallbacks") {
   backend.max_ffn_dim = 64;
   CHECK(emel::text::generator::detail::effective_max_ffn_dim(backend) == 64);
 
-  emel::model::llama::detail::execution_view execution{};
+  emel::model::transformer::execution_view execution{};
   CHECK(emel::text::generator::detail::select_output_projection_tensor(
             execution) == nullptr);
   emel::model::data::tensor_record token_embedding{};
@@ -3865,10 +3865,10 @@ TEST_CASE("generator_detail_gemma4_shared_kv_layer_rms_norms_value_branch_"
   backend->n_layer = 16;
   backend->blocks.resize(16u, backend->blocks.front());
   backend->blocks[15].attention_v = backend->blocks[15].attention_k;
-  backend->blocks[15].value_route = emel::model::llama::detail::
+  backend->blocks[15].value_route = emel::model::transformer::
       generation_attention_value_route::shared_key_value;
   backend->blocks[15].v_norm_route =
-      emel::model::llama::detail::generation_attention_v_norm_route::rms;
+      emel::model::transformer::generation_attention_v_norm_route::rms;
   backend->layer_cache_offsets.resize(16u, 0u);
   backend->flash_layer_cache_offsets.resize(16u, 0u);
 

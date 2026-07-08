@@ -151,7 +151,7 @@ struct chunk4_planning_backend_fixture {
 
     auto &block = backend.blocks.emplace_back();
     block.residual_route =
-        emel::model::llama::detail::generation_residual_route::attention;
+        emel::model::transformer::generation_residual_route::attention;
     block.attention_q = {&matrix, 4, 4};
     block.attention_k = {&matrix, 4, 4};
     block.attention_v = {&matrix, 4, 4};
@@ -214,7 +214,7 @@ struct native_quantized_route_fixture {
 
     auto &block = backend.blocks.emplace_back();
     block.residual_route =
-        emel::model::llama::detail::generation_residual_route::attention;
+        emel::model::transformer::generation_residual_route::attention;
     block.attention_q = {&body_tensor, backend.n_embd, backend.n_embd};
     block.attention_k = {&body_tensor, backend.n_embd, backend.n_embd};
     block.attention_v = {&body_tensor, backend.n_embd, backend.n_embd};

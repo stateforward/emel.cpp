@@ -125,6 +125,7 @@ add_library(emel STATIC
   src/emel/model/architecture/detail.cpp
   src/emel/model/detail.cpp
   src/emel/model/data.cpp
+  src/emel/model/transformer/any.cpp
   src/emel/text/unicode_data.cpp
   src/emel/model/llama/detail.cpp
   src/emel/model/qwen3/detail.cpp

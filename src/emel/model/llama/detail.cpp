@@ -1,5 +1,7 @@
 #include "emel/model/llama/detail.hpp"
 
+#include "emel/model/transformer/any.hpp"
+
 namespace emel::model::llama::detail {
 
 bool load_hparams(const emel::model::detail::hparam_loader & loader,
@@ -29,8 +31,8 @@ bool load_hparams(const emel::model::detail::hparam_loader & loader,
 }
 
 emel::error::type validate_data(const emel::model::data & model_data) noexcept {
-  execution_view view = {};
-  return build_execution_view(model_data, view);
+  emel::model::transformer::execution_view view = {};
+  return emel::model::transformer::build_execution_view(model_data, view);
 }
 
 }  // namespace emel::model::llama::detail
