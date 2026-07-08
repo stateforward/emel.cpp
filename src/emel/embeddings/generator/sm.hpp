@@ -363,6 +363,77 @@ struct model {
   }
 };
 
+namespace component_route {
+
+bool reserve_scratch(action::context & ctx,
+                     const emel::model::data & model) noexcept;
+void prepare_image_input(const event::embed_image_run & ev,
+                         action::context & ctx) noexcept;
+void prepare_audio_input(const event::embed_audio_run & ev,
+                         action::context & ctx) noexcept;
+void run_text_embedding(const event::embed_text_run & ev,
+                        action::context & ctx) noexcept;
+void run_image_embedding(const event::embed_image_run & ev,
+                         action::context & ctx) noexcept;
+void run_audio_embedding(const event::embed_audio_run & ev,
+                         action::context & ctx) noexcept;
+
+}  // namespace component_route
+
+struct route {
+  using context = emel::embeddings::generator::action::context;
+
+  static bool reserve_scratch(action::context & ctx,
+                              const emel::model::data & model) noexcept {
+    return component_route::reserve_scratch(ctx, model);
+  }
+
+  struct effect_prepare_image_input {
+    template <class runtime_event_type>
+    void operator()(const runtime_event_type & runtime_ev,
+                    action::context & ctx) const noexcept {
+      const auto & ev = detail::unwrap_runtime_event(runtime_ev);
+      component_route::prepare_image_input(ev, ctx);
+    }
+  };
+
+  struct effect_prepare_audio_input {
+    template <class runtime_event_type>
+    void operator()(const runtime_event_type & runtime_ev,
+                    action::context & ctx) const noexcept {
+      const auto & ev = detail::unwrap_runtime_event(runtime_ev);
+      component_route::prepare_audio_input(ev, ctx);
+    }
+  };
+
+  struct effect_run_text_embedding {
+    template <class runtime_event_type>
+    void operator()(const runtime_event_type & runtime_ev,
+                    action::context & ctx) const noexcept {
+      const auto & ev = detail::unwrap_runtime_event(runtime_ev);
+      component_route::run_text_embedding(ev, ctx);
+    }
+  };
+
+  struct effect_run_image_embedding {
+    template <class runtime_event_type>
+    void operator()(const runtime_event_type & runtime_ev,
+                    action::context & ctx) const noexcept {
+      const auto & ev = detail::unwrap_runtime_event(runtime_ev);
+      component_route::run_image_embedding(ev, ctx);
+    }
+  };
+
+  struct effect_run_audio_embedding {
+    template <class runtime_event_type>
+    void operator()(const runtime_event_type & runtime_ev,
+                    action::context & ctx) const noexcept {
+      const auto & ev = detail::unwrap_runtime_event(runtime_ev);
+      component_route::run_audio_embedding(ev, ctx);
+    }
+  };
+};
+
 template <class Route>
 struct basic_sm : public emel::sm<model<Route>, action::context> {
   using base_type = emel::sm<model<Route>, action::context>;
@@ -417,5 +488,7 @@ struct basic_sm : public emel::sm<model<Route>, action::context> {
     return accepted && ctx.err == detail::to_error(error::none);
   }
 };
+
+using sm = basic_sm<route>;
 
 }  // namespace emel::embeddings::generator

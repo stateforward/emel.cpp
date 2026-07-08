@@ -4,11 +4,13 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <vector>
 
 #include "doctest/doctest.h"
 
 #include "emel/embeddings/generator/detail.hpp"
+#include "emel/embeddings/generator/sm.hpp"
 
 namespace {
 
@@ -56,6 +58,15 @@ std::vector<std::filesystem::path> generic_generator_surfaces() {
 }
 
 }  // namespace
+
+TEST_CASE("embedding generator keeps component-level sm compatibility type") {
+  static_assert(std::is_same_v<emel::embeddings::generator::sm,
+                               emel::embeddings::generator::basic_sm<
+                                   emel::embeddings::generator::route>>);
+  emel::embeddings::generator::sm generator;
+  CHECK(generator.is(
+      stateforward::sml::state<emel::embeddings::generator::state_uninitialized>));
+}
 
 TEST_CASE("embedding generator no longer hides phase outcome latches in actions and guards") {
   const std::string actions = read_text_file(
