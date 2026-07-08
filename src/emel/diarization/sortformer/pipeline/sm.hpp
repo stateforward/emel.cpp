@@ -23,11 +23,13 @@ struct state_preparing_features {};
 struct state_prepare_decision {};
 struct state_binding_encoder {};
 struct state_computing_encoder {};
+struct state_encoder_compute_decision {};
 struct state_executing_hidden {};
 struct state_execute_decision {};
 struct state_binding_modules {};
 struct state_computing_probabilities {};
 struct state_probability_decision {};
+struct state_probability_compute_decision {};
 struct state_decoding_segments {};
 struct state_publish_success {};
 struct state_publish_error {};
@@ -101,13 +103,18 @@ struct model {
           + sml::completion<event::run_flow>
           / action::effect_bind_encoder
       , sml::state<state_executing_hidden> <= sml::state<state_computing_encoder>
-          + sml::completion<event::run_flow>
+          + sml::completion<event::run_flow> [ guard::guard_encoder_kernel_ready{} ]
           / action::effect_compute_encoder_frames
-      , sml::state<state_execute_decision> <= sml::state<state_executing_hidden>
-          + sml::completion<event::run_flow> [ guard::guard_no_error{} ]
-          / action::effect_execute_hidden
+      , sml::state<state_publish_error> <= sml::state<state_computing_encoder>
+          + sml::completion<event::run_flow> [ guard::guard_encoder_kernel_unavailable{} ]
+          / action::effect_mark_kernel_error
+      , sml::state<state_encoder_compute_decision> <= sml::state<state_executing_hidden>
+          + sml::completion<event::run_flow> [ guard::guard_encoder_compute_succeeded{} ]
       , sml::state<state_publish_error> <= sml::state<state_executing_hidden>
-          + sml::completion<event::run_flow> [ guard::guard_has_error{} ]
+          + sml::completion<event::run_flow> [ guard::guard_encoder_compute_failed{} ]
+      , sml::state<state_execute_decision> <= sml::state<state_encoder_compute_decision>
+          + sml::completion<event::run_flow>
+          / action::effect_execute_hidden
       , sml::state<state_binding_modules> <= sml::state<state_execute_decision>
           + sml::completion<event::run_flow> [ guard::guard_no_error{} ]
       , sml::state<state_publish_error> <= sml::state<state_execute_decision>
@@ -117,12 +124,17 @@ struct model {
           + sml::completion<event::run_flow>
           / action::effect_bind_modules
       , sml::state<state_probability_decision> <= sml::state<state_computing_probabilities>
-          + sml::completion<event::run_flow>
+          + sml::completion<event::run_flow> [ guard::guard_probability_kernel_ready{} ]
           / action::effect_compute_probabilities
-      , sml::state<state_decoding_segments> <= sml::state<state_probability_decision>
-          + sml::completion<event::run_flow> [ guard::guard_no_error{} ]
+      , sml::state<state_publish_error> <= sml::state<state_computing_probabilities>
+          + sml::completion<event::run_flow> [ guard::guard_probability_kernel_unavailable{} ]
+          / action::effect_mark_kernel_error
+      , sml::state<state_probability_compute_decision> <= sml::state<state_probability_decision>
+          + sml::completion<event::run_flow> [ guard::guard_probability_compute_succeeded{} ]
       , sml::state<state_publish_error> <= sml::state<state_probability_decision>
-          + sml::completion<event::run_flow> [ guard::guard_has_error{} ]
+          + sml::completion<event::run_flow> [ guard::guard_probability_compute_failed{} ]
+      , sml::state<state_decoding_segments> <= sml::state<state_probability_compute_decision>
+          + sml::completion<event::run_flow>
       , sml::state<state_publish_success> <= sml::state<state_decoding_segments>
           + sml::completion<event::run_flow>
           / action::effect_decode_segments
@@ -166,6 +178,8 @@ struct model {
           + sml::unexpected_event<sml::_> / action::effect_on_unexpected
       , sml::state<state_ready> <= sml::state<state_computing_encoder>
           + sml::unexpected_event<sml::_> / action::effect_on_unexpected
+      , sml::state<state_ready> <= sml::state<state_encoder_compute_decision>
+          + sml::unexpected_event<sml::_> / action::effect_on_unexpected
       , sml::state<state_ready> <= sml::state<state_executing_hidden>
           + sml::unexpected_event<sml::_> / action::effect_on_unexpected
       , sml::state<state_ready> <= sml::state<state_execute_decision>
@@ -175,6 +189,8 @@ struct model {
       , sml::state<state_ready> <= sml::state<state_computing_probabilities>
           + sml::unexpected_event<sml::_> / action::effect_on_unexpected
       , sml::state<state_ready> <= sml::state<state_probability_decision>
+          + sml::unexpected_event<sml::_> / action::effect_on_unexpected
+      , sml::state<state_ready> <= sml::state<state_probability_compute_decision>
           + sml::unexpected_event<sml::_> / action::effect_on_unexpected
       , sml::state<state_ready> <= sml::state<state_decoding_segments>
           + sml::unexpected_event<sml::_> / action::effect_on_unexpected
