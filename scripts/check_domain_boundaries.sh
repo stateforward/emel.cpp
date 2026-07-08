@@ -116,6 +116,39 @@ check_no_matches "maintained benchmark/parity lanes reaching IO or tensor actor 
   'emel/(io/loader|model/tensor|model/loader)/(actions|detail|guards)\.hpp|emel::io::loader::(action|detail|guard)::|emel::model::tensor::(action|detail|guard)::|emel::model::loader::(action|detail|guard)::' \
   tools/bench tools/paritychecker tools/embedded_size
 
+sortformer_bench_actor_pattern=
+sortformer_bench_actor_pattern+='emel/diarization/'
+sortformer_bench_actor_pattern+='(request|sortformer/'
+sortformer_bench_actor_pattern+='(request|encoder(/feature_extractor)?|executor|modules|output|pipeline))'
+sortformer_bench_actor_pattern+='/(actions|detail|guards)\.hpp'
+sortformer_bench_actor_pattern+='|emel/model/sortformer/detail\.hpp'
+sortformer_bench_actor_pattern+='|emel::diarization::sortformer::request::'
+sortformer_bench_actor_pattern+='(action|detail|guard)::'
+sortformer_bench_actor_pattern+='|emel::diarization::sortformer::'
+sortformer_bench_actor_pattern+='(encoder::(action|guard|detail)'
+sortformer_bench_actor_pattern+='|encoder::feature_extractor::detail'
+sortformer_bench_actor_pattern+='|executor::(action|guard|detail)'
+sortformer_bench_actor_pattern+='|modules::detail'
+sortformer_bench_actor_pattern+='|output::(action|guard|detail)'
+sortformer_bench_actor_pattern+='|pipeline::(action|guard|detail))::'
+sortformer_bench_actor_pattern+='|emel::model::sortformer::detail::'
+check_no_matches "Sortformer diarization benchmark bypassing actor surfaces" \
+  "$sortformer_bench_actor_pattern" \
+  tools/bench/diarization/sortformer_bench.cpp \
+  tools/bench/diarization/sortformer_fixture.hpp
+
+check_no_matches "Sortformer public facade headers exposing detail internals" \
+  'emel/.*/detail\.hpp|::detail::' \
+  src/emel/model/sortformer/any.hpp \
+  src/emel/diarization/sortformer/request/events.hpp \
+  src/emel/diarization/sortformer/executor/events.hpp \
+  src/emel/diarization/sortformer/output/any.hpp \
+  src/emel/diarization/sortformer/pipeline/any.hpp
+
+check_absent_path "generic diarization request route hardcoding Sortformer" \
+  src/emel/diarization/request \
+  tests/diarization/request
+
 check_no_matches "forbidden moshi model-family runtime roots" \
   'emel/moshi|namespace emel::moshi|kernel/moshi|kernel::moshi|kernel/mimi|kernel::mimi|model/moshi/(runtime|inference|encoder|decoder|codec)|model::moshi::(runtime|inference|encoder|decoder|codec)|speech/asr/moshi|speech::asr::moshi|speech/moshi/|speech::moshi' \
   src tests tools CMakeLists.txt

@@ -508,3 +508,31 @@ TEST_CASE("diarization compare reports requested ONNX model errors as failures")
   CHECK(capture.stdout_text.find("status=error reason=reference_lane_error") !=
         std::string::npos);
 }
+
+TEST_CASE("diarization compare ONNX feature generation uses public Sortformer actor") {
+  const std::string compare_source = read_file(diarization_compare_script_path());
+  const std::string bench_source =
+      read_file(repo_root() / "tools" / "bench" / "diarization" /
+                "sortformer_bench.cpp");
+  REQUIRE_FALSE(compare_source.empty());
+  REQUIRE_FALSE(bench_source.empty());
+
+  CHECK(compare_source.find("EMEL_DIARIZATION_ONNX_FEATURE_INPUT") !=
+        std::string::npos);
+  CHECK(compare_source.find("args.onnx_reference_model is not None and "
+                            "args.onnx_reference_features is None") !=
+        std::string::npos);
+  CHECK(bench_source.find(
+            "#include \"emel/diarization/sortformer/request/sm.hpp\"") !=
+        std::string::npos);
+  CHECK(bench_source.find("request::sm feature_machine") != std::string::npos);
+  CHECK(bench_source.find(
+            "feature_err != emel::error::cast(request::error::none)") !=
+        std::string::npos);
+  CHECK(bench_source.find("EMEL_DIARIZATION_ONNX_ENCODER_PROBE_OUTPUT") ==
+        std::string::npos);
+  CHECK(bench_source.find("EMEL_DIARIZATION_HIDDEN_PROBE_OUTPUT") ==
+        std::string::npos);
+  CHECK(bench_source.find("stage_probe_requires_public_stage_actor") ==
+        std::string::npos);
+}

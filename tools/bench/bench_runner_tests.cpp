@@ -1,6 +1,7 @@
 #define DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN
 
 #include <algorithm>
+#include <array>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -1530,6 +1531,95 @@ TEST_CASE("generation_stage_probe_emel_path_does_not_bypass_generator_actor") {
         std::string::npos);
   CHECK(probe_source.find("emel::text::generator::prefill::action::context") ==
         std::string::npos);
+}
+
+TEST_CASE("sortformer_diarization_bench_uses_public_actor_surfaces") {
+  const std::array<std::filesystem::path, 2> source_paths = {
+      repo_root() / "tools" / "bench" / "diarization" /
+          "sortformer_bench.cpp",
+      repo_root() / "tools" / "bench" / "diarization" /
+          "sortformer_fixture.hpp",
+  };
+  const std::vector<std::string> forbidden_source_patterns = {
+      "#include \"emel/diarization/sortformer/request/actions.hpp\"",
+      "#include \"emel/diarization/sortformer/request/detail.hpp\"",
+      "#include \"emel/diarization/sortformer/request/guards.hpp\"",
+      "#include \"emel/diarization/sortformer/encoder/actions.hpp\"",
+      "#include \"emel/diarization/sortformer/encoder/detail.hpp\"",
+      "#include \"emel/diarization/sortformer/encoder/feature_extractor/detail.hpp\"",
+      "#include \"emel/diarization/sortformer/encoder/guards.hpp\"",
+      "#include \"emel/diarization/sortformer/executor/actions.hpp\"",
+      "#include \"emel/diarization/sortformer/executor/detail.hpp\"",
+      "#include \"emel/diarization/sortformer/executor/guards.hpp\"",
+      "#include \"emel/diarization/sortformer/modules/detail.hpp\"",
+      "#include \"emel/diarization/sortformer/output/actions.hpp\"",
+      "#include \"emel/diarization/sortformer/output/detail.hpp\"",
+      "#include \"emel/diarization/sortformer/output/guards.hpp\"",
+      "#include \"emel/diarization/sortformer/pipeline/actions.hpp\"",
+      "#include \"emel/diarization/sortformer/pipeline/detail.hpp\"",
+      "#include \"emel/diarization/sortformer/pipeline/guards.hpp\"",
+      "#include \"emel/model/sortformer/detail.hpp\"",
+      "emel::diarization::sortformer::request::action::",
+      "emel::diarization::sortformer::request::detail::",
+      "emel::diarization::sortformer::request::guard::",
+      "emel::diarization::sortformer::encoder::action::",
+      "emel::diarization::sortformer::encoder::detail::",
+      "emel::diarization::sortformer::encoder::feature_extractor::detail::",
+      "emel::diarization::sortformer::encoder::guard::",
+      "emel::diarization::sortformer::executor::action::",
+      "emel::diarization::sortformer::executor::detail::",
+      "emel::diarization::sortformer::executor::guard::",
+      "emel::diarization::sortformer::modules::detail::",
+      "emel::diarization::sortformer::output::action::",
+      "emel::diarization::sortformer::output::detail::",
+      "emel::diarization::sortformer::output::guard::",
+      "emel::diarization::sortformer::pipeline::action::",
+      "emel::diarization::sortformer::pipeline::detail::",
+      "emel::diarization::sortformer::pipeline::guard::",
+      "emel::model::sortformer::detail::",
+  };
+
+  for (const auto &source_path : source_paths) {
+    const std::string source = read_file(source_path);
+    REQUIRE_MESSAGE(!source.empty(), "missing source " << source_path.string());
+    for (const std::string &pattern : forbidden_source_patterns) {
+      CHECK_MESSAGE(source.find(pattern) == std::string::npos,
+                    source_path.string()
+                        << " bypasses Sortformer actor boundary with "
+                        << pattern);
+    }
+  }
+
+  const std::array<std::filesystem::path, 5> public_facade_paths = {
+      repo_root() / "src" / "emel" / "model" / "sortformer" / "any.hpp",
+      repo_root() / "src" / "emel" / "diarization" / "sortformer" /
+          "request" / "events.hpp",
+      repo_root() / "src" / "emel" / "diarization" / "sortformer" /
+          "output" / "any.hpp",
+      repo_root() / "src" / "emel" / "diarization" / "sortformer" /
+          "pipeline" / "any.hpp",
+      repo_root() / "src" / "emel" / "diarization" / "sortformer" /
+          "executor" / "events.hpp",
+  };
+  for (const auto &facade_path : public_facade_paths) {
+    const std::string source = read_file(facade_path);
+    REQUIRE_MESSAGE(!source.empty(), "missing source " << facade_path.string());
+    CHECK_MESSAGE(source.find("/detail.hpp") == std::string::npos,
+                  facade_path.string() << " includes a detail header");
+    CHECK_MESSAGE(source.find("::detail::") == std::string::npos,
+                  facade_path.string() << " exposes a detail namespace");
+  }
+
+  CHECK_FALSE(std::filesystem::exists(repo_root() / "src" / "emel" /
+                                      "diarization" / "request"));
+  CHECK_FALSE(std::filesystem::exists(repo_root() / "tests" / "diarization" /
+                                      "request"));
+  CHECK(source_paths[0].string().find("sortformer_bench.cpp") !=
+        std::string::npos);
+  const std::string bench_source = read_file(source_paths[0]);
+  CHECK(bench_source.find("EMEL_DIARIZATION_STAGE_PROFILE") ==
+        std::string::npos);
+  CHECK(bench_source.find("stage_profile_") == std::string::npos);
 }
 
 TEST_CASE("generation_stage_probe_selector_is_explicit") {

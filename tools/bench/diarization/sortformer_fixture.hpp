@@ -13,8 +13,7 @@
 #include <string_view>
 #include <vector>
 
-#include "emel/diarization/sortformer/encoder/feature_extractor/detail.hpp"
-#include "emel/diarization/sortformer/output/detail.hpp"
+#include "emel/diarization/sortformer/pipeline/any.hpp"
 #include "emel/diarization/sortformer/pipeline/sm.hpp"
 #include "emel/gguf/loader/any.hpp"
 #include "emel/gguf/loader/events.hpp"
@@ -28,7 +27,7 @@
 #include "emel/model/loader/errors.hpp"
 #include "emel/model/loader/events.hpp"
 #include "emel/model/loader/sm.hpp"
-#include "emel/model/sortformer/detail.hpp"
+#include "emel/model/sortformer/any.hpp"
 #include "emel/model/tensor/errors.hpp"
 #include "emel/model/tensor/events.hpp"
 #include "emel/model/tensor/sm.hpp"
@@ -36,10 +35,7 @@
 
 namespace emel::bench::diarization::sortformer_fixture {
 
-namespace output_detail = emel::diarization::sortformer::output::detail;
 namespace pipeline = emel::diarization::sortformer::pipeline;
-namespace feature_detail =
-    emel::diarization::sortformer::encoder::feature_extractor::detail;
 
 inline constexpr const char *k_case_name =
     "diarization/sortformer/ami_en2002b_mix_headset_137.00_152.04_16khz_mono";
@@ -129,7 +125,7 @@ struct load_capture {
 
 struct model_fixture {
   emel::model::data model = {};
-  emel::model::sortformer::detail::execution_contract contract = {};
+  emel::model::sortformer::execution_contract contract = {};
   std::vector<uint8_t> file_bytes = {};
   std::vector<uint8_t> kv_arena = {};
   uint64_t gguf_tensor_data_bytes = 0u;
@@ -548,7 +544,7 @@ inline bool prepare(model_fixture &fixture) {
     return false;
   }
 
-  if (emel::model::sortformer::detail::build_execution_contract(
+  if (emel::model::sortformer::build_execution_contract(
           fixture.model, fixture.contract) !=
       emel::error::cast(emel::model::loader::error::none)) {
     fixture.contract = {};
@@ -624,7 +620,7 @@ inline bool prepare(pcm_fixture &fixture) {
   wav_fmt_chunk fmt = {};
   if (!parse_wav_fmt_chunk(fmt_chunk, fmt) || fmt.audio_format != 1u ||
       fmt.channel_count != 1u ||
-      fmt.sample_rate != static_cast<uint32_t>(feature_detail::k_sample_rate) ||
+      fmt.sample_rate != static_cast<uint32_t>(pipeline::k_sample_rate) ||
       fmt.bits_per_sample != 16u) {
     return false;
   }
@@ -685,16 +681,8 @@ inline bool prepare(expected_output_baseline &baseline) {
   return baseline.ready;
 }
 
-inline emel::model::sortformer::detail::execution_contract
-make_contract(const emel::model::data &model) noexcept {
-  emel::model::sortformer::detail::execution_contract contract = {};
-  (void)emel::model::sortformer::detail::build_execution_contract(model,
-                                                                  contract);
-  return contract;
-}
-
 inline std::uint64_t
-compute_checksum(std::span<const output_detail::segment_record> segments,
+compute_checksum(std::span<const pipeline::segment_record> segments,
                  const int32_t segment_count) noexcept {
   std::uint64_t checksum = 1469598103934665603ull;
   for (int32_t i = 0; i < segment_count; ++i) {
@@ -711,9 +699,9 @@ compute_checksum(std::span<const output_detail::segment_record> segments,
 
 struct run_result {
   std::vector<float> probabilities = std::vector<float>(
-      static_cast<size_t>(output_detail::k_required_probability_value_count));
-  std::array<output_detail::segment_record,
-             output_detail::k_frame_count * output_detail::k_speaker_count>
+      static_cast<size_t>(pipeline::k_required_probability_value_count));
+  std::array<pipeline::segment_record,
+             static_cast<size_t>(pipeline::k_max_segment_count)>
       segments = {};
   int32_t frame_count = -1;
   int32_t probability_count = -1;
@@ -725,7 +713,7 @@ struct run_result {
 inline void reset(run_result &result) noexcept {
   std::fill(result.probabilities.begin(), result.probabilities.end(), 0.0f);
   std::fill(result.segments.begin(), result.segments.end(),
-            output_detail::segment_record{});
+            pipeline::segment_record{});
   result.frame_count = -1;
   result.probability_count = -1;
   result.segment_count = -1;
@@ -734,21 +722,21 @@ inline void reset(run_result &result) noexcept {
 }
 
 inline pipeline::event::run make_run_event(
-    const emel::model::sortformer::detail::execution_contract &contract,
+    const emel::model::sortformer::execution_contract &contract,
     std::span<const float> pcm, const int32_t sample_rate,
     std::span<float> probabilities,
-    std::span<output_detail::segment_record> segments, int32_t &frame_count,
+    std::span<pipeline::segment_record> segments, int32_t &frame_count,
     int32_t &probability_count, int32_t &segment_count,
     emel::error::type &err) noexcept {
   return pipeline::event::run{
-      contract,      pcm,      sample_rate, feature_detail::k_channel_count,
+      contract,      pcm,      sample_rate, pipeline::k_channel_count,
       probabilities, segments, frame_count, probability_count,
       segment_count, err};
 }
 
 inline bool run_pipeline(
     pipeline::sm &machine,
-    const emel::model::sortformer::detail::execution_contract &contract,
+    const emel::model::sortformer::execution_contract &contract,
     std::span<const float> pcm, const int32_t sample_rate, run_result &result) {
   reset(result);
   auto request = make_run_event(contract, pcm, sample_rate,
