@@ -109,7 +109,7 @@ struct context {
   text_route_status text_status = {};
   image_route_status image_status = {};
   audio_route_status audio_status = {};
-  scratch_status scratch_status = {};
+  emel::embeddings::generator::action::scratch_status scratch_status = {};
   route_state route = {};
   bool initialized = false;
 };

@@ -11,6 +11,7 @@
 
 #include "emel/embeddings/generator/detail.hpp"
 #include "emel/embeddings/generator/sm.hpp"
+#include "emel/machines.hpp"
 
 namespace {
 
@@ -63,6 +64,10 @@ TEST_CASE("embedding generator keeps component-level sm compatibility type") {
   static_assert(std::is_same_v<emel::embeddings::generator::sm,
                                emel::embeddings::generator::basic_sm<
                                    emel::embeddings::generator::route>>);
+  static_assert(std::is_same_v<emel::EmbeddingsGenerator,
+                               emel::embeddings::generator::sm>);
+  static_assert(std::is_same_v<emel::OmniEmbedEmbeddingsGenerator,
+                               emel::embeddings::generator::omniembed::sm>);
   emel::embeddings::generator::sm generator;
   CHECK(generator.is(
       stateforward::sml::state<emel::embeddings::generator::state_uninitialized>));
