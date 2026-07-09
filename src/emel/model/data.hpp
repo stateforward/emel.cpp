@@ -273,10 +273,13 @@ struct data {
 
   struct moshi_lm_hparams {
     static constexpr int32_t k_max_delays = 64;
+    static constexpr int32_t k_max_inference_prompt_tokens = k_max_delays;
+    static constexpr int32_t k_max_depformer_weight_schedule = k_max_delays;
 
     int32_t card = 0;
     int32_t n_q = 0;
     int32_t dep_q = 0;
+    int32_t inference_dep_q = 0;
     int32_t text_card = 0;
     int32_t text_padding_id = -1;
     int32_t dim = 0;
@@ -293,8 +296,16 @@ struct data {
     int32_t depformer_max_period = 0;
     int32_t depformer_low_rank_embeddings = 0;
     int32_t extra_heads_num_heads = 0;
+    int32_t inference_pre_text_silence_frames = 0;
+    int32_t inference_post_text_silence_frames = 0;
     uint32_t delay_count = 0;
+    uint32_t inference_prompt_token_count = 0;
+    uint32_t depformer_weight_schedule_count = 0;
     std::array<int32_t, k_max_delays> delays = {};
+    std::array<int32_t, k_max_inference_prompt_tokens> inference_prompt_tokens =
+        {};
+    std::array<int32_t, k_max_depformer_weight_schedule>
+        depformer_weight_schedule = {};
     bool causal = false;
     bool cross_attention = false;
     bool demux_second_stream = false;

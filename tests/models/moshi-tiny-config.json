@@ -31,6 +31,16 @@
   "depformer_gating": "silu",
   "depformer_pos_emb": "none",
   "depformer_weights_per_step": true,
+  "inference_dep_q": 2,
+  "inference_prompt_tokens": [
+    3,
+    4,
+    5,
+    6,
+    7
+  ],
+  "inference_pre_text_silence_frames": 1,
+  "inference_post_text_silence_frames": 1,
   "cross_attention": false,
   "model_type": "personaplex",
   "tokenizer_name": "moshi-tokenizer-tiny.model"

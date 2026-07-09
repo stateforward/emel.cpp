@@ -1,7 +1,7 @@
 #include "doctest/doctest.h"
 
-#include <array>
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
@@ -228,7 +228,7 @@ TEST_CASE("mimi codec facade initializes, encodes, and decodes frames") {
   CHECK(err == emel::error::cast(mimi::error::none));
   check_session_ready(machine);
   CHECK(g_frame_samples == 1920);
-  CHECK(g_n_q == 4);
+  CHECK(g_n_q == 2);
 
   const auto pcm = deterministic_pcm(g_frame_samples);
   std::vector<int32_t> codes(static_cast<size_t>(g_n_q), -1);
@@ -255,6 +255,28 @@ TEST_CASE("mimi codec facade initializes, encodes, and decodes frames") {
   CHECK(err == emel::error::cast(mimi::error::none));
   check_session_ready(machine);
   CHECK(g_decode_done_count == 1u);
+
+  REQUIRE(machine.process_event(mimi::event::reset_stream{}));
+  const size_t partial_count =
+      std::min(codes.size() - 1u,
+               static_cast<size_t>(loaded.model->mimi.semantic_n_q + 1));
+  REQUIRE(partial_count > 0u);
+  REQUIRE(partial_count < codes.size());
+  std::vector<float> partial_decoded(static_cast<size_t>(g_frame_samples),
+                                     0.0f);
+  mimi::event::decode_frame partial_decode{
+      std::span<const int32_t>{codes.data(), partial_count},
+      std::span<float>{partial_decoded}};
+  partial_decode.error_out = &err;
+  partial_decode.on_done = emel::callback<void(
+      const mimi::events::decode_frame_done &)>::from<&on_decode_frame_done>();
+  REQUIRE(machine.process_event(partial_decode));
+  CHECK(err == emel::error::cast(mimi::error::none));
+  check_session_ready(machine);
+  CHECK(g_decode_done_count == 2u);
+  for (const float sample : partial_decoded) {
+    CHECK(std::isfinite(sample));
+  }
 
   // stream reset replays the exact same codes for the same first frame
   std::vector<int32_t> replay(codes.size(), -1);
@@ -410,9 +432,9 @@ TEST_CASE("mimi codec initialize rejects out-of-contract model metadata") {
     // 256-float buffer while the declared extents describe 2^64 elements.
     for (uint32_t index = 0u; index < loaded.model->n_tensors; ++index) {
       auto &tensor = loaded.model->tensors[index];
-      const std::string_view name{
-          loaded.model->name_storage.data() + tensor.name_offset,
-          tensor.name_length};
+      const std::string_view name{loaded.model->name_storage.data() +
+                                      tensor.name_offset,
+                                  tensor.name_length};
       if (name == "mimi.encoder_transformer.transformer.layers.0.self_attn."
                   "out_projs.0.weight") {
         tensor.n_dims = 2;
@@ -428,9 +450,9 @@ TEST_CASE("mimi codec initialize rejects out-of-contract model metadata") {
     // time with no error channel, so the plan must reject the q8 class.
     for (uint32_t index = 0u; index < loaded.model->n_tensors; ++index) {
       auto &tensor = loaded.model->tensors[index];
-      const std::string_view name{
-          loaded.model->name_storage.data() + tensor.name_offset,
-          tensor.name_length};
+      const std::string_view name{loaded.model->name_storage.data() +
+                                      tensor.name_offset,
+                                  tensor.name_length};
       const bool projection =
           name.find("self_attn.in_projs.0.weight") != std::string_view::npos ||
           name.find("self_attn.out_projs.0.weight") != std::string_view::npos ||
@@ -438,7 +460,7 @@ TEST_CASE("mimi codec initialize rejects out-of-contract model metadata") {
           name.find("linear2.weight") != std::string_view::npos ||
           name.find("_proj.weight") != std::string_view::npos;
       if (projection && name.starts_with("mimi.")) {
-        tensor.type = 8;  // q8_0
+        tensor.type = 8; // q8_0
       }
     }
     expect_bind_failed(*loaded.model);
@@ -457,9 +479,9 @@ TEST_CASE("mimi codec initialize rejects out-of-contract model metadata") {
     // one-tap upsample kernel against stride 2 would index outside it.
     for (uint32_t index = 0u; index < loaded.model->n_tensors; ++index) {
       auto &tensor = loaded.model->tensors[index];
-      const std::string_view name{
-          loaded.model->name_storage.data() + tensor.name_offset,
-          tensor.name_length};
+      const std::string_view name{loaded.model->name_storage.data() +
+                                      tensor.name_offset,
+                                  tensor.name_length};
       if (name == "mimi.upsample.convtr.convtr.convtr.weight") {
         tensor.dims[0] = 1;
       }
@@ -470,9 +492,9 @@ TEST_CASE("mimi codec initialize rejects out-of-contract model metadata") {
   SUBCASE("seanet transposed layer kernel shorter than its stride") {
     for (uint32_t index = 0u; index < loaded.model->n_tensors; ++index) {
       auto &tensor = loaded.model->tensors[index];
-      const std::string_view name{
-          loaded.model->name_storage.data() + tensor.name_offset,
-          tensor.name_length};
+      const std::string_view name{loaded.model->name_storage.data() +
+                                      tensor.name_offset,
+                                  tensor.name_length};
       if (name.find("decoder.model.") != std::string_view::npos &&
           name.find(".convtr.convtr.weight") != std::string_view::npos) {
         tensor.dims[0] = 1;
@@ -504,9 +526,9 @@ TEST_CASE("mimi codec initialize rejects out-of-contract model metadata") {
     // span negative in the sizing accounting.
     for (uint32_t index = 0u; index < loaded.model->n_tensors; ++index) {
       auto &tensor = loaded.model->tensors[index];
-      const std::string_view name{
-          loaded.model->name_storage.data() + tensor.name_offset,
-          tensor.name_length};
+      const std::string_view name{loaded.model->name_storage.data() +
+                                      tensor.name_offset,
+                                  tensor.name_length};
       if (name.find("encoder.model.") != std::string_view::npos &&
           name.find(".conv.conv.weight") != std::string_view::npos &&
           name.find(".block.") == std::string_view::npos) {
@@ -519,9 +541,9 @@ TEST_CASE("mimi codec initialize rejects out-of-contract model metadata") {
   SUBCASE("downsample conv kernel shorter than its stride") {
     for (uint32_t index = 0u; index < loaded.model->n_tensors; ++index) {
       auto &tensor = loaded.model->tensors[index];
-      const std::string_view name{
-          loaded.model->name_storage.data() + tensor.name_offset,
-          tensor.name_length};
+      const std::string_view name{loaded.model->name_storage.data() +
+                                      tensor.name_offset,
+                                  tensor.name_length};
       if (name == "mimi.downsample.conv.conv.conv.weight") {
         tensor.dims[0] = 1;
       }
@@ -667,8 +689,9 @@ TEST_CASE("mimi codec facade rejects malformed frame requests explicitly") {
                                        std::span<int32_t>{codes}};
   bad_encode.error_out = &err;
   g_encode_error_count = 0;
-  bad_encode.on_error = emel::callback<void(
-      const mimi::events::encode_frame_error &)>::from<&on_encode_frame_error>();
+  bad_encode.on_error =
+      emel::callback<void(const mimi::events::encode_frame_error &)>::from<
+          &on_encode_frame_error>();
   CHECK_FALSE(machine.process_event(bad_encode));
   CHECK(g_encode_error_count == 1u);
   CHECK(err == emel::error::cast(mimi::error::request_shape));
@@ -681,8 +704,9 @@ TEST_CASE("mimi codec facade rejects malformed frame requests explicitly") {
                                        std::span<float>{short_pcm_out}};
   bad_decode.error_out = &err;
   g_decode_error_count = 0;
-  bad_decode.on_error = emel::callback<void(
-      const mimi::events::decode_frame_error &)>::from<&on_decode_frame_error>();
+  bad_decode.on_error =
+      emel::callback<void(const mimi::events::decode_frame_error &)>::from<
+          &on_decode_frame_error>();
   CHECK_FALSE(machine.process_event(bad_decode));
   CHECK(g_decode_error_count == 1u);
   CHECK(err == emel::error::cast(mimi::error::request_shape));
@@ -751,11 +775,10 @@ TEST_CASE("mimi codec facade streams the f16 and q8 operand-class fixtures") {
     emel::error::type err = emel::error::cast(mimi::error::none);
     g_frame_samples = 0;
     g_n_q = 0;
-    mimi::event::initialize init{*loaded.model,
-                                 std::span<float>{arenas.prepared},
-                                 std::span<float>{arenas.state},
-                                 std::span<float>{arenas.workspace},
-                                 std::span<float>{arenas.frame}};
+    mimi::event::initialize init{
+        *loaded.model, std::span<float>{arenas.prepared},
+        std::span<float>{arenas.state}, std::span<float>{arenas.workspace},
+        std::span<float>{arenas.frame}};
     init.error_out = &err;
     init.on_done = emel::callback<void(
         const mimi::events::initialize_done &)>::from<&on_initialize_done>();
@@ -851,8 +874,7 @@ TEST_CASE("mimi child actors report validation errors when driven directly") {
   {
     quantizer::sm machine{};
     emel::error::type err = emel::error::cast(quantizer::error::none);
-    quantizer::event::encode ev{unbound_runtime,
-                                std::span<float>{tiny_buf},
+    quantizer::event::encode ev{unbound_runtime, std::span<float>{tiny_buf},
                                 std::span<int32_t>{tiny_codes},
                                 std::span<float>{tiny_buf}};
     ev.error_out = &err;
@@ -860,10 +882,9 @@ TEST_CASE("mimi child actors report validation errors when driven directly") {
     CHECK(err == emel::error::cast(quantizer::error::runtime_unbound));
 
     err = emel::error::cast(quantizer::error::none);
-    quantizer::event::decode dev{unbound_runtime,
-                                 std::span<const int32_t>{tiny_codes},
-                                 std::span<float>{tiny_buf},
-                                 std::span<float>{tiny_buf}};
+    quantizer::event::decode dev{
+        unbound_runtime, std::span<const int32_t>{tiny_codes},
+        std::span<float>{tiny_buf}, std::span<float>{tiny_buf}};
     dev.error_out = &err;
     CHECK_FALSE(machine.process_event(dev));
     CHECK(err == emel::error::cast(quantizer::error::runtime_unbound));
@@ -893,12 +914,13 @@ TEST_CASE("mimi child actors report validation errors when driven directly") {
     // pcm shorter than one frame -> request_shape
     encoder::sm machine{};
     emel::error::type err = emel::error::cast(encoder::error::none);
-    encoder::event::encode ev{runtime,
-                              streaming,
-                              std::span<const float>{pcm.data(), pcm.size() - 1u},
-                              std::span<float>{frame},
-                              std::span<float>{workspace},
-                              std::span<float>{latent}};
+    encoder::event::encode ev{
+        runtime,
+        streaming,
+        std::span<const float>{pcm.data(), pcm.size() - 1u},
+        std::span<float>{frame},
+        std::span<float>{workspace},
+        std::span<float>{latent}};
     ev.error_out = &err;
     CHECK_FALSE(machine.process_event(ev));
     CHECK(err == emel::error::cast(encoder::error::request_shape));
@@ -933,13 +955,13 @@ TEST_CASE("mimi child actors report validation errors when driven directly") {
     // latent narrower than dim -> request_shape
     decoder::sm machine{};
     emel::error::type err = emel::error::cast(decoder::error::none);
-    decoder::event::decode ev{runtime,
-                              streaming,
-                              std::span<const float>{latent.data(),
-                                                     latent.size() - 1u},
-                              std::span<float>{frame},
-                              std::span<float>{workspace},
-                              std::span<float>{pcm}};
+    decoder::event::decode ev{
+        runtime,
+        streaming,
+        std::span<const float>{latent.data(), latent.size() - 1u},
+        std::span<float>{frame},
+        std::span<float>{workspace},
+        std::span<float>{pcm}};
     ev.error_out = &err;
     CHECK_FALSE(machine.process_event(ev));
     CHECK(err == emel::error::cast(decoder::error::request_shape));
@@ -974,11 +996,9 @@ TEST_CASE("mimi child actors report validation errors when driven directly") {
     // code_range
     quantizer::sm machine{};
     emel::error::type err = emel::error::cast(quantizer::error::none);
-    quantizer::event::encode ev{runtime,
-                                std::span<float>{latent.data(),
-                                                 latent.size() - 1u},
-                                std::span<int32_t>{codes},
-                                std::span<float>{workspace}};
+    quantizer::event::encode ev{
+        runtime, std::span<float>{latent.data(), latent.size() - 1u},
+        std::span<int32_t>{codes}, std::span<float>{workspace}};
     ev.error_out = &err;
     CHECK_FALSE(machine.process_event(ev));
     CHECK(err == emel::error::cast(quantizer::error::request_shape));
@@ -986,8 +1006,7 @@ TEST_CASE("mimi child actors report validation errors when driven directly") {
     err = emel::error::cast(quantizer::error::none);
     std::vector<int32_t> bad_codes(codes.size(), 0);
     bad_codes[0] = runtime.quantizer.codebook_entries;
-    quantizer::event::decode dev{runtime,
-                                 std::span<const int32_t>{bad_codes},
+    quantizer::event::decode dev{runtime, std::span<const int32_t>{bad_codes},
                                  std::span<float>{latent},
                                  std::span<float>{workspace}};
     dev.error_out = &err;

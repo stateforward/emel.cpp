@@ -1,0 +1,70 @@
+{
+  "version": "1.0",
+  "timestamp": "2026-07-09T18:25:29.229Z",
+  "phase": null,
+  "phase_name": "PersonaPlex Moshi CPU audio parity",
+  "phase_dir": null,
+  "plan": 1,
+  "task": 2,
+  "total_tasks": 5,
+  "status": "paused",
+  "completed_tasks": [
+    {
+      "id": 1,
+      "name": "Reproduce the first EMEL/reference divergence on current CPU-only binaries",
+      "status": "done",
+      "commit": "this WIP commit"
+    },
+    {
+      "id": 2,
+      "name": "Fix the first proven numerical or sampling divergence without hidden control flow",
+      "status": "in_progress",
+      "progress": "Added and passed a bit-exact arm64 GGML NEON softmax regression; full-card GGML-compatible sampling and actor-owned RNG remain unfinished."
+    }
+  ],
+  "remaining_tasks": [
+    {
+      "id": 3,
+      "name": "Run matched-seed moshi.cpp and EMEL PersonaPlex E2E from the same macOS say WAV",
+      "status": "not_started"
+    },
+    {
+      "id": 4,
+      "name": "Compare token traces and generated WAVs, then confirm and play intelligible speech",
+      "status": "not_started"
+    },
+    {
+      "id": 5,
+      "name": "Run scoped tests, domain checks, README sync, and quality gates",
+      "status": "not_started"
+    }
+  ],
+  "blockers": [
+    {
+      "description": "EMEL still diverges from moshi.cpp at generated frame 0 audio codebook 2 because the sampler does not yet materialize the same full-card f32 softmax probability buffer before top-k exponential sampling.",
+      "type": "technical",
+      "workaround": "Continue from the passing arm64 softmax regression and port the reference sampling arithmetic before rerunning the slow CPU E2E."
+    }
+  ],
+  "human_actions_pending": [],
+  "decisions": [
+    {
+      "decision": "Keep all reference and EMEL runs CPU-only.",
+      "rationale": "The user explicitly rejected Metal and requires CPU parity.",
+      "phase": null
+    },
+    {
+      "decision": "Treat frame 0 codebook 2 as the earliest authoritative failure boundary.",
+      "rationale": "With seed 1234 and aligned draw counts, both implementations emit 1049,488 before EMEL chooses 572 and moshi.cpp chooses 1632.",
+      "phase": null
+    },
+    {
+      "decision": "Port GGML's arm64 NEON v_expf arithmetic before changing model execution.",
+      "rationale": "The prior EMEL softmax used scalar expf on arm64 and differed from actual GGML output by 1-2 ULPs; the new regression now matches all 16 reference lanes bit-for-bit.",
+      "phase": null
+    }
+  ],
+  "uncommitted_files": [],
+  "next_action": "Replace Moshi sampling's raw-logit shortcut with the reference sequence: f32 inverse-temperature scaling, full-card soft_max_row_ggml, top-k on materialized probabilities, reference exponential draws, and f32 probability/divisor argmax; add a failing sampler regression first and keep behavior choices in guards/transitions.",
+  "context_notes": "The goal is incomplete. No EMEL output WAV has completed. A fresh CPU run reproduced the same codebook-2 mismatch and stopped during voice prefill at frame 10. The arm64 softmax regression passes, but the full sampling path, injected/model-owned inference configuration, actor-owned RNG, matched E2E run, audible verification, and final gates remain."
+}

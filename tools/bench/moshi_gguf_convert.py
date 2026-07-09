@@ -13,9 +13,11 @@ This converter produces the emel moshi GGUF convention:
   - CRC-mangled tensor names restored to their canonical long names
   - for `lm`: the SentencePiece text tokenizer embedded as standard
     `tokenizer.ggml.*` keys so emel's generic vocab loader consumes it
+  - optionally for `lm`: selected Q4_K mat-vec weights rewritten to EMEL's
+    packed aarch64 CPU layout, exposed in GGUF as tensor dtype metadata
 
-Tensor payload bytes are streamed through unchanged (same order, same
-alignment, same relative offsets).
+Tensor payload bytes are streamed through unchanged unless an explicit rewrite
+option is selected.
 
 stdlib-only by design, matching tools/bench/whisper_normalize_model.py.
 """
@@ -26,6 +28,7 @@ import argparse
 import hashlib
 import json
 import math
+import re
 import struct
 import zlib
 from dataclasses import dataclass
@@ -45,9 +48,24 @@ GGUF_TYPE_ARRAY = 9
 # tensor dtype codes (ggml enumeration)
 GGML_DTYPE_F32 = 0
 GGML_DTYPE_F16 = 1
+GGML_DTYPE_Q4_0 = 2
+GGML_DTYPE_Q4_1 = 3
+GGML_DTYPE_Q5_0 = 6
+GGML_DTYPE_Q5_1 = 7
 GGML_DTYPE_Q8_0 = 8
+GGML_DTYPE_Q2_K = 10
+GGML_DTYPE_Q3_K = 11
+GGML_DTYPE_Q4_K = 12
+GGML_DTYPE_Q5_K = 13
+GGML_DTYPE_Q6_K = 14
+GGML_DTYPE_Q8_K = 15
+EMEL_DTYPE_Q4_K_X8_BL8 = 42
 Q8_0_BLOCK = 32
 Q8_0_BLOCK_BYTES = 34  # fp16 scale + 32 int8
+QK_K = 256
+Q4_K_BLOCK_BYTES = 144
+Q4_K_X8_ROWS = 8
+Q4_K_X8_BLOCK_BYTES = 1152
 
 # weight classes safe to quantize in a mimi component: the transformer and
 # RVQ projections (uniform row length, k % 32 == 0, consumed as mat-vecs by
@@ -128,6 +146,13 @@ class TensorInfo:
   dims: tuple[int, ...]
   dtype: int
   offset: int
+
+
+@dataclass(frozen=True)
+class TensorPayloadPlan:
+  source: TensorInfo
+  mode: str
+  padding: int
 
 
 class Reader:
@@ -326,10 +351,6 @@ def load_lm_config(path: Path) -> dict:
       raise ValueError(
           f"{path}: unsupported {key}={config[key]!r} "
           f"(only {SUPPORTED_LM_VALUES[key]!r} is supported)")
-  if config.get("depformer_weights_per_step_schedule"):
-    raise ValueError(
-        f"{path}: depformer_weights_per_step_schedule is not supported")
-
   if config["dep_q"] > 0:
     dep_required = [
         "depformer_dim", "depformer_num_heads", "depformer_num_layers",
@@ -347,6 +368,24 @@ def load_lm_config(path: Path) -> dict:
             f"(only {SUPPORTED_LM_VALUES[key]!r} is supported)")
     if not config["depformer_multi_linear"]:
       raise ValueError(f"{path}: depformer_multi_linear=false is unsupported")
+    schedule = config.get("depformer_weights_per_step_schedule")
+    if schedule is not None:
+      if not isinstance(schedule, list):
+        raise ValueError(
+            f"{path}: depformer_weights_per_step_schedule must be a list")
+      if len(schedule) != config["dep_q"]:
+        raise ValueError(
+            f"{path}: depformer_weights_per_step_schedule has "
+            f"{len(schedule)} entries, expected dep_q={config['dep_q']}")
+      if not all(isinstance(value, int) for value in schedule):
+        raise ValueError(
+            f"{path}: depformer_weights_per_step_schedule must contain only "
+            "integers")
+      for index, value in enumerate(schedule):
+        if value < 0 or value >= config["dep_q"]:
+          raise ValueError(
+              f"{path}: depformer_weights_per_step_schedule[{index}]="
+              f"{value} must be within [0, dep_q={config['dep_q']})")
 
   delays = config["delays"]
   if len(delays) != config["n_q"] + 1:
@@ -393,7 +432,105 @@ def load_lm_config(path: Path) -> dict:
       raise ValueError(
           f"{path}: depformer_dim={config['depformer_dim']} is not divisible "
           f"by depformer_num_heads={config['depformer_num_heads']}")
+  normalize_lm_inference_config(config, path)
   return config
+
+
+def normalize_lm_inference_config(config: dict, path: Path) -> None:
+  """Normalize explicit LMGen inference knobs into emitted GGUF metadata."""
+  if not config.get("depformer_weights_per_step", False):
+    return
+
+  inference = config.get("inference", {})
+
+  def get_value(key: str):
+    flat_key = f"inference_{key}"
+    if flat_key in config:
+      return config[flat_key]
+    return inference.get(key)
+
+  inference_dep_q = get_value("dep_q")
+  if inference_dep_q is None:
+    raise ValueError(
+        f"{path}: depformer_weights_per_step=true requires "
+        "inference_dep_q metadata")
+
+  prompt_tokens = get_value("prompt_tokens")
+  if prompt_tokens is None:
+    raise ValueError(
+        f"{path}: depformer_weights_per_step=true requires "
+        "inference_prompt_tokens metadata")
+
+  pre_silence = get_value("pre_text_silence_frames")
+  if pre_silence is None:
+    raise ValueError(
+        f"{path}: depformer_weights_per_step=true requires "
+        "inference_pre_text_silence_frames metadata")
+
+  post_silence = get_value("post_text_silence_frames")
+  if post_silence is None:
+    raise ValueError(
+        f"{path}: depformer_weights_per_step=true requires "
+        "inference_post_text_silence_frames metadata")
+
+  if not isinstance(inference_dep_q, int):
+    raise ValueError(f"{path}: inference_dep_q must be an integer")
+  if inference_dep_q <= 0 or inference_dep_q > config["dep_q"]:
+    raise ValueError(
+        f"{path}: inference_dep_q={inference_dep_q} must be within "
+        f"[1, dep_q={config['dep_q']}]")
+  if not isinstance(pre_silence, int) or pre_silence < 0:
+    raise ValueError(
+        f"{path}: inference_pre_text_silence_frames must be a non-negative "
+        "integer")
+  if not isinstance(post_silence, int) or post_silence < 0:
+    raise ValueError(
+        f"{path}: inference_post_text_silence_frames must be a non-negative "
+        "integer")
+  if not isinstance(prompt_tokens, list):
+    raise ValueError(f"{path}: inference_prompt_tokens must be a list")
+  if len(prompt_tokens) != config["n_q"] + 1:
+    raise ValueError(
+        f"{path}: inference_prompt_tokens has {len(prompt_tokens)} entries, "
+        f"expected n_q+1 = {config['n_q'] + 1}")
+  if any(not isinstance(token, int) for token in prompt_tokens):
+    raise ValueError(
+        f"{path}: inference_prompt_tokens must contain only integers")
+  if not 0 <= prompt_tokens[0] < config["text_card"]:
+    raise ValueError(
+        f"{path}: inference_prompt_tokens[0]={prompt_tokens[0]} must be "
+        f"within [0, text_card={config['text_card']})")
+  for index, token in enumerate(prompt_tokens[1:], start=1):
+    if not 0 <= token < config["card"]:
+      raise ValueError(
+          f"{path}: inference_prompt_tokens[{index}]={token} must be within "
+          f"[0, card={config['card']})")
+
+  config["inference_dep_q"] = inference_dep_q
+  config["inference_prompt_tokens"] = list(prompt_tokens)
+  config["inference_pre_text_silence_frames"] = pre_silence
+  config["inference_post_text_silence_frames"] = post_silence
+
+
+def resolve_mimi_n_q(config_path: Path | None) -> int:
+  if config_path is None:
+    return 16
+  config = json.loads(config_path.read_text(encoding="utf-8"))
+  if "n_q" not in config:
+    raise ValueError(f"{config_path}: mimi conversion config requires n_q")
+  if not isinstance(config["n_q"], int):
+    raise ValueError(f"{config_path}: n_q must be an integer")
+  if config.get("depformer_weights_per_step", False):
+    normalize_lm_inference_config(config, config_path)
+    return config["inference_dep_q"]
+  return config["n_q"]
+
+
+def depformer_weight_count(config: dict) -> int:
+  schedule = config.get("depformer_weights_per_step_schedule")
+  if schedule:
+    return max(schedule) + 1
+  return config["dep_q"] if config.get("depformer_multi_linear") else 1
 
 
 def cross_check_lm(infos: list[TensorInfo], config: dict) -> None:
@@ -443,8 +580,11 @@ def cross_check_lm(infos: list[TensorInfo], config: dict) -> None:
           f"{layer_count} layer tensors present)")
     require_block("lm.transformer", layer, with_gating=True)
   if config["dep_q"] > 0:
-    if count_prefixed(infos, "lm.depformer_in.") != config["dep_q"]:
-      raise ValueError("lm.depformer_in.* count does not match config dep_q")
+    expected_depformer_weights = depformer_weight_count(config)
+    if count_prefixed(infos, "lm.depformer_in.") != expected_depformer_weights:
+      raise ValueError(
+          "lm.depformer_in.* count does not match depformer weight count "
+          f"{expected_depformer_weights}")
     if count_prefixed(infos, "lm.linears.") != config["dep_q"]:
       raise ValueError("lm.linears.* count does not match config dep_q")
     # The C++ contract also requires the depformer text-embedding family for
@@ -932,6 +1072,14 @@ def append_lm_kv(kv: KvWriter, config: dict) -> None:
   kv.boolean("moshi.lm.demux_second_stream",
              config.get("demux_second_stream", False))
   kv.i32_array("moshi.lm.delays", list(config["delays"]))
+  if config.get("depformer_weights_per_step", False):
+    kv.u32("moshi.lm.inference.dep_q", config["inference_dep_q"])
+    kv.u32("moshi.lm.inference.pre_text_silence_frames",
+           config["inference_pre_text_silence_frames"])
+    kv.u32("moshi.lm.inference.post_text_silence_frames",
+           config["inference_post_text_silence_frames"])
+    kv.i32_array("moshi.lm.inference.prompt_tokens",
+                 list(config["inference_prompt_tokens"]))
   kv.u32("moshi.lm.extra_heads.num_heads",
          config.get("extra_heads_num_heads", 0))
   if "model_type" in config:
@@ -950,6 +1098,9 @@ def append_lm_kv(kv: KvWriter, config: dict) -> None:
                config["depformer_multi_linear"])
     kv.boolean("moshi.lm.depformer.weights_per_step",
                config["depformer_weights_per_step"])
+    if config.get("depformer_weights_per_step_schedule") is not None:
+      kv.i32_array("moshi.lm.depformer.weights_per_step_schedule",
+                   list(config["depformer_weights_per_step_schedule"]))
     kv.u32("moshi.lm.depformer.low_rank_embeddings",
            config.get("depformer_low_rank_embeddings") or 0)
 
@@ -995,9 +1146,194 @@ def tensor_data_bytes(info: TensorInfo) -> int:
     return elements * 4
   if info.dtype == GGML_DTYPE_F16:
     return elements * 2
+  if info.dtype == GGML_DTYPE_Q4_0:
+    return elements // 32 * 18
+  if info.dtype == GGML_DTYPE_Q4_1:
+    return elements // 32 * 20
+  if info.dtype == GGML_DTYPE_Q5_0:
+    return elements // 32 * 22
+  if info.dtype == GGML_DTYPE_Q5_1:
+    return elements // 32 * 24
   if info.dtype == GGML_DTYPE_Q8_0:
     return elements // Q8_0_BLOCK * Q8_0_BLOCK_BYTES
+  if info.dtype == GGML_DTYPE_Q2_K:
+    return elements // QK_K * 84
+  if info.dtype == GGML_DTYPE_Q3_K:
+    return elements // QK_K * 110
+  if info.dtype == GGML_DTYPE_Q4_K:
+    return elements // QK_K * Q4_K_BLOCK_BYTES
+  if info.dtype == GGML_DTYPE_Q5_K:
+    return elements // QK_K * 176
+  if info.dtype == GGML_DTYPE_Q6_K:
+    return elements // QK_K * 210
+  if info.dtype == GGML_DTYPE_Q8_K:
+    return elements // QK_K * 292
+  if info.dtype == EMEL_DTYPE_Q4_K_X8_BL8:
+    if len(info.dims) < 2:
+      raise ValueError(
+          f"packed q4_k_x8_bl8 tensor {info.name!r} has dims {info.dims}")
+    cols, rows = info.dims[0], info.dims[1]
+    groups = (rows + Q4_K_X8_ROWS - 1) // Q4_K_X8_ROWS
+    return groups * (cols // QK_K) * Q4_K_X8_BLOCK_BYTES
   raise ValueError(f"unsupported dtype {info.dtype} for {info.name}")
+
+
+def get_scale_min_k4(index: int, scales: bytes) -> tuple[int, int]:
+  if index < 4:
+    return scales[index] & 63, scales[index + 4] & 63
+  scale = (scales[index + 4] & 0x0F) | ((scales[index - 4] >> 6) << 4)
+  minimum = (scales[index + 4] >> 4) | ((scales[index] >> 6) << 4)
+  return scale, minimum
+
+
+def write_q4_kx8_scale_chunk(out: bytearray, base: int, scales: list[int],
+                             mins: list[int]) -> None:
+  out[base + 0] = (scales[0] & 63) + ((scales[4] & 48) << 2)
+  out[base + 1] = (scales[1] & 63) + ((scales[5] & 48) << 2)
+  out[base + 2] = (scales[2] & 63) + ((scales[6] & 48) << 2)
+  out[base + 3] = (scales[3] & 63) + ((scales[7] & 48) << 2)
+  out[base + 4] = (mins[0] & 63) + ((mins[4] & 48) << 2)
+  out[base + 5] = (mins[1] & 63) + ((mins[5] & 48) << 2)
+  out[base + 6] = (mins[2] & 63) + ((mins[6] & 48) << 2)
+  out[base + 7] = (mins[3] & 63) + ((mins[7] & 48) << 2)
+  out[base + 8] = (scales[4] & 15) + ((mins[4] & 15) << 4)
+  out[base + 9] = (scales[5] & 15) + ((mins[5] & 15) << 4)
+  out[base + 10] = (scales[6] & 15) + ((mins[6] & 15) << 4)
+  out[base + 11] = (scales[7] & 15) + ((mins[7] & 15) << 4)
+
+
+def pack_q4_k_rows_x8_bl8(raw: bytes, rows: int, cols: int) -> bytes:
+  if cols <= 0 or rows <= 0 or cols % QK_K != 0:
+    raise ValueError(
+        f"cannot pack q4_k matrix with rows={rows}, cols={cols}")
+  block_count = cols // QK_K
+  expected = rows * block_count * Q4_K_BLOCK_BYTES
+  if len(raw) != expected:
+    raise ValueError(
+        f"q4_k payload has {len(raw)} bytes, expected {expected}")
+
+  zero_block = bytes(Q4_K_BLOCK_BYTES)
+  out = bytearray()
+  group_count = (rows + Q4_K_X8_ROWS - 1) // Q4_K_X8_ROWS
+  for group in range(group_count):
+    row_base = group * Q4_K_X8_ROWS
+    for block in range(block_count):
+      blocks: list[bytes] = []
+      for lane in range(Q4_K_X8_ROWS):
+        logical_row = row_base + lane
+        if logical_row < rows:
+          offset = (logical_row * block_count + block) * Q4_K_BLOCK_BYTES
+          blocks.append(raw[offset:offset + Q4_K_BLOCK_BYTES])
+        else:
+          blocks.append(zero_block)
+
+      for lane in range(Q4_K_X8_ROWS):
+        out.extend(blocks[lane][0:2])
+      for lane in range(Q4_K_X8_ROWS):
+        out.extend(blocks[lane][2:4])
+
+      packed_scales = bytearray(12 * Q4_K_X8_ROWS)
+      for scale_index in range(4):
+        scales: list[int] = []
+        mins: list[int] = []
+        for lane in range(Q4_K_X8_ROWS):
+          scales_bytes = blocks[lane][4:4 + 12]
+          scales.append(scales_bytes[scale_index] & 63)
+          mins.append(scales_bytes[scale_index + 4] & 63)
+        write_q4_kx8_scale_chunk(packed_scales, scale_index * 12, scales,
+                                 mins)
+      for scale_index in range(4):
+        scales = []
+        mins = []
+        for lane in range(Q4_K_X8_ROWS):
+          scales_bytes = blocks[lane][4:4 + 12]
+          scales.append(((scales_bytes[scale_index] & 192) >> 2) |
+                        (scales_bytes[scale_index + 8] & 15))
+          mins.append(((scales_bytes[scale_index + 4] & 192) >> 2) |
+                      ((scales_bytes[scale_index + 8] & 240) >> 4))
+        write_q4_kx8_scale_chunk(packed_scales, 48 + scale_index * 12,
+                                 scales, mins)
+      out.extend(packed_scales)
+
+      packed_qs = bytearray((QK_K // 2) * Q4_K_X8_ROWS)
+      interleave = 8
+      end = (QK_K * 4) // interleave
+      for index in range(end):
+        src_row = index % Q4_K_X8_ROWS
+        src_offset = (index // Q4_K_X8_ROWS) * interleave
+        dst_offset = index * interleave
+        qs = blocks[src_row][16:16 + QK_K // 2]
+        packed_qs[dst_offset:dst_offset + interleave] = \
+            qs[src_offset:src_offset + interleave]
+      out.extend(packed_qs)
+
+  return bytes(out)
+
+
+LM_Q4_K_PACKABLE_PATTERNS = (
+    re.compile(r"^lm\.text_linear\.weight$"),
+    re.compile(r"^lm\.depformer_in\.\d+\.weight$"),
+    re.compile(r"^lm\.linears\.\d+\.weight$"),
+    re.compile(
+        r"^lm\.transformer\.layers\.\d+\.self_attn\.in_proj_weight$"),
+    re.compile(
+        r"^lm\.transformer\.layers\.\d+\.self_attn\.in_projs\.0\.weight$"),
+    re.compile(
+        r"^lm\.transformer\.layers\.\d+\.self_attn\.out_projs\.0\.weight$"),
+    re.compile(
+        r"^lm\.transformer\.layers\.\d+\.gating\.linear_in\.weight$"),
+    re.compile(
+        r"^lm\.transformer\.layers\.\d+\.gating\.linear_out\.weight$"),
+    re.compile(
+        r"^lm\.depformer\.layers\.\d+\.self_attn\.in_proj_weight$"),
+    re.compile(
+        r"^lm\.depformer\.layers\.\d+\.self_attn\.in_projs\.\d+\.weight$"),
+    re.compile(
+        r"^lm\.depformer\.layers\.\d+\.self_attn\.out_projs\.\d+\.weight$"),
+    re.compile(
+        r"^lm\.depformer\.layers\.\d+\.gating\.\d+\.linear_in\.weight$"),
+    re.compile(
+        r"^lm\.depformer\.layers\.\d+\.gating\.\d+\.linear_out\.weight$"),
+)
+
+
+def is_lm_q4_k_packable(info: TensorInfo) -> bool:
+  return (info.dtype == GGML_DTYPE_Q4_K and len(info.dims) == 2 and
+          info.dims[0] % QK_K == 0 and info.dims[1] > 0 and
+          any(pattern.match(info.name) for pattern in
+              LM_Q4_K_PACKABLE_PATTERNS))
+
+
+def plan_lm_q4_k_packing(
+    infos: list[TensorInfo],
+    pack_lm_q4_k: str) -> tuple[list[TensorInfo], list[TensorPayloadPlan], int]:
+  if pack_lm_q4_k != "q4_k_x8_bl8":
+    raise ValueError(f"unsupported --pack-lm-q4-k type: {pack_lm_q4_k}")
+
+  new_infos: list[TensorInfo] = []
+  plans: list[TensorPayloadPlan] = []
+  offset = 0
+  packed = 0
+  for info in infos:
+    dtype = info.dtype
+    mode = "raw"
+    if is_lm_q4_k_packable(info):
+      dtype = EMEL_DTYPE_Q4_K_X8_BL8
+      mode = "q4_k_x8_bl8"
+      packed += 1
+    new_info = TensorInfo(
+        name=info.name, dims=info.dims, dtype=dtype, offset=offset)
+    size = tensor_data_bytes(new_info)
+    offset += size
+    pad = (-offset) % GGUF_ALIGNMENT
+    offset += pad
+    new_infos.append(new_info)
+    plans.append(TensorPayloadPlan(source=info, mode=mode, padding=pad))
+
+  if packed == 0:
+    raise ValueError(
+        "--pack-lm-q4-k selected but no matching LM Q4_K tensors were found")
+  return new_infos, plans, packed
 
 
 def is_mimi_quantizable(info: TensorInfo) -> bool:
@@ -1123,14 +1459,73 @@ def write_enriched(source: Path, output: Path, infos: list[TensorInfo],
       dst.write(chunk)
 
 
+def copy_exact(src, dst, size: int) -> None:
+  remaining = size
+  while remaining > 0:
+    chunk = src.read(min(remaining, 8 * 1024 * 1024))
+    if not chunk:
+      raise ValueError("unexpected EOF while copying GGUF tensor payload")
+    dst.write(chunk)
+    remaining -= len(chunk)
+
+
+def write_rewritten_from_source(output: Path, infos: list[TensorInfo],
+                                plans: list[TensorPayloadPlan], source: Path,
+                                data_start: int, kv: KvWriter) -> None:
+  if len(infos) != len(plans):
+    raise ValueError("tensor payload plan count does not match tensor infos")
+  out = bytearray()
+  out.extend(GGUF_MAGIC)
+  out.extend(struct.pack("<IQQ", GGUF_VERSION, len(infos), kv.count))
+  out.extend(kv.buffer)
+  for info in infos:
+    write_string(out, info.name)
+    out.extend(struct.pack("<I", len(info.dims)))
+    for dim in info.dims:
+      out.extend(struct.pack("<Q", dim))
+    out.extend(struct.pack("<IQ", info.dtype, info.offset))
+  out.extend(b"\0" * ((-len(out)) % GGUF_ALIGNMENT))
+
+  output.parent.mkdir(parents=True, exist_ok=True)
+  with output.open("wb") as dst, source.open("rb") as src:
+    dst.write(out)
+    for info, plan in zip(infos, plans):
+      source_size = tensor_data_bytes(plan.source)
+      src.seek(data_start + plan.source.offset)
+      if plan.mode == "raw":
+        copy_exact(src, dst, source_size)
+      elif plan.mode == "q4_k_x8_bl8":
+        raw = src.read(source_size)
+        if len(raw) != source_size:
+          raise ValueError(
+              f"unexpected EOF while reading {plan.source.name!r}")
+        packed = pack_q4_k_rows_x8_bl8(
+            raw, rows=plan.source.dims[1], cols=plan.source.dims[0])
+        expected = tensor_data_bytes(info)
+        if len(packed) != expected:
+          raise ValueError(
+              f"packed {plan.source.name!r} to {len(packed)} bytes, "
+              f"expected {expected}")
+        dst.write(packed)
+      else:
+        raise ValueError(f"unknown tensor payload rewrite mode {plan.mode!r}")
+      if plan.padding:
+        dst.write(b"\0" * plan.padding)
+
+
 def convert(source: Path, output: Path, config_path: Path | None,
             tokenizer_path: Path | None,
             mimi_preset_path: Path | None = None,
-            quantize: str | None = None) -> dict:
+            quantize: str | None = None,
+            pack_lm_q4_k: str | None = None) -> dict:
   infos, data_start = read_raw_gguf(source)
   component = detect_component(infos)
   if quantize is not None and component != "mimi":
     raise ValueError("--quantize currently supports mimi components only")
+  if pack_lm_q4_k is not None and component != "lm":
+    raise ValueError("--pack-lm-q4-k supports lm components only")
+  if quantize is not None and pack_lm_q4_k is not None:
+    raise ValueError("--quantize and --pack-lm-q4-k are component-specific")
 
   kv = KvWriter()
   kv.string("general.architecture", "moshi")
@@ -1143,7 +1538,7 @@ def convert(source: Path, output: Path, config_path: Path | None,
     if tokenizer_path is None:
       raise ValueError("--tokenizer is required for lm components")
     config = load_lm_config(config_path)
-    num_weights = config["dep_q"] if config.get("depformer_multi_linear") else 1
+    num_weights = depformer_weight_count(config)
     candidates = transformer_layer_candidates(
         "lm.transformer.", config["num_layers"], 1)
     candidates += transformer_layer_candidates(
@@ -1152,13 +1547,13 @@ def convert(source: Path, output: Path, config_path: Path | None,
     cross_check_lm(infos, config)
     append_lm_kv(kv, config)
     append_tokenizer_kv(kv, parse_sentencepiece_model(tokenizer_path))
+    if pack_lm_q4_k is not None:
+      kv.string("moshi.lm.tensor_packing", pack_lm_q4_k)
   elif component == "mimi":
     preset = dict(MIMI_PRESET)
     if mimi_preset_path is not None:
       preset.update(json.loads(mimi_preset_path.read_text(encoding="utf-8")))
-    n_q = 16
-    if config_path is not None:
-      n_q = json.loads(config_path.read_text(encoding="utf-8"))["n_q"]
+    n_q = resolve_mimi_n_q(config_path)
     layers = preset["transformer_num_layers"]
     candidates = transformer_layer_candidates(
         "mimi.encoder_transformer.transformer.", layers, 1)
@@ -1176,10 +1571,14 @@ def convert(source: Path, output: Path, config_path: Path | None,
     kv.string("moshi.voice.format", VOICE_FORMAT)
 
   quantized_count = 0
+  packed_count = 0
   if quantize is not None:
     infos, payloads, quantized_count = quantize_mimi_tensors(
         source, infos, data_start, quantize)
     write_rewritten(output, infos, payloads, kv)
+  elif pack_lm_q4_k is not None:
+    infos, plans, packed_count = plan_lm_q4_k_packing(infos, pack_lm_q4_k)
+    write_rewritten_from_source(output, infos, plans, source, data_start, kv)
   else:
     write_enriched(source, output, infos, data_start, kv)
   manifest = {
@@ -1193,6 +1592,9 @@ def convert(source: Path, output: Path, config_path: Path | None,
   if quantize is not None:
     manifest["quantization"] = quantize
     manifest["quantized_tensors"] = quantized_count
+  if pack_lm_q4_k is not None:
+    manifest["lm_tensor_packing"] = pack_lm_q4_k
+    manifest["packed_tensors"] = packed_count
   return manifest
 
 
@@ -1204,7 +1606,8 @@ def parse_args() -> argparse.Namespace:
                       help="enriched emel moshi GGUF to write")
   parser.add_argument("--config", type=Path, default=None,
                       help="moshi config JSON (personaplex-config.json); "
-                           "required for lm components")
+                           "required for lm components; optional for mimi "
+                           "components to declare active inference n_q")
   parser.add_argument("--tokenizer", type=Path, default=None,
                       help="SentencePiece .model file; required for lm "
                            "components")
@@ -1217,13 +1620,17 @@ def parse_args() -> argparse.Namespace:
                       help="quantize the mimi projection weight classes "
                            "(transformer + RVQ projections) to the given "
                            "block format; requires numpy")
+  parser.add_argument("--pack-lm-q4-k", choices=("q4_k_x8_bl8",),
+                      default=None,
+                      help="rewrite selected LM Q4_K mat-vec/logit weights "
+                           "to EMEL packed CPU tensor dtype metadata")
   return parser.parse_args()
 
 
 def main() -> int:
   args = parse_args()
   manifest = convert(args.source, args.output, args.config, args.tokenizer,
-                     args.mimi_preset, args.quantize)
+                     args.mimi_preset, args.quantize, args.pack_lm_q4_k)
   if args.manifest is not None:
     args.manifest.parent.mkdir(parents=True, exist_ok=True)
     args.manifest.write_text(json.dumps(manifest, indent=2) + "\n",

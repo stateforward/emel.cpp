@@ -232,7 +232,7 @@ TEST_CASE("mimi codec binds and encodes deterministic frames") {
   bound_codec codec_state{};
   REQUIRE(bind_or_fail(*loaded.model, codec_state));
   CHECK(codec_state.runtime.frame_samples == 1920);
-  CHECK(codec_state.runtime.n_q == 4);
+  CHECK(codec_state.runtime.n_q == 2);
   CHECK(codec_state.runtime.dim == 16);
 
   const auto pcm = deterministic_pcm(codec_state.runtime.frame_samples);
@@ -276,6 +276,23 @@ TEST_CASE("mimi codec decodes codes back to a full frame of audio") {
   REQUIRE(decode_frame(codec_state, std::span<const int32_t>{codes},
                        std::span<float>{pcm}));
   CHECK(all_finite(pcm.data(), pcm.size()));
+
+  codec::reset_streaming_state(codec_state.runtime, codec_state.streaming);
+  const size_t partial_count =
+      std::min(codes.size() - 1u,
+               static_cast<size_t>(
+                   codec_state.runtime.quantizer.semantic.level_count + 1));
+  REQUIRE(partial_count > 0u);
+  REQUIRE(partial_count < codes.size());
+  std::vector<float> partial_pcm(
+      static_cast<size_t>(codec_state.runtime.frame_samples), 0.0f);
+  CHECK(codec::validate_codes_in_range(
+      codec_state.runtime,
+      std::span<const int32_t>{codes.data(), partial_count}));
+  REQUIRE(decode_frame(codec_state,
+                       std::span<const int32_t>{codes.data(), partial_count},
+                       std::span<float>{partial_pcm}));
+  CHECK(all_finite(partial_pcm.data(), partial_pcm.size()));
 
   // out-of-range codes are rejected by the pure request validator the
   // quantizer/facade guards route on (the compute path never sees them)

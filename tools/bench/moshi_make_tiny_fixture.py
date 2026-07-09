@@ -8,7 +8,7 @@ Produces, under --output-dir (tests/models by default):
                                 exercises the loader-rejection path and the
                                 converter round-trip)
   - moshi-tiny-lm.gguf          enriched LM fixture (via moshi_gguf_convert)
-  - mimi-tiny.gguf              enriched Mimi codec fixture
+  - mimi-tiny.gguf              enriched PersonaPlex-active Mimi codec fixture
   - moshi-tiny-voice.gguf       enriched PersonaPlex voice-prompt fixture
 
 All payloads are deterministic (fixed LCG seed); regenerating the fixtures is
@@ -58,6 +58,10 @@ TINY_CONFIG = {
     "depformer_gating": "silu",
     "depformer_pos_emb": "none",
     "depformer_weights_per_step": True,
+    "inference_dep_q": 2,
+    "inference_prompt_tokens": [3, 4, 5, 6, 7],
+    "inference_pre_text_silence_frames": 1,
+    "inference_post_text_silence_frames": 1,
     "cross_attention": False,
     "model_type": "personaplex",
     "tokenizer_name": "moshi-tokenizer-tiny.model",
@@ -212,6 +216,8 @@ def mimi_tensors(rng: Lcg, preset=TINY_MIMI_PRESET,
                      tuple[str, tuple[int, ...], int, bytes]]:
   dim = preset["dim"]
   card = preset["card"]
+  # The raw synthetic cache carries the full tiny LM codebook count. The
+  # converter declares the active PersonaPlex inference count in GGUF metadata.
   n_q = TINY_CONFIG["n_q"]
 
   def t(name, *dims):

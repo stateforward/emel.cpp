@@ -1014,6 +1014,8 @@ struct generation_load_state {
   emel::text::tokenizer::sm tokenizer = {};
   emel::text::conditioner::sm conditioner = {};
   emel::model::generation::contract generation_contract = {};
+  emel::text::generator::matmul::lane_pool<7u, 128u, 1048576u>
+      parallel_matmul_lanes = {};
   std::unique_ptr<emel::text::generator::sm> generator = {};
   reference_backend reference = {};
   generation_trace *emel_trace = nullptr;
@@ -1095,8 +1097,8 @@ bool audit_has_native_quantized_tensor_type(
   const int32_t tensor_type = static_cast<int32_t>(dtype);
   for (const auto &stage : audit.stages) {
     if (stage.tensor_type == tensor_type &&
-        stage.contract ==
-            emel::model::generation::quantized_contract_kind::native_quantized) {
+        stage.contract == emel::model::generation::quantized_contract_kind::
+                              native_quantized) {
       return true;
     }
   }
@@ -16204,8 +16206,8 @@ void dump_reference_decode_seam(generation_load_state &state) {
       const auto contract_name =
           emel::model::generation::quantized_contract_kind_name(stage.contract);
       const uint32_t supported =
-          stage.contract ==
-                  emel::model::generation::quantized_contract_kind::explicit_no_claim
+          stage.contract == emel::model::generation::quantized_contract_kind::
+                                explicit_no_claim
               ? 0u
               : 1u;
       std::fprintf(
@@ -18930,7 +18932,7 @@ int run_generation_harness_contract(
                                            debug_audit)) {
       emel::model::generation::block_view debug_block{};
       if (emel::model::generation::lookup_block_view(debug_execution, 0,
-                                                debug_block) ==
+                                                     debug_block) ==
           emel::error::cast(emel::model::loader::error::none)) {
         const auto print_tensor_shape =
             [&](const char *label,

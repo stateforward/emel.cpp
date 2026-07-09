@@ -2,8 +2,10 @@
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <cmath>
 #include <concepts>
+#include <cstdint>
 #include <cstring>
 #include <span>
 #include <vector>
@@ -415,6 +417,8 @@ TEST_CASE("kernel_backends_accept_dispatch_event") {
   kernel_sm kernel_machine{};
   emel::kernel::any any_machine{};
 
+  CHECK(kernel_machine.kind() == emel::kernel::detect_host_kind());
+  CHECK(any_machine.kind() == emel::kernel::detect_host_kind());
   CHECK(x86_64_machine.process_event(event));
   CHECK(aarch64_machine.process_event(event));
   CHECK(kernel_machine.process_event(event));
@@ -703,6 +707,28 @@ TEST_CASE("kernel_detail_stride_paths_and_scalar_helpers") {
       .dst = make_dst(dst_storage, dtype::f32, 4),
   };
   CHECK_FALSE(emel::kernel::detail::execute_scalar(unsupported_ev));
+}
+
+TEST_CASE("kernel_soft_max_row_matches_ggml_arm64_neon_bits") {
+#if defined(__aarch64__) && defined(__ARM_NEON)
+  std::array<float, 16> values = {
+      0.25f,  -0.5f, 1.25f,  -3.0f, 2.5f, 0.0f,  -1.5f, 0.75f,
+      3.25f, -2.25f, 1.0f, 0.125f, -0.875f, 2.0f, -4.0f, 0.5f,
+  };
+  constexpr std::array<uint32_t, 16> expected = {
+      0x3caece97u, 0x3c25255eu, 0x3d6d965au, 0x3a58e566u,
+      0x3e4f50b8u, 0x3c8823cbu, 0x3b7303e3u, 0x3d101aa1u,
+      0x3edb717au, 0x3ae595a1u, 0x3d390880u, 0x3c9a4441u,
+      0x3be3018fu, 0x3dfb7c76u, 0x399f954fu, 0x3ce074e5u,
+  };
+
+  emel::kernel::detail::soft_max_row_ggml(
+      static_cast<int64_t>(values.size()), values.data());
+
+  for (size_t index = 0; index < values.size(); ++index) {
+    CHECK(std::bit_cast<uint32_t>(values[index]) == expected[index]);
+  }
+#endif
 }
 
 TEST_CASE("kernel_backends_reject_quantized_dispatch_dtypes") {

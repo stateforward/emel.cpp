@@ -344,6 +344,12 @@ fetch pinned artifacts and produce the EMEL-lane GGUF, but it does not build, li
 moshi.cpp reference lane. the guard is meant to fail if the maintained EMEL Moshi model contract
 rejects a valid converted LM GGUF.
 
+the converted GGUF owns the PersonaPlex inference contract. the converter writes
+`moshi.lm.inference.dep_q`, `moshi.lm.inference.pre_text_silence_frames`,
+`moshi.lm.inference.post_text_silence_frames`, and `moshi.lm.inference.prompt_tokens`; EMEL loads
+those fields from model metadata instead of hardcoding prompt or delayed-codebook constants in the
+generator.
+
 the default model discovery order is:
 
 - `--model`
