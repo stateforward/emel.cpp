@@ -731,6 +731,58 @@ TEST_CASE("kernel_soft_max_row_matches_ggml_arm64_neon_bits") {
 #endif
 }
 
+TEST_CASE("kernel_rms_norm_matches_ggml_float_square_order") {
+  std::array<float, 4096> src = {};
+  constexpr float eps = 1.0e-8f;
+  float scale = 0.0f;
+  uint32_t fixture_seed = 0u;
+  for (uint32_t seed = 1u; seed <= 4096u; ++seed) {
+    uint32_t state = seed;
+    for (size_t index = 0; index < src.size(); ++index) {
+      state = state * 1664525u + 1013904223u;
+      const int32_t centered = static_cast<int32_t>(state & 0xffffu) - 32768;
+      const int exponent = static_cast<int>((state >> 16u) % 18u) - 12;
+      src[index] =
+          std::ldexp(static_cast<float>(centered) / 32768.0f, exponent);
+    }
+
+    double ggml_sum = 0.0;
+    double widened_sum = 0.0;
+    for (const float value : src) {
+      ggml_sum += static_cast<double>(value * value);
+      widened_sum += static_cast<double>(value) * static_cast<double>(value);
+    }
+    const float mean = static_cast<float>(ggml_sum / src.size());
+    const float widened_mean = static_cast<float>(widened_sum / src.size());
+    scale = 1.0f / std::sqrt(mean + eps);
+    const float widened_scale = 1.0f / std::sqrt(widened_mean + eps);
+    if (std::bit_cast<uint32_t>(scale) !=
+        std::bit_cast<uint32_t>(widened_scale)) {
+      fixture_seed = seed;
+      break;
+    }
+  }
+  REQUIRE(fixture_seed != 0u);
+  std::array<float, 4096> expected = {};
+  for (size_t index = 0; index < src.size(); ++index) {
+    expected[index] = src[index] * scale;
+  }
+
+  std::array<float, 4096> actual = {};
+  emel::kernel::event::op_rms_norm rms_ev{
+      .src0 = make_src(src.data(), dtype::f32, src.size()),
+      .dst = make_dst(actual.data(), dtype::f32, actual.size()),
+  };
+  std::memcpy(rms_ev.op_params.data(), &eps, sizeof(eps));
+  rms_ev.op_params_size = sizeof(eps);
+  REQUIRE(emel::kernel::detail::run_rms_norm(rms_ev));
+
+  for (size_t index = 0; index < actual.size(); ++index) {
+    CHECK(std::bit_cast<uint32_t>(actual[index]) ==
+          std::bit_cast<uint32_t>(expected[index]));
+  }
+}
+
 TEST_CASE("kernel_backends_reject_quantized_dispatch_dtypes") {
   float src0[4] = {1.0f, 2.0f, 3.0f, 4.0f};
   float src1[4] = {4.0f, 3.0f, 2.0f, 1.0f};

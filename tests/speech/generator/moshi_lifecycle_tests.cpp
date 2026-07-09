@@ -890,6 +890,54 @@ TEST_CASE("speech_moshi_executor_initializes_lm_fixture") {
   CHECK(err == emel::error::cast(moshi_executor::error::none));
 }
 
+TEST_CASE("speech_moshi_executor_models_zero_seed_and_top_k_clamp") {
+  auto fixture = load_fixture_or_skip("moshi-tiny-lm.gguf");
+  if (fixture.model == nullptr) {
+    return;
+  }
+
+  moshi_executor::sm executor{};
+  emel::error::type err = emel::error::cast(moshi_executor::error::none);
+  moshi_executor::event::initialize init{*fixture.model};
+  init.sampling_enabled = true;
+  init.sampling_audio_temperature = 0.8f;
+  init.sampling_text_temperature = 0.7f;
+  init.sampling_audio_top_k = 1;
+  init.sampling_text_top_k = fixture.model->moshi_lm.text_card + 1;
+  init.sampling_seed = 0u;
+  init.error_out = &err;
+
+  REQUIRE(executor.process_event(init));
+  CHECK(err == emel::error::cast(moshi_executor::error::none));
+}
+
+TEST_CASE("speech_moshi_executor_sampling_matches_reference_probability_path") {
+  std::array<float, 2048> logits = {};
+  uint32_t logit_state = 1153427707u;
+  for (float &logit : logits) {
+    logit_state = static_cast<uint32_t>(
+        (static_cast<uint64_t>(logit_state) * 16807u) % 2147483647u);
+    logit = (static_cast<float>(logit_state) / 2147483647.0f - 0.5f) * 16.0f;
+  }
+  std::array<float, 250> top_probabilities = {};
+  std::array<int32_t, 250> top_indices = {};
+  std::array<int32_t, 2048> sorted_indices = {};
+  uint32_t random_state = 1234u;
+  int32_t best_index = -1;
+  float best_score = 0.0f;
+
+  moshi_executor::detail::scale_sampling_logits(logits, 2048, 0.8f);
+  moshi_executor::detail::compute_sampling_probabilities(logits, 2048);
+  moshi_executor::detail::compute_sampling_top_k(
+      logits, sorted_indices, top_probabilities, top_indices, 2048, 250);
+  moshi_executor::detail::compute_sampling_exponential_argmax(
+      top_probabilities, top_indices, 2048, 250, random_state, best_index,
+      best_score);
+
+  CHECK(best_index == 1582);
+  CHECK(random_state == 1237704734u);
+}
+
 TEST_CASE("speech_moshi_executor_rejects_graph_step_before_initialize") {
   auto fixture = load_fixture_or_skip("moshi-tiny-lm.gguf");
   if (fixture.model == nullptr) {
@@ -904,8 +952,8 @@ TEST_CASE("speech_moshi_executor_rejects_graph_step_before_initialize") {
   emel::memory::view::snapshot snapshot{};
 
   moshi::event::graph_step step{*fixture.model, snapshot,
-      std::span<const int32_t>{input},
-      std::span<int32_t>{output}, text_token};
+                                std::span<const int32_t>{input},
+                                std::span<int32_t>{output}, text_token};
   step.error_out = &err;
 
   CHECK_FALSE(executor.process_event(step));
@@ -921,6 +969,10 @@ TEST_CASE("speech_moshi_executor_runtime_choice_uses_explicit_transitions") {
       read_binary_file(repo_root() / "src" / "emel" / "speech" / "generator" /
                        "moshi" / "executor" / "actions.hpp");
   const std::string actions_source{action_bytes.begin(), action_bytes.end()};
+  const auto detail_bytes =
+      read_binary_file(repo_root() / "src" / "emel" / "speech" / "generator" /
+                       "moshi" / "executor" / "detail.hpp");
+  const std::string detail_source{detail_bytes.begin(), detail_bytes.end()};
 
   CHECK(source.find("infer_debug_phase") == std::string::npos);
   CHECK(source.find("debug_phase_out != nullptr") == std::string::npos);
@@ -934,6 +986,8 @@ TEST_CASE("speech_moshi_executor_runtime_choice_uses_explicit_transitions") {
   CHECK(actions_source.find("if (!ctx.kernel.process_event(projection_ev))") ==
         std::string::npos);
   CHECK(actions_source.find("if (!detail::bind_tensor_view") ==
+        std::string::npos);
+  CHECK(actions_source.find("if (runtime_ev.ctx.depformer_kv_bound") ==
         std::string::npos);
   CHECK(actions_source.find("(void)detail::bind_tensor_view") ==
         std::string::npos);
@@ -975,6 +1029,14 @@ TEST_CASE("speech_moshi_executor_runtime_choice_uses_explicit_transitions") {
         std::string::npos);
   CHECK(actions_source.find("effect_bind_depformer_token_logits") !=
         std::string::npos);
+  CHECK(source.find("state_sampling_seed_decision") != std::string::npos);
+  CHECK(source.find("state_text_sampling_top_k_decision") != std::string::npos);
+  CHECK(source.find("state_audio_sampling_top_k_decision") !=
+        std::string::npos);
+  CHECK(source.find("guard_sampling_seed_zero") != std::string::npos);
+  CHECK(actions_source.find("effect_bind_zero_sampling_seed") !=
+        std::string::npos);
+  CHECK(detail_source.find("random_state == 0u") == std::string::npos);
   CHECK(actions_source.find("effect_publish_temporal_out_norm") !=
         std::string::npos);
   CHECK(actions_source.find("struct effect_run_temporal_layer_norm {") ==
@@ -1838,6 +1900,82 @@ TEST_CASE("speech_moshi_executor_generates_audio_tokens_with_injected_kv") {
                     depformer_probe.value_cache.begin() +
                         static_cast<std::ptrdiff_t>(last_layer_end),
                     [](const uint16_t value) { return value != 0u; }));
+}
+
+TEST_CASE("speech_moshi_executor_sampling_rng_is_actor_owned") {
+  auto first_fixture = load_fixture_or_skip("moshi-tiny-lm.gguf");
+  auto second_fixture = load_fixture_or_skip("moshi-tiny-lm.gguf");
+  if (first_fixture.model == nullptr || second_fixture.model == nullptr) {
+    return;
+  }
+
+  temporal_kv_probe first_temporal{};
+  temporal_kv_probe second_temporal{};
+  depformer_kv_probe first_depformer{};
+  depformer_kv_probe second_depformer{};
+  moshi_executor::sm first{moshi_executor::bind_kv_caches(
+      moshi_executor::bind_temporal_kv_cache(&first_temporal,
+                                             temporal_kv_probe_bind),
+      moshi_executor::bind_depformer_kv_cache(&first_depformer,
+                                              depformer_kv_probe_bind))};
+  moshi_executor::sm second{moshi_executor::bind_kv_caches(
+      moshi_executor::bind_temporal_kv_cache(&second_temporal,
+                                             temporal_kv_probe_bind),
+      moshi_executor::bind_depformer_kv_cache(&second_depformer,
+                                              depformer_kv_probe_bind))};
+  emel::error::type first_err = emel::error::cast(moshi_executor::error::none);
+  emel::error::type second_err = emel::error::cast(moshi_executor::error::none);
+  moshi_executor::event::initialize first_init{*first_fixture.model};
+  moshi_executor::event::initialize second_init{*second_fixture.model};
+  for (auto *init : {&first_init, &second_init}) {
+    init->sampling_enabled = true;
+    init->sampling_audio_temperature = 0.8f;
+    init->sampling_text_temperature = 0.7f;
+    init->sampling_audio_top_k = 250;
+    init->sampling_text_top_k = 25;
+    init->sampling_seed = 1234u;
+  }
+  first_init.error_out = &first_err;
+  second_init.error_out = &second_err;
+  REQUIRE(first.process_event(first_init));
+  REQUIRE(second.process_event(second_init));
+
+  std::array<int32_t, moshi::event::k_max_codebooks> input = {};
+  std::array<int32_t, moshi::event::k_max_codebooks> first_output = {};
+  std::array<int32_t, moshi::event::k_max_codebooks> second_output = {};
+  input.fill(-1);
+  input[0] = first_fixture.model->moshi_lm.text_padding_id;
+  int32_t first_text_token = -1;
+  int32_t second_text_token = -1;
+  emel::memory::view::snapshot snapshot{};
+  snapshot.max_sequences = 1;
+  snapshot.sequence_active[0] = 1;
+  snapshot.sequence_length_values[0] = 1;
+  snapshot.sequence_kv_block_count[0] = 1;
+  snapshot.sequence_kv_blocks[0][0] = 0;
+  const auto input_span = std::span<const int32_t>{
+      input.data(), static_cast<size_t>(first_fixture.model->moshi_lm.n_q + 1)};
+  moshi::event::graph_step first_step{
+      *first_fixture.model, snapshot, input_span,
+      std::span<int32_t>{
+          first_output.data(),
+          static_cast<size_t>(first_fixture.model->moshi_lm.dep_q)},
+      first_text_token};
+  moshi::event::graph_step second_step{
+      *second_fixture.model, snapshot, input_span,
+      std::span<int32_t>{
+          second_output.data(),
+          static_cast<size_t>(second_fixture.model->moshi_lm.dep_q)},
+      second_text_token};
+  first_step.error_out = &first_err;
+  second_step.error_out = &second_err;
+
+  REQUIRE(first.process_event(first_step));
+  REQUIRE(second.process_event(second_step));
+  CHECK(first_text_token == second_text_token);
+  CHECK(std::equal(first_output.begin(),
+                   first_output.begin() + first_fixture.model->moshi_lm.dep_q,
+                   second_output.begin()));
 }
 
 TEST_CASE("speech_moshi_e2e_encodes_audio_generates_tokens_and_decodes_audio") {

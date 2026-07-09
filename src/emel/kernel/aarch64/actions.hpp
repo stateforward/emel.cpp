@@ -2748,11 +2748,11 @@ inline int32_t q4_k_min_sum_neon(const uint8_t *mins,
 }
 #endif
 
-inline float dot_q4_k_q8_k_block_neon(
+inline void accumulate_q4_k_q8_k_block_neon(
     const ::emel::kernel::detail::quant::block_q4_k &lhs,
-    const ::emel::kernel::detail::quant::block_q8_k &rhs) noexcept {
+    const ::emel::kernel::detail::quant::block_q8_k &rhs, float &sum) noexcept {
 #if !defined(__ARM_FEATURE_DOTPROD)
-  return ::emel::kernel::detail::dot_q4_k_q8_k_block_scalar(lhs, rhs);
+  sum += ::emel::kernel::detail::dot_q4_k_q8_k_block_scalar(lhs, rhs);
 #else
   uint32_t decoded_words[4] = {};
   decode_q4_k_scales_words(lhs, decoded_words);
@@ -2800,8 +2800,8 @@ inline float dot_q4_k_q8_k_block_neon(
   const float d = ::emel::kernel::detail::quant::fp16_to_fp32(lhs.d) * rhs.d;
   const float dmin =
       ::emel::kernel::detail::quant::fp16_to_fp32(lhs.dmin) * rhs.d;
-  return d * static_cast<float>(low_sum + high_sum) -
-         dmin * static_cast<float>(min_sum);
+  sum -= dmin * static_cast<float>(min_sum);
+  sum += d * static_cast<float>(low_sum + high_sum);
 #endif
 }
 
@@ -2815,7 +2815,7 @@ dot_q4_k_q8_k_row_neon(const ::emel::kernel::detail::quant::block_q4_k *lhs,
 #else
   float sum = 0.0f;
   for (uint64_t block = 0; block < block_count; ++block) {
-    sum += dot_q4_k_q8_k_block_neon(lhs[block], rhs[block]);
+    accumulate_q4_k_q8_k_block_neon(lhs[block], rhs[block], sum);
   }
   return sum;
 #endif

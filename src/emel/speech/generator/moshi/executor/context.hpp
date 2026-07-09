@@ -50,7 +50,7 @@ struct sampling_config {
   float text_temperature = 0.0f;
   int32_t audio_top_k = 0;
   int32_t text_top_k = 0;
-  uint32_t seed = 1u;
+  uint32_t random_state = 1u;
 };
 
 struct context {

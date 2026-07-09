@@ -107,8 +107,10 @@ struct step_ctx {
   detail::tensor_view projection_view = {};
   alignas(64) std::array<float, detail::k_max_sampling_card> logits = {};
   alignas(64) std::array<float, detail::k_max_sampling_top_k> top_scores = {};
+  alignas(
+      64) std::array<int32_t, detail::k_max_sampling_top_k> top_indices = {};
   alignas(64)
-      std::array<int32_t, detail::k_max_sampling_top_k> top_indices = {};
+      std::array<int32_t, detail::k_max_sampling_card> sampling_indices = {};
   alignas(64) std::array<float, detail::k_max_hidden_dim> row = {};
   alignas(64) std::array<float, detail::k_max_hidden_dim> hidden = {};
   alignas(64) std::array<float, detail::k_max_hidden_dim> transformer_out = {};

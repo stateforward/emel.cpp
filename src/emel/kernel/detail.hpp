@@ -4585,12 +4585,10 @@ inline bool run_rms_norm(const request_type &request) noexcept {
         for (uint64_t i0 = 0; i0 < cols; ++i0) {
           float value = 0.0f;
           std::memcpy(&value, src_row + i0 * src_nb0, sizeof(value));
-          sum += static_cast<double>(value) * static_cast<double>(value);
+          sum += static_cast<double>(value * value);
         }
-        const float scale =
-            1.0f /
-            std::sqrt(static_cast<float>(sum / static_cast<double>(cols)) +
-                      eps);
+        const float mean = static_cast<float>(sum / static_cast<double>(cols));
+        const float scale = 1.0f / std::sqrt(mean + eps);
         for (uint64_t i0 = 0; i0 < cols; ++i0) {
           float value = 0.0f;
           std::memcpy(&value, src_row + i0 * src_nb0, sizeof(value));

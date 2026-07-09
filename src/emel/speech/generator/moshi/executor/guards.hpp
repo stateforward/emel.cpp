@@ -29,6 +29,52 @@ struct guard_bind_contract_invalid {
   }
 };
 
+struct guard_sampling_seed_nonzero {
+  bool operator()(const event::initialize_run &runtime_ev,
+                  const action::context &) const noexcept {
+    return runtime_ev.request.sampling_seed != 0u;
+  }
+};
+
+struct guard_sampling_seed_zero {
+  bool operator()(const event::initialize_run &runtime_ev,
+                  const action::context &) const noexcept {
+    return runtime_ev.request.sampling_seed == 0u;
+  }
+};
+
+struct guard_text_sampling_top_k_within_card {
+  bool operator()(const event::initialize_run &runtime_ev,
+                  const action::context &) const noexcept {
+    return runtime_ev.request.sampling_text_top_k <=
+           runtime_ev.request.model.moshi_lm.text_card;
+  }
+};
+
+struct guard_text_sampling_top_k_exceeds_card {
+  bool operator()(const event::initialize_run &runtime_ev,
+                  const action::context &) const noexcept {
+    return runtime_ev.request.sampling_text_top_k >
+           runtime_ev.request.model.moshi_lm.text_card;
+  }
+};
+
+struct guard_audio_sampling_top_k_within_card {
+  bool operator()(const event::initialize_run &runtime_ev,
+                  const action::context &) const noexcept {
+    return runtime_ev.request.sampling_audio_top_k <=
+           runtime_ev.request.model.moshi_lm.card;
+  }
+};
+
+struct guard_audio_sampling_top_k_exceeds_card {
+  bool operator()(const event::initialize_run &runtime_ev,
+                  const action::context &) const noexcept {
+    return runtime_ev.request.sampling_audio_top_k >
+           runtime_ev.request.model.moshi_lm.card;
+  }
+};
+
 struct guard_step_model_matches {
   bool operator()(const event::step_run &runtime_ev,
                   const action::context &ctx) const noexcept {
@@ -500,8 +546,7 @@ struct guard_temporal_layer_attention_supported {
         lm.num_heads <= 0 || hidden_dim % lm.num_heads != 0 || head_dim <= 0 ||
         static_cast<uint64_t>(head_dim) > detail::k_max_hidden_dim ||
         sequence_length <= 0 || capacity <= 0 ||
-        static_cast<uint64_t>(capacity) >
-            detail::k_max_temporal_context ||
+        static_cast<uint64_t>(capacity) > detail::k_max_temporal_context ||
         view.kv_dim != hidden_dim || layer < 0 || layer >= view.layer_count ||
         view.layer_cache_offsets.empty() ||
         static_cast<size_t>(layer) >= view.layer_cache_offsets.size()) {
@@ -512,11 +557,11 @@ struct guard_temporal_layer_attention_supported {
     const size_t dim = static_cast<size_t>(hidden_dim);
     const int32_t logical_begin =
         sequence_length > capacity ? sequence_length - capacity : 0;
-    for (int32_t logical = logical_begin; logical < sequence_length; ++logical) {
+    for (int32_t logical = logical_begin; logical < sequence_length;
+         ++logical) {
       const int32_t physical = detail::physical_position(
           snapshot, runtime_ev.request.sequence_id, logical);
-      if (physical < 0 ||
-          physical >= capacity) {
+      if (physical < 0 || physical >= capacity) {
         return false;
       }
       const size_t begin = layer_offset + static_cast<size_t>(physical) * dim;
@@ -919,6 +964,7 @@ struct guard_text_sampling_config_valid {
                   const action::context &ctx) const noexcept {
     return ctx.sampling.enabled && ctx.sampling.text_temperature > 0.0f &&
            ctx.sampling.text_top_k > 0 &&
+           ctx.sampling.text_top_k <= ctx.session.text_card &&
            static_cast<uint64_t>(ctx.session.text_card) <=
                detail::k_max_sampling_card &&
            static_cast<uint64_t>(ctx.sampling.text_top_k) <=
@@ -1024,6 +1070,37 @@ struct guard_text_logits_failed {
   }
 };
 
+struct guard_text_sampling_succeeded {
+  bool operator()(const event::step_run &runtime_ev,
+                  const action::context &) const noexcept {
+    return runtime_ev.ctx.text_sampling_ok;
+  }
+};
+
+struct guard_text_sampling_failed {
+  bool operator()(const event::step_run &runtime_ev,
+                  const action::context &ctx) const noexcept {
+    return !guard_text_sampling_succeeded{}(runtime_ev, ctx);
+  }
+};
+
+struct guard_sampled_text_token_ready {
+  bool operator()(const event::step_run &runtime_ev,
+                  const action::context &ctx) const noexcept {
+    return guard_text_sampling_succeeded{}(runtime_ev, ctx) &&
+           guard_forced_text_token_absent{}(runtime_ev, ctx);
+  }
+};
+
+struct guard_forced_text_sampling_consumed {
+  bool operator()(const event::step_run &runtime_ev,
+                  const action::context &ctx) const noexcept {
+    return guard_text_sampling_succeeded{}(runtime_ev, ctx) &&
+           guard_forced_text_token_valid_and_sampling_consume{}(runtime_ev,
+                                                                ctx);
+  }
+};
+
 struct guard_depformer_kv_binding_present {
   bool operator()(const event::step_run &runtime_ev,
                   const action::context &ctx) const noexcept {
@@ -1065,8 +1142,7 @@ struct guard_depformer_scheduled_weight_present {
     const auto &lm = runtime_ev.request.model.moshi_lm;
     const int32_t codebook = runtime_ev.ctx.depformer_codebook_index;
     if (lm.depformer_weight_schedule_count == 0u || codebook < 0 ||
-        static_cast<uint32_t>(codebook) >=
-            lm.depformer_weight_schedule_count) {
+        static_cast<uint32_t>(codebook) >= lm.depformer_weight_schedule_count) {
       return false;
     }
     const int32_t weight_index =
@@ -1783,6 +1859,7 @@ struct guard_depformer_sampling_config_valid {
                   const action::context &ctx) const noexcept {
     return ctx.sampling.enabled && ctx.sampling.audio_temperature > 0.0f &&
            ctx.sampling.audio_top_k > 0 &&
+           ctx.sampling.audio_top_k <= ctx.session.audio_card &&
            static_cast<uint64_t>(ctx.session.audio_card) <=
                detail::k_max_sampling_card &&
            static_cast<uint64_t>(ctx.sampling.audio_top_k) <=
@@ -1795,6 +1872,20 @@ struct guard_depformer_sampling_config_invalid {
                   const action::context &ctx) const noexcept {
     return ctx.sampling.enabled && ctx.sampling.audio_temperature > 0.0f &&
            !guard_depformer_sampling_config_valid{}(runtime_ev, ctx);
+  }
+};
+
+struct guard_depformer_sampling_succeeded {
+  bool operator()(const event::step_run &runtime_ev,
+                  const action::context &) const noexcept {
+    return runtime_ev.ctx.depformer_sampling_ok;
+  }
+};
+
+struct guard_depformer_sampling_failed {
+  bool operator()(const event::step_run &runtime_ev,
+                  const action::context &ctx) const noexcept {
+    return !guard_depformer_sampling_succeeded{}(runtime_ev, ctx);
   }
 };
 

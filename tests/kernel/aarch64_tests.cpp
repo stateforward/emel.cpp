@@ -4,6 +4,7 @@
 #include <array>
 #include <cmath>
 #include <cstdint>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
@@ -88,6 +89,67 @@ make_row_sliced_lane_event(const emel::kernel::event::op_mul_mat &ev,
   sliced.dst.nb[2] = ev.dst.nb[1] * row_count;
   sliced.dst.nb[3] = sliced.dst.nb[2];
   return sliced;
+}
+
+float compute_ggml_q4_k_q8_k_row(
+    const emel::kernel::detail::quant::block_q4_k *lhs,
+    const emel::kernel::detail::quant::block_q8_k *rhs,
+    const size_t block_count) {
+  constexpr uint32_t kmask1 = 0x3f3f3f3fu;
+  constexpr uint32_t kmask2 = 0x0f0f0f0fu;
+  constexpr uint32_t kmask3 = 0x03030303u;
+  float sum = 0.0f;
+
+  for (size_t block = 0; block < block_count; ++block) {
+    uint32_t decoded_words[4] = {};
+    std::memcpy(decoded_words, lhs[block].scales.data(),
+                lhs[block].scales.size());
+    decoded_words[3] = ((decoded_words[2] >> 4u) & kmask2) |
+                       (((decoded_words[1] >> 6u) & kmask3) << 4u);
+    const uint32_t decoded_aux = decoded_words[1] & kmask1;
+    decoded_words[1] = (decoded_words[2] & kmask2) |
+                       (((decoded_words[0] >> 6u) & kmask3) << 4u);
+    decoded_words[2] = decoded_aux;
+    decoded_words[0] &= kmask1;
+
+    const auto *scales = reinterpret_cast<const uint8_t *>(decoded_words);
+    const auto *mins = reinterpret_cast<const uint8_t *>(decoded_words + 2);
+    int32_t min_sum = 0;
+    for (size_t index = 0; index < 8u; ++index) {
+      const int32_t pair_sum =
+          static_cast<int32_t>(rhs[block].bsums[index * 2u]) +
+          static_cast<int32_t>(rhs[block].bsums[index * 2u + 1u]);
+      min_sum += pair_sum * static_cast<int32_t>(mins[index]);
+    }
+
+    const uint8_t *q4 = lhs[block].qs.data();
+    const int8_t *q8 = rhs[block].qs.data();
+    int32_t low_sum = 0;
+    int32_t high_sum = 0;
+    for (size_t group = 0; group < 4u; ++group) {
+      int32_t low_dot = 0;
+      int32_t high_dot = 0;
+      for (size_t index = 0; index < 32u; ++index) {
+        low_dot += static_cast<int32_t>(q4[index] & 0x0fu) *
+                   static_cast<int32_t>(q8[index]);
+        high_dot += static_cast<int32_t>(q4[index] >> 4u) *
+                    static_cast<int32_t>(q8[index + 32u]);
+      }
+      low_sum += low_dot * static_cast<int32_t>(scales[group * 2u]);
+      high_sum += high_dot * static_cast<int32_t>(scales[group * 2u + 1u]);
+      q4 += 32u;
+      q8 += 64u;
+    }
+
+    const float d =
+        emel::kernel::detail::quant::fp16_to_fp32(lhs[block].d) * rhs[block].d;
+    const float dmin =
+        emel::kernel::detail::quant::fp16_to_fp32(lhs[block].dmin) *
+        rhs[block].d;
+    sum -= dmin * static_cast<float>(min_sum);
+    sum += d * static_cast<float>(low_sum + high_sum);
+  }
+  return sum;
 }
 
 } // namespace
@@ -1373,6 +1435,56 @@ TEST_CASE("kernel_aarch64_q4_k_row_neon_matches_scalar") {
       &q4, q8_blocks.data(), q8_blocks.size());
 
   CHECK(neon == doctest::Approx(scalar).epsilon(1e-5f));
+#endif
+}
+
+TEST_CASE("kernel_aarch64_q4_k_row_matches_ggml_accumulation_order") {
+#if !(defined(__aarch64__) && defined(__ARM_NEON) &&                           \
+      defined(__ARM_FEATURE_DOTPROD))
+  CHECK(true);
+#else
+  using emel::kernel::detail::quant::block_q4_k;
+  using emel::kernel::detail::quant::block_q8_k;
+  using emel::kernel::detail::quant::QK_K;
+
+  constexpr size_t block_count = 64u;
+  std::array<block_q4_k, block_count> q4_blocks = {};
+  std::array<block_q8_k, block_count> q8_blocks = {};
+  for (size_t block = 0; block < block_count; ++block) {
+    auto &q4 = q4_blocks[block];
+    auto &q8 = q8_blocks[block];
+    q4.d = emel::kernel::detail::quant::fp32_to_fp16(
+        0.0009765625f * static_cast<float>((block % 31u) + 1u));
+    q4.dmin = emel::kernel::detail::quant::fp32_to_fp16(
+        0.00048828125f * static_cast<float>((block % 29u) + 1u));
+    q8.d = 0.000244140625f * static_cast<float>((block % 23u) + 1u);
+    for (size_t index = 0; index < q4.scales.size(); ++index) {
+      q4.scales[index] =
+          static_cast<uint8_t>((block * 37u + index * 19u + 0x5au) & 0xffu);
+    }
+    for (size_t index = 0; index < q4.qs.size(); ++index) {
+      q4.qs[index] =
+          static_cast<uint8_t>((block * 17u + index * 29u + 0x96u) & 0xffu);
+    }
+    for (size_t index = 0; index < q8.qs.size(); ++index) {
+      q8.qs[index] = static_cast<int8_t>(
+          static_cast<int32_t>((block * 13u + index * 7u) % 255u) - 127);
+    }
+    for (size_t group = 0; group < q8.bsums.size(); ++group) {
+      int32_t group_sum = 0;
+      for (size_t index = 0; index < 16u; ++index) {
+        group_sum += static_cast<int32_t>(q8.qs[group * 16u + index]);
+      }
+      q8.bsums[group] = static_cast<int16_t>(group_sum);
+    }
+  }
+
+  const float expected = compute_ggml_q4_k_q8_k_row(
+      q4_blocks.data(), q8_blocks.data(), block_count);
+  const float actual = emel::kernel::aarch64::detail::dot_q4_k_q8_k_row_neon(
+      q4_blocks.data(), q8_blocks.data(), block_count);
+
+  CHECK(actual == expected);
 #endif
 }
 

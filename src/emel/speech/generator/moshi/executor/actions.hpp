@@ -7,7 +7,6 @@
 
 #include <algorithm>
 #include <cmath>
-#include <cstdlib>
 #include <cstring>
 #include <limits>
 
@@ -20,99 +19,6 @@ inline emel::error::type to_error(const error value) noexcept {
 }
 
 } // namespace detail_ns
-
-namespace sampling_ns {
-
-inline int32_t bounded_top_k(const int32_t requested,
-                             const int32_t card) noexcept {
-  int32_t top_k = requested;
-  if (top_k > card) {
-    top_k = card;
-  }
-  if (top_k < 0) {
-    top_k = 0;
-  }
-  return top_k;
-}
-
-inline void reset_top_k(event::step_ctx &ctx, const int32_t top_k) noexcept {
-  for (int32_t slot = 0; slot < top_k; ++slot) {
-    ctx.top_scores[static_cast<size_t>(slot)] =
-        -std::numeric_limits<float>::infinity();
-    ctx.top_indices[static_cast<size_t>(slot)] = -1;
-  }
-}
-
-inline void insert_top_k(event::step_ctx &ctx, const int32_t top_k,
-                         const int32_t index, const float score) noexcept {
-  for (int32_t slot = 0; slot < top_k; ++slot) {
-    if (score > ctx.top_scores[static_cast<size_t>(slot)]) {
-      for (int32_t move = top_k - 1; move > slot; --move) {
-        ctx.top_scores[static_cast<size_t>(move)] =
-            ctx.top_scores[static_cast<size_t>(move - 1)];
-        ctx.top_indices[static_cast<size_t>(move)] =
-            ctx.top_indices[static_cast<size_t>(move - 1)];
-      }
-      ctx.top_scores[static_cast<size_t>(slot)] = score;
-      ctx.top_indices[static_cast<size_t>(slot)] = index;
-      return;
-    }
-  }
-}
-
-inline bool
-consume_reference_random_draws(const int32_t card,
-                               const int32_t requested_top_k) noexcept {
-  const int32_t top_k = bounded_top_k(requested_top_k, card);
-  if (card <= 0 || top_k <= 0 ||
-      static_cast<uint64_t>(top_k) > detail::k_max_sampling_top_k) {
-    return false;
-  }
-  for (int32_t index = 0; index < top_k; ++index) {
-    (void)std::rand();
-  }
-  return true;
-}
-
-inline bool sample_top_k_exponential(event::step_ctx &ctx, const int32_t card,
-                                     const int32_t requested_top_k,
-                                     const float temperature) noexcept {
-  const int32_t top_k = bounded_top_k(requested_top_k, card);
-  if (card <= 0 || temperature <= 0.0f || top_k <= 0 ||
-      static_cast<uint64_t>(card) > detail::k_max_sampling_card ||
-      static_cast<uint64_t>(top_k) > detail::k_max_sampling_top_k) {
-    ctx.best_index = -1;
-    ctx.best_score = 0.0f;
-    return false;
-  }
-
-  reset_top_k(ctx, top_k);
-  for (int32_t index = 0; index < card; ++index) {
-    insert_top_k(ctx, top_k, index, ctx.logits[static_cast<size_t>(index)]);
-  }
-
-  const float max_score = ctx.top_scores[0];
-  float best_q = -std::numeric_limits<float>::infinity();
-  int32_t best_index = -1;
-  for (int32_t slot = 0; slot < top_k; ++slot) {
-    const float uniform =
-        static_cast<float>(std::rand()) / static_cast<float>(RAND_MAX);
-    const float exponential = -std::log(uniform);
-    const float weight = std::exp(
-        (ctx.top_scores[static_cast<size_t>(slot)] - max_score) / temperature);
-    const float q = weight / exponential;
-    if (q > best_q) {
-      best_q = q;
-      best_index = ctx.top_indices[static_cast<size_t>(slot)];
-    }
-  }
-
-  ctx.best_index = best_index;
-  ctx.best_score = best_q;
-  return best_index >= 0;
-}
-
-} // namespace sampling_ns
 
 struct effect_bind_contract {
   void operator()(const event::initialize_run &runtime_ev,
@@ -132,12 +38,50 @@ struct effect_bind_contract {
         runtime_ev.request.sampling_audio_temperature;
     ctx.sampling.text_temperature =
         runtime_ev.request.sampling_text_temperature;
-    ctx.sampling.audio_top_k = runtime_ev.request.sampling_audio_top_k;
-    ctx.sampling.text_top_k = runtime_ev.request.sampling_text_top_k;
-    ctx.sampling.seed = runtime_ev.request.sampling_seed;
-    std::srand(static_cast<unsigned int>(ctx.sampling.seed));
     (void)emel::model::moshi::detail::build_execution_contract(
         runtime_ev.request.model, ctx.session.contract);
+  }
+};
+
+struct effect_bind_nonzero_sampling_seed {
+  void operator()(const event::initialize_run &runtime_ev,
+                  context &ctx) const noexcept {
+    ctx.sampling.random_state = runtime_ev.request.sampling_seed;
+  }
+};
+
+struct effect_bind_zero_sampling_seed {
+  void operator()(const event::initialize_run &, context &ctx) const noexcept {
+    constexpr uint32_t zero_seed_state = 123459876u;
+    ctx.sampling.random_state = zero_seed_state;
+  }
+};
+
+struct effect_bind_requested_text_sampling_top_k {
+  void operator()(const event::initialize_run &runtime_ev,
+                  context &ctx) const noexcept {
+    ctx.sampling.text_top_k = runtime_ev.request.sampling_text_top_k;
+  }
+};
+
+struct effect_bind_full_card_text_sampling_top_k {
+  void operator()(const event::initialize_run &runtime_ev,
+                  context &ctx) const noexcept {
+    ctx.sampling.text_top_k = runtime_ev.request.model.moshi_lm.text_card;
+  }
+};
+
+struct effect_bind_requested_audio_sampling_top_k {
+  void operator()(const event::initialize_run &runtime_ev,
+                  context &ctx) const noexcept {
+    ctx.sampling.audio_top_k = runtime_ev.request.sampling_audio_top_k;
+  }
+};
+
+struct effect_bind_full_card_audio_sampling_top_k {
+  void operator()(const event::initialize_run &runtime_ev,
+                  context &ctx) const noexcept {
+    ctx.sampling.audio_top_k = runtime_ev.request.model.moshi_lm.card;
   }
 };
 
@@ -615,13 +559,12 @@ struct effect_run_temporal_layer_attention {
               layer_offset +
               static_cast<size_t>(physical) * static_cast<size_t>(hidden_dim) +
               static_cast<size_t>(head_offset + dim);
-          sum +=
-              static_cast<double>(
-                  emel::kernel::detail::bf16_to_fp32(
-                      view.value_cache[value_index]) *
-                  emel::kernel::detail::bf16_to_fp32(
-                      runtime_ev.ctx.attention_weights_bf16[static_cast<size_t>(
-                          physical)]));
+          sum += static_cast<double>(
+              emel::kernel::detail::bf16_to_fp32(
+                  view.value_cache[value_index]) *
+              emel::kernel::detail::bf16_to_fp32(
+                  runtime_ev.ctx
+                      .attention_weights_bf16[static_cast<size_t>(physical)]));
         }
         attention_head[dim] = static_cast<float>(sum);
       }
@@ -1002,38 +945,48 @@ struct effect_compute_text_token_logits {
   }
 };
 
-struct effect_sample_text_token {
+struct effect_scale_text_sampling_logits {
   void operator()(const event::step_run &runtime_ev,
                   context &ctx) const noexcept {
-    runtime_ev.ctx.text_sampling_ok = sampling_ns::sample_top_k_exponential(
-        runtime_ev.ctx, ctx.session.text_card, ctx.sampling.text_top_k,
-        ctx.sampling.text_temperature);
-    runtime_ev.ctx.text_logits_ok = runtime_ev.ctx.text_sampling_ok;
-    runtime_ev.request.text_token_out = runtime_ev.ctx.best_index;
+    detail::scale_sampling_logits(runtime_ev.ctx.logits, ctx.session.text_card,
+                                  ctx.sampling.text_temperature);
   }
 };
 
-struct effect_consume_forced_text_sampling {
+struct effect_compute_text_sampling_probabilities {
   void operator()(const event::step_run &runtime_ev,
                   context &ctx) const noexcept {
-    const int32_t hidden_dim = ctx.session.hidden_dim;
-    const int32_t text_card = ctx.session.text_card;
-    runtime_ev.ctx.text_logits_ok = false;
-    runtime_ev.ctx.best_index = -1;
-    runtime_ev.ctx.best_score = 0.0f;
-    emel::kernel::event::op_mul_mat logits_ev{
-        .src0 = runtime_ev.ctx.projection_view,
-        .src1 = detail::make_f32_src(runtime_ev.ctx.normalized.data(), 1u,
-                                     static_cast<uint64_t>(hidden_dim)),
-        .dst = detail::make_f32_dst(runtime_ev.ctx.logits.data(), 1u,
-                                    static_cast<uint64_t>(text_card)),
-    };
-    runtime_ev.ctx.text_logits_ok = ctx.kernel.process_event(logits_ev);
-    runtime_ev.ctx.text_sampling_ok = sampling_ns::sample_top_k_exponential(
-        runtime_ev.ctx, ctx.session.text_card, ctx.sampling.text_top_k,
-        ctx.sampling.text_temperature);
-    runtime_ev.ctx.text_logits_ok =
-        runtime_ev.ctx.text_logits_ok && runtime_ev.ctx.text_sampling_ok;
+    detail::compute_sampling_probabilities(runtime_ev.ctx.logits,
+                                           ctx.session.text_card);
+  }
+};
+
+struct effect_compute_text_sampling_top_k {
+  void operator()(const event::step_run &runtime_ev,
+                  context &ctx) const noexcept {
+    detail::compute_sampling_top_k(
+        runtime_ev.ctx.logits, runtime_ev.ctx.sampling_indices,
+        runtime_ev.ctx.top_scores, runtime_ev.ctx.top_indices,
+        ctx.session.text_card, ctx.sampling.text_top_k);
+  }
+};
+
+struct effect_select_text_sampling_token {
+  void operator()(const event::step_run &runtime_ev,
+                  context &ctx) const noexcept {
+    detail::compute_sampling_exponential_argmax(
+        runtime_ev.ctx.top_scores, runtime_ev.ctx.top_indices,
+        ctx.session.text_card, ctx.sampling.text_top_k,
+        ctx.sampling.random_state, runtime_ev.ctx.best_index,
+        runtime_ev.ctx.best_score);
+    runtime_ev.ctx.text_sampling_ok = true;
+    runtime_ev.ctx.text_logits_ok = true;
+  }
+};
+
+struct effect_publish_sampled_text_token {
+  void operator()(const event::step_run &runtime_ev, context &) const noexcept {
+    runtime_ev.request.text_token_out = runtime_ev.ctx.best_index;
   }
 };
 
@@ -1053,10 +1006,12 @@ struct effect_bind_depformer_kv {
         ctx.depformer_kv.cache, runtime_ev.request.model,
         runtime_ev.request.memory_snapshot, runtime_ev.request.sequence_id,
         runtime_ev.ctx.depformer_kv);
-    if (runtime_ev.ctx.depformer_kv_bound &&
-        runtime_ev.ctx.depformer_kv.offset != nullptr) {
-      *runtime_ev.ctx.depformer_kv.offset = 0;
-    }
+  }
+};
+
+struct effect_reset_depformer_kv_offset {
+  void operator()(const event::step_run &runtime_ev, context &) const noexcept {
+    *runtime_ev.ctx.depformer_kv.offset = 0;
   }
 };
 
@@ -1402,13 +1357,12 @@ struct effect_run_depformer_layer_attention {
               layer_offset +
               static_cast<size_t>(physical) * static_cast<size_t>(dep_dim) +
               static_cast<size_t>(head_offset + dim);
-          sum +=
-              static_cast<double>(
-                  emel::kernel::detail::bf16_to_fp32(
-                      view.value_cache[value_index]) *
-                  emel::kernel::detail::bf16_to_fp32(
-                      runtime_ev.ctx.attention_weights_bf16[static_cast<size_t>(
-                          physical)]));
+          sum += static_cast<double>(
+              emel::kernel::detail::bf16_to_fp32(
+                  view.value_cache[value_index]) *
+              emel::kernel::detail::bf16_to_fp32(
+                  runtime_ev.ctx
+                      .attention_weights_bf16[static_cast<size_t>(physical)]));
         }
         attention_head[dim] = static_cast<float>(sum);
       }
@@ -1561,8 +1515,7 @@ struct effect_run_depformer_layer_silu_gate_silu {
                   context &ctx) const noexcept {
     const auto *linear_in = detail::find_depformer_codebook_tensor(
         runtime_ev.request.model, runtime_ev.ctx.depformer_layer_index,
-        "gating.%d.linear_in.weight",
-        runtime_ev.ctx.depformer_weight_index);
+        "gating.%d.linear_in.weight", runtime_ev.ctx.depformer_weight_index);
     const uint64_t projection_dim = static_cast<uint64_t>(linear_in->dims[1]);
     const uint64_t gate_dim = projection_dim / 2u;
     runtime_ev.ctx.depformer_layer_silu_gate_silu_ok = false;
@@ -1589,8 +1542,7 @@ struct effect_run_depformer_layer_silu_gate_mul {
                   context &ctx) const noexcept {
     const auto *linear_in = detail::find_depformer_codebook_tensor(
         runtime_ev.request.model, runtime_ev.ctx.depformer_layer_index,
-        "gating.%d.linear_in.weight",
-        runtime_ev.ctx.depformer_weight_index);
+        "gating.%d.linear_in.weight", runtime_ev.ctx.depformer_weight_index);
     const uint64_t projection_dim = static_cast<uint64_t>(linear_in->dims[1]);
     const uint64_t gate_dim = projection_dim / 2u;
     const float *right = runtime_ev.ctx.gating_projection.data() + gate_dim;
@@ -1744,14 +1696,42 @@ struct effect_compute_depformer_token_logits {
   }
 };
 
-struct effect_sample_depformer_token {
+struct effect_scale_depformer_sampling_logits {
   void operator()(const event::step_run &runtime_ev,
                   context &ctx) const noexcept {
-    runtime_ev.ctx.depformer_sampling_ok =
-        sampling_ns::sample_top_k_exponential(
-            runtime_ev.ctx, ctx.session.audio_card, ctx.sampling.audio_top_k,
-            ctx.sampling.audio_temperature);
-    runtime_ev.ctx.depformer_logits_ok = runtime_ev.ctx.depformer_sampling_ok;
+    detail::scale_sampling_logits(runtime_ev.ctx.logits, ctx.session.audio_card,
+                                  ctx.sampling.audio_temperature);
+  }
+};
+
+struct effect_compute_depformer_sampling_probabilities {
+  void operator()(const event::step_run &runtime_ev,
+                  context &ctx) const noexcept {
+    detail::compute_sampling_probabilities(runtime_ev.ctx.logits,
+                                           ctx.session.audio_card);
+  }
+};
+
+struct effect_compute_depformer_sampling_top_k {
+  void operator()(const event::step_run &runtime_ev,
+                  context &ctx) const noexcept {
+    detail::compute_sampling_top_k(
+        runtime_ev.ctx.logits, runtime_ev.ctx.sampling_indices,
+        runtime_ev.ctx.top_scores, runtime_ev.ctx.top_indices,
+        ctx.session.audio_card, ctx.sampling.audio_top_k);
+  }
+};
+
+struct effect_select_depformer_sampling_token {
+  void operator()(const event::step_run &runtime_ev,
+                  context &ctx) const noexcept {
+    detail::compute_sampling_exponential_argmax(
+        runtime_ev.ctx.top_scores, runtime_ev.ctx.top_indices,
+        ctx.session.audio_card, ctx.sampling.audio_top_k,
+        ctx.sampling.random_state, runtime_ev.ctx.best_index,
+        runtime_ev.ctx.best_score);
+    runtime_ev.ctx.depformer_sampling_ok = true;
+    runtime_ev.ctx.depformer_logits_ok = true;
   }
 };
 
