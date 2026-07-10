@@ -50,25 +50,21 @@ struct guard_initialize_request_valid {
            lm.inference_dep_q == mimi.n_q && lm.card == mimi.card &&
            ctx.temporal_kv.key_cache.data() != nullptr &&
            ctx.temporal_kv.value_cache.data() != nullptr &&
-           ctx.temporal_kv.offset != nullptr &&
            ctx.temporal_kv.key_cache.size() >= temporal_elements &&
            ctx.temporal_kv.value_cache.size() >= temporal_elements &&
            ctx.temporal_kv.layer_cache_offsets.size() >=
                static_cast<size_t>(lm.num_layers) &&
            ctx.temporal_kv.layer_count == lm.num_layers &&
            ctx.temporal_kv.position_capacity == lm.context &&
-           ctx.temporal_kv.block_tokens > 0 &&
            ctx.temporal_kv.kv_dim == lm.dim &&
            ctx.depformer_kv.key_cache.data() != nullptr &&
            ctx.depformer_kv.value_cache.data() != nullptr &&
-           ctx.depformer_kv.offset != nullptr &&
            ctx.depformer_kv.key_cache.size() >= depformer_elements &&
            ctx.depformer_kv.value_cache.size() >= depformer_elements &&
            ctx.depformer_kv.layer_cache_offsets.size() >=
                static_cast<size_t>(lm.depformer_num_layers) &&
            ctx.depformer_kv.layer_count == lm.depformer_num_layers &&
            ctx.depformer_kv.position_capacity == lm.depformer_context &&
-           ctx.depformer_kv.block_tokens > 0 &&
            ctx.depformer_kv.kv_dim == lm.depformer_dim;
   }
 };

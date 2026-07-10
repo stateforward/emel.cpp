@@ -50,8 +50,6 @@ TEST_CASE("PersonaPlex session runs its injected actors end to end") {
     temporal_offsets[static_cast<size_t>(layer)] =
         static_cast<size_t>(layer) * temporal_per_layer;
   }
-  int32_t temporal_offset = 0;
-
   const size_t depformer_per_layer =
       static_cast<size_t>(lm_config.depformer_context) *
       static_cast<size_t>(lm_config.depformer_dim);
@@ -65,18 +63,14 @@ TEST_CASE("PersonaPlex session runs its injected actors end to end") {
     depformer_offsets[static_cast<size_t>(layer)] =
         static_cast<size_t>(layer) * depformer_per_layer;
   }
-  int32_t depformer_offset = 0;
-
   personaplex::dependencies dependencies{
       .temporal_kv =
           {
               .key_cache = std::span<uint16_t>{temporal_keys},
               .value_cache = std::span<uint16_t>{temporal_values},
               .layer_cache_offsets = std::span<const size_t>{temporal_offsets},
-              .offset = &temporal_offset,
               .layer_count = lm_config.num_layers,
               .position_capacity = lm_config.context,
-              .block_tokens = 1,
               .kv_dim = lm_config.dim,
           },
       .depformer_kv =
@@ -84,10 +78,8 @@ TEST_CASE("PersonaPlex session runs its injected actors end to end") {
               .key_cache = std::span<uint16_t>{depformer_keys},
               .value_cache = std::span<uint16_t>{depformer_values},
               .layer_cache_offsets = std::span<const size_t>{depformer_offsets},
-              .offset = &depformer_offset,
               .layer_count = lm_config.depformer_num_layers,
               .position_capacity = lm_config.depformer_context,
-              .block_tokens = 1,
               .kv_dim = lm_config.depformer_dim,
           },
   };
@@ -220,10 +212,6 @@ TEST_CASE("PersonaPlex session runs its injected actors end to end") {
   guard_context->temporal_kv.value_cache = {};
   CHECK_FALSE(request_is_valid());
   guard_context->temporal_kv.value_cache = temporal_value_view;
-  int32_t *const temporal_offset_ptr = guard_context->temporal_kv.offset;
-  guard_context->temporal_kv.offset = nullptr;
-  CHECK_FALSE(request_is_valid());
-  guard_context->temporal_kv.offset = temporal_offset_ptr;
   const auto temporal_layer_views =
       guard_context->temporal_kv.layer_cache_offsets;
   guard_context->temporal_kv.layer_cache_offsets = {};
@@ -235,9 +223,6 @@ TEST_CASE("PersonaPlex session runs its injected actors end to end") {
   --guard_context->temporal_kv.position_capacity;
   CHECK_FALSE(request_is_valid());
   ++guard_context->temporal_kv.position_capacity;
-  guard_context->temporal_kv.block_tokens = 0;
-  CHECK_FALSE(request_is_valid());
-  guard_context->temporal_kv.block_tokens = 1;
   --guard_context->temporal_kv.kv_dim;
   CHECK_FALSE(request_is_valid());
   ++guard_context->temporal_kv.kv_dim;
@@ -250,10 +235,6 @@ TEST_CASE("PersonaPlex session runs its injected actors end to end") {
   guard_context->depformer_kv.value_cache = {};
   CHECK_FALSE(request_is_valid());
   guard_context->depformer_kv.value_cache = depformer_value_view;
-  int32_t *const depformer_offset_ptr = guard_context->depformer_kv.offset;
-  guard_context->depformer_kv.offset = nullptr;
-  CHECK_FALSE(request_is_valid());
-  guard_context->depformer_kv.offset = depformer_offset_ptr;
   const auto depformer_layer_views =
       guard_context->depformer_kv.layer_cache_offsets;
   guard_context->depformer_kv.layer_cache_offsets = {};
@@ -265,9 +246,6 @@ TEST_CASE("PersonaPlex session runs its injected actors end to end") {
   --guard_context->depformer_kv.position_capacity;
   CHECK_FALSE(request_is_valid());
   ++guard_context->depformer_kv.position_capacity;
-  guard_context->depformer_kv.block_tokens = 0;
-  CHECK_FALSE(request_is_valid());
-  guard_context->depformer_kv.block_tokens = 1;
   --guard_context->depformer_kv.kv_dim;
   CHECK_FALSE(request_is_valid());
   ++guard_context->depformer_kv.kv_dim;

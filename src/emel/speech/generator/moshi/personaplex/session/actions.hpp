@@ -22,6 +22,28 @@ void effect_store_error(const runtime_event_type &runtime_ev,
 
 } // namespace detail_ns
 
+struct effect_initialize_temporal_positions {
+  void operator()(const event::initialize_run &runtime_ev,
+                  context &ctx) const noexcept {
+    int32_t error_out = static_cast<int32_t>(
+        emel::error::cast(emel::memory::streaming::error::none));
+    runtime_ev.ctx.child_accepted = ctx.temporal_positions.process_event(
+        emel::memory::streaming::event::initialize{.error_out = error_out});
+    runtime_ev.ctx.child_err = static_cast<emel::error::type>(error_out);
+  }
+};
+
+struct effect_initialize_depformer_positions {
+  void operator()(const event::initialize_run &runtime_ev,
+                  context &ctx) const noexcept {
+    int32_t error_out = static_cast<int32_t>(
+        emel::error::cast(emel::memory::streaming::error::none));
+    runtime_ev.ctx.child_accepted = ctx.depformer_positions.process_event(
+        emel::memory::streaming::event::initialize{.error_out = error_out});
+    runtime_ev.ctx.child_err = static_cast<emel::error::type>(error_out);
+  }
+};
+
 struct effect_initialize_encoder {
   static void effect_capture_codec_initialize(
       event::initialize_ctx &runtime,

@@ -1,5 +1,7 @@
 #pragma once
 
+#include <limits>
+
 #include "emel/model/loader/errors.hpp"
 #include "emel/model/moshi/detail.hpp"
 #include "emel/speech/generator/moshi/executor/context.hpp"
@@ -325,7 +327,8 @@ struct guard_temporal_kv_binding_present {
   bool operator()(const event::step_run &runtime_ev,
                   const action::context &ctx) const noexcept {
     (void)runtime_ev;
-    return ctx.temporal_kv.cache != nullptr && ctx.temporal_kv.bind != nullptr;
+    return ctx.temporal_kv.cache != nullptr &&
+           ctx.temporal_kv.bind != nullptr && ctx.temporal_positions != nullptr;
   }
 };
 
@@ -343,7 +346,31 @@ struct guard_temporal_kv_bound {
     return runtime_ev.ctx.temporal_kv_bound && !view.key_cache.empty() &&
            !view.value_cache.empty() && !view.layer_cache_offsets.empty() &&
            view.layer_count > 0 && view.position_capacity > 0 &&
-           view.block_tokens > 0 && view.kv_dim > 0;
+           view.kv_dim > 0;
+  }
+};
+
+struct guard_temporal_position_advance_succeeded {
+  bool operator()(const event::step_run &runtime_ev,
+                  const action::context &) const noexcept {
+    const auto &result = runtime_ev.ctx.temporal_position;
+    const auto &window = result.window;
+    return runtime_ev.ctx.temporal_position_accepted &&
+           runtime_ev.ctx.temporal_position_error ==
+               static_cast<int32_t>(
+                   emel::error::cast(emel::memory::streaming::error::none)) &&
+           result.logical_position >= 0 && result.physical_position >= 0 &&
+           result.physical_position < window.capacity && window.capacity > 0 &&
+           window.logical_end == result.logical_position + 1 &&
+           window.valid_positions > 0 &&
+           window.valid_positions <= window.capacity;
+  }
+};
+
+struct guard_temporal_position_advance_failed {
+  bool operator()(const event::step_run &runtime_ev,
+                  const action::context &ctx) const noexcept {
+    return !guard_temporal_position_advance_succeeded{}(runtime_ev, ctx);
   }
 };
 
@@ -447,19 +474,18 @@ struct guard_temporal_layer_rope_supported {
                   const action::context &ctx) const noexcept {
     const auto &lm = runtime_ev.request.model.moshi_lm;
     const int32_t hidden_dim = ctx.session.hidden_dim;
-    const int32_t logical_position = detail::current_logical_position(
-        runtime_ev.request.memory_snapshot, runtime_ev.request.sequence_id);
-    const int32_t physical_position = detail::physical_position(
-        runtime_ev.request.memory_snapshot, runtime_ev.request.sequence_id,
-        logical_position);
+    const auto &position = runtime_ev.ctx.temporal_position;
     const int32_t head_dim = lm.num_heads > 0 ? hidden_dim / lm.num_heads : 0;
     return runtime_ev.ctx.temporal_layer_projection_ok && hidden_dim > 0 &&
            lm.num_heads > 0 && lm.max_period > 0 &&
            hidden_dim % lm.num_heads == 0 && head_dim > 0 &&
            (head_dim % 2) == 0 &&
            static_cast<uint64_t>(head_dim) <= detail::k_max_hidden_dim &&
-           logical_position >= 0 && physical_position >= 0 &&
-           physical_position < runtime_ev.ctx.temporal_kv.position_capacity;
+           position.logical_position >= 0 &&
+           position.logical_position <= std::numeric_limits<int32_t>::max() &&
+           position.physical_position >= 0 &&
+           position.physical_position <
+               runtime_ev.ctx.temporal_kv.position_capacity;
   }
 };
 
@@ -494,13 +520,13 @@ struct guard_temporal_layer_cache_write_supported {
         view.kv_dim != hidden_dim || layer < 0 || layer >= view.layer_count ||
         view.layer_cache_offsets.empty() ||
         static_cast<size_t>(layer) >= view.layer_cache_offsets.size() ||
-        runtime_ev.ctx.temporal_physical_position < 0) {
+        runtime_ev.ctx.temporal_position.physical_position < 0) {
       return false;
     }
     const size_t layer_offset =
         view.layer_cache_offsets[static_cast<size_t>(layer)];
     const size_t physical_position =
-        static_cast<size_t>(runtime_ev.ctx.temporal_physical_position);
+        static_cast<size_t>(runtime_ev.ctx.temporal_position.physical_position);
     const size_t dim = static_cast<size_t>(hidden_dim);
     const size_t begin = layer_offset + physical_position * dim;
     const size_t end = begin + dim;
@@ -533,20 +559,22 @@ struct guard_temporal_layer_cache_write_failed {
 struct guard_temporal_layer_attention_supported {
   bool operator()(const event::step_run &runtime_ev,
                   const action::context &ctx) const noexcept {
-    const auto &snapshot = runtime_ev.request.memory_snapshot;
     const auto &view = runtime_ev.ctx.temporal_kv;
+    const auto &window = runtime_ev.ctx.temporal_position.window;
     const auto &lm = runtime_ev.request.model.moshi_lm;
     const int32_t hidden_dim = ctx.session.hidden_dim;
-    const int32_t sequence_length =
-        snapshot.sequence_length(runtime_ev.request.sequence_id);
     const int32_t capacity = view.position_capacity;
     const int32_t head_dim = lm.num_heads > 0 ? hidden_dim / lm.num_heads : 0;
     const int32_t layer = runtime_ev.ctx.temporal_layer_index;
     if (!runtime_ev.ctx.temporal_layer_cache_write_ok || hidden_dim <= 0 ||
         lm.num_heads <= 0 || hidden_dim % lm.num_heads != 0 || head_dim <= 0 ||
         static_cast<uint64_t>(head_dim) > detail::k_max_hidden_dim ||
-        sequence_length <= 0 || capacity <= 0 ||
+        window.valid_positions <= 0 || capacity <= 0 ||
         static_cast<uint64_t>(capacity) > detail::k_max_temporal_context ||
+        window.capacity != capacity || window.valid_positions > capacity ||
+        window.logical_begin < 0 ||
+        window.logical_end - window.logical_begin != window.valid_positions ||
+        window.physical_begin < 0 || window.physical_begin >= capacity ||
         view.kv_dim != hidden_dim || layer < 0 || layer >= view.layer_count ||
         view.layer_cache_offsets.empty() ||
         static_cast<size_t>(layer) >= view.layer_cache_offsets.size()) {
@@ -555,22 +583,8 @@ struct guard_temporal_layer_attention_supported {
     const size_t layer_offset =
         view.layer_cache_offsets[static_cast<size_t>(layer)];
     const size_t dim = static_cast<size_t>(hidden_dim);
-    const int32_t logical_begin =
-        sequence_length > capacity ? sequence_length - capacity : 0;
-    for (int32_t logical = logical_begin; logical < sequence_length;
-         ++logical) {
-      const int32_t physical = detail::physical_position(
-          snapshot, runtime_ev.request.sequence_id, logical);
-      if (physical < 0 || physical >= capacity) {
-        return false;
-      }
-      const size_t begin = layer_offset + static_cast<size_t>(physical) * dim;
-      const size_t end = begin + dim;
-      if (end > view.key_cache.size() || end > view.value_cache.size()) {
-        return false;
-      }
-    }
-    return true;
+    const size_t end = layer_offset + static_cast<size_t>(capacity) * dim;
+    return end <= view.key_cache.size() && end <= view.value_cache.size();
   }
 };
 
@@ -1106,7 +1120,8 @@ struct guard_depformer_kv_binding_present {
                   const action::context &ctx) const noexcept {
     (void)runtime_ev;
     return ctx.depformer_kv.cache != nullptr &&
-           ctx.depformer_kv.bind != nullptr;
+           ctx.depformer_kv.bind != nullptr &&
+           ctx.depformer_positions != nullptr;
   }
 };
 
@@ -1123,9 +1138,49 @@ struct guard_depformer_kv_bound {
     const auto &view = runtime_ev.ctx.depformer_kv;
     return runtime_ev.ctx.depformer_kv_bound && !view.key_cache.empty() &&
            !view.value_cache.empty() && !view.layer_cache_offsets.empty() &&
-           view.offset != nullptr && *view.offset >= 0 &&
            view.layer_count > 0 && view.position_capacity > 0 &&
            view.kv_dim > 0;
+  }
+};
+
+struct guard_depformer_position_reset_succeeded {
+  bool operator()(const event::step_run &runtime_ev,
+                  const action::context &) const noexcept {
+    return runtime_ev.ctx.depformer_position_accepted &&
+           runtime_ev.ctx.depformer_position_error ==
+               static_cast<int32_t>(
+                   emel::error::cast(emel::memory::streaming::error::none));
+  }
+};
+
+struct guard_depformer_position_reset_failed {
+  bool operator()(const event::step_run &runtime_ev,
+                  const action::context &ctx) const noexcept {
+    return !guard_depformer_position_reset_succeeded{}(runtime_ev, ctx);
+  }
+};
+
+struct guard_depformer_position_advance_succeeded {
+  bool operator()(const event::step_run &runtime_ev,
+                  const action::context &) const noexcept {
+    const auto &result = runtime_ev.ctx.depformer_position;
+    const auto &window = result.window;
+    return runtime_ev.ctx.depformer_position_accepted &&
+           runtime_ev.ctx.depformer_position_error ==
+               static_cast<int32_t>(
+                   emel::error::cast(emel::memory::streaming::error::none)) &&
+           result.logical_position >= 0 && result.physical_position >= 0 &&
+           result.physical_position < window.capacity && window.capacity > 0 &&
+           window.logical_end == result.logical_position + 1 &&
+           window.valid_positions > 0 &&
+           window.valid_positions <= window.capacity;
+  }
+};
+
+struct guard_depformer_position_advance_failed {
+  bool operator()(const event::step_run &runtime_ev,
+                  const action::context &ctx) const noexcept {
+    return !guard_depformer_position_advance_succeeded{}(runtime_ev, ctx);
   }
 };
 
@@ -1413,15 +1468,16 @@ struct guard_depformer_layer_cache_write_supported {
     const auto &view = runtime_ev.ctx.depformer_kv;
     const int32_t dep_dim = runtime_ev.request.model.moshi_lm.depformer_dim;
     const int32_t layer = runtime_ev.ctx.depformer_layer_index;
-    if (!runtime_ev.ctx.depformer_layer_projection_ok ||
-        view.offset == nullptr || *view.offset < 0 || dep_dim <= 0 ||
+    const int32_t physical =
+        runtime_ev.ctx.depformer_position.physical_position;
+    if (!runtime_ev.ctx.depformer_layer_projection_ok || dep_dim <= 0 ||
         view.kv_dim != dep_dim || layer < 0 || layer >= view.layer_count ||
         view.layer_cache_offsets.empty() ||
         static_cast<size_t>(layer) >= view.layer_cache_offsets.size() ||
-        view.position_capacity <= 0) {
+        view.position_capacity <= 0 || physical < 0 ||
+        physical >= view.position_capacity) {
       return false;
     }
-    const int32_t physical = *view.offset % view.position_capacity;
     const size_t layer_offset =
         view.layer_cache_offsets[static_cast<size_t>(layer)];
     const size_t begin = layer_offset + static_cast<size_t>(physical) *
@@ -1460,7 +1516,8 @@ struct guard_depformer_layer_attention_supported {
     const int32_t dep_dim = lm.depformer_dim;
     const int32_t head_dim =
         lm.depformer_num_heads > 0 ? dep_dim / lm.depformer_num_heads : 0;
-    const int32_t valid_positions = runtime_ev.ctx.depformer_valid_positions;
+    const auto &window = runtime_ev.ctx.depformer_position.window;
+    const int32_t valid_positions = window.valid_positions;
     const int32_t capacity = view.position_capacity;
     const int32_t layer = runtime_ev.ctx.depformer_layer_index;
     if (!runtime_ev.ctx.depformer_layer_cache_write_ok || dep_dim <= 0 ||
@@ -1469,8 +1526,12 @@ struct guard_depformer_layer_attention_supported {
         static_cast<uint64_t>(head_dim) > detail::k_max_hidden_dim ||
         valid_positions <= 0 || capacity <= 0 ||
         static_cast<uint64_t>(capacity) > detail::k_max_depformer_context ||
-        valid_positions > capacity || view.kv_dim != dep_dim || layer < 0 ||
-        layer >= view.layer_count || view.layer_cache_offsets.empty() ||
+        valid_positions > capacity || window.capacity != capacity ||
+        window.logical_begin < 0 ||
+        window.logical_end - window.logical_begin != valid_positions ||
+        window.physical_begin < 0 || window.physical_begin >= capacity ||
+        view.kv_dim != dep_dim || layer < 0 || layer >= view.layer_count ||
+        view.layer_cache_offsets.empty() ||
         static_cast<size_t>(layer) >= view.layer_cache_offsets.size()) {
       return false;
     }

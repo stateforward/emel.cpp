@@ -1,6 +1,7 @@
 #pragma once
 
 #include "emel/memory/hybrid/context.hpp"
+#include "emel/memory/streaming/sm.hpp"
 #include "emel/speech/codec/mimi/any.hpp"
 #include "emel/speech/generator/moshi/any.hpp"
 #include "emel/speech/generator/moshi/executor/any.hpp"
@@ -20,9 +21,14 @@ struct dependencies {
 struct context {
   explicit context(const dependencies &deps)
       : temporal_kv(deps.temporal_kv), depformer_kv(deps.depformer_kv),
+        temporal_positions(emel::memory::streaming::dependencies{
+            .capacity = deps.temporal_kv.position_capacity}),
+        depformer_positions(emel::memory::streaming::dependencies{
+            .capacity = deps.depformer_kv.position_capacity}),
         graph_executor(executor::bind_kv_caches(
             executor::bind_temporal_kv_cache(this, bind_temporal_cache),
-            executor::bind_depformer_kv_cache(this, bind_depformer_cache))),
+            executor::bind_depformer_kv_cache(this, bind_depformer_cache),
+            temporal_positions, depformer_positions)),
         generator(deps.generator_memory,
                   moshi::action::bind_graph_executor(
                       &graph_executor, executor::dispatch_graph_step)) {}
@@ -45,6 +51,8 @@ struct context {
 
   executor::detail::temporal_kv_view temporal_kv = {};
   executor::detail::depformer_kv_view depformer_kv = {};
+  emel::memory::streaming::sm temporal_positions;
+  emel::memory::streaming::sm depformer_positions;
   int32_t frame_samples = 0;
   int32_t public_n_q = 0;
   mimi::sm encoder = {};

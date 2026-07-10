@@ -3,6 +3,7 @@
 #include <cstdint>
 
 #include "emel/kernel/sm.hpp"
+#include "emel/memory/streaming/sm.hpp"
 #include "emel/memory/view.hpp"
 #include "emel/model/data.hpp"
 #include "emel/model/moshi/detail.hpp"
@@ -31,6 +32,8 @@ struct depformer_kv_binding {
 struct kv_bindings {
   temporal_kv_binding temporal = {};
   depformer_kv_binding depformer = {};
+  emel::memory::streaming::sm *temporal_positions = nullptr;
+  emel::memory::streaming::sm *depformer_positions = nullptr;
 };
 
 struct runtime {
@@ -59,12 +62,16 @@ struct context {
       : temporal_kv(kv_binding) {}
   explicit context(const kv_bindings &kv_binding_set)
       : temporal_kv(kv_binding_set.temporal),
-        depformer_kv(kv_binding_set.depformer) {}
+        depformer_kv(kv_binding_set.depformer),
+        temporal_positions(kv_binding_set.temporal_positions),
+        depformer_positions(kv_binding_set.depformer_positions) {}
 
   runtime session = {};
   sampling_config sampling = {};
   temporal_kv_binding temporal_kv = {};
   depformer_kv_binding depformer_kv = {};
+  emel::memory::streaming::sm *temporal_positions = nullptr;
+  emel::memory::streaming::sm *depformer_positions = nullptr;
   emel::kernel::sm kernel = {};
 };
 
@@ -82,6 +89,19 @@ inline kv_bindings
 bind_kv_caches(const temporal_kv_binding &temporal,
                const depformer_kv_binding &depformer) noexcept {
   return kv_bindings{.temporal = temporal, .depformer = depformer};
+}
+
+inline kv_bindings
+bind_kv_caches(const temporal_kv_binding &temporal,
+               const depformer_kv_binding &depformer,
+               emel::memory::streaming::sm &temporal_positions,
+               emel::memory::streaming::sm &depformer_positions) noexcept {
+  return kv_bindings{
+      .temporal = temporal,
+      .depformer = depformer,
+      .temporal_positions = &temporal_positions,
+      .depformer_positions = &depformer_positions,
+  };
 }
 
 } // namespace emel::speech::generator::moshi::executor::action

@@ -42,6 +42,8 @@ struct state_input_audio_codebook_advance {};
 struct state_input_embedding_result_decision {};
 struct state_bind_temporal_kv {};
 struct state_temporal_kv_result_decision {};
+struct state_temporal_position_result_decision {};
+struct state_temporal_position_valid_decision {};
 struct state_temporal_layer_norm {};
 struct state_temporal_layer_norm_rms_result_decision {};
 struct state_temporal_layer_norm_scale {};
@@ -99,6 +101,9 @@ struct state_text_logits_sample_select {};
 struct state_text_logits_result_decision {};
 struct state_bind_depformer_kv {};
 struct state_depformer_kv_result_decision {};
+struct state_depformer_position_reset_result_decision {};
+struct state_depformer_position_advance_result_decision {};
+struct state_depformer_weight_route_decision {};
 struct state_depformer_weight_decision {};
 struct state_depformer_input {};
 struct state_depformer_input_projection_bind_result_decision {};
@@ -323,10 +328,24 @@ struct model {
       , sml::state<state_step_error_out_decision> <= sml::state<state_bind_temporal_kv>
           + sml::completion<step_run> [ guard::guard_temporal_kv_bind_failed{} ]
           / action::effect_mark_graph_execution_unsupported{}
-      , sml::state<state_temporal_layer_norm> <= sml::state<state_temporal_kv_result_decision>
+      , sml::state<state_temporal_position_result_decision> <=
+            sml::state<state_temporal_kv_result_decision>
+          + sml::completion<step_run> / action::effect_advance_temporal_position{}
+      , sml::state<state_temporal_position_valid_decision> <=
+            sml::state<state_temporal_position_result_decision>
+          + sml::completion<step_run>
+          [ guard::guard_temporal_position_advance_succeeded{} ]
+      , sml::state<state_step_error_out_decision> <=
+            sml::state<state_temporal_position_result_decision>
+          + sml::completion<step_run>
+          [ guard::guard_temporal_position_advance_failed{} ]
+          / action::effect_mark_graph_execution_unsupported{}
+      , sml::state<state_temporal_layer_norm> <=
+            sml::state<state_temporal_position_valid_decision>
           + sml::completion<step_run> [ guard::guard_temporal_layer_norm_supported{} ]
           / action::effect_run_temporal_layer_norm_rms{}
-      , sml::state<state_step_error_out_decision> <= sml::state<state_temporal_kv_result_decision>
+      , sml::state<state_step_error_out_decision> <=
+            sml::state<state_temporal_position_valid_decision>
           + sml::completion<step_run> [ guard::guard_temporal_layer_norm_unsupported{} ]
           / action::effect_mark_graph_execution_unsupported{}
       , sml::state<state_temporal_layer_norm_rms_result_decision> <= sml::state<state_temporal_layer_norm>
@@ -612,17 +631,42 @@ struct model {
           / action::effect_mark_graph_execution_unsupported{}
       , sml::state<state_depformer_kv_result_decision> <= sml::state<state_bind_depformer_kv>
           + sml::completion<step_run> [ guard::guard_depformer_kv_bound{} ]
-          / action::effect_reset_depformer_kv_offset{}
+          / action::effect_reset_depformer_positions{}
       , sml::state<state_step_error_out_decision> <= sml::state<state_bind_depformer_kv>
           + sml::completion<step_run> [ guard::guard_depformer_kv_bind_failed{} ]
           / action::effect_mark_graph_execution_unsupported{}
-      , sml::state<state_depformer_weight_decision> <= sml::state<state_depformer_kv_result_decision>
+      , sml::state<state_depformer_position_reset_result_decision> <=
+            sml::state<state_depformer_kv_result_decision>
+          + sml::completion<step_run>
+      , sml::state<state_depformer_position_advance_result_decision> <=
+            sml::state<state_depformer_position_reset_result_decision>
+          + sml::completion<step_run>
+          [ guard::guard_depformer_position_reset_succeeded{} ]
+          / action::effect_advance_depformer_position{}
+      , sml::state<state_step_error_out_decision> <=
+            sml::state<state_depformer_position_reset_result_decision>
+          + sml::completion<step_run>
+          [ guard::guard_depformer_position_reset_failed{} ]
+          / action::effect_mark_graph_execution_unsupported{}
+      , sml::state<state_depformer_weight_route_decision> <=
+            sml::state<state_depformer_position_advance_result_decision>
+          + sml::completion<step_run>
+          [ guard::guard_depformer_position_advance_succeeded{} ]
+      , sml::state<state_step_error_out_decision> <=
+            sml::state<state_depformer_position_advance_result_decision>
+          + sml::completion<step_run>
+          [ guard::guard_depformer_position_advance_failed{} ]
+          / action::effect_mark_graph_execution_unsupported{}
+      , sml::state<state_depformer_weight_decision> <=
+            sml::state<state_depformer_weight_route_decision>
           + sml::completion<step_run> [ guard::guard_depformer_scheduled_weight_present{} ]
           / action::effect_use_depformer_scheduled_weight{}
-      , sml::state<state_depformer_weight_decision> <= sml::state<state_depformer_kv_result_decision>
+      , sml::state<state_depformer_weight_decision> <=
+            sml::state<state_depformer_weight_route_decision>
           + sml::completion<step_run> [ guard::guard_depformer_scheduled_weight_absent{} ]
           / action::effect_use_depformer_codebook_weight{}
-      , sml::state<state_step_error_out_decision> <= sml::state<state_depformer_kv_result_decision>
+      , sml::state<state_step_error_out_decision> <=
+            sml::state<state_depformer_weight_route_decision>
           + sml::completion<step_run> [ guard::guard_depformer_scheduled_weight_invalid{} ]
           / action::effect_mark_graph_execution_unsupported{}
       , sml::state<state_depformer_input> <= sml::state<state_depformer_weight_decision>
@@ -913,15 +957,9 @@ struct model {
           / action::effect_advance_depformer_codebook{}
       , sml::state<state_ready> <= sml::state<state_depformer_logits_result_decision>
           + sml::completion<step_run> [ guard::guard_depformer_codebooks_complete{} ]
-      , sml::state<state_depformer_weight_decision> <= sml::state<state_depformer_codebook_advance>
-          + sml::completion<step_run> [ guard::guard_depformer_scheduled_weight_present{} ]
-          / action::effect_use_depformer_scheduled_weight{}
-      , sml::state<state_depformer_weight_decision> <= sml::state<state_depformer_codebook_advance>
-          + sml::completion<step_run> [ guard::guard_depformer_scheduled_weight_absent{} ]
-          / action::effect_use_depformer_codebook_weight{}
-      , sml::state<state_step_error_out_decision> <= sml::state<state_depformer_codebook_advance>
-          + sml::completion<step_run> [ guard::guard_depformer_scheduled_weight_invalid{} ]
-          / action::effect_mark_graph_execution_unsupported{}
+      , sml::state<state_depformer_position_advance_result_decision> <=
+            sml::state<state_depformer_codebook_advance>
+          + sml::completion<step_run> / action::effect_advance_depformer_position{}
       , sml::state<state_ready> <= sml::state<state_step_error_out_decision>
           + sml::completion<step_run> [ guard::guard_has_error_out<step_run>{} ]
           / action::effect_store_error_out<step_run>{}

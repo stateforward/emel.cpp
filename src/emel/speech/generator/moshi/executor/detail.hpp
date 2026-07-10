@@ -36,10 +36,8 @@ struct streaming_kv_view {
   std::span<uint16_t> key_cache = {};
   std::span<uint16_t> value_cache = {};
   std::span<const size_t> layer_cache_offsets = {};
-  int32_t *offset = nullptr;
   int32_t layer_count = 0;
   int32_t position_capacity = 0;
-  int32_t block_tokens = 0;
   int32_t kv_dim = 0;
 };
 
@@ -278,28 +276,6 @@ inline bool tensor_shape(const tensor_record *tensor, const int64_t ne0,
   return tensor != nullptr && tensor->data != nullptr && tensor->n_dims >= 1 &&
          tensor->dims[0] == ne0 &&
          (tensor->n_dims == 1 || tensor->dims[1] == ne1);
-}
-
-inline int32_t
-current_logical_position(const emel::memory::view::snapshot &snapshot,
-                         const int32_t sequence_id) noexcept {
-  const int32_t length = snapshot.sequence_length(sequence_id);
-  return length > 0 ? length - 1 : -1;
-}
-
-inline int32_t physical_position(const emel::memory::view::snapshot &snapshot,
-                                 const int32_t sequence_id,
-                                 const int32_t logical_position) noexcept {
-  if (logical_position < 0 || snapshot.block_tokens <= 0) {
-    return -1;
-  }
-  const int32_t block_id =
-      snapshot.lookup_kv_block(sequence_id, logical_position);
-  if (block_id < 0) {
-    return -1;
-  }
-  return block_id * snapshot.block_tokens +
-         (logical_position % snapshot.block_tokens);
 }
 
 inline bool token_in_embedding_range(const int32_t token,

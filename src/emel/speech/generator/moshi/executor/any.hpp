@@ -38,6 +38,15 @@ bind_kv_caches(const temporal_kv_binding &temporal,
   return action::bind_kv_caches(temporal, depformer);
 }
 
+inline kv_bindings
+bind_kv_caches(const temporal_kv_binding &temporal,
+               const depformer_kv_binding &depformer,
+               emel::memory::streaming::sm &temporal_positions,
+               emel::memory::streaming::sm &depformer_positions) noexcept {
+  return action::bind_kv_caches(temporal, depformer, temporal_positions,
+                                depformer_positions);
+}
+
 using MoshiExecutor = sm;
 
 } // namespace emel::speech::generator::moshi::executor

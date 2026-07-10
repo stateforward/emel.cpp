@@ -129,6 +129,10 @@ struct effect_begin_input_embedding {
     runtime_ev.ctx.embedding_view_bound = false;
     runtime_ev.ctx.embedding_row_ok = false;
     runtime_ev.ctx.projection_view_bound = false;
+    runtime_ev.ctx.temporal_position_accepted = false;
+    runtime_ev.ctx.temporal_position_error = static_cast<int32_t>(
+        emel::error::cast(emel::memory::streaming::error::none));
+    runtime_ev.ctx.temporal_position = {};
     runtime_ev.ctx.depformer_input_projection_bound = false;
     runtime_ev.ctx.depformer_input_projection_ok = false;
     runtime_ev.ctx.temporal_layer_norm_rms_ok = false;
@@ -151,6 +155,10 @@ struct effect_begin_input_embedding {
     runtime_ev.ctx.text_logits_ok = false;
     runtime_ev.ctx.text_sampling_ok = false;
     runtime_ev.ctx.depformer_kv_bound = false;
+    runtime_ev.ctx.depformer_position_accepted = false;
+    runtime_ev.ctx.depformer_position_error = static_cast<int32_t>(
+        emel::error::cast(emel::memory::streaming::error::none));
+    runtime_ev.ctx.depformer_position = {};
     runtime_ev.ctx.depformer_input_ok = false;
     runtime_ev.ctx.depformer_layer_norm_rms_ok = false;
     runtime_ev.ctx.depformer_layer_norm_ok = false;
@@ -172,14 +180,10 @@ struct effect_begin_input_embedding {
     runtime_ev.ctx.best_score = 0.0f;
     runtime_ev.ctx.input_audio_codebook_index = 0;
     runtime_ev.ctx.temporal_layer_index = 0;
-    runtime_ev.ctx.temporal_logical_position = -1;
-    runtime_ev.ctx.temporal_physical_position = -1;
+    runtime_ev.ctx.temporal_rope_position = -1;
     runtime_ev.ctx.depformer_codebook_index = 0;
     runtime_ev.ctx.depformer_weight_index = -1;
     runtime_ev.ctx.depformer_layer_index = 0;
-    runtime_ev.ctx.depformer_logical_position = -1;
-    runtime_ev.ctx.depformer_physical_position = -1;
-    runtime_ev.ctx.depformer_valid_positions = 0;
     runtime_ev.ctx.embedding_dim = 0;
     runtime_ev.ctx.embedding_view = {};
     runtime_ev.ctx.projection_view = {};
@@ -421,20 +425,11 @@ template <uint64_t projection_part> struct effect_run_temporal_layer_rope {
   void operator()(const event::step_run &runtime_ev,
                   context &ctx) const noexcept {
     const auto &lm = runtime_ev.request.model.moshi_lm;
-    const auto &snapshot = runtime_ev.request.memory_snapshot;
     const int32_t hidden_dim = ctx.session.hidden_dim;
     const int32_t head_dim = hidden_dim / lm.num_heads;
     runtime_ev.ctx.temporal_layer_rope_ok = false;
-    const size_t sequence = static_cast<size_t>(runtime_ev.request.sequence_id);
-    runtime_ev.ctx.temporal_logical_position =
-        snapshot.sequence_length_values[sequence] - 1;
-    const size_t logical_block = static_cast<size_t>(
-        runtime_ev.ctx.temporal_logical_position / snapshot.block_tokens);
-    const int32_t block_id = static_cast<int32_t>(
-        snapshot.sequence_kv_blocks[sequence][logical_block]);
-    runtime_ev.ctx.temporal_physical_position =
-        block_id * snapshot.block_tokens +
-        (runtime_ev.ctx.temporal_logical_position % snapshot.block_tokens);
+    runtime_ev.ctx.temporal_rope_position =
+        static_cast<int32_t>(runtime_ev.ctx.temporal_position.logical_position);
 
     const uint64_t head_dim_u64 = static_cast<uint64_t>(head_dim);
     const uint64_t heads_u64 = static_cast<uint64_t>(lm.num_heads);
@@ -454,7 +449,7 @@ template <uint64_t projection_part> struct effect_run_temporal_layer_rope {
             },
         .src1 =
             {
-                .data = &runtime_ev.ctx.temporal_logical_position,
+                .data = &runtime_ev.ctx.temporal_rope_position,
                 .type = emel::kernel::event::dtype::i32,
                 .ne = {1u, 1u, 1u, 1u},
                 .nb = {sizeof(int32_t), sizeof(int32_t), sizeof(int32_t),
@@ -517,7 +512,7 @@ struct effect_write_temporal_layer_kv_cache {
     const size_t layer_offset = view.layer_cache_offsets[static_cast<size_t>(
         runtime_ev.ctx.temporal_layer_index)];
     const size_t physical_position =
-        static_cast<size_t>(runtime_ev.ctx.temporal_physical_position);
+        static_cast<size_t>(runtime_ev.ctx.temporal_position.physical_position);
     const size_t dim = static_cast<size_t>(hidden_dim);
     const size_t begin = layer_offset + physical_position * dim;
     const float *key = runtime_ev.ctx.qkv.data() + dim;
@@ -536,17 +531,13 @@ struct effect_write_temporal_layer_kv_cache {
 struct effect_run_temporal_layer_attention {
   void operator()(const event::step_run &runtime_ev,
                   const context &ctx) const noexcept {
-    const auto &snapshot = runtime_ev.request.memory_snapshot;
     const auto &view = runtime_ev.ctx.temporal_kv;
+    const auto &window = runtime_ev.ctx.temporal_position.window;
     const auto &lm = runtime_ev.request.model.moshi_lm;
     const int32_t hidden_dim = ctx.session.hidden_dim;
     const int32_t head_dim = hidden_dim / lm.num_heads;
     const int32_t capacity = view.position_capacity;
-    const int32_t sequence_length =
-        snapshot.sequence_length(runtime_ev.request.sequence_id);
-    const int32_t current_logical = runtime_ev.ctx.temporal_logical_position;
-    const int32_t logical_begin =
-        sequence_length > capacity ? sequence_length - capacity : 0;
+    const int32_t valid_positions = window.valid_positions;
     const float scale = 1.0f / std::sqrt(static_cast<float>(head_dim));
     const size_t layer_offset = view.layer_cache_offsets[static_cast<size_t>(
         runtime_ev.ctx.temporal_layer_index)];
@@ -566,23 +557,19 @@ struct effect_run_temporal_layer_attention {
         runtime_ev.ctx.attention_scores[static_cast<size_t>(physical)] =
             -std::numeric_limits<float>::infinity();
       }
-      for (int32_t logical = logical_begin; logical < sequence_length;
-           ++logical) {
-        const int32_t physical = detail::physical_position(
-            snapshot, runtime_ev.request.sequence_id, logical);
-        const int32_t delta = current_logical - logical;
-        const bool visible =
-            delta >= 0 && (lm.context <= 0 || delta < lm.context);
+      for (int32_t position = 0; position < valid_positions; ++position) {
+        const int32_t unwrapped = window.physical_begin + position;
+        const int32_t physical =
+            unwrapped - static_cast<int32_t>(unwrapped >= capacity) * capacity;
         const size_t cache_begin =
             layer_offset +
             static_cast<size_t>(physical) * static_cast<size_t>(hidden_dim) +
             static_cast<size_t>(head_offset);
         runtime_ev.ctx.attention_scores[static_cast<size_t>(physical)] =
-            visible ? emel::kernel::detail::vec_dot_bf16_ggml(
-                          head_dim, view.key_cache.data() + cache_begin,
-                          runtime_ev.ctx.q_bf16.data()) *
-                          scale
-                    : -std::numeric_limits<float>::infinity();
+            emel::kernel::detail::vec_dot_bf16_ggml(
+                head_dim, view.key_cache.data() + cache_begin,
+                runtime_ev.ctx.q_bf16.data()) *
+            scale;
       }
 
       emel::kernel::detail::soft_max_row_ggml(
@@ -597,10 +584,11 @@ struct effect_run_temporal_layer_attention {
           runtime_ev.ctx.attention.data() + static_cast<size_t>(head_offset);
       for (int32_t dim = 0; dim < head_dim; ++dim) {
         double sum = 0.0;
-        for (int32_t logical = logical_begin; logical < sequence_length;
-             ++logical) {
-          const int32_t physical = detail::physical_position(
-              snapshot, runtime_ev.request.sequence_id, logical);
+        for (int32_t position = 0; position < valid_positions; ++position) {
+          const int32_t unwrapped = window.physical_begin + position;
+          const int32_t physical =
+              unwrapped -
+              static_cast<int32_t>(unwrapped >= capacity) * capacity;
           const size_t value_index =
               layer_offset +
               static_cast<size_t>(physical) * static_cast<size_t>(hidden_dim) +
@@ -883,8 +871,6 @@ struct effect_advance_temporal_layer {
     runtime_ev.ctx.temporal_layer_silu_gate_ok = false;
     runtime_ev.ctx.temporal_layer_gating_out_ok = false;
     runtime_ev.ctx.temporal_layer_ff_residual_ok = false;
-    runtime_ev.ctx.temporal_logical_position = -1;
-    runtime_ev.ctx.temporal_physical_position = -1;
   }
 };
 
@@ -1055,9 +1041,29 @@ struct effect_bind_depformer_kv {
   }
 };
 
-struct effect_reset_depformer_kv_offset {
-  void operator()(const event::step_run &runtime_ev, context &) const noexcept {
-    *runtime_ev.ctx.depformer_kv.offset = 0;
+struct effect_reset_depformer_positions {
+  void operator()(const event::step_run &runtime_ev,
+                  context &ctx) const noexcept {
+    runtime_ev.ctx.depformer_position_error = static_cast<int32_t>(
+        emel::error::cast(emel::memory::streaming::error::none));
+    runtime_ev.ctx.depformer_position_accepted =
+        ctx.depformer_positions->process_event(
+            emel::memory::streaming::event::reset{
+                .error_out = runtime_ev.ctx.depformer_position_error});
+  }
+};
+
+struct effect_advance_depformer_position {
+  void operator()(const event::step_run &runtime_ev,
+                  context &ctx) const noexcept {
+    runtime_ev.ctx.depformer_position = {};
+    runtime_ev.ctx.depformer_position_error = static_cast<int32_t>(
+        emel::error::cast(emel::memory::streaming::error::none));
+    runtime_ev.ctx.depformer_position_accepted =
+        ctx.depformer_positions->process_event(
+            emel::memory::streaming::event::advance{
+                .result = runtime_ev.ctx.depformer_position,
+                .error_out = runtime_ev.ctx.depformer_position_error});
   }
 };
 
@@ -1322,12 +1328,8 @@ struct effect_write_depformer_layer_kv_cache {
     auto &view = runtime_ev.ctx.depformer_kv;
     runtime_ev.ctx.depformer_layer_cache_write_ok = false;
 
-    const int32_t logical_position = *view.offset;
-    const int32_t physical_position = logical_position % view.position_capacity;
-    runtime_ev.ctx.depformer_logical_position = logical_position;
-    runtime_ev.ctx.depformer_physical_position = physical_position;
-    runtime_ev.ctx.depformer_valid_positions =
-        std::min(logical_position + 1, view.position_capacity);
+    const int32_t physical_position =
+        runtime_ev.ctx.depformer_position.physical_position;
 
     const size_t layer_offset = view.layer_cache_offsets[static_cast<size_t>(
         runtime_ev.ctx.depformer_layer_index)];
@@ -1351,11 +1353,12 @@ struct effect_run_depformer_layer_attention {
   void operator()(const event::step_run &runtime_ev,
                   const context &) const noexcept {
     const auto &view = runtime_ev.ctx.depformer_kv;
+    const auto &window = runtime_ev.ctx.depformer_position.window;
     const auto &lm = runtime_ev.request.model.moshi_lm;
     const int32_t dep_dim = lm.depformer_dim;
     const int32_t head_dim = dep_dim / lm.depformer_num_heads;
     const int32_t capacity = view.position_capacity;
-    const int32_t logical_position = runtime_ev.ctx.depformer_logical_position;
+    const int32_t valid_positions = window.valid_positions;
     const float scale = 1.0f / std::sqrt(static_cast<float>(head_dim));
     const size_t layer_offset = view.layer_cache_offsets[static_cast<size_t>(
         runtime_ev.ctx.depformer_layer_index)];
@@ -1372,18 +1375,22 @@ struct effect_run_depformer_layer_attention {
             emel::kernel::detail::fp32_to_bf16(q_head[dim]);
       }
       for (int32_t physical = 0; physical < capacity; ++physical) {
-        const bool visible =
-            logical_position >= capacity || physical <= logical_position;
+        runtime_ev.ctx.attention_scores[static_cast<size_t>(physical)] =
+            -std::numeric_limits<float>::infinity();
+      }
+      for (int32_t position = 0; position < valid_positions; ++position) {
+        const int32_t unwrapped = window.physical_begin + position;
+        const int32_t physical =
+            unwrapped - static_cast<int32_t>(unwrapped >= capacity) * capacity;
         const size_t cache_begin =
             layer_offset +
             static_cast<size_t>(physical) * static_cast<size_t>(dep_dim) +
             static_cast<size_t>(head_offset);
         runtime_ev.ctx.attention_scores[static_cast<size_t>(physical)] =
-            visible ? emel::kernel::detail::vec_dot_bf16_ggml(
-                          head_dim, view.key_cache.data() + cache_begin,
-                          runtime_ev.ctx.q_bf16.data()) *
-                          scale
-                    : -std::numeric_limits<float>::infinity();
+            emel::kernel::detail::vec_dot_bf16_ggml(
+                head_dim, view.key_cache.data() + cache_begin,
+                runtime_ev.ctx.q_bf16.data()) *
+            scale;
       }
 
       emel::kernel::detail::soft_max_row_ggml(
@@ -1398,7 +1405,11 @@ struct effect_run_depformer_layer_attention {
           runtime_ev.ctx.attention.data() + static_cast<size_t>(head_offset);
       for (int32_t dim = 0; dim < head_dim; ++dim) {
         double sum = 0.0;
-        for (int32_t physical = 0; physical < capacity; ++physical) {
+        for (int32_t position = 0; position < valid_positions; ++position) {
+          const int32_t unwrapped = window.physical_begin + position;
+          const int32_t physical =
+              unwrapped -
+              static_cast<int32_t>(unwrapped >= capacity) * capacity;
           const size_t value_index =
               layer_offset +
               static_cast<size_t>(physical) * static_cast<size_t>(dep_dim) +
@@ -1684,9 +1695,6 @@ struct effect_advance_depformer_layer {
     runtime_ev.ctx.depformer_layer_silu_gate_ok = false;
     runtime_ev.ctx.depformer_layer_gating_out_ok = false;
     runtime_ev.ctx.depformer_layer_ff_residual_ok = false;
-    runtime_ev.ctx.depformer_logical_position = -1;
-    runtime_ev.ctx.depformer_physical_position = -1;
-    runtime_ev.ctx.depformer_valid_positions = 0;
   }
 };
 
@@ -1786,7 +1794,6 @@ struct effect_publish_depformer_token {
     const int32_t codebook = runtime_ev.ctx.depformer_codebook_index;
     runtime_ev.request.audio_tokens_out[static_cast<size_t>(codebook)] =
         runtime_ev.ctx.best_index;
-    ++(*runtime_ev.ctx.depformer_kv.offset);
   }
 };
 
@@ -1812,9 +1819,6 @@ struct effect_advance_depformer_codebook {
     runtime_ev.ctx.depformer_layer_gating_out_ok = false;
     runtime_ev.ctx.depformer_layer_ff_residual_ok = false;
     runtime_ev.ctx.depformer_logits_ok = false;
-    runtime_ev.ctx.depformer_logical_position = -1;
-    runtime_ev.ctx.depformer_physical_position = -1;
-    runtime_ev.ctx.depformer_valid_positions = 0;
     runtime_ev.ctx.depformer_weight_index = -1;
   }
 };
@@ -1827,6 +1831,20 @@ struct effect_bind_temporal_kv {
         ctx.temporal_kv.cache, runtime_ev.request.model,
         runtime_ev.request.memory_snapshot, runtime_ev.request.sequence_id,
         runtime_ev.ctx.temporal_kv);
+  }
+};
+
+struct effect_advance_temporal_position {
+  void operator()(const event::step_run &runtime_ev,
+                  context &ctx) const noexcept {
+    runtime_ev.ctx.temporal_position = {};
+    runtime_ev.ctx.temporal_position_error = static_cast<int32_t>(
+        emel::error::cast(emel::memory::streaming::error::none));
+    runtime_ev.ctx.temporal_position_accepted =
+        ctx.temporal_positions->process_event(
+            emel::memory::streaming::event::advance{
+                .result = runtime_ev.ctx.temporal_position,
+                .error_out = runtime_ev.ctx.temporal_position_error});
   }
 };
 

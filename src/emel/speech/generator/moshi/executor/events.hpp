@@ -4,6 +4,7 @@
 
 #include "emel/callback.hpp"
 #include "emel/error/error.hpp"
+#include "emel/memory/streaming/events.hpp"
 #include "emel/model/data.hpp"
 #include "emel/speech/generator/moshi/events.hpp"
 #include "emel/speech/generator/moshi/executor/detail.hpp"
@@ -48,6 +49,7 @@ struct step_ctx {
   bool embedding_row_ok = false;
   bool projection_view_bound = false;
   bool temporal_kv_bound = false;
+  bool temporal_position_accepted = false;
   bool temporal_layer_norm_rms_ok = false;
   bool temporal_layer_norm_ok = false;
   bool temporal_layer_projection_ok = false;
@@ -68,6 +70,7 @@ struct step_ctx {
   bool text_logits_ok = false;
   bool text_sampling_ok = false;
   bool depformer_kv_bound = false;
+  bool depformer_position_accepted = false;
   bool depformer_input_ok = false;
   bool depformer_input_projection_bound = false;
   bool depformer_input_projection_ok = false;
@@ -92,17 +95,17 @@ struct step_ctx {
   int32_t best_index = -1;
   int32_t input_audio_codebook_index = 0;
   int32_t temporal_layer_index = 0;
-  int32_t temporal_logical_position = -1;
-  int32_t temporal_physical_position = -1;
+  int32_t temporal_rope_position = -1;
+  int32_t temporal_position_error = 0;
   int32_t depformer_codebook_index = 0;
   int32_t depformer_weight_index = -1;
   int32_t depformer_layer_index = 0;
-  int32_t depformer_logical_position = -1;
-  int32_t depformer_physical_position = -1;
-  int32_t depformer_valid_positions = 0;
+  int32_t depformer_position_error = 0;
   float best_score = 0.0f;
   detail::temporal_kv_view temporal_kv = {};
   detail::depformer_kv_view depformer_kv = {};
+  emel::memory::streaming::advance_result temporal_position = {};
+  emel::memory::streaming::advance_result depformer_position = {};
   detail::tensor_view embedding_view = {};
   detail::tensor_view projection_view = {};
   alignas(64) std::array<float, detail::k_max_sampling_card> logits = {};

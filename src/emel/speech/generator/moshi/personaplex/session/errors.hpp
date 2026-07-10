@@ -7,6 +7,7 @@ namespace emel::speech::generator::moshi::personaplex::session::error {
 enum code : emel::error::type {
   none = 0,
   invalid_request,
+  memory_initialize_failed,
   codec_initialize_failed,
   executor_initialize_failed,
   generator_initialize_failed,

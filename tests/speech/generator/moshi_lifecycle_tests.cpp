@@ -11,6 +11,7 @@
 #include <doctest/doctest.h>
 
 #include "../../memory/recording_kv_actor.hpp"
+#include "emel/memory/streaming/sm.hpp"
 #include "emel/model/moshi/detail.hpp"
 #include "emel/speech/codec/mimi/any.hpp"
 #include "emel/speech/generator/moshi/any.hpp"
@@ -21,6 +22,7 @@ namespace {
 
 namespace moshi = emel::speech::generator::moshi;
 namespace moshi_executor = emel::speech::generator::moshi::executor;
+namespace memory_streaming = emel::memory::streaming;
 namespace mimi = emel::speech::codec::mimi;
 namespace model_moshi = emel::model::moshi::detail;
 using emel::speech::generator::moshi::test::load_fixture_or_skip;
@@ -75,7 +77,6 @@ struct depformer_kv_probe {
   int32_t call_count = 0;
   int32_t sequence_id = -1;
   int32_t sequence_length = -1;
-  int32_t offset = 0;
   std::vector<uint16_t> key_cache = {};
   std::vector<uint16_t> value_cache = {};
   std::vector<size_t> layer_offsets = {};
@@ -261,7 +262,6 @@ bool temporal_kv_probe_bind(void *cache_ptr, const emel::model::data &model,
   view.layer_cache_offsets = probe.layer_offsets;
   view.layer_count = layer_count;
   view.position_capacity = position_capacity;
-  view.block_tokens = snapshot.block_tokens > 0 ? snapshot.block_tokens : 16;
   view.kv_dim = kv_dim;
   return true;
 }
@@ -296,12 +296,19 @@ bool depformer_kv_probe_bind(void *cache_ptr, const emel::model::data &model,
   view.value_cache =
       std::span<uint16_t>{probe.value_cache.data(), probe.value_cache.size()};
   view.layer_cache_offsets = probe.layer_offsets;
-  view.offset = &probe.offset;
   view.layer_count = layer_count;
   view.position_capacity = position_capacity;
-  view.block_tokens = 1;
   view.kv_dim = kv_dim;
   return true;
+}
+
+void initialize_streaming_position(memory_streaming::sm &position) {
+  int32_t err =
+      static_cast<int32_t>(emel::error::cast(memory_streaming::error::none));
+  REQUIRE(position.process_event(
+      memory_streaming::event::initialize{.error_out = err}));
+  REQUIRE(err == static_cast<int32_t>(
+                     emel::error::cast(memory_streaming::error::none)));
 }
 
 } // namespace
@@ -1476,7 +1483,6 @@ TEST_CASE("speech_moshi_generator_and_executor_cover_explicit_error_guards") {
   step_ctx.temporal_kv.layer_cache_offsets = std::span<const size_t>{offsets};
   step_ctx.temporal_kv.layer_count = 1;
   step_ctx.temporal_kv.position_capacity = 1;
-  step_ctx.temporal_kv.block_tokens = 1;
   step_ctx.temporal_kv.kv_dim = lm.dim;
   step_ctx.temporal_kv_bound = true;
   CHECK(
@@ -1502,6 +1508,8 @@ TEST_CASE("speech_moshi_generator_and_executor_cover_explicit_error_guards") {
   step_ctx.temporal_layer_projection_ok = true;
   CHECK(moshi_executor::guard::guard_temporal_layer_projection_succeeded{}(
       step_run, executor_ctx));
+  step_ctx.temporal_position.logical_position = 0;
+  step_ctx.temporal_position.physical_position = 0;
   CHECK_FALSE(moshi_executor::guard::guard_temporal_layer_rope_unsupported{}(
       step_run, executor_ctx));
   CHECK(moshi_executor::guard::guard_temporal_layer_rope_failed{}(
@@ -1581,8 +1589,15 @@ TEST_CASE(
   }
 
   temporal_kv_probe probe{};
-  moshi_executor::sm executor{
-      moshi_executor::bind_temporal_kv_cache(&probe, temporal_kv_probe_bind)};
+  memory_streaming::sm temporal_positions{memory_streaming::dependencies{
+      .capacity = fixture.model->moshi_lm.context}};
+  initialize_streaming_position(temporal_positions);
+  moshi_executor::action::kv_bindings bindings{
+      .temporal = moshi_executor::bind_temporal_kv_cache(
+          &probe, temporal_kv_probe_bind),
+      .temporal_positions = &temporal_positions,
+  };
+  moshi_executor::sm executor{bindings};
   emel::error::type err = emel::error::cast(moshi_executor::error::none);
   moshi_executor::event::initialize init{*fixture.model};
   init.error_out = &err;
@@ -1617,9 +1632,7 @@ TEST_CASE(
   CHECK(probe.call_count == 1);
   CHECK(probe.sequence_id == 7);
   CHECK(probe.sequence_length == 3);
-  const size_t write_offset =
-      static_cast<size_t>(snapshot.sequence_length_values[7] - 1) *
-      static_cast<size_t>(fixture.model->moshi_lm.dim);
+  const size_t write_offset = 0;
   const size_t write_end =
       write_offset + static_cast<size_t>(fixture.model->moshi_lm.dim);
   REQUIRE(write_end <= probe.key_cache.size());
@@ -1665,8 +1678,14 @@ TEST_CASE("speech_moshi_executor_accepts_personaplex_voice_embedding_step") {
       &temporal_probe, temporal_kv_probe_bind);
   const auto depformer_kv = moshi_executor::bind_depformer_kv_cache(
       &depformer_probe, depformer_kv_probe_bind);
-  moshi_executor::sm executor{
-      moshi_executor::bind_kv_caches(temporal_kv, depformer_kv)};
+  memory_streaming::sm temporal_positions{memory_streaming::dependencies{
+      .capacity = fixture.model->moshi_lm.context}};
+  memory_streaming::sm depformer_positions{memory_streaming::dependencies{
+      .capacity = fixture.model->moshi_lm.depformer_context}};
+  initialize_streaming_position(temporal_positions);
+  initialize_streaming_position(depformer_positions);
+  moshi_executor::sm executor{moshi_executor::bind_kv_caches(
+      temporal_kv, depformer_kv, temporal_positions, depformer_positions)};
   emel::error::type err = emel::error::cast(moshi_executor::error::none);
   moshi_executor::event::initialize init{*fixture.model};
   init.error_out = &err;
@@ -1725,8 +1744,14 @@ TEST_CASE("speech_moshi_executor_generates_audio_tokens_with_injected_kv") {
       &temporal_probe, temporal_kv_probe_bind);
   const auto depformer_kv = moshi_executor::bind_depformer_kv_cache(
       &depformer_probe, depformer_kv_probe_bind);
-  moshi_executor::sm executor{
-      moshi_executor::bind_kv_caches(temporal_kv, depformer_kv)};
+  memory_streaming::sm temporal_positions{memory_streaming::dependencies{
+      .capacity = fixture.model->moshi_lm.context}};
+  memory_streaming::sm depformer_positions{memory_streaming::dependencies{
+      .capacity = fixture.model->moshi_lm.depformer_context}};
+  initialize_streaming_position(temporal_positions);
+  initialize_streaming_position(depformer_positions);
+  moshi_executor::sm executor{moshi_executor::bind_kv_caches(
+      temporal_kv, depformer_kv, temporal_positions, depformer_positions)};
   emel::error::type err = emel::error::cast(moshi_executor::error::none);
   moshi_executor::event::initialize init{*fixture.model};
   init.error_out = &err;
@@ -1744,7 +1769,6 @@ TEST_CASE("speech_moshi_executor_generates_audio_tokens_with_injected_kv") {
   snapshot.sequence_kv_block_count[7] = 1;
   snapshot.sequence_kv_blocks[7][0] = 0;
   err = emel::error::cast(moshi_executor::error::none);
-  depformer_probe.offset = 37;
 
   moshi::event::graph_step step{
       *fixture.model, snapshot,
@@ -1760,7 +1784,13 @@ TEST_CASE("speech_moshi_executor_generates_audio_tokens_with_injected_kv") {
   CHECK(err == emel::error::cast(moshi_executor::error::none));
   CHECK(temporal_probe.call_count == 1);
   CHECK(depformer_probe.call_count == 1);
-  CHECK(depformer_probe.offset == fixture.model->moshi_lm.dep_q);
+  memory_streaming::window_view depformer_window = {};
+  int32_t memory_err =
+      static_cast<int32_t>(emel::error::cast(memory_streaming::error::none));
+  REQUIRE(
+      depformer_positions.process_event(memory_streaming::event::capture_view{
+          .view_out = depformer_window, .error_out = memory_err}));
+  CHECK(depformer_window.logical_end == fixture.model->moshi_lm.dep_q);
   CHECK(text_token >= 0);
   CHECK(text_token < fixture.model->moshi_lm.text_card);
   for (int32_t index = 0; index < fixture.model->moshi_lm.dep_q; ++index) {
@@ -1799,16 +1829,31 @@ TEST_CASE("speech_moshi_executor_sampling_rng_is_actor_owned") {
   temporal_kv_probe second_temporal{};
   depformer_kv_probe first_depformer{};
   depformer_kv_probe second_depformer{};
+  memory_streaming::sm first_temporal_positions{memory_streaming::dependencies{
+      .capacity = first_fixture.model->moshi_lm.context}};
+  memory_streaming::sm first_depformer_positions{memory_streaming::dependencies{
+      .capacity = first_fixture.model->moshi_lm.depformer_context}};
+  memory_streaming::sm second_temporal_positions{memory_streaming::dependencies{
+      .capacity = second_fixture.model->moshi_lm.context}};
+  memory_streaming::sm second_depformer_positions{
+      memory_streaming::dependencies{
+          .capacity = second_fixture.model->moshi_lm.depformer_context}};
+  initialize_streaming_position(first_temporal_positions);
+  initialize_streaming_position(first_depformer_positions);
+  initialize_streaming_position(second_temporal_positions);
+  initialize_streaming_position(second_depformer_positions);
   moshi_executor::sm first{moshi_executor::bind_kv_caches(
       moshi_executor::bind_temporal_kv_cache(&first_temporal,
                                              temporal_kv_probe_bind),
       moshi_executor::bind_depformer_kv_cache(&first_depformer,
-                                              depformer_kv_probe_bind))};
+                                              depformer_kv_probe_bind),
+      first_temporal_positions, first_depformer_positions)};
   moshi_executor::sm second{moshi_executor::bind_kv_caches(
       moshi_executor::bind_temporal_kv_cache(&second_temporal,
                                              temporal_kv_probe_bind),
       moshi_executor::bind_depformer_kv_cache(&second_depformer,
-                                              depformer_kv_probe_bind))};
+                                              depformer_kv_probe_bind),
+      second_temporal_positions, second_depformer_positions)};
   emel::error::type first_err = emel::error::cast(moshi_executor::error::none);
   emel::error::type second_err = emel::error::cast(moshi_executor::error::none);
   moshi_executor::event::initialize first_init{*first_fixture.model};
@@ -1917,8 +1962,14 @@ TEST_CASE("speech_moshi_e2e_encodes_audio_generates_tokens_and_decodes_audio") {
       &temporal_probe, temporal_kv_probe_bind);
   const auto depformer_kv = moshi_executor::bind_depformer_kv_cache(
       &depformer_probe, depformer_kv_probe_bind);
-  moshi_executor::sm executor{
-      moshi_executor::bind_kv_caches(temporal_kv, depformer_kv)};
+  memory_streaming::sm temporal_positions{memory_streaming::dependencies{
+      .capacity = lm_fixture.model->moshi_lm.context}};
+  memory_streaming::sm depformer_positions{memory_streaming::dependencies{
+      .capacity = lm_fixture.model->moshi_lm.depformer_context}};
+  initialize_streaming_position(temporal_positions);
+  initialize_streaming_position(depformer_positions);
+  moshi_executor::sm executor{moshi_executor::bind_kv_caches(
+      temporal_kv, depformer_kv, temporal_positions, depformer_positions)};
   emel::error::type executor_err =
       emel::error::cast(moshi_executor::error::none);
   moshi_executor::event::initialize executor_init{*lm_fixture.model};

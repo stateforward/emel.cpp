@@ -12,6 +12,8 @@
 namespace emel::speech::generator::moshi::personaplex::session {
 
 struct state_uninitialized {};
+struct state_initialize_temporal_positions_result {};
+struct state_initialize_depformer_positions_result {};
 struct state_initialize_encoder_result {};
 struct state_initialize_decoder_result {};
 struct state_initialize_executor_result {};
@@ -48,9 +50,23 @@ struct model {
     return sml::make_transition_table(
       //------------------------------------------------------------------------------//
       // Initialize every child actor in deterministic RTC order.
-        sml::state<state_initialize_encoder_result> <= *sml::state<state_uninitialized>
+        sml::state<state_initialize_temporal_positions_result> <= *sml::state<state_uninitialized>
           + sml::event<init_run> [ guard::guard_initialize_request_valid{} ]
+          / action::effect_initialize_temporal_positions{}
+      , sml::state<state_initialize_depformer_positions_result> <=
+            sml::state<state_initialize_temporal_positions_result>
+          + sml::completion<init_run> [ guard::guard_child_succeeded<init_run>{} ]
+          / action::effect_initialize_depformer_positions{}
+      , sml::state<state_failed> <= sml::state<state_initialize_temporal_positions_result>
+          + sml::completion<init_run> [ guard::guard_child_failed<init_run>{} ]
+          / action::effect_fail_initialize_child<error::memory_initialize_failed>{}
+      , sml::state<state_initialize_encoder_result> <=
+            sml::state<state_initialize_depformer_positions_result>
+          + sml::completion<init_run> [ guard::guard_child_succeeded<init_run>{} ]
           / action::effect_initialize_encoder{}
+      , sml::state<state_failed> <= sml::state<state_initialize_depformer_positions_result>
+          + sml::completion<init_run> [ guard::guard_child_failed<init_run>{} ]
+          / action::effect_fail_initialize_child<error::memory_initialize_failed>{}
       , sml::state<state_failed> <= sml::state<state_uninitialized>
           + sml::event<init_run> [ guard::guard_initialize_request_invalid{} ]
           / action::effect_fail_initialize_invalid{}
@@ -183,6 +199,10 @@ struct model {
       //------------------------------------------------------------------------------//
       // Every external event outside its modeled phase is explicit.
       , sml::state<state_failed> <= sml::state<state_uninitialized>
+          + sml::unexpected_event<sml::_> / action::effect_mark_unexpected{}
+      , sml::state<state_failed> <= sml::state<state_initialize_temporal_positions_result>
+          + sml::unexpected_event<sml::_> / action::effect_mark_unexpected{}
+      , sml::state<state_failed> <= sml::state<state_initialize_depformer_positions_result>
           + sml::unexpected_event<sml::_> / action::effect_mark_unexpected{}
       , sml::state<state_failed> <= sml::state<state_initialize_encoder_result>
           + sml::unexpected_event<sml::_> / action::effect_mark_unexpected{}

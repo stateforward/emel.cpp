@@ -63,7 +63,6 @@ struct streaming_cache {
   std::vector<uint16_t> key_cache = {};
   std::vector<uint16_t> value_cache = {};
   std::vector<size_t> layer_offsets = {};
-  int32_t offset = 0;
 };
 
 bool read_binary_file(const std::filesystem::path &path,
@@ -276,7 +275,6 @@ bool prepare_streaming_cache(streaming_cache &cache, const int32_t layer_count,
   }
   cache.key_cache.assign(static_cast<size_t>(layer_count) * per_layer, 0u);
   cache.value_cache.assign(cache.key_cache.size(), 0u);
-  cache.offset = 0;
   return true;
 }
 
@@ -433,10 +431,8 @@ int main(int argc, char **argv) {
               .value_cache = std::span<uint16_t>{temporal_cache.value_cache},
               .layer_cache_offsets =
                   std::span<const size_t>{temporal_cache.layer_offsets},
-              .offset = &temporal_cache.offset,
               .layer_count = lm_model.model->moshi_lm.num_layers,
               .position_capacity = lm_model.model->moshi_lm.context,
-              .block_tokens = 1,
               .kv_dim = lm_model.model->moshi_lm.dim,
           },
       .depformer_kv =
@@ -445,10 +441,8 @@ int main(int argc, char **argv) {
               .value_cache = std::span<uint16_t>{depformer_cache.value_cache},
               .layer_cache_offsets =
                   std::span<const size_t>{depformer_cache.layer_offsets},
-              .offset = &depformer_cache.offset,
               .layer_count = lm_model.model->moshi_lm.depformer_num_layers,
               .position_capacity = lm_model.model->moshi_lm.depformer_context,
-              .block_tokens = 1,
               .kv_dim = lm_model.model->moshi_lm.depformer_dim,
           },
       .generator_memory = emel::memory::hybrid::kv_binding{},
