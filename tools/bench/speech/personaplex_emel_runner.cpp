@@ -17,16 +17,20 @@
 #include "emel/gguf/loader/detail.hpp"
 #include "emel/gguf/loader/events.hpp"
 #include "emel/gguf/loader/sm.hpp"
+#include "emel/memory/streaming/sm.hpp"
 #include "emel/model/data.hpp"
 #include "emel/model/detail.hpp"
 #include "emel/speech/codec/mimi/any.hpp"
-#include "emel/speech/generator/moshi/personaplex/session/any.hpp"
+#include "emel/speech/generator/moshi/any.hpp"
+#include "emel/speech/generator/moshi/executor/any.hpp"
+#include "emel/speech/generator/sm.hpp"
 
 namespace {
 
 namespace mimi = emel::speech::codec::mimi;
-namespace personaplex_session =
-    emel::speech::generator::moshi::personaplex::session;
+namespace generator = emel::speech::generator;
+namespace predictor = emel::speech::generator::moshi;
+namespace runtime = emel::speech::generator::moshi::executor;
 
 struct runner_config {
   const char *mimi_path = nullptr;
@@ -63,6 +67,51 @@ struct streaming_cache {
   std::vector<uint16_t> key_cache = {};
   std::vector<uint16_t> value_cache = {};
   std::vector<size_t> layer_offsets = {};
+};
+
+struct cache_binding {
+  runtime::detail::temporal_kv_view temporal = {};
+  runtime::detail::depformer_kv_view secondary = {};
+};
+
+bool bind_temporal_cache(void *binding_ptr, const emel::model::data &,
+                         const emel::memory::view::snapshot &, int32_t,
+                         runtime::detail::temporal_kv_view &view) noexcept {
+  view = static_cast<cache_binding *>(binding_ptr)->temporal;
+  return true;
+}
+
+bool bind_secondary_cache(void *binding_ptr, const emel::model::data &,
+                          const emel::memory::view::snapshot &, int32_t,
+                          runtime::detail::depformer_kv_view &view) noexcept {
+  view = static_cast<cache_binding *>(binding_ptr)->secondary;
+  return true;
+}
+
+struct personaplex_dependencies {
+  using voice_condition_event = predictor::event::prefill_voice;
+  using prompt_begin_event = predictor::event::begin_personaplex_prompt;
+  using prompt_condition_event = predictor::event::prefill_personaplex_prompt;
+  using encode_event = mimi::event::encode_frame;
+  using predict_event = predictor::event::step;
+  using decode_event = mimi::event::decode_frame;
+
+  emel::memory::streaming::sm &temporal_positions;
+  emel::memory::streaming::sm &secondary_positions;
+  mimi::sm &encoder;
+  mimi::sm &decoder;
+  runtime::sm &runtime;
+  predictor::sm &predictor;
+  mimi::event::initialize encoder_initialize;
+  mimi::event::initialize decoder_initialize;
+  runtime::event::initialize runtime_initialize;
+  predictor::event::initialize predictor_initialize;
+  predictor::event::load_voice conditioning_initialize;
+  std::span<float> silence_pcm = {};
+  std::span<int32_t> input_codes = {};
+  std::span<int32_t> output_codes = {};
+  int32_t frame_samples = 0;
+  int32_t codebook_count = 0;
 };
 
 bool read_binary_file(const std::filesystem::path &path,
@@ -424,8 +473,14 @@ int main(int argc, char **argv) {
   std::vector<int32_t> input_codes(static_cast<size_t>(public_n_q), -1);
   std::vector<int32_t> output_codes(static_cast<size_t>(public_n_q), -1);
 
-  personaplex_session::dependencies session_dependencies{
-      .temporal_kv =
+  emel::memory::streaming::sm temporal_positions{
+      emel::memory::streaming::dependencies{
+          .capacity = lm_model.model->moshi_lm.context}};
+  emel::memory::streaming::sm secondary_positions{
+      emel::memory::streaming::dependencies{
+          .capacity = lm_model.model->moshi_lm.depformer_context}};
+  cache_binding cache_views{
+      .temporal =
           {
               .key_cache = std::span<uint16_t>{temporal_cache.key_cache},
               .value_cache = std::span<uint16_t>{temporal_cache.value_cache},
@@ -435,7 +490,7 @@ int main(int argc, char **argv) {
               .position_capacity = lm_model.model->moshi_lm.context,
               .kv_dim = lm_model.model->moshi_lm.dim,
           },
-      .depformer_kv =
+      .secondary =
           {
               .key_cache = std::span<uint16_t>{depformer_cache.key_cache},
               .value_cache = std::span<uint16_t>{depformer_cache.value_cache},
@@ -445,65 +500,84 @@ int main(int argc, char **argv) {
               .position_capacity = lm_model.model->moshi_lm.depformer_context,
               .kv_dim = lm_model.model->moshi_lm.depformer_dim,
           },
-      .generator_memory = emel::memory::hybrid::kv_binding{},
   };
-  personaplex_session::sm session{session_dependencies};
+  runtime::sm prediction_runtime{runtime::bind_kv_caches(
+      runtime::bind_temporal_kv_cache(&cache_views, bind_temporal_cache),
+      runtime::bind_depformer_kv_cache(&cache_views, bind_secondary_cache),
+      temporal_positions, secondary_positions)};
+  predictor::sm token_predictor{
+      emel::memory::hybrid::kv_binding{},
+      runtime::bind_graph_executor(prediction_runtime)};
+  mimi::sm encoder{};
+  mimi::sm decoder{};
+
+  runtime::event::initialize runtime_initialize{*lm_model.model};
+  runtime_initialize.sampling_enabled = true;
+  runtime_initialize.sampling_consume_forced_text = true;
+  runtime_initialize.sampling_audio_temperature = config.audio_temperature;
+  runtime_initialize.sampling_text_temperature = config.text_temperature;
+  runtime_initialize.sampling_audio_top_k = config.audio_top_k;
+  runtime_initialize.sampling_text_top_k = config.text_top_k;
+  runtime_initialize.sampling_seed = config.sampling_seed;
+  predictor::event::initialize predictor_initialize{*lm_model.model};
+  predictor_initialize.max_blocks = config.max_blocks;
+  predictor_initialize.block_tokens = config.block_tokens;
+
+  personaplex_dependencies dependencies{
+      .temporal_positions = temporal_positions,
+      .secondary_positions = secondary_positions,
+      .encoder = encoder,
+      .decoder = decoder,
+      .runtime = prediction_runtime,
+      .predictor = token_predictor,
+      .encoder_initialize =
+          mimi::event::initialize{*mimi_model.model,
+                                  std::span<float>{encoder_prepared},
+                                  std::span<float>{encoder_state},
+                                  std::span<float>{encoder_workspace},
+                                  std::span<float>{encoder_frame}},
+      .decoder_initialize =
+          mimi::event::initialize{*mimi_model.model,
+                                  std::span<float>{decoder_prepared},
+                                  std::span<float>{decoder_state},
+                                  std::span<float>{decoder_workspace},
+                                  std::span<float>{decoder_frame}},
+      .runtime_initialize = runtime_initialize,
+      .predictor_initialize = predictor_initialize,
+      .conditioning_initialize =
+          predictor::event::load_voice{*voice_model.model},
+      .silence_pcm = std::span<float>{pcm_frame},
+      .input_codes = std::span<int32_t>{input_codes},
+      .output_codes = std::span<int32_t>{output_codes},
+      .frame_samples = frame_samples_i32,
+      .codebook_count = public_n_q,
+  };
+  generator::sm<personaplex_dependencies> session{dependencies};
   emel::error::type session_err =
-      emel::error::cast(personaplex_session::error::none);
-  personaplex_session::event::initialize initialize{
-      .mimi_model = *mimi_model.model,
-      .lm_model = *lm_model.model,
-      .voice_model = *voice_model.model,
-      .encoder_storage =
-          {
-              .prepared = std::span<float>{encoder_prepared},
-              .state = std::span<float>{encoder_state},
-              .workspace = std::span<float>{encoder_workspace},
-              .frame = std::span<float>{encoder_frame},
-          },
-      .decoder_storage =
-          {
-              .prepared = std::span<float>{decoder_prepared},
-              .state = std::span<float>{decoder_state},
-              .workspace = std::span<float>{decoder_workspace},
-              .frame = std::span<float>{decoder_frame},
-          },
-      .sampling =
-          {
-              .enabled = true,
-              .consume_forced_text = true,
-              .audio_temperature = config.audio_temperature,
-              .text_temperature = config.text_temperature,
-              .audio_top_k = config.audio_top_k,
-              .text_top_k = config.text_top_k,
-              .seed = config.sampling_seed,
-          },
-      .max_blocks = config.max_blocks,
-      .block_tokens = config.block_tokens,
-      .error_out = session_err,
-  };
-  if (!session.process_event(initialize)) {
+      generator::action::error_code(generator::error::none);
+  if (!session.process_event(generator::event::initialize{session_err})) {
     std::fprintf(stderr, "PersonaPlex session initialize failed err=%d\n",
                  static_cast<int>(session_err));
     return 1;
   }
 
-  while (session.is(
-      stateforward::sml::state<personaplex_session::state_voice_prefill>)) {
-    session_err = emel::error::cast(personaplex_session::error::none);
-    personaplex_session::event::advance_voice advance{.error_out = session_err};
-    (void)session.process_event(advance);
+  while (
+      session.is(stateforward::sml::state<generator::state_condition_voice>)) {
+    bool complete = false;
+    int32_t remaining = -1;
+    session_err = generator::action::error_code(generator::error::none);
+    (void)session.process_event(generator::event::condition{
+        config.prompt_text_token, complete, remaining, session_err});
   }
-  while (session.is(
-      stateforward::sml::state<personaplex_session::state_prompt_prefill>)) {
-    session_err = emel::error::cast(personaplex_session::error::none);
-    personaplex_session::event::advance_prompt advance{
-        .text_token = config.prompt_text_token,
-        .error_out = session_err,
-    };
-    (void)session.process_event(advance);
+  while (
+      session.is(stateforward::sml::state<generator::state_condition_prompt>)) {
+    bool complete = false;
+    int32_t remaining = -1;
+    session_err = generator::action::error_code(generator::error::none);
+    (void)session.process_event(generator::event::condition{
+        config.prompt_text_token, complete, remaining, session_err});
   }
-  if (!session.is(stateforward::sml::state<personaplex_session::state_live>)) {
+  if (!session.is(stateforward::sml::state<generator::state_ready>)) {
     std::fprintf(stderr, "PersonaPlex prefill failed err=%d\n",
                  static_cast<int>(session_err));
     return 1;
@@ -516,21 +590,18 @@ int main(int argc, char **argv) {
     std::copy_n(input_pcm.data() + begin, copy_count, pcm_frame.data());
     int32_t text_token = -1;
     bool produced = false;
-    session_err = emel::error::cast(personaplex_session::error::none);
-    personaplex_session::event::live_frame frame{
-        .payload =
-            {
-                .pcm = std::span<const float>{pcm_frame},
-                .input_codes_out = std::span<int32_t>{input_codes},
-                .output_codes_out = std::span<int32_t>{output_codes},
-                .text_token_out = text_token,
-                .produced_out = produced,
-                .pcm_out = std::span<float>{output_pcm.data() +
-                                                frame_index * frame_samples,
-                                            frame_samples},
-            },
-        .error_out = session_err,
-    };
+    int32_t sample_count = 0;
+    session_err = generator::action::error_code(generator::error::none);
+    generator::event::stream_frame frame{
+        std::span<const float>{pcm_frame},
+        std::span<float>{output_pcm.data() + frame_index * frame_samples,
+                         frame_samples},
+        std::span<int32_t>{input_codes},
+        std::span<int32_t>{output_codes},
+        text_token,
+        sample_count,
+        produced,
+        session_err};
     (void)session.process_event(frame);
     std::fprintf(stderr, "EMEL_INPUT frame=%zu codes=", frame_index);
     for (int32_t index = 0; index < public_n_q; ++index) {
@@ -546,30 +617,23 @@ int main(int argc, char **argv) {
     std::fprintf(stderr, "\n");
   }
 
-  session_err = emel::error::cast(personaplex_session::error::none);
-  personaplex_session::event::begin_flush begin_flush{.error_out = session_err};
-  (void)session.process_event(begin_flush);
   std::fill(pcm_frame.begin(), pcm_frame.end(), 0.0f);
   const size_t flush_steps = config.target_output_frames - input_frames;
   for (size_t index = 0; index < flush_steps; ++index) {
     const size_t frame_index = input_frames + index;
     int32_t text_token = -1;
-    bool produced = false;
-    session_err = emel::error::cast(personaplex_session::error::none);
-    personaplex_session::event::flush_frame frame{
-        .payload =
-            {
-                .pcm = std::span<const float>{pcm_frame},
-                .input_codes_out = std::span<int32_t>{input_codes},
-                .output_codes_out = std::span<int32_t>{output_codes},
-                .text_token_out = text_token,
-                .produced_out = produced,
-                .pcm_out = std::span<float>{output_pcm.data() +
-                                                frame_index * frame_samples,
-                                            frame_samples},
-            },
-        .error_out = session_err,
-    };
+    int32_t sample_count = 0;
+    bool complete = false;
+    session_err = generator::action::error_code(generator::error::none);
+    generator::event::flush frame{
+        std::span<float>{output_pcm.data() + frame_index * frame_samples,
+                         frame_samples},
+        std::span<int32_t>{input_codes},
+        std::span<int32_t>{output_codes},
+        text_token,
+        sample_count,
+        complete,
+        session_err};
     (void)session.process_event(frame);
     std::fprintf(stderr, "EMEL_INPUT frame=%zu codes=", frame_index);
     for (int32_t codebook = 0; codebook < public_n_q; ++codebook) {
@@ -584,9 +648,7 @@ int main(int argc, char **argv) {
     }
     std::fprintf(stderr, "\n");
   }
-  personaplex_session::event::finish finish{.error_out = session_err};
-  (void)session.process_event(finish);
-  if (!session.is(stateforward::sml::state<personaplex_session::state_done>)) {
+  if (!session.is(stateforward::sml::state<generator::state_flushing>)) {
     std::fprintf(stderr, "PersonaPlex session failed err=%d\n",
                  static_cast<int>(session_err));
     return 1;

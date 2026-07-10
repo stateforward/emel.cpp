@@ -4,6 +4,7 @@
 
 namespace emel::speech::generator {
 
-using SpeechGenerator = sm;
+template <class dependencies_type>
+using SpeechGenerator = sm<dependencies_type>;
 
 } // namespace emel::speech::generator

@@ -37,7 +37,8 @@ using SortformerPipeline = emel::diarization::sortformer::pipeline::sm;
 using OmniEmbedEmbeddingsGenerator = emel::embeddings::generator::omniembed::sm;
 using EmbeddingsGenerator = emel::embeddings::generator::sm;
 using MimiCodec = emel::speech::codec::mimi::sm;
-using SpeechGenerator = emel::speech::generator::sm;
+template <class dependencies_type>
+using SpeechGenerator = emel::speech::generator::sm<dependencies_type>;
 using EncoderAny = emel::text::encoders::any;
 using EncoderBpe = emel::text::encoders::bpe::sm;
 using EncoderSpm = emel::text::encoders::spm::sm;

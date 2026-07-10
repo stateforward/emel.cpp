@@ -120,7 +120,9 @@ TEST_CASE("personaplex compare keeps CPU and lane isolation explicit") {
                           "PersonaPlex reference lane\" FORCE)") !=
         std::string::npos);
   CHECK(emel_source.find("#include <ggml") == std::string::npos);
-  CHECK(emel_source.find(".seed = config.sampling_seed") != std::string::npos);
+  CHECK(emel_source.find(
+            "runtime_initialize.sampling_seed = config.sampling_seed") !=
+        std::string::npos);
   CHECK(emel_source.find("sampling_seed = 1234") == std::string::npos);
   CHECK(emel_source.find(".max_blocks = 256") == std::string::npos);
   CHECK(compare_source.find("\"--n-q\", \"8\"") == std::string::npos);
@@ -150,16 +152,16 @@ TEST_CASE("personaplex conversion injects its inference contract") {
   CHECK(command_exit_code(command) == 0);
 }
 
-TEST_CASE("personaplex runtime orchestration is owned by a session actor") {
-  const auto session_machine = repo_root() / "src" / "emel" / "speech" /
-                               "generator" / "moshi" / "personaplex" /
-                               "session" / "sm.hpp";
+TEST_CASE(
+    "personaplex runtime orchestration is owned by the generic generator") {
+  const auto generator_machine =
+      repo_root() / "src" / "emel" / "speech" / "generator" / "sm.hpp";
   const std::string emel_source =
       read_file(repo_root() / "tools" / "bench" / "speech" /
                 "personaplex_emel_runner.cpp");
 
-  CHECK(std::filesystem::exists(session_machine));
-  CHECK(emel_source.find(
-            "emel/speech/generator/moshi/personaplex/session/any.hpp") !=
+  CHECK(std::filesystem::exists(generator_machine));
+  CHECK(emel_source.find("emel/speech/generator/sm.hpp") != std::string::npos);
+  CHECK(emel_source.find("speech/generator/moshi/personaplex/session") ==
         std::string::npos);
 }

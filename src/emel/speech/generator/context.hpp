@@ -1,29 +1,38 @@
 #pragma once
 
-#include "emel/batch/planner/sm.hpp"
-#include "emel/graph/sm.hpp"
-#include "emel/kernel/sm.hpp"
-#include "emel/logits/sampler/sm.hpp"
-#include "emel/memory/hybrid/sm.hpp"
+namespace emel::speech::generator::action {
 
-namespace emel::speech::generator {
-
-struct dependencies {
-  emel::batch::planner::sm &planner;
-  emel::memory::hybrid::sm &memory;
-  emel::graph::sm &graph;
-  emel::logits::sampler::sm &sampler;
-  emel::kernel::sm &kernel;
+template <class dependencies_type>
+concept generator_dependencies = requires(dependencies_type deps) {
+  typename dependencies_type::voice_condition_event;
+  typename dependencies_type::prompt_begin_event;
+  typename dependencies_type::prompt_condition_event;
+  typename dependencies_type::encode_event;
+  typename dependencies_type::predict_event;
+  typename dependencies_type::decode_event;
+  deps.temporal_positions;
+  deps.secondary_positions;
+  deps.encoder;
+  deps.decoder;
+  deps.runtime;
+  deps.predictor;
+  deps.encoder_initialize;
+  deps.decoder_initialize;
+  deps.runtime_initialize;
+  deps.predictor_initialize;
+  deps.conditioning_initialize;
+  deps.silence_pcm;
+  deps.input_codes;
+  deps.output_codes;
+  deps.frame_samples;
+  deps.codebook_count;
 };
 
-namespace action {
+template <generator_dependencies dependencies_type> struct context {
+  explicit context(const dependencies_type &deps) noexcept
+      : collaborators(deps) {}
 
-struct context {
-  explicit context(const dependencies &deps) noexcept : collaborators(deps) {}
-
-  const dependencies collaborators;
+  const dependencies_type collaborators;
 };
 
-} // namespace action
-
-} // namespace emel::speech::generator
+} // namespace emel::speech::generator::action
