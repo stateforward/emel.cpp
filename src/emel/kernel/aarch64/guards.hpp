@@ -296,6 +296,25 @@ inline bool can_use_neon_conv_transpose_1d_f32(
              sizeof(float);
 }
 
+inline bool
+can_use_neon_unary_f32(const ::emel::kernel::event::op_unary &request,
+                       const bool neon_available) noexcept {
+#if !(defined(__aarch64__) || defined(__ARM_NEON))
+  (void)request;
+  (void)neon_available;
+  return false;
+#else
+  return neon_available &&
+         ::emel::kernel::detail::can_run_backend_request(request) &&
+         ::emel::kernel::detail::dtype_code(request.src0.type) ==
+             ::emel::kernel::detail::dtype_f32 &&
+         ::emel::kernel::detail::dtype_code(request.dst.type) ==
+             ::emel::kernel::detail::dtype_f32 &&
+         ::emel::kernel::detail::is_dense_contiguous(request.src0) &&
+         ::emel::kernel::detail::is_dense_contiguous(request.dst);
+#endif
+}
+
 } // namespace detail
 
 template <class dispatch_event_type> struct simd_op {
@@ -804,6 +823,16 @@ template <class dispatch_event_type> struct invalid_op {
   }
 };
 
+struct simd_op_unary_f32 {
+  bool operator()(const ::emel::kernel::aarch64::event::dispatch_op_unary &ev,
+                  const action::context &ctx) const noexcept {
+    if (!::emel::kernel::detail::validate_dispatch_request(ev.request)) {
+      return false;
+    }
+    return detail::can_use_neon_unary_f32(ev.request, ctx.neon_available);
+  }
+};
+
 template <::emel::kernel::event::unary_subop subop> struct unary_subop_is {
   bool operator()(const ::emel::kernel::aarch64::event::dispatch_op_unary &ev,
                   const action::context &) const noexcept {
@@ -814,8 +843,7 @@ template <::emel::kernel::event::unary_subop subop> struct unary_subop_is {
 template <::emel::kernel::event::unary_subop subop>
 using simd_op_unary_subop = ::emel::kernel::detail::simd_unary_subop_guard<
     ::emel::kernel::aarch64::event::dispatch_op_unary, action::context,
-    simd_op<::emel::kernel::aarch64::event::dispatch_op_unary>,
-    unary_subop_is<subop>>;
+    simd_op_unary_f32, unary_subop_is<subop>>;
 
 template <::emel::kernel::event::unary_subop subop>
 using valid_op_unary_subop = ::emel::kernel::detail::valid_unary_subop_guard<
@@ -823,18 +851,29 @@ using valid_op_unary_subop = ::emel::kernel::detail::valid_unary_subop_guard<
     valid_op<::emel::kernel::aarch64::event::dispatch_op_unary>,
     unary_subop_is<subop>>;
 
+template <::emel::kernel::event::unary_subop subop>
+struct valid_scalar_op_unary_subop {
+  bool operator()(const ::emel::kernel::aarch64::event::dispatch_op_unary &ev,
+                  const action::context &ctx) const noexcept {
+    return valid_op_unary_subop<subop>{}(ev, ctx) &&
+           !simd_op_unary_f32{}(ev, ctx);
+  }
+};
+
 using simd_op_unary_abs =
     simd_op_unary_subop<::emel::kernel::event::unary_subop::abs>;
 using simd_op_unary_neg =
     simd_op_unary_subop<::emel::kernel::event::unary_subop::neg>;
 using simd_op_unary_relu =
     simd_op_unary_subop<::emel::kernel::event::unary_subop::relu>;
+using simd_op_unary_silu =
+    simd_op_unary_subop<::emel::kernel::event::unary_subop::silu>;
 using valid_op_unary_abs =
-    valid_op_unary_subop<::emel::kernel::event::unary_subop::abs>;
+    valid_scalar_op_unary_subop<::emel::kernel::event::unary_subop::abs>;
 using valid_op_unary_neg =
-    valid_op_unary_subop<::emel::kernel::event::unary_subop::neg>;
+    valid_scalar_op_unary_subop<::emel::kernel::event::unary_subop::neg>;
 using valid_op_unary_relu =
-    valid_op_unary_subop<::emel::kernel::event::unary_subop::relu>;
+    valid_scalar_op_unary_subop<::emel::kernel::event::unary_subop::relu>;
 using valid_op_unary_exp =
     valid_op_unary_subop<::emel::kernel::event::unary_subop::exp>;
 using valid_op_unary_tanh =
@@ -844,7 +883,7 @@ using valid_op_unary_elu =
 using valid_op_unary_gelu =
     valid_op_unary_subop<::emel::kernel::event::unary_subop::gelu>;
 using valid_op_unary_silu =
-    valid_op_unary_subop<::emel::kernel::event::unary_subop::silu>;
+    valid_scalar_op_unary_subop<::emel::kernel::event::unary_subop::silu>;
 
 // Variant predicates for the ops whose dtype/mode choice is modeled as
 // explicit transition rows (op_unary pattern).

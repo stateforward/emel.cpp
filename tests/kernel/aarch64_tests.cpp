@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
@@ -5041,9 +5042,11 @@ TEST_CASE("kernel_aarch64_detail_branch_paths") {
       .subop = emel::kernel::event::unary_subop::relu,
   };
 #if defined(__aarch64__) || defined(__ARM_NEON)
-  CHECK(emel::kernel::aarch64::detail::can_use_neon(unary_ev, true));
+  CHECK(emel::kernel::aarch64::guard::detail::can_use_neon_unary_f32(unary_ev,
+                                                                     true));
 #else
-  CHECK_FALSE(emel::kernel::aarch64::detail::can_use_neon(unary_ev, true));
+  CHECK_FALSE(emel::kernel::aarch64::guard::detail::can_use_neon_unary_f32(
+      unary_ev, true));
 #endif
   unary_ev.subop = emel::kernel::event::unary_subop::exp;
   CHECK_FALSE(emel::kernel::aarch64::detail::can_use_neon(unary_ev, true));
@@ -5183,7 +5186,8 @@ TEST_CASE("kernel_aarch64_detail_helper_edge_paths") {
   CHECK(emel::kernel::aarch64::detail::execute_neon_sqr(sqr_ev));
   CHECK(emel::kernel::aarch64::detail::execute_neon_sqrt(sqrt_ev));
   CHECK(emel::kernel::aarch64::detail::execute_neon_mul_mat(mul_mat_ev));
-  CHECK(emel::kernel::aarch64::detail::execute_neon_unary(unary_ev));
+  emel::kernel::aarch64::detail::execute_simd_unary_subop_unchecked<
+      emel::kernel::event::unary_subop::relu>(unary_ev);
 #else
   CHECK_FALSE(emel::kernel::aarch64::detail::execute_neon_dup(dup_ev));
   CHECK_FALSE(emel::kernel::aarch64::detail::execute_neon_add(add_ev));
@@ -5193,7 +5197,6 @@ TEST_CASE("kernel_aarch64_detail_helper_edge_paths") {
   CHECK_FALSE(emel::kernel::aarch64::detail::execute_neon_sqr(sqr_ev));
   CHECK_FALSE(emel::kernel::aarch64::detail::execute_neon_sqrt(sqrt_ev));
   CHECK_FALSE(emel::kernel::aarch64::detail::execute_neon_mul_mat(mul_mat_ev));
-  CHECK_FALSE(emel::kernel::aarch64::detail::execute_neon_unary(unary_ev));
 #endif
 
   const bool simd_dup = emel::kernel::aarch64::detail::execute_simd(dup_ev);
@@ -5205,7 +5208,6 @@ TEST_CASE("kernel_aarch64_detail_helper_edge_paths") {
   const bool simd_sqrt = emel::kernel::aarch64::detail::execute_simd(sqrt_ev);
   const bool simd_mul_mat =
       emel::kernel::aarch64::detail::execute_simd(mul_mat_ev);
-  const bool simd_unary = emel::kernel::aarch64::detail::execute_simd(unary_ev);
   (void)simd_dup;
   (void)simd_add;
   (void)simd_sub;
@@ -5214,7 +5216,6 @@ TEST_CASE("kernel_aarch64_detail_helper_edge_paths") {
   (void)simd_sqr;
   (void)simd_sqrt;
   (void)simd_mul_mat;
-  (void)simd_unary;
 
 #if defined(__aarch64__) || defined(__ARM_NEON)
   CHECK(simd_dup);
@@ -5225,7 +5226,6 @@ TEST_CASE("kernel_aarch64_detail_helper_edge_paths") {
   CHECK(simd_sqr);
   CHECK(simd_sqrt);
   CHECK(simd_mul_mat);
-  CHECK(simd_unary);
 #else
   CHECK_FALSE(simd_dup);
   CHECK_FALSE(simd_add);
@@ -5235,7 +5235,6 @@ TEST_CASE("kernel_aarch64_detail_helper_edge_paths") {
   CHECK_FALSE(simd_sqr);
   CHECK_FALSE(simd_sqrt);
   CHECK_FALSE(simd_mul_mat);
-  CHECK_FALSE(simd_unary);
 #endif
 
   unary_ev.subop = emel::kernel::event::unary_subop::exp;
@@ -5312,6 +5311,54 @@ TEST_CASE("kernel_aarch64_unary_subop_scalar_paths") {
 
   unary_ev.subop = emel::kernel::event::unary_subop::sigmoid;
   CHECK_FALSE(scalar_machine.process_event(unary_ev));
+}
+
+TEST_CASE("kernel_aarch64_neon_silu_matches_moshi_reference_activation") {
+#if !(defined(__aarch64__) || defined(__ARM_NEON))
+  return;
+#else
+  const float src[5] = {
+      std::bit_cast<float>(0x3a9dd9b3u),
+      std::bit_cast<float>(0xbef68af7u),
+      std::bit_cast<float>(0xbdc5f39au),
+      std::bit_cast<float>(0xbf218bc1u),
+      0.5f,
+  };
+  float dst[5] = {};
+  const emel::kernel::event::op_unary unary_ev{
+      .src0 = make_src(src, dtype::f32, 5),
+      .dst = make_dst(dst, dtype::f32, 5),
+      .subop = emel::kernel::event::unary_subop::silu,
+  };
+  aarch64_sm machine{emel::kernel::aarch64::action::context{true, {}, 0}};
+
+  REQUIRE(machine.process_event(unary_ev));
+  CHECK(std::bit_cast<uint32_t>(dst[0]) == 0x3a1df208u);
+  CHECK(std::bit_cast<uint32_t>(dst[1]) == 0xbe3c4e19u);
+  CHECK(std::bit_cast<uint32_t>(dst[2]) == 0xbd3c6475u);
+  CHECK(std::bit_cast<uint32_t>(dst[3]) == 0xbe606749u);
+  CHECK(dst[4] == doctest::Approx(0.5f / (1.0f + std::exp(-0.5f))));
+#endif
+}
+
+TEST_CASE("kernel_aarch64_simd_guards_reject_invalid_unary_and_argmax") {
+  const emel::kernel::event::op_unary invalid_unary{};
+  const emel::kernel::event::op_mul_mat_argmax invalid_argmax{};
+  emel::kernel::aarch64::event::dispatch_ctx dispatch_context{};
+  const emel::kernel::aarch64::event::dispatch_op_unary unary_dispatch{
+      invalid_unary, dispatch_context};
+  const emel::kernel::aarch64::event::dispatch_op_mul_mat_argmax
+      argmax_dispatch{invalid_argmax, dispatch_context};
+  const emel::kernel::aarch64::action::context guard_context{true, {}, 0};
+
+  CHECK_FALSE(emel::kernel::aarch64::guard::simd_op_unary_f32{}(unary_dispatch,
+                                                                guard_context));
+  CHECK_FALSE(emel::kernel::aarch64::guard::
+                  simd_op_mul_mat_argmax_q6_vector_packed_q8_rhs{}(
+                      argmax_dispatch, guard_context));
+  CHECK_FALSE(emel::kernel::aarch64::guard::
+                  simd_op_mul_mat_argmax_q4_vector_packed_f32_rhs_bl4{}(
+                      argmax_dispatch, guard_context));
 }
 
 TEST_CASE("kernel_aarch64_flash_attn_ext_reuses_persistent_workspace") {

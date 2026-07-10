@@ -1169,6 +1169,11 @@ struct model {
 
       , sml::state<ready> <= sml::state<ready> +
                sml::event<::emel::kernel::aarch64::event::dispatch_op_unary>
+                 [ guard::simd_op_unary_silu{} ]
+                 / action::exec_simd_op_unary_silu_t{}
+
+      , sml::state<ready> <= sml::state<ready> +
+               sml::event<::emel::kernel::aarch64::event::dispatch_op_unary>
                  [ guard::valid_op_unary_abs{} ]
                  / action::exec_scalar_op_unary_abs
 

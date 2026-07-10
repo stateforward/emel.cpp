@@ -83,16 +83,44 @@ inline constexpr bool simd_supported_request_v =
     std::is_same_v<request_type, event::op_div> ||
     std::is_same_v<request_type, event::op_sqr> ||
     std::is_same_v<request_type, event::op_sqrt> ||
-    std::is_same_v<request_type, event::op_mul_mat> ||
-    std::is_same_v<request_type, event::op_unary>;
+    std::is_same_v<request_type, event::op_mul_mat>;
 
-inline bool
-unary_subop_supported_simd(const event::unary_subop subop) noexcept {
-  const auto subop_code = static_cast<uint8_t>(subop);
-  return subop_code == static_cast<uint8_t>(event::unary_subop::abs) ||
-         subop_code == static_cast<uint8_t>(event::unary_subop::neg) ||
-         subop_code == static_cast<uint8_t>(event::unary_subop::relu);
+#if defined(__aarch64__) || defined(__ARM_NEON)
+inline float32x4_t compute_neon_expf(const float32x4_t x) noexcept {
+  const float32x4_t r = vdupq_n_f32(0x1.8p23f);
+  const float32x4_t z = vfmaq_f32(r, x, vdupq_n_f32(0x1.715476p+0f));
+  const float32x4_t n = vsubq_f32(z, r);
+  const float32x4_t b = vfmsq_f32(vfmsq_f32(x, n, vdupq_n_f32(0x1.62e4p-1f)), n,
+                                  vdupq_n_f32(0x1.7f7d1cp-20f));
+  const uint32x4_t e = vshlq_n_u32(vreinterpretq_u32_f32(z), 23);
+  const float32x4_t k = vreinterpretq_f32_u32(
+      vaddq_u32(e, vreinterpretq_u32_f32(vdupq_n_f32(1.0f))));
+  const uint32x4_t c = vcagtq_f32(n, vdupq_n_f32(126.0f));
+  const float32x4_t u = vmulq_f32(b, b);
+  const float32x4_t j =
+      vfmaq_f32(vmulq_f32(vdupq_n_f32(0x1.ffffecp-1f), b),
+                vfmaq_f32(vfmaq_f32(vdupq_n_f32(0x1.fffdb6p-2f),
+                                    vdupq_n_f32(0x1.555e66p-3f), b),
+                          vfmaq_f32(vdupq_n_f32(0x1.573e2ep-5f),
+                                    vdupq_n_f32(0x1.0e4020p-7f), b),
+                          u),
+                u);
+  const uint32x4_t d = vandq_u32(vclezq_f32(n), vdupq_n_u32(0x82000000u));
+  const float32x4_t s1 =
+      vreinterpretq_f32_u32(vaddq_u32(d, vdupq_n_u32(0x7f000000u)));
+  const float32x4_t s2 = vreinterpretq_f32_u32(vsubq_u32(e, d));
+  return vbslq_f32(
+      vcagtq_f32(n, vdupq_n_f32(192.0f)), vmulq_f32(s1, s1),
+      vbslq_f32(c, vmulq_f32(vfmaq_f32(s2, s2, j), s1), vfmaq_f32(k, k, j)));
 }
+
+inline float32x4_t compute_neon_silu(const float32x4_t x) noexcept {
+  const float32x4_t neg_x = vsubq_f32(vdupq_n_f32(0.0f), x);
+  const float32x4_t denominator =
+      vaddq_f32(vdupq_n_f32(1.0f), compute_neon_expf(neg_x));
+  return vdivq_f32(x, denominator);
+}
+#endif
 
 inline void execute_neon_unary_abs(const float *src, float *dst,
                                    const uint64_t count) noexcept {
@@ -141,6 +169,24 @@ inline void execute_neon_unary_relu(const float *src, float *dst,
   }
   for (; i < count; ++i) {
     dst[i] = std::max(0.0f, src[i]);
+  }
+#else
+  (void)src;
+  (void)dst;
+  (void)count;
+#endif
+}
+
+inline void execute_neon_unary_silu(const float *src, float *dst,
+                                    const uint64_t count) noexcept {
+#if defined(__aarch64__) || defined(__ARM_NEON)
+  uint64_t i = 0;
+  for (; i + 4 <= count; i += 4) {
+    vst1q_f32(dst + i, compute_neon_silu(vld1q_f32(src + i)));
+  }
+  for (; i < count; ++i) {
+    const float v = src[i];
+    dst[i] = v / (1.0f + std::exp(-v));
   }
 #else
   (void)src;
@@ -877,12 +923,7 @@ inline bool can_use_neon(const request_type &request,
             ::emel::kernel::detail::tensor_element_count(request.dst);
   }
 
-  bool unary_supported = true;
-  if constexpr (std::is_same_v<request_type, event::op_unary>) {
-    unary_supported = unary_subop_supported_simd(request.subop);
-  }
-
-  return base_supported && src1_supported && unary_supported &&
+  return base_supported && src1_supported &&
          (quantized_mul_mat || is_dense_contiguous(request.src0)) &&
          is_dense_contiguous(request.dst);
 #endif
@@ -8324,37 +8365,6 @@ inline bool execute_neon_mul_mat_prepared_f32_lhs_4row(
 #endif
 }
 
-inline bool execute_neon_unary(const event::op_unary &request) noexcept {
-#if defined(__aarch64__) || defined(__ARM_NEON)
-  const uint8_t subop_code = static_cast<uint8_t>(request.subop);
-  const size_t is_abs = static_cast<size_t>(
-      subop_code == static_cast<uint8_t>(event::unary_subop::abs));
-  const size_t is_neg = static_cast<size_t>(
-      subop_code == static_cast<uint8_t>(event::unary_subop::neg));
-  const size_t is_relu = static_cast<size_t>(
-      subop_code == static_cast<uint8_t>(event::unary_subop::relu));
-  const size_t kernel_index = is_abs * 1u + is_neg * 2u + is_relu * 3u;
-  const uint64_t count =
-      ::emel::kernel::detail::tensor_element_count(request.dst);
-  const float *src = static_cast<const float *>(request.src0.data);
-  float *dst = static_cast<float *>(request.dst.data);
-  using unary_kernel_t = void (*)(const float *, float *, uint64_t) noexcept;
-  constexpr unary_kernel_t noop_kernel =
-      +[](const float *, float *, uint64_t) noexcept {};
-  constexpr std::array<unary_kernel_t, 4> kernels = {
-      noop_kernel,
-      execute_neon_unary_abs,
-      execute_neon_unary_neg,
-      execute_neon_unary_relu,
-  };
-  kernels[kernel_index](src, dst, count);
-  return kernel_index != 0u;
-#else
-  (void)request;
-  return false;
-#endif
-}
-
 inline void
 execute_neon_unary_abs_request(const event::op_unary &request) noexcept {
 #if defined(__aarch64__) || defined(__ARM_NEON)
@@ -8394,6 +8404,19 @@ execute_neon_unary_relu_request(const event::op_unary &request) noexcept {
 #endif
 }
 
+inline void
+execute_neon_unary_silu_request(const event::op_unary &request) noexcept {
+#if defined(__aarch64__) || defined(__ARM_NEON)
+  const uint64_t count =
+      ::emel::kernel::detail::tensor_element_count(request.dst);
+  const float *src = static_cast<const float *>(request.src0.data);
+  float *dst = static_cast<float *>(request.dst.data);
+  execute_neon_unary_silu(src, dst, count);
+#else
+  (void)request;
+#endif
+}
+
 template <event::unary_subop subop>
 inline void
 execute_simd_unary_subop_unchecked(const event::op_unary &request) noexcept {
@@ -8405,6 +8428,9 @@ execute_simd_unary_subop_unchecked(const event::op_unary &request) noexcept {
   }
   if constexpr (subop == event::unary_subop::relu) {
     execute_neon_unary_relu_request(request);
+  }
+  if constexpr (subop == event::unary_subop::silu) {
+    execute_neon_unary_silu_request(request);
   }
 }
 
@@ -8434,9 +8460,6 @@ inline void execute_simd_unchecked(const request_type &request) noexcept {
   if constexpr (std::is_same_v<request_type, event::op_mul_mat>) {
     (void)execute_neon_mul_mat(request);
   }
-  if constexpr (std::is_same_v<request_type, event::op_unary>) {
-    (void)execute_neon_unary(request);
-  }
 }
 
 template <class request_type>
@@ -8464,9 +8487,6 @@ inline bool execute_simd(const request_type &request) noexcept {
   }
   if constexpr (std::is_same_v<request_type, event::op_mul_mat>) {
     return execute_neon_mul_mat(request);
-  }
-  if constexpr (std::is_same_v<request_type, event::op_unary>) {
-    return execute_neon_unary(request);
   }
   return false;
 }
@@ -9149,6 +9169,8 @@ using exec_simd_op_unary_neg_t =
     detail::exec_simd_unary_op<::emel::kernel::event::unary_subop::neg>;
 using exec_simd_op_unary_relu_t =
     detail::exec_simd_unary_op<::emel::kernel::event::unary_subop::relu>;
+using exec_simd_op_unary_silu_t =
+    detail::exec_simd_unary_op<::emel::kernel::event::unary_subop::silu>;
 using exec_scalar_op_unary_abs_t = ::emel::kernel::detail::exec_scalar_unary_op<
     ::emel::kernel::aarch64::event::dispatch_op_unary, context,
     detail::mark_done_op, ::emel::kernel::event::unary_subop::abs>;
