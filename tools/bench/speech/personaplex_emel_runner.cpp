@@ -24,6 +24,7 @@
 #include "emel/speech/generator/sm.hpp"
 #include "emel/speech/predictor/moshi/any.hpp"
 #include "emel/speech/predictor/moshi/executor/any.hpp"
+#include "emel/speech/tokenizer/moshi/any.hpp"
 
 namespace {
 
@@ -31,6 +32,7 @@ namespace mimi = emel::speech::codec::mimi;
 namespace generator = emel::speech::generator;
 namespace predictor = emel::speech::predictor::moshi;
 namespace runtime = emel::speech::predictor::moshi::executor;
+namespace tokenizer = emel::speech::tokenizer::moshi;
 
 struct runner_config {
   const char *mimi_path = nullptr;
@@ -94,12 +96,19 @@ struct personaplex_dependencies {
   using prompt_begin_event = predictor::event::begin_personaplex_prompt;
   using prompt_condition_event = predictor::event::prefill_personaplex_prompt;
   using encode_event = mimi::event::encode_frame;
-  using predict_event = predictor::event::step;
+  using tokenizer_initialize_event = tokenizer::event::initialize;
+  using tokenize_event = tokenizer::event::tokenize;
+  using predict_event = predictor::event::predict;
+  using detokenize_event = tokenizer::event::detokenize;
+  using capture_tokenizer_state_event =
+      predictor::event::capture_tokenizer_state;
+  using restore_tokenizer_state_event = tokenizer::event::restore_cache;
   using decode_event = mimi::event::decode_frame;
 
   emel::memory::streaming::sm &temporal_positions;
   emel::memory::streaming::sm &secondary_positions;
   mimi::sm &encoder;
+  tokenizer::sm &tokenizer;
   mimi::sm &decoder;
   runtime::sm &runtime;
   predictor::sm &predictor;
@@ -110,7 +119,11 @@ struct personaplex_dependencies {
   predictor::event::load_voice conditioning_initialize;
   std::span<float> silence_pcm = {};
   std::span<int32_t> input_codes = {};
+  std::span<const int32_t> tokenize_input_codes = {};
+  std::span<int32_t> model_codes = {};
+  std::span<int32_t> predicted_codes = {};
   std::span<int32_t> output_codes = {};
+  std::span<int32_t> tokenizer_cache_snapshot = {};
   int32_t frame_samples = 0;
   int32_t codebook_count = 0;
 };
@@ -472,7 +485,20 @@ int main(int argc, char **argv) {
   std::vector<float> output_pcm(config.target_output_frames * frame_samples,
                                 0.0f);
   std::vector<int32_t> input_codes(static_cast<size_t>(public_n_q), -1);
+  const int32_t model_codebook_count = lm_model.model->moshi_lm.n_q + 1;
+  const auto delay_begin = lm_model.model->moshi_lm.delays.begin();
+  const auto delay_end = delay_begin + lm_model.model->moshi_lm.delay_count;
+  const int32_t maximum_delay = *std::max_element(delay_begin, delay_end);
+  const int32_t tokenizer_cache_rows = maximum_delay + 3;
+  std::vector<int32_t> model_codes(static_cast<size_t>(model_codebook_count),
+                                   -1);
+  std::vector<int32_t> predicted_codes(
+      static_cast<size_t>(lm_model.model->moshi_lm.dep_q), -1);
   std::vector<int32_t> output_codes(static_cast<size_t>(public_n_q), -1);
+  std::vector<int32_t> tokenizer_storage(
+      static_cast<size_t>(tokenizer_cache_rows * model_codebook_count), -2);
+  std::vector<int32_t> tokenizer_cache_snapshot(
+      static_cast<size_t>(tokenizer_cache_rows * model_codebook_count), -2);
 
   emel::memory::streaming::sm temporal_positions{
       emel::memory::streaming::dependencies{
@@ -509,6 +535,20 @@ int main(int argc, char **argv) {
   predictor::sm token_predictor{
       emel::memory::hybrid::kv_binding{},
       runtime::bind_graph_executor(prediction_runtime)};
+  tokenizer::sm token_delay{tokenizer::dependencies{
+      .delays = std::span<const int32_t>{delay_begin, delay_end},
+      .cache = std::span<int32_t>{tokenizer_storage},
+      .codebooks = model_codebook_count,
+      .generated_audio_codebooks = lm_model.model->moshi_lm.dep_q,
+      .delayed_audio_codebooks = lm_model.model->moshi_lm.inference_dep_q,
+      .cache_rows = tokenizer_cache_rows,
+      .maximum_delay = maximum_delay,
+      .initial_delay_frames = 0,
+      .text_initial_token = lm_model.model->moshi_lm.text_card,
+      .audio_initial_token = lm_model.model->moshi_lm.card,
+      .token_zero = -1,
+      .token_ungenerated = -2,
+  }};
   mimi::sm encoder{};
   mimi::sm decoder{};
 
@@ -528,6 +568,7 @@ int main(int argc, char **argv) {
       .temporal_positions = temporal_positions,
       .secondary_positions = secondary_positions,
       .encoder = encoder,
+      .tokenizer = token_delay,
       .decoder = decoder,
       .runtime = prediction_runtime,
       .predictor = token_predictor,
@@ -549,7 +590,11 @@ int main(int argc, char **argv) {
           predictor::event::load_voice{*voice_model.model},
       .silence_pcm = std::span<float>{pcm_frame},
       .input_codes = std::span<int32_t>{input_codes},
+      .tokenize_input_codes = std::span<const int32_t>{input_codes},
+      .model_codes = std::span<int32_t>{model_codes},
+      .predicted_codes = std::span<int32_t>{predicted_codes},
       .output_codes = std::span<int32_t>{output_codes},
+      .tokenizer_cache_snapshot = std::span<int32_t>{tokenizer_cache_snapshot},
       .frame_samples = frame_samples_i32,
       .codebook_count = public_n_q,
   };
@@ -583,7 +628,6 @@ int main(int argc, char **argv) {
                  static_cast<int>(session_err));
     return 1;
   }
-
   for (size_t frame_index = 0; frame_index < input_frames; ++frame_index) {
     std::fill(pcm_frame.begin(), pcm_frame.end(), 0.0f);
     const size_t begin = frame_index * frame_samples;
@@ -603,7 +647,11 @@ int main(int argc, char **argv) {
         sample_count,
         produced,
         session_err};
-    (void)session.process_event(frame);
+    if (!session.process_event(frame)) {
+      std::fprintf(stderr, "PersonaPlex stream frame=%zu failed err=%d\n",
+                   frame_index, static_cast<int>(session_err));
+      return 1;
+    }
     std::fprintf(stderr, "EMEL_INPUT frame=%zu codes=", frame_index);
     for (int32_t index = 0; index < public_n_q; ++index) {
       std::fprintf(stderr, "%s%d", index == 0 ? "" : ",",
@@ -635,7 +683,11 @@ int main(int argc, char **argv) {
         sample_count,
         complete,
         session_err};
-    (void)session.process_event(frame);
+    if (!session.process_event(frame)) {
+      std::fprintf(stderr, "PersonaPlex flush frame=%zu failed err=%d\n",
+                   frame_index, static_cast<int>(session_err));
+      return 1;
+    }
     std::fprintf(stderr, "EMEL_INPUT frame=%zu codes=", frame_index);
     for (int32_t codebook = 0; codebook < public_n_q; ++codebook) {
       std::fprintf(stderr, "%s%d", codebook == 0 ? "" : ",",

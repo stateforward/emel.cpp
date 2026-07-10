@@ -122,6 +122,7 @@ struct initialize_ctx {
   emel::error::type err = {};
   emel::error::type child_err = {};
   bool child_accepted = false;
+  int32_t tokenizer_err = 0;
 };
 
 struct condition_ctx {
@@ -131,6 +132,8 @@ struct condition_ctx {
   bool child_accepted = false;
   bool complete = false;
   int32_t remaining = -1;
+  int32_t tokenizer_err = 0;
+  int64_t tokenizer_offset = 0;
 };
 
 struct generate_ctx {
@@ -146,6 +149,8 @@ struct frame_ctx {
   emel::error::type graph_err = {};
   bool child_accepted = false;
   bool produced = false;
+  int32_t tokenizer_err = 0;
+  int32_t predicted_text_token = -1;
   int32_t text_token = -1;
 };
 

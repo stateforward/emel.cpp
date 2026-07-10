@@ -29,6 +29,15 @@ template <class runtime_event_type> struct effect_mark_not_initialized {
   }
 };
 
+template <class runtime_event_type>
+struct effect_mark_not_initialized_and_store {
+  void operator()(const runtime_event_type &runtime_ev,
+                  context &) const noexcept {
+    runtime_ev.ctx.err = detail_ns::to_error(error::not_initialized);
+    *runtime_ev.request.error_out = runtime_ev.ctx.err;
+  }
+};
+
 struct effect_mark_bind_failed {
   void operator()(const event::initialize_run &runtime_ev,
                   context &) const noexcept {
@@ -44,8 +53,11 @@ template <class runtime_event_type> struct effect_mark_memory_error {
 };
 
 struct effect_mark_step_request_invalid {
-  void operator()(const event::step_run &runtime_ev, context &) const noexcept {
-    runtime_ev.ctx.err = detail_ns::to_error(error::request_shape);
+  template <class runtime_event_type>
+  void operator()(const runtime_event_type &runtime_ev,
+                  context &) const noexcept {
+    const auto &ev = detail::unwrap_runtime_event(runtime_ev);
+    ev.ctx.err = detail_ns::to_error(error::request_shape);
   }
 };
 
@@ -80,8 +92,11 @@ struct effect_mark_personaplex_prompt_error {
 };
 
 struct effect_mark_voice_prompt_pending {
-  void operator()(const event::step_run &runtime_ev, context &) const noexcept {
-    runtime_ev.ctx.err = detail_ns::to_error(error::voice_prompt_pending);
+  template <class runtime_event_type>
+  void operator()(const runtime_event_type &runtime_ev,
+                  context &) const noexcept {
+    const auto &ev = detail::unwrap_runtime_event(runtime_ev);
+    ev.ctx.err = detail_ns::to_error(error::voice_prompt_pending);
   }
 };
 
@@ -180,17 +195,19 @@ struct effect_allocate_sequence {
 };
 
 struct effect_allocate_step_slot {
-  void operator()(const event::step_run &runtime_ev,
+  template <class runtime_event_type>
+  void operator()(const runtime_event_type &runtime_ev,
                   context &ctx) const noexcept {
-    runtime_ev.ctx.memory_error = static_cast<int32_t>(
+    const auto &ev = detail::unwrap_runtime_event(runtime_ev);
+    ev.ctx.memory_error = static_cast<int32_t>(
         emel::error::cast(emel::memory::hybrid::error::none));
-    runtime_ev.ctx.memory_block_count = 0;
-    runtime_ev.ctx.memory_accepted =
+    ev.ctx.memory_block_count = 0;
+    ev.ctx.memory_accepted =
         ctx.memory.process_event(emel::memory::event::allocate_slots{
             .seq_id = ctx.session.sequence_id,
             .token_count = 1,
-            .block_count_out = &runtime_ev.ctx.memory_block_count,
-            .error_out = &runtime_ev.ctx.memory_error,
+            .block_count_out = &ev.ctx.memory_block_count,
+            .error_out = &ev.ctx.memory_error,
             .copy_block = nullptr,
             .copy_block_user_data = nullptr,
         });
@@ -198,14 +215,16 @@ struct effect_allocate_step_slot {
 };
 
 struct effect_capture_memory {
-  void operator()(const event::step_run &runtime_ev,
+  template <class runtime_event_type>
+  void operator()(const runtime_event_type &runtime_ev,
                   context &ctx) const noexcept {
-    runtime_ev.ctx.memory_error = static_cast<int32_t>(
+    const auto &ev = detail::unwrap_runtime_event(runtime_ev);
+    ev.ctx.memory_error = static_cast<int32_t>(
         emel::error::cast(emel::memory::hybrid::error::none));
-    runtime_ev.ctx.memory_accepted =
+    ev.ctx.memory_accepted =
         ctx.memory.process_event(emel::memory::event::capture_view{
-            .snapshot_out = &runtime_ev.ctx.memory_snapshot,
-            .error_out = &runtime_ev.ctx.memory_error,
+            .snapshot_out = &ev.ctx.memory_snapshot,
+            .error_out = &ev.ctx.memory_error,
         });
   }
 };
@@ -599,6 +618,73 @@ struct effect_begin_step {
               runtime_ev.ctx.input_sequence.end(), k_token_ungenerated);
     std::fill(runtime_ev.ctx.audio_tokens.begin(),
               runtime_ev.ctx.audio_tokens.end(), k_token_ungenerated);
+  }
+};
+
+struct effect_begin_predict {
+  void operator()(const event::predict_run &runtime_ev,
+                  const context &) const noexcept {
+    runtime_ev.ctx.err = detail_ns::to_error(error::none);
+    runtime_ev.ctx.graph_error = detail_ns::to_error(error::none);
+    runtime_ev.ctx.graph_accepted = false;
+  }
+};
+
+struct effect_run_predict_graph {
+  void operator()(const event::predict_run &runtime_ev,
+                  context &ctx) const noexcept {
+    runtime_ev.ctx.graph_error = detail_ns::to_error(error::none);
+    event::graph_step graph_step{
+        *ctx.session.model,
+        runtime_ev.ctx.memory_snapshot,
+        runtime_ev.request.model_tokens,
+        runtime_ev.request.audio_tokens_out,
+        runtime_ev.request.text_token_out,
+    };
+    graph_step.sequence_id = ctx.session.sequence_id;
+    graph_step.error_out = &runtime_ev.ctx.graph_error;
+    runtime_ev.ctx.graph_accepted =
+        ctx.graph.dispatch_step(ctx.graph.executor, graph_step);
+  }
+};
+
+struct effect_publish_predict {
+  void operator()(const event::predict_run &runtime_ev,
+                  context &) const noexcept {
+    runtime_ev.ctx.err = detail_ns::to_error(error::none);
+  }
+};
+
+struct effect_store_predict_graph_error_out {
+  void operator()(const event::predict_run &runtime_ev,
+                  context &) const noexcept {
+    *runtime_ev.request.graph_error_out = runtime_ev.ctx.graph_error;
+  }
+};
+
+struct effect_capture_tokenizer_state {
+  void operator()(const event::capture_tokenizer_state &ev,
+                  const context &ctx) const noexcept {
+    for (int32_t codebook = 0; codebook < ctx.lmgen.codebook_count;
+         ++codebook) {
+      for (int32_t row = 0; row < ctx.lmgen.cache_row_count; ++row) {
+        const size_t destination =
+            static_cast<size_t>(row) +
+            static_cast<size_t>(codebook) *
+                static_cast<size_t>(ctx.lmgen.cache_row_count);
+        ev.cache_out[destination] = detail::cache_at(ctx.lmgen, row, codebook);
+      }
+    }
+    ev.offset_out = ctx.lmgen.offset;
+    ev.error_out = detail_ns::to_error(error::none);
+  }
+};
+
+template <error error_value> struct effect_reject_capture_tokenizer_state {
+  void operator()(const event::capture_tokenizer_state &ev,
+                  const context &) const noexcept {
+    ev.offset_out = 0;
+    ev.error_out = detail_ns::to_error(error_value);
   }
 };
 

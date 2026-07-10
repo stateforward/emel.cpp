@@ -111,6 +111,19 @@ template <class dependencies_type> struct effect_initialize_conditioning {
   }
 };
 
+template <class dependencies_type> struct effect_initialize_tokenizer {
+  void operator()(const event::initialize_run &runtime_ev,
+                  context<dependencies_type> &ctx) const noexcept {
+    runtime_ev.ctx.tokenizer_err = 0;
+    typename dependencies_type::tokenizer_initialize_event request{
+        runtime_ev.ctx.tokenizer_err};
+    runtime_ev.ctx.child_accepted =
+        ctx.collaborators.tokenizer.process_event(request);
+    runtime_ev.ctx.child_err =
+        static_cast<emel::error::type>(runtime_ev.ctx.tokenizer_err);
+  }
+};
+
 template <class dependencies_type> struct effect_publish_initialize_done {
   void operator()(const event::initialize_run &runtime_ev,
                   const context<dependencies_type> &) const noexcept {
@@ -248,6 +261,33 @@ template <class dependencies_type> struct effect_condition_prompt {
     request.remaining_frames_out = &runtime_ev.ctx.remaining;
     runtime_ev.ctx.child_accepted =
         ctx.collaborators.predictor.process_event(request);
+  }
+};
+
+template <class dependencies_type> struct effect_capture_tokenizer_state {
+  void operator()(const event::condition_run &runtime_ev,
+                  context<dependencies_type> &ctx) const noexcept {
+    runtime_ev.ctx.child_err = 0;
+    runtime_ev.ctx.tokenizer_offset = 0;
+    typename dependencies_type::capture_tokenizer_state_event request{
+        ctx.collaborators.tokenizer_cache_snapshot,
+        runtime_ev.ctx.tokenizer_offset, runtime_ev.ctx.child_err};
+    runtime_ev.ctx.child_accepted =
+        ctx.collaborators.predictor.process_event(request);
+  }
+};
+
+template <class dependencies_type> struct effect_restore_tokenizer_state {
+  void operator()(const event::condition_run &runtime_ev,
+                  context<dependencies_type> &ctx) const noexcept {
+    runtime_ev.ctx.tokenizer_err = 0;
+    typename dependencies_type::restore_tokenizer_state_event request{
+        std::span<const int32_t>{ctx.collaborators.tokenizer_cache_snapshot},
+        runtime_ev.ctx.tokenizer_offset, runtime_ev.ctx.tokenizer_err};
+    runtime_ev.ctx.child_accepted =
+        ctx.collaborators.tokenizer.process_event(request);
+    runtime_ev.ctx.child_err =
+        static_cast<emel::error::type>(runtime_ev.ctx.tokenizer_err);
   }
 };
 
@@ -417,22 +457,59 @@ template <class dependencies_type> struct effect_encode_flush_frame {
 };
 
 template <class dependencies_type, class runtime_event_type>
+struct effect_tokenize_frame {
+  void operator()(const runtime_event_type &runtime_ev,
+                  context<dependencies_type> &ctx) const noexcept {
+    runtime_ev.ctx.tokenizer_err = 0;
+    typename dependencies_type::tokenize_event request{
+        ctx.collaborators.tokenize_input_codes, ctx.collaborators.model_codes,
+        runtime_ev.ctx.tokenizer_err};
+    runtime_ev.ctx.child_accepted =
+        ctx.collaborators.tokenizer.process_event(request);
+    runtime_ev.ctx.child_err =
+        static_cast<emel::error::type>(runtime_ev.ctx.tokenizer_err);
+  }
+};
+
+template <class dependencies_type, class runtime_event_type>
 struct effect_predict_frame {
   void operator()(const runtime_event_type &runtime_ev,
                   context<dependencies_type> &ctx) const noexcept {
     runtime_ev.ctx.child_err = 0;
     runtime_ev.ctx.graph_err = 0;
-    runtime_ev.ctx.produced = false;
-    std::fill(ctx.collaborators.output_codes.begin(),
-              ctx.collaborators.output_codes.end(), -1);
+    runtime_ev.ctx.predicted_text_token = -1;
+    std::fill(ctx.collaborators.predicted_codes.begin(),
+              ctx.collaborators.predicted_codes.end(), -1);
     typename dependencies_type::predict_event request{
-        std::span<const int32_t>{ctx.collaborators.input_codes},
-        ctx.collaborators.output_codes, runtime_ev.ctx.text_token};
+        std::span<const int32_t>{ctx.collaborators.model_codes},
+        ctx.collaborators.predicted_codes, runtime_ev.ctx.predicted_text_token};
     request.error_out = &runtime_ev.ctx.child_err;
     request.graph_error_out = &runtime_ev.ctx.graph_err;
-    request.produced_out = &runtime_ev.ctx.produced;
     runtime_ev.ctx.child_accepted =
         ctx.collaborators.predictor.process_event(request);
+  }
+};
+
+template <class dependencies_type, class runtime_event_type>
+struct effect_detokenize_frame {
+  void operator()(const runtime_event_type &runtime_ev,
+                  context<dependencies_type> &ctx) const noexcept {
+    runtime_ev.ctx.tokenizer_err = 0;
+    runtime_ev.ctx.produced = false;
+    runtime_ev.ctx.text_token = -1;
+    std::fill(ctx.collaborators.output_codes.begin(),
+              ctx.collaborators.output_codes.end(), -1);
+    typename dependencies_type::detokenize_event request{
+        runtime_ev.ctx.predicted_text_token,
+        std::span<const int32_t>{ctx.collaborators.predicted_codes},
+        runtime_ev.ctx.text_token,
+        ctx.collaborators.output_codes,
+        runtime_ev.ctx.produced,
+        runtime_ev.ctx.tokenizer_err};
+    runtime_ev.ctx.child_accepted =
+        ctx.collaborators.tokenizer.process_event(request);
+    runtime_ev.ctx.child_err =
+        static_cast<emel::error::type>(runtime_ev.ctx.tokenizer_err);
   }
 };
 

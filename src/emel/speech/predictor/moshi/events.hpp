@@ -106,6 +106,32 @@ struct step {
   emel::callback<void(const events::step_error &)> on_error = {};
 };
 
+struct predict {
+  predict(std::span<const int32_t> model_tokens_ref,
+          std::span<int32_t> audio_tokens_out_ref,
+          int32_t &text_token_out_ref) noexcept
+      : model_tokens(model_tokens_ref), audio_tokens_out(audio_tokens_out_ref),
+        text_token_out(text_token_out_ref) {}
+
+  std::span<const int32_t> model_tokens = {};
+  std::span<int32_t> audio_tokens_out = {};
+  int32_t &text_token_out;
+  emel::error::type *error_out = nullptr;
+  emel::error::type *graph_error_out = nullptr;
+};
+
+struct capture_tokenizer_state {
+  capture_tokenizer_state(std::span<int32_t> cache_out_ref,
+                          int64_t &offset_out_ref,
+                          emel::error::type &error_out_ref) noexcept
+      : cache_out(cache_out_ref), offset_out(offset_out_ref),
+        error_out(error_out_ref) {}
+
+  std::span<int32_t> cache_out = {};
+  int64_t &offset_out;
+  emel::error::type &error_out;
+};
+
 struct reset {};
 
 struct graph_step {
@@ -207,6 +233,20 @@ struct step_ctx {
   emel::memory::view::snapshot &memory_snapshot;
 };
 
+struct predict_ctx {
+  explicit predict_ctx(
+      emel::memory::view::snapshot &memory_snapshot_ref) noexcept
+      : memory_snapshot(memory_snapshot_ref) {}
+
+  emel::error::type err = emel::error::cast(error::none);
+  bool memory_accepted = false;
+  int32_t memory_error = static_cast<int32_t>(emel::error::cast(error::none));
+  int32_t memory_block_count = 0;
+  bool graph_accepted = false;
+  emel::error::type graph_error = emel::error::cast(error::none);
+  emel::memory::view::snapshot &memory_snapshot;
+};
+
 struct initialize_run {
   const initialize &request;
   initialize_ctx &ctx;
@@ -235,6 +275,11 @@ struct prefill_personaplex_prompt_run {
 struct step_run {
   const step &request;
   step_ctx &ctx;
+};
+
+struct predict_run {
+  const predict &request;
+  predict_ctx &ctx;
 };
 
 struct reset_run {

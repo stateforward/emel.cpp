@@ -28,6 +28,9 @@ enum class error : emel::error::type {
   sample_failed = (1u << 19),
   postprocess_failed = (1u << 20),
   unsupported_request = (1u << 21),
+  tokenizer_initialize_failed = (1u << 22),
+  tokenize_failed = (1u << 23),
+  detokenize_failed = (1u << 24),
 };
 
 } // namespace emel::speech::generator

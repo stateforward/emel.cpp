@@ -139,6 +139,25 @@ struct guard_frame_produced {
 };
 
 template <class dependencies_type, class runtime_event_type>
+struct guard_prediction_succeeded {
+  bool operator()(const runtime_event_type &runtime_ev,
+                  const action::context<dependencies_type> &) const noexcept {
+    return runtime_ev.ctx.child_accepted && runtime_ev.ctx.child_err == 0 &&
+           runtime_ev.ctx.graph_err == 0;
+  }
+};
+
+template <class dependencies_type, class runtime_event_type>
+struct guard_prediction_failed {
+  bool
+  operator()(const runtime_event_type &runtime_ev,
+             const action::context<dependencies_type> &ctx) const noexcept {
+    return !guard_prediction_succeeded<dependencies_type, runtime_event_type>{}(
+        runtime_ev, ctx);
+  }
+};
+
+template <class dependencies_type, class runtime_event_type>
 struct guard_frame_pending {
   bool operator()(const runtime_event_type &runtime_ev,
                   const action::context<dependencies_type> &) const noexcept {

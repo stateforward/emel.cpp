@@ -172,6 +172,52 @@ struct guard_step_request_shape_invalid {
   }
 };
 
+struct guard_predict_request_valid {
+  bool operator()(const event::predict_run &runtime_ev,
+                  const action::context &ctx) const noexcept {
+    const bool voice_ready =
+        !ctx.voice.loaded || (ctx.voice.ready && ctx.voice.prompt_ready);
+    return ctx.session.model != nullptr && voice_ready &&
+           runtime_ev.request.model_tokens.size() ==
+               static_cast<size_t>(ctx.lmgen.codebook_count) &&
+           runtime_ev.request.audio_tokens_out.size() >=
+               static_cast<size_t>(ctx.lmgen.generated_dep_q);
+  }
+};
+
+struct guard_predict_blocked_by_voice_prompt {
+  bool operator()(const event::predict_run &,
+                  const action::context &ctx) const noexcept {
+    return ctx.session.model != nullptr && ctx.voice.loaded &&
+           (!ctx.voice.ready || !ctx.voice.prompt_ready);
+  }
+};
+
+struct guard_predict_request_shape_invalid {
+  bool operator()(const event::predict_run &runtime_ev,
+                  const action::context &ctx) const noexcept {
+    return !guard_predict_request_valid{}(runtime_ev, ctx) &&
+           !guard_predict_blocked_by_voice_prompt{}(runtime_ev, ctx);
+  }
+};
+
+struct guard_capture_tokenizer_state_valid {
+  bool operator()(const event::capture_tokenizer_state &ev,
+                  const action::context &ctx) const noexcept {
+    return ctx.session.model != nullptr &&
+           ev.cache_out.size() ==
+               static_cast<size_t>(ctx.lmgen.cache_row_count *
+                                   ctx.lmgen.codebook_count);
+  }
+};
+
+struct guard_capture_tokenizer_state_invalid {
+  bool operator()(const event::capture_tokenizer_state &ev,
+                  const action::context &ctx) const noexcept {
+    return !guard_capture_tokenizer_state_valid{}(ev, ctx);
+  }
+};
+
 struct guard_voice_prefill_request_valid {
   bool operator()(const event::prefill_voice_run &,
                   const action::context &ctx) const noexcept {

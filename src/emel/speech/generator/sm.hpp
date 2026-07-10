@@ -20,6 +20,7 @@ struct state_initialize_decoder_result {};
 struct state_initialize_runtime_result {};
 struct state_initialize_predictor_result {};
 struct state_initialize_conditioning_result {};
+struct state_initialize_tokenizer_result {};
 struct state_initialize_synthesis_conditioner_result {};
 struct state_initialize_synthesis_prefiller_result {};
 struct state_initialize_synthesis_predictor_result {};
@@ -35,6 +36,8 @@ struct state_condition_prompt_begin_result {};
 struct state_condition_voice_done_channel_decision {};
 struct state_condition_prompt {};
 struct state_condition_prompt_result {};
+struct state_condition_capture_tokenizer_result {};
+struct state_condition_restore_tokenizer_result {};
 struct state_condition_prompt_done_channel_decision {};
 struct state_condition_error_channel_decision {};
 
@@ -49,14 +52,18 @@ struct state_generate_error_channel_decision {};
 struct state_generate_done_channel_decision {};
 
 struct state_stream_encode_result {};
+struct state_stream_tokenize_result {};
 struct state_stream_predict_result {};
+struct state_stream_detokenize_result {};
 struct state_stream_decode_result {};
 struct state_stream_done_channel_decision {};
 struct state_stream_error_channel_decision {};
 
 struct state_flushing {};
 struct state_flush_encode_result {};
+struct state_flush_tokenize_result {};
 struct state_flush_predict_result {};
+struct state_flush_detokenize_result {};
 struct state_flush_decode_result {};
 struct state_flush_done_channel_decision {};
 struct state_flush_error_channel_decision {};
@@ -186,14 +193,22 @@ template <class dependencies_type> struct duplex_model {
           sml::state<state_initialize_predictor_result> + sml::completion<init_run>
           [ guard::guard_child_failed<dependencies_type, init_run>{} ]
           / action::effect_fail_initialize<dependencies_type, error::predictor_initialize_failed>{}
-      , sml::state<state_initialize_done_channel_decision> <=
+      , sml::state<state_initialize_tokenizer_result> <=
           sml::state<state_initialize_conditioning_result> + sml::completion<init_run>
           [ guard::guard_child_succeeded<dependencies_type, init_run>{} ]
-          / action::effect_publish_initialize_done<dependencies_type>{}
+          / action::effect_initialize_tokenizer<dependencies_type>{}
       , sml::state<state_initialize_error_channel_decision> <=
           sml::state<state_initialize_conditioning_result> + sml::completion<init_run>
           [ guard::guard_child_failed<dependencies_type, init_run>{} ]
           / action::effect_fail_initialize<dependencies_type, error::conditioning_failed>{}
+      , sml::state<state_initialize_done_channel_decision> <=
+          sml::state<state_initialize_tokenizer_result> + sml::completion<init_run>
+          [ guard::guard_child_succeeded<dependencies_type, init_run>{} ]
+          / action::effect_publish_initialize_done<dependencies_type>{}
+      , sml::state<state_initialize_error_channel_decision> <=
+          sml::state<state_initialize_tokenizer_result> + sml::completion<init_run>
+          [ guard::guard_child_failed<dependencies_type, init_run>{} ]
+          / action::effect_fail_initialize<dependencies_type, error::tokenizer_initialize_failed>{}
       , sml::state<state_condition_voice> <=
           sml::state<state_initialize_done_channel_decision> + sml::completion<init_run>
           [ init_done_present{} ] / action::effect_emit_initialize_done<dependencies_type>{}
@@ -255,13 +270,33 @@ template <class dependencies_type> struct duplex_model {
           sml::state<state_condition_prompt_result> + sml::completion<condition_run>
           [ guard::guard_condition_succeeded_pending<dependencies_type>{} ]
           / action::effect_publish_condition_pending<dependencies_type>{}
-      , sml::state<state_condition_prompt_done_channel_decision> <=
+      , sml::state<state_condition_capture_tokenizer_result> <=
           sml::state<state_condition_prompt_result> + sml::completion<condition_run>
           [ guard::guard_condition_succeeded_complete<dependencies_type>{} ]
-          / action::effect_publish_condition_complete<dependencies_type>{}
+          / action::effect_capture_tokenizer_state<dependencies_type>{}
       , sml::state<state_condition_error_channel_decision> <=
           sml::state<state_condition_prompt_result> + sml::completion<condition_run>
           [ guard::guard_condition_failed<dependencies_type>{} ]
+          / action::effect_fail_condition<dependencies_type, error::conditioning_failed>{}
+      , sml::state<state_condition_restore_tokenizer_result> <=
+          sml::state<state_condition_capture_tokenizer_result>
+          + sml::completion<condition_run>
+          [ guard::guard_child_succeeded<dependencies_type, condition_run>{} ]
+          / action::effect_restore_tokenizer_state<dependencies_type>{}
+      , sml::state<state_condition_error_channel_decision> <=
+          sml::state<state_condition_capture_tokenizer_result>
+          + sml::completion<condition_run>
+          [ guard::guard_child_failed<dependencies_type, condition_run>{} ]
+          / action::effect_fail_condition<dependencies_type, error::conditioning_failed>{}
+      , sml::state<state_condition_prompt_done_channel_decision> <=
+          sml::state<state_condition_restore_tokenizer_result>
+          + sml::completion<condition_run>
+          [ guard::guard_child_succeeded<dependencies_type, condition_run>{} ]
+          / action::effect_publish_condition_complete<dependencies_type>{}
+      , sml::state<state_condition_error_channel_decision> <=
+          sml::state<state_condition_restore_tokenizer_result>
+          + sml::completion<condition_run>
+          [ guard::guard_child_failed<dependencies_type, condition_run>{} ]
           / action::effect_fail_condition<dependencies_type, error::conditioning_failed>{}
       , sml::state<state_condition_prompt> <=
           sml::state<state_condition_prompt_done_channel_decision>
@@ -317,31 +352,45 @@ template <class dependencies_type> struct duplex_model {
           + sml::completion<generate_run> [ generate_error_absent{} ]
 
       //------------------------------------------------------------------------------//
-      // Duplex encode -> predict -> optional decode.
+      // Duplex encode -> tokenize -> predict -> detokenize -> optional decode.
       , sml::state<state_stream_encode_result> <= sml::state<state_ready>
           + sml::event<stream_run> [ guard::guard_stream_request_valid<dependencies_type>{} ]
           / action::effect_encode_stream_frame<dependencies_type>{}
       , sml::state<state_stream_error_channel_decision> <= sml::state<state_ready>
           + sml::event<stream_run> [ guard::guard_stream_request_invalid<dependencies_type>{} ]
           / action::effect_fail_stream_frame<dependencies_type, error::invalid_request>{}
-      , sml::state<state_stream_predict_result> <= sml::state<state_stream_encode_result>
+      , sml::state<state_stream_tokenize_result> <= sml::state<state_stream_encode_result>
           + sml::completion<stream_run> [ guard::guard_child_succeeded<dependencies_type, stream_run>{} ]
-          / action::effect_predict_frame<dependencies_type, stream_run>{}
+          / action::effect_tokenize_frame<dependencies_type, stream_run>{}
       , sml::state<state_stream_error_channel_decision> <=
           sml::state<state_stream_encode_result> + sml::completion<stream_run>
           [ guard::guard_child_failed<dependencies_type, stream_run>{} ]
           / action::effect_fail_stream_frame<dependencies_type, error::encode_failed>{}
-      , sml::state<state_stream_decode_result> <= sml::state<state_stream_predict_result>
+      , sml::state<state_stream_predict_result> <= sml::state<state_stream_tokenize_result>
+          + sml::completion<stream_run> [ guard::guard_child_succeeded<dependencies_type, stream_run>{} ]
+          / action::effect_predict_frame<dependencies_type, stream_run>{}
+      , sml::state<state_stream_error_channel_decision> <=
+          sml::state<state_stream_tokenize_result> + sml::completion<stream_run>
+          [ guard::guard_child_failed<dependencies_type, stream_run>{} ]
+          / action::effect_fail_stream_frame<dependencies_type, error::tokenize_failed>{}
+      , sml::state<state_stream_detokenize_result> <= sml::state<state_stream_predict_result>
+          + sml::completion<stream_run> [ guard::guard_prediction_succeeded<dependencies_type, stream_run>{} ]
+          / action::effect_detokenize_frame<dependencies_type, stream_run>{}
+      , sml::state<state_stream_error_channel_decision> <=
+          sml::state<state_stream_predict_result> + sml::completion<stream_run>
+          [ guard::guard_prediction_failed<dependencies_type, stream_run>{} ]
+          / action::effect_fail_stream_frame<dependencies_type, error::predict_failed>{}
+      , sml::state<state_stream_decode_result> <= sml::state<state_stream_detokenize_result>
           + sml::completion<stream_run> [ guard::guard_frame_produced<dependencies_type, stream_run>{} ]
           / action::effect_decode_frame<dependencies_type, stream_run>{}
       , sml::state<state_stream_done_channel_decision> <=
-          sml::state<state_stream_predict_result> + sml::completion<stream_run>
+          sml::state<state_stream_detokenize_result> + sml::completion<stream_run>
           [ guard::guard_frame_pending<dependencies_type, stream_run>{} ]
           / action::effect_publish_stream_frame_pending<dependencies_type>{}
       , sml::state<state_stream_error_channel_decision> <=
-          sml::state<state_stream_predict_result> + sml::completion<stream_run>
+          sml::state<state_stream_detokenize_result> + sml::completion<stream_run>
           [ guard::guard_frame_failed<dependencies_type, stream_run>{} ]
-          / action::effect_fail_stream_frame<dependencies_type, error::predict_failed>{}
+          / action::effect_fail_stream_frame<dependencies_type, error::detokenize_failed>{}
       , sml::state<state_stream_done_channel_decision> <=
           sml::state<state_stream_decode_result> + sml::completion<stream_run>
           [ guard::guard_child_succeeded<dependencies_type, stream_run>{} ]
@@ -375,24 +424,38 @@ template <class dependencies_type> struct duplex_model {
       , sml::state<state_flush_error_channel_decision> <= sml::state<state_flushing>
           + sml::event<flush_run> [ guard::guard_flush_request_invalid<dependencies_type>{} ]
           / action::effect_fail_flush<dependencies_type, error::invalid_request>{}
-      , sml::state<state_flush_predict_result> <= sml::state<state_flush_encode_result>
+      , sml::state<state_flush_tokenize_result> <= sml::state<state_flush_encode_result>
           + sml::completion<flush_run> [ guard::guard_child_succeeded<dependencies_type, flush_run>{} ]
-          / action::effect_predict_frame<dependencies_type, flush_run>{}
+          / action::effect_tokenize_frame<dependencies_type, flush_run>{}
       , sml::state<state_flush_error_channel_decision> <=
           sml::state<state_flush_encode_result> + sml::completion<flush_run>
           [ guard::guard_child_failed<dependencies_type, flush_run>{} ]
           / action::effect_fail_flush<dependencies_type, error::encode_failed>{}
-      , sml::state<state_flush_decode_result> <= sml::state<state_flush_predict_result>
+      , sml::state<state_flush_predict_result> <= sml::state<state_flush_tokenize_result>
+          + sml::completion<flush_run> [ guard::guard_child_succeeded<dependencies_type, flush_run>{} ]
+          / action::effect_predict_frame<dependencies_type, flush_run>{}
+      , sml::state<state_flush_error_channel_decision> <=
+          sml::state<state_flush_tokenize_result> + sml::completion<flush_run>
+          [ guard::guard_child_failed<dependencies_type, flush_run>{} ]
+          / action::effect_fail_flush<dependencies_type, error::tokenize_failed>{}
+      , sml::state<state_flush_detokenize_result> <= sml::state<state_flush_predict_result>
+          + sml::completion<flush_run> [ guard::guard_prediction_succeeded<dependencies_type, flush_run>{} ]
+          / action::effect_detokenize_frame<dependencies_type, flush_run>{}
+      , sml::state<state_flush_error_channel_decision> <=
+          sml::state<state_flush_predict_result> + sml::completion<flush_run>
+          [ guard::guard_prediction_failed<dependencies_type, flush_run>{} ]
+          / action::effect_fail_flush<dependencies_type, error::predict_failed>{}
+      , sml::state<state_flush_decode_result> <= sml::state<state_flush_detokenize_result>
           + sml::completion<flush_run> [ guard::guard_frame_produced<dependencies_type, flush_run>{} ]
           / action::effect_decode_frame<dependencies_type, flush_run>{}
       , sml::state<state_flush_done_channel_decision> <=
-          sml::state<state_flush_predict_result> + sml::completion<flush_run>
+          sml::state<state_flush_detokenize_result> + sml::completion<flush_run>
           [ guard::guard_frame_pending<dependencies_type, flush_run>{} ]
           / action::effect_publish_flush_pending<dependencies_type>{}
       , sml::state<state_flush_error_channel_decision> <=
-          sml::state<state_flush_predict_result> + sml::completion<flush_run>
+          sml::state<state_flush_detokenize_result> + sml::completion<flush_run>
           [ guard::guard_frame_failed<dependencies_type, flush_run>{} ]
-          / action::effect_fail_flush<dependencies_type, error::predict_failed>{}
+          / action::effect_fail_flush<dependencies_type, error::detokenize_failed>{}
       , sml::state<state_flush_done_channel_decision> <=
           sml::state<state_flush_decode_result> + sml::completion<flush_run>
           [ guard::guard_child_succeeded<dependencies_type, flush_run>{} ]

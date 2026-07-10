@@ -61,7 +61,43 @@ struct fake_predict {
   int32_t &text_token_out;
   emel::error::type *error_out = nullptr;
   emel::error::type *graph_error_out = nullptr;
-  bool *produced_out = nullptr;
+};
+
+struct fake_tokenizer_initialize {
+  int32_t &error_out;
+};
+
+struct fake_tokenize {
+  std::span<const int32_t> audio_tokens = {};
+  std::span<int32_t> model_tokens_out = {};
+  int32_t &error_out;
+};
+
+struct fake_detokenize {
+  int32_t text_token = -1;
+  std::span<const int32_t> audio_tokens = {};
+  int32_t &text_token_out;
+  std::span<int32_t> audio_tokens_out = {};
+  bool &produced_out;
+  int32_t &error_out;
+};
+
+struct fake_capture_tokenizer_state {
+  fake_capture_tokenizer_state(std::span<int32_t> cache_out_ref,
+                               int64_t &offset_out_ref,
+                               emel::error::type &error_out_ref) noexcept
+      : cache_out(cache_out_ref), offset_out(offset_out_ref),
+        error_out(error_out_ref) {}
+
+  std::span<int32_t> cache_out = {};
+  int64_t &offset_out;
+  emel::error::type &error_out;
+};
+
+struct fake_restore_tokenizer_state {
+  std::span<const int32_t> cache = {};
+  int64_t offset = 0;
+  int32_t &error_out;
 };
 
 struct fake_decode {
@@ -131,6 +167,44 @@ struct fake_runtime_actor {
   }
 };
 
+struct fake_tokenizer_actor {
+  int32_t initialize_calls = 0;
+  int32_t tokenize_calls = 0;
+  int32_t detokenize_calls = 0;
+  int32_t restore_calls = 0;
+  bool produce = true;
+
+  bool process_event(const fake_tokenizer_initialize &request) noexcept {
+    ++initialize_calls;
+    request.error_out = 0;
+    return true;
+  }
+
+  bool process_event(const fake_tokenize &request) noexcept {
+    ++tokenize_calls;
+    std::copy(request.audio_tokens.begin(), request.audio_tokens.end(),
+              request.model_tokens_out.begin());
+    request.error_out = 0;
+    return true;
+  }
+
+  bool process_event(const fake_detokenize &request) noexcept {
+    ++detokenize_calls;
+    std::copy(request.audio_tokens.begin(), request.audio_tokens.end(),
+              request.audio_tokens_out.begin());
+    request.text_token_out = request.text_token;
+    request.produced_out = produce;
+    request.error_out = 0;
+    return true;
+  }
+
+  bool process_event(const fake_restore_tokenizer_state &request) noexcept {
+    ++restore_calls;
+    request.error_out = 0;
+    return true;
+  }
+};
+
 struct fake_predictor_actor {
   int32_t initialize_calls = 0;
   int32_t conditioning_initialize_calls = 0;
@@ -153,7 +227,6 @@ struct fake_predictor_actor {
   emel::error::type predict_graph_error = 0;
   bool voice_complete = true;
   bool prompt_complete = true;
-  bool produce = true;
 
   bool process_event(const fake_initialize &request) noexcept {
     ++initialize_calls;
@@ -192,8 +265,14 @@ struct fake_predictor_actor {
     request.text_token_out = 42;
     *request.error_out = predict_error;
     *request.graph_error_out = predict_graph_error;
-    *request.produced_out = produce;
     return predict_accepted;
+  }
+
+  bool process_event(const fake_capture_tokenizer_state &request) noexcept {
+    std::fill(request.cache_out.begin(), request.cache_out.end(), 0);
+    request.offset_out = 0;
+    request.error_out = 0;
+    return true;
   }
 };
 
@@ -203,12 +282,18 @@ struct fake_dependencies {
   using prompt_begin_event = fake_prompt_begin;
   using prompt_condition_event = fake_prompt_condition;
   using encode_event = fake_encode;
+  using tokenizer_initialize_event = fake_tokenizer_initialize;
+  using tokenize_event = fake_tokenize;
   using predict_event = fake_predict;
+  using detokenize_event = fake_detokenize;
+  using capture_tokenizer_state_event = fake_capture_tokenizer_state;
+  using restore_tokenizer_state_event = fake_restore_tokenizer_state;
   using decode_event = fake_decode;
 
   emel::memory::streaming::sm &temporal_positions;
   emel::memory::streaming::sm &secondary_positions;
   fake_encoder_actor &encoder;
+  fake_tokenizer_actor &tokenizer;
   fake_decoder_actor &decoder;
   fake_runtime_actor &runtime;
   fake_predictor_actor &predictor;
@@ -219,7 +304,11 @@ struct fake_dependencies {
   fake_initialize conditioning_initialize = {};
   std::span<float> silence_pcm = {};
   std::span<int32_t> input_codes = {};
+  std::span<const int32_t> tokenize_input_codes = {};
+  std::span<int32_t> model_codes = {};
+  std::span<int32_t> predicted_codes = {};
   std::span<int32_t> output_codes = {};
+  std::span<int32_t> tokenizer_cache_snapshot = {};
   int32_t frame_samples = 0;
   int32_t codebook_count = 0;
 };
@@ -227,12 +316,16 @@ struct fake_dependencies {
 struct fixture {
   std::array<float, 4> silence{};
   std::array<int32_t, 2> input_codes{};
+  std::array<int32_t, 2> model_codes{};
+  std::array<int32_t, 2> predicted_codes{};
   std::array<int32_t, 2> output_codes{};
+  std::array<int32_t, 4> tokenizer_cache_snapshot{};
   emel::memory::streaming::sm temporal_positions{
       emel::memory::streaming::dependencies{.capacity = 16}};
   emel::memory::streaming::sm secondary_positions{
       emel::memory::streaming::dependencies{.capacity = 16}};
   fake_encoder_actor encoder{};
+  fake_tokenizer_actor tokenizer{};
   fake_decoder_actor decoder{};
   fake_runtime_actor runtime{};
   fake_predictor_actor predictor{};
@@ -245,12 +338,17 @@ struct fixture {
             .temporal_positions = temporal_positions,
             .secondary_positions = secondary_positions,
             .encoder = encoder,
+            .tokenizer = tokenizer,
             .decoder = decoder,
             .runtime = runtime,
             .predictor = predictor,
             .silence_pcm = std::span<float>{silence},
             .input_codes = std::span<int32_t>{input_codes},
+            .tokenize_input_codes = std::span<const int32_t>{input_codes},
+            .model_codes = std::span<int32_t>{model_codes},
+            .predicted_codes = std::span<int32_t>{predicted_codes},
             .output_codes = std::span<int32_t>{output_codes},
+            .tokenizer_cache_snapshot = std::span<int32_t>{tokenizer_cache_snapshot},
             .frame_samples = frame_samples,
             .codebook_count = codebook_count,
         },
@@ -647,7 +745,7 @@ TEST_CASE("speech_generator_streams_pending_frames_and_reports_failures") {
                                          err};
 
   SUBCASE("pending") {
-    test->predictor.produce = false;
+    test->tokenizer.produce = false;
     request.on_done =
         decltype(request.on_done)::from<callback_probe,
                                         &callback_probe::stream_done>(&probe);
@@ -748,7 +846,7 @@ TEST_CASE("speech_generator_flushes_pending_frames_and_reports_failures") {
                                   err};
 
   SUBCASE("pending") {
-    test->predictor.produce = false;
+    test->tokenizer.produce = false;
     request.on_done =
         decltype(request.on_done)::from<callback_probe,
                                         &callback_probe::flush_done>(&probe);
