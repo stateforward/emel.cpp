@@ -128,50 +128,6 @@ struct guard_memory_rejected {
   }
 };
 
-struct guard_step_request_valid {
-  bool operator()(const event::step_run &runtime_ev,
-                  const action::context &ctx) const noexcept {
-    const bool input_full = runtime_ev.request.audio_tokens.size() ==
-                            static_cast<size_t>(ctx.lmgen.codebook_count);
-    const bool input_tail = ctx.lmgen.needed_tokens > 0 &&
-                            runtime_ev.request.audio_tokens.size() >=
-                                static_cast<size_t>(ctx.lmgen.needed_tokens) &&
-                            runtime_ev.request.audio_tokens.size() !=
-                                static_cast<size_t>(ctx.lmgen.codebook_count);
-    const bool input_optional = ctx.lmgen.needed_tokens == 0;
-    const bool voice_ready =
-        !ctx.voice.loaded || (ctx.voice.ready && ctx.voice.prompt_ready);
-    return ctx.session.model != nullptr && voice_ready &&
-           runtime_ev.request.audio_tokens_out.data() != nullptr &&
-           runtime_ev.request.audio_tokens_out.size() >=
-               static_cast<size_t>(ctx.lmgen.delayed_dep_q) &&
-           (input_full || input_tail || input_optional);
-  }
-};
-
-struct guard_step_request_invalid {
-  bool operator()(const event::step_run &runtime_ev,
-                  const action::context &ctx) const noexcept {
-    return !guard_step_request_valid{}(runtime_ev, ctx);
-  }
-};
-
-struct guard_step_blocked_by_voice_prompt {
-  bool operator()(const event::step_run &,
-                  const action::context &ctx) const noexcept {
-    return ctx.session.model != nullptr && ctx.voice.loaded &&
-           (!ctx.voice.ready || !ctx.voice.prompt_ready);
-  }
-};
-
-struct guard_step_request_shape_invalid {
-  bool operator()(const event::step_run &runtime_ev,
-                  const action::context &ctx) const noexcept {
-    return !guard_step_request_valid{}(runtime_ev, ctx) &&
-           !guard_step_blocked_by_voice_prompt{}(runtime_ev, ctx);
-  }
-};
-
 struct guard_predict_request_valid {
   bool operator()(const event::predict_run &runtime_ev,
                   const action::context &ctx) const noexcept {
@@ -476,33 +432,6 @@ struct guard_no_voice_remaining_out {
   }
 };
 
-struct guard_has_full_input {
-  bool operator()(const event::step_run &runtime_ev,
-                  const action::context &ctx) const noexcept {
-    return runtime_ev.request.audio_tokens.size() ==
-           static_cast<size_t>(ctx.lmgen.codebook_count);
-  }
-};
-
-struct guard_has_tail_input {
-  bool operator()(const event::step_run &runtime_ev,
-                  const action::context &ctx) const noexcept {
-    return ctx.lmgen.needed_tokens > 0 &&
-           runtime_ev.request.audio_tokens.size() >=
-               static_cast<size_t>(ctx.lmgen.needed_tokens) &&
-           runtime_ev.request.audio_tokens.size() !=
-               static_cast<size_t>(ctx.lmgen.codebook_count);
-  }
-};
-
-struct guard_has_no_input_write {
-  bool operator()(const event::step_run &runtime_ev,
-                  const action::context &ctx) const noexcept {
-    return !guard_has_full_input{}(runtime_ev, ctx) &&
-           !guard_has_tail_input{}(runtime_ev, ctx);
-  }
-};
-
 struct guard_graph_runtime_available {
   template <class runtime_event_type>
   bool operator()(const runtime_event_type &,
@@ -575,92 +504,6 @@ struct guard_no_graph_error_out {
   bool operator()(const runtime_event_type &runtime_ev,
                   const action::context &ctx) const noexcept {
     return !guard_has_graph_error_out{}(runtime_ev, ctx);
-  }
-};
-
-struct guard_replace_depformer_tokens {
-  bool operator()(const event::step_run &,
-                  const action::context &ctx) const noexcept {
-    return ctx.lmgen.delay_steps > 0 &&
-           ctx.lmgen.offset < ctx.lmgen.delay_steps;
-  }
-};
-
-struct guard_use_graph_audio_tokens {
-  bool operator()(const event::step_run &runtime_ev,
-                  const action::context &ctx) const noexcept {
-    return !guard_replace_depformer_tokens{}(runtime_ev, ctx);
-  }
-};
-
-struct guard_should_write_generated {
-  bool operator()(const event::step_run &runtime_ev,
-                  const action::context &) const noexcept {
-    return !runtime_ev.ctx.provided_input;
-  }
-};
-
-struct guard_provided_input {
-  bool operator()(const event::step_run &runtime_ev,
-                  const action::context &) const noexcept {
-    return runtime_ev.ctx.provided_input;
-  }
-};
-
-struct guard_skip_pending {
-  bool operator()(const event::step_run &,
-                  const action::context &ctx) const noexcept {
-    return ctx.lmgen.skip > 0;
-  }
-};
-
-struct guard_before_delay {
-  bool operator()(const event::step_run &,
-                  const action::context &ctx) const noexcept {
-    return ctx.lmgen.offset <= ctx.lmgen.max_delay;
-  }
-};
-
-struct guard_past_delay {
-  bool operator()(const event::step_run &runtime_ev,
-                  const action::context &ctx) const noexcept {
-    return !guard_skip_pending{}(runtime_ev, ctx) &&
-           !guard_before_delay{}(runtime_ev, ctx);
-  }
-};
-
-struct guard_output_has_ungenerated {
-  bool operator()(const event::step_run &runtime_ev,
-                  const action::context &) const noexcept {
-    bool has_ungenerated = false;
-    for (int32_t index = 0; index < runtime_ev.ctx.delayed_dep_q; ++index) {
-      if (runtime_ev.request.audio_tokens_out[static_cast<size_t>(index)] ==
-          action::k_token_zero) {
-        has_ungenerated = true;
-      }
-    }
-    return has_ungenerated;
-  }
-};
-
-struct guard_output_complete {
-  bool operator()(const event::step_run &runtime_ev,
-                  const action::context &ctx) const noexcept {
-    return !guard_output_has_ungenerated{}(runtime_ev, ctx);
-  }
-};
-
-struct guard_has_produced_out {
-  bool operator()(const event::step_run &runtime_ev,
-                  const action::context &) const noexcept {
-    return runtime_ev.request.produced_out != nullptr;
-  }
-};
-
-struct guard_no_produced_out {
-  bool operator()(const event::step_run &runtime_ev,
-                  const action::context &ctx) const noexcept {
-    return !guard_has_produced_out{}(runtime_ev, ctx);
   }
 };
 

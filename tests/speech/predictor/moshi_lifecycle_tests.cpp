@@ -1,6 +1,5 @@
 #include <algorithm>
 #include <array>
-#include <cmath>
 #include <cstdint>
 #include <memory>
 #include <span>
@@ -13,7 +12,6 @@
 #include "../../memory/recording_kv_actor.hpp"
 #include "emel/memory/streaming/sm.hpp"
 #include "emel/model/moshi/detail.hpp"
-#include "emel/speech/codec/mimi/any.hpp"
 #include "emel/speech/predictor/moshi/any.hpp"
 #include "emel/speech/predictor/moshi/executor/any.hpp"
 #include "moshi_fixture.hpp"
@@ -23,7 +21,6 @@ namespace {
 namespace moshi = emel::speech::predictor::moshi;
 namespace moshi_executor = emel::speech::predictor::moshi::executor;
 namespace memory_streaming = emel::memory::streaming;
-namespace mimi = emel::speech::codec::mimi;
 namespace model_moshi = emel::model::moshi::detail;
 using emel::speech::predictor::moshi::test::load_fixture_or_skip;
 using emel::speech::predictor::moshi::test::read_binary_file;
@@ -31,25 +28,6 @@ using emel::speech::predictor::moshi::test::repo_root;
 
 inline constexpr emel::error::type k_no_error =
     emel::error::cast(moshi::error::none);
-
-int32_t g_mimi_frame_samples = 0;
-int32_t g_mimi_n_q = 0;
-
-void on_mimi_initialized(const mimi::events::initialize_done &done) {
-  g_mimi_frame_samples = done.frame_samples;
-  g_mimi_n_q = done.n_q;
-}
-
-std::vector<float> deterministic_pcm(const int32_t frame_samples) {
-  std::vector<float> pcm(static_cast<size_t>(frame_samples), 0.0f);
-  for (int32_t index = 0; index < frame_samples; ++index) {
-    const float carrier = static_cast<float>((index % 109) - 54) / 54.0f;
-    const float envelope =
-        0.35f + 0.65f * static_cast<float>((index / 160) % 2);
-    pcm[static_cast<size_t>(index)] = 0.08f * envelope * carrier;
-  }
-  return pcm;
-}
 
 struct recording_graph_executor {
   int32_t call_count = 0;
@@ -162,19 +140,6 @@ struct moshi_callback_probe {
 
   void on_generator_prefill_prompt_error(
       const moshi::events::prefill_personaplex_prompt_error &error) noexcept {
-    ++error_count;
-    request = error.request;
-    err = error.err;
-  }
-
-  void on_generator_step_done(const moshi::events::step_done &done) noexcept {
-    ++done_count;
-    request = done.request;
-    produced = done.produced;
-  }
-
-  void
-  on_generator_step_error(const moshi::events::step_error &error) noexcept {
     ++error_count;
     request = error.request;
     err = error.err;
@@ -313,18 +278,18 @@ void initialize_streaming_position(memory_streaming::sm &position) {
 
 } // namespace
 
-TEST_CASE("speech_moshi_generator_rejects_step_before_initialize") {
+TEST_CASE("speech_moshi_predictor_rejects_predict_before_initialize") {
   moshi::sm generator{};
   std::array<int32_t, 4> input = {0, 0, 0, 0};
   std::array<int32_t, 4> output = {};
   int32_t text_token = -1;
   emel::error::type err = k_no_error;
 
-  moshi::event::step step{std::span<const int32_t>{input},
-                          std::span<int32_t>{output}, text_token};
-  step.error_out = &err;
+  moshi::event::predict predict{std::span<const int32_t>{input},
+                                std::span<int32_t>{output}, text_token};
+  predict.error_out = &err;
 
-  CHECK_FALSE(generator.process_event(step));
+  CHECK_FALSE(generator.process_event(predict));
   CHECK(err == emel::error::cast(moshi::error::not_initialized));
 }
 
@@ -395,36 +360,6 @@ TEST_CASE("speech_moshi_generator_personaplex_uses_model_inference_codebooks") {
   CHECK(ctx.lmgen.delayed_dep_q == model->moshi_lm.inference_dep_q);
   CHECK(ctx.lmgen.needed_tokens == 8);
   CHECK(ctx.lmgen.cache_row_count == 4);
-
-  auto snapshot = std::make_unique<emel::memory::view::snapshot>();
-  moshi::event::step_ctx step_ctx{*snapshot};
-  std::array<int32_t, 8> prompt_tail = {};
-  std::array<int32_t, 8> output = {};
-  int32_t text_token = -1;
-  moshi::event::step step{std::span<const int32_t>{prompt_tail},
-                          std::span<int32_t>{output}, text_token};
-  moshi::event::step_run step_run{step, step_ctx};
-
-  CHECK(moshi::guard::guard_step_request_valid{}(step_run, ctx));
-
-  ctx.lmgen.offset = 5;
-  step_ctx.generated_dep_q = ctx.lmgen.generated_dep_q;
-  step_ctx.delayed_dep_q = ctx.lmgen.delayed_dep_q;
-  for (int32_t row = 0; row < ctx.lmgen.cache_row_count; ++row) {
-    for (int32_t column = 0; column < ctx.lmgen.codebook_count; ++column) {
-      moshi::detail::cache_at(ctx.lmgen, row, column) = column * 10 + row;
-    }
-  }
-  for (int32_t index = 0; index < ctx.lmgen.generated_dep_q; ++index) {
-    step_ctx.audio_tokens[static_cast<size_t>(index)] = 1000 + index;
-  }
-
-  moshi::action::effect_collect_delayed_output{}(step_run, ctx);
-
-  CHECK(text_token == 0);
-  for (int32_t index = 0; index < ctx.lmgen.delayed_dep_q; ++index) {
-    CHECK(output[static_cast<size_t>(index)] == (index + 1) * 10 + 1);
-  }
 }
 
 TEST_CASE(
@@ -456,16 +391,17 @@ TEST_CASE(
   CHECK(err == k_no_error);
 
   std::array<int32_t, moshi::event::k_max_codebooks> output = {};
+  std::array<int32_t, moshi::event::k_max_codebooks> model_tokens = {};
   int32_t text_token = -1;
-  bool produced = true;
-  moshi::event::step blocked_step{
-      std::span<const int32_t>{},
+  moshi::event::predict blocked_predict{
+      std::span<const int32_t>{
+          model_tokens.data(),
+          static_cast<size_t>(fixture.model->moshi_lm.n_q + 1)},
       std::span<int32_t>{output.data(),
                          static_cast<size_t>(fixture.model->moshi_lm.dep_q)},
       text_token};
-  blocked_step.error_out = &err;
-  blocked_step.produced_out = &produced;
-  CHECK_FALSE(generator.process_event(blocked_step));
+  blocked_predict.error_out = &err;
+  CHECK_FALSE(generator.process_event(blocked_predict));
   CHECK(err == emel::error::cast(moshi::error::voice_prompt_pending));
 
   for (int32_t index = 0; index < prompt_frames; ++index) {
@@ -572,17 +508,15 @@ TEST_CASE("speech_moshi_generator_prefills_personaplex_system_prompt_before_"
   std::array<int32_t, moshi::event::k_max_codebooks> output = {};
   std::fill(input.begin(), input.end(), 0);
   int32_t text_token = -1;
-  bool produced = true;
   err = k_no_error;
-  moshi::event::step blocked_step{
-      std::span<const int32_t>{input.data(),
-                               static_cast<size_t>(needed_tokens)},
+  moshi::event::predict blocked_predict{
+      std::span<const int32_t>{
+          input.data(), static_cast<size_t>(fixture.model->moshi_lm.n_q + 1)},
       std::span<int32_t>{output.data(),
                          static_cast<size_t>(fixture.model->moshi_lm.dep_q)},
       text_token};
-  blocked_step.error_out = &err;
-  blocked_step.produced_out = &produced;
-  CHECK_FALSE(generator.process_event(blocked_step));
+  blocked_predict.error_out = &err;
+  CHECK_FALSE(generator.process_event(blocked_predict));
   CHECK(err == emel::error::cast(moshi::error::voice_prompt_pending));
 
   err = k_no_error;
@@ -623,19 +557,17 @@ TEST_CASE("speech_moshi_generator_prefills_personaplex_system_prompt_before_"
   CHECK(kv.capture_view_count >= prompt_frames + 4);
 
   text_token = -1;
-  produced = true;
   err = k_no_error;
   emel::error::type graph_err = emel::error::cast(moshi::error::graph_runtime);
-  moshi::event::step first_step{
-      std::span<const int32_t>{input.data(),
-                               static_cast<size_t>(needed_tokens)},
+  moshi::event::predict first_predict{
+      std::span<const int32_t>{
+          input.data(), static_cast<size_t>(fixture.model->moshi_lm.n_q + 1)},
       std::span<int32_t>{output.data(),
                          static_cast<size_t>(fixture.model->moshi_lm.dep_q)},
       text_token};
-  first_step.error_out = &err;
-  first_step.graph_error_out = &graph_err;
-  first_step.produced_out = &produced;
-  REQUIRE(generator.process_event(first_step));
+  first_predict.error_out = &err;
+  first_predict.graph_error_out = &graph_err;
+  REQUIRE(generator.process_event(first_predict));
   CHECK(err == k_no_error);
   CHECK(graph_err == k_no_error);
   CHECK(graph.call_count == prompt_frames + 5);
@@ -692,20 +624,18 @@ TEST_CASE("speech_moshi_generator_accepts_personaplex_voice_without_system_"
   std::array<int32_t, moshi::event::k_max_codebooks> output = {};
   std::fill(input.begin(), input.end(), 0);
   int32_t text_token = -1;
-  bool produced = false;
   emel::error::type graph_err = emel::error::cast(moshi::error::graph_runtime);
-  moshi::event::step step{
-      std::span<const int32_t>{input.data(),
-                               static_cast<size_t>(needed_tokens)},
+  moshi::event::predict predict{
+      std::span<const int32_t>{
+          input.data(), static_cast<size_t>(fixture.model->moshi_lm.n_q + 1)},
       std::span<int32_t>{output.data(),
                          static_cast<size_t>(fixture.model->moshi_lm.dep_q)},
       text_token};
-  step.error_out = &err;
-  step.graph_error_out = &graph_err;
-  step.produced_out = &produced;
+  predict.error_out = &err;
+  predict.graph_error_out = &graph_err;
 
   err = k_no_error;
-  CHECK_FALSE(generator.process_event(step));
+  CHECK_FALSE(generator.process_event(predict));
   CHECK(err == emel::error::cast(moshi::error::voice_prompt_pending));
 
   const int32_t personaplex_prompt_frames =
@@ -734,13 +664,13 @@ TEST_CASE("speech_moshi_generator_accepts_personaplex_voice_without_system_"
 
   err = k_no_error;
   graph_err = emel::error::cast(moshi::error::graph_runtime);
-  REQUIRE(generator.process_event(step));
+  REQUIRE(generator.process_event(predict));
   CHECK(err == k_no_error);
   CHECK(graph_err == k_no_error);
   CHECK(graph.call_count == prompt_frames + personaplex_prompt_frames + 1);
 }
 
-TEST_CASE("speech_moshi_generator_step_uses_memory_then_reports_missing_graph_"
+TEST_CASE("speech_moshi_predictor_uses_memory_then_reports_missing_graph_"
           "runtime") {
   auto fixture = load_fixture_or_skip("moshi-tiny-lm.gguf");
   if (fixture.model == nullptr) {
@@ -754,15 +684,19 @@ TEST_CASE("speech_moshi_generator_step_uses_memory_then_reports_missing_graph_"
   init.error_out = &err;
   REQUIRE(generator.process_event(init));
 
-  std::array<int32_t, 4> input = {0, 1, 2, 3};
-  std::array<int32_t, 4> output = {};
+  std::array<int32_t, moshi::event::k_max_codebooks> input = {};
+  std::array<int32_t, moshi::event::k_max_codebooks> output = {};
   int32_t text_token = -1;
   err = k_no_error;
-  moshi::event::step step{std::span<const int32_t>{input},
-                          std::span<int32_t>{output}, text_token};
-  step.error_out = &err;
+  moshi::event::predict predict{
+      std::span<const int32_t>{
+          input.data(), static_cast<size_t>(fixture.model->moshi_lm.n_q + 1)},
+      std::span<int32_t>{output.data(),
+                         static_cast<size_t>(fixture.model->moshi_lm.dep_q)},
+      text_token};
+  predict.error_out = &err;
 
-  CHECK_FALSE(generator.process_event(step));
+  CHECK_FALSE(generator.process_event(predict));
   CHECK(err == emel::error::cast(moshi::error::graph_runtime_unavailable));
   CHECK(kv.allocate_slots_count == 1);
   CHECK(kv.capture_view_count == 1);
@@ -1063,7 +997,8 @@ TEST_CASE("speech_moshi_generator_graph_outputs_use_explicit_transitions") {
         std::string::npos);
   CHECK(actions_source.find("effect_store_graph_debug_phase_out") ==
         std::string::npos);
-  CHECK(sm_source.find("state_graph_error_out_decision") != std::string::npos);
+  CHECK(sm_source.find("state_predict_graph_error_out_decision") !=
+        std::string::npos);
   CHECK(sm_source.find("state_graph_debug_phase_out_decision") ==
         std::string::npos);
 }
@@ -1084,31 +1019,32 @@ TEST_CASE("speech_moshi_generator_and_executor_cover_explicit_error_guards") {
   CHECK(generator_ctx.lmgen.delayed_dep_q == fixture.model->moshi_lm.dep_q);
 
   auto generator_snapshot = std::make_unique<emel::memory::view::snapshot>();
-  moshi::event::step_ctx generator_step_ctx{*generator_snapshot};
+  moshi::event::predict_ctx generator_predict_ctx{*generator_snapshot};
   std::array<int32_t, moshi::event::k_max_codebooks> generator_input = {};
   std::array<int32_t, moshi::event::k_max_codebooks> generator_output = {};
   int32_t generator_text = -1;
-  moshi::event::step generator_step{
+  moshi::event::predict generator_predict{
       std::span<const int32_t>{generator_input.data(), 1},
       std::span<int32_t>{generator_output.data(), 1}, generator_text};
-  moshi::event::step_run generator_step_run{generator_step, generator_step_ctx};
-  moshi::action::effect_mark_memory_error<moshi::event::step_run>{}(
-      generator_step_run, generator_ctx);
-  CHECK(generator_step_ctx.err == emel::error::cast(moshi::error::memory));
-  moshi::action::effect_mark_step_request_invalid{}(generator_step_run,
+  moshi::event::predict_run generator_predict_run{generator_predict,
+                                                  generator_predict_ctx};
+  moshi::action::effect_mark_memory_error<moshi::event::predict_run>{}(
+      generator_predict_run, generator_ctx);
+  CHECK(generator_predict_ctx.err == emel::error::cast(moshi::error::memory));
+  moshi::action::effect_mark_step_request_invalid{}(generator_predict_run,
                                                     generator_ctx);
-  CHECK(generator_step_ctx.err ==
+  CHECK(generator_predict_ctx.err ==
         emel::error::cast(moshi::error::request_shape));
-  moshi::action::effect_mark_voice_contract_error<moshi::event::step_run>{}(
-      generator_step_run, generator_ctx);
-  CHECK(generator_step_ctx.err ==
+  moshi::action::effect_mark_voice_contract_error<moshi::event::predict_run>{}(
+      generator_predict_run, generator_ctx);
+  CHECK(generator_predict_ctx.err ==
         emel::error::cast(moshi::error::voice_contract));
-  moshi::action::effect_mark_personaplex_prompt_error<moshi::event::step_run>{}(
-      generator_step_run, generator_ctx);
-  CHECK(generator_step_ctx.err ==
+  moshi::action::effect_mark_personaplex_prompt_error<
+      moshi::event::predict_run>{}(generator_predict_run, generator_ctx);
+  CHECK(generator_predict_ctx.err ==
         emel::error::cast(moshi::error::personaplex_prompt));
-  CHECK(
-      moshi::guard::guard_memory_rejected{}(generator_step_run, generator_ctx));
+  CHECK(moshi::guard::guard_memory_rejected{}(generator_predict_run,
+                                              generator_ctx));
 
   moshi::event::begin_personaplex_prompt begin_prompt{};
   moshi::event::begin_personaplex_prompt_ctx begin_prompt_ctx{};
@@ -1282,36 +1218,6 @@ TEST_CASE("speech_moshi_generator_and_executor_cover_explicit_error_guards") {
       prompt_prefill_run, generator_ctx);
   CHECK(callback_probe.err ==
         emel::error::cast(moshi::error::graph_runtime_unavailable));
-
-  bool produced = false;
-  emel::error::type generator_err = k_no_error;
-  generator_step.produced_out = &produced;
-  generator_step.error_out = &generator_err;
-  generator_step.on_done =
-      emel::callback<void(const moshi::events::step_done &)>::from<
-          moshi_callback_probe, &moshi_callback_probe::on_generator_step_done>(
-          &callback_probe);
-  generator_step.on_error =
-      emel::callback<void(const moshi::events::step_error &)>::from<
-          moshi_callback_probe, &moshi_callback_probe::on_generator_step_error>(
-          &callback_probe);
-  generator_step_ctx.produced = true;
-  generator_step_ctx.err = emel::error::cast(moshi::error::request_shape);
-  moshi::action::effect_store_produced_out{}(generator_step_run, generator_ctx);
-  moshi::action::effect_store_error_out<moshi::event::step_run>{}(
-      generator_step_run, generator_ctx);
-  CHECK(produced);
-  CHECK(generator_err == emel::error::cast(moshi::error::request_shape));
-  moshi::action::effect_emit_step_done{}(generator_step_run, generator_ctx);
-  CHECK(callback_probe.produced);
-  CHECK(callback_probe.request == &generator_step);
-  moshi::action::effect_emit_step_error{}(generator_step_run, generator_ctx);
-  CHECK(callback_probe.err == emel::error::cast(moshi::error::request_shape));
-  moshi::action::effect_mark_unexpected_and_store{}(generator_step_run,
-                                                    generator_ctx);
-  CHECK(generator_step_ctx.err ==
-        emel::error::cast(moshi::error::unexpected_event));
-  CHECK(generator_err == emel::error::cast(moshi::error::unexpected_event));
 
   const auto &lm = fixture.model->moshi_lm;
   emel::memory::view::snapshot snapshot{};
@@ -1909,171 +1815,8 @@ TEST_CASE("speech_moshi_executor_sampling_rng_is_actor_owned") {
                    second_output.begin()));
 }
 
-TEST_CASE("speech_moshi_e2e_encodes_audio_generates_tokens_and_decodes_audio") {
-  auto codec_fixture = load_fixture_or_skip("mimi-tiny.gguf");
-  auto lm_fixture = load_fixture_or_skip("moshi-tiny-lm.gguf");
-  if (codec_fixture.model == nullptr || lm_fixture.model == nullptr) {
-    return;
-  }
-
-  std::vector<float> prepared(
-      mimi::prepared_arena_floats(*codec_fixture.model));
-  std::vector<float> state(mimi::state_arena_floats(*codec_fixture.model));
-  std::vector<float> workspace(
-      mimi::workspace_arena_floats(*codec_fixture.model));
-  std::vector<float> frame(mimi::frame_arena_floats(*codec_fixture.model));
-  mimi::sm codec{};
-  emel::error::type codec_err = emel::error::cast(mimi::error::none);
-  g_mimi_frame_samples = 0;
-  g_mimi_n_q = 0;
-  mimi::event::initialize codec_init{
-      *codec_fixture.model, std::span<float>{prepared}, std::span<float>{state},
-      std::span<float>{workspace}, std::span<float>{frame}};
-  codec_init.error_out = &codec_err;
-  codec_init.on_done = emel::callback<void(
-      const mimi::events::initialize_done &)>::from<&on_mimi_initialized>();
-  REQUIRE(codec.process_event(codec_init));
-  REQUIRE(codec_err == emel::error::cast(mimi::error::none));
-  REQUIRE(g_mimi_frame_samples > 0);
-  REQUIRE(codec_fixture.model->mimi.card == lm_fixture.model->moshi_lm.card);
-  const int32_t public_n_q = lm_fixture.model->moshi_lm.inference_dep_q;
-  REQUIRE(public_n_q > 0);
-  REQUIRE(public_n_q <= lm_fixture.model->moshi_lm.n_q);
-  REQUIRE(g_mimi_n_q == public_n_q);
-  const int32_t needed_tokens =
-      (lm_fixture.model->moshi_lm.n_q + 1) - public_n_q - 1;
-  REQUIRE(needed_tokens > 0);
-
-  const auto pcm = deterministic_pcm(g_mimi_frame_samples);
-  std::vector<int32_t> encoded_codes(static_cast<size_t>(g_mimi_n_q), -1);
-  mimi::event::encode_frame encode{std::span<const float>{pcm},
-                                   std::span<int32_t>{encoded_codes}};
-  encode.error_out = &codec_err;
-  REQUIRE(codec.process_event(encode));
-  REQUIRE(codec_err == emel::error::cast(mimi::error::none));
-  for (const int32_t code : encoded_codes) {
-    REQUIRE(code >= 0);
-    REQUIRE(code < lm_fixture.model->moshi_lm.card);
-  }
-
-  temporal_kv_probe temporal_probe{};
-  depformer_kv_probe depformer_probe{};
-  const auto temporal_kv = moshi_executor::bind_temporal_kv_cache(
-      &temporal_probe, temporal_kv_probe_bind);
-  const auto depformer_kv = moshi_executor::bind_depformer_kv_cache(
-      &depformer_probe, depformer_kv_probe_bind);
-  memory_streaming::sm temporal_positions{memory_streaming::dependencies{
-      .capacity = lm_fixture.model->moshi_lm.context}};
-  memory_streaming::sm depformer_positions{memory_streaming::dependencies{
-      .capacity = lm_fixture.model->moshi_lm.depformer_context}};
-  initialize_streaming_position(temporal_positions);
-  initialize_streaming_position(depformer_positions);
-  moshi_executor::sm executor{moshi_executor::bind_kv_caches(
-      temporal_kv, depformer_kv, temporal_positions, depformer_positions)};
-  emel::error::type executor_err =
-      emel::error::cast(moshi_executor::error::none);
-  moshi_executor::event::initialize executor_init{*lm_fixture.model};
-  executor_init.error_out = &executor_err;
-  REQUIRE(executor.process_event(executor_init));
-  REQUIRE(executor_err == emel::error::cast(moshi_executor::error::none));
-
-  moshi::sm generator{emel::memory::hybrid::kv_binding{},
-                      moshi_executor::bind_graph_executor(executor)};
-  emel::error::type generator_err = k_no_error;
-  moshi::event::initialize generator_init{*lm_fixture.model};
-  generator_init.error_out = &generator_err;
-  generator_init.max_blocks = 16;
-  generator_init.block_tokens = 4;
-  REQUIRE(generator.process_event(generator_init));
-  REQUIRE(generator_err == k_no_error);
-
-  std::array<int32_t, moshi::event::k_max_codebooks> generated_codes = {};
-  generated_codes.fill(-1);
-  std::array<int32_t, moshi::event::k_max_codebooks> tail_input = {};
-  tail_input.fill(-1);
-  REQUIRE(needed_tokens == public_n_q);
-  for (int32_t index = 0; index < needed_tokens; ++index) {
-    tail_input[static_cast<size_t>(index)] =
-        encoded_codes[static_cast<size_t>(index)];
-  }
-  int32_t text_token = -1;
-  bool produced = false;
-  emel::error::type graph_err = emel::error::cast(moshi::error::none);
-
-  moshi::event::step seed_step{
-      std::span<const int32_t>{tail_input.data(),
-                               static_cast<size_t>(needed_tokens)},
-      std::span<int32_t>{generated_codes.data(),
-                         static_cast<size_t>(public_n_q)},
-      text_token};
-  seed_step.error_out = &generator_err;
-  seed_step.graph_error_out = &graph_err;
-  seed_step.produced_out = &produced;
-  REQUIRE(generator.process_event(seed_step));
-  REQUIRE(generator_err == k_no_error);
-  REQUIRE(graph_err == k_no_error);
-  CHECK_FALSE(produced);
-
-  int32_t generation_attempts = 0;
-  for (int32_t attempt = 0; attempt < 5; ++attempt) {
-    generated_codes.fill(-1);
-    text_token = -1;
-    produced = false;
-    graph_err = emel::error::cast(moshi::error::none);
-    moshi::event::step generate_step{
-        std::span<const int32_t>{tail_input.data(),
-                                 static_cast<size_t>(needed_tokens)},
-        std::span<int32_t>{generated_codes.data(),
-                           static_cast<size_t>(public_n_q)},
-        text_token};
-    generate_step.error_out = &generator_err;
-    generate_step.graph_error_out = &graph_err;
-    generate_step.produced_out = &produced;
-    CAPTURE(attempt);
-    CAPTURE(generator_err);
-    CAPTURE(graph_err);
-    REQUIRE(generator.process_event(generate_step));
-    REQUIRE(generator_err == k_no_error);
-    REQUIRE(graph_err == k_no_error);
-    ++generation_attempts;
-    if (produced && generation_attempts >= 2) {
-      break;
-    }
-  }
-
-  REQUIRE(produced);
-  REQUIRE(generation_attempts >= 2);
-  REQUIRE(temporal_probe.call_count >= 3);
-  REQUIRE(depformer_probe.call_count >= 3);
-  REQUIRE(text_token >= 0);
-  REQUIRE(text_token < lm_fixture.model->moshi_lm.text_card);
-  for (int32_t index = 0; index < public_n_q; ++index) {
-    const int32_t code = generated_codes[static_cast<size_t>(index)];
-    REQUIRE(code >= 0);
-    REQUIRE(code < codec_fixture.model->mimi.card);
-  }
-
-  std::vector<float> decoded(static_cast<size_t>(g_mimi_frame_samples), 0.0f);
-  mimi::event::decode_frame decode{
-      std::span<const int32_t>{generated_codes.data(),
-                               static_cast<size_t>(public_n_q)},
-      std::span<float>{decoded}};
-  decode.error_out = &codec_err;
-  REQUIRE(codec.process_event(decode));
-  REQUIRE(codec_err == emel::error::cast(mimi::error::none));
-
-  bool all_finite = true;
-  bool has_energy = false;
-  for (const float sample : decoded) {
-    all_finite = all_finite && std::isfinite(sample);
-    has_energy = has_energy || std::abs(sample) > 1.0e-8f;
-  }
-  CHECK(all_finite);
-  CHECK(has_energy);
-}
-
 TEST_CASE(
-    "speech_moshi_generator_uses_emel_executor_binding_without_fake_tokens") {
+    "speech_moshi_predictor_uses_emel_executor_binding_without_fake_tokens") {
   auto fixture = load_fixture_or_skip("moshi-tiny-lm.gguf");
   if (fixture.model == nullptr) {
     return;
@@ -2094,82 +1837,22 @@ TEST_CASE(
   init.error_out = &err;
   REQUIRE(generator.process_event(init));
 
-  std::array<int32_t, 4> input = {0, 1, 2, 3};
-  std::array<int32_t, 4> output = {};
+  std::array<int32_t, moshi::event::k_max_codebooks> input = {};
+  std::array<int32_t, moshi::event::k_max_codebooks> output = {};
   output.fill(-1);
   int32_t text_token = -1;
-  moshi::event::step step{std::span<const int32_t>{input},
-                          std::span<int32_t>{output}, text_token};
-  step.error_out = &err;
+  moshi::event::predict predict{
+      std::span<const int32_t>{
+          input.data(), static_cast<size_t>(fixture.model->moshi_lm.n_q + 1)},
+      std::span<int32_t>{output.data(),
+                         static_cast<size_t>(fixture.model->moshi_lm.dep_q)},
+      text_token};
+  predict.error_out = &err;
 
-  CHECK_FALSE(generator.process_event(step));
+  CHECK_FALSE(generator.process_event(predict));
   CHECK(err == emel::error::cast(moshi::error::graph_runtime));
   CHECK(kv.allocate_slots_count == 1);
   CHECK(kv.capture_view_count == 1);
   CHECK(text_token == -1);
   CHECK(output[0] == -1);
-}
-
-TEST_CASE("speech_moshi_generator_runs_injected_graph_through_delay_cache") {
-  auto fixture = load_fixture_or_skip("moshi-tiny-lm.gguf");
-  if (fixture.model == nullptr) {
-    return;
-  }
-
-  emel::memory::test::recording_kv_actor kv{};
-  recording_graph_executor graph{};
-  auto graph_binding =
-      moshi::action::bind_graph_executor(&graph, dispatch_recording_graph);
-  moshi::sm generator{emel::memory::hybrid::bind_kv_actor(kv), graph_binding};
-  emel::error::type err = k_no_error;
-  moshi::event::initialize init{*fixture.model};
-  init.error_out = &err;
-  REQUIRE(generator.process_event(init));
-
-  std::array<int32_t, 4> input = {0, 1, 2, 3};
-  std::array<int32_t, 4> output = {};
-  output.fill(-1);
-  const size_t public_n_q =
-      static_cast<size_t>(fixture.model->moshi_lm.inference_dep_q);
-  REQUIRE(public_n_q < output.size());
-  int32_t text_token = -1;
-  bool produced = true;
-  emel::error::type graph_err = emel::error::cast(moshi::error::graph_runtime);
-
-  moshi::event::step first{std::span<const int32_t>{input},
-                           std::span<int32_t>{output.data(), public_n_q},
-                           text_token};
-  first.error_out = &err;
-  first.produced_out = &produced;
-  first.graph_error_out = &graph_err;
-  REQUIRE(generator.process_event(first));
-  CHECK(err == k_no_error);
-  CHECK(graph_err == k_no_error);
-  CHECK_FALSE(produced);
-  CHECK(graph.call_count == 1);
-  CHECK(kv.allocate_slots_count == 1);
-  CHECK(kv.capture_view_count == 1);
-  CHECK(graph.first_sequence_length == 1);
-  CHECK(graph.first_input[0] == fixture.model->moshi_lm.text_card);
-  CHECK(graph.first_input[1] == fixture.model->moshi_lm.card);
-
-  produced = false;
-  graph_err = emel::error::cast(moshi::error::graph_runtime);
-  moshi::event::step second{std::span<const int32_t>{input},
-                            std::span<int32_t>{output.data(), public_n_q},
-                            text_token};
-  second.error_out = &err;
-  second.produced_out = &produced;
-  second.graph_error_out = &graph_err;
-  REQUIRE(generator.process_event(second));
-  CHECK(err == k_no_error);
-  CHECK(graph_err == k_no_error);
-  CHECK(produced);
-  CHECK(graph.call_count == 2);
-  CHECK(text_token == 101);
-  CHECK(output[0] == 1010);
-  CHECK(output[public_n_q] == -1);
-  CHECK(kv.allocate_slots_count == 2);
-  CHECK(kv.capture_view_count == 2);
-  CHECK(graph.second_sequence_length == 2);
 }

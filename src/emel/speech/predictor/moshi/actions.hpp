@@ -602,25 +602,6 @@ struct effect_store_voice_remaining_out {
   }
 };
 
-struct effect_begin_step {
-  void operator()(const event::step_run &runtime_ev,
-                  const context &ctx) const noexcept {
-    runtime_ev.ctx.err = detail_ns::to_error(error::none);
-    runtime_ev.ctx.graph_error = detail_ns::to_error(error::none);
-    runtime_ev.ctx.graph_accepted = false;
-    runtime_ev.ctx.provided_input = false;
-    runtime_ev.ctx.produced = false;
-    runtime_ev.ctx.text_token = 0;
-    runtime_ev.ctx.generated_dep_q = ctx.lmgen.generated_dep_q;
-    runtime_ev.ctx.delayed_dep_q = ctx.lmgen.delayed_dep_q;
-    runtime_ev.ctx.needed_tokens = ctx.lmgen.needed_tokens;
-    std::fill(runtime_ev.ctx.input_sequence.begin(),
-              runtime_ev.ctx.input_sequence.end(), k_token_ungenerated);
-    std::fill(runtime_ev.ctx.audio_tokens.begin(),
-              runtime_ev.ctx.audio_tokens.end(), k_token_ungenerated);
-  }
-};
-
 struct effect_begin_predict {
   void operator()(const event::predict_run &runtime_ev,
                   const context &) const noexcept {
@@ -688,185 +669,12 @@ template <error error_value> struct effect_reject_capture_tokenizer_state {
   }
 };
 
-struct effect_write_full_input {
-  void operator()(const event::step_run &runtime_ev,
-                  context &ctx) const noexcept {
-    for (int32_t index = 0; index < ctx.lmgen.codebook_count; ++index) {
-      const int32_t row = detail::cache_position(
-          ctx.lmgen, ctx.lmgen.offset + ctx.lmgen.delays[index]);
-      detail::cache_at(ctx.lmgen, row, index) =
-          runtime_ev.request.audio_tokens[static_cast<size_t>(index)];
-    }
-    runtime_ev.ctx.provided_input = true;
-  }
-};
-
-struct effect_write_tail_input {
-  void operator()(const event::step_run &runtime_ev,
-                  context &ctx) const noexcept {
-    const int32_t start = ctx.lmgen.delayed_dep_q + 1;
-    for (int32_t index = 0; index < ctx.lmgen.needed_tokens; ++index) {
-      const int32_t column = start + index;
-      const int32_t row = detail::cache_position(
-          ctx.lmgen, ctx.lmgen.offset + ctx.lmgen.delays[column]);
-      detail::cache_at(ctx.lmgen, row, column) =
-          runtime_ev.request.audio_tokens[static_cast<size_t>(index)];
-    }
-  }
-};
-
-struct effect_build_input_sequence {
-  void operator()(const event::step_run &runtime_ev,
-                  const context &ctx) const noexcept {
-    const int32_t row = detail::cache_position(ctx.lmgen, ctx.lmgen.offset);
-    for (int32_t index = 0; index < ctx.lmgen.codebook_count; ++index) {
-      const bool use_initial = ctx.lmgen.offset <= ctx.lmgen.delays[index];
-      const int32_t initial_lane = static_cast<int32_t>(use_initial);
-      const int32_t cache_lane = static_cast<int32_t>(!use_initial);
-      runtime_ev.ctx.input_sequence[static_cast<size_t>(index)] =
-          (initial_lane * ctx.lmgen.initial[index]) +
-          (cache_lane * detail::cache_at(ctx.lmgen, row, index));
-    }
-  }
-};
-
-struct effect_run_graph_runtime {
-  void operator()(const event::step_run &runtime_ev,
-                  context &ctx) const noexcept {
-    runtime_ev.ctx.graph_error = detail_ns::to_error(error::none);
-    event::graph_step graph_step{
-        *ctx.session.model,
-        runtime_ev.ctx.memory_snapshot,
-        std::span<const int32_t>{runtime_ev.ctx.input_sequence.data(),
-                                 static_cast<size_t>(ctx.lmgen.codebook_count)},
-        std::span<int32_t>{runtime_ev.ctx.audio_tokens.data(),
-                           static_cast<size_t>(ctx.lmgen.generated_dep_q)},
-        runtime_ev.ctx.text_token,
-    };
-    graph_step.sequence_id = ctx.session.sequence_id;
-    graph_step.error_out = &runtime_ev.ctx.graph_error;
-    runtime_ev.ctx.graph_accepted =
-        ctx.graph.dispatch_step(ctx.graph.executor, graph_step);
-  }
-};
-
 struct effect_store_graph_error_out {
   template <class runtime_event_type>
   void operator()(const runtime_event_type &runtime_ev,
                   context &) const noexcept {
     const auto &ev = detail::unwrap_runtime_event(runtime_ev);
     *ev.request.graph_error_out = ev.ctx.graph_error;
-  }
-};
-
-struct effect_replace_audio_with_zero {
-  void operator()(const event::step_run &runtime_ev,
-                  const context &) const noexcept {
-    for (int32_t index = 0; index < runtime_ev.ctx.generated_dep_q; ++index) {
-      runtime_ev.ctx.audio_tokens[static_cast<size_t>(index)] = k_token_zero;
-    }
-  }
-};
-
-struct effect_apply_delay_mask {
-  void operator()(const event::step_run &runtime_ev,
-                  const context &ctx) const noexcept {
-    for (int32_t index = 0; index < runtime_ev.ctx.generated_dep_q; ++index) {
-      const int32_t delay_index = index + 1;
-      const bool masked = (ctx.lmgen.delay_steps > 0) &&
-                          (ctx.lmgen.offset < (ctx.lmgen.delays[delay_index] +
-                                               ctx.lmgen.delay_steps));
-      const int32_t zero_lane = static_cast<int32_t>(masked);
-      const int32_t current_lane = static_cast<int32_t>(!masked);
-      runtime_ev.ctx.audio_tokens[static_cast<size_t>(index)] =
-          (zero_lane * k_token_zero) +
-          (current_lane *
-           runtime_ev.ctx.audio_tokens[static_cast<size_t>(index)]);
-    }
-  }
-};
-
-struct effect_advance_offset {
-  void operator()(const event::step_run &, context &ctx) const noexcept {
-    ++ctx.lmgen.offset;
-  }
-};
-
-struct effect_apply_delay_mask_and_advance {
-  void operator()(const event::step_run &runtime_ev,
-                  context &ctx) const noexcept {
-    effect_apply_delay_mask{}(runtime_ev, ctx);
-    effect_advance_offset{}(runtime_ev, ctx);
-  }
-};
-
-struct effect_write_generated {
-  void operator()(const event::step_run &runtime_ev,
-                  context &ctx) const noexcept {
-    const int32_t row = detail::cache_position(ctx.lmgen, ctx.lmgen.offset);
-    detail::cache_at(ctx.lmgen, row, 0) = runtime_ev.ctx.text_token;
-    for (int32_t index = 0; index < runtime_ev.ctx.generated_dep_q; ++index) {
-      detail::cache_at(ctx.lmgen, row, index + 1) =
-          runtime_ev.ctx.audio_tokens[static_cast<size_t>(index)];
-    }
-  }
-};
-
-struct effect_write_generated_missing {
-  void operator()(const event::step_run &runtime_ev,
-                  context &ctx) const noexcept {
-    const int32_t row = detail::cache_position(ctx.lmgen, ctx.lmgen.offset);
-    detail::cache_at(ctx.lmgen, row, 0) = runtime_ev.ctx.text_token;
-    for (int32_t index = 0; index < runtime_ev.ctx.generated_dep_q; ++index) {
-      const int32_t column = index + 1;
-      const int32_t current = detail::cache_at(ctx.lmgen, row, column);
-      const int32_t missing_lane =
-          static_cast<int32_t>(current == k_token_ungenerated);
-      const int32_t current_lane = static_cast<int32_t>(!missing_lane);
-      detail::cache_at(ctx.lmgen, row, column) =
-          (current_lane * current) +
-          (missing_lane *
-           runtime_ev.ctx.audio_tokens[static_cast<size_t>(index)]);
-    }
-  }
-};
-
-struct effect_consume_skip {
-  void operator()(const event::step_run &, context &ctx) const noexcept {
-    --ctx.lmgen.skip;
-  }
-};
-
-struct effect_collect_delayed_output {
-  void operator()(const event::step_run &runtime_ev,
-                  const context &ctx) const noexcept {
-    int32_t row = detail::cache_position(ctx.lmgen, ctx.lmgen.offset -
-                                                        ctx.lmgen.max_delay +
-                                                        ctx.lmgen.delays[0]);
-    runtime_ev.request.text_token_out = detail::cache_at(ctx.lmgen, row, 0);
-    for (int32_t index = 0; index < runtime_ev.ctx.delayed_dep_q; ++index) {
-      runtime_ev.request.audio_tokens_out[static_cast<size_t>(index)] =
-          runtime_ev.ctx.audio_tokens[static_cast<size_t>(index)];
-    }
-    for (int32_t index = 1; index <= runtime_ev.ctx.delayed_dep_q; ++index) {
-      row = detail::cache_position(ctx.lmgen, ctx.lmgen.offset -
-                                                  ctx.lmgen.max_delay +
-                                                  ctx.lmgen.delays[index]);
-      runtime_ev.request.audio_tokens_out[static_cast<size_t>(index - 1)] =
-          detail::cache_at(ctx.lmgen, row, index);
-    }
-  }
-};
-
-struct effect_publish_output {
-  void operator()(const event::step_run &runtime_ev, context &) const noexcept {
-    runtime_ev.ctx.produced = true;
-  }
-};
-
-struct effect_publish_no_output {
-  void operator()(const event::step_run &runtime_ev, context &) const noexcept {
-    runtime_ev.ctx.produced = false;
   }
 };
 
@@ -882,12 +690,6 @@ template <class runtime_event_type> struct effect_store_error_out {
   void operator()(const runtime_event_type &runtime_ev,
                   context &) const noexcept {
     *runtime_ev.request.error_out = runtime_ev.ctx.err;
-  }
-};
-
-struct effect_store_produced_out {
-  void operator()(const event::step_run &runtime_ev, context &) const noexcept {
-    *runtime_ev.request.produced_out = runtime_ev.ctx.produced;
   }
 };
 
@@ -988,24 +790,6 @@ struct effect_emit_prefill_personaplex_prompt_error {
   void operator()(const event::prefill_personaplex_prompt_run &runtime_ev,
                   context &) const noexcept {
     runtime_ev.request.on_error(events::prefill_personaplex_prompt_error{
-        .request = &runtime_ev.request,
-        .err = runtime_ev.ctx.err,
-    });
-  }
-};
-
-struct effect_emit_step_done {
-  void operator()(const event::step_run &runtime_ev, context &) const noexcept {
-    runtime_ev.request.on_done(events::step_done{
-        .request = &runtime_ev.request,
-        .produced = runtime_ev.ctx.produced,
-    });
-  }
-};
-
-struct effect_emit_step_error {
-  void operator()(const event::step_run &runtime_ev, context &) const noexcept {
-    runtime_ev.request.on_error(events::step_error{
         .request = &runtime_ev.request,
         .err = runtime_ev.ctx.err,
     });

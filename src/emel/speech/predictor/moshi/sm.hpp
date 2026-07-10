@@ -78,29 +78,6 @@ struct state_prefill_personaplex_prompt_error_out_decision {};
 struct state_prefill_personaplex_prompt_callback_decision {};
 struct state_prefill_personaplex_prompt_failed_error_out_decision {};
 struct state_prefill_personaplex_prompt_failed_callback_decision {};
-struct state_step_request_decision {};
-struct state_allocate_step_slot {};
-struct state_allocate_step_slot_decision {};
-struct state_capture_memory {};
-struct state_capture_memory_decision {};
-struct state_step_begin {};
-struct state_input_write_decision {};
-struct state_build_input_sequence {};
-struct state_graph_runtime_decision {};
-struct state_running_graph {};
-struct state_graph_error_out_decision {};
-struct state_graph_result_decision {};
-struct state_depformer_decision {};
-struct state_apply_delay_mask {};
-struct state_write_generated_decision {};
-struct state_skip_delay_decision {};
-struct state_collect_output {};
-struct state_output_decision {};
-struct state_step_produced_out_decision {};
-struct state_step_error_out_decision {};
-struct state_step_callback_decision {};
-struct state_step_failed_error_out_decision {};
-struct state_step_failed_callback_decision {};
 struct state_predict_request_decision {};
 struct state_predict_allocate_slot {};
 struct state_predict_allocate_slot_decision {};
@@ -113,8 +90,6 @@ struct state_predict_graph_error_out_decision {};
 struct state_predict_graph_result_decision {};
 struct state_predict_error_out_decision {};
 struct state_predict_failed_error_out_decision {};
-struct state_uninit_step_error_out_decision {};
-struct state_uninit_step_callback_decision {};
 struct state_uninit_voice_error_out_decision {};
 struct state_uninit_voice_callback_decision {};
 struct state_uninit_prefill_voice_error_out_decision {};
@@ -133,7 +108,6 @@ struct model {
     using prefill_prompt_run = event::prefill_personaplex_prompt_run;
     using prefill_voice_run = event::prefill_voice_run;
     using predict_run = event::predict_run;
-    using step_run = event::step_run;
 
     // clang-format off
     return sml::make_transition_table(
@@ -544,127 +518,6 @@ struct model {
           / action::effect_reject_capture_tokenizer_state<error::request_shape>{}
 
       //------------------------------------------------------------------------------//
-      // Legacy online step: validate audio-token frame, allocate the next
-      // Cortext-owned KV slot, capture memory, then enter the explicitly
-      // modeled Moshi graph execution route.
-      , sml::state<state_step_request_decision> <= sml::state<state_session_ready>
-          + sml::event<step_run>
-      , sml::state<state_allocate_step_slot> <= sml::state<state_step_request_decision>
-          + sml::completion<step_run> [ guard::guard_step_request_valid{} ]
-          / action::effect_allocate_step_slot{}
-      , sml::state<state_step_failed_error_out_decision> <= sml::state<state_step_request_decision>
-          + sml::completion<step_run> [ guard::guard_step_blocked_by_voice_prompt{} ]
-          / action::effect_mark_voice_prompt_pending{}
-      , sml::state<state_step_failed_error_out_decision> <= sml::state<state_step_request_decision>
-          + sml::completion<step_run> [ guard::guard_step_request_shape_invalid{} ]
-          / action::effect_mark_step_request_invalid{}
-      , sml::state<state_allocate_step_slot_decision> <= sml::state<state_allocate_step_slot>
-          + sml::completion<step_run>
-      , sml::state<state_capture_memory> <= sml::state<state_allocate_step_slot_decision>
-          + sml::completion<step_run> [ guard::guard_memory_accepted{} ]
-          / action::effect_capture_memory{}
-      , sml::state<state_step_failed_error_out_decision> <= sml::state<state_allocate_step_slot_decision>
-          + sml::completion<step_run> [ guard::guard_memory_rejected{} ]
-          / action::effect_mark_memory_error<step_run>{}
-      , sml::state<state_capture_memory_decision> <= sml::state<state_capture_memory>
-          + sml::completion<step_run>
-      , sml::state<state_step_begin> <= sml::state<state_capture_memory_decision>
-          + sml::completion<step_run> [ guard::guard_memory_accepted{} ]
-          / action::effect_begin_step{}
-      , sml::state<state_step_failed_error_out_decision> <= sml::state<state_capture_memory_decision>
-          + sml::completion<step_run> [ guard::guard_memory_rejected{} ]
-          / action::effect_mark_memory_error<step_run>{}
-      , sml::state<state_input_write_decision> <= sml::state<state_step_begin>
-          + sml::completion<step_run>
-      , sml::state<state_build_input_sequence> <= sml::state<state_input_write_decision>
-          + sml::completion<step_run> [ guard::guard_has_full_input{} ]
-          / action::effect_write_full_input{}
-      , sml::state<state_build_input_sequence> <= sml::state<state_input_write_decision>
-          + sml::completion<step_run> [ guard::guard_has_tail_input{} ]
-          / action::effect_write_tail_input{}
-      , sml::state<state_build_input_sequence> <= sml::state<state_input_write_decision>
-          + sml::completion<step_run> [ guard::guard_has_no_input_write{} ]
-      , sml::state<state_graph_runtime_decision> <= sml::state<state_build_input_sequence>
-          + sml::completion<step_run>
-          / action::effect_build_input_sequence{}
-      , sml::state<state_running_graph> <= sml::state<state_graph_runtime_decision>
-          + sml::completion<step_run> [ guard::guard_graph_runtime_available{} ]
-          / action::effect_run_graph_runtime{}
-      , sml::state<state_step_failed_error_out_decision> <= sml::state<state_graph_runtime_decision>
-          + sml::completion<step_run> [ guard::guard_graph_runtime_unavailable{} ]
-          / action::effect_mark_graph_runtime_unavailable<step_run>{}
-      , sml::state<state_graph_error_out_decision> <= sml::state<state_running_graph>
-          + sml::completion<step_run>
-      , sml::state<state_graph_result_decision> <= sml::state<state_graph_error_out_decision>
-          + sml::completion<step_run> [ guard::guard_has_graph_error_out{} ]
-          / action::effect_store_graph_error_out{}
-      , sml::state<state_graph_result_decision> <= sml::state<state_graph_error_out_decision>
-          + sml::completion<step_run> [ guard::guard_no_graph_error_out{} ]
-      , sml::state<state_depformer_decision> <= sml::state<state_graph_result_decision>
-          + sml::completion<step_run> [ guard::guard_graph_step_accepted{} ]
-      , sml::state<state_step_failed_error_out_decision> <= sml::state<state_graph_result_decision>
-          + sml::completion<step_run> [ guard::guard_graph_step_rejected{} ]
-          / action::effect_mark_graph_runtime_error<step_run>{}
-      , sml::state<state_apply_delay_mask> <= sml::state<state_depformer_decision>
-          + sml::completion<step_run> [ guard::guard_replace_depformer_tokens{} ]
-          / action::effect_replace_audio_with_zero{}
-      , sml::state<state_apply_delay_mask> <= sml::state<state_depformer_decision>
-          + sml::completion<step_run> [ guard::guard_use_graph_audio_tokens{} ]
-      , sml::state<state_write_generated_decision> <= sml::state<state_apply_delay_mask>
-          + sml::completion<step_run>
-          / action::effect_apply_delay_mask_and_advance{}
-      , sml::state<state_skip_delay_decision> <= sml::state<state_write_generated_decision>
-          + sml::completion<step_run> [ guard::guard_should_write_generated{} ]
-          / action::effect_write_generated{}
-      , sml::state<state_skip_delay_decision> <= sml::state<state_write_generated_decision>
-          + sml::completion<step_run> [ guard::guard_provided_input{} ]
-          / action::effect_write_generated_missing{}
-      , sml::state<state_step_produced_out_decision> <= sml::state<state_skip_delay_decision>
-          + sml::completion<step_run> [ guard::guard_skip_pending{} ]
-          / action::effect_consume_skip{}
-      , sml::state<state_step_produced_out_decision> <= sml::state<state_skip_delay_decision>
-          + sml::completion<step_run> [ guard::guard_before_delay{} ]
-          / action::effect_publish_no_output{}
-      , sml::state<state_collect_output> <= sml::state<state_skip_delay_decision>
-          + sml::completion<step_run> [ guard::guard_past_delay{} ]
-          / action::effect_collect_delayed_output{}
-      , sml::state<state_output_decision> <= sml::state<state_collect_output>
-          + sml::completion<step_run>
-      , sml::state<state_step_produced_out_decision> <= sml::state<state_output_decision>
-          + sml::completion<step_run> [ guard::guard_output_has_ungenerated{} ]
-          / action::effect_publish_no_output{}
-      , sml::state<state_step_produced_out_decision> <= sml::state<state_output_decision>
-          + sml::completion<step_run> [ guard::guard_output_complete{} ]
-          / action::effect_publish_output{}
-
-      , sml::state<state_step_error_out_decision> <= sml::state<state_step_produced_out_decision>
-          + sml::completion<step_run> [ guard::guard_has_produced_out{} ]
-          / action::effect_store_produced_out{}
-      , sml::state<state_step_error_out_decision> <= sml::state<state_step_produced_out_decision>
-          + sml::completion<step_run> [ guard::guard_no_produced_out{} ]
-
-      , sml::state<state_step_callback_decision> <= sml::state<state_step_error_out_decision>
-          + sml::completion<step_run> [ guard::guard_has_error_out<step_run>{} ]
-          / action::effect_store_error_out<step_run>{}
-      , sml::state<state_step_callback_decision> <= sml::state<state_step_error_out_decision>
-          + sml::completion<step_run> [ guard::guard_no_error_out<step_run>{} ]
-      , sml::state<state_step_failed_callback_decision> <= sml::state<state_step_failed_error_out_decision>
-          + sml::completion<step_run> [ guard::guard_has_error_out<step_run>{} ]
-          / action::effect_store_error_out<step_run>{}
-      , sml::state<state_step_failed_callback_decision> <= sml::state<state_step_failed_error_out_decision>
-          + sml::completion<step_run> [ guard::guard_no_error_out<step_run>{} ]
-      , sml::state<state_session_ready> <= sml::state<state_step_callback_decision>
-          + sml::completion<step_run> [ guard::guard_has_done_callback<step_run>{} ]
-          / action::effect_emit_step_done{}
-      , sml::state<state_session_ready> <= sml::state<state_step_callback_decision>
-          + sml::completion<step_run> [ guard::guard_no_done_callback<step_run>{} ]
-      , sml::state<state_session_ready> <= sml::state<state_step_failed_callback_decision>
-          + sml::completion<step_run> [ guard::guard_has_error_callback<step_run>{} ]
-          / action::effect_emit_step_error{}
-      , sml::state<state_session_ready> <= sml::state<state_step_failed_callback_decision>
-          + sml::completion<step_run> [ guard::guard_no_error_callback<step_run>{} ]
-
-      //------------------------------------------------------------------------------//
       // Requests before initialization answer with explicit errors.
       , sml::state<state_uninitialized> <= sml::state<state_uninitialized>
           + sml::event<predict_run> [ guard::guard_has_error_out<predict_run>{} ]
@@ -675,20 +528,6 @@ struct model {
       , sml::state<state_uninitialized> <= sml::state<state_uninitialized>
           + sml::event<event::capture_tokenizer_state>
           / action::effect_reject_capture_tokenizer_state<error::not_initialized>{}
-      , sml::state<state_uninit_step_error_out_decision> <= sml::state<state_uninitialized>
-          + sml::event<step_run>
-          / action::effect_mark_not_initialized<step_run>{}
-      , sml::state<state_uninit_step_callback_decision> <= sml::state<state_uninit_step_error_out_decision>
-          + sml::completion<step_run> [ guard::guard_has_error_out<step_run>{} ]
-          / action::effect_store_error_out<step_run>{}
-      , sml::state<state_uninit_step_callback_decision> <= sml::state<state_uninit_step_error_out_decision>
-          + sml::completion<step_run> [ guard::guard_no_error_out<step_run>{} ]
-      , sml::state<state_uninitialized> <= sml::state<state_uninit_step_callback_decision>
-          + sml::completion<step_run> [ guard::guard_has_error_callback<step_run>{} ]
-          / action::effect_emit_step_error{}
-      , sml::state<state_uninitialized> <= sml::state<state_uninit_step_callback_decision>
-          + sml::completion<step_run> [ guard::guard_no_error_callback<step_run>{} ]
-
       , sml::state<state_uninit_voice_error_out_decision> <= sml::state<state_uninitialized>
           + sml::event<load_voice_run>
           / action::effect_mark_not_initialized<load_voice_run>{}
@@ -816,13 +655,6 @@ struct sm : public emel::sm<model, action::context> {
   bool process_event(const event::prefill_personaplex_prompt &ev) {
     event::prefill_personaplex_prompt_ctx ctx{*memory_snapshot_};
     event::prefill_personaplex_prompt_run runtime_ev{ev, ctx};
-    const bool accepted = base_type::process_event(runtime_ev);
-    return accepted && ctx.err == action::detail_ns::to_error(error::none);
-  }
-
-  bool process_event(const event::step &ev) {
-    event::step_ctx ctx{*memory_snapshot_};
-    event::step_run runtime_ev{ev, ctx};
     const bool accepted = base_type::process_event(runtime_ev);
     return accepted && ctx.err == action::detail_ns::to_error(error::none);
   }

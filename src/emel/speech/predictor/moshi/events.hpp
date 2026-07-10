@@ -23,8 +23,6 @@ struct prefill_voice_done;
 struct prefill_voice_error;
 struct prefill_personaplex_prompt_done;
 struct prefill_personaplex_prompt_error;
-struct step_done;
-struct step_error;
 
 } // namespace emel::speech::predictor::moshi::events
 
@@ -87,23 +85,6 @@ struct prefill_personaplex_prompt {
       on_done = {};
   emel::callback<void(const events::prefill_personaplex_prompt_error &)>
       on_error = {};
-};
-
-struct step {
-  step(std::span<const int32_t> audio_tokens_ref,
-       std::span<int32_t> audio_tokens_out_ref,
-       int32_t &text_token_out_ref) noexcept
-      : audio_tokens(audio_tokens_ref), audio_tokens_out(audio_tokens_out_ref),
-        text_token_out(text_token_out_ref) {}
-
-  std::span<const int32_t> audio_tokens = {};
-  std::span<int32_t> audio_tokens_out = {};
-  int32_t &text_token_out;
-  emel::error::type *error_out = nullptr;
-  emel::error::type *graph_error_out = nullptr;
-  bool *produced_out = nullptr;
-  emel::callback<void(const events::step_done &)> on_done = {};
-  emel::callback<void(const events::step_error &)> on_error = {};
 };
 
 struct predict {
@@ -212,27 +193,6 @@ struct prefill_personaplex_prompt_ctx {
   emel::memory::view::snapshot &memory_snapshot;
 };
 
-struct step_ctx {
-  explicit step_ctx(emel::memory::view::snapshot &memory_snapshot_ref) noexcept
-      : memory_snapshot(memory_snapshot_ref) {}
-
-  emel::error::type err = emel::error::cast(error::none);
-  bool memory_accepted = false;
-  int32_t memory_error = static_cast<int32_t>(emel::error::cast(error::none));
-  int32_t memory_block_count = 0;
-  bool graph_accepted = false;
-  emel::error::type graph_error = emel::error::cast(error::none);
-  bool provided_input = false;
-  bool produced = false;
-  int32_t text_token = 0;
-  int32_t generated_dep_q = 0;
-  int32_t delayed_dep_q = 0;
-  int32_t needed_tokens = 0;
-  std::array<int32_t, k_max_codebooks> input_sequence = {};
-  std::array<int32_t, k_max_codebooks> audio_tokens = {};
-  emel::memory::view::snapshot &memory_snapshot;
-};
-
 struct predict_ctx {
   explicit predict_ctx(
       emel::memory::view::snapshot &memory_snapshot_ref) noexcept
@@ -270,11 +230,6 @@ struct prefill_voice_run {
 struct prefill_personaplex_prompt_run {
   const prefill_personaplex_prompt &request;
   prefill_personaplex_prompt_ctx &ctx;
-};
-
-struct step_run {
-  const step &request;
-  step_ctx &ctx;
 };
 
 struct predict_run {
@@ -340,16 +295,6 @@ struct prefill_personaplex_prompt_done {
 
 struct prefill_personaplex_prompt_error {
   const event::prefill_personaplex_prompt *request = nullptr;
-  emel::error::type err = emel::error::cast(error::none);
-};
-
-struct step_done {
-  const event::step *request = nullptr;
-  bool produced = false;
-};
-
-struct step_error {
-  const event::step *request = nullptr;
   emel::error::type err = emel::error::cast(error::none);
 };
 
