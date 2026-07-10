@@ -4661,6 +4661,7 @@ struct rope_op_params {
 
 inline constexpr int32_t rope_mode_norm = 0;
 inline constexpr int32_t rope_mode_neox = 2;
+inline constexpr int32_t rope_mode_timestep = 4;
 
 template <class request_type>
 inline bool read_rope_params(const request_type &request,
@@ -4678,13 +4679,14 @@ inline bool read_rope_params(const request_type &request,
 template <class request_type>
 inline bool can_run_rope(const request_type &request) noexcept {
   rope_op_params params = {};
+  const bool params_ok = read_rope_params(request, params);
   const bool same_shape = request.src0.ne[0] == request.dst.ne[0] &&
                           request.src0.ne[1] == request.dst.ne[1] &&
                           request.src0.ne[2] == request.dst.ne[2] &&
                           request.src0.ne[3] == request.dst.ne[3];
-  return read_rope_params(request, params) && same_shape &&
-         request.src0.data != nullptr && request.src1.data != nullptr &&
-         request.src0.ne[0] > 0 && dtype_code(request.src0.type) == dtype_f32 &&
+  return params_ok && same_shape && request.src0.data != nullptr &&
+         request.src1.data != nullptr && request.src0.ne[0] > 0 &&
+         dtype_code(request.src0.type) == dtype_f32 &&
          dtype_code(request.dst.type) == dtype_f32 &&
          dtype_code(request.src1.type) == dtype_i32 &&
          request.src2.data == nullptr &&
@@ -4694,7 +4696,6 @@ inline bool can_run_rope(const request_type &request) noexcept {
          request.src1.ne[0] == request.src0.ne[2] && params.n_dims > 0 &&
          (params.n_dims % 2) == 0 &&
          static_cast<uint64_t>(params.n_dims) <= request.src0.ne[0] &&
-         (params.mode == rope_mode_norm || params.mode == rope_mode_neox) &&
          params.ext_factor == 0.0f && std::isfinite(params.freq_base) &&
          params.freq_base > 0.0f && std::isfinite(params.freq_scale) &&
          params.freq_scale > 0.0f && std::isfinite(params.attn_factor);
@@ -4757,6 +4758,61 @@ inline bool run_rope_as(const request_type &request) noexcept {
     }
   }
   return true;
+}
+
+// Moshi's timestep embedding rotates adjacent projected pairs and writes the
+// real and imaginary results into split halves. The reference graph computes
+// each multiplication as its own f32 node, so volatile product temporaries are
+// intentional round barriers that prevent contraction into FMA instructions.
+template <class request_type>
+inline void compute_timestep_rope(const request_type &request) noexcept {
+  float freq_base = 0.0f;
+  float freq_scale = 0.0f;
+  float attn_factor = 0.0f;
+  std::memcpy(&freq_base,
+              request.op_params.data() + 5u * sizeof(freq_base),
+              sizeof(freq_base));
+  std::memcpy(&freq_scale,
+              request.op_params.data() + 6u * sizeof(freq_scale),
+              sizeof(freq_scale));
+  std::memcpy(&attn_factor,
+              request.op_params.data() + 8u * sizeof(attn_factor),
+              sizeof(attn_factor));
+
+  const uint64_t cols = request.src0.ne[0];
+  const uint64_t half_dims = cols / 2u;
+  const float neg_log_period = -std::log(freq_base);
+  const auto *src_base = static_cast<const float *>(request.src0.data);
+  const auto *positions = static_cast<const int32_t *>(request.src1.data);
+  auto *dst_base = static_cast<float *>(request.dst.data);
+
+  for (uint64_t i3 = 0; i3 < request.src0.ne[3]; ++i3) {
+    for (uint64_t i2 = 0; i2 < request.src0.ne[2]; ++i2) {
+      const float position = static_cast<float>(positions[i2]);
+      for (uint64_t i1 = 0; i1 < request.src0.ne[1]; ++i1) {
+        const uint64_t row =
+            (i3 * request.src0.ne[2] + i2) * request.src0.ne[1] + i1;
+        const float *src_row = src_base + row * cols;
+        float *dst_row = dst_base + row * cols;
+        for (uint64_t pair = 0; pair < half_dims; ++pair) {
+          const float real = src_row[2u * pair];
+          const float imaginary = src_row[2u * pair + 1u];
+          const float frequency =
+              std::exp(neg_log_period * static_cast<float>(pair) /
+                       static_cast<float>(half_dims));
+          const float argument = position * frequency * freq_scale;
+          const float cosine = std::cos(argument) * attn_factor;
+          const float sine = std::sin(argument) * attn_factor;
+          volatile float real_cosine = real * cosine;
+          volatile float imaginary_sine = imaginary * sine;
+          volatile float real_sine = real * sine;
+          volatile float imaginary_cosine = imaginary * cosine;
+          dst_row[pair] = real_cosine - imaginary_sine;
+          dst_row[half_dims + pair] = real_sine + imaginary_cosine;
+        }
+      }
+    }
+  }
 }
 
 // ggml im2col op_params layout: i32 slots {s0, s1, p0, p1, d0, d1, is_2D}.
@@ -5045,6 +5101,15 @@ struct exec_scalar_rope_op {
   void operator()(const dispatch_event_type &ev,
                   context_type &ctx) const noexcept {
     (void)run_rope_as<neox_mode>(ev.request);
+    mark_done_type{}(ev, ctx);
+  }
+};
+
+template <class dispatch_event_type, class context_type, class mark_done_type>
+struct exec_scalar_timestep_rope_op {
+  void operator()(const dispatch_event_type &ev,
+                  context_type &ctx) const noexcept {
+    compute_timestep_rope(ev.request);
     mark_done_type{}(ev, ctx);
   }
 };

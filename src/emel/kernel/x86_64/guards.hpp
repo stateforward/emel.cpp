@@ -273,15 +273,39 @@ template <uint8_t src_dtype_code> struct get_rows_src_dtype_is {
   }
 };
 
-template <bool neox_mode> struct rope_mode_is {
+template <int32_t mode_value> struct rope_mode_is {
   bool operator()(const ::emel::kernel::x86_64::event::dispatch_op_rope &ev,
                   const action::context &) const noexcept {
     int32_t mode = 0;
     return ::emel::kernel::detail::read_op_param_i32(
                ev.request.op_params.data(), ev.request.op_params_size, 2u,
                mode) &&
-           mode == (neox_mode ? ::emel::kernel::detail::rope_mode_neox
-                              : ::emel::kernel::detail::rope_mode_norm);
+           mode == mode_value;
+  }
+};
+
+struct rope_timestep_layout_is {
+  bool operator()(const ::emel::kernel::x86_64::event::dispatch_op_rope &ev,
+                  const action::context &) const noexcept {
+    int32_t n_dims = 0;
+    return ::emel::kernel::detail::read_op_param_i32(
+               ev.request.op_params.data(), ev.request.op_params_size, 1u,
+               n_dims) &&
+           n_dims > 0 &&
+           static_cast<uint64_t>(n_dims) == ev.request.src0.ne[0] &&
+           ev.request.src0.data != ev.request.dst.data &&
+           ::emel::kernel::detail::is_dense_contiguous(ev.request.src0) &&
+           ::emel::kernel::detail::is_dense_contiguous(ev.request.src1) &&
+           ::emel::kernel::detail::is_dense_contiguous(ev.request.dst);
+  }
+};
+
+struct rope_timestep_is {
+  bool operator()(const ::emel::kernel::x86_64::event::dispatch_op_rope &ev,
+                  const action::context &ctx) const noexcept {
+    return rope_mode_is<::emel::kernel::detail::rope_mode_timestep>{}(ev,
+                                                                      ctx) &&
+           rope_timestep_layout_is{}(ev, ctx);
   }
 };
 
@@ -338,11 +362,23 @@ using valid_op_mul_mat_f16 = ::emel::kernel::detail::valid_variant_guard<
 using valid_op_rope_norm = ::emel::kernel::detail::valid_variant_guard<
     ::emel::kernel::x86_64::event::dispatch_op_rope, action::context,
     valid_op<::emel::kernel::x86_64::event::dispatch_op_rope>,
-    rope_mode_is<false>>;
+    rope_mode_is<::emel::kernel::detail::rope_mode_norm>>;
 using valid_op_rope_neox = ::emel::kernel::detail::valid_variant_guard<
     ::emel::kernel::x86_64::event::dispatch_op_rope, action::context,
     valid_op<::emel::kernel::x86_64::event::dispatch_op_rope>,
-    rope_mode_is<true>>;
+    rope_mode_is<::emel::kernel::detail::rope_mode_neox>>;
+using valid_op_rope_timestep = ::emel::kernel::detail::valid_variant_guard<
+    ::emel::kernel::x86_64::event::dispatch_op_rope, action::context,
+    valid_op<::emel::kernel::x86_64::event::dispatch_op_rope>,
+    rope_timestep_is>;
+
+template <> struct invalid_op<::emel::kernel::x86_64::event::dispatch_op_rope> {
+  bool operator()(const ::emel::kernel::x86_64::event::dispatch_op_rope &ev,
+                  const action::context &ctx) const noexcept {
+    return !valid_op_rope_norm{}(ev, ctx) && !valid_op_rope_neox{}(ev, ctx) &&
+           !valid_op_rope_timestep{}(ev, ctx);
+  }
+};
 
 using valid_op_im2col_f32 = ::emel::kernel::detail::valid_variant_guard<
     ::emel::kernel::x86_64::event::dispatch_op_im2col, action::context,

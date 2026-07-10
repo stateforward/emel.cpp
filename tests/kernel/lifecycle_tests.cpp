@@ -44,6 +44,8 @@ using emel::kernel::test::make_quantized_src;
 using emel::kernel::test::make_q8_k_vector_src;
 using emel::kernel::test::make_smoke_op_event;
 using emel::kernel::test::make_src;
+using emel::kernel::test::set_op_param_f32;
+using emel::kernel::test::set_op_param_i32;
 using emel::kernel::test::to_fp16_storage;
 using emel::kernel::test::within_flash_online_f16_tolerance;
 
@@ -81,6 +83,40 @@ void check_backend_op_paths(machine_type & machine,
 }
 
 }  // namespace
+
+TEST_CASE("kernel timestep rope preserves ggml f32 round points") {
+  const auto check_machine = [](auto & machine) {
+    std::array<float, 128> src = {};
+    std::array<float, 128> dst = {};
+    src[88] = std::bit_cast<float>(UINT32_C(0x3f91261c));
+    src[89] = std::bit_cast<float>(UINT32_C(0x3e9d87b5));
+    int32_t position = 9;
+
+    emel::kernel::event::op_rope rope_ev{
+      .src0 = make_src(src.data(), dtype::f32, 128, 1, 1),
+      .src1 = make_src(&position, dtype::i32, 1),
+      .dst = make_dst(dst.data(), dtype::f32, 128, 1, 1),
+    };
+    set_op_param_i32(rope_ev, 1u, 128);
+    set_op_param_i32(rope_ev, 2u,
+                     emel::kernel::detail::rope_mode_timestep);
+    set_op_param_f32(rope_ev, 5u, 10000.0f);
+    set_op_param_f32(rope_ev, 6u, 1.0f);
+    set_op_param_f32(rope_ev, 7u, 0.0f);
+    set_op_param_f32(rope_ev, 8u, 1.0f);
+
+    REQUIRE(machine.process_event(rope_ev));
+    CHECK(std::bit_cast<uint32_t>(dst[44]) == UINT32_C(0x3f908001));
+    CHECK(std::bit_cast<uint32_t>(dst[108]) == UINT32_C(0x3ea6cd3b));
+  };
+
+  x86_64_sm x86_machine{
+    emel::kernel::x86_64::action::context{false, {}, 0}};
+  aarch64_sm arm_machine{
+    emel::kernel::aarch64::action::context{false, {}, 0}};
+  check_machine(x86_machine);
+  check_machine(arm_machine);
+}
 
 TEST_CASE("kernel_mul_mat_accepts_quantized_qk_weights") {
   using emel::kernel::detail::quant::QK_K;

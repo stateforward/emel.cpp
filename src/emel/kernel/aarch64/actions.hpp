@@ -9227,6 +9227,10 @@ using exec_scalar_op_rope_norm_t = ::emel::kernel::detail::exec_scalar_rope_op<
 using exec_scalar_op_rope_neox_t = ::emel::kernel::detail::exec_scalar_rope_op<
     ::emel::kernel::aarch64::event::dispatch_op_rope, context,
     detail::mark_done_op, true>;
+using exec_scalar_op_rope_timestep_t =
+    ::emel::kernel::detail::exec_scalar_timestep_rope_op<
+        ::emel::kernel::aarch64::event::dispatch_op_rope, context,
+        detail::mark_done_op>;
 using exec_scalar_op_im2col_f32_t =
     ::emel::kernel::detail::exec_scalar_im2col_op<
         ::emel::kernel::aarch64::event::dispatch_op_im2col, context,
@@ -9373,6 +9377,7 @@ inline constexpr exec_scalar_op_get_rows_q8_0_t exec_scalar_op_get_rows_q8_0{};
 inline constexpr exec_scalar_op_get_rows_q4_k_t exec_scalar_op_get_rows_q4_k{};
 inline constexpr exec_scalar_op_rope_norm_t exec_scalar_op_rope_norm{};
 inline constexpr exec_scalar_op_rope_neox_t exec_scalar_op_rope_neox{};
+inline constexpr exec_scalar_op_rope_timestep_t exec_scalar_op_rope_timestep{};
 inline constexpr exec_scalar_op_im2col_f32_t exec_scalar_op_im2col_f32{};
 inline constexpr exec_scalar_op_im2col_f16_t exec_scalar_op_im2col_f16{};
 inline constexpr exec_scalar_op_conv_transpose_1d_f32_t

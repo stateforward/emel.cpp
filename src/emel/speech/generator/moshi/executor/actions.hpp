@@ -417,50 +417,96 @@ struct effect_run_temporal_layer_projection {
   }
 };
 
-struct effect_apply_temporal_layer_rope {
+template <uint64_t projection_part> struct effect_run_temporal_layer_rope {
   void operator()(const event::step_run &runtime_ev,
-                  const context &ctx) const noexcept {
+                  context &ctx) const noexcept {
     const auto &lm = runtime_ev.request.model.moshi_lm;
+    const auto &snapshot = runtime_ev.request.memory_snapshot;
     const int32_t hidden_dim = ctx.session.hidden_dim;
     const int32_t head_dim = hidden_dim / lm.num_heads;
-    const int32_t half = head_dim / 2;
     runtime_ev.ctx.temporal_layer_rope_ok = false;
-    runtime_ev.ctx.temporal_logical_position = detail::current_logical_position(
-        runtime_ev.request.memory_snapshot, runtime_ev.request.sequence_id);
-    runtime_ev.ctx.temporal_physical_position = detail::physical_position(
-        runtime_ev.request.memory_snapshot, runtime_ev.request.sequence_id,
-        runtime_ev.ctx.temporal_logical_position);
+    const size_t sequence = static_cast<size_t>(runtime_ev.request.sequence_id);
+    runtime_ev.ctx.temporal_logical_position =
+        snapshot.sequence_length_values[sequence] - 1;
+    const size_t logical_block = static_cast<size_t>(
+        runtime_ev.ctx.temporal_logical_position / snapshot.block_tokens);
+    const int32_t block_id = static_cast<int32_t>(
+        snapshot.sequence_kv_blocks[sequence][logical_block]);
+    runtime_ev.ctx.temporal_physical_position =
+        block_id * snapshot.block_tokens +
+        (runtime_ev.ctx.temporal_logical_position % snapshot.block_tokens);
 
-    const float neg_log_period = -std::log(static_cast<float>(lm.max_period));
-    const float position =
-        static_cast<float>(runtime_ev.ctx.temporal_logical_position);
-    for (int32_t part = 0; part < 2; ++part) {
-      float *data = runtime_ev.ctx.qkv.data() +
-                    static_cast<size_t>(part) * static_cast<size_t>(hidden_dim);
-      for (int32_t head = 0; head < lm.num_heads; ++head) {
-        float *head_data =
-            data + static_cast<size_t>(head) * static_cast<size_t>(head_dim);
-        for (int32_t index = 0; index < half; ++index) {
-          const float freq =
-              std::exp(neg_log_period * static_cast<float>(index) /
-                       static_cast<float>(half));
-          const float arg = position * freq;
-          const float rotr = std::cos(arg);
-          const float roti = std::sin(arg);
-          const float real = head_data[static_cast<size_t>(2 * index)];
-          const float imag = head_data[static_cast<size_t>(2 * index + 1)];
-          runtime_ev.ctx.rope[static_cast<size_t>(index)] =
-              real * rotr - imag * roti;
-          runtime_ev.ctx.rope[static_cast<size_t>(half + index)] =
-              real * roti + imag * rotr;
-        }
-        std::memcpy(head_data, runtime_ev.ctx.rope.data(),
-                    static_cast<size_t>(head_dim) * sizeof(float));
-      }
-    }
-    runtime_ev.ctx.temporal_layer_rope_ok = true;
+    const uint64_t head_dim_u64 = static_cast<uint64_t>(head_dim);
+    const uint64_t heads_u64 = static_cast<uint64_t>(lm.num_heads);
+    const uint64_t hidden_dim_u64 = static_cast<uint64_t>(hidden_dim);
+    const uint64_t element_bytes = sizeof(float);
+    const float *source =
+        runtime_ev.ctx.qkv.data() + projection_part * hidden_dim_u64;
+    emel::kernel::event::op_rope rope_ev{
+        .src0 =
+            {
+                .data = source,
+                .type = emel::kernel::event::dtype::f32,
+                .ne = {head_dim_u64, heads_u64, 1u, 1u},
+                .nb = {element_bytes, element_bytes * head_dim_u64,
+                       element_bytes * hidden_dim_u64,
+                       element_bytes * hidden_dim_u64},
+            },
+        .src1 =
+            {
+                .data = &runtime_ev.ctx.temporal_logical_position,
+                .type = emel::kernel::event::dtype::i32,
+                .ne = {1u, 1u, 1u, 1u},
+                .nb = {sizeof(int32_t), sizeof(int32_t), sizeof(int32_t),
+                       sizeof(int32_t)},
+            },
+        .dst =
+            {
+                .data = runtime_ev.ctx.rope.data(),
+                .type = emel::kernel::event::dtype::f32,
+                .ne = {head_dim_u64, heads_u64, 1u, 1u},
+                .nb = {element_bytes, element_bytes * head_dim_u64,
+                       element_bytes * hidden_dim_u64,
+                       element_bytes * hidden_dim_u64},
+            },
+    };
+    const int32_t rope_mode = emel::kernel::detail::rope_mode_timestep;
+    const float freq_base = static_cast<float>(lm.max_period);
+    const float freq_scale = 1.0f;
+    const float ext_factor = 0.0f;
+    const float attn_factor = 1.0f;
+    std::memcpy(rope_ev.op_params.data() + 1u * sizeof(int32_t), &head_dim,
+                sizeof(head_dim));
+    std::memcpy(rope_ev.op_params.data() + 2u * sizeof(int32_t), &rope_mode,
+                sizeof(rope_mode));
+    std::memcpy(rope_ev.op_params.data() + 5u * sizeof(float), &freq_base,
+                sizeof(freq_base));
+    std::memcpy(rope_ev.op_params.data() + 6u * sizeof(float), &freq_scale,
+                sizeof(freq_scale));
+    std::memcpy(rope_ev.op_params.data() + 7u * sizeof(float), &ext_factor,
+                sizeof(ext_factor));
+    std::memcpy(rope_ev.op_params.data() + 8u * sizeof(float), &attn_factor,
+                sizeof(attn_factor));
+    rope_ev.op_params_size = 9u * sizeof(float);
+    runtime_ev.ctx.temporal_layer_rope_ok = ctx.kernel.process_event(rope_ev);
   }
 };
+
+using effect_run_temporal_layer_query_rope = effect_run_temporal_layer_rope<0u>;
+using effect_run_temporal_layer_key_rope = effect_run_temporal_layer_rope<1u>;
+
+template <uint64_t projection_part> struct effect_copy_temporal_layer_rope {
+  void operator()(const event::step_run &runtime_ev,
+                  const context &ctx) const noexcept {
+    const size_t hidden_dim = static_cast<size_t>(ctx.session.hidden_dim);
+    std::memcpy(runtime_ev.ctx.qkv.data() + projection_part * hidden_dim,
+                runtime_ev.ctx.rope.data(), hidden_dim * sizeof(float));
+  }
+};
+
+using effect_copy_temporal_layer_query_rope =
+    effect_copy_temporal_layer_rope<0u>;
+using effect_copy_temporal_layer_key_rope = effect_copy_temporal_layer_rope<1u>;
 
 struct effect_write_temporal_layer_kv_cache {
   void operator()(const event::step_run &runtime_ev,

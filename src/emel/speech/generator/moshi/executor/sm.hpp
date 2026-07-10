@@ -52,6 +52,8 @@ struct state_temporal_layer_projection_run {};
 struct state_temporal_layer_projection_result_decision {};
 struct state_temporal_layer_rope {};
 struct state_temporal_layer_rope_result_decision {};
+struct state_temporal_layer_key_rope {};
+struct state_temporal_layer_key_rope_result_decision {};
 struct state_temporal_layer_cache_write {};
 struct state_temporal_layer_cache_write_result_decision {};
 struct state_temporal_layer_attention {};
@@ -361,19 +363,29 @@ struct model {
           / action::effect_mark_graph_execution_unsupported{}
       , sml::state<state_temporal_layer_rope> <= sml::state<state_temporal_layer_projection_result_decision>
           + sml::completion<step_run> [ guard::guard_temporal_layer_rope_supported{} ]
-          / action::effect_apply_temporal_layer_rope{}
+          / action::effect_run_temporal_layer_query_rope{}
       , sml::state<state_step_error_out_decision> <= sml::state<state_temporal_layer_projection_result_decision>
           + sml::completion<step_run> [ guard::guard_temporal_layer_rope_unsupported{} ]
           / action::effect_mark_graph_execution_unsupported{}
       , sml::state<state_temporal_layer_rope_result_decision> <= sml::state<state_temporal_layer_rope>
           + sml::completion<step_run> [ guard::guard_temporal_layer_rope_succeeded{} ]
+          / action::effect_copy_temporal_layer_query_rope{}
       , sml::state<state_step_error_out_decision> <= sml::state<state_temporal_layer_rope>
           + sml::completion<step_run> [ guard::guard_temporal_layer_rope_failed{} ]
           / action::effect_mark_graph_execution_unsupported{}
-      , sml::state<state_temporal_layer_cache_write> <= sml::state<state_temporal_layer_rope_result_decision>
+      , sml::state<state_temporal_layer_key_rope> <= sml::state<state_temporal_layer_rope_result_decision>
+          + sml::completion<step_run>
+          / action::effect_run_temporal_layer_key_rope{}
+      , sml::state<state_temporal_layer_key_rope_result_decision> <= sml::state<state_temporal_layer_key_rope>
+          + sml::completion<step_run> [ guard::guard_temporal_layer_rope_succeeded{} ]
+          / action::effect_copy_temporal_layer_key_rope{}
+      , sml::state<state_step_error_out_decision> <= sml::state<state_temporal_layer_key_rope>
+          + sml::completion<step_run> [ guard::guard_temporal_layer_rope_failed{} ]
+          / action::effect_mark_graph_execution_unsupported{}
+      , sml::state<state_temporal_layer_cache_write> <= sml::state<state_temporal_layer_key_rope_result_decision>
           + sml::completion<step_run> [ guard::guard_temporal_layer_cache_write_supported{} ]
           / action::effect_write_temporal_layer_kv_cache{}
-      , sml::state<state_step_error_out_decision> <= sml::state<state_temporal_layer_rope_result_decision>
+      , sml::state<state_step_error_out_decision> <= sml::state<state_temporal_layer_key_rope_result_decision>
           + sml::completion<step_run> [ guard::guard_temporal_layer_cache_write_unsupported{} ]
           / action::effect_mark_graph_execution_unsupported{}
       , sml::state<state_temporal_layer_cache_write_result_decision> <= sml::state<state_temporal_layer_cache_write>

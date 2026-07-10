@@ -649,6 +649,11 @@ struct model {
 
       , sml::state<ready> <= sml::state<ready> +
                sml::event<::emel::kernel::x86_64::event::dispatch_op_rope>
+                 [ guard::valid_op_rope_timestep{} ]
+                 / action::exec_scalar_op_rope_timestep
+
+      , sml::state<ready> <= sml::state<ready> +
+               sml::event<::emel::kernel::x86_64::event::dispatch_op_rope>
                  [ guard::invalid_op_rope{} ]
                  / action::reject_invalid_op_rope
 

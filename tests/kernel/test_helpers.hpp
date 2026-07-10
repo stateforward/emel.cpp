@@ -26,6 +26,24 @@ inline bool within_flash_online_f16_tolerance(const float actual,
   return std::fabs(actual - expected) <= k_flash_online_f16_abs_tolerance;
 }
 
+template <class event_type>
+inline void set_op_param_i32(event_type &ev, const uint32_t slot,
+                             const int32_t value) {
+  std::memcpy(ev.op_params.data() + slot * sizeof(int32_t), &value,
+              sizeof(value));
+  ev.op_params_size =
+      std::max<uint32_t>(ev.op_params_size, (slot + 1u) * sizeof(int32_t));
+}
+
+template <class event_type>
+inline void set_op_param_f32(event_type &ev, const uint32_t slot,
+                             const float value) {
+  std::memcpy(ev.op_params.data() + slot * sizeof(float), &value,
+              sizeof(value));
+  ev.op_params_size =
+      std::max<uint32_t>(ev.op_params_size, (slot + 1u) * sizeof(float));
+}
+
 template <class tensor_type>
 inline void fill_default_nb(tensor_type & tensor) {
   const auto elem_size =
