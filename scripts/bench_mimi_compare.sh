@@ -18,6 +18,7 @@ BUILD_DIR="${EMEL_MIMI_COMPARE_BUILD_DIR:-$ROOT_DIR/build/mimi_compare_tools}"
 OUTPUT_DIR="${EMEL_MIMI_COMPARE_OUTPUT_DIR:-$ROOT_DIR/build/mimi_compare}"
 ARTIFACT_DIR="${EMEL_MOSHI_REFERENCE_ARTIFACT_DIR:-$ROOT_DIR/build/moshi_reference}"
 MLX_ARTIFACT_DIR="${EMEL_PERSONAPLEX_MLX_ARTIFACT_DIR:-$ROOT_DIR/build/personaplex_mlx_reference}"
+MODEL_CONFIG="$ARTIFACT_DIR/personaplex-config.json"
 BUILD_ONLY=false
 RUN_ONLY=false
 REFERENCE_BACKEND="moshi_cpp"
@@ -70,6 +71,20 @@ if [[ -z "$PYTHON_BIN" ]]; then
   echo "error: required tool missing: python3 (or python3.12/python3.13)" >&2
   exit 1
 fi
+if [[ ! -f "$MODEL_CONFIG" ]]; then
+  echo "error: missing pinned PersonaPlex model config: $MODEL_CONFIG" >&2
+  exit 1
+fi
+MIMI_N_Q="$($PYTHON_BIN - "$MODEL_CONFIG" <<'PY'
+import json
+import sys
+
+value = json.load(open(sys.argv[1], encoding="utf-8")).get("n_q")
+if not isinstance(value, int) or value <= 0:
+    raise SystemExit("Mimi n_q must be a positive integer")
+print(value)
+PY
+)"
 
 if ! $RUN_ONLY; then
   # full mode: fetch + sha256 verify + run the emel converter (no build)
@@ -158,6 +173,7 @@ PY
     --emel-model "$EMEL_MODEL" \
     --reference-model "$REFERENCE_MODEL" \
     --audio "$AUDIO" \
+    --n-q "$MIMI_N_Q" \
     --compare-decode \
     --prefix-streams "${EMEL_MIMI_MLX_PREFIX_STREAMS:-4}" \
     --min-prefix-match "${EMEL_MIMI_MLX_MIN_PREFIX_MATCH:-0.90}" \
@@ -174,6 +190,7 @@ else
     --emel-model "$EMEL_MODEL" \
     --reference-model "$REFERENCE_MODEL" \
     --audio "$AUDIO" \
+    --n-q "$MIMI_N_Q" \
     --compare-decode \
     --min-decode-psnr-db "${EMEL_MIMI_MIN_DECODE_PSNR_DB:-30}" \
     --require-token-exact \

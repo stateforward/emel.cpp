@@ -372,6 +372,41 @@ scripts/bench_moshi_lm_compare.sh \
 
 pass `--system` on macOS hosts where zig links against a newer SDK than the runtime OS can load.
 
+<!-- operator workflow for scripts/bench_personaplex_compare.sh, personaplex_compare.py, and the two isolated PersonaPlex runner targets -->
+## CPU-only PersonaPlex speech comparison
+
+to run real speech end to end through both EMEL and pinned moshi.cpp with the same fixed seed and
+input samples:
+
+```bash
+scripts/bench_personaplex_compare.sh
+```
+
+on macOS, the default input is generated with Samantha at 175 words per minute saying
+`Hey, I'm Gabe. How are you doing?` directly as a mono 24 kHz signed 16-bit WAV. pass
+`--audio /path/to/input.wav` on another Unix host or to use an existing recording.
+
+the comparison builds two isolated Release executables. `personaplex_emel_runner` links only EMEL
+and drives the maintained Mimi and Moshi state machines. `moshi_reference_driver personaplex` links
+only the pinned moshi.cpp/ggml reference lane. the reference configure hard-disables Metal and the
+script injects `--threads 1`, seed `1234`, 125 frames, temperatures, and sampling limits; there are
+no process-global EMEL sampling defaults.
+
+the pinned upstream JSON remains untouched for the reference lane. EMEL model conversion injects
+the separate `tools/bench/personaplex-inference.json` contract, keeping prompt tokens, public
+codebook count, and silence framing explicit and reproducible. the setup keeps the full 16-codebook
+Mimi parity artifact separate from PersonaPlex's 8-public-codebook Mimi artifact.
+
+the report and both audible WAVs are written under `build/personaplex_compare/`. the report records
+the input SHA256, exact public Mimi input-code match, sampled output-token match, text-token match,
+lagged 80 ms energy correlation, activity ratio, non-silence, output hashes, and end-to-end wall
+time. sampled output is compared as behavior rather than raw-waveform equality because a one-rank
+floating-point difference can avalanche later fixed-seed draws even when the RNG state and sampling
+policy agree.
+
+use `--frames`, `--seed`, `--threads`, `--output-dir`, `--build-only`, or `--run-only` to override
+the injected run configuration. `--run-only` never fetches, converts, or rebuilds artifacts.
+
 ## generation-specific local overrides
 
 the canonical generation case has its own bounded local validation knobs:

@@ -26,6 +26,7 @@ MOSHI_MODEL="$ARTIFACT_DIR/model-q4_k.gguf"
 MOSHI_MODEL_SHA256="73c4eb247740a48eebe5319ef767669dc8a06fd333b152a6cd6e12bacb64553d"
 MOSHI_CONFIG="$ARTIFACT_DIR/personaplex-config.json"
 MOSHI_CONFIG_SHA256="1b215765f6aafc6ef2592dadefcd8ad39c8b56d6eda25242be301b4af36b986a"
+MOSHI_INFERENCE_CONFIG="$ROOT_DIR/tools/bench/personaplex-inference.json"
 MIMI_MODEL="$ARTIFACT_DIR/mimi-e351c8d8-125.gguf"
 MIMI_MODEL_SHA256="7e0c9ced83cbd035f70b82f1c5602673083fcccec006ea29f48d2e32c60ec697"
 TOKENIZER_MODEL="$ARTIFACT_DIR/tokenizer_spm_32k_3.model"
@@ -36,6 +37,7 @@ REFERENCE_AUDIO="$ARTIFACT_DIR/phase_moshi_440hz_24khz_mono.wav"
 
 MOSHI_MODEL_EMEL="$ARTIFACT_DIR/model-q4_k-emel.gguf"
 MIMI_MODEL_EMEL="$ARTIFACT_DIR/mimi-e351c8d8-125-emel.gguf"
+MIMI_MODEL_PERSONAPLEX_EMEL="$ARTIFACT_DIR/mimi-e351c8d8-125-personaplex-emel.gguf"
 VOICE_MODEL_EMEL="$ARTIFACT_DIR/voices/NATF0-emel.gguf"
 
 FETCH_ONLY=false
@@ -109,10 +111,15 @@ fetch_pinned() {
   local url="$1"
   local path="$2"
   local expected_sha="$3"
-  if [[ ! -f "$path" ]]; then
-    curl -fL "$url" -o "$path"
+  local actual_sha=""
+  if [[ -f "$path" ]]; then
+    actual_sha="$(shasum -a 256 "$path" | awk '{print $1}')"
+    if [[ "$actual_sha" == "$expected_sha" ]]; then
+      return 0
+    fi
+    echo "warning: refetching $path (sha256 mismatch)" >&2
   fi
-  local actual_sha
+  curl -fL --retry 3 "$url" -o "$path"
   actual_sha="$(shasum -a 256 "$path" | awk '{print $1}')"
   if [[ "$actual_sha" != "$expected_sha" ]]; then
     echo "error: sha256 mismatch for $path: $actual_sha != $expected_sha" >&2
@@ -149,6 +156,17 @@ if $FETCH_ONLY; then
   exit 0
 fi
 
+MIMI_FULL_N_Q="$($PYTHON_BIN - "$MOSHI_CONFIG" <<'PY'
+import json
+import sys
+
+value = json.load(open(sys.argv[1], encoding="utf-8")).get("n_q")
+if not isinstance(value, int) or value <= 0:
+    raise SystemExit("Mimi n_q must be a positive integer")
+print(value)
+PY
+)"
+
 convert_if_needed() {
   local source="$1"
   local output="$2"
@@ -179,8 +197,12 @@ convert_if_needed() {
 }
 
 convert_if_needed "$MOSHI_MODEL" "$MOSHI_MODEL_EMEL" \
-  --config "$MOSHI_CONFIG" --tokenizer "$TOKENIZER_MODEL"
-convert_if_needed "$MIMI_MODEL" "$MIMI_MODEL_EMEL" --config "$MOSHI_CONFIG"
+  --config "$MOSHI_CONFIG" --inference-config "$MOSHI_INFERENCE_CONFIG" \
+  --tokenizer "$TOKENIZER_MODEL"
+convert_if_needed "$MIMI_MODEL" "$MIMI_MODEL_EMEL" \
+  --config "$MOSHI_CONFIG" --mimi-n-q "$MIMI_FULL_N_Q"
+convert_if_needed "$MIMI_MODEL" "$MIMI_MODEL_PERSONAPLEX_EMEL" \
+  --config "$MOSHI_CONFIG" --inference-config "$MOSHI_INFERENCE_CONFIG"
 convert_if_needed "$VOICE_MODEL" "$VOICE_MODEL_EMEL"
 
 echo "EMEL_MOSHI_CPP_SOURCE=$REFERENCE_DIR"
@@ -188,6 +210,7 @@ echo "EMEL_MOSHI_REFERENCE_MODEL=$MOSHI_MODEL"
 echo "EMEL_MOSHI_REFERENCE_MODEL_EMEL=$MOSHI_MODEL_EMEL"
 echo "EMEL_MIMI_REFERENCE_MODEL=$MIMI_MODEL"
 echo "EMEL_MIMI_REFERENCE_MODEL_EMEL=$MIMI_MODEL_EMEL"
+echo "EMEL_MIMI_PERSONAPLEX_MODEL_EMEL=$MIMI_MODEL_PERSONAPLEX_EMEL"
 echo "EMEL_MOSHI_TOKENIZER_MODEL=$TOKENIZER_MODEL"
 echo "EMEL_MOSHI_VOICE_MODEL=$VOICE_MODEL"
 echo "EMEL_MOSHI_VOICE_MODEL_EMEL=$VOICE_MODEL_EMEL"

@@ -334,8 +334,22 @@ def require_elements(infos: list[TensorInfo], name: str,
         f"elements), the runtime bind consumes {elements}")
 
 
-def load_lm_config(path: Path) -> dict:
+def inject_inference_config(config: dict,
+                            inference_config_path: Path | None) -> None:
+  if inference_config_path is None:
+    return
+  inference = json.loads(
+      inference_config_path.read_text(encoding="utf-8"))
+  if not isinstance(inference, dict):
+    raise ValueError(
+        f"{inference_config_path}: inference config must be an object")
+  config["inference"] = inference
+
+
+def load_lm_config(path: Path,
+                   inference_config_path: Path | None = None) -> dict:
   config = json.loads(path.read_text(encoding="utf-8"))
+  inject_inference_config(config, inference_config_path)
   required = [
       "card", "n_q", "dep_q", "text_card", "existing_text_padding_id", "dim",
       "num_heads", "num_layers", "hidden_scale", "causal", "context",
@@ -512,10 +526,12 @@ def normalize_lm_inference_config(config: dict, path: Path) -> None:
   config["inference_post_text_silence_frames"] = post_silence
 
 
-def resolve_mimi_n_q(config_path: Path | None) -> int:
+def resolve_mimi_n_q(config_path: Path | None,
+                      inference_config_path: Path | None = None) -> int:
   if config_path is None:
-    return 16
+    raise ValueError("Mimi conversion requires --config or --mimi-n-q")
   config = json.loads(config_path.read_text(encoding="utf-8"))
+  inject_inference_config(config, inference_config_path)
   if "n_q" not in config:
     raise ValueError(f"{config_path}: mimi conversion config requires n_q")
   if not isinstance(config["n_q"], int):
@@ -1517,13 +1533,19 @@ def convert(source: Path, output: Path, config_path: Path | None,
             tokenizer_path: Path | None,
             mimi_preset_path: Path | None = None,
             quantize: str | None = None,
-            pack_lm_q4_k: str | None = None) -> dict:
+            pack_lm_q4_k: str | None = None,
+            inference_config_path: Path | None = None,
+            mimi_n_q: int | None = None) -> dict:
   infos, data_start = read_raw_gguf(source)
   component = detect_component(infos)
   if quantize is not None and component != "mimi":
     raise ValueError("--quantize currently supports mimi components only")
   if pack_lm_q4_k is not None and component != "lm":
     raise ValueError("--pack-lm-q4-k supports lm components only")
+  if mimi_n_q is not None and component != "mimi":
+    raise ValueError("--mimi-n-q supports Mimi components only")
+  if mimi_n_q is not None and mimi_n_q <= 0:
+    raise ValueError("--mimi-n-q must be a positive integer")
   if quantize is not None and pack_lm_q4_k is not None:
     raise ValueError("--quantize and --pack-lm-q4-k are component-specific")
 
@@ -1537,7 +1559,7 @@ def convert(source: Path, output: Path, config_path: Path | None,
       raise ValueError("--config is required for lm components")
     if tokenizer_path is None:
       raise ValueError("--tokenizer is required for lm components")
-    config = load_lm_config(config_path)
+    config = load_lm_config(config_path, inference_config_path)
     num_weights = depformer_weight_count(config)
     candidates = transformer_layer_candidates(
         "lm.transformer.", config["num_layers"], 1)
@@ -1553,7 +1575,8 @@ def convert(source: Path, output: Path, config_path: Path | None,
     preset = dict(MIMI_PRESET)
     if mimi_preset_path is not None:
       preset.update(json.loads(mimi_preset_path.read_text(encoding="utf-8")))
-    n_q = resolve_mimi_n_q(config_path)
+    n_q = (mimi_n_q if mimi_n_q is not None else
+           resolve_mimi_n_q(config_path, inference_config_path))
     layers = preset["transformer_num_layers"]
     candidates = transformer_layer_candidates(
         "mimi.encoder_transformer.transformer.", layers, 1)
@@ -1595,6 +1618,11 @@ def convert(source: Path, output: Path, config_path: Path | None,
   if pack_lm_q4_k is not None:
     manifest["lm_tensor_packing"] = pack_lm_q4_k
     manifest["packed_tensors"] = packed_count
+  if inference_config_path is not None:
+    manifest["inference_config"] = str(inference_config_path)
+    manifest["inference_config_sha256"] = sha256_file(inference_config_path)
+  if mimi_n_q is not None:
+    manifest["mimi_n_q"] = mimi_n_q
   return manifest
 
 
@@ -1606,8 +1634,14 @@ def parse_args() -> argparse.Namespace:
                       help="enriched emel moshi GGUF to write")
   parser.add_argument("--config", type=Path, default=None,
                       help="moshi config JSON (personaplex-config.json); "
-                           "required for lm components; optional for mimi "
-                           "components to declare active inference n_q")
+                           "required for lm components and for mimi unless "
+                           "--mimi-n-q is injected")
+  parser.add_argument("--inference-config", type=Path, default=None,
+                      help="injected inference-only JSON overlay for prompt "
+                           "tokens, public codebooks, and silence framing")
+  parser.add_argument("--mimi-n-q", type=int, default=None,
+                      help="explicit injected Mimi codebook count; used to "
+                           "keep full-codec and PersonaPlex artifacts separate")
   parser.add_argument("--tokenizer", type=Path, default=None,
                       help="SentencePiece .model file; required for lm "
                            "components")
@@ -1630,7 +1664,8 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
   args = parse_args()
   manifest = convert(args.source, args.output, args.config, args.tokenizer,
-                     args.mimi_preset, args.quantize, args.pack_lm_q4_k)
+                     args.mimi_preset, args.quantize, args.pack_lm_q4_k,
+                     args.inference_config, args.mimi_n_q)
   if args.manifest is not None:
     args.manifest.parent.mkdir(parents=True, exist_ok=True)
     args.manifest.write_text(json.dumps(manifest, indent=2) + "\n",

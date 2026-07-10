@@ -33,7 +33,8 @@ if(EMEL_BENCH_SUITE_FILTER STREQUAL "batch_planner" OR
    # subtree, which the moshi reference driver links against; an MLX-only
    # compare (EMEL_BENCH_SKIP_MOSHI_REFERENCE) builds no such driver.
    (EMEL_BENCH_SUITE_FILTER STREQUAL "speech_codec_mimi" AND
-    NOT EMEL_BENCH_SKIP_MOSHI_REFERENCE))
+    NOT EMEL_BENCH_SKIP_MOSHI_REFERENCE) OR
+   EMEL_BENCH_SUITE_FILTER STREQUAL "speech_dialogue_moshi")
   set(EMEL_BENCH_NEEDS_LLAMA ON)
 endif()
 
@@ -283,6 +284,9 @@ if(EMEL_BENCH_NEEDS_LLAMA)
 
   set(GGML_BUILD_TESTS OFF CACHE BOOL "" FORCE)
   set(GGML_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+  if(EMEL_BENCH_SUITE_FILTER STREQUAL "speech_dialogue_moshi")
+    set(GGML_METAL OFF CACHE BOOL "CPU-only PersonaPlex reference lane" FORCE)
+  endif()
   set(LLAMA_BUILD_NUMBER 0 CACHE STRING "" FORCE)
   set(LLAMA_INSTALL_VERSION 0.0.0 CACHE STRING "" FORCE)
   add_subdirectory(${reference_impl_SOURCE_DIR}/ggml ggml)
@@ -455,6 +459,7 @@ add_bench_runner_suite(tokenizer text/tokenizer/tokenizer_bench.cpp EMEL_BENCH_E
 
 if(NOT EMEL_BENCH_SUITE_FILTER STREQUAL "" AND
    NOT EMEL_BENCH_SUITE_FILTER STREQUAL "whisper_compare" AND
+   NOT EMEL_BENCH_SUITE_FILTER STREQUAL "speech_dialogue_moshi" AND
    BENCH_RUNNER_COMPILE_DEFINITIONS STREQUAL "")
   message(FATAL_ERROR "Unknown EMEL_BENCH_SUITE_FILTER='${EMEL_BENCH_SUITE_FILTER}'")
 endif()
@@ -480,6 +485,10 @@ add_executable(mimi_emel_parity_runner
   ${CMAKE_CURRENT_SOURCE_DIR}/speech/mimi_emel_parity_runner.cpp
 )
 
+add_executable(personaplex_emel_runner
+  ${CMAKE_CURRENT_SOURCE_DIR}/speech/personaplex_emel_runner.cpp
+)
+
 target_link_libraries(mimi_emel_parity_runner
   PRIVATE
     emel_core
@@ -487,6 +496,20 @@ target_link_libraries(mimi_emel_parity_runner
 )
 
 target_include_directories(mimi_emel_parity_runner
+  PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${EMEL_ROOT}
+    ${EMEL_ROOT}/src
+    ${EMEL_ROOT}/include
+)
+
+target_link_libraries(personaplex_emel_runner
+  PRIVATE
+    emel_core
+    emel
+)
+
+target_include_directories(personaplex_emel_runner
   PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${EMEL_ROOT}
@@ -639,6 +662,26 @@ target_compile_definitions(diarization_compare_tests
 add_test(
   NAME diarization_compare_tests
   COMMAND diarization_compare_tests
+)
+
+add_executable(personaplex_compare_tests
+  ${CMAKE_CURRENT_SOURCE_DIR}/personaplex_compare_tests.cpp
+)
+
+target_include_directories(personaplex_compare_tests
+  PRIVATE
+    ${DOCTEST_INCLUDE_DIR}
+)
+
+target_compile_definitions(personaplex_compare_tests
+  PRIVATE
+    BENCH_REPO_ROOT="${EMEL_ROOT}"
+    PERSONAPLEX_COMPARE_SCRIPT_PATH="${CMAKE_CURRENT_SOURCE_DIR}/personaplex_compare.py"
+)
+
+add_test(
+  NAME personaplex_compare_tests
+  COMMAND personaplex_compare_tests
 )
 
 add_executable(whisper_benchmark_tests
