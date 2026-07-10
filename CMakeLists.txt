@@ -196,6 +196,7 @@ if(EMEL_ENABLE_TESTS)
     tests/speech/decoder/whisper/lifecycle_tests.cpp
     tests/speech/encoder/whisper/detail_tests.cpp
     tests/speech/recognizer/lifecycle_tests.cpp
+    tests/speech/tokenizer/moshi/lifecycle_tests.cpp
     tests/speech/tokenizer/whisper_tests.cpp
     tests/embeddings/text_embedding_lane_tests.cpp
     tests/embeddings/vision_embedding_lane_tests.cpp
