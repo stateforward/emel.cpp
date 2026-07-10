@@ -198,6 +198,7 @@ struct fake_predictor_actor {
 };
 
 struct fake_dependencies {
+  using generator_mode = generator::action::mode::duplex;
   using voice_condition_event = fake_voice_condition;
   using prompt_begin_event = fake_prompt_begin;
   using prompt_condition_event = fake_prompt_condition;
@@ -296,6 +297,9 @@ struct callback_probe {
     ++error_calls;
     last_error = ev.err;
   }
+  void generation_done(const generator::events::generation_done &) noexcept {
+    ++done_calls;
+  }
   void stream_done(const generator::events::stream_frame_done &) noexcept {
     ++done_calls;
   }
@@ -318,6 +322,90 @@ void advance_to_ready(fixture &test) {
   REQUIRE(test.condition());
 }
 
+struct fake_synthesis_stage {
+  explicit fake_synthesis_stage(
+      const generator::event::generate &request_ref) noexcept
+      : request(request_ref) {}
+  fake_synthesis_stage(const generator::event::generate &request_ref,
+                       int32_t &sample_count_out_ref) noexcept
+      : request(request_ref), sample_count_out(&sample_count_out_ref) {}
+
+  const generator::event::generate &request;
+  int32_t *sample_count_out = nullptr;
+  emel::error::type *error_out = nullptr;
+};
+
+struct fake_synthesis_actor {
+  int32_t initialize_calls = 0;
+  int32_t stage_calls = 0;
+  bool write_pcm = false;
+  bool postprocess_pcm = false;
+
+  bool process_event(const fake_initialize &request) noexcept {
+    ++initialize_calls;
+    *request.error_out = 0;
+    return true;
+  }
+
+  bool process_event(const fake_synthesis_stage &request) noexcept {
+    ++stage_calls;
+    if (write_pcm) {
+      std::fill(request.request.pcm_out.begin(), request.request.pcm_out.end(),
+                0.5f);
+      *request.sample_count_out =
+          static_cast<int32_t>(request.request.pcm_out.size());
+    }
+    if (postprocess_pcm) {
+      for (float &sample : request.request.pcm_out) {
+        sample *= 0.5f;
+      }
+    }
+    *request.error_out = 0;
+    return true;
+  }
+};
+
+struct fake_synthesis_dependencies {
+  using generator_mode = generator::action::mode::synthesis;
+  using condition_event = fake_synthesis_stage;
+  using prefill_event = fake_synthesis_stage;
+  using predict_event = fake_synthesis_stage;
+  using sample_event = fake_synthesis_stage;
+  using decode_event = fake_synthesis_stage;
+  using postprocess_event = fake_synthesis_stage;
+
+  fake_synthesis_actor &conditioner;
+  fake_synthesis_actor &prefiller;
+  fake_synthesis_actor &predictor;
+  fake_synthesis_actor &sampler;
+  fake_synthesis_actor &decoder;
+  fake_synthesis_actor &postprocessor;
+  fake_initialize conditioner_initialize = {};
+  fake_initialize prefiller_initialize = {};
+  fake_initialize predictor_initialize = {};
+  fake_initialize sampler_initialize = {};
+  fake_initialize decoder_initialize = {};
+  fake_initialize postprocessor_initialize = {};
+};
+
+struct synthesis_fixture {
+  fake_synthesis_actor conditioner{};
+  fake_synthesis_actor prefiller{};
+  fake_synthesis_actor predictor{};
+  fake_synthesis_actor sampler{};
+  fake_synthesis_actor decoder{.write_pcm = true};
+  fake_synthesis_actor postprocessor{.postprocess_pcm = true};
+  fake_synthesis_dependencies dependencies{
+      .conditioner = conditioner,
+      .prefiller = prefiller,
+      .predictor = predictor,
+      .sampler = sampler,
+      .decoder = decoder,
+      .postprocessor = postprocessor,
+  };
+  generator::sm<fake_synthesis_dependencies> machine{dependencies};
+};
+
 } // namespace
 
 TEST_CASE("speech_generator_initializes_injected_actor_composition") {
@@ -329,6 +417,42 @@ TEST_CASE("speech_generator_initializes_injected_actor_composition") {
   CHECK(test->decoder.initialize_calls == 1);
   CHECK(test->runtime.initialize_calls == 1);
   CHECK(test->predictor.initialize_calls == 2);
+}
+
+TEST_CASE("speech_generator_synthesizes_with_model_neutral_actor_composition") {
+  auto test = std::make_unique<synthesis_fixture>();
+  emel::error::type err = -1;
+  REQUIRE(test->machine.process_event(generator::event::initialize{err}));
+  CHECK(test->machine.is(sml::state<generator::state_ready>));
+  CHECK(test->conditioner.initialize_calls == 1);
+  CHECK(test->prefiller.initialize_calls == 1);
+  CHECK(test->predictor.initialize_calls == 1);
+  CHECK(test->sampler.initialize_calls == 1);
+  CHECK(test->decoder.initialize_calls == 1);
+  CHECK(test->postprocessor.initialize_calls == 1);
+
+  callback_probe probe{};
+  std::array<float, 8> pcm_out{};
+  int32_t sample_count = 0;
+  generator::event::generate request{"a model-neutral synthesis request",
+                                     std::span<float>{pcm_out}, sample_count,
+                                     err};
+  request.on_done =
+      decltype(request.on_done)::from<callback_probe,
+                                      &callback_probe::generation_done>(&probe);
+
+  REQUIRE(test->machine.process_event(request));
+  CHECK(test->machine.is(sml::state<generator::state_ready>));
+  CHECK(test->conditioner.stage_calls == 1);
+  CHECK(test->prefiller.stage_calls == 1);
+  CHECK(test->predictor.stage_calls == 1);
+  CHECK(test->sampler.stage_calls == 1);
+  CHECK(test->decoder.stage_calls == 1);
+  CHECK(test->postprocessor.stage_calls == 1);
+  CHECK(sample_count == 8);
+  CHECK(pcm_out[0] == doctest::Approx(0.25f));
+  CHECK(probe.done_calls == 1);
+  CHECK(err == generator::action::error_code(generator::error::none));
 }
 
 TEST_CASE("speech_generator_reports_initialize_outcomes_through_callbacks") {

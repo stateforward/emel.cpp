@@ -89,6 +89,7 @@ bool bind_secondary_cache(void *binding_ptr, const emel::model::data &,
 }
 
 struct personaplex_dependencies {
+  using generator_mode = generator::action::mode::duplex;
   using voice_condition_event = predictor::event::prefill_voice;
   using prompt_begin_event = predictor::event::begin_personaplex_prompt;
   using prompt_condition_event = predictor::event::prefill_personaplex_prompt;

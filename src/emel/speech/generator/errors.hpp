@@ -20,6 +20,14 @@ enum class error : emel::error::type {
   encode_failed = (1u << 11),
   predict_failed = (1u << 12),
   decode_failed = (1u << 13),
+  conditioner_initialize_failed = (1u << 14),
+  prefiller_initialize_failed = (1u << 15),
+  sampler_initialize_failed = (1u << 16),
+  postprocessor_initialize_failed = (1u << 17),
+  prefill_failed = (1u << 18),
+  sample_failed = (1u << 19),
+  postprocess_failed = (1u << 20),
+  unsupported_request = (1u << 21),
 };
 
 } // namespace emel::speech::generator

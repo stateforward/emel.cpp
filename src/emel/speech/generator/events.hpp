@@ -135,6 +135,9 @@ struct condition_ctx {
 
 struct generate_ctx {
   emel::error::type err = {};
+  emel::error::type child_err = {};
+  bool child_accepted = false;
+  int32_t sample_count = 0;
 };
 
 struct frame_ctx {

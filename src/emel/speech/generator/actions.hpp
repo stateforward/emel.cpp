@@ -23,6 +23,14 @@ void effect_store_error(const runtime_event_type &runtime_ev,
   runtime_ev.request.error_out = runtime_ev.ctx.err;
 }
 
+template <class runtime_event_type, class actor_type, class request_type>
+void effect_dispatch_child(const runtime_event_type &runtime_ev,
+                           actor_type &actor, request_type &request) noexcept {
+  runtime_ev.ctx.child_err = 0;
+  request.error_out = &runtime_ev.ctx.child_err;
+  runtime_ev.ctx.child_accepted = actor.process_event(request);
+}
+
 template <class dependencies_type> struct effect_initialize_temporal_positions {
   void operator()(const event::initialize_run &runtime_ev,
                   context<dependencies_type> &ctx) const noexcept {
@@ -136,6 +144,67 @@ template <class dependencies_type> struct effect_emit_initialize_error {
   }
 };
 
+template <class dependencies_type>
+struct effect_emit_synthesis_initialize_done {
+  void operator()(const event::initialize_run &runtime_ev,
+                  const context<dependencies_type> &) const noexcept {
+    runtime_ev.request.on_done(
+        events::initialize_done{runtime_ev.request, 0, 0});
+  }
+};
+
+template <class dependencies_type>
+struct effect_initialize_synthesis_conditioner {
+  void operator()(const event::initialize_run &runtime_ev,
+                  context<dependencies_type> &ctx) const noexcept {
+    auto request = ctx.collaborators.conditioner_initialize;
+    effect_dispatch_child(runtime_ev, ctx.collaborators.conditioner, request);
+  }
+};
+
+template <class dependencies_type>
+struct effect_initialize_synthesis_prefiller {
+  void operator()(const event::initialize_run &runtime_ev,
+                  context<dependencies_type> &ctx) const noexcept {
+    auto request = ctx.collaborators.prefiller_initialize;
+    effect_dispatch_child(runtime_ev, ctx.collaborators.prefiller, request);
+  }
+};
+
+template <class dependencies_type>
+struct effect_initialize_synthesis_predictor {
+  void operator()(const event::initialize_run &runtime_ev,
+                  context<dependencies_type> &ctx) const noexcept {
+    auto request = ctx.collaborators.predictor_initialize;
+    effect_dispatch_child(runtime_ev, ctx.collaborators.predictor, request);
+  }
+};
+
+template <class dependencies_type> struct effect_initialize_synthesis_sampler {
+  void operator()(const event::initialize_run &runtime_ev,
+                  context<dependencies_type> &ctx) const noexcept {
+    auto request = ctx.collaborators.sampler_initialize;
+    effect_dispatch_child(runtime_ev, ctx.collaborators.sampler, request);
+  }
+};
+
+template <class dependencies_type> struct effect_initialize_synthesis_decoder {
+  void operator()(const event::initialize_run &runtime_ev,
+                  context<dependencies_type> &ctx) const noexcept {
+    auto request = ctx.collaborators.decoder_initialize;
+    effect_dispatch_child(runtime_ev, ctx.collaborators.decoder, request);
+  }
+};
+
+template <class dependencies_type>
+struct effect_initialize_synthesis_postprocessor {
+  void operator()(const event::initialize_run &runtime_ev,
+                  context<dependencies_type> &ctx) const noexcept {
+    auto request = ctx.collaborators.postprocessor_initialize;
+    effect_dispatch_child(runtime_ev, ctx.collaborators.postprocessor, request);
+  }
+};
+
 template <class dependencies_type> struct effect_condition_voice {
   void operator()(const event::condition_run &runtime_ev,
                   context<dependencies_type> &ctx) const noexcept {
@@ -235,6 +304,73 @@ template <class dependencies_type> struct effect_prepare_generate {
     runtime_ev.request.sample_count_out = 0;
     runtime_ev.ctx.err = error_code(error::none);
     runtime_ev.request.error_out = runtime_ev.ctx.err;
+  }
+};
+
+template <class dependencies_type> struct effect_condition_generate {
+  void operator()(const event::generate_run &runtime_ev,
+                  context<dependencies_type> &ctx) const noexcept {
+    typename dependencies_type::condition_event request{runtime_ev.request};
+    effect_dispatch_child(runtime_ev, ctx.collaborators.conditioner, request);
+  }
+};
+
+template <class dependencies_type> struct effect_prefill_generate {
+  void operator()(const event::generate_run &runtime_ev,
+                  context<dependencies_type> &ctx) const noexcept {
+    typename dependencies_type::prefill_event request{runtime_ev.request};
+    effect_dispatch_child(runtime_ev, ctx.collaborators.prefiller, request);
+  }
+};
+
+template <class dependencies_type> struct effect_predict_generate {
+  void operator()(const event::generate_run &runtime_ev,
+                  context<dependencies_type> &ctx) const noexcept {
+    typename dependencies_type::predict_event request{runtime_ev.request};
+    effect_dispatch_child(runtime_ev, ctx.collaborators.predictor, request);
+  }
+};
+
+template <class dependencies_type> struct effect_sample_generate {
+  void operator()(const event::generate_run &runtime_ev,
+                  context<dependencies_type> &ctx) const noexcept {
+    typename dependencies_type::sample_event request{runtime_ev.request};
+    effect_dispatch_child(runtime_ev, ctx.collaborators.sampler, request);
+  }
+};
+
+template <class dependencies_type> struct effect_decode_generate {
+  void operator()(const event::generate_run &runtime_ev,
+                  context<dependencies_type> &ctx) const noexcept {
+    typename dependencies_type::decode_event request{
+        runtime_ev.request, runtime_ev.ctx.sample_count};
+    effect_dispatch_child(runtime_ev, ctx.collaborators.decoder, request);
+  }
+};
+
+template <class dependencies_type> struct effect_postprocess_generate {
+  void operator()(const event::generate_run &runtime_ev,
+                  context<dependencies_type> &ctx) const noexcept {
+    typename dependencies_type::postprocess_event request{
+        runtime_ev.request, runtime_ev.ctx.sample_count};
+    effect_dispatch_child(runtime_ev, ctx.collaborators.postprocessor, request);
+  }
+};
+
+template <class dependencies_type> struct effect_publish_generation_done {
+  void operator()(const event::generate_run &runtime_ev,
+                  const context<dependencies_type> &) const noexcept {
+    runtime_ev.request.sample_count_out = runtime_ev.ctx.sample_count;
+    runtime_ev.ctx.err = error_code(error::none);
+    runtime_ev.request.error_out = runtime_ev.ctx.err;
+  }
+};
+
+template <class dependencies_type> struct effect_emit_generation_done {
+  void operator()(const event::generate_run &runtime_ev,
+                  const context<dependencies_type> &) const noexcept {
+    runtime_ev.request.on_done(events::generation_done{
+        runtime_ev.request, runtime_ev.request.sample_count_out});
   }
 };
 
