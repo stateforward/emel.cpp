@@ -2,7 +2,7 @@
 
 #include "emel/error/error.hpp"
 
-namespace emel::speech::generator::moshi {
+namespace emel::speech::predictor::moshi {
 
 enum class error : emel::error::type {
   none = 0,
@@ -19,4 +19,4 @@ enum class error : emel::error::type {
   unexpected_event = 11,
 };
 
-} // namespace emel::speech::generator::moshi
+} // namespace emel::speech::predictor::moshi

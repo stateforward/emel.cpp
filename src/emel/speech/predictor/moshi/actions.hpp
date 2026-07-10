@@ -8,11 +8,11 @@
 #include "emel/kernel/detail.hpp"
 #include "emel/memory/events.hpp"
 #include "emel/model/moshi/detail.hpp"
-#include "emel/speech/generator/moshi/context.hpp"
-#include "emel/speech/generator/moshi/detail.hpp"
-#include "emel/speech/generator/moshi/events.hpp"
+#include "emel/speech/predictor/moshi/context.hpp"
+#include "emel/speech/predictor/moshi/detail.hpp"
+#include "emel/speech/predictor/moshi/events.hpp"
 
-namespace emel::speech::generator::moshi::action {
+namespace emel::speech::predictor::moshi::action {
 
 namespace detail_ns {
 
@@ -949,4 +949,4 @@ struct effect_mark_unexpected_and_store {
   }
 };
 
-} // namespace emel::speech::generator::moshi::action
+} // namespace emel::speech::predictor::moshi::action

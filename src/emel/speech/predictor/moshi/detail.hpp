@@ -2,9 +2,9 @@
 
 #include <cstdint>
 
-#include "emel/speech/generator/moshi/context.hpp"
+#include "emel/speech/predictor/moshi/context.hpp"
 
-namespace emel::speech::generator::moshi::detail {
+namespace emel::speech::predictor::moshi::detail {
 
 template <class runtime_event_type>
 constexpr decltype(auto)
@@ -35,4 +35,4 @@ inline int32_t cache_at(const action::lmgen_state &lmgen, const int32_t row,
       .cache[static_cast<size_t>(row * action::k_max_codebooks + column)];
 }
 
-} // namespace emel::speech::generator::moshi::detail
+} // namespace emel::speech::predictor::moshi::detail

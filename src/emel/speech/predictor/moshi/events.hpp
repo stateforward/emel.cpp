@@ -9,9 +9,9 @@
 #include "emel/error/error.hpp"
 #include "emel/memory/view.hpp"
 #include "emel/model/data.hpp"
-#include "emel/speech/generator/moshi/errors.hpp"
+#include "emel/speech/predictor/moshi/errors.hpp"
 
-namespace emel::speech::generator::moshi::events {
+namespace emel::speech::predictor::moshi::events {
 
 struct initialize_done;
 struct initialize_error;
@@ -26,9 +26,9 @@ struct prefill_personaplex_prompt_error;
 struct step_done;
 struct step_error;
 
-} // namespace emel::speech::generator::moshi::events
+} // namespace emel::speech::predictor::moshi::events
 
-namespace emel::speech::generator::moshi::event {
+namespace emel::speech::predictor::moshi::event {
 
 inline constexpr std::size_t k_max_codebooks = 64;
 inline constexpr std::size_t k_max_voice_embedding_dim = 8192;
@@ -241,9 +241,9 @@ struct reset_run {
   const reset &request;
 };
 
-} // namespace emel::speech::generator::moshi::event
+} // namespace emel::speech::predictor::moshi::event
 
-namespace emel::speech::generator::moshi::events {
+namespace emel::speech::predictor::moshi::events {
 
 struct initialize_done {
   const event::initialize *request = nullptr;
@@ -308,4 +308,4 @@ struct step_error {
   emel::error::type err = emel::error::cast(error::none);
 };
 
-} // namespace emel::speech::generator::moshi::events
+} // namespace emel::speech::predictor::moshi::events

@@ -6,18 +6,18 @@
 #include "emel/error/error.hpp"
 #include "emel/memory/streaming/events.hpp"
 #include "emel/model/data.hpp"
-#include "emel/speech/generator/moshi/events.hpp"
-#include "emel/speech/generator/moshi/executor/detail.hpp"
-#include "emel/speech/generator/moshi/executor/errors.hpp"
+#include "emel/speech/predictor/moshi/events.hpp"
+#include "emel/speech/predictor/moshi/executor/detail.hpp"
+#include "emel/speech/predictor/moshi/executor/errors.hpp"
 
-namespace emel::speech::generator::moshi::executor::events {
+namespace emel::speech::predictor::moshi::executor::events {
 
 struct initialize_done;
 struct initialize_error;
 
-} // namespace emel::speech::generator::moshi::executor::events
+} // namespace emel::speech::predictor::moshi::executor::events
 
-namespace emel::speech::generator::moshi::executor::event {
+namespace emel::speech::predictor::moshi::executor::event {
 
 struct initialize {
   explicit initialize(const emel::model::data &model_ref) noexcept
@@ -140,15 +140,15 @@ struct initialize_run {
 };
 
 struct step_run {
-  const emel::speech::generator::moshi::event::graph_step &request;
+  const emel::speech::predictor::moshi::event::graph_step &request;
   step_ctx &ctx;
 };
 
 struct reset {};
 
-} // namespace emel::speech::generator::moshi::executor::event
+} // namespace emel::speech::predictor::moshi::executor::event
 
-namespace emel::speech::generator::moshi::executor::events {
+namespace emel::speech::predictor::moshi::executor::events {
 
 struct initialize_done {
   const event::initialize *request = nullptr;
@@ -161,4 +161,4 @@ struct initialize_error {
   emel::error::type err = emel::error::cast(error::none);
 };
 
-} // namespace emel::speech::generator::moshi::executor::events
+} // namespace emel::speech::predictor::moshi::executor::events

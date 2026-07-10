@@ -6,12 +6,12 @@
 #include <stateforward/sml.hpp>
 
 #include "emel/sm.hpp"
-#include "emel/speech/generator/moshi/actions.hpp"
-#include "emel/speech/generator/moshi/context.hpp"
-#include "emel/speech/generator/moshi/events.hpp"
-#include "emel/speech/generator/moshi/guards.hpp"
+#include "emel/speech/predictor/moshi/actions.hpp"
+#include "emel/speech/predictor/moshi/context.hpp"
+#include "emel/speech/predictor/moshi/events.hpp"
+#include "emel/speech/predictor/moshi/guards.hpp"
 
-namespace emel::speech::generator::moshi {
+namespace emel::speech::predictor::moshi {
 
 struct state_uninitialized {};
 struct state_bind_contract_decision {};
@@ -739,4 +739,4 @@ private:
 
 using Generator = sm;
 
-} // namespace emel::speech::generator::moshi
+} // namespace emel::speech::predictor::moshi

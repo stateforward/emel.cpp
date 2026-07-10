@@ -1,16 +1,16 @@
 #pragma once
 
 #include "emel/model/moshi/detail.hpp"
-#include "emel/speech/generator/moshi/executor/context.hpp"
-#include "emel/speech/generator/moshi/executor/detail.hpp"
-#include "emel/speech/generator/moshi/executor/events.hpp"
+#include "emel/speech/predictor/moshi/executor/context.hpp"
+#include "emel/speech/predictor/moshi/executor/detail.hpp"
+#include "emel/speech/predictor/moshi/executor/events.hpp"
 
 #include <algorithm>
 #include <cmath>
 #include <cstring>
 #include <limits>
 
-namespace emel::speech::generator::moshi::executor::action {
+namespace emel::speech::predictor::moshi::executor::action {
 
 namespace detail_ns {
 
@@ -1905,4 +1905,4 @@ struct effect_mark_unexpected_and_store {
   }
 };
 
-} // namespace emel::speech::generator::moshi::executor::action
+} // namespace emel::speech::predictor::moshi::executor::action

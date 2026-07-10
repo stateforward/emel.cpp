@@ -14,7 +14,7 @@
 #include "emel/memory/view.hpp"
 #include "emel/model/data.hpp"
 
-namespace emel::speech::generator::moshi::executor::detail {
+namespace emel::speech::predictor::moshi::executor::detail {
 
 using dtype = emel::kernel::event::dtype;
 using tensor_record = emel::model::data::tensor_record;
@@ -342,4 +342,4 @@ inline void compute_sampling_exponential_argmax(
   }
 }
 
-} // namespace emel::speech::generator::moshi::executor::detail
+} // namespace emel::speech::predictor::moshi::executor::detail

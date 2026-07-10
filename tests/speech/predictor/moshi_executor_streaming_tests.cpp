@@ -8,16 +8,16 @@
 
 #include "emel/error/error.hpp"
 #include "emel/memory/streaming/sm.hpp"
-#include "emel/speech/generator/moshi/any.hpp"
-#include "emel/speech/generator/moshi/executor/any.hpp"
+#include "emel/speech/predictor/moshi/any.hpp"
+#include "emel/speech/predictor/moshi/executor/any.hpp"
 #include "moshi_fixture.hpp"
 
 namespace {
 
 namespace memory_streaming = emel::memory::streaming;
-namespace moshi = emel::speech::generator::moshi;
-namespace executor = emel::speech::generator::moshi::executor;
-using emel::speech::generator::moshi::test::load_fixture_or_skip;
+namespace moshi = emel::speech::predictor::moshi;
+namespace executor = emel::speech::predictor::moshi::executor;
+using emel::speech::predictor::moshi::test::load_fixture_or_skip;
 
 struct cache_storage {
   cache_storage(const int32_t layer_count, const int32_t capacity,

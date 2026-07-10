@@ -17,7 +17,7 @@
 #include "emel/gguf/loader/sm.hpp"
 #include "emel/model/detail.hpp"
 
-namespace emel::speech::generator::moshi::test {
+namespace emel::speech::predictor::moshi::test {
 
 struct loaded_fixture {
   std::vector<uint8_t> file_bytes = {};
@@ -133,4 +133,4 @@ inline loaded_fixture load_fixture_or_skip(const std::string_view name) {
   return loaded;
 }
 
-} // namespace emel::speech::generator::moshi::test
+} // namespace emel::speech::predictor::moshi::test

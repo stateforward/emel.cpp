@@ -14,20 +14,20 @@
 #include "emel/memory/streaming/sm.hpp"
 #include "emel/model/moshi/detail.hpp"
 #include "emel/speech/codec/mimi/any.hpp"
-#include "emel/speech/generator/moshi/any.hpp"
-#include "emel/speech/generator/moshi/executor/any.hpp"
+#include "emel/speech/predictor/moshi/any.hpp"
+#include "emel/speech/predictor/moshi/executor/any.hpp"
 #include "moshi_fixture.hpp"
 
 namespace {
 
-namespace moshi = emel::speech::generator::moshi;
-namespace moshi_executor = emel::speech::generator::moshi::executor;
+namespace moshi = emel::speech::predictor::moshi;
+namespace moshi_executor = emel::speech::predictor::moshi::executor;
 namespace memory_streaming = emel::memory::streaming;
 namespace mimi = emel::speech::codec::mimi;
 namespace model_moshi = emel::model::moshi::detail;
-using emel::speech::generator::moshi::test::load_fixture_or_skip;
-using emel::speech::generator::moshi::test::read_binary_file;
-using emel::speech::generator::moshi::test::repo_root;
+using emel::speech::predictor::moshi::test::load_fixture_or_skip;
+using emel::speech::predictor::moshi::test::read_binary_file;
+using emel::speech::predictor::moshi::test::repo_root;
 
 inline constexpr emel::error::type k_no_error =
     emel::error::cast(moshi::error::none);
@@ -855,15 +855,15 @@ TEST_CASE("speech_moshi_executor_rejects_graph_step_before_initialize") {
 
 TEST_CASE("speech_moshi_executor_runtime_choice_uses_explicit_transitions") {
   const auto bytes =
-      read_binary_file(repo_root() / "src" / "emel" / "speech" / "generator" /
+      read_binary_file(repo_root() / "src" / "emel" / "speech" / "predictor" /
                        "moshi" / "executor" / "sm.hpp");
   const std::string source{bytes.begin(), bytes.end()};
   const auto action_bytes =
-      read_binary_file(repo_root() / "src" / "emel" / "speech" / "generator" /
+      read_binary_file(repo_root() / "src" / "emel" / "speech" / "predictor" /
                        "moshi" / "executor" / "actions.hpp");
   const std::string actions_source{action_bytes.begin(), action_bytes.end()};
   const auto detail_bytes =
-      read_binary_file(repo_root() / "src" / "emel" / "speech" / "generator" /
+      read_binary_file(repo_root() / "src" / "emel" / "speech" / "predictor" /
                        "moshi" / "executor" / "detail.hpp");
   const std::string detail_source{detail_bytes.begin(), detail_bytes.end()};
 
@@ -1047,11 +1047,11 @@ TEST_CASE("speech_moshi_executor_runtime_choice_uses_explicit_transitions") {
 
 TEST_CASE("speech_moshi_generator_graph_outputs_use_explicit_transitions") {
   const auto action_bytes =
-      read_binary_file(repo_root() / "src" / "emel" / "speech" / "generator" /
+      read_binary_file(repo_root() / "src" / "emel" / "speech" / "predictor" /
                        "moshi" / "actions.hpp");
   const std::string actions_source{action_bytes.begin(), action_bytes.end()};
   const auto sm_bytes =
-      read_binary_file(repo_root() / "src" / "emel" / "speech" / "generator" /
+      read_binary_file(repo_root() / "src" / "emel" / "speech" / "predictor" /
                        "moshi" / "sm.hpp");
   const std::string sm_source{sm_bytes.begin(), sm_bytes.end()};
 

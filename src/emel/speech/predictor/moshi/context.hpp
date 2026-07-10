@@ -7,9 +7,9 @@
 #include "emel/memory/hybrid/sm.hpp"
 #include "emel/model/data.hpp"
 #include "emel/model/moshi/detail.hpp"
-#include "emel/speech/generator/moshi/events.hpp"
+#include "emel/speech/predictor/moshi/events.hpp"
 
-namespace emel::speech::generator::moshi::action {
+namespace emel::speech::predictor::moshi::action {
 
 inline constexpr int32_t k_max_codebooks =
     static_cast<int32_t>(event::k_max_codebooks);
@@ -87,4 +87,4 @@ bind_graph_executor(void *executor,
   return graph_binding{.executor = executor, .dispatch_step = &dispatch_step};
 }
 
-} // namespace emel::speech::generator::moshi::action
+} // namespace emel::speech::predictor::moshi::action

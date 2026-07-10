@@ -4,11 +4,11 @@
 #include "emel/memory/hybrid/errors.hpp"
 #include "emel/model/loader/errors.hpp"
 #include "emel/model/moshi/detail.hpp"
-#include "emel/speech/generator/moshi/context.hpp"
-#include "emel/speech/generator/moshi/detail.hpp"
-#include "emel/speech/generator/moshi/events.hpp"
+#include "emel/speech/predictor/moshi/context.hpp"
+#include "emel/speech/predictor/moshi/detail.hpp"
+#include "emel/speech/predictor/moshi/events.hpp"
 
-namespace emel::speech::generator::moshi::guard {
+namespace emel::speech::predictor::moshi::guard {
 
 struct guard_bind_contract_valid {
   bool operator()(const event::initialize_run &runtime_ev,
@@ -683,4 +683,4 @@ struct guard_unexpected_error_out_absent {
   }
 };
 
-} // namespace emel::speech::generator::moshi::guard
+} // namespace emel::speech::predictor::moshi::guard

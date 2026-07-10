@@ -21,16 +21,16 @@
 #include "emel/model/data.hpp"
 #include "emel/model/detail.hpp"
 #include "emel/speech/codec/mimi/any.hpp"
-#include "emel/speech/generator/moshi/any.hpp"
-#include "emel/speech/generator/moshi/executor/any.hpp"
 #include "emel/speech/generator/sm.hpp"
+#include "emel/speech/predictor/moshi/any.hpp"
+#include "emel/speech/predictor/moshi/executor/any.hpp"
 
 namespace {
 
 namespace mimi = emel::speech::codec::mimi;
 namespace generator = emel::speech::generator;
-namespace predictor = emel::speech::generator::moshi;
-namespace runtime = emel::speech::generator::moshi::executor;
+namespace predictor = emel::speech::predictor::moshi;
+namespace runtime = emel::speech::predictor::moshi::executor;
 
 struct runner_config {
   const char *mimi_path = nullptr;

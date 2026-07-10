@@ -1,18 +1,18 @@
 #pragma once
 
-#include "emel/speech/generator/moshi/executor/sm.hpp"
+#include "emel/speech/predictor/moshi/executor/sm.hpp"
 
-namespace emel::speech::generator::moshi::executor {
+namespace emel::speech::predictor::moshi::executor {
 
 inline bool dispatch_graph_step(
     void *executor_ptr,
-    const emel::speech::generator::moshi::event::graph_step &ev) noexcept {
+    const emel::speech::predictor::moshi::event::graph_step &ev) noexcept {
   return static_cast<sm *>(executor_ptr)->process_event(ev);
 }
 
-inline emel::speech::generator::moshi::action::graph_binding
+inline emel::speech::predictor::moshi::action::graph_binding
 bind_graph_executor(sm &executor) noexcept {
-  return emel::speech::generator::moshi::action::bind_graph_executor(
+  return emel::speech::predictor::moshi::action::bind_graph_executor(
       &executor, dispatch_graph_step);
 }
 
@@ -49,4 +49,4 @@ bind_kv_caches(const temporal_kv_binding &temporal,
 
 using MoshiExecutor = sm;
 
-} // namespace emel::speech::generator::moshi::executor
+} // namespace emel::speech::predictor::moshi::executor

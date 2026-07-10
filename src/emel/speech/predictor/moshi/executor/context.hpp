@@ -7,9 +7,9 @@
 #include "emel/memory/view.hpp"
 #include "emel/model/data.hpp"
 #include "emel/model/moshi/detail.hpp"
-#include "emel/speech/generator/moshi/executor/detail.hpp"
+#include "emel/speech/predictor/moshi/executor/detail.hpp"
 
-namespace emel::speech::generator::moshi::executor::action {
+namespace emel::speech::predictor::moshi::executor::action {
 
 using temporal_kv_bind_fn = bool(void *, const emel::model::data &,
                                  const emel::memory::view::snapshot &, int32_t,
@@ -104,4 +104,4 @@ bind_kv_caches(const temporal_kv_binding &temporal,
   };
 }
 
-} // namespace emel::speech::generator::moshi::executor::action
+} // namespace emel::speech::predictor::moshi::executor::action

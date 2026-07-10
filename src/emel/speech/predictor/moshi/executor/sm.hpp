@@ -4,12 +4,12 @@
 #include <stateforward/sml.hpp>
 
 #include "emel/sm.hpp"
-#include "emel/speech/generator/moshi/executor/actions.hpp"
-#include "emel/speech/generator/moshi/executor/context.hpp"
-#include "emel/speech/generator/moshi/executor/events.hpp"
-#include "emel/speech/generator/moshi/executor/guards.hpp"
+#include "emel/speech/predictor/moshi/executor/actions.hpp"
+#include "emel/speech/predictor/moshi/executor/context.hpp"
+#include "emel/speech/predictor/moshi/executor/events.hpp"
+#include "emel/speech/predictor/moshi/executor/guards.hpp"
 
-namespace emel::speech::generator::moshi::executor {
+namespace emel::speech::predictor::moshi::executor {
 
 struct state_uninitialized {};
 struct state_bind_contract_decision {};
@@ -1017,7 +1017,7 @@ struct sm : public emel::sm<model, action::context> {
   }
 
   bool
-  process_event(const emel::speech::generator::moshi::event::graph_step &ev) {
+  process_event(const emel::speech::predictor::moshi::event::graph_step &ev) {
     event::step_ctx ctx{};
     event::step_run runtime_ev{ev, ctx};
     const bool accepted = base_type::process_event(runtime_ev);
@@ -1031,4 +1031,4 @@ struct sm : public emel::sm<model, action::context> {
 
 using Executor = sm;
 
-} // namespace emel::speech::generator::moshi::executor
+} // namespace emel::speech::predictor::moshi::executor
