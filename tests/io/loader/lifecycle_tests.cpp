@@ -139,11 +139,9 @@ uint32_t occurrence_count(const std::string_view source,
 
 TEST_CASE("io loader exposes canonical machine aliases") {
   emel::io::loader::sm loader{};
-  emel::io::sm io_loader{};
   emel::IoLoader top_level_loader{};
 
   CHECK(loader.is(stateforward::sml::state<emel::io::loader::state_ready>));
-  CHECK(io_loader.is(stateforward::sml::state<emel::io::loader::state_ready>));
   CHECK(top_level_loader.is(
       stateforward::sml::state<emel::io::loader::state_ready>));
 }

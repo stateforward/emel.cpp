@@ -19,24 +19,6 @@ check_no_matches() {
   rm -f /tmp/emel_domain_boundary_matches.$$
 }
 
-check_no_matches_except() {
-  local label="$1"
-  local pattern="$2"
-  local allow_pattern="$3"
-  shift 3
-
-  if rg -n "$pattern" "$@" >/tmp/emel_domain_boundary_matches.$$ 2>/dev/null; then
-    if grep -Ev "$allow_pattern" /tmp/emel_domain_boundary_matches.$$ \
-        >/tmp/emel_domain_boundary_filtered.$$; then
-      echo "error: domain boundary leak: ${label}" >&2
-      cat /tmp/emel_domain_boundary_filtered.$$ >&2
-      status=1
-    fi
-    rm -f /tmp/emel_domain_boundary_filtered.$$
-  fi
-  rm -f /tmp/emel_domain_boundary_matches.$$
-}
-
 check_absent_path() {
   local label="$1"
   shift
@@ -74,10 +56,19 @@ check_no_matches "lfm2 model code depends on sibling model-family detail" \
   'emel/model/llama/(detail|any)\.hpp|emel/model/(qwen3|gemma4)/detail\.hpp|emel::model::llama::|emel::model::(qwen3|gemma4)::detail::' \
   src/emel/model/lfm2
 
-check_no_matches_except "legacy text generator root" \
-  'emel/generator|emel::generator|namespace emel::generator|src/emel/generator|tests/generator' \
-  '^(src/emel/generator/|tests/text/generator/legacy_compatibility_tests\.cpp:[0-9]+:|scripts/(quality_gates|test_with_coverage)\.sh:[0-9]+:.*src/emel/generator)' \
-  src tests tools scripts/quality_gates.sh scripts/test_with_coverage.sh CMakeLists.txt
+check_absent_path "legacy text generator root" \
+  src/emel/generator tests/text/generator/legacy_compatibility_tests.cpp
+
+check_no_matches "legacy text generator includes or namespace" \
+  'emel/generator|emel::generator|namespace emel::generator|tests/generator' \
+  src tests tools CMakeLists.txt
+
+check_absent_path "legacy generic machine aliases" \
+  src/emel/io/sm.hpp src/emel/text/encoders/sm.hpp
+
+check_no_matches "legacy top-level machine aliases" \
+  'using[[:space:]]+(ComputeExecutor|DiarizationRequest|Model)[[:space:]]*=' \
+  src tests tools CMakeLists.txt
 
 check_no_matches "text generator actor internals in maintained generation parity/benchmark lanes" \
   'emel/text/generator/(detail|actions|guards)\.hpp|emel::text::generator::(detail|action|guard)::|emel::text::generator::prefill::guard::|generation_internal_diagnostics' \
@@ -191,6 +182,10 @@ check_no_matches "forbidden moshi model-family runtime roots" \
 check_no_matches "Moshi/Mimi leaked into generic speech recognizer" \
   'moshi|model/moshi|model::moshi|tokenizer::moshi|codec::mimi|speech/codec/mimi' \
   src/emel/speech/recognizer tests/speech/recognizer
+
+check_no_matches "model-family names leaked into generic speech generator" \
+  '[Mm]oshi|[Mm]imi|[Pp]ersona[Pp]lex|[Cc]hatterbox' \
+  src/emel/speech/generator/*.hpp tests/speech/generator/lifecycle_tests.cpp
 
 check_absent_path "retired generic diarization request owner path" \
   src/emel/diarization/request \

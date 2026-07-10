@@ -169,7 +169,6 @@ if(EMEL_ENABLE_TESTS)
     tests/gbnf/lexer_tests.cpp
     tests/gbnf/parser_tests.cpp
     tests/gbnf/sampler_tests.cpp
-    tests/text/generator/legacy_compatibility_tests.cpp
     tests/text/generator/lifecycle_tests.cpp
     tests/text/generator/action_guard_tests.cpp
     tests/text/generator/detail_tests.cpp
@@ -189,6 +188,7 @@ if(EMEL_ENABLE_TESTS)
     tests/diarization/sortformer/transformer/lifecycle_tests.cpp
     tests/speech/codec/mimi_detail_tests.cpp
     tests/speech/codec/mimi_lifecycle_tests.cpp
+    tests/speech/generator/lifecycle_tests.cpp
     tests/speech/generator/moshi_lifecycle_tests.cpp
     tests/speech/generator/moshi_executor_streaming_tests.cpp
     tests/speech/generator/moshi_personaplex_session_tests.cpp
