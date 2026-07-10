@@ -173,6 +173,7 @@ environments, while Zig remains the default for day-to-day builds.
 - [`.planning/architecture/memory_hybrid.md`](.planning/architecture/memory_hybrid.md)
 - [`.planning/architecture/memory_kv.md`](.planning/architecture/memory_kv.md)
 - [`.planning/architecture/memory_recurrent.md`](.planning/architecture/memory_recurrent.md)
+- [`.planning/architecture/memory_streaming.md`](.planning/architecture/memory_streaming.md)
 - [`.planning/architecture/model_loader.md`](.planning/architecture/model_loader.md)
 - [`.planning/architecture/model_tensor.md`](.planning/architecture/model_tensor.md)
 - [`.planning/architecture/model_tensor_window.md`](.planning/architecture/model_tensor_window.md)

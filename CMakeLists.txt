@@ -235,6 +235,7 @@ if(EMEL_ENABLE_TESTS)
     tests/memory/kv/lifecycle_tests.cpp
     tests/memory/recurrent/lifecycle_tests.cpp
     tests/memory/hybrid/lifecycle_tests.cpp
+    tests/memory/streaming/lifecycle_tests.cpp
     tests/graph/tensor/lifecycle_tests.cpp
     tests/model/tensor/lifecycle_tests.cpp
     tests/model/tensor/window/lifecycle_tests.cpp

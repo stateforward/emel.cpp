@@ -1,0 +1,35 @@
+stateDiagram-v2
+  direction TB
+  [*] --> state_uninitialized
+  state_uninitialized --> state_empty : initialize [guard_configuration_valid_] / effect_initialize_
+  state_uninitialized --> state_uninitialized : initialize [guard_configuration_invalid_] / invalid_configuration__
+  state_empty --> state_empty : initialize [always] / already_initialized__
+  state_filling --> state_filling : initialize [always] / already_initialized__
+  state_full --> state_full : initialize [always] / already_initialized__
+  state_errored --> state_empty : initialize [guard_configuration_valid_] / effect_initialize_
+  state_errored --> state_errored : initialize [guard_configuration_invalid_] / invalid_configuration__
+  state_empty --> state_full : advance [guard_capacity_one_] / wrap__
+  state_empty --> state_filling : advance [guard_capacity_many_] / advance__
+  state_filling --> state_filling : advance [guard_filling_remains_partial_] / advance__
+  state_filling --> state_full : advance [guard_filling_becomes_full_] / wrap__
+  state_full --> state_full : advance [guard_full_position_available_before_wrap_] / advance__
+  state_full --> state_full : advance [guard_full_position_available_at_wrap_] / wrap__
+  state_full --> state_full : advance [guard_full_position_overflow_] / position_overflow__
+  state_full --> state_full : advance [guard_full_cursor_invalid_] / internal_error__
+  state_empty --> state_empty : reset [always] / effect_reset_
+  state_filling --> state_empty : reset [always] / effect_reset_
+  state_full --> state_empty : reset [always] / effect_reset_
+  state_empty --> state_empty : capture_view [always] / empty__
+  state_filling --> state_filling : capture_view [always] / filling__
+  state_full --> state_full : capture_view [always] / full__
+  state_uninitialized --> state_uninitialized : advance [always] / uninitialized__
+  state_uninitialized --> state_uninitialized : reset [always] / uninitialized__
+  state_uninitialized --> state_uninitialized : capture_view [always] / uninitialized__
+  state_errored --> state_errored : advance [always] / internal_error__
+  state_errored --> state_errored : reset [always] / internal_error__
+  state_errored --> state_errored : capture_view [always] / internal_error__
+  state_uninitialized --> state_errored : _ [always] / effect_unexpected_
+  state_empty --> state_errored : _ [always] / effect_unexpected_
+  state_filling --> state_errored : _ [always] / effect_unexpected_
+  state_full --> state_errored : _ [always] / effect_unexpected_
+  state_errored --> state_errored : _ [always] / effect_unexpected_

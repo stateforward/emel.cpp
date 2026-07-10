@@ -1,11 +1,11 @@
 #pragma once
 
 #include "emel/batch/planner/sm.hpp"
-#include "emel/diarization/sortformer/request/sm.hpp"
 #include "emel/diarization/sortformer/executor/sm.hpp"
 #include "emel/diarization/sortformer/pipeline/sm.hpp"
-#include "emel/embeddings/generator/sm.hpp"
+#include "emel/diarization/sortformer/request/sm.hpp"
 #include "emel/embeddings/generator/omniembed/sm.hpp"
+#include "emel/embeddings/generator/sm.hpp"
 #include "emel/gguf/loader/sm.hpp"
 #include "emel/graph/processor/sm.hpp"
 #include "emel/io/mmap/sm.hpp"
@@ -15,6 +15,7 @@
 #include "emel/memory/hybrid/sm.hpp"
 #include "emel/memory/kv/sm.hpp"
 #include "emel/memory/recurrent/sm.hpp"
+#include "emel/memory/streaming/sm.hpp"
 #include "emel/model/loader/sm.hpp"
 #include "emel/model/tensor/sm.hpp"
 #include "emel/speech/codec/mimi/sm.hpp"
@@ -54,6 +55,7 @@ using IoStagedRead = emel::io::staged_read::sm;
 using MemoryHybrid = emel::memory::hybrid::sm;
 using KvCache = emel::memory::kv::sm;
 using MemoryRecurrent = emel::memory::recurrent::sm;
+using MemoryStreaming = emel::memory::streaming::sm;
 using ModelLoader = emel::model::loader::sm;
 using Model = emel::model::loader::sm;
 using Parser = emel::gguf::loader::sm;
