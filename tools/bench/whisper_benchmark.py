@@ -20,8 +20,8 @@ COMPARE_GROUP = "whisper/tiny/q8_0/phase99_440hz_16khz_mono"
 WHISPER_CPP_REF = "v1.7.6"
 WHISPER_CPP_COMMIT = "a8d002cfd879315632a579e73f0148d06959de36"
 EXPECTED_TOKENIZER_SHA256 = "dfc530298b6fbed1a97c6472c575b026453706e2a204c7f7038f2c9d208b0759"
-EMEL_BACKEND_ID = "emel.speech.recognizer.whisper"
-EMEL_RUNTIME_SURFACE = "speech/recognizer+speech/recognizer_routes/whisper"
+EMEL_BACKEND_ID = "emel.speech.transcriber.whisper"
+EMEL_RUNTIME_SURFACE = "speech/transcriber+speech/encoder/whisper+speech/decoder/whisper+speech/tokenizer/whisper"
 
 
 def sha256_file(path: Path) -> str:

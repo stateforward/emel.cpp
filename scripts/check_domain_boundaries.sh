@@ -59,7 +59,7 @@ cd "$ROOT_DIR"
 concrete_io_api_pattern='(^|[^[:alnum:]_])(::)?(mmap|munmap|pread|read|fread|fopen|fclose|open|openat|CreateFile|CreateFileMapping|MapViewOfFile|ReadFile)[[:space:]]*\(|std::(ifstream|fstream|filebuf|fread|fopen|freopen)'
 
 check_no_matches "forbidden model-family runtime roots" \
-  'emel/whisper|namespace emel::whisper|kernel/whisper|kernel::whisper|model/whisper/(runtime|inference|encoder|decoder)|model::whisper::(runtime|inference|encoder|decoder)|speech/asr/whisper|speech::asr::whisper|speech/whisper|speech::whisper|recognizer/detail/whisper|recognizer::detail::whisper' \
+  'emel/whisper|namespace emel::whisper|kernel/whisper|kernel::whisper|model/whisper/(runtime|inference|encoder|decoder)|model::whisper::(runtime|inference|encoder|decoder)|speech/asr/whisper|speech::asr::whisper|speech/whisper|speech::whisper|transcriber/detail/whisper|transcriber::detail::whisper' \
   src tests tools CMakeLists.txt
 
 check_no_matches "qwen3 model code depends on sibling model-family detail" \
@@ -188,9 +188,9 @@ check_no_matches "forbidden moshi model-family runtime roots" \
   'emel/moshi|namespace emel::moshi|kernel/moshi|kernel::moshi|kernel/mimi|kernel::mimi|model/moshi/(runtime|inference|encoder|decoder|codec)|model::moshi::(runtime|inference|encoder|decoder|codec)|speech/asr/moshi|speech::asr::moshi|speech/moshi/|speech::moshi' \
   src tests tools CMakeLists.txt
 
-check_no_matches "Moshi/Mimi leaked into generic speech recognizer" \
+check_no_matches "Moshi/Mimi leaked into generic speech transcriber" \
   'moshi|model/moshi|model::moshi|tokenizer::moshi|codec::mimi|speech/codec/mimi' \
-  src/emel/speech/recognizer tests/speech/recognizer
+  src/emel/speech/transcriber tests/speech/transcriber
 
 check_absent_path "retired generic diarization request owner path" \
   src/emel/diarization/request \
@@ -200,13 +200,22 @@ check_absent_path "retired generic diarization request owner path" \
   .planning/architecture/diarization_request.md \
   .planning/architecture/mermaid/diarization_request.mmd
 
-check_no_matches "Whisper leaked into generic speech recognizer" \
+check_no_matches "Whisper leaked into generic speech transcriber" \
   'whisper|model/whisper|speech/tokenizer/whisper|speech/encoder/whisper|speech/decoder/whisper|model::whisper|tokenizer::whisper|encoder::whisper|decoder::whisper' \
-  src/emel/speech/recognizer tests/speech/recognizer
+  src/emel/speech/transcriber
 
-check_no_matches "Whisper encoder detail leaked into recognizer route" \
-  'emel/speech/(encoder|decoder|tokenizer)/whisper/detail\.hpp|(encoder|decoder|tokenizer)::whisper::detail|using[[:space:]]+namespace[[:space:]]+[^;]*whisper|::detail([[:space:]]*(;|$)|::)|(^|[^[:alnum:]_:])detail::' \
-  src/emel/speech/recognizer_routes/whisper
+# Tests may select component variants through the component-level kind enums
+# (encoder_kind::whisper), but must not include variant headers or reach into
+# variant namespaces.
+check_no_matches "Whisper contracts leaked into speech transcriber tests" \
+  'emel/speech/(encoder|decoder|tokenizer)/whisper|emel/model/whisper|(model|tokenizer|encoder|decoder)::whisper::' \
+  tests/speech/transcriber
+
+check_no_matches "Variant detail leaked into speech component facades" \
+  'emel/speech/(encoder|decoder|tokenizer)/whisper/detail\.hpp|(encoder|decoder|tokenizer)::whisper::detail' \
+  src/emel/speech/encoder/any.hpp src/emel/speech/encoder/events.hpp \
+  src/emel/speech/decoder/any.hpp src/emel/speech/decoder/events.hpp \
+  src/emel/speech/tokenizer/any.hpp src/emel/speech/tokenizer/events.hpp
 
 check_no_matches "Whisper model binding leaked into speech encoder/decoder runtime" \
   'emel/model/whisper|model::whisper' \

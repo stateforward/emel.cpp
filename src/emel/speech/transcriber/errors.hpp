@@ -2,7 +2,7 @@
 
 #include "emel/error/error.hpp"
 
-namespace emel::speech::recognizer {
+namespace emel::speech::transcriber {
 
 enum class error : emel::error::type {
   none = 0,
@@ -15,4 +15,4 @@ enum class error : emel::error::type {
   output_capacity = 7,
 };
 
-}  // namespace emel::speech::recognizer
+} // namespace emel::speech::transcriber

@@ -14,6 +14,7 @@
 
 #include "emel/kernel/sm.hpp"
 #include "emel/model/data.hpp"
+#include "emel/speech/decoder/events.hpp"
 #include "emel/speech/decoder/whisper/errors.hpp"
 
 namespace emel::speech::decoder::whisper::detail {
@@ -45,12 +46,7 @@ inline constexpr int32_t k_token_timestamp_begin = 50364;
 inline constexpr int32_t k_token_space = 220;
 inline constexpr float k_layer_norm_epsilon = 1.0e-5f;
 
-struct execution_contract {
-  const emel::model::data *model = nullptr;
-  int32_t vocab_size = 0;
-  int32_t embedding_length = 0;
-  int32_t decoder_block_count = 0;
-};
+using execution_contract = emel::speech::decoder::execution_contract;
 
 inline execution_contract
 bind_execution_contract(const emel::model::data &model) noexcept {
@@ -328,7 +324,7 @@ linear_q8_0_quantized_input(::emel::kernel::sm &kernel,
                   },
           },
   };
-  (void) kernel.process_event(request);
+  (void)kernel.process_event(request);
   if constexpr (HasBias) {
     for (uint64_t row = 0; row < Out; ++row) {
       output[row] += read_aux_vector<Aux>(*bias, row);
@@ -381,7 +377,7 @@ inline void linear(::emel::kernel::sm &kernel,
     linear_q8_0_quantized_input<In, Out, true, Aux>(kernel, weight, &bias,
                                                     input, output);
   } else {
-    (void) kernel;
+    (void)kernel;
     for (uint64_t row = 0; row < Out; ++row) {
       output[row] = dot_linear_row<Variant>(weight, row, input, In) +
                     read_aux_vector<Aux>(bias, row);
@@ -397,7 +393,7 @@ inline void linear_no_bias(::emel::kernel::sm &kernel,
     linear_q8_0_quantized_input<In, Out, false>(kernel, weight, nullptr, input,
                                                 output);
   } else {
-    (void) kernel;
+    (void)kernel;
     for (uint64_t row = 0; row < Out; ++row) {
       output[row] = dot_linear_row<Variant>(weight, row, input, In);
     }
@@ -475,14 +471,12 @@ inline void compute_decoder_cross_cache(::emel::kernel::sm &kernel,
 }
 
 template <linear_weight_variant Variant, aux_weight_variant Aux>
-inline void
-run_decoder_layer_sequence(::emel::kernel::sm &kernel,
-                           const emel::model::data &model, const uint64_t layer,
-                           const uint64_t encoder_frames,
-                           const uint64_t token_count, const float *cross_k,
-                           const float *cross_v, float *hidden, float *next,
-                           float *q, float *k, float *v, float *attn,
-                           float *norm, float *ff, float *scores) noexcept {
+inline void run_decoder_layer_sequence(
+    ::emel::kernel::sm &kernel, const emel::model::data &model,
+    const uint64_t layer, const uint64_t encoder_frames,
+    const uint64_t token_count, const float *cross_k, const float *cross_v,
+    float *hidden, float *next, float *q, float *k, float *v, float *attn,
+    float *norm, float *ff, float *scores) noexcept {
   char name[96] = {};
   const auto layer_tensor = [&](const char *suffix) noexcept {
     const uint64_t name_size =
@@ -627,11 +621,11 @@ inline uint64_t digest_f32(const float *values, const uint64_t count) noexcept {
 template <linear_weight_variant Variant,
           aux_weight_variant Aux = aux_weight_variant::q8_0>
 inline void compute_decoder_logits_for_tokens(
-    ::emel::kernel::sm &kernel,
-    const emel::model::data &model, const uint64_t encoder_frames,
-    const float *cross_k_cache, const float *cross_v_cache,
-    const int32_t *tokens, const uint64_t token_count, float *workspace,
-    float *logits, float &confidence_out, uint64_t &digest_out) noexcept {
+    ::emel::kernel::sm &kernel, const emel::model::data &model,
+    const uint64_t encoder_frames, const float *cross_k_cache,
+    const float *cross_v_cache, const int32_t *tokens,
+    const uint64_t token_count, float *workspace, float *logits,
+    float &confidence_out, uint64_t &digest_out) noexcept {
   float *hidden = workspace;
   const uint64_t hidden_count =
       static_cast<uint64_t>(k_embedding_length) * token_count;
@@ -771,8 +765,8 @@ inline int32_t select_greedy_timestamp_aware_token(
         (last_was_timestamp && penultimate_was_timestamp && timestamp_token) ||
         (last_was_timestamp && !penultimate_was_timestamp &&
          token < policy.eot);
-    const bool blocked_by_initial_limit = initial_token && timestamp_token &&
-                                          token > policy.timestamp_begin + 50;
+    const bool blocked_by_initial_limit =
+        initial_token && timestamp_token && token > policy.timestamp_begin + 50;
     const bool blocked_by_timestamp_mass = force_timestamp && !timestamp_token;
     const float score =
         initial_suppressed || control_suppressed || blocked_by_pair_rule ||
@@ -791,12 +785,11 @@ inline int32_t select_greedy_timestamp_aware_token(
 template <linear_weight_variant Variant,
           aux_weight_variant Aux = aux_weight_variant::q8_0>
 inline uint64_t run_decoder_sequence(
-    ::emel::kernel::sm &kernel,
-    const emel::model::data &model, const float *encoder_state,
-    const uint64_t encoder_frames, const decode_policy_runtime &policy,
-    const int32_t *prompt_tokens, const uint64_t prompt_token_count,
-    float *workspace, float *logits, int32_t *generated_tokens,
-    const uint64_t generated_token_capacity,
+    ::emel::kernel::sm &kernel, const emel::model::data &model,
+    const float *encoder_state, const uint64_t encoder_frames,
+    const decode_policy_runtime &policy, const int32_t *prompt_tokens,
+    const uint64_t prompt_token_count, float *workspace, float *logits,
+    int32_t *generated_tokens, const uint64_t generated_token_capacity,
     uint64_t &generated_token_count_out, int32_t &token_out,
     float &confidence_out) noexcept {
   std::array<int32_t, static_cast<size_t>(k_decoder_sequence_token_count)>
@@ -814,9 +807,9 @@ inline uint64_t run_decoder_sequence(
   float *cross_k_cache = workspace;
   float *cross_v_cache = cross_k_cache + cross_cache_count;
   float *step_workspace = cross_v_cache + cross_cache_count;
-  compute_decoder_cross_cache<Variant, Aux>(
-      kernel, model, encoder_state, encoder_frames, cross_k_cache,
-      cross_v_cache);
+  compute_decoder_cross_cache<Variant, Aux>(kernel, model, encoder_state,
+                                            encoder_frames, cross_k_cache,
+                                            cross_v_cache);
   uint64_t token_count = prompt_token_count;
   uint64_t digest = 0u;
   generated_token_count_out = 0u;
@@ -824,8 +817,8 @@ inline uint64_t run_decoder_sequence(
     float raw_confidence = 0.0f;
     compute_decoder_logits_for_tokens<Variant, Aux>(
         kernel, model, encoder_frames, cross_k_cache, cross_v_cache,
-        tokens.data(),
-        token_count, step_workspace, logits, raw_confidence, digest);
+        tokens.data(), token_count, step_workspace, logits, raw_confidence,
+        digest);
     const int32_t next_token = select_greedy_timestamp_aware_token(
         policy, logits, generated_tokens, step, step == 0u, confidence_out);
     token_out = next_token;
@@ -841,4 +834,4 @@ inline uint64_t run_decoder_sequence(
   return digest;
 }
 
-}  // namespace emel::speech::decoder::whisper::detail
+} // namespace emel::speech::decoder::whisper::detail

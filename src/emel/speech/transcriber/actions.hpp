@@ -1,10 +1,14 @@
 #pragma once
 
-#include "emel/speech/recognizer/context.hpp"
-#include "emel/speech/recognizer/detail.hpp"
-#include "emel/speech/recognizer/events.hpp"
+#include <cstddef>
+#include <cstdint>
+#include <span>
 
-namespace emel::speech::recognizer::action {
+#include "emel/speech/transcriber/context.hpp"
+#include "emel/speech/transcriber/detail.hpp"
+#include "emel/speech/transcriber/events.hpp"
+
+namespace emel::speech::transcriber::action {
 
 struct effect_begin_initialize {
   void operator()(const event::initialize_run &runtime_ev,
@@ -76,6 +80,7 @@ struct effect_begin_recognize {
     runtime_ev.ctx.err = detail::to_error(error::none);
     runtime_ev.ctx.encoder_accepted = false;
     runtime_ev.ctx.decoder_accepted = false;
+    runtime_ev.ctx.detokenize_accepted = false;
     runtime_ev.ctx.encoder_frame_count = 0;
     runtime_ev.ctx.encoder_width = 0;
     runtime_ev.ctx.generated_token_count = 0;
@@ -109,6 +114,68 @@ struct effect_mark_backend_error {
   void operator()(const event::recognize_run &runtime_ev,
                   context &) const noexcept {
     runtime_ev.ctx.err = detail::to_error(error::backend);
+  }
+};
+
+// Pipeline effects: dispatch into the injected component actors that the sm
+// wrapper owns. Each effect drives one already-chosen phase; which phase runs
+// (and whether the pipeline runs at all) is decided by guards in the transition
+// table, never here.
+struct effect_encode {
+  void operator()(const event::recognize_run &runtime_ev,
+                  context &ctx) const noexcept {
+    speech::encoder::event::encode encode_ev{
+        ctx.deps.encoder_contract,
+        runtime_ev.request.pcm,
+        runtime_ev.request.sample_rate,
+        runtime_ev.request.channel_count,
+        runtime_ev.request.storage.encoder_workspace,
+        runtime_ev.request.storage.encoder_state,
+        runtime_ev.ctx.encoder_frame_count,
+        runtime_ev.ctx.encoder_width,
+        runtime_ev.ctx.encoder_digest};
+    runtime_ev.ctx.encoder_accepted = ctx.encoder->process_event(encode_ev);
+    runtime_ev.ctx.err = detail::to_error(error::none);
+  }
+};
+
+struct effect_decode {
+  void operator()(const event::recognize_run &runtime_ev,
+                  context &ctx) const noexcept {
+    const auto encoder_state_size =
+        static_cast<size_t>(runtime_ev.ctx.encoder_frame_count) *
+        static_cast<size_t>(ctx.deps.decoder_contract.embedding_length);
+    speech::decoder::event::decode decode_ev{
+        ctx.deps.decoder_contract,
+        std::span<const float>{runtime_ev.request.storage.encoder_state.data(),
+                               encoder_state_size},
+        runtime_ev.ctx.encoder_frame_count,
+        ctx.deps.decode_policy,
+        runtime_ev.request.storage.generated_tokens,
+        runtime_ev.ctx.generated_token_count,
+        runtime_ev.request.storage.decoder_workspace,
+        runtime_ev.request.storage.logits,
+        runtime_ev.ctx.selected_token,
+        runtime_ev.ctx.confidence,
+        runtime_ev.ctx.decoder_digest};
+    runtime_ev.ctx.decoder_accepted = ctx.decoder->process_event(decode_ev);
+    runtime_ev.ctx.err = detail::to_error(error::none);
+  }
+};
+
+struct effect_detokenize {
+  void operator()(const event::recognize_run &runtime_ev,
+                  context &ctx) const noexcept {
+    speech::tokenizer::event::detokenize detokenize_ev{
+        runtime_ev.request.tokenizer.model_json,
+        std::span<const int32_t>{
+            runtime_ev.request.storage.generated_tokens.data(),
+            static_cast<size_t>(runtime_ev.ctx.generated_token_count),
+        },
+        runtime_ev.request.transcript, runtime_ev.ctx.transcript_size};
+    runtime_ev.ctx.detokenize_accepted =
+        ctx.tokenizer->process_event(detokenize_ev);
+    runtime_ev.ctx.err = detail::to_error(error::none);
   }
 };
 
@@ -184,6 +251,9 @@ inline constexpr effect_store_initialize_success
 inline constexpr effect_emit_initialize_done effect_emit_initialize_done{};
 inline constexpr effect_emit_initialize_error effect_emit_initialize_error{};
 inline constexpr effect_begin_recognize effect_begin_recognize{};
+inline constexpr effect_encode effect_encode{};
+inline constexpr effect_decode effect_decode{};
+inline constexpr effect_detokenize effect_detokenize{};
 inline constexpr effect_reject_recognize effect_reject_recognize{};
 inline constexpr effect_mark_uninitialized effect_mark_uninitialized{};
 inline constexpr effect_mark_backend_error effect_mark_backend_error{};
@@ -196,29 +266,4 @@ inline constexpr effect_emit_recognize_done effect_emit_recognize_done{};
 inline constexpr effect_emit_recognize_error effect_emit_recognize_error{};
 inline constexpr effect_on_unexpected effect_on_unexpected{};
 
-} // namespace emel::speech::recognizer::action
-
-namespace emel::speech::recognizer::route {
-
-struct effect_encode_unsupported {
-  void operator()(const event::recognize_run &runtime_ev,
-                  action::context &) const noexcept {
-    runtime_ev.ctx.err = detail::to_error(error::backend);
-  }
-};
-
-struct effect_decode_unsupported {
-  void operator()(const event::recognize_run &runtime_ev,
-                  action::context &) const noexcept {
-    runtime_ev.ctx.err = detail::to_error(error::backend);
-  }
-};
-
-struct effect_detokenize_unsupported {
-  void operator()(const event::recognize_run &runtime_ev,
-                  action::context &) const noexcept {
-    runtime_ev.ctx.err = detail::to_error(error::backend);
-  }
-};
-
-} // namespace emel::speech::recognizer::route
+} // namespace emel::speech::transcriber::action

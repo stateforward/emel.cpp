@@ -1,11 +1,11 @@
 #pragma once
 
 #include "emel/batch/planner/sm.hpp"
-#include "emel/diarization/sortformer/request/sm.hpp"
 #include "emel/diarization/sortformer/executor/sm.hpp"
 #include "emel/diarization/sortformer/pipeline/sm.hpp"
-#include "emel/embeddings/generator/sm.hpp"
+#include "emel/diarization/sortformer/request/sm.hpp"
 #include "emel/embeddings/generator/omniembed/sm.hpp"
+#include "emel/embeddings/generator/sm.hpp"
 #include "emel/gguf/loader/sm.hpp"
 #include "emel/graph/processor/sm.hpp"
 #include "emel/io/mmap/sm.hpp"

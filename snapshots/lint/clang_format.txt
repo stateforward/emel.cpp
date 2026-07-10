@@ -291,7 +291,6 @@ src/emel/kernel/aarch64/context.hpp
 src/emel/kernel/aarch64/errors.hpp
 src/emel/kernel/aarch64/events.hpp
 src/emel/kernel/aarch64/guards.hpp
-src/emel/kernel/aarch64/sm.hpp
 src/emel/kernel/actions.hpp
 src/emel/kernel/any.hpp
 src/emel/kernel/context.hpp
@@ -372,21 +371,14 @@ src/emel/model/tensor/window/guards.hpp
 src/emel/model/tensor/window/sm.hpp
 src/emel/sm.hpp
 src/emel/speech/codec/mimi/any.hpp
-src/emel/speech/codec/mimi/detail.cpp
-src/emel/speech/codec/mimi/guards.hpp
 src/emel/speech/decoder/whisper/actions.hpp
 src/emel/speech/decoder/whisper/any.hpp
 src/emel/speech/decoder/whisper/context.hpp
-src/emel/speech/decoder/whisper/detail.hpp
 src/emel/speech/decoder/whisper/errors.hpp
-src/emel/speech/decoder/whisper/events.hpp
 src/emel/speech/encoder/whisper/any.hpp
 src/emel/speech/encoder/whisper/context.hpp
 src/emel/speech/encoder/whisper/errors.hpp
 src/emel/speech/encoder/whisper/guards.hpp
-src/emel/speech/recognizer/detail.hpp
-src/emel/speech/recognizer/errors.hpp
-src/emel/speech/tokenizer/whisper/detail.hpp
 src/emel/tensor/view/actions.hpp
 src/emel/tensor/view/context.hpp
 src/emel/tensor/view/detail.hpp
@@ -618,7 +610,6 @@ tests/memory/kv/lifecycle_tests.cpp
 tests/memory/recurrent/lifecycle_tests.cpp
 tests/model/fixture_manifest_tests.cpp
 tests/model/loader/lifecycle_tests.cpp
-tests/model/moshi/binding_tests.cpp
 tests/model/tensor/lifecycle_tests.cpp
 tests/model/tensor/window/lifecycle_tests.cpp
 tests/model/tensor/window/streaming_tests.cpp
@@ -627,8 +618,6 @@ tests/sm/callback_tests.cpp
 tests/sm/sm_any_tests.cpp
 tests/sm/sm_external_completion_tests.cpp
 tests/sm/sm_policy_tests.cpp
-tests/speech/codec/mimi_lifecycle_tests.cpp
-tests/speech/decoder/whisper/lifecycle_tests.cpp
 tests/speech/encoder/whisper/detail_tests.cpp
 tests/speech/tokenizer/whisper_tests.cpp
 tests/tensor/view/lifecycle_tests.cpp

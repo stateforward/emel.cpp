@@ -2,8 +2,8 @@
 
 #include <algorithm>
 #include <array>
-#include <cstdint>
 #include <climits>
+#include <cstdint>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -373,12 +373,9 @@ uint64_t quant_storage_bytes(const int64_t cols, const int64_t rows,
   return blocks * block_bytes;
 }
 
-void set_matrix_tensor(emel::model::data &model,
-                       const std::string_view name,
-                       const int32_t dtype,
-                       const int64_t cols,
-                       const int64_t rows,
-                       const uint64_t data_size) {
+void set_matrix_tensor(emel::model::data &model, const std::string_view name,
+                       const int32_t dtype, const int64_t cols,
+                       const int64_t rows, const uint64_t data_size) {
   auto *tensor = find_mutable_tensor(model, name);
   REQUIRE(tensor != nullptr);
   REQUIRE(cols > 0);
@@ -389,12 +386,9 @@ void set_matrix_tensor(emel::model::data &model,
   tensor->data_size = data_size;
 }
 
-void set_q4_k_matrix(emel::model::data &model,
-                     const std::string_view name,
-                     const int64_t cols,
-                     const int64_t rows) {
-  REQUIRE(cols % static_cast<int64_t>(emel::kernel::detail::quant::QK_K) ==
-          0);
+void set_q4_k_matrix(emel::model::data &model, const std::string_view name,
+                     const int64_t cols, const int64_t rows) {
+  REQUIRE(cols % static_cast<int64_t>(emel::kernel::detail::quant::QK_K) == 0);
   set_matrix_tensor(model, name, emel::kernel::detail::dtype_q4_k, cols, rows,
                     q4_k_storage_bytes(cols, rows));
 }
@@ -743,11 +737,11 @@ TEST_CASE("moshi lm contract accounts for supported dense tensor byte widths") {
     CAPTURE(entry.name);
     auto model = std::make_unique<emel::model::data>(*loaded.model);
     configure_q4_k_lm_contract(*model);
-    set_matrix_tensor(
-        *model, "lm.text_emb.weight", entry.dtype, model->moshi_lm.dim,
-        model->moshi_lm.text_card + 1,
-        dense_storage_bytes(model->moshi_lm.dim, model->moshi_lm.text_card + 1,
-                            entry.element_bytes));
+    set_matrix_tensor(*model, "lm.text_emb.weight", entry.dtype,
+                      model->moshi_lm.dim, model->moshi_lm.text_card + 1,
+                      dense_storage_bytes(model->moshi_lm.dim,
+                                          model->moshi_lm.text_card + 1,
+                                          entry.element_bytes));
     CHECK(moshi::validate_execution_contract(*model) == k_none);
 
     auto *tensor = find_mutable_tensor(*model, "lm.text_emb.weight");
@@ -769,12 +763,8 @@ TEST_CASE("moshi lm contract accepts supported gguf tensor layouts") {
     int32_t dtype = 0;
   };
   const std::array cases{
-      dtype_case{"f32", 0},
-      dtype_case{"q4_0", 2},
-      dtype_case{"q8_0", 8},
-      dtype_case{"q2_k", 10},
-      dtype_case{"q3_k", 11},
-      dtype_case{"q4_k", 12},
+      dtype_case{"f32", 0},   dtype_case{"q4_0", 2},  dtype_case{"q8_0", 8},
+      dtype_case{"q2_k", 10}, dtype_case{"q3_k", 11}, dtype_case{"q4_k", 12},
       dtype_case{"q6_k", 14},
   };
 
@@ -782,19 +772,17 @@ TEST_CASE("moshi lm contract accepts supported gguf tensor layouts") {
     CAPTURE(entry.name);
     auto model = std::make_unique<emel::model::data>(*loaded.model);
     configure_q4_k_lm_contract(*model);
-    const auto layout =
-        emel::gguf::loader::detail::ggml_layout(
-            static_cast<uint32_t>(entry.dtype));
+    const auto layout = emel::gguf::loader::detail::ggml_layout(
+        static_cast<uint32_t>(entry.dtype));
     REQUIRE(layout.block_size > 0u);
     REQUIRE(layout.type_size > 0u);
-    REQUIRE(static_cast<uint64_t>(model->moshi_lm.dim) %
-                layout.block_size ==
+    REQUIRE(static_cast<uint64_t>(model->moshi_lm.dim) % layout.block_size ==
             0u);
-    set_matrix_tensor(
-        *model, "lm.text_emb.weight", entry.dtype, model->moshi_lm.dim,
-        model->moshi_lm.text_card + 1,
-        quant_storage_bytes(model->moshi_lm.dim, model->moshi_lm.text_card + 1,
-                            layout.block_size, layout.type_size));
+    set_matrix_tensor(*model, "lm.text_emb.weight", entry.dtype,
+                      model->moshi_lm.dim, model->moshi_lm.text_card + 1,
+                      quant_storage_bytes(model->moshi_lm.dim,
+                                          model->moshi_lm.text_card + 1,
+                                          layout.block_size, layout.type_size));
     CHECK(moshi::validate_execution_contract(*model) == k_none);
 
     auto *tensor = find_mutable_tensor(*model, "lm.text_emb.weight");
@@ -816,38 +804,36 @@ TEST_CASE("moshi lm contract rejects unsupported known gguf tensor layouts") {
     int32_t dtype = 0;
   };
   const std::array cases{
-      dtype_case{"f16", 1},      dtype_case{"q4_1", 3},
-      dtype_case{"q5_0", 6},
-      dtype_case{"q5_1", 7},     dtype_case{"q8_1", 9},
-      dtype_case{"q5_k", 13},    dtype_case{"q8_k", 15},
-      dtype_case{"iq2_xxs", 16}, dtype_case{"iq2_xs", 17},
-      dtype_case{"iq3_xxs", 18}, dtype_case{"iq1_s", 19},
-      dtype_case{"iq4_nl", 20},  dtype_case{"iq3_s", 21},
-      dtype_case{"iq2_s", 22},   dtype_case{"iq4_xs", 23},
-      dtype_case{"i8", 24},      dtype_case{"i16", 25},
-      dtype_case{"i32", 26},     dtype_case{"i64", 27},
-      dtype_case{"f64", 28},     dtype_case{"iq1_m", 29},
-      dtype_case{"bf16", 30},    dtype_case{"tq1_0", 34},
-      dtype_case{"tq2_0", 35},   dtype_case{"mxfp4", 39},
+      dtype_case{"f16", 1},     dtype_case{"q4_1", 3},
+      dtype_case{"q5_0", 6},    dtype_case{"q5_1", 7},
+      dtype_case{"q8_1", 9},    dtype_case{"q5_k", 13},
+      dtype_case{"q8_k", 15},   dtype_case{"iq2_xxs", 16},
+      dtype_case{"iq2_xs", 17}, dtype_case{"iq3_xxs", 18},
+      dtype_case{"iq1_s", 19},  dtype_case{"iq4_nl", 20},
+      dtype_case{"iq3_s", 21},  dtype_case{"iq2_s", 22},
+      dtype_case{"iq4_xs", 23}, dtype_case{"i8", 24},
+      dtype_case{"i16", 25},    dtype_case{"i32", 26},
+      dtype_case{"i64", 27},    dtype_case{"f64", 28},
+      dtype_case{"iq1_m", 29},  dtype_case{"bf16", 30},
+      dtype_case{"tq1_0", 34},  dtype_case{"tq2_0", 35},
+      dtype_case{"mxfp4", 39},
   };
 
   for (const auto &entry : cases) {
     CAPTURE(entry.name);
     auto model = std::make_unique<emel::model::data>(*loaded.model);
     configure_q4_k_lm_contract(*model);
-    const auto layout =
-        emel::gguf::loader::detail::ggml_layout(
-            static_cast<uint32_t>(entry.dtype));
+    const auto layout = emel::gguf::loader::detail::ggml_layout(
+        static_cast<uint32_t>(entry.dtype));
     REQUIRE(layout.block_size > 0u);
     REQUIRE(layout.type_size > 0u);
-    REQUIRE(static_cast<uint64_t>(model->moshi_lm.dim) %
-                layout.block_size ==
+    REQUIRE(static_cast<uint64_t>(model->moshi_lm.dim) % layout.block_size ==
             0u);
-    set_matrix_tensor(
-        *model, "lm.text_emb.weight", entry.dtype, model->moshi_lm.dim,
-        model->moshi_lm.text_card + 1,
-        quant_storage_bytes(model->moshi_lm.dim, model->moshi_lm.text_card + 1,
-                            layout.block_size, layout.type_size));
+    set_matrix_tensor(*model, "lm.text_emb.weight", entry.dtype,
+                      model->moshi_lm.dim, model->moshi_lm.text_card + 1,
+                      quant_storage_bytes(model->moshi_lm.dim,
+                                          model->moshi_lm.text_card + 1,
+                                          layout.block_size, layout.type_size));
     CHECK(moshi::validate_execution_contract(*model) != k_none);
   }
 }
@@ -1012,9 +998,10 @@ bool append_cloned_tensor(emel::model::data &model,
   return false;
 }
 
-}  // namespace
+} // namespace
 
-TEST_CASE("mimi contract validation rejects rvq split counts past the codec cap") {
+TEST_CASE(
+    "mimi contract validation rejects rvq split counts past the codec cap") {
   auto loaded = load_fixture_or_skip("mimi-tiny.gguf");
   if (loaded.model == nullptr) {
     return;
@@ -1036,7 +1023,8 @@ TEST_CASE("mimi contract validation rejects rvq split counts past the codec cap"
   CHECK(moshi::validate_execution_contract(model) != k_none);
 }
 
-TEST_CASE("mimi contract validation rejects transformer layers past the codec cap") {
+TEST_CASE(
+    "mimi contract validation rejects transformer layers past the codec cap") {
   auto loaded = load_fixture_or_skip("mimi-tiny.gguf");
   if (loaded.model == nullptr) {
     return;
@@ -1048,17 +1036,22 @@ TEST_CASE("mimi contract validation rejects transformer layers past the codec ca
   // layers 2..16 for both families so every probed tensor exists.
   auto &model = *loaded.model;
   static constexpr const char *k_layer_tensors[] = {
-      "norm1.weight",  "norm1.bias",
-      "norm2.weight",  "norm2.bias",
-      "layer_scale_1.scale", "layer_scale_2.scale",
-      "self_attn.in_projs.0.weight", "self_attn.out_projs.0.weight",
-      "linear1.weight", "linear2.weight",
+      "norm1.weight",
+      "norm1.bias",
+      "norm2.weight",
+      "norm2.bias",
+      "layer_scale_1.scale",
+      "layer_scale_2.scale",
+      "self_attn.in_projs.0.weight",
+      "self_attn.out_projs.0.weight",
+      "linear1.weight",
+      "linear2.weight",
   };
   for (const char *family : {"encoder_transformer", "decoder_transformer"}) {
     for (int layer = 2; layer <= 16; ++layer) {
       for (const char *suffix : k_layer_tensors) {
-        const std::string source = std::string("mimi.") + family +
-                                   ".transformer.layers.1." + suffix;
+        const std::string source =
+            std::string("mimi.") + family + ".transformer.layers.1." + suffix;
         const std::string clone = std::string("mimi.") + family +
                                   ".transformer.layers." +
                                   std::to_string(layer) + "." + suffix;
@@ -1135,7 +1128,8 @@ TEST_CASE("mimi contract validation rejects a mixed f16 conv class") {
   CHECK(moshi::validate_execution_contract(model) != k_none);
 }
 
-TEST_CASE("mimi contract validation requires f16 rvq projections in the f16 class") {
+TEST_CASE(
+    "mimi contract validation requires f16 rvq projections in the f16 class") {
   auto loaded = load_fixture_or_skip("mimi-tiny.gguf");
   if (loaded.model == nullptr) {
     return;
@@ -1154,7 +1148,8 @@ TEST_CASE("mimi contract validation requires f16 rvq projections in the f16 clas
     const std::string_view name{model.name_storage.data() + tensor.name_offset,
                                 tensor.name_length};
     const bool non_transposed_conv =
-        (name.starts_with("mimi.encoder.") || name.starts_with("mimi.decoder.") ||
+        (name.starts_with("mimi.encoder.") ||
+         name.starts_with("mimi.decoder.") ||
          name.starts_with("mimi.downsample.")) &&
         name.ends_with("conv.conv.weight") &&
         name.find("convtr") == std::string_view::npos;
@@ -1164,7 +1159,7 @@ TEST_CASE("mimi contract validation requires f16 rvq projections in the f16 clas
     tensor.type = k_dtype_f16;
     flipped += 1;
   }
-  REQUIRE(flipped >= 25u);  // 14 encoder + 10 decoder + downsample
+  REQUIRE(flipped >= 25u); // 14 encoder + 10 decoder + downsample
   CHECK(moshi::validate_execution_contract(model) != k_none);
 }
 
@@ -1196,7 +1191,8 @@ TEST_CASE("mimi contract validation rejects oversized conv geometry extents") {
   CHECK(moshi::validate_execution_contract(model) != k_none);
 }
 
-TEST_CASE("mimi contract validation rejects a frame length off the stride chain") {
+TEST_CASE(
+    "mimi contract validation rejects a frame length off the stride chain") {
   auto loaded = load_fixture_or_skip("mimi-tiny.gguf");
   if (loaded.model == nullptr) {
     return;
@@ -1205,11 +1201,12 @@ TEST_CASE("mimi contract validation rejects a frame length off the stride chain"
   // The fixed encoder/downsample stride chain reduces exactly 1920 samples
   // to one token; a positive finite frame rate producing any other frame
   // length validated here and then failed plan_seanet/plan_codec.
-  loaded.model->mimi.frame_rate = 25.0f;  // 24000 / 25 = 960 samples
+  loaded.model->mimi.frame_rate = 25.0f; // 24000 / 25 = 960 samples
   CHECK(moshi::validate_execution_contract(*loaded.model) != k_none);
 }
 
-TEST_CASE("mimi contract validation rejects codebook extents past the codec cap") {
+TEST_CASE(
+    "mimi contract validation rejects codebook extents past the codec cap") {
   auto loaded = load_fixture_or_skip("mimi-tiny.gguf");
   if (loaded.model == nullptr) {
     return;
@@ -1237,7 +1234,8 @@ TEST_CASE("mimi contract validation rejects codebook extents past the codec cap"
   CHECK(moshi::validate_execution_contract(model) != k_none);
 }
 
-TEST_CASE("mimi contract validation rejects non-float tensors the binder consumes") {
+TEST_CASE(
+    "mimi contract validation rejects non-float tensors the binder consumes") {
   auto loaded = load_fixture_or_skip("mimi-tiny.gguf");
   if (loaded.model == nullptr) {
     return;
@@ -1266,17 +1264,17 @@ TEST_CASE("mimi contract validation rejects non-float tensors the binder consume
   };
 
   SUBCASE("bf16 transformer vector") {
-    REQUIRE(flip_type(
-        "mimi.encoder_transformer.transformer.layers.1.norm2.bias",
-        k_dtype_bf16));
+    REQUIRE(
+        flip_type("mimi.encoder_transformer.transformer.layers.1.norm2.bias",
+                  k_dtype_bf16));
   }
   SUBCASE("bf16 seanet conv in the f32 class") {
     REQUIRE(flip_type("mimi.decoder.model.0.conv.conv.weight", k_dtype_bf16));
   }
   SUBCASE("q8_0 rvq codebook") {
-    REQUIRE(flip_type(
-        "mimi.quantizer.rvq_first.vq.layers.0._codebook.embedding",
-        k_dtype_q8_0));
+    REQUIRE(
+        flip_type("mimi.quantizer.rvq_first.vq.layers.0._codebook.embedding",
+                  k_dtype_q8_0));
   }
   CHECK(moshi::validate_execution_contract(model) != k_none);
 }
@@ -1298,12 +1296,12 @@ TEST_CASE("mimi contract validation rejects mixed transformer mlp widths") {
                                 tensor.name_length};
     if (name ==
         "mimi.encoder_transformer.transformer.layers.1.linear1.weight") {
-      tensor.dims[1] = 1;  // storage stays over-sized, width shrinks
+      tensor.dims[1] = 1; // storage stays over-sized, width shrinks
       narrowed = true;
     }
     if (name ==
         "mimi.encoder_transformer.transformer.layers.1.linear2.weight") {
-      tensor.dims[0] = 1;  // keep linear2 consistent with the narrowed layer
+      tensor.dims[0] = 1; // keep linear2 consistent with the narrowed layer
     }
   }
   REQUIRE(narrowed);
@@ -1380,7 +1378,8 @@ TEST_CASE("mimi contract validation requires the fixed seanet topology") {
   CHECK(moshi::validate_execution_contract(model) != k_none);
 }
 
-TEST_CASE("mimi contract validation rejects q8 classes with misaligned widths") {
+TEST_CASE(
+    "mimi contract validation rejects q8 classes with misaligned widths") {
   auto loaded = load_fixture_or_skip("mimi-tiny.gguf");
   if (loaded.model == nullptr) {
     return;
@@ -1402,7 +1401,7 @@ TEST_CASE("mimi contract validation rejects q8 classes with misaligned widths") 
         name.find("linear2.weight") != std::string_view::npos ||
         name.find("_proj.weight") != std::string_view::npos;
     if (projection && name.starts_with("mimi.")) {
-      tensor.type = 8;  // q8_0
+      tensor.type = 8; // q8_0
       flipped += 1;
     }
   }
@@ -1470,9 +1469,7 @@ TEST_CASE("mimi contract validation requires the rvq projections") {
       const size_t underscore = name.find("input_proj") + 5u;
       model.name_storage[tensor.name_offset + underscore] = 'x';
     }
-    SUBCASE("wrong projection element count") {
-      tensor.dims[0] += 1;
-    }
+    SUBCASE("wrong projection element count") { tensor.dims[0] += 1; }
     corrupted = true;
   }
   REQUIRE(corrupted);
@@ -1519,9 +1516,7 @@ TEST_CASE("mimi contract validation requires every acoustic rvq codebook") {
       const size_t digit = name.find("layers.1") + 7u;
       model.name_storage[tensor.name_offset + digit] = '9';
     }
-    SUBCASE("wrong intermediate codebook shape") {
-      tensor.dims[1] += 1;
-    }
+    SUBCASE("wrong intermediate codebook shape") { tensor.dims[1] += 1; }
     corrupted = true;
   }
   REQUIRE(corrupted);

@@ -1,10 +1,10 @@
 #pragma once
 
-#include "emel/speech/recognizer/context.hpp"
-#include "emel/speech/recognizer/detail.hpp"
-#include "emel/speech/recognizer/events.hpp"
+#include "emel/speech/transcriber/context.hpp"
+#include "emel/speech/transcriber/detail.hpp"
+#include "emel/speech/transcriber/events.hpp"
 
-namespace emel::speech::recognizer::guard {
+namespace emel::speech::transcriber::guard {
 
 struct guard_valid_initialize {
   bool operator()(const event::initialize_run &runtime_ev,
@@ -21,42 +21,63 @@ struct guard_invalid_initialize {
   }
 };
 
-template <class route_policy> struct guard_initialize_tokenizer_supported {
-  bool operator()(const event::initialize_run &runtime_ev,
-                  const action::context &) const noexcept {
-    return typename route_policy::guard_tokenizer_supported{}(
-        runtime_ev.request.tokenizer);
+// Injected-dependency support predicates: the engine accepts a request only
+// when the caller injected supported component kinds, the component contracts
+// were bound against the same model the event carries, and the tokenizer assets
+// match the pinned checksum in the dependencies. Content-level validation
+// (model tensors, workspace capacity, tokenizer JSON control tokens) is owned
+// by the component machines and re-checked on every component dispatch.
+struct guard_tokenizer_assets_supported {
+  bool operator()(const event::tokenizer_assets &assets,
+                  const dependencies &deps) const noexcept {
+    return deps.tokenizer_kind !=
+               speech::tokenizer::tokenizer_kind::unsupported &&
+           assets.model_json.data() != nullptr && !assets.model_json.empty() &&
+           !deps.tokenizer_sha256.empty() &&
+           assets.sha256 == deps.tokenizer_sha256;
   }
 };
 
-template <class route_policy> struct guard_initialize_tokenizer_unsupported {
+struct guard_model_contracts_supported {
+  bool operator()(const emel::model::data &model,
+                  const dependencies &deps) const noexcept {
+    return deps.encoder_kind != speech::encoder::encoder_kind::unsupported &&
+           deps.decoder_kind != speech::decoder::decoder_kind::unsupported &&
+           deps.encoder_contract.model == &model &&
+           deps.encoder_contract.embedding_length > 0 &&
+           deps.decoder_contract.model == &model &&
+           deps.decoder_contract.vocab_size > 0 &&
+           deps.decoder_contract.embedding_length > 0;
+  }
+};
+
+struct guard_initialize_tokenizer_supported {
   bool operator()(const event::initialize_run &runtime_ev,
                   const action::context &ctx) const noexcept {
-    return !guard_initialize_tokenizer_supported<route_policy>{}(runtime_ev,
-                                                                 ctx);
+    return guard_tokenizer_assets_supported{}(runtime_ev.request.tokenizer,
+                                              ctx.deps);
   }
 };
 
-template <class route_policy> struct guard_initialize_model_supported {
-  bool operator()(const event::initialize_run &runtime_ev,
-                  const action::context &) const noexcept {
-    return typename route_policy::guard_model_supported{}(
-        runtime_ev.request.model);
-  }
-};
-
-template <class route_policy>
-struct guard_initialize_model_supported_and_route_storage_ready {
+struct guard_initialize_tokenizer_unsupported {
   bool operator()(const event::initialize_run &runtime_ev,
                   const action::context &ctx) const noexcept {
-    return guard_initialize_model_supported<route_policy>{}(runtime_ev, ctx);
+    return !guard_initialize_tokenizer_supported{}(runtime_ev, ctx);
   }
 };
 
-template <class route_policy> struct guard_initialize_unsupported_model {
+struct guard_initialize_model_supported {
   bool operator()(const event::initialize_run &runtime_ev,
                   const action::context &ctx) const noexcept {
-    return !guard_initialize_model_supported<route_policy>{}(runtime_ev, ctx);
+    return guard_model_contracts_supported{}(runtime_ev.request.model,
+                                             ctx.deps);
+  }
+};
+
+struct guard_initialize_unsupported_model {
+  bool operator()(const event::initialize_run &runtime_ev,
+                  const action::context &ctx) const noexcept {
+    return !guard_initialize_model_supported{}(runtime_ev, ctx);
   }
 };
 
@@ -119,17 +140,20 @@ struct guard_invalid_recognize {
   }
 };
 
-template <class route_policy> struct guard_recognizer_route_ready {
+struct guard_transcriber_ready {
   bool operator()(const event::recognize_run &runtime_ev,
-                  const action::context &) const noexcept {
-    return typename route_policy::guard_recognition_ready{}(runtime_ev.request);
+                  const action::context &ctx) const noexcept {
+    return guard_model_contracts_supported{}(runtime_ev.request.model,
+                                             ctx.deps) &&
+           guard_tokenizer_assets_supported{}(runtime_ev.request.tokenizer,
+                                              ctx.deps);
   }
 };
 
-template <class route_policy> struct guard_recognizer_route_unsupported {
+struct guard_transcriber_unsupported {
   bool operator()(const event::recognize_run &runtime_ev,
                   const action::context &ctx) const noexcept {
-    return !guard_recognizer_route_ready<route_policy>{}(runtime_ev, ctx);
+    return !guard_transcriber_ready{}(runtime_ev, ctx);
   }
 };
 
@@ -160,6 +184,21 @@ struct guard_decoder_failure {
   bool operator()(const event::recognize_run &runtime_ev,
                   const action::context &ctx) const noexcept {
     return !guard_decoder_success{}(runtime_ev, ctx);
+  }
+};
+
+struct guard_detokenize_success {
+  bool operator()(const event::recognize_run &runtime_ev,
+                  const action::context &) const noexcept {
+    return runtime_ev.ctx.detokenize_accepted &&
+           runtime_ev.ctx.err == detail::to_error(error::none);
+  }
+};
+
+struct guard_detokenize_failure {
+  bool operator()(const event::recognize_run &runtime_ev,
+                  const action::context &ctx) const noexcept {
+    return !guard_detokenize_success{}(runtime_ev, ctx);
   }
 };
 
@@ -205,23 +244,4 @@ struct guard_no_recognize_error_out {
   }
 };
 
-} // namespace emel::speech::recognizer::guard
-
-namespace emel::speech::recognizer::route {
-
-struct guard_unsupported_tokenizer {
-  bool operator()(const event::tokenizer_assets &assets) const noexcept {
-    return assets.model_json.data() != nullptr && !assets.model_json.empty() &&
-           assets.sha256.data() != nullptr && !assets.sha256.empty();
-  }
-};
-
-struct guard_unsupported_model {
-  bool operator()(const emel::model::data &) const noexcept { return false; }
-};
-
-struct guard_unsupported_recognition {
-  bool operator()(const event::recognize &) const noexcept { return false; }
-};
-
-} // namespace emel::speech::recognizer::route
+} // namespace emel::speech::transcriber::guard

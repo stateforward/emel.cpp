@@ -4,29 +4,29 @@
 #include <stateforward/sml.hpp>
 
 #include "emel/sm.hpp"
-#include "emel/speech/recognizer/actions.hpp"
-#include "emel/speech/recognizer/context.hpp"
-#include "emel/speech/recognizer/events.hpp"
-#include "emel/speech/recognizer/guards.hpp"
+#include "emel/speech/transcriber/actions.hpp"
+#include "emel/speech/transcriber/context.hpp"
+#include "emel/speech/transcriber/events.hpp"
+#include "emel/speech/transcriber/guards.hpp"
 
-namespace emel::speech::recognizer {
+namespace emel::speech::transcriber {
 
 struct state_uninitialized {};
 struct state_initializing {};
 struct state_tokenizer_decision {};
-struct state_model_route_decision {};
+struct state_model_support_decision {};
 struct state_initialize_success {};
 struct state_initialize_error_out_decision {};
 struct state_initialize_done_callback_decision {};
 struct state_initialize_error_callback_decision {};
 struct state_ready {};
-struct state_recognize_route_decision {};
-struct state_recognize_preparing {};
-struct state_route_encoding {};
-struct state_route_encoder_decision {};
-struct state_route_decoding {};
-struct state_route_decoder_decision {};
-struct state_route_detokenizing {};
+struct state_recognize_support_decision {};
+struct state_encoding {};
+struct state_encoder_decision {};
+struct state_decoding {};
+struct state_decoder_decision {};
+struct state_detokenizing {};
+struct state_detokenize_decision {};
 struct state_recognize_success {};
 struct state_recognize_error_out_decision {};
 struct state_recognize_done_callback_decision {};
@@ -34,20 +34,29 @@ struct state_recognize_error_callback_decision {};
 struct state_done {};
 struct state_errored {};
 
-namespace route {
+/*
+speech transcriber engine (single source of truth)
 
-struct unsupported {
-  using guard_tokenizer_supported = guard_unsupported_tokenizer;
-  using guard_model_supported = guard_unsupported_model;
-  using guard_recognition_ready = guard_unsupported_recognition;
-  using effect_encode = effect_encode_unsupported;
-  using effect_decode = effect_decode_unsupported;
-  using effect_detokenize = effect_detokenize_unsupported;
-};
+state purpose
+- initialize validates the injected dependencies against the request: the
+  tokenizer assets must match the pinned checksum and the component contracts
+  must have been bound against the same model the event carries.
+- recognize drives the encode -> decode -> detokenize pipeline by dispatching
+  into the injected component actors (speech/encoder, speech/decoder,
+  speech/tokenizer facades); each phase outcome is an explicit decision state.
+- done/error error-out and callback decision states keep the error_out and
+  on_done/on_error channels as explicit transitions.
 
-} // namespace route
-
-template <class route_policy = route::unsupported> struct model {
+control invariants
+- the machine contains no model-family names, contracts, routes, constants, or
+  variant behavior; which variant runs is decided entirely by the injected
+  dependencies (component kinds + contracts + decode policy), and content-level
+  validation is owned by the component machines themselves.
+- guards are pure predicates of (event, context); all mutation happens in
+  actions; component dispatch is synchronous, acyclic, and joined before the
+  action returns.
+*/
+struct model {
   auto operator()() const {
     namespace sml = stateforward::sml;
 
@@ -73,19 +82,19 @@ template <class route_policy = route::unsupported> struct model {
 
       , sml::state<state_tokenizer_decision> <= sml::state<state_initializing>
           + sml::completion<event::initialize_run>
-      , sml::state<state_model_route_decision> <= sml::state<state_tokenizer_decision>
+      , sml::state<state_model_support_decision> <= sml::state<state_tokenizer_decision>
           + sml::completion<event::initialize_run>
-              [ guard::guard_initialize_tokenizer_supported<route_policy>{} ]
+              [ guard::guard_initialize_tokenizer_supported{} ]
       , sml::state<state_initialize_error_out_decision> <= sml::state<state_tokenizer_decision>
           + sml::completion<event::initialize_run>
-              [ guard::guard_initialize_tokenizer_unsupported<route_policy>{} ]
+              [ guard::guard_initialize_tokenizer_unsupported{} ]
           / action::effect_mark_tokenizer_invalid
-      , sml::state<state_initialize_success> <= sml::state<state_model_route_decision>
+      , sml::state<state_initialize_success> <= sml::state<state_model_support_decision>
           + sml::completion<event::initialize_run>
-              [ guard::guard_initialize_model_supported_and_route_storage_ready<route_policy>{} ]
-      , sml::state<state_initialize_error_out_decision> <= sml::state<state_model_route_decision>
+              [ guard::guard_initialize_model_supported{} ]
+      , sml::state<state_initialize_error_out_decision> <= sml::state<state_model_support_decision>
           + sml::completion<event::initialize_run>
-              [ guard::guard_initialize_unsupported_model<route_policy>{} ]
+              [ guard::guard_initialize_unsupported_model{} ]
           / action::effect_mark_unsupported_model
 
       , sml::state<state_initialize_done_callback_decision> <= sml::state<state_initialize_success>
@@ -113,7 +122,7 @@ template <class route_policy = route::unsupported> struct model {
 
       //------------------------------------------------------------------------------//
       // Recognition.
-      , sml::state<state_recognize_route_decision> <= sml::state<state_ready>
+      , sml::state<state_recognize_support_decision> <= sml::state<state_ready>
           + sml::event<event::recognize_run> [ guard::guard_valid_recognize{} ]
           / action::effect_begin_recognize
       , sml::state<state_recognize_error_out_decision> <= sml::state<state_ready>
@@ -127,35 +136,41 @@ template <class route_policy = route::unsupported> struct model {
           / action::effect_mark_uninitialized
 
       , sml::state<state_recognize_error_out_decision> <=
-          sml::state<state_recognize_route_decision>
+          sml::state<state_recognize_support_decision>
           + sml::completion<event::recognize_run>
-              [ guard::guard_recognizer_route_unsupported<route_policy>{} ]
+              [ guard::guard_transcriber_unsupported{} ]
           / action::effect_mark_uninitialized
-      , sml::state<state_route_encoding> <= sml::state<state_recognize_route_decision>
+      , sml::state<state_encoding> <= sml::state<state_recognize_support_decision>
           + sml::completion<event::recognize_run>
-              [ guard::guard_recognizer_route_ready<route_policy>{} ]
-          / typename route_policy::effect_encode{}
-      , sml::state<state_route_encoder_decision> <= sml::state<state_route_encoding>
+              [ guard::guard_transcriber_ready{} ]
+          / action::effect_encode
+      , sml::state<state_encoder_decision> <= sml::state<state_encoding>
           + sml::completion<event::recognize_run>
-      , sml::state<state_route_decoding> <= sml::state<state_route_encoder_decision>
+      , sml::state<state_decoding> <= sml::state<state_encoder_decision>
           + sml::completion<event::recognize_run> [ guard::guard_encoder_success{} ]
-          / typename route_policy::effect_decode{}
+          / action::effect_decode
       , sml::state<state_recognize_error_out_decision> <=
-          sml::state<state_route_encoder_decision>
+          sml::state<state_encoder_decision>
           + sml::completion<event::recognize_run> [ guard::guard_encoder_failure{} ]
           / action::effect_mark_backend_error
-      , sml::state<state_route_decoder_decision> <= sml::state<state_route_decoding>
+      , sml::state<state_decoder_decision> <= sml::state<state_decoding>
           + sml::completion<event::recognize_run>
-      , sml::state<state_route_detokenizing> <= sml::state<state_route_decoder_decision>
+      , sml::state<state_detokenizing> <= sml::state<state_decoder_decision>
           + sml::completion<event::recognize_run> [ guard::guard_decoder_success{} ]
-          / typename route_policy::effect_detokenize{}
+          / action::effect_detokenize
       , sml::state<state_recognize_error_out_decision> <=
-          sml::state<state_route_decoder_decision>
+          sml::state<state_decoder_decision>
           + sml::completion<event::recognize_run> [ guard::guard_decoder_failure{} ]
           / action::effect_mark_backend_error
-      , sml::state<state_recognize_success> <= sml::state<state_route_detokenizing>
+      , sml::state<state_detokenize_decision> <= sml::state<state_detokenizing>
           + sml::completion<event::recognize_run>
+      , sml::state<state_recognize_success> <= sml::state<state_detokenize_decision>
+          + sml::completion<event::recognize_run> [ guard::guard_detokenize_success{} ]
           / action::effect_publish_recognition_outputs
+      , sml::state<state_recognize_error_out_decision> <=
+          sml::state<state_detokenize_decision>
+          + sml::completion<event::recognize_run> [ guard::guard_detokenize_failure{} ]
+          / action::effect_mark_backend_error
 
       , sml::state<state_recognize_done_callback_decision> <=
           sml::state<state_recognize_success>
@@ -197,13 +212,26 @@ template <class route_policy = route::unsupported> struct model {
   }
 };
 
-template <class route_policy = route::unsupported>
-struct sm : public emel::sm<model<route_policy>, action::context> {
-  using base_type = emel::sm<model<route_policy>, action::context>;
+struct sm : public emel::sm<model, action::context> {
+  using base_type = emel::sm<model, action::context>;
   using base_type::is;
   using base_type::visit_current_states;
 
-  sm() = default;
+  sm() : sm(dependencies{}) {}
+
+  explicit sm(const dependencies &deps)
+      : base_type(), encoder_(deps.encoder_kind), decoder_(deps.decoder_kind),
+        tokenizer_(deps.tokenizer_kind) {
+    this->context_.deps = deps;
+    this->context_.encoder = &encoder_;
+    this->context_.decoder = &decoder_;
+    this->context_.tokenizer = &tokenizer_;
+  }
+
+  sm(const sm &) = delete;
+  sm &operator=(const sm &) = delete;
+  sm(sm &&) = delete;
+  sm &operator=(sm &&) = delete;
 
   bool process_event(const event::initialize &ev) {
     event::initialize_ctx ctx{};
@@ -218,14 +246,19 @@ struct sm : public emel::sm<model<route_policy>, action::context> {
     const bool accepted = base_type::process_event(runtime_ev);
     return accepted && ctx.err == detail::to_error(error::none);
   }
+
+private:
+  speech::encoder::any encoder_;
+  speech::decoder::any decoder_;
+  speech::tokenizer::any tokenizer_;
 };
 
-using Recognizer = sm<>;
+using Transcriber = sm;
 
-} // namespace emel::speech::recognizer
+} // namespace emel::speech::transcriber
 
 namespace emel {
 
-using SpeechRecognizer = speech::recognizer::sm<>;
+using SpeechTranscriber = speech::transcriber::sm;
 
 } // namespace emel

@@ -60,8 +60,7 @@ tensor_elements(const emel::model::data::tensor_record &tensor) noexcept {
   uint64_t count = 1;
   for (int32_t dim = 0; dim < tensor.n_dims; ++dim) {
     const int64_t extent = tensor.dims[static_cast<size_t>(dim)];
-    if (extent <= 0 ||
-        static_cast<uint64_t>(extent) > UINT64_MAX / count) {
+    if (extent <= 0 || static_cast<uint64_t>(extent) > UINT64_MAX / count) {
       return 0u;
     }
     count *= static_cast<uint64_t>(extent);
@@ -2026,10 +2025,9 @@ bool bind_transformer(arena_cursor_t<dry_run> &cursor, uint64_t &state_cursor,
 
 template <bool dry_run>
 bool bind_rvq_split(arena_cursor_t<dry_run> &cursor,
-                    const emel::model::data &model_data,
-                    const char *split, const int32_t level_count,
-                    const bool with_f16, const bool with_q8,
-                    rvq_split_weights &split_out) noexcept {
+                    const emel::model::data &model_data, const char *split,
+                    const int32_t level_count, const bool with_f16,
+                    const bool with_q8, rvq_split_weights &split_out) noexcept {
   // The per-level codebook/search-table arrays are k_max_quantizer_levels
   // wide; a split larger than that is out of contract regardless of which
   // tensors the model carries.
