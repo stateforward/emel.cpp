@@ -320,6 +320,24 @@ def main() -> int:
           "prompt_text_token": prompt_text_token,
           "frame_samples": frame_samples,
       },
+      "models": {
+          "emel_mimi": {
+              "path": str(Path(args.emel_mimi).resolve()),
+              "sha256": sha256(Path(args.emel_mimi)),
+          },
+          "reference_mimi": {
+              "path": str(Path(args.reference_mimi).resolve()),
+              "sha256": sha256(Path(args.reference_mimi)),
+          },
+          "emel_lm": {
+              "path": str(Path(args.emel_lm).resolve()),
+              "sha256": sha256(Path(args.emel_lm)),
+          },
+          "reference_lm": {
+              "path": str(Path(args.reference_lm).resolve()),
+              "sha256": sha256(Path(args.reference_lm)),
+          },
+      },
       "input": {
           "path": str(Path(args.audio).resolve()),
           "sha256": sha256(Path(args.audio)),

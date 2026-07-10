@@ -107,6 +107,10 @@ TEST_CASE("personaplex compare keeps CPU and lane isolation explicit") {
   CHECK(wrapper_source.find("--audio \"$AUDIO\"") != std::string::npos);
   CHECK(wrapper_source.find("--inference-config \"$INFERENCE_CONFIG\"") !=
         std::string::npos);
+  CHECK(wrapper_source.find("--emel-lm PATH") != std::string::npos);
+  CHECK(wrapper_source.find("--emel-lm) EMEL_LM=") != std::string::npos);
+  CHECK(wrapper_source.find("--emel-mimi PATH") != std::string::npos);
+  CHECK(wrapper_source.find("--emel-mimi) EMEL_MIMI=") != std::string::npos);
   CHECK(wrapper_source.find("--data-format=LEI16@24000") != std::string::npos);
   CHECK(wrapper_source.find("mimi-e351c8d8-125-personaplex-emel.gguf") !=
         std::string::npos);
@@ -120,6 +124,10 @@ TEST_CASE("personaplex compare keeps CPU and lane isolation explicit") {
   CHECK(emel_source.find("sampling_seed = 1234") == std::string::npos);
   CHECK(emel_source.find(".max_blocks = 256") == std::string::npos);
   CHECK(compare_source.find("\"--n-q\", \"8\"") == std::string::npos);
+  CHECK(compare_source.find("\"emel_lm\": {") != std::string::npos);
+  CHECK(compare_source.find("\"reference_lm\": {") != std::string::npos);
+  CHECK(compare_source.find("\"emel_mimi\": {") != std::string::npos);
+  CHECK(compare_source.find("\"reference_mimi\": {") != std::string::npos);
   CHECK(setup_source.find("--inference-config \"$MOSHI_INFERENCE_CONFIG\"") !=
         std::string::npos);
   CHECK(converter_source.find("--inference-config") != std::string::npos);

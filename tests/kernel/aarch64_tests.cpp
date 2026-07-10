@@ -2674,6 +2674,7 @@ TEST_CASE(
 
   std::array<float, Q4_K_X8_ROWS> native_out = {};
   std::array<float, Q4_K_X8_ROWS> packed_bl4_out = {};
+  std::array<float, Q4_K_X8_ROWS> packed_bl4_f32_out = {};
   std::array<float, Q4_K_X8_ROWS> packed_bl8_out = {};
   std::array<float, Q4_K_X8_ROWS> packed_bl8_f32_out = {};
   const emel::kernel::event::op_mul_mat native_ev{
@@ -2694,6 +2695,13 @@ TEST_CASE(
       .src1 = make_q8_k_vector_src(q8_input.data(), QK_K),
       .dst = make_dst(packed_bl8_out.data(), dtype::f32, 1u, Q4_K_X8_ROWS),
   };
+  const emel::kernel::event::op_mul_mat packed_bl4_f32_ev{
+      .src0 = make_packed_q4_k_x8_bl4_src(packed_bl4_storage.data(), QK_K,
+                                          Q4_K_X8_ROWS),
+      .src1 = make_src(input.data(), dtype::f32, 1u, QK_K),
+      .dst =
+          make_dst(packed_bl4_f32_out.data(), dtype::f32, 1u, Q4_K_X8_ROWS),
+  };
   const emel::kernel::event::op_mul_mat packed_bl8_f32_ev{
       .src0 = make_packed_q4_k_x8_bl8_src(packed_bl8_storage.data(), QK_K,
                                           Q4_K_X8_ROWS),
@@ -2703,6 +2711,15 @@ TEST_CASE(
   };
   float argmax_score = 0.0f;
   int32_t argmax_index = -1;
+  float bl4_argmax_score = 0.0f;
+  int32_t bl4_argmax_index = -1;
+  const emel::kernel::event::op_mul_mat_argmax packed_bl4_f32_argmax_ev{
+      .src0 = make_packed_q4_k_x8_bl4_src(packed_bl4_storage.data(), QK_K,
+                                          Q4_K_X8_ROWS),
+      .src1 = make_src(input.data(), dtype::f32, 1u, QK_K),
+      .dst = make_dst(&bl4_argmax_score, dtype::f32, 1u, 1u),
+      .index_out = &bl4_argmax_index,
+  };
   const emel::kernel::event::op_mul_mat_argmax packed_bl8_f32_argmax_ev{
       .src0 = make_packed_q4_k_x8_bl8_src(packed_bl8_storage.data(), QK_K,
                                           Q4_K_X8_ROWS),
@@ -2713,11 +2730,16 @@ TEST_CASE(
 
   aarch64_sm native_machine{};
   aarch64_sm packed_bl4_machine{};
+  aarch64_sm packed_bl4_f32_machine{};
+  aarch64_sm packed_bl4_f32_argmax_machine{};
   aarch64_sm packed_bl8_machine{};
   aarch64_sm packed_bl8_f32_machine{};
   aarch64_sm packed_bl8_f32_argmax_machine{};
   CHECK(native_machine.process_event(native_ev));
   CHECK(packed_bl4_machine.process_event(packed_bl4_ev));
+  CHECK(packed_bl4_f32_machine.process_event(packed_bl4_f32_ev));
+  CHECK(packed_bl4_f32_argmax_machine.process_event(
+      packed_bl4_f32_argmax_ev));
   CHECK(packed_bl8_machine.process_event(packed_bl8_ev));
   CHECK(packed_bl8_f32_machine.process_event(packed_bl8_f32_ev));
   CHECK(packed_bl8_f32_argmax_machine.process_event(
@@ -2735,11 +2757,20 @@ TEST_CASE(
   for (size_t row = 0; row < native_out.size(); ++row) {
     CHECK(packed_bl4_out[row] ==
           doctest::Approx(native_out[row]).epsilon(1.0e-5f));
+    CHECK(packed_bl4_f32_out[row] ==
+          doctest::Approx(native_out[row]).epsilon(1.0e-5f));
     CHECK(packed_bl8_out[row] ==
           doctest::Approx(native_out[row]).epsilon(1.0e-5f));
     CHECK(packed_bl8_f32_out[row] ==
           doctest::Approx(native_out[row]).epsilon(1.0e-5f));
+    CHECK(std::bit_cast<uint32_t>(packed_bl8_out[row]) ==
+          std::bit_cast<uint32_t>(native_out[row]));
+    CHECK(std::bit_cast<uint32_t>(packed_bl8_f32_out[row]) ==
+          std::bit_cast<uint32_t>(native_out[row]));
   }
+  CHECK(bl4_argmax_index == expected_argmax_index);
+  CHECK(bl4_argmax_score ==
+        doctest::Approx(expected_argmax_score).epsilon(1.0e-5f));
   CHECK(argmax_index == expected_argmax_index);
   CHECK(argmax_score == doctest::Approx(expected_argmax_score).epsilon(1.0e-5f));
 
@@ -2749,6 +2780,17 @@ TEST_CASE(
   CHECK(packed_bl4_machine.optimized_q4_vector_packed_q8_rhs_dispatch_count() ==
         1u);
   CHECK(packed_bl4_machine.shared_q4_dispatch_count() == 0u);
+  CHECK(packed_bl4_f32_machine.optimized_q4_dispatch_count() == 1u);
+  CHECK(packed_bl4_f32_machine.optimized_q4_vector_dispatch_count() == 1u);
+  CHECK(packed_bl4_f32_machine.optimized_q4_vector_packed_dispatch_count() ==
+        1u);
+  CHECK(packed_bl4_f32_machine.shared_q4_dispatch_count() == 0u);
+  CHECK(packed_bl4_f32_argmax_machine.optimized_q4_dispatch_count() == 1u);
+  CHECK(packed_bl4_f32_argmax_machine.optimized_q4_vector_dispatch_count() ==
+        1u);
+  CHECK(packed_bl4_f32_argmax_machine
+            .optimized_q4_vector_packed_dispatch_count() == 1u);
+  CHECK(packed_bl4_f32_argmax_machine.shared_q4_dispatch_count() == 0u);
   CHECK(packed_bl8_machine.optimized_q4_dispatch_count() == 1u);
   CHECK(packed_bl8_machine.optimized_q4_vector_dispatch_count() == 1u);
   CHECK(packed_bl8_machine.optimized_q4_vector_packed_dispatch_count() == 1u);
@@ -2768,6 +2810,73 @@ TEST_CASE(
   CHECK(packed_bl8_f32_argmax_machine
             .optimized_q4_vector_packed_dispatch_count() == 1u);
   CHECK(packed_bl8_f32_argmax_machine.shared_q4_dispatch_count() == 0u);
+#endif
+}
+
+TEST_CASE("kernel_aarch64_q4_packed_bl8_preserves_native_block_order_bits") {
+#if !(defined(__aarch64__) && defined(__ARM_NEON) &&                           \
+      defined(__ARM_FEATURE_DOTPROD))
+  CHECK(true);
+#else
+  using emel::kernel::detail::quant::block_q4_k;
+  using emel::kernel::detail::quant::block_q4_kx8;
+  using emel::kernel::detail::quant::Q4_K_X8_ROWS;
+  using emel::kernel::detail::quant::QK_K;
+
+  constexpr uint64_t block_count = 4u;
+  constexpr uint64_t cols = block_count * QK_K;
+  std::array<block_q4_k, Q4_K_X8_ROWS * block_count> native_rows = {};
+  for (size_t row = 0; row < Q4_K_X8_ROWS; ++row) {
+    for (size_t block = 0; block < block_count; ++block) {
+      auto &value = native_rows[row * block_count + block];
+      value.d = static_cast<uint16_t>(0x3000u + row * 31u + block * 7u);
+      value.dmin = static_cast<uint16_t>(0x2800u + row * 19u + block * 11u);
+      for (size_t index = 0; index < value.scales.size(); ++index) {
+        value.scales[index] = static_cast<uint8_t>(
+            (row * 37u + block * 53u + index * 17u + 9u) & 0xffu);
+      }
+      for (size_t index = 0; index < value.qs.size(); ++index) {
+        value.qs[index] = static_cast<uint8_t>(
+            (row * 29u + block * 43u + index * 13u + 5u) & 0xffu);
+      }
+    }
+  }
+
+  const std::array<float, cols> input = [] {
+    std::array<float, cols> values = {};
+    for (size_t index = 0; index < values.size(); ++index) {
+      const int32_t centered = static_cast<int32_t>(index % 61u) - 30;
+      values[index] = static_cast<float>(centered) * 0.03125f;
+    }
+    return values;
+  }();
+
+  std::array<uint8_t, block_count * sizeof(block_q4_kx8)> packed = {};
+  REQUIRE(emel::kernel::detail::quant::pack_q4_k_rows_x8_bl8(
+      native_rows.data(), Q4_K_X8_ROWS, cols, packed.data()));
+
+  std::array<float, Q4_K_X8_ROWS> native_out = {};
+  std::array<float, Q4_K_X8_ROWS> packed_out = {};
+  const emel::kernel::event::op_mul_mat native_ev{
+      .src0 = make_quantized_src(native_rows.data(), dtype::q4_k, cols,
+                                 Q4_K_X8_ROWS),
+      .src1 = make_src(input.data(), dtype::f32, 1u, cols),
+      .dst = make_dst(native_out.data(), dtype::f32, 1u, Q4_K_X8_ROWS),
+  };
+  const emel::kernel::event::op_mul_mat packed_ev{
+      .src0 = make_packed_q4_k_x8_bl8_src(packed.data(), cols, Q4_K_X8_ROWS),
+      .src1 = make_src(input.data(), dtype::f32, 1u, cols),
+      .dst = make_dst(packed_out.data(), dtype::f32, 1u, Q4_K_X8_ROWS),
+  };
+
+  aarch64_sm native_machine{};
+  aarch64_sm packed_machine{};
+  REQUIRE(native_machine.process_event(native_ev));
+  REQUIRE(packed_machine.process_event(packed_ev));
+  for (size_t row = 0; row < native_out.size(); ++row) {
+    CHECK(std::bit_cast<uint32_t>(packed_out[row]) ==
+          std::bit_cast<uint32_t>(native_out[row]));
+  }
 #endif
 }
 

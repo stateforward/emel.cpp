@@ -2789,6 +2789,17 @@ inline int32_t q4_k_min_sum_neon(const uint8_t *mins,
 }
 #endif
 
+inline void
+accumulate_q4_k_scaled_sums(const uint16_t lhs_d, const uint16_t lhs_dmin,
+                            const float rhs_d, const int32_t min_sum,
+                            const int32_t dot_sum, float &sum) noexcept {
+  const float d = ::emel::kernel::detail::quant::fp16_to_fp32(lhs_d) * rhs_d;
+  const float dmin =
+      ::emel::kernel::detail::quant::fp16_to_fp32(lhs_dmin) * rhs_d;
+  sum -= dmin * static_cast<float>(min_sum);
+  sum += d * static_cast<float>(dot_sum);
+}
+
 inline void accumulate_q4_k_q8_k_block_neon(
     const ::emel::kernel::detail::quant::block_q4_k &lhs,
     const ::emel::kernel::detail::quant::block_q8_k &rhs, float &sum) noexcept {
@@ -2838,11 +2849,8 @@ inline void accumulate_q4_k_q8_k_block_neon(
                 static_cast<int32_t>(scales[group * 2u + 1u]);
   }
 
-  const float d = ::emel::kernel::detail::quant::fp16_to_fp32(lhs.d) * rhs.d;
-  const float dmin =
-      ::emel::kernel::detail::quant::fp16_to_fp32(lhs.dmin) * rhs.d;
-  sum -= dmin * static_cast<float>(min_sum);
-  sum += d * static_cast<float>(low_sum + high_sum);
+  accumulate_q4_k_scaled_sums(lhs.d, lhs.dmin, rhs.d, min_sum,
+                              low_sum + high_sum, sum);
 #endif
 }
 
@@ -3102,32 +3110,25 @@ inline void dot_q4_k_x8_q8_k_group_bl8_neon(
   (void)block_count;
   std::fill(out, out + ::emel::kernel::detail::quant::Q4_K_X8_ROWS, 0.0f);
 #else
+  // Keep weights in their x8 interleaved representation for the integer dot
+  // work. Apply each block's float scale/min terms row-wise in the same order
+  // as the native Q4_K kernel so fixed-seed behavior remains bit-exact.
   constexpr uint64_t col_pairs =
       ::emel::kernel::detail::quant::Q4_K_X8_ROWS / 2u;
-  std::array<float32x4_t, ::emel::kernel::detail::quant::Q4_K_X8_ROWS / 4u>
-      acc_f32 = {};
+  std::array<float, ::emel::kernel::detail::quant::Q4_K_X8_ROWS> sums = {};
   const uint8x16_t m4b = vdupq_n_u8(0x0fu);
-  for (auto &acc : acc_f32) {
-    acc = vdupq_n_f32(0.0f);
-  }
 
   for (uint64_t block = 0; block < block_count; ++block) {
     const auto &q4_block = lhs[block];
     const auto &q8_block = rhs[block];
-    const float32x4_t q4_d_0 = vcvt_f32_f16(
-        vld1_f16(reinterpret_cast<const __fp16 *>(q4_block.d.data())));
-    const float32x4_t q4_d_1 = vcvt_f32_f16(
-        vld1_f16(reinterpret_cast<const __fp16 *>(q4_block.d.data() + 4u)));
-    const float32x4_t q8_d = vdupq_n_f32(q8_block.d);
-    const float32x4_t sb_scale_0 = vmulq_f32(q4_d_0, q8_d);
-    const float32x4_t sb_scale_1 = vmulq_f32(q4_d_1, q8_d);
-    const float32x4_t q4_dmin_0 = vcvt_f32_f16(
-        vld1_f16(reinterpret_cast<const __fp16 *>(q4_block.dmin.data())));
-    const float32x4_t q4_dmin_1 = vcvt_f32_f16(
-        vld1_f16(reinterpret_cast<const __fp16 *>(q4_block.dmin.data() + 4u)));
-    const float32x4_t sb_min_0 = vmulq_f32(q4_dmin_0, q8_d);
-    const float32x4_t sb_min_1 = vmulq_f32(q4_dmin_1, q8_d);
-
+    std::array<int32x4_t, 2> low_acc = {
+        vdupq_n_s32(0),
+        vdupq_n_s32(0),
+    };
+    std::array<int32x4_t, 2> high_acc = {
+        vdupq_n_s32(0),
+        vdupq_n_s32(0),
+    };
     std::array<int32x4_t, 2> bias_acc = {
         vdupq_n_s32(0),
         vdupq_n_s32(0),
@@ -3197,25 +3198,18 @@ inline void dot_q4_k_x8_q8_k_group_bl8_neon(
                       q8_qs[7]);
       }
 
-      for (uint64_t i = 0, pair = 0; pair < col_pairs; i += 1u, pair += 2u) {
-        const int16x4_t group_scales_lo = pair == 0u
-                                              ? vget_low_s16(q4sb_scales[0])
-                                              : vget_high_s16(q4sb_scales[0]);
-        const int16x4_t group_scales_hi = pair == 0u
-                                              ? vget_low_s16(q4sb_scales[1])
-                                              : vget_high_s16(q4sb_scales[1]);
-        const float32x4_t sb_scale = pair == 0u ? sb_scale_0 : sb_scale_1;
-
-        const float32x4_t sumf_0 = vcvtq_f32_s32(
-            vmulq_s32(vmovl_s16(group_scales_lo),
-                      vpaddq_s32(acc_lo[pair], acc_lo[pair + 1u])));
-        acc_f32[i] = vfmaq_f32(acc_f32[i], sb_scale, sumf_0);
-
-        const float32x4_t sumf_1 = vcvtq_f32_s32(
-            vmulq_s32(vmovl_s16(group_scales_hi),
-                      vpaddq_s32(acc_hi[pair], acc_hi[pair + 1u])));
-        acc_f32[i] = vfmaq_f32(acc_f32[i], sb_scale, sumf_1);
-      }
+      low_acc[0] = vaddq_s32(low_acc[0],
+                             vmulq_s32(vmovl_s16(vget_low_s16(q4sb_scales[0])),
+                                       vpaddq_s32(acc_lo[0], acc_lo[1])));
+      high_acc[0] = vaddq_s32(high_acc[0],
+                              vmulq_s32(vmovl_s16(vget_low_s16(q4sb_scales[1])),
+                                        vpaddq_s32(acc_hi[0], acc_hi[1])));
+      low_acc[1] = vaddq_s32(low_acc[1],
+                             vmulq_s32(vmovl_s16(vget_high_s16(q4sb_scales[0])),
+                                       vpaddq_s32(acc_lo[2], acc_lo[3])));
+      high_acc[1] = vaddq_s32(
+          high_acc[1], vmulq_s32(vmovl_s16(vget_high_s16(q4sb_scales[1])),
+                                 vpaddq_s32(acc_hi[2], acc_hi[3])));
 
       const int16x4_t bsums_vec_lo = vdup_n_s16(bsums_array[2u * sb + 0u]);
       const int16x4_t bsums_vec_hi = vdup_n_s16(bsums_array[2u * sb + 1u]);
@@ -3229,12 +3223,28 @@ inline void dot_q4_k_x8_q8_k_group_bl8_neon(
           vmlal_s16(bias_acc[1], bsums_vec_hi, vget_high_s16(q4sb_mins[1]));
     }
 
-    acc_f32[0] = vmlsq_f32(acc_f32[0], vcvtq_f32_s32(bias_acc[0]), sb_min_0);
-    acc_f32[1] = vmlsq_f32(acc_f32[1], vcvtq_f32_s32(bias_acc[1]), sb_min_1);
+    alignas(16) std::array<int32_t, ::emel::kernel::detail::quant::Q4_K_X8_ROWS>
+        low_sums = {};
+    alignas(16) std::array<int32_t, ::emel::kernel::detail::quant::Q4_K_X8_ROWS>
+        high_sums = {};
+    alignas(16) std::array<int32_t, ::emel::kernel::detail::quant::Q4_K_X8_ROWS>
+        min_sums = {};
+    vst1q_s32(low_sums.data(), low_acc[0]);
+    vst1q_s32(low_sums.data() + 4u, low_acc[1]);
+    vst1q_s32(high_sums.data(), high_acc[0]);
+    vst1q_s32(high_sums.data() + 4u, high_acc[1]);
+    vst1q_s32(min_sums.data(), bias_acc[0]);
+    vst1q_s32(min_sums.data() + 4u, bias_acc[1]);
+
+    for (uint64_t row = 0; row < ::emel::kernel::detail::quant::Q4_K_X8_ROWS;
+         ++row) {
+      accumulate_q4_k_scaled_sums(q4_block.d[row], q4_block.dmin[row],
+                                  q8_block.d, min_sums[row],
+                                  low_sums[row] + high_sums[row], sums[row]);
+    }
   }
 
-  vst1q_f32(out, acc_f32[0]);
-  vst1q_f32(out + 4u, acc_f32[1]);
+  std::copy(sums.begin(), sums.end(), out);
 #endif
 }
 

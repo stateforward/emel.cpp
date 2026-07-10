@@ -398,14 +398,17 @@ codebook count, and silence framing explicit and reproducible. the setup keeps t
 Mimi parity artifact separate from PersonaPlex's 8-public-codebook Mimi artifact.
 
 the report and both audible WAVs are written under `build/personaplex_compare/`. the report records
-the input SHA256, exact public Mimi input-code match, sampled output-token match, text-token match,
-lagged 80 ms energy correlation, activity ratio, non-silence, output hashes, and end-to-end wall
-time. sampled output is compared as behavior rather than raw-waveform equality because a one-rank
-floating-point difference can avalanche later fixed-seed draws even when the RNG state and sampling
-policy agree.
+the input SHA256, EMEL/reference LM and Mimi paths and SHA256 values, exact public Mimi input-code
+match, sampled output-token match, text-token match, lagged 80 ms energy correlation, activity
+ratio, non-silence, output hashes, and end-to-end wall time. sampled output is compared as behavior
+rather than raw-waveform equality because a one-rank floating-point difference can avalanche later
+fixed-seed draws even when the RNG state and sampling policy agree.
 
-use `--frames`, `--seed`, `--threads`, `--output-dir`, `--build-only`, or `--run-only` to override
-the injected run configuration. `--run-only` never fetches, converts, or rebuilds artifacts.
+use `--emel-lm` and `--emel-mimi` (or `EMEL_PERSONAPLEX_EMEL_LM` and
+`EMEL_PERSONAPLEX_EMEL_MIMI`) to inject packed or quantized EMEL artifacts without changing the
+reference lane. use `--frames`, `--seed`, `--threads`, `--output-dir`, `--build-only`, or
+`--run-only` to override the remaining injected run configuration. `--run-only` never fetches,
+converts, or rebuilds artifacts.
 
 ## generation-specific local overrides
 

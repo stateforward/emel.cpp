@@ -2,7 +2,7 @@
 status: resolved
 trigger: "Make EMEL PersonaPlex Moshi generate real speech end to end from the same macOS say WAV input as moshi.cpp, with fixed-seed reference comparison showing closely matching audio/token behavior and an output WAV the user can hear. CPU only."
 created: 2026-07-09
-updated: 2026-07-09
+updated: 2026-07-10
 ---
 
 # Moshi PersonaPlex Audio Parity
@@ -358,6 +358,59 @@ updated: 2026-07-09
   AArch64 guard/SM entries were removed from that delta and the snapshot was not updated.
   implication: implementation-specific verification is green without weakening gates or
   changing the user-controlled lint baseline.
+
+- timestamp: 2026-07-10T00:10:00-05:00
+  observation: the direct AArch64 Q4_K x8 BL8 operand path now preserves the native
+  per-block f32 scale/min accumulation order without reconstructing native rows or
+  materializing f32 weights. The 125-frame packed report at
+  `build/personaplex_compare_packed_parity_10s_manual/personaplex_compare.json` matches
+  232/232 input tokens, 1,000/1,000 output tokens, 500/500 first-four tokens, and 125/125
+  text tokens. Audio-energy correlation is 0.999999967 at zero lag.
+  implication: the packed artifact is a true native packed operand path with fixed-seed
+  behavior equivalent to the unpacked path, not a packed-to-native fallback.
+
+- timestamp: 2026-07-10T00:15:00-05:00
+  observation: packed EMEL completed 125 frames in 50.671 seconds versus 57.99 seconds for
+  a fresh unpacked run and 261.648 seconds for one-thread CPU moshi.cpp. Packed and unpacked
+  EMEL WAVs are byte-identical; packed throughput is 2.467 frames/s, 1.144x the unpacked
+  throughput and 5.164x the reference throughput.
+  implication: direct packing improves end-to-end single-thread throughput by 14.4% while
+  preserving the audible/reference behavior.
+
+- timestamp: 2026-07-10T00:25:00-05:00
+  observation: the PersonaPlex LM contains 4,313.8 MiB of Q4_K matrices, 176.8 MiB of
+  already-Q4_0 embedding tables, and only 1.06 MiB of F32 norms. The separate 331.2 MiB
+  Mimi artifact still contains 193.0 MiB of transformer/RVQ projection matrices. Its
+  maintained Q8_0 converter reduces those projections to 51.5 MiB and the complete Mimi
+  artifact to 189.7 MiB.
+  implication: Mimi projections are the meaningful non-Q4_K quantization target. LM norms
+  and the 0.4 MiB voice prompt cannot provide material size savings.
+
+- timestamp: 2026-07-10T00:30:00-05:00
+  observation: the injected Q8_0 Mimi artifact completed the same packed-LM 125-frame run
+  in 42.74 seconds, a 1.186x speedup over the float-Mimi packed run. It retained 99.14%
+  actual-WAV input-code agreement, but autoregressive output-token agreement versus the
+  exact-parity EMEL baseline fell to 43.3%, text agreement to 70.4%, and waveform
+  correlation to 0.670.
+  implication: Q8_0 Mimi is a valid 141.5 MiB smaller/faster optional artifact, but it must
+  not replace the exact-reference artifact in parity claims.
+
+- timestamp: 2026-07-10T00:35:00-05:00
+  observation: a late live-audio macOS sample profile placed 40.0% of top-of-stack samples
+  in the packed Q4_K kernel, 21.3% in Mimi transformer compute, 12.7% in temporal
+  attention, and roughly another 19% in Mimi convolution, im2col, f16 matmul, and tensor
+  access work. The 8-codebook PersonaPlex Mimi artifact also retains 24 unused 2 MiB
+  acoustic codebooks from the 32-codebook source.
+  implication: further speed work should optimize the packed LM kernel and Mimi compute;
+  further zero-drift size work should first prune the unused 48 MiB of Mimi codebooks.
+
+- timestamp: 2026-07-10T00:40:00-05:00
+  observation: the final scoped gate passed the AArch64 benchmark, 98.0% changed-line and
+  66.2% changed-branch coverage, live GGML kernel parity, cross-process determinism, and
+  the affected tests. The only aggregate failure is unrelated pre-existing global
+  clang-format snapshot drift, which was not updated.
+  implication: packed/Q8 changes and evidence are implementation-green without weakening
+  gates or changing user-owned snapshots.
 
 ## Eliminated
 

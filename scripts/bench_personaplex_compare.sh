@@ -10,6 +10,8 @@ BUILD_DIR="${EMEL_PERSONAPLEX_COMPARE_BUILD_DIR:-$ROOT_DIR/build/personaplex_com
 OUTPUT_DIR="${EMEL_PERSONAPLEX_COMPARE_OUTPUT_DIR:-$ROOT_DIR/build/personaplex_compare}"
 ARTIFACT_DIR="${EMEL_MOSHI_REFERENCE_ARTIFACT_DIR:-$ROOT_DIR/build/moshi_reference}"
 AUDIO=""
+EMEL_LM="${EMEL_PERSONAPLEX_EMEL_LM:-}"
+EMEL_MIMI="${EMEL_PERSONAPLEX_EMEL_MIMI:-}"
 FRAMES=125
 SEED=1234
 THREADS=1
@@ -22,6 +24,10 @@ usage: scripts/bench_personaplex_compare.sh [options]
 
   --audio PATH       24 kHz mono s16 WAV; default uses macOS say for
                      "Hey, I'm Gabe. How are you doing?"
+  --emel-lm PATH     enriched EMEL LM artifact; defaults to the unpacked
+                     model in the configured artifact directory
+  --emel-mimi PATH   enriched EMEL Mimi artifact; defaults to the float
+                     model in the configured artifact directory
   --frames N         generated frames per lane (default: 125 / 10 seconds)
   --seed N           fixed sampling seed (default: 1234)
   --threads N        CPU threads in moshi.cpp reference lane (default: 1)
@@ -34,6 +40,8 @@ USAGE
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --audio) AUDIO="${2:-}"; shift 2 ;;
+    --emel-lm) EMEL_LM="${2:-}"; shift 2 ;;
+    --emel-mimi) EMEL_MIMI="${2:-}"; shift 2 ;;
     --frames) FRAMES="${2:-}"; shift 2 ;;
     --seed) SEED="${2:-}"; shift 2 ;;
     --threads) THREADS="${2:-}"; shift 2 ;;
@@ -99,9 +107,13 @@ fi
 
 EMEL_RUNNER="$BUILD_DIR/personaplex_emel_runner"
 REFERENCE_DRIVER="$BUILD_DIR/moshi_reference_driver"
-EMEL_MIMI="$ARTIFACT_DIR/mimi-e351c8d8-125-personaplex-emel.gguf"
+if [[ -z "$EMEL_MIMI" ]]; then
+  EMEL_MIMI="$ARTIFACT_DIR/mimi-e351c8d8-125-personaplex-emel.gguf"
+fi
 REFERENCE_MIMI="$ARTIFACT_DIR/mimi-e351c8d8-125.gguf"
-EMEL_LM="$ARTIFACT_DIR/model-q4_k-emel.gguf"
+if [[ -z "$EMEL_LM" ]]; then
+  EMEL_LM="$ARTIFACT_DIR/model-q4_k-emel.gguf"
+fi
 REFERENCE_LM="$ARTIFACT_DIR/model-q4_k.gguf"
 EMEL_VOICE="$ARTIFACT_DIR/voices/NATF0-emel.gguf"
 REFERENCE_VOICE="$ARTIFACT_DIR/voices/NATF0.gguf"
