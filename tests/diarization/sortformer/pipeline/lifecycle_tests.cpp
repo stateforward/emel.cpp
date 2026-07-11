@@ -18,6 +18,7 @@
 #include "emel/diarization/sortformer/modules/detail.hpp"
 #include "emel/diarization/sortformer/transformer/detail.hpp"
 #include "emel/model/data.hpp"
+#include "emel/model/sortformer/detail.hpp"
 
 namespace {
 
