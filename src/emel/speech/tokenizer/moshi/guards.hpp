@@ -261,11 +261,15 @@ struct guard_past_output_delay {
 struct guard_output_incomplete {
   bool operator()(const event::detokenize_run &runtime_ev,
                   const action::context &ctx) const noexcept {
-    bool incomplete = false;
+    bool incomplete =
+        runtime_ev.request.text_token_out == ctx.config.token_zero ||
+        runtime_ev.request.text_token_out == ctx.config.token_ungenerated;
     for (int32_t codebook = 0; codebook < ctx.config.delayed_audio_codebooks;
          ++codebook) {
-      if (runtime_ev.request.audio_tokens_out[static_cast<size_t>(codebook)] ==
-          ctx.config.token_zero) {
+      const int32_t token =
+          runtime_ev.request.audio_tokens_out[static_cast<size_t>(codebook)];
+      if (token == ctx.config.token_zero ||
+          token == ctx.config.token_ungenerated) {
         incomplete = true;
       }
     }

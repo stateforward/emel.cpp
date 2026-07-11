@@ -377,6 +377,10 @@ TEST_CASE("quality gates route PersonaPlex changes through end-to-end compare") 
         std::string::npos);
   CHECK(script.find("QUALITY_GATES_PERSONAPLEX_FRAMES") !=
         std::string::npos);
+  CHECK(script.find("QUALITY_GATES_PERSONAPLEX_AUDIO") !=
+        std::string::npos);
+  CHECK(script.find("--audio \"$QUALITY_GATES_PERSONAPLEX_AUDIO\"") !=
+        std::string::npos);
 }
 
 TEST_CASE("benchmark defaults stay bounded for routine quality gates") {
