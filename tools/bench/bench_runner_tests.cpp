@@ -1151,6 +1151,7 @@ TEST_CASE(
   bool has_speech_lm_script = false;
   bool has_speech_lm_setup = false;
   bool has_speech_lm_moshi_binding = false;
+  bool has_personaplex_emel_runner = false;
   for (const auto &record : speech_lm_records) {
     has_speech_lm_script = has_speech_lm_script ||
                            record.path == "scripts/bench_moshi_lm_compare.sh";
@@ -1160,10 +1161,15 @@ TEST_CASE(
     has_speech_lm_moshi_binding =
         has_speech_lm_moshi_binding ||
         record.path == std::string_view{"src/emel/model/moshi"};
+    has_personaplex_emel_runner =
+        has_personaplex_emel_runner ||
+        record.path == std::string_view{
+                           "tools/bench/speech/personaplex_emel_runner.cpp"};
   }
   CHECK(has_speech_lm_script);
   CHECK(has_speech_lm_setup);
   CHECK(has_speech_lm_moshi_binding);
+  CHECK(has_personaplex_emel_runner);
   CHECK(manifest::records_for("missing_runner").empty());
 }
 
@@ -1184,6 +1190,10 @@ TEST_CASE(
         std::string::npos);
   CHECK(rendered.find("record runner=speech_lm_moshi kind=source "
                       "path=tools/bench/speech/lm_moshi_bench.cpp") !=
+        std::string::npos);
+  CHECK(rendered.find(
+            "record runner=speech_lm_moshi kind=source "
+            "path=tools/bench/speech/personaplex_emel_runner.cpp") !=
         std::string::npos);
 
   const std::filesystem::path manifest_path =

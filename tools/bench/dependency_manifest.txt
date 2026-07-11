@@ -107,6 +107,7 @@ record runner=speech_codec_mimi kind=config path=tools/bench/moshi_reference_ref
 record runner=speech_codec_mimi kind=config path=tools/bench/reference_backends/moshi_cpp_mimi.json reason=reference_backend_descriptor
 record runner=speech_codec_mimi kind=script path=scripts/setup_moshi_cpp_reference.sh reason=reference_setup
 record runner=speech_lm_moshi kind=source path=tools/bench/speech/lm_moshi_bench.cpp reason=suite_source
+record runner=speech_lm_moshi kind=source path=tools/bench/speech/personaplex_emel_runner.cpp reason=e2e_emel_lane_runner
 record runner=speech_lm_moshi kind=source path=src/emel/model/moshi reason=model_binding
 record runner=speech_lm_moshi kind=script path=scripts/bench_moshi_lm_compare.sh reason=compare_wrapper
 record runner=speech_lm_moshi kind=script path=scripts/setup_moshi_cpp_reference.sh reason=reference_setup

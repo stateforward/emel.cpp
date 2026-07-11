@@ -22,7 +22,7 @@
 #include "emel/model/data.hpp"
 #include "emel/model/detail.hpp"
 #include "emel/speech/codec/mimi/any.hpp"
-#include "emel/speech/generator/sm.hpp"
+#include "emel/speech/generator/any.hpp"
 #include "emel/speech/predictor/moshi/any.hpp"
 #include "emel/speech/predictor/moshi/executor/any.hpp"
 #include "emel/speech/tokenizer/moshi/any.hpp"
@@ -78,7 +78,7 @@ struct cache_views {
 };
 
 struct personaplex_dependencies {
-  using generator_mode = generator::action::mode::duplex;
+  using generator_mode = generator::duplex;
   using voice_condition_event = predictor::event::prefill_voice;
   using prompt_begin_event = predictor::event::begin_personaplex_prompt;
   using prompt_condition_event = predictor::event::prefill_personaplex_prompt;
@@ -529,13 +529,13 @@ int main(int argc, char **argv) {
       .kernel = prediction_kernel,
       .sampler = &prediction_sampler,
       .policy =
-          runtime::action::policies{
+          runtime::policies{
               .rms_norm_epsilon = 1.0e-8f,
               .zero_seed_state = 123459876u,
               .token_zero = -1,
           },
       .capacity =
-          runtime::action::capacities{
+          runtime::capacities{
               .hidden_dim = static_cast<uint64_t>(
                   std::max(lm_model.model->moshi_lm.dim,
                            lm_model.model->moshi_lm.depformer_dim)),
@@ -550,11 +550,11 @@ int main(int argc, char **argv) {
                   std::max(config.audio_top_k, config.text_top_k)),
           },
   }};
-  predictor::sm token_predictor{predictor::action::dependencies{
+  predictor::sm token_predictor{predictor::dependencies<runtime::sm>{
       .kv_cache = emel::memory::hybrid::kv_binding{},
       .graph = prediction_runtime,
       .policy =
-          predictor::action::policies{
+          predictor::policies{
               .token_zero = -1,
               .token_ungenerated = -2,
           },
@@ -627,8 +627,7 @@ int main(int argc, char **argv) {
       .codebook_count = public_n_q,
   };
   generator::sm<personaplex_dependencies> session{dependencies};
-  emel::error::type session_err =
-      generator::action::error_code(generator::error::none);
+  emel::error::type session_err = emel::error::cast(generator::error::none);
   if (!session.process_event(generator::event::initialize{session_err})) {
     std::fprintf(stderr, "PersonaPlex session initialize failed err=%d\n",
                  static_cast<int>(session_err));
@@ -639,7 +638,7 @@ int main(int argc, char **argv) {
       session.is(stateforward::sml::state<generator::state_condition_voice>)) {
     bool complete = false;
     int32_t remaining = -1;
-    session_err = generator::action::error_code(generator::error::none);
+    session_err = emel::error::cast(generator::error::none);
     (void)session.process_event(generator::event::condition{
         config.prompt_text_token, complete, remaining, session_err});
   }
@@ -647,7 +646,7 @@ int main(int argc, char **argv) {
       session.is(stateforward::sml::state<generator::state_condition_prompt>)) {
     bool complete = false;
     int32_t remaining = -1;
-    session_err = generator::action::error_code(generator::error::none);
+    session_err = emel::error::cast(generator::error::none);
     (void)session.process_event(generator::event::condition{
         config.prompt_text_token, complete, remaining, session_err});
   }
@@ -664,7 +663,7 @@ int main(int argc, char **argv) {
     int32_t text_token = -1;
     bool produced = false;
     int32_t sample_count = 0;
-    session_err = generator::action::error_code(generator::error::none);
+    session_err = emel::error::cast(generator::error::none);
     generator::event::stream_frame frame{
         std::span<const float>{pcm_frame},
         std::span<float>{output_pcm.data() + frame_index * frame_samples,
@@ -701,7 +700,7 @@ int main(int argc, char **argv) {
     int32_t text_token = -1;
     int32_t sample_count = 0;
     bool complete = false;
-    session_err = generator::action::error_code(generator::error::none);
+    session_err = emel::error::cast(generator::error::none);
     generator::event::flush frame{
         std::span<float>{output_pcm.data() + frame_index * frame_samples,
                          frame_samples},
