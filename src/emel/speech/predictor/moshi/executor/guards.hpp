@@ -11,6 +11,29 @@
 
 namespace emel::speech::predictor::moshi::executor::guard {
 
+inline bool guard_cache_span_valid(const size_t layer_offset,
+                                   const size_t first_position,
+                                   const size_t position_count,
+                                   const size_t dim,
+                                   const size_t key_cache_size,
+                                   const size_t value_cache_size) noexcept {
+  if (dim == 0u || first_position >
+                       std::numeric_limits<size_t>::max() / dim ||
+      position_count > std::numeric_limits<size_t>::max() / dim) {
+    return false;
+  }
+  const size_t first_element = first_position * dim;
+  const size_t element_count = position_count * dim;
+  if (layer_offset >
+      std::numeric_limits<size_t>::max() - first_element) {
+    return false;
+  }
+  const size_t begin = layer_offset + first_element;
+  return begin <= key_cache_size && begin <= value_cache_size &&
+         element_count <= key_cache_size - begin &&
+         element_count <= value_cache_size - begin;
+}
+
 struct guard_bind_contract_valid {
   bool operator()(const event::initialize_run &runtime_ev,
                   const action::context &ctx) const noexcept {
@@ -838,15 +861,14 @@ struct guard_temporal_layer_cache_write_supported {
         runtime_ev.ctx.temporal_position.physical_position < 0) {
       return false;
     }
-    const size_t layer_offset =
-        view.layer_cache_offsets[static_cast<size_t>(layer)];
     const size_t physical_position =
         static_cast<size_t>(runtime_ev.ctx.temporal_position.physical_position);
     const size_t dim = static_cast<size_t>(hidden_dim);
-    const size_t begin = layer_offset + physical_position * dim;
-    const size_t end = begin + dim;
     return physical_position < static_cast<size_t>(view.position_capacity) &&
-           end <= view.key_cache.size() && end <= view.value_cache.size();
+           guard_cache_span_valid(
+               view.layer_cache_offsets[static_cast<size_t>(layer)],
+               physical_position, 1u, dim, view.key_cache.size(),
+               view.value_cache.size());
   }
 };
 
@@ -898,8 +920,9 @@ struct guard_temporal_layer_attention_supported {
     const size_t layer_offset =
         view.layer_cache_offsets[static_cast<size_t>(layer)];
     const size_t dim = static_cast<size_t>(hidden_dim);
-    const size_t end = layer_offset + static_cast<size_t>(capacity) * dim;
-    return end <= view.key_cache.size() && end <= view.value_cache.size();
+    return guard_cache_span_valid(
+        layer_offset, 0u, static_cast<size_t>(capacity), dim,
+        view.key_cache.size(), view.value_cache.size());
   }
 };
 
@@ -1221,12 +1244,10 @@ struct guard_text_logits_unsupported {
 
 struct guard_forced_text_token_valid {
   bool operator()(const event::step_run &runtime_ev,
-                  const action::context &ctx) const noexcept {
+                  const action::context &) const noexcept {
     return runtime_ev.request.forced_text_token >= 0 &&
-           detail::token_in_embedding_range(
-               runtime_ev.request.forced_text_token,
-               runtime_ev.request.model.moshi_lm.text_card,
-               ctx.policy.token_zero);
+           runtime_ev.request.forced_text_token <
+               runtime_ev.request.model.moshi_lm.text_card;
   }
 };
 
@@ -1716,12 +1737,10 @@ struct guard_depformer_layer_cache_write_supported {
         physical >= view.position_capacity) {
       return false;
     }
-    const size_t layer_offset =
-        view.layer_cache_offsets[static_cast<size_t>(layer)];
-    const size_t begin = layer_offset + static_cast<size_t>(physical) *
-                                            static_cast<size_t>(dep_dim);
-    const size_t end = begin + static_cast<size_t>(dep_dim);
-    return end <= view.key_cache.size() && end <= view.value_cache.size();
+    return guard_cache_span_valid(
+        view.layer_cache_offsets[static_cast<size_t>(layer)],
+        static_cast<size_t>(physical), 1u, static_cast<size_t>(dep_dim),
+        view.key_cache.size(), view.value_cache.size());
   }
 };
 
@@ -1773,17 +1792,11 @@ struct guard_depformer_layer_attention_supported {
         static_cast<size_t>(layer) >= view.layer_cache_offsets.size()) {
       return false;
     }
-    const size_t layer_offset =
-        view.layer_cache_offsets[static_cast<size_t>(layer)];
     const size_t dim = static_cast<size_t>(dep_dim);
-    for (int32_t physical = 0; physical < capacity; ++physical) {
-      const size_t begin = layer_offset + static_cast<size_t>(physical) * dim;
-      const size_t end = begin + dim;
-      if (end > view.key_cache.size() || end > view.value_cache.size()) {
-        return false;
-      }
-    }
-    return true;
+    return guard_cache_span_valid(
+        view.layer_cache_offsets[static_cast<size_t>(layer)], 0u,
+        static_cast<size_t>(capacity), dim, view.key_cache.size(),
+        view.value_cache.size());
   }
 };
 

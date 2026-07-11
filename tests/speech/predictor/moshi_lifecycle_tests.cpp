@@ -2206,6 +2206,172 @@ TEST_CASE("speech_moshi_executor_generates_audio_tokens_with_injected_kv") {
                     [](const uint16_t value) { return value != 0u; }));
 }
 
+TEST_CASE(
+    "speech_moshi_executor_guards_reject_invalid_outputs_and_cache_metadata") {
+  auto fixture = load_fixture_or_skip("moshi-tiny-lm.gguf");
+  if (fixture.model == nullptr) {
+    return;
+  }
+  const auto &lm = fixture.model->moshi_lm;
+
+  emel::kernel::sm kernel{};
+  moshi_executor::action::context executor_ctx{
+      make_executor_dependencies(kernel)};
+  executor_ctx.session.hidden_dim = lm.dim;
+  executor_ctx.session.text_card = lm.text_card;
+
+  emel::memory::view::snapshot snapshot{};
+  std::array<int32_t, moshi::event::k_max_codebooks> input = {};
+  std::array<int32_t, moshi::event::k_max_codebooks> output = {};
+  int32_t text_token = -1;
+  moshi::event::graph_step step{
+      *fixture.model, snapshot,
+      std::span<const int32_t>{input.data(), static_cast<size_t>(lm.n_q + 1)},
+      std::span<int32_t>{output.data(), static_cast<size_t>(lm.dep_q)},
+      text_token};
+  auto step_ctx = std::make_unique<moshi_executor::event::step_ctx>();
+  moshi_executor::event::step_run step_run{step, *step_ctx};
+
+  step.forced_text_token = lm.text_card;
+  CHECK_FALSE(moshi_executor::guard::guard_forced_text_token_valid{}(
+      step_run, executor_ctx));
+
+  float tensor_data = 0.0f;
+  emel::model::data::tensor_record malformed_matrix{};
+  malformed_matrix.data = &tensor_data;
+  malformed_matrix.n_dims = 1;
+  malformed_matrix.dims[0] = lm.dim;
+  CHECK_FALSE(moshi_executor::detail::tensor_shape(&malformed_matrix, lm.dim,
+                                                   lm.dim * 3));
+
+  std::array<uint16_t, moshi_executor::detail::k_max_hidden_dim> key_cache =
+      {};
+  std::array<uint16_t, moshi_executor::detail::k_max_hidden_dim> value_cache =
+      {};
+  std::array<size_t, 1> offsets = {std::numeric_limits<size_t>::max()};
+  step_ctx->temporal_layer_rope_ok = true;
+  step_ctx->temporal_layer_index = 0;
+  step_ctx->temporal_position.physical_position = 0;
+  step_ctx->temporal_kv = moshi_executor::detail::temporal_kv_view{
+      .key_cache = key_cache,
+      .value_cache = value_cache,
+      .layer_cache_offsets = offsets,
+      .layer_count = 1,
+      .position_capacity = 1,
+      .kv_dim = lm.dim,
+  };
+  CHECK_FALSE(
+      moshi_executor::guard::guard_temporal_layer_cache_write_supported{}(
+          step_run, executor_ctx));
+
+  step_ctx->depformer_layer_projection_ok = true;
+  step_ctx->depformer_layer_index = 0;
+  step_ctx->depformer_position.physical_position = 0;
+  step_ctx->depformer_kv = moshi_executor::detail::depformer_kv_view{
+      .key_cache = key_cache,
+      .value_cache = value_cache,
+      .layer_cache_offsets = offsets,
+      .layer_count = 1,
+      .position_capacity = 1,
+      .kv_dim = lm.depformer_dim,
+  };
+  CHECK_FALSE(
+      moshi_executor::guard::guard_depformer_layer_cache_write_supported{}(
+          step_run, executor_ctx));
+
+  CHECK_FALSE(moshi_executor::guard::guard_cache_span_valid(
+      0u, std::numeric_limits<size_t>::max(), 1u, 2u, key_cache.size(),
+      value_cache.size()));
+  CHECK_FALSE(moshi_executor::guard::guard_cache_span_valid(
+      std::numeric_limits<size_t>::max(), 1u, 1u, 1u, key_cache.size(),
+      value_cache.size()));
+  CHECK(moshi_executor::guard::guard_sampling_step_invalid{}(
+            step_run, executor_ctx) !=
+        moshi_executor::guard::guard_sampling_step_valid{}(step_run,
+                                                           executor_ctx));
+  CHECK(moshi_executor::guard::guard_temporal_position_advance_failed{}(
+            step_run, executor_ctx) !=
+        moshi_executor::guard::guard_temporal_position_advance_succeeded{}(
+            step_run, executor_ctx));
+  CHECK(moshi_executor::guard::guard_temporal_layer_norm2_unsupported{}(
+            step_run, executor_ctx) !=
+        moshi_executor::guard::guard_temporal_layer_norm2_supported{}(
+            step_run, executor_ctx));
+  CHECK(moshi_executor::guard::guard_temporal_layer_norm2_rms_failed{}(
+            step_run, executor_ctx) !=
+        moshi_executor::guard::guard_temporal_layer_norm2_rms_succeeded{}(
+            step_run, executor_ctx));
+  CHECK(moshi_executor::guard::guard_temporal_layer_norm2_failed{}(
+            step_run, executor_ctx) !=
+        moshi_executor::guard::guard_temporal_layer_norm2_succeeded{}(
+            step_run, executor_ctx));
+  CHECK(moshi_executor::guard::guard_temporal_layer_gating_in_unsupported{}(
+            step_run, executor_ctx) !=
+        moshi_executor::guard::guard_temporal_layer_gating_in_supported{}(
+            step_run, executor_ctx));
+  CHECK(moshi_executor::guard::guard_temporal_layer_gating_in_failed{}(
+            step_run, executor_ctx) !=
+        moshi_executor::guard::guard_temporal_layer_gating_in_succeeded{}(
+            step_run, executor_ctx));
+  CHECK(moshi_executor::guard::guard_temporal_layer_silu_gate_unsupported{}(
+            step_run, executor_ctx) !=
+        moshi_executor::guard::guard_temporal_layer_silu_gate_supported{}(
+            step_run, executor_ctx));
+  CHECK(
+      moshi_executor::guard::guard_temporal_layer_silu_gate_silu_failed{}(
+          step_run, executor_ctx) !=
+      moshi_executor::guard::guard_temporal_layer_silu_gate_silu_succeeded{}(
+          step_run, executor_ctx));
+  CHECK(moshi_executor::guard::guard_temporal_layer_silu_gate_failed{}(
+            step_run, executor_ctx) !=
+        moshi_executor::guard::guard_temporal_layer_silu_gate_succeeded{}(
+            step_run, executor_ctx));
+  CHECK(moshi_executor::guard::guard_temporal_layer_gating_out_unsupported{}(
+            step_run, executor_ctx) !=
+        moshi_executor::guard::guard_temporal_layer_gating_out_supported{}(
+            step_run, executor_ctx));
+  CHECK(moshi_executor::guard::guard_temporal_layer_gating_out_failed{}(
+            step_run, executor_ctx) !=
+        moshi_executor::guard::guard_temporal_layer_gating_out_succeeded{}(
+            step_run, executor_ctx));
+  CHECK(moshi_executor::guard::guard_temporal_layer_ff_residual_failed{}(
+            step_run, executor_ctx) !=
+        moshi_executor::guard::guard_temporal_layer_ff_residual_succeeded{}(
+            step_run, executor_ctx));
+  CHECK(moshi_executor::guard::guard_temporal_out_norm_unsupported{}(
+            step_run, executor_ctx) !=
+        moshi_executor::guard::guard_temporal_out_norm_supported{}(
+            step_run, executor_ctx));
+  step_ctx->temporal_layer_index = lm.num_layers;
+  step_ctx->temporal_layer_ff_residual_ok = true;
+  CHECK(moshi_executor::guard::guard_temporal_out_norm_supported{}(
+      step_run, executor_ctx));
+  CHECK(moshi_executor::guard::guard_temporal_out_norm_rms_failed{}(
+            step_run, executor_ctx) !=
+        moshi_executor::guard::guard_temporal_out_norm_rms_succeeded{}(
+            step_run, executor_ctx));
+  CHECK(moshi_executor::guard::guard_temporal_out_norm_failed{}(
+            step_run, executor_ctx) !=
+        moshi_executor::guard::guard_temporal_out_norm_succeeded{}(
+            step_run, executor_ctx));
+  CHECK(moshi_executor::guard::guard_text_logits_unsupported{}(
+            step_run, executor_ctx) !=
+        moshi_executor::guard::guard_text_logits_supported{}(step_run,
+                                                             executor_ctx));
+  CHECK(moshi_executor::guard::guard_text_logits_matmul_failed{}(
+            step_run, executor_ctx) !=
+        moshi_executor::guard::guard_text_logits_matmul_succeeded{}(
+            step_run, executor_ctx));
+  CHECK(moshi_executor::guard::guard_text_logits_failed{}(step_run,
+                                                          executor_ctx) !=
+        moshi_executor::guard::guard_text_logits_succeeded{}(step_run,
+                                                             executor_ctx));
+  CHECK(moshi_executor::guard::guard_text_sampling_failed{}(
+            step_run, executor_ctx) !=
+        moshi_executor::guard::guard_text_sampling_succeeded{}(step_run,
+                                                               executor_ctx));
+}
+
 TEST_CASE("speech_moshi_executor_sampling_rng_is_actor_owned") {
   auto first_fixture = load_fixture_or_skip("moshi-tiny-lm.gguf");
   auto second_fixture = load_fixture_or_skip("moshi-tiny-lm.gguf");

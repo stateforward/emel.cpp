@@ -183,7 +183,8 @@ inline bool tensor_shape(const tensor_record *tensor, const int64_t ne0,
                          const int64_t ne1 = 1) noexcept {
   return tensor != nullptr && tensor->data != nullptr && tensor->n_dims >= 1 &&
          tensor->dims[0] == ne0 &&
-         (tensor->n_dims == 1 || tensor->dims[1] == ne1);
+         ((tensor->n_dims == 1 && ne1 == 1) ||
+          (tensor->n_dims >= 2 && tensor->dims[1] == ne1));
 }
 
 inline bool token_in_embedding_range(const int32_t token, const int32_t card,
