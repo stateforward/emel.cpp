@@ -796,6 +796,39 @@ TEST_CASE("speech_moshi_predictor_rejects_memory_geometry_beyond_temporal_kv") {
   CHECK_FALSE(graph.initialized);
 }
 
+TEST_CASE(
+    "speech_moshi_executor_init_honors_shared_depformer_weight_schedule") {
+  auto fixture = load_fixture_or_skip("moshi-tiny-lm.gguf");
+  if (fixture.model == nullptr) {
+    return;
+  }
+
+  auto &lm = fixture.model->moshi_lm;
+  REQUIRE(lm.dep_q >= 2);
+
+  emel::kernel::sm kernel{};
+  moshi_executor::action::context ctx{make_executor_dependencies(kernel)};
+  moshi_executor::event::initialize request{*fixture.model};
+  moshi_executor::event::initialize_ctx request_ctx{};
+  moshi_executor::event::initialize_run runtime_ev{request, request_ctx};
+  moshi_executor::action::effect_bind_contract{}(runtime_ev, ctx);
+  REQUIRE(moshi_executor::guard::guard_bound_root_operands_supported{}(
+      runtime_ev, ctx));
+
+  lm.depformer_weight_schedule_count = static_cast<uint32_t>(lm.dep_q);
+  for (int32_t codebook = 0; codebook < lm.dep_q; ++codebook) {
+    lm.depformer_weight_schedule[static_cast<size_t>(codebook)] = codebook;
+  }
+  lm.depformer_weight_schedule[static_cast<size_t>(lm.dep_q - 1)] =
+      lm.dep_q - 2;
+  ctx.session.contract.lm
+      .depformer_input_projections[static_cast<size_t>(lm.dep_q - 1)]
+      .tensor = nullptr;
+
+  CHECK(moshi_executor::guard::guard_bound_root_operands_supported{}(runtime_ev,
+                                                                     ctx));
+}
+
 TEST_CASE("speech_moshi_generator_accepts_personaplex_voice_without_system_"
           "prompt") {
   auto fixture = load_fixture_or_skip("moshi-tiny-lm.gguf");

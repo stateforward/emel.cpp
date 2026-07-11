@@ -17,15 +17,13 @@ inline bool guard_cache_span_valid(const size_t layer_offset,
                                    const size_t dim,
                                    const size_t key_cache_size,
                                    const size_t value_cache_size) noexcept {
-  if (dim == 0u || first_position >
-                       std::numeric_limits<size_t>::max() / dim ||
+  if (dim == 0u || first_position > std::numeric_limits<size_t>::max() / dim ||
       position_count > std::numeric_limits<size_t>::max() / dim) {
     return false;
   }
   const size_t first_element = first_position * dim;
   const size_t element_count = position_count * dim;
-  if (layer_offset >
-      std::numeric_limits<size_t>::max() - first_element) {
+  if (layer_offset > std::numeric_limits<size_t>::max() - first_element) {
     return false;
   }
   const size_t begin = layer_offset + first_element;
@@ -54,12 +52,10 @@ struct guard_bind_contract_valid {
            model.moshi_lm.text_card > 0 && model.moshi_lm.card > 0 &&
            model.moshi_lm.dim > 0 &&
            (!runtime_ev.request.sampling_enabled || ctx.sampler != nullptr) &&
-           sampling_config_valid &&
-           ctx.policy.rms_norm_epsilon > 0.0f &&
+           sampling_config_valid && ctx.policy.rms_norm_epsilon > 0.0f &&
            ctx.policy.sampling_modulus > 1u &&
            ctx.policy.zero_seed_state % ctx.policy.sampling_modulus != 0u &&
-           ctx.policy.token_zero < 0 &&
-           ctx.capacity.hidden_dim > 0u &&
+           ctx.policy.token_zero < 0 && ctx.capacity.hidden_dim > 0u &&
            ctx.capacity.hidden_dim <= detail::k_max_hidden_dim &&
            ctx.capacity.temporal_context > 0u &&
            ctx.capacity.temporal_context <= detail::k_max_temporal_context &&
@@ -116,18 +112,35 @@ struct guard_bound_root_operands_supported {
                 detail::supported_get_rows_dtype(
                     static_cast<detail::dtype>(depformer_text_embedding->type));
     for (int32_t codebook = 0; codebook < lm.dep_q; ++codebook) {
-      const auto *input_projection =
-          ctx.session.contract.lm
-              .depformer_input_projections[static_cast<size_t>(codebook)]
-              .tensor;
+      int32_t weight_index = codebook;
+      if (lm.depformer_weight_schedule_count > 0u) {
+        if (static_cast<uint32_t>(codebook) >=
+            lm.depformer_weight_schedule_count) {
+          supported = false;
+        } else {
+          weight_index =
+              lm.depformer_weight_schedule[static_cast<size_t>(codebook)];
+        }
+      }
+      if (weight_index < 0 || weight_index >= lm.dep_q) {
+        supported = false;
+      } else {
+        const auto *input_projection =
+            ctx.session.contract.lm
+                .depformer_input_projections[static_cast<size_t>(weight_index)]
+                .tensor;
+        supported =
+            supported &&
+            detail::tensor_shape(input_projection, hidden_dim, dep_dim) &&
+            detail::supported_mul_mat_dtype(
+                static_cast<detail::dtype>(input_projection->type));
+      }
+
       const auto *output_projection =
           ctx.session.contract.lm
               .depformer_output_projections[static_cast<size_t>(codebook)]
               .tensor;
       supported = supported &&
-                  detail::tensor_shape(input_projection, hidden_dim, dep_dim) &&
-                  detail::supported_mul_mat_dtype(
-                      static_cast<detail::dtype>(input_projection->type)) &&
                   detail::tensor_shape(output_projection, dep_dim, lm.card) &&
                   detail::supported_argmax_dtype(
                       static_cast<detail::dtype>(output_projection->type));
@@ -2233,8 +2246,8 @@ struct guard_reset_temporal_positions_succeeded {
                   const action::context &) const noexcept {
     return runtime_ev.ctx.temporal_position_accepted &&
            runtime_ev.ctx.temporal_position_error ==
-               static_cast<int32_t>(emel::error::cast(
-                   emel::memory::streaming::error::none));
+               static_cast<int32_t>(
+                   emel::error::cast(emel::memory::streaming::error::none));
   }
 };
 
@@ -2264,8 +2277,8 @@ struct guard_reset_depformer_positions_succeeded {
                   const action::context &) const noexcept {
     return runtime_ev.ctx.depformer_position_accepted &&
            runtime_ev.ctx.depformer_position_error ==
-               static_cast<int32_t>(emel::error::cast(
-                   emel::memory::streaming::error::none));
+               static_cast<int32_t>(
+                   emel::error::cast(emel::memory::streaming::error::none));
   }
 };
 
