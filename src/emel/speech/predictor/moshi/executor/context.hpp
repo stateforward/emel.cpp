@@ -54,6 +54,12 @@ struct runtime {
              static_cast<std::size_t>(
                  emel::model::data::moshi_lm_hparams::k_max_delays)>
       temporal_input_projections = {};
+  std::array<std::array<const emel::model::data::tensor_record *,
+                        static_cast<std::size_t>(
+                            emel::model::data::moshi_lm_hparams::k_max_delays)>,
+             static_cast<std::size_t>(
+                 emel::model::data::moshi_lm_hparams::k_max_delays)>
+      depformer_input_projections = {};
 };
 
 struct sampling_config {

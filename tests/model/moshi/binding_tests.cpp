@@ -524,6 +524,22 @@ TEST_CASE("enriched moshi lm fixture loads hparams, vocab, and contract") {
     REQUIRE(layer.gating_input.tensor != nullptr);
     REQUIRE(layer.gating_output.tensor != nullptr);
   }
+  for (int32_t layer_index = 0;
+       layer_index < model.moshi_lm.depformer_num_layers; ++layer_index) {
+    const auto &layer =
+        contract.lm.depformer_layers[static_cast<size_t>(layer_index)];
+    REQUIRE(layer.norm1.tensor != nullptr);
+    REQUIRE(layer.norm2.tensor != nullptr);
+    for (int32_t codebook = 0; codebook < model.moshi_lm.dep_q; ++codebook) {
+      const auto &codebook_layer =
+          layer.codebooks[static_cast<size_t>(codebook)];
+      REQUIRE((codebook_layer.split_input_projection.tensor != nullptr ||
+               codebook_layer.fused_input_projection.tensor != nullptr));
+      REQUIRE(codebook_layer.output_projection.tensor != nullptr);
+      REQUIRE(codebook_layer.gating_input.tensor != nullptr);
+      REQUIRE(codebook_layer.gating_output.tensor != nullptr);
+    }
+  }
   CHECK(contract.lm.depformer.tensor_count > 0u);
   CHECK(contract.lm.linears.tensor_count == 4u);
 }

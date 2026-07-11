@@ -1,17 +1,14 @@
 #include <array>
 #include <cstdint>
-#include <memory>
 
 #include <doctest/doctest.h>
 
 #include "emel/kernel/detail.hpp"
 #include "emel/speech/predictor/moshi/executor/detail.hpp"
-#include "moshi_fixture.hpp"
 
 namespace {
 
 namespace detail = emel::speech::predictor::moshi::executor::detail;
-using emel::speech::predictor::moshi::test::load_fixture_or_skip;
 
 detail::dtype dtype(const uint8_t code) {
   return static_cast<detail::dtype>(code);
@@ -94,37 +91,4 @@ TEST_CASE("speech Moshi executor classifies supported operand dtypes") {
       dtype(emel::kernel::detail::dtype_q4_k_x8_bl8)));
   CHECK_FALSE(
       detail::supported_mul_mat_dtype(dtype(emel::kernel::detail::dtype_i32)));
-}
-
-TEST_CASE("speech Moshi executor resolves model tensor families") {
-  auto fixture = load_fixture_or_skip("moshi-tiny-lm.gguf");
-  if (fixture.model == nullptr) {
-    return;
-  }
-
-  const auto &model = *fixture.model;
-  CHECK(detail::find_tensor(model, "lm.text_emb.weight") != nullptr);
-  CHECK(detail::find_tensor(model, "missing.tensor") == nullptr);
-  CHECK(detail::find_indexed_tensor(model, "lm.emb.%d.weight", 0) != nullptr);
-  CHECK(detail::find_lm_transformer_projection(model, 0) != nullptr);
-  CHECK(detail::find_depformer_projection(model, 0, 0) != nullptr);
-  CHECK(detail::find_depformer_codebook_tensor(
-            model, 0, "self_attn.in_projs.%d.weight", 0) != nullptr);
-
-  const std::array<char, 192> long_name = [] {
-    std::array<char, 192> value{};
-    value.fill('x');
-    value.back() = '\0';
-    return value;
-  }();
-  CHECK(detail::find_indexed_tensor(model, long_name.data(), 0) == nullptr);
-  CHECK(detail::find_lm_transformer_tensor(model, 0, long_name.data()) ==
-        nullptr);
-  CHECK(detail::find_depformer_tensor(model, 0, long_name.data()) == nullptr);
-  CHECK(detail::find_depformer_codebook_tensor(model, 0, long_name.data(), 0) ==
-        nullptr);
-
-  auto empty_model = std::make_unique<emel::model::data>();
-  CHECK(detail::find_lm_transformer_projection(*empty_model, 0) == nullptr);
-  CHECK(detail::find_depformer_projection(*empty_model, 0, 0) == nullptr);
 }

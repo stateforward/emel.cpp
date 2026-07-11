@@ -853,9 +853,86 @@ emel::error::type validate_lm_contract(const emel::model::data &model_data,
       }
     }
 
+    if (lm.depformer_num_layers >
+        emel::model::data::moshi_lm_hparams::k_max_delays) {
+      return emel::error::cast(emel::model::loader::error::model_invalid);
+    }
     for (int32_t block = 0; block < lm.depformer_num_layers; ++block) {
       if (!has_depformer_block(model_data, block)) {
         return emel::error::cast(emel::model::loader::error::model_invalid);
+      }
+      auto &layer = contract_out.depformer_layers[static_cast<size_t>(block)];
+      char name[160] = {};
+      int written = std::snprintf(name, sizeof(name),
+                                  "lm.depformer.layers.%d.norm1.alpha", block);
+      if (written <= 0 || static_cast<size_t>(written) >= sizeof(name) ||
+          !bind_exact_tensor(
+              model_data, std::string_view{name, static_cast<size_t>(written)},
+              layer.norm1)) {
+        return emel::error::cast(emel::model::loader::error::model_invalid);
+      }
+      written = std::snprintf(name, sizeof(name),
+                              "lm.depformer.layers.%d.norm2.alpha", block);
+      if (written <= 0 || static_cast<size_t>(written) >= sizeof(name) ||
+          !bind_exact_tensor(
+              model_data, std::string_view{name, static_cast<size_t>(written)},
+              layer.norm2)) {
+        return emel::error::cast(emel::model::loader::error::model_invalid);
+      }
+      for (int32_t codebook = 0; codebook < lm.dep_q; ++codebook) {
+        auto &codebook_layer = layer.codebooks[static_cast<size_t>(codebook)];
+        written =
+            std::snprintf(name, sizeof(name),
+                          "lm.depformer.layers.%d.self_attn.in_projs.%d.weight",
+                          block, codebook);
+        if (written <= 0 || static_cast<size_t>(written) >= sizeof(name)) {
+          return emel::error::cast(emel::model::loader::error::model_invalid);
+        }
+        (void)bind_exact_tensor(
+            model_data, std::string_view{name, static_cast<size_t>(written)},
+            codebook_layer.split_input_projection);
+        written = std::snprintf(
+            name, sizeof(name),
+            "lm.depformer.layers.%d.self_attn.in_proj_weight", block);
+        if (written <= 0 || static_cast<size_t>(written) >= sizeof(name)) {
+          return emel::error::cast(emel::model::loader::error::model_invalid);
+        }
+        (void)bind_exact_tensor(
+            model_data, std::string_view{name, static_cast<size_t>(written)},
+            codebook_layer.fused_input_projection);
+        written = std::snprintf(
+            name, sizeof(name),
+            "lm.depformer.layers.%d.self_attn.out_projs.%d.weight", block,
+            codebook);
+        if (written <= 0 || static_cast<size_t>(written) >= sizeof(name) ||
+            !bind_exact_tensor(
+                model_data,
+                std::string_view{name, static_cast<size_t>(written)},
+                codebook_layer.output_projection)) {
+          return emel::error::cast(emel::model::loader::error::model_invalid);
+        }
+        written =
+            std::snprintf(name, sizeof(name),
+                          "lm.depformer.layers.%d.gating.%d.linear_in.weight",
+                          block, codebook);
+        if (written <= 0 || static_cast<size_t>(written) >= sizeof(name) ||
+            !bind_exact_tensor(
+                model_data,
+                std::string_view{name, static_cast<size_t>(written)},
+                codebook_layer.gating_input)) {
+          return emel::error::cast(emel::model::loader::error::model_invalid);
+        }
+        written =
+            std::snprintf(name, sizeof(name),
+                          "lm.depformer.layers.%d.gating.%d.linear_out.weight",
+                          block, codebook);
+        if (written <= 0 || static_cast<size_t>(written) >= sizeof(name) ||
+            !bind_exact_tensor(
+                model_data,
+                std::string_view{name, static_cast<size_t>(written)},
+                codebook_layer.gating_output)) {
+          return emel::error::cast(emel::model::loader::error::model_invalid);
+        }
       }
     }
   }

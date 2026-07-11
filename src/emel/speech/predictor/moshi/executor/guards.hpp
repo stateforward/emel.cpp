@@ -143,6 +143,48 @@ struct guard_bound_root_operands_supported {
           detail::supported_mul_mat_dtype(
               static_cast<detail::dtype>(gating_output->type));
     }
+    for (int32_t layer_index = 0; layer_index < lm.depformer_num_layers;
+         ++layer_index) {
+      const auto &layer =
+          ctx.session.contract.lm
+              .depformer_layers[static_cast<size_t>(layer_index)];
+      const auto *norm1 = layer.norm1.tensor;
+      const auto *norm2 = layer.norm2.tensor;
+      supported =
+          supported && detail::tensor_shape(norm1, dep_dim) &&
+          static_cast<detail::dtype>(norm1->type) == detail::dtype::f32 &&
+          detail::tensor_shape(norm2, dep_dim) &&
+          static_cast<detail::dtype>(norm2->type) == detail::dtype::f32;
+      for (int32_t codebook = 0; codebook < lm.dep_q; ++codebook) {
+        const auto &codebook_layer =
+            layer.codebooks[static_cast<size_t>(codebook)];
+        const auto *output_projection = codebook_layer.output_projection.tensor;
+        const auto *gating_input = codebook_layer.gating_input.tensor;
+        const auto *gating_output = codebook_layer.gating_output.tensor;
+        int64_t gating_projection_dim = 0;
+        if (gating_input != nullptr && gating_input->n_dims > 1) {
+          gating_projection_dim = gating_input->dims[1];
+        }
+        const int64_t gating_dim = gating_projection_dim / 2;
+        supported =
+            supported &&
+            detail::tensor_shape(output_projection, dep_dim, dep_dim) &&
+            detail::supported_mul_mat_dtype(
+                static_cast<detail::dtype>(output_projection->type)) &&
+            gating_projection_dim > 0 && (gating_projection_dim % 2) == 0 &&
+            static_cast<uint64_t>(gating_projection_dim) <=
+                ctx.capacity.hidden_dim * 8u &&
+            detail::tensor_shape(gating_input, dep_dim,
+                                 gating_projection_dim) &&
+            detail::supported_mul_mat_dtype(
+                static_cast<detail::dtype>(gating_input->type)) &&
+            gating_dim > 0 &&
+            static_cast<uint64_t>(gating_dim) <= ctx.capacity.hidden_dim * 4u &&
+            detail::tensor_shape(gating_output, gating_dim, dep_dim) &&
+            detail::supported_mul_mat_dtype(
+                static_cast<detail::dtype>(gating_output->type));
+      }
+    }
     return supported;
   }
 };
@@ -201,6 +243,67 @@ struct guard_temporal_projection_layout_unsupported {
     return !guard_temporal_split_projection_layout_supported{}(runtime_ev,
                                                                ctx) &&
            !guard_temporal_fused_projection_layout_supported{}(runtime_ev, ctx);
+  }
+};
+
+struct guard_depformer_split_projection_layout_supported {
+  bool operator()(const event::initialize_run &runtime_ev,
+                  const action::context &ctx) const noexcept {
+    const auto &lm = runtime_ev.request.model.moshi_lm;
+    bool supported = lm.depformer_num_layers > 0 && lm.dep_q > 0;
+    for (int32_t layer_index = 0; layer_index < lm.depformer_num_layers;
+         ++layer_index) {
+      for (int32_t codebook = 0; codebook < lm.dep_q; ++codebook) {
+        const auto *projection =
+            ctx.session.contract.lm
+                .depformer_layers[static_cast<size_t>(layer_index)]
+                .codebooks[static_cast<size_t>(codebook)]
+                .split_input_projection.tensor;
+        supported = supported &&
+                    detail::tensor_shape(projection, lm.depformer_dim,
+                                         lm.depformer_dim * 3) &&
+                    detail::supported_mul_mat_dtype(
+                        static_cast<detail::dtype>(projection->type));
+      }
+    }
+    return supported;
+  }
+};
+
+struct guard_depformer_fused_projection_layout_supported {
+  bool operator()(const event::initialize_run &runtime_ev,
+                  const action::context &ctx) const noexcept {
+    if (guard_depformer_split_projection_layout_supported{}(runtime_ev, ctx)) {
+      return false;
+    }
+    const auto &lm = runtime_ev.request.model.moshi_lm;
+    bool supported = lm.depformer_num_layers > 0 && lm.dep_q > 0;
+    for (int32_t layer_index = 0; layer_index < lm.depformer_num_layers;
+         ++layer_index) {
+      for (int32_t codebook = 0; codebook < lm.dep_q; ++codebook) {
+        const auto *projection =
+            ctx.session.contract.lm
+                .depformer_layers[static_cast<size_t>(layer_index)]
+                .codebooks[static_cast<size_t>(codebook)]
+                .fused_input_projection.tensor;
+        supported = supported &&
+                    detail::tensor_shape(projection, lm.depformer_dim,
+                                         lm.depformer_dim * 3) &&
+                    detail::supported_mul_mat_dtype(
+                        static_cast<detail::dtype>(projection->type));
+      }
+    }
+    return supported;
+  }
+};
+
+struct guard_depformer_projection_layout_unsupported {
+  bool operator()(const event::initialize_run &runtime_ev,
+                  const action::context &ctx) const noexcept {
+    return !guard_depformer_split_projection_layout_supported{}(runtime_ev,
+                                                                ctx) &&
+           !guard_depformer_fused_projection_layout_supported{}(runtime_ev,
+                                                                ctx);
   }
 };
 
@@ -1453,16 +1556,12 @@ struct guard_depformer_input_projection_embedding_unsupported {
 struct guard_depformer_layer_norm_supported {
   bool operator()(const event::step_run &runtime_ev,
                   const action::context &ctx) const noexcept {
-    const auto &model = runtime_ev.request.model;
-    const int32_t dep_dim = model.moshi_lm.depformer_dim;
+    const auto &lm = runtime_ev.request.model.moshi_lm;
+    const int32_t dep_dim = lm.depformer_dim;
     const int32_t layer = runtime_ev.ctx.depformer_layer_index;
-    const auto *norm1 =
-        detail::find_depformer_tensor(model, layer, "norm1.alpha");
     return runtime_ev.ctx.depformer_input_ok && layer >= 0 &&
-           layer < model.moshi_lm.depformer_num_layers && dep_dim > 0 &&
-           static_cast<uint64_t>(dep_dim) <= ctx.capacity.hidden_dim &&
-           detail::tensor_shape(norm1, dep_dim) &&
-           static_cast<detail::dtype>(norm1->type) == detail::dtype::f32;
+           layer < lm.depformer_num_layers && dep_dim > 0 &&
+           static_cast<uint64_t>(dep_dim) <= ctx.capacity.hidden_dim;
   }
 };
 
@@ -1513,16 +1612,10 @@ struct guard_depformer_layer_projection_supported {
     if (weight_index < 0 || weight_index >= lm.dep_q) {
       return false;
     }
-    const auto *projection =
-        detail::find_depformer_projection(model, layer, weight_index);
     return runtime_ev.ctx.depformer_layer_norm_ok && layer >= 0 &&
            layer < model.moshi_lm.depformer_num_layers && codebook >= 0 &&
            codebook < model.moshi_lm.dep_q && dep_dim > 0 &&
-           static_cast<uint64_t>(dep_dim) * 3u <=
-               ctx.capacity.hidden_dim * 3u &&
-           detail::tensor_shape(projection, dep_dim, dep_dim * 3) &&
-           detail::supported_mul_mat_dtype(
-               static_cast<detail::dtype>(projection->type));
+           static_cast<uint64_t>(dep_dim) * 3u <= ctx.capacity.hidden_dim * 3u;
   }
 };
 
@@ -1667,14 +1760,9 @@ struct guard_depformer_layer_out_projection_supported {
     if (weight_index < 0 || weight_index >= lm.dep_q) {
       return false;
     }
-    const auto *projection = detail::find_depformer_codebook_tensor(
-        model, layer, "self_attn.out_projs.%d.weight", weight_index);
     return runtime_ev.ctx.depformer_layer_attention_ok && layer >= 0 &&
            layer < model.moshi_lm.depformer_num_layers && codebook >= 0 &&
-           codebook < model.moshi_lm.dep_q && dep_dim > 0 &&
-           detail::tensor_shape(projection, dep_dim, dep_dim) &&
-           detail::supported_mul_mat_dtype(
-               static_cast<detail::dtype>(projection->type));
+           codebook < model.moshi_lm.dep_q && dep_dim > 0;
   }
 };
 
@@ -1716,16 +1804,12 @@ struct guard_depformer_layer_residual_failed {
 struct guard_depformer_layer_norm2_supported {
   bool operator()(const event::step_run &runtime_ev,
                   const action::context &ctx) const noexcept {
-    const auto &model = runtime_ev.request.model;
-    const int32_t dep_dim = model.moshi_lm.depformer_dim;
+    const auto &lm = runtime_ev.request.model.moshi_lm;
+    const int32_t dep_dim = lm.depformer_dim;
     const int32_t layer = runtime_ev.ctx.depformer_layer_index;
-    const auto *norm2 =
-        detail::find_depformer_tensor(model, layer, "norm2.alpha");
     return runtime_ev.ctx.depformer_layer_residual_ok && layer >= 0 &&
-           layer < model.moshi_lm.depformer_num_layers && dep_dim > 0 &&
-           static_cast<uint64_t>(dep_dim) <= ctx.capacity.hidden_dim &&
-           detail::tensor_shape(norm2, dep_dim) &&
-           static_cast<detail::dtype>(norm2->type) == detail::dtype::f32;
+           layer < lm.depformer_num_layers && dep_dim > 0 &&
+           static_cast<uint64_t>(dep_dim) <= ctx.capacity.hidden_dim;
   }
 };
 
@@ -1766,7 +1850,7 @@ struct guard_depformer_layer_norm2_failed {
 
 struct guard_depformer_layer_gating_in_supported {
   bool operator()(const event::step_run &runtime_ev,
-                  const action::context &ctx) const noexcept {
+                  const action::context &) const noexcept {
     const auto &model = runtime_ev.request.model;
     const auto &lm = model.moshi_lm;
     const int32_t dep_dim = lm.depformer_dim;
@@ -1776,21 +1860,9 @@ struct guard_depformer_layer_gating_in_supported {
     if (weight_index < 0 || weight_index >= lm.dep_q) {
       return false;
     }
-    const auto *linear_in = detail::find_depformer_codebook_tensor(
-        model, layer, "gating.%d.linear_in.weight", weight_index);
-    int64_t projection_dim = 0;
-    if (linear_in != nullptr && linear_in->n_dims > 1) {
-      projection_dim = linear_in->dims[1];
-    }
     return runtime_ev.ctx.depformer_layer_norm2_ok && layer >= 0 &&
            layer < model.moshi_lm.depformer_num_layers && codebook >= 0 &&
-           codebook < model.moshi_lm.dep_q && dep_dim > 0 &&
-           projection_dim > 0 && (projection_dim % 2) == 0 &&
-           static_cast<uint64_t>(projection_dim) <=
-               ctx.capacity.hidden_dim * 8u &&
-           detail::tensor_shape(linear_in, dep_dim, projection_dim) &&
-           detail::supported_mul_mat_dtype(
-               static_cast<detail::dtype>(linear_in->type));
+           codebook < model.moshi_lm.dep_q && dep_dim > 0;
   }
 };
 
@@ -1817,7 +1889,7 @@ struct guard_depformer_layer_gating_in_failed {
 
 struct guard_depformer_layer_silu_gate_supported {
   bool operator()(const event::step_run &runtime_ev,
-                  const action::context &ctx) const noexcept {
+                  const action::context &) const noexcept {
     const auto &lm = runtime_ev.request.model.moshi_lm;
     const int32_t codebook = runtime_ev.ctx.depformer_codebook_index;
     const int32_t weight_index = runtime_ev.ctx.depformer_weight_index;
@@ -1825,20 +1897,10 @@ struct guard_depformer_layer_silu_gate_supported {
         codebook >= lm.dep_q) {
       return false;
     }
-    const auto *linear_in = detail::find_depformer_codebook_tensor(
-        runtime_ev.request.model, runtime_ev.ctx.depformer_layer_index,
-        "gating.%d.linear_in.weight", weight_index);
-    int64_t projection_dim = 0;
-    if (linear_in != nullptr && linear_in->n_dims > 1) {
-      projection_dim = linear_in->dims[1];
-    }
-    const int64_t gate_dim = projection_dim / 2;
     return runtime_ev.ctx.depformer_layer_gating_in_ok &&
            runtime_ev.ctx.depformer_layer_index >= 0 &&
            runtime_ev.ctx.depformer_layer_index <
-               runtime_ev.request.model.moshi_lm.depformer_num_layers &&
-           gate_dim > 0 &&
-           static_cast<uint64_t>(gate_dim) <= ctx.capacity.hidden_dim * 4u;
+               runtime_ev.request.model.moshi_lm.depformer_num_layers;
   }
 };
 
@@ -1879,7 +1941,7 @@ struct guard_depformer_layer_silu_gate_failed {
 
 struct guard_depformer_layer_gating_out_supported {
   bool operator()(const event::step_run &runtime_ev,
-                  const action::context &ctx) const noexcept {
+                  const action::context &) const noexcept {
     const auto &model = runtime_ev.request.model;
     const auto &lm = model.moshi_lm;
     const int32_t dep_dim = lm.depformer_dim;
@@ -1889,22 +1951,9 @@ struct guard_depformer_layer_gating_out_supported {
     if (weight_index < 0 || weight_index >= lm.dep_q) {
       return false;
     }
-    const auto *linear_in = detail::find_depformer_codebook_tensor(
-        model, layer, "gating.%d.linear_in.weight", weight_index);
-    const auto *linear_out = detail::find_depformer_codebook_tensor(
-        model, layer, "gating.%d.linear_out.weight", weight_index);
-    int64_t projection_dim = 0;
-    if (linear_in != nullptr && linear_in->n_dims > 1) {
-      projection_dim = linear_in->dims[1];
-    }
-    const int64_t gate_dim = projection_dim / 2;
     return runtime_ev.ctx.depformer_layer_silu_gate_ok && layer >= 0 &&
            layer < model.moshi_lm.depformer_num_layers && codebook >= 0 &&
-           codebook < model.moshi_lm.dep_q && dep_dim > 0 && gate_dim > 0 &&
-           static_cast<uint64_t>(gate_dim) <= ctx.capacity.hidden_dim * 4u &&
-           detail::tensor_shape(linear_out, gate_dim, dep_dim) &&
-           detail::supported_mul_mat_dtype(
-               static_cast<detail::dtype>(linear_out->type));
+           codebook < model.moshi_lm.dep_q && dep_dim > 0;
   }
 };
 

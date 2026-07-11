@@ -1540,6 +1540,48 @@ TEST_CASE("speech_moshi_generator_and_executor_cover_explicit_error_guards") {
   CHECK_FALSE(
       moshi_executor::guard::guard_temporal_projection_layout_unsupported{}(
           executor_init_run, executor_ctx));
+  for (int32_t layer_index = 0; layer_index < lm.depformer_num_layers;
+       ++layer_index) {
+    for (int32_t codebook = 0; codebook < lm.dep_q; ++codebook) {
+      auto &codebook_layer =
+          executor_ctx.session.contract.lm
+              .depformer_layers[static_cast<size_t>(layer_index)]
+              .codebooks[static_cast<size_t>(codebook)];
+      const auto *projection =
+          codebook_layer.split_input_projection.tensor != nullptr
+              ? codebook_layer.split_input_projection.tensor
+              : codebook_layer.fused_input_projection.tensor;
+      REQUIRE(projection != nullptr);
+      codebook_layer.split_input_projection.tensor = projection;
+      codebook_layer.fused_input_projection.tensor = projection;
+    }
+  }
+  CHECK(moshi_executor::guard::
+            guard_depformer_split_projection_layout_supported{}(
+                executor_init_run, executor_ctx));
+  moshi_executor::action::effect_bind_depformer_split_projection_layout{}(
+      executor_init_run, executor_ctx);
+  CHECK(executor_ctx.session.depformer_input_projections[0][0] ==
+        executor_ctx.session.contract.lm.depformer_layers[0]
+            .codebooks[0]
+            .split_input_projection.tensor);
+  for (int32_t layer_index = 0; layer_index < lm.depformer_num_layers;
+       ++layer_index) {
+    for (int32_t codebook = 0; codebook < lm.dep_q; ++codebook) {
+      executor_ctx.session.contract.lm
+          .depformer_layers[static_cast<size_t>(layer_index)]
+          .codebooks[static_cast<size_t>(codebook)]
+          .split_input_projection.tensor = nullptr;
+    }
+  }
+  CHECK(moshi_executor::guard::
+            guard_depformer_fused_projection_layout_supported{}(
+                executor_init_run, executor_ctx));
+  moshi_executor::action::effect_bind_depformer_fused_projection_layout{}(
+      executor_init_run, executor_ctx);
+  CHECK_FALSE(
+      moshi_executor::guard::guard_depformer_projection_layout_unsupported{}(
+          executor_init_run, executor_ctx));
   executor_init.on_done =
       emel::callback<void(const moshi_executor::events::initialize_done &)>::
           from<moshi_callback_probe,

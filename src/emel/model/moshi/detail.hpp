@@ -46,6 +46,23 @@ struct temporal_layer_contract {
   tensor_view gating_output = {};
 };
 
+struct depformer_codebook_layer_contract {
+  tensor_view split_input_projection = {};
+  tensor_view fused_input_projection = {};
+  tensor_view output_projection = {};
+  tensor_view gating_input = {};
+  tensor_view gating_output = {};
+};
+
+struct depformer_layer_contract {
+  tensor_view norm1 = {};
+  tensor_view norm2 = {};
+  std::array<depformer_codebook_layer_contract,
+             static_cast<std::size_t>(
+                 emel::model::data::moshi_lm_hparams::k_max_delays)>
+      codebooks = {};
+};
+
 struct lm_contract {
   family_view text_emb = {};
   family_view audio_emb = {};
@@ -81,6 +98,10 @@ struct lm_contract {
              static_cast<std::size_t>(
                  emel::model::data::moshi_lm_hparams::k_max_delays)>
       temporal_layers = {};
+  std::array<depformer_layer_contract,
+             static_cast<std::size_t>(
+                 emel::model::data::moshi_lm_hparams::k_max_delays)>
+      depformer_layers = {};
 };
 
 struct mimi_contract {

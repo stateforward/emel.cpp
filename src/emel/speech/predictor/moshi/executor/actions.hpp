@@ -65,6 +65,36 @@ struct effect_bind_temporal_fused_projection_layout {
   }
 };
 
+struct effect_bind_depformer_split_projection_layout {
+  void operator()(const event::initialize_run &, context &ctx) const noexcept {
+    const auto &lm = ctx.session.model->moshi_lm;
+    for (int32_t layer = 0; layer < lm.depformer_num_layers; ++layer) {
+      for (int32_t codebook = 0; codebook < lm.dep_q; ++codebook) {
+        ctx.session.depformer_input_projections[static_cast<size_t>(layer)]
+                                               [static_cast<size_t>(codebook)] =
+            ctx.session.contract.lm.depformer_layers[static_cast<size_t>(layer)]
+                .codebooks[static_cast<size_t>(codebook)]
+                .split_input_projection.tensor;
+      }
+    }
+  }
+};
+
+struct effect_bind_depformer_fused_projection_layout {
+  void operator()(const event::initialize_run &, context &ctx) const noexcept {
+    const auto &lm = ctx.session.model->moshi_lm;
+    for (int32_t layer = 0; layer < lm.depformer_num_layers; ++layer) {
+      for (int32_t codebook = 0; codebook < lm.dep_q; ++codebook) {
+        ctx.session.depformer_input_projections[static_cast<size_t>(layer)]
+                                               [static_cast<size_t>(codebook)] =
+            ctx.session.contract.lm.depformer_layers[static_cast<size_t>(layer)]
+                .codebooks[static_cast<size_t>(codebook)]
+                .fused_input_projection.tensor;
+      }
+    }
+  }
+};
+
 struct effect_bind_nonzero_sampling_seed {
   void operator()(const event::initialize_run &runtime_ev,
                   context &ctx) const noexcept {
@@ -1263,7 +1293,8 @@ struct effect_run_depformer_layer_norm_scale {
     runtime_ev.ctx.depformer_layer_norm_ok = false;
 
     const auto *norm1 =
-        detail::find_depformer_tensor(model, layer, "norm1.alpha");
+        ctx.session.contract.lm.depformer_layers[static_cast<size_t>(layer)]
+            .norm1.tensor;
     const auto *alpha = static_cast<const float *>(norm1->data);
 
     emel::kernel::event::op_mul mul_ev{
@@ -1278,9 +1309,9 @@ struct effect_run_depformer_layer_norm_scale {
 };
 
 struct effect_bind_depformer_layer_projection {
-  void operator()(const event::step_run &runtime_ev, context &) const noexcept {
-    const auto &model = runtime_ev.request.model;
-    const auto &lm = model.moshi_lm;
+  void operator()(const event::step_run &runtime_ev,
+                  context &ctx) const noexcept {
+    const auto &lm = runtime_ev.request.model.moshi_lm;
     const int32_t dep_dim = lm.depformer_dim;
     const int32_t layer = runtime_ev.ctx.depformer_layer_index;
     const int32_t weight_index = runtime_ev.ctx.depformer_weight_index;
@@ -1291,7 +1322,8 @@ struct effect_bind_depformer_layer_projection {
                 0.0f);
 
     const auto *projection =
-        detail::find_depformer_projection(model, layer, weight_index);
+        ctx.session.depformer_input_projections[static_cast<size_t>(
+            layer)][static_cast<size_t>(weight_index)];
     runtime_ev.ctx.projection_view_bound =
         detail::bind_tensor_view(*projection, runtime_ev.ctx.projection_view);
   }
@@ -1423,7 +1455,8 @@ struct effect_run_depformer_layer_attention {
 };
 
 struct effect_bind_depformer_layer_out_projection {
-  void operator()(const event::step_run &runtime_ev, context &) const noexcept {
+  void operator()(const event::step_run &runtime_ev,
+                  context &ctx) const noexcept {
     const auto &model = runtime_ev.request.model;
     const auto &lm = model.moshi_lm;
     const int32_t dep_dim = lm.depformer_dim;
@@ -1435,8 +1468,10 @@ struct effect_bind_depformer_layer_out_projection {
     std::fill_n(runtime_ev.ctx.projection.data(), static_cast<size_t>(dep_dim),
                 0.0f);
 
-    const auto *projection = detail::find_depformer_codebook_tensor(
-        model, layer, "self_attn.out_projs.%d.weight", weight_index);
+    const auto *projection =
+        ctx.session.contract.lm.depformer_layers[static_cast<size_t>(layer)]
+            .codebooks[static_cast<size_t>(weight_index)]
+            .output_projection.tensor;
     runtime_ev.ctx.projection_view_bound =
         detail::bind_tensor_view(*projection, runtime_ev.ctx.projection_view);
   }
@@ -1505,7 +1540,8 @@ struct effect_run_depformer_layer_norm2_scale {
     runtime_ev.ctx.depformer_layer_norm2_ok = false;
 
     const auto *norm2 =
-        detail::find_depformer_tensor(model, layer, "norm2.alpha");
+        ctx.session.contract.lm.depformer_layers[static_cast<size_t>(layer)]
+            .norm2.tensor;
     const auto *alpha = static_cast<const float *>(norm2->data);
 
     emel::kernel::event::op_mul mul_ev{
@@ -1520,12 +1556,14 @@ struct effect_run_depformer_layer_norm2_scale {
 };
 
 struct effect_bind_depformer_layer_gating_in {
-  void operator()(const event::step_run &runtime_ev, context &) const noexcept {
-    const auto &model = runtime_ev.request.model;
+  void operator()(const event::step_run &runtime_ev,
+                  context &ctx) const noexcept {
     const int32_t layer = runtime_ev.ctx.depformer_layer_index;
     const int32_t weight_index = runtime_ev.ctx.depformer_weight_index;
-    const auto *linear_in = detail::find_depformer_codebook_tensor(
-        model, layer, "gating.%d.linear_in.weight", weight_index);
+    const auto *linear_in =
+        ctx.session.contract.lm.depformer_layers[static_cast<size_t>(layer)]
+            .codebooks[static_cast<size_t>(weight_index)]
+            .gating_input.tensor;
     const uint64_t projection_dim = static_cast<uint64_t>(linear_in->dims[1]);
     runtime_ev.ctx.depformer_layer_gating_in_ok = false;
     runtime_ev.ctx.projection_view_bound = false;
@@ -1541,12 +1579,13 @@ struct effect_bind_depformer_layer_gating_in {
 struct effect_run_depformer_layer_gating_in {
   void operator()(const event::step_run &runtime_ev,
                   context &ctx) const noexcept {
-    const auto &model = runtime_ev.request.model;
-    const int32_t dep_dim = model.moshi_lm.depformer_dim;
+    const int32_t dep_dim = runtime_ev.request.model.moshi_lm.depformer_dim;
     const int32_t layer = runtime_ev.ctx.depformer_layer_index;
     const int32_t weight_index = runtime_ev.ctx.depformer_weight_index;
-    const auto *linear_in = detail::find_depformer_codebook_tensor(
-        model, layer, "gating.%d.linear_in.weight", weight_index);
+    const auto *linear_in =
+        ctx.session.contract.lm.depformer_layers[static_cast<size_t>(layer)]
+            .codebooks[static_cast<size_t>(weight_index)]
+            .gating_input.tensor;
     const uint64_t projection_dim = static_cast<uint64_t>(linear_in->dims[1]);
     runtime_ev.ctx.depformer_layer_gating_in_ok = false;
     emel::kernel::event::op_mul_mat projection_ev{
@@ -1564,9 +1603,12 @@ struct effect_run_depformer_layer_gating_in {
 struct effect_run_depformer_layer_silu_gate_silu {
   void operator()(const event::step_run &runtime_ev,
                   context &ctx) const noexcept {
-    const auto *linear_in = detail::find_depformer_codebook_tensor(
-        runtime_ev.request.model, runtime_ev.ctx.depformer_layer_index,
-        "gating.%d.linear_in.weight", runtime_ev.ctx.depformer_weight_index);
+    const auto *linear_in = ctx.session.contract.lm
+                                .depformer_layers[static_cast<size_t>(
+                                    runtime_ev.ctx.depformer_layer_index)]
+                                .codebooks[static_cast<size_t>(
+                                    runtime_ev.ctx.depformer_weight_index)]
+                                .gating_input.tensor;
     const uint64_t projection_dim = static_cast<uint64_t>(linear_in->dims[1]);
     const uint64_t gate_dim = projection_dim / 2u;
     runtime_ev.ctx.depformer_layer_silu_gate_silu_ok = false;
@@ -1591,9 +1633,12 @@ struct effect_run_depformer_layer_silu_gate_silu {
 struct effect_run_depformer_layer_silu_gate_mul {
   void operator()(const event::step_run &runtime_ev,
                   context &ctx) const noexcept {
-    const auto *linear_in = detail::find_depformer_codebook_tensor(
-        runtime_ev.request.model, runtime_ev.ctx.depformer_layer_index,
-        "gating.%d.linear_in.weight", runtime_ev.ctx.depformer_weight_index);
+    const auto *linear_in = ctx.session.contract.lm
+                                .depformer_layers[static_cast<size_t>(
+                                    runtime_ev.ctx.depformer_layer_index)]
+                                .codebooks[static_cast<size_t>(
+                                    runtime_ev.ctx.depformer_weight_index)]
+                                .gating_input.tensor;
     const uint64_t projection_dim = static_cast<uint64_t>(linear_in->dims[1]);
     const uint64_t gate_dim = projection_dim / 2u;
     const float *right = runtime_ev.ctx.gating_projection.data() + gate_dim;
@@ -1611,16 +1656,17 @@ struct effect_run_depformer_layer_silu_gate_mul {
 };
 
 struct effect_bind_depformer_layer_gating_out {
-  void operator()(const event::step_run &runtime_ev, context &) const noexcept {
-    const auto &model = runtime_ev.request.model;
-    const auto &lm = model.moshi_lm;
+  void operator()(const event::step_run &runtime_ev,
+                  context &ctx) const noexcept {
+    const auto &lm = runtime_ev.request.model.moshi_lm;
     const int32_t dep_dim = lm.depformer_dim;
     const int32_t layer = runtime_ev.ctx.depformer_layer_index;
     const int32_t weight_index = runtime_ev.ctx.depformer_weight_index;
-    const auto *linear_in = detail::find_depformer_codebook_tensor(
-        model, layer, "gating.%d.linear_in.weight", weight_index);
-    const auto *linear_out = detail::find_depformer_codebook_tensor(
-        model, layer, "gating.%d.linear_out.weight", weight_index);
+    const auto &codebook_layer =
+        ctx.session.contract.lm.depformer_layers[static_cast<size_t>(layer)]
+            .codebooks[static_cast<size_t>(weight_index)];
+    const auto *linear_in = codebook_layer.gating_input.tensor;
+    const auto *linear_out = codebook_layer.gating_output.tensor;
     const uint64_t gate_dim = static_cast<uint64_t>(linear_in->dims[1]) / 2u;
     (void)gate_dim;
     runtime_ev.ctx.depformer_layer_gating_out_ok = false;
@@ -1637,13 +1683,14 @@ struct effect_bind_depformer_layer_gating_out {
 struct effect_run_depformer_layer_gating_out {
   void operator()(const event::step_run &runtime_ev,
                   context &ctx) const noexcept {
-    const auto &model = runtime_ev.request.model;
-    const auto &lm = model.moshi_lm;
+    const auto &lm = runtime_ev.request.model.moshi_lm;
     const int32_t dep_dim = lm.depformer_dim;
     const int32_t layer = runtime_ev.ctx.depformer_layer_index;
     const int32_t weight_index = runtime_ev.ctx.depformer_weight_index;
-    const auto *linear_in = detail::find_depformer_codebook_tensor(
-        model, layer, "gating.%d.linear_in.weight", weight_index);
+    const auto *linear_in =
+        ctx.session.contract.lm.depformer_layers[static_cast<size_t>(layer)]
+            .codebooks[static_cast<size_t>(weight_index)]
+            .gating_input.tensor;
     const uint64_t gate_dim = static_cast<uint64_t>(linear_in->dims[1]) / 2u;
     runtime_ev.ctx.depformer_layer_gating_out_ok = false;
     emel::kernel::event::op_mul_mat projection_ev{

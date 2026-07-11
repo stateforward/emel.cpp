@@ -1,10 +1,8 @@
 #pragma once
 
 #include <cstdint>
-#include <cstdio>
 #include <cstring>
 #include <span>
-#include <string_view>
 
 #include "emel/kernel/detail.hpp"
 #include "emel/kernel/events.hpp"
@@ -47,91 +45,6 @@ void fill_default_nb(tensor_type &tensor) noexcept {
   tensor.nb[1] = tensor.nb[0] * tensor.ne[0];
   tensor.nb[2] = tensor.nb[1] * tensor.ne[1];
   tensor.nb[3] = tensor.nb[2] * tensor.ne[2];
-}
-
-inline const tensor_record *find_tensor(const emel::model::data &model,
-                                        const std::string_view name) noexcept {
-  for (uint32_t index = 0u; index < model.n_tensors; ++index) {
-    const auto &tensor = model.tensors[index];
-    if (emel::model::tensor_name_view(model, tensor) == name) {
-      return &tensor;
-    }
-  }
-  return nullptr;
-}
-
-inline const tensor_record *find_indexed_tensor(const emel::model::data &model,
-                                                const char *format,
-                                                const int32_t index) noexcept {
-  char buffer[96] = {};
-  const int written = std::snprintf(buffer, sizeof(buffer), format, index);
-  if (written <= 0 || static_cast<size_t>(written) >= sizeof(buffer)) {
-    return nullptr;
-  }
-  return find_tensor(model,
-                     std::string_view{buffer, static_cast<size_t>(written)});
-}
-
-inline const tensor_record *
-find_lm_transformer_tensor(const emel::model::data &model, const int32_t layer,
-                           const char *suffix) noexcept {
-  char buffer[128] = {};
-  const int written = std::snprintf(
-      buffer, sizeof(buffer), "lm.transformer.layers.%d.%s", layer, suffix);
-  if (written <= 0 || static_cast<size_t>(written) >= sizeof(buffer)) {
-    return nullptr;
-  }
-  return find_tensor(model,
-                     std::string_view{buffer, static_cast<size_t>(written)});
-}
-
-inline const tensor_record *
-find_lm_transformer_projection(const emel::model::data &model,
-                               const int32_t layer) noexcept {
-  const auto *split =
-      find_lm_transformer_tensor(model, layer, "self_attn.in_projs.0.weight");
-  if (split != nullptr) {
-    return split;
-  }
-  return find_lm_transformer_tensor(model, layer, "self_attn.in_proj_weight");
-}
-
-inline const tensor_record *
-find_depformer_tensor(const emel::model::data &model, const int32_t layer,
-                      const char *suffix) noexcept {
-  char buffer[160] = {};
-  const int written = std::snprintf(buffer, sizeof(buffer),
-                                    "lm.depformer.layers.%d.%s", layer, suffix);
-  if (written <= 0 || static_cast<size_t>(written) >= sizeof(buffer)) {
-    return nullptr;
-  }
-  return find_tensor(model,
-                     std::string_view{buffer, static_cast<size_t>(written)});
-}
-
-inline const tensor_record *
-find_depformer_codebook_tensor(const emel::model::data &model,
-                               const int32_t layer, const char *format,
-                               const int32_t codebook) noexcept {
-  char suffix[128] = {};
-  const int suffix_written =
-      std::snprintf(suffix, sizeof(suffix), format, codebook);
-  if (suffix_written <= 0 ||
-      static_cast<size_t>(suffix_written) >= sizeof(suffix)) {
-    return nullptr;
-  }
-  return find_depformer_tensor(model, layer, suffix);
-}
-
-inline const tensor_record *
-find_depformer_projection(const emel::model::data &model, const int32_t layer,
-                          const int32_t codebook) noexcept {
-  const auto *split = find_depformer_codebook_tensor(
-      model, layer, "self_attn.in_projs.%d.weight", codebook);
-  if (split != nullptr) {
-    return split;
-  }
-  return find_depformer_tensor(model, layer, "self_attn.in_proj_weight");
 }
 
 inline bool supported_get_rows_dtype(const dtype type) noexcept {
