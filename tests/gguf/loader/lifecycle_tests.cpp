@@ -2,6 +2,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <span>
 #include <string_view>
 #include <type_traits>
@@ -638,4 +639,18 @@ TEST_CASE("gguf loader explicit error guard classification") {
 
   parse_ctx.err = 0x7fff;
   CHECK(emel::gguf::loader::guard::parse_error_unknown{}(parse_runtime, ctx));
+}
+
+TEST_CASE("gguf packed q4_k row group ceiling does not overflow") {
+  const std::array<uint64_t, 4> dims{
+      256u,
+      std::numeric_limits<uint64_t>::max(),
+      1u,
+      1u,
+  };
+  uint64_t data_size = 0u;
+
+  CHECK(emel::gguf::loader::detail::compute_emel_packed_q4_k_x8_data_size(
+            dims, 2u, data_size) ==
+        emel::error::cast(emel::gguf::loader::error::capacity));
 }

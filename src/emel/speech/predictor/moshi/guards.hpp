@@ -2,6 +2,7 @@
 
 #include "emel/kernel/detail.hpp"
 #include "emel/memory/hybrid/errors.hpp"
+#include "emel/memory/view.hpp"
 #include "emel/model/loader/errors.hpp"
 #include "emel/model/moshi/detail.hpp"
 #include "emel/speech/predictor/moshi/context.hpp"
@@ -16,6 +17,9 @@ struct guard_bind_contract_valid {
     const auto &model = runtime_ev.request.model;
     const auto &lm = model.moshi_lm;
     if (lm.delay_count > lm.delays.size()) {
+      return false;
+    }
+    if (lm.n_q < 0 || lm.n_q >= action::k_max_codebooks) {
       return false;
     }
     int32_t max_delay = 0;
@@ -51,7 +55,10 @@ struct guard_bind_contract_valid {
            row_count <= action::k_max_delay_rows && inference_contract &&
            lm.delay_count >= static_cast<uint32_t>(codebook_count) &&
            runtime_ev.request.max_sequences > 0 &&
+           runtime_ev.request.max_sequences <=
+               emel::memory::view::MAX_SEQUENCES &&
            runtime_ev.request.max_blocks > 0 &&
+           runtime_ev.request.max_blocks <= emel::memory::view::MAX_BLOCKS &&
            runtime_ev.request.block_tokens > 0 && reserved_token_capacity > 0 &&
            reserved_token_capacity <= static_cast<int64_t>(lm.context) &&
            runtime_ev.request.sequence_id >= 0 &&

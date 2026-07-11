@@ -151,7 +151,8 @@ inline emel::error::type compute_emel_packed_q4_k_x8_data_size(
   }
 
   const uint64_t block_count = dims[0] / k_block_cols;
-  const uint64_t group_count = (rows + k_group_rows - 1u) / k_group_rows;
+  const uint64_t group_count =
+      rows / k_group_rows + static_cast<uint64_t>((rows % k_group_rows) != 0u);
   uint64_t groups_and_blocks = 0u;
   if (!multiply_u64(group_count, block_count, groups_and_blocks) ||
       !multiply_u64(groups_and_blocks, k_group_block_bytes, data_size_out)) {

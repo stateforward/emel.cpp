@@ -831,6 +831,48 @@ TEST_CASE("speech_moshi_predictor_rejects_memory_geometry_beyond_temporal_kv") {
   CHECK_FALSE(graph.initialized);
 }
 
+TEST_CASE("speech_moshi_predictor_rejects_memory_actor_capacity_before_graph") {
+  auto fixture = load_fixture_or_skip("moshi-tiny-lm.gguf");
+  if (fixture.model == nullptr) {
+    return;
+  }
+  emel::memory::hybrid::sm memory{};
+  recording_graph_executor graph{};
+  moshi::sm predictor{make_predictor_dependencies(graph, memory)};
+  emel::error::type err = k_no_error;
+  moshi::event::initialize init{*fixture.model};
+  configure_predictor_initialize(init);
+  init.max_sequences = emel::memory::view::MAX_SEQUENCES + 1;
+  init.error_out = &err;
+  CHECK_FALSE(predictor.process_event(init));
+  CHECK(err == emel::error::cast(moshi::error::bind_failed));
+  CHECK_FALSE(graph.initialized);
+}
+
+TEST_CASE(
+    "speech_moshi_predictor_bounds_codebooks_before_delay_slot_addition") {
+  auto fixture = load_fixture_or_skip("moshi-tiny-lm.gguf");
+  if (fixture.model == nullptr) {
+    return;
+  }
+  auto model = std::make_unique<emel::model::data>(*fixture.model);
+  model->moshi_lm.n_q = std::numeric_limits<int32_t>::max();
+  emel::memory::hybrid::sm memory{};
+  recording_graph_executor graph{};
+  moshi::sm predictor{make_predictor_dependencies(graph, memory)};
+  emel::error::type err = k_no_error;
+  moshi::event::initialize init{*model};
+  init.max_sequences = 1;
+  init.max_blocks = 1;
+  init.block_tokens = 1;
+  init.codebook_capacity = 1;
+  init.delay_cache_row_capacity = 1;
+  init.error_out = &err;
+  CHECK_FALSE(predictor.process_event(init));
+  CHECK(err == emel::error::cast(moshi::error::bind_failed));
+  CHECK_FALSE(graph.initialized);
+}
+
 TEST_CASE(
     "speech_moshi_executor_init_honors_shared_depformer_weight_schedule") {
   auto fixture = load_fixture_or_skip("moshi-tiny-lm.gguf");
