@@ -107,9 +107,12 @@ TEST_CASE(
       executor::bind_temporal_kv_cache(&temporal_cache, bind_temporal_cache);
   const auto depformer_binding =
       executor::bind_depformer_kv_cache(&depformer_cache, bind_depformer_cache);
-  executor::sm machine{
-      executor::bind_kv_caches(temporal_binding, depformer_binding,
-                               temporal_positions, depformer_positions)};
+  emel::kernel::sm kernel{};
+  executor::sm machine{executor::dependencies{
+      .kv = executor::bind_kv_caches(temporal_binding, depformer_binding,
+                                     temporal_positions, depformer_positions),
+      .kernel = kernel,
+  }};
 
   emel::error::type err = emel::error::cast(executor::error::none);
   executor::event::initialize initialize{*fixture.model};

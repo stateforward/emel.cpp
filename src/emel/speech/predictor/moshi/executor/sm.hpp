@@ -1003,11 +1003,8 @@ struct sm : public emel::sm<model, action::context> {
   using base_type::is;
   using base_type::visit_current_states;
 
-  sm() = default;
-  explicit sm(const action::temporal_kv_binding &kv_binding)
-      : base_type(std::in_place, kv_binding) {}
-  explicit sm(const action::kv_bindings &kv_binding_set)
-      : base_type(std::in_place, kv_binding_set) {}
+  explicit sm(const action::dependencies &deps)
+      : base_type(std::in_place, deps) {}
 
   bool process_event(const event::initialize &ev) {
     event::initialize_ctx ctx{};

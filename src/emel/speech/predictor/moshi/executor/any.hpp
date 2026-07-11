@@ -7,6 +7,7 @@ namespace emel::speech::predictor::moshi::executor {
 using temporal_kv_binding = action::temporal_kv_binding;
 using depformer_kv_binding = action::depformer_kv_binding;
 using kv_bindings = action::kv_bindings;
+using dependencies = action::dependencies;
 
 inline temporal_kv_binding
 bind_temporal_kv_cache(void *cache,

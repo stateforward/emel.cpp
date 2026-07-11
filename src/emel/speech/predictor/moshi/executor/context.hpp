@@ -36,6 +36,11 @@ struct kv_bindings {
   emel::memory::streaming::sm *depformer_positions = nullptr;
 };
 
+struct dependencies {
+  kv_bindings kv = {};
+  emel::kernel::sm &kernel;
+};
+
 struct runtime {
   const emel::model::data *model = nullptr;
   emel::model::moshi::detail::execution_contract contract = {};
@@ -57,14 +62,10 @@ struct sampling_config {
 };
 
 struct context {
-  context() = default;
-  explicit context(const temporal_kv_binding &kv_binding)
-      : temporal_kv(kv_binding) {}
-  explicit context(const kv_bindings &kv_binding_set)
-      : temporal_kv(kv_binding_set.temporal),
-        depformer_kv(kv_binding_set.depformer),
-        temporal_positions(kv_binding_set.temporal_positions),
-        depformer_positions(kv_binding_set.depformer_positions) {}
+  explicit context(const dependencies &deps)
+      : temporal_kv(deps.kv.temporal), depformer_kv(deps.kv.depformer),
+        temporal_positions(deps.kv.temporal_positions),
+        depformer_positions(deps.kv.depformer_positions), kernel(deps.kernel) {}
 
   runtime session = {};
   sampling_config sampling = {};
@@ -72,7 +73,7 @@ struct context {
   depformer_kv_binding depformer_kv = {};
   emel::memory::streaming::sm *temporal_positions = nullptr;
   emel::memory::streaming::sm *depformer_positions = nullptr;
-  emel::kernel::sm kernel = {};
+  emel::kernel::sm &kernel;
 };
 
 inline temporal_kv_binding

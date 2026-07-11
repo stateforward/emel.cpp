@@ -744,7 +744,8 @@ TEST_CASE("speech_moshi_executor_initializes_lm_fixture") {
     return;
   }
 
-  moshi_executor::sm executor{};
+  emel::kernel::sm kernel{};
+  moshi_executor::sm executor{moshi_executor::dependencies{.kernel = kernel}};
   emel::error::type err = emel::error::cast(moshi_executor::error::none);
   moshi_executor::event::initialize init{*fixture.model};
   init.error_out = &err;
@@ -759,7 +760,8 @@ TEST_CASE("speech_moshi_executor_models_zero_seed_and_top_k_clamp") {
     return;
   }
 
-  moshi_executor::sm executor{};
+  emel::kernel::sm kernel{};
+  moshi_executor::sm executor{moshi_executor::dependencies{.kernel = kernel}};
   emel::error::type err = emel::error::cast(moshi_executor::error::none);
   moshi_executor::event::initialize init{*fixture.model};
   init.sampling_enabled = true;
@@ -807,7 +809,8 @@ TEST_CASE("speech_moshi_executor_rejects_graph_step_before_initialize") {
     return;
   }
 
-  moshi_executor::sm executor{};
+  emel::kernel::sm kernel{};
+  moshi_executor::sm executor{moshi_executor::dependencies{.kernel = kernel}};
   std::array<int32_t, 4> input = {0, 1, 2, 3};
   std::array<int32_t, 4> output = {};
   int32_t text_token = -1;
@@ -1277,7 +1280,9 @@ TEST_CASE("speech_moshi_generator_and_executor_cover_explicit_error_guards") {
       std::span<const float>{embedding.data(), static_cast<size_t>(lm.dim)};
   moshi_executor::event::step_ctx step_ctx{};
   moshi_executor::event::step_run step_run{step, step_ctx};
-  moshi_executor::action::context executor_ctx{};
+  emel::kernel::sm guard_kernel{};
+  moshi_executor::action::context executor_ctx{
+      moshi_executor::dependencies{.kernel = guard_kernel}};
   executor_ctx.session.model = fixture.model.get();
   executor_ctx.session.codebook_count = lm.n_q + 1;
   executor_ctx.session.dep_q = lm.dep_q;
@@ -1492,7 +1497,8 @@ TEST_CASE("speech_moshi_executor_embeds_input_before_unsupported_transformer") {
     return;
   }
 
-  moshi_executor::sm executor{};
+  emel::kernel::sm kernel{};
+  moshi_executor::sm executor{moshi_executor::dependencies{.kernel = kernel}};
   emel::error::type err = emel::error::cast(moshi_executor::error::none);
   moshi_executor::event::initialize init{*fixture.model};
   init.error_out = &err;
@@ -1537,7 +1543,9 @@ TEST_CASE(
           &probe, temporal_kv_probe_bind),
       .temporal_positions = &temporal_positions,
   };
-  moshi_executor::sm executor{bindings};
+  emel::kernel::sm kernel{};
+  moshi_executor::sm executor{
+      moshi_executor::dependencies{.kv = bindings, .kernel = kernel}};
   emel::error::type err = emel::error::cast(moshi_executor::error::none);
   moshi_executor::event::initialize init{*fixture.model};
   init.error_out = &err;
@@ -1624,8 +1632,12 @@ TEST_CASE("speech_moshi_executor_accepts_personaplex_voice_embedding_step") {
       .capacity = fixture.model->moshi_lm.depformer_context}};
   initialize_streaming_position(temporal_positions);
   initialize_streaming_position(depformer_positions);
-  moshi_executor::sm executor{moshi_executor::bind_kv_caches(
-      temporal_kv, depformer_kv, temporal_positions, depformer_positions)};
+  emel::kernel::sm kernel{};
+  moshi_executor::sm executor{moshi_executor::dependencies{
+      .kv = moshi_executor::bind_kv_caches(
+          temporal_kv, depformer_kv, temporal_positions, depformer_positions),
+      .kernel = kernel,
+  }};
   emel::error::type err = emel::error::cast(moshi_executor::error::none);
   moshi_executor::event::initialize init{*fixture.model};
   init.error_out = &err;
@@ -1690,8 +1702,12 @@ TEST_CASE("speech_moshi_executor_generates_audio_tokens_with_injected_kv") {
       .capacity = fixture.model->moshi_lm.depformer_context}};
   initialize_streaming_position(temporal_positions);
   initialize_streaming_position(depformer_positions);
-  moshi_executor::sm executor{moshi_executor::bind_kv_caches(
-      temporal_kv, depformer_kv, temporal_positions, depformer_positions)};
+  emel::kernel::sm kernel{};
+  moshi_executor::sm executor{moshi_executor::dependencies{
+      .kv = moshi_executor::bind_kv_caches(
+          temporal_kv, depformer_kv, temporal_positions, depformer_positions),
+      .kernel = kernel,
+  }};
   emel::error::type err = emel::error::cast(moshi_executor::error::none);
   moshi_executor::event::initialize init{*fixture.model};
   init.error_out = &err;
@@ -1782,18 +1798,26 @@ TEST_CASE("speech_moshi_executor_sampling_rng_is_actor_owned") {
   initialize_streaming_position(first_depformer_positions);
   initialize_streaming_position(second_temporal_positions);
   initialize_streaming_position(second_depformer_positions);
-  moshi_executor::sm first{moshi_executor::bind_kv_caches(
-      moshi_executor::bind_temporal_kv_cache(&first_temporal,
-                                             temporal_kv_probe_bind),
-      moshi_executor::bind_depformer_kv_cache(&first_depformer,
-                                              depformer_kv_probe_bind),
-      first_temporal_positions, first_depformer_positions)};
-  moshi_executor::sm second{moshi_executor::bind_kv_caches(
-      moshi_executor::bind_temporal_kv_cache(&second_temporal,
-                                             temporal_kv_probe_bind),
-      moshi_executor::bind_depformer_kv_cache(&second_depformer,
-                                              depformer_kv_probe_bind),
-      second_temporal_positions, second_depformer_positions)};
+  emel::kernel::sm first_kernel{};
+  emel::kernel::sm second_kernel{};
+  moshi_executor::sm first{moshi_executor::dependencies{
+      .kv = moshi_executor::bind_kv_caches(
+          moshi_executor::bind_temporal_kv_cache(&first_temporal,
+                                                 temporal_kv_probe_bind),
+          moshi_executor::bind_depformer_kv_cache(&first_depformer,
+                                                  depformer_kv_probe_bind),
+          first_temporal_positions, first_depformer_positions),
+      .kernel = first_kernel,
+  }};
+  moshi_executor::sm second{moshi_executor::dependencies{
+      .kv = moshi_executor::bind_kv_caches(
+          moshi_executor::bind_temporal_kv_cache(&second_temporal,
+                                                 temporal_kv_probe_bind),
+          moshi_executor::bind_depformer_kv_cache(&second_depformer,
+                                                  depformer_kv_probe_bind),
+          second_temporal_positions, second_depformer_positions),
+      .kernel = second_kernel,
+  }};
   emel::error::type first_err = emel::error::cast(moshi_executor::error::none);
   emel::error::type second_err = emel::error::cast(moshi_executor::error::none);
   moshi_executor::event::initialize first_init{*first_fixture.model};
@@ -1857,7 +1881,8 @@ TEST_CASE(
   }
 
   emel::memory::test::recording_kv_actor kv{};
-  moshi_executor::sm executor{};
+  emel::kernel::sm kernel{};
+  moshi_executor::sm executor{moshi_executor::dependencies{.kernel = kernel}};
 
   moshi::sm generator{moshi::action::dependencies{
       .kv_cache = emel::memory::hybrid::bind_kv_actor(kv), .graph = executor}};

@@ -17,6 +17,7 @@
 #include "emel/gguf/loader/detail.hpp"
 #include "emel/gguf/loader/events.hpp"
 #include "emel/gguf/loader/sm.hpp"
+#include "emel/kernel/sm.hpp"
 #include "emel/memory/streaming/sm.hpp"
 #include "emel/model/data.hpp"
 #include "emel/model/detail.hpp"
@@ -529,10 +530,14 @@ int main(int argc, char **argv) {
               .kv_dim = lm_model.model->moshi_lm.depformer_dim,
           },
   };
-  runtime::sm prediction_runtime{runtime::bind_kv_caches(
-      runtime::bind_temporal_kv_cache(&cache_views, bind_temporal_cache),
-      runtime::bind_depformer_kv_cache(&cache_views, bind_secondary_cache),
-      temporal_positions, secondary_positions)};
+  emel::kernel::sm prediction_kernel{};
+  runtime::sm prediction_runtime{runtime::dependencies{
+      .kv = runtime::bind_kv_caches(
+          runtime::bind_temporal_kv_cache(&cache_views, bind_temporal_cache),
+          runtime::bind_depformer_kv_cache(&cache_views, bind_secondary_cache),
+          temporal_positions, secondary_positions),
+      .kernel = prediction_kernel,
+  }};
   predictor::sm token_predictor{predictor::action::dependencies{
       .kv_cache = emel::memory::hybrid::kv_binding{},
       .graph = prediction_runtime,
