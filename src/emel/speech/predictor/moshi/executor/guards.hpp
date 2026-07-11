@@ -44,6 +44,36 @@ struct guard_bind_contract_invalid {
   }
 };
 
+struct guard_bound_input_embeddings_supported {
+  bool operator()(const event::initialize_run &runtime_ev,
+                  const action::context &ctx) const noexcept {
+    const auto &lm = runtime_ev.request.model.moshi_lm;
+    const int32_t hidden_dim = ctx.session.hidden_dim;
+    const auto *text_emb = ctx.session.contract.lm.text_embedding.tensor;
+    bool supported =
+        detail::tensor_shape(text_emb, hidden_dim, lm.text_card + 1) &&
+        detail::supported_get_rows_dtype(
+            static_cast<detail::dtype>(text_emb->type));
+    for (int32_t index = 0; index < lm.n_q; ++index) {
+      const auto *audio_emb =
+          ctx.session.contract.lm.audio_embeddings[static_cast<size_t>(index)]
+              .tensor;
+      supported = supported &&
+                  detail::tensor_shape(audio_emb, hidden_dim, lm.card + 1) &&
+                  detail::supported_get_rows_dtype(
+                      static_cast<detail::dtype>(audio_emb->type));
+    }
+    return supported;
+  }
+};
+
+struct guard_bound_input_embeddings_unsupported {
+  bool operator()(const event::initialize_run &runtime_ev,
+                  const action::context &ctx) const noexcept {
+    return !guard_bound_input_embeddings_supported{}(runtime_ev, ctx);
+  }
+};
+
 struct guard_sampling_seed_nonzero {
   bool operator()(const event::initialize_run &runtime_ev,
                   const action::context &) const noexcept {
@@ -138,24 +168,8 @@ struct guard_external_input_embedding_supported {
 struct guard_token_input_embedding_supported {
   bool operator()(const event::step_run &runtime_ev,
                   const action::context &ctx) const noexcept {
-    const auto &model = runtime_ev.request.model;
-    const auto &lm = model.moshi_lm;
+    const auto &lm = runtime_ev.request.model.moshi_lm;
     const int32_t hidden_dim = ctx.session.hidden_dim;
-    const auto *text_emb = detail::find_tensor(model, "lm.text_emb.weight");
-    const bool root_tensors_ok =
-        detail::tensor_shape(text_emb, hidden_dim, lm.text_card + 1) &&
-        detail::supported_get_rows_dtype(
-            static_cast<detail::dtype>(text_emb->type));
-    bool audio_tensors_ok = true;
-    for (int32_t index = 0; index < lm.n_q; ++index) {
-      const auto *audio_emb =
-          detail::find_indexed_tensor(model, "lm.emb.%d.weight", index);
-      audio_tensors_ok =
-          audio_tensors_ok &&
-          detail::tensor_shape(audio_emb, hidden_dim, lm.card + 1) &&
-          detail::supported_get_rows_dtype(
-              static_cast<detail::dtype>(audio_emb->type));
-    }
     bool tokens_ok =
         runtime_ev.request.input_sequence[0] != ctx.policy.token_zero &&
         detail::token_in_embedding_range(runtime_ev.request.input_sequence[0],
@@ -170,7 +184,7 @@ struct guard_token_input_embedding_supported {
     return runtime_ev.request.input_embedding.data() == nullptr &&
            !lm.demux_second_stream && hidden_dim > 0 &&
            static_cast<uint64_t>(hidden_dim) <= ctx.capacity.hidden_dim &&
-           root_tensors_ok && audio_tensors_ok && tokens_ok;
+           tokens_ok;
   }
 };
 

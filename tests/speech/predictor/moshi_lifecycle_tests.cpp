@@ -1494,11 +1494,21 @@ TEST_CASE("speech_moshi_generator_and_executor_cover_explicit_error_guards") {
   executor_ctx.session.text_card = lm.text_card;
   executor_ctx.session.audio_card = lm.card;
   executor_ctx.session.hidden_dim = lm.dim;
+  REQUIRE(emel::model::moshi::detail::build_execution_contract(
+              *fixture.model, executor_ctx.session.contract) == k_no_error);
 
   moshi_executor::event::initialize executor_init{*fixture.model};
   moshi_executor::event::initialize_ctx executor_init_ctx{};
   moshi_executor::event::initialize_run executor_init_run{executor_init,
                                                           executor_init_ctx};
+  CHECK(moshi_executor::guard::guard_bound_input_embeddings_supported{}(
+      executor_init_run, executor_ctx));
+  const auto *bound_text_embedding =
+      executor_ctx.session.contract.lm.text_embedding.tensor;
+  executor_ctx.session.contract.lm.text_embedding.tensor = nullptr;
+  CHECK(moshi_executor::guard::guard_bound_input_embeddings_unsupported{}(
+      executor_init_run, executor_ctx));
+  executor_ctx.session.contract.lm.text_embedding.tensor = bound_text_embedding;
   executor_init.on_done =
       emel::callback<void(const moshi_executor::events::initialize_done &)>::
           from<moshi_callback_probe,

@@ -13,6 +13,7 @@ namespace emel::speech::predictor::moshi::executor {
 
 struct state_uninitialized {};
 struct state_bind_contract_decision {};
+struct state_input_embedding_contract_decision {};
 struct state_sampling_seed_decision {};
 struct state_text_sampling_top_k_decision {};
 struct state_audio_sampling_top_k_decision {};
@@ -173,11 +174,21 @@ struct model {
       // Bind the Moshi LM execution contract.
         sml::state<state_bind_contract_decision> <= *sml::state<state_uninitialized>
           + sml::event<init_run>
-      , sml::state<state_sampling_seed_decision> <= sml::state<state_bind_contract_decision>
+      , sml::state<state_input_embedding_contract_decision> <=
+          sml::state<state_bind_contract_decision>
           + sml::completion<init_run> [ guard::guard_bind_contract_valid{} ]
           / action::effect_bind_contract{}
       , sml::state<state_init_failed_error_out_decision> <= sml::state<state_bind_contract_decision>
           + sml::completion<init_run> [ guard::guard_bind_contract_invalid{} ]
+          / action::effect_mark_bind_failed{}
+      , sml::state<state_sampling_seed_decision> <=
+          sml::state<state_input_embedding_contract_decision>
+          + sml::completion<init_run>
+          [ guard::guard_bound_input_embeddings_supported{} ]
+      , sml::state<state_init_failed_error_out_decision> <=
+          sml::state<state_input_embedding_contract_decision>
+          + sml::completion<init_run>
+          [ guard::guard_bound_input_embeddings_unsupported{} ]
           / action::effect_mark_bind_failed{}
       , sml::state<state_text_sampling_top_k_decision> <= sml::state<state_sampling_seed_decision>
           + sml::completion<init_run> [ guard::guard_sampling_seed_nonzero{} ]

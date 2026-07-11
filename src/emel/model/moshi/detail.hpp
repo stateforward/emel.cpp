@@ -1,5 +1,7 @@
 #pragma once
 
+#include <array>
+#include <cstddef>
 #include <cstdint>
 #include <string_view>
 
@@ -45,6 +47,11 @@ struct lm_contract {
   family_view depformer = {};
   family_view depformer_text_emb = {};
   family_view depformer_emb = {};
+  tensor_view text_embedding = {};
+  std::array<tensor_view,
+             static_cast<std::size_t>(
+                 emel::model::data::moshi_lm_hparams::k_max_delays)>
+      audio_embeddings = {};
 };
 
 struct mimi_contract {

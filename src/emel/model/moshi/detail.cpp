@@ -644,6 +644,32 @@ emel::error::type validate_lm_contract(const emel::model::data &model_data,
     return emel::error::cast(emel::model::loader::error::model_invalid);
   }
 
+  if (lm.n_q > emel::model::data::moshi_lm_hparams::k_max_delays) {
+    return emel::error::cast(emel::model::loader::error::model_invalid);
+  }
+  const auto *text_embedding = find_tensor(model_data, "lm.text_emb.weight");
+  contract_out.text_embedding = tensor_view{
+      .tensor = text_embedding,
+      .name = emel::model::tensor_name_view(model_data, *text_embedding),
+  };
+  for (int32_t codebook = 0; codebook < lm.n_q; ++codebook) {
+    char name[96] = {};
+    const int written =
+        std::snprintf(name, sizeof(name), "lm.emb.%d.weight", codebook);
+    if (written <= 0 || static_cast<size_t>(written) >= sizeof(name)) {
+      return emel::error::cast(emel::model::loader::error::model_invalid);
+    }
+    const auto *audio_embedding = find_tensor(
+        model_data, std::string_view{name, static_cast<size_t>(written)});
+    if (audio_embedding == nullptr) {
+      return emel::error::cast(emel::model::loader::error::model_invalid);
+    }
+    contract_out.audio_embeddings[static_cast<size_t>(codebook)] = tensor_view{
+        .tensor = audio_embedding,
+        .name = emel::model::tensor_name_view(model_data, *audio_embedding),
+    };
+  }
+
   for (int32_t block = 0; block < lm.num_layers; ++block) {
     if (!has_lm_transformer_block(model_data, block)) {
       return emel::error::cast(emel::model::loader::error::model_invalid);

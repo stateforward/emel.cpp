@@ -238,8 +238,7 @@ struct effect_apply_external_input_embedding {
 struct effect_bind_input_text_embedding {
   void operator()(const event::step_run &runtime_ev,
                   const context &ctx) const noexcept {
-    const auto *text_emb =
-        detail::find_tensor(runtime_ev.request.model, "lm.text_emb.weight");
+    const auto *text_emb = ctx.session.contract.lm.text_embedding.tensor;
     runtime_ev.ctx.embedding_view = {};
     runtime_ev.ctx.embedding_view_bound = false;
     runtime_ev.ctx.embedding_row_ok = false;
@@ -285,8 +284,9 @@ struct effect_bind_input_audio_embedding {
   void operator()(const event::step_run &runtime_ev,
                   const context &ctx) const noexcept {
     const int32_t index = runtime_ev.ctx.input_audio_codebook_index;
-    const auto *audio_emb = detail::find_indexed_tensor(
-        runtime_ev.request.model, "lm.emb.%d.weight", index);
+    const auto *audio_emb =
+        ctx.session.contract.lm.audio_embeddings[static_cast<size_t>(index)]
+            .tensor;
     runtime_ev.ctx.embedding_view = {};
     runtime_ev.ctx.embedding_view_bound = false;
     runtime_ev.ctx.embedding_row_ok = false;
