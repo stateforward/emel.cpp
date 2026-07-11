@@ -12,7 +12,7 @@ namespace emel::speech::predictor::moshi::executor::guard {
 
 struct guard_bind_contract_valid {
   bool operator()(const event::initialize_run &runtime_ev,
-                  const action::context &) const noexcept {
+                  const action::context &ctx) const noexcept {
     const auto &model = runtime_ev.request.model;
     return emel::model::moshi::detail::validate_execution_contract(model) ==
                emel::error::cast(emel::model::loader::error::none) &&
@@ -20,7 +20,8 @@ struct guard_bind_contract_valid {
            model.moshi_lm.n_q > 0 && model.moshi_lm.dep_q > 0 &&
            model.moshi_lm.dep_q <= model.moshi_lm.n_q &&
            model.moshi_lm.text_card > 0 && model.moshi_lm.card > 0 &&
-           model.moshi_lm.dim > 0;
+           model.moshi_lm.dim > 0 && ctx.policy.rms_norm_epsilon > 0.0f &&
+           ctx.policy.zero_seed_state != 0u;
   }
 };
 

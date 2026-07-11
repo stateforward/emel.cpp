@@ -112,6 +112,10 @@ TEST_CASE(
       .kv = executor::bind_kv_caches(temporal_binding, depformer_binding,
                                      temporal_positions, depformer_positions),
       .kernel = kernel,
+      .policy = executor::action::policies{
+          .rms_norm_epsilon = 1.0e-8f,
+          .zero_seed_state = 123459876u,
+      },
   }};
 
   emel::error::type err = emel::error::cast(executor::error::none);

@@ -36,9 +36,15 @@ struct kv_bindings {
   emel::memory::streaming::sm *depformer_positions = nullptr;
 };
 
+struct policies {
+  float rms_norm_epsilon = 0.0f;
+  uint32_t zero_seed_state = 0u;
+};
+
 struct dependencies {
   kv_bindings kv = {};
   emel::kernel::sm &kernel;
+  policies policy = {};
 };
 
 struct runtime {
@@ -65,7 +71,8 @@ struct context {
   explicit context(const dependencies &deps)
       : temporal_kv(deps.kv.temporal), depformer_kv(deps.kv.depformer),
         temporal_positions(deps.kv.temporal_positions),
-        depformer_positions(deps.kv.depformer_positions), kernel(deps.kernel) {}
+        depformer_positions(deps.kv.depformer_positions), kernel(deps.kernel),
+        policy(deps.policy) {}
 
   runtime session = {};
   sampling_config sampling = {};
@@ -74,6 +81,7 @@ struct context {
   emel::memory::streaming::sm *temporal_positions = nullptr;
   emel::memory::streaming::sm *depformer_positions = nullptr;
   emel::kernel::sm &kernel;
+  const policies policy;
 };
 
 inline temporal_kv_binding

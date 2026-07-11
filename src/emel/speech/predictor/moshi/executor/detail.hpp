@@ -30,7 +30,6 @@ inline constexpr uint64_t k_max_depformer_context = 512u;
 inline constexpr uint64_t k_max_sampling_card = 65536u;
 inline constexpr uint64_t k_max_sampling_top_k = 1024u;
 inline constexpr int32_t k_token_zero = -1;
-inline constexpr float k_rms_norm_eps = 1.0e-8f;
 
 struct streaming_kv_view {
   std::span<uint16_t> key_cache = {};

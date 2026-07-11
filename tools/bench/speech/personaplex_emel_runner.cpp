@@ -537,6 +537,10 @@ int main(int argc, char **argv) {
           runtime::bind_depformer_kv_cache(&cache_views, bind_secondary_cache),
           temporal_positions, secondary_positions),
       .kernel = prediction_kernel,
+      .policy = runtime::action::policies{
+          .rms_norm_epsilon = 1.0e-8f,
+          .zero_seed_state = 123459876u,
+      },
   }};
   predictor::sm token_predictor{predictor::action::dependencies{
       .kv_cache = emel::memory::hybrid::kv_binding{},

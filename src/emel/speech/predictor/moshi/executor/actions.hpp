@@ -52,8 +52,7 @@ struct effect_bind_nonzero_sampling_seed {
 
 struct effect_bind_zero_sampling_seed {
   void operator()(const event::initialize_run &, context &ctx) const noexcept {
-    constexpr uint32_t zero_seed_state = 123459876u;
-    ctx.sampling.random_state = zero_seed_state;
+    ctx.sampling.random_state = ctx.policy.zero_seed_state;
   }
 };
 
@@ -356,7 +355,7 @@ struct effect_run_temporal_layer_norm_rms {
         .dst = detail::make_f32_dst(runtime_ev.ctx.row.data(),
                                     static_cast<uint64_t>(hidden_dim)),
     };
-    detail::set_op_param_f32(rms_ev, 0u, detail::k_rms_norm_eps);
+    detail::set_op_param_f32(rms_ev, 0u, ctx.policy.rms_norm_epsilon);
     runtime_ev.ctx.temporal_layer_norm_rms_ok =
         ctx.kernel.process_event(rms_ev);
   }
@@ -674,7 +673,7 @@ struct effect_run_temporal_layer_norm2_rms {
         .dst = detail::make_f32_dst(runtime_ev.ctx.row.data(),
                                     static_cast<uint64_t>(hidden_dim)),
     };
-    detail::set_op_param_f32(rms_ev, 0u, detail::k_rms_norm_eps);
+    detail::set_op_param_f32(rms_ev, 0u, ctx.policy.rms_norm_epsilon);
     runtime_ev.ctx.temporal_layer_norm2_rms_ok =
         ctx.kernel.process_event(rms_ev);
   }
@@ -892,7 +891,7 @@ struct effect_run_temporal_out_norm_rms {
         .dst = detail::make_f32_dst(runtime_ev.ctx.row.data(),
                                     static_cast<uint64_t>(hidden_dim)),
     };
-    detail::set_op_param_f32(rms_ev, 0u, detail::k_rms_norm_eps);
+    detail::set_op_param_f32(rms_ev, 0u, ctx.policy.rms_norm_epsilon);
     runtime_ev.ctx.temporal_out_norm_rms_ok = ctx.kernel.process_event(rms_ev);
   }
 };
@@ -1254,7 +1253,7 @@ struct effect_run_depformer_layer_norm_rms {
         .dst = detail::make_f32_dst(runtime_ev.ctx.row.data(),
                                     static_cast<uint64_t>(dep_dim)),
     };
-    detail::set_op_param_f32(rms_ev, 0u, detail::k_rms_norm_eps);
+    detail::set_op_param_f32(rms_ev, 0u, ctx.policy.rms_norm_epsilon);
     runtime_ev.ctx.depformer_layer_norm_rms_ok =
         ctx.kernel.process_event(rms_ev);
   }
@@ -1496,7 +1495,7 @@ struct effect_run_depformer_layer_norm2_rms {
         .dst = detail::make_f32_dst(runtime_ev.ctx.row.data(),
                                     static_cast<uint64_t>(dep_dim)),
     };
-    detail::set_op_param_f32(rms_ev, 0u, detail::k_rms_norm_eps);
+    detail::set_op_param_f32(rms_ev, 0u, ctx.policy.rms_norm_epsilon);
     runtime_ev.ctx.depformer_layer_norm2_rms_ok =
         ctx.kernel.process_event(rms_ev);
   }
