@@ -289,8 +289,17 @@ stateDiagram-v2
   state_uninitialized --> state_uninit_step_error_out_decision : step_run [always] / effect_mark_not_initialized_
   state_uninit_step_error_out_decision --> state_uninitialized : completion_step_run_ [step_run__] / step_run__
   state_uninit_step_error_out_decision --> state_uninitialized : completion_step_run_ [step_run__] / none
-  state_ready --> state_uninitialized : reset [always] / effect_reset_session_
-  state_sampling_ready --> state_uninitialized : reset [always] / effect_reset_session_
+  state_ready --> state_reset_temporal_positions_decision : reset_run [always] / none
+  state_sampling_ready --> state_reset_temporal_positions_decision : reset_run [always] / none
+  state_reset_temporal_positions_decision --> state_reset_temporal_positions_result_decision : completion_reset_run_ [guard_reset_temporal_positions_present_] / effect_reset_temporal_positions_
+  state_reset_temporal_positions_decision --> state_reset_depformer_positions_decision : completion_reset_run_ [guard_reset_temporal_positions_missing_] / none
+  state_reset_temporal_positions_result_decision --> state_reset_depformer_positions_decision : completion_reset_run_ [guard_reset_temporal_positions_succeeded_] / none
+  state_reset_temporal_positions_result_decision --> state_reset_failed : completion_reset_run_ [guard_reset_temporal_positions_failed_] / effect_mark_reset_failed_
+  state_reset_depformer_positions_decision --> state_reset_depformer_positions_result_decision : completion_reset_run_ [guard_reset_depformer_positions_present_] / effect_reset_bound_depformer_positions_
+  state_reset_depformer_positions_decision --> state_uninitialized : completion_reset_run_ [guard_reset_depformer_positions_missing_] / effect_reset_session_
+  state_reset_depformer_positions_result_decision --> state_uninitialized : completion_reset_run_ [guard_reset_depformer_positions_succeeded_] / effect_reset_session_
+  state_reset_depformer_positions_result_decision --> state_reset_failed : completion_reset_run_ [guard_reset_depformer_positions_failed_] / effect_mark_reset_failed_
+  state_reset_failed --> state_uninitialized : completion_reset_run_ [always] / effect_reset_session_
   state_uninitialized --> state_uninitialized : _ [guard_unexpected_error_out_present_] / effect_mark_unexpected_and_store_
   state_uninitialized --> state_uninitialized : _ [guard_unexpected_error_out_absent_] / effect_mark_unexpected_
   state_ready --> state_ready : _ [guard_unexpected_error_out_present_] / effect_mark_unexpected_and_store_
