@@ -20,12 +20,21 @@ stateDiagram-v2
   sample_call_decision --> errored : completion_sample_logits_runtime_ [sampler_call_failed_] / mark_sampler_error_
   sample_complete_decision --> done : completion_sample_logits_runtime_ [selected_token_valid_] / none
   sample_complete_decision --> errored : completion_sample_logits_runtime_ [selected_token_missing_or_invalid_] / mark_invalid_request_
+  ready --> state_temperature_top_k_request_decision : sample_temperature_top_k_runtime [always] / none
+  state_temperature_top_k_request_decision --> state_temperature_top_k_scale : completion_sample_temperature_top_k_runtime_ [temperature_top_k_request_valid_] / scale_temperature_logits_
+  state_temperature_top_k_request_decision --> errored : completion_sample_temperature_top_k_runtime_ [temperature_top_k_request_invalid_] / mark_invalid_request_
+  state_temperature_top_k_scale --> state_temperature_top_k_probabilities : completion_sample_temperature_top_k_runtime_ [always] / compute_temperature_probabilities_
+  state_temperature_top_k_probabilities --> state_temperature_top_k_rank : completion_sample_temperature_top_k_runtime_ [always] / compute_temperature_top_k_
+  state_temperature_top_k_rank --> state_temperature_top_k_select : completion_sample_temperature_top_k_runtime_ [always] / select_temperature_top_k_
+  state_temperature_top_k_select --> done : completion_sample_temperature_top_k_runtime_ [always] / none
   done --> ready : completion_configure_runtime_ [always] / publish_done_
   errored --> ready : completion_configure_runtime_ [always] / publish_error_
   done --> ready : completion_sample_logits_runtime_ [always] / publish_done_
   errored --> ready : completion_sample_logits_runtime_ [always] / publish_error_
   done --> ready : completion_sample_preselected_runtime_ [always] / publish_done_
   errored --> ready : completion_sample_preselected_runtime_ [always] / publish_error_
+  done --> ready : completion_sample_temperature_top_k_runtime_ [always] / publish_done_
+  errored --> ready : completion_sample_temperature_top_k_runtime_ [always] / publish_error_
   ready --> ready : _ [always] / on_unexpected_
   request_logits_decision --> ready : _ [always] / on_unexpected_
   request_preselected_decision --> ready : _ [always] / on_unexpected_
@@ -35,5 +44,10 @@ stateDiagram-v2
   sample_call --> ready : _ [always] / on_unexpected_
   sample_call_decision --> ready : _ [always] / on_unexpected_
   sample_complete_decision --> ready : _ [always] / on_unexpected_
+  state_temperature_top_k_request_decision --> ready : _ [always] / on_unexpected_
+  state_temperature_top_k_scale --> ready : _ [always] / on_unexpected_
+  state_temperature_top_k_probabilities --> ready : _ [always] / on_unexpected_
+  state_temperature_top_k_rank --> ready : _ [always] / on_unexpected_
+  state_temperature_top_k_select --> ready : _ [always] / on_unexpected_
   done --> ready : _ [always] / on_unexpected_
   errored --> ready : _ [always] / on_unexpected_

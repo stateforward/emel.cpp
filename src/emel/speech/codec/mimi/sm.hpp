@@ -475,6 +475,4 @@ struct sm : public emel::sm<model, action::context> {
   }
 };
 
-using Codec = sm;
-
 } // namespace emel::speech::codec::mimi

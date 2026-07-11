@@ -168,7 +168,6 @@ if(EMEL_ENABLE_TESTS)
     tests/gbnf/lexer_tests.cpp
     tests/gbnf/parser_tests.cpp
     tests/gbnf/sampler_tests.cpp
-    tests/text/generator/legacy_compatibility_tests.cpp
     tests/text/generator/lifecycle_tests.cpp
     tests/text/generator/action_guard_tests.cpp
     tests/text/generator/detail_tests.cpp
@@ -188,9 +187,14 @@ if(EMEL_ENABLE_TESTS)
     tests/diarization/sortformer/transformer/lifecycle_tests.cpp
     tests/speech/codec/mimi_detail_tests.cpp
     tests/speech/codec/mimi_lifecycle_tests.cpp
+    tests/speech/generator/lifecycle_tests.cpp
+    tests/speech/predictor/moshi_lifecycle_tests.cpp
+    tests/speech/predictor/moshi_executor_detail_tests.cpp
+    tests/speech/predictor/moshi_executor_streaming_tests.cpp
     tests/speech/encoder/whisper/lifecycle_tests.cpp
     tests/speech/decoder/whisper/lifecycle_tests.cpp
     tests/speech/encoder/whisper/detail_tests.cpp
+    tests/speech/tokenizer/moshi/lifecycle_tests.cpp
     tests/speech/transcriber/lifecycle_tests.cpp
     tests/speech/tokenizer/whisper_tests.cpp
     tests/embeddings/text_embedding_lane_tests.cpp
@@ -232,6 +236,7 @@ if(EMEL_ENABLE_TESTS)
     tests/memory/kv/lifecycle_tests.cpp
     tests/memory/recurrent/lifecycle_tests.cpp
     tests/memory/hybrid/lifecycle_tests.cpp
+    tests/memory/streaming/lifecycle_tests.cpp
     tests/graph/tensor/lifecycle_tests.cpp
     tests/model/tensor/lifecycle_tests.cpp
     tests/model/tensor/window/lifecycle_tests.cpp

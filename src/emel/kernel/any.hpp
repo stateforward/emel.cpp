@@ -27,7 +27,7 @@ constexpr kernel_kind detect_host_kind() noexcept {
 
 class any {
  public:
-  any() = default;
+  any() : core_(detect_host_kind()) {}
   explicit any(const kernel_kind kind) : core_(kind) {}
 
   any(const any &) = delete;

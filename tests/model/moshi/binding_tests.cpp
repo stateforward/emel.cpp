@@ -297,6 +297,14 @@ kv_store make_lm_kv(const lm_kv_options &options) {
     }
     store.i32_array("moshi.lm.delays", std::span<const int32_t>{delays});
   }
+  put_u32("moshi.lm.inference.dep_q", 2u);
+  put_u32("moshi.lm.inference.pre_text_silence_frames", 1u);
+  put_u32("moshi.lm.inference.post_text_silence_frames", 1u);
+  if (options.skip_key != "moshi.lm.inference.prompt_tokens") {
+    const std::array<int32_t, 5> prompt_tokens = {3, 4, 5, 6, 7};
+    store.i32_array("moshi.lm.inference.prompt_tokens",
+                    std::span<const int32_t>{prompt_tokens});
+  }
   put_u32("moshi.lm.depformer.dim", 16u);
   put_u32("moshi.lm.depformer.num_heads", 2u);
   put_u32("moshi.lm.depformer.num_layers", 2u);
@@ -406,7 +414,23 @@ void configure_q4_k_lm_contract(emel::model::data &model) {
   model.params.n_vocab = k_text_card;
   set_q4_k_matrix(model, "lm.text_emb.weight", k_dim, k_text_card + 1);
   set_q4_k_matrix(model, "lm.text_linear.weight", k_dim, k_text_card);
-  set_q4_k_matrix(model, "lm.emb.0.weight", k_dim, k_audio_card + 1);
+  for (int32_t codebook = 0; codebook < model.moshi_lm.n_q; ++codebook) {
+    set_q4_k_matrix(model, "lm.emb." + std::to_string(codebook) + ".weight",
+                    k_dim, k_audio_card + 1);
+  }
+  set_matrix_tensor(model, "lm.depformer_text_emb.weight",
+                    emel::kernel::detail::dtype_f32,
+                    model.moshi_lm.depformer_dim, k_text_card + 1,
+                    dense_storage_bytes(model.moshi_lm.depformer_dim,
+                                        k_text_card + 1, sizeof(uint32_t)));
+  for (int32_t codebook = 0; codebook < model.moshi_lm.dep_q - 1; ++codebook) {
+    set_matrix_tensor(
+        model, "lm.depformer_emb." + std::to_string(codebook) + ".weight",
+        emel::kernel::detail::dtype_f32, model.moshi_lm.depformer_dim,
+        k_audio_card + 1,
+        dense_storage_bytes(model.moshi_lm.depformer_dim, k_audio_card + 1,
+                            sizeof(uint32_t)));
+  }
 }
 
 } // namespace
@@ -468,9 +492,218 @@ TEST_CASE("enriched moshi lm fixture loads hparams, vocab, and contract") {
   REQUIRE(moshi::build_execution_contract(model, contract) == k_none);
   CHECK(contract.component == emel::model::data::moshi_component::lm);
   CHECK(contract.lm.audio_emb.tensor_count == 4u);
+  REQUIRE(contract.lm.text_embedding.tensor != nullptr);
+  CHECK(contract.lm.text_embedding.name == "lm.text_emb.weight");
+  REQUIRE(contract.lm.output_norm.tensor != nullptr);
+  CHECK(contract.lm.output_norm.name == "lm.out_norm.alpha");
+  REQUIRE(contract.lm.text_output_projection.tensor != nullptr);
+  CHECK(contract.lm.text_output_projection.name == "lm.text_linear.weight");
+  for (int32_t codebook = 0; codebook < model.moshi_lm.n_q; ++codebook) {
+    const auto &embedding =
+        contract.lm.audio_embeddings[static_cast<size_t>(codebook)];
+    REQUIRE(embedding.tensor != nullptr);
+    CHECK(embedding.name == "lm.emb." + std::to_string(codebook) + ".weight");
+  }
+  REQUIRE(contract.lm.depformer_text_embedding.tensor != nullptr);
+  CHECK(contract.lm.depformer_text_embedding.name ==
+        "lm.depformer_text_emb.weight");
+  for (int32_t codebook = 0; codebook < model.moshi_lm.dep_q; ++codebook) {
+    const auto &input_projection =
+        contract.lm.depformer_input_projections[static_cast<size_t>(codebook)];
+    REQUIRE(input_projection.tensor != nullptr);
+    CHECK(input_projection.name ==
+          "lm.depformer_in." + std::to_string(codebook) + ".weight");
+    const auto &output_projection =
+        contract.lm.depformer_output_projections[static_cast<size_t>(codebook)];
+    REQUIRE(output_projection.tensor != nullptr);
+    CHECK(output_projection.name ==
+          "lm.linears." + std::to_string(codebook) + ".weight");
+    if (codebook > 0) {
+      const auto &audio_embedding =
+          contract.lm
+              .depformer_audio_embeddings[static_cast<size_t>(codebook - 1)];
+      REQUIRE(audio_embedding.tensor != nullptr);
+      CHECK(audio_embedding.name ==
+            "lm.depformer_emb." + std::to_string(codebook - 1) + ".weight");
+    }
+  }
   CHECK(contract.lm.transformer.tensor_count > 0u);
+  for (int32_t layer_index = 0; layer_index < model.moshi_lm.num_layers;
+       ++layer_index) {
+    const auto &layer =
+        contract.lm.temporal_layers[static_cast<size_t>(layer_index)];
+    REQUIRE(layer.norm1.tensor != nullptr);
+    REQUIRE((layer.split_input_projection.tensor != nullptr ||
+             layer.fused_input_projection.tensor != nullptr));
+    REQUIRE(layer.output_projection.tensor != nullptr);
+    REQUIRE(layer.norm2.tensor != nullptr);
+    REQUIRE(layer.gating_input.tensor != nullptr);
+    REQUIRE(layer.gating_output.tensor != nullptr);
+  }
+  for (int32_t layer_index = 0;
+       layer_index < model.moshi_lm.depformer_num_layers; ++layer_index) {
+    const auto &layer =
+        contract.lm.depformer_layers[static_cast<size_t>(layer_index)];
+    REQUIRE(layer.norm1.tensor != nullptr);
+    REQUIRE(layer.norm2.tensor != nullptr);
+    for (int32_t codebook = 0; codebook < model.moshi_lm.dep_q; ++codebook) {
+      const auto &codebook_layer =
+          layer.codebooks[static_cast<size_t>(codebook)];
+      REQUIRE((codebook_layer.split_input_projection.tensor != nullptr ||
+               codebook_layer.fused_input_projection.tensor != nullptr));
+      REQUIRE(codebook_layer.output_projection.tensor != nullptr);
+      REQUIRE(codebook_layer.gating_input.tensor != nullptr);
+      REQUIRE(codebook_layer.gating_output.tensor != nullptr);
+    }
+  }
   CHECK(contract.lm.depformer.tensor_count > 0u);
   CHECK(contract.lm.linears.tensor_count == 4u);
+}
+
+TEST_CASE("moshi lm contract requires every split depformer input projection") {
+  auto loaded = load_fixture_or_skip("moshi-tiny-lm.gguf");
+  if (loaded.model == nullptr) {
+    return;
+  }
+
+  auto model = std::make_unique<emel::model::data>(*loaded.model);
+  const auto hide_tensor = [&model](const std::string_view target,
+                                    const size_t changed_character) {
+    for (uint32_t index = 0; index < model->n_tensors; ++index) {
+      auto &tensor = model->tensors[index];
+      const std::string_view name{
+          model->name_storage.data() + tensor.name_offset, tensor.name_length};
+      if (name == target) {
+        model->name_storage[tensor.name_offset + changed_character] = '9';
+        return true;
+      }
+    }
+    return false;
+  };
+
+  constexpr std::string_view split_name =
+      "lm.depformer.layers.0.self_attn.in_projs.1.weight";
+  REQUIRE(hide_tensor(split_name, split_name.find("in_projs.1") + 9u));
+  constexpr std::string_view fused_name =
+      "lm.depformer.layers.0.self_attn.in_proj_weight";
+  (void)hide_tensor(fused_name, fused_name.size() - 1u);
+  CHECK(moshi::validate_execution_contract(*model) != k_none);
+}
+
+TEST_CASE("moshi lm contract validates every audio embedding") {
+  auto loaded = load_fixture_or_skip("moshi-tiny-lm.gguf");
+  if (loaded.model == nullptr) {
+    return;
+  }
+
+  auto model = std::make_unique<emel::model::data>(*loaded.model);
+  auto *embedding = find_mutable_tensor(*model, "lm.emb.1.weight");
+  REQUIRE(embedding != nullptr);
+
+  SUBCASE("shape") { embedding->dims[0] += 1; }
+  SUBCASE("execution dtype") { embedding->type = 10; }
+
+  CHECK(moshi::validate_execution_contract(*model) != k_none);
+}
+
+TEST_CASE("moshi lm contract validates depformer embeddings") {
+  auto loaded = load_fixture_or_skip("moshi-tiny-lm.gguf");
+  if (loaded.model == nullptr) {
+    return;
+  }
+  auto model = std::make_unique<emel::model::data>(*loaded.model);
+  SUBCASE("text shape") {
+    auto *tensor = find_mutable_tensor(*model, "lm.depformer_text_emb.weight");
+    REQUIRE(tensor != nullptr);
+    tensor->dims[0] += 1;
+  }
+  SUBCASE("audio dtype") {
+    auto *tensor = find_mutable_tensor(*model, "lm.depformer_emb.0.weight");
+    REQUIRE(tensor != nullptr);
+    tensor->type = 10;
+  }
+  CHECK(moshi::validate_execution_contract(*model) != k_none);
+}
+
+TEST_CASE("moshi lm contract binds only scheduled depformer weight sets") {
+  auto loaded = load_fixture_or_skip("moshi-tiny-lm.gguf");
+  if (loaded.model == nullptr) {
+    return;
+  }
+
+  auto model = std::make_unique<emel::model::data>(*loaded.model);
+  model->moshi_lm.depformer_weights_per_step = true;
+  model->moshi_lm.depformer_weight_schedule_count = 4u;
+  model->moshi_lm.depformer_weight_schedule[0] = 0;
+  model->moshi_lm.depformer_weight_schedule[1] = 1;
+  model->moshi_lm.depformer_weight_schedule[2] = 1;
+  model->moshi_lm.depformer_weight_schedule[3] = 2;
+
+  for (uint32_t index = 0; index < model->n_tensors; ++index) {
+    auto &tensor = model->tensors[index];
+    const std::string_view name{model->name_storage.data() + tensor.name_offset,
+                                tensor.name_length};
+    const std::size_t codebook = name.find(".3.");
+    if ((name.starts_with("lm.depformer_in.") ||
+         name.starts_with("lm.depformer.layers.")) &&
+        codebook != std::string_view::npos) {
+      model->name_storage[tensor.name_offset + codebook + 1u] = '9';
+    }
+  }
+
+  CHECK(moshi::validate_execution_contract(*model) == k_none);
+}
+
+TEST_CASE("moshi lm contract rejects invalid scheduled tensor bindings") {
+  auto loaded = load_fixture_or_skip("moshi-tiny-lm.gguf");
+  if (loaded.model == nullptr) {
+    return;
+  }
+
+  auto model = std::make_unique<emel::model::data>(*loaded.model);
+  const auto hide_tensor = [&model](const std::string_view target,
+                                    const size_t changed_character) {
+    for (uint32_t index = 0; index < model->n_tensors; ++index) {
+      auto &tensor = model->tensors[index];
+      const std::string_view name{
+          model->name_storage.data() + tensor.name_offset, tensor.name_length};
+      if (name == target) {
+        model->name_storage[tensor.name_offset + changed_character] = '9';
+        return true;
+      }
+    }
+    return false;
+  };
+
+  SUBCASE("schedule index must be in range") {
+    model->moshi_lm.depformer_weights_per_step = true;
+    model->moshi_lm.depformer_weight_schedule_count = 1u;
+    model->moshi_lm.depformer_weight_schedule[0] = model->moshi_lm.dep_q;
+  }
+  SUBCASE("text embedding is required") {
+    constexpr std::string_view name = "lm.depformer_text_emb.weight";
+    REQUIRE(hide_tensor(name, name.size() - 1u));
+  }
+  SUBCASE("scheduled input projection is required") {
+    constexpr std::string_view name = "lm.depformer_in.1.weight";
+    REQUIRE(hide_tensor(name, name.find(".1.") + 1u));
+  }
+  SUBCASE("codebook output projection is required") {
+    constexpr std::string_view name = "lm.linears.1.weight";
+    REQUIRE(hide_tensor(name, name.find(".1.") + 1u));
+  }
+  SUBCASE("unscheduled codebook output projection is still required") {
+    model->moshi_lm.depformer_weights_per_step = true;
+    model->moshi_lm.depformer_weight_schedule_count = 4u;
+    model->moshi_lm.depformer_weight_schedule[0] = 0;
+    model->moshi_lm.depformer_weight_schedule[1] = 1;
+    model->moshi_lm.depformer_weight_schedule[2] = 1;
+    model->moshi_lm.depformer_weight_schedule[3] = 2;
+    constexpr std::string_view name = "lm.linears.3.weight";
+    REQUIRE(hide_tensor(name, name.find(".3.") + 1u));
+  }
+
+  CHECK(moshi::validate_execution_contract(*model) != k_none);
 }
 
 TEST_CASE("enriched mimi fixture loads hparams and contract") {
@@ -483,13 +716,13 @@ TEST_CASE("enriched mimi fixture loads hparams and contract") {
   CHECK(model.moshi_component_id == emel::model::data::moshi_component::mimi);
   CHECK(model.mimi.sample_rate == 24000);
   CHECK(model.mimi.frame_rate == doctest::Approx(12.5f));
-  CHECK(model.mimi.n_q == 4);
+  CHECK(model.mimi.n_q == 2);
   CHECK(model.mimi.card == 32);
   CHECK(model.mimi.dim == 16);
   CHECK(model.mimi.codebook_dim == 8);
   CHECK(model.mimi.semantic_n_q == 1);
   CHECK(model.mimi.transformer_num_layers == 2);
-  CHECK(model.params.n_features == 4);
+  CHECK(model.params.n_features == 2);
 
   moshi::execution_contract contract = {};
   REQUIRE(moshi::build_execution_contract(model, contract) == k_none);
@@ -580,6 +813,31 @@ TEST_CASE("moshi lm hparams require the full metadata contract") {
 
   SUBCASE("dep_q above n_q fails") {
     CHECK_FALSE(load_lm_hparams(make_lm_kv({.dep_q = 5}), *model));
+  }
+
+  SUBCASE("missing inference keys fail for personaplex lmgen") {
+    CHECK_FALSE(load_lm_hparams(
+        make_lm_kv({.skip_key = "moshi.lm.inference.dep_q"}), *model));
+    CHECK_FALSE(load_lm_hparams(
+        make_lm_kv({.skip_key = "moshi.lm.inference.prompt_tokens"}), *model));
+  }
+
+  SUBCASE("depformer weight schedule metadata loads when present") {
+    auto store = make_lm_kv({});
+    const std::array<int32_t, 4> schedule = {0, 1, 1, 2};
+    store.i32_array("moshi.lm.depformer.weights_per_step_schedule",
+                    std::span<const int32_t>{schedule});
+    CHECK(load_lm_hparams(store, *model));
+    CHECK(model->moshi_lm.depformer_weight_schedule_count == schedule.size());
+    CHECK(model->moshi_lm.depformer_weight_schedule[2] == 1);
+  }
+
+  SUBCASE("depformer weight schedule count must match dep_q") {
+    auto store = make_lm_kv({});
+    const std::array<int32_t, 3> schedule = {0, 1, 2};
+    store.i32_array("moshi.lm.depformer.weights_per_step_schedule",
+                    std::span<const int32_t>{schedule});
+    CHECK_FALSE(load_lm_hparams(store, *model));
   }
 
   SUBCASE("missing depformer keys fail when dep_q is positive") {
@@ -1499,9 +1757,10 @@ TEST_CASE("mimi contract validation requires every acoustic rvq codebook") {
 
   // bind_rvq_split consumes every acoustic level 0..n_q-semantic_n_q-1 with
   // the full {codebook_dim, card} shape; corrupt the intermediate one (level
-  // 1 of 0..2 in the tiny fixture) so a last-index-only or existence-only
-  // probe would still pass while initialization fails.
+  // 1 of 0..2 after declaring the full tiny raw count) so a last-index-only
+  // or existence-only probe would still pass while initialization fails.
   auto &model = *loaded.model;
+  model.mimi.n_q = 4;
   bool corrupted = false;
   for (uint32_t idx = 0; idx < model.n_tensors; ++idx) {
     auto &tensor = model.tensors[idx];

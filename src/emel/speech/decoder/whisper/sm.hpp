@@ -199,6 +199,4 @@ struct sm : public emel::sm<model, action::context> {
   }
 };
 
-using Decoder = sm;
-
 } // namespace emel::speech::decoder::whisper

@@ -83,6 +83,11 @@ inline constexpr ggml_type_layout ggml_layout(const uint32_t type) noexcept {
   }
 }
 
+inline constexpr bool is_emel_packed_q4_k_x8_type(
+    const uint32_t type) noexcept {
+  return type == 41u || type == 42u;
+}
+
 inline constexpr uint8_t gguf_scalar_size(const uint32_t type) noexcept {
   switch (type) {
     case constants::gguf_type_uint8:
@@ -125,6 +130,36 @@ inline bool multiply_u64(const uint64_t lhs, const uint64_t rhs, uint64_t & out)
 
   out = lhs * rhs;
   return true;
+}
+
+inline emel::error::type compute_emel_packed_q4_k_x8_data_size(
+    const std::array<uint64_t, 4> &dims, const uint32_t n_dims,
+    uint64_t &data_size_out) noexcept {
+  constexpr uint64_t k_block_cols = 256u;
+  constexpr uint64_t k_group_rows = 8u;
+  constexpr uint64_t k_group_block_bytes = 1152u;
+  if (n_dims < 2u || n_dims > constants::max_tensor_dims ||
+      (dims[0] % k_block_cols) != 0u) {
+    return cast_loader_error(error::model_invalid);
+  }
+
+  uint64_t rows = 1u;
+  for (uint32_t dim_index = 1u; dim_index < n_dims; ++dim_index) {
+    if (!multiply_u64(rows, dims[dim_index], rows)) {
+      return cast_loader_error(error::capacity);
+    }
+  }
+
+  const uint64_t block_count = dims[0] / k_block_cols;
+  const uint64_t group_count =
+      rows / k_group_rows + static_cast<uint64_t>((rows % k_group_rows) != 0u);
+  uint64_t groups_and_blocks = 0u;
+  if (!multiply_u64(group_count, block_count, groups_and_blocks) ||
+      !multiply_u64(groups_and_blocks, k_group_block_bytes, data_size_out)) {
+    return cast_loader_error(error::capacity);
+  }
+
+  return cast_loader_error(error::none);
 }
 
 inline bool pad_to_alignment(const uint64_t value,
@@ -217,6 +252,9 @@ inline bool valid_gguf_type(const uint32_t type) noexcept {
 }
 
 inline bool valid_ggml_type(const uint32_t type) noexcept {
+  if (is_emel_packed_q4_k_x8_type(type)) {
+    return true;
+  }
   const ggml_type_layout layout = ggml_layout(type);
   return layout.block_size != 0u && layout.type_size != 0u;
 }
@@ -337,6 +375,11 @@ inline emel::error::type compute_tensor_data_size(const std::array<uint64_t, 4> 
                                                   uint64_t & data_size_out) noexcept {
   if (!valid_ggml_type(type)) {
     return cast_loader_error(error::model_invalid);
+  }
+
+  if (is_emel_packed_q4_k_x8_type(type)) {
+    return compute_emel_packed_q4_k_x8_data_size(dims, n_dims,
+                                                 data_size_out);
   }
 
   const ggml_type_layout layout = ggml_layout(type);

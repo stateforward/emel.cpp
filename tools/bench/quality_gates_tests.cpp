@@ -82,6 +82,7 @@ TEST_CASE("quality gates full benchmark branch preserves failure status") {
 
   CHECK(full_branch.find("run_step_allow_fail bench_snapshot") !=
         std::string::npos);
+  CHECK(full_branch.find("EMEL_BENCH_INTERNAL=1") != std::string::npos);
   CHECK(full_branch.find("full_status=$?") != std::string::npos);
   CHECK(full_branch.find("run_full_benchmark_opt_in_suites") !=
         std::string::npos);
@@ -238,6 +239,7 @@ TEST_CASE(
 
   CHECK(script.find("QUALITY_GATES_PARALLEL") != std::string::npos);
   CHECK(script.find("parallel_enabled()") != std::string::npos);
+  CHECK(script.find("EMEL_BENCH_STRICT_REGRESSION") != std::string::npos);
   CHECK(script.find("start_parallel_step bench_snapshot run_benchmark_gates") !=
         std::string::npos);
   CHECK(
@@ -361,6 +363,25 @@ TEST_CASE("bench script routes Moshi LM suite through the wrapper") {
   CHECK(route.find("speech_lm_moshi has no reference lane") !=
         std::string::npos);
   CHECK(route.find("bash \"$ROOT_DIR/scripts/bench_moshi_lm_compare.sh\"") !=
+        std::string::npos);
+}
+
+TEST_CASE(
+    "quality gates route PersonaPlex changes through end-to-end compare") {
+  const std::string script =
+      read_file(repo_root() / "scripts" / "quality_gates.sh");
+
+  CHECK(script.find("add_bench_suite speech_dialogue_moshi") !=
+        std::string::npos);
+  CHECK(script.find("speech_dialogue_moshi)") != std::string::npos);
+  CHECK(script.find("scripts/bench_personaplex_compare.sh") !=
+        std::string::npos);
+  CHECK(script.find("QUALITY_GATES_PERSONAPLEX_FRAMES") != std::string::npos);
+  CHECK(script.find("QUALITY_GATES_PERSONAPLEX_AUDIO") != std::string::npos);
+  CHECK(script.find("--audio \"$QUALITY_GATES_PERSONAPLEX_AUDIO\"") !=
+        std::string::npos);
+  CHECK(script.find("tools/bench/moshi_gguf_convert.py|") != std::string::npos);
+  CHECK(script.find("scripts/setup_moshi_cpp_reference.sh|") !=
         std::string::npos);
 }
 
@@ -504,6 +525,11 @@ TEST_CASE(
         std::string::npos);
   CHECK(helper.find("gbnf_rule_parser") != std::string::npos);
   CHECK(helper.find("kernel_aarch64") != std::string::npos);
+  const std::size_t parallel_matmul_priority = helper.find("parallel_matmul");
+  const std::size_t manifest_expansion = helper.find("while IFS= read -r line");
+  REQUIRE(parallel_matmul_priority != std::string::npos);
+  REQUIRE(manifest_expansion != std::string::npos);
+  CHECK(parallel_matmul_priority < manifest_expansion);
   CHECK(helper.find("runner=\"\"") != std::string::npos);
   CHECK(helper.find("runner=*)") != std::string::npos);
   CHECK(helper.find("\"$runner\" == \"all\"") != std::string::npos);

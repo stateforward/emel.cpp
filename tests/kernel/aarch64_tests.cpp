@@ -2,8 +2,10 @@
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <cmath>
 #include <cstdint>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
@@ -55,7 +57,9 @@ std::filesystem::path repo_root() {
 #ifdef EMEL_TEST_REPO_ROOT
   return std::filesystem::path{EMEL_TEST_REPO_ROOT};
 #else
-  return std::filesystem::path{__FILE__}.parent_path().parent_path()
+  return std::filesystem::path{__FILE__}
+      .parent_path()
+      .parent_path()
       .parent_path();
 #endif
 }
@@ -69,15 +73,14 @@ std::string read_text_file(const std::filesystem::path &path) {
 
 // Mirrors the generator's parallel matmul lane slicing: a group-aligned row
 // slice of src0/dst embedded in the full batch-major output, sharing src1.
-inline emel::kernel::event::op_mul_mat make_row_sliced_lane_event(
-    const emel::kernel::event::op_mul_mat & ev,
-    const uint64_t group_rows,
-    const uint64_t row_begin,
-    const uint64_t row_count) {
+inline emel::kernel::event::op_mul_mat
+make_row_sliced_lane_event(const emel::kernel::event::op_mul_mat &ev,
+                           const uint64_t group_rows, const uint64_t row_begin,
+                           const uint64_t row_count) {
   emel::kernel::event::op_mul_mat sliced = ev;
   const uint64_t slice_groups = (row_count + group_rows - 1u) / group_rows;
   sliced.src0.data = static_cast<const uint8_t *>(ev.src0.data) +
-      (row_begin / group_rows) * ev.src0.nb[1];
+                     (row_begin / group_rows) * ev.src0.nb[1];
   sliced.src0.ne[1] = row_count;
   sliced.src0.nb[2] = ev.src0.nb[1] * slice_groups;
   sliced.src0.nb[3] = sliced.src0.nb[2];
@@ -89,7 +92,68 @@ inline emel::kernel::event::op_mul_mat make_row_sliced_lane_event(
   return sliced;
 }
 
-}  // namespace
+float compute_ggml_q4_k_q8_k_row(
+    const emel::kernel::detail::quant::block_q4_k *lhs,
+    const emel::kernel::detail::quant::block_q8_k *rhs,
+    const size_t block_count) {
+  constexpr uint32_t kmask1 = 0x3f3f3f3fu;
+  constexpr uint32_t kmask2 = 0x0f0f0f0fu;
+  constexpr uint32_t kmask3 = 0x03030303u;
+  float sum = 0.0f;
+
+  for (size_t block = 0; block < block_count; ++block) {
+    uint32_t decoded_words[4] = {};
+    std::memcpy(decoded_words, lhs[block].scales.data(),
+                lhs[block].scales.size());
+    decoded_words[3] = ((decoded_words[2] >> 4u) & kmask2) |
+                       (((decoded_words[1] >> 6u) & kmask3) << 4u);
+    const uint32_t decoded_aux = decoded_words[1] & kmask1;
+    decoded_words[1] = (decoded_words[2] & kmask2) |
+                       (((decoded_words[0] >> 6u) & kmask3) << 4u);
+    decoded_words[2] = decoded_aux;
+    decoded_words[0] &= kmask1;
+
+    const auto *scales = reinterpret_cast<const uint8_t *>(decoded_words);
+    const auto *mins = reinterpret_cast<const uint8_t *>(decoded_words + 2);
+    int32_t min_sum = 0;
+    for (size_t index = 0; index < 8u; ++index) {
+      const int32_t pair_sum =
+          static_cast<int32_t>(rhs[block].bsums[index * 2u]) +
+          static_cast<int32_t>(rhs[block].bsums[index * 2u + 1u]);
+      min_sum += pair_sum * static_cast<int32_t>(mins[index]);
+    }
+
+    const uint8_t *q4 = lhs[block].qs.data();
+    const int8_t *q8 = rhs[block].qs.data();
+    int32_t low_sum = 0;
+    int32_t high_sum = 0;
+    for (size_t group = 0; group < 4u; ++group) {
+      int32_t low_dot = 0;
+      int32_t high_dot = 0;
+      for (size_t index = 0; index < 32u; ++index) {
+        low_dot += static_cast<int32_t>(q4[index] & 0x0fu) *
+                   static_cast<int32_t>(q8[index]);
+        high_dot += static_cast<int32_t>(q4[index] >> 4u) *
+                    static_cast<int32_t>(q8[index + 32u]);
+      }
+      low_sum += low_dot * static_cast<int32_t>(scales[group * 2u]);
+      high_sum += high_dot * static_cast<int32_t>(scales[group * 2u + 1u]);
+      q4 += 32u;
+      q8 += 64u;
+    }
+
+    const float d =
+        emel::kernel::detail::quant::fp16_to_fp32(lhs[block].d) * rhs[block].d;
+    const float dmin =
+        emel::kernel::detail::quant::fp16_to_fp32(lhs[block].dmin) *
+        rhs[block].d;
+    sum -= dmin * static_cast<float>(min_sum);
+    sum += d * static_cast<float>(low_sum + high_sum);
+  }
+  return sum;
+}
+
+} // namespace
 
 TEST_CASE("kernel_aarch64_numeric_paths") {
   float lhs[4] = {1.0f, 2.0f, 3.0f, 4.0f};
@@ -1375,6 +1439,56 @@ TEST_CASE("kernel_aarch64_q4_k_row_neon_matches_scalar") {
 #endif
 }
 
+TEST_CASE("kernel_aarch64_q4_k_row_matches_ggml_accumulation_order") {
+#if !(defined(__aarch64__) && defined(__ARM_NEON) &&                           \
+      defined(__ARM_FEATURE_DOTPROD))
+  CHECK(true);
+#else
+  using emel::kernel::detail::quant::block_q4_k;
+  using emel::kernel::detail::quant::block_q8_k;
+  using emel::kernel::detail::quant::QK_K;
+
+  constexpr size_t block_count = 64u;
+  std::array<block_q4_k, block_count> q4_blocks = {};
+  std::array<block_q8_k, block_count> q8_blocks = {};
+  for (size_t block = 0; block < block_count; ++block) {
+    auto &q4 = q4_blocks[block];
+    auto &q8 = q8_blocks[block];
+    q4.d = emel::kernel::detail::quant::fp32_to_fp16(
+        0.0009765625f * static_cast<float>((block % 31u) + 1u));
+    q4.dmin = emel::kernel::detail::quant::fp32_to_fp16(
+        0.00048828125f * static_cast<float>((block % 29u) + 1u));
+    q8.d = 0.000244140625f * static_cast<float>((block % 23u) + 1u);
+    for (size_t index = 0; index < q4.scales.size(); ++index) {
+      q4.scales[index] =
+          static_cast<uint8_t>((block * 37u + index * 19u + 0x5au) & 0xffu);
+    }
+    for (size_t index = 0; index < q4.qs.size(); ++index) {
+      q4.qs[index] =
+          static_cast<uint8_t>((block * 17u + index * 29u + 0x96u) & 0xffu);
+    }
+    for (size_t index = 0; index < q8.qs.size(); ++index) {
+      q8.qs[index] = static_cast<int8_t>(
+          static_cast<int32_t>((block * 13u + index * 7u) % 255u) - 127);
+    }
+    for (size_t group = 0; group < q8.bsums.size(); ++group) {
+      int32_t group_sum = 0;
+      for (size_t index = 0; index < 16u; ++index) {
+        group_sum += static_cast<int32_t>(q8.qs[group * 16u + index]);
+      }
+      q8.bsums[group] = static_cast<int16_t>(group_sum);
+    }
+  }
+
+  const float expected = compute_ggml_q4_k_q8_k_row(
+      q4_blocks.data(), q8_blocks.data(), block_count);
+  const float actual = emel::kernel::aarch64::detail::dot_q4_k_q8_k_row_neon(
+      q4_blocks.data(), q8_blocks.data(), block_count);
+
+  CHECK(actual == expected);
+#endif
+}
+
 TEST_CASE("kernel_aarch64_q4_k_2rows_neon_matches_scalar") {
 #if !(defined(__aarch64__) || defined(__ARM_NEON))
   CHECK(true);
@@ -1897,7 +2011,8 @@ TEST_CASE("kernel_aarch64_f16_mul_mat_without_neon_takes_shared_route") {
   }
 }
 
-TEST_CASE("kernel_aarch64_f32_vector_gemv_route_is_explicit_and_bit_identical") {
+TEST_CASE(
+    "kernel_aarch64_f32_vector_gemv_route_is_explicit_and_bit_identical") {
   // k covers four 16-wide f32 steps plus a 6-element scalar tail so the
   // vfmaq body and the leftover loop of the ported ggml_vec_dot_f32 both
   // execute. Integer-valued inputs keep every product and partial sum
@@ -2172,14 +2287,28 @@ TEST_CASE("kernel_aarch64_q4_k_uses_neon_dispatch_when_dotprod_is_available") {
 
 #if defined(__ARM_FEATURE_DOTPROD)
   CHECK(emel::kernel::aarch64::detail::can_use_neon(shared_ev, true));
+  CHECK(emel::kernel::aarch64::detail::
+            can_use_neon_mul_mat_q4_vector_f32_rhs(shared_ev, true));
 #else
   CHECK_FALSE(emel::kernel::aarch64::detail::can_use_neon(shared_ev, true));
+  CHECK_FALSE(emel::kernel::aarch64::detail::
+                  can_use_neon_mul_mat_q4_vector_f32_rhs(shared_ev, true));
 #endif
 
   aarch64_sm machine{};
   CHECK(machine.process_event(shared_ev));
   CHECK(shared_out[0] == doctest::Approx(scalar_out[0]).epsilon(1.0e-6f));
   CHECK(shared_out[0] == doctest::Approx(-256.0f).epsilon(1.0e-6f));
+#if defined(__aarch64__) && defined(__ARM_NEON) &&                             \
+    defined(__ARM_FEATURE_DOTPROD)
+  CHECK(machine.optimized_q4_dispatch_count() == 1u);
+  CHECK(machine.optimized_q4_vector_dispatch_count() == 1u);
+  CHECK(machine.shared_q4_dispatch_count() == 0u);
+#else
+  CHECK(machine.optimized_q4_dispatch_count() == 0u);
+  CHECK(machine.optimized_q4_vector_dispatch_count() == 0u);
+  CHECK(machine.shared_q4_dispatch_count() == 1u);
+#endif
 }
 
 TEST_CASE("kernel_aarch64_supported_quantized_dispatch_is_alloc_free") {
@@ -2545,7 +2674,9 @@ TEST_CASE(
 
   std::array<float, Q4_K_X8_ROWS> native_out = {};
   std::array<float, Q4_K_X8_ROWS> packed_bl4_out = {};
+  std::array<float, Q4_K_X8_ROWS> packed_bl4_f32_out = {};
   std::array<float, Q4_K_X8_ROWS> packed_bl8_out = {};
+  std::array<float, Q4_K_X8_ROWS> packed_bl8_f32_out = {};
   const emel::kernel::event::op_mul_mat native_ev{
       .src0 = make_quantized_src(native_rows.data(), dtype::q4_k, QK_K,
                                  Q4_K_X8_ROWS),
@@ -2564,20 +2695,84 @@ TEST_CASE(
       .src1 = make_q8_k_vector_src(q8_input.data(), QK_K),
       .dst = make_dst(packed_bl8_out.data(), dtype::f32, 1u, Q4_K_X8_ROWS),
   };
+  const emel::kernel::event::op_mul_mat packed_bl4_f32_ev{
+      .src0 = make_packed_q4_k_x8_bl4_src(packed_bl4_storage.data(), QK_K,
+                                          Q4_K_X8_ROWS),
+      .src1 = make_src(input.data(), dtype::f32, 1u, QK_K),
+      .dst =
+          make_dst(packed_bl4_f32_out.data(), dtype::f32, 1u, Q4_K_X8_ROWS),
+  };
+  const emel::kernel::event::op_mul_mat packed_bl8_f32_ev{
+      .src0 = make_packed_q4_k_x8_bl8_src(packed_bl8_storage.data(), QK_K,
+                                          Q4_K_X8_ROWS),
+      .src1 = make_src(input.data(), dtype::f32, 1u, QK_K),
+      .dst =
+          make_dst(packed_bl8_f32_out.data(), dtype::f32, 1u, Q4_K_X8_ROWS),
+  };
+  float argmax_score = 0.0f;
+  int32_t argmax_index = -1;
+  float bl4_argmax_score = 0.0f;
+  int32_t bl4_argmax_index = -1;
+  const emel::kernel::event::op_mul_mat_argmax packed_bl4_f32_argmax_ev{
+      .src0 = make_packed_q4_k_x8_bl4_src(packed_bl4_storage.data(), QK_K,
+                                          Q4_K_X8_ROWS),
+      .src1 = make_src(input.data(), dtype::f32, 1u, QK_K),
+      .dst = make_dst(&bl4_argmax_score, dtype::f32, 1u, 1u),
+      .index_out = &bl4_argmax_index,
+  };
+  const emel::kernel::event::op_mul_mat_argmax packed_bl8_f32_argmax_ev{
+      .src0 = make_packed_q4_k_x8_bl8_src(packed_bl8_storage.data(), QK_K,
+                                          Q4_K_X8_ROWS),
+      .src1 = make_src(input.data(), dtype::f32, 1u, QK_K),
+      .dst = make_dst(&argmax_score, dtype::f32, 1u, 1u),
+      .index_out = &argmax_index,
+  };
 
   aarch64_sm native_machine{};
   aarch64_sm packed_bl4_machine{};
+  aarch64_sm packed_bl4_f32_machine{};
+  aarch64_sm packed_bl4_f32_argmax_machine{};
   aarch64_sm packed_bl8_machine{};
+  aarch64_sm packed_bl8_f32_machine{};
+  aarch64_sm packed_bl8_f32_argmax_machine{};
   CHECK(native_machine.process_event(native_ev));
   CHECK(packed_bl4_machine.process_event(packed_bl4_ev));
+  CHECK(packed_bl4_f32_machine.process_event(packed_bl4_f32_ev));
+  CHECK(packed_bl4_f32_argmax_machine.process_event(
+      packed_bl4_f32_argmax_ev));
   CHECK(packed_bl8_machine.process_event(packed_bl8_ev));
+  CHECK(packed_bl8_f32_machine.process_event(packed_bl8_f32_ev));
+  CHECK(packed_bl8_f32_argmax_machine.process_event(
+      packed_bl8_f32_argmax_ev));
+
+  int32_t expected_argmax_index = 0;
+  float expected_argmax_score = native_out[0];
+  for (size_t row = 1; row < native_out.size(); ++row) {
+    if (native_out[row] > expected_argmax_score) {
+      expected_argmax_score = native_out[row];
+      expected_argmax_index = static_cast<int32_t>(row);
+    }
+  }
 
   for (size_t row = 0; row < native_out.size(); ++row) {
     CHECK(packed_bl4_out[row] ==
           doctest::Approx(native_out[row]).epsilon(1.0e-5f));
+    CHECK(packed_bl4_f32_out[row] ==
+          doctest::Approx(native_out[row]).epsilon(1.0e-5f));
     CHECK(packed_bl8_out[row] ==
           doctest::Approx(native_out[row]).epsilon(1.0e-5f));
+    CHECK(packed_bl8_f32_out[row] ==
+          doctest::Approx(native_out[row]).epsilon(1.0e-5f));
+    CHECK(std::bit_cast<uint32_t>(packed_bl8_out[row]) ==
+          std::bit_cast<uint32_t>(native_out[row]));
+    CHECK(std::bit_cast<uint32_t>(packed_bl8_f32_out[row]) ==
+          std::bit_cast<uint32_t>(native_out[row]));
   }
+  CHECK(bl4_argmax_index == expected_argmax_index);
+  CHECK(bl4_argmax_score ==
+        doctest::Approx(expected_argmax_score).epsilon(1.0e-5f));
+  CHECK(argmax_index == expected_argmax_index);
+  CHECK(argmax_score == doctest::Approx(expected_argmax_score).epsilon(1.0e-5f));
 
   CHECK(packed_bl4_machine.optimized_q4_dispatch_count() == 1u);
   CHECK(packed_bl4_machine.optimized_q4_vector_dispatch_count() == 1u);
@@ -2585,17 +2780,108 @@ TEST_CASE(
   CHECK(packed_bl4_machine.optimized_q4_vector_packed_q8_rhs_dispatch_count() ==
         1u);
   CHECK(packed_bl4_machine.shared_q4_dispatch_count() == 0u);
+  CHECK(packed_bl4_f32_machine.optimized_q4_dispatch_count() == 1u);
+  CHECK(packed_bl4_f32_machine.optimized_q4_vector_dispatch_count() == 1u);
+  CHECK(packed_bl4_f32_machine.optimized_q4_vector_packed_dispatch_count() ==
+        1u);
+  CHECK(packed_bl4_f32_machine.shared_q4_dispatch_count() == 0u);
+  CHECK(packed_bl4_f32_argmax_machine.optimized_q4_dispatch_count() == 1u);
+  CHECK(packed_bl4_f32_argmax_machine.optimized_q4_vector_dispatch_count() ==
+        1u);
+  CHECK(packed_bl4_f32_argmax_machine
+            .optimized_q4_vector_packed_dispatch_count() == 1u);
+  CHECK(packed_bl4_f32_argmax_machine.shared_q4_dispatch_count() == 0u);
   CHECK(packed_bl8_machine.optimized_q4_dispatch_count() == 1u);
   CHECK(packed_bl8_machine.optimized_q4_vector_dispatch_count() == 1u);
   CHECK(packed_bl8_machine.optimized_q4_vector_packed_dispatch_count() == 1u);
   CHECK(packed_bl8_machine.optimized_q4_vector_packed_q8_rhs_dispatch_count() ==
         1u);
   CHECK(packed_bl8_machine.shared_q4_dispatch_count() == 0u);
+  CHECK(packed_bl8_f32_machine.optimized_q4_dispatch_count() == 1u);
+  CHECK(packed_bl8_f32_machine.optimized_q4_vector_dispatch_count() == 1u);
+  CHECK(packed_bl8_f32_machine.optimized_q4_vector_packed_dispatch_count() ==
+        1u);
+  CHECK(packed_bl8_f32_machine
+            .optimized_q4_vector_packed_q8_rhs_dispatch_count() == 0u);
+  CHECK(packed_bl8_f32_machine.shared_q4_dispatch_count() == 0u);
+  CHECK(packed_bl8_f32_argmax_machine.optimized_q4_dispatch_count() == 1u);
+  CHECK(packed_bl8_f32_argmax_machine.optimized_q4_vector_dispatch_count() ==
+        1u);
+  CHECK(packed_bl8_f32_argmax_machine
+            .optimized_q4_vector_packed_dispatch_count() == 1u);
+  CHECK(packed_bl8_f32_argmax_machine.shared_q4_dispatch_count() == 0u);
 #endif
 }
 
-TEST_CASE(
-    "kernel_aarch64_raw_quantized_prepared_rhs_routes_are_explicit_and_numeric_match") {
+TEST_CASE("kernel_aarch64_q4_packed_bl8_preserves_native_block_order_bits") {
+#if !(defined(__aarch64__) && defined(__ARM_NEON) &&                           \
+      defined(__ARM_FEATURE_DOTPROD))
+  CHECK(true);
+#else
+  using emel::kernel::detail::quant::block_q4_k;
+  using emel::kernel::detail::quant::block_q4_kx8;
+  using emel::kernel::detail::quant::Q4_K_X8_ROWS;
+  using emel::kernel::detail::quant::QK_K;
+
+  constexpr uint64_t block_count = 4u;
+  constexpr uint64_t cols = block_count * QK_K;
+  std::array<block_q4_k, Q4_K_X8_ROWS * block_count> native_rows = {};
+  for (size_t row = 0; row < Q4_K_X8_ROWS; ++row) {
+    for (size_t block = 0; block < block_count; ++block) {
+      auto &value = native_rows[row * block_count + block];
+      value.d = static_cast<uint16_t>(0x3000u + row * 31u + block * 7u);
+      value.dmin = static_cast<uint16_t>(0x2800u + row * 19u + block * 11u);
+      for (size_t index = 0; index < value.scales.size(); ++index) {
+        value.scales[index] = static_cast<uint8_t>(
+            (row * 37u + block * 53u + index * 17u + 9u) & 0xffu);
+      }
+      for (size_t index = 0; index < value.qs.size(); ++index) {
+        value.qs[index] = static_cast<uint8_t>(
+            (row * 29u + block * 43u + index * 13u + 5u) & 0xffu);
+      }
+    }
+  }
+
+  const std::array<float, cols> input = [] {
+    std::array<float, cols> values = {};
+    for (size_t index = 0; index < values.size(); ++index) {
+      const int32_t centered = static_cast<int32_t>(index % 61u) - 30;
+      values[index] = static_cast<float>(centered) * 0.03125f;
+    }
+    return values;
+  }();
+
+  std::array<uint8_t, block_count * sizeof(block_q4_kx8)> packed = {};
+  REQUIRE(emel::kernel::detail::quant::pack_q4_k_rows_x8_bl8(
+      native_rows.data(), Q4_K_X8_ROWS, cols, packed.data()));
+
+  std::array<float, Q4_K_X8_ROWS> native_out = {};
+  std::array<float, Q4_K_X8_ROWS> packed_out = {};
+  const emel::kernel::event::op_mul_mat native_ev{
+      .src0 = make_quantized_src(native_rows.data(), dtype::q4_k, cols,
+                                 Q4_K_X8_ROWS),
+      .src1 = make_src(input.data(), dtype::f32, 1u, cols),
+      .dst = make_dst(native_out.data(), dtype::f32, 1u, Q4_K_X8_ROWS),
+  };
+  const emel::kernel::event::op_mul_mat packed_ev{
+      .src0 = make_packed_q4_k_x8_bl8_src(packed.data(), cols, Q4_K_X8_ROWS),
+      .src1 = make_src(input.data(), dtype::f32, 1u, cols),
+      .dst = make_dst(packed_out.data(), dtype::f32, 1u, Q4_K_X8_ROWS),
+  };
+
+  aarch64_sm native_machine{};
+  aarch64_sm packed_machine{};
+  REQUIRE(native_machine.process_event(native_ev));
+  REQUIRE(packed_machine.process_event(packed_ev));
+  for (size_t row = 0; row < native_out.size(); ++row) {
+    CHECK(std::bit_cast<uint32_t>(packed_out[row]) ==
+          std::bit_cast<uint32_t>(native_out[row]));
+  }
+#endif
+}
+
+TEST_CASE("kernel_aarch64_raw_quantized_prepared_rhs_routes_are_explicit_and_"
+          "numeric_match") {
 #if !(defined(__aarch64__) && defined(__ARM_NEON) &&                           \
       defined(__ARM_FEATURE_DOTPROD))
   CHECK(true);
@@ -3470,10 +3756,10 @@ TEST_CASE("kernel_aarch64_q4_k_packed_bl8_multi_block_matrix_x8_route_matches_"
 #endif
 }
 
-TEST_CASE("kernel_aarch64_q4_k_packed_bl8_routes_do_not_compile_bad_i8mm_tile") {
-  const std::string actions_source =
-      read_text_file(repo_root() / "src" / "emel" / "kernel" / "aarch64" /
-                     "actions.hpp");
+TEST_CASE(
+    "kernel_aarch64_q4_k_packed_bl8_routes_do_not_compile_bad_i8mm_tile") {
+  const std::string actions_source = read_text_file(
+      repo_root() / "src" / "emel" / "kernel" / "aarch64" / "actions.hpp");
   CHECK(actions_source.find("dot_q4_k_x8_q8_k_group_bl8_i8mm_x4") ==
         std::string::npos);
 }
@@ -3896,11 +4182,12 @@ TEST_CASE("kernel_aarch64_q6_k_prepared_q8_rhs_i8mm_multi_block_matrix_x4_"
 #endif
 }
 
-TEST_CASE("kernel_aarch64_q4_k_packed_bl8_matrix_x8_row_sliced_lane_views_are_supported") {
-  using emel::kernel::detail::quant::Q4_K_X8_ROWS;
-  using emel::kernel::detail::quant::QK_K;
+TEST_CASE("kernel_aarch64_q4_k_packed_bl8_matrix_x8_row_sliced_lane_views_are_"
+          "supported") {
   using emel::kernel::detail::quant::block_q4_k;
   using emel::kernel::detail::quant::block_q8_k;
+  using emel::kernel::detail::quant::Q4_K_X8_ROWS;
+  using emel::kernel::detail::quant::QK_K;
 
   constexpr uint64_t row_count = 16u;
   constexpr uint64_t slice_rows = Q4_K_X8_ROWS;
@@ -3908,13 +4195,15 @@ TEST_CASE("kernel_aarch64_q4_k_packed_bl8_matrix_x8_row_sliced_lane_views_are_su
   constexpr uint64_t col_count = QK_K;
   constexpr uint64_t block_count = col_count / QK_K;
 
-  std::vector<block_q4_k> native_rows(static_cast<size_t>(row_count * block_count));
+  std::vector<block_q4_k> native_rows(
+      static_cast<size_t>(row_count * block_count));
   for (size_t row = 0; row < static_cast<size_t>(row_count); ++row) {
-    auto & q4 = native_rows[row];
+    auto &q4 = native_rows[row];
     q4.d = 0x3c00u;
     q4.dmin = static_cast<uint16_t>(0x3600u + row * 0x0020u);
     for (size_t idx = 0; idx < q4.scales.size(); ++idx) {
-      q4.scales[idx] = static_cast<uint8_t>((idx * (13u + row)) ^ (0x66u - row));
+      q4.scales[idx] =
+          static_cast<uint8_t>((idx * (13u + row)) ^ (0x66u - row));
     }
     for (size_t idx = 0; idx < q4.qs.size(); ++idx) {
       q4.qs[idx] = static_cast<uint8_t>((idx * (7u + row)) ^ (0xa5u + row));
@@ -3934,15 +4223,15 @@ TEST_CASE("kernel_aarch64_q4_k_packed_bl8_matrix_x8_row_sliced_lane_views_are_su
   std::vector<block_q8_k> rhs_q8(static_cast<size_t>(rhs_rows * block_count));
   for (size_t row = 0; row < static_cast<size_t>(rhs_rows); ++row) {
     emel::kernel::detail::quant::quantize_row_q8_k_strided(
-        rhs_dense.data() + row * static_cast<size_t>(col_count),
-        1u,
+        rhs_dense.data() + row * static_cast<size_t>(col_count), 1u,
         rhs_q8.data() + row * static_cast<size_t>(block_count),
         static_cast<int64_t>(col_count));
   }
 
   std::vector<float> reference(static_cast<size_t>(rhs_rows * row_count), 0.0f);
   for (size_t rhs_row = 0; rhs_row < static_cast<size_t>(rhs_rows); ++rhs_row) {
-    for (size_t lhs_row = 0; lhs_row < static_cast<size_t>(row_count); ++lhs_row) {
+    for (size_t lhs_row = 0; lhs_row < static_cast<size_t>(row_count);
+         ++lhs_row) {
       reference[rhs_row * static_cast<size_t>(row_count) + lhs_row] =
           emel::kernel::detail::dot_q4_k_q8_k_row_scalar(
               native_rows.data() + lhs_row * static_cast<size_t>(block_count),
@@ -3953,24 +4242,29 @@ TEST_CASE("kernel_aarch64_q4_k_packed_bl8_matrix_x8_row_sliced_lane_views_are_su
 
   std::vector<uint8_t> packed_bl8(
       sizeof(emel::kernel::detail::quant::block_q4_kx8) *
-      emel::kernel::detail::quant::packed_q4_k_x8_group_count(row_count) * block_count);
+      emel::kernel::detail::quant::packed_q4_k_x8_group_count(row_count) *
+      block_count);
   REQUIRE(emel::kernel::detail::quant::pack_q4_k_rows_x8_bl8(
       native_rows.data(), row_count, col_count, packed_bl8.data()));
 
-  std::vector<float> packed_out(static_cast<size_t>(rhs_rows * row_count), 0.0f);
+  std::vector<float> packed_out(static_cast<size_t>(rhs_rows * row_count),
+                                0.0f);
   aarch64_sm machine{};
 
   const emel::kernel::event::op_mul_mat full_ev{
-      .src0 = make_packed_q4_k_x8_bl8_src(packed_bl8.data(), col_count, row_count),
+      .src0 =
+          make_packed_q4_k_x8_bl8_src(packed_bl8.data(), col_count, row_count),
       .src1 = make_q8_k_x8_rhs_src(rhs_q8.data(), rhs_rows, col_count),
-      .dst = make_batch_major_dst(packed_out.data(), dtype::f32, rhs_rows, row_count),
+      .dst = make_batch_major_dst(packed_out.data(), dtype::f32, rhs_rows,
+                                  row_count),
   };
   const auto lane0 =
       make_row_sliced_lane_event(full_ev, Q4_K_X8_ROWS, 0u, slice_rows);
-  const auto lane1 =
-      make_row_sliced_lane_event(full_ev, Q4_K_X8_ROWS, slice_rows, row_count - slice_rows);
+  const auto lane1 = make_row_sliced_lane_event(
+      full_ev, Q4_K_X8_ROWS, slice_rows, row_count - slice_rows);
 
-#if defined(__aarch64__) && defined(__ARM_NEON) && defined(__ARM_FEATURE_DOTPROD)
+#if defined(__aarch64__) && defined(__ARM_NEON) &&                             \
+    defined(__ARM_FEATURE_DOTPROD)
   CHECK(machine.process_event(lane0));
   CHECK(machine.process_event(lane1));
   for (size_t idx = 0; idx < packed_out.size(); ++idx) {
@@ -3983,12 +4277,12 @@ TEST_CASE("kernel_aarch64_q4_k_packed_bl8_matrix_x8_row_sliced_lane_views_are_su
 #endif
 }
 
-TEST_CASE(
-    "kernel_aarch64_q6_k_prepared_q8_rhs_i8mm_matrix_x8_row_sliced_lane_views_are_supported") {
-  using emel::kernel::detail::quant::Q6_K_X8_ROWS;
-  using emel::kernel::detail::quant::QK_K;
+TEST_CASE("kernel_aarch64_q6_k_prepared_q8_rhs_i8mm_matrix_x8_row_sliced_lane_"
+          "views_are_supported") {
   using emel::kernel::detail::quant::block_q6_k;
   using emel::kernel::detail::quant::block_q8_k;
+  using emel::kernel::detail::quant::Q6_K_X8_ROWS;
+  using emel::kernel::detail::quant::QK_K;
 
   constexpr uint64_t row_count = 16u;
   constexpr uint64_t slice_rows = Q6_K_X8_ROWS;
@@ -3996,12 +4290,14 @@ TEST_CASE(
   constexpr uint64_t col_count = QK_K;
   constexpr uint64_t block_count = col_count / QK_K;
 
-  std::vector<block_q6_k> native_rows(static_cast<size_t>(row_count * block_count));
+  std::vector<block_q6_k> native_rows(
+      static_cast<size_t>(row_count * block_count));
   for (size_t row = 0; row < static_cast<size_t>(row_count); ++row) {
-    auto & q6 = native_rows[row];
+    auto &q6 = native_rows[row];
     q6.d = 0x3c00u;
     for (size_t idx = 0; idx < q6.scales.size(); ++idx) {
-      const int32_t scale_value = static_cast<int32_t>((idx + row * 5u) % 15u) - 7;
+      const int32_t scale_value =
+          static_cast<int32_t>((idx + row * 5u) % 15u) - 7;
       q6.scales[idx] = static_cast<int8_t>(scale_value);
     }
     for (size_t idx = 0; idx < q6.ql.size(); ++idx) {
@@ -4025,15 +4321,15 @@ TEST_CASE(
   std::vector<block_q8_k> rhs_q8(static_cast<size_t>(rhs_rows * block_count));
   for (size_t row = 0; row < static_cast<size_t>(rhs_rows); ++row) {
     emel::kernel::detail::quant::quantize_row_q8_k_strided(
-        rhs_dense.data() + row * static_cast<size_t>(col_count),
-        1u,
+        rhs_dense.data() + row * static_cast<size_t>(col_count), 1u,
         rhs_q8.data() + row * static_cast<size_t>(block_count),
         static_cast<int64_t>(col_count));
   }
 
   std::vector<float> reference(static_cast<size_t>(rhs_rows * row_count), 0.0f);
   for (size_t rhs_row = 0; rhs_row < static_cast<size_t>(rhs_rows); ++rhs_row) {
-    for (size_t lhs_row = 0; lhs_row < static_cast<size_t>(row_count); ++lhs_row) {
+    for (size_t lhs_row = 0; lhs_row < static_cast<size_t>(row_count);
+         ++lhs_row) {
       reference[rhs_row * static_cast<size_t>(row_count) + lhs_row] =
           emel::kernel::detail::dot_q6_k_q8_k_row_scalar(
               native_rows.data() + lhs_row * static_cast<size_t>(block_count),
@@ -4043,41 +4339,49 @@ TEST_CASE(
   }
 
   std::vector<uint8_t> prepared_storage(
-      emel::kernel::detail::quant::prepared_q6_k_x8_q8_group_storage_bytes(col_count) *
+      emel::kernel::detail::quant::prepared_q6_k_x8_q8_group_storage_bytes(
+          col_count) *
       emel::kernel::detail::quant::packed_q6_k_x8_group_count(row_count));
   REQUIRE(emel::kernel::detail::quant::pack_q6_k_rows_x8_q8_prepared(
       native_rows.data(), row_count, col_count, prepared_storage.data()));
 
-  std::vector<float> prepared_out(static_cast<size_t>(rhs_rows * row_count), 0.0f);
+  std::vector<float> prepared_out(static_cast<size_t>(rhs_rows * row_count),
+                                  0.0f);
   aarch64_sm machine{};
 
   const emel::kernel::event::op_mul_mat full_ev{
-      .src0 = make_prepared_q6_k_x8_q8_src(prepared_storage.data(), col_count, row_count),
+      .src0 = make_prepared_q6_k_x8_q8_src(prepared_storage.data(), col_count,
+                                           row_count),
       .src1 = make_q8_k_x8_rhs_src(rhs_q8.data(), rhs_rows, col_count),
-      .dst = make_batch_major_dst(prepared_out.data(), dtype::f32, rhs_rows, row_count),
+      .dst = make_batch_major_dst(prepared_out.data(), dtype::f32, rhs_rows,
+                                  row_count),
   };
   const auto lane0 =
       make_row_sliced_lane_event(full_ev, Q6_K_X8_ROWS, 0u, slice_rows);
-  const auto lane1 =
-      make_row_sliced_lane_event(full_ev, Q6_K_X8_ROWS, slice_rows, row_count - slice_rows);
+  const auto lane1 = make_row_sliced_lane_event(
+      full_ev, Q6_K_X8_ROWS, slice_rows, row_count - slice_rows);
 
-#if defined(__aarch64__) && defined(__ARM_NEON) && defined(__ARM_FEATURE_MATMUL_INT8)
+#if defined(__aarch64__) && defined(__ARM_NEON) &&                             \
+    defined(__ARM_FEATURE_MATMUL_INT8)
   CHECK(machine.process_event(lane0));
   CHECK(machine.process_event(lane1));
   for (size_t idx = 0; idx < prepared_out.size(); ++idx) {
-    CHECK(prepared_out[idx] == doctest::Approx(reference[idx]).epsilon(1.0e-5f));
+    CHECK(prepared_out[idx] ==
+          doctest::Approx(reference[idx]).epsilon(1.0e-5f));
   }
-  CHECK(machine.optimized_q6_vector_prepared_q8_rhs_i8mm_dispatch_count() == 2u);
+  CHECK(machine.optimized_q6_vector_prepared_q8_rhs_i8mm_dispatch_count() ==
+        2u);
 #else
   CHECK_FALSE(machine.process_event(lane0));
   CHECK_FALSE(machine.process_event(lane1));
 #endif
 }
 
-TEST_CASE("kernel_aarch64_q8_0_packed_bl8_matrix_x4_row_sliced_lane_views_are_supported") {
+TEST_CASE("kernel_aarch64_q8_0_packed_bl8_matrix_x4_row_sliced_lane_views_are_"
+          "supported") {
+  using emel::kernel::detail::quant::block_q8_0;
   using emel::kernel::detail::quant::Q8_0_X4_ROWS;
   using emel::kernel::detail::quant::QK8_0;
-  using emel::kernel::detail::quant::block_q8_0;
 
   constexpr uint64_t row_count = 8u;
   constexpr uint64_t slice_rows = Q8_0_X4_ROWS;
@@ -4085,15 +4389,18 @@ TEST_CASE("kernel_aarch64_q8_0_packed_bl8_matrix_x4_row_sliced_lane_views_are_su
   constexpr uint64_t col_count = QK8_0 * 8u;
   constexpr uint64_t block_count = col_count / QK8_0;
 
-  std::vector<block_q8_0> native_rows(static_cast<size_t>(row_count * block_count));
+  std::vector<block_q8_0> native_rows(
+      static_cast<size_t>(row_count * block_count));
   for (size_t row = 0; row < static_cast<size_t>(row_count); ++row) {
     for (size_t block = 0; block < static_cast<size_t>(block_count); ++block) {
-      auto & cell = native_rows[row * static_cast<size_t>(block_count) + block];
+      auto &cell = native_rows[row * static_cast<size_t>(block_count) + block];
       cell.d = emel::kernel::detail::quant::fp32_to_fp16(
-          0.0078125f * static_cast<float>(((row + 3u) * (block + 5u)) % 23u + 1u));
+          0.0078125f *
+          static_cast<float>(((row + 3u) * (block + 5u)) % 23u + 1u));
       for (size_t idx = 0; idx < cell.qs.size(); ++idx) {
         const int32_t centered =
-            static_cast<int32_t>(((row + 7u) * 17u + (block + 11u) * 13u + idx * 5u) % 255u) -
+            static_cast<int32_t>(
+                ((row + 7u) * 17u + (block + 11u) * 13u + idx * 5u) % 255u) -
             127;
         cell.qs[idx] = static_cast<int8_t>(std::clamp(centered, -127, 127));
       }
@@ -4113,15 +4420,15 @@ TEST_CASE("kernel_aarch64_q8_0_packed_bl8_matrix_x4_row_sliced_lane_views_are_su
   std::vector<block_q8_0> rhs_q8(static_cast<size_t>(rhs_rows * block_count));
   for (size_t row = 0; row < static_cast<size_t>(rhs_rows); ++row) {
     emel::kernel::detail::quant::quantize_row_q8_0_strided(
-        rhs_dense.data() + row * static_cast<size_t>(col_count),
-        1u,
+        rhs_dense.data() + row * static_cast<size_t>(col_count), 1u,
         rhs_q8.data() + row * static_cast<size_t>(block_count),
         static_cast<int64_t>(col_count));
   }
 
   std::vector<float> reference(static_cast<size_t>(rhs_rows * row_count), 0.0f);
   for (size_t rhs_row = 0; rhs_row < static_cast<size_t>(rhs_rows); ++rhs_row) {
-    for (size_t lhs_row = 0; lhs_row < static_cast<size_t>(row_count); ++lhs_row) {
+    for (size_t lhs_row = 0; lhs_row < static_cast<size_t>(row_count);
+         ++lhs_row) {
       reference[rhs_row * static_cast<size_t>(row_count) + lhs_row] =
           emel::kernel::detail::dot_q8_0_q8_0_row_scalar(
               native_rows.data() + lhs_row * static_cast<size_t>(block_count),
@@ -4132,7 +4439,8 @@ TEST_CASE("kernel_aarch64_q8_0_packed_bl8_matrix_x4_row_sliced_lane_views_are_su
 
   std::vector<uint8_t> packed_bl8(
       sizeof(emel::kernel::detail::quant::block_q8_0x4) *
-      emel::kernel::detail::quant::packed_q8_0_x4_group_count(row_count) * block_count);
+      emel::kernel::detail::quant::packed_q8_0_x4_group_count(row_count) *
+      block_count);
   std::vector<uint8_t> rhs_packed_bl8(
       sizeof(emel::kernel::detail::quant::block_q8_0x4) * block_count);
   REQUIRE(emel::kernel::detail::quant::pack_q8_0_rows_x4_bl8(
@@ -4140,20 +4448,25 @@ TEST_CASE("kernel_aarch64_q8_0_packed_bl8_matrix_x4_row_sliced_lane_views_are_su
   REQUIRE(emel::kernel::detail::quant::pack_q8_0_rows_x4_bl8(
       rhs_q8.data(), rhs_rows, col_count, rhs_packed_bl8.data()));
 
-  std::vector<float> packed_out(static_cast<size_t>(rhs_rows * row_count), 0.0f);
+  std::vector<float> packed_out(static_cast<size_t>(rhs_rows * row_count),
+                                0.0f);
   aarch64_sm machine{};
 
   const emel::kernel::event::op_mul_mat full_ev{
-      .src0 = make_packed_q8_0_x4_bl8_src(packed_bl8.data(), col_count, row_count),
-      .src1 = make_packed_q8_0_x4_bl8_rhs_src(rhs_packed_bl8.data(), rhs_rows, col_count),
-      .dst = make_batch_major_dst(packed_out.data(), dtype::f32, rhs_rows, row_count),
+      .src0 =
+          make_packed_q8_0_x4_bl8_src(packed_bl8.data(), col_count, row_count),
+      .src1 = make_packed_q8_0_x4_bl8_rhs_src(rhs_packed_bl8.data(), rhs_rows,
+                                              col_count),
+      .dst = make_batch_major_dst(packed_out.data(), dtype::f32, rhs_rows,
+                                  row_count),
   };
   const auto lane0 =
       make_row_sliced_lane_event(full_ev, Q8_0_X4_ROWS, 0u, slice_rows);
-  const auto lane1 =
-      make_row_sliced_lane_event(full_ev, Q8_0_X4_ROWS, slice_rows, row_count - slice_rows);
+  const auto lane1 = make_row_sliced_lane_event(
+      full_ev, Q8_0_X4_ROWS, slice_rows, row_count - slice_rows);
 
-#if defined(__aarch64__) && defined(__ARM_NEON) && defined(__ARM_FEATURE_MATMUL_INT8)
+#if defined(__aarch64__) && defined(__ARM_NEON) &&                             \
+    defined(__ARM_FEATURE_MATMUL_INT8)
   CHECK(machine.process_event(lane0));
   CHECK(machine.process_event(lane1));
   for (size_t idx = 0; idx < packed_out.size(); ++idx) {
@@ -4166,12 +4479,13 @@ TEST_CASE("kernel_aarch64_q8_0_packed_bl8_matrix_x4_row_sliced_lane_views_are_su
 #endif
 }
 
-TEST_CASE("kernel_aarch64_q4_k_packed_bl8_matrix_x4_row_sliced_lane_views_are_supported") {
+TEST_CASE("kernel_aarch64_q4_k_packed_bl8_matrix_x4_row_sliced_lane_views_are_"
+          "supported") {
+  using emel::kernel::detail::quant::block_q4_k;
+  using emel::kernel::detail::quant::block_q8_k;
   using emel::kernel::detail::quant::Q4_K_X8_ROWS;
   using emel::kernel::detail::quant::Q8_0_X4_ROWS;
   using emel::kernel::detail::quant::QK_K;
-  using emel::kernel::detail::quant::block_q4_k;
-  using emel::kernel::detail::quant::block_q8_k;
 
   constexpr uint64_t row_count = 16u;
   constexpr uint64_t slice_rows = Q4_K_X8_ROWS;
@@ -4179,13 +4493,15 @@ TEST_CASE("kernel_aarch64_q4_k_packed_bl8_matrix_x4_row_sliced_lane_views_are_su
   constexpr uint64_t col_count = QK_K;
   constexpr uint64_t block_count = col_count / QK_K;
 
-  std::vector<block_q4_k> native_rows(static_cast<size_t>(row_count * block_count));
+  std::vector<block_q4_k> native_rows(
+      static_cast<size_t>(row_count * block_count));
   for (size_t row = 0; row < static_cast<size_t>(row_count); ++row) {
-    auto & q4 = native_rows[row];
+    auto &q4 = native_rows[row];
     q4.d = 0x3c00u;
     q4.dmin = static_cast<uint16_t>(0x3800u + row * 0x0040u);
     for (size_t idx = 0; idx < q4.scales.size(); ++idx) {
-      q4.scales[idx] = static_cast<uint8_t>((idx * (11u + row)) ^ (0x5au + row));
+      q4.scales[idx] =
+          static_cast<uint8_t>((idx * (11u + row)) ^ (0x5au + row));
     }
     for (size_t idx = 0; idx < q4.qs.size(); ++idx) {
       q4.qs[idx] = static_cast<uint8_t>((idx * (9u + row)) ^ (0x96u - row));
@@ -4205,15 +4521,15 @@ TEST_CASE("kernel_aarch64_q4_k_packed_bl8_matrix_x4_row_sliced_lane_views_are_su
   std::vector<block_q8_k> rhs_q8(static_cast<size_t>(rhs_rows * block_count));
   for (size_t row = 0; row < static_cast<size_t>(rhs_rows); ++row) {
     emel::kernel::detail::quant::quantize_row_q8_k_strided(
-        rhs_dense.data() + row * static_cast<size_t>(col_count),
-        1u,
+        rhs_dense.data() + row * static_cast<size_t>(col_count), 1u,
         rhs_q8.data() + row * static_cast<size_t>(block_count),
         static_cast<int64_t>(col_count));
   }
 
   std::vector<float> reference(static_cast<size_t>(rhs_rows * row_count), 0.0f);
   for (size_t rhs_row = 0; rhs_row < static_cast<size_t>(rhs_rows); ++rhs_row) {
-    for (size_t lhs_row = 0; lhs_row < static_cast<size_t>(row_count); ++lhs_row) {
+    for (size_t lhs_row = 0; lhs_row < static_cast<size_t>(row_count);
+         ++lhs_row) {
       reference[rhs_row * static_cast<size_t>(row_count) + lhs_row] =
           emel::kernel::detail::dot_q4_k_q8_k_row_scalar(
               native_rows.data() + lhs_row * static_cast<size_t>(block_count),
@@ -4224,24 +4540,29 @@ TEST_CASE("kernel_aarch64_q4_k_packed_bl8_matrix_x4_row_sliced_lane_views_are_su
 
   std::vector<uint8_t> packed_bl8(
       sizeof(emel::kernel::detail::quant::block_q4_kx8) *
-      emel::kernel::detail::quant::packed_q4_k_x8_group_count(row_count) * block_count);
+      emel::kernel::detail::quant::packed_q4_k_x8_group_count(row_count) *
+      block_count);
   REQUIRE(emel::kernel::detail::quant::pack_q4_k_rows_x8_bl8(
       native_rows.data(), row_count, col_count, packed_bl8.data()));
 
-  std::vector<float> packed_out(static_cast<size_t>(rhs_rows * row_count), 0.0f);
+  std::vector<float> packed_out(static_cast<size_t>(rhs_rows * row_count),
+                                0.0f);
   aarch64_sm machine{};
 
   const emel::kernel::event::op_mul_mat full_ev{
-      .src0 = make_packed_q4_k_x8_bl8_src(packed_bl8.data(), col_count, row_count),
+      .src0 =
+          make_packed_q4_k_x8_bl8_src(packed_bl8.data(), col_count, row_count),
       .src1 = make_q8_k_x4_rhs_src(rhs_q8.data(), rhs_rows, col_count),
-      .dst = make_batch_major_dst(packed_out.data(), dtype::f32, rhs_rows, row_count),
+      .dst = make_batch_major_dst(packed_out.data(), dtype::f32, rhs_rows,
+                                  row_count),
   };
   const auto lane0 =
       make_row_sliced_lane_event(full_ev, Q4_K_X8_ROWS, 0u, slice_rows);
-  const auto lane1 =
-      make_row_sliced_lane_event(full_ev, Q4_K_X8_ROWS, slice_rows, row_count - slice_rows);
+  const auto lane1 = make_row_sliced_lane_event(
+      full_ev, Q4_K_X8_ROWS, slice_rows, row_count - slice_rows);
 
-#if defined(__aarch64__) && defined(__ARM_NEON) && defined(__ARM_FEATURE_DOTPROD)
+#if defined(__aarch64__) && defined(__ARM_NEON) &&                             \
+    defined(__ARM_FEATURE_DOTPROD)
   CHECK(machine.process_event(lane0));
   CHECK(machine.process_event(lane1));
   for (size_t idx = 0; idx < packed_out.size(); ++idx) {
@@ -4254,13 +4575,13 @@ TEST_CASE("kernel_aarch64_q4_k_packed_bl8_matrix_x4_row_sliced_lane_views_are_su
 #endif
 }
 
-TEST_CASE(
-    "kernel_aarch64_q6_k_prepared_q8_rhs_i8mm_matrix_x4_row_sliced_lane_views_are_supported") {
+TEST_CASE("kernel_aarch64_q6_k_prepared_q8_rhs_i8mm_matrix_x4_row_sliced_lane_"
+          "views_are_supported") {
+  using emel::kernel::detail::quant::block_q6_k;
+  using emel::kernel::detail::quant::block_q8_k;
   using emel::kernel::detail::quant::Q6_K_X8_ROWS;
   using emel::kernel::detail::quant::Q8_0_X4_ROWS;
   using emel::kernel::detail::quant::QK_K;
-  using emel::kernel::detail::quant::block_q6_k;
-  using emel::kernel::detail::quant::block_q8_k;
 
   constexpr uint64_t row_count = 16u;
   constexpr uint64_t slice_rows = Q6_K_X8_ROWS;
@@ -4268,12 +4589,14 @@ TEST_CASE(
   constexpr uint64_t col_count = QK_K;
   constexpr uint64_t block_count = col_count / QK_K;
 
-  std::vector<block_q6_k> native_rows(static_cast<size_t>(row_count * block_count));
+  std::vector<block_q6_k> native_rows(
+      static_cast<size_t>(row_count * block_count));
   for (size_t row = 0; row < static_cast<size_t>(row_count); ++row) {
-    auto & q6 = native_rows[row];
+    auto &q6 = native_rows[row];
     q6.d = 0x3c00u;
     for (size_t idx = 0; idx < q6.scales.size(); ++idx) {
-      const int32_t scale_value = static_cast<int32_t>((idx + row * 5u) % 15u) - 7;
+      const int32_t scale_value =
+          static_cast<int32_t>((idx + row * 5u) % 15u) - 7;
       q6.scales[idx] = static_cast<int8_t>(scale_value);
     }
     for (size_t idx = 0; idx < q6.ql.size(); ++idx) {
@@ -4297,15 +4620,15 @@ TEST_CASE(
   std::vector<block_q8_k> rhs_q8(static_cast<size_t>(rhs_rows * block_count));
   for (size_t row = 0; row < static_cast<size_t>(rhs_rows); ++row) {
     emel::kernel::detail::quant::quantize_row_q8_k_strided(
-        rhs_dense.data() + row * static_cast<size_t>(col_count),
-        1u,
+        rhs_dense.data() + row * static_cast<size_t>(col_count), 1u,
         rhs_q8.data() + row * static_cast<size_t>(block_count),
         static_cast<int64_t>(col_count));
   }
 
   std::vector<float> reference(static_cast<size_t>(rhs_rows * row_count), 0.0f);
   for (size_t rhs_row = 0; rhs_row < static_cast<size_t>(rhs_rows); ++rhs_row) {
-    for (size_t lhs_row = 0; lhs_row < static_cast<size_t>(row_count); ++lhs_row) {
+    for (size_t lhs_row = 0; lhs_row < static_cast<size_t>(row_count);
+         ++lhs_row) {
       reference[rhs_row * static_cast<size_t>(row_count) + lhs_row] =
           emel::kernel::detail::dot_q6_k_q8_k_row_scalar(
               native_rows.data() + lhs_row * static_cast<size_t>(block_count),
@@ -4315,31 +4638,38 @@ TEST_CASE(
   }
 
   std::vector<uint8_t> prepared_storage(
-      emel::kernel::detail::quant::prepared_q6_k_x8_q8_group_storage_bytes(col_count) *
+      emel::kernel::detail::quant::prepared_q6_k_x8_q8_group_storage_bytes(
+          col_count) *
       emel::kernel::detail::quant::packed_q6_k_x8_group_count(row_count));
   REQUIRE(emel::kernel::detail::quant::pack_q6_k_rows_x8_q8_prepared(
       native_rows.data(), row_count, col_count, prepared_storage.data()));
 
-  std::vector<float> prepared_out(static_cast<size_t>(rhs_rows * row_count), 0.0f);
+  std::vector<float> prepared_out(static_cast<size_t>(rhs_rows * row_count),
+                                  0.0f);
   aarch64_sm machine{};
 
   const emel::kernel::event::op_mul_mat full_ev{
-      .src0 = make_prepared_q6_k_x8_q8_src(prepared_storage.data(), col_count, row_count),
+      .src0 = make_prepared_q6_k_x8_q8_src(prepared_storage.data(), col_count,
+                                           row_count),
       .src1 = make_q8_k_x4_rhs_src(rhs_q8.data(), rhs_rows, col_count),
-      .dst = make_batch_major_dst(prepared_out.data(), dtype::f32, rhs_rows, row_count),
+      .dst = make_batch_major_dst(prepared_out.data(), dtype::f32, rhs_rows,
+                                  row_count),
   };
   const auto lane0 =
       make_row_sliced_lane_event(full_ev, Q6_K_X8_ROWS, 0u, slice_rows);
-  const auto lane1 =
-      make_row_sliced_lane_event(full_ev, Q6_K_X8_ROWS, slice_rows, row_count - slice_rows);
+  const auto lane1 = make_row_sliced_lane_event(
+      full_ev, Q6_K_X8_ROWS, slice_rows, row_count - slice_rows);
 
-#if defined(__aarch64__) && defined(__ARM_NEON) && defined(__ARM_FEATURE_MATMUL_INT8)
+#if defined(__aarch64__) && defined(__ARM_NEON) &&                             \
+    defined(__ARM_FEATURE_MATMUL_INT8)
   CHECK(machine.process_event(lane0));
   CHECK(machine.process_event(lane1));
   for (size_t idx = 0; idx < prepared_out.size(); ++idx) {
-    CHECK(prepared_out[idx] == doctest::Approx(reference[idx]).epsilon(1.0e-5f));
+    CHECK(prepared_out[idx] ==
+          doctest::Approx(reference[idx]).epsilon(1.0e-5f));
   }
-  CHECK(machine.optimized_q6_vector_prepared_q8_rhs_i8mm_dispatch_count() == 2u);
+  CHECK(machine.optimized_q6_vector_prepared_q8_rhs_i8mm_dispatch_count() ==
+        2u);
 #else
   CHECK_FALSE(machine.process_event(lane0));
   CHECK_FALSE(machine.process_event(lane1));
@@ -4610,8 +4940,8 @@ TEST_CASE("kernel_aarch64_detail_branch_paths") {
 
   using emel::kernel::detail::quant::block_q4_k;
   using emel::kernel::detail::quant::block_q6_k;
-  using emel::kernel::detail::quant::block_q8_k;
   using emel::kernel::detail::quant::block_q8_0;
+  using emel::kernel::detail::quant::block_q8_k;
   using emel::kernel::detail::quant::QK8_0;
   std::array<block_q4_k, 1> q4_k_rows = {};
   std::array<block_q6_k, 1> q6_k_rows = {};
@@ -4772,25 +5102,28 @@ TEST_CASE("kernel_aarch64_detail_branch_paths") {
       .src1 = make_src(lhs, dtype::f32, 1u, 4u),
       .dst = make_dst(vector_out.data(), dtype::f32, 1u, 1u),
   };
-  CHECK(emel::kernel::aarch64::detail::
-            can_run_neon_mul_mat_f32_vector_request(f32_ev));
+  CHECK(emel::kernel::aarch64::detail::can_run_neon_mul_mat_f32_vector_request(
+      f32_ev));
   {
     auto bad = f32_ev;
     bad.src1.ne[0] = 2u;
-    CHECK_FALSE(emel::kernel::aarch64::detail::
-                    can_run_neon_mul_mat_f32_vector_request(bad));
+    CHECK_FALSE(
+        emel::kernel::aarch64::detail::can_run_neon_mul_mat_f32_vector_request(
+            bad));
   }
   {
     auto bad = f32_ev;
     bad.src0.nb[1] = bad.src0.nb[1] + sizeof(float);
-    CHECK_FALSE(emel::kernel::aarch64::detail::
-                    can_run_neon_mul_mat_f32_vector_request(bad));
+    CHECK_FALSE(
+        emel::kernel::aarch64::detail::can_run_neon_mul_mat_f32_vector_request(
+            bad));
   }
   const auto reject_f32 = [&](const auto mutate) {
     auto bad = f32_ev;
     mutate(bad);
-    CHECK_FALSE(emel::kernel::aarch64::detail::
-                    can_run_neon_mul_mat_f32_vector_request(bad));
+    CHECK_FALSE(
+        emel::kernel::aarch64::detail::can_run_neon_mul_mat_f32_vector_request(
+            bad));
   };
   reject_f32([](auto &bad) { bad.src0.ne[0] = 0u; });
   reject_f32([](auto &bad) { bad.src0.ne[1] = 0u; });
@@ -4807,8 +5140,10 @@ TEST_CASE("kernel_aarch64_detail_branch_paths") {
   reject_f32([](auto &bad) { bad.src1.type = dtype::q4_k; });
   reject_f32([](auto &bad) { bad.dst.type = dtype::q4_k; });
   reject_f32([](auto &bad) { bad.src0.nb[0] = sizeof(float) * 2u; });
-  reject_f32([](auto &bad) { bad.src0.nb[2] = bad.src0.nb[2] + sizeof(float); });
-  reject_f32([](auto &bad) { bad.src0.nb[3] = bad.src0.nb[3] + sizeof(float); });
+  reject_f32(
+      [](auto &bad) { bad.src0.nb[2] = bad.src0.nb[2] + sizeof(float); });
+  reject_f32(
+      [](auto &bad) { bad.src0.nb[3] = bad.src0.nb[3] + sizeof(float); });
 
   emel::kernel::event::op_unary unary_ev{
       .src0 = make_src(lhs, dtype::f32, 4),
@@ -4816,9 +5151,11 @@ TEST_CASE("kernel_aarch64_detail_branch_paths") {
       .subop = emel::kernel::event::unary_subop::relu,
   };
 #if defined(__aarch64__) || defined(__ARM_NEON)
-  CHECK(emel::kernel::aarch64::detail::can_use_neon(unary_ev, true));
+  CHECK(emel::kernel::aarch64::guard::detail::can_use_neon_unary_f32(unary_ev,
+                                                                     true));
 #else
-  CHECK_FALSE(emel::kernel::aarch64::detail::can_use_neon(unary_ev, true));
+  CHECK_FALSE(emel::kernel::aarch64::guard::detail::can_use_neon_unary_f32(
+      unary_ev, true));
 #endif
   unary_ev.subop = emel::kernel::event::unary_subop::exp;
   CHECK_FALSE(emel::kernel::aarch64::detail::can_use_neon(unary_ev, true));
@@ -4865,8 +5202,8 @@ TEST_CASE("kernel_aarch64_q4_k_vector_q8_rhs_tail_rows_match_scalar") {
 
   std::array<float, row_count> out = {};
   const emel::kernel::event::op_mul_mat ev{
-      .src0 = make_quantized_src(native_rows.data(), dtype::q4_k, QK_K,
-                                 row_count),
+      .src0 =
+          make_quantized_src(native_rows.data(), dtype::q4_k, QK_K, row_count),
       .src1 = make_q8_k_vector_src(rhs_q8.data(), QK_K),
       .dst = make_dst(out.data(), dtype::f32, 1u, row_count),
   };
@@ -4958,7 +5295,8 @@ TEST_CASE("kernel_aarch64_detail_helper_edge_paths") {
   CHECK(emel::kernel::aarch64::detail::execute_neon_sqr(sqr_ev));
   CHECK(emel::kernel::aarch64::detail::execute_neon_sqrt(sqrt_ev));
   CHECK(emel::kernel::aarch64::detail::execute_neon_mul_mat(mul_mat_ev));
-  CHECK(emel::kernel::aarch64::detail::execute_neon_unary(unary_ev));
+  emel::kernel::aarch64::detail::execute_simd_unary_subop_unchecked<
+      emel::kernel::event::unary_subop::relu>(unary_ev);
 #else
   CHECK_FALSE(emel::kernel::aarch64::detail::execute_neon_dup(dup_ev));
   CHECK_FALSE(emel::kernel::aarch64::detail::execute_neon_add(add_ev));
@@ -4968,7 +5306,6 @@ TEST_CASE("kernel_aarch64_detail_helper_edge_paths") {
   CHECK_FALSE(emel::kernel::aarch64::detail::execute_neon_sqr(sqr_ev));
   CHECK_FALSE(emel::kernel::aarch64::detail::execute_neon_sqrt(sqrt_ev));
   CHECK_FALSE(emel::kernel::aarch64::detail::execute_neon_mul_mat(mul_mat_ev));
-  CHECK_FALSE(emel::kernel::aarch64::detail::execute_neon_unary(unary_ev));
 #endif
 
   const bool simd_dup = emel::kernel::aarch64::detail::execute_simd(dup_ev);
@@ -4980,7 +5317,6 @@ TEST_CASE("kernel_aarch64_detail_helper_edge_paths") {
   const bool simd_sqrt = emel::kernel::aarch64::detail::execute_simd(sqrt_ev);
   const bool simd_mul_mat =
       emel::kernel::aarch64::detail::execute_simd(mul_mat_ev);
-  const bool simd_unary = emel::kernel::aarch64::detail::execute_simd(unary_ev);
   (void)simd_dup;
   (void)simd_add;
   (void)simd_sub;
@@ -4989,7 +5325,6 @@ TEST_CASE("kernel_aarch64_detail_helper_edge_paths") {
   (void)simd_sqr;
   (void)simd_sqrt;
   (void)simd_mul_mat;
-  (void)simd_unary;
 
 #if defined(__aarch64__) || defined(__ARM_NEON)
   CHECK(simd_dup);
@@ -5000,7 +5335,6 @@ TEST_CASE("kernel_aarch64_detail_helper_edge_paths") {
   CHECK(simd_sqr);
   CHECK(simd_sqrt);
   CHECK(simd_mul_mat);
-  CHECK(simd_unary);
 #else
   CHECK_FALSE(simd_dup);
   CHECK_FALSE(simd_add);
@@ -5010,7 +5344,6 @@ TEST_CASE("kernel_aarch64_detail_helper_edge_paths") {
   CHECK_FALSE(simd_sqr);
   CHECK_FALSE(simd_sqrt);
   CHECK_FALSE(simd_mul_mat);
-  CHECK_FALSE(simd_unary);
 #endif
 
   unary_ev.subop = emel::kernel::event::unary_subop::exp;
@@ -5089,6 +5422,54 @@ TEST_CASE("kernel_aarch64_unary_subop_scalar_paths") {
   CHECK_FALSE(scalar_machine.process_event(unary_ev));
 }
 
+TEST_CASE("kernel_aarch64_neon_silu_matches_moshi_reference_activation") {
+#if !(defined(__aarch64__) || defined(__ARM_NEON))
+  return;
+#else
+  const float src[5] = {
+      std::bit_cast<float>(0x3a9dd9b3u),
+      std::bit_cast<float>(0xbef68af7u),
+      std::bit_cast<float>(0xbdc5f39au),
+      std::bit_cast<float>(0xbf218bc1u),
+      0.5f,
+  };
+  float dst[5] = {};
+  const emel::kernel::event::op_unary unary_ev{
+      .src0 = make_src(src, dtype::f32, 5),
+      .dst = make_dst(dst, dtype::f32, 5),
+      .subop = emel::kernel::event::unary_subop::silu,
+  };
+  aarch64_sm machine{emel::kernel::aarch64::action::context{true, {}, 0}};
+
+  REQUIRE(machine.process_event(unary_ev));
+  CHECK(std::bit_cast<uint32_t>(dst[0]) == 0x3a1df208u);
+  CHECK(std::bit_cast<uint32_t>(dst[1]) == 0xbe3c4e19u);
+  CHECK(std::bit_cast<uint32_t>(dst[2]) == 0xbd3c6475u);
+  CHECK(std::bit_cast<uint32_t>(dst[3]) == 0xbe606749u);
+  CHECK(dst[4] == doctest::Approx(0.5f / (1.0f + std::exp(-0.5f))));
+#endif
+}
+
+TEST_CASE("kernel_aarch64_simd_guards_reject_invalid_unary_and_argmax") {
+  const emel::kernel::event::op_unary invalid_unary{};
+  const emel::kernel::event::op_mul_mat_argmax invalid_argmax{};
+  emel::kernel::aarch64::event::dispatch_ctx dispatch_context{};
+  const emel::kernel::aarch64::event::dispatch_op_unary unary_dispatch{
+      invalid_unary, dispatch_context};
+  const emel::kernel::aarch64::event::dispatch_op_mul_mat_argmax
+      argmax_dispatch{invalid_argmax, dispatch_context};
+  const emel::kernel::aarch64::action::context guard_context{true, {}, 0};
+
+  CHECK_FALSE(emel::kernel::aarch64::guard::simd_op_unary_f32{}(unary_dispatch,
+                                                                guard_context));
+  CHECK_FALSE(emel::kernel::aarch64::guard::
+                  simd_op_mul_mat_argmax_q6_vector_packed_q8_rhs{}(
+                      argmax_dispatch, guard_context));
+  CHECK_FALSE(emel::kernel::aarch64::guard::
+                  simd_op_mul_mat_argmax_q4_vector_packed_f32_rhs_bl4{}(
+                      argmax_dispatch, guard_context));
+}
+
 TEST_CASE("kernel_aarch64_flash_attn_ext_reuses_persistent_workspace") {
 #if !(defined(__aarch64__) || defined(__ARM_NEON))
   return;
@@ -5163,7 +5544,6 @@ TEST_CASE("kernel_aarch64_flash_attn_ext_uses_optimized_backend_path") {
   CHECK(within_flash_online_f16_tolerance(fixture.dst[3], expected[3]));
 #endif
 }
-
 
 TEST_CASE(
     "kernel_aarch64_flash_attn_ext_matches_shared_workspace_on_long_kv_spans") {

@@ -154,9 +154,9 @@ struct transformer_weights {
 };
 
 // One RVQ split (rvq_first carries the semantic level, rvq_rest the acoustic
-// levels). Codebook search operands are prepared at bind time: the argmax
-// score for level codebooks is x . c - |c|^2 / 2, so the prepared table
-// appends the bias column and the input vector a trailing 1.
+// levels). Codebook rows stay in reference layout; encode scans them with the
+// reference squared-distance arithmetic so near-tie argmax behavior does not
+// drift from ggml.
 struct rvq_split_weights {
   const float *input_proj = nullptr;  // [dim, codebook_dim] (conv1x1)
   const float *output_proj = nullptr; // [codebook_dim, dim]
@@ -166,9 +166,7 @@ struct rvq_split_weights {
   // raw q8_0 row blocks when the model carries quantized projections
   const uint8_t *input_proj_q8 = nullptr;
   const uint8_t *output_proj_q8 = nullptr;
-  // per level: prepared search table [codebook_dim + 1, entries] and raw
-  // codebook rows [codebook_dim, entries]
-  std::array<const float *, k_max_quantizer_levels> search_tables = {};
+  // per level: raw codebook rows [codebook_dim, entries]
   std::array<const float *, k_max_quantizer_levels> codebooks = {};
   int32_t level_count = 0;
 };
@@ -258,8 +256,8 @@ uint64_t required_frame_floats(const emel::model::data &model_data) noexcept;
 bool validate_codec_contract(const emel::model::data &model_data) noexcept;
 
 // Pure per-request validator for decode codes: every code addresses a valid
-// codebook entry. Bounded scan over n_q codes; guards route on this before
-// the decode action runs.
+// codebook entry, and the request carries a valid codebook prefix. Bounded
+// scan; guards route on this before the decode action runs.
 bool validate_codes_in_range(const codec_runtime &runtime,
                              std::span<const int32_t> codes) noexcept;
 
@@ -328,7 +326,7 @@ void compute_rvq_encode(codec_runtime &runtime, const frame_buffer &latent,
                         std::span<int32_t> codes_out,
                         std::span<float> workspace) noexcept;
 
-// codes [n_q, frames] -> latent [dim, frames]
+// codes [active_n_q, frames] -> latent [dim, frames]
 template <bool conv_f16, bool proj_q8 = false>
 void compute_rvq_decode(codec_runtime &runtime, std::span<const int32_t> codes,
                         int32_t frames, frame_buffer &latent_out,

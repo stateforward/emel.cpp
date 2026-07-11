@@ -382,6 +382,10 @@ constexpr std::array k_records{
                       "emel_lane_converter"},
     dependency_record{"speech_codec_mimi",
                       kind::config,
+                      "tools/bench/personaplex-inference.json",
+                      "inference_contract"},
+    dependency_record{"speech_codec_mimi",
+                      kind::config,
                       "tools/bench/moshi_reference_ref.txt",
                       "reference_pin"},
     dependency_record{"speech_codec_mimi",
@@ -398,6 +402,10 @@ constexpr std::array k_records{
                       "suite_source"},
     dependency_record{"speech_lm_moshi",
                       kind::source,
+                      "tools/bench/speech/personaplex_emel_runner.cpp",
+                      "e2e_emel_lane_runner"},
+    dependency_record{"speech_lm_moshi",
+                      kind::source,
                       "src/emel/model/moshi",
                       "model_binding"},
     dependency_record{"speech_lm_moshi",
@@ -412,6 +420,10 @@ constexpr std::array k_records{
                       kind::script,
                       "tools/bench/moshi_gguf_convert.py",
                       "emel_lane_converter"},
+    dependency_record{"speech_lm_moshi",
+                      kind::config,
+                      "tools/bench/personaplex-inference.json",
+                      "inference_contract"},
     // MLX-only inputs map to the MLX suite: quality_gates.sh runs the
     // personaplex-mlx compare lane only for speech_codec_mimi_mlx, so routing
     // these through the generic mimi suite would gate MLX regressions with

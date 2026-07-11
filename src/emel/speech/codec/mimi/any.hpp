@@ -7,8 +7,6 @@
 
 namespace emel::speech::codec::mimi {
 
-using MimiCodec = sm;
-
 // Public arena-sizing contract for event::initialize: the caller owns the
 // four arenas, sizes them here before dispatching initialize, and keeps them
 // alive for the codec's lifetime (the machine never allocates). A result of

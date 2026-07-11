@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# shellcheck source=scripts/build_jobs.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/build_jobs.sh"
+
 for tool in cmake ninja clang clang++; do
   if ! command -v "$tool" >/dev/null 2>&1; then
     echo "error: required tool missing: $tool" >&2
@@ -48,10 +51,24 @@ else
 fi
 fuzz_cxx_flags=""
 fuzz_link_flags=""
+fuzz_platform_flags=()
 fuzz_root="$(cd "$(dirname "$fuzz_cc")/.." && pwd)"
 if [[ -d "$fuzz_root/lib/c++" ]]; then
   fuzz_cxx_flags="-stdlib=libc++ -I${fuzz_root}/include/c++/v1"
   fuzz_link_flags="-stdlib=libc++ -L${fuzz_root}/lib/c++ -Wl,-rpath,${fuzz_root}/lib/c++ -lc++ -lc++abi"
+fi
+
+if [[ "$(uname -s)" == "Darwin" ]]; then
+  if ! command -v xcrun >/dev/null 2>&1; then
+    echo "error: xcrun is required to locate the active macOS SDK" >&2
+    exit 1
+  fi
+  fuzz_macos_sysroot="$(xcrun --sdk macosx --show-sdk-path)"
+  if [[ ! -d "$fuzz_macos_sysroot" ]]; then
+    echo "error: active macOS SDK does not exist: $fuzz_macos_sysroot" >&2
+    exit 1
+  fi
+  fuzz_platform_flags+=("-DCMAKE_OSX_SYSROOT=$fuzz_macos_sysroot")
 fi
 if [[ "$fuzz_cc" == "clang" ]]; then
   if ! ls /opt/homebrew/opt/llvm/lib/clang/*/lib/darwin/libclang_rt.fuzzer_osx.a >/dev/null 2>&1 && \
@@ -71,10 +88,11 @@ cmake -S "$ROOT_DIR" -B "$BUILD_DIR" -G Ninja \
   -DCMAKE_CXX_COMPILER="$fuzz_cxx" \
   -DCMAKE_CXX_FLAGS="$fuzz_cxx_flags" \
   -DCMAKE_EXE_LINKER_FLAGS="$fuzz_link_flags" \
+  "${fuzz_platform_flags[@]}" \
   -DEMEL_ENABLE_FUZZ=ON \
   -DEMEL_ENABLE_TESTS=OFF
 
-cmake --build "$BUILD_DIR" --parallel
+cmake --build "$BUILD_DIR" --parallel "$EMEL_BUILD_JOBS"
 
 run_fuzzer() {
   local name="$1"

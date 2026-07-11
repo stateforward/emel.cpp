@@ -27,6 +27,8 @@ using emel::kernel::test::make_dst;
 using emel::kernel::test::make_flash_attn_ext_event;
 using emel::kernel::test::make_quantized_src;
 using emel::kernel::test::make_src;
+using emel::kernel::test::set_op_param_f32;
+using emel::kernel::test::set_op_param_i32;
 using emel::kernel::test::to_fp16_storage;
 using emel::kernel::test::within_flash_online_f16_tolerance;
 
@@ -1851,27 +1853,6 @@ TEST_CASE("kernel_x86_64_simd_action_exec_marks_done") {
   CHECK(dispatch_ctx.err == static_cast<int32_t>(emel::error::cast(
                                 emel::kernel::x86_64::error::none)));
 }
-
-namespace {
-
-template <class event_type>
-void set_op_param_i32(event_type &ev, const uint32_t slot,
-                      const int32_t value) {
-  std::memcpy(ev.op_params.data() + slot * sizeof(int32_t), &value,
-              sizeof(value));
-  ev.op_params_size =
-      std::max<uint32_t>(ev.op_params_size, (slot + 1u) * sizeof(int32_t));
-}
-
-template <class event_type>
-void set_op_param_f32(event_type &ev, const uint32_t slot, const float value) {
-  std::memcpy(ev.op_params.data() + slot * sizeof(float), &value,
-              sizeof(value));
-  ev.op_params_size =
-      std::max<uint32_t>(ev.op_params_size, (slot + 1u) * sizeof(float));
-}
-
-} // namespace
 
 TEST_CASE("kernel_x86_64_get_rows_gathers_f32_and_q8_0_rows") {
   x86_64_sm machine{emel::kernel::x86_64::action::context{false, {}, 0}};

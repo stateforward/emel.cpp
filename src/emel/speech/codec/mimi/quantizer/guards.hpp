@@ -64,10 +64,13 @@ struct guard_decode_shape_valid {
   bool operator()(const event::decode_run &runtime_ev,
                   const action::context &) const noexcept {
     const auto &request = runtime_ev.request;
+    const size_t code_count = request.codes.size();
     return request.codes.data() != nullptr &&
            request.latent_out.data() != nullptr &&
            request.workspace.data() != nullptr &&
-           request.codes.size() >= static_cast<size_t>(request.runtime.n_q) &&
+           code_count >= static_cast<size_t>(
+                             request.runtime.quantizer.semantic.level_count) &&
+           code_count <= static_cast<size_t>(request.runtime.n_q) &&
            request.latent_out.size() >=
                static_cast<size_t>(request.runtime.dim) &&
            request.workspace.size() >=

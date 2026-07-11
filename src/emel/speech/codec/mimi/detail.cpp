@@ -427,16 +427,6 @@ bool dispatch_add(codec_runtime &runtime, const kev::tensor_view &lhs,
   return runtime.kernel.process_event(ev);
 }
 
-bool dispatch_sub(codec_runtime &runtime, const kev::tensor_view &lhs,
-                  const kev::tensor_view &rhs,
-                  const kev::tensor_view_mut &dst) noexcept {
-  kev::op_sub ev{};
-  ev.src0 = lhs;
-  ev.src1 = rhs;
-  ev.dst = dst;
-  return runtime.kernel.process_event(ev);
-}
-
 bool dispatch_mul_mat(codec_runtime &runtime, const kev::tensor_view &src0,
                       const kev::tensor_view &src1,
                       const kev::tensor_view_mut &dst) noexcept {
@@ -1197,15 +1187,13 @@ void compute_rvq_encode(codec_runtime &runtime, const frame_buffer &latent,
           static_cast<size_t>(n_q) * static_cast<size_t>(frames)) {
     return;
   }
-  const uint64_t need = 2u * static_cast<uint64_t>(codebook_dim) + 2u +
+  const uint64_t need = static_cast<uint64_t>(codebook_dim) +
                         (static_cast<uint64_t>(dim) + 1u) / 2u + 1u;
   if (workspace.size() < need) {
     return;
   }
-  float *residual = workspace.data(); // [codebook_dim + 1] with trailing 1
-  float *chosen = residual + codebook_dim + 1;
-  auto *staged_f16 =
-      reinterpret_cast<uint16_t *>(chosen + codebook_dim + 1); // [dim] halfs
+  float *residual = workspace.data(); // [codebook_dim]
+  auto *staged_f16 = reinterpret_cast<uint16_t *>(residual + codebook_dim);
 
   for (int64_t frame = 0; frame < frames; ++frame) {
     const float *x = latent.data + frame * dim;
@@ -1216,7 +1204,7 @@ void compute_rvq_encode(codec_runtime &runtime, const frame_buffer &latent,
       if (split->level_count <= 0) {
         continue;
       }
-      // project into codebook space; append the bias-fold constant
+      // project into codebook space
       bool projected_in = false;
       if constexpr (proj_q8) {
         projected_in = dispatch_q8_matvec(runtime, split->input_proj_q8, dim,
@@ -1243,43 +1231,39 @@ void compute_rvq_encode(codec_runtime &runtime, const frame_buffer &latent,
       if (!projected_in) {
         return;
       }
-      residual[codebook_dim] = 1.0f;
 
       for (int32_t level = 0; level < split->level_count; ++level) {
-        int32_t index = -1;
-        float score = 0.0f;
-        kev::op_mul_mat_argmax argmax_ev{};
-        argmax_ev.src0 =
-            make_view(split->search_tables[static_cast<size_t>(level)],
-                      static_cast<uint64_t>(codebook_dim) + 1u,
-                      static_cast<uint64_t>(entries));
-        argmax_ev.src1 =
-            make_view(residual, 1u, static_cast<uint64_t>(codebook_dim) + 1u);
-        argmax_ev.dst = make_view_mut(&score, 1u, 1u);
-        argmax_ev.index_out = &index;
-        if (!runtime.kernel.process_event(argmax_ev) || index < 0) {
+        const float *codebook = split->codebooks[static_cast<size_t>(level)];
+        if (codebook == nullptr || entries <= 0 || codebook_dim <= 0) {
           return;
+        }
+        int32_t index = 0;
+        float best_distance = 0.0f;
+        const float *first_entry = codebook;
+        for (int64_t c = 0; c < codebook_dim; ++c) {
+          const float diff = first_entry[c] - residual[c];
+          best_distance += diff * diff;
+        }
+        for (int64_t entry = 1; entry < entries; ++entry) {
+          const float *candidate = codebook + entry * codebook_dim;
+          float distance = 0.0f;
+          for (int64_t c = 0; c < codebook_dim; ++c) {
+            const float diff = candidate[c] - residual[c];
+            distance += diff * diff;
+          }
+          if (distance < best_distance) {
+            best_distance = distance;
+            index = static_cast<int32_t>(entry);
+          }
         }
         codes_out[static_cast<size_t>(code_row * frames + frame)] = index;
         ++code_row;
 
         if (level + 1 < split->level_count) {
-          kev::op_get_rows rows_ev{};
-          rows_ev.src0 = make_view(split->codebooks[static_cast<size_t>(level)],
-                                   static_cast<uint64_t>(codebook_dim),
-                                   static_cast<uint64_t>(entries));
-          rows_ev.src1 = make_view(reinterpret_cast<const float *>(&index), 1u);
-          rows_ev.src1.type = kev::dtype::i32;
-          rows_ev.dst =
-              make_view_mut(chosen, static_cast<uint64_t>(codebook_dim), 1u);
-          if (!runtime.kernel.process_event(rows_ev) ||
-              !dispatch_sub(
-                  runtime,
-                  make_view(residual, static_cast<uint64_t>(codebook_dim)),
-                  make_view(chosen, static_cast<uint64_t>(codebook_dim)),
-                  make_view_mut(residual,
-                                static_cast<uint64_t>(codebook_dim)))) {
-            return;
+          const float *chosen =
+              codebook + static_cast<int64_t>(index) * codebook_dim;
+          for (int64_t c = 0; c < codebook_dim; ++c) {
+            residual[c] -= chosen[c];
           }
         }
       }
@@ -1299,9 +1283,14 @@ void compute_rvq_decode(codec_runtime &runtime, std::span<const int32_t> codes,
   const int64_t dim = runtime.dim;
   const int64_t codebook_dim = quantizer.codebook_dim;
   const int64_t entries = quantizer.codebook_entries;
-  const int64_t n_q = runtime.n_q;
-  if (frames <= 0 ||
-      codes.size() < static_cast<size_t>(n_q) * static_cast<size_t>(frames)) {
+  const int64_t semantic_levels = quantizer.semantic.level_count;
+  if (frames <= 0 || codes.empty() ||
+      codes.size() % static_cast<size_t>(frames) != 0u) {
+    return;
+  }
+  const int64_t decode_n_q =
+      static_cast<int64_t>(codes.size() / static_cast<size_t>(frames));
+  if (decode_n_q < semantic_levels || decode_n_q > runtime.n_q) {
     return;
   }
   const uint64_t need = 2u * static_cast<uint64_t>(codebook_dim) +
@@ -1321,13 +1310,23 @@ void compute_rvq_decode(codec_runtime &runtime, std::span<const int32_t> codes,
     std::memset(out, 0, static_cast<size_t>(dim) * sizeof(float));
     const rvq_split_weights *splits[2] = {&quantizer.semantic,
                                           &quantizer.acoustic};
+    const int32_t split_levels[2] = {
+        static_cast<int32_t>(semantic_levels),
+        static_cast<int32_t>(decode_n_q - semantic_levels),
+    };
     int64_t code_row = 0;
-    for (const rvq_split_weights *split : splits) {
-      if (split->level_count <= 0) {
+    for (int32_t split_index = 0; split_index < 2; ++split_index) {
+      const rvq_split_weights *split = splits[static_cast<size_t>(split_index)];
+      const int32_t active_levels =
+          split_levels[static_cast<size_t>(split_index)];
+      if (active_levels <= 0) {
         continue;
       }
+      if (active_levels > split->level_count) {
+        return;
+      }
       std::memset(summed, 0, static_cast<size_t>(codebook_dim) * sizeof(float));
-      for (int32_t level = 0; level < split->level_count; ++level) {
+      for (int32_t level = 0; level < active_levels; ++level) {
         const int32_t index =
             codes[static_cast<size_t>(code_row * frames + frame)];
         ++code_row;
@@ -1385,7 +1384,7 @@ void compute_rvq_decode(codec_runtime &runtime, std::span<const int32_t> codes,
         return;
       }
     }
-    if (code_row != n_q) {
+    if (code_row != decode_n_q) {
       return;
     }
   }
@@ -2099,26 +2098,19 @@ bool bind_rvq_split(arena_cursor_t<dry_run> &cursor,
     }
     float *codebook = cursor.take(static_cast<uint64_t>(cb_dim) *
                                   static_cast<uint64_t>(entries));
-    float *table = cursor.take((static_cast<uint64_t>(cb_dim) + 1u) *
-                               static_cast<uint64_t>(entries));
-    if (codebook == nullptr || table == nullptr) {
+    if (codebook == nullptr) {
       return false;
     }
     if constexpr (!dry_run) {
       for (int64_t entry = 0; entry < entries; ++entry) {
-        float norm2 = 0.0f;
         for (int64_t component = 0; component < cb_dim; ++component) {
           const float value = source_value(
               *embedding, static_cast<uint64_t>(component + entry * cb_dim));
           codebook[component + entry * cb_dim] = value;
-          table[component + entry * (cb_dim + 1)] = value;
-          norm2 += value * value;
         }
-        table[cb_dim + entry * (cb_dim + 1)] = -0.5f * norm2;
       }
     }
     split_out.codebooks[static_cast<size_t>(level)] = codebook;
-    split_out.search_tables[static_cast<size_t>(level)] = table;
   }
   return true;
 }
@@ -2317,8 +2309,9 @@ bool validate_codec_contract(const emel::model::data &model_data) noexcept {
 bool validate_codes_in_range(const codec_runtime &runtime,
                              std::span<const int32_t> codes) noexcept {
   const int32_t entries = runtime.quantizer.codebook_entries;
-  const size_t count = static_cast<size_t>(runtime.n_q);
-  if (codes.size() < count) {
+  const size_t count = codes.size();
+  if (count == 0u || count > static_cast<size_t>(runtime.n_q) ||
+      count < static_cast<size_t>(runtime.quantizer.semantic.level_count)) {
     return false;
   }
   for (size_t index = 0; index < count; ++index) {

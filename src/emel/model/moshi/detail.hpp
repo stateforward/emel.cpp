@@ -1,5 +1,7 @@
 #pragma once
 
+#include <array>
+#include <cstddef>
 #include <cstdint>
 #include <string_view>
 
@@ -34,6 +36,33 @@ struct family_view {
   tensor_view first = {};
 };
 
+struct temporal_layer_contract {
+  tensor_view norm1 = {};
+  tensor_view split_input_projection = {};
+  tensor_view fused_input_projection = {};
+  tensor_view output_projection = {};
+  tensor_view norm2 = {};
+  tensor_view gating_input = {};
+  tensor_view gating_output = {};
+};
+
+struct depformer_codebook_layer_contract {
+  tensor_view split_input_projection = {};
+  tensor_view fused_input_projection = {};
+  tensor_view output_projection = {};
+  tensor_view gating_input = {};
+  tensor_view gating_output = {};
+};
+
+struct depformer_layer_contract {
+  tensor_view norm1 = {};
+  tensor_view norm2 = {};
+  std::array<depformer_codebook_layer_contract,
+             static_cast<std::size_t>(
+                 emel::model::data::moshi_lm_hparams::k_max_delays)>
+      codebooks = {};
+};
+
 struct lm_contract {
   family_view text_emb = {};
   family_view audio_emb = {};
@@ -45,6 +74,34 @@ struct lm_contract {
   family_view depformer = {};
   family_view depformer_text_emb = {};
   family_view depformer_emb = {};
+  tensor_view text_embedding = {};
+  tensor_view output_norm = {};
+  tensor_view text_output_projection = {};
+  tensor_view depformer_text_embedding = {};
+  std::array<tensor_view,
+             static_cast<std::size_t>(
+                 emel::model::data::moshi_lm_hparams::k_max_delays)>
+      audio_embeddings = {};
+  std::array<tensor_view,
+             static_cast<std::size_t>(
+                 emel::model::data::moshi_lm_hparams::k_max_delays)>
+      depformer_input_projections = {};
+  std::array<tensor_view,
+             static_cast<std::size_t>(
+                 emel::model::data::moshi_lm_hparams::k_max_delays)>
+      depformer_audio_embeddings = {};
+  std::array<tensor_view,
+             static_cast<std::size_t>(
+                 emel::model::data::moshi_lm_hparams::k_max_delays)>
+      depformer_output_projections = {};
+  std::array<temporal_layer_contract,
+             static_cast<std::size_t>(
+                 emel::model::data::moshi_lm_hparams::k_max_delays)>
+      temporal_layers = {};
+  std::array<depformer_layer_contract,
+             static_cast<std::size_t>(
+                 emel::model::data::moshi_lm_hparams::k_max_delays)>
+      depformer_layers = {};
 };
 
 struct mimi_contract {

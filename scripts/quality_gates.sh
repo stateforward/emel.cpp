@@ -16,6 +16,11 @@ QUALITY_GATES_BENCH_RUNS="${EMEL_QUALITY_GATES_BENCH_RUNS:-3}"
 QUALITY_GATES_BENCH_WARMUP_ITERS="${EMEL_QUALITY_GATES_BENCH_WARMUP_ITERS:-10}"
 QUALITY_GATES_BENCH_WARMUP_RUNS="${EMEL_QUALITY_GATES_BENCH_WARMUP_RUNS:-1}"
 QUALITY_GATES_BENCH_TOLERANCE="${EMEL_QUALITY_GATES_BENCH_TOLERANCE:-0.30}"
+QUALITY_GATES_PERSONAPLEX_FRAMES="${EMEL_QUALITY_GATES_PERSONAPLEX_FRAMES:-40}"
+MOSHI_REFERENCE_ARTIFACT_DIR="${EMEL_MOSHI_REFERENCE_ARTIFACT_DIR:-$ROOT_DIR/build/moshi_reference}"
+PERSONAPLEX_AUDIO_NAME="phase_moshi_440hz_24khz_mono.wav"
+DEFAULT_PERSONAPLEX_AUDIO="$MOSHI_REFERENCE_ARTIFACT_DIR/$PERSONAPLEX_AUDIO_NAME"
+QUALITY_GATES_PERSONAPLEX_AUDIO="${EMEL_QUALITY_GATES_PERSONAPLEX_AUDIO:-$DEFAULT_PERSONAPLEX_AUDIO}"
 QUALITY_GATES_GENERATION_BENCH_ITERS="${EMEL_QUALITY_GATES_GENERATION_BENCH_ITERS:-1}"
 QUALITY_GATES_GENERATION_BENCH_RUNS="${EMEL_QUALITY_GATES_GENERATION_BENCH_RUNS:-1}"
 QUALITY_GATES_GENERATION_BENCH_WARMUP_ITERS="${EMEL_QUALITY_GATES_GENERATION_BENCH_WARMUP_ITERS:-0}"
@@ -234,9 +239,6 @@ run_sml_surface_gate() {
 is_coverage_excluded_src_file() {
   local file="$1"
   case "$file" in
-    src/emel/generator/*.hpp|src/emel/generator/**/*.hpp)
-      return 0
-      ;;
     src/emel/*/sm.hpp|src/emel/**/*/sm.hpp)
       return 0
       ;;
@@ -328,9 +330,6 @@ infer_test_shard_for_src() {
   case "$file" in
     src/emel/model/*|src/emel/model*.hpp|src/emel/gguf/*|src/emel/gbnf/*|src/emel/batch/*)
       add_test_shard model_and_batch
-      ;;
-    src/emel/generator/*|src/emel/generator/**/*)
-      add_test_shard generator_and_runtime
       ;;
     src/emel/text/generator/*|src/emel/embeddings/*|src/emel/logits/*|src/emel/token/*)
       add_test_shard generator_and_runtime
@@ -484,6 +483,7 @@ add_all_benchmark_suites_from_manifest() {
       kernel_aarch64 \
       kernel_x86_64 \
       batch_planner \
+      parallel_matmul \
       sm_any; do
     add_benchmark_suite_from_manifest "$priority_runner"
   done
@@ -797,8 +797,6 @@ infer_quality_gate_scope() {
           add_all_benchmark_suites_from_manifest
         fi
         ;;
-      src/emel/generator/*|src/emel/generator/**/*)
-        ;;
       docs/templates/*|tools/docsgen/*|snapshots/bench/*|snapshots/embedded_size/*|src/emel/**/sm.hpp)
         docs_needed=true
         ;;
@@ -844,8 +842,6 @@ infer_quality_gate_scope() {
     fi
 
     case "$file" in
-      src/emel/generator/*|src/emel/generator/**/*)
-        ;;
       src/emel/diarization/*|src/emel/model/sortformer/*|tests/diarization/*|\
       tools/bench/diarization*|scripts/bench_diarization_compare.sh|\
       scripts/setup_diarization_pytorch_ref_env.sh)
@@ -856,6 +852,16 @@ infer_quality_gate_scope() {
         ;;
       src/emel/batch/*|tests/batch/*)
         add_bench_suite batch_planner "scope path=$file"
+        ;;
+      src/emel/speech/codec/mimi/*|src/emel/speech/generator/*|\
+      src/emel/speech/predictor/moshi/*|\
+      src/emel/speech/tokenizer/moshi/*|tests/speech/generator/*|\
+      tests/speech/codec/mimi*|tests/speech/predictor/*|\
+      tests/speech/tokenizer/moshi/*|\
+      tools/bench/personaplex*|tools/bench/speech/personaplex*|\
+      tools/bench/moshi_gguf_convert.py|scripts/setup_moshi_cpp_reference.sh|\
+      scripts/bench_personaplex_compare.sh)
+        add_bench_suite speech_dialogue_moshi "scope path=$file"
         ;;
       src/emel/io/*|src/emel/io/**/*|tests/io/*|tests/io/**/*)
         ;;
@@ -1141,6 +1147,7 @@ run_benchmark_gates() {
       EMEL_BENCH_RUNS="$QUALITY_GATES_BENCH_RUNS" \
       EMEL_BENCH_WARMUP_ITERS="$QUALITY_GATES_BENCH_WARMUP_ITERS" \
       EMEL_BENCH_WARMUP_RUNS="$QUALITY_GATES_BENCH_WARMUP_RUNS" \
+      EMEL_BENCH_INTERNAL=1 \
       BENCH_TOLERANCE="$QUALITY_GATES_BENCH_TOLERANCE" \
       "$ROOT_DIR/scripts/bench.sh" --snapshot --compare; then
       full_status=0
@@ -1204,6 +1211,20 @@ run_benchmark_gates() {
       whisper_compare)
         if run_step_allow_fail "bench_snapshot_${suite}" \
           "$ROOT_DIR/scripts/bench_whisper_compare.sh"; then
+          continue
+        else
+          status=$?
+          continue
+        fi
+        ;;
+      speech_dialogue_moshi)
+        # PersonaPlex is an end-to-end dialogue lane rather than a bench_runner
+        # microbenchmark. It owns the maintained encoder -> tokenizer ->
+        # predictor -> sampler -> detokenizer -> decoder comparison.
+        if run_step_allow_fail "bench_snapshot_${suite}" \
+          "$ROOT_DIR/scripts/bench_personaplex_compare.sh" \
+          --audio "$QUALITY_GATES_PERSONAPLEX_AUDIO" \
+          --frames "$QUALITY_GATES_PERSONAPLEX_FRAMES"; then
           continue
         else
           status=$?
@@ -1275,6 +1296,11 @@ run_coverage_gate() {
 }
 
 parallel_enabled() {
+  case "${EMEL_BENCH_STRICT_REGRESSION:-0}" in
+    1|true|yes)
+      return 1
+      ;;
+  esac
   case "$QUALITY_GATES_PARALLEL" in
     auto|always|1|true|yes)
       return 0

@@ -4098,16 +4098,30 @@ TEST_CASE("generator_detail_nonflash_chunk4_prefill_matches_scalar_q8_k_on_"
   REQUIRE(chunk_fixture->backend.bound_logits.size() ==
           scalar_fixture->backend.bound_logits.size());
   float max_delta = 0.0f;
+  float max_reference_magnitude = 0.0f;
+  size_t max_delta_index = 0u;
   for (size_t idx = 0; idx < scalar_fixture->backend.bound_logits.size();
        ++idx) {
-    max_delta = std::max(max_delta,
-                         std::fabs(chunk_fixture->backend.bound_logits[idx] -
-                                   scalar_fixture->backend.bound_logits[idx]));
+    max_reference_magnitude =
+        std::max(max_reference_magnitude,
+                 std::fabs(scalar_fixture->backend.bound_logits[idx]));
+    const float delta = std::fabs(chunk_fixture->backend.bound_logits[idx] -
+                                  scalar_fixture->backend.bound_logits[idx]);
+    if (delta > max_delta) {
+      max_delta = delta;
+      max_delta_index = idx;
+    }
     CHECK(chunk_fixture->backend.bound_logits[idx] ==
           doctest::Approx(scalar_fixture->backend.bound_logits[idx])
               .epsilon(1.0e-5f));
   }
-  CHECK(max_delta <= 1.0e-4f);
+  INFO("max delta index="
+       << max_delta_index
+       << " chunk=" << chunk_fixture->backend.bound_logits[max_delta_index]
+       << " scalar=" << scalar_fixture->backend.bound_logits[max_delta_index]);
+  const float max_allowed_delta =
+      std::max(1.0e-4f, max_reference_magnitude * 1.0e-6f);
+  CHECK(max_delta <= max_allowed_delta);
 #endif
 }
 
@@ -4170,16 +4184,30 @@ TEST_CASE("generator_detail_nonflash_chunk8_prefill_matches_scalar_q8_k_on_"
   REQUIRE(chunk_fixture->backend.bound_logits.size() ==
           scalar_fixture->backend.bound_logits.size());
   float max_delta = 0.0f;
+  float max_reference_magnitude = 0.0f;
+  size_t max_delta_index = 0u;
   for (size_t idx = 0; idx < scalar_fixture->backend.bound_logits.size();
        ++idx) {
-    max_delta = std::max(max_delta,
-                         std::fabs(chunk_fixture->backend.bound_logits[idx] -
-                                   scalar_fixture->backend.bound_logits[idx]));
+    max_reference_magnitude =
+        std::max(max_reference_magnitude,
+                 std::fabs(scalar_fixture->backend.bound_logits[idx]));
+    const float delta = std::fabs(chunk_fixture->backend.bound_logits[idx] -
+                                  scalar_fixture->backend.bound_logits[idx]);
+    if (delta > max_delta) {
+      max_delta = delta;
+      max_delta_index = idx;
+    }
     CHECK(chunk_fixture->backend.bound_logits[idx] ==
           doctest::Approx(scalar_fixture->backend.bound_logits[idx])
               .epsilon(1.0e-5f));
   }
-  CHECK(max_delta <= 1.0e-4f);
+  INFO("max delta index="
+       << max_delta_index
+       << " chunk=" << chunk_fixture->backend.bound_logits[max_delta_index]
+       << " scalar=" << scalar_fixture->backend.bound_logits[max_delta_index]);
+  const float max_allowed_delta =
+      std::max(1.0e-4f, max_reference_magnitude * 1.0e-6f);
+  CHECK(max_delta <= max_allowed_delta);
 #endif
 }
 

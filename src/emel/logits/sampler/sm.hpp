@@ -17,6 +17,11 @@ struct sample_decision {};
 struct sample_call {};
 struct sample_call_decision {};
 struct sample_complete_decision {};
+struct state_temperature_top_k_request_decision {};
+struct state_temperature_top_k_scale {};
+struct state_temperature_top_k_probabilities {};
+struct state_temperature_top_k_rank {};
+struct state_temperature_top_k_select {};
 struct done {};
 struct errored {};
 
@@ -89,6 +94,41 @@ struct model {
           / action::mark_invalid_request
 
       //------------------------------------------------------------------------------//
+      // Native temperature/top-k sampling is a typed actor path. Each numeric
+      // phase is explicit and uses caller-provided, allocation-free workspace.
+      , sml::state<state_temperature_top_k_request_decision> <= sml::state<ready>
+          + sml::event<event::sample_temperature_top_k_runtime>
+      , sml::state<state_temperature_top_k_scale> <=
+          sml::state<state_temperature_top_k_request_decision>
+          + sml::completion<event::sample_temperature_top_k_runtime>
+          [ guard::temperature_top_k_request_valid{} ]
+          / action::scale_temperature_logits
+      , sml::state<errored> <=
+          sml::state<state_temperature_top_k_request_decision>
+          + sml::completion<event::sample_temperature_top_k_runtime>
+          [ guard::temperature_top_k_request_invalid{} ]
+          / action::mark_invalid_request
+      , sml::state<state_temperature_top_k_probabilities> <=
+          sml::state<state_temperature_top_k_scale>
+          + sml::completion<event::sample_temperature_top_k_runtime>
+          / action::compute_temperature_probabilities
+      , sml::state<state_temperature_top_k_rank> <=
+          sml::state<state_temperature_top_k_probabilities>
+          + sml::completion<event::sample_temperature_top_k_runtime>
+          / action::compute_temperature_top_k
+      , sml::state<state_temperature_top_k_select> <=
+          sml::state<state_temperature_top_k_rank>
+          + sml::completion<event::sample_temperature_top_k_runtime>
+          / action::select_temperature_top_k
+      , sml::state<done> <= sml::state<state_temperature_top_k_select>
+          + sml::completion<event::sample_temperature_top_k_runtime>
+          [ guard::temperature_top_k_selected_token_valid{} ]
+      , sml::state<errored> <= sml::state<state_temperature_top_k_select>
+          + sml::completion<event::sample_temperature_top_k_runtime>
+          [ guard::temperature_top_k_selected_token_invalid{} ]
+          / action::mark_invalid_request
+
+      //------------------------------------------------------------------------------//
       , sml::state<ready> <= sml::state<done> + sml::completion<event::configure_runtime>
           / action::publish_done
       , sml::state<ready> <= sml::state<errored> + sml::completion<event::configure_runtime>
@@ -100,6 +140,12 @@ struct model {
       , sml::state<ready> <= sml::state<done> + sml::completion<event::sample_preselected_runtime>
           / action::publish_done
       , sml::state<ready> <= sml::state<errored> + sml::completion<event::sample_preselected_runtime>
+          / action::publish_error
+      , sml::state<ready> <= sml::state<done>
+          + sml::completion<event::sample_temperature_top_k_runtime>
+          / action::publish_done
+      , sml::state<ready> <= sml::state<errored>
+          + sml::completion<event::sample_temperature_top_k_runtime>
           / action::publish_error
 
       //------------------------------------------------------------------------------//
@@ -121,6 +167,16 @@ struct model {
           / action::on_unexpected
       , sml::state<ready> <= sml::state<sample_complete_decision> + sml::unexpected_event<sml::_>
           / action::on_unexpected
+      , sml::state<ready> <= sml::state<state_temperature_top_k_request_decision>
+          + sml::unexpected_event<sml::_> / action::on_unexpected
+      , sml::state<ready> <= sml::state<state_temperature_top_k_scale>
+          + sml::unexpected_event<sml::_> / action::on_unexpected
+      , sml::state<ready> <= sml::state<state_temperature_top_k_probabilities>
+          + sml::unexpected_event<sml::_> / action::on_unexpected
+      , sml::state<ready> <= sml::state<state_temperature_top_k_rank>
+          + sml::unexpected_event<sml::_> / action::on_unexpected
+      , sml::state<ready> <= sml::state<state_temperature_top_k_select>
+          + sml::unexpected_event<sml::_> / action::on_unexpected
       , sml::state<ready> <= sml::state<done> + sml::unexpected_event<sml::_>
           / action::on_unexpected
       , sml::state<ready> <= sml::state<errored> + sml::unexpected_event<sml::_>
@@ -138,30 +194,37 @@ struct sm : public emel::sm<model, action::context> {
 
   sm() : base_type() {}
 
-  bool process_event(const event::configure & ev) {
+  bool process_event(const event::configure &ev) {
     event::configure_ctx ctx{};
     event::configure_runtime runtime{ev, ctx};
     const bool accepted = base_type::process_event(runtime);
     return accepted && ctx.err == emel::error::cast(error::none);
   }
 
-  bool process_event(const event::sample_logits & ev) {
+  bool process_event(const event::sample_logits &ev) {
     event::sample_logits_ctx ctx{};
     event::sample_logits_runtime runtime{ev, ctx};
     const bool accepted = base_type::process_event(runtime);
     return accepted && ctx.err == emel::error::cast(error::none);
   }
 
-  bool process_event(const event::sample_preselected & ev) {
+  bool process_event(const event::sample_preselected &ev) {
     event::sample_preselected_ctx ctx{};
     event::sample_preselected_runtime runtime{ev, ctx};
     const bool accepted = base_type::process_event(runtime);
     return accepted && ctx.err == emel::error::cast(error::none);
   }
 
- private:
+  bool process_event(const event::sample_temperature_top_k &ev) {
+    event::sample_temperature_top_k_ctx ctx{};
+    event::sample_temperature_top_k_runtime runtime{ev, ctx};
+    const bool accepted = base_type::process_event(runtime);
+    return accepted && ctx.err == emel::error::cast(error::none);
+  }
+
+private:
 };
 
 using Sampler = sm;
 
-}  // namespace emel::logits::sampler
+} // namespace emel::logits::sampler

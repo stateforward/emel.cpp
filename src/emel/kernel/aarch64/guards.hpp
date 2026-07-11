@@ -18,9 +18,9 @@ namespace detail {
 // rows) and the group-aligned row-slice lane view emitted by the parallel
 // matmul slicer, whose slice is embedded in a wider output (nb[0] covers the
 // full output row while ne[1]/nb[2] describe only the slice rows).
-inline bool is_batch_major_dst_view(const ::emel::kernel::event::tensor_view_mut &dst,
-                                    const uint64_t m,
-                                    const uint64_t rhs_rows) noexcept {
+inline bool
+is_batch_major_dst_view(const ::emel::kernel::event::tensor_view_mut &dst,
+                        const uint64_t m, const uint64_t rhs_rows) noexcept {
   // Keep every byte-stride term in uint64_t: mixing size_t in the products
   // could truncate on 32-bit hosts and mis-accept a stride contract.
   constexpr uint64_t k_f32_bytes = sizeof(float);
@@ -33,7 +33,8 @@ inline bool is_batch_major_dst_view(const ::emel::kernel::event::tensor_view_mut
 }
 
 inline bool can_use_neon_mul_mat_q8_0_packed_bl8_matrix_x4(
-    const ::emel::kernel::event::op_mul_mat &request, const bool neon_available) noexcept {
+    const ::emel::kernel::event::op_mul_mat &request,
+    const bool neon_available) noexcept {
   const uint64_t k = request.src0.ne[0];
   const uint64_t m = request.src0.ne[1];
   const uint64_t rhs_rows = request.src1.ne[0];
@@ -43,8 +44,10 @@ inline bool can_use_neon_mul_mat_q8_0_packed_bl8_matrix_x4(
       ::emel::kernel::detail::quant::packed_q8_0_x4_group_count(rhs_rows);
   const size_t group_bytes =
       ::emel::kernel::detail::quant::packed_q8_0_x4_group_storage_bytes(k);
-  return neon_available && ::emel::kernel::aarch64::detail::neon_q8_0_packed_bl8_supported() && k != 0u &&
-         m != 0u && rhs_rows == ::emel::kernel::detail::quant::Q8_0_X4_ROWS &&
+  return neon_available &&
+         ::emel::kernel::aarch64::detail::neon_q8_0_packed_bl8_supported() &&
+         k != 0u && m != 0u &&
+         rhs_rows == ::emel::kernel::detail::quant::Q8_0_X4_ROWS &&
          request.src1.ne[1] == k && request.dst.ne[0] == rhs_rows &&
          request.dst.ne[1] == m && request.src0.ne[2] == 1u &&
          request.src0.ne[3] == 1u && request.src1.ne[2] == 1u &&
@@ -68,7 +71,8 @@ inline bool can_use_neon_mul_mat_q8_0_packed_bl8_matrix_x4(
 }
 
 inline bool can_run_neon_mul_mat_q4_vector_packed_q8_rhs_matrix_x4_request(
-    const ::emel::kernel::event::op_mul_mat &request, const uint8_t packed_dtype) noexcept {
+    const ::emel::kernel::event::op_mul_mat &request,
+    const uint8_t packed_dtype) noexcept {
   const uint64_t k = request.src0.ne[0];
   const uint64_t m = request.src0.ne[1];
   const uint64_t rhs_rows = request.src1.ne[0];
@@ -103,8 +107,8 @@ inline bool can_run_neon_mul_mat_q4_vector_packed_q8_rhs_matrix_x4_request(
 }
 
 inline bool can_run_neon_mul_mat_q6_vector_packed_q8_rhs_matrix_x4_request(
-    const ::emel::kernel::event::op_mul_mat &request, const uint8_t packed_dtype,
-    const size_t group_bytes) noexcept {
+    const ::emel::kernel::event::op_mul_mat &request,
+    const uint8_t packed_dtype, const size_t group_bytes) noexcept {
   const uint64_t k = request.src0.ne[0];
   const uint64_t m = request.src0.ne[1];
   const uint64_t rhs_rows = request.src1.ne[0];
@@ -137,22 +141,28 @@ inline bool can_run_neon_mul_mat_q6_vector_packed_q8_rhs_matrix_x4_request(
 }
 
 inline bool can_use_neon_mul_mat_q4_vector_packed_q8_rhs_bl4_matrix_x4(
-    const ::emel::kernel::event::op_mul_mat &request, const bool neon_available) noexcept {
-  return neon_available && ::emel::kernel::aarch64::detail::neon_q4_vector_packed_supported() &&
+    const ::emel::kernel::event::op_mul_mat &request,
+    const bool neon_available) noexcept {
+  return neon_available &&
+         ::emel::kernel::aarch64::detail::neon_q4_vector_packed_supported() &&
          can_run_neon_mul_mat_q4_vector_packed_q8_rhs_matrix_x4_request(
              request, ::emel::kernel::detail::dtype_q4_k_x8_bl4);
 }
 
 inline bool can_use_neon_mul_mat_q4_vector_packed_q8_rhs_bl8_matrix_x4(
-    const ::emel::kernel::event::op_mul_mat &request, const bool neon_available) noexcept {
-  return neon_available && ::emel::kernel::aarch64::detail::neon_q4_vector_packed_supported() &&
+    const ::emel::kernel::event::op_mul_mat &request,
+    const bool neon_available) noexcept {
+  return neon_available &&
+         ::emel::kernel::aarch64::detail::neon_q4_vector_packed_supported() &&
          can_run_neon_mul_mat_q4_vector_packed_q8_rhs_matrix_x4_request(
              request, ::emel::kernel::detail::dtype_q4_k_x8_bl8);
 }
 
 inline bool can_use_neon_mul_mat_q6_vector_packed_q8_rhs_matrix_x4(
-    const ::emel::kernel::event::op_mul_mat &request, const bool neon_available) noexcept {
-  return neon_available && ::emel::kernel::aarch64::detail::neon_q6_vector_packed_supported() &&
+    const ::emel::kernel::event::op_mul_mat &request,
+    const bool neon_available) noexcept {
+  return neon_available &&
+         ::emel::kernel::aarch64::detail::neon_q6_vector_packed_supported() &&
          can_run_neon_mul_mat_q6_vector_packed_q8_rhs_matrix_x4_request(
              request, ::emel::kernel::detail::dtype_q6_k_x8,
              ::emel::kernel::detail::quant::packed_q6_k_x8_group_storage_bytes(
@@ -160,14 +170,16 @@ inline bool can_use_neon_mul_mat_q6_vector_packed_q8_rhs_matrix_x4(
 }
 
 inline bool can_use_neon_mul_mat_q6_vector_prepared_q8_rhs_i8mm_matrix_x4(
-    const ::emel::kernel::event::op_mul_mat &request, const bool neon_available) noexcept {
-  return neon_available && ::emel::kernel::aarch64::detail::neon_q6_vector_prepared_q8_rhs_i8mm_supported() &&
+    const ::emel::kernel::event::op_mul_mat &request,
+    const bool neon_available) noexcept {
+  return neon_available &&
+         ::emel::kernel::aarch64::detail::
+             neon_q6_vector_prepared_q8_rhs_i8mm_supported() &&
          can_run_neon_mul_mat_q6_vector_packed_q8_rhs_matrix_x4_request(
              request, ::emel::kernel::detail::dtype_q6_k_x8_q8_prepared,
              ::emel::kernel::detail::quant::
                  prepared_q6_k_x8_q8_group_storage_bytes(request.src0.ne[0]));
 }
-
 
 inline bool can_run_neon_mul_mat_q4_vector_packed_q8_rhs_matrix_x8_request(
     const ::emel::kernel::event::op_mul_mat &request,
@@ -182,34 +194,27 @@ inline bool can_run_neon_mul_mat_q4_vector_packed_q8_rhs_matrix_x8_request(
   const size_t rhs_row_bytes =
       ::emel::kernel::detail::quantized_row_storage_bytes(
           ::emel::kernel::detail::dtype_q8_k, k);
-  return k != 0u &&
-      m != 0u &&
-      rhs_rows == ::emel::kernel::detail::quant::Q4_K_X8_ROWS &&
-      request.src1.ne[1] == k &&
-      request.dst.ne[0] == rhs_rows &&
-      request.dst.ne[1] == m &&
-      request.src0.ne[2] == 1u &&
-      request.src0.ne[3] == 1u &&
-      request.src1.ne[2] == 1u &&
-      request.src1.ne[3] == 1u &&
-      request.dst.ne[2] == 1u &&
-      request.dst.ne[3] == 1u &&
-      ::emel::kernel::detail::dtype_code(request.src0.type) == packed_dtype &&
-      ::emel::kernel::detail::dtype_code(request.src1.type) ==
-          ::emel::kernel::detail::dtype_q8_k_x8 &&
-      ::emel::kernel::detail::dtype_code(request.dst.type) ==
-          ::emel::kernel::detail::dtype_f32 &&
-      request.src0.nb[0] == 1u &&
-      group_bytes != 0u &&
-      request.src0.nb[1] == group_bytes &&
-      request.src0.nb[2] == group_bytes * group_count &&
-      request.src0.nb[3] == request.src0.nb[2] &&
-      request.src1.nb[0] == 1u &&
-      rhs_row_bytes != 0u &&
-      request.src1.nb[1] == rhs_row_bytes &&
-      request.src1.nb[2] == rhs_row_bytes * rhs_rows &&
-      request.src1.nb[3] == request.src1.nb[2] &&
-      is_batch_major_dst_view(request.dst, m, rhs_rows);
+  return k != 0u && m != 0u &&
+         rhs_rows == ::emel::kernel::detail::quant::Q4_K_X8_ROWS &&
+         request.src1.ne[1] == k && request.dst.ne[0] == rhs_rows &&
+         request.dst.ne[1] == m && request.src0.ne[2] == 1u &&
+         request.src0.ne[3] == 1u && request.src1.ne[2] == 1u &&
+         request.src1.ne[3] == 1u && request.dst.ne[2] == 1u &&
+         request.dst.ne[3] == 1u &&
+         ::emel::kernel::detail::dtype_code(request.src0.type) ==
+             packed_dtype &&
+         ::emel::kernel::detail::dtype_code(request.src1.type) ==
+             ::emel::kernel::detail::dtype_q8_k_x8 &&
+         ::emel::kernel::detail::dtype_code(request.dst.type) ==
+             ::emel::kernel::detail::dtype_f32 &&
+         request.src0.nb[0] == 1u && group_bytes != 0u &&
+         request.src0.nb[1] == group_bytes &&
+         request.src0.nb[2] == group_bytes * group_count &&
+         request.src0.nb[3] == request.src0.nb[2] && request.src1.nb[0] == 1u &&
+         rhs_row_bytes != 0u && request.src1.nb[1] == rhs_row_bytes &&
+         request.src1.nb[2] == rhs_row_bytes * rhs_rows &&
+         request.src1.nb[3] == request.src1.nb[2] &&
+         is_batch_major_dst_view(request.dst, m, rhs_rows);
 }
 
 inline bool
@@ -225,35 +230,27 @@ can_run_neon_mul_mat_q6_vector_prepared_q8_rhs_i8mm_matrix_x8_request(
   const size_t rhs_row_bytes =
       ::emel::kernel::detail::quantized_row_storage_bytes(
           ::emel::kernel::detail::dtype_q8_k, k);
-  return k != 0u &&
-      m != 0u &&
-      rhs_rows == ::emel::kernel::detail::quant::Q6_K_X8_ROWS &&
-      request.src1.ne[1] == k &&
-      request.dst.ne[0] == rhs_rows &&
-      request.dst.ne[1] == m &&
-      request.src0.ne[2] == 1u &&
-      request.src0.ne[3] == 1u &&
-      request.src1.ne[2] == 1u &&
-      request.src1.ne[3] == 1u &&
-      request.dst.ne[2] == 1u &&
-      request.dst.ne[3] == 1u &&
-      ::emel::kernel::detail::dtype_code(request.src0.type) ==
-          ::emel::kernel::detail::dtype_q6_k_x8_q8_prepared &&
-      ::emel::kernel::detail::dtype_code(request.src1.type) ==
-          ::emel::kernel::detail::dtype_q8_k_x8 &&
-      ::emel::kernel::detail::dtype_code(request.dst.type) ==
-          ::emel::kernel::detail::dtype_f32 &&
-      request.src0.nb[0] == 1u &&
-      group_bytes != 0u &&
-      request.src0.nb[1] == group_bytes &&
-      request.src0.nb[2] == group_bytes * group_count &&
-      request.src0.nb[3] == request.src0.nb[2] &&
-      request.src1.nb[0] == 1u &&
-      rhs_row_bytes != 0u &&
-      request.src1.nb[1] == rhs_row_bytes &&
-      request.src1.nb[2] == rhs_row_bytes * rhs_rows &&
-      request.src1.nb[3] == request.src1.nb[2] &&
-      is_batch_major_dst_view(request.dst, m, rhs_rows);
+  return k != 0u && m != 0u &&
+         rhs_rows == ::emel::kernel::detail::quant::Q6_K_X8_ROWS &&
+         request.src1.ne[1] == k && request.dst.ne[0] == rhs_rows &&
+         request.dst.ne[1] == m && request.src0.ne[2] == 1u &&
+         request.src0.ne[3] == 1u && request.src1.ne[2] == 1u &&
+         request.src1.ne[3] == 1u && request.dst.ne[2] == 1u &&
+         request.dst.ne[3] == 1u &&
+         ::emel::kernel::detail::dtype_code(request.src0.type) ==
+             ::emel::kernel::detail::dtype_q6_k_x8_q8_prepared &&
+         ::emel::kernel::detail::dtype_code(request.src1.type) ==
+             ::emel::kernel::detail::dtype_q8_k_x8 &&
+         ::emel::kernel::detail::dtype_code(request.dst.type) ==
+             ::emel::kernel::detail::dtype_f32 &&
+         request.src0.nb[0] == 1u && group_bytes != 0u &&
+         request.src0.nb[1] == group_bytes &&
+         request.src0.nb[2] == group_bytes * group_count &&
+         request.src0.nb[3] == request.src0.nb[2] && request.src1.nb[0] == 1u &&
+         rhs_row_bytes != 0u && request.src1.nb[1] == rhs_row_bytes &&
+         request.src1.nb[2] == rhs_row_bytes * rhs_rows &&
+         request.src1.nb[3] == request.src1.nb[2] &&
+         is_batch_major_dst_view(request.dst, m, rhs_rows);
 }
 
 inline bool can_use_neon_mul_mat_q4_vector_packed_q8_rhs_bl8_matrix_x8(
@@ -297,6 +294,25 @@ inline bool can_use_neon_conv_transpose_1d_f32(
              ::emel::kernel::detail::dtype_f32 &&
          ::emel::kernel::detail::tensor_stride_bytes(request.src0, 0) ==
              sizeof(float);
+}
+
+inline bool
+can_use_neon_unary_f32(const ::emel::kernel::event::op_unary &request,
+                       const bool neon_available) noexcept {
+#if !(defined(__aarch64__) || defined(__ARM_NEON))
+  (void)request;
+  (void)neon_available;
+  return false;
+#else
+  return neon_available &&
+         ::emel::kernel::detail::can_run_backend_request(request) &&
+         ::emel::kernel::detail::dtype_code(request.src0.type) ==
+             ::emel::kernel::detail::dtype_f32 &&
+         ::emel::kernel::detail::dtype_code(request.dst.type) ==
+             ::emel::kernel::detail::dtype_f32 &&
+         ::emel::kernel::detail::is_dense_contiguous(request.src0) &&
+         ::emel::kernel::detail::is_dense_contiguous(request.dst);
+#endif
 }
 
 } // namespace detail
@@ -454,8 +470,7 @@ struct simd_op_mul_mat_q8_0_vector_q8_rhs {
       return false;
     }
     return ::emel::kernel::aarch64::detail::
-        can_use_neon_mul_mat_q8_0_vector_q8_rhs(ev.request,
-                                                ctx.neon_available);
+        can_use_neon_mul_mat_q8_0_vector_q8_rhs(ev.request, ctx.neon_available);
   }
 };
 
@@ -477,9 +492,20 @@ struct simd_op_mul_mat_q4_vector_packed_q8_rhs_bl4_matrix_x4 {
     if (!::emel::kernel::detail::validate_dispatch_request(ev.request)) {
       return false;
     }
-    return detail::
-        can_use_neon_mul_mat_q4_vector_packed_q8_rhs_bl4_matrix_x4(
-            ev.request, ctx.neon_available);
+    return detail::can_use_neon_mul_mat_q4_vector_packed_q8_rhs_bl4_matrix_x4(
+        ev.request, ctx.neon_available);
+  }
+};
+
+struct simd_op_mul_mat_q4_vector_packed_f32_rhs_bl4 {
+  bool operator()(const ::emel::kernel::aarch64::event::dispatch_op_mul_mat &ev,
+                  const action::context &ctx) const noexcept {
+    if (!::emel::kernel::detail::validate_dispatch_request(ev.request)) {
+      return false;
+    }
+    return ::emel::kernel::aarch64::detail::
+        can_use_neon_mul_mat_q4_vector_packed_f32_rhs_bl4(ev.request,
+                                                          ctx.neon_available);
   }
 };
 
@@ -495,15 +521,26 @@ struct simd_op_mul_mat_q4_vector_packed_q8_rhs_bl8 {
   }
 };
 
+struct simd_op_mul_mat_q4_vector_packed_f32_rhs_bl8 {
+  bool operator()(const ::emel::kernel::aarch64::event::dispatch_op_mul_mat &ev,
+                  const action::context &ctx) const noexcept {
+    if (!::emel::kernel::detail::validate_dispatch_request(ev.request)) {
+      return false;
+    }
+    return ::emel::kernel::aarch64::detail::
+        can_use_neon_mul_mat_q4_vector_packed_f32_rhs_bl8(ev.request,
+                                                          ctx.neon_available);
+  }
+};
+
 struct simd_op_mul_mat_q4_vector_packed_q8_rhs_bl8_matrix_x4 {
   bool operator()(const ::emel::kernel::aarch64::event::dispatch_op_mul_mat &ev,
                   const action::context &ctx) const noexcept {
     if (!::emel::kernel::detail::validate_dispatch_request(ev.request)) {
       return false;
     }
-    return detail::
-        can_use_neon_mul_mat_q4_vector_packed_q8_rhs_bl8_matrix_x4(
-            ev.request, ctx.neon_available);
+    return detail::can_use_neon_mul_mat_q4_vector_packed_q8_rhs_bl8_matrix_x4(
+        ev.request, ctx.neon_available);
   }
 };
 
@@ -525,8 +562,18 @@ struct simd_op_mul_mat_q4_vector_q8_rhs {
       return false;
     }
     return ::emel::kernel::aarch64::detail::
-        can_use_neon_mul_mat_q4_vector_q8_rhs(ev.request,
-                                              ctx.neon_available);
+        can_use_neon_mul_mat_q4_vector_q8_rhs(ev.request, ctx.neon_available);
+  }
+};
+
+struct simd_op_mul_mat_q4_vector_f32_rhs {
+  bool operator()(const ::emel::kernel::aarch64::event::dispatch_op_mul_mat &ev,
+                  const action::context &ctx) const noexcept {
+    if (!::emel::kernel::detail::validate_dispatch_request(ev.request)) {
+      return false;
+    }
+    return ::emel::kernel::aarch64::detail::
+        can_use_neon_mul_mat_q4_vector_f32_rhs(ev.request, ctx.neon_available);
   }
 };
 
@@ -548,8 +595,7 @@ struct simd_op_mul_mat_q6_vector_q8_rhs {
       return false;
     }
     return ::emel::kernel::aarch64::detail::
-        can_use_neon_mul_mat_q6_vector_q8_rhs(ev.request,
-                                              ctx.neon_available);
+        can_use_neon_mul_mat_q6_vector_q8_rhs(ev.request, ctx.neon_available);
   }
 };
 
@@ -571,9 +617,8 @@ struct simd_op_mul_mat_q6_vector_packed_q8_rhs_matrix_x4 {
     if (!::emel::kernel::detail::validate_dispatch_request(ev.request)) {
       return false;
     }
-    return detail::
-        can_use_neon_mul_mat_q6_vector_packed_q8_rhs_matrix_x4(
-            ev.request, ctx.neon_available);
+    return detail::can_use_neon_mul_mat_q6_vector_packed_q8_rhs_matrix_x4(
+        ev.request, ctx.neon_available);
   }
 };
 
@@ -638,6 +683,32 @@ struct simd_op_mul_mat_argmax_q6_vector_packed_q8_rhs {
   }
 };
 
+struct simd_op_mul_mat_argmax_q4_vector_packed_f32_rhs_bl4 {
+  bool operator()(
+      const ::emel::kernel::aarch64::event::dispatch_op_mul_mat_argmax &ev,
+      const action::context &ctx) const noexcept {
+    if (!::emel::kernel::detail::validate_dispatch_request(ev.request)) {
+      return false;
+    }
+    return ::emel::kernel::aarch64::detail::
+        can_use_neon_mul_mat_argmax_q4_vector_packed_f32_rhs_bl4(
+            ev.request, ctx.neon_available);
+  }
+};
+
+struct simd_op_mul_mat_argmax_q4_vector_packed_f32_rhs_bl8 {
+  bool operator()(
+      const ::emel::kernel::aarch64::event::dispatch_op_mul_mat_argmax &ev,
+      const action::context &ctx) const noexcept {
+    if (!::emel::kernel::detail::validate_dispatch_request(ev.request)) {
+      return false;
+    }
+    return ::emel::kernel::aarch64::detail::
+        can_use_neon_mul_mat_argmax_q4_vector_packed_f32_rhs_bl8(
+            ev.request, ctx.neon_available);
+  }
+};
+
 struct simd_op_mul_mat_argmax_q6_vector_prepared_q8_rhs_i8mm {
   bool operator()(
       const ::emel::kernel::aarch64::event::dispatch_op_mul_mat_argmax &ev,
@@ -682,9 +753,12 @@ struct simd_op_mul_mat_generic {
            !simd_op_mul_mat_q4_vector_packed_q8_rhs_bl8_matrix_x8{}(ev, ctx) &&
            !simd_op_mul_mat_q4_vector_packed_q8_rhs_bl8_matrix_x4{}(ev, ctx) &&
            !simd_op_mul_mat_q4_vector_packed_q8_rhs_bl8{}(ev, ctx) &&
+           !simd_op_mul_mat_q4_vector_packed_f32_rhs_bl8{}(ev, ctx) &&
            !simd_op_mul_mat_q4_vector_packed_q8_rhs_bl4_matrix_x4{}(ev, ctx) &&
            !simd_op_mul_mat_q4_vector_packed_q8_rhs_bl4{}(ev, ctx) &&
+           !simd_op_mul_mat_q4_vector_packed_f32_rhs_bl4{}(ev, ctx) &&
            !simd_op_mul_mat_q4_vector_q8_rhs{}(ev, ctx) &&
+           !simd_op_mul_mat_q4_vector_f32_rhs{}(ev, ctx) &&
            !simd_op_mul_mat_q6_vector_prepared_q8_rhs_i8mm_matrix_x8{}(ev,
                                                                        ctx) &&
            !simd_op_mul_mat_q6_vector_prepared_q8_rhs_i8mm_matrix_x4{}(ev,
@@ -749,6 +823,16 @@ template <class dispatch_event_type> struct invalid_op {
   }
 };
 
+struct simd_op_unary_f32 {
+  bool operator()(const ::emel::kernel::aarch64::event::dispatch_op_unary &ev,
+                  const action::context &ctx) const noexcept {
+    if (!::emel::kernel::detail::validate_dispatch_request(ev.request)) {
+      return false;
+    }
+    return detail::can_use_neon_unary_f32(ev.request, ctx.neon_available);
+  }
+};
+
 template <::emel::kernel::event::unary_subop subop> struct unary_subop_is {
   bool operator()(const ::emel::kernel::aarch64::event::dispatch_op_unary &ev,
                   const action::context &) const noexcept {
@@ -759,8 +843,7 @@ template <::emel::kernel::event::unary_subop subop> struct unary_subop_is {
 template <::emel::kernel::event::unary_subop subop>
 using simd_op_unary_subop = ::emel::kernel::detail::simd_unary_subop_guard<
     ::emel::kernel::aarch64::event::dispatch_op_unary, action::context,
-    simd_op<::emel::kernel::aarch64::event::dispatch_op_unary>,
-    unary_subop_is<subop>>;
+    simd_op_unary_f32, unary_subop_is<subop>>;
 
 template <::emel::kernel::event::unary_subop subop>
 using valid_op_unary_subop = ::emel::kernel::detail::valid_unary_subop_guard<
@@ -768,18 +851,29 @@ using valid_op_unary_subop = ::emel::kernel::detail::valid_unary_subop_guard<
     valid_op<::emel::kernel::aarch64::event::dispatch_op_unary>,
     unary_subop_is<subop>>;
 
+template <::emel::kernel::event::unary_subop subop>
+struct valid_scalar_op_unary_subop {
+  bool operator()(const ::emel::kernel::aarch64::event::dispatch_op_unary &ev,
+                  const action::context &ctx) const noexcept {
+    return valid_op_unary_subop<subop>{}(ev, ctx) &&
+           !simd_op_unary_f32{}(ev, ctx);
+  }
+};
+
 using simd_op_unary_abs =
     simd_op_unary_subop<::emel::kernel::event::unary_subop::abs>;
 using simd_op_unary_neg =
     simd_op_unary_subop<::emel::kernel::event::unary_subop::neg>;
 using simd_op_unary_relu =
     simd_op_unary_subop<::emel::kernel::event::unary_subop::relu>;
+using simd_op_unary_silu =
+    simd_op_unary_subop<::emel::kernel::event::unary_subop::silu>;
 using valid_op_unary_abs =
-    valid_op_unary_subop<::emel::kernel::event::unary_subop::abs>;
+    valid_scalar_op_unary_subop<::emel::kernel::event::unary_subop::abs>;
 using valid_op_unary_neg =
-    valid_op_unary_subop<::emel::kernel::event::unary_subop::neg>;
+    valid_scalar_op_unary_subop<::emel::kernel::event::unary_subop::neg>;
 using valid_op_unary_relu =
-    valid_op_unary_subop<::emel::kernel::event::unary_subop::relu>;
+    valid_scalar_op_unary_subop<::emel::kernel::event::unary_subop::relu>;
 using valid_op_unary_exp =
     valid_op_unary_subop<::emel::kernel::event::unary_subop::exp>;
 using valid_op_unary_tanh =
@@ -789,7 +883,7 @@ using valid_op_unary_elu =
 using valid_op_unary_gelu =
     valid_op_unary_subop<::emel::kernel::event::unary_subop::gelu>;
 using valid_op_unary_silu =
-    valid_op_unary_subop<::emel::kernel::event::unary_subop::silu>;
+    valid_scalar_op_unary_subop<::emel::kernel::event::unary_subop::silu>;
 
 // Variant predicates for the ops whose dtype/mode choice is modeled as
 // explicit transition rows (op_unary pattern).
@@ -802,15 +896,39 @@ template <uint8_t src_dtype_code> struct get_rows_src_dtype_is {
   }
 };
 
-template <bool neox_mode> struct rope_mode_is {
+template <int32_t mode_value> struct rope_mode_is {
   bool operator()(const ::emel::kernel::aarch64::event::dispatch_op_rope &ev,
                   const action::context &) const noexcept {
     int32_t mode = 0;
     return ::emel::kernel::detail::read_op_param_i32(
                ev.request.op_params.data(), ev.request.op_params_size, 2u,
                mode) &&
-           mode == (neox_mode ? ::emel::kernel::detail::rope_mode_neox
-                              : ::emel::kernel::detail::rope_mode_norm);
+           mode == mode_value;
+  }
+};
+
+struct rope_timestep_layout_is {
+  bool operator()(const ::emel::kernel::aarch64::event::dispatch_op_rope &ev,
+                  const action::context &) const noexcept {
+    int32_t n_dims = 0;
+    return ::emel::kernel::detail::read_op_param_i32(
+               ev.request.op_params.data(), ev.request.op_params_size, 1u,
+               n_dims) &&
+           n_dims > 0 &&
+           static_cast<uint64_t>(n_dims) == ev.request.src0.ne[0] &&
+           ev.request.src0.data != ev.request.dst.data &&
+           ::emel::kernel::detail::is_dense_contiguous(ev.request.src0) &&
+           ::emel::kernel::detail::is_dense_contiguous(ev.request.src1) &&
+           ::emel::kernel::detail::is_dense_contiguous(ev.request.dst);
+  }
+};
+
+struct rope_timestep_is {
+  bool operator()(const ::emel::kernel::aarch64::event::dispatch_op_rope &ev,
+                  const action::context &ctx) const noexcept {
+    return rope_mode_is<::emel::kernel::detail::rope_mode_timestep>{}(ev,
+                                                                      ctx) &&
+           rope_timestep_layout_is{}(ev, ctx);
   }
 };
 
@@ -878,11 +996,23 @@ struct valid_op_mul_mat_f16 {
 using valid_op_rope_norm = ::emel::kernel::detail::valid_variant_guard<
     ::emel::kernel::aarch64::event::dispatch_op_rope, action::context,
     valid_op<::emel::kernel::aarch64::event::dispatch_op_rope>,
-    rope_mode_is<false>>;
+    rope_mode_is<::emel::kernel::detail::rope_mode_norm>>;
 using valid_op_rope_neox = ::emel::kernel::detail::valid_variant_guard<
     ::emel::kernel::aarch64::event::dispatch_op_rope, action::context,
     valid_op<::emel::kernel::aarch64::event::dispatch_op_rope>,
-    rope_mode_is<true>>;
+    rope_mode_is<::emel::kernel::detail::rope_mode_neox>>;
+using valid_op_rope_timestep = ::emel::kernel::detail::valid_variant_guard<
+    ::emel::kernel::aarch64::event::dispatch_op_rope, action::context,
+    valid_op<::emel::kernel::aarch64::event::dispatch_op_rope>,
+    rope_timestep_is>;
+
+template <> struct invalid_op<::emel::kernel::aarch64::event::dispatch_op_rope> {
+  bool operator()(const ::emel::kernel::aarch64::event::dispatch_op_rope &ev,
+                  const action::context &ctx) const noexcept {
+    return !valid_op_rope_norm{}(ev, ctx) && !valid_op_rope_neox{}(ev, ctx) &&
+           !valid_op_rope_timestep{}(ev, ctx);
+  }
+};
 
 using valid_op_im2col_f32 = ::emel::kernel::detail::valid_variant_guard<
     ::emel::kernel::aarch64::event::dispatch_op_im2col, action::context,

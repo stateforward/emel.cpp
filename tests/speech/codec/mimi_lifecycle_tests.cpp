@@ -228,7 +228,7 @@ TEST_CASE("mimi codec facade initializes, encodes, and decodes frames") {
   CHECK(err == emel::error::cast(mimi::error::none));
   check_session_ready(machine);
   CHECK(g_frame_samples == 1920);
-  CHECK(g_n_q == 4);
+  CHECK(g_n_q == 2);
 
   const auto pcm = deterministic_pcm(g_frame_samples);
   std::vector<int32_t> codes(static_cast<size_t>(g_n_q), -1);
@@ -255,6 +255,28 @@ TEST_CASE("mimi codec facade initializes, encodes, and decodes frames") {
   CHECK(err == emel::error::cast(mimi::error::none));
   check_session_ready(machine);
   CHECK(g_decode_done_count == 1u);
+
+  REQUIRE(machine.process_event(mimi::event::reset_stream{}));
+  const size_t partial_count =
+      std::min(codes.size() - 1u,
+               static_cast<size_t>(loaded.model->mimi.semantic_n_q + 1));
+  REQUIRE(partial_count > 0u);
+  REQUIRE(partial_count < codes.size());
+  std::vector<float> partial_decoded(static_cast<size_t>(g_frame_samples),
+                                     0.0f);
+  mimi::event::decode_frame partial_decode{
+      std::span<const int32_t>{codes.data(), partial_count},
+      std::span<float>{partial_decoded}};
+  partial_decode.error_out = &err;
+  partial_decode.on_done = emel::callback<void(
+      const mimi::events::decode_frame_done &)>::from<&on_decode_frame_done>();
+  REQUIRE(machine.process_event(partial_decode));
+  CHECK(err == emel::error::cast(mimi::error::none));
+  check_session_ready(machine);
+  CHECK(g_decode_done_count == 2u);
+  for (const float sample : partial_decoded) {
+    CHECK(std::isfinite(sample));
+  }
 
   // stream reset replays the exact same codes for the same first frame
   std::vector<int32_t> replay(codes.size(), -1);

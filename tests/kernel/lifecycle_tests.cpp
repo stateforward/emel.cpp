@@ -2,8 +2,10 @@
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <cmath>
 #include <concepts>
+#include <cstdint>
 #include <cstring>
 #include <span>
 #include <vector>
@@ -42,6 +44,8 @@ using emel::kernel::test::make_quantized_src;
 using emel::kernel::test::make_q8_k_vector_src;
 using emel::kernel::test::make_smoke_op_event;
 using emel::kernel::test::make_src;
+using emel::kernel::test::set_op_param_f32;
+using emel::kernel::test::set_op_param_i32;
 using emel::kernel::test::to_fp16_storage;
 using emel::kernel::test::within_flash_online_f16_tolerance;
 
@@ -79,6 +83,40 @@ void check_backend_op_paths(machine_type & machine,
 }
 
 }  // namespace
+
+TEST_CASE("kernel timestep rope preserves ggml f32 round points") {
+  const auto check_machine = [](auto & machine) {
+    std::array<float, 128> src = {};
+    std::array<float, 128> dst = {};
+    src[88] = std::bit_cast<float>(UINT32_C(0x3f91261c));
+    src[89] = std::bit_cast<float>(UINT32_C(0x3e9d87b5));
+    int32_t position = 9;
+
+    emel::kernel::event::op_rope rope_ev{
+      .src0 = make_src(src.data(), dtype::f32, 128, 1, 1),
+      .src1 = make_src(&position, dtype::i32, 1),
+      .dst = make_dst(dst.data(), dtype::f32, 128, 1, 1),
+    };
+    set_op_param_i32(rope_ev, 1u, 128);
+    set_op_param_i32(rope_ev, 2u,
+                     emel::kernel::detail::rope_mode_timestep);
+    set_op_param_f32(rope_ev, 5u, 10000.0f);
+    set_op_param_f32(rope_ev, 6u, 1.0f);
+    set_op_param_f32(rope_ev, 7u, 0.0f);
+    set_op_param_f32(rope_ev, 8u, 1.0f);
+
+    REQUIRE(machine.process_event(rope_ev));
+    CHECK(std::bit_cast<uint32_t>(dst[44]) == UINT32_C(0x3f908001));
+    CHECK(std::bit_cast<uint32_t>(dst[108]) == UINT32_C(0x3ea6cd3b));
+  };
+
+  x86_64_sm x86_machine{
+    emel::kernel::x86_64::action::context{false, {}, 0}};
+  aarch64_sm arm_machine{
+    emel::kernel::aarch64::action::context{false, {}, 0}};
+  check_machine(x86_machine);
+  check_machine(arm_machine);
+}
 
 TEST_CASE("kernel_mul_mat_accepts_quantized_qk_weights") {
   using emel::kernel::detail::quant::QK_K;
@@ -415,6 +453,8 @@ TEST_CASE("kernel_backends_accept_dispatch_event") {
   kernel_sm kernel_machine{};
   emel::kernel::any any_machine{};
 
+  CHECK(kernel_machine.kind() == emel::kernel::detect_host_kind());
+  CHECK(any_machine.kind() == emel::kernel::detect_host_kind());
   CHECK(x86_64_machine.process_event(event));
   CHECK(aarch64_machine.process_event(event));
   CHECK(kernel_machine.process_event(event));
@@ -703,6 +743,80 @@ TEST_CASE("kernel_detail_stride_paths_and_scalar_helpers") {
       .dst = make_dst(dst_storage, dtype::f32, 4),
   };
   CHECK_FALSE(emel::kernel::detail::execute_scalar(unsupported_ev));
+}
+
+TEST_CASE("kernel_soft_max_row_matches_ggml_arm64_neon_bits") {
+#if defined(__aarch64__) && defined(__ARM_NEON)
+  std::array<float, 16> values = {
+      0.25f,  -0.5f, 1.25f,  -3.0f, 2.5f, 0.0f,  -1.5f, 0.75f,
+      3.25f, -2.25f, 1.0f, 0.125f, -0.875f, 2.0f, -4.0f, 0.5f,
+  };
+  constexpr std::array<uint32_t, 16> expected = {
+      0x3caece97u, 0x3c25255eu, 0x3d6d965au, 0x3a58e566u,
+      0x3e4f50b8u, 0x3c8823cbu, 0x3b7303e3u, 0x3d101aa1u,
+      0x3edb717au, 0x3ae595a1u, 0x3d390880u, 0x3c9a4441u,
+      0x3be3018fu, 0x3dfb7c76u, 0x399f954fu, 0x3ce074e5u,
+  };
+
+  emel::kernel::detail::soft_max_row_ggml(
+      static_cast<int64_t>(values.size()), values.data());
+
+  for (size_t index = 0; index < values.size(); ++index) {
+    CHECK(std::bit_cast<uint32_t>(values[index]) == expected[index]);
+  }
+#endif
+}
+
+TEST_CASE("kernel_rms_norm_matches_ggml_float_square_order") {
+  std::array<float, 4096> src = {};
+  constexpr float eps = 1.0e-8f;
+  float scale = 0.0f;
+  uint32_t fixture_seed = 0u;
+  for (uint32_t seed = 1u; seed <= 4096u; ++seed) {
+    uint32_t state = seed;
+    for (size_t index = 0; index < src.size(); ++index) {
+      state = state * 1664525u + 1013904223u;
+      const int32_t centered = static_cast<int32_t>(state & 0xffffu) - 32768;
+      const int exponent = static_cast<int>((state >> 16u) % 18u) - 12;
+      src[index] =
+          std::ldexp(static_cast<float>(centered) / 32768.0f, exponent);
+    }
+
+    double ggml_sum = 0.0;
+    double widened_sum = 0.0;
+    for (const float value : src) {
+      ggml_sum += static_cast<double>(value * value);
+      widened_sum += static_cast<double>(value) * static_cast<double>(value);
+    }
+    const float mean = static_cast<float>(ggml_sum / src.size());
+    const float widened_mean = static_cast<float>(widened_sum / src.size());
+    scale = 1.0f / std::sqrt(mean + eps);
+    const float widened_scale = 1.0f / std::sqrt(widened_mean + eps);
+    if (std::bit_cast<uint32_t>(scale) !=
+        std::bit_cast<uint32_t>(widened_scale)) {
+      fixture_seed = seed;
+      break;
+    }
+  }
+  REQUIRE(fixture_seed != 0u);
+  std::array<float, 4096> expected = {};
+  for (size_t index = 0; index < src.size(); ++index) {
+    expected[index] = src[index] * scale;
+  }
+
+  std::array<float, 4096> actual = {};
+  emel::kernel::event::op_rms_norm rms_ev{
+      .src0 = make_src(src.data(), dtype::f32, src.size()),
+      .dst = make_dst(actual.data(), dtype::f32, actual.size()),
+  };
+  std::memcpy(rms_ev.op_params.data(), &eps, sizeof(eps));
+  rms_ev.op_params_size = sizeof(eps);
+  REQUIRE(emel::kernel::detail::run_rms_norm(rms_ev));
+
+  for (size_t index = 0; index < actual.size(); ++index) {
+    CHECK(std::bit_cast<uint32_t>(actual[index]) ==
+          std::bit_cast<uint32_t>(expected[index]));
+  }
 }
 
 TEST_CASE("kernel_backends_reject_quantized_dispatch_dtypes") {

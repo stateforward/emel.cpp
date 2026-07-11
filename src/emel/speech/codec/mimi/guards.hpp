@@ -80,9 +80,12 @@ struct guard_decode_request_valid {
                   const action::context &ctx) const noexcept {
     const auto &request = runtime_ev.request;
     // Mirror of the encode guard: codes are read and pcm_out is written.
+    const size_t code_count = request.codes.size();
     return request.codes.data() != nullptr &&
            request.pcm_out.data() != nullptr &&
-           request.codes.size() >= static_cast<size_t>(ctx.runtime.n_q) &&
+           code_count >= static_cast<size_t>(
+                             ctx.runtime.quantizer.semantic.level_count) &&
+           code_count <= static_cast<size_t>(ctx.runtime.n_q) &&
            request.pcm_out.size() >=
                static_cast<size_t>(ctx.runtime.frame_samples);
   }

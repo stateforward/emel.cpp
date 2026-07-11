@@ -146,23 +146,6 @@ src/emel/gbnf/sampler/token_parser/errors.hpp
 src/emel/gbnf/sampler/token_parser/events.hpp
 src/emel/gbnf/sampler/token_parser/guards.hpp
 src/emel/gbnf/sampler/token_parser/sm.hpp
-src/emel/generator/actions.hpp
-src/emel/generator/context.hpp
-src/emel/generator/detail.hpp
-src/emel/generator/errors.hpp
-src/emel/generator/events.hpp
-src/emel/generator/guards.hpp
-src/emel/generator/initializer/actions.hpp
-src/emel/generator/initializer/context.hpp
-src/emel/generator/initializer/detail.hpp
-src/emel/generator/initializer/guards.hpp
-src/emel/generator/initializer/sm.hpp
-src/emel/generator/prefill/actions.hpp
-src/emel/generator/prefill/context.hpp
-src/emel/generator/prefill/detail.hpp
-src/emel/generator/prefill/guards.hpp
-src/emel/generator/prefill/sm.hpp
-src/emel/generator/sm.hpp
 src/emel/gguf/loader/actions.hpp
 src/emel/gguf/loader/any.hpp
 src/emel/gguf/loader/context.hpp
@@ -307,8 +290,6 @@ src/emel/logits/sampler/actions.hpp
 src/emel/logits/sampler/context.hpp
 src/emel/logits/sampler/errors.hpp
 src/emel/logits/sampler/events.hpp
-src/emel/logits/sampler/guards.hpp
-src/emel/logits/sampler/sm.hpp
 src/emel/logits/validator/actions.hpp
 src/emel/logits/validator/context.hpp
 src/emel/logits/validator/errors.hpp
@@ -354,7 +335,6 @@ src/emel/model/loader/context.hpp
 src/emel/model/loader/detail.hpp
 src/emel/model/loader/events.hpp
 src/emel/model/loader/guards.hpp
-src/emel/model/moshi/detail.cpp
 src/emel/model/omniembed/detail.cpp
 src/emel/model/omniembed/detail.hpp
 src/emel/model/qwen3/detail.cpp
@@ -379,6 +359,7 @@ src/emel/speech/encoder/whisper/any.hpp
 src/emel/speech/encoder/whisper/context.hpp
 src/emel/speech/encoder/whisper/errors.hpp
 src/emel/speech/encoder/whisper/guards.hpp
+src/emel/speech/predictor/moshi/events.hpp
 src/emel/tensor/view/actions.hpp
 src/emel/tensor/view/context.hpp
 src/emel/tensor/view/detail.hpp
@@ -456,7 +437,6 @@ src/emel/text/formatter/sm.hpp
 src/emel/text/generator/actions.hpp
 src/emel/text/generator/context.hpp
 src/emel/text/generator/decode_wavefront/actions.hpp
-src/emel/text/generator/decode_wavefront/context.hpp
 src/emel/text/generator/decode_wavefront/errors.hpp
 src/emel/text/generator/decode_wavefront/events.hpp
 src/emel/text/generator/decode_wavefront/guards.hpp
@@ -603,7 +583,6 @@ tests/kernel/aarch64_tests.cpp
 tests/kernel/lifecycle_tests.cpp
 tests/kernel/test_helpers.hpp
 tests/kernel/x86_64_tests.cpp
-tests/logits/sampler/pipeline_tests.cpp
 tests/logits/validator/validator_tests.cpp
 tests/memory/hybrid/lifecycle_tests.cpp
 tests/memory/kv/lifecycle_tests.cpp
@@ -636,7 +615,6 @@ tests/text/generator/action_guard_tests.cpp
 tests/text/generator/decode_wavefront/lifecycle_tests.cpp
 tests/text/generator/determinism_tests.cpp
 tests/text/generator/initializer/lifecycle_tests.cpp
-tests/text/generator/legacy_compatibility_tests.cpp
 tests/text/generator/lifecycle_tests.cpp
 tests/text/generator/prefill/lifecycle_tests.cpp
 tests/text/generator/stream_window_tests.cpp

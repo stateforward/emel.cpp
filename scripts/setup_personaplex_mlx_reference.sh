@@ -131,10 +131,20 @@ if [[ ! -f "$MIMI_MODEL_EMEL" || "$MIMI_MODEL" -nt "$MIMI_MODEL_EMEL" ||
       "$CONVERTER" -nt "$MIMI_MODEL_EMEL" ]]; then
   # Use the interpreter discovered by the version check above: hosts that only
   # ship python3.12/python3.13 (no python3 shim) must convert with it too.
+  MIMI_FULL_N_Q="$($PYTHON_BIN - "$MOSHI_CONFIG" <<'PY'
+import json
+import sys
+
+value = json.load(open(sys.argv[1], encoding="utf-8")).get("n_q")
+if not isinstance(value, int) or value <= 0:
+    raise SystemExit("Mimi n_q must be a positive integer")
+print(value)
+PY
+)"
   "$PYTHON_BIN" "$ROOT_DIR/tools/bench/moshi_gguf_convert.py" \
     --source "$MIMI_MODEL" --output "$MIMI_MODEL_EMEL" \
     --manifest "${MIMI_MODEL_EMEL%.gguf}.manifest.json" \
-    --config "$MOSHI_CONFIG"
+    --config "$MOSHI_CONFIG" --mimi-n-q "$MIMI_FULL_N_Q"
 fi
 
 cat > "$DRIVER_SHIM" <<SHIM

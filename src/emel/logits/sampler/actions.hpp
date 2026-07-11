@@ -1,5 +1,11 @@
 #pragma once
 
+#include <algorithm>
+#include <cmath>
+#include <limits>
+
+#include "emel/kernel/detail.hpp"
+
 #include "emel/logits/sampler/context.hpp"
 #include "emel/logits/sampler/events.hpp"
 
@@ -85,6 +91,74 @@ struct advance_sampler_index {
   }
 };
 
+struct scale_temperature_logits {
+  void operator()(const event::sample_temperature_top_k_runtime &ev,
+                  context &) const noexcept {
+    const float inverse_temperature = 1.0f / ev.request.temperature;
+    for (int32_t index = 0; index < ev.request.card; ++index) {
+      ev.request.logits[static_cast<size_t>(index)] *= inverse_temperature;
+    }
+  }
+};
+
+struct compute_temperature_probabilities {
+  void operator()(const event::sample_temperature_top_k_runtime &ev,
+                  context &) const noexcept {
+    emel::kernel::detail::soft_max_row_ggml(ev.request.card,
+                                            ev.request.logits.data());
+  }
+};
+
+struct compute_temperature_top_k {
+  void operator()(const event::sample_temperature_top_k_runtime &ev,
+                  context &) const noexcept {
+    for (int32_t index = 0; index < ev.request.card; ++index) {
+      ev.request.sorted_indices[static_cast<size_t>(index)] = index;
+    }
+    std::sort(ev.request.sorted_indices.begin(),
+              ev.request.sorted_indices.begin() + ev.request.card,
+              [&ev](const int32_t lhs, const int32_t rhs) {
+                return ev.request.logits[static_cast<size_t>(lhs)] >
+                       ev.request.logits[static_cast<size_t>(rhs)];
+              });
+    for (int32_t slot = 0; slot < ev.request.top_k; ++slot) {
+      const int32_t index =
+          ev.request.sorted_indices[static_cast<size_t>(slot)];
+      ev.request.top_probabilities[static_cast<size_t>(slot)] =
+          ev.request.logits[static_cast<size_t>(index)];
+      ev.request.top_indices[static_cast<size_t>(slot)] = index;
+    }
+  }
+};
+
+struct select_temperature_top_k {
+  void operator()(const event::sample_temperature_top_k_runtime &ev,
+                  context &) const noexcept {
+    constexpr uint32_t multiplier = 16807u;
+    constexpr uint32_t modulus = 2147483647u;
+    constexpr float random_max = 2147483647.0f;
+    ev.request.selected_token_out = -1;
+    ev.request.selected_score_out = -std::numeric_limits<float>::infinity();
+    for (int32_t slot = 0; slot < ev.request.top_k; ++slot) {
+      ev.request.random_state = static_cast<uint32_t>(
+          (static_cast<uint64_t>(ev.request.random_state) * multiplier) %
+          modulus);
+      const float uniform =
+          static_cast<float>(ev.request.random_state) / random_max;
+      const float divisor = -std::log(uniform);
+      const float score =
+          ev.request.top_probabilities[static_cast<size_t>(slot)] / divisor;
+      const int32_t replace =
+          static_cast<int32_t>(score > ev.request.selected_score_out);
+      ev.request.selected_token_out =
+          replace * ev.request.top_indices[static_cast<size_t>(slot)] +
+          (1 - replace) * ev.request.selected_token_out;
+      ev.request.selected_score_out =
+          std::max(ev.request.selected_score_out, score);
+    }
+  }
+};
+
 struct publish_done {
   template <class runtime_event_type>
   void operator()(const runtime_event_type & ev, context &) const noexcept {
@@ -121,6 +195,11 @@ inline constexpr prepare_candidates prepare_candidates{};
 inline constexpr apply_sampler apply_sampler{};
 inline constexpr mark_sampler_error mark_sampler_error{};
 inline constexpr advance_sampler_index advance_sampler_index{};
+inline constexpr scale_temperature_logits scale_temperature_logits{};
+inline constexpr compute_temperature_probabilities
+    compute_temperature_probabilities{};
+inline constexpr compute_temperature_top_k compute_temperature_top_k{};
+inline constexpr select_temperature_top_k select_temperature_top_k{};
 inline constexpr publish_done publish_done{};
 inline constexpr publish_error publish_error{};
 inline constexpr on_unexpected on_unexpected{};

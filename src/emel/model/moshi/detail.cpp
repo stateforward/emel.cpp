@@ -1,5 +1,7 @@
 #include "emel/model/moshi/detail.hpp"
 
+#include <algorithm>
+#include <array>
 #include <climits>
 #include <cmath>
 #include <cstddef>
@@ -112,6 +114,12 @@ bool assign_optional_i32(const emel::model::detail::kv_binding &binding,
   return require_u32_as_i32(binding, key, field);
 }
 
+bool require_nonnegative_i32(const emel::model::detail::kv_binding &binding,
+                             const std::string_view key,
+                             int32_t &field) noexcept {
+  return require_u32_as_i32(binding, key, field) && field >= 0;
+}
+
 bool require_f32(const emel::model::detail::hparam_loader &loader,
                  const std::string_view key, float &field) noexcept {
   const auto *entry = emel::model::detail::find_kv_entry(loader.binding, key);
@@ -143,6 +151,60 @@ bool require_i32_array(const emel::model::detail::kv_binding &binding,
   }
 
   count_out = static_cast<uint32_t>(header.count);
+  return true;
+}
+
+bool assign_optional_i32_array(const emel::model::detail::kv_binding &binding,
+                               const std::string_view key,
+                               const std::span<int32_t> dst,
+                               uint32_t &count_out) noexcept {
+  const auto *entry = emel::model::detail::find_kv_entry(binding, key);
+  if (entry == nullptr) {
+    count_out = 0u;
+    return true;
+  }
+  return require_i32_array(binding, key, dst, count_out);
+}
+
+bool validate_lm_inference_hparams(
+    const emel::model::data::moshi_lm_hparams &lm) noexcept {
+  if (!lm.depformer_weights_per_step) {
+    return true;
+  }
+
+  const uint32_t codebook_count = static_cast<uint32_t>(lm.n_q) + 1u;
+  if (lm.inference_dep_q <= 0 || lm.inference_dep_q > lm.dep_q ||
+      lm.inference_dep_q > lm.n_q ||
+      lm.inference_prompt_token_count != codebook_count ||
+      lm.inference_pre_text_silence_frames < 0 ||
+      lm.inference_post_text_silence_frames < 0) {
+    return false;
+  }
+
+  if (lm.inference_prompt_tokens[0] < 0 ||
+      lm.inference_prompt_tokens[0] >= lm.text_card) {
+    return false;
+  }
+  for (uint32_t index = 1u; index < codebook_count; ++index) {
+    const int32_t token = lm.inference_prompt_tokens[index];
+    if (token < 0 || token >= lm.card) {
+      return false;
+    }
+  }
+
+  if (lm.depformer_weight_schedule_count > 0u) {
+    if (lm.depformer_weight_schedule_count != static_cast<uint32_t>(lm.dep_q)) {
+      return false;
+    }
+    for (uint32_t index = 0u; index < lm.depformer_weight_schedule_count;
+         ++index) {
+      const int32_t weight_index = lm.depformer_weight_schedule[index];
+      if (weight_index < 0 || weight_index >= lm.dep_q) {
+        return false;
+      }
+    }
+  }
+
   return true;
 }
 
@@ -210,10 +272,33 @@ bool load_lm_hparams(const emel::model::detail::hparam_loader &loader,
                      lm.depformer_multi_linear) ||
        !require_bool(binding, "moshi.lm.depformer.weights_per_step",
                      lm.depformer_weights_per_step) ||
+       !assign_optional_i32_array(
+           binding, "moshi.lm.depformer.weights_per_step_schedule",
+           std::span<int32_t>{lm.depformer_weight_schedule},
+           lm.depformer_weight_schedule_count) ||
        !assign_optional_i32(binding, "moshi.lm.depformer.low_rank_embeddings",
                             lm.depformer_low_rank_embeddings) ||
        !lm.depformer_multi_linear ||
        lm.depformer_dim % lm.depformer_num_heads != 0)) {
+    return false;
+  }
+
+  if (lm.depformer_weights_per_step &&
+      (!require_positive_i32(binding, "moshi.lm.inference.dep_q",
+                             lm.inference_dep_q) ||
+       !require_nonnegative_i32(binding,
+                                "moshi.lm.inference.pre_text_silence_frames",
+                                lm.inference_pre_text_silence_frames) ||
+       !require_nonnegative_i32(binding,
+                                "moshi.lm.inference.post_text_silence_frames",
+                                lm.inference_post_text_silence_frames) ||
+       !require_i32_array(binding, "moshi.lm.inference.prompt_tokens",
+                          std::span<int32_t>{lm.inference_prompt_tokens},
+                          lm.inference_prompt_token_count))) {
+    return false;
+  }
+
+  if (!validate_lm_inference_hparams(lm)) {
     return false;
   }
 
@@ -296,42 +381,23 @@ bool tensor_has_storage(
     return false;
   }
 
-  uint64_t rows = 1u;
+  std::array<uint64_t, 4> dims = {1u, 1u, 1u, 1u};
   for (int32_t dim = 0; dim < tensor.n_dims; ++dim) {
     if (tensor.dims[static_cast<size_t>(dim)] <= 0) {
       return false;
     }
-    const uint64_t extent =
+    dims[static_cast<size_t>(dim)] =
         static_cast<uint64_t>(tensor.dims[static_cast<size_t>(dim)]);
-    if (dim > 0) {
-      if (extent > UINT64_MAX / rows) {
-        return false;
-      }
-      rows *= extent;
-    }
   }
 
-  const auto layout =
-      emel::gguf::loader::detail::ggml_layout(
-          static_cast<uint32_t>(tensor.type));
-  if (layout.block_size == 0u || layout.type_size == 0u) {
+  uint64_t required_bytes = 0u;
+  const emel::error::type size_err =
+      emel::gguf::loader::detail::compute_tensor_data_size(
+          dims, static_cast<uint32_t>(tensor.n_dims),
+          static_cast<uint32_t>(tensor.type), required_bytes);
+  if (size_err != emel::error::cast(emel::gguf::loader::error::none)) {
     return false;
   }
-
-  const uint64_t cols = static_cast<uint64_t>(tensor.dims[0]);
-  if (cols % layout.block_size != 0u) {
-    return false;
-  }
-  const uint64_t blocks_per_row = cols / layout.block_size;
-  if (blocks_per_row > UINT64_MAX / rows) {
-    return false;
-  }
-  const uint64_t blocks = blocks_per_row * rows;
-  if (blocks > UINT64_MAX / layout.type_size) {
-    return false;
-  }
-  const uint64_t required_bytes =
-      blocks * static_cast<uint64_t>(layout.type_size);
 
   return tensor.data_size >= required_bytes;
 }
@@ -353,16 +419,17 @@ bool tensor_has_lm_execution_storage(
   case 11: // Q3_K
   case 12: // Q4_K
   case 14: // Q6_K
+  case 42: // EMEL Q4_K x8 BL8
     return true;
   default:
     return false;
   }
 }
 
-bool assign_family_view(const emel::model::data &model_data,
-                        const std::string_view prefix,
-                        family_view &family_out,
-                        const bool require_lm_execution_storage = false) noexcept {
+bool assign_family_view(
+    const emel::model::data &model_data, const std::string_view prefix,
+    family_view &family_out,
+    const bool require_lm_execution_storage = false) noexcept {
   family_out = {};
   family_out.prefix = prefix;
 
@@ -397,6 +464,20 @@ find_tensor(const emel::model::data &model_data,
   }
 
   return nullptr;
+}
+
+bool bind_exact_tensor(const emel::model::data &model_data,
+                       const std::string_view name,
+                       tensor_view &view_out) noexcept {
+  const auto *tensor = find_tensor(model_data, name);
+  if (tensor == nullptr) {
+    return false;
+  }
+  view_out = tensor_view{
+      .tensor = tensor,
+      .name = emel::model::tensor_name_view(model_data, *tensor),
+  };
+  return true;
 }
 
 bool has_tensor(const emel::model::data &model_data,
@@ -456,8 +537,7 @@ bool has_projection_tensor(const emel::model::data &model_data,
     return false;
   }
   return q8_class ? tensor->type == k_dtype_q8_0
-                  : tensor->type == k_dtype_f32 ||
-                        tensor->type == k_dtype_f16;
+                  : tensor->type == k_dtype_f32 || tensor->type == k_dtype_f16;
 }
 
 bool require_tensor_shape(const emel::model::data &model_data,
@@ -478,6 +558,26 @@ bool require_tensor_shape(const emel::model::data &model_data,
   }
 
   return true;
+}
+
+bool require_lm_embedding_tensor_shape(
+    const emel::model::data &model_data, const std::string_view name,
+    const std::initializer_list<int64_t> dims) noexcept {
+  if (!require_tensor_shape(model_data, name, dims)) {
+    return false;
+  }
+  const auto *tensor = find_tensor(model_data, name);
+  switch (tensor->type) {
+  case 0:  // F32
+  case 1:  // F16
+  case 2:  // Q4_0
+  case 8:  // Q8_0
+  case 12: // Q4_K
+  case 30: // BF16
+    return true;
+  default:
+    return false;
+  }
 }
 
 bool has_indexed_tensor(const emel::model::data &model_data, const char *format,
@@ -527,8 +627,7 @@ bool has_depformer_block(const emel::model::data &model_data,
               block_index));
 }
 
-uint32_t
-count_tensors_with_storage(
+uint32_t count_tensors_with_storage(
     const emel::model::data &model_data,
     const bool require_lm_execution_storage = false) noexcept {
   uint32_t count = 0u;
@@ -575,14 +674,120 @@ emel::error::type validate_lm_contract(const emel::model::data &model_data,
                            {dim, text_card + 1}) &&
       require_tensor_shape(model_data, "lm.text_linear.weight",
                            {dim, text_card}) &&
-      require_tensor_shape(model_data, "lm.emb.0.weight", {dim, card + 1}) &&
+      require_lm_embedding_tensor_shape(model_data, "lm.emb.0.weight",
+                                        {dim, card + 1}) &&
       has_tensor(model_data, "lm.out_norm.alpha");
   if (!shapes_ok) {
     return emel::error::cast(emel::model::loader::error::model_invalid);
   }
 
+  if (lm.n_q > emel::model::data::moshi_lm_hparams::k_max_delays) {
+    return emel::error::cast(emel::model::loader::error::model_invalid);
+  }
+  const auto *text_embedding = find_tensor(model_data, "lm.text_emb.weight");
+  contract_out.text_embedding = tensor_view{
+      .tensor = text_embedding,
+      .name = emel::model::tensor_name_view(model_data, *text_embedding),
+  };
+  const auto *output_norm = find_tensor(model_data, "lm.out_norm.alpha");
+  contract_out.output_norm = tensor_view{
+      .tensor = output_norm,
+      .name = emel::model::tensor_name_view(model_data, *output_norm),
+  };
+  const auto *text_output_projection =
+      find_tensor(model_data, "lm.text_linear.weight");
+  contract_out.text_output_projection = tensor_view{
+      .tensor = text_output_projection,
+      .name =
+          emel::model::tensor_name_view(model_data, *text_output_projection),
+  };
+  for (int32_t codebook = 0; codebook < lm.n_q; ++codebook) {
+    char name[96] = {};
+    const int written =
+        std::snprintf(name, sizeof(name), "lm.emb.%d.weight", codebook);
+    if (written <= 0 || static_cast<size_t>(written) >= sizeof(name)) {
+      return emel::error::cast(emel::model::loader::error::model_invalid);
+    }
+    const std::string_view embedding_name{name, static_cast<size_t>(written)};
+    if (!require_lm_embedding_tensor_shape(model_data, embedding_name,
+                                           {dim, card + 1})) {
+      return emel::error::cast(emel::model::loader::error::model_invalid);
+    }
+    const auto *audio_embedding = find_tensor(model_data, embedding_name);
+    contract_out.audio_embeddings[static_cast<size_t>(codebook)] = tensor_view{
+        .tensor = audio_embedding,
+        .name = emel::model::tensor_name_view(model_data, *audio_embedding),
+    };
+  }
+
+  if (lm.num_layers > emel::model::data::moshi_lm_hparams::k_max_delays) {
+    return emel::error::cast(emel::model::loader::error::model_invalid);
+  }
   for (int32_t block = 0; block < lm.num_layers; ++block) {
     if (!has_lm_transformer_block(model_data, block)) {
+      return emel::error::cast(emel::model::loader::error::model_invalid);
+    }
+    auto &layer = contract_out.temporal_layers[static_cast<size_t>(block)];
+    char name[128] = {};
+    int written = std::snprintf(name, sizeof(name),
+                                "lm.transformer.layers.%d.norm1.alpha", block);
+    if (written <= 0 || static_cast<size_t>(written) >= sizeof(name) ||
+        !bind_exact_tensor(model_data,
+                           std::string_view{name, static_cast<size_t>(written)},
+                           layer.norm1)) {
+      return emel::error::cast(emel::model::loader::error::model_invalid);
+    }
+    written = std::snprintf(
+        name, sizeof(name),
+        "lm.transformer.layers.%d.self_attn.in_projs.0.weight", block);
+    if (written <= 0 || static_cast<size_t>(written) >= sizeof(name)) {
+      return emel::error::cast(emel::model::loader::error::model_invalid);
+    }
+    (void)bind_exact_tensor(
+        model_data, std::string_view{name, static_cast<size_t>(written)},
+        layer.split_input_projection);
+    written = std::snprintf(name, sizeof(name),
+                            "lm.transformer.layers.%d.self_attn.in_proj_weight",
+                            block);
+    if (written <= 0 || static_cast<size_t>(written) >= sizeof(name)) {
+      return emel::error::cast(emel::model::loader::error::model_invalid);
+    }
+    (void)bind_exact_tensor(
+        model_data, std::string_view{name, static_cast<size_t>(written)},
+        layer.fused_input_projection);
+    written = std::snprintf(
+        name, sizeof(name),
+        "lm.transformer.layers.%d.self_attn.out_projs.0.weight", block);
+    if (written <= 0 || static_cast<size_t>(written) >= sizeof(name) ||
+        !bind_exact_tensor(model_data,
+                           std::string_view{name, static_cast<size_t>(written)},
+                           layer.output_projection)) {
+      return emel::error::cast(emel::model::loader::error::model_invalid);
+    }
+    written = std::snprintf(name, sizeof(name),
+                            "lm.transformer.layers.%d.norm2.alpha", block);
+    if (written <= 0 || static_cast<size_t>(written) >= sizeof(name) ||
+        !bind_exact_tensor(model_data,
+                           std::string_view{name, static_cast<size_t>(written)},
+                           layer.norm2)) {
+      return emel::error::cast(emel::model::loader::error::model_invalid);
+    }
+    written = std::snprintf(name, sizeof(name),
+                            "lm.transformer.layers.%d.gating.linear_in.weight",
+                            block);
+    if (written <= 0 || static_cast<size_t>(written) >= sizeof(name) ||
+        !bind_exact_tensor(model_data,
+                           std::string_view{name, static_cast<size_t>(written)},
+                           layer.gating_input)) {
+      return emel::error::cast(emel::model::loader::error::model_invalid);
+    }
+    written = std::snprintf(name, sizeof(name),
+                            "lm.transformer.layers.%d.gating.linear_out.weight",
+                            block);
+    if (written <= 0 || static_cast<size_t>(written) >= sizeof(name) ||
+        !bind_exact_tensor(model_data,
+                           std::string_view{name, static_cast<size_t>(written)},
+                           layer.gating_output)) {
       return emel::error::cast(emel::model::loader::error::model_invalid);
     }
   }
@@ -607,9 +812,184 @@ emel::error::type validate_lm_contract(const emel::model::data &model_data,
       return emel::error::cast(emel::model::loader::error::model_invalid);
     }
 
+    std::array<bool, emel::model::data::moshi_lm_hparams::k_max_delays>
+        required_weight_indices = {};
+    if (lm.depformer_weights_per_step &&
+        lm.depformer_weight_schedule_count > 0u) {
+      for (uint32_t index = 0u; index < lm.depformer_weight_schedule_count;
+           ++index) {
+        const int32_t weight_index = lm.depformer_weight_schedule[index];
+        if (weight_index < 0 || weight_index >= lm.dep_q) {
+          return emel::error::cast(emel::model::loader::error::model_invalid);
+        }
+        required_weight_indices[static_cast<size_t>(weight_index)] = true;
+      }
+    } else {
+      std::fill_n(required_weight_indices.begin(), lm.dep_q, true);
+    }
+
+    const auto *depformer_text_embedding =
+        find_tensor(model_data, "lm.depformer_text_emb.weight");
+    if (depformer_text_embedding == nullptr ||
+        !require_lm_embedding_tensor_shape(model_data,
+                                           "lm.depformer_text_emb.weight",
+                                           {lm.depformer_dim, text_card + 1})) {
+      return emel::error::cast(emel::model::loader::error::model_invalid);
+    }
+    contract_out.depformer_text_embedding = tensor_view{
+        .tensor = depformer_text_embedding,
+        .name = emel::model::tensor_name_view(model_data,
+                                              *depformer_text_embedding),
+    };
+    for (int32_t codebook = 0; codebook < lm.dep_q; ++codebook) {
+      char name[96] = {};
+      int written = 0;
+      if (required_weight_indices[static_cast<size_t>(codebook)]) {
+        written = std::snprintf(name, sizeof(name), "lm.depformer_in.%d.weight",
+                                codebook);
+        if (written <= 0 || static_cast<size_t>(written) >= sizeof(name)) {
+          return emel::error::cast(emel::model::loader::error::model_invalid);
+        }
+        const auto *input_projection = find_tensor(
+            model_data, std::string_view{name, static_cast<size_t>(written)});
+        if (input_projection == nullptr) {
+          return emel::error::cast(emel::model::loader::error::model_invalid);
+        }
+        contract_out
+            .depformer_input_projections[static_cast<size_t>(codebook)] =
+            tensor_view{
+                .tensor = input_projection,
+                .name = emel::model::tensor_name_view(model_data,
+                                                      *input_projection),
+            };
+      }
+
+      written =
+          std::snprintf(name, sizeof(name), "lm.linears.%d.weight", codebook);
+      if (written <= 0 || static_cast<size_t>(written) >= sizeof(name)) {
+        return emel::error::cast(emel::model::loader::error::model_invalid);
+      }
+      const auto *output_projection = find_tensor(
+          model_data, std::string_view{name, static_cast<size_t>(written)});
+      if (output_projection == nullptr) {
+        return emel::error::cast(emel::model::loader::error::model_invalid);
+      }
+      contract_out.depformer_output_projections[static_cast<size_t>(codebook)] =
+          tensor_view{
+              .tensor = output_projection,
+              .name =
+                  emel::model::tensor_name_view(model_data, *output_projection),
+          };
+
+      if (codebook > 0) {
+        written = std::snprintf(name, sizeof(name),
+                                "lm.depformer_emb.%d.weight", codebook - 1);
+        if (written <= 0 || static_cast<size_t>(written) >= sizeof(name)) {
+          return emel::error::cast(emel::model::loader::error::model_invalid);
+        }
+        const auto *audio_embedding = find_tensor(
+            model_data, std::string_view{name, static_cast<size_t>(written)});
+        if (audio_embedding == nullptr ||
+            !require_lm_embedding_tensor_shape(
+                model_data,
+                std::string_view{name, static_cast<size_t>(written)},
+                {lm.depformer_dim, card + 1})) {
+          return emel::error::cast(emel::model::loader::error::model_invalid);
+        }
+        contract_out.depformer_audio_embeddings[static_cast<size_t>(
+            codebook - 1)] = tensor_view{
+            .tensor = audio_embedding,
+            .name = emel::model::tensor_name_view(model_data, *audio_embedding),
+        };
+      }
+    }
+
+    if (lm.depformer_num_layers >
+        emel::model::data::moshi_lm_hparams::k_max_delays) {
+      return emel::error::cast(emel::model::loader::error::model_invalid);
+    }
     for (int32_t block = 0; block < lm.depformer_num_layers; ++block) {
       if (!has_depformer_block(model_data, block)) {
         return emel::error::cast(emel::model::loader::error::model_invalid);
+      }
+      auto &layer = contract_out.depformer_layers[static_cast<size_t>(block)];
+      char name[160] = {};
+      int written = std::snprintf(name, sizeof(name),
+                                  "lm.depformer.layers.%d.norm1.alpha", block);
+      if (written <= 0 || static_cast<size_t>(written) >= sizeof(name) ||
+          !bind_exact_tensor(
+              model_data, std::string_view{name, static_cast<size_t>(written)},
+              layer.norm1)) {
+        return emel::error::cast(emel::model::loader::error::model_invalid);
+      }
+      written = std::snprintf(name, sizeof(name),
+                              "lm.depformer.layers.%d.norm2.alpha", block);
+      if (written <= 0 || static_cast<size_t>(written) >= sizeof(name) ||
+          !bind_exact_tensor(
+              model_data, std::string_view{name, static_cast<size_t>(written)},
+              layer.norm2)) {
+        return emel::error::cast(emel::model::loader::error::model_invalid);
+      }
+      for (int32_t codebook = 0; codebook < lm.dep_q; ++codebook) {
+        if (!required_weight_indices[static_cast<size_t>(codebook)]) {
+          continue;
+        }
+        auto &codebook_layer = layer.codebooks[static_cast<size_t>(codebook)];
+        written =
+            std::snprintf(name, sizeof(name),
+                          "lm.depformer.layers.%d.self_attn.in_projs.%d.weight",
+                          block, codebook);
+        if (written <= 0 || static_cast<size_t>(written) >= sizeof(name)) {
+          return emel::error::cast(emel::model::loader::error::model_invalid);
+        }
+        const bool split_input_bound = bind_exact_tensor(
+            model_data, std::string_view{name, static_cast<size_t>(written)},
+            codebook_layer.split_input_projection);
+        written = std::snprintf(
+            name, sizeof(name),
+            "lm.depformer.layers.%d.self_attn.in_proj_weight", block);
+        if (written <= 0 || static_cast<size_t>(written) >= sizeof(name)) {
+          return emel::error::cast(emel::model::loader::error::model_invalid);
+        }
+        const bool fused_input_bound = bind_exact_tensor(
+            model_data, std::string_view{name, static_cast<size_t>(written)},
+            codebook_layer.fused_input_projection);
+        if (!split_input_bound && !fused_input_bound) {
+          return emel::error::cast(emel::model::loader::error::model_invalid);
+        }
+        written = std::snprintf(
+            name, sizeof(name),
+            "lm.depformer.layers.%d.self_attn.out_projs.%d.weight", block,
+            codebook);
+        if (written <= 0 || static_cast<size_t>(written) >= sizeof(name) ||
+            !bind_exact_tensor(
+                model_data,
+                std::string_view{name, static_cast<size_t>(written)},
+                codebook_layer.output_projection)) {
+          return emel::error::cast(emel::model::loader::error::model_invalid);
+        }
+        written =
+            std::snprintf(name, sizeof(name),
+                          "lm.depformer.layers.%d.gating.%d.linear_in.weight",
+                          block, codebook);
+        if (written <= 0 || static_cast<size_t>(written) >= sizeof(name) ||
+            !bind_exact_tensor(
+                model_data,
+                std::string_view{name, static_cast<size_t>(written)},
+                codebook_layer.gating_input)) {
+          return emel::error::cast(emel::model::loader::error::model_invalid);
+        }
+        written =
+            std::snprintf(name, sizeof(name),
+                          "lm.depformer.layers.%d.gating.%d.linear_out.weight",
+                          block, codebook);
+        if (written <= 0 || static_cast<size_t>(written) >= sizeof(name) ||
+            !bind_exact_tensor(
+                model_data,
+                std::string_view{name, static_cast<size_t>(written)},
+                codebook_layer.gating_output)) {
+          return emel::error::cast(emel::model::loader::error::model_invalid);
+        }
       }
     }
   }
@@ -672,35 +1052,31 @@ emel::error::type validate_mimi_contract(const emel::model::data &model_data,
                                       "mimi.quantizer.rvq_first.vq.layers.%d."
                                       "_codebook.embedding",
                                       level);
-    quantizer_ok = written > 0 && static_cast<size_t>(written) < sizeof(name) &&
-                   require_tensor_shape(
-                       model_data,
-                       std::string_view{name, static_cast<size_t>(written)},
-                       {codebook_dim, card}) &&
-                   // bind_rvq_split consumes codebooks via tensor_is_float
-                   has_float_tensor_with_elements(
-                       model_data,
-                       std::string_view{name, static_cast<size_t>(written)},
-                       static_cast<uint64_t>(codebook_dim) *
-                           static_cast<uint64_t>(card));
+    quantizer_ok =
+        written > 0 && static_cast<size_t>(written) < sizeof(name) &&
+        require_tensor_shape(
+            model_data, std::string_view{name, static_cast<size_t>(written)},
+            {codebook_dim, card}) &&
+        // bind_rvq_split consumes codebooks via tensor_is_float
+        has_float_tensor_with_elements(
+            model_data, std::string_view{name, static_cast<size_t>(written)},
+            static_cast<uint64_t>(codebook_dim) * static_cast<uint64_t>(card));
   }
-  for (int32_t level = 0;
-       quantizer_ok && level < mimi.n_q - mimi.semantic_n_q; ++level) {
+  for (int32_t level = 0; quantizer_ok && level < mimi.n_q - mimi.semantic_n_q;
+       ++level) {
     char name[96] = {};
     const int written = std::snprintf(name, sizeof(name),
                                       "mimi.quantizer.rvq_rest.vq.layers.%d."
                                       "_codebook.embedding",
                                       level);
-    quantizer_ok = written > 0 && static_cast<size_t>(written) < sizeof(name) &&
-                   require_tensor_shape(
-                       model_data,
-                       std::string_view{name, static_cast<size_t>(written)},
-                       {codebook_dim, card}) &&
-                   has_float_tensor_with_elements(
-                       model_data,
-                       std::string_view{name, static_cast<size_t>(written)},
-                       static_cast<uint64_t>(codebook_dim) *
-                           static_cast<uint64_t>(card));
+    quantizer_ok =
+        written > 0 && static_cast<size_t>(written) < sizeof(name) &&
+        require_tensor_shape(
+            model_data, std::string_view{name, static_cast<size_t>(written)},
+            {codebook_dim, card}) &&
+        has_float_tensor_with_elements(
+            model_data, std::string_view{name, static_cast<size_t>(written)},
+            static_cast<uint64_t>(codebook_dim) * static_cast<uint64_t>(card));
   }
   if (!quantizer_ok) {
     return emel::error::cast(emel::model::loader::error::model_invalid);
@@ -743,9 +1119,9 @@ emel::error::type validate_mimi_contract(const emel::model::data &model_data,
     for (int32_t layer = 0;
          transformers_ok && layer < mimi.transformer_num_layers; ++layer) {
       char base[96] = {};
-      const int base_len = std::snprintf(
-          base, sizeof(base), "mimi.%s.transformer.layers.%d.",
-          k_transformer_families[family], layer);
+      const int base_len =
+          std::snprintf(base, sizeof(base), "mimi.%s.transformer.layers.%d.",
+                        k_transformer_families[family], layer);
       if (base_len <= 0 || static_cast<size_t>(base_len) >= sizeof(base)) {
         transformers_ok = false;
         break;
@@ -791,34 +1167,27 @@ emel::error::type validate_mimi_contract(const emel::model::data &model_data,
           has_projection_tensor(model_data,
                                 layer_name("self_attn.in_projs.0.weight", name),
                                 dim_elements * 3u * dim_elements, proj_q8) &&
-          has_projection_tensor(model_data,
-                                layer_name("self_attn.out_projs.0.weight",
-                                           name),
-                                dim_elements * dim_elements, proj_q8) &&
+          has_projection_tensor(
+              model_data, layer_name("self_attn.out_projs.0.weight", name),
+              dim_elements * dim_elements, proj_q8) &&
           has_projection_tensor(model_data, layer_name("linear2.weight", name),
                                 dim_elements * mlp_elements, proj_q8) &&
           // norms, biases, and layer scales bind through prepare_vector,
           // which accepts only f32/f16.
-          has_float_tensor_with_elements(model_data,
-                                         layer_name("norm1.weight", name),
-                                         dim_elements) &&
-          has_float_tensor_with_elements(model_data,
-                                         layer_name("norm1.bias", name),
-                                         dim_elements) &&
-          has_float_tensor_with_elements(model_data,
-                                         layer_name("norm2.weight", name),
-                                         dim_elements) &&
-          has_float_tensor_with_elements(model_data,
-                                         layer_name("norm2.bias", name),
-                                         dim_elements) &&
-          has_float_tensor_with_elements(model_data,
-                                         layer_name("layer_scale_1.scale",
-                                                    name),
-                                         dim_elements) &&
-          has_float_tensor_with_elements(model_data,
-                                         layer_name("layer_scale_2.scale",
-                                                    name),
-                                         dim_elements);
+          has_float_tensor_with_elements(
+              model_data, layer_name("norm1.weight", name), dim_elements) &&
+          has_float_tensor_with_elements(
+              model_data, layer_name("norm1.bias", name), dim_elements) &&
+          has_float_tensor_with_elements(
+              model_data, layer_name("norm2.weight", name), dim_elements) &&
+          has_float_tensor_with_elements(
+              model_data, layer_name("norm2.bias", name), dim_elements) &&
+          has_float_tensor_with_elements(
+              model_data, layer_name("layer_scale_1.scale", name),
+              dim_elements) &&
+          has_float_tensor_with_elements(
+              model_data, layer_name("layer_scale_2.scale", name),
+              dim_elements);
     }
   }
   if (!transformers_ok) {
@@ -839,8 +1208,8 @@ emel::error::type validate_mimi_contract(const emel::model::data &model_data,
       find_tensor(model_data, "mimi.encoder.model.0.conv.conv.weight");
   const bool conv_f16 =
       first_conv != nullptr && first_conv->type == k_dtype_f16;
-  const uint64_t proj_elements =
-      static_cast<uint64_t>(mimi.dim) * static_cast<uint64_t>(mimi.codebook_dim);
+  const uint64_t proj_elements = static_cast<uint64_t>(mimi.dim) *
+                                 static_cast<uint64_t>(mimi.codebook_dim);
   const auto *first_rvq_proj =
       find_tensor(model_data, "mimi.quantizer.rvq_first.input_proj.weight");
   const bool rvq_q8 =
@@ -867,12 +1236,11 @@ emel::error::type validate_mimi_contract(const emel::model::data &model_data,
   for (size_t split = 0; projections_ok && split < 2u; ++split) {
     char name[96] = {};
     const int in_len =
-        std::snprintf(name, sizeof(name),
-                      "mimi.quantizer.%s.input_proj.weight", k_rvq_splits[split]);
+        std::snprintf(name, sizeof(name), "mimi.quantizer.%s.input_proj.weight",
+                      k_rvq_splits[split]);
     projections_ok =
         in_len > 0 && static_cast<size_t>(in_len) < sizeof(name) &&
-        rvq_projection_ok(
-            std::string_view{name, static_cast<size_t>(in_len)});
+        rvq_projection_ok(std::string_view{name, static_cast<size_t>(in_len)});
     if (!projections_ok) {
       break;
     }
@@ -881,8 +1249,7 @@ emel::error::type validate_mimi_contract(const emel::model::data &model_data,
                                       k_rvq_splits[split]);
     projections_ok =
         out_len > 0 && static_cast<size_t>(out_len) < sizeof(name) &&
-        rvq_projection_ok(
-            std::string_view{name, static_cast<size_t>(out_len)});
+        rvq_projection_ok(std::string_view{name, static_cast<size_t>(out_len)});
   }
   if (!projections_ok) {
     return emel::error::cast(emel::model::loader::error::model_invalid);
@@ -897,11 +1264,11 @@ emel::error::type validate_mimi_contract(const emel::model::data &model_data,
   // stride otherwise validates and fails codec initialization. plan_codec
   // also selects the f16 conv operand class from the first encoder conv and
   // bind_conv requires raw f16 taps on every non-transposed conv.
-  const auto resolve_conv = [&model_data, conv_f16](
-                                const std::string_view name,
-                                const int64_t in_channels,
-                                const bool transposed, int64_t &taps_out,
-                                int64_t &out_channels_out) noexcept {
+  const auto resolve_conv = [&model_data,
+                             conv_f16](const std::string_view name,
+                                       const int64_t in_channels,
+                                       const bool transposed, int64_t &taps_out,
+                                       int64_t &out_channels_out) noexcept {
     const auto *weight = find_tensor(model_data, name);
     constexpr int32_t k_dtype_f32 = 0;
     if (weight == nullptr || !tensor_has_storage(*weight) ||
@@ -941,17 +1308,18 @@ emel::error::type validate_mimi_contract(const emel::model::data &model_data,
     int32_t stride;
   };
   static constexpr seanet_module k_encoder_modules[] = {
-      {0, 0, 1}, {1, 2, 1}, {3, 0, 4}, {4, 2, 1},  {6, 0, 5},
+      {0, 0, 1}, {1, 2, 1}, {3, 0, 4},  {4, 2, 1},  {6, 0, 5},
       {7, 2, 1}, {9, 0, 6}, {10, 2, 1}, {12, 0, 8}, {14, 0, 1},
   };
   static constexpr seanet_module k_decoder_modules[] = {
-      {0, 0, 1}, {2, 1, 8}, {3, 2, 1}, {5, 1, 6},  {6, 2, 1},
+      {0, 0, 1}, {2, 1, 8}, {3, 2, 1},  {5, 1, 6},  {6, 2, 1},
       {8, 1, 5}, {9, 2, 1}, {11, 1, 4}, {12, 2, 1}, {14, 0, 1},
   };
-  const auto walk_seanet = [&resolve_conv](const char *family,
-                                           std::span<const seanet_module> modules,
-                                           int64_t channels,
-                                           int64_t &channels_out) noexcept {
+  const auto walk_seanet = [&resolve_conv](
+                               const char *family,
+                               std::span<const seanet_module> modules,
+                               int64_t channels,
+                               int64_t &channels_out) noexcept {
     for (const seanet_module &module : modules) {
       char name[112] = {};
       if (module.kind == 2u) {
@@ -999,8 +1367,8 @@ emel::error::type validate_mimi_contract(const emel::model::data &model_data,
   int64_t decoder_channels = 0;
   int64_t down_taps = 0;
   int64_t down_out = 0;
-  const auto *upsample = find_tensor(
-      model_data, "mimi.upsample.convtr.convtr.convtr.weight");
+  const auto *upsample =
+      find_tensor(model_data, "mimi.upsample.convtr.convtr.convtr.weight");
   uint64_t upsample_elements = 0u;
   if (upsample != nullptr && tensor_has_storage(*upsample)) {
     upsample_elements = 1u;
@@ -1010,12 +1378,10 @@ emel::error::type validate_mimi_contract(const emel::model::data &model_data,
     }
   }
   const bool seanet_ok =
-      walk_seanet("encoder",
-                  std::span<const seanet_module>{k_encoder_modules},
+      walk_seanet("encoder", std::span<const seanet_module>{k_encoder_modules},
                   1, encoder_channels) &&
       encoder_channels == dim &&
-      walk_seanet("decoder",
-                  std::span<const seanet_module>{k_decoder_modules},
+      walk_seanet("decoder", std::span<const seanet_module>{k_decoder_modules},
                   dim, decoder_channels) &&
       decoder_channels == 1 &&
       resolve_conv("mimi.downsample.conv.conv.conv.weight", dim, false,
@@ -1046,7 +1412,6 @@ emel::error::type validate_mimi_contract(const emel::model::data &model_data,
       static_cast<int32_t>(frame_ratio) != k_mimi_frame_samples) {
     return emel::error::cast(emel::model::loader::error::model_invalid);
   }
-
 
   return emel::error::cast(emel::model::loader::error::none);
 }
