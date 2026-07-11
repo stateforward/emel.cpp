@@ -90,6 +90,15 @@ def common_token_prefix(left: list[list[int]], right: list[list[int]]) -> int:
   return count
 
 
+def append_text_parity_reason(reasons: list[str], emel_text: list[int],
+                              ref_text: list[int], text_match: float) -> None:
+  if len(emel_text) != len(ref_text):
+    reasons.append("text frame count mismatch")
+  elif text_match != 1.0:
+    reasons.append(
+        f"text token match is {text_match:.6f}, expected 1.0")
+
+
 def read_wav(path: Path) -> tuple[int, list[float]]:
   with wave.open(str(path), "rb") as source:
     if (source.getnchannels(), source.getsampwidth()) != (1, 2):
@@ -286,6 +295,7 @@ def main() -> int:
     reasons.append("input frame count mismatch")
   if len(emel_output) != args.frames or len(ref_output) != args.frames:
     reasons.append("output frame count mismatch")
+  append_text_parity_reason(reasons, emel_text, ref_text, text_match)
   if input_match != 1.0:
     reasons.append(f"same-WAV input token match is {input_match:.6f}, expected 1.0")
   if output_match < args.min_output_match:

@@ -337,7 +337,6 @@ src/emel/model/loader/context.hpp
 src/emel/model/loader/detail.hpp
 src/emel/model/loader/events.hpp
 src/emel/model/loader/guards.hpp
-src/emel/model/moshi/detail.cpp
 src/emel/model/omniembed/detail.cpp
 src/emel/model/omniembed/detail.hpp
 src/emel/model/qwen3/detail.cpp
@@ -593,7 +592,6 @@ tests/memory/kv/lifecycle_tests.cpp
 tests/memory/recurrent/lifecycle_tests.cpp
 tests/model/fixture_manifest_tests.cpp
 tests/model/loader/lifecycle_tests.cpp
-tests/model/moshi/binding_tests.cpp
 tests/model/tensor/lifecycle_tests.cpp
 tests/model/tensor/window/lifecycle_tests.cpp
 tests/model/tensor/window/streaming_tests.cpp

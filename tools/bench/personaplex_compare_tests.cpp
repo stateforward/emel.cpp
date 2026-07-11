@@ -76,7 +76,13 @@ TEST_CASE("personaplex compare math reports exact and partial token behavior") {
       "assert m.match_fraction([[1,9]], [[1,2]], 2) == 0.5; "
       "assert m.match_fraction([[1]], [[1,2]], 2) == 0.0; "
       "assert m.common_token_prefix([[1,2]], [[1,3]]) == 1; "
-      "assert abs(m.correlation([1.0,2.0,3.0], [2.0,4.0,6.0])-1.0) < 1e-12";
+      "assert abs(m.correlation([1.0,2.0,3.0], [2.0,4.0,6.0])-1.0) < 1e-12; "
+      "reasons=[]; m.append_text_parity_reason(reasons, [1,2], [1,3], 0.5); "
+      "assert reasons == ['text token match is 0.500000, expected 1.0']; "
+      "reasons=[]; m.append_text_parity_reason(reasons, [1], [1,2], 0.0); "
+      "assert reasons == ['text frame count mismatch']; "
+      "reasons=[]; m.append_text_parity_reason(reasons, [1,2], [1,2], 1.0); "
+      "assert reasons == []";
   CHECK(command_exit_code("python3 -c " + quote_arg_posix(program)) == 0);
 }
 

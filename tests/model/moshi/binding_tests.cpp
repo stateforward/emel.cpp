@@ -590,8 +590,8 @@ TEST_CASE("moshi lm contract binds only scheduled depformer weight sets") {
 
   for (uint32_t index = 0; index < model->n_tensors; ++index) {
     auto &tensor = model->tensors[index];
-    const std::string_view name{
-        model->name_storage.data() + tensor.name_offset, tensor.name_length};
+    const std::string_view name{model->name_storage.data() + tensor.name_offset,
+                                tensor.name_length};
     const std::size_t codebook = name.find(".3.");
     if ((name.starts_with("lm.depformer_in.") ||
          name.starts_with("lm.depformer.layers.")) &&
@@ -640,6 +640,16 @@ TEST_CASE("moshi lm contract rejects invalid scheduled tensor bindings") {
   SUBCASE("codebook output projection is required") {
     constexpr std::string_view name = "lm.linears.1.weight";
     REQUIRE(hide_tensor(name, name.find(".1.") + 1u));
+  }
+  SUBCASE("unscheduled codebook output projection is still required") {
+    model->moshi_lm.depformer_weights_per_step = true;
+    model->moshi_lm.depformer_weight_schedule_count = 4u;
+    model->moshi_lm.depformer_weight_schedule[0] = 0;
+    model->moshi_lm.depformer_weight_schedule[1] = 1;
+    model->moshi_lm.depformer_weight_schedule[2] = 1;
+    model->moshi_lm.depformer_weight_schedule[3] = 2;
+    constexpr std::string_view name = "lm.linears.3.weight";
+    REQUIRE(hide_tensor(name, name.find(".3.") + 1u));
   }
 
   CHECK(moshi::validate_execution_contract(*model) != k_none);

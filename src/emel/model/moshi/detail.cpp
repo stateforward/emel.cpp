@@ -154,9 +154,10 @@ bool require_i32_array(const emel::model::detail::kv_binding &binding,
   return true;
 }
 
-bool assign_optional_i32_array(
-    const emel::model::detail::kv_binding &binding, const std::string_view key,
-    const std::span<int32_t> dst, uint32_t &count_out) noexcept {
+bool assign_optional_i32_array(const emel::model::detail::kv_binding &binding,
+                               const std::string_view key,
+                               const std::span<int32_t> dst,
+                               uint32_t &count_out) noexcept {
   const auto *entry = emel::model::detail::find_kv_entry(binding, key);
   if (entry == nullptr) {
     count_out = 0u;
@@ -816,26 +817,27 @@ emel::error::type validate_lm_contract(const emel::model::data &model_data,
                                               *depformer_text_embedding),
     };
     for (int32_t codebook = 0; codebook < lm.dep_q; ++codebook) {
-      if (!required_weight_indices[static_cast<size_t>(codebook)]) {
-        continue;
-      }
       char name[96] = {};
-      int written = std::snprintf(name, sizeof(name),
-                                  "lm.depformer_in.%d.weight", codebook);
-      if (written <= 0 || static_cast<size_t>(written) >= sizeof(name)) {
-        return emel::error::cast(emel::model::loader::error::model_invalid);
+      int written = 0;
+      if (required_weight_indices[static_cast<size_t>(codebook)]) {
+        written = std::snprintf(name, sizeof(name), "lm.depformer_in.%d.weight",
+                                codebook);
+        if (written <= 0 || static_cast<size_t>(written) >= sizeof(name)) {
+          return emel::error::cast(emel::model::loader::error::model_invalid);
+        }
+        const auto *input_projection = find_tensor(
+            model_data, std::string_view{name, static_cast<size_t>(written)});
+        if (input_projection == nullptr) {
+          return emel::error::cast(emel::model::loader::error::model_invalid);
+        }
+        contract_out
+            .depformer_input_projections[static_cast<size_t>(codebook)] =
+            tensor_view{
+                .tensor = input_projection,
+                .name = emel::model::tensor_name_view(model_data,
+                                                      *input_projection),
+            };
       }
-      const auto *input_projection = find_tensor(
-          model_data, std::string_view{name, static_cast<size_t>(written)});
-      if (input_projection == nullptr) {
-        return emel::error::cast(emel::model::loader::error::model_invalid);
-      }
-      contract_out.depformer_input_projections[static_cast<size_t>(codebook)] =
-          tensor_view{
-              .tensor = input_projection,
-              .name =
-                  emel::model::tensor_name_view(model_data, *input_projection),
-          };
 
       written =
           std::snprintf(name, sizeof(name), "lm.linears.%d.weight", codebook);
