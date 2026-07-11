@@ -449,7 +449,6 @@ src/emel/text/formatter/sm.hpp
 src/emel/text/generator/actions.hpp
 src/emel/text/generator/context.hpp
 src/emel/text/generator/decode_wavefront/actions.hpp
-src/emel/text/generator/decode_wavefront/context.hpp
 src/emel/text/generator/decode_wavefront/errors.hpp
 src/emel/text/generator/decode_wavefront/events.hpp
 src/emel/text/generator/decode_wavefront/guards.hpp
