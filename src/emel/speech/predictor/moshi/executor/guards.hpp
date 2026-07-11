@@ -2214,6 +2214,68 @@ struct guard_depformer_logits_matmul_failed {
   }
 };
 
+struct guard_reset_temporal_positions_present {
+  bool operator()(const event::reset_run &,
+                  const action::context &ctx) const noexcept {
+    return ctx.temporal_positions != nullptr;
+  }
+};
+
+struct guard_reset_temporal_positions_missing {
+  bool operator()(const event::reset_run &runtime_ev,
+                  const action::context &ctx) const noexcept {
+    return !guard_reset_temporal_positions_present{}(runtime_ev, ctx);
+  }
+};
+
+struct guard_reset_temporal_positions_succeeded {
+  bool operator()(const event::reset_run &runtime_ev,
+                  const action::context &) const noexcept {
+    return runtime_ev.ctx.temporal_position_accepted &&
+           runtime_ev.ctx.temporal_position_error ==
+               static_cast<int32_t>(emel::error::cast(
+                   emel::memory::streaming::error::none));
+  }
+};
+
+struct guard_reset_temporal_positions_failed {
+  bool operator()(const event::reset_run &runtime_ev,
+                  const action::context &ctx) const noexcept {
+    return !guard_reset_temporal_positions_succeeded{}(runtime_ev, ctx);
+  }
+};
+
+struct guard_reset_depformer_positions_present {
+  bool operator()(const event::reset_run &,
+                  const action::context &ctx) const noexcept {
+    return ctx.depformer_positions != nullptr;
+  }
+};
+
+struct guard_reset_depformer_positions_missing {
+  bool operator()(const event::reset_run &runtime_ev,
+                  const action::context &ctx) const noexcept {
+    return !guard_reset_depformer_positions_present{}(runtime_ev, ctx);
+  }
+};
+
+struct guard_reset_depformer_positions_succeeded {
+  bool operator()(const event::reset_run &runtime_ev,
+                  const action::context &) const noexcept {
+    return runtime_ev.ctx.depformer_position_accepted &&
+           runtime_ev.ctx.depformer_position_error ==
+               static_cast<int32_t>(emel::error::cast(
+                   emel::memory::streaming::error::none));
+  }
+};
+
+struct guard_reset_depformer_positions_failed {
+  bool operator()(const event::reset_run &runtime_ev,
+                  const action::context &ctx) const noexcept {
+    return !guard_reset_depformer_positions_succeeded{}(runtime_ev, ctx);
+  }
+};
+
 struct guard_more_depformer_codebooks {
   bool operator()(const event::step_run &runtime_ev,
                   const action::context &) const noexcept {

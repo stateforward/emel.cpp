@@ -1107,6 +1107,7 @@ struct effect_reset_depformer_positions {
             emel::memory::streaming::event::reset{
                 .error_out = runtime_ev.ctx.depformer_position_error});
   }
+
 };
 
 struct effect_advance_depformer_position {
@@ -1929,8 +1930,39 @@ struct effect_emit_initialize_error {
 };
 
 struct effect_reset_session {
-  void operator()(const event::reset &, context &ctx) const noexcept {
+  void operator()(const event::reset_run &, context &ctx) const noexcept {
     ctx.session = {};
+  }
+};
+
+struct effect_reset_temporal_positions {
+  void operator()(const event::reset_run &runtime_ev,
+                  context &ctx) const noexcept {
+    runtime_ev.ctx.temporal_position_error = static_cast<int32_t>(
+        emel::error::cast(emel::memory::streaming::error::none));
+    runtime_ev.ctx.temporal_position_accepted =
+        ctx.temporal_positions->process_event(
+            emel::memory::streaming::event::reset{
+                .error_out = runtime_ev.ctx.temporal_position_error});
+  }
+};
+
+struct effect_reset_bound_depformer_positions {
+  void operator()(const event::reset_run &runtime_ev,
+                  context &ctx) const noexcept {
+    runtime_ev.ctx.depformer_position_error = static_cast<int32_t>(
+        emel::error::cast(emel::memory::streaming::error::none));
+    runtime_ev.ctx.depformer_position_accepted =
+        ctx.depformer_positions->process_event(
+            emel::memory::streaming::event::reset{
+                .error_out = runtime_ev.ctx.depformer_position_error});
+  }
+};
+
+struct effect_mark_reset_failed {
+  void operator()(const event::reset_run &runtime_ev,
+                  context &) const noexcept {
+    runtime_ev.ctx.err = detail_ns::to_error(error::reset_failed);
   }
 };
 

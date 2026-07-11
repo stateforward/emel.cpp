@@ -146,6 +146,19 @@ struct step_run {
 
 struct reset {};
 
+struct reset_ctx {
+  emel::error::type err = emel::error::cast(error::none);
+  bool temporal_position_accepted = false;
+  bool depformer_position_accepted = false;
+  int32_t temporal_position_error = 0;
+  int32_t depformer_position_error = 0;
+};
+
+struct reset_run {
+  const reset &request;
+  reset_ctx &ctx;
+};
+
 } // namespace emel::speech::predictor::moshi::executor::event
 
 namespace emel::speech::predictor::moshi::executor::events {

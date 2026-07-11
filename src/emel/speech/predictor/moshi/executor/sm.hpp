@@ -12,6 +12,11 @@
 namespace emel::speech::predictor::moshi::executor {
 
 struct state_uninitialized {};
+struct state_reset_temporal_positions_decision {};
+struct state_reset_temporal_positions_result_decision {};
+struct state_reset_depformer_positions_decision {};
+struct state_reset_depformer_positions_result_decision {};
+struct state_reset_failed {};
 struct state_bind_contract_decision {};
 struct state_input_embedding_contract_decision {};
 struct state_temporal_projection_layout_decision {};
@@ -169,6 +174,7 @@ struct state_uninit_step_error_out_decision {};
 struct model {
   auto operator()() const {
     namespace sml = stateforward::sml;
+    using reset_run = event::reset_run;
     using init_run = event::initialize_run;
     using step_run = event::step_run;
 
@@ -1013,12 +1019,50 @@ struct model {
 
       //------------------------------------------------------------------------------//
       // Reset.
-      , sml::state<state_uninitialized> <= sml::state<state_ready>
-          + sml::event<event::reset>
+      , sml::state<state_reset_temporal_positions_decision> <= sml::state<state_ready>
+          + sml::event<reset_run>
+      , sml::state<state_reset_temporal_positions_decision> <= sml::state<state_sampling_ready>
+          + sml::event<reset_run>
+      , sml::state<state_reset_temporal_positions_result_decision> <=
+          sml::state<state_reset_temporal_positions_decision>
+          + sml::completion<reset_run>
+              [ guard::guard_reset_temporal_positions_present{} ]
+          / action::effect_reset_temporal_positions{}
+      , sml::state<state_reset_depformer_positions_decision> <=
+          sml::state<state_reset_temporal_positions_decision>
+          + sml::completion<reset_run>
+              [ guard::guard_reset_temporal_positions_missing{} ]
+      , sml::state<state_reset_depformer_positions_decision> <=
+          sml::state<state_reset_temporal_positions_result_decision>
+          + sml::completion<reset_run>
+              [ guard::guard_reset_temporal_positions_succeeded{} ]
+      , sml::state<state_reset_failed> <=
+          sml::state<state_reset_temporal_positions_result_decision>
+          + sml::completion<reset_run>
+              [ guard::guard_reset_temporal_positions_failed{} ]
+          / action::effect_mark_reset_failed{}
+      , sml::state<state_reset_depformer_positions_result_decision> <=
+          sml::state<state_reset_depformer_positions_decision>
+          + sml::completion<reset_run>
+              [ guard::guard_reset_depformer_positions_present{} ]
+          / action::effect_reset_bound_depformer_positions{}
+      , sml::state<state_uninitialized> <=
+          sml::state<state_reset_depformer_positions_decision>
+          + sml::completion<reset_run>
+              [ guard::guard_reset_depformer_positions_missing{} ]
           / action::effect_reset_session{}
-      , sml::state<state_uninitialized> <= sml::state<state_sampling_ready>
-          + sml::event<event::reset>
+      , sml::state<state_uninitialized> <=
+          sml::state<state_reset_depformer_positions_result_decision>
+          + sml::completion<reset_run>
+              [ guard::guard_reset_depformer_positions_succeeded{} ]
           / action::effect_reset_session{}
+      , sml::state<state_reset_failed> <=
+          sml::state<state_reset_depformer_positions_result_decision>
+          + sml::completion<reset_run>
+              [ guard::guard_reset_depformer_positions_failed{} ]
+          / action::effect_mark_reset_failed{}
+      , sml::state<state_uninitialized> <= sml::state<state_reset_failed>
+          + sml::completion<reset_run> / action::effect_reset_session{}
 
       //------------------------------------------------------------------------------//
       // Unexpected events.
@@ -1090,7 +1134,10 @@ struct sm : public emel::sm<model, action::context> {
   }
 
   bool process_event(const event::reset &ev) {
-    return base_type::process_event(ev);
+    event::reset_ctx ctx{};
+    event::reset_run runtime_ev{ev, ctx};
+    const bool accepted = base_type::process_event(runtime_ev);
+    return accepted && ctx.err == action::detail_ns::to_error(error::none);
   }
 };
 

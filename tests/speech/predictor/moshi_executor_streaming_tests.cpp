@@ -159,4 +159,14 @@ TEST_CASE(
   step.phase = moshi::event::graph_phase::sampling;
   REQUIRE(machine.process_event(step));
   CHECK(capture(depformer_positions).logical_end == lm.dep_q);
+
+  REQUIRE(machine.process_event(executor::event::reset{}));
+  CHECK(capture(temporal_positions).logical_end == 0);
+  CHECK(capture(depformer_positions).logical_end == 0);
+  CHECK(machine.is(stateforward::sml::state<executor::state_uninitialized>));
+
+  REQUIRE(machine.process_event(initialize));
+  step.phase = moshi::event::graph_phase::prediction;
+  REQUIRE(machine.process_event(step));
+  CHECK(capture(temporal_positions).logical_end == 1);
 }

@@ -12,6 +12,7 @@ enum class error : emel::error::type {
   model_mismatch = 4,
   graph_execution_unsupported = 5,
   unexpected_event = 6,
+  reset_failed = 7,
 };
 
 } // namespace emel::speech::predictor::moshi::executor
