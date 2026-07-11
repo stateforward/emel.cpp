@@ -220,8 +220,6 @@ struct sm : public emel::sm<model<route_policy>, action::context> {
   }
 };
 
-using Recognizer = sm<>;
-
 } // namespace emel::speech::recognizer
 
 namespace emel {

@@ -1029,6 +1029,4 @@ struct sm : public emel::sm<model, action::context> {
   }
 };
 
-using Executor = sm;
-
 } // namespace emel::speech::predictor::moshi::executor

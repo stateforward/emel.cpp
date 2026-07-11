@@ -47,6 +47,4 @@ bind_kv_caches(const temporal_kv_binding &temporal,
                                 depformer_positions);
 }
 
-using MoshiExecutor = sm;
-
 } // namespace emel::speech::predictor::moshi::executor

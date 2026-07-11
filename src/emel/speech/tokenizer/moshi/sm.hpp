@@ -270,6 +270,4 @@ struct sm : public emel::sm<model, action::context> {
   }
 };
 
-using Moshi = sm;
-
 } // namespace emel::speech::tokenizer::moshi

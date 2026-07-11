@@ -816,6 +816,4 @@ struct sm : public emel::sm<model<dependencies_type>,
 template <class dependencies_type>
 sm(const dependencies_type &) -> sm<dependencies_type>;
 
-template <class dependencies_type> using Generator = sm<dependencies_type>;
-
 } // namespace emel::speech::generator

@@ -722,6 +722,4 @@ private:
   std::unique_ptr<emel::memory::view::snapshot> memory_snapshot_ = {};
 };
 
-using Generator = sm;
-
 } // namespace emel::speech::predictor::moshi

@@ -187,6 +187,4 @@ struct sm : public emel::sm<model, action::context> {
   explicit sm(const dependencies &deps) : base_type(std::in_place, deps) {}
 };
 
-using Streaming = sm;
-
 } // namespace emel::memory::streaming
