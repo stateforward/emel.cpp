@@ -16,6 +16,7 @@ QUALITY_GATES_BENCH_RUNS="${EMEL_QUALITY_GATES_BENCH_RUNS:-3}"
 QUALITY_GATES_BENCH_WARMUP_ITERS="${EMEL_QUALITY_GATES_BENCH_WARMUP_ITERS:-10}"
 QUALITY_GATES_BENCH_WARMUP_RUNS="${EMEL_QUALITY_GATES_BENCH_WARMUP_RUNS:-1}"
 QUALITY_GATES_BENCH_TOLERANCE="${EMEL_QUALITY_GATES_BENCH_TOLERANCE:-0.30}"
+QUALITY_GATES_PERSONAPLEX_FRAMES="${EMEL_QUALITY_GATES_PERSONAPLEX_FRAMES:-40}"
 QUALITY_GATES_GENERATION_BENCH_ITERS="${EMEL_QUALITY_GATES_GENERATION_BENCH_ITERS:-1}"
 QUALITY_GATES_GENERATION_BENCH_RUNS="${EMEL_QUALITY_GATES_GENERATION_BENCH_RUNS:-1}"
 QUALITY_GATES_GENERATION_BENCH_WARMUP_ITERS="${EMEL_QUALITY_GATES_GENERATION_BENCH_WARMUP_ITERS:-0}"
@@ -847,6 +848,15 @@ infer_quality_gate_scope() {
       src/emel/batch/*|tests/batch/*)
         add_bench_suite batch_planner "scope path=$file"
         ;;
+      src/emel/speech/codec/mimi/*|src/emel/speech/generator/*|\
+      src/emel/speech/predictor/moshi/*|\
+      src/emel/speech/tokenizer/moshi/*|tests/speech/generator/*|\
+      tests/speech/codec/mimi*|tests/speech/predictor/*|\
+      tests/speech/tokenizer/moshi/*|\
+      tools/bench/personaplex*|tools/bench/speech/personaplex*|\
+      scripts/bench_personaplex_compare.sh)
+        add_bench_suite speech_dialogue_moshi "scope path=$file"
+        ;;
       src/emel/io/*|src/emel/io/**/*|tests/io/*|tests/io/**/*)
         ;;
       src/emel/kernel/aarch64/*|tests/kernel/aarch64*)
@@ -1194,6 +1204,19 @@ run_benchmark_gates() {
       whisper_compare)
         if run_step_allow_fail "bench_snapshot_${suite}" \
           "$ROOT_DIR/scripts/bench_whisper_compare.sh"; then
+          continue
+        else
+          status=$?
+          continue
+        fi
+        ;;
+      speech_dialogue_moshi)
+        # PersonaPlex is an end-to-end dialogue lane rather than a bench_runner
+        # microbenchmark. It owns the maintained encoder -> tokenizer ->
+        # predictor -> sampler -> detokenizer -> decoder comparison.
+        if run_step_allow_fail "bench_snapshot_${suite}" \
+          "$ROOT_DIR/scripts/bench_personaplex_compare.sh" \
+          --frames "$QUALITY_GATES_PERSONAPLEX_FRAMES"; then
           continue
         else
           status=$?

@@ -364,6 +364,19 @@ TEST_CASE("bench script routes Moshi LM suite through the wrapper") {
         std::string::npos);
 }
 
+TEST_CASE("quality gates route PersonaPlex changes through end-to-end compare") {
+  const std::string script =
+      read_file(repo_root() / "scripts" / "quality_gates.sh");
+
+  CHECK(script.find("add_bench_suite speech_dialogue_moshi") !=
+        std::string::npos);
+  CHECK(script.find("speech_dialogue_moshi)") != std::string::npos);
+  CHECK(script.find("scripts/bench_personaplex_compare.sh") !=
+        std::string::npos);
+  CHECK(script.find("QUALITY_GATES_PERSONAPLEX_FRAMES") !=
+        std::string::npos);
+}
+
 TEST_CASE("benchmark defaults stay bounded for routine quality gates") {
   const std::string quality_gates =
       read_file(repo_root() / "scripts" / "quality_gates.sh");
