@@ -83,8 +83,8 @@ void configure_predictor_initialize(moshi::event::initialize &request) {
         std::max(maximum_delay, request.model.moshi_lm.delays[index]);
   }
   request.max_sequences = 1;
-  request.max_blocks = 64;
   request.block_tokens = 4;
+  request.max_blocks = request.model.moshi_lm.context / request.block_tokens;
   request.sequence_id = 0;
   request.codebook_capacity = request.model.moshi_lm.n_q + 1;
   request.delay_cache_row_capacity = maximum_delay + 3;
@@ -436,7 +436,7 @@ TEST_CASE("speech_moshi_generator_initializes_lm_with_injected_kv") {
   moshi::event::initialize init{*fixture.model};
   configure_predictor_initialize(init);
   init.max_sequences = 2;
-  init.max_blocks = 16;
+  init.max_blocks = fixture.model->moshi_lm.context / init.block_tokens;
   init.block_tokens = 4;
   init.error_out = &err;
 
@@ -539,7 +539,7 @@ TEST_CASE(
 
   moshi::event::initialize init{*fixture.model};
   configure_predictor_initialize(init);
-  init.max_blocks = 32;
+  init.max_blocks = fixture.model->moshi_lm.context / init.block_tokens;
   init.block_tokens = 4;
   init.error_out = &err;
   REQUIRE(generator.process_event(init));
@@ -635,7 +635,7 @@ TEST_CASE("speech_moshi_generator_prefills_personaplex_system_prompt_before_"
 
   moshi::event::initialize init{*fixture.model};
   configure_predictor_initialize(init);
-  init.max_blocks = 48;
+  init.max_blocks = fixture.model->moshi_lm.context / init.block_tokens;
   init.block_tokens = 4;
   init.error_out = &err;
   REQUIRE(generator.process_event(init));
@@ -772,6 +772,30 @@ TEST_CASE("speech_moshi_generator_prefills_personaplex_system_prompt_before_"
   CHECK(graph.call_count == prompt_frames + 6);
 }
 
+TEST_CASE("speech_moshi_predictor_rejects_memory_geometry_beyond_temporal_kv") {
+  auto fixture = load_fixture_or_skip("moshi-tiny-lm.gguf");
+  if (fixture.model == nullptr) {
+    return;
+  }
+
+  emel::memory::test::recording_kv_actor kv{};
+  emel::memory::hybrid::sm memory{emel::memory::hybrid::bind_kv_actor(kv)};
+  recording_graph_executor graph{};
+  moshi::sm generator{make_predictor_dependencies(graph, memory)};
+  emel::error::type err = k_no_error;
+
+  moshi::event::initialize init{*fixture.model};
+  configure_predictor_initialize(init);
+  init.max_blocks = fixture.model->moshi_lm.context;
+  init.block_tokens = 2;
+  init.error_out = &err;
+
+  CHECK_FALSE(generator.process_event(init));
+  CHECK(err == emel::error::cast(moshi::error::bind_failed));
+  CHECK(kv.reserve_count == 0);
+  CHECK_FALSE(graph.initialized);
+}
+
 TEST_CASE("speech_moshi_generator_accepts_personaplex_voice_without_system_"
           "prompt") {
   auto fixture = load_fixture_or_skip("moshi-tiny-lm.gguf");
@@ -788,7 +812,7 @@ TEST_CASE("speech_moshi_generator_accepts_personaplex_voice_without_system_"
 
   moshi::event::initialize init{*fixture.model};
   configure_predictor_initialize(init);
-  init.max_blocks = 48;
+  init.max_blocks = fixture.model->moshi_lm.context / init.block_tokens;
   init.block_tokens = 4;
   init.error_out = &err;
   REQUIRE(generator.process_event(init));
@@ -1043,26 +1067,25 @@ TEST_CASE("speech_moshi_executor_rejects_invalid_sampling_configuration") {
     return;
   }
 
-  const auto rejected = [&fixture](const float audio_temperature,
-                                   const float text_temperature,
-                                   const int32_t audio_top_k,
-                                   const int32_t text_top_k) {
-    emel::kernel::sm kernel{};
-    emel::logits::sampler::sm sampler{};
-    moshi_executor::sm executor{
-        make_executor_dependencies(kernel, {}, &sampler)};
-    emel::error::type err = emel::error::cast(moshi_executor::error::none);
-    moshi_executor::event::initialize init{*fixture.model};
-    init.sampling_enabled = true;
-    init.sampling_audio_temperature = audio_temperature;
-    init.sampling_text_temperature = text_temperature;
-    init.sampling_audio_top_k = audio_top_k;
-    init.sampling_text_top_k = text_top_k;
-    init.sampling_seed = 1234u;
-    init.error_out = &err;
-    return !executor.process_event(init) &&
-           err == emel::error::cast(moshi_executor::error::bind_failed);
-  };
+  const auto rejected =
+      [&fixture](const float audio_temperature, const float text_temperature,
+                 const int32_t audio_top_k, const int32_t text_top_k) {
+        emel::kernel::sm kernel{};
+        emel::logits::sampler::sm sampler{};
+        moshi_executor::sm executor{
+            make_executor_dependencies(kernel, {}, &sampler)};
+        emel::error::type err = emel::error::cast(moshi_executor::error::none);
+        moshi_executor::event::initialize init{*fixture.model};
+        init.sampling_enabled = true;
+        init.sampling_audio_temperature = audio_temperature;
+        init.sampling_text_temperature = text_temperature;
+        init.sampling_audio_top_k = audio_top_k;
+        init.sampling_text_top_k = text_top_k;
+        init.sampling_seed = 1234u;
+        init.error_out = &err;
+        return !executor.process_event(init) &&
+               err == emel::error::cast(moshi_executor::error::bind_failed);
+      };
 
   CHECK(rejected(std::numeric_limits<float>::quiet_NaN(), 0.7f, 1, 1));
   CHECK(rejected(0.8f, std::numeric_limits<float>::quiet_NaN(), 1, 1));
@@ -1196,14 +1219,16 @@ TEST_CASE("speech_moshi_executor_runtime_choice_uses_explicit_transitions") {
                        "moshi" / "executor" / "detail.hpp");
   const std::string detail_source{detail_bytes.begin(), detail_bytes.end()};
   const auto predictor_guard_bytes =
-      read_binary_file(repo_root() / "src" / "emel" / "speech" /
-                       "predictor" / "moshi" / "guards.hpp");
+      read_binary_file(repo_root() / "src" / "emel" / "speech" / "predictor" /
+                       "moshi" / "guards.hpp");
   const std::string predictor_guards_source{predictor_guard_bytes.begin(),
                                             predictor_guard_bytes.end()};
 
   CHECK(source.find("infer_debug_phase") == std::string::npos);
   CHECK(source.find("debug_phase_out != nullptr") == std::string::npos);
   CHECK(source.find("effect_store_debug_phase_out") == std::string::npos);
+  CHECK(source.find("event::step_ctx ctx{}") == std::string::npos);
+  CHECK(source.find("step_workspace_") != std::string::npos);
   CHECK(source.find("if (ctx.depformer_logits_ok)") == std::string::npos);
   CHECK(actions_source.find("if (runtime_ev.ctx.temporal_out_norm_ok)") ==
         std::string::npos);
@@ -2276,8 +2301,7 @@ TEST_CASE(
   CHECK_FALSE(moshi_executor::detail::tensor_shape(&malformed_matrix, lm.dim,
                                                    lm.dim * 3));
 
-  std::array<uint16_t, moshi_executor::detail::k_max_hidden_dim> key_cache =
-      {};
+  std::array<uint16_t, moshi_executor::detail::k_max_hidden_dim> key_cache = {};
   std::array<uint16_t, moshi_executor::detail::k_max_hidden_dim> value_cache =
       {};
   std::array<size_t, 1> offsets = {std::numeric_limits<size_t>::max()};
@@ -2317,8 +2341,8 @@ TEST_CASE(
   CHECK_FALSE(moshi_executor::guard::guard_cache_span_valid(
       std::numeric_limits<size_t>::max(), 1u, 1u, 1u, key_cache.size(),
       value_cache.size()));
-  CHECK(moshi_executor::guard::guard_sampling_step_invalid{}(
-            step_run, executor_ctx) !=
+  CHECK(moshi_executor::guard::guard_sampling_step_invalid{}(step_run,
+                                                             executor_ctx) !=
         moshi_executor::guard::guard_sampling_step_valid{}(step_run,
                                                            executor_ctx));
   CHECK(moshi_executor::guard::guard_temporal_position_advance_failed{}(
@@ -2349,11 +2373,10 @@ TEST_CASE(
             step_run, executor_ctx) !=
         moshi_executor::guard::guard_temporal_layer_silu_gate_supported{}(
             step_run, executor_ctx));
-  CHECK(
-      moshi_executor::guard::guard_temporal_layer_silu_gate_silu_failed{}(
-          step_run, executor_ctx) !=
-      moshi_executor::guard::guard_temporal_layer_silu_gate_silu_succeeded{}(
-          step_run, executor_ctx));
+  CHECK(moshi_executor::guard::guard_temporal_layer_silu_gate_silu_failed{}(
+            step_run, executor_ctx) !=
+        moshi_executor::guard::guard_temporal_layer_silu_gate_silu_succeeded{}(
+            step_run, executor_ctx));
   CHECK(moshi_executor::guard::guard_temporal_layer_silu_gate_failed{}(
             step_run, executor_ctx) !=
         moshi_executor::guard::guard_temporal_layer_silu_gate_succeeded{}(
@@ -2382,12 +2405,12 @@ TEST_CASE(
             step_run, executor_ctx) !=
         moshi_executor::guard::guard_temporal_out_norm_rms_succeeded{}(
             step_run, executor_ctx));
-  CHECK(moshi_executor::guard::guard_temporal_out_norm_failed{}(
-            step_run, executor_ctx) !=
+  CHECK(moshi_executor::guard::guard_temporal_out_norm_failed{}(step_run,
+                                                                executor_ctx) !=
         moshi_executor::guard::guard_temporal_out_norm_succeeded{}(
             step_run, executor_ctx));
-  CHECK(moshi_executor::guard::guard_text_logits_unsupported{}(
-            step_run, executor_ctx) !=
+  CHECK(moshi_executor::guard::guard_text_logits_unsupported{}(step_run,
+                                                               executor_ctx) !=
         moshi_executor::guard::guard_text_logits_supported{}(step_run,
                                                              executor_ctx));
   CHECK(moshi_executor::guard::guard_text_logits_matmul_failed{}(
@@ -2398,8 +2421,8 @@ TEST_CASE(
                                                           executor_ctx) !=
         moshi_executor::guard::guard_text_logits_succeeded{}(step_run,
                                                              executor_ctx));
-  CHECK(moshi_executor::guard::guard_text_sampling_failed{}(
-            step_run, executor_ctx) !=
+  CHECK(moshi_executor::guard::guard_text_sampling_failed{}(step_run,
+                                                            executor_ctx) !=
         moshi_executor::guard::guard_text_sampling_succeeded{}(step_run,
                                                                executor_ctx));
 }

@@ -1127,10 +1127,10 @@ struct sm : public emel::sm<model, action::context> {
 
   bool
   process_event(const emel::speech::predictor::moshi::event::graph_step &ev) {
-    event::step_ctx ctx{};
-    event::step_run runtime_ev{ev, ctx};
+    event::step_run runtime_ev{ev, step_workspace_};
     const bool accepted = base_type::process_event(runtime_ev);
-    return accepted && ctx.err == action::detail_ns::to_error(error::none);
+    return accepted &&
+           step_workspace_.err == action::detail_ns::to_error(error::none);
   }
 
   bool process_event(const event::reset &ev) {
@@ -1140,10 +1140,14 @@ struct sm : public emel::sm<model, action::context> {
     return accepted && ctx.err == action::detail_ns::to_error(error::none);
   }
 
-  bool process_event(
-      const emel::speech::predictor::moshi::event::reset &) {
+  bool process_event(const emel::speech::predictor::moshi::event::reset &) {
     return process_event(event::reset{});
   }
+
+private:
+  // Actor-owned numeric scratch is initialized once and reused synchronously.
+  // Entry actions reset scalar outcomes and only the active tensor extents.
+  event::step_ctx step_workspace_ = {};
 };
 
 } // namespace emel::speech::predictor::moshi::executor

@@ -109,6 +109,7 @@ struct personaplex_dependencies {
   mimi::event::initialize decoder_initialize;
   predictor::event::initialize predictor_initialize;
   predictor::event::load_voice conditioning_initialize;
+  predictor::event::begin_personaplex_prompt prompt_begin = {};
   std::span<float> silence_pcm = {};
   std::span<int32_t> input_codes = {};
   std::span<const int32_t> tokenize_input_codes = {};
@@ -636,6 +637,14 @@ int main(int argc, char **argv) {
       .predictor_initialize = predictor_initialize,
       .conditioning_initialize =
           predictor::event::load_voice{*voice_model.model},
+      .prompt_begin =
+          predictor::event::begin_personaplex_prompt{
+              .text_token_count = config.prompt_text_token >= 0 ? 1 : 0,
+              .pre_text_silence_frames =
+                  lm_model.model->moshi_lm.inference_pre_text_silence_frames,
+              .post_text_silence_frames =
+                  lm_model.model->moshi_lm.inference_post_text_silence_frames,
+          },
       .silence_pcm = std::span<float>{pcm_frame},
       .input_codes = std::span<int32_t>{input_codes},
       .tokenize_input_codes = std::span<const int32_t>{input_codes},

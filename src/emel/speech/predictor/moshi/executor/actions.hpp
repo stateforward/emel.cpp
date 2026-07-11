@@ -98,10 +98,9 @@ struct effect_bind_depformer_fused_projection_layout {
 struct effect_bind_nonzero_sampling_seed {
   void operator()(const event::initialize_run &runtime_ev,
                   context &ctx) const noexcept {
-    ctx.sampling.random_state =
-        ((runtime_ev.request.sampling_seed - 1u) %
-         (ctx.policy.sampling_modulus - 1u)) +
-        1u;
+    ctx.sampling.random_state = ((runtime_ev.request.sampling_seed - 1u) %
+                                 (ctx.policy.sampling_modulus - 1u)) +
+                                1u;
   }
 };
 
@@ -177,6 +176,7 @@ struct effect_begin_input_embedding {
     const auto &model = runtime_ev.request.model;
     const int32_t hidden_dim = ctx.session.hidden_dim;
     (void)model;
+    runtime_ev.ctx.err = detail_ns::to_error(error::none);
     runtime_ev.ctx.input_embedding_ok = false;
     runtime_ev.ctx.input_text_embedding_ok = false;
     runtime_ev.ctx.input_audio_embedding_ok = false;
@@ -990,6 +990,7 @@ struct effect_restore_prediction_state_and_bind_text_logits {
   void operator()(const event::step_run &runtime_ev,
                   context &ctx) const noexcept {
     const int32_t hidden_dim = ctx.session.hidden_dim;
+    runtime_ev.ctx.err = detail_ns::to_error(error::none);
     std::copy_n(runtime_ev.request.temporal_state.begin(),
                 static_cast<size_t>(hidden_dim),
                 runtime_ev.ctx.normalized.data());
@@ -1107,7 +1108,6 @@ struct effect_reset_depformer_positions {
             emel::memory::streaming::event::reset{
                 .error_out = runtime_ev.ctx.depformer_position_error});
   }
-
 };
 
 struct effect_advance_depformer_position {

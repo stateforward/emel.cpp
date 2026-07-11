@@ -18,7 +18,7 @@ struct guard_configuration_valid {
         config.delayed_audio_codebooks <= 0 ||
         config.delayed_audio_codebooks > config.generated_audio_codebooks ||
         config.cache_rows <= 0 || config.maximum_delay < 0 ||
-        config.initial_delay_frames < 0 ||
+        config.initial_delay_frames < 0 || config.audio_initial_token <= 0 ||
         config.token_zero == config.token_ungenerated ||
         config.delays.size() < static_cast<size_t>(config.codebooks)) {
       return false;
@@ -99,12 +99,26 @@ struct guard_tokenize_empty_shape {
   }
 };
 
+struct guard_tokenize_tokens_valid {
+  bool operator()(const event::tokenize &ev,
+                  const action::context &ctx) const noexcept {
+    bool valid = true;
+    for (const int32_t token : ev.audio_tokens) {
+      if (token < 0 || token >= ctx.config.audio_initial_token) {
+        valid = false;
+      }
+    }
+    return valid;
+  }
+};
+
 struct guard_tokenize_shape_valid {
   bool operator()(const event::tokenize &ev,
                   const action::context &ctx) const noexcept {
-    return guard_tokenize_full_shape{}(ev, ctx) ||
-           guard_tokenize_tail_shape{}(ev, ctx) ||
-           guard_tokenize_empty_shape{}(ev, ctx);
+    return (guard_tokenize_full_shape{}(ev, ctx) ||
+            guard_tokenize_tail_shape{}(ev, ctx) ||
+            guard_tokenize_empty_shape{}(ev, ctx)) &&
+           guard_tokenize_tokens_valid{}(ev, ctx);
   }
 };
 
@@ -112,6 +126,7 @@ struct guard_tokenize_full {
   bool operator()(const event::tokenize &ev,
                   const action::context &ctx) const noexcept {
     return guard_tokenize_full_shape{}(ev, ctx) &&
+           guard_tokenize_tokens_valid{}(ev, ctx) &&
            guard_tokenize_position_available{}(ev, ctx);
   }
 };
@@ -120,6 +135,7 @@ struct guard_tokenize_tail {
   bool operator()(const event::tokenize &ev,
                   const action::context &ctx) const noexcept {
     return guard_tokenize_tail_shape{}(ev, ctx) &&
+           guard_tokenize_tokens_valid{}(ev, ctx) &&
            guard_tokenize_position_available{}(ev, ctx);
   }
 };
@@ -128,6 +144,7 @@ struct guard_tokenize_empty {
   bool operator()(const event::tokenize &ev,
                   const action::context &ctx) const noexcept {
     return guard_tokenize_empty_shape{}(ev, ctx) &&
+           guard_tokenize_tokens_valid{}(ev, ctx) &&
            guard_tokenize_position_available{}(ev, ctx);
   }
 };

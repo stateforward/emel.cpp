@@ -363,10 +363,7 @@ src/emel/speech/encoder/whisper/context.hpp
 src/emel/speech/encoder/whisper/errors.hpp
 src/emel/speech/encoder/whisper/guards.hpp
 src/emel/speech/predictor/moshi/events.hpp
-src/emel/speech/predictor/moshi/executor/actions.hpp
 src/emel/speech/predictor/moshi/executor/guards.hpp
-src/emel/speech/predictor/moshi/executor/sm.hpp
-src/emel/speech/predictor/moshi/guards.hpp
 src/emel/tensor/view/actions.hpp
 src/emel/tensor/view/context.hpp
 src/emel/tensor/view/detail.hpp
@@ -607,8 +604,6 @@ tests/sm/sm_any_tests.cpp
 tests/sm/sm_external_completion_tests.cpp
 tests/sm/sm_policy_tests.cpp
 tests/speech/encoder/whisper/detail_tests.cpp
-tests/speech/predictor/moshi_lifecycle_tests.cpp
-tests/speech/tokenizer/moshi/lifecycle_tests.cpp
 tests/speech/tokenizer/whisper_tests.cpp
 tests/tensor/view/lifecycle_tests.cpp
 tests/text/conditioner/text_conditioner_tests.cpp

@@ -15,6 +15,7 @@ namespace emel::speech::tokenizer::moshi {
 struct state_uninitialized {};
 struct state_ready {};
 struct state_prepared_full {};
+struct state_prepared_tail {};
 struct state_prepared_generated {};
 struct state_commit_full_zero {};
 struct state_commit_full_generated {};
@@ -30,9 +31,10 @@ Moshi tokenizer architecture notes (single source of truth)
 state purpose
 - state_ready accepts the first half of a frame and tokenizes the caller's
   audio codebooks into the delay-aligned LM input sequence.
-- state_prepared_full records that all codebooks were provided, while
-  state_prepared_generated records tail-only or generator-owned input. The
-  state graph therefore owns cache-write policy without a persistent flag.
+- state_prepared_full records that all codebooks were provided,
+  state_prepared_tail records that PersonaPlex tail lanes were provided, and
+  state_prepared_generated records generator-owned input. The state graph
+  therefore owns cache-write policy without a persistent flag.
 - commit states select initial-delay replacement and provided-cache
   preservation before executing fixed data-plane cache writes.
 
@@ -89,6 +91,9 @@ struct model {
       , sml::state<state_prepared_generated> <= sml::state<state_prepared_generated>
           + sml::event<event::initialize>
           / action::effect_reject<error::already_initialized>{}
+      , sml::state<state_prepared_tail> <= sml::state<state_prepared_tail>
+          + sml::event<event::initialize>
+          / action::effect_reject<error::already_initialized>{}
       , sml::state<state_ready> <= sml::state<state_errored>
           + sml::event<event::initialize> [ guard::guard_configuration_valid{} ]
           / action::effect_initialize{}
@@ -102,7 +107,7 @@ struct model {
       , sml::state<state_prepared_full> <= sml::state<state_ready>
           + sml::event<event::tokenize> [ guard::guard_tokenize_full{} ]
           / action::effect_tokenize_full{}
-      , sml::state<state_prepared_generated> <= sml::state<state_ready>
+      , sml::state<state_prepared_tail> <= sml::state<state_ready>
           + sml::event<event::tokenize> [ guard::guard_tokenize_tail{} ]
           / action::effect_tokenize_tail{}
       , sml::state<state_prepared_generated> <= sml::state<state_ready>
@@ -121,6 +126,9 @@ struct model {
       , sml::state<state_prepared_generated> <= sml::state<state_prepared_generated>
           + sml::event<event::tokenize>
           / action::effect_reject<error::phase_order>{}
+      , sml::state<state_prepared_tail> <= sml::state<state_prepared_tail>
+          + sml::event<event::tokenize>
+          / action::effect_reject<error::phase_order>{}
 
       //------------------------------------------------------------------------------//
       // Detokenization explicitly selects full-input preservation and initial
@@ -130,6 +138,14 @@ struct model {
           [ guard::guard_detokenize_valid_replace{} ]
           / action::effect_begin_detokenize{}
       , sml::state<state_commit_full_generated> <= sml::state<state_prepared_full>
+          + sml::event<event::detokenize_run>
+          [ guard::guard_detokenize_valid_generated{} ]
+          / action::effect_begin_detokenize{}
+      , sml::state<state_commit_full_zero> <= sml::state<state_prepared_tail>
+          + sml::event<event::detokenize_run>
+          [ guard::guard_detokenize_valid_replace{} ]
+          / action::effect_begin_detokenize{}
+      , sml::state<state_commit_full_generated> <= sml::state<state_prepared_tail>
           + sml::event<event::detokenize_run>
           [ guard::guard_detokenize_valid_generated{} ]
           / action::effect_begin_detokenize{}
@@ -149,10 +165,17 @@ struct model {
           + sml::event<event::detokenize_run>
           [ guard::guard_detokenize_shape_invalid{} ]
           / action::effect_reject_detokenize<error::request_shape>{}
+      , sml::state<state_prepared_tail> <= sml::state<state_prepared_tail>
+          + sml::event<event::detokenize_run>
+          [ guard::guard_detokenize_shape_invalid{} ]
+          / action::effect_reject_detokenize<error::request_shape>{}
       , sml::state<state_prepared_full> <= sml::state<state_prepared_full>
           + sml::event<event::detokenize_run> [ guard::guard_position_overflow{} ]
           / action::effect_reject_detokenize<error::position_overflow>{}
       , sml::state<state_prepared_generated> <= sml::state<state_prepared_generated>
+          + sml::event<event::detokenize_run> [ guard::guard_position_overflow{} ]
+          / action::effect_reject_detokenize<error::position_overflow>{}
+      , sml::state<state_prepared_tail> <= sml::state<state_prepared_tail>
           + sml::event<event::detokenize_run> [ guard::guard_position_overflow{} ]
           / action::effect_reject_detokenize<error::position_overflow>{}
       , sml::state<state_output_decision> <= sml::state<state_commit_full_zero>
@@ -190,6 +213,9 @@ struct model {
       , sml::state<state_prepared_generated> <= sml::state<state_prepared_generated>
           + sml::event<event::restore_cache>
           / action::effect_reject<error::phase_order>{}
+      , sml::state<state_prepared_tail> <= sml::state<state_prepared_tail>
+          + sml::event<event::restore_cache>
+          / action::effect_reject<error::phase_order>{}
       , sml::state<state_ready> <= sml::state<state_prepared_full>
           + sml::event<event::advance>
           [ guard::guard_advance_position_available{} ] / action::effect_advance{}
@@ -199,6 +225,8 @@ struct model {
           / action::effect_reject<error::position_overflow>{}
       , sml::state<state_prepared_generated> <= sml::state<state_prepared_generated>
           + sml::event<event::advance> / action::effect_reject<error::phase_order>{}
+      , sml::state<state_prepared_tail> <= sml::state<state_prepared_tail>
+          + sml::event<event::advance> / action::effect_reject<error::phase_order>{}
       , sml::state<state_ready> <= sml::state<state_ready>
           + sml::event<event::advance> / action::effect_reject<error::phase_order>{}
       , sml::state<state_ready> <= sml::state<state_ready>
@@ -206,6 +234,8 @@ struct model {
       , sml::state<state_ready> <= sml::state<state_prepared_full>
           + sml::event<event::reset> / action::effect_reset{}
       , sml::state<state_ready> <= sml::state<state_prepared_generated>
+          + sml::event<event::reset> / action::effect_reset{}
+      , sml::state<state_ready> <= sml::state<state_prepared_tail>
           + sml::event<event::reset> / action::effect_reset{}
       , sml::state<state_ready> <= sml::state<state_errored>
           + sml::event<event::reset> / action::effect_reset{}
@@ -247,6 +277,8 @@ struct model {
       , sml::state<state_errored> <= sml::state<state_prepared_full>
           + sml::unexpected_event<sml::_> / action::effect_unexpected{}
       , sml::state<state_errored> <= sml::state<state_prepared_generated>
+          + sml::unexpected_event<sml::_> / action::effect_unexpected{}
+      , sml::state<state_errored> <= sml::state<state_prepared_tail>
           + sml::unexpected_event<sml::_> / action::effect_unexpected{}
       , sml::state<state_errored> <= sml::state<state_errored>
           + sml::unexpected_event<sml::_> / action::effect_unexpected{}

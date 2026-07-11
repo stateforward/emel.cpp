@@ -44,6 +44,7 @@ concept duplex_dependencies = requires(dependencies_type deps) {
   deps.decoder_initialize;
   deps.predictor_initialize;
   deps.conditioning_initialize;
+  deps.prompt_begin;
   deps.silence_pcm;
   deps.input_codes;
   deps.tokenize_input_codes;

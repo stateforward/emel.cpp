@@ -243,7 +243,7 @@ template <class dependencies_type> struct effect_begin_prompt_conditioning {
   void operator()(const event::condition_run &runtime_ev,
                   context<dependencies_type> &ctx) const noexcept {
     runtime_ev.ctx.child_err = 0;
-    typename dependencies_type::prompt_begin_event request{};
+    auto request = ctx.collaborators.prompt_begin;
     request.error_out = &runtime_ev.ctx.child_err;
     runtime_ev.ctx.child_accepted =
         ctx.collaborators.predictor.process_event(request);

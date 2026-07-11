@@ -29,6 +29,7 @@ struct fake_voice_condition {
 };
 
 struct fake_prompt_begin {
+  int32_t text_token_count = 0;
   emel::error::type *error_out = nullptr;
 };
 
@@ -230,6 +231,7 @@ struct fake_predictor_actor {
   int32_t conditioning_initialize_calls = 0;
   int32_t voice_condition_calls = 0;
   int32_t prompt_begin_calls = 0;
+  int32_t prompt_begin_text_token_count = 0;
   int32_t prompt_condition_calls = 0;
   int32_t predict_calls = 0;
   int32_t execute_calls = 0;
@@ -264,6 +266,7 @@ struct fake_predictor_actor {
 
   bool process_event(const fake_prompt_begin &request) noexcept {
     ++prompt_begin_calls;
+    prompt_begin_text_token_count = request.text_token_count;
     *request.error_out = prompt_begin_error;
     return prompt_begin_accepted;
   }
@@ -349,6 +352,7 @@ struct fake_dependencies {
   fake_initialize decoder_initialize = {};
   fake_initialize predictor_initialize = {};
   fake_initialize conditioning_initialize = {};
+  fake_prompt_begin prompt_begin{.text_token_count = 1};
   std::span<float> silence_pcm = {};
   std::span<int32_t> input_codes = {};
   std::span<const int32_t> tokenize_input_codes = {};
@@ -668,6 +672,7 @@ TEST_CASE("speech_generator_conditions_without_model_family_contracts") {
   CHECK(test->machine.is(sml::state<generator::state_condition_prompt>));
   CHECK(test->predictor.voice_condition_calls == 1);
   CHECK(test->predictor.prompt_begin_calls == 1);
+  CHECK(test->predictor.prompt_begin_text_token_count == 1);
 
   REQUIRE(test->condition());
   CHECK(test->machine.is(sml::state<generator::state_ready>));

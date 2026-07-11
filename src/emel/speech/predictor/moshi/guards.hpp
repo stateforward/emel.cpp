@@ -25,8 +25,11 @@ struct guard_bind_contract_valid {
     const bool personaplex = lm.depformer_weights_per_step;
     const int32_t delayed_dep_q = personaplex ? lm.inference_dep_q : lm.dep_q;
     const int32_t needed_tokens = codebook_count - delayed_dep_q - 1;
-    const int64_t row_count = static_cast<int64_t>(max_delay) + 2 +
-                              static_cast<int64_t>(personaplex);
+    const int64_t row_count =
+        static_cast<int64_t>(max_delay) + 2 + static_cast<int64_t>(personaplex);
+    const int64_t reserved_token_capacity =
+        static_cast<int64_t>(runtime_ev.request.max_blocks) *
+        static_cast<int64_t>(runtime_ev.request.block_tokens);
     const bool inference_contract =
         !personaplex ||
         (lm.inference_dep_q > 0 && lm.inference_dep_q <= lm.dep_q &&
@@ -43,7 +46,8 @@ struct guard_bind_contract_valid {
            lm.delay_count >= static_cast<uint32_t>(codebook_count) &&
            runtime_ev.request.max_sequences > 0 &&
            runtime_ev.request.max_blocks > 0 &&
-           runtime_ev.request.block_tokens > 0 &&
+           runtime_ev.request.block_tokens > 0 && reserved_token_capacity > 0 &&
+           reserved_token_capacity <= static_cast<int64_t>(lm.context) &&
            runtime_ev.request.sequence_id >= 0 &&
            runtime_ev.request.sequence_id < runtime_ev.request.max_sequences &&
            runtime_ev.request.codebook_capacity >= codebook_count &&
@@ -106,7 +110,8 @@ struct guard_voice_contract_valid {
            embeddings->n_dims == 4 &&
            embeddings->dims[0] == ctx.session.model->moshi_lm.dim &&
            embeddings->dims[1] == 1 && embeddings->dims[2] == 1 &&
-           embeddings->dims[3] > 0 && embeddings->dims[0] <=
+           embeddings->dims[3] > 0 &&
+           embeddings->dims[0] <=
                static_cast<int64_t>(event::k_max_voice_embedding_dim) &&
            embedding_type_ok && cache->n_dims == 2 &&
            cache->dims[0] == ctx.lmgen.cache_row_count &&

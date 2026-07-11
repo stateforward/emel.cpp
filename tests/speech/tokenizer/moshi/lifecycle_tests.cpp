@@ -146,7 +146,7 @@ TEST_CASE("speech Moshi tokenizer accepts the PersonaPlex tail shape") {
   int32_t err = error_code(moshi::error::none);
   REQUIRE(machine.process_event(moshi::event::initialize{.error_out = err}));
 
-  std::array<int32_t, 2> tail = {301, 302};
+  std::array<int32_t, 2> tail = {101, 102};
   std::array<int32_t, 5> model_tokens = {};
   REQUIRE(machine.process_event(moshi::event::tokenize{
       .audio_tokens = std::span<const int32_t>{tail},
@@ -168,6 +168,43 @@ TEST_CASE("speech Moshi tokenizer accepts the PersonaPlex tail shape") {
       .error_out = err,
   }));
   CHECK_FALSE(produced);
+
+  const std::array<int32_t, 2> next_tail = {111, 112};
+  REQUIRE(machine.process_event(moshi::event::tokenize{
+      .audio_tokens = std::span<const int32_t>{next_tail},
+      .model_tokens_out = std::span<int32_t>{model_tokens},
+      .error_out = err,
+  }));
+  REQUIRE(machine.process_event(moshi::event::detokenize{
+      .text_token = 20,
+      .audio_tokens = std::span<const int32_t>{generated},
+      .text_token_out = text_out,
+      .audio_tokens_out = std::span<int32_t>{output},
+      .produced_out = produced,
+      .error_out = err,
+  }));
+  const std::array<int32_t, 2> third_tail = {121, 122};
+  REQUIRE(machine.process_event(moshi::event::tokenize{
+      .audio_tokens = std::span<const int32_t>{third_tail},
+      .model_tokens_out = std::span<int32_t>{model_tokens},
+      .error_out = err,
+  }));
+  CHECK(model_tokens[3] == next_tail[0]);
+  CHECK(model_tokens[4] == next_tail[1]);
+}
+
+TEST_CASE("speech Moshi tokenizer rejects invalid public audio tokens before "
+          "caching") {
+  standard_fixture state;
+  REQUIRE(state.initialize());
+
+  const std::array<int32_t, 3> invalid_input = {50, 200, 52};
+  CHECK(state.tokenize(invalid_input));
+  CHECK(state.err == error_code(moshi::error::request_shape));
+  CHECK(state.machine.is(sml::state<moshi::state_ready>));
+
+  REQUIRE(state.tokenize());
+  CHECK(state.model_tokens == std::array<int32_t, 3>{100, 200, 200});
 }
 
 TEST_CASE("speech Moshi tokenizer masks initial delayed audio explicitly") {
@@ -209,7 +246,8 @@ TEST_CASE("speech Moshi tokenizer restores column-major voice cache") {
   CHECK(state.model_tokens == std::array<int32_t, 3>{12, 22, 200});
 }
 
-TEST_CASE("speech Moshi tokenizer does not publish restored ungenerated output") {
+TEST_CASE(
+    "speech Moshi tokenizer does not publish restored ungenerated output") {
   standard_fixture state;
   REQUIRE(state.initialize());
 
