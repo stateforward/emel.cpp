@@ -898,8 +898,7 @@ struct effect_run_temporal_out_norm_scale {
   void operator()(const event::step_run &runtime_ev,
                   context &ctx) const noexcept {
     const int32_t hidden_dim = ctx.session.hidden_dim;
-    const auto *out_norm =
-        detail::find_tensor(runtime_ev.request.model, "lm.out_norm.alpha");
+    const auto *out_norm = ctx.session.contract.lm.output_norm.tensor;
     const auto *alpha = static_cast<const float *>(out_norm->data);
     runtime_ev.ctx.temporal_out_norm_ok = false;
 
@@ -925,9 +924,10 @@ struct effect_publish_temporal_out_norm {
 };
 
 struct effect_bind_text_token_logits {
-  void operator()(const event::step_run &runtime_ev, context &) const noexcept {
+  void operator()(const event::step_run &runtime_ev,
+                  context &ctx) const noexcept {
     const auto *text_linear =
-        detail::find_tensor(runtime_ev.request.model, "lm.text_linear.weight");
+        ctx.session.contract.lm.text_output_projection.tensor;
     runtime_ev.ctx.text_logits_ok = false;
     runtime_ev.ctx.projection_view_bound = false;
     runtime_ev.ctx.projection_view = {};

@@ -478,6 +478,10 @@ TEST_CASE("enriched moshi lm fixture loads hparams, vocab, and contract") {
   CHECK(contract.lm.audio_emb.tensor_count == 4u);
   REQUIRE(contract.lm.text_embedding.tensor != nullptr);
   CHECK(contract.lm.text_embedding.name == "lm.text_emb.weight");
+  REQUIRE(contract.lm.output_norm.tensor != nullptr);
+  CHECK(contract.lm.output_norm.name == "lm.out_norm.alpha");
+  REQUIRE(contract.lm.text_output_projection.tensor != nullptr);
+  CHECK(contract.lm.text_output_projection.name == "lm.text_linear.weight");
   for (int32_t codebook = 0; codebook < model.moshi_lm.n_q; ++codebook) {
     const auto &embedding =
         contract.lm.audio_embeddings[static_cast<size_t>(codebook)];

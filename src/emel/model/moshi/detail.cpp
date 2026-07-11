@@ -652,6 +652,18 @@ emel::error::type validate_lm_contract(const emel::model::data &model_data,
       .tensor = text_embedding,
       .name = emel::model::tensor_name_view(model_data, *text_embedding),
   };
+  const auto *output_norm = find_tensor(model_data, "lm.out_norm.alpha");
+  contract_out.output_norm = tensor_view{
+      .tensor = output_norm,
+      .name = emel::model::tensor_name_view(model_data, *output_norm),
+  };
+  const auto *text_output_projection =
+      find_tensor(model_data, "lm.text_linear.weight");
+  contract_out.text_output_projection = tensor_view{
+      .tensor = text_output_projection,
+      .name =
+          emel::model::tensor_name_view(model_data, *text_output_projection),
+  };
   for (int32_t codebook = 0; codebook < lm.n_q; ++codebook) {
     char name[96] = {};
     const int written =

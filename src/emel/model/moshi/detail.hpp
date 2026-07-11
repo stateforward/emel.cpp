@@ -48,6 +48,8 @@ struct lm_contract {
   family_view depformer_text_emb = {};
   family_view depformer_emb = {};
   tensor_view text_embedding = {};
+  tensor_view output_norm = {};
+  tensor_view text_output_projection = {};
   std::array<tensor_view,
              static_cast<std::size_t>(
                  emel::model::data::moshi_lm_hparams::k_max_delays)>

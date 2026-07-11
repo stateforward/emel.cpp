@@ -1501,12 +1501,12 @@ TEST_CASE("speech_moshi_generator_and_executor_cover_explicit_error_guards") {
   moshi_executor::event::initialize_ctx executor_init_ctx{};
   moshi_executor::event::initialize_run executor_init_run{executor_init,
                                                           executor_init_ctx};
-  CHECK(moshi_executor::guard::guard_bound_input_embeddings_supported{}(
+  CHECK(moshi_executor::guard::guard_bound_root_operands_supported{}(
       executor_init_run, executor_ctx));
   const auto *bound_text_embedding =
       executor_ctx.session.contract.lm.text_embedding.tensor;
   executor_ctx.session.contract.lm.text_embedding.tensor = nullptr;
-  CHECK(moshi_executor::guard::guard_bound_input_embeddings_unsupported{}(
+  CHECK(moshi_executor::guard::guard_bound_root_operands_unsupported{}(
       executor_init_run, executor_ctx));
   executor_ctx.session.contract.lm.text_embedding.tensor = bound_text_embedding;
   executor_init.on_done =

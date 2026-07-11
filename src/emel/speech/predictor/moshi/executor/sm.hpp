@@ -184,11 +184,11 @@ struct model {
       , sml::state<state_sampling_seed_decision> <=
           sml::state<state_input_embedding_contract_decision>
           + sml::completion<init_run>
-          [ guard::guard_bound_input_embeddings_supported{} ]
+          [ guard::guard_bound_root_operands_supported{} ]
       , sml::state<state_init_failed_error_out_decision> <=
           sml::state<state_input_embedding_contract_decision>
           + sml::completion<init_run>
-          [ guard::guard_bound_input_embeddings_unsupported{} ]
+          [ guard::guard_bound_root_operands_unsupported{} ]
           / action::effect_mark_bind_failed{}
       , sml::state<state_text_sampling_top_k_decision> <= sml::state<state_sampling_seed_decision>
           + sml::completion<init_run> [ guard::guard_sampling_seed_nonzero{} ]

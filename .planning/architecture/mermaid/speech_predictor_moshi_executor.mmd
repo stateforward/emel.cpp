@@ -2,8 +2,10 @@ stateDiagram-v2
   direction TB
   [*] --> state_uninitialized
   state_uninitialized --> state_bind_contract_decision : initialize_run [always] / none
-  state_bind_contract_decision --> state_sampling_seed_decision : completion_initialize_run_ [guard_bind_contract_valid_] / effect_bind_contract_
+  state_bind_contract_decision --> state_input_embedding_contract_decision : completion_initialize_run_ [guard_bind_contract_valid_] / effect_bind_contract_
   state_bind_contract_decision --> state_init_failed_error_out_decision : completion_initialize_run_ [guard_bind_contract_invalid_] / effect_mark_bind_failed_
+  state_input_embedding_contract_decision --> state_sampling_seed_decision : completion_initialize_run_ [guard_bound_root_operands_supported_] / none
+  state_input_embedding_contract_decision --> state_init_failed_error_out_decision : completion_initialize_run_ [guard_bound_root_operands_unsupported_] / effect_mark_bind_failed_
   state_sampling_seed_decision --> state_text_sampling_top_k_decision : completion_initialize_run_ [guard_sampling_seed_nonzero_] / effect_bind_nonzero_sampling_seed_
   state_sampling_seed_decision --> state_text_sampling_top_k_decision : completion_initialize_run_ [guard_sampling_seed_zero_] / effect_bind_zero_sampling_seed_
   state_text_sampling_top_k_decision --> state_audio_sampling_top_k_decision : completion_initialize_run_ [guard_text_sampling_top_k_within_card_] / effect_bind_requested_text_sampling_top_k_
@@ -150,11 +152,8 @@ stateDiagram-v2
   state_text_logits_bind_result_decision --> state_step_error_out_decision : completion_step_run_ [guard_text_logits_projection_bound_and_no_forced_token_sampling_invalid_] / effect_mark_graph_execution_unsupported_
   state_text_logits_bind_result_decision --> state_step_error_out_decision : completion_step_run_ [guard_projection_view_bind_failed_] / effect_mark_graph_execution_unsupported_
   state_text_logits_sample_projection --> state_text_logits_sample_projection_result_decision : completion_step_run_ [always] / none
-  state_text_logits_sample_projection_result_decision --> state_text_logits_sample_scale : completion_step_run_ [guard_text_logits_matmul_succeeded_] / effect_scale_text_sampling_logits_
+  state_text_logits_sample_projection_result_decision --> state_text_logits_sample_select : completion_step_run_ [guard_text_logits_matmul_succeeded_] / effect_select_text_sampling_token_
   state_text_logits_sample_projection_result_decision --> state_step_error_out_decision : completion_step_run_ [guard_text_logits_matmul_failed_] / effect_mark_graph_execution_unsupported_
-  state_text_logits_sample_scale --> state_text_logits_sample_softmax : completion_step_run_ [always] / effect_compute_text_sampling_probabilities_
-  state_text_logits_sample_softmax --> state_text_logits_sample_top_k : completion_step_run_ [always] / effect_compute_text_sampling_top_k_
-  state_text_logits_sample_top_k --> state_text_logits_sample_select : completion_step_run_ [always] / effect_select_text_sampling_token_
   state_text_logits_sample_select --> state_text_logits_result_decision : completion_step_run_ [guard_sampled_text_token_ready_] / effect_publish_sampled_text_token_
   state_text_logits_sample_select --> state_text_logits_result_decision : completion_step_run_ [guard_forced_text_sampling_consumed_] / effect_publish_forced_text_token_
   state_text_logits_sample_select --> state_step_error_out_decision : completion_step_run_ [guard_text_sampling_failed_] / effect_mark_graph_execution_unsupported_
@@ -263,11 +262,8 @@ stateDiagram-v2
   state_depformer_logits_bind_result_decision --> state_step_error_out_decision : completion_step_run_ [guard_depformer_logits_projection_bound_sampling_invalid_] / effect_mark_graph_execution_unsupported_
   state_depformer_logits_bind_result_decision --> state_step_error_out_decision : completion_step_run_ [guard_projection_view_bind_failed_] / effect_mark_graph_execution_unsupported_
   state_depformer_logits_sample_projection --> state_depformer_logits_sample_projection_result_decision : completion_step_run_ [always] / none
-  state_depformer_logits_sample_projection_result_decision --> state_depformer_logits_sample_scale : completion_step_run_ [guard_depformer_logits_matmul_succeeded_] / effect_scale_depformer_sampling_logits_
+  state_depformer_logits_sample_projection_result_decision --> state_depformer_logits_sample_select : completion_step_run_ [guard_depformer_logits_matmul_succeeded_] / effect_select_depformer_sampling_token_
   state_depformer_logits_sample_projection_result_decision --> state_step_error_out_decision : completion_step_run_ [guard_depformer_logits_matmul_failed_] / effect_mark_graph_execution_unsupported_
-  state_depformer_logits_sample_scale --> state_depformer_logits_sample_softmax : completion_step_run_ [always] / effect_compute_depformer_sampling_probabilities_
-  state_depformer_logits_sample_softmax --> state_depformer_logits_sample_top_k : completion_step_run_ [always] / effect_compute_depformer_sampling_top_k_
-  state_depformer_logits_sample_top_k --> state_depformer_logits_sample_select : completion_step_run_ [always] / effect_select_depformer_sampling_token_
   state_depformer_layer_advance --> state_depformer_layer_norm : completion_step_run_ [guard_depformer_layer_norm_supported_] / effect_run_depformer_layer_norm_rms_
   state_depformer_layer_advance --> state_step_error_out_decision : completion_step_run_ [guard_depformer_layer_norm_unsupported_] / effect_mark_graph_execution_unsupported_
   state_depformer_logits_run --> state_depformer_token_publish : completion_step_run_ [guard_depformer_logits_succeeded_] / effect_publish_depformer_token_

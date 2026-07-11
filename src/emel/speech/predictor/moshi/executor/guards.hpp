@@ -44,16 +44,25 @@ struct guard_bind_contract_invalid {
   }
 };
 
-struct guard_bound_input_embeddings_supported {
+struct guard_bound_root_operands_supported {
   bool operator()(const event::initialize_run &runtime_ev,
                   const action::context &ctx) const noexcept {
     const auto &lm = runtime_ev.request.model.moshi_lm;
     const int32_t hidden_dim = ctx.session.hidden_dim;
     const auto *text_emb = ctx.session.contract.lm.text_embedding.tensor;
+    const auto *output_norm = ctx.session.contract.lm.output_norm.tensor;
+    const auto *text_output_projection =
+        ctx.session.contract.lm.text_output_projection.tensor;
     bool supported =
         detail::tensor_shape(text_emb, hidden_dim, lm.text_card + 1) &&
         detail::supported_get_rows_dtype(
-            static_cast<detail::dtype>(text_emb->type));
+            static_cast<detail::dtype>(text_emb->type)) &&
+        detail::tensor_shape(output_norm, hidden_dim) &&
+        static_cast<detail::dtype>(output_norm->type) == detail::dtype::f32 &&
+        detail::tensor_shape(text_output_projection, hidden_dim,
+                             lm.text_card) &&
+        detail::supported_argmax_dtype(
+            static_cast<detail::dtype>(text_output_projection->type));
     for (int32_t index = 0; index < lm.n_q; ++index) {
       const auto *audio_emb =
           ctx.session.contract.lm.audio_embeddings[static_cast<size_t>(index)]
@@ -67,10 +76,10 @@ struct guard_bound_input_embeddings_supported {
   }
 };
 
-struct guard_bound_input_embeddings_unsupported {
+struct guard_bound_root_operands_unsupported {
   bool operator()(const event::initialize_run &runtime_ev,
                   const action::context &ctx) const noexcept {
-    return !guard_bound_input_embeddings_supported{}(runtime_ev, ctx);
+    return !guard_bound_root_operands_supported{}(runtime_ev, ctx);
   }
 };
 
@@ -920,13 +929,9 @@ struct guard_temporal_out_norm_supported {
   bool operator()(const event::step_run &runtime_ev,
                   const action::context &ctx) const noexcept {
     const int32_t hidden_dim = ctx.session.hidden_dim;
-    const auto *out_norm =
-        detail::find_tensor(runtime_ev.request.model, "lm.out_norm.alpha");
     return guard_temporal_layers_complete{}(runtime_ev, ctx) &&
            hidden_dim > 0 &&
-           static_cast<uint64_t>(hidden_dim) <= ctx.capacity.hidden_dim &&
-           detail::tensor_shape(out_norm, hidden_dim) &&
-           static_cast<detail::dtype>(out_norm->type) == detail::dtype::f32;
+           static_cast<uint64_t>(hidden_dim) <= ctx.capacity.hidden_dim;
   }
 };
 
@@ -970,13 +975,8 @@ struct guard_text_logits_supported {
                   const action::context &ctx) const noexcept {
     const auto &lm = runtime_ev.request.model.moshi_lm;
     const int32_t hidden_dim = ctx.session.hidden_dim;
-    const auto *text_linear =
-        detail::find_tensor(runtime_ev.request.model, "lm.text_linear.weight");
     return runtime_ev.ctx.temporal_out_norm_ok && hidden_dim > 0 &&
-           lm.text_card > 0 &&
-           detail::tensor_shape(text_linear, hidden_dim, lm.text_card) &&
-           detail::supported_argmax_dtype(
-               static_cast<detail::dtype>(text_linear->type));
+           lm.text_card > 0;
   }
 };
 
