@@ -63,14 +63,18 @@ for value in "$FRAMES" "$SEED" "$THREADS"; do
     exit 1
   fi
 done
-for tool in cmake ninja git python3 zig; do
-  if ! command -v "$tool" >/dev/null 2>&1; then
-    echo "error: required tool missing: $tool" >&2
-    exit 1
-  fi
-done
+if ! command -v python3 >/dev/null 2>&1; then
+  echo "error: required tool missing: python3" >&2
+  exit 1
+fi
 
 if ! $RUN_ONLY; then
+  for tool in cmake ninja git zig; do
+    if ! command -v "$tool" >/dev/null 2>&1; then
+      echo "error: required build tool missing: $tool" >&2
+      exit 1
+    fi
+  done
   "$ROOT_DIR/scripts/setup_moshi_cpp_reference.sh" >/dev/null
   zig_bin="$(command -v zig)"
   cmake -S "$ROOT_DIR/tools/bench" -B "$BUILD_DIR" -G Ninja \

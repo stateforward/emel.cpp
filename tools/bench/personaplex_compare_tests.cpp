@@ -74,6 +74,7 @@ TEST_CASE("personaplex compare math reports exact and partial token behavior") {
       "); m=importlib.util.module_from_spec(spec); spec.loader.exec_module(m); "
       "assert m.match_fraction([[1,2],[3,4]], [[1,2],[3,4]], 2) == 1.0; "
       "assert m.match_fraction([[1,9]], [[1,2]], 2) == 0.5; "
+      "assert m.match_fraction([[1]], [[1,2]], 2) == 0.0; "
       "assert m.common_token_prefix([[1,2]], [[1,3]]) == 1; "
       "assert abs(m.correlation([1.0,2.0,3.0], [2.0,4.0,6.0])-1.0) < 1e-12";
   CHECK(command_exit_code("python3 -c " + quote_arg_posix(program)) == 0);
@@ -94,6 +95,11 @@ TEST_CASE("personaplex compare keeps CPU and lane isolation explicit") {
       read_file(repo_root() / "tools" / "bench" / "moshi_gguf_convert.py");
   const std::string inference_source =
       read_file(repo_root() / "tools" / "bench" / "personaplex-inference.json");
+  const std::string mimi_wrapper_source =
+      read_file(repo_root() / "scripts" / "bench_mimi_compare.sh");
+  const std::string reference_source =
+      read_file(repo_root() / "tools" / "bench" / "speech" /
+                "moshi_reference_driver.cpp");
 
   const std::size_t first_public_match =
       compare_source.find("public_codebook_match_fraction");
@@ -127,6 +133,8 @@ TEST_CASE("personaplex compare keeps CPU and lane isolation explicit") {
   CHECK(emel_source.find("sampling_seed = 1234") == std::string::npos);
   CHECK(emel_source.find(".max_blocks = 256") == std::string::npos);
   CHECK(compare_source.find("\"--n-q\", \"8\"") == std::string::npos);
+  CHECK(compare_source.find("--audio-top-k") == std::string::npos);
+  CHECK(compare_source.find("--text-top-k") == std::string::npos);
   CHECK(compare_source.find("\"emel_lm\": {") != std::string::npos);
   CHECK(compare_source.find("\"reference_lm\": {") != std::string::npos);
   CHECK(compare_source.find("\"emel_mimi\": {") != std::string::npos);
@@ -135,6 +143,21 @@ TEST_CASE("personaplex compare keeps CPU and lane isolation explicit") {
         std::string::npos);
   CHECK(converter_source.find("--inference-config") != std::string::npos);
   CHECK(inference_source.find("\"prompt_tokens\"") != std::string::npos);
+  CHECK(inference_source.find("\"audio_top_k\"") != std::string::npos);
+  CHECK(inference_source.find("\"text_top_k\"") != std::string::npos);
+  const std::size_t personaplex_build_guard =
+      wrapper_source.find("if ! $RUN_ONLY; then");
+  REQUIRE(personaplex_build_guard != std::string::npos);
+  CHECK(wrapper_source.find("for tool in cmake ninja git zig",
+                            personaplex_build_guard) != std::string::npos);
+  const std::size_t mimi_build_guard =
+      mimi_wrapper_source.find("if ! $RUN_ONLY; then");
+  REQUIRE(mimi_build_guard != std::string::npos);
+  CHECK(mimi_wrapper_source.find("for tool in cmake ninja git",
+                                 mimi_build_guard) != std::string::npos);
+  CHECK(mimi_wrapper_source.find("if [[ ! -f \"$MODEL_CONFIG\" ]]",
+                                 mimi_build_guard) != std::string::npos);
+  CHECK(reference_source.find("produced=%d") != std::string::npos);
 }
 
 TEST_CASE("personaplex conversion injects its inference contract") {
@@ -162,7 +185,7 @@ TEST_CASE(
                 "personaplex_emel_runner.cpp");
 
   CHECK(std::filesystem::exists(generator_machine));
-  CHECK(emel_source.find("emel/speech/generator/sm.hpp") != std::string::npos);
+  CHECK(emel_source.find("emel/speech/generator/any.hpp") != std::string::npos);
   CHECK(emel_source.find("speech/generator/moshi/personaplex/session") ==
         std::string::npos);
 }

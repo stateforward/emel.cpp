@@ -312,18 +312,21 @@ int run_personaplex(const options &opts, ggml_backend_t backend_cpu) {
 
     moshi_lm_send2(generator, tokens);
     const int produced = moshi_lm_receive(generator, text_token, tokens);
+    std::printf("output frame=%d produced=%d text=%d codes=", frame, produced,
+                produced != 0 ? text_token : -1);
+    for (size_t stream = 0; stream < tokens.size(); ++stream) {
+      std::printf("%s%d", stream == 0u ? "" : ",",
+                  produced != 0 ? static_cast<int>(tokens[stream]) : -1);
+    }
+    std::printf("\n");
     if (produced != 0) {
-      std::printf("output frame=%d text=%d codes=", frame, text_token);
-      for (size_t stream = 0; stream < tokens.size(); ++stream) {
-        std::printf("%s%d", stream == 0u ? "" : ",",
-                    static_cast<int>(tokens[stream]));
-      }
-      std::printf("\n");
       mimi_decode_send(decoder, tokens.data());
       mimi_decode_receive(decoder, decoded_frame.data());
-      output_pcm.insert(output_pcm.end(), decoded_frame.begin(),
-                        decoded_frame.end());
+    } else {
+      std::fill(decoded_frame.begin(), decoded_frame.end(), 0.0f);
     }
+    output_pcm.insert(output_pcm.end(), decoded_frame.begin(),
+                      decoded_frame.end());
   }
   const double elapsed =
       std::chrono::duration<double>(std::chrono::steady_clock::now() - started)

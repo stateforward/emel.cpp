@@ -48,13 +48,6 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-for tool in cmake ninja git; do
-  if ! command -v "$tool" >/dev/null 2>&1; then
-    echo "error: required tool missing: $tool" >&2
-    exit 1
-  fi
-done
-
 # Discover the interpreter the same way the MLX setup script does, so hosts
 # that ship python3.12/python3.13 without a python3 shim (the environment the
 # setup path supports) can run the WAV generation and comparison steps too.
@@ -71,22 +64,13 @@ if [[ -z "$PYTHON_BIN" ]]; then
   echo "error: required tool missing: python3 (or python3.12/python3.13)" >&2
   exit 1
 fi
-if [[ ! -f "$MODEL_CONFIG" ]]; then
-  echo "error: missing pinned PersonaPlex model config: $MODEL_CONFIG" >&2
-  exit 1
-fi
-MIMI_N_Q="$($PYTHON_BIN - "$MODEL_CONFIG" <<'PY'
-import json
-import sys
-
-value = json.load(open(sys.argv[1], encoding="utf-8")).get("n_q")
-if not isinstance(value, int) or value <= 0:
-    raise SystemExit("Mimi n_q must be a positive integer")
-print(value)
-PY
-)"
-
 if ! $RUN_ONLY; then
+  for tool in cmake ninja git; do
+    if ! command -v "$tool" >/dev/null 2>&1; then
+      echo "error: required build tool missing: $tool" >&2
+      exit 1
+    fi
+  done
   # full mode: fetch + sha256 verify + run the emel converter (no build)
   # build_targets is always non-empty: the MLX lane drives its reference
   # through the Python shim only (no reference build target), while the
@@ -111,6 +95,21 @@ if ! $RUN_ONLY; then
   cmake --build "$BUILD_DIR" --parallel "$EMEL_BUILD_JOBS" \
     --target "${build_targets[@]}"
 fi
+
+if [[ ! -f "$MODEL_CONFIG" ]]; then
+  echo "error: missing pinned PersonaPlex model config: $MODEL_CONFIG" >&2
+  exit 1
+fi
+MIMI_N_Q="$($PYTHON_BIN - "$MODEL_CONFIG" <<'PY'
+import json
+import sys
+
+value = json.load(open(sys.argv[1], encoding="utf-8")).get("n_q")
+if not isinstance(value, int) or value <= 0:
+    raise SystemExit("Mimi n_q must be a positive integer")
+print(value)
+PY
+)"
 
 if $BUILD_ONLY; then
   echo "mimi compare lanes built in $BUILD_DIR"

@@ -70,9 +70,11 @@ def match_fraction(left: list[list[int]], right: list[list[int]], streams: int) 
   matched = 0
   total = 0
   for left_frame, right_frame in zip(left, right):
-    width = min(streams, len(left_frame), len(right_frame))
-    matched += sum(a == b for a, b in zip(left_frame[:width], right_frame[:width]))
-    total += width
+    if len(left_frame) < streams or len(right_frame) < streams:
+      return 0.0
+    matched += sum(a == b for a, b in
+                   zip(left_frame[:streams], right_frame[:streams]))
+    total += streams
   return matched / total if total else 0.0
 
 
@@ -173,8 +175,6 @@ def main() -> int:
   parser.add_argument("--threads", type=int, default=1)
   parser.add_argument("--audio-temperature", type=float, default=0.8)
   parser.add_argument("--text-temperature", type=float, default=0.7)
-  parser.add_argument("--audio-top-k", type=int, default=250)
-  parser.add_argument("--text-top-k", type=int, default=25)
   parser.add_argument("--min-output-match", type=float, default=0.15)
   parser.add_argument("--min-first-four-match", type=float, default=0.30)
   parser.add_argument("--min-energy-correlation", type=float, default=0.30)
@@ -187,7 +187,7 @@ def main() -> int:
   inference = json.loads(inference_path.read_text(encoding="utf-8"))
   required_inference = (
       "dep_q", "max_blocks", "block_tokens", "prompt_text_token",
-      "frame_samples")
+      "frame_samples", "audio_top_k", "text_top_k")
   if any(not isinstance(inference.get(key), int)
          for key in required_inference):
     parser.error("inference config integer contract is incomplete")
@@ -196,11 +196,13 @@ def main() -> int:
   block_tokens = inference["block_tokens"]
   prompt_text_token = inference["prompt_text_token"]
   frame_samples = inference["frame_samples"]
+  audio_top_k = inference["audio_top_k"]
+  text_top_k = inference["text_top_k"]
   if (public_n_q <= 0 or max_blocks <= 0 or block_tokens <= 0 or
-      frame_samples <= 0):
+      frame_samples <= 0 or audio_top_k <= 0 or text_top_k <= 0):
     parser.error(
-        "inference dep_q, max_blocks, block_tokens, and frame_samples must "
-        "be positive")
+        "inference dep_q, max_blocks, block_tokens, frame_samples, and top-k "
+        "limits must be positive")
 
   output_dir = Path(args.output_dir)
   output_dir.mkdir(parents=True, exist_ok=True)
@@ -222,8 +224,8 @@ def main() -> int:
       str(args.seed),
       str(args.audio_temperature),
       str(args.text_temperature),
-      str(args.audio_top_k),
-      str(args.text_top_k),
+      str(audio_top_k),
+      str(text_top_k),
       str(max_blocks),
       str(block_tokens),
       str(prompt_text_token),

@@ -402,14 +402,16 @@ after temporal normalization in `sampling_ready`, then the sample RTC restores t
 temporal-state buffer and performs text logits, text sampling, depformer execution, and audio
 sampling. `moshi_reference_driver personaplex` links only the pinned moshi.cpp/ggml reference lane.
 the reference configure hard-disables Metal and the script injects `--threads 1`, seed `1234`, 125
-frames, temperatures, and sampling limits; there are no process-global EMEL sampling defaults.
+frames, and temperatures. The shared inference contract injects the fixed reference-compatible
+audio/text top-k limits into EMEL; asymmetric command-line sampling overrides are intentionally not
+exposed. There are no process-global EMEL sampling defaults.
 The EMEL composition also injects the Park-Miller modulus and zero-seed replacement state; nonzero
 external seeds are normalized into the valid actor-owned RNG state range before sampling.
 
 the pinned upstream JSON remains untouched for the reference lane. EMEL model conversion injects
 the separate `tools/bench/personaplex-inference.json` contract, keeping prompt tokens, public
-codebook count, and silence framing explicit and reproducible. the setup keeps the full 16-codebook
-Mimi parity artifact separate from PersonaPlex's 8-public-codebook Mimi artifact.
+codebook count, silence framing, and sampling limits explicit and reproducible. the setup keeps the
+full 16-codebook Mimi parity artifact separate from PersonaPlex's 8-public-codebook Mimi artifact.
 
 the report and both audible WAVs are written under `build/personaplex_compare/`. the report records
 the input SHA256, EMEL/reference LM and Mimi paths and SHA256 values, exact public Mimi input-code

@@ -24,5 +24,7 @@
   "max_blocks": 256,
   "block_tokens": 4,
   "prompt_text_token": -1,
-  "frame_samples": 1920
+  "frame_samples": 1920,
+  "audio_top_k": 250,
+  "text_top_k": 25
 }

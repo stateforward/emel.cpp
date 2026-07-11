@@ -574,6 +574,77 @@ TEST_CASE("moshi lm contract requires every split depformer input projection") {
   CHECK(moshi::validate_execution_contract(*model) != k_none);
 }
 
+TEST_CASE("moshi lm contract binds only scheduled depformer weight sets") {
+  auto loaded = load_fixture_or_skip("moshi-tiny-lm.gguf");
+  if (loaded.model == nullptr) {
+    return;
+  }
+
+  auto model = std::make_unique<emel::model::data>(*loaded.model);
+  model->moshi_lm.depformer_weights_per_step = true;
+  model->moshi_lm.depformer_weight_schedule_count = 4u;
+  model->moshi_lm.depformer_weight_schedule[0] = 0;
+  model->moshi_lm.depformer_weight_schedule[1] = 1;
+  model->moshi_lm.depformer_weight_schedule[2] = 1;
+  model->moshi_lm.depformer_weight_schedule[3] = 2;
+
+  for (uint32_t index = 0; index < model->n_tensors; ++index) {
+    auto &tensor = model->tensors[index];
+    const std::string_view name{
+        model->name_storage.data() + tensor.name_offset, tensor.name_length};
+    const std::size_t codebook = name.find(".3.");
+    if ((name.starts_with("lm.depformer_in.") ||
+         name.starts_with("lm.depformer.layers.")) &&
+        codebook != std::string_view::npos) {
+      model->name_storage[tensor.name_offset + codebook + 1u] = '9';
+    }
+  }
+
+  CHECK(moshi::validate_execution_contract(*model) == k_none);
+}
+
+TEST_CASE("moshi lm contract rejects invalid scheduled tensor bindings") {
+  auto loaded = load_fixture_or_skip("moshi-tiny-lm.gguf");
+  if (loaded.model == nullptr) {
+    return;
+  }
+
+  auto model = std::make_unique<emel::model::data>(*loaded.model);
+  const auto hide_tensor = [&model](const std::string_view target,
+                                    const size_t changed_character) {
+    for (uint32_t index = 0; index < model->n_tensors; ++index) {
+      auto &tensor = model->tensors[index];
+      const std::string_view name{
+          model->name_storage.data() + tensor.name_offset, tensor.name_length};
+      if (name == target) {
+        model->name_storage[tensor.name_offset + changed_character] = '9';
+        return true;
+      }
+    }
+    return false;
+  };
+
+  SUBCASE("schedule index must be in range") {
+    model->moshi_lm.depformer_weights_per_step = true;
+    model->moshi_lm.depformer_weight_schedule_count = 1u;
+    model->moshi_lm.depformer_weight_schedule[0] = model->moshi_lm.dep_q;
+  }
+  SUBCASE("text embedding is required") {
+    constexpr std::string_view name = "lm.depformer_text_emb.weight";
+    REQUIRE(hide_tensor(name, name.size() - 1u));
+  }
+  SUBCASE("scheduled input projection is required") {
+    constexpr std::string_view name = "lm.depformer_in.1.weight";
+    REQUIRE(hide_tensor(name, name.find(".1.") + 1u));
+  }
+  SUBCASE("codebook output projection is required") {
+    constexpr std::string_view name = "lm.linears.1.weight";
+    REQUIRE(hide_tensor(name, name.find(".1.") + 1u));
+  }
+
+  CHECK(moshi::validate_execution_contract(*model) != k_none);
+}
+
 TEST_CASE("enriched mimi fixture loads hparams and contract") {
   auto loaded = load_fixture_or_skip("mimi-tiny.gguf");
   if (loaded.model == nullptr) {

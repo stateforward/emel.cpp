@@ -1,5 +1,6 @@
 #include "emel/model/moshi/detail.hpp"
 
+#include <algorithm>
 #include <array>
 #include <climits>
 #include <cmath>
@@ -788,6 +789,22 @@ emel::error::type validate_lm_contract(const emel::model::data &model_data,
       return emel::error::cast(emel::model::loader::error::model_invalid);
     }
 
+    std::array<bool, emel::model::data::moshi_lm_hparams::k_max_delays>
+        required_weight_indices = {};
+    if (lm.depformer_weights_per_step &&
+        lm.depformer_weight_schedule_count > 0u) {
+      for (uint32_t index = 0u; index < lm.depformer_weight_schedule_count;
+           ++index) {
+        const int32_t weight_index = lm.depformer_weight_schedule[index];
+        if (weight_index < 0 || weight_index >= lm.dep_q) {
+          return emel::error::cast(emel::model::loader::error::model_invalid);
+        }
+        required_weight_indices[static_cast<size_t>(weight_index)] = true;
+      }
+    } else {
+      std::fill_n(required_weight_indices.begin(), lm.dep_q, true);
+    }
+
     const auto *depformer_text_embedding =
         find_tensor(model_data, "lm.depformer_text_emb.weight");
     if (depformer_text_embedding == nullptr) {
@@ -799,6 +816,9 @@ emel::error::type validate_lm_contract(const emel::model::data &model_data,
                                               *depformer_text_embedding),
     };
     for (int32_t codebook = 0; codebook < lm.dep_q; ++codebook) {
+      if (!required_weight_indices[static_cast<size_t>(codebook)]) {
+        continue;
+      }
       char name[96] = {};
       int written = std::snprintf(name, sizeof(name),
                                   "lm.depformer_in.%d.weight", codebook);
@@ -880,6 +900,9 @@ emel::error::type validate_lm_contract(const emel::model::data &model_data,
         return emel::error::cast(emel::model::loader::error::model_invalid);
       }
       for (int32_t codebook = 0; codebook < lm.dep_q; ++codebook) {
+        if (!required_weight_indices[static_cast<size_t>(codebook)]) {
+          continue;
+        }
         auto &codebook_layer = layer.codebooks[static_cast<size_t>(codebook)];
         written =
             std::snprintf(name, sizeof(name),
