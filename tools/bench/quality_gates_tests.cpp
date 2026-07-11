@@ -82,6 +82,7 @@ TEST_CASE("quality gates full benchmark branch preserves failure status") {
 
   CHECK(full_branch.find("run_step_allow_fail bench_snapshot") !=
         std::string::npos);
+  CHECK(full_branch.find("EMEL_BENCH_INTERNAL=1") != std::string::npos);
   CHECK(full_branch.find("full_status=$?") != std::string::npos);
   CHECK(full_branch.find("run_full_benchmark_opt_in_suites") !=
         std::string::npos);

@@ -129,6 +129,8 @@ decode_wavefront/gemv_batch8 ns_per_op=10245.420 iter=100 runs=3
 decode_wavefront/ggml_batch1 ns_per_op=4695.840 iter=100 runs=3
 decode_wavefront/ggml_batch4 ns_per_op=7364.160 iter=100 runs=3
 decode_wavefront/ggml_batch8 ns_per_op=9325.000 iter=100 runs=3
+sm_any/any ns_per_op=0.842 iter=10000 runs=9
+sm_any/direct ns_per_op=0.388 iter=10000 runs=9
 sm_scheduler/busy_worker_async ns_per_op=355.000
 sm_scheduler/idle_async ns_per_op=387.080
 generation/preloaded_request/lfm2_5_1_2b_thinking_q4_k_m_prompt_hello_max_tokens_1/multithreaded ns_per_op=87893208.000

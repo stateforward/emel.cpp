@@ -1141,6 +1141,7 @@ run_benchmark_gates() {
       EMEL_BENCH_RUNS="$QUALITY_GATES_BENCH_RUNS" \
       EMEL_BENCH_WARMUP_ITERS="$QUALITY_GATES_BENCH_WARMUP_ITERS" \
       EMEL_BENCH_WARMUP_RUNS="$QUALITY_GATES_BENCH_WARMUP_RUNS" \
+      EMEL_BENCH_INTERNAL=1 \
       BENCH_TOLERANCE="$QUALITY_GATES_BENCH_TOLERANCE" \
       "$ROOT_DIR/scripts/bench.sh" --snapshot --compare; then
       full_status=0
