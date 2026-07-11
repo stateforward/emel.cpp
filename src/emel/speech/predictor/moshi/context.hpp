@@ -3,7 +3,6 @@
 #include <array>
 #include <cstdint>
 
-#include "emel/memory/hybrid/context.hpp"
 #include "emel/memory/hybrid/sm.hpp"
 #include "emel/model/data.hpp"
 #include "emel/model/moshi/detail.hpp"
@@ -65,21 +64,24 @@ struct voice_prompt_state {
 };
 
 template <class graph_actor_type> struct dependencies {
-  emel::memory::hybrid::kv_binding kv_cache = {};
+  emel::memory::hybrid::sm &memory;
   graph_actor_type &graph;
   policies policy = {};
 };
 
 struct context {
-  context() = default;
+  explicit context(emel::memory::hybrid::sm &memory_ref,
+                   const policies policy_ref = {}) noexcept
+      : memory(memory_ref), policy(policy_ref) {}
+
   template <class graph_actor_type>
   explicit context(const dependencies<graph_actor_type> &deps)
-      : memory(deps.kv_cache), policy(deps.policy) {}
+      : context(deps.memory, deps.policy) {}
 
   runtime session = {};
   voice_prompt_state voice = {};
   lmgen_state lmgen = {};
-  emel::memory::hybrid::sm memory = {};
+  emel::memory::hybrid::sm &memory;
   const policies policy = {};
 };
 

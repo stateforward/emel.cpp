@@ -559,8 +559,9 @@ int main(int argc, char **argv) {
                   std::max(config.audio_top_k, config.text_top_k)),
           },
   }};
+  emel::memory::hybrid::sm prediction_memory{};
   predictor::sm token_predictor{predictor::dependencies<runtime::sm>{
-      .kv_cache = emel::memory::hybrid::kv_binding{},
+      .memory = prediction_memory,
       .graph = prediction_runtime,
       .policy =
           predictor::policies{

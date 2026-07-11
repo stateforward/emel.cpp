@@ -57,11 +57,11 @@ moshi_executor::dependencies make_executor_dependencies(
 }
 
 template <class graph_actor_type>
-moshi::action::dependencies<graph_actor_type> make_predictor_dependencies(
-    graph_actor_type &graph,
-    const emel::memory::hybrid::kv_binding &kv_cache = {}) noexcept {
+moshi::action::dependencies<graph_actor_type>
+make_predictor_dependencies(graph_actor_type &graph,
+                            emel::memory::hybrid::sm &memory) noexcept {
   return moshi::action::dependencies<graph_actor_type>{
-      .kv_cache = kv_cache,
+      .memory = memory,
       .graph = graph,
       .policy =
           moshi::action::policies{
@@ -376,7 +376,8 @@ void initialize_streaming_position(memory_streaming::sm &position) {
 
 TEST_CASE("speech_moshi_predictor_rejects_predict_before_initialize") {
   recording_graph_executor graph{};
-  moshi::sm generator{make_predictor_dependencies(graph)};
+  emel::memory::hybrid::sm memory{};
+  moshi::sm generator{make_predictor_dependencies(graph, memory)};
   std::array<int32_t, 4> input = {0, 0, 0, 0};
   moshi::event::predict::workspace workspace{};
   emel::error::type err = k_no_error;
@@ -393,7 +394,8 @@ TEST_CASE("speech_moshi_generator_rejects_non_lm_model_contract") {
   auto model = std::make_unique<emel::model::data>();
   model->moshi_component_id = emel::model::data::moshi_component::mimi;
   recording_graph_executor graph{};
-  moshi::sm generator{make_predictor_dependencies(graph)};
+  emel::memory::hybrid::sm memory{};
+  moshi::sm generator{make_predictor_dependencies(graph, memory)};
   emel::error::type err = k_no_error;
 
   moshi::event::initialize init{*model};
@@ -412,9 +414,9 @@ TEST_CASE("speech_moshi_generator_initializes_lm_with_injected_kv") {
           emel::error::cast(emel::model::loader::error::none));
 
   emel::memory::test::recording_kv_actor kv{};
+  emel::memory::hybrid::sm memory{emel::memory::hybrid::bind_kv_actor(kv)};
   recording_graph_executor graph{};
-  moshi::sm generator{make_predictor_dependencies(
-      graph, emel::memory::hybrid::bind_kv_actor(kv))};
+  moshi::sm generator{make_predictor_dependencies(graph, memory)};
   emel::error::type err = k_no_error;
 
   moshi::event::initialize init{*fixture.model};
@@ -437,7 +439,8 @@ TEST_CASE("speech_moshi_predictor_rejects_missing_initialize_capacity") {
   }
 
   recording_graph_executor graph{};
-  moshi::sm generator{make_predictor_dependencies(graph)};
+  emel::memory::hybrid::sm memory{};
+  moshi::sm generator{make_predictor_dependencies(graph, memory)};
   emel::error::type err = k_no_error;
   moshi::event::initialize init{*fixture.model};
   init.error_out = &err;
@@ -453,7 +456,9 @@ TEST_CASE("speech_moshi_predictor_rejects_missing_token_policy") {
   }
 
   recording_graph_executor graph{};
-  moshi::sm generator{moshi::action::dependencies{.graph = graph}};
+  emel::memory::hybrid::sm memory{};
+  moshi::sm generator{
+      moshi::action::dependencies{.memory = memory, .graph = graph}};
   emel::error::type err = k_no_error;
   moshi::event::initialize init{*fixture.model};
   configure_predictor_initialize(init);
@@ -483,7 +488,8 @@ TEST_CASE("speech_moshi_generator_personaplex_uses_model_inference_codebooks") {
   moshi::event::initialize init{*model};
   moshi::event::initialize_ctx init_ctx{};
   moshi::event::initialize_run run{init, init_ctx};
-  moshi::action::context ctx{};
+  emel::memory::hybrid::sm memory{};
+  moshi::action::context ctx{memory};
 
   moshi::action::effect_bind_contract{}(run, ctx);
   CHECK(moshi::guard::guard_personaplex_lmgen{}(run, ctx));
@@ -504,9 +510,9 @@ TEST_CASE(
   }
 
   emel::memory::test::recording_kv_actor kv{};
+  emel::memory::hybrid::sm memory{emel::memory::hybrid::bind_kv_actor(kv)};
   recording_graph_executor graph{};
-  moshi::sm generator{make_predictor_dependencies(
-      graph, emel::memory::hybrid::bind_kv_actor(kv))};
+  moshi::sm generator{make_predictor_dependencies(graph, memory)};
   emel::error::type err = k_no_error;
 
   moshi::event::initialize init{*fixture.model};
@@ -564,7 +570,8 @@ TEST_CASE("speech_moshi_generator_loads_personaplex_voice_embedding_dtypes") {
   moshi::event::prefill_voice prefill{};
   moshi::event::prefill_voice_ctx prefill_ctx{*snapshot};
   moshi::event::prefill_voice_run prefill_run{prefill, prefill_ctx};
-  moshi::action::context ctx{};
+  emel::memory::hybrid::sm memory{};
+  moshi::action::context ctx{memory};
   emel::model::data::tensor_record tensor{};
   std::array<uint16_t, 4> data = {0x3c00u, 0x4000u, 0x4200u, 0x4400u};
   tensor.data = data.data();
@@ -599,9 +606,9 @@ TEST_CASE("speech_moshi_generator_prefills_personaplex_system_prompt_before_"
   }
 
   emel::memory::test::recording_kv_actor kv{};
+  emel::memory::hybrid::sm memory{emel::memory::hybrid::bind_kv_actor(kv)};
   recording_graph_executor graph{};
-  moshi::sm generator{make_predictor_dependencies(
-      graph, emel::memory::hybrid::bind_kv_actor(kv))};
+  moshi::sm generator{make_predictor_dependencies(graph, memory)};
   emel::error::type err = k_no_error;
 
   moshi::event::initialize init{*fixture.model};
@@ -740,9 +747,9 @@ TEST_CASE("speech_moshi_generator_accepts_personaplex_voice_without_system_"
   }
 
   emel::memory::test::recording_kv_actor kv{};
+  emel::memory::hybrid::sm memory{emel::memory::hybrid::bind_kv_actor(kv)};
   recording_graph_executor graph{};
-  moshi::sm generator{make_predictor_dependencies(
-      graph, emel::memory::hybrid::bind_kv_actor(kv))};
+  moshi::sm generator{make_predictor_dependencies(graph, memory)};
   emel::error::type err = k_no_error;
 
   moshi::event::initialize init{*fixture.model};
@@ -850,9 +857,9 @@ TEST_CASE("speech_moshi_predictor_reports_rejected_graph_event") {
   }
 
   emel::memory::test::recording_kv_actor kv{};
+  emel::memory::hybrid::sm memory{emel::memory::hybrid::bind_kv_actor(kv)};
   rejecting_graph_executor graph{};
-  moshi::sm generator{make_predictor_dependencies(
-      graph, emel::memory::hybrid::bind_kv_actor(kv))};
+  moshi::sm generator{make_predictor_dependencies(graph, memory)};
   emel::error::type err = k_no_error;
   moshi::event::initialize init{*fixture.model};
   configure_predictor_initialize(init);
@@ -927,8 +934,7 @@ TEST_CASE("speech_moshi_executor_rejects_missing_numeric_policy") {
   }
 
   emel::kernel::sm kernel{};
-  moshi_executor::sm executor{
-      moshi_executor::dependencies{.kernel = kernel}};
+  moshi_executor::sm executor{moshi_executor::dependencies{.kernel = kernel}};
   emel::error::type err = emel::error::cast(moshi_executor::error::none);
   moshi_executor::event::initialize init{*fixture.model};
   init.error_out = &err;
@@ -1283,7 +1289,8 @@ TEST_CASE("speech_moshi_generator_and_executor_cover_explicit_error_guards") {
     return;
   }
 
-  moshi::action::context generator_ctx{};
+  emel::memory::hybrid::sm memory{};
+  moshi::action::context generator_ctx{memory};
   moshi::event::initialize init{*fixture.model};
   configure_predictor_initialize(init);
   moshi::event::initialize_ctx init_ctx{};
@@ -2203,11 +2210,11 @@ TEST_CASE(
   }
 
   emel::memory::test::recording_kv_actor kv{};
+  emel::memory::hybrid::sm memory{emel::memory::hybrid::bind_kv_actor(kv)};
   emel::kernel::sm kernel{};
   moshi_executor::sm executor{make_executor_dependencies(kernel)};
 
-  moshi::sm generator{make_predictor_dependencies(
-      executor, emel::memory::hybrid::bind_kv_actor(kv))};
+  moshi::sm generator{make_predictor_dependencies(executor, memory)};
   emel::error::type err = k_no_error;
   moshi::event::initialize init{*fixture.model};
   configure_predictor_initialize(init);

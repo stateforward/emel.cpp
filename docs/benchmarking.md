@@ -388,8 +388,9 @@ on macOS, the default input is generated with Samantha at 175 words per minute s
 
 the comparison builds two isolated Release executables. `personaplex_emel_runner` links only EMEL
 and drives the maintained generic speech generator with injected Mimi, batch-planner, tokenizer,
-Moshi predictor, sampler, streaming-memory, and decoder actors. Each streamed or flushed frame is
-planned through the shared batch planner before prediction; the typed one-frame plan is validated
+Moshi predictor, sampler, streaming-memory, hybrid KV/recurrent-memory, and decoder actors. Each
+streamed or flushed frame is planned through the shared batch planner before prediction; the typed
+one-frame plan is validated
 by the predictor before memory allocation. The generic generator then dispatches graph execution
 and sampling as distinct injected actor phases; the Moshi predictor enforces the typed
 `prediction_ready -> execution_ready -> session_ready` protocol. Its executor stops graph RTC
