@@ -1289,6 +1289,11 @@ run_coverage_gate() {
 }
 
 parallel_enabled() {
+  case "${EMEL_BENCH_STRICT_REGRESSION:-0}" in
+    1|true|yes)
+      return 1
+      ;;
+  esac
   case "$QUALITY_GATES_PARALLEL" in
     auto|always|1|true|yes)
       return 0

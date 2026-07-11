@@ -239,6 +239,7 @@ TEST_CASE(
 
   CHECK(script.find("QUALITY_GATES_PARALLEL") != std::string::npos);
   CHECK(script.find("parallel_enabled()") != std::string::npos);
+  CHECK(script.find("EMEL_BENCH_STRICT_REGRESSION") != std::string::npos);
   CHECK(script.find("start_parallel_step bench_snapshot run_benchmark_gates") !=
         std::string::npos);
   CHECK(
