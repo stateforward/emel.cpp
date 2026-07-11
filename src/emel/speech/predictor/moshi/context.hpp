@@ -17,13 +17,6 @@ inline constexpr int32_t k_max_delay_rows = 128;
 inline constexpr int32_t k_token_zero = -1;
 inline constexpr int32_t k_token_ungenerated = -2;
 
-using graph_step_dispatch_fn = bool(void *, const event::graph_step &);
-
-struct graph_binding {
-  void *executor = nullptr;
-  graph_step_dispatch_fn *dispatch_step = nullptr;
-};
-
 struct lmgen_state {
   int32_t codebook_count = 0;
   int32_t generated_dep_q = 0;
@@ -66,25 +59,20 @@ struct voice_prompt_state {
   bool prompt_ready = false;
 };
 
+template <class graph_actor_type> struct dependencies {
+  emel::memory::hybrid::kv_binding kv_cache = {};
+  graph_actor_type &graph;
+};
+
 struct context {
   context() = default;
   explicit context(const emel::memory::hybrid::kv_binding &kv_cache)
       : memory(kv_cache) {}
-  context(const emel::memory::hybrid::kv_binding &kv_cache,
-          const graph_binding &graph_executor)
-      : graph(graph_executor), memory(kv_cache) {}
 
   runtime session = {};
   voice_prompt_state voice = {};
-  graph_binding graph = {};
   lmgen_state lmgen = {};
   emel::memory::hybrid::sm memory = {};
 };
-
-inline graph_binding
-bind_graph_executor(void *executor,
-                    graph_step_dispatch_fn &dispatch_step) noexcept {
-  return graph_binding{.executor = executor, .dispatch_step = &dispatch_step};
-}
 
 } // namespace emel::speech::predictor::moshi::action

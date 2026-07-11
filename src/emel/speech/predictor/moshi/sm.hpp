@@ -18,6 +18,8 @@ struct state_bind_contract_decision {};
 struct state_binding {};
 struct state_lmgen_mode_decision {};
 struct state_configure_lmgen {};
+struct state_initialize_graph {};
+struct state_initialize_graph_decision {};
 struct state_reserve_memory {};
 struct state_reserve_memory_decision {};
 struct state_allocate_sequence {};
@@ -103,7 +105,7 @@ struct state_uninit_begin_personaplex_prompt_callback_decision {};
 struct state_uninit_prefill_personaplex_prompt_error_out_decision {};
 struct state_uninit_prefill_personaplex_prompt_callback_decision {};
 
-struct model {
+template <class graph_actor_type> struct model {
   auto operator()() const {
     namespace sml = stateforward::sml;
     using init_run = event::initialize_run;
@@ -134,9 +136,18 @@ struct model {
       , sml::state<state_configure_lmgen> <= sml::state<state_lmgen_mode_decision>
           + sml::completion<init_run> [ guard::guard_standard_lmgen{} ]
           / action::effect_configure_standard_lmgen{}
-      , sml::state<state_reserve_memory> <= sml::state<state_configure_lmgen>
+      , sml::state<state_initialize_graph> <= sml::state<state_configure_lmgen>
           + sml::completion<init_run>
+          / action::effect_initialize_graph<graph_actor_type>{}
+      , sml::state<state_initialize_graph_decision> <= sml::state<state_initialize_graph>
+          + sml::completion<init_run>
+      , sml::state<state_reserve_memory> <= sml::state<state_initialize_graph_decision>
+          + sml::completion<init_run> [ guard::guard_graph_initialize_succeeded{} ]
           / action::effect_reserve_memory{}
+      , sml::state<state_init_failed_error_out_decision> <=
+          sml::state<state_initialize_graph_decision> + sml::completion<init_run>
+          [ guard::guard_graph_initialize_failed{} ]
+          / action::effect_mark_graph_runtime_error<init_run>{}
       , sml::state<state_reserve_memory_decision> <= sml::state<state_reserve_memory>
           + sml::completion<init_run>
       , sml::state<state_allocate_sequence> <= sml::state<state_reserve_memory_decision>
@@ -247,11 +258,8 @@ struct model {
           + sml::completion<prefill_voice_run> [ guard::guard_voice_embedding_frame_failed{} ]
           / action::effect_mark_voice_contract_error<prefill_voice_run>{}
       , sml::state<state_prefill_voice_running_graph> <= sml::state<state_prefill_voice_graph_runtime_decision>
-          + sml::completion<prefill_voice_run> [ guard::guard_graph_runtime_available{} ]
-          / action::effect_run_voice_graph_runtime{}
-      , sml::state<state_prefill_voice_failed_error_out_decision> <= sml::state<state_prefill_voice_graph_runtime_decision>
-          + sml::completion<prefill_voice_run> [ guard::guard_graph_runtime_unavailable{} ]
-          / action::effect_mark_graph_runtime_unavailable<prefill_voice_run>{}
+          + sml::completion<prefill_voice_run>
+          / action::effect_run_voice_graph_runtime<graph_actor_type>{}
       , sml::state<state_prefill_voice_graph_error_out_decision> <= sml::state<state_prefill_voice_running_graph>
           + sml::completion<prefill_voice_run>
       , sml::state<state_prefill_voice_graph_result_decision> <= sml::state<state_prefill_voice_graph_error_out_decision>
@@ -382,11 +390,8 @@ struct model {
       , sml::state<state_prefill_personaplex_prompt_graph_runtime_decision> <= sml::state<state_prefill_personaplex_prompt_write_input>
           + sml::completion<prefill_prompt_run>
       , sml::state<state_prefill_personaplex_prompt_running_graph> <= sml::state<state_prefill_personaplex_prompt_graph_runtime_decision>
-          + sml::completion<prefill_prompt_run> [ guard::guard_graph_runtime_available{} ]
-          / action::effect_run_personaplex_prompt_graph_runtime{}
-      , sml::state<state_prefill_personaplex_prompt_failed_error_out_decision> <= sml::state<state_prefill_personaplex_prompt_graph_runtime_decision>
-          + sml::completion<prefill_prompt_run> [ guard::guard_graph_runtime_unavailable{} ]
-          / action::effect_mark_graph_runtime_unavailable<prefill_prompt_run>{}
+          + sml::completion<prefill_prompt_run>
+          / action::effect_run_personaplex_prompt_graph_runtime<graph_actor_type>{}
       , sml::state<state_prefill_personaplex_prompt_graph_error_out_decision> <= sml::state<state_prefill_personaplex_prompt_running_graph>
           + sml::completion<prefill_prompt_run>
       , sml::state<state_prefill_personaplex_prompt_graph_result_decision> <= sml::state<state_prefill_personaplex_prompt_graph_error_out_decision>
@@ -505,11 +510,7 @@ struct model {
           sml::state<state_sample_begin> + sml::completion<sample_run>
       , sml::state<state_sample_running_graph> <=
           sml::state<state_sample_graph_runtime_decision> + sml::completion<sample_run>
-          [ guard::guard_graph_runtime_available{} ] / action::effect_run_sample_graph{}
-      , sml::state<state_sample_failed_error_out_decision> <=
-          sml::state<state_sample_graph_runtime_decision> + sml::completion<sample_run>
-          [ guard::guard_graph_runtime_unavailable{} ]
-          / action::effect_mark_graph_runtime_unavailable<sample_run>{}
+          / action::effect_run_sample_graph<graph_actor_type>{}
       , sml::state<state_sample_graph_error_out_decision> <=
           sml::state<state_sample_running_graph> + sml::completion<sample_run>
       , sml::state<state_sample_graph_result_decision> <=
@@ -640,18 +641,14 @@ struct model {
   }
 };
 
-struct sm : public emel::sm<model, action::context> {
-  using base_type = emel::sm<model, action::context>;
+template <class graph_actor_type>
+struct sm : public emel::sm<model<graph_actor_type>, action::context> {
+  using base_type = emel::sm<model<graph_actor_type>, action::context>;
   using base_type::is;
   using base_type::visit_current_states;
 
-  sm() : memory_snapshot_(std::make_unique<emel::memory::view::snapshot>()) {}
-  explicit sm(const emel::memory::hybrid::kv_binding &kv_cache)
-      : base_type(std::in_place, kv_cache),
-        memory_snapshot_(std::make_unique<emel::memory::view::snapshot>()) {}
-  sm(const emel::memory::hybrid::kv_binding &kv_cache,
-     const action::graph_binding &graph_executor)
-      : base_type(std::in_place, kv_cache, graph_executor),
+  explicit sm(const action::dependencies<graph_actor_type> &deps)
+      : base_type(std::piecewise_construct, deps.kv_cache, deps.graph),
         memory_snapshot_(std::make_unique<emel::memory::view::snapshot>()) {}
 
   sm(const sm &) = delete;
@@ -721,5 +718,8 @@ struct sm : public emel::sm<model, action::context> {
 private:
   std::unique_ptr<emel::memory::view::snapshot> memory_snapshot_ = {};
 };
+
+template <class graph_actor_type>
+sm(const action::dependencies<graph_actor_type> &) -> sm<graph_actor_type>;
 
 } // namespace emel::speech::predictor::moshi

@@ -111,13 +111,11 @@ struct personaplex_dependencies {
   mimi::sm &encoder;
   tokenizer::sm &tokenizer;
   mimi::sm &decoder;
-  runtime::sm &runtime;
-  predictor::sm &predictor;
-  predictor::sm &sampler;
+  predictor::sm<runtime::sm> &predictor;
+  predictor::sm<runtime::sm> &sampler;
   predictor::event::predict::workspace &prediction_workspace;
   mimi::event::initialize encoder_initialize;
   mimi::event::initialize decoder_initialize;
-  runtime::event::initialize runtime_initialize;
   predictor::event::initialize predictor_initialize;
   predictor::event::load_voice conditioning_initialize;
   std::span<float> silence_pcm = {};
@@ -535,9 +533,10 @@ int main(int argc, char **argv) {
       runtime::bind_temporal_kv_cache(&cache_views, bind_temporal_cache),
       runtime::bind_depformer_kv_cache(&cache_views, bind_secondary_cache),
       temporal_positions, secondary_positions)};
-  predictor::sm token_predictor{
-      emel::memory::hybrid::kv_binding{},
-      runtime::bind_graph_executor(prediction_runtime)};
+  predictor::sm token_predictor{predictor::action::dependencies{
+      .kv_cache = emel::memory::hybrid::kv_binding{},
+      .graph = prediction_runtime,
+  }};
   predictor::event::predict::workspace prediction_workspace{};
   tokenizer::sm token_delay{tokenizer::dependencies{
       .delays = std::span<const int32_t>{delay_begin, delay_end},
@@ -556,17 +555,16 @@ int main(int argc, char **argv) {
   mimi::sm encoder{};
   mimi::sm decoder{};
 
-  runtime::event::initialize runtime_initialize{*lm_model.model};
-  runtime_initialize.sampling_enabled = true;
-  runtime_initialize.sampling_consume_forced_text = true;
-  runtime_initialize.sampling_audio_temperature = config.audio_temperature;
-  runtime_initialize.sampling_text_temperature = config.text_temperature;
-  runtime_initialize.sampling_audio_top_k = config.audio_top_k;
-  runtime_initialize.sampling_text_top_k = config.text_top_k;
-  runtime_initialize.sampling_seed = config.sampling_seed;
   predictor::event::initialize predictor_initialize{*lm_model.model};
   predictor_initialize.max_blocks = config.max_blocks;
   predictor_initialize.block_tokens = config.block_tokens;
+  predictor_initialize.sampling_enabled = true;
+  predictor_initialize.sampling_consume_forced_text = true;
+  predictor_initialize.sampling_audio_temperature = config.audio_temperature;
+  predictor_initialize.sampling_text_temperature = config.text_temperature;
+  predictor_initialize.sampling_audio_top_k = config.audio_top_k;
+  predictor_initialize.sampling_text_top_k = config.text_top_k;
+  predictor_initialize.sampling_seed = config.sampling_seed;
 
   personaplex_dependencies dependencies{
       .temporal_positions = temporal_positions,
@@ -574,7 +572,6 @@ int main(int argc, char **argv) {
       .encoder = encoder,
       .tokenizer = token_delay,
       .decoder = decoder,
-      .runtime = prediction_runtime,
       .predictor = token_predictor,
       .sampler = token_predictor,
       .prediction_workspace = prediction_workspace,
@@ -590,7 +587,6 @@ int main(int argc, char **argv) {
                                   std::span<float>{decoder_state},
                                   std::span<float>{decoder_workspace},
                                   std::span<float>{decoder_frame}},
-      .runtime_initialize = runtime_initialize,
       .predictor_initialize = predictor_initialize,
       .conditioning_initialize =
           predictor::event::load_voice{*voice_model.model},

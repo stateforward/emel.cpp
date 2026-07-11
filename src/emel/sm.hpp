@@ -716,6 +716,12 @@ class sm {
   explicit sm(std::in_place_t, context_args &&... context_args_in)
       : context_(std::forward<context_args>(context_args_in)...),
         state_machine_(context_) {}
+  template <class context_arg, class... args>
+    requires (sizeof...(args) > 0)
+  explicit sm(std::piecewise_construct_t, context_arg && context_arg_in,
+              args &&... args_in)
+      : context_(std::forward<context_arg>(context_arg_in)),
+        state_machine_(context_, std::forward<args>(args_in)...) {}
   explicit sm(const context_type & context_in)
       : context_(context_in), state_machine_(context_) {}
   explicit sm(context_type && context_in)

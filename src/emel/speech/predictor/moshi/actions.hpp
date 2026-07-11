@@ -61,14 +61,6 @@ struct effect_mark_step_request_invalid {
   }
 };
 
-template <class runtime_event_type>
-struct effect_mark_graph_runtime_unavailable {
-  void operator()(const runtime_event_type &runtime_ev,
-                  context &) const noexcept {
-    runtime_ev.ctx.err = detail_ns::to_error(error::graph_runtime_unavailable);
-  }
-};
-
 template <class runtime_event_type> struct effect_mark_graph_runtime_error {
   void operator()(const runtime_event_type &runtime_ev,
                   context &) const noexcept {
@@ -135,6 +127,16 @@ struct effect_configure_standard_lmgen {
     ctx.lmgen.delayed_dep_q = ctx.lmgen.generated_dep_q;
     ctx.lmgen.needed_tokens =
         ctx.lmgen.codebook_count - ctx.lmgen.delayed_dep_q - 1;
+  }
+};
+
+template <class graph_actor_type> struct effect_initialize_graph {
+  void operator()(const event::initialize_run &runtime_ev, context &,
+                  graph_actor_type &graph) const noexcept {
+    runtime_ev.ctx.graph_error = detail_ns::to_error(error::none);
+    event::initialize_graph request{runtime_ev.request};
+    request.error_out = &runtime_ev.ctx.graph_error;
+    runtime_ev.ctx.graph_accepted = graph.process_event(request);
   }
 };
 
@@ -330,9 +332,9 @@ struct effect_load_voice_embedding_frame_bf16 {
   }
 };
 
-struct effect_run_voice_graph_runtime {
-  void operator()(const event::prefill_voice_run &runtime_ev,
-                  context &ctx) const noexcept {
+template <class graph_actor_type> struct effect_run_voice_graph_runtime {
+  void operator()(const event::prefill_voice_run &runtime_ev, context &ctx,
+                  graph_actor_type &graph) const noexcept {
     runtime_ev.ctx.graph_error = detail_ns::to_error(error::none);
     event::graph_step graph_step{
         *ctx.session.model,
@@ -349,8 +351,7 @@ struct effect_run_voice_graph_runtime {
                                static_cast<size_t>(ctx.voice.embedding_dim)};
     graph_step.forced_text_token = ctx.session.model->moshi_lm.text_padding_id;
     graph_step.error_out = &runtime_ev.ctx.graph_error;
-    runtime_ev.ctx.graph_accepted =
-        ctx.graph.dispatch_step(ctx.graph.executor, graph_step);
+    runtime_ev.ctx.graph_accepted = graph.process_event(graph_step);
   }
 };
 
@@ -511,9 +512,10 @@ struct effect_write_and_build_personaplex_prompt_input {
   }
 };
 
+template <class graph_actor_type>
 struct effect_run_personaplex_prompt_graph_runtime {
   void operator()(const event::prefill_personaplex_prompt_run &runtime_ev,
-                  context &ctx) const noexcept {
+                  context &ctx, graph_actor_type &graph) const noexcept {
     runtime_ev.ctx.graph_error = detail_ns::to_error(error::none);
     event::graph_step graph_step{
         *ctx.session.model,
@@ -526,8 +528,7 @@ struct effect_run_personaplex_prompt_graph_runtime {
     };
     graph_step.sequence_id = ctx.session.sequence_id;
     graph_step.error_out = &runtime_ev.ctx.graph_error;
-    runtime_ev.ctx.graph_accepted =
-        ctx.graph.dispatch_step(ctx.graph.executor, graph_step);
+    runtime_ev.ctx.graph_accepted = graph.process_event(graph_step);
   }
 };
 
@@ -625,9 +626,9 @@ struct effect_begin_sample {
   }
 };
 
-struct effect_run_sample_graph {
-  void operator()(const event::sample_run &runtime_ev,
-                  context &ctx) const noexcept {
+template <class graph_actor_type> struct effect_run_sample_graph {
+  void operator()(const event::sample_run &runtime_ev, context &ctx,
+                  graph_actor_type &graph) const noexcept {
     runtime_ev.ctx.graph_error = detail_ns::to_error(error::none);
     event::graph_step graph_step{
         *ctx.session.model,
@@ -638,8 +639,7 @@ struct effect_run_sample_graph {
     };
     graph_step.sequence_id = ctx.session.sequence_id;
     graph_step.error_out = &runtime_ev.ctx.graph_error;
-    runtime_ev.ctx.graph_accepted =
-        ctx.graph.dispatch_step(ctx.graph.executor, graph_step);
+    runtime_ev.ctx.graph_accepted = graph.process_event(graph_step);
   }
 };
 

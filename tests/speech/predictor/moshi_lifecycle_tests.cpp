@@ -40,6 +40,22 @@ struct recording_graph_executor {
   float first_embedding_sample = 0.0f;
   std::array<int32_t, moshi::event::k_max_codebooks> first_input = {};
   std::array<int32_t, moshi::event::k_max_codebooks> last_input = {};
+
+  bool process_event(const moshi::event::initialize_graph &request) noexcept {
+    *request.error_out = k_no_error;
+    return true;
+  }
+  bool process_event(const moshi::event::graph_step &step);
+};
+
+struct rejecting_graph_executor {
+  bool process_event(const moshi::event::initialize_graph &request) noexcept {
+    *request.error_out = k_no_error;
+    return true;
+  }
+  bool process_event(const moshi::event::graph_step &) noexcept {
+    return false;
+  }
 };
 
 struct temporal_kv_probe {
@@ -161,9 +177,9 @@ struct moshi_callback_probe {
   }
 };
 
-bool dispatch_recording_graph(void *executor_ptr,
-                              const moshi::event::graph_step &step) {
-  auto &executor = *static_cast<recording_graph_executor *>(executor_ptr);
+bool recording_graph_executor::process_event(
+    const moshi::event::graph_step &step) {
+  auto &executor = *this;
   ++executor.call_count;
   if (!step.input_embedding.empty()) {
     ++executor.external_embedding_count;
@@ -279,7 +295,8 @@ void initialize_streaming_position(memory_streaming::sm &position) {
 } // namespace
 
 TEST_CASE("speech_moshi_predictor_rejects_predict_before_initialize") {
-  moshi::sm generator{};
+  recording_graph_executor graph{};
+  moshi::sm generator{moshi::action::dependencies{.graph = graph}};
   std::array<int32_t, 4> input = {0, 0, 0, 0};
   moshi::event::predict::workspace workspace{};
   emel::error::type err = k_no_error;
@@ -294,7 +311,8 @@ TEST_CASE("speech_moshi_predictor_rejects_predict_before_initialize") {
 TEST_CASE("speech_moshi_generator_rejects_non_lm_model_contract") {
   auto model = std::make_unique<emel::model::data>();
   model->moshi_component_id = emel::model::data::moshi_component::mimi;
-  moshi::sm generator{};
+  recording_graph_executor graph{};
+  moshi::sm generator{moshi::action::dependencies{.graph = graph}};
   emel::error::type err = k_no_error;
 
   moshi::event::initialize init{*model};
@@ -313,7 +331,9 @@ TEST_CASE("speech_moshi_generator_initializes_lm_with_injected_kv") {
           emel::error::cast(emel::model::loader::error::none));
 
   emel::memory::test::recording_kv_actor kv{};
-  moshi::sm generator{emel::memory::hybrid::bind_kv_actor(kv)};
+  recording_graph_executor graph{};
+  moshi::sm generator{moshi::action::dependencies{
+      .kv_cache = emel::memory::hybrid::bind_kv_actor(kv), .graph = graph}};
   emel::error::type err = k_no_error;
 
   moshi::event::initialize init{*fixture.model};
@@ -370,9 +390,8 @@ TEST_CASE(
 
   emel::memory::test::recording_kv_actor kv{};
   recording_graph_executor graph{};
-  moshi::sm generator{
-      emel::memory::hybrid::bind_kv_actor(kv),
-      moshi::action::bind_graph_executor(&graph, dispatch_recording_graph)};
+  moshi::sm generator{moshi::action::dependencies{
+      .kv_cache = emel::memory::hybrid::bind_kv_actor(kv), .graph = graph}};
   emel::error::type err = k_no_error;
 
   moshi::event::initialize init{*fixture.model};
@@ -465,9 +484,8 @@ TEST_CASE("speech_moshi_generator_prefills_personaplex_system_prompt_before_"
 
   emel::memory::test::recording_kv_actor kv{};
   recording_graph_executor graph{};
-  moshi::sm generator{
-      emel::memory::hybrid::bind_kv_actor(kv),
-      moshi::action::bind_graph_executor(&graph, dispatch_recording_graph)};
+  moshi::sm generator{moshi::action::dependencies{
+      .kv_cache = emel::memory::hybrid::bind_kv_actor(kv), .graph = graph}};
   emel::error::type err = k_no_error;
 
   moshi::event::initialize init{*fixture.model};
@@ -584,9 +602,8 @@ TEST_CASE("speech_moshi_generator_accepts_personaplex_voice_without_system_"
 
   emel::memory::test::recording_kv_actor kv{};
   recording_graph_executor graph{};
-  moshi::sm generator{
-      emel::memory::hybrid::bind_kv_actor(kv),
-      moshi::action::bind_graph_executor(&graph, dispatch_recording_graph)};
+  moshi::sm generator{moshi::action::dependencies{
+      .kv_cache = emel::memory::hybrid::bind_kv_actor(kv), .graph = graph}};
   emel::error::type err = k_no_error;
 
   moshi::event::initialize init{*fixture.model};
@@ -679,15 +696,16 @@ TEST_CASE("speech_moshi_generator_accepts_personaplex_voice_without_system_"
   CHECK(graph.call_count == prompt_frames + personaplex_prompt_frames + 1);
 }
 
-TEST_CASE("speech_moshi_predictor_uses_memory_then_reports_missing_graph_"
-          "runtime") {
+TEST_CASE("speech_moshi_predictor_reports_rejected_graph_event") {
   auto fixture = load_fixture_or_skip("moshi-tiny-lm.gguf");
   if (fixture.model == nullptr) {
     return;
   }
 
   emel::memory::test::recording_kv_actor kv{};
-  moshi::sm generator{emel::memory::hybrid::bind_kv_actor(kv)};
+  rejecting_graph_executor graph{};
+  moshi::sm generator{moshi::action::dependencies{
+      .kv_cache = emel::memory::hybrid::bind_kv_actor(kv), .graph = graph}};
   emel::error::type err = k_no_error;
   moshi::event::initialize init{*fixture.model};
   init.error_out = &err;
@@ -715,7 +733,7 @@ TEST_CASE("speech_moshi_predictor_uses_memory_then_reports_missing_graph_"
   sample.error_out = &err;
 
   CHECK_FALSE(generator.process_event(sample));
-  CHECK(err == emel::error::cast(moshi::error::graph_runtime_unavailable));
+  CHECK(err == emel::error::cast(moshi::error::graph_runtime));
   CHECK(kv.allocate_slots_count == 1);
   CHECK(kv.capture_view_count == 1);
 }
@@ -1840,14 +1858,9 @@ TEST_CASE(
 
   emel::memory::test::recording_kv_actor kv{};
   moshi_executor::sm executor{};
-  emel::error::type executor_err =
-      emel::error::cast(moshi_executor::error::none);
-  moshi_executor::event::initialize executor_init{*fixture.model};
-  executor_init.error_out = &executor_err;
-  REQUIRE(executor.process_event(executor_init));
 
-  moshi::sm generator{emel::memory::hybrid::bind_kv_actor(kv),
-                      moshi_executor::bind_graph_executor(executor)};
+  moshi::sm generator{moshi::action::dependencies{
+      .kv_cache = emel::memory::hybrid::bind_kv_actor(kv), .graph = executor}};
   emel::error::type err = k_no_error;
   moshi::event::initialize init{*fixture.model};
   init.error_out = &err;

@@ -40,9 +40,24 @@ struct initialize {
   int32_t max_blocks = 4096;
   int32_t block_tokens = emel::memory::view::DEFAULT_BLOCK_TOKENS;
   int32_t sequence_id = 0;
+  bool sampling_enabled = false;
+  bool sampling_consume_forced_text = false;
+  float sampling_audio_temperature = 0.0f;
+  float sampling_text_temperature = 0.0f;
+  int32_t sampling_audio_top_k = 0;
+  int32_t sampling_text_top_k = 0;
+  uint32_t sampling_seed = 1u;
   emel::error::type *error_out = nullptr;
   emel::callback<void(const events::initialize_done &)> on_done = {};
   emel::callback<void(const events::initialize_error &)> on_error = {};
+};
+
+struct initialize_graph {
+  explicit initialize_graph(const initialize &request_ref) noexcept
+      : request(request_ref) {}
+
+  const initialize &request;
+  emel::error::type *error_out = nullptr;
 };
 
 struct load_voice {
@@ -156,6 +171,8 @@ struct graph_step {
 
 struct initialize_ctx {
   emel::error::type err = emel::error::cast(error::none);
+  emel::error::type graph_error = emel::error::cast(error::none);
+  bool graph_accepted = false;
   bool memory_accepted = false;
   int32_t memory_error = static_cast<int32_t>(emel::error::cast(error::none));
 };

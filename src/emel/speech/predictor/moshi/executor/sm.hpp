@@ -1016,6 +1016,21 @@ struct sm : public emel::sm<model, action::context> {
     return accepted && ctx.err == action::detail_ns::to_error(error::none);
   }
 
+  bool process_event(
+      const emel::speech::predictor::moshi::event::initialize_graph &ev) {
+    event::initialize request{ev.request.model};
+    request.sampling_enabled = ev.request.sampling_enabled;
+    request.sampling_consume_forced_text =
+        ev.request.sampling_consume_forced_text;
+    request.sampling_audio_temperature = ev.request.sampling_audio_temperature;
+    request.sampling_text_temperature = ev.request.sampling_text_temperature;
+    request.sampling_audio_top_k = ev.request.sampling_audio_top_k;
+    request.sampling_text_top_k = ev.request.sampling_text_top_k;
+    request.sampling_seed = ev.request.sampling_seed;
+    request.error_out = ev.error_out;
+    return process_event(request);
+  }
+
   bool
   process_event(const emel::speech::predictor::moshi::event::graph_step &ev) {
     event::step_ctx ctx{};

@@ -120,6 +120,22 @@ struct guard_memory_accepted {
   }
 };
 
+struct guard_graph_initialize_succeeded {
+  bool operator()(const event::initialize_run &runtime_ev,
+                  const action::context &) const noexcept {
+    return runtime_ev.ctx.graph_accepted &&
+           runtime_ev.ctx.graph_error ==
+               action::detail_ns::to_error(error::none);
+  }
+};
+
+struct guard_graph_initialize_failed {
+  bool operator()(const event::initialize_run &runtime_ev,
+                  const action::context &ctx) const noexcept {
+    return !guard_graph_initialize_succeeded{}(runtime_ev, ctx);
+  }
+};
+
 struct guard_memory_rejected {
   template <class runtime_event_type>
   bool operator()(const runtime_event_type &runtime_ev,
@@ -447,22 +463,6 @@ struct guard_no_voice_remaining_out {
   bool operator()(const event::prefill_voice_run &runtime_ev,
                   const action::context &ctx) const noexcept {
     return !guard_has_voice_remaining_out{}(runtime_ev, ctx);
-  }
-};
-
-struct guard_graph_runtime_available {
-  template <class runtime_event_type>
-  bool operator()(const runtime_event_type &,
-                  const action::context &ctx) const noexcept {
-    return ctx.graph.executor != nullptr && ctx.graph.dispatch_step != nullptr;
-  }
-};
-
-struct guard_graph_runtime_unavailable {
-  template <class runtime_event_type>
-  bool operator()(const runtime_event_type &runtime_ev,
-                  const action::context &ctx) const noexcept {
-    return !guard_graph_runtime_available{}(runtime_ev, ctx);
   }
 };
 

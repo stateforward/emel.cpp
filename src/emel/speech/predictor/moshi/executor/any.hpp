@@ -4,18 +4,6 @@
 
 namespace emel::speech::predictor::moshi::executor {
 
-inline bool dispatch_graph_step(
-    void *executor_ptr,
-    const emel::speech::predictor::moshi::event::graph_step &ev) noexcept {
-  return static_cast<sm *>(executor_ptr)->process_event(ev);
-}
-
-inline emel::speech::predictor::moshi::action::graph_binding
-bind_graph_executor(sm &executor) noexcept {
-  return emel::speech::predictor::moshi::action::bind_graph_executor(
-      &executor, dispatch_graph_step);
-}
-
 using temporal_kv_binding = action::temporal_kv_binding;
 using depformer_kv_binding = action::depformer_kv_binding;
 using kv_bindings = action::kv_bindings;

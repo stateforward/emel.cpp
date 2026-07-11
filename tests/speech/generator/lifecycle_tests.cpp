@@ -169,18 +169,6 @@ struct fake_decoder_actor {
   }
 };
 
-struct fake_runtime_actor {
-  int32_t initialize_calls = 0;
-  bool initialize_accepted = true;
-  emel::error::type initialize_error = 0;
-
-  bool process_event(const fake_initialize &request) noexcept {
-    ++initialize_calls;
-    *request.error_out = initialize_error;
-    return initialize_accepted;
-  }
-};
-
 struct fake_tokenizer_actor {
   int32_t initialize_calls = 0;
   int32_t tokenize_calls = 0;
@@ -319,13 +307,11 @@ struct fake_dependencies {
   fake_encoder_actor &encoder;
   fake_tokenizer_actor &tokenizer;
   fake_decoder_actor &decoder;
-  fake_runtime_actor &runtime;
   fake_predictor_actor &predictor;
   fake_predictor_actor &sampler;
   fake_prediction_workspace &prediction_workspace;
   fake_initialize encoder_initialize = {};
   fake_initialize decoder_initialize = {};
-  fake_initialize runtime_initialize = {};
   fake_initialize predictor_initialize = {};
   fake_initialize conditioning_initialize = {};
   std::span<float> silence_pcm = {};
@@ -353,7 +339,6 @@ struct fixture {
   fake_encoder_actor encoder{};
   fake_tokenizer_actor tokenizer{};
   fake_decoder_actor decoder{};
-  fake_runtime_actor runtime{};
   fake_predictor_actor predictor{};
   fake_prediction_workspace prediction_workspace{};
   fake_dependencies dependencies;
@@ -367,7 +352,6 @@ struct fixture {
             .encoder = encoder,
             .tokenizer = tokenizer,
             .decoder = decoder,
-            .runtime = runtime,
             .predictor = predictor,
             .sampler = predictor,
             .prediction_workspace = prediction_workspace,
@@ -542,7 +526,6 @@ TEST_CASE("speech_generator_initializes_injected_actor_composition") {
   CHECK(test->machine.is(sml::state<generator::state_condition_voice>));
   CHECK(test->encoder.initialize_calls == 1);
   CHECK(test->decoder.initialize_calls == 1);
-  CHECK(test->runtime.initialize_calls == 1);
   CHECK(test->predictor.initialize_calls == 2);
 }
 

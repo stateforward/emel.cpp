@@ -13,7 +13,6 @@ enum class error : emel::error::type {
   memory_initialize_failed = (1u << 5),
   encoder_initialize_failed = (1u << 6),
   decoder_initialize_failed = (1u << 7),
-  runtime_initialize_failed = (1u << 8),
   predictor_initialize_failed = (1u << 9),
   conditioning_failed = (1u << 10),
   encode_failed = (1u << 11),

@@ -32,13 +32,11 @@ concept duplex_dependencies = requires(dependencies_type deps) {
   deps.encoder;
   deps.tokenizer;
   deps.decoder;
-  deps.runtime;
   deps.predictor;
   deps.sampler;
   deps.prediction_workspace;
   deps.encoder_initialize;
   deps.decoder_initialize;
-  deps.runtime_initialize;
   deps.predictor_initialize;
   deps.conditioning_initialize;
   deps.silence_pcm;

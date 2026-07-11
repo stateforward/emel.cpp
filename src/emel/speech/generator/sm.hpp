@@ -17,7 +17,6 @@ struct state_initialize_temporal_result {};
 struct state_initialize_secondary_result {};
 struct state_initialize_encoder_result {};
 struct state_initialize_decoder_result {};
-struct state_initialize_runtime_result {};
 struct state_initialize_predictor_result {};
 struct state_initialize_conditioning_result {};
 struct state_initialize_tokenizer_result {};
@@ -76,7 +75,8 @@ generic speech generator (single source of truth)
 
 state purpose
 - initialization deterministically initializes injected temporal memory,
-  encoder, decoder, prediction runtime, predictor, and conditioning actors.
+  encoder, decoder, predictor, conditioning, and tokenizer actors. Model-family
+  predictors own initialization of their injected execution actors.
 - condition states advance reference and prompt conditioning one bounded frame
   per public dispatch.
 - state_ready accepts offline synthesis or duplex input frames.
@@ -171,22 +171,14 @@ template <class dependencies_type> struct duplex_model {
           sml::state<state_initialize_encoder_result> + sml::completion<init_run>
           [ guard::guard_child_failed<dependencies_type, init_run>{} ]
           / action::effect_fail_initialize<dependencies_type, error::encoder_initialize_failed>{}
-      , sml::state<state_initialize_runtime_result> <=
+      , sml::state<state_initialize_predictor_result> <=
           sml::state<state_initialize_decoder_result> + sml::completion<init_run>
           [ guard::guard_child_succeeded<dependencies_type, init_run>{} ]
-          / action::effect_initialize_runtime<dependencies_type>{}
+          / action::effect_initialize_predictor<dependencies_type>{}
       , sml::state<state_initialize_error_channel_decision> <=
           sml::state<state_initialize_decoder_result> + sml::completion<init_run>
           [ guard::guard_child_failed<dependencies_type, init_run>{} ]
           / action::effect_fail_initialize<dependencies_type, error::decoder_initialize_failed>{}
-      , sml::state<state_initialize_predictor_result> <=
-          sml::state<state_initialize_runtime_result> + sml::completion<init_run>
-          [ guard::guard_child_succeeded<dependencies_type, init_run>{} ]
-          / action::effect_initialize_predictor<dependencies_type>{}
-      , sml::state<state_initialize_error_channel_decision> <=
-          sml::state<state_initialize_runtime_result> + sml::completion<init_run>
-          [ guard::guard_child_failed<dependencies_type, init_run>{} ]
-          / action::effect_fail_initialize<dependencies_type, error::runtime_initialize_failed>{}
       , sml::state<state_initialize_conditioning_result> <=
           sml::state<state_initialize_predictor_result> + sml::completion<init_run>
           [ guard::guard_child_succeeded<dependencies_type, init_run>{} ]

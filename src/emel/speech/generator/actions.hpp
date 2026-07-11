@@ -78,17 +78,6 @@ template <class dependencies_type> struct effect_initialize_decoder {
   }
 };
 
-template <class dependencies_type> struct effect_initialize_runtime {
-  void operator()(const event::initialize_run &runtime_ev,
-                  context<dependencies_type> &ctx) const noexcept {
-    runtime_ev.ctx.child_err = 0;
-    auto request = ctx.collaborators.runtime_initialize;
-    request.error_out = &runtime_ev.ctx.child_err;
-    runtime_ev.ctx.child_accepted =
-        ctx.collaborators.runtime.process_event(request);
-  }
-};
-
 template <class dependencies_type> struct effect_initialize_predictor {
   void operator()(const event::initialize_run &runtime_ev,
                   context<dependencies_type> &ctx) const noexcept {
