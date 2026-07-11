@@ -39,7 +39,17 @@ struct guard_bind_contract_valid {
            lm.dep_q > 0 && lm.dep_q < codebook_count && delayed_dep_q > 0 &&
            delayed_dep_q <= lm.dep_q && needed_tokens >= 0 && row_count > 0 &&
            row_count <= action::k_max_delay_rows && inference_contract &&
-           lm.delay_count >= static_cast<uint32_t>(codebook_count);
+           lm.delay_count >= static_cast<uint32_t>(codebook_count) &&
+           runtime_ev.request.max_sequences > 0 &&
+           runtime_ev.request.max_blocks > 0 &&
+           runtime_ev.request.block_tokens > 0 &&
+           runtime_ev.request.sequence_id >= 0 &&
+           runtime_ev.request.sequence_id < runtime_ev.request.max_sequences &&
+           runtime_ev.request.codebook_capacity >= codebook_count &&
+           runtime_ev.request.codebook_capacity <= action::k_max_codebooks &&
+           runtime_ev.request.delay_cache_row_capacity >= row_count &&
+           runtime_ev.request.delay_cache_row_capacity <=
+               action::k_max_delay_rows;
   }
 };
 

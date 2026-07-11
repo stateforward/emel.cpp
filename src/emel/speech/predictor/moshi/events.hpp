@@ -36,10 +36,12 @@ struct initialize {
       : model(model_ref) {}
 
   const emel::model::data &model;
-  int32_t max_sequences = 1;
-  int32_t max_blocks = 4096;
-  int32_t block_tokens = emel::memory::view::DEFAULT_BLOCK_TOKENS;
-  int32_t sequence_id = 0;
+  int32_t max_sequences = 0;
+  int32_t max_blocks = 0;
+  int32_t block_tokens = 0;
+  int32_t sequence_id = -1;
+  int32_t codebook_capacity = 0;
+  int32_t delay_cache_row_capacity = 0;
   bool sampling_enabled = false;
   bool sampling_consume_forced_text = false;
   float sampling_audio_temperature = 0.0f;

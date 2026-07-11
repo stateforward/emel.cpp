@@ -579,8 +579,12 @@ int main(int argc, char **argv) {
   mimi::sm decoder{};
 
   predictor::event::initialize predictor_initialize{*lm_model.model};
+  predictor_initialize.max_sequences = 1;
   predictor_initialize.max_blocks = config.max_blocks;
   predictor_initialize.block_tokens = config.block_tokens;
+  predictor_initialize.sequence_id = 0;
+  predictor_initialize.codebook_capacity = model_codebook_count;
+  predictor_initialize.delay_cache_row_capacity = tokenizer_cache_rows;
   predictor_initialize.sampling_enabled = true;
   predictor_initialize.sampling_consume_forced_text = true;
   predictor_initialize.sampling_audio_temperature = config.audio_temperature;

@@ -49,6 +49,21 @@ moshi_executor::dependencies make_executor_dependencies(
   };
 }
 
+void configure_predictor_initialize(moshi::event::initialize &request) {
+  int32_t maximum_delay = 0;
+  for (uint32_t index = 0; index < request.model.moshi_lm.delay_count;
+       ++index) {
+    maximum_delay =
+        std::max(maximum_delay, request.model.moshi_lm.delays[index]);
+  }
+  request.max_sequences = 1;
+  request.max_blocks = 64;
+  request.block_tokens = 4;
+  request.sequence_id = 0;
+  request.codebook_capacity = request.model.moshi_lm.n_q + 1;
+  request.delay_cache_row_capacity = maximum_delay + 3;
+}
+
 struct recording_graph_executor {
   int32_t call_count = 0;
   int32_t external_embedding_count = 0;
@@ -357,6 +372,7 @@ TEST_CASE("speech_moshi_generator_initializes_lm_with_injected_kv") {
   emel::error::type err = k_no_error;
 
   moshi::event::initialize init{*fixture.model};
+  configure_predictor_initialize(init);
   init.max_sequences = 2;
   init.max_blocks = 16;
   init.block_tokens = 4;
@@ -366,6 +382,22 @@ TEST_CASE("speech_moshi_generator_initializes_lm_with_injected_kv") {
   CHECK(err == k_no_error);
   CHECK(kv.reserve_count == 1);
   CHECK(kv.allocate_sequence_count == 1);
+}
+
+TEST_CASE("speech_moshi_predictor_rejects_missing_initialize_capacity") {
+  auto fixture = load_fixture_or_skip("moshi-tiny-lm.gguf");
+  if (fixture.model == nullptr) {
+    return;
+  }
+
+  recording_graph_executor graph{};
+  moshi::sm generator{moshi::action::dependencies{.graph = graph}};
+  emel::error::type err = k_no_error;
+  moshi::event::initialize init{*fixture.model};
+  init.error_out = &err;
+
+  CHECK_FALSE(generator.process_event(init));
+  CHECK(err == emel::error::cast(moshi::error::bind_failed));
 }
 
 TEST_CASE("speech_moshi_generator_personaplex_uses_model_inference_codebooks") {
@@ -415,6 +447,7 @@ TEST_CASE(
   emel::error::type err = k_no_error;
 
   moshi::event::initialize init{*fixture.model};
+  configure_predictor_initialize(init);
   init.max_blocks = 32;
   init.block_tokens = 4;
   init.error_out = &err;
@@ -509,6 +542,7 @@ TEST_CASE("speech_moshi_generator_prefills_personaplex_system_prompt_before_"
   emel::error::type err = k_no_error;
 
   moshi::event::initialize init{*fixture.model};
+  configure_predictor_initialize(init);
   init.max_blocks = 48;
   init.block_tokens = 4;
   init.error_out = &err;
@@ -627,6 +661,7 @@ TEST_CASE("speech_moshi_generator_accepts_personaplex_voice_without_system_"
   emel::error::type err = k_no_error;
 
   moshi::event::initialize init{*fixture.model};
+  configure_predictor_initialize(init);
   init.max_blocks = 48;
   init.block_tokens = 4;
   init.error_out = &err;
@@ -728,6 +763,7 @@ TEST_CASE("speech_moshi_predictor_reports_rejected_graph_event") {
       .kv_cache = emel::memory::hybrid::bind_kv_actor(kv), .graph = graph}};
   emel::error::type err = k_no_error;
   moshi::event::initialize init{*fixture.model};
+  configure_predictor_initialize(init);
   init.error_out = &err;
   REQUIRE(generator.process_event(init));
 
@@ -1105,6 +1141,7 @@ TEST_CASE("speech_moshi_generator_and_executor_cover_explicit_error_guards") {
 
   moshi::action::context generator_ctx{};
   moshi::event::initialize init{*fixture.model};
+  configure_predictor_initialize(init);
   moshi::event::initialize_ctx init_ctx{};
   moshi::event::initialize_run init_run{init, init_ctx};
   generator_ctx.lmgen.codebook_count = fixture.model->moshi_lm.n_q + 1;
@@ -1936,6 +1973,7 @@ TEST_CASE(
       .kv_cache = emel::memory::hybrid::bind_kv_actor(kv), .graph = executor}};
   emel::error::type err = k_no_error;
   moshi::event::initialize init{*fixture.model};
+  configure_predictor_initialize(init);
   init.error_out = &err;
   REQUIRE(generator.process_event(init));
 
