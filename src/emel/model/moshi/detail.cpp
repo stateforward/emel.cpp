@@ -830,7 +830,10 @@ emel::error::type validate_lm_contract(const emel::model::data &model_data,
 
     const auto *depformer_text_embedding =
         find_tensor(model_data, "lm.depformer_text_emb.weight");
-    if (depformer_text_embedding == nullptr) {
+    if (depformer_text_embedding == nullptr ||
+        !require_lm_embedding_tensor_shape(model_data,
+                                           "lm.depformer_text_emb.weight",
+                                           {lm.depformer_dim, text_card + 1})) {
       return emel::error::cast(emel::model::loader::error::model_invalid);
     }
     contract_out.depformer_text_embedding = tensor_view{
@@ -886,7 +889,11 @@ emel::error::type validate_lm_contract(const emel::model::data &model_data,
         }
         const auto *audio_embedding = find_tensor(
             model_data, std::string_view{name, static_cast<size_t>(written)});
-        if (audio_embedding == nullptr) {
+        if (audio_embedding == nullptr ||
+            !require_lm_embedding_tensor_shape(
+                model_data,
+                std::string_view{name, static_cast<size_t>(written)},
+                {lm.depformer_dim, card + 1})) {
           return emel::error::cast(emel::model::loader::error::model_invalid);
         }
         contract_out.depformer_audio_embeddings[static_cast<size_t>(

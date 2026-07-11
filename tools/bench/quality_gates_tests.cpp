@@ -366,7 +366,8 @@ TEST_CASE("bench script routes Moshi LM suite through the wrapper") {
         std::string::npos);
 }
 
-TEST_CASE("quality gates route PersonaPlex changes through end-to-end compare") {
+TEST_CASE(
+    "quality gates route PersonaPlex changes through end-to-end compare") {
   const std::string script =
       read_file(repo_root() / "scripts" / "quality_gates.sh");
 
@@ -375,11 +376,12 @@ TEST_CASE("quality gates route PersonaPlex changes through end-to-end compare") 
   CHECK(script.find("speech_dialogue_moshi)") != std::string::npos);
   CHECK(script.find("scripts/bench_personaplex_compare.sh") !=
         std::string::npos);
-  CHECK(script.find("QUALITY_GATES_PERSONAPLEX_FRAMES") !=
-        std::string::npos);
-  CHECK(script.find("QUALITY_GATES_PERSONAPLEX_AUDIO") !=
-        std::string::npos);
+  CHECK(script.find("QUALITY_GATES_PERSONAPLEX_FRAMES") != std::string::npos);
+  CHECK(script.find("QUALITY_GATES_PERSONAPLEX_AUDIO") != std::string::npos);
   CHECK(script.find("--audio \"$QUALITY_GATES_PERSONAPLEX_AUDIO\"") !=
+        std::string::npos);
+  CHECK(script.find("tools/bench/moshi_gguf_convert.py|") != std::string::npos);
+  CHECK(script.find("scripts/setup_moshi_cpp_reference.sh|") !=
         std::string::npos);
 }
 
@@ -523,8 +525,7 @@ TEST_CASE(
         std::string::npos);
   CHECK(helper.find("gbnf_rule_parser") != std::string::npos);
   CHECK(helper.find("kernel_aarch64") != std::string::npos);
-  const std::size_t parallel_matmul_priority =
-      helper.find("parallel_matmul");
+  const std::size_t parallel_matmul_priority = helper.find("parallel_matmul");
   const std::size_t manifest_expansion = helper.find("while IFS= read -r line");
   REQUIRE(parallel_matmul_priority != std::string::npos);
   REQUIRE(manifest_expansion != std::string::npos);

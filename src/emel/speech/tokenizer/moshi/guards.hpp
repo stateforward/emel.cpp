@@ -169,9 +169,24 @@ struct guard_restore_valid {
                   const action::context &ctx) const noexcept {
     const uint64_t elements = static_cast<uint64_t>(ctx.config.cache_rows) *
                               static_cast<uint64_t>(ctx.config.codebooks);
-    return elements == ev.column_major_cache.size() && ev.offset >= 0 &&
-           ev.offset <= std::numeric_limits<int64_t>::max() -
-                            static_cast<int64_t>(ctx.config.maximum_delay);
+    bool valid =
+        elements == ev.column_major_cache.size() && ev.offset >= 0 &&
+        ev.offset <= std::numeric_limits<int64_t>::max() -
+                         static_cast<int64_t>(ctx.config.maximum_delay);
+    for (size_t index = 0; index < ev.column_major_cache.size(); ++index) {
+      const int32_t token = ev.column_major_cache[index];
+      const bool sentinel = token == ctx.config.token_zero ||
+                            token == ctx.config.token_ungenerated;
+      const size_t codebook =
+          index / static_cast<size_t>(ctx.config.cache_rows);
+      const int32_t upper_bound = codebook == 0u
+                                      ? ctx.config.text_initial_token
+                                      : ctx.config.audio_initial_token;
+      if (!sentinel && (token < 0 || token >= upper_bound)) {
+        valid = false;
+      }
+    }
+    return valid;
   }
 };
 

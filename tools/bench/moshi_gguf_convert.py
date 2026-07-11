@@ -596,11 +596,24 @@ def cross_check_lm(infos: list[TensorInfo], config: dict) -> None:
           f"{layer_count} layer tensors present)")
     require_block("lm.transformer", layer, with_gating=True)
   if config["dep_q"] > 0:
-    expected_depformer_weights = depformer_weight_count(config)
-    if count_prefixed(infos, "lm.depformer_in.") != expected_depformer_weights:
+    schedule = config.get("depformer_weights_per_step_schedule")
+    if schedule:
+      required_depformer_indices = set(schedule)
+    elif config.get("depformer_multi_linear"):
+      required_depformer_indices = set(range(config["dep_q"]))
+    else:
+      required_depformer_indices = {0}
+    required_depformer_names = {
+        f"lm.depformer_in.{index}.weight"
+        for index in required_depformer_indices
+    }
+    present_depformer_names = {
+        info.name for info in infos if info.name.startswith("lm.depformer_in.")
+    }
+    if present_depformer_names != required_depformer_names:
       raise ValueError(
-          "lm.depformer_in.* count does not match depformer weight count "
-          f"{expected_depformer_weights}")
+          "lm.depformer_in.* names do not match scheduled weight indices "
+          f"{sorted(required_depformer_indices)}")
     if count_prefixed(infos, "lm.linears.") != config["dep_q"]:
       raise ValueError("lm.linears.* count does not match config dep_q")
     # The C++ contract also requires the depformer text-embedding family for

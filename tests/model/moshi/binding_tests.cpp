@@ -418,6 +418,19 @@ void configure_q4_k_lm_contract(emel::model::data &model) {
     set_q4_k_matrix(model, "lm.emb." + std::to_string(codebook) + ".weight",
                     k_dim, k_audio_card + 1);
   }
+  set_matrix_tensor(model, "lm.depformer_text_emb.weight",
+                    emel::kernel::detail::dtype_f32,
+                    model.moshi_lm.depformer_dim, k_text_card + 1,
+                    dense_storage_bytes(model.moshi_lm.depformer_dim,
+                                        k_text_card + 1, sizeof(uint32_t)));
+  for (int32_t codebook = 0; codebook < model.moshi_lm.dep_q - 1; ++codebook) {
+    set_matrix_tensor(
+        model, "lm.depformer_emb." + std::to_string(codebook) + ".weight",
+        emel::kernel::detail::dtype_f32, model.moshi_lm.depformer_dim,
+        k_audio_card + 1,
+        dense_storage_bytes(model.moshi_lm.depformer_dim, k_audio_card + 1,
+                            sizeof(uint32_t)));
+  }
 }
 
 } // namespace
@@ -590,6 +603,25 @@ TEST_CASE("moshi lm contract validates every audio embedding") {
   SUBCASE("shape") { embedding->dims[0] += 1; }
   SUBCASE("execution dtype") { embedding->type = 10; }
 
+  CHECK(moshi::validate_execution_contract(*model) != k_none);
+}
+
+TEST_CASE("moshi lm contract validates depformer embeddings") {
+  auto loaded = load_fixture_or_skip("moshi-tiny-lm.gguf");
+  if (loaded.model == nullptr) {
+    return;
+  }
+  auto model = std::make_unique<emel::model::data>(*loaded.model);
+  SUBCASE("text shape") {
+    auto *tensor = find_mutable_tensor(*model, "lm.depformer_text_emb.weight");
+    REQUIRE(tensor != nullptr);
+    tensor->dims[0] += 1;
+  }
+  SUBCASE("audio dtype") {
+    auto *tensor = find_mutable_tensor(*model, "lm.depformer_emb.0.weight");
+    REQUIRE(tensor != nullptr);
+    tensor->type = 10;
+  }
   CHECK(moshi::validate_execution_contract(*model) != k_none);
 }
 

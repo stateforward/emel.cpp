@@ -122,6 +122,11 @@ struct model {
           / action::select_temperature_top_k
       , sml::state<done> <= sml::state<state_temperature_top_k_select>
           + sml::completion<event::sample_temperature_top_k_runtime>
+          [ guard::temperature_top_k_selected_token_valid{} ]
+      , sml::state<errored> <= sml::state<state_temperature_top_k_select>
+          + sml::completion<event::sample_temperature_top_k_runtime>
+          [ guard::temperature_top_k_selected_token_invalid{} ]
+          / action::mark_invalid_request
 
       //------------------------------------------------------------------------------//
       , sml::state<ready> <= sml::state<done> + sml::completion<event::configure_runtime>
@@ -189,21 +194,21 @@ struct sm : public emel::sm<model, action::context> {
 
   sm() : base_type() {}
 
-  bool process_event(const event::configure & ev) {
+  bool process_event(const event::configure &ev) {
     event::configure_ctx ctx{};
     event::configure_runtime runtime{ev, ctx};
     const bool accepted = base_type::process_event(runtime);
     return accepted && ctx.err == emel::error::cast(error::none);
   }
 
-  bool process_event(const event::sample_logits & ev) {
+  bool process_event(const event::sample_logits &ev) {
     event::sample_logits_ctx ctx{};
     event::sample_logits_runtime runtime{ev, ctx};
     const bool accepted = base_type::process_event(runtime);
     return accepted && ctx.err == emel::error::cast(error::none);
   }
 
-  bool process_event(const event::sample_preselected & ev) {
+  bool process_event(const event::sample_preselected &ev) {
     event::sample_preselected_ctx ctx{};
     event::sample_preselected_runtime runtime{ev, ctx};
     const bool accepted = base_type::process_event(runtime);
@@ -217,9 +222,9 @@ struct sm : public emel::sm<model, action::context> {
     return accepted && ctx.err == emel::error::cast(error::none);
   }
 
- private:
+private:
 };
 
 using Sampler = sm;
 
-}  // namespace emel::logits::sampler
+} // namespace emel::logits::sampler

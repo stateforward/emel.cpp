@@ -490,6 +490,22 @@ TEST_CASE("speech_moshi_predictor_rejects_missing_token_policy") {
   CHECK(err == emel::error::cast(moshi::error::bind_failed));
 }
 
+TEST_CASE("speech_moshi_predictor_bounds_delay_count_before_scanning") {
+  auto fixture = load_fixture_or_skip("moshi-tiny-lm.gguf");
+  if (fixture.model == nullptr) {
+    return;
+  }
+  auto model = std::make_unique<emel::model::data>(*fixture.model);
+  model->moshi_lm.delay_count =
+      static_cast<uint32_t>(model->moshi_lm.delays.size() + 1u);
+  moshi::event::initialize request{*model};
+  moshi::event::initialize_ctx request_ctx{};
+  moshi::event::initialize_run runtime{request, request_ctx};
+  emel::memory::hybrid::sm memory{};
+  moshi::action::context ctx{memory};
+  CHECK_FALSE(moshi::guard::guard_bind_contract_valid{}(runtime, ctx));
+}
+
 TEST_CASE("speech_moshi_generator_personaplex_uses_model_inference_codebooks") {
   auto model = std::make_unique<emel::model::data>();
   model->moshi_lm.n_q = 16;

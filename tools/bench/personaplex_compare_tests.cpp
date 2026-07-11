@@ -182,6 +182,16 @@ TEST_CASE("personaplex conversion injects its inference contract") {
   CHECK(command_exit_code(command) == 0);
 }
 
+TEST_CASE("personaplex converter checks exact sparse depformer weights") {
+  const std::string converter_source =
+      read_file(repo_root() / "tools" / "bench" / "moshi_gguf_convert.py");
+  CHECK(converter_source.find("required_depformer_indices = set(schedule)") !=
+        std::string::npos);
+  CHECK(converter_source.find(
+            "present_depformer_names != required_depformer_names") !=
+        std::string::npos);
+}
+
 TEST_CASE(
     "personaplex runtime orchestration is owned by the generic generator") {
   const auto generator_machine =

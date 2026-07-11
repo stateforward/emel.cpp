@@ -859,6 +859,7 @@ infer_quality_gate_scope() {
       tests/speech/codec/mimi*|tests/speech/predictor/*|\
       tests/speech/tokenizer/moshi/*|\
       tools/bench/personaplex*|tools/bench/speech/personaplex*|\
+      tools/bench/moshi_gguf_convert.py|scripts/setup_moshi_cpp_reference.sh|\
       scripts/bench_personaplex_compare.sh)
         add_bench_suite speech_dialogue_moshi "scope path=$file"
         ;;

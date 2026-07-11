@@ -290,8 +290,6 @@ src/emel/logits/sampler/actions.hpp
 src/emel/logits/sampler/context.hpp
 src/emel/logits/sampler/errors.hpp
 src/emel/logits/sampler/events.hpp
-src/emel/logits/sampler/guards.hpp
-src/emel/logits/sampler/sm.hpp
 src/emel/logits/validator/actions.hpp
 src/emel/logits/validator/context.hpp
 src/emel/logits/validator/errors.hpp
@@ -585,7 +583,6 @@ tests/kernel/aarch64_tests.cpp
 tests/kernel/lifecycle_tests.cpp
 tests/kernel/test_helpers.hpp
 tests/kernel/x86_64_tests.cpp
-tests/logits/sampler/pipeline_tests.cpp
 tests/logits/validator/validator_tests.cpp
 tests/memory/hybrid/lifecycle_tests.cpp
 tests/memory/kv/lifecycle_tests.cpp

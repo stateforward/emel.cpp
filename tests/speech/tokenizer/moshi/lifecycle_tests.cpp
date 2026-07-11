@@ -263,6 +263,19 @@ TEST_CASE("speech Moshi tokenizer restores column-major voice cache") {
   CHECK(state.model_tokens == std::array<int32_t, 3>{12, 22, 200});
 }
 
+TEST_CASE("speech Moshi tokenizer rejects invalid restored cache tokens") {
+  standard_fixture state;
+  REQUIRE(state.initialize());
+  std::array<int32_t, 12> column_major{};
+  column_major[0] = 100;
+  CHECK(state.machine.process_event(moshi::event::restore_cache{
+      .column_major_cache = std::span<const int32_t>{column_major},
+      .offset = 0,
+      .error_out = state.err,
+  }));
+  CHECK(state.err == error_code(moshi::error::request_shape));
+}
+
 TEST_CASE(
     "speech Moshi tokenizer does not publish restored ungenerated output") {
   standard_fixture state;

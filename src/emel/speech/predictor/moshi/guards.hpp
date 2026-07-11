@@ -15,6 +15,9 @@ struct guard_bind_contract_valid {
                   const action::context &ctx) const noexcept {
     const auto &model = runtime_ev.request.model;
     const auto &lm = model.moshi_lm;
+    if (lm.delay_count > lm.delays.size()) {
+      return false;
+    }
     int32_t max_delay = 0;
     for (uint32_t index = 0; index < lm.delay_count; ++index) {
       if (lm.delays[index] > max_delay) {
