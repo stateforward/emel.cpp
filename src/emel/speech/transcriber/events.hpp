@@ -7,18 +7,18 @@
 #include "emel/callback.hpp"
 #include "emel/error/error.hpp"
 #include "emel/model/data.hpp"
-#include "emel/speech/recognizer/errors.hpp"
+#include "emel/speech/transcriber/errors.hpp"
 
-namespace emel::speech::recognizer::events {
+namespace emel::speech::transcriber::events {
 
 struct initialize_done;
 struct initialize_error;
 struct recognition_done;
 struct recognition_error;
 
-} // namespace emel::speech::recognizer::events
+} // namespace emel::speech::transcriber::events
 
-namespace emel::speech::recognizer::event {
+namespace emel::speech::transcriber::event {
 
 struct tokenizer_assets {
   std::string_view model_json = {};
@@ -52,6 +52,7 @@ struct initialize {
 
 struct initialize_ctx {
   emel::error::type err = emel::error::cast(error::none);
+  bool tokenizer_validation_accepted = false;
 };
 
 struct initialize_run {
@@ -169,6 +170,7 @@ struct recognize_ctx {
   emel::error::type err = emel::error::cast(error::none);
   bool encoder_accepted = false;
   bool decoder_accepted = false;
+  bool detokenize_accepted = false;
   int32_t encoder_frame_count = 0;
   int32_t encoder_width = 0;
   int32_t generated_token_count = 0;
@@ -184,9 +186,9 @@ struct recognize_run {
   recognize_ctx &ctx;
 };
 
-} // namespace emel::speech::recognizer::event
+} // namespace emel::speech::transcriber::event
 
-namespace emel::speech::recognizer::events {
+namespace emel::speech::transcriber::events {
 
 struct initialize_done {
   const event::initialize *request = nullptr;
@@ -214,4 +216,4 @@ struct recognition_error {
   emel::error::type err = emel::error::cast(error::none);
 };
 
-} // namespace emel::speech::recognizer::events
+} // namespace emel::speech::transcriber::events

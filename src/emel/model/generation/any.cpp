@@ -70,8 +70,7 @@ bool block_has_required_tensors(const block_view &block) noexcept {
          tensor_view_bound(block.shortconv_out_proj);
 }
 
-bool layer_requires_qk_norm(
-    const generation_layer_execution &layer) noexcept {
+bool layer_requires_qk_norm(const generation_layer_execution &layer) noexcept {
   return layer.residual_route == generation_residual_route::attention &&
          layer.qk_norm_route != generation_attention_qk_norm_route::none;
 }
@@ -215,7 +214,7 @@ stage_tensor(const execution_view &execution, const block_view *block,
   return nullptr;
 }
 
-}  // namespace
+} // namespace
 
 emel::error::type build_contract(const emel::model::data &model_data,
                                  contract &contract_out) noexcept {
@@ -292,10 +291,11 @@ bool reject_block_tensor(const emel::model::data &model_data,
          !has_tensor_named(model_data, name);
 }
 
-emel::error::type bind_attention_block(
-    const emel::model::data &model_data, const int32_t block_index,
-    const bool require_qk_norm, const bool use_shared_key_value,
-    block_view &block_out) noexcept {
+emel::error::type bind_attention_block(const emel::model::data &model_data,
+                                       const int32_t block_index,
+                                       const bool require_qk_norm,
+                                       const bool use_shared_key_value,
+                                       block_view &block_out) noexcept {
   block_out = {};
   block_out.index = block_index;
   block_out.uses_attention = true;
@@ -342,9 +342,9 @@ emel::error::type bind_attention_block(
   return emel::error::cast(emel::model::loader::error::none);
 }
 
-emel::error::type bind_shortconv_block(
-    const emel::model::data &model_data, const int32_t block_index,
-    block_view &block_out) noexcept {
+emel::error::type bind_shortconv_block(const emel::model::data &model_data,
+                                       const int32_t block_index,
+                                       block_view &block_out) noexcept {
   block_out = {};
   block_out.index = block_index;
   block_out.uses_attention = false;
@@ -556,9 +556,9 @@ emel::error::type complete_contract(contract &contract_out) noexcept {
     return emel::error::cast(emel::model::loader::error::invalid_request);
   }
 
-  const auto step_err = build_step_plans(contract_out.topology,
-                                        contract_out.prefill_plan,
-                                        contract_out.decode_plan);
+  const auto step_err =
+      build_step_plans(contract_out.topology, contract_out.prefill_plan,
+                       contract_out.decode_plan);
   if (step_err != emel::error::cast(emel::model::loader::error::none)) {
     return step_err;
   }
@@ -646,4 +646,4 @@ build_quantized_path_audit(const execution_view &execution) noexcept {
   return audit;
 }
 
-}  // namespace emel::model::generation
+} // namespace emel::model::generation

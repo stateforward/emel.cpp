@@ -137,7 +137,6 @@ add_library(emel STATIC
   src/emel/model/moshi/detail.cpp
   src/emel/embeddings/generator/omniembed/sm.cpp
   src/emel/speech/codec/mimi/detail.cpp
-  src/emel/speech/recognizer_routes/whisper/detail.cpp
   src/emel/diarization/sortformer/detail.cpp
   src/emel/diarization/sortformer/encoder/feature_extractor/detail.cpp
   src/emel/diarization/sortformer/encoder/detail.cpp
@@ -192,7 +191,7 @@ if(EMEL_ENABLE_TESTS)
     tests/speech/encoder/whisper/lifecycle_tests.cpp
     tests/speech/decoder/whisper/lifecycle_tests.cpp
     tests/speech/encoder/whisper/detail_tests.cpp
-    tests/speech/recognizer/lifecycle_tests.cpp
+    tests/speech/transcriber/lifecycle_tests.cpp
     tests/speech/tokenizer/whisper_tests.cpp
     tests/embeddings/text_embedding_lane_tests.cpp
     tests/embeddings/vision_embedding_lane_tests.cpp

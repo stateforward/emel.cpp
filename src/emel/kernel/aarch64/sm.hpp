@@ -1290,7 +1290,7 @@ struct sm : public emel::sm<model, action::context> {
   using base_type = emel::sm<model, action::context>;
   using base_type::base_type;
 
-  bool process_event(const ::emel::kernel::event::dispatch & ev) {
+  bool process_event(const ::emel::kernel::event::dispatch &ev) {
     event::dispatch_ctx ctx{};
     const event::dispatch_request dispatch{ev, ctx};
     return process_dispatch_event(dispatch);
@@ -1298,7 +1298,7 @@ struct sm : public emel::sm<model, action::context> {
 
   template <class event_type>
     requires(::emel::kernel::is_op_event_v<event_type>)
-  bool process_event(const event_type & ev) {
+  bool process_event(const event_type &ev) {
     event::dispatch_ctx ctx{};
     using dispatch_event_type = event::dispatch_event_for_t<event_type>;
     const dispatch_event_type dispatch{ev, ctx};
@@ -1365,7 +1365,8 @@ struct sm : public emel::sm<model, action::context> {
     return this->context_.optimized_q8_0_packed_bl8_dispatch_count;
   }
 
-  uint64_t optimized_q8_0_packed_bl8_full_groups_dispatch_count() const noexcept {
+  uint64_t
+  optimized_q8_0_packed_bl8_full_groups_dispatch_count() const noexcept {
     return this->context_.optimized_q8_0_packed_bl8_full_groups_dispatch_count;
   }
 
@@ -1437,24 +1438,32 @@ struct sm : public emel::sm<model, action::context> {
     return this->context_.optimized_q6_vector_packed_q8_rhs_dispatch_count;
   }
 
-  uint64_t optimized_q6_vector_packed_q8_rhs_argmax_dispatch_count() const noexcept {
-    return this->context_.optimized_q6_vector_packed_q8_rhs_argmax_dispatch_count;
+  uint64_t
+  optimized_q6_vector_packed_q8_rhs_argmax_dispatch_count() const noexcept {
+    return this->context_
+        .optimized_q6_vector_packed_q8_rhs_argmax_dispatch_count;
   }
 
   uint64_t optimized_q6_vector_prepared_q8_rhs_dispatch_count() const noexcept {
     return this->context_.optimized_q6_vector_prepared_q8_rhs_dispatch_count;
   }
 
-  uint64_t optimized_q6_vector_prepared_q8_rhs_i8mm_dispatch_count() const noexcept {
-    return this->context_.optimized_q6_vector_prepared_q8_rhs_i8mm_dispatch_count;
+  uint64_t
+  optimized_q6_vector_prepared_q8_rhs_i8mm_dispatch_count() const noexcept {
+    return this->context_
+        .optimized_q6_vector_prepared_q8_rhs_i8mm_dispatch_count;
   }
 
-  uint64_t optimized_q6_vector_prepared_q8_rhs_argmax_i8mm_dispatch_count() const noexcept {
-    return this->context_.optimized_q6_vector_prepared_q8_rhs_argmax_i8mm_dispatch_count;
+  uint64_t optimized_q6_vector_prepared_q8_rhs_argmax_i8mm_dispatch_count()
+      const noexcept {
+    return this->context_
+        .optimized_q6_vector_prepared_q8_rhs_argmax_i8mm_dispatch_count;
   }
 
-  uint64_t optimized_q6_vector_q8_argmax_prepared_i8mm_dispatch_count() const noexcept {
-    return this->context_.optimized_q6_vector_q8_argmax_prepared_i8mm_dispatch_count;
+  uint64_t
+  optimized_q6_vector_q8_argmax_prepared_i8mm_dispatch_count() const noexcept {
+    return this->context_
+        .optimized_q6_vector_q8_argmax_prepared_i8mm_dispatch_count;
   }
 
   uint64_t shared_q6_dispatch_count() const noexcept {
@@ -1465,12 +1474,13 @@ struct sm : public emel::sm<model, action::context> {
     return this->context_.shared_flash_dispatch_count;
   }
 
- private:
+private:
   template <class dispatch_event_type>
-  bool process_dispatch_event(const dispatch_event_type & ev) {
+  bool process_dispatch_event(const dispatch_event_type &ev) {
     const bool accepted = base_type::process_event(ev);
-    return accepted && ev.ctx.err == static_cast<int32_t>(emel::error::cast(error::none));
+    return accepted &&
+           ev.ctx.err == static_cast<int32_t>(emel::error::cast(error::none));
   }
 };
 
-}  // namespace emel::kernel::aarch64
+} // namespace emel::kernel::aarch64

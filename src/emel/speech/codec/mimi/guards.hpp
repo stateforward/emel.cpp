@@ -38,7 +38,8 @@ struct guard_arena_capacity_valid {
            request.frame.data() != nullptr &&
            request.prepared.size() >= detail::required_prepared_floats(model) &&
            request.state_arena.size() >= detail::required_state_floats(model) &&
-           request.workspace.size() >= detail::required_workspace_floats(model) &&
+           request.workspace.size() >=
+               detail::required_workspace_floats(model) &&
            request.frame.size() >= detail::required_frame_floats(model);
   }
 };

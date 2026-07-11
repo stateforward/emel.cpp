@@ -1026,7 +1026,10 @@ template <class kind_enum, class sm_list, class event_list>
 class sm_any {
  public:
   sm_any() { construct(default_index()); }
-  explicit sm_any(const kind_enum kind) { construct(index_from_kind(kind)); }
+  explicit sm_any(const kind_enum kind) {
+    construct(index_from_kind(kind));
+    kind_ = kind;
+  }
 
   sm_any(const sm_any &) = delete;
   sm_any & operator=(const sm_any &) = delete;
@@ -1041,11 +1044,25 @@ class sm_any {
     while (changed) {
       destroy();
       construct(next);
-      return;
+      break;
     }
+    kind_ = kind;
   }
 
+  // Reports the kind the owner requested, even when it does not name a real
+  // variant. The active machine index is clamped to the first variant for such
+  // kinds (safe construction), but the requested kind is preserved so
+  // is_supported_kind(kind()) stays truthful and owners can reject dispatch to
+  // an unsupported facade instead of silently running the default variant.
   kind_enum kind() const noexcept { return kind_; }
+
+  // A kind is supported only when it names a real variant. Out-of-range kinds
+  // (including the owner-defined `unsupported` sentinel) are clamped to the
+  // first variant by index_from_kind, so owners must reject them before
+  // dispatch instead of silently running the default variant.
+  static constexpr bool is_supported_kind(const kind_enum kind) noexcept {
+    return static_cast<std::size_t>(kind) < k_sm_count;
+  }
 
   template <class event>
   bool process_event(const event & ev) {

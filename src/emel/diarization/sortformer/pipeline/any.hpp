@@ -31,4 +31,4 @@ inline constexpr int32_t k_required_probability_value_count =
 inline constexpr int32_t k_max_segment_count =
     emel::diarization::sortformer::output::k_max_segment_count;
 
-}  // namespace emel::diarization::sortformer::pipeline
+} // namespace emel::diarization::sortformer::pipeline

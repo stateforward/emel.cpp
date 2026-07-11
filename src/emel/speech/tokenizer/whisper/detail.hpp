@@ -6,41 +6,26 @@
 #include <span>
 #include <string_view>
 
+#include "emel/speech/tokenizer/events.hpp"
+
 namespace emel::speech::tokenizer::whisper::detail {
 
-struct control_tokens {
-  int32_t eot = 50257;
-  int32_t sot = 50258;
-  int32_t language_en = 50259;
-  int32_t translate = 50358;
-  int32_t transcribe = 50359;
-  int32_t no_speech = 50362;
-  int32_t notimestamps = 50363;
-  int32_t timestamp_begin = 50364;
-  int32_t space = 220;
-};
+using control_tokens = emel::speech::tokenizer::control_tokens;
+using language_role = emel::speech::tokenizer::language_role;
+using task_role = emel::speech::tokenizer::task_role;
+using timestamp_mode = emel::speech::tokenizer::timestamp_mode;
+using asr_decode_policy = emel::speech::tokenizer::asr_decode_policy;
 
-inline constexpr control_tokens k_tiny_control_tokens{};
-
-enum class language_role : uint8_t {
-  english = 0u,
-};
-
-enum class task_role : uint8_t {
-  transcribe = 0u,
-};
-
-enum class timestamp_mode : uint8_t {
-  timestamp_tokens = 0u,
-};
-
-struct asr_decode_policy {
-  control_tokens tokens = {};
-  language_role language = language_role::english;
-  task_role task = task_role::transcribe;
-  timestamp_mode timestamps = timestamp_mode::timestamp_tokens;
-  bool suppress_translate = true;
-  std::array<int32_t, 3> prompt_tokens = {};
+inline constexpr control_tokens k_tiny_control_tokens{
+    .eot = 50257,
+    .sot = 50258,
+    .language_en = 50259,
+    .translate = 50358,
+    .transcribe = 50359,
+    .no_speech = 50362,
+    .notimestamps = 50363,
+    .timestamp_begin = 50364,
+    .space = 220,
 };
 
 inline constexpr asr_decode_policy k_tiny_asr_decode_policy{
@@ -63,19 +48,22 @@ inline bool contains(std::string_view text, std::string_view needle) noexcept {
 
 inline uint32_t write_i32(const int32_t id, char *out) noexcept {
   char digits[12] = {};
-  int32_t value = id;
+  // The magnitude is computed in unsigned arithmetic so the minimum int32
+  // (whose negation does not fit in int32_t) renders correctly instead of
+  // hitting signed-negation overflow.
+  uint32_t magnitude = static_cast<uint32_t>(id);
   uint32_t offset = 0;
-  if (value < 0) {
+  if (id < 0) {
     out[offset] = '-';
     ++offset;
-    value = -value;
+    magnitude = 0u - magnitude;
   }
   uint32_t digits_count = 0;
   do {
-    digits[digits_count] = static_cast<char>('0' + (value % 10));
-    value /= 10;
+    digits[digits_count] = static_cast<char>('0' + (magnitude % 10u));
+    magnitude /= 10u;
     ++digits_count;
-  } while (value != 0);
+  } while (magnitude != 0u);
   while (digits_count > 0) {
     --digits_count;
     out[offset] = digits[digits_count];
@@ -107,16 +95,14 @@ inline bool is_json_space(const char value) noexcept {
   return value == ' ' || value == '\n' || value == '\r' || value == '\t';
 }
 
-inline size_t skip_json_space(std::string_view text,
-                              size_t offset) noexcept {
+inline size_t skip_json_space(std::string_view text, size_t offset) noexcept {
   while (offset < text.size() && is_json_space(text[offset])) {
     ++offset;
   }
   return offset;
 }
 
-inline bool find_json_object_value(std::string_view json,
-                                   std::string_view key,
+inline bool find_json_object_value(std::string_view json, std::string_view key,
                                    std::string_view &object_out) noexcept {
   size_t search = 0u;
   while (search < json.size()) {
@@ -169,8 +155,8 @@ inline bool find_json_object_value(std::string_view json,
   return false;
 }
 
-inline std::string_view vocab_lookup_scope(std::string_view tokenizer_json)
-    noexcept {
+inline std::string_view
+vocab_lookup_scope(std::string_view tokenizer_json) noexcept {
   std::string_view vocab_json = {};
   if (find_json_object_value(tokenizer_json, "\"vocab\"", vocab_json)) {
     return vocab_json;
@@ -248,14 +234,14 @@ inline bool find_vocab_token_text(std::string_view tokenizer_json,
       token_text_out = token_text;
       return true;
     }
-    search = value_begin < vocab_json.size() ? value_begin + 1u
-                                             : vocab_json.size();
+    search =
+        value_begin < vocab_json.size() ? value_begin + 1u : vocab_json.size();
   }
   return false;
 }
 
-inline size_t find_max_vocab_token_bytes(std::string_view tokenizer_json)
-    noexcept {
+inline size_t
+find_max_vocab_token_bytes(std::string_view tokenizer_json) noexcept {
   const std::string_view vocab_json = vocab_lookup_scope(tokenizer_json);
   size_t search = 0u;
   size_t max_token_bytes = 0u;
@@ -269,8 +255,8 @@ inline size_t find_max_vocab_token_bytes(std::string_view tokenizer_json)
     if (token_text.size() > max_token_bytes) {
       max_token_bytes = token_text.size();
     }
-    search = value_begin < vocab_json.size() ? value_begin + 1u
-                                             : vocab_json.size();
+    search =
+        value_begin < vocab_json.size() ? value_begin + 1u : vocab_json.size();
   }
   return max_token_bytes;
 }
@@ -335,8 +321,8 @@ inline void append_decoded_piece(std::string_view piece, char *transcript,
         decode_json_escaped_byte(piece[index + 1u], out)) {
       advance = 2u;
     } else if (index + 1u < piece.size() &&
-        static_cast<unsigned char>(piece[index]) == 0xc4u &&
-        static_cast<unsigned char>(piece[index + 1u]) == 0xa0u) {
+               static_cast<unsigned char>(piece[index]) == 0xc4u &&
+               static_cast<unsigned char>(piece[index + 1u]) == 0xa0u) {
       out = ' ';
       advance = 2u;
     }
