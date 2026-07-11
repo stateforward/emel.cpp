@@ -23,7 +23,8 @@ struct guard_bind_contract_valid {
            model.moshi_lm.dim > 0 &&
            (!runtime_ev.request.sampling_enabled || ctx.sampler != nullptr) &&
            ctx.policy.rms_norm_epsilon > 0.0f &&
-           ctx.policy.zero_seed_state != 0u && ctx.capacity.hidden_dim > 0u &&
+           ctx.policy.zero_seed_state != 0u && ctx.policy.token_zero < 0 &&
+           ctx.capacity.hidden_dim > 0u &&
            ctx.capacity.hidden_dim <= detail::k_max_hidden_dim &&
            ctx.capacity.temporal_context > 0u &&
            ctx.capacity.temporal_context <= detail::k_max_temporal_context &&
@@ -156,15 +157,15 @@ struct guard_token_input_embedding_supported {
               static_cast<detail::dtype>(audio_emb->type));
     }
     bool tokens_ok =
-        runtime_ev.request.input_sequence[0] != detail::k_token_zero &&
+        runtime_ev.request.input_sequence[0] != ctx.policy.token_zero &&
         detail::token_in_embedding_range(runtime_ev.request.input_sequence[0],
-                                         lm.text_card);
+                                         lm.text_card, ctx.policy.token_zero);
     for (int32_t index = 0; index < lm.n_q; ++index) {
       tokens_ok =
           tokens_ok &&
           detail::token_in_embedding_range(
               runtime_ev.request.input_sequence[static_cast<size_t>(index + 1)],
-              lm.card);
+              lm.card, ctx.policy.token_zero);
     }
     return runtime_ev.request.input_embedding.data() == nullptr &&
            !lm.demux_second_stream && hidden_dim > 0 &&
@@ -262,8 +263,9 @@ struct guard_current_input_audio_token_present {
     }
     const int32_t token =
         runtime_ev.request.input_sequence[static_cast<size_t>(index + 1)];
-    return token != detail::k_token_zero &&
-           detail::token_in_embedding_range(token, lm.card) &&
+    return token != ctx.policy.token_zero &&
+           detail::token_in_embedding_range(token, lm.card,
+                                            ctx.policy.token_zero) &&
            guard_input_embedding_supported{}(runtime_ev, ctx);
   }
 };
@@ -277,7 +279,7 @@ struct guard_current_input_audio_token_zero {
       return false;
     }
     return runtime_ev.request.input_sequence[static_cast<size_t>(index + 1)] ==
-               detail::k_token_zero &&
+               ctx.policy.token_zero &&
            guard_input_embedding_supported{}(runtime_ev, ctx);
   }
 };
@@ -973,11 +975,12 @@ struct guard_text_logits_unsupported {
 
 struct guard_forced_text_token_valid {
   bool operator()(const event::step_run &runtime_ev,
-                  const action::context &) const noexcept {
+                  const action::context &ctx) const noexcept {
     return runtime_ev.request.forced_text_token >= 0 &&
            detail::token_in_embedding_range(
                runtime_ev.request.forced_text_token,
-               runtime_ev.request.model.moshi_lm.text_card);
+               runtime_ev.request.model.moshi_lm.text_card,
+               ctx.policy.token_zero);
   }
 };
 
@@ -1270,7 +1273,8 @@ struct guard_depformer_text_input_supported {
            detail::supported_get_rows_dtype(
                static_cast<detail::dtype>(embedding->type)) &&
            detail::token_in_embedding_range(runtime_ev.request.text_token_out,
-                                            lm.text_card);
+                                            lm.text_card,
+                                            ctx.policy.token_zero);
   }
 };
 
@@ -1306,7 +1310,7 @@ struct guard_depformer_audio_input_supported {
            detail::token_in_embedding_range(
                runtime_ev.request
                    .audio_tokens_out[static_cast<size_t>(codebook - 1)],
-               lm.card);
+               lm.card, ctx.policy.token_zero);
   }
 };
 

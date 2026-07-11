@@ -14,8 +14,11 @@ namespace emel::speech::predictor::moshi::action {
 inline constexpr int32_t k_max_codebooks =
     static_cast<int32_t>(event::k_max_codebooks);
 inline constexpr int32_t k_max_delay_rows = 128;
-inline constexpr int32_t k_token_zero = -1;
-inline constexpr int32_t k_token_ungenerated = -2;
+
+struct policies {
+  int32_t token_zero = 0;
+  int32_t token_ungenerated = 0;
+};
 
 struct lmgen_state {
   int32_t codebook_count = 0;
@@ -62,17 +65,20 @@ struct voice_prompt_state {
 template <class graph_actor_type> struct dependencies {
   emel::memory::hybrid::kv_binding kv_cache = {};
   graph_actor_type &graph;
+  policies policy = {};
 };
 
 struct context {
   context() = default;
-  explicit context(const emel::memory::hybrid::kv_binding &kv_cache)
-      : memory(kv_cache) {}
+  template <class graph_actor_type>
+  explicit context(const dependencies<graph_actor_type> &deps)
+      : memory(deps.kv_cache), policy(deps.policy) {}
 
   runtime session = {};
   voice_prompt_state voice = {};
   lmgen_state lmgen = {};
   emel::memory::hybrid::sm memory = {};
+  const policies policy = {};
 };
 
 } // namespace emel::speech::predictor::moshi::action

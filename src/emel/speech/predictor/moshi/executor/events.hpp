@@ -30,7 +30,7 @@ struct initialize {
   float sampling_text_temperature = 0.0f;
   int32_t sampling_audio_top_k = 0;
   int32_t sampling_text_top_k = 0;
-  uint32_t sampling_seed = 1u;
+  uint32_t sampling_seed = 0u;
   emel::error::type *error_out = nullptr;
   emel::callback<void(const events::initialize_done &)> on_done = {};
   emel::callback<void(const events::initialize_error &)> on_error = {};

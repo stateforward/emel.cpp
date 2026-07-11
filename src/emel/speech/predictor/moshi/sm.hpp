@@ -648,7 +648,7 @@ struct sm : public emel::sm<model<graph_actor_type>, action::context> {
   using base_type::visit_current_states;
 
   explicit sm(const action::dependencies<graph_actor_type> &deps)
-      : base_type(std::piecewise_construct, deps.kv_cache, deps.graph),
+      : base_type(std::piecewise_construct, deps, deps.graph),
         memory_snapshot_(std::make_unique<emel::memory::view::snapshot>()) {}
 
   sm(const sm &) = delete;

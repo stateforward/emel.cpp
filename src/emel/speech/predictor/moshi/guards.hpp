@@ -12,7 +12,7 @@ namespace emel::speech::predictor::moshi::guard {
 
 struct guard_bind_contract_valid {
   bool operator()(const event::initialize_run &runtime_ev,
-                  const action::context &) const noexcept {
+                  const action::context &ctx) const noexcept {
     const auto &model = runtime_ev.request.model;
     const auto &lm = model.moshi_lm;
     int32_t max_delay = 0;
@@ -49,7 +49,8 @@ struct guard_bind_contract_valid {
            runtime_ev.request.codebook_capacity <= action::k_max_codebooks &&
            runtime_ev.request.delay_cache_row_capacity >= row_count &&
            runtime_ev.request.delay_cache_row_capacity <=
-               action::k_max_delay_rows;
+               action::k_max_delay_rows &&
+           ctx.policy.token_ungenerated < ctx.policy.token_zero;
   }
 };
 

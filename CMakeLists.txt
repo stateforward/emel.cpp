@@ -190,6 +190,7 @@ if(EMEL_ENABLE_TESTS)
     tests/speech/codec/mimi_lifecycle_tests.cpp
     tests/speech/generator/lifecycle_tests.cpp
     tests/speech/predictor/moshi_lifecycle_tests.cpp
+    tests/speech/predictor/moshi_executor_detail_tests.cpp
     tests/speech/predictor/moshi_executor_streaming_tests.cpp
     tests/speech/encoder/whisper/lifecycle_tests.cpp
     tests/speech/decoder/whisper/lifecycle_tests.cpp

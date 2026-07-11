@@ -532,6 +532,7 @@ int main(int argc, char **argv) {
           runtime::action::policies{
               .rms_norm_epsilon = 1.0e-8f,
               .zero_seed_state = 123459876u,
+              .token_zero = -1,
           },
       .capacity =
           runtime::action::capacities{
@@ -552,6 +553,11 @@ int main(int argc, char **argv) {
   predictor::sm token_predictor{predictor::action::dependencies{
       .kv_cache = emel::memory::hybrid::kv_binding{},
       .graph = prediction_runtime,
+      .policy =
+          predictor::action::policies{
+              .token_zero = -1,
+              .token_ungenerated = -2,
+          },
   }};
   predictor::event::predict::workspace prediction_workspace{};
   tokenizer::sm token_delay{tokenizer::dependencies{

@@ -111,7 +111,7 @@ struct effect_bind_contract {
     ctx.lmgen.generated_dep_q = lm.dep_q;
     ctx.lmgen.cache_row_count = 2;
     std::fill(ctx.lmgen.cache.begin(), ctx.lmgen.cache.end(),
-              k_token_ungenerated);
+              ctx.policy.token_ungenerated);
     std::fill(ctx.lmgen.initial.begin(), ctx.lmgen.initial.end(), lm.card);
     ctx.lmgen.initial[0] = lm.text_card;
     for (uint32_t index = 0; index < lm.delay_count; ++index) {
@@ -274,11 +274,11 @@ struct effect_begin_voice_prefill {
         ctx.voice.prompt_frame_count - ctx.voice.prompt_frame_index;
     runtime_ev.ctx.text_token = ctx.session.model->moshi_lm.text_padding_id;
     std::fill(runtime_ev.ctx.input_sequence.begin(),
-              runtime_ev.ctx.input_sequence.end(), k_token_zero);
+              runtime_ev.ctx.input_sequence.end(), ctx.policy.token_zero);
     runtime_ev.ctx.input_sequence[0] =
         ctx.session.model->moshi_lm.text_padding_id;
     std::fill(runtime_ev.ctx.audio_tokens.begin(),
-              runtime_ev.ctx.audio_tokens.end(), k_token_zero);
+              runtime_ev.ctx.audio_tokens.end(), ctx.policy.token_zero);
   }
 };
 
@@ -462,11 +462,11 @@ struct effect_begin_personaplex_prompt_prefill {
                                       ctx.voice.post_text_silence_remaining;
     runtime_ev.ctx.text_token = ctx.session.model->moshi_lm.text_padding_id;
     std::fill(runtime_ev.ctx.prompt_sequence.begin(),
-              runtime_ev.ctx.prompt_sequence.end(), k_token_zero);
+              runtime_ev.ctx.prompt_sequence.end(), ctx.policy.token_zero);
     std::fill(runtime_ev.ctx.input_sequence.begin(),
-              runtime_ev.ctx.input_sequence.end(), k_token_zero);
+              runtime_ev.ctx.input_sequence.end(), ctx.policy.token_zero);
     std::fill(runtime_ev.ctx.audio_tokens.begin(),
-              runtime_ev.ctx.audio_tokens.end(), k_token_zero);
+              runtime_ev.ctx.audio_tokens.end(), ctx.policy.token_zero);
   }
 };
 

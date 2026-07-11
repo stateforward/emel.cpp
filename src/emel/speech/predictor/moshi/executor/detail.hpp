@@ -26,7 +26,6 @@ inline constexpr uint64_t k_max_temporal_context = 8192u;
 inline constexpr uint64_t k_max_depformer_context = 512u;
 inline constexpr uint64_t k_max_sampling_card = 65536u;
 inline constexpr uint64_t k_max_sampling_top_k = 1024u;
-inline constexpr int32_t k_token_zero = -1;
 
 struct streaming_kv_view {
   std::span<uint16_t> key_cache = {};
@@ -274,9 +273,9 @@ inline bool tensor_shape(const tensor_record *tensor, const int64_t ne0,
          (tensor->n_dims == 1 || tensor->dims[1] == ne1);
 }
 
-inline bool token_in_embedding_range(const int32_t token,
-                                     const int32_t card) noexcept {
-  return token >= k_token_zero && token <= card;
+inline bool token_in_embedding_range(const int32_t token, const int32_t card,
+                                     const int32_t token_zero) noexcept {
+  return token >= token_zero && token <= card;
 }
 
 } // namespace emel::speech::predictor::moshi::executor::detail
