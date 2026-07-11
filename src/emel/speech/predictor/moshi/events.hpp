@@ -322,6 +322,13 @@ struct sample_run {
 
 struct reset_run {
   const reset &request;
+  struct context {
+    emel::error::type err = emel::error::cast(error::none);
+    bool graph_accepted = false;
+    emel::error::type graph_error = emel::error::cast(error::none);
+    bool memory_accepted = false;
+    int32_t memory_error = static_cast<int32_t>(emel::error::cast(error::none));
+  } &ctx;
 };
 
 } // namespace emel::speech::predictor::moshi::event

@@ -91,6 +91,8 @@ void configure_predictor_initialize(moshi::event::initialize &request) {
 }
 
 struct recording_graph_executor {
+  bool initialized = false;
+  int32_t reset_count = 0;
   int32_t call_count = 0;
   int32_t external_embedding_count = 0;
   int32_t first_sequence_length = -1;
@@ -103,7 +105,17 @@ struct recording_graph_executor {
   std::array<int32_t, moshi::event::k_max_codebooks> last_input = {};
 
   bool process_event(const moshi::event::initialize_graph &request) noexcept {
+    if (initialized) {
+      *request.error_out = emel::error::cast(moshi::error::graph_runtime);
+      return false;
+    }
+    initialized = true;
     *request.error_out = k_no_error;
+    return true;
+  }
+  bool process_event(const moshi::event::reset &) noexcept {
+    initialized = false;
+    ++reset_count;
     return true;
   }
   bool process_event(const moshi::event::graph_step &step);
@@ -432,6 +444,14 @@ TEST_CASE("speech_moshi_generator_initializes_lm_with_injected_kv") {
   CHECK(err == k_no_error);
   CHECK(kv.reserve_count == 1);
   CHECK(kv.allocate_sequence_count == 1);
+
+  REQUIRE(generator.process_event(moshi::event::reset{}));
+  CHECK(graph.reset_count == 1);
+  CHECK(kv.free_sequence_count == 1);
+  err = k_no_error;
+  REQUIRE(generator.process_event(init));
+  CHECK(err == k_no_error);
+  CHECK(kv.allocate_sequence_count == 2);
 }
 
 TEST_CASE("speech_moshi_predictor_rejects_missing_initialize_capacity") {

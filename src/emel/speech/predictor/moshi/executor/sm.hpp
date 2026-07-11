@@ -1139,6 +1139,11 @@ struct sm : public emel::sm<model, action::context> {
     const bool accepted = base_type::process_event(runtime_ev);
     return accepted && ctx.err == action::detail_ns::to_error(error::none);
   }
+
+  bool process_event(
+      const emel::speech::predictor::moshi::event::reset &) {
+    return process_event(event::reset{});
+  }
 };
 
 } // namespace emel::speech::predictor::moshi::executor

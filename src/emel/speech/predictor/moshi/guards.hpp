@@ -445,6 +445,37 @@ struct guard_personaplex_prompt_phase_invalid {
   }
 };
 
+struct guard_reset_graph_succeeded {
+  bool operator()(const event::reset_run &runtime_ev,
+                  const action::context &) const noexcept {
+    return runtime_ev.ctx.graph_accepted;
+  }
+};
+
+struct guard_reset_graph_failed {
+  bool operator()(const event::reset_run &runtime_ev,
+                  const action::context &ctx) const noexcept {
+    return !guard_reset_graph_succeeded{}(runtime_ev, ctx);
+  }
+};
+
+struct guard_reset_memory_succeeded {
+  bool operator()(const event::reset_run &runtime_ev,
+                  const action::context &) const noexcept {
+    return runtime_ev.ctx.memory_accepted &&
+           runtime_ev.ctx.memory_error ==
+               static_cast<int32_t>(
+                   emel::error::cast(emel::memory::hybrid::error::none));
+  }
+};
+
+struct guard_reset_memory_failed {
+  bool operator()(const event::reset_run &runtime_ev,
+                  const action::context &ctx) const noexcept {
+    return !guard_reset_memory_succeeded{}(runtime_ev, ctx);
+  }
+};
+
 struct guard_personaplex_prompt_complete {
   bool operator()(const event::prefill_personaplex_prompt_run &,
                   const action::context &ctx) const noexcept {

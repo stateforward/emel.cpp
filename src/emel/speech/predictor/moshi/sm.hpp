@@ -14,6 +14,9 @@
 namespace emel::speech::predictor::moshi {
 
 struct state_uninitialized {};
+struct state_reset_graph_result_decision {};
+struct state_reset_memory_result_decision {};
+struct state_reset_failed {};
 struct state_bind_contract_decision {};
 struct state_binding {};
 struct state_lmgen_mode_decision {};
@@ -126,6 +129,7 @@ template <class graph_actor_type> struct model {
     using predict_run = event::predict_run;
     using execute_run = event::execute_run;
     using sample_run = event::sample_run;
+    using reset_run = event::reset_run;
 
     // clang-format off
     return sml::make_transition_table(
@@ -706,15 +710,27 @@ template <class graph_actor_type> struct model {
 
       //------------------------------------------------------------------------------//
       // Reset.
-      , sml::state<state_uninitialized> <= sml::state<state_session_ready>
-          + sml::event<event::reset_run>
+      , sml::state<state_reset_graph_result_decision> <= sml::state<state_session_ready>
+          + sml::event<reset_run> / action::effect_reset_graph<graph_actor_type>{}
+      , sml::state<state_reset_graph_result_decision> <= sml::state<state_execution_ready>
+          + sml::event<reset_run> / action::effect_reset_graph<graph_actor_type>{}
+      , sml::state<state_reset_graph_result_decision> <= sml::state<state_prediction_ready>
+          + sml::event<reset_run> / action::effect_reset_graph<graph_actor_type>{}
+      , sml::state<state_reset_memory_result_decision> <=
+          sml::state<state_reset_graph_result_decision>
+          + sml::completion<reset_run> [ guard::guard_reset_graph_succeeded{} ]
+          / action::effect_release_reset_sequence{}
+      , sml::state<state_reset_failed> <= sml::state<state_reset_graph_result_decision>
+          + sml::completion<reset_run> [ guard::guard_reset_graph_failed{} ]
+          / action::effect_mark_reset_graph_failed{}
+      , sml::state<state_uninitialized> <= sml::state<state_reset_memory_result_decision>
+          + sml::completion<reset_run> [ guard::guard_reset_memory_succeeded{} ]
           / action::effect_reset_session{}
-      , sml::state<state_uninitialized> <= sml::state<state_execution_ready>
-          + sml::event<event::reset_run>
-          / action::effect_reset_session{}
-      , sml::state<state_uninitialized> <= sml::state<state_prediction_ready>
-          + sml::event<event::reset_run>
-          / action::effect_reset_session{}
+      , sml::state<state_reset_failed> <= sml::state<state_reset_memory_result_decision>
+          + sml::completion<reset_run> [ guard::guard_reset_memory_failed{} ]
+          / action::effect_mark_reset_memory_failed{}
+      , sml::state<state_uninitialized> <= sml::state<state_reset_failed>
+          + sml::completion<reset_run> / action::effect_reset_session{}
 
       //------------------------------------------------------------------------------//
       // Unexpected events.
@@ -832,8 +848,10 @@ struct sm : public emel::sm<model<graph_actor_type>, action::context> {
   }
 
   bool process_event(const event::reset &ev) {
-    event::reset_run runtime_ev{ev};
-    return base_type::process_event(runtime_ev);
+    event::reset_run::context ctx{};
+    event::reset_run runtime_ev{ev, ctx};
+    const bool accepted = base_type::process_event(runtime_ev);
+    return accepted && ctx.err == action::detail_ns::to_error(error::none);
   }
 
 private:

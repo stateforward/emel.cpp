@@ -768,6 +768,41 @@ struct effect_reset_session {
   }
 };
 
+template <class graph_actor_type> struct effect_reset_graph {
+  void operator()(const event::reset_run &runtime_ev, context &,
+                  graph_actor_type &graph) const noexcept {
+    runtime_ev.ctx.graph_error = detail_ns::to_error(error::none);
+    runtime_ev.ctx.graph_accepted = graph.process_event(runtime_ev.request);
+  }
+};
+
+struct effect_release_reset_sequence {
+  void operator()(const event::reset_run &runtime_ev,
+                  context &ctx) const noexcept {
+    runtime_ev.ctx.memory_error = static_cast<int32_t>(
+        emel::error::cast(emel::memory::hybrid::error::none));
+    runtime_ev.ctx.memory_accepted =
+        ctx.memory.process_event(emel::memory::event::free_sequence{
+            .seq_id = ctx.session.sequence_id,
+            .error_out = &runtime_ev.ctx.memory_error,
+        });
+  }
+};
+
+struct effect_mark_reset_graph_failed {
+  void operator()(const event::reset_run &runtime_ev,
+                  context &) const noexcept {
+    runtime_ev.ctx.err = detail_ns::to_error(error::graph_runtime);
+  }
+};
+
+struct effect_mark_reset_memory_failed {
+  void operator()(const event::reset_run &runtime_ev,
+                  context &) const noexcept {
+    runtime_ev.ctx.err = detail_ns::to_error(error::memory);
+  }
+};
+
 template <class runtime_event_type> struct effect_store_error_out {
   void operator()(const runtime_event_type &runtime_ev,
                   context &) const noexcept {
