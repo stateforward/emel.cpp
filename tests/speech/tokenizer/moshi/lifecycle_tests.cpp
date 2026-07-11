@@ -112,14 +112,14 @@ TEST_CASE("speech Moshi tokenizer preserves complete provided frames") {
   const std::array<int32_t, 3> first_input = {50, 51, 52};
   const std::array<int32_t, 3> second_input = {60, 61, 62};
   const std::array<int32_t, 3> third_input = {70, 71, 72};
-  const std::array<int32_t, 2> generated = {901, 902};
+  const std::array<int32_t, 2> generated = {91, 92};
 
   REQUIRE(state.tokenize(first_input));
-  REQUIRE(state.detokenize(900, generated));
+  REQUIRE(state.detokenize(90, generated));
   REQUIRE(state.tokenize(second_input));
-  REQUIRE(state.detokenize(900, generated));
+  REQUIRE(state.detokenize(90, generated));
   REQUIRE(state.tokenize(third_input));
-  REQUIRE(state.detokenize(900, generated));
+  REQUIRE(state.detokenize(90, generated));
 
   CHECK(state.produced);
   CHECK(state.text_out == 60);
@@ -205,6 +205,23 @@ TEST_CASE("speech Moshi tokenizer rejects invalid public audio tokens before "
 
   REQUIRE(state.tokenize());
   CHECK(state.model_tokens == std::array<int32_t, 3>{100, 200, 200});
+}
+
+TEST_CASE("speech Moshi tokenizer rejects invalid generated tokens before "
+          "commit") {
+  standard_fixture state;
+  REQUIRE(state.initialize());
+
+  REQUIRE(state.tokenize());
+  const std::array<int32_t, 2> invalid_audio = {11, 200};
+  CHECK(state.detokenize(10, invalid_audio));
+  CHECK(state.err == error_code(moshi::error::request_shape));
+  CHECK(state.machine.is(sml::state<moshi::state_prepared_generated>));
+
+  const std::array<int32_t, 2> valid_audio = {11, 12};
+  CHECK(state.detokenize(100, valid_audio));
+  CHECK(state.err == error_code(moshi::error::request_shape));
+  CHECK(state.machine.is(sml::state<moshi::state_prepared_generated>));
 }
 
 TEST_CASE("speech Moshi tokenizer masks initial delayed audio explicitly") {

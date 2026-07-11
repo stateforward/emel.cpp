@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <cmath>
 #include <limits>
 
@@ -64,7 +65,20 @@ struct guard_bind_contract_valid {
            ctx.capacity.sampling_card > 0u &&
            ctx.capacity.sampling_card <= detail::k_max_sampling_card &&
            ctx.capacity.sampling_top_k > 0u &&
-           ctx.capacity.sampling_top_k <= detail::k_max_sampling_top_k;
+           ctx.capacity.sampling_top_k <= detail::k_max_sampling_top_k &&
+           (!runtime_ev.request.sampling_enabled ||
+            (ctx.capacity.sampling_card >=
+                 static_cast<uint64_t>(model.moshi_lm.text_card) &&
+             ctx.capacity.sampling_card >=
+                 static_cast<uint64_t>(model.moshi_lm.card) &&
+             ctx.capacity.sampling_top_k >=
+                 static_cast<uint64_t>(
+                     std::min(runtime_ev.request.sampling_text_top_k,
+                              model.moshi_lm.text_card)) &&
+             ctx.capacity.sampling_top_k >=
+                 static_cast<uint64_t>(
+                     std::min(runtime_ev.request.sampling_audio_top_k,
+                              model.moshi_lm.card))));
   }
 };
 
@@ -1308,8 +1322,16 @@ struct guard_forced_text_token_valid {
 
 struct guard_forced_text_token_absent {
   bool operator()(const event::step_run &runtime_ev,
-                  const action::context &ctx) const noexcept {
-    return !guard_forced_text_token_valid{}(runtime_ev, ctx);
+                  const action::context &) const noexcept {
+    return runtime_ev.request.forced_text_token < 0;
+  }
+};
+
+struct guard_forced_text_token_invalid {
+  bool operator()(const event::step_run &runtime_ev,
+                  const action::context &) const noexcept {
+    return runtime_ev.request.forced_text_token >=
+           runtime_ev.request.model.moshi_lm.text_card;
   }
 };
 

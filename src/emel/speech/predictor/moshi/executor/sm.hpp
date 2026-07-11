@@ -638,6 +638,9 @@ struct model {
       , sml::state<state_step_error_out_decision> <= sml::state<state_text_logits_bind_result_decision>
           + sml::completion<step_run> [ guard::guard_forced_text_sampling_config_invalid{} ]
           / action::effect_mark_graph_execution_unsupported{}
+      , sml::state<state_step_error_out_decision> <= sml::state<state_text_logits_bind_result_decision>
+          + sml::completion<step_run> [ guard::guard_forced_text_token_invalid{} ]
+          / action::effect_mark_request_shape{}
       , sml::state<state_text_logits_run> <= sml::state<state_text_logits_bind_result_decision>
           + sml::completion<step_run> [ guard::guard_text_logits_projection_bound_and_no_forced_token_argmax{} ]
           / action::effect_select_text_token{}

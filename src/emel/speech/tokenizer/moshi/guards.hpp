@@ -206,10 +206,32 @@ struct guard_detokenize_shape_valid {
   }
 };
 
-struct guard_detokenize_shape_invalid {
+struct guard_detokenize_tokens_valid {
   bool operator()(const event::detokenize_run &runtime_ev,
                   const action::context &ctx) const noexcept {
-    return !guard_detokenize_shape_valid{}(runtime_ev, ctx);
+    bool valid = runtime_ev.request.text_token >= 0 &&
+                 runtime_ev.request.text_token < ctx.config.text_initial_token;
+    for (const int32_t token : runtime_ev.request.audio_tokens) {
+      if (token < 0 || token >= ctx.config.audio_initial_token) {
+        valid = false;
+      }
+    }
+    return valid;
+  }
+};
+
+struct guard_detokenize_request_valid {
+  bool operator()(const event::detokenize_run &runtime_ev,
+                  const action::context &ctx) const noexcept {
+    return guard_detokenize_shape_valid{}(runtime_ev, ctx) &&
+           guard_detokenize_tokens_valid{}(runtime_ev, ctx);
+  }
+};
+
+struct guard_detokenize_request_invalid {
+  bool operator()(const event::detokenize_run &runtime_ev,
+                  const action::context &ctx) const noexcept {
+    return !guard_detokenize_request_valid{}(runtime_ev, ctx);
   }
 };
 
@@ -223,7 +245,7 @@ struct guard_position_available {
 struct guard_position_overflow {
   bool operator()(const event::detokenize_run &runtime_ev,
                   const action::context &ctx) const noexcept {
-    return guard_detokenize_shape_valid{}(runtime_ev, ctx) &&
+    return guard_detokenize_request_valid{}(runtime_ev, ctx) &&
            !guard_position_available{}(runtime_ev, ctx);
   }
 };
@@ -246,7 +268,7 @@ struct guard_use_generated_audio {
 struct guard_detokenize_valid_replace {
   bool operator()(const event::detokenize_run &runtime_ev,
                   const action::context &ctx) const noexcept {
-    return guard_detokenize_shape_valid{}(runtime_ev, ctx) &&
+    return guard_detokenize_request_valid{}(runtime_ev, ctx) &&
            guard_position_available{}(runtime_ev, ctx) &&
            guard_replace_generated_audio{}(runtime_ev, ctx);
   }
@@ -255,7 +277,7 @@ struct guard_detokenize_valid_replace {
 struct guard_detokenize_valid_generated {
   bool operator()(const event::detokenize_run &runtime_ev,
                   const action::context &ctx) const noexcept {
-    return guard_detokenize_shape_valid{}(runtime_ev, ctx) &&
+    return guard_detokenize_request_valid{}(runtime_ev, ctx) &&
            guard_position_available{}(runtime_ev, ctx) &&
            guard_use_generated_audio{}(runtime_ev, ctx);
   }

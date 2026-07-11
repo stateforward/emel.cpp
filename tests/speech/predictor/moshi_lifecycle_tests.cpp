@@ -1100,6 +1100,38 @@ TEST_CASE("speech_moshi_executor_rejects_missing_capacity") {
   CHECK(err == emel::error::cast(moshi_executor::error::bind_failed));
 }
 
+TEST_CASE("speech_moshi_executor_rejects_undersized_sampling_capacity") {
+  auto fixture = load_fixture_or_skip("moshi-tiny-lm.gguf");
+  if (fixture.model == nullptr) {
+    return;
+  }
+
+  const auto rejected = [&fixture](const uint64_t sampling_card,
+                                   const uint64_t sampling_top_k) {
+    emel::kernel::sm kernel{};
+    emel::logits::sampler::sm sampler{};
+    auto dependencies = make_executor_dependencies(kernel, {}, &sampler);
+    dependencies.capacity.sampling_card = sampling_card;
+    dependencies.capacity.sampling_top_k = sampling_top_k;
+    moshi_executor::sm executor{dependencies};
+    emel::error::type err = emel::error::cast(moshi_executor::error::none);
+    moshi_executor::event::initialize init{*fixture.model};
+    init.sampling_enabled = true;
+    init.sampling_audio_temperature = 0.8f;
+    init.sampling_text_temperature = 0.7f;
+    init.sampling_audio_top_k = 2;
+    init.sampling_text_top_k = 2;
+    init.sampling_seed = 1234u;
+    init.error_out = &err;
+    return !executor.process_event(init) &&
+           err == emel::error::cast(moshi_executor::error::bind_failed);
+  };
+
+  CHECK(rejected(static_cast<uint64_t>(fixture.model->moshi_lm.text_card - 1),
+                 2u));
+  CHECK(rejected(moshi_executor::detail::k_max_sampling_card, 1u));
+}
+
 TEST_CASE("speech_moshi_executor_models_zero_seed_and_top_k_clamp") {
   auto fixture = load_fixture_or_skip("moshi-tiny-lm.gguf");
   if (fixture.model == nullptr) {
@@ -2372,6 +2404,8 @@ TEST_CASE(
 
   step.forced_text_token = lm.text_card;
   CHECK_FALSE(moshi_executor::guard::guard_forced_text_token_valid{}(
+      step_run, executor_ctx));
+  CHECK_FALSE(moshi_executor::guard::guard_forced_text_token_absent{}(
       step_run, executor_ctx));
 
   float tensor_data = 0.0f;

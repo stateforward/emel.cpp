@@ -159,15 +159,15 @@ struct model {
           / action::effect_begin_detokenize{}
       , sml::state<state_prepared_full> <= sml::state<state_prepared_full>
           + sml::event<event::detokenize_run>
-          [ guard::guard_detokenize_shape_invalid{} ]
+          [ guard::guard_detokenize_request_invalid{} ]
           / action::effect_reject_detokenize<error::request_shape>{}
       , sml::state<state_prepared_generated> <= sml::state<state_prepared_generated>
           + sml::event<event::detokenize_run>
-          [ guard::guard_detokenize_shape_invalid{} ]
+          [ guard::guard_detokenize_request_invalid{} ]
           / action::effect_reject_detokenize<error::request_shape>{}
       , sml::state<state_prepared_tail> <= sml::state<state_prepared_tail>
           + sml::event<event::detokenize_run>
-          [ guard::guard_detokenize_shape_invalid{} ]
+          [ guard::guard_detokenize_request_invalid{} ]
           / action::effect_reject_detokenize<error::request_shape>{}
       , sml::state<state_prepared_full> <= sml::state<state_prepared_full>
           + sml::event<event::detokenize_run> [ guard::guard_position_overflow{} ]

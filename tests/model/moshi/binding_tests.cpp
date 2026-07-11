@@ -414,7 +414,10 @@ void configure_q4_k_lm_contract(emel::model::data &model) {
   model.params.n_vocab = k_text_card;
   set_q4_k_matrix(model, "lm.text_emb.weight", k_dim, k_text_card + 1);
   set_q4_k_matrix(model, "lm.text_linear.weight", k_dim, k_text_card);
-  set_q4_k_matrix(model, "lm.emb.0.weight", k_dim, k_audio_card + 1);
+  for (int32_t codebook = 0; codebook < model.moshi_lm.n_q; ++codebook) {
+    set_q4_k_matrix(model, "lm.emb." + std::to_string(codebook) + ".weight",
+                    k_dim, k_audio_card + 1);
+  }
 }
 
 } // namespace
@@ -571,6 +574,22 @@ TEST_CASE("moshi lm contract requires every split depformer input projection") {
   constexpr std::string_view fused_name =
       "lm.depformer.layers.0.self_attn.in_proj_weight";
   (void)hide_tensor(fused_name, fused_name.size() - 1u);
+  CHECK(moshi::validate_execution_contract(*model) != k_none);
+}
+
+TEST_CASE("moshi lm contract validates every audio embedding") {
+  auto loaded = load_fixture_or_skip("moshi-tiny-lm.gguf");
+  if (loaded.model == nullptr) {
+    return;
+  }
+
+  auto model = std::make_unique<emel::model::data>(*loaded.model);
+  auto *embedding = find_mutable_tensor(*model, "lm.emb.1.weight");
+  REQUIRE(embedding != nullptr);
+
+  SUBCASE("shape") { embedding->dims[0] += 1; }
+  SUBCASE("execution dtype") { embedding->type = 10; }
+
   CHECK(moshi::validate_execution_contract(*model) != k_none);
 }
 

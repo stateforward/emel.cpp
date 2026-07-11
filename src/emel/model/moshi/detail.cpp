@@ -560,6 +560,26 @@ bool require_tensor_shape(const emel::model::data &model_data,
   return true;
 }
 
+bool require_lm_embedding_tensor_shape(
+    const emel::model::data &model_data, const std::string_view name,
+    const std::initializer_list<int64_t> dims) noexcept {
+  if (!require_tensor_shape(model_data, name, dims)) {
+    return false;
+  }
+  const auto *tensor = find_tensor(model_data, name);
+  switch (tensor->type) {
+  case 0:  // F32
+  case 1:  // F16
+  case 2:  // Q4_0
+  case 8:  // Q8_0
+  case 12: // Q4_K
+  case 30: // BF16
+    return true;
+  default:
+    return false;
+  }
+}
+
 bool has_indexed_tensor(const emel::model::data &model_data, const char *format,
                         const int32_t index) noexcept {
   char buffer[96] = {};
@@ -654,7 +674,8 @@ emel::error::type validate_lm_contract(const emel::model::data &model_data,
                            {dim, text_card + 1}) &&
       require_tensor_shape(model_data, "lm.text_linear.weight",
                            {dim, text_card}) &&
-      require_tensor_shape(model_data, "lm.emb.0.weight", {dim, card + 1}) &&
+      require_lm_embedding_tensor_shape(model_data, "lm.emb.0.weight",
+                                        {dim, card + 1}) &&
       has_tensor(model_data, "lm.out_norm.alpha");
   if (!shapes_ok) {
     return emel::error::cast(emel::model::loader::error::model_invalid);
@@ -687,11 +708,12 @@ emel::error::type validate_lm_contract(const emel::model::data &model_data,
     if (written <= 0 || static_cast<size_t>(written) >= sizeof(name)) {
       return emel::error::cast(emel::model::loader::error::model_invalid);
     }
-    const auto *audio_embedding = find_tensor(
-        model_data, std::string_view{name, static_cast<size_t>(written)});
-    if (audio_embedding == nullptr) {
+    const std::string_view embedding_name{name, static_cast<size_t>(written)};
+    if (!require_lm_embedding_tensor_shape(model_data, embedding_name,
+                                           {dim, card + 1})) {
       return emel::error::cast(emel::model::loader::error::model_invalid);
     }
+    const auto *audio_embedding = find_tensor(model_data, embedding_name);
     contract_out.audio_embeddings[static_cast<size_t>(codebook)] = tensor_view{
         .tensor = audio_embedding,
         .name = emel::model::tensor_name_view(model_data, *audio_embedding),
