@@ -18,7 +18,9 @@ struct guard_configuration_valid {
         config.delayed_audio_codebooks <= 0 ||
         config.delayed_audio_codebooks > config.generated_audio_codebooks ||
         config.cache_rows <= 0 || config.maximum_delay < 0 ||
-        config.initial_delay_frames < 0 || config.audio_initial_token <= 0 ||
+        config.initial_delay_frames < 0 || config.text_initial_token <= 0 ||
+        config.audio_initial_token <= 0 || config.token_zero >= 0 ||
+        config.token_ungenerated >= 0 ||
         config.token_zero == config.token_ungenerated ||
         config.delays.size() < static_cast<size_t>(config.codebooks)) {
       return false;

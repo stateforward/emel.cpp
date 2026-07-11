@@ -20,6 +20,9 @@ struct guard_bind_contract_valid {
     }
     int32_t max_delay = 0;
     for (uint32_t index = 0; index < lm.delay_count; ++index) {
+      if (lm.delays[index] < 0) {
+        return false;
+      }
       if (lm.delays[index] > max_delay) {
         max_delay = lm.delays[index];
       }

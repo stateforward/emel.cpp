@@ -57,6 +57,10 @@ struct guard_bind_contract_valid {
            ctx.policy.sampling_modulus > 1u &&
            ctx.policy.zero_seed_state % ctx.policy.sampling_modulus != 0u &&
            ctx.policy.token_zero < 0 && ctx.capacity.hidden_dim > 0u &&
+           ctx.capacity.hidden_dim >=
+               static_cast<uint64_t>(model.moshi_lm.dim) &&
+           ctx.capacity.hidden_dim >=
+               static_cast<uint64_t>(model.moshi_lm.depformer_dim) &&
            ctx.capacity.hidden_dim <= detail::k_max_hidden_dim &&
            ctx.capacity.temporal_context > 0u &&
            ctx.capacity.temporal_context <= detail::k_max_temporal_context &&

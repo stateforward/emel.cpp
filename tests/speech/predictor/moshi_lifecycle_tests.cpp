@@ -506,6 +506,25 @@ TEST_CASE("speech_moshi_predictor_bounds_delay_count_before_scanning") {
   CHECK_FALSE(moshi::guard::guard_bind_contract_valid{}(runtime, ctx));
 }
 
+TEST_CASE("speech_moshi_predictor_rejects_negative_model_delays") {
+  auto fixture = load_fixture_or_skip("moshi-tiny-lm.gguf");
+  if (fixture.model == nullptr) {
+    return;
+  }
+  auto model = std::make_unique<emel::model::data>(*fixture.model);
+  REQUIRE(model->moshi_lm.delay_count > 1u);
+  model->moshi_lm.delays[1] = -1;
+  recording_graph_executor graph{};
+  emel::memory::hybrid::sm memory{};
+  moshi::sm predictor{make_predictor_dependencies(graph, memory)};
+  emel::error::type err = k_no_error;
+  moshi::event::initialize request{*model};
+  configure_predictor_initialize(request);
+  request.error_out = &err;
+  CHECK_FALSE(predictor.process_event(request));
+  CHECK(err == emel::error::cast(moshi::error::bind_failed));
+}
+
 TEST_CASE("speech_moshi_generator_personaplex_uses_model_inference_codebooks") {
   auto model = std::make_unique<emel::model::data>();
   model->moshi_lm.n_q = 16;
@@ -843,6 +862,12 @@ TEST_CASE(
 
   CHECK(moshi_executor::guard::guard_bound_root_operands_supported{}(runtime_ev,
                                                                      ctx));
+  CHECK_FALSE(
+      moshi_executor::guard::guard_temporal_fused_projection_layout_supported{}(
+          runtime_ev, ctx));
+  CHECK_FALSE(
+      moshi_executor::guard::
+          guard_depformer_fused_projection_layout_supported{}(runtime_ev, ctx));
   for (int32_t layer = 0; layer < lm.depformer_num_layers; ++layer) {
     auto &unused =
         ctx.session.contract.lm.depformer_layers[static_cast<size_t>(layer)]
@@ -858,6 +883,19 @@ TEST_CASE(
   CHECK_FALSE(
       moshi_executor::guard::guard_depformer_projection_layout_unsupported{}(
           runtime_ev, ctx));
+
+  lm.depformer_weight_schedule_count = 1u;
+  CHECK_FALSE(moshi_executor::guard::guard_bound_root_operands_supported{}(
+      runtime_ev, ctx));
+  CHECK(moshi_executor::guard::guard_depformer_projection_layout_unsupported{}(
+      runtime_ev, ctx));
+
+  lm.depformer_weight_schedule_count = static_cast<uint32_t>(lm.dep_q);
+  lm.depformer_weight_schedule[0] = lm.dep_q;
+  CHECK_FALSE(moshi_executor::guard::guard_bound_root_operands_supported{}(
+      runtime_ev, ctx));
+  CHECK(moshi_executor::guard::guard_depformer_projection_layout_unsupported{}(
+      runtime_ev, ctx));
 }
 
 TEST_CASE("speech_moshi_predictor_rejects_tokenizer_capture_outside_ready") {
@@ -1112,6 +1150,23 @@ TEST_CASE("speech_moshi_executor_rejects_missing_capacity") {
   moshi_executor::event::initialize init{*fixture.model};
   init.error_out = &err;
 
+  CHECK_FALSE(executor.process_event(init));
+  CHECK(err == emel::error::cast(moshi_executor::error::bind_failed));
+}
+
+TEST_CASE("speech_moshi_executor_rejects_undersized_hidden_capacity") {
+  auto fixture = load_fixture_or_skip("moshi-tiny-lm.gguf");
+  if (fixture.model == nullptr) {
+    return;
+  }
+  emel::kernel::sm kernel{};
+  auto dependencies = make_executor_dependencies(kernel);
+  dependencies.capacity.hidden_dim =
+      static_cast<uint64_t>(fixture.model->moshi_lm.dim - 1);
+  moshi_executor::sm executor{dependencies};
+  emel::error::type err = emel::error::cast(moshi_executor::error::none);
+  moshi_executor::event::initialize init{*fixture.model};
+  init.error_out = &err;
   CHECK_FALSE(executor.process_event(init));
   CHECK(err == emel::error::cast(moshi_executor::error::bind_failed));
 }

@@ -354,6 +354,35 @@ TEST_CASE("speech Moshi tokenizer rejects invalid injected geometry") {
   CHECK(machine.is(sml::state<moshi::state_uninitialized>));
 }
 
+TEST_CASE("speech Moshi tokenizer rejects invalid token bounds and sentinels") {
+  const auto rejected = [](const int32_t text_initial_token,
+                           const int32_t token_zero,
+                           const int32_t token_ungenerated) {
+    std::array<int32_t, 3> delays = {0, 1, 2};
+    std::array<int32_t, 12> cache{};
+    moshi::sm machine{moshi::dependencies{
+        .delays = std::span<const int32_t>{delays},
+        .cache = std::span<int32_t>{cache},
+        .codebooks = 3,
+        .generated_audio_codebooks = 2,
+        .delayed_audio_codebooks = 2,
+        .cache_rows = 4,
+        .maximum_delay = 2,
+        .initial_delay_frames = 0,
+        .text_initial_token = text_initial_token,
+        .audio_initial_token = 200,
+        .token_zero = token_zero,
+        .token_ungenerated = token_ungenerated,
+    }};
+    int32_t err = error_code(moshi::error::none);
+    return !machine.process_event(moshi::event::initialize{.error_out = err}) ||
+           err == error_code(moshi::error::invalid_configuration);
+  };
+  CHECK(rejected(0, -1, -2));
+  CHECK(rejected(100, 0, -2));
+  CHECK(rejected(100, -1, 0));
+}
+
 TEST_CASE("speech Moshi tokenizer dispatch remains allocation free") {
   standard_fixture state;
   REQUIRE(state.initialize());
