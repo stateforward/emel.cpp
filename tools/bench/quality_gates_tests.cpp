@@ -519,6 +519,12 @@ TEST_CASE(
         std::string::npos);
   CHECK(helper.find("gbnf_rule_parser") != std::string::npos);
   CHECK(helper.find("kernel_aarch64") != std::string::npos);
+  const std::size_t parallel_matmul_priority =
+      helper.find("parallel_matmul");
+  const std::size_t manifest_expansion = helper.find("while IFS= read -r line");
+  REQUIRE(parallel_matmul_priority != std::string::npos);
+  REQUIRE(manifest_expansion != std::string::npos);
+  CHECK(parallel_matmul_priority < manifest_expansion);
   CHECK(helper.find("runner=\"\"") != std::string::npos);
   CHECK(helper.find("runner=*)") != std::string::npos);
   CHECK(helper.find("\"$runner\" == \"all\"") != std::string::npos);

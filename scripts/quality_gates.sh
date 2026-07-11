@@ -479,6 +479,7 @@ add_all_benchmark_suites_from_manifest() {
       kernel_aarch64 \
       kernel_x86_64 \
       batch_planner \
+      parallel_matmul \
       sm_any; do
     add_benchmark_suite_from_manifest "$priority_runner"
   done
