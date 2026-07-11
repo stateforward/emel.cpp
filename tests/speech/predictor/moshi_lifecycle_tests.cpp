@@ -669,6 +669,18 @@ TEST_CASE("speech_moshi_generator_prefills_personaplex_system_prompt_before_"
   const std::array<int32_t, 4> prompt_text_tokens = {-1, 42, 43, -1};
   const std::array<int32_t, 4> expected_text_inputs = {3, 42, 43, 3};
   for (int32_t index = 0; index < 4; ++index) {
+    if (index == 1) {
+      const int32_t allocations_before = kv.allocate_slots_count;
+      const int32_t graph_calls_before = graph.call_count;
+      moshi::event::prefill_personaplex_prompt invalid_prefill{};
+      invalid_prefill.text_token = fixture.model->moshi_lm.text_card;
+      invalid_prefill.error_out = &err;
+      err = k_no_error;
+      CHECK_FALSE(generator.process_event(invalid_prefill));
+      CHECK(err == emel::error::cast(moshi::error::personaplex_prompt));
+      CHECK(kv.allocate_slots_count == allocations_before);
+      CHECK(graph.call_count == graph_calls_before);
+    }
     bool complete = true;
     int32_t remaining = -1;
     emel::error::type graph_err = emel::error::cast(moshi::error::none);

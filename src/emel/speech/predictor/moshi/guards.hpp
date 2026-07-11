@@ -378,15 +378,30 @@ struct guard_personaplex_prompt_begin_invalid {
   }
 };
 
+struct guard_personaplex_prompt_current_phase_valid {
+  bool operator()(const event::prefill_personaplex_prompt_run &runtime_ev,
+                  const action::context &ctx) const noexcept {
+    return ctx.voice.pre_text_silence_remaining > 0 ||
+           (ctx.voice.pre_text_silence_remaining == 0 &&
+            ctx.voice.text_tokens_remaining > 0 &&
+            runtime_ev.request.text_token >= 0 &&
+            runtime_ev.request.text_token < ctx.session.text_card) ||
+           (ctx.voice.pre_text_silence_remaining == 0 &&
+            ctx.voice.text_tokens_remaining == 0 &&
+            ctx.voice.post_text_silence_remaining > 0);
+  }
+};
+
 struct guard_personaplex_prompt_prefill_request_valid {
-  bool operator()(const event::prefill_personaplex_prompt_run &,
+  bool operator()(const event::prefill_personaplex_prompt_run &runtime_ev,
                   const action::context &ctx) const noexcept {
     const int32_t frame_count = ctx.voice.pre_text_silence_remaining +
                                 ctx.voice.text_tokens_remaining +
                                 ctx.voice.post_text_silence_remaining;
     return ctx.session.model != nullptr && ctx.voice.loaded &&
            ctx.voice.ready && ctx.voice.prompt_started &&
-           !ctx.voice.prompt_ready && frame_count > 0;
+           !ctx.voice.prompt_ready && frame_count > 0 &&
+           guard_personaplex_prompt_current_phase_valid{}(runtime_ev, ctx);
   }
 };
 
@@ -426,9 +441,7 @@ struct guard_personaplex_prompt_post_silence_pending {
 struct guard_personaplex_prompt_phase_invalid {
   bool operator()(const event::prefill_personaplex_prompt_run &runtime_ev,
                   const action::context &ctx) const noexcept {
-    return !guard_personaplex_prompt_pre_silence_pending{}(runtime_ev, ctx) &&
-           !guard_personaplex_prompt_text_pending{}(runtime_ev, ctx) &&
-           !guard_personaplex_prompt_post_silence_pending{}(runtime_ev, ctx);
+    return !guard_personaplex_prompt_current_phase_valid{}(runtime_ev, ctx);
   }
 };
 
