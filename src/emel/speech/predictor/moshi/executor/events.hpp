@@ -68,7 +68,6 @@ struct step_ctx {
   bool temporal_out_norm_rms_ok = false;
   bool temporal_out_norm_ok = false;
   bool text_logits_ok = false;
-  bool text_sampling_ok = false;
   bool depformer_kv_bound = false;
   bool depformer_position_accepted = false;
   bool depformer_input_ok = false;
@@ -89,7 +88,7 @@ struct step_ctx {
   bool depformer_layer_gating_out_ok = false;
   bool depformer_layer_ff_residual_ok = false;
   bool depformer_logits_ok = false;
-  bool depformer_sampling_ok = false;
+  bool sampler_accepted = false;
   int32_t row_index = 0;
   int32_t embedding_dim = 0;
   int32_t best_index = -1;
@@ -101,6 +100,7 @@ struct step_ctx {
   int32_t depformer_weight_index = -1;
   int32_t depformer_layer_index = 0;
   int32_t depformer_position_error = 0;
+  emel::error::type sampler_error = {};
   float best_score = 0.0f;
   detail::temporal_kv_view temporal_kv = {};
   detail::depformer_kv_view depformer_kv = {};

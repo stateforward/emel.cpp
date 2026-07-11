@@ -10,6 +10,7 @@
 #include <doctest/doctest.h>
 
 #include "../../memory/recording_kv_actor.hpp"
+#include "emel/logits/sampler/sm.hpp"
 #include "emel/memory/streaming/sm.hpp"
 #include "emel/model/moshi/detail.hpp"
 #include "emel/speech/predictor/moshi/any.hpp"
@@ -29,23 +30,28 @@ using emel::speech::predictor::moshi::test::repo_root;
 inline constexpr emel::error::type k_no_error =
     emel::error::cast(moshi::error::none);
 
-moshi_executor::dependencies
-make_executor_dependencies(emel::kernel::sm &kernel,
-                           const moshi_executor::kv_views &kv = {}) noexcept {
+moshi_executor::dependencies make_executor_dependencies(
+    emel::kernel::sm &kernel, const moshi_executor::kv_views &kv = {},
+    emel::logits::sampler::sm *sampler = nullptr) noexcept {
   return moshi_executor::dependencies{
       .kv = kv,
       .kernel = kernel,
-      .policy = moshi_executor::action::policies{
-          .rms_norm_epsilon = 1.0e-8f,
-          .zero_seed_state = 123459876u,
-      },
-      .capacity = moshi_executor::action::capacities{
-          .hidden_dim = moshi_executor::detail::k_max_hidden_dim,
-          .temporal_context = moshi_executor::detail::k_max_temporal_context,
-          .depformer_context = moshi_executor::detail::k_max_depformer_context,
-          .sampling_card = moshi_executor::detail::k_max_sampling_card,
-          .sampling_top_k = moshi_executor::detail::k_max_sampling_top_k,
-      },
+      .sampler = sampler,
+      .policy =
+          moshi_executor::action::policies{
+              .rms_norm_epsilon = 1.0e-8f,
+              .zero_seed_state = 123459876u,
+          },
+      .capacity =
+          moshi_executor::action::capacities{
+              .hidden_dim = moshi_executor::detail::k_max_hidden_dim,
+              .temporal_context =
+                  moshi_executor::detail::k_max_temporal_context,
+              .depformer_context =
+                  moshi_executor::detail::k_max_depformer_context,
+              .sampling_card = moshi_executor::detail::k_max_sampling_card,
+              .sampling_top_k = moshi_executor::detail::k_max_sampling_top_k,
+          },
   };
 }
 
@@ -822,7 +828,8 @@ TEST_CASE("speech_moshi_executor_initializes_lm_fixture") {
   }
 
   emel::kernel::sm kernel{};
-  moshi_executor::sm executor{make_executor_dependencies(kernel)};
+  emel::logits::sampler::sm sampler{};
+  moshi_executor::sm executor{make_executor_dependencies(kernel, {}, &sampler)};
   emel::error::type err = emel::error::cast(moshi_executor::error::none);
   moshi_executor::event::initialize init{*fixture.model};
   init.error_out = &err;
@@ -873,7 +880,8 @@ TEST_CASE("speech_moshi_executor_models_zero_seed_and_top_k_clamp") {
   }
 
   emel::kernel::sm kernel{};
-  moshi_executor::sm executor{make_executor_dependencies(kernel)};
+  emel::logits::sampler::sm sampler{};
+  moshi_executor::sm executor{make_executor_dependencies(kernel, {}, &sampler)};
   emel::error::type err = emel::error::cast(moshi_executor::error::none);
   moshi_executor::event::initialize init{*fixture.model};
   init.sampling_enabled = true;
@@ -886,6 +894,28 @@ TEST_CASE("speech_moshi_executor_models_zero_seed_and_top_k_clamp") {
 
   REQUIRE(executor.process_event(init));
   CHECK(err == emel::error::cast(moshi_executor::error::none));
+}
+
+TEST_CASE("speech_moshi_executor_requires_sampler_for_sampling") {
+  auto fixture = load_fixture_or_skip("moshi-tiny-lm.gguf");
+  if (fixture.model == nullptr) {
+    return;
+  }
+
+  emel::kernel::sm kernel{};
+  moshi_executor::sm executor{make_executor_dependencies(kernel)};
+  emel::error::type err = emel::error::cast(moshi_executor::error::none);
+  moshi_executor::event::initialize init{*fixture.model};
+  init.sampling_enabled = true;
+  init.sampling_audio_temperature = 0.8f;
+  init.sampling_text_temperature = 0.7f;
+  init.sampling_audio_top_k = 250;
+  init.sampling_text_top_k = 25;
+  init.sampling_seed = 1234u;
+  init.error_out = &err;
+
+  CHECK_FALSE(executor.process_event(init));
+  CHECK(err == emel::error::cast(moshi_executor::error::bind_failed));
 }
 
 TEST_CASE("speech_moshi_executor_sampling_matches_reference_probability_path") {
@@ -903,13 +933,23 @@ TEST_CASE("speech_moshi_executor_sampling_matches_reference_probability_path") {
   int32_t best_index = -1;
   float best_score = 0.0f;
 
-  moshi_executor::detail::scale_sampling_logits(logits, 2048, 0.8f);
-  moshi_executor::detail::compute_sampling_probabilities(logits, 2048);
-  moshi_executor::detail::compute_sampling_top_k(
-      logits, sorted_indices, top_probabilities, top_indices, 2048, 250);
-  moshi_executor::detail::compute_sampling_exponential_argmax(
-      top_probabilities, top_indices, 2048, 250, random_state, best_index,
-      best_score);
+  emel::logits::sampler::sm sampler{};
+  emel::error::type err = emel::error::cast(emel::logits::sampler::error::none);
+  emel::logits::sampler::event::sample_temperature_top_k request{
+      logits,
+      2048,
+      0.8f,
+      250,
+      sorted_indices,
+      top_probabilities,
+      top_indices,
+      random_state,
+      best_index,
+      best_score,
+      err};
+
+  REQUIRE(sampler.process_event(request));
+  CHECK(err == emel::error::cast(emel::logits::sampler::error::none));
 
   CHECK(best_index == 1582);
   CHECK(random_state == 1237704734u);
@@ -1897,6 +1937,8 @@ TEST_CASE("speech_moshi_executor_sampling_rng_is_actor_owned") {
   initialize_streaming_position(second_depformer_positions);
   emel::kernel::sm first_kernel{};
   emel::kernel::sm second_kernel{};
+  emel::logits::sampler::sm first_sampler{};
+  emel::logits::sampler::sm second_sampler{};
   const auto first_views =
       prepare_kv_views(*first_fixture.model, &first_temporal, &first_depformer,
                        &first_temporal_positions, &first_depformer_positions);
@@ -1904,9 +1946,9 @@ TEST_CASE("speech_moshi_executor_sampling_rng_is_actor_owned") {
       *second_fixture.model, &second_temporal, &second_depformer,
       &second_temporal_positions, &second_depformer_positions);
   moshi_executor::sm first{
-      make_executor_dependencies(first_kernel, first_views)};
+      make_executor_dependencies(first_kernel, first_views, &first_sampler)};
   moshi_executor::sm second{
-      make_executor_dependencies(second_kernel, second_views)};
+      make_executor_dependencies(second_kernel, second_views, &second_sampler)};
   emel::error::type first_err = emel::error::cast(moshi_executor::error::none);
   emel::error::type second_err = emel::error::cast(moshi_executor::error::none);
   moshi_executor::event::initialize first_init{*first_fixture.model};

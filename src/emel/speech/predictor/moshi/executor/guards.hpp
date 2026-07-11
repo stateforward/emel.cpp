@@ -20,7 +20,9 @@ struct guard_bind_contract_valid {
            model.moshi_lm.n_q > 0 && model.moshi_lm.dep_q > 0 &&
            model.moshi_lm.dep_q <= model.moshi_lm.n_q &&
            model.moshi_lm.text_card > 0 && model.moshi_lm.card > 0 &&
-           model.moshi_lm.dim > 0 && ctx.policy.rms_norm_epsilon > 0.0f &&
+           model.moshi_lm.dim > 0 &&
+           (!runtime_ev.request.sampling_enabled || ctx.sampler != nullptr) &&
+           ctx.policy.rms_norm_epsilon > 0.0f &&
            ctx.policy.zero_seed_state != 0u && ctx.capacity.hidden_dim > 0u &&
            ctx.capacity.hidden_dim <= detail::k_max_hidden_dim &&
            ctx.capacity.temporal_context > 0u &&
@@ -989,7 +991,8 @@ struct guard_forced_text_token_absent {
 struct guard_text_sampling_config_valid {
   bool operator()(const event::step_run &,
                   const action::context &ctx) const noexcept {
-    return ctx.sampling.enabled && ctx.sampling.text_temperature > 0.0f &&
+    return ctx.sampling.enabled && ctx.sampler != nullptr &&
+           ctx.sampling.text_temperature > 0.0f &&
            ctx.sampling.text_top_k > 0 &&
            ctx.sampling.text_top_k <= ctx.session.text_card &&
            static_cast<uint64_t>(ctx.session.text_card) <=
@@ -1100,7 +1103,9 @@ struct guard_text_logits_failed {
 struct guard_text_sampling_succeeded {
   bool operator()(const event::step_run &runtime_ev,
                   const action::context &) const noexcept {
-    return runtime_ev.ctx.text_sampling_ok;
+    return runtime_ev.ctx.sampler_accepted &&
+           runtime_ev.ctx.sampler_error ==
+               emel::error::cast(emel::logits::sampler::error::none);
   }
 };
 
@@ -1933,7 +1938,8 @@ struct guard_depformer_logits_failed {
 struct guard_depformer_sampling_config_valid {
   bool operator()(const event::step_run &,
                   const action::context &ctx) const noexcept {
-    return ctx.sampling.enabled && ctx.sampling.audio_temperature > 0.0f &&
+    return ctx.sampling.enabled && ctx.sampler != nullptr &&
+           ctx.sampling.audio_temperature > 0.0f &&
            ctx.sampling.audio_top_k > 0 &&
            ctx.sampling.audio_top_k <= ctx.session.audio_card &&
            static_cast<uint64_t>(ctx.session.audio_card) <=
@@ -1954,7 +1960,9 @@ struct guard_depformer_sampling_config_invalid {
 struct guard_depformer_sampling_succeeded {
   bool operator()(const event::step_run &runtime_ev,
                   const action::context &) const noexcept {
-    return runtime_ev.ctx.depformer_sampling_ok;
+    return runtime_ev.ctx.sampler_accepted &&
+           runtime_ev.ctx.sampler_error ==
+               emel::error::cast(emel::logits::sampler::error::none);
   }
 };
 

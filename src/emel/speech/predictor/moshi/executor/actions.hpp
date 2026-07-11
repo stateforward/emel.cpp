@@ -152,7 +152,6 @@ struct effect_begin_input_embedding {
     runtime_ev.ctx.temporal_out_norm_rms_ok = false;
     runtime_ev.ctx.temporal_out_norm_ok = false;
     runtime_ev.ctx.text_logits_ok = false;
-    runtime_ev.ctx.text_sampling_ok = false;
     runtime_ev.ctx.depformer_kv_bound = false;
     runtime_ev.ctx.depformer_position_accepted = false;
     runtime_ev.ctx.depformer_position_error = static_cast<int32_t>(
@@ -174,7 +173,6 @@ struct effect_begin_input_embedding {
     runtime_ev.ctx.depformer_layer_gating_out_ok = false;
     runtime_ev.ctx.depformer_layer_ff_residual_ok = false;
     runtime_ev.ctx.depformer_logits_ok = false;
-    runtime_ev.ctx.depformer_sampling_ok = false;
     runtime_ev.ctx.best_index = -1;
     runtime_ev.ctx.best_score = 0.0f;
     runtime_ev.ctx.input_audio_codebook_index = 0;
@@ -976,42 +974,19 @@ struct effect_compute_text_token_logits {
   }
 };
 
-struct effect_scale_text_sampling_logits {
-  void operator()(const event::step_run &runtime_ev,
-                  context &ctx) const noexcept {
-    detail::scale_sampling_logits(runtime_ev.ctx.logits, ctx.session.text_card,
-                                  ctx.sampling.text_temperature);
-  }
-};
-
-struct effect_compute_text_sampling_probabilities {
-  void operator()(const event::step_run &runtime_ev,
-                  context &ctx) const noexcept {
-    detail::compute_sampling_probabilities(runtime_ev.ctx.logits,
-                                           ctx.session.text_card);
-  }
-};
-
-struct effect_compute_text_sampling_top_k {
-  void operator()(const event::step_run &runtime_ev,
-                  context &ctx) const noexcept {
-    detail::compute_sampling_top_k(
-        runtime_ev.ctx.logits, runtime_ev.ctx.sampling_indices,
-        runtime_ev.ctx.top_scores, runtime_ev.ctx.top_indices,
-        ctx.session.text_card, ctx.sampling.text_top_k);
-  }
-};
-
 struct effect_select_text_sampling_token {
   void operator()(const event::step_run &runtime_ev,
                   context &ctx) const noexcept {
-    detail::compute_sampling_exponential_argmax(
-        runtime_ev.ctx.top_scores, runtime_ev.ctx.top_indices,
-        ctx.session.text_card, ctx.sampling.text_top_k,
-        ctx.sampling.random_state, runtime_ev.ctx.best_index,
-        runtime_ev.ctx.best_score);
-    runtime_ev.ctx.text_sampling_ok = true;
-    runtime_ev.ctx.text_logits_ok = true;
+    runtime_ev.ctx.sampler_error =
+        emel::error::cast(emel::logits::sampler::error::none);
+    emel::logits::sampler::event::sample_temperature_top_k sample_ev{
+        runtime_ev.ctx.logits,           ctx.session.text_card,
+        ctx.sampling.text_temperature,   ctx.sampling.text_top_k,
+        runtime_ev.ctx.sampling_indices, runtime_ev.ctx.top_scores,
+        runtime_ev.ctx.top_indices,      ctx.sampling.random_state,
+        runtime_ev.ctx.best_index,       runtime_ev.ctx.best_score,
+        runtime_ev.ctx.sampler_error};
+    runtime_ev.ctx.sampler_accepted = ctx.sampler->process_event(sample_ev);
   }
 };
 
@@ -1746,42 +1721,19 @@ struct effect_compute_depformer_token_logits {
   }
 };
 
-struct effect_scale_depformer_sampling_logits {
-  void operator()(const event::step_run &runtime_ev,
-                  context &ctx) const noexcept {
-    detail::scale_sampling_logits(runtime_ev.ctx.logits, ctx.session.audio_card,
-                                  ctx.sampling.audio_temperature);
-  }
-};
-
-struct effect_compute_depformer_sampling_probabilities {
-  void operator()(const event::step_run &runtime_ev,
-                  context &ctx) const noexcept {
-    detail::compute_sampling_probabilities(runtime_ev.ctx.logits,
-                                           ctx.session.audio_card);
-  }
-};
-
-struct effect_compute_depformer_sampling_top_k {
-  void operator()(const event::step_run &runtime_ev,
-                  context &ctx) const noexcept {
-    detail::compute_sampling_top_k(
-        runtime_ev.ctx.logits, runtime_ev.ctx.sampling_indices,
-        runtime_ev.ctx.top_scores, runtime_ev.ctx.top_indices,
-        ctx.session.audio_card, ctx.sampling.audio_top_k);
-  }
-};
-
 struct effect_select_depformer_sampling_token {
   void operator()(const event::step_run &runtime_ev,
                   context &ctx) const noexcept {
-    detail::compute_sampling_exponential_argmax(
-        runtime_ev.ctx.top_scores, runtime_ev.ctx.top_indices,
-        ctx.session.audio_card, ctx.sampling.audio_top_k,
-        ctx.sampling.random_state, runtime_ev.ctx.best_index,
-        runtime_ev.ctx.best_score);
-    runtime_ev.ctx.depformer_sampling_ok = true;
-    runtime_ev.ctx.depformer_logits_ok = true;
+    runtime_ev.ctx.sampler_error =
+        emel::error::cast(emel::logits::sampler::error::none);
+    emel::logits::sampler::event::sample_temperature_top_k sample_ev{
+        runtime_ev.ctx.logits,           ctx.session.audio_card,
+        ctx.sampling.audio_temperature,  ctx.sampling.audio_top_k,
+        runtime_ev.ctx.sampling_indices, runtime_ev.ctx.top_scores,
+        runtime_ev.ctx.top_indices,      ctx.sampling.random_state,
+        runtime_ev.ctx.best_index,       runtime_ev.ctx.best_score,
+        runtime_ev.ctx.sampler_error};
+    runtime_ev.ctx.sampler_accepted = ctx.sampler->process_event(sample_ev);
   }
 };
 

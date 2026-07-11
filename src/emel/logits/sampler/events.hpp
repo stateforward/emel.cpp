@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <span>
 
 #include "emel/callback.hpp"
 #include "emel/error/error.hpp"
@@ -68,6 +69,36 @@ struct sample_preselected {
       error_out(error_out_ref) {}
 };
 
+struct sample_temperature_top_k {
+  sample_temperature_top_k(std::span<float> logits_ref, const int32_t card_ref,
+                           const float temperature_ref, const int32_t top_k_ref,
+                           std::span<int32_t> sorted_indices_ref,
+                           std::span<float> top_probabilities_ref,
+                           std::span<int32_t> top_indices_ref,
+                           uint32_t &random_state_ref,
+                           int32_t &selected_token_out_ref,
+                           float &selected_score_out_ref,
+                           emel::error::type &error_out_ref) noexcept
+      : logits(logits_ref), card(card_ref), temperature(temperature_ref),
+        top_k(top_k_ref), sorted_indices(sorted_indices_ref),
+        top_probabilities(top_probabilities_ref), top_indices(top_indices_ref),
+        random_state(random_state_ref),
+        selected_token_out(selected_token_out_ref),
+        selected_score_out(selected_score_out_ref), error_out(error_out_ref) {}
+
+  std::span<float> logits;
+  int32_t card;
+  float temperature;
+  int32_t top_k;
+  std::span<int32_t> sorted_indices;
+  std::span<float> top_probabilities;
+  std::span<int32_t> top_indices;
+  uint32_t &random_state;
+  int32_t &selected_token_out;
+  float &selected_score_out;
+  emel::error::type &error_out;
+};
+
 struct configure_ctx {
   emel::error::type err = emel::error::cast(error::none);
 };
@@ -80,6 +111,10 @@ struct sample_logits_ctx {
 };
 
 struct sample_preselected_ctx {
+  emel::error::type err = emel::error::cast(error::none);
+};
+
+struct sample_temperature_top_k_ctx {
   emel::error::type err = emel::error::cast(error::none);
 };
 
@@ -96,6 +131,11 @@ struct sample_logits_runtime {
 struct sample_preselected_runtime {
   const sample_preselected & request;
   sample_preselected_ctx & ctx;
+};
+
+struct sample_temperature_top_k_runtime {
+  const sample_temperature_top_k &request;
+  sample_temperature_top_k_ctx &ctx;
 };
 
 }  // namespace emel::logits::sampler::event

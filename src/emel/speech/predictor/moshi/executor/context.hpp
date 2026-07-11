@@ -3,6 +3,7 @@
 #include <cstdint>
 
 #include "emel/kernel/sm.hpp"
+#include "emel/logits/sampler/sm.hpp"
 #include "emel/memory/streaming/sm.hpp"
 #include "emel/memory/view.hpp"
 #include "emel/model/data.hpp"
@@ -34,6 +35,7 @@ struct capacities {
 struct dependencies {
   kv_views kv = {};
   emel::kernel::sm &kernel;
+  emel::logits::sampler::sm *sampler = nullptr;
   policies policy = {};
   capacities capacity = {};
 };
@@ -63,7 +65,7 @@ struct context {
       : temporal_kv(deps.kv.temporal), depformer_kv(deps.kv.depformer),
         temporal_positions(deps.kv.temporal_positions),
         depformer_positions(deps.kv.depformer_positions), kernel(deps.kernel),
-        policy(deps.policy), capacity(deps.capacity) {}
+        sampler(deps.sampler), policy(deps.policy), capacity(deps.capacity) {}
 
   runtime session = {};
   sampling_config sampling = {};
@@ -72,6 +74,7 @@ struct context {
   emel::memory::streaming::sm *temporal_positions = nullptr;
   emel::memory::streaming::sm *depformer_positions = nullptr;
   emel::kernel::sm &kernel;
+  emel::logits::sampler::sm *sampler = nullptr;
   const policies policy;
   const capacities capacity;
 };

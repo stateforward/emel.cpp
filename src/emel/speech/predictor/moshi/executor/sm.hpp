@@ -94,9 +94,6 @@ struct state_text_logits_bind_result_decision {};
 struct state_text_logits_run {};
 struct state_text_logits_sample_projection {};
 struct state_text_logits_sample_projection_result_decision {};
-struct state_text_logits_sample_scale {};
-struct state_text_logits_sample_softmax {};
-struct state_text_logits_sample_top_k {};
 struct state_text_logits_sample_select {};
 struct state_text_logits_result_decision {};
 struct state_bind_depformer_kv {};
@@ -157,9 +154,6 @@ struct state_depformer_logits_bind_result_decision {};
 struct state_depformer_logits_run {};
 struct state_depformer_logits_sample_projection {};
 struct state_depformer_logits_sample_projection_result_decision {};
-struct state_depformer_logits_sample_scale {};
-struct state_depformer_logits_sample_softmax {};
-struct state_depformer_logits_sample_top_k {};
 struct state_depformer_logits_sample_select {};
 struct state_depformer_token_publish {};
 struct state_depformer_logits_result_decision {};
@@ -594,21 +588,12 @@ struct model {
           / action::effect_mark_graph_execution_unsupported{}
       , sml::state<state_text_logits_sample_projection_result_decision> <= sml::state<state_text_logits_sample_projection>
           + sml::completion<step_run>
-      , sml::state<state_text_logits_sample_scale> <= sml::state<state_text_logits_sample_projection_result_decision>
+      , sml::state<state_text_logits_sample_select> <= sml::state<state_text_logits_sample_projection_result_decision>
           + sml::completion<step_run> [ guard::guard_text_logits_matmul_succeeded{} ]
-          / action::effect_scale_text_sampling_logits{}
+          / action::effect_select_text_sampling_token{}
       , sml::state<state_step_error_out_decision> <= sml::state<state_text_logits_sample_projection_result_decision>
           + sml::completion<step_run> [ guard::guard_text_logits_matmul_failed{} ]
           / action::effect_mark_graph_execution_unsupported{}
-      , sml::state<state_text_logits_sample_softmax> <= sml::state<state_text_logits_sample_scale>
-          + sml::completion<step_run>
-          / action::effect_compute_text_sampling_probabilities{}
-      , sml::state<state_text_logits_sample_top_k> <= sml::state<state_text_logits_sample_softmax>
-          + sml::completion<step_run>
-          / action::effect_compute_text_sampling_top_k{}
-      , sml::state<state_text_logits_sample_select> <= sml::state<state_text_logits_sample_top_k>
-          + sml::completion<step_run>
-          / action::effect_select_text_sampling_token{}
       , sml::state<state_text_logits_result_decision> <= sml::state<state_text_logits_sample_select>
           + sml::completion<step_run> [ guard::guard_sampled_text_token_ready{} ]
           / action::effect_publish_sampled_text_token{}
@@ -917,21 +902,12 @@ struct model {
           / action::effect_mark_graph_execution_unsupported{}
       , sml::state<state_depformer_logits_sample_projection_result_decision> <= sml::state<state_depformer_logits_sample_projection>
           + sml::completion<step_run>
-      , sml::state<state_depformer_logits_sample_scale> <= sml::state<state_depformer_logits_sample_projection_result_decision>
+      , sml::state<state_depformer_logits_sample_select> <= sml::state<state_depformer_logits_sample_projection_result_decision>
           + sml::completion<step_run> [ guard::guard_depformer_logits_matmul_succeeded{} ]
-          / action::effect_scale_depformer_sampling_logits{}
+          / action::effect_select_depformer_sampling_token{}
       , sml::state<state_step_error_out_decision> <= sml::state<state_depformer_logits_sample_projection_result_decision>
           + sml::completion<step_run> [ guard::guard_depformer_logits_matmul_failed{} ]
           / action::effect_mark_graph_execution_unsupported{}
-      , sml::state<state_depformer_logits_sample_softmax> <= sml::state<state_depformer_logits_sample_scale>
-          + sml::completion<step_run>
-          / action::effect_compute_depformer_sampling_probabilities{}
-      , sml::state<state_depformer_logits_sample_top_k> <= sml::state<state_depformer_logits_sample_softmax>
-          + sml::completion<step_run>
-          / action::effect_compute_depformer_sampling_top_k{}
-      , sml::state<state_depformer_logits_sample_select> <= sml::state<state_depformer_logits_sample_top_k>
-          + sml::completion<step_run>
-          / action::effect_select_depformer_sampling_token{}
       , sml::state<state_depformer_layer_norm> <= sml::state<state_depformer_layer_advance>
           + sml::completion<step_run> [ guard::guard_depformer_layer_norm_supported{} ]
           / action::effect_run_depformer_layer_norm_rms{}

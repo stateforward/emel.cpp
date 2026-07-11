@@ -129,4 +129,26 @@ struct selected_token_missing_or_invalid {
   }
 };
 
+struct temperature_top_k_request_valid {
+  bool
+  operator()(const event::sample_temperature_top_k_runtime &ev) const noexcept {
+    const auto &request = ev.request;
+    return request.card > 0 && request.temperature > 0.0f &&
+           request.top_k > 0 && request.top_k <= request.card &&
+           request.logits.size() >= static_cast<size_t>(request.card) &&
+           request.sorted_indices.size() >= static_cast<size_t>(request.card) &&
+           request.top_probabilities.size() >=
+               static_cast<size_t>(request.top_k) &&
+           request.top_indices.size() >= static_cast<size_t>(request.top_k) &&
+           request.random_state != 0u;
+  }
+};
+
+struct temperature_top_k_request_invalid {
+  bool
+  operator()(const event::sample_temperature_top_k_runtime &ev) const noexcept {
+    return !temperature_top_k_request_valid{}(ev);
+  }
+};
+
 }  // namespace emel::logits::sampler::guard

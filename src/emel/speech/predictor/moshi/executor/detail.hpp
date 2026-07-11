@@ -1,11 +1,8 @@
 #pragma once
 
-#include <algorithm>
-#include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
-#include <limits>
 #include <span>
 #include <string_view>
 
@@ -280,65 +277,6 @@ inline bool tensor_shape(const tensor_record *tensor, const int64_t ne0,
 inline bool token_in_embedding_range(const int32_t token,
                                      const int32_t card) noexcept {
   return token >= k_token_zero && token <= card;
-}
-
-inline void scale_sampling_logits(std::span<float> logits, const int32_t card,
-                                  const float temperature) noexcept {
-  const float inverse_temperature = 1.0f / temperature;
-  for (int32_t index = 0; index < card; ++index) {
-    logits[static_cast<size_t>(index)] *= inverse_temperature;
-  }
-}
-
-inline void compute_sampling_probabilities(std::span<float> logits,
-                                           const int32_t card) noexcept {
-  emel::kernel::detail::soft_max_row_ggml(card, logits.data());
-}
-
-inline void compute_sampling_top_k(std::span<const float> probabilities,
-                                   std::span<int32_t> sorted_indices,
-                                   std::span<float> top_probabilities,
-                                   std::span<int32_t> top_indices,
-                                   const int32_t card,
-                                   const int32_t requested_top_k) noexcept {
-  for (int32_t index = 0; index < card; ++index) {
-    sorted_indices[static_cast<size_t>(index)] = index;
-  }
-  std::sort(sorted_indices.begin(), sorted_indices.begin() + card,
-            [probabilities](const int32_t lhs, const int32_t rhs) {
-              return probabilities[static_cast<size_t>(lhs)] >
-                     probabilities[static_cast<size_t>(rhs)];
-            });
-  for (int32_t slot = 0; slot < requested_top_k; ++slot) {
-    const int32_t index = sorted_indices[static_cast<size_t>(slot)];
-    top_probabilities[static_cast<size_t>(slot)] =
-        probabilities[static_cast<size_t>(index)];
-    top_indices[static_cast<size_t>(slot)] = index;
-  }
-}
-
-inline void compute_sampling_exponential_argmax(
-    std::span<const float> top_probabilities,
-    std::span<const int32_t> top_indices, const int32_t card,
-    const int32_t requested_top_k, uint32_t &random_state, int32_t &best_index,
-    float &best_score) noexcept {
-  constexpr uint32_t multiplier = 16807u;
-  constexpr uint32_t modulus = 2147483647u;
-  constexpr float random_max = 2147483647.0f;
-  (void)card;
-  best_index = -1;
-  best_score = -std::numeric_limits<float>::infinity();
-  for (int32_t slot = 0; slot < requested_top_k; ++slot) {
-    random_state = static_cast<uint32_t>(
-        (static_cast<uint64_t>(random_state) * multiplier) % modulus);
-    const float uniform = static_cast<float>(random_state) / random_max;
-    const float divisor = -std::log(uniform);
-    const float score = top_probabilities[static_cast<size_t>(slot)] / divisor;
-    if (score > best_score) {
-      best_score = score;
-      best_index = top_indices[static_cast<size_t>(slot)];
-    }
-  }
 }
 
 } // namespace emel::speech::predictor::moshi::executor::detail

@@ -517,6 +517,7 @@ int main(int argc, char **argv) {
           },
   };
   emel::kernel::sm prediction_kernel{};
+  emel::logits::sampler::sm prediction_sampler{};
   runtime::sm prediction_runtime{runtime::dependencies{
       .kv =
           runtime::kv_views{
@@ -526,6 +527,7 @@ int main(int argc, char **argv) {
               .depformer_positions = &secondary_positions,
           },
       .kernel = prediction_kernel,
+      .sampler = &prediction_sampler,
       .policy =
           runtime::action::policies{
               .rms_norm_epsilon = 1.0e-8f,

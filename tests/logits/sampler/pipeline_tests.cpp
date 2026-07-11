@@ -362,3 +362,32 @@ TEST_CASE("sampler pipeline propagates gbnf sampler errors") {
   CHECK(err == emel::error::cast(emel::gbnf::sampler::error::invalid_request));
   CHECK(selected == -1);
 }
+
+TEST_CASE("sampler rejects invalid typed temperature top-k workspace") {
+  std::array<float, 2> logits = {1.0f, 2.0f};
+  std::array<int32_t, 1> sorted_indices = {};
+  std::array<float, 1> top_probabilities = {};
+  std::array<int32_t, 1> top_indices = {};
+  uint32_t random_state = 1234u;
+  int32_t selected = -1;
+  float score = 0.0f;
+  emel::error::type err = emel::error::cast(emel::logits::sampler::error::none);
+  emel::logits::sampler::event::sample_temperature_top_k request{
+      logits,
+      2,
+      0.8f,
+      1,
+      sorted_indices,
+      top_probabilities,
+      top_indices,
+      random_state,
+      selected,
+      score,
+      err};
+  emel::logits::sampler::sm machine{};
+
+  CHECK_FALSE(machine.process_event(request));
+  CHECK(err ==
+        emel::error::cast(emel::logits::sampler::error::invalid_request));
+  CHECK(selected == -1);
+}
