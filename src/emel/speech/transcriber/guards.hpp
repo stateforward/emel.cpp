@@ -1,5 +1,7 @@
 #pragma once
 
+#include <cstddef>
+
 #include "emel/speech/transcriber/context.hpp"
 #include "emel/speech/transcriber/detail.hpp"
 #include "emel/speech/transcriber/events.hpp"
@@ -45,6 +47,11 @@ struct guard_tokenizer_assets_supported {
   }
 };
 
+// The encoder output feeds the decoder cross-attention directly, and the
+// decode phase slices the shared encoder-state buffer as frame_count x
+// decoder embedding_length, so injected contracts whose embedding lengths
+// disagree would make the pipeline mis-slice the buffer; they are rejected
+// here as an unsupported dependency combination.
 struct guard_model_contracts_supported {
   bool operator()(const emel::model::data &model,
                   const dependencies &deps) const noexcept {
@@ -54,7 +61,9 @@ struct guard_model_contracts_supported {
            deps.encoder_contract.embedding_length > 0 &&
            deps.decoder_contract.model == &model &&
            deps.decoder_contract.vocab_size > 0 &&
-           deps.decoder_contract.embedding_length > 0;
+           deps.decoder_contract.embedding_length > 0 &&
+           deps.encoder_contract.embedding_length ==
+               deps.decoder_contract.embedding_length;
   }
 };
 
@@ -164,11 +173,21 @@ struct guard_transcriber_unsupported {
   }
 };
 
+// The decode phase reads frame_count x decoder embedding_length floats from
+// the caller-owned encoder-state buffer, so the encode outcome only counts as
+// a success when that slice provably fits the buffer the caller provided;
+// otherwise the pipeline takes the backend-error path instead of letting the
+// decoder read past the span.
 struct guard_encoder_success {
   bool operator()(const event::recognize_run &runtime_ev,
-                  const action::context &) const noexcept {
+                  const action::context &ctx) const noexcept {
     return runtime_ev.ctx.encoder_accepted &&
-           runtime_ev.ctx.err == detail::to_error(error::none);
+           runtime_ev.ctx.err == detail::to_error(error::none) &&
+           runtime_ev.ctx.encoder_frame_count >= 0 &&
+           static_cast<size_t>(runtime_ev.ctx.encoder_frame_count) *
+                   static_cast<size_t>(
+                       ctx.deps.decoder_contract.embedding_length) <=
+               runtime_ev.request.storage.encoder_state.size();
   }
 };
 

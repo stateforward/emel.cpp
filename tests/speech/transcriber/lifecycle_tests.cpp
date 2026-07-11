@@ -298,8 +298,9 @@ TEST_CASE("speech_transcriber_reports_backend_error_when_component_rejects") {
 }
 
 TEST_CASE("speech_transcriber_rejects_recognition_before_initialize") {
-  transcriber::sm engine{};
   auto model = std::make_unique<emel::model::data>();
+  const transcriber::dependencies deps = make_supported_dependencies(*model);
+  transcriber::sm engine{deps};
   std::array<float, 160> pcm{};
   std::array<char, 32> transcript{};
   int32_t transcript_size = -1;
@@ -333,6 +334,104 @@ TEST_CASE("speech_transcriber_rejects_recognition_before_initialize") {
   CHECK(err == emel::error::cast(transcriber::error::uninitialized));
   CHECK(capture.calls == 1);
   CHECK(capture.err == emel::error::cast(transcriber::error::uninitialized));
+
+  // The rejection must return to state_uninitialized, not promote the machine
+  // to ready: a second pre-initialize recognize is rejected identically, so
+  // the pipeline stays unreachable without a successful initialize.
+  CHECK(engine.is(stateforward::sml::state<transcriber::state_uninitialized>));
+  err = emel::error::cast(transcriber::error::none);
+  CHECK_FALSE(engine.process_event(recognize_ev));
+  CHECK(err == emel::error::cast(transcriber::error::uninitialized));
+  CHECK(capture.calls == 2);
+  CHECK(engine.is(stateforward::sml::state<transcriber::state_uninitialized>));
+
+  // A subsequent initialize still succeeds from uninitialized, after which
+  // recognize dispatches normally (the injected whisper-kind encoder rejects
+  // the synthetic model with a backend error and returns to ready).
+  err = emel::error::cast(transcriber::error::none);
+  transcriber::event::initialize initialize_ev{*model, make_supported_assets()};
+  initialize_ev.error_out = &err;
+  REQUIRE(engine.process_event(initialize_ev));
+  CHECK(err == emel::error::cast(transcriber::error::none));
+  CHECK(engine.is(stateforward::sml::state<transcriber::state_ready>));
+
+  err = emel::error::cast(transcriber::error::none);
+  transcriber::event::recognize post_init_recognize_ev{
+      *model,
+      make_supported_assets(),
+      std::span<const float>{pcm},
+      16000,
+      std::span<char>{transcript},
+      transcript_size,
+      selected_token,
+      confidence,
+      encoder_frames,
+      encoder_width,
+      encoder_digest,
+      decoder_digest};
+  post_init_recognize_ev.error_out = &err;
+  CHECK_FALSE(engine.process_event(post_init_recognize_ev));
+  CHECK(err == emel::error::cast(transcriber::error::backend));
+  CHECK(engine.is(stateforward::sml::state<transcriber::state_ready>));
+}
+
+TEST_CASE(
+    "speech_transcriber_recognition_after_failed_initialize_stays_errored") {
+  transcriber::sm engine{};
+  auto model = std::make_unique<emel::model::data>();
+  emel::error::type err = emel::error::cast(transcriber::error::none);
+
+  // Drive the machine into state_errored via an invalid initialize.
+  transcriber::event::initialize invalid_initialize_ev{
+      *model, transcriber::event::tokenizer_assets{}};
+  invalid_initialize_ev.error_out = &err;
+  CHECK_FALSE(engine.process_event(invalid_initialize_ev));
+  CHECK(err == emel::error::cast(transcriber::error::invalid_request));
+  REQUIRE(engine.is(stateforward::sml::state<transcriber::state_errored>));
+
+  std::array<float, 160> pcm{};
+  std::array<char, 32> transcript{};
+  int32_t transcript_size = -1;
+  int32_t selected_token = -1;
+  float confidence = -1.0f;
+  int32_t encoder_frames = -1;
+  int32_t encoder_width = -1;
+  uint64_t encoder_digest = 1u;
+  uint64_t decoder_digest = 1u;
+  recognition_error_capture capture{};
+
+  transcriber::event::recognize recognize_ev{*model,
+                                             "{}",
+                                             std::span<const float>{pcm},
+                                             16000,
+                                             std::span<char>{transcript},
+                                             transcript_size,
+                                             selected_token,
+                                             confidence,
+                                             encoder_frames,
+                                             encoder_width,
+                                             encoder_digest,
+                                             decoder_digest};
+  recognize_ev.error_out = &err;
+  recognize_ev.on_error =
+      emel::callback<void(const transcriber::events::recognition_error &)>::
+          from<recognition_error_capture, record_recognition_error>(&capture);
+
+  // The rejection must return to state_errored, not promote the machine to
+  // ready: repeated recognize dispatches keep rejecting, so the pipeline is
+  // unreachable without a successful initialize.
+  err = emel::error::cast(transcriber::error::none);
+  CHECK_FALSE(engine.process_event(recognize_ev));
+  CHECK(err == emel::error::cast(transcriber::error::uninitialized));
+  CHECK(capture.calls == 1);
+  CHECK(capture.err == emel::error::cast(transcriber::error::uninitialized));
+  CHECK(engine.is(stateforward::sml::state<transcriber::state_errored>));
+
+  err = emel::error::cast(transcriber::error::none);
+  CHECK_FALSE(engine.process_event(recognize_ev));
+  CHECK(err == emel::error::cast(transcriber::error::uninitialized));
+  CHECK(capture.calls == 2);
+  CHECK(engine.is(stateforward::sml::state<transcriber::state_errored>));
 }
 
 TEST_CASE("speech_transcriber_returns_to_ready_after_rejected_recognition") {
@@ -521,6 +620,68 @@ TEST_CASE("speech_transcriber_guards_validate_injected_dependencies") {
   zero_decoder_embedding.decoder_contract.embedding_length = 0;
   CHECK_FALSE(transcriber::guard::guard_model_contracts_supported{}(
       *model, zero_decoder_embedding));
+
+  // The decode phase slices the encoder-state buffer as frame_count x decoder
+  // embedding_length, so contracts whose embedding lengths disagree are an
+  // unsupported dependency combination.
+  transcriber::dependencies mismatched_embedding = supported;
+  mismatched_embedding.decoder_contract.embedding_length =
+      supported.encoder_contract.embedding_length + 1;
+  CHECK_FALSE(transcriber::guard::guard_model_contracts_supported{}(
+      *model, mismatched_embedding));
+}
+
+TEST_CASE("speech_transcriber_encoder_success_requires_state_capacity") {
+  auto model = std::make_unique<emel::model::data>();
+  transcriber::action::context ctx{};
+  ctx.deps = make_supported_dependencies(*model);
+
+  std::array<float, 160> pcm{};
+  std::array<float, 768> encoder_state{};
+  std::array<char, 32> transcript{};
+  int32_t transcript_size = -1;
+  int32_t selected_token = -1;
+  float confidence = -1.0f;
+  int32_t encoder_frames = -1;
+  int32_t encoder_width = -1;
+  uint64_t encoder_digest = 1u;
+  uint64_t decoder_digest = 1u;
+
+  transcriber::event::recognize recognize_ev{*model,
+                                             make_supported_assets(),
+                                             std::span<const float>{pcm},
+                                             16000,
+                                             std::span<char>{transcript},
+                                             transcript_size,
+                                             selected_token,
+                                             confidence,
+                                             encoder_frames,
+                                             encoder_width,
+                                             encoder_digest,
+                                             decoder_digest};
+  recognize_ev.storage = transcriber::event::runtime_storage{
+      .encoder_state = std::span<float>{encoder_state},
+  };
+  transcriber::event::recognize_ctx recognize_ctx{};
+  transcriber::event::recognize_run recognize_run{recognize_ev, recognize_ctx};
+
+  recognize_ctx.encoder_accepted = true;
+  recognize_ctx.err = emel::error::cast(transcriber::error::none);
+
+  // Two frames of the 384-wide contract fit the 768-float buffer.
+  recognize_ctx.encoder_frame_count = 2;
+  CHECK(transcriber::guard::guard_encoder_success{}(recognize_run, ctx));
+  CHECK_FALSE(transcriber::guard::guard_encoder_failure{}(recognize_run, ctx));
+
+  // Three frames would read past the caller's encoder-state span, so the
+  // encode outcome must route to the backend-error path.
+  recognize_ctx.encoder_frame_count = 3;
+  CHECK_FALSE(transcriber::guard::guard_encoder_success{}(recognize_run, ctx));
+  CHECK(transcriber::guard::guard_encoder_failure{}(recognize_run, ctx));
+
+  // A negative frame count never counts as encoder success.
+  recognize_ctx.encoder_frame_count = -1;
+  CHECK_FALSE(transcriber::guard::guard_encoder_success{}(recognize_run, ctx));
 }
 
 TEST_CASE("speech_transcriber_actions_store_and_emit_dispatch_outputs") {

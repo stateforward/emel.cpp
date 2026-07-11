@@ -31,6 +31,10 @@ struct state_recognize_success {};
 struct state_recognize_error_out_decision {};
 struct state_recognize_done_callback_decision {};
 struct state_recognize_error_callback_decision {};
+struct state_recognize_uninitialized_error_out_decision {};
+struct state_recognize_uninitialized_error_callback_decision {};
+struct state_recognize_errored_error_out_decision {};
+struct state_recognize_errored_error_callback_decision {};
 struct state_done {};
 struct state_errored {};
 
@@ -46,6 +50,12 @@ state purpose
   speech/tokenizer facades); each phase outcome is an explicit decision state.
 - done/error error-out and callback decision states keep the error_out and
   on_done/on_error channels as explicit transitions.
+- recognize rejections dispatched before a successful initialize have their own
+  origin-specific error chains (uninitialized/errored error-out and callback
+  decisions) whose terminals return to the origin state, so a rejected
+  pre-initialize recognize can never promote the machine to ready and open the
+  pipeline without a successful initialize. The shared recognize error chain is
+  reachable only from ready-origin dispatches and correctly returns to ready.
 
 control invariants
 - the machine contains no model-family names, contracts, routes, constants, or
@@ -128,10 +138,11 @@ struct model {
       , sml::state<state_recognize_error_out_decision> <= sml::state<state_ready>
           + sml::event<event::recognize_run> [ guard::guard_invalid_recognize{} ]
           / action::effect_reject_recognize
-      , sml::state<state_recognize_error_out_decision> <= sml::state<state_uninitialized>
+      , sml::state<state_recognize_uninitialized_error_out_decision> <=
+          sml::state<state_uninitialized>
           + sml::event<event::recognize_run>
           / action::effect_mark_uninitialized
-      , sml::state<state_recognize_error_out_decision> <= sml::state<state_errored>
+      , sml::state<state_recognize_errored_error_out_decision> <= sml::state<state_errored>
           + sml::event<event::recognize_run>
           / action::effect_mark_uninitialized
 
@@ -198,6 +209,45 @@ struct model {
           + sml::completion<event::recognize_run> [ guard::guard_no_recognize_error_callback{} ]
       , sml::state<state_ready> <= sml::state<state_done>
           + sml::completion<event::recognize_run>
+
+      //------------------------------------------------------------------------------//
+      // Pre-initialize recognize rejection (uninitialized origin). Mirrors the
+      // shared recognize error chain but terminates back in
+      // state_uninitialized so a rejected recognize can never promote the
+      // machine to ready without a successful initialize.
+      , sml::state<state_recognize_uninitialized_error_callback_decision> <=
+          sml::state<state_recognize_uninitialized_error_out_decision>
+          + sml::completion<event::recognize_run> [ guard::guard_has_recognize_error_out{} ]
+          / action::effect_store_recognize_error
+      , sml::state<state_recognize_uninitialized_error_callback_decision> <=
+          sml::state<state_recognize_uninitialized_error_out_decision>
+          + sml::completion<event::recognize_run> [ guard::guard_no_recognize_error_out{} ]
+      , sml::state<state_uninitialized> <=
+          sml::state<state_recognize_uninitialized_error_callback_decision>
+          + sml::completion<event::recognize_run> [ guard::guard_has_recognize_error_callback{} ]
+          / action::effect_emit_recognize_error
+      , sml::state<state_uninitialized> <=
+          sml::state<state_recognize_uninitialized_error_callback_decision>
+          + sml::completion<event::recognize_run> [ guard::guard_no_recognize_error_callback{} ]
+
+      //------------------------------------------------------------------------------//
+      // Pre-initialize recognize rejection (errored origin). Same shape as the
+      // uninitialized chain; terminals return to state_errored so the failed
+      // initialize outcome stays observable and the pipeline stays unreachable.
+      , sml::state<state_recognize_errored_error_callback_decision> <=
+          sml::state<state_recognize_errored_error_out_decision>
+          + sml::completion<event::recognize_run> [ guard::guard_has_recognize_error_out{} ]
+          / action::effect_store_recognize_error
+      , sml::state<state_recognize_errored_error_callback_decision> <=
+          sml::state<state_recognize_errored_error_out_decision>
+          + sml::completion<event::recognize_run> [ guard::guard_no_recognize_error_out{} ]
+      , sml::state<state_errored> <=
+          sml::state<state_recognize_errored_error_callback_decision>
+          + sml::completion<event::recognize_run> [ guard::guard_has_recognize_error_callback{} ]
+          / action::effect_emit_recognize_error
+      , sml::state<state_errored> <=
+          sml::state<state_recognize_errored_error_callback_decision>
+          + sml::completion<event::recognize_run> [ guard::guard_no_recognize_error_callback{} ]
 
       //------------------------------------------------------------------------------//
       // Unexpected events.
