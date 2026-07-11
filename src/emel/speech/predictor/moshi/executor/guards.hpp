@@ -72,6 +72,42 @@ struct guard_bound_root_operands_supported {
                   detail::supported_get_rows_dtype(
                       static_cast<detail::dtype>(audio_emb->type));
     }
+    const int32_t dep_dim = lm.depformer_dim;
+    const auto *depformer_text_embedding =
+        ctx.session.contract.lm.depformer_text_embedding.tensor;
+    supported = supported && dep_dim > 0 &&
+                detail::tensor_shape(depformer_text_embedding, dep_dim,
+                                     lm.text_card + 1) &&
+                detail::supported_get_rows_dtype(
+                    static_cast<detail::dtype>(depformer_text_embedding->type));
+    for (int32_t codebook = 0; codebook < lm.dep_q; ++codebook) {
+      const auto *input_projection =
+          ctx.session.contract.lm
+              .depformer_input_projections[static_cast<size_t>(codebook)]
+              .tensor;
+      const auto *output_projection =
+          ctx.session.contract.lm
+              .depformer_output_projections[static_cast<size_t>(codebook)]
+              .tensor;
+      supported = supported &&
+                  detail::tensor_shape(input_projection, hidden_dim, dep_dim) &&
+                  detail::supported_mul_mat_dtype(
+                      static_cast<detail::dtype>(input_projection->type)) &&
+                  detail::tensor_shape(output_projection, dep_dim, lm.card) &&
+                  detail::supported_argmax_dtype(
+                      static_cast<detail::dtype>(output_projection->type));
+      if (codebook > 0) {
+        const auto *audio_embedding =
+            ctx.session.contract.lm
+                .depformer_audio_embeddings[static_cast<size_t>(codebook - 1)]
+                .tensor;
+        supported =
+            supported &&
+            detail::tensor_shape(audio_embedding, dep_dim, lm.card + 1) &&
+            detail::supported_get_rows_dtype(
+                static_cast<detail::dtype>(audio_embedding->type));
+      }
+    }
     return supported;
   }
 };
@@ -1261,8 +1297,7 @@ struct guard_depformer_scheduled_weight_invalid {
 struct guard_depformer_text_input_supported {
   bool operator()(const event::step_run &runtime_ev,
                   const action::context &ctx) const noexcept {
-    const auto &model = runtime_ev.request.model;
-    const auto &lm = model.moshi_lm;
+    const auto &lm = runtime_ev.request.model.moshi_lm;
     const int32_t codebook = runtime_ev.ctx.depformer_codebook_index;
     if (codebook != 0) {
       return false;
@@ -1273,19 +1308,9 @@ struct guard_depformer_text_input_supported {
     if (weight_index < 0 || weight_index >= lm.dep_q) {
       return false;
     }
-    const auto *input_projection = detail::find_indexed_tensor(
-        model, "lm.depformer_in.%d.weight", weight_index);
-    const auto *embedding =
-        detail::find_tensor(model, "lm.depformer_text_emb.weight");
     return runtime_ev.ctx.depformer_kv_bound && runtime_ev.ctx.text_logits_ok &&
            codebook == 0 && hidden_dim > 0 && dep_dim > 0 &&
            static_cast<uint64_t>(dep_dim) <= ctx.capacity.hidden_dim &&
-           detail::tensor_shape(input_projection, hidden_dim, dep_dim) &&
-           detail::supported_mul_mat_dtype(
-               static_cast<detail::dtype>(input_projection->type)) &&
-           detail::tensor_shape(embedding, dep_dim, lm.text_card + 1) &&
-           detail::supported_get_rows_dtype(
-               static_cast<detail::dtype>(embedding->type)) &&
            detail::token_in_embedding_range(runtime_ev.request.text_token_out,
                                             lm.text_card,
                                             ctx.policy.token_zero);
@@ -1295,8 +1320,7 @@ struct guard_depformer_text_input_supported {
 struct guard_depformer_audio_input_supported {
   bool operator()(const event::step_run &runtime_ev,
                   const action::context &ctx) const noexcept {
-    const auto &model = runtime_ev.request.model;
-    const auto &lm = model.moshi_lm;
+    const auto &lm = runtime_ev.request.model.moshi_lm;
     const int32_t codebook = runtime_ev.ctx.depformer_codebook_index;
     if (codebook <= 0 || codebook >= lm.dep_q) {
       return false;
@@ -1307,20 +1331,10 @@ struct guard_depformer_audio_input_supported {
     if (weight_index < 0 || weight_index >= lm.dep_q) {
       return false;
     }
-    const auto *input_projection = detail::find_indexed_tensor(
-        model, "lm.depformer_in.%d.weight", weight_index);
-    const auto *embedding = detail::find_indexed_tensor(
-        model, "lm.depformer_emb.%d.weight", codebook - 1);
     return runtime_ev.ctx.depformer_kv_bound && runtime_ev.ctx.text_logits_ok &&
            codebook > 0 && codebook < lm.dep_q && hidden_dim > 0 &&
            dep_dim > 0 &&
            static_cast<uint64_t>(dep_dim) <= ctx.capacity.hidden_dim &&
-           detail::tensor_shape(input_projection, hidden_dim, dep_dim) &&
-           detail::supported_mul_mat_dtype(
-               static_cast<detail::dtype>(input_projection->type)) &&
-           detail::tensor_shape(embedding, dep_dim, lm.card + 1) &&
-           detail::supported_get_rows_dtype(
-               static_cast<detail::dtype>(embedding->type)) &&
            detail::token_in_embedding_range(
                runtime_ev.request
                    .audio_tokens_out[static_cast<size_t>(codebook - 1)],
@@ -1920,13 +1934,8 @@ struct guard_depformer_logits_supported {
     const auto &lm = model.moshi_lm;
     const int32_t dep_dim = lm.depformer_dim;
     const int32_t codebook = runtime_ev.ctx.depformer_codebook_index;
-    const auto *linear =
-        detail::find_indexed_tensor(model, "lm.linears.%d.weight", codebook);
     return guard_depformer_layers_complete{}(runtime_ev, ctx) &&
-           codebook >= 0 && codebook < lm.dep_q && dep_dim > 0 && lm.card > 0 &&
-           detail::tensor_shape(linear, dep_dim, lm.card) &&
-           detail::supported_argmax_dtype(
-               static_cast<detail::dtype>(linear->type));
+           codebook >= 0 && codebook < lm.dep_q && dep_dim > 0 && lm.card > 0;
   }
 };
 

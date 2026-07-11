@@ -708,6 +708,71 @@ emel::error::type validate_lm_contract(const emel::model::data &model_data,
       return emel::error::cast(emel::model::loader::error::model_invalid);
     }
 
+    const auto *depformer_text_embedding =
+        find_tensor(model_data, "lm.depformer_text_emb.weight");
+    if (depformer_text_embedding == nullptr) {
+      return emel::error::cast(emel::model::loader::error::model_invalid);
+    }
+    contract_out.depformer_text_embedding = tensor_view{
+        .tensor = depformer_text_embedding,
+        .name = emel::model::tensor_name_view(model_data,
+                                              *depformer_text_embedding),
+    };
+    for (int32_t codebook = 0; codebook < lm.dep_q; ++codebook) {
+      char name[96] = {};
+      int written = std::snprintf(name, sizeof(name),
+                                  "lm.depformer_in.%d.weight", codebook);
+      if (written <= 0 || static_cast<size_t>(written) >= sizeof(name)) {
+        return emel::error::cast(emel::model::loader::error::model_invalid);
+      }
+      const auto *input_projection = find_tensor(
+          model_data, std::string_view{name, static_cast<size_t>(written)});
+      if (input_projection == nullptr) {
+        return emel::error::cast(emel::model::loader::error::model_invalid);
+      }
+      contract_out.depformer_input_projections[static_cast<size_t>(codebook)] =
+          tensor_view{
+              .tensor = input_projection,
+              .name =
+                  emel::model::tensor_name_view(model_data, *input_projection),
+          };
+
+      written =
+          std::snprintf(name, sizeof(name), "lm.linears.%d.weight", codebook);
+      if (written <= 0 || static_cast<size_t>(written) >= sizeof(name)) {
+        return emel::error::cast(emel::model::loader::error::model_invalid);
+      }
+      const auto *output_projection = find_tensor(
+          model_data, std::string_view{name, static_cast<size_t>(written)});
+      if (output_projection == nullptr) {
+        return emel::error::cast(emel::model::loader::error::model_invalid);
+      }
+      contract_out.depformer_output_projections[static_cast<size_t>(codebook)] =
+          tensor_view{
+              .tensor = output_projection,
+              .name =
+                  emel::model::tensor_name_view(model_data, *output_projection),
+          };
+
+      if (codebook > 0) {
+        written = std::snprintf(name, sizeof(name),
+                                "lm.depformer_emb.%d.weight", codebook - 1);
+        if (written <= 0 || static_cast<size_t>(written) >= sizeof(name)) {
+          return emel::error::cast(emel::model::loader::error::model_invalid);
+        }
+        const auto *audio_embedding = find_tensor(
+            model_data, std::string_view{name, static_cast<size_t>(written)});
+        if (audio_embedding == nullptr) {
+          return emel::error::cast(emel::model::loader::error::model_invalid);
+        }
+        contract_out.depformer_audio_embeddings[static_cast<size_t>(
+            codebook - 1)] = tensor_view{
+            .tensor = audio_embedding,
+            .name = emel::model::tensor_name_view(model_data, *audio_embedding),
+        };
+      }
+    }
+
     for (int32_t block = 0; block < lm.depformer_num_layers; ++block) {
       if (!has_depformer_block(model_data, block)) {
         return emel::error::cast(emel::model::loader::error::model_invalid);

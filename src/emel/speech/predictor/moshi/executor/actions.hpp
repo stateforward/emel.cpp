@@ -1041,9 +1041,7 @@ struct effect_advance_depformer_position {
 struct effect_bind_depformer_text_input_projection {
   void operator()(const event::step_run &runtime_ev,
                   context &ctx) const noexcept {
-    const auto &model = runtime_ev.request.model;
-    const auto &lm = model.moshi_lm;
-    (void)ctx;
+    const auto &lm = runtime_ev.request.model.moshi_lm;
     const int32_t dep_dim = lm.depformer_dim;
     runtime_ev.ctx.depformer_input_ok = false;
     runtime_ev.ctx.depformer_input_projection_bound = false;
@@ -1080,8 +1078,10 @@ struct effect_bind_depformer_text_input_projection {
                 0.0f);
 
     const int32_t weight_index = runtime_ev.ctx.depformer_weight_index;
-    const auto *input_projection = detail::find_indexed_tensor(
-        model, "lm.depformer_in.%d.weight", weight_index);
+    const auto *input_projection =
+        ctx.session.contract.lm
+            .depformer_input_projections[static_cast<size_t>(weight_index)]
+            .tensor;
     runtime_ev.ctx.projection_view = {};
     runtime_ev.ctx.depformer_input_projection_bound = detail::bind_tensor_view(
         *input_projection, runtime_ev.ctx.projection_view);
@@ -1091,9 +1091,7 @@ struct effect_bind_depformer_text_input_projection {
 struct effect_bind_depformer_audio_input_projection {
   void operator()(const event::step_run &runtime_ev,
                   context &ctx) const noexcept {
-    const auto &model = runtime_ev.request.model;
-    const auto &lm = model.moshi_lm;
-    (void)ctx;
+    const auto &lm = runtime_ev.request.model.moshi_lm;
     const int32_t dep_dim = lm.depformer_dim;
     const int32_t weight_index = runtime_ev.ctx.depformer_weight_index;
     runtime_ev.ctx.depformer_input_ok = false;
@@ -1130,8 +1128,10 @@ struct effect_bind_depformer_audio_input_projection {
     std::fill_n(runtime_ev.ctx.attention.data(), static_cast<size_t>(dep_dim),
                 0.0f);
 
-    const auto *input_projection = detail::find_indexed_tensor(
-        model, "lm.depformer_in.%d.weight", weight_index);
+    const auto *input_projection =
+        ctx.session.contract.lm
+            .depformer_input_projections[static_cast<size_t>(weight_index)]
+            .tensor;
     runtime_ev.ctx.projection_view = {};
     runtime_ev.ctx.depformer_input_projection_bound = detail::bind_tensor_view(
         *input_projection, runtime_ev.ctx.projection_view);
@@ -1159,10 +1159,10 @@ struct effect_run_depformer_input_projection {
 
 struct effect_bind_depformer_text_input_embedding {
   void operator()(const event::step_run &runtime_ev,
-                  const context &) const noexcept {
+                  const context &ctx) const noexcept {
     const int32_t dep_dim = runtime_ev.request.model.moshi_lm.depformer_dim;
-    const auto *text_emb = detail::find_tensor(runtime_ev.request.model,
-                                               "lm.depformer_text_emb.weight");
+    const auto *text_emb =
+        ctx.session.contract.lm.depformer_text_embedding.tensor;
     runtime_ev.ctx.embedding_view = {};
     runtime_ev.ctx.embedding_view_bound = false;
     runtime_ev.ctx.embedding_row_ok = false;
@@ -1176,12 +1176,14 @@ struct effect_bind_depformer_text_input_embedding {
 
 struct effect_bind_depformer_audio_input_embedding {
   void operator()(const event::step_run &runtime_ev,
-                  const context &) const noexcept {
+                  const context &ctx) const noexcept {
     const int32_t dep_dim = runtime_ev.request.model.moshi_lm.depformer_dim;
     const int32_t codebook = runtime_ev.ctx.depformer_codebook_index;
 
-    const auto *audio_emb = detail::find_indexed_tensor(
-        runtime_ev.request.model, "lm.depformer_emb.%d.weight", codebook - 1);
+    const auto *audio_emb =
+        ctx.session.contract.lm
+            .depformer_audio_embeddings[static_cast<size_t>(codebook - 1)]
+            .tensor;
     runtime_ev.ctx.embedding_view = {};
     runtime_ev.ctx.embedding_view_bound = false;
     runtime_ev.ctx.embedding_row_ok = false;
@@ -1670,10 +1672,13 @@ struct effect_advance_depformer_layer {
 };
 
 struct effect_bind_depformer_token_logits {
-  void operator()(const event::step_run &runtime_ev, context &) const noexcept {
+  void operator()(const event::step_run &runtime_ev,
+                  context &ctx) const noexcept {
     const int32_t codebook = runtime_ev.ctx.depformer_codebook_index;
-    const auto *linear = detail::find_indexed_tensor(
-        runtime_ev.request.model, "lm.linears.%d.weight", codebook);
+    const auto *linear =
+        ctx.session.contract.lm
+            .depformer_output_projections[static_cast<size_t>(codebook)]
+            .tensor;
     runtime_ev.ctx.depformer_logits_ok = false;
     runtime_ev.ctx.projection_view_bound = false;
     runtime_ev.ctx.projection_view = {};

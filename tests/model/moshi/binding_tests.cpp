@@ -488,6 +488,29 @@ TEST_CASE("enriched moshi lm fixture loads hparams, vocab, and contract") {
     REQUIRE(embedding.tensor != nullptr);
     CHECK(embedding.name == "lm.emb." + std::to_string(codebook) + ".weight");
   }
+  REQUIRE(contract.lm.depformer_text_embedding.tensor != nullptr);
+  CHECK(contract.lm.depformer_text_embedding.name ==
+        "lm.depformer_text_emb.weight");
+  for (int32_t codebook = 0; codebook < model.moshi_lm.dep_q; ++codebook) {
+    const auto &input_projection =
+        contract.lm.depformer_input_projections[static_cast<size_t>(codebook)];
+    REQUIRE(input_projection.tensor != nullptr);
+    CHECK(input_projection.name ==
+          "lm.depformer_in." + std::to_string(codebook) + ".weight");
+    const auto &output_projection =
+        contract.lm.depformer_output_projections[static_cast<size_t>(codebook)];
+    REQUIRE(output_projection.tensor != nullptr);
+    CHECK(output_projection.name ==
+          "lm.linears." + std::to_string(codebook) + ".weight");
+    if (codebook > 0) {
+      const auto &audio_embedding =
+          contract.lm
+              .depformer_audio_embeddings[static_cast<size_t>(codebook - 1)];
+      REQUIRE(audio_embedding.tensor != nullptr);
+      CHECK(audio_embedding.name ==
+            "lm.depformer_emb." + std::to_string(codebook - 1) + ".weight");
+    }
+  }
   CHECK(contract.lm.transformer.tensor_count > 0u);
   CHECK(contract.lm.depformer.tensor_count > 0u);
   CHECK(contract.lm.linears.tensor_count == 4u);

@@ -50,10 +50,23 @@ struct lm_contract {
   tensor_view text_embedding = {};
   tensor_view output_norm = {};
   tensor_view text_output_projection = {};
+  tensor_view depformer_text_embedding = {};
   std::array<tensor_view,
              static_cast<std::size_t>(
                  emel::model::data::moshi_lm_hparams::k_max_delays)>
       audio_embeddings = {};
+  std::array<tensor_view,
+             static_cast<std::size_t>(
+                 emel::model::data::moshi_lm_hparams::k_max_delays)>
+      depformer_input_projections = {};
+  std::array<tensor_view,
+             static_cast<std::size_t>(
+                 emel::model::data::moshi_lm_hparams::k_max_delays)>
+      depformer_audio_embeddings = {};
+  std::array<tensor_view,
+             static_cast<std::size_t>(
+                 emel::model::data::moshi_lm_hparams::k_max_delays)>
+      depformer_output_projections = {};
 };
 
 struct mimi_contract {
