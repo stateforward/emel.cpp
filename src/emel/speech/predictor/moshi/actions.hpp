@@ -61,6 +61,16 @@ struct effect_mark_step_request_invalid {
   }
 };
 
+struct effect_mark_step_request_invalid_and_store {
+  template <class runtime_event_type>
+  void operator()(const runtime_event_type &runtime_ev,
+                  context &) const noexcept {
+    const auto &ev = detail::unwrap_runtime_event(runtime_ev);
+    ev.ctx.err = detail_ns::to_error(error::request_shape);
+    *ev.request.error_out = ev.ctx.err;
+  }
+};
+
 template <class runtime_event_type> struct effect_mark_graph_runtime_error {
   void operator()(const runtime_event_type &runtime_ev,
                   context &) const noexcept {
@@ -615,25 +625,31 @@ struct effect_publish_predict {
   }
 };
 
-struct effect_begin_sample {
-  void operator()(const event::sample_run &runtime_ev,
+struct effect_begin_execute {
+  void operator()(const event::execute_run &runtime_ev,
                   const context &) const noexcept {
     runtime_ev.ctx.err = detail_ns::to_error(error::none);
     runtime_ev.ctx.graph_error = detail_ns::to_error(error::none);
     runtime_ev.ctx.graph_accepted = false;
+    runtime_ev.request.prediction_workspace.sampled_text_token = -1;
+    std::fill(
+        runtime_ev.request.prediction_workspace.sampled_audio_tokens.begin(),
+        runtime_ev.request.prediction_workspace.sampled_audio_tokens.end(), -1);
   }
 };
 
-template <class graph_actor_type> struct effect_run_sample_graph {
-  void operator()(const event::sample_run &runtime_ev, context &ctx,
+template <class graph_actor_type> struct effect_run_prediction_graph {
+  void operator()(const event::execute_run &runtime_ev, context &ctx,
                   graph_actor_type &graph) const noexcept {
     runtime_ev.ctx.graph_error = detail_ns::to_error(error::none);
     event::graph_step graph_step{
         *ctx.session.model,
         runtime_ev.request.prediction_workspace.memory,
         runtime_ev.request.model_tokens,
-        runtime_ev.request.audio_tokens_out,
-        runtime_ev.request.text_token_out,
+        std::span<int32_t>{
+            runtime_ev.request.prediction_workspace.sampled_audio_tokens.data(),
+            static_cast<size_t>(ctx.lmgen.generated_dep_q)},
+        runtime_ev.request.prediction_workspace.sampled_text_token,
     };
     graph_step.sequence_id = ctx.session.sequence_id;
     graph_step.error_out = &runtime_ev.ctx.graph_error;
@@ -641,17 +657,30 @@ template <class graph_actor_type> struct effect_run_sample_graph {
   }
 };
 
-struct effect_publish_sample {
-  void operator()(const event::sample_run &runtime_ev,
+struct effect_publish_execute {
+  void operator()(const event::execute_run &runtime_ev,
                   context &) const noexcept {
     runtime_ev.ctx.err = detail_ns::to_error(error::none);
   }
 };
 
-struct effect_store_sample_graph_error_out {
-  void operator()(const event::sample_run &runtime_ev,
+struct effect_store_execute_graph_error_out {
+  void operator()(const event::execute_run &runtime_ev,
                   context &) const noexcept {
     *runtime_ev.request.graph_error_out = runtime_ev.ctx.graph_error;
+  }
+};
+
+struct effect_publish_sample {
+  void operator()(const event::sample_run &runtime_ev,
+                  const context &ctx) const noexcept {
+    std::copy_n(
+        runtime_ev.request.prediction_workspace.sampled_audio_tokens.begin(),
+        static_cast<size_t>(ctx.lmgen.generated_dep_q),
+        runtime_ev.request.audio_tokens_out.begin());
+    runtime_ev.request.text_token_out =
+        runtime_ev.request.prediction_workspace.sampled_text_token;
+    runtime_ev.ctx.err = detail_ns::to_error(error::none);
   }
 };
 

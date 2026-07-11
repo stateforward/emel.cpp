@@ -390,7 +390,9 @@ the comparison builds two isolated Release executables. `personaplex_emel_runner
 and drives the maintained generic speech generator with injected Mimi, batch-planner, tokenizer,
 Moshi predictor, sampler, streaming-memory, and decoder actors. Each streamed or flushed frame is
 planned through the shared batch planner before prediction; the typed one-frame plan is validated
-by the predictor before memory allocation and graph execution. `moshi_reference_driver
+by the predictor before memory allocation. The generic generator then dispatches graph execution
+and sampled-result publication as distinct injected actor phases; the Moshi predictor enforces the
+typed `prediction_ready -> execution_ready -> session_ready` protocol. `moshi_reference_driver
 personaplex` links only the pinned moshi.cpp/ggml reference lane. the reference configure
 hard-disables Metal and the script injects `--threads 1`, seed `1234`, 125 frames, temperatures,
 and sampling limits; there are no process-global EMEL sampling defaults.

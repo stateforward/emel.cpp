@@ -172,14 +172,28 @@ struct guard_predict_request_valid {
   }
 };
 
-struct guard_sample_request_valid {
-  bool operator()(const event::sample_run &runtime_ev,
+struct guard_execute_request_valid {
+  bool operator()(const event::execute_run &runtime_ev,
                   const action::context &ctx) const noexcept {
     const bool voice_ready =
         !ctx.voice.loaded || (ctx.voice.ready && ctx.voice.prompt_ready);
     return ctx.session.model != nullptr && voice_ready &&
            runtime_ev.request.model_tokens.size() ==
-               static_cast<size_t>(ctx.lmgen.codebook_count) &&
+               static_cast<size_t>(ctx.lmgen.codebook_count);
+  }
+};
+
+struct guard_execute_request_invalid {
+  bool operator()(const event::execute_run &runtime_ev,
+                  const action::context &ctx) const noexcept {
+    return !guard_execute_request_valid{}(runtime_ev, ctx);
+  }
+};
+
+struct guard_sample_request_valid {
+  bool operator()(const event::sample_run &runtime_ev,
+                  const action::context &ctx) const noexcept {
+    return ctx.session.model != nullptr &&
            runtime_ev.request.audio_tokens_out.size() >=
                static_cast<size_t>(ctx.lmgen.generated_dep_q);
   }

@@ -694,16 +694,33 @@ TEST_CASE("speech_moshi_generator_prefills_personaplex_system_prompt_before_"
       workspace, 1, 1};
   first_predict.error_out = &err;
   REQUIRE(generator.process_event(first_predict));
-  moshi::event::sample first_sample{
+  CHECK(generator.is(stateforward::sml::state<moshi::state_prediction_ready>));
+  moshi::event::execute first_execute{
       workspace,
       std::span<const int32_t>{
-          input.data(), static_cast<size_t>(fixture.model->moshi_lm.n_q + 1)},
+          input.data(), static_cast<size_t>(fixture.model->moshi_lm.n_q + 1)}};
+  first_execute.error_out = &err;
+  first_execute.graph_error_out = &graph_err;
+  REQUIRE(generator.process_event(first_execute));
+  CHECK(generator.is(stateforward::sml::state<moshi::state_execution_ready>));
+  moshi::event::sample undersized_sample{
+      workspace,
+      std::span<int32_t>{output.data(), static_cast<size_t>(
+                                            fixture.model->moshi_lm.dep_q - 1)},
+      text_token};
+  undersized_sample.error_out = &err;
+  CHECK_FALSE(generator.process_event(undersized_sample));
+  CHECK(err == emel::error::cast(moshi::error::request_shape));
+  CHECK(generator.is(stateforward::sml::state<moshi::state_execution_ready>));
+  err = k_no_error;
+  moshi::event::sample first_sample{
+      workspace,
       std::span<int32_t>{output.data(),
                          static_cast<size_t>(fixture.model->moshi_lm.dep_q)},
       text_token};
   first_sample.error_out = &err;
-  first_sample.graph_error_out = &graph_err;
   REQUIRE(generator.process_event(first_sample));
+  CHECK(generator.is(stateforward::sml::state<moshi::state_session_ready>));
   CHECK(err == k_no_error);
   CHECK(graph_err == k_no_error);
   CHECK(graph.call_count == prompt_frames + 5);
@@ -799,15 +816,19 @@ TEST_CASE("speech_moshi_generator_accepts_personaplex_voice_without_system_"
   err = k_no_error;
   graph_err = emel::error::cast(moshi::error::graph_runtime);
   REQUIRE(generator.process_event(predict));
-  moshi::event::sample sample{
+  moshi::event::execute execute{
       workspace,
       std::span<const int32_t>{
-          input.data(), static_cast<size_t>(fixture.model->moshi_lm.n_q + 1)},
+          input.data(), static_cast<size_t>(fixture.model->moshi_lm.n_q + 1)}};
+  execute.error_out = &err;
+  execute.graph_error_out = &graph_err;
+  REQUIRE(generator.process_event(execute));
+  moshi::event::sample sample{
+      workspace,
       std::span<int32_t>{output.data(),
                          static_cast<size_t>(fixture.model->moshi_lm.dep_q)},
       text_token};
   sample.error_out = &err;
-  sample.graph_error_out = &graph_err;
   REQUIRE(generator.process_event(sample));
   CHECK(err == k_no_error);
   CHECK(graph_err == k_no_error);
@@ -831,9 +852,27 @@ TEST_CASE("speech_moshi_predictor_reports_rejected_graph_event") {
   REQUIRE(generator.process_event(init));
 
   std::array<int32_t, moshi::event::k_max_codebooks> input = {};
-  std::array<int32_t, moshi::event::k_max_codebooks> output = {};
   moshi::event::predict::workspace workspace{};
-  int32_t text_token = -1;
+  moshi::event::execute premature_execute{
+      workspace,
+      std::span<const int32_t>{
+          input.data(), static_cast<size_t>(fixture.model->moshi_lm.n_q + 1)}};
+  premature_execute.error_out = &err;
+  CHECK_FALSE(generator.process_event(premature_execute));
+  CHECK(err == emel::error::cast(moshi::error::request_shape));
+
+  std::array<int32_t, moshi::event::k_max_codebooks> premature_output = {};
+  int32_t premature_text_token = -1;
+  err = k_no_error;
+  moshi::event::sample premature_sample{
+      workspace,
+      std::span<int32_t>{premature_output.data(),
+                         static_cast<size_t>(fixture.model->moshi_lm.dep_q)},
+      premature_text_token};
+  premature_sample.error_out = &err;
+  CHECK_FALSE(generator.process_event(premature_sample));
+  CHECK(err == emel::error::cast(moshi::error::request_shape));
+
   err = k_no_error;
   moshi::event::predict predict{
       std::span<const int32_t>{
@@ -842,16 +881,13 @@ TEST_CASE("speech_moshi_predictor_reports_rejected_graph_event") {
   predict.error_out = &err;
 
   REQUIRE(generator.process_event(predict));
-  moshi::event::sample sample{
+  moshi::event::execute execute{
       workspace,
       std::span<const int32_t>{
-          input.data(), static_cast<size_t>(fixture.model->moshi_lm.n_q + 1)},
-      std::span<int32_t>{output.data(),
-                         static_cast<size_t>(fixture.model->moshi_lm.dep_q)},
-      text_token};
-  sample.error_out = &err;
+          input.data(), static_cast<size_t>(fixture.model->moshi_lm.n_q + 1)}};
+  execute.error_out = &err;
 
-  CHECK_FALSE(generator.process_event(sample));
+  CHECK_FALSE(generator.process_event(execute));
   CHECK(err == emel::error::cast(moshi::error::graph_runtime));
   CHECK(kv.allocate_slots_count == 1);
   CHECK(kv.capture_view_count == 1);
@@ -1224,8 +1260,9 @@ TEST_CASE("speech_moshi_generator_graph_outputs_use_explicit_transitions") {
         std::string::npos);
   CHECK(actions_source.find("effect_store_graph_debug_phase_out") ==
         std::string::npos);
-  CHECK(sm_source.find("state_sample_graph_error_out_decision") !=
+  CHECK(sm_source.find("state_execute_graph_error_out_decision") !=
         std::string::npos);
+  CHECK(sm_source.find("state_sample_error_out_decision") != std::string::npos);
   CHECK(sm_source.find("state_graph_debug_phase_out_decision") ==
         std::string::npos);
 }
@@ -2168,29 +2205,23 @@ TEST_CASE(
   REQUIRE(generator.process_event(init));
 
   std::array<int32_t, moshi::event::k_max_codebooks> input = {};
-  std::array<int32_t, moshi::event::k_max_codebooks> output = {};
   moshi::event::predict::workspace workspace{};
-  output.fill(-1);
-  int32_t text_token = -1;
   moshi::event::predict predict{
       std::span<const int32_t>{
           input.data(), static_cast<size_t>(fixture.model->moshi_lm.n_q + 1)},
       workspace, 1, 1};
   predict.error_out = &err;
   REQUIRE(generator.process_event(predict));
-  moshi::event::sample sample{
+  moshi::event::execute execute{
       workspace,
       std::span<const int32_t>{
-          input.data(), static_cast<size_t>(fixture.model->moshi_lm.n_q + 1)},
-      std::span<int32_t>{output.data(),
-                         static_cast<size_t>(fixture.model->moshi_lm.dep_q)},
-      text_token};
-  sample.error_out = &err;
+          input.data(), static_cast<size_t>(fixture.model->moshi_lm.n_q + 1)}};
+  execute.error_out = &err;
 
-  CHECK_FALSE(generator.process_event(sample));
+  CHECK_FALSE(generator.process_event(execute));
   CHECK(err == emel::error::cast(moshi::error::graph_runtime));
   CHECK(kv.allocate_slots_count == 1);
   CHECK(kv.capture_view_count == 1);
-  CHECK(text_token == -1);
-  CHECK(output[0] == -1);
+  CHECK(workspace.sampled_text_token == -1);
+  CHECK(workspace.sampled_audio_tokens[0] == -1);
 }

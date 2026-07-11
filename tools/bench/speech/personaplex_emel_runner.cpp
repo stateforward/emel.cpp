@@ -87,6 +87,7 @@ struct personaplex_dependencies {
   using tokenizer_initialize_event = tokenizer::event::initialize;
   using tokenize_event = tokenizer::event::tokenize;
   using predict_event = predictor::event::predict;
+  using graph_event = predictor::event::execute;
   using sample_event = predictor::event::sample;
   using detokenize_event = tokenizer::event::detokenize;
   using capture_tokenizer_state_event =
@@ -101,6 +102,7 @@ struct personaplex_dependencies {
   tokenizer::sm &tokenizer;
   mimi::sm &decoder;
   predictor::sm<runtime::sm> &predictor;
+  predictor::sm<runtime::sm> &graph;
   predictor::sm<runtime::sm> &sampler;
   predictor::event::predict::workspace &prediction_workspace;
   mimi::event::initialize encoder_initialize;
@@ -610,6 +612,7 @@ int main(int argc, char **argv) {
       .tokenizer = token_delay,
       .decoder = decoder,
       .predictor = token_predictor,
+      .graph = token_predictor,
       .sampler = token_predictor,
       .prediction_workspace = prediction_workspace,
       .encoder_initialize =

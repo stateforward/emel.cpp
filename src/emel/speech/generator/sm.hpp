@@ -54,6 +54,7 @@ struct state_stream_encode_result {};
 struct state_stream_tokenize_result {};
 struct state_stream_plan_result {};
 struct state_stream_predict_result {};
+struct state_stream_graph_result {};
 struct state_stream_sample_result {};
 struct state_stream_detokenize_result {};
 struct state_stream_decode_result {};
@@ -65,6 +66,7 @@ struct state_flush_encode_result {};
 struct state_flush_tokenize_result {};
 struct state_flush_plan_result {};
 struct state_flush_predict_result {};
+struct state_flush_graph_result {};
 struct state_flush_sample_result {};
 struct state_flush_detokenize_result {};
 struct state_flush_decode_result {};
@@ -333,7 +335,7 @@ template <class dependencies_type> struct duplex_model {
           + sml::completion<generate_run> [ generate_error_absent{} ]
 
       //------------------------------------------------------------------------------//
-      // Duplex encode -> tokenize -> plan -> predict -> sample -> detokenize -> decode.
+      // Duplex encode -> tokenize -> plan -> predict -> graph -> sample -> detokenize -> decode.
       , sml::state<state_stream_encode_result> <= sml::state<state_ready>
           + sml::event<stream_run> [ guard::guard_stream_request_valid<dependencies_type>{} ]
           / action::effect_encode_stream_frame<dependencies_type>{}
@@ -361,13 +363,20 @@ template <class dependencies_type> struct duplex_model {
           sml::state<state_stream_plan_result> + sml::completion<stream_run>
           [ guard::guard_child_failed<dependencies_type, stream_run>{} ]
           / action::effect_fail_stream_frame<dependencies_type, error::planning_failed>{}
-      , sml::state<state_stream_sample_result> <= sml::state<state_stream_predict_result>
+      , sml::state<state_stream_graph_result> <= sml::state<state_stream_predict_result>
           + sml::completion<stream_run> [ guard::guard_prediction_succeeded<dependencies_type, stream_run>{} ]
-          / action::effect_sample_frame<dependencies_type, stream_run>{}
+          / action::effect_execute_prediction_graph<dependencies_type, stream_run>{}
       , sml::state<state_stream_error_channel_decision> <=
           sml::state<state_stream_predict_result> + sml::completion<stream_run>
           [ guard::guard_prediction_failed<dependencies_type, stream_run>{} ]
           / action::effect_fail_stream_frame<dependencies_type, error::predict_failed>{}
+      , sml::state<state_stream_sample_result> <= sml::state<state_stream_graph_result>
+          + sml::completion<stream_run> [ guard::guard_prediction_succeeded<dependencies_type, stream_run>{} ]
+          / action::effect_sample_frame<dependencies_type, stream_run>{}
+      , sml::state<state_stream_error_channel_decision> <=
+          sml::state<state_stream_graph_result> + sml::completion<stream_run>
+          [ guard::guard_prediction_failed<dependencies_type, stream_run>{} ]
+          / action::effect_fail_stream_frame<dependencies_type, error::graph_failed>{}
       , sml::state<state_stream_detokenize_result> <= sml::state<state_stream_sample_result>
           + sml::completion<stream_run> [ guard::guard_prediction_succeeded<dependencies_type, stream_run>{} ]
           / action::effect_detokenize_frame<dependencies_type, stream_run>{}
@@ -440,13 +449,20 @@ template <class dependencies_type> struct duplex_model {
           sml::state<state_flush_plan_result> + sml::completion<flush_run>
           [ guard::guard_child_failed<dependencies_type, flush_run>{} ]
           / action::effect_fail_flush<dependencies_type, error::planning_failed>{}
-      , sml::state<state_flush_sample_result> <= sml::state<state_flush_predict_result>
+      , sml::state<state_flush_graph_result> <= sml::state<state_flush_predict_result>
           + sml::completion<flush_run> [ guard::guard_prediction_succeeded<dependencies_type, flush_run>{} ]
-          / action::effect_sample_frame<dependencies_type, flush_run>{}
+          / action::effect_execute_prediction_graph<dependencies_type, flush_run>{}
       , sml::state<state_flush_error_channel_decision> <=
           sml::state<state_flush_predict_result> + sml::completion<flush_run>
           [ guard::guard_prediction_failed<dependencies_type, flush_run>{} ]
           / action::effect_fail_flush<dependencies_type, error::predict_failed>{}
+      , sml::state<state_flush_sample_result> <= sml::state<state_flush_graph_result>
+          + sml::completion<flush_run> [ guard::guard_prediction_succeeded<dependencies_type, flush_run>{} ]
+          / action::effect_sample_frame<dependencies_type, flush_run>{}
+      , sml::state<state_flush_error_channel_decision> <=
+          sml::state<state_flush_graph_result> + sml::completion<flush_run>
+          [ guard::guard_prediction_failed<dependencies_type, flush_run>{} ]
+          / action::effect_fail_flush<dependencies_type, error::graph_failed>{}
       , sml::state<state_flush_detokenize_result> <= sml::state<state_flush_sample_result>
           + sml::completion<flush_run> [ guard::guard_prediction_succeeded<dependencies_type, flush_run>{} ]
           / action::effect_detokenize_frame<dependencies_type, flush_run>{}

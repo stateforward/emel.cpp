@@ -107,6 +107,8 @@ struct prefill_personaplex_prompt {
 struct predict {
   struct workspace {
     emel::memory::view::snapshot memory = {};
+    std::array<int32_t, k_max_codebooks> sampled_audio_tokens = {};
+    int32_t sampled_text_token = -1;
   };
 
   predict(std::span<const int32_t> model_tokens_ref, workspace &workspace_ref,
@@ -123,21 +125,29 @@ struct predict {
   emel::error::type *error_out = nullptr;
 };
 
+struct execute {
+  execute(predict::workspace &workspace_ref,
+          std::span<const int32_t> model_tokens_ref) noexcept
+      : prediction_workspace(workspace_ref), model_tokens(model_tokens_ref) {}
+
+  predict::workspace &prediction_workspace;
+  std::span<const int32_t> model_tokens = {};
+  emel::error::type *error_out = nullptr;
+  emel::error::type *graph_error_out = nullptr;
+};
+
 struct sample {
   sample(predict::workspace &workspace_ref,
-         std::span<const int32_t> model_tokens_ref,
          std::span<int32_t> audio_tokens_out_ref,
          int32_t &text_token_out_ref) noexcept
-      : prediction_workspace(workspace_ref), model_tokens(model_tokens_ref),
+      : prediction_workspace(workspace_ref),
         audio_tokens_out(audio_tokens_out_ref),
         text_token_out(text_token_out_ref) {}
 
   predict::workspace &prediction_workspace;
-  std::span<const int32_t> model_tokens = {};
   std::span<int32_t> audio_tokens_out = {};
   int32_t &text_token_out;
   emel::error::type *error_out = nullptr;
-  emel::error::type *graph_error_out = nullptr;
 };
 
 struct capture_tokenizer_state {
@@ -246,10 +256,14 @@ struct predict_ctx {
   emel::memory::view::snapshot &memory_snapshot;
 };
 
-struct sample_ctx {
+struct execute_ctx {
   emel::error::type err = emel::error::cast(error::none);
   bool graph_accepted = false;
   emel::error::type graph_error = emel::error::cast(error::none);
+};
+
+struct sample_ctx {
+  emel::error::type err = emel::error::cast(error::none);
 };
 
 struct initialize_run {
@@ -280,6 +294,11 @@ struct prefill_personaplex_prompt_run {
 struct predict_run {
   const predict &request;
   predict_ctx &ctx;
+};
+
+struct execute_run {
+  const execute &request;
+  execute_ctx &ctx;
 };
 
 struct sample_run {

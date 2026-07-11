@@ -68,20 +68,28 @@ struct fake_predict {
   emel::error::type *error_out = nullptr;
 };
 
-struct fake_sample {
-  fake_sample(fake_prediction_workspace &workspace_ref,
-              std::span<const int32_t> tokens_ref,
-              std::span<int32_t> tokens_out_ref,
-              int32_t &text_token_out_ref) noexcept
-      : workspace(workspace_ref), tokens(tokens_ref),
-        tokens_out(tokens_out_ref), text_token_out(text_token_out_ref) {}
+struct fake_execute {
+  fake_execute(fake_prediction_workspace &workspace_ref,
+               std::span<const int32_t> tokens_ref) noexcept
+      : workspace(workspace_ref), tokens(tokens_ref) {}
 
   fake_prediction_workspace &workspace;
   std::span<const int32_t> tokens;
+  emel::error::type *error_out = nullptr;
+  emel::error::type *graph_error_out = nullptr;
+};
+
+struct fake_sample {
+  fake_sample(fake_prediction_workspace &workspace_ref,
+              std::span<int32_t> tokens_out_ref,
+              int32_t &text_token_out_ref) noexcept
+      : workspace(workspace_ref), tokens_out(tokens_out_ref),
+        text_token_out(text_token_out_ref) {}
+
+  fake_prediction_workspace &workspace;
   std::span<int32_t> tokens_out;
   int32_t &text_token_out;
   emel::error::type *error_out = nullptr;
-  emel::error::type *graph_error_out = nullptr;
 };
 
 struct fake_tokenizer_initialize {
@@ -221,6 +229,7 @@ struct fake_predictor_actor {
   int32_t prompt_begin_calls = 0;
   int32_t prompt_condition_calls = 0;
   int32_t predict_calls = 0;
+  int32_t execute_calls = 0;
   int32_t sample_calls = 0;
   int32_t last_plan_step_size = 0;
   int32_t last_plan_output_count = 0;
@@ -229,6 +238,7 @@ struct fake_predictor_actor {
   bool prompt_begin_accepted = true;
   bool prompt_accepted = true;
   bool predict_accepted = true;
+  bool execute_accepted = true;
   bool sample_accepted = true;
   emel::error::type initialize_error = 0;
   emel::error::type voice_error = 0;
@@ -237,8 +247,9 @@ struct fake_predictor_actor {
   emel::error::type prompt_error = 0;
   emel::error::type prompt_graph_error = 0;
   emel::error::type predict_error = 0;
+  emel::error::type execute_error = 0;
+  emel::error::type execute_graph_error = 0;
   emel::error::type sample_error = 0;
-  emel::error::type sample_graph_error = 0;
   bool voice_complete = true;
   bool prompt_complete = true;
 
@@ -280,13 +291,19 @@ struct fake_predictor_actor {
     return predict_accepted;
   }
 
+  bool process_event(const fake_execute &request) noexcept {
+    ++execute_calls;
+    *request.error_out = execute_error;
+    *request.graph_error_out = execute_graph_error;
+    return execute_accepted;
+  }
+
   bool process_event(const fake_sample &request) noexcept {
     ++sample_calls;
-    request.tokens_out[0] = request.tokens[0] + 100;
-    request.tokens_out[1] = request.tokens[1] + 100;
+    request.tokens_out[0] = 111;
+    request.tokens_out[1] = 112;
     request.text_token_out = 42;
     *request.error_out = sample_error;
-    *request.graph_error_out = sample_graph_error;
     return sample_accepted;
   }
 
@@ -307,6 +324,7 @@ struct fake_dependencies {
   using tokenizer_initialize_event = fake_tokenizer_initialize;
   using tokenize_event = fake_tokenize;
   using predict_event = fake_predict;
+  using graph_event = fake_execute;
   using sample_event = fake_sample;
   using detokenize_event = fake_detokenize;
   using capture_tokenizer_state_event = fake_capture_tokenizer_state;
@@ -320,6 +338,7 @@ struct fake_dependencies {
   fake_tokenizer_actor &tokenizer;
   fake_decoder_actor &decoder;
   fake_predictor_actor &predictor;
+  fake_predictor_actor &graph;
   fake_predictor_actor &sampler;
   fake_prediction_workspace &prediction_workspace;
   fake_initialize encoder_initialize = {};
@@ -375,6 +394,7 @@ struct fixture {
             .tokenizer = tokenizer,
             .decoder = decoder,
             .predictor = predictor,
+            .graph = predictor,
             .sampler = predictor,
             .prediction_workspace = prediction_workspace,
             .silence_pcm = std::span<float>{silence},
@@ -757,6 +777,7 @@ TEST_CASE("speech_generator_streams_through_injected_actor_pipeline") {
   CHECK(generated == std::array<int32_t, 2>{111, 112});
   CHECK(text_token == 42);
   CHECK(test->predictor.predict_calls == 1);
+  CHECK(test->predictor.execute_calls == 1);
   CHECK(test->predictor.sample_calls == 1);
   CHECK(test->predictor.last_plan_step_size == 1);
   CHECK(test->predictor.last_plan_output_count == 1);
@@ -845,8 +866,18 @@ TEST_CASE("speech_generator_streams_pending_frames_and_reports_failures") {
           generator::action::error_code(generator::error::encode_failed));
   }
 
+  SUBCASE("graph failure") {
+    test->predictor.execute_graph_error = 4;
+    request.on_error =
+        decltype(request.on_error)::from<callback_probe,
+                                         &callback_probe::stream_error>(&probe);
+    CHECK_FALSE(test->machine.process_event(request));
+    CHECK(probe.last_error ==
+          generator::action::error_code(generator::error::graph_failed));
+  }
+
   SUBCASE("sample failure") {
-    test->predictor.sample_graph_error = 4;
+    test->predictor.sample_error = 4;
     request.on_error =
         decltype(request.on_error)::from<callback_probe,
                                          &callback_probe::stream_error>(&probe);
