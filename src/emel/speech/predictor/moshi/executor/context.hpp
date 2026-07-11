@@ -41,10 +41,19 @@ struct policies {
   uint32_t zero_seed_state = 0u;
 };
 
+struct capacities {
+  uint64_t hidden_dim = 0u;
+  uint64_t temporal_context = 0u;
+  uint64_t depformer_context = 0u;
+  uint64_t sampling_card = 0u;
+  uint64_t sampling_top_k = 0u;
+};
+
 struct dependencies {
   kv_bindings kv = {};
   emel::kernel::sm &kernel;
   policies policy = {};
+  capacities capacity = {};
 };
 
 struct runtime {
@@ -72,7 +81,7 @@ struct context {
       : temporal_kv(deps.kv.temporal), depformer_kv(deps.kv.depformer),
         temporal_positions(deps.kv.temporal_positions),
         depformer_positions(deps.kv.depformer_positions), kernel(deps.kernel),
-        policy(deps.policy) {}
+        policy(deps.policy), capacity(deps.capacity) {}
 
   runtime session = {};
   sampling_config sampling = {};
@@ -82,6 +91,7 @@ struct context {
   emel::memory::streaming::sm *depformer_positions = nullptr;
   emel::kernel::sm &kernel;
   const policies policy;
+  const capacities capacity;
 };
 
 inline temporal_kv_binding

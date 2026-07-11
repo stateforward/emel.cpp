@@ -21,7 +21,16 @@ struct guard_bind_contract_valid {
            model.moshi_lm.dep_q <= model.moshi_lm.n_q &&
            model.moshi_lm.text_card > 0 && model.moshi_lm.card > 0 &&
            model.moshi_lm.dim > 0 && ctx.policy.rms_norm_epsilon > 0.0f &&
-           ctx.policy.zero_seed_state != 0u;
+           ctx.policy.zero_seed_state != 0u && ctx.capacity.hidden_dim > 0u &&
+           ctx.capacity.hidden_dim <= detail::k_max_hidden_dim &&
+           ctx.capacity.temporal_context > 0u &&
+           ctx.capacity.temporal_context <= detail::k_max_temporal_context &&
+           ctx.capacity.depformer_context > 0u &&
+           ctx.capacity.depformer_context <= detail::k_max_depformer_context &&
+           ctx.capacity.sampling_card > 0u &&
+           ctx.capacity.sampling_card <= detail::k_max_sampling_card &&
+           ctx.capacity.sampling_top_k > 0u &&
+           ctx.capacity.sampling_top_k <= detail::k_max_sampling_top_k;
   }
 };
 
@@ -119,7 +128,7 @@ struct guard_external_input_embedding_supported {
                static_cast<size_t>(ctx.session.hidden_dim) &&
            ctx.session.hidden_dim > 0 &&
            static_cast<uint64_t>(ctx.session.hidden_dim) <=
-               detail::k_max_hidden_dim;
+               ctx.capacity.hidden_dim;
   }
 };
 
@@ -157,7 +166,7 @@ struct guard_token_input_embedding_supported {
     }
     return runtime_ev.request.input_embedding.data() == nullptr &&
            !lm.demux_second_stream && hidden_dim > 0 &&
-           static_cast<uint64_t>(hidden_dim) <= detail::k_max_hidden_dim &&
+           static_cast<uint64_t>(hidden_dim) <= ctx.capacity.hidden_dim &&
            root_tensors_ok && audio_tensors_ok && tokens_ok;
   }
 };
@@ -391,7 +400,7 @@ struct guard_temporal_layer_norm_supported {
     const auto *norm1 =
         detail::find_lm_transformer_tensor(model, layer, "norm1.alpha");
     return layer >= 0 && layer < model.moshi_lm.num_layers && hidden_dim > 0 &&
-           static_cast<uint64_t>(hidden_dim) <= detail::k_max_hidden_dim &&
+           static_cast<uint64_t>(hidden_dim) <= ctx.capacity.hidden_dim &&
            detail::tensor_shape(norm1, hidden_dim) &&
            static_cast<detail::dtype>(norm1->type) == detail::dtype::f32;
   }
@@ -441,8 +450,9 @@ struct guard_temporal_layer_projection_supported {
     const auto *projection =
         detail::find_lm_transformer_projection(model, layer);
     return layer >= 0 && layer < model.moshi_lm.num_layers && hidden_dim > 0 &&
-           static_cast<uint64_t>(hidden_dim) <= detail::k_max_hidden_dim &&
-           static_cast<uint64_t>(hidden_dim) * 3u <= detail::k_max_qkv_dim &&
+           static_cast<uint64_t>(hidden_dim) <= ctx.capacity.hidden_dim &&
+           static_cast<uint64_t>(hidden_dim) * 3u <=
+               ctx.capacity.hidden_dim * 3u &&
            detail::tensor_shape(projection, hidden_dim, hidden_dim * 3) &&
            detail::supported_mul_mat_dtype(
                static_cast<detail::dtype>(projection->type));
@@ -481,7 +491,7 @@ struct guard_temporal_layer_rope_supported {
            lm.num_heads > 0 && lm.max_period > 0 &&
            hidden_dim % lm.num_heads == 0 && head_dim > 0 &&
            (head_dim % 2) == 0 &&
-           static_cast<uint64_t>(head_dim) <= detail::k_max_hidden_dim &&
+           static_cast<uint64_t>(head_dim) <= ctx.capacity.hidden_dim &&
            position.logical_position >= 0 &&
            position.logical_position <= std::numeric_limits<int32_t>::max() &&
            position.physical_position >= 0 &&
@@ -569,9 +579,9 @@ struct guard_temporal_layer_attention_supported {
     const int32_t layer = runtime_ev.ctx.temporal_layer_index;
     if (!runtime_ev.ctx.temporal_layer_cache_write_ok || hidden_dim <= 0 ||
         lm.num_heads <= 0 || hidden_dim % lm.num_heads != 0 || head_dim <= 0 ||
-        static_cast<uint64_t>(head_dim) > detail::k_max_hidden_dim ||
+        static_cast<uint64_t>(head_dim) > ctx.capacity.hidden_dim ||
         window.valid_positions <= 0 || capacity <= 0 ||
-        static_cast<uint64_t>(capacity) > detail::k_max_temporal_context ||
+        static_cast<uint64_t>(capacity) > ctx.capacity.temporal_context ||
         window.capacity != capacity || window.valid_positions > capacity ||
         window.logical_begin < 0 ||
         window.logical_end - window.logical_begin != window.valid_positions ||
@@ -671,7 +681,7 @@ struct guard_temporal_layer_norm2_supported {
         detail::find_lm_transformer_tensor(model, layer, "norm2.alpha");
     return runtime_ev.ctx.temporal_layer_residual_ok && layer >= 0 &&
            layer < model.moshi_lm.num_layers && hidden_dim > 0 &&
-           static_cast<uint64_t>(hidden_dim) <= detail::k_max_hidden_dim &&
+           static_cast<uint64_t>(hidden_dim) <= ctx.capacity.hidden_dim &&
            detail::tensor_shape(norm2, hidden_dim) &&
            static_cast<detail::dtype>(norm2->type) == detail::dtype::f32;
   }
@@ -727,7 +737,7 @@ struct guard_temporal_layer_gating_in_supported {
            layer < runtime_ev.request.model.moshi_lm.num_layers &&
            hidden_dim > 0 && projection_dim > 0 && (projection_dim % 2) == 0 &&
            static_cast<uint64_t>(projection_dim) <=
-               detail::k_max_gating_projection_dim &&
+               ctx.capacity.hidden_dim * 8u &&
            detail::tensor_shape(linear_in, hidden_dim, projection_dim) &&
            detail::supported_mul_mat_dtype(
                static_cast<detail::dtype>(linear_in->type));
@@ -757,7 +767,7 @@ struct guard_temporal_layer_gating_in_failed {
 
 struct guard_temporal_layer_silu_gate_supported {
   bool operator()(const event::step_run &runtime_ev,
-                  const action::context &) const noexcept {
+                  const action::context &ctx) const noexcept {
     const auto *linear_in = detail::find_lm_transformer_tensor(
         runtime_ev.request.model, runtime_ev.ctx.temporal_layer_index,
         "gating.linear_in.weight");
@@ -771,7 +781,7 @@ struct guard_temporal_layer_silu_gate_supported {
            runtime_ev.ctx.temporal_layer_index <
                runtime_ev.request.model.moshi_lm.num_layers &&
            gate_dim > 0 &&
-           static_cast<uint64_t>(gate_dim) <= detail::k_max_gating_dim;
+           static_cast<uint64_t>(gate_dim) <= ctx.capacity.hidden_dim * 4u;
   }
 };
 
@@ -827,7 +837,7 @@ struct guard_temporal_layer_gating_out_supported {
     return runtime_ev.ctx.temporal_layer_silu_gate_ok && layer >= 0 &&
            layer < runtime_ev.request.model.moshi_lm.num_layers &&
            hidden_dim > 0 && gate_dim > 0 &&
-           static_cast<uint64_t>(gate_dim) <= detail::k_max_gating_dim &&
+           static_cast<uint64_t>(gate_dim) <= ctx.capacity.hidden_dim * 4u &&
            detail::tensor_shape(linear_out, gate_dim, hidden_dim) &&
            detail::supported_mul_mat_dtype(
                static_cast<detail::dtype>(linear_out->type));
@@ -894,7 +904,7 @@ struct guard_temporal_out_norm_supported {
         detail::find_tensor(runtime_ev.request.model, "lm.out_norm.alpha");
     return guard_temporal_layers_complete{}(runtime_ev, ctx) &&
            hidden_dim > 0 &&
-           static_cast<uint64_t>(hidden_dim) <= detail::k_max_hidden_dim &&
+           static_cast<uint64_t>(hidden_dim) <= ctx.capacity.hidden_dim &&
            detail::tensor_shape(out_norm, hidden_dim) &&
            static_cast<detail::dtype>(out_norm->type) == detail::dtype::f32;
   }
@@ -981,9 +991,9 @@ struct guard_text_sampling_config_valid {
            ctx.sampling.text_top_k > 0 &&
            ctx.sampling.text_top_k <= ctx.session.text_card &&
            static_cast<uint64_t>(ctx.session.text_card) <=
-               detail::k_max_sampling_card &&
+               ctx.capacity.sampling_card &&
            static_cast<uint64_t>(ctx.sampling.text_top_k) <=
-               detail::k_max_sampling_top_k;
+               ctx.capacity.sampling_top_k;
   }
 };
 
@@ -1244,7 +1254,7 @@ struct guard_depformer_text_input_supported {
         detail::find_tensor(model, "lm.depformer_text_emb.weight");
     return runtime_ev.ctx.depformer_kv_bound && runtime_ev.ctx.text_logits_ok &&
            codebook == 0 && hidden_dim > 0 && dep_dim > 0 &&
-           static_cast<uint64_t>(dep_dim) <= detail::k_max_hidden_dim &&
+           static_cast<uint64_t>(dep_dim) <= ctx.capacity.hidden_dim &&
            detail::tensor_shape(input_projection, hidden_dim, dep_dim) &&
            detail::supported_mul_mat_dtype(
                static_cast<detail::dtype>(input_projection->type)) &&
@@ -1278,7 +1288,7 @@ struct guard_depformer_audio_input_supported {
     return runtime_ev.ctx.depformer_kv_bound && runtime_ev.ctx.text_logits_ok &&
            codebook > 0 && codebook < lm.dep_q && hidden_dim > 0 &&
            dep_dim > 0 &&
-           static_cast<uint64_t>(dep_dim) <= detail::k_max_hidden_dim &&
+           static_cast<uint64_t>(dep_dim) <= ctx.capacity.hidden_dim &&
            detail::tensor_shape(input_projection, hidden_dim, dep_dim) &&
            detail::supported_mul_mat_dtype(
                static_cast<detail::dtype>(input_projection->type)) &&
@@ -1369,7 +1379,7 @@ struct guard_depformer_input_projection_embedding_unsupported {
 
 struct guard_depformer_layer_norm_supported {
   bool operator()(const event::step_run &runtime_ev,
-                  const action::context &) const noexcept {
+                  const action::context &ctx) const noexcept {
     const auto &model = runtime_ev.request.model;
     const int32_t dep_dim = model.moshi_lm.depformer_dim;
     const int32_t layer = runtime_ev.ctx.depformer_layer_index;
@@ -1377,7 +1387,7 @@ struct guard_depformer_layer_norm_supported {
         detail::find_depformer_tensor(model, layer, "norm1.alpha");
     return runtime_ev.ctx.depformer_input_ok && layer >= 0 &&
            layer < model.moshi_lm.depformer_num_layers && dep_dim > 0 &&
-           static_cast<uint64_t>(dep_dim) <= detail::k_max_hidden_dim &&
+           static_cast<uint64_t>(dep_dim) <= ctx.capacity.hidden_dim &&
            detail::tensor_shape(norm1, dep_dim) &&
            static_cast<detail::dtype>(norm1->type) == detail::dtype::f32;
   }
@@ -1420,7 +1430,7 @@ struct guard_depformer_layer_norm_failed {
 
 struct guard_depformer_layer_projection_supported {
   bool operator()(const event::step_run &runtime_ev,
-                  const action::context &) const noexcept {
+                  const action::context &ctx) const noexcept {
     const auto &model = runtime_ev.request.model;
     const auto &lm = model.moshi_lm;
     const int32_t dep_dim = model.moshi_lm.depformer_dim;
@@ -1435,7 +1445,8 @@ struct guard_depformer_layer_projection_supported {
     return runtime_ev.ctx.depformer_layer_norm_ok && layer >= 0 &&
            layer < model.moshi_lm.depformer_num_layers && codebook >= 0 &&
            codebook < model.moshi_lm.dep_q && dep_dim > 0 &&
-           static_cast<uint64_t>(dep_dim) * 3u <= detail::k_max_qkv_dim &&
+           static_cast<uint64_t>(dep_dim) * 3u <=
+               ctx.capacity.hidden_dim * 3u &&
            detail::tensor_shape(projection, dep_dim, dep_dim * 3) &&
            detail::supported_mul_mat_dtype(
                static_cast<detail::dtype>(projection->type));
@@ -1511,7 +1522,7 @@ struct guard_depformer_layer_cache_write_failed {
 
 struct guard_depformer_layer_attention_supported {
   bool operator()(const event::step_run &runtime_ev,
-                  const action::context &) const noexcept {
+                  const action::context &ctx) const noexcept {
     const auto &lm = runtime_ev.request.model.moshi_lm;
     const auto &view = runtime_ev.ctx.depformer_kv;
     const int32_t dep_dim = lm.depformer_dim;
@@ -1524,9 +1535,9 @@ struct guard_depformer_layer_attention_supported {
     if (!runtime_ev.ctx.depformer_layer_cache_write_ok || dep_dim <= 0 ||
         lm.depformer_num_heads <= 0 || dep_dim % lm.depformer_num_heads != 0 ||
         head_dim <= 0 ||
-        static_cast<uint64_t>(head_dim) > detail::k_max_hidden_dim ||
+        static_cast<uint64_t>(head_dim) > ctx.capacity.hidden_dim ||
         valid_positions <= 0 || capacity <= 0 ||
-        static_cast<uint64_t>(capacity) > detail::k_max_depformer_context ||
+        static_cast<uint64_t>(capacity) > ctx.capacity.depformer_context ||
         valid_positions > capacity || window.capacity != capacity ||
         window.logical_begin < 0 ||
         window.logical_end - window.logical_begin != valid_positions ||
@@ -1631,7 +1642,7 @@ struct guard_depformer_layer_residual_failed {
 
 struct guard_depformer_layer_norm2_supported {
   bool operator()(const event::step_run &runtime_ev,
-                  const action::context &) const noexcept {
+                  const action::context &ctx) const noexcept {
     const auto &model = runtime_ev.request.model;
     const int32_t dep_dim = model.moshi_lm.depformer_dim;
     const int32_t layer = runtime_ev.ctx.depformer_layer_index;
@@ -1639,7 +1650,7 @@ struct guard_depformer_layer_norm2_supported {
         detail::find_depformer_tensor(model, layer, "norm2.alpha");
     return runtime_ev.ctx.depformer_layer_residual_ok && layer >= 0 &&
            layer < model.moshi_lm.depformer_num_layers && dep_dim > 0 &&
-           static_cast<uint64_t>(dep_dim) <= detail::k_max_hidden_dim &&
+           static_cast<uint64_t>(dep_dim) <= ctx.capacity.hidden_dim &&
            detail::tensor_shape(norm2, dep_dim) &&
            static_cast<detail::dtype>(norm2->type) == detail::dtype::f32;
   }
@@ -1682,7 +1693,7 @@ struct guard_depformer_layer_norm2_failed {
 
 struct guard_depformer_layer_gating_in_supported {
   bool operator()(const event::step_run &runtime_ev,
-                  const action::context &) const noexcept {
+                  const action::context &ctx) const noexcept {
     const auto &model = runtime_ev.request.model;
     const auto &lm = model.moshi_lm;
     const int32_t dep_dim = lm.depformer_dim;
@@ -1703,7 +1714,7 @@ struct guard_depformer_layer_gating_in_supported {
            codebook < model.moshi_lm.dep_q && dep_dim > 0 &&
            projection_dim > 0 && (projection_dim % 2) == 0 &&
            static_cast<uint64_t>(projection_dim) <=
-               detail::k_max_gating_projection_dim &&
+               ctx.capacity.hidden_dim * 8u &&
            detail::tensor_shape(linear_in, dep_dim, projection_dim) &&
            detail::supported_mul_mat_dtype(
                static_cast<detail::dtype>(linear_in->type));
@@ -1733,7 +1744,7 @@ struct guard_depformer_layer_gating_in_failed {
 
 struct guard_depformer_layer_silu_gate_supported {
   bool operator()(const event::step_run &runtime_ev,
-                  const action::context &) const noexcept {
+                  const action::context &ctx) const noexcept {
     const auto &lm = runtime_ev.request.model.moshi_lm;
     const int32_t codebook = runtime_ev.ctx.depformer_codebook_index;
     const int32_t weight_index = runtime_ev.ctx.depformer_weight_index;
@@ -1754,7 +1765,7 @@ struct guard_depformer_layer_silu_gate_supported {
            runtime_ev.ctx.depformer_layer_index <
                runtime_ev.request.model.moshi_lm.depformer_num_layers &&
            gate_dim > 0 &&
-           static_cast<uint64_t>(gate_dim) <= detail::k_max_gating_dim;
+           static_cast<uint64_t>(gate_dim) <= ctx.capacity.hidden_dim * 4u;
   }
 };
 
@@ -1795,7 +1806,7 @@ struct guard_depformer_layer_silu_gate_failed {
 
 struct guard_depformer_layer_gating_out_supported {
   bool operator()(const event::step_run &runtime_ev,
-                  const action::context &) const noexcept {
+                  const action::context &ctx) const noexcept {
     const auto &model = runtime_ev.request.model;
     const auto &lm = model.moshi_lm;
     const int32_t dep_dim = lm.depformer_dim;
@@ -1817,7 +1828,7 @@ struct guard_depformer_layer_gating_out_supported {
     return runtime_ev.ctx.depformer_layer_silu_gate_ok && layer >= 0 &&
            layer < model.moshi_lm.depformer_num_layers && codebook >= 0 &&
            codebook < model.moshi_lm.dep_q && dep_dim > 0 && gate_dim > 0 &&
-           static_cast<uint64_t>(gate_dim) <= detail::k_max_gating_dim &&
+           static_cast<uint64_t>(gate_dim) <= ctx.capacity.hidden_dim * 4u &&
            detail::tensor_shape(linear_out, gate_dim, dep_dim) &&
            detail::supported_mul_mat_dtype(
                static_cast<detail::dtype>(linear_out->type));
@@ -1923,9 +1934,9 @@ struct guard_depformer_sampling_config_valid {
            ctx.sampling.audio_top_k > 0 &&
            ctx.sampling.audio_top_k <= ctx.session.audio_card &&
            static_cast<uint64_t>(ctx.session.audio_card) <=
-               detail::k_max_sampling_card &&
+               ctx.capacity.sampling_card &&
            static_cast<uint64_t>(ctx.sampling.audio_top_k) <=
-               detail::k_max_sampling_top_k;
+               ctx.capacity.sampling_top_k;
   }
 };
 

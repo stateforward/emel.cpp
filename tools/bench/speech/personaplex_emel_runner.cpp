@@ -541,6 +541,20 @@ int main(int argc, char **argv) {
           .rms_norm_epsilon = 1.0e-8f,
           .zero_seed_state = 123459876u,
       },
+      .capacity = runtime::action::capacities{
+          .hidden_dim = static_cast<uint64_t>(std::max(
+              lm_model.model->moshi_lm.dim,
+              lm_model.model->moshi_lm.depformer_dim)),
+          .temporal_context =
+              static_cast<uint64_t>(lm_model.model->moshi_lm.context),
+          .depformer_context = static_cast<uint64_t>(
+              lm_model.model->moshi_lm.depformer_context),
+          .sampling_card = static_cast<uint64_t>(std::max(
+              lm_model.model->moshi_lm.text_card,
+              lm_model.model->moshi_lm.card)),
+          .sampling_top_k = static_cast<uint64_t>(
+              std::max(config.audio_top_k, config.text_top_k)),
+      },
   }};
   predictor::sm token_predictor{predictor::action::dependencies{
       .kv_cache = emel::memory::hybrid::kv_binding{},

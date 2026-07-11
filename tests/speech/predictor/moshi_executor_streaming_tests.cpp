@@ -116,6 +116,13 @@ TEST_CASE(
           .rms_norm_epsilon = 1.0e-8f,
           .zero_seed_state = 123459876u,
       },
+      .capacity = executor::action::capacities{
+          .hidden_dim = executor::detail::k_max_hidden_dim,
+          .temporal_context = executor::detail::k_max_temporal_context,
+          .depformer_context = executor::detail::k_max_depformer_context,
+          .sampling_card = executor::detail::k_max_sampling_card,
+          .sampling_top_k = executor::detail::k_max_sampling_top_k,
+      },
   }};
 
   emel::error::type err = emel::error::cast(executor::error::none);

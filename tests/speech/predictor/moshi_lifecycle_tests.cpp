@@ -39,6 +39,13 @@ moshi_executor::dependencies make_executor_dependencies(
           .rms_norm_epsilon = 1.0e-8f,
           .zero_seed_state = 123459876u,
       },
+      .capacity = moshi_executor::action::capacities{
+          .hidden_dim = moshi_executor::detail::k_max_hidden_dim,
+          .temporal_context = moshi_executor::detail::k_max_temporal_context,
+          .depformer_context = moshi_executor::detail::k_max_depformer_context,
+          .sampling_card = moshi_executor::detail::k_max_sampling_card,
+          .sampling_top_k = moshi_executor::detail::k_max_sampling_top_k,
+      },
   };
 }
 
@@ -776,6 +783,24 @@ TEST_CASE("speech_moshi_executor_rejects_missing_numeric_policy") {
   emel::kernel::sm kernel{};
   moshi_executor::sm executor{
       moshi_executor::dependencies{.kernel = kernel}};
+  emel::error::type err = emel::error::cast(moshi_executor::error::none);
+  moshi_executor::event::initialize init{*fixture.model};
+  init.error_out = &err;
+
+  CHECK_FALSE(executor.process_event(init));
+  CHECK(err == emel::error::cast(moshi_executor::error::bind_failed));
+}
+
+TEST_CASE("speech_moshi_executor_rejects_missing_capacity") {
+  auto fixture = load_fixture_or_skip("moshi-tiny-lm.gguf");
+  if (fixture.model == nullptr) {
+    return;
+  }
+
+  emel::kernel::sm kernel{};
+  auto dependencies = make_executor_dependencies(kernel);
+  dependencies.capacity.hidden_dim = 0u;
+  moshi_executor::sm executor{dependencies};
   emel::error::type err = emel::error::cast(moshi_executor::error::none);
   moshi_executor::event::initialize init{*fixture.model};
   init.error_out = &err;
