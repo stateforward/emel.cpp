@@ -204,8 +204,22 @@ struct guard_bound_root_operands_supported {
           detail::tensor_shape(norm2, dep_dim) &&
           static_cast<detail::dtype>(norm2->type) == detail::dtype::f32;
       for (int32_t codebook = 0; codebook < lm.dep_q; ++codebook) {
+        int32_t weight_index = codebook;
+        if (lm.depformer_weight_schedule_count > 0u) {
+          if (static_cast<uint32_t>(codebook) >=
+              lm.depformer_weight_schedule_count) {
+            supported = false;
+          } else {
+            weight_index =
+                lm.depformer_weight_schedule[static_cast<size_t>(codebook)];
+          }
+        }
+        if (weight_index < 0 || weight_index >= lm.dep_q) {
+          supported = false;
+          continue;
+        }
         const auto &codebook_layer =
-            layer.codebooks[static_cast<size_t>(codebook)];
+            layer.codebooks[static_cast<size_t>(weight_index)];
         const auto *output_projection = codebook_layer.output_projection.tensor;
         const auto *gating_input = codebook_layer.gating_input.tensor;
         const auto *gating_output = codebook_layer.gating_output.tensor;
@@ -302,10 +316,24 @@ struct guard_depformer_split_projection_layout_supported {
     for (int32_t layer_index = 0; layer_index < lm.depformer_num_layers;
          ++layer_index) {
       for (int32_t codebook = 0; codebook < lm.dep_q; ++codebook) {
+        int32_t weight_index = codebook;
+        if (lm.depformer_weight_schedule_count > 0u) {
+          if (static_cast<uint32_t>(codebook) >=
+              lm.depformer_weight_schedule_count) {
+            supported = false;
+          } else {
+            weight_index =
+                lm.depformer_weight_schedule[static_cast<size_t>(codebook)];
+          }
+        }
+        if (weight_index < 0 || weight_index >= lm.dep_q) {
+          supported = false;
+          continue;
+        }
         const auto *projection =
             ctx.session.contract.lm
                 .depformer_layers[static_cast<size_t>(layer_index)]
-                .codebooks[static_cast<size_t>(codebook)]
+                .codebooks[static_cast<size_t>(weight_index)]
                 .split_input_projection.tensor;
         supported = supported &&
                     detail::tensor_shape(projection, lm.depformer_dim,
@@ -329,10 +357,24 @@ struct guard_depformer_fused_projection_layout_supported {
     for (int32_t layer_index = 0; layer_index < lm.depformer_num_layers;
          ++layer_index) {
       for (int32_t codebook = 0; codebook < lm.dep_q; ++codebook) {
+        int32_t weight_index = codebook;
+        if (lm.depformer_weight_schedule_count > 0u) {
+          if (static_cast<uint32_t>(codebook) >=
+              lm.depformer_weight_schedule_count) {
+            supported = false;
+          } else {
+            weight_index =
+                lm.depformer_weight_schedule[static_cast<size_t>(codebook)];
+          }
+        }
+        if (weight_index < 0 || weight_index >= lm.dep_q) {
+          supported = false;
+          continue;
+        }
         const auto *projection =
             ctx.session.contract.lm
                 .depformer_layers[static_cast<size_t>(layer_index)]
-                .codebooks[static_cast<size_t>(codebook)]
+                .codebooks[static_cast<size_t>(weight_index)]
                 .fused_input_projection.tensor;
         supported = supported &&
                     detail::tensor_shape(projection, lm.depformer_dim,

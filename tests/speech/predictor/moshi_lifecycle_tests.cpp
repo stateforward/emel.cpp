@@ -827,6 +827,54 @@ TEST_CASE(
 
   CHECK(moshi_executor::guard::guard_bound_root_operands_supported{}(runtime_ev,
                                                                      ctx));
+  for (int32_t layer = 0; layer < lm.depformer_num_layers; ++layer) {
+    auto &unused =
+        ctx.session.contract.lm.depformer_layers[static_cast<size_t>(layer)]
+            .codebooks[static_cast<size_t>(lm.dep_q - 1)];
+    unused.output_projection.tensor = nullptr;
+    unused.gating_input.tensor = nullptr;
+    unused.gating_output.tensor = nullptr;
+    unused.split_input_projection.tensor = nullptr;
+    unused.fused_input_projection.tensor = nullptr;
+  }
+  CHECK(moshi_executor::guard::guard_bound_root_operands_supported{}(runtime_ev,
+                                                                     ctx));
+  CHECK_FALSE(
+      moshi_executor::guard::guard_depformer_projection_layout_unsupported{}(
+          runtime_ev, ctx));
+}
+
+TEST_CASE("speech_moshi_predictor_rejects_tokenizer_capture_outside_ready") {
+  auto fixture = load_fixture_or_skip("moshi-tiny-lm.gguf");
+  if (fixture.model == nullptr) {
+    return;
+  }
+  emel::memory::test::recording_kv_actor kv{};
+  emel::memory::hybrid::sm memory{emel::memory::hybrid::bind_kv_actor(kv)};
+  recording_graph_executor graph{};
+  moshi::sm predictor{make_predictor_dependencies(graph, memory)};
+  emel::error::type err = k_no_error;
+  moshi::event::initialize init{*fixture.model};
+  configure_predictor_initialize(init);
+  init.error_out = &err;
+  REQUIRE(predictor.process_event(init));
+  std::array<int32_t, moshi::event::k_max_codebooks> tokens{};
+  moshi::event::predict::workspace workspace{};
+  moshi::event::predict predict{
+      std::span<const int32_t>{
+          tokens.data(), static_cast<size_t>(fixture.model->moshi_lm.n_q + 1)},
+      workspace, 1, 1};
+  predict.error_out = &err;
+  REQUIRE(predictor.process_event(predict));
+  std::array<int32_t,
+             moshi::action::k_max_delay_rows * moshi::event::k_max_codebooks>
+      cache{};
+  int64_t offset = -1;
+  err = k_no_error;
+  CHECK_FALSE(predictor.process_event(moshi::event::capture_tokenizer_state{
+      std::span<int32_t>{cache}, offset, err}));
+  CHECK(err == emel::error::cast(moshi::error::request_shape));
+  CHECK(offset == 0);
 }
 
 TEST_CASE("speech_moshi_generator_accepts_personaplex_voice_without_system_"

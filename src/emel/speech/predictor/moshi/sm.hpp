@@ -607,6 +607,12 @@ template <class graph_actor_type> struct model {
           + sml::event<event::capture_tokenizer_state>
           [ guard::guard_capture_tokenizer_state_invalid{} ]
           / action::effect_reject_capture_tokenizer_state<error::request_shape>{}
+      , sml::state<state_prediction_ready> <= sml::state<state_prediction_ready>
+          + sml::event<event::capture_tokenizer_state>
+          / action::effect_reject_capture_tokenizer_state<error::request_shape>{}
+      , sml::state<state_execution_ready> <= sml::state<state_execution_ready>
+          + sml::event<event::capture_tokenizer_state>
+          / action::effect_reject_capture_tokenizer_state<error::request_shape>{}
 
       //------------------------------------------------------------------------------//
       // Requests before initialization answer with explicit errors.

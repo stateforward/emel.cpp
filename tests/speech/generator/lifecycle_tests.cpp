@@ -795,6 +795,97 @@ TEST_CASE("speech_generator_streams_through_injected_actor_pipeline") {
   CHECK(pcm_out[0] == doctest::Approx(0.25f));
 }
 
+TEST_CASE("speech_generator_rejects_stream_before_initialization") {
+  auto test = std::make_unique<fixture>();
+  std::array<float, 4> pcm_in{};
+  std::array<float, 4> pcm_out{};
+  std::array<int32_t, 2> encoded{};
+  std::array<int32_t, 2> generated{};
+  int32_t text_token = 77;
+  int32_t sample_count = 77;
+  bool produced = true;
+  emel::error::type err = generator::action::error_code(generator::error::none);
+  generator::event::stream_frame request{std::span<const float>{pcm_in},
+                                         std::span<float>{pcm_out},
+                                         std::span<int32_t>{encoded},
+                                         std::span<int32_t>{generated},
+                                         text_token,
+                                         sample_count,
+                                         produced,
+                                         err};
+  CHECK_FALSE(test->machine.process_event(request));
+  CHECK(err == generator::action::error_code(generator::error::internal_error));
+  CHECK(sample_count == 0);
+  CHECK_FALSE(produced);
+}
+
+TEST_CASE("speech_generator_rejects_other_public_requests_outside_lifecycle") {
+  const auto internal_error =
+      generator::action::error_code(generator::error::internal_error);
+
+  SUBCASE("second initialization") {
+    auto test = std::make_unique<fixture>();
+    REQUIRE(test->initialize());
+    emel::error::type err =
+        generator::action::error_code(generator::error::none);
+    CHECK_FALSE(test->machine.process_event(generator::event::initialize{err}));
+    CHECK(err == internal_error);
+  }
+
+  SUBCASE("conditioning before initialization") {
+    auto test = std::make_unique<fixture>();
+    bool complete = true;
+    int32_t remaining = 77;
+    emel::error::type err =
+        generator::action::error_code(generator::error::none);
+    CHECK_FALSE(test->machine.process_event(
+        generator::event::condition{7, complete, remaining, err}));
+    CHECK(err == internal_error);
+    CHECK_FALSE(complete);
+    CHECK(remaining == -1);
+  }
+
+  SUBCASE("generation before initialization") {
+    auto test = std::make_unique<fixture>();
+    std::array<float, 4> pcm_out{};
+    int32_t sample_count = 77;
+    emel::error::type err =
+        generator::action::error_code(generator::error::none);
+    CHECK_FALSE(test->machine.process_event(generator::event::generate{
+        "hello", std::span<float>{pcm_out}, sample_count, err}));
+    CHECK(err == internal_error);
+    CHECK(sample_count == 0);
+  }
+
+  SUBCASE("flush before initialization") {
+    auto test = std::make_unique<fixture>();
+    std::array<float, 4> pcm_out{};
+    std::array<int32_t, 2> encoded{};
+    std::array<int32_t, 2> generated{};
+    int32_t text_token = 77;
+    int32_t sample_count = 77;
+    bool complete = true;
+    emel::error::type err =
+        generator::action::error_code(generator::error::none);
+    CHECK_FALSE(test->machine.process_event(generator::event::flush{
+        std::span<float>{pcm_out}, std::span<int32_t>{encoded},
+        std::span<int32_t>{generated}, text_token, sample_count, complete,
+        err}));
+    CHECK(err == internal_error);
+    CHECK(sample_count == 0);
+    CHECK_FALSE(complete);
+  }
+
+  SUBCASE("reset while conditioning") {
+    auto test = std::make_unique<fixture>();
+    REQUIRE(test->initialize());
+    emel::error::type err =
+        generator::action::error_code(generator::error::none);
+    CHECK_FALSE(test->machine.process_event(generator::event::reset{err}));
+    CHECK(err == internal_error);
+  }
+}
+
 TEST_CASE("speech_generator_reports_frame_planning_failure") {
   auto test = std::make_unique<fixture>(
       4, 2, static_cast<emel::batch::planner::event::plan_mode>(99));

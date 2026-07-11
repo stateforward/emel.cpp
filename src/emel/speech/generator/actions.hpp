@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <cstddef>
 
+#include <stateforward/sml.hpp>
+
 #include "emel/batch/planner/events.hpp"
 #include "emel/error/error.hpp"
 #include "emel/memory/streaming/errors.hpp"
@@ -712,9 +714,58 @@ struct effect_reject_reset {
 };
 
 template <class dependencies_type> struct effect_unexpected {
+  static void
+  effect_reject_origin(const event::initialize_run &runtime_ev,
+                       const context<dependencies_type> &ctx) noexcept {
+    effect_fail_initialize<dependencies_type, error::internal_error>{}(
+        runtime_ev, ctx);
+  }
+
+  static void
+  effect_reject_origin(const event::condition_run &runtime_ev,
+                       const context<dependencies_type> &ctx) noexcept {
+    effect_fail_condition<dependencies_type, error::internal_error>{}(
+        runtime_ev, ctx);
+  }
+
+  static void
+  effect_reject_origin(const event::generate_run &runtime_ev,
+                       const context<dependencies_type> &ctx) noexcept {
+    effect_fail_generate<dependencies_type, error::internal_error>{}(runtime_ev,
+                                                                     ctx);
+  }
+
+  static void
+  effect_reject_origin(const event::stream_frame_run &runtime_ev,
+                       const context<dependencies_type> &ctx) noexcept {
+    effect_fail_stream_frame<dependencies_type, error::internal_error>{}(
+        runtime_ev, ctx);
+  }
+
+  static void
+  effect_reject_origin(const event::flush_run &runtime_ev,
+                       const context<dependencies_type> &ctx) noexcept {
+    effect_fail_flush<dependencies_type, error::internal_error>{}(runtime_ev,
+                                                                  ctx);
+  }
+
+  static void
+  effect_reject_origin(const event::reset &ev,
+                       const context<dependencies_type> &ctx) noexcept {
+    effect_reject_reset<dependencies_type, error::internal_error>{}(ev, ctx);
+  }
+
   template <class event_type>
-  void operator()(const event_type &,
-                  const context<dependencies_type> &) const noexcept {}
+  static void
+  effect_reject_origin(const event_type &,
+                       const context<dependencies_type> &) noexcept {}
+
+  template <class unexpected_type>
+  void operator()(const unexpected_type &unexpected,
+                  const context<dependencies_type> &ctx) const noexcept {
+    effect_reject_origin(stateforward::sml::back::get_origin_event(unexpected),
+                         ctx);
+  }
 };
 
 } // namespace emel::speech::generator::action
