@@ -11,27 +11,9 @@
 
 namespace emel::speech::predictor::moshi::executor::action {
 
-using temporal_kv_bind_fn = bool(void *, const emel::model::data &,
-                                 const emel::memory::view::snapshot &, int32_t,
-                                 detail::temporal_kv_view &);
-
-using depformer_kv_bind_fn = bool(void *, const emel::model::data &,
-                                  const emel::memory::view::snapshot &, int32_t,
-                                  detail::depformer_kv_view &);
-
-struct temporal_kv_binding {
-  void *cache = nullptr;
-  temporal_kv_bind_fn *bind = nullptr;
-};
-
-struct depformer_kv_binding {
-  void *cache = nullptr;
-  depformer_kv_bind_fn *bind = nullptr;
-};
-
-struct kv_bindings {
-  temporal_kv_binding temporal = {};
-  depformer_kv_binding depformer = {};
+struct kv_views {
+  detail::temporal_kv_view temporal = {};
+  detail::depformer_kv_view depformer = {};
   emel::memory::streaming::sm *temporal_positions = nullptr;
   emel::memory::streaming::sm *depformer_positions = nullptr;
 };
@@ -50,7 +32,7 @@ struct capacities {
 };
 
 struct dependencies {
-  kv_bindings kv = {};
+  kv_views kv = {};
   emel::kernel::sm &kernel;
   policies policy = {};
   capacities capacity = {};
@@ -85,42 +67,13 @@ struct context {
 
   runtime session = {};
   sampling_config sampling = {};
-  temporal_kv_binding temporal_kv = {};
-  depformer_kv_binding depformer_kv = {};
+  const detail::temporal_kv_view temporal_kv;
+  const detail::depformer_kv_view depformer_kv;
   emel::memory::streaming::sm *temporal_positions = nullptr;
   emel::memory::streaming::sm *depformer_positions = nullptr;
   emel::kernel::sm &kernel;
   const policies policy;
   const capacities capacity;
 };
-
-inline temporal_kv_binding
-bind_temporal_kv_cache(void *cache, temporal_kv_bind_fn &bind) noexcept {
-  return temporal_kv_binding{.cache = cache, .bind = &bind};
-}
-
-inline depformer_kv_binding
-bind_depformer_kv_cache(void *cache, depformer_kv_bind_fn &bind) noexcept {
-  return depformer_kv_binding{.cache = cache, .bind = &bind};
-}
-
-inline kv_bindings
-bind_kv_caches(const temporal_kv_binding &temporal,
-               const depformer_kv_binding &depformer) noexcept {
-  return kv_bindings{.temporal = temporal, .depformer = depformer};
-}
-
-inline kv_bindings
-bind_kv_caches(const temporal_kv_binding &temporal,
-               const depformer_kv_binding &depformer,
-               emel::memory::streaming::sm &temporal_positions,
-               emel::memory::streaming::sm &depformer_positions) noexcept {
-  return kv_bindings{
-      .temporal = temporal,
-      .depformer = depformer,
-      .temporal_positions = &temporal_positions,
-      .depformer_positions = &depformer_positions,
-  };
-}
 
 } // namespace emel::speech::predictor::moshi::executor::action

@@ -72,24 +72,10 @@ struct streaming_cache {
   std::vector<size_t> layer_offsets = {};
 };
 
-struct cache_binding {
+struct cache_views {
   runtime::detail::temporal_kv_view temporal = {};
   runtime::detail::depformer_kv_view secondary = {};
 };
-
-bool bind_temporal_cache(void *binding_ptr, const emel::model::data &,
-                         const emel::memory::view::snapshot &, int32_t,
-                         runtime::detail::temporal_kv_view &view) noexcept {
-  view = static_cast<cache_binding *>(binding_ptr)->temporal;
-  return true;
-}
-
-bool bind_secondary_cache(void *binding_ptr, const emel::model::data &,
-                          const emel::memory::view::snapshot &, int32_t,
-                          runtime::detail::depformer_kv_view &view) noexcept {
-  view = static_cast<cache_binding *>(binding_ptr)->secondary;
-  return true;
-}
 
 struct personaplex_dependencies {
   using generator_mode = generator::action::mode::duplex;
@@ -508,7 +494,7 @@ int main(int argc, char **argv) {
   emel::memory::streaming::sm secondary_positions{
       emel::memory::streaming::dependencies{
           .capacity = lm_model.model->moshi_lm.depformer_context}};
-  cache_binding cache_views{
+  cache_views cache_view_set{
       .temporal =
           {
               .key_cache = std::span<uint16_t>{temporal_cache.key_cache},
@@ -532,29 +518,34 @@ int main(int argc, char **argv) {
   };
   emel::kernel::sm prediction_kernel{};
   runtime::sm prediction_runtime{runtime::dependencies{
-      .kv = runtime::bind_kv_caches(
-          runtime::bind_temporal_kv_cache(&cache_views, bind_temporal_cache),
-          runtime::bind_depformer_kv_cache(&cache_views, bind_secondary_cache),
-          temporal_positions, secondary_positions),
+      .kv =
+          runtime::kv_views{
+              .temporal = cache_view_set.temporal,
+              .depformer = cache_view_set.secondary,
+              .temporal_positions = &temporal_positions,
+              .depformer_positions = &secondary_positions,
+          },
       .kernel = prediction_kernel,
-      .policy = runtime::action::policies{
-          .rms_norm_epsilon = 1.0e-8f,
-          .zero_seed_state = 123459876u,
-      },
-      .capacity = runtime::action::capacities{
-          .hidden_dim = static_cast<uint64_t>(std::max(
-              lm_model.model->moshi_lm.dim,
-              lm_model.model->moshi_lm.depformer_dim)),
-          .temporal_context =
-              static_cast<uint64_t>(lm_model.model->moshi_lm.context),
-          .depformer_context = static_cast<uint64_t>(
-              lm_model.model->moshi_lm.depformer_context),
-          .sampling_card = static_cast<uint64_t>(std::max(
-              lm_model.model->moshi_lm.text_card,
-              lm_model.model->moshi_lm.card)),
-          .sampling_top_k = static_cast<uint64_t>(
-              std::max(config.audio_top_k, config.text_top_k)),
-      },
+      .policy =
+          runtime::action::policies{
+              .rms_norm_epsilon = 1.0e-8f,
+              .zero_seed_state = 123459876u,
+          },
+      .capacity =
+          runtime::action::capacities{
+              .hidden_dim = static_cast<uint64_t>(
+                  std::max(lm_model.model->moshi_lm.dim,
+                           lm_model.model->moshi_lm.depformer_dim)),
+              .temporal_context =
+                  static_cast<uint64_t>(lm_model.model->moshi_lm.context),
+              .depformer_context = static_cast<uint64_t>(
+                  lm_model.model->moshi_lm.depformer_context),
+              .sampling_card = static_cast<uint64_t>(
+                  std::max(lm_model.model->moshi_lm.text_card,
+                           lm_model.model->moshi_lm.card)),
+              .sampling_top_k = static_cast<uint64_t>(
+                  std::max(config.audio_top_k, config.text_top_k)),
+          },
   }};
   predictor::sm token_predictor{predictor::action::dependencies{
       .kv_cache = emel::memory::hybrid::kv_binding{},

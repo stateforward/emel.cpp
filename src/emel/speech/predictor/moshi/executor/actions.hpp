@@ -1032,11 +1032,8 @@ struct effect_publish_forced_text_token {
 struct effect_bind_depformer_kv {
   void operator()(const event::step_run &runtime_ev,
                   context &ctx) const noexcept {
-    runtime_ev.ctx.depformer_kv = {};
-    runtime_ev.ctx.depformer_kv_bound = ctx.depformer_kv.bind(
-        ctx.depformer_kv.cache, runtime_ev.request.model,
-        runtime_ev.request.memory_snapshot, runtime_ev.request.sequence_id,
-        runtime_ev.ctx.depformer_kv);
+    runtime_ev.ctx.depformer_kv = ctx.depformer_kv;
+    runtime_ev.ctx.depformer_kv_bound = true;
   }
 };
 
@@ -1825,11 +1822,8 @@ struct effect_advance_depformer_codebook {
 struct effect_bind_temporal_kv {
   void operator()(const event::step_run &runtime_ev,
                   context &ctx) const noexcept {
-    runtime_ev.ctx.temporal_kv = {};
-    runtime_ev.ctx.temporal_kv_bound = ctx.temporal_kv.bind(
-        ctx.temporal_kv.cache, runtime_ev.request.model,
-        runtime_ev.request.memory_snapshot, runtime_ev.request.sequence_id,
-        runtime_ev.ctx.temporal_kv);
+    runtime_ev.ctx.temporal_kv = ctx.temporal_kv;
+    runtime_ev.ctx.temporal_kv_bound = true;
   }
 };
 

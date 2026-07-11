@@ -337,8 +337,10 @@ struct guard_temporal_kv_binding_present {
   bool operator()(const event::step_run &runtime_ev,
                   const action::context &ctx) const noexcept {
     (void)runtime_ev;
-    return ctx.temporal_kv.cache != nullptr &&
-           ctx.temporal_kv.bind != nullptr && ctx.temporal_positions != nullptr;
+    return !ctx.temporal_kv.key_cache.empty() &&
+           !ctx.temporal_kv.value_cache.empty() &&
+           !ctx.temporal_kv.layer_cache_offsets.empty() &&
+           ctx.temporal_positions != nullptr;
   }
 };
 
@@ -1130,8 +1132,9 @@ struct guard_depformer_kv_binding_present {
   bool operator()(const event::step_run &runtime_ev,
                   const action::context &ctx) const noexcept {
     (void)runtime_ev;
-    return ctx.depformer_kv.cache != nullptr &&
-           ctx.depformer_kv.bind != nullptr &&
+    return !ctx.depformer_kv.key_cache.empty() &&
+           !ctx.depformer_kv.value_cache.empty() &&
+           !ctx.depformer_kv.layer_cache_offsets.empty() &&
            ctx.depformer_positions != nullptr;
   }
 };

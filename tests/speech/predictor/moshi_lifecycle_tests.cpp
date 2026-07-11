@@ -29,9 +29,9 @@ using emel::speech::predictor::moshi::test::repo_root;
 inline constexpr emel::error::type k_no_error =
     emel::error::cast(moshi::error::none);
 
-moshi_executor::dependencies make_executor_dependencies(
-    emel::kernel::sm &kernel,
-    const moshi_executor::kv_bindings &kv = {}) noexcept {
+moshi_executor::dependencies
+make_executor_dependencies(emel::kernel::sm &kernel,
+                           const moshi_executor::kv_views &kv = {}) noexcept {
   return moshi_executor::dependencies{
       .kv = kv,
       .kernel = kernel,
@@ -316,6 +316,27 @@ bool depformer_kv_probe_bind(void *cache_ptr, const emel::model::data &model,
   view.position_capacity = position_capacity;
   view.kv_dim = kv_dim;
   return true;
+}
+
+moshi_executor::kv_views
+prepare_kv_views(const emel::model::data &model, temporal_kv_probe *temporal,
+                 depformer_kv_probe *depformer,
+                 memory_streaming::sm *temporal_positions = nullptr,
+                 memory_streaming::sm *depformer_positions = nullptr) {
+  moshi_executor::kv_views views{
+      .temporal_positions = temporal_positions,
+      .depformer_positions = depformer_positions,
+  };
+  emel::memory::view::snapshot snapshot{};
+  if (temporal != nullptr) {
+    REQUIRE(
+        temporal_kv_probe_bind(temporal, model, snapshot, 0, views.temporal));
+  }
+  if (depformer != nullptr) {
+    REQUIRE(depformer_kv_probe_bind(depformer, model, snapshot, 0,
+                                    views.depformer));
+  }
+  return views;
 }
 
 void initialize_streaming_position(memory_streaming::sm &position) {
@@ -1630,13 +1651,10 @@ TEST_CASE(
   memory_streaming::sm temporal_positions{memory_streaming::dependencies{
       .capacity = fixture.model->moshi_lm.context}};
   initialize_streaming_position(temporal_positions);
-  moshi_executor::action::kv_bindings bindings{
-      .temporal = moshi_executor::bind_temporal_kv_cache(
-          &probe, temporal_kv_probe_bind),
-      .temporal_positions = &temporal_positions,
-  };
+  const auto views =
+      prepare_kv_views(*fixture.model, &probe, nullptr, &temporal_positions);
   emel::kernel::sm kernel{};
-  moshi_executor::sm executor{make_executor_dependencies(kernel, bindings)};
+  moshi_executor::sm executor{make_executor_dependencies(kernel, views)};
   emel::error::type err = emel::error::cast(moshi_executor::error::none);
   moshi_executor::event::initialize init{*fixture.model};
   init.error_out = &err;
@@ -1669,8 +1687,6 @@ TEST_CASE(
   CHECK(err ==
         emel::error::cast(moshi_executor::error::graph_execution_unsupported));
   CHECK(probe.call_count == 1);
-  CHECK(probe.sequence_id == 7);
-  CHECK(probe.sequence_length == 3);
   const size_t write_offset = 0;
   const size_t write_end =
       write_offset + static_cast<size_t>(fixture.model->moshi_lm.dim);
@@ -1713,10 +1729,6 @@ TEST_CASE("speech_moshi_executor_accepts_personaplex_voice_embedding_step") {
 
   temporal_kv_probe temporal_probe{};
   depformer_kv_probe depformer_probe{};
-  const auto temporal_kv = moshi_executor::bind_temporal_kv_cache(
-      &temporal_probe, temporal_kv_probe_bind);
-  const auto depformer_kv = moshi_executor::bind_depformer_kv_cache(
-      &depformer_probe, depformer_kv_probe_bind);
   memory_streaming::sm temporal_positions{memory_streaming::dependencies{
       .capacity = fixture.model->moshi_lm.context}};
   memory_streaming::sm depformer_positions{memory_streaming::dependencies{
@@ -1724,9 +1736,10 @@ TEST_CASE("speech_moshi_executor_accepts_personaplex_voice_embedding_step") {
   initialize_streaming_position(temporal_positions);
   initialize_streaming_position(depformer_positions);
   emel::kernel::sm kernel{};
-  const auto bindings = moshi_executor::bind_kv_caches(
-      temporal_kv, depformer_kv, temporal_positions, depformer_positions);
-  moshi_executor::sm executor{make_executor_dependencies(kernel, bindings)};
+  const auto views =
+      prepare_kv_views(*fixture.model, &temporal_probe, &depformer_probe,
+                       &temporal_positions, &depformer_positions);
+  moshi_executor::sm executor{make_executor_dependencies(kernel, views)};
   emel::error::type err = emel::error::cast(moshi_executor::error::none);
   moshi_executor::event::initialize init{*fixture.model};
   init.error_out = &err;
@@ -1781,10 +1794,6 @@ TEST_CASE("speech_moshi_executor_generates_audio_tokens_with_injected_kv") {
 
   temporal_kv_probe temporal_probe{};
   depformer_kv_probe depformer_probe{};
-  const auto temporal_kv = moshi_executor::bind_temporal_kv_cache(
-      &temporal_probe, temporal_kv_probe_bind);
-  const auto depformer_kv = moshi_executor::bind_depformer_kv_cache(
-      &depformer_probe, depformer_kv_probe_bind);
   memory_streaming::sm temporal_positions{memory_streaming::dependencies{
       .capacity = fixture.model->moshi_lm.context}};
   memory_streaming::sm depformer_positions{memory_streaming::dependencies{
@@ -1792,9 +1801,10 @@ TEST_CASE("speech_moshi_executor_generates_audio_tokens_with_injected_kv") {
   initialize_streaming_position(temporal_positions);
   initialize_streaming_position(depformer_positions);
   emel::kernel::sm kernel{};
-  const auto bindings = moshi_executor::bind_kv_caches(
-      temporal_kv, depformer_kv, temporal_positions, depformer_positions);
-  moshi_executor::sm executor{make_executor_dependencies(kernel, bindings)};
+  const auto views =
+      prepare_kv_views(*fixture.model, &temporal_probe, &depformer_probe,
+                       &temporal_positions, &depformer_positions);
+  moshi_executor::sm executor{make_executor_dependencies(kernel, views)};
   emel::error::type err = emel::error::cast(moshi_executor::error::none);
   moshi_executor::event::initialize init{*fixture.model};
   init.error_out = &err;
@@ -1887,22 +1897,16 @@ TEST_CASE("speech_moshi_executor_sampling_rng_is_actor_owned") {
   initialize_streaming_position(second_depformer_positions);
   emel::kernel::sm first_kernel{};
   emel::kernel::sm second_kernel{};
-  const auto first_bindings = moshi_executor::bind_kv_caches(
-      moshi_executor::bind_temporal_kv_cache(&first_temporal,
-                                             temporal_kv_probe_bind),
-      moshi_executor::bind_depformer_kv_cache(&first_depformer,
-                                              depformer_kv_probe_bind),
-      first_temporal_positions, first_depformer_positions);
-  const auto second_bindings = moshi_executor::bind_kv_caches(
-      moshi_executor::bind_temporal_kv_cache(&second_temporal,
-                                             temporal_kv_probe_bind),
-      moshi_executor::bind_depformer_kv_cache(&second_depformer,
-                                              depformer_kv_probe_bind),
-      second_temporal_positions, second_depformer_positions);
+  const auto first_views =
+      prepare_kv_views(*first_fixture.model, &first_temporal, &first_depformer,
+                       &first_temporal_positions, &first_depformer_positions);
+  const auto second_views = prepare_kv_views(
+      *second_fixture.model, &second_temporal, &second_depformer,
+      &second_temporal_positions, &second_depformer_positions);
   moshi_executor::sm first{
-      make_executor_dependencies(first_kernel, first_bindings)};
+      make_executor_dependencies(first_kernel, first_views)};
   moshi_executor::sm second{
-      make_executor_dependencies(second_kernel, second_bindings)};
+      make_executor_dependencies(second_kernel, second_views)};
   emel::error::type first_err = emel::error::cast(moshi_executor::error::none);
   emel::error::type second_err = emel::error::cast(moshi_executor::error::none);
   moshi_executor::event::initialize first_init{*first_fixture.model};

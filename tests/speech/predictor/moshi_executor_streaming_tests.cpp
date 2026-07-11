@@ -38,32 +38,6 @@ struct cache_storage {
   std::vector<size_t> offsets;
 };
 
-bool bind_temporal_cache(void *storage_ptr, const emel::model::data &model,
-                         const emel::memory::view::snapshot &, int32_t,
-                         executor::detail::temporal_kv_view &view) noexcept {
-  auto &storage = *static_cast<cache_storage *>(storage_ptr);
-  view.key_cache = storage.key;
-  view.value_cache = storage.value;
-  view.layer_cache_offsets = storage.offsets;
-  view.layer_count = model.moshi_lm.num_layers;
-  view.position_capacity = model.moshi_lm.context;
-  view.kv_dim = model.moshi_lm.dim;
-  return true;
-}
-
-bool bind_depformer_cache(void *storage_ptr, const emel::model::data &model,
-                          const emel::memory::view::snapshot &, int32_t,
-                          executor::detail::depformer_kv_view &view) noexcept {
-  auto &storage = *static_cast<cache_storage *>(storage_ptr);
-  view.key_cache = storage.key;
-  view.value_cache = storage.value;
-  view.layer_cache_offsets = storage.offsets;
-  view.layer_count = model.moshi_lm.depformer_num_layers;
-  view.position_capacity = model.moshi_lm.depformer_context;
-  view.kv_dim = model.moshi_lm.depformer_dim;
-  return true;
-}
-
 memory_streaming::window_view capture(memory_streaming::sm &machine) {
   memory_streaming::window_view view = {};
   int32_t err =
@@ -103,27 +77,48 @@ TEST_CASE(
   REQUIRE(memory_err == static_cast<int32_t>(
                             emel::error::cast(memory_streaming::error::none)));
 
-  const auto temporal_binding =
-      executor::bind_temporal_kv_cache(&temporal_cache, bind_temporal_cache);
-  const auto depformer_binding =
-      executor::bind_depformer_kv_cache(&depformer_cache, bind_depformer_cache);
   emel::kernel::sm kernel{};
-  executor::sm machine{executor::dependencies{
-      .kv = executor::bind_kv_caches(temporal_binding, depformer_binding,
-                                     temporal_positions, depformer_positions),
-      .kernel = kernel,
-      .policy = executor::action::policies{
-          .rms_norm_epsilon = 1.0e-8f,
-          .zero_seed_state = 123459876u,
-      },
-      .capacity = executor::action::capacities{
-          .hidden_dim = executor::detail::k_max_hidden_dim,
-          .temporal_context = executor::detail::k_max_temporal_context,
-          .depformer_context = executor::detail::k_max_depformer_context,
-          .sampling_card = executor::detail::k_max_sampling_card,
-          .sampling_top_k = executor::detail::k_max_sampling_top_k,
-      },
-  }};
+  executor::sm machine{
+      executor::dependencies{
+          .kv =
+              executor::kv_views{
+                  .temporal =
+                      executor::detail::temporal_kv_view{
+                          .key_cache = temporal_cache.key,
+                          .value_cache = temporal_cache.value,
+                          .layer_cache_offsets = temporal_cache.offsets,
+                          .layer_count = lm.num_layers,
+                          .position_capacity = lm.context,
+                          .kv_dim = lm.dim,
+                      },
+                  .depformer =
+                      executor::detail::depformer_kv_view{
+                          .key_cache = depformer_cache.key,
+                          .value_cache = depformer_cache.value,
+                          .layer_cache_offsets = depformer_cache.offsets,
+                          .layer_count = lm.depformer_num_layers,
+                          .position_capacity = lm.depformer_context,
+                          .kv_dim = lm.depformer_dim,
+                      },
+                  .temporal_positions = &temporal_positions,
+                  .depformer_positions = &depformer_positions,
+              },
+          .kernel = kernel,
+          .policy =
+              executor::action::policies{
+                  .rms_norm_epsilon = 1.0e-8f,
+                  .zero_seed_state = 123459876u,
+              },
+          .capacity =
+              executor::action::capacities{
+                  .hidden_dim = executor::detail::k_max_hidden_dim,
+                  .temporal_context = executor::detail::k_max_temporal_context,
+                  .depformer_context =
+                      executor::detail::k_max_depformer_context,
+                  .sampling_card = executor::detail::k_max_sampling_card,
+                  .sampling_top_k = executor::detail::k_max_sampling_top_k,
+              },
+      }};
 
   emel::error::type err = emel::error::cast(executor::error::none);
   executor::event::initialize initialize{*fixture.model};
