@@ -81,15 +81,18 @@ struct fake_execute {
 
 struct fake_sample {
   fake_sample(fake_prediction_workspace &workspace_ref,
+              std::span<const int32_t> tokens_ref,
               std::span<int32_t> tokens_out_ref,
               int32_t &text_token_out_ref) noexcept
-      : workspace(workspace_ref), tokens_out(tokens_out_ref),
-        text_token_out(text_token_out_ref) {}
+      : workspace(workspace_ref), tokens(tokens_ref),
+        tokens_out(tokens_out_ref), text_token_out(text_token_out_ref) {}
 
   fake_prediction_workspace &workspace;
+  std::span<const int32_t> tokens;
   std::span<int32_t> tokens_out;
   int32_t &text_token_out;
   emel::error::type *error_out = nullptr;
+  emel::error::type *graph_error_out = nullptr;
 };
 
 struct fake_tokenizer_initialize {
@@ -304,6 +307,7 @@ struct fake_predictor_actor {
     request.tokens_out[1] = 112;
     request.text_token_out = 42;
     *request.error_out = sample_error;
+    *request.graph_error_out = 0;
     return sample_accepted;
   }
 

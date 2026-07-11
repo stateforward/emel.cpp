@@ -99,8 +99,13 @@ struct state_execute_error_out_decision {};
 struct state_execute_failed_error_out_decision {};
 struct state_execution_ready {};
 struct state_sample_request_decision {};
+struct state_sample_begin {};
+struct state_sample_running_graph {};
+struct state_sample_graph_error_out_decision {};
+struct state_sample_graph_result_decision {};
 struct state_sample_error_out_decision {};
 struct state_sample_failed_error_out_decision {};
+struct state_sample_graph_failed_error_out_decision {};
 struct state_uninit_voice_error_out_decision {};
 struct state_uninit_voice_callback_decision {};
 struct state_uninit_prefill_voice_error_out_decision {};
@@ -546,13 +551,31 @@ template <class graph_actor_type> struct model {
       // Sample publication is a distinct typed request after graph execution.
       , sml::state<state_sample_request_decision> <= sml::state<state_execution_ready>
           + sml::event<sample_run>
-      , sml::state<state_sample_error_out_decision> <=
+      , sml::state<state_sample_begin> <=
           sml::state<state_sample_request_decision> + sml::completion<sample_run>
-          [ guard::guard_sample_request_valid{} ] / action::effect_publish_sample{}
+          [ guard::guard_sample_request_valid{} ] / action::effect_begin_sample{}
       , sml::state<state_sample_failed_error_out_decision> <=
           sml::state<state_sample_request_decision> + sml::completion<sample_run>
           [ guard::guard_sample_request_invalid{} ]
           / action::effect_mark_step_request_invalid{}
+      , sml::state<state_sample_running_graph> <= sml::state<state_sample_begin>
+          + sml::completion<sample_run>
+          / action::effect_run_sampling_graph<graph_actor_type>{}
+      , sml::state<state_sample_graph_error_out_decision> <=
+          sml::state<state_sample_running_graph> + sml::completion<sample_run>
+      , sml::state<state_sample_graph_result_decision> <=
+          sml::state<state_sample_graph_error_out_decision> + sml::completion<sample_run>
+          [ guard::guard_has_graph_error_out{} ] / action::effect_store_sample_graph_error_out{}
+      , sml::state<state_sample_graph_result_decision> <=
+          sml::state<state_sample_graph_error_out_decision> + sml::completion<sample_run>
+          [ guard::guard_no_graph_error_out{} ]
+      , sml::state<state_sample_error_out_decision> <=
+          sml::state<state_sample_graph_result_decision> + sml::completion<sample_run>
+          [ guard::guard_graph_step_accepted{} ] / action::effect_publish_sample{}
+      , sml::state<state_sample_graph_failed_error_out_decision> <=
+          sml::state<state_sample_graph_result_decision> + sml::completion<sample_run>
+          [ guard::guard_graph_step_rejected{} ]
+          / action::effect_mark_graph_runtime_error<sample_run>{}
       , sml::state<state_session_ready> <= sml::state<state_sample_error_out_decision>
           + sml::completion<sample_run> [ guard::guard_has_error_out<sample_run>{} ]
           / action::effect_store_error_out<sample_run>{}
@@ -562,6 +585,13 @@ template <class graph_actor_type> struct model {
           + sml::completion<sample_run> [ guard::guard_has_error_out<sample_run>{} ]
           / action::effect_store_error_out<sample_run>{}
       , sml::state<state_execution_ready> <= sml::state<state_sample_failed_error_out_decision>
+          + sml::completion<sample_run> [ guard::guard_no_error_out<sample_run>{} ]
+      , sml::state<state_session_ready> <=
+          sml::state<state_sample_graph_failed_error_out_decision>
+          + sml::completion<sample_run> [ guard::guard_has_error_out<sample_run>{} ]
+          / action::effect_store_error_out<sample_run>{}
+      , sml::state<state_session_ready> <=
+          sml::state<state_sample_graph_failed_error_out_decision>
           + sml::completion<sample_run> [ guard::guard_no_error_out<sample_run>{} ]
 
       // Predictor-owned prompt cache handoff into the injected tokenizer.

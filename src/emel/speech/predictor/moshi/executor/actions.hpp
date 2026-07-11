@@ -974,6 +974,37 @@ struct effect_publish_temporal_out_norm {
   }
 };
 
+struct effect_publish_prediction_state {
+  void operator()(const event::step_run &runtime_ev,
+                  context &ctx) const noexcept {
+    std::copy_n(runtime_ev.ctx.normalized.data(),
+                static_cast<size_t>(ctx.session.hidden_dim),
+                runtime_ev.request.temporal_state.begin());
+  }
+};
+
+struct effect_restore_prediction_state_and_bind_text_logits {
+  void operator()(const event::step_run &runtime_ev,
+                  context &ctx) const noexcept {
+    const int32_t hidden_dim = ctx.session.hidden_dim;
+    std::copy_n(runtime_ev.request.temporal_state.begin(),
+                static_cast<size_t>(hidden_dim),
+                runtime_ev.ctx.normalized.data());
+    std::copy_n(runtime_ev.request.temporal_state.begin(),
+                static_cast<size_t>(hidden_dim),
+                runtime_ev.ctx.transformer_out.data());
+    const auto *text_linear =
+        ctx.session.contract.lm.text_output_projection.tensor;
+    runtime_ev.ctx.text_logits_ok = false;
+    runtime_ev.ctx.projection_view_bound = false;
+    runtime_ev.ctx.projection_view = {};
+    runtime_ev.ctx.best_index = -1;
+    runtime_ev.ctx.best_score = 0.0f;
+    runtime_ev.ctx.projection_view_bound =
+        detail::bind_tensor_view(*text_linear, runtime_ev.ctx.projection_view);
+  }
+};
+
 struct effect_bind_text_token_logits {
   void operator()(const event::step_run &runtime_ev,
                   context &ctx) const noexcept {

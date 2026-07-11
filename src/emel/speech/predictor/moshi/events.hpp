@@ -107,6 +107,7 @@ struct prefill_personaplex_prompt {
 struct predict {
   struct workspace {
     emel::memory::view::snapshot memory = {};
+    std::span<float> temporal_state = {};
     std::array<int32_t, k_max_codebooks> sampled_audio_tokens = {};
     int32_t sampled_text_token = -1;
   };
@@ -138,16 +139,19 @@ struct execute {
 
 struct sample {
   sample(predict::workspace &workspace_ref,
+         std::span<const int32_t> model_tokens_ref,
          std::span<int32_t> audio_tokens_out_ref,
          int32_t &text_token_out_ref) noexcept
-      : prediction_workspace(workspace_ref),
+      : prediction_workspace(workspace_ref), model_tokens(model_tokens_ref),
         audio_tokens_out(audio_tokens_out_ref),
         text_token_out(text_token_out_ref) {}
 
   predict::workspace &prediction_workspace;
+  std::span<const int32_t> model_tokens = {};
   std::span<int32_t> audio_tokens_out = {};
   int32_t &text_token_out;
   emel::error::type *error_out = nullptr;
+  emel::error::type *graph_error_out = nullptr;
 };
 
 struct capture_tokenizer_state {
@@ -164,6 +168,12 @@ struct capture_tokenizer_state {
 
 struct reset {};
 
+enum class graph_phase : uint8_t {
+  full,
+  prediction,
+  sampling,
+};
+
 struct graph_step {
   graph_step(const emel::model::data &model_ref,
              const emel::memory::view::snapshot &memory_snapshot_ref,
@@ -178,8 +188,10 @@ struct graph_step {
   const emel::model::data &model;
   const emel::memory::view::snapshot &memory_snapshot;
   int32_t sequence_id = 0;
+  graph_phase phase = graph_phase::full;
   std::span<const int32_t> input_sequence = {};
   std::span<const float> input_embedding = {};
+  std::span<float> temporal_state = {};
   int32_t forced_text_token = -1;
   std::span<int32_t> audio_tokens_out = {};
   int32_t &text_token_out;
@@ -264,6 +276,8 @@ struct execute_ctx {
 
 struct sample_ctx {
   emel::error::type err = emel::error::cast(error::none);
+  bool graph_accepted = false;
+  emel::error::type graph_error = emel::error::cast(error::none);
 };
 
 struct initialize_run {

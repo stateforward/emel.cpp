@@ -570,7 +570,11 @@ int main(int argc, char **argv) {
               .prediction_output_count = 1,
           },
   }};
+  std::vector<float> prediction_temporal_state(
+      static_cast<size_t>(lm_model.model->moshi_lm.dim));
   predictor::event::predict::workspace prediction_workspace{};
+  prediction_workspace.temporal_state =
+      std::span<float>{prediction_temporal_state};
   tokenizer::sm token_delay{tokenizer::dependencies{
       .delays = std::span<const int32_t>{delay_begin, delay_end},
       .cache = std::span<int32_t>{tokenizer_storage},

@@ -548,8 +548,10 @@ struct effect_sample_frame {
               ctx.collaborators.predicted_codes.end(), -1);
     typename dependencies_type::sample_event request{
         ctx.collaborators.prediction_workspace,
+        std::span<const int32_t>{ctx.collaborators.model_codes},
         ctx.collaborators.predicted_codes, runtime_ev.ctx.predicted_text_token};
     request.error_out = &runtime_ev.ctx.child_err;
+    request.graph_error_out = &runtime_ev.ctx.graph_err;
     runtime_ev.ctx.child_accepted =
         ctx.collaborators.sampler.process_event(request);
   }

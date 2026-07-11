@@ -128,6 +128,7 @@ TEST_CASE(
 
   std::array<int32_t, moshi::event::k_max_codebooks> input = {};
   std::array<int32_t, moshi::event::k_max_codebooks> output = {};
+  std::vector<float> temporal_state(static_cast<size_t>(lm.dim));
   input.fill(-1);
   input[0] = lm.text_padding_id;
   emel::memory::view::snapshot unused_snapshot = {};
@@ -138,12 +139,23 @@ TEST_CASE(
       std::span<int32_t>{output.data(), static_cast<size_t>(lm.dep_q)},
       text_token};
   step.error_out = &err;
+  step.temporal_state = temporal_state;
+  step.phase = moshi::event::graph_phase::prediction;
 
   REQUIRE(machine.process_event(step));
   CHECK(capture(temporal_positions).logical_end == 1);
-  CHECK(capture(depformer_positions).logical_end == lm.dep_q);
+  CHECK(capture(depformer_positions).logical_end == 0);
+  CHECK(machine.is(stateforward::sml::state<executor::state_sampling_ready>));
 
+  step.phase = moshi::event::graph_phase::sampling;
+  REQUIRE(machine.process_event(step));
+  CHECK(capture(depformer_positions).logical_end == lm.dep_q);
+  CHECK(machine.is(stateforward::sml::state<executor::state_ready>));
+
+  step.phase = moshi::event::graph_phase::prediction;
   REQUIRE(machine.process_event(step));
   CHECK(capture(temporal_positions).logical_end == 2);
+  step.phase = moshi::event::graph_phase::sampling;
+  REQUIRE(machine.process_event(step));
   CHECK(capture(depformer_positions).logical_end == lm.dep_q);
 }

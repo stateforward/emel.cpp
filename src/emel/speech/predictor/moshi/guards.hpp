@@ -194,6 +194,8 @@ struct guard_sample_request_valid {
   bool operator()(const event::sample_run &runtime_ev,
                   const action::context &ctx) const noexcept {
     return ctx.session.model != nullptr &&
+           runtime_ev.request.model_tokens.size() ==
+               static_cast<size_t>(ctx.lmgen.codebook_count) &&
            runtime_ev.request.audio_tokens_out.size() >=
                static_cast<size_t>(ctx.lmgen.generated_dep_q);
   }

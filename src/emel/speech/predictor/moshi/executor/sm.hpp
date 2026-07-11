@@ -92,6 +92,8 @@ struct state_temporal_out_norm {};
 struct state_temporal_out_norm_rms_result_decision {};
 struct state_temporal_out_norm_scale {};
 struct state_temporal_out_norm_result_decision {};
+struct state_text_logits_phase_decision {};
+struct state_sampling_ready {};
 struct state_text_logits {};
 struct state_text_logits_bind_result_decision {};
 struct state_text_logits_run {};
@@ -600,12 +602,25 @@ struct model {
       , sml::state<state_step_error_out_decision> <= sml::state<state_temporal_out_norm_scale>
           + sml::completion<step_run> [ guard::guard_temporal_out_norm_failed{} ]
           / action::effect_mark_graph_execution_unsupported{}
-      , sml::state<state_text_logits> <= sml::state<state_temporal_out_norm_result_decision>
+      , sml::state<state_text_logits_phase_decision> <=
+          sml::state<state_temporal_out_norm_result_decision>
+          + sml::completion<step_run> [ guard::guard_full_graph_phase{} ]
+      , sml::state<state_sampling_ready> <=
+          sml::state<state_temporal_out_norm_result_decision>
+          + sml::completion<step_run> [ guard::guard_prediction_graph_phase{} ]
+          / action::effect_publish_prediction_state{}
+      , sml::state<state_text_logits> <= sml::state<state_text_logits_phase_decision>
           + sml::completion<step_run> [ guard::guard_text_logits_supported{} ]
           / action::effect_bind_text_token_logits{}
-      , sml::state<state_step_error_out_decision> <= sml::state<state_temporal_out_norm_result_decision>
+      , sml::state<state_step_error_out_decision> <= sml::state<state_text_logits_phase_decision>
           + sml::completion<step_run> [ guard::guard_text_logits_unsupported{} ]
           / action::effect_mark_graph_execution_unsupported{}
+      , sml::state<state_text_logits> <= sml::state<state_sampling_ready>
+          + sml::event<step_run> [ guard::guard_sampling_step_valid{} ]
+          / action::effect_restore_prediction_state_and_bind_text_logits{}
+      , sml::state<state_step_error_out_decision> <= sml::state<state_sampling_ready>
+          + sml::event<step_run> [ guard::guard_sampling_step_invalid{} ]
+          / action::effect_mark_request_shape{}
       , sml::state<state_text_logits_bind_result_decision> <= sml::state<state_text_logits>
           + sml::completion<step_run>
       , sml::state<state_text_logits_sample_projection> <= sml::state<state_text_logits_bind_result_decision>
@@ -999,6 +1014,9 @@ struct model {
       //------------------------------------------------------------------------------//
       // Reset.
       , sml::state<state_uninitialized> <= sml::state<state_ready>
+          + sml::event<event::reset>
+          / action::effect_reset_session{}
+      , sml::state<state_uninitialized> <= sml::state<state_sampling_ready>
           + sml::event<event::reset>
           / action::effect_reset_session{}
 

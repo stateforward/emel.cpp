@@ -652,6 +652,9 @@ template <class graph_actor_type> struct effect_run_prediction_graph {
         runtime_ev.request.prediction_workspace.sampled_text_token,
     };
     graph_step.sequence_id = ctx.session.sequence_id;
+    graph_step.phase = event::graph_phase::prediction;
+    graph_step.temporal_state =
+        runtime_ev.request.prediction_workspace.temporal_state;
     graph_step.error_out = &runtime_ev.ctx.graph_error;
     runtime_ev.ctx.graph_accepted = graph.process_event(graph_step);
   }
@@ -666,6 +669,44 @@ struct effect_publish_execute {
 
 struct effect_store_execute_graph_error_out {
   void operator()(const event::execute_run &runtime_ev,
+                  context &) const noexcept {
+    *runtime_ev.request.graph_error_out = runtime_ev.ctx.graph_error;
+  }
+};
+
+struct effect_begin_sample {
+  void operator()(const event::sample_run &runtime_ev,
+                  const context &) const noexcept {
+    runtime_ev.ctx.err = detail_ns::to_error(error::none);
+    runtime_ev.ctx.graph_error = detail_ns::to_error(error::none);
+    runtime_ev.ctx.graph_accepted = false;
+  }
+};
+
+template <class graph_actor_type> struct effect_run_sampling_graph {
+  void operator()(const event::sample_run &runtime_ev, context &ctx,
+                  graph_actor_type &graph) const noexcept {
+    runtime_ev.ctx.graph_error = detail_ns::to_error(error::none);
+    event::graph_step graph_step{
+        *ctx.session.model,
+        runtime_ev.request.prediction_workspace.memory,
+        runtime_ev.request.model_tokens,
+        std::span<int32_t>{
+            runtime_ev.request.prediction_workspace.sampled_audio_tokens.data(),
+            static_cast<size_t>(ctx.lmgen.generated_dep_q)},
+        runtime_ev.request.prediction_workspace.sampled_text_token,
+    };
+    graph_step.sequence_id = ctx.session.sequence_id;
+    graph_step.phase = event::graph_phase::sampling;
+    graph_step.temporal_state =
+        runtime_ev.request.prediction_workspace.temporal_state;
+    graph_step.error_out = &runtime_ev.ctx.graph_error;
+    runtime_ev.ctx.graph_accepted = graph.process_event(graph_step);
+  }
+};
+
+struct effect_store_sample_graph_error_out {
+  void operator()(const event::sample_run &runtime_ev,
                   context &) const noexcept {
     *runtime_ev.request.graph_error_out = runtime_ev.ctx.graph_error;
   }

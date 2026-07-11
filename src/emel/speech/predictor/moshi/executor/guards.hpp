@@ -370,12 +370,60 @@ struct guard_step_model_mismatch {
 struct guard_step_shape_valid {
   bool operator()(const event::step_run &runtime_ev,
                   const action::context &ctx) const noexcept {
-    return runtime_ev.request.input_sequence.data() != nullptr &&
+    const bool full = runtime_ev.request.phase ==
+                      emel::speech::predictor::moshi::event::graph_phase::full;
+    const bool prediction =
+        runtime_ev.request.phase ==
+        emel::speech::predictor::moshi::event::graph_phase::prediction;
+    return (full || prediction) &&
+           runtime_ev.request.input_sequence.data() != nullptr &&
            runtime_ev.request.input_sequence.size() ==
                static_cast<size_t>(ctx.session.codebook_count) &&
            runtime_ev.request.audio_tokens_out.data() != nullptr &&
            runtime_ev.request.audio_tokens_out.size() >=
-               static_cast<size_t>(ctx.session.dep_q);
+               static_cast<size_t>(ctx.session.dep_q) &&
+           (full || runtime_ev.request.temporal_state.size() >=
+                        static_cast<size_t>(ctx.session.hidden_dim));
+  }
+};
+
+struct guard_sampling_step_valid {
+  bool operator()(const event::step_run &runtime_ev,
+                  const action::context &ctx) const noexcept {
+    return runtime_ev.request.phase ==
+               emel::speech::predictor::moshi::event::graph_phase::sampling &&
+           guard_step_model_matches{}(runtime_ev, ctx) &&
+           runtime_ev.request.input_sequence.data() != nullptr &&
+           runtime_ev.request.input_sequence.size() ==
+               static_cast<size_t>(ctx.session.codebook_count) &&
+           runtime_ev.request.audio_tokens_out.data() != nullptr &&
+           runtime_ev.request.audio_tokens_out.size() >=
+               static_cast<size_t>(ctx.session.dep_q) &&
+           runtime_ev.request.temporal_state.size() >=
+               static_cast<size_t>(ctx.session.hidden_dim);
+  }
+};
+
+struct guard_sampling_step_invalid {
+  bool operator()(const event::step_run &runtime_ev,
+                  const action::context &ctx) const noexcept {
+    return !guard_sampling_step_valid{}(runtime_ev, ctx);
+  }
+};
+
+struct guard_full_graph_phase {
+  bool operator()(const event::step_run &runtime_ev,
+                  const action::context &) const noexcept {
+    return runtime_ev.request.phase ==
+           emel::speech::predictor::moshi::event::graph_phase::full;
+  }
+};
+
+struct guard_prediction_graph_phase {
+  bool operator()(const event::step_run &runtime_ev,
+                  const action::context &) const noexcept {
+    return runtime_ev.request.phase ==
+           emel::speech::predictor::moshi::event::graph_phase::prediction;
   }
 };
 

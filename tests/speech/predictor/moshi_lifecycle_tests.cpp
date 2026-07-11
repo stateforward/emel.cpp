@@ -705,6 +705,8 @@ TEST_CASE("speech_moshi_generator_prefills_personaplex_system_prompt_before_"
   CHECK(generator.is(stateforward::sml::state<moshi::state_execution_ready>));
   moshi::event::sample undersized_sample{
       workspace,
+      std::span<const int32_t>{
+          input.data(), static_cast<size_t>(fixture.model->moshi_lm.n_q + 1)},
       std::span<int32_t>{output.data(), static_cast<size_t>(
                                             fixture.model->moshi_lm.dep_q - 1)},
       text_token};
@@ -715,15 +717,18 @@ TEST_CASE("speech_moshi_generator_prefills_personaplex_system_prompt_before_"
   err = k_no_error;
   moshi::event::sample first_sample{
       workspace,
+      std::span<const int32_t>{
+          input.data(), static_cast<size_t>(fixture.model->moshi_lm.n_q + 1)},
       std::span<int32_t>{output.data(),
                          static_cast<size_t>(fixture.model->moshi_lm.dep_q)},
       text_token};
   first_sample.error_out = &err;
+  first_sample.graph_error_out = &graph_err;
   REQUIRE(generator.process_event(first_sample));
   CHECK(generator.is(stateforward::sml::state<moshi::state_session_ready>));
   CHECK(err == k_no_error);
   CHECK(graph_err == k_no_error);
-  CHECK(graph.call_count == prompt_frames + 5);
+  CHECK(graph.call_count == prompt_frames + 6);
 }
 
 TEST_CASE("speech_moshi_generator_accepts_personaplex_voice_without_system_"
@@ -825,14 +830,17 @@ TEST_CASE("speech_moshi_generator_accepts_personaplex_voice_without_system_"
   REQUIRE(generator.process_event(execute));
   moshi::event::sample sample{
       workspace,
+      std::span<const int32_t>{
+          input.data(), static_cast<size_t>(fixture.model->moshi_lm.n_q + 1)},
       std::span<int32_t>{output.data(),
                          static_cast<size_t>(fixture.model->moshi_lm.dep_q)},
       text_token};
   sample.error_out = &err;
+  sample.graph_error_out = &graph_err;
   REQUIRE(generator.process_event(sample));
   CHECK(err == k_no_error);
   CHECK(graph_err == k_no_error);
-  CHECK(graph.call_count == prompt_frames + personaplex_prompt_frames + 1);
+  CHECK(graph.call_count == prompt_frames + personaplex_prompt_frames + 2);
 }
 
 TEST_CASE("speech_moshi_predictor_reports_rejected_graph_event") {
@@ -866,6 +874,8 @@ TEST_CASE("speech_moshi_predictor_reports_rejected_graph_event") {
   err = k_no_error;
   moshi::event::sample premature_sample{
       workspace,
+      std::span<const int32_t>{
+          input.data(), static_cast<size_t>(fixture.model->moshi_lm.n_q + 1)},
       std::span<int32_t>{premature_output.data(),
                          static_cast<size_t>(fixture.model->moshi_lm.dep_q)},
       premature_text_token};
@@ -2205,7 +2215,11 @@ TEST_CASE(
   REQUIRE(generator.process_event(init));
 
   std::array<int32_t, moshi::event::k_max_codebooks> input = {};
+  std::array<float, moshi_executor::detail::k_max_hidden_dim> temporal_state =
+      {};
   moshi::event::predict::workspace workspace{};
+  workspace.temporal_state = std::span<float>{
+      temporal_state.data(), static_cast<size_t>(fixture.model->moshi_lm.dim)};
   moshi::event::predict predict{
       std::span<const int32_t>{
           input.data(), static_cast<size_t>(fixture.model->moshi_lm.n_q + 1)},

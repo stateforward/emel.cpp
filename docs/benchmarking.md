@@ -391,11 +391,13 @@ and drives the maintained generic speech generator with injected Mimi, batch-pla
 Moshi predictor, sampler, streaming-memory, and decoder actors. Each streamed or flushed frame is
 planned through the shared batch planner before prediction; the typed one-frame plan is validated
 by the predictor before memory allocation. The generic generator then dispatches graph execution
-and sampled-result publication as distinct injected actor phases; the Moshi predictor enforces the
-typed `prediction_ready -> execution_ready -> session_ready` protocol. `moshi_reference_driver
-personaplex` links only the pinned moshi.cpp/ggml reference lane. the reference configure
-hard-disables Metal and the script injects `--threads 1`, seed `1234`, 125 frames, temperatures,
-and sampling limits; there are no process-global EMEL sampling defaults.
+and sampling as distinct injected actor phases; the Moshi predictor enforces the typed
+`prediction_ready -> execution_ready -> session_ready` protocol. Its executor stops graph RTC
+after temporal normalization in `sampling_ready`, then the sample RTC restores the injected
+temporal-state buffer and performs text logits, text sampling, depformer execution, and audio
+sampling. `moshi_reference_driver personaplex` links only the pinned moshi.cpp/ggml reference lane.
+the reference configure hard-disables Metal and the script injects `--threads 1`, seed `1234`, 125
+frames, temperatures, and sampling limits; there are no process-global EMEL sampling defaults.
 
 the pinned upstream JSON remains untouched for the reference lane. EMEL model conversion injects
 the separate `tools/bench/personaplex-inference.json` contract, keeping prompt tokens, public
