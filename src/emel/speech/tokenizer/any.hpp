@@ -34,6 +34,14 @@ public:
 
   tokenizer_kind kind() const noexcept { return core_.kind(); }
 
+  // True only for kinds that name a real variant; owners must reject every
+  // other value (including `unsupported` and out-of-range casts) before
+  // dispatch, since the facade would otherwise clamp them to the first variant.
+  static constexpr bool is_supported(const tokenizer_kind kind) noexcept {
+    return emel::sm_any<tokenizer_kind, sm_list, event_list>::is_supported_kind(
+        kind);
+  }
+
   bool process_event(const event::detokenize &ev) {
     return core_.process_event(ev);
   }

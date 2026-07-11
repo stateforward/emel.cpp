@@ -1047,6 +1047,14 @@ class sm_any {
 
   kind_enum kind() const noexcept { return kind_; }
 
+  // A kind is supported only when it names a real variant. Out-of-range kinds
+  // (including the owner-defined `unsupported` sentinel) are clamped to the
+  // first variant by index_from_kind, so owners must reject them before
+  // dispatch instead of silently running the default variant.
+  static constexpr bool is_supported_kind(const kind_enum kind) noexcept {
+    return static_cast<std::size_t>(kind) < k_sm_count;
+  }
+
   template <class event>
   bool process_event(const event & ev) {
     static_assert(detail::type_list_contains<event, event_list>::value,

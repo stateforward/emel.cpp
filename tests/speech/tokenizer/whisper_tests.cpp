@@ -8,6 +8,8 @@
 
 #include "emel/speech/tokenizer/whisper/any.hpp"
 #include "emel/speech/tokenizer/whisper/detail.hpp"
+#include "emel/speech/tokenizer/whisper/events.hpp"
+#include "emel/speech/tokenizer/whisper/guards.hpp"
 
 namespace {
 
@@ -206,6 +208,51 @@ TEST_CASE("speech whisper tokenizer trims leading spaces and respects capacity")
   CHECK(transcript_size == 5u);
   CHECK(std::string_view{transcript, static_cast<size_t>(transcript_size)} ==
         "ABell");
+}
+
+TEST_CASE("speech whisper tokenizer guard rejects malformed detokenize spans") {
+  namespace whisper = emel::speech::tokenizer::whisper;
+
+  const auto tokenizer_path =
+      repo_root() / "tests" / "models" / "tokenizer-tiny.json";
+  REQUIRE(std::filesystem::exists(tokenizer_path));
+  const std::string tokenizer_json = read_text_file(tokenizer_path);
+
+  int32_t token_ids[] = {whisper::detail::k_tiny_control_tokens.timestamp_begin};
+  char transcript[16] = {};
+  int32_t transcript_size = 0;
+
+  // A well-formed request with valid JSON and valid spans passes the guard.
+  whisper::event::detokenize good_request{
+      tokenizer_json, std::span<const int32_t>{token_ids},
+      std::span<char>{transcript}, transcript_size};
+  whisper::event::detokenize_ctx good_ctx{};
+  whisper::event::detokenize_run good_run{good_request, good_ctx};
+  CHECK(whisper::guard::guard_tokenizer_json_valid{}(good_run));
+  CHECK_FALSE(whisper::guard::guard_tokenizer_json_invalid{}(good_run));
+
+  // A non-empty transcript span with a null data pointer must be rejected so the
+  // decode action never writes through the null pointer.
+  whisper::event::detokenize null_transcript_request{
+      tokenizer_json, std::span<const int32_t>{token_ids},
+      std::span<char>{static_cast<char *>(nullptr), 8u}, transcript_size};
+  whisper::event::detokenize_ctx null_transcript_ctx{};
+  whisper::event::detokenize_run null_transcript_run{null_transcript_request,
+                                                     null_transcript_ctx};
+  CHECK_FALSE(whisper::guard::guard_tokenizer_json_valid{}(null_transcript_run));
+  CHECK(whisper::guard::guard_tokenizer_json_invalid{}(null_transcript_run));
+
+  // A non-empty token span with a null data pointer must be rejected so the
+  // decode action never iterates the null span.
+  whisper::event::detokenize null_tokens_request{
+      tokenizer_json,
+      std::span<const int32_t>{static_cast<const int32_t *>(nullptr), 4u},
+      std::span<char>{transcript}, transcript_size};
+  whisper::event::detokenize_ctx null_tokens_ctx{};
+  whisper::event::detokenize_run null_tokens_run{null_tokens_request,
+                                                 null_tokens_ctx};
+  CHECK_FALSE(whisper::guard::guard_tokenizer_json_valid{}(null_tokens_run));
+  CHECK(whisper::guard::guard_tokenizer_json_invalid{}(null_tokens_run));
 }
 
 TEST_CASE("speech whisper tokenizer clamps compacted output to capacity") {

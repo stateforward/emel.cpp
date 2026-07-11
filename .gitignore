@@ -9,6 +9,10 @@ tmp/profiles/
 .gemini/
 gha-creds-*.json
 
+# Default compiler output binaries.
+a.out
+*.out
+
 # Large scale-class generation fixtures are NOT committed to git. They are fetched
 # on demand from the provenance recorded in tests/models/README.md (source URL, pinned
 # repo commit, size, SHA256). See the Qwen3-4B-Q4_K_M.gguf README section.

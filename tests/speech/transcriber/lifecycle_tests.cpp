@@ -444,6 +444,14 @@ TEST_CASE("speech_transcriber_guards_validate_injected_dependencies") {
   CHECK_FALSE(transcriber::guard::guard_tokenizer_assets_supported{}(
       supported_assets, unsupported_tokenizer));
 
+  // An out-of-range cast kind (neither `whisper` nor `unsupported`) must be
+  // rejected: sm_any would otherwise clamp it to the Whisper facade.
+  transcriber::dependencies unknown_tokenizer = supported;
+  unknown_tokenizer.tokenizer_kind =
+      static_cast<emel::speech::tokenizer::tokenizer_kind>(42);
+  CHECK_FALSE(transcriber::guard::guard_tokenizer_assets_supported{}(
+      supported_assets, unknown_tokenizer));
+
   const transcriber::event::tokenizer_assets mismatched_sha_assets{
       .model_json = "{}",
       .sha256 = "other-sha",
@@ -481,6 +489,19 @@ TEST_CASE("speech_transcriber_guards_validate_injected_dependencies") {
       emel::speech::decoder::decoder_kind::unsupported;
   CHECK_FALSE(transcriber::guard::guard_model_contracts_supported{}(
       *model, unsupported_decoder));
+
+  // Out-of-range cast component kinds must be rejected, not clamped to Whisper.
+  transcriber::dependencies unknown_encoder = supported;
+  unknown_encoder.encoder_kind =
+      static_cast<emel::speech::encoder::encoder_kind>(42);
+  CHECK_FALSE(transcriber::guard::guard_model_contracts_supported{}(
+      *model, unknown_encoder));
+
+  transcriber::dependencies unknown_decoder = supported;
+  unknown_decoder.decoder_kind =
+      static_cast<emel::speech::decoder::decoder_kind>(42);
+  CHECK_FALSE(transcriber::guard::guard_model_contracts_supported{}(
+      *model, unknown_decoder));
 
   // Contracts bound against a different model than the request carries.
   CHECK_FALSE(transcriber::guard::guard_model_contracts_supported{}(

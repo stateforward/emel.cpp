@@ -27,11 +27,18 @@ struct guard_invalid_initialize {
 // match the pinned checksum in the dependencies. Content-level validation
 // (model tensors, workspace capacity, tokenizer JSON control tokens) is owned
 // by the component machines and re-checked on every component dispatch.
+//
+// Component kinds are matched against the facade's supported-variant set, not
+// merely against the `unsupported` sentinel: sm_any clamps any out-of-range
+// enum value to the first variant, so an owner that accepted every
+// non-`unsupported` value would silently run the default variant for a
+// deserialized/cast kind it never meant to support. any::is_supported keeps
+// that variant knowledge in the component facade, so the engine stays
+// model-family-neutral.
 struct guard_tokenizer_assets_supported {
   bool operator()(const event::tokenizer_assets &assets,
                   const dependencies &deps) const noexcept {
-    return deps.tokenizer_kind !=
-               speech::tokenizer::tokenizer_kind::unsupported &&
+    return speech::tokenizer::any::is_supported(deps.tokenizer_kind) &&
            assets.model_json.data() != nullptr && !assets.model_json.empty() &&
            !deps.tokenizer_sha256.empty() &&
            assets.sha256 == deps.tokenizer_sha256;
@@ -41,8 +48,8 @@ struct guard_tokenizer_assets_supported {
 struct guard_model_contracts_supported {
   bool operator()(const emel::model::data &model,
                   const dependencies &deps) const noexcept {
-    return deps.encoder_kind != speech::encoder::encoder_kind::unsupported &&
-           deps.decoder_kind != speech::decoder::decoder_kind::unsupported &&
+    return speech::encoder::any::is_supported(deps.encoder_kind) &&
+           speech::decoder::any::is_supported(deps.decoder_kind) &&
            deps.encoder_contract.model == &model &&
            deps.encoder_contract.embedding_length > 0 &&
            deps.decoder_contract.model == &model &&
