@@ -25,7 +25,8 @@ struct guard_bind_contract_valid {
     const bool personaplex = lm.depformer_weights_per_step;
     const int32_t delayed_dep_q = personaplex ? lm.inference_dep_q : lm.dep_q;
     const int32_t needed_tokens = codebook_count - delayed_dep_q - 1;
-    const int32_t row_count = max_delay + 2 + static_cast<int32_t>(personaplex);
+    const int64_t row_count = static_cast<int64_t>(max_delay) + 2 +
+                              static_cast<int64_t>(personaplex);
     const bool inference_contract =
         !personaplex ||
         (lm.inference_dep_q > 0 && lm.inference_dep_q <= lm.dep_q &&
@@ -105,8 +106,7 @@ struct guard_voice_contract_valid {
            embeddings->n_dims == 4 &&
            embeddings->dims[0] == ctx.session.model->moshi_lm.dim &&
            embeddings->dims[1] == 1 && embeddings->dims[2] == 1 &&
-           embeddings->dims[3] > 0 &&
-           embeddings->dims[3] <=
+           embeddings->dims[3] > 0 && embeddings->dims[0] <=
                static_cast<int64_t>(event::k_max_voice_embedding_dim) &&
            embedding_type_ok && cache->n_dims == 2 &&
            cache->dims[0] == ctx.lmgen.cache_row_count &&
@@ -321,9 +321,10 @@ struct guard_voice_prefill_pending {
 struct guard_personaplex_prompt_begin_valid {
   bool operator()(const event::begin_personaplex_prompt_run &runtime_ev,
                   const action::context &ctx) const noexcept {
-    const int32_t frame_count = runtime_ev.request.pre_text_silence_frames +
-                                runtime_ev.request.text_token_count +
-                                runtime_ev.request.post_text_silence_frames;
+    const int64_t frame_count =
+        static_cast<int64_t>(runtime_ev.request.pre_text_silence_frames) +
+        static_cast<int64_t>(runtime_ev.request.text_token_count) +
+        static_cast<int64_t>(runtime_ev.request.post_text_silence_frames);
     return ctx.session.model != nullptr && ctx.voice.loaded &&
            ctx.voice.ready && !ctx.voice.prompt_ready &&
            !ctx.voice.prompt_started &&
@@ -339,9 +340,10 @@ struct guard_personaplex_prompt_begin_valid {
 struct guard_personaplex_prompt_begin_nonempty_valid {
   bool operator()(const event::begin_personaplex_prompt_run &runtime_ev,
                   const action::context &ctx) const noexcept {
-    const int32_t frame_count = runtime_ev.request.pre_text_silence_frames +
-                                runtime_ev.request.text_token_count +
-                                runtime_ev.request.post_text_silence_frames;
+    const int64_t frame_count =
+        static_cast<int64_t>(runtime_ev.request.pre_text_silence_frames) +
+        static_cast<int64_t>(runtime_ev.request.text_token_count) +
+        static_cast<int64_t>(runtime_ev.request.post_text_silence_frames);
     return guard_personaplex_prompt_begin_valid{}(runtime_ev, ctx) &&
            frame_count > 0;
   }
@@ -350,15 +352,18 @@ struct guard_personaplex_prompt_begin_nonempty_valid {
 struct guard_personaplex_prompt_begin_empty_valid {
   bool operator()(const event::begin_personaplex_prompt_run &runtime_ev,
                   const action::context &ctx) const noexcept {
-    const int32_t frame_count = runtime_ev.request.pre_text_silence_frames +
-                                runtime_ev.request.text_token_count +
-                                runtime_ev.request.post_text_silence_frames;
+    const int64_t frame_count =
+        static_cast<int64_t>(runtime_ev.request.pre_text_silence_frames) +
+        static_cast<int64_t>(runtime_ev.request.text_token_count) +
+        static_cast<int64_t>(runtime_ev.request.post_text_silence_frames);
     const auto *model = ctx.session.model;
-    const int32_t default_frame_count =
+    const int64_t default_frame_count =
         model == nullptr
             ? -1
-            : model->moshi_lm.inference_pre_text_silence_frames +
-                  model->moshi_lm.inference_post_text_silence_frames;
+            : static_cast<int64_t>(
+                  model->moshi_lm.inference_pre_text_silence_frames) +
+                  static_cast<int64_t>(
+                      model->moshi_lm.inference_post_text_silence_frames);
     return guard_personaplex_prompt_begin_valid{}(runtime_ev, ctx) &&
            frame_count == 0 && default_frame_count > 0 &&
            default_frame_count <= action::k_max_delay_rows;

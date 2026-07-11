@@ -1,6 +1,7 @@
 #include <algorithm>
 #include <array>
 #include <cstdint>
+#include <limits>
 #include <memory>
 #include <span>
 #include <string>
@@ -41,6 +42,7 @@ moshi_executor::dependencies make_executor_dependencies(
           moshi_executor::action::policies{
               .rms_norm_epsilon = 1.0e-8f,
               .zero_seed_state = 123459876u,
+              .sampling_modulus = 2147483647u,
               .token_zero = -1,
           },
       .capacity =
@@ -984,6 +986,88 @@ TEST_CASE("speech_moshi_executor_models_zero_seed_and_top_k_clamp") {
   CHECK(err == emel::error::cast(moshi_executor::error::none));
 }
 
+TEST_CASE("speech_moshi_executor_normalizes_nonzero_sampling_seed") {
+  auto fixture = load_fixture_or_skip("moshi-tiny-lm.gguf");
+  if (fixture.model == nullptr) {
+    return;
+  }
+
+  emel::kernel::sm kernel{};
+  auto dependencies = make_executor_dependencies(kernel);
+  moshi_executor::action::context ctx{dependencies};
+  moshi_executor::event::initialize init{*fixture.model};
+  init.sampling_seed = 2147483647u;
+  moshi_executor::event::initialize_ctx init_ctx{};
+  moshi_executor::event::initialize_run init_run{init, init_ctx};
+
+  moshi_executor::action::effect_bind_nonzero_sampling_seed{}(init_run, ctx);
+  CHECK(ctx.sampling.random_state > 0u);
+  CHECK(ctx.sampling.random_state < 2147483647u);
+}
+
+TEST_CASE("speech_moshi_executor_rejects_invalid_sampling_configuration") {
+  auto fixture = load_fixture_or_skip("moshi-tiny-lm.gguf");
+  if (fixture.model == nullptr) {
+    return;
+  }
+
+  const auto rejected = [&fixture](const float audio_temperature,
+                                   const float text_temperature,
+                                   const int32_t audio_top_k,
+                                   const int32_t text_top_k) {
+    emel::kernel::sm kernel{};
+    emel::logits::sampler::sm sampler{};
+    moshi_executor::sm executor{
+        make_executor_dependencies(kernel, {}, &sampler)};
+    emel::error::type err = emel::error::cast(moshi_executor::error::none);
+    moshi_executor::event::initialize init{*fixture.model};
+    init.sampling_enabled = true;
+    init.sampling_audio_temperature = audio_temperature;
+    init.sampling_text_temperature = text_temperature;
+    init.sampling_audio_top_k = audio_top_k;
+    init.sampling_text_top_k = text_top_k;
+    init.sampling_seed = 1234u;
+    init.error_out = &err;
+    return !executor.process_event(init) &&
+           err == emel::error::cast(moshi_executor::error::bind_failed);
+  };
+
+  CHECK(rejected(std::numeric_limits<float>::quiet_NaN(), 0.7f, 1, 1));
+  CHECK(rejected(0.8f, std::numeric_limits<float>::quiet_NaN(), 1, 1));
+  CHECK(rejected(0.8f, 0.7f, 0, 1));
+  CHECK(rejected(0.8f, 0.7f, 1, 0));
+}
+
+TEST_CASE("speech_moshi_machines_report_unexpected_events_after_init") {
+  auto fixture = load_fixture_or_skip("moshi-tiny-lm.gguf");
+  if (fixture.model == nullptr) {
+    return;
+  }
+
+  emel::kernel::sm kernel{};
+  moshi_executor::sm executor{make_executor_dependencies(kernel)};
+  emel::error::type executor_err = k_no_error;
+  moshi_executor::event::initialize executor_init{*fixture.model};
+  executor_init.error_out = &executor_err;
+  REQUIRE(executor.process_event(executor_init));
+  executor_err = k_no_error;
+  CHECK_FALSE(executor.process_event(executor_init));
+  CHECK(executor_err ==
+        emel::error::cast(moshi_executor::error::unexpected_event));
+
+  emel::memory::hybrid::sm memory{};
+  recording_graph_executor graph{};
+  moshi::sm predictor{make_predictor_dependencies(graph, memory)};
+  emel::error::type predictor_err = k_no_error;
+  moshi::event::initialize predictor_init{*fixture.model};
+  configure_predictor_initialize(predictor_init);
+  predictor_init.error_out = &predictor_err;
+  REQUIRE(predictor.process_event(predictor_init));
+  predictor_err = k_no_error;
+  CHECK_FALSE(predictor.process_event(predictor_init));
+  CHECK(predictor_err == emel::error::cast(moshi::error::unexpected_event));
+}
+
 TEST_CASE("speech_moshi_executor_requires_sampler_for_sampling") {
   auto fixture = load_fixture_or_skip("moshi-tiny-lm.gguf");
   if (fixture.model == nullptr) {
@@ -1079,6 +1163,11 @@ TEST_CASE("speech_moshi_executor_runtime_choice_uses_explicit_transitions") {
       read_binary_file(repo_root() / "src" / "emel" / "speech" / "predictor" /
                        "moshi" / "executor" / "detail.hpp");
   const std::string detail_source{detail_bytes.begin(), detail_bytes.end()};
+  const auto predictor_guard_bytes =
+      read_binary_file(repo_root() / "src" / "emel" / "speech" /
+                       "predictor" / "moshi" / "guards.hpp");
+  const std::string predictor_guards_source{predictor_guard_bytes.begin(),
+                                            predictor_guard_bytes.end()};
 
   CHECK(source.find("infer_debug_phase") == std::string::npos);
   CHECK(source.find("debug_phase_out != nullptr") == std::string::npos);
@@ -1143,6 +1232,14 @@ TEST_CASE("speech_moshi_executor_runtime_choice_uses_explicit_transitions") {
   CHECK(actions_source.find("effect_bind_zero_sampling_seed") !=
         std::string::npos);
   CHECK(detail_source.find("random_state == 0u") == std::string::npos);
+  CHECK(predictor_guards_source.find("const int64_t row_count") !=
+        std::string::npos);
+  CHECK(predictor_guards_source.find("const int64_t frame_count") !=
+        std::string::npos);
+  CHECK(predictor_guards_source.find("const int64_t default_frame_count") !=
+        std::string::npos);
+  CHECK(predictor_guards_source.find("embeddings->dims[0] <=") !=
+        std::string::npos);
   CHECK(actions_source.find("effect_publish_temporal_out_norm") !=
         std::string::npos);
   CHECK(actions_source.find("struct effect_run_temporal_layer_norm {") ==

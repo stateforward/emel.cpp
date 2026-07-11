@@ -108,6 +108,7 @@ TEST_CASE(
               executor::action::policies{
                   .rms_norm_epsilon = 1.0e-8f,
                   .zero_seed_state = 123459876u,
+                  .sampling_modulus = 2147483647u,
                   .token_zero = -1,
               },
           .capacity =

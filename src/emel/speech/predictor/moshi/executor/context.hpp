@@ -23,6 +23,7 @@ struct kv_views {
 struct policies {
   float rms_norm_epsilon = 0.0f;
   uint32_t zero_seed_state = 0u;
+  uint32_t sampling_modulus = 0u;
   int32_t token_zero = 0;
 };
 

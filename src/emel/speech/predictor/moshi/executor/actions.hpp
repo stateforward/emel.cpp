@@ -98,7 +98,10 @@ struct effect_bind_depformer_fused_projection_layout {
 struct effect_bind_nonzero_sampling_seed {
   void operator()(const event::initialize_run &runtime_ev,
                   context &ctx) const noexcept {
-    ctx.sampling.random_state = runtime_ev.request.sampling_seed;
+    ctx.sampling.random_state =
+        ((runtime_ev.request.sampling_seed - 1u) %
+         (ctx.policy.sampling_modulus - 1u)) +
+        1u;
   }
 };
 

@@ -79,13 +79,18 @@ stateDiagram-v2
   ready --> ready : dispatch_op_mul_mat [simd_op_mul_mat_q4_vector_packed_q8_rhs_bl8_matrix_x8_] / exec_simd_q4_vector_packed_q8_rhs_bl8_matrix_x8_op_mul_mat_
   ready --> ready : dispatch_op_mul_mat [simd_op_mul_mat_q4_vector_packed_q8_rhs_bl8_matrix_x4_] / exec_simd_q4_vector_packed_q8_rhs_bl8_matrix_x4_op_mul_mat_
   ready --> ready : dispatch_op_mul_mat [simd_op_mul_mat_q4_vector_packed_q8_rhs_bl8_] / exec_simd_q4_vector_packed_q8_rhs_bl8_op_mul_mat_
+  ready --> ready : dispatch_op_mul_mat [simd_op_mul_mat_q4_vector_packed_f32_rhs_bl8_] / exec_simd_q4_vector_packed_f32_rhs_bl8_op_mul_mat_
   ready --> ready : dispatch_op_mul_mat [simd_op_mul_mat_q4_vector_packed_q8_rhs_bl4_matrix_x4_] / exec_simd_q4_vector_packed_q8_rhs_bl4_matrix_x4_op_mul_mat_
   ready --> ready : dispatch_op_mul_mat [simd_op_mul_mat_q4_vector_packed_q8_rhs_bl4_] / exec_simd_q4_vector_packed_q8_rhs_bl4_op_mul_mat_
+  ready --> ready : dispatch_op_mul_mat [simd_op_mul_mat_q4_vector_packed_f32_rhs_bl4_] / exec_simd_q4_vector_packed_f32_rhs_bl4_op_mul_mat_
   ready --> ready : dispatch_op_mul_mat [simd_op_mul_mat_q4_vector_q8_rhs_] / exec_simd_q4_vector_q8_rhs_op_mul_mat_
+  ready --> ready : dispatch_op_mul_mat [simd_op_mul_mat_q4_vector_f32_rhs_] / exec_simd_q4_vector_f32_rhs_op_mul_mat_
   ready --> ready : dispatch_op_mul_mat [simd_op_mul_mat_q6_vector_prepared_q8_rhs_i8mm_matrix_x8_] / exec_simd_q6_vector_prepared_q8_rhs_i8mm_matrix_x8_op_mul_mat_
   ready --> ready : dispatch_op_mul_mat [simd_op_mul_mat_q6_vector_prepared_q8_rhs_i8mm_matrix_x4_] / exec_simd_q6_vector_prepared_q8_rhs_i8mm_matrix_x4_op_mul_mat_
   ready --> ready : dispatch_op_mul_mat [simd_op_mul_mat_q6_vector_prepared_q8_rhs_i8mm_] / exec_simd_q6_vector_prepared_q8_rhs_i8mm_op_mul_mat_
   ready --> ready : dispatch_op_mul_mat_argmax [simd_op_mul_mat_argmax_q6_vector_q8_argmax_prepared_i8mm_] / exec_simd_q6_vector_q8_argmax_prepared_i8mm_op_mul_mat_argmax_
+  ready --> ready : dispatch_op_mul_mat_argmax [simd_op_mul_mat_argmax_q4_vector_packed_f32_rhs_bl8_] / exec_simd_q4_vector_packed_f32_rhs_bl8_op_mul_mat_argmax_
+  ready --> ready : dispatch_op_mul_mat_argmax [simd_op_mul_mat_argmax_q4_vector_packed_f32_rhs_bl4_] / exec_simd_q4_vector_packed_f32_rhs_bl4_op_mul_mat_argmax_
   ready --> ready : dispatch_op_mul_mat_argmax [simd_op_mul_mat_argmax_q6_vector_packed_q8_rhs_] / exec_simd_q6_vector_packed_q8_rhs_op_mul_mat_argmax_
   ready --> ready : dispatch_op_mul_mat_argmax [simd_op_mul_mat_argmax_q6_vector_prepared_q8_rhs_i8mm_] / exec_simd_q6_vector_prepared_q8_rhs_i8mm_op_mul_mat_argmax_
   ready --> ready : dispatch_op_mul_mat [simd_op_mul_mat_q6_vector_prepared_q8_rhs_] / exec_simd_q6_vector_prepared_q8_rhs_op_mul_mat_
@@ -143,8 +148,9 @@ stateDiagram-v2
   ready --> ready : dispatch_op_soft_max [dispatch_op_soft_max__] / dispatch_op_soft_max__
   ready --> ready : dispatch_op_soft_max_back [dispatch_op_soft_max_back__] / dispatch_op_soft_max_back__
   ready --> ready : dispatch_op_soft_max_back [dispatch_op_soft_max_back__] / dispatch_op_soft_max_back__
-  ready --> ready : dispatch_op_rope [rope_mode_is_false___] / mark_done_op__false__
-  ready --> ready : dispatch_op_rope [rope_mode_is_true___] / mark_done_op__true__
+  ready --> ready : dispatch_op_rope [rope_mode_is_0___] / mark_done_op__false__
+  ready --> ready : dispatch_op_rope [rope_mode_is_2___] / mark_done_op__true__
+  ready --> ready : dispatch_op_rope [rope_timestep_is__] / mark_done_op__
   ready --> ready : dispatch_op_rope [dispatch_op_rope__] / dispatch_op_rope__
   ready --> ready : dispatch_op_rope_back [dispatch_op_rope_back__] / dispatch_op_rope_back__
   ready --> ready : dispatch_op_rope_back [dispatch_op_rope_back__] / dispatch_op_rope_back__
@@ -225,14 +231,15 @@ stateDiagram-v2
   ready --> ready : dispatch_op_unary [abs___] / abs__
   ready --> ready : dispatch_op_unary [neg___] / neg__
   ready --> ready : dispatch_op_unary [relu___] / relu__
-  ready --> ready : dispatch_op_unary [abs___] / abs__
-  ready --> ready : dispatch_op_unary [neg___] / neg__
-  ready --> ready : dispatch_op_unary [relu___] / relu__
+  ready --> ready : dispatch_op_unary [silu___] / silu__
+  ready --> ready : dispatch_op_unary [abs__] / abs__
+  ready --> ready : dispatch_op_unary [neg__] / neg__
+  ready --> ready : dispatch_op_unary [relu__] / relu__
   ready --> ready : dispatch_op_unary [exp___] / exp__
   ready --> ready : dispatch_op_unary [tanh___] / tanh__
   ready --> ready : dispatch_op_unary [elu___] / elu__
   ready --> ready : dispatch_op_unary [gelu___] / gelu__
-  ready --> ready : dispatch_op_unary [silu___] / silu__
+  ready --> ready : dispatch_op_unary [silu__] / silu__
   ready --> ready : dispatch_op_unary [dispatch_op_unary__] / dispatch_op_unary__
   ready --> ready : dispatch_op_map_custom1 [dispatch_op_map_custom1__] / dispatch_op_map_custom1__
   ready --> ready : dispatch_op_map_custom1 [dispatch_op_map_custom1__] / dispatch_op_map_custom1__

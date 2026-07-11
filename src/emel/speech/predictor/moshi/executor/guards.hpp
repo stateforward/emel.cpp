@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cmath>
 #include <limits>
 
 #include "emel/model/loader/errors.hpp"
@@ -14,6 +15,14 @@ struct guard_bind_contract_valid {
   bool operator()(const event::initialize_run &runtime_ev,
                   const action::context &ctx) const noexcept {
     const auto &model = runtime_ev.request.model;
+    const bool sampling_config_valid =
+        !runtime_ev.request.sampling_enabled ||
+        (std::isfinite(runtime_ev.request.sampling_audio_temperature) &&
+         runtime_ev.request.sampling_audio_temperature > 0.0f &&
+         std::isfinite(runtime_ev.request.sampling_text_temperature) &&
+         runtime_ev.request.sampling_text_temperature > 0.0f &&
+         runtime_ev.request.sampling_audio_top_k > 0 &&
+         runtime_ev.request.sampling_text_top_k > 0);
     return emel::model::moshi::detail::validate_execution_contract(model) ==
                emel::error::cast(emel::model::loader::error::none) &&
            model.moshi_component_id == emel::model::data::moshi_component::lm &&
@@ -22,8 +31,11 @@ struct guard_bind_contract_valid {
            model.moshi_lm.text_card > 0 && model.moshi_lm.card > 0 &&
            model.moshi_lm.dim > 0 &&
            (!runtime_ev.request.sampling_enabled || ctx.sampler != nullptr) &&
+           sampling_config_valid &&
            ctx.policy.rms_norm_epsilon > 0.0f &&
-           ctx.policy.zero_seed_state != 0u && ctx.policy.token_zero < 0 &&
+           ctx.policy.sampling_modulus > 1u &&
+           ctx.policy.zero_seed_state % ctx.policy.sampling_modulus != 0u &&
+           ctx.policy.token_zero < 0 &&
            ctx.capacity.hidden_dim > 0u &&
            ctx.capacity.hidden_dim <= detail::k_max_hidden_dim &&
            ctx.capacity.temporal_context > 0u &&

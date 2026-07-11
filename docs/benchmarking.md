@@ -403,6 +403,8 @@ temporal-state buffer and performs text logits, text sampling, depformer executi
 sampling. `moshi_reference_driver personaplex` links only the pinned moshi.cpp/ggml reference lane.
 the reference configure hard-disables Metal and the script injects `--threads 1`, seed `1234`, 125
 frames, temperatures, and sampling limits; there are no process-global EMEL sampling defaults.
+The EMEL composition also injects the Park-Miller modulus and zero-seed replacement state; nonzero
+external seeds are normalized into the valid actor-owned RNG state range before sampling.
 
 the pinned upstream JSON remains untouched for the reference lane. EMEL model conversion injects
 the separate `tools/bench/personaplex-inference.json` contract, keeping prompt tokens, public

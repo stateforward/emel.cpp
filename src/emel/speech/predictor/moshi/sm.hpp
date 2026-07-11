@@ -726,6 +726,30 @@ template <class graph_actor_type> struct model {
           + sml::unexpected_event<sml::_>
               [ guard::guard_unexpected_error_out_absent{} ]
               / action::effect_mark_unexpected{}
+      , sml::state<state_session_ready> <= sml::state<state_session_ready>
+          + sml::unexpected_event<sml::_>
+              [ guard::guard_unexpected_error_out_present{} ]
+              / action::effect_mark_unexpected_and_store{}
+      , sml::state<state_session_ready> <= sml::state<state_session_ready>
+          + sml::unexpected_event<sml::_>
+              [ guard::guard_unexpected_error_out_absent{} ]
+              / action::effect_mark_unexpected{}
+      , sml::state<state_execution_ready> <= sml::state<state_execution_ready>
+          + sml::unexpected_event<sml::_>
+              [ guard::guard_unexpected_error_out_present{} ]
+              / action::effect_mark_unexpected_and_store{}
+      , sml::state<state_execution_ready> <= sml::state<state_execution_ready>
+          + sml::unexpected_event<sml::_>
+              [ guard::guard_unexpected_error_out_absent{} ]
+              / action::effect_mark_unexpected{}
+      , sml::state<state_prediction_ready> <= sml::state<state_prediction_ready>
+          + sml::unexpected_event<sml::_>
+              [ guard::guard_unexpected_error_out_present{} ]
+              / action::effect_mark_unexpected_and_store{}
+      , sml::state<state_prediction_ready> <= sml::state<state_prediction_ready>
+          + sml::unexpected_event<sml::_>
+              [ guard::guard_unexpected_error_out_absent{} ]
+              / action::effect_mark_unexpected{}
     );
     // clang-format on
   }

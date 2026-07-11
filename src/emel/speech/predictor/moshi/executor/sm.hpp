@@ -1030,6 +1030,22 @@ struct model {
           + sml::unexpected_event<sml::_>
               [ guard::guard_unexpected_error_out_absent{} ]
               / action::effect_mark_unexpected{}
+      , sml::state<state_ready> <= sml::state<state_ready>
+          + sml::unexpected_event<sml::_>
+              [ guard::guard_unexpected_error_out_present{} ]
+              / action::effect_mark_unexpected_and_store{}
+      , sml::state<state_ready> <= sml::state<state_ready>
+          + sml::unexpected_event<sml::_>
+              [ guard::guard_unexpected_error_out_absent{} ]
+              / action::effect_mark_unexpected{}
+      , sml::state<state_sampling_ready> <= sml::state<state_sampling_ready>
+          + sml::unexpected_event<sml::_>
+              [ guard::guard_unexpected_error_out_present{} ]
+              / action::effect_mark_unexpected_and_store{}
+      , sml::state<state_sampling_ready> <= sml::state<state_sampling_ready>
+          + sml::unexpected_event<sml::_>
+              [ guard::guard_unexpected_error_out_absent{} ]
+              / action::effect_mark_unexpected{}
     );
     // clang-format on
   }
