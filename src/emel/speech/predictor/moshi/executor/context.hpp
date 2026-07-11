@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 
 #include "emel/kernel/sm.hpp"
@@ -49,6 +50,10 @@ struct runtime {
   int32_t text_card = 0;
   int32_t audio_card = 0;
   int32_t hidden_dim = 0;
+  std::array<const emel::model::data::tensor_record *,
+             static_cast<std::size_t>(
+                 emel::model::data::moshi_lm_hparams::k_max_delays)>
+      temporal_input_projections = {};
 };
 
 struct sampling_config {

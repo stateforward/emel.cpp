@@ -14,6 +14,7 @@ namespace emel::speech::predictor::moshi::executor {
 struct state_uninitialized {};
 struct state_bind_contract_decision {};
 struct state_input_embedding_contract_decision {};
+struct state_temporal_projection_layout_decision {};
 struct state_sampling_seed_decision {};
 struct state_text_sampling_top_k_decision {};
 struct state_audio_sampling_top_k_decision {};
@@ -181,7 +182,7 @@ struct model {
       , sml::state<state_init_failed_error_out_decision> <= sml::state<state_bind_contract_decision>
           + sml::completion<init_run> [ guard::guard_bind_contract_invalid{} ]
           / action::effect_mark_bind_failed{}
-      , sml::state<state_sampling_seed_decision> <=
+      , sml::state<state_temporal_projection_layout_decision> <=
           sml::state<state_input_embedding_contract_decision>
           + sml::completion<init_run>
           [ guard::guard_bound_root_operands_supported{} ]
@@ -189,6 +190,21 @@ struct model {
           sml::state<state_input_embedding_contract_decision>
           + sml::completion<init_run>
           [ guard::guard_bound_root_operands_unsupported{} ]
+          / action::effect_mark_bind_failed{}
+      , sml::state<state_sampling_seed_decision> <=
+          sml::state<state_temporal_projection_layout_decision>
+          + sml::completion<init_run>
+          [ guard::guard_temporal_split_projection_layout_supported{} ]
+          / action::effect_bind_temporal_split_projection_layout{}
+      , sml::state<state_sampling_seed_decision> <=
+          sml::state<state_temporal_projection_layout_decision>
+          + sml::completion<init_run>
+          [ guard::guard_temporal_fused_projection_layout_supported{} ]
+          / action::effect_bind_temporal_fused_projection_layout{}
+      , sml::state<state_init_failed_error_out_decision> <=
+          sml::state<state_temporal_projection_layout_decision>
+          + sml::completion<init_run>
+          [ guard::guard_temporal_projection_layout_unsupported{} ]
           / action::effect_mark_bind_failed{}
       , sml::state<state_text_sampling_top_k_decision> <= sml::state<state_sampling_seed_decision>
           + sml::completion<init_run> [ guard::guard_sampling_seed_nonzero{} ]

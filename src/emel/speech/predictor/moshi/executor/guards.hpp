@@ -108,6 +108,41 @@ struct guard_bound_root_operands_supported {
                 static_cast<detail::dtype>(audio_embedding->type));
       }
     }
+    for (int32_t layer_index = 0; layer_index < lm.num_layers; ++layer_index) {
+      const auto &layer =
+          ctx.session.contract.lm
+              .temporal_layers[static_cast<size_t>(layer_index)];
+      const auto *norm1 = layer.norm1.tensor;
+      const auto *output_projection = layer.output_projection.tensor;
+      const auto *norm2 = layer.norm2.tensor;
+      const auto *gating_input = layer.gating_input.tensor;
+      const auto *gating_output = layer.gating_output.tensor;
+      int64_t gating_projection_dim = 0;
+      if (gating_input != nullptr && gating_input->n_dims > 1) {
+        gating_projection_dim = gating_input->dims[1];
+      }
+      const int64_t gating_dim = gating_projection_dim / 2;
+      supported =
+          supported && detail::tensor_shape(norm1, hidden_dim) &&
+          static_cast<detail::dtype>(norm1->type) == detail::dtype::f32 &&
+          detail::tensor_shape(output_projection, hidden_dim, hidden_dim) &&
+          detail::supported_mul_mat_dtype(
+              static_cast<detail::dtype>(output_projection->type)) &&
+          detail::tensor_shape(norm2, hidden_dim) &&
+          static_cast<detail::dtype>(norm2->type) == detail::dtype::f32 &&
+          gating_projection_dim > 0 && (gating_projection_dim % 2) == 0 &&
+          static_cast<uint64_t>(gating_projection_dim) <=
+              ctx.capacity.hidden_dim * 8u &&
+          detail::tensor_shape(gating_input, hidden_dim,
+                               gating_projection_dim) &&
+          detail::supported_mul_mat_dtype(
+              static_cast<detail::dtype>(gating_input->type)) &&
+          gating_dim > 0 &&
+          static_cast<uint64_t>(gating_dim) <= ctx.capacity.hidden_dim * 4u &&
+          detail::tensor_shape(gating_output, gating_dim, hidden_dim) &&
+          detail::supported_mul_mat_dtype(
+              static_cast<detail::dtype>(gating_output->type));
+    }
     return supported;
   }
 };
@@ -116,6 +151,56 @@ struct guard_bound_root_operands_unsupported {
   bool operator()(const event::initialize_run &runtime_ev,
                   const action::context &ctx) const noexcept {
     return !guard_bound_root_operands_supported{}(runtime_ev, ctx);
+  }
+};
+
+struct guard_temporal_split_projection_layout_supported {
+  bool operator()(const event::initialize_run &runtime_ev,
+                  const action::context &ctx) const noexcept {
+    const auto &lm = runtime_ev.request.model.moshi_lm;
+    bool supported = lm.num_layers > 0;
+    for (int32_t layer_index = 0; layer_index < lm.num_layers; ++layer_index) {
+      const auto *projection =
+          ctx.session.contract.lm
+              .temporal_layers[static_cast<size_t>(layer_index)]
+              .split_input_projection.tensor;
+      supported = supported &&
+                  detail::tensor_shape(projection, lm.dim, lm.dim * 3) &&
+                  detail::supported_mul_mat_dtype(
+                      static_cast<detail::dtype>(projection->type));
+    }
+    return supported;
+  }
+};
+
+struct guard_temporal_fused_projection_layout_supported {
+  bool operator()(const event::initialize_run &runtime_ev,
+                  const action::context &ctx) const noexcept {
+    if (guard_temporal_split_projection_layout_supported{}(runtime_ev, ctx)) {
+      return false;
+    }
+    const auto &lm = runtime_ev.request.model.moshi_lm;
+    bool supported = lm.num_layers > 0;
+    for (int32_t layer_index = 0; layer_index < lm.num_layers; ++layer_index) {
+      const auto *projection =
+          ctx.session.contract.lm
+              .temporal_layers[static_cast<size_t>(layer_index)]
+              .fused_input_projection.tensor;
+      supported = supported &&
+                  detail::tensor_shape(projection, lm.dim, lm.dim * 3) &&
+                  detail::supported_mul_mat_dtype(
+                      static_cast<detail::dtype>(projection->type));
+    }
+    return supported;
+  }
+};
+
+struct guard_temporal_projection_layout_unsupported {
+  bool operator()(const event::initialize_run &runtime_ev,
+                  const action::context &ctx) const noexcept {
+    return !guard_temporal_split_projection_layout_supported{}(runtime_ev,
+                                                               ctx) &&
+           !guard_temporal_fused_projection_layout_supported{}(runtime_ev, ctx);
   }
 };
 
@@ -459,15 +544,11 @@ struct guard_temporal_kv_bind_failed {
 struct guard_temporal_layer_norm_supported {
   bool operator()(const event::step_run &runtime_ev,
                   const action::context &ctx) const noexcept {
-    const auto &model = runtime_ev.request.model;
     const int32_t hidden_dim = ctx.session.hidden_dim;
     const int32_t layer = runtime_ev.ctx.temporal_layer_index;
-    const auto *norm1 =
-        detail::find_lm_transformer_tensor(model, layer, "norm1.alpha");
-    return layer >= 0 && layer < model.moshi_lm.num_layers && hidden_dim > 0 &&
-           static_cast<uint64_t>(hidden_dim) <= ctx.capacity.hidden_dim &&
-           detail::tensor_shape(norm1, hidden_dim) &&
-           static_cast<detail::dtype>(norm1->type) == detail::dtype::f32;
+    return layer >= 0 && layer < runtime_ev.request.model.moshi_lm.num_layers &&
+           hidden_dim > 0 &&
+           static_cast<uint64_t>(hidden_dim) <= ctx.capacity.hidden_dim;
   }
 };
 
@@ -509,18 +590,13 @@ struct guard_temporal_layer_norm_failed {
 struct guard_temporal_layer_projection_supported {
   bool operator()(const event::step_run &runtime_ev,
                   const action::context &ctx) const noexcept {
-    const auto &model = runtime_ev.request.model;
     const int32_t hidden_dim = ctx.session.hidden_dim;
     const int32_t layer = runtime_ev.ctx.temporal_layer_index;
-    const auto *projection =
-        detail::find_lm_transformer_projection(model, layer);
-    return layer >= 0 && layer < model.moshi_lm.num_layers && hidden_dim > 0 &&
+    return layer >= 0 && layer < runtime_ev.request.model.moshi_lm.num_layers &&
+           hidden_dim > 0 &&
            static_cast<uint64_t>(hidden_dim) <= ctx.capacity.hidden_dim &&
            static_cast<uint64_t>(hidden_dim) * 3u <=
-               ctx.capacity.hidden_dim * 3u &&
-           detail::tensor_shape(projection, hidden_dim, hidden_dim * 3) &&
-           detail::supported_mul_mat_dtype(
-               static_cast<detail::dtype>(projection->type));
+               ctx.capacity.hidden_dim * 3u;
   }
 };
 
@@ -690,14 +766,9 @@ struct guard_temporal_layer_out_projection_supported {
                   const action::context &ctx) const noexcept {
     const int32_t hidden_dim = ctx.session.hidden_dim;
     const int32_t layer = runtime_ev.ctx.temporal_layer_index;
-    const auto *projection = detail::find_lm_transformer_tensor(
-        runtime_ev.request.model, layer, "self_attn.out_projs.0.weight");
     return runtime_ev.ctx.temporal_layer_attention_ok && layer >= 0 &&
            layer < runtime_ev.request.model.moshi_lm.num_layers &&
-           hidden_dim > 0 &&
-           detail::tensor_shape(projection, hidden_dim, hidden_dim) &&
-           detail::supported_mul_mat_dtype(
-               static_cast<detail::dtype>(projection->type));
+           hidden_dim > 0;
   }
 };
 
@@ -739,16 +810,12 @@ struct guard_temporal_layer_residual_failed {
 struct guard_temporal_layer_norm2_supported {
   bool operator()(const event::step_run &runtime_ev,
                   const action::context &ctx) const noexcept {
-    const auto &model = runtime_ev.request.model;
     const int32_t hidden_dim = ctx.session.hidden_dim;
     const int32_t layer = runtime_ev.ctx.temporal_layer_index;
-    const auto *norm2 =
-        detail::find_lm_transformer_tensor(model, layer, "norm2.alpha");
     return runtime_ev.ctx.temporal_layer_residual_ok && layer >= 0 &&
-           layer < model.moshi_lm.num_layers && hidden_dim > 0 &&
-           static_cast<uint64_t>(hidden_dim) <= ctx.capacity.hidden_dim &&
-           detail::tensor_shape(norm2, hidden_dim) &&
-           static_cast<detail::dtype>(norm2->type) == detail::dtype::f32;
+           layer < runtime_ev.request.model.moshi_lm.num_layers &&
+           hidden_dim > 0 &&
+           static_cast<uint64_t>(hidden_dim) <= ctx.capacity.hidden_dim;
   }
 };
 
@@ -792,20 +859,9 @@ struct guard_temporal_layer_gating_in_supported {
                   const action::context &ctx) const noexcept {
     const int32_t hidden_dim = ctx.session.hidden_dim;
     const int32_t layer = runtime_ev.ctx.temporal_layer_index;
-    const auto *linear_in = detail::find_lm_transformer_tensor(
-        runtime_ev.request.model, layer, "gating.linear_in.weight");
-    int64_t projection_dim = 0;
-    if (linear_in != nullptr && linear_in->n_dims > 1) {
-      projection_dim = linear_in->dims[1];
-    }
     return runtime_ev.ctx.temporal_layer_norm2_ok && layer >= 0 &&
            layer < runtime_ev.request.model.moshi_lm.num_layers &&
-           hidden_dim > 0 && projection_dim > 0 && (projection_dim % 2) == 0 &&
-           static_cast<uint64_t>(projection_dim) <=
-               ctx.capacity.hidden_dim * 8u &&
-           detail::tensor_shape(linear_in, hidden_dim, projection_dim) &&
-           detail::supported_mul_mat_dtype(
-               static_cast<detail::dtype>(linear_in->type));
+           hidden_dim > 0;
   }
 };
 
@@ -832,21 +888,11 @@ struct guard_temporal_layer_gating_in_failed {
 
 struct guard_temporal_layer_silu_gate_supported {
   bool operator()(const event::step_run &runtime_ev,
-                  const action::context &ctx) const noexcept {
-    const auto *linear_in = detail::find_lm_transformer_tensor(
-        runtime_ev.request.model, runtime_ev.ctx.temporal_layer_index,
-        "gating.linear_in.weight");
-    int64_t projection_dim = 0;
-    if (linear_in != nullptr && linear_in->n_dims > 1) {
-      projection_dim = linear_in->dims[1];
-    }
-    const int64_t gate_dim = projection_dim / 2;
+                  const action::context &) const noexcept {
     return runtime_ev.ctx.temporal_layer_gating_in_ok &&
            runtime_ev.ctx.temporal_layer_index >= 0 &&
            runtime_ev.ctx.temporal_layer_index <
-               runtime_ev.request.model.moshi_lm.num_layers &&
-           gate_dim > 0 &&
-           static_cast<uint64_t>(gate_dim) <= ctx.capacity.hidden_dim * 4u;
+               runtime_ev.request.model.moshi_lm.num_layers;
   }
 };
 
@@ -890,22 +936,9 @@ struct guard_temporal_layer_gating_out_supported {
                   const action::context &ctx) const noexcept {
     const int32_t hidden_dim = ctx.session.hidden_dim;
     const int32_t layer = runtime_ev.ctx.temporal_layer_index;
-    const auto *linear_in = detail::find_lm_transformer_tensor(
-        runtime_ev.request.model, layer, "gating.linear_in.weight");
-    const auto *linear_out = detail::find_lm_transformer_tensor(
-        runtime_ev.request.model, layer, "gating.linear_out.weight");
-    int64_t projection_dim = 0;
-    if (linear_in != nullptr && linear_in->n_dims > 1) {
-      projection_dim = linear_in->dims[1];
-    }
-    const int64_t gate_dim = projection_dim / 2;
     return runtime_ev.ctx.temporal_layer_silu_gate_ok && layer >= 0 &&
            layer < runtime_ev.request.model.moshi_lm.num_layers &&
-           hidden_dim > 0 && gate_dim > 0 &&
-           static_cast<uint64_t>(gate_dim) <= ctx.capacity.hidden_dim * 4u &&
-           detail::tensor_shape(linear_out, gate_dim, hidden_dim) &&
-           detail::supported_mul_mat_dtype(
-               static_cast<detail::dtype>(linear_out->type));
+           hidden_dim > 0;
   }
 };
 

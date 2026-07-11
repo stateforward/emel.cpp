@@ -1509,6 +1509,37 @@ TEST_CASE("speech_moshi_generator_and_executor_cover_explicit_error_guards") {
   CHECK(moshi_executor::guard::guard_bound_root_operands_unsupported{}(
       executor_init_run, executor_ctx));
   executor_ctx.session.contract.lm.text_embedding.tensor = bound_text_embedding;
+  for (int32_t layer_index = 0; layer_index < lm.num_layers; ++layer_index) {
+    auto &layer = executor_ctx.session.contract.lm
+                      .temporal_layers[static_cast<size_t>(layer_index)];
+    const auto *projection = layer.split_input_projection.tensor != nullptr
+                                 ? layer.split_input_projection.tensor
+                                 : layer.fused_input_projection.tensor;
+    REQUIRE(projection != nullptr);
+    layer.split_input_projection.tensor = projection;
+    layer.fused_input_projection.tensor = projection;
+  }
+  CHECK(
+      moshi_executor::guard::guard_temporal_split_projection_layout_supported{}(
+          executor_init_run, executor_ctx));
+  moshi_executor::action::effect_bind_temporal_split_projection_layout{}(
+      executor_init_run, executor_ctx);
+  CHECK(executor_ctx.session.temporal_input_projections[0] ==
+        executor_ctx.session.contract.lm.temporal_layers[0]
+            .split_input_projection.tensor);
+  for (int32_t layer_index = 0; layer_index < lm.num_layers; ++layer_index) {
+    executor_ctx.session.contract.lm
+        .temporal_layers[static_cast<size_t>(layer_index)]
+        .split_input_projection.tensor = nullptr;
+  }
+  CHECK(
+      moshi_executor::guard::guard_temporal_fused_projection_layout_supported{}(
+          executor_init_run, executor_ctx));
+  moshi_executor::action::effect_bind_temporal_fused_projection_layout{}(
+      executor_init_run, executor_ctx);
+  CHECK_FALSE(
+      moshi_executor::guard::guard_temporal_projection_layout_unsupported{}(
+          executor_init_run, executor_ctx));
   executor_init.on_done =
       emel::callback<void(const moshi_executor::events::initialize_done &)>::
           from<moshi_callback_probe,

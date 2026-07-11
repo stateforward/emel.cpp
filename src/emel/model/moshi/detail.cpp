@@ -464,6 +464,20 @@ find_tensor(const emel::model::data &model_data,
   return nullptr;
 }
 
+bool bind_exact_tensor(const emel::model::data &model_data,
+                       const std::string_view name,
+                       tensor_view &view_out) noexcept {
+  const auto *tensor = find_tensor(model_data, name);
+  if (tensor == nullptr) {
+    return false;
+  }
+  view_out = tensor_view{
+      .tensor = tensor,
+      .name = emel::model::tensor_name_view(model_data, *tensor),
+  };
+  return true;
+}
+
 bool has_tensor(const emel::model::data &model_data,
                 const std::string_view name) noexcept {
   const auto *tensor = find_tensor(model_data, name);
@@ -682,8 +696,74 @@ emel::error::type validate_lm_contract(const emel::model::data &model_data,
     };
   }
 
+  if (lm.num_layers > emel::model::data::moshi_lm_hparams::k_max_delays) {
+    return emel::error::cast(emel::model::loader::error::model_invalid);
+  }
   for (int32_t block = 0; block < lm.num_layers; ++block) {
     if (!has_lm_transformer_block(model_data, block)) {
+      return emel::error::cast(emel::model::loader::error::model_invalid);
+    }
+    auto &layer = contract_out.temporal_layers[static_cast<size_t>(block)];
+    char name[128] = {};
+    int written = std::snprintf(name, sizeof(name),
+                                "lm.transformer.layers.%d.norm1.alpha", block);
+    if (written <= 0 || static_cast<size_t>(written) >= sizeof(name) ||
+        !bind_exact_tensor(model_data,
+                           std::string_view{name, static_cast<size_t>(written)},
+                           layer.norm1)) {
+      return emel::error::cast(emel::model::loader::error::model_invalid);
+    }
+    written = std::snprintf(
+        name, sizeof(name),
+        "lm.transformer.layers.%d.self_attn.in_projs.0.weight", block);
+    if (written <= 0 || static_cast<size_t>(written) >= sizeof(name)) {
+      return emel::error::cast(emel::model::loader::error::model_invalid);
+    }
+    (void)bind_exact_tensor(
+        model_data, std::string_view{name, static_cast<size_t>(written)},
+        layer.split_input_projection);
+    written = std::snprintf(name, sizeof(name),
+                            "lm.transformer.layers.%d.self_attn.in_proj_weight",
+                            block);
+    if (written <= 0 || static_cast<size_t>(written) >= sizeof(name)) {
+      return emel::error::cast(emel::model::loader::error::model_invalid);
+    }
+    (void)bind_exact_tensor(
+        model_data, std::string_view{name, static_cast<size_t>(written)},
+        layer.fused_input_projection);
+    written = std::snprintf(
+        name, sizeof(name),
+        "lm.transformer.layers.%d.self_attn.out_projs.0.weight", block);
+    if (written <= 0 || static_cast<size_t>(written) >= sizeof(name) ||
+        !bind_exact_tensor(model_data,
+                           std::string_view{name, static_cast<size_t>(written)},
+                           layer.output_projection)) {
+      return emel::error::cast(emel::model::loader::error::model_invalid);
+    }
+    written = std::snprintf(name, sizeof(name),
+                            "lm.transformer.layers.%d.norm2.alpha", block);
+    if (written <= 0 || static_cast<size_t>(written) >= sizeof(name) ||
+        !bind_exact_tensor(model_data,
+                           std::string_view{name, static_cast<size_t>(written)},
+                           layer.norm2)) {
+      return emel::error::cast(emel::model::loader::error::model_invalid);
+    }
+    written = std::snprintf(name, sizeof(name),
+                            "lm.transformer.layers.%d.gating.linear_in.weight",
+                            block);
+    if (written <= 0 || static_cast<size_t>(written) >= sizeof(name) ||
+        !bind_exact_tensor(model_data,
+                           std::string_view{name, static_cast<size_t>(written)},
+                           layer.gating_input)) {
+      return emel::error::cast(emel::model::loader::error::model_invalid);
+    }
+    written = std::snprintf(name, sizeof(name),
+                            "lm.transformer.layers.%d.gating.linear_out.weight",
+                            block);
+    if (written <= 0 || static_cast<size_t>(written) >= sizeof(name) ||
+        !bind_exact_tensor(model_data,
+                           std::string_view{name, static_cast<size_t>(written)},
+                           layer.gating_output)) {
       return emel::error::cast(emel::model::loader::error::model_invalid);
     }
   }

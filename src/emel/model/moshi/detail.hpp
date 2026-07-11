@@ -36,6 +36,16 @@ struct family_view {
   tensor_view first = {};
 };
 
+struct temporal_layer_contract {
+  tensor_view norm1 = {};
+  tensor_view split_input_projection = {};
+  tensor_view fused_input_projection = {};
+  tensor_view output_projection = {};
+  tensor_view norm2 = {};
+  tensor_view gating_input = {};
+  tensor_view gating_output = {};
+};
+
 struct lm_contract {
   family_view text_emb = {};
   family_view audio_emb = {};
@@ -67,6 +77,10 @@ struct lm_contract {
              static_cast<std::size_t>(
                  emel::model::data::moshi_lm_hparams::k_max_delays)>
       depformer_output_projections = {};
+  std::array<temporal_layer_contract,
+             static_cast<std::size_t>(
+                 emel::model::data::moshi_lm_hparams::k_max_delays)>
+      temporal_layers = {};
 };
 
 struct mimi_contract {

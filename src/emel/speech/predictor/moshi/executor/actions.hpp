@@ -43,6 +43,28 @@ struct effect_bind_contract {
   }
 };
 
+struct effect_bind_temporal_split_projection_layout {
+  void operator()(const event::initialize_run &, context &ctx) const noexcept {
+    for (int32_t layer = 0; layer < ctx.session.model->moshi_lm.num_layers;
+         ++layer) {
+      ctx.session.temporal_input_projections[static_cast<size_t>(layer)] =
+          ctx.session.contract.lm.temporal_layers[static_cast<size_t>(layer)]
+              .split_input_projection.tensor;
+    }
+  }
+};
+
+struct effect_bind_temporal_fused_projection_layout {
+  void operator()(const event::initialize_run &, context &ctx) const noexcept {
+    for (int32_t layer = 0; layer < ctx.session.model->moshi_lm.num_layers;
+         ++layer) {
+      ctx.session.temporal_input_projections[static_cast<size_t>(layer)] =
+          ctx.session.contract.lm.temporal_layers[static_cast<size_t>(layer)]
+              .fused_input_projection.tensor;
+    }
+  }
+};
+
 struct effect_bind_nonzero_sampling_seed {
   void operator()(const event::initialize_run &runtime_ev,
                   context &ctx) const noexcept {
@@ -362,13 +384,13 @@ struct effect_run_temporal_layer_norm_rms {
 struct effect_run_temporal_layer_norm_scale {
   void operator()(const event::step_run &runtime_ev,
                   context &ctx) const noexcept {
-    const auto &model = runtime_ev.request.model;
     const int32_t hidden_dim = ctx.session.hidden_dim;
     const int32_t layer = runtime_ev.ctx.temporal_layer_index;
     runtime_ev.ctx.temporal_layer_norm_ok = false;
 
     const auto *norm1 =
-        detail::find_lm_transformer_tensor(model, layer, "norm1.alpha");
+        ctx.session.contract.lm.temporal_layers[static_cast<size_t>(layer)]
+            .norm1.tensor;
     const auto *alpha = static_cast<const float *>(norm1->data);
 
     emel::kernel::event::op_mul mul_ev{
@@ -385,7 +407,6 @@ struct effect_run_temporal_layer_norm_scale {
 struct effect_bind_temporal_layer_projection {
   void operator()(const event::step_run &runtime_ev,
                   context &ctx) const noexcept {
-    const auto &model = runtime_ev.request.model;
     const int32_t hidden_dim = ctx.session.hidden_dim;
     const int32_t layer = runtime_ev.ctx.temporal_layer_index;
     runtime_ev.ctx.temporal_layer_projection_ok = false;
@@ -395,7 +416,7 @@ struct effect_bind_temporal_layer_projection {
                 0.0f);
 
     const auto *projection =
-        detail::find_lm_transformer_projection(model, layer);
+        ctx.session.temporal_input_projections[static_cast<size_t>(layer)];
     runtime_ev.ctx.projection_view_bound =
         detail::bind_tensor_view(*projection, runtime_ev.ctx.projection_view);
   }
@@ -607,7 +628,6 @@ struct effect_run_temporal_layer_attention {
 struct effect_bind_temporal_layer_out_projection {
   void operator()(const event::step_run &runtime_ev,
                   context &ctx) const noexcept {
-    const auto &model = runtime_ev.request.model;
     const int32_t hidden_dim = ctx.session.hidden_dim;
     const int32_t layer = runtime_ev.ctx.temporal_layer_index;
     runtime_ev.ctx.temporal_layer_out_projection_ok = false;
@@ -616,8 +636,9 @@ struct effect_bind_temporal_layer_out_projection {
     std::fill_n(runtime_ev.ctx.projection.data(),
                 static_cast<size_t>(hidden_dim), 0.0f);
 
-    const auto *projection = detail::find_lm_transformer_tensor(
-        model, layer, "self_attn.out_projs.0.weight");
+    const auto *projection =
+        ctx.session.contract.lm.temporal_layers[static_cast<size_t>(layer)]
+            .output_projection.tensor;
     runtime_ev.ctx.projection_view_bound =
         detail::bind_tensor_view(*projection, runtime_ev.ctx.projection_view);
   }
@@ -680,13 +701,13 @@ struct effect_run_temporal_layer_norm2_rms {
 struct effect_run_temporal_layer_norm2_scale {
   void operator()(const event::step_run &runtime_ev,
                   context &ctx) const noexcept {
-    const auto &model = runtime_ev.request.model;
     const int32_t hidden_dim = ctx.session.hidden_dim;
     const int32_t layer = runtime_ev.ctx.temporal_layer_index;
     runtime_ev.ctx.temporal_layer_norm2_ok = false;
 
     const auto *norm2 =
-        detail::find_lm_transformer_tensor(model, layer, "norm2.alpha");
+        ctx.session.contract.lm.temporal_layers[static_cast<size_t>(layer)]
+            .norm2.tensor;
     const auto *alpha = static_cast<const float *>(norm2->data);
 
     emel::kernel::event::op_mul mul_ev{
@@ -703,11 +724,10 @@ struct effect_run_temporal_layer_norm2_scale {
 struct effect_bind_temporal_layer_gating_in {
   void operator()(const event::step_run &runtime_ev,
                   context &ctx) const noexcept {
-    const auto &model = runtime_ev.request.model;
-    (void)ctx;
     const int32_t layer = runtime_ev.ctx.temporal_layer_index;
-    const auto *linear_in = detail::find_lm_transformer_tensor(
-        model, layer, "gating.linear_in.weight");
+    const auto *linear_in =
+        ctx.session.contract.lm.temporal_layers[static_cast<size_t>(layer)]
+            .gating_input.tensor;
     const uint64_t projection_dim = static_cast<uint64_t>(linear_in->dims[1]);
     runtime_ev.ctx.temporal_layer_gating_in_ok = false;
     runtime_ev.ctx.projection_view_bound = false;
@@ -723,11 +743,11 @@ struct effect_bind_temporal_layer_gating_in {
 struct effect_run_temporal_layer_gating_in {
   void operator()(const event::step_run &runtime_ev,
                   context &ctx) const noexcept {
-    const auto &model = runtime_ev.request.model;
     const int32_t hidden_dim = ctx.session.hidden_dim;
     const int32_t layer = runtime_ev.ctx.temporal_layer_index;
-    const auto *linear_in = detail::find_lm_transformer_tensor(
-        model, layer, "gating.linear_in.weight");
+    const auto *linear_in =
+        ctx.session.contract.lm.temporal_layers[static_cast<size_t>(layer)]
+            .gating_input.tensor;
     const uint64_t projection_dim = static_cast<uint64_t>(linear_in->dims[1]);
     runtime_ev.ctx.temporal_layer_gating_in_ok = false;
     emel::kernel::event::op_mul_mat projection_ev{
@@ -745,9 +765,10 @@ struct effect_run_temporal_layer_gating_in {
 struct effect_run_temporal_layer_silu_gate_silu {
   void operator()(const event::step_run &runtime_ev,
                   context &ctx) const noexcept {
-    const auto *linear_in = detail::find_lm_transformer_tensor(
-        runtime_ev.request.model, runtime_ev.ctx.temporal_layer_index,
-        "gating.linear_in.weight");
+    const auto *linear_in = ctx.session.contract.lm
+                                .temporal_layers[static_cast<size_t>(
+                                    runtime_ev.ctx.temporal_layer_index)]
+                                .gating_input.tensor;
     const uint64_t projection_dim = static_cast<uint64_t>(linear_in->dims[1]);
     const uint64_t gate_dim = projection_dim / 2u;
     runtime_ev.ctx.temporal_layer_silu_gate_silu_ok = false;
@@ -772,9 +793,10 @@ struct effect_run_temporal_layer_silu_gate_silu {
 struct effect_run_temporal_layer_silu_gate_mul {
   void operator()(const event::step_run &runtime_ev,
                   context &ctx) const noexcept {
-    const auto *linear_in = detail::find_lm_transformer_tensor(
-        runtime_ev.request.model, runtime_ev.ctx.temporal_layer_index,
-        "gating.linear_in.weight");
+    const auto *linear_in = ctx.session.contract.lm
+                                .temporal_layers[static_cast<size_t>(
+                                    runtime_ev.ctx.temporal_layer_index)]
+                                .gating_input.tensor;
     const uint64_t projection_dim = static_cast<uint64_t>(linear_in->dims[1]);
     const uint64_t gate_dim = projection_dim / 2u;
     const float *right = runtime_ev.ctx.gating_projection.data() + gate_dim;
@@ -794,13 +816,12 @@ struct effect_run_temporal_layer_silu_gate_mul {
 struct effect_bind_temporal_layer_gating_out {
   void operator()(const event::step_run &runtime_ev,
                   context &ctx) const noexcept {
-    const auto &model = runtime_ev.request.model;
     const int32_t hidden_dim = ctx.session.hidden_dim;
     const int32_t layer = runtime_ev.ctx.temporal_layer_index;
-    const auto *linear_in = detail::find_lm_transformer_tensor(
-        model, layer, "gating.linear_in.weight");
-    const auto *linear_out = detail::find_lm_transformer_tensor(
-        model, layer, "gating.linear_out.weight");
+    const auto &layer_contract =
+        ctx.session.contract.lm.temporal_layers[static_cast<size_t>(layer)];
+    const auto *linear_in = layer_contract.gating_input.tensor;
+    const auto *linear_out = layer_contract.gating_output.tensor;
     const uint64_t gate_dim = static_cast<uint64_t>(linear_in->dims[1]) / 2u;
     (void)gate_dim;
     runtime_ev.ctx.temporal_layer_gating_out_ok = false;
@@ -817,11 +838,11 @@ struct effect_bind_temporal_layer_gating_out {
 struct effect_run_temporal_layer_gating_out {
   void operator()(const event::step_run &runtime_ev,
                   context &ctx) const noexcept {
-    const auto &model = runtime_ev.request.model;
     const int32_t hidden_dim = ctx.session.hidden_dim;
     const int32_t layer = runtime_ev.ctx.temporal_layer_index;
-    const auto *linear_in = detail::find_lm_transformer_tensor(
-        model, layer, "gating.linear_in.weight");
+    const auto *linear_in =
+        ctx.session.contract.lm.temporal_layers[static_cast<size_t>(layer)]
+            .gating_input.tensor;
     const uint64_t gate_dim = static_cast<uint64_t>(linear_in->dims[1]) / 2u;
     runtime_ev.ctx.temporal_layer_gating_out_ok = false;
     emel::kernel::event::op_mul_mat projection_ev{
