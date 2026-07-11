@@ -10,9 +10,10 @@ namespace emel::speech::tokenizer {
 
 // Component variant selector. `unsupported` is a sentinel used by owners (e.g.
 // speech/transcriber dependencies) to model "no tokenizer injected"; owners
-// must guard dispatch on a supported kind. sm_any clamps out-of-range kinds to
-// the first variant, so constructing a facade with `unsupported` is safe as
-// long as no event is dispatched to it.
+// must guard dispatch on is_supported(kind()). Constructing a facade with
+// `unsupported` (or an out-of-range cast) is safe: the active machine clamps
+// to the first variant, but kind() preserves the requested value so the guard
+// stays truthful. No event may be dispatched to an unsupported facade.
 enum class tokenizer_kind : uint8_t {
   whisper = 0,
   unsupported = 255,

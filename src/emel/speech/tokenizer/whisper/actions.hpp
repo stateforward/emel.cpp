@@ -11,8 +11,16 @@ namespace emel::speech::tokenizer::whisper::action {
 // The tokenizer machine holds no persistent actor-owned state.
 struct context {};
 
+// Clears the public outputs before validation, mirroring the encoder and
+// decoder begin actions, so a rejected request never leaves a caller reading a
+// stale transcript size from a previous dispatch.
 struct effect_begin_detokenize {
-  void operator()(const event::detokenize_run &, context &) const noexcept {}
+  void operator()(const event::detokenize_run &runtime_ev,
+                  context &) const noexcept {
+    runtime_ev.ctx.err = emel::error::cast(error::none);
+    runtime_ev.ctx.transcript_size = 0;
+    runtime_ev.request.transcript_size_out = 0;
+  }
 };
 
 struct effect_detokenize {

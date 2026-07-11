@@ -6,10 +6,13 @@
 #include <span>
 #include <string>
 
+#include "emel/error/error.hpp"
+#include "emel/speech/tokenizer/any.hpp"
 #include "emel/speech/tokenizer/whisper/any.hpp"
 #include "emel/speech/tokenizer/whisper/detail.hpp"
 #include "emel/speech/tokenizer/whisper/events.hpp"
 #include "emel/speech/tokenizer/whisper/guards.hpp"
+#include "emel/speech/tokenizer/whisper/sm.hpp"
 
 namespace {
 
@@ -253,6 +256,67 @@ TEST_CASE("speech whisper tokenizer guard rejects malformed detokenize spans") {
                                                  null_tokens_ctx};
   CHECK_FALSE(whisper::guard::guard_tokenizer_json_valid{}(null_tokens_run));
   CHECK(whisper::guard::guard_tokenizer_json_invalid{}(null_tokens_run));
+}
+
+TEST_CASE("speech whisper tokenizer clears stale transcript size on rejection") {
+  namespace tokenizer = emel::speech::tokenizer;
+
+  const auto tokenizer_path =
+      repo_root() / "tests" / "models" / "tokenizer-tiny.json";
+  REQUIRE(std::filesystem::exists(tokenizer_path));
+  const std::string tokenizer_json = read_text_file(tokenizer_path);
+
+  tokenizer::whisper::sm machine{};
+  int32_t token_ids[] = {542, 33, 898, 60};
+  char transcript[16] = {};
+  int32_t transcript_size = -1;
+  emel::error::type err =
+      emel::error::cast(tokenizer::whisper::error::internal_error);
+
+  tokenizer::event::detokenize good_request{
+      tokenizer_json, std::span<const int32_t>{token_ids},
+      std::span<char>{transcript}, transcript_size};
+  good_request.error_out = &err;
+  REQUIRE(machine.process_event(good_request));
+  CHECK(err == emel::error::cast(tokenizer::whisper::error::none));
+  REQUIRE(transcript_size > 0);
+
+  // A rejected request must clear the caller's out-parameter instead of
+  // leaving the previous dispatch's positive size next to a failure result.
+  tokenizer::event::detokenize bad_request{"{}",
+                                           std::span<const int32_t>{token_ids},
+                                           std::span<char>{transcript},
+                                           transcript_size};
+  bad_request.error_out = &err;
+  CHECK_FALSE(machine.process_event(bad_request));
+  CHECK(err ==
+        emel::error::cast(tokenizer::whisper::error::tokenizer_json_invalid));
+  CHECK(transcript_size == 0);
+}
+
+TEST_CASE("speech tokenizer facade preserves unsupported kinds") {
+  namespace tokenizer = emel::speech::tokenizer;
+
+  static_assert(
+      tokenizer::any::is_supported(tokenizer::tokenizer_kind::whisper));
+  static_assert(
+      !tokenizer::any::is_supported(tokenizer::tokenizer_kind::unsupported));
+  static_assert(
+      !tokenizer::any::is_supported(static_cast<tokenizer::tokenizer_kind>(42)));
+
+  // kind() reports the requested value so owners can reject dispatch to an
+  // unsupported facade instead of silently running the default variant.
+  tokenizer::any unsupported_facade{tokenizer::tokenizer_kind::unsupported};
+  CHECK(unsupported_facade.kind() == tokenizer::tokenizer_kind::unsupported);
+  CHECK_FALSE(tokenizer::any::is_supported(unsupported_facade.kind()));
+
+  tokenizer::any cast_facade{static_cast<tokenizer::tokenizer_kind>(42)};
+  CHECK(cast_facade.kind() == static_cast<tokenizer::tokenizer_kind>(42));
+  CHECK_FALSE(tokenizer::any::is_supported(cast_facade.kind()));
+
+  cast_facade.set_kind(tokenizer::tokenizer_kind::whisper);
+  CHECK(cast_facade.kind() == tokenizer::tokenizer_kind::whisper);
+  CHECK(tokenizer::any::is_supported(cast_facade.kind()));
 }
 
 TEST_CASE("speech whisper tokenizer clamps compacted output to capacity") {
