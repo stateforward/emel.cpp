@@ -544,6 +544,36 @@ TEST_CASE("enriched moshi lm fixture loads hparams, vocab, and contract") {
   CHECK(contract.lm.linears.tensor_count == 4u);
 }
 
+TEST_CASE("moshi lm contract requires every split depformer input projection") {
+  auto loaded = load_fixture_or_skip("moshi-tiny-lm.gguf");
+  if (loaded.model == nullptr) {
+    return;
+  }
+
+  auto model = std::make_unique<emel::model::data>(*loaded.model);
+  const auto hide_tensor = [&model](const std::string_view target,
+                                    const size_t changed_character) {
+    for (uint32_t index = 0; index < model->n_tensors; ++index) {
+      auto &tensor = model->tensors[index];
+      const std::string_view name{
+          model->name_storage.data() + tensor.name_offset, tensor.name_length};
+      if (name == target) {
+        model->name_storage[tensor.name_offset + changed_character] = '9';
+        return true;
+      }
+    }
+    return false;
+  };
+
+  constexpr std::string_view split_name =
+      "lm.depformer.layers.0.self_attn.in_projs.1.weight";
+  REQUIRE(hide_tensor(split_name, split_name.find("in_projs.1") + 9u));
+  constexpr std::string_view fused_name =
+      "lm.depformer.layers.0.self_attn.in_proj_weight";
+  (void)hide_tensor(fused_name, fused_name.size() - 1u);
+  CHECK(moshi::validate_execution_contract(*model) != k_none);
+}
+
 TEST_CASE("enriched mimi fixture loads hparams and contract") {
   auto loaded = load_fixture_or_skip("mimi-tiny.gguf");
   if (loaded.model == nullptr) {

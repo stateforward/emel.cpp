@@ -751,7 +751,11 @@ int main(int argc, char **argv) {
     }
     std::fprintf(stderr, "\n");
   }
-  if (!session.is(stateforward::sml::state<generator::state_flushing>)) {
+  const bool session_finished =
+      flush_steps == 0
+          ? session.is(stateforward::sml::state<generator::state_ready>)
+          : session.is(stateforward::sml::state<generator::state_flushing>);
+  if (!session_finished) {
     std::fprintf(stderr, "PersonaPlex session failed err=%d\n",
                  static_cast<int>(session_err));
     return 1;

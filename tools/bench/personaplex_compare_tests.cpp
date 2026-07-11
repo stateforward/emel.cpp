@@ -121,8 +121,9 @@ TEST_CASE("personaplex compare keeps CPU and lane isolation explicit") {
         std::string::npos);
   CHECK(emel_source.find("#include <ggml") == std::string::npos);
   CHECK(emel_source.find(
-            "runtime_initialize.sampling_seed = config.sampling_seed") !=
+            "predictor_initialize.sampling_seed = config.sampling_seed") !=
         std::string::npos);
+  CHECK(emel_source.find("flush_steps == 0") != std::string::npos);
   CHECK(emel_source.find("sampling_seed = 1234") == std::string::npos);
   CHECK(emel_source.find(".max_blocks = 256") == std::string::npos);
   CHECK(compare_source.find("\"--n-q\", \"8\"") == std::string::npos);

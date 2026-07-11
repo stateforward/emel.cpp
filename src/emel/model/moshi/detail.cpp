@@ -888,7 +888,7 @@ emel::error::type validate_lm_contract(const emel::model::data &model_data,
         if (written <= 0 || static_cast<size_t>(written) >= sizeof(name)) {
           return emel::error::cast(emel::model::loader::error::model_invalid);
         }
-        (void)bind_exact_tensor(
+        const bool split_input_bound = bind_exact_tensor(
             model_data, std::string_view{name, static_cast<size_t>(written)},
             codebook_layer.split_input_projection);
         written = std::snprintf(
@@ -897,9 +897,12 @@ emel::error::type validate_lm_contract(const emel::model::data &model_data,
         if (written <= 0 || static_cast<size_t>(written) >= sizeof(name)) {
           return emel::error::cast(emel::model::loader::error::model_invalid);
         }
-        (void)bind_exact_tensor(
+        const bool fused_input_bound = bind_exact_tensor(
             model_data, std::string_view{name, static_cast<size_t>(written)},
             codebook_layer.fused_input_projection);
+        if (!split_input_bound && !fused_input_bound) {
+          return emel::error::cast(emel::model::loader::error::model_invalid);
+        }
         written = std::snprintf(
             name, sizeof(name),
             "lm.depformer.layers.%d.self_attn.out_projs.%d.weight", block,

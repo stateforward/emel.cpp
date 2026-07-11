@@ -612,6 +612,7 @@ tests/sm/sm_external_completion_tests.cpp
 tests/sm/sm_policy_tests.cpp
 tests/speech/decoder/whisper/lifecycle_tests.cpp
 tests/speech/encoder/whisper/detail_tests.cpp
+tests/speech/tokenizer/moshi/lifecycle_tests.cpp
 tests/speech/tokenizer/whisper_tests.cpp
 tests/tensor/view/lifecycle_tests.cpp
 tests/text/conditioner/text_conditioner_tests.cpp
