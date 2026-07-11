@@ -9,7 +9,7 @@
 namespace emel::model::sortformer {
 
 struct tensor_view {
-  const emel::model::data::tensor_record * tensor = nullptr;
+  const emel::model::data::tensor_record *tensor = nullptr;
   std::string_view name = {};
 };
 
@@ -20,7 +20,7 @@ struct family_view {
 };
 
 struct execution_contract {
-  const emel::model::data * model = nullptr;
+  const emel::model::data *model = nullptr;
   int32_t sample_rate = 0;
   int32_t speaker_count = 0;
   int32_t frame_shift_ms = 0;
@@ -35,7 +35,8 @@ struct execution_contract {
   family_view transformer_encoder = {};
 };
 
-emel::error::type build_execution_contract(const emel::model::data & model_data,
-                                           execution_contract & contract_out) noexcept;
+emel::error::type
+build_execution_contract(const emel::model::data &model_data,
+                         execution_contract &contract_out) noexcept;
 
-}  // namespace emel::model::sortformer
+} // namespace emel::model::sortformer

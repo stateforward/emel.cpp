@@ -148,8 +148,11 @@ add_executable(docsgen docsgen.cpp "${GEN_HEADER}" ${GEN_SOURCES})
 # The docs generator is an introspection utility, not runtime code. Release optimization makes
 # generated SML registration translation units dominate quality-gate latency without improving
 # the generated output.
+# Large transition tables (e.g. speech/generator/moshi/executor) exceed clang's default
+# 256-level bracket-depth limit when docsgen instantiates their full transition type lists.
 target_compile_options(docsgen PRIVATE
   "$<$<COMPILE_LANG_AND_ID:CXX,Clang,AppleClang,GNU>:-O0;-g0;-fno-sanitize=all>"
+  "$<$<COMPILE_LANG_AND_ID:CXX,Clang,AppleClang>:-fbracket-depth=1024>"
   "$<$<COMPILE_LANG_AND_ID:CXX,MSVC>:/Od>"
 )
 

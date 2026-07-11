@@ -223,10 +223,8 @@ process_capture run_whisper_benchmark(const std::filesystem::path &tmp_dir,
 process_capture run_whisper_benchmark_defaults(
     const std::filesystem::path &tmp_dir,
     const std::filesystem::path &emel_model,
-    const std::filesystem::path &ref_model,
-    const std::string &emel_transcript,
-    const std::string &ref_transcript,
-    const std::string &extra_env = {}) {
+    const std::filesystem::path &ref_model, const std::string &emel_transcript,
+    const std::string &ref_transcript, const std::string &extra_env = {}) {
   const auto stdout_path = tmp_dir / "stdout.txt";
   const auto stderr_path = tmp_dir / "stderr.txt";
   const auto fake_emel = prepare_fake_runner(tmp_dir);
@@ -290,7 +288,8 @@ process_capture run_whisper_compare(const std::filesystem::path &tmp_dir,
 } // namespace
 
 TEST_CASE("whisper emel parity runner stays on public runtime surfaces") {
-  const std::string source = read_file(whisper_emel_parity_runner_source_path());
+  const std::string source =
+      read_file(whisper_emel_parity_runner_source_path());
   REQUIRE(!source.empty());
 
   CHECK(source.find("emel/model/whisper/detail.hpp") == std::string::npos);
@@ -301,24 +300,23 @@ TEST_CASE("whisper emel parity runner stays on public runtime surfaces") {
   CHECK(source.find("emel/speech/tokenizer/whisper/detail.hpp") ==
         std::string::npos);
   CHECK(source.find("emel/model/whisper/any.hpp") != std::string::npos);
-  CHECK(source.find("emel/speech/recognizer/sm.hpp") != std::string::npos);
-  CHECK(source.find("emel/speech/recognizer_routes/whisper/any.hpp") !=
+  CHECK(source.find("emel/speech/transcriber/sm.hpp") != std::string::npos);
+  CHECK(source.find("emel/speech/encoder/whisper/any.hpp") !=
         std::string::npos);
-  CHECK(source.find("emel/speech/encoder/whisper/sm.hpp") ==
+  CHECK(source.find("emel/speech/decoder/whisper/any.hpp") !=
         std::string::npos);
-  CHECK(source.find("emel/speech/decoder/whisper/sm.hpp") ==
-        std::string::npos);
-  CHECK(source.find("emel::speech::encoder::whisper::sm") ==
-        std::string::npos);
-  CHECK(source.find("emel::speech::decoder::whisper::sm") ==
-        std::string::npos);
+  CHECK(source.find("emel/speech/encoder/whisper/sm.hpp") == std::string::npos);
+  CHECK(source.find("emel/speech/decoder/whisper/sm.hpp") == std::string::npos);
+  CHECK(source.find("emel::speech::encoder::whisper::sm") == std::string::npos);
+  CHECK(source.find("emel::speech::decoder::whisper::sm") == std::string::npos);
   CHECK(source.find("decode_token_ids") == std::string::npos);
   CHECK(source.find("emel/speech/tokenizer/whisper/any.hpp") !=
         std::string::npos);
 }
 
 TEST_CASE("whisper emel parity runner escapes transcript JSON") {
-  const std::string source = read_file(whisper_emel_parity_runner_source_path());
+  const std::string source =
+      read_file(whisper_emel_parity_runner_source_path());
   REQUIRE(!source.empty());
 
   CHECK(source.find("json_escape_string") != std::string::npos);
@@ -357,7 +355,8 @@ TEST_CASE("whisper emel parity runner validates tensor name materialization") {
                     "model_image)") != std::string::npos);
 }
 
-TEST_CASE("whisper emel parity runner sizes transcript buffer from tokenizer vocab") {
+TEST_CASE(
+    "whisper emel parity runner sizes transcript buffer from tokenizer vocab") {
   const std::string source =
       read_file(whisper_emel_parity_runner_source_path());
   REQUIRE(!source.empty());
@@ -369,8 +368,7 @@ TEST_CASE("whisper emel parity runner sizes transcript buffer from tokenizer voc
   CHECK(source.find("k_transcript_bytes_per_token") == std::string::npos);
   CHECK(source.find("generated_tokens.size() * k_transcript_bytes_per_token") ==
         std::string::npos);
-  CHECK(source.find("std::vector<char> transcript(64u)") ==
-        std::string::npos);
+  CHECK(source.find("std::vector<char> transcript(64u)") == std::string::npos);
 }
 
 TEST_CASE("whisper normalizer rejects negative reader sizes") {
@@ -404,8 +402,8 @@ TEST_CASE("whisper normalizer rejects negative reader sizes") {
 
   const std::string command =
       "python3 " + quote_arg_posix(script_path.string()) + " " +
-      quote_arg_posix(whisper_normalize_model_script_path().string()) +
-      " > " + quote_arg_posix(stdout_path.string()) + " 2> " +
+      quote_arg_posix(whisper_normalize_model_script_path().string()) + " > " +
+      quote_arg_posix(stdout_path.string()) + " 2> " +
       quote_arg_posix(stderr_path.string());
   const auto capture = run_command_capture(command, stdout_path, stderr_path);
   CHECK(capture.exit_code == 0);
@@ -515,8 +513,7 @@ TEST_CASE("whisper compare hard-fails transcript mismatch") {
       run_whisper_compare(tmp_dir, model, model, "[C]", "[Bell]");
   CHECK(capture.exit_code == 1);
   CHECK(capture.stderr_text.empty());
-  CHECK(capture.stdout_text.find("status=bounded_drift") !=
-        std::string::npos);
+  CHECK(capture.stdout_text.find("status=bounded_drift") != std::string::npos);
   CHECK(capture.stdout_text.find("reason=transcript_mismatch") !=
         std::string::npos);
   const std::string summary = read_file(tmp_dir / "out" / "summary.json");
@@ -545,10 +542,12 @@ TEST_CASE("whisper compare exact match succeeds") {
   CHECK(capture.stdout_text.find("status=exact_match") != std::string::npos);
   CHECK(capture.stdout_text.find("reason=ok") != std::string::npos);
   const std::string summary = read_file(tmp_dir / "out" / "summary.json");
-  CHECK(summary.find("\"backend_id\": \"emel.speech.recognizer.whisper\"") !=
+  CHECK(summary.find("\"backend_id\": \"emel.speech.transcriber.whisper\"") !=
         std::string::npos);
-  CHECK(summary.find("\"runtime_surface\": \"speech/recognizer+speech/"
-                     "recognizer_routes/whisper\"") != std::string::npos);
+  CHECK(summary.find(
+            "\"runtime_surface\": \"speech/transcriber+speech/encoder/whisper+"
+            "speech/decoder/whisper+speech/tokenizer/whisper\"") !=
+        std::string::npos);
 #endif
 }
 
@@ -711,9 +710,8 @@ TEST_CASE("whisper benchmark uses deterministic reference policy flags") {
   const auto model = tmp_dir / "model.bin";
   write_text_file(model, "same-model");
 
-  const auto capture =
-      run_whisper_benchmark(tmp_dir, model, model, "[C]", "[C]",
-                            "REF_FAKE_SLEEP=0.2");
+  const auto capture = run_whisper_benchmark(tmp_dir, model, model, "[C]",
+                                             "[C]", "REF_FAKE_SLEEP=0.2");
   CHECK(capture.exit_code == 0);
   CHECK(capture.stderr_text.empty());
   const std::string args = read_file(tmp_dir / "reference_args.txt");
@@ -723,9 +721,11 @@ TEST_CASE("whisper benchmark uses deterministic reference policy flags") {
   CHECK(args.find("--no-fallback\n") != std::string::npos);
   const std::string summary =
       read_file(tmp_dir / "out" / "benchmark_summary.json");
-  CHECK(summary.find("\"backend_id\": \"emel.speech.recognizer.whisper\"") !=
+  CHECK(summary.find("\"backend_id\": \"emel.speech.transcriber.whisper\"") !=
         std::string::npos);
-  CHECK(summary.find("\"runtime_surface\": \"speech/recognizer+speech/"
-                     "recognizer_routes/whisper\"") != std::string::npos);
+  CHECK(summary.find(
+            "\"runtime_surface\": \"speech/transcriber+speech/encoder/whisper+"
+            "speech/decoder/whisper+speech/tokenizer/whisper\"") !=
+        std::string::npos);
 #endif
 }

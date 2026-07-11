@@ -19,11 +19,12 @@
 #include "emel/model/detail.hpp"
 #include "emel/model/loader/errors.hpp"
 #include "emel/model/whisper/detail.hpp"
+#include "emel/speech/decoder/whisper/any.hpp"
+#include "emel/speech/encoder/whisper/any.hpp"
 #include "emel/speech/encoder/whisper/detail.hpp"
 #include "emel/speech/encoder/whisper/sm.hpp"
-#include "emel/speech/recognizer/sm.hpp"
-#include "emel/speech/recognizer_routes/whisper/any.hpp"
 #include "emel/speech/tokenizer/whisper/any.hpp"
+#include "emel/speech/transcriber/sm.hpp"
 
 namespace {
 
@@ -536,7 +537,7 @@ TEST_CASE("whisper_encoder_runs_q8_f32_aux_variant_from_public_event") {
   CHECK(machine.q4_1_dispatch_count() == 0u);
 }
 
-TEST_CASE("whisper_recognizer_runs_fixture_through_public_actor") {
+TEST_CASE("whisper_transcriber_runs_fixture_through_public_actor") {
   auto loaded = load_fixture_or_skip();
   if (loaded.model == nullptr) {
     return;
@@ -544,16 +545,20 @@ TEST_CASE("whisper_recognizer_runs_fixture_through_public_actor") {
 
   const std::string tokenizer_json = read_text_file(whisper_tokenizer_path());
   const std::vector<float> pcm = deterministic_pcm(320);
-  namespace recognizer = emel::speech::recognizer;
-  namespace route = emel::speech::recognizer_routes::whisper;
+  namespace transcriber = emel::speech::transcriber;
+  namespace whisper_decoder = emel::speech::decoder::whisper;
+  namespace whisper_encoder = emel::speech::encoder::whisper;
 
   std::vector<float> encoder_workspace(static_cast<size_t>(
-      route::required_encoder_workspace_floats(pcm.size())));
-  std::vector<float> encoder_state(
-      static_cast<size_t>(route::required_encoder_state_floats(pcm.size())));
+      whisper_encoder::required_workspace_floats(pcm.size())));
+  std::vector<float> encoder_state(static_cast<size_t>(
+      whisper_encoder::required_encoder_output_floats(pcm.size())));
+  const uint64_t decoder_input_frames =
+      whisper_encoder::encoder_frame_count_for_mel_frames(
+          whisper_encoder::mel_frame_count_for_samples(pcm.size()));
   std::vector<float> decoder_workspace(static_cast<size_t>(
-      route::required_decoder_workspace_floats(pcm.size())));
-  std::vector<float> logits(static_cast<size_t>(route::logits_size()));
+      whisper_decoder::required_workspace_floats(decoder_input_frames)));
+  std::vector<float> logits(static_cast<size_t>(whisper_decoder::vocab_size()));
   std::array<int32_t, 32> generated_tokens = {};
   std::array<char, 64> transcript = {};
   int32_t transcript_size = -1;
@@ -563,23 +568,36 @@ TEST_CASE("whisper_recognizer_runs_fixture_through_public_actor") {
   int32_t width = 0;
   uint64_t encoder_digest = 0u;
   uint64_t decoder_digest = 0u;
-  emel::error::type err = emel::error::cast(recognizer::error::none);
+  emel::error::type err = emel::error::cast(transcriber::error::none);
 
-  recognizer::sm<route::route> machine{};
-  recognizer::event::initialize initialize_ev{
+  const transcriber::dependencies transcriber_deps{
+      .encoder_kind = emel::speech::encoder::encoder_kind::whisper,
+      .decoder_kind = emel::speech::decoder::decoder_kind::whisper,
+      .tokenizer_kind = emel::speech::tokenizer::tokenizer_kind::whisper,
+      .encoder_contract =
+          whisper_encoder::bind_execution_contract(*loaded.model),
+      .decoder_contract =
+          whisper_decoder::bind_execution_contract(*loaded.model),
+      .decode_policy =
+          emel::speech::tokenizer::whisper::tiny_asr_decode_policy(),
+      .tokenizer_sha256 =
+          emel::speech::tokenizer::whisper::tiny_tokenizer_sha256(),
+  };
+  transcriber::sm machine{transcriber_deps};
+  transcriber::event::initialize initialize_ev{
       *loaded.model,
-      recognizer::event::tokenizer_assets{
+      transcriber::event::tokenizer_assets{
           .model_json = tokenizer_json,
           .sha256 = emel::speech::tokenizer::whisper::tiny_tokenizer_sha256(),
       }};
   initialize_ev.error_out = &err;
 
   REQUIRE(machine.process_event(initialize_ev));
-  CHECK(err == emel::error::cast(recognizer::error::none));
+  CHECK(err == emel::error::cast(transcriber::error::none));
 
-  recognizer::event::recognize recognize_ev{
+  transcriber::event::recognize recognize_ev{
       *loaded.model,
-      recognizer::event::tokenizer_assets{
+      transcriber::event::tokenizer_assets{
           .model_json = tokenizer_json,
           .sha256 = emel::speech::tokenizer::whisper::tiny_tokenizer_sha256(),
       },
@@ -593,7 +611,7 @@ TEST_CASE("whisper_recognizer_runs_fixture_through_public_actor") {
       width,
       encoder_digest,
       decoder_digest};
-  recognize_ev.storage = recognizer::event::runtime_storage{
+  recognize_ev.storage = transcriber::event::runtime_storage{
       .encoder_workspace = std::span<float>{encoder_workspace},
       .encoder_state = std::span<float>{encoder_state},
       .decoder_workspace = std::span<float>{decoder_workspace},
@@ -603,7 +621,7 @@ TEST_CASE("whisper_recognizer_runs_fixture_through_public_actor") {
   recognize_ev.error_out = &err;
 
   REQUIRE(machine.process_event(recognize_ev));
-  CHECK(err == emel::error::cast(recognizer::error::none));
+  CHECK(err == emel::error::cast(transcriber::error::none));
   CHECK(transcript_size >= 0);
   CHECK(selected_token > 0);
   CHECK(confidence >= 0.0f);

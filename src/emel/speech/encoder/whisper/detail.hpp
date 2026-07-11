@@ -18,6 +18,7 @@
 #include "emel/kernel/events.hpp"
 #include "emel/kernel/sm.hpp"
 #include "emel/model/data.hpp"
+#include "emel/speech/encoder/events.hpp"
 #include "emel/speech/encoder/whisper/errors.hpp"
 
 namespace emel::speech::encoder::whisper::detail {
@@ -44,15 +45,7 @@ inline constexpr float k_pi = 3.14159265358979323846f;
 inline constexpr float k_layer_norm_epsilon = 1.0e-5f;
 inline constexpr float k_log_zero_guard = 1.0e-10f;
 
-struct execution_contract {
-  const emel::model::data *model = nullptr;
-  int32_t sample_rate = 0;
-  int32_t mel_bin_count = 0;
-  int32_t embedding_length = 0;
-  int32_t feed_forward_length = 0;
-  int32_t attention_head_count = 0;
-  int32_t encoder_block_count = 0;
-};
+using execution_contract = emel::speech::encoder::execution_contract;
 
 inline execution_contract
 bind_execution_contract(const emel::model::data &model) noexcept {

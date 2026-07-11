@@ -185,6 +185,8 @@ environments, while Zig remains the default for day-to-day builds.
 - [`.planning/architecture/speech_encoder_whisper.md`](.planning/architecture/speech_encoder_whisper.md)
 - [`.planning/architecture/speech_predictor_moshi_executor.md`](.planning/architecture/speech_predictor_moshi_executor.md)
 - [`.planning/architecture/speech_tokenizer_moshi.md`](.planning/architecture/speech_tokenizer_moshi.md)
+- [`.planning/architecture/speech_tokenizer_whisper.md`](.planning/architecture/speech_tokenizer_whisper.md)
+- [`.planning/architecture/speech_transcriber.md`](.planning/architecture/speech_transcriber.md)
 - [`.planning/architecture/tensor_view.md`](.planning/architecture/tensor_view.md)
 - [`.planning/architecture/text_conditioner.md`](.planning/architecture/text_conditioner.md)
 - [`.planning/architecture/text_detokenizer.md`](.planning/architecture/text_detokenizer.md)

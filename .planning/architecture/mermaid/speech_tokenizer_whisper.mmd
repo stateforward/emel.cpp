@@ -1,0 +1,42 @@
+stateDiagram-v2
+  direction TB
+  [*] --> state_ready
+  state_ready --> state_json_decision : detokenize_run [always] / effect_begin_detokenize_
+  state_json_decision --> state_detokenizing : completion_detokenize_run_ [guard_detokenize_request_valid_] / effect_detokenize_
+  state_json_decision --> state_error_error_out_decision : completion_detokenize_run_ [guard_tokenizer_json_invalid_] / effect_mark_tokenizer_json_invalid_
+  state_json_decision --> state_error_error_out_decision : completion_detokenize_run_ [guard_token_ids_invalid_] / effect_mark_token_ids_invalid_
+  state_detokenizing --> state_success_error_out_decision : completion_detokenize_run_ [always] / none
+  state_success_error_out_decision --> state_success_callback_decision : completion_detokenize_run_ [guard_has_error_out_] / effect_store_error_out_
+  state_success_error_out_decision --> state_success_callback_decision : completion_detokenize_run_ [guard_no_error_out_] / none
+  state_error_error_out_decision --> state_error_callback_decision : completion_detokenize_run_ [guard_has_error_out_] / effect_store_error_out_
+  state_error_error_out_decision --> state_error_callback_decision : completion_detokenize_run_ [guard_no_error_out_] / none
+  state_success_callback_decision --> state_done : completion_detokenize_run_ [guard_has_done_callback_] / effect_emit_done_
+  state_success_callback_decision --> state_done : completion_detokenize_run_ [guard_no_done_callback_] / none
+  state_error_callback_decision --> state_errored : completion_detokenize_run_ [guard_has_error_callback_] / effect_emit_error_
+  state_error_callback_decision --> state_errored : completion_detokenize_run_ [guard_no_error_callback_] / none
+  state_done --> state_ready : completion_detokenize_run_ [always] / none
+  state_errored --> state_ready : completion_detokenize_run_ [always] / none
+  state_ready --> state_validate_decision : validate_run [always] / effect_begin_validate_
+  state_validate_decision --> state_validate_success_error_out_decision : completion_validate_run_ [guard_validate_supported_] / none
+  state_validate_decision --> state_validate_error_error_out_decision : completion_validate_run_ [guard_validate_json_invalid_] / effect_mark_validate_json_invalid_
+  state_validate_decision --> state_validate_error_error_out_decision : completion_validate_run_ [guard_validate_policy_unsupported_] / effect_mark_validate_policy_unsupported_
+  state_validate_success_error_out_decision --> state_validate_done : completion_validate_run_ [guard_validate_has_error_out_] / effect_store_validate_error_out_
+  state_validate_success_error_out_decision --> state_validate_done : completion_validate_run_ [guard_validate_no_error_out_] / none
+  state_validate_error_error_out_decision --> state_validate_errored : completion_validate_run_ [guard_validate_has_error_out_] / effect_store_validate_error_out_
+  state_validate_error_error_out_decision --> state_validate_errored : completion_validate_run_ [guard_validate_no_error_out_] / none
+  state_validate_done --> state_ready : completion_validate_run_ [always] / none
+  state_validate_errored --> state_ready : completion_validate_run_ [always] / none
+  state_ready --> state_ready : _ [always] / effect_on_unexpected_
+  state_json_decision --> state_ready : _ [always] / effect_on_unexpected_
+  state_detokenizing --> state_ready : _ [always] / effect_on_unexpected_
+  state_success_error_out_decision --> state_ready : _ [always] / effect_on_unexpected_
+  state_success_callback_decision --> state_ready : _ [always] / effect_on_unexpected_
+  state_error_error_out_decision --> state_ready : _ [always] / effect_on_unexpected_
+  state_error_callback_decision --> state_ready : _ [always] / effect_on_unexpected_
+  state_done --> state_ready : _ [always] / effect_on_unexpected_
+  state_errored --> state_ready : _ [always] / effect_on_unexpected_
+  state_validate_decision --> state_ready : _ [always] / effect_on_unexpected_
+  state_validate_success_error_out_decision --> state_ready : _ [always] / effect_on_unexpected_
+  state_validate_error_error_out_decision --> state_ready : _ [always] / effect_on_unexpected_
+  state_validate_done --> state_ready : _ [always] / effect_on_unexpected_
+  state_validate_errored --> state_ready : _ [always] / effect_on_unexpected_

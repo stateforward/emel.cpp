@@ -129,3 +129,28 @@ TEST_CASE("sm_any_normalizes_invalid_kind_to_default") {
   any.process_event(event_alpha{&value});
   CHECK(value == 11);
 }
+
+TEST_CASE("sm_any_preserves_requested_kind_and_reports_support") {
+  static_assert(any_sm::is_supported_kind(test_kind::first));
+  static_assert(any_sm::is_supported_kind(test_kind::second));
+  static_assert(!any_sm::is_supported_kind(static_cast<test_kind>(42)));
+  static_assert(!any_sm::is_supported_kind(static_cast<test_kind>(255)));
+
+  // The active machine clamps to the default variant, but kind() preserves the
+  // requested value so owners can reject dispatch to an unsupported facade.
+  any_sm constructed_invalid{static_cast<test_kind>(42)};
+  CHECK(constructed_invalid.kind() == static_cast<test_kind>(42));
+  CHECK_FALSE(any_sm::is_supported_kind(constructed_invalid.kind()));
+
+  any_sm reassigned{test_kind::second};
+  CHECK(reassigned.kind() == test_kind::second);
+  reassigned.set_kind(static_cast<test_kind>(255));
+  CHECK(reassigned.kind() == static_cast<test_kind>(255));
+  CHECK_FALSE(any_sm::is_supported_kind(reassigned.kind()));
+
+  reassigned.set_kind(test_kind::first);
+  CHECK(reassigned.kind() == test_kind::first);
+  int32_t value = 0;
+  reassigned.process_event(event_alpha{&value});
+  CHECK(value == 11);
+}

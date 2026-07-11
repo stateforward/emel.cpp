@@ -224,9 +224,9 @@ struct synthetic_model_fixture {
   }
 };
 
-emel::model::sortformer::detail::execution_contract make_synthetic_contract(
+emel::model::sortformer::execution_contract make_synthetic_contract(
     const emel::model::data & model) noexcept {
-  emel::model::sortformer::detail::execution_contract contract = {};
+  emel::model::sortformer::execution_contract contract = {};
   contract.model = &model;
   contract.sample_rate = pipeline_detail::k_sample_rate;
   contract.speaker_count = pipeline_detail::k_speaker_count;

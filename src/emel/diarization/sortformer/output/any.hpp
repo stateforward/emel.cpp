@@ -24,4 +24,4 @@ struct segment_record {
   float max_probability = 0.0f;
 };
 
-}  // namespace emel::diarization::sortformer::output
+} // namespace emel::diarization::sortformer::output
