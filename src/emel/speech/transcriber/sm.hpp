@@ -14,6 +14,7 @@ namespace emel::speech::transcriber {
 struct state_uninitialized {};
 struct state_initializing {};
 struct state_tokenizer_decision {};
+struct state_tokenizer_validation_decision {};
 struct state_model_support_decision {};
 struct state_initialize_success {};
 struct state_initialize_error_out_decision {};
@@ -43,8 +44,12 @@ speech transcriber engine (single source of truth)
 
 state purpose
 - initialize validates the injected dependencies against the request: the
-  tokenizer assets must match the pinned checksum and the component contracts
-  must have been bound against the same model the event carries.
+  tokenizer assets must match the pinned checksum, the component contracts
+  must have been bound against the same model the event carries, and the
+  injected tokenizer actor must accept the tokenizer JSON and the bound decode
+  policy (component-driven asset validation), so a transcriber never reaches
+  state_ready with assets or a decode policy the variant would reject at the
+  first detokenize after pipeline work already ran.
 - recognize drives the encode -> decode -> detokenize pipeline by dispatching
   into the injected component actors (speech/encoder, speech/decoder,
   speech/tokenizer facades); each phase outcome is an explicit decision state.
@@ -92,12 +97,22 @@ struct model {
 
       , sml::state<state_tokenizer_decision> <= sml::state<state_initializing>
           + sml::completion<event::initialize_run>
-      , sml::state<state_model_support_decision> <= sml::state<state_tokenizer_decision>
+      , sml::state<state_tokenizer_validation_decision> <= sml::state<state_tokenizer_decision>
           + sml::completion<event::initialize_run>
               [ guard::guard_initialize_tokenizer_supported{} ]
+          / action::effect_validate_tokenizer_assets
       , sml::state<state_initialize_error_out_decision> <= sml::state<state_tokenizer_decision>
           + sml::completion<event::initialize_run>
               [ guard::guard_initialize_tokenizer_unsupported{} ]
+          / action::effect_mark_tokenizer_invalid
+      , sml::state<state_model_support_decision> <=
+          sml::state<state_tokenizer_validation_decision>
+          + sml::completion<event::initialize_run>
+              [ guard::guard_tokenizer_validation_accepted{} ]
+      , sml::state<state_initialize_error_out_decision> <=
+          sml::state<state_tokenizer_validation_decision>
+          + sml::completion<event::initialize_run>
+              [ guard::guard_tokenizer_validation_rejected{} ]
           / action::effect_mark_tokenizer_invalid
       , sml::state<state_initialize_success> <= sml::state<state_model_support_decision>
           + sml::completion<event::initialize_run>

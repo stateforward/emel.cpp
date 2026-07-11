@@ -3,6 +3,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <limits>
 #include <span>
 #include <string>
 
@@ -135,6 +136,13 @@ TEST_CASE("speech whisper tokenizer rejects malformed token metadata") {
   char negative_id[8] = {};
   const uint32_t negative_id_size = whisper::write_i32(-42, negative_id);
   CHECK(std::string_view{negative_id, negative_id_size} == "-42");
+
+  // The minimum int32 has no in-range positive counterpart; the unsigned
+  // magnitude arithmetic must render it without signed-negation overflow.
+  char min_id[16] = {};
+  const uint32_t min_id_size =
+      whisper::write_i32(std::numeric_limits<int32_t>::min(), min_id);
+  CHECK(std::string_view{min_id, min_id_size} == "-2147483648");
 
   CHECK_FALSE(whisper::validate_tiny_control_tokens("{}"));
   CHECK_FALSE(whisper::contains_token_role("{}", "<|endoftext|>",
@@ -317,6 +325,84 @@ TEST_CASE("speech tokenizer facade preserves unsupported kinds") {
   cast_facade.set_kind(tokenizer::tokenizer_kind::whisper);
   CHECK(cast_facade.kind() == tokenizer::tokenizer_kind::whisper);
   CHECK(tokenizer::any::is_supported(cast_facade.kind()));
+}
+
+TEST_CASE("speech whisper tokenizer rejects negative token ids") {
+  namespace tokenizer = emel::speech::tokenizer;
+
+  const auto tokenizer_path =
+      repo_root() / "tests" / "models" / "tokenizer-tiny.json";
+  REQUIRE(std::filesystem::exists(tokenizer_path));
+  const std::string tokenizer_json = read_text_file(tokenizer_path);
+
+  tokenizer::whisper::sm machine{};
+  int32_t token_ids[] = {542, -1, std::numeric_limits<int32_t>::min()};
+  char transcript[16] = {};
+  int32_t transcript_size = -1;
+  emel::error::type err = emel::error::cast(tokenizer::whisper::error::none);
+
+  tokenizer::event::detokenize request{
+      tokenizer_json, std::span<const int32_t>{token_ids},
+      std::span<char>{transcript}, transcript_size};
+  request.error_out = &err;
+  CHECK_FALSE(machine.process_event(request));
+  CHECK(err == emel::error::cast(tokenizer::whisper::error::token_ids_invalid));
+  CHECK(transcript_size == 0);
+}
+
+TEST_CASE("speech whisper tokenizer validates assets and decode policy") {
+  namespace tokenizer = emel::speech::tokenizer;
+  namespace whisper = emel::speech::tokenizer::whisper;
+
+  const auto tokenizer_path =
+      repo_root() / "tests" / "models" / "tokenizer-tiny.json";
+  REQUIRE(std::filesystem::exists(tokenizer_path));
+  const std::string tokenizer_json = read_text_file(tokenizer_path);
+
+  tokenizer::whisper::sm machine{};
+  emel::error::type err = emel::error::cast(whisper::error::internal_error);
+
+  // Valid JSON with the pinned decode policy passes.
+  tokenizer::event::validate good_request{tokenizer_json,
+                                          whisper::tiny_asr_decode_policy()};
+  good_request.error_out = &err;
+  CHECK(machine.process_event(good_request));
+  CHECK(err == emel::error::cast(whisper::error::none));
+
+  // Malformed JSON fails with tokenizer_json_invalid.
+  tokenizer::event::validate bad_json_request{
+      "{}", whisper::tiny_asr_decode_policy()};
+  bad_json_request.error_out = &err;
+  CHECK_FALSE(machine.process_event(bad_json_request));
+  CHECK(err == emel::error::cast(whisper::error::tokenizer_json_invalid));
+
+  // A default (unsupported) decode policy fails with
+  // decode_policy_unsupported even when the JSON is valid.
+  const tokenizer::asr_decode_policy default_policy{};
+  tokenizer::event::validate bad_policy_request{tokenizer_json,
+                                                default_policy};
+  bad_policy_request.error_out = &err;
+  CHECK_FALSE(machine.process_event(bad_policy_request));
+  CHECK(err == emel::error::cast(whisper::error::decode_policy_unsupported));
+
+  // The facade forwards validation the same way, and the machine still serves
+  // detokenize dispatches afterwards.
+  tokenizer::any facade{tokenizer::tokenizer_kind::whisper};
+  tokenizer::event::validate facade_request{tokenizer_json,
+                                            whisper::tiny_asr_decode_policy()};
+  CHECK(facade.process_event(facade_request));
+
+  int32_t token_ids[] = {542, 33, 898, 60};
+  char transcript[16] = {};
+  int32_t transcript_size = -1;
+  err = emel::error::cast(whisper::error::internal_error);
+  tokenizer::event::detokenize detokenize_request{
+      tokenizer_json, std::span<const int32_t>{token_ids},
+      std::span<char>{transcript}, transcript_size};
+  detokenize_request.error_out = &err;
+  CHECK(machine.process_event(detokenize_request));
+  CHECK(err == emel::error::cast(whisper::error::none));
+  CHECK(transcript_size > 0);
 }
 
 TEST_CASE("speech whisper tokenizer clamps compacted output to capacity") {

@@ -14,6 +14,22 @@ struct effect_begin_initialize {
   void operator()(const event::initialize_run &runtime_ev,
                   context &) const noexcept {
     runtime_ev.ctx.err = detail::to_error(error::none);
+    runtime_ev.ctx.tokenizer_validation_accepted = false;
+  }
+};
+
+// Dispatches the component-level asset-validation event into the injected
+// tokenizer actor so the variant validates the tokenizer JSON and the bound
+// decode policy before initialization succeeds; whether initialization
+// proceeds is decided by guards on the stored acceptance, never here.
+struct effect_validate_tokenizer_assets {
+  void operator()(const event::initialize_run &runtime_ev,
+                  context &ctx) const noexcept {
+    const speech::tokenizer::event::validate validate_ev{
+        runtime_ev.request.tokenizer.model_json, ctx.deps.decode_policy};
+    runtime_ev.ctx.tokenizer_validation_accepted =
+        ctx.tokenizer->process_event(validate_ev);
+    runtime_ev.ctx.err = detail::to_error(error::none);
   }
 };
 
@@ -240,6 +256,8 @@ struct effect_on_unexpected {
 };
 
 inline constexpr effect_begin_initialize effect_begin_initialize{};
+inline constexpr effect_validate_tokenizer_assets
+    effect_validate_tokenizer_assets{};
 inline constexpr effect_reject_initialize effect_reject_initialize{};
 inline constexpr effect_mark_tokenizer_invalid effect_mark_tokenizer_invalid{};
 inline constexpr effect_mark_unsupported_model effect_mark_unsupported_model{};

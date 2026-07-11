@@ -7,8 +7,10 @@ stateDiagram-v2
   state_ready --> state_initialize_error_out_decision : initialize_run [guard_invalid_initialize_] / effect_reject_initialize_
   state_errored --> state_initialize_error_out_decision : initialize_run [always] / effect_reject_initialize_
   state_initializing --> state_tokenizer_decision : completion_initialize_run_ [always] / none
-  state_tokenizer_decision --> state_model_support_decision : completion_initialize_run_ [guard_initialize_tokenizer_supported_] / none
+  state_tokenizer_decision --> state_tokenizer_validation_decision : completion_initialize_run_ [guard_initialize_tokenizer_supported_] / effect_validate_tokenizer_assets_
   state_tokenizer_decision --> state_initialize_error_out_decision : completion_initialize_run_ [guard_initialize_tokenizer_unsupported_] / effect_mark_tokenizer_invalid_
+  state_tokenizer_validation_decision --> state_model_support_decision : completion_initialize_run_ [guard_tokenizer_validation_accepted_] / none
+  state_tokenizer_validation_decision --> state_initialize_error_out_decision : completion_initialize_run_ [guard_tokenizer_validation_rejected_] / effect_mark_tokenizer_invalid_
   state_model_support_decision --> state_initialize_success : completion_initialize_run_ [guard_initialize_model_supported_] / none
   state_model_support_decision --> state_initialize_error_out_decision : completion_initialize_run_ [guard_initialize_unsupported_model_] / effect_mark_unsupported_model_
   state_initialize_success --> state_initialize_done_callback_decision : completion_initialize_run_ [guard_has_initialize_error_out_] / effect_store_initialize_success_

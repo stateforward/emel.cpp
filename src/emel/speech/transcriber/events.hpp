@@ -52,6 +52,7 @@ struct initialize {
 
 struct initialize_ctx {
   emel::error::type err = emel::error::cast(error::none);
+  bool tokenizer_validation_accepted = false;
 };
 
 struct initialize_run {

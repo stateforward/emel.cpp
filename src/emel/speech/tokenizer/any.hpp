@@ -47,9 +47,14 @@ public:
     return core_.process_event(ev);
   }
 
+  bool process_event(const event::validate &ev) {
+    return core_.process_event(ev);
+  }
+
 private:
   using sm_list = stateforward::sml::aux::type_list<whisper::sm>;
-  using event_list = stateforward::sml::aux::type_list<event::detokenize>;
+  using event_list =
+      stateforward::sml::aux::type_list<event::detokenize, event::validate>;
 
   emel::sm_any<tokenizer_kind, sm_list, event_list> core_{};
 };

@@ -15,6 +15,7 @@ using detokenize_error = emel::speech::tokenizer::events::detokenize_error;
 namespace emel::speech::tokenizer::whisper::event {
 
 using detokenize = emel::speech::tokenizer::event::detokenize;
+using validate = emel::speech::tokenizer::event::validate;
 
 struct detokenize_ctx {
   emel::error::type err = emel::error::cast(error::none);
@@ -24,6 +25,15 @@ struct detokenize_ctx {
 struct detokenize_run {
   const detokenize &request;
   detokenize_ctx &ctx;
+};
+
+struct validate_ctx {
+  emel::error::type err = emel::error::cast(error::none);
+};
+
+struct validate_run {
+  const validate &request;
+  validate_ctx &ctx;
 };
 
 } // namespace emel::speech::tokenizer::whisper::event

@@ -82,6 +82,25 @@ struct guard_initialize_tokenizer_unsupported {
   }
 };
 
+// Outcome of the component-driven asset validation dispatched by
+// effect_validate_tokenizer_assets: the injected tokenizer variant validated
+// the tokenizer JSON and the bound decode policy, so initialization fails fast
+// with tokenizer_invalid instead of deferring the failure to the first
+// recognize after encode/decode work already ran.
+struct guard_tokenizer_validation_accepted {
+  bool operator()(const event::initialize_run &runtime_ev,
+                  const action::context &) const noexcept {
+    return runtime_ev.ctx.tokenizer_validation_accepted;
+  }
+};
+
+struct guard_tokenizer_validation_rejected {
+  bool operator()(const event::initialize_run &runtime_ev,
+                  const action::context &ctx) const noexcept {
+    return !guard_tokenizer_validation_accepted{}(runtime_ev, ctx);
+  }
+};
+
 struct guard_initialize_model_supported {
   bool operator()(const event::initialize_run &runtime_ev,
                   const action::context &ctx) const noexcept {

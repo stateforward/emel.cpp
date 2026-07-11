@@ -43,6 +43,41 @@ struct effect_mark_tokenizer_json_invalid {
   }
 };
 
+struct effect_mark_token_ids_invalid {
+  void operator()(const event::detokenize_run &runtime_ev,
+                  context &) const noexcept {
+    runtime_ev.ctx.err = emel::error::cast(error::token_ids_invalid);
+  }
+};
+
+struct effect_begin_validate {
+  void operator()(const event::validate_run &runtime_ev,
+                  context &) const noexcept {
+    runtime_ev.ctx.err = emel::error::cast(error::none);
+  }
+};
+
+struct effect_mark_validate_json_invalid {
+  void operator()(const event::validate_run &runtime_ev,
+                  context &) const noexcept {
+    runtime_ev.ctx.err = emel::error::cast(error::tokenizer_json_invalid);
+  }
+};
+
+struct effect_mark_validate_policy_unsupported {
+  void operator()(const event::validate_run &runtime_ev,
+                  context &) const noexcept {
+    runtime_ev.ctx.err = emel::error::cast(error::decode_policy_unsupported);
+  }
+};
+
+struct effect_store_validate_error_out {
+  void operator()(const event::validate_run &runtime_ev,
+                  context &) const noexcept {
+    *runtime_ev.request.error_out = runtime_ev.ctx.err;
+  }
+};
+
 struct effect_store_error_out {
   void operator()(const event::detokenize_run &runtime_ev,
                   context &) const noexcept {

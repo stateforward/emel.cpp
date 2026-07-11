@@ -2,8 +2,12 @@
 
 #include <array>
 #include <cstdint>
+#include <filesystem>
+#include <fstream>
+#include <iterator>
 #include <memory>
 #include <span>
+#include <string>
 #include <string_view>
 
 #include "emel/error/error.hpp"
@@ -15,6 +19,46 @@ namespace {
 namespace transcriber = emel::speech::transcriber;
 
 inline constexpr std::string_view k_backend_sha = "test-backend-sha";
+
+std::filesystem::path repo_root() {
+#ifdef EMEL_TEST_REPO_ROOT
+  return std::filesystem::path{EMEL_TEST_REPO_ROOT};
+#else
+  return std::filesystem::current_path();
+#endif
+}
+
+// Real whisper-tiny tokenizer JSON: the initialize flow now drives
+// component-level asset validation through the injected tokenizer actor, so
+// supported fixtures must carry JSON the tokenizer variant accepts.
+const std::string &tiny_tokenizer_json() {
+  static const std::string json = [] {
+    std::ifstream stream(repo_root() / "tests" / "models" /
+                             "tokenizer-tiny.json",
+                         std::ios::binary);
+    return std::string{std::istreambuf_iterator<char>{stream},
+                       std::istreambuf_iterator<char>{}};
+  }();
+  return json;
+}
+
+// Component-level decode policy carrying the pinned whisper-tiny control-token
+// ids as pure data (no variant headers or namespaces).
+emel::speech::tokenizer::asr_decode_policy make_supported_policy() noexcept {
+  emel::speech::tokenizer::asr_decode_policy policy{};
+  policy.tokens.eot = 50257;
+  policy.tokens.sot = 50258;
+  policy.tokens.language_en = 50259;
+  policy.tokens.translate = 50358;
+  policy.tokens.transcribe = 50359;
+  policy.tokens.no_speech = 50362;
+  policy.tokens.notimestamps = 50363;
+  policy.tokens.timestamp_begin = 50364;
+  policy.tokens.space = 220;
+  policy.suppress_translate = true;
+  policy.prompt_tokens = {50258, 50259, 50359};
+  return policy;
+}
 
 struct initialize_error_capture {
   int32_t calls = 0;
@@ -104,14 +148,14 @@ make_supported_dependencies(const emel::model::data &model) noexcept {
       .embedding_length = 384,
       .decoder_block_count = 4,
   };
-  deps.decode_policy = emel::speech::tokenizer::asr_decode_policy{};
+  deps.decode_policy = make_supported_policy();
   deps.tokenizer_sha256 = k_backend_sha;
   return deps;
 }
 
 transcriber::event::tokenizer_assets make_supported_assets() noexcept {
   return transcriber::event::tokenizer_assets{
-      .model_json = "{}",
+      .model_json = tiny_tokenizer_json(),
       .sha256 = k_backend_sha,
   };
 }
@@ -156,11 +200,60 @@ TEST_CASE("speech_transcriber_rejects_unsupported_tokenizer") {
         emel::error::cast(transcriber::error::tokenizer_invalid));
 }
 
+TEST_CASE("speech_transcriber_rejects_invalid_tokenizer_json_at_initialize") {
+  auto model = std::make_unique<emel::model::data>();
+  const transcriber::dependencies deps = make_supported_dependencies(*model);
+  transcriber::sm engine{deps};
+  emel::error::type err = emel::error::cast(transcriber::error::none);
+  initialize_error_capture capture{};
+
+  // The checksum matches the injected dependency pin, but the JSON itself is
+  // malformed (missing the control tokens); the component-driven validation
+  // must fail initialization instead of deferring the failure to the first
+  // detokenize after pipeline work ran.
+  const transcriber::event::tokenizer_assets malformed_assets{
+      .model_json = "{}",
+      .sha256 = k_backend_sha,
+  };
+  transcriber::event::initialize initialize_ev{*model, malformed_assets};
+  initialize_ev.error_out = &err;
+  initialize_ev.on_error =
+      emel::callback<void(const transcriber::events::initialize_error &)>::from<
+          initialize_error_capture, record_initialize_error>(&capture);
+
+  CHECK_FALSE(engine.process_event(initialize_ev));
+  CHECK(err == emel::error::cast(transcriber::error::tokenizer_invalid));
+  CHECK(capture.calls == 1);
+  CHECK(capture.err ==
+        emel::error::cast(transcriber::error::tokenizer_invalid));
+  CHECK(engine.is(stateforward::sml::state<transcriber::state_errored>));
+}
+
+TEST_CASE(
+    "speech_transcriber_rejects_unsupported_decode_policy_at_initialize") {
+  auto model = std::make_unique<emel::model::data>();
+  transcriber::dependencies deps = make_supported_dependencies(*model);
+  deps.decode_policy = emel::speech::tokenizer::asr_decode_policy{};
+  transcriber::sm engine{deps};
+  emel::error::type err = emel::error::cast(transcriber::error::none);
+
+  // The decode policy is part of the injected dependency contract; a default
+  // (unsupported) policy must fail initialization instead of running the
+  // encoder on the first recognize and failing in the decoder.
+  transcriber::event::initialize initialize_ev{*model, make_supported_assets()};
+  initialize_ev.error_out = &err;
+
+  CHECK_FALSE(engine.process_event(initialize_ev));
+  CHECK(err == emel::error::cast(transcriber::error::tokenizer_invalid));
+  CHECK(engine.is(stateforward::sml::state<transcriber::state_errored>));
+}
+
 TEST_CASE("speech_transcriber_rejects_unsupported_initialized_model") {
   auto model = std::make_unique<emel::model::data>();
   transcriber::dependencies deps{};
   deps.tokenizer_kind = emel::speech::tokenizer::tokenizer_kind::whisper;
   deps.tokenizer_sha256 = k_backend_sha;
+  deps.decode_policy = make_supported_policy();
   transcriber::sm engine{deps};
   emel::error::type err = emel::error::cast(transcriber::error::none);
 

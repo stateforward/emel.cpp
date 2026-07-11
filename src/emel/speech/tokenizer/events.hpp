@@ -76,6 +76,20 @@ struct detokenize {
   emel::callback<void(const events::detokenize_error &)> on_error = {};
 };
 
+// Asset-validation request: owners (e.g. the speech transcriber's initialize
+// flow) dispatch this through the injected facade so the tokenizer variant can
+// validate the tokenizer JSON and the bound decode policy before any pipeline
+// work runs, instead of deferring the failure to the first detokenize.
+struct validate {
+  validate(const std::string_view tokenizer_json_ref,
+           const asr_decode_policy &decode_policy_ref) noexcept
+      : tokenizer_json(tokenizer_json_ref), decode_policy(decode_policy_ref) {}
+
+  std::string_view tokenizer_json = {};
+  const asr_decode_policy &decode_policy;
+  emel::error::type *error_out = nullptr;
+};
+
 } // namespace emel::speech::tokenizer::event
 
 namespace emel::speech::tokenizer::events {

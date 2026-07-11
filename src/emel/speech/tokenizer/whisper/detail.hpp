@@ -48,19 +48,22 @@ inline bool contains(std::string_view text, std::string_view needle) noexcept {
 
 inline uint32_t write_i32(const int32_t id, char *out) noexcept {
   char digits[12] = {};
-  int32_t value = id;
+  // The magnitude is computed in unsigned arithmetic so the minimum int32
+  // (whose negation does not fit in int32_t) renders correctly instead of
+  // hitting signed-negation overflow.
+  uint32_t magnitude = static_cast<uint32_t>(id);
   uint32_t offset = 0;
-  if (value < 0) {
+  if (id < 0) {
     out[offset] = '-';
     ++offset;
-    value = -value;
+    magnitude = 0u - magnitude;
   }
   uint32_t digits_count = 0;
   do {
-    digits[digits_count] = static_cast<char>('0' + (value % 10));
-    value /= 10;
+    digits[digits_count] = static_cast<char>('0' + (magnitude % 10u));
+    magnitude /= 10u;
     ++digits_count;
-  } while (value != 0);
+  } while (magnitude != 0u);
   while (digits_count > 0) {
     --digits_count;
     out[offset] = digits[digits_count];
