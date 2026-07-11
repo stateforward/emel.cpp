@@ -13,6 +13,7 @@
 #include <string>
 #include <vector>
 
+#include "emel/batch/planner/sm.hpp"
 #include "emel/error/error.hpp"
 #include "emel/gguf/loader/detail.hpp"
 #include "emel/gguf/loader/events.hpp"
@@ -95,6 +96,7 @@ struct personaplex_dependencies {
 
   emel::memory::streaming::sm &temporal_positions;
   emel::memory::streaming::sm &secondary_positions;
+  emel::batch::planner::sm &planner;
   mimi::sm &encoder;
   tokenizer::sm &tokenizer;
   mimi::sm &decoder;
@@ -114,6 +116,11 @@ struct personaplex_dependencies {
   std::span<int32_t> tokenizer_cache_snapshot = {};
   int32_t frame_samples = 0;
   int32_t codebook_count = 0;
+  emel::batch::planner::event::plan_mode frame_plan_mode =
+      emel::batch::planner::event::plan_mode::simple;
+  int32_t frame_plan_steps = 0;
+  int32_t frame_plan_token_count = 0;
+  bool frame_plan_output_all = false;
 };
 
 bool read_binary_file(const std::filesystem::path &path,
@@ -557,6 +564,8 @@ int main(int argc, char **argv) {
           predictor::policies{
               .token_zero = -1,
               .token_ungenerated = -2,
+              .prediction_step_size = 1,
+              .prediction_output_count = 1,
           },
   }};
   predictor::event::predict::workspace prediction_workspace{};
@@ -576,6 +585,7 @@ int main(int argc, char **argv) {
   }};
   mimi::sm encoder{};
   mimi::sm decoder{};
+  emel::batch::planner::sm frame_planner{};
 
   predictor::event::initialize predictor_initialize{*lm_model.model};
   predictor_initialize.max_sequences = 1;
@@ -595,6 +605,7 @@ int main(int argc, char **argv) {
   personaplex_dependencies dependencies{
       .temporal_positions = temporal_positions,
       .secondary_positions = secondary_positions,
+      .planner = frame_planner,
       .encoder = encoder,
       .tokenizer = token_delay,
       .decoder = decoder,
@@ -625,6 +636,10 @@ int main(int argc, char **argv) {
       .tokenizer_cache_snapshot = std::span<int32_t>{tokenizer_cache_snapshot},
       .frame_samples = frame_samples_i32,
       .codebook_count = public_n_q,
+      .frame_plan_mode = emel::batch::planner::event::plan_mode::simple,
+      .frame_plan_steps = 1,
+      .frame_plan_token_count = 1,
+      .frame_plan_output_all = true,
   };
   generator::sm<personaplex_dependencies> session{dependencies};
   emel::error::type session_err = emel::error::cast(generator::error::none);

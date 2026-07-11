@@ -17,7 +17,11 @@ template <class dependencies_type> struct guard_initialize_request_valid {
            ctx.collaborators.frame_samples > 0 &&
            ctx.collaborators.input_codes.size() == count &&
            ctx.collaborators.output_codes.size() == count &&
-           ctx.collaborators.silence_pcm.size() == samples;
+           ctx.collaborators.silence_pcm.size() == samples &&
+           ctx.collaborators.frame_plan_token_count > 0 &&
+           ctx.collaborators.frame_plan_steps > 0 &&
+           static_cast<size_t>(ctx.collaborators.frame_plan_token_count) <=
+               ctx.collaborators.model_codes.size();
   }
 };
 

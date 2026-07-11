@@ -197,19 +197,17 @@ struct effect_allocate_sequence {
 };
 
 struct effect_allocate_step_slot {
-  template <class runtime_event_type>
-  void operator()(const runtime_event_type &runtime_ev,
+  void operator()(const event::predict_run &runtime_ev,
                   context &ctx) const noexcept {
-    const auto &ev = detail::unwrap_runtime_event(runtime_ev);
-    ev.ctx.memory_error = static_cast<int32_t>(
+    runtime_ev.ctx.memory_error = static_cast<int32_t>(
         emel::error::cast(emel::memory::hybrid::error::none));
-    ev.ctx.memory_block_count = 0;
-    ev.ctx.memory_accepted =
+    runtime_ev.ctx.memory_block_count = 0;
+    runtime_ev.ctx.memory_accepted =
         ctx.memory.process_event(emel::memory::event::allocate_slots{
             .seq_id = ctx.session.sequence_id,
-            .token_count = 1,
-            .block_count_out = &ev.ctx.memory_block_count,
-            .error_out = &ev.ctx.memory_error,
+            .token_count = runtime_ev.request.planned_step_size,
+            .block_count_out = &runtime_ev.ctx.memory_block_count,
+            .error_out = &runtime_ev.ctx.memory_error,
             .copy_block = nullptr,
             .copy_block_user_data = nullptr,
         });

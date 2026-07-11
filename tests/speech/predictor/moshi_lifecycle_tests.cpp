@@ -67,6 +67,8 @@ moshi::action::dependencies<graph_actor_type> make_predictor_dependencies(
           moshi::action::policies{
               .token_zero = -1,
               .token_ungenerated = -2,
+              .prediction_step_size = 1,
+              .prediction_output_count = 1,
           },
   };
 }
@@ -379,7 +381,8 @@ TEST_CASE("speech_moshi_predictor_rejects_predict_before_initialize") {
   moshi::event::predict::workspace workspace{};
   emel::error::type err = k_no_error;
 
-  moshi::event::predict predict{std::span<const int32_t>{input}, workspace};
+  moshi::event::predict predict{std::span<const int32_t>{input}, workspace, 1,
+                                1};
   predict.error_out = &err;
 
   CHECK_FALSE(generator.process_event(predict));
@@ -526,7 +529,7 @@ TEST_CASE(
       std::span<const int32_t>{
           model_tokens.data(),
           static_cast<size_t>(fixture.model->moshi_lm.n_q + 1)},
-      workspace};
+      workspace, 1, 1};
   blocked_predict.error_out = &err;
   CHECK_FALSE(generator.process_event(blocked_predict));
   CHECK(err == emel::error::cast(moshi::error::voice_prompt_pending));
@@ -640,7 +643,7 @@ TEST_CASE("speech_moshi_generator_prefills_personaplex_system_prompt_before_"
   moshi::event::predict blocked_predict{
       std::span<const int32_t>{
           input.data(), static_cast<size_t>(fixture.model->moshi_lm.n_q + 1)},
-      workspace};
+      workspace, 1, 1};
   blocked_predict.error_out = &err;
   CHECK_FALSE(generator.process_event(blocked_predict));
   CHECK(err == emel::error::cast(moshi::error::voice_prompt_pending));
@@ -688,7 +691,7 @@ TEST_CASE("speech_moshi_generator_prefills_personaplex_system_prompt_before_"
   moshi::event::predict first_predict{
       std::span<const int32_t>{
           input.data(), static_cast<size_t>(fixture.model->moshi_lm.n_q + 1)},
-      workspace};
+      workspace, 1, 1};
   first_predict.error_out = &err;
   REQUIRE(generator.process_event(first_predict));
   moshi::event::sample first_sample{
@@ -762,7 +765,7 @@ TEST_CASE("speech_moshi_generator_accepts_personaplex_voice_without_system_"
   moshi::event::predict predict{
       std::span<const int32_t>{
           input.data(), static_cast<size_t>(fixture.model->moshi_lm.n_q + 1)},
-      workspace};
+      workspace, 1, 1};
   predict.error_out = &err;
 
   err = k_no_error;
@@ -835,7 +838,7 @@ TEST_CASE("speech_moshi_predictor_reports_rejected_graph_event") {
   moshi::event::predict predict{
       std::span<const int32_t>{
           input.data(), static_cast<size_t>(fixture.model->moshi_lm.n_q + 1)},
-      workspace};
+      workspace, 1, 1};
   predict.error_out = &err;
 
   REQUIRE(generator.process_event(predict));
@@ -1248,7 +1251,8 @@ TEST_CASE("speech_moshi_generator_and_executor_cover_explicit_error_guards") {
   auto generator_snapshot = std::make_unique<emel::memory::view::snapshot>();
   std::array<int32_t, moshi::event::k_max_codebooks> generator_input = {};
   moshi::event::predict generator_predict{
-      std::span<const int32_t>{generator_input.data(), 1}, generator_workspace};
+      std::span<const int32_t>{generator_input.data(), 1}, generator_workspace,
+      1, 1};
   moshi::event::predict_run generator_predict_run{generator_predict,
                                                   generator_predict_ctx};
   moshi::action::effect_mark_not_initialized<moshi::event::predict_run>{}(
@@ -2171,7 +2175,7 @@ TEST_CASE(
   moshi::event::predict predict{
       std::span<const int32_t>{
           input.data(), static_cast<size_t>(fixture.model->moshi_lm.n_q + 1)},
-      workspace};
+      workspace, 1, 1};
   predict.error_out = &err;
   REQUIRE(generator.process_event(predict));
   moshi::event::sample sample{

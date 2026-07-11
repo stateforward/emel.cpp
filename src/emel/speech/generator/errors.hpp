@@ -29,6 +29,7 @@ enum class error : emel::error::type {
   tokenizer_initialize_failed = (1u << 22),
   tokenize_failed = (1u << 23),
   detokenize_failed = (1u << 24),
+  planning_failed = (1u << 25),
 };
 
 } // namespace emel::speech::generator

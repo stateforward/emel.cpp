@@ -152,6 +152,8 @@ struct frame_ctx {
   int32_t tokenizer_err = 0;
   int32_t predicted_text_token = -1;
   int32_t text_token = -1;
+  int32_t plan_step_size = 0;
+  int32_t plan_output_count = 0;
 };
 
 struct flush_ctx : frame_ctx {};

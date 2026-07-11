@@ -109,12 +109,17 @@ struct predict {
     emel::memory::view::snapshot memory = {};
   };
 
-  predict(std::span<const int32_t> model_tokens_ref,
-          workspace &workspace_ref) noexcept
-      : model_tokens(model_tokens_ref), prediction_workspace(workspace_ref) {}
+  predict(std::span<const int32_t> model_tokens_ref, workspace &workspace_ref,
+          const int32_t planned_step_size_ref,
+          const int32_t planned_output_count_ref) noexcept
+      : model_tokens(model_tokens_ref), prediction_workspace(workspace_ref),
+        planned_step_size(planned_step_size_ref),
+        planned_output_count(planned_output_count_ref) {}
 
   std::span<const int32_t> model_tokens = {};
   workspace &prediction_workspace;
+  int32_t planned_step_size = 0;
+  int32_t planned_output_count = 0;
   emel::error::type *error_out = nullptr;
 };
 

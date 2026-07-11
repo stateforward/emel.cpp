@@ -387,10 +387,13 @@ on macOS, the default input is generated with Samantha at 175 words per minute s
 `--audio /path/to/input.wav` on another Unix host or to use an existing recording.
 
 the comparison builds two isolated Release executables. `personaplex_emel_runner` links only EMEL
-and drives the maintained Mimi and Moshi state machines. `moshi_reference_driver personaplex` links
-only the pinned moshi.cpp/ggml reference lane. the reference configure hard-disables Metal and the
-script injects `--threads 1`, seed `1234`, 125 frames, temperatures, and sampling limits; there are
-no process-global EMEL sampling defaults.
+and drives the maintained generic speech generator with injected Mimi, batch-planner, tokenizer,
+Moshi predictor, sampler, streaming-memory, and decoder actors. Each streamed or flushed frame is
+planned through the shared batch planner before prediction; the typed one-frame plan is validated
+by the predictor before memory allocation and graph execution. `moshi_reference_driver
+personaplex` links only the pinned moshi.cpp/ggml reference lane. the reference configure
+hard-disables Metal and the script injects `--threads 1`, seed `1234`, 125 frames, temperatures,
+and sampling limits; there are no process-global EMEL sampling defaults.
 
 the pinned upstream JSON remains untouched for the reference lane. EMEL model conversion injects
 the separate `tools/bench/personaplex-inference.json` contract, keeping prompt tokens, public

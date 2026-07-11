@@ -7,6 +7,7 @@
 #include <span>
 
 #include "../../allocation_tracker.hpp"
+#include "emel/batch/planner/sm.hpp"
 #include "emel/error/error.hpp"
 #include "emel/memory/streaming/sm.hpp"
 #include "emel/speech/generator/sm.hpp"
@@ -53,11 +54,17 @@ struct fake_prediction_workspace {};
 
 struct fake_predict {
   fake_predict(std::span<const int32_t> tokens_ref,
-               fake_prediction_workspace &workspace_ref) noexcept
-      : tokens(tokens_ref), workspace(workspace_ref) {}
+               fake_prediction_workspace &workspace_ref,
+               const int32_t planned_step_size_ref,
+               const int32_t planned_output_count_ref) noexcept
+      : tokens(tokens_ref), workspace(workspace_ref),
+        planned_step_size(planned_step_size_ref),
+        planned_output_count(planned_output_count_ref) {}
 
   std::span<const int32_t> tokens;
   fake_prediction_workspace &workspace;
+  int32_t planned_step_size = 0;
+  int32_t planned_output_count = 0;
   emel::error::type *error_out = nullptr;
 };
 
@@ -215,6 +222,8 @@ struct fake_predictor_actor {
   int32_t prompt_condition_calls = 0;
   int32_t predict_calls = 0;
   int32_t sample_calls = 0;
+  int32_t last_plan_step_size = 0;
+  int32_t last_plan_output_count = 0;
   int32_t rejected_initialize_call = 0;
   bool voice_accepted = true;
   bool prompt_begin_accepted = true;
@@ -265,6 +274,8 @@ struct fake_predictor_actor {
 
   bool process_event(const fake_predict &request) noexcept {
     ++predict_calls;
+    last_plan_step_size = request.planned_step_size;
+    last_plan_output_count = request.planned_output_count;
     *request.error_out = predict_error;
     return predict_accepted;
   }
@@ -304,6 +315,7 @@ struct fake_dependencies {
 
   emel::memory::streaming::sm &temporal_positions;
   emel::memory::streaming::sm &secondary_positions;
+  emel::batch::planner::sm &planner;
   fake_encoder_actor &encoder;
   fake_tokenizer_actor &tokenizer;
   fake_decoder_actor &decoder;
@@ -323,6 +335,11 @@ struct fake_dependencies {
   std::span<int32_t> tokenizer_cache_snapshot = {};
   int32_t frame_samples = 0;
   int32_t codebook_count = 0;
+  emel::batch::planner::event::plan_mode frame_plan_mode =
+      emel::batch::planner::event::plan_mode::simple;
+  int32_t frame_plan_steps = 0;
+  int32_t frame_plan_token_count = 0;
+  bool frame_plan_output_all = false;
 };
 
 struct fixture {
@@ -336,6 +353,7 @@ struct fixture {
       emel::memory::streaming::dependencies{.capacity = 16}};
   emel::memory::streaming::sm secondary_positions{
       emel::memory::streaming::dependencies{.capacity = 16}};
+  emel::batch::planner::sm planner{};
   fake_encoder_actor encoder{};
   fake_tokenizer_actor tokenizer{};
   fake_decoder_actor decoder{};
@@ -345,10 +363,14 @@ struct fixture {
   generator::sm<fake_dependencies> machine;
 
   explicit fixture(const int32_t frame_samples = 4,
-                   const int32_t codebook_count = 2)
+                   const int32_t codebook_count = 2,
+                   const emel::batch::planner::event::plan_mode
+                       frame_plan_mode =
+                           emel::batch::planner::event::plan_mode::simple)
       : dependencies{
             .temporal_positions = temporal_positions,
             .secondary_positions = secondary_positions,
+            .planner = planner,
             .encoder = encoder,
             .tokenizer = tokenizer,
             .decoder = decoder,
@@ -364,6 +386,10 @@ struct fixture {
             .tokenizer_cache_snapshot = std::span<int32_t>{tokenizer_cache_snapshot},
             .frame_samples = frame_samples,
             .codebook_count = codebook_count,
+            .frame_plan_mode = frame_plan_mode,
+            .frame_plan_steps = 1,
+            .frame_plan_token_count = 1,
+            .frame_plan_output_all = true,
         },
         machine{dependencies} {}
 
@@ -732,9 +758,38 @@ TEST_CASE("speech_generator_streams_through_injected_actor_pipeline") {
   CHECK(text_token == 42);
   CHECK(test->predictor.predict_calls == 1);
   CHECK(test->predictor.sample_calls == 1);
+  CHECK(test->predictor.last_plan_step_size == 1);
+  CHECK(test->predictor.last_plan_output_count == 1);
   CHECK(sample_count == 4);
   CHECK(produced);
   CHECK(pcm_out[0] == doctest::Approx(0.25f));
+}
+
+TEST_CASE("speech_generator_reports_frame_planning_failure") {
+  auto test = std::make_unique<fixture>(
+      4, 2, static_cast<emel::batch::planner::event::plan_mode>(99));
+  advance_to_ready(*test);
+  std::array<float, 4> pcm_in{};
+  std::array<float, 4> pcm_out{};
+  std::array<int32_t, 2> encoded{};
+  std::array<int32_t, 2> generated{};
+  int32_t text_token = -1;
+  int32_t sample_count = 0;
+  bool produced = false;
+  emel::error::type err = 0;
+  generator::event::stream_frame request{std::span<const float>{pcm_in},
+                                         std::span<float>{pcm_out},
+                                         std::span<int32_t>{encoded},
+                                         std::span<int32_t>{generated},
+                                         text_token,
+                                         sample_count,
+                                         produced,
+                                         err};
+
+  CHECK_FALSE(test->machine.process_event(request));
+  CHECK(err ==
+        generator::action::error_code(generator::error::planning_failed));
+  CHECK(test->predictor.predict_calls == 0);
 }
 
 TEST_CASE("speech_generator_streams_pending_frames_and_reports_failures") {

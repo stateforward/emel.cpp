@@ -18,6 +18,8 @@ inline constexpr int32_t k_max_delay_rows = 128;
 struct policies {
   int32_t token_zero = 0;
   int32_t token_ungenerated = 0;
+  int32_t prediction_step_size = 0;
+  int32_t prediction_output_count = 0;
 };
 
 struct lmgen_state {

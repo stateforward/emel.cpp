@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cstddef>
 
+#include "emel/batch/planner/events.hpp"
 #include "emel/error/error.hpp"
 #include "emel/memory/streaming/errors.hpp"
 #include "emel/memory/streaming/events.hpp"
@@ -11,6 +12,20 @@
 #include "emel/speech/generator/events.hpp"
 
 namespace emel::speech::generator::action {
+
+struct frame_plan_capture {
+  event::frame_ctx &ctx;
+
+  void on_done(const emel::batch::planner::events::plan_done &ev) noexcept {
+    ctx.child_err = emel::error::cast(emel::batch::planner::error::none);
+    ctx.plan_step_size = ev.step_sizes[0];
+    ctx.plan_output_count = ev.total_outputs;
+  }
+
+  void on_error(const emel::batch::planner::events::plan_error &ev) noexcept {
+    ctx.child_err = ev.err;
+  }
+};
 
 inline emel::error::type error_code(const error value) noexcept {
   return emel::error::cast(value);
@@ -467,10 +482,42 @@ struct effect_predict_frame {
     runtime_ev.ctx.child_err = 0;
     typename dependencies_type::predict_event request{
         std::span<const int32_t>{ctx.collaborators.model_codes},
-        ctx.collaborators.prediction_workspace};
+        ctx.collaborators.prediction_workspace, runtime_ev.ctx.plan_step_size,
+        runtime_ev.ctx.plan_output_count};
     request.error_out = &runtime_ev.ctx.child_err;
     runtime_ev.ctx.child_accepted =
         ctx.collaborators.predictor.process_event(request);
+  }
+};
+
+template <class dependencies_type, class runtime_event_type>
+struct effect_plan_frame {
+  void operator()(const runtime_event_type &runtime_ev,
+                  context<dependencies_type> &ctx) const noexcept {
+    runtime_ev.ctx.child_err =
+        emel::error::cast(emel::batch::planner::error::none);
+    runtime_ev.ctx.plan_step_size = 0;
+    runtime_ev.ctx.plan_output_count = 0;
+    frame_plan_capture capture{runtime_ev.ctx};
+    const auto on_done =
+        emel::callback<void(const emel::batch::planner::events::plan_done &)>::
+            template from<frame_plan_capture, &frame_plan_capture::on_done>(
+                &capture);
+    const auto on_error =
+        emel::callback<void(const emel::batch::planner::events::plan_error &)>::
+            template from<frame_plan_capture, &frame_plan_capture::on_error>(
+                &capture);
+    const emel::batch::planner::event::plan_request request{
+        .token_ids = ctx.collaborators.model_codes.data(),
+        .n_tokens = ctx.collaborators.frame_plan_token_count,
+        .n_steps = ctx.collaborators.frame_plan_steps,
+        .mode = ctx.collaborators.frame_plan_mode,
+        .output_all = ctx.collaborators.frame_plan_output_all,
+        .on_done = on_done,
+        .on_error = on_error,
+    };
+    runtime_ev.ctx.child_accepted =
+        ctx.collaborators.planner.process_event(request);
   }
 };
 

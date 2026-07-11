@@ -50,7 +50,9 @@ struct guard_bind_contract_valid {
            runtime_ev.request.delay_cache_row_capacity >= row_count &&
            runtime_ev.request.delay_cache_row_capacity <=
                action::k_max_delay_rows &&
-           ctx.policy.token_ungenerated < ctx.policy.token_zero;
+           ctx.policy.token_ungenerated < ctx.policy.token_zero &&
+           ctx.policy.prediction_step_size > 0 &&
+           ctx.policy.prediction_output_count > 0;
   }
 };
 
@@ -162,7 +164,11 @@ struct guard_predict_request_valid {
         !ctx.voice.loaded || (ctx.voice.ready && ctx.voice.prompt_ready);
     return ctx.session.model != nullptr && voice_ready &&
            runtime_ev.request.model_tokens.size() ==
-               static_cast<size_t>(ctx.lmgen.codebook_count);
+               static_cast<size_t>(ctx.lmgen.codebook_count) &&
+           runtime_ev.request.planned_step_size ==
+               ctx.policy.prediction_step_size &&
+           runtime_ev.request.planned_output_count ==
+               ctx.policy.prediction_output_count;
   }
 };
 

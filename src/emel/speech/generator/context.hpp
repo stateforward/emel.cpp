@@ -2,6 +2,8 @@
 
 #include <concepts>
 
+#include "emel/batch/planner/events.hpp"
+
 namespace emel::speech::generator::action {
 
 namespace mode {
@@ -29,6 +31,7 @@ concept duplex_dependencies = requires(dependencies_type deps) {
   typename dependencies_type::decode_event;
   deps.temporal_positions;
   deps.secondary_positions;
+  deps.planner;
   deps.encoder;
   deps.tokenizer;
   deps.decoder;
@@ -48,6 +51,10 @@ concept duplex_dependencies = requires(dependencies_type deps) {
   deps.tokenizer_cache_snapshot;
   deps.frame_samples;
   deps.codebook_count;
+  deps.frame_plan_mode;
+  deps.frame_plan_steps;
+  deps.frame_plan_token_count;
+  deps.frame_plan_output_all;
 };
 
 template <class dependencies_type>
