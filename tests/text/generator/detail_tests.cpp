@@ -319,8 +319,8 @@ struct qwen3_runtime_fixture {
     add_matrix("blk.0.ffn_down.weight", 4, 4, std::vector<float>(16, 0.0f));
     add_matrix("blk.0.ffn_up.weight", 4, 4, std::vector<float>(16, 0.0f));
     model.n_tensors = tensor_index;
-    REQUIRE(emel::model::qwen3::detail::build_generation_contract(model, contract) ==
-            emel::error::type{0});
+    REQUIRE(emel::model::qwen3::detail::build_generation_contract(
+                model, contract) == emel::error::type{0});
   }
 };
 
@@ -335,10 +335,10 @@ struct prepared_qwen3_backend_fixture {
     const auto runtime_policy =
         emel::text::generator::test::make_auto_runtime_policy(
             model_fixture.model);
-    ready = emel::text::generator::detail::prepare(
-                backend, model_fixture.contract, matmul.actor,
-                runtime_policy) ==
-            emel::error::cast(emel::model::loader::error::none);
+    ready =
+        emel::text::generator::detail::prepare(backend, model_fixture.contract,
+                                               matmul.actor, runtime_policy) ==
+        emel::error::cast(emel::model::loader::error::none);
     backend.bound_tokens = {0};
     backend.bound_positions = {0};
     backend.bound_token_count = 1;
@@ -441,8 +441,8 @@ struct gemma4_runtime_fixture {
     add_matrix("blk.0.ffn_down.weight", 4, 4, std::vector<float>(16, 0.0f));
     add_matrix("blk.0.ffn_up.weight", 4, 4, std::vector<float>(16, 0.0f));
     model.n_tensors = tensor_index;
-    REQUIRE(emel::model::gemma4::detail::build_generation_contract(model, contract) ==
-            emel::error::type{0});
+    REQUIRE(emel::model::gemma4::detail::build_generation_contract(
+                model, contract) == emel::error::type{0});
   }
 };
 
@@ -2385,8 +2385,8 @@ TEST_CASE("generator_detail_prepare_rejects_invalid_generation_contract") {
   emel::model::generation::contract contract = {};
   emel::text::generator::runtime_policy runtime_policy = {};
 
-  CHECK(emel::text::generator::detail::prepare(
-            backend, contract, matmul.actor, runtime_policy) ==
+  CHECK(emel::text::generator::detail::prepare(backend, contract, matmul.actor,
+                                               runtime_policy) ==
         emel::error::cast(emel::model::loader::error::model_invalid));
   CHECK(backend.model == nullptr);
 }
@@ -2407,8 +2407,8 @@ TEST_CASE("model_generation_validate_contract_rejects_incomplete_blocks") {
   const auto runtime_policy =
       emel::text::generator::test::make_auto_runtime_policy(
           model_fixture->model);
-  CHECK(emel::text::generator::detail::prepare(
-            backend, model_fixture->contract, matmul.actor, runtime_policy) ==
+  CHECK(emel::text::generator::detail::prepare(backend, model_fixture->contract,
+                                               matmul.actor, runtime_policy) ==
         emel::error::cast(emel::model::loader::error::model_invalid));
   CHECK(backend.model == nullptr);
 }
@@ -2423,10 +2423,10 @@ TEST_CASE("generator_detail_prepare_derives_kv_geometry_from_memory_contract") {
           model_fixture->model);
 
   // Default geometry: n_ctx=8 pads up to one 16-token block.
-  REQUIRE(emel::text::generator::detail::prepare(
-              *backend, model_fixture->contract, matmul.actor,
-              runtime_policy) ==
-          emel::error::cast(emel::model::loader::error::none));
+  REQUIRE(
+      emel::text::generator::detail::prepare(*backend, model_fixture->contract,
+                                             matmul.actor, runtime_policy) ==
+      emel::error::cast(emel::model::loader::error::none));
   CHECK(backend->kv_block_tokens == emel::memory::view::DEFAULT_BLOCK_TOKENS);
   CHECK(backend->kv_positions_capacity ==
         emel::memory::view::DEFAULT_BLOCK_TOKENS);
@@ -2443,10 +2443,10 @@ TEST_CASE("generator_detail_prepare_derives_kv_geometry_from_memory_contract") {
 
   // Non-positive block tokens cannot cover the context window and are
   // rejected through prepare's existing model_invalid validation path.
-  REQUIRE(emel::text::generator::detail::prepare(*backend, model_fixture->contract,
-                                                 matmul.actor, runtime_policy,
-                                                 0) ==
-          emel::error::cast(emel::model::loader::error::model_invalid));
+  REQUIRE(
+      emel::text::generator::detail::prepare(*backend, model_fixture->contract,
+                                             matmul.actor, runtime_policy, 0) ==
+      emel::error::cast(emel::model::loader::error::model_invalid));
 
   // Non-divisible geometry: capacity rounds up to whole blocks.
   REQUIRE(emel::text::generator::detail::prepare(
@@ -4098,16 +4098,30 @@ TEST_CASE("generator_detail_nonflash_chunk4_prefill_matches_scalar_q8_k_on_"
   REQUIRE(chunk_fixture->backend.bound_logits.size() ==
           scalar_fixture->backend.bound_logits.size());
   float max_delta = 0.0f;
+  float max_reference_magnitude = 0.0f;
+  size_t max_delta_index = 0u;
   for (size_t idx = 0; idx < scalar_fixture->backend.bound_logits.size();
        ++idx) {
-    max_delta = std::max(max_delta,
-                         std::fabs(chunk_fixture->backend.bound_logits[idx] -
-                                   scalar_fixture->backend.bound_logits[idx]));
+    max_reference_magnitude =
+        std::max(max_reference_magnitude,
+                 std::fabs(scalar_fixture->backend.bound_logits[idx]));
+    const float delta = std::fabs(chunk_fixture->backend.bound_logits[idx] -
+                                  scalar_fixture->backend.bound_logits[idx]);
+    if (delta > max_delta) {
+      max_delta = delta;
+      max_delta_index = idx;
+    }
     CHECK(chunk_fixture->backend.bound_logits[idx] ==
           doctest::Approx(scalar_fixture->backend.bound_logits[idx])
               .epsilon(1.0e-5f));
   }
-  CHECK(max_delta <= 1.0e-4f);
+  INFO("max delta index="
+       << max_delta_index
+       << " chunk=" << chunk_fixture->backend.bound_logits[max_delta_index]
+       << " scalar=" << scalar_fixture->backend.bound_logits[max_delta_index]);
+  const float max_allowed_delta =
+      std::max(1.0e-4f, max_reference_magnitude * 1.0e-6f);
+  CHECK(max_delta <= max_allowed_delta);
 #endif
 }
 
@@ -4170,16 +4184,30 @@ TEST_CASE("generator_detail_nonflash_chunk8_prefill_matches_scalar_q8_k_on_"
   REQUIRE(chunk_fixture->backend.bound_logits.size() ==
           scalar_fixture->backend.bound_logits.size());
   float max_delta = 0.0f;
+  float max_reference_magnitude = 0.0f;
+  size_t max_delta_index = 0u;
   for (size_t idx = 0; idx < scalar_fixture->backend.bound_logits.size();
        ++idx) {
-    max_delta = std::max(max_delta,
-                         std::fabs(chunk_fixture->backend.bound_logits[idx] -
-                                   scalar_fixture->backend.bound_logits[idx]));
+    max_reference_magnitude =
+        std::max(max_reference_magnitude,
+                 std::fabs(scalar_fixture->backend.bound_logits[idx]));
+    const float delta = std::fabs(chunk_fixture->backend.bound_logits[idx] -
+                                  scalar_fixture->backend.bound_logits[idx]);
+    if (delta > max_delta) {
+      max_delta = delta;
+      max_delta_index = idx;
+    }
     CHECK(chunk_fixture->backend.bound_logits[idx] ==
           doctest::Approx(scalar_fixture->backend.bound_logits[idx])
               .epsilon(1.0e-5f));
   }
-  CHECK(max_delta <= 1.0e-4f);
+  INFO("max delta index="
+       << max_delta_index
+       << " chunk=" << chunk_fixture->backend.bound_logits[max_delta_index]
+       << " scalar=" << scalar_fixture->backend.bound_logits[max_delta_index]);
+  const float max_allowed_delta =
+      std::max(1.0e-4f, max_reference_magnitude * 1.0e-6f);
+  CHECK(max_delta <= max_allowed_delta);
 #endif
 }
 

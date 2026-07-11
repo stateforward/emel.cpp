@@ -628,7 +628,6 @@ tests/text/encoders/ugm_tests.cpp
 tests/text/encoders/wpm_tests.cpp
 tests/text/generator/action_guard_tests.cpp
 tests/text/generator/decode_wavefront/lifecycle_tests.cpp
-tests/text/generator/detail_tests.cpp
 tests/text/generator/determinism_tests.cpp
 tests/text/generator/initializer/lifecycle_tests.cpp
 tests/text/generator/lifecycle_tests.cpp
