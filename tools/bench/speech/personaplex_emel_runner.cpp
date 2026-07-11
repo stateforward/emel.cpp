@@ -99,6 +99,7 @@ struct personaplex_dependencies {
   using tokenizer_initialize_event = tokenizer::event::initialize;
   using tokenize_event = tokenizer::event::tokenize;
   using predict_event = predictor::event::predict;
+  using sample_event = predictor::event::sample;
   using detokenize_event = tokenizer::event::detokenize;
   using capture_tokenizer_state_event =
       predictor::event::capture_tokenizer_state;
@@ -112,6 +113,8 @@ struct personaplex_dependencies {
   mimi::sm &decoder;
   runtime::sm &runtime;
   predictor::sm &predictor;
+  predictor::sm &sampler;
+  predictor::event::predict::workspace &prediction_workspace;
   mimi::event::initialize encoder_initialize;
   mimi::event::initialize decoder_initialize;
   runtime::event::initialize runtime_initialize;
@@ -535,6 +538,7 @@ int main(int argc, char **argv) {
   predictor::sm token_predictor{
       emel::memory::hybrid::kv_binding{},
       runtime::bind_graph_executor(prediction_runtime)};
+  predictor::event::predict::workspace prediction_workspace{};
   tokenizer::sm token_delay{tokenizer::dependencies{
       .delays = std::span<const int32_t>{delay_begin, delay_end},
       .cache = std::span<int32_t>{tokenizer_storage},
@@ -572,6 +576,8 @@ int main(int argc, char **argv) {
       .decoder = decoder,
       .runtime = prediction_runtime,
       .predictor = token_predictor,
+      .sampler = token_predictor,
+      .prediction_workspace = prediction_workspace,
       .encoder_initialize =
           mimi::event::initialize{*mimi_model.model,
                                   std::span<float>{encoder_prepared},

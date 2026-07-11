@@ -9,7 +9,6 @@ enum class error : emel::error::type {
   uninitialized = (1u << 0),
   already_initialized = (1u << 1),
   invalid_request = (1u << 2),
-  cutover_pending = (1u << 3),
   internal_error = (1u << 4),
   memory_initialize_failed = (1u << 5),
   encoder_initialize_failed = (1u << 6),

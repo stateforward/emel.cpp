@@ -22,6 +22,7 @@ concept duplex_dependencies = requires(dependencies_type deps) {
   typename dependencies_type::tokenizer_initialize_event;
   typename dependencies_type::tokenize_event;
   typename dependencies_type::predict_event;
+  typename dependencies_type::sample_event;
   typename dependencies_type::detokenize_event;
   typename dependencies_type::capture_tokenizer_state_event;
   typename dependencies_type::restore_tokenizer_state_event;
@@ -33,6 +34,8 @@ concept duplex_dependencies = requires(dependencies_type deps) {
   deps.decoder;
   deps.runtime;
   deps.predictor;
+  deps.sampler;
+  deps.prediction_workspace;
   deps.encoder_initialize;
   deps.decoder_initialize;
   deps.runtime_initialize;

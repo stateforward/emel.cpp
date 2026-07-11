@@ -135,9 +135,27 @@ struct guard_predict_request_valid {
         !ctx.voice.loaded || (ctx.voice.ready && ctx.voice.prompt_ready);
     return ctx.session.model != nullptr && voice_ready &&
            runtime_ev.request.model_tokens.size() ==
+               static_cast<size_t>(ctx.lmgen.codebook_count);
+  }
+};
+
+struct guard_sample_request_valid {
+  bool operator()(const event::sample_run &runtime_ev,
+                  const action::context &ctx) const noexcept {
+    const bool voice_ready =
+        !ctx.voice.loaded || (ctx.voice.ready && ctx.voice.prompt_ready);
+    return ctx.session.model != nullptr && voice_ready &&
+           runtime_ev.request.model_tokens.size() ==
                static_cast<size_t>(ctx.lmgen.codebook_count) &&
            runtime_ev.request.audio_tokens_out.size() >=
                static_cast<size_t>(ctx.lmgen.generated_dep_q);
+  }
+};
+
+struct guard_sample_request_invalid {
+  bool operator()(const event::sample_run &runtime_ev,
+                  const action::context &ctx) const noexcept {
+    return !guard_sample_request_valid{}(runtime_ev, ctx);
   }
 };
 

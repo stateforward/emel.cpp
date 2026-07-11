@@ -606,18 +606,32 @@ struct effect_begin_predict {
   void operator()(const event::predict_run &runtime_ev,
                   const context &) const noexcept {
     runtime_ev.ctx.err = detail_ns::to_error(error::none);
+  }
+};
+
+struct effect_publish_predict {
+  void operator()(const event::predict_run &runtime_ev,
+                  context &) const noexcept {
+    runtime_ev.ctx.err = detail_ns::to_error(error::none);
+  }
+};
+
+struct effect_begin_sample {
+  void operator()(const event::sample_run &runtime_ev,
+                  const context &) const noexcept {
+    runtime_ev.ctx.err = detail_ns::to_error(error::none);
     runtime_ev.ctx.graph_error = detail_ns::to_error(error::none);
     runtime_ev.ctx.graph_accepted = false;
   }
 };
 
-struct effect_run_predict_graph {
-  void operator()(const event::predict_run &runtime_ev,
+struct effect_run_sample_graph {
+  void operator()(const event::sample_run &runtime_ev,
                   context &ctx) const noexcept {
     runtime_ev.ctx.graph_error = detail_ns::to_error(error::none);
     event::graph_step graph_step{
         *ctx.session.model,
-        runtime_ev.ctx.memory_snapshot,
+        runtime_ev.request.prediction_workspace.memory,
         runtime_ev.request.model_tokens,
         runtime_ev.request.audio_tokens_out,
         runtime_ev.request.text_token_out,
@@ -629,15 +643,15 @@ struct effect_run_predict_graph {
   }
 };
 
-struct effect_publish_predict {
-  void operator()(const event::predict_run &runtime_ev,
+struct effect_publish_sample {
+  void operator()(const event::sample_run &runtime_ev,
                   context &) const noexcept {
     runtime_ev.ctx.err = detail_ns::to_error(error::none);
   }
 };
 
-struct effect_store_predict_graph_error_out {
-  void operator()(const event::predict_run &runtime_ev,
+struct effect_store_sample_graph_error_out {
+  void operator()(const event::sample_run &runtime_ev,
                   context &) const noexcept {
     *runtime_ev.request.graph_error_out = runtime_ev.ctx.graph_error;
   }

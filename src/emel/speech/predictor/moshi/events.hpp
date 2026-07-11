@@ -88,12 +88,29 @@ struct prefill_personaplex_prompt {
 };
 
 struct predict {
+  struct workspace {
+    emel::memory::view::snapshot memory = {};
+  };
+
   predict(std::span<const int32_t> model_tokens_ref,
-          std::span<int32_t> audio_tokens_out_ref,
-          int32_t &text_token_out_ref) noexcept
-      : model_tokens(model_tokens_ref), audio_tokens_out(audio_tokens_out_ref),
+          workspace &workspace_ref) noexcept
+      : model_tokens(model_tokens_ref), prediction_workspace(workspace_ref) {}
+
+  std::span<const int32_t> model_tokens = {};
+  workspace &prediction_workspace;
+  emel::error::type *error_out = nullptr;
+};
+
+struct sample {
+  sample(predict::workspace &workspace_ref,
+         std::span<const int32_t> model_tokens_ref,
+         std::span<int32_t> audio_tokens_out_ref,
+         int32_t &text_token_out_ref) noexcept
+      : prediction_workspace(workspace_ref), model_tokens(model_tokens_ref),
+        audio_tokens_out(audio_tokens_out_ref),
         text_token_out(text_token_out_ref) {}
 
+  predict::workspace &prediction_workspace;
   std::span<const int32_t> model_tokens = {};
   std::span<int32_t> audio_tokens_out = {};
   int32_t &text_token_out;
@@ -202,9 +219,13 @@ struct predict_ctx {
   bool memory_accepted = false;
   int32_t memory_error = static_cast<int32_t>(emel::error::cast(error::none));
   int32_t memory_block_count = 0;
+  emel::memory::view::snapshot &memory_snapshot;
+};
+
+struct sample_ctx {
+  emel::error::type err = emel::error::cast(error::none);
   bool graph_accepted = false;
   emel::error::type graph_error = emel::error::cast(error::none);
-  emel::memory::view::snapshot &memory_snapshot;
 };
 
 struct initialize_run {
@@ -235,6 +256,11 @@ struct prefill_personaplex_prompt_run {
 struct predict_run {
   const predict &request;
   predict_ctx &ctx;
+};
+
+struct sample_run {
+  const sample &request;
+  sample_ctx &ctx;
 };
 
 struct reset_run {

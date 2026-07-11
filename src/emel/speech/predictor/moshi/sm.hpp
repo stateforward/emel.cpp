@@ -84,12 +84,16 @@ struct state_predict_allocate_slot_decision {};
 struct state_predict_capture_memory {};
 struct state_predict_capture_memory_decision {};
 struct state_predict_begin {};
-struct state_predict_graph_runtime_decision {};
-struct state_predict_running_graph {};
-struct state_predict_graph_error_out_decision {};
-struct state_predict_graph_result_decision {};
 struct state_predict_error_out_decision {};
 struct state_predict_failed_error_out_decision {};
+struct state_sample_request_decision {};
+struct state_sample_begin {};
+struct state_sample_graph_runtime_decision {};
+struct state_sample_running_graph {};
+struct state_sample_graph_error_out_decision {};
+struct state_sample_graph_result_decision {};
+struct state_sample_error_out_decision {};
+struct state_sample_failed_error_out_decision {};
 struct state_uninit_voice_error_out_decision {};
 struct state_uninit_voice_callback_decision {};
 struct state_uninit_prefill_voice_error_out_decision {};
@@ -108,6 +112,7 @@ struct model {
     using prefill_prompt_run = event::prefill_personaplex_prompt_run;
     using prefill_voice_run = event::prefill_voice_run;
     using predict_run = event::predict_run;
+    using sample_run = event::sample_run;
 
     // clang-format off
     return sml::make_transition_table(
@@ -472,40 +477,64 @@ struct model {
       , sml::state<state_predict_failed_error_out_decision> <=
           sml::state<state_predict_capture_memory_decision> + sml::completion<predict_run>
           [ guard::guard_memory_rejected{} ] / action::effect_mark_memory_error<predict_run>{}
-      , sml::state<state_predict_graph_runtime_decision> <=
-          sml::state<state_predict_begin> + sml::completion<predict_run>
-      , sml::state<state_predict_running_graph> <=
-          sml::state<state_predict_graph_runtime_decision> + sml::completion<predict_run>
-          [ guard::guard_graph_runtime_available{} ] / action::effect_run_predict_graph{}
-      , sml::state<state_predict_failed_error_out_decision> <=
-          sml::state<state_predict_graph_runtime_decision> + sml::completion<predict_run>
-          [ guard::guard_graph_runtime_unavailable{} ]
-          / action::effect_mark_graph_runtime_unavailable<predict_run>{}
-      , sml::state<state_predict_graph_error_out_decision> <=
-          sml::state<state_predict_running_graph> + sml::completion<predict_run>
-      , sml::state<state_predict_graph_result_decision> <=
-          sml::state<state_predict_graph_error_out_decision> + sml::completion<predict_run>
-          [ guard::guard_has_graph_error_out{} ] / action::effect_store_predict_graph_error_out{}
-      , sml::state<state_predict_graph_result_decision> <=
-          sml::state<state_predict_graph_error_out_decision> + sml::completion<predict_run>
-          [ guard::guard_no_graph_error_out{} ]
       , sml::state<state_predict_error_out_decision> <=
-          sml::state<state_predict_graph_result_decision> + sml::completion<predict_run>
-          [ guard::guard_graph_step_accepted{} ] / action::effect_publish_predict{}
-      , sml::state<state_predict_failed_error_out_decision> <=
-          sml::state<state_predict_graph_result_decision> + sml::completion<predict_run>
+          sml::state<state_predict_begin> + sml::completion<predict_run>
+          / action::effect_publish_predict{}
+      , sml::state<state_session_ready> <= sml::state<state_predict_error_out_decision>
+          + sml::completion<predict_run> [ guard::guard_has_error_out<predict_run>{} ]
+          / action::effect_store_error_out<predict_run>{}
+      , sml::state<state_session_ready> <= sml::state<state_predict_error_out_decision>
+          + sml::completion<predict_run> [ guard::guard_no_error_out<predict_run>{} ]
+      , sml::state<state_session_ready> <= sml::state<state_predict_failed_error_out_decision>
+          + sml::completion<predict_run> [ guard::guard_has_error_out<predict_run>{} ]
+          / action::effect_store_error_out<predict_run>{}
+      , sml::state<state_session_ready> <= sml::state<state_predict_failed_error_out_decision>
+          + sml::completion<predict_run> [ guard::guard_no_error_out<predict_run>{} ]
+
+      // Model-family sampling executes only after prediction memory is prepared.
+      , sml::state<state_sample_request_decision> <= sml::state<state_session_ready>
+          + sml::event<sample_run>
+      , sml::state<state_sample_begin> <= sml::state<state_sample_request_decision>
+          + sml::completion<sample_run> [ guard::guard_sample_request_valid{} ]
+          / action::effect_begin_sample{}
+      , sml::state<state_sample_failed_error_out_decision> <=
+          sml::state<state_sample_request_decision> + sml::completion<sample_run>
+          [ guard::guard_sample_request_invalid{} ]
+          / action::effect_mark_step_request_invalid{}
+      , sml::state<state_sample_graph_runtime_decision> <=
+          sml::state<state_sample_begin> + sml::completion<sample_run>
+      , sml::state<state_sample_running_graph> <=
+          sml::state<state_sample_graph_runtime_decision> + sml::completion<sample_run>
+          [ guard::guard_graph_runtime_available{} ] / action::effect_run_sample_graph{}
+      , sml::state<state_sample_failed_error_out_decision> <=
+          sml::state<state_sample_graph_runtime_decision> + sml::completion<sample_run>
+          [ guard::guard_graph_runtime_unavailable{} ]
+          / action::effect_mark_graph_runtime_unavailable<sample_run>{}
+      , sml::state<state_sample_graph_error_out_decision> <=
+          sml::state<state_sample_running_graph> + sml::completion<sample_run>
+      , sml::state<state_sample_graph_result_decision> <=
+          sml::state<state_sample_graph_error_out_decision> + sml::completion<sample_run>
+          [ guard::guard_has_graph_error_out{} ] / action::effect_store_sample_graph_error_out{}
+      , sml::state<state_sample_graph_result_decision> <=
+          sml::state<state_sample_graph_error_out_decision> + sml::completion<sample_run>
+          [ guard::guard_no_graph_error_out{} ]
+      , sml::state<state_sample_error_out_decision> <=
+          sml::state<state_sample_graph_result_decision> + sml::completion<sample_run>
+          [ guard::guard_graph_step_accepted{} ] / action::effect_publish_sample{}
+      , sml::state<state_sample_failed_error_out_decision> <=
+          sml::state<state_sample_graph_result_decision> + sml::completion<sample_run>
           [ guard::guard_graph_step_rejected{} ]
-          / action::effect_mark_graph_runtime_error<predict_run>{}
-      , sml::state<state_session_ready> <= sml::state<state_predict_error_out_decision>
-          + sml::completion<predict_run> [ guard::guard_has_error_out<predict_run>{} ]
-          / action::effect_store_error_out<predict_run>{}
-      , sml::state<state_session_ready> <= sml::state<state_predict_error_out_decision>
-          + sml::completion<predict_run> [ guard::guard_no_error_out<predict_run>{} ]
-      , sml::state<state_session_ready> <= sml::state<state_predict_failed_error_out_decision>
-          + sml::completion<predict_run> [ guard::guard_has_error_out<predict_run>{} ]
-          / action::effect_store_error_out<predict_run>{}
-      , sml::state<state_session_ready> <= sml::state<state_predict_failed_error_out_decision>
-          + sml::completion<predict_run> [ guard::guard_no_error_out<predict_run>{} ]
+          / action::effect_mark_graph_runtime_error<sample_run>{}
+      , sml::state<state_session_ready> <= sml::state<state_sample_error_out_decision>
+          + sml::completion<sample_run> [ guard::guard_has_error_out<sample_run>{} ]
+          / action::effect_store_error_out<sample_run>{}
+      , sml::state<state_session_ready> <= sml::state<state_sample_error_out_decision>
+          + sml::completion<sample_run> [ guard::guard_no_error_out<sample_run>{} ]
+      , sml::state<state_session_ready> <= sml::state<state_sample_failed_error_out_decision>
+          + sml::completion<sample_run> [ guard::guard_has_error_out<sample_run>{} ]
+          / action::effect_store_error_out<sample_run>{}
+      , sml::state<state_session_ready> <= sml::state<state_sample_failed_error_out_decision>
+          + sml::completion<sample_run> [ guard::guard_no_error_out<sample_run>{} ]
 
       // Predictor-owned prompt cache handoff into the injected tokenizer.
       , sml::state<state_session_ready> <= sml::state<state_session_ready>
@@ -525,6 +554,12 @@ struct model {
       , sml::state<state_uninitialized> <= sml::state<state_uninitialized>
           + sml::event<predict_run> [ guard::guard_no_error_out<predict_run>{} ]
           / action::effect_mark_not_initialized<predict_run>{}
+      , sml::state<state_uninitialized> <= sml::state<state_uninitialized>
+          + sml::event<sample_run> [ guard::guard_has_error_out<sample_run>{} ]
+          / action::effect_mark_not_initialized_and_store<sample_run>{}
+      , sml::state<state_uninitialized> <= sml::state<state_uninitialized>
+          + sml::event<sample_run> [ guard::guard_no_error_out<sample_run>{} ]
+          / action::effect_mark_not_initialized<sample_run>{}
       , sml::state<state_uninitialized> <= sml::state<state_uninitialized>
           + sml::event<event::capture_tokenizer_state>
           / action::effect_reject_capture_tokenizer_state<error::not_initialized>{}
@@ -660,8 +695,15 @@ struct sm : public emel::sm<model, action::context> {
   }
 
   bool process_event(const event::predict &ev) {
-    event::predict_ctx ctx{*memory_snapshot_};
+    event::predict_ctx ctx{ev.prediction_workspace.memory};
     event::predict_run runtime_ev{ev, ctx};
+    const bool accepted = base_type::process_event(runtime_ev);
+    return accepted && ctx.err == action::detail_ns::to_error(error::none);
+  }
+
+  bool process_event(const event::sample &ev) {
+    event::sample_ctx ctx{};
+    event::sample_run runtime_ev{ev, ctx};
     const bool accepted = base_type::process_event(runtime_ev);
     return accepted && ctx.err == action::detail_ns::to_error(error::none);
   }

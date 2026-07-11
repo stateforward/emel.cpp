@@ -476,17 +476,32 @@ struct effect_predict_frame {
   void operator()(const runtime_event_type &runtime_ev,
                   context<dependencies_type> &ctx) const noexcept {
     runtime_ev.ctx.child_err = 0;
+    typename dependencies_type::predict_event request{
+        std::span<const int32_t>{ctx.collaborators.model_codes},
+        ctx.collaborators.prediction_workspace};
+    request.error_out = &runtime_ev.ctx.child_err;
+    runtime_ev.ctx.child_accepted =
+        ctx.collaborators.predictor.process_event(request);
+  }
+};
+
+template <class dependencies_type, class runtime_event_type>
+struct effect_sample_frame {
+  void operator()(const runtime_event_type &runtime_ev,
+                  context<dependencies_type> &ctx) const noexcept {
+    runtime_ev.ctx.child_err = 0;
     runtime_ev.ctx.graph_err = 0;
     runtime_ev.ctx.predicted_text_token = -1;
     std::fill(ctx.collaborators.predicted_codes.begin(),
               ctx.collaborators.predicted_codes.end(), -1);
-    typename dependencies_type::predict_event request{
+    typename dependencies_type::sample_event request{
+        ctx.collaborators.prediction_workspace,
         std::span<const int32_t>{ctx.collaborators.model_codes},
         ctx.collaborators.predicted_codes, runtime_ev.ctx.predicted_text_token};
     request.error_out = &runtime_ev.ctx.child_err;
     request.graph_error_out = &runtime_ev.ctx.graph_err;
     runtime_ev.ctx.child_accepted =
-        ctx.collaborators.predictor.process_event(request);
+        ctx.collaborators.sampler.process_event(request);
   }
 };
 

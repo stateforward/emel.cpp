@@ -54,6 +54,7 @@ struct state_generate_done_channel_decision {};
 struct state_stream_encode_result {};
 struct state_stream_tokenize_result {};
 struct state_stream_predict_result {};
+struct state_stream_sample_result {};
 struct state_stream_detokenize_result {};
 struct state_stream_decode_result {};
 struct state_stream_done_channel_decision {};
@@ -63,6 +64,7 @@ struct state_flushing {};
 struct state_flush_encode_result {};
 struct state_flush_tokenize_result {};
 struct state_flush_predict_result {};
+struct state_flush_sample_result {};
 struct state_flush_detokenize_result {};
 struct state_flush_decode_result {};
 struct state_flush_done_channel_decision {};
@@ -325,26 +327,11 @@ template <class dependencies_type> struct duplex_model {
           + sml::completion<condition_run> [ condition_error_absent{} ]
 
       //------------------------------------------------------------------------------//
-      // Offline synthesis remains explicitly reserved for its later cutover.
-      , sml::state<state_generate_conditioning> <= sml::state<state_ready>
-          + sml::event<generate_run> [ guard::guard_generate_request_valid<dependencies_type>{} ]
-          / action::effect_prepare_generate<dependencies_type>{}
-      , sml::state<state_generate_error_channel_decision> <= sml::state<state_ready>
-          + sml::event<generate_run> [ guard::guard_generate_request_invalid<dependencies_type>{} ]
-          / action::effect_fail_generate<dependencies_type, error::invalid_request>{}
-      , sml::state<state_generate_prefill> <= sml::state<state_generate_conditioning>
-          + sml::completion<generate_run>
-      , sml::state<state_generate_predict> <= sml::state<state_generate_prefill>
-          + sml::completion<generate_run>
-      , sml::state<state_generate_sample> <= sml::state<state_generate_predict>
-          + sml::completion<generate_run>
-      , sml::state<state_generate_decode> <= sml::state<state_generate_sample>
-          + sml::completion<generate_run>
-      , sml::state<state_generate_postprocess> <= sml::state<state_generate_decode>
-          + sml::completion<generate_run>
+      // Duplex generators expose streaming requests; offline synthesis is a
+      // distinct, explicitly unsupported request shape for this composition.
       , sml::state<state_generate_error_channel_decision> <=
-          sml::state<state_generate_postprocess> + sml::completion<generate_run>
-          / action::effect_fail_generate<dependencies_type, error::cutover_pending>{}
+          sml::state<state_ready> + sml::event<generate_run>
+          / action::effect_fail_generate<dependencies_type, error::unsupported_request>{}
       , sml::state<state_ready> <= sml::state<state_generate_error_channel_decision>
           + sml::completion<generate_run> [ generate_error_present{} ]
           / action::effect_emit_generation_error<dependencies_type>{}
@@ -352,7 +339,7 @@ template <class dependencies_type> struct duplex_model {
           + sml::completion<generate_run> [ generate_error_absent{} ]
 
       //------------------------------------------------------------------------------//
-      // Duplex encode -> tokenize -> predict -> detokenize -> optional decode.
+      // Duplex encode -> tokenize -> predict -> sample -> detokenize -> decode.
       , sml::state<state_stream_encode_result> <= sml::state<state_ready>
           + sml::event<stream_run> [ guard::guard_stream_request_valid<dependencies_type>{} ]
           / action::effect_encode_stream_frame<dependencies_type>{}
@@ -373,13 +360,20 @@ template <class dependencies_type> struct duplex_model {
           sml::state<state_stream_tokenize_result> + sml::completion<stream_run>
           [ guard::guard_child_failed<dependencies_type, stream_run>{} ]
           / action::effect_fail_stream_frame<dependencies_type, error::tokenize_failed>{}
-      , sml::state<state_stream_detokenize_result> <= sml::state<state_stream_predict_result>
+      , sml::state<state_stream_sample_result> <= sml::state<state_stream_predict_result>
           + sml::completion<stream_run> [ guard::guard_prediction_succeeded<dependencies_type, stream_run>{} ]
-          / action::effect_detokenize_frame<dependencies_type, stream_run>{}
+          / action::effect_sample_frame<dependencies_type, stream_run>{}
       , sml::state<state_stream_error_channel_decision> <=
           sml::state<state_stream_predict_result> + sml::completion<stream_run>
           [ guard::guard_prediction_failed<dependencies_type, stream_run>{} ]
           / action::effect_fail_stream_frame<dependencies_type, error::predict_failed>{}
+      , sml::state<state_stream_detokenize_result> <= sml::state<state_stream_sample_result>
+          + sml::completion<stream_run> [ guard::guard_prediction_succeeded<dependencies_type, stream_run>{} ]
+          / action::effect_detokenize_frame<dependencies_type, stream_run>{}
+      , sml::state<state_stream_error_channel_decision> <=
+          sml::state<state_stream_sample_result> + sml::completion<stream_run>
+          [ guard::guard_prediction_failed<dependencies_type, stream_run>{} ]
+          / action::effect_fail_stream_frame<dependencies_type, error::sample_failed>{}
       , sml::state<state_stream_decode_result> <= sml::state<state_stream_detokenize_result>
           + sml::completion<stream_run> [ guard::guard_frame_produced<dependencies_type, stream_run>{} ]
           / action::effect_decode_frame<dependencies_type, stream_run>{}
@@ -438,13 +432,20 @@ template <class dependencies_type> struct duplex_model {
           sml::state<state_flush_tokenize_result> + sml::completion<flush_run>
           [ guard::guard_child_failed<dependencies_type, flush_run>{} ]
           / action::effect_fail_flush<dependencies_type, error::tokenize_failed>{}
-      , sml::state<state_flush_detokenize_result> <= sml::state<state_flush_predict_result>
+      , sml::state<state_flush_sample_result> <= sml::state<state_flush_predict_result>
           + sml::completion<flush_run> [ guard::guard_prediction_succeeded<dependencies_type, flush_run>{} ]
-          / action::effect_detokenize_frame<dependencies_type, flush_run>{}
+          / action::effect_sample_frame<dependencies_type, flush_run>{}
       , sml::state<state_flush_error_channel_decision> <=
           sml::state<state_flush_predict_result> + sml::completion<flush_run>
           [ guard::guard_prediction_failed<dependencies_type, flush_run>{} ]
           / action::effect_fail_flush<dependencies_type, error::predict_failed>{}
+      , sml::state<state_flush_detokenize_result> <= sml::state<state_flush_sample_result>
+          + sml::completion<flush_run> [ guard::guard_prediction_succeeded<dependencies_type, flush_run>{} ]
+          / action::effect_detokenize_frame<dependencies_type, flush_run>{}
+      , sml::state<state_flush_error_channel_decision> <=
+          sml::state<state_flush_sample_result> + sml::completion<flush_run>
+          [ guard::guard_prediction_failed<dependencies_type, flush_run>{} ]
+          / action::effect_fail_flush<dependencies_type, error::sample_failed>{}
       , sml::state<state_flush_decode_result> <= sml::state<state_flush_detokenize_result>
           + sml::completion<flush_run> [ guard::guard_frame_produced<dependencies_type, flush_run>{} ]
           / action::effect_decode_frame<dependencies_type, flush_run>{}
@@ -482,10 +483,10 @@ template <class dependencies_type> struct duplex_model {
           / action::effect_reject_reset<dependencies_type, error::uninitialized>{}
       , sml::state<state_ready> <= sml::state<state_ready>
           + sml::event<event::reset>
-          / action::effect_reject_reset<dependencies_type, error::cutover_pending>{}
+          / action::effect_reject_reset<dependencies_type, error::unsupported_request>{}
       , sml::state<state_flushing> <= sml::state<state_flushing>
           + sml::event<event::reset>
-          / action::effect_reject_reset<dependencies_type, error::cutover_pending>{}
+          / action::effect_reject_reset<dependencies_type, error::unsupported_request>{}
       , sml::state<state_errored> <= sml::state<state_errored>
           + sml::event<event::reset>
           / action::effect_reject_reset<dependencies_type, error::internal_error>{}
@@ -735,7 +736,7 @@ template <class dependencies_type> struct synthesis_model {
           + sml::event<event::reset>
           / action::effect_reject_reset<dependencies_type, error::uninitialized>{}
       , sml::state<state_ready> <= sml::state<state_ready> + sml::event<event::reset>
-          / action::effect_reject_reset<dependencies_type, error::cutover_pending>{}
+          / action::effect_reject_reset<dependencies_type, error::unsupported_request>{}
       , sml::state<state_errored> <= sml::state<state_errored> + sml::event<event::reset>
           / action::effect_reject_reset<dependencies_type, error::internal_error>{}
       , sml::state<state_errored> <= sml::state<state_uninitialized>
