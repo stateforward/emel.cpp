@@ -9,7 +9,7 @@ Development of this C++ implementation has been discontinued in favor of
 [stateforward/emel.rs](https://github.com/stateforward/emel.rs). Please use that repository for
 current development and future updates.
 
-This inference engine is being implemented by AI under human engineering and architecture direction.
+This C++ implementation was developed by AI under human engineering and architecture direction.
 
 ## CPU-first scope
 
