@@ -3,13 +3,13 @@
 CPU-first C++ inference engine for deterministic, high-performance inference built around
 Stateforward.SML orchestration.
 
-## Status: WIP
+## Status: Discontinued
 
-This repository is under active development. APIs, state machines, and formats will change.
-If you’re evaluating EMEL, expect fast iteration and breaking changes until the core loader,
-allocator, and execution pipelines stabilize.
+Development of this C++ implementation has been discontinued in favor of
+[stateforward/emel.rs](https://github.com/stateforward/emel.rs). Please use that repository for
+current development and future updates.
 
-This inference engine is being implemented by AI under human engineering and architecture direction.
+This C++ implementation was developed by AI under human engineering and architecture direction.
 
 ## CPU-first scope
 
