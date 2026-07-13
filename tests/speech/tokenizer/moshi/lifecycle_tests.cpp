@@ -189,8 +189,73 @@ TEST_CASE("speech Moshi tokenizer accepts the PersonaPlex tail shape") {
       .model_tokens_out = std::span<int32_t>{model_tokens},
       .error_out = err,
   }));
-  CHECK(model_tokens[3] == next_tail[0]);
-  CHECK(model_tokens[4] == next_tail[1]);
+  CHECK(model_tokens[3] == generated[2]);
+  CHECK(model_tokens[4] == generated[3]);
+}
+
+TEST_CASE(
+    "speech Moshi tokenizer replaces restored prompt lanes with generated "
+    "PersonaPlex audio") {
+  std::array<int32_t, 5> delays = {0, 1, 1, 1, 1};
+  std::array<int32_t, 20> cache = {};
+  moshi::sm machine{moshi::dependencies{
+      .delays = std::span<const int32_t>{delays},
+      .cache = std::span<int32_t>{cache},
+      .codebooks = 5,
+      .generated_audio_codebooks = 4,
+      .delayed_audio_codebooks = 2,
+      .cache_rows = 4,
+      .maximum_delay = 1,
+      .initial_delay_frames = 0,
+      .text_initial_token = 100,
+      .audio_initial_token = 200,
+      .token_zero = -1,
+      .token_ungenerated = -2,
+  }};
+  int32_t err = error_code(moshi::error::none);
+  REQUIRE(machine.process_event(moshi::event::initialize{.error_out = err}));
+
+  const std::array<int32_t, 20> restored_column_major = {
+      10, 11, 12, 13, 51, 61, 71, 81, 52, 62,
+      72, 82, 53, 63, 73, 83, 54, 64, 74, 84,
+  };
+  REQUIRE(machine.process_event(moshi::event::restore_cache{
+      .column_major_cache = std::span<const int32_t>{restored_column_major},
+      .offset = 3,
+      .error_out = err,
+  }));
+
+  const std::array<int32_t, 2> provided_tail = {101, 102};
+  std::array<int32_t, 5> model_tokens = {};
+  REQUIRE(machine.process_event(moshi::event::tokenize{
+      .audio_tokens = std::span<const int32_t>{provided_tail},
+      .model_tokens_out = std::span<int32_t>{model_tokens},
+      .error_out = err,
+  }));
+
+  const std::array<int32_t, 4> generated = {21, 22, 23, 24};
+  std::array<int32_t, 2> output = {};
+  int32_t text_out = -1;
+  bool produced = false;
+  REQUIRE(machine.process_event(moshi::event::detokenize{
+      .text_token = 20,
+      .audio_tokens = std::span<const int32_t>{generated},
+      .text_token_out = text_out,
+      .audio_tokens_out = std::span<int32_t>{output},
+      .produced_out = produced,
+      .error_out = err,
+  }));
+
+  REQUIRE(produced);
+  CHECK(output == std::array<int32_t, 2>{21, 22});
+
+  const std::array<int32_t, 2> next_tail = {111, 112};
+  REQUIRE(machine.process_event(moshi::event::tokenize{
+      .audio_tokens = std::span<const int32_t>{next_tail},
+      .model_tokens_out = std::span<int32_t>{model_tokens},
+      .error_out = err,
+  }));
+  CHECK(model_tokens == std::array<int32_t, 5>{20, 21, 22, 23, 24});
 }
 
 TEST_CASE("speech Moshi tokenizer rejects invalid public audio tokens before "

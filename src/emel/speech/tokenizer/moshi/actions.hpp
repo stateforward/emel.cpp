@@ -107,7 +107,7 @@ struct effect_begin_detokenize {
 
 enum class cache_write_mode : uint8_t {
   replace,
-  preserve_provided,
+  preserve_full,
 };
 
 enum class audio_write_mode : uint8_t {
@@ -141,7 +141,7 @@ struct effect_commit_generated {
                         .audio_tokens[static_cast<size_t>(audio_codebook)];
       }
 
-      if constexpr (cache_mode == cache_write_mode::preserve_provided) {
+      if constexpr (cache_mode == cache_write_mode::preserve_full) {
         const int32_t current = detail::cache_at(ctx, row, codebook);
         const int32_t missing =
             static_cast<int32_t>(current == ctx.config.token_ungenerated);

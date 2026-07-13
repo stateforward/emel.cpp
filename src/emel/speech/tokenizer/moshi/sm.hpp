@@ -35,8 +35,9 @@ state purpose
   state_prepared_tail records that PersonaPlex tail lanes were provided, and
   state_prepared_generated records generator-owned input. The state graph
   therefore owns cache-write policy without a persistent flag.
-- commit states select initial-delay replacement and provided-cache
-  preservation before executing fixed data-plane cache writes.
+- commit states select initial-delay replacement and full-input versus generated
+  cache ownership before executing fixed data-plane cache writes. Tail input
+  feeds the current model frame; sampled audio owns the committed cache.
 
 control invariants
 - delay geometry, token sentinels, and cache storage are injected; the actor
@@ -59,12 +60,12 @@ struct model {
   auto operator()() const {
     namespace sml = stateforward::sml;
 
-    using effect_commit_full_zero = action::effect_commit_generated<
-        action::cache_write_mode::preserve_provided,
-        action::audio_write_mode::zero>;
-    using effect_commit_full_generated = action::effect_commit_generated<
-        action::cache_write_mode::preserve_provided,
-        action::audio_write_mode::generated>;
+    using effect_commit_full_zero =
+        action::effect_commit_generated<action::cache_write_mode::preserve_full,
+                                        action::audio_write_mode::zero>;
+    using effect_commit_full_generated =
+        action::effect_commit_generated<action::cache_write_mode::preserve_full,
+                                        action::audio_write_mode::generated>;
     using effect_commit_zero =
         action::effect_commit_generated<action::cache_write_mode::replace,
                                         action::audio_write_mode::zero>;
@@ -141,11 +142,11 @@ struct model {
           + sml::event<event::detokenize_run>
           [ guard::guard_detokenize_valid_generated{} ]
           / action::effect_begin_detokenize{}
-      , sml::state<state_commit_full_zero> <= sml::state<state_prepared_tail>
+      , sml::state<state_commit_generated_zero> <= sml::state<state_prepared_tail>
           + sml::event<event::detokenize_run>
           [ guard::guard_detokenize_valid_replace{} ]
           / action::effect_begin_detokenize{}
-      , sml::state<state_commit_full_generated> <= sml::state<state_prepared_tail>
+      , sml::state<state_commit_generated> <= sml::state<state_prepared_tail>
           + sml::event<event::detokenize_run>
           [ guard::guard_detokenize_valid_generated{} ]
           / action::effect_begin_detokenize{}
