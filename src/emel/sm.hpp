@@ -17,7 +17,6 @@
 #include <memory>
 #include <new>
 #include <semaphore>
-#include <stdexcept>
 #include <thread>
 #include <type_traits>
 #include <tuple>
@@ -131,13 +130,12 @@ class fork_join_lane_pool {
 
   static constexpr std::size_t static_worker_count = worker_count;
 
-  fork_join_lane_pool() : fork_join_lane_pool(worker_count) {}
+  fork_join_lane_pool() noexcept : fork_join_lane_pool(worker_count) {}
 
-  explicit fork_join_lane_pool(const std::size_t active_worker_count)
+  explicit fork_join_lane_pool(const std::size_t active_worker_count) noexcept
       : active_worker_count_(active_worker_count) {
     if (active_worker_count_ == 0u || active_worker_count_ > worker_count) {
-      throw std::invalid_argument(
-          "fork_join_lane_pool active worker count is out of range");
+      std::terminate();
     }
     start_workers();
   }
@@ -299,15 +297,10 @@ class fork_join_lane_pool {
     std::atomic<bool> stopping = false;
   };
 
-  void start_workers() {
-    try {
-      for (std::size_t index = 0u; index < active_worker_count_; ++index) {
-        workers_[index].thread =
-            std::thread([this, index]() noexcept { worker_loop(index); });
-      }
-    } catch (...) {
-      stop_workers();
-      throw;
+  void start_workers() noexcept {
+    for (std::size_t index = 0u; index < active_worker_count_; ++index) {
+      workers_[index].thread =
+          std::thread([this, index]() noexcept { worker_loop(index); });
     }
   }
 

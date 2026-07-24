@@ -358,3 +358,15 @@ TEST_CASE("kernel attention rejects unsafe public span storage") {
   CHECK_FALSE(actor->process_event(attention::event::execute{request, result}));
   CHECK_FALSE(result.accepted);
 }
+
+TEST_CASE("kernel attention rejects unexpected result-bearing dispatches") {
+  struct unexpected_dispatch {
+    attention::event::dispatch_result &result;
+  };
+
+  attention::action::context ctx{};
+  attention::event::dispatch_result result{.accepted = true};
+  attention::action::effect_on_unexpected{}(unexpected_dispatch{result}, ctx);
+
+  CHECK_FALSE(result.accepted);
+}

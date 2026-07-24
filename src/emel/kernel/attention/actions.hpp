@@ -119,7 +119,11 @@ struct effect_emit_execute_error {
 
 struct effect_on_unexpected {
   template <class event_type>
-  void operator()(const event_type &, context &) const noexcept {}
+  void operator()(const event_type &ev, context &) const noexcept {
+    if constexpr (requires { ev.result.accepted; }) {
+      ev.result.accepted = false;
+    }
+  }
 };
 
 } // namespace emel::kernel::attention::action

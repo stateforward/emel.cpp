@@ -44,6 +44,7 @@ fi
 required_tools=(
   cmake
   ctest
+  ninja
   gcovr
   clang-format
   llvm-cov
