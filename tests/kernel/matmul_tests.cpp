@@ -410,6 +410,30 @@ TEST_CASE("parallel matmul uses the concrete canonical lane pool") {
   CHECK(policy.active_lanes == 8u);
 }
 
+TEST_CASE(
+    "parallel matmul auto policy stays within the runtime worker budget") {
+  {
+    matmul::lane_pool pool{1u};
+    CHECK(matmul::make_auto_execution_policy(pool).active_lanes == 2u);
+  }
+  {
+    matmul::lane_pool pool{2u};
+    CHECK(matmul::make_auto_execution_policy(pool).active_lanes == 2u);
+  }
+  {
+    matmul::lane_pool pool{3u};
+    CHECK(matmul::make_auto_execution_policy(pool).active_lanes == 4u);
+  }
+  {
+    matmul::lane_pool pool{6u};
+    CHECK(matmul::make_auto_execution_policy(pool).active_lanes == 4u);
+  }
+  {
+    matmul::lane_pool pool{7u};
+    CHECK(matmul::make_auto_execution_policy(pool).active_lanes == 8u);
+  }
+}
+
 struct parallel_backend_fixture {
   emel::kernel::matmul::lane_pool parallel_matmul_lanes = {};
   emel::kernel::matmul::execution_policy policy =

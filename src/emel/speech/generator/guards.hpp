@@ -297,7 +297,10 @@ template <class dependencies_type> struct guard_wavefront_frame_valid {
            runtime_ev.request.input_attribution.sequence !=
                event::k_invalid_wavefront_sequence &&
            runtime_ev.request.input_attribution.sequence ==
-               ctx.expected_input.sequence;
+               ctx.expected_input.sequence &&
+           (ctx.expected_input.sequence == 0u ||
+            runtime_ev.request.input_attribution.source ==
+                ctx.expected_input.source);
   }
 };
 

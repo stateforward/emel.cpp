@@ -184,6 +184,13 @@ struct attention_executor_bench_fixture {
                   static_cast<std::size_t>(model.moshi_lm.context) *
                   static_cast<std::size_t>(model.moshi_lm.dim)),
         value_cache(key_cache.size()),
+        depformer_layer_offsets(
+            static_cast<std::size_t>(model.moshi_lm.depformer_num_layers), 0u),
+        depformer_key_cache(
+            static_cast<std::size_t>(model.moshi_lm.depformer_num_layers) *
+            static_cast<std::size_t>(model.moshi_lm.depformer_context) *
+            static_cast<std::size_t>(model.moshi_lm.depformer_dim)),
+        depformer_value_cache(depformer_key_cache.size()),
         input_sequence(static_cast<std::size_t>(model.moshi_lm.n_q + 1), -1),
         input_embedding(static_cast<std::size_t>(model.moshi_lm.dim)),
         temporal_state(input_embedding.size()),
@@ -200,6 +207,13 @@ struct attention_executor_bench_fixture {
         static_cast<std::size_t>(model.moshi_lm.dim);
     for (std::size_t index = 0u; index < layer_offsets.size(); ++index) {
       layer_offsets[index] = index * per_layer_cache;
+    }
+    const std::size_t depformer_per_layer_cache =
+        static_cast<std::size_t>(model.moshi_lm.depformer_context) *
+        static_cast<std::size_t>(model.moshi_lm.depformer_dim);
+    for (std::size_t index = 0u; index < depformer_layer_offsets.size();
+         ++index) {
+      depformer_layer_offsets[index] = index * depformer_per_layer_cache;
     }
     if (lane_count > 1u) {
       attention_lanes.emplace();
@@ -226,6 +240,21 @@ struct attention_executor_bench_fixture {
                                 .position_capacity = model.moshi_lm.context,
                                 .kv_dim = model.moshi_lm.dim,
                             },
+                        .depformer =
+                            {
+                                .key_cache =
+                                    std::span<uint16_t>{depformer_key_cache},
+                                .value_cache =
+                                    std::span<uint16_t>{depformer_value_cache},
+                                .layer_cache_offsets =
+                                    std::span<const std::size_t>{
+                                        depformer_layer_offsets},
+                                .layer_count =
+                                    model.moshi_lm.depformer_num_layers,
+                                .position_capacity =
+                                    model.moshi_lm.depformer_context,
+                                .kv_dim = model.moshi_lm.depformer_dim,
+                            },
                         .temporal_positions = &temporal_positions,
                         .depformer_positions = &depformer_positions,
                     },
@@ -246,18 +275,18 @@ struct attention_executor_bench_fixture {
                 .capacity =
                     {
                         .hidden_dim =
-                            static_cast<uint64_t>(std::max(model.moshi_lm.dim,
-                                                           model.moshi_lm.depformer_dim)),
+                            static_cast<uint64_t>(
+                                std::max(model.moshi_lm.dim,
+                                         model.moshi_lm.depformer_dim)),
                         .temporal_context =
                             static_cast<uint64_t>(model.moshi_lm.context),
                         .depformer_context =
-                            static_cast<uint64_t>(model.moshi_lm
-                                                      .depformer_context),
+                            static_cast<uint64_t>(
+                                model.moshi_lm.depformer_context),
                         .sampling_card =
                             static_cast<uint64_t>(
-                                std::
-                                    max(model.moshi_lm.text_card, model.moshi_lm
-                                                                      .card)),
+                                std::max(model.moshi_lm.text_card,
+                                         model.moshi_lm.card)),
                         .sampling_top_k = 1u,
                     },
             });
@@ -348,6 +377,9 @@ struct attention_executor_bench_fixture {
   std::vector<std::size_t> layer_offsets = {};
   std::vector<uint16_t> key_cache = {};
   std::vector<uint16_t> value_cache = {};
+  std::vector<std::size_t> depformer_layer_offsets = {};
+  std::vector<uint16_t> depformer_key_cache = {};
+  std::vector<uint16_t> depformer_value_cache = {};
   std::vector<int32_t> input_sequence = {};
   std::vector<float> input_embedding = {};
   std::vector<float> temporal_state = {};

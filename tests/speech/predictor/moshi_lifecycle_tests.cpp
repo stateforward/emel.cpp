@@ -1704,6 +1704,17 @@ TEST_CASE("speech_moshi_executor_runtime_choice_uses_explicit_transitions") {
         std::string::npos);
 }
 
+TEST_CASE("speech Moshi attention benchmark binds temporal and depformer KV") {
+  const auto bytes = read_binary_file(repo_root() / "tools" / "bench" /
+                                      "speech" / "lm_moshi_bench.cpp");
+  const std::string source{bytes.begin(), bytes.end()};
+
+  CHECK(source.find("depformer_layer_offsets") != std::string::npos);
+  CHECK(source.find("depformer_key_cache") != std::string::npos);
+  CHECK(source.find("depformer_value_cache") != std::string::npos);
+  CHECK(source.find(".depformer =") != std::string::npos);
+}
+
 TEST_CASE("speech_moshi_generator_graph_outputs_use_explicit_transitions") {
   const auto action_bytes =
       read_binary_file(repo_root() / "src" / "emel" / "speech" / "predictor" /

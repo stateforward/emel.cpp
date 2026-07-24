@@ -400,6 +400,17 @@ struct fixture {
        std::array<int32_t, CODEBOOKS> &tokens_out, emel::error::type &err,
        emel::callback<void(const generator::events::wavefront_frame_done &)>
            on_done = {}) {
+    return push_from_source(sequence, 99u, produced, output, pcm_out,
+                            tokens_out, err, on_done);
+  }
+
+  bool push_from_source(
+      const uint64_t sequence, const uint64_t source, bool &produced,
+      generator::event::wavefront_attribution &output,
+      std::array<float, FRAME_SAMPLES> &pcm_out,
+      std::array<int32_t, CODEBOOKS> &tokens_out, emel::error::type &err,
+      emel::callback<void(const generator::events::wavefront_frame_done &)>
+          on_done = {}) {
     std::array<float, FRAME_SAMPLES> pcm_in{};
     pcm_in.fill(static_cast<float>(sequence + 1u));
     last_text_token = -1;
@@ -409,7 +420,7 @@ struct fixture {
         pcm_out,
         last_encoded_tokens,
         tokens_out,
-        {.sequence = sequence, .source = 99u},
+        {.sequence = sequence, .source = source},
         output,
         last_text_token,
         last_sample_count,
@@ -624,6 +635,18 @@ TEST_CASE("speech_generator_wavefront_emits_done_callbacks_for_each_public_"
     CHECK(probe.all_calls_inside_dispatch);
     CHECK(test.machine.is(sml::state<generator::state_wavefront_complete>));
   }
+}
+
+TEST_CASE("speech_generator_wavefront_rejects_source_switch_without_reset") {
+  fixture test{};
+  wavefront_io io{};
+
+  REQUIRE(test.push_from_source(0u, 99u, io.produced, io.output, io.pcm,
+                                io.tokens, io.err));
+  CHECK_FALSE(test.push_from_source(1u, 100u, io.produced, io.output, io.pcm,
+                                    io.tokens, io.err));
+  CHECK_FALSE(io.produced);
+  CHECK(io.err == error_code(generator::error::invalid_request));
 }
 
 TEST_CASE("speech_generator_wavefront_rejects_each_invalid_public_request_"
