@@ -8,8 +8,6 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # shellcheck source=scripts/build_jobs.sh
 source "$ROOT_DIR/scripts/build_jobs.sh"
-# shellcheck source=scripts/zig_toolchain.sh
-source "$ROOT_DIR/scripts/zig_toolchain.sh"
 
 BUILD_DIR_OVERRIDE="${EMEL_MOSHI_LM_COMPARE_BUILD_DIR:-}"
 BUILD_DIR=""
@@ -120,12 +118,17 @@ for tool in cmake ninja git; do
   fi
 done
 
+if ! $RUN_ONLY && $USE_ZIG; then
+  # shellcheck source=scripts/zig_toolchain.sh
+  source "$ROOT_DIR/scripts/zig_toolchain.sh"
+fi
+
 cmake_args=(-S "$ROOT_DIR/tools/bench" -B "$BUILD_DIR" -G Ninja
             -DCMAKE_BUILD_TYPE=Release
             -DEMEL_BENCH_SUITE_FILTER=speech_lm_moshi
             -DEMEL_BENCH_SKIP_MOSHI_REFERENCE=ON)
 
-if $USE_ZIG; then
+if ! $RUN_ONLY && $USE_ZIG; then
   if ! command -v zig >/dev/null 2>&1; then
     echo "error: zig not found (use --system to use system compilers)" >&2
     exit 1

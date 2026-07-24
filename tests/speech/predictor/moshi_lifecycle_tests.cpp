@@ -1713,6 +1713,9 @@ TEST_CASE("speech Moshi attention benchmark binds temporal and depformer KV") {
   CHECK(source.find("depformer_key_cache") != std::string::npos);
   CHECK(source.find("depformer_value_cache") != std::string::npos);
   CHECK(source.find(".depformer =") != std::string::npos);
+  CHECK(source.find("attention_lanes.emplace(lane_count - 1u)") !=
+        std::string::npos);
+  CHECK(source.find("attention_lanes.emplace()") == std::string::npos);
 }
 
 TEST_CASE("speech_moshi_generator_graph_outputs_use_explicit_transitions") {

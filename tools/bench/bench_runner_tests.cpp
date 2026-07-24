@@ -1245,6 +1245,9 @@ TEST_CASE("moshi lm wrapper gives --model priority over inherited env") {
     write_file(tool_path, "#!/bin/sh\nexit 0\n");
     make_executable(tool_path);
   }
+  const std::filesystem::path xcrun_path = fake_bin_dir / "xcrun";
+  write_file(xcrun_path, "#!/bin/sh\nexit 99\n");
+  make_executable(xcrun_path);
   write_file(fake_runner,
              "#!/bin/sh\n"
              "printf 'personaplex=%s\\nmoshi=%s\\nbench=%s\\nargs=%s\\n' "
@@ -1302,6 +1305,18 @@ TEST_CASE("moshi lm wrapper keeps build-only model-free") {
   CHECK(model_guard < setup_call);
   CHECK(setup_call < tool_check);
   CHECK(tool_check < build_only_exit);
+}
+
+TEST_CASE("moshi lm wrapper defers Zig setup outside system run-only") {
+  const std::string script = read_file(bench_moshi_lm_compare_wrapper_path());
+  const std::size_t source_zig =
+      script.find("source \"$ROOT_DIR/scripts/zig_toolchain.sh\"");
+  const std::size_t build_guard =
+      script.find("if ! $RUN_ONLY && $USE_ZIG; then");
+
+  REQUIRE(source_zig != std::string::npos);
+  REQUIRE(build_guard != std::string::npos);
+  CHECK(build_guard < source_zig);
 }
 
 TEST_CASE("moshi lm wrapper and runner search common companion layouts") {

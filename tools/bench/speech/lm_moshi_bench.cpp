@@ -216,7 +216,7 @@ struct attention_executor_bench_fixture {
       depformer_layer_offsets[index] = index * depformer_per_layer_cache;
     }
     if (lane_count > 1u) {
-      attention_lanes.emplace();
+      attention_lanes.emplace(lane_count - 1u);
     }
     for (std::size_t index = 0u; index < input_embedding.size(); ++index) {
       input_embedding[index] =
