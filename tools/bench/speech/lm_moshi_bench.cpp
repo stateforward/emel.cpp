@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -9,6 +10,7 @@
 #include <filesystem>
 #include <limits>
 #include <memory>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -20,12 +22,17 @@
 #include "emel/gguf/loader/sm.hpp"
 #include "emel/io/mmap/events.hpp"
 #include "emel/io/mmap/sm.hpp"
+#include "emel/kernel/matmul/sm.hpp"
+#include "emel/kernel/sm.hpp"
+#include "emel/logits/sampler/sm.hpp"
+#include "emel/memory/streaming/sm.hpp"
 #include "emel/model/data.hpp"
 #include "emel/model/detail.hpp"
 #include "emel/model/loader/errors.hpp"
 #include "emel/model/loader/events.hpp"
 #include "emel/model/loader/sm.hpp"
 #include "emel/model/tensor/sm.hpp"
+#include "emel/speech/predictor/moshi/executor/any.hpp"
 
 namespace {
 
@@ -76,6 +83,313 @@ struct lm_fixture {
   emel::model::loader::sm model_loader = {};
   gguf_capture gguf = {};
   load_capture load = {};
+};
+
+uint64_t append_checksum(uint64_t checksum, const void *data,
+                         const std::size_t bytes) noexcept {
+  const auto *input = static_cast<const uint8_t *>(data);
+  for (std::size_t index = 0u; index < bytes; ++index) {
+    checksum ^= input[index];
+    checksum *= 1099511628211ull;
+  }
+  return checksum;
+}
+
+template <class value_type>
+uint64_t append_checksum(uint64_t checksum,
+                         const std::span<const value_type> values) noexcept {
+  return append_checksum(checksum, values.data(), values.size_bytes());
+}
+
+struct attention_route_snapshot {
+  std::vector<float> temporal_state = {};
+  std::vector<uint16_t> key_cache = {};
+  std::vector<uint16_t> value_cache = {};
+  std::vector<int32_t> audio_tokens = {};
+  int32_t text_token = -1;
+
+  bool operator==(const attention_route_snapshot &) const = default;
+
+  uint64_t checksum() const noexcept {
+    uint64_t value = 1469598103934665603ull;
+    value = append_checksum(value, std::span<const float>{temporal_state});
+    value = append_checksum(value, std::span<const uint16_t>{key_cache});
+    value = append_checksum(value, std::span<const uint16_t>{value_cache});
+    value = append_checksum(value, std::span<const int32_t>{audio_tokens});
+    return append_checksum(value, &text_token, sizeof(text_token));
+  }
+};
+
+template <class prepare_type, class run_type, class finish_type>
+result measure_prepared_case(const char *name, const config &cfg,
+                             prepare_type &&prepare, run_type &&run,
+                             finish_type &&finish) {
+  const auto runs = std::max<std::size_t>(cfg.runs, 1u);
+  const auto iterations = std::max<uint64_t>(cfg.iterations, 1u);
+  std::vector<double> samples;
+  samples.reserve(runs);
+
+  for (std::size_t warmup_run = 0u; warmup_run < cfg.warmup_runs;
+       ++warmup_run) {
+    for (uint64_t index = 0u; index < cfg.warmup_iterations; ++index) {
+      auto prepared = prepare();
+      run(*prepared);
+    }
+  }
+
+  for (std::size_t measured_run = 0u; measured_run < runs; ++measured_run) {
+    int64_t elapsed_ns = 0;
+    for (uint64_t index = 0u; index < iterations; ++index) {
+      auto prepared = prepare();
+      const auto start = std::chrono::steady_clock::now();
+      run(*prepared);
+      const auto end = std::chrono::steady_clock::now();
+      elapsed_ns +=
+          std::chrono::duration_cast<std::chrono::nanoseconds>(end - start)
+              .count();
+      finish(*prepared);
+    }
+    samples.push_back(static_cast<double>(elapsed_ns) /
+                      static_cast<double>(iterations));
+  }
+
+  std::sort(samples.begin(), samples.end());
+  double sum = 0.0;
+  for (const double sample : samples) {
+    sum += sample;
+  }
+  result measured;
+  measured.name = name;
+  measured.ns_per_op = emel::bench::select_reported_ns_per_op(samples);
+  measured.ns_min_per_op = samples.front();
+  measured.ns_mean_per_op = sum / static_cast<double>(samples.size());
+  measured.ns_max_per_op = samples.back();
+  measured.iterations = iterations;
+  measured.runs = runs;
+  return measured;
+}
+
+struct attention_executor_bench_fixture {
+  static constexpr int32_t k_valid_positions = 250;
+
+  attention_executor_bench_fixture(const emel::model::data &model_ref,
+                                   const std::size_t lane_count_ref)
+      : model(model_ref), lane_count(lane_count_ref),
+        temporal_positions(emel::memory::streaming::dependencies{
+            .capacity = model.moshi_lm.context}),
+        depformer_positions(emel::memory::streaming::dependencies{
+            .capacity = model.moshi_lm.depformer_context}),
+        layer_offsets(static_cast<std::size_t>(model.moshi_lm.num_layers), 0u),
+        key_cache(static_cast<std::size_t>(model.moshi_lm.num_layers) *
+                  static_cast<std::size_t>(model.moshi_lm.context) *
+                  static_cast<std::size_t>(model.moshi_lm.dim)),
+        value_cache(key_cache.size()),
+        depformer_layer_offsets(
+            static_cast<std::size_t>(model.moshi_lm.depformer_num_layers), 0u),
+        depformer_key_cache(
+            static_cast<std::size_t>(model.moshi_lm.depformer_num_layers) *
+            static_cast<std::size_t>(model.moshi_lm.depformer_context) *
+            static_cast<std::size_t>(model.moshi_lm.depformer_dim)),
+        depformer_value_cache(depformer_key_cache.size()),
+        input_sequence(static_cast<std::size_t>(model.moshi_lm.n_q + 1), -1),
+        input_embedding(static_cast<std::size_t>(model.moshi_lm.dim)),
+        temporal_state(input_embedding.size()),
+        audio_tokens(static_cast<std::size_t>(model.moshi_lm.dep_q), -1),
+        matmul_policy{
+            .parallel_matmul_lanes = nullptr,
+            .kernel_kind = emel::kernel::detect_host_kind(),
+            .active_lanes = 1u,
+            .mode = emel::kernel::matmul::lane_mode::serial,
+        },
+        matmul(matmul_policy) {
+    const std::size_t per_layer_cache =
+        static_cast<std::size_t>(model.moshi_lm.context) *
+        static_cast<std::size_t>(model.moshi_lm.dim);
+    for (std::size_t index = 0u; index < layer_offsets.size(); ++index) {
+      layer_offsets[index] = index * per_layer_cache;
+    }
+    const std::size_t depformer_per_layer_cache =
+        static_cast<std::size_t>(model.moshi_lm.depformer_context) *
+        static_cast<std::size_t>(model.moshi_lm.depformer_dim);
+    for (std::size_t index = 0u; index < depformer_layer_offsets.size();
+         ++index) {
+      depformer_layer_offsets[index] = index * depformer_per_layer_cache;
+    }
+    if (lane_count > 1u) {
+      attention_lanes.emplace(lane_count - 1u);
+    }
+    for (std::size_t index = 0u; index < input_embedding.size(); ++index) {
+      input_embedding[index] =
+          static_cast<float>(static_cast<int32_t>(index % 127u) - 63) / 128.0f;
+    }
+    input_sequence[0] = model.moshi_lm.text_padding_id;
+    initialize_position(temporal_positions);
+    initialize_position(depformer_positions);
+    executor =
+        std::make_unique<emel::speech::predictor::moshi::executor::sm>(
+            emel::speech::predictor::moshi::executor::dependencies{
+                .kv =
+                    emel::speech::predictor::moshi::executor::kv_views{
+                        .temporal =
+                            {
+                                .key_cache = std::span<uint16_t>{key_cache},
+                                .value_cache = std::span<uint16_t>{value_cache},
+                                .layer_cache_offsets =
+                                    std::span<const std::size_t>{layer_offsets},
+                                .layer_count = model.moshi_lm.num_layers,
+                                .position_capacity = model.moshi_lm.context,
+                                .kv_dim = model.moshi_lm.dim,
+                            },
+                        .depformer =
+                            {
+                                .key_cache =
+                                    std::span<uint16_t>{depformer_key_cache},
+                                .value_cache =
+                                    std::span<uint16_t>{depformer_value_cache},
+                                .layer_cache_offsets =
+                                    std::span<const std::size_t>{
+                                        depformer_layer_offsets},
+                                .layer_count =
+                                    model.moshi_lm.depformer_num_layers,
+                                .position_capacity =
+                                    model.moshi_lm.depformer_context,
+                                .kv_dim = model.moshi_lm.depformer_dim,
+                            },
+                        .temporal_positions = &temporal_positions,
+                        .depformer_positions = &depformer_positions,
+                    },
+                .kernel = kernel,
+                .matmul = matmul,
+                .matmul_lane_mode = emel::kernel::matmul::lane_mode::serial,
+                .attention_lanes =
+                    attention_lanes ? &*attention_lanes : nullptr,
+                .active_attention_lanes = lane_count,
+                .sampler = nullptr,
+                .policy =
+                    {
+                        .rms_norm_epsilon = 1.0e-8f,
+                        .zero_seed_state = 123459876u,
+                        .sampling_modulus = 2147483647u,
+                        .token_zero = -1,
+                    },
+                .capacity =
+                    {
+                        .hidden_dim =
+                            static_cast<uint64_t>(
+                                std::max(model.moshi_lm.dim,
+                                         model.moshi_lm.depformer_dim)),
+                        .temporal_context =
+                            static_cast<uint64_t>(model.moshi_lm.context),
+                        .depformer_context =
+                            static_cast<uint64_t>(
+                                model.moshi_lm.depformer_context),
+                        .sampling_card =
+                            static_cast<uint64_t>(
+                                std::max(model.moshi_lm.text_card,
+                                         model.moshi_lm.card)),
+                        .sampling_top_k = 1u,
+                    },
+            });
+    emel::error::type err = emel::error::cast(
+        emel::speech::predictor::moshi::executor::error::none);
+    emel::speech::predictor::moshi::executor::event::initialize initialize{
+        model};
+    initialize.error_out = &err;
+    if (!executor->process_event(initialize)) {
+      std::fprintf(stderr,
+                   "error: Moshi executor attention benchmark init failed "
+                   "lanes=%zu err=%d\n",
+                   lane_count, static_cast<int>(err));
+      std::exit(1);
+    }
+    prime_temporal_window();
+  }
+
+  static void initialize_position(emel::memory::streaming::sm &position) {
+    int32_t err = static_cast<int32_t>(
+        emel::error::cast(emel::memory::streaming::error::none));
+    if (!position.process_event(
+            emel::memory::streaming::event::initialize{err}) ||
+        err != static_cast<int32_t>(
+                   emel::error::cast(emel::memory::streaming::error::none))) {
+      std::fprintf(stderr,
+                   "error: Moshi executor attention position init failed\n");
+      std::exit(1);
+    }
+  }
+
+  void prime_temporal_window() noexcept {
+    for (int32_t index = 0; index < k_valid_positions - 1; ++index) {
+      emel::memory::streaming::advance_result result{};
+      int32_t err = static_cast<int32_t>(
+          emel::error::cast(emel::memory::streaming::error::none));
+      if (!temporal_positions.process_event(
+              emel::memory::streaming::event::advance{result, err}) ||
+          err != static_cast<int32_t>(
+                     emel::error::cast(emel::memory::streaming::error::none))) {
+        std::exit(1);
+      }
+    }
+  }
+
+  void run_prediction() noexcept {
+    emel::error::type err = emel::error::cast(
+        emel::speech::predictor::moshi::executor::error::none);
+    std::fill(temporal_state.begin(), temporal_state.end(), 0.0f);
+    std::fill(audio_tokens.begin(), audio_tokens.end(), -1);
+    text_token = -1;
+    emel::memory::view::snapshot memory{};
+    memory.max_sequences = 1;
+    memory.sequence_active[0] = 1;
+    memory.sequence_length_values[0] = k_valid_positions;
+    memory.sequence_kv_block_count[0] = 1;
+    memory.sequence_kv_blocks[0][0] = 0;
+    emel::speech::predictor::moshi::event::graph_step step{
+        model, memory, std::span<const int32_t>{input_sequence},
+        std::span<int32_t>{audio_tokens}, text_token};
+    step.phase = emel::speech::predictor::moshi::event::graph_phase::prediction;
+    step.input_embedding = std::span<const float>{input_embedding};
+    step.temporal_state = std::span<float>{temporal_state};
+    step.error_out = &err;
+    if (!executor->process_event(step)) {
+      std::fprintf(stderr,
+                   "error: Moshi executor attention prediction failed "
+                   "lanes=%zu err=%d\n",
+                   lane_count, static_cast<int>(err));
+      std::exit(1);
+    }
+  }
+
+  attention_route_snapshot capture_snapshot() const {
+    return attention_route_snapshot{
+        .temporal_state = temporal_state,
+        .key_cache = key_cache,
+        .value_cache = value_cache,
+        .audio_tokens = audio_tokens,
+        .text_token = text_token,
+    };
+  }
+
+  const emel::model::data &model;
+  std::size_t lane_count = 1u;
+  emel::memory::streaming::sm temporal_positions;
+  emel::memory::streaming::sm depformer_positions;
+  std::vector<std::size_t> layer_offsets = {};
+  std::vector<uint16_t> key_cache = {};
+  std::vector<uint16_t> value_cache = {};
+  std::vector<std::size_t> depformer_layer_offsets = {};
+  std::vector<uint16_t> depformer_key_cache = {};
+  std::vector<uint16_t> depformer_value_cache = {};
+  std::vector<int32_t> input_sequence = {};
+  std::vector<float> input_embedding = {};
+  std::vector<float> temporal_state = {};
+  std::vector<int32_t> audio_tokens = {};
+  int32_t text_token = -1;
+  emel::kernel::sm kernel = {};
+  emel::kernel::matmul::execution_policy matmul_policy;
+  emel::kernel::matmul::sm matmul;
+  std::optional<emel::kernel::matmul::lane_pool> attention_lanes = {};
+  std::unique_ptr<emel::speech::predictor::moshi::executor::sm> executor = {};
 };
 
 bool bench_enabled() {
@@ -456,6 +770,67 @@ void append_emel_speech_lm_moshi_cases(std::vector<result> &results,
   measured.workload_id = "moshi_lm_load_contract";
   measured.note = "component=lm contract=moshi_execution dtype=q4_k";
   results.push_back(std::move(measured));
+
+  auto append_attention_result = [&](const char *name, const int32_t lanes,
+                                     const attention_route_snapshot
+                                         *reference) {
+    attention_route_snapshot measured_snapshot;
+    auto attention_result = measure_prepared_case(
+        name, cfg,
+        [&]() {
+          return std::make_unique<attention_executor_bench_fixture>(
+              fixture->model_data, static_cast<std::size_t>(lanes));
+        },
+        [](attention_executor_bench_fixture &attention) {
+          attention.run_prediction();
+        },
+        [&](const attention_executor_bench_fixture &attention) {
+          measured_snapshot = attention.capture_snapshot();
+        });
+    const uint64_t measured_checksum = measured_snapshot.checksum();
+    if (reference != nullptr && measured_snapshot != *reference) {
+      std::fprintf(stderr,
+                   "error: measured %d-lane owning Moshi attention route is "
+                   "not exact\n",
+                   lanes);
+      std::exit(1);
+    }
+    attention_result.lane = "emel";
+    attention_result.backend_id = "emel";
+    attention_result.backend_language = "c++";
+    attention_result.thread_count = lanes;
+    attention_result.thread_contract =
+        "owning_moshi_executor_same_rtc_attention_head_ranges";
+    attention_result.model_id = "Codes4Fun/personaplex-7b-v1-q4_k-GGUF";
+    attention_result.fixture_id = fixture_id_from_path(model_path);
+    attention_result.workload_id =
+        "moshi_executor_prediction_attention_capacity_3000_start_valid_250";
+    attention_result.output_checksum = measured_checksum;
+    attention_result.output_dim =
+        static_cast<uint64_t>(measured_snapshot.temporal_state.size());
+    attention_result.note =
+        "component=moshi_executor_prediction only_delta=attention_lanes "
+        "nonattention_matmul=serial_identical capacity=3000 "
+        "start_valid_positions=250 measured_checksum=temporal_state+kv+outputs "
+        "iterations=" +
+        std::to_string(attention_result.iterations) +
+        " runs=" + std::to_string(attention_result.runs);
+    results.push_back(std::move(attention_result));
+    return measured_snapshot;
+  };
+  const attention_route_snapshot serial_snapshot =
+      append_attention_result("speech_lm_moshi/executor_prediction_attention/"
+                              "personaplex_capacity_3000_valid_250_lanes_1",
+                              1, nullptr);
+  append_attention_result("speech_lm_moshi/executor_prediction_attention/"
+                          "personaplex_capacity_3000_valid_250_lanes_2",
+                          2, &serial_snapshot);
+  append_attention_result("speech_lm_moshi/executor_prediction_attention/"
+                          "personaplex_capacity_3000_valid_250_lanes_4",
+                          4, &serial_snapshot);
+  append_attention_result("speech_lm_moshi/executor_prediction_attention/"
+                          "personaplex_capacity_3000_valid_250_lanes_8",
+                          8, &serial_snapshot);
 
   release_file(fixture->mapping);
 }

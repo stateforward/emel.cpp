@@ -14,7 +14,9 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # shellcheck source=scripts/build_jobs.sh
 source "$ROOT_DIR/scripts/build_jobs.sh"
-BUILD_DIR="${EMEL_MIMI_COMPARE_BUILD_DIR:-$ROOT_DIR/build/mimi_compare_tools}"
+# shellcheck source=scripts/zig_toolchain.sh
+source "$ROOT_DIR/scripts/zig_toolchain.sh"
+BUILD_DIR="${EMEL_MIMI_COMPARE_BUILD_DIR:-$ROOT_DIR/build/mimi_compare_tools_zig}"
 OUTPUT_DIR="${EMEL_MIMI_COMPARE_OUTPUT_DIR:-$ROOT_DIR/build/mimi_compare}"
 ARTIFACT_DIR="${EMEL_MOSHI_REFERENCE_ARTIFACT_DIR:-$ROOT_DIR/build/moshi_reference}"
 MLX_ARTIFACT_DIR="${EMEL_PERSONAPLEX_MLX_ARTIFACT_DIR:-$ROOT_DIR/build/personaplex_mlx_reference}"
@@ -53,7 +55,7 @@ done
 # setup path supports) can run the WAV generation and comparison steps too.
 PYTHON_BIN="${PYTHON_BIN:-}"
 if [[ -z "$PYTHON_BIN" ]]; then
-  for candidate in python3 python3.13 python3.12; do
+  for candidate in python3.12 python3.13 python3; do
     if command -v "$candidate" >/dev/null 2>&1; then
       PYTHON_BIN="$(command -v "$candidate")"
       break
@@ -65,7 +67,7 @@ if [[ -z "$PYTHON_BIN" ]]; then
   exit 1
 fi
 if ! $RUN_ONLY; then
-  for tool in cmake ninja git; do
+  for tool in cmake ninja git zig; do
     if ! command -v "$tool" >/dev/null 2>&1; then
       echo "error: required build tool missing: $tool" >&2
       exit 1
@@ -88,10 +90,20 @@ if ! $RUN_ONLY; then
     skip_moshi=OFF
   fi
 
+  zig_bin="$(command -v zig)"
   cmake -S "$ROOT_DIR/tools/bench" -B "$BUILD_DIR" -G Ninja \
     -DCMAKE_BUILD_TYPE=Release \
     -DEMEL_BENCH_SKIP_MOSHI_REFERENCE="$skip_moshi" \
-    -DEMEL_BENCH_SUITE_FILTER=speech_codec_mimi
+    -DEMEL_BENCH_SUITE_FILTER=speech_codec_mimi \
+    -DCMAKE_C_COMPILER="$zig_bin" \
+    -DCMAKE_C_COMPILER_ARG1=cc \
+    -DCMAKE_CXX_COMPILER="$zig_bin" \
+    -DCMAKE_CXX_COMPILER_ARG1=c++ \
+    -DCMAKE_ASM_COMPILER="$zig_bin" \
+    -DCMAKE_ASM_COMPILER_ARG1=cc \
+    -DCMAKE_C_FLAGS=-fno-sanitize=undefined \
+    -DCMAKE_CXX_FLAGS=-fno-sanitize=undefined \
+    "${EMEL_ZIG_CMAKE_PLATFORM_ARGS[@]}"
   cmake --build "$BUILD_DIR" --parallel "$EMEL_BUILD_JOBS" \
     --target "${build_targets[@]}"
 fi

@@ -43,7 +43,7 @@ path beats `llama.cpp` on this CPU.
   coroutine scheduler cutover but still has too much shared-queue wake/claim
   overhead for the hot row-sliced matmul actor fanout. The matmul route now
   uses an EMEL-owned fixed fork/join lane pool with one direct slot per worker
-  behind an explicit `emel::text::generator::matmul::sm` actor. The caller
+  behind an explicit `emel::kernel::matmul::sm` actor. The caller
   still joins every submitted lane actor before dispatch returns, so no
   deferred work escapes the RTC boundary.
 - Benchmark finding: the aarch64 f32 GEMV path has a 4-row RHS-reuse kernel,

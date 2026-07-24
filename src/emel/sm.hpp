@@ -17,7 +17,6 @@
 #include <memory>
 #include <new>
 #include <semaphore>
-#include <stdexcept>
 #include <thread>
 #include <type_traits>
 #include <tuple>
@@ -131,7 +130,15 @@ class fork_join_lane_pool {
 
   static constexpr std::size_t static_worker_count = worker_count;
 
-  fork_join_lane_pool() { start_workers(); }
+  fork_join_lane_pool() noexcept : fork_join_lane_pool(worker_count) {}
+
+  explicit fork_join_lane_pool(const std::size_t active_worker_count) noexcept
+      : active_worker_count_(active_worker_count) {
+    if (active_worker_count_ == 0u || active_worker_count_ > worker_count) {
+      std::terminate();
+    }
+    start_workers();
+  }
 
   ~fork_join_lane_pool() { stop_workers(); }
 
@@ -201,8 +208,37 @@ class fork_join_lane_pool {
     return true;
   }
 
+  template <class... fns>
+  std::size_t try_submit_batch(join_group & group, fns &&... fns_in) noexcept {
+    static_assert(sizeof...(fns) > 0u,
+                  "fork_join_lane_pool batch must contain tasks");
+    if (running_on_this_worker()) {
+      group.reject();
+      return 0u;
+    }
+
+    std::array<std::size_t, sizeof...(fns)> claimed_workers = {};
+    std::size_t claimed_count = 0u;
+    const std::size_t start =
+        next_worker_.fetch_add(sizeof...(fns), std::memory_order_relaxed) %
+        active_worker_count_;
+    (claim_batch_task(group, claimed_workers, claimed_count, start,
+                      std::forward<fns>(fns_in)),
+     ...);
+
+    std::atomic_thread_fence(std::memory_order_release);
+    for (std::size_t index = 0u; index < claimed_count; ++index) {
+      workers_[claimed_workers[index]].ready.release();
+    }
+    return claimed_count;
+  }
+
   bool is_current_thread_worker() const noexcept {
     return running_on_this_worker();
+  }
+
+  std::size_t active_worker_count() const noexcept {
+    return active_worker_count_;
   }
 
  private:
@@ -261,24 +297,21 @@ class fork_join_lane_pool {
     std::atomic<bool> stopping = false;
   };
 
-  void start_workers() {
-    try {
-      for (std::size_t index = 0u; index < worker_count; ++index) {
-        workers_[index].thread =
-            std::thread([this, index]() noexcept { worker_loop(index); });
-      }
-    } catch (...) {
-      stop_workers();
-      throw;
+  void start_workers() noexcept {
+    for (std::size_t index = 0u; index < active_worker_count_; ++index) {
+      workers_[index].thread =
+          std::thread([this, index]() noexcept { worker_loop(index); });
     }
   }
 
   void stop_workers() noexcept {
-    for (auto &worker : workers_) {
+    for (std::size_t index = 0u; index < active_worker_count_; ++index) {
+      auto &worker = workers_[index];
       worker.stopping.store(true, std::memory_order_release);
       worker.ready.release();
     }
-    for (auto &worker : workers_) {
+    for (std::size_t index = 0u; index < active_worker_count_; ++index) {
+      auto &worker = workers_[index];
       if (worker.thread.joinable()) {
         worker.thread.join();
       }
@@ -291,9 +324,11 @@ class fork_join_lane_pool {
                                   void (*completion_fn)(void *) noexcept)
       noexcept {
     const std::size_t start =
-        next_worker_.fetch_add(1u, std::memory_order_relaxed) % worker_count;
-    for (std::size_t offset = 0u; offset < worker_count; ++offset) {
-      worker_slot &worker = workers_[(start + offset) % worker_count];
+        next_worker_.fetch_add(1u, std::memory_order_relaxed) %
+        active_worker_count_;
+    for (std::size_t offset = 0u; offset < active_worker_count_; ++offset) {
+      worker_slot &worker =
+          workers_[(start + offset) % active_worker_count_];
       bool expected = true;
       if (!worker.idle.compare_exchange_strong(
               expected, false, std::memory_order_acq_rel,
@@ -306,6 +341,37 @@ class fork_join_lane_pool {
       return true;
     }
     return false;
+  }
+
+  template <std::size_t batch_size, class fn>
+  void claim_batch_task(join_group & group,
+                        std::array<std::size_t, batch_size> & claimed_workers,
+                        std::size_t & claimed_count, const std::size_t start,
+                        fn && fn_in) noexcept {
+    using fn_type = std::decay_t<fn>;
+    static_assert(std::is_nothrow_constructible_v<fn_type, fn &&>,
+                  "fork_join_lane_pool batch task construction must not throw");
+    static_assert(std::is_nothrow_invocable_v<fn_type &>,
+                  "fork_join_lane_pool batch task invocation must not throw");
+
+    for (std::size_t offset = 0u; offset < active_worker_count_; ++offset) {
+      const std::size_t worker_index =
+          (start + offset) % active_worker_count_;
+      worker_slot & worker = workers_[worker_index];
+      bool expected = true;
+      if (!worker.idle.compare_exchange_strong(
+              expected, false, std::memory_order_acq_rel,
+              std::memory_order_acquire)) {
+        continue;
+      }
+      group.start_one();
+      worker.task.set(std::forward<fn>(fn_in), &group,
+                      join_group::complete_one);
+      claimed_workers[claimed_count] = worker_index;
+      ++claimed_count;
+      return;
+    }
+    group.reject();
   }
 
   void worker_loop(const std::size_t index) noexcept {
@@ -356,6 +422,7 @@ class fork_join_lane_pool {
   }
 
   std::array<worker_slot, worker_count> workers_{};
+  const std::size_t active_worker_count_;
   std::atomic<std::size_t> next_worker_ = 0u;
   inline static thread_local const fork_join_lane_pool *active_worker_pool_ =
       nullptr;

@@ -2,6 +2,8 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=scripts/zig_toolchain.sh
+source "$ROOT_DIR/scripts/zig_toolchain.sh"
 TOOLS_DIR="$ROOT_DIR/tools/bench"
 BUILD_DIR="${EMEL_REFERENCE_BUILD_DIR:-$ROOT_DIR/build/bench_tools_liquid_ninja}"
 REFERENCE_REPOSITORY="${EMEL_REFERENCE_REPOSITORY:-https://github.com/Liquid4All/benchmarks-llama.cpp.git}"
@@ -168,6 +170,9 @@ if [[ -n "$bench_c_flags" ]]; then
 fi
 if [[ -n "$bench_cxx_flags" ]]; then
   cmake_args+=("-DCMAKE_CXX_FLAGS=$bench_cxx_flags")
+fi
+if $USE_ZIG; then
+  cmake_args+=("${EMEL_ZIG_CMAKE_PLATFORM_ARGS[@]}")
 fi
 
 if ! $RUN_ONLY; then

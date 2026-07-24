@@ -550,7 +550,7 @@ struct generator_rig {
   prepared_model prepared{};
   emel::text::tokenizer::sm tokenizer{};
   emel::text::conditioner::sm conditioner{};
-  emel::text::generator::matmul::lane_pool<7u, 128u, 1048576u> parallel_matmul_lanes = {};
+  emel::kernel::matmul::lane_pool parallel_matmul_lanes = {};
   emel::model::generation::contract generation_contract = {};
   std::array<emel::logits::sampler::fn, 1> samplers = {
       emel::logits::sampler::fn::from<sampler_select_argmax>(),
@@ -570,7 +570,7 @@ struct generator_rig_q8 {
   prepared_model prepared{};
   emel::text::tokenizer::sm tokenizer{};
   emel::text::conditioner::sm conditioner{};
-  emel::text::generator::matmul::lane_pool<7u, 128u, 1048576u> parallel_matmul_lanes = {};
+  emel::kernel::matmul::lane_pool parallel_matmul_lanes = {};
   emel::model::generation::contract generation_contract = {};
   std::array<emel::logits::sampler::fn, 1> samplers = {
       emel::logits::sampler::fn::from<sampler_select_argmax>(),
@@ -589,7 +589,7 @@ make_generator(rig_type & rig,
                emel::model::tensor::window::sm * stream_window = nullptr,
                const bool stream_active = false) {
   const auto matmul_policy =
-      emel::text::generator::matmul::make_auto_execution_policy(
+      emel::kernel::matmul::make_auto_execution_policy(
           rig.parallel_matmul_lanes);
   return std::make_unique<emel::text::generator::sm>(
       emel::text::generator::dependencies{

@@ -1014,7 +1014,7 @@ struct generation_load_state {
   emel::text::tokenizer::sm tokenizer = {};
   emel::text::conditioner::sm conditioner = {};
   emel::model::generation::contract generation_contract = {};
-  emel::text::generator::matmul::lane_pool<7u, 128u, 1048576u>
+  emel::kernel::matmul::lane_pool
       parallel_matmul_lanes = {};
   std::unique_ptr<emel::text::generator::sm> generator = {};
   reference_backend reference = {};
@@ -1615,7 +1615,7 @@ run_emel_initialize_generator(generation_load_state &state,
              emel::memory::view::DEFAULT_BLOCK_TOKENS, session_tokens));
 
   const auto matmul_policy =
-      emel::text::generator::matmul::make_auto_execution_policy(
+      emel::kernel::matmul::make_auto_execution_policy(
           state.parallel_matmul_lanes);
   state.generator = std::make_unique<emel::text::generator::sm>(
       emel::text::generator::dependencies{

@@ -2,6 +2,8 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=scripts/zig_toolchain.sh
+source "$ROOT_DIR/scripts/zig_toolchain.sh"
 REFERENCE_DIR="${EMEL_WHISPER_CPP_SOURCE_DIR:-$ROOT_DIR/build/whisper_cpp_reference/src}"
 BUILD_DIR="${EMEL_WHISPER_CPP_BUILD_DIR:-$ROOT_DIR/build/whisper_cpp_reference/build}"
 ARTIFACT_DIR="${EMEL_WHISPER_REFERENCE_ARTIFACT_DIR:-$ROOT_DIR/build/whisper_reference}"
@@ -122,6 +124,7 @@ if $USE_ZIG; then
   cmake_args+=("-DCMAKE_C_COMPILER_ARG1=cc")
   cmake_args+=("-DCMAKE_CXX_COMPILER_ARG1=c++")
   cmake_args+=("-DCMAKE_ASM_COMPILER_ARG1=cc")
+  cmake_args+=("${EMEL_ZIG_CMAKE_PLATFORM_ARGS[@]}")
 fi
 cmake "${cmake_args[@]}"
 cmake --build "$BUILD_DIR" --parallel --target whisper-cli

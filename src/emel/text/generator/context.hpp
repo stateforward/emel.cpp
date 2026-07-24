@@ -136,7 +136,9 @@ struct context {
   emel::text::generator::action::initializer_dispatch_fn * dispatch_initializer = nullptr;
   void * prefill_actor = nullptr;
   emel::text::generator::action::prefill_dispatch_fn * dispatch_prefill = nullptr;
-  emel::text::generator::matmul::sm * matmul_actor = nullptr;
+  emel::kernel::matmul::sm * matmul_actor = nullptr;
+  emel::kernel::matmul::lane_mode matmul_lane_mode =
+      emel::kernel::matmul::lane_mode::serial;
 
   tokenizer_binding conditioning = {};
   graph_binding compute = {};

@@ -51,10 +51,11 @@ inline bool dispatch_prefill_run(void * actor,
 
 inline void bind_matmul_actor(
     action::context & ctx,
-    std::optional<emel::text::generator::matmul::sm> & actor,
-    const emel::text::generator::matmul::execution_policy & policy) {
+    std::optional<emel::kernel::matmul::sm> & actor,
+    const emel::kernel::matmul::execution_policy & policy) {
   actor.emplace(policy);
   ctx.matmul_actor = &actor.value();
+  ctx.matmul_lane_mode = policy.mode;
 }
 
 inline void bind_pipeline_actors(
@@ -74,7 +75,7 @@ inline void bind_pipeline_actors(
 struct dependencies {
   const emel::model::generation::contract & generation_contract;
   emel::text::conditioner::sm & conditioner;
-  emel::text::generator::matmul::execution_policy matmul_policy;
+  emel::kernel::matmul::execution_policy matmul_policy;
   emel::text::generator::runtime_policy runtime_policy;
   void * formatter_ctx = nullptr;
   emel::text::formatter::format_fn format_prompt =
@@ -1188,7 +1189,7 @@ struct sm : public emel::sm<model, action::context> {
   }
 
  private:
-  std::optional<emel::text::generator::matmul::sm> matmul_actor_ = {};
+  std::optional<emel::kernel::matmul::sm> matmul_actor_ = {};
   std::optional<emel::text::generator::initializer::sm> initializer_actor_ = {};
   std::optional<emel::text::generator::prefill::sm> prefill_actor_ = {};
 };

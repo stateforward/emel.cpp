@@ -78,6 +78,13 @@ TEST_CASE(
                             emel::error::cast(memory_streaming::error::none)));
 
   emel::kernel::sm kernel{};
+  emel::kernel::matmul::execution_policy matmul_policy{
+      .parallel_matmul_lanes = nullptr,
+      .kernel_kind = emel::kernel::detect_host_kind(),
+      .active_lanes = 1u,
+      .mode = emel::kernel::matmul::lane_mode::serial,
+  };
+  emel::kernel::matmul::sm matmul{matmul_policy};
   executor::sm machine{
       executor::dependencies{
           .kv =
@@ -104,6 +111,7 @@ TEST_CASE(
                   .depformer_positions = &depformer_positions,
               },
           .kernel = kernel,
+          .matmul = matmul,
           .policy =
               executor::action::policies{
                   .rms_norm_epsilon = 1.0e-8f,

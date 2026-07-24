@@ -12,16 +12,18 @@
 // Mimi codec facade: owns the bound runtime, the streaming state, and the
 // frontend/quantizer/backend child actors, and sequences one 80 ms frame per
 // dispatch through them. Every success/error route is decided by pure
-// validation guards BEFORE the corresponding action runs (bind contract via
-// the dry-run walk, arena capacity via the sizing contract, frame requests
-// against the bound runtime), so the compute actions are non-failing and no
-// action-written flag routes behavior. Requests before initialization are
-// answered with explicit not_initialized errors rather than dropped.
+// validation guards BEFORE the corresponding action runs (immutable bind
+// facts prepared before RTC, arena capacity from that same contract, frame
+// requests against the bound runtime), so the compute actions are non-failing
+// and no action-written flag routes behavior. Requests before initialization
+// are answered with explicit not_initialized errors rather than dropped.
 namespace emel::speech::codec::mimi {
 
 struct state_uninitialized {};
 struct state_bind_contract_decision {};
-struct state_bind_capacity_decision {};
+struct state_bind_f32_capacity_decision {};
+struct state_bind_native_capacity_decision {};
+struct state_bind_q8_capacity_decision {};
 struct state_binding {};
 struct state_init_error_out_decision {};
 struct state_init_callback_decision {};
@@ -58,18 +60,34 @@ struct model {
     // clang-format off
     return sml::make_transition_table(
       //------------------------------------------------------------------------------//
-      // Initialization: contract, then capacity, then the non-failing bind.
+      // Initialization: pre-dispatch contract, capacity, non-failing bind.
         sml::state<state_bind_contract_decision> <= *sml::state<state_uninitialized>
           + sml::event<init_run>
-      , sml::state<state_bind_capacity_decision> <= sml::state<state_bind_contract_decision>
-          + sml::completion<init_run> [ guard::guard_bind_contract_valid{} ]
+      , sml::state<state_bind_f32_capacity_decision> <= sml::state<state_bind_contract_decision>
+          + sml::completion<init_run> [ guard::guard_bind_f32_contract_valid{} ]
+      , sml::state<state_bind_native_capacity_decision> <= sml::state<state_bind_contract_decision>
+          + sml::completion<init_run> [ guard::guard_bind_native_contract_valid{} ]
+      , sml::state<state_bind_q8_capacity_decision> <= sml::state<state_bind_contract_decision>
+          + sml::completion<init_run> [ guard::guard_bind_q8_contract_valid{} ]
       , sml::state<state_init_failed_error_out_decision> <= sml::state<state_bind_contract_decision>
           + sml::completion<init_run> [ guard::guard_bind_contract_invalid{} ]
           / action::effect_mark_bind_failed{}
-      , sml::state<state_binding> <= sml::state<state_bind_capacity_decision>
+      , sml::state<state_binding> <= sml::state<state_bind_f32_capacity_decision>
           + sml::completion<init_run> [ guard::guard_arena_capacity_valid{} ]
-          / action::effect_bind{}
-      , sml::state<state_init_failed_error_out_decision> <= sml::state<state_bind_capacity_decision>
+          / action::effect_bind_f32{}
+      , sml::state<state_init_failed_error_out_decision> <= sml::state<state_bind_f32_capacity_decision>
+          + sml::completion<init_run> [ guard::guard_arena_capacity_invalid{} ]
+          / action::effect_mark_arena_capacity_invalid{}
+      , sml::state<state_binding> <= sml::state<state_bind_native_capacity_decision>
+          + sml::completion<init_run> [ guard::guard_arena_capacity_valid{} ]
+          / action::effect_bind_native{}
+      , sml::state<state_init_failed_error_out_decision> <= sml::state<state_bind_native_capacity_decision>
+          + sml::completion<init_run> [ guard::guard_arena_capacity_invalid{} ]
+          / action::effect_mark_arena_capacity_invalid{}
+      , sml::state<state_binding> <= sml::state<state_bind_q8_capacity_decision>
+          + sml::completion<init_run> [ guard::guard_arena_capacity_valid{} ]
+          / action::effect_bind_q8{}
+      , sml::state<state_init_failed_error_out_decision> <= sml::state<state_bind_q8_capacity_decision>
           + sml::completion<init_run> [ guard::guard_arena_capacity_invalid{} ]
           / action::effect_mark_arena_capacity_invalid{}
       , sml::state<state_init_error_out_decision> <= sml::state<state_binding>
@@ -178,6 +196,15 @@ struct model {
       , sml::state<state_session_ready> <= sml::state<state_session_ready>
           + sml::event<event::reset_stream_run>
           / action::effect_reset_stream{}
+
+      //------------------------------------------------------------------------------//
+      // Public read-only diagnostics before or after initialization.
+      , sml::state<state_uninitialized> <= sml::state<state_uninitialized>
+          + sml::event<event::capture_diagnostics>
+          / action::effect_capture_diagnostics{}
+      , sml::state<state_session_ready> <= sml::state<state_session_ready>
+          + sml::event<event::capture_diagnostics>
+          / action::effect_capture_diagnostics{}
 
       //------------------------------------------------------------------------------//
       // Requests before initialization answer with explicit errors.
@@ -354,11 +381,27 @@ struct model {
           + sml::unexpected_event<sml::_>
               [ guard::guard_unexpected_error_out_absent{} ]
               / action::effect_mark_unexpected{}
-      , sml::state<state_uninitialized> <= sml::state<state_bind_capacity_decision>
+      , sml::state<state_uninitialized> <= sml::state<state_bind_f32_capacity_decision>
           + sml::unexpected_event<sml::_>
               [ guard::guard_unexpected_error_out_present{} ]
               / action::effect_mark_unexpected_and_store{}
-      , sml::state<state_uninitialized> <= sml::state<state_bind_capacity_decision>
+      , sml::state<state_uninitialized> <= sml::state<state_bind_f32_capacity_decision>
+          + sml::unexpected_event<sml::_>
+              [ guard::guard_unexpected_error_out_absent{} ]
+              / action::effect_mark_unexpected{}
+      , sml::state<state_uninitialized> <= sml::state<state_bind_native_capacity_decision>
+          + sml::unexpected_event<sml::_>
+              [ guard::guard_unexpected_error_out_present{} ]
+              / action::effect_mark_unexpected_and_store{}
+      , sml::state<state_uninitialized> <= sml::state<state_bind_native_capacity_decision>
+          + sml::unexpected_event<sml::_>
+              [ guard::guard_unexpected_error_out_absent{} ]
+              / action::effect_mark_unexpected{}
+      , sml::state<state_uninitialized> <= sml::state<state_bind_q8_capacity_decision>
+          + sml::unexpected_event<sml::_>
+              [ guard::guard_unexpected_error_out_present{} ]
+              / action::effect_mark_unexpected_and_store{}
+      , sml::state<state_uninitialized> <= sml::state<state_bind_q8_capacity_decision>
           + sml::unexpected_event<sml::_>
               [ guard::guard_unexpected_error_out_absent{} ]
               / action::effect_mark_unexpected{}
@@ -472,6 +515,10 @@ struct sm : public emel::sm<model, action::context> {
     event::reset_stream_run runtime_ev{ev, ctx};
     const bool accepted = base_type::process_event(runtime_ev);
     return accepted && ctx.err == action::detail_ns::to_error(error::none);
+  }
+
+  bool process_event(const event::capture_diagnostics &ev) {
+    return base_type::process_event(ev);
   }
 };
 

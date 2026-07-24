@@ -350,7 +350,6 @@ src/emel/model/tensor/window/events.hpp
 src/emel/model/tensor/window/guards.hpp
 src/emel/model/tensor/window/sm.hpp
 src/emel/sm.hpp
-src/emel/speech/codec/mimi/any.hpp
 src/emel/speech/decoder/whisper/actions.hpp
 src/emel/speech/decoder/whisper/any.hpp
 src/emel/speech/decoder/whisper/context.hpp
@@ -360,6 +359,7 @@ src/emel/speech/encoder/whisper/context.hpp
 src/emel/speech/encoder/whisper/errors.hpp
 src/emel/speech/encoder/whisper/guards.hpp
 src/emel/speech/predictor/moshi/events.hpp
+src/emel/speech/predictor/moshi/executor/actions.hpp
 src/emel/tensor/view/actions.hpp
 src/emel/tensor/view/context.hpp
 src/emel/tensor/view/detail.hpp
@@ -449,12 +449,6 @@ src/emel/text/generator/initializer/context.hpp
 src/emel/text/generator/initializer/detail.hpp
 src/emel/text/generator/initializer/guards.hpp
 src/emel/text/generator/initializer/sm.hpp
-src/emel/text/generator/matmul/actions.hpp
-src/emel/text/generator/matmul/context.hpp
-src/emel/text/generator/matmul/detail.hpp
-src/emel/text/generator/matmul/events.hpp
-src/emel/text/generator/matmul/guards.hpp
-src/emel/text/generator/matmul/sm.hpp
 src/emel/text/generator/prefill/actions.hpp
 src/emel/text/generator/prefill/context.hpp
 src/emel/text/generator/prefill/detail.hpp
@@ -615,7 +609,6 @@ tests/text/generator/action_guard_tests.cpp
 tests/text/generator/decode_wavefront/lifecycle_tests.cpp
 tests/text/generator/determinism_tests.cpp
 tests/text/generator/initializer/lifecycle_tests.cpp
-tests/text/generator/lifecycle_tests.cpp
 tests/text/generator/prefill/lifecycle_tests.cpp
 tests/text/generator/stream_window_tests.cpp
 tests/text/jinja/formatter_tests.cpp

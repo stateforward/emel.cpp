@@ -82,12 +82,11 @@ void write_file(const std::filesystem::path &path,
 }
 
 void make_executable(const std::filesystem::path &path) {
-  std::filesystem::permissions(
-      path,
-      std::filesystem::perms::owner_read |
-          std::filesystem::perms::owner_write |
-          std::filesystem::perms::owner_exec,
-      std::filesystem::perm_options::add);
+  std::filesystem::permissions(path,
+                               std::filesystem::perms::owner_read |
+                                   std::filesystem::perms::owner_write |
+                                   std::filesystem::perms::owner_exec,
+                               std::filesystem::perm_options::add);
 }
 
 void replace_all(std::string &text, const std::string_view needle,
@@ -1156,15 +1155,14 @@ TEST_CASE(
     has_speech_lm_script = has_speech_lm_script ||
                            record.path == "scripts/bench_moshi_lm_compare.sh";
     has_speech_lm_setup = has_speech_lm_setup ||
-                          record.path ==
-                              "scripts/setup_moshi_cpp_reference.sh";
+                          record.path == "scripts/setup_moshi_cpp_reference.sh";
     has_speech_lm_moshi_binding =
         has_speech_lm_moshi_binding ||
         record.path == std::string_view{"src/emel/model/moshi"};
     has_personaplex_emel_runner =
         has_personaplex_emel_runner ||
-        record.path == std::string_view{
-                           "tools/bench/speech/personaplex_emel_runner.cpp"};
+        record.path ==
+            std::string_view{"tools/bench/speech/personaplex_emel_runner.cpp"};
   }
   CHECK(has_speech_lm_script);
   CHECK(has_speech_lm_setup);
@@ -1191,9 +1189,8 @@ TEST_CASE(
   CHECK(rendered.find("record runner=speech_lm_moshi kind=source "
                       "path=tools/bench/speech/lm_moshi_bench.cpp") !=
         std::string::npos);
-  CHECK(rendered.find(
-            "record runner=speech_lm_moshi kind=source "
-            "path=tools/bench/speech/personaplex_emel_runner.cpp") !=
+  CHECK(rendered.find("record runner=speech_lm_moshi kind=source "
+                      "path=tools/bench/speech/personaplex_emel_runner.cpp") !=
         std::string::npos);
 
   const std::filesystem::path manifest_path =
@@ -1213,11 +1210,23 @@ TEST_CASE(
   CHECK(docs.find("full_gate_on=missing,stale,uncertain") != std::string::npos);
 }
 
+TEST_CASE("speech Moshi attention benchmark owns per-layer KV cache slices") {
+  const std::string source = read_file(repo_root() / "tools" / "bench" /
+                                       "speech" / "lm_moshi_bench.cpp");
+
+  CHECK(
+      source.find(
+          "key_cache(static_cast<std::size_t>(model.moshi_lm.num_layers) *") !=
+      std::string::npos);
+  CHECK(source.find("layer_offsets[index] = index * per_layer_cache;") !=
+        std::string::npos);
+}
+
 #if !defined(_WIN32)
 TEST_CASE("moshi lm wrapper gives --model priority over inherited env") {
-  const std::filesystem::path tmp_dir =
-      std::filesystem::temp_directory_path() / "emel-bench-runner-tests" /
-      "moshi-lm-model-priority";
+  const std::filesystem::path tmp_dir = std::filesystem::temp_directory_path() /
+                                        "emel-bench-runner-tests" /
+                                        "moshi-lm-model-priority";
   const std::filesystem::path fake_bin_dir = tmp_dir / "bin";
   const std::filesystem::path build_dir = tmp_dir / "build";
   const std::filesystem::path fake_runner = build_dir / "bench_runner";
@@ -1236,6 +1245,9 @@ TEST_CASE("moshi lm wrapper gives --model priority over inherited env") {
     write_file(tool_path, "#!/bin/sh\nexit 0\n");
     make_executable(tool_path);
   }
+  const std::filesystem::path xcrun_path = fake_bin_dir / "xcrun";
+  write_file(xcrun_path, "#!/bin/sh\nexit 99\n");
+  make_executable(xcrun_path);
   write_file(fake_runner,
              "#!/bin/sh\n"
              "printf 'personaplex=%s\\nmoshi=%s\\nbench=%s\\nargs=%s\\n' "
@@ -1245,18 +1257,20 @@ TEST_CASE("moshi lm wrapper gives --model priority over inherited env") {
              "exit 0\n");
   make_executable(fake_runner);
 
-  std::string command = "PATH=" + quote_arg_posix(fake_bin_dir.string()) +
-                        ":$PATH ";
-  command += "EMEL_TEST_INVOKED_PATH=" +
-             quote_arg_posix(invoked_path.string()) + " ";
-  command += "EMEL_MOSHI_LM_COMPARE_BUILD_DIR=" +
-             quote_arg_posix(build_dir.string()) + " ";
-  command += "EMEL_PERSONAPLEX_LM_MODEL=" +
-             quote_arg_posix(stale_model.string()) + " ";
+  std::string command =
+      "PATH=" + quote_arg_posix(fake_bin_dir.string()) + ":$PATH ";
+  command +=
+      "EMEL_TEST_INVOKED_PATH=" + quote_arg_posix(invoked_path.string()) + " ";
+  command +=
+      "EMEL_MOSHI_LM_COMPARE_BUILD_DIR=" + quote_arg_posix(build_dir.string()) +
+      " ";
+  command +=
+      "EMEL_PERSONAPLEX_LM_MODEL=" + quote_arg_posix(stale_model.string()) +
+      " ";
   command += quote_arg_posix("/bin/bash") + " " +
              quote_arg_posix(bench_moshi_lm_compare_wrapper_path().string());
-  command += " --run-only --system --model " +
-             quote_arg_posix(cli_model.string());
+  command +=
+      " --run-only --system --model " + quote_arg_posix(cli_model.string());
   command += " > " + quote_arg_posix(stdout_path.string());
   command += " 2> " + quote_arg_posix(stderr_path.string());
 
@@ -1265,8 +1279,7 @@ TEST_CASE("moshi lm wrapper gives --model priority over inherited env") {
 
   const std::string invoked = read_file(invoked_path);
   CHECK_MESSAGE(!invoked.empty(), capture.stderr_text);
-  CHECK(invoked.find("personaplex=" + cli_model.string()) !=
-        std::string::npos);
+  CHECK(invoked.find("personaplex=" + cli_model.string()) != std::string::npos);
   CHECK(invoked.find("moshi=" + cli_model.string()) != std::string::npos);
   CHECK(invoked.find("bench=" + cli_model.string()) != std::string::npos);
   CHECK(invoked.find("personaplex=" + stale_model.string()) ==
@@ -1278,8 +1291,8 @@ TEST_CASE("moshi lm wrapper keeps build-only model-free") {
   const std::size_t mutual_exclusion =
       script.find("if $BUILD_ONLY && $RUN_ONLY; then");
   const std::size_t model_guard = script.find("if ! $BUILD_ONLY; then");
-  const std::size_t setup_call =
-      script.find("setup_output=\"$(\"$ROOT_DIR/scripts/setup_moshi_cpp_reference.sh\")\"");
+  const std::size_t setup_call = script.find(
+      "setup_output=\"$(\"$ROOT_DIR/scripts/setup_moshi_cpp_reference.sh\")\"");
   const std::size_t tool_check = script.find("for tool in cmake ninja git");
   const std::size_t build_only_exit = script.find("if $BUILD_ONLY; then");
 
@@ -1292,6 +1305,18 @@ TEST_CASE("moshi lm wrapper keeps build-only model-free") {
   CHECK(model_guard < setup_call);
   CHECK(setup_call < tool_check);
   CHECK(tool_check < build_only_exit);
+}
+
+TEST_CASE("moshi lm wrapper defers Zig setup outside system run-only") {
+  const std::string script = read_file(bench_moshi_lm_compare_wrapper_path());
+  const std::size_t source_zig =
+      script.find("source \"$ROOT_DIR/scripts/zig_toolchain.sh\"");
+  const std::size_t build_guard =
+      script.find("if ! $RUN_ONLY && $USE_ZIG; then");
+
+  REQUIRE(source_zig != std::string::npos);
+  REQUIRE(build_guard != std::string::npos);
+  CHECK(build_guard < source_zig);
 }
 
 TEST_CASE("moshi lm wrapper and runner search common companion layouts") {
@@ -1545,8 +1570,7 @@ TEST_CASE("generation_stage_probe_emel_path_does_not_bypass_generator_actor") {
 
 TEST_CASE("sortformer_diarization_bench_uses_public_actor_surfaces") {
   const std::array<std::filesystem::path, 2> source_paths = {
-      repo_root() / "tools" / "bench" / "diarization" /
-          "sortformer_bench.cpp",
+      repo_root() / "tools" / "bench" / "diarization" / "sortformer_bench.cpp",
       repo_root() / "tools" / "bench" / "diarization" /
           "sortformer_fixture.hpp",
   };
@@ -1556,7 +1580,8 @@ TEST_CASE("sortformer_diarization_bench_uses_public_actor_surfaces") {
       "#include \"emel/diarization/sortformer/request/guards.hpp\"",
       "#include \"emel/diarization/sortformer/encoder/actions.hpp\"",
       "#include \"emel/diarization/sortformer/encoder/detail.hpp\"",
-      "#include \"emel/diarization/sortformer/encoder/feature_extractor/detail.hpp\"",
+      "#include "
+      "\"emel/diarization/sortformer/encoder/feature_extractor/detail.hpp\"",
       "#include \"emel/diarization/sortformer/encoder/guards.hpp\"",
       "#include \"emel/diarization/sortformer/executor/actions.hpp\"",
       "#include \"emel/diarization/sortformer/executor/detail.hpp\"",
@@ -1602,14 +1627,14 @@ TEST_CASE("sortformer_diarization_bench_uses_public_actor_surfaces") {
 
   const std::array<std::filesystem::path, 5> public_facade_paths = {
       repo_root() / "src" / "emel" / "model" / "sortformer" / "any.hpp",
-      repo_root() / "src" / "emel" / "diarization" / "sortformer" /
-          "request" / "events.hpp",
-      repo_root() / "src" / "emel" / "diarization" / "sortformer" /
-          "output" / "any.hpp",
-      repo_root() / "src" / "emel" / "diarization" / "sortformer" /
-          "pipeline" / "any.hpp",
-      repo_root() / "src" / "emel" / "diarization" / "sortformer" /
-          "executor" / "events.hpp",
+      repo_root() / "src" / "emel" / "diarization" / "sortformer" / "request" /
+          "events.hpp",
+      repo_root() / "src" / "emel" / "diarization" / "sortformer" / "output" /
+          "any.hpp",
+      repo_root() / "src" / "emel" / "diarization" / "sortformer" / "pipeline" /
+          "any.hpp",
+      repo_root() / "src" / "emel" / "diarization" / "sortformer" / "executor" /
+          "events.hpp",
   };
   for (const auto &facade_path : public_facade_paths) {
     const std::string source = read_file(facade_path);
@@ -1708,10 +1733,10 @@ TEST_CASE("bench_runner generation jsonl emits manifest-driven workload "
         std::string::npos);
   CHECK(emel_capture.stdout_text.find("\"kernel_dispatch_calls\":") !=
         std::string::npos);
-  CHECK(emel_capture.stdout_text.find(
-            "\"flash_attention_dispatch_calls\":") != std::string::npos);
-  CHECK(emel_capture.stdout_text.find(
-            "\"native_quantized_stage_count\":") != std::string::npos);
+  CHECK(emel_capture.stdout_text.find("\"flash_attention_dispatch_calls\":") !=
+        std::string::npos);
+  CHECK(emel_capture.stdout_text.find("\"native_quantized_stage_count\":") !=
+        std::string::npos);
   const std::filesystem::path gemma4_fixture_path =
       repo_root() / "tests" / "models" / "gemma-4-e2b-it-Q8_0.gguf";
   if (std::filesystem::exists(gemma4_fixture_path)) {

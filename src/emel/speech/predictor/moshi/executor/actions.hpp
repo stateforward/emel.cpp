@@ -6,9 +6,12 @@
 #include "emel/speech/predictor/moshi/executor/events.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
+#include <cstddef>
 #include <cstring>
 #include <limits>
+#include <utility>
 
 namespace emel::speech::predictor::moshi::executor::action {
 
@@ -19,6 +22,25 @@ inline emel::error::type to_error(const error value) noexcept {
 }
 
 } // namespace detail_ns
+
+template <emel::kernel::matmul::lane_mode route>
+inline bool
+effect_dispatch_matmul(const emel::kernel::event::op_mul_mat &request,
+                       context &ctx) noexcept {
+  if constexpr (route == emel::kernel::matmul::lane_mode::serial) {
+    emel::kernel::matmul::event::dispatch_result result = {};
+    bool accepted = false;
+    const emel::kernel::matmul::event::execute_serial execute{request, result,
+                                                              accepted};
+    return ctx.matmul.process_event(execute) && accepted;
+  } else {
+    emel::kernel::matmul::event::dispatch_result result = {};
+    bool accepted = false;
+    const emel::kernel::matmul::event::execute_parallel execute{request, result,
+                                                                accepted};
+    return ctx.matmul.process_event(execute) && accepted;
+  }
+}
 
 struct effect_bind_contract {
   void operator()(const event::initialize_run &runtime_ev,
@@ -455,6 +477,7 @@ struct effect_bind_temporal_layer_projection {
   }
 };
 
+template <emel::kernel::matmul::lane_mode route>
 struct effect_run_temporal_layer_projection {
   void operator()(const event::step_run &runtime_ev,
                   context &ctx) const noexcept {
@@ -468,7 +491,7 @@ struct effect_run_temporal_layer_projection {
                                     static_cast<uint64_t>(hidden_dim) * 3u),
     };
     runtime_ev.ctx.temporal_layer_projection_ok =
-        ctx.kernel.process_event(projection_ev);
+        effect_dispatch_matmul<route>(projection_ev, ctx);
   }
 };
 
@@ -579,84 +602,172 @@ struct effect_write_temporal_layer_kv_cache {
   }
 };
 
+struct attention_head_slice {
+  int32_t head_begin = 0;
+  int32_t head_end = 0;
+};
+
+template <std::size_t lane, std::size_t lane_count>
+inline attention_head_slice
+compute_fixed_attention_head_slice(const int32_t heads) noexcept {
+  const int32_t lanes = static_cast<int32_t>(lane_count);
+  const int32_t lane_index = static_cast<int32_t>(lane);
+  const int32_t heads_per_lane = heads / lanes;
+  const int32_t extra_heads = heads % lanes;
+  const int32_t head_begin =
+      lane_index * heads_per_lane + std::min(lane_index, extra_heads);
+  const int32_t head_count =
+      heads_per_lane + static_cast<int32_t>(lane_index < extra_heads);
+  return attention_head_slice{
+      .head_begin = head_begin,
+      .head_end = head_begin + head_count,
+  };
+}
+
+struct attention_lane_dispatch {
+  emel::kernel::attention::sm *actor = nullptr;
+  const emel::kernel::attention::event::head_range_request *request = nullptr;
+  emel::kernel::attention::event::dispatch_result *result = nullptr;
+  bool handled = false;
+};
+
+template <std::size_t lane_count, std::size_t... lanes>
+inline void prepare_attention_lanes(
+    const event::step_run &runtime_ev, const context &ctx,
+    std::array<attention_head_slice, lane_count> &head_slices,
+    std::array<emel::kernel::attention::event::head_range_request, lane_count>
+        &requests,
+    std::array<emel::kernel::attention::event::dispatch_result, lane_count>
+        &results,
+    std::array<attention_lane_dispatch, lane_count> &dispatches,
+    std::index_sequence<lanes...>) noexcept {
+  const auto &view = runtime_ev.ctx.temporal_kv;
+  const auto &window = runtime_ev.ctx.temporal_position.window;
+  const auto &lm = runtime_ev.request.model.moshi_lm;
+  const int32_t hidden_dim = ctx.session.hidden_dim;
+  const int32_t head_dim = hidden_dim / lm.num_heads;
+  const std::size_t layer_offset = view.layer_cache_offsets[
+      static_cast<std::size_t>(runtime_ev.ctx.temporal_layer_index)];
+  ((head_slices[lanes] =
+        compute_fixed_attention_head_slice<lanes, lane_count>(lm.num_heads),
+    requests[lanes] =
+        emel::kernel::attention::event::head_range_request{
+            .query = std::span<const float>{
+                runtime_ev.ctx.qkv.data(), static_cast<std::size_t>(hidden_dim)},
+            .key_cache = std::span<const uint16_t>{view.key_cache},
+            .value_cache = std::span<const uint16_t>{view.value_cache},
+            .output = std::span<float>{
+                runtime_ev.ctx.attention.data() +
+                    static_cast<std::size_t>(head_slices[lanes].head_begin) *
+                        static_cast<std::size_t>(head_dim),
+                static_cast<std::size_t>(head_slices[lanes].head_end -
+                                         head_slices[lanes].head_begin) *
+                    static_cast<std::size_t>(head_dim)},
+            .layer_offset = layer_offset,
+            .hidden_dim = hidden_dim,
+            .head_dim = head_dim,
+            .head_begin = head_slices[lanes].head_begin,
+            .head_end = head_slices[lanes].head_end,
+            .position_capacity = view.position_capacity,
+            .physical_begin = window.physical_begin,
+            .valid_positions = window.valid_positions,
+        },
+    dispatches[lanes] = attention_lane_dispatch{
+        .actor = &ctx.attention_actors->actors[lanes],
+        .request = &requests[lanes],
+        .result = &results[lanes],
+    }),
+   ...);
+}
+
+template <std::size_t lane>
+inline bool submit_attention_lane(
+    context &ctx, emel::kernel::matmul::lane_pool::join_group &group,
+    emel::policy::fork_join_start_gate &gate,
+    attention_lane_dispatch &dispatch) noexcept {
+  dispatch.handled = false;
+  return ctx.attention_lanes->try_submit(
+      group, [&dispatch, &gate]() noexcept {
+        gate.arrive_and_wait();
+        const emel::kernel::attention::event::execute execute{
+            *dispatch.request, *dispatch.result};
+        dispatch.handled = dispatch.actor->process_event(execute);
+      });
+}
+
+template <std::size_t lane_count, std::size_t... lane_offsets>
+inline std::size_t submit_attention_worker_lanes(
+    context &ctx, emel::kernel::matmul::lane_pool::join_group &group,
+    emel::policy::fork_join_start_gate &gate,
+    std::array<attention_lane_dispatch, lane_count> &dispatches,
+    std::index_sequence<lane_offsets...>) noexcept {
+  std::size_t submitted = 0u;
+  ((submitted += static_cast<std::size_t>(submit_attention_lane<
+        lane_offsets + 1u>(ctx, group, gate, dispatches[lane_offsets + 1u]))),
+   ...);
+  return submitted;
+}
+
+template <std::size_t lane_count, std::size_t... lane_offsets>
+inline bool attention_worker_lanes_accepted(
+    const std::array<attention_lane_dispatch, lane_count> &dispatches,
+    std::index_sequence<lane_offsets...>) noexcept {
+  return (dispatches[lane_offsets + 1u].handled && ...);
+}
+
+template <std::size_t lane_count>
 struct effect_run_temporal_layer_attention {
   void operator()(const event::step_run &runtime_ev,
-                  const context &ctx) const noexcept {
-    const auto &view = runtime_ev.ctx.temporal_kv;
-    const auto &window = runtime_ev.ctx.temporal_position.window;
-    const auto &lm = runtime_ev.request.model.moshi_lm;
+                  context &ctx) const noexcept {
+    static_assert(lane_count == 1u || lane_count == 2u || lane_count == 4u ||
+                  lane_count == 8u);
     const int32_t hidden_dim = ctx.session.hidden_dim;
-    const int32_t head_dim = hidden_dim / lm.num_heads;
-    const int32_t capacity = view.position_capacity;
-    const int32_t valid_positions = window.valid_positions;
-    const float scale = 1.0f / std::sqrt(static_cast<float>(head_dim));
-    const size_t layer_offset = view.layer_cache_offsets[static_cast<size_t>(
-        runtime_ev.ctx.temporal_layer_index)];
     runtime_ev.ctx.temporal_layer_attention_ok = false;
     std::fill_n(runtime_ev.ctx.attention.data(),
                 static_cast<size_t>(hidden_dim), 0.0f);
+    std::array<attention_head_slice, lane_count> head_slices = {};
+    std::array<emel::kernel::attention::event::head_range_request, lane_count>
+        requests = {};
+    std::array<emel::kernel::attention::event::dispatch_result, lane_count>
+        results = {};
+    std::array<attention_lane_dispatch, lane_count> dispatches = {};
+    prepare_attention_lanes<lane_count>(
+        runtime_ev, ctx, head_slices, requests, results, dispatches,
+        std::make_index_sequence<lane_count>{});
 
-    for (int32_t head = 0; head < lm.num_heads; ++head) {
-      const int32_t head_offset = head * head_dim;
-      const float *q_head =
-          runtime_ev.ctx.qkv.data() + static_cast<size_t>(head_offset);
-      for (int32_t dim = 0; dim < head_dim; ++dim) {
-        runtime_ev.ctx.q_bf16[static_cast<size_t>(dim)] =
-            emel::kernel::detail::fp32_to_bf16(q_head[dim]);
-      }
-      for (int32_t physical = 0; physical < capacity; ++physical) {
-        runtime_ev.ctx.attention_scores[static_cast<size_t>(physical)] =
-            -std::numeric_limits<float>::infinity();
-      }
-      for (int32_t position = 0; position < valid_positions; ++position) {
-        const int32_t unwrapped = window.physical_begin + position;
-        const int32_t physical =
-            unwrapped - static_cast<int32_t>(unwrapped >= capacity) * capacity;
-        const size_t cache_begin =
-            layer_offset +
-            static_cast<size_t>(physical) * static_cast<size_t>(hidden_dim) +
-            static_cast<size_t>(head_offset);
-        runtime_ev.ctx.attention_scores[static_cast<size_t>(physical)] =
-            emel::kernel::detail::vec_dot_bf16_ggml(
-                head_dim, view.key_cache.data() + cache_begin,
-                runtime_ev.ctx.q_bf16.data()) *
-            scale;
-      }
-
-      emel::kernel::detail::soft_max_row_ggml(
-          capacity, runtime_ev.ctx.attention_scores.data());
-      for (int32_t physical = 0; physical < capacity; ++physical) {
-        runtime_ev.ctx.attention_weights_bf16[static_cast<size_t>(physical)] =
-            emel::kernel::detail::fp32_to_bf16(
-                runtime_ev.ctx.attention_scores[static_cast<size_t>(physical)]);
-      }
-
-      float *attention_head =
-          runtime_ev.ctx.attention.data() + static_cast<size_t>(head_offset);
-      for (int32_t dim = 0; dim < head_dim; ++dim) {
-        double sum = 0.0;
-        for (int32_t position = 0; position < valid_positions; ++position) {
-          const int32_t unwrapped = window.physical_begin + position;
-          const int32_t physical =
-              unwrapped -
-              static_cast<int32_t>(unwrapped >= capacity) * capacity;
-          const size_t value_index =
-              layer_offset +
-              static_cast<size_t>(physical) * static_cast<size_t>(hidden_dim) +
-              static_cast<size_t>(head_offset + dim);
-          sum += static_cast<double>(
-              emel::kernel::detail::bf16_to_fp32(
-                  view.value_cache[value_index]) *
-              emel::kernel::detail::bf16_to_fp32(
-                  runtime_ev.ctx
-                      .attention_weights_bf16[static_cast<size_t>(physical)]));
-        }
-        attention_head[dim] = static_cast<float>(sum);
-      }
+    if constexpr (lane_count == 1u) {
+      const emel::kernel::attention::event::execute execute{requests[0],
+                                                            results[0]};
+      runtime_ev.ctx.temporal_layer_attention_ok =
+          ctx.attention_actors->actors[0].process_event(execute);
+    } else {
+      emel::kernel::matmul::lane_pool::join_group group{};
+      emel::policy::fork_join_start_gate gate{};
+      const std::size_t submitted = submit_attention_worker_lanes<lane_count>(
+          ctx, group, gate, dispatches,
+          std::make_index_sequence<lane_count - 1u>{});
+      gate.open_after_arrivals(submitted);
+      const emel::kernel::attention::event::execute owner_execute{requests[0],
+                                                                  results[0]};
+      const bool owner_accepted =
+          ctx.attention_actors->actors[0].process_event(owner_execute);
+      const bool workers_drained = group.wait();
+      runtime_ev.ctx.temporal_layer_attention_ok =
+          submitted == lane_count - 1u && owner_accepted && workers_drained &&
+          attention_worker_lanes_accepted(
+              dispatches, std::make_index_sequence<lane_count - 1u>{});
     }
-    runtime_ev.ctx.temporal_layer_attention_ok = true;
   }
 };
+
+using effect_run_temporal_layer_attention_serial =
+    effect_run_temporal_layer_attention<1u>;
+using effect_run_temporal_layer_attention_two =
+    effect_run_temporal_layer_attention<2u>;
+using effect_run_temporal_layer_attention_four =
+    effect_run_temporal_layer_attention<4u>;
+using effect_run_temporal_layer_attention_eight =
+    effect_run_temporal_layer_attention<8u>;
 
 struct effect_bind_temporal_layer_out_projection {
   void operator()(const event::step_run &runtime_ev,
@@ -677,6 +788,7 @@ struct effect_bind_temporal_layer_out_projection {
   }
 };
 
+template <emel::kernel::matmul::lane_mode route>
 struct effect_run_temporal_layer_out_projection {
   void operator()(const event::step_run &runtime_ev,
                   context &ctx) const noexcept {
@@ -690,7 +802,7 @@ struct effect_run_temporal_layer_out_projection {
                                     static_cast<uint64_t>(hidden_dim)),
     };
     runtime_ev.ctx.temporal_layer_out_projection_ok =
-        ctx.kernel.process_event(projection_ev);
+        effect_dispatch_matmul<route>(projection_ev, ctx);
   }
 };
 
@@ -773,6 +885,7 @@ struct effect_bind_temporal_layer_gating_in {
   }
 };
 
+template <emel::kernel::matmul::lane_mode route>
 struct effect_run_temporal_layer_gating_in {
   void operator()(const event::step_run &runtime_ev,
                   context &ctx) const noexcept {
@@ -791,7 +904,7 @@ struct effect_run_temporal_layer_gating_in {
                                     projection_dim),
     };
     runtime_ev.ctx.temporal_layer_gating_in_ok =
-        ctx.kernel.process_event(projection_ev);
+        effect_dispatch_matmul<route>(projection_ev, ctx);
   }
 };
 
@@ -868,6 +981,7 @@ struct effect_bind_temporal_layer_gating_out {
   }
 };
 
+template <emel::kernel::matmul::lane_mode route>
 struct effect_run_temporal_layer_gating_out {
   void operator()(const event::step_run &runtime_ev,
                   context &ctx) const noexcept {
@@ -885,7 +999,7 @@ struct effect_run_temporal_layer_gating_out {
                                     static_cast<uint64_t>(hidden_dim)),
     };
     runtime_ev.ctx.temporal_layer_gating_out_ok =
-        ctx.kernel.process_event(projection_ev);
+        effect_dispatch_matmul<route>(projection_ev, ctx);
   }
 };
 
@@ -1041,6 +1155,7 @@ struct effect_select_text_token {
   }
 };
 
+template <emel::kernel::matmul::lane_mode route>
 struct effect_compute_text_token_logits {
   void operator()(const event::step_run &runtime_ev,
                   context &ctx) const noexcept {
@@ -1056,7 +1171,8 @@ struct effect_compute_text_token_logits {
         .dst = detail::make_f32_dst(runtime_ev.ctx.logits.data(), 1u,
                                     static_cast<uint64_t>(text_card)),
     };
-    runtime_ev.ctx.text_logits_ok = ctx.kernel.process_event(logits_ev);
+    runtime_ev.ctx.text_logits_ok =
+        effect_dispatch_matmul<route>(logits_ev, ctx);
   }
 };
 
@@ -1224,6 +1340,7 @@ struct effect_bind_depformer_audio_input_projection {
   }
 };
 
+template <emel::kernel::matmul::lane_mode route>
 struct effect_run_depformer_input_projection {
   void operator()(const event::step_run &runtime_ev,
                   context &ctx) const noexcept {
@@ -1239,7 +1356,7 @@ struct effect_run_depformer_input_projection {
                                     static_cast<uint64_t>(dep_dim)),
     };
     runtime_ev.ctx.depformer_input_projection_ok =
-        ctx.kernel.process_event(projection_ev);
+        effect_dispatch_matmul<route>(projection_ev, ctx);
   }
 };
 
@@ -1364,6 +1481,7 @@ struct effect_bind_depformer_layer_projection {
   }
 };
 
+template <emel::kernel::matmul::lane_mode route>
 struct effect_run_depformer_layer_projection {
   void operator()(const event::step_run &runtime_ev,
                   context &ctx) const noexcept {
@@ -1377,7 +1495,7 @@ struct effect_run_depformer_layer_projection {
                                     static_cast<uint64_t>(dep_dim) * 3u),
     };
     runtime_ev.ctx.depformer_layer_projection_ok =
-        ctx.kernel.process_event(projection_ev);
+        effect_dispatch_matmul<route>(projection_ev, ctx);
   }
 };
 
@@ -1512,6 +1630,7 @@ struct effect_bind_depformer_layer_out_projection {
   }
 };
 
+template <emel::kernel::matmul::lane_mode route>
 struct effect_run_depformer_layer_out_projection {
   void operator()(const event::step_run &runtime_ev,
                   context &ctx) const noexcept {
@@ -1525,7 +1644,7 @@ struct effect_run_depformer_layer_out_projection {
                                     static_cast<uint64_t>(dep_dim)),
     };
     runtime_ev.ctx.depformer_layer_out_projection_ok =
-        ctx.kernel.process_event(projection_ev);
+        effect_dispatch_matmul<route>(projection_ev, ctx);
   }
 };
 
@@ -1611,6 +1730,7 @@ struct effect_bind_depformer_layer_gating_in {
   }
 };
 
+template <emel::kernel::matmul::lane_mode route>
 struct effect_run_depformer_layer_gating_in {
   void operator()(const event::step_run &runtime_ev,
                   context &ctx) const noexcept {
@@ -1631,7 +1751,7 @@ struct effect_run_depformer_layer_gating_in {
                                     projection_dim),
     };
     runtime_ev.ctx.depformer_layer_gating_in_ok =
-        ctx.kernel.process_event(projection_ev);
+        effect_dispatch_matmul<route>(projection_ev, ctx);
   }
 };
 
@@ -1715,6 +1835,7 @@ struct effect_bind_depformer_layer_gating_out {
   }
 };
 
+template <emel::kernel::matmul::lane_mode route>
 struct effect_run_depformer_layer_gating_out {
   void operator()(const event::step_run &runtime_ev,
                   context &ctx) const noexcept {
@@ -1735,7 +1856,7 @@ struct effect_run_depformer_layer_gating_out {
                                     static_cast<uint64_t>(dep_dim)),
     };
     runtime_ev.ctx.depformer_layer_gating_out_ok =
-        ctx.kernel.process_event(projection_ev);
+        effect_dispatch_matmul<route>(projection_ev, ctx);
   }
 };
 
@@ -1809,6 +1930,7 @@ struct effect_select_depformer_token {
   }
 };
 
+template <emel::kernel::matmul::lane_mode route>
 struct effect_compute_depformer_token_logits {
   void operator()(const event::step_run &runtime_ev,
                   context &ctx) const noexcept {
@@ -1825,7 +1947,8 @@ struct effect_compute_depformer_token_logits {
         .dst = detail::make_f32_dst(runtime_ev.ctx.logits.data(), 1u,
                                     static_cast<uint64_t>(audio_card)),
     };
-    runtime_ev.ctx.depformer_logits_ok = ctx.kernel.process_event(logits_ev);
+    runtime_ev.ctx.depformer_logits_ok =
+        effect_dispatch_matmul<route>(logits_ev, ctx);
   }
 };
 
@@ -1988,5 +2111,72 @@ struct effect_mark_unexpected_and_store {
     }
   }
 };
+
+struct effect_run_temporal_layer_projection_serial
+    : effect_run_temporal_layer_projection<
+          emel::kernel::matmul::lane_mode::serial> {};
+struct effect_run_temporal_layer_projection_parallel
+    : effect_run_temporal_layer_projection<
+          emel::kernel::matmul::lane_mode::parallel> {};
+struct effect_run_temporal_layer_out_projection_serial
+    : effect_run_temporal_layer_out_projection<
+          emel::kernel::matmul::lane_mode::serial> {};
+struct effect_run_temporal_layer_out_projection_parallel
+    : effect_run_temporal_layer_out_projection<
+          emel::kernel::matmul::lane_mode::parallel> {};
+struct effect_run_temporal_layer_gating_in_serial
+    : effect_run_temporal_layer_gating_in<
+          emel::kernel::matmul::lane_mode::serial> {};
+struct effect_run_temporal_layer_gating_in_parallel
+    : effect_run_temporal_layer_gating_in<
+          emel::kernel::matmul::lane_mode::parallel> {};
+struct effect_run_temporal_layer_gating_out_serial
+    : effect_run_temporal_layer_gating_out<
+          emel::kernel::matmul::lane_mode::serial> {};
+struct effect_run_temporal_layer_gating_out_parallel
+    : effect_run_temporal_layer_gating_out<
+          emel::kernel::matmul::lane_mode::parallel> {};
+struct effect_compute_text_token_logits_serial
+    : effect_compute_text_token_logits<
+          emel::kernel::matmul::lane_mode::serial> {};
+struct effect_compute_text_token_logits_parallel
+    : effect_compute_text_token_logits<
+          emel::kernel::matmul::lane_mode::parallel> {};
+struct effect_run_depformer_input_projection_serial
+    : effect_run_depformer_input_projection<
+          emel::kernel::matmul::lane_mode::serial> {};
+struct effect_run_depformer_input_projection_parallel
+    : effect_run_depformer_input_projection<
+          emel::kernel::matmul::lane_mode::parallel> {};
+struct effect_run_depformer_layer_projection_serial
+    : effect_run_depformer_layer_projection<
+          emel::kernel::matmul::lane_mode::serial> {};
+struct effect_run_depformer_layer_projection_parallel
+    : effect_run_depformer_layer_projection<
+          emel::kernel::matmul::lane_mode::parallel> {};
+struct effect_run_depformer_layer_out_projection_serial
+    : effect_run_depformer_layer_out_projection<
+          emel::kernel::matmul::lane_mode::serial> {};
+struct effect_run_depformer_layer_out_projection_parallel
+    : effect_run_depformer_layer_out_projection<
+          emel::kernel::matmul::lane_mode::parallel> {};
+struct effect_run_depformer_layer_gating_in_serial
+    : effect_run_depformer_layer_gating_in<
+          emel::kernel::matmul::lane_mode::serial> {};
+struct effect_run_depformer_layer_gating_in_parallel
+    : effect_run_depformer_layer_gating_in<
+          emel::kernel::matmul::lane_mode::parallel> {};
+struct effect_run_depformer_layer_gating_out_serial
+    : effect_run_depformer_layer_gating_out<
+          emel::kernel::matmul::lane_mode::serial> {};
+struct effect_run_depformer_layer_gating_out_parallel
+    : effect_run_depformer_layer_gating_out<
+          emel::kernel::matmul::lane_mode::parallel> {};
+struct effect_compute_depformer_token_logits_serial
+    : effect_compute_depformer_token_logits<
+          emel::kernel::matmul::lane_mode::serial> {};
+struct effect_compute_depformer_token_logits_parallel
+    : effect_compute_depformer_token_logits<
+          emel::kernel::matmul::lane_mode::parallel> {};
 
 } // namespace emel::speech::predictor::moshi::executor::action

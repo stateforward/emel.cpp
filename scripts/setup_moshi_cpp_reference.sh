@@ -14,8 +14,8 @@ REFERENCE_DIR="${EMEL_MOSHI_CPP_SOURCE_DIR:-$ROOT_DIR/build/moshi_cpp_reference/
 ARTIFACT_DIR="${EMEL_MOSHI_REFERENCE_ARTIFACT_DIR:-$ROOT_DIR/build/moshi_reference}"
 MOSHI_CPP_REPO="${EMEL_MOSHI_CPP_REPO:-https://github.com/Codes4Fun/moshi.cpp.git}"
 PIN_FILE="$ROOT_DIR/tools/bench/moshi_reference_ref.txt"
-MOSHI_CPP_COMMIT="${EMEL_MOSHI_CPP_COMMIT:-$(tr -d '[:space:]' < "$PIN_FILE")}"
-MOSHI_CPP_REF="${EMEL_MOSHI_CPP_REF:-$MOSHI_CPP_COMMIT}"
+MOSHI_CPP_COMMIT="${EMEL_MOSHI_CPP_COMMIT:-}"
+MOSHI_CPP_REF="${EMEL_MOSHI_CPP_REF:-}"
 
 PERSONAPLEX_REVISION="1685c70257e525bc6c72470eee1ab2cacff3f709"
 PERSONAPLEX_BASE="https://huggingface.co/Codes4Fun/personaplex-7b-v1-q4_k-GGUF/resolve/$PERSONAPLEX_REVISION"
@@ -39,13 +39,28 @@ MOSHI_MODEL_EMEL="$ARTIFACT_DIR/model-q4_k-emel.gguf"
 MIMI_MODEL_EMEL="$ARTIFACT_DIR/mimi-e351c8d8-125-emel.gguf"
 MIMI_MODEL_PERSONAPLEX_EMEL="$ARTIFACT_DIR/mimi-e351c8d8-125-personaplex-emel.gguf"
 VOICE_MODEL_EMEL="$ARTIFACT_DIR/voices/NATF0-emel.gguf"
+MIMI_PERSONAPLEX_Q8_TENSORS=68
 
 FETCH_ONLY=false
 BUILD_ONLY=false
+VALIDATE_Q8_OUTPUT=""
+VALIDATE_Q8_MANIFEST=""
+VALIDATE_Q8_TENSORS=""
+ENSURE_Q8_OUTPUT=""
+ENSURE_Q8_MANIFEST=""
+ENSURE_Q8_TENSORS=""
+ENSURE_Q8_CONVERTER=""
+ENSURE_Q8_SOURCE=""
+ENSURE_Q8_CONVERTER_ARGS=()
 
 usage() {
   cat <<'USAGE'
 usage: scripts/setup_moshi_cpp_reference.sh [--fetch-only] [--build-only]
+       scripts/setup_moshi_cpp_reference.sh \
+         --validate-q8-artifact OUTPUT MANIFEST EXPECTED_TENSORS
+       scripts/setup_moshi_cpp_reference.sh \
+         --ensure-q8-artifact OUTPUT MANIFEST EXPECTED_TENSORS CONVERTER SOURCE \
+         [CONVERTER_ARGS...]
 
 Fetches pinned moshi.cpp, downloads the sha256-pinned PersonaPlex-7B q4_k GGUF
 plus Mimi/tokenizer/voice artifacts, generates the deterministic 24 kHz WAV
@@ -58,10 +73,128 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --fetch-only) FETCH_ONLY=true; shift ;;
     --build-only) BUILD_ONLY=true; shift ;;
+    --validate-q8-artifact)
+      if [[ $# -lt 4 ]]; then
+        echo "error: --validate-q8-artifact requires OUTPUT MANIFEST EXPECTED_TENSORS" >&2
+        exit 1
+      fi
+      VALIDATE_Q8_OUTPUT="$2"
+      VALIDATE_Q8_MANIFEST="$3"
+      VALIDATE_Q8_TENSORS="$4"
+      shift 4
+      ;;
+    --ensure-q8-artifact)
+      if [[ $# -lt 6 ]]; then
+        echo "error: --ensure-q8-artifact requires OUTPUT MANIFEST EXPECTED_TENSORS CONVERTER SOURCE" >&2
+        exit 1
+      fi
+      ENSURE_Q8_OUTPUT="$2"
+      ENSURE_Q8_MANIFEST="$3"
+      ENSURE_Q8_TENSORS="$4"
+      ENSURE_Q8_CONVERTER="$5"
+      ENSURE_Q8_SOURCE="$6"
+      shift 6
+      ENSURE_Q8_CONVERTER_ARGS=("$@")
+      set --
+      ;;
     -h|--help) usage; exit 0 ;;
     *) echo "error: unknown argument '$1'" >&2; usage; exit 1 ;;
   esac
 done
+
+# Discover the interpreter the same way the compare wrapper does, so hosts
+# that ship python3.12/python3.13 without a python3 shim can run the WAV
+# generation and the converter too.
+PYTHON_BIN="${PYTHON_BIN:-}"
+if [[ -z "$PYTHON_BIN" ]]; then
+  for candidate in python3.12 python3.13 /usr/bin/python3 python3; do
+    if command -v "$candidate" >/dev/null 2>&1; then
+      candidate_path="$(command -v "$candidate")"
+      if "$candidate_path" -c 'import hashlib, json, subprocess' \
+        >/dev/null 2>&1; then
+        PYTHON_BIN="$candidate_path"
+        break
+      fi
+    fi
+  done
+fi
+if [[ -z "$PYTHON_BIN" ]] ||
+   ! "$PYTHON_BIN" -c 'import hashlib, json, subprocess' >/dev/null 2>&1; then
+  echo "error: no usable Python 3 interpreter" >&2
+  exit 1
+fi
+
+q8_manifest_matches_output() {
+  local output="$1"
+  local manifest="$2"
+  local expected_tensors="$3"
+  "$PYTHON_BIN" - "$output" "$manifest" "$expected_tensors" <<'PY'
+import hashlib
+import json
+import pathlib
+import sys
+
+output = pathlib.Path(sys.argv[1])
+manifest_path = pathlib.Path(sys.argv[2])
+expected_tensors = int(sys.argv[3])
+if not output.is_file() or not manifest_path.is_file():
+    raise SystemExit("Q8 output and manifest must both exist")
+
+manifest = json.load(open(manifest_path, encoding="utf-8"))
+if manifest.get("quantization") != "q8_0":
+    raise SystemExit("Q8 manifest quantization mismatch")
+if manifest.get("quantized_tensors") != expected_tensors:
+    raise SystemExit("Q8 manifest tensor-count mismatch")
+
+digest = hashlib.sha256()
+with open(output, "rb") as source:
+    for chunk in iter(lambda: source.read(1024 * 1024), b""):
+        digest.update(chunk)
+if manifest.get("enriched_sha256") != digest.hexdigest():
+    raise SystemExit("Q8 manifest output identity mismatch")
+PY
+}
+
+rebuild_q8_artifact() {
+  local output="$1"
+  local manifest="$2"
+  local expected_tensors="$3"
+  local converter="$4"
+  local source="$5"
+  shift 5
+  "$PYTHON_BIN" "$converter" \
+    --source "$source" --output "$output" --manifest "$manifest" "$@"
+  q8_manifest_matches_output "$output" "$manifest" "$expected_tensors"
+}
+
+ensure_q8_artifact() {
+  local output="$1"
+  local manifest="$2"
+  local expected_tensors="$3"
+  local converter="$4"
+  local source="$5"
+  shift 5
+  if q8_manifest_matches_output \
+    "$output" "$manifest" "$expected_tensors" >/dev/null 2>&1; then
+    return 0
+  fi
+  rebuild_q8_artifact \
+    "$output" "$manifest" "$expected_tensors" "$converter" "$source" "$@"
+}
+
+if [[ -n "$VALIDATE_Q8_OUTPUT" ]]; then
+  q8_manifest_matches_output \
+    "$VALIDATE_Q8_OUTPUT" "$VALIDATE_Q8_MANIFEST" "$VALIDATE_Q8_TENSORS"
+  exit 0
+fi
+
+if [[ -n "$ENSURE_Q8_OUTPUT" ]]; then
+  ensure_q8_artifact \
+    "$ENSURE_Q8_OUTPUT" "$ENSURE_Q8_MANIFEST" "$ENSURE_Q8_TENSORS" \
+    "$ENSURE_Q8_CONVERTER" "$ENSURE_Q8_SOURCE" \
+    "${ENSURE_Q8_CONVERTER_ARGS[@]}"
+  exit 0
+fi
 
 for tool in git shasum curl; do
   if ! command -v "$tool" >/dev/null 2>&1; then
@@ -70,21 +203,11 @@ for tool in git shasum curl; do
   fi
 done
 
-# Discover the interpreter the same way the compare wrapper does, so hosts
-# that ship python3.12/python3.13 without a python3 shim can run the WAV
-# generation and the converter too.
-PYTHON_BIN="${PYTHON_BIN:-}"
-if [[ -z "$PYTHON_BIN" ]]; then
-  for candidate in python3 python3.13 python3.12; do
-    if command -v "$candidate" >/dev/null 2>&1; then
-      PYTHON_BIN="$(command -v "$candidate")"
-      break
-    fi
-  done
+if [[ -z "$MOSHI_CPP_COMMIT" ]]; then
+  MOSHI_CPP_COMMIT="$(tr -d '[:space:]' < "$PIN_FILE")"
 fi
-if [[ -z "$PYTHON_BIN" ]]; then
-  echo "error: required tool missing: python3 (or python3.12/python3.13)" >&2
-  exit 1
+if [[ -z "$MOSHI_CPP_REF" ]]; then
+  MOSHI_CPP_REF="$MOSHI_CPP_COMMIT"
 fi
 
 if $BUILD_ONLY; then
@@ -174,7 +297,9 @@ convert_if_needed() {
   # The converter embeds its side inputs (--config/--tokenizer files) as
   # hparams/tokenizer metadata, so any of them being newer than the enriched
   # output must force a reconvert, not just the raw GGUF.
+  local manifest="${output%.gguf}.manifest.json"
   local stale=0
+  local quantize_q8=0
   if [[ ! -f "$output" || "$source" -nt "$output" ]]; then
     stale=1
   fi
@@ -184,15 +309,36 @@ convert_if_needed() {
     stale=1
   fi
   local arg
+  local previous_arg=""
   for arg in "$@"; do
     if [[ -f "$arg" && "$arg" -nt "$output" ]]; then
       stale=1
     fi
+    if [[ "$previous_arg" == "--quantize" && "$arg" == "q8_0" ]]; then
+      quantize_q8=1
+    fi
+    previous_arg="$arg"
   done
+  # A pre-existing float artifact is not current merely because its mtime is
+  # newer. When the maintained call requests Q8_0, bind freshness to the
+  # converter manifest's operand-class contract as well.
+  if ((quantize_q8)); then
+    if ! q8_manifest_matches_output \
+      "$output" "$manifest" "$MIMI_PERSONAPLEX_Q8_TENSORS" \
+      >/dev/null 2>&1; then
+      stale=1
+    fi
+  fi
   if ((stale)); then
-    "$PYTHON_BIN" "$ROOT_DIR/tools/bench/moshi_gguf_convert.py" \
-      --source "$source" --output "$output" \
-      --manifest "${output%.gguf}.manifest.json" "$@"
+    if ((quantize_q8)); then
+      rebuild_q8_artifact \
+        "$output" "$manifest" "$MIMI_PERSONAPLEX_Q8_TENSORS" \
+        "$ROOT_DIR/tools/bench/moshi_gguf_convert.py" "$source" "$@"
+    else
+      "$PYTHON_BIN" "$ROOT_DIR/tools/bench/moshi_gguf_convert.py" \
+        --source "$source" --output "$output" \
+        --manifest "$manifest" "$@"
+    fi
   fi
 }
 
@@ -202,7 +348,8 @@ convert_if_needed "$MOSHI_MODEL" "$MOSHI_MODEL_EMEL" \
 convert_if_needed "$MIMI_MODEL" "$MIMI_MODEL_EMEL" \
   --config "$MOSHI_CONFIG" --mimi-n-q "$MIMI_FULL_N_Q"
 convert_if_needed "$MIMI_MODEL" "$MIMI_MODEL_PERSONAPLEX_EMEL" \
-  --config "$MOSHI_CONFIG" --inference-config "$MOSHI_INFERENCE_CONFIG"
+  --config "$MOSHI_CONFIG" --inference-config "$MOSHI_INFERENCE_CONFIG" \
+  --quantize q8_0
 convert_if_needed "$VOICE_MODEL" "$VOICE_MODEL_EMEL"
 
 echo "EMEL_MOSHI_CPP_SOURCE=$REFERENCE_DIR"

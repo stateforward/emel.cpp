@@ -171,7 +171,6 @@ if(EMEL_ENABLE_TESTS)
     tests/text/generator/lifecycle_tests.cpp
     tests/text/generator/action_guard_tests.cpp
     tests/text/generator/detail_tests.cpp
-    tests/text/generator/parallel_matmul_tests.cpp
     tests/text/generator/determinism_tests.cpp
     tests/text/generator/stream_window_tests.cpp
     tests/text/generator/decode_wavefront/lifecycle_tests.cpp
@@ -188,6 +187,8 @@ if(EMEL_ENABLE_TESTS)
     tests/speech/codec/mimi_detail_tests.cpp
     tests/speech/codec/mimi_lifecycle_tests.cpp
     tests/speech/generator/lifecycle_tests.cpp
+    tests/speech/generator/frame_lifecycle_tests.cpp
+    tests/speech/generator/wavefront_lifecycle_tests.cpp
     tests/speech/predictor/moshi_lifecycle_tests.cpp
     tests/speech/predictor/moshi_executor_detail_tests.cpp
     tests/speech/predictor/moshi_executor_streaming_tests.cpp
@@ -218,6 +219,9 @@ if(EMEL_ENABLE_TESTS)
     tests/graph/processor/processor_action_branch_tests.cpp
     tests/kernel/aarch64_tests.cpp
     tests/kernel/lifecycle_tests.cpp
+    tests/kernel/attention_tests.cpp
+    tests/kernel/f32_matvec_tests.cpp
+    tests/kernel/matmul_tests.cpp
     tests/kernel/x86_64_tests.cpp
     # Legacy processor tests target pre-cutover API shape and are disabled until migrated.
     # Keep them out of gate builds during the hard cutover.

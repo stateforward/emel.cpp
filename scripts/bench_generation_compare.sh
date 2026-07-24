@@ -2,6 +2,8 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=scripts/zig_toolchain.sh
+source "$ROOT_DIR/scripts/zig_toolchain.sh"
 TOOLS_DIR="$ROOT_DIR/tools/bench"
 BUILD_DIR="${EMEL_BENCH_BUILD_DIR:-$ROOT_DIR/build/bench_tools_ninja}"
 OUTPUT_DIR="${EMEL_GENERATION_COMPARE_OUTPUT_DIR:-$ROOT_DIR/build/generation_compare}"
@@ -184,6 +186,9 @@ if ! $SKIP_EMEL_BUILD; then
   fi
   if [[ -n "$bench_cxx_flags" ]]; then
     cmake_args+=("-DCMAKE_CXX_FLAGS=$bench_cxx_flags")
+  fi
+  if $USE_ZIG; then
+    cmake_args+=("${EMEL_ZIG_CMAKE_PLATFORM_ARGS[@]}")
   fi
 
   cmake "${cmake_args[@]}"

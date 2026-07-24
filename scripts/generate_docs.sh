@@ -2,6 +2,10 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=scripts/build_jobs.sh
+source "$ROOT_DIR/scripts/build_jobs.sh"
+# shellcheck source=scripts/zig_toolchain.sh
+source "$ROOT_DIR/scripts/zig_toolchain.sh"
 
 mode="${1:-}"
 if [[ -n "$mode" && "$mode" != "--check" ]]; then
@@ -47,9 +51,10 @@ run_docsgen() {
     -DCMAKE_C_COMPILER_ARG1="$bench_cc_arg" \
     -DCMAKE_CXX_COMPILER_ARG1="$bench_cxx_arg" \
     -DCMAKE_ASM_COMPILER_ARG1="$bench_cc_arg" \
+    "${EMEL_ZIG_CMAKE_PLATFORM_ARGS[@]}" \
     -DDOCSGEN_PART_SIZE="${DOCSGEN_PART_SIZE:-1}"
 
-  cmake --build "$build_dir" --parallel --target docsgen
+  cmake --build "$build_dir" --parallel "$EMEL_BUILD_JOBS" --target docsgen
 
   if $CHECK_MODE; then
     "$docsgen_bin" --root "$ROOT_DIR" --check

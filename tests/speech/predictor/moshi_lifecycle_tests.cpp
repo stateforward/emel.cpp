@@ -1,15 +1,18 @@
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cstdint>
 #include <limits>
 #include <memory>
 #include <span>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <vector>
 
 #include <doctest/doctest.h>
 
+#include "../../allocation_tracker.hpp"
 #include "../../memory/recording_kv_actor.hpp"
 #include "emel/logits/sampler/sm.hpp"
 #include "emel/memory/streaming/sm.hpp"
@@ -31,12 +34,39 @@ using emel::speech::predictor::moshi::test::repo_root;
 inline constexpr emel::error::type k_no_error =
     emel::error::cast(moshi::error::none);
 
+struct serial_matmul_fixture {
+  emel::kernel::matmul::execution_policy policy{
+      .parallel_matmul_lanes = nullptr,
+      .kernel_kind = emel::kernel::detect_host_kind(),
+      .active_lanes = 1u,
+      .mode = emel::kernel::matmul::lane_mode::serial,
+  };
+  emel::kernel::matmul::sm actor{policy};
+};
+
+struct parallel_matmul_fixture {
+  emel::kernel::matmul::lane_pool pool = {};
+  emel::kernel::matmul::execution_policy policy =
+      emel::kernel::matmul::make_execution_policy(
+          pool, emel::kernel::detect_host_kind(), 2u);
+  emel::kernel::matmul::sm actor{policy};
+};
+
 moshi_executor::dependencies make_executor_dependencies(
-    emel::kernel::sm &kernel, const moshi_executor::kv_views &kv = {},
-    emel::logits::sampler::sm *sampler = nullptr) noexcept {
+    emel::kernel::sm &kernel, emel::kernel::matmul::sm &matmul,
+    const moshi_executor::kv_views &kv = {},
+    emel::logits::sampler::sm *sampler = nullptr,
+    const emel::kernel::matmul::lane_mode matmul_lane_mode =
+        emel::kernel::matmul::lane_mode::serial,
+    emel::kernel::matmul::lane_pool *attention_lanes = nullptr,
+    const std::size_t active_attention_lanes = 1u) noexcept {
   return moshi_executor::dependencies{
       .kv = kv,
       .kernel = kernel,
+      .matmul = matmul,
+      .matmul_lane_mode = matmul_lane_mode,
+      .attention_lanes = attention_lanes,
+      .active_attention_lanes = active_attention_lanes,
       .sampler = sampler,
       .policy =
           moshi_executor::action::policies{
@@ -88,6 +118,23 @@ void configure_predictor_initialize(moshi::event::initialize &request) {
   request.sequence_id = 0;
   request.codebook_capacity = request.model.moshi_lm.n_q + 1;
   request.delay_cache_row_capacity = maximum_delay + 3;
+}
+
+TEST_CASE("speech Moshi matmul route guards are mutually exclusive") {
+  emel::kernel::sm serial_kernel{};
+  emel::kernel::sm parallel_kernel{};
+  serial_matmul_fixture serial_matmul{};
+  parallel_matmul_fixture parallel_matmul{};
+  moshi_executor::action::context serial_ctx{
+      make_executor_dependencies(serial_kernel, serial_matmul.actor)};
+  moshi_executor::action::context parallel_ctx{make_executor_dependencies(
+      parallel_kernel, parallel_matmul.actor, {}, nullptr,
+      emel::kernel::matmul::lane_mode::parallel)};
+
+  CHECK(moshi_executor::guard::guard_serial_matmul_mode(serial_ctx));
+  CHECK_FALSE(moshi_executor::guard::guard_parallel_matmul_mode(serial_ctx));
+  CHECK_FALSE(moshi_executor::guard::guard_serial_matmul_mode(parallel_ctx));
+  CHECK(moshi_executor::guard::guard_parallel_matmul_mode(parallel_ctx));
 }
 
 struct recording_graph_executor {
@@ -884,7 +931,9 @@ TEST_CASE(
   REQUIRE(lm.dep_q >= 2);
 
   emel::kernel::sm kernel{};
-  moshi_executor::action::context ctx{make_executor_dependencies(kernel)};
+  serial_matmul_fixture matmul{};
+  moshi_executor::action::context ctx{
+      make_executor_dependencies(kernel, matmul.actor)};
   moshi_executor::event::initialize request{*fixture.model};
   moshi_executor::event::initialize_ctx request_ctx{};
   moshi_executor::event::initialize_run runtime_ev{request, request_ctx};
@@ -1152,8 +1201,10 @@ TEST_CASE("speech_moshi_executor_initializes_lm_fixture") {
   }
 
   emel::kernel::sm kernel{};
+  serial_matmul_fixture matmul{};
   emel::logits::sampler::sm sampler{};
-  moshi_executor::sm executor{make_executor_dependencies(kernel, {}, &sampler)};
+  moshi_executor::sm executor{
+      make_executor_dependencies(kernel, matmul.actor, {}, &sampler)};
   emel::error::type err = emel::error::cast(moshi_executor::error::none);
   moshi_executor::event::initialize init{*fixture.model};
   init.error_out = &err;
@@ -1169,7 +1220,9 @@ TEST_CASE("speech_moshi_executor_rejects_missing_numeric_policy") {
   }
 
   emel::kernel::sm kernel{};
-  moshi_executor::sm executor{moshi_executor::dependencies{.kernel = kernel}};
+  serial_matmul_fixture matmul{};
+  moshi_executor::sm executor{
+      moshi_executor::dependencies{.kernel = kernel, .matmul = matmul.actor}};
   emel::error::type err = emel::error::cast(moshi_executor::error::none);
   moshi_executor::event::initialize init{*fixture.model};
   init.error_out = &err;
@@ -1185,7 +1238,8 @@ TEST_CASE("speech_moshi_executor_rejects_missing_capacity") {
   }
 
   emel::kernel::sm kernel{};
-  auto dependencies = make_executor_dependencies(kernel);
+  serial_matmul_fixture matmul{};
+  auto dependencies = make_executor_dependencies(kernel, matmul.actor);
   dependencies.capacity.hidden_dim = 0u;
   moshi_executor::sm executor{dependencies};
   emel::error::type err = emel::error::cast(moshi_executor::error::none);
@@ -1202,7 +1256,8 @@ TEST_CASE("speech_moshi_executor_rejects_undersized_hidden_capacity") {
     return;
   }
   emel::kernel::sm kernel{};
-  auto dependencies = make_executor_dependencies(kernel);
+  serial_matmul_fixture matmul{};
+  auto dependencies = make_executor_dependencies(kernel, matmul.actor);
   dependencies.capacity.hidden_dim =
       static_cast<uint64_t>(fixture.model->moshi_lm.dim - 1);
   moshi_executor::sm executor{dependencies};
@@ -1222,8 +1277,10 @@ TEST_CASE("speech_moshi_executor_rejects_undersized_sampling_capacity") {
   const auto rejected = [&fixture](const uint64_t sampling_card,
                                    const uint64_t sampling_top_k) {
     emel::kernel::sm kernel{};
+    serial_matmul_fixture matmul{};
     emel::logits::sampler::sm sampler{};
-    auto dependencies = make_executor_dependencies(kernel, {}, &sampler);
+    auto dependencies =
+        make_executor_dependencies(kernel, matmul.actor, {}, &sampler);
     dependencies.capacity.sampling_card = sampling_card;
     dependencies.capacity.sampling_top_k = sampling_top_k;
     moshi_executor::sm executor{dependencies};
@@ -1252,8 +1309,10 @@ TEST_CASE("speech_moshi_executor_models_zero_seed_and_top_k_clamp") {
   }
 
   emel::kernel::sm kernel{};
+  serial_matmul_fixture matmul{};
   emel::logits::sampler::sm sampler{};
-  moshi_executor::sm executor{make_executor_dependencies(kernel, {}, &sampler)};
+  moshi_executor::sm executor{
+      make_executor_dependencies(kernel, matmul.actor, {}, &sampler)};
   emel::error::type err = emel::error::cast(moshi_executor::error::none);
   moshi_executor::event::initialize init{*fixture.model};
   init.sampling_enabled = true;
@@ -1275,7 +1334,8 @@ TEST_CASE("speech_moshi_executor_normalizes_nonzero_sampling_seed") {
   }
 
   emel::kernel::sm kernel{};
-  auto dependencies = make_executor_dependencies(kernel);
+  serial_matmul_fixture matmul{};
+  auto dependencies = make_executor_dependencies(kernel, matmul.actor);
   moshi_executor::action::context ctx{dependencies};
   moshi_executor::event::initialize init{*fixture.model};
   init.sampling_seed = 2147483647u;
@@ -1297,9 +1357,10 @@ TEST_CASE("speech_moshi_executor_rejects_invalid_sampling_configuration") {
       [&fixture](const float audio_temperature, const float text_temperature,
                  const int32_t audio_top_k, const int32_t text_top_k) {
         emel::kernel::sm kernel{};
+        serial_matmul_fixture matmul{};
         emel::logits::sampler::sm sampler{};
         moshi_executor::sm executor{
-            make_executor_dependencies(kernel, {}, &sampler)};
+            make_executor_dependencies(kernel, matmul.actor, {}, &sampler)};
         emel::error::type err = emel::error::cast(moshi_executor::error::none);
         moshi_executor::event::initialize init{*fixture.model};
         init.sampling_enabled = true;
@@ -1326,7 +1387,8 @@ TEST_CASE("speech_moshi_machines_report_unexpected_events_after_init") {
   }
 
   emel::kernel::sm kernel{};
-  moshi_executor::sm executor{make_executor_dependencies(kernel)};
+  serial_matmul_fixture matmul{};
+  moshi_executor::sm executor{make_executor_dependencies(kernel, matmul.actor)};
   emel::error::type executor_err = k_no_error;
   moshi_executor::event::initialize executor_init{*fixture.model};
   executor_init.error_out = &executor_err;
@@ -1356,7 +1418,8 @@ TEST_CASE("speech_moshi_executor_requires_sampler_for_sampling") {
   }
 
   emel::kernel::sm kernel{};
-  moshi_executor::sm executor{make_executor_dependencies(kernel)};
+  serial_matmul_fixture matmul{};
+  moshi_executor::sm executor{make_executor_dependencies(kernel, matmul.actor)};
   emel::error::type err = emel::error::cast(moshi_executor::error::none);
   moshi_executor::event::initialize init{*fixture.model};
   init.sampling_enabled = true;
@@ -1415,7 +1478,8 @@ TEST_CASE("speech_moshi_executor_rejects_graph_step_before_initialize") {
   }
 
   emel::kernel::sm kernel{};
-  moshi_executor::sm executor{make_executor_dependencies(kernel)};
+  serial_matmul_fixture matmul{};
+  moshi_executor::sm executor{make_executor_dependencies(kernel, matmul.actor)};
   std::array<int32_t, 4> input = {0, 1, 2, 3};
   std::array<int32_t, 4> output = {};
   int32_t text_token = -1;
@@ -1618,7 +1682,9 @@ TEST_CASE("speech_moshi_executor_runtime_choice_uses_explicit_transitions") {
   CHECK(source.find("guard_embedding_view_bound") != std::string::npos);
   CHECK(source.find("guard_embedding_row_succeeded") != std::string::npos);
   CHECK(source.find("guard_projection_view_bound") != std::string::npos);
-  CHECK(source.find("guard_depformer_input_projection_bound") !=
+  CHECK(source.find("guard_depformer_input_projection_serial") !=
+        std::string::npos);
+  CHECK(source.find("guard_depformer_input_projection_parallel") !=
         std::string::npos);
   CHECK(source.find("guard_depformer_text_input_projection_succeeded") !=
         std::string::npos);
@@ -1636,6 +1702,20 @@ TEST_CASE("speech_moshi_executor_runtime_choice_uses_explicit_transitions") {
         std::string::npos);
   CHECK(source.find("guard_depformer_layer_norm2_rms_succeeded") !=
         std::string::npos);
+}
+
+TEST_CASE("speech Moshi attention benchmark binds temporal and depformer KV") {
+  const auto bytes = read_binary_file(repo_root() / "tools" / "bench" /
+                                      "speech" / "lm_moshi_bench.cpp");
+  const std::string source{bytes.begin(), bytes.end()};
+
+  CHECK(source.find("depformer_layer_offsets") != std::string::npos);
+  CHECK(source.find("depformer_key_cache") != std::string::npos);
+  CHECK(source.find("depformer_value_cache") != std::string::npos);
+  CHECK(source.find(".depformer =") != std::string::npos);
+  CHECK(source.find("attention_lanes.emplace(lane_count - 1u)") !=
+        std::string::npos);
+  CHECK(source.find("attention_lanes.emplace()") == std::string::npos);
 }
 
 TEST_CASE("speech_moshi_generator_graph_outputs_use_explicit_transitions") {
@@ -1908,8 +1988,9 @@ TEST_CASE("speech_moshi_generator_and_executor_cover_explicit_error_guards") {
   snapshot.sequence_kv_blocks[0][0] = 0;
 
   emel::kernel::sm guard_kernel{};
+  serial_matmul_fixture guard_matmul{};
   moshi_executor::action::context executor_ctx{
-      make_executor_dependencies(guard_kernel)};
+      make_executor_dependencies(guard_kernel, guard_matmul.actor)};
   std::array<int32_t, moshi::event::k_max_codebooks> input = {};
   std::array<int32_t, moshi::event::k_max_codebooks> output = {};
   std::array<float, moshi::event::k_max_voice_embedding_dim> embedding = {};
@@ -1926,6 +2007,14 @@ TEST_CASE("speech_moshi_generator_and_executor_cover_explicit_error_guards") {
       std::span<const float>{embedding.data(), static_cast<size_t>(lm.dim)};
   moshi_executor::event::step_ctx step_ctx{};
   moshi_executor::event::step_run step_run{step, step_ctx};
+  emel::kernel::sm parallel_guard_kernel{};
+  parallel_matmul_fixture parallel_guard_matmul{};
+  moshi_executor::action::context parallel_executor_ctx{
+      make_executor_dependencies(parallel_guard_kernel,
+                                 parallel_guard_matmul.actor, {}, nullptr,
+                                 emel::kernel::matmul::lane_mode::parallel)};
+  CHECK(moshi_executor::guard::guard_parallel_matmul_route{}(
+      step_run, parallel_executor_ctx));
   executor_ctx.session.model = fixture.model.get();
   executor_ctx.session.codebook_count = lm.n_q + 1;
   executor_ctx.session.dep_q = lm.dep_q;
@@ -2229,7 +2318,8 @@ TEST_CASE("speech_moshi_executor_embeds_input_before_unsupported_transformer") {
   }
 
   emel::kernel::sm kernel{};
-  moshi_executor::sm executor{make_executor_dependencies(kernel)};
+  serial_matmul_fixture matmul{};
+  moshi_executor::sm executor{make_executor_dependencies(kernel, matmul.actor)};
   emel::error::type err = emel::error::cast(moshi_executor::error::none);
   moshi_executor::event::initialize init{*fixture.model};
   init.error_out = &err;
@@ -2272,7 +2362,9 @@ TEST_CASE(
   const auto views =
       prepare_kv_views(*fixture.model, &probe, nullptr, &temporal_positions);
   emel::kernel::sm kernel{};
-  moshi_executor::sm executor{make_executor_dependencies(kernel, views)};
+  serial_matmul_fixture matmul{};
+  moshi_executor::sm executor{
+      make_executor_dependencies(kernel, matmul.actor, views)};
   emel::error::type err = emel::error::cast(moshi_executor::error::none);
   moshi_executor::event::initialize init{*fixture.model};
   init.error_out = &err;
@@ -2354,10 +2446,12 @@ TEST_CASE("speech_moshi_executor_accepts_personaplex_voice_embedding_step") {
   initialize_streaming_position(temporal_positions);
   initialize_streaming_position(depformer_positions);
   emel::kernel::sm kernel{};
+  serial_matmul_fixture matmul{};
   const auto views =
       prepare_kv_views(*fixture.model, &temporal_probe, &depformer_probe,
                        &temporal_positions, &depformer_positions);
-  moshi_executor::sm executor{make_executor_dependencies(kernel, views)};
+  moshi_executor::sm executor{
+      make_executor_dependencies(kernel, matmul.actor, views)};
   emel::error::type err = emel::error::cast(moshi_executor::error::none);
   moshi_executor::event::initialize init{*fixture.model};
   init.error_out = &err;
@@ -2419,10 +2513,12 @@ TEST_CASE("speech_moshi_executor_generates_audio_tokens_with_injected_kv") {
   initialize_streaming_position(temporal_positions);
   initialize_streaming_position(depformer_positions);
   emel::kernel::sm kernel{};
+  serial_matmul_fixture matmul{};
   const auto views =
       prepare_kv_views(*fixture.model, &temporal_probe, &depformer_probe,
                        &temporal_positions, &depformer_positions);
-  moshi_executor::sm executor{make_executor_dependencies(kernel, views)};
+  moshi_executor::sm executor{
+      make_executor_dependencies(kernel, matmul.actor, views)};
   emel::error::type err = emel::error::cast(moshi_executor::error::none);
   moshi_executor::event::initialize init{*fixture.model};
   init.error_out = &err;
@@ -2498,8 +2594,9 @@ TEST_CASE(
   const auto &lm = fixture.model->moshi_lm;
 
   emel::kernel::sm kernel{};
+  serial_matmul_fixture matmul{};
   moshi_executor::action::context executor_ctx{
-      make_executor_dependencies(kernel)};
+      make_executor_dependencies(kernel, matmul.actor)};
   executor_ctx.session.hidden_dim = lm.dim;
   executor_ctx.session.text_card = lm.text_card;
 
@@ -2514,6 +2611,14 @@ TEST_CASE(
       text_token};
   auto step_ctx = std::make_unique<moshi_executor::event::step_ctx>();
   moshi_executor::event::step_run step_run{step, *step_ctx};
+
+  CHECK(moshi_executor::guard::guard_unexpected_error_out_absent{}(
+      step_run, executor_ctx));
+  emel::error::type unexpected_err = k_no_error;
+  step.error_out = &unexpected_err;
+  CHECK(moshi_executor::guard::guard_unexpected_error_out_present{}(
+      step_run, executor_ctx));
+  step.error_out = nullptr;
 
   step.forced_text_token = lm.text_card;
   CHECK_FALSE(moshi_executor::guard::guard_forced_text_token_valid{}(
@@ -2655,97 +2760,253 @@ TEST_CASE(
                                                                executor_ctx));
 }
 
-TEST_CASE("speech_moshi_executor_sampling_rng_is_actor_owned") {
-  auto first_fixture = load_fixture_or_skip("moshi-tiny-lm.gguf");
-  auto second_fixture = load_fixture_or_skip("moshi-tiny-lm.gguf");
-  if (first_fixture.model == nullptr || second_fixture.model == nullptr) {
-    return;
-  }
+struct attention_parent_fixture {
+  emel::speech::predictor::moshi::test::loaded_fixture loaded = {};
+  std::unique_ptr<temporal_kv_probe> temporal = {};
+  std::unique_ptr<memory_streaming::sm> temporal_positions = {};
+  std::unique_ptr<memory_streaming::sm> depformer_positions = {};
+  std::unique_ptr<emel::kernel::sm> kernel = {};
+  std::unique_ptr<serial_matmul_fixture> matmul = {};
+  std::unique_ptr<emel::kernel::matmul::lane_pool> pool = {};
+  std::unique_ptr<moshi_executor::sm> executor = {};
+  std::vector<int32_t> input = {};
+  std::vector<float> input_embedding = {};
+  std::vector<float> temporal_state_with_canaries = {};
+  std::vector<int32_t> audio_output_with_canaries = {};
+  int32_t text_token = -1;
+  emel::error::type err = emel::error::cast(moshi_executor::error::none);
+};
 
-  temporal_kv_probe first_temporal{};
-  temporal_kv_probe second_temporal{};
-  depformer_kv_probe first_depformer{};
-  depformer_kv_probe second_depformer{};
-  memory_streaming::sm first_temporal_positions{memory_streaming::dependencies{
-      .capacity = first_fixture.model->moshi_lm.context}};
-  memory_streaming::sm first_depformer_positions{memory_streaming::dependencies{
-      .capacity = first_fixture.model->moshi_lm.depformer_context}};
-  memory_streaming::sm second_temporal_positions{memory_streaming::dependencies{
-      .capacity = second_fixture.model->moshi_lm.context}};
-  memory_streaming::sm second_depformer_positions{
-      memory_streaming::dependencies{
-          .capacity = second_fixture.model->moshi_lm.depformer_context}};
-  initialize_streaming_position(first_temporal_positions);
-  initialize_streaming_position(first_depformer_positions);
-  initialize_streaming_position(second_temporal_positions);
-  initialize_streaming_position(second_depformer_positions);
-  emel::kernel::sm first_kernel{};
-  emel::kernel::sm second_kernel{};
-  emel::logits::sampler::sm first_sampler{};
-  emel::logits::sampler::sm second_sampler{};
-  const auto first_views =
-      prepare_kv_views(*first_fixture.model, &first_temporal, &first_depformer,
-                       &first_temporal_positions, &first_depformer_positions);
-  const auto second_views = prepare_kv_views(
-      *second_fixture.model, &second_temporal, &second_depformer,
-      &second_temporal_positions, &second_depformer_positions);
-  moshi_executor::sm first{
-      make_executor_dependencies(first_kernel, first_views, &first_sampler)};
-  moshi_executor::sm second{
-      make_executor_dependencies(second_kernel, second_views, &second_sampler)};
-  emel::error::type first_err = emel::error::cast(moshi_executor::error::none);
-  emel::error::type second_err = emel::error::cast(moshi_executor::error::none);
-  moshi_executor::event::initialize first_init{*first_fixture.model};
-  moshi_executor::event::initialize second_init{*second_fixture.model};
-  for (auto *init : {&first_init, &second_init}) {
-    init->sampling_enabled = true;
-    init->sampling_audio_temperature = 0.8f;
-    init->sampling_text_temperature = 0.7f;
-    init->sampling_audio_top_k = 250;
-    init->sampling_text_top_k = 25;
-    init->sampling_seed = 1234u;
+std::unique_ptr<attention_parent_fixture>
+make_attention_parent_fixture(const std::size_t lanes,
+                              const int32_t num_heads = 8) {
+  auto fixture = std::make_unique<attention_parent_fixture>();
+  fixture->loaded = load_fixture_or_skip("moshi-tiny-lm.gguf");
+  if (fixture->loaded.model == nullptr) {
+    return fixture;
   }
-  first_init.error_out = &first_err;
-  second_init.error_out = &second_err;
-  REQUIRE(first.process_event(first_init));
-  REQUIRE(second.process_event(second_init));
+  auto &model = *fixture->loaded.model;
+  model.moshi_lm.num_heads = num_heads;
+  fixture->temporal = std::make_unique<temporal_kv_probe>();
+  fixture->temporal_positions = std::make_unique<memory_streaming::sm>(
+      memory_streaming::dependencies{.capacity = model.moshi_lm.context});
+  fixture->depformer_positions =
+      std::make_unique<memory_streaming::sm>(memory_streaming::dependencies{
+          .capacity = model.moshi_lm.depformer_context});
+  initialize_streaming_position(*fixture->temporal_positions);
+  initialize_streaming_position(*fixture->depformer_positions);
+  fixture->kernel = std::make_unique<emel::kernel::sm>();
+  fixture->matmul = std::make_unique<serial_matmul_fixture>();
+  if (lanes > 1u) {
+    fixture->pool = std::make_unique<emel::kernel::matmul::lane_pool>();
+  }
+  const auto views = prepare_kv_views(model, fixture->temporal.get(), nullptr,
+                                      fixture->temporal_positions.get(),
+                                      fixture->depformer_positions.get());
+  fixture->executor =
+      std::make_unique<moshi_executor::sm>(make_executor_dependencies(
+          *fixture->kernel, fixture->matmul->actor, views, nullptr,
+          emel::kernel::matmul::lane_mode::serial, fixture->pool.get(), lanes));
+  moshi_executor::event::initialize initialize{model};
+  initialize.error_out = &fixture->err;
+  REQUIRE(fixture->executor->process_event(initialize));
+  fixture->input.assign(static_cast<std::size_t>(model.moshi_lm.n_q + 1), -1);
+  fixture->input[0] = model.moshi_lm.text_padding_id;
+  fixture->input_embedding.resize(static_cast<std::size_t>(model.moshi_lm.dim));
+  for (std::size_t index = 0u; index < fixture->input_embedding.size();
+       ++index) {
+    fixture->input_embedding[index] =
+        static_cast<float>(static_cast<int32_t>(index) - 16) / 32.0f;
+  }
+  fixture->temporal_state_with_canaries.assign(
+      static_cast<std::size_t>(model.moshi_lm.dim) + 2u, -12345.0f);
+  fixture->audio_output_with_canaries.assign(
+      static_cast<std::size_t>(model.moshi_lm.dep_q) + 2u, -12345);
+  return fixture;
+}
 
-  std::array<int32_t, moshi::event::k_max_codebooks> input = {};
-  std::array<int32_t, moshi::event::k_max_codebooks> first_output = {};
-  std::array<int32_t, moshi::event::k_max_codebooks> second_output = {};
-  input.fill(-1);
-  input[0] = first_fixture.model->moshi_lm.text_padding_id;
-  int32_t first_text_token = -1;
-  int32_t second_text_token = -1;
+bool run_attention_parent_prediction(attention_parent_fixture &fixture,
+                                     std::size_t &allocations) {
+  auto &model = *fixture.loaded.model;
+  std::fill(fixture.temporal_state_with_canaries.begin() + 1,
+            fixture.temporal_state_with_canaries.end() - 1, 0.0f);
+  std::fill(fixture.audio_output_with_canaries.begin() + 1,
+            fixture.audio_output_with_canaries.end() - 1, -1);
+  fixture.text_token = -1;
+  fixture.err = emel::error::cast(moshi_executor::error::none);
   emel::memory::view::snapshot snapshot{};
   snapshot.max_sequences = 1;
   snapshot.sequence_active[0] = 1;
   snapshot.sequence_length_values[0] = 1;
   snapshot.sequence_kv_block_count[0] = 1;
   snapshot.sequence_kv_blocks[0][0] = 0;
-  const auto input_span = std::span<const int32_t>{
-      input.data(), static_cast<size_t>(first_fixture.model->moshi_lm.n_q + 1)};
-  moshi::event::graph_step first_step{
-      *first_fixture.model, snapshot, input_span,
-      std::span<int32_t>{
-          first_output.data(),
-          static_cast<size_t>(first_fixture.model->moshi_lm.dep_q)},
-      first_text_token};
-  moshi::event::graph_step second_step{
-      *second_fixture.model, snapshot, input_span,
-      std::span<int32_t>{
-          second_output.data(),
-          static_cast<size_t>(second_fixture.model->moshi_lm.dep_q)},
-      second_text_token};
-  first_step.error_out = &first_err;
-  second_step.error_out = &second_err;
+  moshi::event::graph_step step{
+      model, snapshot, std::span<const int32_t>{fixture.input},
+      std::span<int32_t>{fixture.audio_output_with_canaries.data() + 1,
+                         static_cast<std::size_t>(model.moshi_lm.dep_q)},
+      fixture.text_token};
+  step.phase = moshi::event::graph_phase::prediction;
+  step.input_embedding = std::span<const float>{fixture.input_embedding};
+  step.temporal_state =
+      std::span<float>{fixture.temporal_state_with_canaries.data() + 1,
+                       static_cast<std::size_t>(model.moshi_lm.dim)};
+  step.error_out = &fixture.err;
+  bool accepted = false;
+  {
+    emel::test::allocation::allocation_scope allocation_scope{};
+    accepted = fixture.executor->process_event(step);
+    allocations = allocation_scope.allocations();
+  }
+  return accepted;
+}
 
-  REQUIRE(first.process_event(first_step));
-  REQUIRE(second.process_event(second_step));
-  CHECK(first_text_token == second_text_token);
-  CHECK(std::equal(first_output.begin(),
-                   first_output.begin() + first_fixture.model->moshi_lm.dep_q,
-                   second_output.begin()));
+TEST_CASE("speech Moshi attention parent routes are exact disjoint and "
+          "allocation free") {
+  auto serial = make_attention_parent_fixture(1u);
+  auto two = make_attention_parent_fixture(2u);
+  auto four = make_attention_parent_fixture(4u);
+  auto eight = make_attention_parent_fixture(8u);
+  if (serial->loaded.model == nullptr || two->loaded.model == nullptr ||
+      four->loaded.model == nullptr || eight->loaded.model == nullptr) {
+    return;
+  }
+
+  std::size_t serial_allocations = 0u;
+  std::size_t two_allocations = 0u;
+  std::size_t four_allocations = 0u;
+  std::size_t eight_allocations = 0u;
+  REQUIRE(run_attention_parent_prediction(*serial, serial_allocations));
+  REQUIRE(run_attention_parent_prediction(*two, two_allocations));
+  REQUIRE(run_attention_parent_prediction(*four, four_allocations));
+  REQUIRE(run_attention_parent_prediction(*eight, eight_allocations));
+  CHECK(serial_allocations == 0u);
+  CHECK(two_allocations == 0u);
+  CHECK(four_allocations == 0u);
+  CHECK(eight_allocations == 0u);
+  CHECK(two->temporal_state_with_canaries ==
+        serial->temporal_state_with_canaries);
+  CHECK(four->temporal_state_with_canaries ==
+        serial->temporal_state_with_canaries);
+  CHECK(eight->temporal_state_with_canaries ==
+        serial->temporal_state_with_canaries);
+  CHECK(two->temporal->key_cache == serial->temporal->key_cache);
+  CHECK(two->temporal->value_cache == serial->temporal->value_cache);
+  CHECK(four->temporal->key_cache == serial->temporal->key_cache);
+  CHECK(four->temporal->value_cache == serial->temporal->value_cache);
+  CHECK(eight->temporal->key_cache == serial->temporal->key_cache);
+  CHECK(eight->temporal->value_cache == serial->temporal->value_cache);
+  for (const auto *fixture : {two.get(), four.get(), eight.get()}) {
+    CHECK(fixture->temporal_state_with_canaries.front() == -12345.0f);
+    CHECK(fixture->temporal_state_with_canaries.back() == -12345.0f);
+    CHECK(fixture->audio_output_with_canaries.front() == -12345);
+    CHECK(fixture->audio_output_with_canaries.back() == -12345);
+  }
+}
+
+TEST_CASE("speech Moshi unsupported attention lane count fails explicitly") {
+  auto fixture = make_attention_parent_fixture(3u);
+  if (fixture->loaded.model == nullptr) {
+    return;
+  }
+
+  std::size_t allocations = 0u;
+  CHECK_FALSE(run_attention_parent_prediction(*fixture, allocations));
+  CHECK(allocations == 0u);
+  CHECK(fixture->err ==
+        emel::error::cast(moshi_executor::error::graph_execution_unsupported));
+}
+
+TEST_CASE("speech Moshi attention falls back to the largest lane count bounded "
+          "by model heads") {
+  for (const int32_t num_heads : {1, 2, 4}) {
+    auto bounded = make_attention_parent_fixture(
+        static_cast<std::size_t>(num_heads), num_heads);
+    auto eight_requested = make_attention_parent_fixture(8u, num_heads);
+    if (bounded->loaded.model == nullptr ||
+        eight_requested->loaded.model == nullptr) {
+      return;
+    }
+
+    std::size_t bounded_allocations = 0u;
+    std::size_t eight_allocations = 0u;
+    REQUIRE(run_attention_parent_prediction(*bounded, bounded_allocations));
+    REQUIRE(
+        run_attention_parent_prediction(*eight_requested, eight_allocations));
+    CHECK(bounded_allocations == 0u);
+    CHECK(eight_allocations == 0u);
+    CHECK(eight_requested->temporal_state_with_canaries ==
+          bounded->temporal_state_with_canaries);
+    CHECK(eight_requested->temporal->key_cache == bounded->temporal->key_cache);
+    CHECK(eight_requested->temporal->value_cache ==
+          bounded->temporal->value_cache);
+  }
+}
+
+TEST_CASE(
+    "speech Moshi attention partial submission drains accepted children") {
+  auto fixture = make_attention_parent_fixture(8u);
+  if (fixture->loaded.model == nullptr) {
+    return;
+  }
+
+  std::atomic<bool> blocker_entered = false;
+  std::atomic<bool> release_blocker = false;
+  std::atomic<std::size_t> drain_probe_entered = 0u;
+  std::atomic<bool> release_drain_probes = false;
+  emel::kernel::matmul::lane_pool::join_group blocker_group{};
+  emel::kernel::matmul::lane_pool::join_group drain_probe_group{};
+  struct release_tasks {
+    std::atomic<bool> &release_blocker;
+    std::atomic<bool> &release_drain_probes;
+    emel::kernel::matmul::lane_pool::join_group &blocker_group;
+    emel::kernel::matmul::lane_pool::join_group &drain_probe_group;
+    ~release_tasks() {
+      release_drain_probes.store(true, std::memory_order_release);
+      (void)drain_probe_group.wait();
+      release_blocker.store(true, std::memory_order_release);
+      (void)blocker_group.wait();
+    }
+  } cleanup{release_blocker, release_drain_probes, blocker_group,
+            drain_probe_group};
+
+  REQUIRE(fixture->pool->try_submit(blocker_group, [&]() noexcept {
+    blocker_entered.store(true, std::memory_order_release);
+    while (!release_blocker.load(std::memory_order_acquire)) {
+      std::this_thread::yield();
+    }
+  }));
+  for (std::size_t attempt = 0u; attempt < 100000u; ++attempt) {
+    if (blocker_entered.load(std::memory_order_acquire)) {
+      break;
+    }
+    std::this_thread::yield();
+  }
+  REQUIRE(blocker_entered.load(std::memory_order_acquire));
+
+  std::size_t allocations = 0u;
+  CHECK_FALSE(run_attention_parent_prediction(*fixture, allocations));
+  CHECK(allocations == 0u);
+  CHECK(fixture->err ==
+        emel::error::cast(moshi_executor::error::graph_execution_unsupported));
+
+  std::size_t drain_probe_submitted = 0u;
+  for (std::size_t index = 0u; index < 6u; ++index) {
+    drain_probe_submitted += static_cast<std::size_t>(
+        fixture->pool->try_submit(drain_probe_group, [&]() noexcept {
+          drain_probe_entered.fetch_add(1u, std::memory_order_acq_rel);
+          while (!release_drain_probes.load(std::memory_order_acquire)) {
+            std::this_thread::yield();
+          }
+        }));
+  }
+  CHECK(drain_probe_submitted == 6u);
+  for (std::size_t attempt = 0u; attempt < 100000u; ++attempt) {
+    if (drain_probe_entered.load(std::memory_order_acquire) == 6u) {
+      break;
+    }
+    std::this_thread::yield();
+  }
+  CHECK(drain_probe_entered.load(std::memory_order_acquire) == 6u);
 }
 
 TEST_CASE(
@@ -2758,7 +3019,8 @@ TEST_CASE(
   emel::memory::test::recording_kv_actor kv{};
   emel::memory::hybrid::sm memory{emel::memory::hybrid::bind_kv_actor(kv)};
   emel::kernel::sm kernel{};
-  moshi_executor::sm executor{make_executor_dependencies(kernel)};
+  serial_matmul_fixture matmul{};
+  moshi_executor::sm executor{make_executor_dependencies(kernel, matmul.actor)};
 
   moshi::sm generator{make_predictor_dependencies(executor, memory)};
   emel::error::type err = k_no_error;

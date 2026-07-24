@@ -26,6 +26,52 @@ namespace {
 
 namespace mimi = emel::speech::codec::mimi;
 
+template <class contract_type>
+concept mutable_bind_model_field =
+    requires(contract_type &contract, const emel::model::data *model) {
+      contract.model = model;
+    };
+
+template <class contract_type>
+concept mutable_bind_prepared_field =
+    requires(contract_type &contract) { contract.prepared_floats = 1u; };
+
+template <class contract_type>
+concept mutable_bind_state_field =
+    requires(contract_type &contract) { contract.state_floats = 1u; };
+
+template <class contract_type>
+concept mutable_bind_workspace_field =
+    requires(contract_type &contract) { contract.workspace_floats = 1u; };
+
+template <class contract_type>
+concept mutable_bind_frame_field =
+    requires(contract_type &contract) { contract.frame_floats = 1u; };
+
+template <class contract_type>
+concept mutable_bind_f32_field =
+    requires(contract_type &contract) { contract.f32_valid = true; };
+
+template <class contract_type>
+concept mutable_bind_native_field =
+    requires(contract_type &contract) { contract.native_valid = true; };
+
+template <class contract_type>
+concept mutable_bind_q8_field =
+    requires(contract_type &contract) { contract.q8_valid = true; };
+
+static_assert(!std::is_aggregate_v<mimi::event::bind_contract>);
+static_assert(!std::is_default_constructible_v<mimi::event::bind_contract>);
+static_assert(!std::is_trivially_copyable_v<mimi::event::bind_contract>);
+static_assert(!mutable_bind_model_field<mimi::event::bind_contract>);
+static_assert(!mutable_bind_prepared_field<mimi::event::bind_contract>);
+static_assert(!mutable_bind_state_field<mimi::event::bind_contract>);
+static_assert(!mutable_bind_workspace_field<mimi::event::bind_contract>);
+static_assert(!mutable_bind_frame_field<mimi::event::bind_contract>);
+static_assert(!mutable_bind_f32_field<mimi::event::bind_contract>);
+static_assert(!mutable_bind_native_field<mimi::event::bind_contract>);
+static_assert(!mutable_bind_q8_field<mimi::event::bind_contract>);
+
 // modeled-event observation: initialize_done carries the codec dims, and
 // the done callbacks count completed frames (no context peeking)
 int32_t g_frame_samples = 0;
@@ -211,13 +257,19 @@ TEST_CASE("mimi codec facade initializes, encodes, and decodes frames") {
   mimi::sm machine{};
   namespace sml = stateforward::sml;
   CHECK(machine.is(sml::state<mimi::state_uninitialized>));
+  mimi::event::diagnostics diagnostics_before{};
+  REQUIRE(machine.process_event(
+      mimi::event::capture_diagnostics{diagnostics_before}));
+  CHECK(diagnostics_before.projection_prepare_calls == 0u);
 
   emel::error::type err = emel::error::cast(mimi::error::none);
   g_frame_samples = 0;
   g_n_q = 0;
   g_encode_done_count = 0;
   g_decode_done_count = 0;
-  mimi::event::initialize init{*loaded.model, std::span<float>{arenas.prepared},
+  mimi::event::initialize init{*loaded.model,
+                               mimi::make_bind_contract(*loaded.model),
+                               std::span<float>{arenas.prepared},
                                std::span<float>{arenas.state},
                                std::span<float>{arenas.workspace},
                                std::span<float>{arenas.frame}};
@@ -229,6 +281,11 @@ TEST_CASE("mimi codec facade initializes, encodes, and decodes frames") {
   check_session_ready(machine);
   CHECK(g_frame_samples == 1920);
   CHECK(g_n_q == 2);
+  mimi::event::diagnostics diagnostics_initialized{};
+  REQUIRE(machine.process_event(
+      mimi::event::capture_diagnostics{diagnostics_initialized}));
+  CHECK(diagnostics_initialized.projection_prepare_calls > 0u);
+  CHECK(diagnostics_initialized.projection_prepared_floats > 0u);
 
   const auto pcm = deterministic_pcm(g_frame_samples);
   std::vector<int32_t> codes(static_cast<size_t>(g_n_q), -1);
@@ -255,6 +312,17 @@ TEST_CASE("mimi codec facade initializes, encodes, and decodes frames") {
   CHECK(err == emel::error::cast(mimi::error::none));
   check_session_ready(machine);
   CHECK(g_decode_done_count == 1u);
+  mimi::event::diagnostics diagnostics_after_frames{};
+  REQUIRE(machine.process_event(
+      mimi::event::capture_diagnostics{diagnostics_after_frames}));
+#if defined(__aarch64__) || defined(_M_ARM64)
+  CHECK(diagnostics_after_frames.projection_exact_x4_calls >
+        diagnostics_initialized.projection_exact_x4_calls);
+  CHECK(diagnostics_after_frames.legacy_f32_projection_calls == 0u);
+#else
+  CHECK(diagnostics_after_frames.projection_exact_x4_calls == 0u);
+  CHECK(diagnostics_after_frames.legacy_f32_projection_calls > 0u);
+#endif
 
   REQUIRE(machine.process_event(mimi::event::reset_stream{}));
   const size_t partial_count =
@@ -331,7 +399,9 @@ TEST_CASE("mimi codec facade reports bind failures explicitly") {
   mimi::sm machine{};
   namespace sml = stateforward::sml;
   emel::error::type err = emel::error::cast(mimi::error::none);
-  mimi::event::initialize init{*loaded.model, std::span<float>{arenas.prepared},
+  mimi::event::initialize init{*loaded.model,
+                               mimi::make_bind_contract(*loaded.model),
+                               std::span<float>{arenas.prepared},
                                std::span<float>{arenas.state},
                                std::span<float>{arenas.workspace},
                                std::span<float>{arenas.frame}};
@@ -357,6 +427,7 @@ TEST_CASE("mimi codec facade reports bind failures explicitly") {
     err = emel::error::cast(mimi::error::none);
     g_init_error = emel::error::cast(mimi::error::none);
     mimi::event::initialize lm_init{*lm_loaded.model,
+                                    mimi::make_bind_contract(*lm_loaded.model),
                                     std::span<float>{lm_arenas.prepared},
                                     std::span<float>{lm_arenas.state},
                                     std::span<float>{lm_arenas.workspace},
@@ -385,7 +456,9 @@ TEST_CASE("mimi codec initialize rejects out-of-contract model metadata") {
     mimi::sm machine{};
     emel::error::type err = emel::error::cast(mimi::error::none);
     g_init_error = emel::error::cast(mimi::error::none);
-    mimi::event::initialize init{model, std::span<float>{arenas.prepared},
+    mimi::event::initialize init{model,
+                                 mimi::make_bind_contract(model),
+                                 std::span<float>{arenas.prepared},
                                  std::span<float>{arenas.state},
                                  std::span<float>{arenas.workspace},
                                  std::span<float>{arenas.frame}};
@@ -605,13 +678,122 @@ TEST_CASE("mimi codec initialize rejects null arena storage") {
   // walk and reset_streaming_state write through every arena.
   mimi::event::initialize init{
       *loaded.model,
+      mimi::make_bind_contract(*loaded.model),
       std::span<float>{static_cast<float *>(nullptr), arenas.prepared.size()},
-      std::span<float>{arenas.state}, std::span<float>{arenas.workspace},
+      std::span<float>{arenas.state},
+      std::span<float>{arenas.workspace},
       std::span<float>{arenas.frame}};
   init.error_out = &err;
   CHECK_FALSE(machine.process_event(init));
   CHECK(err == emel::error::cast(mimi::error::arena_capacity));
   CHECK(machine.is(sml::state<mimi::state_uninitialized>));
+}
+
+TEST_CASE("mimi codec bind contracts are opaque and model bound") {
+  auto loaded = load_mimi_fixture_or_skip();
+  if (loaded.model == nullptr) {
+    return;
+  }
+
+  auto other_loaded = load_mimi_fixture_or_skip();
+  if (other_loaded.model == nullptr) {
+    return;
+  }
+
+  codec_arenas arenas{};
+  size_arenas(*other_loaded.model, arenas);
+  auto contract = mimi::make_bind_contract(*loaded.model);
+
+  namespace sml = stateforward::sml;
+  mimi::sm machine{};
+  emel::error::type err = emel::error::cast(mimi::error::none);
+  mimi::event::initialize init{*other_loaded.model,
+                               contract,
+                               std::span<float>{arenas.prepared},
+                               std::span<float>{arenas.state},
+                               std::span<float>{arenas.workspace},
+                               std::span<float>{arenas.frame}};
+  init.error_out = &err;
+  CHECK_FALSE(machine.process_event(init));
+  CHECK(err == emel::error::cast(mimi::error::bind_failed));
+  CHECK(machine.is(sml::state<mimi::state_uninitialized>));
+}
+
+TEST_CASE("mimi codec bind contracts reject same-address model mutation") {
+  auto loaded = load_mimi_fixture_or_skip();
+  if (loaded.model == nullptr) {
+    return;
+  }
+
+  codec_arenas arenas{};
+  size_arenas(*loaded.model, arenas);
+  auto contract = mimi::make_bind_contract(*loaded.model);
+  SUBCASE("Mimi hyperparameters") { ++loaded.model->mimi.sample_rate; }
+  SUBCASE("tensor records") {
+    REQUIRE(loaded.model->n_tensors > 0u);
+    ++loaded.model->tensors[0].file_offset;
+  }
+  SUBCASE("used tensor-name storage") {
+    REQUIRE(loaded.model->name_bytes_used > 0u);
+    loaded.model->name_storage[loaded.model->name_bytes_used - 1u] ^= 1;
+  }
+
+  namespace sml = stateforward::sml;
+  mimi::sm machine{};
+  emel::error::type err = emel::error::cast(mimi::error::none);
+  mimi::event::initialize init{*loaded.model,
+                               contract,
+                               std::span<float>{arenas.prepared},
+                               std::span<float>{arenas.state},
+                               std::span<float>{arenas.workspace},
+                               std::span<float>{arenas.frame}};
+  init.error_out = &err;
+  CHECK_FALSE(machine.process_event(init));
+  CHECK(err == emel::error::cast(mimi::error::bind_failed));
+  CHECK(machine.is(sml::state<mimi::state_uninitialized>));
+}
+
+TEST_CASE("mimi codec initialize rejects arenas overlapping model tensors") {
+  auto loaded = load_mimi_fixture_or_skip();
+  if (loaded.model == nullptr) {
+    return;
+  }
+
+  codec_arenas arenas{};
+  size_arenas(*loaded.model, arenas);
+  REQUIRE_FALSE(arenas.prepared.empty());
+
+  emel::model::data::tensor_record *projection = nullptr;
+  for (uint32_t index = 0u; index < loaded.model->n_tensors; ++index) {
+    auto &tensor = loaded.model->tensors[index];
+    const auto name = emel::model::tensor_name_view(*loaded.model, tensor);
+    if (name.ends_with(".self_attn.in_projs.0.weight")) {
+      projection = &tensor;
+      break;
+    }
+  }
+  REQUIRE(projection != nullptr);
+  REQUIRE(projection->data_size <= arenas.prepared.size() * sizeof(float));
+  projection->data = arenas.prepared.data();
+
+  namespace sml = stateforward::sml;
+  mimi::sm machine{};
+  emel::error::type err = emel::error::cast(mimi::error::none);
+  mimi::event::initialize init{*loaded.model,
+                               mimi::make_bind_contract(*loaded.model),
+                               std::span<float>{arenas.prepared},
+                               std::span<float>{arenas.state},
+                               std::span<float>{arenas.workspace},
+                               std::span<float>{arenas.frame}};
+  init.error_out = &err;
+  CHECK_FALSE(machine.process_event(init));
+  CHECK(err == emel::error::cast(mimi::error::arena_capacity));
+  CHECK(machine.is(sml::state<mimi::state_uninitialized>));
+
+  mimi::event::diagnostics diagnostics{};
+  REQUIRE(machine.process_event(mimi::event::capture_diagnostics{diagnostics}));
+  CHECK(diagnostics.projection_prepare_calls == 0u);
+  CHECK(diagnostics.projection_prepared_floats == 0u);
 }
 
 TEST_CASE("mimi codec facade reports unexpected event ordering as errors") {
@@ -632,7 +814,9 @@ TEST_CASE("mimi codec facade reports unexpected event ordering as errors") {
   CHECK(machine.is(sml::state<mimi::state_uninitialized>));
 
   emel::error::type err = emel::error::cast(mimi::error::none);
-  mimi::event::initialize init{*loaded.model, std::span<float>{arenas.prepared},
+  mimi::event::initialize init{*loaded.model,
+                               mimi::make_bind_contract(*loaded.model),
+                               std::span<float>{arenas.prepared},
                                std::span<float>{arenas.state},
                                std::span<float>{arenas.workspace},
                                std::span<float>{arenas.frame}};
@@ -643,10 +827,12 @@ TEST_CASE("mimi codec facade reports unexpected event ordering as errors") {
   // initialize while a session is ready is equally out of order; the
   // dispatch must fail and surface the explicit unexpected_event error.
   emel::error::type second_err = emel::error::cast(mimi::error::none);
-  mimi::event::initialize second{
-      *loaded.model, std::span<float>{arenas.prepared},
-      std::span<float>{arenas.state}, std::span<float>{arenas.workspace},
-      std::span<float>{arenas.frame}};
+  mimi::event::initialize second{*loaded.model,
+                                 mimi::make_bind_contract(*loaded.model),
+                                 std::span<float>{arenas.prepared},
+                                 std::span<float>{arenas.state},
+                                 std::span<float>{arenas.workspace},
+                                 std::span<float>{arenas.frame}};
   second.error_out = &second_err;
   CHECK_FALSE(machine.process_event(second));
   CHECK(second_err == emel::error::cast(mimi::error::unexpected_event));
@@ -671,7 +857,9 @@ TEST_CASE("mimi codec facade rejects malformed frame requests explicitly") {
   emel::error::type err = emel::error::cast(mimi::error::none);
   g_frame_samples = 0;
   g_n_q = 0;
-  mimi::event::initialize init{*loaded.model, std::span<float>{arenas.prepared},
+  mimi::event::initialize init{*loaded.model,
+                               mimi::make_bind_contract(*loaded.model),
+                               std::span<float>{arenas.prepared},
                                std::span<float>{arenas.state},
                                std::span<float>{arenas.workspace},
                                std::span<float>{arenas.frame}};
@@ -775,10 +963,12 @@ TEST_CASE("mimi codec facade streams the f16 and q8 operand-class fixtures") {
     emel::error::type err = emel::error::cast(mimi::error::none);
     g_frame_samples = 0;
     g_n_q = 0;
-    mimi::event::initialize init{
-        *loaded.model, std::span<float>{arenas.prepared},
-        std::span<float>{arenas.state}, std::span<float>{arenas.workspace},
-        std::span<float>{arenas.frame}};
+    mimi::event::initialize init{*loaded.model,
+                                 mimi::make_bind_contract(*loaded.model),
+                                 std::span<float>{arenas.prepared},
+                                 std::span<float>{arenas.state},
+                                 std::span<float>{arenas.workspace},
+                                 std::span<float>{arenas.frame}};
     init.error_out = &err;
     init.on_done = emel::callback<void(
         const mimi::events::initialize_done &)>::from<&on_initialize_done>();

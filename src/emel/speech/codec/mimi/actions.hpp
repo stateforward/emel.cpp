@@ -55,16 +55,59 @@ struct effect_mark_code_range_invalid {
 };
 
 // One-time bind of the caller arenas into the codec runtime. Non-failing by
-// contract: the transition rows reach this only after guard_bind_contract_valid
-// (pure dry-run of the same walk) and guard_arena_capacity_valid passed.
-struct effect_bind {
+// contract: the transition rows reach these only after the matching immutable
+// pre-dispatch contract and guard_arena_capacity_valid passed.
+struct effect_bind_f32 {
   void operator()(const event::initialize_run &runtime_ev,
                   context &ctx) const noexcept {
     const auto &request = runtime_ev.request;
     ctx.workspace = request.workspace;
     ctx.frame = request.frame;
-    detail::bind_codec_runtime(request.model, request.prepared,
-                               request.state_arena, ctx.runtime, ctx.streaming);
+    detail::bind_codec_runtime_f32(request.model, request.prepared,
+                                   request.state_arena, ctx.runtime,
+                                   ctx.streaming);
+  }
+};
+
+struct effect_bind_native {
+  void operator()(const event::initialize_run &runtime_ev,
+                  context &ctx) const noexcept {
+    const auto &request = runtime_ev.request;
+    ctx.workspace = request.workspace;
+    ctx.frame = request.frame;
+    detail::bind_codec_runtime_native(request.model, request.prepared,
+                                      request.state_arena, ctx.runtime,
+                                      ctx.streaming);
+  }
+};
+
+struct effect_bind_q8 {
+  void operator()(const event::initialize_run &runtime_ev,
+                  context &ctx) const noexcept {
+    const auto &request = runtime_ev.request;
+    ctx.workspace = request.workspace;
+    ctx.frame = request.frame;
+    detail::bind_codec_runtime_q8(request.model, request.prepared,
+                                  request.state_arena, ctx.runtime,
+                                  ctx.streaming);
+  }
+};
+
+struct effect_capture_diagnostics {
+  void operator()(const event::capture_diagnostics &ev,
+                  context &ctx) const noexcept {
+    emel::kernel::f32_matvec::event::diagnostics projection{};
+    emel::kernel::f32_matvec::event::dispatch_result result{};
+    (void)ctx.runtime.projection_matvec.process_event(
+        emel::kernel::f32_matvec::event::capture_diagnostics{projection,
+                                                             result});
+    ev.out = event::diagnostics{
+        .projection_prepare_calls = projection.prepare_calls,
+        .projection_prepared_floats = projection.prepared_floats,
+        .projection_reference_calls = projection.reference_calls,
+        .projection_exact_x4_calls = projection.exact_x4_calls,
+        .legacy_f32_projection_calls = ctx.runtime.legacy_f32_projection_calls,
+    };
   }
 };
 

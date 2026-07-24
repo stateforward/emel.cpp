@@ -31,6 +31,11 @@ enum class error : emel::error::type {
   detokenize_failed = (1u << 24),
   planning_failed = (1u << 25),
   graph_failed = (1u << 26),
+  stage_submit_failed = (1u << 27),
+  attribution_failed = (1u << 28),
+  middle_failed = (1u << 29),
+  non_production_failed = (1u << 30),
+  drain_failed = (1u << 31),
 };
 
 } // namespace emel::speech::generator

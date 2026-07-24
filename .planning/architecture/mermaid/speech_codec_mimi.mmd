@@ -2,10 +2,16 @@ stateDiagram-v2
   direction TB
   [*] --> state_uninitialized
   state_uninitialized --> state_bind_contract_decision : initialize_run [always] / none
-  state_bind_contract_decision --> state_bind_capacity_decision : completion_initialize_run_ [guard_bind_contract_valid_] / none
+  state_bind_contract_decision --> state_bind_f32_capacity_decision : completion_initialize_run_ [guard_bind_f32_contract_valid_] / none
+  state_bind_contract_decision --> state_bind_native_capacity_decision : completion_initialize_run_ [guard_bind_native_contract_valid_] / none
+  state_bind_contract_decision --> state_bind_q8_capacity_decision : completion_initialize_run_ [guard_bind_q8_contract_valid_] / none
   state_bind_contract_decision --> state_init_failed_error_out_decision : completion_initialize_run_ [guard_bind_contract_invalid_] / effect_mark_bind_failed_
-  state_bind_capacity_decision --> state_binding : completion_initialize_run_ [guard_arena_capacity_valid_] / effect_bind_
-  state_bind_capacity_decision --> state_init_failed_error_out_decision : completion_initialize_run_ [guard_arena_capacity_invalid_] / effect_mark_arena_capacity_invalid_
+  state_bind_f32_capacity_decision --> state_binding : completion_initialize_run_ [guard_arena_capacity_valid_] / effect_bind_f32_
+  state_bind_f32_capacity_decision --> state_init_failed_error_out_decision : completion_initialize_run_ [guard_arena_capacity_invalid_] / effect_mark_arena_capacity_invalid_
+  state_bind_native_capacity_decision --> state_binding : completion_initialize_run_ [guard_arena_capacity_valid_] / effect_bind_native_
+  state_bind_native_capacity_decision --> state_init_failed_error_out_decision : completion_initialize_run_ [guard_arena_capacity_invalid_] / effect_mark_arena_capacity_invalid_
+  state_bind_q8_capacity_decision --> state_binding : completion_initialize_run_ [guard_arena_capacity_valid_] / effect_bind_q8_
+  state_bind_q8_capacity_decision --> state_init_failed_error_out_decision : completion_initialize_run_ [guard_arena_capacity_invalid_] / effect_mark_arena_capacity_invalid_
   state_binding --> state_init_error_out_decision : completion_initialize_run_ [always] / none
   state_init_error_out_decision --> state_init_callback_decision : completion_initialize_run_ [initialize_run__] / initialize_run__
   state_init_error_out_decision --> state_init_callback_decision : completion_initialize_run_ [initialize_run__] / none
@@ -44,6 +50,8 @@ stateDiagram-v2
   state_decode_failed_callback_decision --> state_session_ready : completion_decode_frame_run_ [decode_frame_run__] / effect_emit_decode_error_
   state_decode_failed_callback_decision --> state_session_ready : completion_decode_frame_run_ [decode_frame_run__] / none
   state_session_ready --> state_session_ready : reset_stream_run [always] / effect_reset_stream_
+  state_uninitialized --> state_uninitialized : capture_diagnostics [always] / effect_capture_diagnostics_
+  state_session_ready --> state_session_ready : capture_diagnostics [always] / effect_capture_diagnostics_
   state_uninitialized --> state_uninit_encode_error_out_decision : encode_frame_run [always] / encode_frame_run__
   state_uninit_encode_error_out_decision --> state_uninit_encode_callback_decision : completion_encode_frame_run_ [encode_frame_run__] / encode_frame_run__
   state_uninit_encode_error_out_decision --> state_uninit_encode_callback_decision : completion_encode_frame_run_ [encode_frame_run__] / none
@@ -90,8 +98,12 @@ stateDiagram-v2
   state_decode_failed_callback_decision --> state_session_ready : _ [guard_unexpected_error_out_absent_] / effect_mark_unexpected_
   state_bind_contract_decision --> state_uninitialized : _ [guard_unexpected_error_out_present_] / effect_mark_unexpected_and_store_
   state_bind_contract_decision --> state_uninitialized : _ [guard_unexpected_error_out_absent_] / effect_mark_unexpected_
-  state_bind_capacity_decision --> state_uninitialized : _ [guard_unexpected_error_out_present_] / effect_mark_unexpected_and_store_
-  state_bind_capacity_decision --> state_uninitialized : _ [guard_unexpected_error_out_absent_] / effect_mark_unexpected_
+  state_bind_f32_capacity_decision --> state_uninitialized : _ [guard_unexpected_error_out_present_] / effect_mark_unexpected_and_store_
+  state_bind_f32_capacity_decision --> state_uninitialized : _ [guard_unexpected_error_out_absent_] / effect_mark_unexpected_
+  state_bind_native_capacity_decision --> state_uninitialized : _ [guard_unexpected_error_out_present_] / effect_mark_unexpected_and_store_
+  state_bind_native_capacity_decision --> state_uninitialized : _ [guard_unexpected_error_out_absent_] / effect_mark_unexpected_
+  state_bind_q8_capacity_decision --> state_uninitialized : _ [guard_unexpected_error_out_present_] / effect_mark_unexpected_and_store_
+  state_bind_q8_capacity_decision --> state_uninitialized : _ [guard_unexpected_error_out_absent_] / effect_mark_unexpected_
   state_binding --> state_uninitialized : _ [guard_unexpected_error_out_present_] / effect_mark_unexpected_and_store_
   state_binding --> state_uninitialized : _ [guard_unexpected_error_out_absent_] / effect_mark_unexpected_
   state_init_error_out_decision --> state_uninitialized : _ [guard_unexpected_error_out_present_] / effect_mark_unexpected_and_store_

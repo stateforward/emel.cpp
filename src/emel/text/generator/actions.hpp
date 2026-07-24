@@ -1161,8 +1161,15 @@ struct on_unexpected {
 struct capture_diagnostics {
   void operator()(const event::capture_diagnostics & ev, const context & ctx) const noexcept {
     const auto & backend = ctx.compute.backend;
-    const auto total = [&backend](auto counter) noexcept {
-      return detail::compute_kernel_counter_total(backend, counter);
+    emel::kernel::matmul::event::diagnostics matmul = {};
+    bool matmul_accepted = false;
+    const emel::kernel::matmul::event::capture_diagnostics capture{
+        matmul, matmul_accepted};
+    ctx.matmul_actor->process_event(capture);
+    (void)matmul_accepted;
+    const auto total = [&backend](auto counter,
+                                  const uint64_t matmul_total) noexcept {
+      return std::invoke(counter, backend.kernel) + matmul_total;
     };
     ev.out.kernel_kind = backend.kernel_kind;
     ev.out.kernel_dispatch_calls = backend.kernel_dispatch_calls;
@@ -1170,40 +1177,71 @@ struct capture_diagnostics {
     ev.out.packed_q8_0_dispatch_calls = backend.packed_q8_0_dispatch_calls;
     ev.out.flash_attention_dispatch_calls = backend.flash_attention_dispatch_calls;
     ev.out.optimized_flash_dispatch_calls =
-        total(&emel::kernel::sm::optimized_flash_dispatch_count);
-    ev.out.shared_flash_dispatch_calls = total(&emel::kernel::sm::shared_flash_dispatch_count);
-    ev.out.optimized_q2_dispatch_calls = total(&emel::kernel::sm::optimized_q2_dispatch_count);
-    ev.out.shared_q2_dispatch_calls = total(&emel::kernel::sm::shared_q2_dispatch_count);
-    ev.out.optimized_q3_dispatch_calls = total(&emel::kernel::sm::optimized_q3_dispatch_count);
-    ev.out.shared_q3_dispatch_calls = total(&emel::kernel::sm::shared_q3_dispatch_count);
-    ev.out.optimized_q4_dispatch_calls = total(&emel::kernel::sm::optimized_q4_dispatch_count);
+        total(&emel::kernel::sm::optimized_flash_dispatch_count,
+              matmul.optimized_flash_dispatch_calls);
+    ev.out.shared_flash_dispatch_calls = total(
+        &emel::kernel::sm::shared_flash_dispatch_count,
+        matmul.shared_flash_dispatch_calls);
+    ev.out.optimized_q2_dispatch_calls = total(
+        &emel::kernel::sm::optimized_q2_dispatch_count,
+        matmul.optimized_q2_dispatch_calls);
+    ev.out.shared_q2_dispatch_calls = total(
+        &emel::kernel::sm::shared_q2_dispatch_count,
+        matmul.shared_q2_dispatch_calls);
+    ev.out.optimized_q3_dispatch_calls = total(
+        &emel::kernel::sm::optimized_q3_dispatch_count,
+        matmul.optimized_q3_dispatch_calls);
+    ev.out.shared_q3_dispatch_calls = total(
+        &emel::kernel::sm::shared_q3_dispatch_count,
+        matmul.shared_q3_dispatch_calls);
+    ev.out.optimized_q4_dispatch_calls = total(
+        &emel::kernel::sm::optimized_q4_dispatch_count,
+        matmul.optimized_q4_dispatch_calls);
     ev.out.optimized_q4_vector_dispatch_calls =
-        total(&emel::kernel::sm::optimized_q4_vector_dispatch_count);
+        total(&emel::kernel::sm::optimized_q4_vector_dispatch_count,
+              matmul.optimized_q4_vector_dispatch_calls);
     ev.out.optimized_q4_vector_packed_dispatch_calls =
-        total(&emel::kernel::sm::optimized_q4_vector_packed_dispatch_count);
+        total(&emel::kernel::sm::optimized_q4_vector_packed_dispatch_count,
+              matmul.optimized_q4_vector_packed_dispatch_calls);
     ev.out.optimized_q4_vector_packed_q8_rhs_dispatch_calls =
-        total(&emel::kernel::sm::optimized_q4_vector_packed_q8_rhs_dispatch_count);
-    ev.out.shared_q4_dispatch_calls = total(&emel::kernel::sm::shared_q4_dispatch_count);
-    ev.out.optimized_q6_dispatch_calls = total(&emel::kernel::sm::optimized_q6_dispatch_count);
+        total(&emel::kernel::sm::optimized_q4_vector_packed_q8_rhs_dispatch_count,
+              matmul.optimized_q4_vector_packed_q8_rhs_dispatch_calls);
+    ev.out.shared_q4_dispatch_calls = total(
+        &emel::kernel::sm::shared_q4_dispatch_count,
+        matmul.shared_q4_dispatch_calls);
+    ev.out.optimized_q6_dispatch_calls = total(
+        &emel::kernel::sm::optimized_q6_dispatch_count,
+        matmul.optimized_q6_dispatch_calls);
     ev.out.optimized_q6_vector_dispatch_calls =
-        total(&emel::kernel::sm::optimized_q6_vector_dispatch_count);
+        total(&emel::kernel::sm::optimized_q6_vector_dispatch_count,
+              matmul.optimized_q6_vector_dispatch_calls);
     ev.out.optimized_q6_vector_argmax_dispatch_calls =
-        total(&emel::kernel::sm::optimized_q6_vector_argmax_dispatch_count);
+        total(&emel::kernel::sm::optimized_q6_vector_argmax_dispatch_count,
+              matmul.optimized_q6_vector_argmax_dispatch_calls);
     ev.out.optimized_q6_vector_packed_dispatch_calls =
-        total(&emel::kernel::sm::optimized_q6_vector_packed_dispatch_count);
+        total(&emel::kernel::sm::optimized_q6_vector_packed_dispatch_count,
+              matmul.optimized_q6_vector_packed_dispatch_calls);
     ev.out.optimized_q6_vector_packed_q8_rhs_dispatch_calls =
-        total(&emel::kernel::sm::optimized_q6_vector_packed_q8_rhs_dispatch_count);
+        total(&emel::kernel::sm::optimized_q6_vector_packed_q8_rhs_dispatch_count,
+              matmul.optimized_q6_vector_packed_q8_rhs_dispatch_calls);
     ev.out.optimized_q6_vector_packed_q8_rhs_argmax_dispatch_calls =
-        total(&emel::kernel::sm::optimized_q6_vector_packed_q8_rhs_argmax_dispatch_count);
+        total(&emel::kernel::sm::optimized_q6_vector_packed_q8_rhs_argmax_dispatch_count,
+              matmul.optimized_q6_vector_packed_q8_rhs_argmax_dispatch_calls);
     ev.out.optimized_q6_vector_prepared_q8_rhs_dispatch_calls =
-        total(&emel::kernel::sm::optimized_q6_vector_prepared_q8_rhs_dispatch_count);
+        total(&emel::kernel::sm::optimized_q6_vector_prepared_q8_rhs_dispatch_count,
+              matmul.optimized_q6_vector_prepared_q8_rhs_dispatch_calls);
     ev.out.optimized_q6_vector_prepared_q8_rhs_i8mm_dispatch_calls =
-        total(&emel::kernel::sm::optimized_q6_vector_prepared_q8_rhs_i8mm_dispatch_count);
+        total(&emel::kernel::sm::optimized_q6_vector_prepared_q8_rhs_i8mm_dispatch_count,
+              matmul.optimized_q6_vector_prepared_q8_rhs_i8mm_dispatch_calls);
     ev.out.optimized_q6_vector_prepared_q8_rhs_argmax_i8mm_dispatch_calls =
-        total(&emel::kernel::sm::optimized_q6_vector_prepared_q8_rhs_argmax_i8mm_dispatch_count);
+        total(&emel::kernel::sm::optimized_q6_vector_prepared_q8_rhs_argmax_i8mm_dispatch_count,
+              matmul.optimized_q6_vector_prepared_q8_rhs_argmax_i8mm_dispatch_calls);
     ev.out.optimized_q6_vector_q8_argmax_prepared_i8mm_dispatch_calls =
-        total(&emel::kernel::sm::optimized_q6_vector_q8_argmax_prepared_i8mm_dispatch_count);
-    ev.out.shared_q6_dispatch_calls = total(&emel::kernel::sm::shared_q6_dispatch_count);
+        total(&emel::kernel::sm::optimized_q6_vector_q8_argmax_prepared_i8mm_dispatch_count,
+              matmul.optimized_q6_vector_q8_argmax_prepared_i8mm_dispatch_calls);
+    ev.out.shared_q6_dispatch_calls = total(
+        &emel::kernel::sm::shared_q6_dispatch_count,
+        matmul.shared_q6_dispatch_calls);
     ev.out.native_quantized_stage_count = detail::quantized_contract_stage_count(
         ctx.compute.backend,
         emel::model::generation::quantized_contract_kind::native_quantized);

@@ -12,6 +12,8 @@ set -euo pipefail
 
 # shellcheck source=scripts/build_jobs.sh
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/build_jobs.sh"
+# shellcheck source=scripts/zig_toolchain.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/zig_toolchain.sh"
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BUILD_DIR="${EMEL_DETERMINISM_BUILD_DIR:-$ROOT_DIR/build/determinism_check}"
@@ -40,6 +42,7 @@ cmake -S "$ROOT_DIR/tools/determinism_check" -B "$BUILD_DIR" -G Ninja \
   -DCMAKE_C_COMPILER_ARG1=cc \
   -DCMAKE_CXX_COMPILER="$zig_bin" \
   -DCMAKE_CXX_COMPILER_ARG1=c++ \
+  "${EMEL_ZIG_CMAKE_PLATFORM_ARGS[@]}" \
   -DEMEL_ROOT_DIR="$ROOT_DIR"
 cmake --build "$BUILD_DIR" --parallel "$EMEL_BUILD_JOBS"
 

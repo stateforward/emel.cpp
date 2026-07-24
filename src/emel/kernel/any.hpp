@@ -12,19 +12,6 @@
 
 namespace emel::kernel {
 
-enum class kernel_kind : uint8_t {
-  x86_64 = 0,
-  aarch64 = 1,
-};
-
-constexpr kernel_kind detect_host_kind() noexcept {
-#if defined(__aarch64__) || defined(_M_ARM64)
-  return kernel_kind::aarch64;
-#else
-  return kernel_kind::x86_64;
-#endif
-}
-
 class any {
  public:
   any() : core_(detect_host_kind()) {}
@@ -42,6 +29,49 @@ class any {
   kernel_kind kind() const noexcept { return core_.kind(); }
 
   bool process_event(const event::dispatch & ev) { return core_.process_event(ev); }
+
+  bool process_event(const event::configure_kind &ev) {
+    core_.set_kind(ev.kind);
+    return true;
+  }
+
+  bool process_event(const event::capture_diagnostics &ev) {
+    ev.out.optimized_flash_dispatch_calls = optimized_flash_dispatch_count();
+    ev.out.shared_flash_dispatch_calls = shared_flash_dispatch_count();
+    ev.out.optimized_q2_dispatch_calls = optimized_q2_dispatch_count();
+    ev.out.shared_q2_dispatch_calls = shared_q2_dispatch_count();
+    ev.out.optimized_q3_dispatch_calls = optimized_q3_dispatch_count();
+    ev.out.shared_q3_dispatch_calls = shared_q3_dispatch_count();
+    ev.out.optimized_q4_dispatch_calls = optimized_q4_dispatch_count();
+    ev.out.optimized_q4_vector_dispatch_calls =
+        optimized_q4_vector_dispatch_count();
+    ev.out.optimized_q4_vector_packed_dispatch_calls =
+        optimized_q4_vector_packed_dispatch_count();
+    ev.out.optimized_q4_vector_packed_q8_rhs_dispatch_calls =
+        optimized_q4_vector_packed_q8_rhs_dispatch_count();
+    ev.out.shared_q4_dispatch_calls = shared_q4_dispatch_count();
+    ev.out.optimized_q6_dispatch_calls = optimized_q6_dispatch_count();
+    ev.out.optimized_q6_vector_dispatch_calls =
+        optimized_q6_vector_dispatch_count();
+    ev.out.optimized_q6_vector_argmax_dispatch_calls =
+        optimized_q6_vector_argmax_dispatch_count();
+    ev.out.optimized_q6_vector_packed_dispatch_calls =
+        optimized_q6_vector_packed_dispatch_count();
+    ev.out.optimized_q6_vector_packed_q8_rhs_dispatch_calls =
+        optimized_q6_vector_packed_q8_rhs_dispatch_count();
+    ev.out.optimized_q6_vector_packed_q8_rhs_argmax_dispatch_calls =
+        optimized_q6_vector_packed_q8_rhs_argmax_dispatch_count();
+    ev.out.optimized_q6_vector_prepared_q8_rhs_dispatch_calls =
+        optimized_q6_vector_prepared_q8_rhs_dispatch_count();
+    ev.out.optimized_q6_vector_prepared_q8_rhs_i8mm_dispatch_calls =
+        optimized_q6_vector_prepared_q8_rhs_i8mm_dispatch_count();
+    ev.out.optimized_q6_vector_prepared_q8_rhs_argmax_i8mm_dispatch_calls =
+        optimized_q6_vector_prepared_q8_rhs_argmax_i8mm_dispatch_count();
+    ev.out.optimized_q6_vector_q8_argmax_prepared_i8mm_dispatch_calls =
+        optimized_q6_vector_q8_argmax_prepared_i8mm_dispatch_count();
+    ev.out.shared_q6_dispatch_calls = shared_q6_dispatch_count();
+    return true;
+  }
 
   template <class event_type>
     requires(::emel::kernel::is_op_event_v<event_type>)

@@ -1,0 +1,19 @@
+stateDiagram-v2
+  direction TB
+  [*] --> state_ready
+  state_ready --> state_execute_result_decision : execute [guard_execute_supported_] / effect_execute_head_range_
+  state_ready --> state_execute_error_callback_decision : execute [guard_execute_unsupported_] / effect_reject_execute_
+  state_execute_result_decision --> state_execute_done_callback_decision : completion_execute_ [guard_execute_succeeded_] / effect_accept_execute_
+  state_execute_result_decision --> state_execute_error_callback_decision : completion_execute_ [guard_execute_failed_] / effect_reject_execute_
+  state_execute_done_callback_decision --> state_execute_done : completion_execute_ [guard_has_done_callback_] / effect_emit_execute_done_
+  state_execute_done_callback_decision --> state_execute_done : completion_execute_ [guard_no_done_callback_] / none
+  state_execute_error_callback_decision --> state_execute_errored : completion_execute_ [guard_has_error_callback_] / effect_emit_execute_error_
+  state_execute_error_callback_decision --> state_execute_errored : completion_execute_ [guard_no_error_callback_] / none
+  state_execute_done --> state_ready : completion_execute_ [always] / none
+  state_execute_errored --> state_ready : completion_execute_ [always] / none
+  state_ready --> state_ready : _ [always] / effect_on_unexpected_
+  state_execute_result_decision --> state_ready : _ [always] / effect_on_unexpected_
+  state_execute_done_callback_decision --> state_ready : _ [always] / effect_on_unexpected_
+  state_execute_error_callback_decision --> state_ready : _ [always] / effect_on_unexpected_
+  state_execute_done --> state_ready : _ [always] / effect_on_unexpected_
+  state_execute_errored --> state_ready : _ [always] / effect_on_unexpected_

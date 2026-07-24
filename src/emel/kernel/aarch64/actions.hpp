@@ -2904,14 +2904,10 @@ dot_q4_k_q8_k_4rows_neon(const ::emel::kernel::detail::quant::block_q4_k *lhs0,
 #endif
 }
 
+#if defined(__aarch64__) && defined(__ARM_NEON)
 inline void decode_q4_k_x8_6bit_scales_neon(const uint8_t *scales_in,
                                             int16x8_t &mins_out,
                                             int16x8_t &scales_out) noexcept {
-#if !(defined(__aarch64__) && defined(__ARM_NEON))
-  (void)scales_in;
-  (void)mins_out;
-  (void)scales_out;
-#else
   constexpr uint32_t kmask1 = 0x3f3f3f3fu;
   constexpr uint32_t kmask2 = 0x0f0f0f0fu;
   constexpr uint32_t kmask3 = 0x03030303u;
@@ -2931,8 +2927,8 @@ inline void decode_q4_k_x8_6bit_scales_neon(const uint8_t *scales_in,
   std::array<int8_t, 8> scales_bytes = {};
   std::memcpy(scales_bytes.data(), scales_u32.data(), scales_bytes.size());
   scales_out = vmovl_s8(vld1_s8(scales_bytes.data()));
-#endif
 }
+#endif
 
 inline void dot_q4_k_x8_q8_k_group_bl4_neon(
     const ::emel::kernel::detail::quant::block_q4_kx8 *lhs,

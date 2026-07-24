@@ -1179,7 +1179,8 @@ struct guard_decode_parallel_lanes_ready {
   bool operator()(const event::generate_run &, const action::context & ctx) const noexcept {
     return ctx.compute.backend.parallel_lanes_enabled &&
            ctx.compute.backend.matmul_actor != nullptr &&
-           ctx.compute.backend.matmul_actor->parallel_lanes_available() &&
+           ctx.compute.backend.matmul_lane_mode ==
+               emel::kernel::matmul::lane_mode::parallel &&
            ctx.compute.backend.n_embd >=
                ctx.compute.backend.routes.parallel_min_gemv_dim;
   }

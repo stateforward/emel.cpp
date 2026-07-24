@@ -12,6 +12,9 @@
 #include "emel/io/mmap/sm.hpp"
 #include "emel/io/read/sm.hpp"
 #include "emel/io/staged_read/sm.hpp"
+#include "emel/kernel/attention/sm.hpp"
+#include "emel/kernel/f32_matvec/sm.hpp"
+#include "emel/kernel/matmul/sm.hpp"
 #include "emel/memory/hybrid/sm.hpp"
 #include "emel/memory/kv/sm.hpp"
 #include "emel/memory/recurrent/sm.hpp"
@@ -52,6 +55,9 @@ using IoLoader = emel::io::loader::sm;
 using IoMmap = emel::io::mmap::sm;
 using IoRead = emel::io::read::sm;
 using IoStagedRead = emel::io::staged_read::sm;
+using KernelAttention = emel::kernel::attention::sm;
+using F32Matvec = emel::kernel::f32_matvec::sm;
+using KernelMatmul = emel::kernel::matmul::sm;
 using MemoryHybrid = emel::memory::hybrid::sm;
 using KvCache = emel::memory::kv::sm;
 using MemoryRecurrent = emel::memory::recurrent::sm;

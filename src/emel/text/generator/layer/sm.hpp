@@ -15,7 +15,7 @@ struct state_feed_forward_done {};
 
 template <emel::text::generator::attention_mode mode,
           emel::text::generator::detail::scalar_matmul_route route,
-          emel::text::generator::matmul::lane_mode lanes,
+          emel::kernel::matmul::lane_mode lanes,
           emel::text::generator::detail::window_mode wmode>
 struct scalar_model {
   auto operator()() const {
@@ -137,7 +137,7 @@ struct scalar_model {
 
 template <emel::text::generator::attention_mode mode,
           emel::text::generator::detail::chunk4_rhs_route route,
-          emel::text::generator::matmul::lane_mode lanes>
+          emel::kernel::matmul::lane_mode lanes>
 struct chunk4_model {
   auto operator()() const {
     namespace sml = stateforward::sml;
@@ -247,7 +247,7 @@ struct chunk4_model {
 };
 
 template <emel::text::generator::attention_mode mode,
-          emel::text::generator::matmul::lane_mode lanes>
+          emel::kernel::matmul::lane_mode lanes>
 struct chunk8_model {
   auto operator()() const {
     namespace sml = stateforward::sml;
@@ -354,22 +354,22 @@ struct chunk8_model {
 
 template <emel::text::generator::attention_mode mode,
           emel::text::generator::detail::scalar_matmul_route route,
-          emel::text::generator::matmul::lane_mode lanes,
+          emel::kernel::matmul::lane_mode lanes,
           emel::text::generator::detail::window_mode wmode>
 using scalar_sm = emel::sm<scalar_model<mode, route, lanes, wmode>>;
 
 template <emel::text::generator::attention_mode mode,
           emel::text::generator::detail::chunk4_rhs_route route,
-          emel::text::generator::matmul::lane_mode lanes>
+          emel::kernel::matmul::lane_mode lanes>
 using chunk4_sm = emel::sm<chunk4_model<mode, route, lanes>>;
 
 template <emel::text::generator::attention_mode mode,
-          emel::text::generator::matmul::lane_mode lanes>
+          emel::kernel::matmul::lane_mode lanes>
 using chunk8_sm = emel::sm<chunk8_model<mode, lanes>>;
 
 template <emel::text::generator::attention_mode mode,
           emel::text::generator::detail::scalar_matmul_route route,
-          emel::text::generator::matmul::lane_mode lanes,
+          emel::kernel::matmul::lane_mode lanes,
           emel::text::generator::detail::window_mode wmode>
 struct scalar_actor {
   scalar_sm<mode, route, lanes, wmode> machine{};
@@ -381,7 +381,7 @@ struct scalar_actor {
 
 template <emel::text::generator::attention_mode mode,
           emel::text::generator::detail::chunk4_rhs_route route,
-          emel::text::generator::matmul::lane_mode lanes>
+          emel::kernel::matmul::lane_mode lanes>
 struct chunk4_actor {
   chunk4_sm<mode, route, lanes> machine{};
 
@@ -391,7 +391,7 @@ struct chunk4_actor {
 };
 
 template <emel::text::generator::attention_mode mode,
-          emel::text::generator::matmul::lane_mode lanes>
+          emel::kernel::matmul::lane_mode lanes>
 struct chunk8_actor {
   chunk8_sm<mode, lanes> machine{};
 
@@ -402,7 +402,7 @@ struct chunk8_actor {
 
 template <emel::text::generator::attention_mode mode,
           emel::text::generator::detail::scalar_matmul_route route,
-          emel::text::generator::matmul::lane_mode lanes,
+          emel::kernel::matmul::lane_mode lanes,
           emel::text::generator::detail::window_mode wmode>
 inline void process_scalar(const event::scalar_run &ev) noexcept {
   scalar_actor<mode, route, lanes, wmode> actor{};
@@ -411,14 +411,14 @@ inline void process_scalar(const event::scalar_run &ev) noexcept {
 
 template <emel::text::generator::attention_mode mode,
           emel::text::generator::detail::chunk4_rhs_route route,
-          emel::text::generator::matmul::lane_mode lanes>
+          emel::kernel::matmul::lane_mode lanes>
 inline void process_chunk4(const event::chunk4_run &ev) noexcept {
   chunk4_actor<mode, route, lanes> actor{};
   (void)actor.process_event(ev);
 }
 
 template <emel::text::generator::attention_mode mode,
-          emel::text::generator::matmul::lane_mode lanes>
+          emel::kernel::matmul::lane_mode lanes>
 inline void process_chunk8(const event::chunk8_run &ev) noexcept {
   chunk8_actor<mode, lanes> actor{};
   (void)actor.process_event(ev);
@@ -426,7 +426,7 @@ inline void process_chunk8(const event::chunk8_run &ev) noexcept {
 
 template <emel::text::generator::attention_mode mode,
           emel::text::generator::detail::scalar_matmul_route route,
-          emel::text::generator::matmul::lane_mode lanes,
+          emel::kernel::matmul::lane_mode lanes,
           emel::text::generator::detail::window_mode wmode>
 inline bool
 run_layer(emel::text::generator::detail::native_backend &backend,
@@ -448,7 +448,7 @@ run_layer(emel::text::generator::detail::native_backend &backend,
 
 template <emel::text::generator::attention_mode mode,
           emel::text::generator::detail::scalar_matmul_route route,
-          emel::text::generator::matmul::lane_mode lanes,
+          emel::kernel::matmul::lane_mode lanes,
           emel::text::generator::detail::window_mode wmode>
 inline bool run_layer(emel::text::generator::detail::native_backend &backend,
                       const int32_t layer_index, const int32_t position,
@@ -460,7 +460,7 @@ inline bool run_layer(emel::text::generator::detail::native_backend &backend,
 
 template <emel::text::generator::attention_mode mode,
           emel::text::generator::detail::scalar_matmul_route route,
-          emel::text::generator::matmul::lane_mode lanes,
+          emel::kernel::matmul::lane_mode lanes,
           emel::text::generator::detail::window_mode wmode>
 inline bool
 run_layer(emel::text::generator::detail::native_backend &backend,
@@ -474,7 +474,7 @@ run_layer(emel::text::generator::detail::native_backend &backend,
 
 template <emel::text::generator::attention_mode mode,
           emel::text::generator::detail::scalar_matmul_route route,
-          emel::text::generator::matmul::lane_mode lanes,
+          emel::kernel::matmul::lane_mode lanes,
           emel::text::generator::detail::window_mode wmode>
 inline bool run_layer(emel::text::generator::detail::native_backend &backend,
                       const int32_t layer_index,
@@ -506,7 +506,7 @@ run_layer_nonflash(emel::text::generator::detail::native_backend &backend,
 
 template <emel::text::generator::attention_mode mode,
           emel::text::generator::detail::chunk4_rhs_route route,
-          emel::text::generator::matmul::lane_mode lanes>
+          emel::kernel::matmul::lane_mode lanes>
 inline bool
 run_layer_chunk4(emel::text::generator::detail::native_backend &backend,
                  const emel::text::generator::detail::kv_addressing_view &kv,
@@ -524,7 +524,7 @@ run_layer_chunk4(emel::text::generator::detail::native_backend &backend,
 }
 
 template <emel::text::generator::attention_mode mode,
-          emel::text::generator::matmul::lane_mode lanes>
+          emel::kernel::matmul::lane_mode lanes>
 inline bool run_layer_chunk8_q8_k(
     emel::text::generator::detail::native_backend &backend,
     const emel::text::generator::detail::kv_addressing_view &kv,
