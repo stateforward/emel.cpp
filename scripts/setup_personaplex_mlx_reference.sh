@@ -112,9 +112,35 @@ fi
 if [[ ! -x "$VENV_DIR/bin/python" ]]; then
   "$PYTHON_BIN" -m venv "$VENV_DIR"
 fi
-"$VENV_DIR/bin/pip" install --quiet --upgrade pip
-"$VENV_DIR/bin/pip" install --quiet -e "$SRC_DIR"
-"$VENV_DIR/bin/python" -c "from personaplex_mlx import models; models.mimi.mimi_202407(16)" \
+probe_personaplex_mlx() {
+  local status=0
+  for _ in 1 2 3; do
+    if "$VENV_DIR/bin/python" -c \
+        "from personaplex_mlx import models; models.mimi.mimi_202407(16)" \
+        >/dev/null 2>&1; then
+      return 0
+    else
+      status=$?
+    fi
+    if [[ "$status" -ne 137 ]]; then
+      return "$status"
+    fi
+  done
+  return "$status"
+}
+
+if probe_personaplex_mlx; then
+  :
+else
+  probe_status=$?
+  if [[ "$probe_status" -eq 137 ]]; then
+    echo "error: personaplex_mlx import probe was repeatedly killed" >&2
+    exit "$probe_status"
+  fi
+  "$VENV_DIR/bin/pip" install --quiet --upgrade pip
+  "$VENV_DIR/bin/pip" install --quiet -e "$SRC_DIR"
+fi
+probe_personaplex_mlx \
   || { echo "error: personaplex_mlx import check failed" >&2; exit 1; }
 
 fetch_pinned "$MIMI_SAFETENSORS_URL" "$MIMI_SAFETENSORS" "$MIMI_SAFETENSORS_SHA256"

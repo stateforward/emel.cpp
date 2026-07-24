@@ -16,7 +16,7 @@
 #include "emel/text/generator/actions.hpp"
 #include "emel/text/generator/guards.hpp"
 #include "emel/text/generator/initializer/guards.hpp"
-#include "emel/text/generator/matmul/sm.hpp"
+#include "emel/kernel/matmul/sm.hpp"
 #include "emel/text/generator/prefill/actions.hpp"
 #include "emel/text/generator/prefill/guards.hpp"
 #include "generator_test_policies.hpp"
@@ -229,11 +229,11 @@ struct native_quantized_route_fixture {
 
 struct compute_guard_fixture {
   emel::text::generator::action::context context = {};
-  emel::text::generator::matmul::lane_pool<7u, 128u, 1048576u> parallel_matmul_lanes = {};
-  emel::text::generator::matmul::execution_policy matmul_policy =
-      emel::text::generator::matmul::make_auto_execution_policy(
+  emel::kernel::matmul::lane_pool parallel_matmul_lanes = {};
+  emel::kernel::matmul::execution_policy matmul_policy =
+      emel::kernel::matmul::make_auto_execution_policy(
           parallel_matmul_lanes);
-  emel::text::generator::matmul::sm matmul_actor{matmul_policy};
+  emel::kernel::matmul::sm matmul_actor{matmul_policy};
   emel::model::data model = {};
   std::array<emel::graph::processor::event::lifecycle_tensor_binding, 1>
       reserve_tensors = {};
@@ -262,6 +262,7 @@ struct compute_guard_fixture {
 
     auto &backend = context.compute.backend;
     backend.matmul_actor = &matmul_actor;
+    backend.matmul_lane_mode = emel::kernel::matmul::lane_mode::parallel;
     backend.model = &model;
     backend.n_embd = 4;
     backend.n_head = 1;

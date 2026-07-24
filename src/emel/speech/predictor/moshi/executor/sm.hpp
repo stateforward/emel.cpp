@@ -415,8 +415,11 @@ struct model {
       , sml::state<state_temporal_layer_projection_bind_result_decision> <= sml::state<state_temporal_layer_projection>
           + sml::completion<step_run>
       , sml::state<state_temporal_layer_projection_run> <= sml::state<state_temporal_layer_projection_bind_result_decision>
-          + sml::completion<step_run> [ guard::guard_projection_view_bound{} ]
-          / action::effect_run_temporal_layer_projection{}
+          + sml::completion<step_run> [ guard::guard_projection_view_bound_serial{} ]
+          / action::effect_run_temporal_layer_projection_serial{}
+      , sml::state<state_temporal_layer_projection_run> <= sml::state<state_temporal_layer_projection_bind_result_decision>
+          + sml::completion<step_run> [ guard::guard_projection_view_bound_parallel{} ]
+          / action::effect_run_temporal_layer_projection_parallel{}
       , sml::state<state_step_error_out_decision> <= sml::state<state_temporal_layer_projection_bind_result_decision>
           + sml::completion<step_run> [ guard::guard_projection_view_bind_failed{} ]
           / action::effect_mark_graph_execution_unsupported{}
@@ -458,10 +461,22 @@ struct model {
           + sml::completion<step_run> [ guard::guard_temporal_layer_cache_write_failed{} ]
           / action::effect_mark_graph_execution_unsupported{}
       , sml::state<state_temporal_layer_attention> <= sml::state<state_temporal_layer_cache_write_result_decision>
-          + sml::completion<step_run> [ guard::guard_temporal_layer_attention_supported{} ]
-          / action::effect_run_temporal_layer_attention{}
+          + sml::completion<step_run> [ guard::guard_temporal_layer_attention_serial{} ]
+          / action::effect_run_temporal_layer_attention_serial{}
+      , sml::state<state_temporal_layer_attention> <= sml::state<state_temporal_layer_cache_write_result_decision>
+          + sml::completion<step_run> [ guard::guard_temporal_layer_attention_two{} ]
+          / action::effect_run_temporal_layer_attention_two{}
+      , sml::state<state_temporal_layer_attention> <= sml::state<state_temporal_layer_cache_write_result_decision>
+          + sml::completion<step_run> [ guard::guard_temporal_layer_attention_four{} ]
+          / action::effect_run_temporal_layer_attention_four{}
+      , sml::state<state_temporal_layer_attention> <= sml::state<state_temporal_layer_cache_write_result_decision>
+          + sml::completion<step_run> [ guard::guard_temporal_layer_attention_eight{} ]
+          / action::effect_run_temporal_layer_attention_eight{}
       , sml::state<state_step_error_out_decision> <= sml::state<state_temporal_layer_cache_write_result_decision>
           + sml::completion<step_run> [ guard::guard_temporal_layer_attention_unsupported{} ]
+          / action::effect_mark_graph_execution_unsupported{}
+      , sml::state<state_step_error_out_decision> <= sml::state<state_temporal_layer_cache_write_result_decision>
+          + sml::completion<step_run> [ guard::guard_temporal_layer_attention_route_unavailable{} ]
           / action::effect_mark_graph_execution_unsupported{}
       , sml::state<state_temporal_layer_attention_result_decision> <= sml::state<state_temporal_layer_attention>
           + sml::completion<step_run> [ guard::guard_temporal_layer_attention_succeeded{} ]
@@ -477,8 +492,11 @@ struct model {
       , sml::state<state_temporal_layer_out_projection_bind_result_decision> <= sml::state<state_temporal_layer_out_projection>
           + sml::completion<step_run>
       , sml::state<state_temporal_layer_out_projection_run> <= sml::state<state_temporal_layer_out_projection_bind_result_decision>
-          + sml::completion<step_run> [ guard::guard_projection_view_bound{} ]
-          / action::effect_run_temporal_layer_out_projection{}
+          + sml::completion<step_run> [ guard::guard_projection_view_bound_serial{} ]
+          / action::effect_run_temporal_layer_out_projection_serial{}
+      , sml::state<state_temporal_layer_out_projection_run> <= sml::state<state_temporal_layer_out_projection_bind_result_decision>
+          + sml::completion<step_run> [ guard::guard_projection_view_bound_parallel{} ]
+          / action::effect_run_temporal_layer_out_projection_parallel{}
       , sml::state<state_step_error_out_decision> <= sml::state<state_temporal_layer_out_projection_bind_result_decision>
           + sml::completion<step_run> [ guard::guard_projection_view_bind_failed{} ]
           / action::effect_mark_graph_execution_unsupported{}
@@ -523,8 +541,11 @@ struct model {
       , sml::state<state_temporal_layer_gating_in_bind_result_decision> <= sml::state<state_temporal_layer_gating_in>
           + sml::completion<step_run>
       , sml::state<state_temporal_layer_gating_in_run> <= sml::state<state_temporal_layer_gating_in_bind_result_decision>
-          + sml::completion<step_run> [ guard::guard_projection_view_bound{} ]
-          / action::effect_run_temporal_layer_gating_in{}
+          + sml::completion<step_run> [ guard::guard_projection_view_bound_serial{} ]
+          / action::effect_run_temporal_layer_gating_in_serial{}
+      , sml::state<state_temporal_layer_gating_in_run> <= sml::state<state_temporal_layer_gating_in_bind_result_decision>
+          + sml::completion<step_run> [ guard::guard_projection_view_bound_parallel{} ]
+          / action::effect_run_temporal_layer_gating_in_parallel{}
       , sml::state<state_step_error_out_decision> <= sml::state<state_temporal_layer_gating_in_bind_result_decision>
           + sml::completion<step_run> [ guard::guard_projection_view_bind_failed{} ]
           / action::effect_mark_graph_execution_unsupported{}
@@ -561,8 +582,11 @@ struct model {
       , sml::state<state_temporal_layer_gating_out_bind_result_decision> <= sml::state<state_temporal_layer_gating_out>
           + sml::completion<step_run>
       , sml::state<state_temporal_layer_gating_out_run> <= sml::state<state_temporal_layer_gating_out_bind_result_decision>
-          + sml::completion<step_run> [ guard::guard_projection_view_bound{} ]
-          / action::effect_run_temporal_layer_gating_out{}
+          + sml::completion<step_run> [ guard::guard_projection_view_bound_serial{} ]
+          / action::effect_run_temporal_layer_gating_out_serial{}
+      , sml::state<state_temporal_layer_gating_out_run> <= sml::state<state_temporal_layer_gating_out_bind_result_decision>
+          + sml::completion<step_run> [ guard::guard_projection_view_bound_parallel{} ]
+          / action::effect_run_temporal_layer_gating_out_parallel{}
       , sml::state<state_step_error_out_decision> <= sml::state<state_temporal_layer_gating_out_bind_result_decision>
           + sml::completion<step_run> [ guard::guard_projection_view_bind_failed{} ]
           / action::effect_mark_graph_execution_unsupported{}
@@ -630,8 +654,13 @@ struct model {
       , sml::state<state_text_logits_bind_result_decision> <= sml::state<state_text_logits>
           + sml::completion<step_run>
       , sml::state<state_text_logits_sample_projection> <= sml::state<state_text_logits_bind_result_decision>
-          + sml::completion<step_run> [ guard::guard_forced_text_token_valid_and_sampling_consume{} ]
-          / action::effect_compute_text_token_logits{}
+          + sml::completion<step_run>
+          [ guard::guard_forced_text_token_sampling_serial{} ]
+          / action::effect_compute_text_token_logits_serial{}
+      , sml::state<state_text_logits_sample_projection> <= sml::state<state_text_logits_bind_result_decision>
+          + sml::completion<step_run>
+          [ guard::guard_forced_text_token_sampling_parallel{} ]
+          / action::effect_compute_text_token_logits_parallel{}
       , sml::state<state_text_logits_result_decision> <= sml::state<state_text_logits_bind_result_decision>
           + sml::completion<step_run> [ guard::guard_forced_text_token_valid_without_sampling_consume{} ]
           / action::effect_publish_forced_text_token{}
@@ -645,8 +674,13 @@ struct model {
           + sml::completion<step_run> [ guard::guard_text_logits_projection_bound_and_no_forced_token_argmax{} ]
           / action::effect_select_text_token{}
       , sml::state<state_text_logits_sample_projection> <= sml::state<state_text_logits_bind_result_decision>
-          + sml::completion<step_run> [ guard::guard_text_logits_projection_bound_and_no_forced_token_sampling{} ]
-          / action::effect_compute_text_token_logits{}
+          + sml::completion<step_run>
+          [ guard::guard_text_logits_sampling_serial{} ]
+          / action::effect_compute_text_token_logits_serial{}
+      , sml::state<state_text_logits_sample_projection> <= sml::state<state_text_logits_bind_result_decision>
+          + sml::completion<step_run>
+          [ guard::guard_text_logits_sampling_parallel{} ]
+          / action::effect_compute_text_token_logits_parallel{}
       , sml::state<state_step_error_out_decision> <= sml::state<state_text_logits_bind_result_decision>
           + sml::completion<step_run> [ guard::guard_text_logits_projection_bound_and_no_forced_token_sampling_invalid{} ]
           / action::effect_mark_graph_execution_unsupported{}
@@ -733,8 +767,13 @@ struct model {
       , sml::state<state_depformer_input_projection_bind_result_decision> <= sml::state<state_depformer_input>
           + sml::completion<step_run>
       , sml::state<state_depformer_input_projection> <= sml::state<state_depformer_input_projection_bind_result_decision>
-          + sml::completion<step_run> [ guard::guard_depformer_input_projection_bound{} ]
-          / action::effect_run_depformer_input_projection{}
+          + sml::completion<step_run>
+          [ guard::guard_depformer_input_projection_serial{} ]
+          / action::effect_run_depformer_input_projection_serial{}
+      , sml::state<state_depformer_input_projection> <= sml::state<state_depformer_input_projection_bind_result_decision>
+          + sml::completion<step_run>
+          [ guard::guard_depformer_input_projection_parallel{} ]
+          / action::effect_run_depformer_input_projection_parallel{}
       , sml::state<state_step_error_out_decision> <= sml::state<state_depformer_input_projection_bind_result_decision>
           + sml::completion<step_run> [ guard::guard_depformer_input_projection_bind_failed{} ]
           / action::effect_mark_graph_execution_unsupported{}
@@ -801,8 +840,11 @@ struct model {
       , sml::state<state_depformer_layer_projection_bind_result_decision> <= sml::state<state_depformer_layer_projection>
           + sml::completion<step_run>
       , sml::state<state_depformer_layer_projection_run> <= sml::state<state_depformer_layer_projection_bind_result_decision>
-          + sml::completion<step_run> [ guard::guard_projection_view_bound{} ]
-          / action::effect_run_depformer_layer_projection{}
+          + sml::completion<step_run> [ guard::guard_projection_view_bound_serial{} ]
+          / action::effect_run_depformer_layer_projection_serial{}
+      , sml::state<state_depformer_layer_projection_run> <= sml::state<state_depformer_layer_projection_bind_result_decision>
+          + sml::completion<step_run> [ guard::guard_projection_view_bound_parallel{} ]
+          / action::effect_run_depformer_layer_projection_parallel{}
       , sml::state<state_step_error_out_decision> <= sml::state<state_depformer_layer_projection_bind_result_decision>
           + sml::completion<step_run> [ guard::guard_projection_view_bind_failed{} ]
           / action::effect_mark_graph_execution_unsupported{}
@@ -842,8 +884,11 @@ struct model {
       , sml::state<state_depformer_layer_out_projection_bind_result_decision> <= sml::state<state_depformer_layer_out_projection>
           + sml::completion<step_run>
       , sml::state<state_depformer_layer_out_projection_run> <= sml::state<state_depformer_layer_out_projection_bind_result_decision>
-          + sml::completion<step_run> [ guard::guard_projection_view_bound{} ]
-          / action::effect_run_depformer_layer_out_projection{}
+          + sml::completion<step_run> [ guard::guard_projection_view_bound_serial{} ]
+          / action::effect_run_depformer_layer_out_projection_serial{}
+      , sml::state<state_depformer_layer_out_projection_run> <= sml::state<state_depformer_layer_out_projection_bind_result_decision>
+          + sml::completion<step_run> [ guard::guard_projection_view_bound_parallel{} ]
+          / action::effect_run_depformer_layer_out_projection_parallel{}
       , sml::state<state_step_error_out_decision> <= sml::state<state_depformer_layer_out_projection_bind_result_decision>
           + sml::completion<step_run> [ guard::guard_projection_view_bind_failed{} ]
           / action::effect_mark_graph_execution_unsupported{}
@@ -888,8 +933,11 @@ struct model {
       , sml::state<state_depformer_layer_gating_in_bind_result_decision> <= sml::state<state_depformer_layer_gating_in>
           + sml::completion<step_run>
       , sml::state<state_depformer_layer_gating_in_run> <= sml::state<state_depformer_layer_gating_in_bind_result_decision>
-          + sml::completion<step_run> [ guard::guard_projection_view_bound{} ]
-          / action::effect_run_depformer_layer_gating_in{}
+          + sml::completion<step_run> [ guard::guard_projection_view_bound_serial{} ]
+          / action::effect_run_depformer_layer_gating_in_serial{}
+      , sml::state<state_depformer_layer_gating_in_run> <= sml::state<state_depformer_layer_gating_in_bind_result_decision>
+          + sml::completion<step_run> [ guard::guard_projection_view_bound_parallel{} ]
+          / action::effect_run_depformer_layer_gating_in_parallel{}
       , sml::state<state_step_error_out_decision> <= sml::state<state_depformer_layer_gating_in_bind_result_decision>
           + sml::completion<step_run> [ guard::guard_projection_view_bind_failed{} ]
           / action::effect_mark_graph_execution_unsupported{}
@@ -926,8 +974,11 @@ struct model {
       , sml::state<state_depformer_layer_gating_out_bind_result_decision> <= sml::state<state_depformer_layer_gating_out>
           + sml::completion<step_run>
       , sml::state<state_depformer_layer_gating_out_run> <= sml::state<state_depformer_layer_gating_out_bind_result_decision>
-          + sml::completion<step_run> [ guard::guard_projection_view_bound{} ]
-          / action::effect_run_depformer_layer_gating_out{}
+          + sml::completion<step_run> [ guard::guard_projection_view_bound_serial{} ]
+          / action::effect_run_depformer_layer_gating_out_serial{}
+      , sml::state<state_depformer_layer_gating_out_run> <= sml::state<state_depformer_layer_gating_out_bind_result_decision>
+          + sml::completion<step_run> [ guard::guard_projection_view_bound_parallel{} ]
+          / action::effect_run_depformer_layer_gating_out_parallel{}
       , sml::state<state_step_error_out_decision> <= sml::state<state_depformer_layer_gating_out_bind_result_decision>
           + sml::completion<step_run> [ guard::guard_projection_view_bind_failed{} ]
           / action::effect_mark_graph_execution_unsupported{}
@@ -959,8 +1010,13 @@ struct model {
           + sml::completion<step_run> [ guard::guard_depformer_logits_projection_bound_argmax{} ]
           / action::effect_select_depformer_token{}
       , sml::state<state_depformer_logits_sample_projection> <= sml::state<state_depformer_logits_bind_result_decision>
-          + sml::completion<step_run> [ guard::guard_depformer_logits_projection_bound_sampling{} ]
-          / action::effect_compute_depformer_token_logits{}
+          + sml::completion<step_run>
+          [ guard::guard_depformer_logits_sampling_serial{} ]
+          / action::effect_compute_depformer_token_logits_serial{}
+      , sml::state<state_depformer_logits_sample_projection> <= sml::state<state_depformer_logits_bind_result_decision>
+          + sml::completion<step_run>
+          [ guard::guard_depformer_logits_sampling_parallel{} ]
+          / action::effect_compute_depformer_token_logits_parallel{}
       , sml::state<state_step_error_out_decision> <= sml::state<state_depformer_logits_bind_result_decision>
           + sml::completion<step_run> [ guard::guard_depformer_logits_projection_bound_sampling_invalid{} ]
           / action::effect_mark_graph_execution_unsupported{}

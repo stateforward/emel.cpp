@@ -13,6 +13,11 @@ BUILD_DIR="$ROOT_DIR/build/paritychecker_zig"
 zig_bin="$(command -v zig)"
 selected_runners=()
 
+# shellcheck source=build_jobs.sh
+source "$ROOT_DIR/scripts/build_jobs.sh"
+# shellcheck source=scripts/zig_toolchain.sh
+source "$ROOT_DIR/scripts/zig_toolchain.sh"
+
 usage() {
   cat >&2 <<'USAGE'
 usage: scripts/paritychecker.sh [--runner=<name>|--mode=<name>]...
@@ -83,10 +88,11 @@ cmake -S "$ROOT_DIR/tools/paritychecker" -B "$BUILD_DIR" -G Ninja \
   -DCMAKE_C_COMPILER_ARG1=cc \
   -DCMAKE_CXX_COMPILER="$zig_bin" \
   -DCMAKE_CXX_COMPILER_ARG1=c++ \
+  "${EMEL_ZIG_CMAKE_PLATFORM_ARGS[@]}" \
   -DGGML_METAL=OFF \
   -DLLAMA_METAL=OFF
 
-cmake --build "$BUILD_DIR" --parallel
+cmake --build "$BUILD_DIR" --parallel "$EMEL_BUILD_JOBS"
 if [[ ${#selected_runners[@]} -eq 0 ]]; then
   ctest --test-dir "$BUILD_DIR" --output-on-failure -R paritychecker_tests
   exit $?

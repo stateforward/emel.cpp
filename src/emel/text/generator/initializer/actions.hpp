@@ -51,7 +51,8 @@ struct request_backend_prepare {
         *generator.generation_contract,
         *generator.matmul_actor,
         generator.runtime_policy,
-        generator.limits.block_tokens));
+        generator.limits.block_tokens,
+        generator.matmul_lane_mode));
     ev.ctx.phase_accepted =
         ev.ctx.phase_code ==
         static_cast<int32_t>(emel::error::cast(emel::model::loader::error::none));

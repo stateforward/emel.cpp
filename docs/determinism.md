@@ -99,47 +99,57 @@ statically determined order**:
 
 ## 4. Parallel-lane policy and lane-count invariance
 
-The runtime has exactly three fork/join parallel sites, all bounded within a
-single RTC dispatch, and none of them reorders a float reduction:
+The maintained runtime has five fork/join or overlap surfaces. Every compute
+fork joins within the owning RTC dispatch, and none reorders a float reduction:
 
-1. **View-sliced parallel matmul lanes**
-   (`compute_mul_mat_sliced_parallel` in
-   `src/emel/text/generator/detail.hpp`; pool type
-   `emel::policy::thread_pool_scheduler` in `src/emel/sm.hpp`).
-   One logical `mul_mat` forks into per-lane row-slice events across kernel
-   actors on a warm thread pool. Slices are contiguous, aligned to the packed
-   storage group (`matmul_slice_group_rows`: 4 rows for q8_0_x4, 8 rows for
-   q4_k_x8/q6_k_x8, 1 otherwise), write **disjoint output rows**, and share
-   the read-only input operand. Because each output element's reduction runs
-   entirely inside one lane in the kernel's fixed order, slicing changes only
-   *which thread* computes a row, never *how* it is computed. Results are
-   therefore bitwise identical to serial dispatch and **bitwise invariant to
-   the lane count**.
+1. **Kernel-owned row-sliced matmul**
+   (`src/emel/kernel/matmul/**`). A logical `mul_mat` is routed by explicit
+   state-machine guards to serial, 2-, 4-, or 8-lane effects. The owner runs
+   lane zero while a construction-time-sized `fork_join_lane_pool` runs the
+   remaining lanes. Slices are contiguous, aligned to the packed row group,
+   write disjoint output rows, and share read-only operands. Each output
+   element's reduction stays wholly within one lane in the kernel's fixed
+   order, so results are bitwise invariant across the supported lane counts.
+   The pool starts exactly `active_lanes - 1` workers on budgeted runtime paths;
+   unused capacity does not create runnable or spinning threads.
 
-   The lane count is a compile-time constant today
-   (`k_matmul_lanes = 8`); the effective per-dispatch lane count still varies
-   as `min(8, row_groups)`, so invariance across slice counts is load-bearing
-   and is proven directly:
+   Invariance is proven directly:
    `tests/text/generator/determinism_tests.cpp` sweeps slice counts
    {1, 2, 3, 5, 8} over f32/q8_0/q4_k/q6_k GEMV and f32 GEMM and asserts
    bitwise equality with the unsliced dispatch;
-   `tests/text/generator/parallel_matmul_tests.cpp` asserts serial vs
+   `tests/kernel/matmul_tests.cpp` asserts serial vs
    parallel fork/join bit-exactness on the production dispatch helper.
 
-2. **Decode wavefront lanes**
+2. **Moshi temporal-attention head lanes**
+   (`src/emel/speech/predictor/moshi/executor/actions.hpp`). The same budgeted
+   lane pool dispatches disjoint head ranges to independent attention actors.
+   Each head writes a disjoint output interval and performs its softmax and
+   weighted-value reductions locally in fixed order. The 1/2/4/8-lane result
+   and cache state are compared exactly by
+   `tests/speech/predictor/moshi_lifecycle_tests.cpp`.
+
+3. **Speech-generator frame wavefront**
+   (`src/emel/speech/generator/actions.hpp`). A fixed two-worker stage pool can
+   overlap encoder and decoder actors with the owner-thread Moshi middle stage.
+   The actors own disjoint frame lanes, preserve typed attribution, and join
+   before the action returns. Serial stage mode creates no stage pool. Lifecycle,
+   overlap, drain, attribution, and deterministic-trace contracts are covered by
+   `tests/speech/generator/wavefront_lifecycle_tests.cpp`.
+
+4. **Decode wavefront lanes**
    (`src/emel/text/generator/decode_wavefront/actions.hpp`). Forks
    *independent generation sessions* (each with its own graph, KV state, and
    buffers) across the pool. There is no shared mutable float state between
    lanes, so each session's stream is unchanged by running next to others
    (`tools/decode_wavefront_eval` asserts sequential == parallel outputs).
 
-3. **Tensor-window stream I/O**
+5. **Tensor-window stream I/O**
    (`src/emel/model/tensor/window/actions.hpp`). Overlaps weight prefetch
    I/O with compute; it moves bytes and performs no float arithmetic.
 
 **Current invariance status: no known gaps.** No parallel route performs a
-cross-lane float reduction; flash and non-flash attention, softmax, and
-norm reductions all run serially within a generator step. If a future
+cross-lane float reduction; all softmax, norm, dot-product, and weighted-value
+reductions remain local to one output element or attention head. If a future
 parallel route must split a reduction (e.g., intra-op flash-attention
 K-splitting), it MUST either merge partial results in a fixed, lane-count-
 independent order or record the resulting per-lane-count-only guarantee here,

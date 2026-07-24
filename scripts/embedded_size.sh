@@ -2,6 +2,8 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=scripts/zig_toolchain.sh
+source "$ROOT_DIR/scripts/zig_toolchain.sh"
 BUILD_ROOT="${EMEL_EMBEDDED_SIZE_BUILD_ROOT:-$ROOT_DIR/build/embedded_size}"
 REFERENCE_REPOSITORY="${EMEL_EMBEDDED_SIZE_REFERENCE_REPOSITORY:-https://github.com/ggml-org/llama.cpp.git}"
 REFERENCE_REF="${EMEL_EMBEDDED_SIZE_REF:-}"
@@ -213,6 +215,9 @@ configure_cmake_project() {
   if [[ "$with_asm" == "with_asm" && -n "$bench_asm_arg" ]]; then
     cmake_args+=("-DCMAKE_ASM_COMPILER=$bench_cc")
     cmake_args+=("-DCMAKE_ASM_COMPILER_ARG1=$bench_asm_arg")
+  fi
+  if $USE_ZIG; then
+    cmake_args+=("${EMEL_ZIG_CMAKE_PLATFORM_ARGS[@]}")
   fi
   cmake_args+=("$@")
 

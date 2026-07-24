@@ -65,7 +65,7 @@ record runner=graph_processor kind=source path=tools/bench/graph/processor_bench
 record runner=decode_wavefront kind=source path=tools/bench/text/generator/decode_wavefront_bench.cpp reason=suite_source
 record runner=decode_wavefront kind=source path=src/emel/text/generator/decode_wavefront reason=wavefront_actor
 record runner=parallel_matmul kind=source path=tools/bench/text/generator/parallel_matmul_bench.cpp reason=suite_source
-record runner=parallel_matmul kind=source path=src/emel/text/generator/detail.hpp reason=parallel_matmul_lanes
+record runner=parallel_matmul kind=source path=src/emel/kernel/matmul reason=parallel_matmul_actor
 record runner=weight_streaming kind=source path=tools/bench/model/tensor/window_streaming_bench.cpp reason=suite_source
 record runner=weight_streaming kind=source path=src/emel/model/tensor/window reason=window_actor
 record runner=weight_streaming kind=source path=src/emel/io/mmap reason=mmap_actor

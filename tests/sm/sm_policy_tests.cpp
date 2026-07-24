@@ -737,6 +737,128 @@ TEST_CASE("fork_join_lane_pool_wait_returns_after_worker_slot_reusable") {
   CHECK(ran.load(std::memory_order_acquire) == k_rounds);
 }
 
+TEST_CASE("fork_join_lane_pool_batch_uses_distinct_workers_and_drains") {
+  using pool_type = emel::policy::fork_join_lane_pool<2u, 128u, 64u>;
+  pool_type pool{};
+  pool_type::join_group group{};
+  std::atomic<int32_t> entered{0};
+  std::atomic<bool> release{false};
+
+  const size_t submitted = pool.try_submit_batch(
+      group,
+      [&]() noexcept {
+        entered.fetch_add(1, std::memory_order_release);
+        while (!release.load(std::memory_order_acquire)) {
+          std::this_thread::yield();
+        }
+      },
+      [&]() noexcept {
+        entered.fetch_add(1, std::memory_order_release);
+        while (!release.load(std::memory_order_acquire)) {
+          std::this_thread::yield();
+        }
+      });
+
+  CHECK(submitted == 2u);
+  require_eventually("batch tasks did not enter distinct workers", [&]() {
+    return entered.load(std::memory_order_acquire) == 2;
+  });
+  release.store(true, std::memory_order_release);
+  CHECK(group.wait());
+}
+
+TEST_CASE("fork_join_lane_pool_starts_only_the_runtime_worker_budget") {
+  using pool_type = emel::policy::fork_join_lane_pool<7u, 128u, 64u>;
+  pool_type pool{1u};
+  CHECK(pool.active_worker_count() == 1u);
+
+  pool_type::join_group group{};
+  std::atomic<int32_t> ran{0};
+  const size_t submitted = pool.try_submit_batch(
+      group,
+      [&]() noexcept { ran.fetch_add(1, std::memory_order_relaxed); },
+      [&]() noexcept { ran.fetch_add(1, std::memory_order_relaxed); });
+
+  CHECK(submitted == 1u);
+  CHECK_FALSE(group.wait());
+  CHECK(ran.load(std::memory_order_acquire) == 1);
+}
+
+TEST_CASE("fork_join_lane_pool_batch_rejects_partial_claim_and_reuses_slots") {
+  using pool_type = emel::policy::fork_join_lane_pool<2u, 128u, 64u>;
+  pool_type pool{};
+  pool_type::join_group partial_group{};
+  std::atomic<int32_t> entered{0};
+  std::atomic<bool> release{false};
+  std::atomic<bool> unclaimed_ran{false};
+
+  const size_t submitted = pool.try_submit_batch(
+      partial_group,
+      [&]() noexcept {
+        entered.fetch_add(1, std::memory_order_release);
+        while (!release.load(std::memory_order_acquire)) {
+          std::this_thread::yield();
+        }
+      },
+      [&]() noexcept {
+        entered.fetch_add(1, std::memory_order_release);
+        while (!release.load(std::memory_order_acquire)) {
+          std::this_thread::yield();
+        }
+      },
+      [&]() noexcept { unclaimed_ran.store(true, std::memory_order_release); });
+
+  CHECK(submitted == 2u);
+  require_eventually("partial batch tasks did not enter", [&]() {
+    return entered.load(std::memory_order_acquire) == 2;
+  });
+  CHECK_FALSE(unclaimed_ran.load(std::memory_order_acquire));
+  release.store(true, std::memory_order_release);
+  CHECK_FALSE(partial_group.wait());
+
+  pool_type::join_group reuse_group{};
+  std::atomic<int32_t> reused{0};
+  size_t reused_count = 0u;
+  bool reuse_joined = false;
+  size_t allocation_count = 0u;
+  {
+    allocation_scope allocations{};
+    reused_count = pool.try_submit_batch(
+        reuse_group,
+        [&]() noexcept { reused.fetch_add(1, std::memory_order_relaxed); },
+        [&]() noexcept { reused.fetch_add(1, std::memory_order_relaxed); });
+    reuse_joined = reuse_group.wait();
+    allocation_count = allocations.allocations();
+  }
+  CHECK(reused_count == 2u);
+  CHECK(reuse_joined);
+  CHECK(reused.load(std::memory_order_acquire) == 2);
+  CHECK(allocation_count == 0u);
+}
+
+TEST_CASE("fork_join_lane_pool_batch_rejects_same_pool_worker_submit") {
+  using pool_type = emel::policy::fork_join_lane_pool<1u, 128u, 64u>;
+  pool_type pool{};
+  pool_type::join_group outer_group{};
+  std::atomic<size_t> nested_submitted{1u};
+  std::atomic<bool> nested_joined{true};
+  std::atomic<bool> nested_ran{false};
+
+  REQUIRE(pool.try_submit(outer_group, [&]() noexcept {
+    pool_type::join_group nested_group{};
+    nested_submitted.store(
+        pool.try_submit_batch(nested_group, [&]() noexcept {
+          nested_ran.store(true, std::memory_order_release);
+        }),
+        std::memory_order_release);
+    nested_joined.store(nested_group.wait(), std::memory_order_release);
+  }));
+  CHECK(outer_group.wait());
+  CHECK(nested_submitted.load(std::memory_order_acquire) == 0u);
+  CHECK_FALSE(nested_joined.load(std::memory_order_acquire));
+  CHECK_FALSE(nested_ran.load(std::memory_order_acquire));
+}
+
 TEST_CASE("co_sm_contextful_wrapper_injects_context") {
   namespace sml = stateforward::sml;
   context_co_probe ctx{.value = 40};

@@ -372,6 +372,10 @@ render_template(const fs::path &template_path,
     }
   }
 
+  if (rendered.empty() || rendered.back() != '\n') {
+    rendered.push_back('\n');
+  }
+
   return rendered;
 }
 

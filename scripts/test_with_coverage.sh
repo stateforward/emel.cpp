@@ -16,6 +16,8 @@ COVERAGE_TEST_REGEX="${EMEL_COVERAGE_TEST_REGEX:-}"
 COVERAGE_GCOV_JOBS="${EMEL_COVERAGE_GCOV_JOBS:-}"
 COVERAGE_TEST_EXTRA_ARG="${EMEL_COVERAGE_TEST_EXTRA_ARG:-}"
 COVERAGE_TEST_SHARDS="${EMEL_COVERAGE_TEST_SHARDS:-}"
+COVERAGE_C_COMPILER="${EMEL_COVERAGE_C_COMPILER:-gcc}"
+COVERAGE_CXX_COMPILER="${EMEL_COVERAGE_CXX_COMPILER:-g++}"
 # ctest's built-in default test timeout is 1500s; O0 coverage-instrumented
 # shards can exceed it on slower hosts, so make it overridable.
 COVERAGE_CTEST_TIMEOUT="${EMEL_COVERAGE_CTEST_TIMEOUT:-1500}"
@@ -39,7 +41,16 @@ if ! command -v llvm-cov >/dev/null 2>&1 || ! command -v llvm-profdata >/dev/nul
   done
 fi
 
-required_tools=(cmake ctest gcovr clang-format llvm-cov llvm-profdata gcc g++)
+required_tools=(
+  cmake
+  ctest
+  gcovr
+  clang-format
+  llvm-cov
+  llvm-profdata
+  "$COVERAGE_C_COMPILER"
+  "$COVERAGE_CXX_COMPILER"
+)
 if [[ "$COVERAGE_CHANGED_ONLY" == "1" && "$COVERAGE_CHANGED_LINE_ONLY" != "0" ]]; then
   required_tools+=(python3)
 fi
@@ -288,16 +299,17 @@ fi
 
 cmake -S . -B "$COVERAGE_BUILD_DIR" -G Ninja \
   -DCMAKE_BUILD_TYPE=Debug \
-  -DCMAKE_C_COMPILER=gcc \
-  -DCMAKE_CXX_COMPILER=g++ \
+  -DCMAKE_C_COMPILER="$COVERAGE_C_COMPILER" \
+  -DCMAKE_CXX_COMPILER="$COVERAGE_CXX_COMPILER" \
   -DCMAKE_C_FLAGS="--coverage -O0 -fprofile-update=atomic" \
   -DCMAKE_CXX_FLAGS="--coverage -O0 -fprofile-update=atomic" \
   -DCMAKE_EXE_LINKER_FLAGS="--coverage" \
   -DEMEL_TEST_EXTRA_ARG="$COVERAGE_TEST_EXTRA_ARG" \
   -DEMEL_TEST_SHARDS="$COVERAGE_TEST_SHARDS"
 
-# Instrumented g++ peaks ~7-8GB on the template-heavy TUs: recompute the
-# bound with an 8GB per-job budget regardless of the inherited job count.
+# Instrumented C++ compilation peaks ~7-8GB on the template-heavy TUs:
+# recompute the bound with an 8GB per-job budget regardless of the inherited
+# job count.
 COVERAGE_BUILD_JOBS="${EMEL_COVERAGE_BUILD_JOBS:-$(emel_compute_build_jobs 8)}"
 cmake --build "$COVERAGE_BUILD_DIR" --parallel "$COVERAGE_BUILD_JOBS"
 

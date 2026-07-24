@@ -252,11 +252,9 @@ int main(int argc, char **argv) {
     return 1;
   }
 
-  std::vector<float> prepared(
-      mimi::prepared_arena_floats(*loaded.model));
+  std::vector<float> prepared(mimi::prepared_arena_floats(*loaded.model));
   std::vector<float> state(mimi::state_arena_floats(*loaded.model));
-  std::vector<float> workspace(
-      mimi::workspace_arena_floats(*loaded.model));
+  std::vector<float> workspace(mimi::workspace_arena_floats(*loaded.model));
   std::vector<float> frame(mimi::frame_arena_floats(*loaded.model));
   if (prepared.empty() || state.empty() || workspace.empty() || frame.empty()) {
     std::fprintf(stderr, "model does not describe a mimi codec component\n");
@@ -265,9 +263,12 @@ int main(int argc, char **argv) {
 
   mimi::sm codec{};
   emel::error::type err = emel::error::cast(mimi::error::none);
-  mimi::event::initialize init{
-      *loaded.model, std::span<float>{prepared}, std::span<float>{state},
-      std::span<float>{workspace}, std::span<float>{frame}};
+  mimi::event::initialize init{*loaded.model,
+                               mimi::make_bind_contract(*loaded.model),
+                               std::span<float>{prepared},
+                               std::span<float>{state},
+                               std::span<float>{workspace},
+                               std::span<float>{frame}};
   init.error_out = &err;
   init.on_done = emel::callback<void(
       const mimi::events::initialize_done &)>::from<&on_codec_initialized>();

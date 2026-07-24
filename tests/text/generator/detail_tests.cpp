@@ -43,21 +43,19 @@ using emel::text::generator::detail::quant::QK8_0;
 using emel::text::generator::detail::quant::QK_K;
 
 struct matmul_actor_fixture {
-  emel::text::generator::matmul::lane_pool<7u, 128u, 1048576u>
-      parallel_matmul_lanes = {};
-  emel::text::generator::matmul::execution_policy policy =
-      emel::text::generator::matmul::make_auto_execution_policy(
-          parallel_matmul_lanes);
-  emel::text::generator::matmul::sm actor{policy};
+  emel::kernel::matmul::lane_pool parallel_matmul_lanes = {};
+  emel::kernel::matmul::execution_policy policy =
+      emel::kernel::matmul::make_auto_execution_policy(parallel_matmul_lanes);
+  emel::kernel::matmul::sm actor{policy};
 };
 
 void bind_test_matmul_actor(
     emel::text::generator::detail::native_backend &backend,
     matmul_actor_fixture &matmul) {
   backend.matmul_actor = &matmul.actor;
+  backend.matmul_lane_mode = emel::kernel::matmul::lane_mode::parallel;
   matmul.actor.process_event(
-      emel::text::generator::matmul::event::configure_kernel_kind{
-          backend.kernel_kind});
+      emel::kernel::matmul::event::configure_kernel_kind{backend.kernel_kind});
 }
 
 uint16_t fp16_bits(const float value) {
@@ -515,7 +513,7 @@ struct chunk4_prefill_runtime_fixture {
     backend.kernel_kind = emel::kernel::kernel_kind::aarch64;
     backend.matmul_actor = &matmul.actor;
     matmul.actor.process_event(
-        emel::text::generator::matmul::event::configure_kernel_kind{
+        emel::kernel::matmul::event::configure_kernel_kind{
             backend.kernel_kind});
     backend.model = &model;
     backend.n_vocab = k_vocab;
@@ -732,7 +730,7 @@ struct hybrid_chunked_q8_runtime_fixture {
     backend.kernel_kind = emel::kernel::kernel_kind::aarch64;
     backend.matmul_actor = &matmul.actor;
     matmul.actor.process_event(
-        emel::text::generator::matmul::event::configure_kernel_kind{
+        emel::kernel::matmul::event::configure_kernel_kind{
             backend.kernel_kind});
     backend.model = &model;
     backend.n_vocab = k_vocab;
@@ -4275,14 +4273,14 @@ TEST_CASE("generator_detail_run_kernel_flash_prefill_parallel_chunk8_keeps_"
   // The parallel route must keep every prefill matmul on the matmul lane
   // actors; the matmul actor's serial kernel stays untouched.
   CHECK(parallel_fixture->backend.kernel.optimized_q4_dispatch_count() == 0u);
-  CHECK(parallel_fixture->matmul.actor.serial_kernel()
-            .optimized_q4_dispatch_count() == 0u);
-  uint64_t lane_q4_dispatches = 0u;
-  for (const auto &lane_kernel :
-       parallel_fixture->matmul.actor.parallel_lane_kernels()) {
-    lane_q4_dispatches += lane_kernel.optimized_q4_dispatch_count();
-  }
-  CHECK(lane_q4_dispatches > 0u);
+  emel::kernel::matmul::event::diagnostics matmul_diagnostics = {};
+  bool diagnostics_accepted = false;
+  const emel::kernel::matmul::event::capture_diagnostics capture{
+      matmul_diagnostics, diagnostics_accepted};
+  REQUIRE(parallel_fixture->backend.matmul_actor->process_event(capture));
+  REQUIRE(diagnostics_accepted);
+  CHECK(matmul_diagnostics.serial_optimized_q4_dispatch_calls == 0u);
+  CHECK(matmul_diagnostics.parallel_optimized_q4_dispatch_calls > 0u);
 
   // Row-sliced lanes write disjoint dst rows and reorder no reductions, so
   // the parallel output is bit-identical to the serial dispatch.

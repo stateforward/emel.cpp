@@ -11,9 +11,61 @@ namespace emel::kernel::action {
 struct context;
 }
 
+namespace emel::kernel {
+
+enum class kernel_kind : uint8_t {
+  x86_64 = 0,
+  aarch64 = 1,
+};
+
+constexpr kernel_kind detect_host_kind() noexcept {
+#if defined(__aarch64__) || defined(_M_ARM64)
+  return kernel_kind::aarch64;
+#else
+  return kernel_kind::x86_64;
+#endif
+}
+
+} // namespace emel::kernel
+
 namespace emel::kernel::event {
 
 struct dispatch {};
+
+struct configure_kind {
+  emel::kernel::kernel_kind kind = emel::kernel::kernel_kind::x86_64;
+};
+
+struct diagnostics {
+  uint64_t optimized_flash_dispatch_calls = 0u;
+  uint64_t shared_flash_dispatch_calls = 0u;
+  uint64_t optimized_q2_dispatch_calls = 0u;
+  uint64_t shared_q2_dispatch_calls = 0u;
+  uint64_t optimized_q3_dispatch_calls = 0u;
+  uint64_t shared_q3_dispatch_calls = 0u;
+  uint64_t optimized_q4_dispatch_calls = 0u;
+  uint64_t optimized_q4_vector_dispatch_calls = 0u;
+  uint64_t optimized_q4_vector_packed_dispatch_calls = 0u;
+  uint64_t optimized_q4_vector_packed_q8_rhs_dispatch_calls = 0u;
+  uint64_t shared_q4_dispatch_calls = 0u;
+  uint64_t optimized_q6_dispatch_calls = 0u;
+  uint64_t optimized_q6_vector_dispatch_calls = 0u;
+  uint64_t optimized_q6_vector_argmax_dispatch_calls = 0u;
+  uint64_t optimized_q6_vector_packed_dispatch_calls = 0u;
+  uint64_t optimized_q6_vector_packed_q8_rhs_dispatch_calls = 0u;
+  uint64_t optimized_q6_vector_packed_q8_rhs_argmax_dispatch_calls = 0u;
+  uint64_t optimized_q6_vector_prepared_q8_rhs_dispatch_calls = 0u;
+  uint64_t optimized_q6_vector_prepared_q8_rhs_i8mm_dispatch_calls = 0u;
+  uint64_t optimized_q6_vector_prepared_q8_rhs_argmax_i8mm_dispatch_calls = 0u;
+  uint64_t optimized_q6_vector_q8_argmax_prepared_i8mm_dispatch_calls = 0u;
+  uint64_t shared_q6_dispatch_calls = 0u;
+};
+
+struct capture_diagnostics {
+  explicit capture_diagnostics(diagnostics &out_ref) noexcept : out(out_ref) {}
+
+  diagnostics &out;
+};
 
 //------------------------------------------------------------------------------
 // GGML/GGUF opcode events.

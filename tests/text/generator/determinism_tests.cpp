@@ -19,9 +19,10 @@
 namespace {
 
 namespace gen_detail = emel::text::generator::detail;
+namespace matmul_detail = emel::kernel::matmul::detail;
 using emel::kernel::event::dtype;
 using gen_detail::matmul_lane_mode;
-using gen_detail::matmul_row_slice;
+using matmul_detail::matmul_row_slice;
 
 inline constexpr size_t k_test_matmul_lanes = 8u;
 
@@ -41,7 +42,7 @@ emel::model::data::tensor_record make_tensor_record(void *data,
 }
 
 // Contiguous group-aligned partition of `rows` into exactly `slice_count`
-// slices: the same shape the production compute_matmul_row_slices emits,
+// slices: the same shape the production fixed-lane actor emits,
 // parameterized over the slice count so the tests can sweep every effective
 // lane count instead of only one fixed topology.
 size_t
@@ -125,7 +126,7 @@ bool outputs_identical(const std::vector<float> &lhs,
 }
 
 uint64_t matmul_group_rows_for_test(const dtype type) noexcept {
-  namespace matmul = emel::text::generator::matmul;
+  namespace matmul = emel::kernel::matmul;
   if (matmul::guard::guard_uses_x8_row_groups(type)) {
     return emel::kernel::detail::quant::Q4_K_X8_ROWS;
   }
@@ -147,7 +148,7 @@ bool run_row_sliced(emel::kernel::sm &kernel, const matmul_case &fixture,
                                       group_rows, slice_count, slices);
   bool all_ok = true;
   for (size_t lane = 0; lane < lanes; ++lane) {
-    const auto sliced = gen_detail::compute_sliced_mul_mat_event(
+    const auto sliced = matmul_detail::compute_sliced_mul_mat_event(
         full, group_rows, slices[lane]);
     all_ok = all_ok && kernel.process_event(sliced);
   }
@@ -204,16 +205,16 @@ TEST_CASE("determinism: row-sliced matmul bitwise invariant across slice "
 TEST_CASE("determinism: parallel fork/join dispatch bitwise repeatable and "
           "serial-identical") {
   const matmul_case fixture(dtype::q8_0, 64, 61, 1);
-  emel::text::generator::matmul::lane_pool<7u, 128u, 1048576u> parallel_matmul_lanes = {};
-  auto policy = emel::text::generator::matmul::make_auto_execution_policy(
+  emel::kernel::matmul::lane_pool parallel_matmul_lanes = {};
+  auto policy = emel::kernel::matmul::make_auto_execution_policy(
       parallel_matmul_lanes);
-  emel::text::generator::matmul::sm matmul_actor{policy};
+  emel::kernel::matmul::sm matmul_actor{policy};
   gen_detail::native_backend backend = {};
   backend.kernel_kind = policy.kernel_kind;
   backend.kernel.set_kind(backend.kernel_kind);
   backend.matmul_actor = &matmul_actor;
   matmul_actor.process_event(
-      emel::text::generator::matmul::event::configure_kernel_kind{backend.kernel_kind});
+      emel::kernel::matmul::event::configure_kernel_kind{backend.kernel_kind});
 
   std::vector<float> serial_output = {};
   const auto serial_ev = fixture.event_for(serial_output);

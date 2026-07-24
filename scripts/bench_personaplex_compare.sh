@@ -5,6 +5,8 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # shellcheck source=scripts/build_jobs.sh
 source "$ROOT_DIR/scripts/build_jobs.sh"
+# shellcheck source=scripts/zig_toolchain.sh
+source "$ROOT_DIR/scripts/zig_toolchain.sh"
 
 BUILD_DIR="${EMEL_PERSONAPLEX_COMPARE_BUILD_DIR:-$ROOT_DIR/build/personaplex_compare_tools_zig}"
 OUTPUT_DIR="${EMEL_PERSONAPLEX_COMPARE_OUTPUT_DIR:-$ROOT_DIR/build/personaplex_compare}"
@@ -26,11 +28,12 @@ usage: scripts/bench_personaplex_compare.sh [options]
                      "Hey, I'm Gabe. How are you doing?"
   --emel-lm PATH     enriched EMEL LM artifact; defaults to the unpacked
                      model in the configured artifact directory
-  --emel-mimi PATH   enriched EMEL Mimi artifact; defaults to the float
-                     model in the configured artifact directory
+  --emel-mimi PATH   enriched EMEL Mimi artifact; defaults to the selective
+                     Q8_0 model in the configured artifact directory
   --frames N         generated frames per lane (default: 125 / 10 seconds)
   --seed N           fixed sampling seed (default: 1234)
-  --threads N        CPU threads in moshi.cpp reference lane (default: 1)
+  --threads N        active CPU lanes in EMEL and CPU threads in moshi.cpp
+                     (supported: 1, 2, 4, or 8; default: 1)
   --output-dir PATH  output WAV/log/report directory
   --build-only       fetch/configure/build without running
   --run-only         use an existing build and artifacts
@@ -63,8 +66,26 @@ for value in "$FRAMES" "$SEED" "$THREADS"; do
     exit 1
   fi
 done
-if ! command -v python3 >/dev/null 2>&1; then
-  echo "error: required tool missing: python3" >&2
+if [[ ! "$THREADS" =~ ^(1|2|4|8)$ ]]; then
+  echo "error: threads must be 1, 2, 4, or 8" >&2
+  exit 1
+fi
+PYTHON_BIN="${PYTHON_BIN:-}"
+if [[ -z "$PYTHON_BIN" ]]; then
+  for candidate in python3.12 python3.13 /usr/bin/python3 python3; do
+    if command -v "$candidate" >/dev/null 2>&1; then
+      candidate_path="$(command -v "$candidate")"
+      if "$candidate_path" -c 'import hashlib, json, subprocess' \
+        >/dev/null 2>&1; then
+        PYTHON_BIN="$candidate_path"
+        break
+      fi
+    fi
+  done
+fi
+if [[ -z "$PYTHON_BIN" ]] ||
+   ! "$PYTHON_BIN" -c 'import hashlib, json, subprocess' >/dev/null 2>&1; then
+  echo "error: no usable Python 3 interpreter" >&2
   exit 1
 fi
 
@@ -75,7 +96,7 @@ if ! $RUN_ONLY; then
       exit 1
     fi
   done
-  "$ROOT_DIR/scripts/setup_moshi_cpp_reference.sh" >/dev/null
+  bash "$ROOT_DIR/scripts/setup_moshi_cpp_reference.sh" >/dev/null
   zig_bin="$(command -v zig)"
   cmake -S "$ROOT_DIR/tools/bench" -B "$BUILD_DIR" -G Ninja \
     -DCMAKE_BUILD_TYPE=Release \
@@ -88,7 +109,8 @@ if ! $RUN_ONLY; then
     -DCMAKE_ASM_COMPILER="$zig_bin" \
     -DCMAKE_ASM_COMPILER_ARG1=cc \
     -DCMAKE_C_FLAGS=-fno-sanitize=undefined \
-    -DCMAKE_CXX_FLAGS=-fno-sanitize=undefined
+    -DCMAKE_CXX_FLAGS=-fno-sanitize=undefined \
+    "${EMEL_ZIG_CMAKE_PLATFORM_ARGS[@]}"
   cmake --build "$BUILD_DIR" --parallel "$EMEL_BUILD_JOBS" \
     --target personaplex_emel_runner moshi_reference_driver
 fi
@@ -132,19 +154,23 @@ for path in "$AUDIO" "$EMEL_RUNNER" "$REFERENCE_DRIVER" "$EMEL_MIMI" \
   fi
 done
 
-python3 "$ROOT_DIR/tools/bench/personaplex_compare.py" \
-  --emel-runner "$EMEL_RUNNER" \
-  --reference-driver "$REFERENCE_DRIVER" \
-  --emel-mimi "$EMEL_MIMI" \
-  --reference-mimi "$REFERENCE_MIMI" \
-  --emel-lm "$EMEL_LM" \
-  --reference-lm "$REFERENCE_LM" \
-  --emel-voice "$EMEL_VOICE" \
-  --reference-voice "$REFERENCE_VOICE" \
-  --config "$CONFIG" \
-  --inference-config "$INFERENCE_CONFIG" \
-  --audio "$AUDIO" \
-  --output-dir "$OUTPUT_DIR" \
-  --frames "$FRAMES" \
-  --seed "$SEED" \
+compare_args=(
+  --emel-runner "$EMEL_RUNNER"
+  --reference-driver "$REFERENCE_DRIVER"
+  --emel-mimi "$EMEL_MIMI"
+  --reference-mimi "$REFERENCE_MIMI"
+  --emel-lm "$EMEL_LM"
+  --reference-lm "$REFERENCE_LM"
+  --emel-voice "$EMEL_VOICE"
+  --reference-voice "$REFERENCE_VOICE"
+  --config "$CONFIG"
+  --inference-config "$INFERENCE_CONFIG"
+  --audio "$AUDIO"
+  --output-dir "$OUTPUT_DIR"
+  --frames "$FRAMES"
+  --seed "$SEED"
   --threads "$THREADS"
+)
+
+"$PYTHON_BIN" "$ROOT_DIR/tools/bench/personaplex_compare.py" \
+  "${compare_args[@]}"

@@ -74,6 +74,27 @@ struct state_flush_done_channel_decision {};
 struct state_flush_error_channel_decision {};
 struct state_errored {};
 
+struct state_wavefront_fill0 {};
+struct state_wavefront_fill0_result {};
+struct state_wavefront_fill1_model0 {};
+struct state_wavefront_fill1_model0_result {};
+struct state_wavefront_steady_even {};
+struct state_wavefront_steady_even_result {};
+struct state_wavefront_steady_odd {};
+struct state_wavefront_steady_odd_result {};
+struct state_wavefront_empty_flush_result {};
+struct state_wavefront_drain_model_result {};
+struct state_wavefront_drain_model_decode_even_result {};
+struct state_wavefront_drain_model_decode_odd_result {};
+struct state_wavefront_final_decode_lane0 {};
+struct state_wavefront_final_decode_lane0_result {};
+struct state_wavefront_final_decode_lane1 {};
+struct state_wavefront_final_decode_lane1_result {};
+struct state_wavefront_complete {};
+struct state_wavefront_error_channel_decision {};
+struct state_wavefront_errored {};
+struct state_wavefront_reset_result {};
+
 /*
 generic speech generator (single source of truth)
 
@@ -774,6 +795,989 @@ template <class dependencies_type> struct synthesis_model {
   }
 };
 
+/*
+opt-in speech generator stage wavefront
+
+state purpose
+- fill0 accepts only frame zero and runs encode on the dedicated codec worker.
+- fill1_model0, steady parity, drain, and final-decode states are extended by
+  the additive wavefront transitions below without changing serial modes.
+- the error state retains no work: every accepted stage submission is joined
+  by the action that submitted it before the transition can complete.
+
+control invariants
+- phase and parity are represented only by SML states and compile-time lane
+  action types; no runtime lane table or wrapped inactive index exists.
+- the canonical generator sm owns the context and public process wrappers.
+- fixed encoded/generated lanes and attribution live in the wavefront context.
+*/
+template <action::wavefront_dependencies dependencies_type>
+struct wavefront_model {
+  auto operator()() const {
+    namespace sml = stateforward::sml;
+
+    using event_frame = detail::wavefront_frame_run;
+    using event_flush = detail::wavefront_flush_run;
+    using event_reset = detail::event_wavefront_reset_run;
+    using phase_fill0 = guard::guard_wavefront_phase_succeeded<
+        dependencies_type, action::lane_zero, action::lane_zero,
+        action::lane_zero, true, false, false, false>;
+    using guard_fill0_done_present =
+        guard::guard_wavefront_phase_success_done_present<
+            event_frame, dependencies_type, phase_fill0>;
+    using guard_fill0_done_absent =
+        guard::guard_wavefront_phase_success_done_absent<
+            event_frame, dependencies_type, phase_fill0>;
+    using phase_fill1_model0 = guard::guard_wavefront_phase_succeeded<
+        dependencies_type, action::lane_one, action::lane_zero,
+        action::lane_zero, true, true, false, false>;
+    using phase_steady_even = guard::guard_wavefront_phase_succeeded<
+        dependencies_type, action::lane_zero, action::lane_one,
+        action::lane_zero, true, true, true, true>;
+    using phase_steady_odd = guard::guard_wavefront_phase_succeeded<
+        dependencies_type, action::lane_one, action::lane_zero,
+        action::lane_one, true, true, true, true>;
+    using phase_empty_flush = guard::guard_wavefront_phase_succeeded<
+        dependencies_type, action::lane_zero, action::lane_zero,
+        action::lane_zero, false, false, false, false>;
+    using phase_drain_model = guard::guard_wavefront_phase_succeeded<
+        dependencies_type, action::lane_zero, action::lane_zero,
+        action::lane_zero, false, true, false, false>;
+    using phase_drain_even = guard::guard_wavefront_phase_succeeded<
+        dependencies_type, action::lane_zero, action::lane_one,
+        action::lane_zero, false, true, true, false>;
+    using phase_drain_odd = guard::guard_wavefront_phase_succeeded<
+        dependencies_type, action::lane_zero, action::lane_zero,
+        action::lane_one, false, true, true, false>;
+    using phase_final_lane0 = guard::guard_wavefront_phase_succeeded<
+        dependencies_type, action::lane_zero, action::lane_zero,
+        action::lane_zero, false, false, true, false>;
+    using phase_final_lane1 = guard::guard_wavefront_phase_succeeded<
+        dependencies_type, action::lane_zero, action::lane_zero,
+        action::lane_one, false, false, true, false>;
+
+    // clang-format off
+    return sml::make_transition_table(
+      //------------------------------------------------------------------------------//
+      // Fill frame zero on the dedicated encoder worker.
+        sml::state<state_wavefront_fill0_result> <= *sml::state<state_wavefront_fill0>
+          + sml::event<event_frame> [ guard::guard_wavefront_request_stage_mode<
+              dependencies_type, guard::guard_wavefront_frame_valid<dependencies_type>,
+              action::wavefront_stage_mode::parallel>{} ]
+          / action::effect_execute_wavefront_phase_parallel<
+              dependencies_type, action::lane_zero, action::lane_zero,
+              action::lane_zero, true, false, false>{}
+      , sml::state<state_wavefront_fill0_result> <= sml::state<state_wavefront_fill0>
+          + sml::event<event_frame> [ guard::guard_wavefront_request_stage_mode<
+              dependencies_type, guard::guard_wavefront_frame_valid<dependencies_type>,
+              action::wavefront_stage_mode::serial>{} ]
+          / action::effect_execute_wavefront_phase_serial<
+              dependencies_type, action::lane_zero, action::lane_zero,
+              action::lane_zero, true, false, false>{}
+      , sml::state<state_wavefront_error_channel_decision> <=
+          sml::state<state_wavefront_fill0> + sml::event<event_frame>
+          [ guard::guard_wavefront_frame_invalid<dependencies_type>{} ]
+          / action::effect_fail_wavefront<dependencies_type, event_frame,
+              error::invalid_request, false>{}
+      , sml::state<state_wavefront_fill1_model0> <=
+          sml::state<state_wavefront_fill0_result> + sml::completion<event_frame>
+          [ guard_fill0_done_present{} ]
+          / action::effect_publish_wavefront_frame_pending<dependencies_type, true>{}
+      , sml::state<state_wavefront_fill1_model0> <=
+          sml::state<state_wavefront_fill0_result> + sml::completion<event_frame>
+          [ guard_fill0_done_absent{} ]
+          / action::effect_publish_wavefront_frame_pending<dependencies_type, false>{}
+      , sml::state<state_wavefront_error_channel_decision> <=
+          sml::state<state_wavefront_fill0_result> + sml::completion<event_frame>
+          [ guard::guard_wavefront_submission_failed<
+                event_frame, dependencies_type, phase_fill0>{} ]
+          / action::effect_fail_wavefront<dependencies_type, event_frame,
+              error::stage_submit_failed, false>{}
+      , sml::state<state_wavefront_error_channel_decision> <=
+          sml::state<state_wavefront_fill0_result> + sml::completion<event_frame>
+          [ guard::guard_wavefront_encode_rejected<
+                event_frame, dependencies_type, phase_fill0>{} ]
+          / action::effect_fail_wavefront<dependencies_type, event_frame,
+              error::encode_failed, false, error::unsupported_request>{}
+      , sml::state<state_wavefront_error_channel_decision> <=
+          sml::state<state_wavefront_fill0_result> + sml::completion<event_frame>
+          [ guard::guard_wavefront_encode_failed<
+                event_frame, dependencies_type, phase_fill0>{} ]
+          / action::effect_fail_wavefront<dependencies_type, event_frame,
+              error::encode_failed, false>{}
+      , sml::state<state_wavefront_error_channel_decision> <=
+          sml::state<state_wavefront_fill0_result> + sml::completion<event_frame>
+          [ guard::guard_wavefront_attribution_failed<
+                event_frame, dependencies_type, phase_fill0>{} ]
+          / action::effect_fail_wavefront<dependencies_type, event_frame,
+              error::attribution_failed, false>{}
+
+      //------------------------------------------------------------------------------//
+      // Fill frame one while the parent runs middle frame zero.
+      , sml::state<state_wavefront_fill1_model0_result> <=
+          sml::state<state_wavefront_fill1_model0> + sml::event<event_frame>
+          [ guard::guard_wavefront_request_stage_mode<dependencies_type,
+                guard::guard_wavefront_frame_valid<dependencies_type>,
+                action::wavefront_stage_mode::parallel>{} ]
+          / action::effect_execute_wavefront_phase_parallel<
+              dependencies_type, action::lane_one, action::lane_zero,
+              action::lane_zero, true, true, false>{}
+      , sml::state<state_wavefront_fill1_model0_result> <=
+          sml::state<state_wavefront_fill1_model0> + sml::event<event_frame>
+          [ guard::guard_wavefront_request_stage_mode<dependencies_type,
+                guard::guard_wavefront_frame_valid<dependencies_type>,
+                action::wavefront_stage_mode::serial>{} ]
+          / action::effect_execute_wavefront_phase_serial<
+              dependencies_type, action::lane_one, action::lane_zero,
+              action::lane_zero, true, true, false>{}
+      , sml::state<state_wavefront_error_channel_decision> <=
+          sml::state<state_wavefront_fill1_model0> + sml::event<event_frame>
+          [ guard::guard_wavefront_frame_invalid<dependencies_type>{} ]
+          / action::effect_fail_wavefront<dependencies_type, event_frame,
+              error::invalid_request, false>{}
+      , sml::state<state_wavefront_steady_even> <=
+          sml::state<state_wavefront_fill1_model0_result>
+          + sml::completion<event_frame>
+          [ guard::guard_wavefront_phase_success_done_present<
+                event_frame, dependencies_type, phase_fill1_model0>{} ]
+          / action::effect_publish_wavefront_frame_pending<dependencies_type, true>{}
+      , sml::state<state_wavefront_steady_even> <=
+          sml::state<state_wavefront_fill1_model0_result>
+          + sml::completion<event_frame>
+          [ guard::guard_wavefront_phase_success_done_absent<
+                event_frame, dependencies_type, phase_fill1_model0>{} ]
+          / action::effect_publish_wavefront_frame_pending<dependencies_type, false>{}
+      , sml::state<state_wavefront_error_channel_decision> <=
+          sml::state<state_wavefront_fill1_model0_result>
+          + sml::completion<event_frame>
+          [ guard::guard_wavefront_submission_failed<
+                event_frame, dependencies_type, phase_fill1_model0>{} ]
+          / action::effect_fail_wavefront<dependencies_type, event_frame,
+              error::stage_submit_failed, false>{}
+      , sml::state<state_wavefront_error_channel_decision> <=
+          sml::state<state_wavefront_fill1_model0_result>
+          + sml::completion<event_frame>
+          [ guard::guard_wavefront_encode_rejected<
+                event_frame, dependencies_type, phase_fill1_model0>{} ]
+          / action::effect_fail_wavefront<dependencies_type, event_frame,
+              error::encode_failed, false, error::unsupported_request>{}
+      , sml::state<state_wavefront_error_channel_decision> <=
+          sml::state<state_wavefront_fill1_model0_result>
+          + sml::completion<event_frame>
+          [ guard::guard_wavefront_encode_failed<
+                event_frame, dependencies_type, phase_fill1_model0>{} ]
+          / action::effect_fail_wavefront<dependencies_type, event_frame,
+              error::encode_failed, false>{}
+      , sml::state<state_wavefront_error_channel_decision> <=
+          sml::state<state_wavefront_fill1_model0_result>
+          + sml::completion<event_frame>
+          [ guard::guard_wavefront_middle_non_production<
+                event_frame, dependencies_type, phase_fill1_model0>{} ]
+          / action::effect_fail_wavefront<dependencies_type, event_frame,
+              error::non_production_failed, false>{}
+      , sml::state<state_wavefront_error_channel_decision> <=
+          sml::state<state_wavefront_fill1_model0_result>
+          + sml::completion<event_frame>
+          [ guard::guard_wavefront_middle_rejected<
+                event_frame, dependencies_type, phase_fill1_model0>{} ]
+          / action::effect_fail_wavefront<dependencies_type, event_frame,
+              error::middle_failed, false, error::unsupported_request>{}
+      , sml::state<state_wavefront_error_channel_decision> <=
+          sml::state<state_wavefront_fill1_model0_result>
+          + sml::completion<event_frame>
+          [ guard::guard_wavefront_middle_failed<
+                event_frame, dependencies_type, phase_fill1_model0>{} ]
+          / action::effect_fail_wavefront<dependencies_type, event_frame,
+              error::middle_failed, false>{}
+      , sml::state<state_wavefront_error_channel_decision> <=
+          sml::state<state_wavefront_fill1_model0_result>
+          + sml::completion<event_frame>
+          [ guard::guard_wavefront_attribution_failed<
+                event_frame, dependencies_type, phase_fill1_model0>{} ]
+          / action::effect_fail_wavefront<dependencies_type, event_frame,
+              error::attribution_failed, false>{}
+
+      //------------------------------------------------------------------------------//
+      // Steady parity: encode N, middle N-1, decode N-2.
+      , sml::state<state_wavefront_steady_even_result> <=
+          sml::state<state_wavefront_steady_even> + sml::event<event_frame>
+          [ guard::guard_wavefront_request_stage_mode<dependencies_type,
+                guard::guard_wavefront_frame_valid<dependencies_type>,
+                action::wavefront_stage_mode::parallel>{} ]
+          / action::effect_execute_wavefront_phase_parallel<
+              dependencies_type, action::lane_zero, action::lane_one,
+              action::lane_zero, true, true, true>{}
+      , sml::state<state_wavefront_steady_even_result> <=
+          sml::state<state_wavefront_steady_even> + sml::event<event_frame>
+          [ guard::guard_wavefront_request_stage_mode<dependencies_type,
+                guard::guard_wavefront_frame_valid<dependencies_type>,
+                action::wavefront_stage_mode::serial>{} ]
+          / action::effect_execute_wavefront_phase_serial<
+              dependencies_type, action::lane_zero, action::lane_one,
+              action::lane_zero, true, true, true>{}
+      , sml::state<state_wavefront_error_channel_decision> <=
+          sml::state<state_wavefront_steady_even> + sml::event<event_frame>
+          [ guard::guard_wavefront_frame_invalid<dependencies_type>{} ]
+          / action::effect_fail_wavefront<dependencies_type, event_frame,
+              error::invalid_request, false>{}
+      , sml::state<state_wavefront_steady_odd> <=
+          sml::state<state_wavefront_steady_even_result>
+          + sml::completion<event_frame>
+          [ guard::guard_wavefront_phase_success_done_present<
+                event_frame, dependencies_type, phase_steady_even>{} ]
+          / action::effect_publish_wavefront_frame_produced<
+              dependencies_type, action::lane_zero, true>{}
+      , sml::state<state_wavefront_steady_odd> <=
+          sml::state<state_wavefront_steady_even_result>
+          + sml::completion<event_frame>
+          [ guard::guard_wavefront_phase_success_done_absent<
+                event_frame, dependencies_type, phase_steady_even>{} ]
+          / action::effect_publish_wavefront_frame_produced<
+              dependencies_type, action::lane_zero, false>{}
+      , sml::state<state_wavefront_error_channel_decision> <=
+          sml::state<state_wavefront_steady_even_result>
+          + sml::completion<event_frame>
+          [ guard::guard_wavefront_submission_failed<
+                event_frame, dependencies_type, phase_steady_even>{} ]
+          / action::effect_fail_wavefront<dependencies_type, event_frame,
+              error::stage_submit_failed, false>{}
+      , sml::state<state_wavefront_error_channel_decision> <=
+          sml::state<state_wavefront_steady_even_result>
+          + sml::completion<event_frame>
+          [ guard::guard_wavefront_encode_rejected<
+                event_frame, dependencies_type, phase_steady_even>{} ]
+          / action::effect_fail_wavefront<dependencies_type, event_frame,
+              error::encode_failed, false, error::unsupported_request>{}
+      , sml::state<state_wavefront_error_channel_decision> <=
+          sml::state<state_wavefront_steady_even_result>
+          + sml::completion<event_frame>
+          [ guard::guard_wavefront_encode_failed<
+                event_frame, dependencies_type, phase_steady_even>{} ]
+          / action::effect_fail_wavefront<dependencies_type, event_frame,
+              error::encode_failed, false>{}
+      , sml::state<state_wavefront_error_channel_decision> <=
+          sml::state<state_wavefront_steady_even_result>
+          + sml::completion<event_frame>
+          [ guard::guard_wavefront_middle_non_production<
+                event_frame, dependencies_type, phase_steady_even>{} ]
+          / action::effect_fail_wavefront<dependencies_type, event_frame,
+              error::non_production_failed, false>{}
+      , sml::state<state_wavefront_error_channel_decision> <=
+          sml::state<state_wavefront_steady_even_result>
+          + sml::completion<event_frame>
+          [ guard::guard_wavefront_middle_rejected<
+                event_frame, dependencies_type, phase_steady_even>{} ]
+          / action::effect_fail_wavefront<dependencies_type, event_frame,
+              error::middle_failed, false, error::unsupported_request>{}
+      , sml::state<state_wavefront_error_channel_decision> <=
+          sml::state<state_wavefront_steady_even_result>
+          + sml::completion<event_frame>
+          [ guard::guard_wavefront_middle_failed<
+                event_frame, dependencies_type, phase_steady_even>{} ]
+          / action::effect_fail_wavefront<dependencies_type, event_frame,
+              error::middle_failed, false>{}
+      , sml::state<state_wavefront_error_channel_decision> <=
+          sml::state<state_wavefront_steady_even_result>
+          + sml::completion<event_frame>
+          [ guard::guard_wavefront_decode_rejected<
+                event_frame, dependencies_type, phase_steady_even>{} ]
+          / action::effect_fail_wavefront<dependencies_type, event_frame,
+              error::decode_failed, false, error::unsupported_request>{}
+      , sml::state<state_wavefront_error_channel_decision> <=
+          sml::state<state_wavefront_steady_even_result>
+          + sml::completion<event_frame>
+          [ guard::guard_wavefront_decode_failed<
+                event_frame, dependencies_type, phase_steady_even>{} ]
+          / action::effect_fail_wavefront<dependencies_type, event_frame,
+              error::decode_failed, false>{}
+      , sml::state<state_wavefront_error_channel_decision> <=
+          sml::state<state_wavefront_steady_even_result>
+          + sml::completion<event_frame>
+          [ guard::guard_wavefront_attribution_failed<
+                event_frame, dependencies_type, phase_steady_even>{} ]
+          / action::effect_fail_wavefront<dependencies_type, event_frame,
+              error::attribution_failed, false>{}
+      , sml::state<state_wavefront_steady_odd_result> <=
+          sml::state<state_wavefront_steady_odd> + sml::event<event_frame>
+          [ guard::guard_wavefront_request_stage_mode<dependencies_type,
+                guard::guard_wavefront_frame_valid<dependencies_type>,
+                action::wavefront_stage_mode::parallel>{} ]
+          / action::effect_execute_wavefront_phase_parallel<
+              dependencies_type, action::lane_one, action::lane_zero,
+              action::lane_one, true, true, true>{}
+      , sml::state<state_wavefront_steady_odd_result> <=
+          sml::state<state_wavefront_steady_odd> + sml::event<event_frame>
+          [ guard::guard_wavefront_request_stage_mode<dependencies_type,
+                guard::guard_wavefront_frame_valid<dependencies_type>,
+                action::wavefront_stage_mode::serial>{} ]
+          / action::effect_execute_wavefront_phase_serial<
+              dependencies_type, action::lane_one, action::lane_zero,
+              action::lane_one, true, true, true>{}
+      , sml::state<state_wavefront_error_channel_decision> <=
+          sml::state<state_wavefront_steady_odd> + sml::event<event_frame>
+          [ guard::guard_wavefront_frame_invalid<dependencies_type>{} ]
+          / action::effect_fail_wavefront<dependencies_type, event_frame,
+              error::invalid_request, false>{}
+      , sml::state<state_wavefront_steady_even> <=
+          sml::state<state_wavefront_steady_odd_result>
+          + sml::completion<event_frame>
+          [ guard::guard_wavefront_phase_success_done_present<
+                event_frame, dependencies_type, phase_steady_odd>{} ]
+          / action::effect_publish_wavefront_frame_produced<
+              dependencies_type, action::lane_one, true>{}
+      , sml::state<state_wavefront_steady_even> <=
+          sml::state<state_wavefront_steady_odd_result>
+          + sml::completion<event_frame>
+          [ guard::guard_wavefront_phase_success_done_absent<
+                event_frame, dependencies_type, phase_steady_odd>{} ]
+          / action::effect_publish_wavefront_frame_produced<
+              dependencies_type, action::lane_one, false>{}
+      , sml::state<state_wavefront_error_channel_decision> <=
+          sml::state<state_wavefront_steady_odd_result>
+          + sml::completion<event_frame>
+          [ guard::guard_wavefront_submission_failed<
+                event_frame, dependencies_type, phase_steady_odd>{} ]
+          / action::effect_fail_wavefront<dependencies_type, event_frame,
+              error::stage_submit_failed, false>{}
+      , sml::state<state_wavefront_error_channel_decision> <=
+          sml::state<state_wavefront_steady_odd_result>
+          + sml::completion<event_frame>
+          [ guard::guard_wavefront_encode_rejected<
+                event_frame, dependencies_type, phase_steady_odd>{} ]
+          / action::effect_fail_wavefront<dependencies_type, event_frame,
+              error::encode_failed, false, error::unsupported_request>{}
+      , sml::state<state_wavefront_error_channel_decision> <=
+          sml::state<state_wavefront_steady_odd_result>
+          + sml::completion<event_frame>
+          [ guard::guard_wavefront_encode_failed<
+                event_frame, dependencies_type, phase_steady_odd>{} ]
+          / action::effect_fail_wavefront<dependencies_type, event_frame,
+              error::encode_failed, false>{}
+      , sml::state<state_wavefront_error_channel_decision> <=
+          sml::state<state_wavefront_steady_odd_result>
+          + sml::completion<event_frame>
+          [ guard::guard_wavefront_middle_non_production<
+                event_frame, dependencies_type, phase_steady_odd>{} ]
+          / action::effect_fail_wavefront<dependencies_type, event_frame,
+              error::non_production_failed, false>{}
+      , sml::state<state_wavefront_error_channel_decision> <=
+          sml::state<state_wavefront_steady_odd_result>
+          + sml::completion<event_frame>
+          [ guard::guard_wavefront_middle_rejected<
+                event_frame, dependencies_type, phase_steady_odd>{} ]
+          / action::effect_fail_wavefront<dependencies_type, event_frame,
+              error::middle_failed, false, error::unsupported_request>{}
+      , sml::state<state_wavefront_error_channel_decision> <=
+          sml::state<state_wavefront_steady_odd_result>
+          + sml::completion<event_frame>
+          [ guard::guard_wavefront_middle_failed<
+                event_frame, dependencies_type, phase_steady_odd>{} ]
+          / action::effect_fail_wavefront<dependencies_type, event_frame,
+              error::middle_failed, false>{}
+      , sml::state<state_wavefront_error_channel_decision> <=
+          sml::state<state_wavefront_steady_odd_result>
+          + sml::completion<event_frame>
+          [ guard::guard_wavefront_decode_rejected<
+                event_frame, dependencies_type, phase_steady_odd>{} ]
+          / action::effect_fail_wavefront<dependencies_type, event_frame,
+              error::decode_failed, false, error::unsupported_request>{}
+      , sml::state<state_wavefront_error_channel_decision> <=
+          sml::state<state_wavefront_steady_odd_result>
+          + sml::completion<event_frame>
+          [ guard::guard_wavefront_decode_failed<
+                event_frame, dependencies_type, phase_steady_odd>{} ]
+          / action::effect_fail_wavefront<dependencies_type, event_frame,
+              error::decode_failed, false>{}
+      , sml::state<state_wavefront_error_channel_decision> <=
+          sml::state<state_wavefront_steady_odd_result>
+          + sml::completion<event_frame>
+          [ guard::guard_wavefront_attribution_failed<
+                event_frame, dependencies_type, phase_steady_odd>{} ]
+          / action::effect_fail_wavefront<dependencies_type, event_frame,
+              error::attribution_failed, false>{}
+
+      //------------------------------------------------------------------------------//
+      // Flush zero or one input frame without fabricating an output.
+      , sml::state<state_wavefront_empty_flush_result> <=
+          sml::state<state_wavefront_fill0> + sml::event<event_flush>
+          [ guard::guard_wavefront_flush_valid<dependencies_type>{} ]
+          / action::effect_prepare_wavefront_empty_flush<dependencies_type>{}
+      , sml::state<state_wavefront_error_channel_decision> <=
+          sml::state<state_wavefront_fill0> + sml::event<event_flush>
+          [ guard::guard_wavefront_flush_invalid<dependencies_type>{} ]
+          / action::effect_fail_wavefront<dependencies_type, event_flush,
+              error::invalid_request, false>{}
+      , sml::state<state_wavefront_complete> <=
+          sml::state<state_wavefront_empty_flush_result>
+          + sml::completion<event_flush>
+          [ guard::guard_wavefront_phase_success_done_present<
+                event_flush, dependencies_type, phase_empty_flush>{} ]
+          / action::effect_publish_wavefront_flush<
+              dependencies_type, action::lane_zero, false, true, true>{}
+      , sml::state<state_wavefront_complete> <=
+          sml::state<state_wavefront_empty_flush_result>
+          + sml::completion<event_flush>
+          [ guard::guard_wavefront_phase_success_done_absent<
+                event_flush, dependencies_type, phase_empty_flush>{} ]
+          / action::effect_publish_wavefront_flush<
+              dependencies_type, action::lane_zero, false, true, false>{}
+      , sml::state<state_wavefront_drain_model_result> <=
+          sml::state<state_wavefront_fill1_model0> + sml::event<event_flush>
+          [ guard::guard_wavefront_request_stage_mode<dependencies_type,
+                guard::guard_wavefront_flush_valid<dependencies_type>,
+                action::wavefront_stage_mode::parallel>{} ]
+          / action::effect_execute_wavefront_phase_parallel<
+              dependencies_type, action::lane_zero, action::lane_zero,
+              action::lane_zero, false, true, false>{}
+      , sml::state<state_wavefront_drain_model_result> <=
+          sml::state<state_wavefront_fill1_model0> + sml::event<event_flush>
+          [ guard::guard_wavefront_request_stage_mode<dependencies_type,
+                guard::guard_wavefront_flush_valid<dependencies_type>,
+                action::wavefront_stage_mode::serial>{} ]
+          / action::effect_execute_wavefront_phase_serial<
+              dependencies_type, action::lane_zero, action::lane_zero,
+              action::lane_zero, false, true, false>{}
+      , sml::state<state_wavefront_error_channel_decision> <=
+          sml::state<state_wavefront_fill1_model0> + sml::event<event_flush>
+          [ guard::guard_wavefront_flush_invalid<dependencies_type>{} ]
+          / action::effect_fail_wavefront<dependencies_type, event_flush,
+              error::invalid_request, false>{}
+      , sml::state<state_wavefront_final_decode_lane0> <=
+          sml::state<state_wavefront_drain_model_result>
+          + sml::completion<event_flush>
+          [ guard::guard_wavefront_phase_success_done_present<
+                event_flush, dependencies_type, phase_drain_model>{} ]
+          / action::effect_publish_wavefront_flush<
+              dependencies_type, action::lane_zero, false, false, true>{}
+      , sml::state<state_wavefront_final_decode_lane0> <=
+          sml::state<state_wavefront_drain_model_result>
+          + sml::completion<event_flush>
+          [ guard::guard_wavefront_phase_success_done_absent<
+                event_flush, dependencies_type, phase_drain_model>{} ]
+          / action::effect_publish_wavefront_flush<
+              dependencies_type, action::lane_zero, false, false, false>{}
+      , sml::state<state_wavefront_error_channel_decision> <=
+          sml::state<state_wavefront_drain_model_result>
+          + sml::completion<event_flush>
+          [ guard::guard_wavefront_submission_failed<
+                event_flush, dependencies_type, phase_drain_model>{} ]
+          / action::effect_fail_wavefront<dependencies_type, event_flush,
+              error::stage_submit_failed, false, error::drain_failed>{}
+      , sml::state<state_wavefront_error_channel_decision> <=
+          sml::state<state_wavefront_drain_model_result>
+          + sml::completion<event_flush>
+          [ guard::guard_wavefront_middle_non_production<
+                event_flush, dependencies_type, phase_drain_model>{} ]
+          / action::effect_fail_wavefront<dependencies_type, event_flush,
+              error::non_production_failed, false, error::drain_failed>{}
+      , sml::state<state_wavefront_error_channel_decision> <=
+          sml::state<state_wavefront_drain_model_result>
+          + sml::completion<event_flush>
+          [ guard::guard_wavefront_middle_rejected<
+                event_flush, dependencies_type, phase_drain_model>{} ]
+          / action::effect_fail_wavefront<dependencies_type, event_flush,
+              error::middle_failed, false, error::unsupported_request,
+              error::drain_failed>{}
+      , sml::state<state_wavefront_error_channel_decision> <=
+          sml::state<state_wavefront_drain_model_result>
+          + sml::completion<event_flush>
+          [ guard::guard_wavefront_middle_failed<
+                event_flush, dependencies_type, phase_drain_model>{} ]
+          / action::effect_fail_wavefront<dependencies_type, event_flush,
+              error::middle_failed, false, error::drain_failed>{}
+      , sml::state<state_wavefront_error_channel_decision> <=
+          sml::state<state_wavefront_drain_model_result>
+          + sml::completion<event_flush>
+          [ guard::guard_wavefront_attribution_failed<
+                event_flush, dependencies_type, phase_drain_model>{} ]
+          / action::effect_fail_wavefront<dependencies_type, event_flush,
+              error::attribution_failed, false, error::drain_failed>{}
+
+      //------------------------------------------------------------------------------//
+      // Drain the last middle frame concurrently with the penultimate decode.
+      , sml::state<state_wavefront_drain_model_decode_even_result> <=
+          sml::state<state_wavefront_steady_even> + sml::event<event_flush>
+          [ guard::guard_wavefront_request_stage_mode<dependencies_type,
+                guard::guard_wavefront_flush_valid<dependencies_type>,
+                action::wavefront_stage_mode::parallel>{} ]
+          / action::effect_execute_wavefront_phase_parallel<
+              dependencies_type, action::lane_zero, action::lane_one,
+              action::lane_zero, false, true, true>{}
+      , sml::state<state_wavefront_drain_model_decode_even_result> <=
+          sml::state<state_wavefront_steady_even> + sml::event<event_flush>
+          [ guard::guard_wavefront_request_stage_mode<dependencies_type,
+                guard::guard_wavefront_flush_valid<dependencies_type>,
+                action::wavefront_stage_mode::serial>{} ]
+          / action::effect_execute_wavefront_phase_serial<
+              dependencies_type, action::lane_zero, action::lane_one,
+              action::lane_zero, false, true, true>{}
+      , sml::state<state_wavefront_error_channel_decision> <=
+          sml::state<state_wavefront_steady_even> + sml::event<event_flush>
+          [ guard::guard_wavefront_flush_invalid<dependencies_type>{} ]
+          / action::effect_fail_wavefront<dependencies_type, event_flush,
+              error::invalid_request, false>{}
+      , sml::state<state_wavefront_final_decode_lane1> <=
+          sml::state<state_wavefront_drain_model_decode_even_result>
+          + sml::completion<event_flush>
+          [ guard::guard_wavefront_phase_success_done_present<
+                event_flush, dependencies_type, phase_drain_even>{} ]
+          / action::effect_publish_wavefront_flush<
+              dependencies_type, action::lane_zero, true, false, true>{}
+      , sml::state<state_wavefront_final_decode_lane1> <=
+          sml::state<state_wavefront_drain_model_decode_even_result>
+          + sml::completion<event_flush>
+          [ guard::guard_wavefront_phase_success_done_absent<
+                event_flush, dependencies_type, phase_drain_even>{} ]
+          / action::effect_publish_wavefront_flush<
+              dependencies_type, action::lane_zero, true, false, false>{}
+      , sml::state<state_wavefront_error_channel_decision> <=
+          sml::state<state_wavefront_drain_model_decode_even_result>
+          + sml::completion<event_flush>
+          [ guard::guard_wavefront_submission_failed<
+                event_flush, dependencies_type, phase_drain_even>{} ]
+          / action::effect_fail_wavefront<dependencies_type, event_flush,
+              error::stage_submit_failed, false, error::drain_failed>{}
+      , sml::state<state_wavefront_error_channel_decision> <=
+          sml::state<state_wavefront_drain_model_decode_even_result>
+          + sml::completion<event_flush>
+          [ guard::guard_wavefront_middle_non_production<
+                event_flush, dependencies_type, phase_drain_even>{} ]
+          / action::effect_fail_wavefront<dependencies_type, event_flush,
+              error::non_production_failed, false, error::drain_failed>{}
+      , sml::state<state_wavefront_error_channel_decision> <=
+          sml::state<state_wavefront_drain_model_decode_even_result>
+          + sml::completion<event_flush>
+          [ guard::guard_wavefront_middle_rejected<
+                event_flush, dependencies_type, phase_drain_even>{} ]
+          / action::effect_fail_wavefront<dependencies_type, event_flush,
+              error::middle_failed, false, error::unsupported_request,
+              error::drain_failed>{}
+      , sml::state<state_wavefront_error_channel_decision> <=
+          sml::state<state_wavefront_drain_model_decode_even_result>
+          + sml::completion<event_flush>
+          [ guard::guard_wavefront_middle_failed<
+                event_flush, dependencies_type, phase_drain_even>{} ]
+          / action::effect_fail_wavefront<dependencies_type, event_flush,
+              error::middle_failed, false, error::drain_failed>{}
+      , sml::state<state_wavefront_error_channel_decision> <=
+          sml::state<state_wavefront_drain_model_decode_even_result>
+          + sml::completion<event_flush>
+          [ guard::guard_wavefront_decode_rejected<
+                event_flush, dependencies_type, phase_drain_even>{} ]
+          / action::effect_fail_wavefront<dependencies_type, event_flush,
+              error::decode_failed, false, error::unsupported_request,
+              error::drain_failed>{}
+      , sml::state<state_wavefront_error_channel_decision> <=
+          sml::state<state_wavefront_drain_model_decode_even_result>
+          + sml::completion<event_flush>
+          [ guard::guard_wavefront_decode_failed<
+                event_flush, dependencies_type, phase_drain_even>{} ]
+          / action::effect_fail_wavefront<dependencies_type, event_flush,
+              error::decode_failed, false, error::drain_failed>{}
+      , sml::state<state_wavefront_error_channel_decision> <=
+          sml::state<state_wavefront_drain_model_decode_even_result>
+          + sml::completion<event_flush>
+          [ guard::guard_wavefront_attribution_failed<
+                event_flush, dependencies_type, phase_drain_even>{} ]
+          / action::effect_fail_wavefront<dependencies_type, event_flush,
+              error::attribution_failed, false, error::drain_failed>{}
+      , sml::state<state_wavefront_drain_model_decode_odd_result> <=
+          sml::state<state_wavefront_steady_odd> + sml::event<event_flush>
+          [ guard::guard_wavefront_request_stage_mode<dependencies_type,
+                guard::guard_wavefront_flush_valid<dependencies_type>,
+                action::wavefront_stage_mode::parallel>{} ]
+          / action::effect_execute_wavefront_phase_parallel<
+              dependencies_type, action::lane_zero, action::lane_zero,
+              action::lane_one, false, true, true>{}
+      , sml::state<state_wavefront_drain_model_decode_odd_result> <=
+          sml::state<state_wavefront_steady_odd> + sml::event<event_flush>
+          [ guard::guard_wavefront_request_stage_mode<dependencies_type,
+                guard::guard_wavefront_flush_valid<dependencies_type>,
+                action::wavefront_stage_mode::serial>{} ]
+          / action::effect_execute_wavefront_phase_serial<
+              dependencies_type, action::lane_zero, action::lane_zero,
+              action::lane_one, false, true, true>{}
+      , sml::state<state_wavefront_error_channel_decision> <=
+          sml::state<state_wavefront_steady_odd> + sml::event<event_flush>
+          [ guard::guard_wavefront_flush_invalid<dependencies_type>{} ]
+          / action::effect_fail_wavefront<dependencies_type, event_flush,
+              error::invalid_request, false>{}
+      , sml::state<state_wavefront_final_decode_lane0> <=
+          sml::state<state_wavefront_drain_model_decode_odd_result>
+          + sml::completion<event_flush>
+          [ guard::guard_wavefront_phase_success_done_present<
+                event_flush, dependencies_type, phase_drain_odd>{} ]
+          / action::effect_publish_wavefront_flush<
+              dependencies_type, action::lane_one, true, false, true>{}
+      , sml::state<state_wavefront_final_decode_lane0> <=
+          sml::state<state_wavefront_drain_model_decode_odd_result>
+          + sml::completion<event_flush>
+          [ guard::guard_wavefront_phase_success_done_absent<
+                event_flush, dependencies_type, phase_drain_odd>{} ]
+          / action::effect_publish_wavefront_flush<
+              dependencies_type, action::lane_one, true, false, false>{}
+      , sml::state<state_wavefront_error_channel_decision> <=
+          sml::state<state_wavefront_drain_model_decode_odd_result>
+          + sml::completion<event_flush>
+          [ guard::guard_wavefront_submission_failed<
+                event_flush, dependencies_type, phase_drain_odd>{} ]
+          / action::effect_fail_wavefront<dependencies_type, event_flush,
+              error::stage_submit_failed, false, error::drain_failed>{}
+      , sml::state<state_wavefront_error_channel_decision> <=
+          sml::state<state_wavefront_drain_model_decode_odd_result>
+          + sml::completion<event_flush>
+          [ guard::guard_wavefront_middle_non_production<
+                event_flush, dependencies_type, phase_drain_odd>{} ]
+          / action::effect_fail_wavefront<dependencies_type, event_flush,
+              error::non_production_failed, false, error::drain_failed>{}
+      , sml::state<state_wavefront_error_channel_decision> <=
+          sml::state<state_wavefront_drain_model_decode_odd_result>
+          + sml::completion<event_flush>
+          [ guard::guard_wavefront_middle_rejected<
+                event_flush, dependencies_type, phase_drain_odd>{} ]
+          / action::effect_fail_wavefront<dependencies_type, event_flush,
+              error::middle_failed, false, error::unsupported_request,
+              error::drain_failed>{}
+      , sml::state<state_wavefront_error_channel_decision> <=
+          sml::state<state_wavefront_drain_model_decode_odd_result>
+          + sml::completion<event_flush>
+          [ guard::guard_wavefront_middle_failed<
+                event_flush, dependencies_type, phase_drain_odd>{} ]
+          / action::effect_fail_wavefront<dependencies_type, event_flush,
+              error::middle_failed, false, error::drain_failed>{}
+      , sml::state<state_wavefront_error_channel_decision> <=
+          sml::state<state_wavefront_drain_model_decode_odd_result>
+          + sml::completion<event_flush>
+          [ guard::guard_wavefront_decode_rejected<
+                event_flush, dependencies_type, phase_drain_odd>{} ]
+          / action::effect_fail_wavefront<dependencies_type, event_flush,
+              error::decode_failed, false, error::unsupported_request,
+              error::drain_failed>{}
+      , sml::state<state_wavefront_error_channel_decision> <=
+          sml::state<state_wavefront_drain_model_decode_odd_result>
+          + sml::completion<event_flush>
+          [ guard::guard_wavefront_decode_failed<
+                event_flush, dependencies_type, phase_drain_odd>{} ]
+          / action::effect_fail_wavefront<dependencies_type, event_flush,
+              error::decode_failed, false, error::drain_failed>{}
+      , sml::state<state_wavefront_error_channel_decision> <=
+          sml::state<state_wavefront_drain_model_decode_odd_result>
+          + sml::completion<event_flush>
+          [ guard::guard_wavefront_attribution_failed<
+                event_flush, dependencies_type, phase_drain_odd>{} ]
+          / action::effect_fail_wavefront<dependencies_type, event_flush,
+              error::attribution_failed, false, error::drain_failed>{}
+
+      //------------------------------------------------------------------------------//
+      // Final decode publishes the last frame and completes the session.
+      , sml::state<state_wavefront_final_decode_lane0_result> <=
+          sml::state<state_wavefront_final_decode_lane0>
+          + sml::event<event_flush>
+          [ guard::guard_wavefront_request_stage_mode<dependencies_type,
+                guard::guard_wavefront_flush_valid<dependencies_type>,
+                action::wavefront_stage_mode::parallel>{} ]
+          / action::effect_execute_wavefront_phase_parallel<
+              dependencies_type, action::lane_zero, action::lane_zero,
+              action::lane_zero, false, false, true>{}
+      , sml::state<state_wavefront_final_decode_lane0_result> <=
+          sml::state<state_wavefront_final_decode_lane0>
+          + sml::event<event_flush>
+          [ guard::guard_wavefront_request_stage_mode<dependencies_type,
+                guard::guard_wavefront_flush_valid<dependencies_type>,
+                action::wavefront_stage_mode::serial>{} ]
+          / action::effect_execute_wavefront_phase_serial<
+              dependencies_type, action::lane_zero, action::lane_zero,
+              action::lane_zero, false, false, true>{}
+      , sml::state<state_wavefront_error_channel_decision> <=
+          sml::state<state_wavefront_final_decode_lane0>
+          + sml::event<event_flush>
+          [ guard::guard_wavefront_flush_invalid<dependencies_type>{} ]
+          / action::effect_fail_wavefront<dependencies_type, event_flush,
+              error::invalid_request, false>{}
+      , sml::state<state_wavefront_complete> <=
+          sml::state<state_wavefront_final_decode_lane0_result>
+          + sml::completion<event_flush>
+          [ guard::guard_wavefront_phase_success_done_present<
+                event_flush, dependencies_type, phase_final_lane0>{} ]
+          / action::effect_publish_wavefront_flush<
+              dependencies_type, action::lane_zero, true, true, true>{}
+      , sml::state<state_wavefront_complete> <=
+          sml::state<state_wavefront_final_decode_lane0_result>
+          + sml::completion<event_flush>
+          [ guard::guard_wavefront_phase_success_done_absent<
+                event_flush, dependencies_type, phase_final_lane0>{} ]
+          / action::effect_publish_wavefront_flush<
+              dependencies_type, action::lane_zero, true, true, false>{}
+      , sml::state<state_wavefront_error_channel_decision> <=
+          sml::state<state_wavefront_final_decode_lane0_result>
+          + sml::completion<event_flush>
+          [ guard::guard_wavefront_submission_failed<
+                event_flush, dependencies_type, phase_final_lane0>{} ]
+          / action::effect_fail_wavefront<dependencies_type, event_flush,
+              error::stage_submit_failed, false, error::drain_failed>{}
+      , sml::state<state_wavefront_error_channel_decision> <=
+          sml::state<state_wavefront_final_decode_lane0_result>
+          + sml::completion<event_flush>
+          [ guard::guard_wavefront_decode_rejected<
+                event_flush, dependencies_type, phase_final_lane0>{} ]
+          / action::effect_fail_wavefront<dependencies_type, event_flush,
+              error::decode_failed, false, error::unsupported_request,
+              error::drain_failed>{}
+      , sml::state<state_wavefront_error_channel_decision> <=
+          sml::state<state_wavefront_final_decode_lane0_result>
+          + sml::completion<event_flush>
+          [ guard::guard_wavefront_decode_failed<
+                event_flush, dependencies_type, phase_final_lane0>{} ]
+          / action::effect_fail_wavefront<dependencies_type, event_flush,
+              error::decode_failed, false, error::drain_failed>{}
+      , sml::state<state_wavefront_error_channel_decision> <=
+          sml::state<state_wavefront_final_decode_lane0_result>
+          + sml::completion<event_flush>
+          [ guard::guard_wavefront_attribution_failed<
+                event_flush, dependencies_type, phase_final_lane0>{} ]
+          / action::effect_fail_wavefront<dependencies_type, event_flush,
+              error::attribution_failed, false, error::drain_failed>{}
+      , sml::state<state_wavefront_final_decode_lane1_result> <=
+          sml::state<state_wavefront_final_decode_lane1>
+          + sml::event<event_flush>
+          [ guard::guard_wavefront_request_stage_mode<dependencies_type,
+                guard::guard_wavefront_flush_valid<dependencies_type>,
+                action::wavefront_stage_mode::parallel>{} ]
+          / action::effect_execute_wavefront_phase_parallel<
+              dependencies_type, action::lane_zero, action::lane_zero,
+              action::lane_one, false, false, true>{}
+      , sml::state<state_wavefront_final_decode_lane1_result> <=
+          sml::state<state_wavefront_final_decode_lane1>
+          + sml::event<event_flush>
+          [ guard::guard_wavefront_request_stage_mode<dependencies_type,
+                guard::guard_wavefront_flush_valid<dependencies_type>,
+                action::wavefront_stage_mode::serial>{} ]
+          / action::effect_execute_wavefront_phase_serial<
+              dependencies_type, action::lane_zero, action::lane_zero,
+              action::lane_one, false, false, true>{}
+      , sml::state<state_wavefront_error_channel_decision> <=
+          sml::state<state_wavefront_final_decode_lane1>
+          + sml::event<event_flush>
+          [ guard::guard_wavefront_flush_invalid<dependencies_type>{} ]
+          / action::effect_fail_wavefront<dependencies_type, event_flush,
+              error::invalid_request, false>{}
+      , sml::state<state_wavefront_complete> <=
+          sml::state<state_wavefront_final_decode_lane1_result>
+          + sml::completion<event_flush>
+          [ guard::guard_wavefront_phase_success_done_present<
+                event_flush, dependencies_type, phase_final_lane1>{} ]
+          / action::effect_publish_wavefront_flush<
+              dependencies_type, action::lane_one, true, true, true>{}
+      , sml::state<state_wavefront_complete> <=
+          sml::state<state_wavefront_final_decode_lane1_result>
+          + sml::completion<event_flush>
+          [ guard::guard_wavefront_phase_success_done_absent<
+                event_flush, dependencies_type, phase_final_lane1>{} ]
+          / action::effect_publish_wavefront_flush<
+              dependencies_type, action::lane_one, true, true, false>{}
+      , sml::state<state_wavefront_error_channel_decision> <=
+          sml::state<state_wavefront_final_decode_lane1_result>
+          + sml::completion<event_flush>
+          [ guard::guard_wavefront_submission_failed<
+                event_flush, dependencies_type, phase_final_lane1>{} ]
+          / action::effect_fail_wavefront<dependencies_type, event_flush,
+              error::stage_submit_failed, false, error::drain_failed>{}
+      , sml::state<state_wavefront_error_channel_decision> <=
+          sml::state<state_wavefront_final_decode_lane1_result>
+          + sml::completion<event_flush>
+          [ guard::guard_wavefront_decode_rejected<
+                event_flush, dependencies_type, phase_final_lane1>{} ]
+          / action::effect_fail_wavefront<dependencies_type, event_flush,
+              error::decode_failed, false, error::unsupported_request,
+              error::drain_failed>{}
+      , sml::state<state_wavefront_error_channel_decision> <=
+          sml::state<state_wavefront_final_decode_lane1_result>
+          + sml::completion<event_flush>
+          [ guard::guard_wavefront_decode_failed<
+                event_flush, dependencies_type, phase_final_lane1>{} ]
+          / action::effect_fail_wavefront<dependencies_type, event_flush,
+              error::decode_failed, false, error::drain_failed>{}
+      , sml::state<state_wavefront_error_channel_decision> <=
+          sml::state<state_wavefront_final_decode_lane1_result>
+          + sml::completion<event_flush>
+          [ guard::guard_wavefront_attribution_failed<
+                event_flush, dependencies_type, phase_final_lane1>{} ]
+          / action::effect_fail_wavefront<dependencies_type, event_flush,
+              error::attribution_failed, false, error::drain_failed>{}
+
+      //------------------------------------------------------------------------------//
+      // Immediate error channel and explicit reset recovery.
+      , sml::state<state_wavefront_errored> <=
+          sml::state<state_wavefront_error_channel_decision>
+          + sml::completion<event_frame>
+          [ guard::guard_error_callback_present<dependencies_type, event_frame>{} ]
+          / action::effect_emit_wavefront_error<dependencies_type, event_frame>{}
+      , sml::state<state_wavefront_errored> <=
+          sml::state<state_wavefront_error_channel_decision>
+          + sml::completion<event_frame>
+          [ guard::guard_error_callback_absent<dependencies_type, event_frame>{} ]
+      , sml::state<state_wavefront_errored> <=
+          sml::state<state_wavefront_error_channel_decision>
+          + sml::completion<event_flush>
+          [ guard::guard_error_callback_present<dependencies_type, event_flush>{} ]
+          / action::effect_emit_wavefront_error<dependencies_type, event_flush>{}
+      , sml::state<state_wavefront_errored> <=
+          sml::state<state_wavefront_error_channel_decision>
+          + sml::completion<event_flush>
+          [ guard::guard_error_callback_absent<dependencies_type, event_flush>{} ]
+      , sml::state<state_wavefront_error_channel_decision> <=
+          sml::state<state_wavefront_final_decode_lane0> + sml::event<event_frame>
+          / action::effect_fail_wavefront<dependencies_type, event_frame,
+              error::unsupported_request, false>{}
+      , sml::state<state_wavefront_error_channel_decision> <=
+          sml::state<state_wavefront_final_decode_lane1> + sml::event<event_frame>
+          / action::effect_fail_wavefront<dependencies_type, event_frame,
+              error::unsupported_request, false>{}
+      , sml::state<state_wavefront_error_channel_decision> <=
+          sml::state<state_wavefront_complete> + sml::event<event_frame>
+          / action::effect_fail_wavefront<dependencies_type, event_frame,
+              error::unsupported_request, false>{}
+      , sml::state<state_wavefront_error_channel_decision> <=
+          sml::state<state_wavefront_complete> + sml::event<event_flush>
+          / action::effect_fail_wavefront<dependencies_type, event_flush,
+              error::unsupported_request, false>{}
+      , sml::state<state_wavefront_error_channel_decision> <=
+          sml::state<state_wavefront_errored> + sml::event<event_frame>
+          / action::effect_fail_wavefront<dependencies_type, event_frame,
+              error::unsupported_request, false>{}
+      , sml::state<state_wavefront_error_channel_decision> <=
+          sml::state<state_wavefront_errored> + sml::event<event_flush>
+          / action::effect_fail_wavefront<dependencies_type, event_flush,
+              error::unsupported_request, false>{}
+      , sml::state<state_wavefront_reset_result> <=
+          sml::state<state_wavefront_fill0> + sml::event<event_reset>
+          [ guard::guard_wavefront_stage_mode<dependencies_type,
+              action::wavefront_stage_mode::parallel>{} ]
+          / action::effect_reset_wavefront_children_parallel<dependencies_type>{}
+      , sml::state<state_wavefront_reset_result> <=
+          sml::state<state_wavefront_fill0> + sml::event<event_reset>
+          [ guard::guard_wavefront_stage_mode<dependencies_type,
+              action::wavefront_stage_mode::serial>{} ]
+          / action::effect_reset_wavefront_children_serial<dependencies_type>{}
+      , sml::state<state_wavefront_reset_result> <=
+          sml::state<state_wavefront_fill1_model0> + sml::event<event_reset>
+          [ guard::guard_wavefront_stage_mode<dependencies_type,
+              action::wavefront_stage_mode::parallel>{} ]
+          / action::effect_reset_wavefront_children_parallel<dependencies_type>{}
+      , sml::state<state_wavefront_reset_result> <=
+          sml::state<state_wavefront_fill1_model0> + sml::event<event_reset>
+          [ guard::guard_wavefront_stage_mode<dependencies_type,
+              action::wavefront_stage_mode::serial>{} ]
+          / action::effect_reset_wavefront_children_serial<dependencies_type>{}
+      , sml::state<state_wavefront_reset_result> <=
+          sml::state<state_wavefront_steady_even> + sml::event<event_reset>
+          [ guard::guard_wavefront_stage_mode<dependencies_type,
+              action::wavefront_stage_mode::parallel>{} ]
+          / action::effect_reset_wavefront_children_parallel<dependencies_type>{}
+      , sml::state<state_wavefront_reset_result> <=
+          sml::state<state_wavefront_steady_even> + sml::event<event_reset>
+          [ guard::guard_wavefront_stage_mode<dependencies_type,
+              action::wavefront_stage_mode::serial>{} ]
+          / action::effect_reset_wavefront_children_serial<dependencies_type>{}
+      , sml::state<state_wavefront_reset_result> <=
+          sml::state<state_wavefront_steady_odd> + sml::event<event_reset>
+          [ guard::guard_wavefront_stage_mode<dependencies_type,
+              action::wavefront_stage_mode::parallel>{} ]
+          / action::effect_reset_wavefront_children_parallel<dependencies_type>{}
+      , sml::state<state_wavefront_reset_result> <=
+          sml::state<state_wavefront_steady_odd> + sml::event<event_reset>
+          [ guard::guard_wavefront_stage_mode<dependencies_type,
+              action::wavefront_stage_mode::serial>{} ]
+          / action::effect_reset_wavefront_children_serial<dependencies_type>{}
+      , sml::state<state_wavefront_reset_result> <=
+          sml::state<state_wavefront_final_decode_lane0>
+          + sml::event<event_reset>
+          [ guard::guard_wavefront_stage_mode<dependencies_type,
+              action::wavefront_stage_mode::parallel>{} ]
+          / action::effect_reset_wavefront_children_parallel<dependencies_type>{}
+      , sml::state<state_wavefront_reset_result> <=
+          sml::state<state_wavefront_final_decode_lane0>
+          + sml::event<event_reset>
+          [ guard::guard_wavefront_stage_mode<dependencies_type,
+              action::wavefront_stage_mode::serial>{} ]
+          / action::effect_reset_wavefront_children_serial<dependencies_type>{}
+      , sml::state<state_wavefront_reset_result> <=
+          sml::state<state_wavefront_final_decode_lane1>
+          + sml::event<event_reset>
+          [ guard::guard_wavefront_stage_mode<dependencies_type,
+              action::wavefront_stage_mode::parallel>{} ]
+          / action::effect_reset_wavefront_children_parallel<dependencies_type>{}
+      , sml::state<state_wavefront_reset_result> <=
+          sml::state<state_wavefront_final_decode_lane1>
+          + sml::event<event_reset>
+          [ guard::guard_wavefront_stage_mode<dependencies_type,
+              action::wavefront_stage_mode::serial>{} ]
+          / action::effect_reset_wavefront_children_serial<dependencies_type>{}
+      , sml::state<state_wavefront_reset_result> <=
+          sml::state<state_wavefront_complete> + sml::event<event_reset>
+          [ guard::guard_wavefront_stage_mode<dependencies_type,
+              action::wavefront_stage_mode::parallel>{} ]
+          / action::effect_reset_wavefront_children_parallel<dependencies_type>{}
+      , sml::state<state_wavefront_reset_result> <=
+          sml::state<state_wavefront_complete> + sml::event<event_reset>
+          [ guard::guard_wavefront_stage_mode<dependencies_type,
+              action::wavefront_stage_mode::serial>{} ]
+          / action::effect_reset_wavefront_children_serial<dependencies_type>{}
+      , sml::state<state_wavefront_reset_result> <=
+          sml::state<state_wavefront_errored> + sml::event<event_reset>
+          [ guard::guard_wavefront_stage_mode<dependencies_type,
+              action::wavefront_stage_mode::parallel>{} ]
+          / action::effect_reset_wavefront_children_parallel<dependencies_type>{}
+      , sml::state<state_wavefront_reset_result> <=
+          sml::state<state_wavefront_errored> + sml::event<event_reset>
+          [ guard::guard_wavefront_stage_mode<dependencies_type,
+              action::wavefront_stage_mode::serial>{} ]
+          / action::effect_reset_wavefront_children_serial<dependencies_type>{}
+      , sml::state<state_wavefront_errored> <=
+          sml::state<state_wavefront_reset_result> + sml::completion<event_reset>
+          [ guard::guard_wavefront_reset_submission_failed<dependencies_type>{} ]
+          / action::effect_fail_wavefront_reset<
+              dependencies_type, error::stage_submit_failed>{}
+      , sml::state<state_wavefront_errored> <=
+          sml::state<state_wavefront_reset_result> + sml::completion<event_reset>
+          [ guard::guard_wavefront_reset_children_failed<dependencies_type>{} ]
+          / action::effect_fail_wavefront_reset<
+              dependencies_type, error::internal_error>{}
+      , sml::state<state_wavefront_fill0> <=
+          sml::state<state_wavefront_reset_result> + sml::completion<event_reset>
+          [ guard::guard_wavefront_reset_succeeded<dependencies_type>{} ]
+          / action::effect_reset_wavefront_parent<dependencies_type>{}
+      , sml::state<state_wavefront_errored> <= sml::state<state_wavefront_fill0>
+          + sml::unexpected_event<sml::_>
+          / action::effect_unexpected_wavefront<dependencies_type>{}
+      , sml::state<state_wavefront_errored> <= sml::state<state_wavefront_fill1_model0>
+          + sml::unexpected_event<sml::_>
+          / action::effect_unexpected_wavefront<dependencies_type>{}
+      , sml::state<state_wavefront_errored> <= sml::state<state_wavefront_steady_even>
+          + sml::unexpected_event<sml::_>
+          / action::effect_unexpected_wavefront<dependencies_type>{}
+      , sml::state<state_wavefront_errored> <= sml::state<state_wavefront_steady_odd>
+          + sml::unexpected_event<sml::_>
+          / action::effect_unexpected_wavefront<dependencies_type>{}
+      , sml::state<state_wavefront_errored> <=
+          sml::state<state_wavefront_final_decode_lane0>
+          + sml::unexpected_event<sml::_>
+          / action::effect_unexpected_wavefront<dependencies_type>{}
+      , sml::state<state_wavefront_errored> <=
+          sml::state<state_wavefront_final_decode_lane1>
+          + sml::unexpected_event<sml::_>
+          / action::effect_unexpected_wavefront<dependencies_type>{}
+      , sml::state<state_wavefront_errored> <= sml::state<state_wavefront_complete>
+          + sml::unexpected_event<sml::_>
+          / action::effect_unexpected_wavefront<dependencies_type>{}
+      , sml::state<state_wavefront_errored> <= sml::state<state_wavefront_errored>
+          + sml::unexpected_event<sml::_>
+          / action::effect_unexpected_wavefront<dependencies_type>{}
+    );
+    // clang-format on
+  }
+};
+
 template <class dependencies_type,
           class mode_type = typename dependencies_type::generator_mode>
 struct model;
@@ -787,53 +1791,95 @@ struct model<dependencies_type, action::mode::synthesis>
     : synthesis_model<dependencies_type> {};
 
 template <class dependencies_type>
-struct sm : public emel::sm<model<dependencies_type>,
-                            action::context<dependencies_type>> {
+struct model<dependencies_type, action::mode::wavefront>
+    : wavefront_model<dependencies_type> {};
+
+template <class dependencies_type>
+struct sm : private emel::sm<model<dependencies_type>,
+                             action::context<dependencies_type>> {
   using base_type =
       emel::sm<model<dependencies_type>, action::context<dependencies_type>>;
   using base_type::is;
-  using base_type::process_event;
   using base_type::visit_current_states;
 
   explicit sm(const dependencies_type &deps) : base_type(std::in_place, deps) {}
 
-  bool process_event(const event::initialize &ev) {
+  bool process_event(const event::initialize &ev)
+    requires(!action::wavefront_dependencies<dependencies_type>)
+  {
     event::initialize_ctx ctx{};
     const bool accepted =
         base_type::process_event(event::initialize_run{ev, ctx});
     return accepted && ctx.err == action::error_code(error::none);
   }
 
-  bool process_event(const event::condition &ev) {
+  bool process_event(const event::condition &ev)
+    requires(!action::wavefront_dependencies<dependencies_type>)
+  {
     event::condition_ctx ctx{};
     const bool accepted =
         base_type::process_event(event::condition_run{ev, ctx});
     return accepted && ctx.err == action::error_code(error::none);
   }
 
-  bool process_event(const event::generate &ev) {
+  bool process_event(const event::generate &ev)
+    requires(!action::wavefront_dependencies<dependencies_type>)
+  {
     event::generate_ctx ctx{};
     const bool accepted =
         base_type::process_event(event::generate_run{ev, ctx});
     return accepted && ctx.err == action::error_code(error::none);
   }
 
-  bool process_event(const event::stream_frame &ev) {
+  bool process_event(const event::stream_frame &ev)
+    requires(!action::wavefront_dependencies<dependencies_type>)
+  {
     event::frame_ctx ctx{};
     const bool accepted =
         base_type::process_event(event::stream_frame_run{ev, ctx});
     return accepted && ctx.err == action::error_code(error::none);
   }
 
-  bool process_event(const event::flush &ev) {
+  bool process_event(const event::flush &ev)
+    requires(!action::wavefront_dependencies<dependencies_type>)
+  {
     event::flush_ctx ctx{};
     const bool accepted = base_type::process_event(event::flush_run{ev, ctx});
     return accepted && ctx.err == action::error_code(error::none);
   }
 
-  bool process_event(const event::reset &ev) {
+  bool process_event(const event::reset &ev)
+    requires(!action::wavefront_dependencies<dependencies_type>)
+  {
     const bool accepted = base_type::process_event(ev);
     return accepted && ev.error_out == action::error_code(error::none);
+  }
+
+  bool process_event(const event::wavefront_frame &ev)
+    requires action::wavefront_dependencies<dependencies_type>
+  {
+    detail::wavefront_run_ctx ctx{};
+    const bool accepted =
+        base_type::process_event(detail::wavefront_frame_run{ev, ctx});
+    return accepted && ctx.err == action::error_code(error::none);
+  }
+
+  bool process_event(const event::wavefront_flush &ev)
+    requires action::wavefront_dependencies<dependencies_type>
+  {
+    detail::wavefront_run_ctx ctx{};
+    const bool accepted =
+        base_type::process_event(detail::wavefront_flush_run{ev, ctx});
+    return accepted && ctx.err == action::error_code(error::none);
+  }
+
+  bool process_event(const event::wavefront_reset &ev)
+    requires action::wavefront_dependencies<dependencies_type>
+  {
+    detail::wavefront_reset_ctx ctx{};
+    const bool accepted =
+        base_type::process_event(detail::event_wavefront_reset_run{ev, ctx});
+    return accepted && ctx.err == action::error_code(error::none);
   }
 };
 

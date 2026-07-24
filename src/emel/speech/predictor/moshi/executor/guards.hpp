@@ -12,6 +12,35 @@
 
 namespace emel::speech::predictor::moshi::executor::guard {
 
+inline bool guard_serial_matmul_mode(const action::context &ctx) noexcept {
+  return ctx.matmul_lane_mode == emel::kernel::matmul::lane_mode::serial;
+}
+
+inline bool guard_parallel_matmul_mode(const action::context &ctx) noexcept {
+  return ctx.matmul_lane_mode == emel::kernel::matmul::lane_mode::parallel;
+}
+
+struct guard_serial_matmul_route {
+  bool operator()(const event::step_run &,
+                  const action::context &ctx) const noexcept {
+    return guard_serial_matmul_mode(ctx);
+  }
+};
+
+struct guard_parallel_matmul_route {
+  bool operator()(const event::step_run &,
+                  const action::context &ctx) const noexcept {
+    return guard_parallel_matmul_mode(ctx);
+  }
+};
+
+template <class base_guard, class route_guard> struct guard_for_matmul_route {
+  bool operator()(const event::step_run &runtime_ev,
+                  const action::context &ctx) const noexcept {
+    return base_guard{}(runtime_ev, ctx) && route_guard{}(runtime_ev, ctx);
+  }
+};
+
 inline bool guard_cache_span_valid(const size_t layer_offset,
                                    const size_t first_position,
                                    const size_t position_count,
@@ -1003,6 +1032,48 @@ struct guard_temporal_layer_attention_unsupported {
   bool operator()(const event::step_run &runtime_ev,
                   const action::context &ctx) const noexcept {
     return !guard_temporal_layer_attention_supported{}(runtime_ev, ctx);
+  }
+};
+
+template <std::size_t lane_count>
+struct guard_temporal_layer_attention_route {
+  bool operator()(const event::step_run &runtime_ev,
+                  const action::context &ctx) const noexcept {
+    static_assert(lane_count == 1u || lane_count == 2u || lane_count == 4u ||
+                  lane_count == 8u);
+    const bool route_selected = ctx.active_attention_lanes == lane_count;
+    const bool enough_heads =
+        runtime_ev.request.model.moshi_lm.num_heads >=
+        static_cast<int32_t>(lane_count);
+    if constexpr (lane_count == 1u) {
+      return guard_temporal_layer_attention_supported{}(runtime_ev, ctx) &&
+             route_selected && enough_heads;
+    } else {
+      return guard_temporal_layer_attention_supported{}(runtime_ev, ctx) &&
+             route_selected && enough_heads && ctx.attention_lanes != nullptr;
+    }
+  }
+};
+
+using guard_temporal_layer_attention_serial =
+    guard_temporal_layer_attention_route<1u>;
+using guard_temporal_layer_attention_two =
+    guard_temporal_layer_attention_route<2u>;
+using guard_temporal_layer_attention_four =
+    guard_temporal_layer_attention_route<4u>;
+using guard_temporal_layer_attention_eight =
+    guard_temporal_layer_attention_route<8u>;
+
+struct guard_temporal_layer_attention_route_unavailable {
+  bool operator()(const event::step_run &runtime_ev,
+                  const action::context &ctx) const noexcept {
+    const bool selected =
+        guard_temporal_layer_attention_serial{}(runtime_ev, ctx) ||
+        guard_temporal_layer_attention_two{}(runtime_ev, ctx) ||
+        guard_temporal_layer_attention_four{}(runtime_ev, ctx) ||
+        guard_temporal_layer_attention_eight{}(runtime_ev, ctx);
+    return guard_temporal_layer_attention_supported{}(runtime_ev, ctx) &&
+           !selected;
   }
 };
 
@@ -2438,5 +2509,47 @@ struct guard_unexpected_error_out_absent {
     return !guard_unexpected_error_out_present{}(ev, ctx);
   }
 };
+
+struct guard_projection_view_bound_serial
+    : guard_for_matmul_route<guard_projection_view_bound,
+                             guard_serial_matmul_route> {};
+
+struct guard_projection_view_bound_parallel
+    : guard_for_matmul_route<guard_projection_view_bound,
+                             guard_parallel_matmul_route> {};
+
+struct guard_forced_text_token_sampling_serial
+    : guard_for_matmul_route<guard_forced_text_token_valid_and_sampling_consume,
+                             guard_serial_matmul_route> {};
+
+struct guard_forced_text_token_sampling_parallel
+    : guard_for_matmul_route<guard_forced_text_token_valid_and_sampling_consume,
+                             guard_parallel_matmul_route> {};
+
+struct guard_text_logits_sampling_serial
+    : guard_for_matmul_route<
+          guard_text_logits_projection_bound_and_no_forced_token_sampling,
+          guard_serial_matmul_route> {};
+
+struct guard_text_logits_sampling_parallel
+    : guard_for_matmul_route<
+          guard_text_logits_projection_bound_and_no_forced_token_sampling,
+          guard_parallel_matmul_route> {};
+
+struct guard_depformer_input_projection_serial
+    : guard_for_matmul_route<guard_depformer_input_projection_bound,
+                             guard_serial_matmul_route> {};
+
+struct guard_depformer_input_projection_parallel
+    : guard_for_matmul_route<guard_depformer_input_projection_bound,
+                             guard_parallel_matmul_route> {};
+
+struct guard_depformer_logits_sampling_serial
+    : guard_for_matmul_route<guard_depformer_logits_projection_bound_sampling,
+                             guard_serial_matmul_route> {};
+
+struct guard_depformer_logits_sampling_parallel
+    : guard_for_matmul_route<guard_depformer_logits_projection_bound_sampling,
+                             guard_parallel_matmul_route> {};
 
 } // namespace emel::speech::predictor::moshi::executor::guard

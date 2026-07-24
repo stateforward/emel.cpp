@@ -527,7 +527,7 @@ matmul dispatch path rather than a standalone component.
 Correctness:
 
 - Row slices write disjoint dst rows and reorder no reductions, so parallel output is
-  bit-identical to serial; `tests/text/generator/parallel_matmul_tests.cpp` proves slice
+  bit-identical to serial; `tests/kernel/matmul_tests.cpp` proves slice
   arithmetic, group alignment, and f32/q8_0 serial-vs-parallel byte equality, and the full
   generator fixture suites pass with prompts >= 8 tokens taking the parallel prefill route.
 - The strict LFM2 x86_64 generation evidence failure is unchanged and pre-existing

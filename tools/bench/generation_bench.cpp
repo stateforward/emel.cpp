@@ -835,7 +835,7 @@ struct emel_session {
   emel::model::generation::contract generation_contract = {};
   emel::text::tokenizer::sm tokenizer = {};
   emel::text::conditioner::sm conditioner = {};
-  emel::text::generator::matmul::lane_pool<7u, 128u, 1048576u> parallel_matmul_lanes = {};
+  emel::kernel::matmul::lane_pool parallel_matmul_lanes = {};
   std::unique_ptr<emel::text::generator::sm> generator = {};
   std::array<emel::logits::sampler::fn, 1> samplers = {};
   emel::tools::generation_formatter_contract::formatter_binding
@@ -1962,7 +1962,7 @@ bool prepare_emel_session(const emel_fixture &fixture, emel_session &session) {
     return false;
   }
   const auto matmul_policy =
-      emel::text::generator::matmul::make_auto_execution_policy(
+      emel::kernel::matmul::make_auto_execution_policy(
           session.parallel_matmul_lanes);
   session.generator = std::make_unique<emel::text::generator::sm>(
       emel::text::generator::dependencies{

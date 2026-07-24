@@ -8,6 +8,8 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # shellcheck source=scripts/build_jobs.sh
 source "$ROOT_DIR/scripts/build_jobs.sh"
+# shellcheck source=scripts/zig_toolchain.sh
+source "$ROOT_DIR/scripts/zig_toolchain.sh"
 
 BUILD_DIR_OVERRIDE="${EMEL_MOSHI_LM_COMPARE_BUILD_DIR:-}"
 BUILD_DIR=""
@@ -137,6 +139,7 @@ if $USE_ZIG; then
                "-DCMAKE_ASM_COMPILER_ARG1=cc"
                "-DCMAKE_C_FLAGS=-fno-sanitize=undefined"
                "-DCMAKE_CXX_FLAGS=-fno-sanitize=undefined")
+  cmake_args+=("${EMEL_ZIG_CMAKE_PLATFORM_ARGS[@]}")
 fi
 
 if ! $RUN_ONLY; then

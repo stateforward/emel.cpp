@@ -412,14 +412,21 @@ the pinned upstream JSON remains untouched for the reference lane. EMEL model co
 the separate `tools/bench/personaplex-inference.json` contract, keeping prompt tokens, public
 codebook count, silence framing, and sampling limits explicit and reproducible. the setup keeps the
 full 16-codebook Mimi parity artifact separate from PersonaPlex's 8-public-codebook Mimi artifact.
+the maintained PersonaPlex artifact is generated with `--quantize q8_0`: only the Mimi transformer
+and RVQ projection weight classes are quantized, while convolutions, norms, biases, scales, and
+codebooks retain their source float dtype. setup freshness verifies the converter manifest's
+quantization, exact 68-tensor contract, and `enriched_sha256` against the actual GGUF bytes, so a
+newer legacy F32 artifact cannot silently satisfy the maintained default.
 
 the report and both audible WAVs are written under `build/personaplex_compare/`. the report records
-the input SHA256, EMEL/reference LM and Mimi paths and SHA256 values, exact public Mimi input-code
-match, sampled output-token match, exact text frame/token match, lagged 80 ms energy correlation,
-activity ratio, non-silence, output hashes, and end-to-end wall time. A text frame-count or token
-drift fails the comparison. sampled audio output is compared as behavior rather than raw-waveform
-equality because a one-rank floating-point difference can avalanche later fixed-seed draws even
-when the RNG state and sampling policy agree.
+the input SHA256, EMEL/reference LM and Mimi paths and SHA256 values, same-WAV public Mimi
+input-code match, sampled output-token match, exact text frame/token match, lagged 80 ms energy
+correlation, activity ratio, non-silence, output hashes, and end-to-end wall time. The current
+maintained same-WAV input-code match is `0.961538`; it is reported separately from generated-output
+acceptance and keeps exact semantic parity failed until it reaches `1.0`. A text frame-count or
+token drift fails the bounded comparison. sampled audio output is compared as behavior rather than
+raw-waveform equality because a one-rank floating-point difference can avalanche later fixed-seed
+draws even when the RNG state and sampling policy agree.
 
 use `--emel-lm` and `--emel-mimi` (or `EMEL_PERSONAPLEX_EMEL_LM` and
 `EMEL_PERSONAPLEX_EMEL_MIMI`) to inject packed or quantized EMEL artifacts without changing the

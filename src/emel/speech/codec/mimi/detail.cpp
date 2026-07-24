@@ -112,6 +112,13 @@ template <bool dry_run> struct arena_cursor_t {
 
 using arena_cursor = arena_cursor_t<false>;
 
+enum class projection_bind_kind : uint8_t {
+  f32,
+  f16,
+  native,
+  q8,
+};
+
 // Reads one element of an f32/f16 source tensor as f32.
 float source_value(const emel::model::data::tensor_record &tensor,
                    const uint64_t index) noexcept {
@@ -205,6 +212,68 @@ const float *prepare_matrix_raw(arena_cursor_t<dry_run> &cursor,
       out[index] = source_value(*tensor, static_cast<uint64_t>(index));
     }
   }
+  return out;
+}
+
+// Packs one exact F32 projection through the kernel-owned actor. The owning
+// facade guard has already selected the F32 route and validated every source,
+// arena, alignment, capacity, and overlap before the live specialization runs.
+template <bool dry_run>
+const float *
+prepare_matrix_exact_x4(arena_cursor_t<dry_run> &cursor,
+                        emel::kernel::f32_matvec::sm &projection_matvec,
+                        const emel::model::data::tensor_record *tensor,
+                        const int64_t in_count,
+                        const int64_t out_count) noexcept {
+  if constexpr (dry_run) {
+    (void)projection_matvec;
+    return prepare_matrix_raw(cursor, tensor, in_count, out_count);
+  }
+  const uint64_t elements =
+      static_cast<uint64_t>(in_count) * static_cast<uint64_t>(out_count);
+  float *out = cursor.take(elements);
+  const auto source = std::span<const float>{
+      static_cast<const float *>(tensor->data), static_cast<size_t>(elements)};
+  const auto destination = std::span<float>{out, static_cast<size_t>(elements)};
+  const emel::kernel::f32_matvec::event::prepare_f32_request request{
+      .source = source,
+      .destination = destination,
+      .inner = static_cast<uint64_t>(in_count),
+      .rows = static_cast<uint64_t>(out_count),
+  };
+  emel::kernel::f32_matvec::event::dispatch_result result{};
+  (void)projection_matvec.process_event(
+      emel::kernel::f32_matvec::event::prepare_f32{request, result});
+  return out;
+}
+
+template <bool dry_run>
+const float *
+prepare_matrix_exact_x4_f16(arena_cursor_t<dry_run> &cursor,
+                            emel::kernel::f32_matvec::sm &projection_matvec,
+                            const emel::model::data::tensor_record *tensor,
+                            const int64_t in_count,
+                            const int64_t out_count) noexcept {
+  if constexpr (dry_run) {
+    (void)projection_matvec;
+    return prepare_matrix_raw(cursor, tensor, in_count, out_count);
+  }
+  const uint64_t elements =
+      static_cast<uint64_t>(in_count) * static_cast<uint64_t>(out_count);
+  float *out = cursor.take(elements);
+  const auto source =
+      std::span<const uint16_t>{static_cast<const uint16_t *>(tensor->data),
+                                static_cast<size_t>(elements)};
+  const auto destination = std::span<float>{out, static_cast<size_t>(elements)};
+  const emel::kernel::f32_matvec::event::prepare_f16_request request{
+      .source = source,
+      .destination = destination,
+      .inner = static_cast<uint64_t>(in_count),
+      .rows = static_cast<uint64_t>(out_count),
+  };
+  emel::kernel::f32_matvec::event::dispatch_result result{};
+  (void)projection_matvec.process_event(
+      emel::kernel::f32_matvec::event::prepare_f16{request, result});
   return out;
 }
 
@@ -404,6 +473,26 @@ bool dispatch_q8_matvec(codec_runtime &runtime, const uint8_t *weight_q8,
   ev.dst = make_view_mut(y, 1u, static_cast<uint64_t>(rows));
   return runtime.kernel.process_event(ev);
 }
+
+#if defined(__aarch64__) || defined(_M_ARM64)
+void dispatch_f32_exact_x4(codec_runtime &runtime, const float *weights,
+                           const int64_t inner, const int64_t rows,
+                           const float *input, float *output) noexcept {
+  const uint64_t weight_count =
+      static_cast<uint64_t>(inner) * static_cast<uint64_t>(rows);
+  const emel::kernel::f32_matvec::event::execute_request request{
+      .weights =
+          std::span<const float>{weights, static_cast<size_t>(weight_count)},
+      .input = std::span<const float>{input, static_cast<size_t>(inner)},
+      .output = std::span<float>{output, static_cast<size_t>(rows)},
+      .inner = static_cast<uint64_t>(inner),
+      .rows = static_cast<uint64_t>(rows),
+  };
+  emel::kernel::f32_matvec::event::dispatch_result result{};
+  (void)runtime.projection_matvec.process_event(
+      emel::kernel::f32_matvec::event::execute_exact_x4{request, result});
+}
+#endif
 
 kev::tensor_view_mut make_strided_view_mut(float *data, const uint64_t ne0,
                                            const uint64_t ne1,
@@ -1044,9 +1133,15 @@ void compute_transformer(codec_runtime &runtime,
           return;
         }
       } else {
+#if defined(__aarch64__) || defined(_M_ARM64)
+        dispatch_f32_exact_x4(runtime, layer.in_proj, dim, 3 * dim, normed,
+                              qkv);
+#else
         for (int64_t o = 0; o < 3 * dim; ++o) {
           qkv[o] = kd::vec_dot_f32_ggml(dim, layer.in_proj + o * dim, normed);
         }
+        ++runtime.legacy_f32_projection_calls;
+#endif
       }
 
       // reference rope: timestep-embedding angles, adjacent-pair rotation,
@@ -1121,9 +1216,14 @@ void compute_transformer(codec_runtime &runtime,
           return;
         }
       } else {
+#if defined(__aarch64__) || defined(_M_ARM64)
+        dispatch_f32_exact_x4(runtime, layer.out_proj, dim, dim, attn, proj);
+#else
         for (int64_t o = 0; o < dim; ++o) {
           proj[o] = kd::vec_dot_f32_ggml(dim, layer.out_proj + o * dim, attn);
         }
+        ++runtime.legacy_f32_projection_calls;
+#endif
       }
       for (int64_t d = 0; d < dim; ++d) {
         x[d] = x[d] + proj[d] * layer.layer_scale_1[d];
@@ -1142,9 +1242,15 @@ void compute_transformer(codec_runtime &runtime,
           return;
         }
       } else {
+#if defined(__aarch64__) || defined(_M_ARM64)
+        dispatch_f32_exact_x4(runtime, layer.linear1, dim, mlp_dim, normed,
+                              mlp);
+#else
         for (int64_t o = 0; o < mlp_dim; ++o) {
           mlp[o] = kd::vec_dot_f32_ggml(dim, layer.linear1 + o * dim, normed);
         }
+        ++runtime.legacy_f32_projection_calls;
+#endif
       }
       if (!dispatch_unary(runtime, kev::unary_subop::gelu,
                           make_view(mlp, static_cast<uint64_t>(mlp_dim)),
@@ -1157,10 +1263,15 @@ void compute_transformer(codec_runtime &runtime,
           return;
         }
       } else {
+#if defined(__aarch64__) || defined(_M_ARM64)
+        dispatch_f32_exact_x4(runtime, layer.linear2, mlp_dim, dim, mlp, proj);
+#else
         for (int64_t o = 0; o < dim; ++o) {
           proj[o] =
               kd::vec_dot_f32_ggml(mlp_dim, layer.linear2 + o * mlp_dim, mlp);
         }
+        ++runtime.legacy_f32_projection_calls;
+#endif
       }
       for (int64_t d = 0; d < dim; ++d) {
         x[d] = x[d] + proj[d] * layer.layer_scale_2[d];
@@ -1918,11 +2029,11 @@ bool bind_conv(arena_cursor_t<dry_run> &cursor, uint64_t &state_cursor,
   return true;
 }
 
-template <bool dry_run>
+template <bool dry_run, projection_bind_kind bind_kind>
 bool bind_transformer(arena_cursor_t<dry_run> &cursor, uint64_t &state_cursor,
+                      emel::kernel::f32_matvec::sm &projection_matvec,
                       const emel::model::data &model_data, const char *family,
                       const transformer_plan &plan, const int32_t frame_tokens,
-                      const bool proj_q8,
                       transformer_weights &weights_out) noexcept {
   const auto &mimi = model_data.mimi;
   const int64_t dim = mimi.dim;
@@ -1950,7 +2061,7 @@ bool bind_transformer(arena_cursor_t<dry_run> &cursor, uint64_t &state_cursor,
     layer.norm1_bias = prepare_vector(
         cursor, find_layer_tensor(model_data, format, index, "norm1.bias"),
         dim);
-    if (proj_q8) {
+    if constexpr (bind_kind == projection_bind_kind::q8) {
       layer.in_proj_q8 = prepare_raw_q8_0(
           cursor,
           find_layer_tensor(model_data, format, index,
@@ -1961,6 +2072,28 @@ bool bind_transformer(arena_cursor_t<dry_run> &cursor, uint64_t &state_cursor,
           find_layer_tensor(model_data, format, index,
                             "self_attn.out_projs.0.weight"),
           static_cast<uint64_t>(dim) * static_cast<uint64_t>(dim));
+    } else if constexpr (bind_kind == projection_bind_kind::f32) {
+      layer.in_proj = prepare_matrix_exact_x4(
+          cursor, projection_matvec,
+          find_layer_tensor(model_data, format, index,
+                            "self_attn.in_projs.0.weight"),
+          dim, 3 * dim);
+      layer.out_proj = prepare_matrix_exact_x4(
+          cursor, projection_matvec,
+          find_layer_tensor(model_data, format, index,
+                            "self_attn.out_projs.0.weight"),
+          dim, dim);
+    } else if constexpr (bind_kind == projection_bind_kind::f16) {
+      layer.in_proj = prepare_matrix_exact_x4_f16(
+          cursor, projection_matvec,
+          find_layer_tensor(model_data, format, index,
+                            "self_attn.in_projs.0.weight"),
+          dim, 3 * dim);
+      layer.out_proj = prepare_matrix_exact_x4_f16(
+          cursor, projection_matvec,
+          find_layer_tensor(model_data, format, index,
+                            "self_attn.out_projs.0.weight"),
+          dim, dim);
     } else {
       layer.in_proj =
           prepare_matrix_raw(cursor,
@@ -1983,7 +2116,7 @@ bool bind_transformer(arena_cursor_t<dry_run> &cursor, uint64_t &state_cursor,
     layer.norm2_bias = prepare_vector(
         cursor, find_layer_tensor(model_data, format, index, "norm2.bias"),
         dim);
-    if (proj_q8) {
+    if constexpr (bind_kind == projection_bind_kind::q8) {
       layer.linear1_q8 = prepare_raw_q8_0(
           cursor,
           find_layer_tensor(model_data, format, index, "linear1.weight"),
@@ -1992,6 +2125,24 @@ bool bind_transformer(arena_cursor_t<dry_run> &cursor, uint64_t &state_cursor,
           cursor,
           find_layer_tensor(model_data, format, index, "linear2.weight"),
           static_cast<uint64_t>(plan.mlp_dim) * static_cast<uint64_t>(dim));
+    } else if constexpr (bind_kind == projection_bind_kind::f32) {
+      layer.linear1 = prepare_matrix_exact_x4(
+          cursor, projection_matvec,
+          find_layer_tensor(model_data, format, index, "linear1.weight"), dim,
+          plan.mlp_dim);
+      layer.linear2 = prepare_matrix_exact_x4(
+          cursor, projection_matvec,
+          find_layer_tensor(model_data, format, index, "linear2.weight"),
+          plan.mlp_dim, dim);
+    } else if constexpr (bind_kind == projection_bind_kind::f16) {
+      layer.linear1 = prepare_matrix_exact_x4_f16(
+          cursor, projection_matvec,
+          find_layer_tensor(model_data, format, index, "linear1.weight"), dim,
+          plan.mlp_dim);
+      layer.linear2 = prepare_matrix_exact_x4_f16(
+          cursor, projection_matvec,
+          find_layer_tensor(model_data, format, index, "linear2.weight"),
+          plan.mlp_dim, dim);
     } else {
       layer.linear1 = prepare_matrix_raw(
           cursor,
@@ -2006,12 +2157,16 @@ bool bind_transformer(arena_cursor_t<dry_run> &cursor, uint64_t &state_cursor,
         cursor,
         find_layer_tensor(model_data, format, index, "layer_scale_2.scale"),
         dim);
-    const bool projections_bound =
-        proj_q8
-            ? (layer.in_proj_q8 != nullptr && layer.out_proj_q8 != nullptr &&
-               layer.linear1_q8 != nullptr && layer.linear2_q8 != nullptr)
-            : (layer.in_proj != nullptr && layer.out_proj != nullptr &&
-               layer.linear1 != nullptr && layer.linear2 != nullptr);
+    bool projections_bound = false;
+    if constexpr (bind_kind == projection_bind_kind::q8) {
+      projections_bound =
+          layer.in_proj_q8 != nullptr && layer.out_proj_q8 != nullptr &&
+          layer.linear1_q8 != nullptr && layer.linear2_q8 != nullptr;
+    } else {
+      projections_bound = layer.in_proj != nullptr &&
+                          layer.out_proj != nullptr &&
+                          layer.linear1 != nullptr && layer.linear2 != nullptr;
+    }
     if (layer.norm1_weight == nullptr || layer.norm1_bias == nullptr ||
         !projections_bound || layer.layer_scale_1 == nullptr ||
         layer.norm2_weight == nullptr || layer.norm2_bias == nullptr ||
@@ -2191,14 +2346,30 @@ uint64_t required_frame_floats(const emel::model::data &model_data) noexcept {
 // caller memory - it only fills the caller-local scratch runtime); the live
 // instantiation canonicalizes into the arenas. One walk, two modes, so the
 // validator can never drift from the bind it authorizes.
-template <bool dry_run>
+template <bool dry_run, projection_bind_kind bind_kind>
 bool run_codec_bind_walk(const emel::model::data &model_data,
                          std::span<float> prepared, std::span<float> state,
                          codec_runtime &runtime_out,
                          codec_streaming_state &state_out) noexcept {
   codec_plan plan{};
-  if (!plan_codec(model_data, plan)) {
-    return false;
+  if constexpr (dry_run) {
+    if (!plan_codec(model_data, plan)) {
+      return false;
+    }
+  } else {
+    // The caller supplied a pre-dispatch bind contract and the owning guard
+    // accepted it. Rebuild the immutable geometry for binding only; its
+    // boolean validation result does not route or select an RTC outcome.
+    (void)plan_codec(model_data, plan);
+  }
+  if constexpr (dry_run) {
+    if constexpr (bind_kind == projection_bind_kind::q8) {
+      if (!plan.proj_q8) {
+        return false;
+      }
+    } else if (plan.proj_q8) {
+      return false;
+    }
   }
   if constexpr (!dry_run) {
     if (prepared.size() < plan.prepared_floats ||
@@ -2222,18 +2393,34 @@ bool run_codec_bind_walk(const emel::model::data &model_data,
   arena_cursor_t<dry_run> cursor{prepared, 0};
   uint64_t state_cursor = 0;
 
-  if (!bind_seanet(cursor, state_cursor, plan.encoder, plan.conv_f16,
-                   runtime_out.encoder_layers) ||
-      !bind_transformer(cursor, state_cursor, model_data, "encoder_transformer",
-                        plan.encoder_transformer,
-                        static_cast<int32_t>(plan.encoder_tokens), plan.proj_q8,
-                        runtime_out.encoder_transformer)) {
-    return false;
+  if constexpr (dry_run) {
+    if (!bind_seanet(cursor, state_cursor, plan.encoder, plan.conv_f16,
+                     runtime_out.encoder_layers) ||
+        !bind_transformer<dry_run, bind_kind>(
+            cursor, state_cursor, runtime_out.projection_matvec, model_data,
+            "encoder_transformer", plan.encoder_transformer,
+            static_cast<int32_t>(plan.encoder_tokens),
+            runtime_out.encoder_transformer)) {
+      return false;
+    }
+  } else {
+    (void)bind_seanet(cursor, state_cursor, plan.encoder, plan.conv_f16,
+                      runtime_out.encoder_layers);
+    (void)bind_transformer<dry_run, bind_kind>(
+        cursor, state_cursor, runtime_out.projection_matvec, model_data,
+        "encoder_transformer", plan.encoder_transformer,
+        static_cast<int32_t>(plan.encoder_tokens),
+        runtime_out.encoder_transformer);
   }
 
-  if (!bind_conv(cursor, state_cursor, plan.downsample, false, plan.conv_f16,
-                 runtime_out.downsample)) {
-    return false;
+  if constexpr (dry_run) {
+    if (!bind_conv(cursor, state_cursor, plan.downsample, false, plan.conv_f16,
+                   runtime_out.downsample)) {
+      return false;
+    }
+  } else {
+    (void)bind_conv(cursor, state_cursor, plan.downsample, false, plan.conv_f16,
+                    runtime_out.downsample);
   }
 
   runtime_out.conv_f16 = plan.conv_f16;
@@ -2242,13 +2429,22 @@ bool run_codec_bind_walk(const emel::model::data &model_data,
   if constexpr (!dry_run) {
     runtime_out.kernel.set_kind(runtime_out.kernel_kind);
   }
-  if (!bind_rvq_split(cursor, model_data, "rvq_first", mimi.semantic_n_q,
-                      plan.conv_f16, plan.rvq_q8,
-                      runtime_out.quantizer.semantic) ||
-      !bind_rvq_split(cursor, model_data, "rvq_rest",
-                      mimi.n_q - mimi.semantic_n_q, plan.conv_f16, plan.rvq_q8,
-                      runtime_out.quantizer.acoustic)) {
-    return false;
+  if constexpr (dry_run) {
+    if (!bind_rvq_split(cursor, model_data, "rvq_first", mimi.semantic_n_q,
+                        plan.conv_f16, plan.rvq_q8,
+                        runtime_out.quantizer.semantic) ||
+        !bind_rvq_split(cursor, model_data, "rvq_rest",
+                        mimi.n_q - mimi.semantic_n_q, plan.conv_f16,
+                        plan.rvq_q8, runtime_out.quantizer.acoustic)) {
+      return false;
+    }
+  } else {
+    (void)bind_rvq_split(cursor, model_data, "rvq_first", mimi.semantic_n_q,
+                         plan.conv_f16, plan.rvq_q8,
+                         runtime_out.quantizer.semantic);
+    (void)bind_rvq_split(cursor, model_data, "rvq_rest",
+                         mimi.n_q - mimi.semantic_n_q, plan.conv_f16,
+                         plan.rvq_q8, runtime_out.quantizer.acoustic);
   }
 
   {
@@ -2276,13 +2472,24 @@ bool run_codec_bind_walk(const emel::model::data &model_data,
     state_cursor += upsample.state_floats;
   }
 
-  if (!bind_transformer(cursor, state_cursor, model_data, "decoder_transformer",
-                        plan.decoder_transformer,
-                        static_cast<int32_t>(plan.decoder_tokens), plan.proj_q8,
-                        runtime_out.decoder_transformer) ||
-      !bind_seanet(cursor, state_cursor, plan.decoder, plan.conv_f16,
-                   runtime_out.decoder_layers)) {
-    return false;
+  if constexpr (dry_run) {
+    if (!bind_transformer<dry_run, bind_kind>(
+            cursor, state_cursor, runtime_out.projection_matvec, model_data,
+            "decoder_transformer", plan.decoder_transformer,
+            static_cast<int32_t>(plan.decoder_tokens),
+            runtime_out.decoder_transformer) ||
+        !bind_seanet(cursor, state_cursor, plan.decoder, plan.conv_f16,
+                     runtime_out.decoder_layers)) {
+      return false;
+    }
+  } else {
+    (void)bind_transformer<dry_run, bind_kind>(
+        cursor, state_cursor, runtime_out.projection_matvec, model_data,
+        "decoder_transformer", plan.decoder_transformer,
+        static_cast<int32_t>(plan.decoder_tokens),
+        runtime_out.decoder_transformer);
+    (void)bind_seanet(cursor, state_cursor, plan.decoder, plan.conv_f16,
+                      runtime_out.decoder_layers);
   }
 
   runtime_out.prepared_floats_used = cursor.used;
@@ -2296,14 +2503,114 @@ bool run_codec_bind_walk(const emel::model::data &model_data,
   }
 }
 
-bool validate_codec_contract(const emel::model::data &model_data) noexcept {
+template <projection_bind_kind bind_kind>
+bool validate_codec_contract_for(const emel::model::data &model_data) noexcept {
   // Caller-local scratch: the dry-run walk writes only here, never to any
   // caller arena, so this is a pure predicate suitable for guards. One-time
   // initialization path only, never per-frame.
   codec_runtime scratch_runtime{};
   codec_streaming_state scratch_state{};
-  return run_codec_bind_walk<true>(model_data, {}, {}, scratch_runtime,
-                                   scratch_state);
+  return run_codec_bind_walk<true, bind_kind>(model_data, {}, {},
+                                              scratch_runtime, scratch_state);
+}
+
+template <projection_bind_kind bind_kind>
+void bind_validated_codec_runtime_walk(
+    const emel::model::data &model_data, std::span<float> prepared,
+    std::span<float> state, codec_runtime &runtime_out,
+    codec_streaming_state &state_out) noexcept {
+  codec_plan plan{};
+  (void)plan_codec(model_data, plan);
+
+  const auto &mimi = model_data.mimi;
+  runtime_out.model = &model_data;
+  runtime_out.sample_rate = mimi.sample_rate;
+  runtime_out.frame_samples = plan.frame_samples;
+  runtime_out.n_q = mimi.n_q;
+  runtime_out.dim = mimi.dim;
+  runtime_out.prepared_arena = prepared;
+  runtime_out.quantizer.codebook_entries = mimi.card;
+  runtime_out.quantizer.codebook_dim = mimi.codebook_dim;
+  runtime_out.workspace_floats = workspace_floats_from_plan(model_data, plan);
+  runtime_out.frame_floats = plan.extents.frame + 64u;
+
+  arena_cursor cursor{prepared, 0};
+  uint64_t state_cursor = 0u;
+  (void)bind_seanet(cursor, state_cursor, plan.encoder, plan.conv_f16,
+                    runtime_out.encoder_layers);
+  (void)bind_transformer<false, bind_kind>(
+      cursor, state_cursor, runtime_out.projection_matvec, model_data,
+      "encoder_transformer", plan.encoder_transformer,
+      static_cast<int32_t>(plan.encoder_tokens),
+      runtime_out.encoder_transformer);
+  (void)bind_conv(cursor, state_cursor, plan.downsample, false, plan.conv_f16,
+                  runtime_out.downsample);
+
+  runtime_out.conv_f16 = plan.conv_f16;
+  runtime_out.proj_q8 = plan.proj_q8;
+  runtime_out.rvq_q8 = plan.rvq_q8;
+  runtime_out.kernel.set_kind(runtime_out.kernel_kind);
+  (void)bind_rvq_split(cursor, model_data, "rvq_first", mimi.semantic_n_q,
+                       plan.conv_f16, plan.rvq_q8,
+                       runtime_out.quantizer.semantic);
+  (void)bind_rvq_split(cursor, model_data, "rvq_rest",
+                       mimi.n_q - mimi.semantic_n_q, plan.conv_f16, plan.rvq_q8,
+                       runtime_out.quantizer.acoustic);
+
+  const int64_t taps = plan.upsample.taps;
+  const int64_t channels = plan.upsample.out_channels;
+  auto &upsample = runtime_out.upsample;
+  upsample.weight = prepare_conv_transpose(cursor, plan.upsample.weight,
+                                           static_cast<uint64_t>(taps) *
+                                               static_cast<uint64_t>(channels));
+  upsample.bias = nullptr;
+  upsample.taps = static_cast<int32_t>(taps);
+  upsample.in_channels = static_cast<int32_t>(channels);
+  upsample.out_channels = static_cast<int32_t>(channels);
+  upsample.stride = 2;
+  upsample.frame_length = 1;
+  upsample.state_offset = state_cursor;
+  const int64_t lout_full = (1 - 1) * 2 + taps;
+  upsample.state_floats =
+      static_cast<uint64_t>(lout_full) * static_cast<uint64_t>(channels);
+  state_cursor += upsample.state_floats;
+
+  (void)bind_transformer<false, bind_kind>(
+      cursor, state_cursor, runtime_out.projection_matvec, model_data,
+      "decoder_transformer", plan.decoder_transformer,
+      static_cast<int32_t>(plan.decoder_tokens),
+      runtime_out.decoder_transformer);
+  (void)bind_seanet(cursor, state_cursor, plan.decoder, plan.conv_f16,
+                    runtime_out.decoder_layers);
+
+  runtime_out.prepared_floats_used = cursor.used;
+  state_out.arena = state;
+  reset_streaming_state(runtime_out, state_out);
+}
+
+bool validate_codec_contract_f32(const emel::model::data &model_data) noexcept {
+#if defined(__aarch64__) || defined(_M_ARM64)
+  return validate_codec_contract_for<projection_bind_kind::f32>(model_data);
+#else
+  return validate_codec_contract_for<projection_bind_kind::native>(model_data);
+#endif
+}
+
+bool validate_codec_contract_native(
+    const emel::model::data &model_data) noexcept {
+#if defined(__aarch64__) || defined(_M_ARM64)
+  return validate_codec_contract_for<projection_bind_kind::f16>(model_data);
+#else
+  return validate_codec_contract_for<projection_bind_kind::native>(model_data);
+#endif
+}
+
+bool validate_codec_contract_q8(const emel::model::data &model_data) noexcept {
+  return validate_codec_contract_for<projection_bind_kind::q8>(model_data);
+}
+
+bool validate_codec_contract(const emel::model::data &model_data) noexcept {
+  return validate_codec_contract_f32(model_data);
 }
 
 bool validate_codes_in_range(const codec_runtime &runtime,
@@ -2322,15 +2629,58 @@ bool validate_codes_in_range(const codec_runtime &runtime,
   return true;
 }
 
+template <projection_bind_kind bind_kind>
+void bind_codec_runtime_for(const emel::model::data &model_data,
+                            std::span<float> prepared, std::span<float> state,
+                            codec_runtime &runtime_out,
+                            codec_streaming_state &state_out) noexcept {
+  // Non-failing by contract: immutable validation facts and capacities were
+  // accepted before this route-specialized action runs. The live walk has no
+  // failure result and therefore cannot select the next RTC transition.
+  bind_validated_codec_runtime_walk<bind_kind>(model_data, prepared, state,
+                                               runtime_out, state_out);
+}
+
+void bind_codec_runtime_f32(const emel::model::data &model_data,
+                            std::span<float> prepared, std::span<float> state,
+                            codec_runtime &runtime_out,
+                            codec_streaming_state &state_out) noexcept {
+#if defined(__aarch64__) || defined(_M_ARM64)
+  bind_codec_runtime_for<projection_bind_kind::f32>(model_data, prepared, state,
+                                                    runtime_out, state_out);
+#else
+  bind_codec_runtime_for<projection_bind_kind::native>(
+      model_data, prepared, state, runtime_out, state_out);
+#endif
+}
+
+void bind_codec_runtime_native(const emel::model::data &model_data,
+                               std::span<float> prepared,
+                               std::span<float> state,
+                               codec_runtime &runtime_out,
+                               codec_streaming_state &state_out) noexcept {
+#if defined(__aarch64__) || defined(_M_ARM64)
+  bind_codec_runtime_for<projection_bind_kind::f16>(model_data, prepared, state,
+                                                    runtime_out, state_out);
+#else
+  bind_codec_runtime_for<projection_bind_kind::native>(
+      model_data, prepared, state, runtime_out, state_out);
+#endif
+}
+
+void bind_codec_runtime_q8(const emel::model::data &model_data,
+                           std::span<float> prepared, std::span<float> state,
+                           codec_runtime &runtime_out,
+                           codec_streaming_state &state_out) noexcept {
+  bind_codec_runtime_for<projection_bind_kind::q8>(model_data, prepared, state,
+                                                   runtime_out, state_out);
+}
+
 void bind_codec_runtime(const emel::model::data &model_data,
                         std::span<float> prepared, std::span<float> state,
                         codec_runtime &runtime_out,
                         codec_streaming_state &state_out) noexcept {
-  // Non-failing by contract: the owning machine's guards route on
-  // validate_codec_contract and the required_* capacities before this action
-  // runs, so the walk's data-plane short-circuit cannot trigger here.
-  (void)run_codec_bind_walk<false>(model_data, prepared, state, runtime_out,
-                                   state_out);
+  bind_codec_runtime_f32(model_data, prepared, state, runtime_out, state_out);
 }
 
 template void compute_seanet_encoder<false>(codec_runtime &,

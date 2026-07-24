@@ -3,6 +3,8 @@ set -euo pipefail
 
 # shellcheck source=scripts/build_jobs.sh
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/build_jobs.sh"
+# shellcheck source=scripts/zig_toolchain.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/zig_toolchain.sh"
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TOOLS_DIR="$ROOT_DIR/tools/bench"
@@ -302,6 +304,9 @@ configure_bench_build() {
   fi
   if [[ -n "$bench_cxx_flags" ]]; then
     cmake_args+=("-DCMAKE_CXX_FLAGS=$bench_cxx_flags")
+  fi
+  if $USE_ZIG; then
+    cmake_args+=("${EMEL_ZIG_CMAKE_PLATFORM_ARGS[@]}")
   fi
 
   cmake "${cmake_args[@]}" >&2
@@ -617,6 +622,9 @@ if $SNAPSHOT; then
   if [[ -n "$bench_cxx_flags" ]]; then
     cmake_args+=("-DCMAKE_CXX_FLAGS=$bench_cxx_flags")
   fi
+  if $USE_ZIG; then
+    cmake_args+=("${EMEL_ZIG_CMAKE_PLATFORM_ARGS[@]}")
+  fi
 
   cmake "${cmake_args[@]}"
 
@@ -699,6 +707,9 @@ if $COMPARE; then
   if [[ -n "$bench_cxx_flags" ]]; then
     cmake_args+=("-DCMAKE_CXX_FLAGS=$bench_cxx_flags")
   fi
+  if $USE_ZIG; then
+    cmake_args+=("${EMEL_ZIG_CMAKE_PLATFORM_ARGS[@]}")
+  fi
 
   cmake "${cmake_args[@]}" >&2
   cmake --build "$compare_build_dir" --parallel "$EMEL_BUILD_JOBS" --target bench_runner >&2
@@ -756,6 +767,9 @@ if $RUN_ONLY; then
   fi
   if [[ -n "$bench_cxx_flags" ]]; then
     cmake_args+=("-DCMAKE_CXX_FLAGS=$bench_cxx_flags")
+  fi
+  if $USE_ZIG; then
+    cmake_args+=("${EMEL_ZIG_CMAKE_PLATFORM_ARGS[@]}")
   fi
 
   cmake "${cmake_args[@]}" >&2

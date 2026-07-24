@@ -12,6 +12,7 @@
 #include "emel/speech/generator/context.hpp"
 #include "emel/speech/generator/errors.hpp"
 #include "emel/speech/generator/events.hpp"
+#include "emel/speech/generator/frame/events.hpp"
 
 namespace emel::speech::generator::action {
 
@@ -765,6 +766,485 @@ template <class dependencies_type> struct effect_unexpected {
                   const context<dependencies_type> &ctx) const noexcept {
     effect_reject_origin(stateforward::sml::back::get_origin_event(unexpected),
                          ctx);
+  }
+};
+
+struct lane_zero {};
+struct lane_one {};
+
+template <class dependencies_type>
+void effect_record_worker_entry(context<dependencies_type> &ctx) noexcept {
+  if constexpr (requires { ctx.collaborators.stage_diagnostics; }) {
+    ctx.collaborators.stage_diagnostics.worker_entries.fetch_add(
+        1u, std::memory_order_relaxed);
+  }
+}
+
+template <class dependencies_type>
+void effect_record_worker_exit(context<dependencies_type> &ctx) noexcept {
+  if constexpr (requires { ctx.collaborators.stage_diagnostics; }) {
+    ctx.collaborators.stage_diagnostics.worker_exits.fetch_add(
+        1u, std::memory_order_relaxed);
+  }
+}
+
+template <class dependencies_type>
+void effect_record_submission(context<dependencies_type> &ctx,
+                              const bool submitted) noexcept {
+  if constexpr (requires { ctx.collaborators.stage_diagnostics; }) {
+    ctx.collaborators.stage_diagnostics.submissions.fetch_add(
+        static_cast<uint64_t>(submitted), std::memory_order_relaxed);
+  }
+}
+
+template <class dependencies_type>
+void effect_record_joins(context<dependencies_type> &ctx,
+                         const size_t joined) noexcept {
+  if constexpr (requires { ctx.collaborators.stage_diagnostics; }) {
+    ctx.collaborators.stage_diagnostics.joins.fetch_add(
+        static_cast<uint64_t>(joined), std::memory_order_relaxed);
+  }
+}
+
+template <class lane_type, class dependencies_type>
+std::span<int32_t> encoded_lane(context<dependencies_type> &ctx) noexcept {
+  if constexpr (std::same_as<lane_type, lane_zero>) {
+    return ctx.encoded_lane0();
+  } else {
+    return ctx.encoded_lane1();
+  }
+}
+
+template <class lane_type, class dependencies_type>
+std::span<int32_t> generated_lane(context<dependencies_type> &ctx) noexcept {
+  if constexpr (std::same_as<lane_type, lane_zero>) {
+    return ctx.generated_lane0();
+  } else {
+    return ctx.generated_lane1();
+  }
+}
+
+template <class lane_type, class dependencies_type>
+event::wavefront_attribution &
+encoded_attribution(context<dependencies_type> &ctx) noexcept {
+  if constexpr (std::same_as<lane_type, lane_zero>) {
+    return ctx.encoded_lane0_attribution;
+  } else {
+    return ctx.encoded_lane1_attribution;
+  }
+}
+
+template <class lane_type, class dependencies_type>
+event::wavefront_attribution &
+generated_attribution(context<dependencies_type> &ctx) noexcept {
+  if constexpr (std::same_as<lane_type, lane_zero>) {
+    return ctx.generated_lane0_attribution;
+  } else {
+    return ctx.generated_lane1_attribution;
+  }
+}
+
+template <class lane_type, class dependencies_type>
+int32_t &generated_text_token(context<dependencies_type> &ctx) noexcept {
+  if constexpr (std::same_as<lane_type, lane_zero>) {
+    return ctx.generated_lane0_text_token;
+  } else {
+    return ctx.generated_lane1_text_token;
+  }
+}
+
+template <class dependencies_type, class encode_lane_type,
+          class middle_lane_type, class decode_lane_type, bool encode_active,
+          bool middle_active, bool decode_active>
+struct effect_execute_wavefront_phase_parallel {
+  template <class runtime_event_type>
+  void operator()(const runtime_event_type &runtime_ev,
+                  context<dependencies_type> &ctx) const noexcept {
+    runtime_ev.ctx = {};
+    runtime_ev.request.output_attribution = {};
+    runtime_ev.request.text_token_out = -1;
+    runtime_ev.request.sample_count_out = 0;
+    runtime_ev.request.produced_out = false;
+    if constexpr (requires { runtime_ev.request.complete_out; }) {
+      runtime_ev.request.complete_out = false;
+    }
+
+    wavefront_stage_pool::join_group group{};
+    emel::policy::fork_join_start_gate gate{};
+    size_t submitted_tasks = 0u;
+    bool all_submitted = true;
+
+    if constexpr (encode_active) {
+      const bool submitted = ctx.collaborators.stage_pool->try_submit(
+          group, [&runtime_ev, &ctx, &gate]() noexcept {
+            effect_record_worker_entry(ctx);
+            gate.arrive_and_wait();
+            typename dependencies_type::wavefront_encode_event request{
+                runtime_ev.request.pcm_in, encoded_lane<encode_lane_type>(ctx)};
+            request.error_out = &runtime_ev.ctx.encode_err;
+            runtime_ev.ctx.encode_accepted =
+                ctx.collaborators.wavefront_encoder.process_event(request);
+            encoded_attribution<encode_lane_type>(ctx) =
+                runtime_ev.request.input_attribution;
+            effect_record_worker_exit(ctx);
+          });
+      submitted_tasks += static_cast<size_t>(submitted);
+      all_submitted = all_submitted && submitted;
+      effect_record_submission(ctx, submitted);
+    }
+
+    if constexpr (decode_active) {
+      const bool submitted = ctx.collaborators.stage_pool->try_submit(
+          group, [&runtime_ev, &ctx, &gate]() noexcept {
+            effect_record_worker_entry(ctx);
+            gate.arrive_and_wait();
+            typename dependencies_type::wavefront_decode_event request{
+                std::span<const int32_t>{generated_lane<decode_lane_type>(ctx)},
+                ctx.decoded_pcm()};
+            request.error_out = &runtime_ev.ctx.decode_err;
+            runtime_ev.ctx.decode_accepted =
+                ctx.collaborators.wavefront_decoder.process_event(request);
+            runtime_ev.ctx.decoded_attribution =
+                generated_attribution<decode_lane_type>(ctx);
+            runtime_ev.ctx.decoded_text_token =
+                generated_text_token<decode_lane_type>(ctx);
+            effect_record_worker_exit(ctx);
+          });
+      submitted_tasks += static_cast<size_t>(submitted);
+      all_submitted = all_submitted && submitted;
+      effect_record_submission(ctx, submitted);
+    }
+
+    gate.open_after_arrivals(submitted_tasks);
+
+    if constexpr (middle_active) {
+      frame::event::run request{
+          std::span<const int32_t>{encoded_lane<middle_lane_type>(ctx)},
+          generated_lane<middle_lane_type>(ctx),
+          generated_text_token<middle_lane_type>(ctx),
+          runtime_ev.ctx.middle_err};
+      runtime_ev.ctx.middle_accepted =
+          ctx.collaborators.wavefront_middle.process_event(request);
+      generated_attribution<middle_lane_type>(ctx) =
+          encoded_attribution<middle_lane_type>(ctx);
+    }
+
+    (void)group.wait();
+    effect_record_joins(ctx, submitted_tasks);
+    runtime_ev.ctx.all_submitted = all_submitted;
+    runtime_ev.ctx.joined = true;
+  }
+};
+
+template <class dependencies_type, class encode_lane_type,
+          class middle_lane_type, class decode_lane_type, bool encode_active,
+          bool middle_active, bool decode_active>
+struct effect_execute_wavefront_phase_serial {
+  template <class runtime_event_type>
+  void operator()(const runtime_event_type &runtime_ev,
+                  context<dependencies_type> &ctx) const noexcept {
+    runtime_ev.ctx = {};
+    runtime_ev.request.output_attribution = {};
+    runtime_ev.request.text_token_out = -1;
+    runtime_ev.request.sample_count_out = 0;
+    runtime_ev.request.produced_out = false;
+    if constexpr (requires { runtime_ev.request.complete_out; }) {
+      runtime_ev.request.complete_out = false;
+    }
+
+    if constexpr (encode_active) {
+      typename dependencies_type::wavefront_encode_event request{
+          runtime_ev.request.pcm_in, encoded_lane<encode_lane_type>(ctx)};
+      request.error_out = &runtime_ev.ctx.encode_err;
+      runtime_ev.ctx.encode_accepted =
+          ctx.collaborators.wavefront_encoder.process_event(request);
+      encoded_attribution<encode_lane_type>(ctx) =
+          runtime_ev.request.input_attribution;
+    }
+
+    if constexpr (middle_active) {
+      frame::event::run request{
+          std::span<const int32_t>{encoded_lane<middle_lane_type>(ctx)},
+          generated_lane<middle_lane_type>(ctx),
+          generated_text_token<middle_lane_type>(ctx),
+          runtime_ev.ctx.middle_err};
+      runtime_ev.ctx.middle_accepted =
+          ctx.collaborators.wavefront_middle.process_event(request);
+      generated_attribution<middle_lane_type>(ctx) =
+          encoded_attribution<middle_lane_type>(ctx);
+    }
+
+    if constexpr (decode_active) {
+      typename dependencies_type::wavefront_decode_event request{
+          std::span<const int32_t>{generated_lane<decode_lane_type>(ctx)},
+          ctx.decoded_pcm()};
+      request.error_out = &runtime_ev.ctx.decode_err;
+      runtime_ev.ctx.decode_accepted =
+          ctx.collaborators.wavefront_decoder.process_event(request);
+      runtime_ev.ctx.decoded_attribution =
+          generated_attribution<decode_lane_type>(ctx);
+      runtime_ev.ctx.decoded_text_token =
+          generated_text_token<decode_lane_type>(ctx);
+    }
+
+    runtime_ev.ctx.all_submitted = true;
+    runtime_ev.ctx.joined = true;
+  }
+};
+
+template <class dependencies_type> struct effect_prepare_wavefront_empty_flush {
+  void operator()(const detail::wavefront_flush_run &runtime_ev,
+                  const context<dependencies_type> &) const noexcept {
+    runtime_ev.ctx = {};
+    runtime_ev.request.output_attribution = {};
+    runtime_ev.request.text_token_out = -1;
+    runtime_ev.request.sample_count_out = 0;
+    runtime_ev.request.produced_out = false;
+    runtime_ev.request.complete_out = false;
+  }
+};
+
+template <class dependencies_type>
+void effect_commit_wavefront_input(
+    const detail::wavefront_frame_run &runtime_ev,
+    context<dependencies_type> &ctx) noexcept {
+  ctx.expected_input.sequence =
+      runtime_ev.request.input_attribution.sequence + 1u;
+  ctx.expected_input.source = runtime_ev.request.input_attribution.source;
+}
+
+template <class dependencies_type, bool emit_callback>
+struct effect_publish_wavefront_frame_pending {
+  void operator()(const detail::wavefront_frame_run &runtime_ev,
+                  context<dependencies_type> &ctx) const noexcept {
+    effect_commit_wavefront_input(runtime_ev, ctx);
+    runtime_ev.ctx.err = error_code(error::none);
+    runtime_ev.request.error_out = runtime_ev.ctx.err;
+    if constexpr (emit_callback) {
+      runtime_ev.request.on_done(
+          events::wavefront_frame_done{runtime_ev.request, {}, 0, false});
+    }
+  }
+};
+
+template <class dependencies_type, class output_lane_type, bool emit_callback>
+struct effect_publish_wavefront_frame_produced {
+  void operator()(const detail::wavefront_frame_run &runtime_ev,
+                  context<dependencies_type> &ctx) const noexcept {
+    std::copy(ctx.decoded_pcm().begin(), ctx.decoded_pcm().end(),
+              runtime_ev.request.pcm_out.begin());
+    std::copy(generated_lane<output_lane_type>(ctx).begin(),
+              generated_lane<output_lane_type>(ctx).end(),
+              runtime_ev.request.generated_tokens_out.begin());
+    runtime_ev.request.output_attribution = runtime_ev.ctx.decoded_attribution;
+    runtime_ev.request.text_token_out = runtime_ev.ctx.decoded_text_token;
+    runtime_ev.request.sample_count_out = ctx.collaborators.frame_samples;
+    runtime_ev.request.produced_out = true;
+    effect_commit_wavefront_input(runtime_ev, ctx);
+    runtime_ev.ctx.err = error_code(error::none);
+    runtime_ev.request.error_out = runtime_ev.ctx.err;
+    if constexpr (emit_callback) {
+      runtime_ev.request.on_done(events::wavefront_frame_done{
+          runtime_ev.request, runtime_ev.ctx.decoded_attribution,
+          ctx.collaborators.frame_samples, true});
+    }
+  }
+};
+
+template <class dependencies_type, class output_lane_type, bool produced,
+          bool complete, bool emit_callback>
+struct effect_publish_wavefront_flush {
+  void operator()(const detail::wavefront_flush_run &runtime_ev,
+                  context<dependencies_type> &ctx) const noexcept {
+    if constexpr (produced) {
+      std::copy(ctx.decoded_pcm().begin(), ctx.decoded_pcm().end(),
+                runtime_ev.request.pcm_out.begin());
+      std::copy(generated_lane<output_lane_type>(ctx).begin(),
+                generated_lane<output_lane_type>(ctx).end(),
+                runtime_ev.request.generated_tokens_out.begin());
+      runtime_ev.request.output_attribution =
+          runtime_ev.ctx.decoded_attribution;
+      runtime_ev.request.text_token_out = runtime_ev.ctx.decoded_text_token;
+      runtime_ev.request.sample_count_out = ctx.collaborators.frame_samples;
+      runtime_ev.request.produced_out = true;
+    }
+    runtime_ev.request.complete_out = complete;
+    runtime_ev.ctx.err = error_code(error::none);
+    runtime_ev.request.error_out = runtime_ev.ctx.err;
+    if constexpr (emit_callback) {
+      runtime_ev.request.on_done(events::wavefront_flush_done{
+          runtime_ev.request, runtime_ev.request.output_attribution,
+          runtime_ev.request.sample_count_out, runtime_ev.request.produced_out,
+          complete});
+    }
+  }
+};
+
+template <class dependencies_type, class runtime_event_type, error error_value,
+          bool emit_callback, error qualifier = error::none,
+          error second_qualifier = error::none>
+struct effect_fail_wavefront {
+  void operator()(const runtime_event_type &runtime_ev,
+                  const context<dependencies_type> &) const noexcept {
+    runtime_ev.request.output_attribution = {};
+    runtime_ev.request.text_token_out = -1;
+    runtime_ev.request.sample_count_out = 0;
+    runtime_ev.request.produced_out = false;
+    if constexpr (requires { runtime_ev.request.complete_out; }) {
+      runtime_ev.request.complete_out = false;
+    }
+    runtime_ev.ctx.err = error_code(error_value) | error_code(qualifier) |
+                         error_code(second_qualifier);
+    runtime_ev.request.error_out = runtime_ev.ctx.err;
+    if constexpr (emit_callback && std::same_as<runtime_event_type,
+                                                detail::wavefront_frame_run>) {
+      runtime_ev.request.on_error(events::wavefront_frame_error{
+          runtime_ev.request, runtime_ev.ctx.err});
+    }
+    if constexpr (emit_callback && std::same_as<runtime_event_type,
+                                                detail::wavefront_flush_run>) {
+      runtime_ev.request.on_error(events::wavefront_flush_error{
+          runtime_ev.request, runtime_ev.ctx.err});
+    }
+  }
+};
+
+template <class dependencies_type, class runtime_event_type>
+struct effect_emit_wavefront_error {
+  void operator()(const runtime_event_type &runtime_ev,
+                  const context<dependencies_type> &) const noexcept {
+    if constexpr (std::same_as<runtime_event_type,
+                               detail::wavefront_frame_run>) {
+      runtime_ev.request.on_error(events::wavefront_frame_error{
+          runtime_ev.request, runtime_ev.ctx.err});
+    } else {
+      runtime_ev.request.on_error(events::wavefront_flush_error{
+          runtime_ev.request, runtime_ev.ctx.err});
+    }
+  }
+};
+
+template <class dependencies_type>
+struct effect_reset_wavefront_children_parallel {
+  void operator()(const detail::event_wavefront_reset_run &runtime_ev,
+                  context<dependencies_type> &ctx) const noexcept {
+    runtime_ev.ctx = {};
+    wavefront_stage_pool::join_group group{};
+    size_t submitted_tasks = 0u;
+    bool all_submitted = true;
+
+    const bool encode_submitted = ctx.collaborators.stage_pool->try_submit(
+        group, [&runtime_ev, &ctx]() noexcept {
+          effect_record_worker_entry(ctx);
+          typename dependencies_type::wavefront_encode_reset_event request{
+              runtime_ev.ctx.encode_err};
+          runtime_ev.ctx.encode_accepted =
+              ctx.collaborators.wavefront_encoder.process_event(request);
+          effect_record_worker_exit(ctx);
+        });
+    submitted_tasks += static_cast<size_t>(encode_submitted);
+    all_submitted = all_submitted && encode_submitted;
+    effect_record_submission(ctx, encode_submitted);
+
+    const bool decode_submitted = ctx.collaborators.stage_pool->try_submit(
+        group, [&runtime_ev, &ctx]() noexcept {
+          effect_record_worker_entry(ctx);
+          typename dependencies_type::wavefront_decode_reset_event request{
+              runtime_ev.ctx.decode_err};
+          runtime_ev.ctx.decode_accepted =
+              ctx.collaborators.wavefront_decoder.process_event(request);
+          effect_record_worker_exit(ctx);
+        });
+    submitted_tasks += static_cast<size_t>(decode_submitted);
+    all_submitted = all_submitted && decode_submitted;
+    effect_record_submission(ctx, decode_submitted);
+
+    typename dependencies_type::wavefront_middle_reset_event middle_request{
+        runtime_ev.ctx.middle_err};
+    runtime_ev.ctx.middle_accepted =
+        ctx.collaborators.wavefront_middle.process_event(middle_request);
+
+    (void)group.wait();
+    effect_record_joins(ctx, submitted_tasks);
+    runtime_ev.ctx.all_submitted = all_submitted;
+    runtime_ev.ctx.joined = true;
+  }
+};
+
+template <class dependencies_type>
+struct effect_reset_wavefront_children_serial {
+  void operator()(const detail::event_wavefront_reset_run &runtime_ev,
+                  context<dependencies_type> &ctx) const noexcept {
+    runtime_ev.ctx = {};
+
+    typename dependencies_type::wavefront_encode_reset_event encode_request{
+        runtime_ev.ctx.encode_err};
+    runtime_ev.ctx.encode_accepted =
+        ctx.collaborators.wavefront_encoder.process_event(encode_request);
+
+    typename dependencies_type::wavefront_middle_reset_event middle_request{
+        runtime_ev.ctx.middle_err};
+    runtime_ev.ctx.middle_accepted =
+        ctx.collaborators.wavefront_middle.process_event(middle_request);
+
+    typename dependencies_type::wavefront_decode_reset_event decode_request{
+        runtime_ev.ctx.decode_err};
+    runtime_ev.ctx.decode_accepted =
+        ctx.collaborators.wavefront_decoder.process_event(decode_request);
+
+    runtime_ev.ctx.all_submitted = true;
+    runtime_ev.ctx.joined = true;
+  }
+};
+
+template <class dependencies_type> struct effect_reset_wavefront_parent {
+  void operator()(const detail::event_wavefront_reset_run &runtime_ev,
+                  context<dependencies_type> &ctx) const noexcept {
+    std::fill(ctx.encoded_lane0_storage.begin(),
+              ctx.encoded_lane0_storage.end(), -1);
+    std::fill(ctx.encoded_lane1_storage.begin(),
+              ctx.encoded_lane1_storage.end(), -1);
+    std::fill(ctx.generated_lane0_storage.begin(),
+              ctx.generated_lane0_storage.end(), -1);
+    std::fill(ctx.generated_lane1_storage.begin(),
+              ctx.generated_lane1_storage.end(), -1);
+    std::fill(ctx.decoded_pcm_storage.begin(), ctx.decoded_pcm_storage.end(),
+              0.0f);
+    ctx.encoded_lane0_attribution = {};
+    ctx.encoded_lane1_attribution = {};
+    ctx.generated_lane0_attribution = {};
+    ctx.generated_lane1_attribution = {};
+    ctx.expected_input = {.sequence = 0u, .source = 0u};
+    ctx.generated_lane0_text_token = -1;
+    ctx.generated_lane1_text_token = -1;
+    runtime_ev.ctx.err = error_code(error::none);
+    runtime_ev.request.error_out = runtime_ev.ctx.err;
+  }
+};
+
+template <class dependencies_type, error error_value>
+struct effect_fail_wavefront_reset {
+  void operator()(const detail::event_wavefront_reset_run &runtime_ev,
+                  const context<dependencies_type> &) const noexcept {
+    runtime_ev.ctx.err = error_code(error_value);
+    runtime_ev.request.error_out = runtime_ev.ctx.err;
+  }
+};
+
+template <class dependencies_type> struct effect_unexpected_wavefront {
+  template <class unexpected_type>
+  void operator()(const unexpected_type &unexpected,
+                  const context<dependencies_type> &) const noexcept {
+    const auto &ev = stateforward::sml::back::get_origin_event(unexpected);
+    if constexpr (requires { ev.error_out; }) {
+      ev.error_out = error_code(error::internal_error);
+    }
+    if constexpr (requires { ev.produced_out; }) {
+      ev.produced_out = false;
+    }
+    if constexpr (requires { ev.complete_out; }) {
+      ev.complete_out = false;
+    }
   }
 };
 

@@ -1,8 +1,14 @@
 #pragma once
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
+#include <exception>
+#include <memory>
+#include <new>
 
+#include "emel/kernel/attention/sm.hpp"
+#include "emel/kernel/matmul/sm.hpp"
 #include "emel/kernel/sm.hpp"
 #include "emel/logits/sampler/sm.hpp"
 #include "emel/memory/streaming/sm.hpp"
@@ -35,9 +41,20 @@ struct capacities {
   uint64_t sampling_top_k = 0u;
 };
 
+inline constexpr std::size_t k_max_attention_lanes = 8u;
+
+struct attention_lane_storage {
+  std::array<emel::kernel::attention::sm, k_max_attention_lanes> actors = {};
+};
+
 struct dependencies {
   kv_views kv = {};
   emel::kernel::sm &kernel;
+  emel::kernel::matmul::sm &matmul;
+  emel::kernel::matmul::lane_mode matmul_lane_mode =
+      emel::kernel::matmul::lane_mode::serial;
+  emel::kernel::matmul::lane_pool *attention_lanes = nullptr;
+  std::size_t active_attention_lanes = 1u;
   emel::logits::sampler::sm *sampler = nullptr;
   policies policy = {};
   capacities capacity = {};
@@ -78,7 +95,18 @@ struct context {
       : temporal_kv(deps.kv.temporal), depformer_kv(deps.kv.depformer),
         temporal_positions(deps.kv.temporal_positions),
         depformer_positions(deps.kv.depformer_positions), kernel(deps.kernel),
-        sampler(deps.sampler), policy(deps.policy), capacity(deps.capacity) {}
+        matmul(deps.matmul), matmul_lane_mode(deps.matmul_lane_mode),
+        attention_lanes(deps.attention_lanes),
+        active_attention_lanes(deps.active_attention_lanes),
+        attention_actors(new (std::nothrow) attention_lane_storage{}),
+        sampler(deps.sampler), policy(deps.policy), capacity(deps.capacity) {
+    // Attention actors own substantial reusable scratch. One construction-time
+    // allocation avoids oversized parent and thread stacks; same-RTC inference
+    // dispatches reuse it without allocation.
+    if (attention_actors == nullptr) {
+      std::terminate();
+    }
+  }
 
   runtime session = {};
   sampling_config sampling = {};
@@ -87,6 +115,11 @@ struct context {
   emel::memory::streaming::sm *temporal_positions = nullptr;
   emel::memory::streaming::sm *depformer_positions = nullptr;
   emel::kernel::sm &kernel;
+  emel::kernel::matmul::sm &matmul;
+  const emel::kernel::matmul::lane_mode matmul_lane_mode;
+  emel::kernel::matmul::lane_pool *attention_lanes = nullptr;
+  const std::size_t active_attention_lanes;
+  std::unique_ptr<attention_lane_storage> attention_actors = {};
   emel::logits::sampler::sm *sampler = nullptr;
   const policies policy;
   const capacities capacity;

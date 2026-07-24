@@ -7,6 +7,14 @@
 
 namespace emel::speech::codec::mimi {
 
+// Compute immutable validation facts before entering the actor's RTC
+// boundary. The state machine still owns route selection through guards over
+// these facts; no behavior is selected by this preflight.
+inline event::bind_contract
+make_bind_contract(const emel::model::data &model) noexcept {
+  return guard::make_bind_contract(model);
+}
+
 // Public arena-sizing contract for event::initialize: the caller owns the
 // four arenas, sizes them here before dispatching initialize, and keeps them
 // alive for the codec's lifetime (the machine never allocates). A result of
@@ -21,7 +29,8 @@ inline uint64_t state_arena_floats(const emel::model::data &model) noexcept {
   return detail::required_state_floats(model);
 }
 
-inline uint64_t workspace_arena_floats(const emel::model::data &model) noexcept {
+inline uint64_t
+workspace_arena_floats(const emel::model::data &model) noexcept {
   return detail::required_workspace_floats(model);
 }
 

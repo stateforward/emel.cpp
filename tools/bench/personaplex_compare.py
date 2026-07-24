@@ -14,6 +14,57 @@ import wave
 from pathlib import Path
 
 
+def repo_root() -> Path:
+  return Path(__file__).resolve().parents[2]
+
+
+def implementation_identity(root: Path) -> dict[str, str]:
+  root = root.resolve()
+  result = subprocess.run(
+      ["git", "-C", str(root), "rev-parse", "HEAD"],
+      capture_output=True, text=True, check=False)
+  if result.returncode != 0:
+    raise RuntimeError("cannot resolve implementation git head")
+  git_head = result.stdout.strip()
+  if not re.fullmatch(r"[0-9a-f]{40}", git_head):
+    raise RuntimeError("implementation git head is malformed")
+
+  runtime_roots = (
+      root / "CMakeLists.txt",
+      root / "cmake",
+      root / "scripts" / "bench_personaplex_compare.sh",
+      root / "src",
+      root / "tools" / "bench" / "CMakeLists.txt",
+      root / "tools" / "bench" / "personaplex_compare.py",
+      root / "tools" / "bench" / "speech" / "personaplex_emel_runner.cpp",
+  )
+  files = []
+  for runtime_root in runtime_roots:
+    if runtime_root.is_file():
+      files.append(runtime_root)
+    elif runtime_root.is_dir():
+      files.extend(path for path in runtime_root.rglob("*") if path.is_file())
+    else:
+      raise RuntimeError(f"implementation identity path is missing: {runtime_root}")
+  digest = hashlib.sha256()
+  for path in sorted(set(files)):
+    relative = path.relative_to(root).as_posix().encode("utf-8")
+    digest.update(len(relative).to_bytes(8, "little"))
+    digest.update(relative)
+    digest.update(bytes.fromhex(sha256(path)))
+  return {
+      "git_head": git_head,
+      "runtime_tree_sha256": digest.hexdigest(),
+  }
+
+
+def runner_identity(path: Path) -> dict[str, str]:
+  resolved = path.resolve(strict=True)
+  if not resolved.is_file():
+    raise RuntimeError(f"EMEL runner is not a file: {resolved}")
+  return {"path": str(resolved), "sha256": sha256(resolved)}
+
+
 def run_lane(command: list[str], stdout_path: Path, stderr_path: Path) -> float:
   started = time.monotonic()
   with stdout_path.open("w") as stdout, stderr_path.open("w") as stderr:
@@ -45,6 +96,49 @@ def parse_emel_log(path: Path) -> tuple[list[list[int]], list[list[int]], list[i
       text_tokens.append(int(match.group(1)))
       output_frames.append([int(value) for value in match.group(2).split(",")])
   return input_frames, output_frames, text_tokens
+
+
+def parse_emel_threads(path: Path) -> tuple[int, int, int, int, int, str, str]:
+  pattern = re.compile(
+      r"^EMEL_THREADS requested_total=(\d+) owner_threads=(\d+) "
+      r"stage_workers=(\d+) matmul_workers=(\d+) matmul_lanes=(\d+) "
+      r"stage_mode=(serial|parallel) matmul_mode=(serial|parallel)$")
+  matches = [pattern.match(line) for line in path.read_text().splitlines()]
+  parsed = [match for match in matches if match is not None]
+  if len(parsed) != 1:
+    raise ValueError("expected one EMEL_THREADS contract line")
+  return (int(parsed[0].group(1)), int(parsed[0].group(2)),
+          int(parsed[0].group(3)), int(parsed[0].group(4)),
+          int(parsed[0].group(5)), parsed[0].group(6), parsed[0].group(7))
+
+
+def thread_contract_reasons(
+    contract: tuple[int, int, int, int, int, str, str],
+    requested: int) -> list[str]:
+  (requested_total, owner_threads, stage_workers, matmul_workers,
+   matmul_lanes, stage_mode, matmul_mode) = contract
+  reasons = []
+  if requested_total != requested:
+    reasons.append("EMEL requested total CPU budget does not match harness")
+  if owner_threads != 1:
+    reasons.append("EMEL owner-thread count must be exactly one")
+  accounted_concurrency = owner_threads + stage_workers + matmul_workers
+  if accounted_concurrency > requested_total:
+    reasons.append("EMEL runnable concurrency exceeds total CPU budget")
+  if stage_workers not in (0, 2):
+    reasons.append("EMEL stage worker count is unsupported")
+  if ((stage_workers == 0 and stage_mode != "serial") or
+      (stage_workers != 0 and stage_mode != "parallel")):
+    reasons.append("EMEL stage worker mode does not match its worker count")
+  if matmul_lanes == 1:
+    if matmul_workers != 0 or matmul_mode != "serial":
+      reasons.append("EMEL serial matmul lane unexpectedly constructed a pool")
+  elif matmul_lanes > 1:
+    if matmul_workers != matmul_lanes - 1 or matmul_mode != "parallel":
+      reasons.append("EMEL parallel matmul worker-pool contract mismatch")
+  else:
+    reasons.append("EMEL matmul lane count must be positive")
+  return reasons
 
 
 def parse_reference_log(path: Path) -> tuple[list[list[int]], list[list[int]], list[int]]:
@@ -97,6 +191,28 @@ def append_text_parity_reason(reasons: list[str], emel_text: list[int],
   elif text_match != 1.0:
     reasons.append(
         f"text token match is {text_match:.6f}, expected 1.0")
+
+
+def append_input_parity_observation(observations: list[str],
+                                    input_match: float) -> None:
+  if input_match != 1.0:
+    observations.append(
+        f"same-WAV input token match is {input_match:.6f}, tracked "
+        "separately from generated-output parity")
+
+
+def semantic_parity_reasons(input_match: float, output_match: float,
+                            text_match: float) -> list[str]:
+  reasons = []
+  if input_match != 1.0:
+    reasons.append(
+        f"same-WAV input token match is {input_match:.6f}, expected 1.0")
+  if output_match != 1.0:
+    reasons.append(
+        f"generated output token match is {output_match:.6f}, expected 1.0")
+  if text_match != 1.0:
+    reasons.append(f"text token match is {text_match:.6f}, expected 1.0")
+  return reasons
 
 
 def read_wav(path: Path) -> tuple[int, list[float]]:
@@ -221,6 +337,8 @@ def main() -> int:
   emel_stderr = output_dir / "emel.stderr.log"
   reference_stdout = output_dir / "moshi_cpp.stdout.log"
   reference_stderr = output_dir / "moshi_cpp.stderr.log"
+  implementation = implementation_identity(repo_root())
+  runner = runner_identity(Path(args.emel_runner))
 
   emel_elapsed = run_lane([
       args.emel_runner,
@@ -238,6 +356,7 @@ def main() -> int:
       str(max_blocks),
       str(block_tokens),
       str(prompt_text_token),
+      str(args.threads),
   ], emel_stdout, emel_stderr)
   reference_elapsed = run_lane([
       args.reference_driver,
@@ -257,6 +376,10 @@ def main() -> int:
   ], reference_stdout, reference_stderr)
 
   emel_input, emel_output, emel_text = parse_emel_log(emel_stderr)
+  emel_thread_contract = parse_emel_threads(emel_stderr)
+  (emel_requested_total, emel_owner_threads, emel_stage_workers,
+   emel_matmul_workers, emel_matmul_lanes, emel_stage_mode,
+   emel_matmul_mode) = emel_thread_contract
   ref_input, ref_output, ref_text = parse_reference_log(reference_stdout)
   input_rate, input_samples = read_wav(Path(args.audio))
   if input_rate != 24000:
@@ -291,13 +414,16 @@ def main() -> int:
       float(emel_audio["active_ratio"]) - float(reference_audio["active_ratio"]))
 
   reasons = []
+  observations = []
+  reasons.extend(thread_contract_reasons(emel_thread_contract, args.threads))
   if len(emel_input) != args.frames or len(ref_input) != args.frames:
     reasons.append("input frame count mismatch")
   if len(emel_output) != args.frames or len(ref_output) != args.frames:
     reasons.append("output frame count mismatch")
   append_text_parity_reason(reasons, emel_text, ref_text, text_match)
-  if input_match != 1.0:
-    reasons.append(f"same-WAV input token match is {input_match:.6f}, expected 1.0")
+  append_input_parity_observation(observations, input_match)
+  exact_semantic_reasons = semantic_parity_reasons(
+      input_match, output_match, text_match)
   if output_match < args.min_output_match:
     reasons.append(
         f"output token match {output_match:.6f} below {args.min_output_match:.6f}")
@@ -318,9 +444,26 @@ def main() -> int:
 
   report = {
       "surface": "personaplex_compare/v1",
-      "status": "pass" if not reasons else "fail",
+      "acceptance_scope": "bounded_quality_performance",
+      "status": "pass_bounded_quality_performance" if not reasons else "fail",
       "reasons": reasons,
-      "cpu_threads": args.threads,
+      "observations": observations,
+      "semantic_parity": {
+          "status": "pass" if not exact_semantic_reasons else "fail",
+          "reasons": exact_semantic_reasons,
+      },
+      "implementation": implementation,
+      "emel_runner": runner,
+      "threads": {
+          "emel_requested_total": emel_requested_total,
+          "emel_owner_threads": emel_owner_threads,
+          "emel_stage_workers": emel_stage_workers,
+          "emel_matmul_workers": emel_matmul_workers,
+          "emel_matmul_lanes": emel_matmul_lanes,
+          "emel_stage_mode": emel_stage_mode,
+          "emel_matmul_mode": emel_matmul_mode,
+          "reference_requested": args.threads,
+      },
       "seed": args.seed,
       "frames": args.frames,
       "inference": {

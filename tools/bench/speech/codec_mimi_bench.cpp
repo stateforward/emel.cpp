@@ -142,17 +142,17 @@ bool load_fixture(codec_fixture &fixture) {
     fixture.model->name_bytes_used += tensor.name_length;
   }
 
-  fixture.prepared.resize(
-      mimi::prepared_arena_floats(*fixture.model));
+  fixture.prepared.resize(mimi::prepared_arena_floats(*fixture.model));
   fixture.state.resize(mimi::state_arena_floats(*fixture.model));
-  fixture.workspace.resize(
-      mimi::workspace_arena_floats(*fixture.model));
+  fixture.workspace.resize(mimi::workspace_arena_floats(*fixture.model));
   fixture.frame.resize(mimi::frame_arena_floats(*fixture.model));
   fixture.codec = std::make_unique<mimi::sm>();
-  mimi::event::initialize init{
-      *fixture.model, std::span<float>{fixture.prepared},
-      std::span<float>{fixture.state}, std::span<float>{fixture.workspace},
-      std::span<float>{fixture.frame}};
+  mimi::event::initialize init{*fixture.model,
+                               mimi::make_bind_contract(*fixture.model),
+                               std::span<float>{fixture.prepared},
+                               std::span<float>{fixture.state},
+                               std::span<float>{fixture.workspace},
+                               std::span<float>{fixture.frame}};
   init.on_done = emel::callback<void(
       const mimi::events::initialize_done &)>::from<&on_codec_initialized>();
   if (!fixture.codec->process_event(init)) {
@@ -227,10 +227,9 @@ void append_reference_speech_codec_mimi_cases(std::vector<result> &results,
   // compare table stays one-to-one with the EMEL lane (the sortformer
   // recorded-baseline pattern); their timings are not a measurement of
   // moshi.cpp and the snapshot gate reads only the EMEL column.
-  for (const char *name :
-       {"speech_codec_mimi/encode_frame_tiny",
-        "speech_codec_mimi/decode_frame_tiny",
-        "speech_codec_mimi/roundtrip_frame_tiny"}) {
+  for (const char *name : {"speech_codec_mimi/encode_frame_tiny",
+                           "speech_codec_mimi/decode_frame_tiny",
+                           "speech_codec_mimi/roundtrip_frame_tiny"}) {
     auto record = measure_case(name, cfg, []() {});
     record.ns_per_op = 0.0;
     results.push_back(std::move(record));

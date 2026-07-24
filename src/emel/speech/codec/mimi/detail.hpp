@@ -7,6 +7,7 @@
 
 #include "emel/error/error.hpp"
 #include "emel/kernel/events.hpp"
+#include "emel/kernel/f32_matvec/sm.hpp"
 #include "emel/kernel/sm.hpp"
 #include "emel/model/data.hpp"
 
@@ -125,6 +126,8 @@ struct seanet_layer_weights {
 struct transformer_layer_weights {
   const float *norm1_weight = nullptr;
   const float *norm1_bias = nullptr;
+  // Native row-major off AArch64. On AArch64 F32 models, complete groups of
+  // four output rows are column-interleaved; 1/2/3 tail rows remain native.
   const float *in_proj = nullptr;  // [dim, 3*dim] fused qkv
   const float *out_proj = nullptr; // [dim, dim]
   // raw q8_0 row blocks when the model carries quantized projections
@@ -185,6 +188,7 @@ struct quantizer_weights {
 struct codec_runtime {
   const emel::model::data *model = nullptr;
   emel::kernel::sm kernel = {};
+  emel::kernel::f32_matvec::sm projection_matvec = {};
   // Host backend, resolved at compile time and applied once at bind; the
   // compute helpers never re-select it.
   emel::kernel::kernel_kind kernel_kind = emel::kernel::detect_host_kind();
@@ -195,6 +199,7 @@ struct codec_runtime {
   bool conv_f16 = false;
   bool proj_q8 = false;
   bool rvq_q8 = false;
+  uint64_t legacy_f32_projection_calls = 0u;
 
   std::array<seanet_layer_weights, k_max_seanet_layers> encoder_layers = {};
   conv_weights downsample = {};
@@ -253,6 +258,15 @@ uint64_t required_frame_floats(const emel::model::data &model_data) noexcept;
 // element checks, no arena writes), so the guard-side predicate can never
 // drift from the bind it authorizes. Capacity is validated separately via
 // the required_* sizing contract.
+bool validate_codec_contract_f32(const emel::model::data &model_data) noexcept;
+
+bool validate_codec_contract_native(
+    const emel::model::data &model_data) noexcept;
+
+bool validate_codec_contract_q8(const emel::model::data &model_data) noexcept;
+
+// F32 compatibility entrypoint retained for direct codec tests. Runtime
+// facade initialization uses the explicit typed validators above.
 bool validate_codec_contract(const emel::model::data &model_data) noexcept;
 
 // Pure per-request validator for decode codes: every code addresses a valid
@@ -264,6 +278,24 @@ bool validate_codes_in_range(const codec_runtime &runtime,
 // Canonicalizes weights into `prepared`, carves `state`, fills `runtime_out`.
 // Non-failing by contract: the owning machine's guards route on
 // validate_codec_contract and the required_* capacities before this runs.
+void bind_codec_runtime_f32(const emel::model::data &model_data,
+                            std::span<float> prepared, std::span<float> state,
+                            codec_runtime &runtime_out,
+                            codec_streaming_state &state_out) noexcept;
+
+void bind_codec_runtime_native(const emel::model::data &model_data,
+                               std::span<float> prepared,
+                               std::span<float> state,
+                               codec_runtime &runtime_out,
+                               codec_streaming_state &state_out) noexcept;
+
+void bind_codec_runtime_q8(const emel::model::data &model_data,
+                           std::span<float> prepared, std::span<float> state,
+                           codec_runtime &runtime_out,
+                           codec_streaming_state &state_out) noexcept;
+
+// F32 compatibility entrypoint retained for direct codec tests. Runtime
+// facade initialization uses the explicit typed bind actions above.
 void bind_codec_runtime(const emel::model::data &model_data,
                         std::span<float> prepared, std::span<float> state,
                         codec_runtime &runtime_out,

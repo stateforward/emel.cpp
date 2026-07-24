@@ -19,6 +19,7 @@
 
 #include "emel/graph/processor/errors.hpp"
 #include "emel/kernel/events.hpp"
+#include "emel/kernel/matmul/sm.hpp"
 #include "emel/kernel/sm.hpp"
 #include "emel/memory/view.hpp"
 #include "emel/model/data.hpp"
@@ -26,7 +27,6 @@
 #include "emel/model/loader/errors.hpp"
 #include "emel/model/tensor/window/sm.hpp"
 #include "emel/text/generator/events.hpp"
-#include "emel/text/generator/matmul/sm.hpp"
 
 namespace emel::text::generator::detail {
 
@@ -134,11 +134,7 @@ struct kv_addressing_view {
   int32_t recurrent_slot = 0;
 };
 
-using matmul_lane_mode = emel::text::generator::matmul::lane_mode;
-using matmul_row_slice =
-    emel::text::generator::matmul::detail::matmul_row_slice;
-using emel::text::generator::matmul::detail::compute_matmul_row_slices;
-using emel::text::generator::matmul::detail::compute_sliced_mul_mat_event;
+using matmul_lane_mode = emel::kernel::matmul::lane_mode;
 
 // Weight residency mode for the layer loop: resident consumes blocks[] views
 // as prepared; streamed acquires each layer's slot from the tensor window
@@ -201,8 +197,10 @@ struct native_backend {
   emel::model::generation::step_plan prefill_plan = {};
   emel::model::generation::step_plan decode_plan = {};
   emel::kernel::sm kernel = {};
-  emel::text::generator::matmul::sm *matmul_actor = nullptr;
+  emel::kernel::matmul::sm *matmul_actor = nullptr;
   route_policy routes = {};
+  emel::kernel::matmul::lane_mode matmul_lane_mode =
+      emel::kernel::matmul::lane_mode::serial;
   bool parallel_lanes_enabled = true;
   emel::kernel::kernel_kind kernel_kind = emel::kernel::kernel_kind::x86_64;
   uint64_t kernel_dispatch_calls = 0;
@@ -2217,9 +2215,8 @@ inline bool compute_mul_mat_sliced_parallel(
     native_backend &backend,
     const emel::kernel::event::op_mul_mat &ev) noexcept {
   bool accepted = false;
-  emel::text::generator::matmul::event::dispatch_result result = {};
-  const emel::text::generator::matmul::event::execute_parallel run{ev, result,
-                                                                   accepted};
+  emel::kernel::matmul::event::dispatch_result result = {};
+  const emel::kernel::matmul::event::execute_parallel run{ev, result, accepted};
   const bool dispatched = backend.matmul_actor->process_event(run);
   return dispatched && accepted;
 }
@@ -2234,24 +2231,11 @@ compute_mul_mat(native_backend &backend,
     return compute_mul_mat_sliced_parallel(backend, ev);
   } else {
     bool accepted = false;
-    emel::text::generator::matmul::event::dispatch_result result = {};
-    const emel::text::generator::matmul::event::execute_serial run{ev, result,
-                                                                   accepted};
+    emel::kernel::matmul::event::dispatch_result result = {};
+    const emel::kernel::matmul::event::execute_serial run{ev, result, accepted};
     const bool dispatched = backend.matmul_actor->process_event(run);
     return dispatched && accepted;
   }
-}
-
-// Evidence counters live per kernel actor; parallel slices accrue on lane
-// actors, so audit reads must sum the primary kernel and every lane.
-template <class counter_fn>
-inline uint64_t compute_kernel_counter_total(const native_backend &backend,
-                                             counter_fn &&counter) noexcept {
-  uint64_t total = std::invoke(counter, backend.kernel);
-  if (backend.matmul_actor != nullptr) {
-    total += backend.matmul_actor->kernel_counter_total(counter);
-  }
-  return total;
 }
 
 template <matmul_lane_mode lanes = matmul_lane_mode::serial>
@@ -3947,8 +3931,8 @@ namespace emel::text::generator::layer {
 
 template <emel::text::generator::attention_mode mode,
           emel::text::generator::detail::scalar_matmul_route route,
-          emel::text::generator::matmul::lane_mode lanes =
-              emel::text::generator::matmul::lane_mode::serial,
+          emel::kernel::matmul::lane_mode lanes =
+              emel::kernel::matmul::lane_mode::serial,
           emel::text::generator::detail::window_mode wmode =
               emel::text::generator::detail::window_mode::resident>
 bool run_layer(emel::text::generator::detail::native_backend &backend,
@@ -3958,8 +3942,8 @@ bool run_layer(emel::text::generator::detail::native_backend &backend,
 
 template <emel::text::generator::attention_mode mode,
           emel::text::generator::detail::scalar_matmul_route route,
-          emel::text::generator::matmul::lane_mode lanes =
-              emel::text::generator::matmul::lane_mode::serial,
+          emel::kernel::matmul::lane_mode lanes =
+              emel::kernel::matmul::lane_mode::serial,
           emel::text::generator::detail::window_mode wmode =
               emel::text::generator::detail::window_mode::resident>
 bool run_layer(emel::text::generator::detail::native_backend &backend,
@@ -3969,8 +3953,8 @@ bool run_layer(emel::text::generator::detail::native_backend &backend,
 
 template <emel::text::generator::attention_mode mode,
           emel::text::generator::detail::scalar_matmul_route route,
-          emel::text::generator::matmul::lane_mode lanes =
-              emel::text::generator::matmul::lane_mode::serial,
+          emel::kernel::matmul::lane_mode lanes =
+              emel::kernel::matmul::lane_mode::serial,
           emel::text::generator::detail::window_mode wmode =
               emel::text::generator::detail::window_mode::resident>
 bool run_layer(emel::text::generator::detail::native_backend &backend,
@@ -3978,8 +3962,8 @@ bool run_layer(emel::text::generator::detail::native_backend &backend,
 
 template <emel::text::generator::attention_mode mode,
           emel::text::generator::detail::scalar_matmul_route route,
-          emel::text::generator::matmul::lane_mode lanes =
-              emel::text::generator::matmul::lane_mode::serial,
+          emel::kernel::matmul::lane_mode lanes =
+              emel::kernel::matmul::lane_mode::serial,
           emel::text::generator::detail::window_mode wmode =
               emel::text::generator::detail::window_mode::resident>
 bool run_layer(emel::text::generator::detail::native_backend &backend,
@@ -3993,14 +3977,14 @@ bool run_layer_nonflash(emel::text::generator::detail::native_backend &backend,
 
 template <emel::text::generator::attention_mode mode,
           emel::text::generator::detail::chunk4_rhs_route route,
-          emel::text::generator::matmul::lane_mode lanes>
+          emel::kernel::matmul::lane_mode lanes>
 bool run_layer_chunk4(
     emel::text::generator::detail::native_backend &backend,
     const emel::text::generator::detail::kv_addressing_view &kv,
     int32_t layer_index, size_t token_base) noexcept;
 
 template <emel::text::generator::attention_mode mode,
-          emel::text::generator::matmul::lane_mode lanes>
+          emel::kernel::matmul::lane_mode lanes>
 bool run_layer_chunk8_q8_k(
     emel::text::generator::detail::native_backend &backend,
     const emel::text::generator::detail::kv_addressing_view &kv,
@@ -5015,13 +4999,13 @@ inline bool run_decode_preselected_argmax(
 
 } // namespace
 
-inline emel::error::type
-prepare(native_backend &backend,
-        const emel::model::generation::contract &generation_contract,
-        emel::text::generator::matmul::sm &matmul_actor,
-        const runtime_policy &policy,
-        const int32_t kv_block_tokens =
-            emel::memory::view::DEFAULT_BLOCK_TOKENS) noexcept {
+inline emel::error::type prepare(
+    native_backend &backend,
+    const emel::model::generation::contract &generation_contract,
+    emel::kernel::matmul::sm &matmul_actor, const runtime_policy &policy,
+    const int32_t kv_block_tokens = emel::memory::view::DEFAULT_BLOCK_TOKENS,
+    const emel::kernel::matmul::lane_mode matmul_lane_mode =
+        emel::kernel::matmul::lane_mode::parallel) noexcept {
   if (emel::model::generation::validate_contract(generation_contract) !=
           emel::error::cast(emel::model::loader::error::none) ||
       kv_block_tokens <= 0) {
@@ -5031,12 +5015,12 @@ prepare(native_backend &backend,
   std::destroy_at(std::addressof(backend));
   std::construct_at(std::addressof(backend));
   backend.matmul_actor = &matmul_actor;
+  backend.matmul_lane_mode = matmul_lane_mode;
   backend.routes = policy.routes;
   backend.kernel_kind = policy.kernel_kind;
   backend.kernel.set_kind(backend.kernel_kind);
   backend.matmul_actor->process_event(
-      emel::text::generator::matmul::event::configure_kernel_kind{
-          backend.kernel_kind});
+      emel::kernel::matmul::event::configure_kernel_kind{backend.kernel_kind});
 
   const auto &model_data = *generation_contract.execution.model;
   backend.execution = generation_contract.execution;
