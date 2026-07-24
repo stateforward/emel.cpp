@@ -228,12 +228,20 @@ TEST_CASE("personaplex compare keeps CPU and lane isolation explicit") {
   CHECK(emel_source.find(
             "predictor_initialize.sampling_seed = config.sampling_seed") !=
         std::string::npos);
-  CHECK(emel_source.find("flush_steps == 0") != std::string::npos);
+  CHECK(emel_source.find("state_wavefront_complete") != std::string::npos);
   CHECK(emel_source.find("sampling_seed = 1234") == std::string::npos);
   CHECK(emel_source.find("std::optional<emel::kernel::matmul::lane_pool>") !=
         std::string::npos);
   CHECK(emel_source.find("stage_worker_count") != std::string::npos);
   CHECK(emel_source.find("matmul_lane_count") != std::string::npos);
+  CHECK(emel_source.find("EMEL_PERSONAPLEX_STAGE_PIPELINE_PROBE") ==
+        std::string::npos);
+  CHECK(emel_source.find("if (run_stage_pipeline)") == std::string::npos);
+  CHECK(emel_source.find("generator::event::wavefront_frame") !=
+        std::string::npos);
+  CHECK(emel_source.find("EMEL_INPUT frame=%llu codes=") != std::string::npos);
+  CHECK(emel_source.find("EMEL_OUTPUT frame=%llu text=%d codes=") !=
+        std::string::npos);
   CHECK(emel_source.find(
             "prediction_matmul_lanes.emplace(matmul_lane_count - 1u)") !=
         std::string::npos);

@@ -12,7 +12,6 @@
 #include <optional>
 #include <span>
 #include <string>
-#include <string_view>
 #include <vector>
 
 #include "emel/batch/planner/sm.hpp"
@@ -609,12 +608,8 @@ int main(int argc, char **argv) {
           },
   };
   emel::kernel::sm prediction_kernel{};
-  const char *stage_pipeline_probe =
-      std::getenv("EMEL_PERSONAPLEX_STAGE_PIPELINE_PROBE");
-  const bool run_stage_pipeline = stage_pipeline_probe != nullptr &&
-                                  std::string_view{stage_pipeline_probe} == "1";
   const size_t stage_worker_count =
-      run_stage_pipeline && config.cpu_threads >= 4u
+      config.cpu_threads >= 4u
           ? generator::action::wavefront_stage_pool::static_worker_count
           : 0u;
   const size_t available_matmul_lanes = config.cpu_threads - stage_worker_count;
@@ -632,9 +627,8 @@ int main(int argc, char **argv) {
     prediction_matmul_lanes.emplace(matmul_lane_count - 1u);
   }
   const size_t matmul_worker_count =
-      prediction_matmul_lanes
-          ? prediction_matmul_lanes->active_worker_count()
-          : 0u;
+      prediction_matmul_lanes ? prediction_matmul_lanes->active_worker_count()
+                              : 0u;
   emel::kernel::matmul::execution_policy prediction_matmul_policy{
       .parallel_matmul_lanes =
           prediction_matmul_lanes ? &prediction_matmul_lanes.value() : nullptr,
@@ -684,17 +678,16 @@ int main(int argc, char **argv) {
                   std::max(config.audio_top_k, config.text_top_k)),
           },
   }};
-  std::fprintf(stderr,
-               "EMEL_THREADS requested_total=%zu owner_threads=1 "
-               "stage_workers=%zu matmul_workers=%zu matmul_lanes=%zu "
-               "stage_mode=%s matmul_mode=%s\n",
-               config.cpu_threads, stage_worker_count, matmul_worker_count,
-               matmul_lane_count,
-               stage_worker_count == 0u ? "serial" : "parallel",
-               prediction_matmul_policy.mode ==
-                       emel::kernel::matmul::lane_mode::parallel
-                   ? "parallel"
-                   : "serial");
+  std::fprintf(
+      stderr,
+      "EMEL_THREADS requested_total=%zu owner_threads=1 "
+      "stage_workers=%zu matmul_workers=%zu matmul_lanes=%zu "
+      "stage_mode=%s matmul_mode=%s\n",
+      config.cpu_threads, stage_worker_count, matmul_worker_count,
+      matmul_lane_count, stage_worker_count == 0u ? "serial" : "parallel",
+      prediction_matmul_policy.mode == emel::kernel::matmul::lane_mode::parallel
+          ? "parallel"
+          : "serial");
   emel::memory::hybrid::sm prediction_memory{};
   predictor::sm token_predictor{predictor::dependencies<runtime::sm>{
       .memory = prediction_memory,
@@ -837,7 +830,7 @@ int main(int argc, char **argv) {
                  static_cast<int>(session_err));
     return 1;
   }
-  if (run_stage_pipeline) {
+  {
     session.reset();
 
     personaplex_frame_dependencies middle_dependencies{
@@ -877,6 +870,25 @@ int main(int argc, char **argv) {
     generator::sm<wavefront_dependencies> wavefront{wavefront_deps};
     std::vector<float> wavefront_pcm(frame_samples, 0.0f);
     size_t produced_frames = 0u;
+    const auto print_emel_input = [&](const uint64_t sequence) {
+      std::fprintf(stderr, "EMEL_INPUT frame=%llu codes=",
+                   static_cast<unsigned long long>(sequence));
+      for (int32_t codebook = 0; codebook < public_n_q; ++codebook) {
+        std::fprintf(stderr, "%s%d", codebook == 0 ? "" : ",",
+                     input_codes[static_cast<size_t>(codebook)]);
+      }
+      std::fprintf(stderr, "\n");
+    };
+    const auto print_emel_output = [&](const uint64_t sequence,
+                                       const int32_t text_token) {
+      std::fprintf(stderr, "EMEL_OUTPUT frame=%llu text=%d codes=",
+                   static_cast<unsigned long long>(sequence), text_token);
+      for (int32_t codebook = 0; codebook < public_n_q; ++codebook) {
+        std::fprintf(stderr, "%s%d", codebook == 0 ? "" : ",",
+                     output_codes[static_cast<size_t>(codebook)]);
+      }
+      std::fprintf(stderr, "\n");
+    };
     std::fprintf(stderr,
                  "EMEL_PHASE name=steady_begin implementation=canonical "
                  "frames=%zu\n",
@@ -900,6 +912,7 @@ int main(int argc, char **argv) {
       generator::event::wavefront_frame request{
           std::span<const float>{pcm_frame},
           std::span<float>{wavefront_pcm},
+          std::span<int32_t>{input_codes},
           std::span<int32_t>{output_codes},
           {.sequence = sequence, .source = 1u},
           output_attribution,
@@ -916,6 +929,7 @@ int main(int argc, char **argv) {
             static_cast<unsigned long long>(output_attribution.sequence));
         return 1;
       }
+      print_emel_input(sequence);
       if (produced) {
         if (output_attribution.sequence != produced_frames ||
             output_attribution.sequence >= config.target_output_frames ||
@@ -929,6 +943,7 @@ int main(int argc, char **argv) {
               produced_frames, sample_count);
           return 1;
         }
+        print_emel_output(output_attribution.sequence, text_token);
         std::copy(wavefront_pcm.begin(), wavefront_pcm.end(),
                   output_pcm.begin() + static_cast<std::ptrdiff_t>(
                                            produced_frames * frame_samples));
@@ -975,6 +990,7 @@ int main(int argc, char **argv) {
               produced_frames, sample_count);
           return 1;
         }
+        print_emel_output(output_attribution.sequence, text_token);
         std::copy(wavefront_pcm.begin(), wavefront_pcm.end(),
                   output_pcm.begin() + static_cast<std::ptrdiff_t>(
                                            produced_frames * frame_samples));
@@ -1018,92 +1034,6 @@ int main(int argc, char **argv) {
                  static_cast<unsigned long long>(joins),
                  static_cast<unsigned long long>(worker_entries),
                  static_cast<unsigned long long>(worker_exits));
-  } else {
-    for (size_t frame_index = 0; frame_index < input_frames; ++frame_index) {
-      std::fill(pcm_frame.begin(), pcm_frame.end(), 0.0f);
-      const size_t begin = frame_index * frame_samples;
-      const size_t copy_count =
-          std::min(frame_samples, input_pcm.size() - begin);
-      std::copy_n(input_pcm.data() + begin, copy_count, pcm_frame.data());
-      int32_t text_token = -1;
-      bool produced = false;
-      int32_t sample_count = 0;
-      session_err = emel::error::cast(generator::error::none);
-      generator::event::stream_frame frame{
-          std::span<const float>{pcm_frame},
-          std::span<float>{output_pcm.data() + frame_index * frame_samples,
-                           frame_samples},
-          std::span<int32_t>{input_codes},
-          std::span<int32_t>{output_codes},
-          text_token,
-          sample_count,
-          produced,
-          session_err};
-      if (!session->process_event(frame)) {
-        std::fprintf(stderr, "PersonaPlex stream frame=%zu failed err=%d\n",
-                     frame_index, static_cast<int>(session_err));
-        return 1;
-      }
-      std::fprintf(stderr, "EMEL_INPUT frame=%zu codes=", frame_index);
-      for (int32_t index = 0; index < public_n_q; ++index) {
-        std::fprintf(stderr, "%s%d", index == 0 ? "" : ",",
-                     input_codes[static_cast<size_t>(index)]);
-      }
-      std::fprintf(stderr,
-                   "\nEMEL_OUTPUT frame=%zu text=%d codes=", frame_index,
-                   text_token);
-      for (int32_t index = 0; index < public_n_q; ++index) {
-        std::fprintf(stderr, "%s%d", index == 0 ? "" : ",",
-                     output_codes[static_cast<size_t>(index)]);
-      }
-      std::fprintf(stderr, "\n");
-    }
-
-    std::fill(pcm_frame.begin(), pcm_frame.end(), 0.0f);
-    const size_t flush_steps = config.target_output_frames - input_frames;
-    for (size_t index = 0; index < flush_steps; ++index) {
-      const size_t frame_index = input_frames + index;
-      int32_t text_token = -1;
-      int32_t sample_count = 0;
-      bool complete = false;
-      session_err = emel::error::cast(generator::error::none);
-      generator::event::flush frame{
-          std::span<float>{output_pcm.data() + frame_index * frame_samples,
-                           frame_samples},
-          std::span<int32_t>{input_codes},
-          std::span<int32_t>{output_codes},
-          text_token,
-          sample_count,
-          complete,
-          session_err};
-      if (!session->process_event(frame)) {
-        std::fprintf(stderr, "PersonaPlex flush frame=%zu failed err=%d\n",
-                     frame_index, static_cast<int>(session_err));
-        return 1;
-      }
-      std::fprintf(stderr, "EMEL_INPUT frame=%zu codes=", frame_index);
-      for (int32_t codebook = 0; codebook < public_n_q; ++codebook) {
-        std::fprintf(stderr, "%s%d", codebook == 0 ? "" : ",",
-                     input_codes[static_cast<size_t>(codebook)]);
-      }
-      std::fprintf(stderr,
-                   "\nEMEL_OUTPUT frame=%zu text=%d codes=", frame_index,
-                   text_token);
-      for (int32_t codebook = 0; codebook < public_n_q; ++codebook) {
-        std::fprintf(stderr, "%s%d", codebook == 0 ? "" : ",",
-                     output_codes[static_cast<size_t>(codebook)]);
-      }
-      std::fprintf(stderr, "\n");
-    }
-    const bool session_finished =
-        flush_steps == 0
-            ? session->is(stateforward::sml::state<generator::state_ready>)
-            : session->is(stateforward::sml::state<generator::state_flushing>);
-    if (!session_finished) {
-      std::fprintf(stderr, "PersonaPlex session failed err=%d\n",
-                   static_cast<int>(session_err));
-      return 1;
-    }
   }
 
   if (output_pcm.empty()) {

@@ -180,7 +180,8 @@ struct attention_executor_bench_fixture {
         depformer_positions(emel::memory::streaming::dependencies{
             .capacity = model.moshi_lm.depformer_context}),
         layer_offsets(static_cast<std::size_t>(model.moshi_lm.num_layers), 0u),
-        key_cache(static_cast<std::size_t>(model.moshi_lm.context) *
+        key_cache(static_cast<std::size_t>(model.moshi_lm.num_layers) *
+                  static_cast<std::size_t>(model.moshi_lm.context) *
                   static_cast<std::size_t>(model.moshi_lm.dim)),
         value_cache(key_cache.size()),
         input_sequence(static_cast<std::size_t>(model.moshi_lm.n_q + 1), -1),
@@ -194,6 +195,12 @@ struct attention_executor_bench_fixture {
             .mode = emel::kernel::matmul::lane_mode::serial,
         },
         matmul(matmul_policy) {
+    const std::size_t per_layer_cache =
+        static_cast<std::size_t>(model.moshi_lm.context) *
+        static_cast<std::size_t>(model.moshi_lm.dim);
+    for (std::size_t index = 0u; index < layer_offsets.size(); ++index) {
+      layer_offsets[index] = index * per_layer_cache;
+    }
     if (lane_count > 1u) {
       attention_lanes.emplace();
     }

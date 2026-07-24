@@ -931,6 +931,11 @@ struct effect_execute_wavefront_phase_parallel {
 
     (void)group.wait();
     effect_record_joins(ctx, submitted_tasks);
+    if constexpr (encode_active) {
+      std::copy(encoded_lane<encode_lane_type>(ctx).begin(),
+                encoded_lane<encode_lane_type>(ctx).end(),
+                runtime_ev.request.encoded_tokens_out.begin());
+    }
     runtime_ev.ctx.all_submitted = all_submitted;
     runtime_ev.ctx.joined = true;
   }
@@ -985,6 +990,12 @@ struct effect_execute_wavefront_phase_serial {
           generated_attribution<decode_lane_type>(ctx);
       runtime_ev.ctx.decoded_text_token =
           generated_text_token<decode_lane_type>(ctx);
+    }
+
+    if constexpr (encode_active) {
+      std::copy(encoded_lane<encode_lane_type>(ctx).begin(),
+                encoded_lane<encode_lane_type>(ctx).end(),
+                runtime_ev.request.encoded_tokens_out.begin());
     }
 
     runtime_ev.ctx.all_submitted = true;

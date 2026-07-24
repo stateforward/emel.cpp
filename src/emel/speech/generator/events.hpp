@@ -132,6 +132,7 @@ struct wavefront_attribution {
 struct wavefront_frame {
   wavefront_frame(std::span<const float> pcm_in_ref,
                   std::span<float> pcm_out_ref,
+                  std::span<int32_t> encoded_tokens_out_ref,
                   std::span<int32_t> generated_tokens_out_ref,
                   const wavefront_attribution input_attribution_ref,
                   wavefront_attribution &output_attribution_ref,
@@ -139,6 +140,7 @@ struct wavefront_frame {
                   bool &produced_out_ref,
                   emel::error::type &error_out_ref) noexcept
       : pcm_in(pcm_in_ref), pcm_out(pcm_out_ref),
+        encoded_tokens_out(encoded_tokens_out_ref),
         generated_tokens_out(generated_tokens_out_ref),
         input_attribution(input_attribution_ref),
         output_attribution(output_attribution_ref),
@@ -148,6 +150,7 @@ struct wavefront_frame {
 
   const std::span<const float> pcm_in;
   const std::span<float> pcm_out;
+  const std::span<int32_t> encoded_tokens_out;
   const std::span<int32_t> generated_tokens_out;
   const wavefront_attribution input_attribution;
   wavefront_attribution &output_attribution;

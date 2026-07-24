@@ -264,6 +264,19 @@ struct guard_condition_complete_done_callback_absent {
   }
 };
 
+template <class dependencies_type>
+struct guard_wavefront_stage_configuration_valid {
+  template <class runtime_event_type>
+  bool
+  operator()(const runtime_event_type &,
+             const action::context<dependencies_type> &ctx) const noexcept {
+    return ctx.collaborators.stage_mode !=
+               action::wavefront_stage_mode::parallel ||
+           static_cast<action::wavefront_stage_pool *>(
+               ctx.collaborators.stage_pool) != nullptr;
+  }
+};
+
 template <class dependencies_type> struct guard_wavefront_frame_valid {
   bool
   operator()(const detail::wavefront_frame_run &runtime_ev,
@@ -273,10 +286,13 @@ template <class dependencies_type> struct guard_wavefront_frame_valid {
         static_cast<size_t>(ctx.collaborators.codebook_count);
     return ctx.collaborators.frame_samples > 0 &&
            ctx.collaborators.codebook_count > 0 &&
+           guard_wavefront_stage_configuration_valid<dependencies_type>{}(
+               runtime_ev, ctx) &&
            samples <= dependencies_type::wavefront_frame_capacity &&
            codebooks <= dependencies_type::wavefront_codebook_capacity &&
            runtime_ev.request.pcm_in.size() == samples &&
            runtime_ev.request.pcm_out.size() >= samples &&
+           runtime_ev.request.encoded_tokens_out.size() >= codebooks &&
            runtime_ev.request.generated_tokens_out.size() >= codebooks &&
            runtime_ev.request.input_attribution.sequence !=
                event::k_invalid_wavefront_sequence &&
@@ -302,6 +318,8 @@ template <class dependencies_type> struct guard_wavefront_flush_valid {
         static_cast<size_t>(ctx.collaborators.codebook_count);
     return ctx.collaborators.frame_samples > 0 &&
            ctx.collaborators.codebook_count > 0 &&
+           guard_wavefront_stage_configuration_valid<dependencies_type>{}(
+               runtime_ev, ctx) &&
            samples <= dependencies_type::wavefront_frame_capacity &&
            codebooks <= dependencies_type::wavefront_codebook_capacity &&
            runtime_ev.request.pcm_out.size() >= samples &&
@@ -321,9 +339,11 @@ template <class dependencies_type, action::wavefront_stage_mode stage_mode>
 struct guard_wavefront_stage_mode {
   template <class runtime_event_type>
   bool
-  operator()(const runtime_event_type &,
+  operator()(const runtime_event_type &runtime_ev,
              const action::context<dependencies_type> &ctx) const noexcept {
-    return ctx.collaborators.stage_mode == stage_mode;
+    return ctx.collaborators.stage_mode == stage_mode &&
+           guard_wavefront_stage_configuration_valid<dependencies_type>{}(
+               runtime_ev, ctx);
   }
 };
 

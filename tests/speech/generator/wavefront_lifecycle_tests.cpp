@@ -374,6 +374,7 @@ struct fixture {
   generator::action::wavefront_diagnostics diagnostics{};
   wavefront_dependencies dependencies;
   generator::sm<wavefront_dependencies> machine;
+  std::array<int32_t, CODEBOOKS> last_encoded_tokens{};
   int32_t last_text_token = -1;
   int32_t last_sample_count = 0;
 
@@ -406,6 +407,7 @@ struct fixture {
     generator::event::wavefront_frame request{
         pcm_in,
         pcm_out,
+        last_encoded_tokens,
         tokens_out,
         {.sequence = sequence, .source = 99u},
         output,
@@ -556,6 +558,8 @@ TEST_CASE(
     for (uint64_t sequence = 0u; sequence < frame_total; ++sequence) {
       bool produced = true;
       REQUIRE(test.push(sequence, produced, output, pcm, tokens, err));
+      CHECK(test.last_encoded_tokens[0] == static_cast<int32_t>(sequence + 1u));
+      CHECK(test.last_encoded_tokens[1] == static_cast<int32_t>(sequence + 2u));
       CHECK(produced == (sequence >= 2u));
       if (produced) {
         CHECK(output.sequence == output_sequence++);
@@ -624,25 +628,31 @@ TEST_CASE("speech_generator_wavefront_emits_done_callbacks_for_each_public_"
 
 TEST_CASE("speech_generator_wavefront_rejects_each_invalid_public_request_"
           "shape") {
-  const auto check_invalid_frame = [](fixture &test,
-                                      std::span<const float> pcm_in,
-                                      std::span<float> pcm_out,
-                                      std::span<int32_t> tokens_out,
-                                      const uint64_t sequence) {
-    generator::event::wavefront_attribution output{};
-    int32_t text_token = 7;
-    int32_t samples = 7;
-    bool produced = true;
-    emel::error::type err = 0u;
-    const generator::event::wavefront_frame request{
-        pcm_in, pcm_out,    tokens_out, {.sequence = sequence, .source = 99u},
-        output, text_token, samples,    produced,
-        err};
+  const auto check_invalid_frame =
+      [](fixture &test, std::span<const float> pcm_in, std::span<float> pcm_out,
+         std::span<int32_t> tokens_out, const uint64_t sequence) {
+        std::array<int32_t, CODEBOOKS> encoded_tokens{};
+        generator::event::wavefront_attribution output{};
+        int32_t text_token = 7;
+        int32_t samples = 7;
+        bool produced = true;
+        emel::error::type err = 0u;
+        const generator::event::wavefront_frame request{
+            pcm_in,
+            pcm_out,
+            encoded_tokens,
+            tokens_out,
+            {.sequence = sequence, .source = 99u},
+            output,
+            text_token,
+            samples,
+            produced,
+            err};
 
-    CHECK_FALSE(test.machine.process_event(request));
-    CHECK_FALSE(produced);
-    CHECK(err == error_code(generator::error::invalid_request));
-  };
+        CHECK_FALSE(test.machine.process_event(request));
+        CHECK_FALSE(produced);
+        CHECK(err == error_code(generator::error::invalid_request));
+      };
 
   const auto check_invalid_flush = [](fixture &test, std::span<float> pcm_out,
                                       std::span<int32_t> tokens_out) {
@@ -730,13 +740,20 @@ TEST_CASE(
   test.overlap.hold_workers.store(true);
   callback_probe probe{};
   std::array<float, FRAME_SAMPLES> pcm_in{};
+  std::array<int32_t, CODEBOOKS> encoded_tokens{};
   pcm_in.fill(3.0f);
   int32_t text_token = -1;
   int32_t samples = 0;
-  generator::event::wavefront_frame request{
-      pcm_in, pcm,        tokens,  {.sequence = 2u, .source = 99u},
-      output, text_token, samples, produced,
-      err};
+  generator::event::wavefront_frame request{pcm_in,
+                                            pcm,
+                                            encoded_tokens,
+                                            tokens,
+                                            {.sequence = 2u, .source = 99u},
+                                            output,
+                                            text_token,
+                                            samples,
+                                            produced,
+                                            err};
   request.on_done =
       decltype(request.on_done)::from<callback_probe, &callback_probe::done>(
           &probe);
@@ -773,6 +790,17 @@ TEST_CASE("speech_generator_wavefront_serial_stage_mode_uses_no_workers") {
   CHECK(test.diagnostics.joins.load() == 0u);
   CHECK(test.diagnostics.worker_entries.load() == 0u);
   CHECK(test.diagnostics.worker_exits.load() == 0u);
+}
+
+TEST_CASE("speech_generator_wavefront_parallel_mode_requires_stage_pool") {
+  fixture test{};
+  auto dependencies = test.dependencies;
+  dependencies.stage_pool = nullptr;
+  generator::action::context<wavefront_dependencies> ctx{dependencies};
+
+  CHECK_FALSE((generator::guard::guard_wavefront_stage_mode<
+               wavefront_dependencies,
+               generator::action::wavefront_stage_mode::parallel>{})(0, ctx));
 }
 
 TEST_CASE(
@@ -1140,12 +1168,20 @@ TEST_CASE("speech_generator_wavefront_rejects_wrong_lifecycle_with_immediate_"
   REQUIRE(complete);
 
   std::array<float, FRAME_SAMPLES> pcm_in{};
+  std::array<int32_t, CODEBOOKS> encoded_tokens{};
   int32_t text_token = -1;
   int32_t samples = 0;
   callback_probe probe{};
   generator::event::wavefront_frame frame_request{
-      pcm_in, pcm,        tokens,  {.sequence = 0u, .source = 99u},
-      output, text_token, samples, produced,
+      pcm_in,
+      pcm,
+      encoded_tokens,
+      tokens,
+      {.sequence = 0u, .source = 99u},
+      output,
+      text_token,
+      samples,
+      produced,
       err};
   frame_request.on_error = decltype(frame_request.on_error)::from<
       callback_probe, &callback_probe::frame_error>(&probe);
@@ -1194,6 +1230,7 @@ TEST_CASE("speech_generator_wavefront_detects_corrupt_lane_attribution") {
   run_ctx.encode_accepted = true;
   std::array<float, FRAME_SAMPLES> pcm_in{};
   std::array<float, FRAME_SAMPLES> pcm_out{};
+  std::array<int32_t, CODEBOOKS> encoded_tokens{};
   std::array<int32_t, CODEBOOKS> tokens{};
   generator::event::wavefront_attribution output{};
   int32_t text_token = -1;
@@ -1201,8 +1238,15 @@ TEST_CASE("speech_generator_wavefront_detects_corrupt_lane_attribution") {
   bool produced = false;
   emel::error::type err = 0u;
   const generator::event::wavefront_frame request{
-      pcm_in, pcm_out,    tokens,  {.sequence = 0u, .source = 99u},
-      output, text_token, samples, produced,
+      pcm_in,
+      pcm_out,
+      encoded_tokens,
+      tokens,
+      {.sequence = 0u, .source = 99u},
+      output,
+      text_token,
+      samples,
+      produced,
       err};
   const generator::detail::wavefront_frame_run runtime_ev{request, run_ctx};
   using phase_fill0 = generator::guard::guard_wavefront_phase_succeeded<
@@ -1317,6 +1361,7 @@ TEST_CASE("speech_generator_wavefront_trace_is_deterministic_and_statically_"
   traced_machine machine{ctx, logger};
   std::array<float, FRAME_SAMPLES> pcm_in{};
   std::array<float, FRAME_SAMPLES> pcm_out{};
+  std::array<int32_t, CODEBOOKS> encoded_tokens{};
   std::array<int32_t, CODEBOOKS> tokens{};
   generator::event::wavefront_attribution output{};
   int32_t text_token = -1;
@@ -1324,8 +1369,15 @@ TEST_CASE("speech_generator_wavefront_trace_is_deterministic_and_statically_"
   bool produced = false;
   emel::error::type err = 0u;
   const generator::event::wavefront_frame request{
-      pcm_in, pcm_out,    tokens,  {.sequence = 0u, .source = 99u},
-      output, text_token, samples, produced,
+      pcm_in,
+      pcm_out,
+      encoded_tokens,
+      tokens,
+      {.sequence = 0u, .source = 99u},
+      output,
+      text_token,
+      samples,
+      produced,
       err};
 
   logger.reset();
