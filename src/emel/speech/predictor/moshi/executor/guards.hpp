@@ -1035,22 +1035,27 @@ struct guard_temporal_layer_attention_unsupported {
   }
 };
 
-template <std::size_t lane_count>
-struct guard_temporal_layer_attention_route {
+template <std::size_t lane_count> struct guard_temporal_layer_attention_route {
   bool operator()(const event::step_run &runtime_ev,
                   const action::context &ctx) const noexcept {
     static_assert(lane_count == 1u || lane_count == 2u || lane_count == 4u ||
                   lane_count == 8u);
-    const bool route_selected = ctx.active_attention_lanes == lane_count;
-    const bool enough_heads =
-        runtime_ev.request.model.moshi_lm.num_heads >=
-        static_cast<int32_t>(lane_count);
+    const bool configured_lane_count_supported =
+        ctx.active_attention_lanes == 1u || ctx.active_attention_lanes == 2u ||
+        ctx.active_attention_lanes == 4u || ctx.active_attention_lanes == 8u;
+    const std::size_t available_lanes =
+        std::min(ctx.active_attention_lanes,
+                 static_cast<std::size_t>(
+                     std::max(runtime_ev.request.model.moshi_lm.num_heads, 0)));
+    const bool route_selected = configured_lane_count_supported &&
+                                available_lanes >= lane_count &&
+                                available_lanes < lane_count * 2u;
     if constexpr (lane_count == 1u) {
       return guard_temporal_layer_attention_supported{}(runtime_ev, ctx) &&
-             route_selected && enough_heads;
+             route_selected;
     } else {
       return guard_temporal_layer_attention_supported{}(runtime_ev, ctx) &&
-             route_selected && enough_heads && ctx.attention_lanes != nullptr;
+             route_selected && ctx.attention_lanes != nullptr;
     }
   }
 };

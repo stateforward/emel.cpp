@@ -360,7 +360,6 @@ src/emel/speech/encoder/whisper/errors.hpp
 src/emel/speech/encoder/whisper/guards.hpp
 src/emel/speech/predictor/moshi/events.hpp
 src/emel/speech/predictor/moshi/executor/actions.hpp
-src/emel/speech/predictor/moshi/executor/guards.hpp
 src/emel/tensor/view/actions.hpp
 src/emel/tensor/view/context.hpp
 src/emel/tensor/view/detail.hpp

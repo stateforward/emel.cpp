@@ -2007,6 +2007,14 @@ TEST_CASE("speech_moshi_generator_and_executor_cover_explicit_error_guards") {
       std::span<const float>{embedding.data(), static_cast<size_t>(lm.dim)};
   moshi_executor::event::step_ctx step_ctx{};
   moshi_executor::event::step_run step_run{step, step_ctx};
+  emel::kernel::sm parallel_guard_kernel{};
+  parallel_matmul_fixture parallel_guard_matmul{};
+  moshi_executor::action::context parallel_executor_ctx{
+      make_executor_dependencies(parallel_guard_kernel,
+                                 parallel_guard_matmul.actor, {}, nullptr,
+                                 emel::kernel::matmul::lane_mode::parallel)};
+  CHECK(moshi_executor::guard::guard_parallel_matmul_route{}(
+      step_run, parallel_executor_ctx));
   executor_ctx.session.model = fixture.model.get();
   executor_ctx.session.codebook_count = lm.n_q + 1;
   executor_ctx.session.dep_q = lm.dep_q;
@@ -2604,6 +2612,14 @@ TEST_CASE(
   auto step_ctx = std::make_unique<moshi_executor::event::step_ctx>();
   moshi_executor::event::step_run step_run{step, *step_ctx};
 
+  CHECK(moshi_executor::guard::guard_unexpected_error_out_absent{}(
+      step_run, executor_ctx));
+  emel::error::type unexpected_err = k_no_error;
+  step.error_out = &unexpected_err;
+  CHECK(moshi_executor::guard::guard_unexpected_error_out_present{}(
+      step_run, executor_ctx));
+  step.error_out = nullptr;
+
   step.forced_text_token = lm.text_card;
   CHECK_FALSE(moshi_executor::guard::guard_forced_text_token_valid{}(
       step_run, executor_ctx));
@@ -2762,14 +2778,15 @@ struct attention_parent_fixture {
 };
 
 std::unique_ptr<attention_parent_fixture>
-make_attention_parent_fixture(const std::size_t lanes) {
+make_attention_parent_fixture(const std::size_t lanes,
+                              const int32_t num_heads = 8) {
   auto fixture = std::make_unique<attention_parent_fixture>();
   fixture->loaded = load_fixture_or_skip("moshi-tiny-lm.gguf");
   if (fixture->loaded.model == nullptr) {
     return fixture;
   }
   auto &model = *fixture->loaded.model;
-  model.moshi_lm.num_heads = 8;
+  model.moshi_lm.num_heads = num_heads;
   fixture->temporal = std::make_unique<temporal_kv_probe>();
   fixture->temporal_positions = std::make_unique<memory_streaming::sm>(
       memory_streaming::dependencies{.capacity = model.moshi_lm.context});
@@ -2897,6 +2914,32 @@ TEST_CASE("speech Moshi unsupported attention lane count fails explicitly") {
   CHECK(allocations == 0u);
   CHECK(fixture->err ==
         emel::error::cast(moshi_executor::error::graph_execution_unsupported));
+}
+
+TEST_CASE("speech Moshi attention falls back to the largest lane count bounded "
+          "by model heads") {
+  for (const int32_t num_heads : {1, 2, 4}) {
+    auto bounded = make_attention_parent_fixture(
+        static_cast<std::size_t>(num_heads), num_heads);
+    auto eight_requested = make_attention_parent_fixture(8u, num_heads);
+    if (bounded->loaded.model == nullptr ||
+        eight_requested->loaded.model == nullptr) {
+      return;
+    }
+
+    std::size_t bounded_allocations = 0u;
+    std::size_t eight_allocations = 0u;
+    REQUIRE(run_attention_parent_prediction(*bounded, bounded_allocations));
+    REQUIRE(
+        run_attention_parent_prediction(*eight_requested, eight_allocations));
+    CHECK(bounded_allocations == 0u);
+    CHECK(eight_allocations == 0u);
+    CHECK(eight_requested->temporal_state_with_canaries ==
+          bounded->temporal_state_with_canaries);
+    CHECK(eight_requested->temporal->key_cache == bounded->temporal->key_cache);
+    CHECK(eight_requested->temporal->value_cache ==
+          bounded->temporal->value_cache);
+  }
 }
 
 TEST_CASE(

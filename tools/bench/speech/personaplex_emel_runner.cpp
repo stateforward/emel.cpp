@@ -609,7 +609,7 @@ int main(int argc, char **argv) {
   };
   emel::kernel::sm prediction_kernel{};
   const size_t stage_worker_count =
-      config.cpu_threads >= 4u
+      config.cpu_threads == 4u
           ? generator::action::wavefront_stage_pool::static_worker_count
           : 0u;
   const size_t available_matmul_lanes = config.cpu_threads - stage_worker_count;

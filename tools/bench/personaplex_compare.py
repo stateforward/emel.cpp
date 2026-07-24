@@ -123,8 +123,8 @@ def thread_contract_reasons(
   if owner_threads != 1:
     reasons.append("EMEL owner-thread count must be exactly one")
   accounted_concurrency = owner_threads + stage_workers + matmul_workers
-  if accounted_concurrency > requested_total:
-    reasons.append("EMEL runnable concurrency exceeds total CPU budget")
+  if accounted_concurrency != requested_total:
+    reasons.append("EMEL runnable concurrency does not match total CPU budget")
   if stage_workers not in (0, 2):
     reasons.append("EMEL stage worker count is unsupported")
   if ((stage_workers == 0 and stage_mode != "serial") or

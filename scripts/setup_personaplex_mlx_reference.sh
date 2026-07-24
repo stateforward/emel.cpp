@@ -15,6 +15,7 @@ ARTIFACT_DIR="${EMEL_PERSONAPLEX_MLX_ARTIFACT_DIR:-$ROOT_DIR/build/personaplex_m
 MOSHI_ARTIFACT_DIR="${EMEL_MOSHI_REFERENCE_ARTIFACT_DIR:-$ROOT_DIR/build/moshi_reference}"
 SRC_DIR="$ARTIFACT_DIR/src"
 VENV_DIR="$ARTIFACT_DIR/venv"
+INSTALLED_REF_FILE="$VENV_DIR/.personaplex_mlx_ref"
 DRIVER_SHIM="$ARTIFACT_DIR/mimi_driver"
 
 PERSONAPLEX_MLX_REPOSITORY="https://github.com/mu-hashmi/personaplex-mlx"
@@ -129,7 +130,16 @@ probe_personaplex_mlx() {
   return "$status"
 }
 
-if probe_personaplex_mlx; then
+install_personaplex_mlx() {
+  "$VENV_DIR/bin/pip" install --quiet --upgrade pip
+  "$VENV_DIR/bin/pip" install --quiet -e "$SRC_DIR"
+  printf '%s\n' "$resolved_ref" > "$INSTALLED_REF_FILE"
+}
+
+if [[ ! -f "$INSTALLED_REF_FILE" ||
+      "$(<"$INSTALLED_REF_FILE")" != "$resolved_ref" ]]; then
+  install_personaplex_mlx
+elif probe_personaplex_mlx; then
   :
 else
   probe_status=$?
@@ -137,8 +147,7 @@ else
     echo "error: personaplex_mlx import probe was repeatedly killed" >&2
     exit "$probe_status"
   fi
-  "$VENV_DIR/bin/pip" install --quiet --upgrade pip
-  "$VENV_DIR/bin/pip" install --quiet -e "$SRC_DIR"
+  install_personaplex_mlx
 fi
 probe_personaplex_mlx \
   || { echo "error: personaplex_mlx import check failed" >&2; exit 1; }

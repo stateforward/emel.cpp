@@ -111,9 +111,12 @@ TEST_CASE(
       "matmul_mode=parallel\\n'); "
       "contract=m.parse_emel_threads(p); "
       "assert contract == (8,1,2,3,4,'parallel','parallel'); "
-      "assert m.thread_contract_reasons(contract, 8) == []; "
+      "assert m.thread_contract_reasons(contract, 8) == "
+      "['EMEL runnable concurrency does not match total CPU budget']; "
+      "assert m.thread_contract_reasons((8,1,0,7,8,'serial','parallel'), 8) "
+      "== []; "
       "assert m.thread_contract_reasons((8,1,2,7,8,'parallel','parallel'), 8) "
-      "== ['EMEL runnable concurrency exceeds total CPU budget']; "
+      "== ['EMEL runnable concurrency does not match total CPU budget']; "
       "p.unlink()";
   CHECK(command_exit_code("python3 -B -c " + quote_arg_posix(program)) == 0);
 }
@@ -177,6 +180,8 @@ TEST_CASE("personaplex compare keeps CPU and lane isolation explicit") {
                 "personaplex_emel_runner.cpp");
   const std::string setup_source =
       read_file(repo_root() / "scripts" / "setup_moshi_cpp_reference.sh");
+  const std::string mlx_setup_source =
+      read_file(repo_root() / "scripts" / "setup_personaplex_mlx_reference.sh");
   const std::string converter_source =
       read_file(repo_root() / "tools" / "bench" / "moshi_gguf_convert.py");
   const std::string inference_source =
@@ -212,6 +217,19 @@ TEST_CASE("personaplex compare keeps CPU and lane isolation explicit") {
         std::string::npos);
   CHECK(wrapper_source.find(
             "bash \"$ROOT_DIR/scripts/setup_moshi_cpp_reference.sh\"") !=
+        std::string::npos);
+  const std::size_t run_only_branch =
+      wrapper_source.find("if ! $RUN_ONLY; then");
+  const std::size_t zig_toolchain_source =
+      wrapper_source.find("source \"$ROOT_DIR/scripts/zig_toolchain.sh\"");
+  REQUIRE(run_only_branch != std::string::npos);
+  REQUIRE(zig_toolchain_source != std::string::npos);
+  CHECK(zig_toolchain_source > run_only_branch);
+  CHECK(mlx_setup_source.find("INSTALLED_REF_FILE=") != std::string::npos);
+  CHECK(mlx_setup_source.find("[[ ! -f \"$INSTALLED_REF_FILE\" ||") !=
+        std::string::npos);
+  CHECK(mlx_setup_source.find(
+            "printf '%s\\n' \"$resolved_ref\" > \"$INSTALLED_REF_FILE\"") !=
         std::string::npos);
   CHECK(wrapper_source.find("--emel-lm PATH") != std::string::npos);
   CHECK(wrapper_source.find("--emel-lm) EMEL_LM=") != std::string::npos);
