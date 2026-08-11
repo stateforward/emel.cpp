@@ -15,6 +15,10 @@ This converter produces the emel moshi GGUF convention:
     `tokenizer.ggml.*` keys so emel's generic vocab loader consumes it
   - optionally for `lm`: selected Q4_K mat-vec weights rewritten to EMEL's
     packed aarch64 CPU layout, exposed in GGUF as tensor dtype metadata
+  - optionally with `--quantize q8_0`: a dtype layout usable by both the
+    aarch64 CPU and Metal kernels - `lm` matmul weight classes become q8_0
+    and `get_rows` codebooks become f16; `mimi` projection classes become
+    q8_0 (exact ggml reference quantization)
 
 Tensor payload bytes are streamed through unchanged unless an explicit rewrite
 option is selected.
@@ -30,6 +34,7 @@ import json
 import math
 import re
 import struct
+import sys
 import zlib
 from dataclasses import dataclass
 from pathlib import Path
@@ -280,6 +285,57 @@ def read_raw_gguf(path: Path) -> tuple[list[TensorInfo], int]:
   data_start = reader.offset
   data_start += (-data_start) % GGUF_ALIGNMENT
   return infos, data_start
+
+
+def read_enriched_gguf_tensors(path: Path) -> list[TensorInfo]:
+  """Read tensor infos from an enriched (kv-carrying) GGUF written by this
+  converter; used by the self-test to verify emitted dtypes."""
+  reader = Reader(path.open("rb").read(128 * 1024 * 1024))
+  if reader.read(4) != GGUF_MAGIC:
+    raise ValueError(f"{path} is not a GGUF file")
+  version = reader.u32()
+  if version != GGUF_VERSION:
+    raise ValueError(f"{path}: unsupported GGUF version {version}")
+  n_tensors = reader.u64()
+  n_kv = reader.u64()
+  for _ in range(n_kv):
+    key = reader.string()
+    value_type = reader.u32()
+    if value_type == GGUF_TYPE_STRING:
+      reader.string()
+    elif value_type in (GGUF_TYPE_UINT32, GGUF_TYPE_INT32, GGUF_TYPE_FLOAT32):
+      reader.u32()
+    elif value_type == GGUF_TYPE_BOOL:
+      reader.read(1)
+    elif value_type == GGUF_TYPE_ARRAY:
+      element_type = reader.u32()
+      count = reader.u64()
+      element_size = {
+          GGUF_TYPE_UINT32: 4,
+          GGUF_TYPE_INT32: 4,
+          GGUF_TYPE_FLOAT32: 4,
+      }.get(element_type)
+      if element_size is None:
+        if element_type == GGUF_TYPE_STRING:
+          for _ in range(count):
+            reader.string()
+        else:
+          raise ValueError(f"{path}: unsupported array element type "
+                           f"{element_type} (key {key!r})")
+      else:
+        reader.read(count * element_size)
+    else:
+      raise ValueError(f"{path}: unsupported kv value type {value_type} "
+                       f"(key {key!r})")
+  infos: list[TensorInfo] = []
+  for _ in range(n_tensors):
+    name = reader.string()
+    n_dims = reader.u32()
+    dims = tuple(reader.u64() for _ in range(n_dims))
+    dtype = reader.u32()
+    offset = reader.u64()
+    infos.append(TensorInfo(name, dims, dtype, offset))
+  return infos
 
 
 def detect_component(infos: list[TensorInfo]) -> str:
@@ -1325,6 +1381,18 @@ LM_Q4_K_PACKABLE_PATTERNS = (
         r"^lm\.depformer\.layers\.\d+\.gating\.\d+\.linear_out\.weight$"),
 )
 
+# LM tensors consumed as codebooks/embeddings (op_get_rows on CPU and Metal).
+# The Metal get_rows kernel only accepts f32/f16 codebooks, so any quantized
+# source codebook is upcast to f16 when an lm q8_0 artifact is requested
+# (f16 is also a valid CPU get_rows dtype, so the artifact stays dual-backend).
+LM_EMBEDDING_PATTERNS = (
+    re.compile(r"^lm\.text_emb\.weight$"),
+    re.compile(r"^lm\.emb\.\d+\.weight$"),
+    re.compile(r"^lm\.depformer_text_emb\.weight$"),
+    re.compile(r"^lm\.depformer_text_emb\.\d+\.weight$"),
+    re.compile(r"^lm\.depformer_emb\.\d+\.weight$"),
+)
+
 
 def is_lm_q4_k_packable(info: TensorInfo) -> bool:
   return (info.dtype == GGML_DTYPE_Q4_K and len(info.dims) == 2 and
@@ -1446,6 +1514,194 @@ def quantize_mimi_tensors(
   return new_infos, payloads, quantized
 
 
+def dequantize_q4_K(blocks: np.ndarray, rows: int, cols: int) -> np.ndarray:
+  """ggml `dequantize_row_q4_K` faithfully.
+
+  block_q4_K is 2 fp16 (d, dmin) + 12 scale bytes + 128 qs bytes per 256
+  elements. Each 256-element block is 8 sub-blocks of 32; sub-block s uses
+  scale `get_scale_min_k4(s, scales)` (6-bit scale/min), and the qs nibble
+  pairs resolve to d*sc*lo - dmin*m and d*sc*hi - dmin*m for the low/high
+  halves of a 64-element pair.
+  """
+  import numpy as np
+  out = np.zeros((rows, cols), dtype=np.float32)
+  blocks_per_row = cols // QK_K
+
+  def scale_min(index: int) -> tuple[int, int]:
+    if index < 4:
+      return int(scales[index] & 63), int(scales[index + 4] & 63)
+    return (int(scales[index + 4] & 0xF) |
+            int((scales[index - 4] >> 6) << 4),
+            int(scales[index + 4] >> 4) |
+            int((scales[index] >> 6) << 4))
+
+  for row in range(rows):
+    for block_index in range(blocks_per_row):
+      block = blocks[row * blocks_per_row + block_index]
+      d = np.float32(
+          np.frombuffer(block[0:2].tobytes(), dtype=np.float16)[0])
+      dmin = np.float32(
+          np.frombuffer(block[2:4].tobytes(), dtype=np.float16)[0])
+      scales = block[4:16]
+      qs = block[16:16 + QK_K // 2]
+      dest = out[row, block_index * QK_K:(block_index + 1) * QK_K]
+      for base in (0, 64, 128, 192):
+        sc0, m0 = scale_min((base // 64) * 2)
+        sc1, m1 = scale_min((base // 64) * 2 + 1)
+        qbytes = qs[(base // 64) * 32:(base // 64) * 32 + 32]
+        lo = qbytes & 0x0F
+        hi = qbytes >> 4
+        dest[base:base + 32] = d * sc0 * lo - dmin * m0
+        dest[base + 32:base + 64] = d * sc1 * hi - dmin * m1
+  return out
+
+
+def dequantize_q8_0(blocks: np.ndarray, rows: int, cols: int) -> np.ndarray:
+  """ggml `dequantize_row_q8_0`: per 32 elements, fp16 d + 32 int8."""
+  import numpy as np
+  out = np.zeros((rows, cols), dtype=np.float32)
+  blocks_per_row = cols // Q8_0_BLOCK
+  for row in range(rows):
+    for block_index in range(blocks_per_row):
+      block = blocks[row * blocks_per_row + block_index]
+      d = np.float32(
+          np.frombuffer(block[0:2].tobytes(), dtype=np.float16)[0])
+      qs = np.frombuffer(block[2:2 + Q8_0_BLOCK].tobytes(),
+                         dtype=np.int8).astype(np.float32)
+      lo = block_index * Q8_0_BLOCK
+      out[row, lo:lo + Q8_0_BLOCK] = d * qs
+  return out
+
+
+def dequantize_q4_0(blocks: np.ndarray, rows: int, cols: int) -> np.ndarray:
+  """ggml `dequantize_row_q4_0`: per 32 elements, fp16 d + 16 nibble bytes,
+  value = d * (nibble - 8). Nibbles interleave: byte j supplies elements
+  (2j, 2j+1) as low then high nibble."""
+  import numpy as np
+  out = np.zeros((rows, cols), dtype=np.float32)
+  blocks_per_row = cols // Q8_0_BLOCK
+  for row in range(rows):
+    for block_index in range(blocks_per_row):
+      block = blocks[row * blocks_per_row + block_index]
+      d = np.float32(
+          np.frombuffer(block[0:2].tobytes(), dtype=np.float16)[0])
+      qs = block[2:2 + Q8_0_BLOCK // 2]
+      lo = (qs & 0x0F).astype(np.int32) - 8
+      hi = (qs >> 4).astype(np.int32) - 8
+      base = block_index * Q8_0_BLOCK
+      out[row, base:base + Q8_0_BLOCK:2] = d * lo
+      out[row, base + 1:base + Q8_0_BLOCK:2] = d * hi
+  return out
+
+
+def dequantize_tensor_f32(raw: bytes, dtype: int,
+                          dims: tuple[int, ...]) -> np.ndarray:
+  """Row-major f32 view of a tensor stored in f32/f16/q8_0/q4_0/q4_k."""
+  import numpy as np
+  cols = dims[0]
+  rows = 1
+  for dim in dims[1:]:
+    rows *= dim
+  if dtype == GGML_DTYPE_F32:
+    return np.frombuffer(raw, dtype=np.float32).astype(np.float32)
+  if dtype == GGML_DTYPE_F16:
+    return np.frombuffer(raw, dtype=np.float16).astype(np.float32)
+  if dtype == GGML_DTYPE_Q8_0:
+    if cols % Q8_0_BLOCK != 0:
+      raise ValueError(
+          f"tensor dequant q8_0 needs ne0 % {Q8_0_BLOCK} == 0 (dims {dims})")
+    block_count = rows * (cols // Q8_0_BLOCK)
+    blocks = np.frombuffer(raw, dtype=np.uint8).reshape(block_count,
+                                                        Q8_0_BLOCK_BYTES)
+    return dequantize_q8_0(blocks, rows, cols).reshape(rows * cols)
+  if dtype == GGML_DTYPE_Q4_0:
+    if cols % Q8_0_BLOCK != 0:
+      raise ValueError(
+          f"tensor dequant q4_0 needs ne0 % {Q8_0_BLOCK} == 0 (dims {dims})")
+    blocks = np.frombuffer(raw, dtype=np.uint8).reshape(rows * (cols // Q8_0_BLOCK), 18)
+    return dequantize_q4_0(blocks, rows, cols).reshape(rows * cols)
+  if dtype == GGML_DTYPE_Q4_K:
+    if cols % QK_K != 0:
+      raise ValueError(
+          f"tensor dequant q4_k needs ne0 % {QK_K} == 0 (dims {dims})")
+    blocks = np.frombuffer(raw, dtype=np.uint8).reshape(rows * (cols // QK_K), Q4_K_BLOCK_BYTES)
+    return dequantize_q4_K(blocks, rows, cols).reshape(rows * cols)
+  raise ValueError(f"unsupported dequant dtype {dtype} for {dims}")
+
+
+def is_lm_matmul_tensor(info: TensorInfo) -> bool:
+  return len(info.dims) == 2 and info.dims[1] > 0 and \
+      any(pattern.match(info.name) for pattern in LM_Q4_K_PACKABLE_PATTERNS)
+
+
+def is_lm_embedding_tensor(info: TensorInfo) -> bool:
+  return len(info.dims) >= 1 and \
+      any(pattern.match(info.name) for pattern in LM_EMBEDDING_PATTERNS)
+
+
+def quantize_lm_tensors(
+    source: Path, infos: list[TensorInfo],
+    data_start: int) -> tuple[list[TensorInfo], list[bytes], int, int]:
+  """Rewrite an lm component to the q8_0 layout both backends dispatch.
+
+  Matmul weight classes (the LM_Q4_K_PACKABLE_PATTERNS set) are rewritten to
+  q8_0 (CPU aarch64 and Metal both accept q8_0 mul_mat). Codebook/embedding
+  tensors consumed by op_get_rows are upcast to f16 when they are not already
+  f32/f16 (Metal get_rows is f32/f16 only; f16 is CPU-valid too). Everything
+  else is streamed through unchanged. Returns (new infos, per-tensor payloads,
+  matmul count, codebook upcast count).
+  """
+  import numpy as np
+  data = source.read_bytes()
+  payloads: list[bytes] = []
+  new_infos: list[TensorInfo] = []
+  offset = 0
+  matmul_q8 = 0
+  embed_upcast = 0
+  for info in infos:
+    raw = data[data_start + info.offset:
+               data_start + info.offset + tensor_data_bytes(info)]
+    if is_lm_matmul_tensor(info):
+      if len(info.dims) == 2 and info.dims[0] % Q8_0_BLOCK == 0:
+        # q8_0 row blocks align: full quantization, valid on both backends.
+        values = dequantize_tensor_f32(raw, info.dtype, info.dims)
+        payload = quantize_q8_0(values)
+        dtype = GGML_DTYPE_Q8_0
+        matmul_q8 += 1
+      elif info.dtype in (GGML_DTYPE_F32, GGML_DTYPE_F16):
+        # Row length is not a q8_0 block (e.g. a 16-wide depformer gate).
+        # Keep the float so the family stays a valid mul_mat for both
+        # backends; forcing q8_0 here would need row padding the kernels
+        # do not implement.
+        payload = raw
+        dtype = info.dtype
+      else:
+        values = dequantize_tensor_f32(raw, info.dtype, info.dims)
+        payload = values.astype(np.float16).tobytes()
+        dtype = GGML_DTYPE_F16
+    elif (is_lm_embedding_tensor(info) and
+          info.dtype not in (GGML_DTYPE_F32, GGML_DTYPE_F16)):
+      values = dequantize_tensor_f32(raw, info.dtype, info.dims)
+      payload = values.astype(np.float16).tobytes()
+      dtype = GGML_DTYPE_F16
+      embed_upcast += 1
+    else:
+      payload = raw
+      dtype = info.dtype
+    payloads.append(payload)
+    new_infos.append(
+        TensorInfo(name=info.name, dims=info.dims, dtype=dtype, offset=offset))
+    offset += len(payload)
+    pad = (-offset) % GGUF_ALIGNMENT
+    offset += pad
+    payloads.append(b"\0" * pad)
+  if matmul_q8 == 0:
+    raise ValueError(
+        "--quantize q8_0 selected for lm but no lm matmul weight tensors were "
+        "found to convert")
+  return new_infos, payloads, matmul_q8, embed_upcast
+
+
 def write_rewritten(output: Path, infos: list[TensorInfo],
                     payloads: list[bytes], kv: KvWriter) -> None:
   out = bytearray()
@@ -1551,8 +1807,8 @@ def convert(source: Path, output: Path, config_path: Path | None,
             mimi_n_q: int | None = None) -> dict:
   infos, data_start = read_raw_gguf(source)
   component = detect_component(infos)
-  if quantize is not None and component != "mimi":
-    raise ValueError("--quantize currently supports mimi components only")
+  if quantize is not None and component not in ("mimi", "lm"):
+    raise ValueError("--quantize currently supports mimi and lm components only")
   if pack_lm_q4_k is not None and component != "lm":
     raise ValueError("--pack-lm-q4-k supports lm components only")
   if mimi_n_q is not None and component != "mimi":
@@ -1584,6 +1840,8 @@ def convert(source: Path, output: Path, config_path: Path | None,
     append_tokenizer_kv(kv, parse_sentencepiece_model(tokenizer_path))
     if pack_lm_q4_k is not None:
       kv.string("moshi.lm.tensor_packing", pack_lm_q4_k)
+    if quantize is not None:
+      kv.string("moshi.lm.quantization", quantize)
   elif component == "mimi":
     preset = dict(MIMI_PRESET)
     if mimi_preset_path is not None:
@@ -1608,9 +1866,14 @@ def convert(source: Path, output: Path, config_path: Path | None,
 
   quantized_count = 0
   packed_count = 0
+  embed_upcast_count = 0
   if quantize is not None:
-    infos, payloads, quantized_count = quantize_mimi_tensors(
-        source, infos, data_start, quantize)
+    if component == "mimi":
+      infos, payloads, quantized_count = quantize_mimi_tensors(
+          source, infos, data_start, quantize)
+    else:
+      infos, payloads, quantized_count, embed_upcast_count = \
+          quantize_lm_tensors(source, infos, data_start)
     write_rewritten(output, infos, payloads, kv)
   elif pack_lm_q4_k is not None:
     infos, plans, packed_count = plan_lm_q4_k_packing(infos, pack_lm_q4_k)
@@ -1628,6 +1891,8 @@ def convert(source: Path, output: Path, config_path: Path | None,
   if quantize is not None:
     manifest["quantization"] = quantize
     manifest["quantized_tensors"] = quantized_count
+    if component == "lm":
+      manifest["lm_embedding_upcast_to_f16"] = embed_upcast_count
   if pack_lm_q4_k is not None:
     manifest["lm_tensor_packing"] = pack_lm_q4_k
     manifest["packed_tensors"] = packed_count
@@ -1641,10 +1906,12 @@ def convert(source: Path, output: Path, config_path: Path | None,
 
 def parse_args() -> argparse.Namespace:
   parser = argparse.ArgumentParser(description=__doc__)
-  parser.add_argument("--source", type=Path, required=True,
-                      help="raw moshi.cpp GGUF cache")
-  parser.add_argument("--output", type=Path, required=True,
-                      help="enriched emel moshi GGUF to write")
+  parser.add_argument("--source", type=Path, default=None,
+                      help="raw moshi.cpp GGUF cache (required unless "
+                           "--self-test)")
+  parser.add_argument("--output", type=Path, default=None,
+                      help="enriched emel moshi GGUF to write (required "
+                           "unless --self-test)")
   parser.add_argument("--config", type=Path, default=None,
                       help="moshi config JSON (personaplex-config.json); "
                            "required for lm components and for mimi unless "
@@ -1664,18 +1931,31 @@ def parse_args() -> argparse.Namespace:
   parser.add_argument("--manifest", type=Path, default=None,
                       help="optional provenance manifest JSON to write")
   parser.add_argument("--quantize", choices=("q8_0",), default=None,
-                      help="quantize the mimi projection weight classes "
-                           "(transformer + RVQ projections) to the given "
-                           "block format; requires numpy")
+                      help="quantize to the given block format; requires "
+                           "numpy. For mimi: rewrites the projection weight "
+                           "classes (transformer + RVQ projections). For lm: "
+                           "rewrites the matmul weight classes to q8_0 "
+                           "(usable by both the aarch64 CPU and Metal "
+                           "kernels) and upcasts get_rows codebook tensors "
+                           "to f16 when they are quantized")
   parser.add_argument("--pack-lm-q4-k", choices=("q4_k_x8_bl8",),
                       default=None,
                       help="rewrite selected LM Q4_K mat-vec/logit weights "
                            "to EMEL packed CPU tensor dtype metadata")
+  parser.add_argument("--self-test", action="store_true",
+                      help="run the built-in converter self-test on a tiny "
+                           "synthetic raw lm cache and exit")
   return parser.parse_args()
 
 
 def main() -> int:
   args = parse_args()
+  if args.self_test:
+    return self_test()
+  if args.source is None or args.output is None:
+    print("error: --source and --output are required unless --self-test "
+          "is used", file=sys.stderr)
+    return 1
   manifest = convert(args.source, args.output, args.config, args.tokenizer,
                      args.mimi_preset, args.quantize, args.pack_lm_q4_k,
                      args.inference_config, args.mimi_n_q)
@@ -1684,6 +1964,177 @@ def main() -> int:
     args.manifest.write_text(json.dumps(manifest, indent=2) + "\n",
                              encoding="utf-8")
   print(json.dumps(manifest, indent=2))
+  return 0
+
+
+def _fp16_bytes(value: float) -> bytes:
+  return struct.pack("<e", value)
+
+
+def _build_raw_lm_cache() -> tuple[bytes, list[TensorInfo], int]:
+  """A tiny raw moshi.cpp-style lm cache (n_kv == 0) for --self-test."""
+  # q4_k matmul weight [256, 4]: d=1.0, dmin=80.0, every sub-block scale=1 /
+  # min=0, qs bytes encode lo = k % 16, hi = (3k) % 16. Dequant must equal the
+  # ggml nibble decode exactly (d * sc * nibble - dmin * m).
+  scales = bytes([1, 1, 1, 1, 0, 0, 0, 0, 1, 1, 1, 1])
+  qs = bytes(((k % 16) | (((k * 3) % 16) << 4)) for k in range(128))
+  block_q4_k = _fp16_bytes(1.0) + _fp16_bytes(80.0) + bytearray(scales + qs)
+  weight_payload = block_q4_k * 4  # 4 rows
+
+  # q4_0 codebook [32, 200]: d=1.0, qs nibbles fixed at 0x12 (lo=-6, hi=-7).
+  block_q4_0 = _fp16_bytes(1.0) + bytes([0x12] * 16)
+  codebook_payload = bytearray(block_q4_0 * 200)
+
+  alpha_payload = struct.pack("<8f", *[1.0] * 8)
+
+  specs = [
+      ("lm.transformer.layers.0.self_attn.in_projs.0.weight",
+       (256, 4), GGML_DTYPE_Q4_K, weight_payload),
+      ("lm.emb.0.weight", (32, 200), GGML_DTYPE_Q4_0, codebook_payload),
+      ("lm.out_norm.alpha", (8,), GGML_DTYPE_F32, alpha_payload),
+  ]
+  head = bytearray()
+  head.extend(GGUF_MAGIC)
+  head.extend(struct.pack("<IQQ", GGUF_VERSION, len(specs), 0))
+  offset = 0
+  infos = []
+  for name, dims, dtype, _ in specs:
+    infos.append(TensorInfo(name, dims, dtype, offset))
+    offset += _tensor_source_bytes(dtype, dims)
+    offset += (-offset) % GGUF_ALIGNMENT
+  for info in infos:
+    write_string(head, info.name)
+    head.extend(struct.pack("<I", len(info.dims)))
+    for dim in info.dims:
+      head.extend(struct.pack("<Q", dim))
+    head.extend(struct.pack("<IQ", info.dtype, info.offset))
+  head.extend(b"\0" * ((-len(head)) % GGUF_ALIGNMENT))
+  data_start = len(head)
+  body = bytearray()
+  for info in infos:
+    spec = specs[[i for i, s in enumerate(specs) if s[0] == info.name][0]]
+    body.extend(spec[3])
+    pad = (-len(body)) % GGUF_ALIGNMENT
+    body.extend(b"\0" * pad)
+  return bytes(head) + bytes(body), infos, data_start
+
+
+def _tensor_source_bytes(dtype: int, dims: tuple[int, ...]) -> int:
+  elements = 1
+  for dim in dims:
+    elements *= dim
+  if dtype == GGML_DTYPE_F32:
+    return elements * 4
+  if dtype == GGML_DTYPE_F16:
+    return elements * 2
+  if dtype == GGML_DTYPE_Q4_0:
+    return elements // 32 * 18
+  if dtype == GGML_DTYPE_Q4_K:
+    return elements // QK_K * Q4_K_BLOCK_BYTES
+  raise ValueError(f"self-test unsupported source dtype {dtype}")
+
+
+def self_test() -> int:
+  import numpy as np
+  from tempfile import NamedTemporaryFile
+
+  raw, infos, data_start = _build_raw_lm_cache()
+
+  # 1. dequantize_q4_K must match the ggml nibble decode from the construction.
+  expected_low = np.array([(k % 16) for k in range(64)], dtype=np.float32)
+  expected_high = np.array([((k % 16) * 3) % 16 for k in range(64)],
+                           dtype=np.float32)
+  blocks = np.frombuffer(raw[data_start:data_start + 4 * 144],
+                         dtype=np.uint8).reshape(4, 144)
+  values = dequantize_q4_K(blocks, 4, 256)
+  for row in range(4):
+    for base in (0, 64, 128, 192):
+      qoff = (base // 64) * 32
+      got_low = values[row, base:base + 32]
+      got_high = values[row, base + 32:base + 64]
+      if not np.array_equal(got_low, expected_low[:32]) or \
+         not np.array_equal(got_high, expected_high[:32]):
+        raise AssertionError(
+            f"dequantize_q4_K mismatch at row {row} base {base}")
+      if base == 0 and row == 0:
+        # Independent cross-check of the construction against the ggml
+        # reference decode: every value is d * sc * nibble - dmin * m with
+        # d=1.0, sc=1, m=0, so the decode must be exactly the nibble.
+        if values[0, 0] != 0.0 or values[0, 1] != 1.0 or values[0, 32] != 0.0:
+          raise AssertionError("unexpected q4_k decode anchor")
+
+  # 2. Rewriting the lm cache produces q8_0 matmul weights, f16 codebooks,
+  #    and byte-exact f32 passthrough, in an output we can re-read.
+  with NamedTemporaryFile(suffix=".gguf") as tmp:
+    tmp.write(raw)
+    tmp.flush()
+    source = Path(tmp.name)
+    new_infos, payloads, matmul_q8, embed_upcast = \
+        quantize_lm_tensors(source, infos, data_start)
+    if matmul_q8 != 1 or embed_upcast != 1:
+      raise AssertionError(
+          f"lm rewrite counts matmul_q8={matmul_q8} embed_upcast={embed_upcast}")
+    by_name = {info.name: info for info in new_infos}
+    if by_name["lm.transformer.layers.0.self_attn.in_projs.0.weight"].dtype != \
+        GGML_DTYPE_Q8_0:
+      raise AssertionError("matmul weight was not rewritten to q8_0")
+    if by_name["lm.emb.0.weight"].dtype != GGML_DTYPE_F16:
+      raise AssertionError("codebook was not upcast to f16")
+    if by_name["lm.out_norm.alpha"].dtype != GGML_DTYPE_F32:
+      raise AssertionError("non-dispatch tensor was not preserved")
+    # q8_0 payload size: 4 * 256 / 32 * 34.
+    q8_payload = payloads[0]
+    if len(q8_payload) != 4 * 256 // 32 * 34:
+      raise AssertionError("q8_0 matmul payload has unexpected size")
+    # f16 codebook payload: 32 * 200 * 2, dequant close to the q4_0 source.
+    f16_payload = payloads[2]
+    if len(f16_payload) != 32 * 200 * 2:
+      raise AssertionError("f16 codebook payload has unexpected size")
+    f16_back = np.frombuffer(f16_payload, dtype=np.float16).astype(np.float32)
+    expected_codebook = np.array(
+        [-6.0 if (i % 2) == 0 else -7.0 for i in range(32 * 200)],
+        dtype=np.float32)
+    if not np.array_equal(f16_back, expected_codebook):
+      raise AssertionError("f16 codebook upcast does not match q4_0 dequant")
+    # 2b. The rewritten q8_0 matmul dequantizes back near the q4_k source.
+    q8_blocks = np.frombuffer(q8_payload,
+                              dtype=np.uint8).reshape(4 * (256 // 32), 34)
+    q8_values = dequantize_q8_0(q8_blocks, 4, 256).reshape(4 * 256)
+    if not np.allclose(q8_values, values.reshape(4 * 256), atol=0.06):
+      raise AssertionError("q8_0 matmul round-trip diverged from q4_k source")
+
+  # 3. End-to-end: convert() on the tiny f32 lm fixture emits a dual-backend
+  #    q8_0 lm artifact (no packing, no partial-class rejection).
+  import moshi_make_tiny_fixture as tiny
+  from tempfile import TemporaryDirectory
+  with TemporaryDirectory() as tmpdir:
+    tmp = Path(tmpdir)
+    lm_raw = tmp / "lm_raw.gguf"
+    tiny.write_raw_gguf(lm_raw, tiny.lm_tensors(tiny.Lcg(0x4D4F5348)))
+    cfg_path = tmp / "config.json"
+    cfg_path.write_text(json.dumps(tiny.TINY_CONFIG, indent=2) + "\n",
+                        encoding="utf-8")
+    spm_path = tmp / "tokenizer.model"
+    tiny.make_tokenizer_model(spm_path)
+    out_path = tmp / "lm_q8.gguf"
+    manifest = convert(lm_raw, out_path, cfg_path, spm_path, quantize="q8_0")
+    if manifest["quantization"] != "q8_0":
+      raise AssertionError("lm conversion manifest did not record q8_0")
+    out_infos = read_enriched_gguf_tensors(out_path)
+    out_by_name = {info.name: info for info in out_infos}
+    if not any(is_lm_matmul_tensor(info) for info in out_infos):
+      raise AssertionError("end-to-end lm q8_0 conversion produced no matmul")
+    proj = out_by_name["lm.transformer.layers.0.self_attn.in_projs.0.weight"]
+    if proj.dtype != GGML_DTYPE_Q8_0:
+      raise AssertionError("end-to-end lm matmul did not become q8_0")
+    for info in out_infos:
+      if is_lm_matmul_tensor(info) and \
+          info.dtype not in (GGML_DTYPE_F32, GGML_DTYPE_F16, GGML_DTYPE_Q8_0):
+        raise AssertionError(
+            f"end-to-end lm matmul {info.name!r} left as unsupported dtype "
+            f"{info.dtype}")
+
+  print("converter self-test: OK")
   return 0
 
 
