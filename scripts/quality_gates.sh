@@ -875,6 +875,11 @@ infer_quality_gate_scope() {
           add_bench_suite kernel_x86_64 "scope path=$file"
         fi
         ;;
+      src/emel/kernel/metal/*|tests/kernel/metal*)
+        # The Metal actor serves the Mimi codec op set; scope benches to the
+        # PersonaPlex speech lane instead of the broad kernel gate.
+        add_bench_suite speech_dialogue_moshi "scope path=$file"
+        ;;
       src/emel/kernel/*|src/emel/graph/*|src/emel/memory/*|src/emel/tensor/*|\
       tests/kernel/*|tests/graph/*|tests/memory/*|tests/tensor/*)
         select_full_benchmark_gate "broad benchmark-affecting path=$file"

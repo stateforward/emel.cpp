@@ -1,0 +1,30 @@
+stateDiagram-v2
+  direction TB
+  [*] --> ready
+  ready --> ready : dispatch_request [always] / exec_dispatch_
+  ready --> ready : dispatch_op_mul_mat [valid_op_mul_mat_q8_0_] / exec_op_mul_mat_q8_0_
+  ready --> ready : dispatch_op_mul_mat [valid_op_mul_mat_f16_] / exec_op_mul_mat_f16_
+  ready --> ready : dispatch_op_mul_mat [valid_op_mul_mat_f32_] / exec_op_mul_mat_f32_
+  ready --> ready : dispatch_op_mul_mat [invalid_op_mul_mat_] / reject_invalid_op_mul_mat_
+  ready --> ready : dispatch_op_add [valid_op_add_equal_] / exec_op_add_equal_
+  ready --> ready : dispatch_op_add [valid_op_add_broadcast_row_] / exec_op_add_broadcast_row_
+  ready --> ready : dispatch_op_add [invalid_op_add_] / reject_invalid_op_add_
+  ready --> ready : dispatch_op_unary [abs__] / abs__
+  ready --> ready : dispatch_op_unary [neg__] / neg__
+  ready --> ready : dispatch_op_unary [tanh__] / tanh__
+  ready --> ready : dispatch_op_unary [elu__] / elu__
+  ready --> ready : dispatch_op_unary [relu__] / relu__
+  ready --> ready : dispatch_op_unary [gelu__] / gelu__
+  ready --> ready : dispatch_op_unary [silu__] / silu__
+  ready --> ready : dispatch_op_unary [exp__] / exp__
+  ready --> ready : dispatch_op_unary [invalid_op_unary_] / reject_invalid_op_unary_
+  ready --> ready : dispatch_op_im2col [valid_op_im2col_f32_] / exec_op_im2col_f32_
+  ready --> ready : dispatch_op_im2col [valid_op_im2col_f16_] / exec_op_im2col_f16_
+  ready --> ready : dispatch_op_im2col [invalid_op_im2col_] / reject_invalid_op_im2col_
+  ready --> ready : dispatch_op_conv_transpose_1d [valid_op_conv_transpose_1d_f32_] / exec_op_conv_transpose_1d_f32_
+  ready --> ready : dispatch_op_conv_transpose_1d [valid_op_conv_transpose_1d_f16_] / exec_op_conv_transpose_1d_f16_
+  ready --> ready : dispatch_op_conv_transpose_1d [invalid_op_conv_transpose_1d_] / reject_invalid_op_conv_transpose_1d_
+  ready --> ready : dispatch_op_get_rows [valid_op_get_rows_f32_] / exec_op_get_rows_f32_
+  ready --> ready : dispatch_op_get_rows [valid_op_get_rows_f16_] / exec_op_get_rows_f16_
+  ready --> ready : dispatch_op_get_rows [invalid_op_get_rows_] / reject_invalid_op_get_rows_
+  ready --> ready : _ [always] / reject_unsupported_op_

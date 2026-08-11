@@ -19,11 +19,25 @@ the earlier backend cleanup and whether removal was clearly safe.
 
 These surfaces are part of the maintained CPU direction and were preserved.
 
+## Apple GPU Surface
+
+- `src/emel/kernel/metal/**` (SML actor + embedded MSL kernels)
+- `tests/kernel/metal_tests.cpp` (op parity vs the CPU backends)
+- compiled only when the Metal framework is present (Apple hosts); on other
+  hosts the actor builds as a portable stub whose guards reject every dispatch
+
+The Metal actor serves the Mimi codec op set (`op_mul_mat` f32/f16/q8_0,
+`op_add`, `op_unary`, `op_im2col`, `op_conv_transpose_1d`, `op_get_rows`) and
+is opt-in via `kernel::any` `set_kind(kernel_kind::metal)`; the host default
+stays CPU-first so CPU parity and benchmark lanes never change operand
+pipelines silently. No CPU benchmark claims depend on it.
+
 ## Device Backend Surfaces Reviewed
 
-- Removed in the earlier backend cleanup: `src/emel/kernel/cuda/**`, `src/emel/kernel/metal/**`,
-  `src/emel/kernel/vulkan/**`, and `src/emel/kernel/wasm/**` placeholder actors plus generated
-  architecture docs.
+- Removed in the earlier backend cleanup: `src/emel/kernel/cuda/**`,
+  `src/emel/kernel/vulkan/**`, and `src/emel/kernel/wasm/**` placeholder
+  actors plus generated architecture docs. (The Metal placeholder was
+  replaced by the maintained surface above.)
 
 ## Removal Decision
 

@@ -7,6 +7,7 @@
 #include "emel/kernel/aarch64/sm.hpp"
 #include "emel/kernel/detail.hpp"
 #include "emel/kernel/events.hpp"
+#include "emel/kernel/metal/sm.hpp"
 #include "emel/kernel/x86_64/sm.hpp"
 #include "emel/sm.hpp"
 
@@ -15,8 +16,15 @@ namespace emel::kernel {
 enum class kernel_kind : uint8_t {
   x86_64 = 0,
   aarch64 = 1,
+  metal = 2,
 };
 
+// The host default stays CPU-first: the Metal variant is opt-in via
+// `set_kind(kernel_kind::metal)` (or the kind-forcing constructor), so CPU
+// parity and benchmark lanes never silently change operand pipelines. The
+// metal actor compiles and links on every host; on hosts without a Metal
+// device it reports availability == false and every dispatch is explicitly
+// rejected by its guards.
 constexpr kernel_kind detect_host_kind() noexcept {
 #if defined(__aarch64__) || defined(_M_ARM64)
   return kernel_kind::aarch64;
@@ -350,8 +358,21 @@ class any {
     return count;
   }
 
+  // True when the active kind is the Metal actor and its device/library is
+  // available. Other kinds report false (they do not need a device).
+  bool metal_available() const noexcept {
+    bool available = false;
+    core_.visit([&](const auto & sm) {
+      if constexpr (requires { sm.metal_available(); }) {
+        available = sm.metal_available();
+      }
+    });
+    return available;
+  }
+
  private:
-  using sm_list = stateforward::sml::aux::type_list<x86_64::sm, aarch64::sm>;
+  using sm_list = stateforward::sml::aux::type_list<x86_64::sm, aarch64::sm,
+                                                    metal::sm>;
   using event_list = stateforward::sml::aux::type_list<
       event::dispatch
 #define EMEL_KERNEL_ANY_EVENT_TYPE(op_name) , event::op_name

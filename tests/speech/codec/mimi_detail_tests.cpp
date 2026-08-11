@@ -133,7 +133,8 @@ struct bound_codec {
   codec::codec_streaming_state streaming = {};
 };
 
-bool bind_or_fail(const emel::model::data &model, bound_codec &out) {
+bool bind_or_fail_kind(const emel::model::data &model,
+                       const emel::kernel::kernel_kind kind, bound_codec &out) {
   if (!codec::validate_codec_contract(model)) {
     return false;
   }
@@ -149,10 +150,15 @@ bool bind_or_fail(const emel::model::data &model, bound_codec &out) {
   out.state.resize(state_floats);
   out.workspace.resize(workspace_floats);
   out.frame.resize(frame_floats);
+  out.runtime.kernel_kind = kind;
   codec::bind_codec_runtime(model, std::span<float>{out.prepared},
                             std::span<float>{out.state}, out.runtime,
                             out.streaming);
   return out.runtime.model != nullptr;
+}
+
+bool bind_or_fail(const emel::model::data &model, bound_codec &out) {
+  return bind_or_fail_kind(model, emel::kernel::detect_host_kind(), out);
 }
 
 std::vector<float> deterministic_pcm(const int32_t samples) {
@@ -302,4 +308,57 @@ TEST_CASE("mimi codec decodes codes back to a full frame of audio") {
       codec_state.runtime, std::span<const int32_t>{bad_codes}));
   CHECK(codec::validate_codes_in_range(codec_state.runtime,
                                        std::span<const int32_t>{codes}));
+}
+
+TEST_CASE("mimi codec encodes and decodes through the metal kernel actor") {
+  auto loaded = load_mimi_fixture_or_skip();
+  if (loaded.model == nullptr) {
+    return;
+  }
+
+  bound_codec cpu_state{};
+  REQUIRE(bind_or_fail(*loaded.model, cpu_state));
+
+  bound_codec metal_state{};
+  REQUIRE(bind_or_fail_kind(*loaded.model, emel::kernel::kernel_kind::metal,
+                            metal_state));
+  if (!metal_state.runtime.kernel.metal_available()) {
+    MESSAGE("skipping: no Metal device");
+    return;
+  }
+
+  const auto pcm = deterministic_pcm(cpu_state.runtime.frame_samples);
+
+  std::vector<int32_t> cpu_codes(static_cast<size_t>(cpu_state.runtime.n_q),
+                                 -1);
+  REQUIRE(encode_frame(cpu_state, pcm, std::span<int32_t>{cpu_codes}));
+  std::vector<float> cpu_audio(
+      static_cast<size_t>(cpu_state.runtime.frame_samples), 0.0f);
+  REQUIRE(decode_frame(cpu_state, std::span<const int32_t>{cpu_codes},
+                       std::span<float>{cpu_audio}));
+
+  std::vector<int32_t> metal_codes(static_cast<size_t>(metal_state.runtime.n_q),
+                                   -1);
+  REQUIRE(encode_frame(metal_state, pcm, std::span<int32_t>{metal_codes}));
+  for (const int32_t code : metal_codes) {
+    CHECK(code >= 0);
+    CHECK(code < metal_state.runtime.quantizer.codebook_entries);
+  }
+  std::vector<float> metal_audio(
+      static_cast<size_t>(metal_state.runtime.frame_samples), 0.0f);
+  REQUIRE(decode_frame(metal_state, std::span<const int32_t>{metal_codes},
+                       std::span<float>{metal_audio}));
+  CHECK(all_finite(metal_audio.data(), metal_audio.size()));
+
+  // GPU accumulation order and FMA contraction introduce small numeric
+  // differences; the decoded audio must stay close to the CPU reference.
+  const float abs_tolerance = 2.0e-3f;
+  const float rel_tolerance = 2.0e-2f;
+  for (size_t index = 0; index < metal_audio.size(); ++index) {
+    const float diff = std::fabs(metal_audio[index] - cpu_audio[index]);
+    const float bound =
+        abs_tolerance + rel_tolerance * std::max(std::fabs(metal_audio[index]),
+                                                 std::fabs(cpu_audio[index]));
+    CHECK_MESSAGE(diff <= bound, "sample " << index << " diverged");
+  }
 }

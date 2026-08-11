@@ -143,12 +143,53 @@ add_library(emel STATIC
   src/emel/diarization/sortformer/modules/detail.cpp
   src/emel/diarization/sortformer/output/detail.cpp
   src/emel/diarization/sortformer/transformer/detail.cpp
+  src/emel/kernel/metal/detail.cpp
 )
 
 target_link_libraries(emel
   PUBLIC
     emel_core
 )
+
+if(APPLE)
+  # Metal kernel actor: the Metal TU is Objective-C++ (Metal has no C++ API),
+  # compiled against the Xcode/CommandLineTools SDK so the MSL runtime and the
+  # embedded library compile with the host toolchain (zig cc or AppleClang).
+  # The framework headers and link inputs are only added when the SDK provides
+  # Metal; otherwise detail.cpp compiles its portable stub (guards reject all
+  # dispatches) and no Metal dependency leaks into the build.
+  find_library(EMEL_METAL_FRAMEWORK Metal)
+  find_library(EMEL_FOUNDATION_FRAMEWORK Foundation)
+  if(EMEL_METAL_FRAMEWORK)
+    if(CMAKE_CXX_COMPILER MATCHES "/zig$")
+      # zig c++ as an ObjC++ compiler: CMake cannot forward "zig c++" as an
+      # OBJCXX compiler, so wrap it in a tiny configure-time shim. Must run
+      # before enable_language(OBJCXX) so compiler detection uses it.
+      set(EMEL_OBJCXX_WRAPPER "${CMAKE_CURRENT_BINARY_DIR}/zig_objcxx")
+      file(WRITE "${EMEL_OBJCXX_WRAPPER}"
+        "#!/bin/sh\nset -e\nexec \"${CMAKE_CXX_COMPILER}\" ${CMAKE_CXX_COMPILER_ARG1} \"$@\"\n")
+      execute_process(COMMAND chmod +x "${EMEL_OBJCXX_WRAPPER}")
+      set(CMAKE_OBJCXX_COMPILER "${EMEL_OBJCXX_WRAPPER}")
+    endif()
+    enable_language(OBJCXX)
+    set_source_files_properties(src/emel/kernel/metal/detail.cpp
+      PROPERTIES LANGUAGE OBJCXX)
+    execute_process(
+      COMMAND xcrun --show-sdk-path
+      OUTPUT_VARIABLE EMEL_MACOS_SDK_PATH
+      OUTPUT_STRIP_TRAILING_WHITESPACE
+    )
+    if(NOT EMEL_MACOS_SDK_PATH STREQUAL "")
+      set_source_files_properties(src/emel/kernel/metal/detail.cpp
+        PROPERTIES COMPILE_OPTIONS "-isysroot;${EMEL_MACOS_SDK_PATH}")
+    endif()
+    target_link_libraries(emel_core
+      INTERFACE
+        ${EMEL_METAL_FRAMEWORK}
+        ${EMEL_FOUNDATION_FRAMEWORK}
+    )
+  endif()
+endif()
 
 
 if(EMEL_ENABLE_TESTS)
@@ -218,6 +259,7 @@ if(EMEL_ENABLE_TESTS)
     tests/graph/processor/processor_action_branch_tests.cpp
     tests/kernel/aarch64_tests.cpp
     tests/kernel/lifecycle_tests.cpp
+    tests/kernel/metal_tests.cpp
     tests/kernel/x86_64_tests.cpp
     # Legacy processor tests target pre-cutover API shape and are disabled until migrated.
     # Keep them out of gate builds during the hard cutover.

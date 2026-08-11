@@ -3,13 +3,13 @@
 CPU-first C++ inference engine for deterministic, high-performance inference built around
 Stateforward.SML orchestration.
 
-## Status: Discontinued
+## Status: WIP
 
-Development of this C++ implementation has been discontinued in favor of
-[stateforward/emel.rs](https://github.com/stateforward/emel.rs). Please use that repository for
-current development and future updates.
+This repository is under active development. APIs, state machines, and formats will change.
+If you’re evaluating EMEL, expect fast iteration and breaking changes until the core loader,
+allocator, and execution pipelines stabilize.
 
-This C++ implementation was developed by AI under human engineering and architecture direction.
+This inference engine is being implemented by AI under human engineering and architecture direction.
 
 ## CPU-first scope
 
@@ -167,6 +167,7 @@ environments, while Zig remains the default for day-to-day builds.
 - [`.planning/architecture/io_read.md`](.planning/architecture/io_read.md)
 - [`.planning/architecture/io_staged_read.md`](.planning/architecture/io_staged_read.md)
 - [`.planning/architecture/kernel_aarch64.md`](.planning/architecture/kernel_aarch64.md)
+- [`.planning/architecture/kernel_metal.md`](.planning/architecture/kernel_metal.md)
 - [`.planning/architecture/kernel_x86_64.md`](.planning/architecture/kernel_x86_64.md)
 - [`.planning/architecture/logits_sampler.md`](.planning/architecture/logits_sampler.md)
 - [`.planning/architecture/logits_validator.md`](.planning/architecture/logits_validator.md)

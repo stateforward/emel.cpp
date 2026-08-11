@@ -26,7 +26,8 @@ stateDiagram-v2
   state_temperature_top_k_scale --> state_temperature_top_k_probabilities : completion_sample_temperature_top_k_runtime_ [always] / compute_temperature_probabilities_
   state_temperature_top_k_probabilities --> state_temperature_top_k_rank : completion_sample_temperature_top_k_runtime_ [always] / compute_temperature_top_k_
   state_temperature_top_k_rank --> state_temperature_top_k_select : completion_sample_temperature_top_k_runtime_ [always] / select_temperature_top_k_
-  state_temperature_top_k_select --> done : completion_sample_temperature_top_k_runtime_ [always] / none
+  state_temperature_top_k_select --> done : completion_sample_temperature_top_k_runtime_ [temperature_top_k_selected_token_valid_] / none
+  state_temperature_top_k_select --> errored : completion_sample_temperature_top_k_runtime_ [temperature_top_k_selected_token_invalid_] / mark_invalid_request_
   done --> ready : completion_configure_runtime_ [always] / publish_done_
   errored --> ready : completion_configure_runtime_ [always] / publish_error_
   done --> ready : completion_sample_logits_runtime_ [always] / publish_done_
