@@ -1,0 +1,7 @@
+stateDiagram-v2
+  direction TB
+  [*] --> state_ready
+  state_ready --> state_ready : execute_pre_mix [guard_execute_pre_mix_] / effect_execute_pre_mix_
+  state_ready --> state_ready : execute_post_mix [guard_execute_post_mix_] / effect_execute_post_mix_
+  state_ready --> state_ready : execute_mean_lanes [guard_execute_mean_lanes_] / effect_execute_mean_lanes_
+  state_ready --> state_ready : _ [always] / effect_on_unexpected_

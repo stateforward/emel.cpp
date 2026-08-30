@@ -1,0 +1,18 @@
+stateDiagram-v2
+  direction TB
+  [*] --> state_ready
+  state_ready --> state_ready : execute_avx2_2_ [guard_execute_avx2_2__] / effect_execute_avx2_2__
+  state_ready --> state_ready : execute_avx2_3_ [guard_execute_avx2_3__] / effect_execute_avx2_3__
+  state_ready --> state_ready : execute_avx2_4_ [guard_execute_avx2_4__] / effect_execute_avx2_4__
+  state_ready --> state_ready : execute_scalar_2_ [guard_execute_scalar_2__] / effect_execute_scalar_2__
+  state_ready --> state_ready : execute_scalar_3_ [guard_execute_scalar_3__] / effect_execute_scalar_3__
+  state_ready --> state_ready : execute_scalar_4_ [guard_execute_scalar_4__] / effect_execute_scalar_4__
+  state_ready --> state_ready : execute_scalar_5_ [guard_execute_scalar_5__] / effect_execute_scalar_5__
+  state_ready --> state_ready : execute_scalar_rows_2_ [guard_execute_scalar_rows_2__] / effect_execute_scalar_rows_2__
+  state_ready --> state_ready : execute_scalar_rows_3_ [guard_execute_scalar_rows_3__] / effect_execute_scalar_rows_3__
+  state_ready --> state_ready : execute_scalar_rows_4_ [guard_execute_scalar_rows_4__] / effect_execute_scalar_rows_4__
+  state_ready --> state_ready : execute_scalar_dequant_2_ [guard_execute_scalar_dequant_2__] / effect_execute_scalar_dequant_2__
+  state_ready --> state_ready : execute_scalar_dequant_3_ [guard_execute_scalar_dequant_3__] / effect_execute_scalar_dequant_3__
+  state_ready --> state_ready : execute_scalar_dequant_4_ [guard_execute_scalar_dequant_4__] / effect_execute_scalar_dequant_4__
+  state_ready --> state_ready : capture_diagnostics [always] / effect_capture_diagnostics_
+  state_ready --> state_ready : _ [always] / effect_on_unexpected_

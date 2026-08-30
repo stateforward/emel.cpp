@@ -1,0 +1,8 @@
+stateDiagram-v2
+  direction TB
+  [*] --> state_ready
+  state_ready --> state_ready : execute_attend [guard_execute_attend_] / effect_execute_attend_
+  state_ready --> state_ready : execute_cache_write [guard_execute_cache_write_] / effect_execute_cache_write_
+  state_ready --> state_ready : execute_gate_mul [guard_execute_gate_mul_] / effect_execute_gate_mul_
+  state_ready --> state_ready : execute_residual_gate [guard_execute_residual_gate_] / effect_execute_residual_gate_
+  state_ready --> state_ready : _ [always] / effect_on_unexpected_

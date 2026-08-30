@@ -1,0 +1,5 @@
+stateDiagram-v2
+  direction TB
+  [*] --> state_ready
+  state_ready --> state_ready : execute_mlp_row [guard_execute_mlp_row_] / effect_execute_mlp_row_
+  state_ready --> state_ready : _ [always] / effect_on_unexpected_
