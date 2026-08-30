@@ -170,11 +170,8 @@ inline bool prepare_view(context &ctx, const tensor_view &view,
       .indices_by_input8 =
           std::span<uint8_t>{ctx.prepared_indices_by_input8}.subspan(
               index_offset, index_count),
-      .units_f16 = std::span<uint16_t>{ctx.prepared_units_f16}.subspan(
-          index_offset, index_count),
       .norms =
           std::span<float>{ctx.prepared_norms}.subspan(norm_offset, norm_count),
-      .codebook = codebook_span(ctx),
       .prepared = prepared};
   emel::kernel::cq::event::dispatch_result result{};
   const bool ok = ctx.cq.process_event(

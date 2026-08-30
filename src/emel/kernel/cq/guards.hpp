@@ -70,8 +70,7 @@ prepare_supported(const event::prepare_q4_request &request) noexcept {
   return packed_bytes + norm_count * 2u <= view.nbytes &&
          request.indices.size() >= index_count &&
          request.indices_by_input8.size() >= index_count &&
-         request.units_f16.size() >= index_count &&
-         request.norms.size() >= norm_count && request.codebook.size() >= 28u;
+         request.norms.size() >= norm_count;
 }
 inline bool prepared_supported(const event::prepared_q4_view &view,
                                const std::span<const float> codebook) noexcept {
@@ -84,7 +83,6 @@ inline bool prepared_supported(const event::prepared_q4_view &view,
          detail::is_power_of_two(view.group) && view.in_pad >= view.in &&
          view.in_pad % view.group == 0u && view.indices.size() >= index_count &&
          view.indices_by_input8.size() >= blocked_count &&
-         view.units_f16.size() >= index_count &&
          view.norms.size() >= norm_count && codebook.size() >= 28u;
 }
 
