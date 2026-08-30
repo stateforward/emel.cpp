@@ -142,10 +142,38 @@ inline void prepare_q4(const event::prepare_q4_request &request) noexcept {
       .norms = request.norms.first(norm_count)};
 }
 
+#if defined(__x86_64__) || defined(_M_X64)
+struct q4_lookup16_result {
+  __m256 low;
+  __m256 high;
+};
+
+EMEL_KERNEL_CQ_AVX2_TARGET inline q4_lookup16_result
+lookup_codebook16_pshufb(const __m256i index_bytes, const __m256i byte0,
+                         const __m256i byte1, const __m256i byte2,
+                         const __m256i byte3) noexcept {
+  // vpshufb indexes each 128-bit lane independently. The byte-plane tables
+  // are duplicated across lanes, while the selector vector carries values
+  // 0..7 in its low lane and 8..15 in its high lane.
+  const __m256i values0 = _mm256_shuffle_epi8(byte0, index_bytes);
+  const __m256i values1 = _mm256_shuffle_epi8(byte1, index_bytes);
+  const __m256i values2 = _mm256_shuffle_epi8(byte2, index_bytes);
+  const __m256i values3 = _mm256_shuffle_epi8(byte3, index_bytes);
+  const __m256i words01 = _mm256_unpacklo_epi8(values0, values1);
+  const __m256i words23 = _mm256_unpacklo_epi8(values2, values3);
+  const __m256i lanes03 = _mm256_unpacklo_epi16(words01, words23);
+  const __m256i lanes47 = _mm256_unpackhi_epi16(words01, words23);
+  return q4_lookup16_result{
+      .low = _mm256_castsi256_ps(
+          _mm256_permute2x128_si256(lanes03, lanes47, 0x20)),
+      .high = _mm256_castsi256_ps(
+          _mm256_permute2x128_si256(lanes03, lanes47, 0x31))};
+}
+
 EMEL_KERNEL_CQ_AVX2_TARGET inline __m256
-q4_lookup_pshufb(const __m128i index_bytes, const __m128i byte0,
-                 const __m128i byte1, const __m128i byte2,
-                 const __m128i byte3) noexcept {
+lookup_codebook8_pshufb(const __m128i index_bytes, const __m128i byte0,
+                        const __m128i byte1, const __m128i byte2,
+                        const __m128i byte3) noexcept {
   const __m128i values0 = _mm_shuffle_epi8(byte0, index_bytes);
   const __m128i values1 = _mm_shuffle_epi8(byte1, index_bytes);
   const __m128i values2 = _mm_shuffle_epi8(byte2, index_bytes);
@@ -160,19 +188,32 @@ q4_lookup_pshufb(const __m128i index_bytes, const __m128i byte0,
 
 EMEL_KERNEL_CQ_AVX2_TARGET inline void
 q4_codebook_byte_tables(const std::span<const float> codebook_span,
-                        __m128i &byte0, __m128i &byte1, __m128i &byte2,
-                        __m128i &byte3) noexcept {
-  alignas(16) uint8_t tables[4][16];
+                        __m256i &byte0, __m256i &byte1, __m256i &byte2,
+                        __m256i &byte3) noexcept {
+  alignas(32) uint8_t tables[4][32];
   const auto *codebook_bytes = reinterpret_cast<const uint8_t *>(
       detail::codebook_for<4u>(codebook_span));
   for (uint32_t index = 0u; index < 16u; ++index)
-    for (uint32_t byte = 0u; byte < 4u; ++byte)
-      tables[byte][index] = codebook_bytes[index * sizeof(float) + byte];
-  byte0 = _mm_load_si128(reinterpret_cast<const __m128i *>(tables[0]));
-  byte1 = _mm_load_si128(reinterpret_cast<const __m128i *>(tables[1]));
-  byte2 = _mm_load_si128(reinterpret_cast<const __m128i *>(tables[2]));
-  byte3 = _mm_load_si128(reinterpret_cast<const __m128i *>(tables[3]));
+    for (uint32_t byte = 0u; byte < 4u; ++byte) {
+      const uint8_t value = codebook_bytes[index * sizeof(float) + byte];
+      tables[byte][index] = value;
+      tables[byte][16u + index] = value;
+    }
+  byte0 = _mm256_load_si256(reinterpret_cast<const __m256i *>(tables[0]));
+  byte1 = _mm256_load_si256(reinterpret_cast<const __m256i *>(tables[1]));
+  byte2 = _mm256_load_si256(reinterpret_cast<const __m256i *>(tables[2]));
+  byte3 = _mm256_load_si256(reinterpret_cast<const __m256i *>(tables[3]));
 }
+
+EMEL_KERNEL_CQ_AVX2_TARGET inline __m256i
+load_selector16(const uint8_t *selectors) noexcept {
+  const __m128i low =
+      _mm_loadl_epi64(reinterpret_cast<const __m128i *>(selectors));
+  const __m128i high =
+      _mm_loadl_epi64(reinterpret_cast<const __m128i *>(selectors + 8u));
+  return _mm256_inserti128_si256(_mm256_castsi128_si256(low), high, 1);
+}
+#endif
 
 EMEL_KERNEL_CQ_AVX2_TARGET inline void
 execute_prepared_avx2_dot(const event::prepared_q4_view &view,
@@ -181,10 +222,10 @@ execute_prepared_avx2_dot(const event::prepared_q4_view &view,
                           const uint32_t row_begin, const uint32_t row_count,
                           const std::span<float> output) noexcept {
 #if defined(__x86_64__) || defined(_M_X64)
-  __m128i codebook_byte0;
-  __m128i codebook_byte1;
-  __m128i codebook_byte2;
-  __m128i codebook_byte3;
+  __m256i codebook_byte0;
+  __m256i codebook_byte1;
+  __m256i codebook_byte2;
+  __m256i codebook_byte3;
   q4_codebook_byte_tables(codebook_span, codebook_byte0, codebook_byte1,
                           codebook_byte2, codebook_byte3);
   const uint32_t groups_per_row = view.in_pad / view.group;
@@ -194,57 +235,83 @@ execute_prepared_avx2_dot(const event::prepared_q4_view &view,
         view.indices.data() + static_cast<size_t>(source_row) * view.in_pad;
     const float *norms =
         view.norms.data() + static_cast<size_t>(source_row) * groups_per_row;
-    // Four independent chains hide shuffle/FMA latency for group-128 graph
-    // weights. The scalar remainder keeps smaller valid CQ groups exact.
+    // Two independent chains are fastest on the target Zen 2 host. Each
+    // 64-column iteration performs four 16-selector lookups; every lookup
+    // reconstructs sixteen exact float bit patterns with four lane-parallel
+    // byte shuffles.
     __m256 accum0 = _mm256_setzero_ps();
     __m256 accum1 = _mm256_setzero_ps();
-    __m256 accum2 = _mm256_setzero_ps();
-    __m256 accum3 = _mm256_setzero_ps();
+    float scalar_tail = 0.0f;
     for (uint32_t begin = 0u, group_index = 0u; begin < view.in_pad;
          begin += view.group, ++group_index) {
       const __m256 norm_v = _mm256_set1_ps(norms[group_index]);
       uint32_t i = 0u;
-      for (; i + 32u <= view.group; i += 32u) {
+      for (; i + 64u <= view.group; i += 64u) {
         const uint8_t *chunk = indices + begin + i;
         const float *activation = activation_fwht.data() + begin + i;
-        const __m256 values0 = q4_lookup_pshufb(
-            _mm_loadl_epi64(reinterpret_cast<const __m128i *>(chunk)),
-            codebook_byte0, codebook_byte1, codebook_byte2, codebook_byte3);
-        const __m256 values1 = q4_lookup_pshufb(
-            _mm_loadl_epi64(reinterpret_cast<const __m128i *>(chunk + 8u)),
-            codebook_byte0, codebook_byte1, codebook_byte2, codebook_byte3);
-        const __m256 values2 = q4_lookup_pshufb(
-            _mm_loadl_epi64(reinterpret_cast<const __m128i *>(chunk + 16u)),
-            codebook_byte0, codebook_byte1, codebook_byte2, codebook_byte3);
-        const __m256 values3 = q4_lookup_pshufb(
-            _mm_loadl_epi64(reinterpret_cast<const __m128i *>(chunk + 24u)),
-            codebook_byte0, codebook_byte1, codebook_byte2, codebook_byte3);
-        accum0 = _mm256_fmadd_ps(_mm256_mul_ps(values0, norm_v),
+        const q4_lookup16_result values0 = lookup_codebook16_pshufb(
+            load_selector16(chunk), codebook_byte0, codebook_byte1,
+            codebook_byte2, codebook_byte3);
+        const q4_lookup16_result values1 = lookup_codebook16_pshufb(
+            load_selector16(chunk + 16u), codebook_byte0, codebook_byte1,
+            codebook_byte2, codebook_byte3);
+        accum0 = _mm256_fmadd_ps(_mm256_mul_ps(values0.low, norm_v),
                                  _mm256_loadu_ps(activation), accum0);
-        accum1 = _mm256_fmadd_ps(_mm256_mul_ps(values1, norm_v),
+        accum1 = _mm256_fmadd_ps(_mm256_mul_ps(values0.high, norm_v),
                                  _mm256_loadu_ps(activation + 8u), accum1);
-        accum2 = _mm256_fmadd_ps(_mm256_mul_ps(values2, norm_v),
-                                 _mm256_loadu_ps(activation + 16u), accum2);
-        accum3 = _mm256_fmadd_ps(_mm256_mul_ps(values3, norm_v),
-                                 _mm256_loadu_ps(activation + 24u), accum3);
+        accum0 = _mm256_fmadd_ps(_mm256_mul_ps(values1.low, norm_v),
+                                 _mm256_loadu_ps(activation + 16u), accum0);
+        accum1 = _mm256_fmadd_ps(_mm256_mul_ps(values1.high, norm_v),
+                                 _mm256_loadu_ps(activation + 24u), accum1);
+        const q4_lookup16_result values2 = lookup_codebook16_pshufb(
+            load_selector16(chunk + 32u), codebook_byte0, codebook_byte1,
+            codebook_byte2, codebook_byte3);
+        const q4_lookup16_result values3 = lookup_codebook16_pshufb(
+            load_selector16(chunk + 48u), codebook_byte0, codebook_byte1,
+            codebook_byte2, codebook_byte3);
+        accum0 = _mm256_fmadd_ps(_mm256_mul_ps(values2.low, norm_v),
+                                 _mm256_loadu_ps(activation + 32u), accum0);
+        accum1 = _mm256_fmadd_ps(_mm256_mul_ps(values2.high, norm_v),
+                                 _mm256_loadu_ps(activation + 40u), accum1);
+        accum0 = _mm256_fmadd_ps(_mm256_mul_ps(values3.low, norm_v),
+                                 _mm256_loadu_ps(activation + 48u), accum0);
+        accum1 = _mm256_fmadd_ps(_mm256_mul_ps(values3.high, norm_v),
+                                 _mm256_loadu_ps(activation + 56u), accum1);
       }
-      for (; i < view.group; i += 8u) {
-        const __m128i index_bytes = _mm_loadl_epi64(
+      for (; i + 16u <= view.group; i += 16u) {
+        const q4_lookup16_result values = lookup_codebook16_pshufb(
+            load_selector16(indices + begin + i), codebook_byte0,
+            codebook_byte1, codebook_byte2, codebook_byte3);
+        accum0 = _mm256_fmadd_ps(
+            _mm256_mul_ps(values.low, norm_v),
+            _mm256_loadu_ps(activation_fwht.data() + begin + i), accum0);
+        accum1 = _mm256_fmadd_ps(
+            _mm256_mul_ps(values.high, norm_v),
+            _mm256_loadu_ps(activation_fwht.data() + begin + i + 8u), accum1);
+      }
+      if (i + 8u <= view.group) {
+        const __m128i selectors = _mm_loadl_epi64(
             reinterpret_cast<const __m128i *>(indices + begin + i));
-        const __m256 values =
-            q4_lookup_pshufb(index_bytes, codebook_byte0, codebook_byte1,
-                             codebook_byte2, codebook_byte3);
+        const __m256 values = lookup_codebook8_pshufb(
+            selectors, _mm256_castsi256_si128(codebook_byte0),
+            _mm256_castsi256_si128(codebook_byte1),
+            _mm256_castsi256_si128(codebook_byte2),
+            _mm256_castsi256_si128(codebook_byte3));
         accum0 = _mm256_fmadd_ps(
             _mm256_mul_ps(values, norm_v),
             _mm256_loadu_ps(activation_fwht.data() + begin + i), accum0);
+        i += 8u;
       }
+      for (; i < view.group; ++i)
+        scalar_tail += detail::code_value<4u>(indices[begin + i], view.group,
+                                              codebook_span) *
+                       norms[group_index] * activation_fwht[begin + i];
     }
-    const __m256 accum = _mm256_add_ps(_mm256_add_ps(accum0, accum1),
-                                       _mm256_add_ps(accum2, accum3));
+    const __m256 accum = _mm256_add_ps(accum0, accum1);
     alignas(32) float lanes[8];
     _mm256_store_ps(lanes, accum);
     output[row] = lanes[0] + lanes[1] + lanes[2] + lanes[3] + lanes[4] +
-                  lanes[5] + lanes[6] + lanes[7];
+                  lanes[5] + lanes[6] + lanes[7] + scalar_tail;
   }
 #else
   (void)view;
@@ -264,16 +331,17 @@ EMEL_KERNEL_CQ_AVX2_TARGET inline void execute_prepared_avx2_dot_row_block(
     const std::span<float> output) noexcept {
 #if defined(__x86_64__) || defined(_M_X64)
   static_assert(Rows == 4u || Rows == 8u);
-  __m128i codebook_byte0;
-  __m128i codebook_byte1;
-  __m128i codebook_byte2;
-  __m128i codebook_byte3;
+  __m256i codebook_byte0;
+  __m256i codebook_byte1;
+  __m256i codebook_byte2;
+  __m256i codebook_byte3;
   q4_codebook_byte_tables(codebook_span, codebook_byte0, codebook_byte1,
                           codebook_byte2, codebook_byte3);
   const uint32_t groups_per_row = view.in_pad / view.group;
   const uint8_t *row_indices[Rows];
   const float *row_norms[Rows];
   __m256 accum[Rows];
+  float scalar_tail[Rows]{};
   for (uint32_t row = 0u; row < Rows; ++row) {
     const uint32_t source_row = row_begin + row;
     row_indices[row] =
@@ -287,25 +355,34 @@ EMEL_KERNEL_CQ_AVX2_TARGET inline void execute_prepared_avx2_dot_row_block(
     __m256 norm[Rows];
     for (uint32_t row = 0u; row < Rows; ++row)
       norm[row] = _mm256_set1_ps(row_norms[row][group_index]);
-    for (uint32_t i = 0u; i < view.group; i += 8u) {
+    uint32_t i = 0u;
+    for (; i + 8u <= view.group; i += 8u) {
       const __m256 activation =
           _mm256_loadu_ps(activation_fwht.data() + begin + i);
       for (uint32_t row = 0u; row < Rows; ++row) {
         const __m128i index_bytes = _mm_loadl_epi64(
             reinterpret_cast<const __m128i *>(row_indices[row] + begin + i));
-        const __m256 values =
-            q4_lookup_pshufb(index_bytes, codebook_byte0, codebook_byte1,
-                             codebook_byte2, codebook_byte3);
+        const __m256 values = lookup_codebook8_pshufb(
+            index_bytes, _mm256_castsi256_si128(codebook_byte0),
+            _mm256_castsi256_si128(codebook_byte1),
+            _mm256_castsi256_si128(codebook_byte2),
+            _mm256_castsi256_si128(codebook_byte3));
         accum[row] = _mm256_fmadd_ps(_mm256_mul_ps(values, norm[row]),
                                      activation, accum[row]);
       }
     }
+    for (; i < view.group; ++i)
+      for (uint32_t row = 0u; row < Rows; ++row)
+        scalar_tail[row] += detail::code_value<4u>(row_indices[row][begin + i],
+                                                   view.group, codebook_span) *
+                            row_norms[row][group_index] *
+                            activation_fwht[begin + i];
   }
   for (uint32_t row = 0u; row < Rows; ++row) {
     alignas(32) float lanes[8];
     _mm256_store_ps(lanes, accum[row]);
     output[row] = lanes[0] + lanes[1] + lanes[2] + lanes[3] + lanes[4] +
-                  lanes[5] + lanes[6] + lanes[7];
+                  lanes[5] + lanes[6] + lanes[7] + scalar_tail[row];
   }
 #else
   (void)view;
