@@ -259,21 +259,21 @@ struct sm : public emel::sm<model, action::context> {
 
   sm() : base_type() {}
 
-  bool process_event(const event::probe & ev) {
+  bool process_event(const event::probe &ev) {
     event::probe_ctx ctx{};
     event::probe_runtime runtime{ev, ctx};
     const bool accepted = base_type::process_event(runtime);
     return accepted && ctx.err == emel::error::cast(error::none);
   }
 
-  bool process_event(const event::bind_storage & ev) {
+  bool process_event(const event::bind_storage &ev) {
     event::bind_ctx ctx{};
     event::bind_runtime runtime{ev, ctx};
     const bool accepted = base_type::process_event(runtime);
     return accepted && ctx.err == emel::error::cast(error::none);
   }
 
-  bool process_event(const event::parse & ev) {
+  bool process_event(const event::parse &ev) {
     event::parse_ctx ctx{};
     event::parse_runtime runtime{ev, ctx};
     const bool accepted = base_type::process_event(runtime);
@@ -283,4 +283,4 @@ struct sm : public emel::sm<model, action::context> {
 
 using Loader = sm;
 
-}  // namespace emel::cact::loader
+} // namespace emel::cact::loader

@@ -14,4 +14,4 @@ enum class error : emel::error::type {
   untracked = (1u << 5),
 };
 
-}  // namespace emel::cact::loader
+} // namespace emel::cact::loader

@@ -4,8 +4,8 @@
 #include <cstdint>
 #include <span>
 
-#include "emel/callback.hpp"
 #include "emel/cact/loader/errors.hpp"
+#include "emel/callback.hpp"
 #include "emel/error/error.hpp"
 
 namespace emel::cact::loader {
@@ -20,7 +20,7 @@ struct tensor_view {
   uint64_t nbytes = 0u;
   uint32_t group = 0u;
   uint32_t bits = 0u;
-  const uint8_t * data = nullptr;
+  const uint8_t *data = nullptr;
 };
 
 inline constexpr uint32_t k_codebook_len = 28u;
@@ -61,7 +61,7 @@ struct bind_error;
 struct parse_done;
 struct parse_error;
 
-}  // namespace events
+} // namespace events
 
 namespace event {
 
@@ -77,44 +77,36 @@ using parse_error_fn = emel::callback<void(const events::parse_error &)>;
 // maintained mmap/file route before invoking this actor.
 struct probe {
   std::span<const uint8_t> file_image = {};
-  geometry & geometry_out;
-  const probe_done_fn & on_done;
-  const probe_error_fn & on_error;
+  geometry &geometry_out;
+  const probe_done_fn &on_done;
+  const probe_error_fn &on_error;
 
-  probe(std::span<const uint8_t> file_image_in,
-        geometry & geometry_out_in,
-        const probe_done_fn & on_done_in,
-        const probe_error_fn & on_error_in) noexcept
-      : file_image(file_image_in),
-        geometry_out(geometry_out_in),
-        on_done(on_done_in),
-        on_error(on_error_in) {}
+  probe(std::span<const uint8_t> file_image_in, geometry &geometry_out_in,
+        const probe_done_fn &on_done_in,
+        const probe_error_fn &on_error_in) noexcept
+      : file_image(file_image_in), geometry_out(geometry_out_in),
+        on_done(on_done_in), on_error(on_error_in) {}
 };
 
 struct bind_storage {
   std::span<tensor_view> tensors = {};
-  const bind_done_fn & on_done;
-  const bind_error_fn & on_error;
+  const bind_done_fn &on_done;
+  const bind_error_fn &on_error;
 
   bind_storage(std::span<tensor_view> tensors_in,
-               const bind_done_fn & on_done_in,
-               const bind_error_fn & on_error_in) noexcept
-      : tensors(tensors_in),
-        on_done(on_done_in),
-        on_error(on_error_in) {}
+               const bind_done_fn &on_done_in,
+               const bind_error_fn &on_error_in) noexcept
+      : tensors(tensors_in), on_done(on_done_in), on_error(on_error_in) {}
 };
 
 struct parse {
   std::span<const uint8_t> file_image = {};
-  const parse_done_fn & on_done;
-  const parse_error_fn & on_error;
+  const parse_done_fn &on_done;
+  const parse_error_fn &on_error;
 
-  parse(std::span<const uint8_t> file_image_in,
-        const parse_done_fn & on_done_in,
-        const parse_error_fn & on_error_in) noexcept
-      : file_image(file_image_in),
-        on_done(on_done_in),
-        on_error(on_error_in) {}
+  parse(std::span<const uint8_t> file_image_in, const parse_done_fn &on_done_in,
+        const parse_error_fn &on_error_in) noexcept
+      : file_image(file_image_in), on_done(on_done_in), on_error(on_error_in) {}
 };
 
 struct probe_ctx {
@@ -123,8 +115,8 @@ struct probe_ctx {
 };
 
 struct probe_runtime {
-  const probe & request;
-  probe_ctx & ctx;
+  const probe &request;
+  probe_ctx &ctx;
 };
 
 struct bind_ctx {
@@ -132,8 +124,8 @@ struct bind_ctx {
 };
 
 struct bind_runtime {
-  const bind_storage & request;
-  bind_ctx & ctx;
+  const bind_storage &request;
+  bind_ctx &ctx;
 };
 
 struct parse_ctx {
@@ -141,42 +133,42 @@ struct parse_ctx {
 };
 
 struct parse_runtime {
-  const parse & request;
-  parse_ctx & ctx;
+  const parse &request;
+  parse_ctx &ctx;
 };
 
-}  // namespace event
+} // namespace event
 
 namespace events {
 
 struct probe_done {
-  const event::probe & request;
-  const geometry & geometry_out;
+  const event::probe &request;
+  const geometry &geometry_out;
 };
 
 struct probe_error {
-  const event::probe & request;
+  const event::probe &request;
   emel::error::type err = emel::error::cast(error::none);
 };
 
 struct bind_done {
-  const event::bind_storage & request;
+  const event::bind_storage &request;
 };
 
 struct bind_error {
-  const event::bind_storage & request;
+  const event::bind_storage &request;
   emel::error::type err = emel::error::cast(error::none);
 };
 
 struct parse_done {
-  const event::parse & request;
+  const event::parse &request;
 };
 
 struct parse_error {
-  const event::parse & request;
+  const event::parse &request;
   emel::error::type err = emel::error::cast(error::none);
 };
 
-}  // namespace events
+} // namespace events
 
-}  // namespace emel::cact::loader
+} // namespace emel::cact::loader

@@ -18,7 +18,8 @@ namespace constants {
 inline constexpr uint32_t tag = 0x05E12A83u;
 inline constexpr uint32_t alignment = 64u;
 inline constexpr uint32_t header_u32_fields = 29u;
-inline constexpr size_t header_bytes = header_u32_fields * sizeof(uint32_t) + sizeof(float);
+inline constexpr size_t header_bytes =
+    header_u32_fields * sizeof(uint32_t) + sizeof(float);
 inline constexpr size_t record_bytes = 44u;
 inline constexpr uint32_t max_engram_orders = 4u;
 inline constexpr uint32_t max_engram_sites = 4u;
@@ -30,13 +31,14 @@ inline constexpr uint32_t dtype_raw = 4u;
 inline constexpr uint32_t ternary_record_bits = 5u;
 inline constexpr uint32_t max_tensor_count = 1'000'000u;
 
-}  // namespace constants
+} // namespace constants
 
 inline emel::error::type cast_loader_error(const error err) noexcept {
   return emel::error::cast(err);
 }
 
-inline bool add_u64(const uint64_t lhs, const uint64_t rhs, uint64_t & out) noexcept {
+inline bool add_u64(const uint64_t lhs, const uint64_t rhs,
+                    uint64_t &out) noexcept {
   if (std::numeric_limits<uint64_t>::max() - lhs < rhs) {
     return false;
   }
@@ -44,7 +46,8 @@ inline bool add_u64(const uint64_t lhs, const uint64_t rhs, uint64_t & out) noex
   return true;
 }
 
-inline bool multiply_u64(const uint64_t lhs, const uint64_t rhs, uint64_t & out) noexcept {
+inline bool multiply_u64(const uint64_t lhs, const uint64_t rhs,
+                         uint64_t &out) noexcept {
   if (lhs == 0u || rhs == 0u) {
     out = 0u;
     return true;
@@ -63,41 +66,44 @@ struct bounded_reader {
   std::span<const uint8_t> bytes = {};
   uint64_t offset = 0u;
 
-  explicit bounded_reader(std::span<const uint8_t> bytes_in) noexcept : bytes(bytes_in) {}
+  explicit bounded_reader(std::span<const uint8_t> bytes_in) noexcept
+      : bytes(bytes_in) {}
 
   bool can_read(const uint64_t count) const noexcept {
     const uint64_t size = static_cast<uint64_t>(bytes.size());
     return count <= size && offset <= size - count;
   }
 
-  bool read_u32(uint32_t & out) noexcept {
+  bool read_u32(uint32_t &out) noexcept {
     if (!can_read(sizeof(uint32_t))) {
       return false;
     }
     uint32_t value = 0u;
     for (size_t i = 0; i < sizeof(uint32_t); ++i) {
-      value |= static_cast<uint32_t>(bytes[static_cast<size_t>(offset) + i]) << (i * 8u);
+      value |= static_cast<uint32_t>(bytes[static_cast<size_t>(offset) + i])
+               << (i * 8u);
     }
     out = value;
     offset += sizeof(uint32_t);
     return true;
   }
 
-  bool read_u16(uint16_t & out) noexcept {
+  bool read_u16(uint16_t &out) noexcept {
     if (!can_read(sizeof(uint16_t))) {
       return false;
     }
     uint16_t value = 0u;
     for (size_t i = 0; i < sizeof(uint16_t); ++i) {
       value = static_cast<uint16_t>(
-          value | (static_cast<uint16_t>(bytes[static_cast<size_t>(offset) + i]) << (i * 8u)));
+          value | (static_cast<uint16_t>(bytes[static_cast<size_t>(offset) + i])
+                   << (i * 8u)));
     }
     out = value;
     offset += sizeof(uint16_t);
     return true;
   }
 
-  bool read_u8(uint8_t & out) noexcept {
+  bool read_u8(uint8_t &out) noexcept {
     if (!can_read(sizeof(uint8_t))) {
       return false;
     }
@@ -106,20 +112,21 @@ struct bounded_reader {
     return true;
   }
 
-  bool read_u64(uint64_t & out) noexcept {
+  bool read_u64(uint64_t &out) noexcept {
     if (!can_read(sizeof(uint64_t))) {
       return false;
     }
     uint64_t value = 0u;
     for (size_t i = 0; i < sizeof(uint64_t); ++i) {
-      value |= static_cast<uint64_t>(bytes[static_cast<size_t>(offset) + i]) << (i * 8u);
+      value |= static_cast<uint64_t>(bytes[static_cast<size_t>(offset) + i])
+               << (i * 8u);
     }
     out = value;
     offset += sizeof(uint64_t);
     return true;
   }
 
-  bool read_f32(float & out) noexcept {
+  bool read_f32(float &out) noexcept {
     uint32_t bits = 0u;
     if (!read_u32(bits)) {
       return false;
@@ -133,12 +140,14 @@ struct bounded_reader {
 // Data-plane iteration only (fixed field count, fixed codebook length); no
 // behavior selection - every rejection path is a bounded-read failure
 // surfaced as a single error code for guards to dispatch on.
-inline emel::error::type read_header(bounded_reader & reader, geometry & geometry_out) noexcept {
+inline emel::error::type read_header(bounded_reader &reader,
+                                     geometry &geometry_out) noexcept {
   uint32_t tag = 0u;
   uint32_t num_tensors = 0u;
   uint32_t codebook_len = 0u;
 
-  if (!reader.read_u32(tag) || !reader.read_u32(num_tensors) || !reader.read_u32(codebook_len)) {
+  if (!reader.read_u32(tag) || !reader.read_u32(num_tensors) ||
+      !reader.read_u32(codebook_len)) {
     return cast_loader_error(error::parse_failed);
   }
   if (tag != constants::tag) {
@@ -153,12 +162,18 @@ inline emel::error::type read_header(bounded_reader & reader, geometry & geometr
 
   geometry_out.num_tensors = num_tensors;
 
-  if (!reader.read_u32(geometry_out.kv_window) || !reader.read_u32(geometry_out.kv_bits) ||
-      !reader.read_u32(geometry_out.vocab_size) || !reader.read_u32(geometry_out.d_model) ||
-      !reader.read_u32(geometry_out.num_heads) || !reader.read_u32(geometry_out.num_kv_heads) ||
-      !reader.read_u32(geometry_out.num_layers) || !reader.read_u32(geometry_out.head_dim) ||
-      !reader.read_u32(geometry_out.max_seq_len) || !reader.read_u32(geometry_out.hada_n) ||
-      !reader.read_u32(geometry_out.mhc_lanes) || !reader.read_u32(geometry_out.engram_slots) ||
+  if (!reader.read_u32(geometry_out.kv_window) ||
+      !reader.read_u32(geometry_out.kv_bits) ||
+      !reader.read_u32(geometry_out.vocab_size) ||
+      !reader.read_u32(geometry_out.d_model) ||
+      !reader.read_u32(geometry_out.num_heads) ||
+      !reader.read_u32(geometry_out.num_kv_heads) ||
+      !reader.read_u32(geometry_out.num_layers) ||
+      !reader.read_u32(geometry_out.head_dim) ||
+      !reader.read_u32(geometry_out.max_seq_len) ||
+      !reader.read_u32(geometry_out.hada_n) ||
+      !reader.read_u32(geometry_out.mhc_lanes) ||
+      !reader.read_u32(geometry_out.engram_slots) ||
       !reader.read_u32(geometry_out.engram_sub_dim) ||
       !reader.read_u32(geometry_out.num_engram_tables) ||
       !reader.read_u32(geometry_out.engram_conv_taps) ||
@@ -212,22 +227,24 @@ inline emel::error::type read_header(bounded_reader & reader, geometry & geometr
 // Pure numeric computation on the already-chosen CQ path; no path selection.
 inline bool compute_cq_expected_bytes(const uint32_t out_rows,
                                       const uint32_t in_dim,
-                                      const uint32_t group,
-                                      const uint32_t bits,
-                                      uint64_t & expected_bytes_out) noexcept {
+                                      const uint32_t group, const uint32_t bits,
+                                      uint64_t &expected_bytes_out) noexcept {
   if (group == 0u || out_rows == 0u) {
     return false;
   }
 
-  const uint64_t in_pad = ((static_cast<uint64_t>(in_dim) + group - 1u) / group) * group;
-  const uint64_t packed_bits = bits == constants::ternary_record_bits ? 2u : bits;
+  const uint64_t in_pad =
+      ((static_cast<uint64_t>(in_dim) + group - 1u) / group) * group;
+  const uint64_t packed_bits =
+      bits == constants::ternary_record_bits ? 2u : bits;
   if (in_pad % 8u != 0u) {
     return false;
   }
 
   const uint64_t packed_row_bytes = (in_pad * packed_bits) / 8u;
   uint64_t packed_total = 0u;
-  if (!multiply_u64(static_cast<uint64_t>(out_rows), packed_row_bytes, packed_total)) {
+  if (!multiply_u64(static_cast<uint64_t>(out_rows), packed_row_bytes,
+                    packed_total)) {
     return false;
   }
 
@@ -237,7 +254,8 @@ inline bool compute_cq_expected_bytes(const uint32_t out_rows,
     return false;
   }
   uint64_t norms_total = 0u;
-  if (!multiply_u64(static_cast<uint64_t>(out_rows), norms_per_row_bytes, norms_total)) {
+  if (!multiply_u64(static_cast<uint64_t>(out_rows), norms_per_row_bytes,
+                    norms_total)) {
     return false;
   }
 
@@ -247,10 +265,12 @@ inline bool compute_cq_expected_bytes(const uint32_t out_rows,
 // Locates and bounds-checks the directory span within `file_image` for the
 // given tensor count. Shared by probe (bounds-only) and parse (bounds +
 // populate) so the offset/size arithmetic is not duplicated.
-inline emel::error::type locate_directory(const std::span<const uint8_t> & file_image,
-                                          const uint32_t num_tensors,
-                                          uint64_t & directory_offset_out) noexcept {
-  const uint64_t codebook_bytes = static_cast<uint64_t>(k_codebook_len) * sizeof(float);
+inline emel::error::type
+locate_directory(const std::span<const uint8_t> &file_image,
+                 const uint32_t num_tensors,
+                 uint64_t &directory_offset_out) noexcept {
+  const uint64_t codebook_bytes =
+      static_cast<uint64_t>(k_codebook_len) * sizeof(float);
   if (!add_u64(constants::header_bytes, codebook_bytes, directory_offset_out)) {
     return cast_loader_error(error::capacity);
   }
@@ -275,9 +295,10 @@ inline emel::error::type locate_directory(const std::span<const uint8_t> & file_
 // fields into `view_out`. Shared by probe_geometry (discards the view) and
 // parse_directory (keeps it), so the per-record validation lives in exactly
 // one place.
-inline emel::error::type scan_directory_record(bounded_reader & reader,
-                                               const std::span<const uint8_t> & file_image,
-                                               tensor_view & view_out) noexcept {
+inline emel::error::type
+scan_directory_record(bounded_reader &reader,
+                      const std::span<const uint8_t> &file_image,
+                      tensor_view &view_out) noexcept {
   uint8_t dtype = 0u;
   uint8_t ndim = 0u;
   uint16_t pad = 0u;
@@ -287,10 +308,12 @@ inline emel::error::type scan_directory_record(bounded_reader & reader,
   uint32_t group = 0u;
   uint32_t bits = 0u;
 
-  if (!reader.read_u8(dtype) || !reader.read_u8(ndim) || !reader.read_u16(pad) ||
-      !reader.read_u32(shape[0]) || !reader.read_u32(shape[1]) || !reader.read_u32(shape[2]) ||
-      !reader.read_u32(shape[3]) || !reader.read_u64(offset) || !reader.read_u64(nbytes) ||
-      !reader.read_u32(group) || !reader.read_u32(bits)) {
+  if (!reader.read_u8(dtype) || !reader.read_u8(ndim) ||
+      !reader.read_u16(pad) || !reader.read_u32(shape[0]) ||
+      !reader.read_u32(shape[1]) || !reader.read_u32(shape[2]) ||
+      !reader.read_u32(shape[3]) || !reader.read_u64(offset) ||
+      !reader.read_u64(nbytes) || !reader.read_u32(group) ||
+      !reader.read_u32(bits)) {
     return cast_loader_error(error::parse_failed);
   }
 
@@ -315,7 +338,8 @@ inline emel::error::type scan_directory_record(bounded_reader & reader,
       return cast_loader_error(error::model_invalid);
     }
     uint64_t expected_bytes = 0u;
-    if (!compute_cq_expected_bytes(shape[0], shape[1], group, bits, expected_bytes) ||
+    if (!compute_cq_expected_bytes(shape[0], shape[1], group, bits,
+                                   expected_bytes) ||
         expected_bytes != nbytes) {
       return cast_loader_error(error::model_invalid);
     }
@@ -338,9 +362,10 @@ inline emel::error::type scan_directory_record(bounded_reader & reader,
 // count (geometry.num_tensors, already capped in read_header); each record's
 // outcome is folded into a single accumulated error code, so control flow
 // never leaves this single transition's action.
-inline emel::error::type parse_directory(const std::span<const uint8_t> & file_image,
-                                         const geometry & geometry_in,
-                                         const std::span<tensor_view> tensors_out) noexcept {
+inline emel::error::type
+parse_directory(const std::span<const uint8_t> &file_image,
+                const geometry &geometry_in,
+                const std::span<tensor_view> tensors_out) noexcept {
   if (tensors_out.size() < geometry_in.num_tensors) {
     return cast_loader_error(error::capacity);
   }
@@ -356,7 +381,8 @@ inline emel::error::type parse_directory(const std::span<const uint8_t> & file_i
   reader.offset = directory_offset;
 
   for (uint32_t i = 0u; i < geometry_in.num_tensors; ++i) {
-    const emel::error::type record_err = scan_directory_record(reader, file_image, tensors_out[i]);
+    const emel::error::type record_err =
+        scan_directory_record(reader, file_image, tensors_out[i]);
     if (record_err != cast_loader_error(error::none)) {
       return record_err;
     }
@@ -368,8 +394,9 @@ inline emel::error::type parse_directory(const std::span<const uint8_t> & file_i
 // Full probe pass: header/codebook decode plus a directory scan that only
 // validates bounds/alignment (does not populate tensor views - that is
 // parse's job so probe stays a read-only capability check).
-inline emel::error::type probe_geometry(const std::span<const uint8_t> & file_image,
-                                        geometry & geometry_out) noexcept {
+inline emel::error::type
+probe_geometry(const std::span<const uint8_t> &file_image,
+               geometry &geometry_out) noexcept {
   geometry_out = {};
 
   bounded_reader reader{file_image};
@@ -394,7 +421,8 @@ inline emel::error::type probe_geometry(const std::span<const uint8_t> & file_im
 
   for (uint32_t i = 0u; i < geometry_out.num_tensors; ++i) {
     tensor_view discarded = {};
-    const emel::error::type record_err = scan_directory_record(dir_reader, file_image, discarded);
+    const emel::error::type record_err =
+        scan_directory_record(dir_reader, file_image, discarded);
     if (record_err != cast_loader_error(error::none)) {
       return record_err;
     }
@@ -403,4 +431,4 @@ inline emel::error::type probe_geometry(const std::span<const uint8_t> & file_im
   return cast_loader_error(error::none);
 }
 
-}  // namespace emel::cact::loader::detail
+} // namespace emel::cact::loader::detail

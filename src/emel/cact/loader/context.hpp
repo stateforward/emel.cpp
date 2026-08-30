@@ -11,4 +11,4 @@ struct context {
   std::span<tensor_view> tensors = {};
 };
 
-}  // namespace emel::cact::loader::action
+} // namespace emel::cact::loader::action

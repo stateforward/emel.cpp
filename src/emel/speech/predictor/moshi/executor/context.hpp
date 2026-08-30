@@ -98,7 +98,7 @@ struct context {
         matmul(deps.matmul), matmul_lane_mode(deps.matmul_lane_mode),
         attention_lanes(deps.attention_lanes),
         active_attention_lanes(deps.active_attention_lanes),
-        attention_actors(new (std::nothrow) attention_lane_storage{}),
+        attention_actors(new(std::nothrow) attention_lane_storage{}),
         sampler(deps.sampler), policy(deps.policy), capacity(deps.capacity) {
     // Attention actors own substantial reusable scratch. One construction-time
     // allocation avoids oversized parent and thread stacks; same-RTC inference

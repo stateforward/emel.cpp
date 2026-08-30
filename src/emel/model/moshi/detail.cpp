@@ -1127,7 +1127,7 @@ emel::error::type validate_mimi_contract(const emel::model::data &model_data,
         break;
       }
       const auto layer_name = [&base, base_len](const char *suffix,
-                                                char (&name_out)[144]) {
+                                                char(&name_out)[144]) {
         const int written = std::snprintf(name_out, sizeof(name_out), "%.*s%s",
                                           base_len, base, suffix);
         return written > 0 && static_cast<size_t>(written) < sizeof(name_out)
