@@ -65,8 +65,8 @@ inline float read_f32_le(const uint8_t *bytes) noexcept {
 // single accumulated error code.
 inline int32_t compute_vocab_type(const uint8_t piece_type) noexcept {
   constexpr std::array<int32_t, 5> mapping = {
-      constants::vocab_type_normal,       constants::vocab_type_unknown,
-      constants::vocab_type_control,      constants::vocab_type_user_defined,
+      constants::vocab_type_normal,  constants::vocab_type_unknown,
+      constants::vocab_type_control, constants::vocab_type_user_defined,
       constants::vocab_type_byte,
   };
   if (piece_type >= mapping.size()) {

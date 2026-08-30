@@ -7,6 +7,7 @@
 
 #include "doctest/doctest.h"
 
+#include "emel/cact/loader/any.hpp"
 #include "emel/cact/loader/sm.hpp"
 #include "emel/model/needle/detail.hpp"
 #include "emel/model/needle/guards.hpp"
@@ -99,10 +100,10 @@ std::vector<uint8_t> read_file_bytes(const std::filesystem::path &path) {
 
 // Runs the maintained cact loader chain (probe/bind/parse) on the pinned
 // fixture, filling `geometry_out` and `tensors_out`.
-void load_fixture_tensors(const std::vector<uint8_t> &file_bytes,
-                          emel::cact::loader::geometry &geometry_out,
-                          std::vector<emel::cact::loader::tensor_view>
-                              &tensors_out) {
+void load_fixture_tensors(
+    const std::vector<uint8_t> &file_bytes,
+    emel::cact::loader::geometry &geometry_out,
+    std::vector<emel::cact::loader::tensor_view> &tensors_out) {
   emel::cact::loader::sm loader{};
 
   const emel::cact::loader::event::probe probe{
@@ -239,8 +240,7 @@ TEST_CASE("needle binder maps the pinned route-w4-qat fixture to named "
   CHECK(same_view(contract.engram_sites[1].taps, tensors[engram_base + 7u]));
   CHECK(contract.engram_sites[0].tables.shape[0] ==
         k_fixture_num_engram_tables * k_fixture_engram_slots);
-  CHECK(contract.engram_sites[0].tables.shape[1] ==
-        k_fixture_engram_sub_dim);
+  CHECK(contract.engram_sites[0].tables.shape[1] == k_fixture_engram_sub_dim);
 
   const size_t final_norm_index = engram_base + 8u;
   CHECK(same_view(contract.final_norm, tensors[final_norm_index]));
@@ -248,15 +248,13 @@ TEST_CASE("needle binder maps the pinned route-w4-qat fixture to named "
 
   CHECK(same_view(contract.head_manifest, tensors[final_norm_index + 1u]));
   CHECK(contract.head_count == 2u);
-  CHECK(contract.heads[0].code ==
-        emel::model::needle::k_head_code_contrastive);
+  CHECK(contract.heads[0].code == emel::model::needle::k_head_code_contrastive);
   CHECK(same_view(contract.heads[0].probes, tensors[final_norm_index + 2u]));
   CHECK(same_view(contract.heads[0].proj, tensors[final_norm_index + 3u]));
   CHECK(same_view(contract.heads[0].bias, tensors[final_norm_index + 4u]));
   CHECK(contract.heads[0].probes.shape[0] == 4u);
   CHECK(contract.heads[0].proj.shape[0] == 128u);
-  CHECK(contract.heads[1].code ==
-        emel::model::needle::k_head_code_confidence);
+  CHECK(contract.heads[1].code == emel::model::needle::k_head_code_confidence);
   CHECK(same_view(contract.heads[1].probes, tensors[final_norm_index + 5u]));
   CHECK(same_view(contract.heads[1].proj, tensors[final_norm_index + 6u]));
   CHECK(same_view(contract.heads[1].bias, tensors[final_norm_index + 7u]));
@@ -264,8 +262,8 @@ TEST_CASE("needle binder maps the pinned route-w4-qat fixture to named "
   CHECK(contract.heads[1].proj.shape[0] == 1u);
 
   CHECK(contract.has_tokenizer);
-  CHECK(same_view(contract.tokenizer_blob,
-                  tensors[k_fixture_num_tensors - 1u]));
+  CHECK(
+      same_view(contract.tokenizer_blob, tensors[k_fixture_num_tensors - 1u]));
   CHECK(contract.tokenizer_blob.dtype ==
         emel::cact::loader::constants::dtype_raw);
 }
@@ -278,10 +276,8 @@ TEST_CASE("needle binder rejects an empty tensor span as invalid_request") {
   emel::cact::loader::geometry geometry = {};
   emel::model::needle::contract contract = {};
   const emel::model::needle::event::bind bind{
-      geometry,
-      std::span<const emel::cact::loader::tensor_view>{},
-      contract,
-      k_bind_done_cb,
+      geometry,        std::span<const emel::cact::loader::tensor_view>{},
+      contract,        k_bind_done_cb,
       k_bind_error_cb,
   };
 
@@ -317,8 +313,7 @@ TEST_CASE("needle binder classifies malformed positional tables") {
     };
     CHECK_FALSE(machine.process_event(bind));
     CHECK(state.err ==
-          emel::error::cast(
-              emel::model::needle::error::tensor_count_mismatch));
+          emel::error::cast(emel::model::needle::error::tensor_count_mismatch));
     CHECK(machine.is(
         stateforward::sml::state<emel::model::needle::state_errored>));
   }
@@ -341,8 +336,7 @@ TEST_CASE("needle binder classifies malformed positional tables") {
     };
     CHECK_FALSE(machine.process_event(bind));
     CHECK(state.err ==
-          emel::error::cast(
-              emel::model::needle::error::tensor_dtype_mismatch));
+          emel::error::cast(emel::model::needle::error::tensor_dtype_mismatch));
     CHECK(machine.is(
         stateforward::sml::state<emel::model::needle::state_errored>));
   }
@@ -365,8 +359,7 @@ TEST_CASE("needle binder classifies malformed positional tables") {
     };
     CHECK_FALSE(machine.process_event(bind));
     CHECK(state.err ==
-          emel::error::cast(
-              emel::model::needle::error::tensor_shape_mismatch));
+          emel::error::cast(emel::model::needle::error::tensor_shape_mismatch));
     CHECK(machine.is(
         stateforward::sml::state<emel::model::needle::state_errored>));
   }
@@ -375,11 +368,12 @@ TEST_CASE("needle binder classifies malformed positional tables") {
     // Head manifest is the fp16 vector after final_norm; 3.0 is not a
     // canonical head code.
     std::vector<uint8_t> corrupted_bytes = file_bytes;
-    const size_t manifest_index = static_cast<size_t>(geometry.num_tensors) -
-                                  1u - 2u * 3u - 1u;
+    const size_t manifest_index =
+        static_cast<size_t>(geometry.num_tensors) - 1u - 2u * 3u - 1u;
     const uint64_t manifest_offset = tensors[manifest_index].offset;
     corrupted_bytes[static_cast<size_t>(manifest_offset)] = 0x00u;
-    corrupted_bytes[static_cast<size_t>(manifest_offset) + 1u] = 0x42u; // 3.0f16
+    corrupted_bytes[static_cast<size_t>(manifest_offset) + 1u] =
+        0x42u; // 3.0f16
 
     emel::cact::loader::geometry corrupt_geometry = {};
     std::vector<emel::cact::loader::tensor_view> corrupt_tensors;
@@ -399,8 +393,7 @@ TEST_CASE("needle binder classifies malformed positional tables") {
     };
     CHECK_FALSE(machine.process_event(bind));
     CHECK(state.err ==
-          emel::error::cast(
-              emel::model::needle::error::head_manifest_invalid));
+          emel::error::cast(emel::model::needle::error::head_manifest_invalid));
     CHECK(machine.is(
         stateforward::sml::state<emel::model::needle::state_errored>));
   }
@@ -442,10 +435,8 @@ TEST_CASE("needle binder allows re-binding after an error") {
 
   emel::model::needle::contract contract = {};
   const emel::model::needle::event::bind bad_bind{
-      geometry,
-      std::span<const emel::cact::loader::tensor_view>{},
-      contract,
-      k_bind_done_cb,
+      geometry,        std::span<const emel::cact::loader::tensor_view>{},
+      contract,        k_bind_done_cb,
       k_bind_error_cb,
   };
   CHECK_FALSE(machine.process_event(bad_bind));

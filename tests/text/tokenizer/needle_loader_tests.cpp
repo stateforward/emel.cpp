@@ -191,13 +191,13 @@ void read_tokenizer_fixture(const std::filesystem::path &path,
     }
     tokenizer_fixture_piece piece = {};
     std::array<char, 512> surface_hex = {};
-    REQUIRE(std::sscanf(line.c_str(), "%u,%f,%d,%511s", &piece.id,
-                        &piece.score, &piece.type, surface_hex.data()) == 4);
+    REQUIRE(std::sscanf(line.c_str(), "%u,%f,%d,%511s", &piece.id, &piece.score,
+                        &piece.type, surface_hex.data()) == 4);
     const std::string hex{surface_hex.data()};
     REQUIRE(hex.size() % 2u == 0u);
     for (size_t i = 0; i < hex.size(); i += 2u) {
-      piece.surface.push_back(static_cast<char>(
-          std::stoi(hex.substr(i, 2u), nullptr, 16)));
+      piece.surface.push_back(
+          static_cast<char>(std::stoi(hex.substr(i, 2u), nullptr, 16)));
     }
     pieces_out.push_back(piece);
   }
@@ -209,9 +209,9 @@ constexpr int32_t k_vocab_type_from_blob[5] = {1, 2, 3, 4, 6};
 
 std::string_view vocab_token_text(const emel::model::data::vocab &vocab,
                                   const uint32_t id) {
-  return std::string_view{
-      vocab.token_storage.data() + vocab.entries[id].text_offset,
-      vocab.entries[id].text_length};
+  return std::string_view{vocab.token_storage.data() +
+                              vocab.entries[id].text_offset,
+                          vocab.entries[id].text_length};
 }
 
 } // namespace
@@ -304,8 +304,8 @@ TEST_CASE("needle tokenizer loader drives the shared SPM tokenizer machine") {
   REQUIRE(machine.process_event(load));
 
   emel::text::tokenizer::sm tokenizer{};
-  int32_t bind_err = emel::text::tokenizer::error_code(
-      emel::text::tokenizer::error::none);
+  int32_t bind_err =
+      emel::text::tokenizer::error_code(emel::text::tokenizer::error::none);
   emel::text::tokenizer::event::bind bind_ev = {};
   bind_ev.vocab = vocab.get();
   bind_ev.preprocessor_variant =
@@ -313,8 +313,8 @@ TEST_CASE("needle tokenizer loader drives the shared SPM tokenizer machine") {
   bind_ev.encoder_variant = emel::text::encoders::encoder_kind::spm;
   bind_ev.error_out = &bind_err;
   CHECK(tokenizer.process_event(bind_ev));
-  CHECK(bind_err == emel::text::tokenizer::error_code(
-                        emel::text::tokenizer::error::none));
+  CHECK(bind_err ==
+        emel::text::tokenizer::error_code(emel::text::tokenizer::error::none));
 
   // Expected ids computed with the reference encoder
   // (`needle/model/export.py` RefTokenizer) on the pinned fixture blob:
@@ -322,8 +322,8 @@ TEST_CASE("needle tokenizer loader drives the shared SPM tokenizer machine") {
   // "_world" with SentencePiece meta-space).
   std::array<int32_t, 16> tokens = {};
   int32_t count = 0;
-  int32_t tok_err = emel::text::tokenizer::error_code(
-      emel::text::tokenizer::error::none);
+  int32_t tok_err =
+      emel::text::tokenizer::error_code(emel::text::tokenizer::error::none);
   emel::text::tokenizer::event::tokenize tok_ev = {};
   tok_ev.vocab = vocab.get();
   tok_ev.text = std::string_view("hello world");
@@ -335,8 +335,8 @@ TEST_CASE("needle tokenizer loader drives the shared SPM tokenizer machine") {
   tok_ev.error_out = &tok_err;
 
   CHECK(tokenizer.process_event(tok_ev));
-  CHECK(tok_err == emel::text::tokenizer::error_code(
-                       emel::text::tokenizer::error::none));
+  CHECK(tok_err ==
+        emel::text::tokenizer::error_code(emel::text::tokenizer::error::none));
   CHECK(count == 4);
   CHECK(tokens[0] == 323);
   CHECK(tokens[1] == 636);
@@ -376,12 +376,11 @@ TEST_CASE("needle tokenizer loader rejects malformed blobs") {
         k_load_error_cb,
     };
     CHECK_FALSE(machine.process_event(load));
-    CHECK(state.err == emel::error::cast(
-                           emel::text::tokenizer::needle::error::
-                               invalid_request));
-    CHECK(machine.is(
-        stateforward::sml::state<
-            emel::text::tokenizer::needle::state_errored>));
+    CHECK(state.err ==
+          emel::error::cast(
+              emel::text::tokenizer::needle::error::invalid_request));
+    CHECK(machine.is(stateforward::sml::state<
+                     emel::text::tokenizer::needle::state_errored>));
   }
 
   SUBCASE("truncated record stream maps to parse_failed") {
@@ -400,12 +399,10 @@ TEST_CASE("needle tokenizer loader rejects malformed blobs") {
         k_load_error_cb,
     };
     CHECK_FALSE(machine.process_event(load));
-    CHECK(state.err ==
-          emel::error::cast(
-              emel::text::tokenizer::needle::error::parse_failed));
-    CHECK(machine.is(
-        stateforward::sml::state<
-            emel::text::tokenizer::needle::state_errored>));
+    CHECK(state.err == emel::error::cast(
+                           emel::text::tokenizer::needle::error::parse_failed));
+    CHECK(machine.is(stateforward::sml::state<
+                     emel::text::tokenizer::needle::state_errored>));
   }
 
   SUBCASE("out-of-range special id maps to model_invalid") {
@@ -428,11 +425,10 @@ TEST_CASE("needle tokenizer loader rejects malformed blobs") {
         k_load_error_cb,
     };
     CHECK_FALSE(machine.process_event(load));
-    CHECK(state.err ==
-          emel::error::cast(
-              emel::text::tokenizer::needle::error::model_invalid));
-    CHECK(machine.is(
-        stateforward::sml::state<
-            emel::text::tokenizer::needle::state_errored>));
+    CHECK(
+        state.err ==
+        emel::error::cast(emel::text::tokenizer::needle::error::model_invalid));
+    CHECK(machine.is(stateforward::sml::state<
+                     emel::text::tokenizer::needle::state_errored>));
   }
 }

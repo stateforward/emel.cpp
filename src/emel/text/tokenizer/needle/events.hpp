@@ -32,8 +32,8 @@ struct load {
   const load_done_fn &on_done;
   const load_error_fn &on_error;
 
-  load(std::span<const uint8_t> blob_in,
-       emel::model::data::vocab &vocab_out_in, const load_done_fn &on_done_in,
+  load(std::span<const uint8_t> blob_in, emel::model::data::vocab &vocab_out_in,
+       const load_done_fn &on_done_in,
        const load_error_fn &on_error_in) noexcept
       : blob(blob_in), vocab_out(vocab_out_in), on_done(on_done_in),
         on_error(on_error_in) {}

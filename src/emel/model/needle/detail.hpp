@@ -109,35 +109,35 @@ inline uint64_t compute_base_tensor_count(const geometry &geo) noexcept {
 // Maps and validates the per-layer tensor run [norm_in .. d3] starting at
 // `views[0]`, writing named views into `layer_out`. Emission order is the
 // exact `export.py _tensors()` per-layer order.
-inline emel::error::type
-bind_layer(const std::span<const tensor_view> views, const geometry &geo,
-           layer_views &layer_out) noexcept {
+inline emel::error::type bind_layer(const std::span<const tensor_view> views,
+                                    const geometry &geo,
+                                    layer_views &layer_out) noexcept {
   const uint32_t d = geo.d_model;
   const uint32_t attn_dim = geo.num_heads * geo.head_dim;
   const uint32_t kv_dim = geo.num_kv_heads * geo.head_dim;
   const std::array<role_spec, k_layer_tensor_count> specs = {{
-      {constants::dtype_fp16, 1u, {d, 0u, 0u, 0u}},        // norm_in
-      {constants::dtype_cq, 2u, {attn_dim, d, 0u, 0u}},    // q_proj
-      {constants::dtype_cq, 2u, {kv_dim, d, 0u, 0u}},      // k_proj
-      {constants::dtype_cq, 2u, {kv_dim, d, 0u, 0u}},      // v_proj
+      {constants::dtype_fp16, 1u, {d, 0u, 0u, 0u}},            // norm_in
+      {constants::dtype_cq, 2u, {attn_dim, d, 0u, 0u}},        // q_proj
+      {constants::dtype_cq, 2u, {kv_dim, d, 0u, 0u}},          // k_proj
+      {constants::dtype_cq, 2u, {kv_dim, d, 0u, 0u}},          // v_proj
       {constants::dtype_fp16, 1u, {geo.head_dim, 0u, 0u, 0u}}, // q_norm
       {constants::dtype_fp16, 1u, {geo.head_dim, 0u, 0u, 0u}}, // k_norm
-      {constants::dtype_cq, 2u, {attn_dim, d, 0u, 0u}},    // gate_proj
-      {constants::dtype_cq, 2u, {d, attn_dim, 0u, 0u}},    // out_proj
-      {constants::dtype_fp16, 1u, {d, 0u, 0u, 0u}},        // post_norm
-      {constants::dtype_fp16, 1u, {1u, 0u, 0u, 0u}},       // attn_gate
-      {constants::dtype_fp16, 1u, {d, 0u, 0u, 0u}},        // pre_hada
-      {constants::dtype_fp16, 1u, {geo.hada_n, 0u, 0u, 0u}}, // d1
-      {constants::dtype_fp16, 1u, {geo.hada_n, 0u, 0u, 0u}}, // d2
-      {constants::dtype_fp16, 1u, {geo.hada_n, 0u, 0u, 0u}}, // d3
+      {constants::dtype_cq, 2u, {attn_dim, d, 0u, 0u}},        // gate_proj
+      {constants::dtype_cq, 2u, {d, attn_dim, 0u, 0u}},        // out_proj
+      {constants::dtype_fp16, 1u, {d, 0u, 0u, 0u}},            // post_norm
+      {constants::dtype_fp16, 1u, {1u, 0u, 0u, 0u}},           // attn_gate
+      {constants::dtype_fp16, 1u, {d, 0u, 0u, 0u}},            // pre_hada
+      {constants::dtype_fp16, 1u, {geo.hada_n, 0u, 0u, 0u}},   // d1
+      {constants::dtype_fp16, 1u, {geo.hada_n, 0u, 0u, 0u}},   // d2
+      {constants::dtype_fp16, 1u, {geo.hada_n, 0u, 0u, 0u}},   // d3
   }};
 
   std::array<tensor_view *, k_layer_tensor_count> slots = {
-      &layer_out.norm_in, &layer_out.q_proj,    &layer_out.k_proj,
-      &layer_out.v_proj,  &layer_out.q_norm,    &layer_out.k_norm,
+      &layer_out.norm_in,   &layer_out.q_proj,   &layer_out.k_proj,
+      &layer_out.v_proj,    &layer_out.q_norm,   &layer_out.k_norm,
       &layer_out.gate_proj, &layer_out.out_proj, &layer_out.post_norm,
       &layer_out.attn_gate, &layer_out.pre_hada, &layer_out.d1,
-      &layer_out.d2,      &layer_out.d3,
+      &layer_out.d2,        &layer_out.d3,
   };
 
   for (uint32_t t = 0u; t < k_layer_tensor_count; ++t) {
@@ -160,20 +160,22 @@ inline emel::error::type bind_mhc(const std::span<const tensor_view> views,
   const uint32_t lanes = geo.mhc_lanes;
   const uint32_t nc = lanes * geo.d_model;
   const std::array<role_spec, k_mhc_tensor_count> specs = {{
-      {constants::dtype_fp16, 1u, {layers, 0u, 0u, 0u}},          // a_pre
-      {constants::dtype_fp16, 1u, {layers, 0u, 0u, 0u}},          // a_post
-      {constants::dtype_fp16, 1u, {layers, 0u, 0u, 0u}},          // a_res
-      {constants::dtype_fp16, 2u, {layers, lanes, 0u, 0u}},       // b_pre
-      {constants::dtype_fp16, 2u, {layers, lanes, 0u, 0u}},       // b_post
-      {constants::dtype_fp16, 3u, {layers, lanes, lanes, 0u}},    // b_res
-      {constants::dtype_cq, 2u, {layers * lanes, nc, 0u, 0u}},    // phi_pre
-      {constants::dtype_cq, 2u, {layers * lanes, nc, 0u, 0u}},    // phi_post
-      {constants::dtype_cq, 2u, {layers * lanes * lanes, nc, 0u, 0u}}, // phi_res
+      {constants::dtype_fp16, 1u, {layers, 0u, 0u, 0u}},       // a_pre
+      {constants::dtype_fp16, 1u, {layers, 0u, 0u, 0u}},       // a_post
+      {constants::dtype_fp16, 1u, {layers, 0u, 0u, 0u}},       // a_res
+      {constants::dtype_fp16, 2u, {layers, lanes, 0u, 0u}},    // b_pre
+      {constants::dtype_fp16, 2u, {layers, lanes, 0u, 0u}},    // b_post
+      {constants::dtype_fp16, 3u, {layers, lanes, lanes, 0u}}, // b_res
+      {constants::dtype_cq, 2u, {layers * lanes, nc, 0u, 0u}}, // phi_pre
+      {constants::dtype_cq, 2u, {layers * lanes, nc, 0u, 0u}}, // phi_post
+      {constants::dtype_cq,
+       2u,
+       {layers * lanes * lanes, nc, 0u, 0u}}, // phi_res
   }};
 
   std::array<tensor_view *, k_mhc_tensor_count> slots = {
-      &mhc_out.a_pre,  &mhc_out.a_post,  &mhc_out.a_res,
-      &mhc_out.b_pre,  &mhc_out.b_post,  &mhc_out.b_res,
+      &mhc_out.a_pre,   &mhc_out.a_post,   &mhc_out.a_res,
+      &mhc_out.b_pre,   &mhc_out.b_post,   &mhc_out.b_res,
       &mhc_out.phi_pre, &mhc_out.phi_post, &mhc_out.phi_res,
   };
 
@@ -204,7 +206,9 @@ bind_engram_site(const std::span<const tensor_view> views, const geometry &geo,
   }};
 
   std::array<tensor_view *, k_engram_site_tensor_count> slots = {
-      &site_out.tables, &site_out.key_proj, &site_out.value_proj,
+      &site_out.tables,
+      &site_out.key_proj,
+      &site_out.value_proj,
       &site_out.taps,
   };
 
@@ -238,7 +242,9 @@ inline emel::error::type bind_heads(const std::span<const tensor_view> views,
   }
 
   const role_spec manifest_spec = {
-      constants::dtype_fp16, 1u, {static_cast<uint32_t>(head_count), 0u, 0u, 0u}};
+      constants::dtype_fp16,
+      1u,
+      {static_cast<uint32_t>(head_count), 0u, 0u, 0u}};
   const emel::error::type manifest_err = validate_role(views[0], manifest_spec);
   if (manifest_err != cast_needle_error(error::none)) {
     return manifest_err;
@@ -349,18 +355,17 @@ bind_contract(const geometry &geo, const std::span<const tensor_view> tensors,
   }
   contract_out.layer_count = geo.num_layers;
 
-  const emel::error::type mhc_err =
-      bind_mhc(tensors.subspan(index, k_mhc_tensor_count), geo,
-               contract_out.mhc);
+  const emel::error::type mhc_err = bind_mhc(
+      tensors.subspan(index, k_mhc_tensor_count), geo, contract_out.mhc);
   if (mhc_err != cast_needle_error(error::none)) {
     return mhc_err;
   }
   index += k_mhc_tensor_count;
 
   for (uint32_t site = 0u; site < geo.num_engram_sites; ++site) {
-    const emel::error::type site_err = bind_engram_site(
-        tensors.subspan(index, k_engram_site_tensor_count), geo,
-        contract_out.engram_sites[site]);
+    const emel::error::type site_err =
+        bind_engram_site(tensors.subspan(index, k_engram_site_tensor_count),
+                         geo, contract_out.engram_sites[site]);
     if (site_err != cast_needle_error(error::none)) {
       return site_err;
     }
@@ -384,8 +389,8 @@ bind_contract(const geometry &geo, const std::span<const tensor_view> tensors,
   const bool has_tokenizer =
       head_end > index && tensors[head_end - 1u].dtype == constants::dtype_raw;
   if (has_tokenizer) {
-    const role_spec tokenizer_spec = {constants::dtype_raw, 0u,
-                                      {0u, 0u, 0u, 0u}};
+    const role_spec tokenizer_spec = {
+        constants::dtype_raw, 0u, {0u, 0u, 0u, 0u}};
     const emel::error::type tokenizer_err =
         validate_role(tensors[head_end - 1u], tokenizer_spec);
     if (tokenizer_err != cast_needle_error(error::none)) {
