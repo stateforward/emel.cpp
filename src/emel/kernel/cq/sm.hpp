@@ -72,11 +72,12 @@ struct sm : public emel::sm<model, action::context> {
   sm(const sm &) = delete;
   sm &operator=(const sm &) = delete;
 
-  template <class event_type>
-  bool process_event(const event_type &ev) {
-    if constexpr (requires { ev.result.accepted; }) ev.result.accepted = false;
+  template <class event_type> bool process_event(const event_type &ev) {
+    if constexpr (requires { ev.result.accepted; })
+      ev.result.accepted = false;
     const bool handled = base_type::process_event(ev);
-    if constexpr (requires { ev.result.accepted; }) return handled && ev.result.accepted;
+    if constexpr (requires { ev.result.accepted; })
+      return handled && ev.result.accepted;
     return handled;
   }
 };

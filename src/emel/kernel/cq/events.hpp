@@ -7,7 +7,9 @@
 
 namespace emel::kernel::cq::event {
 
-struct dispatch_result { bool accepted = false; };
+struct dispatch_result {
+  bool accepted = false;
+};
 
 struct gemv_request {
   const emel::cact::loader::tensor_view &weights;
@@ -77,6 +79,9 @@ using execute_scalar_dequant_q2 = execute_scalar_dequant<2u>;
 using execute_scalar_dequant_q3 = execute_scalar_dequant<3u>;
 using execute_scalar_dequant_q4 = execute_scalar_dequant<4u>;
 
-struct capture_diagnostics { uint64_t &scalar_calls; uint64_t &avx2_calls; };
+struct capture_diagnostics {
+  uint64_t &scalar_calls;
+  uint64_t &avx2_calls;
+};
 
 } // namespace emel::kernel::cq::event

@@ -38,7 +38,8 @@ inline void execute_scalar_gemv(const event::gemv_request &request) noexcept {
 }
 
 template <uint32_t Bits>
-inline void execute_scalar_gemv_rows(const event::gemv_rows_request &request) noexcept {
+inline void
+execute_scalar_gemv_rows(const event::gemv_rows_request &request) noexcept {
   const auto &view = request.weights;
   const uint32_t in = view.shape[1];
   const uint32_t group = view.group;
@@ -88,8 +89,8 @@ inline void execute_scalar_dequant_rows(
 #endif
 
 template <uint32_t Bits>
-EMEL_KERNEL_CQ_AVX2_TARGET
-inline void execute_avx2_gemv(const event::gemv_request &request) noexcept {
+EMEL_KERNEL_CQ_AVX2_TARGET inline void
+execute_avx2_gemv(const event::gemv_request &request) noexcept {
 #if defined(__x86_64__) || defined(_M_X64)
   const auto &view = request.weights;
   const uint32_t out = view.shape[0];
@@ -110,29 +111,29 @@ inline void execute_avx2_gemv(const event::gemv_request &request) noexcept {
     __m256 accum = _mm256_setzero_ps();
     for (uint32_t begin = 0u, group_index = 0u; begin < in_pad;
          begin += group, ++group_index) {
-      const float norm = detail::fp16_to_fp32(
-          detail::load_u16(row_norms + group_index * 2u));
+      const float norm =
+          detail::fp16_to_fp32(detail::load_u16(row_norms + group_index * 2u));
       const __m256 norm_v = _mm256_set1_ps(norm);
       const uint8_t *group_packed = row_packed + group_index * group_bytes;
       uint32_t i = 0u;
       for (; i + 8u <= group; i += 8u) {
-        const __m256 activation = _mm256_loadu_ps(
-            request.workspace.data() + begin + i);
+        const __m256 activation =
+            _mm256_loadu_ps(request.workspace.data() + begin + i);
         alignas(32) int32_t indices[8];
         for (uint32_t lane = 0u; lane < 8u; ++lane)
-          indices[lane] = static_cast<int32_t>(detail::unpack_index<Bits>(
-              group_packed, i + lane));
-        const __m256i index_v = _mm256_load_si256(
-            reinterpret_cast<const __m256i *>(indices));
+          indices[lane] = static_cast<int32_t>(
+              detail::unpack_index<Bits>(group_packed, i + lane));
+        const __m256i index_v =
+            _mm256_load_si256(reinterpret_cast<const __m256i *>(indices));
         const __m256 values = _mm256_i32gather_ps(codebook, index_v, 4);
-        accum = _mm256_fmadd_ps(_mm256_mul_ps(values, norm_v), activation,
-                                accum);
+        accum =
+            _mm256_fmadd_ps(_mm256_mul_ps(values, norm_v), activation, accum);
       }
       for (; i < group; ++i) {
         const uint32_t index = detail::unpack_index<Bits>(group_packed, i);
-        request.output[row] += detail::code_value<Bits>(
-            index, group, request.codebook) * norm *
-                               request.workspace[begin + i];
+        request.output[row] +=
+            detail::code_value<Bits>(index, group, request.codebook) * norm *
+            request.workspace[begin + i];
       }
     }
     alignas(32) float lanes[8];
@@ -144,18 +145,18 @@ inline void execute_avx2_gemv(const event::gemv_request &request) noexcept {
   execute_scalar_gemv<Bits>(request);
 #endif
 }
-template <uint32_t Bits>
-struct effect_execute_scalar {
-  void operator()(const event::execute_scalar<Bits> &ev, context &ctx) const noexcept {
+template <uint32_t Bits> struct effect_execute_scalar {
+  void operator()(const event::execute_scalar<Bits> &ev,
+                  context &ctx) const noexcept {
     execute_scalar_gemv<Bits>(ev.request);
     ev.result.accepted = true;
     ++ctx.scalar_calls;
   }
 };
 
-template <uint32_t Bits>
-struct effect_execute_avx2 {
-  void operator()(const event::execute_avx2<Bits> &ev, context &ctx) const noexcept {
+template <uint32_t Bits> struct effect_execute_avx2 {
+  void operator()(const event::execute_avx2<Bits> &ev,
+                  context &ctx) const noexcept {
     for (uint32_t row = 0u; row < ev.request.weights.shape[0]; ++row)
       ev.request.output[row] = 0.0f;
     execute_avx2_gemv<Bits>(ev.request);
@@ -164,8 +165,7 @@ struct effect_execute_avx2 {
   }
 };
 
-template <uint32_t Bits>
-struct effect_execute_scalar_rows {
+template <uint32_t Bits> struct effect_execute_scalar_rows {
   void operator()(const event::execute_scalar_rows<Bits> &ev,
                   context &ctx) const noexcept {
     execute_scalar_gemv_rows<Bits>(ev.request);
@@ -174,8 +174,7 @@ struct effect_execute_scalar_rows {
   }
 };
 
-template <uint32_t Bits>
-struct effect_execute_scalar_dequant {
+template <uint32_t Bits> struct effect_execute_scalar_dequant {
   void operator()(const event::execute_scalar_dequant<Bits> &ev,
                   context &ctx) const noexcept {
     execute_scalar_dequant_rows<Bits>(ev.request);

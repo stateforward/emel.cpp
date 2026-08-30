@@ -20,11 +20,13 @@ inline float fp16_to_fp32(const uint16_t bits) noexcept {
   const uint32_t exp = (bits >> 10u) & 0x1Fu;
   const uint32_t mant = bits & 0x3FFu;
   if (exp == 0u) {
-    if (mant == 0u) return std::bit_cast<float>(sign);
+    if (mant == 0u)
+      return std::bit_cast<float>(sign);
     float value = static_cast<float>(mant) * 0x1.0p-24f;
     return sign != 0u ? -value : value;
   }
-  if (exp == 31u) return std::bit_cast<float>(sign | 0x7F800000u | (mant << 13u));
+  if (exp == 31u)
+    return std::bit_cast<float>(sign | 0x7F800000u | (mant << 13u));
   return std::bit_cast<float>(sign | ((exp + 112u) << 23u) | (mant << 13u));
 }
 
@@ -34,10 +36,11 @@ inline uint16_t load_u16(const uint8_t *p) noexcept {
 }
 
 template <uint32_t Bits>
-inline uint32_t unpack_index(const uint8_t *packed, const size_t index) noexcept {
+inline uint32_t unpack_index(const uint8_t *packed,
+                             const size_t index) noexcept {
   if constexpr (Bits == k_ternary_record_bits) {
-    const uint8_t crumb = static_cast<uint8_t>((packed[index >> 2u] >>
-                                                 ((index & 3u) * 2u)) & 3u);
+    const uint8_t crumb =
+        static_cast<uint8_t>((packed[index >> 2u] >> ((index & 3u) * 2u)) & 3u);
     return crumb == 3u ? 0u : static_cast<uint32_t>(crumb) + 1u;
   } else {
     constexpr uint32_t mask = (1u << Bits) - 1u;
@@ -46,20 +49,25 @@ inline uint32_t unpack_index(const uint8_t *packed, const size_t index) noexcept
     const uint32_t shift = static_cast<uint32_t>(bit & 7u);
     uint32_t word = packed[byte];
     if constexpr (Bits > 1u) {
-      if (shift + Bits > 8u) word |= static_cast<uint32_t>(packed[byte + 1u]) << 8u;
+      if (shift + Bits > 8u)
+        word |= static_cast<uint32_t>(packed[byte + 1u]) << 8u;
     }
     if constexpr (Bits > 4u) {
-      if (shift + Bits > 16u) word |= static_cast<uint32_t>(packed[byte + 2u]) << 16u;
+      if (shift + Bits > 16u)
+        word |= static_cast<uint32_t>(packed[byte + 2u]) << 16u;
     }
     return (word >> shift) & mask;
   }
 }
 
 template <uint32_t Bits>
-inline const float *codebook_for(const std::span<const float> codebook) noexcept {
+inline const float *
+codebook_for(const std::span<const float> codebook) noexcept {
   static_assert(Bits == 2u || Bits == 3u || Bits == 4u);
-  if constexpr (Bits == 2u) return codebook.data();
-  if constexpr (Bits == 3u) return codebook.data() + 4u;
+  if constexpr (Bits == 2u)
+    return codebook.data();
+  if constexpr (Bits == 3u)
+    return codebook.data() + 4u;
   return codebook.data() + 12u;
 }
 
@@ -79,28 +87,32 @@ inline size_t packed_row_bytes(const uint32_t in_pad) noexcept {
 
 template <uint32_t Bits>
 inline bool valid_view(const emel::cact::loader::tensor_view &view,
-                      const std::span<const float> codebook,
-                      const std::span<const float> activation,
-                      const std::span<float> output) noexcept {
+                       const std::span<const float> codebook,
+                       const std::span<const float> activation,
+                       const std::span<float> output) noexcept {
   const uint32_t out = view.shape[0];
   const uint32_t in = view.shape[1];
   const uint32_t group = view.group;
   if (view.data == nullptr || view.bits != Bits || out == 0u || in == 0u ||
       group == 0u || group > k_max_group || !is_power_of_two(group) ||
       activation.size() < in || output.size() < out ||
-      (Bits != k_ternary_record_bits && codebook.size() < 28u)) return false;
-  const uint64_t in_pad = (static_cast<uint64_t>(in) + group - 1u) / group * group;
-  const uint64_t packed = static_cast<uint64_t>(out) * packed_row_bytes<Bits>(static_cast<uint32_t>(in_pad));
+      (Bits != k_ternary_record_bits && codebook.size() < 28u))
+    return false;
+  const uint64_t in_pad =
+      (static_cast<uint64_t>(in) + group - 1u) / group * group;
+  const uint64_t packed = static_cast<uint64_t>(out) *
+                          packed_row_bytes<Bits>(static_cast<uint32_t>(in_pad));
   const uint64_t norms = static_cast<uint64_t>(out) * (in_pad / group) * 2u;
   return packed + norms <= view.nbytes;
 }
 
 template <uint32_t Bits>
 inline float code_value(const uint32_t index, const uint32_t group,
-                       const std::span<const float> codebook) noexcept {
+                        const std::span<const float> codebook) noexcept {
   if constexpr (Bits == k_ternary_record_bits) {
-    const float value = index == 0u ? -k_ternary_centroid
-                      : index == 1u ? 0.0f : k_ternary_centroid;
+    const float value = index == 0u   ? -k_ternary_centroid
+                        : index == 1u ? 0.0f
+                                      : k_ternary_centroid;
     return value / std::sqrt(static_cast<float>(group));
   } else {
     return codebook_for<Bits>(codebook)[index];
@@ -108,10 +120,10 @@ inline float code_value(const uint32_t index, const uint32_t group,
 }
 
 template <uint32_t Bits>
-inline float dequant_dot_row(const uint8_t *packed, const uint8_t *norms,
-                            const uint32_t in, const uint32_t group,
-                            const std::span<const float> codebook,
-                            const std::span<const float> activation_fwht) noexcept {
+inline float
+dequant_dot_row(const uint8_t *packed, const uint8_t *norms, const uint32_t in,
+                const uint32_t group, const std::span<const float> codebook,
+                const std::span<const float> activation_fwht) noexcept {
   const uint32_t in_pad = (in + group - 1u) / group * group;
   const size_t group_bytes = packed_row_bytes<Bits>(group);
   float result = 0.0f;
@@ -136,8 +148,7 @@ template <uint32_t Bits>
 inline void dequant_row_values(const uint8_t *packed, const uint8_t *norms,
                                const uint32_t in, const uint32_t group,
                                const std::span<const float> codebook,
-                               const float scale,
-                               float *row_out) noexcept {
+                               const float scale, float *row_out) noexcept {
   const uint32_t in_pad = (in + group - 1u) / group * group;
   const size_t group_bytes = packed_row_bytes<Bits>(group);
   float values[k_max_group];
@@ -150,8 +161,10 @@ inline void dequant_row_values(const uint8_t *packed, const uint8_t *norms,
       values[i] = code_value<Bits>(index, group, codebook) * norm;
     }
     fwht(values, group);
-    const uint32_t keep = begin + group <= in ? group : (in > begin ? in - begin : 0u);
-    for (uint32_t i = 0u; i < keep; ++i) row_out[begin + i] = values[i] * scale;
+    const uint32_t keep =
+        begin + group <= in ? group : (in > begin ? in - begin : 0u);
+    for (uint32_t i = 0u; i < keep; ++i)
+      row_out[begin + i] = values[i] * scale;
   }
 }
 
@@ -165,8 +178,10 @@ inline bool valid_packed_view(const emel::cact::loader::tensor_view &view,
   const uint32_t group = view.group;
   if (view.data == nullptr || view.bits != Bits || out == 0u || in == 0u ||
       group == 0u || group > k_max_group || !is_power_of_two(group) ||
-      (Bits != k_ternary_record_bits && codebook.size() < 28u)) return false;
-  const uint64_t in_pad = (static_cast<uint64_t>(in) + group - 1u) / group * group;
+      (Bits != k_ternary_record_bits && codebook.size() < 28u))
+    return false;
+  const uint64_t in_pad =
+      (static_cast<uint64_t>(in) + group - 1u) / group * group;
   const uint64_t packed = static_cast<uint64_t>(out) *
                           packed_row_bytes<Bits>(static_cast<uint32_t>(in_pad));
   const uint64_t norms = static_cast<uint64_t>(out) * (in_pad / group) * 2u;

@@ -6,8 +6,9 @@ namespace emel::kernel::cq::guard {
 
 template <uint32_t Bits>
 inline bool supported(const event::gemv_request &request) noexcept {
-  const uint32_t in_pad = (request.weights.shape[1] + request.weights.group - 1u) /
-                          request.weights.group * request.weights.group;
+  const uint32_t in_pad =
+      (request.weights.shape[1] + request.weights.group - 1u) /
+      request.weights.group * request.weights.group;
   return detail::valid_view<Bits>(request.weights, request.codebook,
                                   request.activation, request.output) &&
          request.workspace.size() >= in_pad;
@@ -30,8 +31,9 @@ inline bool avx2_supported(const event::gemv_request &request) noexcept {
 
 template <uint32_t Bits>
 inline bool rows_supported(const event::gemv_rows_request &request) noexcept {
-  const uint32_t in_pad = (request.weights.shape[1] + request.weights.group - 1u) /
-                          request.weights.group * request.weights.group;
+  const uint32_t in_pad =
+      (request.weights.shape[1] + request.weights.group - 1u) /
+      request.weights.group * request.weights.group;
   return detail::valid_packed_view<Bits>(request.weights, request.codebook) &&
          request.row_count > 0u &&
          static_cast<uint64_t>(request.row_begin) + request.row_count <=
@@ -42,8 +44,8 @@ inline bool rows_supported(const event::gemv_rows_request &request) noexcept {
 }
 
 template <uint32_t Bits>
-inline bool dequant_rows_supported(
-    const event::dequant_rows_request &request) noexcept {
+inline bool
+dequant_rows_supported(const event::dequant_rows_request &request) noexcept {
   return detail::valid_packed_view<Bits>(request.weights, request.codebook) &&
          request.row_count > 0u &&
          static_cast<uint64_t>(request.row_begin) + request.row_count <=
