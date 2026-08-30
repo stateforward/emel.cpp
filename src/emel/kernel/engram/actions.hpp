@@ -59,25 +59,16 @@ struct effect_execute_conv_taps {
     const auto &request = ev.request;
     const uint16_t *taps =
         reinterpret_cast<const uint16_t *>(request.taps.data());
-    for (uint32_t out_row = 0u; out_row < request.outputs; ++out_row) {
-      const uint32_t position = request.window + out_row;
-      float *output_row =
-          request.output.data() + static_cast<size_t>(out_row) * request.dim;
+    for (uint32_t i = 0u; i < request.dim; ++i)
+      request.output[i] = 0.0f;
+    for (uint32_t tap = 0u; tap < request.conv_taps; ++tap) {
+      const float tap_ok = static_cast<float>(request.tap_valid[tap] != 0u);
+      const float *value_row =
+          request.value_rows.data() + static_cast<size_t>(tap) * request.dim;
+      const uint16_t *tap_row = taps + static_cast<size_t>(tap) * request.dim;
       for (uint32_t i = 0u; i < request.dim; ++i)
-        output_row[i] = 0.0f;
-      for (uint32_t tap = 0u; tap < request.conv_taps; ++tap) {
-        const uint32_t reach = tap * request.dilation;
-        const uint32_t in_range = static_cast<uint32_t>(reach <= position);
-        const uint32_t source = position - reach * in_range;
-        const float tap_ok = static_cast<float>(
-            in_range * static_cast<uint32_t>(request.valid[source] != 0u));
-        const float *value_row =
-            request.values.data() + static_cast<size_t>(source) * request.dim;
-        const uint16_t *tap_row = taps + static_cast<size_t>(tap) * request.dim;
-        for (uint32_t i = 0u; i < request.dim; ++i)
-          output_row[i] +=
-              tap_ok * quant::fp16_to_fp32(tap_row[i]) * value_row[i];
-      }
+        request.output[i] +=
+            tap_ok * quant::fp16_to_fp32(tap_row[i]) * value_row[i];
     }
     ev.result.accepted = true;
   }

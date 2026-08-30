@@ -24,16 +24,13 @@ struct guard_execute_conv_taps {
   bool operator()(const event::execute_conv_taps &ev,
                   const action::context &) const noexcept {
     const auto &request = ev.request;
-    return request.outputs > 0u && request.dim > 0u && request.conv_taps > 0u &&
-           request.dilation > 0u &&
-           request.window + request.outputs <= request.positions &&
-           request.values.size() >=
-               static_cast<uint64_t>(request.positions) * request.dim &&
-           request.valid.size() >= request.positions &&
-           request.taps.size() >=
-               static_cast<uint64_t>(request.conv_taps) * request.dim * 2u &&
-           request.output.size() >=
-               static_cast<uint64_t>(request.outputs) * request.dim;
+    const uint64_t rows =
+        static_cast<uint64_t>(request.conv_taps) * request.dim;
+    return request.dim > 0u && request.conv_taps > 0u &&
+           request.value_rows.size() >= rows &&
+           request.tap_valid.size() >= request.conv_taps &&
+           request.taps.size() >= rows * 2u &&
+           request.output.size() >= request.dim;
   }
 };
 

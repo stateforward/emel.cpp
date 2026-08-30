@@ -48,34 +48,43 @@ TEST_CASE("engram hash rows reproduce the reference FNV-mix indices") {
   CHECK(ngram_ok[5] == 1.0f); // position 2, order 3
 }
 
-TEST_CASE("engram conv taps accumulate dilated causal taps over value rows") {
-  // positions=3, window=1, outputs=2, taps=2, dilation=1, dim=2;
-  // taps fp16 [[1, 0.5], [0.25, 2]]; values [[1,2],[3,4],[5,6]].
-  const std::array<float, 6> values{1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f};
-  const std::array<uint8_t, 3> valid{1u, 1u, 1u};
+TEST_CASE("engram conv taps accumulate gathered tap rows with validity") {
+  // dim=2, taps=2; taps fp16 [[1, 0.5], [0.25, 2]]; tap 0 row [3,4] (the
+  // current position), tap 1 row [1,2]. Expected 1*[3,4]*[1,0.5] +
+  // 1*[1,2]*[0.25,2] = [3.25, 6.0]; masking tap 1 leaves [3, 2].
+  const std::array<float, 4> value_rows{3.0f, 4.0f, 1.0f, 2.0f};
   const std::array<uint16_t, 4> tap_bits{0x3c00u, 0x3800u, 0x3400u, 0x4000u};
   std::array<uint8_t, 8> taps{};
   std::memcpy(taps.data(), tap_bits.data(), taps.size());
-  std::array<float, 4> output{};
-  const emel::kernel::engram::event::conv_taps_request request{.values = values,
-                                                               .valid = valid,
-                                                               .positions = 3u,
-                                                               .window = 1u,
-                                                               .outputs = 2u,
-                                                               .conv_taps = 2u,
-                                                               .dilation = 1u,
-                                                               .taps = taps,
-                                                               .dim = 2u,
-                                                               .output =
-                                                                   output};
+  std::array<float, 2> output{};
+  const std::array<uint8_t, 2> both_valid{1u, 1u};
+  const emel::kernel::engram::event::conv_taps_request request{
+      .value_rows = value_rows,
+      .tap_valid = both_valid,
+      .taps = taps,
+      .conv_taps = 2u,
+      .dim = 2u,
+      .output = output};
   emel::kernel::engram::sm machine;
   dispatch_result result{};
   REQUIRE(machine.process_event(
       emel::kernel::engram::event::execute_conv_taps{request, result}));
   CHECK(output[0] == doctest::Approx(3.25f));
   CHECK(output[1] == doctest::Approx(6.0f));
-  CHECK(output[2] == doctest::Approx(5.75f));
-  CHECK(output[3] == doctest::Approx(11.0f));
+
+  const std::array<uint8_t, 2> tap1_masked{1u, 0u};
+  const emel::kernel::engram::event::conv_taps_request masked_request{
+      .value_rows = value_rows,
+      .tap_valid = tap1_masked,
+      .taps = taps,
+      .conv_taps = 2u,
+      .dim = 2u,
+      .output = output};
+  dispatch_result masked_result{};
+  REQUIRE(machine.process_event(emel::kernel::engram::event::execute_conv_taps{
+      masked_request, masked_result}));
+  CHECK(output[0] == doctest::Approx(3.0f));
+  CHECK(output[1] == doctest::Approx(2.0f));
 }
 
 TEST_CASE("engram alpha gate blends value rows by the rms-unit dot sigmoid") {

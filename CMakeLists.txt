@@ -166,6 +166,7 @@ if(EMEL_ENABLE_TESTS)
     tests/model/loader/lifecycle_tests.cpp
     tests/model/moshi/binding_tests.cpp
     tests/model/needle/binding_tests.cpp
+    tests/model/needle/graph_parity_tests.cpp
     tests/gbnf/lexer_tests.cpp
     tests/gbnf/parser_tests.cpp
     tests/gbnf/sampler_tests.cpp

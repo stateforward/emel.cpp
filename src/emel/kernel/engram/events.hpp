@@ -31,21 +31,18 @@ struct hash_rows_request {
   std::span<float> ngram_ok;   // positions * (num_orders * heads)
 };
 
-// Causal convolution taps over gathered value rows, matching the reference
-// tap sum: out[s] = sum_j taps[j] * value[(window + s) - j * dilation] for
-// taps whose source position is in range and valid. `taps` is the fp16
-// (conv_taps, dim) tensor payload.
+// Causal convolution taps over pre-gathered value rows, matching the
+// reference tap sum `sum_j taps[j] * v[p - j*dilation] * tap_ok[j]` for the
+// current output position: the caller gathers `value_rows[j]` = the value
+// projection at tap j's source position and `tap_valid[j]` = that source's
+// window validity. `taps` is the fp16 (conv_taps, dim) tensor payload.
 struct conv_taps_request {
-  std::span<const float> values;  // positions * dim rows
-  std::span<const uint8_t> valid; // positions entries
-  uint32_t positions = 0u;
-  uint32_t window = 0u;  // history length before the first output
-  uint32_t outputs = 0u; // output rows (positions - window)
+  std::span<const float> value_rows;  // conv_taps * dim rows
+  std::span<const uint8_t> tap_valid; // conv_taps entries
+  std::span<const uint8_t> taps;      // conv_taps * dim fp16 values
   uint32_t conv_taps = 0u;
-  uint32_t dilation = 0u;
-  std::span<const uint8_t> taps; // conv_taps * dim fp16 values
   uint32_t dim = 0u;
-  std::span<float> output; // outputs * dim rows
+  std::span<float> output; // dim
 };
 
 // Engram alpha gate, matching the reference site injection:

@@ -1,5 +1,5 @@
 #pragma once
-// benchmark: kernel
+// benchmark: scaffold
 
 #include "emel/kernel/zcrms/actions.hpp"
 #include "emel/kernel/zcrms/guards.hpp"
