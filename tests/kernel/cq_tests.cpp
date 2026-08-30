@@ -395,3 +395,43 @@ TEST_CASE(
     for (uint32_t row = 0u; row < out; ++row)
       CHECK(output[row] == doctest::Approx(expected[row]));
 }
+
+TEST_CASE("CQ4 prepared 512x512 group128 row blocks preserve exact output") {
+#if defined(__AVX2__) && defined(__FMA__)
+  constexpr uint32_t group = 128u, in = 512u, out = 512u;
+  std::array<float, 28u> cb{};
+  for (uint32_t i = 0u; i < 16u; ++i)
+    cb[12u + i] = (static_cast<float>(i) - 7.5f) / 8.0f;
+  std::vector<uint8_t> indices(static_cast<size_t>(out) * in);
+  std::vector<float> norms(static_cast<size_t>(out) * in / group);
+  std::array<float, in> activation{};
+  for (size_t i = 0u; i < indices.size(); ++i)
+    indices[i] = static_cast<uint8_t>((i * 13u + i / in * 7u + 3u) & 15u);
+  for (size_t i = 0u; i < norms.size(); ++i)
+    norms[i] = 0.125f + static_cast<float>((i * 5u) & 15u) / 32.0f;
+  for (uint32_t i = 0u; i < in; ++i)
+    activation[i] = std::sin(static_cast<float>(i + 1u) * 0.03125f);
+  const emel::kernel::cq::event::prepared_q4_view prepared{
+      .source = nullptr,
+      .out = out,
+      .in = in,
+      .group = group,
+      .in_pad = in,
+      .indices = indices,
+      .indices_by_input8 = {},
+      .norms = norms};
+  std::array<float, out> single{};
+  std::array<float, out> block4{};
+  std::array<float, out> block8{};
+  emel::kernel::cq::action::execute_prepared_avx2_dot(
+      prepared, cb, activation, 0u, out, single);
+  emel::kernel::cq::action::execute_prepared_avx2_dot_blocked4(
+      prepared, cb, activation, block4);
+  emel::kernel::cq::action::execute_prepared_avx2_dot_blocked8(
+      prepared, cb, activation, block8);
+  for (uint32_t row = 0u; row < out; ++row) {
+    CHECK(block4[row] == single[row]);
+    CHECK(block8[row] == single[row]);
+  }
+#endif
+}
