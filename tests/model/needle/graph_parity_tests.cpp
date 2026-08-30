@@ -286,7 +286,7 @@ TEST_CASE("needle graph prepares CQ4 storage once and selects prepared route") {
           prepared_norm_bytes}));
   CHECK(prepare_calls > 0u);
   CHECK(prepared_calls == 0u);
-  CHECK(prepared_index_bytes > 0u);
+  CHECK(prepared_index_bytes == 0u);
   CHECK(prepared_norm_bytes > 0u);
 
   std::vector<float> logits(k_vocab);

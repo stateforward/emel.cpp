@@ -34,25 +34,19 @@ struct gemv_request {
   std::span<float> output;
   std::span<float> workspace;
 };
-// Construction/init-owned CQ4 representation. Indices remain exact codebook
-// selectors and norms are the exact fp16 payload decoded once to f32. The
-// spans borrow caller-owned storage that must outlive every prepared dispatch.
+// Construction/init-owned CQ4 representation. The exact 4-bit selectors stay
+// in the caller-owned source payload; only fp16 norms are decoded once to f32.
+// Both borrowed spans must outlive every prepared dispatch.
 struct prepared_q4_view {
   const uint8_t *source = nullptr;
   uint32_t out = 0u;
   uint32_t in = 0u;
   uint32_t group = 0u;
   uint32_t in_pad = 0u;
-  std::span<const uint8_t> indices = {};
-  // 8-row output blocks, input-major within each block. Tail rows remain in
-  // row-major `indices`; the blocked layout exists only for hot full GEMV.
-  std::span<const uint8_t> indices_by_input8 = {};
   std::span<const float> norms = {};
 };
 struct prepare_q4_request {
   const emel::cact::loader::tensor_view &weights;
-  std::span<uint8_t> indices;
-  std::span<uint8_t> indices_by_input8;
   std::span<float> norms;
   prepared_q4_view &prepared;
 };
