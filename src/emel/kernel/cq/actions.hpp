@@ -194,22 +194,53 @@ execute_prepared_avx2_dot(const event::prepared_q4_view &view,
         view.indices.data() + static_cast<size_t>(source_row) * view.in_pad;
     const float *norms =
         view.norms.data() + static_cast<size_t>(source_row) * groups_per_row;
-    __m256 accum = _mm256_setzero_ps();
+    // Four independent chains hide shuffle/FMA latency for group-128 graph
+    // weights. The scalar remainder keeps smaller valid CQ groups exact.
+    __m256 accum0 = _mm256_setzero_ps();
+    __m256 accum1 = _mm256_setzero_ps();
+    __m256 accum2 = _mm256_setzero_ps();
+    __m256 accum3 = _mm256_setzero_ps();
     for (uint32_t begin = 0u, group_index = 0u; begin < view.in_pad;
          begin += view.group, ++group_index) {
       const __m256 norm_v = _mm256_set1_ps(norms[group_index]);
-      for (uint32_t i = 0u; i < view.group; i += 8u) {
+      uint32_t i = 0u;
+      for (; i + 32u <= view.group; i += 32u) {
+        const uint8_t *chunk = indices + begin + i;
+        const float *activation = activation_fwht.data() + begin + i;
+        const __m256 values0 = q4_lookup_pshufb(
+            _mm_loadl_epi64(reinterpret_cast<const __m128i *>(chunk)),
+            codebook_byte0, codebook_byte1, codebook_byte2, codebook_byte3);
+        const __m256 values1 = q4_lookup_pshufb(
+            _mm_loadl_epi64(reinterpret_cast<const __m128i *>(chunk + 8u)),
+            codebook_byte0, codebook_byte1, codebook_byte2, codebook_byte3);
+        const __m256 values2 = q4_lookup_pshufb(
+            _mm_loadl_epi64(reinterpret_cast<const __m128i *>(chunk + 16u)),
+            codebook_byte0, codebook_byte1, codebook_byte2, codebook_byte3);
+        const __m256 values3 = q4_lookup_pshufb(
+            _mm_loadl_epi64(reinterpret_cast<const __m128i *>(chunk + 24u)),
+            codebook_byte0, codebook_byte1, codebook_byte2, codebook_byte3);
+        accum0 = _mm256_fmadd_ps(_mm256_mul_ps(values0, norm_v),
+                                 _mm256_loadu_ps(activation), accum0);
+        accum1 = _mm256_fmadd_ps(_mm256_mul_ps(values1, norm_v),
+                                 _mm256_loadu_ps(activation + 8u), accum1);
+        accum2 = _mm256_fmadd_ps(_mm256_mul_ps(values2, norm_v),
+                                 _mm256_loadu_ps(activation + 16u), accum2);
+        accum3 = _mm256_fmadd_ps(_mm256_mul_ps(values3, norm_v),
+                                 _mm256_loadu_ps(activation + 24u), accum3);
+      }
+      for (; i < view.group; i += 8u) {
         const __m128i index_bytes = _mm_loadl_epi64(
             reinterpret_cast<const __m128i *>(indices + begin + i));
         const __m256 values =
             q4_lookup_pshufb(index_bytes, codebook_byte0, codebook_byte1,
                              codebook_byte2, codebook_byte3);
-        const __m256 activation_v =
-            _mm256_loadu_ps(activation_fwht.data() + begin + i);
-        accum =
-            _mm256_fmadd_ps(_mm256_mul_ps(values, norm_v), activation_v, accum);
+        accum0 = _mm256_fmadd_ps(
+            _mm256_mul_ps(values, norm_v),
+            _mm256_loadu_ps(activation_fwht.data() + begin + i), accum0);
       }
     }
+    const __m256 accum = _mm256_add_ps(_mm256_add_ps(accum0, accum1),
+                                       _mm256_add_ps(accum2, accum3));
     alignas(32) float lanes[8];
     _mm256_store_ps(lanes, accum);
     output[row] = lanes[0] + lanes[1] + lanes[2] + lanes[3] + lanes[4] +
