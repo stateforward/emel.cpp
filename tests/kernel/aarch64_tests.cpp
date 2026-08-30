@@ -92,7 +92,8 @@ make_row_sliced_lane_event(const emel::kernel::event::op_mul_mat &ev,
   return sliced;
 }
 
-float compute_ggml_q4_k_q8_k_row(
+// Only referenced from aarch64-guarded test cases; unused on x86 builds.
+[[maybe_unused]] float compute_ggml_q4_k_q8_k_row(
     const emel::kernel::detail::quant::block_q4_k *lhs,
     const emel::kernel::detail::quant::block_q8_k *rhs,
     const size_t block_count) {

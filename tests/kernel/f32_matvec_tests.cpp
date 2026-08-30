@@ -348,7 +348,8 @@ TEST_CASE("f32 matvec dispatch is allocation-free and reports deltas") {
       .inner = 2u,
       .rows = 4u,
   };
-  const f32_matvec::event::execute_request execute_request{
+  // Only dispatched on aarch64; unused on x86 builds.
+  [[maybe_unused]] const f32_matvec::event::execute_request execute_request{
       .weights = std::span<const float>{packed},
       .input = std::span<const float>{input},
       .output = std::span<float>{output},
