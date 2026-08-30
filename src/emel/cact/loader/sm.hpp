@@ -1,5 +1,7 @@
 #pragma once
 
+// benchmark: scaffold
+
 #include "emel/cact/loader/actions.hpp"
 #include "emel/cact/loader/context.hpp"
 #include "emel/cact/loader/errors.hpp"
