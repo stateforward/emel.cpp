@@ -223,6 +223,7 @@ if(EMEL_ENABLE_TESTS)
     tests/kernel/attention_tests.cpp
     tests/kernel/f32_matvec_tests.cpp
     tests/kernel/matmul_tests.cpp
+    tests/kernel/cq_tests.cpp
     tests/kernel/x86_64_tests.cpp
     # Legacy processor tests target pre-cutover API shape and are disabled until migrated.
     # Keep them out of gate builds during the hard cutover.
