@@ -165,6 +165,7 @@ if(EMEL_ENABLE_TESTS)
     tests/model/fixture_manifest_tests.cpp
     tests/model/loader/lifecycle_tests.cpp
     tests/model/moshi/binding_tests.cpp
+    tests/model/needle/binding_tests.cpp
     tests/gbnf/lexer_tests.cpp
     tests/gbnf/parser_tests.cpp
     tests/gbnf/sampler_tests.cpp
@@ -285,6 +286,7 @@ if(EMEL_ENABLE_TESTS)
     tests/text/tokenizer/tokenizer_tests.cpp
     tests/text/tokenizer/tokenizer_parity_tests.cpp
     tests/text/tokenizer/tokenizer_action_guard_tests.cpp
+    tests/text/tokenizer/needle_loader_tests.cpp
   )
 
   set(EMEL_TEST_SHARDS "" CACHE STRING "Comma or semicolon separated doctest shards to compile")
