@@ -96,261 +96,177 @@ inline void prepare_q4(const event::prepare_q4_request &request) noexcept {
   const uint32_t in = view.shape[1];
   const uint32_t group = view.group;
   const uint32_t in_pad = (in + group - 1u) / group * group;
-  const size_t packed_row = static_cast<size_t>(in_pad) / 2u;
+  const size_t index_count = static_cast<size_t>(out) * in_pad;
   const size_t blocked_rows = out / 8u * 8u;
-  const size_t blocked_bytes = blocked_rows * packed_row;
+  const size_t blocked_count = blocked_rows * in_pad;
+  const size_t norm_count = index_count / group;
   const uint8_t *base = static_cast<const uint8_t *>(view.data);
+  for (size_t i = 0u; i < index_count; ++i)
+    request.indices[i] =
+        static_cast<uint8_t>(detail::unpack_index<4u>(base, i));
   for (size_t row = 0u; row < blocked_rows; row += 8u)
-    for (size_t pair = 0u; pair < packed_row; ++pair)
+    for (size_t i = 0u; i < in_pad; ++i)
       for (size_t lane = 0u; lane < 8u; ++lane)
-        request.packed_by_pair8[row * packed_row + pair * 8u + lane] =
-            base[(row + lane) * packed_row + pair];
+        request.indices_by_input8[row * in_pad + i * 8u + lane] =
+            request.indices[(row + lane) * in_pad + i];
+  const uint8_t *norms = base + index_count / 2u;
+  for (size_t i = 0u; i < norm_count; ++i)
+    request.norms[i] = detail::fp16_to_fp32(detail::load_u16(norms + i * 2u));
   request.prepared = event::prepared_q4_view{
-      .source = base,
+      .source = static_cast<const uint8_t *>(view.data),
       .out = out,
       .in = in,
       .group = group,
       .in_pad = in_pad,
-      .packed_by_pair8 = request.packed_by_pair8.first(blocked_bytes)};
+      .indices = request.indices.first(index_count),
+      .indices_by_input8 = request.indices_by_input8.first(blocked_count),
+      .norms = request.norms.first(norm_count)};
 }
 
 EMEL_KERNEL_CQ_AVX2_TARGET inline void
-build_pair_lut(const std::span<const float> codebook_span, const float a0_value,
-               const float a1_value, const std::span<float> pair_lut) noexcept {
+execute_prepared_avx2_dot(const event::prepared_q4_view &view,
+                          const std::span<const float> codebook_span,
+                          const std::span<const float> activation_fwht,
+                          const uint32_t row_begin, const uint32_t row_count,
+                          const std::span<float> output) noexcept {
 #if defined(__x86_64__) || defined(_M_X64)
   const float *codebook = detail::codebook_for<4u>(codebook_span);
-  const __m256 a0 = _mm256_set1_ps(a0_value);
-  const __m256 a1 = _mm256_set1_ps(a1_value);
-  for (uint32_t hi = 0u; hi < 16u; ++hi) {
-    const __m256 high = _mm256_mul_ps(a1, _mm256_set1_ps(codebook[hi]));
-    _mm256_storeu_ps(pair_lut.data() + hi * 16u,
-                     _mm256_fmadd_ps(a0, _mm256_loadu_ps(codebook), high));
-    _mm256_storeu_ps(pair_lut.data() + hi * 16u + 8u,
-                     _mm256_fmadd_ps(a0, _mm256_loadu_ps(codebook + 8u), high));
-  }
-#else
-  (void)codebook_span;
-  (void)a0_value;
-  (void)a1_value;
-  (void)pair_lut;
-#endif
-}
-
-EMEL_KERNEL_CQ_AVX2_TARGET inline __m256
-load_group_norms8(const uint8_t *norms, const uint32_t groups_per_row,
-                  const uint32_t group_index) noexcept {
-  return _mm256_setr_ps(
-      detail::fp16_to_fp32(detail::load_u16(norms + group_index * 2u)),
-      detail::fp16_to_fp32(
-          detail::load_u16(norms + (groups_per_row + group_index) * 2u)),
-      detail::fp16_to_fp32(
-          detail::load_u16(norms + (2u * groups_per_row + group_index) * 2u)),
-      detail::fp16_to_fp32(
-          detail::load_u16(norms + (3u * groups_per_row + group_index) * 2u)),
-      detail::fp16_to_fp32(
-          detail::load_u16(norms + (4u * groups_per_row + group_index) * 2u)),
-      detail::fp16_to_fp32(
-          detail::load_u16(norms + (5u * groups_per_row + group_index) * 2u)),
-      detail::fp16_to_fp32(
-          detail::load_u16(norms + (6u * groups_per_row + group_index) * 2u)),
-      detail::fp16_to_fp32(
-          detail::load_u16(norms + (7u * groups_per_row + group_index) * 2u)));
-}
-
-EMEL_KERNEL_CQ_AVX2_TARGET inline void
-prepare_pair_values8(const event::prepared_q4_view &view,
-                     const std::span<const float> codebook_span,
-                     const std::span<const float> activation_fwht,
-                     const std::span<float> pair_lut,
-                     const std::span<float> pair_scratch) noexcept {
-#if defined(__x86_64__) || defined(_M_X64)
-  const uint32_t pairs_per_row = view.in_pad / 2u;
-  const uint32_t blocked_rows = view.out / 8u * 8u;
-  for (uint32_t pair = 0u; pair < pairs_per_row; ++pair) {
-    build_pair_lut(codebook_span, activation_fwht[pair * 2u],
-                   activation_fwht[pair * 2u + 1u], pair_lut);
-    for (uint32_t row = 0u; row < blocked_rows; row += 8u) {
-      const uint8_t *packed = view.packed_by_pair8.data() +
-                              static_cast<size_t>(row) * pairs_per_row;
-      float *scratch =
-          pair_scratch.data() + static_cast<size_t>(row) * pairs_per_row;
-      const __m128i selector_bytes = _mm_loadl_epi64(
-          reinterpret_cast<const __m128i *>(packed + pair * 8u));
-      const __m256i selectors = _mm256_cvtepu8_epi32(selector_bytes);
-      _mm256_storeu_ps(scratch + pair * 8u,
-                       _mm256_i32gather_ps(pair_lut.data(), selectors, 4));
-    }
-    for (uint32_t row = blocked_rows; row < view.out; ++row) {
-      const uint8_t *packed =
-          view.source + static_cast<size_t>(row) * pairs_per_row;
-      pair_scratch[static_cast<size_t>(row) * pairs_per_row + pair] =
-          pair_lut[packed[pair]];
-    }
-  }
-#else
-  (void)view;
-  (void)codebook_span;
-  (void)activation_fwht;
-  (void)pair_lut;
-  (void)pair_scratch;
-#endif
-}
-
-EMEL_KERNEL_CQ_AVX2_TARGET inline void prepare_pair_values_batch4(
-    const event::prepared_gemv_batch4_request &request,
-    const std::span<const float> activation_fwht) noexcept {
-#if defined(__x86_64__) || defined(_M_X64)
-  const uint32_t pairs_per_row = request.targets[0].weights->in_pad / 2u;
-  std::array<size_t, 4u> offsets{};
-  for (size_t target_index = 1u; target_index < request.targets.size();
-       ++target_index)
-    offsets[target_index] =
-        offsets[target_index - 1u] +
-        static_cast<size_t>(request.targets[target_index - 1u].weights->out) *
-            pairs_per_row;
-  for (uint32_t pair = 0u; pair < pairs_per_row; ++pair) {
-    build_pair_lut(request.codebook, activation_fwht[pair * 2u],
-                   activation_fwht[pair * 2u + 1u], request.pair_lut);
-    for (size_t target_index = 0u; target_index < request.targets.size();
-         ++target_index) {
-      const auto &view = *request.targets[target_index].weights;
-      const uint32_t blocked_rows = view.out / 8u * 8u;
-      float *target_scratch =
-          request.pair_scratch.data() + offsets[target_index];
-      for (uint32_t row = 0u; row < blocked_rows; row += 8u) {
-        const uint8_t *packed = view.packed_by_pair8.data() +
-                                static_cast<size_t>(row) * pairs_per_row;
-        const __m128i selector_bytes = _mm_loadl_epi64(
-            reinterpret_cast<const __m128i *>(packed + pair * 8u));
-        const __m256i selectors = _mm256_cvtepu8_epi32(selector_bytes);
-        _mm256_storeu_ps(
-            target_scratch + static_cast<size_t>(row) * pairs_per_row +
-                pair * 8u,
-            _mm256_i32gather_ps(request.pair_lut.data(), selectors, 4));
-      }
-      for (uint32_t row = blocked_rows; row < view.out; ++row) {
-        const uint8_t *packed =
-            view.source + static_cast<size_t>(row) * pairs_per_row;
-        target_scratch[static_cast<size_t>(row) * pairs_per_row + pair] =
-            request.pair_lut[packed[pair]];
-      }
-    }
-  }
-#else
-  (void)request;
-  (void)activation_fwht;
-#endif
-}
-EMEL_KERNEL_CQ_AVX2_TARGET inline void execute_prepared_pair_lut_dot_blocked8(
-    const event::prepared_q4_view &view,
-    const std::span<const float> pair_scratch,
-    const std::span<float> output) noexcept {
-#if defined(__x86_64__) || defined(_M_X64)
+  const __m256 codebook_low = _mm256_loadu_ps(codebook);
+  const __m256 codebook_high = _mm256_loadu_ps(codebook + 8u);
   const uint32_t groups_per_row = view.in_pad / view.group;
-  const uint32_t pairs_per_group = view.group / 2u;
-  const uint32_t pairs_per_row = view.in_pad / 2u;
-  const uint32_t blocked_rows = view.out / 8u * 8u;
-  const size_t packed_row = pairs_per_row;
-  const uint8_t *source_norms =
-      view.source + static_cast<size_t>(view.out) * packed_row;
-  for (uint32_t row = 0u; row < blocked_rows; row += 8u) {
-    const float *scratch =
-        pair_scratch.data() + static_cast<size_t>(row) * pairs_per_row;
-    const uint8_t *norms =
-        source_norms + static_cast<size_t>(row) * groups_per_row * 2u;
+  for (uint32_t row = 0u; row < row_count; ++row) {
+    const uint32_t source_row = row_begin + row;
+    const uint8_t *indices =
+        view.indices.data() + static_cast<size_t>(source_row) * view.in_pad;
+    const float *norms =
+        view.norms.data() + static_cast<size_t>(source_row) * groups_per_row;
     __m256 accum = _mm256_setzero_ps();
-    for (uint32_t group_index = 0u; group_index < groups_per_row;
-         ++group_index) {
-      __m256 group_sum = _mm256_setzero_ps();
-      const uint32_t pair_begin = group_index * pairs_per_group;
-      for (uint32_t pair = 0u; pair < pairs_per_group; ++pair)
-        group_sum = _mm256_add_ps(
-            group_sum, _mm256_loadu_ps(scratch + (pair_begin + pair) * 8u));
-      accum = _mm256_fmadd_ps(
-          group_sum, load_group_norms8(norms, groups_per_row, group_index),
-          accum);
+    for (uint32_t begin = 0u, group_index = 0u; begin < view.in_pad;
+         begin += view.group, ++group_index) {
+      const __m256 norm_v = _mm256_set1_ps(norms[group_index]);
+      for (uint32_t i = 0u; i < view.group; i += 8u) {
+        const __m128i index_bytes = _mm_loadl_epi64(
+            reinterpret_cast<const __m128i *>(indices + begin + i));
+        const __m256i index_v = _mm256_cvtepu8_epi32(index_bytes);
+        const __m256i table_index =
+            _mm256_and_si256(index_v, _mm256_set1_epi32(7));
+        const __m256 low_values =
+            _mm256_permutevar8x32_ps(codebook_low, table_index);
+        const __m256 high_values =
+            _mm256_permutevar8x32_ps(codebook_high, table_index);
+        const __m256 values = _mm256_blendv_ps(
+            low_values, high_values,
+            _mm256_castsi256_ps(_mm256_slli_epi32(index_v, 28)));
+        const __m256 activation_v =
+            _mm256_loadu_ps(activation_fwht.data() + begin + i);
+        accum =
+            _mm256_fmadd_ps(_mm256_mul_ps(values, norm_v), activation_v, accum);
+      }
     }
-    _mm256_storeu_ps(output.data() + row, accum);
-  }
-  for (uint32_t row = blocked_rows; row < view.out; ++row) {
-    const uint8_t *norms =
-        source_norms + static_cast<size_t>(row) * groups_per_row * 2u;
-    const float *values =
-        pair_scratch.data() + static_cast<size_t>(row) * pairs_per_row;
-    float accum = 0.0f;
-    for (uint32_t group_index = 0u; group_index < groups_per_row;
-         ++group_index) {
-      float group_sum = 0.0f;
-      const uint32_t pair_begin = group_index * pairs_per_group;
-      for (uint32_t pair = 0u; pair < pairs_per_group; ++pair)
-        group_sum += values[pair_begin + pair];
-      accum += group_sum *
-               detail::fp16_to_fp32(detail::load_u16(norms + group_index * 2u));
-    }
-    output[row] = accum;
+    alignas(32) float lanes[8];
+    _mm256_store_ps(lanes, accum);
+    output[row] = lanes[0] + lanes[1] + lanes[2] + lanes[3] + lanes[4] +
+                  lanes[5] + lanes[6] + lanes[7];
   }
 #else
   (void)view;
-  (void)pair_scratch;
+  (void)codebook_span;
+  (void)activation_fwht;
+  (void)row_begin;
+  (void)row_count;
   (void)output;
 #endif
 }
 
-EMEL_KERNEL_CQ_AVX2_TARGET inline void execute_prepared_pair_lut_dot_rows(
-    const event::prepared_q4_view &view,
-    const std::span<const float> pair_values, const uint32_t row_begin,
-    const uint32_t row_count, const std::span<float> output) noexcept {
+EMEL_KERNEL_CQ_AVX2_TARGET inline void
+execute_prepared_avx2_dot_blocked8(const event::prepared_q4_view &view,
+                                   const std::span<const float> codebook_span,
+                                   const std::span<const float> activation_fwht,
+                                   const std::span<float> output) noexcept {
+#if defined(__x86_64__) || defined(_M_X64)
+  const float *codebook = detail::codebook_for<4u>(codebook_span);
+  const __m256 codebook_low = _mm256_loadu_ps(codebook);
+  const __m256 codebook_high = _mm256_loadu_ps(codebook + 8u);
   const uint32_t groups_per_row = view.in_pad / view.group;
-  const uint32_t pairs_per_group = view.group / 2u;
-  const uint32_t pairs_per_row = view.in_pad / 2u;
-  const size_t packed_row = pairs_per_row;
-  const uint8_t *source_norms =
-      view.source + static_cast<size_t>(view.out) * packed_row;
-  for (uint32_t row = 0u; row < row_count; ++row) {
-    const uint32_t source_row = row_begin + row;
-    const uint8_t *norms =
-        source_norms + static_cast<size_t>(source_row) * groups_per_row * 2u;
-    const float *values =
-        pair_values.data() + static_cast<size_t>(row) * pairs_per_row;
-    float accum = 0.0f;
-    for (uint32_t group_index = 0u; group_index < groups_per_row;
-         ++group_index) {
-      float group_sum = 0.0f;
-      const uint32_t pair_begin = group_index * pairs_per_group;
-      for (uint32_t pair = 0u; pair < pairs_per_group; ++pair)
-        group_sum += values[pair_begin + pair];
-      accum += group_sum *
-               detail::fp16_to_fp32(detail::load_u16(norms + group_index * 2u));
+  const uint32_t blocked_rows = view.out / 8u * 8u;
+  for (uint32_t row = 0u; row < blocked_rows; row += 8u) {
+    const uint8_t *indices =
+        view.indices_by_input8.data() + static_cast<size_t>(row) * view.in_pad;
+    const float *norms =
+        view.norms.data() + static_cast<size_t>(row) * groups_per_row;
+    __m256 accum = _mm256_setzero_ps();
+    for (uint32_t begin = 0u, group_index = 0u; begin < view.in_pad;
+         begin += view.group, ++group_index) {
+      const __m256 norm = _mm256_setr_ps(
+          norms[group_index], norms[groups_per_row + group_index],
+          norms[2u * groups_per_row + group_index],
+          norms[3u * groups_per_row + group_index],
+          norms[4u * groups_per_row + group_index],
+          norms[5u * groups_per_row + group_index],
+          norms[6u * groups_per_row + group_index],
+          norms[7u * groups_per_row + group_index]);
+      for (uint32_t i = 0u; i < view.group; ++i) {
+        const __m128i index_bytes = _mm_loadl_epi64(
+            reinterpret_cast<const __m128i *>(indices + (begin + i) * 8u));
+        const __m256i index_v = _mm256_cvtepu8_epi32(index_bytes);
+        const __m256i table_index =
+            _mm256_and_si256(index_v, _mm256_set1_epi32(7));
+        const __m256 values = _mm256_blendv_ps(
+            _mm256_permutevar8x32_ps(codebook_low, table_index),
+            _mm256_permutevar8x32_ps(codebook_high, table_index),
+            _mm256_castsi256_ps(_mm256_slli_epi32(index_v, 28)));
+        const __m256 activation = _mm256_set1_ps(activation_fwht[begin + i]);
+        accum = _mm256_fmadd_ps(_mm256_mul_ps(values, norm), activation, accum);
+      }
     }
-    output[row] = accum;
+    _mm256_storeu_ps(output.data() + row, accum);
   }
+  if (blocked_rows < view.out)
+    execute_prepared_avx2_dot(view, codebook_span, activation_fwht,
+                              blocked_rows, view.out - blocked_rows,
+                              output.subspan(blocked_rows));
+#else
+  (void)view;
+  (void)codebook_span;
+  (void)activation_fwht;
+  (void)output;
+#endif
 }
+template <bool Rows>
+EMEL_KERNEL_CQ_AVX2_TARGET inline void
+execute_prepared_avx2_gemv(const event::prepared_q4_view &view,
+                           const std::span<const float> codebook_span,
+                           const std::span<const float> activation,
+                           const uint32_t row_begin, const uint32_t row_count,
+                           const std::span<float> output,
+                           const std::span<float> workspace) noexcept {
+  detail::compute_fwht_groups(activation, view.in, view.group,
+                              workspace.first(view.in_pad));
+  if constexpr (Rows)
+    execute_prepared_avx2_dot(view, codebook_span, workspace.first(view.in_pad),
+                              row_begin, row_count, output);
+  else
+    execute_prepared_avx2_dot_blocked8(view, codebook_span,
+                                       workspace.first(view.in_pad), output);
+}
+
 inline void execute_prepared_dequant_rows(
     const event::prepared_dequant_rows_request &request) noexcept {
   const auto &view = request.weights;
   const float *codebook = detail::codebook_for<4u>(request.codebook);
   const uint32_t groups_per_row = view.in_pad / view.group;
-  const size_t packed_row = static_cast<size_t>(view.in_pad) / 2u;
-  const uint8_t *source_norms =
-      view.source + static_cast<size_t>(view.out) * packed_row;
   alignas(32) float values[detail::k_max_group];
   for (uint32_t row = 0u; row < request.row_count; ++row) {
     const uint32_t source_row = request.row_begin + row;
-    const uint8_t *packed =
-        view.source + static_cast<size_t>(source_row) * packed_row;
-    const uint8_t *norms =
-        source_norms + static_cast<size_t>(source_row) * groups_per_row * 2u;
+    const uint8_t *indices =
+        view.indices.data() + static_cast<size_t>(source_row) * view.in_pad;
+    const float *norms =
+        view.norms.data() + static_cast<size_t>(source_row) * groups_per_row;
     float *row_out = request.output.data() + static_cast<size_t>(row) * view.in;
     for (uint32_t begin = 0u, group_index = 0u; begin < view.in_pad;
          begin += view.group, ++group_index) {
-      const float norm = detail::fp16_to_fp32(
-          detail::load_u16(norms + static_cast<size_t>(group_index) * 2u));
-      for (uint32_t i = 0u; i < view.group; ++i) {
-        const uint8_t byte = packed[(begin + i) / 2u];
-        const uint32_t selector =
-            (i & 1u) == 0u ? byte & 0x0fu : static_cast<uint32_t>(byte >> 4u);
-        values[i] = codebook[selector] * norm;
-      }
+      for (uint32_t i = 0u; i < view.group; ++i)
+        values[i] = codebook[indices[begin + i]] * norms[group_index];
       detail::fwht(values, view.group);
       const uint32_t keep = begin + view.group <= view.in
                                 ? view.group
@@ -468,67 +384,44 @@ struct effect_prepare_q4 {
   }
 };
 
-struct effect_execute_prepared_pair_lut_q4 {
-  void operator()(const event::execute_prepared_pair_lut_q4 &ev,
+struct effect_execute_prepared_avx2_q4 {
+  void operator()(const event::execute_prepared_avx2_q4 &ev,
                   context &ctx) const noexcept {
-    const auto &view = ev.request.weights;
-    detail::compute_fwht_groups(ev.request.activation, view.in, view.group,
-                                ev.request.workspace.first(view.in_pad));
-    prepare_pair_values8(view, ev.request.codebook,
-                         ev.request.workspace.first(view.in_pad),
-                         ev.request.pair_lut, ev.request.pair_scratch);
-    execute_prepared_pair_lut_dot_blocked8(view, ev.request.pair_scratch,
-                                           ev.request.output);
+    for (uint32_t row = 0u; row < ev.request.weights.out; ++row)
+      ev.request.output[row] = 0.0f;
+    execute_prepared_avx2_gemv<false>(
+        ev.request.weights, ev.request.codebook, ev.request.activation, 0u,
+        ev.request.weights.out, ev.request.output, ev.request.workspace);
     ev.result.accepted = true;
     ++ctx.prepared_calls;
   }
 };
 
-struct effect_execute_prepared_pair_lut_batch4_q4 {
-  void operator()(const event::execute_prepared_pair_lut_batch4_q4 &ev,
+struct effect_execute_prepared_avx2_batch4_q4 {
+  void operator()(const event::execute_prepared_avx2_batch4_q4 &ev,
                   context &ctx) const noexcept {
     const auto &request = ev.request;
     const auto &first = *request.targets[0].weights;
     detail::compute_fwht_groups(request.activation, first.in, first.group,
                                 request.workspace.first(first.in_pad));
-    prepare_pair_values_batch4(request, request.workspace.first(first.in_pad));
-    size_t scratch_offset = 0u;
-    for (const auto &target : request.targets) {
-      const size_t scratch_count =
-          static_cast<size_t>(target.weights->out) * (first.in_pad / 2u);
-      execute_prepared_pair_lut_dot_blocked8(
-          *target.weights,
-          request.pair_scratch.subspan(scratch_offset, scratch_count),
-          target.output);
-      scratch_offset += scratch_count;
-    }
+    for (const auto &target : request.targets)
+      execute_prepared_avx2_dot_blocked8(*target.weights, request.codebook,
+                                         request.workspace.first(first.in_pad),
+                                         target.output);
     ev.result.accepted = true;
     ctx.prepared_calls += request.targets.size();
   }
 };
 
-struct effect_execute_prepared_pair_lut_rows_q4 {
-  void operator()(const event::execute_prepared_pair_lut_rows_q4 &ev,
+struct effect_execute_prepared_avx2_rows_q4 {
+  void operator()(const event::execute_prepared_avx2_rows_q4 &ev,
                   context &ctx) const noexcept {
-    const auto &view = ev.request.weights;
-    detail::compute_fwht_groups(ev.request.activation, view.in, view.group,
-                                ev.request.workspace.first(view.in_pad));
-    const size_t pairs_per_row = static_cast<size_t>(view.in_pad) / 2u;
-    for (size_t pair = 0u; pair < pairs_per_row; ++pair) {
-      build_pair_lut(ev.request.codebook, ev.request.workspace[pair * 2u],
-                     ev.request.workspace[pair * 2u + 1u], ev.request.pair_lut);
-      for (uint32_t row = 0u; row < ev.request.row_count; ++row) {
-        const uint8_t *selectors =
-            view.source +
-            static_cast<size_t>(ev.request.row_begin + row) * pairs_per_row;
-        ev.request
-            .pair_scratch[static_cast<size_t>(row) * pairs_per_row + pair] =
-            ev.request.pair_lut[selectors[pair]];
-      }
-    }
-    execute_prepared_pair_lut_dot_rows(view, ev.request.pair_scratch,
-                                       ev.request.row_begin,
-                                       ev.request.row_count, ev.request.output);
+    for (uint32_t row = 0u; row < ev.request.row_count; ++row)
+      ev.request.output[row] = 0.0f;
+    execute_prepared_avx2_gemv<true>(ev.request.weights, ev.request.codebook,
+                                     ev.request.activation,
+                                     ev.request.row_begin, ev.request.row_count,
+                                     ev.request.output, ev.request.workspace);
     ev.result.accepted = true;
     ++ctx.prepared_calls;
   }

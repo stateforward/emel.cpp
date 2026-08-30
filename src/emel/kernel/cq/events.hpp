@@ -19,23 +19,26 @@ struct gemv_request {
   std::span<float> output;
   std::span<float> workspace;
 };
-// Construction/init-owned CQ4 representation. Packed selector bytes remain an
-// exact one-byte/two-weight copy of the source payload, reordered only so each
-// input pair for eight output rows is contiguous. Group norms remain in the
-// authoritative source payload and are decoded at use.
+// Construction/init-owned CQ4 representation. Indices remain exact codebook
+// selectors and norms are the exact fp16 payload decoded once to f32. The
+// spans borrow caller-owned storage that must outlive every prepared dispatch.
 struct prepared_q4_view {
   const uint8_t *source = nullptr;
   uint32_t out = 0u;
   uint32_t in = 0u;
   uint32_t group = 0u;
   uint32_t in_pad = 0u;
-  // 8-row output blocks, activation-pair-major within each block. Tail rows
-  // read their original packed bytes directly from `source`.
-  std::span<const uint8_t> packed_by_pair8 = {};
+  std::span<const uint8_t> indices = {};
+  // 8-row output blocks, input-major within each block. Tail rows remain in
+  // row-major `indices`; the blocked layout exists only for hot full GEMV.
+  std::span<const uint8_t> indices_by_input8 = {};
+  std::span<const float> norms = {};
 };
 struct prepare_q4_request {
   const emel::cact::loader::tensor_view &weights;
-  std::span<uint8_t> packed_by_pair8;
+  std::span<uint8_t> indices;
+  std::span<uint8_t> indices_by_input8;
+  std::span<float> norms;
   prepared_q4_view &prepared;
 };
 
@@ -50,8 +53,6 @@ struct prepared_gemv_request {
   std::span<const float> activation;
   std::span<float> output;
   std::span<float> workspace;
-  std::span<float> pair_lut;
-  std::span<float> pair_scratch;
 };
 
 struct prepared_gemv_target {
@@ -59,23 +60,21 @@ struct prepared_gemv_target {
   std::span<float> output = {};
 };
 
-// Four projections sharing one activation transform and one set of pair LUTs.
-// The fixed arity keeps dispatch allocation-free and matches q/k/v/gate.
+// Four projections sharing one activation transform. The fixed arity keeps
+// dispatch allocation-free and matches the graph's q/k/v/gate hot path.
 struct prepared_gemv_batch4_request {
   std::array<prepared_gemv_target, 4u> targets = {};
   std::span<const float> codebook;
   std::span<const float> activation;
   std::span<float> workspace;
-  std::span<float> pair_lut;
-  std::span<float> pair_scratch;
 };
 
-struct execute_prepared_pair_lut_batch4_q4 {
+struct execute_prepared_avx2_batch4_q4 {
   const prepared_gemv_batch4_request &request;
   dispatch_result &result;
 };
 
-struct execute_prepared_pair_lut_q4 {
+struct execute_prepared_avx2_q4 {
   const prepared_gemv_request &request;
   dispatch_result &result;
 };
@@ -115,11 +114,9 @@ struct prepared_gemv_rows_request {
   uint32_t row_count = 0u;
   std::span<float> output;
   std::span<float> workspace;
-  std::span<float> pair_lut;
-  std::span<float> pair_scratch;
 };
 
-struct execute_prepared_pair_lut_rows_q4 {
+struct execute_prepared_avx2_rows_q4 {
   const prepared_gemv_rows_request &request;
   dispatch_result &result;
 };

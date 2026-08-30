@@ -221,45 +221,40 @@ TEST_CASE("CQ row dequant reconstructs exporter unpack values") {
   CHECK(g[0] == doctest::Approx(dot));
 }
 
-TEST_CASE("CQ4 pair LUT preserves packed bytes norms and irregular parity") {
+TEST_CASE("CQ4 preparation preserves selectors norms and numerical identity") {
   std::array<float, 28u> cb{};
   for (uint32_t i = 0u; i < 16u; ++i)
-    cb[12u + i] = (static_cast<float>(i) - 7.5f) / 8.f;
-  constexpr uint32_t group = 128u, in = 259u, out = 11u;
-  constexpr uint32_t in_pad = 384u;
+    cb[12u + i] = static_cast<float>(i + 1u) / 10.f;
+  constexpr uint32_t group = 8u, in = 16u, out = 4u;
   std::vector<uint32_t> ix;
-  ix.reserve(static_cast<size_t>(out) * in_pad);
-  for (uint32_t i = 0u; i < out * in_pad; ++i)
+  for (uint32_t i = 0u; i < out * in; ++i)
     ix.push_back((i * 7u + 3u) % 16u);
-  std::vector<uint16_t> norms(static_cast<size_t>(out) * in_pad / group);
-  for (size_t i = 0u; i < norms.size(); ++i)
-    norms[i] = static_cast<uint16_t>(0x3800u + (i % 5u) * 0x0100u);
-  const auto b = blob<4u>(ix, out, in, group, norms);
+  const auto b = blob<4u>(
+      ix, out, in, group,
+      {0x3c00, 0x4000, 0x4200, 0x4400, 0x3c00, 0x4000, 0x4200, 0x4400});
   const auto v = view(b, out, in, group, 4u);
-  constexpr size_t packed_row = in_pad / 2u;
-  constexpr size_t blocked_bytes = 8u * packed_row;
-  std::vector<uint8_t> prepared_bytes(blocked_bytes);
+  std::vector<uint8_t> prepared_indices(out * in);
+  std::vector<uint8_t> prepared_indices_by_input8(out * in);
+  std::vector<float> prepared_norms(out * in / group);
   emel::kernel::cq::event::prepared_q4_view prepared{};
   const emel::kernel::cq::event::prepare_q4_request prepare_request{
-      v, prepared_bytes, prepared};
+      v, prepared_indices, prepared_indices_by_input8, prepared_norms,
+      prepared};
   emel::kernel::cq::sm sm;
   emel::kernel::cq::event::dispatch_result prepare_result{};
   REQUIRE(sm.process_event(
       emel::kernel::cq::event::prepare_q4{prepare_request, prepare_result}));
   CHECK(prepared.source == v.data);
-  CHECK(prepared.packed_by_pair8.size() == blocked_bytes);
-  for (size_t pair = 0u; pair < packed_row; ++pair)
-    for (size_t lane = 0u; lane < 8u; ++lane)
-      CHECK(prepared.packed_by_pair8[pair * 8u + lane] ==
-            b[lane * packed_row + pair]);
+  CHECK(prepared.indices.size() == out * in);
+  CHECK(prepared.norms.size() == out * in / group);
+  for (size_t i = 0u; i < ix.size(); ++i)
+    CHECK(prepared.indices[i] == ix[i]);
 
   std::array<float, in> activation{};
   for (uint32_t i = 0u; i < in; ++i)
-    activation[i] = static_cast<float>((i * 11u) % 29u) / 17.f - 0.5f;
-  std::array<float, in_pad> scalar_workspace{};
-  std::array<float, in_pad> prepared_workspace{};
-  std::array<float, 256u> pair_lut{};
-  std::vector<float> pair_scratch(static_cast<size_t>(out) * (in_pad / 2u));
+    activation[i] = static_cast<float>(i + 1u) / 8.f;
+  std::array<float, in> scalar_workspace{};
+  std::array<float, in> prepared_workspace{};
   std::array<float, out> scalar_output{};
   std::array<float, out> prepared_output{};
   const gemv_request scalar_request{v, cb, activation, scalar_output,
@@ -268,12 +263,10 @@ TEST_CASE("CQ4 pair LUT preserves packed bytes norms and irregular parity") {
   REQUIRE(sm.process_event(emel::kernel::cq::event::execute_scalar_q4{
       scalar_request, scalar_result}));
   const emel::kernel::cq::event::prepared_gemv_request prepared_request{
-      prepared,           cb,       activation,  prepared_output,
-      prepared_workspace, pair_lut, pair_scratch};
+      prepared, cb, activation, prepared_output, prepared_workspace};
   emel::kernel::cq::event::dispatch_result prepared_result{};
-  REQUIRE(
-      sm.process_event(emel::kernel::cq::event::execute_prepared_pair_lut_q4{
-          prepared_request, prepared_result}));
+  REQUIRE(sm.process_event(emel::kernel::cq::event::execute_prepared_avx2_q4{
+      prepared_request, prepared_result}));
   for (uint32_t row = 0u; row < out; ++row)
     CHECK(prepared_output[row] == doctest::Approx(scalar_output[row]));
 
@@ -286,23 +279,27 @@ TEST_CASE("CQ4 pair LUT preserves packed bytes norms and irregular parity") {
   CHECK(prepared_calls == 1u);
 }
 
-TEST_CASE("CQ4 batch4 shares one transform and pair LUT set") {
+TEST_CASE(
+    "CQ4 batch4 shares one transform and matches separate prepared routes") {
   std::array<float, 28u> cb{};
   for (uint32_t i = 0u; i < 16u; ++i)
     cb[12u + i] = static_cast<float>(i + 1u) / 10.f;
-  constexpr uint32_t group = 128u, in = 128u, out = 8u;
+  constexpr uint32_t group = 8u, in = 16u, out = 4u;
   std::vector<uint32_t> ix;
   for (uint32_t i = 0u; i < out * in; ++i)
     ix.push_back((i * 5u + 1u) % 16u);
-  const auto b =
-      blob<4u>(ix, out, in, group, std::vector<uint16_t>(out, 0x3c00u));
+  const auto b = blob<4u>(
+      ix, out, in, group,
+      {0x3c00, 0x4000, 0x4200, 0x4400, 0x3c00, 0x4000, 0x4200, 0x4400});
   const auto v = view(b, out, in, group, 4u);
-  std::vector<uint8_t> packed(out * in / 2u);
+  std::vector<uint8_t> indices(out * in);
+  std::vector<float> norms(out * in / group);
+  std::vector<uint8_t> indices_by_input8(out * in);
   emel::kernel::cq::event::prepared_q4_view prepared{};
   emel::kernel::cq::sm sm;
   emel::kernel::cq::event::dispatch_result prepare_result{};
-  const emel::kernel::cq::event::prepare_q4_request prepare_request{v, packed,
-                                                                    prepared};
+  const emel::kernel::cq::event::prepare_q4_request prepare_request{
+      v, indices, indices_by_input8, norms, prepared};
   REQUIRE(sm.process_event(
       emel::kernel::cq::event::prepare_q4{prepare_request, prepare_result}));
   std::array<float, in> activation{};
@@ -310,18 +307,12 @@ TEST_CASE("CQ4 batch4 shares one transform and pair LUT set") {
     activation[i] = static_cast<float>(i + 1u) / 8.f;
   std::array<float, in> separate_workspace{};
   std::array<float, in> batch_workspace{};
-  std::array<float, 256u> separate_lut{};
-  std::array<float, 256u> batch_lut{};
-  std::vector<float> separate_scratch(static_cast<size_t>(out) * (in / 2u));
-  std::vector<float> batch_scratch(4u * static_cast<size_t>(out) * (in / 2u));
   std::array<float, out> expected{};
   const emel::kernel::cq::event::prepared_gemv_request separate_request{
-      prepared,           cb,           activation,      expected,
-      separate_workspace, separate_lut, separate_scratch};
+      prepared, cb, activation, expected, separate_workspace};
   emel::kernel::cq::event::dispatch_result separate_result{};
-  REQUIRE(
-      sm.process_event(emel::kernel::cq::event::execute_prepared_pair_lut_q4{
-          separate_request, separate_result}));
+  REQUIRE(sm.process_event(emel::kernel::cq::event::execute_prepared_avx2_q4{
+      separate_request, separate_result}));
   std::array<std::array<float, out>, 4u> outputs{};
   const emel::kernel::cq::event::prepared_gemv_batch4_request batch_request{
       .targets = {{{&prepared, outputs[0]},
@@ -330,12 +321,10 @@ TEST_CASE("CQ4 batch4 shares one transform and pair LUT set") {
                    {&prepared, outputs[3]}}},
       .codebook = cb,
       .activation = activation,
-      .workspace = batch_workspace,
-      .pair_lut = batch_lut,
-      .pair_scratch = batch_scratch};
+      .workspace = batch_workspace};
   emel::kernel::cq::event::dispatch_result batch_result{};
-  REQUIRE(sm.process_event(
-      emel::kernel::cq::event::execute_prepared_pair_lut_batch4_q4{
+  REQUIRE(
+      sm.process_event(emel::kernel::cq::event::execute_prepared_avx2_batch4_q4{
           batch_request, batch_result}));
   for (const auto &output : outputs)
     for (uint32_t row = 0u; row < out; ++row)

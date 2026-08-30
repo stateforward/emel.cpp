@@ -220,10 +220,9 @@ struct sm : public emel::sm<model, action::context> {
     emel::kernel::cq::event::capture_prepared_diagnostics diagnostics{
         ev.prepare_calls, ev.prepared_calls};
     const bool handled = this->context_.cq.process_event(diagnostics);
-    ev.prepared_packed_bytes = this->context_.prepared_packed.size();
-    ev.pair_lut_bytes =
-        (this->context_.pair_lut.size() + this->context_.pair_scratch.size()) *
-        sizeof(float);
+    ev.prepared_index_bytes = this->context_.prepared_indices.size();
+    ev.prepared_norm_bytes =
+        this->context_.prepared_norms.size() * sizeof(float);
     return handled;
   }
 };
