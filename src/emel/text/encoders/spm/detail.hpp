@@ -485,10 +485,12 @@ inline int32_t prepare_spm(const event::encode &ev,
                            emel::text::encoders::spm::action::context &ctx,
                            const emel::model::data::vocab &vocab) noexcept {
   size_t out_len = 0;
-  const bool add_prefix =
-      vocab.add_space_prefix && !vocab.treat_whitespace_as_suffix;
-  const bool add_suffix =
-      vocab.add_space_prefix && vocab.treat_whitespace_as_suffix;
+  const bool add_prefix = vocab.add_space_prefix &&
+                          !vocab.treat_whitespace_as_suffix &&
+                          !ev.suppress_space_prefix;
+  const bool add_suffix = vocab.add_space_prefix &&
+                          vocab.treat_whitespace_as_suffix &&
+                          !ev.suppress_space_prefix;
   const bool escape_spaces = vocab.escape_whitespaces;
   bool prefix_inserted = false;
   bool overflow = false;

@@ -53,6 +53,7 @@ clear_tokenize_runtime(const runtime_event_type &runtime_ev) noexcept {
   ev.ctx.fragment_count = 0;
   ev.ctx.fragment_index = 0;
   ev.ctx.preprocessed = false;
+  ev.ctx.global_dummy_prefix_pending = false;
   ev.ctx.preprocess_accepted = false;
   ev.ctx.preprocess_err_code = error_code(error::none);
   ev.ctx.encode_accepted = false;
@@ -159,6 +160,10 @@ struct dispatch_preprocess {
     ev.ctx.fragment_count = fragment_count;
     ev.ctx.fragment_index = 0;
     ev.ctx.preprocessed = preprocessed;
+    ev.ctx.global_dummy_prefix_pending =
+        ctx.vocab->tokenizer_pre_id ==
+            emel::model::data::tokenizer_pre::NEEDLE &&
+        ctx.vocab->add_space_prefix && !ev.request.text.empty();
   }
 };
 
@@ -234,12 +239,20 @@ struct dispatch_encode_raw_fragment {
 
     int32_t fragment_count = 0;
     int32_t err = error_code(error::none);
+    const bool needle_profile =
+        ctx.vocab->tokenizer_pre_id == emel::model::data::tokenizer_pre::NEEDLE;
+    const bool suppress_space_prefix =
+        needle_profile && !ev.ctx.global_dummy_prefix_pending;
+    if (needle_profile) {
+      ev.ctx.global_dummy_prefix_pending = false;
+    }
     emel::text::encoders::event::encode encode_ev{
         .vocab = *ctx.vocab,
         .text = frag.text,
         .preprocessed = ev.ctx.preprocessed,
-        .token_ids =
-            std::span<int32_t>(ev.request.token_ids_out + ev.ctx.token_count, output_capacity),
+        .suppress_space_prefix = suppress_space_prefix,
+        .token_ids = std::span<int32_t>(
+            ev.request.token_ids_out + ev.ctx.token_count, output_capacity),
         .token_count_out = &fragment_count,
         .error_out = &err,
     };

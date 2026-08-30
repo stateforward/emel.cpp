@@ -3,10 +3,9 @@
 // Drives the maintained chain end to end: cact loader (probe/bind/parse) ->
 // needle binder -> needle tokenizer blob loader -> shared SPM tokenizer ->
 // native graph (public init/prefill/decode events only). For every heldout
-// row it renders nothing itself: the prompt text and the byte-level reference
-// tokenizer ids come from scripts/gen_needle_heldout_eval.py (the maintained
-// finetune.render_example prompt format + export.py RefTokenizer), so the
-// tool can also report emel-vs-reference tokenizer id parity per row.
+// row it consumes the prompt text plus reference tokenizer IDs produced by
+// scripts/gen_needle_heldout_eval.py, asserts native parity, and feeds the
+// native IDs to the graph.
 //
 // Prediction protocol matches the JAX reference eval that produced the
 // 0.840 domain / 0.760 effort numbers (/shared/effortless/scripts/eval_jax.py):
@@ -293,8 +292,7 @@ int main(int argc, char **argv) {
   for (size_t index = row_begin; index < row_end; ++index) {
     const eval_row &row = rows[index];
 
-    // Native tokenizer lane (emel SPM machine) with reference cross-check.
-    int32_t emel_count = 0;
+    int32_t native_count = 0;
     int32_t tok_err =
         emel::text::tokenizer::error_code(emel::text::tokenizer::error::none);
     emel::text::tokenizer::event::tokenize tok_ev = {};
@@ -304,33 +302,29 @@ int main(int argc, char **argv) {
     tok_ev.parse_special = true;
     tok_ev.token_ids_out = token_buffer.data();
     tok_ev.token_capacity = static_cast<int32_t>(token_buffer.size());
-    tok_ev.token_count_out = &emel_count;
+    tok_ev.token_count_out = &native_count;
     tok_ev.error_out = &tok_err;
     if (!tokenizer.process_event(tok_ev)) die("tokenize");
 
     bool ids_match =
-        static_cast<size_t>(emel_count) == row.ref_ids.size();
-    for (int32_t i = 0; ids_match && i < emel_count; ++i)
+        static_cast<size_t>(native_count) == row.ref_ids.size();
+    for (int32_t i = 0; ids_match && i < native_count; ++i)
       ids_match = token_buffer[static_cast<size_t>(i)] ==
                   row.ref_ids[static_cast<size_t>(i)];
-    if (!ids_match) ++tokenizer_mismatch;
+    if (!ids_match) {
+      ++tokenizer_mismatch;
+      die("native tokenizer ids differ from reference");
+    }
 
-    // Prefill [BOS] + REFERENCE ids: the accuracy comparison vs the JAX
-    // 0.840/0.760 numbers must feed the graph the exact ids the reference
-    // eval produced (export.py RefTokenizer). The emel SPM lane currently
-    // diverges on chat-marker prompts (global dummy-prefix + marker-split
-    // semantics differ); that mismatch is measured and reported per row
-    // above instead of silently changing the eval input.
     prefill_ids.clear();
     prefill_ids.push_back(k_bos_id);
     const size_t prompt_cap =
         contract.geo.max_seq_len > k_max_new_tokens
             ? contract.geo.max_seq_len - k_max_new_tokens
             : 1u;
-    for (size_t i = 0; i < row.ref_ids.size() &&
-                       prefill_ids.size() < prompt_cap;
+    for (int32_t i = 0; i < native_count && prefill_ids.size() < prompt_cap;
          ++i)
-      prefill_ids.push_back(row.ref_ids[i]);
+      prefill_ids.push_back(token_buffer[static_cast<size_t>(i)]);
 
     if (!graph.process_event(needle::graph::event::init{})) die("graph init");
     if (!graph.process_event(needle::graph::event::prefill{
@@ -387,5 +381,5 @@ int main(int argc, char **argv) {
               evaluated ? static_cast<double>(joint_ok) / evaluated : 0.0,
               evaluated ? static_cast<double>(within1) / evaluated : 0.0,
               tokenizer_mismatch);
-  return 0;
+  return tokenizer_mismatch == 0u ? 0 : 1;
 }

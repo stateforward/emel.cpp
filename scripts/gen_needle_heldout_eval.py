@@ -3,9 +3,9 @@
 
 Renders each /shared/effortless/train/heldout.jsonl row exactly like the
 training renderer (`/data/needle/needle/model/finetune.py` render_example,
-prompt part only) and encodes it with the byte-level reference tokenizer
-(`needle/model/export.py` RefTokenizer) built FROM THE PINNED .cact BLOB, so
-the C++ eval can cross-check emel tokenizer parity row by row.
+prompt part only) and records IDs from the byte-level reference tokenizer
+(`needle/model/export.py` RefTokenizer) built FROM THE PINNED .cact BLOB. The
+C++ eval requires native parity with these IDs, then feeds native IDs onward.
 
 Output line format (one row per heldout example):
     gold_domain \t gold_effort \t ref_ids_space_separated \t prompt_hex

@@ -118,6 +118,7 @@ struct data {
     MINIMAX_M2,
     SOLAR_OPEN,
     UNKNOWN,
+    NEEDLE,
   };
 
   struct tensor_record {

@@ -20,6 +20,7 @@ struct encode {
   const emel::model::data::vocab & vocab;
   std::string_view text = {};
   bool preprocessed = false;
+  bool suppress_space_prefix = false;
   std::span<int32_t> token_ids = {};
   int32_t * token_count_out = nullptr;
   int32_t * error_out = nullptr;

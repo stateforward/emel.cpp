@@ -154,13 +154,14 @@ parse_tokenizer_blob(const std::span<const uint8_t> blob,
   vocab_out.n_tokens = n_pieces;
   vocab_out.token_bytes_used = bytes_used;
   vocab_out.tokenizer_model_id = emel::model::data::tokenizer_model::SPM;
-  vocab_out.tokenizer_pre_id = emel::model::data::tokenizer_pre::DEFAULT;
+  vocab_out.tokenizer_pre_id = emel::model::data::tokenizer_pre::NEEDLE;
   vocab_out.pad_id = static_cast<int32_t>(pad_id);
   vocab_out.eos_id = static_cast<int32_t>(eos_id);
   vocab_out.bos_id = static_cast<int32_t>(bos_id);
   vocab_out.unk_id = static_cast<int32_t>(unk_id);
-  // The reference encoder (`export.py` RefTokenizer) never inserts BOS/EOS;
-  // chat markers ride in the text, so specials stay caller-controlled.
+  // RefTokenizer applies the dummy prefix once to the complete prompt before
+  // identifying user-defined markers. The shared tokenizer recognizes this
+  // model-owned profile and preserves that global state across raw fragments.
   vocab_out.add_bos = false;
   vocab_out.add_eos = false;
   vocab_out.add_space_prefix = add_dummy_prefix != 0u;

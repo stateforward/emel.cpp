@@ -36,13 +36,39 @@ struct partition_no_specials {
   }
 };
 
+inline bool prepend_needle_dummy_prefix(
+    const event::preprocess & request, size_t & fragment_count) noexcept {
+  static constexpr char k_space = ' ';
+  const bool needle_profile =
+    request.vocab.tokenizer_pre_id == emel::model::data::tokenizer_pre::NEEDLE;
+  const bool starts_with_special =
+    fragment_count != 0u && request.fragments_out[0].kind == fragment_kind::token;
+  if (!needle_profile || !request.vocab.add_space_prefix || !starts_with_special) {
+    return true;
+  }
+  if (fragment_count >= request.fragments_out.size()) {
+    return false;
+  }
+  for (size_t i = fragment_count; i > 0u; --i) {
+    request.fragments_out[i] = request.fragments_out[i - 1u];
+  }
+  fragment & prefix = request.fragments_out[0];
+  prefix.kind = fragment_kind::raw_text;
+  prefix.text = std::string_view{&k_space, 1u};
+  prefix.token = -1;
+  ++fragment_count;
+  return true;
+}
+
 struct partition_non_bpe_parse_special {
   template <class runtime_event_type>
   void operator()(const runtime_event_type & runtime_ev, context & ctx) const noexcept {
     const auto & ev = pdetail::unwrap_runtime_event(runtime_ev);
     size_t fragment_count = 0;
-    const bool ok = pdetail::partition_with_specials_parse_enabled(
+    const bool partitioned = pdetail::partition_with_specials_parse_enabled(
       ev.request.text, ctx.special_cache, ev.request.fragments_out, fragment_count);
+    const bool ok = partitioned &&
+                    prepend_needle_dummy_prefix(ev.request, fragment_count);
     emel::text::tokenizer::preprocessor::action::detail::set_phase_result(
       runtime_ev, ok, fragment_count, true);
   }
