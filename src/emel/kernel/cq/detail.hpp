@@ -7,6 +7,7 @@
 #include <span>
 
 #include "emel/cact/loader/events.hpp"
+#include "emel/kernel/detail.hpp"
 
 namespace emel::kernel::cq::detail {
 
@@ -63,16 +64,7 @@ inline const float *codebook_for(const std::span<const float> codebook) noexcept
 }
 
 inline void fwht(float *values, const uint32_t n) noexcept {
-  for (uint32_t step = 1u; step < n; step <<= 1u)
-    for (uint32_t base = 0u; base < n; base += step << 1u)
-      for (uint32_t j = 0u; j < step; ++j) {
-        const float a = values[base + j];
-        const float b = values[base + step + j];
-        values[base + j] = a + b;
-        values[base + step + j] = a - b;
-      }
-  const float scale = 1.0f / std::sqrt(static_cast<float>(n));
-  for (uint32_t i = 0u; i < n; ++i) values[i] *= scale;
+  emel::kernel::detail::fwht_normalized(values, n);
 }
 
 inline bool is_power_of_two(const uint32_t n) noexcept {
@@ -134,6 +126,51 @@ inline float dequant_dot_row(const uint8_t *packed, const uint8_t *norms,
     }
   }
   return result;
+}
+
+// Reconstructs one packed row's f32 values exactly like the exporter's
+// `_cq_unpack`: per group, codebook value scaled by the fp16 group norm,
+// then the normalized Walsh-Hadamard rotation; truncated to `in` columns
+// and scaled by `scale`.
+template <uint32_t Bits>
+inline void dequant_row_values(const uint8_t *packed, const uint8_t *norms,
+                               const uint32_t in, const uint32_t group,
+                               const std::span<const float> codebook,
+                               const float scale,
+                               float *row_out) noexcept {
+  const uint32_t in_pad = (in + group - 1u) / group * group;
+  const size_t group_bytes = packed_row_bytes<Bits>(group);
+  float values[k_max_group];
+  for (uint32_t begin = 0u, group_index = 0u; begin < in_pad;
+       begin += group, ++group_index) {
+    const float norm = fp16_to_fp32(load_u16(norms + group_index * 2u));
+    const uint8_t *group_packed = packed + group_index * group_bytes;
+    for (uint32_t i = 0u; i < group; ++i) {
+      const uint32_t index = unpack_index<Bits>(group_packed, i);
+      values[i] = code_value<Bits>(index, group, codebook) * norm;
+    }
+    fwht(values, group);
+    const uint32_t keep = begin + group <= in ? group : (in > begin ? in - begin : 0u);
+    for (uint32_t i = 0u; i < keep; ++i) row_out[begin + i] = values[i] * scale;
+  }
+}
+
+// Shared structural validity for row-range requests: packed geometry checks
+// identical to `valid_view` minus the activation/output coupling.
+template <uint32_t Bits>
+inline bool valid_packed_view(const emel::cact::loader::tensor_view &view,
+                              const std::span<const float> codebook) noexcept {
+  const uint32_t out = view.shape[0];
+  const uint32_t in = view.shape[1];
+  const uint32_t group = view.group;
+  if (view.data == nullptr || view.bits != Bits || out == 0u || in == 0u ||
+      group == 0u || group > k_max_group || !is_power_of_two(group) ||
+      (Bits != k_ternary_record_bits && codebook.size() < 28u)) return false;
+  const uint64_t in_pad = (static_cast<uint64_t>(in) + group - 1u) / group * group;
+  const uint64_t packed = static_cast<uint64_t>(out) *
+                          packed_row_bytes<Bits>(static_cast<uint32_t>(in_pad));
+  const uint64_t norms = static_cast<uint64_t>(out) * (in_pad / group) * 2u;
+  return packed + norms <= view.nbytes;
 }
 
 inline void compute_fwht_groups(const std::span<const float> activation,

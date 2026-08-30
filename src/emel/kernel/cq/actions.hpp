@@ -37,6 +37,46 @@ inline void execute_scalar_gemv(const event::gemv_request &request) noexcept {
         request.codebook, request.workspace.first(in_pad));
 }
 
+template <uint32_t Bits>
+inline void execute_scalar_gemv_rows(const event::gemv_rows_request &request) noexcept {
+  const auto &view = request.weights;
+  const uint32_t in = view.shape[1];
+  const uint32_t group = view.group;
+  const uint32_t in_pad = (in + group - 1u) / group * group;
+  detail::compute_fwht_groups(request.activation, in, group,
+                              request.workspace.first(in_pad));
+  const uint8_t *base = static_cast<const uint8_t *>(view.data);
+  const size_t packed_row = detail::packed_row_bytes<Bits>(in_pad);
+  const size_t norm_row = static_cast<size_t>(in_pad / group) * 2u;
+  const uint8_t *norms = base + static_cast<size_t>(view.shape[0]) * packed_row;
+  for (uint32_t row = 0u; row < request.row_count; ++row) {
+    const size_t src = static_cast<size_t>(request.row_begin) + row;
+    request.output[row] = detail::dequant_dot_row<Bits>(
+        base + src * packed_row, norms + src * norm_row, in, group,
+        request.codebook, request.workspace.first(in_pad));
+  }
+}
+
+template <uint32_t Bits>
+inline void execute_scalar_dequant_rows(
+    const event::dequant_rows_request &request) noexcept {
+  const auto &view = request.weights;
+  const uint32_t in = view.shape[1];
+  const uint32_t group = view.group;
+  const uint32_t in_pad = (in + group - 1u) / group * group;
+  const uint8_t *base = static_cast<const uint8_t *>(view.data);
+  const size_t packed_row = detail::packed_row_bytes<Bits>(in_pad);
+  const size_t norm_row = static_cast<size_t>(in_pad / group) * 2u;
+  const uint8_t *norms = base + static_cast<size_t>(view.shape[0]) * packed_row;
+  for (uint32_t row = 0u; row < request.row_count; ++row) {
+    const size_t src = static_cast<size_t>(request.row_begin) + row;
+    detail::dequant_row_values<Bits>(
+        base + src * packed_row, norms + src * norm_row, in, group,
+        request.codebook, request.scale,
+        request.output.data() + static_cast<size_t>(row) * in);
+  }
+}
+
 #if defined(__x86_64__) || defined(_M_X64)
 #if defined(__GNUC__) || defined(__clang__)
 #define EMEL_KERNEL_CQ_AVX2_TARGET __attribute__((target("avx2,fma")))
@@ -121,6 +161,26 @@ struct effect_execute_avx2 {
     execute_avx2_gemv<Bits>(ev.request);
     ev.result.accepted = true;
     ++ctx.avx2_calls;
+  }
+};
+
+template <uint32_t Bits>
+struct effect_execute_scalar_rows {
+  void operator()(const event::execute_scalar_rows<Bits> &ev,
+                  context &ctx) const noexcept {
+    execute_scalar_gemv_rows<Bits>(ev.request);
+    ev.result.accepted = true;
+    ++ctx.scalar_calls;
+  }
+};
+
+template <uint32_t Bits>
+struct effect_execute_scalar_dequant {
+  void operator()(const event::execute_scalar_dequant<Bits> &ev,
+                  context &ctx) const noexcept {
+    execute_scalar_dequant_rows<Bits>(ev.request);
+    ev.result.accepted = true;
+    ++ctx.scalar_calls;
   }
 };
 

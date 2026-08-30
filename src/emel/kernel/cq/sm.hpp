@@ -36,6 +36,24 @@ struct model {
           + sml::event<event::execute_scalar_ternary>
           [ guard::guard_execute_scalar<5u>{} ] / action::effect_execute_scalar<5u>{}
       , sml::state<state_ready> <= sml::state<state_ready>
+          + sml::event<event::execute_scalar_rows_q2>
+          [ guard::guard_execute_scalar_rows<2u>{} ] / action::effect_execute_scalar_rows<2u>{}
+      , sml::state<state_ready> <= sml::state<state_ready>
+          + sml::event<event::execute_scalar_rows_q3>
+          [ guard::guard_execute_scalar_rows<3u>{} ] / action::effect_execute_scalar_rows<3u>{}
+      , sml::state<state_ready> <= sml::state<state_ready>
+          + sml::event<event::execute_scalar_rows_q4>
+          [ guard::guard_execute_scalar_rows<4u>{} ] / action::effect_execute_scalar_rows<4u>{}
+      , sml::state<state_ready> <= sml::state<state_ready>
+          + sml::event<event::execute_scalar_dequant_q2>
+          [ guard::guard_execute_scalar_dequant<2u>{} ] / action::effect_execute_scalar_dequant<2u>{}
+      , sml::state<state_ready> <= sml::state<state_ready>
+          + sml::event<event::execute_scalar_dequant_q3>
+          [ guard::guard_execute_scalar_dequant<3u>{} ] / action::effect_execute_scalar_dequant<3u>{}
+      , sml::state<state_ready> <= sml::state<state_ready>
+          + sml::event<event::execute_scalar_dequant_q4>
+          [ guard::guard_execute_scalar_dequant<4u>{} ] / action::effect_execute_scalar_dequant<4u>{}
+      , sml::state<state_ready> <= sml::state<state_ready>
           + sml::event<event::capture_diagnostics>
           / action::effect_capture_diagnostics{}
       , sml::state<state_ready> <= sml::state<state_ready>

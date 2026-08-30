@@ -1388,6 +1388,23 @@ inline bool pack_q6_k_rows_x8_q8_argmax_prepared(const block_q6_k *src,
 
 } // namespace quant
 
+
+// In-place normalized Walsh-Hadamard transform (orthonormal: scaled by
+// 1/sqrt(n)). Shared by the CQ packed-weight route (per-group activation
+// rotation) and the needle HadamardMLP mixing stages.
+inline void fwht_normalized(float *values, const uint32_t n) noexcept {
+  for (uint32_t step = 1u; step < n; step <<= 1u)
+    for (uint32_t base = 0u; base < n; base += step << 1u)
+      for (uint32_t j = 0u; j < step; ++j) {
+        const float a = values[base + j];
+        const float b = values[base + step + j];
+        values[base + j] = a + b;
+        values[base + step + j] = a - b;
+      }
+  const float scale = 1.0f / std::sqrt(static_cast<float>(n));
+  for (uint32_t i = 0u; i < n; ++i) values[i] *= scale;
+}
+
 inline uint64_t select_u64(const bool choose_true, const uint64_t true_value,
                            const uint64_t false_value) noexcept {
   const uint64_t mask =

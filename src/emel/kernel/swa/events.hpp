@@ -1,0 +1,83 @@
+#pragma once
+
+#include <cstdint>
+#include <span>
+
+namespace emel::kernel::swa::event {
+
+struct dispatch_result {
+  bool accepted = false;
+};
+
+// Sliding-window softmax attention for one query position against an f32 KV
+// ring cache slice (one layer): logical key positions [window_begin, position]
+// map to physical ring slots (logical % capacity). Grouped-query mapping:
+// query head h reads kv head h / (heads / kv_heads). Scores are scaled by
+// 1/sqrt(head_dim) and softmaxed with max-shift, matching the reference
+// `_attn_cached` non-flash route.
+struct attend_request {
+  std::span<const float> query;       // heads * head_dim
+  std::span<const float> key_cache;   // kv_heads * capacity * head_dim
+  std::span<const float> value_cache; // kv_heads * capacity * head_dim
+  uint32_t position = 0u;
+  uint32_t window_begin = 0u;
+  uint32_t capacity = 0u;
+  uint32_t heads = 0u;
+  uint32_t kv_heads = 0u;
+  uint32_t head_dim = 0u;
+  std::span<float> workspace; // >= position - window_begin + 1 scores
+  std::span<float> output;    // heads * head_dim
+};
+
+// Writes one position's K/V head rows into the ring cache slice at
+// physical slot position % capacity.
+struct cache_write_request {
+  std::span<const float> key_rows;   // kv_heads * head_dim
+  std::span<const float> value_rows; // kv_heads * head_dim
+  uint32_t position = 0u;
+  uint32_t capacity = 0u;
+  uint32_t kv_heads = 0u;
+  uint32_t head_dim = 0u;
+  std::span<float> key_cache;
+  std::span<float> value_cache;
+};
+
+// In-place sigmoid gating: values[i] *= sigmoid(gate_logits[i]). The gated
+// attention output `out * sigmoid(x @ gate_proj)`.
+struct gate_mul_request {
+  std::span<float> values;
+  std::span<const float> gate_logits;
+  uint32_t dim = 0u;
+};
+
+// Scalar-gated residual: output[i] = skip[i] + sigmoid(gate) * values[i].
+// The block residual `skip + sigmoid(attn_gate) * attn`.
+struct residual_gate_request {
+  std::span<const float> skip;
+  float gate = 0.0f;
+  std::span<const float> values;
+  uint32_t dim = 0u;
+  std::span<float> output;
+};
+
+struct execute_attend {
+  const attend_request &request;
+  dispatch_result &result;
+};
+
+struct execute_cache_write {
+  const cache_write_request &request;
+  dispatch_result &result;
+};
+
+struct execute_gate_mul {
+  const gate_mul_request &request;
+  dispatch_result &result;
+};
+
+struct execute_residual_gate {
+  const residual_gate_request &request;
+  dispatch_result &result;
+};
+
+} // namespace emel::kernel::swa::event
