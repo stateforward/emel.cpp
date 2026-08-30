@@ -16,11 +16,11 @@ inline bool supported(const event::gemv_request &request) noexcept {
 template <uint32_t Bits>
 inline bool avx2_supported(const event::gemv_request &request) noexcept {
 #if defined(__x86_64__) || defined(_M_X64)
-#if defined(__GNUC__) || defined(__clang__)
-  return supported<Bits>(request) && __builtin_cpu_supports("avx2") &&
-         __builtin_cpu_supports("fma");
-#else
+#if defined(__AVX2__) && defined(__FMA__)
   return supported<Bits>(request);
+#else
+  (void)request;
+  return false;
 #endif
 #else
   (void)request;
