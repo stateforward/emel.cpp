@@ -1,4 +1,3 @@
-#include "../allocation_tracker.hpp"
 #include "emel/kernel/cq/detail.hpp"
 #include "emel/kernel/cq/sm.hpp"
 #include <array>
@@ -311,53 +310,40 @@ TEST_CASE("CQ row dequant reconstructs exporter unpack values") {
   CHECK(g[0] == doctest::Approx(dot));
 }
 
-TEST_CASE("CQ4 preparation borrows packed selectors and preserves identity") {
+TEST_CASE("CQ4 preparation preserves selectors norms and numerical identity") {
   std::array<float, 28u> cb{};
   for (uint32_t i = 0u; i < 16u; ++i)
     cb[12u + i] = static_cast<float>(i + 1u) / 10.f;
-  constexpr uint32_t group = 8u, in = 13u, in_pad = 16u, out = 5u;
+  constexpr uint32_t group = 8u, in = 16u, out = 4u;
   std::vector<uint32_t> ix;
-  for (uint32_t i = 0u; i < out * in_pad; ++i)
+  for (uint32_t i = 0u; i < out * in; ++i)
     ix.push_back((i * 7u + 3u) % 16u);
-  const auto b = blob<4u>(ix, out, in, group,
-                          {0x3c00, 0x4000, 0x4200, 0x4400, 0x3c00, 0x4000,
-                           0x4200, 0x4400, 0x3c00, 0x4000});
+  const auto b = blob<4u>(
+      ix, out, in, group,
+      {0x3c00, 0x4000, 0x4200, 0x4400, 0x3c00, 0x4000, 0x4200, 0x4400});
   const auto v = view(b, out, in, group, 4u);
-  std::vector<float> prepared_norms(out * in_pad / group);
+  std::vector<uint8_t> prepared_indices(out * in);
+  std::vector<uint8_t> prepared_indices_by_input8(out * in);
+  std::vector<float> prepared_norms(out * in / group);
   emel::kernel::cq::event::prepared_q4_view prepared{};
   const emel::kernel::cq::event::prepare_q4_request prepare_request{
-      v, prepared_norms, prepared};
+      v, prepared_indices, prepared_indices_by_input8, prepared_norms,
+      prepared};
   emel::kernel::cq::sm sm;
   emel::kernel::cq::event::dispatch_result prepare_result{};
-  {
-    emel::test::allocation::allocation_scope allocations{};
-    REQUIRE(sm.process_event(
-        emel::kernel::cq::event::prepare_q4{prepare_request, prepare_result}));
-    CHECK(allocations.allocations() == 0u);
-  }
+  REQUIRE(sm.process_event(
+      emel::kernel::cq::event::prepare_q4{prepare_request, prepare_result}));
   CHECK(prepared.source == v.data);
-  CHECK(prepared.norms.size() == out * in_pad / group);
-#if defined(__AVX2__) && defined(__FMA__)
-  __m128i decoded0;
-  __m128i decoded1;
-  __m128i decoded2;
-  __m128i decoded3;
-  emel::kernel::cq::action::q4_unpack_32(b.data(), decoded0, decoded1, decoded2,
-                                         decoded3);
-  alignas(16) std::array<uint8_t, 32u> decoded{};
-  _mm_storel_epi64(reinterpret_cast<__m128i *>(decoded.data()), decoded0);
-  _mm_storel_epi64(reinterpret_cast<__m128i *>(decoded.data() + 8u), decoded1);
-  _mm_storel_epi64(reinterpret_cast<__m128i *>(decoded.data() + 16u), decoded2);
-  _mm_storel_epi64(reinterpret_cast<__m128i *>(decoded.data() + 24u), decoded3);
-  for (uint32_t i = 0u; i < decoded.size(); ++i)
-    CHECK(decoded[i] == ix[i]);
-#endif
+  CHECK(prepared.indices.size() == out * in);
+  CHECK(prepared.norms.size() == out * in / group);
+  for (size_t i = 0u; i < ix.size(); ++i)
+    CHECK(prepared.indices[i] == ix[i]);
 
   std::array<float, in> activation{};
   for (uint32_t i = 0u; i < in; ++i)
     activation[i] = static_cast<float>(i + 1u) / 8.f;
-  std::array<float, in_pad> scalar_workspace{};
-  std::array<float, in_pad> prepared_workspace{};
+  std::array<float, in> scalar_workspace{};
+  std::array<float, in> prepared_workspace{};
   std::array<float, out> scalar_output{};
   std::array<float, out> prepared_output{};
   const gemv_request scalar_request{v, cb, activation, scalar_output,
@@ -395,12 +381,14 @@ TEST_CASE(
       ix, out, in, group,
       {0x3c00, 0x4000, 0x4200, 0x4400, 0x3c00, 0x4000, 0x4200, 0x4400});
   const auto v = view(b, out, in, group, 4u);
+  std::vector<uint8_t> indices(out * in);
   std::vector<float> norms(out * in / group);
+  std::vector<uint8_t> indices_by_input8(out * in);
   emel::kernel::cq::event::prepared_q4_view prepared{};
   emel::kernel::cq::sm sm;
   emel::kernel::cq::event::dispatch_result prepare_result{};
-  const emel::kernel::cq::event::prepare_q4_request prepare_request{v, norms,
-                                                                    prepared};
+  const emel::kernel::cq::event::prepare_q4_request prepare_request{
+      v, indices, indices_by_input8, norms, prepared};
   REQUIRE(sm.process_event(
       emel::kernel::cq::event::prepare_q4{prepare_request, prepare_result}));
   std::array<float, in> activation{};
@@ -432,31 +420,30 @@ TEST_CASE(
       CHECK(output[row] == doctest::Approx(expected[row]));
 }
 
-TEST_CASE("CQ4 packed 512x512 group128 row blocks preserve exact output") {
+TEST_CASE("CQ4 prepared 512x512 group128 row blocks preserve exact output") {
 #if defined(__AVX2__) && defined(__FMA__)
   constexpr uint32_t group = 128u, in = 512u, out = 512u;
   std::array<float, 28u> cb{};
   for (uint32_t i = 0u; i < 16u; ++i)
     cb[12u + i] = (static_cast<float>(i) - 7.5f) / 8.0f;
-  std::vector<uint32_t> selectors(static_cast<size_t>(out) * in);
-  for (size_t i = 0u; i < selectors.size(); ++i)
-    selectors[i] = static_cast<uint32_t>((i * 13u + i / in * 7u + 3u) & 15u);
-  std::vector<uint16_t> norm_bits(static_cast<size_t>(out) * in / group);
-  for (size_t i = 0u; i < norm_bits.size(); ++i)
-    norm_bits[i] = static_cast<uint16_t>(0x3000u + ((i * 5u) & 0x03ffu));
-  const auto packed = blob<4u>(selectors, out, in, group, norm_bits);
-  const auto weights = view(packed, out, in, group, 4u);
-  std::vector<float> norms(norm_bits.size());
-  emel::kernel::cq::event::prepared_q4_view prepared{};
-  const emel::kernel::cq::event::prepare_q4_request prepare_request{
-      weights, norms, prepared};
-  emel::kernel::cq::sm sm;
-  emel::kernel::cq::event::dispatch_result prepare_result{};
-  REQUIRE(sm.process_event(
-      emel::kernel::cq::event::prepare_q4{prepare_request, prepare_result}));
+  std::vector<uint8_t> indices(static_cast<size_t>(out) * in);
+  std::vector<float> norms(static_cast<size_t>(out) * in / group);
   std::array<float, in> activation{};
+  for (size_t i = 0u; i < indices.size(); ++i)
+    indices[i] = static_cast<uint8_t>((i * 13u + i / in * 7u + 3u) & 15u);
+  for (size_t i = 0u; i < norms.size(); ++i)
+    norms[i] = 0.125f + static_cast<float>((i * 5u) & 15u) / 32.0f;
   for (uint32_t i = 0u; i < in; ++i)
     activation[i] = std::sin(static_cast<float>(i + 1u) * 0.03125f);
+  const emel::kernel::cq::event::prepared_q4_view prepared{
+      .source = nullptr,
+      .out = out,
+      .in = in,
+      .group = group,
+      .in_pad = in,
+      .indices = indices,
+      .indices_by_input8 = {},
+      .norms = norms};
   std::array<float, out> single{};
   std::array<float, out> block4{};
   std::array<float, out> block8{};

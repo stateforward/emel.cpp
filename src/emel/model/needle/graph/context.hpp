@@ -121,7 +121,10 @@ struct context {
     cq_workspace.resize(compute_cq_workspace(contract_in));
     a8_quantized.resize(cq_workspace.size());
     a8_dequantized.resize(cq_workspace.size());
-    prepared_norms.resize(compute_prepared_norm_count(contract_in));
+    const auto prepared_sizes = compute_prepared_sizes(contract_in);
+    prepared_indices.resize(prepared_sizes.first);
+    prepared_indices_by_input8.resize(prepared_sizes.first);
+    prepared_norms.resize(prepared_sizes.second);
   }
 
   context(const context &) = delete;
@@ -158,12 +161,15 @@ struct context {
     return workspace;
   }
 
-  static uint64_t
-  compute_prepared_norm_count(const needle::contract &bound) noexcept {
+  static std::pair<uint64_t, uint64_t>
+  compute_prepared_sizes(const needle::contract &bound) noexcept {
+    uint64_t indices = 0u;
     uint64_t norms = 0u;
     const auto add = [&](const tensor_view &view) {
-      const uint64_t groups_per_row = compute_in_pad(view) / view.group;
-      norms += static_cast<uint64_t>(view.shape[0]) * groups_per_row;
+      const uint64_t in_pad = compute_in_pad(view);
+      const uint64_t count = static_cast<uint64_t>(view.shape[0]) * in_pad;
+      indices += count;
+      norms += count / view.group;
     };
     add(bound.embedding);
     for (uint32_t i = 0u; i < bound.layer_count; ++i) {
@@ -181,7 +187,7 @@ struct context {
       add(bound.engram_sites[i].key_proj);
       add(bound.engram_sites[i].value_proj);
     }
-    return norms;
+    return {indices, norms};
   }
 
   // Bound contract (named views over the mmapped .cact); outlives the graph.
@@ -217,6 +223,8 @@ struct context {
   std::vector<float> cq_workspace;
   std::vector<int8_t> a8_quantized;
   std::vector<float> a8_dequantized;
+  std::vector<uint8_t> prepared_indices;
+  std::vector<uint8_t> prepared_indices_by_input8;
   std::vector<float> prepared_norms;
 
   emel::kernel::cq::event::prepared_q4_view prepared_embedding = {};
