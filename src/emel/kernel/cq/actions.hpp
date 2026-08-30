@@ -491,18 +491,15 @@ EMEL_KERNEL_CQ_AVX2_TARGET inline void execute_prepared_avx2_dot_row_block(
 #endif
 }
 
-EMEL_KERNEL_CQ_AVX2_TARGET inline void execute_prepared_avx2_dot_block32(
+EMEL_KERNEL_CQ_AVX2_TARGET inline void
+execute_prepared_avx2_dot_block32_loaded(
     const event::prepared_q4_view &view,
     const event::prepared_codebook_q4 &codebook,
     const std::span<const float> activation_fwht,
-    const std::span<float> output) noexcept {
+    const std::span<float> output, const __m256i codebook_byte0,
+    const __m256i codebook_byte1, const __m256i codebook_byte2,
+    const __m256i codebook_byte3) noexcept {
 #if defined(__x86_64__) || defined(_M_X64)
-  __m256i codebook_byte0;
-  __m256i codebook_byte1;
-  __m256i codebook_byte2;
-  __m256i codebook_byte3;
-  q4_codebook_byte_tables(codebook, codebook_byte0, codebook_byte1,
-                          codebook_byte2, codebook_byte3);
   const uint32_t blocked_rows = view.out / 32u * 32u;
   const uint32_t groups_per_row = view.in_pad / view.group;
   for (uint32_t row = 0u; row < blocked_rows; row += 32u) {
@@ -557,6 +554,33 @@ EMEL_KERNEL_CQ_AVX2_TARGET inline void execute_prepared_avx2_dot_block32(
         view, codebook, activation_fwht, blocked_rows,
         view.out - blocked_rows, output.subspan(blocked_rows), codebook_byte0,
         codebook_byte1, codebook_byte2, codebook_byte3);
+#else
+  (void)view;
+  (void)codebook;
+  (void)activation_fwht;
+  (void)output;
+  (void)codebook_byte0;
+  (void)codebook_byte1;
+  (void)codebook_byte2;
+  (void)codebook_byte3;
+#endif
+}
+
+EMEL_KERNEL_CQ_AVX2_TARGET inline void execute_prepared_avx2_dot_block32(
+    const event::prepared_q4_view &view,
+    const event::prepared_codebook_q4 &codebook,
+    const std::span<const float> activation_fwht,
+    const std::span<float> output) noexcept {
+#if defined(__x86_64__) || defined(_M_X64)
+  __m256i codebook_byte0;
+  __m256i codebook_byte1;
+  __m256i codebook_byte2;
+  __m256i codebook_byte3;
+  q4_codebook_byte_tables(codebook, codebook_byte0, codebook_byte1,
+                          codebook_byte2, codebook_byte3);
+  execute_prepared_avx2_dot_block32_loaded(
+      view, codebook, activation_fwht, output, codebook_byte0, codebook_byte1,
+      codebook_byte2, codebook_byte3);
 #else
   (void)view;
   (void)codebook;
@@ -875,11 +899,10 @@ struct effect_execute_prepared_avx2_batch4_q4 {
     q4_codebook_byte_tables(request.codebook, codebook_byte0, codebook_byte1,
                             codebook_byte2, codebook_byte3);
     for (const auto &target : request.targets)
-      execute_prepared_avx2_dot_loaded(
+      execute_prepared_avx2_dot_block32_loaded(
           *target.weights, request.codebook,
-          request.workspace.first(first.in_pad), 0u, target.weights->out,
-          target.output, codebook_byte0, codebook_byte1, codebook_byte2,
-          codebook_byte3);
+          request.workspace.first(first.in_pad), target.output, codebook_byte0,
+          codebook_byte1, codebook_byte2, codebook_byte3);
     if (ctx.timing_enabled)
       ctx.timed_nanoseconds += now_nanoseconds() - begin;
     ev.result.accepted = true;

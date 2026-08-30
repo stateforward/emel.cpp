@@ -492,6 +492,111 @@ TEST_CASE(
       CHECK(output[row] == doctest::Approx(expected[row]));
 }
 
+TEST_CASE("CQ4 realistic batch4 matches independent scalar and prepared calls") {
+#if defined(__AVX2__) && defined(__FMA__)
+  constexpr uint32_t group = 128u;
+  constexpr uint32_t in = 512u;
+  constexpr std::array<uint32_t, 4u> outs{512u, 256u, 256u, 512u};
+  std::array<float, 28u> codebook{};
+  uint32_t random = 0x6a09e667u;
+  for (uint32_t i = 0u; i < 16u; ++i) {
+    random = random * 1664525u + 1013904223u;
+    codebook[12u + i] =
+        (static_cast<float>(static_cast<int32_t>(random >> 8u)) /
+         8388608.0f) -
+        1.0f;
+  }
+  std::array<float, in> activation{};
+  for (float &value : activation) {
+    random = random * 1664525u + 1013904223u;
+    value = (static_cast<float>(static_cast<int32_t>(random >> 8u)) /
+             8388608.0f) -
+            1.0f;
+  }
+
+  struct target_fixture {
+    std::vector<uint8_t> blob;
+    tensor_view source{};
+    std::vector<uint8_t> indices;
+    std::vector<uint8_t> indices_by_input32;
+    std::vector<float> norms;
+    emel::kernel::cq::event::prepared_q4_view prepared{};
+    std::vector<float> scalar;
+    std::vector<float> separate;
+    std::vector<float> batch;
+    std::array<float, in> scalar_workspace{};
+    std::array<float, in> prepared_workspace{};
+  };
+  std::array<target_fixture, 4u> targets{};
+  emel::kernel::cq::sm sm;
+  emel::kernel::cq::event::prepared_codebook_q4 prepared_codebook{};
+  emel::kernel::cq::action::prepare_codebook_q4(
+      {codebook, prepared_codebook});
+
+  for (uint32_t target_index = 0u; target_index < targets.size();
+       ++target_index) {
+    auto &target = targets[target_index];
+    const uint32_t out = outs[target_index];
+    std::vector<uint32_t> selectors(static_cast<size_t>(out) * in);
+    for (uint32_t &selector : selectors) {
+      random = random * 1664525u + 1013904223u;
+      selector = (random >> 28u) & 15u;
+    }
+    std::vector<uint16_t> norm_bits(static_cast<size_t>(out) * in / group);
+    for (uint16_t &bits : norm_bits) {
+      random = random * 1664525u + 1013904223u;
+      bits = static_cast<uint16_t>(0x3000u + ((random >> 24u) & 15u) * 0x80u);
+    }
+    target.blob = blob<4u>(selectors, out, in, group, norm_bits);
+    target.source = view(target.blob, out, in, group, 4u);
+    target.indices.resize(static_cast<size_t>(out) * in);
+    target.indices_by_input32.resize(static_cast<size_t>(out) * in);
+    target.norms.resize(static_cast<size_t>(out) * in / group);
+    emel::kernel::cq::event::dispatch_result prepare_result{};
+    const emel::kernel::cq::event::prepare_q4_request prepare_request{
+        target.source, target.indices, target.indices_by_input32, target.norms,
+        target.prepared};
+    REQUIRE(sm.process_event(
+        emel::kernel::cq::event::prepare_q4{prepare_request, prepare_result}));
+
+    target.scalar.resize(out);
+    target.separate.resize(out);
+    target.batch.resize(out);
+    const gemv_request scalar_request{target.source, codebook, activation,
+                                      target.scalar, target.scalar_workspace};
+    emel::kernel::cq::event::dispatch_result scalar_result{};
+    REQUIRE(sm.process_event(emel::kernel::cq::event::execute_scalar_q4{
+        scalar_request, scalar_result}));
+    const emel::kernel::cq::event::prepared_gemv_request prepared_request{
+        target.prepared, prepared_codebook, activation, target.separate,
+        target.prepared_workspace};
+    emel::kernel::cq::event::dispatch_result prepared_result{};
+    REQUIRE(sm.process_event(emel::kernel::cq::event::execute_prepared_avx2_q4{
+        prepared_request, prepared_result}));
+  }
+
+  std::array<float, in> batch_workspace{};
+  const emel::kernel::cq::event::prepared_gemv_batch4_request batch_request{
+      .targets = {{{&targets[0].prepared, targets[0].batch},
+                   {&targets[1].prepared, targets[1].batch},
+                   {&targets[2].prepared, targets[2].batch},
+                   {&targets[3].prepared, targets[3].batch}}},
+      .codebook = prepared_codebook,
+      .activation = activation,
+      .workspace = batch_workspace};
+  emel::kernel::cq::event::dispatch_result batch_result{};
+  REQUIRE(
+      sm.process_event(emel::kernel::cq::event::execute_prepared_avx2_batch4_q4{
+          batch_request, batch_result}));
+  for (const auto &target : targets)
+    for (uint32_t row = 0u; row < target.batch.size(); ++row) {
+      CHECK(target.batch[row] == target.separate[row]);
+      CHECK(target.batch[row] ==
+            doctest::Approx(target.scalar[row]).epsilon(1.0e-5));
+    }
+#endif
+}
+
 TEST_CASE("CQ4 prepared lookup preserves vector and scalar group tails") {
 #if defined(__AVX2__) && defined(__FMA__)
   for (const uint32_t group : {2u, 4u, 8u, 16u, 32u, 64u, 128u}) {
