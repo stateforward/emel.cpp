@@ -18,17 +18,17 @@ struct model {
           + sml::event<event::prepare_q4>
           [ guard::guard_prepare_q4{} ] / action::effect_prepare_q4{}
       , sml::state<state_ready> <= sml::state<state_ready>
-          + sml::event<event::execute_prepared_avx2_q4>
-          [ guard::guard_execute_prepared_avx2_q4{} ]
-          / action::effect_execute_prepared_avx2_q4{}
+          + sml::event<event::execute_prepared_pair_lut_q4>
+          [ guard::guard_execute_prepared_pair_lut_q4{} ]
+          / action::effect_execute_prepared_pair_lut_q4{}
       , sml::state<state_ready> <= sml::state<state_ready>
-          + sml::event<event::execute_prepared_avx2_batch4_q4>
-          [ guard::guard_execute_prepared_avx2_batch4_q4{} ]
-          / action::effect_execute_prepared_avx2_batch4_q4{}
+          + sml::event<event::execute_prepared_pair_lut_batch4_q4>
+          [ guard::guard_execute_prepared_pair_lut_batch4_q4{} ]
+          / action::effect_execute_prepared_pair_lut_batch4_q4{}
       , sml::state<state_ready> <= sml::state<state_ready>
-          + sml::event<event::execute_prepared_avx2_rows_q4>
-          [ guard::guard_execute_prepared_avx2_rows_q4{} ]
-          / action::effect_execute_prepared_avx2_rows_q4{}
+          + sml::event<event::execute_prepared_pair_lut_rows_q4>
+          [ guard::guard_execute_prepared_pair_lut_rows_q4{} ]
+          / action::effect_execute_prepared_pair_lut_rows_q4{}
       , sml::state<state_ready> <= sml::state<state_ready>
           + sml::event<event::execute_prepared_dequant_q4>
           [ guard::guard_execute_prepared_dequant_q4{} ]

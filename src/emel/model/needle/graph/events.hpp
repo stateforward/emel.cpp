@@ -34,8 +34,8 @@ struct decode {
 struct capture_cq_diagnostics {
   uint64_t &prepare_calls;
   uint64_t &prepared_calls;
-  size_t &prepared_index_bytes;
-  size_t &prepared_norm_bytes;
+  size_t &prepared_packed_bytes;
+  size_t &pair_lut_bytes;
 };
 
 struct init_ctx {

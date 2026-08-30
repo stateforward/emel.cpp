@@ -204,16 +204,16 @@ TEST_CASE("needle graph prepares CQ4 storage once and selects prepared route") {
   REQUIRE(graph.process_event(emel::model::needle::graph::event::init{}));
   uint64_t prepare_calls = 0u;
   uint64_t prepared_calls = 0u;
-  size_t prepared_index_bytes = 0u;
-  size_t prepared_norm_bytes = 0u;
+  size_t prepared_packed_bytes = 0u;
+  size_t pair_lut_bytes = 0u;
   REQUIRE(graph.process_event(
       emel::model::needle::graph::event::capture_cq_diagnostics{
-          prepare_calls, prepared_calls, prepared_index_bytes,
-          prepared_norm_bytes}));
+          prepare_calls, prepared_calls, prepared_packed_bytes,
+          pair_lut_bytes}));
   CHECK(prepare_calls > 0u);
   CHECK(prepared_calls == 0u);
-  CHECK(prepared_index_bytes > 0u);
-  CHECK(prepared_norm_bytes > 0u);
+  CHECK(prepared_packed_bytes > 0u);
+  CHECK(pair_lut_bytes > 0u);
 
   std::vector<float> logits(k_vocab);
   REQUIRE(graph.process_event(
@@ -221,8 +221,8 @@ TEST_CASE("needle graph prepares CQ4 storage once and selects prepared route") {
   const uint64_t prepared_after_decode = prepared_calls;
   REQUIRE(graph.process_event(
       emel::model::needle::graph::event::capture_cq_diagnostics{
-          prepare_calls, prepared_calls, prepared_index_bytes,
-          prepared_norm_bytes}));
+          prepare_calls, prepared_calls, prepared_packed_bytes,
+          pair_lut_bytes}));
   CHECK(prepared_calls > prepared_after_decode);
   const uint64_t preparation_count = prepare_calls;
 
@@ -230,8 +230,8 @@ TEST_CASE("needle graph prepares CQ4 storage once and selects prepared route") {
       emel::model::needle::graph::event::decode{2, std::span<float>{logits}}));
   REQUIRE(graph.process_event(
       emel::model::needle::graph::event::capture_cq_diagnostics{
-          prepare_calls, prepared_calls, prepared_index_bytes,
-          prepared_norm_bytes}));
+          prepare_calls, prepared_calls, prepared_packed_bytes,
+          pair_lut_bytes}));
   CHECK(prepare_calls == preparation_count);
 }
 

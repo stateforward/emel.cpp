@@ -59,31 +59,32 @@ prepare_supported(const event::prepare_q4_request &request) noexcept {
   const auto &view = request.weights;
   if (view.data == nullptr || view.bits != 4u || view.shape[0] == 0u ||
       view.shape[1] == 0u || view.group == 0u ||
-      view.group > detail::k_max_group || !detail::is_power_of_two(view.group))
+      view.group > detail::k_max_group ||
+      !detail::is_power_of_two(view.group) || (view.group & 1u) != 0u)
     return false;
   const uint64_t in_pad =
       (static_cast<uint64_t>(view.shape[1]) + view.group - 1u) / view.group *
       view.group;
-  const uint64_t index_count = static_cast<uint64_t>(view.shape[0]) * in_pad;
-  const uint64_t norm_count = index_count / view.group;
-  const uint64_t packed_bytes = index_count / 2u;
+  const uint64_t packed_row = in_pad / 2u;
+  const uint64_t packed_bytes =
+      static_cast<uint64_t>(view.shape[0]) * packed_row;
+  const uint64_t norm_count =
+      static_cast<uint64_t>(view.shape[0]) * in_pad / view.group;
+  const uint64_t blocked_bytes =
+      static_cast<uint64_t>(view.shape[0] / 8u * 8u) * packed_row;
   return packed_bytes + norm_count * 2u <= view.nbytes &&
-         request.indices.size() >= index_count &&
-         request.indices_by_input8.size() >= index_count &&
-         request.norms.size() >= norm_count;
+         request.packed_by_pair8.size() >= blocked_bytes;
 }
 inline bool prepared_supported(const event::prepared_q4_view &view,
                                const std::span<const float> codebook) noexcept {
-  const uint64_t index_count = static_cast<uint64_t>(view.out) * view.in_pad;
-  const uint64_t norm_count = index_count / view.group;
-  const uint64_t blocked_count =
-      static_cast<uint64_t>(view.out / 8u * 8u) * view.in_pad;
+  const uint64_t packed_row = view.in_pad / 2u;
+  const uint64_t blocked_bytes =
+      static_cast<uint64_t>(view.out / 8u * 8u) * packed_row;
   return view.source != nullptr && view.out > 0u && view.in > 0u &&
          view.group > 0u && view.group <= detail::k_max_group &&
-         detail::is_power_of_two(view.group) && view.in_pad >= view.in &&
-         view.in_pad % view.group == 0u && view.indices.size() >= index_count &&
-         view.indices_by_input8.size() >= blocked_count &&
-         view.norms.size() >= norm_count && codebook.size() >= 28u;
+         detail::is_power_of_two(view.group) && (view.group & 1u) == 0u &&
+         view.in_pad >= view.in && view.in_pad % view.group == 0u &&
+         view.packed_by_pair8.size() >= blocked_bytes && codebook.size() >= 28u;
 }
 
 struct guard_prepare_q4 {
@@ -93,8 +94,8 @@ struct guard_prepare_q4 {
   }
 };
 
-struct guard_execute_prepared_avx2_q4 {
-  bool operator()(const event::execute_prepared_avx2_q4 &ev,
+struct guard_execute_prepared_pair_lut_q4 {
+  bool operator()(const event::execute_prepared_pair_lut_q4 &ev,
                   const action::context &) const noexcept {
 #if (defined(__x86_64__) || defined(_M_X64)) && defined(__AVX2__) &&           \
     defined(__FMA__)
@@ -102,7 +103,11 @@ struct guard_execute_prepared_avx2_q4 {
     return prepared_supported(request.weights, request.codebook) &&
            request.activation.size() >= request.weights.in &&
            request.output.size() >= request.weights.out &&
-           request.workspace.size() >= request.weights.in_pad;
+           request.workspace.size() >= request.weights.in_pad &&
+           request.pair_lut.size() >= 256u &&
+           request.pair_scratch.size() >=
+               static_cast<uint64_t>(request.weights.out) *
+                   (request.weights.in_pad / 2u);
 #else
     (void)ev;
     return false;
@@ -110,15 +115,23 @@ struct guard_execute_prepared_avx2_q4 {
   }
 };
 
-struct guard_execute_prepared_avx2_batch4_q4 {
-  bool operator()(const event::execute_prepared_avx2_batch4_q4 &ev,
+struct guard_execute_prepared_pair_lut_batch4_q4 {
+  bool operator()(const event::execute_prepared_pair_lut_batch4_q4 &ev,
                   const action::context &) const noexcept {
 #if (defined(__x86_64__) || defined(_M_X64)) && defined(__AVX2__) &&           \
     defined(__FMA__)
     const auto &request = ev.request;
     const auto *first = request.targets[0].weights;
+    uint64_t scratch_count = 0u;
+    for (const auto &target : request.targets) {
+      if (target.weights != nullptr)
+        scratch_count += static_cast<uint64_t>(target.weights->out) *
+                         (first != nullptr ? first->in_pad / 2u : 0u);
+    }
     if (first == nullptr || request.activation.size() < first->in ||
-        request.workspace.size() < first->in_pad)
+        request.workspace.size() < first->in_pad ||
+        request.pair_lut.size() < 256u ||
+        request.pair_scratch.size() < scratch_count)
       return false;
     for (const auto &target : request.targets)
       if (target.weights == nullptr ||
@@ -136,8 +149,8 @@ struct guard_execute_prepared_avx2_batch4_q4 {
   }
 };
 
-struct guard_execute_prepared_avx2_rows_q4 {
-  bool operator()(const event::execute_prepared_avx2_rows_q4 &ev,
+struct guard_execute_prepared_pair_lut_rows_q4 {
+  bool operator()(const event::execute_prepared_pair_lut_rows_q4 &ev,
                   const action::context &) const noexcept {
     const auto &request = ev.request;
     return prepared_supported(request.weights, request.codebook) &&
@@ -146,7 +159,11 @@ struct guard_execute_prepared_avx2_rows_q4 {
                request.weights.out &&
            request.activation.size() >= request.weights.in &&
            request.output.size() >= request.row_count &&
-           request.workspace.size() >= request.weights.in_pad;
+           request.workspace.size() >= request.weights.in_pad &&
+           request.pair_lut.size() >= 256u &&
+           request.pair_scratch.size() >=
+               static_cast<uint64_t>(request.row_count) *
+                   (request.weights.in_pad / 2u);
   }
 };
 
