@@ -15,11 +15,26 @@ struct model {
     // clang-format off
     return sml::make_transition_table(
         sml::state<state_ready> <= *sml::state<state_ready>
-          + sml::event<event::execute_avx2>
-          [ guard::guard_execute_avx2{} ] / action::effect_execute_avx2{}
+          + sml::event<event::execute_avx2_q2>
+          [ guard::guard_execute_avx2<2u>{} ] / action::effect_execute_avx2<2u>{}
       , sml::state<state_ready> <= sml::state<state_ready>
-          + sml::event<event::execute_scalar>
-          [ guard::guard_execute_scalar{} ] / action::effect_execute_scalar{}
+          + sml::event<event::execute_avx2_q3>
+          [ guard::guard_execute_avx2<3u>{} ] / action::effect_execute_avx2<3u>{}
+      , sml::state<state_ready> <= sml::state<state_ready>
+          + sml::event<event::execute_avx2_q4>
+          [ guard::guard_execute_avx2<4u>{} ] / action::effect_execute_avx2<4u>{}
+      , sml::state<state_ready> <= sml::state<state_ready>
+          + sml::event<event::execute_scalar_q2>
+          [ guard::guard_execute_scalar<2u>{} ] / action::effect_execute_scalar<2u>{}
+      , sml::state<state_ready> <= sml::state<state_ready>
+          + sml::event<event::execute_scalar_q3>
+          [ guard::guard_execute_scalar<3u>{} ] / action::effect_execute_scalar<3u>{}
+      , sml::state<state_ready> <= sml::state<state_ready>
+          + sml::event<event::execute_scalar_q4>
+          [ guard::guard_execute_scalar<4u>{} ] / action::effect_execute_scalar<4u>{}
+      , sml::state<state_ready> <= sml::state<state_ready>
+          + sml::event<event::execute_scalar_ternary>
+          [ guard::guard_execute_scalar<5u>{} ] / action::effect_execute_scalar<5u>{}
       , sml::state<state_ready> <= sml::state<state_ready>
           + sml::event<event::capture_diagnostics>
           / action::effect_capture_diagnostics{}
