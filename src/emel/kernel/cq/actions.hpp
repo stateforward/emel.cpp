@@ -1,8 +1,8 @@
 #pragma once
 
+#include <chrono>
 #include <cstdint>
 #include <cstring>
-#include <chrono>
 
 #if defined(__x86_64__) || defined(_M_X64)
 #include <immintrin.h>
@@ -240,16 +240,15 @@ EMEL_KERNEL_CQ_AVX2_TARGET inline void execute_prepared_avx2_dot_loaded(
         view.indices.data() + static_cast<size_t>(source_row) * view.in_pad;
     const float *norms =
         view.norms.data() + static_cast<size_t>(source_row) * groups_per_row;
-    // Two independent chains are fastest on the target Zen 2 host. Each
-    // 64-column iteration performs four 16-selector lookups; every lookup
-    // reconstructs sixteen exact float bit patterns with four lane-parallel
-    // byte shuffles.
-    __m256 accum0 = _mm256_setzero_ps();
-    __m256 accum1 = _mm256_setzero_ps();
-    float scalar_tail = 0.0f;
+    // Two independent accumulation chains keep the shuffle/FMA pipeline full.
+    // Each group is reduced before its exact decoded fp16 norm is applied, so
+    // the hot selector loop performs lookup * activation only.
+    float row_result = 0.0f;
     for (uint32_t begin = 0u, group_index = 0u; begin < view.in_pad;
          begin += view.group, ++group_index) {
-      const __m256 norm_v = _mm256_set1_ps(norms[group_index]);
+      __m256 group_accum0 = _mm256_setzero_ps();
+      __m256 group_accum1 = _mm256_setzero_ps();
+      float scalar_tail = 0.0f;
       uint32_t i = 0u;
       for (; i + 64u <= view.group; i += 64u) {
         const uint8_t *chunk = indices + begin + i;
@@ -260,39 +259,48 @@ EMEL_KERNEL_CQ_AVX2_TARGET inline void execute_prepared_avx2_dot_loaded(
         const q4_lookup16_result values1 = lookup_codebook16_pshufb(
             load_selector16(chunk + 16u), codebook_byte0, codebook_byte1,
             codebook_byte2, codebook_byte3);
-        accum0 = _mm256_fmadd_ps(_mm256_mul_ps(values0.low, norm_v),
-                                 _mm256_loadu_ps(activation), accum0);
-        accum1 = _mm256_fmadd_ps(_mm256_mul_ps(values0.high, norm_v),
-                                 _mm256_loadu_ps(activation + 8u), accum1);
-        accum0 = _mm256_fmadd_ps(_mm256_mul_ps(values1.low, norm_v),
-                                 _mm256_loadu_ps(activation + 16u), accum0);
-        accum1 = _mm256_fmadd_ps(_mm256_mul_ps(values1.high, norm_v),
-                                 _mm256_loadu_ps(activation + 24u), accum1);
+        group_accum0 = _mm256_fmadd_ps(values0.low,
+                                       _mm256_loadu_ps(activation),
+                                       group_accum0);
+        group_accum1 = _mm256_fmadd_ps(values0.high,
+                                       _mm256_loadu_ps(activation + 8u),
+                                       group_accum1);
+        group_accum0 = _mm256_fmadd_ps(values1.low,
+                                       _mm256_loadu_ps(activation + 16u),
+                                       group_accum0);
+        group_accum1 = _mm256_fmadd_ps(values1.high,
+                                       _mm256_loadu_ps(activation + 24u),
+                                       group_accum1);
         const q4_lookup16_result values2 = lookup_codebook16_pshufb(
             load_selector16(chunk + 32u), codebook_byte0, codebook_byte1,
             codebook_byte2, codebook_byte3);
         const q4_lookup16_result values3 = lookup_codebook16_pshufb(
             load_selector16(chunk + 48u), codebook_byte0, codebook_byte1,
             codebook_byte2, codebook_byte3);
-        accum0 = _mm256_fmadd_ps(_mm256_mul_ps(values2.low, norm_v),
-                                 _mm256_loadu_ps(activation + 32u), accum0);
-        accum1 = _mm256_fmadd_ps(_mm256_mul_ps(values2.high, norm_v),
-                                 _mm256_loadu_ps(activation + 40u), accum1);
-        accum0 = _mm256_fmadd_ps(_mm256_mul_ps(values3.low, norm_v),
-                                 _mm256_loadu_ps(activation + 48u), accum0);
-        accum1 = _mm256_fmadd_ps(_mm256_mul_ps(values3.high, norm_v),
-                                 _mm256_loadu_ps(activation + 56u), accum1);
+        group_accum0 = _mm256_fmadd_ps(values2.low,
+                                       _mm256_loadu_ps(activation + 32u),
+                                       group_accum0);
+        group_accum1 = _mm256_fmadd_ps(values2.high,
+                                       _mm256_loadu_ps(activation + 40u),
+                                       group_accum1);
+        group_accum0 = _mm256_fmadd_ps(values3.low,
+                                       _mm256_loadu_ps(activation + 48u),
+                                       group_accum0);
+        group_accum1 = _mm256_fmadd_ps(values3.high,
+                                       _mm256_loadu_ps(activation + 56u),
+                                       group_accum1);
       }
       for (; i + 16u <= view.group; i += 16u) {
         const q4_lookup16_result values = lookup_codebook16_pshufb(
             load_selector16(indices + begin + i), codebook_byte0,
             codebook_byte1, codebook_byte2, codebook_byte3);
-        accum0 = _mm256_fmadd_ps(
-            _mm256_mul_ps(values.low, norm_v),
-            _mm256_loadu_ps(activation_fwht.data() + begin + i), accum0);
-        accum1 = _mm256_fmadd_ps(
-            _mm256_mul_ps(values.high, norm_v),
-            _mm256_loadu_ps(activation_fwht.data() + begin + i + 8u), accum1);
+        group_accum0 = _mm256_fmadd_ps(
+            values.low, _mm256_loadu_ps(activation_fwht.data() + begin + i),
+            group_accum0);
+        group_accum1 = _mm256_fmadd_ps(
+            values.high,
+            _mm256_loadu_ps(activation_fwht.data() + begin + i + 8u),
+            group_accum1);
       }
       if (i + 8u <= view.group) {
         const __m128i selectors = _mm_loadl_epi64(
@@ -302,21 +310,24 @@ EMEL_KERNEL_CQ_AVX2_TARGET inline void execute_prepared_avx2_dot_loaded(
             _mm256_castsi256_si128(codebook_byte1),
             _mm256_castsi256_si128(codebook_byte2),
             _mm256_castsi256_si128(codebook_byte3));
-        accum0 = _mm256_fmadd_ps(
-            _mm256_mul_ps(values, norm_v),
-            _mm256_loadu_ps(activation_fwht.data() + begin + i), accum0);
+        group_accum0 = _mm256_fmadd_ps(
+            values, _mm256_loadu_ps(activation_fwht.data() + begin + i),
+            group_accum0);
         i += 8u;
       }
       for (; i < view.group; ++i)
         scalar_tail += detail::code_value<4u>(
                            indices[begin + i], view.group, codebook.values) *
-                       norms[group_index] * activation_fwht[begin + i];
+                       activation_fwht[begin + i];
+      const __m256 group_accum = _mm256_add_ps(group_accum0, group_accum1);
+      alignas(32) float lanes[8];
+      _mm256_store_ps(lanes, group_accum);
+      const float group_sum = lanes[0] + lanes[1] + lanes[2] + lanes[3] +
+                              lanes[4] + lanes[5] + lanes[6] + lanes[7] +
+                              scalar_tail;
+      row_result += group_sum * norms[group_index];
     }
-    const __m256 accum = _mm256_add_ps(accum0, accum1);
-    alignas(32) float lanes[8];
-    _mm256_store_ps(lanes, accum);
-    output[row] = lanes[0] + lanes[1] + lanes[2] + lanes[3] + lanes[4] +
-                  lanes[5] + lanes[6] + lanes[7] + scalar_tail;
+    output[row] = row_result;
   }
 #else
   (void)view;
@@ -440,31 +451,37 @@ EMEL_KERNEL_CQ_AVX2_TARGET inline void execute_prepared_avx2_dot_block16(
   for (uint32_t row = 0u; row < blocked_rows; row += 16u) {
     const uint8_t *selectors =
         view.indices_by_input16.data() + static_cast<size_t>(row) * view.in_pad;
-    __m256 accum_low = _mm256_setzero_ps();
-    __m256 accum_high = _mm256_setzero_ps();
+    __m256 row_total_low = _mm256_setzero_ps();
+    __m256 row_total_high = _mm256_setzero_ps();
     for (uint32_t begin = 0u, group_index = 0u; begin < view.in_pad;
          begin += view.group, ++group_index) {
-      alignas(32) float norm_lanes[16u];
-      for (uint32_t lane = 0u; lane < 16u; ++lane)
-        norm_lanes[lane] =
-            view.norms[(static_cast<size_t>(row + lane) * groups_per_row) +
-                       group_index];
-      const __m256 norm_low = _mm256_load_ps(norm_lanes);
-      const __m256 norm_high = _mm256_load_ps(norm_lanes + 8u);
+      __m256 group_accum_low = _mm256_setzero_ps();
+      __m256 group_accum_high = _mm256_setzero_ps();
       for (uint32_t i = 0u; i < view.group; ++i) {
         const q4_lookup16_result values = lookup_codebook16_pshufb(
             load_selector16(selectors + static_cast<size_t>(begin + i) * 16u),
             codebook_byte0, codebook_byte1, codebook_byte2, codebook_byte3);
         const __m256 activation =
             _mm256_set1_ps(activation_fwht[begin + i]);
-        accum_low = _mm256_fmadd_ps(_mm256_mul_ps(values.low, norm_low),
-                                    activation, accum_low);
-        accum_high = _mm256_fmadd_ps(_mm256_mul_ps(values.high, norm_high),
-                                     activation, accum_high);
+        group_accum_low =
+            _mm256_fmadd_ps(values.low, activation, group_accum_low);
+        group_accum_high =
+            _mm256_fmadd_ps(values.high, activation, group_accum_high);
       }
+      alignas(32) float norm_lanes[16u];
+      for (uint32_t lane = 0u; lane < 16u; ++lane)
+        norm_lanes[lane] =
+            view.norms[(static_cast<size_t>(row + lane) * groups_per_row) +
+                       group_index];
+      row_total_low = _mm256_fmadd_ps(group_accum_low,
+                                      _mm256_load_ps(norm_lanes),
+                                      row_total_low);
+      row_total_high = _mm256_fmadd_ps(group_accum_high,
+                                       _mm256_load_ps(norm_lanes + 8u),
+                                       row_total_high);
     }
-    _mm256_storeu_ps(output.data() + row, accum_low);
-    _mm256_storeu_ps(output.data() + row + 8u, accum_high);
+    _mm256_storeu_ps(output.data() + row, row_total_low);
+    _mm256_storeu_ps(output.data() + row + 8u, row_total_high);
   }
   if (blocked_rows < view.out)
     execute_prepared_avx2_dot_loaded(
@@ -582,7 +599,6 @@ execute_avx2_gemv(const event::gemv_request &request) noexcept {
   const uint8_t *base = static_cast<const uint8_t *>(view.data);
   const uint8_t *norms = base + static_cast<size_t>(out) * packed_row;
   const float *codebook = detail::codebook_for<Bits>(request.codebook);
-#if defined(__x86_64__) || defined(_M_X64)
   __m256 q4_codebook_low{};
   __m256 q4_codebook_high{};
   __m128i q4_duplicate_mask{};
@@ -591,24 +607,81 @@ execute_avx2_gemv(const event::gemv_request &request) noexcept {
   if constexpr (Bits == 4u) {
     q4_codebook_low = _mm256_loadu_ps(codebook);
     q4_codebook_high = _mm256_loadu_ps(codebook + 8u);
-    q4_duplicate_mask =
-        _mm_setr_epi8(0, 0, 1, 1, 2, 2, 3, 3, -1, -1, -1, -1, -1, -1, -1, -1);
+    q4_duplicate_mask = _mm_setr_epi8(
+        0, 0, 1, 1, 2, 2, 3, 3, -1, -1, -1, -1, -1, -1, -1, -1);
     q4_high_nibble_mask =
         _mm_setr_epi8(0, -1, 0, -1, 0, -1, 0, -1, 0, 0, 0, 0, 0, 0, 0, 0);
     q4_nibble_mask = _mm_set1_epi8(0x0f);
   }
-#endif
   for (uint32_t row = 0u; row < out; ++row) {
     const uint8_t *row_packed = base + static_cast<size_t>(row) * packed_row;
     const uint8_t *row_norms = norms + static_cast<size_t>(row) * norm_row;
-    __m256 accum = _mm256_setzero_ps();
+    float row_result = 0.0f;
     for (uint32_t begin = 0u, group_index = 0u; begin < in_pad;
          begin += group, ++group_index) {
       const float norm =
           detail::fp16_to_fp32(detail::load_u16(row_norms + group_index * 2u));
-      const __m256 norm_v = _mm256_set1_ps(norm);
       const uint8_t *group_packed = row_packed + group_index * group_bytes;
+      __m256 group_accum0 = _mm256_setzero_ps();
+      __m256 group_accum1 = _mm256_setzero_ps();
+      float scalar_tail = 0.0f;
       uint32_t i = 0u;
+      for (; i + 16u <= group; i += 16u) {
+        const __m256 activation0 =
+            _mm256_loadu_ps(request.workspace.data() + begin + i);
+        const __m256 activation1 =
+            _mm256_loadu_ps(request.workspace.data() + begin + i + 8u);
+        __m256 values0;
+        __m256 values1;
+        if constexpr (Bits == 4u) {
+          uint64_t packed_word = 0u;
+          std::memcpy(&packed_word, group_packed + (i >> 1u),
+                      sizeof(packed_word));
+          const __m128i packed_v =
+              _mm_cvtsi64_si128(static_cast<int64_t>(packed_word));
+          const auto decode_values = [&](const __m128i packed4) {
+            const __m128i duplicated =
+                _mm_shuffle_epi8(packed4, q4_duplicate_mask);
+            const __m128i low_nibbles =
+                _mm_and_si128(duplicated, q4_nibble_mask);
+            const __m128i high_nibbles = _mm_and_si128(
+                _mm_srli_epi16(duplicated, 4), q4_nibble_mask);
+            const __m128i indices_u8 = _mm_blendv_epi8(
+                low_nibbles, high_nibbles, q4_high_nibble_mask);
+            const __m256i index_v = _mm256_cvtepu8_epi32(indices_u8);
+            const __m256i table_index =
+                _mm256_and_si256(index_v, _mm256_set1_epi32(7));
+            const __m256 low_values =
+                _mm256_permutevar8x32_ps(q4_codebook_low, table_index);
+            const __m256 high_values =
+                _mm256_permutevar8x32_ps(q4_codebook_high, table_index);
+            const __m256 high_table_mask =
+                _mm256_castsi256_ps(_mm256_slli_epi32(index_v, 28));
+            return _mm256_blendv_ps(low_values, high_values, high_table_mask);
+          };
+          values0 = decode_values(packed_v);
+          values1 = decode_values(_mm_srli_si128(packed_v, 4));
+        } else {
+          alignas(32) int32_t indices0[8];
+          alignas(32) int32_t indices1[8];
+          for (uint32_t lane = 0u; lane < 8u; ++lane) {
+            indices0[lane] = static_cast<int32_t>(
+                detail::unpack_index<Bits>(group_packed, i + lane));
+            indices1[lane] = static_cast<int32_t>(
+                detail::unpack_index<Bits>(group_packed, i + 8u + lane));
+          }
+          values0 = _mm256_i32gather_ps(
+              codebook,
+              _mm256_load_si256(reinterpret_cast<const __m256i *>(indices0)),
+              4);
+          values1 = _mm256_i32gather_ps(
+              codebook,
+              _mm256_load_si256(reinterpret_cast<const __m256i *>(indices1)),
+              4);
+        }
+        group_accum0 = _mm256_fmadd_ps(values0, activation0, group_accum0);
+        group_accum1 = _mm256_fmadd_ps(values1, activation1, group_accum1);
+      }
       for (; i + 8u <= group; i += 8u) {
         const __m256 activation =
             _mm256_loadu_ps(request.workspace.data() + begin + i);
@@ -621,7 +694,8 @@ execute_avx2_gemv(const event::gemv_request &request) noexcept {
               _mm_cvtsi32_si128(static_cast<int32_t>(packed_word));
           const __m128i duplicated =
               _mm_shuffle_epi8(packed_v, q4_duplicate_mask);
-          const __m128i low_nibbles = _mm_and_si128(duplicated, q4_nibble_mask);
+          const __m128i low_nibbles =
+              _mm_and_si128(duplicated, q4_nibble_mask);
           const __m128i high_nibbles =
               _mm_and_si128(_mm_srli_epi16(duplicated, 4), q4_nibble_mask);
           const __m128i indices_u8 =
@@ -641,24 +715,27 @@ execute_avx2_gemv(const event::gemv_request &request) noexcept {
           for (uint32_t lane = 0u; lane < 8u; ++lane)
             indices[lane] = static_cast<int32_t>(
                 detail::unpack_index<Bits>(group_packed, i + lane));
-          const __m256i index_v =
-              _mm256_load_si256(reinterpret_cast<const __m256i *>(indices));
-          values = _mm256_i32gather_ps(codebook, index_v, 4);
+          values = _mm256_i32gather_ps(
+              codebook,
+              _mm256_load_si256(reinterpret_cast<const __m256i *>(indices)),
+              4);
         }
-        accum =
-            _mm256_fmadd_ps(_mm256_mul_ps(values, norm_v), activation, accum);
+        group_accum0 = _mm256_fmadd_ps(values, activation, group_accum0);
       }
       for (; i < group; ++i) {
         const uint32_t index = detail::unpack_index<Bits>(group_packed, i);
-        request.output[row] +=
-            detail::code_value<Bits>(index, group, request.codebook) * norm *
-            request.workspace[begin + i];
+        scalar_tail += detail::code_value<Bits>(index, group, request.codebook) *
+                       request.workspace[begin + i];
       }
+      const __m256 group_accum = _mm256_add_ps(group_accum0, group_accum1);
+      alignas(32) float lanes[8];
+      _mm256_store_ps(lanes, group_accum);
+      const float group_sum = lanes[0] + lanes[1] + lanes[2] + lanes[3] +
+                              lanes[4] + lanes[5] + lanes[6] + lanes[7] +
+                              scalar_tail;
+      row_result += group_sum * norm;
     }
-    alignas(32) float lanes[8];
-    _mm256_store_ps(lanes, accum);
-    request.output[row] += lanes[0] + lanes[1] + lanes[2] + lanes[3] +
-                           lanes[4] + lanes[5] + lanes[6] + lanes[7];
+    request.output[row] = row_result;
   }
 #else
   execute_scalar_gemv<Bits>(request);
@@ -739,6 +816,7 @@ struct effect_execute_prepared_avx2_batch4_q4 {
     ctx.prepared_calls += request.targets.size();
   }
 };
+
 
 struct effect_execute_prepared_avx2_rows_q4 {
   void operator()(const event::execute_prepared_avx2_rows_q4 &ev,

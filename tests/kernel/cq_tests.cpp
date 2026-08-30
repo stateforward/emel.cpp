@@ -539,6 +539,68 @@ TEST_CASE("CQ4 prepared lookup preserves vector and scalar group tails") {
 #endif
 }
 
+TEST_CASE("CQ4 prepared norm hoist matches scalar for realistic random tensors") {
+#if defined(__AVX2__) && defined(__FMA__)
+  constexpr uint32_t group = 128u, in = 512u, out = 512u;
+  std::array<float, 28u> cb{};
+  uint32_t random = 0x243f6a88u;
+  for (uint32_t i = 0u; i < 16u; ++i) {
+    random = random * 1664525u + 1013904223u;
+    cb[12u + i] =
+        (static_cast<float>(static_cast<int32_t>(random >> 9u)) /
+         8388608.0f) -
+        1.0f;
+  }
+  std::vector<uint32_t> source_indices(static_cast<size_t>(out) * in);
+  for (uint32_t &index : source_indices) {
+    random = random * 1664525u + 1013904223u;
+    index = random >> 28u;
+  }
+  std::vector<uint16_t> norm_bits(static_cast<size_t>(out) * in / group);
+  for (uint16_t &bits : norm_bits) {
+    random = random * 1664525u + 1013904223u;
+    bits = static_cast<uint16_t>(0x3000u + ((random >> 23u) & 31u) * 0x40u);
+  }
+  const auto b = blob<4u>(source_indices, out, in, group, norm_bits);
+  const auto v = view(b, out, in, group, 4u);
+  std::vector<uint8_t> indices(static_cast<size_t>(out) * in);
+  std::vector<uint8_t> indices_by_input16(static_cast<size_t>(out) * in);
+  std::vector<float> norms(static_cast<size_t>(out) * in / group);
+  emel::kernel::cq::event::prepared_q4_view prepared{};
+  emel::kernel::cq::sm sm;
+  emel::kernel::cq::event::dispatch_result prepare_result{};
+  const emel::kernel::cq::event::prepare_q4_request prepare_request{
+      v, indices, indices_by_input16, norms, prepared};
+  REQUIRE(sm.process_event(
+      emel::kernel::cq::event::prepare_q4{prepare_request, prepare_result}));
+  emel::kernel::cq::event::prepared_codebook_q4 prepared_codebook{};
+  emel::kernel::cq::action::prepare_codebook_q4({cb, prepared_codebook});
+  std::array<float, in> activation{};
+  for (float &value : activation) {
+    random = random * 1664525u + 1013904223u;
+    value = (static_cast<float>(static_cast<int32_t>(random >> 8u)) /
+             8388608.0f) -
+            1.0f;
+  }
+  std::array<float, in> scalar_workspace{};
+  std::array<float, in> prepared_workspace{};
+  std::array<float, out> scalar{};
+  std::array<float, out> block16{};
+  const gemv_request scalar_request{v, cb, activation, scalar,
+                                    scalar_workspace};
+  emel::kernel::cq::event::dispatch_result scalar_result{};
+  REQUIRE(sm.process_event(emel::kernel::cq::event::execute_scalar_q4{
+      scalar_request, scalar_result}));
+  const emel::kernel::cq::event::prepared_gemv_request prepared_request{
+      prepared, prepared_codebook, activation, block16, prepared_workspace};
+  emel::kernel::cq::event::dispatch_result prepared_result{};
+  REQUIRE(sm.process_event(emel::kernel::cq::event::execute_prepared_avx2_q4{
+      prepared_request, prepared_result}));
+  for (uint32_t row = 0u; row < out; ++row)
+    CHECK(block16[row] == doctest::Approx(scalar[row]).epsilon(1.0e-5));
+#endif
+}
+
 TEST_CASE("CQ4 prepared block16 input-major route preserves exact output") {
 #if defined(__AVX2__) && defined(__FMA__)
   constexpr uint32_t group = 128u, in = 512u, out = 512u;
