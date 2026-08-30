@@ -299,7 +299,7 @@ if(EMEL_ENABLE_TESTS)
       set(keep_test_source FALSE)
       foreach(test_shard IN LISTS EMEL_TEST_SELECTED_SHARDS)
         if((test_shard STREQUAL "model_and_batch" AND
-              test_source MATCHES "^tests/(model|gguf|gbnf|batch|io)/") OR
+              test_source MATCHES "^tests/(model|gguf|gbnf|batch|io|cact)/") OR
            (test_shard STREQUAL "io" AND
               test_source MATCHES "^tests/io/") OR
            (test_shard STREQUAL "generator_and_runtime" AND
@@ -379,7 +379,7 @@ if(EMEL_ENABLE_TESTS)
 
   emel_add_doctest_shard(
     model_and_batch
-    "*tests/model/*,*tests/gguf/*,*tests/gbnf/*,*tests/batch/*,*tests/io/*"
+    "*tests/model/*,*tests/gguf/*,*tests/gbnf/*,*tests/batch/*,*tests/io/*,*tests/cact/*"
   )
   emel_add_doctest_shard(
     io
