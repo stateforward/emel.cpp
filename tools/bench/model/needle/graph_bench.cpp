@@ -20,6 +20,7 @@
 #include <fstream>
 #include <memory>
 #include <span>
+#include <chrono>
 #include <string>
 #include <vector>
 
@@ -40,6 +41,7 @@ constexpr char k_model_id[] = "route_w4_qat_cact";
 constexpr char k_workload_id[] = "needle_graph_single_core_v1";
 constexpr char k_decode_iters_env[] = "EMEL_BENCH_NEEDLE_GRAPH_DECODE_ITERS";
 constexpr char k_prefill_iters_env[] = "EMEL_BENCH_NEEDLE_GRAPH_PREFILL_ITERS";
+constexpr char k_instrument_cq_env[] = "EMEL_BENCH_NEEDLE_GRAPH_INSTRUMENT_CQ";
 
 // Steady-state decode is measured after a realistic ~100-token prefill; the
 // prefill case runs a 512-token prompt (max_seq_len 2048 bounded).
@@ -68,6 +70,11 @@ std::uint64_t read_env_u64_or(const char *name,
     return fallback;
   }
   return static_cast<std::uint64_t>(parsed);
+}
+
+bool instrument_cq() noexcept {
+  const char *value = std::getenv(k_instrument_cq_env);
+  return value != nullptr && value[0] == '1' && value[1] == '\0';
 }
 
 [[noreturn]] void fail_needle_setup(const char *stage) {
@@ -144,6 +151,8 @@ struct graph_fixture {
   std::vector<int32_t> context_ids;
   std::vector<int32_t> prompt_ids;
   uint32_t decoded_steps = 0u;
+  std::uint64_t decode_ns = 0u;
+  std::uint64_t cq_ns = 0u;
 
   graph_fixture() : file_bytes(read_file_bytes(resolve_model_path())) {
     cact_loader::sm loader{};
@@ -268,9 +277,22 @@ void append_emel_needle_graph_cases(std::vector<result> &results,
       }
       const int32_t token = fixture.prompt_ids[token_cursor];
       token_cursor = (token_cursor + 1u) % fixture.prompt_ids.size();
+      if (instrument_cq())
+        fixture.graph->process_event(
+            needle::graph::event::configure_cq_timing{true});
+      const auto decode_begin = std::chrono::steady_clock::now();
       if (!fixture.graph->process_event(needle::graph::event::decode{
               token, std::span<float>{fixture.logits}})) {
         fail_needle_setup("graph_decode_step");
+      }
+      const auto decode_end = std::chrono::steady_clock::now();
+      if (instrument_cq()) {
+        fixture.decode_ns += static_cast<std::uint64_t>(
+            std::chrono::duration_cast<std::chrono::nanoseconds>(decode_end -
+                                                                 decode_begin)
+                .count());
+        fixture.graph->process_event(
+            needle::graph::event::capture_cq_timing{fixture.cq_ns});
       }
       fixture.decoded_steps += 1u;
     };
@@ -278,6 +300,13 @@ void append_emel_needle_graph_cases(std::vector<result> &results,
         measure_case(k_decode_case_name, decode_cfg, decode_fn);
     results.push_back(with_needle_metadata(std::move(decode_result), "emel",
                                            "emel_needle_graph", "cpp", 1u));
+    if (instrument_cq())
+      std::fprintf(stderr,
+                   "# needle_graph_cq: decode_ns=%llu cq_ns=%llu non_cq_ns=%llu\n",
+                   static_cast<unsigned long long>(fixture.decode_ns),
+                   static_cast<unsigned long long>(fixture.cq_ns),
+                   static_cast<unsigned long long>(fixture.decode_ns -
+                                                   fixture.cq_ns));
   }
 
   {

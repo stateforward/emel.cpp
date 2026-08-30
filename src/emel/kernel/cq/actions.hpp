@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <cstring>
+#include <chrono>
 
 #if defined(__x86_64__) || defined(_M_X64)
 #include <immintrin.h>
@@ -18,6 +19,8 @@ struct context {
   uint64_t prepare_calls = 0u;
   uint64_t prepared_calls = 0u;
   uint64_t quantize_calls = 0u;
+  bool timing_enabled = false;
+  uint64_t timed_nanoseconds = 0u;
 };
 
 inline void quantize_a8(const event::quantize_a8_request &request) noexcept {
@@ -129,17 +132,17 @@ inline void prepare_q4(const event::prepare_q4_request &request) noexcept {
   const uint32_t group = view.group;
   const uint32_t in_pad = (in + group - 1u) / group * group;
   const size_t index_count = static_cast<size_t>(out) * in_pad;
-  const size_t blocked_rows = out / 8u * 8u;
+  const size_t blocked_rows = out / 16u * 16u;
   const size_t blocked_count = blocked_rows * in_pad;
   const size_t norm_count = index_count / group;
   const uint8_t *base = static_cast<const uint8_t *>(view.data);
   for (size_t i = 0u; i < index_count; ++i)
     request.indices[i] =
         static_cast<uint8_t>(detail::unpack_index<4u>(base, i));
-  for (size_t row = 0u; row < blocked_rows; row += 8u)
+  for (size_t row = 0u; row < blocked_rows; row += 16u)
     for (size_t i = 0u; i < in_pad; ++i)
-      for (size_t lane = 0u; lane < 8u; ++lane)
-        request.indices_by_input8[row * in_pad + i * 8u + lane] =
+      for (size_t lane = 0u; lane < 16u; ++lane)
+        request.indices_by_input16[row * in_pad + i * 16u + lane] =
             request.indices[(row + lane) * in_pad + i];
   const uint8_t *norms = base + index_count / 2u;
   for (size_t i = 0u; i < norm_count; ++i)
@@ -151,7 +154,7 @@ inline void prepare_q4(const event::prepare_q4_request &request) noexcept {
       .group = group,
       .in_pad = in_pad,
       .indices = request.indices.first(index_count),
-      .indices_by_input8 = request.indices_by_input8.first(blocked_count),
+      .indices_by_input16 = request.indices_by_input16.first(blocked_count),
       .norms = request.norms.first(norm_count)};
 }
 
@@ -420,6 +423,62 @@ EMEL_KERNEL_CQ_AVX2_TARGET inline void execute_prepared_avx2_dot_row_block(
 #endif
 }
 
+EMEL_KERNEL_CQ_AVX2_TARGET inline void execute_prepared_avx2_dot_block16(
+    const event::prepared_q4_view &view,
+    const event::prepared_codebook_q4 &codebook,
+    const std::span<const float> activation_fwht,
+    const std::span<float> output) noexcept {
+#if defined(__x86_64__) || defined(_M_X64)
+  __m256i codebook_byte0;
+  __m256i codebook_byte1;
+  __m256i codebook_byte2;
+  __m256i codebook_byte3;
+  q4_codebook_byte_tables(codebook, codebook_byte0, codebook_byte1,
+                          codebook_byte2, codebook_byte3);
+  const uint32_t blocked_rows = view.out / 16u * 16u;
+  const uint32_t groups_per_row = view.in_pad / view.group;
+  for (uint32_t row = 0u; row < blocked_rows; row += 16u) {
+    const uint8_t *selectors =
+        view.indices_by_input16.data() + static_cast<size_t>(row) * view.in_pad;
+    __m256 accum_low = _mm256_setzero_ps();
+    __m256 accum_high = _mm256_setzero_ps();
+    for (uint32_t begin = 0u, group_index = 0u; begin < view.in_pad;
+         begin += view.group, ++group_index) {
+      alignas(32) float norm_lanes[16u];
+      for (uint32_t lane = 0u; lane < 16u; ++lane)
+        norm_lanes[lane] =
+            view.norms[(static_cast<size_t>(row + lane) * groups_per_row) +
+                       group_index];
+      const __m256 norm_low = _mm256_load_ps(norm_lanes);
+      const __m256 norm_high = _mm256_load_ps(norm_lanes + 8u);
+      for (uint32_t i = 0u; i < view.group; ++i) {
+        const q4_lookup16_result values = lookup_codebook16_pshufb(
+            load_selector16(selectors + static_cast<size_t>(begin + i) * 16u),
+            codebook_byte0, codebook_byte1, codebook_byte2, codebook_byte3);
+        const __m256 activation =
+            _mm256_set1_ps(activation_fwht[begin + i]);
+        accum_low = _mm256_fmadd_ps(_mm256_mul_ps(values.low, norm_low),
+                                    activation, accum_low);
+        accum_high = _mm256_fmadd_ps(_mm256_mul_ps(values.high, norm_high),
+                                     activation, accum_high);
+      }
+    }
+    _mm256_storeu_ps(output.data() + row, accum_low);
+    _mm256_storeu_ps(output.data() + row + 8u, accum_high);
+  }
+  if (blocked_rows < view.out)
+    execute_prepared_avx2_dot_loaded(
+        view, codebook, activation_fwht, blocked_rows,
+        view.out - blocked_rows, output.subspan(blocked_rows), codebook_byte0,
+        codebook_byte1, codebook_byte2, codebook_byte3);
+#else
+  (void)view;
+  (void)codebook;
+  (void)activation_fwht;
+  (void)output;
+#endif
+}
+
 template <uint32_t Rows>
 EMEL_KERNEL_CQ_AVX2_TARGET inline void
 execute_prepared_avx2_dot_blocked(const event::prepared_q4_view &view,
@@ -471,8 +530,12 @@ execute_prepared_avx2_gemv(const event::prepared_q4_view &view,
                            const std::span<float> workspace) noexcept {
   detail::compute_fwht_groups(activation, view.in, view.group,
                               workspace.first(view.in_pad));
-  execute_prepared_avx2_dot(view, codebook, workspace.first(view.in_pad),
-                            row_begin, row_count, output);
+  if constexpr (Rows)
+    execute_prepared_avx2_dot(view, codebook, workspace.first(view.in_pad),
+                              row_begin, row_count, output);
+  else
+    execute_prepared_avx2_dot_block16(view, codebook,
+                                      workspace.first(view.in_pad), output);
 }
 
 inline void execute_prepared_dequant_rows(
@@ -601,9 +664,18 @@ execute_avx2_gemv(const event::gemv_request &request) noexcept {
   execute_scalar_gemv<Bits>(request);
 #endif
 }
+inline uint64_t now_nanoseconds() noexcept {
+  return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                   std::chrono::steady_clock::now().time_since_epoch())
+                                   .count());
+}
+
 struct effect_quantize_a8 {
   void operator()(const event::quantize_a8 &ev, context &ctx) const noexcept {
+    const uint64_t begin = ctx.timing_enabled ? now_nanoseconds() : 0u;
     quantize_a8(ev.request);
+    if (ctx.timing_enabled)
+      ctx.timed_nanoseconds += now_nanoseconds() - begin;
     ev.result.accepted = true;
     ++ctx.quantize_calls;
   }
@@ -628,11 +700,14 @@ struct effect_prepare_q4 {
 struct effect_execute_prepared_avx2_q4 {
   void operator()(const event::execute_prepared_avx2_q4 &ev,
                   context &ctx) const noexcept {
+    const uint64_t begin = ctx.timing_enabled ? now_nanoseconds() : 0u;
     for (uint32_t row = 0u; row < ev.request.weights.out; ++row)
       ev.request.output[row] = 0.0f;
     execute_prepared_avx2_gemv<false>(
         ev.request.weights, ev.request.codebook, ev.request.activation, 0u,
         ev.request.weights.out, ev.request.output, ev.request.workspace);
+    if (ctx.timing_enabled)
+      ctx.timed_nanoseconds += now_nanoseconds() - begin;
     ev.result.accepted = true;
     ++ctx.prepared_calls;
   }
@@ -643,6 +718,7 @@ struct effect_execute_prepared_avx2_batch4_q4 {
                   context &ctx) const noexcept {
     const auto &request = ev.request;
     const auto &first = *request.targets[0].weights;
+    const uint64_t begin = ctx.timing_enabled ? now_nanoseconds() : 0u;
     detail::compute_fwht_groups(request.activation, first.in, first.group,
                                 request.workspace.first(first.in_pad));
     __m256i codebook_byte0;
@@ -657,6 +733,8 @@ struct effect_execute_prepared_avx2_batch4_q4 {
           request.workspace.first(first.in_pad), 0u, target.weights->out,
           target.output, codebook_byte0, codebook_byte1, codebook_byte2,
           codebook_byte3);
+    if (ctx.timing_enabled)
+      ctx.timed_nanoseconds += now_nanoseconds() - begin;
     ev.result.accepted = true;
     ctx.prepared_calls += request.targets.size();
   }
@@ -665,21 +743,26 @@ struct effect_execute_prepared_avx2_batch4_q4 {
 struct effect_execute_prepared_avx2_rows_q4 {
   void operator()(const event::execute_prepared_avx2_rows_q4 &ev,
                   context &ctx) const noexcept {
+    const uint64_t begin = ctx.timing_enabled ? now_nanoseconds() : 0u;
     for (uint32_t row = 0u; row < ev.request.row_count; ++row)
       ev.request.output[row] = 0.0f;
     execute_prepared_avx2_gemv<true>(ev.request.weights, ev.request.codebook,
                                      ev.request.activation,
                                      ev.request.row_begin, ev.request.row_count,
                                      ev.request.output, ev.request.workspace);
+    if (ctx.timing_enabled)
+      ctx.timed_nanoseconds += now_nanoseconds() - begin;
     ev.result.accepted = true;
     ++ctx.prepared_calls;
   }
 };
-
 struct effect_execute_prepared_dequant_q4 {
   void operator()(const event::execute_prepared_dequant_q4 &ev,
                   context &ctx) const noexcept {
+    const uint64_t begin = ctx.timing_enabled ? now_nanoseconds() : 0u;
     execute_prepared_dequant_rows(ev.request);
+    if (ctx.timing_enabled)
+      ctx.timed_nanoseconds += now_nanoseconds() - begin;
     ev.result.accepted = true;
     ++ctx.prepared_calls;
   }
@@ -743,6 +826,22 @@ struct effect_capture_diagnostics {
                   const context &ctx) const noexcept {
     ev.scalar_calls = ctx.scalar_calls;
     ev.avx2_calls = ctx.avx2_calls;
+  }
+};
+
+struct effect_configure_timing {
+  void operator()(const event::configure_timing &ev,
+                  context &ctx) const noexcept {
+    if (ev.enabled && !ctx.timing_enabled)
+      ctx.timed_nanoseconds = 0u;
+    ctx.timing_enabled = ev.enabled;
+  }
+};
+
+struct effect_capture_timing {
+  void operator()(const event::capture_timing &ev,
+                  const context &ctx) const noexcept {
+    ev.nanoseconds = ctx.timed_nanoseconds;
   }
 };
 

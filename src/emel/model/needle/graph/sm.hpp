@@ -278,9 +278,21 @@ struct sm : public emel::sm<model, action::context> {
         ev.prepare_calls, ev.prepared_calls};
     const bool handled = this->context_.cq.process_event(diagnostics);
     ev.prepared_index_bytes = this->context_.prepared_indices.size();
+    ev.prepared_input16_bytes =
+        this->context_.prepared_indices_by_input16.size();
     ev.prepared_norm_bytes =
         this->context_.prepared_norms.size() * sizeof(float);
     return handled;
+  }
+
+  bool process_event(const event::configure_cq_timing &ev) {
+    return this->context_.cq.process_event(
+        emel::kernel::cq::event::configure_timing{ev.enabled});
+  }
+
+  bool process_event(const event::capture_cq_timing &ev) {
+    return this->context_.cq.process_event(
+        emel::kernel::cq::event::capture_timing{ev.nanoseconds});
   }
 
   bool process_event(const event::capture_a8_diagnostics &ev) {

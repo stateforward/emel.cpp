@@ -62,15 +62,15 @@ struct prepared_q4_view {
   uint32_t group = 0u;
   uint32_t in_pad = 0u;
   std::span<const uint8_t> indices = {};
-  // 8-row output blocks, input-major within each block. Tail rows remain in
+  // 16-row output blocks, input-major within each block. Tail rows remain in
   // row-major `indices`; the blocked layout exists only for hot full GEMV.
-  std::span<const uint8_t> indices_by_input8 = {};
+  std::span<const uint8_t> indices_by_input16 = {};
   std::span<const float> norms = {};
 };
 struct prepare_q4_request {
   const emel::cact::loader::tensor_view &weights;
   std::span<uint8_t> indices;
-  std::span<uint8_t> indices_by_input8;
+  std::span<uint8_t> indices_by_input16;
   std::span<float> norms;
   prepared_q4_view &prepared;
 };
@@ -215,4 +215,12 @@ struct capture_a8_diagnostics {
   uint64_t &quantize_calls;
 };
 
+
+struct configure_timing {
+  bool enabled = false;
+};
+
+struct capture_timing {
+  uint64_t &nanoseconds;
+};
 } // namespace emel::kernel::cq::event

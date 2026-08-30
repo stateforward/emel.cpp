@@ -123,7 +123,7 @@ struct context {
     a8_dequantized.resize(cq_workspace.size());
     const auto prepared_sizes = compute_prepared_sizes(contract_in);
     prepared_indices.resize(prepared_sizes.first);
-    prepared_indices_by_input8.resize(prepared_sizes.first);
+    prepared_indices_by_input16.resize(prepared_sizes.first);
     prepared_norms.resize(prepared_sizes.second);
   }
 
@@ -224,7 +224,7 @@ struct context {
   std::vector<int8_t> a8_quantized;
   std::vector<float> a8_dequantized;
   std::vector<uint8_t> prepared_indices;
-  std::vector<uint8_t> prepared_indices_by_input8;
+  std::vector<uint8_t> prepared_indices_by_input16;
   std::vector<float> prepared_norms;
   emel::kernel::cq::event::prepared_codebook_q4 prepared_codebook = {};
 

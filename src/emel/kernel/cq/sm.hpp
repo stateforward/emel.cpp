@@ -89,6 +89,12 @@ struct model {
           + sml::event<event::capture_a8_diagnostics>
           / action::effect_capture_a8_diagnostics{}
       , sml::state<state_ready> <= sml::state<state_ready>
+          + sml::event<event::configure_timing>
+          / action::effect_configure_timing{}
+      , sml::state<state_ready> <= sml::state<state_ready>
+          + sml::event<event::capture_timing>
+          / action::effect_capture_timing{}
+      , sml::state<state_ready> <= sml::state<state_ready>
           + sml::unexpected_event<sml::_>
           / action::effect_on_unexpected{}
     );

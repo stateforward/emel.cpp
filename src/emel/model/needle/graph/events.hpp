@@ -39,7 +39,16 @@ struct capture_cq_diagnostics {
   uint64_t &prepare_calls;
   uint64_t &prepared_calls;
   size_t &prepared_index_bytes;
+  size_t &prepared_input16_bytes;
   size_t &prepared_norm_bytes;
+};
+
+struct configure_cq_timing {
+  bool enabled = false;
+};
+
+struct capture_cq_timing {
+  uint64_t &nanoseconds;
 };
 
 struct capture_a8_diagnostics {

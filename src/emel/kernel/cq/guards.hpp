@@ -82,7 +82,7 @@ prepare_supported(const event::prepare_q4_request &request) noexcept {
   const uint64_t packed_bytes = index_count / 2u;
   return packed_bytes + norm_count * 2u <= view.nbytes &&
          request.indices.size() >= index_count &&
-         request.indices_by_input8.size() >= index_count &&
+         request.indices_by_input16.size() >= index_count &&
          request.norms.size() >= norm_count;
 }
 inline bool
@@ -101,12 +101,12 @@ inline bool prepared_supported(const event::prepared_q4_view &view,
   const uint64_t index_count = static_cast<uint64_t>(view.out) * view.in_pad;
   const uint64_t norm_count = index_count / view.group;
   const uint64_t blocked_count =
-      static_cast<uint64_t>(view.out / 8u * 8u) * view.in_pad;
+      static_cast<uint64_t>(view.out / 16u * 16u) * view.in_pad;
   return view.source != nullptr && view.out > 0u && view.in > 0u &&
          view.group > 0u && view.group <= detail::k_max_group &&
          detail::is_power_of_two(view.group) && view.in_pad >= view.in &&
          view.in_pad % view.group == 0u && view.indices.size() >= index_count &&
-         view.indices_by_input8.size() >= blocked_count &&
+         view.indices_by_input16.size() >= blocked_count &&
          view.norms.size() >= norm_count && codebook.size() >= 28u;
 }
 
