@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 
 #if defined(__x86_64__) || defined(_M_X64)
 #include <immintrin.h>
@@ -105,6 +106,22 @@ execute_avx2_gemv(const event::gemv_request &request) noexcept {
   const uint8_t *base = static_cast<const uint8_t *>(view.data);
   const uint8_t *norms = base + static_cast<size_t>(out) * packed_row;
   const float *codebook = detail::codebook_for<Bits>(request.codebook);
+#if defined(__x86_64__) || defined(_M_X64)
+  __m256 q4_codebook_low{};
+  __m256 q4_codebook_high{};
+  __m128i q4_duplicate_mask{};
+  __m128i q4_high_nibble_mask{};
+  __m128i q4_nibble_mask{};
+  if constexpr (Bits == 4u) {
+    q4_codebook_low = _mm256_loadu_ps(codebook);
+    q4_codebook_high = _mm256_loadu_ps(codebook + 8u);
+    q4_duplicate_mask =
+        _mm_setr_epi8(0, 0, 1, 1, 2, 2, 3, 3, -1, -1, -1, -1, -1, -1, -1, -1);
+    q4_high_nibble_mask =
+        _mm_setr_epi8(0, -1, 0, -1, 0, -1, 0, -1, 0, 0, 0, 0, 0, 0, 0, 0);
+    q4_nibble_mask = _mm_set1_epi8(0x0f);
+  }
+#endif
   for (uint32_t row = 0u; row < out; ++row) {
     const uint8_t *row_packed = base + static_cast<size_t>(row) * packed_row;
     const uint8_t *row_norms = norms + static_cast<size_t>(row) * norm_row;
@@ -119,13 +136,39 @@ execute_avx2_gemv(const event::gemv_request &request) noexcept {
       for (; i + 8u <= group; i += 8u) {
         const __m256 activation =
             _mm256_loadu_ps(request.workspace.data() + begin + i);
-        alignas(32) int32_t indices[8];
-        for (uint32_t lane = 0u; lane < 8u; ++lane)
-          indices[lane] = static_cast<int32_t>(
-              detail::unpack_index<Bits>(group_packed, i + lane));
-        const __m256i index_v =
-            _mm256_load_si256(reinterpret_cast<const __m256i *>(indices));
-        const __m256 values = _mm256_i32gather_ps(codebook, index_v, 4);
+        __m256 values;
+        if constexpr (Bits == 4u) {
+          uint32_t packed_word = 0u;
+          std::memcpy(&packed_word, group_packed + (i >> 1u),
+                      sizeof(packed_word));
+          const __m128i packed_v =
+              _mm_cvtsi32_si128(static_cast<int32_t>(packed_word));
+          const __m128i duplicated =
+              _mm_shuffle_epi8(packed_v, q4_duplicate_mask);
+          const __m128i low_nibbles = _mm_and_si128(duplicated, q4_nibble_mask);
+          const __m128i high_nibbles =
+              _mm_and_si128(_mm_srli_epi16(duplicated, 4), q4_nibble_mask);
+          const __m128i indices_u8 =
+              _mm_blendv_epi8(low_nibbles, high_nibbles, q4_high_nibble_mask);
+          const __m256i index_v = _mm256_cvtepu8_epi32(indices_u8);
+          const __m256i table_index =
+              _mm256_and_si256(index_v, _mm256_set1_epi32(7));
+          const __m256 low_values =
+              _mm256_permutevar8x32_ps(q4_codebook_low, table_index);
+          const __m256 high_values =
+              _mm256_permutevar8x32_ps(q4_codebook_high, table_index);
+          const __m256 high_table_mask =
+              _mm256_castsi256_ps(_mm256_slli_epi32(index_v, 28));
+          values = _mm256_blendv_ps(low_values, high_values, high_table_mask);
+        } else {
+          alignas(32) int32_t indices[8];
+          for (uint32_t lane = 0u; lane < 8u; ++lane)
+            indices[lane] = static_cast<int32_t>(
+                detail::unpack_index<Bits>(group_packed, i + lane));
+          const __m256i index_v =
+              _mm256_load_si256(reinterpret_cast<const __m256i *>(indices));
+          values = _mm256_i32gather_ps(codebook, index_v, 4);
+        }
         accum =
             _mm256_fmadd_ps(_mm256_mul_ps(values, norm_v), activation, accum);
       }

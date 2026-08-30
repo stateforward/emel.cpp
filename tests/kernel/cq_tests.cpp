@@ -78,6 +78,12 @@ void run_route(uint32_t in, const std::array<float, 28u> &cb) {
       am.process_event(emel::kernel::cq::event::execute_avx2<Bits>{aq, ar}));
   for (uint32_t r = 0; r < 4u; ++r)
     CHECK(ao[r] == doctest::Approx(so[r]));
+  uint64_t scalar_calls = 0u;
+  uint64_t avx2_calls = 0u;
+  REQUIRE(am.process_event(
+      emel::kernel::cq::event::capture_diagnostics{scalar_calls, avx2_calls}));
+  CHECK(scalar_calls == 0u);
+  CHECK(avx2_calls == 1u);
 #endif
 }
 } // namespace
