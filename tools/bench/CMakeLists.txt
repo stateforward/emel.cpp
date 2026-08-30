@@ -432,6 +432,8 @@ add_bench_runner_suite(parallel_matmul text/generator/parallel_matmul_bench.cpp
                        EMEL_BENCH_ENABLE_PARALLEL_MATMUL)
 add_bench_runner_suite(weight_streaming model/tensor/window_streaming_bench.cpp
                        EMEL_BENCH_ENABLE_WEIGHT_STREAMING)
+add_bench_runner_suite(needle_graph model/needle/graph_bench.cpp
+                       EMEL_BENCH_ENABLE_NEEDLE_GRAPH)
 add_bench_runner_suite(tokenizer_preprocessor_bpe text/tokenizer/preprocessor/bpe_bench.cpp
                        EMEL_BENCH_ENABLE_TOKENIZER_PREPROCESSOR_BPE)
 add_bench_runner_suite(tokenizer_preprocessor_spm text/tokenizer/preprocessor/spm_bench.cpp

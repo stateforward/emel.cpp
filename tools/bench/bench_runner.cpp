@@ -231,6 +231,10 @@ bool is_sm_scheduler_case_name(const std::string &name) {
   return name.rfind("sm_scheduler/", 0u) == 0u;
 }
 
+bool is_needle_graph_case_name(const std::string &name) {
+  return name.rfind("needle/graph/", 0u) == 0u;
+}
+
 bool case_supported_on_host(const bench::test_case &tc) {
   if (tc.append_emel == bench::append_emel_kernel_x86_64_cases ||
       tc.append_reference == bench::append_reference_kernel_x86_64_cases) {
@@ -408,6 +412,20 @@ void print_snapshot(const std::vector<bench::result> &results,
           entry.output_checksum, entry.note.c_str());
     }
     if (is_generation_case_name(entry.name)) {
+      std::printf("%s ns_per_op=%.3f tokens_per_second=%.3f iter=%" PRIu64
+                  " runs=%zu\n",
+                  entry.name.c_str(), entry.ns_per_op, entry.tokens_per_second,
+                  entry.iterations, entry.runs);
+      continue;
+    }
+    if (is_needle_graph_case_name(entry.name)) {
+      // Marker line precedes the row so the snapshot/compare gates skip it
+      // (proof_status=measurement_only) until baselines are approved.
+      std::printf("# needle_graph: lane=%s case=%s model_id=%s workload_id=%s "
+                  "%s\n",
+                  entry.lane.c_str(), entry.name.c_str(),
+                  entry.model_id.c_str(), entry.workload_id.c_str(),
+                  entry.note.c_str());
       std::printf("%s ns_per_op=%.3f tokens_per_second=%.3f iter=%" PRIu64
                   " runs=%zu\n",
                   entry.name.c_str(), entry.ns_per_op, entry.tokens_per_second,
@@ -1120,6 +1138,24 @@ void print_compare(const std::vector<bench::result> &emel_results,
       const double ratio = emel_entry.ns_per_op / ref_entry.ns_per_op;
       std::printf("%s emel.cpp %.3f ns/op (%.3f tokens/s), llama.cpp %.3f "
                   "ns/op (%.3f tokens/s), ratio=%.3fx\n",
+                  emel_entry.name.c_str(), emel_entry.ns_per_op,
+                  emel_entry.tokens_per_second, ref_entry.ns_per_op,
+                  ref_entry.tokens_per_second, ratio);
+      continue;
+    }
+    if (is_needle_graph_case_name(emel_entry.name)) {
+      // libneedle cannot be linked; the reference lane is a documented
+      // recorded constant. Marker keeps the row measurement_only for the
+      // snapshot/compare gates until baselines are approved.
+      std::printf("# needle_graph: lane=%s case=%s model_id=%s workload_id=%s "
+                  "%s\n",
+                  emel_entry.lane.c_str(), emel_entry.name.c_str(),
+                  emel_entry.model_id.c_str(), emel_entry.workload_id.c_str(),
+                  emel_entry.note.c_str());
+      const double ratio = emel_entry.ns_per_op / ref_entry.ns_per_op;
+      std::printf("%s emel.cpp %.3f ns/op (%.3f tokens/s), "
+                  "libneedle-recorded %.3f ns/op (%.3f tokens/s), "
+                  "ratio=%.3fx\n",
                   emel_entry.name.c_str(), emel_entry.ns_per_op,
                   emel_entry.tokens_per_second, ref_entry.ns_per_op,
                   ref_entry.tokens_per_second, ratio);
