@@ -118,6 +118,7 @@ struct context {
     const auto prepared_sizes = compute_prepared_sizes(contract_in);
     prepared_indices.resize(prepared_sizes.first);
     prepared_indices_by_input8.resize(prepared_sizes.first);
+    prepared_units_f16.resize(prepared_sizes.first);
     prepared_norms.resize(prepared_sizes.second);
   }
 
@@ -217,6 +218,7 @@ struct context {
   std::vector<float> cq_workspace;
   std::vector<uint8_t> prepared_indices;
   std::vector<uint8_t> prepared_indices_by_input8;
+  std::vector<uint16_t> prepared_units_f16;
   std::vector<float> prepared_norms;
 
   emel::kernel::cq::event::prepared_q4_view prepared_embedding = {};

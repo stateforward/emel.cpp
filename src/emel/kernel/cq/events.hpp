@@ -32,13 +32,18 @@ struct prepared_q4_view {
   // 8-row output blocks, input-major within each block. Tail rows remain in
   // row-major `indices`; the blocked layout exists only for hot full GEMV.
   std::span<const uint8_t> indices_by_input8 = {};
+  // Pre-Hadamard CQ units: selected codebook value times the decoded fp16
+  // group norm, rounded once to fp16 at init. Activation FWHT remains runtime.
+  std::span<const uint16_t> units_f16 = {};
   std::span<const float> norms = {};
 };
 struct prepare_q4_request {
   const emel::cact::loader::tensor_view &weights;
   std::span<uint8_t> indices;
   std::span<uint8_t> indices_by_input8;
+  std::span<uint16_t> units_f16;
   std::span<float> norms;
+  std::span<const float> codebook;
   prepared_q4_view &prepared;
 };
 

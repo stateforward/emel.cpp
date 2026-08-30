@@ -235,10 +235,16 @@ TEST_CASE("CQ4 preparation preserves selectors norms and numerical identity") {
   const auto v = view(b, out, in, group, 4u);
   std::vector<uint8_t> prepared_indices(out * in);
   std::vector<uint8_t> prepared_indices_by_input8(out * in);
+  std::vector<uint16_t> prepared_units_f16(out * in);
   std::vector<float> prepared_norms(out * in / group);
   emel::kernel::cq::event::prepared_q4_view prepared{};
   const emel::kernel::cq::event::prepare_q4_request prepare_request{
-      v, prepared_indices, prepared_indices_by_input8, prepared_norms,
+      v,
+      prepared_indices,
+      prepared_indices_by_input8,
+      prepared_units_f16,
+      prepared_norms,
+      cb,
       prepared};
   emel::kernel::cq::sm sm;
   emel::kernel::cq::event::dispatch_result prepare_result{};
@@ -268,7 +274,8 @@ TEST_CASE("CQ4 preparation preserves selectors norms and numerical identity") {
   REQUIRE(sm.process_event(emel::kernel::cq::event::execute_prepared_avx2_q4{
       prepared_request, prepared_result}));
   for (uint32_t row = 0u; row < out; ++row)
-    CHECK(prepared_output[row] == doctest::Approx(scalar_output[row]));
+    CHECK(prepared_output[row] ==
+          doctest::Approx(scalar_output[row]).epsilon(4.0e-4));
 
   uint64_t prepare_calls = 0u;
   uint64_t prepared_calls = 0u;
@@ -295,11 +302,12 @@ TEST_CASE(
   std::vector<uint8_t> indices(out * in);
   std::vector<float> norms(out * in / group);
   std::vector<uint8_t> indices_by_input8(out * in);
+  std::vector<uint16_t> units_f16(out * in);
   emel::kernel::cq::event::prepared_q4_view prepared{};
   emel::kernel::cq::sm sm;
   emel::kernel::cq::event::dispatch_result prepare_result{};
   const emel::kernel::cq::event::prepare_q4_request prepare_request{
-      v, indices, indices_by_input8, norms, prepared};
+      v, indices, indices_by_input8, units_f16, norms, cb, prepared};
   REQUIRE(sm.process_event(
       emel::kernel::cq::event::prepare_q4{prepare_request, prepare_result}));
   std::array<float, in> activation{};
