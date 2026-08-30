@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <span>
 
+#include "emel/kernel/cq/events.hpp"
 #include "emel/error/error.hpp"
 #include "emel/model/needle/events.hpp"
 #include "emel/model/needle/graph/errors.hpp"
@@ -45,10 +46,11 @@ struct capture_cq_diagnostics {
 
 struct configure_cq_timing {
   bool enabled = false;
+  emel::kernel::cq::event::timestamp_now_fn now = nullptr;
 };
 
 struct capture_cq_timing {
-  uint64_t &nanoseconds;
+  emel::kernel::cq::event::timing_breakdown &breakdown;
 };
 
 struct capture_a8_diagnostics {

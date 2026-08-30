@@ -31,12 +31,13 @@ struct prepare_codebook_q4 {
 };
 
 // JAX-compatible signed A8 fake quantization over one full activation vector.
-// `quantized` keeps the exact integer operand and `dequantized` keeps the f32
-// value consumed by the weight-side FWHT/GEMV. Both spans are caller-owned.
+// `quantized` keeps the exact integer operand and `integer_values` keeps the
+// same integers widened to f32 for the linear FWHT/CQ projection. The caller
+// applies `scale` once to each projection output.
 struct quantize_a8_request {
   std::span<const float> input;
   std::span<int8_t> quantized;
-  std::span<float> dequantized;
+  std::span<float> integer_values;
   float &scale;
 };
 
@@ -44,6 +45,15 @@ struct quantize_a8 {
   const quantize_a8_request &request;
   dispatch_result &result;
 };
+struct fwht_request {
+  std::span<float> values;
+};
+
+struct execute_fwht_avx2 {
+  const fwht_request &request;
+  dispatch_result &result;
+};
+
 
 struct gemv_request {
   const emel::cact::loader::tensor_view &weights;
@@ -51,6 +61,7 @@ struct gemv_request {
   std::span<const float> activation;
   std::span<float> output;
   std::span<float> workspace;
+  float output_scale = 1.0f;
 };
 // Construction/init-owned CQ4 representation. Indices remain exact codebook
 // selectors and norms are the exact fp16 payload decoded once to f32. The
@@ -86,6 +97,7 @@ struct prepared_gemv_request {
   std::span<const float> activation;
   std::span<float> output;
   std::span<float> workspace;
+  float output_scale = 1.0f;
 };
 
 struct prepared_gemv_target {
@@ -100,6 +112,7 @@ struct prepared_gemv_batch4_request {
   const prepared_codebook_q4 &codebook;
   std::span<const float> activation;
   std::span<float> workspace;
+  float output_scale = 1.0f;
 };
 
 struct execute_prepared_avx2_batch4_q4 {
@@ -132,6 +145,7 @@ struct gemv_rows_request {
   uint32_t row_count = 0u;
   std::span<float> output;
   std::span<float> workspace;
+  float output_scale = 1.0f;
 };
 
 template <uint32_t Bits> struct execute_scalar_rows {
@@ -147,6 +161,7 @@ struct prepared_gemv_rows_request {
   uint32_t row_count = 0u;
   std::span<float> output;
   std::span<float> workspace;
+  float output_scale = 1.0f;
 };
 
 struct execute_prepared_avx2_rows_q4 {
@@ -215,12 +230,23 @@ struct capture_a8_diagnostics {
   uint64_t &quantize_calls;
 };
 
+using timestamp_now_fn = uint64_t (*)() noexcept;
 
 struct configure_timing {
   bool enabled = false;
+  timestamp_now_fn now = nullptr;
+};
+
+struct timing_breakdown {
+  uint64_t quantize_nanoseconds = 0u;
+  uint64_t fwht_nanoseconds = 0u;
+  uint64_t dot_full_nanoseconds = 0u;
+  uint64_t dot_batch_nanoseconds = 0u;
+  uint64_t dot_rows_nanoseconds = 0u;
+  uint64_t dequant_nanoseconds = 0u;
 };
 
 struct capture_timing {
-  uint64_t &nanoseconds;
+  timing_breakdown &breakdown;
 };
 } // namespace emel::kernel::cq::event

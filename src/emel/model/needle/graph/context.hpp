@@ -46,6 +46,11 @@ enum class activation_route_kind : uint8_t {
   a8 = 1,
 };
 
+struct activation_payload {
+  std::span<const float> values = {};
+  float scale = 1.0f;
+};
+
 // Graph-owned runtime storage. ALL heap allocation happens here, in the
 // constructor, sized from the bound contract's header geometry — dispatch
 // (init/prefill/decode) never allocates. f32 KV storage is the parity
@@ -120,7 +125,7 @@ struct context {
     engram_values.resize(static_cast<uint64_t>(geo.num_engram_sites) * d_model);
     cq_workspace.resize(compute_cq_workspace(contract_in));
     a8_quantized.resize(cq_workspace.size());
-    a8_dequantized.resize(cq_workspace.size());
+    a8_integer_values.resize(cq_workspace.size());
     const auto prepared_sizes = compute_prepared_sizes(contract_in);
     prepared_indices.resize(prepared_sizes.first);
     prepared_indices_by_input32.resize(prepared_sizes.first);
@@ -222,7 +227,7 @@ struct context {
   std::vector<float> attend_workspace;
   std::vector<float> cq_workspace;
   std::vector<int8_t> a8_quantized;
-  std::vector<float> a8_dequantized;
+  std::vector<float> a8_integer_values;
   std::vector<uint8_t> prepared_indices;
   std::vector<uint8_t> prepared_indices_by_input32;
   std::vector<float> prepared_norms;

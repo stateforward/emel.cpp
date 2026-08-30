@@ -6,6 +6,10 @@
 #include <cstdint>
 #include <span>
 
+#if defined(__x86_64__) || defined(_M_X64)
+#include <immintrin.h>
+#endif
+
 #include "emel/cact/loader/events.hpp"
 #include "emel/kernel/detail.hpp"
 
@@ -14,6 +18,16 @@ namespace emel::kernel::cq::detail {
 inline constexpr uint32_t k_ternary_record_bits = 5u;
 inline constexpr float k_ternary_centroid = 1.2240064f;
 inline constexpr uint32_t k_max_group = 4096u;
+#if defined(__x86_64__) || defined(_M_X64)
+#if defined(__GNUC__) || defined(__clang__)
+#define EMEL_KERNEL_CQ_DETAIL_AVX2_TARGET __attribute__((target("avx2,fma")))
+#else
+#define EMEL_KERNEL_CQ_DETAIL_AVX2_TARGET
+#endif
+#else
+#define EMEL_KERNEL_CQ_DETAIL_AVX2_TARGET
+#endif
+
 
 inline float fp16_to_fp32(const uint16_t bits) noexcept {
   const uint32_t sign = static_cast<uint32_t>(bits & 0x8000u) << 16u;
@@ -101,6 +115,51 @@ q4_codebook_is_symmetric(const std::span<const float> codebook) noexcept {
 inline void fwht(float *values, const uint32_t n) noexcept {
   emel::kernel::detail::fwht_normalized(values, n);
 }
+EMEL_KERNEL_CQ_DETAIL_AVX2_TARGET inline void fwht128_avx2(
+    float *values) noexcept {
+#if defined(__x86_64__) || defined(_M_X64)
+  for (uint32_t base = 0u; base < 128u; base += 8u) {
+    const __m256 x = _mm256_loadu_ps(values + base);
+    const __m256 swapped1 = _mm256_permute_ps(x, 0xb1);
+    const __m256 sums1 = _mm256_add_ps(x, swapped1);
+    const __m256 diffs1 = _mm256_mul_ps(
+        _mm256_sub_ps(x, swapped1),
+        _mm256_setr_ps(1.0f, -1.0f, 1.0f, -1.0f,
+                       1.0f, -1.0f, 1.0f, -1.0f));
+    const __m256 stage1 = _mm256_blend_ps(sums1, diffs1, 0xaau);
+    const __m256 swapped2 = _mm256_permute_ps(stage1, 0x4e);
+    const __m256 sums2 = _mm256_add_ps(stage1, swapped2);
+    const __m256 diffs2 = _mm256_mul_ps(
+        _mm256_sub_ps(stage1, swapped2),
+        _mm256_setr_ps(1.0f, 1.0f, -1.0f, -1.0f,
+                       1.0f, 1.0f, -1.0f, -1.0f));
+    const __m256 stage2 = _mm256_blend_ps(sums2, diffs2, 0xccu);
+    const __m256 swapped4 = _mm256_permute2f128_ps(stage2, stage2, 0x01);
+    const __m256 sums4 = _mm256_add_ps(stage2, swapped4);
+    const __m256 diffs4 = _mm256_mul_ps(
+        _mm256_sub_ps(stage2, swapped4),
+        _mm256_setr_ps(1.0f, 1.0f, 1.0f, 1.0f,
+                       -1.0f, -1.0f, -1.0f, -1.0f));
+    _mm256_storeu_ps(values + base,
+                     _mm256_blend_ps(sums4, diffs4, 0xf0u));
+  }
+  for (uint32_t step = 8u; step < 128u; step <<= 1u)
+    for (uint32_t base = 0u; base < 128u; base += step << 1u)
+      for (uint32_t j = 0u; j < step; j += 8u) {
+        const __m256 a = _mm256_loadu_ps(values + base + j);
+        const __m256 b = _mm256_loadu_ps(values + base + step + j);
+        _mm256_storeu_ps(values + base + j, _mm256_add_ps(a, b));
+        _mm256_storeu_ps(values + base + step + j, _mm256_sub_ps(a, b));
+      }
+  const __m256 scale = _mm256_set1_ps(0.08838834764831844055f);
+  for (uint32_t i = 0u; i < 128u; i += 8u)
+    _mm256_storeu_ps(values + i,
+                     _mm256_mul_ps(_mm256_loadu_ps(values + i), scale));
+#else
+  fwht(values, 128u);
+#endif
+}
+
 
 inline bool is_power_of_two(const uint32_t n) noexcept {
   return n != 0u && (n & (n - 1u)) == 0u;
@@ -225,5 +284,18 @@ inline void compute_fwht_groups(const std::span<const float> activation,
     fwht(transformed.data() + begin, group);
   }
 }
+
+EMEL_KERNEL_CQ_DETAIL_AVX2_TARGET inline void compute_fwht128_groups_avx2(
+    const std::span<const float> activation, const uint32_t in,
+    std::span<float> transformed) noexcept {
+  const uint32_t in_pad = (in + 127u) / 128u * 128u;
+  for (uint32_t begin = 0u; begin < in_pad; begin += 128u) {
+    for (uint32_t i = 0u; i < 128u; ++i)
+      transformed[begin + i] = begin + i < in ? activation[begin + i] : 0.0f;
+    fwht128_avx2(transformed.data() + begin);
+  }
+}
+
+#undef EMEL_KERNEL_CQ_DETAIL_AVX2_TARGET
 
 } // namespace emel::kernel::cq::detail

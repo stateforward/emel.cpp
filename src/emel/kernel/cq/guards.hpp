@@ -7,13 +7,26 @@ namespace emel::kernel::cq::guard {
 inline bool a8_supported(const event::quantize_a8_request &request) noexcept {
   return !request.input.empty() &&
          request.quantized.size() >= request.input.size() &&
-         request.dequantized.size() >= request.input.size();
+         request.integer_values.size() >= request.input.size();
 }
 
 struct guard_quantize_a8 {
   bool operator()(const event::quantize_a8 &ev,
                   const action::context &) const noexcept {
     return a8_supported(ev.request);
+  }
+};
+
+struct guard_execute_fwht_avx2 {
+  bool operator()(const event::execute_fwht_avx2 &ev,
+                  const action::context &) const noexcept {
+#if (defined(__x86_64__) || defined(_M_X64)) && defined(__AVX2__) &&           \
+    defined(__FMA__)
+    return ev.request.values.size() == 128u;
+#else
+    (void)ev;
+    return false;
+#endif
   }
 };
 
@@ -125,6 +138,7 @@ struct guard_execute_prepared_avx2_q4 {
     const auto &request = ev.request;
     return prepared_supported(request.weights, request.codebook.values) &&
            prepared_codebook_supported(request.codebook) &&
+           request.weights.group == 128u &&
            request.activation.size() >= request.weights.in &&
            request.output.size() >= request.weights.out &&
            request.workspace.size() >= request.weights.in_pad;
@@ -142,7 +156,8 @@ struct guard_execute_prepared_avx2_batch4_q4 {
     defined(__FMA__)
     const auto &request = ev.request;
     const auto *first = request.targets[0].weights;
-    if (first == nullptr || request.activation.size() < first->in ||
+    if (first == nullptr || first->group != 128u ||
+        request.activation.size() < first->in ||
         request.workspace.size() < first->in_pad)
       return false;
     for (const auto &target : request.targets)
@@ -168,7 +183,7 @@ struct guard_execute_prepared_avx2_rows_q4 {
     const auto &request = ev.request;
     return prepared_supported(request.weights, request.codebook.values) &&
            prepared_codebook_supported(request.codebook) &&
-           request.row_count > 0u &&
+           request.weights.group == 128u && request.row_count > 0u &&
            static_cast<uint64_t>(request.row_begin) + request.row_count <=
                request.weights.out &&
            request.activation.size() >= request.weights.in &&

@@ -13,6 +13,8 @@
 // proof_status=measurement_only until snapshot baselines are approved.
 #include "bench_cases.hpp"
 
+#include <array>
+#include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -35,6 +37,8 @@ namespace needle = emel::model::needle;
 
 constexpr char k_decode_case_name[] = "needle/graph/decode_steady_route_w4_qat";
 constexpr char k_prefill_case_name[] = "needle/graph/prefill_512_route_w4_qat";
+constexpr char k_fwht_case_name[] = "needle/cq/fwht128_avx2";
+constexpr char k_fwht_iters_env[] = "EMEL_BENCH_NEEDLE_FWHT_ITERS";
 constexpr char k_model_env[] = "EMEL_BENCH_NEEDLE_MODEL";
 constexpr char k_model_relative_path[] = "tests/models/route-w4-qat.cact";
 constexpr char k_model_id[] = "route_w4_qat_cact";
@@ -75,6 +79,13 @@ std::uint64_t read_env_u64_or(const char *name,
 bool instrument_cq() noexcept {
   const char *value = std::getenv(k_instrument_cq_env);
   return value != nullptr && value[0] == '1' && value[1] == '\0';
+}
+
+std::uint64_t benchmark_timestamp_now_ns() noexcept {
+  return static_cast<std::uint64_t>(
+      std::chrono::duration_cast<std::chrono::nanoseconds>(
+          std::chrono::steady_clock::now().time_since_epoch())
+          .count());
 }
 
 [[noreturn]] void fail_needle_setup(const char *stage) {
@@ -152,7 +163,7 @@ struct graph_fixture {
   std::vector<int32_t> prompt_ids;
   uint32_t decoded_steps = 0u;
   std::uint64_t decode_ns = 0u;
-  std::uint64_t cq_ns = 0u;
+  emel::kernel::cq::event::timing_breakdown cq_timing = {};
 
   graph_fixture() : file_bytes(read_file_bytes(resolve_model_path())) {
     cact_loader::sm loader{};
@@ -248,6 +259,7 @@ emel::bench::result make_reference_row(const char *name,
                               "libneedle_2_0_3_recorded", "recorded", tokens);
 }
 
+
 } // namespace
 
 namespace emel::bench {
@@ -255,6 +267,23 @@ namespace emel::bench {
 void append_emel_needle_graph_cases(std::vector<result> &results,
                                     const config &cfg) {
   graph_fixture fixture;
+  {
+    config fwht_cfg = cfg;
+    fwht_cfg.iterations = read_env_u64_or(k_fwht_iters_env, 100000u);
+    fwht_cfg.runs = cfg.runs;
+    fwht_cfg.warmup_iterations = 1000u;
+    fwht_cfg.warmup_runs = 1u;
+    alignas(32) std::array<float, 128u> values{};
+    for (uint32_t i = 0u; i < values.size(); ++i)
+      values[i] = std::sin(static_cast<float>(i + 1u) * 0.03125f);
+    auto fwht_fn = [&]() {
+      emel::kernel::cq::detail::fwht128_avx2(values.data());
+      values[0] += 0.0000001f;
+    };
+    results.push_back(with_needle_metadata(
+        measure_case(k_fwht_case_name, fwht_cfg, fwht_fn), "emel",
+        "emel_cq_avx2_fwht128", "cpp", 1u));
+  }
 
   {
     // Steady-state decode: one greedy-shaped decode step per op at ~100-token
@@ -278,8 +307,8 @@ void append_emel_needle_graph_cases(std::vector<result> &results,
       const int32_t token = fixture.prompt_ids[token_cursor];
       token_cursor = (token_cursor + 1u) % fixture.prompt_ids.size();
       if (instrument_cq())
-        fixture.graph->process_event(
-            needle::graph::event::configure_cq_timing{true});
+        fixture.graph->process_event(needle::graph::event::configure_cq_timing{
+            true, &benchmark_timestamp_now_ns});
       const auto decode_begin = std::chrono::steady_clock::now();
       if (!fixture.graph->process_event(needle::graph::event::decode{
               token, std::span<float>{fixture.logits}})) {
@@ -292,7 +321,7 @@ void append_emel_needle_graph_cases(std::vector<result> &results,
                                                                  decode_begin)
                 .count());
         fixture.graph->process_event(
-            needle::graph::event::capture_cq_timing{fixture.cq_ns});
+            needle::graph::event::capture_cq_timing{fixture.cq_timing});
       }
       fixture.decoded_steps += 1u;
     };
@@ -300,13 +329,29 @@ void append_emel_needle_graph_cases(std::vector<result> &results,
         measure_case(k_decode_case_name, decode_cfg, decode_fn);
     results.push_back(with_needle_metadata(std::move(decode_result), "emel",
                                            "emel_needle_graph", "cpp", 1u));
-    if (instrument_cq())
-      std::fprintf(stderr,
-                   "# needle_graph_cq: decode_ns=%llu cq_ns=%llu non_cq_ns=%llu\n",
-                   static_cast<unsigned long long>(fixture.decode_ns),
-                   static_cast<unsigned long long>(fixture.cq_ns),
-                   static_cast<unsigned long long>(fixture.decode_ns -
-                                                   fixture.cq_ns));
+    if (instrument_cq()) {
+      const auto &t = fixture.cq_timing;
+      const std::uint64_t cq_ns =
+          t.quantize_nanoseconds + t.fwht_nanoseconds +
+          t.dot_full_nanoseconds + t.dot_batch_nanoseconds +
+          t.dot_rows_nanoseconds + t.dequant_nanoseconds;
+      const double pct = static_cast<double>(cq_ns) * 100.0 /
+                         static_cast<double>(fixture.decode_ns);
+      std::fprintf(
+          stderr,
+          "# needle_graph_cq: decode_ns=%llu quant_ns=%llu fwht_ns=%llu "
+          "dot_full_ns=%llu dot_batch_ns=%llu dot_rows_ns=%llu "
+          "dequant_ns=%llu cq_ns=%llu cq_pct=%.3f non_cq_ns=%llu\n",
+          static_cast<unsigned long long>(fixture.decode_ns),
+          static_cast<unsigned long long>(t.quantize_nanoseconds),
+          static_cast<unsigned long long>(t.fwht_nanoseconds),
+          static_cast<unsigned long long>(t.dot_full_nanoseconds),
+          static_cast<unsigned long long>(t.dot_batch_nanoseconds),
+          static_cast<unsigned long long>(t.dot_rows_nanoseconds),
+          static_cast<unsigned long long>(t.dequant_nanoseconds),
+          static_cast<unsigned long long>(cq_ns), pct,
+          static_cast<unsigned long long>(fixture.decode_ns - cq_ns));
+    }
   }
 
   {

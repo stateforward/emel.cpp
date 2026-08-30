@@ -4,6 +4,8 @@
 #include <cfenv>
 #include <cmath>
 #include <cstdint>
+#include <cstring>
+#include <random>
 #include <doctest/doctest.h>
 #include <vector>
 namespace {
@@ -95,17 +97,17 @@ TEST_CASE("CQ A8 fake quant matches JAX ties zero and signed boundary") {
   {
     const std::array<float, 4u> input{0.0f, 0.0f, -0.0f, 0.0f};
     std::array<int8_t, 4u> quantized{};
-    std::array<float, 4u> dequantized{};
+    std::array<float, 4u> integer_values{};
     float scale = 0.0f;
     const emel::kernel::cq::event::quantize_a8_request request{
-        input, quantized, dequantized, scale};
+        input, quantized, integer_values, scale};
     emel::kernel::cq::event::dispatch_result result{};
     REQUIRE(sm.process_event(
         emel::kernel::cq::event::quantize_a8{request, result}));
     CHECK(scale == 1.0f);
     for (uint32_t i = 0u; i < input.size(); ++i) {
       CHECK(quantized[i] == 0);
-      CHECK(dequantized[i] == 0.0f);
+      CHECK(integer_values[i] == 0.0f);
     }
   }
 
@@ -117,17 +119,17 @@ TEST_CASE("CQ A8 fake quant matches JAX ties zero and signed boundary") {
                                       0.5f,    1.5f,    126.5f, 127.0f};
     const std::array<int8_t, 9u> expected{-127, -126, -2, 0, 0, 0, 2, 126, 127};
     std::array<int8_t, 9u> quantized{};
-    std::array<float, 9u> dequantized{};
+    std::array<float, 9u> integer_values{};
     float scale = 0.0f;
     const emel::kernel::cq::event::quantize_a8_request request{
-        input, quantized, dequantized, scale};
+        input, quantized, integer_values, scale};
     emel::kernel::cq::event::dispatch_result result{};
     REQUIRE(sm.process_event(
         emel::kernel::cq::event::quantize_a8{request, result}));
     CHECK(scale == 1.0f);
     for (uint32_t i = 0u; i < input.size(); ++i) {
       CHECK(quantized[i] == expected[i]);
-      CHECK(dequantized[i] == static_cast<float>(expected[i]));
+      CHECK(integer_values[i] == static_cast<float>(expected[i]));
     }
     CHECK(quantized.front() > INT8_MIN);
   }
@@ -141,15 +143,93 @@ TEST_CASE("CQ A8 fake quant matches JAX ties zero and signed boundary") {
 TEST_CASE("CQ A8 guard rejects incomplete caller scratch") {
   const std::array<float, 2u> input{1.0f, -1.0f};
   std::array<int8_t, 1u> quantized{};
-  std::array<float, 2u> dequantized{};
+  std::array<float, 2u> integer_values{};
   float scale = 0.0f;
   const emel::kernel::cq::event::quantize_a8_request request{
-      input, quantized, dequantized, scale};
+      input, quantized, integer_values, scale};
   emel::kernel::cq::event::dispatch_result result{};
   emel::kernel::cq::sm sm;
   CHECK_FALSE(
       sm.process_event(emel::kernel::cq::event::quantize_a8{request, result}));
   CHECK(sm.is(stateforward::sml::state<emel::kernel::cq::state_ready>));
+}
+
+TEST_CASE("CQ AVX2 FWHT128 matches scalar on random zeros tails and A8") {
+#if defined(__AVX2__) && defined(__FMA__)
+  const auto check = [](const std::array<float, 128u> &input) {
+    auto expected = input;
+    auto actual = input;
+    emel::kernel::cq::detail::fwht(expected.data(), expected.size());
+    emel::kernel::cq::sm sm;
+    emel::kernel::cq::event::dispatch_result result{};
+    const emel::kernel::cq::event::fwht_request request{actual};
+    REQUIRE(sm.process_event(
+        emel::kernel::cq::event::execute_fwht_avx2{request, result}));
+    for (uint32_t i = 0u; i < actual.size(); ++i)
+      CHECK(actual[i] == doctest::Approx(expected[i]).epsilon(2.0e-6));
+  };
+
+  check({});
+  std::array<float, 128u> a8{};
+  for (uint32_t i = 0u; i < a8.size(); ++i)
+    a8[i] = static_cast<float>(static_cast<int32_t>(i % 255u) - 127);
+  check(a8);
+  std::array<float, 128u> tail{};
+  for (uint32_t i = 0u; i < 113u; ++i)
+    tail[i] = std::sin(static_cast<float>(i) * 0.19f);
+  check(tail);
+  std::mt19937 random{0x12345678u};
+  std::uniform_real_distribution<float> values{-4.0f, 4.0f};
+  for (uint32_t sample = 0u; sample < 64u; ++sample) {
+    std::array<float, 128u> input{};
+    for (float &value : input)
+      value = values(random);
+    check(input);
+  }
+#endif
+}
+
+TEST_CASE("CQ A8 scale hoist matches dequantized scalar projection") {
+  std::array<float, 28u> cb{};
+  for (uint32_t i = 0u; i < 16u; ++i)
+    cb[12u + i] = (static_cast<float>(i) - 7.5f) / 8.0f;
+  constexpr uint32_t group = 128u, in = 128u, out = 3u;
+  std::vector<uint32_t> ix(static_cast<size_t>(out) * in);
+  for (size_t i = 0u; i < ix.size(); ++i)
+    ix[i] = static_cast<uint32_t>((i * 13u + 5u) & 15u);
+  const auto b = blob<4u>(ix, out, in, group, {0x3c00u, 0x3800u, 0x4000u});
+  const auto v = view(b, out, in, group, 4u);
+  std::array<float, in> input{};
+  for (uint32_t i = 0u; i < in; ++i)
+    input[i] = std::sin(static_cast<float>(i + 1u) * 0.07f) * 3.25f;
+  std::array<int8_t, in> quantized{};
+  std::array<float, in> integer_values{};
+  float scale = 0.0f;
+  emel::kernel::cq::sm sm;
+  emel::kernel::cq::event::dispatch_result quantize_result{};
+  const emel::kernel::cq::event::quantize_a8_request quantize_request{
+      input, quantized, integer_values, scale};
+  REQUIRE(sm.process_event(emel::kernel::cq::event::quantize_a8{
+      quantize_request, quantize_result}));
+  std::array<float, in> dequantized{};
+  for (uint32_t i = 0u; i < in; ++i)
+    dequantized[i] = integer_values[i] * scale;
+  std::array<float, in> baseline_workspace{};
+  std::array<float, in> hoisted_workspace{};
+  std::array<float, out> baseline{};
+  std::array<float, out> hoisted{};
+  emel::kernel::cq::event::dispatch_result baseline_result{};
+  const gemv_request baseline_request{v, cb, dequantized, baseline,
+                                      baseline_workspace};
+  REQUIRE(sm.process_event(emel::kernel::cq::event::execute_scalar_q4{
+      baseline_request, baseline_result}));
+  emel::kernel::cq::event::dispatch_result hoisted_result{};
+  const gemv_request hoisted_request{v, cb, integer_values, hoisted,
+                                     hoisted_workspace, scale};
+  REQUIRE(sm.process_event(emel::kernel::cq::event::execute_scalar_q4{
+      hoisted_request, hoisted_result}));
+  for (uint32_t row = 0u; row < out; ++row)
+    CHECK(hoisted[row] == doctest::Approx(baseline[row]).epsilon(2.0e-6));
 }
 
 TEST_CASE("CQ2 scalar parity and normalized FWHT") {

@@ -287,12 +287,12 @@ struct sm : public emel::sm<model, action::context> {
 
   bool process_event(const event::configure_cq_timing &ev) {
     return this->context_.cq.process_event(
-        emel::kernel::cq::event::configure_timing{ev.enabled});
+        emel::kernel::cq::event::configure_timing{ev.enabled, ev.now});
   }
 
   bool process_event(const event::capture_cq_timing &ev) {
     return this->context_.cq.process_event(
-        emel::kernel::cq::event::capture_timing{ev.nanoseconds});
+        emel::kernel::cq::event::capture_timing{ev.breakdown});
   }
 
   bool process_event(const event::capture_a8_diagnostics &ev) {

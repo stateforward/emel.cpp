@@ -35,19 +35,19 @@ template <route_kind route>
 inline bool
 compute_gemv(context &ctx, const tensor_view &view,
              const emel::kernel::cq::event::prepared_q4_view &prepared,
-             const std::span<const float> activation,
+             const activation_payload activation,
              const std::span<float> output) noexcept {
   emel::kernel::cq::event::dispatch_result result{};
   if constexpr (route == route_kind::prepared_avx2) {
     const emel::kernel::cq::event::prepared_gemv_request request{
-        prepared, ctx.prepared_codebook, activation, output,
-        std::span<float>{ctx.cq_workspace}};
+        prepared, ctx.prepared_codebook, activation.values, output,
+        std::span<float>{ctx.cq_workspace}, activation.scale};
     return ctx.cq.process_event(
         emel::kernel::cq::event::execute_prepared_avx2_q4{request, result});
   } else {
     const emel::kernel::cq::event::gemv_request request{
-        view, codebook_span(ctx), activation, output,
-        std::span<float>{ctx.cq_workspace}};
+        view, codebook_span(ctx), activation.values, output,
+        std::span<float>{ctx.cq_workspace}, activation.scale};
     return ctx.cq.process_event(
         emel::kernel::cq::event::execute_scalar_q4{request, result});
   }
@@ -57,7 +57,7 @@ template <route_kind route>
 inline bool
 compute_gemv_rows(context &ctx, const tensor_view &view,
                   const emel::kernel::cq::event::prepared_q4_view &prepared,
-                  const std::span<const float> activation,
+                  const activation_payload activation,
                   const uint32_t row_begin, const uint32_t row_count,
                   const std::span<float> output) noexcept {
   emel::kernel::cq::event::dispatch_result result{};
@@ -65,11 +65,12 @@ compute_gemv_rows(context &ctx, const tensor_view &view,
     const emel::kernel::cq::event::prepared_gemv_rows_request request{
         prepared,
         ctx.prepared_codebook,
-        activation,
+        activation.values,
         row_begin,
         row_count,
         output,
-        std::span<float>{ctx.cq_workspace}};
+        std::span<float>{ctx.cq_workspace},
+        activation.scale};
     return ctx.cq.process_event(
         emel::kernel::cq::event::execute_prepared_avx2_rows_q4{request,
                                                                result});
@@ -77,11 +78,12 @@ compute_gemv_rows(context &ctx, const tensor_view &view,
     const emel::kernel::cq::event::gemv_rows_request request{
         view,
         codebook_span(ctx),
-        activation,
+        activation.values,
         row_begin,
         row_count,
         output,
-        std::span<float>{ctx.cq_workspace}};
+        std::span<float>{ctx.cq_workspace},
+        activation.scale};
     return ctx.cq.process_event(
         emel::kernel::cq::event::execute_scalar_rows_q4{request, result});
   }
@@ -108,7 +110,7 @@ compute_dequant_row(context &ctx, const tensor_view &view,
 }
 
 template <activation_route_kind activation_route>
-inline std::span<const float>
+inline activation_payload
 prepare_activation(context &ctx, const std::span<const float> activation,
                    bool &ok) noexcept {
   if constexpr (activation_route == activation_route_kind::a8) {
@@ -117,19 +119,21 @@ prepare_activation(context &ctx, const std::span<const float> activation,
         .input = activation,
         .quantized =
             std::span<int8_t>{ctx.a8_quantized}.first(activation.size()),
-        .dequantized =
-            std::span<float>{ctx.a8_dequantized}.first(activation.size()),
+        .integer_values =
+            std::span<float>{ctx.a8_integer_values}.first(activation.size()),
         .scale = scale};
     emel::kernel::cq::event::dispatch_result result{};
     ok = ok && ctx.cq.process_event(
                    emel::kernel::cq::event::quantize_a8{request, result});
-    return std::span<const float>{ctx.a8_dequantized}.first(activation.size());
+    return {std::span<const float>{ctx.a8_integer_values}.first(
+                activation.size()),
+            scale};
   }
-  return activation;
+  return {activation, 1.0f};
 }
 
 inline bool
-compute_gemv_batch4(context &ctx, const std::span<const float> activation,
+compute_gemv_batch4(context &ctx, const activation_payload activation,
                     const emel::kernel::cq::event::prepared_q4_view &first,
                     const std::span<float> first_output,
                     const emel::kernel::cq::event::prepared_q4_view &second,
@@ -144,8 +148,9 @@ compute_gemv_batch4(context &ctx, const std::span<const float> activation,
                    {&third, third_output},
                    {&fourth, fourth_output}}},
       .codebook = ctx.prepared_codebook,
-      .activation = activation,
-      .workspace = std::span<float>{ctx.cq_workspace}};
+      .activation = activation.values,
+      .workspace = std::span<float>{ctx.cq_workspace},
+      .output_scale = activation.scale};
   emel::kernel::cq::event::dispatch_result result{};
   return ctx.cq.process_event(
       emel::kernel::cq::event::execute_prepared_avx2_batch4_q4{request,
@@ -453,10 +458,10 @@ inline bool compute_layer(context &ctx, event::step_ctx &step) noexcept {
 
   bool ok = compute_rms_unit(ctx, ctx.lanes, lane_count * d_model,
                              std::span<float>{ctx.nx});
-  ok = ok && compute_gemv_rows<route>(ctx, bound.mhc.phi_pre,
-                                      ctx.prepared_mhc.phi_pre, ctx.nx,
-                                      layer_index * lane_count, lane_count,
-                                      std::span<float>{ctx.pre_dots});
+  ok = ok && compute_gemv_rows<route>(
+                 ctx, bound.mhc.phi_pre, ctx.prepared_mhc.phi_pre,
+                 activation_payload{ctx.nx, 1.0f}, layer_index * lane_count,
+                 lane_count, std::span<float>{ctx.pre_dots});
 
   const emel::kernel::mhc::event::pre_mix_request pre_request{
       .lanes = ctx.lanes,
@@ -649,14 +654,15 @@ inline bool compute_layer(context &ctx, event::step_ctx &step) noexcept {
                  emel::kernel::hadamard::event::execute_mlp_row{
                      hadamard_request, hadamard_result});
 
-  ok = ok && compute_gemv_rows<route>(ctx, bound.mhc.phi_post,
-                                      ctx.prepared_mhc.phi_post, ctx.nx,
-                                      layer_index * lane_count, lane_count,
-                                      std::span<float>{ctx.post_dots});
   ok = ok && compute_gemv_rows<route>(
-                 ctx, bound.mhc.phi_res, ctx.prepared_mhc.phi_res, ctx.nx,
-                 layer_index * lane_count * lane_count, lane_count * lane_count,
-                 std::span<float>{ctx.res_dots});
+                 ctx, bound.mhc.phi_post, ctx.prepared_mhc.phi_post,
+                 activation_payload{ctx.nx, 1.0f}, layer_index * lane_count,
+                 lane_count, std::span<float>{ctx.post_dots});
+  ok = ok && compute_gemv_rows<route>(
+                 ctx, bound.mhc.phi_res, ctx.prepared_mhc.phi_res,
+                 activation_payload{ctx.nx, 1.0f},
+                 layer_index * lane_count * lane_count,
+                 lane_count * lane_count, std::span<float>{ctx.res_dots});
   const uint64_t square = static_cast<uint64_t>(lane_count) * lane_count;
   const emel::kernel::mhc::event::post_mix_request post_request{
       .lanes = ctx.lanes,

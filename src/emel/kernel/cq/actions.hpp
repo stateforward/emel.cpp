@@ -1,6 +1,5 @@
 #pragma once
 
-#include <chrono>
 #include <cstdint>
 #include <cstring>
 
@@ -20,7 +19,8 @@ struct context {
   uint64_t prepared_calls = 0u;
   uint64_t quantize_calls = 0u;
   bool timing_enabled = false;
-  uint64_t timed_nanoseconds = 0u;
+  event::timestamp_now_fn timing_now = nullptr;
+  event::timing_breakdown timing = {};
 };
 
 inline void quantize_a8(const event::quantize_a8_request &request) noexcept {
@@ -37,7 +37,7 @@ inline void quantize_a8(const event::quantize_a8_request &request) noexcept {
         rounded < -128.0f ? -128.0f : (rounded > 127.0f ? 127.0f : rounded);
     const int8_t quantized = static_cast<int8_t>(clamped);
     request.quantized[i] = quantized;
-    request.dequantized[i] = static_cast<float>(quantized) * request.scale;
+    request.integer_values[i] = static_cast<float>(quantized);
   }
 }
 
@@ -55,10 +55,12 @@ inline void execute_scalar_gemv(const event::gemv_request &request) noexcept {
   const size_t norm_row = static_cast<size_t>(in_pad / group) * 2u;
   const uint8_t *norms = base + static_cast<size_t>(out) * packed_row;
   for (uint32_t row = 0u; row < out; ++row)
-    request.output[row] = detail::dequant_dot_row<Bits>(
-        base + static_cast<size_t>(row) * packed_row,
-        norms + static_cast<size_t>(row) * norm_row, in, group,
-        request.codebook, request.workspace.first(in_pad));
+    request.output[row] =
+        detail::dequant_dot_row<Bits>(
+            base + static_cast<size_t>(row) * packed_row,
+            norms + static_cast<size_t>(row) * norm_row, in, group,
+            request.codebook, request.workspace.first(in_pad)) *
+        request.output_scale;
 }
 
 template <uint32_t Bits>
@@ -76,9 +78,11 @@ execute_scalar_gemv_rows(const event::gemv_rows_request &request) noexcept {
   const uint8_t *norms = base + static_cast<size_t>(view.shape[0]) * packed_row;
   for (uint32_t row = 0u; row < request.row_count; ++row) {
     const size_t src = static_cast<size_t>(request.row_begin) + row;
-    request.output[row] = detail::dequant_dot_row<Bits>(
-        base + src * packed_row, norms + src * norm_row, in, group,
-        request.codebook, request.workspace.first(in_pad));
+    request.output[row] =
+        detail::dequant_dot_row<Bits>(
+            base + src * packed_row, norms + src * norm_row, in, group,
+            request.codebook, request.workspace.first(in_pad)) *
+        request.output_scale;
   }
 }
 
@@ -829,26 +833,42 @@ execute_avx2_gemv(const event::gemv_request &request) noexcept {
                               scalar_tail;
       row_result += group_sum * norm;
     }
-    request.output[row] = row_result;
+    request.output[row] = row_result * request.output_scale;
   }
 #else
   execute_scalar_gemv<Bits>(request);
 #endif
 }
-inline uint64_t now_nanoseconds() noexcept {
-  return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
-                                   std::chrono::steady_clock::now().time_since_epoch())
-                                   .count());
+inline uint64_t timing_now(const context &ctx) noexcept {
+  return ctx.timing_enabled && ctx.timing_now != nullptr ? ctx.timing_now()
+                                                          : 0u;
+}
+
+inline void scale_output(const std::span<float> output,
+                         const float scale) noexcept {
+  for (float &value : output)
+    value *= scale;
 }
 
 struct effect_quantize_a8 {
   void operator()(const event::quantize_a8 &ev, context &ctx) const noexcept {
-    const uint64_t begin = ctx.timing_enabled ? now_nanoseconds() : 0u;
+    const uint64_t begin = timing_now(ctx);
     quantize_a8(ev.request);
     if (ctx.timing_enabled)
-      ctx.timed_nanoseconds += now_nanoseconds() - begin;
+      ctx.timing.quantize_nanoseconds += timing_now(ctx) - begin;
     ev.result.accepted = true;
     ++ctx.quantize_calls;
+  }
+};
+
+struct effect_execute_fwht_avx2 {
+  void operator()(const event::execute_fwht_avx2 &ev,
+                  context &ctx) const noexcept {
+    const uint64_t begin = timing_now(ctx);
+    detail::fwht128_avx2(ev.request.values.data());
+    if (ctx.timing_enabled)
+      ctx.timing.fwht_nanoseconds += timing_now(ctx) - begin;
+    ev.result.accepted = true;
   }
 };
 
@@ -871,14 +891,22 @@ struct effect_prepare_q4 {
 struct effect_execute_prepared_avx2_q4 {
   void operator()(const event::execute_prepared_avx2_q4 &ev,
                   context &ctx) const noexcept {
-    const uint64_t begin = ctx.timing_enabled ? now_nanoseconds() : 0u;
-    for (uint32_t row = 0u; row < ev.request.weights.out; ++row)
-      ev.request.output[row] = 0.0f;
-    execute_prepared_avx2_gemv<false>(
-        ev.request.weights, ev.request.codebook, ev.request.activation, 0u,
-        ev.request.weights.out, ev.request.output, ev.request.workspace);
+    const uint64_t fwht_begin = timing_now(ctx);
+    if constexpr (true)
+      detail::compute_fwht128_groups_avx2(
+          ev.request.activation, ev.request.weights.in,
+          ev.request.workspace.first(ev.request.weights.in_pad));
     if (ctx.timing_enabled)
-      ctx.timed_nanoseconds += now_nanoseconds() - begin;
+      ctx.timing.fwht_nanoseconds += timing_now(ctx) - fwht_begin;
+    const uint64_t dot_begin = timing_now(ctx);
+    execute_prepared_avx2_dot_block32(
+        ev.request.weights, ev.request.codebook,
+        ev.request.workspace.first(ev.request.weights.in_pad),
+        ev.request.output);
+    scale_output(ev.request.output.first(ev.request.weights.out),
+                 ev.request.output_scale);
+    if (ctx.timing_enabled)
+      ctx.timing.dot_full_nanoseconds += timing_now(ctx) - dot_begin;
     ev.result.accepted = true;
     ++ctx.prepared_calls;
   }
@@ -889,40 +917,53 @@ struct effect_execute_prepared_avx2_batch4_q4 {
                   context &ctx) const noexcept {
     const auto &request = ev.request;
     const auto &first = *request.targets[0].weights;
-    const uint64_t begin = ctx.timing_enabled ? now_nanoseconds() : 0u;
-    detail::compute_fwht_groups(request.activation, first.in, first.group,
-                                request.workspace.first(first.in_pad));
+    const uint64_t fwht_begin = timing_now(ctx);
+    if constexpr (true)
+      detail::compute_fwht128_groups_avx2(
+          request.activation, first.in, request.workspace.first(first.in_pad));
+    if (ctx.timing_enabled)
+      ctx.timing.fwht_nanoseconds += timing_now(ctx) - fwht_begin;
+    const uint64_t dot_begin = timing_now(ctx);
     __m256i codebook_byte0;
     __m256i codebook_byte1;
     __m256i codebook_byte2;
     __m256i codebook_byte3;
     q4_codebook_byte_tables(request.codebook, codebook_byte0, codebook_byte1,
                             codebook_byte2, codebook_byte3);
-    for (const auto &target : request.targets)
+    for (const auto &target : request.targets) {
       execute_prepared_avx2_dot_block32_loaded(
           *target.weights, request.codebook,
           request.workspace.first(first.in_pad), target.output, codebook_byte0,
           codebook_byte1, codebook_byte2, codebook_byte3);
+      scale_output(target.output.first(target.weights->out),
+                   request.output_scale);
+    }
     if (ctx.timing_enabled)
-      ctx.timed_nanoseconds += now_nanoseconds() - begin;
+      ctx.timing.dot_batch_nanoseconds += timing_now(ctx) - dot_begin;
     ev.result.accepted = true;
     ctx.prepared_calls += request.targets.size();
   }
 };
 
-
 struct effect_execute_prepared_avx2_rows_q4 {
   void operator()(const event::execute_prepared_avx2_rows_q4 &ev,
                   context &ctx) const noexcept {
-    const uint64_t begin = ctx.timing_enabled ? now_nanoseconds() : 0u;
-    for (uint32_t row = 0u; row < ev.request.row_count; ++row)
-      ev.request.output[row] = 0.0f;
-    execute_prepared_avx2_gemv<true>(ev.request.weights, ev.request.codebook,
-                                     ev.request.activation,
-                                     ev.request.row_begin, ev.request.row_count,
-                                     ev.request.output, ev.request.workspace);
+    const uint64_t fwht_begin = timing_now(ctx);
+    if constexpr (true)
+      detail::compute_fwht128_groups_avx2(
+          ev.request.activation, ev.request.weights.in,
+          ev.request.workspace.first(ev.request.weights.in_pad));
     if (ctx.timing_enabled)
-      ctx.timed_nanoseconds += now_nanoseconds() - begin;
+      ctx.timing.fwht_nanoseconds += timing_now(ctx) - fwht_begin;
+    const uint64_t dot_begin = timing_now(ctx);
+    execute_prepared_avx2_dot(
+        ev.request.weights, ev.request.codebook,
+        ev.request.workspace.first(ev.request.weights.in_pad),
+        ev.request.row_begin, ev.request.row_count, ev.request.output);
+    scale_output(ev.request.output.first(ev.request.row_count),
+                 ev.request.output_scale);
+    if (ctx.timing_enabled)
+      ctx.timing.dot_rows_nanoseconds += timing_now(ctx) - dot_begin;
     ev.result.accepted = true;
     ++ctx.prepared_calls;
   }
@@ -930,10 +971,10 @@ struct effect_execute_prepared_avx2_rows_q4 {
 struct effect_execute_prepared_dequant_q4 {
   void operator()(const event::execute_prepared_dequant_q4 &ev,
                   context &ctx) const noexcept {
-    const uint64_t begin = ctx.timing_enabled ? now_nanoseconds() : 0u;
+    const uint64_t begin = timing_now(ctx);
     execute_prepared_dequant_rows(ev.request);
     if (ctx.timing_enabled)
-      ctx.timed_nanoseconds += now_nanoseconds() - begin;
+      ctx.timing.dequant_nanoseconds += timing_now(ctx) - begin;
     ev.result.accepted = true;
     ++ctx.prepared_calls;
   }
@@ -999,20 +1040,20 @@ struct effect_capture_diagnostics {
     ev.avx2_calls = ctx.avx2_calls;
   }
 };
-
 struct effect_configure_timing {
   void operator()(const event::configure_timing &ev,
                   context &ctx) const noexcept {
     if (ev.enabled && !ctx.timing_enabled)
-      ctx.timed_nanoseconds = 0u;
+      ctx.timing = {};
     ctx.timing_enabled = ev.enabled;
+    ctx.timing_now = ev.now;
   }
 };
 
 struct effect_capture_timing {
   void operator()(const event::capture_timing &ev,
                   const context &ctx) const noexcept {
-    ev.nanoseconds = ctx.timed_nanoseconds;
+    ev.breakdown = ctx.timing;
   }
 };
 
