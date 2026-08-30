@@ -282,6 +282,8 @@ struct sm : public emel::sm<model, action::context> {
         this->context_.prepared_indices_by_input32.size();
     ev.prepared_norm_bytes =
         this->context_.prepared_norms.size() * sizeof(float);
+    ev.prepared_group32_norm_bytes =
+        this->context_.prepared_norms_by_group32.size() * sizeof(float);
     return handled;
   }
 

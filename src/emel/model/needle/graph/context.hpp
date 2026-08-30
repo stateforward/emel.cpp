@@ -127,9 +127,10 @@ struct context {
     a8_quantized.resize(cq_workspace.size());
     a8_integer_values.resize(cq_workspace.size());
     const auto prepared_sizes = compute_prepared_sizes(contract_in);
-    prepared_indices.resize(prepared_sizes.first);
-    prepared_indices_by_input32.resize(prepared_sizes.first);
-    prepared_norms.resize(prepared_sizes.second);
+    prepared_indices.resize(prepared_sizes.indices);
+    prepared_indices_by_input32.resize(prepared_sizes.indices);
+    prepared_norms.resize(prepared_sizes.norms);
+    prepared_norms_by_group32.resize(prepared_sizes.norms_by_group32);
   }
 
   context(const context &) = delete;
@@ -166,15 +167,22 @@ struct context {
     return workspace;
   }
 
-  static std::pair<uint64_t, uint64_t>
-  compute_prepared_sizes(const needle::contract &bound) noexcept {
+  struct prepared_storage_sizes {
     uint64_t indices = 0u;
     uint64_t norms = 0u;
+    uint64_t norms_by_group32 = 0u;
+  };
+
+  static prepared_storage_sizes
+  compute_prepared_sizes(const needle::contract &bound) noexcept {
+    prepared_storage_sizes sizes{};
     const auto add = [&](const tensor_view &view) {
       const uint64_t in_pad = compute_in_pad(view);
-      const uint64_t count = static_cast<uint64_t>(view.shape[0]) * in_pad;
-      indices += count;
-      norms += count / view.group;
+      const uint64_t groups_per_row = in_pad / view.group;
+      sizes.indices += static_cast<uint64_t>(view.shape[0]) * in_pad;
+      sizes.norms += static_cast<uint64_t>(view.shape[0]) * groups_per_row;
+      sizes.norms_by_group32 +=
+          static_cast<uint64_t>(view.shape[0] / 32u * 32u) * groups_per_row;
     };
     add(bound.embedding);
     for (uint32_t i = 0u; i < bound.layer_count; ++i) {
@@ -192,7 +200,7 @@ struct context {
       add(bound.engram_sites[i].key_proj);
       add(bound.engram_sites[i].value_proj);
     }
-    return {indices, norms};
+    return sizes;
   }
 
   // Bound contract (named views over the mmapped .cact); outlives the graph.
@@ -231,6 +239,7 @@ struct context {
   std::vector<uint8_t> prepared_indices;
   std::vector<uint8_t> prepared_indices_by_input32;
   std::vector<float> prepared_norms;
+  std::vector<float> prepared_norms_by_group32;
   emel::kernel::cq::event::prepared_codebook_q4 prepared_codebook = {};
 
   emel::kernel::cq::event::prepared_q4_view prepared_embedding = {};

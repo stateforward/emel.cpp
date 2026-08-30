@@ -185,10 +185,14 @@ inline bool compute_rms_unit(context &ctx, const std::span<const float> input,
 // tensors, precompute RoPE, and clear mutable state.
 inline bool prepare_view(context &ctx, const tensor_view &view,
                          emel::kernel::cq::event::prepared_q4_view &prepared,
-                         size_t &index_offset, size_t &norm_offset) noexcept {
+                         size_t &index_offset, size_t &norm_offset,
+                         size_t &group32_norm_offset) noexcept {
   const size_t index_count =
       static_cast<size_t>(view.shape[0]) * context::compute_in_pad(view);
-  const size_t norm_count = index_count / view.group;
+  const size_t groups_per_row = context::compute_in_pad(view) / view.group;
+  const size_t norm_count = static_cast<size_t>(view.shape[0]) * groups_per_row;
+  const size_t group32_norm_count =
+      static_cast<size_t>(view.shape[0] / 32u * 32u) * groups_per_row;
   const emel::kernel::cq::event::prepare_q4_request request{
       .weights = view,
       .indices = std::span<uint8_t>{ctx.prepared_indices}.subspan(index_offset,
@@ -198,12 +202,16 @@ inline bool prepare_view(context &ctx, const tensor_view &view,
               index_offset, index_count),
       .norms =
           std::span<float>{ctx.prepared_norms}.subspan(norm_offset, norm_count),
+      .norms_by_group32 =
+          std::span<float>{ctx.prepared_norms_by_group32}.subspan(
+              group32_norm_offset, group32_norm_count),
       .prepared = prepared};
   emel::kernel::cq::event::dispatch_result result{};
   const bool ok = ctx.cq.process_event(
       emel::kernel::cq::event::prepare_q4{request, result});
   index_offset += index_count;
   norm_offset += norm_count;
+  group32_norm_offset += group32_norm_count;
   return ok;
 }
 
@@ -216,40 +224,42 @@ inline bool prepare_graph_weights(context &ctx) noexcept {
       codebook_request, codebook_result});
   size_t index_offset = 0u;
   size_t norm_offset = 0u;
+  size_t group32_norm_offset = 0u;
   ok = ok && prepare_view(ctx, bound.embedding, ctx.prepared_embedding,
-                          index_offset, norm_offset);
+                          index_offset, norm_offset, group32_norm_offset);
   for (uint32_t i = 0u; i < bound.layer_count; ++i) {
     const auto &layer = bound.layers[i];
     auto &prepared = ctx.prepared_layers[i];
     ok = ok && prepare_view(ctx, layer.q_proj, prepared.q_proj, index_offset,
-                            norm_offset);
+                            norm_offset, group32_norm_offset);
     ok = ok && prepare_view(ctx, layer.k_proj, prepared.k_proj, index_offset,
-                            norm_offset);
+                            norm_offset, group32_norm_offset);
     ok = ok && prepare_view(ctx, layer.v_proj, prepared.v_proj, index_offset,
-                            norm_offset);
+                            norm_offset, group32_norm_offset);
     ok = ok && prepare_view(ctx, layer.gate_proj, prepared.gate_proj,
-                            index_offset, norm_offset);
+                            index_offset, norm_offset, group32_norm_offset);
     ok = ok && prepare_view(ctx, layer.out_proj, prepared.out_proj,
-                            index_offset, norm_offset);
+                            index_offset, norm_offset, group32_norm_offset);
   }
   ok = ok && prepare_view(ctx, bound.mhc.phi_pre, ctx.prepared_mhc.phi_pre,
-                          index_offset, norm_offset);
+                          index_offset, norm_offset, group32_norm_offset);
   ok = ok && prepare_view(ctx, bound.mhc.phi_post, ctx.prepared_mhc.phi_post,
-                          index_offset, norm_offset);
+                          index_offset, norm_offset, group32_norm_offset);
   ok = ok && prepare_view(ctx, bound.mhc.phi_res, ctx.prepared_mhc.phi_res,
-                          index_offset, norm_offset);
+                          index_offset, norm_offset, group32_norm_offset);
   for (uint32_t i = 0u; i < bound.engram_site_count; ++i) {
     const auto &site = bound.engram_sites[i];
     auto &prepared = ctx.prepared_engram_sites[i];
     ok = ok && prepare_view(ctx, site.tables, prepared.tables, index_offset,
-                            norm_offset);
+                            norm_offset, group32_norm_offset);
     ok = ok && prepare_view(ctx, site.key_proj, prepared.key_proj, index_offset,
-                            norm_offset);
+                            norm_offset, group32_norm_offset);
     ok = ok && prepare_view(ctx, site.value_proj, prepared.value_proj,
-                            index_offset, norm_offset);
+                            index_offset, norm_offset, group32_norm_offset);
   }
   return ok && index_offset == ctx.prepared_indices.size() &&
-         norm_offset == ctx.prepared_norms.size();
+         norm_offset == ctx.prepared_norms.size() &&
+         group32_norm_offset == ctx.prepared_norms_by_group32.size();
 }
 
 inline bool compute_init(context &ctx) noexcept {

@@ -139,6 +139,8 @@ inline void prepare_q4(const event::prepare_q4_request &request) noexcept {
   const size_t blocked_rows = out / 32u * 32u;
   const size_t blocked_count = blocked_rows * in_pad;
   const size_t norm_count = index_count / group;
+  const size_t groups_per_row = in_pad / group;
+  const size_t blocked_norm_count = blocked_rows * groups_per_row;
   const uint8_t *base = static_cast<const uint8_t *>(view.data);
   for (size_t i = 0u; i < index_count; ++i)
     request.indices[i] =
@@ -151,6 +153,13 @@ inline void prepare_q4(const event::prepare_q4_request &request) noexcept {
   const uint8_t *norms = base + index_count / 2u;
   for (size_t i = 0u; i < norm_count; ++i)
     request.norms[i] = detail::fp16_to_fp32(detail::load_u16(norms + i * 2u));
+  for (size_t row = 0u; row < blocked_rows; row += 32u)
+    for (size_t group_index = 0u; group_index < groups_per_row;
+         ++group_index)
+      for (size_t lane = 0u; lane < 32u; ++lane)
+        request.norms_by_group32[row * groups_per_row + group_index * 32u +
+                                 lane] =
+            request.norms[(row + lane) * groups_per_row + group_index];
   request.prepared = event::prepared_q4_view{
       .source = static_cast<const uint8_t *>(view.data),
       .out = out,
@@ -159,7 +168,9 @@ inline void prepare_q4(const event::prepare_q4_request &request) noexcept {
       .in_pad = in_pad,
       .indices = request.indices.first(index_count),
       .indices_by_input32 = request.indices_by_input32.first(blocked_count),
-      .norms = request.norms.first(norm_count)};
+      .norms = request.norms.first(norm_count),
+      .norms_by_group32 =
+          request.norms_by_group32.first(blocked_norm_count)};
 }
 
 #if defined(__x86_64__) || defined(_M_X64)
@@ -509,6 +520,8 @@ execute_prepared_avx2_dot_block32_loaded(
   for (uint32_t row = 0u; row < blocked_rows; row += 32u) {
     const uint8_t *selectors =
         view.indices_by_input32.data() + static_cast<size_t>(row) * view.in_pad;
+    const float *group_norms = view.norms_by_group32.data() +
+                               static_cast<size_t>(row) * groups_per_row;
     __m256 row_total0 = _mm256_setzero_ps();
     __m256 row_total1 = _mm256_setzero_ps();
     __m256 row_total2 = _mm256_setzero_ps();
@@ -534,19 +547,15 @@ execute_prepared_avx2_dot_block32_loaded(
         group_accum3 =
             _mm256_fmadd_ps(values.values3, activation, group_accum3);
       }
-      alignas(32) float norm_lanes[32u];
-      for (uint32_t lane = 0u; lane < 32u; ++lane)
-        norm_lanes[lane] =
-            view.norms[(static_cast<size_t>(row + lane) * groups_per_row) +
-                       group_index];
-      row_total0 = _mm256_fmadd_ps(group_accum0,
-                                   _mm256_load_ps(norm_lanes), row_total0);
-      row_total1 = _mm256_fmadd_ps(group_accum1,
-                                   _mm256_load_ps(norm_lanes + 8u), row_total1);
-      row_total2 = _mm256_fmadd_ps(group_accum2,
-                                   _mm256_load_ps(norm_lanes + 16u), row_total2);
-      row_total3 = _mm256_fmadd_ps(group_accum3,
-                                   _mm256_load_ps(norm_lanes + 24u), row_total3);
+      const float *norms = group_norms + static_cast<size_t>(group_index) * 32u;
+      row_total0 = _mm256_fmadd_ps(group_accum0, _mm256_loadu_ps(norms),
+                                   row_total0);
+      row_total1 = _mm256_fmadd_ps(group_accum1, _mm256_loadu_ps(norms + 8u),
+                                   row_total1);
+      row_total2 = _mm256_fmadd_ps(group_accum2, _mm256_loadu_ps(norms + 16u),
+                                   row_total2);
+      row_total3 = _mm256_fmadd_ps(group_accum3, _mm256_loadu_ps(norms + 24u),
+                                   row_total3);
     }
     _mm256_storeu_ps(output.data() + row, row_total0);
     _mm256_storeu_ps(output.data() + row + 8u, row_total1);

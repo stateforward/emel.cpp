@@ -42,6 +42,7 @@ struct capture_cq_diagnostics {
   size_t &prepared_index_bytes;
   size_t &prepared_input32_bytes;
   size_t &prepared_norm_bytes;
+  size_t &prepared_group32_norm_bytes;
 };
 
 struct configure_cq_timing {
