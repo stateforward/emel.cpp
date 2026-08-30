@@ -188,8 +188,8 @@ inline bool prepare_view(context &ctx, const tensor_view &view,
       .weights = view,
       .indices = std::span<uint8_t>{ctx.prepared_indices}.subspan(index_offset,
                                                                   index_count),
-      .indices_by_input16 =
-          std::span<uint8_t>{ctx.prepared_indices_by_input16}.subspan(
+      .indices_by_input32 =
+          std::span<uint8_t>{ctx.prepared_indices_by_input32}.subspan(
               index_offset, index_count),
       .norms =
           std::span<float>{ctx.prepared_norms}.subspan(norm_offset, norm_count),

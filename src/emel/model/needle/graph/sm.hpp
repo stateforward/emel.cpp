@@ -278,8 +278,8 @@ struct sm : public emel::sm<model, action::context> {
         ev.prepare_calls, ev.prepared_calls};
     const bool handled = this->context_.cq.process_event(diagnostics);
     ev.prepared_index_bytes = this->context_.prepared_indices.size();
-    ev.prepared_input16_bytes =
-        this->context_.prepared_indices_by_input16.size();
+    ev.prepared_input32_bytes =
+        this->context_.prepared_indices_by_input32.size();
     ev.prepared_norm_bytes =
         this->context_.prepared_norms.size() * sizeof(float);
     return handled;

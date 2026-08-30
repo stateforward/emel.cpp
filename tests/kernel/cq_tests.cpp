@@ -310,7 +310,7 @@ TEST_CASE("CQ row dequant reconstructs exporter unpack values") {
   CHECK(g[0] == doctest::Approx(dot));
 }
 
-TEST_CASE("CQ4 sixteen-selector byte shuffle lookup is bit exact") {
+TEST_CASE("CQ4 thirty-two-selector byte shuffle lookup is bit exact") {
 #if defined(__AVX2__) && defined(__FMA__)
   std::array<float, 28u> cb{};
   constexpr std::array<uint32_t, 16u> codebook_bits{
@@ -329,27 +329,37 @@ TEST_CASE("CQ4 sixteen-selector byte shuffle lookup is bit exact") {
   __m256i byte3;
   emel::kernel::cq::action::q4_codebook_byte_tables(
       prepared_codebook, byte0, byte1, byte2, byte3);
-  const auto check = [&](const std::array<uint8_t, 16u> &selectors) {
-    const auto values = emel::kernel::cq::action::lookup_codebook16_pshufb(
-        emel::kernel::cq::action::load_selector16(selectors.data()), byte0,
+  const auto check = [&](const std::array<uint8_t, 32u> &selectors) {
+    const auto values = emel::kernel::cq::action::lookup_codebook32_pshufb(
+        emel::kernel::cq::action::load_selector32(selectors.data()), byte0,
         byte1, byte2, byte3);
-    alignas(32) std::array<uint32_t, 16u> actual{};
+    alignas(32) std::array<uint32_t, 32u> actual{};
     _mm256_store_si256(reinterpret_cast<__m256i *>(actual.data()),
-                       _mm256_castps_si256(values.low));
+                       _mm256_castps_si256(values.values0));
     _mm256_store_si256(reinterpret_cast<__m256i *>(actual.data() + 8u),
-                       _mm256_castps_si256(values.high));
+                       _mm256_castps_si256(values.values1));
+    _mm256_store_si256(reinterpret_cast<__m256i *>(actual.data() + 16u),
+                       _mm256_castps_si256(values.values2));
+    _mm256_store_si256(reinterpret_cast<__m256i *>(actual.data() + 24u),
+                       _mm256_castps_si256(values.values3));
     for (uint32_t lane = 0u; lane < selectors.size(); ++lane)
       CHECK(actual[lane] == codebook_bits[selectors[lane]]);
   };
 
-  std::array<uint8_t, 16u> exhaustive{};
-  for (uint32_t i = 0u; i < exhaustive.size(); ++i)
-    exhaustive[i] = static_cast<uint8_t>(i);
-  check(exhaustive);
+  std::array<uint8_t, 32u> lane_boundaries{};
+  for (uint32_t lane = 0u; lane < lane_boundaries.size(); ++lane)
+    lane_boundaries[lane] = static_cast<uint8_t>(lane & 15u);
+  check(lane_boundaries);
+
+  for (uint32_t selector = 0u; selector < 16u; ++selector) {
+    std::array<uint8_t, 32u> exhaustive{};
+    exhaustive.fill(static_cast<uint8_t>(selector));
+    check(exhaustive);
+  }
 
   uint32_t random = 0x9e3779b9u;
-  for (uint32_t sequence = 0u; sequence < 64u; ++sequence) {
-    std::array<uint8_t, 16u> selectors{};
+  for (uint32_t sequence = 0u; sequence < 256u; ++sequence) {
+    std::array<uint8_t, 32u> selectors{};
     for (uint8_t &selector : selectors) {
       random = random * 1664525u + 1013904223u;
       selector = static_cast<uint8_t>(random >> 28u);
@@ -372,11 +382,11 @@ TEST_CASE("CQ4 preparation preserves selectors norms and numerical identity") {
       {0x3c00, 0x4000, 0x4200, 0x4400, 0x3c00, 0x4000, 0x4200, 0x4400});
   const auto v = view(b, out, in, group, 4u);
   std::vector<uint8_t> prepared_indices(out * in);
-  std::vector<uint8_t> prepared_indices_by_input16(out * in);
+  std::vector<uint8_t> prepared_indices_by_input32(out * in);
   std::vector<float> prepared_norms(out * in / group);
   emel::kernel::cq::event::prepared_q4_view prepared{};
   const emel::kernel::cq::event::prepare_q4_request prepare_request{
-      v, prepared_indices, prepared_indices_by_input16, prepared_norms,
+      v, prepared_indices, prepared_indices_by_input32, prepared_norms,
       prepared};
   emel::kernel::cq::sm sm;
   emel::kernel::cq::event::dispatch_result prepare_result{};
@@ -439,12 +449,12 @@ TEST_CASE(
   const auto v = view(b, out, in, group, 4u);
   std::vector<uint8_t> indices(out * in);
   std::vector<float> norms(out * in / group);
-  std::vector<uint8_t> indices_by_input16(out * in);
+  std::vector<uint8_t> indices_by_input32(out * in);
   emel::kernel::cq::event::prepared_q4_view prepared{};
   emel::kernel::cq::sm sm;
   emel::kernel::cq::event::dispatch_result prepare_result{};
   const emel::kernel::cq::event::prepare_q4_request prepare_request{
-      v, indices, indices_by_input16, norms, prepared};
+      v, indices, indices_by_input32, norms, prepared};
   REQUIRE(sm.process_event(
       emel::kernel::cq::event::prepare_q4{prepare_request, prepare_result}));
   emel::kernel::cq::event::prepared_codebook_q4 prepared_codebook{};
@@ -501,13 +511,13 @@ TEST_CASE("CQ4 prepared lookup preserves vector and scalar group tails") {
     const auto b = blob<4u>(ix, out, in, group, source_norms);
     const auto v = view(b, out, in, group, 4u);
     std::vector<uint8_t> indices(static_cast<size_t>(out) * in);
-    std::vector<uint8_t> indices_by_input16(static_cast<size_t>(out) * in);
+    std::vector<uint8_t> indices_by_input32(static_cast<size_t>(out) * in);
     std::vector<float> norms(static_cast<size_t>(out) * 2u);
     emel::kernel::cq::event::prepared_q4_view prepared{};
     emel::kernel::cq::sm sm;
     emel::kernel::cq::event::dispatch_result prepare_result{};
     const emel::kernel::cq::event::prepare_q4_request prepare_request{
-        v, indices, indices_by_input16, norms, prepared};
+        v, indices, indices_by_input32, norms, prepared};
     REQUIRE(sm.process_event(
         emel::kernel::cq::event::prepare_q4{prepare_request, prepare_result}));
     emel::kernel::cq::event::prepared_codebook_q4 prepared_codebook{};
@@ -564,13 +574,13 @@ TEST_CASE("CQ4 prepared norm hoist matches scalar for realistic random tensors")
   const auto b = blob<4u>(source_indices, out, in, group, norm_bits);
   const auto v = view(b, out, in, group, 4u);
   std::vector<uint8_t> indices(static_cast<size_t>(out) * in);
-  std::vector<uint8_t> indices_by_input16(static_cast<size_t>(out) * in);
+  std::vector<uint8_t> indices_by_input32(static_cast<size_t>(out) * in);
   std::vector<float> norms(static_cast<size_t>(out) * in / group);
   emel::kernel::cq::event::prepared_q4_view prepared{};
   emel::kernel::cq::sm sm;
   emel::kernel::cq::event::dispatch_result prepare_result{};
   const emel::kernel::cq::event::prepare_q4_request prepare_request{
-      v, indices, indices_by_input16, norms, prepared};
+      v, indices, indices_by_input32, norms, prepared};
   REQUIRE(sm.process_event(
       emel::kernel::cq::event::prepare_q4{prepare_request, prepare_result}));
   emel::kernel::cq::event::prepared_codebook_q4 prepared_codebook{};
@@ -585,23 +595,23 @@ TEST_CASE("CQ4 prepared norm hoist matches scalar for realistic random tensors")
   std::array<float, in> scalar_workspace{};
   std::array<float, in> prepared_workspace{};
   std::array<float, out> scalar{};
-  std::array<float, out> block16{};
+  std::array<float, out> block32{};
   const gemv_request scalar_request{v, cb, activation, scalar,
                                     scalar_workspace};
   emel::kernel::cq::event::dispatch_result scalar_result{};
   REQUIRE(sm.process_event(emel::kernel::cq::event::execute_scalar_q4{
       scalar_request, scalar_result}));
   const emel::kernel::cq::event::prepared_gemv_request prepared_request{
-      prepared, prepared_codebook, activation, block16, prepared_workspace};
+      prepared, prepared_codebook, activation, block32, prepared_workspace};
   emel::kernel::cq::event::dispatch_result prepared_result{};
   REQUIRE(sm.process_event(emel::kernel::cq::event::execute_prepared_avx2_q4{
       prepared_request, prepared_result}));
   for (uint32_t row = 0u; row < out; ++row)
-    CHECK(block16[row] == doctest::Approx(scalar[row]).epsilon(1.0e-5));
+    CHECK(block32[row] == doctest::Approx(scalar[row]).epsilon(1.0e-5));
 #endif
 }
 
-TEST_CASE("CQ4 prepared block16 input-major route preserves exact output") {
+TEST_CASE("CQ4 prepared block32 input-major route preserves exact output") {
 #if defined(__AVX2__) && defined(__FMA__)
   constexpr uint32_t group = 128u, in = 512u, out = 512u;
   std::array<float, 28u> cb{};
@@ -609,7 +619,7 @@ TEST_CASE("CQ4 prepared block16 input-major route preserves exact output") {
     cb[12u + i] = (static_cast<float>(i) - 7.5f) / 8.0f;
   std::vector<uint32_t> source_indices(static_cast<size_t>(out) * in);
   std::vector<uint8_t> indices(static_cast<size_t>(out) * in);
-  std::vector<uint8_t> indices_by_input16(static_cast<size_t>(out) * in);
+  std::vector<uint8_t> indices_by_input32(static_cast<size_t>(out) * in);
   std::vector<float> norms(static_cast<size_t>(out) * in / group);
   std::array<float, in> activation{};
   for (size_t i = 0u; i < source_indices.size(); ++i)
@@ -626,25 +636,25 @@ TEST_CASE("CQ4 prepared block16 input-major route preserves exact output") {
   emel::kernel::cq::sm sm;
   emel::kernel::cq::event::dispatch_result prepare_result{};
   const emel::kernel::cq::event::prepare_q4_request prepare_request{
-      v, indices, indices_by_input16, norms, prepared};
+      v, indices, indices_by_input32, norms, prepared};
   REQUIRE(sm.process_event(
       emel::kernel::cq::event::prepare_q4{prepare_request, prepare_result}));
   emel::kernel::cq::event::prepared_codebook_q4 prepared_codebook{};
   emel::kernel::cq::action::prepare_codebook_q4({cb, prepared_codebook});
-  REQUIRE(prepared.indices_by_input16.size() == indices_by_input16.size());
-  for (uint32_t row = 0u; row < out; row += 16u)
+  REQUIRE(prepared.indices_by_input32.size() == indices_by_input32.size());
+  for (uint32_t row = 0u; row < out; row += 32u)
     for (uint32_t i = 0u; i < in; ++i)
-      for (uint32_t lane = 0u; lane < 16u; ++lane)
-        CHECK(prepared.indices_by_input16[static_cast<size_t>(row) * in +
-                                          static_cast<size_t>(i) * 16u + lane] ==
+      for (uint32_t lane = 0u; lane < 32u; ++lane)
+        CHECK(prepared.indices_by_input32[static_cast<size_t>(row) * in +
+                                          static_cast<size_t>(i) * 32u + lane] ==
               source_indices[static_cast<size_t>(row + lane) * in + i]);
   std::array<float, out> single{};
-  std::array<float, out> block16{};
+  std::array<float, out> block32{};
   emel::kernel::cq::action::execute_prepared_avx2_dot(
       prepared, prepared_codebook, activation, 0u, out, single);
-  emel::kernel::cq::action::execute_prepared_avx2_dot_block16(
-      prepared, prepared_codebook, activation, block16);
+  emel::kernel::cq::action::execute_prepared_avx2_dot_block32(
+      prepared, prepared_codebook, activation, block32);
   for (uint32_t row = 0u; row < out; ++row)
-    CHECK(block16[row] == doctest::Approx(single[row]).epsilon(1.0e-5));
+    CHECK(block32[row] == doctest::Approx(single[row]).epsilon(1.0e-5));
 #endif
 }
