@@ -249,6 +249,7 @@ if(EMEL_ENABLE_TESTS)
   )
 
   list(APPEND EMEL_TEST_SOURCES
+    tests/cact/loader_tests.cpp
     tests/gguf/loader/lifecycle_tests.cpp
     tests/io/loader/lifecycle_tests.cpp
     tests/io/mmap/advise_tests.cpp

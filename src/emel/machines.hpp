@@ -1,6 +1,7 @@
 #pragma once
 
 #include "emel/batch/planner/sm.hpp"
+#include "emel/cact/loader/sm.hpp"
 #include "emel/diarization/sortformer/executor/sm.hpp"
 #include "emel/diarization/sortformer/pipeline/sm.hpp"
 #include "emel/diarization/sortformer/request/sm.hpp"
@@ -64,6 +65,7 @@ using MemoryRecurrent = emel::memory::recurrent::sm;
 using MemoryStreaming = emel::memory::streaming::sm;
 using ModelLoader = emel::model::loader::sm;
 using Parser = emel::gguf::loader::sm;
+using CactLoader = emel::cact::loader::sm;
 using Renderer = emel::text::renderer::sm;
 using Tokenizer = emel::text::tokenizer::sm;
 using ModelTensor = emel::model::tensor::sm;
