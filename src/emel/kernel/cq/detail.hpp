@@ -71,6 +71,33 @@ codebook_for(const std::span<const float> codebook) noexcept {
   return codebook.data() + 12u;
 }
 
+// CQ4 sign/rank lookup is lossless only when every negative level has an
+// exact positive counterpart. Match by value rather than index ordering so
+// callers may use any codebook permutation. The bitwise sign relation is the
+// strongest accepted form; exact numeric negation also admits signed zero.
+inline bool
+q4_codebook_is_symmetric(const std::span<const float> codebook) noexcept {
+  if (codebook.size() < 28u)
+    return false;
+  const float *levels = codebook_for<4u>(codebook);
+  for (uint32_t i = 0u; i < 16u; ++i) {
+    const uint32_t bits = std::bit_cast<uint32_t>(levels[i]);
+    bool found = false;
+    for (uint32_t j = 0u; j < 16u; ++j) {
+      if (j == i)
+        continue;
+      const uint32_t other_bits = std::bit_cast<uint32_t>(levels[j]);
+      if (other_bits == (bits ^ 0x80000000u) || levels[j] == -levels[i]) {
+        found = true;
+        break;
+      }
+    }
+    if (!found)
+      return false;
+  }
+  return true;
+}
+
 inline void fwht(float *values, const uint32_t n) noexcept {
   emel::kernel::detail::fwht_normalized(values, n);
 }

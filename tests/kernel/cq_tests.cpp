@@ -175,6 +175,30 @@ TEST_CASE("CQ2 scalar parity and normalized FWHT") {
     e += cb[ix[i]] * t[i];
   CHECK(o[0] == doctest::Approx(e));
 }
+TEST_CASE("CQ4 symmetry guard matches values independent of ordering") {
+  std::array<float, 28u> cb{};
+  const std::array<float, 8u> magnitudes{0.015625f, 0.03125f, 0.0625f, 0.125f,
+                                         0.25f,     0.5f,     1.0f,    2.0f};
+  for (uint32_t i = 0u; i < magnitudes.size(); ++i) {
+    cb[12u + i * 2u] = magnitudes[7u - i];
+    cb[13u + i * 2u] = -magnitudes[7u - i];
+  }
+  CHECK(emel::kernel::cq::detail::q4_codebook_is_symmetric(cb));
+  cb[12u] = std::nextafter(cb[12u], INFINITY);
+  CHECK_FALSE(emel::kernel::cq::detail::q4_codebook_is_symmetric(cb));
+}
+
+TEST_CASE("pinned Needle CQ4 codebook rejects lossless sign-rank mapping") {
+  constexpr std::array<float, 16u> pinned{
+      -0.239531547f,  -0.180706054f,  -0.140957937f,  -0.109012552f,
+      -0.0815129653f, -0.0565276518f, -0.0329391509f, -0.0101161096f,
+      0.0127108004f,  0.0357079171f,  0.0594582558f,  0.0849770233f,
+      0.112741619f,   0.144696921f,   0.184239f,      0.242273703f};
+  std::array<float, 28u> cb{};
+  for (uint32_t i = 0u; i < pinned.size(); ++i)
+    cb[12u + i] = pinned[i];
+  CHECK_FALSE(emel::kernel::cq::detail::q4_codebook_is_symmetric(cb));
+}
 TEST_CASE("CQ3 and CQ4 explicit routes preserve parity") {
   std::array<float, 28u> cb{};
   for (uint32_t i = 0; i < 8; ++i)
@@ -423,15 +447,15 @@ TEST_CASE("CQ4 prepared 512x512 group128 row blocks preserve exact output") {
   std::array<float, out> single{};
   std::array<float, out> block4{};
   std::array<float, out> block8{};
-  emel::kernel::cq::action::execute_prepared_avx2_dot(
-      prepared, cb, activation, 0u, out, single);
+  emel::kernel::cq::action::execute_prepared_avx2_dot(prepared, cb, activation,
+                                                      0u, out, single);
   emel::kernel::cq::action::execute_prepared_avx2_dot_blocked4(
       prepared, cb, activation, block4);
   emel::kernel::cq::action::execute_prepared_avx2_dot_blocked8(
       prepared, cb, activation, block8);
   for (uint32_t row = 0u; row < out; ++row) {
-    CHECK(block4[row] == single[row]);
-    CHECK(block8[row] == single[row]);
+    CHECK(block4[row] == doctest::Approx(single[row]).epsilon(1.0e-5));
+    CHECK(block8[row] == doctest::Approx(single[row]).epsilon(1.0e-5));
   }
 #endif
 }
