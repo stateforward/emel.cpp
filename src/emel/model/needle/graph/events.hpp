@@ -29,6 +29,15 @@ struct decode {
   std::span<float> logits_out = {};
 };
 
+// Snapshot-style diagnostics for tests/bench attribution. Observation is
+// allocation-free and does not drive machine progression.
+struct capture_cq_diagnostics {
+  uint64_t &prepare_calls;
+  uint64_t &prepared_calls;
+  size_t &prepared_index_bytes;
+  size_t &prepared_norm_bytes;
+};
+
 struct init_ctx {
   emel::error::type err = emel::error::cast(error::none);
 };

@@ -148,9 +148,9 @@ struct graph_fixture {
   graph_fixture() : file_bytes(read_file_bytes(resolve_model_path())) {
     cact_loader::sm loader{};
     cact_loader::geometry geometry = {};
-    if (!loader.process_event(cact_loader::event::probe{
-            std::span<const uint8_t>{file_bytes}, geometry, k_probe_done,
-            k_probe_error})) {
+    if (!loader.process_event(
+            cact_loader::event::probe{std::span<const uint8_t>{file_bytes},
+                                      geometry, k_probe_done, k_probe_error})) {
       fail_needle_setup("loader_probe");
     }
     tensors.resize(geometry.num_tensors);
@@ -159,9 +159,9 @@ struct graph_fixture {
             k_bind_error})) {
       fail_needle_setup("loader_bind_storage");
     }
-    if (!loader.process_event(cact_loader::event::parse{
-            std::span<const uint8_t>{file_bytes}, k_parse_done,
-            k_parse_error})) {
+    if (!loader.process_event(
+            cact_loader::event::parse{std::span<const uint8_t>{file_bytes},
+                                      k_parse_done, k_parse_error})) {
       fail_needle_setup("loader_parse");
     }
 
@@ -193,8 +193,7 @@ struct graph_fixture {
       fail_needle_setup("graph_init");
     }
     if (!graph->process_event(needle::graph::event::prefill{
-            std::span<const int32_t>{context_ids},
-            std::span<float>{logits}})) {
+            std::span<const int32_t>{context_ids}, std::span<float>{logits}})) {
       fail_needle_setup("graph_context_prefill");
     }
     decoded_steps = 0u;
@@ -240,11 +239,12 @@ emel::bench::result make_reference_row(const char *name,
                               "libneedle_2_0_3_recorded", "recorded", tokens);
 }
 
-}  // namespace
+} // namespace
 
 namespace emel::bench {
 
-void append_emel_needle_graph_cases(std::vector<result> & results, const config & cfg) {
+void append_emel_needle_graph_cases(std::vector<result> &results,
+                                    const config &cfg) {
   graph_fixture fixture;
 
   {
@@ -274,9 +274,10 @@ void append_emel_needle_graph_cases(std::vector<result> & results, const config 
       }
       fixture.decoded_steps += 1u;
     };
-    results.push_back(with_needle_metadata(
-        measure_case(k_decode_case_name, decode_cfg, decode_fn), "emel",
-        "emel_needle_graph", "cpp", 1u));
+    auto decode_result =
+        measure_case(k_decode_case_name, decode_cfg, decode_fn);
+    results.push_back(with_needle_metadata(std::move(decode_result), "emel",
+                                           "emel_needle_graph", "cpp", 1u));
   }
 
   {
@@ -305,7 +306,8 @@ void append_emel_needle_graph_cases(std::vector<result> & results, const config 
   }
 }
 
-void append_reference_needle_graph_cases(std::vector<result> & results, const config &) {
+void append_reference_needle_graph_cases(std::vector<result> &results,
+                                         const config &) {
   results.push_back(make_reference_row(k_decode_case_name, 1u,
                                        k_libneedle_decode_tokens_per_second));
   results.push_back(make_reference_row(k_prefill_case_name,
@@ -313,4 +315,4 @@ void append_reference_needle_graph_cases(std::vector<result> & results, const co
                                        k_libneedle_prefill_tokens_per_second));
 }
 
-}  // namespace emel::bench
+} // namespace emel::bench

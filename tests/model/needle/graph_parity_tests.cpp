@@ -179,6 +179,62 @@ TEST_CASE("needle graph matches the committed JAX logits fixture on all "
           " rel=", worst_rel);
 }
 
+TEST_CASE("needle graph prepares CQ4 storage once and selects prepared route") {
+  const auto model_path = std::filesystem::path{EMEL_TEST_REPO_ROOT} /
+                          "tests/models/route-w4-qat.cact";
+  const std::vector<uint8_t> file_bytes = read_file_bytes(model_path);
+  emel::cact::loader::sm loader{};
+  emel::cact::loader::geometry geometry = {};
+  REQUIRE(loader.process_event(
+      emel::cact::loader::event::probe{std::span<const uint8_t>{file_bytes},
+                                       geometry, k_probe_done, k_probe_error}));
+  std::vector<emel::cact::loader::tensor_view> tensors(geometry.num_tensors);
+  REQUIRE(loader.process_event(emel::cact::loader::event::bind_storage{
+      std::span<emel::cact::loader::tensor_view>{tensors}, k_bind_done,
+      k_bind_error}));
+  REQUIRE(loader.process_event(emel::cact::loader::event::parse{
+      std::span<const uint8_t>{file_bytes}, k_parse_done, k_parse_error}));
+  emel::model::needle::sm binder{};
+  emel::model::needle::contract contract = {};
+  REQUIRE(binder.process_event(emel::model::needle::event::bind{
+      geometry, std::span<const emel::cact::loader::tensor_view>{tensors},
+      contract, k_needle_done, k_needle_error}));
+
+  emel::model::needle::graph::sm graph{contract};
+  REQUIRE(graph.process_event(emel::model::needle::graph::event::init{}));
+  uint64_t prepare_calls = 0u;
+  uint64_t prepared_calls = 0u;
+  size_t prepared_index_bytes = 0u;
+  size_t prepared_norm_bytes = 0u;
+  REQUIRE(graph.process_event(
+      emel::model::needle::graph::event::capture_cq_diagnostics{
+          prepare_calls, prepared_calls, prepared_index_bytes,
+          prepared_norm_bytes}));
+  CHECK(prepare_calls > 0u);
+  CHECK(prepared_calls == 0u);
+  CHECK(prepared_index_bytes > 0u);
+  CHECK(prepared_norm_bytes > 0u);
+
+  std::vector<float> logits(k_vocab);
+  REQUIRE(graph.process_event(
+      emel::model::needle::graph::event::decode{2, std::span<float>{logits}}));
+  const uint64_t prepared_after_decode = prepared_calls;
+  REQUIRE(graph.process_event(
+      emel::model::needle::graph::event::capture_cq_diagnostics{
+          prepare_calls, prepared_calls, prepared_index_bytes,
+          prepared_norm_bytes}));
+  CHECK(prepared_calls > prepared_after_decode);
+  const uint64_t preparation_count = prepare_calls;
+
+  REQUIRE(graph.process_event(
+      emel::model::needle::graph::event::decode{2, std::span<float>{logits}}));
+  REQUIRE(graph.process_event(
+      emel::model::needle::graph::event::capture_cq_diagnostics{
+          prepare_calls, prepared_calls, prepared_index_bytes,
+          prepared_norm_bytes}));
+  CHECK(prepare_calls == preparation_count);
+}
+
 TEST_CASE("needle graph rejects an out-of-vocab step token") {
   const auto model_path = std::filesystem::path{EMEL_TEST_REPO_ROOT} /
                           "tests/models/route-w4-qat.cact";

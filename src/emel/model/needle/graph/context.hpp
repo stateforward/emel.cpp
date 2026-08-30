@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <utility>
 #include <vector>
 
 #include "emel/kernel/cq/sm.hpp"
@@ -14,11 +15,31 @@
 
 namespace emel::model::needle::graph::action {
 
+struct prepared_layer_views {
+  emel::kernel::cq::event::prepared_q4_view q_proj = {};
+  emel::kernel::cq::event::prepared_q4_view k_proj = {};
+  emel::kernel::cq::event::prepared_q4_view v_proj = {};
+  emel::kernel::cq::event::prepared_q4_view gate_proj = {};
+  emel::kernel::cq::event::prepared_q4_view out_proj = {};
+};
+
+struct prepared_mhc_views {
+  emel::kernel::cq::event::prepared_q4_view phi_pre = {};
+  emel::kernel::cq::event::prepared_q4_view phi_post = {};
+  emel::kernel::cq::event::prepared_q4_view phi_res = {};
+};
+
+struct prepared_engram_site_views {
+  emel::kernel::cq::event::prepared_q4_view tables = {};
+  emel::kernel::cq::event::prepared_q4_view key_proj = {};
+  emel::kernel::cq::event::prepared_q4_view value_proj = {};
+};
+
 // CQ dispatch route baked into the step-chain states; selected once at init
 // by explicit guarded transitions (never stored in context).
 enum class route_kind : uint8_t {
   scalar = 0,
-  avx2 = 1,
+  prepared_avx2 = 1,
 };
 
 // Graph-owned runtime storage. ALL heap allocation happens here, in the
@@ -94,6 +115,10 @@ struct context {
     engram_keys.resize(static_cast<uint64_t>(geo.num_engram_sites) * d_model);
     engram_values.resize(static_cast<uint64_t>(geo.num_engram_sites) * d_model);
     cq_workspace.resize(compute_cq_workspace(contract_in));
+    const auto prepared_sizes = compute_prepared_sizes(contract_in);
+    prepared_indices.resize(prepared_sizes.first);
+    prepared_indices_by_input8.resize(prepared_sizes.first);
+    prepared_norms.resize(prepared_sizes.second);
   }
 
   context(const context &) = delete;
@@ -130,6 +155,35 @@ struct context {
     return workspace;
   }
 
+  static std::pair<uint64_t, uint64_t>
+  compute_prepared_sizes(const needle::contract &bound) noexcept {
+    uint64_t indices = 0u;
+    uint64_t norms = 0u;
+    const auto add = [&](const tensor_view &view) {
+      const uint64_t in_pad = compute_in_pad(view);
+      const uint64_t count = static_cast<uint64_t>(view.shape[0]) * in_pad;
+      indices += count;
+      norms += count / view.group;
+    };
+    add(bound.embedding);
+    for (uint32_t i = 0u; i < bound.layer_count; ++i) {
+      add(bound.layers[i].q_proj);
+      add(bound.layers[i].k_proj);
+      add(bound.layers[i].v_proj);
+      add(bound.layers[i].gate_proj);
+      add(bound.layers[i].out_proj);
+    }
+    add(bound.mhc.phi_pre);
+    add(bound.mhc.phi_post);
+    add(bound.mhc.phi_res);
+    for (uint32_t i = 0u; i < bound.engram_site_count; ++i) {
+      add(bound.engram_sites[i].tables);
+      add(bound.engram_sites[i].key_proj);
+      add(bound.engram_sites[i].value_proj);
+    }
+    return {indices, norms};
+  }
+
   // Bound contract (named views over the mmapped .cact); outlives the graph.
   const needle::contract *bound = nullptr;
 
@@ -161,6 +215,15 @@ struct context {
   std::vector<float> hada_workspace;
   std::vector<float> attend_workspace;
   std::vector<float> cq_workspace;
+  std::vector<uint8_t> prepared_indices;
+  std::vector<uint8_t> prepared_indices_by_input8;
+  std::vector<float> prepared_norms;
+
+  emel::kernel::cq::event::prepared_q4_view prepared_embedding = {};
+  std::array<prepared_layer_views, needle::k_max_layers> prepared_layers = {};
+  prepared_mhc_views prepared_mhc = {};
+  std::array<prepared_engram_site_views, needle::k_max_engram_sites>
+      prepared_engram_sites = {};
 
   // Per-layer f32 KV ring caches over the kv_window sliding mask.
   std::vector<float> key_cache;

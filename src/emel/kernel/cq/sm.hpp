@@ -15,6 +15,25 @@ struct model {
     // clang-format off
     return sml::make_transition_table(
         sml::state<state_ready> <= *sml::state<state_ready>
+          + sml::event<event::prepare_q4>
+          [ guard::guard_prepare_q4{} ] / action::effect_prepare_q4{}
+      , sml::state<state_ready> <= sml::state<state_ready>
+          + sml::event<event::execute_prepared_avx2_q4>
+          [ guard::guard_execute_prepared_avx2_q4{} ]
+          / action::effect_execute_prepared_avx2_q4{}
+      , sml::state<state_ready> <= sml::state<state_ready>
+          + sml::event<event::execute_prepared_avx2_batch4_q4>
+          [ guard::guard_execute_prepared_avx2_batch4_q4{} ]
+          / action::effect_execute_prepared_avx2_batch4_q4{}
+      , sml::state<state_ready> <= sml::state<state_ready>
+          + sml::event<event::execute_prepared_avx2_rows_q4>
+          [ guard::guard_execute_prepared_avx2_rows_q4{} ]
+          / action::effect_execute_prepared_avx2_rows_q4{}
+      , sml::state<state_ready> <= sml::state<state_ready>
+          + sml::event<event::execute_prepared_dequant_q4>
+          [ guard::guard_execute_prepared_dequant_q4{} ]
+          / action::effect_execute_prepared_dequant_q4{}
+      , sml::state<state_ready> <= sml::state<state_ready>
           + sml::event<event::execute_avx2_q2>
           [ guard::guard_execute_avx2<2u>{} ] / action::effect_execute_avx2<2u>{}
       , sml::state<state_ready> <= sml::state<state_ready>
@@ -56,6 +75,9 @@ struct model {
       , sml::state<state_ready> <= sml::state<state_ready>
           + sml::event<event::capture_diagnostics>
           / action::effect_capture_diagnostics{}
+      , sml::state<state_ready> <= sml::state<state_ready>
+          + sml::event<event::capture_prepared_diagnostics>
+          / action::effect_capture_prepared_diagnostics{}
       , sml::state<state_ready> <= sml::state<state_ready>
           + sml::unexpected_event<sml::_>
           / action::effect_on_unexpected{}

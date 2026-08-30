@@ -1,6 +1,5 @@
 #pragma once
 
-#include <cstddef>
 #include <cstdint>
 #include <cstring>
 
@@ -16,6 +15,8 @@ namespace emel::kernel::cq::action {
 struct context {
   uint64_t scalar_calls = 0u;
   uint64_t avx2_calls = 0u;
+  uint64_t prepare_calls = 0u;
+  uint64_t prepared_calls = 0u;
 };
 
 template <uint32_t Bits>
@@ -88,6 +89,193 @@ inline void execute_scalar_dequant_rows(
 #else
 #define EMEL_KERNEL_CQ_AVX2_TARGET
 #endif
+
+inline void prepare_q4(const event::prepare_q4_request &request) noexcept {
+  const auto &view = request.weights;
+  const uint32_t out = view.shape[0];
+  const uint32_t in = view.shape[1];
+  const uint32_t group = view.group;
+  const uint32_t in_pad = (in + group - 1u) / group * group;
+  const size_t index_count = static_cast<size_t>(out) * in_pad;
+  const size_t blocked_rows = out / 8u * 8u;
+  const size_t blocked_count = blocked_rows * in_pad;
+  const size_t norm_count = index_count / group;
+  const uint8_t *base = static_cast<const uint8_t *>(view.data);
+  for (size_t i = 0u; i < index_count; ++i)
+    request.indices[i] =
+        static_cast<uint8_t>(detail::unpack_index<4u>(base, i));
+  for (size_t row = 0u; row < blocked_rows; row += 8u)
+    for (size_t i = 0u; i < in_pad; ++i)
+      for (size_t lane = 0u; lane < 8u; ++lane)
+        request.indices_by_input8[row * in_pad + i * 8u + lane] =
+            request.indices[(row + lane) * in_pad + i];
+  const uint8_t *norms = base + index_count / 2u;
+  for (size_t i = 0u; i < norm_count; ++i)
+    request.norms[i] = detail::fp16_to_fp32(detail::load_u16(norms + i * 2u));
+  request.prepared = event::prepared_q4_view{
+      .source = static_cast<const uint8_t *>(view.data),
+      .out = out,
+      .in = in,
+      .group = group,
+      .in_pad = in_pad,
+      .indices = request.indices.first(index_count),
+      .indices_by_input8 = request.indices_by_input8.first(blocked_count),
+      .norms = request.norms.first(norm_count)};
+}
+
+EMEL_KERNEL_CQ_AVX2_TARGET inline void
+execute_prepared_avx2_dot(const event::prepared_q4_view &view,
+                          const std::span<const float> codebook_span,
+                          const std::span<const float> activation_fwht,
+                          const uint32_t row_begin, const uint32_t row_count,
+                          const std::span<float> output) noexcept {
+#if defined(__x86_64__) || defined(_M_X64)
+  const float *codebook = detail::codebook_for<4u>(codebook_span);
+  const __m256 codebook_low = _mm256_loadu_ps(codebook);
+  const __m256 codebook_high = _mm256_loadu_ps(codebook + 8u);
+  const uint32_t groups_per_row = view.in_pad / view.group;
+  for (uint32_t row = 0u; row < row_count; ++row) {
+    const uint32_t source_row = row_begin + row;
+    const uint8_t *indices =
+        view.indices.data() + static_cast<size_t>(source_row) * view.in_pad;
+    const float *norms =
+        view.norms.data() + static_cast<size_t>(source_row) * groups_per_row;
+    __m256 accum = _mm256_setzero_ps();
+    for (uint32_t begin = 0u, group_index = 0u; begin < view.in_pad;
+         begin += view.group, ++group_index) {
+      const __m256 norm_v = _mm256_set1_ps(norms[group_index]);
+      for (uint32_t i = 0u; i < view.group; i += 8u) {
+        const __m128i index_bytes = _mm_loadl_epi64(
+            reinterpret_cast<const __m128i *>(indices + begin + i));
+        const __m256i index_v = _mm256_cvtepu8_epi32(index_bytes);
+        const __m256i table_index =
+            _mm256_and_si256(index_v, _mm256_set1_epi32(7));
+        const __m256 low_values =
+            _mm256_permutevar8x32_ps(codebook_low, table_index);
+        const __m256 high_values =
+            _mm256_permutevar8x32_ps(codebook_high, table_index);
+        const __m256 values = _mm256_blendv_ps(
+            low_values, high_values,
+            _mm256_castsi256_ps(_mm256_slli_epi32(index_v, 28)));
+        const __m256 activation_v =
+            _mm256_loadu_ps(activation_fwht.data() + begin + i);
+        accum =
+            _mm256_fmadd_ps(_mm256_mul_ps(values, norm_v), activation_v, accum);
+      }
+    }
+    alignas(32) float lanes[8];
+    _mm256_store_ps(lanes, accum);
+    output[row] = lanes[0] + lanes[1] + lanes[2] + lanes[3] + lanes[4] +
+                  lanes[5] + lanes[6] + lanes[7];
+  }
+#else
+  (void)view;
+  (void)codebook_span;
+  (void)activation_fwht;
+  (void)row_begin;
+  (void)row_count;
+  (void)output;
+#endif
+}
+
+EMEL_KERNEL_CQ_AVX2_TARGET inline void
+execute_prepared_avx2_dot_blocked8(const event::prepared_q4_view &view,
+                                   const std::span<const float> codebook_span,
+                                   const std::span<const float> activation_fwht,
+                                   const std::span<float> output) noexcept {
+#if defined(__x86_64__) || defined(_M_X64)
+  const float *codebook = detail::codebook_for<4u>(codebook_span);
+  const __m256 codebook_low = _mm256_loadu_ps(codebook);
+  const __m256 codebook_high = _mm256_loadu_ps(codebook + 8u);
+  const uint32_t groups_per_row = view.in_pad / view.group;
+  const uint32_t blocked_rows = view.out / 8u * 8u;
+  for (uint32_t row = 0u; row < blocked_rows; row += 8u) {
+    const uint8_t *indices =
+        view.indices_by_input8.data() + static_cast<size_t>(row) * view.in_pad;
+    const float *norms =
+        view.norms.data() + static_cast<size_t>(row) * groups_per_row;
+    __m256 accum = _mm256_setzero_ps();
+    for (uint32_t begin = 0u, group_index = 0u; begin < view.in_pad;
+         begin += view.group, ++group_index) {
+      const __m256 norm = _mm256_setr_ps(
+          norms[group_index], norms[groups_per_row + group_index],
+          norms[2u * groups_per_row + group_index],
+          norms[3u * groups_per_row + group_index],
+          norms[4u * groups_per_row + group_index],
+          norms[5u * groups_per_row + group_index],
+          norms[6u * groups_per_row + group_index],
+          norms[7u * groups_per_row + group_index]);
+      for (uint32_t i = 0u; i < view.group; ++i) {
+        const __m128i index_bytes = _mm_loadl_epi64(
+            reinterpret_cast<const __m128i *>(indices + (begin + i) * 8u));
+        const __m256i index_v = _mm256_cvtepu8_epi32(index_bytes);
+        const __m256i table_index =
+            _mm256_and_si256(index_v, _mm256_set1_epi32(7));
+        const __m256 values = _mm256_blendv_ps(
+            _mm256_permutevar8x32_ps(codebook_low, table_index),
+            _mm256_permutevar8x32_ps(codebook_high, table_index),
+            _mm256_castsi256_ps(_mm256_slli_epi32(index_v, 28)));
+        const __m256 activation = _mm256_set1_ps(activation_fwht[begin + i]);
+        accum = _mm256_fmadd_ps(_mm256_mul_ps(values, norm), activation, accum);
+      }
+    }
+    _mm256_storeu_ps(output.data() + row, accum);
+  }
+  if (blocked_rows < view.out)
+    execute_prepared_avx2_dot(view, codebook_span, activation_fwht,
+                              blocked_rows, view.out - blocked_rows,
+                              output.subspan(blocked_rows));
+#else
+  (void)view;
+  (void)codebook_span;
+  (void)activation_fwht;
+  (void)output;
+#endif
+}
+template <bool Rows>
+EMEL_KERNEL_CQ_AVX2_TARGET inline void
+execute_prepared_avx2_gemv(const event::prepared_q4_view &view,
+                           const std::span<const float> codebook_span,
+                           const std::span<const float> activation,
+                           const uint32_t row_begin, const uint32_t row_count,
+                           const std::span<float> output,
+                           const std::span<float> workspace) noexcept {
+  detail::compute_fwht_groups(activation, view.in, view.group,
+                              workspace.first(view.in_pad));
+  if constexpr (Rows)
+    execute_prepared_avx2_dot(view, codebook_span, workspace.first(view.in_pad),
+                              row_begin, row_count, output);
+  else
+    execute_prepared_avx2_dot_blocked8(view, codebook_span,
+                                       workspace.first(view.in_pad), output);
+}
+
+inline void execute_prepared_dequant_rows(
+    const event::prepared_dequant_rows_request &request) noexcept {
+  const auto &view = request.weights;
+  const float *codebook = detail::codebook_for<4u>(request.codebook);
+  const uint32_t groups_per_row = view.in_pad / view.group;
+  alignas(32) float values[detail::k_max_group];
+  for (uint32_t row = 0u; row < request.row_count; ++row) {
+    const uint32_t source_row = request.row_begin + row;
+    const uint8_t *indices =
+        view.indices.data() + static_cast<size_t>(source_row) * view.in_pad;
+    const float *norms =
+        view.norms.data() + static_cast<size_t>(source_row) * groups_per_row;
+    float *row_out = request.output.data() + static_cast<size_t>(row) * view.in;
+    for (uint32_t begin = 0u, group_index = 0u; begin < view.in_pad;
+         begin += view.group, ++group_index) {
+      for (uint32_t i = 0u; i < view.group; ++i)
+        values[i] = codebook[indices[begin + i]] * norms[group_index];
+      detail::fwht(values, view.group);
+      const uint32_t keep = begin + view.group <= view.in
+                                ? view.group
+                                : (view.in > begin ? view.in - begin : 0u);
+      for (uint32_t i = 0u; i < keep; ++i)
+        row_out[begin + i] = values[i] * request.scale;
+    }
+  }
+}
 
 template <uint32_t Bits>
 EMEL_KERNEL_CQ_AVX2_TARGET inline void
@@ -188,6 +376,66 @@ execute_avx2_gemv(const event::gemv_request &request) noexcept {
   execute_scalar_gemv<Bits>(request);
 #endif
 }
+struct effect_prepare_q4 {
+  void operator()(const event::prepare_q4 &ev, context &ctx) const noexcept {
+    prepare_q4(ev.request);
+    ev.result.accepted = true;
+    ++ctx.prepare_calls;
+  }
+};
+
+struct effect_execute_prepared_avx2_q4 {
+  void operator()(const event::execute_prepared_avx2_q4 &ev,
+                  context &ctx) const noexcept {
+    for (uint32_t row = 0u; row < ev.request.weights.out; ++row)
+      ev.request.output[row] = 0.0f;
+    execute_prepared_avx2_gemv<false>(
+        ev.request.weights, ev.request.codebook, ev.request.activation, 0u,
+        ev.request.weights.out, ev.request.output, ev.request.workspace);
+    ev.result.accepted = true;
+    ++ctx.prepared_calls;
+  }
+};
+
+struct effect_execute_prepared_avx2_batch4_q4 {
+  void operator()(const event::execute_prepared_avx2_batch4_q4 &ev,
+                  context &ctx) const noexcept {
+    const auto &request = ev.request;
+    const auto &first = *request.targets[0].weights;
+    detail::compute_fwht_groups(request.activation, first.in, first.group,
+                                request.workspace.first(first.in_pad));
+    for (const auto &target : request.targets)
+      execute_prepared_avx2_dot_blocked8(*target.weights, request.codebook,
+                                         request.workspace.first(first.in_pad),
+                                         target.output);
+    ev.result.accepted = true;
+    ctx.prepared_calls += request.targets.size();
+  }
+};
+
+struct effect_execute_prepared_avx2_rows_q4 {
+  void operator()(const event::execute_prepared_avx2_rows_q4 &ev,
+                  context &ctx) const noexcept {
+    for (uint32_t row = 0u; row < ev.request.row_count; ++row)
+      ev.request.output[row] = 0.0f;
+    execute_prepared_avx2_gemv<true>(ev.request.weights, ev.request.codebook,
+                                     ev.request.activation,
+                                     ev.request.row_begin, ev.request.row_count,
+                                     ev.request.output, ev.request.workspace);
+    ev.result.accepted = true;
+    ++ctx.prepared_calls;
+  }
+};
+
+struct effect_execute_prepared_dequant_q4 {
+  void operator()(const event::execute_prepared_dequant_q4 &ev,
+                  context &ctx) const noexcept {
+    execute_prepared_dequant_rows(ev.request);
+    ev.result.accepted = true;
+    ++ctx.prepared_calls;
+  }
+};
+
 template <uint32_t Bits> struct effect_execute_scalar {
   void operator()(const event::execute_scalar<Bits> &ev,
                   context &ctx) const noexcept {
@@ -223,6 +471,14 @@ template <uint32_t Bits> struct effect_execute_scalar_dequant {
     execute_scalar_dequant_rows<Bits>(ev.request);
     ev.result.accepted = true;
     ++ctx.scalar_calls;
+  }
+};
+
+struct effect_capture_prepared_diagnostics {
+  void operator()(const event::capture_prepared_diagnostics &ev,
+                  const context &ctx) const noexcept {
+    ev.prepare_calls = ctx.prepare_calls;
+    ev.prepared_calls = ctx.prepared_calls;
   }
 };
 

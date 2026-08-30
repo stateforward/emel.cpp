@@ -220,3 +220,113 @@ TEST_CASE("CQ row dequant reconstructs exporter unpack values") {
     dot += row[i] / 2.f * act[i];
   CHECK(g[0] == doctest::Approx(dot));
 }
+
+TEST_CASE("CQ4 preparation preserves selectors norms and numerical identity") {
+  std::array<float, 28u> cb{};
+  for (uint32_t i = 0u; i < 16u; ++i)
+    cb[12u + i] = static_cast<float>(i + 1u) / 10.f;
+  constexpr uint32_t group = 8u, in = 16u, out = 4u;
+  std::vector<uint32_t> ix;
+  for (uint32_t i = 0u; i < out * in; ++i)
+    ix.push_back((i * 7u + 3u) % 16u);
+  const auto b = blob<4u>(
+      ix, out, in, group,
+      {0x3c00, 0x4000, 0x4200, 0x4400, 0x3c00, 0x4000, 0x4200, 0x4400});
+  const auto v = view(b, out, in, group, 4u);
+  std::vector<uint8_t> prepared_indices(out * in);
+  std::vector<uint8_t> prepared_indices_by_input8(out * in);
+  std::vector<float> prepared_norms(out * in / group);
+  emel::kernel::cq::event::prepared_q4_view prepared{};
+  const emel::kernel::cq::event::prepare_q4_request prepare_request{
+      v, prepared_indices, prepared_indices_by_input8, prepared_norms,
+      prepared};
+  emel::kernel::cq::sm sm;
+  emel::kernel::cq::event::dispatch_result prepare_result{};
+  REQUIRE(sm.process_event(
+      emel::kernel::cq::event::prepare_q4{prepare_request, prepare_result}));
+  CHECK(prepared.source == v.data);
+  CHECK(prepared.indices.size() == out * in);
+  CHECK(prepared.norms.size() == out * in / group);
+  for (size_t i = 0u; i < ix.size(); ++i)
+    CHECK(prepared.indices[i] == ix[i]);
+
+  std::array<float, in> activation{};
+  for (uint32_t i = 0u; i < in; ++i)
+    activation[i] = static_cast<float>(i + 1u) / 8.f;
+  std::array<float, in> scalar_workspace{};
+  std::array<float, in> prepared_workspace{};
+  std::array<float, out> scalar_output{};
+  std::array<float, out> prepared_output{};
+  const gemv_request scalar_request{v, cb, activation, scalar_output,
+                                    scalar_workspace};
+  emel::kernel::cq::event::dispatch_result scalar_result{};
+  REQUIRE(sm.process_event(emel::kernel::cq::event::execute_scalar_q4{
+      scalar_request, scalar_result}));
+  const emel::kernel::cq::event::prepared_gemv_request prepared_request{
+      prepared, cb, activation, prepared_output, prepared_workspace};
+  emel::kernel::cq::event::dispatch_result prepared_result{};
+  REQUIRE(sm.process_event(emel::kernel::cq::event::execute_prepared_avx2_q4{
+      prepared_request, prepared_result}));
+  for (uint32_t row = 0u; row < out; ++row)
+    CHECK(prepared_output[row] == doctest::Approx(scalar_output[row]));
+
+  uint64_t prepare_calls = 0u;
+  uint64_t prepared_calls = 0u;
+  REQUIRE(
+      sm.process_event(emel::kernel::cq::event::capture_prepared_diagnostics{
+          prepare_calls, prepared_calls}));
+  CHECK(prepare_calls == 1u);
+  CHECK(prepared_calls == 1u);
+}
+
+TEST_CASE(
+    "CQ4 batch4 shares one transform and matches separate prepared routes") {
+  std::array<float, 28u> cb{};
+  for (uint32_t i = 0u; i < 16u; ++i)
+    cb[12u + i] = static_cast<float>(i + 1u) / 10.f;
+  constexpr uint32_t group = 8u, in = 16u, out = 4u;
+  std::vector<uint32_t> ix;
+  for (uint32_t i = 0u; i < out * in; ++i)
+    ix.push_back((i * 5u + 1u) % 16u);
+  const auto b = blob<4u>(
+      ix, out, in, group,
+      {0x3c00, 0x4000, 0x4200, 0x4400, 0x3c00, 0x4000, 0x4200, 0x4400});
+  const auto v = view(b, out, in, group, 4u);
+  std::vector<uint8_t> indices(out * in);
+  std::vector<float> norms(out * in / group);
+  std::vector<uint8_t> indices_by_input8(out * in);
+  emel::kernel::cq::event::prepared_q4_view prepared{};
+  emel::kernel::cq::sm sm;
+  emel::kernel::cq::event::dispatch_result prepare_result{};
+  const emel::kernel::cq::event::prepare_q4_request prepare_request{
+      v, indices, indices_by_input8, norms, prepared};
+  REQUIRE(sm.process_event(
+      emel::kernel::cq::event::prepare_q4{prepare_request, prepare_result}));
+  std::array<float, in> activation{};
+  for (uint32_t i = 0u; i < in; ++i)
+    activation[i] = static_cast<float>(i + 1u) / 8.f;
+  std::array<float, in> separate_workspace{};
+  std::array<float, in> batch_workspace{};
+  std::array<float, out> expected{};
+  const emel::kernel::cq::event::prepared_gemv_request separate_request{
+      prepared, cb, activation, expected, separate_workspace};
+  emel::kernel::cq::event::dispatch_result separate_result{};
+  REQUIRE(sm.process_event(emel::kernel::cq::event::execute_prepared_avx2_q4{
+      separate_request, separate_result}));
+  std::array<std::array<float, out>, 4u> outputs{};
+  const emel::kernel::cq::event::prepared_gemv_batch4_request batch_request{
+      .targets = {{{&prepared, outputs[0]},
+                   {&prepared, outputs[1]},
+                   {&prepared, outputs[2]},
+                   {&prepared, outputs[3]}}},
+      .codebook = cb,
+      .activation = activation,
+      .workspace = batch_workspace};
+  emel::kernel::cq::event::dispatch_result batch_result{};
+  REQUIRE(
+      sm.process_event(emel::kernel::cq::event::execute_prepared_avx2_batch4_q4{
+          batch_request, batch_result}));
+  for (const auto &output : outputs)
+    for (uint32_t row = 0u; row < out; ++row)
+      CHECK(output[row] == doctest::Approx(expected[row]));
+}

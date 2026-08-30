@@ -30,51 +30,105 @@ inline std::span<const uint8_t> payload_span(const tensor_view &view,
 }
 
 // All CQ tensors in the supported geometry are 4-bit (validated by
-// guard_init_supported); the route (scalar vs AVX2) is baked into the
-// machine's route states, so every conditional below is compile-time.
+// guard_init_supported); the route is selected by explicit machine states.
 template <route_kind route>
-inline bool compute_gemv(context &ctx, const tensor_view &view,
-                         const std::span<const float> activation,
-                         const std::span<float> output) noexcept {
-  const emel::kernel::cq::event::gemv_request request{
-      view, codebook_span(ctx), activation, output,
-      std::span<float>{ctx.cq_workspace}};
+inline bool
+compute_gemv(context &ctx, const tensor_view &view,
+             const emel::kernel::cq::event::prepared_q4_view &prepared,
+             const std::span<const float> activation,
+             const std::span<float> output) noexcept {
   emel::kernel::cq::event::dispatch_result result{};
-  if constexpr (route == route_kind::avx2) {
+  if constexpr (route == route_kind::prepared_avx2) {
+    const emel::kernel::cq::event::prepared_gemv_request request{
+        prepared, codebook_span(ctx), activation, output,
+        std::span<float>{ctx.cq_workspace}};
     return ctx.cq.process_event(
-        emel::kernel::cq::event::execute_avx2_q4{request, result});
+        emel::kernel::cq::event::execute_prepared_avx2_q4{request, result});
   } else {
+    const emel::kernel::cq::event::gemv_request request{
+        view, codebook_span(ctx), activation, output,
+        std::span<float>{ctx.cq_workspace}};
     return ctx.cq.process_event(
         emel::kernel::cq::event::execute_scalar_q4{request, result});
   }
 }
 
-inline bool compute_gemv_rows(context &ctx, const tensor_view &view,
-                              const std::span<const float> activation,
-                              const uint32_t row_begin,
-                              const uint32_t row_count,
-                              const std::span<float> output) noexcept {
-  const emel::kernel::cq::event::gemv_rows_request request{
-      view,
-      codebook_span(ctx),
-      activation,
-      row_begin,
-      row_count,
-      output,
-      std::span<float>{ctx.cq_workspace}};
+template <route_kind route>
+inline bool
+compute_gemv_rows(context &ctx, const tensor_view &view,
+                  const emel::kernel::cq::event::prepared_q4_view &prepared,
+                  const std::span<const float> activation,
+                  const uint32_t row_begin, const uint32_t row_count,
+                  const std::span<float> output) noexcept {
   emel::kernel::cq::event::dispatch_result result{};
-  return ctx.cq.process_event(
-      emel::kernel::cq::event::execute_scalar_rows_q4{request, result});
+  if constexpr (route == route_kind::prepared_avx2) {
+    const emel::kernel::cq::event::prepared_gemv_rows_request request{
+        prepared,
+        codebook_span(ctx),
+        activation,
+        row_begin,
+        row_count,
+        output,
+        std::span<float>{ctx.cq_workspace}};
+    return ctx.cq.process_event(
+        emel::kernel::cq::event::execute_prepared_avx2_rows_q4{request,
+                                                               result});
+  } else {
+    const emel::kernel::cq::event::gemv_rows_request request{
+        view,
+        codebook_span(ctx),
+        activation,
+        row_begin,
+        row_count,
+        output,
+        std::span<float>{ctx.cq_workspace}};
+    return ctx.cq.process_event(
+        emel::kernel::cq::event::execute_scalar_rows_q4{request, result});
+  }
 }
 
-inline bool compute_dequant_row(context &ctx, const tensor_view &view,
-                                const uint32_t row, const float scale,
-                                const std::span<float> output) noexcept {
-  const emel::kernel::cq::event::dequant_rows_request request{
-      view, codebook_span(ctx), row, 1u, scale, output};
+template <route_kind route>
+inline bool
+compute_dequant_row(context &ctx, const tensor_view &view,
+                    const emel::kernel::cq::event::prepared_q4_view &prepared,
+                    const uint32_t row, const float scale,
+                    const std::span<float> output) noexcept {
+  emel::kernel::cq::event::dispatch_result result{};
+  if constexpr (route == route_kind::prepared_avx2) {
+    const emel::kernel::cq::event::prepared_dequant_rows_request request{
+        prepared, codebook_span(ctx), row, 1u, scale, output};
+    return ctx.cq.process_event(
+        emel::kernel::cq::event::execute_prepared_dequant_q4{request, result});
+  } else {
+    const emel::kernel::cq::event::dequant_rows_request request{
+        view, codebook_span(ctx), row, 1u, scale, output};
+    return ctx.cq.process_event(
+        emel::kernel::cq::event::execute_scalar_dequant_q4{request, result});
+  }
+}
+
+inline bool
+compute_gemv_batch4(context &ctx, const std::span<const float> activation,
+                    const emel::kernel::cq::event::prepared_q4_view &first,
+                    const std::span<float> first_output,
+                    const emel::kernel::cq::event::prepared_q4_view &second,
+                    const std::span<float> second_output,
+                    const emel::kernel::cq::event::prepared_q4_view &third,
+                    const std::span<float> third_output,
+                    const emel::kernel::cq::event::prepared_q4_view &fourth,
+                    const std::span<float> fourth_output) noexcept {
+  const emel::kernel::cq::event::prepared_gemv_batch4_request request{
+      .targets = {{{&first, first_output},
+                   {&second, second_output},
+                   {&third, third_output},
+                   {&fourth, fourth_output}}},
+      .codebook = codebook_span(ctx),
+      .activation = activation,
+      .workspace = std::span<float>{ctx.cq_workspace}};
   emel::kernel::cq::event::dispatch_result result{};
   return ctx.cq.process_event(
-      emel::kernel::cq::event::execute_scalar_dequant_q4{request, result});
+      emel::kernel::cq::event::execute_prepared_avx2_batch4_q4{request,
+                                                               result});
 }
 
 inline bool compute_zcrms_norm(context &ctx, const std::span<const float> input,
@@ -101,9 +155,72 @@ inline bool compute_rms_unit(context &ctx, const std::span<const float> input,
       emel::kernel::zcrms::event::execute_unit_rows{request, result});
 }
 
-// Init: decode the fp16 scale tensors once, precompute the RoPE tables via
-// the rope kernel, and clear all mutable state. Runs after
-// guard_init_supported validated the geometry, so payload sizes are safe.
+// Init helpers prepare exact CQ4 selectors/norms, decode the fp16 scale
+// tensors, precompute RoPE, and clear mutable state.
+inline bool prepare_view(context &ctx, const tensor_view &view,
+                         emel::kernel::cq::event::prepared_q4_view &prepared,
+                         size_t &index_offset, size_t &norm_offset) noexcept {
+  const size_t index_count =
+      static_cast<size_t>(view.shape[0]) * context::compute_in_pad(view);
+  const size_t norm_count = index_count / view.group;
+  const emel::kernel::cq::event::prepare_q4_request request{
+      .weights = view,
+      .indices = std::span<uint8_t>{ctx.prepared_indices}.subspan(index_offset,
+                                                                  index_count),
+      .indices_by_input8 =
+          std::span<uint8_t>{ctx.prepared_indices_by_input8}.subspan(
+              index_offset, index_count),
+      .norms =
+          std::span<float>{ctx.prepared_norms}.subspan(norm_offset, norm_count),
+      .prepared = prepared};
+  emel::kernel::cq::event::dispatch_result result{};
+  const bool ok = ctx.cq.process_event(
+      emel::kernel::cq::event::prepare_q4{request, result});
+  index_offset += index_count;
+  norm_offset += norm_count;
+  return ok;
+}
+
+inline bool prepare_graph_weights(context &ctx) noexcept {
+  const auto &bound = *ctx.bound;
+  size_t index_offset = 0u;
+  size_t norm_offset = 0u;
+  bool ok = prepare_view(ctx, bound.embedding, ctx.prepared_embedding,
+                         index_offset, norm_offset);
+  for (uint32_t i = 0u; i < bound.layer_count; ++i) {
+    const auto &layer = bound.layers[i];
+    auto &prepared = ctx.prepared_layers[i];
+    ok = ok && prepare_view(ctx, layer.q_proj, prepared.q_proj, index_offset,
+                            norm_offset);
+    ok = ok && prepare_view(ctx, layer.k_proj, prepared.k_proj, index_offset,
+                            norm_offset);
+    ok = ok && prepare_view(ctx, layer.v_proj, prepared.v_proj, index_offset,
+                            norm_offset);
+    ok = ok && prepare_view(ctx, layer.gate_proj, prepared.gate_proj,
+                            index_offset, norm_offset);
+    ok = ok && prepare_view(ctx, layer.out_proj, prepared.out_proj,
+                            index_offset, norm_offset);
+  }
+  ok = ok && prepare_view(ctx, bound.mhc.phi_pre, ctx.prepared_mhc.phi_pre,
+                          index_offset, norm_offset);
+  ok = ok && prepare_view(ctx, bound.mhc.phi_post, ctx.prepared_mhc.phi_post,
+                          index_offset, norm_offset);
+  ok = ok && prepare_view(ctx, bound.mhc.phi_res, ctx.prepared_mhc.phi_res,
+                          index_offset, norm_offset);
+  for (uint32_t i = 0u; i < bound.engram_site_count; ++i) {
+    const auto &site = bound.engram_sites[i];
+    auto &prepared = ctx.prepared_engram_sites[i];
+    ok = ok && prepare_view(ctx, site.tables, prepared.tables, index_offset,
+                            norm_offset);
+    ok = ok && prepare_view(ctx, site.key_proj, prepared.key_proj, index_offset,
+                            norm_offset);
+    ok = ok && prepare_view(ctx, site.value_proj, prepared.value_proj,
+                            index_offset, norm_offset);
+  }
+  return ok && index_offset == ctx.prepared_indices.size() &&
+         norm_offset == ctx.prepared_norms.size();
+}
+
 inline bool compute_init(context &ctx) noexcept {
   namespace quant = emel::kernel::detail::quant;
   const auto &bound = *ctx.bound;
@@ -164,20 +281,21 @@ inline bool compute_init(context &ctx) noexcept {
     token = 0;
   for (auto &valid : ctx.history_valid)
     valid = 0u;
-  return rope_ok;
+  return rope_ok && prepare_graph_weights(ctx);
 }
 
 // Step begin: record the token in the engram history, gather its embedding
 // row scaled by sqrt(d_model), and broadcast it across the mHC lanes.
+template <route_kind route>
 inline bool compute_step_begin(context &ctx, event::step_ctx &step) noexcept {
   const auto &geo = ctx.bound->geo;
   const uint32_t d_model = geo.d_model;
   ctx.history_tokens[ctx.position] = step.token;
   ctx.history_valid[ctx.position] = 1u;
   const float scale = std::sqrt(static_cast<float>(d_model));
-  const bool embed_ok = compute_dequant_row(ctx, ctx.bound->embedding,
-                                            static_cast<uint32_t>(step.token),
-                                            scale, std::span<float>{ctx.mean});
+  const bool embed_ok = compute_dequant_row<route>(
+      ctx, ctx.bound->embedding, ctx.prepared_embedding,
+      static_cast<uint32_t>(step.token), scale, std::span<float>{ctx.mean});
   for (uint32_t lane = 0u; lane < geo.mhc_lanes; ++lane)
     for (uint32_t c = 0u; c < d_model; ++c)
       ctx.lanes[static_cast<size_t>(lane) * d_model + c] = ctx.mean[c];
@@ -242,24 +360,27 @@ template <route_kind route> inline bool compute_engram(context &ctx) noexcept {
         const uint32_t row =
             table * geo.engram_slots + ctx.engram_hash_indices[hash_at];
         ok = ok &&
-             compute_dequant_row(
-                 ctx, views.tables, row, ctx.engram_ngram_ok[hash_at],
+             compute_dequant_row<route>(
+                 ctx, views.tables, ctx.prepared_engram_sites[site].tables, row,
+                 ctx.engram_ngram_ok[hash_at],
                  std::span<float>{e_row + static_cast<size_t>(table) * sub_dim,
                                   sub_dim});
       }
-      ok =
-          ok && compute_gemv<route>(
-                    ctx, views.value_proj, std::span<const float>{e_row, e_dim},
-                    std::span<float>{ctx.engram_v_taps.data() +
-                                         static_cast<size_t>(tap) * d_model,
-                                     d_model});
+      ok = ok && compute_gemv<route>(
+                     ctx, views.value_proj,
+                     ctx.prepared_engram_sites[site].value_proj,
+                     std::span<const float>{e_row, e_dim},
+                     std::span<float>{ctx.engram_v_taps.data() +
+                                          static_cast<size_t>(tap) * d_model,
+                                      d_model});
     }
-    ok = ok && compute_gemv<route>(
-                   ctx, views.key_proj,
-                   std::span<const float>{ctx.engram_e_rows.data(), e_dim},
-                   std::span<float>{ctx.engram_keys.data() +
-                                        static_cast<size_t>(site) * d_model,
-                                    d_model});
+    ok =
+        ok && compute_gemv<route>(
+                  ctx, views.key_proj, ctx.prepared_engram_sites[site].key_proj,
+                  std::span<const float>{ctx.engram_e_rows.data(), e_dim},
+                  std::span<float>{ctx.engram_keys.data() +
+                                       static_cast<size_t>(site) * d_model,
+                                   d_model});
     const emel::kernel::engram::event::conv_taps_request conv_request{
         .value_rows = ctx.engram_v_taps,
         .tap_valid = ctx.engram_tap_valid,
@@ -288,6 +409,7 @@ inline bool compute_layer(context &ctx, event::step_ctx &step) noexcept {
   const auto &geo = bound.geo;
   const uint32_t layer_index = step.layer_index;
   const auto &layer = bound.layers[layer_index];
+  const auto &prepared_layer = ctx.prepared_layers[layer_index];
   const uint32_t d_model = geo.d_model;
   const uint32_t lane_count = geo.mhc_lanes;
   const uint32_t lane = layer_index % lane_count;
@@ -299,9 +421,10 @@ inline bool compute_layer(context &ctx, event::step_ctx &step) noexcept {
 
   bool ok = compute_rms_unit(ctx, ctx.lanes, lane_count * d_model,
                              std::span<float>{ctx.nx});
-  ok = ok && compute_gemv_rows(ctx, bound.mhc.phi_pre, ctx.nx,
-                               layer_index * lane_count, lane_count,
-                               std::span<float>{ctx.pre_dots});
+  ok = ok && compute_gemv_rows<route>(ctx, bound.mhc.phi_pre,
+                                      ctx.prepared_mhc.phi_pre, ctx.nx,
+                                      layer_index * lane_count, lane_count,
+                                      std::span<float>{ctx.pre_dots});
 
   const emel::kernel::mhc::event::pre_mix_request pre_request{
       .lanes = ctx.lanes,
@@ -319,7 +442,6 @@ inline bool compute_layer(context &ctx, event::step_ctx &step) noexcept {
                  pre_request, pre_result});
 
   if constexpr (engram_site) {
-    // Branch-free site index: exactly one entry matches this layer.
     uint32_t site = 0u;
     for (uint32_t s = 0u; s < geo.num_engram_sites && s < 4u; ++s)
       site += s * static_cast<uint32_t>(geo.engram_sites[s] == layer_index);
@@ -342,18 +464,29 @@ inline bool compute_layer(context &ctx, event::step_ctx &step) noexcept {
       ctx.bx[c] = ctx.u[c];
   }
 
-  // Attention block.
   const std::span<const float> norm_in_scale{
       ctx.norm_in_scale.data() + static_cast<size_t>(layer_index) * d_model,
       d_model};
   ok = ok && compute_zcrms_norm(ctx, ctx.bx, norm_in_scale, 1u, d_model,
                                 std::span<float>{ctx.h_norm});
-  ok = ok && compute_gemv<route>(ctx, layer.q_proj, ctx.h_norm,
-                                 std::span<float>{ctx.q_rows});
-  ok = ok && compute_gemv<route>(ctx, layer.k_proj, ctx.h_norm,
-                                 std::span<float>{ctx.k_rows});
-  ok = ok && compute_gemv<route>(ctx, layer.v_proj, ctx.h_norm,
-                                 std::span<float>{ctx.v_rows});
+  if constexpr (route == route_kind::prepared_avx2) {
+    ok = ok && compute_gemv_batch4(
+                   ctx, ctx.h_norm, prepared_layer.q_proj,
+                   std::span<float>{ctx.q_rows}, prepared_layer.k_proj,
+                   std::span<float>{ctx.k_rows}, prepared_layer.v_proj,
+                   std::span<float>{ctx.v_rows}, prepared_layer.gate_proj,
+                   std::span<float>{ctx.gate_logits});
+  } else {
+    ok = ok && compute_gemv<route>(ctx, layer.q_proj, prepared_layer.q_proj,
+                                   ctx.h_norm, std::span<float>{ctx.q_rows});
+    ok = ok && compute_gemv<route>(ctx, layer.k_proj, prepared_layer.k_proj,
+                                   ctx.h_norm, std::span<float>{ctx.k_rows});
+    ok = ok && compute_gemv<route>(ctx, layer.v_proj, prepared_layer.v_proj,
+                                   ctx.h_norm, std::span<float>{ctx.v_rows});
+    ok = ok &&
+         compute_gemv<route>(ctx, layer.gate_proj, prepared_layer.gate_proj,
+                             ctx.h_norm, std::span<float>{ctx.gate_logits});
+  }
 
   const std::span<const float> q_norm_scale{
       ctx.q_norm_scale.data() + static_cast<size_t>(layer_index) * head_dim,
@@ -431,15 +564,13 @@ inline bool compute_layer(context &ctx, event::step_ctx &step) noexcept {
   ok = ok && ctx.swa.process_event(emel::kernel::swa::event::execute_attend{
                  attend_request, attend_result});
 
-  ok = ok && compute_gemv<route>(ctx, layer.gate_proj, ctx.h_norm,
-                                 std::span<float>{ctx.gate_logits});
   const emel::kernel::swa::event::gate_mul_request gate_request{
       .values = ctx.attn_out, .gate_logits = ctx.gate_logits, .dim = attn_dim};
   emel::kernel::swa::event::dispatch_result gate_result{};
   ok = ok && ctx.swa.process_event(emel::kernel::swa::event::execute_gate_mul{
                  gate_request, gate_result});
-  ok = ok && compute_gemv<route>(ctx, layer.out_proj, ctx.attn_out,
-                                 std::span<float>{ctx.attn_proj});
+  ok = ok && compute_gemv<route>(ctx, layer.out_proj, prepared_layer.out_proj,
+                                 ctx.attn_out, std::span<float>{ctx.attn_proj});
 
   const std::span<const float> post_norm_scale{
       ctx.post_norm_scale.data() + static_cast<size_t>(layer_index) * d_model,
@@ -457,7 +588,6 @@ inline bool compute_layer(context &ctx, event::step_ctx &step) noexcept {
        ctx.swa.process_event(emel::kernel::swa::event::execute_residual_gate{
            residual_request, residual_result});
 
-  // Hadamard MLP block.
   const std::span<const float> pre_hada_scale{
       ctx.pre_hada_scale.data() + static_cast<size_t>(layer_index) * d_model,
       d_model};
@@ -479,14 +609,14 @@ inline bool compute_layer(context &ctx, event::step_ctx &step) noexcept {
                  emel::kernel::hadamard::event::execute_mlp_row{
                      hadamard_request, hadamard_result});
 
-  // mHC post routing.
-  ok = ok && compute_gemv_rows(ctx, bound.mhc.phi_post, ctx.nx,
-                               layer_index * lane_count, lane_count,
-                               std::span<float>{ctx.post_dots});
-  ok = ok && compute_gemv_rows(ctx, bound.mhc.phi_res, ctx.nx,
-                               layer_index * lane_count * lane_count,
-                               lane_count * lane_count,
-                               std::span<float>{ctx.res_dots});
+  ok = ok && compute_gemv_rows<route>(ctx, bound.mhc.phi_post,
+                                      ctx.prepared_mhc.phi_post, ctx.nx,
+                                      layer_index * lane_count, lane_count,
+                                      std::span<float>{ctx.post_dots});
+  ok = ok && compute_gemv_rows<route>(
+                 ctx, bound.mhc.phi_res, ctx.prepared_mhc.phi_res, ctx.nx,
+                 layer_index * lane_count * lane_count, lane_count * lane_count,
+                 std::span<float>{ctx.res_dots});
   const uint64_t square = static_cast<uint64_t>(lane_count) * lane_count;
   const emel::kernel::mhc::event::post_mix_request post_request{
       .lanes = ctx.lanes,
@@ -529,8 +659,9 @@ inline bool compute_logits(context &ctx, event::step_ctx &step) noexcept {
   ok =
       ok && compute_zcrms_norm(ctx, ctx.mean, ctx.final_norm_scale, 1u,
                                geo.d_model, std::span<float>{ctx.final_normed});
-  ok = ok && compute_gemv<route>(ctx, ctx.bound->embedding, ctx.final_normed,
-                                 step.logits_out);
+  ok = ok &&
+       compute_gemv<route>(ctx, ctx.bound->embedding, ctx.prepared_embedding,
+                           ctx.final_normed, step.logits_out);
   return ok;
 }
 
@@ -564,7 +695,7 @@ struct effect_mark_step_invalid {
 
 template <route_kind route> struct effect_step_begin {
   void operator()(const event::step_run &ev, context &ctx) const noexcept {
-    fold_error(ev.ctx.err, compute_step_begin(ctx, ev.ctx));
+    fold_error(ev.ctx.err, compute_step_begin<route>(ctx, ev.ctx));
   }
 };
 

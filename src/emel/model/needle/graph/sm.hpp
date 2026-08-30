@@ -27,11 +27,11 @@ struct state_errored {};
 
 struct state_step_route_decision {};
 struct state_step_engram_decision_scalar {};
-struct state_step_engram_decision_avx2 {};
+struct state_step_engram_decision_prepared_avx2 {};
 struct state_layer_loop_scalar {};
-struct state_layer_loop_avx2 {};
+struct state_layer_loop_prepared_avx2 {};
 struct state_layer_advance_scalar {};
-struct state_layer_advance_avx2 {};
+struct state_layer_advance_prepared_avx2 {};
 struct state_step_finish {};
 
 struct model {
@@ -68,14 +68,14 @@ struct model {
           / action::effect_step_begin<route::scalar>{}
       , sml::state<state_step_route_decision> <= sml::state<state_ready>
           + sml::event<event::step_run> [ guard::guard_step_valid_avx2{} ]
-          / action::effect_step_begin<route::avx2>{}
+          / action::effect_step_begin<route::prepared_avx2>{}
       , sml::state<state_errored> <= sml::state<state_ready>
           + sml::event<event::step_run> [ guard::guard_step_invalid{} ]
           / action::effect_mark_step_invalid{}
 
       , sml::state<state_step_engram_decision_scalar> <= sml::state<state_step_route_decision>
           + sml::completion<event::step_run> [ guard::guard_route_scalar{} ]
-      , sml::state<state_step_engram_decision_avx2> <= sml::state<state_step_route_decision>
+      , sml::state<state_step_engram_decision_prepared_avx2> <= sml::state<state_step_route_decision>
           + sml::completion<event::step_run> [ guard::guard_route_avx2{} ]
 
       , sml::state<state_layer_loop_scalar> <= sml::state<state_step_engram_decision_scalar>
@@ -85,12 +85,12 @@ struct model {
           + sml::completion<event::step_run> [ guard::guard_engram_absent_ok{} ]
       , sml::state<state_errored> <= sml::state<state_step_engram_decision_scalar>
           + sml::completion<event::step_run> [ guard::guard_step_failed{} ]
-      , sml::state<state_layer_loop_avx2> <= sml::state<state_step_engram_decision_avx2>
+      , sml::state<state_layer_loop_prepared_avx2> <= sml::state<state_step_engram_decision_prepared_avx2>
           + sml::completion<event::step_run> [ guard::guard_engram_present_ok{} ]
-          / action::effect_compute_engram<route::avx2>{}
-      , sml::state<state_layer_loop_avx2> <= sml::state<state_step_engram_decision_avx2>
+          / action::effect_compute_engram<route::prepared_avx2>{}
+      , sml::state<state_layer_loop_prepared_avx2> <= sml::state<state_step_engram_decision_prepared_avx2>
           + sml::completion<event::step_run> [ guard::guard_engram_absent_ok{} ]
-      , sml::state<state_errored> <= sml::state<state_step_engram_decision_avx2>
+      , sml::state<state_errored> <= sml::state<state_step_engram_decision_prepared_avx2>
           + sml::completion<event::step_run> [ guard::guard_step_failed{} ]
 
       //------------------------------------------------------------------------------//
@@ -123,30 +123,30 @@ struct model {
 
       //------------------------------------------------------------------------------//
       // Layer loop (AVX2 route).
-      , sml::state<state_layer_advance_avx2> <= sml::state<state_layer_loop_avx2>
+      , sml::state<state_layer_advance_prepared_avx2> <= sml::state<state_layer_loop_prepared_avx2>
           + sml::completion<event::step_run> [ guard::guard_layer_engram_growing{} ]
-          / action::effect_run_layer<route::avx2, true, false>{}
-      , sml::state<state_layer_advance_avx2> <= sml::state<state_layer_loop_avx2>
+          / action::effect_run_layer<route::prepared_avx2, true, false>{}
+      , sml::state<state_layer_advance_prepared_avx2> <= sml::state<state_layer_loop_prepared_avx2>
           + sml::completion<event::step_run> [ guard::guard_layer_engram_full{} ]
-          / action::effect_run_layer<route::avx2, true, true>{}
-      , sml::state<state_layer_advance_avx2> <= sml::state<state_layer_loop_avx2>
+          / action::effect_run_layer<route::prepared_avx2, true, true>{}
+      , sml::state<state_layer_advance_prepared_avx2> <= sml::state<state_layer_loop_prepared_avx2>
           + sml::completion<event::step_run> [ guard::guard_layer_plain_growing{} ]
-          / action::effect_run_layer<route::avx2, false, false>{}
-      , sml::state<state_layer_advance_avx2> <= sml::state<state_layer_loop_avx2>
+          / action::effect_run_layer<route::prepared_avx2, false, false>{}
+      , sml::state<state_layer_advance_prepared_avx2> <= sml::state<state_layer_loop_prepared_avx2>
           + sml::completion<event::step_run> [ guard::guard_layer_plain_full{} ]
-          / action::effect_run_layer<route::avx2, false, true>{}
-      , sml::state<state_errored> <= sml::state<state_layer_loop_avx2>
+          / action::effect_run_layer<route::prepared_avx2, false, true>{}
+      , sml::state<state_errored> <= sml::state<state_layer_loop_prepared_avx2>
           + sml::completion<event::step_run> [ guard::guard_step_failed{} ]
 
-      , sml::state<state_layer_loop_avx2> <= sml::state<state_layer_advance_avx2>
+      , sml::state<state_layer_loop_prepared_avx2> <= sml::state<state_layer_advance_prepared_avx2>
           + sml::completion<event::step_run> [ guard::guard_more_layers{} ]
           / action::effect_advance_layer{}
-      , sml::state<state_step_finish> <= sml::state<state_layer_advance_avx2>
+      , sml::state<state_step_finish> <= sml::state<state_layer_advance_prepared_avx2>
           + sml::completion<event::step_run> [ guard::guard_layers_done_want_logits{} ]
-          / action::effect_emit_logits<route::avx2>{}
-      , sml::state<state_step_finish> <= sml::state<state_layer_advance_avx2>
+          / action::effect_emit_logits<route::prepared_avx2>{}
+      , sml::state<state_step_finish> <= sml::state<state_layer_advance_prepared_avx2>
           + sml::completion<event::step_run> [ guard::guard_layers_done_no_logits{} ]
-      , sml::state<state_errored> <= sml::state<state_layer_advance_avx2>
+      , sml::state<state_errored> <= sml::state<state_layer_advance_prepared_avx2>
           + sml::completion<event::step_run> [ guard::guard_step_failed{} ]
 
       //------------------------------------------------------------------------------//
@@ -214,6 +214,16 @@ struct sm : public emel::sm<model, action::context> {
     const event::step_run runtime{ctx};
     const bool handled = base_type::process_event(runtime);
     return handled && ctx.err == emel::error::cast(error::none);
+  }
+
+  bool process_event(const event::capture_cq_diagnostics &ev) {
+    emel::kernel::cq::event::capture_prepared_diagnostics diagnostics{
+        ev.prepare_calls, ev.prepared_calls};
+    const bool handled = this->context_.cq.process_event(diagnostics);
+    ev.prepared_index_bytes = this->context_.prepared_indices.size();
+    ev.prepared_norm_bytes =
+        this->context_.prepared_norms.size() * sizeof(float);
+    return handled;
   }
 };
 
