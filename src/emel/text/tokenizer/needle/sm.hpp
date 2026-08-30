@@ -1,5 +1,7 @@
 #pragma once
 
+// benchmark: scaffold
+
 #include "emel/sm.hpp"
 #include "emel/text/tokenizer/needle/actions.hpp"
 #include "emel/text/tokenizer/needle/context.hpp"

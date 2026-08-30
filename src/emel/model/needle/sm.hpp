@@ -1,5 +1,7 @@
 #pragma once
 
+// benchmark: scaffold
+
 #include "emel/model/needle/actions.hpp"
 #include "emel/model/needle/context.hpp"
 #include "emel/model/needle/errors.hpp"
