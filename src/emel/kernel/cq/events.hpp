@@ -12,6 +12,24 @@ struct dispatch_result {
   bool accepted = false;
 };
 
+// Graph/model-owned exact CQ4 lookup representation. `values` borrows the
+// source codebook while `byte_planes` owns the bitwise-identical float bytes,
+// duplicated across both 128-bit shuffle lanes.
+struct alignas(32) prepared_codebook_q4 {
+  std::span<const float> values = {};
+  std::array<std::array<uint8_t, 32u>, 4u> byte_planes = {};
+};
+
+struct prepare_codebook_q4_request {
+  std::span<const float> codebook;
+  prepared_codebook_q4 &prepared;
+};
+
+struct prepare_codebook_q4 {
+  const prepare_codebook_q4_request &request;
+  dispatch_result &result;
+};
+
 // JAX-compatible signed A8 fake quantization over one full activation vector.
 // `quantized` keeps the exact integer operand and `dequantized` keeps the f32
 // value consumed by the weight-side FWHT/GEMV. Both spans are caller-owned.
@@ -64,7 +82,7 @@ struct prepare_q4 {
 
 struct prepared_gemv_request {
   const prepared_q4_view &weights;
-  std::span<const float> codebook;
+  const prepared_codebook_q4 &codebook;
   std::span<const float> activation;
   std::span<float> output;
   std::span<float> workspace;
@@ -79,7 +97,7 @@ struct prepared_gemv_target {
 // dispatch allocation-free and matches the graph's q/k/v/gate hot path.
 struct prepared_gemv_batch4_request {
   std::array<prepared_gemv_target, 4u> targets = {};
-  std::span<const float> codebook;
+  const prepared_codebook_q4 &codebook;
   std::span<const float> activation;
   std::span<float> workspace;
 };
@@ -123,7 +141,7 @@ template <uint32_t Bits> struct execute_scalar_rows {
 
 struct prepared_gemv_rows_request {
   const prepared_q4_view &weights;
-  std::span<const float> codebook;
+  const prepared_codebook_q4 &codebook;
   std::span<const float> activation;
   uint32_t row_begin = 0u;
   uint32_t row_count = 0u;
@@ -157,7 +175,7 @@ template <uint32_t Bits> struct execute_scalar_dequant {
 
 struct prepared_dequant_rows_request {
   const prepared_q4_view &weights;
-  std::span<const float> codebook;
+  const prepared_codebook_q4 &codebook;
   uint32_t row_begin = 0u;
   uint32_t row_count = 0u;
   float scale = 1.0f;

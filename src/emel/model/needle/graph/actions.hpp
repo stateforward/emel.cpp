@@ -40,7 +40,7 @@ compute_gemv(context &ctx, const tensor_view &view,
   emel::kernel::cq::event::dispatch_result result{};
   if constexpr (route == route_kind::prepared_avx2) {
     const emel::kernel::cq::event::prepared_gemv_request request{
-        prepared, codebook_span(ctx), activation, output,
+        prepared, ctx.prepared_codebook, activation, output,
         std::span<float>{ctx.cq_workspace}};
     return ctx.cq.process_event(
         emel::kernel::cq::event::execute_prepared_avx2_q4{request, result});
@@ -64,7 +64,7 @@ compute_gemv_rows(context &ctx, const tensor_view &view,
   if constexpr (route == route_kind::prepared_avx2) {
     const emel::kernel::cq::event::prepared_gemv_rows_request request{
         prepared,
-        codebook_span(ctx),
+        ctx.prepared_codebook,
         activation,
         row_begin,
         row_count,
@@ -96,7 +96,7 @@ compute_dequant_row(context &ctx, const tensor_view &view,
   emel::kernel::cq::event::dispatch_result result{};
   if constexpr (route == route_kind::prepared_avx2) {
     const emel::kernel::cq::event::prepared_dequant_rows_request request{
-        prepared, codebook_span(ctx), row, 1u, scale, output};
+        prepared, ctx.prepared_codebook, row, 1u, scale, output};
     return ctx.cq.process_event(
         emel::kernel::cq::event::execute_prepared_dequant_q4{request, result});
   } else {
@@ -143,7 +143,7 @@ compute_gemv_batch4(context &ctx, const std::span<const float> activation,
                    {&second, second_output},
                    {&third, third_output},
                    {&fourth, fourth_output}}},
-      .codebook = codebook_span(ctx),
+      .codebook = ctx.prepared_codebook,
       .activation = activation,
       .workspace = std::span<float>{ctx.cq_workspace}};
   emel::kernel::cq::event::dispatch_result result{};
@@ -204,10 +204,15 @@ inline bool prepare_view(context &ctx, const tensor_view &view,
 
 inline bool prepare_graph_weights(context &ctx) noexcept {
   const auto &bound = *ctx.bound;
+  emel::kernel::cq::event::dispatch_result codebook_result{};
+  const emel::kernel::cq::event::prepare_codebook_q4_request codebook_request{
+      codebook_span(ctx), ctx.prepared_codebook};
+  bool ok = ctx.cq.process_event(emel::kernel::cq::event::prepare_codebook_q4{
+      codebook_request, codebook_result});
   size_t index_offset = 0u;
   size_t norm_offset = 0u;
-  bool ok = prepare_view(ctx, bound.embedding, ctx.prepared_embedding,
-                         index_offset, norm_offset);
+  ok = ok && prepare_view(ctx, bound.embedding, ctx.prepared_embedding,
+                          index_offset, norm_offset);
   for (uint32_t i = 0u; i < bound.layer_count; ++i) {
     const auto &layer = bound.layers[i];
     auto &prepared = ctx.prepared_layers[i];

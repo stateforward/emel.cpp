@@ -109,6 +109,19 @@ inline void execute_scalar_dequant_rows(
 #define EMEL_KERNEL_CQ_AVX2_TARGET
 #endif
 
+inline void
+prepare_codebook_q4(const event::prepare_codebook_q4_request &request) noexcept {
+  request.prepared.values = request.codebook;
+  const auto *codebook_bytes = reinterpret_cast<const uint8_t *>(
+      detail::codebook_for<4u>(request.codebook));
+  for (uint32_t index = 0u; index < 16u; ++index)
+    for (uint32_t byte = 0u; byte < 4u; ++byte) {
+      const uint8_t value = codebook_bytes[index * sizeof(float) + byte];
+      request.prepared.byte_planes[byte][index] = value;
+      request.prepared.byte_planes[byte][16u + index] = value;
+    }
+}
+
 inline void prepare_q4(const event::prepare_q4_request &request) noexcept {
   const auto &view = request.weights;
   const uint32_t out = view.shape[0];
@@ -186,23 +199,17 @@ lookup_codebook8_pshufb(const __m128i index_bytes, const __m128i byte0,
       _mm256_inserti128_si256(_mm256_castsi128_si256(low), high, 1));
 }
 
-EMEL_KERNEL_CQ_AVX2_TARGET inline void
-q4_codebook_byte_tables(const std::span<const float> codebook_span,
-                        __m256i &byte0, __m256i &byte1, __m256i &byte2,
-                        __m256i &byte3) noexcept {
-  alignas(32) uint8_t tables[4][32];
-  const auto *codebook_bytes = reinterpret_cast<const uint8_t *>(
-      detail::codebook_for<4u>(codebook_span));
-  for (uint32_t index = 0u; index < 16u; ++index)
-    for (uint32_t byte = 0u; byte < 4u; ++byte) {
-      const uint8_t value = codebook_bytes[index * sizeof(float) + byte];
-      tables[byte][index] = value;
-      tables[byte][16u + index] = value;
-    }
-  byte0 = _mm256_load_si256(reinterpret_cast<const __m256i *>(tables[0]));
-  byte1 = _mm256_load_si256(reinterpret_cast<const __m256i *>(tables[1]));
-  byte2 = _mm256_load_si256(reinterpret_cast<const __m256i *>(tables[2]));
-  byte3 = _mm256_load_si256(reinterpret_cast<const __m256i *>(tables[3]));
+EMEL_KERNEL_CQ_AVX2_TARGET inline void q4_codebook_byte_tables(
+    const event::prepared_codebook_q4 &codebook, __m256i &byte0,
+    __m256i &byte1, __m256i &byte2, __m256i &byte3) noexcept {
+  byte0 = _mm256_loadu_si256(
+      reinterpret_cast<const __m256i *>(codebook.byte_planes[0].data()));
+  byte1 = _mm256_loadu_si256(
+      reinterpret_cast<const __m256i *>(codebook.byte_planes[1].data()));
+  byte2 = _mm256_loadu_si256(
+      reinterpret_cast<const __m256i *>(codebook.byte_planes[2].data()));
+  byte3 = _mm256_loadu_si256(
+      reinterpret_cast<const __m256i *>(codebook.byte_planes[3].data()));
 }
 
 EMEL_KERNEL_CQ_AVX2_TARGET inline __m256i
@@ -215,19 +222,14 @@ load_selector16(const uint8_t *selectors) noexcept {
 }
 #endif
 
-EMEL_KERNEL_CQ_AVX2_TARGET inline void
-execute_prepared_avx2_dot(const event::prepared_q4_view &view,
-                          const std::span<const float> codebook_span,
-                          const std::span<const float> activation_fwht,
-                          const uint32_t row_begin, const uint32_t row_count,
-                          const std::span<float> output) noexcept {
+EMEL_KERNEL_CQ_AVX2_TARGET inline void execute_prepared_avx2_dot_loaded(
+    const event::prepared_q4_view &view,
+    const event::prepared_codebook_q4 &codebook,
+    const std::span<const float> activation_fwht, const uint32_t row_begin,
+    const uint32_t row_count, const std::span<float> output,
+    const __m256i codebook_byte0, const __m256i codebook_byte1,
+    const __m256i codebook_byte2, const __m256i codebook_byte3) noexcept {
 #if defined(__x86_64__) || defined(_M_X64)
-  __m256i codebook_byte0;
-  __m256i codebook_byte1;
-  __m256i codebook_byte2;
-  __m256i codebook_byte3;
-  q4_codebook_byte_tables(codebook_span, codebook_byte0, codebook_byte1,
-                          codebook_byte2, codebook_byte3);
   const uint32_t groups_per_row = view.in_pad / view.group;
   for (uint32_t row = 0u; row < row_count; ++row) {
     const uint32_t source_row = row_begin + row;
@@ -303,8 +305,8 @@ execute_prepared_avx2_dot(const event::prepared_q4_view &view,
         i += 8u;
       }
       for (; i < view.group; ++i)
-        scalar_tail += detail::code_value<4u>(indices[begin + i], view.group,
-                                              codebook_span) *
+        scalar_tail += detail::code_value<4u>(
+                           indices[begin + i], view.group, codebook.values) *
                        norms[group_index] * activation_fwht[begin + i];
     }
     const __m256 accum = _mm256_add_ps(accum0, accum1);
@@ -315,7 +317,32 @@ execute_prepared_avx2_dot(const event::prepared_q4_view &view,
   }
 #else
   (void)view;
-  (void)codebook_span;
+  (void)codebook;
+  (void)activation_fwht;
+  (void)row_begin;
+  (void)row_count;
+  (void)output;
+#endif
+}
+
+EMEL_KERNEL_CQ_AVX2_TARGET inline void execute_prepared_avx2_dot(
+    const event::prepared_q4_view &view,
+    const event::prepared_codebook_q4 &codebook,
+    const std::span<const float> activation_fwht, const uint32_t row_begin,
+    const uint32_t row_count, const std::span<float> output) noexcept {
+#if defined(__x86_64__) || defined(_M_X64)
+  __m256i codebook_byte0;
+  __m256i codebook_byte1;
+  __m256i codebook_byte2;
+  __m256i codebook_byte3;
+  q4_codebook_byte_tables(codebook, codebook_byte0, codebook_byte1,
+                          codebook_byte2, codebook_byte3);
+  execute_prepared_avx2_dot_loaded(
+      view, codebook, activation_fwht, row_begin, row_count, output,
+      codebook_byte0, codebook_byte1, codebook_byte2, codebook_byte3);
+#else
+  (void)view;
+  (void)codebook;
   (void)activation_fwht;
   (void)row_begin;
   (void)row_count;
@@ -326,7 +353,7 @@ execute_prepared_avx2_dot(const event::prepared_q4_view &view,
 template <uint32_t Rows>
 EMEL_KERNEL_CQ_AVX2_TARGET inline void execute_prepared_avx2_dot_row_block(
     const event::prepared_q4_view &view,
-    const std::span<const float> codebook_span,
+    const event::prepared_codebook_q4 &codebook,
     const std::span<const float> activation_fwht, const uint32_t row_begin,
     const std::span<float> output) noexcept {
 #if defined(__x86_64__) || defined(_M_X64)
@@ -335,7 +362,7 @@ EMEL_KERNEL_CQ_AVX2_TARGET inline void execute_prepared_avx2_dot_row_block(
   __m256i codebook_byte1;
   __m256i codebook_byte2;
   __m256i codebook_byte3;
-  q4_codebook_byte_tables(codebook_span, codebook_byte0, codebook_byte1,
+  q4_codebook_byte_tables(codebook, codebook_byte0, codebook_byte1,
                           codebook_byte2, codebook_byte3);
   const uint32_t groups_per_row = view.in_pad / view.group;
   const uint8_t *row_indices[Rows];
@@ -373,10 +400,10 @@ EMEL_KERNEL_CQ_AVX2_TARGET inline void execute_prepared_avx2_dot_row_block(
     }
     for (; i < view.group; ++i)
       for (uint32_t row = 0u; row < Rows; ++row)
-        scalar_tail[row] += detail::code_value<4u>(row_indices[row][begin + i],
-                                                   view.group, codebook_span) *
-                            row_norms[row][group_index] *
-                            activation_fwht[begin + i];
+        scalar_tail[row] +=
+            detail::code_value<4u>(row_indices[row][begin + i], view.group,
+                                   codebook.values) *
+            row_norms[row][group_index] * activation_fwht[begin + i];
   }
   for (uint32_t row = 0u; row < Rows; ++row) {
     alignas(32) float lanes[8];
@@ -386,7 +413,7 @@ EMEL_KERNEL_CQ_AVX2_TARGET inline void execute_prepared_avx2_dot_row_block(
   }
 #else
   (void)view;
-  (void)codebook_span;
+  (void)codebook;
   (void)activation_fwht;
   (void)row_begin;
   (void)output;
@@ -396,7 +423,7 @@ EMEL_KERNEL_CQ_AVX2_TARGET inline void execute_prepared_avx2_dot_row_block(
 template <uint32_t Rows>
 EMEL_KERNEL_CQ_AVX2_TARGET inline void
 execute_prepared_avx2_dot_blocked(const event::prepared_q4_view &view,
-                                  const std::span<const float> codebook_span,
+                                  const event::prepared_codebook_q4 &codebook,
                                   const std::span<const float> activation_fwht,
                                   const std::span<float> output) noexcept {
 #if defined(__x86_64__) || defined(_M_X64)
@@ -404,58 +431,54 @@ execute_prepared_avx2_dot_blocked(const event::prepared_q4_view &view,
   const uint32_t blocked_rows = view.out / Rows * Rows;
   for (uint32_t row = 0u; row < blocked_rows; row += Rows)
     execute_prepared_avx2_dot_row_block<Rows>(
-        view, codebook_span, activation_fwht, row, output.subspan(row, Rows));
+        view, codebook, activation_fwht, row, output.subspan(row, Rows));
   if (blocked_rows < view.out)
-    execute_prepared_avx2_dot(view, codebook_span, activation_fwht,
-                              blocked_rows, view.out - blocked_rows,
+    execute_prepared_avx2_dot(view, codebook, activation_fwht, blocked_rows,
+                              view.out - blocked_rows,
                               output.subspan(blocked_rows));
 #else
   (void)view;
-  (void)codebook_span;
+  (void)codebook;
   (void)activation_fwht;
   (void)output;
 #endif
 }
 
 EMEL_KERNEL_CQ_AVX2_TARGET inline void
-execute_prepared_avx2_dot_blocked4(const event::prepared_q4_view &view,
-                                   const std::span<const float> codebook_span,
-                                   const std::span<const float> activation_fwht,
-                                   const std::span<float> output) noexcept {
-  execute_prepared_avx2_dot_blocked<4u>(view, codebook_span, activation_fwht,
-                                        output);
+execute_prepared_avx2_dot_blocked4(
+    const event::prepared_q4_view &view,
+    const event::prepared_codebook_q4 &codebook,
+    const std::span<const float> activation_fwht,
+    const std::span<float> output) noexcept {
+  execute_prepared_avx2_dot_blocked<4u>(view, codebook, activation_fwht, output);
 }
 
 EMEL_KERNEL_CQ_AVX2_TARGET inline void
-execute_prepared_avx2_dot_blocked8(const event::prepared_q4_view &view,
-                                   const std::span<const float> codebook_span,
-                                   const std::span<const float> activation_fwht,
-                                   const std::span<float> output) noexcept {
-  execute_prepared_avx2_dot_blocked<8u>(view, codebook_span, activation_fwht,
-                                        output);
+execute_prepared_avx2_dot_blocked8(
+    const event::prepared_q4_view &view,
+    const event::prepared_codebook_q4 &codebook,
+    const std::span<const float> activation_fwht,
+    const std::span<float> output) noexcept {
+  execute_prepared_avx2_dot_blocked<8u>(view, codebook, activation_fwht, output);
 }
 template <bool Rows>
 EMEL_KERNEL_CQ_AVX2_TARGET inline void
 execute_prepared_avx2_gemv(const event::prepared_q4_view &view,
-                           const std::span<const float> codebook_span,
+                           const event::prepared_codebook_q4 &codebook,
                            const std::span<const float> activation,
                            const uint32_t row_begin, const uint32_t row_count,
                            const std::span<float> output,
                            const std::span<float> workspace) noexcept {
   detail::compute_fwht_groups(activation, view.in, view.group,
                               workspace.first(view.in_pad));
-  if constexpr (Rows)
-    execute_prepared_avx2_dot(view, codebook_span, workspace.first(view.in_pad),
-                              row_begin, row_count, output);
-  else
-    execute_prepared_avx2_dot(view, codebook_span, workspace.first(view.in_pad),
-                              row_begin, row_count, output);
+  execute_prepared_avx2_dot(view, codebook, workspace.first(view.in_pad),
+                            row_begin, row_count, output);
 }
 
 inline void execute_prepared_dequant_rows(
     const event::prepared_dequant_rows_request &request) noexcept {
   const auto &view = request.weights;
-  const float *codebook = detail::codebook_for<4u>(request.codebook);
+  const float *codebook = detail::codebook_for<4u>(request.codebook.values);
   const uint32_t groups_per_row = view.in_pad / view.group;
   alignas(32) float values[detail::k_max_group];
   for (uint32_t row = 0u; row < request.row_count; ++row) {
@@ -586,6 +609,14 @@ struct effect_quantize_a8 {
   }
 };
 
+struct effect_prepare_codebook_q4 {
+  void operator()(const event::prepare_codebook_q4 &ev,
+                  context &) const noexcept {
+    prepare_codebook_q4(ev.request);
+    ev.result.accepted = true;
+  }
+};
+
 struct effect_prepare_q4 {
   void operator()(const event::prepare_q4 &ev, context &ctx) const noexcept {
     prepare_q4(ev.request);
@@ -614,10 +645,18 @@ struct effect_execute_prepared_avx2_batch4_q4 {
     const auto &first = *request.targets[0].weights;
     detail::compute_fwht_groups(request.activation, first.in, first.group,
                                 request.workspace.first(first.in_pad));
+    __m256i codebook_byte0;
+    __m256i codebook_byte1;
+    __m256i codebook_byte2;
+    __m256i codebook_byte3;
+    q4_codebook_byte_tables(request.codebook, codebook_byte0, codebook_byte1,
+                            codebook_byte2, codebook_byte3);
     for (const auto &target : request.targets)
-      execute_prepared_avx2_dot(*target.weights, request.codebook,
-                                request.workspace.first(first.in_pad), 0u,
-                                target.weights->out, target.output);
+      execute_prepared_avx2_dot_loaded(
+          *target.weights, request.codebook,
+          request.workspace.first(first.in_pad), 0u, target.weights->out,
+          target.output, codebook_byte0, codebook_byte1, codebook_byte2,
+          codebook_byte3);
     ev.result.accepted = true;
     ctx.prepared_calls += request.targets.size();
   }

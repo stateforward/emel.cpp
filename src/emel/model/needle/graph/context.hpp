@@ -226,6 +226,7 @@ struct context {
   std::vector<uint8_t> prepared_indices;
   std::vector<uint8_t> prepared_indices_by_input8;
   std::vector<float> prepared_norms;
+  emel::kernel::cq::event::prepared_codebook_q4 prepared_codebook = {};
 
   emel::kernel::cq::event::prepared_q4_view prepared_embedding = {};
   std::array<prepared_layer_views, needle::k_max_layers> prepared_layers = {};

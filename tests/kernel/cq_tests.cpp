@@ -321,12 +321,14 @@ TEST_CASE("CQ4 sixteen-selector byte shuffle lookup is bit exact") {
   for (uint32_t i = 0u; i < 16u; ++i)
     std::memcpy(&cb[12u + i], &codebook_bits[i], sizeof(float));
 
+  emel::kernel::cq::event::prepared_codebook_q4 prepared_codebook{};
+  emel::kernel::cq::action::prepare_codebook_q4({cb, prepared_codebook});
   __m256i byte0;
   __m256i byte1;
   __m256i byte2;
   __m256i byte3;
-  emel::kernel::cq::action::q4_codebook_byte_tables(cb, byte0, byte1, byte2,
-                                                    byte3);
+  emel::kernel::cq::action::q4_codebook_byte_tables(
+      prepared_codebook, byte0, byte1, byte2, byte3);
   const auto check = [&](const std::array<uint8_t, 16u> &selectors) {
     const auto values = emel::kernel::cq::action::lookup_codebook16_pshufb(
         emel::kernel::cq::action::load_selector16(selectors.data()), byte0,
@@ -380,6 +382,12 @@ TEST_CASE("CQ4 preparation preserves selectors norms and numerical identity") {
   emel::kernel::cq::event::dispatch_result prepare_result{};
   REQUIRE(sm.process_event(
       emel::kernel::cq::event::prepare_q4{prepare_request, prepare_result}));
+  emel::kernel::cq::event::prepared_codebook_q4 prepared_codebook{};
+  emel::kernel::cq::event::dispatch_result codebook_result{};
+  const emel::kernel::cq::event::prepare_codebook_q4_request codebook_request{
+      cb, prepared_codebook};
+  REQUIRE(sm.process_event(emel::kernel::cq::event::prepare_codebook_q4{
+      codebook_request, codebook_result}));
   CHECK(prepared.source == v.data);
   CHECK(prepared.indices.size() == out * in);
   CHECK(prepared.norms.size() == out * in / group);
@@ -399,7 +407,8 @@ TEST_CASE("CQ4 preparation preserves selectors norms and numerical identity") {
   REQUIRE(sm.process_event(emel::kernel::cq::event::execute_scalar_q4{
       scalar_request, scalar_result}));
   const emel::kernel::cq::event::prepared_gemv_request prepared_request{
-      prepared, cb, activation, prepared_output, prepared_workspace};
+      prepared, prepared_codebook, activation, prepared_output,
+      prepared_workspace};
   emel::kernel::cq::event::dispatch_result prepared_result{};
   REQUIRE(sm.process_event(emel::kernel::cq::event::execute_prepared_avx2_q4{
       prepared_request, prepared_result}));
@@ -438,6 +447,12 @@ TEST_CASE(
       v, indices, indices_by_input8, norms, prepared};
   REQUIRE(sm.process_event(
       emel::kernel::cq::event::prepare_q4{prepare_request, prepare_result}));
+  emel::kernel::cq::event::prepared_codebook_q4 prepared_codebook{};
+  emel::kernel::cq::event::dispatch_result codebook_result{};
+  const emel::kernel::cq::event::prepare_codebook_q4_request codebook_request{
+      cb, prepared_codebook};
+  REQUIRE(sm.process_event(emel::kernel::cq::event::prepare_codebook_q4{
+      codebook_request, codebook_result}));
   std::array<float, in> activation{};
   for (uint32_t i = 0u; i < in; ++i)
     activation[i] = static_cast<float>(i + 1u) / 8.f;
@@ -445,7 +460,7 @@ TEST_CASE(
   std::array<float, in> batch_workspace{};
   std::array<float, out> expected{};
   const emel::kernel::cq::event::prepared_gemv_request separate_request{
-      prepared, cb, activation, expected, separate_workspace};
+      prepared, prepared_codebook, activation, expected, separate_workspace};
   emel::kernel::cq::event::dispatch_result separate_result{};
   REQUIRE(sm.process_event(emel::kernel::cq::event::execute_prepared_avx2_q4{
       separate_request, separate_result}));
@@ -455,7 +470,7 @@ TEST_CASE(
                    {&prepared, outputs[1]},
                    {&prepared, outputs[2]},
                    {&prepared, outputs[3]}}},
-      .codebook = cb,
+      .codebook = prepared_codebook,
       .activation = activation,
       .workspace = batch_workspace};
   emel::kernel::cq::event::dispatch_result batch_result{};
@@ -495,6 +510,12 @@ TEST_CASE("CQ4 prepared lookup preserves vector and scalar group tails") {
         v, indices, indices_by_input8, norms, prepared};
     REQUIRE(sm.process_event(
         emel::kernel::cq::event::prepare_q4{prepare_request, prepare_result}));
+    emel::kernel::cq::event::prepared_codebook_q4 prepared_codebook{};
+    emel::kernel::cq::event::dispatch_result codebook_result{};
+    const emel::kernel::cq::event::prepare_codebook_q4_request codebook_request{
+        cb, prepared_codebook};
+    REQUIRE(sm.process_event(emel::kernel::cq::event::prepare_codebook_q4{
+        codebook_request, codebook_result}));
     std::vector<float> activation(in);
     for (uint32_t i = 0u; i < in; ++i)
       activation[i] = std::cos(static_cast<float>(i + 1u) * 0.0625f);
@@ -508,7 +529,7 @@ TEST_CASE("CQ4 prepared lookup preserves vector and scalar group tails") {
     REQUIRE(sm.process_event(emel::kernel::cq::event::execute_scalar_q4{
         scalar_request, scalar_result}));
     const emel::kernel::cq::event::prepared_gemv_request prepared_request{
-        prepared, cb, activation, actual, prepared_workspace};
+        prepared, prepared_codebook, activation, actual, prepared_workspace};
     emel::kernel::cq::event::dispatch_result prepared_result{};
     REQUIRE(sm.process_event(emel::kernel::cq::event::execute_prepared_avx2_q4{
         prepared_request, prepared_result}));
@@ -533,6 +554,8 @@ TEST_CASE("CQ4 prepared 512x512 group128 row blocks preserve exact output") {
     norms[i] = 0.125f + static_cast<float>((i * 5u) & 15u) / 32.0f;
   for (uint32_t i = 0u; i < in; ++i)
     activation[i] = std::sin(static_cast<float>(i + 1u) * 0.03125f);
+  emel::kernel::cq::event::prepared_codebook_q4 prepared_codebook{};
+  emel::kernel::cq::action::prepare_codebook_q4({cb, prepared_codebook});
   const emel::kernel::cq::event::prepared_q4_view prepared{
       .source = nullptr,
       .out = out,
@@ -545,12 +568,12 @@ TEST_CASE("CQ4 prepared 512x512 group128 row blocks preserve exact output") {
   std::array<float, out> single{};
   std::array<float, out> block4{};
   std::array<float, out> block8{};
-  emel::kernel::cq::action::execute_prepared_avx2_dot(prepared, cb, activation,
-                                                      0u, out, single);
+  emel::kernel::cq::action::execute_prepared_avx2_dot(
+      prepared, prepared_codebook, activation, 0u, out, single);
   emel::kernel::cq::action::execute_prepared_avx2_dot_blocked4(
-      prepared, cb, activation, block4);
+      prepared, prepared_codebook, activation, block4);
   emel::kernel::cq::action::execute_prepared_avx2_dot_blocked8(
-      prepared, cb, activation, block8);
+      prepared, prepared_codebook, activation, block8);
   for (uint32_t row = 0u; row < out; ++row) {
     CHECK(block4[row] == doctest::Approx(single[row]).epsilon(1.0e-5));
     CHECK(block8[row] == doctest::Approx(single[row]).epsilon(1.0e-5));

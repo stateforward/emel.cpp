@@ -18,6 +18,10 @@ struct model {
           + sml::event<event::quantize_a8>
           [ guard::guard_quantize_a8{} ] / action::effect_quantize_a8{}
       , sml::state<state_ready> <= sml::state<state_ready>
+          + sml::event<event::prepare_codebook_q4>
+          [ guard::guard_prepare_codebook_q4{} ]
+          / action::effect_prepare_codebook_q4{}
+      , sml::state<state_ready> <= sml::state<state_ready>
           + sml::event<event::prepare_q4>
           [ guard::guard_prepare_q4{} ] / action::effect_prepare_q4{}
       , sml::state<state_ready> <= sml::state<state_ready>

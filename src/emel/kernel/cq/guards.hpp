@@ -85,6 +85,17 @@ prepare_supported(const event::prepare_q4_request &request) noexcept {
          request.indices_by_input8.size() >= index_count &&
          request.norms.size() >= norm_count;
 }
+inline bool
+prepared_codebook_supported(const event::prepared_codebook_q4 &codebook) noexcept {
+  return codebook.values.size() >= emel::cact::loader::k_codebook_len;
+}
+
+struct guard_prepare_codebook_q4 {
+  bool operator()(const event::prepare_codebook_q4 &ev,
+                  const action::context &) const noexcept {
+    return ev.request.codebook.size() >= emel::cact::loader::k_codebook_len;
+  }
+};
 inline bool prepared_supported(const event::prepared_q4_view &view,
                                const std::span<const float> codebook) noexcept {
   const uint64_t index_count = static_cast<uint64_t>(view.out) * view.in_pad;
@@ -112,7 +123,8 @@ struct guard_execute_prepared_avx2_q4 {
 #if (defined(__x86_64__) || defined(_M_X64)) && defined(__AVX2__) &&           \
     defined(__FMA__)
     const auto &request = ev.request;
-    return prepared_supported(request.weights, request.codebook) &&
+    return prepared_supported(request.weights, request.codebook.values) &&
+           prepared_codebook_supported(request.codebook) &&
            request.activation.size() >= request.weights.in &&
            request.output.size() >= request.weights.out &&
            request.workspace.size() >= request.weights.in_pad;
@@ -135,7 +147,8 @@ struct guard_execute_prepared_avx2_batch4_q4 {
       return false;
     for (const auto &target : request.targets)
       if (target.weights == nullptr ||
-          !prepared_supported(*target.weights, request.codebook) ||
+          !prepared_supported(*target.weights, request.codebook.values) ||
+          !prepared_codebook_supported(request.codebook) ||
           target.weights->in != first->in ||
           target.weights->group != first->group ||
           target.weights->in_pad != first->in_pad ||
@@ -153,7 +166,8 @@ struct guard_execute_prepared_avx2_rows_q4 {
   bool operator()(const event::execute_prepared_avx2_rows_q4 &ev,
                   const action::context &) const noexcept {
     const auto &request = ev.request;
-    return prepared_supported(request.weights, request.codebook) &&
+    return prepared_supported(request.weights, request.codebook.values) &&
+           prepared_codebook_supported(request.codebook) &&
            request.row_count > 0u &&
            static_cast<uint64_t>(request.row_begin) + request.row_count <=
                request.weights.out &&
@@ -167,7 +181,8 @@ struct guard_execute_prepared_dequant_q4 {
   bool operator()(const event::execute_prepared_dequant_q4 &ev,
                   const action::context &) const noexcept {
     const auto &request = ev.request;
-    return prepared_supported(request.weights, request.codebook) &&
+    return prepared_supported(request.weights, request.codebook.values) &&
+           prepared_codebook_supported(request.codebook) &&
            request.row_count > 0u &&
            static_cast<uint64_t>(request.row_begin) + request.row_count <=
                request.weights.out &&
