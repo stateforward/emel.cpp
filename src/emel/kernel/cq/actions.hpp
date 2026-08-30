@@ -17,7 +17,26 @@ struct context {
   uint64_t avx2_calls = 0u;
   uint64_t prepare_calls = 0u;
   uint64_t prepared_calls = 0u;
+  uint64_t quantize_calls = 0u;
 };
+
+inline void quantize_a8(const event::quantize_a8_request &request) noexcept {
+  float absmax = 0.0f;
+  for (const float value : request.input) {
+    const float magnitude = std::abs(value);
+    absmax = magnitude > absmax ? magnitude : absmax;
+  }
+  request.scale = absmax > 0.0f ? absmax / 127.0f : 1.0f;
+  for (size_t i = 0u; i < request.input.size(); ++i) {
+    const float scaled = request.input[i] / request.scale;
+    const float rounded = std::nearbyint(scaled);
+    const float clamped =
+        rounded < -128.0f ? -128.0f : (rounded > 127.0f ? 127.0f : rounded);
+    const int8_t quantized = static_cast<int8_t>(clamped);
+    request.quantized[i] = quantized;
+    request.dequantized[i] = static_cast<float>(quantized) * request.scale;
+  }
+}
 
 template <uint32_t Bits>
 inline void execute_scalar_gemv(const event::gemv_request &request) noexcept {
@@ -376,6 +395,14 @@ execute_avx2_gemv(const event::gemv_request &request) noexcept {
   execute_scalar_gemv<Bits>(request);
 #endif
 }
+struct effect_quantize_a8 {
+  void operator()(const event::quantize_a8 &ev, context &ctx) const noexcept {
+    quantize_a8(ev.request);
+    ev.result.accepted = true;
+    ++ctx.quantize_calls;
+  }
+};
+
 struct effect_prepare_q4 {
   void operator()(const event::prepare_q4 &ev, context &ctx) const noexcept {
     prepare_q4(ev.request);
@@ -479,6 +506,13 @@ struct effect_capture_prepared_diagnostics {
                   const context &ctx) const noexcept {
     ev.prepare_calls = ctx.prepare_calls;
     ev.prepared_calls = ctx.prepared_calls;
+  }
+};
+
+struct effect_capture_a8_diagnostics {
+  void operator()(const event::capture_a8_diagnostics &ev,
+                  const context &ctx) const noexcept {
+    ev.quantize_calls = ctx.quantize_calls;
   }
 };
 

@@ -1,6 +1,7 @@
 #include "emel/kernel/cq/detail.hpp"
 #include "emel/kernel/cq/sm.hpp"
 #include <array>
+#include <cfenv>
 #include <cmath>
 #include <cstdint>
 #include <doctest/doctest.h>
@@ -87,6 +88,70 @@ void run_route(uint32_t in, const std::array<float, 28u> &cb) {
 #endif
 }
 } // namespace
+TEST_CASE("CQ A8 fake quant matches JAX ties zero and signed boundary") {
+  REQUIRE(std::fesetround(FE_TONEAREST) == 0);
+  emel::kernel::cq::sm sm;
+
+  {
+    const std::array<float, 4u> input{0.0f, 0.0f, -0.0f, 0.0f};
+    std::array<int8_t, 4u> quantized{};
+    std::array<float, 4u> dequantized{};
+    float scale = 0.0f;
+    const emel::kernel::cq::event::quantize_a8_request request{
+        input, quantized, dequantized, scale};
+    emel::kernel::cq::event::dispatch_result result{};
+    REQUIRE(sm.process_event(
+        emel::kernel::cq::event::quantize_a8{request, result}));
+    CHECK(scale == 1.0f);
+    for (uint32_t i = 0u; i < input.size(); ++i) {
+      CHECK(quantized[i] == 0);
+      CHECK(dequantized[i] == 0.0f);
+    }
+  }
+
+  {
+    // absmax=127 => scale=1. JAX round is ties-to-even and signed A8 clamps
+    // to [-128, 127]; the negative endpoint is representable but absmax/qmax
+    // makes ordinary finite inputs reach -127, not -128.
+    const std::array<float, 9u> input{-127.0f, -126.5f, -1.5f,  -0.5f, 0.0f,
+                                      0.5f,    1.5f,    126.5f, 127.0f};
+    const std::array<int8_t, 9u> expected{-127, -126, -2, 0, 0, 0, 2, 126, 127};
+    std::array<int8_t, 9u> quantized{};
+    std::array<float, 9u> dequantized{};
+    float scale = 0.0f;
+    const emel::kernel::cq::event::quantize_a8_request request{
+        input, quantized, dequantized, scale};
+    emel::kernel::cq::event::dispatch_result result{};
+    REQUIRE(sm.process_event(
+        emel::kernel::cq::event::quantize_a8{request, result}));
+    CHECK(scale == 1.0f);
+    for (uint32_t i = 0u; i < input.size(); ++i) {
+      CHECK(quantized[i] == expected[i]);
+      CHECK(dequantized[i] == static_cast<float>(expected[i]));
+    }
+    CHECK(quantized.front() > INT8_MIN);
+  }
+
+  uint64_t quantize_calls = 0u;
+  REQUIRE(sm.process_event(
+      emel::kernel::cq::event::capture_a8_diagnostics{quantize_calls}));
+  CHECK(quantize_calls == 2u);
+}
+
+TEST_CASE("CQ A8 guard rejects incomplete caller scratch") {
+  const std::array<float, 2u> input{1.0f, -1.0f};
+  std::array<int8_t, 1u> quantized{};
+  std::array<float, 2u> dequantized{};
+  float scale = 0.0f;
+  const emel::kernel::cq::event::quantize_a8_request request{
+      input, quantized, dequantized, scale};
+  emel::kernel::cq::event::dispatch_result result{};
+  emel::kernel::cq::sm sm;
+  CHECK_FALSE(
+      sm.process_event(emel::kernel::cq::event::quantize_a8{request, result}));
+  CHECK(sm.is(stateforward::sml::state<emel::kernel::cq::state_ready>));
+}
+
 TEST_CASE("CQ2 scalar parity and normalized FWHT") {
   std::array<float, 28u> cb{};
   cb[0] = -.5f;

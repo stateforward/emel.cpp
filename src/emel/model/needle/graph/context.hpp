@@ -35,11 +35,15 @@ struct prepared_engram_site_views {
   emel::kernel::cq::event::prepared_q4_view value_proj = {};
 };
 
-// CQ dispatch route baked into the step-chain states; selected once at init
-// by explicit guarded transitions (never stored in context).
+// CQ dispatch and deployment-numeric route. Both are selected once by explicit
+// guarded init transitions and materialized as distinct step-chain states.
 enum class route_kind : uint8_t {
   scalar = 0,
   prepared_avx2 = 1,
+};
+enum class activation_route_kind : uint8_t {
+  f32 = 0,
+  a8 = 1,
 };
 
 // Graph-owned runtime storage. ALL heap allocation happens here, in the
@@ -115,6 +119,8 @@ struct context {
     engram_keys.resize(static_cast<uint64_t>(geo.num_engram_sites) * d_model);
     engram_values.resize(static_cast<uint64_t>(geo.num_engram_sites) * d_model);
     cq_workspace.resize(compute_cq_workspace(contract_in));
+    a8_quantized.resize(cq_workspace.size());
+    a8_dequantized.resize(cq_workspace.size());
     const auto prepared_sizes = compute_prepared_sizes(contract_in);
     prepared_indices.resize(prepared_sizes.first);
     prepared_indices_by_input8.resize(prepared_sizes.first);
@@ -215,6 +221,8 @@ struct context {
   std::vector<float> hada_workspace;
   std::vector<float> attend_workspace;
   std::vector<float> cq_workspace;
+  std::vector<int8_t> a8_quantized;
+  std::vector<float> a8_dequantized;
   std::vector<uint8_t> prepared_indices;
   std::vector<uint8_t> prepared_indices_by_input8;
   std::vector<float> prepared_norms;

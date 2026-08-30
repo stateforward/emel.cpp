@@ -107,6 +107,27 @@ compute_dequant_row(context &ctx, const tensor_view &view,
   }
 }
 
+template <activation_route_kind activation_route>
+inline std::span<const float>
+prepare_activation(context &ctx, const std::span<const float> activation,
+                   bool &ok) noexcept {
+  if constexpr (activation_route == activation_route_kind::a8) {
+    float scale = 1.0f;
+    const emel::kernel::cq::event::quantize_a8_request request{
+        .input = activation,
+        .quantized =
+            std::span<int8_t>{ctx.a8_quantized}.first(activation.size()),
+        .dequantized =
+            std::span<float>{ctx.a8_dequantized}.first(activation.size()),
+        .scale = scale};
+    emel::kernel::cq::event::dispatch_result result{};
+    ok = ok && ctx.cq.process_event(
+                   emel::kernel::cq::event::quantize_a8{request, result});
+    return std::span<const float>{ctx.a8_dequantized}.first(activation.size());
+  }
+  return activation;
+}
+
 inline bool
 compute_gemv_batch4(context &ctx, const std::span<const float> activation,
                     const emel::kernel::cq::event::prepared_q4_view &first,
@@ -306,7 +327,8 @@ inline bool compute_step_begin(context &ctx, event::step_ctx &step) noexcept {
 // Engram K/V for the current position: FNV-mix hash over the token window,
 // masked table-row gathers, key/value projections, and the dilated causal
 // tap convolution — one K row and one V row per site.
-template <route_kind route> inline bool compute_engram(context &ctx) noexcept {
+template <route_kind route, activation_route_kind activation_route>
+inline bool compute_engram(context &ctx) noexcept {
   const auto &bound = *ctx.bound;
   const auto &geo = bound.geo;
   const uint32_t d_model = geo.d_model;
@@ -366,21 +388,25 @@ template <route_kind route> inline bool compute_engram(context &ctx) noexcept {
                  std::span<float>{e_row + static_cast<size_t>(table) * sub_dim,
                                   sub_dim});
       }
+      const std::span<const float> activation{e_row, e_dim};
+      const auto quantized =
+          prepare_activation<activation_route>(ctx, activation, ok);
       ok = ok && compute_gemv<route>(
                      ctx, views.value_proj,
-                     ctx.prepared_engram_sites[site].value_proj,
-                     std::span<const float>{e_row, e_dim},
+                     ctx.prepared_engram_sites[site].value_proj, quantized,
                      std::span<float>{ctx.engram_v_taps.data() +
                                           static_cast<size_t>(tap) * d_model,
                                       d_model});
     }
-    ok =
-        ok && compute_gemv<route>(
-                  ctx, views.key_proj, ctx.prepared_engram_sites[site].key_proj,
-                  std::span<const float>{ctx.engram_e_rows.data(), e_dim},
-                  std::span<float>{ctx.engram_keys.data() +
-                                       static_cast<size_t>(site) * d_model,
-                                   d_model});
+    const std::span<const float> activation{ctx.engram_e_rows.data(), e_dim};
+    const auto quantized =
+        prepare_activation<activation_route>(ctx, activation, ok);
+    ok = ok && compute_gemv<route>(
+                   ctx, views.key_proj,
+                   ctx.prepared_engram_sites[site].key_proj, quantized,
+                   std::span<float>{ctx.engram_keys.data() +
+                                        static_cast<size_t>(site) * d_model,
+                                    d_model});
     const emel::kernel::engram::event::conv_taps_request conv_request{
         .value_rows = ctx.engram_v_taps,
         .tap_valid = ctx.engram_tap_valid,
@@ -403,7 +429,8 @@ template <route_kind route> inline bool compute_engram(context &ctx) noexcept {
 // One transformer layer over the current single-token step. `engram_site` and
 // `window_full` are guard-selected at the transition; everything inside is
 // compile-time conditionals plus bounded data-plane work.
-template <route_kind route, bool engram_site, bool window_full>
+template <route_kind route, activation_route_kind activation_route,
+          bool engram_site, bool window_full>
 inline bool compute_layer(context &ctx, event::step_ctx &step) noexcept {
   const auto &bound = *ctx.bound;
   const auto &geo = bound.geo;
@@ -469,23 +496,28 @@ inline bool compute_layer(context &ctx, event::step_ctx &step) noexcept {
       d_model};
   ok = ok && compute_zcrms_norm(ctx, ctx.bx, norm_in_scale, 1u, d_model,
                                 std::span<float>{ctx.h_norm});
+  const auto attention_input =
+      prepare_activation<activation_route>(ctx, ctx.h_norm, ok);
   if constexpr (route == route_kind::prepared_avx2) {
     ok = ok && compute_gemv_batch4(
-                   ctx, ctx.h_norm, prepared_layer.q_proj,
+                   ctx, attention_input, prepared_layer.q_proj,
                    std::span<float>{ctx.q_rows}, prepared_layer.k_proj,
                    std::span<float>{ctx.k_rows}, prepared_layer.v_proj,
                    std::span<float>{ctx.v_rows}, prepared_layer.gate_proj,
                    std::span<float>{ctx.gate_logits});
   } else {
-    ok = ok && compute_gemv<route>(ctx, layer.q_proj, prepared_layer.q_proj,
-                                   ctx.h_norm, std::span<float>{ctx.q_rows});
-    ok = ok && compute_gemv<route>(ctx, layer.k_proj, prepared_layer.k_proj,
-                                   ctx.h_norm, std::span<float>{ctx.k_rows});
-    ok = ok && compute_gemv<route>(ctx, layer.v_proj, prepared_layer.v_proj,
-                                   ctx.h_norm, std::span<float>{ctx.v_rows});
     ok = ok &&
-         compute_gemv<route>(ctx, layer.gate_proj, prepared_layer.gate_proj,
-                             ctx.h_norm, std::span<float>{ctx.gate_logits});
+         compute_gemv<route>(ctx, layer.q_proj, prepared_layer.q_proj,
+                             attention_input, std::span<float>{ctx.q_rows});
+    ok = ok &&
+         compute_gemv<route>(ctx, layer.k_proj, prepared_layer.k_proj,
+                             attention_input, std::span<float>{ctx.k_rows});
+    ok = ok &&
+         compute_gemv<route>(ctx, layer.v_proj, prepared_layer.v_proj,
+                             attention_input, std::span<float>{ctx.v_rows});
+    ok = ok && compute_gemv<route>(ctx, layer.gate_proj,
+                                   prepared_layer.gate_proj, attention_input,
+                                   std::span<float>{ctx.gate_logits});
   }
 
   const std::span<const float> q_norm_scale{
@@ -569,8 +601,11 @@ inline bool compute_layer(context &ctx, event::step_ctx &step) noexcept {
   emel::kernel::swa::event::dispatch_result gate_result{};
   ok = ok && ctx.swa.process_event(emel::kernel::swa::event::execute_gate_mul{
                  gate_request, gate_result});
-  ok = ok && compute_gemv<route>(ctx, layer.out_proj, prepared_layer.out_proj,
-                                 ctx.attn_out, std::span<float>{ctx.attn_proj});
+  const auto attention_output =
+      prepare_activation<activation_route>(ctx, ctx.attn_out, ok);
+  ok = ok &&
+       compute_gemv<route>(ctx, layer.out_proj, prepared_layer.out_proj,
+                           attention_output, std::span<float>{ctx.attn_proj});
 
   const std::span<const float> post_norm_scale{
       ctx.post_norm_scale.data() + static_cast<size_t>(layer_index) * d_model,
@@ -645,7 +680,7 @@ inline bool compute_layer(context &ctx, event::step_ctx &step) noexcept {
 }
 
 // Final head: mean over lanes, final ZCRMSNorm, tied-embedding logits.
-template <route_kind route>
+template <route_kind route, activation_route_kind activation_route>
 inline bool compute_logits(context &ctx, event::step_ctx &step) noexcept {
   const auto &geo = ctx.bound->geo;
   const emel::kernel::mhc::event::mean_lanes_request mean_request{
@@ -659,9 +694,11 @@ inline bool compute_logits(context &ctx, event::step_ctx &step) noexcept {
   ok =
       ok && compute_zcrms_norm(ctx, ctx.mean, ctx.final_norm_scale, 1u,
                                geo.d_model, std::span<float>{ctx.final_normed});
+  const auto logits_input =
+      prepare_activation<activation_route>(ctx, ctx.final_normed, ok);
   ok = ok &&
        compute_gemv<route>(ctx, ctx.bound->embedding, ctx.prepared_embedding,
-                           ctx.final_normed, step.logits_out);
+                           logits_input, step.logits_out);
   return ok;
 }
 
@@ -699,17 +736,20 @@ template <route_kind route> struct effect_step_begin {
   }
 };
 
-template <route_kind route> struct effect_compute_engram {
+template <route_kind route, activation_route_kind activation_route>
+struct effect_compute_engram {
   void operator()(const event::step_run &ev, context &ctx) const noexcept {
-    fold_error(ev.ctx.err, compute_engram<route>(ctx));
+    fold_error(ev.ctx.err, compute_engram<route, activation_route>(ctx));
   }
 };
 
-template <route_kind route, bool engram_site, bool window_full>
+template <route_kind route, activation_route_kind activation_route,
+          bool engram_site, bool window_full>
 struct effect_run_layer {
   void operator()(const event::step_run &ev, context &ctx) const noexcept {
     fold_error(ev.ctx.err,
-               compute_layer<route, engram_site, window_full>(ctx, ev.ctx));
+               compute_layer<route, activation_route, engram_site, window_full>(
+                   ctx, ev.ctx));
   }
 };
 
@@ -719,9 +759,11 @@ struct effect_advance_layer {
   }
 };
 
-template <route_kind route> struct effect_emit_logits {
+template <route_kind route, activation_route_kind activation_route>
+struct effect_emit_logits {
   void operator()(const event::step_run &ev, context &ctx) const noexcept {
-    fold_error(ev.ctx.err, compute_logits<route>(ctx, ev.ctx));
+    fold_error(ev.ctx.err,
+               compute_logits<route, activation_route>(ctx, ev.ctx));
   }
 };
 

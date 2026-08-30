@@ -43,6 +43,23 @@ struct guard_route_scalar {
   }
 };
 
+// The `.cact` deployment header carries kv_bits=8 for the W4A8 artifact. The
+// legacy f32 parity route remains explicit for synthetic/legacy contracts;
+// production route selection never hides this numeric mode inside actions.
+struct guard_deployment_a8 {
+  bool operator()(const event::step_run &ev,
+                  const action::context &) const noexcept {
+    return ev.ctx.activation_quant;
+  }
+};
+
+struct guard_deployment_f32 {
+  bool operator()(const event::step_run &ev,
+                  const action::context &) const noexcept {
+    return !ev.ctx.activation_quant;
+  }
+};
+
 // Geometry the graph storage layout supports: derived buffer sizes must be
 // coherent and within the fixed kernel capacities. The context constructor
 // binds `bound` from a reference, so it is never null. The explicit CQ

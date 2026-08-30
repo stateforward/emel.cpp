@@ -4,6 +4,19 @@
 
 namespace emel::kernel::cq::guard {
 
+inline bool a8_supported(const event::quantize_a8_request &request) noexcept {
+  return !request.input.empty() &&
+         request.quantized.size() >= request.input.size() &&
+         request.dequantized.size() >= request.input.size();
+}
+
+struct guard_quantize_a8 {
+  bool operator()(const event::quantize_a8 &ev,
+                  const action::context &) const noexcept {
+    return a8_supported(ev.request);
+  }
+};
+
 template <uint32_t Bits>
 inline bool supported(const event::gemv_request &request) noexcept {
   const uint32_t in_pad =

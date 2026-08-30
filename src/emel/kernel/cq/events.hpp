@@ -12,6 +12,21 @@ struct dispatch_result {
   bool accepted = false;
 };
 
+// JAX-compatible signed A8 fake quantization over one full activation vector.
+// `quantized` keeps the exact integer operand and `dequantized` keeps the f32
+// value consumed by the weight-side FWHT/GEMV. Both spans are caller-owned.
+struct quantize_a8_request {
+  std::span<const float> input;
+  std::span<int8_t> quantized;
+  std::span<float> dequantized;
+  float &scale;
+};
+
+struct quantize_a8 {
+  const quantize_a8_request &request;
+  dispatch_result &result;
+};
+
 struct gemv_request {
   const emel::cact::loader::tensor_view &weights;
   std::span<const float> codebook;
@@ -176,6 +191,10 @@ struct capture_diagnostics {
 struct capture_prepared_diagnostics {
   uint64_t &prepare_calls;
   uint64_t &prepared_calls;
+};
+
+struct capture_a8_diagnostics {
+  uint64_t &quantize_calls;
 };
 
 } // namespace emel::kernel::cq::event

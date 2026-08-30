@@ -15,6 +15,9 @@ struct model {
     // clang-format off
     return sml::make_transition_table(
         sml::state<state_ready> <= *sml::state<state_ready>
+          + sml::event<event::quantize_a8>
+          [ guard::guard_quantize_a8{} ] / action::effect_quantize_a8{}
+      , sml::state<state_ready> <= sml::state<state_ready>
           + sml::event<event::prepare_q4>
           [ guard::guard_prepare_q4{} ] / action::effect_prepare_q4{}
       , sml::state<state_ready> <= sml::state<state_ready>
@@ -78,6 +81,9 @@ struct model {
       , sml::state<state_ready> <= sml::state<state_ready>
           + sml::event<event::capture_prepared_diagnostics>
           / action::effect_capture_prepared_diagnostics{}
+      , sml::state<state_ready> <= sml::state<state_ready>
+          + sml::event<event::capture_a8_diagnostics>
+          / action::effect_capture_a8_diagnostics{}
       , sml::state<state_ready> <= sml::state<state_ready>
           + sml::unexpected_event<sml::_>
           / action::effect_on_unexpected{}
