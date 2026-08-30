@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <cstring>
 #include <random>
+#include <limits>
 #include <doctest/doctest.h>
 #include <vector>
 namespace {
@@ -152,6 +153,24 @@ TEST_CASE("CQ A8 guard rejects incomplete caller scratch") {
   CHECK_FALSE(
       sm.process_event(emel::kernel::cq::event::quantize_a8{request, result}));
   CHECK(sm.is(stateforward::sml::state<emel::kernel::cq::state_ready>));
+}
+
+TEST_CASE("CQ A8 guard rejects non-finite activation values") {
+  emel::kernel::cq::sm sm;
+  for (const float nonfinite : {std::numeric_limits<float>::quiet_NaN(),
+                                std::numeric_limits<float>::infinity(),
+                                -std::numeric_limits<float>::infinity()}) {
+    const std::array<float, 2u> input{1.0f, nonfinite};
+    std::array<int8_t, 2u> quantized{};
+    std::array<float, 2u> integer_values{};
+    float scale = 0.0f;
+    const emel::kernel::cq::event::quantize_a8_request request{
+        input, quantized, integer_values, scale};
+    emel::kernel::cq::event::dispatch_result result{};
+    CHECK_FALSE(
+        sm.process_event(emel::kernel::cq::event::quantize_a8{request, result}));
+    CHECK(sm.is(stateforward::sml::state<emel::kernel::cq::state_ready>));
+  }
 }
 
 TEST_CASE("CQ AVX2 FWHT128 matches scalar on random zeros tails and A8") {

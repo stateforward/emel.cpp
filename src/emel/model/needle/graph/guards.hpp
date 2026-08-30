@@ -18,6 +18,26 @@ inline constexpr bool k_avx2_route_available = false;
 inline bool is_power_of_two(const uint32_t value) noexcept {
   return value != 0u && (value & (value - 1u)) == 0u;
 }
+inline bool cq_group128(const emel::model::needle::contract &bound) noexcept {
+  const auto supported = [](const tensor_view &view) noexcept {
+    return view.group == 128u;
+  };
+  bool ok = supported(bound.embedding) && supported(bound.mhc.phi_pre) &&
+            supported(bound.mhc.phi_post) && supported(bound.mhc.phi_res);
+  for (uint32_t i = 0u; i < bound.layer_count; ++i) {
+    const auto &layer = bound.layers[i];
+    ok = ok && supported(layer.q_proj) && supported(layer.k_proj) &&
+         supported(layer.v_proj) && supported(layer.gate_proj) &&
+         supported(layer.out_proj);
+  }
+  for (uint32_t i = 0u; i < bound.engram_site_count; ++i) {
+    const auto &site = bound.engram_sites[i];
+    ok = ok && supported(site.tables) && supported(site.key_proj) &&
+         supported(site.value_proj);
+  }
+  return ok;
+}
+
 
 inline bool layer_is_engram_site(const emel::cact::loader::geometry &geo,
                                  const uint32_t layer_index) noexcept {
@@ -31,15 +51,15 @@ inline bool layer_is_engram_site(const emel::cact::loader::geometry &geo,
 // passes on any given build.
 struct guard_route_avx2 {
   bool operator()(const event::step_run &,
-                  const action::context &) const noexcept {
-    return k_avx2_route_available;
+                  const action::context &ctx) const noexcept {
+    return k_avx2_route_available && cq_group128(*ctx.bound);
   }
 };
 
 struct guard_route_scalar {
   bool operator()(const event::step_run &,
-                  const action::context &) const noexcept {
-    return !k_avx2_route_available;
+                  const action::context &ctx) const noexcept {
+    return !k_avx2_route_available || !cq_group128(*ctx.bound);
   }
 };
 

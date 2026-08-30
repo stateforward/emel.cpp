@@ -267,6 +267,8 @@ namespace emel::bench {
 void append_emel_needle_graph_cases(std::vector<result> &results,
                                     const config &cfg) {
   graph_fixture fixture;
+#if (defined(__x86_64__) || defined(_M_X64)) && defined(__AVX2__) &&           \
+    defined(__FMA__)
   {
     config fwht_cfg = cfg;
     fwht_cfg.iterations = read_env_u64_or(k_fwht_iters_env, 100000u);
@@ -284,6 +286,7 @@ void append_emel_needle_graph_cases(std::vector<result> &results,
         measure_case(k_fwht_case_name, fwht_cfg, fwht_fn), "emel",
         "emel_cq_avx2_fwht128", "cpp", 1u));
   }
+#endif
 
   {
     // Steady-state decode: one greedy-shaped decode step per op at ~100-token

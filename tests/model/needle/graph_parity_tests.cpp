@@ -311,6 +311,43 @@ TEST_CASE("needle graph prepares CQ4 storage once and selects prepared route") {
   CHECK(prepare_calls == preparation_count);
 }
 
+TEST_CASE("needle graph AVX2 route requires every CQ tensor group to be 128") {
+  emel::model::needle::contract contract{};
+  contract.layer_count = 1u;
+  contract.engram_site_count = 1u;
+  contract.embedding.group = 128u;
+  contract.mhc.phi_pre.group = 128u;
+  contract.mhc.phi_post.group = 128u;
+  contract.mhc.phi_res.group = 128u;
+  auto &layer = contract.layers[0];
+  layer.q_proj.group = 128u;
+  layer.k_proj.group = 128u;
+  layer.v_proj.group = 128u;
+  layer.gate_proj.group = 128u;
+  layer.out_proj.group = 128u;
+  auto &site = contract.engram_sites[0];
+  site.tables.group = 128u;
+  site.key_proj.group = 128u;
+  site.value_proj.group = 128u;
+
+  emel::model::needle::graph::action::context ctx{contract};
+  emel::model::needle::graph::event::step_ctx step{};
+  const emel::model::needle::graph::event::step_run run{step};
+#if (defined(__x86_64__) || defined(_M_X64)) && defined(__AVX2__) &&           \
+    defined(__FMA__)
+  CHECK(emel::model::needle::graph::guard::guard_route_avx2{}(run, ctx));
+  CHECK_FALSE(
+      emel::model::needle::graph::guard::guard_route_scalar{}(run, ctx));
+#else
+  CHECK_FALSE(emel::model::needle::graph::guard::guard_route_avx2{}(run, ctx));
+  CHECK(emel::model::needle::graph::guard::guard_route_scalar{}(run, ctx));
+#endif
+
+  layer.out_proj.group = 64u;
+  CHECK_FALSE(emel::model::needle::graph::guard::guard_route_avx2{}(run, ctx));
+  CHECK(emel::model::needle::graph::guard::guard_route_scalar{}(run, ctx));
+}
+
 TEST_CASE("needle graph rejects an out-of-vocab step token") {
   const auto model_path = std::filesystem::path{EMEL_TEST_REPO_ROOT} /
                           "tests/models/route-w4-qat.cact";

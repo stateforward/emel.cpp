@@ -5,9 +5,14 @@
 namespace emel::kernel::cq::guard {
 
 inline bool a8_supported(const event::quantize_a8_request &request) noexcept {
-  return !request.input.empty() &&
-         request.quantized.size() >= request.input.size() &&
-         request.integer_values.size() >= request.input.size();
+  if (request.input.empty() ||
+      request.quantized.size() < request.input.size() ||
+      request.integer_values.size() < request.input.size())
+    return false;
+  for (const float value : request.input)
+    if (!std::isfinite(value))
+      return false;
+  return true;
 }
 
 struct guard_quantize_a8 {
@@ -180,6 +185,8 @@ struct guard_execute_prepared_avx2_batch4_q4 {
 struct guard_execute_prepared_avx2_rows_q4 {
   bool operator()(const event::execute_prepared_avx2_rows_q4 &ev,
                   const action::context &) const noexcept {
+#if (defined(__x86_64__) || defined(_M_X64)) && defined(__AVX2__) &&           \
+    defined(__FMA__)
     const auto &request = ev.request;
     return prepared_supported(request.weights, request.codebook.values) &&
            prepared_codebook_supported(request.codebook) &&
@@ -189,6 +196,10 @@ struct guard_execute_prepared_avx2_rows_q4 {
            request.activation.size() >= request.weights.in &&
            request.output.size() >= request.row_count &&
            request.workspace.size() >= request.weights.in_pad;
+#else
+    (void)ev;
+    return false;
+#endif
   }
 };
 
