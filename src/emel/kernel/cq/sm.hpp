@@ -1,5 +1,5 @@
 #pragma once
-// benchmark: kernel
+// benchmark: scaffold
 
 #include "emel/kernel/cq/actions.hpp"
 #include "emel/kernel/cq/guards.hpp"
