@@ -1,6 +1,6 @@
-// Needle graph decode/prefill single-core benchmark on the pinned
-// tests/models/route-w4-qat.cact fixture. The EMEL lane drives the native
-// graph machine ONLY through its public events (init/prefill/decode) via the
+// Needle graph serial/parallel4 decode and prefill benchmarks on the pinned
+// tests/models/route-w4-qat.cact fixture. Every measured route drives its own
+// graph machine ONLY through public events (init/prefill/decode) via the
 // maintained loader chain (cact loader probe/bind/parse -> needle binder ->
 // graph machine).
 //
@@ -35,8 +35,14 @@ namespace {
 namespace cact_loader = emel::cact::loader;
 namespace needle = emel::model::needle;
 
-constexpr char k_decode_case_name[] = "needle/graph/decode_steady_route_w4_qat";
-constexpr char k_prefill_case_name[] = "needle/graph/prefill_512_route_w4_qat";
+constexpr char k_serial_decode_case_name[] =
+    "needle/graph/decode_steady_route_w4_qat_serial";
+constexpr char k_parallel4_decode_case_name[] =
+    "needle/graph/decode_steady_route_w4_qat_parallel4";
+constexpr char k_serial_prefill_case_name[] =
+    "needle/graph/prefill_512_route_w4_qat_serial";
+constexpr char k_parallel4_prefill_case_name[] =
+    "needle/graph/prefill_512_route_w4_qat_parallel4";
 constexpr char k_swa_scalar_exp_128_case_name[] =
     "needle/swa/attend_gqa2_scalar_exp_span128";
 constexpr char k_swa_vector_exp_128_case_name[] =
@@ -58,7 +64,7 @@ constexpr char k_fwht_iters_env[] = "EMEL_BENCH_NEEDLE_FWHT_ITERS";
 constexpr char k_model_env[] = "EMEL_BENCH_NEEDLE_MODEL";
 constexpr char k_model_relative_path[] = "tests/models/route-w4-qat.cact";
 constexpr char k_model_id[] = "route_w4_qat_cact";
-constexpr char k_workload_id[] = "needle_graph_single_core_v1";
+constexpr char k_workload_id[] = "needle_graph_serial_parallel_same_binary_v1";
 constexpr char k_decode_iters_env[] = "EMEL_BENCH_NEEDLE_GRAPH_DECODE_ITERS";
 constexpr char k_prefill_iters_env[] = "EMEL_BENCH_NEEDLE_GRAPH_PREFILL_ITERS";
 constexpr char k_swa_iters_env[] = "EMEL_BENCH_NEEDLE_SWA_ITERS";
@@ -420,6 +426,110 @@ struct graph_fixture {
   }
 };
 
+template <class graph_type> struct benchmark_route_fixture {
+  graph_type graph;
+  std::vector<float> logits;
+  std::vector<int32_t> context_ids;
+  std::vector<int32_t> prompt_ids;
+  uint32_t decoded_steps = 0u;
+
+  explicit benchmark_route_fixture(const needle::contract &contract)
+      : graph(contract), logits(contract.geo.vocab_size),
+        context_ids(k_decode_context_tokens),
+        prompt_ids(k_prefill_case_tokens) {
+    for (size_t i = 0; i < context_ids.size(); ++i) {
+      context_ids[i] =
+          static_cast<int32_t>((1000003u * i + 7u) % contract.geo.vocab_size);
+    }
+    for (size_t i = 0; i < prompt_ids.size(); ++i) {
+      prompt_ids[i] =
+          static_cast<int32_t>((1000033u * i + 13u) % contract.geo.vocab_size);
+    }
+  }
+
+  void reset_decode_context() {
+    if (!graph.process_event(
+            needle::graph::event::init{.activation_quant = true})) {
+      fail_needle_setup("graph_init");
+    }
+    if (!graph.process_event(needle::graph::event::prefill{
+            std::span<const int32_t>{context_ids}, std::span<float>{logits}})) {
+      fail_needle_setup("graph_context_prefill");
+    }
+    decoded_steps = 0u;
+  }
+};
+
+template <class graph_type>
+void append_graph_route_cases(std::vector<emel::bench::result> &results,
+                              const emel::bench::config &cfg,
+                              const needle::contract &contract,
+                              const char *decode_name,
+                              const char *prefill_name,
+                              const char *backend_id,
+                              const uint32_t thread_count,
+                              const char *thread_contract,
+                              const char *route_note) {
+  {
+    benchmark_route_fixture<graph_type> fixture{contract};
+    emel::bench::config decode_cfg = cfg;
+    decode_cfg.iterations = read_env_u64_or(k_decode_iters_env, 64u);
+    decode_cfg.runs = cfg.runs;
+    decode_cfg.warmup_iterations = 8u;
+    decode_cfg.warmup_runs = 1u;
+
+    const uint32_t step_budget =
+        contract.geo.max_seq_len - k_decode_context_tokens - 2u;
+    fixture.reset_decode_context();
+    size_t token_cursor = 0u;
+    auto decode_fn = [&]() {
+      if (fixture.decoded_steps >= step_budget) {
+        fixture.reset_decode_context();
+      }
+      const int32_t token = fixture.prompt_ids[token_cursor];
+      token_cursor = (token_cursor + 1u) % fixture.prompt_ids.size();
+      if (!fixture.graph.process_event(needle::graph::event::decode{
+              token, std::span<float>{fixture.logits}})) {
+        fail_needle_setup("graph_decode_step");
+      }
+      fixture.decoded_steps += 1u;
+    };
+    auto row = with_needle_metadata(
+        emel::bench::measure_case(decode_name, decode_cfg, decode_fn), "emel",
+        backend_id, "cpp", 1u);
+    row.thread_count = thread_count;
+    row.thread_contract = thread_contract;
+    row.note += route_note;
+    results.push_back(std::move(row));
+  }
+
+  {
+    benchmark_route_fixture<graph_type> fixture{contract};
+    emel::bench::config prefill_cfg = cfg;
+    prefill_cfg.iterations = read_env_u64_or(k_prefill_iters_env, 1u);
+    prefill_cfg.runs = cfg.runs;
+    prefill_cfg.warmup_iterations = 1u;
+    prefill_cfg.warmup_runs = 1u;
+    auto prefill_fn = [&]() {
+      if (!fixture.graph.process_event(needle::graph::event::init{})) {
+        fail_needle_setup("graph_prefill_init");
+      }
+      if (!fixture.graph.process_event(needle::graph::event::prefill{
+              std::span<const int32_t>{fixture.prompt_ids},
+              std::span<float>{fixture.logits}})) {
+        fail_needle_setup("graph_prefill");
+      }
+    };
+    auto row = with_needle_metadata(
+        emel::bench::measure_case(prefill_name, prefill_cfg, prefill_fn),
+        "emel", backend_id, "cpp", k_prefill_case_tokens);
+    row.thread_count = thread_count;
+    row.thread_contract = thread_contract;
+    row.note += route_note;
+    results.push_back(std::move(row));
+  }
+}
+
 emel::bench::result with_needle_metadata(emel::bench::result out,
                                          const char *lane,
                                          const char *backend_id,
@@ -508,17 +618,27 @@ void append_emel_needle_graph_cases(std::vector<result> &results,
   }
 #endif
 
-  {
-    // Steady-state decode: one greedy-shaped decode step per op at 128-token
-    // context depth. The fixture re-arms (init + context prefill) whenever the
-    // position budget nears max_seq_len so arbitrary iteration counts stay
-    // inside the graph's step-validity guard.
+  append_graph_route_cases<needle::graph::serial_sm>(
+      results, cfg, fixture.contract, k_serial_decode_case_name,
+      k_serial_prefill_case_name, "emel_needle_graph_serial", 1u,
+      "single_thread",
+      " route=serial backend_id=emel_needle_graph_serial thread_count=1"
+      " thread_contract=single_thread");
+  append_graph_route_cases<needle::graph::parallel4_sm>(
+      results, cfg, fixture.contract, k_parallel4_decode_case_name,
+      k_parallel4_prefill_case_name, "emel_needle_graph_parallel4", 4u,
+      "bounded_fork_join_3_workers_plus_owner",
+      " route=parallel4 backend_id=emel_needle_graph_parallel4 thread_count=4"
+      " thread_contract=bounded_fork_join_3_workers_plus_owner");
+
+  if (instrument_graph() || instrument_cq()) {
+    // Optional diagnostics retain the historical parallel4 route and do not
+    // emit an additional benchmark row.
     config decode_cfg = cfg;
     decode_cfg.iterations = read_env_u64_or(k_decode_iters_env, 64u);
     decode_cfg.runs = cfg.runs;
     decode_cfg.warmup_iterations = 8u;
     decode_cfg.warmup_runs = 1u;
-
     const uint32_t step_budget =
         fixture.contract.geo.max_seq_len - k_decode_context_tokens - 2u;
     fixture.reset_decode_context();
@@ -538,28 +658,18 @@ void append_emel_needle_graph_cases(std::vector<result> &results,
         fail_needle_setup("graph_decode_step");
       }
       const auto decode_end = std::chrono::steady_clock::now();
-      if (instrument_cq() || instrument_graph()) {
-        fixture.decode_ns += static_cast<std::uint64_t>(
-            std::chrono::duration_cast<std::chrono::nanoseconds>(decode_end -
-                                                                 decode_begin)
-                .count());
-        if (instrument_graph())
-          fixture.process_event(
-              needle::graph::event::capture_timing{fixture.graph_timing});
-        else
-          fixture.process_event(
-              needle::graph::event::capture_cq_timing{fixture.cq_timing});
-      }
+      fixture.decode_ns += static_cast<std::uint64_t>(
+          std::chrono::duration_cast<std::chrono::nanoseconds>(decode_end -
+                                                               decode_begin)
+              .count());
+      if (instrument_graph())
+        fixture.process_event(
+            needle::graph::event::capture_timing{fixture.graph_timing});
+      else
+        fixture.process_event(
+            needle::graph::event::capture_cq_timing{fixture.cq_timing});
       fixture.decoded_steps += 1u;
     };
-    auto decode_result =
-        measure_case(k_decode_case_name, decode_cfg, decode_fn);
-    auto decode_row = with_needle_metadata(
-        std::move(decode_result), "emel", "emel_needle_graph_parallel4",
-        "cpp", 1u);
-    decode_row.thread_count = 4;
-    decode_row.thread_contract = "bounded_fork_join_3_workers_plus_owner";
-    results.push_back(std::move(decode_row));
     if (instrument_graph()) {
       const auto print_graph_components = [&](const char *route) {
         const auto &t = fixture.graph_timing;
@@ -608,8 +718,8 @@ void append_emel_needle_graph_cases(std::vector<result> &results,
             true, &benchmark_timestamp_now_ns});
         fixture.process_event(needle::graph::event::reset_timing{});
         token_cursor = 0u;
-        const auto route_result =
-            measure_case(k_decode_case_name, decode_cfg, decode_fn);
+        const auto route_result = measure_case(k_parallel4_decode_case_name,
+                                               decode_cfg, decode_fn);
         const double route_tokens_per_second =
             compute_tokens_per_second(1u, route_result.ns_per_op);
         const char *const route = vector_exp ? "vector_exp" : "scalar_exp";
@@ -650,41 +760,18 @@ void append_emel_needle_graph_cases(std::vector<result> &results,
           static_cast<unsigned long long>(fixture.decode_ns - cq_ns));
     }
   }
-
-  {
-    // Prefill: one 512-token prompt per op; init is part of the op so every
-    // iteration prefills from an empty cache (init cost is negligible next to
-    // 512 layer-stack steps).
-    config prefill_cfg = cfg;
-    prefill_cfg.iterations = read_env_u64_or(k_prefill_iters_env, 1u);
-    prefill_cfg.runs = cfg.runs;
-    prefill_cfg.warmup_iterations = 1u;
-    prefill_cfg.warmup_runs = 1u;
-
-    auto prefill_fn = [&]() {
-      if (!fixture.process_event(needle::graph::event::init{})) {
-        fail_needle_setup("graph_prefill_init");
-      }
-      if (!fixture.process_event(needle::graph::event::prefill{
-              std::span<const int32_t>{fixture.prompt_ids},
-              std::span<float>{fixture.logits}})) {
-        fail_needle_setup("graph_prefill");
-      }
-    };
-    auto prefill_row = with_needle_metadata(
-        measure_case(k_prefill_case_name, prefill_cfg, prefill_fn), "emel",
-        "emel_needle_graph_parallel4", "cpp", k_prefill_case_tokens);
-    prefill_row.thread_count = 4;
-    prefill_row.thread_contract = "bounded_fork_join_3_workers_plus_owner";
-    results.push_back(std::move(prefill_row));
-  }
 }
 
 void append_reference_needle_graph_cases(std::vector<result> &results,
                                          const config &) {
-  results.push_back(make_reference_row(k_decode_case_name, 1u,
+  results.push_back(make_reference_row(k_serial_decode_case_name, 1u,
                                        k_libneedle_decode_tokens_per_second));
-  results.push_back(make_reference_row(k_prefill_case_name,
+  results.push_back(make_reference_row(k_parallel4_decode_case_name, 1u,
+                                       k_libneedle_decode_tokens_per_second));
+  results.push_back(make_reference_row(k_serial_prefill_case_name,
+                                       k_prefill_case_tokens,
+                                       k_libneedle_prefill_tokens_per_second));
+  results.push_back(make_reference_row(k_parallel4_prefill_case_name,
                                        k_prefill_case_tokens,
                                        k_libneedle_prefill_tokens_per_second));
 }
