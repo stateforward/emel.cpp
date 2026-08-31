@@ -694,6 +694,43 @@ TEST_CASE("benchmark measurement clamps zero runs and iterations") {
   CHECK(measured.runs == 1u);
 }
 
+TEST_CASE("benchmark run setup executes outside timing for every run") {
+  emel::bench::config cfg = {};
+  cfg.iterations = 3u;
+  cfg.runs = 5u;
+  cfg.warmup_iterations = 2u;
+  cfg.warmup_runs = 1u;
+  std::uint32_t setup_calls = 0u;
+  std::uint32_t measured_calls = 0u;
+  std::uint32_t calls_since_setup = 0u;
+  bool fixed_run_extent = true;
+
+  const auto measured = emel::bench::measure_case_with_run_setup(
+      "bench/run_setup", cfg,
+      [&]() {
+        if (setup_calls > 0u) {
+          const std::uint32_t expected_calls =
+              setup_calls == 1u ? cfg.warmup_iterations : cfg.iterations;
+          fixed_run_extent =
+              fixed_run_extent && calls_since_setup == expected_calls;
+        }
+        ++setup_calls;
+        calls_since_setup = 0u;
+      },
+      [&]() {
+        ++measured_calls;
+        ++calls_since_setup;
+      });
+
+  CHECK(setup_calls == cfg.warmup_runs + cfg.runs);
+  CHECK(measured_calls ==
+        cfg.warmup_iterations * cfg.warmup_runs + cfg.iterations * cfg.runs);
+  CHECK(calls_since_setup == cfg.iterations);
+  CHECK(fixed_run_extent);
+  CHECK(measured.iterations == cfg.iterations);
+  CHECK(measured.runs == cfg.runs);
+}
+
 TEST_CASE("bench runner contract rejects malformed process payloads") {
   emel::bench::runner_request request = {};
   CHECK_FALSE(emel::bench::parse_runner_request(

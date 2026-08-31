@@ -140,6 +140,53 @@ inline double compute_tokens_per_second(const std::uint64_t output_tokens,
   return (static_cast<double>(output_tokens) * 1000000000.0) / ns_per_op;
 }
 
+template <class setup_type, class fn_type>
+result measure_case_with_run_setup(const char *name, const config &cfg,
+                                   setup_type &&setup, fn_type &&fn) {
+  const auto runs = std::max<std::size_t>(cfg.runs, 1u);
+  const auto iterations = std::max<std::uint64_t>(cfg.iterations, 1u);
+  std::vector<double> samples;
+  samples.reserve(runs);
+
+  for (std::size_t run = 0; run < cfg.warmup_runs; ++run) {
+    setup();
+    for (std::uint64_t i = 0; i < cfg.warmup_iterations; ++i) {
+      fn();
+    }
+  }
+
+  for (std::size_t run = 0; run < runs; ++run) {
+    setup();
+    const auto start = std::chrono::steady_clock::now();
+    for (std::uint64_t i = 0; i < iterations; ++i) {
+      fn();
+    }
+    const auto end = std::chrono::steady_clock::now();
+    const auto duration_ns =
+        std::chrono::duration_cast<std::chrono::nanoseconds>(end - start)
+            .count();
+    samples.push_back(static_cast<double>(duration_ns) /
+                      static_cast<double>(iterations));
+  }
+
+  std::sort(samples.begin(), samples.end());
+  const double reported_ns_per_op = select_reported_ns_per_op(samples);
+  double sum = 0.0;
+  for (const double sample : samples) {
+    sum += sample;
+  }
+
+  result out;
+  out.name = name;
+  out.ns_per_op = reported_ns_per_op;
+  out.ns_min_per_op = samples.front();
+  out.ns_mean_per_op = sum / static_cast<double>(samples.size());
+  out.ns_max_per_op = samples.back();
+  out.iterations = iterations;
+  out.runs = runs;
+  return out;
+}
+
 template <class fn_type>
 result measure_case(const char *name, const config &cfg, fn_type &&fn) {
   const auto runs = std::max<std::size_t>(cfg.runs, 1u);

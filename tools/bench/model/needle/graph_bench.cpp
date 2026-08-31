@@ -480,8 +480,11 @@ void append_graph_route_cases(std::vector<emel::bench::result> &results,
 
     const uint32_t step_budget =
         contract.geo.max_seq_len - k_decode_context_tokens - 2u;
-    fixture.reset_decode_context();
     size_t token_cursor = 0u;
+    auto reset_decode_run = [&]() {
+      fixture.reset_decode_context();
+      token_cursor = 0u;
+    };
     auto decode_fn = [&]() {
       if (fixture.decoded_steps >= step_budget) {
         fixture.reset_decode_context();
@@ -495,8 +498,9 @@ void append_graph_route_cases(std::vector<emel::bench::result> &results,
       fixture.decoded_steps += 1u;
     };
     auto row = with_needle_metadata(
-        emel::bench::measure_case(decode_name, decode_cfg, decode_fn), "emel",
-        backend_id, "cpp", 1u);
+        emel::bench::measure_case_with_run_setup(
+            decode_name, decode_cfg, reset_decode_run, decode_fn),
+        "emel", backend_id, "cpp", 1u);
     row.thread_count = thread_count;
     row.thread_contract = thread_contract;
     row.note += route_note;
