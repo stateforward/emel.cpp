@@ -177,6 +177,41 @@ TEST_CASE("CQ4 prepared route rejects a zero group without evaluating counts") {
   CHECK_FALSE(result.accepted);
 }
 
+TEST_CASE("CQ4 prepared route rejects non-canonical padded geometry") {
+  constexpr uint32_t in = 128u;
+  constexpr uint32_t in_pad = 384u;
+  constexpr uint32_t out = 64u;
+  constexpr uint32_t group = 128u;
+  std::vector<uint8_t> indices(static_cast<size_t>(out) * in_pad);
+  std::vector<uint8_t> indices_by_input32(indices.size());
+  std::vector<float> norms(static_cast<size_t>(out) * in_pad / group, 1.0f);
+  std::vector<float> norms_by_group32(norms.size(), 1.0f);
+  std::array<float, 28u> codebook_values{};
+  emel::kernel::cq::event::prepared_codebook_q4 prepared_codebook{};
+  prepared_codebook.values = codebook_values;
+  emel::kernel::cq::event::prepared_q4_view prepared{
+      .source = reinterpret_cast<const uint8_t *>(1u),
+      .out = out,
+      .in = in,
+      .group = group,
+      .in_pad = in_pad,
+      .indices = indices,
+      .indices_by_input32 = indices_by_input32,
+      .norms = norms,
+      .norms_by_group32 = norms_by_group32,
+  };
+  std::array<float, in> activation{};
+  std::array<float, out> output{};
+  std::array<float, in_pad> workspace{};
+  const emel::kernel::cq::event::prepared_gemv_request request{
+      prepared, prepared_codebook, activation, output, workspace};
+  emel::kernel::cq::event::dispatch_result result{};
+  emel::kernel::cq::sm sm;
+  CHECK_FALSE(sm.process_event(
+      emel::kernel::cq::event::execute_prepared_avx2_q4{request, result}));
+  CHECK_FALSE(result.accepted);
+}
+
 TEST_CASE("CQ A8 fake quant matches JAX ties zero and signed boundary") {
   REQUIRE(std::fesetround(FE_TONEAREST) == 0);
   emel::kernel::cq::sm sm;
@@ -991,13 +1026,115 @@ TEST_CASE("CQ4 prepared block32 input-major route preserves exact output") {
                                       canonical_block32);
   std::array<float, out> block32{};
   std::array<float, out> block32_repeat{};
-  emel::kernel::cq::action::execute_prepared_avx2_dot_block32(
-      prepared, prepared_codebook, activation, block32);
-  emel::kernel::cq::action::execute_prepared_avx2_dot_block32(
-      prepared, prepared_codebook, activation, block32_repeat);
+  emel::kernel::cq::action::execute_prepared_avx2_dot_block32_loaded(
+      prepared, prepared_codebook, activation, block32,
+      _mm256_loadu_si256(reinterpret_cast<const __m256i *>(
+          prepared_codebook.byte_planes[0].data())),
+      _mm256_loadu_si256(reinterpret_cast<const __m256i *>(
+          prepared_codebook.byte_planes[1].data())),
+      _mm256_loadu_si256(reinterpret_cast<const __m256i *>(
+          prepared_codebook.byte_planes[2].data())),
+      _mm256_loadu_si256(reinterpret_cast<const __m256i *>(
+          prepared_codebook.byte_planes[3].data())));
+  emel::kernel::cq::action::execute_prepared_avx2_dot_block32_loaded(
+      prepared, prepared_codebook, activation, block32_repeat,
+      _mm256_loadu_si256(reinterpret_cast<const __m256i *>(
+          prepared_codebook.byte_planes[0].data())),
+      _mm256_loadu_si256(reinterpret_cast<const __m256i *>(
+          prepared_codebook.byte_planes[1].data())),
+      _mm256_loadu_si256(reinterpret_cast<const __m256i *>(
+          prepared_codebook.byte_planes[2].data())),
+      _mm256_loadu_si256(reinterpret_cast<const __m256i *>(
+          prepared_codebook.byte_planes[3].data())));
   for (uint32_t row = 0u; row < out; ++row) {
     CHECK(block32[row] == block32_repeat[row]);
     CHECK(block32[row] == canonical_block32[row]);
+  }
+#endif
+}
+
+TEST_CASE("CQ4 prepared block64 matches block32 bitwise including tails and scale") {
+#if defined(__AVX2__) && defined(__FMA__)
+  constexpr uint32_t group = 128u;
+  constexpr uint32_t in = 512u;
+  for (const uint32_t out : {64u, 65u, 96u, 128u, 160u, 256u, 512u,
+                             8192u}) {
+    uint32_t random = 0x9e3779b9u + out;
+    std::array<float, 28u> codebook{};
+    for (uint32_t i = 0u; i < 16u; ++i) {
+      random = random * 1664525u + 1013904223u;
+      const uint32_t bits = 0x3d000000u | (random & 0x007fffffu);
+      std::memcpy(&codebook[12u + i], &bits, sizeof(float));
+      if ((i & 1u) != 0u)
+        codebook[12u + i] = -codebook[12u + i];
+    }
+    std::vector<uint32_t> selectors(static_cast<size_t>(out) * in);
+    for (uint32_t &selector : selectors) {
+      random = random * 1664525u + 1013904223u;
+      selector = random >> 28u;
+    }
+    std::vector<uint16_t> norm_bits(static_cast<size_t>(out) * in / group);
+    for (uint16_t &bits : norm_bits) {
+      random = random * 1664525u + 1013904223u;
+      bits = static_cast<uint16_t>(0x3000u + ((random >> 24u) & 15u) * 0x80u);
+    }
+    const auto b = blob<4u>(selectors, out, in, group, norm_bits);
+    const auto v = view(b, out, in, group, 4u);
+    std::vector<uint8_t> indices(static_cast<size_t>(out) * in);
+    std::vector<uint8_t> indices_by_input32(
+        static_cast<size_t>(out / 32u * 32u) * in);
+    std::vector<float> norms(static_cast<size_t>(out) * in / group);
+    std::vector<float> norms_by_group32(
+        static_cast<size_t>(out / 32u * 32u) * in / group);
+    emel::kernel::cq::event::prepared_q4_view prepared{};
+    emel::kernel::cq::action::prepare_q4(
+        {v, indices, indices_by_input32, norms, norms_by_group32, prepared});
+    emel::kernel::cq::event::prepared_codebook_q4 prepared_codebook{};
+    emel::kernel::cq::action::prepare_codebook_q4(
+        {codebook, prepared_codebook});
+    std::array<float, in> activation{};
+    for (float &value : activation) {
+      random = random * 1664525u + 1013904223u;
+      value = (static_cast<float>(static_cast<int32_t>(random >> 8u)) /
+               8388608.0f) -
+              1.0f;
+    }
+    std::vector<float> block32(out);
+    std::vector<float> block64(out);
+    __m256i codebook_byte0;
+    __m256i codebook_byte1;
+    __m256i codebook_byte2;
+    __m256i codebook_byte3;
+    emel::kernel::cq::action::q4_codebook_byte_tables(
+        prepared_codebook, codebook_byte0, codebook_byte1, codebook_byte2,
+        codebook_byte3);
+    emel::kernel::cq::action::execute_prepared_avx2_dot_block32_loaded(
+        prepared, prepared_codebook, activation, block32, codebook_byte0,
+        codebook_byte1, codebook_byte2, codebook_byte3);
+    emel::kernel::cq::action::execute_prepared_avx2_dot_block64(
+        prepared, prepared_codebook, activation, block64);
+    for (uint32_t row = 0u; row < out; ++row)
+      CHECK(block64[row] == block32[row]);
+
+    constexpr float output_scale = 0.03125f;
+    std::array<float, in> transformed{};
+    emel::kernel::cq::detail::compute_fwht128_groups_avx2(
+        activation, in, transformed);
+    std::vector<float> transformed_block32(out);
+    emel::kernel::cq::action::execute_prepared_avx2_dot_block32_loaded(
+        prepared, prepared_codebook, transformed, transformed_block32,
+        codebook_byte0, codebook_byte1, codebook_byte2, codebook_byte3);
+    std::array<float, in> workspace{};
+    std::vector<float> scaled(out);
+    const emel::kernel::cq::event::prepared_gemv_request request{
+        prepared, prepared_codebook, activation, scaled, workspace,
+        output_scale};
+    emel::kernel::cq::event::dispatch_result result{};
+    emel::kernel::cq::sm sm;
+    REQUIRE(sm.process_event(
+        emel::kernel::cq::event::execute_prepared_avx2_q4{request, result}));
+    for (uint32_t row = 0u; row < out; ++row)
+      CHECK(scaled[row] == transformed_block32[row] * output_scale);
   }
 #endif
 }

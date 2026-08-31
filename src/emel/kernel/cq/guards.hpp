@@ -1,6 +1,7 @@
 #pragma once
 
 #include "emel/kernel/cq/actions.hpp"
+#include "emel/kernel/x86_64/context.hpp"
 
 namespace emel::kernel::cq::guard {
 
@@ -153,7 +154,12 @@ struct guard_execute_prepared_avx2_q4 {
 #if (defined(__x86_64__) || defined(_M_X64)) && defined(__AVX2__) &&           \
     defined(__FMA__)
     const auto &request = ev.request;
-    return prepared_supported(request.weights, request.codebook.values) &&
+    return emel::kernel::x86_64::detail::detect_avx2() &&
+           emel::kernel::x86_64::detail::detect_fma() &&
+           request.weights.in_pad ==
+               (static_cast<uint64_t>(request.weights.in) + 127u) / 128u *
+                   128u &&
+           prepared_supported(request.weights, request.codebook.values) &&
            prepared_codebook_supported(request.codebook) &&
            request.weights.group == 128u &&
            request.activation.size() >= request.weights.in &&
@@ -172,8 +178,15 @@ struct guard_execute_prepared_avx2_batch4_q4 {
 #if (defined(__x86_64__) || defined(_M_X64)) && defined(__AVX2__) &&           \
     defined(__FMA__)
     const auto &request = ev.request;
+    if (!emel::kernel::x86_64::detail::detect_avx2() ||
+        !emel::kernel::x86_64::detail::detect_fma())
+      return false;
     const auto *first = request.targets[0].weights;
-    if (first == nullptr || first->group != 128u ||
+    if (first == nullptr || first->group != 128u)
+      return false;
+    const uint64_t canonical_in_pad =
+        (static_cast<uint64_t>(first->in) + 127u) / 128u * 128u;
+    if (first->in_pad != canonical_in_pad ||
         request.activation.size() < first->in ||
         request.workspace.size() < first->in_pad)
       return false;
@@ -200,7 +213,12 @@ struct guard_execute_prepared_avx2_rows_q4 {
 #if (defined(__x86_64__) || defined(_M_X64)) && defined(__AVX2__) &&           \
     defined(__FMA__)
     const auto &request = ev.request;
-    return prepared_supported(request.weights, request.codebook.values) &&
+    return emel::kernel::x86_64::detail::detect_avx2() &&
+           emel::kernel::x86_64::detail::detect_fma() &&
+           request.weights.in_pad ==
+               (static_cast<uint64_t>(request.weights.in) + 127u) / 128u *
+                   128u &&
+           prepared_supported(request.weights, request.codebook.values) &&
            prepared_codebook_supported(request.codebook) &&
            request.weights.group == 128u && request.row_count > 0u &&
            static_cast<uint64_t>(request.row_begin) + request.row_count <=

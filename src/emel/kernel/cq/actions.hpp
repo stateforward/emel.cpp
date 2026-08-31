@@ -223,7 +223,36 @@ lookup_codebook32_raw(const __m256i index_bytes, const __m256i byte0,
       .values3 = _mm256_castsi256_ps(
           _mm256_unpackhi_epi16(high_words01, high_words23))};
 }
-
+EMEL_KERNEL_CQ_AVX2_TARGET inline q4_lookup32_result
+lookup_codebook32_raw_reload(
+    const __m256i index_bytes,
+    const event::prepared_codebook_q4 &codebook) noexcept {
+  const __m256i bytes0 = _mm256_shuffle_epi8(
+      _mm256_loadu_si256(reinterpret_cast<const __m256i *>(
+          codebook.byte_planes[0].data())), index_bytes);
+  const __m256i bytes1 = _mm256_shuffle_epi8(
+      _mm256_loadu_si256(reinterpret_cast<const __m256i *>(
+          codebook.byte_planes[1].data())), index_bytes);
+  const __m256i bytes2 = _mm256_shuffle_epi8(
+      _mm256_loadu_si256(reinterpret_cast<const __m256i *>(
+          codebook.byte_planes[2].data())), index_bytes);
+  const __m256i bytes3 = _mm256_shuffle_epi8(
+      _mm256_loadu_si256(reinterpret_cast<const __m256i *>(
+          codebook.byte_planes[3].data())), index_bytes);
+  const __m256i low_words01 = _mm256_unpacklo_epi8(bytes0, bytes1);
+  const __m256i low_words23 = _mm256_unpacklo_epi8(bytes2, bytes3);
+  const __m256i high_words01 = _mm256_unpackhi_epi8(bytes0, bytes1);
+  const __m256i high_words23 = _mm256_unpackhi_epi8(bytes2, bytes3);
+  return q4_lookup32_result{
+      .values0 = _mm256_castsi256_ps(
+          _mm256_unpacklo_epi16(low_words01, low_words23)),
+      .values1 = _mm256_castsi256_ps(
+          _mm256_unpackhi_epi16(low_words01, low_words23)),
+      .values2 = _mm256_castsi256_ps(
+          _mm256_unpacklo_epi16(high_words01, high_words23)),
+      .values3 = _mm256_castsi256_ps(
+          _mm256_unpackhi_epi16(high_words01, high_words23))};
+}
 EMEL_KERNEL_CQ_AVX2_TARGET inline q4_lookup32_result
 lookup_codebook32_pshufb(const __m256i index_bytes, const __m256i byte0,
                          const __m256i byte1, const __m256i byte2,
@@ -455,73 +484,85 @@ EMEL_KERNEL_CQ_AVX2_TARGET inline void execute_prepared_avx2_dot(
 #endif
 }
 
-template <uint32_t Rows>
-EMEL_KERNEL_CQ_AVX2_TARGET inline void execute_prepared_avx2_dot_row_block(
-    const event::prepared_q4_view &view,
-    const event::prepared_codebook_q4 &codebook,
-    const std::span<const float> activation_fwht, const uint32_t row_begin,
-    const std::span<float> output) noexcept {
+EMEL_KERNEL_CQ_AVX2_TARGET inline void store_raw_block32_canonical(
+    float *output, const __m256 value0, const __m256 value1,
+    const __m256 value2, const __m256 value3) noexcept {
 #if defined(__x86_64__) || defined(_M_X64)
-  static_assert(Rows == 4u || Rows == 8u);
-  __m256i codebook_byte0;
-  __m256i codebook_byte1;
-  __m256i codebook_byte2;
-  __m256i codebook_byte3;
-  q4_codebook_byte_tables(codebook, codebook_byte0, codebook_byte1,
-                          codebook_byte2, codebook_byte3);
+  _mm_storeu_ps(output, _mm256_castps256_ps128(value0));
+  _mm_storeu_ps(output + 4u, _mm256_castps256_ps128(value1));
+  _mm_storeu_ps(output + 8u, _mm256_castps256_ps128(value2));
+  _mm_storeu_ps(output + 12u, _mm256_castps256_ps128(value3));
+  _mm_storeu_ps(output + 16u, _mm256_extractf128_ps(value0, 1));
+  _mm_storeu_ps(output + 20u, _mm256_extractf128_ps(value1, 1));
+  _mm_storeu_ps(output + 24u, _mm256_extractf128_ps(value2, 1));
+  _mm_storeu_ps(output + 28u, _mm256_extractf128_ps(value3, 1));
+#else
+  (void)output;
+  (void)value0;
+  (void)value1;
+  (void)value2;
+  (void)value3;
+#endif
+}
+
+EMEL_KERNEL_CQ_AVX2_TARGET inline void
+execute_prepared_avx2_dot_one_block32_loaded(
+    const event::prepared_q4_view &view,
+    const std::span<const float> activation_fwht, const uint32_t row,
+    const std::span<float> output, const __m256i codebook_byte0,
+    const __m256i codebook_byte1, const __m256i codebook_byte2,
+    const __m256i codebook_byte3) noexcept {
+#if defined(__x86_64__) || defined(_M_X64)
   const uint32_t groups_per_row = view.in_pad / view.group;
-  const uint8_t *row_indices[Rows];
-  const float *row_norms[Rows];
-  __m256 accum[Rows];
-  float scalar_tail[Rows]{};
-  for (uint32_t row = 0u; row < Rows; ++row) {
-    const uint32_t source_row = row_begin + row;
-    row_indices[row] =
-        view.indices.data() + static_cast<size_t>(source_row) * view.in_pad;
-    row_norms[row] =
-        view.norms.data() + static_cast<size_t>(source_row) * groups_per_row;
-    accum[row] = _mm256_setzero_ps();
-  }
+  const uint8_t *selectors =
+      view.indices_by_input32.data() + static_cast<size_t>(row) * view.in_pad;
+  const float *group_norms = view.norms_by_group32.data() +
+                             static_cast<size_t>(row) * groups_per_row;
+  __m256 row_total0 = _mm256_setzero_ps();
+  __m256 row_total1 = _mm256_setzero_ps();
+  __m256 row_total2 = _mm256_setzero_ps();
+  __m256 row_total3 = _mm256_setzero_ps();
   for (uint32_t begin = 0u, group_index = 0u; begin < view.in_pad;
        begin += view.group, ++group_index) {
-    __m256 norm[Rows];
-    for (uint32_t row = 0u; row < Rows; ++row)
-      norm[row] = _mm256_set1_ps(row_norms[row][group_index]);
-    uint32_t i = 0u;
-    for (; i + 8u <= view.group; i += 8u) {
-      const __m256 activation =
-          _mm256_loadu_ps(activation_fwht.data() + begin + i);
-      for (uint32_t row = 0u; row < Rows; ++row) {
-        const __m128i index_bytes = _mm_loadl_epi64(
-            reinterpret_cast<const __m128i *>(row_indices[row] + begin + i));
-        const __m256 values = lookup_codebook8_pshufb(
-            index_bytes, _mm256_castsi256_si128(codebook_byte0),
-            _mm256_castsi256_si128(codebook_byte1),
-            _mm256_castsi256_si128(codebook_byte2),
-            _mm256_castsi256_si128(codebook_byte3));
-        accum[row] = _mm256_fmadd_ps(_mm256_mul_ps(values, norm[row]),
-                                     activation, accum[row]);
-      }
+    __m256 group_accum0 = _mm256_setzero_ps();
+    __m256 group_accum1 = _mm256_setzero_ps();
+    __m256 group_accum2 = _mm256_setzero_ps();
+    __m256 group_accum3 = _mm256_setzero_ps();
+    for (uint32_t i = 0u; i < view.group; ++i) {
+      const q4_lookup32_result values = lookup_codebook32_raw(
+          load_selector32(selectors + static_cast<size_t>(begin + i) * 32u),
+          codebook_byte0, codebook_byte1, codebook_byte2, codebook_byte3);
+      const __m256 activation = _mm256_set1_ps(activation_fwht[begin + i]);
+      group_accum0 =
+          _mm256_fmadd_ps(values.values0, activation, group_accum0);
+      group_accum1 =
+          _mm256_fmadd_ps(values.values1, activation, group_accum1);
+      group_accum2 =
+          _mm256_fmadd_ps(values.values2, activation, group_accum2);
+      group_accum3 =
+          _mm256_fmadd_ps(values.values3, activation, group_accum3);
     }
-    for (; i < view.group; ++i)
-      for (uint32_t row = 0u; row < Rows; ++row)
-        scalar_tail[row] +=
-            detail::code_value<4u>(row_indices[row][begin + i], view.group,
-                                   codebook.values) *
-            row_norms[row][group_index] * activation_fwht[begin + i];
+    const float *norms = group_norms + static_cast<size_t>(group_index) * 32u;
+    row_total0 = _mm256_fmadd_ps(group_accum0, _mm256_loadu_ps(norms),
+                                 row_total0);
+    row_total1 = _mm256_fmadd_ps(group_accum1, _mm256_loadu_ps(norms + 8u),
+                                 row_total1);
+    row_total2 = _mm256_fmadd_ps(group_accum2, _mm256_loadu_ps(norms + 16u),
+                                 row_total2);
+    row_total3 = _mm256_fmadd_ps(group_accum3, _mm256_loadu_ps(norms + 24u),
+                                 row_total3);
   }
-  for (uint32_t row = 0u; row < Rows; ++row) {
-    alignas(32) float lanes[8];
-    _mm256_store_ps(lanes, accum[row]);
-    output[row] = lanes[0] + lanes[1] + lanes[2] + lanes[3] + lanes[4] +
-                  lanes[5] + lanes[6] + lanes[7] + scalar_tail[row];
-  }
+  store_raw_block32_canonical(output.data() + row, row_total0, row_total1,
+                              row_total2, row_total3);
 #else
   (void)view;
-  (void)codebook;
   (void)activation_fwht;
-  (void)row_begin;
+  (void)row;
   (void)output;
+  (void)codebook_byte0;
+  (void)codebook_byte1;
+  (void)codebook_byte2;
+  (void)codebook_byte3;
 #endif
 }
 
@@ -535,63 +576,10 @@ execute_prepared_avx2_dot_block32_loaded(
     const __m256i codebook_byte3) noexcept {
 #if defined(__x86_64__) || defined(_M_X64)
   const uint32_t blocked_rows = view.out / 32u * 32u;
-  const uint32_t groups_per_row = view.in_pad / view.group;
-  for (uint32_t row = 0u; row < blocked_rows; row += 32u) {
-    const uint8_t *selectors =
-        view.indices_by_input32.data() + static_cast<size_t>(row) * view.in_pad;
-    const float *group_norms = view.norms_by_group32.data() +
-                               static_cast<size_t>(row) * groups_per_row;
-    __m256 row_total0 = _mm256_setzero_ps();
-    __m256 row_total1 = _mm256_setzero_ps();
-    __m256 row_total2 = _mm256_setzero_ps();
-    __m256 row_total3 = _mm256_setzero_ps();
-    for (uint32_t begin = 0u, group_index = 0u; begin < view.in_pad;
-         begin += view.group, ++group_index) {
-      __m256 group_accum0 = _mm256_setzero_ps();
-      __m256 group_accum1 = _mm256_setzero_ps();
-      __m256 group_accum2 = _mm256_setzero_ps();
-      __m256 group_accum3 = _mm256_setzero_ps();
-      for (uint32_t i = 0u; i < view.group; ++i) {
-        const q4_lookup32_result values = lookup_codebook32_raw(
-            load_selector32(selectors + static_cast<size_t>(begin + i) * 32u),
-            codebook_byte0, codebook_byte1, codebook_byte2, codebook_byte3);
-        const __m256 activation =
-            _mm256_set1_ps(activation_fwht[begin + i]);
-        group_accum0 =
-            _mm256_fmadd_ps(values.values0, activation, group_accum0);
-        group_accum1 =
-            _mm256_fmadd_ps(values.values1, activation, group_accum1);
-        group_accum2 =
-            _mm256_fmadd_ps(values.values2, activation, group_accum2);
-        group_accum3 =
-            _mm256_fmadd_ps(values.values3, activation, group_accum3);
-      }
-      const float *norms = group_norms + static_cast<size_t>(group_index) * 32u;
-      row_total0 = _mm256_fmadd_ps(group_accum0, _mm256_loadu_ps(norms),
-                                   row_total0);
-      row_total1 = _mm256_fmadd_ps(group_accum1, _mm256_loadu_ps(norms + 8u),
-                                   row_total1);
-      row_total2 = _mm256_fmadd_ps(group_accum2, _mm256_loadu_ps(norms + 16u),
-                                   row_total2);
-      row_total3 = _mm256_fmadd_ps(group_accum3, _mm256_loadu_ps(norms + 24u),
-                                   row_total3);
-    }
-    _mm_storeu_ps(output.data() + row, _mm256_castps256_ps128(row_total0));
-    _mm_storeu_ps(output.data() + row + 4u,
-                  _mm256_castps256_ps128(row_total1));
-    _mm_storeu_ps(output.data() + row + 8u,
-                  _mm256_castps256_ps128(row_total2));
-    _mm_storeu_ps(output.data() + row + 12u,
-                  _mm256_castps256_ps128(row_total3));
-    _mm_storeu_ps(output.data() + row + 16u,
-                  _mm256_extractf128_ps(row_total0, 1));
-    _mm_storeu_ps(output.data() + row + 20u,
-                  _mm256_extractf128_ps(row_total1, 1));
-    _mm_storeu_ps(output.data() + row + 24u,
-                  _mm256_extractf128_ps(row_total2, 1));
-    _mm_storeu_ps(output.data() + row + 28u,
-                  _mm256_extractf128_ps(row_total3, 1));
-  }
+  for (uint32_t row = 0u; row < blocked_rows; row += 32u)
+    execute_prepared_avx2_dot_one_block32_loaded(
+        view, activation_fwht, row, output, codebook_byte0, codebook_byte1,
+        codebook_byte2, codebook_byte3);
   if (blocked_rows < view.out)
     execute_prepared_avx2_dot_loaded(
         view, codebook, activation_fwht, blocked_rows,
@@ -609,7 +597,132 @@ execute_prepared_avx2_dot_block32_loaded(
 #endif
 }
 
-EMEL_KERNEL_CQ_AVX2_TARGET inline void execute_prepared_avx2_dot_block32(
+EMEL_KERNEL_CQ_AVX2_TARGET inline void
+execute_prepared_avx2_dot_block64_loaded(
+    const event::prepared_q4_view &view,
+    const event::prepared_codebook_q4 &codebook,
+    const std::span<const float> activation_fwht,
+    const std::span<float> output, const __m256i codebook_byte0,
+    const __m256i codebook_byte1, const __m256i codebook_byte2,
+    const __m256i codebook_byte3) noexcept {
+#if defined(__x86_64__) || defined(_M_X64)
+  const uint32_t blocked_rows64 = view.out / 64u * 64u;
+  const uint32_t groups_per_row = view.in_pad / view.group;
+  for (uint32_t row = 0u; row < blocked_rows64; row += 64u) {
+    const uint8_t *selectors_a =
+        view.indices_by_input32.data() + static_cast<size_t>(row) * view.in_pad;
+    const uint8_t *selectors_b =
+        selectors_a + static_cast<size_t>(32u) * view.in_pad;
+    const float *group_norms_a = view.norms_by_group32.data() +
+                                 static_cast<size_t>(row) * groups_per_row;
+    const float *group_norms_b =
+        group_norms_a + static_cast<size_t>(32u) * groups_per_row;
+    alignas(32) float row_totals[64u]{};
+    for (uint32_t begin = 0u, group_index = 0u; begin < view.in_pad;
+         begin += view.group, ++group_index) {
+      __m256 group_accum_a0 = _mm256_setzero_ps();
+      __m256 group_accum_a1 = _mm256_setzero_ps();
+      __m256 group_accum_a2 = _mm256_setzero_ps();
+      __m256 group_accum_a3 = _mm256_setzero_ps();
+      __m256 group_accum_b0 = _mm256_setzero_ps();
+      __m256 group_accum_b1 = _mm256_setzero_ps();
+      __m256 group_accum_b2 = _mm256_setzero_ps();
+      __m256 group_accum_b3 = _mm256_setzero_ps();
+      for (uint32_t i = 0u; i < view.group; ++i) {
+        const size_t selector_offset = static_cast<size_t>(begin + i) * 32u;
+        const __m256 activation = _mm256_set1_ps(activation_fwht[begin + i]);
+        const q4_lookup32_result values_a = lookup_codebook32_raw_reload(
+            load_selector32(selectors_a + selector_offset), codebook);
+        group_accum_a0 =
+            _mm256_fmadd_ps(values_a.values0, activation, group_accum_a0);
+        group_accum_a1 =
+            _mm256_fmadd_ps(values_a.values1, activation, group_accum_a1);
+        group_accum_a2 =
+            _mm256_fmadd_ps(values_a.values2, activation, group_accum_a2);
+        group_accum_a3 =
+            _mm256_fmadd_ps(values_a.values3, activation, group_accum_a3);
+        const q4_lookup32_result values_b = lookup_codebook32_raw_reload(
+            load_selector32(selectors_b + selector_offset), codebook);
+        group_accum_b0 =
+            _mm256_fmadd_ps(values_b.values0, activation, group_accum_b0);
+        group_accum_b1 =
+            _mm256_fmadd_ps(values_b.values1, activation, group_accum_b1);
+        group_accum_b2 =
+            _mm256_fmadd_ps(values_b.values2, activation, group_accum_b2);
+        group_accum_b3 =
+            _mm256_fmadd_ps(values_b.values3, activation, group_accum_b3);
+      }
+      const float *norms_a =
+          group_norms_a + static_cast<size_t>(group_index) * 32u;
+      const float *norms_b =
+          group_norms_b + static_cast<size_t>(group_index) * 32u;
+      __m256 total_a0 = _mm256_load_ps(row_totals);
+      __m256 total_a1 = _mm256_load_ps(row_totals + 8u);
+      __m256 total_a2 = _mm256_load_ps(row_totals + 16u);
+      __m256 total_a3 = _mm256_load_ps(row_totals + 24u);
+      __m256 total_b0 = _mm256_load_ps(row_totals + 32u);
+      __m256 total_b1 = _mm256_load_ps(row_totals + 40u);
+      __m256 total_b2 = _mm256_load_ps(row_totals + 48u);
+      __m256 total_b3 = _mm256_load_ps(row_totals + 56u);
+      total_a0 = _mm256_fmadd_ps(group_accum_a0, _mm256_loadu_ps(norms_a),
+                                 total_a0);
+      total_a1 = _mm256_fmadd_ps(group_accum_a1, _mm256_loadu_ps(norms_a + 8u),
+                                 total_a1);
+      total_a2 = _mm256_fmadd_ps(group_accum_a2, _mm256_loadu_ps(norms_a + 16u),
+                                 total_a2);
+      total_a3 = _mm256_fmadd_ps(group_accum_a3, _mm256_loadu_ps(norms_a + 24u),
+                                 total_a3);
+      total_b0 = _mm256_fmadd_ps(group_accum_b0, _mm256_loadu_ps(norms_b),
+                                 total_b0);
+      total_b1 = _mm256_fmadd_ps(group_accum_b1, _mm256_loadu_ps(norms_b + 8u),
+                                 total_b1);
+      total_b2 = _mm256_fmadd_ps(group_accum_b2, _mm256_loadu_ps(norms_b + 16u),
+                                 total_b2);
+      total_b3 = _mm256_fmadd_ps(group_accum_b3, _mm256_loadu_ps(norms_b + 24u),
+                                 total_b3);
+      _mm256_store_ps(row_totals, total_a0);
+      _mm256_store_ps(row_totals + 8u, total_a1);
+      _mm256_store_ps(row_totals + 16u, total_a2);
+      _mm256_store_ps(row_totals + 24u, total_a3);
+      _mm256_store_ps(row_totals + 32u, total_b0);
+      _mm256_store_ps(row_totals + 40u, total_b1);
+      _mm256_store_ps(row_totals + 48u, total_b2);
+      _mm256_store_ps(row_totals + 56u, total_b3);
+    }
+    store_raw_block32_canonical(output.data() + row,
+                                _mm256_load_ps(row_totals),
+                                _mm256_load_ps(row_totals + 8u),
+                                _mm256_load_ps(row_totals + 16u),
+                                _mm256_load_ps(row_totals + 24u));
+    store_raw_block32_canonical(output.data() + row + 32u,
+                                _mm256_load_ps(row_totals + 32u),
+                                _mm256_load_ps(row_totals + 40u),
+                                _mm256_load_ps(row_totals + 48u),
+                                _mm256_load_ps(row_totals + 56u));
+  }
+  const uint32_t blocked_rows32 = view.out / 32u * 32u;
+  if (blocked_rows64 < blocked_rows32)
+    execute_prepared_avx2_dot_one_block32_loaded(
+        view, activation_fwht, blocked_rows64, output, codebook_byte0,
+        codebook_byte1, codebook_byte2, codebook_byte3);
+  if (blocked_rows32 < view.out)
+    execute_prepared_avx2_dot_loaded(
+        view, codebook, activation_fwht, blocked_rows32,
+        view.out - blocked_rows32, output.subspan(blocked_rows32),
+        codebook_byte0, codebook_byte1, codebook_byte2, codebook_byte3);
+#else
+  (void)view;
+  (void)codebook;
+  (void)activation_fwht;
+  (void)output;
+  (void)codebook_byte0;
+  (void)codebook_byte1;
+  (void)codebook_byte2;
+  (void)codebook_byte3;
+#endif
+}
+
+EMEL_KERNEL_CQ_AVX2_TARGET inline void execute_prepared_avx2_dot_block64(
     const event::prepared_q4_view &view,
     const event::prepared_codebook_q4 &codebook,
     const std::span<const float> activation_fwht,
@@ -621,7 +734,7 @@ EMEL_KERNEL_CQ_AVX2_TARGET inline void execute_prepared_avx2_dot_block32(
   __m256i codebook_byte3;
   q4_codebook_byte_tables(codebook, codebook_byte0, codebook_byte1,
                           codebook_byte2, codebook_byte3);
-  execute_prepared_avx2_dot_block32_loaded(
+  execute_prepared_avx2_dot_block64_loaded(
       view, codebook, activation_fwht, output, codebook_byte0, codebook_byte1,
       codebook_byte2, codebook_byte3);
 #else
@@ -630,66 +743,6 @@ EMEL_KERNEL_CQ_AVX2_TARGET inline void execute_prepared_avx2_dot_block32(
   (void)activation_fwht;
   (void)output;
 #endif
-}
-
-
-template <uint32_t Rows>
-EMEL_KERNEL_CQ_AVX2_TARGET inline void
-execute_prepared_avx2_dot_blocked(const event::prepared_q4_view &view,
-                                  const event::prepared_codebook_q4 &codebook,
-                                  const std::span<const float> activation_fwht,
-                                  const std::span<float> output) noexcept {
-#if defined(__x86_64__) || defined(_M_X64)
-  static_assert(Rows == 4u || Rows == 8u);
-  const uint32_t blocked_rows = view.out / Rows * Rows;
-  for (uint32_t row = 0u; row < blocked_rows; row += Rows)
-    execute_prepared_avx2_dot_row_block<Rows>(
-        view, codebook, activation_fwht, row, output.subspan(row, Rows));
-  if (blocked_rows < view.out)
-    execute_prepared_avx2_dot(view, codebook, activation_fwht, blocked_rows,
-                              view.out - blocked_rows,
-                              output.subspan(blocked_rows));
-#else
-  (void)view;
-  (void)codebook;
-  (void)activation_fwht;
-  (void)output;
-#endif
-}
-
-EMEL_KERNEL_CQ_AVX2_TARGET inline void
-execute_prepared_avx2_dot_blocked4(
-    const event::prepared_q4_view &view,
-    const event::prepared_codebook_q4 &codebook,
-    const std::span<const float> activation_fwht,
-    const std::span<float> output) noexcept {
-  execute_prepared_avx2_dot_blocked<4u>(view, codebook, activation_fwht, output);
-}
-
-EMEL_KERNEL_CQ_AVX2_TARGET inline void
-execute_prepared_avx2_dot_blocked8(
-    const event::prepared_q4_view &view,
-    const event::prepared_codebook_q4 &codebook,
-    const std::span<const float> activation_fwht,
-    const std::span<float> output) noexcept {
-  execute_prepared_avx2_dot_blocked<8u>(view, codebook, activation_fwht, output);
-}
-template <bool Rows>
-EMEL_KERNEL_CQ_AVX2_TARGET inline void
-execute_prepared_avx2_gemv(const event::prepared_q4_view &view,
-                           const event::prepared_codebook_q4 &codebook,
-                           const std::span<const float> activation,
-                           const uint32_t row_begin, const uint32_t row_count,
-                           const std::span<float> output,
-                           const std::span<float> workspace) noexcept {
-  detail::compute_fwht_groups(activation, view.in, view.group,
-                              workspace.first(view.in_pad));
-  if constexpr (Rows)
-    execute_prepared_avx2_dot(view, codebook, workspace.first(view.in_pad),
-                              row_begin, row_count, output);
-  else
-    execute_prepared_avx2_dot_block32(view, codebook,
-                                      workspace.first(view.in_pad), output);
 }
 
 inline void execute_prepared_dequant_rows(
@@ -931,14 +984,13 @@ struct effect_execute_prepared_avx2_q4 {
   void operator()(const event::execute_prepared_avx2_q4 &ev,
                   context &ctx) const noexcept {
     const uint64_t fwht_begin = timing_now(ctx);
-    if constexpr (true)
-      detail::compute_fwht128_groups_avx2(
-          ev.request.activation, ev.request.weights.in,
-          ev.request.workspace.first(ev.request.weights.in_pad));
+    detail::compute_fwht128_groups_avx2(
+        ev.request.activation, ev.request.weights.in,
+        ev.request.workspace.first(ev.request.weights.in_pad));
     if (ctx.timing_enabled)
       ctx.timing.fwht_nanoseconds += timing_now(ctx) - fwht_begin;
     const uint64_t dot_begin = timing_now(ctx);
-    execute_prepared_avx2_dot_block32(
+    execute_prepared_avx2_dot_block64(
         ev.request.weights, ev.request.codebook,
         ev.request.workspace.first(ev.request.weights.in_pad),
         ev.request.output);
@@ -957,9 +1009,8 @@ struct effect_execute_prepared_avx2_batch4_q4 {
     const auto &request = ev.request;
     const auto &first = *request.targets[0].weights;
     const uint64_t fwht_begin = timing_now(ctx);
-    if constexpr (true)
-      detail::compute_fwht128_groups_avx2(
-          request.activation, first.in, request.workspace.first(first.in_pad));
+    detail::compute_fwht128_groups_avx2(
+        request.activation, first.in, request.workspace.first(first.in_pad));
     if (ctx.timing_enabled)
       ctx.timing.fwht_nanoseconds += timing_now(ctx) - fwht_begin;
     const uint64_t dot_begin = timing_now(ctx);
@@ -970,7 +1021,7 @@ struct effect_execute_prepared_avx2_batch4_q4 {
     q4_codebook_byte_tables(request.codebook, codebook_byte0, codebook_byte1,
                             codebook_byte2, codebook_byte3);
     for (const auto &target : request.targets) {
-      execute_prepared_avx2_dot_block32_loaded(
+      execute_prepared_avx2_dot_block64_loaded(
           *target.weights, request.codebook,
           request.workspace.first(first.in_pad), target.output, codebook_byte0,
           codebook_byte1, codebook_byte2, codebook_byte3);
