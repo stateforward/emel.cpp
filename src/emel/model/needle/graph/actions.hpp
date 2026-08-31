@@ -184,28 +184,29 @@ prepare_activation(context &ctx, const std::span<const float> activation,
 
 inline bool
 compute_gemv_batch4(context &ctx, const activation_payload activation,
-                    const emel::kernel::cq::event::prepared_q4_view &first,
-                    const std::span<float> first_output,
-                    const emel::kernel::cq::event::prepared_q4_view &second,
-                    const std::span<float> second_output,
-                    const emel::kernel::cq::event::prepared_q4_view &third,
-                    const std::span<float> third_output,
-                    const emel::kernel::cq::event::prepared_q4_view &fourth,
-                    const std::span<float> fourth_output) noexcept {
-  const emel::kernel::cq::event::prepared_gemv_batch4_request request{
-      .targets = {{{&first, first_output},
-                   {&second, second_output},
-                   {&third, third_output},
-                   {&fourth, fourth_output}}},
+                    const emel::kernel::cq::event::prepared_q4_view &q,
+                    const std::span<float> q_output,
+                    const emel::kernel::cq::event::prepared_q4_view &gate,
+                    const std::span<float> gate_output,
+                    const emel::kernel::cq::event::prepared_q4_view &k,
+                    const std::span<float> k_output,
+                    const emel::kernel::cq::event::prepared_q4_view &v,
+                    const std::span<float> v_output) noexcept {
+  const emel::kernel::cq::event::prepared_gemv_batch4_pair_request request{
+      .q = {&q, q_output},
+      .gate = {&gate, gate_output},
+      .k = {&k, k_output},
+      .v = {&v, v_output},
       .codebook = ctx.prepared_codebook,
       .activation = activation.values,
       .workspace = std::span<float>{ctx.cq_workspace},
       .output_scale = activation.scale};
   emel::kernel::cq::event::dispatch_result result{};
   return ctx.cq.process_event(
-      emel::kernel::cq::event::execute_prepared_avx2_batch4_q4{request,
-                                                               result});
+      emel::kernel::cq::event::execute_prepared_avx2_batch4_pair_q4{request,
+                                                                    result});
 }
+
 inline bool compute_zcrms_norm(context &ctx, const std::span<const float> input,
                                const std::span<const float> scale,
                                const uint32_t rows, const uint32_t dim,
@@ -585,10 +586,10 @@ inline bool compute_layer(context &ctx, event::step_ctx &step) noexcept {
   if constexpr (route == route_kind::prepared_avx2) {
     ok = ok && compute_gemv_batch4(
                    ctx, attention_input, prepared_layer.q_proj,
-                   std::span<float>{ctx.q_rows}, prepared_layer.k_proj,
+                   std::span<float>{ctx.q_rows}, prepared_layer.gate_proj,
+                   std::span<float>{ctx.gate_logits}, prepared_layer.k_proj,
                    std::span<float>{ctx.k_rows}, prepared_layer.v_proj,
-                   std::span<float>{ctx.v_rows}, prepared_layer.gate_proj,
-                   std::span<float>{ctx.gate_logits});
+                   std::span<float>{ctx.v_rows});
   } else {
     ok = ok &&
          compute_gemv<route>(ctx, layer.q_proj, prepared_layer.q_proj,

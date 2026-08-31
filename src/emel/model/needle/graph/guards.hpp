@@ -37,6 +37,25 @@ inline bool cq_group128(const emel::model::needle::contract &bound) noexcept {
   }
   return ok;
 }
+inline bool cq_batch4_pair_block32(
+    const emel::model::needle::contract &bound) noexcept {
+  for (uint32_t i = 0u; i < bound.layer_count; ++i) {
+    const auto &layer = bound.layers[i];
+    if (layer.q_proj.shape[0] != layer.gate_proj.shape[0] ||
+        layer.q_proj.shape[1] != layer.gate_proj.shape[1] ||
+        layer.q_proj.group != layer.gate_proj.group ||
+        layer.k_proj.shape[0] != layer.v_proj.shape[0] ||
+        layer.k_proj.shape[1] != layer.v_proj.shape[1] ||
+        layer.k_proj.group != layer.v_proj.group ||
+        layer.q_proj.shape[1] != layer.k_proj.shape[1] ||
+        layer.q_proj.group != layer.k_proj.group ||
+        layer.q_proj.shape[0] % 32u != 0u ||
+        layer.k_proj.shape[0] % 32u != 0u)
+      return false;
+  }
+  return true;
+}
+
 
 
 inline bool layer_is_engram_site(const emel::cact::loader::geometry &geo,
@@ -52,14 +71,16 @@ inline bool layer_is_engram_site(const emel::cact::loader::geometry &geo,
 struct guard_route_avx2 {
   bool operator()(const event::step_run &,
                   const action::context &ctx) const noexcept {
-    return k_avx2_route_available && cq_group128(*ctx.bound);
+    return k_avx2_route_available && cq_group128(*ctx.bound) &&
+           cq_batch4_pair_block32(*ctx.bound);
   }
 };
 
 struct guard_route_scalar {
   bool operator()(const event::step_run &,
                   const action::context &ctx) const noexcept {
-    return !k_avx2_route_available || !cq_group128(*ctx.bound);
+    return !k_avx2_route_available || !cq_group128(*ctx.bound) ||
+           !cq_batch4_pair_block32(*ctx.bound);
   }
 };
 

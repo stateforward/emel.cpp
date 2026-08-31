@@ -224,6 +224,7 @@ lookup_codebook32_raw(const __m256i index_bytes, const __m256i byte0,
           _mm256_unpackhi_epi16(high_words01, high_words23))};
 }
 
+
 EMEL_KERNEL_CQ_AVX2_TARGET inline q4_lookup32_result
 lookup_codebook32_pshufb(const __m256i index_bytes, const __m256i byte0,
                          const __m256i byte1, const __m256i byte2,
@@ -609,6 +610,117 @@ execute_prepared_avx2_dot_block32_loaded(
 #endif
 }
 
+EMEL_KERNEL_CQ_AVX2_TARGET inline void
+execute_prepared_avx2_dot_block32_pair_loaded(
+    const event::prepared_q4_view &view_a,
+    const event::prepared_q4_view &view_b,
+    const std::span<const float> activation_fwht,
+    const std::span<float> output_a, const std::span<float> output_b,
+    const __m256i codebook_byte0, const __m256i codebook_byte1,
+    const __m256i codebook_byte2, const __m256i codebook_byte3) noexcept {
+#if defined(__x86_64__) || defined(_M_X64)
+  const uint32_t blocked_rows = view_a.out / 32u * 32u;
+  const uint32_t groups_per_row = view_a.in_pad / view_a.group;
+  for (uint32_t row = 0u; row < blocked_rows; row += 32u) {
+    const uint8_t *selectors_a = view_a.indices_by_input32.data() +
+                                 static_cast<size_t>(row) * view_a.in_pad;
+    const uint8_t *selectors_b = view_b.indices_by_input32.data() +
+                                 static_cast<size_t>(row) * view_b.in_pad;
+    const float *group_norms_a = view_a.norms_by_group32.data() +
+                                 static_cast<size_t>(row) * groups_per_row;
+    const float *group_norms_b = view_b.norms_by_group32.data() +
+                                 static_cast<size_t>(row) * groups_per_row;
+    _mm256_storeu_ps(output_a.data() + row, _mm256_setzero_ps());
+    _mm256_storeu_ps(output_a.data() + row + 8u, _mm256_setzero_ps());
+    _mm256_storeu_ps(output_a.data() + row + 16u, _mm256_setzero_ps());
+    _mm256_storeu_ps(output_a.data() + row + 24u, _mm256_setzero_ps());
+    _mm256_storeu_ps(output_b.data() + row, _mm256_setzero_ps());
+    _mm256_storeu_ps(output_b.data() + row + 8u, _mm256_setzero_ps());
+    _mm256_storeu_ps(output_b.data() + row + 16u, _mm256_setzero_ps());
+    _mm256_storeu_ps(output_b.data() + row + 24u, _mm256_setzero_ps());
+    for (uint32_t begin = 0u, group_index = 0u; begin < view_a.in_pad;
+         begin += view_a.group, ++group_index) {
+      __m256 group_accum_a0 = _mm256_setzero_ps();
+      __m256 group_accum_a1 = _mm256_setzero_ps();
+      __m256 group_accum_a2 = _mm256_setzero_ps();
+      __m256 group_accum_a3 = _mm256_setzero_ps();
+      __m256 group_accum_b0 = _mm256_setzero_ps();
+      __m256 group_accum_b1 = _mm256_setzero_ps();
+      __m256 group_accum_b2 = _mm256_setzero_ps();
+      __m256 group_accum_b3 = _mm256_setzero_ps();
+      for (uint32_t i = 0u; i < view_a.group; ++i) {
+        const size_t selector_offset = static_cast<size_t>(begin + i) * 32u;
+        const q4_lookup32_result values_a = lookup_codebook32_raw(
+            load_selector32(selectors_a + selector_offset), codebook_byte0,
+            codebook_byte1, codebook_byte2, codebook_byte3);
+        const __m256 activation =
+            _mm256_broadcast_ss(activation_fwht.data() + begin + i);
+        group_accum_a0 =
+            _mm256_fmadd_ps(values_a.values0, activation, group_accum_a0);
+        group_accum_a1 =
+            _mm256_fmadd_ps(values_a.values1, activation, group_accum_a1);
+        group_accum_a2 =
+            _mm256_fmadd_ps(values_a.values2, activation, group_accum_a2);
+        group_accum_a3 =
+            _mm256_fmadd_ps(values_a.values3, activation, group_accum_a3);
+        const q4_lookup32_result values_b = lookup_codebook32_raw(
+            load_selector32(selectors_b + selector_offset), codebook_byte0,
+            codebook_byte1, codebook_byte2, codebook_byte3);
+        group_accum_b0 =
+            _mm256_fmadd_ps(values_b.values0, activation, group_accum_b0);
+        group_accum_b1 =
+            _mm256_fmadd_ps(values_b.values1, activation, group_accum_b1);
+        group_accum_b2 =
+            _mm256_fmadd_ps(values_b.values2, activation, group_accum_b2);
+        group_accum_b3 =
+            _mm256_fmadd_ps(values_b.values3, activation, group_accum_b3);
+      }
+      const float *norms_a =
+          group_norms_a + static_cast<size_t>(group_index) * 32u;
+      const float *norms_b =
+          group_norms_b + static_cast<size_t>(group_index) * 32u;
+      const auto update_output = [](float *const output, const uint32_t offset,
+                                    const __m256 accum,
+                                    const __m256 norms) noexcept {
+        const __m256 total = _mm256_insertf128_ps(
+            _mm256_castps128_ps256(_mm_loadu_ps(output + offset)),
+            _mm_loadu_ps(output + offset + 16u), 1);
+        const __m256 updated = _mm256_fmadd_ps(accum, norms, total);
+        _mm_storeu_ps(output + offset, _mm256_castps256_ps128(updated));
+        _mm_storeu_ps(output + offset + 16u,
+                      _mm256_extractf128_ps(updated, 1));
+      };
+      update_output(output_a.data() + row, 0u, group_accum_a0,
+                    _mm256_loadu_ps(norms_a));
+      update_output(output_a.data() + row, 4u, group_accum_a1,
+                    _mm256_loadu_ps(norms_a + 8u));
+      update_output(output_a.data() + row, 8u, group_accum_a2,
+                    _mm256_loadu_ps(norms_a + 16u));
+      update_output(output_a.data() + row, 12u, group_accum_a3,
+                    _mm256_loadu_ps(norms_a + 24u));
+      update_output(output_b.data() + row, 0u, group_accum_b0,
+                    _mm256_loadu_ps(norms_b));
+      update_output(output_b.data() + row, 4u, group_accum_b1,
+                    _mm256_loadu_ps(norms_b + 8u));
+      update_output(output_b.data() + row, 8u, group_accum_b2,
+                    _mm256_loadu_ps(norms_b + 16u));
+      update_output(output_b.data() + row, 12u, group_accum_b3,
+                    _mm256_loadu_ps(norms_b + 24u));
+    }
+  }
+#else
+  (void)view_a;
+  (void)view_b;
+  (void)activation_fwht;
+  (void)output_a;
+  (void)output_b;
+  (void)codebook_byte0;
+  (void)codebook_byte1;
+  (void)codebook_byte2;
+  (void)codebook_byte3;
+#endif
+}
+
 EMEL_KERNEL_CQ_AVX2_TARGET inline void execute_prepared_avx2_dot_block32(
     const event::prepared_q4_view &view,
     const event::prepared_codebook_q4 &codebook,
@@ -948,6 +1060,50 @@ struct effect_execute_prepared_avx2_q4 {
       ctx.timing.dot_full_nanoseconds += timing_now(ctx) - dot_begin;
     ev.result.accepted = true;
     ++ctx.prepared_calls;
+  }
+};
+
+struct effect_execute_prepared_avx2_batch4_pair_q4 {
+  void operator()(const event::execute_prepared_avx2_batch4_pair_q4 &ev,
+                  context &ctx) const noexcept {
+    const auto &request = ev.request;
+    const auto &first = *request.q.weights;
+    // CQ timing is an existing actor-wide diagnostic contract shared by every
+    // prepared action; pair fusion does not introduce a separate route choice.
+    const uint64_t fwht_begin = timing_now(ctx);
+    detail::compute_fwht128_groups_avx2(
+        request.activation, first.in, request.workspace.first(first.in_pad));
+    if (ctx.timing_enabled)
+      ctx.timing.fwht_nanoseconds += timing_now(ctx) - fwht_begin;
+    const uint64_t dot_begin = timing_now(ctx);
+    __m256i codebook_byte0;
+    __m256i codebook_byte1;
+    __m256i codebook_byte2;
+    __m256i codebook_byte3;
+    q4_codebook_byte_tables(request.codebook, codebook_byte0, codebook_byte1,
+                            codebook_byte2, codebook_byte3);
+    execute_prepared_avx2_dot_block32_pair_loaded(
+        *request.q.weights, *request.gate.weights,
+        request.workspace.first(first.in_pad), request.q.output,
+        request.gate.output, codebook_byte0, codebook_byte1, codebook_byte2,
+        codebook_byte3);
+    execute_prepared_avx2_dot_block32_pair_loaded(
+        *request.k.weights, *request.v.weights,
+        request.workspace.first(first.in_pad), request.k.output,
+        request.v.output, codebook_byte0, codebook_byte1, codebook_byte2,
+        codebook_byte3);
+    scale_output(request.q.output.first(request.q.weights->out),
+                 request.output_scale);
+    scale_output(request.gate.output.first(request.gate.weights->out),
+                 request.output_scale);
+    scale_output(request.k.output.first(request.k.weights->out),
+                 request.output_scale);
+    scale_output(request.v.output.first(request.v.weights->out),
+                 request.output_scale);
+    if (ctx.timing_enabled)
+      ctx.timing.dot_batch_nanoseconds += timing_now(ctx) - dot_begin;
+    ev.result.accepted = true;
+    ctx.prepared_calls += 4u;
   }
 };
 

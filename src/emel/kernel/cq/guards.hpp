@@ -1,5 +1,7 @@
 #pragma once
 
+#include <limits>
+
 #include "emel/kernel/cq/actions.hpp"
 
 namespace emel::kernel::cq::guard {
@@ -159,6 +161,81 @@ struct guard_execute_prepared_avx2_q4 {
            request.activation.size() >= request.weights.in &&
            request.output.size() >= request.weights.out &&
            request.workspace.size() >= request.weights.in_pad;
+#else
+    (void)ev;
+    return false;
+#endif
+  }
+};
+
+inline bool ranges_disjoint(const float *const a, const size_t a_count,
+                            const float *const b,
+                            const size_t b_count) noexcept {
+  constexpr uintptr_t max_address = std::numeric_limits<uintptr_t>::max();
+  if (a_count > max_address / sizeof(float) ||
+      b_count > max_address / sizeof(float))
+    return false;
+  const auto a_begin = reinterpret_cast<uintptr_t>(a);
+  const auto b_begin = reinterpret_cast<uintptr_t>(b);
+  const size_t a_bytes = a_count * sizeof(float);
+  const size_t b_bytes = b_count * sizeof(float);
+  if (a_begin > max_address - a_bytes || b_begin > max_address - b_bytes)
+    return false;
+  return a_begin + a_bytes <= b_begin || b_begin + b_bytes <= a_begin;
+}
+
+inline bool output_ranges_disjoint(const event::prepared_gemv_target &a,
+                                   const event::prepared_gemv_target &b) noexcept {
+  return ranges_disjoint(a.output.data(), a.weights->out, b.output.data(),
+                         b.weights->out);
+}
+
+inline bool prepared_pair_matches(const event::prepared_gemv_target &a,
+                                  const event::prepared_gemv_target &b,
+                                  const std::span<const float> codebook) noexcept {
+  return a.weights != nullptr && b.weights != nullptr &&
+         prepared_supported(*a.weights, codebook) &&
+         prepared_supported(*b.weights, codebook) &&
+         a.weights->out == b.weights->out && a.weights->in == b.weights->in &&
+         a.weights->group == b.weights->group &&
+         a.weights->in_pad == b.weights->in_pad &&
+         a.weights->out % 32u == 0u && a.output.size() >= a.weights->out &&
+         b.output.size() >= b.weights->out;
+}
+
+struct guard_execute_prepared_avx2_batch4_pair_q4 {
+  bool operator()(const event::execute_prepared_avx2_batch4_pair_q4 &ev,
+                  const action::context &) const noexcept {
+#if (defined(__x86_64__) || defined(_M_X64)) && defined(__AVX2__) &&           \
+    defined(__FMA__)
+    const auto &request = ev.request;
+    const auto *first = request.q.weights;
+    return first != nullptr && first->group == 128u &&
+           prepared_codebook_supported(request.codebook) &&
+           request.activation.size() >= first->in &&
+           request.workspace.size() >= first->in_pad &&
+           prepared_pair_matches(request.q, request.gate,
+                                 request.codebook.values) &&
+           output_ranges_disjoint(request.q, request.gate) &&
+           prepared_pair_matches(request.k, request.v,
+                                 request.codebook.values) &&
+           output_ranges_disjoint(request.k, request.v) &&
+           output_ranges_disjoint(request.q, request.k) &&
+           output_ranges_disjoint(request.q, request.v) &&
+           output_ranges_disjoint(request.gate, request.k) &&
+           output_ranges_disjoint(request.gate, request.v) &&
+           ranges_disjoint(request.workspace.data(), first->in_pad,
+                           request.q.output.data(), request.q.weights->out) &&
+           ranges_disjoint(request.workspace.data(), first->in_pad,
+                           request.gate.output.data(),
+                           request.gate.weights->out) &&
+           ranges_disjoint(request.workspace.data(), first->in_pad,
+                           request.k.output.data(), request.k.weights->out) &&
+           ranges_disjoint(request.workspace.data(), first->in_pad,
+                           request.v.output.data(), request.v.weights->out) &&
+           request.k.weights->in == first->in &&
+           request.k.weights->group == first->group &&
+           request.k.weights->in_pad == first->in_pad;
 #else
     (void)ev;
     return false;
