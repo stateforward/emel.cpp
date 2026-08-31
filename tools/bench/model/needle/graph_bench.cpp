@@ -55,11 +55,6 @@ constexpr char k_swa_iters_env[] = "EMEL_BENCH_NEEDLE_SWA_ITERS";
 constexpr char k_instrument_cq_env[] = "EMEL_BENCH_NEEDLE_GRAPH_INSTRUMENT_CQ";
 constexpr char k_instrument_graph_env[] =
     "EMEL_BENCH_NEEDLE_GRAPH_INSTRUMENT_COMPONENTS";
-constexpr char k_cq_batch4_sequential_case_name[] =
-    "needle/cq/batch4_sequential_raw";
-constexpr char k_cq_batch4_pair_case_name[] = "needle/cq/batch4_pair_raw";
-constexpr char k_cq_batch4_iters_env[] = "EMEL_BENCH_NEEDLE_CQ_BATCH4_ITERS";
-
 
 // Steady-state decode is measured after a 128-token prefill; the prefill case
 // runs a 512-token prompt (max_seq_len 2048 bounded).
@@ -108,127 +103,6 @@ emel::bench::result with_needle_metadata(emel::bench::result out,
                                          std::uint64_t output_tokens);
 
 volatile float g_swa_output_sink = 0.0f;
-volatile float g_cq_output_sink = 0.0f;
-
-#if (defined(__x86_64__) || defined(_M_X64)) && defined(__AVX2__) &&           \
-    defined(__FMA__)
-struct cq_batch4_fixture {
-  static constexpr uint32_t group = 128u;
-  static constexpr uint32_t in = 512u;
-  static constexpr std::array<uint32_t, 4u> outs{512u, 256u, 256u, 512u};
-
-  emel::kernel::cq::event::prepared_codebook_q4 codebook{};
-  std::array<emel::kernel::cq::event::prepared_q4_view, 4u> views{};
-  std::array<std::vector<uint8_t>, 4u> indices{};
-  std::array<std::vector<uint8_t>, 4u> indices_by_input32{};
-  std::array<std::vector<float>, 4u> norms{};
-  std::array<std::vector<float>, 4u> norms_by_group32{};
-  std::array<std::vector<float>, 4u> sequential_outputs{};
-  std::array<std::vector<float>, 4u> pair_outputs{};
-  std::array<float, in> activation{};
-
-  cq_batch4_fixture() {
-    std::array<float, 28u> values{};
-    for (uint32_t i = 0u; i < 16u; ++i)
-      values[12u + i] =
-          static_cast<float>(static_cast<int32_t>(i) - 7) * 0.09375f;
-    emel::kernel::cq::action::prepare_codebook_q4({values, codebook});
-    for (uint32_t i = 0u; i < activation.size(); ++i)
-      activation[i] =
-          static_cast<float>(static_cast<int32_t>((i * 29u) % 101u) - 50) *
-          0.015625f;
-    for (uint32_t target = 0u; target < views.size(); ++target) {
-      const uint32_t out = outs[target];
-      const size_t index_count = static_cast<size_t>(out) * in;
-      const size_t norm_count = static_cast<size_t>(out) * in / group;
-      indices[target].resize(index_count);
-      indices_by_input32[target].resize(index_count);
-      norms[target].resize(norm_count);
-      norms_by_group32[target].resize(norm_count);
-      sequential_outputs[target].resize(out);
-      pair_outputs[target].resize(out);
-      for (uint32_t row = 0u; row < out; ++row)
-        for (uint32_t i = 0u; i < in; ++i)
-          indices[target][static_cast<size_t>(row) * in + i] =
-              static_cast<uint8_t>((row * 11u + i * 7u + target * 5u) & 15u);
-      for (uint32_t row = 0u; row < out; row += 32u)
-        for (uint32_t i = 0u; i < in; ++i)
-          for (uint32_t lane = 0u; lane < 32u; ++lane)
-            indices_by_input32[target][static_cast<size_t>(row) * in +
-                                       static_cast<size_t>(i) * 32u + lane] =
-                indices[target][static_cast<size_t>(row + lane) * in + i];
-      constexpr std::array<uint32_t, 32u> raw_rows{
-          0u,  1u,  2u,  3u,  16u, 17u, 18u, 19u,
-          4u,  5u,  6u,  7u,  20u, 21u, 22u, 23u,
-          8u,  9u,  10u, 11u, 24u, 25u, 26u, 27u,
-          12u, 13u, 14u, 15u, 28u, 29u, 30u, 31u};
-      for (uint32_t row = 0u; row < out; ++row)
-        for (uint32_t g = 0u; g < in / group; ++g)
-          norms[target][static_cast<size_t>(row) * (in / group) + g] =
-              0.5f + static_cast<float>((row * 3u + g * 5u + target) & 15u) *
-                         0.03125f;
-      for (uint32_t row = 0u; row < out; row += 32u)
-        for (uint32_t g = 0u; g < in / group; ++g)
-          for (uint32_t lane = 0u; lane < raw_rows.size(); ++lane)
-            norms_by_group32[target][static_cast<size_t>(row) * (in / group) +
-                                     static_cast<size_t>(g) * 32u + lane] =
-                norms[target][static_cast<size_t>(row + raw_rows[lane]) *
-                                  (in / group) +
-                              g];
-      views[target] = {.out = out,
-                       .in = in,
-                       .group = group,
-                       .in_pad = in,
-                       .indices = indices[target],
-                       .indices_by_input32 = indices_by_input32[target],
-                       .norms = norms[target],
-                       .norms_by_group32 = norms_by_group32[target]};
-    }
-  }
-};
-
-void append_cq_batch4_cases(std::vector<emel::bench::result> &results,
-                            const emel::bench::config &cfg) {
-  cq_batch4_fixture fixture;
-  __m256i byte0;
-  __m256i byte1;
-  __m256i byte2;
-  __m256i byte3;
-  emel::kernel::cq::action::q4_codebook_byte_tables(fixture.codebook, byte0,
-                                                    byte1, byte2, byte3);
-  emel::bench::config batch_cfg = cfg;
-  batch_cfg.iterations = read_env_u64_or(k_cq_batch4_iters_env, 256u);
-  batch_cfg.runs = cfg.runs;
-  batch_cfg.warmup_iterations = 16u;
-  batch_cfg.warmup_runs = 1u;
-  auto sequential_fn = [&]() {
-    for (uint32_t target = 0u; target < fixture.views.size(); ++target)
-      emel::kernel::cq::action::execute_prepared_avx2_dot_block32_loaded(
-          fixture.views[target], fixture.codebook, fixture.activation,
-          fixture.sequential_outputs[target], byte0, byte1, byte2, byte3);
-    g_cq_output_sink = fixture.sequential_outputs[0][0];
-  };
-  auto pair_fn = [&]() {
-    emel::kernel::cq::action::execute_prepared_avx2_dot_block32_pair_loaded(
-        fixture.views[0], fixture.views[3], fixture.activation,
-        fixture.pair_outputs[0], fixture.pair_outputs[3], byte0, byte1, byte2,
-        byte3);
-    emel::kernel::cq::action::execute_prepared_avx2_dot_block32_pair_loaded(
-        fixture.views[1], fixture.views[2], fixture.activation,
-        fixture.pair_outputs[1], fixture.pair_outputs[2], byte0, byte1, byte2,
-        byte3);
-    g_cq_output_sink = fixture.pair_outputs[0][0];
-  };
-  results.push_back(with_needle_metadata(
-      emel::bench::measure_case(k_cq_batch4_sequential_case_name, batch_cfg,
-                                sequential_fn),
-      "emel", "emel_cq_batch4_sequential_raw", "cpp", 1u));
-  results.push_back(with_needle_metadata(
-      emel::bench::measure_case(k_cq_batch4_pair_case_name, batch_cfg, pair_fn),
-      "emel", "emel_cq_batch4_pair_raw", "cpp", 1u));
-}
-#endif
-
 
 void append_swa_case(std::vector<emel::bench::result> &results,
                      const emel::bench::config &cfg, const char *name,
@@ -503,10 +377,6 @@ void append_emel_needle_graph_cases(std::vector<result> &results,
   append_swa_case(results, cfg, k_swa_gqa2_512_case_name, 512u, true);
   append_swa_case(results, cfg, k_swa_generic_704_case_name, 704u, false);
   append_swa_case(results, cfg, k_swa_gqa2_704_case_name, 704u, true);
-#endif
-#if (defined(__x86_64__) || defined(_M_X64)) && defined(__AVX2__) &&           \
-    defined(__FMA__)
-  append_cq_batch4_cases(results, cfg);
 #endif
 
   {

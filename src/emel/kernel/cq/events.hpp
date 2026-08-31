@@ -121,25 +121,6 @@ struct prepared_gemv_batch4_request {
   float output_scale = 1.0f;
 };
 
-// Two named projection pairs sharing one activation transform. Each pair must
-// contain views with identical output/input/group geometry; the names make the
-// graph's q+gate and k+v contract explicit rather than relying on array order.
-struct prepared_gemv_batch4_pair_request {
-  prepared_gemv_target q = {};
-  prepared_gemv_target gate = {};
-  prepared_gemv_target k = {};
-  prepared_gemv_target v = {};
-  const prepared_codebook_q4 &codebook;
-  std::span<const float> activation;
-  std::span<float> workspace;
-  float output_scale = 1.0f;
-};
-
-struct execute_prepared_avx2_batch4_pair_q4 {
-  const prepared_gemv_batch4_pair_request &request;
-  dispatch_result &result;
-};
-
 struct execute_prepared_avx2_batch4_q4 {
   const prepared_gemv_batch4_request &request;
   dispatch_result &result;

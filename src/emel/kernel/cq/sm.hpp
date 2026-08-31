@@ -33,10 +33,6 @@ struct model {
           [ guard::guard_execute_prepared_avx2_q4{} ]
           / action::effect_execute_prepared_avx2_q4{}
       , sml::state<state_ready> <= sml::state<state_ready>
-          + sml::event<event::execute_prepared_avx2_batch4_pair_q4>
-          [ guard::guard_execute_prepared_avx2_batch4_pair_q4{} ]
-          / action::effect_execute_prepared_avx2_batch4_pair_q4{}
-      , sml::state<state_ready> <= sml::state<state_ready>
           + sml::event<event::execute_prepared_avx2_batch4_q4>
           [ guard::guard_execute_prepared_avx2_batch4_q4{} ]
           / action::effect_execute_prepared_avx2_batch4_q4{}
