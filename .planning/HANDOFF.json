@@ -1,0 +1,35 @@
+{
+  "version": "1.0",
+  "timestamp": "2026-08-31T03:39:57.198Z",
+  "phase": "5",
+  "phase_name": "cact-needle exact single-thread performance",
+  "phase_dir": ".planning",
+  "plan": 5,
+  "task": 1,
+  "total_tasks": 5,
+  "status": "paused",
+  "completed_tasks": [
+    {"id": 0, "name": "Native cact loader, Needle graph, exact CQ4 and tokenizer parity", "status": "done"},
+    {"id": 1, "name": "Optimize exact CQ4 decode to target", "status": "in_progress", "progress": "Safe clean boundary at commit 6b08fe3e. Raw lookup32 removes inner-loop cross-lane permutes and improves direct CQ to 0.04782 ns/MAC; graph measured 179.657 tok/s decode and 220.336 tok/s prefill."}
+  ],
+  "remaining_tasks": [
+    {"id": 1, "name": "Rerun graph parity after final raw-lookup guard/test correction", "status": "not_started"},
+    {"id": 2, "name": "Write raw lookup32 closeout report", "status": "not_started"},
+    {"id": 3, "name": "Continue exact single-thread performance research", "status": "not_started"},
+    {"id": 4, "name": "Run full-scope quality gates and terminal blind review", "status": "not_started"},
+    {"id": 5, "name": "Update control plane and create PR", "status": "not_started"}
+  ],
+  "blockers": [
+    {"description": "Scoped quality gate cannot run because zig is unavailable in the current PATH/environment.", "type": "external", "workaround": "Restore the repository Zig toolchain/PATH, then rerun the changed-file scoped quality gate."},
+    {"description": "Exact single-thread 435 tok/s remains unsatisfied. User explicitly chose to exhaust single-thread optimization before multicore.", "type": "technical", "workaround": "Continue only measured exact experiments; do not rescope to multicore or approximation."}
+  ],
+  "human_actions_pending": [],
+  "decisions": [
+    {"decision": "Maximize exact single-thread performance before multicore.", "rationale": "Every single-thread gain compounds multicore throughput; user explicitly prioritized exhausting this avenue first.", "phase": "5"},
+    {"decision": "Keep 435 tok/s exact single-core as the target, not a completed claim.", "rationale": "Current performance is materially below target; no silent rescope.", "phase": "5"},
+    {"decision": "Retain raw lookup32 natural-lane accumulation and half stores.", "rationale": "Same-binary direct measurements improved 512x512 from 0.065379707 to 0.047414810 ns/MAC and 8192x512 from 0.066057701 to 0.047821267 ns/MAC; graph reached 179.657 tok/s.", "phase": "5"}
+  ],
+  "uncommitted_files": [],
+  "next_action": "/tmp/emel-raw-cq-build/emel_tests_bin --test-case=\"needle graph matches the committed JAX logits fixture on all cases,needle graph W4A8 deployment route matches authoritative JAX fixture,needle graph prepares CQ4 storage once and selects prepared route\"",
+  "context_notes": "Branch feat/cact-needle-runtime, clean source head 6b08fe3e. The raw lookup worker stopped safely. Focused CQ proof passed 5 tests / 286293 assertions and row-unique oracle 265219 assertions. Graph parity 3 cases / 124 assertions passed before the final guard/test-only correction and must be rerun. After parity, write ~/.agents/projects/emel-cpp/comments/cact-bench-closeout-impl/raw-lookup32-2026-08-31.md. Do not begin multicore work."
+}
