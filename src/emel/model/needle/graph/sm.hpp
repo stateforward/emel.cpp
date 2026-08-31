@@ -111,17 +111,29 @@ struct model {
           + sml::completion<event::step_run> [ guard::guard_step_failed{} ]
 
       , sml::state<state_layer_advance_scalar_a8> <= sml::state<state_layer_loop_scalar_a8>
-          + sml::completion<event::step_run> [ guard::guard_layer_engram_growing{} ]
-          / action::effect_run_layer<route::scalar, activation::a8, true, false>{}
+          + sml::completion<event::step_run> [ guard::guard_layer_engram_growing_gqa2{} ]
+          / action::effect_run_layer<route::scalar, activation::a8, true, false, true>{}
       , sml::state<state_layer_advance_scalar_a8> <= sml::state<state_layer_loop_scalar_a8>
-          + sml::completion<event::step_run> [ guard::guard_layer_engram_full{} ]
-          / action::effect_run_layer<route::scalar, activation::a8, true, true>{}
+          + sml::completion<event::step_run> [ guard::guard_layer_engram_growing_generic{} ]
+          / action::effect_run_layer<route::scalar, activation::a8, true, false, false>{}
       , sml::state<state_layer_advance_scalar_a8> <= sml::state<state_layer_loop_scalar_a8>
-          + sml::completion<event::step_run> [ guard::guard_layer_plain_growing{} ]
-          / action::effect_run_layer<route::scalar, activation::a8, false, false>{}
+          + sml::completion<event::step_run> [ guard::guard_layer_engram_full_gqa2{} ]
+          / action::effect_run_layer<route::scalar, activation::a8, true, true, true>{}
       , sml::state<state_layer_advance_scalar_a8> <= sml::state<state_layer_loop_scalar_a8>
-          + sml::completion<event::step_run> [ guard::guard_layer_plain_full{} ]
-          / action::effect_run_layer<route::scalar, activation::a8, false, true>{}
+          + sml::completion<event::step_run> [ guard::guard_layer_engram_full_generic{} ]
+          / action::effect_run_layer<route::scalar, activation::a8, true, true, false>{}
+      , sml::state<state_layer_advance_scalar_a8> <= sml::state<state_layer_loop_scalar_a8>
+          + sml::completion<event::step_run> [ guard::guard_layer_plain_growing_gqa2{} ]
+          / action::effect_run_layer<route::scalar, activation::a8, false, false, true>{}
+      , sml::state<state_layer_advance_scalar_a8> <= sml::state<state_layer_loop_scalar_a8>
+          + sml::completion<event::step_run> [ guard::guard_layer_plain_growing_generic{} ]
+          / action::effect_run_layer<route::scalar, activation::a8, false, false, false>{}
+      , sml::state<state_layer_advance_scalar_a8> <= sml::state<state_layer_loop_scalar_a8>
+          + sml::completion<event::step_run> [ guard::guard_layer_plain_full_gqa2{} ]
+          / action::effect_run_layer<route::scalar, activation::a8, false, true, true>{}
+      , sml::state<state_layer_advance_scalar_a8> <= sml::state<state_layer_loop_scalar_a8>
+          + sml::completion<event::step_run> [ guard::guard_layer_plain_full_generic{} ]
+          / action::effect_run_layer<route::scalar, activation::a8, false, true, false>{}
       , sml::state<state_errored> <= sml::state<state_layer_loop_scalar_a8>
           + sml::completion<event::step_run> [ guard::guard_step_failed{} ]
       , sml::state<state_layer_loop_scalar_a8> <= sml::state<state_layer_advance_scalar_a8>
@@ -136,17 +148,29 @@ struct model {
           + sml::completion<event::step_run> [ guard::guard_step_failed{} ]
 
       , sml::state<state_layer_advance_scalar_f32> <= sml::state<state_layer_loop_scalar_f32>
-          + sml::completion<event::step_run> [ guard::guard_layer_engram_growing{} ]
-          / action::effect_run_layer<route::scalar, activation::f32, true, false>{}
+          + sml::completion<event::step_run> [ guard::guard_layer_engram_growing_gqa2{} ]
+          / action::effect_run_layer<route::scalar, activation::f32, true, false, true>{}
       , sml::state<state_layer_advance_scalar_f32> <= sml::state<state_layer_loop_scalar_f32>
-          + sml::completion<event::step_run> [ guard::guard_layer_engram_full{} ]
-          / action::effect_run_layer<route::scalar, activation::f32, true, true>{}
+          + sml::completion<event::step_run> [ guard::guard_layer_engram_growing_generic{} ]
+          / action::effect_run_layer<route::scalar, activation::f32, true, false, false>{}
       , sml::state<state_layer_advance_scalar_f32> <= sml::state<state_layer_loop_scalar_f32>
-          + sml::completion<event::step_run> [ guard::guard_layer_plain_growing{} ]
-          / action::effect_run_layer<route::scalar, activation::f32, false, false>{}
+          + sml::completion<event::step_run> [ guard::guard_layer_engram_full_gqa2{} ]
+          / action::effect_run_layer<route::scalar, activation::f32, true, true, true>{}
       , sml::state<state_layer_advance_scalar_f32> <= sml::state<state_layer_loop_scalar_f32>
-          + sml::completion<event::step_run> [ guard::guard_layer_plain_full{} ]
-          / action::effect_run_layer<route::scalar, activation::f32, false, true>{}
+          + sml::completion<event::step_run> [ guard::guard_layer_engram_full_generic{} ]
+          / action::effect_run_layer<route::scalar, activation::f32, true, true, false>{}
+      , sml::state<state_layer_advance_scalar_f32> <= sml::state<state_layer_loop_scalar_f32>
+          + sml::completion<event::step_run> [ guard::guard_layer_plain_growing_gqa2{} ]
+          / action::effect_run_layer<route::scalar, activation::f32, false, false, true>{}
+      , sml::state<state_layer_advance_scalar_f32> <= sml::state<state_layer_loop_scalar_f32>
+          + sml::completion<event::step_run> [ guard::guard_layer_plain_growing_generic{} ]
+          / action::effect_run_layer<route::scalar, activation::f32, false, false, false>{}
+      , sml::state<state_layer_advance_scalar_f32> <= sml::state<state_layer_loop_scalar_f32>
+          + sml::completion<event::step_run> [ guard::guard_layer_plain_full_gqa2{} ]
+          / action::effect_run_layer<route::scalar, activation::f32, false, true, true>{}
+      , sml::state<state_layer_advance_scalar_f32> <= sml::state<state_layer_loop_scalar_f32>
+          + sml::completion<event::step_run> [ guard::guard_layer_plain_full_generic{} ]
+          / action::effect_run_layer<route::scalar, activation::f32, false, true, false>{}
       , sml::state<state_errored> <= sml::state<state_layer_loop_scalar_f32>
           + sml::completion<event::step_run> [ guard::guard_step_failed{} ]
       , sml::state<state_layer_loop_scalar_f32> <= sml::state<state_layer_advance_scalar_f32>
@@ -161,17 +185,29 @@ struct model {
           + sml::completion<event::step_run> [ guard::guard_step_failed{} ]
 
       , sml::state<state_layer_advance_prepared_avx2_a8> <= sml::state<state_layer_loop_prepared_avx2_a8>
-          + sml::completion<event::step_run> [ guard::guard_layer_engram_growing{} ]
-          / action::effect_run_layer<route::prepared_avx2, activation::a8, true, false>{}
+          + sml::completion<event::step_run> [ guard::guard_layer_engram_growing_gqa2{} ]
+          / action::effect_run_layer<route::prepared_avx2, activation::a8, true, false, true>{}
       , sml::state<state_layer_advance_prepared_avx2_a8> <= sml::state<state_layer_loop_prepared_avx2_a8>
-          + sml::completion<event::step_run> [ guard::guard_layer_engram_full{} ]
-          / action::effect_run_layer<route::prepared_avx2, activation::a8, true, true>{}
+          + sml::completion<event::step_run> [ guard::guard_layer_engram_growing_generic{} ]
+          / action::effect_run_layer<route::prepared_avx2, activation::a8, true, false, false>{}
       , sml::state<state_layer_advance_prepared_avx2_a8> <= sml::state<state_layer_loop_prepared_avx2_a8>
-          + sml::completion<event::step_run> [ guard::guard_layer_plain_growing{} ]
-          / action::effect_run_layer<route::prepared_avx2, activation::a8, false, false>{}
+          + sml::completion<event::step_run> [ guard::guard_layer_engram_full_gqa2{} ]
+          / action::effect_run_layer<route::prepared_avx2, activation::a8, true, true, true>{}
       , sml::state<state_layer_advance_prepared_avx2_a8> <= sml::state<state_layer_loop_prepared_avx2_a8>
-          + sml::completion<event::step_run> [ guard::guard_layer_plain_full{} ]
-          / action::effect_run_layer<route::prepared_avx2, activation::a8, false, true>{}
+          + sml::completion<event::step_run> [ guard::guard_layer_engram_full_generic{} ]
+          / action::effect_run_layer<route::prepared_avx2, activation::a8, true, true, false>{}
+      , sml::state<state_layer_advance_prepared_avx2_a8> <= sml::state<state_layer_loop_prepared_avx2_a8>
+          + sml::completion<event::step_run> [ guard::guard_layer_plain_growing_gqa2{} ]
+          / action::effect_run_layer<route::prepared_avx2, activation::a8, false, false, true>{}
+      , sml::state<state_layer_advance_prepared_avx2_a8> <= sml::state<state_layer_loop_prepared_avx2_a8>
+          + sml::completion<event::step_run> [ guard::guard_layer_plain_growing_generic{} ]
+          / action::effect_run_layer<route::prepared_avx2, activation::a8, false, false, false>{}
+      , sml::state<state_layer_advance_prepared_avx2_a8> <= sml::state<state_layer_loop_prepared_avx2_a8>
+          + sml::completion<event::step_run> [ guard::guard_layer_plain_full_gqa2{} ]
+          / action::effect_run_layer<route::prepared_avx2, activation::a8, false, true, true>{}
+      , sml::state<state_layer_advance_prepared_avx2_a8> <= sml::state<state_layer_loop_prepared_avx2_a8>
+          + sml::completion<event::step_run> [ guard::guard_layer_plain_full_generic{} ]
+          / action::effect_run_layer<route::prepared_avx2, activation::a8, false, true, false>{}
       , sml::state<state_errored> <= sml::state<state_layer_loop_prepared_avx2_a8>
           + sml::completion<event::step_run> [ guard::guard_step_failed{} ]
       , sml::state<state_layer_loop_prepared_avx2_a8> <= sml::state<state_layer_advance_prepared_avx2_a8>
@@ -186,17 +222,29 @@ struct model {
           + sml::completion<event::step_run> [ guard::guard_step_failed{} ]
 
       , sml::state<state_layer_advance_prepared_avx2_f32> <= sml::state<state_layer_loop_prepared_avx2_f32>
-          + sml::completion<event::step_run> [ guard::guard_layer_engram_growing{} ]
-          / action::effect_run_layer<route::prepared_avx2, activation::f32, true, false>{}
+          + sml::completion<event::step_run> [ guard::guard_layer_engram_growing_gqa2{} ]
+          / action::effect_run_layer<route::prepared_avx2, activation::f32, true, false, true>{}
       , sml::state<state_layer_advance_prepared_avx2_f32> <= sml::state<state_layer_loop_prepared_avx2_f32>
-          + sml::completion<event::step_run> [ guard::guard_layer_engram_full{} ]
-          / action::effect_run_layer<route::prepared_avx2, activation::f32, true, true>{}
+          + sml::completion<event::step_run> [ guard::guard_layer_engram_growing_generic{} ]
+          / action::effect_run_layer<route::prepared_avx2, activation::f32, true, false, false>{}
       , sml::state<state_layer_advance_prepared_avx2_f32> <= sml::state<state_layer_loop_prepared_avx2_f32>
-          + sml::completion<event::step_run> [ guard::guard_layer_plain_growing{} ]
-          / action::effect_run_layer<route::prepared_avx2, activation::f32, false, false>{}
+          + sml::completion<event::step_run> [ guard::guard_layer_engram_full_gqa2{} ]
+          / action::effect_run_layer<route::prepared_avx2, activation::f32, true, true, true>{}
       , sml::state<state_layer_advance_prepared_avx2_f32> <= sml::state<state_layer_loop_prepared_avx2_f32>
-          + sml::completion<event::step_run> [ guard::guard_layer_plain_full{} ]
-          / action::effect_run_layer<route::prepared_avx2, activation::f32, false, true>{}
+          + sml::completion<event::step_run> [ guard::guard_layer_engram_full_generic{} ]
+          / action::effect_run_layer<route::prepared_avx2, activation::f32, true, true, false>{}
+      , sml::state<state_layer_advance_prepared_avx2_f32> <= sml::state<state_layer_loop_prepared_avx2_f32>
+          + sml::completion<event::step_run> [ guard::guard_layer_plain_growing_gqa2{} ]
+          / action::effect_run_layer<route::prepared_avx2, activation::f32, false, false, true>{}
+      , sml::state<state_layer_advance_prepared_avx2_f32> <= sml::state<state_layer_loop_prepared_avx2_f32>
+          + sml::completion<event::step_run> [ guard::guard_layer_plain_growing_generic{} ]
+          / action::effect_run_layer<route::prepared_avx2, activation::f32, false, false, false>{}
+      , sml::state<state_layer_advance_prepared_avx2_f32> <= sml::state<state_layer_loop_prepared_avx2_f32>
+          + sml::completion<event::step_run> [ guard::guard_layer_plain_full_gqa2{} ]
+          / action::effect_run_layer<route::prepared_avx2, activation::f32, false, true, true>{}
+      , sml::state<state_layer_advance_prepared_avx2_f32> <= sml::state<state_layer_loop_prepared_avx2_f32>
+          + sml::completion<event::step_run> [ guard::guard_layer_plain_full_generic{} ]
+          / action::effect_run_layer<route::prepared_avx2, activation::f32, false, true, false>{}
       , sml::state<state_errored> <= sml::state<state_layer_loop_prepared_avx2_f32>
           + sml::completion<event::step_run> [ guard::guard_step_failed{} ]
       , sml::state<state_layer_loop_prepared_avx2_f32> <= sml::state<state_layer_advance_prepared_avx2_f32>

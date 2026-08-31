@@ -37,6 +37,12 @@ namespace needle = emel::model::needle;
 
 constexpr char k_decode_case_name[] = "needle/graph/decode_steady_route_w4_qat";
 constexpr char k_prefill_case_name[] = "needle/graph/prefill_512_route_w4_qat";
+constexpr char k_swa_generic_512_case_name[] =
+    "needle/swa/attend_generic_span512";
+constexpr char k_swa_gqa2_512_case_name[] = "needle/swa/attend_gqa2_span512";
+constexpr char k_swa_generic_704_case_name[] =
+    "needle/swa/attend_generic_span704";
+constexpr char k_swa_gqa2_704_case_name[] = "needle/swa/attend_gqa2_span704";
 constexpr char k_fwht_case_name[] = "needle/cq/fwht128_avx2";
 constexpr char k_fwht_iters_env[] = "EMEL_BENCH_NEEDLE_FWHT_ITERS";
 constexpr char k_model_env[] = "EMEL_BENCH_NEEDLE_MODEL";
@@ -45,13 +51,14 @@ constexpr char k_model_id[] = "route_w4_qat_cact";
 constexpr char k_workload_id[] = "needle_graph_single_core_v1";
 constexpr char k_decode_iters_env[] = "EMEL_BENCH_NEEDLE_GRAPH_DECODE_ITERS";
 constexpr char k_prefill_iters_env[] = "EMEL_BENCH_NEEDLE_GRAPH_PREFILL_ITERS";
+constexpr char k_swa_iters_env[] = "EMEL_BENCH_NEEDLE_SWA_ITERS";
 constexpr char k_instrument_cq_env[] = "EMEL_BENCH_NEEDLE_GRAPH_INSTRUMENT_CQ";
 constexpr char k_instrument_graph_env[] =
     "EMEL_BENCH_NEEDLE_GRAPH_INSTRUMENT_COMPONENTS";
 
-// Steady-state decode is measured after a realistic ~100-token prefill; the
-// prefill case runs a 512-token prompt (max_seq_len 2048 bounded).
-constexpr uint32_t k_decode_context_tokens = 100u;
+// Steady-state decode is measured after a 128-token prefill; the prefill case
+// runs a 512-token prompt (max_seq_len 2048 bounded).
+constexpr uint32_t k_decode_context_tokens = 128u;
 constexpr uint32_t k_prefill_case_tokens = 512u;
 
 // Documented libneedle reference lane constants (see file header note).
@@ -86,6 +93,73 @@ bool instrument_cq() noexcept {
 bool instrument_graph() noexcept {
   const char *value = std::getenv(k_instrument_graph_env);
   return value != nullptr && value[0] == '1' && value[1] == '\0';
+}
+
+[[noreturn]] void fail_needle_setup(const char *stage);
+emel::bench::result with_needle_metadata(emel::bench::result out,
+                                         const char *lane,
+                                         const char *backend_id,
+                                         const char *backend_language,
+                                         std::uint64_t output_tokens);
+
+volatile float g_swa_output_sink = 0.0f;
+
+void append_swa_case(std::vector<emel::bench::result> &results,
+                     const emel::bench::config &cfg, const char *name,
+                     const uint32_t span_len, const bool fused) {
+  constexpr uint32_t capacity = 704u;
+  constexpr uint32_t heads = 8u;
+  constexpr uint32_t kv_heads = 4u;
+  constexpr uint32_t head_dim = 64u;
+  std::vector<float> query(static_cast<size_t>(heads) * head_dim);
+  std::vector<float> keys(static_cast<size_t>(kv_heads) * capacity * head_dim);
+  std::vector<float> values(keys.size());
+  std::vector<float> workspace(static_cast<size_t>(span_len) *
+                               (fused ? 2u : 1u));
+  std::vector<float> output(static_cast<size_t>(heads) * head_dim);
+  for (size_t i = 0u; i < query.size(); ++i)
+    query[i] = static_cast<float>(static_cast<int32_t>(i % 53u) - 26) *
+               0.03125f;
+  for (size_t i = 0u; i < keys.size(); ++i) {
+    keys[i] = static_cast<float>(static_cast<int32_t>(i % 79u) - 39) *
+              0.015625f;
+    values[i] = static_cast<float>(static_cast<int32_t>(i % 97u) - 48) *
+                0.0078125f;
+  }
+  const emel::kernel::swa::event::attend_request request{
+      .query = query,
+      .key_cache = keys,
+      .value_cache = values,
+      .position = span_len - 1u,
+      .window_begin = 0u,
+      .capacity = capacity,
+      .heads = heads,
+      .kv_heads = kv_heads,
+      .head_dim = head_dim,
+      .workspace = workspace,
+      .output = output};
+  emel::kernel::swa::sm machine;
+  emel::kernel::swa::event::dispatch_result dispatch_result{};
+  emel::bench::config swa_cfg = cfg;
+  swa_cfg.iterations = read_env_u64_or(k_swa_iters_env, 256u);
+  swa_cfg.runs = cfg.runs;
+  swa_cfg.warmup_iterations = 8u;
+  swa_cfg.warmup_runs = 1u;
+  auto fn = [&]() {
+    const bool ok = fused
+                        ? machine.process_event(
+                              emel::kernel::swa::event::execute_attend_gqa2_avx2{
+                                  request, dispatch_result})
+                        : machine.process_event(
+                              emel::kernel::swa::event::execute_attend{
+                                  request, dispatch_result});
+    if (!ok)
+      fail_needle_setup("swa_direct");
+    g_swa_output_sink = output[0];
+  };
+  results.push_back(with_needle_metadata(
+      emel::bench::measure_case(name, swa_cfg, fn), "emel",
+      fused ? "emel_swa_gqa2_avx2" : "emel_swa_generic", "cpp", 1u));
 }
 
 
@@ -297,8 +371,16 @@ void append_emel_needle_graph_cases(std::vector<result> &results,
   }
 #endif
 
+#if (defined(__x86_64__) || defined(_M_X64)) && defined(__AVX2__) &&           \
+    defined(__FMA__)
+  append_swa_case(results, cfg, k_swa_generic_512_case_name, 512u, false);
+  append_swa_case(results, cfg, k_swa_gqa2_512_case_name, 512u, true);
+  append_swa_case(results, cfg, k_swa_generic_704_case_name, 704u, false);
+  append_swa_case(results, cfg, k_swa_gqa2_704_case_name, 704u, true);
+#endif
+
   {
-    // Steady-state decode: one greedy-shaped decode step per op at ~100-token
+    // Steady-state decode: one greedy-shaped decode step per op at 128-token
     // context depth. The fixture re-arms (init + context prefill) whenever the
     // position budget nears max_seq_len so arbitrary iteration counts stay
     // inside the graph's step-validity guard.

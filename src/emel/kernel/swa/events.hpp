@@ -25,7 +25,7 @@ struct attend_request {
   uint32_t heads = 0u;
   uint32_t kv_heads = 0u;
   uint32_t head_dim = 0u;
-  std::span<float> workspace; // >= position - window_begin + 1 scores
+  std::span<float> workspace; // generic: >= span; GQA2: >= 2 * span
   std::span<float> output;    // heads * head_dim
 };
 
@@ -61,6 +61,13 @@ struct residual_gate_request {
 };
 
 struct execute_attend {
+  const attend_request &request;
+  dispatch_result &result;
+};
+
+// Exact GQA reps=2 AVX2 route. The event is explicit so callers select the
+// geometry/platform specialization before entering the data-plane action.
+struct execute_attend_gqa2_avx2 {
   const attend_request &request;
   dispatch_result &result;
 };

@@ -26,6 +26,33 @@ struct guard_execute_attend {
   }
 };
 
+struct guard_execute_attend_gqa2_avx2 {
+  bool operator()(const event::execute_attend_gqa2_avx2 &ev,
+                  const action::context &) const noexcept {
+#if (defined(__x86_64__) || defined(_M_X64)) && defined(__AVX2__) &&           \
+    defined(__FMA__)
+    const auto &request = ev.request;
+    if (request.kv_heads == 0u || request.heads != request.kv_heads * 2u ||
+        request.head_dim == 0u || request.capacity == 0u ||
+        request.window_begin > request.position)
+      return false;
+    const uint32_t span_len = request.position - request.window_begin + 1u;
+    const uint64_t cache = static_cast<uint64_t>(request.kv_heads) *
+                           request.capacity * request.head_dim;
+    const uint64_t q_len =
+        static_cast<uint64_t>(request.heads) * request.head_dim;
+    return span_len <= request.capacity &&
+           request.workspace.size() >= static_cast<uint64_t>(span_len) * 2u &&
+           request.query.size() >= q_len && request.output.size() >= q_len &&
+           request.key_cache.size() >= cache &&
+           request.value_cache.size() >= cache;
+#else
+    (void)ev;
+    return false;
+#endif
+  }
+};
+
 struct guard_execute_cache_write {
   bool operator()(const event::execute_cache_write &ev,
                   const action::context &) const noexcept {

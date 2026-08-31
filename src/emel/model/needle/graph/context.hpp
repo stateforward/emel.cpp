@@ -100,7 +100,7 @@ struct context {
     attn_out.resize(attn_dim);
     gate_logits.resize(attn_dim);
     hada_workspace.resize(geo.hada_n);
-    attend_workspace.resize(geo.kv_window);
+    attend_workspace.resize(static_cast<uint64_t>(geo.kv_window) * 2u);
     key_cache.resize(cache_floats);
     value_cache.resize(cache_floats);
     history_tokens.resize(geo.max_seq_len);

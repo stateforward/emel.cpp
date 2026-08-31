@@ -50,6 +50,68 @@ dot_avx2(const float *lhs, const float *rhs, const uint32_t dim) noexcept {
 }
 
 EMEL_KERNEL_SWA_AVX2_TARGET inline void
+dot_pair_avx2(const float *lhs0, const float *lhs1, const float *rhs,
+              const uint32_t dim, float &out0, float &out1) noexcept {
+#if defined(__x86_64__) || defined(_M_X64)
+  __m256 sum0 = _mm256_setzero_ps();
+  __m256 sum1 = _mm256_setzero_ps();
+  uint32_t i = 0u;
+  for (; i + 8u <= dim; i += 8u) {
+    const __m256 rhs_v = _mm256_loadu_ps(rhs + i);
+    sum0 = _mm256_fmadd_ps(_mm256_loadu_ps(lhs0 + i), rhs_v, sum0);
+    sum1 = _mm256_fmadd_ps(_mm256_loadu_ps(lhs1 + i), rhs_v, sum1);
+  }
+  alignas(32) float lanes0[8];
+  alignas(32) float lanes1[8];
+  _mm256_store_ps(lanes0, sum0);
+  _mm256_store_ps(lanes1, sum1);
+  out0 = lanes0[0] + lanes0[1] + lanes0[2] + lanes0[3] + lanes0[4] +
+         lanes0[5] + lanes0[6] + lanes0[7];
+  out1 = lanes1[0] + lanes1[1] + lanes1[2] + lanes1[3] + lanes1[4] +
+         lanes1[5] + lanes1[6] + lanes1[7];
+  for (; i < dim; ++i) {
+    out0 += lhs0[i] * rhs[i];
+    out1 += lhs1[i] * rhs[i];
+  }
+#else
+  out0 = 0.0f;
+  out1 = 0.0f;
+  for (uint32_t i = 0u; i < dim; ++i) {
+    out0 += lhs0[i] * rhs[i];
+    out1 += lhs1[i] * rhs[i];
+  }
+#endif
+}
+
+EMEL_KERNEL_SWA_AVX2_TARGET inline void accumulate_value_pair_avx2(
+    float *output0, float *output1, const float *values, const float weight0,
+    const float weight1, const uint32_t dim) noexcept {
+#if defined(__x86_64__) || defined(_M_X64)
+  const __m256 weight0_v = _mm256_set1_ps(weight0);
+  const __m256 weight1_v = _mm256_set1_ps(weight1);
+  uint32_t i = 0u;
+  for (; i + 8u <= dim; i += 8u) {
+    const __m256 value_v = _mm256_loadu_ps(values + i);
+    _mm256_storeu_ps(output0 + i,
+                     _mm256_fmadd_ps(weight0_v, value_v,
+                                     _mm256_loadu_ps(output0 + i)));
+    _mm256_storeu_ps(output1 + i,
+                     _mm256_fmadd_ps(weight1_v, value_v,
+                                     _mm256_loadu_ps(output1 + i)));
+  }
+  for (; i < dim; ++i) {
+    output0[i] += weight0 * values[i];
+    output1[i] += weight1 * values[i];
+  }
+#else
+  for (uint32_t i = 0u; i < dim; ++i) {
+    output0[i] += weight0 * values[i];
+    output1[i] += weight1 * values[i];
+  }
+#endif
+}
+
+EMEL_KERNEL_SWA_AVX2_TARGET inline void
 accumulate_value_avx2(float *output, const float *values, const float weight,
                       const uint32_t dim) noexcept {
 #if defined(__x86_64__) || defined(_M_X64)
@@ -123,6 +185,97 @@ struct effect_execute_attend {
           accumulate_value_avx2(output_row, value,
                                 request.workspace[offset] * inv_sum,
                                 request.head_dim);
+          value += request.head_dim;
+        }
+      };
+      value_segment(first_slot, first_len);
+      value_segment(0u, second_len);
+    }
+    ev.result.accepted = true;
+  }
+};
+
+struct effect_execute_attend_gqa2_avx2 {
+  EMEL_KERNEL_SWA_AVX2_TARGET void
+  operator()(const event::execute_attend_gqa2_avx2 &ev,
+             context &) const noexcept {
+    const auto &request = ev.request;
+    const uint32_t span_len = request.position - request.window_begin + 1u;
+    const float inv_scale =
+        1.0f / std::sqrt(static_cast<float>(request.head_dim));
+    const size_t head_stride =
+        static_cast<size_t>(request.capacity) * request.head_dim;
+    const uint32_t first_slot = request.window_begin % request.capacity;
+    const uint32_t first_len =
+        std::min(span_len, request.capacity - first_slot);
+    const uint32_t second_len = span_len - first_len;
+
+    for (uint32_t kv_head = 0u; kv_head < request.kv_heads; ++kv_head) {
+      const uint32_t head0 = kv_head * 2u;
+      const uint32_t head1 = head0 + 1u;
+      const float *query0 =
+          request.query.data() + static_cast<size_t>(head0) * request.head_dim;
+      const float *query1 =
+          request.query.data() + static_cast<size_t>(head1) * request.head_dim;
+      const float *key_base =
+          request.key_cache.data() + static_cast<size_t>(kv_head) * head_stride;
+      const float *value_base = request.value_cache.data() +
+                                static_cast<size_t>(kv_head) * head_stride;
+      float *score0 = request.workspace.data();
+      float *score1 = request.workspace.data() + span_len;
+      float max0 = -3.402823466e+38f;
+      float max1 = -3.402823466e+38f;
+      uint32_t offset = 0u;
+      const auto score_segment = [&](const uint32_t slot_begin,
+                                     const uint32_t count) {
+        const float *key =
+            key_base + static_cast<size_t>(slot_begin) * request.head_dim;
+        for (uint32_t row = 0u; row < count; ++row, ++offset) {
+          float dot0 = 0.0f;
+          float dot1 = 0.0f;
+          dot_pair_avx2(query0, query1, key, request.head_dim, dot0, dot1);
+          const float value0 = dot0 * inv_scale;
+          const float value1 = dot1 * inv_scale;
+          score0[offset] = value0;
+          score1[offset] = value1;
+          max0 = std::max(max0, value0);
+          max1 = std::max(max1, value1);
+          key += request.head_dim;
+        }
+      };
+      score_segment(first_slot, first_len);
+      score_segment(0u, second_len);
+
+      float sum0 = 0.0f;
+      for (offset = 0u; offset < span_len; ++offset) {
+        const float weight = std::exp(score0[offset] - max0);
+        score0[offset] = weight;
+        sum0 += weight;
+      }
+      float sum1 = 0.0f;
+      for (offset = 0u; offset < span_len; ++offset) {
+        const float weight = std::exp(score1[offset] - max1);
+        score1[offset] = weight;
+        sum1 += weight;
+      }
+      const float inv_sum0 = 1.0f / sum0;
+      const float inv_sum1 = 1.0f / sum1;
+      float *output0 =
+          request.output.data() + static_cast<size_t>(head0) * request.head_dim;
+      float *output1 =
+          request.output.data() + static_cast<size_t>(head1) * request.head_dim;
+      std::fill_n(output0, request.head_dim, 0.0f);
+      std::fill_n(output1, request.head_dim, 0.0f);
+      offset = 0u;
+      const auto value_segment = [&](const uint32_t slot_begin,
+                                     const uint32_t count) {
+        const float *value =
+            value_base + static_cast<size_t>(slot_begin) * request.head_dim;
+        for (uint32_t row = 0u; row < count; ++row, ++offset) {
+          accumulate_value_pair_avx2(output0, output1, value,
+                                     score0[offset] * inv_sum0,
+                                     score1[offset] * inv_sum1,
+                                     request.head_dim);
           value += request.head_dim;
         }
       };

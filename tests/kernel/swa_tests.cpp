@@ -1,4 +1,7 @@
 #include <array>
+#include <cstring>
+#include <vector>
+
 #include <doctest/doctest.h>
 
 #include "emel/kernel/detail.hpp"
@@ -7,6 +10,103 @@
 namespace {
 
 using emel::kernel::swa::event::dispatch_result;
+
+
+void fill_gqa2_fixture(std::vector<float> &query, std::vector<float> &key_cache,
+                       std::vector<float> &value_cache,
+                       const uint32_t capacity) {
+  constexpr uint32_t heads = 8u;
+  constexpr uint32_t kv_heads = 4u;
+  constexpr uint32_t head_dim = 64u;
+  for (uint32_t head = 0u; head < heads; ++head) {
+    for (uint32_t col = 0u; col < head_dim; ++col) {
+      const int32_t signed_value =
+          static_cast<int32_t>((head * 37u + col * 13u) % 61u) - 30;
+      query[static_cast<size_t>(head) * head_dim + col] =
+          static_cast<float>(signed_value) * 0.03125f;
+    }
+  }
+  for (uint32_t head = 0u; head < kv_heads; ++head) {
+    for (uint32_t slot = 0u; slot < capacity; ++slot) {
+      for (uint32_t col = 0u; col < head_dim; ++col) {
+        const size_t index =
+            (static_cast<size_t>(head) * capacity + slot) * head_dim + col;
+        const int32_t key_value = static_cast<int32_t>(
+                                      (head * 29u + slot * 7u + col * 17u) %
+                                      83u) -
+                                  41;
+        const int32_t value_value = static_cast<int32_t>(
+                                        (head * 31u + slot * 19u + col * 5u) %
+                                        97u) -
+                                    48;
+        key_cache[index] = static_cast<float>(key_value) * 0.015625f;
+        value_cache[index] = static_cast<float>(value_value) * 0.0078125f;
+      }
+    }
+  }
+}
+
+void check_gqa2_matches_generic(const uint32_t capacity,
+                                const uint32_t window_begin,
+                                const uint32_t position) {
+#if (defined(__x86_64__) || defined(_M_X64)) && defined(__AVX2__) &&           \
+    defined(__FMA__)
+  constexpr uint32_t heads = 8u;
+  constexpr uint32_t kv_heads = 4u;
+  constexpr uint32_t head_dim = 64u;
+  const uint32_t span_len = position - window_begin + 1u;
+  std::vector<float> query(static_cast<size_t>(heads) * head_dim);
+  std::vector<float> key_cache(static_cast<size_t>(kv_heads) * capacity *
+                               head_dim);
+  std::vector<float> value_cache(static_cast<size_t>(kv_heads) * capacity *
+                                 head_dim);
+  fill_gqa2_fixture(query, key_cache, value_cache, capacity);
+  std::vector<float> generic_workspace(span_len);
+  std::vector<float> fused_workspace(static_cast<size_t>(span_len) * 2u);
+  std::vector<float> generic_output(static_cast<size_t>(heads) * head_dim);
+  std::vector<float> fused_output(static_cast<size_t>(heads) * head_dim);
+  const emel::kernel::swa::event::attend_request generic_request{
+      .query = query,
+      .key_cache = key_cache,
+      .value_cache = value_cache,
+      .position = position,
+      .window_begin = window_begin,
+      .capacity = capacity,
+      .heads = heads,
+      .kv_heads = kv_heads,
+      .head_dim = head_dim,
+      .workspace = generic_workspace,
+      .output = generic_output};
+  const emel::kernel::swa::event::attend_request fused_request{
+      .query = query,
+      .key_cache = key_cache,
+      .value_cache = value_cache,
+      .position = position,
+      .window_begin = window_begin,
+      .capacity = capacity,
+      .heads = heads,
+      .kv_heads = kv_heads,
+      .head_dim = head_dim,
+      .workspace = fused_workspace,
+      .output = fused_output};
+  emel::kernel::swa::sm generic_machine;
+  emel::kernel::swa::sm fused_machine;
+  dispatch_result generic_result{};
+  dispatch_result fused_result{};
+  REQUIRE(generic_machine.process_event(
+      emel::kernel::swa::event::execute_attend{generic_request,
+                                               generic_result}));
+  REQUIRE(fused_machine.process_event(
+      emel::kernel::swa::event::execute_attend_gqa2_avx2{fused_request,
+                                                         fused_result}));
+  CHECK(std::memcmp(generic_output.data(), fused_output.data(),
+                    generic_output.size() * sizeof(float)) == 0);
+#else
+  (void)capacity;
+  (void)window_begin;
+  (void)position;
+#endif
+}
 
 } // namespace
 
@@ -49,6 +149,70 @@ TEST_CASE("swa attend computes grouped sliding-window softmax attention") {
   CHECK(output[1] == doctest::Approx(0.5640538930892944f));
   CHECK(output[2] == doctest::Approx(1.0458049774169922f));
   CHECK(output[3] == doctest::Approx(0.8022611737251282f));
+}
+
+TEST_CASE("swa GQA2 AVX2 matches generic attention bitwise") {
+  SUBCASE("span one") { check_gqa2_matches_generic(704u, 17u, 17u); }
+  SUBCASE("ring wrap") { check_gqa2_matches_generic(8u, 6u, 10u); }
+  SUBCASE("full pinned window") {
+    check_gqa2_matches_generic(704u, 701u, 1404u);
+  }
+}
+
+TEST_CASE("swa GQA2 route rejects incomplete workspace and reps mismatch") {
+#if (defined(__x86_64__) || defined(_M_X64)) && defined(__AVX2__) &&           \
+    defined(__FMA__)
+  constexpr uint32_t capacity = 4u;
+  constexpr uint32_t head_dim = 64u;
+  std::vector<float> query(6u * head_dim);
+  std::vector<float> key_cache(2u * capacity * head_dim);
+  std::vector<float> value_cache(2u * capacity * head_dim);
+  std::vector<float> short_workspace(7u);
+  std::vector<float> generic_workspace(4u);
+  std::vector<float> output(6u * head_dim);
+  const emel::kernel::swa::event::attend_request mismatch_request{
+      .query = query,
+      .key_cache = key_cache,
+      .value_cache = value_cache,
+      .position = 3u,
+      .window_begin = 0u,
+      .capacity = capacity,
+      .heads = 6u,
+      .kv_heads = 2u,
+      .head_dim = head_dim,
+      .workspace = short_workspace,
+      .output = output};
+  emel::kernel::swa::sm machine;
+  dispatch_result result{};
+  CHECK_FALSE(machine.process_event(
+      emel::kernel::swa::event::execute_attend_gqa2_avx2{mismatch_request,
+                                                         result}));
+
+  auto generic_request = mismatch_request;
+  generic_request.workspace = generic_workspace;
+  dispatch_result generic_result{};
+  REQUIRE(machine.process_event(emel::kernel::swa::event::execute_attend{
+      generic_request, generic_result}));
+
+  std::vector<float> query_gqa2(4u * head_dim);
+  std::vector<float> output_gqa2(4u * head_dim);
+  const emel::kernel::swa::event::attend_request short_request{
+      .query = query_gqa2,
+      .key_cache = key_cache,
+      .value_cache = value_cache,
+      .position = 3u,
+      .window_begin = 0u,
+      .capacity = capacity,
+      .heads = 4u,
+      .kv_heads = 2u,
+      .head_dim = head_dim,
+      .workspace = short_workspace,
+      .output = output_gqa2};
+  dispatch_result short_result{};
+  CHECK_FALSE(machine.process_event(
+      emel::kernel::swa::event::execute_attend_gqa2_avx2{short_request,
+                                                         short_result}));
+#endif
 }
 
 TEST_CASE("swa cache write lands rows at position modulo capacity") {

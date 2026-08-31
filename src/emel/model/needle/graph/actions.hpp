@@ -501,11 +501,11 @@ inline bool compute_engram(context &ctx) noexcept {
     return ok;
   });
 }
-// One transformer layer over the current single-token step. `engram_site` and
-// `window_full` are guard-selected at the transition; everything inside is
-// compile-time conditionals plus bounded data-plane work.
+// One transformer layer over the current single-token step. `engram_site`,
+// `window_full`, and `attend_gqa2` are guard-selected at the transition;
+// everything inside is compile-time conditionals plus bounded data-plane work.
 template <route_kind route, activation_route_kind activation_route,
-          bool engram_site, bool window_full>
+          bool engram_site, bool window_full, bool attend_gqa2>
 inline bool compute_layer(context &ctx, event::step_ctx &step) noexcept {
   const auto &bound = *ctx.bound;
   const auto &geo = bound.geo;
@@ -685,9 +685,15 @@ inline bool compute_layer(context &ctx, event::step_ctx &step) noexcept {
   emel::kernel::swa::event::dispatch_result attend_result{};
   ok = ok && time_component(ctx, ctx.timing.attention_attend_nanoseconds,
                             [&]() noexcept {
-                              return ctx.swa.process_event(
-                                  emel::kernel::swa::event::execute_attend{
-                                      attend_request, attend_result});
+                              if constexpr (attend_gqa2) {
+                                return ctx.swa.process_event(
+                                    emel::kernel::swa::event::execute_attend_gqa2_avx2{
+                                        attend_request, attend_result});
+                              } else {
+                                return ctx.swa.process_event(
+                                    emel::kernel::swa::event::execute_attend{
+                                        attend_request, attend_result});
+                              }
                             });
 
   const emel::kernel::swa::event::gate_mul_request gate_request{
@@ -867,12 +873,13 @@ struct effect_compute_engram {
 };
 
 template <route_kind route, activation_route_kind activation_route,
-          bool engram_site, bool window_full>
+          bool engram_site, bool window_full, bool attend_gqa2>
 struct effect_run_layer {
   void operator()(const event::step_run &ev, context &ctx) const noexcept {
-    fold_error(ev.ctx.err,
-               compute_layer<route, activation_route, engram_site, window_full>(
-                   ctx, ev.ctx));
+    fold_error(
+        ev.ctx.err,
+        compute_layer<route, activation_route, engram_site, window_full,
+                      attend_gqa2>(ctx, ev.ctx));
   }
 };
 

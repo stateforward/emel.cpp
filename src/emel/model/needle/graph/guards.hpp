@@ -63,6 +63,26 @@ struct guard_route_scalar {
   }
 };
 
+struct guard_attend_gqa2 {
+  bool operator()(const event::step_run &ev,
+                  const action::context &ctx) const noexcept {
+    const auto &geo = ctx.bound->geo;
+    return ev.ctx.err == emel::error::cast(error::none) &&
+           k_avx2_route_available &&
+           geo.num_heads == geo.num_kv_heads * 2u && geo.head_dim > 0u &&
+           ctx.attend_workspace.size() >=
+               static_cast<uint64_t>(geo.kv_window) * 2u;
+  }
+};
+
+struct guard_attend_generic {
+  bool operator()(const event::step_run &ev,
+                  const action::context &ctx) const noexcept {
+    return ev.ctx.err == emel::error::cast(error::none) &&
+           !guard_attend_gqa2{}(ev, ctx);
+  }
+};
+
 // The `.cact` deployment header carries kv_bits=8 for the W4A8 artifact. The
 // legacy f32 parity route remains explicit for synthetic/legacy contracts;
 // production route selection never hides this numeric mode inside actions.
@@ -272,32 +292,67 @@ struct guard_engram_absent_ok {
   }
 };
 
-struct guard_layer_engram_growing {
+struct guard_layer_engram_growing_gqa2 {
   bool operator()(const event::step_run &ev,
                   const action::context &ctx) const noexcept {
     return guard_layer_engram_site{}(ev, ctx) &&
-           guard_window_growing{}(ev, ctx);
+           guard_window_growing{}(ev, ctx) && guard_attend_gqa2{}(ev, ctx);
   }
 };
 
-struct guard_layer_engram_full {
+struct guard_layer_engram_growing_generic {
   bool operator()(const event::step_run &ev,
                   const action::context &ctx) const noexcept {
-    return guard_layer_engram_site{}(ev, ctx) && guard_window_full{}(ev, ctx);
+    return guard_layer_engram_site{}(ev, ctx) &&
+           guard_window_growing{}(ev, ctx) && guard_attend_generic{}(ev, ctx);
   }
 };
 
-struct guard_layer_plain_growing {
+struct guard_layer_engram_full_gqa2 {
   bool operator()(const event::step_run &ev,
                   const action::context &ctx) const noexcept {
-    return guard_layer_plain{}(ev, ctx) && guard_window_growing{}(ev, ctx);
+    return guard_layer_engram_site{}(ev, ctx) && guard_window_full{}(ev, ctx) &&
+           guard_attend_gqa2{}(ev, ctx);
   }
 };
 
-struct guard_layer_plain_full {
+struct guard_layer_engram_full_generic {
   bool operator()(const event::step_run &ev,
                   const action::context &ctx) const noexcept {
-    return guard_layer_plain{}(ev, ctx) && guard_window_full{}(ev, ctx);
+    return guard_layer_engram_site{}(ev, ctx) && guard_window_full{}(ev, ctx) &&
+           guard_attend_generic{}(ev, ctx);
+  }
+};
+
+struct guard_layer_plain_growing_gqa2 {
+  bool operator()(const event::step_run &ev,
+                  const action::context &ctx) const noexcept {
+    return guard_layer_plain{}(ev, ctx) && guard_window_growing{}(ev, ctx) &&
+           guard_attend_gqa2{}(ev, ctx);
+  }
+};
+
+struct guard_layer_plain_growing_generic {
+  bool operator()(const event::step_run &ev,
+                  const action::context &ctx) const noexcept {
+    return guard_layer_plain{}(ev, ctx) && guard_window_growing{}(ev, ctx) &&
+           guard_attend_generic{}(ev, ctx);
+  }
+};
+
+struct guard_layer_plain_full_gqa2 {
+  bool operator()(const event::step_run &ev,
+                  const action::context &ctx) const noexcept {
+    return guard_layer_plain{}(ev, ctx) && guard_window_full{}(ev, ctx) &&
+           guard_attend_gqa2{}(ev, ctx);
+  }
+};
+
+struct guard_layer_plain_full_generic {
+  bool operator()(const event::step_run &ev,
+                  const action::context &ctx) const noexcept {
+    return guard_layer_plain{}(ev, ctx) && guard_window_full{}(ev, ctx) &&
+           guard_attend_generic{}(ev, ctx);
   }
 };
 
