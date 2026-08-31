@@ -284,8 +284,13 @@ TEST_CASE("mimi codec facade initializes, encodes, and decodes frames") {
   mimi::event::diagnostics diagnostics_initialized{};
   REQUIRE(machine.process_event(
       mimi::event::capture_diagnostics{diagnostics_initialized}));
+#if defined(__aarch64__) || defined(_M_ARM64)
   CHECK(diagnostics_initialized.projection_prepare_calls > 0u);
   CHECK(diagnostics_initialized.projection_prepared_floats > 0u);
+#else
+  CHECK(diagnostics_initialized.projection_prepare_calls == 0u);
+  CHECK(diagnostics_initialized.projection_prepared_floats == 0u);
+#endif
 
   const auto pcm = deterministic_pcm(g_frame_samples);
   std::vector<int32_t> codes(static_cast<size_t>(g_n_q), -1);
