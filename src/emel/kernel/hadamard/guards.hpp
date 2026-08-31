@@ -14,16 +14,30 @@ inline bool power_of_two(const uint32_t n) noexcept {
   return n != 0u && (n & (n - 1u)) == 0u;
 }
 
+template <std::size_t bytes_per_element,
+          std::size_t byte_capacity =
+              std::numeric_limits<std::size_t>::max()>
+constexpr bool fits_size_capacity(const uint32_t count) noexcept {
+  static_assert(bytes_per_element != 0u);
+  if constexpr (byte_capacity / bytes_per_element <
+                std::numeric_limits<uint32_t>::max())
+    return count <= byte_capacity / bytes_per_element;
+  else
+    return true;
+}
+
 inline bool spans_valid(const event::mlp_row_request &request) noexcept {
   const uint64_t d_bytes64 = static_cast<uint64_t>(request.hada_n) * 2u;
   if (request.d_model == 0u || !power_of_two(request.hada_n) ||
       request.hada_n < request.d_model ||
-      request.hada_n > std::numeric_limits<std::size_t>::max() / sizeof(float) ||
-      request.d_model > std::numeric_limits<std::size_t>::max() / sizeof(float) ||
-      d_bytes64 > std::numeric_limits<std::size_t>::max())
+      !fits_size_capacity<sizeof(float)>(request.hada_n) ||
+      !fits_size_capacity<sizeof(float)>(request.d_model) ||
+      !fits_size_capacity<sizeof(uint16_t)>(request.hada_n))
     return false;
+
   const auto d_bytes = static_cast<std::size_t>(d_bytes64);
-  const auto model_bytes = static_cast<std::size_t>(request.d_model) * sizeof(float);
+  const auto model_bytes =
+      static_cast<std::size_t>(request.d_model) * sizeof(float);
   const auto workspace_bytes =
       static_cast<std::size_t>(request.hada_n) * sizeof(float);
   if (request.input.data() == nullptr || request.skip.data() == nullptr ||

@@ -11,6 +11,15 @@ namespace {
 
 using emel::kernel::hadamard::event::dispatch_result;
 
+static_assert(emel::kernel::hadamard::guard::fits_size_capacity<
+              sizeof(float), UINT32_MAX>(UINT32_MAX / sizeof(float)));
+static_assert(!emel::kernel::hadamard::guard::fits_size_capacity<
+              sizeof(float), UINT32_MAX>(UINT32_MAX / sizeof(float) + 1u));
+static_assert(emel::kernel::hadamard::guard::fits_size_capacity<
+              sizeof(uint16_t), UINT32_MAX>(UINT32_MAX / sizeof(uint16_t)));
+static_assert(!emel::kernel::hadamard::guard::fits_size_capacity<
+              sizeof(uint16_t), UINT32_MAX>(UINT32_MAX / sizeof(uint16_t) + 1u));
+
 std::array<uint8_t, 8> pack_f16_bits(const std::array<uint16_t, 4> &bits) {
   std::array<uint8_t, 8> bytes{};
   std::memcpy(bytes.data(), bits.data(), bytes.size());
