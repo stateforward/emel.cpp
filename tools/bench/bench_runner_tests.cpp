@@ -20,8 +20,12 @@
 #include "bench_runner_registry.hpp"
 #include "generation_workload_manifest.hpp"
 
+#if defined(_WIN32)
+#include <process.h>
+#endif
 #if !defined(_WIN32)
 #include <sys/wait.h>
+#include <unistd.h>
 #endif
 
 namespace {
@@ -166,6 +170,14 @@ process_capture run_command_capture(const std::string &command,
   capture.exit_code = WEXITSTATUS(status);
 #endif
   return capture;
+}
+
+std::uint64_t current_process_id() noexcept {
+#if defined(_WIN32)
+  return static_cast<std::uint64_t>(::_getpid());
+#else
+  return static_cast<std::uint64_t>(::getpid());
+#endif
 }
 
 process_capture run_bench_runner_capture(const std::vector<std::string> &args,
@@ -446,6 +458,91 @@ process_capture run_suite_bench_capture(const std::string &suite,
   return capture;
 }
 
+std::size_t count_benchmark_rows(const std::string_view output) {
+  std::size_t count = 0u;
+  std::size_t cursor = 0u;
+  while (cursor < output.size()) {
+    const std::size_t end = output.find('\n', cursor);
+    const std::string_view line =
+        end == std::string_view::npos
+            ? output.substr(cursor)
+            : output.substr(cursor, end - cursor);
+    if (!line.empty() && line.front() != '#') {
+      ++count;
+    }
+    cursor = end == std::string_view::npos ? output.size() : end + 1u;
+  }
+  return count;
+}
+
+process_capture run_needle_graph_bench_capture(const std::string &mode,
+                                               const std::string &tag) {
+  static std::uint64_t invocation = 0u;
+  const std::filesystem::path tmp_root =
+      std::filesystem::temp_directory_path() /
+      ("emel-bench-runner-tests-" + std::to_string(current_process_id()));
+  std::error_code ec;
+  REQUIRE(std::filesystem::create_directory(tmp_root, ec));
+  REQUIRE_FALSE(ec);
+#if !defined(_WIN32)
+  std::filesystem::permissions(
+      tmp_root, std::filesystem::perms::owner_all,
+      std::filesystem::perm_options::replace, ec);
+  REQUIRE_FALSE(ec);
+#endif
+  const std::filesystem::path tmp_dir =
+      tmp_root / (tag + "-" + std::to_string(++invocation));
+  std::filesystem::remove_all(tmp_dir, ec);
+  REQUIRE_FALSE(ec);
+  REQUIRE(std::filesystem::create_directories(tmp_dir));
+  const std::filesystem::path stdout_path = tmp_dir / "stdout.txt";
+  const std::filesystem::path stderr_path = tmp_dir / "stderr.txt";
+
+  std::string command;
+#if defined(_WIN32)
+  command = "set EMEL_BENCH_SUITE=needle_graph && ";
+  command += "set EMEL_BENCH_ITERS=1 && ";
+  command += "set EMEL_BENCH_RUNS=1 && ";
+  command += "set EMEL_BENCH_WARMUP_ITERS=0 && ";
+  command += "set EMEL_BENCH_WARMUP_RUNS=0 && ";
+  command += "set EMEL_BENCH_NEEDLE_GRAPH_DECODE_ITERS=1 && ";
+  command += "set EMEL_BENCH_NEEDLE_GRAPH_PREFILL_ITERS=1 && ";
+  command += "set EMEL_BENCH_NEEDLE_HADAMARD_ITERS=1 && ";
+  command += "set EMEL_BENCH_NEEDLE_FWHT_ITERS=1 && ";
+  command += "set EMEL_BENCH_NEEDLE_SWA_ITERS=1 && ";
+  command += quote_arg_windows(bench_runner_binary_path().string());
+  command += " --mode=" + mode + " > ";
+  command += quote_arg_windows(stdout_path.string());
+  command += " 2> ";
+  command += quote_arg_windows(stderr_path.string());
+#else
+  command = "ulimit -s 8192; ";
+  command += "EMEL_BENCH_SUITE=needle_graph ";
+  command += "EMEL_BENCH_ITERS=1 ";
+  command += "EMEL_BENCH_RUNS=1 ";
+  command += "EMEL_BENCH_WARMUP_ITERS=0 ";
+  command += "EMEL_BENCH_WARMUP_RUNS=0 ";
+  command += "EMEL_BENCH_NEEDLE_GRAPH_DECODE_ITERS=1 ";
+  command += "EMEL_BENCH_NEEDLE_GRAPH_PREFILL_ITERS=1 ";
+  command += "EMEL_BENCH_NEEDLE_HADAMARD_ITERS=1 ";
+  command += "EMEL_BENCH_NEEDLE_FWHT_ITERS=1 ";
+  command += "EMEL_BENCH_NEEDLE_SWA_ITERS=1 ";
+  command += quote_arg_posix(bench_runner_binary_path().string());
+  command += " --mode=" + mode + " > ";
+  command += quote_arg_posix(stdout_path.string());
+  command += " 2> ";
+  command += quote_arg_posix(stderr_path.string());
+#endif
+
+  const process_capture capture =
+      run_command_capture(command, stdout_path, stderr_path);
+  std::filesystem::remove_all(tmp_dir, ec);
+  CHECK_FALSE(ec);
+  std::filesystem::remove(tmp_root, ec);
+  CHECK_FALSE(ec);
+  return capture;
+}
+
 process_capture run_diarization_bench_capture(const std::string &mode,
                                               const bool emit_jsonl = false) {
   const std::filesystem::path tmp_dir =
@@ -554,6 +651,44 @@ std::string find_line_with_prefix(const std::string &haystack,
   return haystack.substr(pos, line_end - pos);
 }
 } // namespace
+
+TEST_CASE("needle graph compare omits EMEL-only microbench rows") {
+#if defined(__x86_64__) || defined(_M_X64)
+  const process_capture snapshot =
+      run_needle_graph_bench_capture("emel", "needle-graph-emel");
+  REQUIRE(snapshot.exit_code == 0);
+  CHECK(snapshot.stderr_text.find("error:") == std::string::npos);
+  CHECK(count_benchmark_rows(snapshot.stdout_text) >= 4u);
+#if defined(__AVX2__) && defined(__FMA__) && defined(__F16C__)
+  CHECK(count_benchmark_rows(snapshot.stdout_text) == 13u);
+  CHECK(snapshot.stdout_text.find("needle/cq/fwht128_avx2 ") !=
+        std::string::npos);
+  CHECK(snapshot.stdout_text.find(
+            "# needle_microbenchmark: lane=emel case=needle/cq/fwht128_avx2 "
+            "proof_status=measurement_only ") != std::string::npos);
+  CHECK(snapshot.stdout_text.find("needle/hadamard/mlp512_scalar ") !=
+        std::string::npos);
+  CHECK(snapshot.stdout_text.find(
+            "needle/swa/attend_gqa2_vector_exp_span704 ") !=
+        std::string::npos);
+#endif
+
+  const process_capture compare =
+      run_needle_graph_bench_capture("compare", "needle-graph-compare");
+  REQUIRE(compare.exit_code == 0);
+  CHECK(compare.stderr_text.find("case count mismatch") == std::string::npos);
+  CHECK(compare.stderr_text.find("case mismatch") == std::string::npos);
+  CHECK(count_benchmark_rows(compare.stdout_text) == 4u);
+  CHECK(compare.stdout_text.find(
+            "needle/graph/decode_steady_route_w4_qat_serial emel.cpp ") !=
+        std::string::npos);
+  CHECK(compare.stdout_text.find("libneedle-recorded") != std::string::npos);
+  CHECK(compare.stdout_text.find("needle/cq/fwht128_avx2 ") ==
+        std::string::npos);
+  CHECK(compare.stdout_text.find("needle/hadamard/") == std::string::npos);
+  CHECK(compare.stdout_text.find("needle/swa/") == std::string::npos);
+#endif
+}
 
 TEST_CASE(
     "bench_runner generation compare keeps bounded maintained Liquid fixture") {

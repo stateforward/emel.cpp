@@ -87,6 +87,10 @@ constexpr char k_measurement_note[] =
     "source=user_supplied_single_core_same_host_class "
     "target_decode_tps=435";
 
+constexpr char k_internal_microbenchmark_note[] =
+    "proof_status=measurement_only "
+    "comparison_mode=emel_internal_microbenchmark";
+
 std::uint64_t read_env_u64_or(const char *name,
                               const std::uint64_t fallback) noexcept {
   const char *value = std::getenv(name);
@@ -118,6 +122,8 @@ emel::bench::result with_needle_metadata(emel::bench::result out,
                                          const char *backend_language,
                                          std::uint64_t output_tokens);
 std::uint64_t benchmark_timestamp_now_ns() noexcept;
+emel::bench::result with_internal_microbenchmark_metadata(
+    emel::bench::result out, const char *backend_id);
 
 volatile float g_swa_output_sink = 0.0f;
 volatile float g_hadamard_output_sink = 0.0f;
@@ -175,9 +181,9 @@ void append_hadamard_case(std::vector<emel::bench::result> &results,
       fail_needle_setup("hadamard_direct");
     g_hadamard_output_sink = output[0];
   };
-  results.push_back(with_needle_metadata(
-      emel::bench::measure_case(name, hadamard_cfg, fn), "emel",
-      avx2 ? "emel_hadamard_avx2" : "emel_hadamard_scalar", "cpp", 1u));
+  results.push_back(with_internal_microbenchmark_metadata(
+      emel::bench::measure_case(name, hadamard_cfg, fn),
+      avx2 ? "emel_hadamard_avx2" : "emel_hadamard_scalar"));
 }
 
 enum class swa_exp_route : uint8_t { scalar = 0u, vector = 1u };
@@ -227,11 +233,10 @@ void append_swa_case(std::vector<emel::bench::result> &results,
     if (!ok) fail_needle_setup("swa_direct");
     g_swa_output_sink = output[0];
   };
-  results.push_back(with_needle_metadata(
-      emel::bench::measure_case(name, swa_cfg, fn), "emel",
+  results.push_back(with_internal_microbenchmark_metadata(
+      emel::bench::measure_case(name, swa_cfg, fn),
       route == swa_exp_route::vector ? "emel_swa_gqa2_avx2_vector_exp"
-                                     : "emel_swa_gqa2_avx2_scalar_exp",
-      "cpp", 1u));
+                                     : "emel_swa_gqa2_avx2_scalar_exp"));
 }
 
 void profile_swa_case(const uint32_t span_len, const swa_exp_route route) {
@@ -557,6 +562,14 @@ emel::bench::result with_needle_metadata(emel::bench::result out,
   return out;
 }
 
+emel::bench::result with_internal_microbenchmark_metadata(
+    emel::bench::result out, const char *backend_id) {
+  out = with_needle_metadata(std::move(out), "emel", backend_id, "cpp", 1u);
+  out.comparison_mode = "emel_internal_microbenchmark";
+  out.note = k_internal_microbenchmark_note;
+  return out;
+}
+
 emel::bench::result make_reference_row(const char *name,
                                        const std::uint64_t tokens,
                                        const double tokens_per_second) {
@@ -581,46 +594,55 @@ namespace emel::bench {
 void append_emel_needle_graph_cases(std::vector<result> &results,
                                     const config &cfg) {
   graph_fixture fixture;
+  const bool include_internal_microbenchmarks = cfg.mode != case_mode::compare;
+  if (include_internal_microbenchmarks) {
 #if (defined(__x86_64__) || defined(_M_X64)) && defined(__AVX2__) &&           \
     defined(__FMA__) && defined(__F16C__)
-  append_hadamard_case(results, cfg, k_hadamard_scalar_case_name, false);
-  append_hadamard_case(results, cfg, k_hadamard_avx2_case_name, true);
+    append_hadamard_case(results, cfg, k_hadamard_scalar_case_name, false);
+    append_hadamard_case(results, cfg, k_hadamard_avx2_case_name, true);
 #endif
 
 #if (defined(__x86_64__) || defined(_M_X64)) && defined(__AVX2__) &&           \
     defined(__FMA__)
-  {
-    config fwht_cfg = cfg;
-    fwht_cfg.iterations = read_env_u64_or(k_fwht_iters_env, 100000u);
-    fwht_cfg.runs = cfg.runs;
-    fwht_cfg.warmup_iterations = 1000u;
-    fwht_cfg.warmup_runs = 1u;
-    alignas(32) std::array<float, 128u> values{};
-    for (uint32_t i = 0u; i < values.size(); ++i)
-      values[i] = std::sin(static_cast<float>(i + 1u) * 0.03125f);
-    auto fwht_fn = [&]() {
-      emel::kernel::cq::detail::fwht128_avx2(values.data());
-      values[0] += 0.0000001f;
-    };
-    results.push_back(with_needle_metadata(
-        measure_case(k_fwht_case_name, fwht_cfg, fwht_fn), "emel",
-        "emel_cq_avx2_fwht128", "cpp", 1u));
-  }
+    {
+      config fwht_cfg = cfg;
+      fwht_cfg.iterations = read_env_u64_or(k_fwht_iters_env, 100000u);
+      fwht_cfg.runs = cfg.runs;
+      fwht_cfg.warmup_iterations = 1000u;
+      fwht_cfg.warmup_runs = 1u;
+      alignas(32) std::array<float, 128u> values{};
+      for (uint32_t i = 0u; i < values.size(); ++i)
+        values[i] = std::sin(static_cast<float>(i + 1u) * 0.03125f);
+      auto fwht_fn = [&]() {
+        emel::kernel::cq::detail::fwht128_avx2(values.data());
+        values[0] += 0.0000001f;
+      };
+      results.push_back(with_internal_microbenchmark_metadata(
+          measure_case(k_fwht_case_name, fwht_cfg, fwht_fn),
+          "emel_cq_avx2_fwht128"));
+    }
 #endif
 
 #if (defined(__x86_64__) || defined(_M_X64)) && defined(__AVX2__) &&           \
     defined(__FMA__)
-  append_swa_case(results, cfg, k_swa_scalar_exp_128_case_name, 128u, swa_exp_route::scalar);
-  append_swa_case(results, cfg, k_swa_vector_exp_128_case_name, 128u, swa_exp_route::vector);
-  append_swa_case(results, cfg, k_swa_scalar_exp_512_case_name, 512u, swa_exp_route::scalar);
-  append_swa_case(results, cfg, k_swa_vector_exp_512_case_name, 512u, swa_exp_route::vector);
-  append_swa_case(results, cfg, k_swa_scalar_exp_704_case_name, 704u, swa_exp_route::scalar);
-  append_swa_case(results, cfg, k_swa_vector_exp_704_case_name, 704u, swa_exp_route::vector);
-  if (instrument_graph()) {
-    profile_swa_case(704u, swa_exp_route::scalar);
-    profile_swa_case(704u, swa_exp_route::vector);
-  }
+    append_swa_case(results, cfg, k_swa_scalar_exp_128_case_name, 128u,
+                    swa_exp_route::scalar);
+    append_swa_case(results, cfg, k_swa_vector_exp_128_case_name, 128u,
+                    swa_exp_route::vector);
+    append_swa_case(results, cfg, k_swa_scalar_exp_512_case_name, 512u,
+                    swa_exp_route::scalar);
+    append_swa_case(results, cfg, k_swa_vector_exp_512_case_name, 512u,
+                    swa_exp_route::vector);
+    append_swa_case(results, cfg, k_swa_scalar_exp_704_case_name, 704u,
+                    swa_exp_route::scalar);
+    append_swa_case(results, cfg, k_swa_vector_exp_704_case_name, 704u,
+                    swa_exp_route::vector);
+    if (instrument_graph()) {
+      profile_swa_case(704u, swa_exp_route::scalar);
+      profile_swa_case(704u, swa_exp_route::vector);
+    }
 #endif
+  }
 
   append_graph_route_cases<needle::graph::serial_sm>(
       results, cfg, fixture.contract, k_serial_decode_case_name,

@@ -15,12 +15,18 @@ enum class generation_lane_mode {
   reference,
   compare,
 };
+enum class case_mode {
+  emel,
+  reference,
+  compare,
+};
 
 struct config {
   std::uint64_t iterations = 0;
   std::size_t runs = 0;
   std::uint64_t warmup_iterations = 0;
   std::size_t warmup_runs = 0;
+  case_mode mode = case_mode::emel;
 };
 
 struct result {

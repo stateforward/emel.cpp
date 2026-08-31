@@ -425,11 +425,14 @@ if $COMBINED; then
   build_dir="${BENCH_COMPARE_BUILD_DIR:-$(bench_suite_build_dir "$SUITE_FILTER")}"
   configure_bench_build "$build_dir"
 
+  snapshot_output="$(mktemp)"
   compare_output="$(mktemp)"
+  current_snapshot="$(mktemp)"
+  trap 'rm -f "$snapshot_output" "$compare_output" "$current_snapshot"' EXIT
+
+  run_bench_runner "$build_dir" --mode=emel > "$snapshot_output"
   run_bench_runner "$build_dir" --mode=compare > "$compare_output"
 
-  current_snapshot="$(mktemp)"
-  trap 'rm -f "$compare_output" "$current_snapshot"' EXIT
   awk '
     /^#/ {
       skip_next = ($0 ~ /proof_status=measurement_only/);
@@ -441,23 +444,40 @@ if $COMBINED; then
         next;
       }
       name = $1;
-      emel = $3;
-      if (name != "" && emel != "") {
-        tokens_per_second = "";
-        if ($4 == "ns/op" && $5 ~ /^\([0-9.]+$/ && $6 == "tokens/s),") {
-          tokens_per_second = $5;
-          sub(/^\(/, "", tokens_per_second);
+      for (i = 2; i <= NF; ++i) {
+        if ($i ~ /^ns_per_op=/) {
+          ns_per_op = $i;
+        } else if ($i ~ /^tokens_per_second=/) {
+          tokens_per_second = $i;
         }
+      }
+      if (name != "" && ns_per_op != "") {
         if (tokens_per_second != "") {
-          printf("%s ns_per_op=%s tokens_per_second=%s\n",
-                 name, emel, tokens_per_second);
+          printf("%s %s tokens_per_second=%s\n", name, ns_per_op,
+                 substr(tokens_per_second, 19));
         } else {
-          printf("%s ns_per_op=%s\n", name, emel);
+          printf("%s %s\n", name, ns_per_op);
         }
       }
       skip_next = 0;
+      ns_per_op = "";
+      tokens_per_second = "";
     }
-  ' "$compare_output" > "$current_snapshot"
+  ' "$snapshot_output" > "$current_snapshot"
+
+  snapshot_measurement_rows="$(awk '
+    /^#/ {
+      measurement_only = ($0 ~ /proof_status=measurement_only/);
+      next;
+    }
+    /^[^#]/ {
+      if (measurement_only) {
+        count += 1;
+      }
+      measurement_only = 0;
+    }
+    END { print count + 0 }
+  ' "$snapshot_output")"
 
   TOLERANCE="${BENCH_TOLERANCE:-0.30}"
   ABS_TOLERANCE_NS="${BENCH_ABS_TOLERANCE_NS:-5000}"
@@ -511,12 +531,17 @@ if $COMBINED; then
       exit 1
     fi
 
-    awk -v tol="$TOLERANCE" -v abs_tol="$ABS_TOLERANCE_NS" \
-      -v strict_regression="${EMEL_BENCH_STRICT_REGRESSION:-0}" \
-      -v scoped="$([[ -n "$SUITE_FILTER" ]] && echo 1 || echo 0)" \
-      -v host_arch="$host_arch" \
-      -f "$ROOT_DIR/scripts/bench_compare_gate.awk" \
-      "$BASELINE" "$current_snapshot"
+    if [[ -s "$current_snapshot" ]]; then
+      awk -v tol="$TOLERANCE" -v abs_tol="$ABS_TOLERANCE_NS" \
+        -v strict_regression="${EMEL_BENCH_STRICT_REGRESSION:-0}" \
+        -v scoped="$([[ -n "$SUITE_FILTER" ]] && echo 1 || echo 0)" \
+        -v host_arch="$host_arch" \
+        -f "$ROOT_DIR/scripts/bench_compare_gate.awk" \
+        "$BASELINE" "$current_snapshot"
+    elif [[ -z "$SUITE_FILTER" || "$snapshot_measurement_rows" == "0" ]]; then
+      echo "error: no benchmark entries matched selected suite" >&2
+      exit 1
+    fi
   fi
 
   if $COMPARE_UPDATE; then

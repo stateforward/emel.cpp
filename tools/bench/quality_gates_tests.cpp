@@ -450,6 +450,28 @@ TEST_CASE("bench script bounds default generation workload") {
         std::string::npos);
 }
 
+TEST_CASE("bench combined gate snapshots EMEL before paired comparison") {
+  const std::string script = read_file(repo_root() / "scripts" / "bench.sh");
+  const std::size_t combined_start = script.find("if $COMBINED; then");
+  REQUIRE(combined_start != std::string::npos);
+  const std::size_t combined_end = script.find("if $SNAPSHOT; then", combined_start);
+  REQUIRE(combined_end != std::string::npos);
+  const std::string combined =
+      script.substr(combined_start, combined_end - combined_start);
+
+  CHECK(combined.find("run_bench_runner \"$build_dir\" --mode=emel > "
+                      "\"$snapshot_output\"") != std::string::npos);
+  CHECK(combined.find("run_bench_runner \"$build_dir\" --mode=compare > "
+                      "\"$compare_output\"") != std::string::npos);
+  CHECK(combined.find("' \"$snapshot_output\" > \"$current_snapshot\"") !=
+        std::string::npos);
+  CHECK(combined.find("snapshot_measurement_rows=\"$(awk '") !=
+        std::string::npos);
+  CHECK(combined.find("elif [[ -z \"$SUITE_FILTER\" || "
+                      "\"$snapshot_measurement_rows\" == \"0\" ]]") !=
+        std::string::npos);
+}
+
 TEST_CASE(
     "bench script merges scoped snapshot updates into the full baseline") {
   const std::string script = read_file(repo_root() / "scripts" / "bench.sh");
