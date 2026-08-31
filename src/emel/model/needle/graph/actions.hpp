@@ -695,7 +695,8 @@ inline bool compute_layer(context &ctx, event::step_ctx &step) noexcept {
                                         attend_request, attend_result});
                               }
                             });
-
+  if constexpr (attend_gqa2)
+    ctx.swa_gqa2_calls += static_cast<uint64_t>(attend_result.accepted);
   const emel::kernel::swa::event::gate_mul_request gate_request{
       .values = ctx.attn_out, .gate_logits = ctx.gate_logits, .dim = attn_dim};
   emel::kernel::swa::event::dispatch_result gate_result{};

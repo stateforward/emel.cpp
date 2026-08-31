@@ -193,6 +193,13 @@ TEST_CASE("needle graph matches the committed JAX logits fixture on all "
   }
   MESSAGE("worst-case parity across 3 cases x 3 steps: max_abs=", worst_abs,
           " rel=", worst_rel);
+#if (defined(__x86_64__) || defined(_M_X64)) && defined(__AVX2__) &&           \
+    defined(__FMA__)
+  uint64_t gqa2_calls = 0u;
+  REQUIRE(graph.process_event(
+      emel::model::needle::graph::event::capture_swa_diagnostics{gqa2_calls}));
+  CHECK(gqa2_calls > 0u);
+#endif
 }
 TEST_CASE("needle graph W4A8 deployment route matches authoritative JAX "
           "fixture") {

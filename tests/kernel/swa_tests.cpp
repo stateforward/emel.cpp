@@ -1,6 +1,8 @@
 #include <array>
 #include <cstring>
 #include <vector>
+#include <limits>
+#include <span>
 
 #include <doctest/doctest.h>
 
@@ -159,7 +161,7 @@ TEST_CASE("swa GQA2 AVX2 matches generic attention bitwise") {
   }
 }
 
-TEST_CASE("swa GQA2 route rejects incomplete workspace and reps mismatch") {
+TEST_CASE("swa GQA2 route rejects reps mismatch and short workspace") {
 #if (defined(__x86_64__) || defined(_M_X64)) && defined(__AVX2__) &&           \
     defined(__FMA__)
   constexpr uint32_t capacity = 4u;
@@ -167,7 +169,7 @@ TEST_CASE("swa GQA2 route rejects incomplete workspace and reps mismatch") {
   std::vector<float> query(6u * head_dim);
   std::vector<float> key_cache(2u * capacity * head_dim);
   std::vector<float> value_cache(2u * capacity * head_dim);
-  std::vector<float> short_workspace(7u);
+  std::vector<float> valid_gqa2_workspace(8u);
   std::vector<float> generic_workspace(4u);
   std::vector<float> output(6u * head_dim);
   const emel::kernel::swa::event::attend_request mismatch_request{
@@ -180,7 +182,7 @@ TEST_CASE("swa GQA2 route rejects incomplete workspace and reps mismatch") {
       .heads = 6u,
       .kv_heads = 2u,
       .head_dim = head_dim,
-      .workspace = short_workspace,
+      .workspace = valid_gqa2_workspace,
       .output = output};
   emel::kernel::swa::sm machine;
   dispatch_result result{};
@@ -195,6 +197,7 @@ TEST_CASE("swa GQA2 route rejects incomplete workspace and reps mismatch") {
       generic_request, generic_result}));
 
   std::vector<float> query_gqa2(4u * head_dim);
+  std::vector<float> short_workspace(7u);
   std::vector<float> output_gqa2(4u * head_dim);
   const emel::kernel::swa::event::attend_request short_request{
       .query = query_gqa2,
@@ -212,6 +215,162 @@ TEST_CASE("swa GQA2 route rejects incomplete workspace and reps mismatch") {
   CHECK_FALSE(machine.process_event(
       emel::kernel::swa::event::execute_attend_gqa2_avx2{short_request,
                                                          short_result}));
+#endif
+}
+
+TEST_CASE("swa attend rejects overflowing geometry before writes") {
+  if constexpr (sizeof(size_t) >= sizeof(uint64_t)) {
+    std::array<float, 2> storage{17.0f, 19.0f};
+    const auto before = storage;
+    constexpr uint32_t extent = uint32_t{1} << 31u;
+    const size_t query_elements = static_cast<size_t>(uint64_t{4} * extent);
+    const emel::kernel::swa::event::attend_request request{
+        .query = std::span<const float>{storage.data(), query_elements},
+        .key_cache = std::span<const float>{storage.data(), 0u},
+        .value_cache = std::span<const float>{storage.data(), 0u},
+        .position = 0u,
+        .window_begin = 0u,
+        .capacity = extent,
+        .heads = 4u,
+        .kv_heads = 4u,
+        .head_dim = extent,
+        .workspace = std::span<float>{storage.data(), 1u},
+        .output = std::span<float>{storage.data(), query_elements}};
+    emel::kernel::swa::sm machine;
+    dispatch_result result{};
+    CHECK_FALSE(machine.process_event(
+        emel::kernel::swa::event::execute_attend{request, result}));
+    CHECK(storage == before);
+  }
+}
+
+TEST_CASE("swa GQA2 rejects inclusive span beyond uint32 before writes") {
+#if (defined(__x86_64__) || defined(_M_X64)) && defined(__AVX2__) &&           \
+    defined(__FMA__)
+  std::array<float, 4> query{1.0f, 2.0f, 3.0f, 4.0f};
+  std::array<float, 1> cache{5.0f};
+  std::array<float, 4> output{7.0f, 11.0f, 13.0f, 17.0f};
+  const auto output_before = output;
+  const size_t cache_elements =
+      static_cast<size_t>(uint64_t{2} * std::numeric_limits<uint32_t>::max());
+  const emel::kernel::swa::event::attend_request request{
+      .query = query,
+      .key_cache = std::span<const float>{cache.data(), cache_elements},
+      .value_cache = std::span<const float>{cache.data(), cache_elements},
+      .position = std::numeric_limits<uint32_t>::max(),
+      .window_begin = 0u,
+      .capacity = std::numeric_limits<uint32_t>::max(),
+      .heads = 2u,
+      .kv_heads = 1u,
+      .head_dim = 2u,
+      .workspace = {},
+      .output = output};
+  emel::kernel::swa::sm machine;
+  dispatch_result result{};
+  CHECK_FALSE(machine.process_event(
+      emel::kernel::swa::event::execute_attend_gqa2_avx2{request, result}));
+  CHECK(output == output_before);
+#endif
+}
+
+TEST_CASE("swa GQA2 rejects writable range aliasing before writes") {
+#if (defined(__x86_64__) || defined(_M_X64)) && defined(__AVX2__) &&           \
+    defined(__FMA__)
+  const std::array<float, 4> query{1.0f, 2.0f, 3.0f, 4.0f};
+  const std::array<float, 4> key_cache{0.5f, 0.25f, -0.5f, -0.25f};
+  const std::array<float, 4> value_cache{2.0f, 3.0f, 5.0f, 7.0f};
+
+  SUBCASE("workspace and output exactly overlap") {
+    std::array<float, 4> writable{17.0f, 19.0f, 23.0f, 29.0f};
+    const auto before = writable;
+    const emel::kernel::swa::event::attend_request request{
+        .query = query,
+        .key_cache = key_cache,
+        .value_cache = value_cache,
+        .position = 1u,
+        .window_begin = 0u,
+        .capacity = 2u,
+        .heads = 2u,
+        .kv_heads = 1u,
+        .head_dim = 2u,
+        .workspace = writable,
+        .output = writable};
+    emel::kernel::swa::sm machine;
+    dispatch_result result{};
+    CHECK_FALSE(machine.process_event(
+        emel::kernel::swa::event::execute_attend_gqa2_avx2{request, result}));
+    CHECK(writable == before);
+  }
+
+  SUBCASE("workspace and output partially overlap") {
+    std::array<float, 6> writable{17.0f, 19.0f, 23.0f,
+                                  29.0f, 31.0f, 37.0f};
+    const auto before = writable;
+    const emel::kernel::swa::event::attend_request request{
+        .query = query,
+        .key_cache = key_cache,
+        .value_cache = value_cache,
+        .position = 1u,
+        .window_begin = 0u,
+        .capacity = 2u,
+        .heads = 2u,
+        .kv_heads = 1u,
+        .head_dim = 2u,
+        .workspace = std::span<float>{writable.data(), 4u},
+        .output = std::span<float>{writable.data() + 2u, 4u}};
+    emel::kernel::swa::sm machine;
+    dispatch_result result{};
+    CHECK_FALSE(machine.process_event(
+        emel::kernel::swa::event::execute_attend_gqa2_avx2{request, result}));
+    CHECK(writable == before);
+  }
+
+  SUBCASE("output overlaps query input") {
+    std::array<float, 4> query_and_output{1.0f, 2.0f, 3.0f, 4.0f};
+    const auto before = query_and_output;
+    std::array<float, 4> workspace{};
+    const emel::kernel::swa::event::attend_request request{
+        .query = query_and_output,
+        .key_cache = key_cache,
+        .value_cache = value_cache,
+        .position = 1u,
+        .window_begin = 0u,
+        .capacity = 2u,
+        .heads = 2u,
+        .kv_heads = 1u,
+        .head_dim = 2u,
+        .workspace = workspace,
+        .output = query_and_output};
+    emel::kernel::swa::sm machine;
+    dispatch_result result{};
+    CHECK_FALSE(machine.process_event(
+        emel::kernel::swa::event::execute_attend_gqa2_avx2{request, result}));
+    CHECK(query_and_output == before);
+  }
+
+  SUBCASE("workspace overlaps value input") {
+    std::array<float, 6> value_and_workspace{2.0f, 3.0f, 5.0f,
+                                             7.0f, 11.0f, 13.0f};
+    const auto before = value_and_workspace;
+    std::array<float, 4> output{};
+    const emel::kernel::swa::event::attend_request request{
+        .query = query,
+        .key_cache = key_cache,
+        .value_cache = std::span<const float>{value_and_workspace.data(), 4u},
+        .position = 1u,
+        .window_begin = 0u,
+        .capacity = 2u,
+        .heads = 2u,
+        .kv_heads = 1u,
+        .head_dim = 2u,
+        .workspace = std::span<float>{value_and_workspace.data() + 2u, 4u},
+        .output = output};
+    emel::kernel::swa::sm machine;
+    dispatch_result result{};
+    CHECK_FALSE(machine.process_event(
+        emel::kernel::swa::event::execute_attend_gqa2_avx2{request, result}));
+    CHECK(value_and_workspace == before);
+  }
 #endif
 }
 

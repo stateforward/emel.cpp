@@ -45,6 +45,10 @@ struct capture_cq_diagnostics {
   size_t &prepared_group32_norm_bytes;
 };
 
+struct capture_swa_diagnostics {
+  uint64_t &gqa2_calls;
+};
+
 struct configure_cq_timing {
   bool enabled = false;
   emel::kernel::cq::event::timestamp_now_fn now = nullptr;

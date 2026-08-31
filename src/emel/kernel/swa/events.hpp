@@ -14,7 +14,12 @@ struct dispatch_result {
 // map to physical ring slots (logical % capacity). Grouped-query mapping:
 // query head h reads kv head h / (heads / kv_heads). Scores are scaled by
 // 1/sqrt(head_dim) and softmaxed with max-shift, matching the reference
-// `_attn_cached` non-flash route.
+// `_attn_cached` non-flash route. Geometry and inclusive span must be nonzero
+// and representable in uint32_t, size_t, and byte-address arithmetic. Query,
+// key, and value are borrowed read-only and may overlap each other. Workspace
+// and output are borrowed writable ranges: they must be mutually disjoint and
+// each must be disjoint from every read-only range. A rejected event performs
+// no workspace or output writes.
 struct attend_request {
   std::span<const float> query;       // heads * head_dim
   std::span<const float> key_cache;   // kv_heads * capacity * head_dim
@@ -66,7 +71,9 @@ struct execute_attend {
 };
 
 // Exact GQA reps=2 AVX2 route. The event is explicit so callers select the
-// geometry/platform specialization before entering the data-plane action.
+// geometry/platform specialization before entering the data-plane action. It
+// inherits attend_request's alias, representability, and no-write-on-rejection
+// contract and requires workspace capacity for two complete score rows.
 struct execute_attend_gqa2_avx2 {
   const attend_request &request;
   dispatch_result &result;

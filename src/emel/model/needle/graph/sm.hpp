@@ -335,6 +335,12 @@ struct sm : public emel::sm<model, action::context> {
     return handled;
   }
 
+  bool process_event(const event::capture_swa_diagnostics &ev) {
+    ev.gqa2_calls = this->context_.swa_gqa2_calls;
+    return true;
+  }
+
+
   bool process_event(const event::configure_cq_timing &ev) {
     return this->context_.cq.process_event(
         emel::kernel::cq::event::configure_timing{ev.enabled, ev.now});

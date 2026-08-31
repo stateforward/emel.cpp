@@ -255,6 +255,7 @@ struct context {
   uint64_t timing_step_begin = 0u;
   uint64_t timing_accounted_nanoseconds = 0u;
   uint64_t timing_cq_begin_nanoseconds = 0u;
+  uint64_t swa_gqa2_calls = 0u;
 
   // Per-layer f32 KV ring caches over the kv_window sliding mask.
   std::vector<float> key_cache;

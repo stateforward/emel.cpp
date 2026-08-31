@@ -74,6 +74,7 @@ record runner=needle_graph kind=source path=tools/bench/model/needle/graph_bench
 record runner=needle_graph kind=source path=src/emel/model/needle reason=needle_binder_and_graph
 record runner=needle_graph kind=source path=src/emel/cact/loader reason=cact_loader
 record runner=needle_graph kind=source path=src/emel/kernel/cq reason=cq_gemv_routes
+record runner=needle_graph kind=source path=src/emel/kernel/swa reason=swa_attention_routes
 record runner=needle_graph kind=model path=tests/models/route-w4-qat.cact reason=pinned_model_fixture
 record runner=tokenizer_preprocessor_bpe kind=source path=tools/bench/text/tokenizer/preprocessor/bpe_bench.cpp reason=suite_source
 record runner=tokenizer_preprocessor_spm kind=source path=tools/bench/text/tokenizer/preprocessor/spm_bench.cpp reason=suite_source

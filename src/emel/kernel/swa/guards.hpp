@@ -1,28 +1,123 @@
 #pragma once
 
+#include <cstddef>
+#include <cstdint>
+#include <limits>
+
 #include "emel/kernel/swa/actions.hpp"
+#include "emel/kernel/attention/guards.hpp"
 
 namespace emel::kernel::swa::guard {
+
+namespace detail {
+
+struct attend_lengths {
+  std::size_t span = 0u;
+  std::size_t workspace = 0u;
+  std::size_t query = 0u;
+  std::size_t cache = 0u;
+};
+
+inline bool checked_multiply(const uint64_t lhs, const uint64_t rhs,
+                             uint64_t &product) noexcept {
+  if (lhs != 0u && rhs > std::numeric_limits<uint64_t>::max() / lhs)
+    return false;
+  product = lhs * rhs;
+  return true;
+}
+
+inline bool checked_float_elements(const uint64_t elements,
+                                   std::size_t &narrowed) noexcept {
+  if (elements == 0u ||
+      elements > std::numeric_limits<std::size_t>::max() ||
+      elements > std::numeric_limits<std::size_t>::max() / sizeof(float) ||
+      elements > std::numeric_limits<std::uintptr_t>::max() / sizeof(float))
+    return false;
+  narrowed = static_cast<std::size_t>(elements);
+  return true;
+}
+
+inline bool validate_attend_lengths(const event::attend_request &request,
+                                    const uint64_t workspace_reps,
+                                    attend_lengths &lengths) noexcept {
+  if (request.heads == 0u || request.kv_heads == 0u ||
+      request.capacity == 0u || request.head_dim == 0u ||
+      request.window_begin > request.position)
+    return false;
+
+  const uint64_t span = static_cast<uint64_t>(request.position) -
+                            request.window_begin +
+                        1u;
+  if (span == 0u || span > request.capacity ||
+      span > std::numeric_limits<uint32_t>::max() ||
+      span > std::numeric_limits<std::size_t>::max())
+    return false;
+
+  uint64_t workspace = 0u;
+  uint64_t query = 0u;
+  uint64_t cache_rows = 0u;
+  uint64_t cache = 0u;
+  if (!checked_multiply(span, workspace_reps, workspace) ||
+      !checked_multiply(request.heads, request.head_dim, query) ||
+      !checked_multiply(request.kv_heads, request.capacity, cache_rows) ||
+      !checked_multiply(cache_rows, request.head_dim, cache) ||
+      !checked_float_elements(workspace, lengths.workspace) ||
+      !checked_float_elements(query, lengths.query) ||
+      !checked_float_elements(cache, lengths.cache))
+    return false;
+
+  lengths.span = static_cast<std::size_t>(span);
+  return true;
+}
+
+inline bool validate_attend_spans(const event::attend_request &request,
+                                  const attend_lengths &lengths) noexcept {
+  if (request.query.data() == nullptr || request.key_cache.data() == nullptr ||
+      request.value_cache.data() == nullptr ||
+      request.workspace.data() == nullptr || request.output.data() == nullptr ||
+      request.query.size() < lengths.query ||
+      request.key_cache.size() < lengths.cache ||
+      request.value_cache.size() < lengths.cache ||
+      request.workspace.size() < lengths.workspace ||
+      request.output.size() < lengths.query)
+    return false;
+
+  const std::size_t workspace_bytes = lengths.workspace * sizeof(float);
+  const std::size_t query_bytes = lengths.query * sizeof(float);
+  const std::size_t cache_bytes = lengths.cache * sizeof(float);
+  return attention::guard::guard_ranges_disjoint(
+             request.workspace.data(), workspace_bytes, request.output.data(),
+             query_bytes) &&
+         attention::guard::guard_ranges_disjoint(
+             request.workspace.data(), workspace_bytes, request.query.data(),
+             query_bytes) &&
+         attention::guard::guard_ranges_disjoint(
+             request.workspace.data(), workspace_bytes,
+             request.key_cache.data(), cache_bytes) &&
+         attention::guard::guard_ranges_disjoint(
+             request.workspace.data(), workspace_bytes,
+             request.value_cache.data(), cache_bytes) &&
+         attention::guard::guard_ranges_disjoint(
+             request.output.data(), query_bytes, request.query.data(),
+             query_bytes) &&
+         attention::guard::guard_ranges_disjoint(
+             request.output.data(), query_bytes, request.key_cache.data(),
+             cache_bytes) &&
+         attention::guard::guard_ranges_disjoint(
+             request.output.data(), query_bytes, request.value_cache.data(),
+             cache_bytes);
+}
+
+} // namespace detail
 
 struct guard_execute_attend {
   bool operator()(const event::execute_attend &ev,
                   const action::context &) const noexcept {
     const auto &request = ev.request;
-    if (request.heads == 0u || request.kv_heads == 0u ||
-        request.head_dim == 0u || request.capacity == 0u ||
-        (request.heads % request.kv_heads) != 0u ||
-        request.window_begin > request.position)
-      return false;
-    const uint32_t span_len = request.position - request.window_begin + 1u;
-    const uint64_t cache = static_cast<uint64_t>(request.kv_heads) *
-                           request.capacity * request.head_dim;
-    const uint64_t q_len =
-        static_cast<uint64_t>(request.heads) * request.head_dim;
-    return span_len <= request.capacity &&
-           request.workspace.size() >= span_len &&
-           request.query.size() >= q_len && request.output.size() >= q_len &&
-           request.key_cache.size() >= cache &&
-           request.value_cache.size() >= cache;
+    detail::attend_lengths lengths{};
+    return detail::validate_attend_lengths(request, 1u, lengths) &&
+           (request.heads % request.kv_heads) == 0u &&
+           detail::validate_attend_spans(request, lengths);
   }
 };
 
@@ -32,20 +127,11 @@ struct guard_execute_attend_gqa2_avx2 {
 #if (defined(__x86_64__) || defined(_M_X64)) && defined(__AVX2__) &&           \
     defined(__FMA__)
     const auto &request = ev.request;
-    if (request.kv_heads == 0u || request.heads != request.kv_heads * 2u ||
-        request.head_dim == 0u || request.capacity == 0u ||
-        request.window_begin > request.position)
-      return false;
-    const uint32_t span_len = request.position - request.window_begin + 1u;
-    const uint64_t cache = static_cast<uint64_t>(request.kv_heads) *
-                           request.capacity * request.head_dim;
-    const uint64_t q_len =
-        static_cast<uint64_t>(request.heads) * request.head_dim;
-    return span_len <= request.capacity &&
-           request.workspace.size() >= static_cast<uint64_t>(span_len) * 2u &&
-           request.query.size() >= q_len && request.output.size() >= q_len &&
-           request.key_cache.size() >= cache &&
-           request.value_cache.size() >= cache;
+    detail::attend_lengths lengths{};
+    return static_cast<uint64_t>(request.heads) ==
+               uint64_t{2} * request.kv_heads &&
+           detail::validate_attend_lengths(request, 2u, lengths) &&
+           detail::validate_attend_spans(request, lengths);
 #else
     (void)ev;
     return false;
@@ -57,15 +143,29 @@ struct guard_execute_cache_write {
   bool operator()(const event::execute_cache_write &ev,
                   const action::context &) const noexcept {
     const auto &request = ev.request;
-    const uint64_t rows =
-        static_cast<uint64_t>(request.kv_heads) * request.head_dim;
-    const uint64_t cache = static_cast<uint64_t>(request.kv_heads) *
-                           request.capacity * request.head_dim;
-    return request.kv_heads > 0u && request.head_dim > 0u &&
-           request.capacity > 0u && request.key_rows.size() >= rows &&
-           request.value_rows.size() >= rows &&
-           request.key_cache.size() >= cache &&
-           request.value_cache.size() >= cache;
+    if (request.kv_heads == 0u || request.head_dim == 0u ||
+        request.capacity == 0u)
+      return false;
+
+    uint64_t rows = 0u;
+    uint64_t cache_rows = 0u;
+    uint64_t cache = 0u;
+    std::size_t rows_size = 0u;
+    std::size_t cache_size = 0u;
+    return detail::checked_multiply(request.kv_heads, request.head_dim, rows) &&
+           detail::checked_multiply(request.kv_heads, request.capacity,
+                                    cache_rows) &&
+           detail::checked_multiply(cache_rows, request.head_dim, cache) &&
+           detail::checked_float_elements(rows, rows_size) &&
+           detail::checked_float_elements(cache, cache_size) &&
+           request.key_rows.data() != nullptr &&
+           request.value_rows.data() != nullptr &&
+           request.key_cache.data() != nullptr &&
+           request.value_cache.data() != nullptr &&
+           request.key_rows.size() >= rows_size &&
+           request.value_rows.size() >= rows_size &&
+           request.key_cache.size() >= cache_size &&
+           request.value_cache.size() >= cache_size;
   }
 };
 
