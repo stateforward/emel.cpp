@@ -5,9 +5,8 @@
 
 namespace emel::model::needle::graph::guard {
 
-// Compile-time CQ route availability: the AVX2 chain exists in the table on
-// every host, but its entry guard is constant-false unless the build actually
-// carries AVX2+FMA codegen (mirrors emel::kernel::cq::guard::avx2_supported).
+// CQ and attention share an AVX2+FMA route. The Hadamard specialization adds
+// an F16C requirement at its graph route guard below.
 #if (defined(__x86_64__) || defined(_M_X64)) && defined(__AVX2__) &&           \
     defined(__FMA__)
 inline constexpr bool k_avx2_route_available = true;
@@ -47,19 +46,27 @@ inline bool layer_is_engram_site(const emel::cact::loader::geometry &geo,
   return match;
 }
 
-// Compile-time route split for the completion chain: exactly one of the two
-// passes on any given build.
+// The graph's route choice includes both the CQ group contract and the pinned
+// Hadamard geometry, so the selected route is valid for every layer action.
 struct guard_route_avx2 {
   bool operator()(const event::step_run &,
                   const action::context &ctx) const noexcept {
-    return k_avx2_route_available && cq_group128(*ctx.bound);
+    const auto &geo = ctx.bound->geo;
+    return k_avx2_route_available &&
+#if defined(__F16C__)
+           emel::kernel::hadamard::guard::avx2_fma_f16c_available() &&
+#else
+           false &&
+#endif
+           geo.d_model == 512u && geo.hada_n == 512u &&
+           cq_group128(*ctx.bound);
   }
 };
 
 struct guard_route_scalar {
-  bool operator()(const event::step_run &,
+  bool operator()(const event::step_run &ev,
                   const action::context &ctx) const noexcept {
-    return !k_avx2_route_available || !cq_group128(*ctx.bound);
+    return !guard_route_avx2{}(ev, ctx);
   }
 };
 
@@ -267,14 +274,14 @@ struct guard_layers_done_no_logits {
 struct guard_step_valid_avx2 {
   bool operator()(const event::step_run &ev,
                   const action::context &ctx) const noexcept {
-    return guard_step_valid{}(ev, ctx) && k_avx2_route_available;
+    return guard_step_valid{}(ev, ctx) && guard_route_avx2{}(ev, ctx);
   }
 };
 
 struct guard_step_valid_scalar {
   bool operator()(const event::step_run &ev,
                   const action::context &ctx) const noexcept {
-    return guard_step_valid{}(ev, ctx) && !k_avx2_route_available;
+    return guard_step_valid{}(ev, ctx) && guard_route_scalar{}(ev, ctx);
   }
 };
 

@@ -18,6 +18,10 @@ struct model {
           + sml::event<event::execute_mlp_row>
           [ guard::guard_execute_mlp_row{} ] / action::effect_execute_mlp_row{}
       , sml::state<state_ready> <= sml::state<state_ready>
+          + sml::event<event::execute_mlp_row_avx2>
+          [ guard::guard_execute_mlp_row_avx2{} ]
+          / action::effect_execute_mlp_row_avx2{}
+      , sml::state<state_ready> <= sml::state<state_ready>
           + sml::unexpected_event<sml::_>
           / action::effect_on_unexpected{}
     );

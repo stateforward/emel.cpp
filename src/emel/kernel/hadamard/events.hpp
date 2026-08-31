@@ -14,7 +14,12 @@ struct dispatch_result {
 // output[i] = skip[i] + (d3 * z)[i] for i < d_model. The FWHT is the
 // normalized (orthonormal) transform, matching `_walsh_matrix(n)/sqrt(n)`
 // composed via `(d1*z) @ H`. Diagonals are fp16 tensor payloads decoded to
-// f32 on the fly. `workspace` holds the padded lane (>= n floats).
+// f32 on the fly. All spans borrow caller-owned memory for the complete
+// dispatch. Read-only spans may overlap one another. Workspace and output must
+// be mutually disjoint and each must be disjoint from every read-only range.
+// A rejected event performs no workspace or output writes. Dispatch is
+// single-owner and externally serialized. `workspace` holds the padded lane
+// (>= n floats).
 struct mlp_row_request {
   std::span<const float> input; // d_model
   std::span<const float> skip;  // d_model
@@ -28,6 +33,14 @@ struct mlp_row_request {
 };
 
 struct execute_mlp_row {
+  const mlp_row_request &request;
+  dispatch_result &result;
+};
+
+// Exact AVX2+FMA+F16C specialization for d_model == hada_n == 512. The event
+// is explicit so platform/geometry routing happens before the data-plane
+// action; it otherwise inherits mlp_row_request's span and alias contract.
+struct execute_mlp_row_avx2 {
   const mlp_row_request &request;
   dispatch_result &result;
 };

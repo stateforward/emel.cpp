@@ -182,6 +182,20 @@ prepare_activation(context &ctx, const std::span<const float> activation,
   return {activation, 1.0f};
 }
 
+template <route_kind route>
+inline bool execute_hadamard(
+    context &ctx,
+    const emel::kernel::hadamard::event::mlp_row_request &request) noexcept {
+  emel::kernel::hadamard::event::dispatch_result result{};
+  if constexpr (route == route_kind::prepared_avx2) {
+    return ctx.hadamard.process_event(
+        emel::kernel::hadamard::event::execute_mlp_row_avx2{request, result});
+  } else {
+    return ctx.hadamard.process_event(
+        emel::kernel::hadamard::event::execute_mlp_row{request, result});
+  }
+}
+
 inline bool
 compute_gemv_batch4(context &ctx, const activation_payload activation,
                     const emel::kernel::cq::event::prepared_q4_view &first,
@@ -747,12 +761,10 @@ inline bool compute_layer(context &ctx, event::step_ctx &step) noexcept {
       .hada_n = geo.hada_n,
       .workspace = ctx.hada_workspace,
       .output = std::span<float>{ctx.block_out}};
-  emel::kernel::hadamard::event::dispatch_result hadamard_result{};
   ok = ok && time_component(ctx, ctx.timing.hadamard_nanoseconds,
                             [&]() noexcept {
-                              return ctx.hadamard.process_event(
-                                  emel::kernel::hadamard::event::execute_mlp_row{
-                                      hadamard_request, hadamard_result});
+                              return execute_hadamard<route>(ctx,
+                                                             hadamard_request);
                             });
 
   ok = ok && compute_gemv_rows<route>(

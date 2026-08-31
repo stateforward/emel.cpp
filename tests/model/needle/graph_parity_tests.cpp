@@ -386,6 +386,8 @@ TEST_CASE("needle graph AVX2 route requires every CQ tensor group to be 128") {
   emel::model::needle::contract contract{};
   contract.layer_count = 1u;
   contract.engram_site_count = 1u;
+  contract.geo.d_model = 512u;
+  contract.geo.hada_n = 512u;
   contract.embedding.group = 128u;
   contract.mhc.phi_pre.group = 128u;
   contract.mhc.phi_post.group = 128u;
@@ -405,7 +407,7 @@ TEST_CASE("needle graph AVX2 route requires every CQ tensor group to be 128") {
   emel::model::needle::graph::event::step_ctx step{};
   const emel::model::needle::graph::event::step_run run{step};
 #if (defined(__x86_64__) || defined(_M_X64)) && defined(__AVX2__) &&           \
-    defined(__FMA__)
+    defined(__FMA__) && defined(__F16C__)
   CHECK(emel::model::needle::graph::guard::guard_route_avx2{}(run, ctx));
   CHECK_FALSE(
       emel::model::needle::graph::guard::guard_route_scalar{}(run, ctx));
@@ -415,6 +417,11 @@ TEST_CASE("needle graph AVX2 route requires every CQ tensor group to be 128") {
 #endif
 
   layer.out_proj.group = 64u;
+  CHECK_FALSE(emel::model::needle::graph::guard::guard_route_avx2{}(run, ctx));
+  CHECK(emel::model::needle::graph::guard::guard_route_scalar{}(run, ctx));
+
+  layer.out_proj.group = 128u;
+  contract.geo.d_model = 256u;
   CHECK_FALSE(emel::model::needle::graph::guard::guard_route_avx2{}(run, ctx));
   CHECK(emel::model::needle::graph::guard::guard_route_scalar{}(run, ctx));
 }

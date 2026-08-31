@@ -44,6 +44,10 @@ constexpr char k_swa_generic_704_case_name[] =
     "needle/swa/attend_generic_span704";
 constexpr char k_swa_gqa2_704_case_name[] = "needle/swa/attend_gqa2_span704";
 constexpr char k_fwht_case_name[] = "needle/cq/fwht128_avx2";
+constexpr char k_hadamard_scalar_case_name[] =
+    "needle/hadamard/mlp512_scalar";
+constexpr char k_hadamard_avx2_case_name[] = "needle/hadamard/mlp512_avx2";
+constexpr char k_hadamard_iters_env[] = "EMEL_BENCH_NEEDLE_HADAMARD_ITERS";
 constexpr char k_fwht_iters_env[] = "EMEL_BENCH_NEEDLE_FWHT_ITERS";
 constexpr char k_model_env[] = "EMEL_BENCH_NEEDLE_MODEL";
 constexpr char k_model_relative_path[] = "tests/models/route-w4-qat.cact";
@@ -103,6 +107,65 @@ emel::bench::result with_needle_metadata(emel::bench::result out,
                                          std::uint64_t output_tokens);
 
 volatile float g_swa_output_sink = 0.0f;
+volatile float g_hadamard_output_sink = 0.0f;
+
+void append_hadamard_case(std::vector<emel::bench::result> &results,
+                          const emel::bench::config &cfg, const char *name,
+                          const bool avx2) {
+  constexpr uint32_t n = 512u;
+  std::array<float, n> input{};
+  std::array<float, n> skip{};
+  std::array<float, n> workspace{};
+  std::array<float, n> output{};
+  std::array<uint16_t, n> d1_bits{};
+  std::array<uint16_t, n> d2_bits{};
+  std::array<uint16_t, n> d3_bits{};
+  for (uint32_t i = 0u; i < n; ++i) {
+    input[i] = static_cast<float>(static_cast<int32_t>((i * 37u) % 101u) - 50) *
+               0.03125f;
+    skip[i] = static_cast<float>(static_cast<int32_t>((i * 19u) % 83u) - 41) *
+              0.015625f;
+    d1_bits[i] = emel::kernel::detail::quant::fp32_to_fp16(
+        static_cast<float>(static_cast<int32_t>((i * 13u) % 29u) - 14) *
+        0.125f);
+    d2_bits[i] = emel::kernel::detail::quant::fp32_to_fp16(
+        static_cast<float>(static_cast<int32_t>((i * 17u) % 31u) - 15) *
+        0.09375f);
+    d3_bits[i] = emel::kernel::detail::quant::fp32_to_fp16(
+        static_cast<float>(static_cast<int32_t>((i * 23u) % 37u) - 18) *
+        0.0625f);
+  }
+  const auto bytes = [](const auto &values) {
+    return std::span<const uint8_t>{
+        reinterpret_cast<const uint8_t *>(values.data()),
+        values.size() * sizeof(values[0])};
+  };
+  const emel::kernel::hadamard::event::mlp_row_request request{
+      input, skip, bytes(d1_bits), bytes(d2_bits), bytes(d3_bits), n, n,
+      workspace, output};
+  emel::kernel::hadamard::sm machine;
+  emel::kernel::hadamard::event::dispatch_result dispatch_result{};
+  emel::bench::config hadamard_cfg = cfg;
+  hadamard_cfg.iterations = read_env_u64_or(k_hadamard_iters_env, 4096u);
+  hadamard_cfg.runs = cfg.runs;
+  hadamard_cfg.warmup_iterations = 64u;
+  hadamard_cfg.warmup_runs = 1u;
+  auto fn = [&]() {
+    const bool ok = avx2
+                        ? machine.process_event(
+                              emel::kernel::hadamard::event::execute_mlp_row_avx2{
+                                  request, dispatch_result})
+                        : machine.process_event(
+                              emel::kernel::hadamard::event::execute_mlp_row{
+                                  request, dispatch_result});
+    if (!ok)
+      fail_needle_setup("hadamard_direct");
+    g_hadamard_output_sink = output[0];
+  };
+  results.push_back(with_needle_metadata(
+      emel::bench::measure_case(name, hadamard_cfg, fn), "emel",
+      avx2 ? "emel_hadamard_avx2" : "emel_hadamard_scalar", "cpp", 1u));
+}
 
 void append_swa_case(std::vector<emel::bench::result> &results,
                      const emel::bench::config &cfg, const char *name,
@@ -350,6 +413,12 @@ namespace emel::bench {
 void append_emel_needle_graph_cases(std::vector<result> &results,
                                     const config &cfg) {
   graph_fixture fixture;
+#if (defined(__x86_64__) || defined(_M_X64)) && defined(__AVX2__) &&           \
+    defined(__FMA__) && defined(__F16C__)
+  append_hadamard_case(results, cfg, k_hadamard_scalar_case_name, false);
+  append_hadamard_case(results, cfg, k_hadamard_avx2_case_name, true);
+#endif
+
 #if (defined(__x86_64__) || defined(_M_X64)) && defined(__AVX2__) &&           \
     defined(__FMA__)
   {
