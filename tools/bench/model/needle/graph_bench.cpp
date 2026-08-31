@@ -554,8 +554,12 @@ void append_emel_needle_graph_cases(std::vector<result> &results,
     };
     auto decode_result =
         measure_case(k_decode_case_name, decode_cfg, decode_fn);
-    results.push_back(with_needle_metadata(std::move(decode_result), "emel",
-                                           "emel_needle_graph", "cpp", 1u));
+    auto decode_row = with_needle_metadata(
+        std::move(decode_result), "emel", "emel_needle_graph_parallel4",
+        "cpp", 1u);
+    decode_row.thread_count = 4;
+    decode_row.thread_contract = "bounded_fork_join_3_workers_plus_owner";
+    results.push_back(std::move(decode_row));
     if (instrument_graph()) {
       const auto print_graph_components = [&](const char *route) {
         const auto &t = fixture.graph_timing;
@@ -667,9 +671,12 @@ void append_emel_needle_graph_cases(std::vector<result> &results,
         fail_needle_setup("graph_prefill");
       }
     };
-    results.push_back(with_needle_metadata(
+    auto prefill_row = with_needle_metadata(
         measure_case(k_prefill_case_name, prefill_cfg, prefill_fn), "emel",
-        "emel_needle_graph", "cpp", k_prefill_case_tokens));
+        "emel_needle_graph_parallel4", "cpp", k_prefill_case_tokens);
+    prefill_row.thread_count = 4;
+    prefill_row.thread_contract = "bounded_fork_join_3_workers_plus_owner";
+    results.push_back(std::move(prefill_row));
   }
 }
 

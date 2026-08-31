@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <cstdint>
 #include <span>
 
@@ -43,6 +44,13 @@ struct capture_cq_diagnostics {
   size_t &prepared_input32_bytes;
   size_t &prepared_norm_bytes;
   size_t &prepared_group32_norm_bytes;
+};
+
+struct capture_projection_diagnostics {
+  std::array<uint64_t, 3u> &worker_calls;
+  uint64_t &submitted;
+  uint64_t &joined;
+  uint64_t &live;
 };
 
 struct capture_swa_diagnostics {

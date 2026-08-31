@@ -34,11 +34,13 @@ struct state_layer_advance_scalar_f32 {};
 struct state_layer_advance_prepared_avx2_f32 {};
 struct state_step_finish {};
 
-template <bool vector_exp> struct model {
+template <bool vector_exp, action::projection_route_kind projection_route>
+struct model {
   auto operator()() const {
     namespace sml = stateforward::sml;
     using route = action::route_kind;
     using activation = action::activation_route_kind;
+    using projection = action::projection_route_kind;
     // clang-format off
     return sml::make_transition_table(
         sml::state<state_init_decision> <= *sml::state<state_uninitialized>
@@ -112,40 +114,40 @@ template <bool vector_exp> struct model {
 
       , sml::state<state_layer_advance_scalar_a8> <= sml::state<state_layer_loop_scalar_a8>
           + sml::completion<event::step_run> [ guard::with_exp_route<guard::guard_layer_engram_growing_gqa2, vector_exp>{} ]
-          / action::effect_run_layer<route::scalar, activation::a8, true, false, true, true>{}
+          / action::effect_run_layer<route::scalar, activation::a8, projection::serial, true, false, true, true>{}
       , sml::state<state_layer_advance_scalar_a8> <= sml::state<state_layer_loop_scalar_a8>
           + sml::completion<event::step_run> [ guard::with_exp_route<guard::guard_layer_engram_growing_gqa2, !vector_exp>{} ]
-          / action::effect_run_layer<route::scalar, activation::a8, true, false, true, false>{}
+          / action::effect_run_layer<route::scalar, activation::a8, projection::serial, true, false, true, false>{}
       , sml::state<state_layer_advance_scalar_a8> <= sml::state<state_layer_loop_scalar_a8>
           + sml::completion<event::step_run> [ guard::guard_layer_engram_growing_generic{} ]
-          / action::effect_run_layer<route::scalar, activation::a8, true, false, false, false>{}
+          / action::effect_run_layer<route::scalar, activation::a8, projection::serial, true, false, false, false>{}
       , sml::state<state_layer_advance_scalar_a8> <= sml::state<state_layer_loop_scalar_a8>
           + sml::completion<event::step_run> [ guard::with_exp_route<guard::guard_layer_engram_full_gqa2, vector_exp>{} ]
-          / action::effect_run_layer<route::scalar, activation::a8, true, true, true, true>{}
+          / action::effect_run_layer<route::scalar, activation::a8, projection::serial, true, true, true, true>{}
       , sml::state<state_layer_advance_scalar_a8> <= sml::state<state_layer_loop_scalar_a8>
           + sml::completion<event::step_run> [ guard::with_exp_route<guard::guard_layer_engram_full_gqa2, !vector_exp>{} ]
-          / action::effect_run_layer<route::scalar, activation::a8, true, true, true, false>{}
+          / action::effect_run_layer<route::scalar, activation::a8, projection::serial, true, true, true, false>{}
       , sml::state<state_layer_advance_scalar_a8> <= sml::state<state_layer_loop_scalar_a8>
           + sml::completion<event::step_run> [ guard::guard_layer_engram_full_generic{} ]
-          / action::effect_run_layer<route::scalar, activation::a8, true, true, false, false>{}
+          / action::effect_run_layer<route::scalar, activation::a8, projection::serial, true, true, false, false>{}
       , sml::state<state_layer_advance_scalar_a8> <= sml::state<state_layer_loop_scalar_a8>
           + sml::completion<event::step_run> [ guard::with_exp_route<guard::guard_layer_plain_growing_gqa2, vector_exp>{} ]
-          / action::effect_run_layer<route::scalar, activation::a8, false, false, true, true>{}
+          / action::effect_run_layer<route::scalar, activation::a8, projection::serial, false, false, true, true>{}
       , sml::state<state_layer_advance_scalar_a8> <= sml::state<state_layer_loop_scalar_a8>
           + sml::completion<event::step_run> [ guard::with_exp_route<guard::guard_layer_plain_growing_gqa2, !vector_exp>{} ]
-          / action::effect_run_layer<route::scalar, activation::a8, false, false, true, false>{}
+          / action::effect_run_layer<route::scalar, activation::a8, projection::serial, false, false, true, false>{}
       , sml::state<state_layer_advance_scalar_a8> <= sml::state<state_layer_loop_scalar_a8>
           + sml::completion<event::step_run> [ guard::guard_layer_plain_growing_generic{} ]
-          / action::effect_run_layer<route::scalar, activation::a8, false, false, false, false>{}
+          / action::effect_run_layer<route::scalar, activation::a8, projection::serial, false, false, false, false>{}
       , sml::state<state_layer_advance_scalar_a8> <= sml::state<state_layer_loop_scalar_a8>
           + sml::completion<event::step_run> [ guard::with_exp_route<guard::guard_layer_plain_full_gqa2, vector_exp>{} ]
-          / action::effect_run_layer<route::scalar, activation::a8, false, true, true, true>{}
+          / action::effect_run_layer<route::scalar, activation::a8, projection::serial, false, true, true, true>{}
       , sml::state<state_layer_advance_scalar_a8> <= sml::state<state_layer_loop_scalar_a8>
           + sml::completion<event::step_run> [ guard::with_exp_route<guard::guard_layer_plain_full_gqa2, !vector_exp>{} ]
-          / action::effect_run_layer<route::scalar, activation::a8, false, true, true, false>{}
+          / action::effect_run_layer<route::scalar, activation::a8, projection::serial, false, true, true, false>{}
       , sml::state<state_layer_advance_scalar_a8> <= sml::state<state_layer_loop_scalar_a8>
           + sml::completion<event::step_run> [ guard::guard_layer_plain_full_generic{} ]
-          / action::effect_run_layer<route::scalar, activation::a8, false, true, false, false>{}
+          / action::effect_run_layer<route::scalar, activation::a8, projection::serial, false, true, false, false>{}
       , sml::state<state_errored> <= sml::state<state_layer_loop_scalar_a8>
           + sml::completion<event::step_run> [ guard::guard_step_failed{} ]
       , sml::state<state_layer_loop_scalar_a8> <= sml::state<state_layer_advance_scalar_a8>
@@ -161,40 +163,40 @@ template <bool vector_exp> struct model {
 
       , sml::state<state_layer_advance_scalar_f32> <= sml::state<state_layer_loop_scalar_f32>
           + sml::completion<event::step_run> [ guard::with_exp_route<guard::guard_layer_engram_growing_gqa2, vector_exp>{} ]
-          / action::effect_run_layer<route::scalar, activation::f32, true, false, true, true>{}
+          / action::effect_run_layer<route::scalar, activation::f32, projection::serial, true, false, true, true>{}
       , sml::state<state_layer_advance_scalar_f32> <= sml::state<state_layer_loop_scalar_f32>
           + sml::completion<event::step_run> [ guard::with_exp_route<guard::guard_layer_engram_growing_gqa2, !vector_exp>{} ]
-          / action::effect_run_layer<route::scalar, activation::f32, true, false, true, false>{}
+          / action::effect_run_layer<route::scalar, activation::f32, projection::serial, true, false, true, false>{}
       , sml::state<state_layer_advance_scalar_f32> <= sml::state<state_layer_loop_scalar_f32>
           + sml::completion<event::step_run> [ guard::guard_layer_engram_growing_generic{} ]
-          / action::effect_run_layer<route::scalar, activation::f32, true, false, false, false>{}
+          / action::effect_run_layer<route::scalar, activation::f32, projection::serial, true, false, false, false>{}
       , sml::state<state_layer_advance_scalar_f32> <= sml::state<state_layer_loop_scalar_f32>
           + sml::completion<event::step_run> [ guard::with_exp_route<guard::guard_layer_engram_full_gqa2, vector_exp>{} ]
-          / action::effect_run_layer<route::scalar, activation::f32, true, true, true, true>{}
+          / action::effect_run_layer<route::scalar, activation::f32, projection::serial, true, true, true, true>{}
       , sml::state<state_layer_advance_scalar_f32> <= sml::state<state_layer_loop_scalar_f32>
           + sml::completion<event::step_run> [ guard::with_exp_route<guard::guard_layer_engram_full_gqa2, !vector_exp>{} ]
-          / action::effect_run_layer<route::scalar, activation::f32, true, true, true, false>{}
+          / action::effect_run_layer<route::scalar, activation::f32, projection::serial, true, true, true, false>{}
       , sml::state<state_layer_advance_scalar_f32> <= sml::state<state_layer_loop_scalar_f32>
           + sml::completion<event::step_run> [ guard::guard_layer_engram_full_generic{} ]
-          / action::effect_run_layer<route::scalar, activation::f32, true, true, false, false>{}
+          / action::effect_run_layer<route::scalar, activation::f32, projection::serial, true, true, false, false>{}
       , sml::state<state_layer_advance_scalar_f32> <= sml::state<state_layer_loop_scalar_f32>
           + sml::completion<event::step_run> [ guard::with_exp_route<guard::guard_layer_plain_growing_gqa2, vector_exp>{} ]
-          / action::effect_run_layer<route::scalar, activation::f32, false, false, true, true>{}
+          / action::effect_run_layer<route::scalar, activation::f32, projection::serial, false, false, true, true>{}
       , sml::state<state_layer_advance_scalar_f32> <= sml::state<state_layer_loop_scalar_f32>
           + sml::completion<event::step_run> [ guard::with_exp_route<guard::guard_layer_plain_growing_gqa2, !vector_exp>{} ]
-          / action::effect_run_layer<route::scalar, activation::f32, false, false, true, false>{}
+          / action::effect_run_layer<route::scalar, activation::f32, projection::serial, false, false, true, false>{}
       , sml::state<state_layer_advance_scalar_f32> <= sml::state<state_layer_loop_scalar_f32>
           + sml::completion<event::step_run> [ guard::guard_layer_plain_growing_generic{} ]
-          / action::effect_run_layer<route::scalar, activation::f32, false, false, false, false>{}
+          / action::effect_run_layer<route::scalar, activation::f32, projection::serial, false, false, false, false>{}
       , sml::state<state_layer_advance_scalar_f32> <= sml::state<state_layer_loop_scalar_f32>
           + sml::completion<event::step_run> [ guard::with_exp_route<guard::guard_layer_plain_full_gqa2, vector_exp>{} ]
-          / action::effect_run_layer<route::scalar, activation::f32, false, true, true, true>{}
+          / action::effect_run_layer<route::scalar, activation::f32, projection::serial, false, true, true, true>{}
       , sml::state<state_layer_advance_scalar_f32> <= sml::state<state_layer_loop_scalar_f32>
           + sml::completion<event::step_run> [ guard::with_exp_route<guard::guard_layer_plain_full_gqa2, !vector_exp>{} ]
-          / action::effect_run_layer<route::scalar, activation::f32, false, true, true, false>{}
+          / action::effect_run_layer<route::scalar, activation::f32, projection::serial, false, true, true, false>{}
       , sml::state<state_layer_advance_scalar_f32> <= sml::state<state_layer_loop_scalar_f32>
           + sml::completion<event::step_run> [ guard::guard_layer_plain_full_generic{} ]
-          / action::effect_run_layer<route::scalar, activation::f32, false, true, false, false>{}
+          / action::effect_run_layer<route::scalar, activation::f32, projection::serial, false, true, false, false>{}
       , sml::state<state_errored> <= sml::state<state_layer_loop_scalar_f32>
           + sml::completion<event::step_run> [ guard::guard_step_failed{} ]
       , sml::state<state_layer_loop_scalar_f32> <= sml::state<state_layer_advance_scalar_f32>
@@ -210,40 +212,40 @@ template <bool vector_exp> struct model {
 
       , sml::state<state_layer_advance_prepared_avx2_a8> <= sml::state<state_layer_loop_prepared_avx2_a8>
           + sml::completion<event::step_run> [ guard::with_exp_route<guard::guard_layer_engram_growing_gqa2, vector_exp>{} ]
-          / action::effect_run_layer<route::prepared_avx2, activation::a8, true, false, true, true>{}
+          / action::effect_run_layer<route::prepared_avx2, activation::a8, projection_route, true, false, true, true>{}
       , sml::state<state_layer_advance_prepared_avx2_a8> <= sml::state<state_layer_loop_prepared_avx2_a8>
           + sml::completion<event::step_run> [ guard::with_exp_route<guard::guard_layer_engram_growing_gqa2, !vector_exp>{} ]
-          / action::effect_run_layer<route::prepared_avx2, activation::a8, true, false, true, false>{}
+          / action::effect_run_layer<route::prepared_avx2, activation::a8, projection_route, true, false, true, false>{}
       , sml::state<state_layer_advance_prepared_avx2_a8> <= sml::state<state_layer_loop_prepared_avx2_a8>
           + sml::completion<event::step_run> [ guard::guard_layer_engram_growing_generic{} ]
-          / action::effect_run_layer<route::prepared_avx2, activation::a8, true, false, false, false>{}
+          / action::effect_run_layer<route::prepared_avx2, activation::a8, projection_route, true, false, false, false>{}
       , sml::state<state_layer_advance_prepared_avx2_a8> <= sml::state<state_layer_loop_prepared_avx2_a8>
           + sml::completion<event::step_run> [ guard::with_exp_route<guard::guard_layer_engram_full_gqa2, vector_exp>{} ]
-          / action::effect_run_layer<route::prepared_avx2, activation::a8, true, true, true, true>{}
+          / action::effect_run_layer<route::prepared_avx2, activation::a8, projection_route, true, true, true, true>{}
       , sml::state<state_layer_advance_prepared_avx2_a8> <= sml::state<state_layer_loop_prepared_avx2_a8>
           + sml::completion<event::step_run> [ guard::with_exp_route<guard::guard_layer_engram_full_gqa2, !vector_exp>{} ]
-          / action::effect_run_layer<route::prepared_avx2, activation::a8, true, true, true, false>{}
+          / action::effect_run_layer<route::prepared_avx2, activation::a8, projection_route, true, true, true, false>{}
       , sml::state<state_layer_advance_prepared_avx2_a8> <= sml::state<state_layer_loop_prepared_avx2_a8>
           + sml::completion<event::step_run> [ guard::guard_layer_engram_full_generic{} ]
-          / action::effect_run_layer<route::prepared_avx2, activation::a8, true, true, false, false>{}
+          / action::effect_run_layer<route::prepared_avx2, activation::a8, projection_route, true, true, false, false>{}
       , sml::state<state_layer_advance_prepared_avx2_a8> <= sml::state<state_layer_loop_prepared_avx2_a8>
           + sml::completion<event::step_run> [ guard::with_exp_route<guard::guard_layer_plain_growing_gqa2, vector_exp>{} ]
-          / action::effect_run_layer<route::prepared_avx2, activation::a8, false, false, true, true>{}
+          / action::effect_run_layer<route::prepared_avx2, activation::a8, projection_route, false, false, true, true>{}
       , sml::state<state_layer_advance_prepared_avx2_a8> <= sml::state<state_layer_loop_prepared_avx2_a8>
           + sml::completion<event::step_run> [ guard::with_exp_route<guard::guard_layer_plain_growing_gqa2, !vector_exp>{} ]
-          / action::effect_run_layer<route::prepared_avx2, activation::a8, false, false, true, false>{}
+          / action::effect_run_layer<route::prepared_avx2, activation::a8, projection_route, false, false, true, false>{}
       , sml::state<state_layer_advance_prepared_avx2_a8> <= sml::state<state_layer_loop_prepared_avx2_a8>
           + sml::completion<event::step_run> [ guard::guard_layer_plain_growing_generic{} ]
-          / action::effect_run_layer<route::prepared_avx2, activation::a8, false, false, false, false>{}
+          / action::effect_run_layer<route::prepared_avx2, activation::a8, projection_route, false, false, false, false>{}
       , sml::state<state_layer_advance_prepared_avx2_a8> <= sml::state<state_layer_loop_prepared_avx2_a8>
           + sml::completion<event::step_run> [ guard::with_exp_route<guard::guard_layer_plain_full_gqa2, vector_exp>{} ]
-          / action::effect_run_layer<route::prepared_avx2, activation::a8, false, true, true, true>{}
+          / action::effect_run_layer<route::prepared_avx2, activation::a8, projection_route, false, true, true, true>{}
       , sml::state<state_layer_advance_prepared_avx2_a8> <= sml::state<state_layer_loop_prepared_avx2_a8>
           + sml::completion<event::step_run> [ guard::with_exp_route<guard::guard_layer_plain_full_gqa2, !vector_exp>{} ]
-          / action::effect_run_layer<route::prepared_avx2, activation::a8, false, true, true, false>{}
+          / action::effect_run_layer<route::prepared_avx2, activation::a8, projection_route, false, true, true, false>{}
       , sml::state<state_layer_advance_prepared_avx2_a8> <= sml::state<state_layer_loop_prepared_avx2_a8>
           + sml::completion<event::step_run> [ guard::guard_layer_plain_full_generic{} ]
-          / action::effect_run_layer<route::prepared_avx2, activation::a8, false, true, false, false>{}
+          / action::effect_run_layer<route::prepared_avx2, activation::a8, projection_route, false, true, false, false>{}
       , sml::state<state_errored> <= sml::state<state_layer_loop_prepared_avx2_a8>
           + sml::completion<event::step_run> [ guard::guard_step_failed{} ]
       , sml::state<state_layer_loop_prepared_avx2_a8> <= sml::state<state_layer_advance_prepared_avx2_a8>
@@ -259,40 +261,40 @@ template <bool vector_exp> struct model {
 
       , sml::state<state_layer_advance_prepared_avx2_f32> <= sml::state<state_layer_loop_prepared_avx2_f32>
           + sml::completion<event::step_run> [ guard::with_exp_route<guard::guard_layer_engram_growing_gqa2, vector_exp>{} ]
-          / action::effect_run_layer<route::prepared_avx2, activation::f32, true, false, true, true>{}
+          / action::effect_run_layer<route::prepared_avx2, activation::f32, projection_route, true, false, true, true>{}
       , sml::state<state_layer_advance_prepared_avx2_f32> <= sml::state<state_layer_loop_prepared_avx2_f32>
           + sml::completion<event::step_run> [ guard::with_exp_route<guard::guard_layer_engram_growing_gqa2, !vector_exp>{} ]
-          / action::effect_run_layer<route::prepared_avx2, activation::f32, true, false, true, false>{}
+          / action::effect_run_layer<route::prepared_avx2, activation::f32, projection_route, true, false, true, false>{}
       , sml::state<state_layer_advance_prepared_avx2_f32> <= sml::state<state_layer_loop_prepared_avx2_f32>
           + sml::completion<event::step_run> [ guard::guard_layer_engram_growing_generic{} ]
-          / action::effect_run_layer<route::prepared_avx2, activation::f32, true, false, false, false>{}
+          / action::effect_run_layer<route::prepared_avx2, activation::f32, projection_route, true, false, false, false>{}
       , sml::state<state_layer_advance_prepared_avx2_f32> <= sml::state<state_layer_loop_prepared_avx2_f32>
           + sml::completion<event::step_run> [ guard::with_exp_route<guard::guard_layer_engram_full_gqa2, vector_exp>{} ]
-          / action::effect_run_layer<route::prepared_avx2, activation::f32, true, true, true, true>{}
+          / action::effect_run_layer<route::prepared_avx2, activation::f32, projection_route, true, true, true, true>{}
       , sml::state<state_layer_advance_prepared_avx2_f32> <= sml::state<state_layer_loop_prepared_avx2_f32>
           + sml::completion<event::step_run> [ guard::with_exp_route<guard::guard_layer_engram_full_gqa2, !vector_exp>{} ]
-          / action::effect_run_layer<route::prepared_avx2, activation::f32, true, true, true, false>{}
+          / action::effect_run_layer<route::prepared_avx2, activation::f32, projection_route, true, true, true, false>{}
       , sml::state<state_layer_advance_prepared_avx2_f32> <= sml::state<state_layer_loop_prepared_avx2_f32>
           + sml::completion<event::step_run> [ guard::guard_layer_engram_full_generic{} ]
-          / action::effect_run_layer<route::prepared_avx2, activation::f32, true, true, false, false>{}
+          / action::effect_run_layer<route::prepared_avx2, activation::f32, projection_route, true, true, false, false>{}
       , sml::state<state_layer_advance_prepared_avx2_f32> <= sml::state<state_layer_loop_prepared_avx2_f32>
           + sml::completion<event::step_run> [ guard::with_exp_route<guard::guard_layer_plain_growing_gqa2, vector_exp>{} ]
-          / action::effect_run_layer<route::prepared_avx2, activation::f32, false, false, true, true>{}
+          / action::effect_run_layer<route::prepared_avx2, activation::f32, projection_route, false, false, true, true>{}
       , sml::state<state_layer_advance_prepared_avx2_f32> <= sml::state<state_layer_loop_prepared_avx2_f32>
           + sml::completion<event::step_run> [ guard::with_exp_route<guard::guard_layer_plain_growing_gqa2, !vector_exp>{} ]
-          / action::effect_run_layer<route::prepared_avx2, activation::f32, false, false, true, false>{}
+          / action::effect_run_layer<route::prepared_avx2, activation::f32, projection_route, false, false, true, false>{}
       , sml::state<state_layer_advance_prepared_avx2_f32> <= sml::state<state_layer_loop_prepared_avx2_f32>
           + sml::completion<event::step_run> [ guard::guard_layer_plain_growing_generic{} ]
-          / action::effect_run_layer<route::prepared_avx2, activation::f32, false, false, false, false>{}
+          / action::effect_run_layer<route::prepared_avx2, activation::f32, projection_route, false, false, false, false>{}
       , sml::state<state_layer_advance_prepared_avx2_f32> <= sml::state<state_layer_loop_prepared_avx2_f32>
           + sml::completion<event::step_run> [ guard::with_exp_route<guard::guard_layer_plain_full_gqa2, vector_exp>{} ]
-          / action::effect_run_layer<route::prepared_avx2, activation::f32, false, true, true, true>{}
+          / action::effect_run_layer<route::prepared_avx2, activation::f32, projection_route, false, true, true, true>{}
       , sml::state<state_layer_advance_prepared_avx2_f32> <= sml::state<state_layer_loop_prepared_avx2_f32>
           + sml::completion<event::step_run> [ guard::with_exp_route<guard::guard_layer_plain_full_gqa2, !vector_exp>{} ]
-          / action::effect_run_layer<route::prepared_avx2, activation::f32, false, true, true, false>{}
+          / action::effect_run_layer<route::prepared_avx2, activation::f32, projection_route, false, true, true, false>{}
       , sml::state<state_layer_advance_prepared_avx2_f32> <= sml::state<state_layer_loop_prepared_avx2_f32>
           + sml::completion<event::step_run> [ guard::guard_layer_plain_full_generic{} ]
-          / action::effect_run_layer<route::prepared_avx2, activation::f32, false, true, false, false>{}
+          / action::effect_run_layer<route::prepared_avx2, activation::f32, projection_route, false, true, false, false>{}
       , sml::state<state_errored> <= sml::state<state_layer_loop_prepared_avx2_f32>
           + sml::completion<event::step_run> [ guard::guard_step_failed{} ]
       , sml::state<state_layer_loop_prepared_avx2_f32> <= sml::state<state_layer_advance_prepared_avx2_f32>
@@ -323,14 +325,17 @@ template <bool vector_exp> struct model {
   }
 };
 
-template <bool vector_exp>
-struct basic_sm : public emel::sm<model<vector_exp>, action::context> {
-  using base_type = emel::sm<model<vector_exp>, action::context>;
+template <bool vector_exp, action::projection_route_kind projection_route>
+struct basic_sm
+    : public emel::sm<model<vector_exp, projection_route>, action::context> {
+  using base_type =
+      emel::sm<model<vector_exp, projection_route>, action::context>;
   using base_type::is;
   using base_type::visit_current_states;
 
   explicit basic_sm(const needle::contract &contract_in)
-      : base_type(std::in_place, contract_in) {}
+      : base_type(std::in_place, contract_in,
+                  projection_route == action::projection_route_kind::parallel4) {}
   basic_sm(const basic_sm &) = delete;
   basic_sm &operator=(const basic_sm &) = delete;
 
@@ -371,9 +376,23 @@ struct basic_sm : public emel::sm<model<vector_exp>, action::context> {
   }
 
   bool process_event(const event::capture_cq_diagnostics &ev) {
-    emel::kernel::cq::event::capture_prepared_diagnostics diagnostics{
-        ev.prepare_calls, ev.prepared_calls};
-    const bool handled = this->context_.cq.process_event(diagnostics);
+    uint64_t owner_prepare = 0u;
+    uint64_t owner_prepared = 0u;
+    bool handled = this->context_.cq.process_event(
+        emel::kernel::cq::event::capture_prepared_diagnostics{
+            owner_prepare, owner_prepared});
+    ev.prepare_calls = owner_prepare;
+    ev.prepared_calls = owner_prepared;
+    for (auto &actor : this->context_.worker_cq) {
+      uint64_t worker_prepare = 0u;
+      uint64_t worker_prepared = 0u;
+      handled = actor.process_event(
+                    emel::kernel::cq::event::capture_prepared_diagnostics{
+                        worker_prepare, worker_prepared}) &&
+                handled;
+      ev.prepare_calls += worker_prepare;
+      ev.prepared_calls += worker_prepared;
+    }
     ev.prepared_index_bytes = this->context_.prepared_indices.size();
     ev.prepared_input32_bytes =
         this->context_.prepared_indices_by_input32.size();
@@ -384,6 +403,14 @@ struct basic_sm : public emel::sm<model<vector_exp>, action::context> {
     return handled;
   }
 
+  bool process_event(const event::capture_projection_diagnostics &ev) {
+    ev.worker_calls = this->context_.worker_projection_calls;
+    ev.submitted = this->context_.projection_submitted;
+    ev.joined = this->context_.projection_joined;
+    ev.live = this->context_.projection_live.load(std::memory_order_acquire);
+    return true;
+  }
+
   bool process_event(const event::capture_swa_diagnostics &ev) {
     ev.gqa2_calls = this->context_.swa_gqa2_calls;
     return true;
@@ -391,13 +418,22 @@ struct basic_sm : public emel::sm<model<vector_exp>, action::context> {
 
 
   bool process_event(const event::configure_cq_timing &ev) {
+    if (ev.enabled && ev.now == nullptr)
+      return false;
+    if (ev.enabled && !this->context_.cq_timing_enabled)
+      this->context_.projection_cq_extra_nanoseconds = 0u;
+    this->context_.cq_timing_enabled = ev.enabled;
+    this->context_.cq_timing_now = ev.now;
     return this->context_.cq.process_event(
         emel::kernel::cq::event::configure_timing{ev.enabled, ev.now});
   }
 
   bool process_event(const event::capture_cq_timing &ev) {
-    return this->context_.cq.process_event(
+    const bool handled = this->context_.cq.process_event(
         emel::kernel::cq::event::capture_timing{ev.breakdown});
+    ev.breakdown.dot_batch_nanoseconds +=
+        this->context_.projection_cq_extra_nanoseconds;
+    return handled;
   }
 
   bool process_event(const event::configure_timing &ev) {
@@ -415,6 +451,7 @@ struct basic_sm : public emel::sm<model<vector_exp>, action::context> {
     this->context_.timing = {};
     if (!this->context_.timing_enabled)
       return true;
+    this->context_.projection_cq_extra_nanoseconds = 0u;
     const auto now = this->context_.timing_now;
     this->context_.cq.process_event(
         emel::kernel::cq::event::configure_timing{false, now});
@@ -435,8 +472,11 @@ struct basic_sm : public emel::sm<model<vector_exp>, action::context> {
 private:
   bool activation_quant_ = true;
 };
-using sm = basic_sm<true>;
-using scalar_exp_sm = basic_sm<false>;
+using serial_sm = basic_sm<true, action::projection_route_kind::serial>;
+using parallel4_sm = basic_sm<true, action::projection_route_kind::parallel4>;
+using sm = parallel4_sm;
+using scalar_exp_sm =
+    basic_sm<false, action::projection_route_kind::serial>;
 using NeedleGraph = sm;
 
 } // namespace emel::model::needle::graph

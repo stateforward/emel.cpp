@@ -463,3 +463,62 @@ TEST_CASE("needle graph rejects an out-of-vocab step token") {
   CHECK(graph.is(
       stateforward::sml::state<emel::model::needle::graph::state_ready>));
 }
+
+TEST_CASE("needle graph serial and parallel4 routes are exact deterministic peers") {
+#if (defined(__x86_64__) || defined(_M_X64)) && defined(__AVX2__) &&           \
+    defined(__FMA__) && defined(__F16C__)
+  const auto model_path = std::filesystem::path{EMEL_TEST_REPO_ROOT} /
+                          "tests/models/route-w4-qat.cact";
+  const std::vector<uint8_t> file_bytes = read_file_bytes(model_path);
+  emel::cact::loader::sm loader{};
+  emel::cact::loader::geometry geometry = {};
+  REQUIRE(loader.process_event(
+      emel::cact::loader::event::probe{std::span<const uint8_t>{file_bytes},
+                                       geometry, k_probe_done, k_probe_error}));
+  std::vector<emel::cact::loader::tensor_view> tensors(geometry.num_tensors);
+  REQUIRE(loader.process_event(emel::cact::loader::event::bind_storage{
+      std::span<emel::cact::loader::tensor_view>{tensors}, k_bind_done,
+      k_bind_error}));
+  REQUIRE(loader.process_event(emel::cact::loader::event::parse{
+      std::span<const uint8_t>{file_bytes}, k_parse_done, k_parse_error}));
+  emel::model::needle::sm binder{};
+  emel::model::needle::contract contract = {};
+  REQUIRE(binder.process_event(emel::model::needle::event::bind{
+      geometry, std::span<const emel::cact::loader::tensor_view>{tensors},
+      contract, k_needle_done, k_needle_error}));
+  emel::model::needle::graph::serial_sm serial{contract};
+  emel::model::needle::graph::parallel4_sm parallel4{contract};
+  for (const bool activation_quant : {false, true}) {
+    REQUIRE(serial.process_event(
+        emel::model::needle::graph::event::init{activation_quant}));
+    REQUIRE(parallel4.process_event(
+        emel::model::needle::graph::event::init{activation_quant}));
+    std::vector<float> serial_logits(k_vocab);
+    std::vector<float> parallel4_logits(k_vocab);
+    const std::array<int32_t, 4u> prompt = {2, 1544, 1663, 2328};
+    REQUIRE(serial.process_event(emel::model::needle::graph::event::prefill{
+        prompt, serial_logits}));
+    REQUIRE(parallel4.process_event(emel::model::needle::graph::event::prefill{
+        prompt, parallel4_logits}));
+    CHECK(parallel4_logits == serial_logits);
+    const int32_t next = static_cast<int32_t>(argmax(serial_logits));
+    REQUIRE(serial.process_event(emel::model::needle::graph::event::decode{
+        next, serial_logits}));
+    REQUIRE(parallel4.process_event(emel::model::needle::graph::event::decode{
+        next, parallel4_logits}));
+    CHECK(parallel4_logits == serial_logits);
+    std::array<uint64_t, 3u> calls{};
+    uint64_t submitted = 0u;
+    uint64_t joined = 0u;
+    uint64_t live = 1u;
+    REQUIRE(parallel4.process_event(
+        emel::model::needle::graph::event::capture_projection_diagnostics{
+            calls, submitted, joined, live}));
+    CHECK(calls[0] > 0u);
+    CHECK(calls[1] > 0u);
+    CHECK(calls[2] > 0u);
+    CHECK(submitted == joined);
+    CHECK(live == 0u);
+  }
+#endif
+}

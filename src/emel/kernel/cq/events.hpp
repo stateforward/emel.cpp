@@ -106,6 +106,21 @@ struct prepared_gemv_request {
   float output_scale = 1.0f;
 };
 
+// Dot-only prepared CQ4 request over an activation already padded and
+// transformed in 128-value FWHT groups by its owner.
+struct prepared_dot_q4_request {
+  const prepared_q4_view &weights;
+  const prepared_codebook_q4 &codebook;
+  std::span<const float> activation_fwht;
+  std::span<float> output;
+  float output_scale = 1.0f;
+};
+
+struct execute_prepared_avx2_dot_q4 {
+  const prepared_dot_q4_request &request;
+  dispatch_result &result;
+};
+
 struct prepared_gemv_target {
   const prepared_q4_view *weights = nullptr;
   std::span<float> output = {};

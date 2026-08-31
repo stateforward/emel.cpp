@@ -784,10 +784,11 @@ TEST_CASE("fork_join_lane_pool_starts_only_the_runtime_worker_budget") {
   CHECK(ran.load(std::memory_order_acquire) == 1);
 }
 
-TEST_CASE("fork_join_lane_pool_runtime_budget_constructor is noexcept") {
+TEST_CASE("fork_join_lane_pool_runtime_budget_constructor is fallible") {
   using pool_type = emel::policy::fork_join_lane_pool<7u, 128u, 64u>;
-  CHECK(std::is_nothrow_default_constructible_v<pool_type>);
-  CHECK(std::is_nothrow_constructible_v<pool_type, std::size_t>);
+  CHECK_FALSE(std::is_nothrow_default_constructible_v<pool_type>);
+  CHECK_FALSE(std::is_nothrow_constructible_v<pool_type, std::size_t>);
+  CHECK_THROWS_AS(pool_type{0u}, std::invalid_argument);
 }
 
 TEST_CASE("fork_join_lane_pool_batch_rejects_partial_claim_and_reuses_slots") {

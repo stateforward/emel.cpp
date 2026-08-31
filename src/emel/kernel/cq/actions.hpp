@@ -1003,6 +1003,23 @@ struct effect_execute_prepared_avx2_q4 {
   }
 };
 
+struct effect_execute_prepared_avx2_dot_q4 {
+  void operator()(const event::execute_prepared_avx2_dot_q4 &ev,
+                  context &ctx) const noexcept {
+    const uint64_t dot_begin = timing_now(ctx);
+    execute_prepared_avx2_dot_block64(ev.request.weights,
+                                      ev.request.codebook,
+                                      ev.request.activation_fwht,
+                                      ev.request.output);
+    scale_output(ev.request.output.first(ev.request.weights.out),
+                 ev.request.output_scale);
+    if (ctx.timing_enabled)
+      ctx.timing.dot_full_nanoseconds += timing_now(ctx) - dot_begin;
+    ev.result.accepted = true;
+    ++ctx.prepared_calls;
+  }
+};
+
 struct effect_execute_prepared_avx2_batch4_q4 {
   void operator()(const event::execute_prepared_avx2_batch4_q4 &ev,
                   context &ctx) const noexcept {

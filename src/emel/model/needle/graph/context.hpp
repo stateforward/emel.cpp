@@ -1,6 +1,9 @@
 #pragma once
 
+#include <array>
+#include <atomic>
 #include <cstdint>
+#include <optional>
 #include <utility>
 #include <vector>
 
@@ -46,6 +49,10 @@ enum class activation_route_kind : uint8_t {
   f32 = 0,
   a8 = 1,
 };
+enum class projection_route_kind : uint8_t { serial = 0, parallel4 = 3 };
+
+using projection_lane_pool =
+    emel::policy::fork_join_lane_pool<3u, 256u, 1048576u>;
 
 struct activation_payload {
   std::span<const float> values = {};
@@ -59,7 +66,10 @@ struct activation_payload {
 // KV_BITS=0 -> no KV quantization) also runs f32 caches, so kv_bits in the
 // header stays a baked deployment hint, not a runtime obligation.
 struct context {
-  explicit context(const needle::contract &contract_in) : bound(&contract_in) {
+  explicit context(const needle::contract &contract_in,
+                   const bool parallel_projection_wave = false)
+      : bound(&contract_in),
+        parallel_projection_wave(parallel_projection_wave) {
     const auto &geo = contract_in.geo;
     const uint64_t d_model = geo.d_model;
     const uint64_t lanes_dim = static_cast<uint64_t>(geo.mhc_lanes) * d_model;
@@ -132,6 +142,8 @@ struct context {
     prepared_indices_by_input32.resize(prepared_sizes.indices);
     prepared_norms.resize(prepared_sizes.norms);
     prepared_norms_by_group32.resize(prepared_sizes.norms_by_group32);
+    if (parallel_projection_wave)
+      projection_pool.emplace(3u);
   }
 
   context(const context &) = delete;
@@ -242,6 +254,14 @@ struct context {
   std::vector<float> prepared_norms;
   std::vector<float> prepared_norms_by_group32;
   emel::kernel::cq::event::prepared_codebook_q4 prepared_codebook = {};
+  const bool parallel_projection_wave = false;
+  std::array<uint64_t, 3u> worker_projection_calls = {};
+  uint64_t projection_submitted = 0u;
+  uint64_t projection_joined = 0u;
+  std::atomic<uint64_t> projection_live{0u};
+  uint64_t projection_cq_extra_nanoseconds = 0u;
+  bool cq_timing_enabled = false;
+  emel::kernel::cq::event::timestamp_now_fn cq_timing_now = nullptr;
 
   emel::kernel::cq::event::prepared_q4_view prepared_embedding = {};
   std::array<prepared_layer_views, needle::k_max_layers> prepared_layers = {};
@@ -291,12 +311,16 @@ struct context {
 
   // Child kernel machines (parent-owned, dispatched via process_event only).
   emel::kernel::cq::sm cq;
+  std::array<emel::kernel::cq::sm, 3u> worker_cq = {};
   emel::kernel::zcrms::sm zcrms;
   emel::kernel::rope::sm rope;
   emel::kernel::swa::sm swa;
   emel::kernel::hadamard::sm hadamard;
   emel::kernel::engram::sm engram;
   emel::kernel::mhc::sm mhc;
+
+  // Last member: worker threads stop and join before actor/storage teardown.
+  std::optional<projection_lane_pool> projection_pool = std::nullopt;
 };
 
 } // namespace emel::model::needle::graph::action

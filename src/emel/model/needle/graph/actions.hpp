@@ -43,12 +43,17 @@ inline auto time_component(context &ctx, uint64_t &accumulator,
   }
 }
 
-inline uint64_t captured_cq_nanoseconds(context &ctx) noexcept {
+inline uint64_t captured_owner_cq_nanoseconds(context &ctx) noexcept {
   emel::kernel::cq::event::timing_breakdown cq{};
   ctx.cq.process_event(emel::kernel::cq::event::capture_timing{cq});
   return cq.quantize_nanoseconds + cq.fwht_nanoseconds +
          cq.dot_full_nanoseconds + cq.dot_batch_nanoseconds +
          cq.dot_rows_nanoseconds + cq.dequant_nanoseconds;
+}
+
+inline uint64_t captured_cq_nanoseconds(context &ctx) noexcept {
+  return captured_owner_cq_nanoseconds(ctx) +
+         ctx.projection_cq_extra_nanoseconds;
 }
 
 template <class function_type>
@@ -219,6 +224,77 @@ compute_gemv_batch4(context &ctx, const activation_payload activation,
   return ctx.cq.process_event(
       emel::kernel::cq::event::execute_prepared_avx2_batch4_q4{request,
                                                                result});
+}
+
+inline bool compute_prepared_dot(
+    emel::kernel::cq::sm &actor,
+    const emel::kernel::cq::event::prepared_q4_view &weights,
+    const emel::kernel::cq::event::prepared_codebook_q4 &codebook,
+    const std::span<const float> activation_fwht,
+    const std::span<float> output, const float output_scale) noexcept {
+  const emel::kernel::cq::event::prepared_dot_q4_request request{
+      weights, codebook, activation_fwht, output, output_scale};
+  emel::kernel::cq::event::dispatch_result result{};
+  return actor.process_event(
+      emel::kernel::cq::event::execute_prepared_avx2_dot_q4{request, result});
+}
+
+template <projection_route_kind projection_route>
+inline bool compute_gemv_projection_wave(
+    context &ctx, const activation_payload activation,
+    const emel::kernel::cq::event::prepared_q4_view &q,
+    const std::span<float> q_output,
+    const emel::kernel::cq::event::prepared_q4_view &k,
+    const std::span<float> k_output,
+    const emel::kernel::cq::event::prepared_q4_view &v,
+    const std::span<float> v_output,
+    const emel::kernel::cq::event::prepared_q4_view &gate,
+    const std::span<float> gate_output) noexcept {
+  if constexpr (projection_route == projection_route_kind::serial) {
+    return compute_gemv_batch4(ctx, activation, q, q_output, k, k_output, v,
+                               v_output, gate, gate_output);
+  } else {
+    const bool measure_cq = ctx.timing_enabled || ctx.cq_timing_enabled;
+    const auto now = ctx.timing_enabled ? ctx.timing_now : ctx.cq_timing_now;
+    const uint64_t wave_begin = measure_cq ? now() : 0u;
+    const uint64_t owner_cq_begin =
+        measure_cq ? captured_owner_cq_nanoseconds(ctx) : 0u;
+    auto transformed = std::span<float>{ctx.cq_workspace}.first(q.in_pad);
+    emel::kernel::cq::detail::compute_fwht128_groups_avx2(
+        activation.values, q.in, transformed);
+    projection_lane_pool::join_group group{};
+    std::array<bool, 3u> worker_ok = {false, false, false};
+    const auto run_worker = [&](const size_t lane,
+                                const emel::kernel::cq::event::prepared_q4_view
+                                    &weights,
+                                const std::span<float> output) noexcept {
+      ctx.projection_live.fetch_add(1u, std::memory_order_acq_rel);
+      worker_ok[lane] = compute_prepared_dot(
+          ctx.worker_cq[lane], weights, ctx.prepared_codebook, transformed,
+          output, activation.scale);
+      ++ctx.worker_projection_calls[lane];
+      ctx.projection_live.fetch_sub(1u, std::memory_order_acq_rel);
+    };
+    const size_t submitted = ctx.projection_pool->try_submit_batch(
+        group, [&]() noexcept { run_worker(0u, q, q_output); },
+        [&]() noexcept { run_worker(1u, k, k_output); },
+        [&]() noexcept { run_worker(2u, v, v_output); });
+    ctx.projection_submitted += submitted;
+    const bool owner_ok = compute_prepared_dot(
+        ctx.cq, gate, ctx.prepared_codebook, transformed, gate_output,
+        activation.scale);
+    const bool joined_ok = group.wait();
+    if (measure_cq) {
+      const uint64_t elapsed = now() - wave_begin;
+      const uint64_t owner_elapsed =
+          captured_owner_cq_nanoseconds(ctx) - owner_cq_begin;
+      ctx.projection_cq_extra_nanoseconds +=
+          elapsed > owner_elapsed ? elapsed - owner_elapsed : 0u;
+    }
+    ctx.projection_joined += submitted;
+    return submitted == 3u && joined_ok && owner_ok && worker_ok[0] &&
+           worker_ok[1] && worker_ok[2];
+  }
 }
 inline bool compute_zcrms_norm(context &ctx, const std::span<const float> input,
                                const std::span<const float> scale,
@@ -519,8 +595,8 @@ inline bool compute_engram(context &ctx) noexcept {
 // `window_full`, and `attend_gqa2` are guard-selected at the transition;
 // everything inside is compile-time conditionals plus bounded data-plane work.
 template <route_kind route, activation_route_kind activation_route,
-          bool engram_site, bool window_full, bool attend_gqa2,
-          bool vector_exp>
+          projection_route_kind projection_route, bool engram_site,
+          bool window_full, bool attend_gqa2, bool vector_exp>
 inline bool compute_layer(context &ctx, event::step_ctx &step) noexcept {
   const auto &bound = *ctx.bound;
   const auto &geo = bound.geo;
@@ -598,7 +674,7 @@ inline bool compute_layer(context &ctx, event::step_ctx &step) noexcept {
   const auto attention_input =
       prepare_activation<activation_route>(ctx, ctx.h_norm, ok);
   if constexpr (route == route_kind::prepared_avx2) {
-    ok = ok && compute_gemv_batch4(
+    ok = ok && compute_gemv_projection_wave<projection_route>(
                    ctx, attention_input, prepared_layer.q_proj,
                    std::span<float>{ctx.q_rows}, prepared_layer.k_proj,
                    std::span<float>{ctx.k_rows}, prepared_layer.v_proj,
@@ -873,12 +949,7 @@ template <route_kind route> struct effect_step_begin {
     if (ctx.timing_enabled) {
       ctx.timing_step_begin = ctx.timing_now();
       ctx.timing_accounted_nanoseconds = 0u;
-      emel::kernel::cq::event::timing_breakdown cq{};
-      ctx.cq.process_event(emel::kernel::cq::event::capture_timing{cq});
-      ctx.timing_cq_begin_nanoseconds =
-          cq.quantize_nanoseconds + cq.fwht_nanoseconds +
-          cq.dot_full_nanoseconds + cq.dot_batch_nanoseconds +
-          cq.dot_rows_nanoseconds + cq.dequant_nanoseconds;
+      ctx.timing_cq_begin_nanoseconds = captured_cq_nanoseconds(ctx);
     }
     fold_error(ev.ctx.err, compute_step_begin<route>(ctx, ev.ctx));
   }
@@ -892,14 +963,14 @@ struct effect_compute_engram {
 };
 
 template <route_kind route, activation_route_kind activation_route,
-          bool engram_site, bool window_full, bool attend_gqa2,
-          bool vector_exp>
+          projection_route_kind projection_route, bool engram_site,
+          bool window_full, bool attend_gqa2, bool vector_exp>
 struct effect_run_layer {
   void operator()(const event::step_run &ev, context &ctx) const noexcept {
     fold_error(
         ev.ctx.err,
-        compute_layer<route, activation_route, engram_site, window_full,
-                      attend_gqa2, vector_exp>(ctx, ev.ctx));
+        compute_layer<route, activation_route, projection_route, engram_site,
+                      window_full, attend_gqa2, vector_exp>(ctx, ev.ctx));
   }
 };
 
@@ -921,12 +992,7 @@ struct effect_finish_step {
   void operator()(const event::step_run &, context &ctx) const noexcept {
     if (ctx.timing_enabled) {
       const uint64_t total = ctx.timing_now() - ctx.timing_step_begin;
-      emel::kernel::cq::event::timing_breakdown cq{};
-      ctx.cq.process_event(emel::kernel::cq::event::capture_timing{cq});
-      const uint64_t cq_total =
-          cq.quantize_nanoseconds + cq.fwht_nanoseconds +
-          cq.dot_full_nanoseconds + cq.dot_batch_nanoseconds +
-          cq.dot_rows_nanoseconds + cq.dequant_nanoseconds;
+      const uint64_t cq_total = captured_cq_nanoseconds(ctx);
       const uint64_t cq_step = cq_total - ctx.timing_cq_begin_nanoseconds;
       ctx.timing.steps += 1u;
       ctx.timing.total_nanoseconds += total;

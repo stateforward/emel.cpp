@@ -172,6 +172,30 @@ struct guard_execute_prepared_avx2_q4 {
   }
 };
 
+struct guard_execute_prepared_avx2_dot_q4 {
+  bool operator()(const event::execute_prepared_avx2_dot_q4 &ev,
+                  const action::context &) const noexcept {
+#if (defined(__x86_64__) || defined(_M_X64)) && defined(__AVX2__) &&           \
+    defined(__FMA__)
+    const auto &request = ev.request;
+    return emel::kernel::x86_64::detail::detect_avx2() &&
+           emel::kernel::x86_64::detail::detect_fma() &&
+           request.weights.in_pad ==
+               (static_cast<uint64_t>(request.weights.in) + 127u) / 128u *
+                   128u &&
+           prepared_supported(request.weights, request.codebook.values) &&
+           prepared_codebook_supported(request.codebook) &&
+           request.weights.group == 128u &&
+           request.activation_fwht.size() >= request.weights.in_pad &&
+           request.output.size() >= request.weights.out &&
+           std::isfinite(request.output_scale);
+#else
+    (void)ev;
+    return false;
+#endif
+  }
+};
+
 struct guard_execute_prepared_avx2_batch4_q4 {
   bool operator()(const event::execute_prepared_avx2_batch4_q4 &ev,
                   const action::context &) const noexcept {

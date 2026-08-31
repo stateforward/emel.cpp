@@ -16,6 +16,7 @@
 #include <exception>
 #include <memory>
 #include <new>
+#include <stdexcept>
 #include <semaphore>
 #include <thread>
 #include <type_traits>
@@ -130,12 +131,12 @@ class fork_join_lane_pool {
 
   static constexpr std::size_t static_worker_count = worker_count;
 
-  fork_join_lane_pool() noexcept : fork_join_lane_pool(worker_count) {}
+  fork_join_lane_pool() : fork_join_lane_pool(worker_count) {}
 
-  explicit fork_join_lane_pool(const std::size_t active_worker_count) noexcept
+  explicit fork_join_lane_pool(const std::size_t active_worker_count)
       : active_worker_count_(active_worker_count) {
     if (active_worker_count_ == 0u || active_worker_count_ > worker_count) {
-      std::terminate();
+      throw std::invalid_argument{"fork_join_lane_pool worker count"};
     }
     start_workers();
   }
@@ -297,10 +298,30 @@ class fork_join_lane_pool {
     std::atomic<bool> stopping = false;
   };
 
-  void start_workers() noexcept {
-    for (std::size_t index = 0u; index < active_worker_count_; ++index) {
-      workers_[index].thread =
-          std::thread([this, index]() noexcept { worker_loop(index); });
+  void start_workers() {
+    std::size_t started = 0u;
+    try {
+      for (; started < active_worker_count_; ++started) {
+        workers_[started].thread =
+            std::thread([this, started]() noexcept { worker_loop(started); });
+      }
+    } catch (...) {
+      stop_workers(started);
+      throw;
+    }
+  }
+
+  void stop_workers(const std::size_t count) noexcept {
+    for (std::size_t index = 0u; index < count; ++index) {
+      auto &worker = workers_[index];
+      worker.stopping.store(true, std::memory_order_release);
+      worker.ready.release();
+    }
+    for (std::size_t index = 0u; index < count; ++index) {
+      auto &worker = workers_[index];
+      if (worker.thread.joinable())
+        worker.thread.join();
+      worker.task.reset();
     }
   }
 

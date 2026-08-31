@@ -1138,3 +1138,62 @@ TEST_CASE("CQ4 prepared block64 matches block32 bitwise including tails and scal
   }
 #endif
 }
+
+TEST_CASE("CQ4 prepared dot-only dispatch matches full route and rejects malformed spans without writes") {
+#if (defined(__x86_64__) || defined(_M_X64)) && defined(__AVX2__) &&           \
+    defined(__FMA__)
+  constexpr uint32_t out = 65u;
+  constexpr uint32_t in = 128u;
+  constexpr uint32_t group = 128u;
+  std::vector<uint32_t> selectors(static_cast<size_t>(out) * in, 3u);
+  std::vector<uint16_t> norm_bits(out, 0x3c00u);
+  const auto b = blob<4u>(selectors, out, in, group, norm_bits);
+  const auto v = view(b, out, in, group, 4u);
+  std::vector<uint8_t> indices(static_cast<size_t>(out) * in);
+  std::vector<uint8_t> indices_by_input32(static_cast<size_t>(out / 32u * 32u) * in);
+  std::vector<float> norms(out);
+  std::vector<float> norms_by_group32(out / 32u * 32u);
+  emel::kernel::cq::event::prepared_q4_view prepared{};
+  emel::kernel::cq::action::prepare_q4(
+      {v, indices, indices_by_input32, norms, norms_by_group32, prepared});
+  std::array<float, emel::cact::loader::k_codebook_len> codebook{};
+  for (size_t i = 0u; i < codebook.size(); ++i)
+    codebook[i] = static_cast<float>(static_cast<int32_t>(i) - 14) * 0.125f;
+  emel::kernel::cq::event::prepared_codebook_q4 prepared_codebook{};
+  emel::kernel::cq::action::prepare_codebook_q4({codebook, prepared_codebook});
+  std::array<float, in> activation{};
+  for (size_t i = 0u; i < activation.size(); ++i)
+    activation[i] = static_cast<float>(static_cast<int32_t>(i % 17u) - 8) * 0.25f;
+  std::array<float, in> transformed{};
+  emel::kernel::cq::detail::compute_fwht128_groups_avx2(activation, in,
+                                                        transformed);
+  std::vector<float> full(out);
+  std::vector<float> dot(out);
+  std::array<float, in> workspace{};
+  constexpr float scale = 0.03125f;
+  emel::kernel::cq::sm machine;
+  emel::kernel::cq::event::dispatch_result full_result{};
+  const emel::kernel::cq::event::prepared_gemv_request full_request{
+      prepared, prepared_codebook, activation, full, workspace, scale};
+  REQUIRE(machine.process_event(
+      emel::kernel::cq::event::execute_prepared_avx2_q4{full_request,
+                                                        full_result}));
+  emel::kernel::cq::event::dispatch_result dot_result{};
+  const emel::kernel::cq::event::prepared_dot_q4_request dot_request{
+      prepared, prepared_codebook, transformed, dot, scale};
+  REQUIRE(machine.process_event(
+      emel::kernel::cq::event::execute_prepared_avx2_dot_q4{dot_request,
+                                                            dot_result}));
+  CHECK(dot == full);
+  std::vector<float> rejected(out, 123.0f);
+  const emel::kernel::cq::event::prepared_dot_q4_request malformed{
+      prepared, prepared_codebook,
+      std::span<const float>{transformed}.first(in - 1u), rejected, scale};
+  emel::kernel::cq::event::dispatch_result rejected_result{};
+  CHECK_FALSE(machine.process_event(
+      emel::kernel::cq::event::execute_prepared_avx2_dot_q4{malformed,
+                                                            rejected_result}));
+  for (const float value : rejected)
+    CHECK(value == 123.0f);
+#endif
+}
