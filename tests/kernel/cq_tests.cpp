@@ -56,6 +56,72 @@ size_t blocked_norm_count(const tensor_view &view) {
       (view.shape[1] + view.group - 1u) / view.group * view.group;
   return static_cast<size_t>(view.shape[0] / 32u * 32u) * in_pad / view.group;
 }
+#if defined(__AVX2__) && defined(__FMA__)
+void execute_block32_canonical_reference(
+    const emel::kernel::cq::event::prepared_q4_view &prepared,
+    const emel::kernel::cq::event::prepared_codebook_q4 &codebook,
+    const std::span<const float> activation_fwht,
+    const std::span<float> output) {
+  __m256i byte0;
+  __m256i byte1;
+  __m256i byte2;
+  __m256i byte3;
+  emel::kernel::cq::action::q4_codebook_byte_tables(codebook, byte0, byte1,
+                                                    byte2, byte3);
+  const uint32_t groups_per_row = prepared.in_pad / prepared.group;
+  for (uint32_t row = 0u; row < prepared.out; row += 32u) {
+    const uint8_t *selectors = prepared.indices_by_input32.data() +
+                               static_cast<size_t>(row) * prepared.in_pad;
+    __m256 row_total0 = _mm256_setzero_ps();
+    __m256 row_total1 = _mm256_setzero_ps();
+    __m256 row_total2 = _mm256_setzero_ps();
+    __m256 row_total3 = _mm256_setzero_ps();
+    for (uint32_t begin = 0u, group_index = 0u; begin < prepared.in_pad;
+         begin += prepared.group, ++group_index) {
+      __m256 group_accum0 = _mm256_setzero_ps();
+      __m256 group_accum1 = _mm256_setzero_ps();
+      __m256 group_accum2 = _mm256_setzero_ps();
+      __m256 group_accum3 = _mm256_setzero_ps();
+      for (uint32_t i = 0u; i < prepared.group; ++i) {
+        const auto values = emel::kernel::cq::action::lookup_codebook32_pshufb(
+            emel::kernel::cq::action::load_selector32(
+                selectors + static_cast<size_t>(begin + i) * 32u),
+            byte0, byte1, byte2, byte3);
+        const __m256 activation = _mm256_set1_ps(activation_fwht[begin + i]);
+        group_accum0 =
+            _mm256_fmadd_ps(values.values0, activation, group_accum0);
+        group_accum1 =
+            _mm256_fmadd_ps(values.values1, activation, group_accum1);
+        group_accum2 =
+            _mm256_fmadd_ps(values.values2, activation, group_accum2);
+        group_accum3 =
+            _mm256_fmadd_ps(values.values3, activation, group_accum3);
+      }
+      alignas(32) std::array<float, 32u> canonical_norms{};
+      for (uint32_t lane = 0u; lane < canonical_norms.size(); ++lane)
+        canonical_norms[lane] =
+            prepared.norms[static_cast<size_t>(row + lane) * groups_per_row +
+                           group_index];
+      row_total0 = _mm256_fmadd_ps(group_accum0,
+                                   _mm256_load_ps(canonical_norms.data()),
+                                   row_total0);
+      row_total1 = _mm256_fmadd_ps(group_accum1,
+                                   _mm256_load_ps(canonical_norms.data() + 8u),
+                                   row_total1);
+      row_total2 = _mm256_fmadd_ps(group_accum2,
+                                   _mm256_load_ps(canonical_norms.data() + 16u),
+                                   row_total2);
+      row_total3 = _mm256_fmadd_ps(group_accum3,
+                                   _mm256_load_ps(canonical_norms.data() + 24u),
+                                   row_total3);
+    }
+    _mm256_storeu_ps(output.data() + row, row_total0);
+    _mm256_storeu_ps(output.data() + row + 8u, row_total1);
+    _mm256_storeu_ps(output.data() + row + 16u, row_total2);
+    _mm256_storeu_ps(output.data() + row + 24u, row_total3);
+  }
+}
+#endif
 template <uint32_t Bits>
 void run_route(uint32_t in, const std::array<float, 28u> &cb) {
   constexpr uint32_t group = 8u;
@@ -96,6 +162,21 @@ void run_route(uint32_t in, const std::array<float, 28u> &cb) {
 #endif
 }
 } // namespace
+TEST_CASE("CQ4 prepared route rejects a zero group without evaluating counts") {
+  emel::kernel::cq::event::prepared_q4_view prepared{};
+  emel::kernel::cq::event::prepared_codebook_q4 prepared_codebook{};
+  std::array<float, 1u> activation{};
+  std::array<float, 1u> output{};
+  std::array<float, 1u> workspace{};
+  const emel::kernel::cq::event::prepared_gemv_request request{
+      prepared, prepared_codebook, activation, output, workspace};
+  emel::kernel::cq::event::dispatch_result result{};
+  emel::kernel::cq::sm sm;
+  CHECK_FALSE(sm.process_event(
+      emel::kernel::cq::event::execute_prepared_avx2_q4{request, result}));
+  CHECK_FALSE(result.accepted);
+}
+
 TEST_CASE("CQ A8 fake quant matches JAX ties zero and signed boundary") {
   REQUIRE(std::fesetround(FE_TONEAREST) == 0);
   emel::kernel::cq::sm sm;
@@ -448,6 +529,25 @@ TEST_CASE("CQ4 thirty-two-selector byte shuffle lookup is bit exact") {
                        _mm256_castps_si256(values.values3));
     for (uint32_t lane = 0u; lane < selectors.size(); ++lane)
       CHECK(actual[lane] == codebook_bits[selectors[lane]]);
+    const auto raw = emel::kernel::cq::action::lookup_codebook32_raw(
+        emel::kernel::cq::action::load_selector32(selectors.data()), byte0,
+        byte1, byte2, byte3);
+    alignas(32) std::array<uint32_t, 32u> raw_actual{};
+    _mm256_store_si256(reinterpret_cast<__m256i *>(raw_actual.data()),
+                       _mm256_castps_si256(raw.values0));
+    _mm256_store_si256(reinterpret_cast<__m256i *>(raw_actual.data() + 8u),
+                       _mm256_castps_si256(raw.values1));
+    _mm256_store_si256(reinterpret_cast<__m256i *>(raw_actual.data() + 16u),
+                       _mm256_castps_si256(raw.values2));
+    _mm256_store_si256(reinterpret_cast<__m256i *>(raw_actual.data() + 24u),
+                       _mm256_castps_si256(raw.values3));
+    constexpr std::array<uint32_t, 32u> raw_rows{
+        0u,  1u,  2u,  3u,  16u, 17u, 18u, 19u,
+        4u,  5u,  6u,  7u,  20u, 21u, 22u, 23u,
+        8u,  9u,  10u, 11u, 24u, 25u, 26u, 27u,
+        12u, 13u, 14u, 15u, 28u, 29u, 30u, 31u};
+    for (uint32_t lane = 0u; lane < raw_rows.size(); ++lane)
+      CHECK(raw_actual[lane] == codebook_bits[selectors[raw_rows[lane]]]);
   };
 
   std::array<uint8_t, 32u> lane_boundaries{};
@@ -839,14 +939,17 @@ TEST_CASE("CQ4 prepared block32 input-major route preserves exact output") {
   std::vector<float> norms(static_cast<size_t>(out) * in / group);
   std::vector<float> norms_by_group32(static_cast<size_t>(out) * in / group);
   std::array<float, in> activation{};
-  for (size_t i = 0u; i < source_indices.size(); ++i)
+  for (size_t i = 0u; i < source_indices.size(); ++i) {
+    const size_t row = i / in;
+    const size_t column = i % in;
     source_indices[i] = static_cast<uint32_t>(
-        (i * 13u + i / in * 7u + 3u) & 15u);
+        (column * 13u + row * 7u + (row >> 4u) * 8u + 3u) & 15u);
+  }
   for (uint32_t i = 0u; i < in; ++i)
     activation[i] = std::sin(static_cast<float>(i + 1u) * 0.03125f);
   std::vector<uint16_t> norm_bits(norms.size());
   for (size_t i = 0u; i < norm_bits.size(); ++i)
-    norm_bits[i] = static_cast<uint16_t>(0x3000u + ((i * 5u) & 15u) * 0x40u);
+    norm_bits[i] = static_cast<uint16_t>(0x3000u + i);
   const auto b = blob<4u>(source_indices, out, in, group, norm_bits);
   const auto v = view(b, out, in, group, 4u);
   emel::kernel::cq::event::prepared_q4_view prepared{};
@@ -859,15 +962,21 @@ TEST_CASE("CQ4 prepared block32 input-major route preserves exact output") {
   emel::kernel::cq::event::prepared_codebook_q4 prepared_codebook{};
   REQUIRE(prepared.norms_by_group32.size() == norms_by_group32.size());
   const uint32_t groups_per_row = in / group;
+  constexpr std::array<uint32_t, 32u> raw_rows{
+      0u,  1u,  2u,  3u,  16u, 17u, 18u, 19u,
+      4u,  5u,  6u,  7u,  20u, 21u, 22u, 23u,
+      8u,  9u,  10u, 11u, 24u, 25u, 26u, 27u,
+      12u, 13u, 14u, 15u, 28u, 29u, 30u, 31u};
   for (uint32_t row = 0u; row < out; row += 32u)
     for (uint32_t group_index = 0u; group_index < groups_per_row;
          ++group_index)
-      for (uint32_t lane = 0u; lane < 32u; ++lane)
+      for (uint32_t lane = 0u; lane < raw_rows.size(); ++lane)
         CHECK(prepared.norms_by_group32[static_cast<size_t>(row) *
                                             groups_per_row +
                                         static_cast<size_t>(group_index) * 32u +
                                         lane] ==
-              prepared.norms[static_cast<size_t>(row + lane) * groups_per_row +
+              prepared.norms[static_cast<size_t>(row + raw_rows[lane]) *
+                                 groups_per_row +
                              group_index]);
   emel::kernel::cq::action::prepare_codebook_q4({cb, prepared_codebook});
   REQUIRE(prepared.indices_by_input32.size() == indices_by_input32.size());
@@ -877,13 +986,18 @@ TEST_CASE("CQ4 prepared block32 input-major route preserves exact output") {
         CHECK(prepared.indices_by_input32[static_cast<size_t>(row) * in +
                                           static_cast<size_t>(i) * 32u + lane] ==
               source_indices[static_cast<size_t>(row + lane) * in + i]);
+  std::array<float, out> canonical_block32{};
+  execute_block32_canonical_reference(prepared, prepared_codebook, activation,
+                                      canonical_block32);
   std::array<float, out> block32{};
   std::array<float, out> block32_repeat{};
   emel::kernel::cq::action::execute_prepared_avx2_dot_block32(
       prepared, prepared_codebook, activation, block32);
   emel::kernel::cq::action::execute_prepared_avx2_dot_block32(
       prepared, prepared_codebook, activation, block32_repeat);
-  for (uint32_t row = 0u; row < out; ++row)
+  for (uint32_t row = 0u; row < out; ++row) {
     CHECK(block32[row] == block32_repeat[row]);
+    CHECK(block32[row] == canonical_block32[row]);
+  }
 #endif
 }

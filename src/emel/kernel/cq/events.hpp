@@ -77,9 +77,10 @@ struct prepared_q4_view {
   // row-major `indices`; the blocked layout exists only for hot full GEMV.
   std::span<const uint8_t> indices_by_input32 = {};
   std::span<const float> norms = {};
-  // Complete 32-row output blocks, group-major within each block. Values are
-  // copied from the exact decoded row-major norms during preparation; tail
-  // rows continue to use `norms`.
+  // Complete 32-row output blocks, group-major within each block and ordered
+  // like lookup_codebook32_raw: 0..3,16..19; 4..7,20..23; 8..11,24..27;
+  // 12..15,28..31. Values are copied from exact decoded row-major norms;
+  // tail rows continue to use `norms`.
   std::span<const float> norms_by_group32 = {};
 };
 struct prepare_q4_request {
