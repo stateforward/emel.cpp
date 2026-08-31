@@ -91,33 +91,18 @@ dot_pair_avx2(const float *lhs0, const float *lhs1, const float *rhs,
 #endif
 }
 
-EMEL_KERNEL_SWA_AVX2_TARGET inline void accumulate_value_pair_avx2(
-    float *output0, float *output1, const float *values, const float weight0,
-    const float weight1, const uint32_t dim) noexcept {
-#if defined(__x86_64__) || defined(_M_X64)
-  const __m256 weight0_v = _mm256_set1_ps(weight0);
-  const __m256 weight1_v = _mm256_set1_ps(weight1);
-  size_t i = 0u;
-  const size_t vector_end = static_cast<size_t>(dim) & ~size_t{7u};
-  for (; i < vector_end; i += 8u) {
-    const __m256 value_v = _mm256_loadu_ps(values + i);
-    _mm256_storeu_ps(output0 + i,
-                     _mm256_fmadd_ps(weight0_v, value_v,
-                                     _mm256_loadu_ps(output0 + i)));
-    _mm256_storeu_ps(output1 + i,
-                     _mm256_fmadd_ps(weight1_v, value_v,
-                                     _mm256_loadu_ps(output1 + i)));
-  }
-  for (; i < static_cast<size_t>(dim); ++i) {
-    output0[i] += weight0 * values[i];
-    output1[i] += weight1 * values[i];
-  }
-#else
+#if defined(__GNUC__) || defined(__clang__)
+__attribute__((noinline))
+#endif
+inline void accumulate_value_pair_scalar(float *output0, float *output1,
+                                         const float *values,
+                                         const float weight0,
+                                         const float weight1,
+                                         const uint32_t dim) noexcept {
   for (size_t i = 0u; i < static_cast<size_t>(dim); ++i) {
     output0[i] += weight0 * values[i];
     output1[i] += weight1 * values[i];
   }
-#endif
 }
 
 EMEL_KERNEL_SWA_AVX2_TARGET inline void
@@ -306,10 +291,10 @@ struct effect_execute_attend_gqa2_avx2_impl {
         const float *value =
             value_base + static_cast<size_t>(slot_begin) * request.head_dim;
         for (uint32_t row = 0u; row < count; ++row, ++offset) {
-          accumulate_value_pair_avx2(output0, output1, value,
-                                     score0[offset] * inv_sum0,
-                                     score1[offset] * inv_sum1,
-                                     request.head_dim);
+          accumulate_value_pair_scalar(output0, output1, value,
+                                       score0[offset] * inv_sum0,
+                                       score1[offset] * inv_sum1,
+                                       request.head_dim);
           value += request.head_dim;
         }
       };
