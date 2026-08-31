@@ -297,6 +297,33 @@ struct sm : public emel::sm<model, action::context> {
         emel::kernel::cq::event::capture_timing{ev.breakdown});
   }
 
+  bool process_event(const event::configure_timing &ev) {
+    if (ev.enabled && ev.now == nullptr)
+      return false;
+    if (ev.enabled && !this->context_.timing_enabled)
+      this->context_.timing = {};
+    this->context_.timing_enabled = ev.enabled;
+    this->context_.timing_now = ev.now;
+    return this->context_.cq.process_event(
+        emel::kernel::cq::event::configure_timing{ev.enabled, ev.now});
+  }
+
+  bool process_event(const event::reset_timing &) {
+    this->context_.timing = {};
+    if (!this->context_.timing_enabled)
+      return true;
+    const auto now = this->context_.timing_now;
+    this->context_.cq.process_event(
+        emel::kernel::cq::event::configure_timing{false, now});
+    return this->context_.cq.process_event(
+        emel::kernel::cq::event::configure_timing{true, now});
+  }
+
+  bool process_event(const event::capture_timing &ev) {
+    ev.breakdown = this->context_.timing;
+    return true;
+  }
+
   bool process_event(const event::capture_a8_diagnostics &ev) {
     return this->context_.cq.process_event(
         emel::kernel::cq::event::capture_a8_diagnostics{ev.quantize_calls});

@@ -11,6 +11,7 @@
 #include "emel/kernel/rope/sm.hpp"
 #include "emel/kernel/swa/sm.hpp"
 #include "emel/kernel/zcrms/sm.hpp"
+#include "emel/model/needle/graph/events.hpp"
 #include "emel/model/needle/events.hpp"
 
 namespace emel::model::needle::graph::action {
@@ -247,6 +248,13 @@ struct context {
   prepared_mhc_views prepared_mhc = {};
   std::array<prepared_engram_site_views, needle::k_max_engram_sites>
       prepared_engram_sites = {};
+
+  bool timing_enabled = false;
+  emel::model::needle::graph::event::timestamp_now_fn timing_now = nullptr;
+  emel::model::needle::graph::event::timing_breakdown timing = {};
+  uint64_t timing_step_begin = 0u;
+  uint64_t timing_accounted_nanoseconds = 0u;
+  uint64_t timing_cq_begin_nanoseconds = 0u;
 
   // Per-layer f32 KV ring caches over the kv_window sliding mask.
   std::vector<float> key_cache;

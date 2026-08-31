@@ -53,6 +53,38 @@ struct configure_cq_timing {
 struct capture_cq_timing {
   emel::kernel::cq::event::timing_breakdown &breakdown;
 };
+using timestamp_now_fn = emel::kernel::cq::event::timestamp_now_fn;
+
+// Opt-in graph/component timing. The graph calls `now` only while enabled;
+// capture and reset are observation/control events and never advance runtime.
+struct timing_breakdown {
+  uint64_t steps = 0u;
+  uint64_t total_nanoseconds = 0u;
+  uint64_t cq_nanoseconds = 0u;
+  uint64_t graph_overhead_nanoseconds = 0u;
+  uint64_t engram_nanoseconds = 0u;
+  uint64_t norm_nanoseconds = 0u;
+  uint64_t mhc_pre_nanoseconds = 0u;
+  uint64_t mhc_post_nanoseconds = 0u;
+  uint64_t attention_rope_nanoseconds = 0u;
+  uint64_t attention_cache_nanoseconds = 0u;
+  uint64_t attention_attend_nanoseconds = 0u;
+  uint64_t attention_gate_nanoseconds = 0u;
+  uint64_t hadamard_nanoseconds = 0u;
+  uint64_t lane_copy_mean_nanoseconds = 0u;
+  uint64_t sampling_nanoseconds = 0u;
+};
+
+struct configure_timing {
+  bool enabled = false;
+  timestamp_now_fn now = nullptr;
+};
+
+struct reset_timing {};
+
+struct capture_timing {
+  timing_breakdown &breakdown;
+};
 
 struct capture_a8_diagnostics {
   uint64_t &quantize_calls;

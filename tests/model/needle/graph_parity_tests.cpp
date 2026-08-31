@@ -120,6 +120,13 @@ step_error compare_step(const std::span<const float> native,
 
 } // namespace
 
+uint64_t g_timing_clock = 0u;
+
+uint64_t fake_timestamp_now() noexcept {
+  g_timing_clock += 10u;
+  return g_timing_clock;
+}
+
 TEST_CASE("needle graph matches the committed JAX logits fixture on all "
           "cases") {
   // Load the pinned .cact through the maintained loader chain.
@@ -314,6 +321,58 @@ TEST_CASE("needle graph prepares CQ4 storage once and selects prepared route") {
           prepared_input32_bytes, prepared_norm_bytes,
           prepared_group32_norm_bytes}));
   CHECK(prepare_calls == preparation_count);
+}
+
+TEST_CASE("needle graph component timing is explicit, resettable, and reconciled") {
+  const auto model_path = std::filesystem::path{EMEL_TEST_REPO_ROOT} /
+                          "tests/models/route-w4-qat.cact";
+  const std::vector<uint8_t> file_bytes = read_file_bytes(model_path);
+  emel::cact::loader::sm loader{};
+  emel::cact::loader::geometry geometry = {};
+  REQUIRE(loader.process_event(
+      emel::cact::loader::event::probe{std::span<const uint8_t>{file_bytes},
+                                       geometry, k_probe_done, k_probe_error}));
+  std::vector<emel::cact::loader::tensor_view> tensors(geometry.num_tensors);
+  REQUIRE(loader.process_event(emel::cact::loader::event::bind_storage{
+      std::span<emel::cact::loader::tensor_view>{tensors}, k_bind_done,
+      k_bind_error}));
+  REQUIRE(loader.process_event(emel::cact::loader::event::parse{
+      std::span<const uint8_t>{file_bytes}, k_parse_done, k_parse_error}));
+  emel::model::needle::sm binder{};
+  emel::model::needle::contract contract = {};
+  REQUIRE(binder.process_event(emel::model::needle::event::bind{
+      geometry, std::span<const emel::cact::loader::tensor_view>{tensors},
+      contract, k_needle_done, k_needle_error}));
+
+  emel::model::needle::graph::sm graph{contract};
+  std::vector<float> logits(k_vocab);
+  REQUIRE(graph.process_event(emel::model::needle::graph::event::init{}));
+  g_timing_clock = 0u;
+  REQUIRE(graph.process_event(emel::model::needle::graph::event::configure_timing{
+      true, &fake_timestamp_now}));
+  REQUIRE(graph.process_event(emel::model::needle::graph::event::decode{
+      2, std::span<float>{logits}}));
+  emel::model::needle::graph::event::timing_breakdown timing{};
+  REQUIRE(graph.process_event(
+      emel::model::needle::graph::event::capture_timing{timing}));
+  CHECK(timing.steps == 1u);
+  CHECK(timing.total_nanoseconds > 0u);
+  const uint64_t split =
+      timing.cq_nanoseconds + timing.graph_overhead_nanoseconds +
+      timing.engram_nanoseconds + timing.norm_nanoseconds +
+      timing.mhc_pre_nanoseconds + timing.mhc_post_nanoseconds +
+      timing.attention_rope_nanoseconds + timing.attention_cache_nanoseconds +
+      timing.attention_attend_nanoseconds + timing.attention_gate_nanoseconds +
+      timing.hadamard_nanoseconds + timing.lane_copy_mean_nanoseconds +
+      timing.sampling_nanoseconds;
+  CHECK(split == timing.total_nanoseconds);
+  REQUIRE(graph.process_event(emel::model::needle::graph::event::reset_timing{}));
+  REQUIRE(graph.process_event(
+      emel::model::needle::graph::event::capture_timing{timing}));
+  CHECK(timing.steps == 0u);
+  CHECK(timing.total_nanoseconds == 0u);
+  REQUIRE(graph.process_event(emel::model::needle::graph::event::configure_timing{
+      false, nullptr}));
 }
 
 TEST_CASE("needle graph AVX2 route requires every CQ tensor group to be 128") {

@@ -46,6 +46,8 @@ constexpr char k_workload_id[] = "needle_graph_single_core_v1";
 constexpr char k_decode_iters_env[] = "EMEL_BENCH_NEEDLE_GRAPH_DECODE_ITERS";
 constexpr char k_prefill_iters_env[] = "EMEL_BENCH_NEEDLE_GRAPH_PREFILL_ITERS";
 constexpr char k_instrument_cq_env[] = "EMEL_BENCH_NEEDLE_GRAPH_INSTRUMENT_CQ";
+constexpr char k_instrument_graph_env[] =
+    "EMEL_BENCH_NEEDLE_GRAPH_INSTRUMENT_COMPONENTS";
 
 // Steady-state decode is measured after a realistic ~100-token prefill; the
 // prefill case runs a 512-token prompt (max_seq_len 2048 bounded).
@@ -80,6 +82,12 @@ bool instrument_cq() noexcept {
   const char *value = std::getenv(k_instrument_cq_env);
   return value != nullptr && value[0] == '1' && value[1] == '\0';
 }
+
+bool instrument_graph() noexcept {
+  const char *value = std::getenv(k_instrument_graph_env);
+  return value != nullptr && value[0] == '1' && value[1] == '\0';
+}
+
 
 std::uint64_t benchmark_timestamp_now_ns() noexcept {
   return static_cast<std::uint64_t>(
@@ -164,6 +172,7 @@ struct graph_fixture {
   uint32_t decoded_steps = 0u;
   std::uint64_t decode_ns = 0u;
   emel::kernel::cq::event::timing_breakdown cq_timing = {};
+  needle::graph::event::timing_breakdown graph_timing = {};
 
   graph_fixture() : file_bytes(read_file_bytes(resolve_model_path())) {
     cact_loader::sm loader{};
@@ -309,7 +318,10 @@ void append_emel_needle_graph_cases(std::vector<result> &results,
       }
       const int32_t token = fixture.prompt_ids[token_cursor];
       token_cursor = (token_cursor + 1u) % fixture.prompt_ids.size();
-      if (instrument_cq())
+      if (instrument_graph())
+        fixture.graph->process_event(needle::graph::event::configure_timing{
+            true, &benchmark_timestamp_now_ns});
+      else if (instrument_cq())
         fixture.graph->process_event(needle::graph::event::configure_cq_timing{
             true, &benchmark_timestamp_now_ns});
       const auto decode_begin = std::chrono::steady_clock::now();
@@ -318,13 +330,17 @@ void append_emel_needle_graph_cases(std::vector<result> &results,
         fail_needle_setup("graph_decode_step");
       }
       const auto decode_end = std::chrono::steady_clock::now();
-      if (instrument_cq()) {
+      if (instrument_cq() || instrument_graph()) {
         fixture.decode_ns += static_cast<std::uint64_t>(
             std::chrono::duration_cast<std::chrono::nanoseconds>(decode_end -
                                                                  decode_begin)
                 .count());
-        fixture.graph->process_event(
-            needle::graph::event::capture_cq_timing{fixture.cq_timing});
+        if (instrument_graph())
+          fixture.graph->process_event(
+              needle::graph::event::capture_timing{fixture.graph_timing});
+        else
+          fixture.graph->process_event(
+              needle::graph::event::capture_cq_timing{fixture.cq_timing});
       }
       fixture.decoded_steps += 1u;
     };
@@ -354,6 +370,44 @@ void append_emel_needle_graph_cases(std::vector<result> &results,
           static_cast<unsigned long long>(t.dequant_nanoseconds),
           static_cast<unsigned long long>(cq_ns), pct,
           static_cast<unsigned long long>(fixture.decode_ns - cq_ns));
+    }
+    if (instrument_graph()) {
+      const auto &t = fixture.graph_timing;
+      const double tokens = static_cast<double>(t.steps);
+      const auto print_phase = [&](const char *name, const uint64_t ns) {
+        const double ns_per_token = tokens > 0.0 ? ns / tokens : 0.0;
+        const double pct = t.total_nanoseconds > 0u
+                               ? static_cast<double>(ns) * 100.0 /
+                                     static_cast<double>(t.total_nanoseconds)
+                               : 0.0;
+        std::fprintf(stderr, "# needle_graph_component: phase=%s ns=%llu "
+                             "ns_per_token=%.3f pct_total=%.3f\n",
+                     name, static_cast<unsigned long long>(ns), ns_per_token,
+                     pct);
+      };
+      std::fprintf(stderr,
+                   "# needle_graph_components: steps=%llu measured_ns=%llu "
+                   "timed_ns=%llu reconciliation_pct=%.3f\n",
+                   static_cast<unsigned long long>(t.steps),
+                   static_cast<unsigned long long>(fixture.decode_ns),
+                   static_cast<unsigned long long>(t.total_nanoseconds),
+                   fixture.decode_ns > 0u
+                       ? static_cast<double>(t.total_nanoseconds) * 100.0 /
+                             static_cast<double>(fixture.decode_ns)
+                       : 0.0);
+      print_phase("cq", t.cq_nanoseconds);
+      print_phase("graph_overhead", t.graph_overhead_nanoseconds);
+      print_phase("engram", t.engram_nanoseconds);
+      print_phase("norm", t.norm_nanoseconds);
+      print_phase("mhc_pre", t.mhc_pre_nanoseconds);
+      print_phase("mhc_post", t.mhc_post_nanoseconds);
+      print_phase("attention_rope", t.attention_rope_nanoseconds);
+      print_phase("attention_cache", t.attention_cache_nanoseconds);
+      print_phase("attention_attend", t.attention_attend_nanoseconds);
+      print_phase("attention_gate", t.attention_gate_nanoseconds);
+      print_phase("hadamard", t.hadamard_nanoseconds);
+      print_phase("lane_copy_mean", t.lane_copy_mean_nanoseconds);
+      print_phase("sampling", t.sampling_nanoseconds);
     }
   }
 

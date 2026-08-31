@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <span>
 #include <utility>
+#include <type_traits>
 
 #include "emel/kernel/detail.hpp"
 #include "emel/model/needle/graph/context.hpp"
@@ -17,6 +18,55 @@ namespace emel::model::needle::graph::action {
 inline void fold_error(emel::error::type &err, const bool ok) noexcept {
   err = emel::error::set(err, static_cast<emel::error::type>(!ok) *
                                   emel::error::cast(error::kernel_rejected));
+}
+
+template <class function_type>
+inline auto time_component(context &ctx, uint64_t &accumulator,
+                           function_type &&function) noexcept(
+    noexcept(std::forward<function_type>(function)()))
+    -> decltype(std::forward<function_type>(function)()) {
+  if (!ctx.timing_enabled)
+    return std::forward<function_type>(function)();
+  const uint64_t begin = ctx.timing_now();
+  if constexpr (std::is_void_v<
+                    decltype(std::forward<function_type>(function)())>) {
+    std::forward<function_type>(function)();
+    const uint64_t elapsed = ctx.timing_now() - begin;
+    accumulator += elapsed;
+    ctx.timing_accounted_nanoseconds += elapsed;
+  } else {
+    auto result = std::forward<function_type>(function)();
+    const uint64_t elapsed = ctx.timing_now() - begin;
+    accumulator += elapsed;
+    ctx.timing_accounted_nanoseconds += elapsed;
+    return result;
+  }
+}
+
+inline uint64_t captured_cq_nanoseconds(context &ctx) noexcept {
+  emel::kernel::cq::event::timing_breakdown cq{};
+  ctx.cq.process_event(emel::kernel::cq::event::capture_timing{cq});
+  return cq.quantize_nanoseconds + cq.fwht_nanoseconds +
+         cq.dot_full_nanoseconds + cq.dot_batch_nanoseconds +
+         cq.dot_rows_nanoseconds + cq.dequant_nanoseconds;
+}
+
+template <class function_type>
+inline auto time_component_excluding_cq(context &ctx, uint64_t &accumulator,
+                                        function_type &&function) noexcept(
+    noexcept(std::forward<function_type>(function)()))
+    -> decltype(std::forward<function_type>(function)()) {
+  if (!ctx.timing_enabled)
+    return std::forward<function_type>(function)();
+  const uint64_t cq_begin = captured_cq_nanoseconds(ctx);
+  const uint64_t begin = ctx.timing_now();
+  auto result = std::forward<function_type>(function)();
+  const uint64_t elapsed = ctx.timing_now() - begin;
+  const uint64_t cq_elapsed = captured_cq_nanoseconds(ctx) - cq_begin;
+  const uint64_t exclusive = elapsed > cq_elapsed ? elapsed - cq_elapsed : 0u;
+  accumulator += exclusive;
+  ctx.timing_accounted_nanoseconds += exclusive;
+  return result;
 }
 
 inline std::span<const float> codebook_span(const context &ctx) noexcept {
@@ -156,29 +206,33 @@ compute_gemv_batch4(context &ctx, const activation_payload activation,
       emel::kernel::cq::event::execute_prepared_avx2_batch4_q4{request,
                                                                result});
 }
-
 inline bool compute_zcrms_norm(context &ctx, const std::span<const float> input,
                                const std::span<const float> scale,
                                const uint32_t rows, const uint32_t dim,
                                const std::span<float> output) noexcept {
-  const emel::kernel::zcrms::event::norm_rows_request request{.input = input,
-                                                              .scale = scale,
-                                                              .rows = rows,
-                                                              .dim = dim,
-                                                              .output = output};
-  emel::kernel::zcrms::event::dispatch_result result{};
-  return ctx.zcrms.process_event(
-      emel::kernel::zcrms::event::execute_norm_rows{request, result});
+  return time_component(ctx, ctx.timing.norm_nanoseconds, [&]() noexcept {
+    const emel::kernel::zcrms::event::norm_rows_request request{
+        .input = input,
+        .scale = scale,
+        .rows = rows,
+        .dim = dim,
+        .output = output};
+    emel::kernel::zcrms::event::dispatch_result result{};
+    return ctx.zcrms.process_event(
+        emel::kernel::zcrms::event::execute_norm_rows{request, result});
+  });
 }
 
 inline bool compute_rms_unit(context &ctx, const std::span<const float> input,
                              const uint32_t dim,
                              const std::span<float> output) noexcept {
-  const emel::kernel::zcrms::event::unit_rows_request request{
-      .input = input, .rows = 1u, .dim = dim, .output = output};
-  emel::kernel::zcrms::event::dispatch_result result{};
-  return ctx.zcrms.process_event(
-      emel::kernel::zcrms::event::execute_unit_rows{request, result});
+  return time_component(ctx, ctx.timing.norm_nanoseconds, [&]() noexcept {
+    const emel::kernel::zcrms::event::unit_rows_request request{
+        .input = input, .rows = 1u, .dim = dim, .output = output};
+    emel::kernel::zcrms::event::dispatch_result result{};
+    return ctx.zcrms.process_event(
+        emel::kernel::zcrms::event::execute_unit_rows{request, result});
+  });
 }
 
 // Init helpers prepare exact CQ4 selectors/norms, decode the fp16 scale
@@ -337,9 +391,11 @@ inline bool compute_step_begin(context &ctx, event::step_ctx &step) noexcept {
   const bool embed_ok = compute_dequant_row<route>(
       ctx, ctx.bound->embedding, ctx.prepared_embedding,
       static_cast<uint32_t>(step.token), scale, std::span<float>{ctx.mean});
-  for (uint32_t lane = 0u; lane < geo.mhc_lanes; ++lane)
-    for (uint32_t c = 0u; c < d_model; ++c)
-      ctx.lanes[static_cast<size_t>(lane) * d_model + c] = ctx.mean[c];
+  time_component(ctx, ctx.timing.lane_copy_mean_nanoseconds, [&]() noexcept {
+    for (uint32_t lane = 0u; lane < geo.mhc_lanes; ++lane)
+      for (uint32_t c = 0u; c < d_model; ++c)
+        ctx.lanes[static_cast<size_t>(lane) * d_model + c] = ctx.mean[c];
+  });
   step.layer_index = 0u;
   return embed_ok;
 }
@@ -349,103 +405,102 @@ inline bool compute_step_begin(context &ctx, event::step_ctx &step) noexcept {
 // tap convolution — one K row and one V row per site.
 template <route_kind route, activation_route_kind activation_route>
 inline bool compute_engram(context &ctx) noexcept {
-  const auto &bound = *ctx.bound;
-  const auto &geo = bound.geo;
-  const uint32_t d_model = geo.d_model;
-  const uint32_t max_order =
-      static_cast<uint32_t>(context::compute_max_order(geo));
-  const uint32_t window = geo.engram_conv_taps * max_order;
-  const uint32_t positions = window + 1u;
-  const uint32_t tables = geo.num_engram_tables;
-  const uint32_t sub_dim = geo.engram_sub_dim;
-  const uint32_t e_dim = tables * sub_dim;
+  return time_component_excluding_cq(
+      ctx, ctx.timing.engram_nanoseconds, [&]() noexcept {
+    const auto &bound = *ctx.bound;
+    const auto &geo = bound.geo;
+    const uint32_t d_model = geo.d_model;
+    const uint32_t max_order =
+        static_cast<uint32_t>(context::compute_max_order(geo));
+    const uint32_t window = geo.engram_conv_taps * max_order;
+    const uint32_t positions = window + 1u;
+    const uint32_t tables = geo.num_engram_tables;
+    const uint32_t sub_dim = geo.engram_sub_dim;
+    const uint32_t e_dim = tables * sub_dim;
 
-  // Window positions map to logical token positions
-  // [position - window, position]; out-of-range sources read token 0 invalid.
-  for (uint32_t p = 0u; p < positions; ++p) {
-    const uint32_t in_range = static_cast<uint32_t>(p + ctx.position >= window);
-    const uint32_t source = (ctx.position + p - window) * in_range;
-    ctx.engram_hash_tokens[p] = in_range * ctx.history_tokens[source];
-    ctx.engram_hash_valid[p] = static_cast<uint8_t>(
-        in_range * static_cast<uint32_t>(ctx.history_valid[source] != 0u));
-  }
+    for (uint32_t p = 0u; p < positions; ++p) {
+      const uint32_t in_range =
+          static_cast<uint32_t>(p + ctx.position >= window);
+      const uint32_t source = (ctx.position + p - window) * in_range;
+      ctx.engram_hash_tokens[p] = in_range * ctx.history_tokens[source];
+      ctx.engram_hash_valid[p] = static_cast<uint8_t>(
+          in_range * static_cast<uint32_t>(ctx.history_valid[source] != 0u));
+    }
 
-  const emel::kernel::engram::event::hash_rows_request hash_request{
-      .tokens = ctx.engram_hash_tokens,
-      .valid = ctx.engram_hash_valid,
-      .positions = positions,
-      .orders = std::span<const uint32_t>{geo.engram_orders.data(),
-                                          geo.num_engram_orders},
-      .num_orders = geo.num_engram_orders,
-      .heads = tables / geo.num_engram_orders,
-      .slots = geo.engram_slots,
-      .indices = ctx.engram_hash_indices,
-      .ngram_ok = ctx.engram_ngram_ok};
-  emel::kernel::engram::event::dispatch_result hash_result{};
-  bool ok =
-      ctx.engram.process_event(emel::kernel::engram::event::execute_hash_rows{
-          hash_request, hash_result});
+    const emel::kernel::engram::event::hash_rows_request hash_request{
+        .tokens = ctx.engram_hash_tokens,
+        .valid = ctx.engram_hash_valid,
+        .positions = positions,
+        .orders = std::span<const uint32_t>{geo.engram_orders.data(),
+                                            geo.num_engram_orders},
+        .num_orders = geo.num_engram_orders,
+        .heads = tables / geo.num_engram_orders,
+        .slots = geo.engram_slots,
+        .indices = ctx.engram_hash_indices,
+        .ngram_ok = ctx.engram_ngram_ok};
+    emel::kernel::engram::event::dispatch_result hash_result{};
+    bool ok = ctx.engram.process_event(
+        emel::kernel::engram::event::execute_hash_rows{hash_request,
+                                                       hash_result});
 
-  for (uint32_t site = 0u; site < bound.engram_site_count; ++site) {
-    const auto &views = bound.engram_sites[site];
-    // Tap j reads window position window - j * dilation; tap 0 is the
-    // current position and also feeds the key projection.
-    // decode.py taps shift by j * max(orders); the header's conv dilation
-    // equals max(orders) for this deployment, but decode.py is ground truth.
-    for (uint32_t tap = 0u; tap < geo.engram_conv_taps; ++tap) {
-      const uint32_t p = window - tap * max_order;
-      ctx.engram_tap_valid[tap] = ctx.engram_hash_valid[p];
-      float *e_row =
-          ctx.engram_e_rows.data() + static_cast<size_t>(tap) * e_dim;
-      for (uint32_t table = 0u; table < tables; ++table) {
-        const size_t hash_at = static_cast<size_t>(p) * tables + table;
-        const uint32_t row =
-            table * geo.engram_slots + ctx.engram_hash_indices[hash_at];
-        ok = ok &&
-             compute_dequant_row<route>(
-                 ctx, views.tables, ctx.prepared_engram_sites[site].tables, row,
-                 ctx.engram_ngram_ok[hash_at],
-                 std::span<float>{e_row + static_cast<size_t>(table) * sub_dim,
-                                  sub_dim});
+    for (uint32_t site = 0u; site < bound.engram_site_count; ++site) {
+      const auto &views = bound.engram_sites[site];
+      for (uint32_t tap = 0u; tap < geo.engram_conv_taps; ++tap) {
+        const uint32_t p = window - tap * max_order;
+        ctx.engram_tap_valid[tap] = ctx.engram_hash_valid[p];
+        float *e_row =
+            ctx.engram_e_rows.data() + static_cast<size_t>(tap) * e_dim;
+        for (uint32_t table = 0u; table < tables; ++table) {
+          const size_t hash_at = static_cast<size_t>(p) * tables + table;
+          const uint32_t row =
+              table * geo.engram_slots + ctx.engram_hash_indices[hash_at];
+          ok = ok && compute_dequant_row<route>(
+                         ctx, views.tables,
+                         ctx.prepared_engram_sites[site].tables, row,
+                         ctx.engram_ngram_ok[hash_at],
+                         std::span<float>{e_row +
+                                              static_cast<size_t>(table) *
+                                                  sub_dim,
+                                          sub_dim});
+        }
+        const std::span<const float> activation{e_row, e_dim};
+        const auto quantized =
+            prepare_activation<activation_route>(ctx, activation, ok);
+        ok = ok && compute_gemv<route>(
+                       ctx, views.value_proj,
+                       ctx.prepared_engram_sites[site].value_proj, quantized,
+                       std::span<float>{ctx.engram_v_taps.data() +
+                                            static_cast<size_t>(tap) * d_model,
+                                        d_model});
       }
-      const std::span<const float> activation{e_row, e_dim};
+      const std::span<const float> activation{ctx.engram_e_rows.data(), e_dim};
       const auto quantized =
           prepare_activation<activation_route>(ctx, activation, ok);
       ok = ok && compute_gemv<route>(
-                     ctx, views.value_proj,
-                     ctx.prepared_engram_sites[site].value_proj, quantized,
-                     std::span<float>{ctx.engram_v_taps.data() +
-                                          static_cast<size_t>(tap) * d_model,
+                     ctx, views.key_proj,
+                     ctx.prepared_engram_sites[site].key_proj, quantized,
+                     std::span<float>{ctx.engram_keys.data() +
+                                          static_cast<size_t>(site) * d_model,
                                       d_model});
+      const emel::kernel::engram::event::conv_taps_request conv_request{
+          .value_rows = ctx.engram_v_taps,
+          .tap_valid = ctx.engram_tap_valid,
+          .taps = payload_span(views.taps, 0u,
+                               static_cast<uint64_t>(geo.engram_conv_taps) *
+                                   d_model * 2u),
+          .conv_taps = geo.engram_conv_taps,
+          .dim = d_model,
+          .output = std::span<float>{ctx.engram_values.data() +
+                                         static_cast<size_t>(site) * d_model,
+                                     d_model}};
+      emel::kernel::engram::event::dispatch_result conv_result{};
+      ok = ok && ctx.engram.process_event(
+                     emel::kernel::engram::event::execute_conv_taps{
+                         conv_request, conv_result});
     }
-    const std::span<const float> activation{ctx.engram_e_rows.data(), e_dim};
-    const auto quantized =
-        prepare_activation<activation_route>(ctx, activation, ok);
-    ok = ok && compute_gemv<route>(
-                   ctx, views.key_proj,
-                   ctx.prepared_engram_sites[site].key_proj, quantized,
-                   std::span<float>{ctx.engram_keys.data() +
-                                        static_cast<size_t>(site) * d_model,
-                                    d_model});
-    const emel::kernel::engram::event::conv_taps_request conv_request{
-        .value_rows = ctx.engram_v_taps,
-        .tap_valid = ctx.engram_tap_valid,
-        .taps = payload_span(views.taps, 0u,
-                             static_cast<uint64_t>(geo.engram_conv_taps) *
-                                 d_model * 2u),
-        .conv_taps = geo.engram_conv_taps,
-        .dim = d_model,
-        .output = std::span<float>{ctx.engram_values.data() +
-                                       static_cast<size_t>(site) * d_model,
-                                   d_model}};
-    emel::kernel::engram::event::dispatch_result conv_result{};
-    ok = ok && ctx.engram.process_event(
-                   emel::kernel::engram::event::execute_conv_taps{conv_request,
-                                                                  conv_result});
-  }
-  return ok;
+    return ok;
+  });
 }
-
 // One transformer layer over the current single-token step. `engram_site` and
 // `window_full` are guard-selected at the transition; everything inside is
 // compile-time conditionals plus bounded data-plane work.
@@ -485,8 +540,12 @@ inline bool compute_layer(context &ctx, event::step_ctx &step) noexcept {
       .dim = d_model,
       .output = std::span<float>{ctx.u}};
   emel::kernel::mhc::event::dispatch_result pre_result{};
-  ok = ok && ctx.mhc.process_event(emel::kernel::mhc::event::execute_pre_mix{
-                 pre_request, pre_result});
+  ok = ok && time_component(ctx, ctx.timing.mhc_pre_nanoseconds,
+                            [&]() noexcept {
+                              return ctx.mhc.process_event(
+                                  emel::kernel::mhc::event::execute_pre_mix{
+                                      pre_request, pre_result});
+                            });
 
   if constexpr (engram_site) {
     uint32_t site = 0u;
@@ -503,12 +562,17 @@ inline bool compute_layer(context &ctx, event::step_ctx &step) noexcept {
         .dim = d_model,
         .output = std::span<float>{ctx.bx}};
     emel::kernel::engram::event::dispatch_result gate_result{};
-    ok = ok && ctx.engram.process_event(
-                   emel::kernel::engram::event::execute_alpha_gate{
-                       gate_request, gate_result});
+    ok = ok && time_component(ctx, ctx.timing.engram_nanoseconds,
+                              [&]() noexcept {
+                                return ctx.engram.process_event(
+                                    emel::kernel::engram::event::execute_alpha_gate{
+                                        gate_request, gate_result});
+                              });
   } else {
-    for (uint32_t c = 0u; c < d_model; ++c)
-      ctx.bx[c] = ctx.u[c];
+    time_component(ctx, ctx.timing.lane_copy_mean_nanoseconds, [&]() noexcept {
+      for (uint32_t c = 0u; c < d_model; ++c)
+        ctx.bx[c] = ctx.u[c];
+    });
   }
 
   const std::span<const float> norm_in_scale{
@@ -559,20 +623,23 @@ inline bool compute_layer(context &ctx, event::step_ctx &step) noexcept {
       .head_dim = head_dim,
       .rows = ctx.q_rows};
   emel::kernel::rope::event::dispatch_result rope_q_result{};
-  ok = ok &&
-       ctx.rope.process_event(emel::kernel::rope::event::execute_apply_rows{
-           rope_q, rope_q_result});
-  const emel::kernel::rope::event::apply_rows_request rope_k{
-      .cos_table = ctx.rope_cos,
-      .sin_table = ctx.rope_sin,
-      .position = ctx.position,
-      .head_count = kv_heads,
-      .head_dim = head_dim,
-      .rows = ctx.k_rows};
-  emel::kernel::rope::event::dispatch_result rope_k_result{};
-  ok = ok &&
-       ctx.rope.process_event(emel::kernel::rope::event::execute_apply_rows{
-           rope_k, rope_k_result});
+  ok = ok && time_component(ctx, ctx.timing.attention_rope_nanoseconds,
+                            [&]() noexcept {
+                              bool rope_ok = ctx.rope.process_event(
+                                  emel::kernel::rope::event::execute_apply_rows{
+                                      rope_q, rope_q_result});
+                              const emel::kernel::rope::event::apply_rows_request rope_k{
+                                  .cos_table = ctx.rope_cos,
+                                  .sin_table = ctx.rope_sin,
+                                  .position = ctx.position,
+                                  .head_count = kv_heads,
+                                  .head_dim = head_dim,
+                                  .rows = ctx.k_rows};
+                              emel::kernel::rope::event::dispatch_result rope_k_result{};
+                              return rope_ok && ctx.rope.process_event(
+                                                    emel::kernel::rope::event::execute_apply_rows{
+                                                        rope_k, rope_k_result});
+                            });
 
   const size_t cache_layer_floats = static_cast<size_t>(kv_dim) * geo.kv_window;
   const std::span<float> key_slice{ctx.key_cache.data() +
@@ -593,9 +660,12 @@ inline bool compute_layer(context &ctx, event::step_ctx &step) noexcept {
       .key_cache = key_slice,
       .value_cache = value_slice};
   emel::kernel::swa::event::dispatch_result write_result{};
-  ok =
-      ok && ctx.swa.process_event(emel::kernel::swa::event::execute_cache_write{
-                write_request, write_result});
+  ok = ok && time_component(ctx, ctx.timing.attention_cache_nanoseconds,
+                            [&]() noexcept {
+                              return ctx.swa.process_event(
+                                  emel::kernel::swa::event::execute_cache_write{
+                                      write_request, write_result});
+                            });
 
   uint32_t window_begin = 0u;
   if constexpr (window_full)
@@ -613,14 +683,22 @@ inline bool compute_layer(context &ctx, event::step_ctx &step) noexcept {
       .workspace = ctx.attend_workspace,
       .output = ctx.attn_out};
   emel::kernel::swa::event::dispatch_result attend_result{};
-  ok = ok && ctx.swa.process_event(emel::kernel::swa::event::execute_attend{
-                 attend_request, attend_result});
+  ok = ok && time_component(ctx, ctx.timing.attention_attend_nanoseconds,
+                            [&]() noexcept {
+                              return ctx.swa.process_event(
+                                  emel::kernel::swa::event::execute_attend{
+                                      attend_request, attend_result});
+                            });
 
   const emel::kernel::swa::event::gate_mul_request gate_request{
       .values = ctx.attn_out, .gate_logits = ctx.gate_logits, .dim = attn_dim};
   emel::kernel::swa::event::dispatch_result gate_result{};
-  ok = ok && ctx.swa.process_event(emel::kernel::swa::event::execute_gate_mul{
-                 gate_request, gate_result});
+  ok = ok && time_component(ctx, ctx.timing.attention_gate_nanoseconds,
+                            [&]() noexcept {
+                              return ctx.swa.process_event(
+                                  emel::kernel::swa::event::execute_gate_mul{
+                                      gate_request, gate_result});
+                            });
   const auto attention_output =
       prepare_activation<activation_route>(ctx, ctx.attn_out, ok);
   ok = ok &&
@@ -639,9 +717,12 @@ inline bool compute_layer(context &ctx, event::step_ctx &step) noexcept {
       .dim = d_model,
       .output = std::span<float>{ctx.xb}};
   emel::kernel::swa::event::dispatch_result residual_result{};
-  ok = ok &&
-       ctx.swa.process_event(emel::kernel::swa::event::execute_residual_gate{
-           residual_request, residual_result});
+  ok = ok && time_component(ctx, ctx.timing.attention_gate_nanoseconds,
+                            [&]() noexcept {
+                              return ctx.swa.process_event(
+                                  emel::kernel::swa::event::execute_residual_gate{
+                                      residual_request, residual_result});
+                            });
 
   const std::span<const float> pre_hada_scale{
       ctx.pre_hada_scale.data() + static_cast<size_t>(layer_index) * d_model,
@@ -660,9 +741,12 @@ inline bool compute_layer(context &ctx, event::step_ctx &step) noexcept {
       .workspace = ctx.hada_workspace,
       .output = std::span<float>{ctx.block_out}};
   emel::kernel::hadamard::event::dispatch_result hadamard_result{};
-  ok = ok && ctx.hadamard.process_event(
-                 emel::kernel::hadamard::event::execute_mlp_row{
-                     hadamard_request, hadamard_result});
+  ok = ok && time_component(ctx, ctx.timing.hadamard_nanoseconds,
+                            [&]() noexcept {
+                              return ctx.hadamard.process_event(
+                                  emel::kernel::hadamard::event::execute_mlp_row{
+                                      hadamard_request, hadamard_result});
+                            });
 
   ok = ok && compute_gemv_rows<route>(
                  ctx, bound.mhc.phi_post, ctx.prepared_mhc.phi_post,
@@ -694,8 +778,12 @@ inline bool compute_layer(context &ctx, event::step_ctx &step) noexcept {
       .dim = d_model,
       .output = std::span<float>{ctx.lanes_next}};
   emel::kernel::mhc::event::dispatch_result post_result{};
-  ok = ok && ctx.mhc.process_event(emel::kernel::mhc::event::execute_post_mix{
-                 post_request, post_result});
+  ok = ok && time_component(ctx, ctx.timing.mhc_post_nanoseconds,
+                            [&]() noexcept {
+                              return ctx.mhc.process_event(
+                                  emel::kernel::mhc::event::execute_post_mix{
+                                      post_request, post_result});
+                            });
   std::swap(ctx.lanes, ctx.lanes_next);
   return ok;
 }
@@ -710,8 +798,12 @@ inline bool compute_logits(context &ctx, event::step_ctx &step) noexcept {
       .dim = geo.d_model,
       .output = std::span<float>{ctx.mean}};
   emel::kernel::mhc::event::dispatch_result mean_result{};
-  bool ok = ctx.mhc.process_event(
-      emel::kernel::mhc::event::execute_mean_lanes{mean_request, mean_result});
+  bool ok = time_component(ctx, ctx.timing.lane_copy_mean_nanoseconds,
+                           [&]() noexcept {
+                             return ctx.mhc.process_event(
+                                 emel::kernel::mhc::event::execute_mean_lanes{
+                                     mean_request, mean_result});
+                           });
   ok =
       ok && compute_zcrms_norm(ctx, ctx.mean, ctx.final_norm_scale, 1u,
                                geo.d_model, std::span<float>{ctx.final_normed});
@@ -753,6 +845,16 @@ struct effect_mark_step_invalid {
 
 template <route_kind route> struct effect_step_begin {
   void operator()(const event::step_run &ev, context &ctx) const noexcept {
+    if (ctx.timing_enabled) {
+      ctx.timing_step_begin = ctx.timing_now();
+      ctx.timing_accounted_nanoseconds = 0u;
+      emel::kernel::cq::event::timing_breakdown cq{};
+      ctx.cq.process_event(emel::kernel::cq::event::capture_timing{cq});
+      ctx.timing_cq_begin_nanoseconds =
+          cq.quantize_nanoseconds + cq.fwht_nanoseconds +
+          cq.dot_full_nanoseconds + cq.dot_batch_nanoseconds +
+          cq.dot_rows_nanoseconds + cq.dequant_nanoseconds;
+    }
     fold_error(ev.ctx.err, compute_step_begin<route>(ctx, ev.ctx));
   }
 };
@@ -790,6 +892,22 @@ struct effect_emit_logits {
 
 struct effect_finish_step {
   void operator()(const event::step_run &, context &ctx) const noexcept {
+    if (ctx.timing_enabled) {
+      const uint64_t total = ctx.timing_now() - ctx.timing_step_begin;
+      emel::kernel::cq::event::timing_breakdown cq{};
+      ctx.cq.process_event(emel::kernel::cq::event::capture_timing{cq});
+      const uint64_t cq_total =
+          cq.quantize_nanoseconds + cq.fwht_nanoseconds +
+          cq.dot_full_nanoseconds + cq.dot_batch_nanoseconds +
+          cq.dot_rows_nanoseconds + cq.dequant_nanoseconds;
+      const uint64_t cq_step = cq_total - ctx.timing_cq_begin_nanoseconds;
+      ctx.timing.steps += 1u;
+      ctx.timing.total_nanoseconds += total;
+      ctx.timing.cq_nanoseconds += cq_step;
+      const uint64_t attributed = ctx.timing_accounted_nanoseconds + cq_step;
+      ctx.timing.graph_overhead_nanoseconds +=
+          total > attributed ? total - attributed : 0u;
+    }
     ++ctx.position;
   }
 };
