@@ -18,6 +18,11 @@ struct attend_lengths {
   std::size_t cache = 0u;
 };
 
+struct cache_write_lengths {
+  std::size_t row_elements = 0u;
+  std::size_t cache_elements = 0u;
+};
+
 inline bool checked_multiply(const uint64_t lhs, const uint64_t rhs,
                              uint64_t &product) noexcept {
   if (lhs != 0u && rhs > std::numeric_limits<uint64_t>::max() / lhs)
@@ -108,6 +113,58 @@ inline bool validate_attend_spans(const event::attend_request &request,
              cache_bytes);
 }
 
+inline bool validate_cache_write_lengths(
+    const event::cache_write_request &request,
+    cache_write_lengths &lengths) noexcept {
+  if (request.kv_heads == 0u || request.head_dim == 0u ||
+      request.capacity == 0u)
+    return false;
+
+  uint64_t rows = 0u;
+  uint64_t cache_rows = 0u;
+  uint64_t cache = 0u;
+  if (!checked_multiply(request.kv_heads, request.head_dim, rows) ||
+      !checked_multiply(request.kv_heads, request.capacity, cache_rows) ||
+      !checked_multiply(cache_rows, request.head_dim, cache) ||
+      !checked_float_elements(rows, lengths.row_elements) ||
+      !checked_float_elements(cache, lengths.cache_elements))
+    return false;
+
+  return true;
+}
+
+inline bool validate_cache_write_spans(
+    const event::cache_write_request &request,
+    const cache_write_lengths &lengths) noexcept {
+  if (request.key_rows.data() == nullptr ||
+      request.value_rows.data() == nullptr ||
+      request.key_cache.data() == nullptr ||
+      request.value_cache.data() == nullptr ||
+      request.key_rows.size() < lengths.row_elements ||
+      request.value_rows.size() < lengths.row_elements ||
+      request.key_cache.size() < lengths.cache_elements ||
+      request.value_cache.size() < lengths.cache_elements)
+    return false;
+
+  const std::size_t rows_bytes = lengths.row_elements * sizeof(float);
+  const std::size_t cache_bytes = lengths.cache_elements * sizeof(float);
+  return attention::guard::guard_ranges_disjoint(
+             request.key_cache.data(), cache_bytes, request.value_cache.data(),
+             cache_bytes) &&
+         attention::guard::guard_ranges_disjoint(
+             request.key_cache.data(), cache_bytes, request.key_rows.data(),
+             rows_bytes) &&
+         attention::guard::guard_ranges_disjoint(
+             request.key_cache.data(), cache_bytes, request.value_rows.data(),
+             rows_bytes) &&
+         attention::guard::guard_ranges_disjoint(
+             request.value_cache.data(), cache_bytes, request.key_rows.data(),
+             rows_bytes) &&
+         attention::guard::guard_ranges_disjoint(
+             request.value_cache.data(), cache_bytes,
+             request.value_rows.data(), rows_bytes);
+}
+
 } // namespace detail
 
 struct guard_execute_attend {
@@ -143,29 +200,9 @@ struct guard_execute_cache_write {
   bool operator()(const event::execute_cache_write &ev,
                   const action::context &) const noexcept {
     const auto &request = ev.request;
-    if (request.kv_heads == 0u || request.head_dim == 0u ||
-        request.capacity == 0u)
-      return false;
-
-    uint64_t rows = 0u;
-    uint64_t cache_rows = 0u;
-    uint64_t cache = 0u;
-    std::size_t rows_size = 0u;
-    std::size_t cache_size = 0u;
-    return detail::checked_multiply(request.kv_heads, request.head_dim, rows) &&
-           detail::checked_multiply(request.kv_heads, request.capacity,
-                                    cache_rows) &&
-           detail::checked_multiply(cache_rows, request.head_dim, cache) &&
-           detail::checked_float_elements(rows, rows_size) &&
-           detail::checked_float_elements(cache, cache_size) &&
-           request.key_rows.data() != nullptr &&
-           request.value_rows.data() != nullptr &&
-           request.key_cache.data() != nullptr &&
-           request.value_cache.data() != nullptr &&
-           request.key_rows.size() >= rows_size &&
-           request.value_rows.size() >= rows_size &&
-           request.key_cache.size() >= cache_size &&
-           request.value_cache.size() >= cache_size;
+    detail::cache_write_lengths lengths{};
+    return detail::validate_cache_write_lengths(request, lengths) &&
+           detail::validate_cache_write_spans(request, lengths);
   }
 };
 

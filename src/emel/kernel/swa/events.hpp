@@ -34,8 +34,12 @@ struct attend_request {
   std::span<float> output;    // heads * head_dim
 };
 
-// Writes one position's K/V head rows into the ring cache slice at
-// physical slot position % capacity.
+// Writes one position's K/V head rows into the ring cache slice at physical
+// slot position % capacity. All spans borrow caller-owned memory for the full
+// dispatch. The complete declared key/value cache ranges must be representable
+// and mutually disjoint, and each cache must be disjoint from both source row
+// ranges; the read-only source ranges may overlap each other. A rejected event
+// performs no cache writes.
 struct cache_write_request {
   std::span<const float> key_rows;   // kv_heads * head_dim
   std::span<const float> value_rows; // kv_heads * head_dim

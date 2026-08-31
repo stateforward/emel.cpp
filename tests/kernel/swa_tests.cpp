@@ -398,6 +398,110 @@ TEST_CASE("swa cache write lands rows at position modulo capacity") {
   CHECK(value_cache[5] == 8.0f);
 }
 
+TEST_CASE("swa cache write rejects aliased ranges before writes") {
+  const auto reject = [](const std::span<const float> key_rows,
+                         const std::span<const float> value_rows,
+                         const std::span<float> key_cache,
+                         const std::span<float> value_cache) {
+    const emel::kernel::swa::event::cache_write_request request{
+        .key_rows = key_rows,
+        .value_rows = value_rows,
+        .position = 0u,
+        .capacity = 2u,
+        .kv_heads = 1u,
+        .head_dim = 2u,
+        .key_cache = key_cache,
+        .value_cache = value_cache};
+    emel::kernel::swa::sm machine;
+    dispatch_result result{};
+    CHECK_FALSE(machine.process_event(
+        emel::kernel::swa::event::execute_cache_write{request, result}));
+  };
+
+  SUBCASE("key and value caches exactly overlap") {
+    std::array<float, 4> cache{11.0f, 13.0f, 17.0f, 19.0f};
+    const auto before = cache;
+    const std::array<float, 2> key_rows{5.0f, 6.0f};
+    const std::array<float, 2> value_rows{7.0f, 8.0f};
+    reject(key_rows, value_rows, cache, cache);
+    CHECK(cache == before);
+  }
+
+  SUBCASE("key and value caches partially overlap") {
+    std::array<float, 6> caches{11.0f, 13.0f, 17.0f,
+                                19.0f, 23.0f, 29.0f};
+    const auto before = caches;
+    const std::array<float, 2> key_rows{5.0f, 6.0f};
+    const std::array<float, 2> value_rows{7.0f, 8.0f};
+    reject(key_rows, value_rows, std::span<float>{caches.data(), 4u},
+           std::span<float>{caches.data() + 2u, 4u});
+    CHECK(caches == before);
+  }
+
+  SUBCASE("key cache overlaps key rows") {
+    std::array<float, 6> key_storage{5.0f, 6.0f, 11.0f,
+                                     13.0f, 17.0f, 19.0f};
+    const auto before = key_storage;
+    const std::array<float, 2> value_rows{7.0f, 8.0f};
+    std::array<float, 4> value_cache{23.0f, 29.0f, 31.0f, 37.0f};
+    const auto value_before = value_cache;
+    reject(std::span<const float>{key_storage.data(), 2u}, value_rows,
+           std::span<float>{key_storage.data(), 4u}, value_cache);
+    CHECK(key_storage == before);
+    CHECK(value_cache == value_before);
+  }
+
+  SUBCASE("value cache overlaps value rows") {
+    const std::array<float, 2> key_rows{5.0f, 6.0f};
+    std::array<float, 6> value_storage{7.0f, 8.0f, 11.0f,
+                                       13.0f, 17.0f, 19.0f};
+    const auto before = value_storage;
+    std::array<float, 4> key_cache{23.0f, 29.0f, 31.0f, 37.0f};
+    const auto key_before = key_cache;
+    reject(key_rows, std::span<const float>{value_storage.data(), 2u},
+           key_cache, std::span<float>{value_storage.data(), 4u});
+    CHECK(value_storage == before);
+    CHECK(key_cache == key_before);
+  }
+
+  SUBCASE("key cache overlaps value rows") {
+    const std::array<float, 2> key_rows{5.0f, 6.0f};
+    std::array<float, 6> key_storage{7.0f, 8.0f, 11.0f,
+                                     13.0f, 17.0f, 19.0f};
+    const auto before = key_storage;
+    std::array<float, 4> value_cache{23.0f, 29.0f, 31.0f, 37.0f};
+    const auto value_before = value_cache;
+    reject(key_rows, std::span<const float>{key_storage.data(), 2u},
+           std::span<float>{key_storage.data(), 4u}, value_cache);
+    CHECK(key_storage == before);
+    CHECK(value_cache == value_before);
+  }
+
+  SUBCASE("value cache overlaps key rows") {
+    std::array<float, 6> value_storage{5.0f, 6.0f, 11.0f,
+                                       13.0f, 17.0f, 19.0f};
+    const auto before = value_storage;
+    const std::array<float, 2> value_rows{7.0f, 8.0f};
+    std::array<float, 4> key_cache{23.0f, 29.0f, 31.0f, 37.0f};
+    const auto key_before = key_cache;
+    reject(std::span<const float>{value_storage.data(), 2u}, value_rows,
+           key_cache, std::span<float>{value_storage.data(), 4u});
+    CHECK(value_storage == before);
+    CHECK(key_cache == key_before);
+  }
+
+  SUBCASE("cache endpoint exceeds uintptr") {
+    const std::array<float, 2> key_rows{5.0f, 6.0f};
+    const std::array<float, 2> value_rows{7.0f, 8.0f};
+    std::array<float, 4> real_cache{11.0f, 13.0f, 17.0f, 19.0f};
+    const auto before = real_cache;
+    auto *near_max = reinterpret_cast<float *>(
+        std::numeric_limits<std::uintptr_t>::max() - (sizeof(float) - 1u));
+    reject(key_rows, value_rows, std::span<float>{near_max, 4u}, real_cache);
+    CHECK(real_cache == before);
+  }
+}
+
 TEST_CASE("swa gate mul applies elementwise sigmoid gating") {
   std::array<float, 4> values{1.0f, 2.0f, 3.0f, 4.0f};
   const std::array<float, 4> gate_logits{0.3f, -1.2f, 2.0f, 0.0f};
