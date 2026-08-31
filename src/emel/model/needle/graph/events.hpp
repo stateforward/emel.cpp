@@ -16,7 +16,7 @@ namespace emel::model::needle::graph::event {
 // allocation happens here; all storage is sized at construction.
 struct init {
   // Deployment is the default. Tests may explicitly request the legacy
-  // W4/f32 parity route; the choice is copied into the init/step SML payload.
+  // W4/f32 parity route.
   bool activation_quant = true;
 };
 

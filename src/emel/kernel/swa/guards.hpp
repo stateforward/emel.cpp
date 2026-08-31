@@ -180,12 +180,13 @@ struct guard_execute_attend {
 
 struct guard_execute_attend_gqa2_avx2 {
   bool operator()(const event::execute_attend_gqa2_avx2 &ev,
-                  const action::context &) const noexcept {
+                  const action::context &ctx) const noexcept {
 #if (defined(__x86_64__) || defined(_M_X64)) && defined(__AVX2__) &&           \
     defined(__FMA__)
     const auto &request = ev.request;
     detail::attend_lengths lengths{};
-    return static_cast<uint64_t>(request.heads) ==
+    return ctx.avx2_fma_available &&
+           static_cast<uint64_t>(request.heads) ==
                uint64_t{2} * request.kv_heads &&
            detail::validate_attend_lengths(request, 2u, lengths) &&
            detail::validate_attend_spans(request, lengths);
@@ -193,6 +194,14 @@ struct guard_execute_attend_gqa2_avx2 {
     (void)ev;
     return false;
 #endif
+  }
+};
+
+struct guard_execute_attend_gqa2_avx2_vector_exp {
+  bool operator()(const event::execute_attend_gqa2_avx2_vector_exp &ev,
+                  const action::context &ctx) const noexcept {
+    return guard_execute_attend_gqa2_avx2{}(
+        event::execute_attend_gqa2_avx2{ev.request, ev.result}, ctx);
   }
 };
 

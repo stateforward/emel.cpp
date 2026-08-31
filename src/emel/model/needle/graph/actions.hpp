@@ -519,7 +519,8 @@ inline bool compute_engram(context &ctx) noexcept {
 // `window_full`, and `attend_gqa2` are guard-selected at the transition;
 // everything inside is compile-time conditionals plus bounded data-plane work.
 template <route_kind route, activation_route_kind activation_route,
-          bool engram_site, bool window_full, bool attend_gqa2>
+          bool engram_site, bool window_full, bool attend_gqa2,
+          bool vector_exp>
 inline bool compute_layer(context &ctx, event::step_ctx &step) noexcept {
   const auto &bound = *ctx.bound;
   const auto &geo = bound.geo;
@@ -699,7 +700,12 @@ inline bool compute_layer(context &ctx, event::step_ctx &step) noexcept {
   emel::kernel::swa::event::dispatch_result attend_result{};
   ok = ok && time_component(ctx, ctx.timing.attention_attend_nanoseconds,
                             [&]() noexcept {
-                              if constexpr (attend_gqa2) {
+                              if constexpr (attend_gqa2 && vector_exp) {
+                                return ctx.swa.process_event(
+                                    emel::kernel::swa::event::
+                                        execute_attend_gqa2_avx2_vector_exp{
+                                            attend_request, attend_result});
+                              } else if constexpr (attend_gqa2) {
                                 return ctx.swa.process_event(
                                     emel::kernel::swa::event::execute_attend_gqa2_avx2{
                                         attend_request, attend_result});
@@ -886,13 +892,14 @@ struct effect_compute_engram {
 };
 
 template <route_kind route, activation_route_kind activation_route,
-          bool engram_site, bool window_full, bool attend_gqa2>
+          bool engram_site, bool window_full, bool attend_gqa2,
+          bool vector_exp>
 struct effect_run_layer {
   void operator()(const event::step_run &ev, context &ctx) const noexcept {
     fold_error(
         ev.ctx.err,
         compute_layer<route, activation_route, engram_site, window_full,
-                      attend_gqa2>(ctx, ev.ctx));
+                      attend_gqa2, vector_exp>(ctx, ev.ctx));
   }
 };
 

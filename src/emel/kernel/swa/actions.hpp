@@ -9,12 +9,18 @@
 #include <immintrin.h>
 #endif
 
+#include "emel/kernel/swa/detail.hpp"
 #include "emel/kernel/swa/events.hpp"
+#include "emel/kernel/x86_64/context.hpp"
 
 namespace emel::kernel::swa::action {
 
-// The swa kernel holds no persistent actor state.
-struct context {};
+// CPU capability is detected once with machine construction, never in dispatch.
+struct context {
+  bool avx2_fma_available =
+      emel::kernel::x86_64::detail::detect_avx2() &&
+      emel::kernel::x86_64::detail::detect_fma();
+};
 
 #if defined(__x86_64__) || defined(_M_X64)
 #if defined(__GNUC__) || defined(__clang__)
@@ -30,20 +36,21 @@ EMEL_KERNEL_SWA_AVX2_TARGET inline float
 dot_avx2(const float *lhs, const float *rhs, const uint32_t dim) noexcept {
 #if defined(__x86_64__) || defined(_M_X64)
   __m256 sum = _mm256_setzero_ps();
-  uint32_t i = 0u;
-  for (; i + 8u <= dim; i += 8u)
+  size_t i = 0u;
+  const size_t vector_end = static_cast<size_t>(dim) & ~size_t{7u};
+  for (; i < vector_end; i += 8u)
     sum = _mm256_fmadd_ps(_mm256_loadu_ps(lhs + i), _mm256_loadu_ps(rhs + i),
                           sum);
   alignas(32) float lanes[8];
   _mm256_store_ps(lanes, sum);
   float out = lanes[0] + lanes[1] + lanes[2] + lanes[3] + lanes[4] + lanes[5] +
               lanes[6] + lanes[7];
-  for (; i < dim; ++i)
+  for (; i < static_cast<size_t>(dim); ++i)
     out += lhs[i] * rhs[i];
   return out;
 #else
   float out = 0.0f;
-  for (uint32_t i = 0u; i < dim; ++i)
+  for (size_t i = 0u; i < static_cast<size_t>(dim); ++i)
     out += lhs[i] * rhs[i];
   return out;
 #endif
@@ -55,8 +62,9 @@ dot_pair_avx2(const float *lhs0, const float *lhs1, const float *rhs,
 #if defined(__x86_64__) || defined(_M_X64)
   __m256 sum0 = _mm256_setzero_ps();
   __m256 sum1 = _mm256_setzero_ps();
-  uint32_t i = 0u;
-  for (; i + 8u <= dim; i += 8u) {
+  size_t i = 0u;
+  const size_t vector_end = static_cast<size_t>(dim) & ~size_t{7u};
+  for (; i < vector_end; i += 8u) {
     const __m256 rhs_v = _mm256_loadu_ps(rhs + i);
     sum0 = _mm256_fmadd_ps(_mm256_loadu_ps(lhs0 + i), rhs_v, sum0);
     sum1 = _mm256_fmadd_ps(_mm256_loadu_ps(lhs1 + i), rhs_v, sum1);
@@ -69,14 +77,14 @@ dot_pair_avx2(const float *lhs0, const float *lhs1, const float *rhs,
          lanes0[5] + lanes0[6] + lanes0[7];
   out1 = lanes1[0] + lanes1[1] + lanes1[2] + lanes1[3] + lanes1[4] +
          lanes1[5] + lanes1[6] + lanes1[7];
-  for (; i < dim; ++i) {
+  for (; i < static_cast<size_t>(dim); ++i) {
     out0 += lhs0[i] * rhs[i];
     out1 += lhs1[i] * rhs[i];
   }
 #else
   out0 = 0.0f;
   out1 = 0.0f;
-  for (uint32_t i = 0u; i < dim; ++i) {
+  for (size_t i = 0u; i < static_cast<size_t>(dim); ++i) {
     out0 += lhs0[i] * rhs[i];
     out1 += lhs1[i] * rhs[i];
   }
@@ -89,8 +97,9 @@ EMEL_KERNEL_SWA_AVX2_TARGET inline void accumulate_value_pair_avx2(
 #if defined(__x86_64__) || defined(_M_X64)
   const __m256 weight0_v = _mm256_set1_ps(weight0);
   const __m256 weight1_v = _mm256_set1_ps(weight1);
-  uint32_t i = 0u;
-  for (; i + 8u <= dim; i += 8u) {
+  size_t i = 0u;
+  const size_t vector_end = static_cast<size_t>(dim) & ~size_t{7u};
+  for (; i < vector_end; i += 8u) {
     const __m256 value_v = _mm256_loadu_ps(values + i);
     _mm256_storeu_ps(output0 + i,
                      _mm256_fmadd_ps(weight0_v, value_v,
@@ -99,12 +108,12 @@ EMEL_KERNEL_SWA_AVX2_TARGET inline void accumulate_value_pair_avx2(
                      _mm256_fmadd_ps(weight1_v, value_v,
                                      _mm256_loadu_ps(output1 + i)));
   }
-  for (; i < dim; ++i) {
+  for (; i < static_cast<size_t>(dim); ++i) {
     output0[i] += weight0 * values[i];
     output1[i] += weight1 * values[i];
   }
 #else
-  for (uint32_t i = 0u; i < dim; ++i) {
+  for (size_t i = 0u; i < static_cast<size_t>(dim); ++i) {
     output0[i] += weight0 * values[i];
     output1[i] += weight1 * values[i];
   }
@@ -116,22 +125,38 @@ accumulate_value_avx2(float *output, const float *values, const float weight,
                       const uint32_t dim) noexcept {
 #if defined(__x86_64__) || defined(_M_X64)
   const __m256 weight_v = _mm256_set1_ps(weight);
-  uint32_t i = 0u;
-  for (; i + 8u <= dim; i += 8u)
+  size_t i = 0u;
+  const size_t vector_end = static_cast<size_t>(dim) & ~size_t{7u};
+  for (; i < vector_end; i += 8u)
     _mm256_storeu_ps(output + i,
                      _mm256_fmadd_ps(weight_v, _mm256_loadu_ps(values + i),
                                      _mm256_loadu_ps(output + i)));
-  for (; i < dim; ++i)
+  for (; i < static_cast<size_t>(dim); ++i)
     output[i] += weight * values[i];
 #else
-  for (uint32_t i = 0u; i < dim; ++i)
+  for (size_t i = 0u; i < static_cast<size_t>(dim); ++i)
     output[i] += weight * values[i];
 #endif
 }
 
+inline float dot_scalar(const float *lhs, const float *rhs,
+                        const uint32_t dim) noexcept {
+  float sum = 0.0f;
+  for (size_t i = 0u; i < static_cast<size_t>(dim); ++i)
+    sum += lhs[i] * rhs[i];
+  return sum;
+}
+
+inline void accumulate_value_scalar(float *output, const float *values,
+                                    const float weight,
+                                    const uint32_t dim) noexcept {
+  for (size_t i = 0u; i < static_cast<size_t>(dim); ++i)
+    output[i] += weight * values[i];
+}
+
 struct effect_execute_attend {
-  EMEL_KERNEL_SWA_AVX2_TARGET void operator()(const event::execute_attend &ev,
-                                              context &) const noexcept {
+  void operator()(const event::execute_attend &ev,
+                  context &) const noexcept {
     const auto &request = ev.request;
     const uint32_t span_len = request.position - request.window_begin + 1u;
     const uint32_t reps = request.heads / request.kv_heads;
@@ -158,7 +183,7 @@ struct effect_execute_attend {
             key_base + static_cast<size_t>(slot_begin) * request.head_dim;
         for (uint32_t row = 0u; row < count; ++row, ++offset) {
           const float score =
-              dot_avx2(query_row, key, request.head_dim) * inv_scale;
+              dot_scalar(query_row, key, request.head_dim) * inv_scale;
           request.workspace[offset] = score;
           max_score = std::max(max_score, score);
           key += request.head_dim;
@@ -182,9 +207,9 @@ struct effect_execute_attend {
         const float *value =
             value_base + static_cast<size_t>(slot_begin) * request.head_dim;
         for (uint32_t row = 0u; row < count; ++row, ++offset) {
-          accumulate_value_avx2(output_row, value,
-                                request.workspace[offset] * inv_sum,
-                                request.head_dim);
+          accumulate_value_scalar(output_row, value,
+                                  request.workspace[offset] * inv_sum,
+                                  request.head_dim);
           value += request.head_dim;
         }
       };
@@ -195,10 +220,13 @@ struct effect_execute_attend {
   }
 };
 
-struct effect_execute_attend_gqa2_avx2 {
-  EMEL_KERNEL_SWA_AVX2_TARGET void
-  operator()(const event::execute_attend_gqa2_avx2 &ev,
-             context &) const noexcept {
+template <bool vector_exp>
+struct effect_execute_attend_gqa2_avx2_impl {
+  EMEL_KERNEL_SWA_AVX2_TARGET void operator()(
+      const std::conditional_t<vector_exp,
+                               event::execute_attend_gqa2_avx2_vector_exp,
+                               event::execute_attend_gqa2_avx2> &ev,
+      context &) const noexcept {
     const auto &request = ev.request;
     const uint32_t span_len = request.position - request.window_begin + 1u;
     const float inv_scale =
@@ -247,17 +275,23 @@ struct effect_execute_attend_gqa2_avx2 {
       score_segment(0u, second_len);
 
       float sum0 = 0.0f;
-      for (offset = 0u; offset < span_len; ++offset) {
-        const float weight = std::exp(score0[offset] - max0);
-        score0[offset] = weight;
-        sum0 += weight;
-      }
       float sum1 = 0.0f;
-      for (offset = 0u; offset < span_len; ++offset) {
-        const float weight = std::exp(score1[offset] - max1);
-        score1[offset] = weight;
-        sum1 += weight;
+      if constexpr (vector_exp) {
+        sum0 = detail::exp_sum_avx2(score0, span_len, max0);
+        sum1 = detail::exp_sum_avx2(score1, span_len, max1);
+      } else {
+        for (offset = 0u; offset < span_len; ++offset) {
+          const float weight = std::exp(score0[offset] - max0);
+          score0[offset] = weight;
+          sum0 += weight;
+        }
+        for (offset = 0u; offset < span_len; ++offset) {
+          const float weight = std::exp(score1[offset] - max1);
+          score1[offset] = weight;
+          sum1 += weight;
+        }
       }
+
       const float inv_sum0 = 1.0f / sum0;
       const float inv_sum1 = 1.0f / sum1;
       float *output0 =
@@ -286,6 +320,10 @@ struct effect_execute_attend_gqa2_avx2 {
   }
 };
 
+using effect_execute_attend_gqa2_avx2 =
+    effect_execute_attend_gqa2_avx2_impl<false>;
+using effect_execute_attend_gqa2_avx2_vector_exp =
+    effect_execute_attend_gqa2_avx2_impl<true>;
 struct effect_execute_cache_write {
   void operator()(const event::execute_cache_write &ev,
                   context &) const noexcept {

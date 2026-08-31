@@ -37,12 +37,18 @@ namespace needle = emel::model::needle;
 
 constexpr char k_decode_case_name[] = "needle/graph/decode_steady_route_w4_qat";
 constexpr char k_prefill_case_name[] = "needle/graph/prefill_512_route_w4_qat";
-constexpr char k_swa_generic_512_case_name[] =
-    "needle/swa/attend_generic_span512";
-constexpr char k_swa_gqa2_512_case_name[] = "needle/swa/attend_gqa2_span512";
-constexpr char k_swa_generic_704_case_name[] =
-    "needle/swa/attend_generic_span704";
-constexpr char k_swa_gqa2_704_case_name[] = "needle/swa/attend_gqa2_span704";
+constexpr char k_swa_scalar_exp_128_case_name[] =
+    "needle/swa/attend_gqa2_scalar_exp_span128";
+constexpr char k_swa_vector_exp_128_case_name[] =
+    "needle/swa/attend_gqa2_vector_exp_span128";
+constexpr char k_swa_scalar_exp_512_case_name[] =
+    "needle/swa/attend_gqa2_scalar_exp_span512";
+constexpr char k_swa_vector_exp_512_case_name[] =
+    "needle/swa/attend_gqa2_vector_exp_span512";
+constexpr char k_swa_scalar_exp_704_case_name[] =
+    "needle/swa/attend_gqa2_scalar_exp_span704";
+constexpr char k_swa_vector_exp_704_case_name[] =
+    "needle/swa/attend_gqa2_vector_exp_span704";
 constexpr char k_fwht_case_name[] = "needle/cq/fwht128_avx2";
 constexpr char k_hadamard_scalar_case_name[] =
     "needle/hadamard/mlp512_scalar";
@@ -105,6 +111,7 @@ emel::bench::result with_needle_metadata(emel::bench::result out,
                                          const char *backend_id,
                                          const char *backend_language,
                                          std::uint64_t output_tokens);
+std::uint64_t benchmark_timestamp_now_ns() noexcept;
 
 volatile float g_swa_output_sink = 0.0f;
 volatile float g_hadamard_output_sink = 0.0f;
@@ -167,9 +174,11 @@ void append_hadamard_case(std::vector<emel::bench::result> &results,
       avx2 ? "emel_hadamard_avx2" : "emel_hadamard_scalar", "cpp", 1u));
 }
 
+enum class swa_exp_route : uint8_t { scalar = 0u, vector = 1u };
+
 void append_swa_case(std::vector<emel::bench::result> &results,
                      const emel::bench::config &cfg, const char *name,
-                     const uint32_t span_len, const bool fused) {
+                     const uint32_t span_len, const swa_exp_route route) {
   constexpr uint32_t capacity = 704u;
   constexpr uint32_t heads = 8u;
   constexpr uint32_t kv_heads = 4u;
@@ -177,8 +186,7 @@ void append_swa_case(std::vector<emel::bench::result> &results,
   std::vector<float> query(static_cast<size_t>(heads) * head_dim);
   std::vector<float> keys(static_cast<size_t>(kv_heads) * capacity * head_dim);
   std::vector<float> values(keys.size());
-  std::vector<float> workspace(static_cast<size_t>(span_len) *
-                               (fused ? 2u : 1u));
+  std::vector<float> workspace(static_cast<size_t>(span_len) * 2u);
   std::vector<float> output(static_cast<size_t>(heads) * head_dim);
   for (size_t i = 0u; i < query.size(); ++i)
     query[i] = static_cast<float>(static_cast<int32_t>(i % 53u) - 26) *
@@ -190,17 +198,10 @@ void append_swa_case(std::vector<emel::bench::result> &results,
                 0.0078125f;
   }
   const emel::kernel::swa::event::attend_request request{
-      .query = query,
-      .key_cache = keys,
-      .value_cache = values,
-      .position = span_len - 1u,
-      .window_begin = 0u,
-      .capacity = capacity,
-      .heads = heads,
-      .kv_heads = kv_heads,
-      .head_dim = head_dim,
-      .workspace = workspace,
-      .output = output};
+      .query = query, .key_cache = keys, .value_cache = values,
+      .position = span_len - 1u, .window_begin = 0u, .capacity = capacity,
+      .heads = heads, .kv_heads = kv_heads, .head_dim = head_dim,
+      .workspace = workspace, .output = output};
   emel::kernel::swa::sm machine;
   emel::kernel::swa::event::dispatch_result dispatch_result{};
   emel::bench::config swa_cfg = cfg;
@@ -209,22 +210,61 @@ void append_swa_case(std::vector<emel::bench::result> &results,
   swa_cfg.warmup_iterations = 8u;
   swa_cfg.warmup_runs = 1u;
   auto fn = [&]() {
-    const bool ok = fused
+    const bool ok = route == swa_exp_route::vector
                         ? machine.process_event(
-                              emel::kernel::swa::event::execute_attend_gqa2_avx2{
-                                  request, dispatch_result})
+                              emel::kernel::swa::event::
+                                  execute_attend_gqa2_avx2_vector_exp{
+                                      request, dispatch_result})
                         : machine.process_event(
-                              emel::kernel::swa::event::execute_attend{
+                              emel::kernel::swa::event::execute_attend_gqa2_avx2{
                                   request, dispatch_result});
-    if (!ok)
-      fail_needle_setup("swa_direct");
+    if (!ok) fail_needle_setup("swa_direct");
     g_swa_output_sink = output[0];
   };
   results.push_back(with_needle_metadata(
       emel::bench::measure_case(name, swa_cfg, fn), "emel",
-      fused ? "emel_swa_gqa2_avx2" : "emel_swa_generic", "cpp", 1u));
+      route == swa_exp_route::vector ? "emel_swa_gqa2_avx2_vector_exp"
+                                     : "emel_swa_gqa2_avx2_scalar_exp",
+      "cpp", 1u));
 }
 
+void profile_swa_case(const uint32_t span_len, const swa_exp_route route) {
+  constexpr uint32_t calls = 1024u;
+  emel::bench::config profile_cfg{};
+  profile_cfg.iterations = calls;
+  profile_cfg.runs = 5u;
+  profile_cfg.warmup_iterations = 8u;
+  profile_cfg.warmup_runs = 1u;
+  const auto measure_pass = [&](const char *pass, auto &&fn) {
+    const auto measured = emel::bench::measure_case(pass, profile_cfg, fn);
+    std::fprintf(stderr,
+                 "# needle_swa_component: route=%s pass=%s "
+                 "ns_per_call=%.3f\n",
+                 route == swa_exp_route::vector ? "vector_exp" : "scalar_exp",
+                 pass, measured.ns_per_op);
+  };
+  std::vector<float> scores(span_len);
+  for (uint32_t i = 0u; i < span_len; ++i)
+    scores[i] = -static_cast<float>(i % 101u) * 0.03125f;
+  std::vector<float> working(scores.size());
+  float sum_sink = 0.0f;
+  measure_pass("exp_sum", [&]() {
+    std::copy(scores.begin(), scores.end(), working.begin());
+    float sum = 0.0f;
+    if (route == swa_exp_route::vector) {
+      sum = emel::kernel::swa::detail::exp_sum_avx2(
+          working.data(), span_len, 0.0f);
+    } else {
+      for (uint32_t i = 0u; i < span_len; ++i) {
+        const float weight = std::exp(working[i]);
+        working[i] = weight;
+        sum += weight;
+      }
+    }
+    sum_sink = sum;
+  });
+  g_swa_output_sink = sum_sink;
+}
 
 std::uint64_t benchmark_timestamp_now_ns() noexcept {
   return static_cast<std::uint64_t>(
@@ -302,11 +342,13 @@ struct graph_fixture {
   std::vector<uint8_t> file_bytes;
   std::vector<cact_loader::tensor_view> tensors;
   needle::contract contract = {};
-  std::unique_ptr<needle::graph::sm> graph;
+  std::unique_ptr<needle::graph::sm> vector_graph;
+  std::unique_ptr<needle::graph::scalar_exp_sm> scalar_graph;
   std::vector<float> logits;
   std::vector<int32_t> context_ids;
   std::vector<int32_t> prompt_ids;
   uint32_t decoded_steps = 0u;
+  bool swa_vector_exp = true;
   std::uint64_t decode_ns = 0u;
   emel::kernel::cq::event::timing_breakdown cq_timing = {};
   needle::graph::event::timing_breakdown graph_timing = {};
@@ -338,7 +380,8 @@ struct graph_fixture {
       fail_needle_setup("needle_bind");
     }
 
-    graph = std::make_unique<needle::graph::sm>(contract);
+    vector_graph = std::make_unique<needle::graph::sm>(contract);
+    scalar_graph = std::make_unique<needle::graph::scalar_exp_sm>(contract);
     logits.resize(contract.geo.vocab_size);
     context_ids.resize(k_decode_context_tokens);
     prompt_ids.resize(k_prefill_case_tokens);
@@ -354,15 +397,26 @@ struct graph_fixture {
     }
   }
 
+  template <class event_type> bool process_event(const event_type &ev) {
+    return swa_vector_exp ? vector_graph->process_event(ev)
+                          : scalar_graph->process_event(ev);
+  }
+
   void reset_decode_context() {
-    if (!graph->process_event(needle::graph::event::init{})) {
+    if (!process_event(needle::graph::event::init{
+            .activation_quant = true})) {
       fail_needle_setup("graph_init");
     }
-    if (!graph->process_event(needle::graph::event::prefill{
+    if (!process_event(needle::graph::event::prefill{
             std::span<const int32_t>{context_ids}, std::span<float>{logits}})) {
       fail_needle_setup("graph_context_prefill");
     }
     decoded_steps = 0u;
+  }
+
+  void set_swa_vector_exp(const bool enabled) {
+    swa_vector_exp = enabled;
+    reset_decode_context();
   }
 };
 
@@ -442,10 +496,16 @@ void append_emel_needle_graph_cases(std::vector<result> &results,
 
 #if (defined(__x86_64__) || defined(_M_X64)) && defined(__AVX2__) &&           \
     defined(__FMA__)
-  append_swa_case(results, cfg, k_swa_generic_512_case_name, 512u, false);
-  append_swa_case(results, cfg, k_swa_gqa2_512_case_name, 512u, true);
-  append_swa_case(results, cfg, k_swa_generic_704_case_name, 704u, false);
-  append_swa_case(results, cfg, k_swa_gqa2_704_case_name, 704u, true);
+  append_swa_case(results, cfg, k_swa_scalar_exp_128_case_name, 128u, swa_exp_route::scalar);
+  append_swa_case(results, cfg, k_swa_vector_exp_128_case_name, 128u, swa_exp_route::vector);
+  append_swa_case(results, cfg, k_swa_scalar_exp_512_case_name, 512u, swa_exp_route::scalar);
+  append_swa_case(results, cfg, k_swa_vector_exp_512_case_name, 512u, swa_exp_route::vector);
+  append_swa_case(results, cfg, k_swa_scalar_exp_704_case_name, 704u, swa_exp_route::scalar);
+  append_swa_case(results, cfg, k_swa_vector_exp_704_case_name, 704u, swa_exp_route::vector);
+  if (instrument_graph()) {
+    profile_swa_case(704u, swa_exp_route::scalar);
+    profile_swa_case(704u, swa_exp_route::vector);
+  }
 #endif
 
   {
@@ -469,14 +529,11 @@ void append_emel_needle_graph_cases(std::vector<result> &results,
       }
       const int32_t token = fixture.prompt_ids[token_cursor];
       token_cursor = (token_cursor + 1u) % fixture.prompt_ids.size();
-      if (instrument_graph())
-        fixture.graph->process_event(needle::graph::event::configure_timing{
-            true, &benchmark_timestamp_now_ns});
-      else if (instrument_cq())
-        fixture.graph->process_event(needle::graph::event::configure_cq_timing{
+      if (instrument_cq())
+        fixture.process_event(needle::graph::event::configure_cq_timing{
             true, &benchmark_timestamp_now_ns});
       const auto decode_begin = std::chrono::steady_clock::now();
-      if (!fixture.graph->process_event(needle::graph::event::decode{
+      if (!fixture.process_event(needle::graph::event::decode{
               token, std::span<float>{fixture.logits}})) {
         fail_needle_setup("graph_decode_step");
       }
@@ -487,10 +544,10 @@ void append_emel_needle_graph_cases(std::vector<result> &results,
                                                                  decode_begin)
                 .count());
         if (instrument_graph())
-          fixture.graph->process_event(
+          fixture.process_event(
               needle::graph::event::capture_timing{fixture.graph_timing});
         else
-          fixture.graph->process_event(
+          fixture.process_event(
               needle::graph::event::capture_cq_timing{fixture.cq_timing});
       }
       fixture.decoded_steps += 1u;
@@ -499,6 +556,72 @@ void append_emel_needle_graph_cases(std::vector<result> &results,
         measure_case(k_decode_case_name, decode_cfg, decode_fn);
     results.push_back(with_needle_metadata(std::move(decode_result), "emel",
                                            "emel_needle_graph", "cpp", 1u));
+    if (instrument_graph()) {
+      const auto print_graph_components = [&](const char *route) {
+        const auto &t = fixture.graph_timing;
+        const double tokens = static_cast<double>(t.steps);
+        const auto print_phase = [&](const char *name, const uint64_t ns) {
+          const double ns_per_token = tokens > 0.0 ? ns / tokens : 0.0;
+          const double pct = t.total_nanoseconds > 0u
+                                 ? static_cast<double>(ns) * 100.0 /
+                                       static_cast<double>(t.total_nanoseconds)
+                                 : 0.0;
+          std::fprintf(stderr,
+                       "# needle_graph_component: route=%s phase=%s ns=%llu "
+                       "ns_per_token=%.3f pct_total=%.3f\n",
+                       route, name, static_cast<unsigned long long>(ns),
+                       ns_per_token, pct);
+        };
+        std::fprintf(stderr,
+                     "# needle_graph_components: route=%s steps=%llu "
+                     "measured_ns=%llu timed_ns=%llu reconciliation_pct=%.3f\n",
+                     route, static_cast<unsigned long long>(t.steps),
+                     static_cast<unsigned long long>(fixture.decode_ns),
+                     static_cast<unsigned long long>(t.total_nanoseconds),
+                     fixture.decode_ns > 0u
+                         ? static_cast<double>(t.total_nanoseconds) * 100.0 /
+                               static_cast<double>(fixture.decode_ns)
+                         : 0.0);
+        print_phase("cq", t.cq_nanoseconds);
+        print_phase("graph_overhead", t.graph_overhead_nanoseconds);
+        print_phase("engram", t.engram_nanoseconds);
+        print_phase("norm", t.norm_nanoseconds);
+        print_phase("mhc_pre", t.mhc_pre_nanoseconds);
+        print_phase("mhc_post", t.mhc_post_nanoseconds);
+        print_phase("attention_rope", t.attention_rope_nanoseconds);
+        print_phase("attention_cache", t.attention_cache_nanoseconds);
+        print_phase("attention_attend", t.attention_attend_nanoseconds);
+        print_phase("attention_gate", t.attention_gate_nanoseconds);
+        print_phase("hadamard", t.hadamard_nanoseconds);
+        print_phase("lane_copy_mean", t.lane_copy_mean_nanoseconds);
+        print_phase("sampling", t.sampling_nanoseconds);
+      };
+      const auto measure_graph_route = [&](const bool vector_exp) {
+        fixture.set_swa_vector_exp(vector_exp);
+        fixture.decode_ns = 0u;
+        fixture.graph_timing = {};
+        fixture.process_event(needle::graph::event::configure_timing{
+            true, &benchmark_timestamp_now_ns});
+        fixture.process_event(needle::graph::event::reset_timing{});
+        token_cursor = 0u;
+        const auto route_result =
+            measure_case(k_decode_case_name, decode_cfg, decode_fn);
+        const double route_tokens_per_second =
+            compute_tokens_per_second(1u, route_result.ns_per_op);
+        const char *const route = vector_exp ? "vector_exp" : "scalar_exp";
+        std::fprintf(stderr,
+                     "# needle_graph_swa_route: route=%s ns_per_op=%.3f "
+                     "tokens_per_second=%.3f\n",
+                     route, route_result.ns_per_op, route_tokens_per_second);
+        print_graph_components(route);
+        fixture.process_event(
+            needle::graph::event::configure_timing{false, nullptr});
+      };
+      for (uint32_t alternation = 0u; alternation < 5u; ++alternation) {
+        measure_graph_route(false);
+        measure_graph_route(true);
+      }
+    }
     if (instrument_cq()) {
       const auto &t = fixture.cq_timing;
       const std::uint64_t cq_ns =
@@ -522,44 +645,6 @@ void append_emel_needle_graph_cases(std::vector<result> &results,
           static_cast<unsigned long long>(cq_ns), pct,
           static_cast<unsigned long long>(fixture.decode_ns - cq_ns));
     }
-    if (instrument_graph()) {
-      const auto &t = fixture.graph_timing;
-      const double tokens = static_cast<double>(t.steps);
-      const auto print_phase = [&](const char *name, const uint64_t ns) {
-        const double ns_per_token = tokens > 0.0 ? ns / tokens : 0.0;
-        const double pct = t.total_nanoseconds > 0u
-                               ? static_cast<double>(ns) * 100.0 /
-                                     static_cast<double>(t.total_nanoseconds)
-                               : 0.0;
-        std::fprintf(stderr, "# needle_graph_component: phase=%s ns=%llu "
-                             "ns_per_token=%.3f pct_total=%.3f\n",
-                     name, static_cast<unsigned long long>(ns), ns_per_token,
-                     pct);
-      };
-      std::fprintf(stderr,
-                   "# needle_graph_components: steps=%llu measured_ns=%llu "
-                   "timed_ns=%llu reconciliation_pct=%.3f\n",
-                   static_cast<unsigned long long>(t.steps),
-                   static_cast<unsigned long long>(fixture.decode_ns),
-                   static_cast<unsigned long long>(t.total_nanoseconds),
-                   fixture.decode_ns > 0u
-                       ? static_cast<double>(t.total_nanoseconds) * 100.0 /
-                             static_cast<double>(fixture.decode_ns)
-                       : 0.0);
-      print_phase("cq", t.cq_nanoseconds);
-      print_phase("graph_overhead", t.graph_overhead_nanoseconds);
-      print_phase("engram", t.engram_nanoseconds);
-      print_phase("norm", t.norm_nanoseconds);
-      print_phase("mhc_pre", t.mhc_pre_nanoseconds);
-      print_phase("mhc_post", t.mhc_post_nanoseconds);
-      print_phase("attention_rope", t.attention_rope_nanoseconds);
-      print_phase("attention_cache", t.attention_cache_nanoseconds);
-      print_phase("attention_attend", t.attention_attend_nanoseconds);
-      print_phase("attention_gate", t.attention_gate_nanoseconds);
-      print_phase("hadamard", t.hadamard_nanoseconds);
-      print_phase("lane_copy_mean", t.lane_copy_mean_nanoseconds);
-      print_phase("sampling", t.sampling_nanoseconds);
-    }
   }
 
   {
@@ -573,10 +658,10 @@ void append_emel_needle_graph_cases(std::vector<result> &results,
     prefill_cfg.warmup_runs = 1u;
 
     auto prefill_fn = [&]() {
-      if (!fixture.graph->process_event(needle::graph::event::init{})) {
+      if (!fixture.process_event(needle::graph::event::init{})) {
         fail_needle_setup("graph_prefill_init");
       }
-      if (!fixture.graph->process_event(needle::graph::event::prefill{
+      if (!fixture.process_event(needle::graph::event::prefill{
               std::span<const int32_t>{fixture.prompt_ids},
               std::span<float>{fixture.logits}})) {
         fail_needle_setup("graph_prefill");

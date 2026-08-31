@@ -22,6 +22,10 @@ struct model {
           [ guard::guard_execute_attend_gqa2_avx2{} ]
           / action::effect_execute_attend_gqa2_avx2{}
       , sml::state<state_ready> <= sml::state<state_ready>
+          + sml::event<event::execute_attend_gqa2_avx2_vector_exp>
+          [ guard::guard_execute_attend_gqa2_avx2_vector_exp{} ]
+          / action::effect_execute_attend_gqa2_avx2_vector_exp{}
+      , sml::state<state_ready> <= sml::state<state_ready>
           + sml::event<event::execute_cache_write>
           [ guard::guard_execute_cache_write{} ] / action::effect_execute_cache_write{}
       , sml::state<state_ready> <= sml::state<state_ready>

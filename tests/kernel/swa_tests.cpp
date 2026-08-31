@@ -1,3 +1,5 @@
+#include <algorithm>
+#include <cmath>
 #include <array>
 #include <cstring>
 #include <vector>
@@ -112,6 +114,120 @@ void check_gqa2_matches_generic(const uint32_t capacity,
 
 } // namespace
 
+
+void check_vector_exp_matches_scalar(const uint32_t capacity,
+                                     const uint32_t window_begin,
+                                     const uint32_t position) {
+#if (defined(__x86_64__) || defined(_M_X64)) && defined(__AVX2__) &&           \
+    defined(__FMA__)
+  constexpr uint32_t heads = 8u;
+  constexpr uint32_t kv_heads = 4u;
+  constexpr uint32_t head_dim = 64u;
+  const uint32_t span_len = position - window_begin + 1u;
+  std::vector<float> query(static_cast<size_t>(heads) * head_dim);
+  std::vector<float> key_cache(static_cast<size_t>(kv_heads) * capacity *
+                               head_dim);
+  std::vector<float> value_cache(key_cache.size());
+  fill_gqa2_fixture(query, key_cache, value_cache, capacity);
+  std::vector<float> scalar_workspace(static_cast<size_t>(span_len) * 2u);
+  std::vector<float> vector_workspace(static_cast<size_t>(span_len) * 2u);
+  std::vector<float> scalar_output(static_cast<size_t>(heads) * head_dim);
+  std::vector<float> vector_output(scalar_output.size());
+  const auto make_request = [&](std::span<float> workspace,
+                                std::span<float> output) {
+    return emel::kernel::swa::event::attend_request{
+        .query = query,
+        .key_cache = key_cache,
+        .value_cache = value_cache,
+        .position = position,
+        .window_begin = window_begin,
+        .capacity = capacity,
+        .heads = heads,
+        .kv_heads = kv_heads,
+        .head_dim = head_dim,
+        .workspace = workspace,
+        .output = output};
+  };
+  const auto scalar_request = make_request(scalar_workspace, scalar_output);
+  const auto vector_request = make_request(vector_workspace, vector_output);
+  emel::kernel::swa::sm scalar_machine;
+  emel::kernel::swa::sm vector_machine;
+  dispatch_result scalar_result{};
+  dispatch_result vector_result{};
+  REQUIRE(scalar_machine.process_event(
+      emel::kernel::swa::event::execute_attend_gqa2_avx2{scalar_request,
+                                                         scalar_result}));
+  REQUIRE(vector_machine.process_event(
+      emel::kernel::swa::event::execute_attend_gqa2_avx2_vector_exp{
+          vector_request, vector_result}));
+  for (size_t i = 0u; i < scalar_output.size(); ++i)
+    CHECK(vector_output[i] == doctest::Approx(scalar_output[i]).epsilon(3e-5));
+#else
+  (void)capacity;
+  (void)window_begin;
+  (void)position;
+#endif
+}
+
+TEST_CASE("swa vector exp approximation is finite monotonic and accurate") {
+#if (defined(__x86_64__) || defined(_M_X64)) && defined(__AVX2__) &&           \
+    defined(__FMA__)
+  std::array<float, 808u> values{};
+  for (size_t i = 0u; i < 801u; ++i)
+    values[i] = -100.0f + static_cast<float>(i) * 0.125f;
+  values[801] = -100.0f;
+  values[802] = std::nextafter(-100.0f, 0.0f);
+  values[803] = -std::numeric_limits<float>::min();
+  values[804] = -std::numeric_limits<float>::denorm_min();
+  values[805] = -0.0f;
+  values[806] = 0.0f;
+  values[807] = std::nextafter(0.0f, -1.0f);
+  for (size_t base = 0u; base < values.size(); base += 8u) {
+    alignas(32) float output[8];
+    _mm256_store_ps(output, emel::kernel::swa::detail::expf8_approx_avx2(
+                                _mm256_loadu_ps(values.data() + base)));
+    for (size_t lane = 0u; lane < 8u; ++lane) {
+      const float reference = std::exp(values[base + lane]);
+      CHECK(std::isfinite(output[lane]));
+      CHECK(output[lane] >= 0.0f);
+      CHECK(std::abs(output[lane] - reference) <=
+            std::max(1e-7f, reference * 3e-5f));
+    }
+  }
+  std::sort(values.begin(), values.end());
+  float previous = -1.0f;
+  for (size_t base = 0u; base < values.size(); base += 8u) {
+    alignas(32) float output[8];
+    _mm256_store_ps(output, emel::kernel::swa::detail::expf8_approx_avx2(
+                                _mm256_loadu_ps(values.data() + base)));
+    for (const float value : output) {
+      CHECK(value >= previous);
+      previous = value;
+    }
+  }
+
+  std::array<float, 17u> scores{-100.0f, -31.0f, -8.0f, -4.0f, -2.0f,
+                                -1.0f,   -0.5f,  -0.25f, -0.125f, -0.0625f,
+                                -0.03125f, -0.015625f, -0.0078125f,
+                                -0.00390625f, -0.001953125f, -0.0009765625f,
+                                0.0f};
+  const float sum = emel::kernel::swa::detail::exp_sum_avx2(
+      scores.data(), static_cast<uint32_t>(scores.size()), 0.0f);
+  float normalized_sum = 0.0f;
+  for (const float weight : scores)
+    normalized_sum += weight / sum;
+  CHECK(normalized_sum == doctest::Approx(1.0f).epsilon(2e-6));
+#endif
+}
+
+TEST_CASE("swa vector exp GQA2 route tracks scalar stable attention") {
+  SUBCASE("span 128") { check_vector_exp_matches_scalar(704u, 0u, 127u); }
+  SUBCASE("span 512") { check_vector_exp_matches_scalar(704u, 0u, 511u); }
+  SUBCASE("span 704") { check_vector_exp_matches_scalar(704u, 0u, 703u); }
+  SUBCASE("ring wrap") { check_vector_exp_matches_scalar(8u, 6u, 10u); }
+}
+
+
 TEST_CASE("swa attend computes grouped sliding-window softmax attention") {
   // heads=2, kv_heads=1, head_dim=2, capacity=4, positions 0..2 valid.
   std::array<float, 8> key_cache{};
@@ -215,6 +331,10 @@ TEST_CASE("swa GQA2 route rejects reps mismatch and short workspace") {
   CHECK_FALSE(machine.process_event(
       emel::kernel::swa::event::execute_attend_gqa2_avx2{short_request,
                                                          short_result}));
+  dispatch_result vector_short_result{};
+  CHECK_FALSE(machine.process_event(
+      emel::kernel::swa::event::execute_attend_gqa2_avx2_vector_exp{
+          short_request, vector_short_result}));
 #endif
 }
 

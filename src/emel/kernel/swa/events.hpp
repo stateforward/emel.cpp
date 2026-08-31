@@ -83,6 +83,15 @@ struct execute_attend_gqa2_avx2 {
   dispatch_result &result;
 };
 
+// GQA reps=2 AVX2 route whose stable exp/sum pass uses the source-owned
+// eight-wide approximation in swa/detail.hpp. Score dot/max order and value
+// accumulation are identical to execute_attend_gqa2_avx2. The approximation
+// is an explicit caller-selected contract, never a hidden runtime mode.
+struct execute_attend_gqa2_avx2_vector_exp {
+  const attend_request &request;
+  dispatch_result &result;
+};
+
 struct execute_cache_write {
   const cache_write_request &request;
   dispatch_result &result;

@@ -362,5 +362,13 @@ struct guard_layer_plain_full_generic {
            guard_attend_generic{}(ev, ctx);
   }
 };
+template <class base_guard, bool enabled> struct with_exp_route {
+  bool operator()(const event::step_run &ev,
+                  const action::context &ctx) const noexcept {
+    if constexpr (enabled)
+      return base_guard{}(ev, ctx);
+    return false;
+  }
+};
 
 } // namespace emel::model::needle::graph::guard
