@@ -19,6 +19,7 @@ else()
 endif()
 
 option(EMEL_ENABLE_TESTS "Build tests" ON)
+option(EMEL_ENABLE_NEEDLE_EVAL "Build maintained Needle heldout evaluator" ON)
 option(EMEL_ENABLE_FUZZ "Build fuzz targets" OFF)
 option(EMEL_ENABLE_AARCH64_HOST_FEATURES
   "Enable host-tuned AArch64 compile flags for EMEL-owned C++ code"
@@ -149,6 +150,11 @@ target_link_libraries(emel
   PUBLIC
     emel_core
 )
+
+if(EMEL_ENABLE_NEEDLE_EVAL)
+  set(EMEL_ROOT_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
+  add_subdirectory(tools/needle_eval needle_eval)
+endif()
 
 
 if(EMEL_ENABLE_TESTS)

@@ -479,6 +479,33 @@ TEST_CASE("bench script exposes unfiltered bench tool validation command") {
   CHECK(script.find(ctest_contract) != std::string::npos);
 }
 
+TEST_CASE("quality gates wire the maintained Needle evaluator with release-safe resources") {
+  const std::string cmake = read_file(repo_root() / "CMakeLists.txt");
+  CHECK(cmake.find("EMEL_ENABLE_NEEDLE_EVAL") != std::string::npos);
+  CHECK(cmake.find("add_subdirectory(tools/needle_eval needle_eval)") !=
+        std::string::npos);
+
+  const std::string evaluator =
+      read_file(repo_root() / "tools" / "needle_eval" / "main.cpp");
+  CHECK(evaluator.find("vocab->bos_id") != std::string::npos);
+  CHECK(evaluator.find("vocab->eos_id") != std::string::npos);
+  CHECK(evaluator.find("min_domain_accuracy = 0.840") != std::string::npos);
+  CHECK(evaluator.find("min_effort_accuracy = 0.760") != std::string::npos);
+  CHECK(evaluator.find("max_no_parse = 0u") != std::string::npos);
+  CHECK(evaluator.find("accuracy thresholds unmet") != std::string::npos);
+
+  const std::string quality =
+      read_file(repo_root() / "scripts" / "quality_gates.sh");
+  CHECK(quality.find("run_needle_eval_gate()") != std::string::npos);
+  CHECK(quality.find("needle_eval required resources missing:") !=
+        std::string::npos);
+  CHECK(quality.find("QUALITY_GATES_SCOPE\" == \"full\"") !=
+        std::string::npos);
+  CHECK(quality.find("--min-domain-accuracy") != std::string::npos);
+  CHECK(quality.find("--min-effort-accuracy") != std::string::npos);
+  CHECK(quality.find("--max-no-parse") != std::string::npos);
+}
+
 TEST_CASE("bench script routes Moshi LM suite through the wrapper") {
   const std::string script = read_file(repo_root() / "scripts" / "bench.sh");
   const std::size_t route_start =

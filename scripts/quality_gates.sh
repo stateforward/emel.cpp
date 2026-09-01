@@ -28,10 +28,14 @@ QUALITY_GATES_GENERATION_BENCH_WARMUP_RUNS="${EMEL_QUALITY_GATES_GENERATION_BENC
 QUALITY_GATES_GENERATION_WORKLOAD_ID="${EMEL_QUALITY_GATES_GENERATION_WORKLOAD_ID:-${EMEL_GENERATION_WORKLOAD_ID:-}}"
 QUALITY_GATES_DEFAULT_GENERATION_WORKLOAD_ID="${EMEL_QUALITY_GATES_DEFAULT_GENERATION_WORKLOAD_ID:-lfm2_single_user_hello_max_tokens_1_v1}"
 QUALITY_GATES_ALLOW_BENCH_REGRESSION="${EMEL_QUALITY_GATES_ALLOW_BENCH_REGRESSION:-0}"
+QUALITY_GATES_NEEDLE_EVAL="${EMEL_QUALITY_GATES_NEEDLE_EVAL:-auto}"
+QUALITY_GATES_NEEDLE_DOMAIN_MIN="${EMEL_QUALITY_GATES_NEEDLE_DOMAIN_MIN:-0.840}"
+QUALITY_GATES_NEEDLE_EFFORT_MIN="${EMEL_QUALITY_GATES_NEEDLE_EFFORT_MIN:-0.760}"
+QUALITY_GATES_NEEDLE_MAX_NO_PARSE="${EMEL_QUALITY_GATES_NEEDLE_MAX_NO_PARSE:-0}"
+NEEDLE_EVAL_BINARY="${EMEL_NEEDLE_EVAL_BINARY:-$ROOT_DIR/build/zig/emel_needle_eval}"
+NEEDLE_EVAL_MODEL="${EMEL_NEEDLE_EVAL_MODEL:-$ROOT_DIR/tests/models/route-w4-qat.cact}"
+NEEDLE_EVAL_PROMPTS="${EMEL_NEEDLE_EVAL_PROMPTS:-$ROOT_DIR/tests/fixtures/cact/needle-heldout-prompts.tsv}"
 QUALITY_GATES_PARITY="${EMEL_QUALITY_GATES_PARITY:-auto}"
-QUALITY_GATES_FUZZ="${EMEL_QUALITY_GATES_FUZZ:-auto}"
-QUALITY_GATES_DETERMINISM="${EMEL_QUALITY_GATES_DETERMINISM:-auto}"
-QUALITY_GATES_PARALLEL="${EMEL_QUALITY_GATES_PARALLEL:-auto}"
 # Per-lane wall-clock budget for the parallel quality group. This is an
 # EVIDENCE GUARANTEE, not a work cap: each lane gets everything that remains
 # of the global timeout minus a flush margin, so a wedged or starved lane is
@@ -226,6 +230,49 @@ lane_timeout_for() {
 lane_timeout_enabled() {
   local budget="$1"
   awk -v budget="$budget" 'BEGIN { exit !(budget > 0) }'
+}
+
+needle_eval_resources_ready() {
+  [[ -x "$NEEDLE_EVAL_BINARY" && -f "$NEEDLE_EVAL_MODEL" &&
+     -s "$NEEDLE_EVAL_PROMPTS" ]]
+}
+
+run_needle_eval_gate() {
+  case "$QUALITY_GATES_NEEDLE_EVAL" in
+    never)
+      if [[ "$QUALITY_GATES_SCOPE" == "full" ]]; then
+        echo "error: needle_eval cannot be disabled in full scope" >&2
+        return 1
+      fi
+      record_skipped_step needle_eval "disabled by EMEL_QUALITY_GATES_NEEDLE_EVAL=never"
+      return 0
+      ;;
+    auto|always)
+      ;;
+    *)
+      echo "error: unknown EMEL_QUALITY_GATES_NEEDLE_EVAL value '$QUALITY_GATES_NEEDLE_EVAL'" >&2
+      return 1
+      ;;
+  esac
+  if needle_eval_resources_ready; then
+    run_step needle_eval "$NEEDLE_EVAL_BINARY" "$NEEDLE_EVAL_MODEL" \
+      "$NEEDLE_EVAL_PROMPTS" \
+      --min-domain-accuracy "$QUALITY_GATES_NEEDLE_DOMAIN_MIN" \
+      --min-effort-accuracy "$QUALITY_GATES_NEEDLE_EFFORT_MIN" \
+      --max-no-parse "$QUALITY_GATES_NEEDLE_MAX_NO_PARSE"
+    return
+  fi
+
+  local missing=""
+  [[ -x "$NEEDLE_EVAL_BINARY" ]] || missing+=" binary=$NEEDLE_EVAL_BINARY"
+  [[ -f "$NEEDLE_EVAL_MODEL" ]] || missing+=" model=$NEEDLE_EVAL_MODEL"
+  [[ -s "$NEEDLE_EVAL_PROMPTS" ]] || missing+=" prompts=$NEEDLE_EVAL_PROMPTS"
+  if [[ "$QUALITY_GATES_SCOPE" == "full" ||
+        "$QUALITY_GATES_NEEDLE_EVAL" == "always" ]]; then
+    echo "error: needle_eval required resources missing:${missing}" >&2
+    return 1
+  fi
+  record_skipped_step needle_eval "required resources missing:${missing}"
 }
 
 run_domain_boundary_gate() {
@@ -1435,6 +1482,7 @@ run_parallel_quality_group() {
   parallel_duration_files=()
 
   start_parallel_step bench_snapshot run_benchmark_gates
+  start_parallel_step needle_eval run_needle_eval_gate
   start_parallel_step test_with_coverage run_coverage_gate
   start_parallel_step paritychecker run_parity_gate
   start_parallel_step fuzz_smoke run_fuzz_gate
@@ -1477,6 +1525,9 @@ fi
 # the environment and git state, so the child computes the same selections.
 if [[ -n "${EMEL_QUALITY_GATES_LANE:-}" ]]; then
   case "$EMEL_QUALITY_GATES_LANE" in
+    needle_eval)
+      run_needle_eval_gate
+      ;;
     bench_snapshot)
       run_benchmark_gates
       ;;
@@ -1513,6 +1564,11 @@ if parallel_enabled; then
     parallel_group_status=$?
   fi
 else
+  if run_needle_eval_gate; then
+    :
+  else
+    parallel_group_status=$?
+  fi
   if run_benchmark_gates; then
     bench_status=0
   else
@@ -1522,8 +1578,8 @@ else
   run_parity_gate
   run_fuzz_gate
   run_determinism_gate
-fi
 
+fi
 if [[ $parallel_group_status -ne 0 ]]; then
   exit "$parallel_group_status"
 fi

@@ -20,12 +20,15 @@
 // Usage:
 //   needle_eval <model.cact> <prompts.tsv> [row_begin row_end]
 // Output: one "row i=..." line per example plus a final summary line.
+#include <cerrno>
+#include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <memory>
 #include <span>
 #include <string>
@@ -44,9 +47,15 @@ namespace {
 namespace cact_loader = emel::cact::loader;
 namespace needle = emel::model::needle;
 
-constexpr int32_t k_bos_id = 2;
-constexpr int32_t k_eos_id = 1;
 constexpr uint32_t k_max_new_tokens = 80u;
+
+struct eval_options {
+  double min_domain_accuracy = 0.840;
+  double min_effort_accuracy = 0.760;
+  size_t max_no_parse = 0u;
+  size_t row_begin = 0u;
+  size_t row_end = std::numeric_limits<size_t>::max();
+};
 
 [[noreturn]] void die(const char *what) {
   std::fprintf(stderr, "error: needle_eval: %s\n", what);
@@ -193,6 +202,7 @@ std::string extract_call_value(const std::string &text, const char *key) {
   ++cursor;
   const size_t value_end = body.find('"', cursor);
   if (value_end == std::string_view::npos) return {};
+
   return std::string{body.substr(cursor, value_end - cursor)};
 }
 
@@ -204,26 +214,92 @@ int effort_rank(const std::string &effort) {
   return -1;
 }
 
+bool parse_fraction(const char *text, double &value_out) {
+  if (text == nullptr || *text == '\0') return false;
+  char *end = nullptr;
+  errno = 0;
+  const double value = std::strtod(text, &end);
+  if (errno == ERANGE || end == text || *end != '\0' ||
+      !std::isfinite(value) || value < 0.0 || value > 1.0)
+    return false;
+  value_out = value;
+  return true;
+}
+
+bool parse_count(const char *text, size_t &value_out) {
+  if (text == nullptr || *text == '\0' || *text == '-') return false;
+  char *end = nullptr;
+  errno = 0;
+  const unsigned long long value = std::strtoull(text, &end, 10);
+  if (errno == ERANGE || end == text || *end != '\0' ||
+      value > std::numeric_limits<size_t>::max())
+    return false;
+  value_out = static_cast<size_t>(value);
+  return true;
+}
+
+bool take_option_value(int argc, char **argv, int &index, const char *name,
+                       const char *&value_out) {
+  const std::string_view arg{argv[index]};
+  const std::string prefix = std::string{name} + "=";
+  if (arg.rfind(prefix, 0u) == 0u) {
+    value_out = argv[index] + prefix.size();
+    return true;
+  }
+  if (arg == name && index + 1 < argc) {
+    value_out = argv[++index];
+    return true;
+  }
+  return false;
+}
+
+bool parse_options(int argc, char **argv, eval_options &options) {
+  bool have_range = false;
+  for (int index = 3; index < argc; ++index) {
+    const char *value = nullptr;
+    if (take_option_value(argc, argv, index, "--min-domain-accuracy", value)) {
+      if (!parse_fraction(value, options.min_domain_accuracy)) return false;
+    } else if (take_option_value(argc, argv, index, "--min-effort-accuracy",
+                                 value)) {
+      if (!parse_fraction(value, options.min_effort_accuracy)) return false;
+    } else if (take_option_value(argc, argv, index, "--max-no-parse", value)) {
+      if (!parse_count(value, options.max_no_parse)) return false;
+    } else if (!have_range && index + 1 < argc &&
+               parse_count(argv[index], options.row_begin) &&
+               parse_count(argv[index + 1], options.row_end)) {
+      ++index;
+      have_range = true;
+    } else {
+      return false;
+    }
+  }
+  return true;
+}
+
 } // namespace
 
 int main(int argc, char **argv) {
   if (argc < 3) {
     std::fprintf(stderr,
                  "usage: needle_eval <model.cact> <prompts.tsv> "
-                 "[row_begin row_end]\n");
+                 "[row_begin row_end] [--min-domain-accuracy VALUE] "
+                 "[--min-effort-accuracy VALUE] [--max-no-parse COUNT]\n");
+    return 2;
+  }
+  eval_options options = {};
+  if (!parse_options(argc, argv, options)) {
+    std::fprintf(stderr, "error: needle_eval: invalid CLI option or value\n");
     return 2;
   }
   const std::vector<uint8_t> file_bytes = read_file_bytes(argv[1]);
   std::vector<eval_row> rows = read_rows(argv[2]);
-  size_t row_begin = 0u;
-  size_t row_end = rows.size();
-  if (argc >= 5) {
-    row_begin = static_cast<size_t>(std::strtoul(argv[3], nullptr, 10));
-    row_end = static_cast<size_t>(std::strtoul(argv[4], nullptr, 10));
-    if (row_begin >= rows.size() || row_end > rows.size() ||
-        row_begin >= row_end)
-      die("bad row range");
-  }
+  const size_t row_begin = options.row_begin;
+  const size_t row_end = options.row_end == std::numeric_limits<size_t>::max()
+                             ? rows.size()
+                             : options.row_end;
+  if (rows.empty() || row_begin >= rows.size() || row_end > rows.size() ||
+      row_begin >= row_end)
+    die("bad row range or empty prompts");
 
   cact_loader::sm loader{};
   cact_loader::geometry geometry = {};
@@ -266,6 +342,10 @@ int main(int argc, char **argv) {
           emel::text::tokenizer::needle::event::load_error_fn::from<
               &on_tok_load_error>()}))
     die("tokenizer blob load");
+  if (vocab->bos_id < 0 || vocab->eos_id < 0 ||
+      static_cast<uint32_t>(vocab->bos_id) >= vocab->n_tokens ||
+      static_cast<uint32_t>(vocab->eos_id) >= vocab->n_tokens)
+    die("tokenizer blob has invalid BOS/EOS IDs");
 
   emel::text::tokenizer::sm tokenizer{};
   int32_t bind_err =
@@ -317,7 +397,7 @@ int main(int argc, char **argv) {
     }
 
     prefill_ids.clear();
-    prefill_ids.push_back(k_bos_id);
+    prefill_ids.push_back(vocab->bos_id);
     const size_t prompt_cap =
         contract.geo.max_seq_len > k_max_new_tokens
             ? contract.geo.max_seq_len - k_max_new_tokens
@@ -336,7 +416,7 @@ int main(int argc, char **argv) {
     for (uint32_t step = 0u; step < k_max_new_tokens; ++step) {
       const int32_t next = static_cast<int32_t>(
           argmax(std::span<const float>{logits.data(), logits.size()}));
-      if (next == k_eos_id) break;
+      if (next == vocab->eos_id) break;
       generated.push_back(next);
       if (step + 1u < k_max_new_tokens) {
         if (!graph.process_event(needle::graph::event::decode{
@@ -372,14 +452,35 @@ int main(int argc, char **argv) {
     std::fflush(stdout);
   }
 
+  const double domain_accuracy =
+      evaluated ? static_cast<double>(domain_ok) / evaluated : 0.0;
+  const double effort_accuracy =
+      evaluated ? static_cast<double>(effort_ok) / evaluated : 0.0;
+  const double joint_accuracy =
+      evaluated ? static_cast<double>(joint_ok) / evaluated : 0.0;
+  const double effort_within1 =
+      evaluated ? static_cast<double>(within1) / evaluated : 0.0;
   std::printf("needle_eval_summary rows=%zu no_parse=%zu domain_acc=%.4f "
               "effort_acc=%.4f joint_acc=%.4f effort_within1=%.4f "
-              "tokenizer_id_mismatch_rows=%zu\n",
-              evaluated, no_parse,
-              evaluated ? static_cast<double>(domain_ok) / evaluated : 0.0,
-              evaluated ? static_cast<double>(effort_ok) / evaluated : 0.0,
-              evaluated ? static_cast<double>(joint_ok) / evaluated : 0.0,
-              evaluated ? static_cast<double>(within1) / evaluated : 0.0,
-              tokenizer_mismatch);
-  return tokenizer_mismatch == 0u ? 0 : 1;
+              "tokenizer_id_mismatch_rows=%zu thresholds=%.4f/%.4f/%zu\n",
+              evaluated, no_parse, domain_accuracy, effort_accuracy,
+              joint_accuracy, effort_within1, tokenizer_mismatch,
+              options.min_domain_accuracy, options.min_effort_accuracy,
+              options.max_no_parse);
+  if (tokenizer_mismatch != 0u) {
+    std::fprintf(stderr, "error: tokenizer ID mismatch rows=%zu\n",
+                 tokenizer_mismatch);
+    return 1;
+  }
+  if (no_parse > options.max_no_parse ||
+      domain_accuracy < options.min_domain_accuracy ||
+      effort_accuracy < options.min_effort_accuracy) {
+    std::fprintf(stderr,
+                 "error: accuracy thresholds unmet domain=%.4f (min %.4f) "
+                 "effort=%.4f (min %.4f) no_parse=%zu (max %zu)\n",
+                 domain_accuracy, options.min_domain_accuracy, effort_accuracy,
+                 options.min_effort_accuracy, no_parse, options.max_no_parse);
+    return 1;
+  }
+  return 0;
 }
