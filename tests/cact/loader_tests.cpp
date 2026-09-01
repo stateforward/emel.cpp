@@ -4,6 +4,7 @@
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <span>
 #include <string>
 #include <vector>
@@ -135,6 +136,14 @@ std::vector<uint8_t> make_valid_cact_file() {
 std::vector<uint8_t> make_bad_tag_cact_file() {
   std::vector<uint8_t> bytes = make_valid_cact_file();
   bytes[0] ^= 0xffu;
+  return bytes;
+}
+
+std::vector<uint8_t> make_nonfinite_codebook_cact_file(const float value) {
+  std::vector<uint8_t> bytes = make_valid_cact_file();
+  uint32_t raw = 0u;
+  __builtin_memcpy(&raw, &value, sizeof(raw));
+  write_scalar<uint32_t>(bytes, k_header_bytes, raw);
   return bytes;
 }
 
@@ -547,6 +556,202 @@ TEST_CASE("cact loader probe classifies malformed images") {
     CHECK_FALSE(machine.process_event(probe));
     CHECK(state.probe_error ==
           emel::error::cast(emel::cact::loader::error::model_invalid));
+    CHECK(machine.is(
+        stateforward::sml::state<emel::cact::loader::state_errored>));
+  }
+}
+
+TEST_CASE("cact loader rejects non-finite codebook values") {
+  for (const float value : {std::numeric_limits<float>::quiet_NaN(),
+                            std::numeric_limits<float>::infinity(),
+                            -std::numeric_limits<float>::infinity()}) {
+    CAPTURE(value);
+    emel::cact::loader::sm machine{};
+    callback_state state = {};
+    callback_scope scope{state};
+    const std::vector<uint8_t> file_bytes =
+        make_nonfinite_codebook_cact_file(value);
+    emel::cact::loader::geometry geometry = {};
+    const emel::cact::loader::event::probe probe{
+        std::span<const uint8_t>{file_bytes}, geometry, k_probe_done_cb,
+        k_probe_error_cb};
+
+    CHECK_FALSE(machine.process_event(probe));
+    CHECK(state.probe_done_count == 0u);
+    CHECK(state.probe_error_count == 1u);
+    CHECK(state.probe_error ==
+          emel::error::cast(emel::cact::loader::error::model_invalid));
+    CHECK(machine.is(
+        stateforward::sml::state<emel::cact::loader::state_errored>));
+  }
+}
+
+TEST_CASE("cact loader parse requires the exact span accepted by probe") {
+  emel::cact::loader::sm machine{};
+  callback_state state = {};
+  callback_scope scope{state};
+  const std::vector<uint8_t> file_a = make_valid_cact_file();
+  const std::vector<uint8_t> file_b = file_a;
+  REQUIRE(file_a.data() != file_b.data());
+  REQUIRE(file_a.size() == file_b.size());
+
+  emel::cact::loader::geometry geometry = {};
+  const emel::cact::loader::event::probe probe{
+      std::span<const uint8_t>{file_a}, geometry, k_probe_done_cb,
+      k_probe_error_cb};
+  REQUIRE(machine.process_event(probe));
+
+  std::vector<emel::cact::loader::tensor_view> tensors(geometry.num_tensors);
+  const emel::cact::loader::event::bind_storage bind{
+      std::span<emel::cact::loader::tensor_view>{tensors}, k_bind_done_cb,
+      k_bind_error_cb};
+  REQUIRE(machine.process_event(bind));
+
+  const emel::cact::loader::event::parse wrong_span{
+      std::span<const uint8_t>{file_b}, k_parse_done_cb, k_parse_error_cb};
+  CHECK_FALSE(machine.process_event(wrong_span));
+  CHECK(state.parse_done_count == 0u);
+  CHECK(state.parse_error_count == 1u);
+  CHECK(state.parse_error ==
+        emel::error::cast(emel::cact::loader::error::invalid_request));
+  CHECK(machine.is(
+      stateforward::sml::state<emel::cact::loader::state_errored>));
+}
+
+TEST_CASE("cact loader accepts parse of the exact probed span") {
+  emel::cact::loader::sm machine{};
+  callback_state state = {};
+  callback_scope scope{state};
+  const std::vector<uint8_t> file_bytes = make_valid_cact_file();
+
+  emel::cact::loader::geometry geometry = {};
+  const emel::cact::loader::event::probe probe{
+      std::span<const uint8_t>{file_bytes}, geometry, k_probe_done_cb,
+      k_probe_error_cb};
+  REQUIRE(machine.process_event(probe));
+
+  std::vector<emel::cact::loader::tensor_view> tensors(geometry.num_tensors);
+  const emel::cact::loader::event::bind_storage bind{
+      std::span<emel::cact::loader::tensor_view>{tensors}, k_bind_done_cb,
+      k_bind_error_cb};
+  REQUIRE(machine.process_event(bind));
+
+  const emel::cact::loader::event::parse parse{
+      std::span<const uint8_t>{file_bytes}, k_parse_done_cb, k_parse_error_cb};
+  CHECK(machine.process_event(parse));
+  CHECK(state.parse_done_count == 1u);
+  CHECK(state.parse_error_count == 0u);
+  CHECK(tensors[0].data == file_bytes.data() + tensors[0].offset);
+  CHECK(machine.is(
+      stateforward::sml::state<emel::cact::loader::state_parsed>));
+}
+
+TEST_CASE("cact loader handles absent callbacks on valid and error requests") {
+  const emel::cact::loader::event::probe_done_fn no_probe_done = {};
+  const emel::cact::loader::event::probe_error_fn no_probe_error = {};
+  const emel::cact::loader::event::bind_done_fn no_bind_done = {};
+  const emel::cact::loader::event::bind_error_fn no_bind_error = {};
+  const emel::cact::loader::event::parse_done_fn no_parse_done = {};
+  const emel::cact::loader::event::parse_error_fn no_parse_error = {};
+
+  SUBCASE("probe valid request reaches probed without a done callback") {
+    emel::cact::loader::sm machine{};
+    const std::vector<uint8_t> file_bytes = make_valid_cact_file();
+    emel::cact::loader::geometry geometry = {};
+    const emel::cact::loader::event::probe probe{
+        std::span<const uint8_t>{file_bytes}, geometry, no_probe_done,
+        no_probe_error};
+
+    CHECK(machine.process_event(probe));
+    CHECK(geometry.num_tensors == 1u);
+    CHECK(machine.is(
+        stateforward::sml::state<emel::cact::loader::state_probed>));
+  }
+
+  SUBCASE("probe error reaches errored without an error callback") {
+    emel::cact::loader::sm machine{};
+    emel::cact::loader::geometry geometry = {};
+    const emel::cact::loader::event::probe probe{
+        std::span<const uint8_t>{}, geometry, no_probe_done, no_probe_error};
+
+    CHECK_FALSE(machine.process_event(probe));
+    CHECK(machine.is(
+        stateforward::sml::state<emel::cact::loader::state_errored>));
+  }
+
+  SUBCASE("bind valid request reaches bound without a done callback") {
+    emel::cact::loader::sm machine{};
+    const std::vector<uint8_t> file_bytes = make_valid_cact_file();
+    emel::cact::loader::geometry geometry = {};
+    const emel::cact::loader::event::probe probe{
+        std::span<const uint8_t>{file_bytes}, geometry, no_probe_done,
+        no_probe_error};
+    REQUIRE(machine.process_event(probe));
+    std::vector<emel::cact::loader::tensor_view> tensors(geometry.num_tensors);
+    const emel::cact::loader::event::bind_storage bind{
+        std::span<emel::cact::loader::tensor_view>{tensors}, no_bind_done,
+        no_bind_error};
+
+    CHECK(machine.process_event(bind));
+    CHECK(machine.is(
+        stateforward::sml::state<emel::cact::loader::state_bound>));
+  }
+
+  SUBCASE("bind error reaches errored without an error callback") {
+    emel::cact::loader::sm machine{};
+    const std::vector<uint8_t> file_bytes = make_valid_cact_file();
+    emel::cact::loader::geometry geometry = {};
+    const emel::cact::loader::event::probe probe{
+        std::span<const uint8_t>{file_bytes}, geometry, no_probe_done,
+        no_probe_error};
+    REQUIRE(machine.process_event(probe));
+    const emel::cact::loader::event::bind_storage bind{
+        std::span<emel::cact::loader::tensor_view>{}, no_bind_done,
+        no_bind_error};
+
+    CHECK_FALSE(machine.process_event(bind));
+    CHECK(machine.is(
+        stateforward::sml::state<emel::cact::loader::state_errored>));
+  }
+
+  SUBCASE("parse valid request reaches parsed without a done callback") {
+    emel::cact::loader::sm machine{};
+    const std::vector<uint8_t> file_bytes = make_valid_cact_file();
+    emel::cact::loader::geometry geometry = {};
+    const emel::cact::loader::event::probe probe{
+        std::span<const uint8_t>{file_bytes}, geometry, no_probe_done,
+        no_probe_error};
+    REQUIRE(machine.process_event(probe));
+    std::vector<emel::cact::loader::tensor_view> tensors(geometry.num_tensors);
+    const emel::cact::loader::event::bind_storage bind{
+        std::span<emel::cact::loader::tensor_view>{tensors}, no_bind_done,
+        no_bind_error};
+    REQUIRE(machine.process_event(bind));
+    const emel::cact::loader::event::parse parse{
+        std::span<const uint8_t>{file_bytes}, no_parse_done, no_parse_error};
+
+    CHECK(machine.process_event(parse));
+    CHECK(machine.is(
+        stateforward::sml::state<emel::cact::loader::state_parsed>));
+  }
+
+  SUBCASE("parse error reaches errored without an error callback") {
+    emel::cact::loader::sm machine{};
+    const std::vector<uint8_t> file_bytes = make_valid_cact_file();
+    emel::cact::loader::geometry geometry = {};
+    const emel::cact::loader::event::probe probe{
+        std::span<const uint8_t>{file_bytes}, geometry, no_probe_done,
+        no_probe_error};
+    REQUIRE(machine.process_event(probe));
+    std::vector<emel::cact::loader::tensor_view> tensors(geometry.num_tensors);
+    const emel::cact::loader::event::bind_storage bind{
+        std::span<emel::cact::loader::tensor_view>{tensors}, no_bind_done,
+        no_bind_error};
+    REQUIRE(machine.process_event(bind));
+    const emel::cact::loader::event::parse parse{
+        std::span<const uint8_t>{}, no_parse_done, no_parse_error};
+
+    CHECK_FALSE(machine.process_event(parse));
     CHECK(machine.is(
         stateforward::sml::state<emel::cact::loader::state_errored>));
   }

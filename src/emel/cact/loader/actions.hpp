@@ -7,9 +7,12 @@
 namespace emel::cact::loader::action {
 
 struct effect_begin_probe {
-  void operator()(const event::probe_runtime &ev, context &) const noexcept {
+  void operator()(const event::probe_runtime &ev, context &ctx) const noexcept {
     ev.ctx.err = emel::error::cast(error::none);
     ev.ctx.geometry_out = {};
+    ctx.probed = {};
+    ctx.probed_file_image = {};
+    ctx.tensors = {};
   }
 };
 
@@ -66,6 +69,7 @@ struct effect_commit_probe_geometry {
   void operator()(const event::probe_runtime &ev, context &ctx) const noexcept {
     ev.request.geometry_out = ev.ctx.geometry_out;
     ctx.probed = ev.ctx.geometry_out;
+    ctx.probed_file_image = ev.request.file_image;
     ctx.tensors = {};
   }
 };

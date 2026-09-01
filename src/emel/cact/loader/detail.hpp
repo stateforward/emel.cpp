@@ -3,6 +3,7 @@
 #include <array>
 #include <bit>
 #include <cstddef>
+#include <cmath>
 #include <cstdint>
 #include <limits>
 #include <span>
@@ -252,6 +253,9 @@ inline emel::error::type read_header(bounded_reader &reader,
   for (uint32_t i = 0u; i < k_codebook_len; ++i) {
     if (!reader.read_f32(geometry_out.codebook[i])) {
       return cast_loader_error(error::parse_failed);
+    }
+    if (!std::isfinite(geometry_out.codebook[i])) {
+      return cast_loader_error(error::model_invalid);
     }
   }
 

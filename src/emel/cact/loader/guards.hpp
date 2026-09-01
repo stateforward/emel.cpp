@@ -88,6 +88,53 @@ struct guard_parse_missing_file_image {
   }
 };
 
+struct guard_parse_matches_probed_file_image {
+  bool operator()(const event::parse_runtime &ev,
+                  const action::context &ctx) const noexcept {
+    return ev.request.file_image.data() == ctx.probed_file_image.data() &&
+           ev.request.file_image.size() == ctx.probed_file_image.size();
+  }
+};
+
+struct guard_parse_mismatches_probed_file_image {
+  bool operator()(const event::parse_runtime &ev,
+                  const action::context &ctx) const noexcept {
+    return !guard_parse_matches_probed_file_image{}(ev, ctx);
+  }
+};
+
+template <class runtime_event_type>
+struct guard_done_callback_present {
+  bool operator()(const runtime_event_type &ev,
+                  const action::context &) const noexcept {
+    return static_cast<bool>(ev.request.on_done);
+  }
+};
+
+template <class runtime_event_type>
+struct guard_done_callback_absent {
+  bool operator()(const runtime_event_type &ev,
+                  const action::context &ctx) const noexcept {
+    return !guard_done_callback_present<runtime_event_type>{}(ev, ctx);
+  }
+};
+
+template <class runtime_event_type>
+struct guard_error_callback_present {
+  bool operator()(const runtime_event_type &ev,
+                  const action::context &) const noexcept {
+    return static_cast<bool>(ev.request.on_error);
+  }
+};
+
+template <class runtime_event_type>
+struct guard_error_callback_absent {
+  bool operator()(const runtime_event_type &ev,
+                  const action::context &ctx) const noexcept {
+    return !guard_error_callback_present<runtime_event_type>{}(ev, ctx);
+  }
+};
+
 struct guard_parse_has_bound_storage {
   bool operator()(const event::parse_runtime &,
                   const action::context &ctx) const noexcept {

@@ -72,9 +72,10 @@ using bind_error_fn = emel::callback<void(const events::bind_error &)>;
 using parse_done_fn = emel::callback<void(const events::parse_done &)>;
 using parse_error_fn = emel::callback<void(const events::parse_error &)>;
 
-// Probes header + directory geometry from a zero-copy file image. Does not
-// touch io::mmap; the caller is responsible for producing file_image via the
-// maintained mmap/file route before invoking this actor.
+// Probes header + directory geometry from a zero-copy file image. The actor
+// retains the span identity and extent, not its payload; the caller must keep
+// that mapping alive through parse. Does not touch io::mmap; the caller is
+// responsible for producing file_image via the maintained mmap/file route.
 struct probe {
   std::span<const uint8_t> file_image = {};
   geometry &geometry_out;
@@ -99,6 +100,9 @@ struct bind_storage {
       : tensors(tensors_in), on_done(on_done_in), on_error(on_error_in) {}
 };
 
+// Parses only the exact base address and extent accepted by the latest
+// successful probe, preserving tensor views as zero-copy aliases of that
+// caller-owned mapping.
 struct parse {
   std::span<const uint8_t> file_image = {};
   const parse_done_fn &on_done;
