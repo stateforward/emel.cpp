@@ -17,6 +17,7 @@
 #include "emel/text/generator/guards.hpp"
 #include "emel/text/generator/initializer/guards.hpp"
 #include "emel/kernel/matmul/sm.hpp"
+#include "emel/model/tensor/window/sm.hpp"
 #include "emel/text/generator/prefill/actions.hpp"
 #include "emel/text/generator/prefill/guards.hpp"
 #include "generator_test_policies.hpp"
@@ -2710,4 +2711,351 @@ TEST_CASE(
   CHECK(emel::text::generator::initializer::guard::
             backend_prepare_backend_error{}(initializer_run,
                                             initializer_context));
+}
+
+TEST_CASE("generator layer guards classify routes and outcomes for every event shape") {
+  namespace layer = emel::text::generator::layer;
+  using qk_route = layer::event::attention_qk_norm_route;
+  using residual_route = layer::event::residual_route;
+  using v_route = layer::event::attention_v_norm_route;
+
+  emel::text::generator::detail::native_backend backend{};
+  const auto kv = emel::text::generator::detail::identity_kv_addressing();
+  int32_t error = emel::text::generator::detail::k_error_ok;
+  layer::event::scalar_run scalar{backend, kv, 0, 3,
+                                  residual_route::attention,
+                                  qk_route::headwise_rms, v_route::rms,
+                                  error};
+  layer::event::chunk4_run chunk4{backend, kv, 0, 4,
+                                  residual_route::attention,
+                                  qk_route::headwise_rms, v_route::rms};
+  layer::event::chunk8_run chunk8{backend, kv, 0, 8,
+                                  residual_route::attention,
+                                  qk_route::headwise_rms, v_route::rms};
+
+  CHECK(layer::guard::guard_scalar_attention_route<
+        qk_route::headwise_rms, v_route::rms>{}(scalar));
+  CHECK_FALSE(layer::guard::guard_scalar_attention_route<
+              qk_route::none, v_route::rms>{}(scalar));
+  CHECK(layer::guard::guard_chunk4_attention_route<
+        qk_route::headwise_rms, v_route::rms>{}(chunk4));
+  CHECK_FALSE(layer::guard::guard_chunk4_attention_route<
+              qk_route::headwise_rms, v_route::none>{}(chunk4));
+  CHECK(layer::guard::guard_chunk8_attention_route<
+        qk_route::headwise_rms, v_route::rms>{}(chunk8));
+  CHECK_FALSE(layer::guard::guard_chunk8_attention_route<
+              qk_route::none, v_route::none>{}(chunk8));
+
+  scalar.residual = residual_route::shortconv;
+  chunk4.residual = residual_route::shortconv;
+  chunk8.residual = residual_route::shortconv;
+  CHECK(layer::guard::guard_scalar_shortconv_route{}(scalar));
+  CHECK(layer::guard::guard_chunk4_shortconv_route{}(chunk4));
+  CHECK(layer::guard::guard_chunk8_shortconv_route{}(chunk8));
+  scalar.normalized_ok = true;
+  chunk4.normalized_ok = true;
+  chunk8.normalized_ok = true;
+  CHECK(layer::guard::guard_scalar_normalized_shortconv_route{}(scalar));
+  CHECK(layer::guard::guard_chunk4_normalized_shortconv_route{}(chunk4));
+  CHECK(layer::guard::guard_chunk8_normalized_shortconv_route{}(chunk8));
+  scalar.residual = residual_route::attention;
+  chunk4.residual = residual_route::attention;
+  chunk8.residual = residual_route::attention;
+
+  scalar.stream_ready = true;
+  scalar.normalized_ok = true;
+  chunk4.normalized_ok = true;
+  chunk8.normalized_ok = true;
+  CHECK(layer::guard::guard_stream_ready{}(scalar));
+  CHECK_FALSE(layer::guard::guard_stream_failed{}(scalar));
+  CHECK(layer::guard::guard_normalized_ok{}(scalar));
+  CHECK(layer::guard::guard_normalized_ok{}(chunk4));
+  CHECK(layer::guard::guard_normalized_ok{}(chunk8));
+  CHECK_FALSE(layer::guard::guard_normalized_failed{}(scalar));
+  CHECK_FALSE(layer::guard::guard_normalized_failed{}(chunk4));
+  CHECK_FALSE(layer::guard::guard_normalized_failed{}(chunk8));
+  CHECK(layer::guard::guard_scalar_normalized_attention_route<
+        qk_route::headwise_rms, v_route::rms>{}(scalar));
+  CHECK(layer::guard::guard_chunk4_normalized_attention_route<
+        qk_route::headwise_rms, v_route::rms>{}(chunk4));
+  CHECK(layer::guard::guard_chunk8_normalized_attention_route<
+        qk_route::headwise_rms, v_route::rms>{}(chunk8));
+
+  scalar.residual_ok = true;
+  chunk4.residual_ok = true;
+  chunk8.residual_ok = true;
+  scalar.feed_forward_ok = true;
+  chunk4.feed_forward_ok = true;
+  chunk8.feed_forward_ok = true;
+  CHECK(layer::guard::guard_residual_ok{}(scalar));
+  CHECK(layer::guard::guard_residual_ok{}(chunk4));
+  CHECK(layer::guard::guard_residual_ok{}(chunk8));
+  CHECK_FALSE(layer::guard::guard_residual_failed{}(scalar));
+  CHECK_FALSE(layer::guard::guard_residual_failed{}(chunk4));
+  CHECK_FALSE(layer::guard::guard_residual_failed{}(chunk8));
+  CHECK(layer::guard::guard_feed_forward_ok{}(scalar));
+  CHECK(layer::guard::guard_feed_forward_ok{}(chunk4));
+  CHECK(layer::guard::guard_feed_forward_ok{}(chunk8));
+  CHECK_FALSE(layer::guard::guard_feed_forward_failed{}(scalar));
+  CHECK_FALSE(layer::guard::guard_feed_forward_failed{}(chunk4));
+  CHECK_FALSE(layer::guard::guard_feed_forward_failed{}(chunk8));
+
+  scalar.stream_ready = false;
+  scalar.normalized_ok = false;
+  chunk4.normalized_ok = false;
+  chunk8.normalized_ok = false;
+  scalar.residual_ok = false;
+  chunk4.residual_ok = false;
+  chunk8.residual_ok = false;
+  scalar.feed_forward_ok = false;
+  chunk4.feed_forward_ok = false;
+  chunk8.feed_forward_ok = false;
+  CHECK(layer::guard::guard_stream_failed{}(scalar));
+  CHECK(layer::guard::guard_normalized_failed{}(scalar));
+  CHECK(layer::guard::guard_normalized_failed{}(chunk4));
+  CHECK(layer::guard::guard_normalized_failed{}(chunk8));
+  CHECK(layer::guard::guard_residual_failed{}(scalar));
+  CHECK(layer::guard::guard_residual_failed{}(chunk4));
+  CHECK(layer::guard::guard_residual_failed{}(chunk8));
+  CHECK(layer::guard::guard_feed_forward_failed{}(scalar));
+  CHECK(layer::guard::guard_feed_forward_failed{}(chunk4));
+  CHECK(layer::guard::guard_feed_forward_failed{}(chunk8));
+}
+
+TEST_CASE("generator layer actions publish normalization, route, and lifecycle outcomes") {
+  namespace layer = emel::text::generator::layer;
+  using qk_route = layer::event::attention_qk_norm_route;
+  using residual_route = layer::event::residual_route;
+  using v_route = layer::event::attention_v_norm_route;
+
+  emel::text::generator::detail::native_backend backend{};
+  backend.n_embd = 1;
+  backend.blocks.resize(1u);
+  backend.blocks[0].attention_norm = {2.0f};
+  backend.hidden = {3.0f};
+  backend.norm = {-7.0f};
+  backend.hidden_chunk4 = {1.0f, 2.0f, 3.0f, 4.0f};
+  backend.norm_chunk4.assign(4u, -7.0f);
+  backend.hidden_chunk8 = {1.0f, 2.0f, 3.0f, 4.0f,
+                           5.0f, 6.0f, 7.0f, 8.0f};
+  backend.norm_chunk8.assign(8u, -7.0f);
+  const auto kv = emel::text::generator::detail::identity_kv_addressing();
+  int32_t error = 99;
+  layer::event::scalar_run scalar{backend, kv, 0, 0,
+                                  residual_route::attention, qk_route::none,
+                                  v_route::none, error};
+  layer::event::chunk4_run chunk4{backend, kv, 0, 0,
+                                  residual_route::attention, qk_route::none,
+                                  v_route::none};
+  layer::event::chunk8_run chunk8{backend, kv, 0, 0,
+                                  residual_route::attention, qk_route::none,
+                                  v_route::none};
+
+  layer::action::effect_prepare_scalar<
+      emel::text::generator::detail::window_mode::resident>{}(scalar);
+  CHECK(scalar.stream_ready);
+  CHECK(error == emel::text::generator::detail::k_error_ok);
+
+  layer::action::effect_normalize_scalar{}(scalar);
+  layer::action::effect_normalize_chunk4{}(chunk4);
+  layer::action::effect_normalize_chunk8{}(chunk8);
+  CHECK(error == emel::text::generator::detail::k_error_invalid);
+  CHECK(scalar.normalized_ok);
+  CHECK(chunk4.normalized_ok);
+  CHECK(chunk8.normalized_ok);
+  CHECK(backend.norm[0] == doctest::Approx(2.0f));
+  for (const float value : backend.norm_chunk4) {
+    CHECK(value == doctest::Approx(2.0f));
+  }
+  for (const float value : backend.norm_chunk8) {
+    CHECK(value == doctest::Approx(2.0f));
+  }
+
+  backend.blocks[0].attention_norm.clear();
+  backend.norm = {11.0f};
+  backend.norm_chunk4.assign(4u, 12.0f);
+  backend.norm_chunk8.assign(8u, 13.0f);
+  scalar.normalized_ok = true;
+  chunk4.normalized_ok = true;
+  chunk8.normalized_ok = true;
+  layer::action::effect_normalize_scalar{}(scalar);
+  layer::action::effect_normalize_chunk4{}(chunk4);
+  layer::action::effect_normalize_chunk8{}(chunk8);
+  CHECK_FALSE(scalar.normalized_ok);
+  CHECK_FALSE(chunk4.normalized_ok);
+  CHECK_FALSE(chunk8.normalized_ok);
+  CHECK(backend.norm[0] == 11.0f);
+  CHECK(std::all_of(backend.norm_chunk4.begin(), backend.norm_chunk4.end(),
+                    [](const float value) { return value == 12.0f; }));
+  CHECK(std::all_of(backend.norm_chunk8.begin(), backend.norm_chunk8.end(),
+                    [](const float value) { return value == 13.0f; }));
+
+  layer::action::effect_reject_unsupported_route(scalar);
+  layer::action::effect_reject_unsupported_route(chunk4);
+  layer::action::effect_reject_unsupported_route(chunk8);
+  CHECK(scalar.failed);
+  CHECK(chunk4.failed);
+  CHECK(chunk8.failed);
+  layer::action::effect_mark_succeeded(scalar);
+  layer::action::effect_mark_succeeded(chunk4);
+  layer::action::effect_mark_succeeded(chunk8);
+  CHECK(scalar.succeeded);
+  CHECK(chunk4.succeeded);
+  CHECK(chunk8.succeeded);
+  CHECK_FALSE(scalar.failed);
+  CHECK_FALSE(chunk4.failed);
+  CHECK_FALSE(chunk8.failed);
+  layer::action::effect_mark_failed(scalar);
+  layer::action::effect_mark_failed(chunk4);
+  layer::action::effect_mark_failed(chunk8);
+  CHECK_FALSE(scalar.succeeded);
+  CHECK_FALSE(chunk4.succeeded);
+  CHECK_FALSE(chunk8.succeeded);
+  CHECK(scalar.failed);
+  CHECK(chunk4.failed);
+  CHECK(chunk8.failed);
+  layer::action::effect_on_unexpected(17);
+  CHECK(scalar.failed);
+}
+
+TEST_CASE("generator streamed layer preparation reports acquisition failure without writes") {
+  namespace layer = emel::text::generator::layer;
+  emel::model::tensor::window::sm window{};
+  emel::text::generator::detail::native_backend backend{};
+  backend.stream.window = &window;
+  const auto kv = emel::text::generator::detail::identity_kv_addressing();
+  int32_t error = emel::text::generator::detail::k_error_ok;
+  layer::event::scalar_run scalar{
+      backend, kv, 0, 0, layer::event::residual_route::attention,
+      layer::event::attention_qk_norm_route::none,
+      layer::event::attention_v_norm_route::none, error};
+
+  layer::action::effect_prepare_scalar<
+      emel::text::generator::detail::window_mode::streamed>{}(scalar);
+
+  CHECK_FALSE(scalar.stream_ready);
+  CHECK(error == emel::text::generator::detail::k_error_stream_acquire);
+  CHECK(backend.blocks.empty());
+  CHECK(backend.hidden.empty());
+}
+
+TEST_CASE("generator layer actors reject malformed work and return to idle") {
+  namespace layer = emel::text::generator::layer;
+  using attention_mode = emel::text::generator::attention_mode;
+  using chunk4_route = emel::text::generator::detail::chunk4_rhs_route;
+  using lane_mode = emel::kernel::matmul::lane_mode;
+  using scalar_route = emel::text::generator::detail::scalar_matmul_route;
+  using window_mode = emel::text::generator::detail::window_mode;
+
+  emel::text::generator::detail::native_backend backend{};
+  backend.n_embd = 1;
+  backend.blocks.resize(1u);
+  backend.blocks[0].attention_norm = {1.0f};
+  backend.hidden = {1.0f};
+  backend.norm = {0.0f};
+  backend.hidden_chunk4.assign(4u, 1.0f);
+  backend.norm_chunk4.assign(4u, 0.0f);
+  backend.hidden_chunk8.assign(8u, 1.0f);
+  backend.norm_chunk8.assign(8u, 0.0f);
+  const auto kv = emel::text::generator::detail::identity_kv_addressing();
+
+  int32_t error = 0;
+  layer::event::scalar_run scalar{
+      backend, kv, 0, 0, layer::event::residual_route::attention,
+      layer::event::attention_qk_norm_route::none,
+      layer::event::attention_v_norm_route::none, error};
+  layer::scalar_actor<attention_mode::nonflash, scalar_route::kernel,
+                      lane_mode::serial, window_mode::resident>
+      scalar_actor{};
+  CHECK(scalar_actor.process_event(scalar));
+  CHECK(scalar.failed);
+  CHECK_FALSE(scalar.succeeded);
+  CHECK(scalar_actor.machine.is(stateforward::sml::state<layer::state_idle>));
+
+  layer::event::chunk4_run chunk4{
+      backend, kv, 0, 0, layer::event::residual_route::attention,
+      layer::event::attention_qk_norm_route::none,
+      layer::event::attention_v_norm_route::none};
+  layer::chunk4_actor<attention_mode::nonflash, chunk4_route::q8_k,
+                      lane_mode::serial>
+      chunk4_actor{};
+  CHECK(chunk4_actor.process_event(chunk4));
+  CHECK(chunk4.failed);
+  CHECK_FALSE(chunk4.succeeded);
+  CHECK(chunk4_actor.machine.is(stateforward::sml::state<layer::state_idle>));
+
+  layer::event::chunk8_run chunk8{
+      backend, kv, 0, 0, layer::event::residual_route::attention,
+      layer::event::attention_qk_norm_route::none,
+      layer::event::attention_v_norm_route::none};
+  layer::chunk8_actor<attention_mode::nonflash, lane_mode::serial>
+      chunk8_actor{};
+  CHECK(chunk8_actor.process_event(chunk8));
+  CHECK(chunk8.failed);
+  CHECK_FALSE(chunk8.succeeded);
+  CHECK(chunk8_actor.machine.is(stateforward::sml::state<layer::state_idle>));
+
+  struct unrelated_event {};
+  CHECK(scalar_actor.machine.process_event(unrelated_event{}));
+  CHECK(chunk4_actor.machine.process_event(unrelated_event{}));
+  CHECK(chunk8_actor.machine.process_event(unrelated_event{}));
+  CHECK(scalar_actor.machine.is(stateforward::sml::state<layer::state_idle>));
+  CHECK(chunk4_actor.machine.is(stateforward::sml::state<layer::state_idle>));
+  CHECK(chunk8_actor.machine.is(stateforward::sml::state<layer::state_idle>));
+}
+
+TEST_CASE("generator layer action wrappers reject malformed residual and feed-forward inputs") {
+  namespace layer = emel::text::generator::layer;
+  using attention_mode = emel::text::generator::attention_mode;
+  using chunk4_route = emel::text::generator::detail::chunk4_rhs_route;
+  using lane_mode = emel::kernel::matmul::lane_mode;
+  using scalar_route = emel::text::generator::detail::scalar_matmul_route;
+
+  emel::text::generator::detail::native_backend backend{};
+  backend.blocks.resize(1u);
+  const auto kv = emel::text::generator::detail::identity_kv_addressing();
+  int32_t error = 0;
+  layer::event::scalar_run scalar{
+      backend, kv, 0, 0, layer::event::residual_route::attention,
+      layer::event::attention_qk_norm_route::none,
+      layer::event::attention_v_norm_route::none, error};
+  layer::event::chunk4_run chunk4{
+      backend, kv, 0, 0, layer::event::residual_route::attention,
+      layer::event::attention_qk_norm_route::none,
+      layer::event::attention_v_norm_route::none};
+  layer::event::chunk8_run chunk8{
+      backend, kv, 0, 0, layer::event::residual_route::attention,
+      layer::event::attention_qk_norm_route::none,
+      layer::event::attention_v_norm_route::none};
+
+  layer::action::effect_run_scalar_attention<
+      attention_mode::nonflash, scalar_route::kernel,
+      layer::event::attention_qk_norm_route::none,
+      layer::event::attention_v_norm_route::none, lane_mode::serial>{}(scalar);
+  layer::action::effect_run_scalar_shortconv<scalar_route::kernel,
+                                             lane_mode::serial>{}(scalar);
+  layer::action::effect_run_scalar_feed_forward<scalar_route::kernel,
+                                                lane_mode::serial>{}(scalar);
+  CHECK_FALSE(scalar.residual_ok);
+  CHECK_FALSE(scalar.feed_forward_ok);
+
+  layer::action::effect_run_chunk4_attention<
+      attention_mode::nonflash, chunk4_route::q8_k,
+      layer::event::attention_qk_norm_route::none,
+      layer::event::attention_v_norm_route::none, lane_mode::serial>{}(chunk4);
+  layer::action::effect_run_chunk4_shortconv<chunk4_route::q8_k,
+                                             lane_mode::serial>{}(chunk4);
+  layer::action::effect_run_chunk4_feed_forward<chunk4_route::q8_k,
+                                                lane_mode::serial>{}(chunk4);
+  CHECK_FALSE(chunk4.residual_ok);
+  CHECK_FALSE(chunk4.feed_forward_ok);
+
+  layer::action::effect_run_chunk8_attention<
+      attention_mode::nonflash,
+      layer::event::attention_qk_norm_route::none,
+      layer::event::attention_v_norm_route::none, lane_mode::serial>{}(chunk8);
+  layer::action::effect_run_chunk8_shortconv<lane_mode::serial>{}(chunk8);
+  layer::action::effect_run_chunk8_feed_forward<lane_mode::serial>{}(chunk8);
+  CHECK_FALSE(chunk8.residual_ok);
+  CHECK_FALSE(chunk8.feed_forward_ok);
 }
