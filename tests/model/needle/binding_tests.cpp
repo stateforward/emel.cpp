@@ -454,3 +454,147 @@ TEST_CASE("needle binder allows re-binding after an error") {
   CHECK(state.done_count == 1u);
   check_needle_binder_state_bound(machine);
 }
+
+TEST_CASE("needle binder rejects geometry capacity and engram inconsistencies") {
+  const std::vector<uint8_t> file_bytes = read_file_bytes(fixture_model_path());
+  emel::cact::loader::geometry geometry = {};
+  std::vector<emel::cact::loader::tensor_view> tensors;
+  load_fixture_tensors(file_bytes, geometry, tensors);
+
+  const auto check_geometry_error = [&](const emel::cact::loader::geometry &bad) {
+    emel::model::needle::sm machine{};
+    binder_state state = {};
+    binder_scope scope{state};
+    emel::model::needle::contract contract = {};
+    const emel::model::needle::event::bind bind{
+        bad, std::span<const emel::cact::loader::tensor_view>{tensors}, contract,
+        k_bind_done_cb, k_bind_error_cb};
+    CHECK_FALSE(machine.process_event(bind));
+    CHECK(state.done_count == 0u);
+    CHECK(state.error_count == 1u);
+    CHECK(state.err ==
+          emel::error::cast(emel::model::needle::error::geometry_invalid));
+    CHECK(contract.layer_count == 0u);
+  };
+
+  SUBCASE("too many layers") {
+    auto bad = geometry;
+    bad.num_layers = emel::model::needle::k_max_layers + 1u;
+    check_geometry_error(bad);
+  }
+  SUBCASE("too many engram sites") {
+    auto bad = geometry;
+    bad.num_engram_sites = emel::model::needle::k_max_engram_sites + 1u;
+    check_geometry_error(bad);
+  }
+  SUBCASE("engram geometry requires nonzero storage dimensions") {
+    auto bad = geometry;
+    bad.engram_slots = 0u;
+    check_geometry_error(bad);
+  }
+}
+
+TEST_CASE("needle binder classifies failures in later positional sections") {
+  const std::vector<uint8_t> file_bytes = read_file_bytes(fixture_model_path());
+  emel::cact::loader::geometry geometry = {};
+  std::vector<emel::cact::loader::tensor_view> tensors;
+  load_fixture_tensors(file_bytes, geometry, tensors);
+  const size_t mhc_base =
+      1u + static_cast<size_t>(geometry.num_layers) *
+               emel::model::needle::k_layer_tensor_count;
+  const size_t engram_base = mhc_base + emel::model::needle::k_mhc_tensor_count;
+  const size_t final_norm_index =
+      engram_base + static_cast<size_t>(geometry.num_engram_sites) *
+                        emel::model::needle::k_engram_site_tensor_count;
+  const size_t manifest_index = final_norm_index + 1u;
+
+  const auto check_bind_error = [&](std::vector<emel::cact::loader::tensor_view> bad,
+                                    const emel::model::needle::error expected) {
+    emel::model::needle::sm machine{};
+    binder_state state = {};
+    binder_scope scope{state};
+    emel::model::needle::contract contract = {};
+    const emel::model::needle::event::bind bind{
+        geometry, std::span<const emel::cact::loader::tensor_view>{bad},
+        contract, k_bind_done_cb, k_bind_error_cb};
+    CHECK_FALSE(machine.process_event(bind));
+    CHECK(state.done_count == 0u);
+    CHECK(state.error_count == 1u);
+    CHECK(state.err == emel::error::cast(expected));
+    CHECK(machine.is(
+        stateforward::sml::state<emel::model::needle::state_errored>));
+  };
+
+  SUBCASE("mHC shape mismatch") {
+    auto bad = tensors;
+    bad[mhc_base].ndim = 2u;
+    check_bind_error(std::move(bad),
+                     emel::model::needle::error::tensor_shape_mismatch);
+  }
+  SUBCASE("engram shape mismatch") {
+    auto bad = tensors;
+    bad[engram_base].shape[0] += 1u;
+    check_bind_error(std::move(bad),
+                     emel::model::needle::error::tensor_shape_mismatch);
+  }
+  SUBCASE("final norm dtype mismatch") {
+    auto bad = tensors;
+    bad[final_norm_index].dtype = emel::cact::loader::constants::dtype_cq;
+    check_bind_error(std::move(bad),
+                     emel::model::needle::error::tensor_dtype_mismatch);
+  }
+  SUBCASE("manifest payload is required") {
+    auto bad = tensors;
+    bad[manifest_index].data = nullptr;
+    check_bind_error(std::move(bad),
+                     emel::model::needle::error::head_manifest_invalid);
+  }
+  SUBCASE("probe rows must be nonzero") {
+    auto bad = tensors;
+    bad[manifest_index + 1u].shape[0] = 0u;
+    check_bind_error(std::move(bad),
+                     emel::model::needle::error::tensor_shape_mismatch);
+  }
+  SUBCASE("projection rows must be nonzero") {
+    auto bad = tensors;
+    bad[manifest_index + 2u].shape[0] = 0u;
+    check_bind_error(std::move(bad),
+                     emel::model::needle::error::tensor_shape_mismatch);
+  }
+  SUBCASE("bias shape follows projection rows") {
+    auto bad = tensors;
+    bad[manifest_index + 3u].shape[0] += 1u;
+    check_bind_error(std::move(bad),
+                     emel::model::needle::error::tensor_shape_mismatch);
+  }
+}
+
+TEST_CASE("needle binder accepts the base contract without heads or tokenizer") {
+  const std::vector<uint8_t> file_bytes = read_file_bytes(fixture_model_path());
+  emel::cact::loader::geometry geometry = {};
+  std::vector<emel::cact::loader::tensor_view> tensors;
+  load_fixture_tensors(file_bytes, geometry, tensors);
+  const size_t base_count =
+      1u + static_cast<size_t>(geometry.num_layers) *
+               emel::model::needle::k_layer_tensor_count +
+      emel::model::needle::k_mhc_tensor_count +
+      static_cast<size_t>(geometry.num_engram_sites) *
+          emel::model::needle::k_engram_site_tensor_count +
+      1u;
+  tensors.resize(base_count);
+  geometry.num_tensors = static_cast<uint32_t>(tensors.size());
+
+  emel::model::needle::sm machine{};
+  binder_state state = {};
+  binder_scope scope{state};
+  emel::model::needle::contract contract = {};
+  const emel::model::needle::event::bind bind{
+      geometry, std::span<const emel::cact::loader::tensor_view>{tensors},
+      contract, k_bind_done_cb, k_bind_error_cb};
+  REQUIRE(machine.process_event(bind));
+  CHECK(state.done_count == 1u);
+  CHECK(state.error_count == 0u);
+  CHECK(contract.head_count == 0u);
+  CHECK_FALSE(contract.has_tokenizer);
+  check_needle_binder_state_bound(machine);
+}
