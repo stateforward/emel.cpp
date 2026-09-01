@@ -619,6 +619,45 @@ TEST_CASE("speech_generator_synthesizes_with_model_neutral_actor_composition") {
   CHECK(err == generator::action::error_code(generator::error::none));
 }
 
+TEST_CASE("speech_generator_synthesis_reports_validation_and_lifecycle_errors") {
+  auto test = std::make_unique<synthesis_fixture>();
+  callback_probe probe{};
+  emel::error::type err = -1;
+  generator::event::initialize initialize{err};
+  initialize.on_done = decltype(initialize.on_done)::from<
+      callback_probe, &callback_probe::initialize_done>(&probe);
+
+  REQUIRE(test->machine.process_event(initialize));
+  CHECK(probe.done_calls == 1);
+  CHECK(err == generator::action::error_code(generator::error::none));
+
+  std::array<float, 2> pcm_out{};
+  int32_t sample_count = 17;
+  generator::event::generate invalid{"", std::span<float>{pcm_out},
+                                     sample_count, err};
+  invalid.on_error = decltype(invalid.on_error)::from<
+      callback_probe, &callback_probe::generation_error>(&probe);
+  CHECK_FALSE(test->machine.process_event(invalid));
+  CHECK(sample_count == 0);
+  CHECK(err ==
+        generator::action::error_code(generator::error::invalid_request));
+  CHECK(probe.error_calls == 1);
+  CHECK(probe.last_error == err);
+  CHECK(test->conditioner.stage_calls == 0);
+  CHECK(test->machine.is(sml::state<generator::state_ready>));
+
+  CHECK_FALSE(test->machine.process_event(generator::event::reset{err}));
+  CHECK(err ==
+        generator::action::error_code(generator::error::unsupported_request));
+
+  auto duplicate = std::make_unique<synthesis_fixture>();
+  REQUIRE(duplicate->machine.process_event(generator::event::initialize{err}));
+  CHECK_FALSE(
+      duplicate->machine.process_event(generator::event::initialize{err}));
+  CHECK(err == generator::action::error_code(generator::error::internal_error));
+  CHECK(duplicate->machine.is(sml::state<generator::state_errored>));
+}
+
 TEST_CASE("speech_generator_reports_initialize_outcomes_through_callbacks") {
   SUBCASE("success") {
     auto test = std::make_unique<fixture>();

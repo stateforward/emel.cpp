@@ -2585,6 +2585,163 @@ TEST_CASE("speech_moshi_executor_generates_audio_tokens_with_injected_kv") {
                     [](const uint16_t value) { return value != 0u; }));
 }
 
+TEST_CASE("speech_moshi_tokenizer_snapshot_preserves_cache_layout_and_offset") {
+  emel::memory::hybrid::sm memory{};
+  moshi::action::context ctx{memory};
+  auto model = std::make_unique<emel::model::data>();
+  ctx.session.model = model.get();
+  ctx.lmgen.codebook_count = 3;
+  ctx.lmgen.cache_row_count = 2;
+  ctx.lmgen.offset = 19;
+  moshi::detail::cache_at(ctx.lmgen, 0, 0) = 10;
+  moshi::detail::cache_at(ctx.lmgen, 1, 0) = 11;
+  moshi::detail::cache_at(ctx.lmgen, 0, 1) = 20;
+  moshi::detail::cache_at(ctx.lmgen, 1, 1) = 21;
+  moshi::detail::cache_at(ctx.lmgen, 0, 2) = 30;
+  moshi::detail::cache_at(ctx.lmgen, 1, 2) = 31;
+
+  std::array<int32_t, 6> cache{};
+  int64_t offset = -1;
+  emel::error::type err = emel::error::cast(moshi::error::request_shape);
+  moshi::event::capture_tokenizer_state capture{cache, offset, err};
+  CHECK(moshi::guard::guard_capture_tokenizer_state_valid{}(capture, ctx));
+  CHECK_FALSE(
+      moshi::guard::guard_capture_tokenizer_state_invalid{}(capture, ctx));
+  moshi::action::effect_capture_tokenizer_state{}(capture, ctx);
+  CHECK(cache == std::array<int32_t, 6>{10, 11, 20, 21, 30, 31});
+  CHECK(offset == 19);
+  CHECK(err == k_no_error);
+
+  std::array<int32_t, 5> short_cache{};
+  offset = 7;
+  moshi::event::capture_tokenizer_state invalid{short_cache, offset, err};
+  CHECK(moshi::guard::guard_capture_tokenizer_state_invalid{}(invalid, ctx));
+  moshi::action::effect_reject_capture_tokenizer_state<
+      moshi::error::request_shape>{}(invalid, ctx);
+  CHECK(offset == 0);
+  CHECK(err == emel::error::cast(moshi::error::request_shape));
+}
+
+TEST_CASE("speech_moshi_request_and_reset_guards_are_complementary") {
+  emel::memory::hybrid::sm memory{};
+  moshi::action::context ctx{memory};
+  emel::model::data model{};
+  ctx.session.model = &model;
+  ctx.lmgen.codebook_count = 3;
+  ctx.lmgen.generated_dep_q = 2;
+
+  moshi::event::predict::workspace workspace{};
+  std::array<int32_t, 3> tokens{};
+  moshi::event::execute execute{workspace, tokens};
+  moshi::event::execute_ctx execute_ctx{};
+  moshi::event::execute_run execute_run{execute, execute_ctx};
+  CHECK(moshi::guard::guard_execute_request_valid{}(execute_run, ctx));
+  CHECK_FALSE(moshi::guard::guard_execute_request_invalid{}(execute_run, ctx));
+  execute.model_tokens = std::span<const int32_t>{tokens}.first(2);
+  CHECK(moshi::guard::guard_execute_request_invalid{}(execute_run, ctx));
+
+  std::array<int32_t, 2> audio_tokens{};
+  int32_t text_token = -1;
+  moshi::event::sample sample{workspace, tokens, audio_tokens, text_token};
+  moshi::event::sample_ctx sample_ctx{};
+  moshi::event::sample_run sample_run{sample, sample_ctx};
+  CHECK(moshi::guard::guard_sample_request_valid{}(sample_run, ctx));
+  sample.audio_tokens_out = std::span<int32_t>{audio_tokens}.first(1);
+  CHECK(moshi::guard::guard_sample_request_invalid{}(sample_run, ctx));
+
+  moshi::event::reset reset{};
+  moshi::event::reset_run::context reset_ctx{};
+  moshi::event::reset_run reset_run{reset, reset_ctx};
+  CHECK(moshi::guard::guard_reset_graph_failed{}(reset_run, ctx));
+  moshi::action::effect_mark_reset_graph_failed{}(reset_run, ctx);
+  CHECK(reset_ctx.err == emel::error::cast(moshi::error::graph_runtime));
+  reset_ctx.graph_accepted = true;
+  CHECK(moshi::guard::guard_reset_graph_succeeded{}(reset_run, ctx));
+  CHECK(moshi::guard::guard_reset_memory_failed{}(reset_run, ctx));
+  moshi::action::effect_mark_reset_memory_failed{}(reset_run, ctx);
+  CHECK(reset_ctx.err == emel::error::cast(moshi::error::memory));
+  reset_ctx.memory_accepted = true;
+  reset_ctx.memory_error = static_cast<int32_t>(
+      emel::error::cast(emel::memory::hybrid::error::none));
+  CHECK(moshi::guard::guard_reset_memory_succeeded{}(reset_run, ctx));
+  moshi::action::effect_reset_session{}(reset_run, ctx);
+  CHECK(ctx.session.model == nullptr);
+  CHECK(ctx.lmgen.codebook_count == 0);
+}
+
+TEST_CASE("speech_moshi_executor_sampling_guards_validate_public_policy") {
+  emel::kernel::sm kernel{};
+  serial_matmul_fixture matmul{};
+  emel::logits::sampler::sm sampler{};
+  moshi_executor::action::context ctx{
+      make_executor_dependencies(kernel, matmul.actor, {}, &sampler)};
+  ctx.session.text_card = 8;
+  ctx.session.audio_card = 16;
+  ctx.sampling.enabled = true;
+  ctx.sampling.consume_forced_text = true;
+  ctx.sampling.text_temperature = 0.8f;
+  ctx.sampling.audio_temperature = 0.7f;
+  ctx.sampling.text_top_k = 4;
+  ctx.sampling.audio_top_k = 5;
+
+  auto model = std::make_unique<emel::model::data>();
+  model->moshi_lm.text_card = 8;
+  model->moshi_lm.card = 16;
+  model->moshi_lm.dep_q = 3;
+  model->moshi_lm.depformer_weight_schedule_count = 3;
+  model->moshi_lm.depformer_weight_schedule[0] = 2;
+  model->moshi_lm.depformer_weight_schedule[1] = 1;
+  model->moshi_lm.depformer_weight_schedule[2] = 0;
+  emel::memory::view::snapshot snapshot{};
+  std::array<int32_t, 4> input{};
+  std::array<int32_t, 3> output{};
+  int32_t text_token = -1;
+  moshi::event::graph_step step{*model, snapshot, input, output, text_token};
+  auto step_ctx = std::make_unique<moshi_executor::event::step_ctx>();
+  moshi_executor::event::step_run run{step, *step_ctx};
+
+  step_ctx->projection_view_bound = true;
+  CHECK(moshi_executor::guard::guard_text_sampling_config_valid{}(run, ctx));
+  CHECK(moshi_executor::guard::
+            guard_text_logits_projection_bound_and_no_forced_token_sampling{}(
+                run, ctx));
+  step_ctx->sampler_accepted = true;
+  step_ctx->sampler_error =
+      emel::error::cast(emel::logits::sampler::error::none);
+  CHECK(moshi_executor::guard::guard_sampled_text_token_ready{}(run, ctx));
+  step.forced_text_token = 3;
+  CHECK(moshi_executor::guard::guard_forced_text_sampling_consumed{}(run,
+                                                                     ctx));
+  ctx.sampling.text_top_k = 0;
+  CHECK(moshi_executor::guard::guard_text_sampling_config_invalid{}(run, ctx));
+  CHECK(moshi_executor::guard::guard_forced_text_sampling_config_invalid{}(
+      run, ctx));
+
+  ctx.sampling.text_top_k = 4;
+  CHECK(moshi_executor::guard::guard_depformer_sampling_config_valid{}(run,
+                                                                       ctx));
+  CHECK(moshi_executor::guard::guard_depformer_logits_projection_bound_sampling{}(
+      run, ctx));
+  ctx.sampling.audio_top_k = 0;
+  CHECK(moshi_executor::guard::guard_depformer_sampling_config_invalid{}(run,
+                                                                         ctx));
+  CHECK(moshi_executor::guard::
+            guard_depformer_logits_projection_bound_sampling_invalid{}(run,
+                                                                         ctx));
+
+  step_ctx->depformer_codebook_index = 1;
+  CHECK(moshi_executor::guard::guard_depformer_scheduled_weight_present{}(run,
+                                                                          ctx));
+  moshi_executor::action::effect_use_depformer_scheduled_weight{}(run, ctx);
+  CHECK(step_ctx->depformer_weight_index == 1);
+  step_ctx->best_index = 7;
+  moshi_executor::action::effect_publish_depformer_token{}(run, ctx);
+  CHECK(output[1] == 7);
+  step_ctx->depformer_codebook_index = 3;
+  CHECK(moshi_executor::guard::guard_depformer_scheduled_weight_invalid{}(run,
+                                                                          ctx));
+}
+
 TEST_CASE(
     "speech_moshi_executor_guards_reject_invalid_outputs_and_cache_metadata") {
   auto fixture = load_fixture_or_skip("moshi-tiny-lm.gguf");
