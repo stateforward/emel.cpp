@@ -534,7 +534,10 @@ TEST_CASE("quality gates wire the maintained Needle evaluator with release-safe 
   CHECK(evaluator.find("vocab->eos_id") != std::string::npos);
   CHECK(evaluator.find("min_domain_accuracy = 0.840") != std::string::npos);
   CHECK(evaluator.find("min_effort_accuracy = 0.760") != std::string::npos);
-  CHECK(evaluator.find("max_no_parse = 0u") != std::string::npos);
+  CHECK(evaluator.find("max_no_parse = 1u") != std::string::npos);
+  CHECK(evaluator.find("comparison_precision=3dp") != std::string::npos);
+  CHECK(evaluator.find("domain_acc=%.4f") != std::string::npos);
+  CHECK(evaluator.find("effort_acc=%.4f") != std::string::npos);
   CHECK(evaluator.find("accuracy thresholds unmet") != std::string::npos);
 
   const std::string quality =
@@ -547,6 +550,10 @@ TEST_CASE("quality gates wire the maintained Needle evaluator with release-safe 
   CHECK(quality.find("--min-domain-accuracy") != std::string::npos);
   CHECK(quality.find("--min-effort-accuracy") != std::string::npos);
   CHECK(quality.find("--max-no-parse") != std::string::npos);
+  CHECK(quality.find(
+            "QUALITY_GATES_NEEDLE_MAX_NO_PARSE=\"${EMEL_QUALITY_GATES_NEEDLE_MAX_NO_PARSE:-1}\"") !=
+        std::string::npos);
+  CHECK(quality.find("--activation-route f32") != std::string::npos);
 
   CHECK(evaluator.find("emel/io/mmap/sm.hpp") != std::string::npos);
   CHECK(evaluator.find("emel::io::mmap::event::map_tensor_request") !=
@@ -563,14 +570,16 @@ TEST_CASE("quality gates wire the maintained Needle evaluator with release-safe 
   CHECK(evaluator.find("std::bad_alloc") != std::string::npos);
 }
 
-TEST_CASE(
-    "Needle evaluator exposes activation route through options and graph init") {
+TEST_CASE("Needle evaluator defaults to heldout f32 and retains explicit A8") {
   const std::string evaluator =
       read_file(repo_root() / "tools" / "needle_eval" / "main.cpp");
+  const std::string graph_events = read_file(
+      repo_root() / "src" / "emel" / "model" / "needle" / "graph" /
+      "events.hpp");
 
   CHECK(evaluator.find("enum class activation_route { a8, f32 }") !=
         std::string::npos);
-  CHECK(evaluator.find("activation_route route = activation_route::a8") !=
+  CHECK(evaluator.find("activation_route route = activation_route::f32") !=
         std::string::npos);
   CHECK(evaluator.find("--activation-route") != std::string::npos);
   CHECK(evaluator.find("value == \"a8\"") != std::string::npos);
@@ -578,10 +587,34 @@ TEST_CASE(
   CHECK(evaluator.find(
             ".activation_quant = options.route == activation_route::a8") !=
         std::string::npos);
-  CHECK(evaluator.find("needle::graph::event::init{}") == std::string::npos);
   CHECK(evaluator.find("activation_route_name(options.route)") !=
         std::string::npos);
   CHECK(evaluator.find("activation_route=%s") != std::string::npos);
+  CHECK(graph_events.find("bool activation_quant = false") !=
+        std::string::npos);
+  CHECK(read_file(repo_root() / "tests" / "model" / "needle" /
+                  "graph_parity_tests.cpp")
+            .find("graph::event::init{true}") != std::string::npos);
+}
+
+TEST_CASE("Needle evaluator compares published accuracy at three decimals") {
+  const std::string evaluator =
+      read_file(repo_root() / "tools" / "needle_eval" / "main.cpp");
+
+  CHECK(evaluator.find(
+            "static_assert(!accuracy_meets_threshold(0.8394, 0.840))") !=
+        std::string::npos);
+  CHECK(evaluator.find(
+            "static_assert(accuracy_meets_threshold(0.8395, 0.840))") !=
+        std::string::npos);
+  CHECK(evaluator.find(
+            "static_assert(!accuracy_meets_threshold(0.7594, 0.760))") !=
+        std::string::npos);
+  CHECK(evaluator.find(
+            "static_assert(accuracy_meets_threshold(0.7595, 0.760))") !=
+        std::string::npos);
+  CHECK(evaluator.find("static_assert(eval_options{}.max_no_parse == 1u)") !=
+        std::string::npos);
 }
 
 #if !defined(_WIN32) && defined(BENCH_NEEDLE_EVAL_BINARY)

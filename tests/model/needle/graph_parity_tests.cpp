@@ -17,9 +17,9 @@
 
 namespace {
 
-// Committed W4/f32 parity fixture (route-w4-qat.logits.json): 3 cases, each
-// 1 prefill + 2 greedy decode steps. W4A8 deployment parity is covered by the
-// separate route-w4-qat-a8 fixture test below.
+// Committed CQ4-weight/f32-activation fixture (route-w4-qat.logits.json): 3
+// cases, each 1 prefill + 2 greedy decode steps. The explicit A8 training
+// parity route is covered by the separate route-w4-qat-a8 fixture test below.
 constexpr uint32_t k_vocab = 8192u;
 constexpr uint32_t k_steps = 3u;
 
@@ -165,8 +165,8 @@ uint64_t fake_timestamp_now() noexcept {
   return g_timing_clock;
 }
 
-TEST_CASE("needle graph matches the committed JAX logits fixture on all "
-          "cases") {
+TEST_CASE("needle graph default f32 route matches the committed JAX logits "
+          "fixture on all cases") {
   // Load the pinned .cact through the maintained loader chain.
   const auto model_path = std::filesystem::path{EMEL_TEST_REPO_ROOT} /
                           "tests/models/route-w4-qat.cact";
@@ -199,9 +199,8 @@ TEST_CASE("needle graph matches the committed JAX logits fixture on all "
   double worst_rel = 0.0;
 
   for (const auto &parity : k_cases) {
-    // Re-init between cases: clears KV caches, lanes, and history.
-    REQUIRE(graph.process_event(
-        emel::model::needle::graph::event::init{.activation_quant = false}));
+    // Default init is the authoritative heldout CQ4/f32 generation route.
+    REQUIRE(graph.process_event(emel::model::needle::graph::event::init{}));
 
     const auto reference = read_reference_logits(parity.file);
     std::array<int32_t, k_steps> greedy = {};
@@ -239,7 +238,7 @@ TEST_CASE("needle graph matches the committed JAX logits fixture on all "
   CHECK(gqa2_calls > 0u);
 #endif
 }
-TEST_CASE("needle graph W4A8 deployment route matches authoritative JAX "
+TEST_CASE("needle graph explicit A8 training route matches authoritative JAX "
           "fixture") {
   const auto model_path = std::filesystem::path{EMEL_TEST_REPO_ROOT} /
                           "tests/models/route-w4-qat.cact";
@@ -266,7 +265,7 @@ TEST_CASE("needle graph W4A8 deployment route matches authoritative JAX "
   double worst_abs = 0.0;
   double worst_rel = 0.0;
   for (const auto &parity : k_a8_cases) {
-    REQUIRE(graph.process_event(emel::model::needle::graph::event::init{}));
+    REQUIRE(graph.process_event(emel::model::needle::graph::event::init{true}));
     const auto reference = read_reference_logits(parity.file);
     std::array<int32_t, k_steps> greedy = {};
     REQUIRE(graph.process_event(emel::model::needle::graph::event::prefill{
@@ -285,7 +284,7 @@ TEST_CASE("needle graph W4A8 deployment route matches authoritative JAX "
               " argmax=", greedy[step]);
       // The native graph keeps exact CQ operands and greedy identity. Its
       // scalar stage ordering differs from XLA, so use the generated fixture's
-      // observed 1.5e-2 relative envelope rather than the legacy f32 1e-3.
+      // observed 1.5e-2 envelope rather than the f32 route's 1e-3.
       CHECK(err.rel <= 1.5e-2);
       CHECK(greedy[step] == parity.greedy[step]);
       if (step + 1u < k_steps) {

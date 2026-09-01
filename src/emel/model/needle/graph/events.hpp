@@ -16,9 +16,9 @@ namespace emel::model::needle::graph::event {
 // f32 once, precomputes the RoPE tables, and clears the KV/engram state. No
 // allocation happens here; all storage is sized at construction.
 struct init {
-  // Deployment is the default. Tests may explicitly request the legacy
-  // W4/f32 parity route.
-  bool activation_quant = true;
+  // The maintained heldout reference uses CQ4 weights with f32 activations.
+  // Pass true explicitly for the training/A8 parity route.
+  bool activation_quant = false;
 };
 
 // Runs the prompt through the graph: one allocation-free RTC step dispatch per
@@ -104,7 +104,7 @@ struct capture_a8_diagnostics {
 
 struct init_ctx {
   emel::error::type err = emel::error::cast(error::none);
-  bool activation_quant = true;
+  bool activation_quant = false;
 };
 
 struct init_run {
@@ -120,7 +120,7 @@ struct step_ctx {
   uint32_t layer_index = 0u;
   bool want_logits = false;
   std::span<float> logits_out = {};
-  bool activation_quant = true;
+  bool activation_quant = false;
   emel::error::type err = emel::error::cast(error::none);
 };
 

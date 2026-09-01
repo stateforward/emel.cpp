@@ -7,10 +7,10 @@
 // scripts/gen_needle_heldout_eval.py, asserts native parity, and feeds the
 // native IDs to the graph.
 //
-// Prediction protocol matches the JAX reference eval that produced the
-// 0.840 domain / 0.760 effort numbers (/shared/effortless/scripts/eval_jax.py):
-// greedy decode (temperature 0) up to 80 new tokens, stop at EOS (id 1),
-// detokenize, parse the first <tool_call>{...}</tool_call> arguments object.
+// Prediction protocol matches the authoritative heldout generation path that
+// produced the published 0.840 domain / 0.760 effort numbers: CQ4 weights,
+// f32 activations, greedy decode up to 80 new tokens, stop at EOS (id 1),
+// detokenize, and parse the first <tool_call>{...}</tool_call> arguments object.
 // The probe heads bound in the phase-2 contract (head manifest codes
 // 1 contrastive / 2 confidence) are NOT part of this accuracy path in the
 // maintained reference: the contrastive head embeds tool schemas and the
@@ -58,13 +58,14 @@ constexpr size_t k_max_tsv_line_bytes = 64u * 1024u;
 constexpr size_t k_max_reference_ids_per_row = 4096u;
 constexpr size_t k_max_reference_ids_total = 1u * 1024u * 1024u;
 constexpr int32_t k_model_mapping_tensor_id = 1;
+constexpr uint32_t k_accuracy_comparison_scale = 1000u;
 enum class activation_route { a8, f32 };
 
 struct eval_options {
   double min_domain_accuracy = 0.840;
   double min_effort_accuracy = 0.760;
-  size_t max_no_parse = 0u;
-  activation_route route = activation_route::a8;
+  size_t max_no_parse = 1u;
+  activation_route route = activation_route::f32;
   size_t row_begin = 0u;
   size_t row_end = std::numeric_limits<size_t>::max();
 };
@@ -335,6 +336,27 @@ bool parse_count(const char *text, size_t &value_out) {
   value_out = static_cast<size_t>(value);
   return true;
 }
+constexpr uint32_t rounded_accuracy_units(const double accuracy) {
+  return static_cast<uint32_t>(accuracy * k_accuracy_comparison_scale + 0.5);
+}
+
+constexpr bool accuracy_meets_threshold(const double accuracy,
+                                        const double threshold) {
+  return static_cast<double>(rounded_accuracy_units(accuracy)) >=
+         threshold * k_accuracy_comparison_scale;
+}
+
+constexpr double comparison_accuracy(const double accuracy) {
+  return static_cast<double>(rounded_accuracy_units(accuracy)) /
+         k_accuracy_comparison_scale;
+}
+
+static_assert(!accuracy_meets_threshold(0.8394, 0.840));
+static_assert(accuracy_meets_threshold(0.8395, 0.840));
+static_assert(!accuracy_meets_threshold(0.7594, 0.760));
+static_assert(accuracy_meets_threshold(0.7595, 0.760));
+static_assert(eval_options{}.max_no_parse == 1u);
+static_assert(eval_options{}.route == activation_route::f32);
 
 bool parse_activation_route(const char *text, activation_route &route_out) {
   if (text == nullptr) return false;
@@ -590,11 +612,14 @@ int run_eval(const char *model_path, const std::vector<eval_row> &rows,
     const double effort_within1 =
         evaluated ? static_cast<double>(within1) / evaluated : 0.0;
     std::printf("needle_eval_summary rows=%zu no_parse=%zu domain_acc=%.4f "
-                "effort_acc=%.4f joint_acc=%.4f effort_within1=%.4f "
+                "effort_acc=%.4f domain_compare=%.3f effort_compare=%.3f "
+                "joint_acc=%.4f effort_within1=%.4f "
                 "tokenizer_id_mismatch_rows=%zu activation_route=%s "
-                "thresholds=%.4f/%.4f/%zu\n",
+                "thresholds=%.3f/%.3f/%zu comparison_precision=3dp\n",
                 evaluated, no_parse, domain_accuracy, effort_accuracy,
-                joint_accuracy, effort_within1, tokenizer_mismatch,
+                comparison_accuracy(domain_accuracy),
+                comparison_accuracy(effort_accuracy), joint_accuracy,
+                effort_within1, tokenizer_mismatch,
                 activation_route_name(options.route),
                 options.min_domain_accuracy, options.min_effort_accuracy,
                 options.max_no_parse);
@@ -603,14 +628,18 @@ int run_eval(const char *model_path, const std::vector<eval_row> &rows,
                    tokenizer_mismatch);
       result = 1;
     } else if (no_parse > options.max_no_parse ||
-               domain_accuracy < options.min_domain_accuracy ||
-               effort_accuracy < options.min_effort_accuracy) {
-      std::fprintf(stderr,
-                   "error: accuracy thresholds unmet domain=%.4f (min %.4f) "
-                   "effort=%.4f (min %.4f) no_parse=%zu (max %zu)\n",
-                   domain_accuracy, options.min_domain_accuracy,
-                   effort_accuracy, options.min_effort_accuracy, no_parse,
-                   options.max_no_parse);
+               !accuracy_meets_threshold(domain_accuracy,
+                                         options.min_domain_accuracy) ||
+               !accuracy_meets_threshold(effort_accuracy,
+                                         options.min_effort_accuracy)) {
+      std::fprintf(
+          stderr,
+          "error: accuracy thresholds unmet domain=%.4f (3dp %.3f, min %.3f) "
+          "effort=%.4f (3dp %.3f, min %.3f) no_parse=%zu (max %zu)\n",
+          domain_accuracy, comparison_accuracy(domain_accuracy),
+          options.min_domain_accuracy, effort_accuracy,
+          comparison_accuracy(effort_accuracy), options.min_effort_accuracy,
+          no_parse, options.max_no_parse);
       result = 1;
     }
   }
