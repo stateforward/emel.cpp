@@ -720,6 +720,14 @@ target_compile_definitions(quality_gates_tests
     BENCH_REPO_ROOT=\"${EMEL_ROOT}\"
 )
 
+if(TARGET emel_needle_eval)
+  add_dependencies(quality_gates_tests emel_needle_eval)
+  target_compile_definitions(quality_gates_tests
+    PRIVATE
+      BENCH_NEEDLE_EVAL_BINARY="$<TARGET_FILE:emel_needle_eval>"
+  )
+endif()
+
 add_test(
   NAME quality_gates_tests
   COMMAND quality_gates_tests

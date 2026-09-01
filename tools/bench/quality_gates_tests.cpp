@@ -32,6 +32,34 @@ void write_file(const std::filesystem::path &path, const std::string &text) {
   REQUIRE(output.good());
 }
 
+std::string shell_quote(const std::string &text) {
+  std::string quoted{"'"};
+  for (const char ch : text) {
+    if (ch == '\'') quoted += "'\\''";
+    else quoted.push_back(ch);
+  }
+  quoted.push_back('\'');
+  return quoted;
+}
+
+struct command_result {
+  int status = 1;
+  std::string output;
+};
+
+command_result run_command(const std::string &command,
+                           const std::filesystem::path &output_path) {
+  const std::string full_command =
+      command + " >" + shell_quote(output_path.string()) + " 2>&1";
+  const int raw = std::system(full_command.c_str());
+  command_result result{};
+  result.status = raw == 0 ? 0 : 1;
+  result.output = read_file(output_path);
+  std::error_code ec;
+  std::filesystem::remove(output_path, ec);
+  return result;
+}
+
 // Run the extracted compare gate (scripts/bench_compare_gate.awk) against the
 // given baseline and current snapshots, returning the process exit status
 // (0 => gate passed, non-zero => gate failed).
@@ -389,6 +417,21 @@ TEST_CASE(
         std::string::npos);
 }
 
+TEST_CASE("quality gate defaults are nounset-safe and use canonical evaluator path") {
+  const std::string script =
+      read_file(repo_root() / "scripts" / "quality_gates.sh");
+
+  CHECK(script.find(
+            "QUALITY_GATES_FUZZ=\"${EMEL_QUALITY_GATES_FUZZ:-auto}\"") !=
+        std::string::npos);
+  CHECK(script.find("QUALITY_GATES_DETERMINISM=\"${EMEL_QUALITY_GATES_"
+                    "DETERMINISM:-auto}\"") != std::string::npos);
+  CHECK(script.find("QUALITY_GATES_PARALLEL=\"${EMEL_QUALITY_GATES_"
+                    "PARALLEL:-auto}\"") != std::string::npos);
+  CHECK(script.find("build/zig/needle_eval/emel_needle_eval") !=
+        std::string::npos);
+}
+
 TEST_CASE("quality gates preserve fractional and disabled timeout budgets") {
   const std::string script =
       read_file(repo_root() / "scripts" / "quality_gates.sh");
@@ -504,7 +547,76 @@ TEST_CASE("quality gates wire the maintained Needle evaluator with release-safe 
   CHECK(quality.find("--min-domain-accuracy") != std::string::npos);
   CHECK(quality.find("--min-effort-accuracy") != std::string::npos);
   CHECK(quality.find("--max-no-parse") != std::string::npos);
+
+  CHECK(evaluator.find("emel/io/mmap/sm.hpp") != std::string::npos);
+  CHECK(evaluator.find("emel::io::mmap::event::map_tensor_request") !=
+        std::string::npos);
+  CHECK(evaluator.find("emel::io::mmap::event::release_mapping") !=
+        std::string::npos);
+  CHECK(evaluator.find("read_file_bytes") == std::string::npos);
+  CHECK(evaluator.find("k_max_model_bytes") != std::string::npos);
+  CHECK(evaluator.find("k_max_tsv_bytes") != std::string::npos);
+  CHECK(evaluator.find("k_max_tsv_rows") != std::string::npos);
+  CHECK(evaluator.find("k_max_tsv_line_bytes") != std::string::npos);
+  CHECK(evaluator.find("k_max_reference_ids_per_row") != std::string::npos);
+  CHECK(evaluator.find("std::strtoul") != std::string::npos);
+  CHECK(evaluator.find("std::bad_alloc") != std::string::npos);
 }
+
+#if !defined(_WIN32) && defined(BENCH_NEEDLE_EVAL_BINARY)
+TEST_CASE("Needle evaluator rejects malformed IDs before model evaluation") {
+  static int fixture_counter = 0;
+  const std::filesystem::path dir =
+      std::filesystem::temp_directory_path() /
+      ("needle_eval_contract_" + std::to_string(++fixture_counter) + "_" +
+       std::to_string(std::rand()));
+  std::filesystem::create_directories(dir);
+  const std::filesystem::path prompts = dir / "prompts.tsv";
+  const std::filesystem::path output = dir / "output.txt";
+  write_file(prompts, "routing\tlow\t1 junk\t6869\n");
+
+  const command_result result = run_command(
+      shell_quote(BENCH_NEEDLE_EVAL_BINARY) + " " +
+          shell_quote((repo_root() / "tests" / "models" /
+                       "route-w4-qat.cact")
+                          .string()) +
+          " " + shell_quote(prompts.string()) + " 0 1",
+      output);
+  CHECK(result.status != 0);
+  CHECK(result.output.find("invalid reference IDs") != std::string::npos);
+  CHECK(result.output.find("native tokenizer ids differ") ==
+        std::string::npos);
+  std::error_code ec;
+  std::filesystem::remove_all(dir, ec);
+}
+
+TEST_CASE("Needle evaluator rejects oversized resources before evaluation") {
+  static int fixture_counter = 0;
+  const std::filesystem::path dir =
+      std::filesystem::temp_directory_path() /
+      ("needle_eval_bounds_" + std::to_string(++fixture_counter) + "_" +
+       std::to_string(std::rand()));
+  std::filesystem::create_directories(dir);
+  const std::filesystem::path prompts = dir / "prompts.tsv";
+  const std::filesystem::path output = dir / "output.txt";
+  write_file(prompts, "routing\tlow\t1\t" + std::string(65538u, '0') + "\n");
+
+  const command_result result = run_command(
+      shell_quote(BENCH_NEEDLE_EVAL_BINARY) + " " +
+          shell_quote((repo_root() / "tests" / "models" /
+                       "route-w4-qat.cact")
+                          .string()) +
+          " " + shell_quote(prompts.string()) + " 0 1",
+      output);
+  CHECK(result.status != 0);
+  CHECK(result.output.find("prompts tsv line too large") !=
+        std::string::npos);
+  CHECK(result.output.find("row i=") == std::string::npos);
+  std::error_code ec;
+  std::filesystem::remove_all(dir, ec);
+}
+#endif
+
 
 TEST_CASE("bench script routes Moshi LM suite through the wrapper") {
   const std::string script = read_file(repo_root() / "scripts" / "bench.sh");
