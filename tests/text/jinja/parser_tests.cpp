@@ -430,3 +430,114 @@ TEST_CASE("jinja_parser_unexpected_event_transitions_state") {
 
   CHECK(machine.is(stateforward::sml::state<emel::text::jinja::parser::unexpected>));
 }
+
+TEST_CASE("jinja_parser_reuses_machine_after_success_and_failure") {
+  emel::text::jinja::parser::action::context ctx{};
+  emel::text::jinja::parser::sm machine{ctx};
+  callback_tracker tracker{};
+
+  emel::text::jinja::program first_program{};
+  int32_t first_err = -1;
+  size_t first_error_pos = 99;
+  parse first{
+      "{{ first }}",
+      first_program,
+      done_cb::from<callback_tracker, &callback_tracker::on_done>(&tracker),
+      error_cb::from<callback_tracker, &callback_tracker::on_error>(&tracker),
+      first_err,
+      first_error_pos,
+  };
+  CHECK(machine.process_event(first));
+  CHECK(first_program.body.size() == 1);
+
+  emel::text::jinja::program invalid_program{};
+  int32_t invalid_err = 0;
+  size_t invalid_error_pos = 0;
+  parse invalid{
+      "{% unknown %}",
+      invalid_program,
+      done_cb::from<callback_tracker, &callback_tracker::on_done>(&tracker),
+      error_cb::from<callback_tracker, &callback_tracker::on_error>(&tracker),
+      invalid_err,
+      invalid_error_pos,
+  };
+  CHECK_FALSE(machine.process_event(invalid));
+  CHECK(invalid_err == static_cast<int32_t>(emel::text::jinja::parser::error::parse_failed));
+  CHECK(invalid_program.body.empty());
+
+  emel::text::jinja::program final_program{};
+  int32_t final_err = -1;
+  size_t final_error_pos = 99;
+  parse final{
+      "literal {# note #} {{ final }}",
+      final_program,
+      done_cb::from<callback_tracker, &callback_tracker::on_done>(&tracker),
+      error_cb::from<callback_tracker, &callback_tracker::on_error>(&tracker),
+      final_err,
+      final_error_pos,
+  };
+  CHECK(machine.process_event(final));
+  CHECK(final_err == static_cast<int32_t>(emel::text::jinja::parser::error::none));
+  REQUIRE(final_program.body.size() == 3);
+  CHECK(dynamic_cast<emel::text::jinja::string_literal *>(final_program.body[0].get()) != nullptr);
+  CHECK(dynamic_cast<emel::text::jinja::comment_statement *>(final_program.body[1].get()) != nullptr);
+  CHECK(dynamic_cast<emel::text::jinja::identifier *>(final_program.body[2].get()) != nullptr);
+}
+
+TEST_CASE("jinja_parser_rejects_incomplete_expression_shapes") {
+  constexpr std::array<std::string_view, 5> invalid_templates{
+      "{{ foo",
+      "{{ + }}",
+      "{{ [1, 2 }}",
+      "{{ {'key':} }}",
+      "{% if value %}",
+  };
+
+  for (const std::string_view source : invalid_templates) {
+    CAPTURE(source);
+    emel::text::jinja::parser::action::context ctx{};
+    emel::text::jinja::parser::sm machine{ctx};
+    emel::text::jinja::program program{};
+    int32_t err = 0;
+    size_t error_pos = 0;
+    parse ev{
+        source,
+        program,
+        k_ignore_done_callback,
+        k_ignore_error_callback,
+        err,
+        error_pos,
+    };
+
+    CHECK_FALSE(machine.process_event(ev));
+    CHECK(err == static_cast<int32_t>(emel::text::jinja::parser::error::parse_failed));
+    CHECK(program.body.empty());
+  }
+}
+
+TEST_CASE("jinja_parser_unexpected_runtime_event_reports_internal_error") {
+  emel::text::jinja::parser::action::context ctx{};
+  stateforward::sml::sm<emel::text::jinja::parser::model,
+                        stateforward::sml::testing>
+      machine{ctx};
+  emel::text::jinja::program program{};
+  int32_t err = 0;
+  size_t error_pos = 7;
+  parse request{
+      "{{ value }}",
+      program,
+      k_ignore_done_callback,
+      k_ignore_error_callback,
+      err,
+      error_pos,
+  };
+  emel::text::jinja::event::parse_ctx runtime_ctx{request.template_text, err, error_pos};
+  emel::text::jinja::event::parse_runtime runtime{request, runtime_ctx};
+
+  machine.set_current_states(
+      stateforward::sml::state<emel::text::jinja::parser::request_decision>);
+  (void)machine.process_event(runtime);
+  CHECK(runtime_ctx.err == emel::text::jinja::parser::error::internal_error);
+  CHECK(err == static_cast<int32_t>(emel::text::jinja::parser::error::internal_error));
+  CHECK(machine.is(stateforward::sml::state<emel::text::jinja::parser::unexpected>));
+}

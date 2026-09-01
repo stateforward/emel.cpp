@@ -156,3 +156,33 @@ TEST_CASE("tokenizer_preprocessor_plamo2_phase_result_guards") {
   CHECK(emel::text::tokenizer::preprocessor::plamo2::guard::partition_unknown_error{}(
       runtime_ev, sm_ctx));
 }
+
+TEST_CASE("tokenizer_preprocessor_plamo2_empty_and_zero_capacity_paths") {
+  auto & vocab = make_plamo2_vocab_with_specials();
+  emel::text::tokenizer::preprocessor::plamo2::sm machine{};
+  std::array<emel::text::tokenizer::preprocessor::fragment,
+             emel::text::tokenizer::preprocessor::k_max_fragments>
+      fragments = {};
+
+  size_t count = 99;
+  bool preprocessed = false;
+  int32_t err = -1;
+  emel::text::tokenizer::preprocessor::event::preprocess empty(
+      vocab, "", false,
+      std::span<emel::text::tokenizer::preprocessor::fragment>(fragments), count, err);
+  empty.preprocessed_out = &preprocessed;
+  CHECK(machine.process_event(empty));
+  CHECK(count == 0);
+  CHECK(preprocessed);
+
+  std::array<emel::text::tokenizer::preprocessor::fragment, 1> one = {};
+  count = 99;
+  err = -1;
+  emel::text::tokenizer::preprocessor::event::preprocess invalid(
+      vocab, "x", false,
+      std::span<emel::text::tokenizer::preprocessor::fragment>(one.data(), 0), count, err);
+  CHECK_FALSE(machine.process_event(invalid));
+  CHECK(count == 0);
+  CHECK(err == emel::text::tokenizer::preprocessor::error_code(
+                   emel::text::tokenizer::preprocessor::error::invalid_request));
+}
