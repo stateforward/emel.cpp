@@ -409,7 +409,7 @@ TEST_CASE("jinja_lexer_empty_quoted_strings_are_literals") {
   CHECK(result.tokens[2].value.empty());
 }
 
-TEST_CASE("jinja_lexer_rejects_cursor_past_end") {
+TEST_CASE("jinja_lexer_dispatches_cursor_past_end_error") {
   std::string source = "{{ x }}";
   cursor cur{
       source,
@@ -428,7 +428,7 @@ TEST_CASE("jinja_lexer_rejects_cursor_past_end") {
   };
 
   emel::text::jinja::parser::lexer::sm machine{};
-  CHECK_FALSE(machine.process_event(ev));
+  CHECK(machine.process_event(ev));
   CHECK_FALSE(step.done_called);
   CHECK(step.error_called);
   CHECK(step.err == emel::text::jinja::parser::to_error_code(error::invalid_request));
