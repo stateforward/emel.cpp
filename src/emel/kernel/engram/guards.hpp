@@ -11,12 +11,21 @@ struct guard_execute_hash_rows {
     const uint64_t tables =
         static_cast<uint64_t>(request.num_orders) * request.heads;
     const uint64_t total = static_cast<uint64_t>(request.positions) * tables;
-    return request.positions > 0u && request.num_orders > 0u &&
-           request.num_orders <= event::k_max_orders && request.heads > 0u &&
-           request.slots > 0u && request.orders.size() >= request.num_orders &&
-           request.tokens.size() >= request.positions &&
-           request.valid.size() >= request.positions &&
-           request.indices.size() >= total && request.ngram_ok.size() >= total;
+    if (request.positions == 0u || request.num_orders == 0u ||
+        request.num_orders > event::k_max_orders || request.heads == 0u ||
+        request.slots == 0u || request.orders.size() < request.num_orders ||
+        request.tokens.size() < request.positions ||
+        request.valid.size() < request.positions ||
+        request.indices.size() < total || request.ngram_ok.size() < total)
+      return false;
+    for (uint32_t order_index = 0u; order_index < request.num_orders;
+         ++order_index) {
+      const uint32_t order = request.orders[order_index];
+      if (order == 0u || order > request.positions ||
+          order > request.tokens.size())
+        return false;
+    }
+    return true;
   }
 };
 

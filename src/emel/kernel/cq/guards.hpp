@@ -1,5 +1,7 @@
 #pragma once
 
+#include <limits>
+
 #include "emel/kernel/cq/actions.hpp"
 #include "emel/kernel/x86_64/context.hpp"
 
@@ -86,6 +88,22 @@ dequant_rows_supported(const event::dequant_rows_request &request) noexcept {
                                       request.weights.shape[1];
 }
 
+inline bool checked_multiply_u64(const uint64_t lhs, const uint64_t rhs,
+                                 uint64_t &product) noexcept {
+  if (lhs != 0u && rhs > std::numeric_limits<uint64_t>::max() / lhs)
+    return false;
+  product = lhs * rhs;
+  return true;
+}
+
+inline bool checked_add_u64(const uint64_t lhs, const uint64_t rhs,
+                            uint64_t &sum) noexcept {
+  if (rhs > std::numeric_limits<uint64_t>::max() - lhs)
+    return false;
+  sum = lhs + rhs;
+  return true;
+}
+
 inline bool
 prepare_supported(const event::prepare_q4_request &request) noexcept {
   const auto &view = request.weights;
@@ -96,13 +114,23 @@ prepare_supported(const event::prepare_q4_request &request) noexcept {
   const uint64_t in_pad =
       (static_cast<uint64_t>(view.shape[1]) + view.group - 1u) / view.group *
       view.group;
-  const uint64_t index_count = static_cast<uint64_t>(view.shape[0]) * in_pad;
+  if (in_pad > std::numeric_limits<uint32_t>::max())
+    return false;
+  uint64_t index_count = 0u;
+  if (!checked_multiply_u64(view.shape[0], in_pad, index_count))
+    return false;
   const uint64_t norm_count = index_count / view.group;
-  const uint64_t blocked_norm_count =
-      static_cast<uint64_t>(view.shape[0] / 32u * 32u) *
-      (in_pad / view.group);
-  const uint64_t packed_bytes = index_count / 2u;
-  return packed_bytes + norm_count * 2u <= view.nbytes &&
+  const uint64_t blocked_rows =
+      static_cast<uint64_t>(view.shape[0] / 32u * 32u);
+  uint64_t blocked_norm_count = 0u;
+  uint64_t norm_bytes = 0u;
+  uint64_t required_bytes = 0u;
+  if (!checked_multiply_u64(blocked_rows, in_pad / view.group,
+                            blocked_norm_count) ||
+      !checked_multiply_u64(norm_count, 2u, norm_bytes) ||
+      !checked_add_u64(index_count / 2u, norm_bytes, required_bytes))
+    return false;
+  return required_bytes <= view.nbytes &&
          request.indices.size() >= index_count &&
          request.indices_by_input32.size() >= index_count &&
          request.norms.size() >= norm_count &&

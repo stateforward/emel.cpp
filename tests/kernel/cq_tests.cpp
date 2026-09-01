@@ -212,6 +212,42 @@ TEST_CASE("CQ4 prepared route rejects non-canonical padded geometry") {
   CHECK_FALSE(result.accepted);
 }
 
+TEST_CASE("CQ4 prepare guard rejects tensor byte-size arithmetic overflow") {
+  constexpr uint64_t extent = std::numeric_limits<uint32_t>::max();
+  constexpr uint64_t index_count = extent * extent;
+  const auto *readable = reinterpret_cast<const uint8_t *>(uintptr_t{1u});
+  auto *bytes = reinterpret_cast<uint8_t *>(uintptr_t{1u});
+  auto *floats = reinterpret_cast<float *>(uintptr_t{1u});
+  const tensor_view weights{.dtype = 3u,
+                            .ndim = 2u,
+                            .shape = {static_cast<uint32_t>(extent),
+                                      static_cast<uint32_t>(extent), 0u, 0u},
+                            .nbytes = std::numeric_limits<uint64_t>::max(),
+                            .group = 1u,
+                            .bits = 4u,
+                            .data = readable};
+  emel::kernel::cq::event::prepared_q4_view prepared{
+      .source = reinterpret_cast<const uint8_t *>(uintptr_t{7u}), .out = 17u};
+  const emel::kernel::cq::event::prepare_q4_request request{
+      weights,
+      std::span<uint8_t>{bytes, static_cast<size_t>(index_count)},
+      std::span<uint8_t>{bytes, static_cast<size_t>(index_count)},
+      std::span<float>{floats, static_cast<size_t>(index_count)},
+      std::span<float>{floats, static_cast<size_t>(index_count)},
+      prepared};
+  emel::kernel::cq::event::dispatch_result result{};
+  const emel::kernel::cq::event::prepare_q4 event{request, result};
+
+  CHECK_FALSE(emel::kernel::cq::guard::guard_prepare_q4{}(
+      event, emel::kernel::cq::action::context{}));
+
+  emel::kernel::cq::sm machine;
+  CHECK_FALSE(machine.process_event(event));
+  CHECK_FALSE(result.accepted);
+  CHECK(prepared.source == reinterpret_cast<const uint8_t *>(uintptr_t{7u}));
+  CHECK(prepared.out == 17u);
+}
+
 TEST_CASE("CQ A8 fake quant matches JAX ties zero and signed boundary") {
   REQUIRE(std::fesetround(FE_TONEAREST) == 0);
   emel::kernel::cq::sm sm;

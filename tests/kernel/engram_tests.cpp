@@ -127,3 +127,74 @@ TEST_CASE("engram hash guard rejects zero slots") {
   CHECK(
       machine.is(stateforward::sml::state<emel::kernel::engram::state_ready>));
 }
+
+TEST_CASE("engram hash guard rejects orders outside the gathered window") {
+  const std::array<int32_t, 3> tokens{5, 7, 9};
+  const std::array<uint8_t, 3> valid{1u, 1u, 1u};
+  std::array<uint32_t, 6> indices{};
+  std::array<float, 6> ngram_ok{};
+  emel::kernel::engram::action::context context{};
+
+  for (const std::array<uint32_t, 2> orders :
+       {std::array<uint32_t, 2>{0u, 2u},
+        std::array<uint32_t, 2>{2u, 4u}}) {
+    indices.fill(0xDEADBEEFu);
+    ngram_ok.fill(-17.0f);
+    const emel::kernel::engram::event::hash_rows_request request{
+        .tokens = tokens,
+        .valid = valid,
+        .positions = 3u,
+        .orders = orders,
+        .num_orders = 2u,
+        .heads = 1u,
+        .slots = 64u,
+        .indices = indices,
+        .ngram_ok = ngram_ok};
+    dispatch_result result{};
+    const emel::kernel::engram::event::execute_hash_rows event{request, result};
+
+    CHECK_FALSE(emel::kernel::engram::guard::guard_execute_hash_rows{}(
+        event, context));
+
+    emel::kernel::engram::sm machine;
+    CHECK_FALSE(machine.process_event(event));
+    CHECK_FALSE(result.accepted);
+    for (const uint32_t index : indices)
+      CHECK(index == 0xDEADBEEFu);
+    for (const float value : ngram_ok)
+      CHECK(value == -17.0f);
+  }
+}
+
+TEST_CASE("engram hash guard validates orders against supplied token bounds") {
+  const std::array<int32_t, 2> tokens{5, 7};
+  const std::array<uint8_t, 3> valid{1u, 1u, 1u};
+  const std::array<uint32_t, 1> orders{3u};
+  std::array<uint32_t, 3> indices{};
+  std::array<float, 3> ngram_ok{};
+  const emel::kernel::engram::event::hash_rows_request request{
+      .tokens = tokens,
+      .valid = valid,
+      .positions = 3u,
+      .orders = orders,
+      .num_orders = 1u,
+      .heads = 1u,
+      .slots = 64u,
+      .indices = indices,
+      .ngram_ok = ngram_ok};
+  dispatch_result result{};
+  const emel::kernel::engram::event::execute_hash_rows event{request, result};
+
+  CHECK_FALSE(emel::kernel::engram::guard::guard_execute_hash_rows{}(
+      event, emel::kernel::engram::action::context{}));
+
+  indices.fill(0xDEADBEEFu);
+  ngram_ok.fill(-17.0f);
+  emel::kernel::engram::sm machine;
+  CHECK_FALSE(machine.process_event(event));
+  CHECK_FALSE(result.accepted);
+  for (const uint32_t index : indices)
+    CHECK(index == 0xDEADBEEFu);
+  for (const float value : ngram_ok)
+    CHECK(value == -17.0f);
+}
