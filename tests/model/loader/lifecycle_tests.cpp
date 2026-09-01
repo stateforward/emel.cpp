@@ -2344,11 +2344,12 @@ TEST_CASE(
   }
 }
 
-TEST_CASE("io boundary closeout tests avoid actor internal reach-through") {
-  const std::array test_sources{
-      "tests/io/loader/lifecycle_tests.cpp",
-      "tests/model/tensor/lifecycle_tests.cpp",
-      "tests/model/loader/lifecycle_tests.cpp",
+TEST_CASE("maintained io boundary consumers avoid actor internal reach-through") {
+  const std::array maintained_sources{
+      "tools/bench/generation_bench.cpp",
+      "tools/bench/diarization/sortformer_fixture.hpp",
+      "tools/embedded_size/emel_probe/main.cpp",
+      "tools/paritychecker/parity_engines.cpp",
   };
   const std::array forbidden{
       std::string{"#include \"emel/io/loader/"} + "actions.hpp\"",
@@ -2371,7 +2372,7 @@ TEST_CASE("io boundary closeout tests avoid actor internal reach-through") {
       std::string{"emel::model::loader::"} + "guard::",
   };
 
-  for (const auto *source_path : test_sources) {
+  for (const auto *source_path : maintained_sources) {
     CAPTURE(source_path);
     const std::string source = read_text_file(repo_root() / source_path);
     for (const auto &needle : forbidden) {
