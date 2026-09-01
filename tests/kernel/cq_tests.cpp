@@ -527,6 +527,158 @@ TEST_CASE("CQ scalar rows machine rejects a zero group without writes") {
   CHECK(workspace[0] == -29.0f);
 }
 
+TEST_CASE("CQ public scalar routes reject non-finite scales without writes") {
+  std::array<float, 28u> codebook{};
+  for (uint32_t i = 0u; i < 16u; ++i)
+    codebook[12u + i] = static_cast<float>(i + 1u) / 10.0f;
+  constexpr uint32_t group = 8u, in = 8u, out = 2u;
+  std::vector<uint32_t> selectors(out * in);
+  for (uint32_t i = 0u; i < selectors.size(); ++i)
+    selectors[i] = i % 16u;
+  const auto packed = blob<4u>(selectors, out, in, group,
+                                {0x3c00u, 0x4000u});
+  const auto weights = view(packed, out, in, group, 4u);
+  std::array<float, in> activation{};
+  std::array<float, in> workspace{};
+
+  for (const float scale : {std::numeric_limits<float>::quiet_NaN(),
+                            std::numeric_limits<float>::infinity()}) {
+    {
+      std::array<float, out> output{-17.0f, -19.0f};
+      const auto before = output;
+      const gemv_request request{weights, codebook, activation, output,
+                                 workspace, scale};
+      emel::kernel::cq::event::dispatch_result result{};
+      emel::kernel::cq::sm machine;
+      CHECK_FALSE(machine.process_event(
+          emel::kernel::cq::event::execute_scalar_q4{request, result}));
+      CHECK_FALSE(result.accepted);
+      CHECK(output == before);
+    }
+    {
+      std::array<float, 1u> output{-23.0f};
+      const auto before = output;
+      const emel::kernel::cq::event::gemv_rows_request request{
+          weights, codebook, activation, 1u, 1u, output, workspace, scale};
+      emel::kernel::cq::event::dispatch_result result{};
+      emel::kernel::cq::sm machine;
+      CHECK_FALSE(machine.process_event(
+          emel::kernel::cq::event::execute_scalar_rows_q4{request, result}));
+      CHECK_FALSE(result.accepted);
+      CHECK(output == before);
+    }
+    {
+      std::array<float, in> output{};
+      output.fill(-29.0f);
+      const auto before = output;
+      const emel::kernel::cq::event::dequant_rows_request request{
+          weights, codebook, 1u, 1u, scale, output};
+      emel::kernel::cq::event::dispatch_result result{};
+      emel::kernel::cq::sm machine;
+      CHECK_FALSE(machine.process_event(
+          emel::kernel::cq::event::execute_scalar_dequant_q4{request,
+                                                             result}));
+      CHECK_FALSE(result.accepted);
+      CHECK(output == before);
+    }
+  }
+}
+
+TEST_CASE("CQ public prepared routes reject non-finite scales without writes") {
+  constexpr uint32_t group = 128u, in = 128u, out = 32u;
+  std::vector<uint32_t> selectors(static_cast<size_t>(out) * in, 3u);
+  std::vector<uint16_t> norm_bits(out, 0x3c00u);
+  const auto packed = blob<4u>(selectors, out, in, group, norm_bits);
+  const auto weights = view(packed, out, in, group, 4u);
+  std::vector<uint8_t> indices(static_cast<size_t>(out) * in);
+  std::vector<uint8_t> indices_by_input32(static_cast<size_t>(out) * in);
+  std::vector<float> norms(out);
+  std::vector<float> norms_by_group32(out);
+  emel::kernel::cq::event::prepared_q4_view prepared{};
+  emel::kernel::cq::action::prepare_q4(
+      {weights, indices, indices_by_input32, norms, norms_by_group32,
+       prepared});
+  std::array<float, 28u> codebook{};
+  for (uint32_t i = 0u; i < 16u; ++i)
+    codebook[12u + i] = static_cast<float>(i + 1u) / 10.0f;
+  emel::kernel::cq::event::prepared_codebook_q4 prepared_codebook{};
+  emel::kernel::cq::action::prepare_codebook_q4({codebook, prepared_codebook});
+  std::array<float, in> activation{};
+  std::array<float, in> workspace{};
+
+  for (const float scale : {std::numeric_limits<float>::quiet_NaN(),
+                            std::numeric_limits<float>::infinity()}) {
+#if (defined(__x86_64__) || defined(_M_X64)) && defined(__AVX2__) &&           \
+    defined(__FMA__)
+    {
+      std::array<float, out> output{};
+      output.fill(-31.0f);
+      const auto before = output;
+      const emel::kernel::cq::event::prepared_gemv_request request{
+          prepared, prepared_codebook, activation, output, workspace, scale};
+      emel::kernel::cq::event::dispatch_result result{};
+      emel::kernel::cq::sm machine;
+      CHECK_FALSE(machine.process_event(
+          emel::kernel::cq::event::execute_prepared_avx2_q4{request, result}));
+      CHECK_FALSE(result.accepted);
+      CHECK(output == before);
+    }
+    {
+      std::array<std::array<float, out>, 4u> outputs{};
+      std::array<std::array<float, out>, 4u> before{};
+      for (uint32_t i = 0u; i < outputs.size(); ++i) {
+        outputs[i].fill(-37.0f - static_cast<float>(i));
+        before[i] = outputs[i];
+      }
+      const emel::kernel::cq::event::prepared_gemv_batch4_request request{
+          .targets = {{{&prepared, outputs[0]},
+                       {&prepared, outputs[1]},
+                       {&prepared, outputs[2]},
+                       {&prepared, outputs[3]}}},
+          .codebook = prepared_codebook,
+          .activation = activation,
+          .workspace = workspace,
+          .output_scale = scale};
+      emel::kernel::cq::event::dispatch_result result{};
+      emel::kernel::cq::sm machine;
+      CHECK_FALSE(machine.process_event(
+          emel::kernel::cq::event::execute_prepared_avx2_batch4_q4{request,
+                                                                   result}));
+      CHECK_FALSE(result.accepted);
+      CHECK(outputs == before);
+    }
+    {
+      std::array<float, 1u> output{-43.0f};
+      const auto before = output;
+      const emel::kernel::cq::event::prepared_gemv_rows_request request{
+          prepared, prepared_codebook, activation, 1u, 1u, output, workspace,
+          scale};
+      emel::kernel::cq::event::dispatch_result result{};
+      emel::kernel::cq::sm machine;
+      CHECK_FALSE(machine.process_event(
+          emel::kernel::cq::event::execute_prepared_avx2_rows_q4{request,
+                                                                 result}));
+      CHECK_FALSE(result.accepted);
+      CHECK(output == before);
+    }
+#endif
+    {
+      std::array<float, in> output{};
+      output.fill(-47.0f);
+      const auto before = output;
+      const emel::kernel::cq::event::prepared_dequant_rows_request request{
+          prepared, prepared_codebook, 1u, 1u, scale, output};
+      emel::kernel::cq::event::dispatch_result result{};
+      emel::kernel::cq::sm machine;
+      CHECK_FALSE(machine.process_event(
+          emel::kernel::cq::event::execute_prepared_dequant_q4{request,
+                                                               result}));
+      CHECK_FALSE(result.accepted);
+      CHECK(output == before);
+    }
+  }
+}
+
 TEST_CASE("CQ guard rejects incomplete padded workspace") {
   const auto b =
       blob<4u>(std::vector<uint32_t>(16, 0), 1, 13, 8, {0x3c00, 0x3c00});

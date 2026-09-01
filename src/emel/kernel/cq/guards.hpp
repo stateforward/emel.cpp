@@ -47,7 +47,8 @@ inline bool supported(const event::gemv_request &request) noexcept {
       (static_cast<uint64_t>(request.weights.shape[1]) +
        request.weights.group - 1u) /
       request.weights.group * request.weights.group;
-  return request.workspace.size() >= in_pad;
+  return request.workspace.size() >= in_pad &&
+         std::isfinite(request.output_scale);
 }
 
 template <uint32_t Bits>
@@ -78,7 +79,8 @@ inline bool rows_supported(const event::gemv_rows_request &request) noexcept {
              request.weights.shape[0] &&
          request.activation.size() >= request.weights.shape[1] &&
          request.output.size() >= request.row_count &&
-         request.workspace.size() >= in_pad;
+         request.workspace.size() >= in_pad &&
+         std::isfinite(request.output_scale);
 }
 
 template <uint32_t Bits>
@@ -89,7 +91,8 @@ dequant_rows_supported(const event::dequant_rows_request &request) noexcept {
          static_cast<uint64_t>(request.row_begin) + request.row_count <=
              request.weights.shape[0] &&
          request.output.size() >= static_cast<uint64_t>(request.row_count) *
-                                      request.weights.shape[1];
+                                      request.weights.shape[1] &&
+         std::isfinite(request.scale);
 }
 
 inline bool checked_multiply_u64(const uint64_t lhs, const uint64_t rhs,
@@ -196,7 +199,8 @@ struct guard_execute_prepared_avx2_q4 {
            request.weights.group == 128u &&
            request.activation.size() >= request.weights.in &&
            request.output.size() >= request.weights.out &&
-           request.workspace.size() >= request.weights.in_pad;
+           request.workspace.size() >= request.weights.in_pad &&
+           std::isfinite(request.output_scale);
 #else
     (void)ev;
     return false;
@@ -244,7 +248,8 @@ struct guard_execute_prepared_avx2_batch4_q4 {
         (static_cast<uint64_t>(first->in) + 127u) / 128u * 128u;
     if (first->in_pad != canonical_in_pad ||
         request.activation.size() < first->in ||
-        request.workspace.size() < first->in_pad)
+        request.workspace.size() < first->in_pad ||
+        !std::isfinite(request.output_scale))
       return false;
     for (const auto &target : request.targets)
       if (target.weights == nullptr ||
@@ -281,7 +286,8 @@ struct guard_execute_prepared_avx2_rows_q4 {
                request.weights.out &&
            request.activation.size() >= request.weights.in &&
            request.output.size() >= request.row_count &&
-           request.workspace.size() >= request.weights.in_pad;
+           request.workspace.size() >= request.weights.in_pad &&
+           std::isfinite(request.output_scale);
 #else
     (void)ev;
     return false;
@@ -299,7 +305,8 @@ struct guard_execute_prepared_dequant_q4 {
            static_cast<uint64_t>(request.row_begin) + request.row_count <=
                request.weights.out &&
            request.output.size() >=
-               static_cast<uint64_t>(request.row_count) * request.weights.in;
+               static_cast<uint64_t>(request.row_count) * request.weights.in &&
+           std::isfinite(request.scale);
   }
 };
 
