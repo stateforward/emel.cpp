@@ -506,12 +506,11 @@ inline bool compute_engram(context &ctx) noexcept {
     const auto &bound = *ctx.bound;
     const auto &geo = bound.geo;
     const uint32_t d_model = geo.d_model;
-    const uint32_t max_order =
-        static_cast<uint32_t>(context::compute_max_order(geo));
-    const uint32_t history_extent =
-        (geo.engram_conv_taps - 1u) * geo.engram_conv_dilation;
-    const uint32_t window = history_extent + max_order - 1u;
-    const uint32_t positions = window + 1u;
+    uint32_t window = 0u;
+    uint32_t positions = 0u;
+    if (!needle::detail::compute_engram_hash_window(geo, window, positions)) {
+      return false;
+    }
     const uint32_t tables = geo.num_engram_tables;
     const uint32_t sub_dim = geo.engram_sub_dim;
     const uint32_t e_dim = tables * sub_dim;
@@ -649,8 +648,9 @@ inline bool compute_layer(context &ctx, event::step_ctx &step) noexcept {
 
   if constexpr (engram_site) {
     uint32_t site = 0u;
-    for (uint32_t s = 0u; s < geo.num_engram_sites && s < 4u; ++s)
-      site += s * static_cast<uint32_t>(geo.engram_sites[s] == layer_index);
+    if (!needle::detail::find_engram_site_index(geo, layer_index, site)) {
+      return false;
+    }
     const emel::kernel::engram::event::alpha_gate_request gate_request{
         .u = ctx.u,
         .key = std::span<const float>{ctx.engram_keys.data() +

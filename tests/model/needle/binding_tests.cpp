@@ -516,6 +516,22 @@ TEST_CASE("needle binder rejects geometry capacity and engram inconsistencies") 
     bad.engram_conv_dilation = UINT32_MAX;
     check_geometry_error(bad);
   }
+  SUBCASE("engram order must fit the checked hash window") {
+    auto bad = geometry;
+    bad.engram_orders[0] = UINT32_MAX;
+    check_geometry_error(bad);
+  }
+  SUBCASE("engram site layer must be in range") {
+    auto bad = geometry;
+    bad.engram_sites[0] = bad.num_layers;
+    check_geometry_error(bad);
+  }
+  SUBCASE("engram site layer assignments must be unique") {
+    auto bad = geometry;
+    REQUIRE(bad.num_engram_sites >= 2u);
+    bad.engram_sites[1] = bad.engram_sites[0];
+    check_geometry_error(bad);
+  }
 }
 
 TEST_CASE("needle binder classifies failures in later positional sections") {

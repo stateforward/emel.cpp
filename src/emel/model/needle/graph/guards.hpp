@@ -40,10 +40,8 @@ inline bool cq_group128(const emel::model::needle::contract &bound) noexcept {
 
 inline bool layer_is_engram_site(const emel::cact::loader::geometry &geo,
                                  const uint32_t layer_index) noexcept {
-  bool match = false;
-  for (uint32_t s = 0u; s < geo.num_engram_sites && s < 4u; ++s)
-    match = match || geo.engram_sites[s] == layer_index;
-  return match;
+  uint32_t site = 0u;
+  return needle::detail::find_engram_site_index(geo, layer_index, site);
 }
 
 // The graph's route choice includes both the CQ group contract and the pinned

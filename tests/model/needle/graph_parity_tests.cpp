@@ -727,6 +727,52 @@ TEST_CASE("needle graph engram dilation gathers exact dilated tap positions") {
   CHECK(gathered == std::array<uint32_t, 4u>{11u, 8u, 5u, 2u});
 }
 
+TEST_CASE("needle graph pinned engram sites retain exact layer-to-site mapping") {
+  const auto fixture = load_contract_fixture();
+  const auto &geo = fixture.contract.geo;
+  REQUIRE(geo.num_engram_sites == fixture.contract.engram_site_count);
+  REQUIRE(geo.num_engram_sites == 2u);
+  CHECK(geo.engram_sites[0] == 2u);
+  CHECK(geo.engram_sites[1] == 15u);
+
+  uint32_t expected_max_order = 0u;
+  for (uint32_t i = 0u; i < geo.num_engram_orders; ++i) {
+    expected_max_order =
+        geo.engram_orders[i] > expected_max_order ? geo.engram_orders[i]
+                                                  : expected_max_order;
+  }
+  const uint32_t expected_history_extent =
+      (geo.engram_conv_taps - 1u) * geo.engram_conv_dilation;
+  uint32_t history_extent = 0u;
+  uint32_t max_order = 0u;
+  uint32_t window = 0u;
+  uint32_t positions = 0u;
+  REQUIRE(emel::model::needle::detail::compute_engram_hash_geometry(
+      geo, history_extent, max_order, window, positions));
+  CHECK(history_extent == expected_history_extent);
+  CHECK(max_order == expected_max_order);
+  CHECK(window == expected_history_extent + expected_max_order - 1u);
+  CHECK(positions == window + 1u);
+
+  for (uint32_t expected = 0u; expected < geo.num_engram_sites; ++expected) {
+    uint32_t actual = emel::model::needle::k_max_engram_sites;
+    CHECK(emel::model::needle::detail::find_engram_site_index(
+        geo, geo.engram_sites[expected], actual));
+    CHECK(actual == expected);
+  }
+
+  for (uint32_t layer = 0u; layer < geo.num_layers; ++layer) {
+    uint32_t site = emel::model::needle::k_max_engram_sites;
+    const bool found = emel::model::needle::detail::find_engram_site_index(
+        geo, layer, site);
+    CHECK(found == emel::model::needle::graph::guard::layer_is_engram_site(
+                       geo, layer));
+    if (!found) {
+      CHECK(site == emel::model::needle::k_max_engram_sites);
+    }
+  }
+}
+
 
 TEST_CASE("needle graph diagnostics reject invalid clocks and stay observational") {
   auto fixture = load_contract_fixture();

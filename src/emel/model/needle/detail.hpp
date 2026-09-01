@@ -43,6 +43,65 @@ inline bool checked_product(const uint32_t first, const uint32_t second,
   return product <= std::numeric_limits<uint32_t>::max();
 }
 
+inline bool checked_sum(const uint32_t lhs, const uint32_t rhs,
+                        uint32_t &out) noexcept {
+  const uint64_t sum = static_cast<uint64_t>(lhs) + rhs;
+  out = static_cast<uint32_t>(sum);
+  return sum <= std::numeric_limits<uint32_t>::max();
+}
+
+inline constexpr uint32_t k_max_engram_hash_positions = 1048576u;
+
+inline bool compute_engram_hash_geometry(const geometry &geo,
+                                         uint32_t &history_extent_out,
+                                         uint32_t &max_order_out,
+                                         uint32_t &window_out,
+                                         uint32_t &positions_out) noexcept {
+  if (geo.engram_conv_taps == 0u || geo.engram_conv_dilation == 0u ||
+      geo.num_engram_orders == 0u ||
+      geo.num_engram_orders > emel::kernel::engram::event::k_max_orders ||
+      !checked_product(geo.engram_conv_taps - 1u,
+                       geo.engram_conv_dilation, history_extent_out)) {
+    return false;
+  }
+
+  max_order_out = 0u;
+  for (uint32_t i = 0u; i < geo.num_engram_orders; ++i) {
+    const uint32_t order = geo.engram_orders[i];
+    if (order == 0u) {
+      return false;
+    }
+    max_order_out = order > max_order_out ? order : max_order_out;
+  }
+
+  return checked_sum(history_extent_out, max_order_out - 1u, window_out) &&
+         checked_sum(window_out, 1u, positions_out) &&
+         positions_out <= k_max_engram_hash_positions;
+}
+
+inline bool compute_engram_hash_window(const geometry &geo,
+                                       uint32_t &window_out,
+                                       uint32_t &positions_out) noexcept {
+  uint32_t history_extent = 0u;
+  uint32_t max_order = 0u;
+  return compute_engram_hash_geometry(geo, history_extent, max_order,
+                                      window_out, positions_out);
+}
+
+inline bool find_engram_site_index(const geometry &geo,
+                                   const uint32_t layer_index,
+                                   uint32_t &site_out) noexcept {
+  site_out = k_max_engram_sites;
+  for (uint32_t site = 0u;
+       site < geo.num_engram_sites && site < k_max_engram_sites; ++site) {
+    if (geo.engram_sites[site] == layer_index) {
+      site_out = site;
+      return true;
+    }
+  }
+  return false;
+}
+
 
 // Expected geometry of one positional tensor role. `shape` entries beyond
 // `ndim` must be zero in the directory record; a zero entry inside `ndim`
@@ -142,7 +201,8 @@ inline emel::error::type validate_geometry(const geometry &geo) noexcept {
   if (geo.num_engram_sites > 0u) {
     uint32_t table_rows = 0u;
     uint32_t embed_dim = 0u;
-    uint32_t history_extent = 0u;
+    uint32_t hash_window = 0u;
+    uint32_t hash_positions = 0u;
     if (geo.engram_slots == 0u || geo.engram_sub_dim == 0u ||
         geo.num_engram_tables == 0u || geo.engram_conv_taps == 0u ||
         geo.engram_conv_dilation == 0u || geo.num_engram_orders == 0u ||
@@ -152,14 +212,18 @@ inline emel::error::type validate_geometry(const geometry &geo) noexcept {
                          table_rows) ||
         !checked_product(geo.num_engram_tables, geo.engram_sub_dim,
                          embed_dim) ||
-        !checked_product(geo.engram_conv_taps - 1u,
-                         geo.engram_conv_dilation, history_extent) ||
+        !compute_engram_hash_window(geo, hash_window, hash_positions) ||
         embed_dim > k_max_engram_embed_dim) {
       return cast_needle_error(error::geometry_invalid);
     }
-    for (uint32_t i = 0u; i < geo.num_engram_orders; ++i) {
-      if (geo.engram_orders[i] == 0u) {
+    for (uint32_t site = 0u; site < geo.num_engram_sites; ++site) {
+      if (geo.engram_sites[site] >= geo.num_layers) {
         return cast_needle_error(error::geometry_invalid);
+      }
+      for (uint32_t prior = 0u; prior < site; ++prior) {
+        if (geo.engram_sites[prior] == geo.engram_sites[site]) {
+          return cast_needle_error(error::geometry_invalid);
+        }
       }
     }
   }
