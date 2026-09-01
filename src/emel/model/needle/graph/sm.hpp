@@ -9,7 +9,7 @@
 #include "emel/model/needle/graph/guards.hpp"
 #include <memory>
 #include <new>
-
+#include <system_error>
 #include "emel/sm.hpp"
 
 namespace emel::model::needle::graph {
@@ -340,22 +340,32 @@ struct basic_sm
     std::unique_ptr<basic_sm> machine = {};
     emel::error::type err = emel::error::cast(error::none);
   };
-
+  using construction_factory = basic_sm *(*)(const needle::contract &);
   static construction_result
-  create(const needle::contract &contract_in) noexcept {
+  create(const needle::contract &contract_in,
+         const construction_factory construct = &construct_machine) noexcept {
     const emel::error::type geometry_err =
         action::validate_construction(contract_in);
     if (geometry_err != emel::error::cast(error::none))
       return {.machine = {}, .err = geometry_err};
+    if (construct == nullptr)
+      return {.machine = {},
+              .err = emel::error::cast(error::internal_error)};
     try {
-      return {.machine = std::unique_ptr<basic_sm>{new basic_sm{contract_in}},
+      std::unique_ptr<basic_sm> machine{construct(contract_in)};
+      if (machine == nullptr)
+        return {.machine = {},
+                .err = emel::error::cast(error::internal_error)};
+      return {.machine = std::move(machine),
               .err = emel::error::cast(error::none)};
     } catch (const std::bad_alloc &) {
       return {.machine = {},
               .err = emel::error::cast(error::capacity_exceeded)};
+    } catch (const std::system_error &) {
+      return {.machine = {},
+              .err = emel::error::cast(error::internal_error)};
     }
   }
-
   explicit basic_sm(const needle::contract &contract_in)
       : base_type(std::in_place, contract_in,
                   projection_route == action::projection_route_kind::parallel4) {}
@@ -493,6 +503,10 @@ struct basic_sm
   }
 
 private:
+  static basic_sm *construct_machine(const needle::contract &contract_in) {
+    return new basic_sm{contract_in};
+  }
+
   bool activation_quant_ = true;
 };
 using serial_sm = basic_sm<true, action::projection_route_kind::serial>;

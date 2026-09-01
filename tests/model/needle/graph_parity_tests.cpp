@@ -683,6 +683,32 @@ TEST_CASE("needle graph scalar route covers guards and activation phases") {
   CHECK(emel::model::needle::graph::guard::guard_deployment_f32{}(run, ctx));
 }
 
+TEST_CASE("needle graph construction factory returns typed thread failure") {
+  auto fixture = load_contract_fixture();
+  using graph_type = emel::model::needle::graph::sm;
+  const graph_type::construction_factory fail_thread_construction =
+      [](const emel::model::needle::contract &) -> graph_type * {
+    throw std::system_error{
+        std::make_error_code(std::errc::resource_unavailable_try_again)};
+  };
+
+  const auto result =
+      graph_type::create(fixture.contract, fail_thread_construction);
+  CHECK(result.machine == nullptr);
+  CHECK(result.err == emel::error::cast(
+                          emel::model::needle::graph::error::internal_error));
+}
+
+TEST_CASE("needle graph construction factory preserves normal creation") {
+  auto fixture = load_contract_fixture();
+
+  const auto result =
+      emel::model::needle::graph::sm::create(fixture.contract);
+  REQUIRE(result.machine != nullptr);
+  CHECK(result.err ==
+        emel::error::cast(emel::model::needle::graph::error::none));
+}
+
 TEST_CASE("needle graph bounded construction rejects extreme geometry typed") {
   auto fixture = load_contract_fixture();
   fixture.contract.geo.max_seq_len = UINT32_MAX;
