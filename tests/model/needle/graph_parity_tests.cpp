@@ -680,6 +680,51 @@ TEST_CASE("needle graph scalar route covers guards and activation phases") {
   CHECK(emel::model::needle::graph::guard::guard_deployment_f32{}(run, ctx));
 }
 
+TEST_CASE("needle graph bounded construction rejects extreme geometry typed") {
+  auto fixture = load_contract_fixture();
+  fixture.contract.geo.max_seq_len = UINT32_MAX;
+
+  const auto result =
+      emel::model::needle::graph::sm::create(fixture.contract);
+  CHECK(result.machine == nullptr);
+  CHECK(result.err == emel::error::cast(
+                          emel::model::needle::graph::error::geometry_unsupported));
+}
+
+TEST_CASE("needle graph bounded construction rejects practical allocation cap") {
+  auto fixture = load_contract_fixture();
+  fixture.contract.geo.kv_window = 65536u;
+
+  const auto result =
+      emel::model::needle::graph::sm::create(fixture.contract);
+  CHECK(result.machine == nullptr);
+  CHECK(result.err == emel::error::cast(
+                          emel::model::needle::graph::error::geometry_unsupported));
+}
+
+TEST_CASE("needle graph GQA2 route falls back when runtime AVX2 is disabled") {
+  auto fixture = load_contract_fixture();
+  emel::model::needle::graph::action::context ctx{fixture.contract};
+  ctx.avx2_fma_available = false;
+  emel::model::needle::graph::event::step_ctx step{};
+  const emel::model::needle::graph::event::step_run run{step};
+
+  CHECK_FALSE(
+      emel::model::needle::graph::guard::guard_attend_gqa2{}(run, ctx));
+  CHECK(emel::model::needle::graph::guard::guard_attend_generic{}(run, ctx));
+}
+
+TEST_CASE("needle graph engram dilation gathers exact dilated tap positions") {
+  std::array<uint32_t, 4u> gathered{};
+  for (uint32_t tap = 0u; tap < gathered.size(); ++tap) {
+    gathered[tap] =
+        emel::model::needle::graph::action::compute_engram_tap_position(
+            11u, tap, 3u);
+  }
+  CHECK(gathered == std::array<uint32_t, 4u>{11u, 8u, 5u, 2u});
+}
+
+
 TEST_CASE("needle graph diagnostics reject invalid clocks and stay observational") {
   auto fixture = load_contract_fixture();
   emel::model::needle::graph::sm graph{fixture.contract};

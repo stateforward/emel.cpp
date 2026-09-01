@@ -492,6 +492,30 @@ TEST_CASE("needle binder rejects geometry capacity and engram inconsistencies") 
     bad.engram_slots = 0u;
     check_geometry_error(bad);
   }
+
+  SUBCASE("derived attention geometry must not overflow") {
+    auto bad = geometry;
+    bad.num_heads = UINT32_MAX;
+    bad.head_dim = 2u;
+    check_geometry_error(bad);
+  }
+  SUBCASE("derived mHC geometry must not overflow") {
+    auto bad = geometry;
+    bad.mhc_lanes = UINT32_MAX;
+    check_geometry_error(bad);
+  }
+  SUBCASE("derived engram geometry must not overflow") {
+    auto bad = geometry;
+    bad.num_engram_tables = UINT32_MAX;
+    bad.engram_slots = 2u;
+    check_geometry_error(bad);
+  }
+  SUBCASE("dilated engram history extent must not overflow") {
+    auto bad = geometry;
+    bad.engram_conv_taps = UINT32_MAX;
+    bad.engram_conv_dilation = UINT32_MAX;
+    check_geometry_error(bad);
+  }
 }
 
 TEST_CASE("needle binder classifies failures in later positional sections") {

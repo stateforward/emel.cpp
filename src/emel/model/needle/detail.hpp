@@ -4,9 +4,13 @@
 #include <bit>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <span>
 
 #include "emel/error/error.hpp"
+#include "emel/kernel/engram/events.hpp"
+#include "emel/kernel/mhc/events.hpp"
+
 #include "emel/model/needle/errors.hpp"
 #include "emel/model/needle/events.hpp"
 
@@ -24,6 +28,21 @@ inline constexpr uint32_t dtype_raw = 4u;
 inline emel::error::type cast_needle_error(const error err) noexcept {
   return emel::error::cast(err);
 }
+
+inline bool checked_product(const uint32_t lhs, const uint32_t rhs,
+                            uint32_t &out) noexcept {
+  const uint64_t product = static_cast<uint64_t>(lhs) * rhs;
+  out = static_cast<uint32_t>(product);
+  return product <= std::numeric_limits<uint32_t>::max();
+}
+
+inline bool checked_product(const uint32_t first, const uint32_t second,
+                            const uint32_t third, uint32_t &out) noexcept {
+  const uint64_t product = static_cast<uint64_t>(first) * second * third;
+  out = static_cast<uint32_t>(product);
+  return product <= std::numeric_limits<uint32_t>::max();
+}
+
 
 // Expected geometry of one positional tensor role. `shape` entries beyond
 // `ndim` must be zero in the directory record; a zero entry inside `ndim`
@@ -77,21 +96,72 @@ inline float compute_f16_to_f32(const uint8_t *bytes) noexcept {
 // Validates the header geometry against the fixed contract capacities and the
 // derived-dimension invariants the role table depends on.
 inline emel::error::type validate_geometry(const geometry &geo) noexcept {
+  constexpr uint32_t k_max_d_model = 8192u;
+  constexpr uint32_t k_max_attention_dim = 65536u;
+  constexpr uint32_t k_max_vocab_size = 1048576u;
+  constexpr uint32_t k_max_kv_window = 65536u;
+  constexpr uint32_t k_max_sequence_length = 1048576u;
+  constexpr uint32_t k_max_hadamard_dim = 65536u;
+  constexpr uint32_t k_max_engram_slots = 1048576u;
+  constexpr uint32_t k_max_engram_embed_dim = 65536u;
+  constexpr uint32_t k_max_engram_conv_taps = 1024u;
+
   if (geo.d_model == 0u || geo.vocab_size == 0u || geo.num_heads == 0u ||
       geo.num_kv_heads == 0u || geo.head_dim == 0u || geo.hada_n == 0u ||
-      geo.mhc_lanes == 0u) {
+      geo.mhc_lanes == 0u || geo.kv_window == 0u ||
+      geo.max_seq_len == 0u) {
     return cast_needle_error(error::geometry_invalid);
   }
-  if (geo.num_layers == 0u || geo.num_layers > k_max_layers) {
+  if (geo.d_model > k_max_d_model || geo.vocab_size > k_max_vocab_size ||
+      geo.kv_window > k_max_kv_window ||
+      geo.max_seq_len > k_max_sequence_length ||
+      geo.hada_n > k_max_hadamard_dim) {
     return cast_needle_error(error::geometry_invalid);
   }
-  if (geo.num_engram_sites > k_max_engram_sites) {
+  if (geo.num_layers == 0u || geo.num_layers > k_max_layers ||
+      geo.num_engram_sites > k_max_engram_sites ||
+      geo.mhc_lanes > emel::kernel::mhc::event::k_max_lanes ||
+      geo.num_engram_orders > emel::kernel::engram::event::k_max_orders) {
     return cast_needle_error(error::geometry_invalid);
   }
-  if (geo.num_engram_sites > 0u &&
-      (geo.engram_slots == 0u || geo.engram_sub_dim == 0u ||
-       geo.num_engram_tables == 0u || geo.engram_conv_taps == 0u)) {
+
+  uint32_t attn_dim = 0u;
+  uint32_t kv_dim = 0u;
+  uint32_t lanes_dim = 0u;
+  uint32_t phi_rows = 0u;
+  if (!checked_product(geo.num_heads, geo.head_dim, attn_dim) ||
+      !checked_product(geo.num_kv_heads, geo.head_dim, kv_dim) ||
+      !checked_product(geo.mhc_lanes, geo.d_model, lanes_dim) ||
+      !checked_product(geo.num_layers, geo.mhc_lanes, geo.mhc_lanes,
+                       phi_rows) ||
+      attn_dim > k_max_attention_dim || kv_dim > k_max_attention_dim ||
+      lanes_dim > k_max_attention_dim) {
     return cast_needle_error(error::geometry_invalid);
+  }
+
+  if (geo.num_engram_sites > 0u) {
+    uint32_t table_rows = 0u;
+    uint32_t embed_dim = 0u;
+    uint32_t history_extent = 0u;
+    if (geo.engram_slots == 0u || geo.engram_sub_dim == 0u ||
+        geo.num_engram_tables == 0u || geo.engram_conv_taps == 0u ||
+        geo.engram_conv_dilation == 0u || geo.num_engram_orders == 0u ||
+        geo.engram_slots > k_max_engram_slots ||
+        geo.engram_conv_taps > k_max_engram_conv_taps ||
+        !checked_product(geo.num_engram_tables, geo.engram_slots,
+                         table_rows) ||
+        !checked_product(geo.num_engram_tables, geo.engram_sub_dim,
+                         embed_dim) ||
+        !checked_product(geo.engram_conv_taps - 1u,
+                         geo.engram_conv_dilation, history_extent) ||
+        embed_dim > k_max_engram_embed_dim) {
+      return cast_needle_error(error::geometry_invalid);
+    }
+    for (uint32_t i = 0u; i < geo.num_engram_orders; ++i) {
+      if (geo.engram_orders[i] == 0u) {
+        return cast_needle_error(error::geometry_invalid);
+      }
+    }
   }
   return cast_needle_error(error::none);
 }
@@ -113,8 +183,12 @@ inline emel::error::type bind_layer(const std::span<const tensor_view> views,
                                     const geometry &geo,
                                     layer_views &layer_out) noexcept {
   const uint32_t d = geo.d_model;
-  const uint32_t attn_dim = geo.num_heads * geo.head_dim;
-  const uint32_t kv_dim = geo.num_kv_heads * geo.head_dim;
+  uint32_t attn_dim = 0u;
+  uint32_t kv_dim = 0u;
+  if (!checked_product(geo.num_heads, geo.head_dim, attn_dim) ||
+      !checked_product(geo.num_kv_heads, geo.head_dim, kv_dim)) {
+    return cast_needle_error(error::geometry_invalid);
+  }
   const std::array<role_spec, k_layer_tensor_count> specs = {{
       {constants::dtype_fp16, 1u, {d, 0u, 0u, 0u}},            // norm_in
       {constants::dtype_cq, 2u, {attn_dim, d, 0u, 0u}},        // q_proj
@@ -158,7 +232,14 @@ inline emel::error::type bind_mhc(const std::span<const tensor_view> views,
                                   mhc_views &mhc_out) noexcept {
   const uint32_t layers = geo.num_layers;
   const uint32_t lanes = geo.mhc_lanes;
-  const uint32_t nc = lanes * geo.d_model;
+  uint32_t nc = 0u;
+  uint32_t layer_lanes = 0u;
+  uint32_t layer_lane_pairs = 0u;
+  if (!checked_product(lanes, geo.d_model, nc) ||
+      !checked_product(layers, lanes, layer_lanes) ||
+      !checked_product(layers, lanes, lanes, layer_lane_pairs)) {
+    return cast_needle_error(error::geometry_invalid);
+  }
   const std::array<role_spec, k_mhc_tensor_count> specs = {{
       {constants::dtype_fp16, 1u, {layers, 0u, 0u, 0u}},       // a_pre
       {constants::dtype_fp16, 1u, {layers, 0u, 0u, 0u}},       // a_post
@@ -166,11 +247,9 @@ inline emel::error::type bind_mhc(const std::span<const tensor_view> views,
       {constants::dtype_fp16, 2u, {layers, lanes, 0u, 0u}},    // b_pre
       {constants::dtype_fp16, 2u, {layers, lanes, 0u, 0u}},    // b_post
       {constants::dtype_fp16, 3u, {layers, lanes, lanes, 0u}}, // b_res
-      {constants::dtype_cq, 2u, {layers * lanes, nc, 0u, 0u}}, // phi_pre
-      {constants::dtype_cq, 2u, {layers * lanes, nc, 0u, 0u}}, // phi_post
-      {constants::dtype_cq,
-       2u,
-       {layers * lanes * lanes, nc, 0u, 0u}}, // phi_res
+      {constants::dtype_cq, 2u, {layer_lanes, nc, 0u, 0u}}, // phi_pre
+      {constants::dtype_cq, 2u, {layer_lanes, nc, 0u, 0u}}, // phi_post
+      {constants::dtype_cq, 2u, {layer_lane_pairs, nc, 0u, 0u}}, // phi_res
   }};
 
   std::array<tensor_view *, k_mhc_tensor_count> slots = {
@@ -196,8 +275,12 @@ inline emel::error::type
 bind_engram_site(const std::span<const tensor_view> views, const geometry &geo,
                  engram_site_views &site_out) noexcept {
   const uint32_t d = geo.d_model;
-  const uint32_t table_rows = geo.num_engram_tables * geo.engram_slots;
-  const uint32_t embed_dim = geo.num_engram_tables * geo.engram_sub_dim;
+  uint32_t table_rows = 0u;
+  uint32_t embed_dim = 0u;
+  if (!checked_product(geo.num_engram_tables, geo.engram_slots, table_rows) ||
+      !checked_product(geo.num_engram_tables, geo.engram_sub_dim, embed_dim)) {
+    return cast_needle_error(error::geometry_invalid);
+  }
   const std::array<role_spec, k_engram_site_tensor_count> specs = {{
       {constants::dtype_cq, 2u, {table_rows, geo.engram_sub_dim, 0u, 0u}},
       {constants::dtype_cq, 2u, {d, embed_dim, 0u, 0u}},
@@ -269,7 +352,8 @@ inline emel::error::type bind_heads(const std::span<const tensor_view> views,
     const tensor_view &proj = views[2u + h * k_head_tensor_count];
     const tensor_view &bias = views[3u + h * k_head_tensor_count];
 
-    const role_spec probes_spec = {constants::dtype_fp16, 2u, {0u, d, 0u, 0u}};
+    const role_spec probes_spec = {constants::dtype_fp16, 2u,
+                                   {0u, d, 0u, 0u}};
     const emel::error::type probes_err = validate_role(probes, probes_spec);
     if (probes_err != cast_needle_error(error::none)) {
       return probes_err;
@@ -278,8 +362,12 @@ inline emel::error::type bind_heads(const std::span<const tensor_view> views,
       return cast_needle_error(error::tensor_shape_mismatch);
     }
 
+    uint32_t probe_width = 0u;
+    if (!checked_product(probes.shape[0], d, probe_width)) {
+      return cast_needle_error(error::tensor_shape_mismatch);
+    }
     const role_spec proj_spec = {
-        constants::dtype_fp16, 2u, {0u, probes.shape[0] * d, 0u, 0u}};
+        constants::dtype_fp16, 2u, {0u, probe_width, 0u, 0u}};
     const emel::error::type proj_err = validate_role(proj, proj_spec);
     if (proj_err != cast_needle_error(error::none)) {
       return proj_err;

@@ -7,6 +7,9 @@
 #include "emel/model/needle/graph/errors.hpp"
 #include "emel/model/needle/graph/events.hpp"
 #include "emel/model/needle/graph/guards.hpp"
+#include <memory>
+#include <new>
+
 #include "emel/sm.hpp"
 
 namespace emel::model::needle::graph {
@@ -332,6 +335,26 @@ struct basic_sm
       emel::sm<model<vector_exp, projection_route>, action::context>;
   using base_type::is;
   using base_type::visit_current_states;
+
+  struct construction_result {
+    std::unique_ptr<basic_sm> machine = {};
+    emel::error::type err = emel::error::cast(error::none);
+  };
+
+  static construction_result
+  create(const needle::contract &contract_in) noexcept {
+    const emel::error::type geometry_err =
+        action::validate_construction(contract_in);
+    if (geometry_err != emel::error::cast(error::none))
+      return {.machine = {}, .err = geometry_err};
+    try {
+      return {.machine = std::unique_ptr<basic_sm>{new basic_sm{contract_in}},
+              .err = emel::error::cast(error::none)};
+    } catch (const std::bad_alloc &) {
+      return {.machine = {},
+              .err = emel::error::cast(error::capacity_exceeded)};
+    }
+  }
 
   explicit basic_sm(const needle::contract &contract_in)
       : base_type(std::in_place, contract_in,

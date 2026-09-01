@@ -5,6 +5,8 @@
 #include <cstdint>
 #include <optional>
 #include <utility>
+#include <limits>
+
 #include <vector>
 
 #include "emel/kernel/cq/sm.hpp"
@@ -15,7 +17,10 @@
 #include "emel/kernel/swa/sm.hpp"
 #include "emel/kernel/zcrms/sm.hpp"
 #include "emel/model/needle/graph/events.hpp"
+#include "emel/model/needle/graph/errors.hpp"
 #include "emel/model/needle/events.hpp"
+#include "emel/model/needle/detail.hpp"
+
 
 namespace emel::model::needle::graph::action {
 
@@ -65,36 +70,250 @@ struct activation_payload {
 // contract: the reference decode path (configure_deploy kv_bits=8 ->
 // KV_BITS=0 -> no KV quantization) also runs f32 caches, so kv_bits in the
 // header stays a baked deployment hint, not a runtime obligation.
+inline constexpr uint64_t k_max_graph_storage_bytes = uint64_t{1} << 30u;
+
+struct storage_plan {
+  uint64_t lanes_dim = 0u;
+  uint64_t attn_dim = 0u;
+  uint64_t kv_dim = 0u;
+  uint64_t cache_floats = 0u;
+  uint64_t max_order = 0u;
+  uint64_t tables = 0u;
+  uint64_t engram_e_dim = 0u;
+  uint64_t hash_window = 0u;
+  uint64_t cq_workspace = 0u;
+  uint64_t prepared_indices = 0u;
+  uint64_t prepared_norms = 0u;
+  uint64_t prepared_norms_by_group32 = 0u;
+
+  uint64_t total_bytes = 0u;
+};
+
+inline bool checked_add(const uint64_t lhs, const uint64_t rhs,
+                        uint64_t &out) noexcept {
+  if (lhs > std::numeric_limits<uint64_t>::max() - rhs)
+    return false;
+  out = lhs + rhs;
+  return true;
+}
+
+inline bool checked_mul(const uint64_t lhs, const uint64_t rhs,
+                        uint64_t &out) noexcept {
+  if (lhs != 0u && rhs > std::numeric_limits<uint64_t>::max() / lhs)
+    return false;
+  out = lhs * rhs;
+  return true;
+}
+
+inline bool add_storage(uint64_t elements, const uint64_t element_bytes,
+                        uint64_t &total) noexcept {
+  uint64_t bytes = 0u;
+  return checked_mul(elements, element_bytes, bytes) &&
+         checked_add(total, bytes, total) &&
+         total <= k_max_graph_storage_bytes;
+}
+
+inline uint64_t compute_max_order(
+    const emel::cact::loader::geometry &geo) noexcept {
+  uint64_t max_order = 1u;
+  for (uint32_t i = 0u; i < geo.num_engram_orders; ++i)
+    max_order = geo.engram_orders[i] > max_order ? geo.engram_orders[i]
+                                                   : max_order;
+  return max_order;
+}
+
+inline uint64_t compute_in_pad(const tensor_view &view) noexcept {
+  const uint64_t group = view.group != 0u ? view.group : 1u;
+  return (static_cast<uint64_t>(view.shape[1]) + group - 1u) / group * group;
+}
+
+inline bool compute_storage_plan(const needle::contract &bound,
+                                 storage_plan &plan) noexcept {
+  const auto &geo = bound.geo;
+  if (needle::detail::validate_geometry(geo) !=
+      needle::detail::cast_needle_error(needle::error::none))
+    return false;
+
+  uint64_t cache_layer = 0u;
+  uint64_t rope_floats = 0u;
+  uint64_t layer_model = 0u;
+  uint64_t layer_head = 0u;
+  uint64_t layer_lanes = 0u;
+  uint64_t hash_extent = 0u;
+  uint64_t hash_tables = 0u;
+  uint64_t engram_tap_embed = 0u;
+  uint64_t engram_tap_model = 0u;
+  uint64_t engram_site_model = 0u;
+
+  plan.max_order = compute_max_order(geo);
+  plan.tables = geo.num_engram_tables;
+  if (!checked_mul(geo.mhc_lanes, geo.d_model, plan.lanes_dim) ||
+      !checked_mul(geo.num_heads, geo.head_dim, plan.attn_dim) ||
+      !checked_mul(geo.num_kv_heads, geo.head_dim, plan.kv_dim) ||
+      !checked_mul(plan.kv_dim, geo.kv_window, cache_layer) ||
+      !checked_mul(cache_layer, geo.num_layers, plan.cache_floats) ||
+      !checked_mul(geo.max_seq_len, geo.head_dim / 2u, rope_floats) ||
+      !checked_mul(geo.num_layers, geo.d_model, layer_model) ||
+      !checked_mul(geo.num_layers, geo.head_dim, layer_head) ||
+      !checked_mul(geo.mhc_lanes, geo.mhc_lanes, layer_lanes) ||
+      !checked_mul(geo.num_engram_tables, geo.engram_sub_dim,
+                   plan.engram_e_dim) ||
+      !checked_mul(geo.engram_conv_taps - 1u, geo.engram_conv_dilation,
+                   hash_extent) ||
+      !checked_mul(hash_extent, plan.max_order, hash_extent) ||
+      !checked_add(hash_extent, 1u, plan.hash_window) ||
+      !checked_mul(plan.hash_window, plan.tables, hash_tables) ||
+      !checked_mul(geo.engram_conv_taps, plan.engram_e_dim,
+                   engram_tap_embed) ||
+      !checked_mul(geo.engram_conv_taps, geo.d_model, engram_tap_model) ||
+      !checked_mul(geo.num_engram_sites, geo.d_model, engram_site_model))
+    return false;
+
+  uint64_t total = 0u;
+  const auto floats = [&](const uint64_t count) noexcept {
+    return add_storage(count, sizeof(float), total);
+  };
+  const auto bytes = [&](const uint64_t count) noexcept {
+    return add_storage(count, sizeof(uint8_t), total);
+  };
+  const auto tokens = [&](const uint64_t count) noexcept {
+    return add_storage(count, sizeof(int32_t), total);
+  };
+  const auto indices = [&](const uint64_t count) noexcept {
+    return add_storage(count, sizeof(uint32_t), total);
+  };
+  if (!floats(plan.lanes_dim * 3u) || !floats(layer_lanes) ||
+      !floats(8u * geo.d_model) || !floats(4u * plan.attn_dim) ||
+      !floats(2u * plan.kv_dim) || !floats(geo.hada_n) ||
+      !floats(2u * geo.kv_window) || !floats(2u * plan.cache_floats) ||
+      !tokens(geo.max_seq_len) || !bytes(geo.max_seq_len) ||
+      !floats(2u * rope_floats) || !floats(3u * layer_model) ||
+      !floats(2u * layer_head) || !floats(geo.num_layers) ||
+      !floats(geo.d_model) || !tokens(plan.hash_window) ||
+      !bytes(plan.hash_window) || !indices(hash_tables) ||
+      !floats(hash_tables) || !floats(engram_tap_embed) ||
+      !floats(engram_tap_model) || !bytes(geo.engram_conv_taps) ||
+      !floats(2u * engram_site_model))
+    return false;
+
+  const auto add_prepared = [&](const tensor_view &view) noexcept {
+    const uint64_t in_pad = compute_in_pad(view);
+    if (view.group == 0u || in_pad % view.group != 0u)
+      return false;
+    const uint64_t groups_per_row = in_pad / view.group;
+    uint64_t indices_count = 0u;
+    uint64_t norms_count = 0u;
+    uint64_t group32_rows = static_cast<uint64_t>(view.shape[0] / 32u) * 32u;
+    uint64_t group32_norms = 0u;
+    return checked_mul(view.shape[0], in_pad, indices_count) &&
+           checked_mul(view.shape[0], groups_per_row, norms_count) &&
+           checked_mul(group32_rows, groups_per_row, group32_norms) &&
+           checked_add(plan.prepared_indices, indices_count,
+                       plan.prepared_indices) &&
+           checked_add(plan.prepared_norms, norms_count, plan.prepared_norms) &&
+           checked_add(plan.prepared_norms_by_group32, group32_norms,
+                       plan.prepared_norms_by_group32);
+  };
+  bool prepared_ok = add_prepared(bound.embedding);
+  for (uint32_t i = 0u; prepared_ok && i < bound.layer_count; ++i) {
+    const auto &layer = bound.layers[i];
+    prepared_ok = add_prepared(layer.q_proj) && add_prepared(layer.k_proj) &&
+                  add_prepared(layer.v_proj) &&
+                  add_prepared(layer.gate_proj) &&
+                  add_prepared(layer.out_proj);
+  }
+  prepared_ok = prepared_ok && add_prepared(bound.mhc.phi_pre) &&
+                add_prepared(bound.mhc.phi_post) &&
+                add_prepared(bound.mhc.phi_res);
+  for (uint32_t i = 0u; prepared_ok && i < bound.engram_site_count; ++i) {
+    const auto &site = bound.engram_sites[i];
+    prepared_ok = add_prepared(site.tables) && add_prepared(site.key_proj) &&
+                  add_prepared(site.value_proj);
+  }
+  if (!prepared_ok || !bytes(plan.prepared_indices) ||
+      !bytes(plan.prepared_indices) || !floats(plan.prepared_norms) ||
+      !floats(plan.prepared_norms_by_group32))
+    return false;
+
+  plan.cq_workspace = compute_in_pad(bound.embedding);
+  for (uint32_t i = 0u; i < bound.layer_count; ++i) {
+    const uint64_t layer_pad = compute_in_pad(bound.layers[i].q_proj);
+    const uint64_t out_pad = compute_in_pad(bound.layers[i].out_proj);
+    plan.cq_workspace = layer_pad > plan.cq_workspace ? layer_pad
+                                                      : plan.cq_workspace;
+    plan.cq_workspace = out_pad > plan.cq_workspace ? out_pad
+                                                     : plan.cq_workspace;
+  }
+  const uint64_t phi_pad = compute_in_pad(bound.mhc.phi_res);
+  plan.cq_workspace = phi_pad > plan.cq_workspace ? phi_pad
+                                                   : plan.cq_workspace;
+  for (uint32_t s = 0u; s < bound.engram_site_count; ++s) {
+    const uint64_t site_pad = compute_in_pad(bound.engram_sites[s].key_proj);
+    plan.cq_workspace = site_pad > plan.cq_workspace ? site_pad
+                                                      : plan.cq_workspace;
+  }
+  if (!floats(plan.cq_workspace) || !bytes(plan.cq_workspace) ||
+      !floats(plan.cq_workspace))
+    return false;
+  plan.total_bytes = total;
+  return true;
+}
+inline emel::error::type
+validate_construction(const needle::contract &bound) noexcept {
+  storage_plan plan{};
+  return compute_storage_plan(bound, plan)
+             ? emel::error::cast(error::none)
+             : emel::error::cast(error::geometry_unsupported);
+}
+
 struct context {
   explicit context(const needle::contract &contract_in,
                    const bool parallel_projection_wave = false)
       : bound(&contract_in),
         parallel_projection_wave(parallel_projection_wave) {
+    storage_plan plan{};
+    construction_error = compute_storage_plan(contract_in, plan)
+                             ? emel::error::cast(error::none)
+                             : emel::error::cast(error::geometry_unsupported);
+    storage_valid = construction_error == emel::error::cast(error::none);
+    if (!storage_valid)
+      return;
+
     const auto &geo = contract_in.geo;
     const uint64_t d_model = geo.d_model;
-    const uint64_t lanes_dim = static_cast<uint64_t>(geo.mhc_lanes) * d_model;
-    const uint64_t attn_dim =
-        static_cast<uint64_t>(geo.num_heads) * geo.head_dim;
-    const uint64_t kv_dim =
-        static_cast<uint64_t>(geo.num_kv_heads) * geo.head_dim;
+    const uint64_t lanes_dim = plan.lanes_dim;
+    const uint64_t attn_dim = plan.attn_dim;
+    const uint64_t kv_dim = plan.kv_dim;
     const uint64_t layers = geo.num_layers;
-    const uint64_t cache_floats =
-        layers * kv_dim * static_cast<uint64_t>(geo.kv_window);
+    const uint64_t cache_floats = plan.cache_floats;
     const uint64_t half_dim = geo.head_dim / 2u;
-    const uint64_t max_order = compute_max_order(geo);
-    const uint64_t tables = geo.num_engram_tables;
-    const uint64_t engram_e_dim = tables * geo.engram_sub_dim;
-    // Engram hash window: ENGRAM_CONV_TAPS * max(orders) history positions
-    // plus the current one (decode.py `_engram_window` + S=1).
-    const uint64_t hash_window =
-        static_cast<uint64_t>(geo.engram_conv_taps) * max_order + 1u;
-
+    const uint64_t tables = plan.tables;
+    const uint64_t engram_e_dim = plan.engram_e_dim;
+    const uint64_t hash_window = plan.hash_window;
+    uint64_t layer_model = 0u;
+    uint64_t layer_head = 0u;
+    uint64_t rope_floats = 0u;
+    uint64_t hash_tables = 0u;
+    uint64_t engram_tap_embed = 0u;
+    uint64_t engram_tap_model = 0u;
+    uint64_t engram_site_model = 0u;
+    uint64_t lane_pairs = 0u;
+    uint64_t attend_floats = 0u;
+    checked_mul(geo.mhc_lanes, geo.mhc_lanes, lane_pairs);
+    checked_mul(geo.kv_window, 2u, attend_floats);
+    checked_mul(layers, d_model, layer_model);
+    checked_mul(layers, geo.head_dim, layer_head);
+    checked_mul(geo.max_seq_len, half_dim, rope_floats);
+    checked_mul(hash_window, tables, hash_tables);
+    checked_mul(geo.engram_conv_taps, engram_e_dim, engram_tap_embed);
+    checked_mul(geo.engram_conv_taps, d_model, engram_tap_model);
+    checked_mul(geo.num_engram_sites, d_model, engram_site_model);
     lanes.resize(lanes_dim);
     lanes_next.resize(lanes_dim);
     nx.resize(lanes_dim);
     pre_dots.resize(geo.mhc_lanes);
     post_dots.resize(geo.mhc_lanes);
-    res_dots.resize(static_cast<uint64_t>(geo.mhc_lanes) * geo.mhc_lanes);
+    res_dots.resize(lane_pairs);
     u.resize(d_model);
     bx.resize(d_model);
     h_norm.resize(d_model);
@@ -110,38 +329,36 @@ struct context {
     attn_out.resize(attn_dim);
     gate_logits.resize(attn_dim);
     hada_workspace.resize(geo.hada_n);
-    attend_workspace.resize(static_cast<uint64_t>(geo.kv_window) * 2u);
+    attend_workspace.resize(attend_floats);
     key_cache.resize(cache_floats);
     value_cache.resize(cache_floats);
     history_tokens.resize(geo.max_seq_len);
     history_valid.resize(geo.max_seq_len);
-    rope_cos.resize(static_cast<uint64_t>(geo.max_seq_len) * half_dim);
-    rope_sin.resize(static_cast<uint64_t>(geo.max_seq_len) * half_dim);
-    norm_in_scale.resize(layers * d_model);
-    post_norm_scale.resize(layers * d_model);
-    pre_hada_scale.resize(layers * d_model);
-    q_norm_scale.resize(layers * geo.head_dim);
-    k_norm_scale.resize(layers * geo.head_dim);
+    rope_cos.resize(rope_floats);
+    rope_sin.resize(rope_floats);
+    norm_in_scale.resize(layer_model);
+    post_norm_scale.resize(layer_model);
+    pre_hada_scale.resize(layer_model);
+    q_norm_scale.resize(layer_head);
+    k_norm_scale.resize(layer_head);
     attn_gate_scale.resize(layers);
     final_norm_scale.resize(d_model);
     engram_hash_tokens.resize(hash_window);
     engram_hash_valid.resize(hash_window);
-    engram_hash_indices.resize(hash_window * tables);
-    engram_ngram_ok.resize(hash_window * tables);
-    engram_e_rows.resize(static_cast<uint64_t>(geo.engram_conv_taps) *
-                         engram_e_dim);
-    engram_v_taps.resize(static_cast<uint64_t>(geo.engram_conv_taps) * d_model);
+    engram_hash_indices.resize(hash_tables);
+    engram_ngram_ok.resize(hash_tables);
+    engram_e_rows.resize(engram_tap_embed);
+    engram_v_taps.resize(engram_tap_model);
     engram_tap_valid.resize(geo.engram_conv_taps);
-    engram_keys.resize(static_cast<uint64_t>(geo.num_engram_sites) * d_model);
-    engram_values.resize(static_cast<uint64_t>(geo.num_engram_sites) * d_model);
-    cq_workspace.resize(compute_cq_workspace(contract_in));
-    a8_quantized.resize(cq_workspace.size());
-    a8_integer_values.resize(cq_workspace.size());
-    const auto prepared_sizes = compute_prepared_sizes(contract_in);
-    prepared_indices.resize(prepared_sizes.indices);
-    prepared_indices_by_input32.resize(prepared_sizes.indices);
-    prepared_norms.resize(prepared_sizes.norms);
-    prepared_norms_by_group32.resize(prepared_sizes.norms_by_group32);
+    engram_keys.resize(engram_site_model);
+    engram_values.resize(engram_site_model);
+    cq_workspace.resize(plan.cq_workspace);
+    a8_quantized.resize(plan.cq_workspace);
+    a8_integer_values.resize(plan.cq_workspace);
+    prepared_indices.resize(plan.prepared_indices);
+    prepared_indices_by_input32.resize(plan.prepared_indices);
+    prepared_norms.resize(plan.prepared_norms);
+    prepared_norms_by_group32.resize(plan.prepared_norms_by_group32);
     if (parallel_projection_wave)
       projection_pool.emplace(3u);
   }
@@ -151,73 +368,22 @@ struct context {
 
   static uint64_t
   compute_max_order(const emel::cact::loader::geometry &geo) noexcept {
-    uint64_t max_order = 1u;
-    for (uint32_t i = 0u; i < geo.num_engram_orders && i < 4u; ++i)
-      max_order =
-          geo.engram_orders[i] > max_order ? geo.engram_orders[i] : max_order;
-    return max_order;
+    return action::compute_max_order(geo);
   }
-
   static uint64_t compute_in_pad(const tensor_view &view) noexcept {
-    const uint64_t group = view.group != 0u ? view.group : 1u;
-    return (static_cast<uint64_t>(view.shape[1]) + group - 1u) / group * group;
+    return action::compute_in_pad(view);
   }
 
-  static uint64_t compute_cq_workspace(const needle::contract &bound) noexcept {
-    uint64_t workspace = compute_in_pad(bound.embedding);
-    for (uint32_t i = 0u; i < bound.layer_count; ++i) {
-      const uint64_t layer_pad = compute_in_pad(bound.layers[i].q_proj);
-      workspace = layer_pad > workspace ? layer_pad : workspace;
-      const uint64_t out_pad = compute_in_pad(bound.layers[i].out_proj);
-      workspace = out_pad > workspace ? out_pad : workspace;
-    }
-    const uint64_t phi_pad = compute_in_pad(bound.mhc.phi_res);
-    workspace = phi_pad > workspace ? phi_pad : workspace;
-    for (uint32_t s = 0u; s < bound.engram_site_count; ++s) {
-      const uint64_t site_pad = compute_in_pad(bound.engram_sites[s].key_proj);
-      workspace = site_pad > workspace ? site_pad : workspace;
-    }
-    return workspace;
-  }
-
-  struct prepared_storage_sizes {
-    uint64_t indices = 0u;
-    uint64_t norms = 0u;
-    uint64_t norms_by_group32 = 0u;
-  };
-
-  static prepared_storage_sizes
-  compute_prepared_sizes(const needle::contract &bound) noexcept {
-    prepared_storage_sizes sizes{};
-    const auto add = [&](const tensor_view &view) {
-      const uint64_t in_pad = compute_in_pad(view);
-      const uint64_t groups_per_row = in_pad / view.group;
-      sizes.indices += static_cast<uint64_t>(view.shape[0]) * in_pad;
-      sizes.norms += static_cast<uint64_t>(view.shape[0]) * groups_per_row;
-      sizes.norms_by_group32 +=
-          static_cast<uint64_t>(view.shape[0] / 32u * 32u) * groups_per_row;
-    };
-    add(bound.embedding);
-    for (uint32_t i = 0u; i < bound.layer_count; ++i) {
-      add(bound.layers[i].q_proj);
-      add(bound.layers[i].k_proj);
-      add(bound.layers[i].v_proj);
-      add(bound.layers[i].gate_proj);
-      add(bound.layers[i].out_proj);
-    }
-    add(bound.mhc.phi_pre);
-    add(bound.mhc.phi_post);
-    add(bound.mhc.phi_res);
-    for (uint32_t i = 0u; i < bound.engram_site_count; ++i) {
-      add(bound.engram_sites[i].tables);
-      add(bound.engram_sites[i].key_proj);
-      add(bound.engram_sites[i].value_proj);
-    }
-    return sizes;
-  }
 
   // Bound contract (named views over the mmapped .cact); outlives the graph.
   const needle::contract *bound = nullptr;
+  bool storage_valid = false;
+  bool avx2_fma_available =
+      emel::kernel::x86_64::detail::detect_avx2() &&
+      emel::kernel::x86_64::detail::detect_fma();
+  emel::error::type construction_error =
+      emel::error::cast(error::geometry_unsupported);
+
 
   // Logical position of the next cache slot (persists across dispatches).
   uint32_t position = 0u;

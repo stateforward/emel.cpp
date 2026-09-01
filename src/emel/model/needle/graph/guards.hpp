@@ -52,7 +52,8 @@ struct guard_route_avx2 {
   bool operator()(const event::step_run &,
                   const action::context &ctx) const noexcept {
     const auto &geo = ctx.bound->geo;
-    return k_avx2_route_available &&
+    return ctx.storage_valid && k_avx2_route_available &&
+           ctx.avx2_fma_available &&
 #if defined(__F16C__)
            emel::kernel::hadamard::guard::avx2_fma_f16c_available() &&
 #else
@@ -75,7 +76,7 @@ struct guard_attend_gqa2 {
                   const action::context &ctx) const noexcept {
     const auto &geo = ctx.bound->geo;
     return ev.ctx.err == emel::error::cast(error::none) &&
-           k_avx2_route_available &&
+           k_avx2_route_available && ctx.avx2_fma_available &&
            geo.num_heads == geo.num_kv_heads * 2u && geo.head_dim > 0u &&
            ctx.attend_workspace.size() >=
                static_cast<uint64_t>(geo.kv_window) * 2u;
@@ -117,11 +118,12 @@ struct guard_init_supported {
   bool operator()(const event::init_run &,
                   const action::context &ctx) const noexcept {
     const auto &geo = ctx.bound->geo;
-    return geo.d_model > 0u && geo.num_heads > 0u && geo.num_kv_heads > 0u &&
+    return ctx.storage_valid && geo.d_model > 0u && geo.num_heads > 0u &&
+           geo.num_kv_heads > 0u &&
            (geo.num_heads % geo.num_kv_heads) == 0u && geo.head_dim >= 2u &&
            (geo.head_dim % 2u) == 0u &&
-           geo.num_heads * geo.head_dim >= geo.d_model && geo.num_layers > 0u &&
-           ctx.bound->layer_count == geo.num_layers &&
+           static_cast<uint64_t>(geo.num_heads) * geo.head_dim >= geo.d_model &&
+           geo.num_layers > 0u && ctx.bound->layer_count == geo.num_layers &&
            is_power_of_two(geo.hada_n) && geo.hada_n >= geo.d_model &&
            geo.mhc_lanes > 0u &&
            geo.mhc_lanes <= emel::kernel::mhc::event::k_max_lanes &&

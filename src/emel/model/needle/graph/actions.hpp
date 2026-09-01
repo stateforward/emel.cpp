@@ -489,6 +489,12 @@ inline bool compute_step_begin(context &ctx, event::step_ctx &step) noexcept {
   step.layer_index = 0u;
   return embed_ok;
 }
+inline uint32_t compute_engram_tap_position(const uint32_t window,
+                                            const uint32_t tap,
+                                            const uint32_t dilation) noexcept {
+  return window - tap * dilation;
+}
+
 
 // Engram K/V for the current position: FNV-mix hash over the token window,
 // masked table-row gathers, key/value projections, and the dilated causal
@@ -502,7 +508,9 @@ inline bool compute_engram(context &ctx) noexcept {
     const uint32_t d_model = geo.d_model;
     const uint32_t max_order =
         static_cast<uint32_t>(context::compute_max_order(geo));
-    const uint32_t window = geo.engram_conv_taps * max_order;
+    const uint32_t history_extent =
+        (geo.engram_conv_taps - 1u) * geo.engram_conv_dilation;
+    const uint32_t window = history_extent + max_order - 1u;
     const uint32_t positions = window + 1u;
     const uint32_t tables = geo.num_engram_tables;
     const uint32_t sub_dim = geo.engram_sub_dim;
@@ -536,7 +544,8 @@ inline bool compute_engram(context &ctx) noexcept {
     for (uint32_t site = 0u; site < bound.engram_site_count; ++site) {
       const auto &views = bound.engram_sites[site];
       for (uint32_t tap = 0u; tap < geo.engram_conv_taps; ++tap) {
-        const uint32_t p = window - tap * max_order;
+        const uint32_t p = compute_engram_tap_position(
+            window, tap, geo.engram_conv_dilation);
         ctx.engram_tap_valid[tap] = ctx.engram_hash_valid[p];
         float *e_row =
             ctx.engram_e_rows.data() + static_cast<size_t>(tap) * e_dim;
