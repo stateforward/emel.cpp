@@ -554,6 +554,61 @@ TEST_CASE("needle tokenizer matches RefTokenizer for all heldout prompts") {
   CHECK(native_hash == reference_hash);
 }
 
+TEST_CASE("needle tokenizer loader handles empty public callbacks explicitly") {
+  const std::vector<uint8_t> file_bytes =
+      read_file_bytes(repo_relative("tests/models/route-w4-qat.cact"));
+  std::vector<emel::cact::loader::tensor_view> tensors;
+  emel::model::needle::contract contract = {};
+  const std::span<const uint8_t> blob =
+      fixture_tokenizer_blob(file_bytes, tensors, contract);
+  const emel::text::tokenizer::needle::event::load_done_fn empty_done{};
+  const emel::text::tokenizer::needle::event::load_error_fn empty_error{};
+
+  SUBCASE("a valid load allows the optional error callback to be absent") {
+    emel::text::tokenizer::needle::sm machine{};
+    loader_state state = {};
+    loader_scope scope{state};
+    auto vocab = std::make_unique<emel::model::data::vocab>();
+    const emel::text::tokenizer::needle::event::load load{
+        blob, *vocab, k_load_done_cb, empty_error};
+
+    CHECK(machine.process_event(load));
+    CHECK(state.done_count == 1u);
+    CHECK(state.error_count == 0u);
+    CHECK(machine.is(
+        stateforward::sml::state<emel::text::tokenizer::needle::state_loaded>));
+  }
+
+  SUBCASE("a missing required done callback reports invalid_request") {
+    emel::text::tokenizer::needle::sm machine{};
+    loader_state state = {};
+    loader_scope scope{state};
+    auto vocab = std::make_unique<emel::model::data::vocab>();
+    const emel::text::tokenizer::needle::event::load load{
+        blob, *vocab, empty_done, k_load_error_cb};
+
+    CHECK_FALSE(machine.process_event(load));
+    CHECK(state.done_count == 0u);
+    CHECK(state.error_count == 1u);
+    CHECK(state.err ==
+          emel::error::cast(
+              emel::text::tokenizer::needle::error::invalid_request));
+    CHECK(machine.is(
+        stateforward::sml::state<emel::text::tokenizer::needle::state_errored>));
+  }
+
+  SUBCASE("an invalid load allows the optional error callback to be absent") {
+    emel::text::tokenizer::needle::sm machine{};
+    auto vocab = std::make_unique<emel::model::data::vocab>();
+    const emel::text::tokenizer::needle::event::load load{
+        std::span<const uint8_t>{}, *vocab, k_load_done_cb, empty_error};
+
+    CHECK_FALSE(machine.process_event(load));
+    CHECK(machine.is(
+        stateforward::sml::state<emel::text::tokenizer::needle::state_errored>));
+  }
+}
+
 TEST_CASE("needle tokenizer loader rejects malformed blobs") {
   const std::vector<uint8_t> file_bytes =
       read_file_bytes(repo_relative("tests/models/route-w4-qat.cact"));

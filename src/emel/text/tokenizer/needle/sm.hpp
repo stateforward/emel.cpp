@@ -21,6 +21,8 @@ struct state_errored {};
 
 struct state_load_request_decision {};
 struct state_load_outcome_dispatch {};
+struct state_load_done_callback_decision {};
+struct state_load_error_callback_decision {};
 
 struct model {
   auto operator()() const {
@@ -44,27 +46,33 @@ struct model {
           + sml::completion<event::load_runtime> [ guard::guard_load_invalid_request{} ]
           / action::effect_mark_load_invalid_request
 
-      , sml::state<state_loaded> <= sml::state<state_load_outcome_dispatch>
+      , sml::state<state_load_done_callback_decision> <= sml::state<state_load_outcome_dispatch>
           + sml::completion<event::load_runtime> [ guard::guard_load_error_none{} ]
-          / action::effect_publish_load_done
-      , sml::state<state_errored> <= sml::state<state_load_outcome_dispatch>
+      , sml::state<state_load_error_callback_decision> <= sml::state<state_load_outcome_dispatch>
           + sml::completion<event::load_runtime> [ guard::guard_load_error_invalid_request{} ]
-          / action::effect_publish_load_error
-      , sml::state<state_errored> <= sml::state<state_load_outcome_dispatch>
+      , sml::state<state_load_error_callback_decision> <= sml::state<state_load_outcome_dispatch>
           + sml::completion<event::load_runtime> [ guard::guard_load_error_model_invalid{} ]
-          / action::effect_publish_load_error
-      , sml::state<state_errored> <= sml::state<state_load_outcome_dispatch>
+      , sml::state<state_load_error_callback_decision> <= sml::state<state_load_outcome_dispatch>
           + sml::completion<event::load_runtime> [ guard::guard_load_error_capacity{} ]
-          / action::effect_publish_load_error
-      , sml::state<state_errored> <= sml::state<state_load_outcome_dispatch>
+      , sml::state<state_load_error_callback_decision> <= sml::state<state_load_outcome_dispatch>
           + sml::completion<event::load_runtime> [ guard::guard_load_error_parse_failed{} ]
-          / action::effect_publish_load_error
-      , sml::state<state_errored> <= sml::state<state_load_outcome_dispatch>
+      , sml::state<state_load_error_callback_decision> <= sml::state<state_load_outcome_dispatch>
           + sml::completion<event::load_runtime> [ guard::guard_load_error_internal_error{} ]
-          / action::effect_publish_load_error
-      , sml::state<state_errored> <= sml::state<state_load_outcome_dispatch>
+      , sml::state<state_load_error_callback_decision> <= sml::state<state_load_outcome_dispatch>
           + sml::completion<event::load_runtime> [ guard::guard_load_error_unknown{} ]
+
+      , sml::state<state_loaded> <= sml::state<state_load_done_callback_decision>
+          + sml::completion<event::load_runtime> [ guard::guard_load_done_callback_present{} ]
+          / action::effect_publish_load_done
+      , sml::state<state_errored> <= sml::state<state_load_done_callback_decision>
+          + sml::completion<event::load_runtime> [ guard::guard_load_done_callback_absent{} ]
+          / action::effect_mark_load_invalid_request
+
+      , sml::state<state_errored> <= sml::state<state_load_error_callback_decision>
+          + sml::completion<event::load_runtime> [ guard::guard_load_error_callback_present{} ]
           / action::effect_publish_load_error
+      , sml::state<state_errored> <= sml::state<state_load_error_callback_decision>
+          + sml::completion<event::load_runtime> [ guard::guard_load_error_callback_absent{} ]
 
       //------------------------------------------------------------------------------//
       // Unexpected events.
@@ -77,6 +85,10 @@ struct model {
       , sml::state<state_errored> <= sml::state<state_load_request_decision> + sml::unexpected_event<sml::_>
           / action::effect_on_unexpected
       , sml::state<state_errored> <= sml::state<state_load_outcome_dispatch> + sml::unexpected_event<sml::_>
+          / action::effect_on_unexpected
+      , sml::state<state_errored> <= sml::state<state_load_done_callback_decision> + sml::unexpected_event<sml::_>
+          / action::effect_on_unexpected
+      , sml::state<state_errored> <= sml::state<state_load_error_callback_decision> + sml::unexpected_event<sml::_>
           / action::effect_on_unexpected
     );
     // clang-format on

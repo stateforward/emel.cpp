@@ -25,7 +25,8 @@ inline bool error_is_unknown(const emel::error::type runtime_err) noexcept {
 struct guard_bind_valid_request {
   bool operator()(const event::bind_runtime &ev,
                   const action::context &) const noexcept {
-    return ev.request.tensors.data() != nullptr && !ev.request.tensors.empty();
+    return ev.request.tensors.data() != nullptr && !ev.request.tensors.empty() &&
+           static_cast<bool>(ev.request.on_done);
   }
 };
 
@@ -33,6 +34,34 @@ struct guard_bind_invalid_request {
   bool operator()(const event::bind_runtime &ev,
                   const action::context &ctx) const noexcept {
     return !guard_bind_valid_request{}(ev, ctx);
+  }
+};
+
+struct guard_bind_done_callback_present {
+  bool operator()(const event::bind_runtime &ev,
+                  const action::context &) const noexcept {
+    return static_cast<bool>(ev.request.on_done);
+  }
+};
+
+struct guard_bind_done_callback_absent {
+  bool operator()(const event::bind_runtime &ev,
+                  const action::context &ctx) const noexcept {
+    return !guard_bind_done_callback_present{}(ev, ctx);
+  }
+};
+
+struct guard_bind_error_callback_present {
+  bool operator()(const event::bind_runtime &ev,
+                  const action::context &) const noexcept {
+    return static_cast<bool>(ev.request.on_error);
+  }
+};
+
+struct guard_bind_error_callback_absent {
+  bool operator()(const event::bind_runtime &ev,
+                  const action::context &ctx) const noexcept {
+    return !guard_bind_error_callback_present{}(ev, ctx);
   }
 };
 

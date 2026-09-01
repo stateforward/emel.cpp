@@ -290,6 +290,69 @@ TEST_CASE("needle binder rejects an empty tensor span as invalid_request") {
       machine.is(stateforward::sml::state<emel::model::needle::state_errored>));
 }
 
+TEST_CASE("needle binder handles empty public callbacks explicitly") {
+  const emel::model::needle::event::bind_done_fn empty_done{};
+  const emel::model::needle::event::bind_error_fn empty_error{};
+
+  SUBCASE("a valid bind allows the optional error callback to be absent") {
+    const std::vector<uint8_t> file_bytes =
+        read_file_bytes(fixture_model_path());
+    emel::cact::loader::geometry geometry = {};
+    std::vector<emel::cact::loader::tensor_view> tensors;
+    load_fixture_tensors(file_bytes, geometry, tensors);
+
+    emel::model::needle::sm machine{};
+    binder_state state = {};
+    binder_scope scope{state};
+    emel::model::needle::contract contract = {};
+    const emel::model::needle::event::bind bind{
+        geometry, std::span<const emel::cact::loader::tensor_view>{tensors},
+        contract, k_bind_done_cb, empty_error};
+
+    CHECK(machine.process_event(bind));
+    CHECK(state.done_count == 1u);
+    CHECK(state.error_count == 0u);
+    check_needle_binder_state_bound(machine);
+  }
+
+  SUBCASE("a missing required done callback reports invalid_request") {
+    const std::vector<uint8_t> file_bytes =
+        read_file_bytes(fixture_model_path());
+    emel::cact::loader::geometry geometry = {};
+    std::vector<emel::cact::loader::tensor_view> tensors;
+    load_fixture_tensors(file_bytes, geometry, tensors);
+
+    emel::model::needle::sm machine{};
+    binder_state state = {};
+    binder_scope scope{state};
+    emel::model::needle::contract contract = {};
+    const emel::model::needle::event::bind bind{
+        geometry, std::span<const emel::cact::loader::tensor_view>{tensors},
+        contract, empty_done, k_bind_error_cb};
+
+    CHECK_FALSE(machine.process_event(bind));
+    CHECK(state.done_count == 0u);
+    CHECK(state.error_count == 1u);
+    CHECK(state.err ==
+          emel::error::cast(emel::model::needle::error::invalid_request));
+    CHECK(
+        machine.is(stateforward::sml::state<emel::model::needle::state_errored>));
+  }
+
+  SUBCASE("an invalid bind allows the optional error callback to be absent") {
+    emel::model::needle::sm machine{};
+    emel::model::needle::contract contract = {};
+    emel::cact::loader::geometry geometry = {};
+    const emel::model::needle::event::bind bind{
+        geometry, std::span<const emel::cact::loader::tensor_view>{}, contract,
+        k_bind_done_cb, empty_error};
+
+    CHECK_FALSE(machine.process_event(bind));
+    CHECK(
+        machine.is(stateforward::sml::state<emel::model::needle::state_errored>));
+  }
+}
+
 TEST_CASE("needle binder classifies malformed positional tables") {
   const std::vector<uint8_t> file_bytes = read_file_bytes(fixture_model_path());
 

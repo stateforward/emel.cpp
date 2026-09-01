@@ -21,6 +21,8 @@ struct state_errored {};
 
 struct state_bind_request_decision {};
 struct state_bind_outcome_dispatch {};
+struct state_bind_done_callback_decision {};
+struct state_bind_error_callback_decision {};
 
 struct model {
   auto operator()() const {
@@ -44,33 +46,37 @@ struct model {
           + sml::completion<event::bind_runtime> [ guard::guard_bind_invalid_request{} ]
           / action::effect_mark_bind_invalid_request
 
-      , sml::state<state_bound> <= sml::state<state_bind_outcome_dispatch>
+      , sml::state<state_bind_done_callback_decision> <= sml::state<state_bind_outcome_dispatch>
           + sml::completion<event::bind_runtime> [ guard::guard_bind_error_none{} ]
-          / action::effect_publish_bind_done
-      , sml::state<state_errored> <= sml::state<state_bind_outcome_dispatch>
+      , sml::state<state_bind_error_callback_decision> <= sml::state<state_bind_outcome_dispatch>
           + sml::completion<event::bind_runtime> [ guard::guard_bind_error_invalid_request{} ]
-          / action::effect_publish_bind_error
-      , sml::state<state_errored> <= sml::state<state_bind_outcome_dispatch>
+      , sml::state<state_bind_error_callback_decision> <= sml::state<state_bind_outcome_dispatch>
           + sml::completion<event::bind_runtime> [ guard::guard_bind_error_geometry_invalid{} ]
-          / action::effect_publish_bind_error
-      , sml::state<state_errored> <= sml::state<state_bind_outcome_dispatch>
+      , sml::state<state_bind_error_callback_decision> <= sml::state<state_bind_outcome_dispatch>
           + sml::completion<event::bind_runtime> [ guard::guard_bind_error_tensor_count_mismatch{} ]
-          / action::effect_publish_bind_error
-      , sml::state<state_errored> <= sml::state<state_bind_outcome_dispatch>
+      , sml::state<state_bind_error_callback_decision> <= sml::state<state_bind_outcome_dispatch>
           + sml::completion<event::bind_runtime> [ guard::guard_bind_error_tensor_dtype_mismatch{} ]
-          / action::effect_publish_bind_error
-      , sml::state<state_errored> <= sml::state<state_bind_outcome_dispatch>
+      , sml::state<state_bind_error_callback_decision> <= sml::state<state_bind_outcome_dispatch>
           + sml::completion<event::bind_runtime> [ guard::guard_bind_error_tensor_shape_mismatch{} ]
-          / action::effect_publish_bind_error
-      , sml::state<state_errored> <= sml::state<state_bind_outcome_dispatch>
+      , sml::state<state_bind_error_callback_decision> <= sml::state<state_bind_outcome_dispatch>
           + sml::completion<event::bind_runtime> [ guard::guard_bind_error_head_manifest_invalid{} ]
-          / action::effect_publish_bind_error
-      , sml::state<state_errored> <= sml::state<state_bind_outcome_dispatch>
+      , sml::state<state_bind_error_callback_decision> <= sml::state<state_bind_outcome_dispatch>
           + sml::completion<event::bind_runtime> [ guard::guard_bind_error_internal_error{} ]
-          / action::effect_publish_bind_error
-      , sml::state<state_errored> <= sml::state<state_bind_outcome_dispatch>
+      , sml::state<state_bind_error_callback_decision> <= sml::state<state_bind_outcome_dispatch>
           + sml::completion<event::bind_runtime> [ guard::guard_bind_error_unknown{} ]
+
+      , sml::state<state_bound> <= sml::state<state_bind_done_callback_decision>
+          + sml::completion<event::bind_runtime> [ guard::guard_bind_done_callback_present{} ]
+          / action::effect_publish_bind_done
+      , sml::state<state_errored> <= sml::state<state_bind_done_callback_decision>
+          + sml::completion<event::bind_runtime> [ guard::guard_bind_done_callback_absent{} ]
+          / action::effect_mark_bind_invalid_request
+
+      , sml::state<state_errored> <= sml::state<state_bind_error_callback_decision>
+          + sml::completion<event::bind_runtime> [ guard::guard_bind_error_callback_present{} ]
           / action::effect_publish_bind_error
+      , sml::state<state_errored> <= sml::state<state_bind_error_callback_decision>
+          + sml::completion<event::bind_runtime> [ guard::guard_bind_error_callback_absent{} ]
 
       //------------------------------------------------------------------------------//
       // Unexpected events.
@@ -83,6 +89,10 @@ struct model {
       , sml::state<state_errored> <= sml::state<state_bind_request_decision> + sml::unexpected_event<sml::_>
           / action::effect_on_unexpected
       , sml::state<state_errored> <= sml::state<state_bind_outcome_dispatch> + sml::unexpected_event<sml::_>
+          / action::effect_on_unexpected
+      , sml::state<state_errored> <= sml::state<state_bind_done_callback_decision> + sml::unexpected_event<sml::_>
+          / action::effect_on_unexpected
+      , sml::state<state_errored> <= sml::state<state_bind_error_callback_decision> + sml::unexpected_event<sml::_>
           / action::effect_on_unexpected
     );
     // clang-format on

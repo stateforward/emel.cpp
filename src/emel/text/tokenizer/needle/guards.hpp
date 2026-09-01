@@ -23,7 +23,8 @@ inline bool error_is_unknown(const emel::error::type runtime_err) noexcept {
 struct guard_load_valid_request {
   bool operator()(const event::load_runtime &ev,
                   const action::context &) const noexcept {
-    return ev.request.blob.data() != nullptr && !ev.request.blob.empty();
+    return ev.request.blob.data() != nullptr && !ev.request.blob.empty() &&
+           static_cast<bool>(ev.request.on_done);
   }
 };
 
@@ -31,6 +32,34 @@ struct guard_load_invalid_request {
   bool operator()(const event::load_runtime &ev,
                   const action::context &ctx) const noexcept {
     return !guard_load_valid_request{}(ev, ctx);
+  }
+};
+
+struct guard_load_done_callback_present {
+  bool operator()(const event::load_runtime &ev,
+                  const action::context &) const noexcept {
+    return static_cast<bool>(ev.request.on_done);
+  }
+};
+
+struct guard_load_done_callback_absent {
+  bool operator()(const event::load_runtime &ev,
+                  const action::context &ctx) const noexcept {
+    return !guard_load_done_callback_present{}(ev, ctx);
+  }
+};
+
+struct guard_load_error_callback_present {
+  bool operator()(const event::load_runtime &ev,
+                  const action::context &) const noexcept {
+    return static_cast<bool>(ev.request.on_error);
+  }
+};
+
+struct guard_load_error_callback_absent {
+  bool operator()(const event::load_runtime &ev,
+                  const action::context &ctx) const noexcept {
+    return !guard_load_error_callback_present{}(ev, ctx);
   }
 };
 
