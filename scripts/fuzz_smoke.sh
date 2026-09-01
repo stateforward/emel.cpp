@@ -23,14 +23,14 @@ detect_fuzzer_toolchain() {
   fi
 
   local brew_llvm_root=""
-  for candidate in /opt/homebrew/opt/llvm /usr/local/opt/llvm; do
-    if [[ -x "$candidate/bin/clang" && -x "$candidate/bin/clang++" ]]; then
-      if ls "$candidate"/lib/clang/*/lib/darwin/libclang_rt.fuzzer_osx.a >/dev/null 2>&1; then
+  if [[ "$(uname -s)" == "Darwin" ]]; then
+    for candidate in /opt/homebrew/opt/llvm /usr/local/opt/llvm; do
+      if [[ -x "$candidate/bin/clang" && -x "$candidate/bin/clang++" ]]; then
         brew_llvm_root="$candidate"
         break
       fi
-    fi
-  done
+    done
+  fi
   if [[ -n "$brew_llvm_root" ]]; then
     echo "$brew_llvm_root/bin/clang" "$brew_llvm_root/bin/clang++"
     return
@@ -52,10 +52,19 @@ fi
 fuzz_cxx_flags=""
 fuzz_link_flags=""
 fuzz_platform_flags=()
+fuzz_probe_flags=()
 fuzz_root="$(cd "$(dirname "$fuzz_cc")/.." && pwd)"
 if [[ -d "$fuzz_root/lib/c++" ]]; then
   fuzz_cxx_flags="-stdlib=libc++ -I${fuzz_root}/include/c++/v1"
   fuzz_link_flags="-stdlib=libc++ -L${fuzz_root}/lib/c++ -Wl,-rpath,${fuzz_root}/lib/c++ -lc++ -lc++abi"
+  fuzz_probe_flags+=(
+    -stdlib=libc++
+    "-I${fuzz_root}/include/c++/v1"
+    "-L${fuzz_root}/lib/c++"
+    "-Wl,-rpath,${fuzz_root}/lib/c++"
+    -lc++
+    -lc++abi
+  )
 fi
 
 if [[ "$(uname -s)" == "Darwin" ]]; then
@@ -69,14 +78,27 @@ if [[ "$(uname -s)" == "Darwin" ]]; then
     exit 1
   fi
   fuzz_platform_flags+=("-DCMAKE_OSX_SYSROOT=$fuzz_macos_sysroot")
+  fuzz_probe_flags+=(-isysroot "$fuzz_macos_sysroot")
 fi
-if [[ "$fuzz_cc" == "clang" ]]; then
-  if ! ls /opt/homebrew/opt/llvm/lib/clang/*/lib/darwin/libclang_rt.fuzzer_osx.a >/dev/null 2>&1 && \
-     ! ls /usr/local/opt/llvm/lib/clang/*/lib/darwin/libclang_rt.fuzzer_osx.a >/dev/null 2>&1; then
-    echo "error: libFuzzer runtime not found for clang (install llvm via Homebrew)." >&2
-    exit 1
+check_libfuzzer_runtime() {
+  local probe_dir probe_log
+  probe_dir="$(mktemp -d "${TMPDIR:-/tmp}/emel-fuzzer-probe.XXXXXX")"
+  probe_log="$probe_dir/link.log"
+
+  if ! printf '%s\n' \
+    'extern "C" int LLVMFuzzerTestOneInput(const unsigned char *, unsigned long) { return 0; }' | \
+    "$fuzz_cxx" "${fuzz_probe_flags[@]}" -x c++ -fsanitize=fuzzer \
+      -o "$probe_dir/fuzzer_probe" - >"$probe_log" 2>&1; then
+    echo "error: selected C++ compiler cannot link a libFuzzer executable with -fsanitize=fuzzer: $fuzz_cxx" >&2
+    cat "$probe_log" >&2
+    rm -rf "$probe_dir"
+    return 1
   fi
-fi
+
+  rm -rf "$probe_dir"
+}
+
+check_libfuzzer_runtime
 
 if [[ "$FUZZ_CLEAN" == "1" ]]; then
   rm -rf "$BUILD_DIR"

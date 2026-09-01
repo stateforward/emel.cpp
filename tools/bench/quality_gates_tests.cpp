@@ -93,6 +93,35 @@ TEST_CASE("quality gates full benchmark branch preserves failure status") {
   CHECK(full_branch.find("return $?") == std::string::npos);
 }
 
+TEST_CASE("fuzz smoke validates the selected compiler's libFuzzer support") {
+  const std::string script =
+      read_file(repo_root() / "scripts" / "fuzz_smoke.sh");
+
+  const std::size_t probe_start = script.find("check_libfuzzer_runtime()");
+  REQUIRE(probe_start != std::string::npos);
+  const std::size_t probe_call =
+      script.find("check_libfuzzer_runtime\n", probe_start);
+  REQUIRE(probe_call != std::string::npos);
+  const std::size_t cmake_call = script.find("cmake -S", probe_call);
+  REQUIRE(cmake_call != std::string::npos);
+
+  const std::string probe =
+      script.substr(probe_start, probe_call - probe_start);
+  CHECK(probe.find("\"$fuzz_cxx\"") != std::string::npos);
+  CHECK(probe.find("-fsanitize=fuzzer") != std::string::npos);
+  CHECK(probe.find("cannot link a libFuzzer executable") !=
+        std::string::npos);
+  CHECK(probe_call < cmake_call);
+  CHECK(script.find("lib/clang/*/lib/darwin/libclang_rt.fuzzer_osx.a") ==
+        std::string::npos);
+  CHECK(script.find("if [[ \"$fuzz_cc\" == \"clang\" ]]") ==
+        std::string::npos);
+  CHECK(script.find("if [[ \"$(uname -s)\" == \"Darwin\" ]]") !=
+        std::string::npos);
+  CHECK(script.find("/opt/homebrew/opt/llvm") != std::string::npos);
+  CHECK(script.find("/usr/local/opt/llvm") != std::string::npos);
+}
+
 TEST_CASE("quality gates exclude nested sml machine headers from coverage "
           "source set") {
   const std::string script =
