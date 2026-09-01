@@ -136,6 +136,42 @@ struct bounded_reader {
   }
 };
 
+inline bool compute_raw_expected_bytes(
+    const std::span<const uint8_t> &file_image, const uint64_t offset,
+    uint64_t &expected_bytes_out) noexcept {
+  if (offset > file_image.size()) {
+    return false;
+  }
+
+  bounded_reader reader{file_image};
+  reader.offset = offset;
+  uint32_t token_count = 0u;
+  uint32_t ignored_u32 = 0u;
+  uint8_t ignored_u8 = 0u;
+  uint16_t reserved = 0u;
+  if (!reader.read_u32(token_count) || !reader.read_u32(ignored_u32) ||
+      !reader.read_u32(ignored_u32) || !reader.read_u32(ignored_u32) ||
+      !reader.read_u32(ignored_u32) || !reader.read_u8(ignored_u8) ||
+      !reader.read_u8(ignored_u8) || !reader.read_u16(reserved) ||
+      token_count == 0u) {
+    return false;
+  }
+
+  for (uint32_t i = 0u; i < token_count; ++i) {
+    float ignored_score = 0.0f;
+    uint16_t piece_bytes = 0u;
+    if (!reader.read_f32(ignored_score) || !reader.read_u8(ignored_u8) ||
+        !reader.read_u16(piece_bytes) || piece_bytes == 0u ||
+        !reader.can_read(piece_bytes)) {
+      return false;
+    }
+    reader.offset += piece_bytes;
+  }
+
+  expected_bytes_out = reader.offset - offset;
+  return expected_bytes_out != 0u;
+}
+
 // Decodes the fixed 120-byte `.cact` header plus codebook into `geometry_out`.
 // Data-plane iteration only (fixed field count, fixed codebook length); no
 // behavior selection - every rejection path is a bounded-read failure
@@ -229,26 +265,36 @@ inline bool compute_cq_expected_bytes(const uint32_t out_rows,
                                       const uint32_t in_dim,
                                       const uint32_t group, const uint32_t bits,
                                       uint64_t &expected_bytes_out) noexcept {
-  if (group == 0u || out_rows == 0u) {
+  if (group == 0u || out_rows == 0u || in_dim == 0u ||
+      (bits != 2u && bits != 3u && bits != 4u &&
+       bits != constants::ternary_record_bits)) {
     return false;
   }
 
-  const uint64_t in_pad =
-      ((static_cast<uint64_t>(in_dim) + group - 1u) / group) * group;
+  uint64_t rounded_in = 0u;
+  if (!add_u64(static_cast<uint64_t>(in_dim),
+               static_cast<uint64_t>(group) - 1u, rounded_in)) {
+    return false;
+  }
+  const uint64_t groups_per_row = rounded_in / group;
+  uint64_t in_pad = 0u;
+  if (!multiply_u64(groups_per_row, group, in_pad) || in_pad % 8u != 0u) {
+    return false;
+  }
+
   const uint64_t packed_bits =
       bits == constants::ternary_record_bits ? 2u : bits;
-  if (in_pad % 8u != 0u) {
+  uint64_t packed_row_bits = 0u;
+  if (!multiply_u64(in_pad, packed_bits, packed_row_bits)) {
     return false;
   }
-
-  const uint64_t packed_row_bytes = (in_pad * packed_bits) / 8u;
+  const uint64_t packed_row_bytes = packed_row_bits / 8u;
   uint64_t packed_total = 0u;
   if (!multiply_u64(static_cast<uint64_t>(out_rows), packed_row_bytes,
                     packed_total)) {
     return false;
   }
 
-  const uint64_t groups_per_row = in_pad / group;
   uint64_t norms_per_row_bytes = 0u;
   if (!multiply_u64(groups_per_row, 2u, norms_per_row_bytes)) {
     return false;
@@ -262,13 +308,63 @@ inline bool compute_cq_expected_bytes(const uint32_t out_rows,
   return add_u64(packed_total, norms_total, expected_bytes_out);
 }
 
+inline bool compute_dense_expected_bytes(
+    const uint8_t ndim, const std::array<uint32_t, 4> &shape,
+    const uint64_t element_bytes, uint64_t &expected_bytes_out) noexcept {
+  if (ndim == 0u || ndim > constants::max_tensor_dims) {
+    return false;
+  }
+
+  uint64_t elements = 1u;
+  for (uint8_t i = 0u; i < ndim; ++i) {
+    if (shape[i] == 0u ||
+        !multiply_u64(elements, static_cast<uint64_t>(shape[i]), elements)) {
+      return false;
+    }
+  }
+  for (uint8_t i = ndim; i < constants::max_tensor_dims; ++i) {
+    if (shape[i] != 0u) {
+      return false;
+    }
+  }
+  return multiply_u64(elements, element_bytes, expected_bytes_out) &&
+         expected_bytes_out != 0u;
+}
+
+inline bool compute_expected_bytes(
+    const std::span<const uint8_t> &file_image, const uint64_t offset,
+    const uint8_t dtype, const uint8_t ndim,
+    const std::array<uint32_t, 4> &shape, const uint32_t group,
+    const uint32_t bits, uint64_t &expected_bytes_out) noexcept {
+  if (dtype == constants::dtype_fp16) {
+    return group == 0u && bits == 0u &&
+           compute_dense_expected_bytes(ndim, shape, 2u, expected_bytes_out);
+  }
+  if (dtype == constants::dtype_fp32) {
+    return group == 0u && bits == 0u &&
+           compute_dense_expected_bytes(ndim, shape, 4u, expected_bytes_out);
+  }
+  if (dtype == constants::dtype_cq) {
+    return ndim == 2u && shape[2] == 0u && shape[3] == 0u &&
+           compute_cq_expected_bytes(shape[0], shape[1], group, bits,
+                                     expected_bytes_out) &&
+           expected_bytes_out != 0u;
+  }
+  if (dtype == constants::dtype_raw) {
+    return ndim == 0u && shape[0] == 0u && shape[1] == 0u &&
+           shape[2] == 0u && shape[3] == 0u && group == 0u && bits == 0u &&
+           compute_raw_expected_bytes(file_image, offset, expected_bytes_out);
+  }
+  return false;
+}
+
 // Locates and bounds-checks the directory span within `file_image` for the
 // given tensor count. Shared by probe (bounds-only) and parse (bounds +
 // populate) so the offset/size arithmetic is not duplicated.
 inline emel::error::type
 locate_directory(const std::span<const uint8_t> &file_image,
-                 const uint32_t num_tensors,
-                 uint64_t &directory_offset_out) noexcept {
+                 const uint32_t num_tensors, uint64_t &directory_offset_out,
+                 uint64_t &directory_end_out) noexcept {
   const uint64_t codebook_bytes =
       static_cast<uint64_t>(k_codebook_len) * sizeof(float);
   if (!add_u64(constants::header_bytes, codebook_bytes, directory_offset_out)) {
@@ -281,9 +377,8 @@ locate_directory(const std::span<const uint8_t> &file_image,
     return cast_loader_error(error::capacity);
   }
 
-  uint64_t directory_end = 0u;
-  if (!add_u64(directory_offset_out, directory_bytes, directory_end) ||
-      directory_end > file_image.size()) {
+  if (!add_u64(directory_offset_out, directory_bytes, directory_end_out) ||
+      directory_end_out > file_image.size()) {
     return cast_loader_error(error::parse_failed);
   }
 
@@ -298,6 +393,7 @@ locate_directory(const std::span<const uint8_t> &file_image,
 inline emel::error::type
 scan_directory_record(bounded_reader &reader,
                       const std::span<const uint8_t> &file_image,
+                      const uint64_t metadata_end,
                       tensor_view &view_out) noexcept {
   uint8_t dtype = 0u;
   uint8_t ndim = 0u;
@@ -324,25 +420,19 @@ scan_directory_record(bounded_reader &reader,
   if (ndim > constants::max_tensor_dims) {
     return cast_loader_error(error::model_invalid);
   }
-  if (offset % constants::alignment != 0u) {
+  if (offset % constants::alignment != 0u || offset < metadata_end) {
+    return cast_loader_error(error::model_invalid);
+  }
+  uint64_t expected_bytes = 0u;
+  if (!compute_expected_bytes(file_image, offset, dtype, ndim, shape, group,
+                              bits, expected_bytes) ||
+      expected_bytes != nbytes) {
     return cast_loader_error(error::model_invalid);
   }
 
   uint64_t tensor_end = 0u;
   if (!add_u64(offset, nbytes, tensor_end) || tensor_end > file_image.size()) {
     return cast_loader_error(error::parse_failed);
-  }
-
-  if (dtype == constants::dtype_cq) {
-    if (ndim != 2u) {
-      return cast_loader_error(error::model_invalid);
-    }
-    uint64_t expected_bytes = 0u;
-    if (!compute_cq_expected_bytes(shape[0], shape[1], group, bits,
-                                   expected_bytes) ||
-        expected_bytes != nbytes) {
-      return cast_loader_error(error::model_invalid);
-    }
   }
 
   view_out.dtype = dtype;
@@ -356,12 +446,9 @@ scan_directory_record(bounded_reader &reader,
   return cast_loader_error(error::none);
 }
 
-// Parses the nameless tensor directory into `tensors_out`, validating each
-// record's shape/offset/nbytes/group/bits and 64-byte blob alignment against
-// `file_image`. This is bulk data-plane iteration over a bounded record
-// count (geometry.num_tensors, already capped in read_header); each record's
-// outcome is folded into a single accumulated error code, so control flow
-// never leaves this single transition's action.
+// Parses the nameless tensor directory into `tensors_out`. Exported payloads
+// are ordered by directory position, so requiring each offset to start at or
+// after the previous payload end rejects both aliases and arbitrary overlaps.
 inline emel::error::type
 parse_directory(const std::span<const uint8_t> &file_image,
                 const geometry &geometry_in,
@@ -371,63 +458,72 @@ parse_directory(const std::span<const uint8_t> &file_image,
   }
 
   uint64_t directory_offset = 0u;
-  const emel::error::type locate_err =
-      locate_directory(file_image, geometry_in.num_tensors, directory_offset);
+  uint64_t metadata_end = 0u;
+  const emel::error::type locate_err = locate_directory(
+      file_image, geometry_in.num_tensors, directory_offset, metadata_end);
   if (locate_err != cast_loader_error(error::none)) {
     return locate_err;
   }
 
   bounded_reader reader{file_image};
   reader.offset = directory_offset;
-
+  uint64_t previous_end = metadata_end;
   for (uint32_t i = 0u; i < geometry_in.num_tensors; ++i) {
-    const emel::error::type record_err =
-        scan_directory_record(reader, file_image, tensors_out[i]);
+    const emel::error::type record_err = scan_directory_record(
+        reader, file_image, metadata_end, tensors_out[i]);
     if (record_err != cast_loader_error(error::none)) {
       return record_err;
     }
+    if (tensors_out[i].offset < previous_end ||
+        !add_u64(tensors_out[i].offset, tensors_out[i].nbytes,
+                 previous_end)) {
+      return cast_loader_error(error::model_invalid);
+    }
   }
-
   return cast_loader_error(error::none);
 }
 
-// Full probe pass: header/codebook decode plus a directory scan that only
-// validates bounds/alignment (does not populate tensor views - that is
-// parse's job so probe stays a read-only capability check).
+// Full probe pass: header/codebook decode plus a directory scan that validates
+// every record and pairwise payload range before geometry can be bound.
 inline emel::error::type
 probe_geometry(const std::span<const uint8_t> &file_image,
                geometry &geometry_out) noexcept {
-  geometry_out = {};
-
   bounded_reader reader{file_image};
   if (!reader.can_read(constants::header_bytes)) {
     return cast_loader_error(error::parse_failed);
   }
 
-  const emel::error::type header_err = read_header(reader, geometry_out);
+  geometry candidate = geometry_out;
+  const emel::error::type header_err = read_header(reader, candidate);
   if (header_err != cast_loader_error(error::none)) {
     return header_err;
   }
 
   uint64_t directory_offset = 0u;
-  const emel::error::type locate_err =
-      locate_directory(file_image, geometry_out.num_tensors, directory_offset);
+  uint64_t metadata_end = 0u;
+  const emel::error::type locate_err = locate_directory(
+      file_image, candidate.num_tensors, directory_offset, metadata_end);
   if (locate_err != cast_loader_error(error::none)) {
     return locate_err;
   }
 
   bounded_reader dir_reader{file_image};
   dir_reader.offset = directory_offset;
-
-  for (uint32_t i = 0u; i < geometry_out.num_tensors; ++i) {
-    tensor_view discarded = {};
-    const emel::error::type record_err =
-        scan_directory_record(dir_reader, file_image, discarded);
+  uint64_t previous_end = metadata_end;
+  for (uint32_t i = 0u; i < candidate.num_tensors; ++i) {
+    tensor_view current = {};
+    const emel::error::type record_err = scan_directory_record(
+        dir_reader, file_image, metadata_end, current);
     if (record_err != cast_loader_error(error::none)) {
       return record_err;
     }
+    if (current.offset < previous_end ||
+        !add_u64(current.offset, current.nbytes, previous_end)) {
+      return cast_loader_error(error::model_invalid);
+    }
   }
 
+  geometry_out = candidate;
   return cast_loader_error(error::none);
 }
 

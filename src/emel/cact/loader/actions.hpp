@@ -56,17 +56,17 @@ struct effect_mark_parse_capacity {
 };
 
 struct effect_exec_probe {
-  void operator()(const event::probe_runtime &ev, context &ctx) const noexcept {
+  void operator()(const event::probe_runtime &ev, context &) const noexcept {
     ev.ctx.err = loader::detail::probe_geometry(ev.request.file_image,
                                                 ev.ctx.geometry_out);
-    ctx.probed = ev.ctx.geometry_out;
-    ctx.tensors = {};
   }
 };
 
 struct effect_commit_probe_geometry {
-  void operator()(const event::probe_runtime &ev, context &) const noexcept {
+  void operator()(const event::probe_runtime &ev, context &ctx) const noexcept {
     ev.request.geometry_out = ev.ctx.geometry_out;
+    ctx.probed = ev.ctx.geometry_out;
+    ctx.tensors = {};
   }
 };
 

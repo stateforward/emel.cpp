@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <cstdio>
@@ -42,6 +43,16 @@ void append_scalar(std::vector<uint8_t> &bytes, const value_type value) {
   for (size_t i = 0; i < sizeof(value_type); ++i) {
     bytes.push_back(static_cast<uint8_t>(
         (static_cast<uint64_t>(value) >> (i * 8u)) & 0xffu));
+  }
+}
+
+template <class value_type>
+void write_scalar(std::vector<uint8_t> &bytes, const size_t offset,
+                  const value_type value) {
+  REQUIRE(offset + sizeof(value_type) <= bytes.size());
+  for (size_t i = 0; i < sizeof(value_type); ++i) {
+    bytes[offset + i] = static_cast<uint8_t>(
+        (static_cast<uint64_t>(value) >> (i * 8u)) & 0xffu);
   }
 }
 
@@ -152,6 +163,88 @@ std::vector<uint8_t> make_unaligned_offset_cact_file() {
   const size_t record_offset = k_header_bytes + k_codebook_len * sizeof(float);
   const size_t offset_field = record_offset + 20u;
   bytes[offset_field] |= 0x01u; // break the 64-byte alignment invariant
+  return bytes;
+}
+
+constexpr size_t record_offset(const size_t index = 0u) {
+  return k_header_bytes + k_codebook_len * sizeof(float) +
+         index * emel::cact::loader::constants::record_bytes;
+}
+
+std::vector<uint8_t> make_single_tensor_cact_file(
+    const uint8_t dtype, const uint8_t ndim,
+    const std::array<uint32_t, 4> &shape, const uint64_t nbytes,
+    const uint32_t group = 0u, const uint32_t bits = 0u) {
+  std::vector<uint8_t> bytes = make_valid_cact_file();
+  const size_t record = record_offset();
+  write_scalar<uint8_t>(bytes, record, dtype);
+  write_scalar<uint8_t>(bytes, record + 1u, ndim);
+  for (size_t i = 0u; i < shape.size(); ++i) {
+    write_scalar<uint32_t>(bytes, record + 4u + i * sizeof(uint32_t), shape[i]);
+  }
+  write_scalar<uint64_t>(bytes, record + 28u, nbytes);
+  write_scalar<uint32_t>(bytes, record + 36u, group);
+  write_scalar<uint32_t>(bytes, record + 40u, bits);
+  const uint64_t offset = 320u;
+  write_scalar<uint64_t>(bytes, record + 20u, offset);
+  bytes.resize(static_cast<size_t>(offset + nbytes), 0x5au);
+  return bytes;
+}
+
+std::vector<uint8_t> make_metadata_overlap_cact_file() {
+  std::vector<uint8_t> bytes = make_valid_cact_file();
+  write_scalar<uint64_t>(bytes, record_offset() + 20u, 256u);
+  return bytes;
+}
+
+std::vector<uint8_t> make_overlapping_tensor_ranges_cact_file() {
+  std::vector<uint8_t> bytes = make_valid_cact_file();
+  write_scalar<uint32_t>(bytes, sizeof(uint32_t), 2u);
+
+  const size_t first_record = record_offset();
+  const size_t second_record = record_offset(1u);
+  const uint64_t offset = 384u;
+  const uint64_t nbytes = 32u;
+
+  bytes.insert(bytes.begin() + static_cast<std::ptrdiff_t>(second_record),
+               emel::cact::loader::constants::record_bytes, 0u);
+  write_scalar<uint64_t>(bytes, first_record + 20u, offset);
+
+  write_scalar<uint8_t>(bytes, second_record, static_cast<uint8_t>(1u));
+  write_scalar<uint8_t>(bytes, second_record + 1u, static_cast<uint8_t>(1u));
+  write_scalar<uint32_t>(bytes, second_record + 4u, 16u);
+  write_scalar<uint64_t>(bytes, second_record + 20u, offset);
+  write_scalar<uint64_t>(bytes, second_record + 28u, nbytes);
+  bytes.resize(static_cast<size_t>(offset + nbytes), 0x5au);
+  return bytes;
+}
+
+std::vector<uint8_t> make_valid_raw_payload() {
+  std::vector<uint8_t> payload;
+  append_scalar<uint32_t>(payload, 1u); // token count
+  append_scalar<uint32_t>(payload, 0u); // pad id
+  append_scalar<uint32_t>(payload, 0u); // eos id
+  append_scalar<uint32_t>(payload, 0u); // bos id
+  append_scalar<uint32_t>(payload, 0u); // unk id
+  append_scalar<uint8_t>(payload, 1u);  // add dummy prefix
+  append_scalar<uint8_t>(payload, 1u);  // byte fallback
+  append_scalar<uint16_t>(payload, 0u); // reserved
+  append_f32(payload, 0.0f);            // score
+  append_scalar<uint8_t>(payload, 0u);  // normal token
+  append_scalar<uint16_t>(payload, 1u); // token byte length
+  append_scalar<uint8_t>(payload, static_cast<uint8_t>('x'));
+  return payload;
+}
+
+std::vector<uint8_t> make_raw_cact_file(const size_t payload_size) {
+  const std::vector<uint8_t> valid_payload = make_valid_raw_payload();
+  std::vector<uint8_t> bytes = make_single_tensor_cact_file(
+      4u, 0u, {0u, 0u, 0u, 0u}, payload_size);
+  const uint64_t offset = 320u;
+  const size_t copied = std::min(payload_size, valid_payload.size());
+  for (size_t i = 0u; i < copied; ++i) {
+    bytes[static_cast<size_t>(offset) + i] = valid_payload[i];
+  }
   return bytes;
 }
 
@@ -457,6 +550,157 @@ TEST_CASE("cact loader probe classifies malformed images") {
     CHECK(machine.is(
         stateforward::sml::state<emel::cact::loader::state_errored>));
   }
+}
+
+TEST_CASE("cact loader rejects tensor payloads inside metadata before bind") {
+  emel::cact::loader::sm machine{};
+  callback_state state = {};
+  callback_scope scope{state};
+
+  const std::vector<uint8_t> file_bytes = make_metadata_overlap_cact_file();
+  emel::cact::loader::geometry geometry = {};
+  const emel::cact::loader::event::probe probe{
+      std::span<const uint8_t>{file_bytes},
+      geometry,
+      k_probe_done_cb,
+      k_probe_error_cb,
+  };
+
+  CHECK_FALSE(machine.process_event(probe));
+  CHECK(state.probe_done_count == 0u);
+  CHECK(state.probe_error_count == 1u);
+  CHECK(state.probe_error ==
+        emel::error::cast(emel::cact::loader::error::model_invalid));
+  CHECK(geometry.num_tensors == 0u);
+  CHECK(
+      machine.is(stateforward::sml::state<emel::cact::loader::state_errored>));
+
+  std::array<emel::cact::loader::tensor_view, 1u> tensors = {};
+  tensors[0].data = reinterpret_cast<const uint8_t *>(0x1u);
+  const emel::cact::loader::event::bind_storage bind{
+      std::span<emel::cact::loader::tensor_view>{tensors},
+      k_bind_done_cb,
+      k_bind_error_cb,
+  };
+  CHECK_FALSE(machine.process_event(bind));
+  CHECK(state.bind_done_count == 0u);
+  CHECK(state.bind_error_count == 1u);
+  CHECK(tensors[0].data == reinterpret_cast<const uint8_t *>(0x1u));
+}
+
+TEST_CASE("cact loader validates exact tensor byte counts before bind") {
+  struct malformed_case {
+    const char *name;
+    uint8_t dtype;
+    uint8_t ndim;
+    std::array<uint32_t, 4> shape;
+    uint64_t nbytes;
+    uint32_t group;
+    uint32_t bits;
+  };
+
+  constexpr std::array<malformed_case, 11u> cases = {{
+      {"fp16 zero", 1u, 1u, {16u, 0u, 0u, 0u}, 0u, 0u, 0u},
+      {"fp16 undersized", 1u, 1u, {16u, 0u, 0u, 0u}, 30u, 0u, 0u},
+      {"fp16 oversized", 1u, 1u, {16u, 0u, 0u, 0u}, 34u, 0u, 0u},
+      {"fp32 zero", 2u, 2u, {4u, 8u, 0u, 0u}, 0u, 0u, 0u},
+      {"fp32 undersized", 2u, 2u, {4u, 8u, 0u, 0u}, 124u, 0u, 0u},
+      {"fp32 oversized", 2u, 2u, {4u, 8u, 0u, 0u}, 132u, 0u, 0u},
+      {"raw zero", 4u, 0u, {0u, 0u, 0u, 0u}, 0u, 0u, 0u},
+      {"raw shaped", 4u, 1u, {1u, 0u, 0u, 0u}, 1u, 0u, 0u},
+      {"cq zero", 3u, 2u, {2u, 128u, 0u, 0u}, 0u, 128u, 4u},
+      {"cq undersized", 3u, 2u, {2u, 128u, 0u, 0u}, 130u, 128u, 4u},
+      {"cq oversized", 3u, 2u, {2u, 128u, 0u, 0u}, 134u, 128u, 4u},
+  }};
+
+  for (const malformed_case &test : cases) {
+    CAPTURE(std::string{test.name});
+    emel::cact::loader::sm machine{};
+    callback_state state = {};
+    callback_scope scope{state};
+    const std::vector<uint8_t> file_bytes = make_single_tensor_cact_file(
+        test.dtype, test.ndim, test.shape, test.nbytes, test.group, test.bits);
+    emel::cact::loader::geometry geometry = {};
+    geometry.num_tensors = 77u;
+    const emel::cact::loader::event::probe probe{
+        std::span<const uint8_t>{file_bytes},
+        geometry,
+        k_probe_done_cb,
+        k_probe_error_cb,
+    };
+
+    CHECK_FALSE(machine.process_event(probe));
+    CHECK(state.probe_done_count == 0u);
+    CHECK(state.probe_error_count == 1u);
+    CHECK(state.probe_error ==
+          emel::error::cast(emel::cact::loader::error::model_invalid));
+    CHECK(geometry.num_tensors == 77u);
+    CHECK(machine.is(
+        stateforward::sml::state<emel::cact::loader::state_errored>));
+  }
+}
+
+TEST_CASE("cact loader validates RAW payload byte count from its schema") {
+  const size_t expected_bytes = make_valid_raw_payload().size();
+  for (const size_t nbytes : {expected_bytes - 1u, expected_bytes + 1u}) {
+    CAPTURE(nbytes);
+    emel::cact::loader::sm machine{};
+    callback_state state = {};
+    callback_scope scope{state};
+    const std::vector<uint8_t> file_bytes = make_raw_cact_file(nbytes);
+    emel::cact::loader::geometry geometry = {};
+    const emel::cact::loader::event::probe probe{
+        std::span<const uint8_t>{file_bytes},
+        geometry,
+        k_probe_done_cb,
+        k_probe_error_cb,
+    };
+
+    CHECK_FALSE(machine.process_event(probe));
+    CHECK(state.probe_done_count == 0u);
+    CHECK(state.probe_error_count == 1u);
+    CHECK(state.probe_error ==
+          emel::error::cast(emel::cact::loader::error::model_invalid));
+    CHECK(geometry.num_tensors == 0u);
+  }
+
+  emel::cact::loader::sm machine{};
+  callback_state state = {};
+  callback_scope scope{state};
+  const std::vector<uint8_t> file_bytes = make_raw_cact_file(expected_bytes);
+  emel::cact::loader::geometry geometry = {};
+  const emel::cact::loader::event::probe probe{
+      std::span<const uint8_t>{file_bytes},
+      geometry,
+      k_probe_done_cb,
+      k_probe_error_cb,
+  };
+  CHECK(machine.process_event(probe));
+  CHECK(state.probe_done_count == 1u);
+  CHECK(state.probe_error_count == 0u);
+  CHECK(geometry.num_tensors == 1u);
+}
+
+TEST_CASE("cact loader rejects overlapping tensor payload ranges") {
+  emel::cact::loader::sm machine{};
+  callback_state state = {};
+  callback_scope scope{state};
+  const std::vector<uint8_t> file_bytes =
+      make_overlapping_tensor_ranges_cact_file();
+  emel::cact::loader::geometry geometry = {};
+  const emel::cact::loader::event::probe probe{
+      std::span<const uint8_t>{file_bytes},
+      geometry,
+      k_probe_done_cb,
+      k_probe_error_cb,
+  };
+
+  CHECK_FALSE(machine.process_event(probe));
+  CHECK(state.probe_done_count == 0u);
+  CHECK(state.probe_error_count == 1u);
+  CHECK(state.probe_error ==
+        emel::error::cast(emel::cact::loader::error::model_invalid));
+  CHECK(geometry.num_tensors == 0u);
 }
 
 TEST_CASE("cact loader bind rejects undersized or unbound storage") {
