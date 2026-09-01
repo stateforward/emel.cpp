@@ -442,14 +442,17 @@ TEST_CASE("needle graph AVX2 route requires every CQ tensor group to be 128") {
   site.value_proj.group = 128u;
 
   emel::model::needle::graph::action::context ctx{contract};
+  ctx.storage_valid = true;
   emel::model::needle::graph::event::step_ctx step{};
   const emel::model::needle::graph::event::step_run run{step};
 #if (defined(__x86_64__) || defined(_M_X64)) && defined(__AVX2__) &&           \
     defined(__FMA__) && defined(__F16C__)
+  ctx.avx2_fma_available = true;
   CHECK(emel::model::needle::graph::guard::guard_route_avx2{}(run, ctx));
   CHECK_FALSE(
       emel::model::needle::graph::guard::guard_route_scalar{}(run, ctx));
 #else
+  ctx.avx2_fma_available = false;
   CHECK_FALSE(emel::model::needle::graph::guard::guard_route_avx2{}(run, ctx));
   CHECK(emel::model::needle::graph::guard::guard_route_scalar{}(run, ctx));
 #endif
