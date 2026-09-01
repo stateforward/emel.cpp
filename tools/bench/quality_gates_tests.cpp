@@ -125,6 +125,39 @@ TEST_CASE("coverage script enforces thresholds on changed executable lines") {
         std::string::npos);
 }
 
+TEST_CASE("coverage reports merge template instantiations by source line") {
+  const std::string script =
+      read_file(repo_root() / "scripts" / "test_with_coverage.sh");
+  const std::size_t threshold_start =
+      script.find("enforcing coverage thresholds:");
+  REQUIRE(threshold_start != std::string::npos);
+
+  const std::size_t json_report_start =
+      script.find("  gcovr \\", threshold_start);
+  REQUIRE(json_report_start != std::string::npos);
+  const std::size_t text_report_start =
+      script.find("  gcovr \\", json_report_start + 1);
+  REQUIRE(text_report_start != std::string::npos);
+
+  const std::string json_report =
+      script.substr(json_report_start, text_report_start - json_report_start);
+  const std::string text_report = script.substr(text_report_start);
+
+  CHECK(json_report.find("--merge-lines") != std::string::npos);
+  CHECK(json_report.find("--json \"$coverage_json\"") != std::string::npos);
+  CHECK(json_report.find("suspicious_hits.warn_once_per_file") !=
+        std::string::npos);
+
+  CHECK(text_report.find("--merge-lines") != std::string::npos);
+  CHECK(text_report.find("--txt-summary") != std::string::npos);
+  CHECK(text_report.find("suspicious_hits.warn_once_per_file") !=
+        std::string::npos);
+  CHECK(text_report.find("--fail-under-line \"$LINE_COVERAGE_MIN\"") !=
+        std::string::npos);
+  CHECK(text_report.find("--fail-under-branch \"$BRANCH_COVERAGE_MIN\"") !=
+        std::string::npos);
+}
+
 TEST_CASE(
     "quality gates consume benchmark dependency manifest conservatively") {
   const std::string script =

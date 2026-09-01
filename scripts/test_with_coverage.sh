@@ -638,6 +638,7 @@ if [[ "$COVERAGE_CHANGED_ONLY" == "1" && "$COVERAGE_CHANGED_LINE_ONLY" != "0" ]]
     --gcov-ignore-parse-errors suspicious_hits.warn_once_per_file \
     --gcov-ignore-parse-errors negative_hits.warn_once_per_file \
     --merge-mode-functions separate \
+    --merge-lines \
     --exclude-throw-branches \
     --exclude-unreachable-branches \
     --txt-summary \
@@ -656,6 +657,7 @@ else
     --gcov-ignore-parse-errors suspicious_hits.warn_once_per_file \
     --gcov-ignore-parse-errors negative_hits.warn_once_per_file \
     --merge-mode-functions separate \
+    --merge-lines \
     --exclude-throw-branches \
     --exclude-unreachable-branches \
     --txt-summary \
