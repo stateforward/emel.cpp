@@ -563,7 +563,63 @@ TEST_CASE("quality gates wire the maintained Needle evaluator with release-safe 
   CHECK(evaluator.find("std::bad_alloc") != std::string::npos);
 }
 
+TEST_CASE(
+    "Needle evaluator exposes activation route through options and graph init") {
+  const std::string evaluator =
+      read_file(repo_root() / "tools" / "needle_eval" / "main.cpp");
+
+  CHECK(evaluator.find("enum class activation_route { a8, f32 }") !=
+        std::string::npos);
+  CHECK(evaluator.find("activation_route route = activation_route::a8") !=
+        std::string::npos);
+  CHECK(evaluator.find("--activation-route") != std::string::npos);
+  CHECK(evaluator.find("value == \"a8\"") != std::string::npos);
+  CHECK(evaluator.find("value == \"f32\"") != std::string::npos);
+  CHECK(evaluator.find(
+            ".activation_quant = options.route == activation_route::a8") !=
+        std::string::npos);
+  CHECK(evaluator.find("needle::graph::event::init{}") == std::string::npos);
+  CHECK(evaluator.find("activation_route_name(options.route)") !=
+        std::string::npos);
+  CHECK(evaluator.find("activation_route=%s") != std::string::npos);
+}
+
 #if !defined(_WIN32) && defined(BENCH_NEEDLE_EVAL_BINARY)
+TEST_CASE(
+    "Needle evaluator rejects invalid activation routes before evaluation") {
+  const std::filesystem::path output =
+      std::filesystem::temp_directory_path() /
+      ("needle_eval_activation_route_" + std::to_string(std::rand()) +
+       ".txt");
+  const command_result result = run_command(
+      shell_quote(BENCH_NEEDLE_EVAL_BINARY) +
+          " unused.cact unused.tsv --activation-route invalid",
+      output);
+
+  CHECK(result.status != 0);
+  CHECK(result.output.find("invalid CLI option or value") !=
+        std::string::npos);
+}
+
+TEST_CASE("Needle evaluator accepts maintained activation routes before model "
+          "evaluation") {
+  const std::filesystem::path output =
+      std::filesystem::temp_directory_path() /
+      ("needle_eval_activation_route_valid_" + std::to_string(std::rand()) +
+       ".txt");
+
+  for (const char *route : {"a8", "f32"}) {
+    const command_result result = run_command(
+        shell_quote(BENCH_NEEDLE_EVAL_BINARY) +
+            " unused.cact unused.tsv --activation-route " + route,
+        output);
+    CHECK(result.status != 0);
+    CHECK(result.output.find("open prompts tsv") != std::string::npos);
+    CHECK(result.output.find("invalid CLI option or value") ==
+          std::string::npos);
+  }
+}
+
 TEST_CASE("Needle evaluator rejects malformed IDs before model evaluation") {
   static int fixture_counter = 0;
   const std::filesystem::path dir =

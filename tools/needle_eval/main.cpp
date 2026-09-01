@@ -19,6 +19,7 @@
 //
 // Usage:
 //   needle_eval <model.cact> <prompts.tsv> [row_begin row_end]
+//               [--activation-route a8|f32]
 // Output: one "row i=..." line per example plus a final summary line.
 #include <cerrno>
 #include <cmath>
@@ -57,11 +58,13 @@ constexpr size_t k_max_tsv_line_bytes = 64u * 1024u;
 constexpr size_t k_max_reference_ids_per_row = 4096u;
 constexpr size_t k_max_reference_ids_total = 1u * 1024u * 1024u;
 constexpr int32_t k_model_mapping_tensor_id = 1;
+enum class activation_route { a8, f32 };
 
 struct eval_options {
   double min_domain_accuracy = 0.840;
   double min_effort_accuracy = 0.760;
   size_t max_no_parse = 0u;
+  activation_route route = activation_route::a8;
   size_t row_begin = 0u;
   size_t row_end = std::numeric_limits<size_t>::max();
 };
@@ -333,6 +336,24 @@ bool parse_count(const char *text, size_t &value_out) {
   return true;
 }
 
+bool parse_activation_route(const char *text, activation_route &route_out) {
+  if (text == nullptr) return false;
+  const std::string_view value{text};
+  if (value == "a8") {
+    route_out = activation_route::a8;
+    return true;
+  }
+  if (value == "f32") {
+    route_out = activation_route::f32;
+    return true;
+  }
+  return false;
+}
+
+const char *activation_route_name(const activation_route route) {
+  return route == activation_route::a8 ? "a8" : "f32";
+}
+
 bool take_option_value(int argc, char **argv, int &index, const char *name,
                        const char *&value_out) {
   const std::string_view arg{argv[index]};
@@ -359,6 +380,9 @@ bool parse_options(int argc, char **argv, eval_options &options) {
       if (!parse_fraction(value, options.min_effort_accuracy)) return false;
     } else if (take_option_value(argc, argv, index, "--max-no-parse", value)) {
       if (!parse_count(value, options.max_no_parse)) return false;
+    } else if (take_option_value(argc, argv, index, "--activation-route",
+                                 value)) {
+      if (!parse_activation_route(value, options.route)) return false;
     } else if (!have_range && index + 1 < argc &&
                parse_count(argv[index], options.row_begin) &&
                parse_count(argv[index + 1], options.row_end)) {
@@ -508,7 +532,9 @@ int run_eval(const char *model_path, const std::vector<eval_row> &rows,
            ++i)
         prefill_ids.push_back(token_buffer[static_cast<size_t>(i)]);
 
-      if (!graph.process_event(needle::graph::event::init{})) die("graph init");
+      if (!graph.process_event(needle::graph::event::init{
+              .activation_quant = options.route == activation_route::a8}))
+        die("graph init");
       if (!graph.process_event(needle::graph::event::prefill{
               std::span<const int32_t>{prefill_ids},
               std::span<float>{logits}}))
@@ -565,9 +591,11 @@ int run_eval(const char *model_path, const std::vector<eval_row> &rows,
         evaluated ? static_cast<double>(within1) / evaluated : 0.0;
     std::printf("needle_eval_summary rows=%zu no_parse=%zu domain_acc=%.4f "
                 "effort_acc=%.4f joint_acc=%.4f effort_within1=%.4f "
-                "tokenizer_id_mismatch_rows=%zu thresholds=%.4f/%.4f/%zu\n",
+                "tokenizer_id_mismatch_rows=%zu activation_route=%s "
+                "thresholds=%.4f/%.4f/%zu\n",
                 evaluated, no_parse, domain_accuracy, effort_accuracy,
                 joint_accuracy, effort_within1, tokenizer_mismatch,
+                activation_route_name(options.route),
                 options.min_domain_accuracy, options.min_effort_accuracy,
                 options.max_no_parse);
     if (tokenizer_mismatch != 0u) {
@@ -597,15 +625,14 @@ int run_eval(const char *model_path, const std::vector<eval_row> &rows,
     die("release model mapping");
   return result;
 }
-
-
 } // namespace
 
 int main(int argc, char **argv) {
   if (argc < 3) {
     std::fprintf(stderr,
                  "usage: needle_eval <model.cact> <prompts.tsv> "
-                 "[row_begin row_end] [--min-domain-accuracy VALUE] "
+                 "[row_begin row_end] [--activation-route a8|f32] "
+                 "[--min-domain-accuracy VALUE] "
                  "[--min-effort-accuracy VALUE] [--max-no-parse COUNT]\n");
     return 2;
   }
