@@ -1690,6 +1690,39 @@ TEST_CASE("model loader unexpected events mark runtime context internal") {
         emel::error::cast(emel::model::loader::error::internal_error));
 }
 
+TEST_CASE("model loader unexpected routes reset representative phase states") {
+  namespace sml = stateforward::sml;
+
+  emel::model::loader::action::context action_ctx{};
+  stateforward::sml::sm<emel::model::loader::model,
+                        stateforward::sml::testing>
+      machine{action_ctx};
+
+  const auto check_route = [&]<class state_type>() {
+    machine.set_current_states(sml::state<state_type>);
+    emel::model::loader::event::load_ctx ctx{};
+    struct unexpected_runtime_event {
+      emel::model::loader::event::load_ctx &ctx;
+    };
+    CHECK(machine.process_event(unexpected_runtime_event{ctx}));
+    CHECK(ctx.err ==
+          emel::error::cast(emel::model::loader::error::internal_error));
+    CHECK(machine.is(sml::state<emel::model::loader::ready>));
+  };
+
+  check_route.template operator()<emel::model::loader::request_decision>();
+  check_route.template operator()<emel::model::loader::parsing>();
+  check_route.template operator()<
+      emel::model::loader::state_tensor_plan_decision>();
+  check_route.template operator()<
+      emel::model::loader::state_io_load_decision>();
+  check_route.template operator()<emel::model::loader::mapping_layers>();
+  check_route.template operator()<
+      emel::model::loader::structure_validation_decision>();
+  check_route.template operator()<
+      emel::model::loader::architecture_validation_decision>();
+}
+
 TEST_CASE("model loader preserves parser weight metadata on model-path load") {
   auto model = std::make_unique<emel::model::data>();
   emel::model::loader::sm machine{};

@@ -549,3 +549,68 @@ TEST_CASE("memory_kv_view_snapshot_tracks_state") {
   CHECK(snapshot.lookup_kv_block(0, 0) >= 0);
   CHECK(snapshot.lookup_recurrent_slot(0) == -1);
 }
+
+TEST_CASE("memory_kv_rolls_back_whole_blocks_and_reuses_them") {
+  kv_sm machine{};
+  int32_t err = static_cast<int32_t>(
+      emel::error::cast(emel::memory::kv::error::none));
+
+  REQUIRE(machine.process_event(event::reserve{
+      .max_sequences = 2, .max_blocks = 3, .block_tokens = 2,
+      .error_out = &err}));
+  REQUIRE(machine.process_event(
+      event::allocate_sequence{.seq_id = 0, .error_out = &err}));
+  REQUIRE(machine.process_event(event::allocate_slots{
+      .seq_id = 0, .token_count = 5, .error_out = &err}));
+  const int32_t released_middle = machine.view().lookup_kv_block(0, 2);
+  REQUIRE(machine.view().lookup_kv_block(0, 4) >= 0);
+  REQUIRE(released_middle >= 0);
+
+  int32_t released_blocks = -1;
+  REQUIRE(machine.process_event(event::rollback_slots{
+      .seq_id = 0,
+      .token_count = 3,
+      .block_count_out = &released_blocks,
+      .error_out = &err,
+  }));
+  CHECK(released_blocks == 2);
+  CHECK(machine.view().sequence_length(0) == 2);
+  CHECK(machine.view().lookup_kv_block(0, 2) == -1);
+
+  REQUIRE(machine.process_event(
+      event::allocate_sequence{.seq_id = 1, .error_out = &err}));
+  REQUIRE(machine.process_event(event::allocate_slots{
+      .seq_id = 1, .token_count = 2, .error_out = &err}));
+  CHECK(machine.view().lookup_kv_block(1, 0) == released_middle);
+}
+
+TEST_CASE("memory_kv_rejects_length_overflow_and_null_capture") {
+  kv_sm machine{};
+  int32_t err = static_cast<int32_t>(
+      emel::error::cast(emel::memory::kv::error::none));
+
+  REQUIRE(machine.process_event(event::reserve{
+      .max_sequences = 1, .max_blocks = 1, .block_tokens = INT32_MAX,
+      .error_out = &err}));
+  REQUIRE(machine.process_event(
+      event::allocate_sequence{.seq_id = 0, .error_out = &err}));
+  REQUIRE(machine.process_event(event::allocate_slots{
+      .seq_id = 0, .token_count = INT32_MAX, .error_out = &err}));
+
+  int32_t block_count = 41;
+  CHECK_FALSE(machine.process_event(event::allocate_slots{
+      .seq_id = 0,
+      .token_count = 1,
+      .block_count_out = &block_count,
+      .error_out = &err,
+  }));
+  CHECK(err == static_cast<int32_t>(
+                   emel::error::cast(emel::memory::kv::error::invalid_request)));
+  CHECK(block_count == 0);
+  CHECK(machine.view().sequence_length(0) == INT32_MAX);
+
+  CHECK_FALSE(machine.process_event(
+      event::capture_view{.snapshot_out = nullptr, .error_out = &err}));
+  CHECK(err == static_cast<int32_t>(
+                   emel::error::cast(emel::memory::kv::error::invalid_request)));
+}
