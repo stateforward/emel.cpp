@@ -40,12 +40,14 @@ struct guard_execute_fwht_avx2 {
 
 template <uint32_t Bits>
 inline bool supported(const event::gemv_request &request) noexcept {
-  const uint32_t in_pad =
-      (request.weights.shape[1] + request.weights.group - 1u) /
+  if (!detail::valid_view<Bits>(request.weights, request.codebook,
+                                request.activation, request.output))
+    return false;
+  const uint64_t in_pad =
+      (static_cast<uint64_t>(request.weights.shape[1]) +
+       request.weights.group - 1u) /
       request.weights.group * request.weights.group;
-  return detail::valid_view<Bits>(request.weights, request.codebook,
-                                  request.activation, request.output) &&
-         request.workspace.size() >= in_pad;
+  return request.workspace.size() >= in_pad;
 }
 
 template <uint32_t Bits>
@@ -65,11 +67,13 @@ inline bool avx2_supported(const event::gemv_request &request) noexcept {
 
 template <uint32_t Bits>
 inline bool rows_supported(const event::gemv_rows_request &request) noexcept {
-  const uint32_t in_pad =
-      (request.weights.shape[1] + request.weights.group - 1u) /
+  if (!detail::valid_packed_view<Bits>(request.weights, request.codebook))
+    return false;
+  const uint64_t in_pad =
+      (static_cast<uint64_t>(request.weights.shape[1]) +
+       request.weights.group - 1u) /
       request.weights.group * request.weights.group;
-  return detail::valid_packed_view<Bits>(request.weights, request.codebook) &&
-         request.row_count > 0u &&
+  return request.row_count > 0u &&
          static_cast<uint64_t>(request.row_begin) + request.row_count <=
              request.weights.shape[0] &&
          request.activation.size() >= request.weights.shape[1] &&

@@ -478,6 +478,55 @@ TEST_CASE("CQ ternary crumbs use analytic centroid") {
   REQUIRE(
       sm.process_event(emel::kernel::cq::event::execute_scalar_ternary{q, r}));
 }
+TEST_CASE("CQ scalar machine rejects a zero group without writes") {
+  const std::array<uint8_t, 1u> packed{};
+  const tensor_view weights{.dtype = 3u,
+                            .ndim = 2u,
+                            .shape = {1u, 1u, 0u, 0u},
+                            .nbytes = packed.size(),
+                            .group = 0u,
+                            .bits = 4u,
+                            .data = packed.data()};
+  std::array<float, 28u> codebook{};
+  const std::array<float, 1u> activation{2.0f};
+  std::array<float, 1u> output{-17.0f};
+  std::array<float, 1u> workspace{-19.0f};
+  const gemv_request request{weights, codebook, activation, output, workspace};
+  emel::kernel::cq::event::dispatch_result result{};
+  emel::kernel::cq::sm machine;
+
+  CHECK_FALSE(machine.process_event(
+      emel::kernel::cq::event::execute_scalar_q4{request, result}));
+  CHECK_FALSE(result.accepted);
+  CHECK(output[0] == -17.0f);
+  CHECK(workspace[0] == -19.0f);
+}
+
+TEST_CASE("CQ scalar rows machine rejects a zero group without writes") {
+  const std::array<uint8_t, 1u> packed{};
+  const tensor_view weights{.dtype = 3u,
+                            .ndim = 2u,
+                            .shape = {1u, 1u, 0u, 0u},
+                            .nbytes = packed.size(),
+                            .group = 0u,
+                            .bits = 4u,
+                            .data = packed.data()};
+  std::array<float, 28u> codebook{};
+  const std::array<float, 1u> activation{2.0f};
+  std::array<float, 1u> output{-23.0f};
+  std::array<float, 1u> workspace{-29.0f};
+  const emel::kernel::cq::event::gemv_rows_request request{
+      weights, codebook, activation, 0u, 1u, output, workspace};
+  emel::kernel::cq::event::dispatch_result result{};
+  emel::kernel::cq::sm machine;
+
+  CHECK_FALSE(machine.process_event(
+      emel::kernel::cq::event::execute_scalar_rows_q4{request, result}));
+  CHECK_FALSE(result.accepted);
+  CHECK(output[0] == -23.0f);
+  CHECK(workspace[0] == -29.0f);
+}
+
 TEST_CASE("CQ guard rejects incomplete padded workspace") {
   const auto b =
       blob<4u>(std::vector<uint32_t>(16, 0), 1, 13, 8, {0x3c00, 0x3c00});
