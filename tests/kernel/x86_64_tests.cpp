@@ -2324,23 +2324,39 @@ TEST_CASE("kernel_x86_64_simd_elementwise_vectors_and_tails_are_exact") {
 TEST_CASE("kernel_x86_64_f16_shared_routes_cover_variants_and_tails") {
   x86_64_sm machine{emel::kernel::x86_64::action::context{false, {}, 0}};
 
-  const std::array<float, 6> lhs_values{1.0f, 2.0f, -1.0f,
-                                        0.5f, 3.0f, 4.0f};
-  const std::array<float, 6> rhs_values{2.0f, -1.0f, 0.5f,
-                                        1.0f, 2.0f, -2.0f};
+  constexpr size_t k = 3;
+  constexpr size_t m = 2;
+  constexpr size_t n = 2;
+  // The f16 route uses ggml layout: src0 stores m k-element rows, src1
+  // stores n k-element columns, and dst stores m-element columns.
+  const std::array<float, k * m> lhs_values{1.0f, 2.0f, -1.0f,
+                                             0.5f, 3.0f, 4.0f};
+  const std::array<float, k * n> rhs_values{2.0f, -1.0f, 0.5f,
+                                             1.0f, 2.0f, -2.0f};
   const auto lhs = to_fp16_storage(lhs_values);
   const auto rhs = to_fp16_storage(rhs_values);
-  std::array<float, 4> matmul_out{};
+  std::array<float, m * n> matmul_out{};
   const emel::kernel::event::op_mul_mat matmul{
-      .src0 = make_src(lhs.data(), dtype::f16, 3, 2),
-      .src1 = make_src(rhs.data(), dtype::f16, 3, 2),
-      .dst = make_dst(matmul_out.data(), dtype::f32, 2, 2),
+      .src0 = make_src(lhs.data(), dtype::f16, k, m),
+      .src1 = make_src(rhs.data(), dtype::f16, k, n),
+      .dst = make_dst(matmul_out.data(), dtype::f32, m, n),
   };
   REQUIRE(machine.process_event(matmul));
-  CHECK(matmul_out[0] == doctest::Approx(-0.5f));
-  CHECK(matmul_out[1] == doctest::Approx(2.0f));
-  CHECK(matmul_out[2] == doctest::Approx(5.5f));
-  CHECK(matmul_out[3] == doctest::Approx(10.5f));
+
+  std::array<float, m * n> matmul_expected{};
+  for (size_t col = 0; col < n; ++col) {
+    for (size_t row = 0; row < m; ++row) {
+      double dot = 0.0;
+      for (size_t inner = 0; inner < k; ++inner) {
+        dot += static_cast<double>(lhs_values[row * k + inner] *
+                                   rhs_values[col * k + inner]);
+      }
+      matmul_expected[row + col * m] = static_cast<float>(dot);
+    }
+  }
+  for (size_t i = 0; i < matmul_out.size(); ++i) {
+    CHECK(matmul_out[i] == doctest::Approx(matmul_expected[i]));
+  }
 
   std::array<block_q4_k, 2> q4_rows{};
   fill_q4_block(q4_rows[0], 71u);
