@@ -109,6 +109,72 @@ TEST_CASE("quality gates exclude nested sml machine headers from coverage "
   CHECK(helper.find("src/emel/**/*/sm.hpp") != std::string::npos);
 }
 
+TEST_CASE("coverage domains use bounded doctest shards") {
+  const std::string cmake = read_file(repo_root() / "CMakeLists.txt");
+  CHECK(cmake.find("test_shard STREQUAL \"text_generator\"") !=
+        std::string::npos);
+  CHECK(cmake.find("test_source MATCHES \"^tests/text/generator/\"") !=
+        std::string::npos);
+  CHECK(cmake.find("test_shard STREQUAL \"embeddings\"") !=
+        std::string::npos);
+  CHECK(cmake.find("test_source MATCHES \"^tests/embeddings/\"") !=
+        std::string::npos);
+  CHECK(cmake.find("test_shard STREQUAL \"logits_and_token\"") !=
+        std::string::npos);
+  CHECK(cmake.find("test_source MATCHES \"^tests/(logits|token)/\"") !=
+        std::string::npos);
+  CHECK(cmake.find("\n    text_generator\n    \"*tests/text/generator/*\"") !=
+        std::string::npos);
+  CHECK(cmake.find("\n    embeddings\n    \"*tests/embeddings/*\"") !=
+        std::string::npos);
+  CHECK(cmake.find(
+            "\n    logits_and_token\n    \"*tests/logits/*,*tests/token/*\"") !=
+        std::string::npos);
+
+  const std::string coverage =
+      read_file(repo_root() / "scripts" / "test_with_coverage.sh");
+  CHECK(coverage.find("text_generator)\n"
+                      "      add_selected_test_dir tests/text/generator") !=
+        std::string::npos);
+  CHECK(coverage.find("embeddings)\n"
+                      "      add_selected_test_dir tests/embeddings") !=
+        std::string::npos);
+  CHECK(coverage.find("logits_and_token)\n"
+                      "      add_selected_test_dir tests/logits\n"
+                      "      add_selected_test_dir tests/token") !=
+        std::string::npos);
+  CHECK(coverage.find("src/emel/text/generator/*)\n"
+                      "        add_changed_shard text_generator") !=
+        std::string::npos);
+  CHECK(coverage.find("src/emel/embeddings/*)\n"
+                      "        add_changed_shard embeddings") !=
+        std::string::npos);
+  CHECK(coverage.find("src/emel/logits/*|src/emel/token/*)\n"
+                      "        add_changed_shard logits_and_token") !=
+        std::string::npos);
+
+  const std::string quality =
+      read_file(repo_root() / "scripts" / "quality_gates.sh");
+  CHECK(quality.find("tests/text/generator/*)\n"
+                     "      add_test_shard text_generator") !=
+        std::string::npos);
+  CHECK(quality.find("tests/embeddings/*)\n"
+                     "      add_test_shard embeddings") !=
+        std::string::npos);
+  CHECK(quality.find("tests/logits/*|tests/token/*)\n"
+                     "      add_test_shard logits_and_token") !=
+        std::string::npos);
+  CHECK(quality.find("src/emel/text/generator/*)\n"
+                     "      add_test_shard text_generator") !=
+        std::string::npos);
+  CHECK(quality.find("src/emel/embeddings/*)\n"
+                     "      add_test_shard embeddings") !=
+        std::string::npos);
+  CHECK(quality.find("src/emel/logits/*|src/emel/token/*)\n"
+                     "      add_test_shard logits_and_token") !=
+        std::string::npos);
+}
+
 TEST_CASE("coverage script enforces thresholds on changed executable lines") {
   const std::string script =
       read_file(repo_root() / "scripts" / "test_with_coverage.sh");

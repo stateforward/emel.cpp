@@ -287,7 +287,13 @@ add_changed_file() {
   esac
   case "$file" in
     tests/text/generator/*)
-      add_test_shard generator_and_runtime
+      add_test_shard text_generator
+      ;;
+    tests/embeddings/*)
+      add_test_shard embeddings
+      ;;
+    tests/logits/*|tests/token/*)
+      add_test_shard logits_and_token
       ;;
     tests/text/encoders/plamo2_tests.cpp)
       add_test_shard text_encoder_plamo2
@@ -331,8 +337,14 @@ infer_test_shard_for_src() {
     src/emel/model/*|src/emel/model*.hpp|src/emel/gguf/*|src/emel/gbnf/*|src/emel/batch/*)
       add_test_shard model_and_batch
       ;;
-    src/emel/text/generator/*|src/emel/embeddings/*|src/emel/logits/*|src/emel/token/*)
-      add_test_shard generator_and_runtime
+    src/emel/text/generator/*)
+      add_test_shard text_generator
+      ;;
+    src/emel/embeddings/*)
+      add_test_shard embeddings
+      ;;
+    src/emel/logits/*|src/emel/token/*)
+      add_test_shard logits_and_token
       ;;
     src/emel/diarization/*)
       add_test_shard diarization

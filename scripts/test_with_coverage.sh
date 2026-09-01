@@ -132,9 +132,13 @@ add_test_dirs_for_shard() {
       add_selected_test_dir tests/gbnf
       add_selected_test_dir tests/batch
       ;;
-    generator_and_runtime)
+    text_generator)
       add_selected_test_dir tests/text/generator
+      ;;
+    embeddings)
       add_selected_test_dir tests/embeddings
+      ;;
+    logits_and_token)
       add_selected_test_dir tests/logits
       add_selected_test_dir tests/token
       ;;
@@ -238,8 +242,14 @@ if [[ "$COVERAGE_CHANGED_ONLY" == "1" ]]; then
       src/emel/model/*|src/emel/model*.hpp|src/emel/gguf/*|src/emel/gbnf/*|src/emel/batch/*)
         add_changed_shard model_and_batch
         ;;
-      src/emel/text/generator/*|src/emel/embeddings/*|src/emel/logits/*|src/emel/token/*)
-        add_changed_shard generator_and_runtime
+      src/emel/text/generator/*)
+        add_changed_shard text_generator
+        ;;
+      src/emel/embeddings/*)
+        add_changed_shard embeddings
+        ;;
+      src/emel/logits/*|src/emel/token/*)
+        add_changed_shard logits_and_token
         ;;
       src/emel/diarization/*)
         add_changed_shard diarization

@@ -312,8 +312,12 @@ if(EMEL_ENABLE_TESTS)
               test_source MATCHES "^tests/(model|gguf|gbnf|batch|io|cact)/") OR
            (test_shard STREQUAL "io" AND
               test_source MATCHES "^tests/io/") OR
-           (test_shard STREQUAL "generator_and_runtime" AND
-              test_source MATCHES "^tests/(text/generator|embeddings|logits|token)/") OR
+           (test_shard STREQUAL "text_generator" AND
+              test_source MATCHES "^tests/text/generator/") OR
+           (test_shard STREQUAL "embeddings" AND
+              test_source MATCHES "^tests/embeddings/") OR
+           (test_shard STREQUAL "logits_and_token" AND
+              test_source MATCHES "^tests/(logits|token)/") OR
            (test_shard STREQUAL "diarization" AND
               test_source MATCHES "^tests/diarization/") OR
            (test_shard STREQUAL "speech" AND
@@ -396,8 +400,16 @@ if(EMEL_ENABLE_TESTS)
     "*tests/io/*"
   )
   emel_add_doctest_shard(
-    generator_and_runtime
-    "*tests/text/generator/*,*tests/embeddings/*,*tests/logits/*,*tests/token/*"
+    text_generator
+    "*tests/text/generator/*"
+  )
+  emel_add_doctest_shard(
+    embeddings
+    "*tests/embeddings/*"
+  )
+  emel_add_doctest_shard(
+    logits_and_token
+    "*tests/logits/*,*tests/token/*"
   )
   emel_add_doctest_shard(
     diarization
