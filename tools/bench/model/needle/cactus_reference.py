@@ -11,6 +11,8 @@ import importlib.machinery
 import importlib.util
 import os
 from pathlib import Path
+import shutil
+import stat
 import statistics
 import subprocess
 import sys
@@ -93,6 +95,17 @@ def sha256_file(path: Path) -> str:
     except OSError as exc:
         fail(f"cannot hash canonical input {path}: {exc}")
     return digest.hexdigest()
+
+
+def copy_authenticated_file(source: Path, destination: Path, name: str) -> None:
+    try:
+        if source.is_symlink() or not source.is_file():
+            fail(f"{name} is missing, is not a regular file, or is a symlink: {source}")
+        with source.open("rb") as source_file, destination.open("xb") as target:
+            shutil.copyfileobj(source_file, target, length=1024 * 1024)
+        destination.chmod(stat.S_IRUSR)
+    except OSError as exc:
+        fail(f"cannot stage {name}: {exc}")
 
 
 def validate_canonical_input(path: Path, expected_sha256: str, name: str) -> None:
@@ -210,7 +223,7 @@ def load_requests(path: Path) -> list[tuple[str | None, list[Any], str]]:
     return requests
 
 
-def sha256_python_tree(package_root: Path) -> str:
+def sha256_python_tree(package_root: Path, *, allow_native_library: Path | None = None) -> str:
     digest = hashlib.sha256()
     sources: list[tuple[str, Path]] = []
     try:
@@ -232,7 +245,8 @@ def sha256_python_tree(package_root: Path) -> str:
                     sources.append((relative.as_posix(), source))
                 elif any(filename.endswith(suffix)
                          for suffix in importlib.machinery.EXTENSION_SUFFIXES):
-                    fail(f"Needle package tree contains an unauthenticated extension module: {source}")
+                    if allow_native_library is None or source != allow_native_library:
+                        fail(f"Needle package tree contains an unauthenticated extension module: {source}")
                 elif source.suffix == ".pyc" and "__pycache__" not in relative.parts:
                     fail(f"Needle package tree contains unauthenticated bytecode: {source}")
         for relative, source in sorted(sources):
@@ -245,15 +259,21 @@ def sha256_python_tree(package_root: Path) -> str:
     return digest.hexdigest()
 
 
-def validate_needle_package(needle_root: Path) -> Path:
+def resolve_needle_package(needle_root: Path) -> tuple[Path, Path]:
     try:
         if needle_root.is_symlink():
             fail(f"Needle package root must not be a symlink: {needle_root}")
         resolved_root = needle_root.resolve(strict=True)
     except OSError as exc:
         fail(f"cannot resolve Needle package root: {exc}")
-    package_root = resolved_root / "needle"
-    actual_tree_sha256 = sha256_python_tree(package_root)
+    return resolved_root, resolved_root / "needle"
+
+
+def validate_needle_package(
+        needle_root: Path, *, allow_native_library: Path | None = None) -> Path:
+    _, package_root = resolve_needle_package(needle_root)
+    actual_tree_sha256 = sha256_python_tree(
+        package_root, allow_native_library=allow_native_library)
     if actual_tree_sha256 != NEEDLE_PACKAGE_TREE_SHA256:
         fail(
             "Needle package tree SHA-256 mismatch: expected "
@@ -263,6 +283,41 @@ def validate_needle_package(needle_root: Path) -> Path:
         package_root / "__init__.py", NEEDLE_PACKAGE_INIT_SHA256,
         "Needle package __init__.py")
     return package_root
+
+
+def stage_needle_package(needle_root: Path, staged_root: Path) -> Path:
+    _, package_root = resolve_needle_package(needle_root)
+    staged_package = staged_root / "needle"
+    try:
+        staged_package.mkdir(mode=stat.S_IRWXU)
+        for directory, child_directories, files in os.walk(
+                package_root, followlinks=False):
+            directory_path = Path(directory)
+            relative_directory = directory_path.relative_to(package_root)
+            target_directory = staged_package / relative_directory
+            for child in child_directories:
+                child_path = directory_path / child
+                if child_path.is_symlink():
+                    fail(f"Needle package tree contains a symlink: {child_path}")
+                (target_directory / child).mkdir(mode=stat.S_IRWXU)
+            for filename in files:
+                source = directory_path / filename
+                relative = source.relative_to(package_root)
+                if source.is_symlink():
+                    fail(f"Needle package tree contains a symlink: {source}")
+                if source.suffix == ".py":
+                    copy_authenticated_file(
+                        source, staged_package / relative,
+                        f"Needle Python source {relative.as_posix()}")
+                elif any(filename.endswith(suffix)
+                         for suffix in importlib.machinery.EXTENSION_SUFFIXES):
+                    fail(f"Needle package tree contains an unauthenticated extension module: {source}")
+                elif source.suffix == ".pyc" and "__pycache__" not in relative.parts:
+                    fail(f"Needle package tree contains unauthenticated bytecode: {source}")
+    except OSError as exc:
+        fail(f"cannot stage Needle package tree: {exc}")
+    validate_needle_package(staged_root)
+    return staged_package
 
 
 def validate_needle_module_identity(needle: Any, package_root: Path) -> None:
@@ -285,11 +340,14 @@ def validate_needle_module_identity(needle: Any, package_root: Path) -> None:
         fail("authenticated needle package has no native library selector")
 
 
-def validate_needle_native_library(needle: Any) -> Path:
-    if "NEEDLE_LIB_PATH" in os.environ:
+def select_needle_native_library(
+        needle: Any, *, allow_override: bool = False) -> Path:
+    override = os.environ.get("NEEDLE_LIB_PATH")
+    if override and not allow_override:
         fail("NEEDLE_LIB_PATH is unsupported for canonical needle_graph compare")
     try:
-        selected = Path(needle._library_path()).expanduser()
+        selected = (Path(override) if override is not None
+                    else Path(needle._library_path()).expanduser())
     except Exception as exc:
         fail(f"cannot select Needle native library: {exc}")
     if selected.is_symlink():
@@ -300,6 +358,13 @@ def validate_needle_native_library(needle: Any) -> Path:
         fail(f"cannot resolve Needle native library: {exc}")
     if not library.is_file():
         fail(f"Needle native library is not a regular file: {library}")
+    return library
+
+
+def validate_needle_native_library(
+        needle: Any, *, allow_override: bool = False) -> Path:
+    library = select_needle_native_library(
+        needle, allow_override=allow_override)
     actual_sha256 = sha256_file(library)
     if actual_sha256 != NEEDLE_NATIVE_LIBRARY_SHA256:
         fail(
@@ -307,6 +372,19 @@ def validate_needle_native_library(needle: Any) -> Path:
             f"{NEEDLE_NATIVE_LIBRARY_SHA256}, got {actual_sha256}"
         )
     return library
+
+
+def stage_needle_native_library(needle: Any, staged_package: Path) -> Path:
+    library = select_needle_native_library(needle)
+    staged_library = staged_package / library.name
+    copy_authenticated_file(library, staged_library, "Needle native library")
+    actual_sha256 = sha256_file(staged_library)
+    if actual_sha256 != NEEDLE_NATIVE_LIBRARY_SHA256:
+        fail(
+            "Needle native library SHA-256 mismatch: expected "
+            f"{NEEDLE_NATIVE_LIBRARY_SHA256}, got {actual_sha256}"
+        )
+    return staged_library
 
 
 
@@ -329,7 +407,10 @@ def import_needle(needle_root: Path, package_root: Path):
         sys.modules.pop("needle", None)
         fail(f"cannot import needle from {needle_root}: {exc}")
     validate_needle_module_identity(needle, package_root)
-    validate_needle_package(needle_root)
+    validate_needle_package(
+        needle_root,
+        allow_native_library=(Path(os.environ["NEEDLE_LIB_PATH"]).resolve()
+                              if "NEEDLE_LIB_PATH" in os.environ else None))
     return needle
 
 def median(values: list[float], name: str) -> float:
@@ -354,24 +435,32 @@ def run_reference(args: argparse.Namespace) -> dict[str, Any]:
     model = Path(args.model).resolve()
     fixture = Path(args.fixture).resolve()
     needle_root = Path(args.needle_root)
-    repo_root = Path(__file__).resolve().parents[4]
-    validate_canonical_path(model, repo_root / MODEL_RELATIVE_PATH, "model")
-    validate_canonical_path(fixture, repo_root / FIXTURE_ID, "fixture")
-    validate_canonical_input(model, MODEL_SHA256, "model")
-    validate_canonical_input(fixture, FIXTURE_SHA256, "fixture")
+    if getattr(args, "staged", False):
+        validate_canonical_input(model, MODEL_SHA256, "model")
+        validate_canonical_input(fixture, FIXTURE_SHA256, "fixture")
+    else:
+        repo_root = Path(__file__).resolve().parents[4]
+        validate_canonical_path(model, repo_root / MODEL_RELATIVE_PATH, "model")
+        validate_canonical_path(fixture, repo_root / FIXTURE_ID, "fixture")
+        validate_canonical_input(model, MODEL_SHA256, "model")
+        validate_canonical_input(fixture, FIXTURE_SHA256, "fixture")
     warmup_iterations = exact_int(args.warmup_iterations, "warmup_iterations")
     warmup_runs = exact_int(args.warmup_runs, "warmup_runs")
     iterations = exact_int(args.iterations, "iterations", minimum=1)
     runs = exact_int(args.runs, "runs", minimum=1)
     requests = load_requests(fixture)
-    if "NEEDLE_LIB_PATH" in os.environ:
+    if "NEEDLE_LIB_PATH" in os.environ and not getattr(args, "staged", False):
         fail("NEEDLE_LIB_PATH is unsupported for canonical needle_graph compare")
-    package_root = validate_needle_package(needle_root)
+    allowed_library = (Path(os.environ["NEEDLE_LIB_PATH"]).resolve()
+                       if getattr(args, "staged", False) else None)
+    package_root = validate_needle_package(
+        needle_root, allow_native_library=allowed_library)
     authenticated_root = package_root.parent
     needle = import_needle(authenticated_root, package_root)
-    native_library = validate_needle_native_library(needle)
-    validate_needle_package(authenticated_root)
-    os.environ["NEEDLE_LIB_PATH"] = str(native_library)
+    native_library = validate_needle_native_library(
+        needle, allow_override=getattr(args, "staged", False))
+    validate_needle_package(
+        authenticated_root, allow_native_library=native_library)
     system, tools, _ = requests[0]
     os.environ["NEEDLE_THREADS"] = str(THREAD_COUNT)
     try:
@@ -699,7 +788,7 @@ def bounded_timeout_int(value: str) -> int:
             f"must be in [1, {MAX_TIMEOUT_SECONDS}]")
     return parsed
 
-def worker_environment() -> dict[str, str]:
+def worker_environment(extra: dict[str, str] | None = None) -> dict[str, str]:
     environment = {
         name: os.environ[name]
         for name in WORKER_ENVIRONMENT_ALLOWLIST
@@ -707,6 +796,8 @@ def worker_environment() -> dict[str, str]:
     }
     environment["PYTHONNOUSERSITE"] = "1"
     environment["PYTHONDONTWRITEBYTECODE"] = "1"
+    if extra:
+        environment.update(extra)
     return environment
 
 
@@ -717,21 +808,51 @@ def run_reference_subprocess(args: argparse.Namespace) -> None:
     timeout_seconds = exact_int(
         args.timeout_seconds, "timeout_seconds", minimum=1,
         maximum=MAX_TIMEOUT_SECONDS)
-    command = [
-        sys.executable, "-I", "-S", "-B", str(Path(__file__).resolve()),
-        "run-reference-worker", "--model", args.model,
-        "--fixture", args.fixture, "--needle-root", args.needle_root,
-        "--warmup-iterations", str(args.warmup_iterations),
-        "--warmup-runs", str(args.warmup_runs),
-        "--iterations", str(args.iterations), "--runs", str(args.runs),
-        "--output", args.output,
-    ]
     output = Path(args.output)
     temporary = output.with_name(output.name + ".tmp")
     try:
-        completed = subprocess.run(
-            command, check=False, timeout=timeout_seconds,
-            env=worker_environment())
+        with tempfile.TemporaryDirectory(prefix="emel-needle-auth-") as staging_name:
+            staging_root = Path(staging_name)
+            staged_model = staging_root / "model.cact"
+            repo_root = Path(__file__).resolve().parents[4]
+            validate_canonical_path(
+                Path(args.model), repo_root / MODEL_RELATIVE_PATH, "model")
+            validate_canonical_path(
+                Path(args.fixture), repo_root / FIXTURE_ID, "fixture")
+            staged_fixture = staging_root / "fixture.tsv"
+            staged_needle_root = staging_root / "package"
+            staged_needle_root.mkdir(mode=stat.S_IRWXU)
+            copy_authenticated_file(Path(args.model), staged_model, "canonical model")
+            copy_authenticated_file(Path(args.fixture), staged_fixture, "canonical fixture")
+            staged_package = stage_needle_package(
+                Path(args.needle_root), staged_needle_root)
+            needle = import_needle(staged_needle_root, staged_package)
+            staged_library = stage_needle_native_library(needle, staged_package)
+            os.environ["NEEDLE_LIB_PATH"] = str(staged_library)
+            try:
+                validate_canonical_input(staged_model, MODEL_SHA256, "model")
+                validate_canonical_input(staged_fixture, FIXTURE_SHA256, "fixture")
+                validate_needle_package(
+                    staged_needle_root, allow_native_library=staged_library)
+                command = [
+                    sys.executable, "-I", "-S", "-B", str(Path(__file__).resolve()),
+                    "run-reference-worker", "--staged",
+                    "--model", str(staged_model),
+                    "--fixture", str(staged_fixture),
+                    "--needle-root", str(staged_needle_root),
+                    "--warmup-iterations", str(args.warmup_iterations),
+                    "--warmup-runs", str(args.warmup_runs),
+                    "--iterations", str(args.iterations), "--runs", str(args.runs),
+                    "--output", args.output,
+                ]
+                completed = subprocess.run(
+                    command, check=False, timeout=timeout_seconds,
+                    env=worker_environment({"NEEDLE_LIB_PATH": str(staged_library)}))
+            finally:
+                os.environ.pop("NEEDLE_LIB_PATH", None)
+                for name in tuple(sys.modules):
+                    if name == "needle" or name.startswith("needle."):
+                        sys.modules.pop(name, None)
     except subprocess.TimeoutExpired:
         temporary.unlink(missing_ok=True)
         fail(f"Needle reference process exceeded {timeout_seconds}s timeout")
@@ -759,6 +880,7 @@ def main() -> None:
                      default=DEFAULT_TIMEOUT_SECONDS)
     worker = subparsers.add_parser("run-reference-worker")
     add_reference_arguments(worker)
+    worker.add_argument("--staged", action="store_true", help=argparse.SUPPRESS)
     compare_parser = subparsers.add_parser("compare")
     compare_parser.add_argument("--emel-input", required=True)
     compare_parser.add_argument("--reference-input", required=True)

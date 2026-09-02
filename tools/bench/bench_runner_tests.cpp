@@ -866,13 +866,129 @@ TEST_CASE("needle cactus rejects substituted package before executing it") {
   CHECK_FALSE(std::filesystem::exists(output_path));
 #endif
 }
+
+TEST_CASE("needle cactus supervisor executes only staged authenticated bytes") {
+#if !defined(_WIN32)
+  const std::string program = R"PY(
+import argparse
+import hashlib
+import importlib.util
+import os
+import pathlib
+import sys
+import tempfile
+
+spec = importlib.util.spec_from_file_location("cactus_reference", sys.argv[1])
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+
+root = pathlib.Path(tempfile.mkdtemp())
+needle_root = root / "needle-root"
+package_root = needle_root / "needle"
+package_root.mkdir(parents=True)
+library = root / "libneedle.so"
+model = root / "model.cact"
+fixture = root / "fixture.tsv"
+output = root / "reference.json"
+
+library_bytes = b"authenticated native library"
+model_bytes = b"authenticated model"
+fixture_bytes = b"authenticated fixture"
+library.write_bytes(library_bytes)
+model.write_bytes(model_bytes)
+fixture.write_bytes(fixture_bytes)
+init_bytes = (
+    "__version__ = '2.0.8'\n"
+    "class Needle:\n"
+    "    pass\n"
+    "def _library_path():\n"
+    f"    return {str(library)!r}\n"
+).encode()
+(package_root / "__init__.py").write_bytes(init_bytes)
+
+sha256 = lambda data: hashlib.sha256(data).hexdigest()
+module.MODEL_SHA256 = sha256(model_bytes)
+module.FIXTURE_SHA256 = sha256(fixture_bytes)
+module.NEEDLE_PACKAGE_INIT_SHA256 = sha256(init_bytes)
+module.NEEDLE_PACKAGE_TREE_SHA256 = module.sha256_python_tree(package_root)
+module.NEEDLE_NATIVE_LIBRARY_SHA256 = sha256(library_bytes)
+module.validate_canonical_path = lambda path, expected, name: None
+
+captured = {}
+class Completed:
+    returncode = 0
+
+def option(command, name):
+    return pathlib.Path(command[command.index(name) + 1])
+
+def fake_run(command, *, check, timeout, env):
+    (package_root / "__init__.py").write_bytes(b"raise RuntimeError('swapped package executed')\n")
+    model.write_bytes(b"swapped model")
+    fixture.write_bytes(b"swapped fixture")
+    staged_model = option(command, "--model")
+    staged_fixture = option(command, "--fixture")
+    staged_root = option(command, "--needle-root")
+    staged_package = staged_root / "needle"
+    staged_libraries = list(staged_package.glob("*.so"))
+    assert len(staged_libraries) == 1
+    staged_library = staged_libraries[0]
+    assert "--staged" in command
+    assert staged_model != model
+    assert staged_fixture != fixture
+    assert staged_root != needle_root
+    assert staged_model.read_bytes() == model_bytes
+    assert staged_fixture.read_bytes() == fixture_bytes
+    assert (staged_package / "__init__.py").read_bytes() == init_bytes
+    assert staged_library.read_bytes() == library_bytes
+    assert module.sha256_python_tree(
+        staged_package, allow_native_library=staged_library) == module.NEEDLE_PACKAGE_TREE_SHA256
+    assert module.sha256_file(staged_library) == module.NEEDLE_NATIVE_LIBRARY_SHA256
+    assert env["NEEDLE_LIB_PATH"] == str(staged_library)
+    assert not (set(module.INJECTION_ENVIRONMENT_VARIABLES) &
+                (set(env) - {"NEEDLE_LIB_PATH"}))
+    captured["stage"] = staged_root.parent
+    return Completed()
+
+module.subprocess.run = fake_run
+module.run_reference_subprocess(argparse.Namespace(
+    timeout_seconds=5,
+    model=str(model),
+    fixture=str(fixture),
+    needle_root=str(needle_root),
+    warmup_iterations=0,
+    warmup_runs=0,
+    iterations=1,
+    runs=1,
+    output=str(output),
+))
+assert not captured["stage"].exists()
+)PY";
+  const std::filesystem::path tmp_dir =
+      std::filesystem::temp_directory_path() / "emel-bench-runner-tests" /
+      "needle-staged-authentication";
+  std::filesystem::create_directories(tmp_dir);
+  const std::filesystem::path stdout_path = tmp_dir / "stdout.txt";
+  const std::filesystem::path stderr_path = tmp_dir / "stderr.txt";
+  const std::string command =
+      "python3 -I -S -B -c " + quote_arg_posix(program) + " " +
+      quote_arg_posix(cactus_reference_driver_path().string()) + " > " +
+      quote_arg_posix(stdout_path.string()) + " 2> " +
+      quote_arg_posix(stderr_path.string());
+  const process_capture capture =
+      run_command_capture(command, stdout_path, stderr_path);
+  CHECK(capture.exit_code == 0);
+  CHECK(capture.stderr_text.empty());
+#endif
+}
 TEST_CASE("needle cactus supervisor uses an explicit safe worker environment") {
 #if !defined(_WIN32)
   const std::string program = R"PY(
 import argparse
 import importlib.util
 import os
+import pathlib
 import sys
+import tempfile
 
 spec = importlib.util.spec_from_file_location("cactus_reference", sys.argv[1])
 module = importlib.util.module_from_spec(spec)
@@ -902,16 +1018,35 @@ def fake_run(command, *, check, timeout, env):
     return Completed()
 
 module.subprocess.run = fake_run
+
+root = pathlib.Path(tempfile.mkdtemp())
+needle_root = root / "needle-root"
+package_root = needle_root / "needle"
+package_root.mkdir(parents=True)
+(package_root / "__init__.py").write_text("__version__ = '2.0.8'\nclass Needle: pass\ndef _library_path(): return 'unused'\n")
+model = root / "model"
+fixture = root / "fixture"
+model.write_bytes(b"model")
+fixture.write_bytes(b"fixture")
+
+module.copy_authenticated_file = lambda source, destination, name: destination.write_bytes(source.read_bytes())
+module.stage_needle_package = lambda source, destination: (destination / "needle")
+module.import_needle = lambda root, package: type("NeedleModule", (), {"_library_path": staticmethod(lambda: "unused")})()
+module.stage_needle_native_library = lambda needle, package: package / "libneedle.so"
+module.validate_canonical_input = lambda path, expected, name: None
+module.validate_canonical_path = lambda path, expected, name: None
+module.validate_needle_package = lambda root, **kwargs: root / "needle"
+
 args = argparse.Namespace(
     timeout_seconds=5,
-    model="model",
-    fixture="fixture",
-    needle_root="needle-root",
+    model=str(model),
+    fixture=str(fixture),
+    needle_root=str(needle_root),
     warmup_iterations=0,
     warmup_runs=0,
     iterations=1,
     runs=1,
-    output="output.json",
+    output=str(root / "output.json"),
 )
 module.run_reference_subprocess(args)
 worker_env = captured["env"]
@@ -926,8 +1061,10 @@ assert worker_env == {
     "NEEDLE_THREADS": "1",
     "PYTHONNOUSERSITE": "1",
     "PYTHONDONTWRITEBYTECODE": "1",
+    "NEEDLE_LIB_PATH": captured["command"][captured["command"].index("--needle-root") + 1] + "/needle/libneedle.so",
 }
-assert not (set(module.INJECTION_ENVIRONMENT_VARIABLES) & set(worker_env))
+assert not (set(module.INJECTION_ENVIRONMENT_VARIABLES) &
+            (set(worker_env) - {"NEEDLE_LIB_PATH"}))
 assert "UNRELATED_SECRET" not in worker_env
 )PY";
   const std::filesystem::path tmp_dir =
