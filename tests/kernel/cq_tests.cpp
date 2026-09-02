@@ -275,7 +275,7 @@ TEST_CASE("CQ4 prepare rejects geometry that differs from owned capacity") {
   CHECK_FALSE(prepared.published());
 }
 
-TEST_CASE("CQ4 prepare refreshes owned payload through trusted dispatch") {
+TEST_CASE("CQ4 prepare rejects republishing owned payload") {
   constexpr uint32_t out = 32u, in = 128u, group = 128u;
   auto packed = blob<4u>(std::vector<uint32_t>(out * in, 3u), out, in, group,
                           std::vector<uint16_t>(out, 0x3c00u));
@@ -286,11 +286,143 @@ TEST_CASE("CQ4 prepare refreshes owned payload through trusted dispatch") {
   emel::kernel::cq::event::dispatch_result first_result{};
   REQUIRE(machine.process_event(
       emel::kernel::cq::event::prepare_q4{request, first_result}));
+  const uint8_t published_selector = prepared.indices().front();
   packed[0] = 0x44u;
   emel::kernel::cq::event::dispatch_result second_result{};
-  REQUIRE(machine.process_event(
+  CHECK_FALSE(machine.process_event(
       emel::kernel::cq::event::prepare_q4{request, second_result}));
-  CHECK(prepared.indices().front() == 4u);
+  CHECK_FALSE(second_result.accepted);
+  CHECK(prepared.indices().front() == published_selector);
+}
+
+TEST_CASE("CQ4 codebook prepare rejects republishing owned payload") {
+  std::array<float, emel::cact::loader::k_codebook_len> codebook{};
+  codebook[12u] = 0.25f;
+  emel::kernel::cq::event::prepared_codebook_q4 prepared{};
+  const emel::kernel::cq::event::prepare_codebook_q4_request request{
+      codebook, prepared};
+  emel::kernel::cq::sm machine;
+  emel::kernel::cq::event::dispatch_result first_result{};
+  REQUIRE(machine.process_event(emel::kernel::cq::event::prepare_codebook_q4{
+      request, first_result}));
+  codebook[12u] = 9.0f;
+  emel::kernel::cq::event::dispatch_result second_result{};
+  CHECK_FALSE(machine.process_event(emel::kernel::cq::event::prepare_codebook_q4{
+      request, second_result}));
+  CHECK_FALSE(second_result.accepted);
+  CHECK(prepared.values()[12u] == 0.25f);
+}
+
+TEST_CASE("CQ4 move transfers publication and invalidates sources") {
+  constexpr uint32_t out = 32u, in = 128u, group = 128u;
+  const auto packed = blob<4u>(std::vector<uint32_t>(out * in, 3u), out, in,
+                                group, std::vector<uint16_t>(out, 0x3c00u));
+  const auto weights = view(packed, out, in, group, 4u);
+  emel::kernel::cq::event::prepared_q4_view prepared{out, in, group};
+  const emel::kernel::cq::event::prepare_q4_request prepare_request{
+      weights, prepared};
+  emel::kernel::cq::sm machine;
+  emel::kernel::cq::event::dispatch_result prepare_result{};
+  REQUIRE(machine.process_event(emel::kernel::cq::event::prepare_q4{
+      prepare_request, prepare_result}));
+
+  std::array<float, emel::cact::loader::k_codebook_len> codebook{};
+  codebook[15u] = 0.25f;
+  emel::kernel::cq::event::prepared_codebook_q4 prepared_codebook{};
+  const emel::kernel::cq::event::prepare_codebook_q4_request codebook_request{
+      codebook, prepared_codebook};
+  emel::kernel::cq::event::dispatch_result codebook_result{};
+  REQUIRE(machine.process_event(emel::kernel::cq::event::prepare_codebook_q4{
+      codebook_request, codebook_result}));
+
+  auto moved_weights = std::move(prepared);
+  auto moved_codebook = std::move(prepared_codebook);
+  CHECK_FALSE(prepared.published());
+  CHECK_FALSE(prepared.capacity_valid());
+  CHECK(prepared.indices().empty());
+  CHECK_FALSE(prepared_codebook.published());
+  CHECK(prepared_codebook.values().empty());
+  CHECK(moved_weights.published());
+  CHECK(moved_codebook.published());
+
+  std::array<float, in> moved_from_output{};
+  moved_from_output.fill(19.0f);
+  const emel::kernel::cq::event::prepared_dequant_rows_request moved_from_request{
+      prepared, moved_codebook, 0u, 1u, 1.0f, moved_from_output};
+  emel::kernel::cq::event::dispatch_result moved_from_result{};
+  CHECK_FALSE(machine.process_event(
+      emel::kernel::cq::event::execute_prepared_dequant_q4{
+          moved_from_request, moved_from_result}));
+  for (const float value : moved_from_output)
+    CHECK(value == 19.0f);
+
+  std::array<float, in> moved_to_output{};
+  const emel::kernel::cq::event::prepared_dequant_rows_request moved_to_request{
+      moved_weights, moved_codebook, 0u, 1u, 1.0f, moved_to_output};
+  emel::kernel::cq::event::dispatch_result moved_to_result{};
+  REQUIRE(machine.process_event(
+      emel::kernel::cq::event::execute_prepared_dequant_q4{
+          moved_to_request, moved_to_result}));
+
+  std::array<float, in> moved_codebook_source_output{};
+  moved_codebook_source_output.fill(23.0f);
+  const emel::kernel::cq::event::prepared_dequant_rows_request
+      moved_codebook_source_request{moved_weights, prepared_codebook, 0u, 1u,
+                                    1.0f, moved_codebook_source_output};
+  emel::kernel::cq::event::dispatch_result moved_codebook_source_result{};
+  CHECK_FALSE(machine.process_event(
+      emel::kernel::cq::event::execute_prepared_dequant_q4{
+          moved_codebook_source_request, moved_codebook_source_result}));
+  for (const float value : moved_codebook_source_output)
+    CHECK(value == 23.0f);
+}
+
+TEST_CASE("CQ4 published move assignment cannot mutate trusted payload") {
+  constexpr uint32_t out = 32u, in = 128u, group = 128u;
+  const auto packed_a = blob<4u>(std::vector<uint32_t>(out * in, 3u), out, in,
+                                  group, std::vector<uint16_t>(out, 0x3c00u));
+  const auto packed_b = blob<4u>(std::vector<uint32_t>(out * in, 4u), out, in,
+                                  group, std::vector<uint16_t>(out, 0x4000u));
+  const auto weights_a = view(packed_a, out, in, group, 4u);
+  const auto weights_b = view(packed_b, out, in, group, 4u);
+  emel::kernel::cq::event::prepared_q4_view prepared_a{out, in, group};
+  emel::kernel::cq::event::prepared_q4_view prepared_b{out, in, group};
+  emel::kernel::cq::sm machine;
+  emel::kernel::cq::event::dispatch_result result_a{};
+  emel::kernel::cq::event::dispatch_result result_b{};
+  const emel::kernel::cq::event::prepare_q4_request request_a{weights_a,
+                                                               prepared_a};
+  const emel::kernel::cq::event::prepare_q4_request request_b{weights_b,
+                                                               prepared_b};
+  REQUIRE(machine.process_event(
+      emel::kernel::cq::event::prepare_q4{request_a, result_a}));
+  REQUIRE(machine.process_event(
+      emel::kernel::cq::event::prepare_q4{request_b, result_b}));
+  prepared_a = std::move(prepared_b);
+  CHECK(prepared_a.indices().front() == 3u);
+  CHECK(prepared_b.published());
+  CHECK(prepared_b.indices().front() == 4u);
+
+  std::array<float, emel::cact::loader::k_codebook_len> codebook_a{};
+  std::array<float, emel::cact::loader::k_codebook_len> codebook_b{};
+  codebook_a[12u] = 0.25f;
+  codebook_b[12u] = 0.75f;
+  emel::kernel::cq::event::prepared_codebook_q4 prepared_codebook_a{};
+  emel::kernel::cq::event::prepared_codebook_q4 prepared_codebook_b{};
+  emel::kernel::cq::event::dispatch_result codebook_result_a{};
+  emel::kernel::cq::event::dispatch_result codebook_result_b{};
+  const emel::kernel::cq::event::prepare_codebook_q4_request codebook_request_a{
+      codebook_a, prepared_codebook_a};
+  const emel::kernel::cq::event::prepare_codebook_q4_request codebook_request_b{
+      codebook_b, prepared_codebook_b};
+  REQUIRE(machine.process_event(emel::kernel::cq::event::prepare_codebook_q4{
+      codebook_request_a, codebook_result_a}));
+  REQUIRE(machine.process_event(emel::kernel::cq::event::prepare_codebook_q4{
+      codebook_request_b, codebook_result_b}));
+  prepared_codebook_a = std::move(prepared_codebook_b);
+  CHECK(prepared_codebook_a.values()[12u] == 0.25f);
+  CHECK(prepared_codebook_b.published());
+  CHECK(prepared_codebook_b.values()[12u] == 0.75f);
 }
 
 

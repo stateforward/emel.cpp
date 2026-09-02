@@ -5,6 +5,7 @@
 #include <limits>
 #include <span>
 #include <vector>
+#include <utility>
 
 #include "emel/kernel/cq/detail.hpp"
 
@@ -33,6 +34,23 @@ public:
   using byte_planes_type = std::array<std::array<uint8_t, 32u>, 4u>;
 
   prepared_codebook_q4() noexcept = default;
+  prepared_codebook_q4(const prepared_codebook_q4 &) = delete;
+  prepared_codebook_q4 &operator=(const prepared_codebook_q4 &) = delete;
+  prepared_codebook_q4(prepared_codebook_q4 &&other) noexcept
+      : values_(std::move(other.values_)),
+        byte_planes_(std::move(other.byte_planes_)),
+        published_(other.published_) {
+    other.reset();
+  }
+  prepared_codebook_q4 &operator=(prepared_codebook_q4 &&other) noexcept {
+    if (this == &other || published_)
+      return *this;
+    values_ = std::move(other.values_);
+    byte_planes_ = std::move(other.byte_planes_);
+    published_ = other.published_;
+    other.reset();
+    return *this;
+  }
 
   [[nodiscard]] bool published() const noexcept { return published_; }
   [[nodiscard]] std::span<const float> values() const noexcept {
@@ -52,6 +70,11 @@ private:
       values_[i] = values[i];
     byte_planes_ = byte_planes;
     published_ = true;
+  }
+  void reset() noexcept {
+    values_ = {};
+    byte_planes_ = {};
+    published_ = false;
   }
 
   values_type values_ = {};
@@ -143,8 +166,14 @@ public:
 
   prepared_q4_view(const prepared_q4_view &) = delete;
   prepared_q4_view &operator=(const prepared_q4_view &) = delete;
-  prepared_q4_view(prepared_q4_view &&) noexcept = default;
-  prepared_q4_view &operator=(prepared_q4_view &&) noexcept = default;
+  prepared_q4_view(prepared_q4_view &&other) noexcept {
+    move_from(std::move(other));
+  }
+  prepared_q4_view &operator=(prepared_q4_view &&other) noexcept {
+    if (this != &other && !published_)
+      move_from(std::move(other));
+    return *this;
+  }
 
   [[nodiscard]] bool capacity_valid() const noexcept { return capacity_valid_; }
   [[nodiscard]] bool published() const noexcept { return published_; }
@@ -188,6 +217,28 @@ private:
   friend struct action::effect_prepare_q4;
 
   void publish() noexcept { published_ = true; }
+  void move_from(prepared_q4_view &&other) noexcept {
+    out_ = other.out_;
+    in_ = other.in_;
+    group_ = other.group_;
+    in_pad_ = other.in_pad_;
+    indices_ = std::move(other.indices_);
+    indices_by_input32_ = std::move(other.indices_by_input32_);
+    norms_ = std::move(other.norms_);
+    norms_by_group32_ = std::move(other.norms_by_group32_);
+    capacity_valid_ = other.capacity_valid_;
+    published_ = other.published_;
+    other.out_ = 0u;
+    other.in_ = 0u;
+    other.group_ = 0u;
+    other.in_pad_ = 0u;
+    other.indices_.clear();
+    other.indices_by_input32_.clear();
+    other.norms_.clear();
+    other.norms_by_group32_.clear();
+    other.capacity_valid_ = false;
+    other.published_ = false;
+  }
 
   uint32_t out_ = 0u;
   uint32_t in_ = 0u;

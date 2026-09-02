@@ -330,6 +330,8 @@ inline bool compute_rms_unit(context &ctx, const std::span<const float> input,
 inline bool prepare_view(
     context &ctx, const tensor_view &view,
     emel::kernel::cq::event::prepared_q4_view &prepared) noexcept {
+  if (prepared.published())
+    return true;
   const emel::kernel::cq::event::prepare_q4_request request{
       .weights = view, .prepared = prepared};
   emel::kernel::cq::event::dispatch_result result{};
@@ -339,11 +341,14 @@ inline bool prepare_view(
 
 inline bool prepare_graph_weights(context &ctx) noexcept {
   const auto &bound = ctx.bound;
-  emel::kernel::cq::event::dispatch_result codebook_result{};
-  const emel::kernel::cq::event::prepare_codebook_q4_request codebook_request{
-      codebook_span(ctx), ctx.prepared_codebook};
-  bool ok = ctx.cq.process_event(emel::kernel::cq::event::prepare_codebook_q4{
-      codebook_request, codebook_result});
+  bool ok = ctx.prepared_codebook.published();
+  if (!ok) {
+    emel::kernel::cq::event::dispatch_result codebook_result{};
+    const emel::kernel::cq::event::prepare_codebook_q4_request codebook_request{
+        codebook_span(ctx), ctx.prepared_codebook};
+    ok = ctx.cq.process_event(emel::kernel::cq::event::prepare_codebook_q4{
+        codebook_request, codebook_result});
+  }
   ok = ok && prepare_view(ctx, bound.embedding, ctx.prepared_embedding);
   for (uint32_t i = 0u; i < bound.layer_count; ++i) {
     const auto &layer = bound.layers[i];

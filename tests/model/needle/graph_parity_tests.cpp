@@ -392,6 +392,17 @@ TEST_CASE("needle graph prepares CQ4 storage once and selects prepared route") {
           prepared_input32_bytes, prepared_norm_bytes,
           prepared_group32_norm_bytes}));
   CHECK(prepare_calls == preparation_count);
+
+  REQUIRE(graph.process_event(
+      emel::model::needle::graph::event::init{.activation_quant = false}));
+  REQUIRE(graph.process_event(
+      emel::model::needle::graph::event::capture_cq_diagnostics{
+          prepare_calls, prepared_calls, prepared_index_bytes,
+          prepared_input32_bytes, prepared_norm_bytes,
+          prepared_group32_norm_bytes}));
+  CHECK(prepare_calls == preparation_count);
+  REQUIRE(graph.process_event(
+      emel::model::needle::graph::event::decode{2, std::span<float>{logits}}));
 }
 
 TEST_CASE("needle graph component timing is explicit, resettable, and reconciled") {

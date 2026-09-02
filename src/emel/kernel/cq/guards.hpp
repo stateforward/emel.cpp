@@ -304,7 +304,7 @@ prepare_supported(const event::prepare_q4_request &request) noexcept {
     return false;
   const uint64_t norm_count = index_count / view.group;
   const auto &prepared = request.prepared;
-  if (!prepared.capacity_valid() ||
+  if (prepared.published() || !prepared.capacity_valid() ||
       prepared.out() != view.shape[0] || prepared.in() != view.shape[1] ||
       prepared.group() != view.group || prepared.in_pad() != layout.in_pad ||
       prepared.index_capacity() != index_count ||
@@ -329,7 +329,8 @@ inline bool prepared_codebook_structure_supported(
 struct guard_prepare_codebook_q4 {
   bool operator()(const event::prepare_codebook_q4 &ev,
                   const action::context &) const noexcept {
-    return span_has_data(ev.request.codebook) &&
+    return !ev.request.prepared.published() &&
+           span_has_data(ev.request.codebook) &&
            ev.request.codebook.size() >= emel::cact::loader::k_codebook_len &&
            finite_values(ev.request.codebook,
                          emel::cact::loader::k_codebook_len);
@@ -338,12 +339,22 @@ struct guard_prepare_codebook_q4 {
 inline bool prepared_structure_supported(
     const event::prepared_q4_view &view) noexcept {
   detail::layout layout{};
+  uint64_t index_count = 0u;
+  uint64_t blocked_count = 0u;
+  const uint64_t blocked_rows = static_cast<uint64_t>(view.out() / 32u) * 32u;
   return view.published() && view.capacity_valid() &&
          view.group() <= detail::k_max_group &&
          detail::is_power_of_two(view.group()) &&
          detail::checked_layout<4u>(view.out(), view.in(), view.group(),
                                     layout) &&
-         view.in_pad() == layout.in_pad;
+         view.in_pad() == layout.in_pad &&
+         detail::checked_multiply_u64(view.out(), layout.in_pad, index_count) &&
+         detail::checked_multiply_u64(blocked_rows, layout.in_pad,
+                                      blocked_count) &&
+         view.index_capacity() == index_count &&
+         view.input32_capacity() == blocked_count &&
+         view.norm_capacity() == index_count / view.group() &&
+         view.group32_norm_capacity() == blocked_count / view.group();
 }
 
 struct guard_prepare_q4 {
