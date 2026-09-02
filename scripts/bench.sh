@@ -30,6 +30,7 @@ DEFAULT_NEEDLE_REQUEST_WARMUP_ITERS="${EMEL_BENCH_NEEDLE_REQUEST_WARMUP_ITERS:-1
 DEFAULT_NEEDLE_REQUEST_WARMUP_RUNS="${EMEL_BENCH_NEEDLE_REQUEST_WARMUP_RUNS:-1}"
 NEEDLE_REQUEST_MAX_COUNT=32
 NEEDLE_PYTHON_SHA256="1643dacd9feaedc58f3cc581e4d22577dfe25c09b10282936186ccf0f2e61118"
+NEEDLE_PYTHON_EXECUTABLE=""
 resolve_needle_python() {
   local python_executable="$1"
   local resolved_python=""
@@ -70,11 +71,14 @@ resolve_needle_python() {
 
 validate_needle_python() {
   local python_executable="$1"
+  local output_variable="$2"
   local resolved_python
   local actual_sha256
   resolved_python="$(resolve_needle_python "$python_executable")" || true
-  if [[ -z "$resolved_python" || ! -f "$resolved_python" ]]; then
-    echo "error: cannot resolve canonical Needle Python executable" >&2
+  if [[ -z "$resolved_python" || "$resolved_python" != /* ||
+        ! -f "$resolved_python" || -L "$resolved_python" ||
+        ! -x "$resolved_python" ]]; then
+    echo "error: cannot resolve canonical regular-file Needle Python executable" >&2
     exit 1
   fi
   if command -v sha256sum >/dev/null 2>&1; then
@@ -90,6 +94,7 @@ validate_needle_python() {
     echo "error: configured Needle Python SHA-256 mismatch" >&2
     exit 1
   fi
+  printf -v "$output_variable" '%s' "$resolved_python"
 }
 NEEDLE_INJECTION_VARIABLES=(
   LD_PRELOAD
@@ -451,11 +456,8 @@ if $COMPARE && [[ "$SUITE_FILTER" == "needle_graph" ]]; then
     echo "error: EMEL_BENCH_NEEDLE_PYTHON is required for --compare --suite=needle_graph" >&2
     exit 1
   fi
-  if [[ ! -x "${EMEL_BENCH_NEEDLE_PYTHON}" ]]; then
-    echo "error: configured Needle Python executable is missing or not executable: ${EMEL_BENCH_NEEDLE_PYTHON}" >&2
-    exit 1
-  fi
-  validate_needle_python "${EMEL_BENCH_NEEDLE_PYTHON}"
+  validate_needle_python "${EMEL_BENCH_NEEDLE_PYTHON}" \
+    NEEDLE_PYTHON_EXECUTABLE
   if [[ -z "${EMEL_BENCH_NEEDLE_ROOT:-}" || ! -d "${EMEL_BENCH_NEEDLE_ROOT}" ]]; then
     echo "error: EMEL_BENCH_NEEDLE_ROOT must name the installed Needle package root" >&2
     exit 1
@@ -482,7 +484,7 @@ prepare_toolchain() {
 }
 run_needle_graph_compare() {
   local build_dir="$1"
-  local python_executable="${EMEL_BENCH_NEEDLE_PYTHON:-}"
+  local python_executable="$NEEDLE_PYTHON_EXECUTABLE"
   local needle_root="${EMEL_BENCH_NEEDLE_ROOT:-}"
   local driver="$TOOLS_DIR/model/needle/cactus_reference.py"
   local model="$ROOT_DIR/tests/models/route-w4-qat.cact"
@@ -491,18 +493,13 @@ run_needle_graph_compare() {
   local reference_output
 
   if [[ -z "$python_executable" ]]; then
-    echo "error: EMEL_BENCH_NEEDLE_PYTHON is required for --compare --suite=needle_graph" >&2
-    exit 1
-  fi
-  if [[ ! -x "$python_executable" ]]; then
-    echo "error: configured Needle Python executable is missing or not executable: $python_executable" >&2
+    echo "error: canonical Needle Python executable was not validated" >&2
     exit 1
   fi
   if [[ -n "${NEEDLE_LIB_PATH:-}" ]]; then
     echo "error: NEEDLE_LIB_PATH is unsupported for canonical needle_graph compare" >&2
     exit 1
   fi
-  validate_needle_python "$python_executable"
   if [[ -z "$needle_root" || ! -d "$needle_root" ]]; then
     echo "error: EMEL_BENCH_NEEDLE_ROOT must name the installed Needle package root" >&2
     exit 1

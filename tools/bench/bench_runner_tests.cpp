@@ -1116,7 +1116,12 @@ TEST_CASE("needle canonical compare has pinned model and retokenizes fixture") {
   CHECK(driver.find("NEEDLE_PACKAGE_VERSION = \"2.0.8\"") != std::string::npos);
   CHECK(wrapper.find("NEEDLE_LIB_PATH is unsupported") != std::string::npos);
   CHECK(wrapper.find("NEEDLE_PYTHON_SHA256=") != std::string::npos);
-  CHECK(wrapper.find("validate_needle_python") != std::string::npos);
+  CHECK(wrapper.find("validate_needle_python \"${EMEL_BENCH_NEEDLE_PYTHON}\" \\\n"
+                     "    NEEDLE_PYTHON_EXECUTABLE") != std::string::npos);
+  CHECK(wrapper.find("local python_executable=\"$NEEDLE_PYTHON_EXECUTABLE\"") !=
+        std::string::npos);
+  CHECK(wrapper.find("validate_needle_python \"$python_executable\"") ==
+        std::string::npos);
   CHECK(graph.find("request_fixture_token_id_mismatch") != std::string::npos);
   CHECK(graph.find("request.text = row.prompt") != std::string::npos);
   CHECK(graph.find("actual != row.token_ids") != std::string::npos);
@@ -1141,6 +1146,79 @@ TEST_CASE("needle canonical compare has pinned model and retokenizes fixture") {
   CHECK(wrapper.find("resolve_needle_python") != std::string::npos);
   CHECK(wrapper.find("readlink -f \"$python_executable\" 2>/dev/null") !=
         std::string::npos);
+}
+
+TEST_CASE("needle Python validation binds execution to resolved target") {
+#if !defined(_WIN32)
+  const std::string wrapper =
+      read_file(repo_root() / "scripts" / "bench.sh");
+  const std::size_t functions_begin =
+      wrapper.find("resolve_needle_python() {");
+  REQUIRE(functions_begin != std::string::npos);
+  const std::size_t functions_end =
+      wrapper.find("\nvalidate_needle_request_count() {", functions_begin);
+  REQUIRE(functions_end != std::string::npos);
+
+  const std::filesystem::path tmp_dir =
+      std::filesystem::temp_directory_path() / "emel-bench-runner-tests" /
+      "needle-python-path-binding";
+  std::error_code ec;
+  std::filesystem::remove_all(tmp_dir, ec);
+  std::filesystem::create_directories(tmp_dir);
+  const std::filesystem::path original_python = tmp_dir / "python-original";
+  const std::filesystem::path replacement_python =
+      tmp_dir / "python-replacement";
+  const std::filesystem::path configured_python = tmp_dir / "python";
+  const std::filesystem::path original_marker = tmp_dir / "original-ran";
+  const std::filesystem::path replacement_marker = tmp_dir / "replacement-ran";
+  const std::filesystem::path harness = tmp_dir / "path-binding.sh";
+  const std::filesystem::path stdout_path = tmp_dir / "stdout.txt";
+  const std::filesystem::path stderr_path = tmp_dir / "stderr.txt";
+
+  write_file(original_python,
+             "#!/bin/sh\nprintf original > " +
+                 quote_arg_posix(original_marker.string()) + "\n");
+  write_file(replacement_python,
+             "#!/bin/sh\nprintf replacement > " +
+                 quote_arg_posix(replacement_marker.string()) + "\n");
+  make_executable(original_python);
+  make_executable(replacement_python);
+  std::filesystem::create_symlink(original_python, configured_python);
+
+  write_file(
+      harness,
+      "#!/usr/bin/env bash\nset -euo pipefail\n" +
+          wrapper.substr(functions_begin, functions_end - functions_begin) +
+          R"SH(
+configured_python="$1"
+original_python="$2"
+replacement_python="$3"
+if command -v sha256sum >/dev/null 2>&1; then
+  NEEDLE_PYTHON_SHA256="$(sha256sum "$original_python")"
+else
+  NEEDLE_PYTHON_SHA256="$(shasum -a 256 "$original_python")"
+fi
+NEEDLE_PYTHON_SHA256="${NEEDLE_PYTHON_SHA256%% *}"
+authenticated_python="$configured_python"
+validate_needle_python "$configured_python" authenticated_python
+ln -sfn "$replacement_python" "$configured_python"
+run_clean_needle_python "$authenticated_python"
+)SH");
+  make_executable(harness);
+
+  const process_capture capture = run_command_capture(
+      quote_arg_posix(harness.string()) + " " +
+          quote_arg_posix(configured_python.string()) + " " +
+          quote_arg_posix(original_python.string()) + " " +
+          quote_arg_posix(replacement_python.string()) + " > " +
+          quote_arg_posix(stdout_path.string()) + " 2> " +
+          quote_arg_posix(stderr_path.string()),
+      stdout_path, stderr_path);
+  CHECK(capture.exit_code == 0);
+  CHECK(capture.stderr_text.empty());
+  CHECK(std::filesystem::exists(original_marker));
+  CHECK_FALSE(std::filesystem::exists(replacement_marker));
+#endif
 }
 
 TEST_CASE("needle compare wrapper rejects model, library override, and unbounded counts") {
@@ -1186,6 +1264,16 @@ TEST_CASE("needle compare wrapper rejects model, library override, and unbounded
   capture = run_command_capture(base + wrapper, stdout_path, stderr_path);
   CHECK(capture.exit_code != 0);
   CHECK(capture.stderr_text.find("Needle Python SHA-256 mismatch") !=
+        std::string::npos);
+  capture = run_command_capture(
+      needle_clean_environment_prefix() +
+          "EMEL_BENCH_NEEDLE_PYTHON=" + quote_arg_posix(fake_needle.string()) +
+          " EMEL_BENCH_NEEDLE_ROOT=" + quote_arg_posix(fake_needle.string()) +
+          " " + wrapper,
+      stdout_path, stderr_path);
+  CHECK(capture.exit_code != 0);
+  CHECK(capture.stderr_text.find(
+            "cannot resolve canonical regular-file Needle Python executable") !=
         std::string::npos);
 #endif
 }
