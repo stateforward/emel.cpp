@@ -998,7 +998,7 @@ emel::error::type sampler_select_argmax(generation_load_state &state,
                                         int32_t &selected_token_out) noexcept;
 
 emel::error::type
-run_emel_parse_model(void *owner, const emel::model::loader::event::load &req);
+run_emel_parse_model(void *owner, const emel::model::loader::event::load &req) noexcept;
 
 struct generation_load_state {
   std::unique_ptr<emel::model::data> model_data =
