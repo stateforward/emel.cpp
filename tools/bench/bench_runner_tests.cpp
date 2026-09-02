@@ -1139,7 +1139,8 @@ TEST_CASE("needle canonical compare has pinned model and retokenizes fixture") {
         std::string::npos);
   CHECK(wrapper.find("EMEL_BENCH_NEEDLE_TIMEOUT_SECONDS") !=
         std::string::npos);
-  CHECK(driver.find("env=worker_environment()") != std::string::npos);
+  CHECK(driver.find("worker_environment({\"NEEDLE_LIB_PATH\": str(staged_library)})") !=
+        std::string::npos);
   CHECK(driver.find("median_run_means") != std::string::npos);
   CHECK(graph.find("proof_status=measurement_only") != std::string::npos);
   CHECK(graph.find("out.comparable = false;") != std::string::npos);
@@ -1244,10 +1245,25 @@ TEST_CASE("needle compare wrapper rejects model, library override, and unbounded
       quote_arg_posix(stdout_path.string()) + " 2> " +
       quote_arg_posix(stderr_path.string());
   process_capture capture = run_command_capture(
-      base + "EMEL_BENCH_NEEDLE_REQUEST_RUNS=33 " + wrapper,
+      base + "EMEL_BENCH_NEEDLE_REQUEST_RUNS=26 " + wrapper,
       stdout_path, stderr_path);
   CHECK(capture.exit_code != 0);
-  CHECK(capture.stderr_text.find("must be an integer in [1, 32]") !=
+  CHECK(capture.stderr_text.find(
+            "EMEL_BENCH_NEEDLE_REQUEST_RUNS must be an integer in [1, 25]") !=
+        std::string::npos);
+  capture = run_command_capture(
+      base + "EMEL_BENCH_NEEDLE_REQUEST_WARMUP_RUNS=0 " + wrapper,
+      stdout_path, stderr_path);
+  CHECK(capture.exit_code != 0);
+  CHECK(capture.stderr_text.find(
+            "EMEL_BENCH_NEEDLE_REQUEST_WARMUP_RUNS must be an integer in [1, 25]") !=
+        std::string::npos);
+  capture = run_command_capture(
+      base + "EMEL_BENCH_NEEDLE_REQUEST_ITERS=33 " + wrapper,
+      stdout_path, stderr_path);
+  CHECK(capture.exit_code != 0);
+  CHECK(capture.stderr_text.find(
+            "EMEL_BENCH_NEEDLE_REQUEST_ITERS must be an integer in [1, 32]") !=
         std::string::npos);
   capture = run_command_capture(
       base + "EMEL_BENCH_NEEDLE_MODEL=/tmp/substitute " + wrapper,
@@ -1276,6 +1292,25 @@ TEST_CASE("needle compare wrapper rejects model, library override, and unbounded
             "cannot resolve canonical regular-file Needle Python executable") !=
         std::string::npos);
 #endif
+}
+
+TEST_CASE("needle compare wrapper count contract matches runner semantics") {
+  const std::string wrapper = read_file(repo_root() / "scripts" / "bench.sh");
+  CHECK(wrapper.find("NEEDLE_REQUEST_MAX_ITERATIONS=32") !=
+        std::string::npos);
+  CHECK(wrapper.find("NEEDLE_REQUEST_MAX_RUNS=25") != std::string::npos);
+  CHECK(wrapper.find(
+            "\"$DEFAULT_NEEDLE_REQUEST_RUNS\" 1 \"$NEEDLE_REQUEST_MAX_RUNS\"") !=
+        std::string::npos);
+  CHECK(wrapper.find(
+            "\"$DEFAULT_NEEDLE_REQUEST_WARMUP_RUNS\" 1 \"$NEEDLE_REQUEST_MAX_RUNS\"") !=
+        std::string::npos);
+  CHECK(wrapper.find(
+            "\"$DEFAULT_NEEDLE_REQUEST_ITERS\" 1 \"$NEEDLE_REQUEST_MAX_ITERATIONS\"") !=
+        std::string::npos);
+  CHECK(wrapper.find(
+            "\"$DEFAULT_NEEDLE_REQUEST_WARMUP_ITERS\" 0 \"$NEEDLE_REQUEST_MAX_ITERATIONS\"") !=
+        std::string::npos);
 }
 TEST_CASE("needle compare wrapper rejects injection before launching Python") {
 #if !defined(_WIN32)
